@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk '/^<style>/{start=NR+1} /^<\\\\/style>/{end=NR-1; print \"CSS: строки\", start, \"-\", end, \"\\(строк:\" \\(end-start+1\\) \"\\)\"; exit}' \"C:/Users/danyil.fiut/Projects/MagTrans/index.html\")",
+      "Bash(cat)",
+      "Bash(bash /tmp/analyze.sh)"
+    ]
+  }
+}
