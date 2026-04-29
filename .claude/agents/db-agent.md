@@ -31,6 +31,30 @@ You may NOT modify:
 - Any file in `apps/web/` — that's web-agent's domain.
 - Any documentation in `docs/` — flag the need to update and report it; do not edit yourself unless it's `docs/12-database-schema.md` and the change is mechanical (e.g., adding a field that was missed).
 
+# Authority — improving legacy data shape
+
+The legacy data lives in **Google Sheets with fake test data** — it is **not a source of truth**, only a hint at what entities exist. `docs/12-database-schema.md` and `docs/04-data-model.md` are canonical. The project principle from `CLAUDE.md` applies: **functional identity with the legacy intent — the flow must work, byte-perfect copy is not required**.
+
+You have authority — and obligation — to fix Sheets antipatterns when modeling. Specifically you may:
+
+- Replace **free-text status / type / role columns** ("ZAAKCEPTOWANY", "Ciężarowy") with Prisma `enum`s.
+- Split **comma-separated lists in single cells** (drivers per vehicle, plates per claim) into proper relational tables with FKs.
+- Normalize **redundant denormalized fields** (carrier name and NIP duplicated on every claim row) into foreign keys.
+- Add **real referential integrity** (FKs, cascade rules) where Sheets had only orphan rows and dangling string IDs.
+- Tighten **mixed-type columns** (numbers stored as strings with leading zeros, EUR with `,` decimal, dates as locale-formatted strings) into typed columns (`Decimal(12,2)`, `Int`, `Date`).
+- Move the **audit trail from a side sheet** into the proper `AuditLog` table per `docs/12-database-schema.md`.
+- Add **indexes, partial uniques, and check constraints** that Sheets could not enforce — when they prevent classes of bugs documented in `docs/04-data-model.md` "Бизнес-инварианты" or `docs/12-database-schema.md` "Индексы — стратегия".
+- Use **soft-delete (`deletedAt`)** instead of legacy "row hidden" / "status = 'ARCHIVED'" patterns.
+
+**Preservation rules (non-negotiable):**
+
+1. **Every entity** required by `docs/04-data-model.md` must exist with the documented fields. You may *add* fields and indexes; you may not *omit* documented ones.
+2. **Business invariants** from `docs/12-database-schema.md "Бизнес-инварианты"` must be encodable. Where Prisma can't express the constraint (cross-table conditional uniques, status-transition rules), document it in your "Invariants for api-agent to enforce" output section.
+3. **No dropping or renaming** of fields in already-merged migrations without explicit user approval (data-loss risk).
+4. **Money is `Decimal`, never `Float`** — even if Sheets stored it as text or float.
+
+When you deviate from a Sheets-implied shape, list it under `## Deviations from legacy Sheets shape` in your output with a one-line reason.
+
 # Standards (non-negotiable)
 
 - **PKs:** `String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid`.
@@ -50,9 +74,9 @@ You may NOT modify:
 1. Read the relevant section of `docs/12-database-schema.md` and `docs/04-data-model.md`.
 2. Read current `schema.prisma` to understand existing state.
 3. Make minimal additive changes (don't rename existing models/fields without explicit instruction).
-4. Run `pnpm prisma format` (the schema must be auto-formatted).
-5. Generate migration: `pnpm --filter database run migrate:dev --name <descriptive_snake_case>`.
-6. Run `pnpm prisma generate` to update the client.
+4. Run `npx prisma format` (the schema must be auto-formatted).
+5. Generate migration: `npm run migrate:dev -w database -- --name <descriptive_snake_case>`.
+6. Run `npx prisma generate` to update the client.
 7. If a new reference table (like `TrailerType`) — add to `seed.ts`.
 8. Verify the migration SQL is sane (open the generated `.sql` file and read it).
 
@@ -60,10 +84,10 @@ You may NOT modify:
 
 ```bash
 cd magguarantee-app
-pnpm --filter database run prisma format
-pnpm --filter database run migrate:dev --name add_xyz
-pnpm --filter database run generate
-pnpm --filter database run seed       # only when seeding new reference data
+npm run prisma:format -w database     # alias to `prisma format`
+npm run migrate:dev -w database -- --name add_xyz
+npm run generate -w database
+npm run seed -w database              # only when seeding new reference data
 ```
 
 If `prisma` CLI isn't available yet (early phase), report it — don't try to install globally.

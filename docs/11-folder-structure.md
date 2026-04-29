@@ -12,7 +12,7 @@ MagTrans/
     ├── apps/
     │   ├── api/                  # NestJS backend
     │   │   ├── src/
-    │   │   │   ├── main.ts                     ← bootstrap (Pino, Helmet, CORS, OpenAPI)
+    │   │   │   ├── main.ts                     ← bootstrap (Pino, Helmet, CORS)
     │   │   │   ├── app.module.ts               ← корневой модуль
     │   │   │   ├── common/
     │   │   │   │   ├── decorators/
@@ -294,8 +294,8 @@ MagTrans/
     ├── .env.example
     ├── .gitignore
     ├── .nvmrc                                  # node 20
-    ├── package.json
-    ├── pnpm-workspace.yaml
+    ├── package.json                            # с "workspaces": ["apps/*", "packages/*"]
+    ├── package-lock.json
     ├── turbo.json
     ├── tsconfig.base.json
     ├── .editorconfig
@@ -303,13 +303,18 @@ MagTrans/
     └── eslint.config.mjs
 ```
 
-## pnpm-workspace.yaml
+## npm workspaces (в корневом `package.json`)
 
-```yaml
-packages:
-  - "apps/*"
-  - "packages/*"
+```jsonc
+{
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}
 ```
+
+Отдельный `pnpm-workspace.yaml` не нужен — npm читает workspaces прямо из root `package.json`. Lockfile — `package-lock.json` в корне (один на весь монорепо), `node_modules` хостится централизованно с автоматическим hoist-ом общих зависимостей.
 
 ## turbo.json
 
@@ -349,7 +354,14 @@ packages:
 {
   "name": "magguarantee-app",
   "private": true,
-  "packageManager": "pnpm@9.x",
+  "packageManager": "npm@10",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev": "turbo run dev",
     "dev:api": "turbo run dev --filter=api",
@@ -358,15 +370,17 @@ packages:
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "db:generate": "pnpm --filter=database run generate",
-    "db:migrate:dev": "pnpm --filter=database run migrate:dev",
-    "db:migrate:deploy": "pnpm --filter=database run migrate:deploy",
-    "db:seed": "pnpm --filter=database run seed",
+    "db:generate": "npm run generate -w database",
+    "db:migrate:dev": "npm run migrate:dev -w database",
+    "db:migrate:deploy": "npm run migrate:deploy -w database",
+    "db:seed": "npm run seed -w database",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down"
   }
 }
 ```
+
+> Шорткаты для workspace: `-w <name>` эквивалентно `--workspace=<name>`. Прод-установка — `npm ci` (а не `npm install`): использует `package-lock.json` буква-в-букву и быстрее.
 
 ## docker-compose.yml (для локальной разработки)
 

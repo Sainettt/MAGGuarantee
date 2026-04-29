@@ -256,7 +256,7 @@ export default config;
 ### Базовые (shadcn install)
 
 ```bash
-pnpm --filter web exec shadcn@latest add button input label dialog \
+npm exec -w web -- shadcn@latest add button input label dialog \
   dropdown-menu select tabs table toast tooltip badge \
   card popover separator skeleton sheet form
 ```

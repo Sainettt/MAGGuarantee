@@ -427,6 +427,5 @@ async function fetchWithRefresh(url: string, opts: RequestInit) {
 - [ ] bcrypt rounds = 12.
 - [ ] При импорте из Sheets — все пароли пересохранены через bcrypt.
 - [ ] Тесты на race-condition в `/auth/refresh` (двойной запрос).
-- [ ] Логи не содержат plaintext пароли, JWT, 2FA-коды (Pino редактор PII).
-- [ ] Sentry hook отбрасывает Authorization header.
+- [ ] Логи не содержат plaintext пароли, JWT, 2FA-коды (Pino редактор PII — `Authorization`, `cookie`, `*.password`, `*.token`, `*.code`).
 - [ ] Endpoint `/auth/sessions` для self-service — список активных refresh-токенов с IP/UA.

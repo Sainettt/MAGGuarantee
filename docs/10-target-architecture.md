@@ -18,8 +18,7 @@ MagTrans/                              ← корень репозитория
     │   ├── shared/                    ─── общие типы, валидаторы, бизнес-расчёты
     │   └── ui/                        ─── (опц.) shadcn-компоненты
     ├── docker-compose.yml             ─── Postgres + Redis для dev
-    ├── package.json
-    ├── pnpm-workspace.yaml
+    ├── package.json                   ─── корневой, с "workspaces": ["apps/*", "packages/*"]
     └── turbo.json
 ```
 
@@ -39,7 +38,6 @@ MagTrans/                              ← корень репозитория
 | Auth | **Passport** + `@nestjs/jwt` + `passport-google-oauth20` | JWT access/refresh + Google OAuth (опц.) + 2FA по email |
 | Email | **Nodemailer + Gmail API** (через service account) | Нативно поддерживает thread (replyTo + In-Reply-To) |
 | Валидация | **class-validator** + **class-transformer** + **Zod** (для shared) | DTO + автоматический pipe в Nest |
-| Документация API | **@nestjs/swagger** | OpenAPI 3 генерится из декораторов |
 | Логи | **Pino** + pino-http | Структурные JSON-логи, быстрые |
 | Тесты | **Jest** + **Supertest** | Unit + e2e на расчёты |
 | Конфигурация | **@nestjs/config** + Zod-схема | Валидация ENV на старте |
@@ -64,13 +62,13 @@ MagTrans/                              ← корень репозитория
 
 | Компонент | Выбор |
 |---|---|
-| Менеджер монорепо | **pnpm** workspaces + **Turborepo** (build cache, task graph) |
+| Менеджер монорепо | **npm workspaces** + **Turborepo** (build cache, task graph). npm выбран намеренно вместо pnpm — проще работа с Docker (нет content-addressable store / симлинков, образ собирается без `pnpm install` бинарника, `npm ci` встроен в Node) |
 | CI | GitHub Actions (lint + test + typecheck + build на PR) |
 | Контейнеризация | Docker (multi-stage), `docker-compose.yml` для локалки |
-| Деплой backend | Railway / Fly.io / VPS с PM2 (по бюджету) |
-| Деплой frontend | Vercel (нативно для Next.js) |
-| Хранилище файлов | S3-совместимое (для `uploadAuthScreenshot`) — Cloudflare R2 / AWS S3 |
-| Мониторинг | Sentry (errors) + Better Stack / Logtail (logs) |
+| Деплой | Один VPS (Hetzner CX32 ≈ €7/мес или аналог): nginx (reverse-proxy) + systemd для api и web + Postgres + Redis на той же машине. Single point of failure осознанно — нагрузка 15–20 одновременных пользователей в пике, бизнес принял риск. |
+| Reverse-proxy / SSL | nginx (или Caddy для авто-Let's Encrypt) + certbot. Сертификаты обновляются systemd-таймером. |
+| Хранилище файлов | S3-совместимое (для `uploadAuthScreenshot`) — Cloudflare R2 / Hetzner Object Storage. Локально на диске VPS не храним — нужен offsite-бэкап. |
+| Мониторинг | Self-hosted на том же VPS: Uptime Kuma (uptime + алерты в email/Telegram) + journalctl + logrotate. Pino пишет в stdout, systemd собирает. Прометей/Графана — позже, если понадобится. |
 
 ## Слои backend (Nest)
 
@@ -179,7 +177,7 @@ MagTrans/                              ← корень репозитория
 ## Принципы
 
 1. **Функциональная идентичность, а не побитовая** — должно делать то же, что задумано в `Code.gs`, но не обязано повторять кодовые баги.
-2. **API-first** — сначала контракт endpoint-а в Swagger, потом backend, потом frontend.
+2. **Контракт-first** — сначала Zod-схема DTO в `packages/shared`, потом backend (использует ту же схему через `ZodValidationPipe`), потом frontend (тот же `infer` из Zod). Один источник правды, без OpenAPI-промежутки.
 3. **One feature, one PR** — разработка вертикальными слайсами (auth → carrier → claims → ...). См. `17-migration-roadmap.md`.
 4. **Никакого parallel-running.** Старый GAS-код не работает в проде, не имеет реальных данных — нет dual-write, нет feature flags для постепенного rollout.
 5. **Тесты на расчёты обязательны** — `calcKmGwarantPerMonth` тестируется на ≥30 fixtures (написанных вручную, т.к. реальных wniosков нет). См. `17-migration-roadmap.md#тестирование-km-calc`.

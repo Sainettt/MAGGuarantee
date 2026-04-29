@@ -46,6 +46,30 @@ You have **autonomy to improve UI** when the documented design is bad. Specifica
 
 For **major** redesigns (new color palette, new layout paradigm) — STOP and route the request back to uiux-agent.
 
+# Authority — improving legacy `index.html` JS
+
+`index.html` is **reference only** — never copied verbatim. The project principle from `CLAUDE.md` applies: **functional identity with the legacy intent — the flow must work, byte-perfect copy is not required**.
+
+You have authority — and obligation — to refactor legacy JS antipatterns when porting client behavior. Specifically you may (and should):
+
+- Replace **300+ inline `onclick="..."` strings** with React event handlers.
+- Replace **global `showAlert()` / `showToast()`** with Sonner toasts.
+- Replace **hand-rolled modal openers (`document.getElementById('modal').classList.add('open')`)** with shadcn `<Dialog>` + Radix portal.
+- Replace **direct DOM manipulation** (`document.querySelector`, `innerHTML =`) with React state and rendering.
+- Replace **`fetch().then().catch()` with manual loading flags** by TanStack Query (`useQuery` / `useMutation`).
+- Replace **untyped client-side validation strings** with Zod schemas in `packages/shared/schemas/`.
+- Replace **`localStorage`-based session tracking** with HttpOnly cookies set by the API.
+- Replace **150 lines of `body.dark [style*="..."]` overrides** with Tailwind `dark:` variants on properly-classed elements (uiux-agent already documented this).
+- Drop **dead branches** in `index.html` covering features the docs explicitly mark out of scope (chat, GAS-deployment helpers, "TRYB PODGLĄD" badge).
+
+**Preservation rules (non-negotiable):**
+
+1. **Observable behavior matches the legacy intent**: clicking "Submit" still submits, the modal still closes on `Esc`, the same fields are validated with the same business rules.
+2. **Role gating** at the route-group level matches `docs/03-roles.md` regardless of how `index.html` did (or did not) hide UI per role.
+3. **Form field semantics** match the legacy form (same field names, same required/optional set per `docs/13-api-design.md` DTO contracts) — but the implementation is yours to design.
+
+List replacements of legacy JS patterns under `## Deviations from legacy index.html` in your output report with a one-line reason.
+
 # Stack rules (non-negotiable)
 
 - **App Router**, no Pages Router.
@@ -53,7 +77,7 @@ For **major** redesigns (new color palette, new layout paradigm) — STOP and ro
 - **Tailwind utility classes** — no inline `style=`, no separate `.module.css`.
 - **shadcn/ui** for primitives (Button, Dialog, Input, Select, Table, Tabs, Badge, Toast). Install via:
   ```
-  pnpm --filter web exec shadcn@latest add <component>
+  npm exec -w web -- shadcn@latest add <component>
   ```
 - **TanStack Query** for server state, **Zustand** for client UI state (theme, modal open, etc.).
 - **React Hook Form + Zod resolver** for all forms. Zod schemas in `packages/shared/schemas/`.
@@ -107,11 +131,11 @@ Each `(role)` is a route group with its own `layout.tsx` (header + role guard) a
 
 ```bash
 cd magguarantee-app
-pnpm --filter web run dev
-pnpm --filter web run lint
-pnpm --filter web run typecheck
-pnpm --filter web run build
-pnpm --filter web exec shadcn@latest add dialog button input
+npm run dev -w web
+npm run lint -w web
+npm run typecheck -w web
+npm run build -w web
+npm exec -w web -- shadcn@latest add dialog button input
 ```
 
 # What you do NOT do

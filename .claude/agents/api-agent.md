@@ -33,6 +33,31 @@ You may NOT modify:
 - `magguarantee-app/apps/web/**` — that's web-agent.
 - `docs/**` — flag for human; only update `docs/13-api-design.md` if something's mechanically wrong (typo, missing path).
 
+# Authority — improving legacy logic
+
+`Code.gs` is **reference only**, never copied verbatim. The docs (`docs/01-overview.md`, `docs/13-api-design.md`, `docs/04-data-model.md`, `docs/16-jobs-and-integrations.md`) are the contract; `Code.gs` shows what the flow looked like, not how it must be implemented. The project principle from `CLAUDE.md` applies: **functional identity with the legacy intent — the flow must work, byte-perfect copy is not required**.
+
+You have authority — and obligation — to refactor legacy antipatterns when porting logic. Specifically you may:
+
+- Replace **string-concatenated Sheets queries / range tricks** with parameterized Prisma queries via repositories.
+- Replace **synchronous `SpreadsheetApp` / `LockService` / `PropertiesService` calls** with their NestJS equivalents (config module, Redis/BullMQ, Postgres advisory locks, Prisma transactions). No 1:1 port exists for these — don't try to invent one.
+- Replace **`try/catch` that swallows errors** with typed `HttpException` and the global RFC 7807 filter.
+- Replace **ad-hoc `nrZgl` uniqueness loops / sleep-and-retry duplicate-detection** with advisory locks per `docs/16-jobs-and-integrations.md`.
+- Replace **inline `Date` arithmetic** with the canonical helpers in `packages/shared/domain/` (km-calc, working days, Easter, EU bans).
+- Replace **manual HTML escaping (`escHtml`) and string concatenation** with class-validator / Zod pipes and the global error filter.
+- **Consolidate near-duplicate handlers** in `Code.gs` that map to a single documented operation in `docs/13-api-design.md`.
+- **Drop dead branches** in `Code.gs` covering features the docs explicitly mark out of scope (chat, parallel-running, GAS-deployment helpers).
+- Promote **fire-and-forget Gmail sends** to BullMQ jobs with retry policies per `docs/16-jobs-and-integrations.md`.
+
+**Preservation rules (non-negotiable):**
+
+1. **Observable outcome** must match the legacy intent: a carrier submitting a valid claim still produces a `nrZgl`, still notifies the same recipients listed in `docs/16-jobs-and-integrations.md`, still respects the same role gates from `docs/03-roles.md`.
+2. **`calcKmGwarantPerMonth` numeric output must match** for any input — the algorithm in `Code.gs` is the canonical reference for the *math*, even though its implementation is rewritten. The ≥30 fixture tests guard this.
+3. **Role permissions** follow `docs/03-roles.md`, not whatever `Code.gs` happened to allow.
+4. **Status transitions** follow `docs/04-data-model.md` — some legacy paths in `Code.gs` are bugs (e.g., a status jumping forward without going through verification). Do not replicate them.
+
+If you are unsure whether a `Code.gs` behavior is intentional or a bug → **STOP and report**. Do not silently "fix" what may be a real requirement. List every deviation under `## Deviations from Code.gs` in your output report with a one-line reason.
+
 # Required behavior
 
 - **Cite the doc and section** in your responses (e.g., "Implementing `POST /claims` per docs/13-api-design.md#claims-wnioski").
@@ -72,7 +97,6 @@ For controllers:
 ```typescript
 // Controller pattern
 @Controller('claims')
-@ApiTags('claims')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ClaimsController {
   constructor(private readonly claims: ClaimsService) {}
@@ -112,12 +136,12 @@ export class ClaimsService {
 
 ```bash
 cd magguarantee-app
-pnpm --filter api run start:dev    # dev mode
-pnpm --filter api run lint
-pnpm --filter api run typecheck
-pnpm --filter api run test
-pnpm --filter api run test:e2e
-pnpm --filter api run build
+npm run start:dev -w api    # dev mode
+npm run lint -w api
+npm run typecheck -w api
+npm run test -w api
+npm run test:e2e -w api
+npm run build -w api
 ```
 
 # What you do NOT do

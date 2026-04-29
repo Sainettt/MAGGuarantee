@@ -10,24 +10,31 @@
 
 ### Инфраструктура
 
-- [ ] Postgres 16 (managed: Railway, Neon, Supabase, AWS RDS).
-  - Минимум: 2 GB RAM, 10 GB SSD на старте.
-  - Бэкапы: ежедневные point-in-time recovery (managed обычно включено).
-- [ ] Redis 7 (managed: Upstash, Railway, AWS ElastiCache).
-  - Достаточно бесплатного тира на старте (256 MB).
-- [ ] S3-совместимое хранилище для скриншотов авторизации:
-  - Cloudflare R2 (без egress fee) или AWS S3.
+Архитектурное решение: **один VPS, всё на нём** (api + web + Postgres + Redis + nginx). Нагрузка в пике — 15–20 одновременных пользователей; managed-сервисы и Vercel избыточны и упираются в ToS Hobby-плана. Single point of failure принят бизнесом осознанно: короткий даунтайм при ребуте/сбое допустим.
+
+- [ ] **VPS** (рекомендую Hetzner CX32 — 4 vCPU / 8 GB RAM / 80 GB NVMe / ~€7/мес, или эквивалент).
+  - Ubuntu 24.04 LTS или Debian 12.
+  - Базовая защита: `ufw` (открыты только 22, 80, 443), ssh только по ключу, root login отключён, `fail2ban`.
+  - `unattended-upgrades` для security-патчей.
+  - `chronyd` (NTP) — критично для JWT и audit-логов.
+- [ ] **Postgres 16** на том же VPS (apt-пакет или официальный PGDG-репозиторий).
+  - Слушает только `localhost` (не выставлять наружу).
+  - Тюнинг под 8 GB RAM: `shared_buffers=2GB`, `effective_cache_size=4GB`, `work_mem=16MB`, `maintenance_work_mem=512MB`.
+  - 10 GB SSD на старте, мониторить рост через `df`.
+- [ ] **Redis 7** на том же VPS, тоже только `localhost`. `maxmemory=512mb`, `maxmemory-policy=allkeys-lru`.
+- [ ] **nginx** как reverse-proxy: `app.magtrans.eu` → `127.0.0.1:3000` (Next.js standalone), `api.magtrans.eu` → `127.0.0.1:4000` (NestJS).
+  - HTTP/2, gzip, разумные тайм-ауты (60s).
+  - HSTS, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`.
+- [ ] **SSL/TLS** через **Caddy** (рекомендую — авто-получение и авто-обновление Let's Encrypt) **или** nginx + certbot с systemd-таймером `certbot.timer`. Без авто-обновления сертификат умрёт через 90 дней.
+- [ ] **systemd-юниты** для процессов: `magtrans-api.service`, `magtrans-web.service`. Обе с `Restart=always`, `WantedBy=multi-user.target` (поднимаются после ребута).
+- [ ] **S3-совместимое хранилище** для screenshots — отдельно от VPS (offsite, чтобы не потерять при сбое диска):
+  - Cloudflare R2 (без egress fee) или Hetzner Object Storage.
   - Bucket: `magtrans-screenshots-prod`.
   - Versioning включён, retention 5 лет.
-- [ ] Деплой backend (`apps/api`):
-  - **Railway** или **Fly.io** или VPS с PM2.
-  - 1 instance на старте, autoscale при нагрузке.
-- [ ] Деплой frontend (`apps/web`):
-  - **Vercel** (нативно для Next.js).
-- [ ] Домены:
-  - `app.magtrans.eu` (или другой) — frontend.
-  - `api.magtrans.eu` — backend.
-  - SSL через Let's Encrypt (обычно автоматически у managed-провайдеров).
+- [ ] **Домены и DNS**:
+  - `app.magtrans.eu` → IP VPS (A-запись).
+  - `api.magtrans.eu` → IP VPS (A-запись).
+  - DNS-провайдер на выбор (Cloudflare бесплатно).
 
 ### Google Cloud (для Gmail API)
 
@@ -49,13 +56,18 @@
 
 ### Мониторинг
 
-- [ ] Sentry проект создан, DSN в env.
-- [ ] Логирование настроено (Logtail / Better Stack / CloudWatch).
-- [ ] Health-check `/health` подключён к uptime-monitor (UptimeRobot, BetterUptime).
-- [ ] Алерты:
-  - Error rate > 1% за 5 мин → email/Slack.
-  - DB connection errors → immediate.
-  - p95 response time > 2с за 10 мин.
+- [ ] **Uptime Kuma** на том же VPS (Docker-контейнер), хостится на `status.magtrans.eu` или поддомене (basic-auth или IP-allowlist).
+  - Мониторит `https://api.magtrans.eu/health`, `/ready`, `https://app.magtrans.eu/`.
+  - Алерты: email + (опц.) Telegram/Discord webhook.
+- [ ] **Логи** через Pino → stdout → `journalctl -u magtrans-api` / `journalctl -u magtrans-web`.
+  - `journalctl --vacuum-time=30d` или `SystemMaxUse=2G` в `/etc/systemd/journald.conf` — не забить диск.
+  - `logrotate` для nginx access/error логов.
+- [ ] **Метрики хоста** — `htop`/`netdata` (опц., Netdata одной командой ставится и даёт дашборд).
+- [ ] **Простые ручные алерты** через Uptime Kuma:
+  - api `/health` не отвечает 2 мин → email.
+  - api `/ready` (DB+Redis ping) не отвечает 1 мин → email.
+  - frontend не отвечает 2 мин → email.
+- [ ] **Disk-space мониторинг** — Uptime Kuma «Push»-monitor + cron на VPS, шлющий heartbeat если `df` < 80%.
 
 ### Безопасность
 
@@ -65,26 +77,41 @@
 - [ ] HTTPS-only (HSTS).
 - [ ] HttpOnly + Secure + SameSite=Strict для всех cookies.
 - [ ] Pino redaction для чувствительных полей (см. [16-jobs-and-integrations.md](16-jobs-and-integrations.md#логирование)).
-- [ ] Sentry beforeSend hook отбрасывает Authorization header.
 - [ ] Pen-test или security checklist OWASP Top 10 пройден.
 
 ## CI/CD
 
-### Backend (apps/api)
+Pipeline один на оба приложения: build на runner-е GitHub Actions, потом ssh на VPS, выкладка нового релиза в `/opt/magtrans/releases/<git-sha>/`, переключение симлинка `current` и `systemctl restart`. Атомарный свич, легко откатывается.
 
-`.github/workflows/api.yml`:
+### Структура релизов на VPS
+
+```
+/opt/magtrans/
+├── api/
+│   ├── current → ../releases/<git-sha>/   (симлинк)
+│   └── shared/                              (uploads, .env link)
+├── web/
+│   ├── current → ../releases/<git-sha>/
+│   └── shared/
+└── releases/
+    ├── 2026-04-29-abc123/
+    ├── 2026-04-29-def456/
+    └── 2026-04-29-ghi789/                   (хранить минимум 3 последних)
+```
+
+systemd-юниты ссылаются на `/opt/magtrans/api/current` и `/opt/magtrans/web/current`. ENV хранится в `/etc/magtrans/api.env` и `/etc/magtrans/web.env` (`chmod 0600`, `chown root:magtrans`), эти файлы НЕ в репозитории.
+
+### `.github/workflows/deploy.yml`
 
 ```yaml
-name: API CI/CD
+name: CI/CD
 on:
   push:
     branches: [main]
-    paths: ['magguarantee-app/apps/api/**', 'magguarantee-app/packages/**']
   pull_request:
-    paths: ['magguarantee-app/apps/api/**', 'magguarantee-app/packages/**']
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -96,46 +123,134 @@ jobs:
         ports: ['6379:6379']
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v3
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          cache: npm
+          cache-dependency-path: magguarantee-app/package-lock.json
+      - run: npm ci
         working-directory: magguarantee-app
-      - run: pnpm db:generate && pnpm db:migrate:deploy
+      - run: npm run db:generate && npm run db:migrate:deploy
         working-directory: magguarantee-app
         env:
           DATABASE_URL: postgresql://postgres:test@localhost:5432/test
-      - run: pnpm --filter api lint
-      - run: pnpm --filter api typecheck
-      - run: pnpm --filter api test
+      - run: npm run lint && npm run typecheck && npm test
+        working-directory: magguarantee-app
         env:
           DATABASE_URL: postgresql://postgres:test@localhost:5432/test
           REDIS_URL: redis://localhost:6379
-      - run: pnpm --filter api build
+      - run: npm run build -w api && npm run build -w web
+        working-directory: magguarantee-app
 
   deploy:
     if: github.ref == 'refs/heads/main'
-    needs: build
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Railway / Fly.io / другой провайдер
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-      - run: flyctl deploy --remote-only -c apps/api/fly.toml
-        env: { FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }} }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: magguarantee-app/package-lock.json
+      - run: npm ci
+        working-directory: magguarantee-app
+      - run: npm run build -w api && npm run build -w web
+        working-directory: magguarantee-app
+        env:
+          NEXT_OUTPUT: standalone   # next.config.js: output: 'standalone'
+
+      # Упаковка релиза
+      - name: Pack release
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          mkdir -p release/api release/web
+          cp -r magguarantee-app/apps/api/dist release/api/
+          cp -r magguarantee-app/apps/api/node_modules release/api/
+          cp -r magguarantee-app/apps/web/.next/standalone/* release/web/
+          cp -r magguarantee-app/apps/web/.next/static release/web/.next/static
+          cp -r magguarantee-app/apps/web/public release/web/
+          tar czf release-$SHA.tar.gz -C release .
+          echo "SHA=$SHA" >> $GITHUB_ENV
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Upload release
+        run: |
+          scp -o StrictHostKeyChecking=accept-new release-$SHA.tar.gz \
+            deploy@${{ secrets.DEPLOY_HOST }}:/tmp/
+
+      - name: Activate release
+        run: |
+          ssh deploy@${{ secrets.DEPLOY_HOST }} bash -s <<EOF
+            set -euo pipefail
+            SHA=$SHA
+            REL=/opt/magtrans/releases/\$(date +%Y-%m-%d)-\$SHA
+            mkdir -p \$REL/api \$REL/web
+            tar xzf /tmp/release-\$SHA.tar.gz -C \$REL
+            # миграции — ДО переключения симлинка
+            cd \$REL/api && DATABASE_URL=\$(cat /etc/magtrans/api.env | grep ^DATABASE_URL | cut -d= -f2-) \
+              node node_modules/.bin/prisma migrate deploy
+            ln -sfn \$REL/api /opt/magtrans/api/current
+            ln -sfn \$REL/web /opt/magtrans/web/current
+            sudo systemctl restart magtrans-api magtrans-web
+            # держим только 5 последних релизов
+            ls -1dt /opt/magtrans/releases/* | tail -n +6 | xargs -r rm -rf
+          EOF
+
+      - name: Smoke test
+        run: |
+          sleep 5
+          curl -fsS https://api.magtrans.eu/health
+          curl -fsS https://api.magtrans.eu/ready
+          curl -fsS https://app.magtrans.eu/ > /dev/null
 ```
 
-### Frontend (apps/web)
+### Секреты GitHub Actions
 
-Vercel автоматически деплоит при push в `main`. PR-preview включён.
+- `DEPLOY_SSH_KEY` — приватный ключ deploy-юзера на VPS (без passphrase).
+- `DEPLOY_HOST` — IP или DNS VPS.
 
-В Vercel project:
-- Root directory: `magguarantee-app/apps/web`.
-- Build command: `cd ../.. && pnpm install --frozen-lockfile && pnpm --filter web build`.
-- Output directory: `.next`.
-- Install command: `pnpm install --frozen-lockfile` (в monorepo root).
+Deploy-юзер на VPS — отдельный, не root. В `/etc/sudoers.d/magtrans`:
+```
+deploy ALL=(ALL) NOPASSWD: /bin/systemctl restart magtrans-api, /bin/systemctl restart magtrans-web
+```
+
+### Пример systemd-юнита
+
+`/etc/systemd/system/magtrans-api.service`:
+
+```ini
+[Unit]
+Description=MagTrans API (NestJS)
+After=network.target postgresql.service redis-server.service
+Requires=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=magtrans
+WorkingDirectory=/opt/magtrans/api/current
+EnvironmentFile=/etc/magtrans/api.env
+ExecStart=/usr/bin/node dist/main.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+# защита
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/magtrans/api/shared
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Аналогично `magtrans-web.service` — порт 3000, `ExecStart=/usr/bin/node server.js` (Next.js standalone).
 
 ## Миграции БД
 
@@ -143,19 +258,19 @@ Vercel автоматически деплоит при push в `main`. PR-previ
 
 ```bash
 # Локально (dev):
-pnpm --filter database run migrate:dev --name <descriptive>
+npm run migrate:dev -w database -- --name <descriptive>
 
 # В CI/CD (prod-деплой):
-pnpm --filter database run migrate:deploy
+npm run migrate:deploy -w database
 ```
 
-`migrate:deploy` запускается **до** старта Nest-приложения (через release command в Railway/Fly или start-up hook).
+`migrate:deploy` запускается **до** переключения симлинка `current` и рестарта systemd-юнита (см. секцию CI/CD выше — миграция выполняется в шаге «Activate release» до `systemctl restart`).
 
 ⚠️ Никогда не использовать `prisma db push` в prod — только `migrate deploy`.
 
 ## Seed для prod
 
-После применения миграций — `pnpm db:seed`. Создаёт:
+После применения миграций — `npm run db:seed`. Создаёт:
 
 1. **14 типов прицепов** (`Firanka`, `Plandeka`, …) — это бизнес-справочник, не "тестовые данные".
 2. **Лимиты км/ставки** — заполнить актуальными значениями MagTrans на текущий и следующий год (получить от бизнеса).
@@ -301,34 +416,92 @@ test('login flow works in prod', async ({ page }) => {
 
 Если деплой сломал prod:
 
-1. **Backend (Fly.io):** `flyctl releases list` + `flyctl deploy --image <previous-image>`.
-2. **Frontend (Vercel):** dashboard → Deployments → Promote to Production предыдущий.
-3. **БД-миграции:** **никогда не откатывать через `prisma migrate reset`** в prod. Если миграция испортила схему — пишем новую миграцию, которая отменяет (forward-only).
+1. **Код (api и web):** ssh на VPS, переключить симлинк `current` на предыдущий релиз и перезапустить.
+   ```bash
+   ssh deploy@vps
+   ls -1dt /opt/magtrans/releases/*    # выбрать предыдущий
+   ln -sfn /opt/magtrans/releases/<prev>/api /opt/magtrans/api/current
+   ln -sfn /opt/magtrans/releases/<prev>/web /opt/magtrans/web/current
+   sudo systemctl restart magtrans-api magtrans-web
+   curl -fsS https://api.magtrans.eu/health
+   ```
+   Полезно положить это в `/usr/local/bin/magtrans-rollback` — короткий bash-скрипт, принимающий целевой sha.
+2. **БД-миграции:** **никогда не откатывать через `prisma migrate reset`** в prod. Если миграция испортила схему — пишем новую миграцию, которая отменяет (forward-only). Помнить: rollback кода без отката миграции допустим только если новая миграция backward-compatible (чему стоит следовать всегда: добавляем колонки nullable, удаляем — отдельным релизом после).
 
 ## Backup-стратегия
 
+Single-VPS — один диск. Без offsite-бэкапов потеря диска = потеря всего. Это критично, не пропускать.
+
 | Что | Частота | Retention | Где |
 |---|---|---|---|
-| Postgres | ежедневно (managed PITR) | 7 дней | у провайдера |
-| Postgres | еженедельно (logical dump) | 4 недели | S3 |
-| Postgres | ежемесячно | 12 месяцев | S3 (cold storage) |
-| S3 (screenshots) | versioning | 5 лет | сам S3 |
+| Postgres `pg_dump` | ежедневно | 7 дней | offsite S3 (R2 / Hetzner Object Storage) |
+| Postgres `pg_dump` | еженедельно | 4 недели | offsite S3 |
+| Postgres `pg_dump` | ежемесячно | 12 месяцев | offsite S3 |
+| VPS-снимок (Hetzner snapshot или volume snapshot) | ежедневно | 7 дней | у хостера |
+| S3 (screenshots) | versioning | 5 лет | сам S3 (offsite by design) |
 | Application code | unlimited | через git | GitHub |
-| Secrets | при изменении | в secret manager (Doppler / Vercel envs) | — |
+| Secrets (`/etc/magtrans/*.env`) | при изменении | offline (1Password / зашифрованный архив) | вне VPS |
+
+### Скрипт бэкапа Postgres
+
+`/usr/local/bin/magtrans-pgbackup`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+TS=$(date +%Y-%m-%d-%H%M)
+DUMP=/var/backups/magtrans/pg-$TS.sql.gz
+mkdir -p /var/backups/magtrans
+sudo -u postgres pg_dump magtrans | gzip > $DUMP
+# offsite (rclone настроен на S3)
+rclone copy $DUMP r2:magtrans-backups/postgres/
+# локальная ротация — держим 7 дней
+find /var/backups/magtrans -name 'pg-*.sql.gz' -mtime +7 -delete
+```
+
+Запуск через systemd-таймер (надёжнее cron — есть отчёты, retry):
+
+```ini
+# /etc/systemd/system/magtrans-pgbackup.timer
+[Timer]
+OnCalendar=daily
+Persistent=true
+[Install]
+WantedBy=timers.target
+```
+
+### Тест восстановления — обязательно
+
+Бэкапы шрёдингера: пока не восстановил, ты не знаешь, рабочие они или нет. Минимум **раз в квартал**:
+
+1. Скачать последний дамп.
+2. Восстановить в локальный или staging Postgres (`gunzip -c pg-XXX.sql.gz | psql magtrans_test`).
+3. Прогнать smoke-проверки (`SELECT count(*) FROM users; SELECT count(*) FROM claims;`).
 
 ## Disaster recovery
 
-Сценарий: основной регион Postgres недоступен.
+### Сценарий 1: VPS лёг (хостер upadl, диск умер, OS не грузится)
 
-1. Восстановить из последнего daily-backup в alternate регион (~30 мин данных потеряно в худшем случае).
-2. Поменять `DATABASE_URL` в env-переменных.
-3. Redeploy.
-4. Проверить `/ready`.
+1. Создать новый VPS той же спецификации у того же или другого хостера.
+2. `apt install` всех зависимостей (пакетный список держать в `infra/setup.sh` в репозитории — bootstrap-скрипт).
+3. Восстановить Postgres из последнего offsite-дампа.
+4. Восстановить `/etc/magtrans/*.env` из offline-секретов.
+5. Передеплоить из main (просто `git push` или ручной запуск GitHub Actions workflow).
+6. Поменять DNS A-запись на новый IP (Cloudflare TTL=300 → 5 мин на распространение).
 
-RTO (recovery time objective): 30 мин.
-RPO (recovery point objective): 24 часа (или сколько с последнего snapshot-а).
+RTO: 1–2 часа (если bootstrap-скрипт готов и оттестирован).
+RPO: 24 часа (или меньше, если уменьшить интервал бэкапа до 6/12 часов).
 
-Можно сократить RPO до 5 мин с PITR (point-in-time recovery), включается у managed-провайдера за доплату.
+### Сценарий 2: только Postgres сломался
+
+1. `systemctl stop magtrans-api` (приложение не должно писать в битую БД).
+2. Восстановить дамп в новую БД, переименовать.
+3. `systemctl start magtrans-api`.
+
+### Чтобы DR работал
+
+- **Bootstrap-скрипт** (`infra/setup.sh` или Ansible playbook) должен быть актуален — каждый раз когда меняем что-то на VPS вручную, обновляем скрипт.
+- **Тест DR** — раз в полгода поднять VPS с нуля по скрипту, восстановить дамп, убедиться что всё работает.
 
 ## Чек-лист перед прод-launch (D-Day)
 
@@ -336,8 +509,8 @@ RPO (recovery point objective): 24 часа (или сколько с после
 - [ ] Все 9 фаз из [17-migration-roadmap.md](17-migration-roadmap.md) завершены.
 - [ ] UAT с реальным admin + 2-3 будущими пользователями (carrier, opiekun) пройден на staging.
 - [ ] Все km-calc fixtures зелёные.
-- [ ] Sentry подключён, тестовая ошибка ловится.
-- [ ] Бэкап-стратегия работает (тестово восстановили dump).
+- [ ] Uptime Kuma пингует endpoints, тестовый алерт пришёл на email.
+- [ ] Бэкап-стратегия работает (тестово восстановили dump в staging).
 
 ### За день
 - [ ] Деплой на prod (без публичной видимости — closed beta).

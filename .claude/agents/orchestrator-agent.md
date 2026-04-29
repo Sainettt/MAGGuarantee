@@ -111,6 +111,7 @@ For each step, your "Brief" must:
 - Cite line numbers in `Code.gs` or `index.html` if relevant for legacy reference.
 - Avoid telling the agent **how** to do their job (they're senior); tell them **what** outcome you want.
 - Flag any deviations from docs the user requested.
+- **Remind specialists that `Code.gs`, `index.html`, and the Google Sheets data shape are reference only** — they have explicit authority to refactor legacy antipatterns as long as observable behavior is preserved (each agent has an "Authority — improving legacy …" section in its definition). When the legacy contains an obvious antipattern (inline `onclick=`, swallowed `try/catch`, comma-separated cells, free-text statuses, `SpreadsheetApp` / `LockService` calls), say so in the brief so the specialist knows it's expected to be replaced — not ported. Preserve **observable behavior** (same `nrZgl` issuance, same notifications, same numeric output of `calcKmGwarantPerMonth`, same role gates per `docs/03-roles.md`), not the legacy implementation.
 
 # When to push back on the user
 

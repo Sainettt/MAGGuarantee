@@ -40,7 +40,7 @@
 
 - **Старый GAS остаётся в репозитории как функциональный референс** — там видно что делает каждая роль, какой алгоритм km-calc, какой дизайн. Не запускаем, не правим.
 - **Новое приложение разрабатывается с нуля** в `magguarantee-app/`. У него своя БД (Postgres), свой деплоймент.
-- **Тестовые данные в новом app** — простой seed для dev (несколько пользователей разных ролей, несколько carrier-ов с авто, генератор wniosków). Никаких реальных данных нет — у MagTrans их и не было.
+- **Тестовые данные в новом app** — простой seed для dev (несколько пользователей разных ролей, несколько carrier-ов с авто, генератор wniosków). Никаких реальных данных нет — у MAGTRANS их и не было.
 
 ---
 
@@ -51,20 +51,19 @@
 ### Шаги
 
 1. Создать папку `magguarantee-app/` в корне репозитория.
-2. `pnpm init` + `pnpm-workspace.yaml` + `turbo.json`.
-3. `apps/api`: `nest new` + базовый `main.ts` с Helmet, CORS, Pino, Swagger.
+2. `npm init -y` + добавить `"workspaces": ["apps/*", "packages/*"]` в корневой `package.json` + `turbo.json`.
+3. `apps/api`: `nest new` + базовый `main.ts` с Helmet, CORS, Pino.
 4. `apps/web`: `create-next-app@latest` (App Router, Tailwind, TypeScript).
 5. `packages/database`: `prisma init`, dummy schema (без моделей пока).
 6. `packages/shared`: пустой пакет с `index.ts` и заглушкой типов.
 7. `docker-compose.yml`: Postgres 16 + Redis 7 + Mailhog.
 8. CI на GitHub Actions: lint + typecheck + build на PR.
 9. `.env.example` для api и web.
-10. `README.md` в `magguarantee-app/` с инструкциями `docker compose up && pnpm dev`.
+10. `README.md` в `magguarantee-app/` с инструкциями `docker compose up && npm run dev`.
 
 ### Deliverables
-- Монорепо запускается: `docker compose up -d && pnpm dev` → `localhost:3000` (web) и `localhost:3001` (api).
+- Монорепо запускается: `docker compose up -d && npm run dev` → `localhost:3000` (web) и `localhost:3001` (api).
 - `localhost:3001/health` отвечает 200.
-- `localhost:3001/api/v1/docs` показывает пустой Swagger.
 - CI проходит на пустом PR.
 
 ### Зависимости
@@ -398,7 +397,7 @@
 3. **BullMQ queues:** `email-send`, `daily-reminders`, `weekly-report`, `token-cleanup`.
 4. **S3 для screenshots** — в Фазе 4 уже подключено, здесь — финализация retention policy.
 5. **Google OAuth** для внутренних — опционально, в конце.
-6. **Sentry hook** для error tracking.
+6. **Uptime Kuma** на VPS — пинг `/health` и `/ready`, алерты в email/Telegram.
 7. **Bull Board UI** на `/admin/queues` (admin only) для мониторинга.
 
 ### Deliverables
@@ -420,21 +419,20 @@
 
 ### Краткие шаги
 
-1. Создан Postgres + Redis + S3 в prod-окружении.
-2. CI/CD pipelines готовы (см. [18-launch-and-deployment.md#cicd](18-launch-and-deployment.md#cicd)).
-3. Все ENV переменные заполнены в prod-deploy.
-4. Прод-деплой backend (Railway/Fly) и frontend (Vercel).
+1. VPS поднят: Postgres 16, Redis 7, nginx, Caddy/certbot, systemd-юниты для api и web. S3-bucket (Cloudflare R2 или Hetzner Object Storage) создан.
+2. CI/CD pipeline готов (GitHub Actions → ssh → `git pull` + `npm run build` + `systemctl restart`, см. [18-launch-and-deployment.md#cicd](18-launch-and-deployment.md#cicd)).
+3. Все ENV переменные заполнены на VPS (`/etc/magtrans/api.env`, `/etc/magtrans/web.env`, права `0600`).
+4. Прод-деплой backend и frontend — обе команды запущены под systemd на одном сервере.
 5. Запуск seed: 14 типов прицепов + monthly_limits + app_config + первый admin.
 6. Smoke-тесты против prod зелёные.
 7. Первый admin через UI создаёт сотрудников и перевозчиков (никаких скриптов-импортеров).
-8. Продакшн-мониторинг включён.
+8. Uptime Kuma настроена, бэкапы Postgres крутятся.
 
 ### Rollback
 
 Если деплой сломал prod:
-- Backend: previous-image rollback через провайдера.
-- Frontend: Vercel «Promote to Production» предыдущего деплоя.
-- БД-миграции: forward-only — пишем новую миграцию, отменяющую проблемную.
+- Backend и frontend: каждый деплой выкладывает в `/opt/magtrans/releases/<git-sha>/`, симлинк `/opt/magtrans/api/current` → нужная папка. Откат — переключение симлинка на предыдущий релиз + `systemctl restart`. Хранить минимум 3 последних релиза.
+- БД-миграции: forward-only — пишем новую миграцию, отменяющую проблемную. Никогда не делать `prisma migrate reset` на prod.
 
 ### Что делать с `Code.gs` + `index.html`
 
@@ -445,7 +443,7 @@
 ### Deliverables
 - Приложение доступно по prod-URL.
 - Admin может зайти, создать пользователей, начать UAT с реальными перевозчиками.
-- Sentry, мониторинг, бэкапы — работают.
+- Uptime Kuma, journalctl, бэкапы Postgres — работают.
 
 ### Зависимости
 - Все предыдущие фазы.
@@ -526,7 +524,7 @@ describe('calcKmGwarantPerMonth', () => {
 | 1. Auth | 1 нед | — | 2 нед |
 | 2. Core entities | 2 нед | — | 4 нед |
 | 3. Carrier panel | 2 нед | Email-шаблоны (carrier-submitted, login-code) | 6 нед |
-| 4. Pracownik+Admin | 3 нед | Email-шаблоны (decision, internal), S3, Sentry | 9 нед |
+| 4. Pracownik+Admin | 3 нед | Email-шаблоны (decision, internal), S3 | 9 нед |
 | 5. Opiekun | 1 нед | — | 10 нед |
 | 6. Planista, Dyspozytor | 1 нед | — | 11 нед |
 | 7. Eksport, Weryfikator | 1 нед | — | 12 нед |
