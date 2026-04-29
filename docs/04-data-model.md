@@ -1,306 +1,337 @@
-# 04. Структура данных (Google Sheets)
+# 04. Domain model — сущности и отношения
 
-Все данные хранятся в одном Google Spreadsheet (`CONFIG.SPREADSHEET_ID`). 18 листов, описаны ниже.
+> Логика отношений между сущностями. Это бизнес-описание, **не схема БД**. Реализация в Postgres — в [12-database-schema.md](12-database-schema.md).
 
-## Карта связей
+## Карта сущностей
 
 ```
-                    ┌─────────────┐
-                    │   ADMIN     │
-                    │  PRACOWNIK  │   (пользователи MagTrans)
-                    │   OPIEKUN   │
-                    │  PLANISCI   │
-                    │ DYSPOZYTOR  │
-                    │   EKSPORT   │
-                    │ WERYFIKATOR │
-                    └─────────────┘
-                          │
-                          │ Login
-                          ▼
-                    ┌─────────────┐
-                    │ UZYTKOWNICY │ ◄────────── OpiekunLogin
-                    │ (przewoznik)│
-                    └─────────────┘
-                          │
-              Login ──────┼─────────────────────┐
-                          │                     │
-              ┌───────────┴───────────┐         │
-              ▼                       ▼         ▼
-        ┌──────────┐            ┌──────────┐ ┌──────────┐
-        │   AUTA   │            │ KIEROWCY │ │ NACZEPY  │
-        └──────────┘            └──────────┘ └──────────┘
-              │ NrRej                 │ Login    │ NrRej
-              │                       │          │
-              └─────────┬─────────────┴──────────┘
-                        ▼
-                  ┌───────────┐
-                  │ DELEGACJE │
-                  └───────────┘
-              
-              ┌──────────┐         ┌──────────────┐
-              │ WNIOSEK  │ ──────► │ AUTA (NrRej) │
-              │          │         │ UZYTKOWNICY  │
-              └──────────┘         └──────────────┘
-              
-              ┌────────────┐ ┌──────────────┐ ┌──────────┐ ┌──────────────┐
-              │ AUDIT_LOG  │ │ LIMITY KM    │ │   CHAT   │ │ NACZEPY_TYPY │
-              │  (универс) │ │ (год×месяц)  │ │ (на nrZgl)│ │ (справочник) │
-              └────────────┘ └──────────────┘ └──────────┘ └──────────────┘
+                    ┌──────────────────┐
+                    │       User       │
+                    │ (1 row per role) │
+                    └──────────────────┘
+                            │
+                ┌───────────┴───────────────┬──────────────┐
+                │                           │              │
+        role=przewoznik              role=opiekun     other roles
+                │                           │              │
+                ▼                           │              │
+         ┌──────────┐    opiekunId ◄────────┘              │
+         │ Carrier  │◄───────────                          │
+         └──────────┘                                      │
+              │                                            │
+    ┌─────────┼──────────┬─────────────┐                   │
+    ▼         ▼          ▼             ▼                   │
+ ┌──────┐ ┌──────┐ ┌──────────┐ ┌──────────┐               │
+ │Vehic-│ │Driver│ │ Trailer  │ │  Claim   │               │
+ │ le   │ │      │ │          │ │ (wniosek)│               │
+ └──────┘ └──────┘ └──────────┘ └──────────┘               │
+    │ │       │       │              │ vehicleId           │
+    │ │ plannerId/    │              │                     │
+    │ │ dispatcherId ─┼──────────────┼─── (User as planner/dispatcher)
+    │ │       │       │              │                     │
+    │ └───────┴───────┴──┐           │                     │
+    │                    ▼           │                     │
+    │              ┌────────────┐    │                     │
+    │              │ Delegation │    │                     │
+    │              │  (выезд)   │    │                     │
+    │              └────────────┘    │                     │
+    │                    │           │                     │
+    │              vehicleId, etc.   │                     │
+    │                                │                     │
+    │              decidedById ──────┘                     │
+    │                                                      │
+    │                   ┌──────────────┐                   │
+    │                   │TrailerType   │ ◄── trailerTypeId │
+    │                   │ (справочник) │                   │
+    │                   └──────────────┘                   │
+    │                                                      │
+    │  ┌─────────────────┐  ┌──────────────┐               │
+    │  │ MonthlyLimit    │  │  AppConfig   │               │
+    │  │ (год, месяц)    │  │ (глобальные  │               │
+    │  └─────────────────┘  │  параметры)  │               │
+    │                       └──────────────┘               │
+    │                                                      │
+    └──────────────────────────────► AuditLog ◄────────────┘
+                                     (кто что когда)
 ```
 
-## Листы
+## Сущности
 
-### 1. WNIOSEK — заявления (50 колонок A–AX)
+### `User` — единый аккаунт
 
-| Col | Поле | Описание |
-|-----|------|----------|
-| A | NrZgl | `GWA/NNN/MM/RR`, уникальный |
-| B | Przewoznik | nazwa перевозчика |
-| C | Pojazd | NrRej авто |
-| D | DataStart | начало периода |
-| E | DataStop | конец периода |
-| F | GodzinaOd | время начала |
-| G | GodzinaDo | время конца |
-| H | DniJezdne | количество дней |
-| I | Przebieg | фактический км |
-| J | KmNaD | км на день |
-| K | KmGwarant | гарантированный км (рассчитанный) |
-| L | Roznica | KmGwarant − Przebieg |
-| M | Doplata | EUR компенсации |
-| N | Status | NA WERYFIKACJI / ZAAKCEPTOWANO / ODRZUCONO / … |
-| O | Komentarz | текст |
-| P | NrZlecenia | номер задания |
-| Q | DataZlecenia | дата задания |
-| R–X | (зарезервированы) | |
-| Y | Opiekun | имя куратора |
-| Z–AD | (зарезервированы) | |
-| AE | Autoryzacja | флаг авторизации крупной суммы |
-| AF | OpisAutoryzacji | |
-| AG | TokenAutoryzacji | |
-| AH | DataAutoryzacji | |
-| AI | DataZmianyStatusu | |
-| AJ | KwotaWnioskowana | EUR, заявленная сумма |
-| AK | ReklamacjaZlozona | флаг рекламации |
-| AL | ReklamacjaTresc | текст рекламации |
-| AM | OdpMagtrans | ответ MagTrans |
-| AN | KwotaReklamacji | |
-| AO | ZatwKwota | утверждённая сумма |
-| AP | KorektaGodzin | флаг корректировки часов |
-| AQ | StatusPrzedReklamacja | предыдущий статус (для отката) |
-| AR | OrigData | оригинальные даты (до рекламации) |
-| AS | OrigGodzina | |
-| AT | OrigPrzebieg | |
-| AU–AV | (резерв) | |
-| AW | Marża | внутренняя маржа |
-| AX | KwotaMaksima | |
+Все 8 ролей хранятся в одной таблице (различаются полем `role`). Это упрощает auth и multi-role переключение.
 
-**Цветовое выделение строки** по `Status` через `CONFIG.KOLORY` (HEX).
+| Поле | Назначение |
+|---|---|
+| `id` | UUID PK |
+| `login` | unique, человекочитаемый идентификатор |
+| `email` | unique, для 2FA |
+| `passwordHash` | bcrypt; nullable если email-only auth |
+| `role` | `admin` / `pracownik` / `opiekun` / `planista` / `dyspozytor` / `przewoznik` / `eksport` / `weryfikator` |
+| `name`, `company` | контакты |
+| `active` | блокировка логина |
+| `liderEmail` | только для `planista` — email лидера группы (для рассылки) |
 
-### 2. UZYTKOWNICY — перевозчики (22 колонки A–V)
+**Связи:**
+- 1:1 с `Carrier` (если role=przewoznik).
+- 1:N с `Carrier.opiekun` (если role=opiekun).
+- 1:N с `Vehicle.planner`, `Vehicle.dispatcher`.
+- 1:N с `Delegation.reportedBy`, `Delegation.verifiedBy`.
+- 1:N с `Claim.decidedBy`.
+- 1:N с `AuditLog.user`.
 
-См. подробное описание в [03-roles.md](03-roles.md#przewoznik).
+### `Carrier` — перевозчик (расширение User)
 
-### 3. ADMIN, PRACOWNIK, OPIEKUN, DYSPOZYTOR, EKSPORT, WERYFIKATOR (6 колонок каждый)
+Дополнительные поля для роли `przewoznik`. Отдельная таблица 1:1 с `User`, чтобы не хранить null-поля у других ролей.
 
-| Col | Поле |
-|-----|------|
-| A | Login |
-| B | Hasło |
-| C | Rola |
-| D | Nazwa |
-| E | Email |
-| F | Firma |
+| Поле | Назначение |
+|---|---|
+| `userId` | FK → User (unique) |
+| `nip`, `vatId` | налоговые идентификаторы |
+| `contactPerson`, `phone`, `ordersEmail` | контакты |
+| `accountEur`, `accountPln` | IBAN счета |
+| `paymentTerms` | срок оплаты в днях |
+| `insuranceValue`, `insuranceExpiry`, `licenseExpiry` | документы |
+| `numberOfPermits` | KREPTD-выписки |
+| `companyAddress` | адрес |
+| `opiekunId` | FK → User (с role=opiekun) — кто курирует |
 
-### 4. PLANISCI (7 колонок)
+**Инварианты:**
+- `Carrier.opiekunId` должен указывать на `User.role=opiekun`.
+- Удаление Carrier каскадно деактивирует все его Vehicle/Driver/Trailer (soft-delete).
 
-Дополнительная колонка **Lider** (email лидера группы) и **Aktywny**.
+### `Vehicle` — автомобиль
 
-### 5. OPIEKUNOWIE (legacy, 3 колонки)
+Принадлежит перевозчику. Имеет назначенных планисту и диспетчера (это другие сотрудники MagTrans, не люди перевозчика).
 
-`Imię i nazwisko`, `Email`, `Aktywny`. Используется для рассылки decision-уведомлений. ⚠️ Дублирует `OPIEKUN` — см. [08-issues-and-solutions.md](08-issues-and-solutions.md#13-два-листа-opiekun-и-opiekunowie).
+| Поле | Назначение |
+|---|---|
+| `carrierId` | FK → Carrier |
+| `plateNumber` | NrRej |
+| `active` | флаг активности |
+| `plannerId` | FK → User (role=planista) |
+| `dispatcherId` | FK → User (role=dyspozytor) |
+| `brand`, `model`, `year` | характеристики |
+| `certificateL` | L1 / L2 / L3 (шумовой класс) |
+| `euro` | III / IV / V / VI |
+| `adrClasses` | string[] классов опасных грузов |
+| `gps`, `fuelCard`, `cabotageDe`, `cabotageFr`, `gb`, `it`, `fr`, `agreement`, `contract` | флаги допусков |
+| `type` | MEGA / STD / COIL |
+| `wasteAllowed`, `wasteCountries` | разрешения на отходы |
+| `rateDe`, `rateUe`, `rateExport`, `rateImport` | EUR/km по направлениям |
+| `gpsMobilePhone` | телефон GPS-устройства |
+| `nextInspectionDate` | следующий техосмотр |
+| `sideNumber` | NrBoczny |
+| `lastDroveAt` | автообновление от Delegation.markReturned |
 
-### 6. AUTA — автомобили (36 колонок A–AJ)
+**Инварианты:**
+- Уникальность `(carrierId, plateNumber)` — один номер на перевозчика.
+- `plannerId` / `dispatcherId` — пользователи с соответствующей ролью.
 
-| Col | Поле | Тип |
-|-----|------|-----|
-| A | LoginPrzewoznika | string (FK → UZYTKOWNICY) |
-| B | NrRej | string (PK составной с A) |
-| C | Aktywne | Tak/Nie |
-| D | DataDodania | datetime |
-| E | DataDezaktywacji | datetime |
-| F | UtworzonePrzez | login |
-| G | Planista | имя планисты (FK → PLANISCI) |
-| H | Wyposazenie | (legacy) |
-| I | Marka | string |
-| J | Model | string |
-| K | Rok | number |
-| L | Uwagi | string |
-| M | CertyfikatL | L1/L2/L3 |
-| N | EURO | III/IV/V/VI |
-| O | ADR | CSV классов |
-| P | GPS | Tak/Nie |
-| Q | KartaPaliwowa | Tak/Nie |
-| R | Typ | MEGA/STD/COIL |
-| S | Dyspozytor | login (FK → DYSPOZYTOR) |
-| T | GB | Tak/Nie (право работы) |
-| U | IT | |
-| V | FR | |
-| W | Porozumienie | |
-| X | Umowa | Tak/Nie |
-| Y | StawkaDE | EUR/км |
-| Z | StawkaUE | |
-| AA | StawkaEksport | |
-| AB | StawkaImport | |
-| AC | Odpady | Tak/Nie |
-| AD | OdpadyKraje | CSV кодов стран |
-| AE | KabotazDE | Tak/Nie |
-| AF | KabotazFR | |
-| AG | GPSMobNr | телефон |
-| AH | NastepnyPrzeglad | date |
-| AI | NrBoczny | string |
-| AJ | OstatnioJezdzilo | date (auto-update от delegacji) |
+### `Driver` — водитель
 
-### 7. KIEROWCY — водители (13 колонок A–M)
+Принадлежит перевозчику.
 
-| Col | Поле |
-|-----|------|
-| A | Login (PK, генерится автоматом) |
-| B | Imie |
-| C | Nazwisko |
-| D | PrzewoznikLogin (FK → UZYTKOWNICY) |
-| E | Telefon |
-| F | Email |
-| G | NrPrawaJazdy |
-| H | Aktywny |
-| I | DataDodania |
-| J | PrawoJazdyWaznosc |
-| K | Telefon2 |
-| L | Konto |
-| M | Uwagi |
+| Поле | Назначение |
+|---|---|
+| `carrierId` | FK → Carrier |
+| `loginSlug` | уникальный slug `имя.фамилия` (с суффиксом -2/-3 при коллизии) |
+| `firstName`, `lastName` | имя |
+| `phone`, `phone2`, `email` | контакты |
+| `driverLicenseNumber`, `licenseExpiry` | права |
+| `bankAccount` | IBAN |
+| `active` | флаг |
 
-### 8. NACZEPY — прицепы (24 колонки A–X)
+### `Trailer` — прицеп
 
-| Col | Поле |
-|-----|------|
-| A | NrRej (PK) |
-| B | PrzewoznikLogin |
-| C | TypNaczepy (FK → NACZEPY_TYPY) |
-| D | Marka |
-| E | Model |
-| F | Rok |
-| G | Aktywna |
-| H | DataDodania |
-| I | Wyposazenie |
-| J | NastepnyPrzeglad |
-| K | Pasy |
-| L | Maty |
-| M | DlugoscWewn |
-| N | SzerokoscWewn |
-| O | WysokoscWewn |
-| P | Pojemnosc |
-| Q | Wyprez |
-| R | LadowanieTyl |
-| S | LadowanieBok |
-| T | LadowanieGora |
-| U | PrzesuwnyDach |
-| V | PrzesuwnyDachEdscha |
-| W | Uwagi |
-| X | (резерв) |
+Принадлежит перевозчику. Тип берётся из справочника `TrailerType`.
 
-### 9. NACZEPY_TYPY — справочник типов прицепов (4 колонки)
+| Поле | Назначение |
+|---|---|
+| `carrierId` | FK → Carrier |
+| `plateNumber` | NrRej (unique в рамках carrier) |
+| `trailerTypeId` | FK → TrailerType |
+| `brand`, `model`, `year` | характеристики |
+| `equipment`, `belts`, `mats`, `airSuspension` | оборудование |
+| `innerLength`, `innerWidth`, `innerHeight`, `capacity` | размеры |
+| `loadFromBack`, `loadFromSide`, `loadFromTop` | способы загрузки |
+| `slidingRoof`, `edschaSlidingRoof` | крыша |
+| `nextInspectionDate` | техосмотр |
 
-| Col | Поле |
-|-----|------|
-| A | Nazwa | (Firanka, Plandeka, Chłodnia, …) |
-| B | Skrot |
-| C | Opis |
-| D | Aktywna |
+### `TrailerType` — справочник типов прицепов
 
-Предзаполненные 14 типов: Firanka, Plandeka, Chłodnia, Wywrotka, Mega, Jumbo, Frigo, Niska, Burtowa, Kontener, Cysterna, HDS, Walking Floor.
+Глобальный справочник (не привязан к перевозчику). Предзаполняется при seed: Firanka, Plandeka, Chłodnia, Wywrotka, Mega, Jumbo, Frigo, Niska, Burtowa, Kontener, Cysterna, HDS, Walking Floor.
 
-### 10. DELEGACJE — выезды (20 колонок A–T)
+| Поле |
+|---|
+| `name` (unique) |
+| `shortCode` |
+| `description` |
+| `active` |
 
-| Col | Поле |
-|-----|------|
-| A | Id (генерится) |
-| B | NrRej (FK → AUTA) |
-| C | NaczepaNrRej (FK → NACZEPY) |
-| D | KierowcaLogin (FK → KIEROWCY) |
-| E | KierowcaImieNazwisko |
-| F | KierowcaTelefon |
-| G | DataWyjazdu |
-| H | KrajWyjazdu |
-| I | KodPocztowyWyjazdu |
-| J | DataZjazduPlan |
-| K | KrajZjazdu |
-| L | KodPocztowyZjazdu |
-| M | Status (zgloszony/w_trasie/zjechal/anulowany) |
-| N | DataZjazduRzeczywista |
-| O | ZgloszonePrzez (login) |
-| P | DataZgloszenia |
-| Q | ZweryfikowanePrzez (login) |
-| R | DataWeryfikacji |
-| S | PrzewoznikLogin |
-| T | Uwagi |
+### `Claim` — заявление (wniosek)
 
-### 11. LIMITY KM — лимиты на месяц (25 колонок)
+Главная сущность системы. Перевозчик подаёт, сотрудник верифицирует.
 
-Каждая строка — один год. Колонки парами: `<Месяц> km`, `<Месяц> €`.
+| Поле | Назначение |
+|---|---|
+| `nrZgl` | unique, формат `GWA/NNN/MM/YY` (последовательный номер с reset на месяц) |
+| `carrierId` | FK → Carrier (кто подал) |
+| `vehicleId` | FK → Vehicle (на какое авто) |
+| `vehiclePlateSnapshot` | snapshot номера на случай удаления авто |
+| `dateStart`, `dateEnd` | период гарантии |
+| `timeFrom`, `timeTo` | часы (для дробных дней) |
+| `mileage` | фактический пробег км |
+| `kmGuaranteed` | расчётный гарантированный км |
+| `kmDifference` | gwarant − mileage |
+| `paymentEur` | сумма доплаты |
+| `ratePerKmEffective` | взвешенная EUR/km по месяцам |
+| `breakdown` | JSON помесячного расчёта |
+| `status` | `NA_WERYFIKACJI` / `ZAAKCEPTOWANO` / `ODRZUCONO` / `REKLAMACJA` / `OCZEKUJE_NA_AUTORYZACJE` / `AUTORYZACJA_KWOTA_MAKSIMA` |
+| `decidedById` | FK → User (кто верифицировал) |
+| `comment`, `orderNumber`, `orderDate` | мета |
+| **Авторизация** (для крупных сумм): | |
+| `authorizationRequired`, `authorizationDescription`, `authorizationToken`, `authorizationDecidedAt` | |
+| `amountRequested`, `amountApproved`, `margin`, `amountMaximum` | |
+| `authScreenshotUrl` | URL screenshot-а в file-storage |
+| **Рекламация** (зеркало для отката): | |
+| `reklamacjaSubmitted`, `reklamacjaText`, `reklamacjaResponse`, `reklamacjaAmount` | |
+| `hoursAdjusted`, `statusBeforeReklamacja` | |
+| `origDateStart`, `origDateEnd`, `origMileage` | оригинальные значения |
 
-| Col | Поле |
-|-----|------|
-| A | Rok | 2026 |
-| B | Sty km |
-| C | Sty € |
-| D | Lut km |
-| E | Lut € |
-| … | … |
-| X | Gru km |
-| Y | Gru € |
+**Инварианты:**
+- `nrZgl` уникален глобально, генерируется атомарно.
+- При переходе в `REKLAMACJA` копируются `dateStart/dateEnd/mileage` в `origDateStart/origDateEnd/origMileage`.
+- `status` всегда из enum (валидируется на API-уровне).
+- `vehicleId` может стать NULL если авто удалено — тогда показываем `vehiclePlateSnapshot`.
 
-Если ячейка пустая — fallback на `CONFIG.KM_DZIENNIE` (540) и `CONFIG.STAWKA_EUR_ZA_KM` (0.5).
+### `Delegation` — выезд (рейс)
 
-### 12. AUDIT_LOG (9 колонок)
+Описывает один логистический рейс.
 
-| Col | Поле |
-|-----|------|
-| A | Data |
-| B | User |
-| C | UserRola |
-| D | Akcja |
-| E | Target (тип объекта + ключ) |
-| F | Przed (JSON) |
-| G | Po (JSON) |
-| H | Powód |
-| I | Metadata (JSON) |
+| Поле | Назначение |
+|---|---|
+| `vehicleId` | FK → Vehicle |
+| `trailerId` | FK → Trailer (опц.) |
+| `driverId` | FK → Driver (опц.) |
+| `carrierId` | FK → Carrier |
+| `driverNameSnapshot`, `driverPhoneSnapshot` | snapshot контактов на момент выезда |
+| `departureAt`, `departureCountry`, `departurePostalCode` | старт |
+| `plannedReturnAt`, `returnCountry`, `returnPostalCode` | план возврата |
+| `actualReturnAt` | факт возврата |
+| `status` | `zgloszony` → `w_trasie` → `zjechal` (или `anulowany` на любой стадии) |
+| `reportedById` | FK → User (кто зарегистрировал) |
+| `verifiedById` | FK → User (верификатор, изменивший статус) |
+| `notes` | заметки |
 
-Записывается через `_writeAuditLog()` (`Code.gs:503`). Доп. эффект — отправка email админу при критических действиях.
+**Инварианты:**
+- Status-переходы строгие: `zgloszony → w_trasie → zjechal`. Переход `markReturned` обновляет `Vehicle.lastDroveAt`.
+- Перевозчик может анулировать только свои `zgloszony`.
+- Верификатор может анулировать любой.
 
-### 13. CHAT (если включён)
+### `MonthlyLimit` — лимиты на месяц
 
-Сообщения по заявлениям. Точная структура зависит от инициализации в `ensureChatSheet` (`Code.gs:7247`). Содержит `NrZgl`, `User`, `Timestamp`, `Message`, `IsRead`.
+Двумерная таблица (год × месяц). На каждый месяц — `kmPerDay` (дневной лимит км) и `ratePerKm` (ставка EUR/km). Используется в расчёте `calcKmGwarantPerMonth`.
 
-### 14. GWARANCJA (legacy)
+| Поле |
+|---|
+| `year` |
+| `month` (1..12) |
+| `kmPerDay` |
+| `ratePerKm` |
 
-История заявлений — упоминается в коде, но новые операции пишут только в `WNIOSEK`. Похоже на legacy с миграции.
+Если для месяца запись пустая — fallback на `AppConfig.km_dziennie_default` (540) и `AppConfig.stawka_eur_default` (0.5).
+
+**Инвариант:** unique `(year, month)`.
+
+### `AppConfig` — глобальные параметры
+
+Key-value хранилище для всех бизнес-параметров, которые могут меняться без релиза:
+
+| Ключ | Значение | Описание |
+|---|---|---|
+| `stawka_eur_default` | `0.5` | EUR/km, fallback |
+| `km_dziennie_default` | `540` | km/день, fallback |
+| `auth_threshold_low` | `1000` | EUR — порог авторизации (low) |
+| `auth_threshold_high` | `5000` | EUR — порог авторизации (high) |
+| `min_days_to_submit` | `10` | минимум дней до подачи |
+| `login_code_ttl` | `600` | секунд — время жизни 2FA-кода |
+| `login_max_attempts` | `5` | максимум попыток ввода кода |
+
+### `AuditLog` — аудит
+
+Append-only журнал всех критических операций.
+
+| Поле | Назначение |
+|---|---|
+| `userId` | FK → User (кто) |
+| `userRole` | роль на момент действия (могла поменяться) |
+| `action` | строка-идентификатор: `createCarrier`, `updateClaim`, `cancelDelegation`, ... |
+| `targetType` | `Carrier` / `Claim` / `Vehicle` / ... |
+| `targetKey` | человекочитаемый ключ: `nrZgl`, `plateNumber`, `login` |
+| `before` | JSON состояния до |
+| `after` | JSON состояния после |
+| `reason` | свободный комментарий (опц.) |
+| `metadata` | JSON (IP, user-agent, и т.п.) |
+| `ipAddress` | IP клиента |
+
+**Инвариант:** запись в audit пишется в той же транзакции, что и сам change. Если main change откатывается — audit тоже.
+
+### `RefreshToken` — JWT-сессии
+
+Для rotation refresh-токенов. Подробности в [15-auth-strategy.md](15-auth-strategy.md).
+
+## Ключевые отношения
+
+| Связь | Описание |
+|---|---|
+| `User` 1:1 `Carrier` | один аккаунт carrier ↔ один профиль перевозчика |
+| `User` 1:N `Carrier` (via opiekunId) | опекун курирует много перевозчиков |
+| `Carrier` 1:N `Vehicle/Driver/Trailer` | перевозчик владеет автопарком |
+| `Vehicle` N:1 `User` (planner, dispatcher) | назначенные люди MagTrans |
+| `Carrier` 1:N `Claim` | перевозчик подаёт заявления |
+| `Vehicle` 1:N `Claim` | заявление на конкретное авто |
+| `Vehicle` 1:N `Delegation` | выезды авто |
+| `Trailer` 1:N `Delegation` | (опц.) с прицепом |
+| `Driver` 1:N `Delegation` | (опц.) с водителем |
+| `Trailer` N:1 `TrailerType` | тип из справочника |
+| `User` 1:N `AuditLog` | действия |
 
 ## Ключевые инварианты
 
-| Инвариант | Где проверяется |
-|-----------|-----------------|
-| `NrRej` уникален в рамках одного перевозчика | `addVehicle` (lock + проверка) |
-| `NrZgl` уникален глобально | `submitNewClaim` (lock + генерация) |
-| Login водителя уникален в KIEROWCY | `_generateDriverLogin` (суффиксы -2, -3) |
-| `OpiekunLogin` ссылается на существующий `OPIEKUN.Login` | ⚠️ FK не проверяется |
-| Статус `WNIOSEK` всегда из enum | ⚠️ Нет валидации (можно записать что угодно) |
-| `DELEGACJE.Status` из `CONFIG.STATUSY_DELEGACJI` | проверяется в mark-функциях |
+| Инвариант | Где |
+|---|---|
+| `Vehicle.plateNumber` уникален в рамках Carrier | DB unique constraint |
+| `Claim.nrZgl` уникален глобально | DB unique constraint, atomic generation |
+| `Driver.loginSlug` уникален глобально | DB unique constraint, suffix-2/-3 |
+| `Trailer.plateNumber` уникален в рамках Carrier | DB unique constraint |
+| `Carrier.opiekunId` указывает на user с role=opiekun | проверка в сервисе при assign |
+| `Vehicle.plannerId` → User.role=planista | проверка в сервисе при assign |
+| `Vehicle.dispatcherId` → User.role=dyspozytor | проверка в сервисе при assign |
+| `Claim.status` всегда из enum | DB enum |
+| `Delegation.status` всегда из enum | DB enum |
+| Status-переходы Delegation строгие | проверка в сервисе |
+| Audit пишется для всех mutating ops | interceptor |
 
-## Проблемы модели данных
+## Soft-delete
 
-См. [08-issues-and-solutions.md](08-issues-and-solutions.md), но основное:
+| Сущность | Стратегия |
+|---|---|
+| User, Carrier, Vehicle, Driver, Trailer, Claim, Delegation | soft (`deletedAt: timestamp?`) |
+| RefreshToken | hard (по `expiresAt`) |
+| AuditLog | append-only, не удаляется |
 
-1. **Нет реляционной целостности** — Google Sheets не FK-aware. Удаление перевозчика не каскадирует на DELEGACJE/WNIOSEK.
-2. **Магические индексы колонок** — код полон `row[0]`, `row[18]`. Добавление колонки в середину сломает всё.
-3. **Денормализация** — `Przewoznik` в WNIOSEK хранится как nazwa, не login. При переименовании перевозчика — рассинхрон.
-4. **Listов «расширений»** — `ensureUsersColumnsExtended`, `ensureAutaColumnsExtended` и др. пристраивают колонки задним числом. История эволюции прибита гвоздями.
-5. **Plaintext пароли** в листах ADMIN/PRACOWNIK/UZYTKOWNICY/etc.
+## Cascade при удалении Carrier
+
+`hard-delete` Carrier (только admin) каскадно soft-deletes:
+- все Vehicle перевозчика,
+- все Driver перевозчика,
+- все Trailer перевозчика.
+
+Связанные `Claim` и `Delegation` остаются (compliance) — `vehicleId` становится NULL, snapshot-поля сохраняют исторический контекст.
+
+## Связь с реализацией
+
+- Postgres-схема (Prisma): [12-database-schema.md](12-database-schema.md).
+- API endpoints CRUD: [13-api-design.md](13-api-design.md).
+- Бизнес-правила доступа по ролям: [03-roles.md](03-roles.md).

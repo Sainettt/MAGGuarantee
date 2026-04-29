@@ -1,0 +1,65 @@
+# ─── Claude Code (local-only) ────────────────────────────
+.claude/settings.local.json
+# Note: .claude/agents/ IS committed — sub-agents are project-scoped and shared.
+
+# ─── Node / pnpm ────────────────────────────────────────
+node_modules/
+.pnpm-store/
+.pnpm-debug.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ─── TypeScript / Build ─────────────────────────────────
+dist/
+build/
+*.tsbuildinfo
+
+# ─── Next.js ────────────────────────────────────────────
+magguarantee-app/apps/web/.next/
+magguarantee-app/apps/web/out/
+
+# ─── NestJS ─────────────────────────────────────────────
+magguarantee-app/apps/api/dist/
+
+# ─── Turborepo ──────────────────────────────────────────
+.turbo/
+magguarantee-app/.turbo/
+magguarantee-app/apps/*/.turbo/
+magguarantee-app/packages/*/.turbo/
+
+# ─── Prisma (generated client) ──────────────────────────
+magguarantee-app/packages/database/src/generated/
+
+# ─── Environment / secrets ──────────────────────────────
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+!.env.example
+
+# ─── Test ───────────────────────────────────────────────
+coverage/
+*.lcov
+.nyc_output/
+
+# ─── OS / IDE ───────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*.swo
+
+# ─── Logs ───────────────────────────────────────────────
+logs/
+*.log
+
+# ─── Temp ───────────────────────────────────────────────
+*.tmp
+*.temp

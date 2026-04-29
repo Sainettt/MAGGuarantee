@@ -1,101 +1,87 @@
-# 03. Роли и сущности системы
+# 03. Роли и права доступа
 
-В системе **8 ролей пользователей**. Каждый пользователь хранится в одном из специализированных листов авторизации (а не в общем `users`-листе). Поле `Rola` определяет, что пользователь видит и что может делать.
+> 8 ролей пользователей. Этот документ — главный референс по бизнес-правилам авторизации.
 
-## Сводная таблица ролей
+## Сводная таблица
 
-| Роль | Где хранится | Видит экран | Основная функция |
-|------|--------------|-------------|------------------|
-| `admin` | `ADMIN` | `#employeeScreen` | Полный доступ ко всему |
-| `pracownik` | `PRACOWNIK` | `#employeeScreen` | Верифицирует заявления |
-| `opiekun` | `OPIEKUN` | `#employeeScreen` (раздел «Moja opieka») | Куратор группы перевозчиков |
-| `planista` | `PLANISCI` | `#planistaScreen` | Спедитор закреплённых авто |
-| `dyspozytor` | `DYSPOZYTOR` | `#dyspozytorScreen` | Диспетчер закреплённых авто |
-| `przewoznik` | `UZYTKOWNICY` | `#carrierScreen` | Подаёт заявления, ведёт автопарк |
-| `eksport` | `EKSPORT` | `#eksportScreen` | Просмотр выездов экспорта |
-| `weryfikator` | `WERYFIKATOR` | `#weryfikatorScreen` | Верифицирует выезды |
+| Роль | Описание | Главный экран |
+|---|---|---|
+| `admin` | Полный доступ. Может всё. | Employee panel + Diagnostics |
+| `pracownik` | Сотрудник, верифицирующий wnioski | Employee panel |
+| `opiekun` | Куратор группы перевозчиков | Employee panel (раздел Moja opieka) |
+| `planista` | Спедитор закреплённых авто | Planista panel (read-only) |
+| `dyspozytor` | Диспетчер по конкретным авто | Dyspozytor panel (read-only) |
+| `przewoznik` | Перевозчик-субподрядчик | Carrier panel |
+| `eksport` | Эксперт экспорта | Eksport panel (read-only) |
+| `weryfikator` | Верификатор делегаций | Weryfikator panel |
 
 ---
 
 ## <a id="przewoznik"></a>🚛 Перевозчик (`przewoznik`)
 
-**Кто это:** субподрядчик MagTrans — компания, владеющая автомобилями и водителями. Подаёт заявления о компенсации.
+**Кто это:** субподрядчик MagTrans — компания, владеющая автомобилями и водителями. Главный «end-user» системы.
 
-### Где хранится
-Лист `UZYTKOWNICY`, 22 колонки (A–V):
-
-| Поле | Описание |
-|------|----------|
-| `Login` | Уникальный идентификатор |
-| `Hasło` | ⚠️ plaintext |
-| `Rola` | `przewoznik` |
-| `Nazwa`, `Firma`, `NIP`, `Email` | Контактные данные |
-| `Aktywny` | `Tak`/`Nie` — блокировка доступа |
-| `OpiekunLogin` | Связь с куратором |
-| `OsobaKontaktowa`, `Telefon`, `EmailZlecenia` | Расширенные контакты |
-| `KontoEUR`, `KontoPLN`, `TerminPlatnosci` | Финансы |
-| `UbezpWartosc`, `UbezpWaznosc`, `LicencjaWaznosc` | Документы |
-| `LiczbaWypisow`, `AdresFirmy` | KREPTD-данные, адрес |
+**Атрибуты:** login, email, имя, NIP, IBAN (EUR + PLN), контакты, привязанный куратор (`opiekunId`), даты страхования / лицензии, число KREPTD-выписок.
 
 ### Что может делать
 
-| Действие | Функция backend |
-|----------|----------------|
-| Подать заявление о гарантии км | `submitNewClaim` |
-| Просмотреть свои заявления | `getClaimsForCarrier` |
-| Подать рекламацию к заявлению | `submitReklamacja` |
-| Управлять своими водителями | `getMyDrivers`, `addMyDriver`, `updateMyDriver`, `toggleMyDriverActive`, `removeMyDriver` |
-| Управлять своими прицепами | `getMyTrailers`, `addMyTrailer`, `updateMyTrailer`, `toggleMyTrailerActive`, `removeMyTrailer` |
-| Зарегистрировать выезд (delegacja) | `addDelegacja` |
-| Анулировать свой выезд (только `zgloszony`) | `cancelDelegacja` |
-| Просмотреть свои выезды | `getDelegacjeForCarrier` |
-| Получить агрегат «моя флота» | `getMyFleet` |
+| Действие | Ограничение |
+|---|---|
+| Подать заявление о гарантии км | Только для **своих** авто |
+| Просмотреть свои заявления | Только свои |
+| Подать рекламацию к заявлению | Только своё, в разрешённом статусе |
+| CRUD своих водителей | Только своих |
+| CRUD своих прицепов | Только своих |
+| Зарегистрировать выезд (delegacja) | Для своих авто |
+| Анулировать свой выезд | Только в статусе `zgloszony` |
+| Просмотреть свои выезды | Только свои |
+| Получить агрегат «моя флота» | Свои авто/водители/прицепы |
 
 ### Что НЕ может
-- Создавать или редактировать **автомобили** — это делает админ/опекун.
+
+- Создавать или редактировать **автомобили** — это делает admin/opiekun.
 - Менять статус заявления.
 - Видеть данные других перевозчиков.
 - Менять ставки EUR/км или лимиты.
 
 ### Особенности
-- При `Aktywny = 'Nie'` логин блокируется (`validateCaller` вернёт сигнал блокировки).
-- Поле `auta` в user-объекте — массив активных `nrRej` его автомобилей.
-- Может переключиться на админ-панель кнопкой `#btnSwitchToEmployee` — **только если** имеет соответствующую запись в `ADMIN`/`PRACOWNIK`/`OPIEKUN`.
+
+- При `active = false` логин блокируется.
+- Перевозчик может иметь дополнительную роль (`opiekun`/`pracownik`/`admin`) — тогда у него есть переключатель панелей.
 
 ---
 
 ## <a id="opiekun"></a>🛡️ Опекун (`opiekun`)
 
-**Кто это:** сотрудник MagTrans, курирующий **группу перевозчиков**. Может полноценно администрировать «своих» (тех, у кого `OpiekunLogin = его login`).
-
-### Где хранится
-Лист `OPIEKUN` — 6 колонок (Login, Hasło, Rola, Nazwa, Email, Firma).
-
-> ⚠️ Существует также **legacy-лист `OPIEKUNOWIE`** (строка `Code.gs:700`) с 3 колонками (`Imię i nazwisko`, `Email`, `Aktywny`). Используется для поиска email-получателей при decision-уведомлениях. Это источник путаницы — см. [08-issues-and-solutions.md](08-issues-and-solutions.md#13-два-листа-opiekun-и-opiekunowie).
+**Кто это:** сотрудник MagTrans, курирующий группу перевозчиков (тех, у кого `carrier.opiekunId = его id`). Может полноценно администрировать «своих».
 
 ### Что может делать (только для своих перевозчиков)
 
-| Действие | Функция |
-|----------|---------|
-| Просмотр флоты (агрегат) со статистикой | `getOpiekunFleet` |
-| CRUD перевозчиков | `addCarrierByOpiekun`, `updateCarrierByOpiekun`, `toggleCarrierActiveByOpiekun`, `deleteCarrierByOpiekunHard`, `resetCarrierPasswordByOpiekun` |
-| CRUD авто | `addVehicleByOpiekun`, `updateVehicleDetailsByOpiekun`, `toggleVehicleActiveByOpiekun`, `removeVehicleByOpiekun`, `getVehicleDetailsByOpiekun` |
-| CRUD прицепов | `addNaczepaByOpiekun`, `updateNaczepaByOpiekun`, `removeNaczepaByOpiekun` |
-| CRUD водителей | `addDriverByOpiekun`, `updateDriverByOpiekun`, `removeDriverByOpiekun` |
+| Действие | Сущности |
+|---|---|
+| Просмотр флоты со статистикой | Carrier, Vehicle, Driver, Trailer |
+| CRUD перевозчиков | Carrier (только свои) |
+| CRUD авто | Vehicle (под своими carrier) |
+| CRUD прицепов | Trailer (под своими carrier) |
+| CRUD водителей | Driver (под своими carrier) |
+| Reset password перевозчику | Только свои |
 
 ### Что НЕ может
-- Действовать на перевозчиках, у которых другой `OpiekunLogin` — `_opiekunOwnsCarrier()` (`Code.gs:2901`) бросает ошибку.
+
+- Действовать на перевозчиках с другим `opiekunId` (403).
 - Верифицировать заявления (это `pracownik`/`admin`).
 
 ### Audit log
-Каждое действие опекуна **обязательно** пишется в `AUDIT_LOG` через `_writeAuditLog()` (`Code.gs:503`) с указанием user, action, target, before/after, reason.
+
+Каждое действие опекуна **обязательно** пишется в audit log с указанием user, action, target, before/after, reason. Audit пишется и для admin/pracownik (см. ниже), но для opiekun — это ключевая фича accountability.
 
 ### Статистика «Moja opieka»
-`getOpiekunFleet()` возвращает по каждому перевозчику:
-- `jezdzace` — авто, у которых `OstatnioJezdzilo` свежее N дней;
-- `stojace` — авто, не выезжавшие давно;
-- `nieaktywne` — `Aktywne='Nie'`;
-- `potencjalne` — `LiczbaWypisow - aktualnaLiczbaAut` (потенциальный апсайд по KREPTD).
+
+По каждому подопечному перевозчику считаются:
+- `jezdzace` — авто, которые ездили в последние N дней (по полю `Vehicle.lastDroveAt`),
+- `stojace` — авто, не выезжавшие давно,
+- `nieaktywne` — `active=false`,
+- `potencjalne` — `numberOfPermits - aktualnaLiczbaAut` (потенциал по KREPTD).
 
 ---
 
@@ -103,20 +89,15 @@
 
 **Кто это:** спедитор, отвечающий за загрузку конкретных автомобилей.
 
-### Где хранится
-Лист `PLANISCI`, 7 колонок: Login, Hasło, Rola, Nazwa, Email, **Lider** (email лидера группы), Aktywny.
+**Атрибуты:** login, email, имя, **liderEmail** (email лидера группы — он тоже получает уведомления о решениях по авто планисты).
 
 ### Что может делать
-- Видеть авто, у которых в колонке `Planista` (AUTA col G) указано его имя.
-- `getPlanistaFleet(login)` (`Code.gs:3583`) — фильтрует AUTA по этой колонке.
+- Видеть авто, у которых `vehicle.plannerId = его id`.
 - Видеть водителей и прицепы перевозчиков своих авто (read-only).
 
 ### Что НЕ может
 - Ничего редактировать.
 - Видеть заявления / делегации.
-
-### Особенности
-- Поле `Lider` (email) используется в `sendInternalDecisionEmail` — лидер группы тоже получает уведомление о решении по заявлению авто планисты.
 
 ---
 
@@ -124,13 +105,9 @@
 
 **Кто это:** диспетчер по конкретным автомобилям. Обычно работает в паре с планистой.
 
-### Где хранится
-Лист `DYSPOZYTOR`, 6 колонок (Login, Hasło, Rola, Nazwa, Email, Firma).
-
 ### Что может делать
-- Видеть авто, у которых `Dyspozytor` (AUTA col S) указывает на его login.
-- `getDyspozytorFleet(login)` (`Code.gs:3676`) — фильтрует AUTA.
-- Видеть **делегации (выезды)** этих авто: `getDelegacjeForDyspozytor` (`Code.gs:4033`).
+- Видеть авто, у которых `vehicle.dispatcherId = его id`.
+- Видеть **делегации (выезды)** этих авто.
 - Просматривать водителей и прицепы.
 
 ### Что НЕ может
@@ -144,92 +121,50 @@
 
 ## <a id="pracownik"></a>👨‍💼 Работник (`pracownik`) и Админ (`admin`)
 
-**Кто это:** сотрудник MagTrans, верифицирующий заявления.
-
-### Где хранится
-- `pracownik` → лист `PRACOWNIK` (6 колонок).
-- `admin` → лист `ADMIN` (6 колонок).
-
-### Различия
-- `admin` имеет дополнительные права: hard-delete, управление лимитами, диагностические функции (`diagnostykaMaili`, `DIAGNOSTYKA_WNIOSKÓW`, `getDashboardStats`).
-- `pracownik` ограничен верификацией.
+**Кто это:** сотрудник MagTrans, верифицирующий заявления. Различия минимальны — `admin` имеет дополнительные права.
 
 ### Что могут оба
-| Действие | Функция |
-|----------|---------|
-| Видеть все заявления с фильтром | `getAllClaims` |
-| Верифицировать (изменить статус, пересчитать) | `updateClaimFull` |
-| Просмотр всех перевозчиков | `getCarriersList` |
-| CRUD перевозчиков | `addCarrier`, `updateCarrier`, `toggleCarrierActive`, `deleteCarrierHard`, `resetCarrierPassword` |
-| CRUD авто (всех) | `getAllVehiclesForAdmin`, `addVehicle`, `updateVehicleDetails`, `toggleVehicleActive`, `removeVehicle`, `getVehicleDetails` |
-| CRUD водителей (всех) | `getDriversList`, `addDriver`, `updateDriver`, `toggleDriverActive`, `removeDriver` |
-| CRUD прицепов | `getNaczepyList`, `addNaczepa`, `updateNaczepa`, `toggleNaczepaActive`, `removeNaczepa` |
-| Управление справочником типов прицепов | `getNaczepyTypyList`, `addNaczepaTyp`, `toggleNaczepaTypActive` |
-| Внешние проверки | `viesLookup`, `whiteListCheckAccount`, `inspectionCheckLink` |
+
+| Действие |
+|---|
+| Видеть все заявления с фильтром |
+| Верифицировать (изменить статус, пересчитать) |
+| Просмотр всех перевозчиков |
+| CRUD перевозчиков (всех) |
+| CRUD авто (всех) |
+| CRUD водителей (всех) |
+| CRUD прицепов |
+| Управление справочником типов прицепов |
+| Внешние проверки: VIES, Biała Lista MF, info-car link |
 
 ### Только для admin
-- `setupTriggers` — создание cron-триггеров.
-- Диагностические endpoint-ы.
-- Прямая запись в `LIMITY KM`.
+
+- Hard-delete (полное удаление, не soft).
+- Прямая правка лимитов км/ставок (`MonthlyLimit`).
+- Создание / редактирование пользователей (всех ролей).
+- Diagnostic-эндпоинты (диагностика email, сводка БД).
+- Чтение audit-log.
 
 ---
 
 ## <a id="специальные-роли"></a>🔍 Специальные роли
 
-### `eksport` — Эксперт экспорта
+### `eksport` — эксперт экспорта
 
-**Где:** лист `EKSPORT`. **Экран:** `#eksportScreen`.
+Видит делегации, относящиеся к экспортным операциям (фильтр по типу). Read-only.
 
-Видит выезды (delegacje), относящиеся к экспортным операциям. Функция: `getEksportData` / `getDelegacjeForEksport` (`Code.gs:3980`).
-
-Read-only.
-
-### `weryfikator` — Верификатор выездов
-
-**Где:** лист `WERYFIKATOR`. **Экран:** `#weryfikatorScreen`.
+### `weryfikator` — верификатор выездов
 
 Управляет статусом делегаций:
-- `markDelegacjaInTransit` — переводит из `zgloszony` в `w_trasie`.
-- `markDelegacjaReturned` — переводит в `zjechal`, обновляет `OstatnioJezdzilo` авто.
-- `cancelDelegacja` — может анулировать любую (в отличие от перевозчика).
+- `markInTransit` — `zgloszony` → `w_trasie`.
+- `markReturned` — `w_trasie` → `zjechal`, обновляет `Vehicle.lastDroveAt`.
+- `cancel` — может анулировать любую (в отличие от перевозчика).
 
-Видит **все** делегации: `getDelegacjeForWeryfikator` (`Code.gs:4007`), параметр `includeHistory` для архивных.
-
----
-
-## Сущности (entities) — данные, не пользователи
-
-### 🚚 Автомобиль (Auto)
-Лист `AUTA`, 36 колонок. Принадлежит перевозчику (`LoginPrzewoznika`). Имеет планисту (`Planista`) и диспетчера (`Dyspozytor`) — это связи на сотрудников MagTrans, а не на перевозчика.
-
-Ключевые поля: `NrRej`, `Aktywne`, `Marka`, `Model`, `Rok`, `CertyfikatL` (L1/L2/L3 — шумовой класс), `EURO` (III/IV/V/VI), `ADR` (CSV классы опасных грузов), `GPS`, `Typ` (MEGA/STD/COIL), 4 ставки EUR/км (DE, UE, Eksport, Import), `Odpady` (флаг отходов), `OdpadyKraje` (CSV стран с разрешением), `Kabotaz` (DE/FR), `NastepnyPrzeglad`, `OstatnioJezdzilo`.
-
-### 👨‍✈️ Водитель (Kierowca)
-Лист `KIEROWCY`, 13 колонок. Привязан к перевозчику через `PrzewoznikLogin`. Login генерируется автоматически из `Imię.Nazwisko` (с деакцентификацией и суффиксами `-2`, `-3` при коллизии).
-
-### 🚃 Прицеп (Naczepa)
-Лист `NACZEPY`, 24 колонки. Привязан к перевозчику. Тип берётся из справочника `NACZEPY_TYPY`.
-
-### 📄 Заявление (Wniosek)
-Лист `WNIOSEK`, 50 колонок (A–AX). Уникальный `NrZgl` формата `GWA/NNN/MM/RR`. Статусы: `NA WERYFIKACJI`, `ZAAKCEPTOWANO`, `ODRZUCONO`, `REKLAMACJA`, `OCZEKUJE NA AUTORYZACJĘ`, `AUTORYZACJA — KWOTA MAKSIMA`.
-
-Имеет «зеркальные» поля для рекламации: `OrigData`, `OrigGodzina`, `OrigPrzebieg`, `StatusPrzedReklamacja` — чтобы можно было откатиться.
-
-### 🚀 Делегация (Delegacja, Wyjazd)
-Лист `DELEGACJE`, 20 колонок. Описывает один рейс. Статусы: `zgloszony` → `w_trasie` → `zjechal` (или `anulowany` на любой стадии).
-
-### 💬 Чат (Chat)
-Лист `CHAT`, активируется флагом `window.CHAT_ENABLED`. Сообщения привязаны к `NrZgl`. Функции: `sendChatMessage`, `getChatMessages`, `getChatUnreadCounts`. Старые (>30 дней) удаляются `_cleanupOldChatMessages`.
-
-### 📊 Audit Log
-Лист `AUDIT_LOG`, 9 колонок: Data, User, UserRola, Akcja, Target, Przed, Po, Powód, Metadata (JSON). Заполняется через `_writeAuditLog()`.
-
-### 🌍 Лимиты (Limity)
-Лист `LIMITY KM`. Двумерная таблица: `Rok` × месяцы. На каждый месяц — 2 значения: км/день и ставка EUR. Используется в `calcKmGwarantPerMonth`.
+Видит **все** делегации, может включить историю архивных.
 
 ---
 
-## Матрица доступа (упрощённая)
+## Матрица доступа
 
 | Действие | admin | pracownik | opiekun | planista | dyspozytor | przewoznik | eksport | weryfikator |
 |----------|:-----:|:---------:|:-------:|:--------:|:----------:|:----------:|:-------:|:-----------:|
@@ -241,13 +176,13 @@ Read-only.
 | CRUD перевозчиков (свои) | — | — | ✅ | — | — | — | — | — |
 | CRUD авто (все) | ✅ | ✅ | — | — | — | — | — | — |
 | CRUD авто (свои перев.) | — | — | ✅ | — | — | — | — | — |
-| Видеть свои авто (планист.) | — | — | — | ✅ | ✅ | — | — | — |
-| CRUD водителей/прицепов (свои) | ✅ | ✅ | ✅ | — | — | ✅ | — | — |
+| Видеть свои авто (planner/dispatcher) | — | — | — | ✅ | ✅ | — | — | — |
+| CRUD водителей/прицепов | ✅ | ✅ | ✅ (свои) | — | — | ✅ (свои) | — | — |
 | Зарегистрировать выезд | — | — | — | — | — | ✅ | — | — |
 | Изменить статус выезда | ✅ | — | — | — | — | — | — | ✅ |
 | Видеть выезды | ✅ | ✅ | — | — | ✅ (свои) | ✅ (свои) | ✅ | ✅ |
-| Управление справочниками | ✅ | — | — | — | — | — | — | — |
-| Audit log | ✅ | — | — | — | — | — | — | — |
+| Управление лимитами / справочниками | ✅ | — | — | — | — | — | — | — |
+| Audit log (чтение) | ✅ | — | — | — | — | — | — | — |
 
 ---
 
@@ -256,15 +191,21 @@ Read-only.
 ```
 Создание (admin/opiekun)
     ↓
-Email с login + сгенерированным паролем (sendAccountCreatedEmail)
+Email с login + сгенерированным паролем (welcome email)
     ↓
-Первый вход → 2FA код по email → user-объект в JS-памяти
+Первый вход → 2FA код по email → user-объект в сессии (JWT)
     ↓
 [активная работа]
     ↓
-Деактивация (Aktywny='Nie') → email уведомление → блокировка логина
+Деактивация (active=false) → email-уведомление → блокировка логина
     ↓
-[опционально] Реактивация → Aktywny='Tak' → email
+[опционально] Реактивация → active=true → email
     ↓
-[опционально] Hard delete → удаление строки + всех связанных авто (для перевозчика)
+[опционально] Hard delete (admin) → удаление + каскад на связанные сущности
 ```
+
+## Multi-role
+
+У одного физического человека могут быть две роли — например, перевозчик, который также является опекуном для других перевозчиков. В системе это представлено как два связанных user-аккаунта (один с `role=przewoznik`, другой с `role=opiekun`), у которых может совпадать email. После login пользователь получает `alternateRoles` — массив дополнительных ролей, и в UI есть переключатель панелей.
+
+См. [15-auth-strategy.md#multi-role](15-auth-strategy.md) для деталей реализации.

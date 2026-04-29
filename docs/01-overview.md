@@ -1,114 +1,117 @@
-# 01. Обзор проекта
+# 01. Что делает система
+
+> Бизнес-обзор предметной области. Без привязки к технологиям. Это то, что должно работать в новом приложении.
 
 ## Назначение
 
-**MagTrans** — внутренняя система управления **гарантией километража** для логистической компании MagTrans. Перевозчики (subcontractors) подают заявления (wnioski) на компенсацию, когда автомобиль за период проехал меньше гарантированного количества километров. Система рассчитывает доплату в EUR на основе:
+**MagTrans Guarantee (MAGGuarantee)** — внутренняя система управления **гарантией километража** для логистической компании MagTrans. Перевозчики (subcontractors) подают заявления (`wniosek`) на компенсацию, когда автомобиль за период проехал меньше гарантированного количества километров. Система рассчитывает доплату в EUR на основе:
 
 - дневного лимита километров (по месяцам года),
 - ставки EUR/км (тоже помесячно),
-- учёта выходных и праздничных дней ЕС,
+- учёта выходных и праздничных дней ЕС (включая Пасху),
 - корректировки на простой / сервис.
 
-Помимо ядра «гарантия», система включает:
+Помимо ядра «гарантия», система покрывает:
 
-- **CRUD автопарка** — автомобили, прицепы, водители каждого перевозчика;
-- **модуль делегаций (выездов)** — учёт фактических рейсов (status: `zgloszony` → `w_trasie` → `zjechal`);
-- **рекламации** — частичный пересмотр уже принятого решения;
-- **email-нотификации** через Gmail (тред-сообщения с одинаковым subject);
-- **аудит-лог** всех критических операций;
-- **внутренний чат** на каждое заявление (Phase 2);
-- **двухфакторную авторизацию** через 6-значный код по email.
-
-## Технологический стек
-
-- **Google Apps Script (V8 runtime)** — серверный код в `Code.gs`
-- **HtmlService** — рендер монолитного `index.html`
-- **Google Sheets** — хранилище данных (~18 листов)
-- **Google Mail (MailApp / GmailApp)** — рассылка
-- **Google Drive** — приём скриншотов авторизации
-- **CacheService** — хранение login-кодов 2FA
-- **LockService** — защита от race conditions
-- **Внешние REST API**:
-  - VIES (проверка VAT/NIP в ЕС)
-  - Biała Lista MF (проверка связи NIP↔IBAN, Польша)
-  - info-car.pl (генерация ссылки на проверку техосмотра)
+- **CRUD автопарка** — автомобили, прицепы, водители каждого перевозчика.
+- **Модуль делегаций (выездов)** — учёт фактических рейсов: `zgloszony` → `w_trasie` → `zjechal`.
+- **Рекламации** — частичный пересмотр уже принятого решения.
+- **Email-нотификации** (треды по `nrZgl`).
+- **Audit-лог** всех критических операций.
+- **Двухфакторная авторизация** через 6-значный код по email.
 
 ## Ключевые бизнес-процессы
 
 ### 1. Подача заявления (wniosek)
 
 ```
-Перевозчик → форма → submitNewClaim() → расчёт km гарантии
-                                     → запись в WNIOSEK
-                                     → email админу
-                                     → email перевозчику (подтверждение)
-                                     → email внутр. сотрудникам (planista, opiekun)
-                                     → статус: NA WERYFIKACJI
+Перевозчик заполняет форму
+  → расчёт km гарантии (calcKmGwarantPerMonth)
+  → сохранение со статусом NA_WERYFIKACJI
+  → email админу + перевозчику + внутренним сотрудникам (planista, opiekun, lider)
 ```
 
 ### 2. Верификация заявления
 
 ```
-Работник → openStatusModal() → корректирует данные
-                            → updateClaimFull() (re-calc + decision)
-                            → email перевозчику (HTML с цветным header)
-                            → email внутр. сотрудникам
-                            → статус: ZAAKCEPTOWANO / ODRZUCONO
+Сотрудник (admin/pracownik) открывает заявление
+  → корректирует данные
+  → live re-calc (kmGwarant, doplata)
+  → решение: ZAAKCEPTOWANO / ODRZUCONO / OCZEKUJE_NA_AUTORYZACJĘ
+  → email перевозчику с цветным header (по статусу)
+  → email внутренним сотрудникам
 ```
 
 ### 3. Делегация (выезд)
 
 ```
-Перевозчик → addDelegacja(auto, kierowca, naczepa, маршрут)
-          → status: zgloszony
-          
-Верификатор → markDelegacjaInTransit()  → status: w_trasie
-            → markDelegacjaReturned()    → status: zjechal
-                                         → AUTA.OstatnioJezdzilo обновляется
+Перевозчик регистрирует выезд (auto, kierowca, naczepa, маршрут)
+  → status: zgloszony
+Верификатор:
+  → markInTransit  → status: w_trasie
+  → markReturned   → status: zjechal
+                   → автообновление поля "OstatnioJezdzilo" у авто
 ```
 
-### 4. Авторизация (логин)
+Любой статус может быть `anulowany`. Перевозчик может анулировать только `zgloszony`-выезды, верификатор — любые.
+
+### 4. Авторизация (login)
 
 ```
-1) Перевозчик вводит login + password → sendLoginCode()
-   - проверяется в одной из таблиц (ADMIN, PRACOWNIK, UZYTKOWNICY, ...)
-   - генерируется 6-значный код, кладётся в CacheService на 600с
+1) login + password → проверка
+   - генерируется 6-значный код, кладётся в кеш на 10 мин
    - отправляется email с кодом
-2) Перевозчик вводит код → verifyLoginCode()
-   - 5 неверных попыток → блокировка на 5 минут
-   - валидный → возвращается user object {login, rola, nazwa, email, auta, ...}
-   - LastLogin обновляется
-3) Frontend сохраняет user в памяти (не в localStorage) и показывает соответствующий экран
+2) ввод кода → проверка
+   - 5 неверных попыток → блокировка на 5 мин
+   - валидный → user-объект в сессии
+3) Frontend показывает экран по роли
 ```
 
-## Конфигурация (CONFIG)
+### 5. Рекламация
 
-Глобальный объект на строках `Code.gs:6–95`. Содержит:
+Перевозчик может оспорить уже верифицированное заявление. Создаётся «зеркало» оригинальных данных (`origDateStart`, `origDateEnd`, `origMileage`, `statusBeforeReklamacja`), статус становится `REKLAMACJA`. Сотрудник пересматривает, может откатить или утвердить новую сумму.
 
-- `SPREADSHEET_ID` — ID Google Sheets с данными;
-- имена всех листов (`SHEET_WNIOSEK`, `SHEET_AUTA`, …);
-- email-адреса админа и `wnioski@`;
-- бизнес-параметры по умолчанию: `STAWKA_EUR_ZA_KM = 0.5`, `KM_DZIENNIE = 540`;
-- enum-справочники: `CERTYFIKAT_L_VALUES`, `EURO_VALUES`, `TYPY_AUT`, `STATUSY_DELEGACJI`, `ADR_KLASY`, `ODPADY_KRAJE`, `KOLORY` (HEX по статусам).
+## Ключевые формулы (бизнес-правила)
 
-## Точки входа
+### Расчёт гарантии (`calcKmGwarantPerMonth`)
 
-| Точка | Файл:строка | Назначение |
-|-------|-------------|-----------|
-| `doGet(e)` | `Code.gs:100` | HTTP GET → отдаёт `index.html` |
-| `onOpen()` | `Code.gs:6950` | Меню в Google Sheets |
-| `setupTriggers()` | `Code.gs:6963` | Time-based триггеры для daily/weekly emails |
-| `google.script.run.<func>()` | вся клиентская часть | Вызов backend из браузера |
+Для интервала `[dateStart, dateEnd]`:
 
-## Объём проекта
+1. Разбить интервал на месяцы.
+2. Для каждого месяца посчитать **рабочие дни**, исключая:
+   - субботы и воскресенья,
+   - праздники EU (`getEUBanDays`),
+   - пасхальный понедельник (`calcEaster` + 1).
+3. Умножить рабочие дни на месячный лимит `km/day` из таблицы лимитов (fallback 540 если не задано).
+4. Учесть **дробные дни** (если интервал начинается / заканчивается посреди дня — пропорция от часов).
+5. Скорректировать на часы простоя/сервиса.
+6. Вычислить **взвешенную ставку** EUR/km по месяцам.
+7. Вернуть `{totalDays, kmGwarant, breakdown[], ratePerKmEffective}`.
+
+### Расчёт доплаты
+
+```
+roznica   = max(0, kmGwarant - przebieg)
+doplata   = roznica × ratePerKmEffective
+```
+
+### Авторизация крупной суммы
+
+Если `amountRequested > authThreshold` (по умолчанию 1000 EUR low / 5000 EUR high) — заявление переходит в `OCZEKUJE_NA_AUTORYZACJĘ`. Требуется screenshot подтверждения от руководства, который грузится в файловое хранилище.
+
+## Объём предметной области
 
 | Метрика | Значение |
-|---------|----------|
-| Backend (Code.gs) | 7 482 строки, ~150 функций |
-| Frontend (index.html) | 10 584 строки, 352 функции |
-| Listов Google Sheets | 18 |
-| Ролей пользователей | 8 |
-| Экранов в UI | 8 (login, carrier, planista, dyspozytor, eksport, weryfikator, comingSoon, employee) |
-| Модальных окон | 18+ |
-| Inline style= атрибутов | 1 375 |
-| Event handlers (onclick/onchange) | 300+ |
+|---|---|
+| Ролей пользователей | 8 (см. [03-roles.md](03-roles.md)) |
+| Сущностей домена | ~10 (см. [04-data-model.md](04-data-model.md)) |
+| Экранов в UI | 8 ролёвых (login, carrier, planista, dyspozytor, eksport, weryfikator, employee, comingSoon) |
+| Модальных окон | 18+ (CRUD + verification + auth + reklamacja) |
+| Фоновых задач (cron) | 2 регулярных (daily reminder, weekly report) |
+| Внешних API | 3 (VIES, Biała Lista MF, info-car.pl) |
+
+## Связь с другими документами
+
+- [03-roles.md](03-roles.md) — что может делать каждая из 8 ролей.
+- [04-data-model.md](04-data-model.md) — сущности и их отношения.
+- [10-target-architecture.md](10-target-architecture.md) и далее — как это будет реализовано.
