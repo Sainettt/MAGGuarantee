@@ -483,7 +483,7 @@ export class AppModule {}
 ## Мониторинг
 
 - **Health-чек**: `/health` (liveness), `/ready` (DB + Redis ping). Uptime Kuma на том же VPS пингует оба endpoint-а раз в минуту, шлёт алерты в email/Telegram при падении.
-- **Логи**: Pino → stdout → systemd journal. `journalctl -u magtrans-api -f` для tail, `logrotate` чтобы journal не съел диск.
+- **Логи**: Pino → stdout → systemd journal. `journalctl -u magguarantee-api -f` для tail, `logrotate` чтобы journal не съел диск.
 - **Ошибки**: ловятся через Pino-логи (level=error). Отдельного error-tracking SaaS не подключаем — для масштаба 15–20 одновременных пользователей хватает грепа по journal.
 - **Metrics** (опц., если понадобится): Prometheus через `@willsoto/nestjs-prometheus` + локальная Grafana на том же VPS.
 

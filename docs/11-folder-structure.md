@@ -3,7 +3,7 @@
 ## Полное дерево
 
 ```
-MagTrans/
+MAGGuarantee/
 ├── Code.gs                       # функциональный референс (никогда не был в проде)
 ├── index.html                    # функциональный референс
 ├── docs/                         # документация миграции
@@ -296,7 +296,6 @@ MagTrans/
     ├── .nvmrc                                  # node 20
     ├── package.json                            # с "workspaces": ["apps/*", "packages/*"]
     ├── package-lock.json
-    ├── turbo.json
     ├── tsconfig.base.json
     ├── .editorconfig
     ├── .prettierrc
@@ -316,37 +315,15 @@ MagTrans/
 
 Отдельный `pnpm-workspace.yaml` не нужен — npm читает workspaces прямо из root `package.json`. Lockfile — `package-lock.json` в корне (один на весь монорепо), `node_modules` хостится централизованно с автоматическим hoist-ом общих зависимостей.
 
-## turbo.json
+## Без Turborepo
 
-```jsonc
-{
-  "$schema": "https://turbo.build/schema.json",
-  "tasks": {
-    "build": {
-      "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
-    },
-    "dev": {
-      "cache": false,
-      "persistent": true
-    },
-    "lint": {},
-    "typecheck": {
-      "dependsOn": ["^build"]
-    },
-    "test": {
-      "dependsOn": ["^build"]
-    },
-    "db:generate": {
-      "cache": false,
-      "outputs": ["packages/database/src/generated/**"]
-    },
-    "db:migrate": {
-      "cache": false
-    }
-  }
-}
-```
+Turbo сознательно не используется. На нашем масштабе (4 workspace, 1 разработчик в момент времени, нет горячего CI-кеша между PR-ами) кеш task-графа Turbo не окупает себя — добавляет ещё одну зависимость и ещё один формат конфигурации, при этом по фактическому времени сборки выигрыш на чистом запуске нулевой. Используем штатные средства npm:
+
+- **`npm run X --workspaces --if-present`** — проходит по всем workspace последовательно, пропускает те, где скрипта нет. Подходит для `build`, `lint`, `typecheck`, `test`.
+- **`concurrently`** (одна dev-зависимость в корне) — поднимает `api` и `web` параллельно для `npm run dev`, корректно прокидывает SIGINT.
+- **`npm run X -w <ws>`** — точечный запуск в одном workspace (`-w` = `--workspace=`).
+
+Если в будущем времени сборки на CI станет действительно больно — вернуться к Turbo проще, чем кажется (turbo.json + замена скриптов), решение полностью обратимо.
 
 ## Корневой package.json (скрипты)
 
@@ -363,24 +340,29 @@ MagTrans/
     "packages/*"
   ],
   "scripts": {
-    "dev": "turbo run dev",
-    "dev:api": "turbo run dev --filter=api",
-    "dev:web": "turbo run dev --filter=web",
-    "build": "turbo run build",
-    "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck",
-    "test": "turbo run test",
+    "dev": "concurrently -n api,web -c blue,magenta \"npm run dev -w api\" \"npm run dev -w web\"",
+    "dev:api": "npm run dev -w api",
+    "dev:web": "npm run dev -w web",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
     "db:generate": "npm run generate -w database",
     "db:migrate:dev": "npm run migrate:dev -w database",
     "db:migrate:deploy": "npm run migrate:deploy -w database",
     "db:seed": "npm run seed -w database",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
   }
 }
 ```
 
 > Шорткаты для workspace: `-w <name>` эквивалентно `--workspace=<name>`. Прод-установка — `npm ci` (а не `npm install`): использует `package-lock.json` буква-в-букву и быстрее.
+>
+> ⚠️ Если apps/api зависит от сгенерированного Prisma client из `packages/database`, перед `typecheck`/`build` запускается `npm run db:generate` (либо явно в CI, либо как `pretypecheck` в `apps/api/package.json`). Раньше это разруливал task-граф Turbo (`dependsOn: ["^build"]`), без него — ответственность переезжает на сами workspace-скрипты.
 
 ## docker-compose.yml (для локальной разработки)
 
@@ -389,14 +371,14 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: magtrans
-      POSTGRES_PASSWORD: magtrans
-      POSTGRES_DB: magtrans
+      POSTGRES_USER: magguarantee
+      POSTGRES_PASSWORD: magguarantee
+      POSTGRES_DB: magguarantee
     ports: ["5432:5432"]
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "magtrans"]
+      test: ["CMD", "pg_isready", "-U", "magguarantee"]
 
   redis:
     image: redis:7-alpine
@@ -419,7 +401,7 @@ volumes:
 ```
 NODE_ENV=development
 PORT=3001
-DATABASE_URL=postgresql://magtrans:magtrans@localhost:5432/magtrans
+DATABASE_URL=postgresql://magguarantee:magguarantee@localhost:5432/magguarantee
 REDIS_URL=redis://localhost:6379
 
 # JWT
@@ -448,7 +430,7 @@ GOOGLE_OAUTH_CALLBACK_URL=http://localhost:3001/auth/google/callback
 S3_ENDPOINT=
 S3_ACCESS_KEY=
 S3_SECRET_KEY=
-S3_BUCKET=magtrans-screenshots
+S3_BUCKET=magguarantee-screenshots
 S3_REGION=auto
 
 # Внешние API
@@ -478,9 +460,9 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
     "resolveJsonModule": true,
     "isolatedModules": true,
     "paths": {
-      "@magtrans/database": ["./packages/database/src"],
-      "@magtrans/shared": ["./packages/shared/src"],
-      "@magtrans/shared/*": ["./packages/shared/src/*"]
+      "@magguarantee/database": ["./packages/database/src"],
+      "@magguarantee/shared": ["./packages/shared/src"],
+      "@magguarantee/shared/*": ["./packages/shared/src/*"]
     }
   }
 }
@@ -488,9 +470,9 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 
 ## Импорты — правила
 
-- `apps/api` импортирует из `@magtrans/database` и `@magtrans/shared`.
-- `apps/web` импортирует из `@magtrans/shared` (НЕ из `database` — у браузера нет PrismaClient).
+- `apps/api` импортирует из `@magguarantee/database` и `@magguarantee/shared`.
+- `apps/web` импортирует из `@magguarantee/shared` (НЕ из `database` — у браузера нет PrismaClient).
 - `packages/shared` — pure TypeScript, **без зависимостей от Nest, Next, Prisma**.
-- `packages/database` — Prisma client owner; не имеет `@magtrans/shared` зависимости (избегаем циклов).
+- `packages/database` — Prisma client owner; не имеет `@magguarantee/shared` зависимости (избегаем циклов).
 
 Это критично: `packages/shared/domain/km-calc.ts` будет импортироваться и backend-ом (для расчёта при `submitClaim`), и frontend-ом (для live-preview в форме). Один источник истины — нет рассинхрона client/server (которым в legacy `Code.gs` страдал `calcKmPerMonth` на клиенте vs `calcKmGwarantPerMonth` на сервере).

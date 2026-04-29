@@ -51,7 +51,7 @@
 ### Шаги
 
 1. Создать папку `magguarantee-app/` в корне репозитория.
-2. `npm init -y` + добавить `"workspaces": ["apps/*", "packages/*"]` в корневой `package.json` + `turbo.json`.
+2. `npm init -y` + добавить `"workspaces": ["apps/*", "packages/*"]` в корневой `package.json` + `concurrently` для параллельного `dev` (api+web).
 3. `apps/api`: `nest new` + базовый `main.ts` с Helmet, CORS, Pino.
 4. `apps/web`: `create-next-app@latest` (App Router, Tailwind, TypeScript).
 5. `packages/database`: `prisma init`, dummy schema (без моделей пока).
@@ -149,7 +149,7 @@
 1. `app/(employee)/carriers/page.tsx`: таблица из `<DataTable>`, фильтр.
 2. `app/(employee)/carriers/[id]/page.tsx`: деталь + редактирование (sheet/modal).
 3. То же для vehicles, drivers, trailers, trailer-types.
-4. Forms через React Hook Form + Zod (схемы из `@magtrans/shared`).
+4. Forms через React Hook Form + Zod (схемы из `@magguarantee/shared`).
 
 ### Deliverables
 - Admin может через UI создать carrier-а, vehicle-а, driver-а, trailer-а.
@@ -421,7 +421,7 @@
 
 1. VPS поднят: Postgres 16, Redis 7, nginx, Caddy/certbot, systemd-юниты для api и web. S3-bucket (Cloudflare R2 или Hetzner Object Storage) создан.
 2. CI/CD pipeline готов (GitHub Actions → ssh → `git pull` + `npm run build` + `systemctl restart`, см. [18-launch-and-deployment.md#cicd](18-launch-and-deployment.md#cicd)).
-3. Все ENV переменные заполнены на VPS (`/etc/magtrans/api.env`, `/etc/magtrans/web.env`, права `0600`).
+3. Все ENV переменные заполнены на VPS (`/etc/magguarantee/api.env`, `/etc/magguarantee/web.env`, права `0600`).
 4. Прод-деплой backend и frontend — обе команды запущены под systemd на одном сервере.
 5. Запуск seed: 14 типов прицепов + monthly_limits + app_config + первый admin.
 6. Smoke-тесты против prod зелёные.
@@ -431,7 +431,7 @@
 ### Rollback
 
 Если деплой сломал prod:
-- Backend и frontend: каждый деплой выкладывает в `/opt/magtrans/releases/<git-sha>/`, симлинк `/opt/magtrans/api/current` → нужная папка. Откат — переключение симлинка на предыдущий релиз + `systemctl restart`. Хранить минимум 3 последних релиза.
+- Backend и frontend: каждый деплой выкладывает в `/opt/magguarantee/releases/<git-sha>/`, симлинк `/opt/magguarantee/api/current` → нужная папка. Откат — переключение симлинка на предыдущий релиз + `systemctl restart`. Хранить минимум 3 последних релиза.
 - БД-миграции: forward-only — пишем новую миграцию, отменяющую проблемную. Никогда не делать `prisma migrate reset` на prod.
 
 ### Что делать с `Code.gs` + `index.html`

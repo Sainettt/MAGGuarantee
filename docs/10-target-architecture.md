@@ -5,7 +5,7 @@
 ## Решение: монорепо в отдельной папке
 
 ```
-MagTrans/                              ← корень репозитория
+MAGGuarantee/                          ← корень репозитория
 ├── Code.gs                            ← функциональный референс (заморожен)
 ├── index.html                         ← функциональный референс (заморожен)
 ├── docs/                              ← документация
@@ -18,11 +18,10 @@ MagTrans/                              ← корень репозитория
     │   ├── shared/                    ─── общие типы, валидаторы, бизнес-расчёты
     │   └── ui/                        ─── (опц.) shadcn-компоненты
     ├── docker-compose.yml             ─── Postgres + Redis для dev
-    ├── package.json                   ─── корневой, с "workspaces": ["apps/*", "packages/*"]
-    └── turbo.json
+    └── package.json                   ─── корневой, с "workspaces": ["apps/*", "packages/*"]
 ```
 
-Имя папки `magtrans-app` — рабочее, можно заменить (`v2`, `next`, `app`). Главное — один уровень с `Code.gs`, чтобы было ясно где старое, где новое.
+Имя папки `magguarantee-app` — рабочее, можно заменить (`v2`, `next`, `app`). Главное — один уровень с `Code.gs`, чтобы было ясно где старое, где новое.
 
 ## Стек
 
@@ -62,7 +61,7 @@ MagTrans/                              ← корень репозитория
 
 | Компонент | Выбор |
 |---|---|
-| Менеджер монорепо | **npm workspaces** + **Turborepo** (build cache, task graph). npm выбран намеренно вместо pnpm — проще работа с Docker (нет content-addressable store / симлинков, образ собирается без `pnpm install` бинарника, `npm ci` встроен в Node) |
+| Менеджер монорепо | **npm workspaces** (без Turborepo — на нашем масштабе кеш task-графа избыточен, проще обходиться `npm run X --workspaces --if-present` и `concurrently` для параллельного `dev`). npm выбран намеренно вместо pnpm — проще работа с Docker (нет content-addressable store / симлинков, образ собирается без `pnpm install` бинарника, `npm ci` встроен в Node) |
 | CI | GitHub Actions (lint + test + typecheck + build на PR) |
 | Контейнеризация | Docker (multi-stage), `docker-compose.yml` для локалки |
 | Деплой | Один VPS (Hetzner CX32 ≈ €7/мес или аналог): nginx (reverse-proxy) + systemd для api и web + Postgres + Redis на той же машине. Single point of failure осознанно — нагрузка 15–20 одновременных пользователей в пике, бизнес принял риск. |

@@ -1,0 +1,28 @@
+{
+  "name": "@magguarantee/database",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "generate": "prisma generate || (echo '[generate] empty schema (phase 0): nothing to generate yet' && exit 0)",
+    "migrate:dev": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
+    "seed": "tsx prisma/seed.ts",
+    "prisma:format": "prisma format",
+    "lint": "echo 'lint: no source yet' && exit 0",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'test: no tests yet' && exit 0"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.20.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.20.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  }
+}

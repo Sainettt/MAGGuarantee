@@ -1,4 +1,4 @@
-# Документация проекта MagTrans
+# Документация проекта MAGGuarantee
 
 Система управления гарантией километража для логистической компании.
 
@@ -90,7 +90,7 @@
 
 **Frontend:** Next.js 15 (App Router) + TypeScript + Tailwind + shadcn/ui + TanStack Query + React Hook Form + Zod.
 
-**Инфра:** npm workspaces + Turborepo + Docker + GitHub Actions + один VPS (nginx + systemd для api/web/Postgres/Redis) + Caddy/certbot для SSL + Uptime Kuma для health-check.
+**Инфра:** npm workspaces (без Turborepo) + Docker + GitHub Actions + один VPS (nginx + systemd для api/web/Postgres/Redis) + Caddy/certbot для SSL + Uptime Kuma для health-check.
 
 Подробности — [10-target-architecture.md](10-target-architecture.md).
 

@@ -1,10 +1,10 @@
-# MagTrans — context for Claude
+# MAGGuarantee — context for Claude
 
 > This file is auto-loaded by Claude Code on session start. Keep it short — point to docs, don't duplicate them.
 
 ## What this project is
 
-**MAGGuarantee** — internal system for managing kilometer-guarantee claims for a logistics company. Carriers submit claims when their vehicle drove fewer kilometers in a period than guaranteed; the system calculates EUR compensation.
+**MAGGuarantee** — internal system for managing kilometer-guarantee claims for the **MAGTRANS** logistics company. The product is named MAGGuarantee; MAGTRANS is the customer/company that operates it. Throughout the codebase: code identifiers (npm scope, container names, DB user, systemd units, paths) use `magguarantee`; references to the company itself (`@magtrans.eu` emails, MAGTRANS RED brand color, "сотрудник MagTrans") keep `magtrans`. Carriers submit claims when their vehicle drove fewer kilometers in a period than guaranteed; the system calculates EUR compensation.
 
 **Current state:** legacy `Code.gs` + `index.html` is an unfinished GAS app, **never in production**, all data in Google Sheets is **fake**. They serve only as a **functional reference** — what to build, how it should look. Do not port their code verbatim.
 
@@ -55,14 +55,14 @@ Defined in `.claude/agents/`. Always invoke `orchestrator-agent` first for any n
 
 - **Backend:** Node 20 + TypeScript + NestJS + Prisma + PostgreSQL + Redis + BullMQ + Gmail API + JWT.
 - **Frontend:** Next.js 15 (App Router) + TypeScript + Tailwind + shadcn/ui + TanStack Query + RHF + Zod.
-- **Infra:** npm workspaces + Turborepo + Docker + GitHub Actions + single VPS (nginx + systemd, всё на одном сервере) + Caddy/certbot для SSL.
+- **Infra:** npm workspaces (без Turborepo — `concurrently` для параллельного dev, `npm run X --workspaces --if-present` для остального) + Docker + GitHub Actions + single VPS (nginx + systemd, всё на одном сервере) + Caddy/certbot для SSL.
 
 Full details: [`docs/10-target-architecture.md`](docs/10-target-architecture.md).
 
 ## Repository layout
 
 ```
-MagTrans/
+MAGGuarantee/
 ├── CLAUDE.md                 ← you're here
 ├── README.md                 ← (when created) public-facing for GitHub
 ├── Code.gs                   ← legacy reference (do not modify, do not port verbatim)

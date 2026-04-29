@@ -26,10 +26,10 @@
   - HTTP/2, gzip, разумные тайм-ауты (60s).
   - HSTS, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`.
 - [ ] **SSL/TLS** через **Caddy** (рекомендую — авто-получение и авто-обновление Let's Encrypt) **или** nginx + certbot с systemd-таймером `certbot.timer`. Без авто-обновления сертификат умрёт через 90 дней.
-- [ ] **systemd-юниты** для процессов: `magtrans-api.service`, `magtrans-web.service`. Обе с `Restart=always`, `WantedBy=multi-user.target` (поднимаются после ребута).
+- [ ] **systemd-юниты** для процессов: `magguarantee-api.service`, `magguarantee-web.service`. Обе с `Restart=always`, `WantedBy=multi-user.target` (поднимаются после ребута).
 - [ ] **S3-совместимое хранилище** для screenshots — отдельно от VPS (offsite, чтобы не потерять при сбое диска):
   - Cloudflare R2 (без egress fee) или Hetzner Object Storage.
-  - Bucket: `magtrans-screenshots-prod`.
+  - Bucket: `magguarantee-screenshots-prod`.
   - Versioning включён, retention 5 лет.
 - [ ] **Домены и DNS**:
   - `app.magtrans.eu` → IP VPS (A-запись).
@@ -59,7 +59,7 @@
 - [ ] **Uptime Kuma** на том же VPS (Docker-контейнер), хостится на `status.magtrans.eu` или поддомене (basic-auth или IP-allowlist).
   - Мониторит `https://api.magtrans.eu/health`, `/ready`, `https://app.magtrans.eu/`.
   - Алерты: email + (опц.) Telegram/Discord webhook.
-- [ ] **Логи** через Pino → stdout → `journalctl -u magtrans-api` / `journalctl -u magtrans-web`.
+- [ ] **Логи** через Pino → stdout → `journalctl -u magguarantee-api` / `journalctl -u magguarantee-web`.
   - `journalctl --vacuum-time=30d` или `SystemMaxUse=2G` в `/etc/systemd/journald.conf` — не забить диск.
   - `logrotate` для nginx access/error логов.
 - [ ] **Метрики хоста** — `htop`/`netdata` (опц., Netdata одной командой ставится и даёт дашборд).
@@ -81,12 +81,12 @@
 
 ## CI/CD
 
-Pipeline один на оба приложения: build на runner-е GitHub Actions, потом ssh на VPS, выкладка нового релиза в `/opt/magtrans/releases/<git-sha>/`, переключение симлинка `current` и `systemctl restart`. Атомарный свич, легко откатывается.
+Pipeline один на оба приложения: build на runner-е GitHub Actions, потом ssh на VPS, выкладка нового релиза в `/opt/magguarantee/releases/<git-sha>/`, переключение симлинка `current` и `systemctl restart`. Атомарный свич, легко откатывается.
 
 ### Структура релизов на VPS
 
 ```
-/opt/magtrans/
+/opt/magguarantee/
 ├── api/
 │   ├── current → ../releases/<git-sha>/   (симлинк)
 │   └── shared/                              (uploads, .env link)
@@ -99,7 +99,7 @@ Pipeline один на оба приложения: build на runner-е GitHub 
     └── 2026-04-29-ghi789/                   (хранить минимум 3 последних)
 ```
 
-systemd-юниты ссылаются на `/opt/magtrans/api/current` и `/opt/magtrans/web/current`. ENV хранится в `/etc/magtrans/api.env` и `/etc/magtrans/web.env` (`chmod 0600`, `chown root:magtrans`), эти файлы НЕ в репозитории.
+systemd-юниты ссылаются на `/opt/magguarantee/api/current` и `/opt/magguarantee/web/current`. ENV хранится в `/etc/magguarantee/api.env` и `/etc/magguarantee/web.env` (`chmod 0600`, `chown root:magguarantee`), эти файлы НЕ в репозитории.
 
 ### `.github/workflows/deploy.yml`
 
@@ -188,17 +188,17 @@ jobs:
           ssh deploy@${{ secrets.DEPLOY_HOST }} bash -s <<EOF
             set -euo pipefail
             SHA=$SHA
-            REL=/opt/magtrans/releases/\$(date +%Y-%m-%d)-\$SHA
+            REL=/opt/magguarantee/releases/\$(date +%Y-%m-%d)-\$SHA
             mkdir -p \$REL/api \$REL/web
             tar xzf /tmp/release-\$SHA.tar.gz -C \$REL
             # миграции — ДО переключения симлинка
-            cd \$REL/api && DATABASE_URL=\$(cat /etc/magtrans/api.env | grep ^DATABASE_URL | cut -d= -f2-) \
+            cd \$REL/api && DATABASE_URL=\$(cat /etc/magguarantee/api.env | grep ^DATABASE_URL | cut -d= -f2-) \
               node node_modules/.bin/prisma migrate deploy
-            ln -sfn \$REL/api /opt/magtrans/api/current
-            ln -sfn \$REL/web /opt/magtrans/web/current
-            sudo systemctl restart magtrans-api magtrans-web
+            ln -sfn \$REL/api /opt/magguarantee/api/current
+            ln -sfn \$REL/web /opt/magguarantee/web/current
+            sudo systemctl restart magguarantee-api magguarantee-web
             # держим только 5 последних релизов
-            ls -1dt /opt/magtrans/releases/* | tail -n +6 | xargs -r rm -rf
+            ls -1dt /opt/magguarantee/releases/* | tail -n +6 | xargs -r rm -rf
           EOF
 
       - name: Smoke test
@@ -214,26 +214,26 @@ jobs:
 - `DEPLOY_SSH_KEY` — приватный ключ deploy-юзера на VPS (без passphrase).
 - `DEPLOY_HOST` — IP или DNS VPS.
 
-Deploy-юзер на VPS — отдельный, не root. В `/etc/sudoers.d/magtrans`:
+Deploy-юзер на VPS — отдельный, не root. В `/etc/sudoers.d/magguarantee`:
 ```
-deploy ALL=(ALL) NOPASSWD: /bin/systemctl restart magtrans-api, /bin/systemctl restart magtrans-web
+deploy ALL=(ALL) NOPASSWD: /bin/systemctl restart magguarantee-api, /bin/systemctl restart magguarantee-web
 ```
 
 ### Пример systemd-юнита
 
-`/etc/systemd/system/magtrans-api.service`:
+`/etc/systemd/system/magguarantee-api.service`:
 
 ```ini
 [Unit]
-Description=MagTrans API (NestJS)
+Description=MAGGuarantee API (NestJS)
 After=network.target postgresql.service redis-server.service
 Requires=postgresql.service redis-server.service
 
 [Service]
 Type=simple
-User=magtrans
-WorkingDirectory=/opt/magtrans/api/current
-EnvironmentFile=/etc/magtrans/api.env
+User=magguarantee
+WorkingDirectory=/opt/magguarantee/api/current
+EnvironmentFile=/etc/magguarantee/api.env
 ExecStart=/usr/bin/node dist/main.js
 Restart=always
 RestartSec=5
@@ -244,13 +244,13 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/magtrans/api/shared
+ReadWritePaths=/opt/magguarantee/api/shared
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Аналогично `magtrans-web.service` — порт 3000, `ExecStart=/usr/bin/node server.js` (Next.js standalone).
+Аналогично `magguarantee-web.service` — порт 3000, `ExecStart=/usr/bin/node server.js` (Next.js standalone).
 
 ## Миграции БД
 
@@ -419,13 +419,13 @@ test('login flow works in prod', async ({ page }) => {
 1. **Код (api и web):** ssh на VPS, переключить симлинк `current` на предыдущий релиз и перезапустить.
    ```bash
    ssh deploy@vps
-   ls -1dt /opt/magtrans/releases/*    # выбрать предыдущий
-   ln -sfn /opt/magtrans/releases/<prev>/api /opt/magtrans/api/current
-   ln -sfn /opt/magtrans/releases/<prev>/web /opt/magtrans/web/current
-   sudo systemctl restart magtrans-api magtrans-web
+   ls -1dt /opt/magguarantee/releases/*    # выбрать предыдущий
+   ln -sfn /opt/magguarantee/releases/<prev>/api /opt/magguarantee/api/current
+   ln -sfn /opt/magguarantee/releases/<prev>/web /opt/magguarantee/web/current
+   sudo systemctl restart magguarantee-api magguarantee-web
    curl -fsS https://api.magtrans.eu/health
    ```
-   Полезно положить это в `/usr/local/bin/magtrans-rollback` — короткий bash-скрипт, принимающий целевой sha.
+   Полезно положить это в `/usr/local/bin/magguarantee-rollback` — короткий bash-скрипт, принимающий целевой sha.
 2. **БД-миграции:** **никогда не откатывать через `prisma migrate reset`** в prod. Если миграция испортила схему — пишем новую миграцию, которая отменяет (forward-only). Помнить: rollback кода без отката миграции допустим только если новая миграция backward-compatible (чему стоит следовать всегда: добавляем колонки nullable, удаляем — отдельным релизом после).
 
 ## Backup-стратегия
@@ -440,29 +440,29 @@ Single-VPS — один диск. Без offsite-бэкапов потеря д�
 | VPS-снимок (Hetzner snapshot или volume snapshot) | ежедневно | 7 дней | у хостера |
 | S3 (screenshots) | versioning | 5 лет | сам S3 (offsite by design) |
 | Application code | unlimited | через git | GitHub |
-| Secrets (`/etc/magtrans/*.env`) | при изменении | offline (1Password / зашифрованный архив) | вне VPS |
+| Secrets (`/etc/magguarantee/*.env`) | при изменении | offline (1Password / зашифрованный архив) | вне VPS |
 
 ### Скрипт бэкапа Postgres
 
-`/usr/local/bin/magtrans-pgbackup`:
+`/usr/local/bin/magguarantee-pgbackup`:
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 TS=$(date +%Y-%m-%d-%H%M)
-DUMP=/var/backups/magtrans/pg-$TS.sql.gz
-mkdir -p /var/backups/magtrans
-sudo -u postgres pg_dump magtrans | gzip > $DUMP
+DUMP=/var/backups/magguarantee/pg-$TS.sql.gz
+mkdir -p /var/backups/magguarantee
+sudo -u postgres pg_dump magguarantee | gzip > $DUMP
 # offsite (rclone настроен на S3)
-rclone copy $DUMP r2:magtrans-backups/postgres/
+rclone copy $DUMP r2:magguarantee-backups/postgres/
 # локальная ротация — держим 7 дней
-find /var/backups/magtrans -name 'pg-*.sql.gz' -mtime +7 -delete
+find /var/backups/magguarantee -name 'pg-*.sql.gz' -mtime +7 -delete
 ```
 
 Запуск через systemd-таймер (надёжнее cron — есть отчёты, retry):
 
 ```ini
-# /etc/systemd/system/magtrans-pgbackup.timer
+# /etc/systemd/system/magguarantee-pgbackup.timer
 [Timer]
 OnCalendar=daily
 Persistent=true
@@ -475,7 +475,7 @@ WantedBy=timers.target
 Бэкапы шрёдингера: пока не восстановил, ты не знаешь, рабочие они или нет. Минимум **раз в квартал**:
 
 1. Скачать последний дамп.
-2. Восстановить в локальный или staging Postgres (`gunzip -c pg-XXX.sql.gz | psql magtrans_test`).
+2. Восстановить в локальный или staging Postgres (`gunzip -c pg-XXX.sql.gz | psql magguarantee_test`).
 3. Прогнать smoke-проверки (`SELECT count(*) FROM users; SELECT count(*) FROM claims;`).
 
 ## Disaster recovery
@@ -485,7 +485,7 @@ WantedBy=timers.target
 1. Создать новый VPS той же спецификации у того же или другого хостера.
 2. `apt install` всех зависимостей (пакетный список держать в `infra/setup.sh` в репозитории — bootstrap-скрипт).
 3. Восстановить Postgres из последнего offsite-дампа.
-4. Восстановить `/etc/magtrans/*.env` из offline-секретов.
+4. Восстановить `/etc/magguarantee/*.env` из offline-секретов.
 5. Передеплоить из main (просто `git push` или ручной запуск GitHub Actions workflow).
 6. Поменять DNS A-запись на новый IP (Cloudflare TTL=300 → 5 мин на распространение).
 
@@ -494,9 +494,9 @@ RPO: 24 часа (или меньше, если уменьшить интерв�
 
 ### Сценарий 2: только Postgres сломался
 
-1. `systemctl stop magtrans-api` (приложение не должно писать в битую БД).
+1. `systemctl stop magguarantee-api` (приложение не должно писать в битую БД).
 2. Восстановить дамп в новую БД, переименовать.
-3. `systemctl start magtrans-api`.
+3. `systemctl start magguarantee-api`.
 
 ### Чтобы DR работал
 
