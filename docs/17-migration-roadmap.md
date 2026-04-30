@@ -44,27 +44,33 @@
 
 ---
 
-## Фаза 0 — Foundation (≈ 1 неделя)
+## Фаза 0 — Foundation (≈ 1 неделя) ✅ ЗАВЕРШЕНА (2026-04-30)
 
 **Цель:** монорепо запускается локально, есть пустой Nest и Next, к ним подключены DB и Redis. Никакой бизнес-логики, только скаффолд.
 
 ### Шаги
 
-1. Создать папку `magguarantee-app/` в корне репозитория.
-2. `npm init -y` + добавить `"workspaces": ["apps/*", "packages/*"]` в корневой `package.json` + `concurrently` для параллельного `dev` (api+web).
-3. `apps/api`: `nest new` + базовый `main.ts` с Helmet, CORS, Pino.
-4. `apps/web`: `create-next-app@latest` (App Router, Tailwind, TypeScript).
-5. `packages/database`: `prisma init`, dummy schema (без моделей пока).
-6. `packages/shared`: пустой пакет с `index.ts` и заглушкой типов.
-7. `docker-compose.yml`: Postgres 16 + Redis 7 + Mailhog.
-8. CI на GitHub Actions: lint + typecheck + build на PR.
-9. `.env.example` для api и web.
-10. `README.md` в `magguarantee-app/` с инструкциями `docker compose up && npm run dev`.
+1. ✅ Создать папку `magguarantee-app/` в корне репозитория.
+2. ✅ `npm init -y` + добавить `"workspaces": ["apps/*", "packages/*"]` в корневой `package.json` + `concurrently` для параллельного `dev` (api+web).
+3. ✅ `apps/api`: `nest new` + базовый `main.ts` с Helmet, CORS, Pino.
+4. ✅ `apps/web`: `create-next-app@latest` (App Router, Tailwind, TypeScript).
+5. ✅ `packages/database`: `prisma init`, dummy schema (без моделей пока).
+6. ✅ `packages/shared`: пустой пакет с `index.ts` и заглушкой типов.
+7. ✅ `docker-compose.yml`: Postgres 16 + Redis 7 + Mailhog.
+8. ✅ CI на GitHub Actions: lint + typecheck + build на PR.
+9. ✅ `.env.example` для api и web.
+10. ✅ `README.md` в `magguarantee-app/` с инструкциями `docker compose up && npm run dev`.
 
 ### Deliverables
-- Монорепо запускается: `docker compose up -d && npm run dev` → `localhost:3000` (web) и `localhost:3001` (api).
-- `localhost:3001/health` отвечает 200.
-- CI проходит на пустом PR.
+- ✅ Монорепо запускается: `docker compose up -d && npm run dev` → `localhost:3000` (web) и `localhost:3001` (api).
+- ✅ `localhost:3001/health` отвечает 200.
+- ✅ CI проходит на пустом PR.
+
+### Дополнительно сделано (вне исходного чек-листа)
+- Кросс-платформенная конфигурация: `.gitattributes` (LF в репо, CRLF только для `.bat`/`.cmd`/`.ps1`) и корневой `.editorconfig`.
+- `forceConsistentCasingInFileNames` в `tsconfig.base.json` (защита от регистровых багов при работе на Windows + Linux).
+- Prisma 5.22 локально (был конфликт с Prisma 7 из npx-кеша — починено).
+- Симлинки воркспейсов работают через npm workspaces (одна корневая `node_modules`).
 
 ### Зависимости
 - Никаких. Это нулевая фаза.
@@ -419,20 +425,21 @@
 
 ### Краткие шаги
 
-1. VPS поднят: Postgres 16, Redis 7, nginx, Caddy/certbot, systemd-юниты для api и web. S3-bucket (Cloudflare R2 или Hetzner Object Storage) создан.
-2. CI/CD pipeline готов (GitHub Actions → ssh → `git pull` + `npm run build` + `systemctl restart`, см. [18-launch-and-deployment.md#cicd](18-launch-and-deployment.md#cicd)).
-3. Все ENV переменные заполнены на VPS (`/etc/magguarantee/api.env`, `/etc/magguarantee/web.env`, права `0600`).
-4. Прод-деплой backend и frontend — обе команды запущены под systemd на одном сервере.
-5. Запуск seed: 14 типов прицепов + monthly_limits + app_config + первый admin.
-6. Smoke-тесты против prod зелёные.
-7. Первый admin через UI создаёт сотрудников и перевозчиков (никаких скриптов-импортеров).
-8. Uptime Kuma настроена, бэкапы Postgres крутятся.
+1. VPS поднят (Hetzner CX32 или эквивалент), bootstrap-скрипт `infra/setup.sh` отрабатывает: установка Docker + Compose, `ufw`, `fail2ban`, `chronyd`, `rclone`, создание `proxy-net` external network. S3-bucket (Cloudflare R2 / Hetzner Object Storage) создан.
+2. **Shared Caddy** запущен в `/opt/caddy/` (auto-HTTPS via Let's Encrypt, роутит несколько приложений на VPS по доменам).
+3. CI/CD pipeline готов: GitHub Actions билдит multi-stage Docker images для api и web, пушит в `ghcr.io`, по ssh обновляет `.env` на VPS и делает `docker compose pull && up -d --no-deps api web`. Миграции `prisma migrate deploy` запускаются ДО подмены контейнеров. См. [18-launch-and-deployment.md#cicd](18-launch-and-deployment.md#cicd).
+4. **Prod docker-compose стек** в `/opt/magguarantee/`: postgres + redis + api + web. Bind mounts для данных (`./data/postgres`, `./data/redis`). Postgres exposed только на `127.0.0.1:5432` для databasus через SSH-туннель.
+5. Все ENV переменные заполнены в `/opt/magguarantee/.env` (`chmod 0600`). Файл НЕ в репозитории, оригинал в 1Password.
+6. Запуск seed: 14 типов прицепов + monthly_limits + app_config + первый admin (`docker compose run --rm api npm run db:seed`).
+7. Smoke-тесты против prod зелёные.
+8. Первый admin через UI создаёт сотрудников и перевозчиков (никаких скриптов-импортеров).
+9. Uptime Kuma настроена (отдельный compose-стек, проксируется через тот же Caddy на `status.magtrans.eu`), бэкапы Postgres крутятся через systemd-таймер на хосте (`pg_dump` через `docker exec` → S3 через rclone).
 
 ### Rollback
 
 Если деплой сломал prod:
-- Backend и frontend: каждый деплой выкладывает в `/opt/magguarantee/releases/<git-sha>/`, симлинк `/opt/magguarantee/api/current` → нужная папка. Откат — переключение симлинка на предыдущий релиз + `systemctl restart`. Хранить минимум 3 последних релиза.
-- БД-миграции: forward-only — пишем новую миграцию, отменяющую проблемную. Никогда не делать `prisma migrate reset` на prod.
+- **api/web**: подмена `API_TAG`/`WEB_TAG` в `.env` на предыдущий sha и `docker compose up -d --no-deps api web`. Атомарно, без даунтайма Postgres/Redis. Старые образы хранятся локально 30 дней + всегда доступны из `ghcr.io`. Скрипт-обёртка `/usr/local/bin/magguarantee-rollback <sha>`.
+- **БД-миграции**: forward-only — пишем новую миграцию, отменяющую проблемную. Никогда не делать `prisma migrate reset` на prod.
 
 ### Что делать с `Code.gs` + `index.html`
 
@@ -441,9 +448,10 @@
 - Решение в [18-launch-and-deployment.md#что-делать-с-legacy](18-launch-and-deployment.md#что-делать-с-legacy-codegs--indexhtml).
 
 ### Deliverables
-- Приложение доступно по prod-URL.
+- Приложение доступно по prod-URL (`https://app.magtrans.eu`, `https://api.magtrans.eu`) — TLS получен Caddy автоматически.
 - Admin может зайти, создать пользователей, начать UAT с реальными перевозчиками.
-- Uptime Kuma, journalctl, бэкапы Postgres — работают.
+- Uptime Kuma пингует endpoints, `docker logs` собирает stdout, бэкапы Postgres крутятся.
+- DR-тест успешен: восстановление дампа из S3 в чистый Postgres-контейнер занимает < 10 минут.
 
 ### Зависимости
 - Все предыдущие фазы.

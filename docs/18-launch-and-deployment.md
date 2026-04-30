@@ -6,35 +6,156 @@
 
 Превратить готовое приложение из Фазы 9 (см. [17-migration-roadmap.md](17-migration-roadmap.md)) в работающий prod-сервис, готовый принимать первых реальных пользователей.
 
+## Архитектурное решение
+
+**Один VPS, всё в Docker.** На том же VPS планируется размещение нескольких приложений (магенерация — лишь одно из них), поэтому контейнеризация даёт изоляцию данных и зависимостей. Нагрузка в пике — 15–20 одновременных пользователей; managed-сервисы и Vercel избыточны и упираются в ToS Hobby-плана. Single point of failure принят бизнесом осознанно: короткий даунтайм при ребуте/сбое допустим, рабочий день оператора заканчивается в 16:00, после этого деплои с минимальным риском.
+
+### Топология
+
+```
+Интернет → :80 / :443 (host)
+                │
+                ▼
+         ┌──────────────┐
+         │    Caddy     │  shared reverse-proxy для ВСЕХ приложений на VPS
+         │  (Docker)    │  auto-HTTPS via Let's Encrypt
+         └──────┬───────┘
+                │ proxy-net (external Docker network)
+                │
+   ┌────────────┼─────────────┐──────────────────┐
+   ▼            ▼             ▼                  ▼
+┌───────┐   ┌───────┐    ┌──────────┐       ┌───────────┐
+│  web  │   │  api  │    │ uptime-  │  ...  │ другие    │
+│       │   │       │    │  kuma    │       │ приложения│
+└───────┘   └───┬───┘    └──────────┘       └───────────┘
+                │
+                │ magguarantee-net (internal)
+                │
+        ┌───────┴────────┐
+        ▼                ▼
+   ┌──────────┐    ┌──────────┐
+   │ postgres │    │  redis   │
+   └──────────┘    └──────────┘
+        │
+        │ ports: 127.0.0.1:5432 (только хост, для databasus через SSH-туннель)
+```
+
+Постгрес и Redis — **не доступны из других приложений на VPS** (они в `magguarantee-net`, а не в `proxy-net`). Доступ к Postgres извне — только через SSH-туннель: `ssh -L 5433:127.0.0.1:5432 deploy@vps`.
+
+### Структура VPS
+
+```
+/opt/
+├── caddy/                           # shared reverse-proxy (один на весь VPS)
+│   ├── docker-compose.yml
+│   ├── Caddyfile
+│   └── data/                        # TLS-сертификаты (managed by Caddy)
+│
+└── magguarantee/                    # наш проект
+    ├── docker-compose.yml
+    ├── .env                         # prod-секреты (chmod 0600, owner: deploy)
+    ├── data/
+    │   ├── postgres/                # bind mount, легко бэкапить
+    │   └── redis/
+    └── backups/                     # локальные дампы перед уходом в S3
+```
+
+Каждое следующее приложение на VPS — отдельная папка в `/opt/`, своя `docker-compose.yml`, своя БД, общий Caddy.
+
 ## Чек-лист prod-окружения
 
-### Инфраструктура
-
-Архитектурное решение: **один VPS, всё на нём** (api + web + Postgres + Redis + nginx). Нагрузка в пике — 15–20 одновременных пользователей; managed-сервисы и Vercel избыточны и упираются в ToS Hobby-плана. Single point of failure принят бизнесом осознанно: короткий даунтайм при ребуте/сбое допустим.
+### Хост (VPS)
 
 - [ ] **VPS** (рекомендую Hetzner CX32 — 4 vCPU / 8 GB RAM / 80 GB NVMe / ~€7/мес, или эквивалент).
   - Ubuntu 24.04 LTS или Debian 12.
   - Базовая защита: `ufw` (открыты только 22, 80, 443), ssh только по ключу, root login отключён, `fail2ban`.
-  - `unattended-upgrades` для security-патчей.
+  - `unattended-upgrades` для security-патчей **самой ОС** (Docker-образы обновляются отдельно, см. ниже).
   - `chronyd` (NTP) — критично для JWT и audit-логов.
-- [ ] **Postgres 16** на том же VPS (apt-пакет или официальный PGDG-репозиторий).
-  - Слушает только `localhost` (не выставлять наружу).
-  - Тюнинг под 8 GB RAM: `shared_buffers=2GB`, `effective_cache_size=4GB`, `work_mem=16MB`, `maintenance_work_mem=512MB`.
-  - 10 GB SSD на старте, мониторить рост через `df`.
-- [ ] **Redis 7** на том же VPS, тоже только `localhost`. `maxmemory=512mb`, `maxmemory-policy=allkeys-lru`.
-- [ ] **nginx** как reverse-proxy: `app.magtrans.eu` → `127.0.0.1:3000` (Next.js standalone), `api.magtrans.eu` → `127.0.0.1:4000` (NestJS).
-  - HTTP/2, gzip, разумные тайм-ауты (60s).
-  - HSTS, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`.
-- [ ] **SSL/TLS** через **Caddy** (рекомендую — авто-получение и авто-обновление Let's Encrypt) **или** nginx + certbot с systemd-таймером `certbot.timer`. Без авто-обновления сертификат умрёт через 90 дней.
-- [ ] **systemd-юниты** для процессов: `magguarantee-api.service`, `magguarantee-web.service`. Обе с `Restart=always`, `WantedBy=multi-user.target` (поднимаются после ребута).
-- [ ] **S3-совместимое хранилище** для screenshots — отдельно от VPS (offsite, чтобы не потерять при сбое диска):
-  - Cloudflare R2 (без egress fee) или Hetzner Object Storage.
-  - Bucket: `magguarantee-screenshots-prod`.
-  - Versioning включён, retention 5 лет.
-- [ ] **Домены и DNS**:
-  - `app.magtrans.eu` → IP VPS (A-запись).
-  - `api.magtrans.eu` → IP VPS (A-запись).
-  - DNS-провайдер на выбор (Cloudflare бесплатно).
+- [ ] **Docker Engine + Compose plugin** установлены официальным скриптом (`get.docker.com`).
+  - Deploy-юзер добавлен в группу `docker` (без sudo для compose-команд).
+- [ ] **rclone** установлен и настроен на S3-совместимый bucket (для отправки бэкапов).
+
+### Shared reverse-proxy (Caddy)
+
+- [ ] **External Docker network** создан один раз: `docker network create proxy-net`.
+- [ ] `/opt/caddy/docker-compose.yml`:
+  ```yaml
+  services:
+    caddy:
+      image: caddy:2-alpine
+      container_name: caddy
+      restart: unless-stopped
+      ports:
+        - "80:80"
+        - "443:443"
+        - "443:443/udp"   # HTTP/3 (QUIC)
+      volumes:
+        - ./Caddyfile:/etc/caddy/Caddyfile:ro
+        - caddy_data:/data
+        - caddy_config:/config
+      networks:
+        - proxy-net
+
+  volumes:
+    caddy_data:        # TLS-сертификаты живут здесь
+    caddy_config:
+
+  networks:
+    proxy-net:
+      external: true
+  ```
+- [ ] `/opt/caddy/Caddyfile`:
+  ```caddy
+  {
+      email admin@magtrans.eu
+  }
+
+  app.magtrans.eu {
+      reverse_proxy magguarantee-web:3000
+      encode gzip zstd
+      header {
+          Strict-Transport-Security "max-age=31536000; includeSubDomains"
+          X-Content-Type-Options "nosniff"
+          X-Frame-Options "DENY"
+          Referrer-Policy "strict-origin-when-cross-origin"
+          -Server
+      }
+  }
+
+  api.magtrans.eu {
+      reverse_proxy magguarantee-api:3001
+      encode gzip zstd
+      header {
+          Strict-Transport-Security "max-age=31536000; includeSubDomains"
+          X-Content-Type-Options "nosniff"
+          X-Frame-Options "DENY"
+          -Server
+      }
+  }
+  ```
+- [ ] Запущен один раз: `cd /opt/caddy && docker compose up -d`. Дальше работает сам, обновляет сертификаты автоматически.
+
+### Magguarantee-стек
+
+- [ ] **Postgres 16** (контейнер):
+  - Bind mount `/opt/magguarantee/data/postgres` → `/var/lib/postgresql/data` — бэкапы привычным `pg_dump`.
+  - `127.0.0.1:5432` exposed только на loopback хоста (для databasus через SSH-туннель).
+  - Тюнинг через CLI-флаги в command (`shared_buffers=2GB` и т.д.).
+  - Healthcheck `pg_isready`.
+- [ ] **Redis 7** (контейнер):
+  - Bind mount `/opt/magguarantee/data/redis`.
+  - `--maxmemory 512mb --maxmemory-policy allkeys-lru`.
+  - Не exposed на хост.
+- [ ] **api** (контейнер из `ghcr.io/<owner>/magguarantee-api:<sha>`):
+  - В двух сетях: `magguarantee-net` (видит Postgres/Redis) + `proxy-net` (доступен Caddy).
+  - `env_file: .env`.
+  - `depends_on` postgres healthy, redis started.
+  - Healthcheck `wget http://localhost:3001/health`.
+- [ ] **web** (контейнер из `ghcr.io/<owner>/magguarantee-web:<sha>`):
+  - Только в `proxy-net`.
+  - Не нужен Postgres/Redis (общается с api по HTTP через Caddy или напрямую через `proxy-net`).
+
+Полный пример `docker-compose.yml` см. ниже в [Файлы prod](#файлы-prod).
 
 ### Google Cloud (для Gmail API)
 
@@ -46,60 +167,100 @@
 - [ ] Технический email `wnioski@magtrans.eu` создан и доступен service-account-у.
 - [ ] (Опц.) Google OAuth credentials для SSO внутренних сотрудников.
 
+> Gmail API и все внешние интеграции (VIES, Biała Lista, info-car.pl, S3) — это **исходящий** HTTPS-трафик из api-контейнера. Caddy в этом не участвует, ничего настраивать не нужно. Контейнер выходит в интернет через Docker bridge → host → NAT.
+
 ### Секреты
 
-- [ ] Все ENV переменные из `apps/api/.env.example` заполнены в prod-deploy.
-- [ ] `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` — сгенерированы по 32+ байта рандома (`openssl rand -base64 48`), **разные**.
-- [ ] `GMAIL_PRIVATE_KEY` — escape `\n` правильно.
-- [ ] `S3_ACCESS_KEY`/`S3_SECRET_KEY` — с правами на конкретный bucket, не root.
-- [ ] `DATABASE_URL` с `sslmode=require`.
+- [ ] `/opt/magguarantee/.env` (`chmod 0600`, `chown deploy:deploy`):
+  ```env
+  # image tags (обновляются CI/CD при каждом деплое)
+  API_TAG=sha-abc123
+  WEB_TAG=sha-abc123
+
+  # Postgres
+  POSTGRES_PASSWORD=...32+ random...
+
+  # api runtime
+  NODE_ENV=production
+  PORT=3001
+  LOG_LEVEL=info
+  DATABASE_URL=postgresql://magguarantee:${POSTGRES_PASSWORD}@postgres:5432/magguarantee
+  REDIS_URL=redis://redis:6379
+  WEB_URL=https://app.magtrans.eu
+
+  JWT_ACCESS_SECRET=...openssl rand -base64 48...
+  JWT_REFRESH_SECRET=...openssl rand -base64 48 (другой)...
+  JWT_ACCESS_TTL=15m
+  JWT_REFRESH_TTL=30d
+
+  # Gmail
+  GMAIL_USER=wnioski@magtrans.eu
+  GMAIL_CLIENT_EMAIL=...
+  GMAIL_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+
+  # S3 (Cloudflare R2 или Hetzner Object Storage)
+  S3_ENDPOINT=https://...
+  S3_BUCKET=magguarantee-screenshots-prod
+  S3_ACCESS_KEY=...
+  S3_SECRET_KEY=...
+
+  # web runtime
+  NEXT_PUBLIC_API_URL=https://api.magtrans.eu
+  API_URL=http://magguarantee-api:3001    # серверный — внутри Docker-сети
+  ```
+- [ ] **`.env` НЕ в репозитории.** Только в `/opt/magguarantee/.env` на VPS. Резервная копия — в 1Password или зашифрованном архиве offline.
+- [ ] `JWT_ACCESS_SECRET` и `JWT_REFRESH_SECRET` — **разные**, по 32+ байта.
+- [ ] `DATABASE_URL` без `sslmode` — Postgres в той же Docker-сети, плейн-тексту достаточно (трафик не выходит из сервера).
+- [ ] `GMAIL_PRIVATE_KEY` — escape `\n` правильно (Gmail API сам это требует).
+
+### S3 (отдельно от VPS)
+
+- [ ] **S3-совместимое хранилище** для screenshots — **offsite** (чтобы не потерять при сбое диска):
+  - Cloudflare R2 (без egress fee) или Hetzner Object Storage.
+  - Bucket: `magguarantee-screenshots-prod`.
+  - Versioning включён, retention 5 лет.
+- [ ] **Второй bucket** — `magguarantee-backups-prod` для дампов БД (см. [Backup-стратегия](#backup-стратегия)).
+
+### Домены и DNS
+
+- [ ] `app.magtrans.eu` → IP VPS (A-запись).
+- [ ] `api.magtrans.eu` → IP VPS (A-запись).
+- [ ] `status.magtrans.eu` → IP VPS (A-запись, для Uptime Kuma).
+- [ ] DNS-провайдер на выбор (Cloudflare бесплатно).
 
 ### Мониторинг
 
-- [ ] **Uptime Kuma** на том же VPS (Docker-контейнер), хостится на `status.magtrans.eu` или поддомене (basic-auth или IP-allowlist).
+- [ ] **Uptime Kuma** — отдельный compose-стек в `/opt/uptime-kuma/`, в `proxy-net`. Caddy роутит `status.magtrans.eu` → этот контейнер.
   - Мониторит `https://api.magtrans.eu/health`, `/ready`, `https://app.magtrans.eu/`.
   - Алерты: email + (опц.) Telegram/Discord webhook.
-- [ ] **Логи** через Pino → stdout → `journalctl -u magguarantee-api` / `journalctl -u magguarantee-web`.
-  - `journalctl --vacuum-time=30d` или `SystemMaxUse=2G` в `/etc/systemd/journald.conf` — не забить диск.
-  - `logrotate` для nginx access/error логов.
-- [ ] **Метрики хоста** — `htop`/`netdata` (опц., Netdata одной командой ставится и даёт дашборд).
-- [ ] **Простые ручные алерты** через Uptime Kuma:
-  - api `/health` не отвечает 2 мин → email.
-  - api `/ready` (DB+Redis ping) не отвечает 1 мин → email.
-  - frontend не отвечает 2 мин → email.
+- [ ] **Логи** через Pino → stdout контейнера → `docker logs magguarantee-api` / `docker logs magguarantee-web`.
+  - В `docker-compose.yml`: `logging: driver: "json-file" options: max-size: "100m" max-file: "3"` — иначе лог-файлы могут забить диск.
+  - При желании — `loki` + `grafana` отдельным compose-стеком, но это уже надстройка.
+- [ ] **Метрики хоста** — `htop` или `netdata` (опц., Netdata одной командой ставится).
 - [ ] **Disk-space мониторинг** — Uptime Kuma «Push»-monitor + cron на VPS, шлющий heartbeat если `df` < 80%.
+- [ ] **Docker volumes мониторинг** — отдельно следить за `/opt/magguarantee/data/postgres` (объём растёт).
 
 ### Безопасность
 
 - [ ] Helmet enabled, CSP настроен.
-- [ ] CORS только для `app.magtrans.eu`.
+- [ ] CORS только для `https://app.magtrans.eu`.
 - [ ] Rate-limit на `/auth/login`, `/auth/verify-code`, `/auth/resend-code` (см. [13-api-design.md](13-api-design.md)).
-- [ ] HTTPS-only (HSTS).
+- [ ] HTTPS-only (HSTS) — Caddy включает по умолчанию.
 - [ ] HttpOnly + Secure + SameSite=Strict для всех cookies.
 - [ ] Pino redaction для чувствительных полей (см. [16-jobs-and-integrations.md](16-jobs-and-integrations.md#логирование)).
+- [ ] Postgres и Redis не exposed на public IP (только через `127.0.0.1:5432` для SSH-туннеля).
+- [ ] `ufw` — открыты **только** 22, 80, 443. 5432, 6379 — закрыты снаружи.
 - [ ] Pen-test или security checklist OWASP Top 10 пройден.
 
 ## CI/CD
 
-Pipeline один на оба приложения: build на runner-е GitHub Actions, потом ssh на VPS, выкладка нового релиза в `/opt/magguarantee/releases/<git-sha>/`, переключение симлинка `current` и `systemctl restart`. Атомарный свич, легко откатывается.
+Pipeline:
+1. Test (lint + typecheck + build + jest) на runner-е GitHub Actions.
+2. Build Docker images для api и web.
+3. Push в **GitHub Container Registry** (`ghcr.io`) — бесплатно для приватных репо, нативная интеграция с GitHub Actions.
+4. SSH на VPS → обновить tag в `.env` → `docker compose pull` → `migrate deploy` → `docker compose up -d --no-deps api web`.
 
-### Структура релизов на VPS
-
-```
-/opt/magguarantee/
-├── api/
-│   ├── current → ../releases/<git-sha>/   (симлинк)
-│   └── shared/                              (uploads, .env link)
-├── web/
-│   ├── current → ../releases/<git-sha>/
-│   └── shared/
-└── releases/
-    ├── 2026-04-29-abc123/
-    ├── 2026-04-29-def456/
-    └── 2026-04-29-ghi789/                   (хранить минимум 3 последних)
-```
-
-systemd-юниты ссылаются на `/opt/magguarantee/api/current` и `/opt/magguarantee/web/current`. ENV хранится в `/etc/magguarantee/api.env` и `/etc/magguarantee/web.env` (`chmod 0600`, `chown root:magguarantee`), эти файлы НЕ в репозитории.
+Атомарный свич образов, миграции до рестарта, никаких симлинков.
 
 ### `.github/workflows/deploy.yml`
 
@@ -118,9 +279,17 @@ jobs:
         image: postgres:16
         env: { POSTGRES_PASSWORD: test, POSTGRES_DB: test }
         ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
       redis:
         image: redis:7
         ports: ['6379:6379']
+    defaults:
+      run:
+        working-directory: magguarantee-app
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -129,83 +298,105 @@ jobs:
           cache: npm
           cache-dependency-path: magguarantee-app/package-lock.json
       - run: npm ci
-        working-directory: magguarantee-app
-      - run: npm run db:generate && npm run db:migrate:deploy
-        working-directory: magguarantee-app
+      - run: npm run db:generate
+      - run: npm run db:migrate:deploy
         env:
           DATABASE_URL: postgresql://postgres:test@localhost:5432/test
-      - run: npm run lint && npm run typecheck && npm test
-        working-directory: magguarantee-app
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
         env:
           DATABASE_URL: postgresql://postgres:test@localhost:5432/test
           REDIS_URL: redis://localhost:6379
-      - run: npm run build -w api && npm run build -w web
-        working-directory: magguarantee-app
 
-  deploy:
+  build-and-push:
     if: github.ref == 'refs/heads/main'
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+
+      - id: tag
+        run: echo "tag=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
         with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: magguarantee-app/package-lock.json
-      - run: npm ci
-        working-directory: magguarantee-app
-      - run: npm run build -w api && npm run build -w web
-        working-directory: magguarantee-app
-        env:
-          NEXT_OUTPUT: standalone   # next.config.js: output: 'standalone'
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Упаковка релиза
-      - name: Pack release
-        run: |
-          SHA=$(git rev-parse --short HEAD)
-          mkdir -p release/api release/web
-          cp -r magguarantee-app/apps/api/dist release/api/
-          cp -r magguarantee-app/apps/api/node_modules release/api/
-          cp -r magguarantee-app/apps/web/.next/standalone/* release/web/
-          cp -r magguarantee-app/apps/web/.next/static release/web/.next/static
-          cp -r magguarantee-app/apps/web/public release/web/
-          tar czf release-$SHA.tar.gz -C release .
-          echo "SHA=$SHA" >> $GITHUB_ENV
+      - name: Build & push api
+        uses: docker/build-push-action@v5
+        with:
+          context: magguarantee-app
+          file: magguarantee-app/apps/api/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/magguarantee-api:${{ steps.tag.outputs.tag }}
+            ghcr.io/${{ github.repository_owner }}/magguarantee-api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: Setup SSH
-        uses: webfactory/ssh-agent@v0.9.0
+      - name: Build & push web
+        uses: docker/build-push-action@v5
+        with:
+          context: magguarantee-app
+          file: magguarantee-app/apps/web/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/magguarantee-web:${{ steps.tag.outputs.tag }}
+            ghcr.io/${{ github.repository_owner }}/magguarantee-web:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
-      - name: Upload release
+      - name: Deploy to VPS
+        env:
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
         run: |
-          scp -o StrictHostKeyChecking=accept-new release-$SHA.tar.gz \
-            deploy@${{ secrets.DEPLOY_HOST }}:/tmp/
-
-      - name: Activate release
-        run: |
-          ssh deploy@${{ secrets.DEPLOY_HOST }} bash -s <<EOF
+          ssh -o StrictHostKeyChecking=accept-new deploy@${{ secrets.DEPLOY_HOST }} bash -s <<EOF
             set -euo pipefail
-            SHA=$SHA
-            REL=/opt/magguarantee/releases/\$(date +%Y-%m-%d)-\$SHA
-            mkdir -p \$REL/api \$REL/web
-            tar xzf /tmp/release-\$SHA.tar.gz -C \$REL
-            # миграции — ДО переключения симлинка
-            cd \$REL/api && DATABASE_URL=\$(cat /etc/magguarantee/api.env | grep ^DATABASE_URL | cut -d= -f2-) \
-              node node_modules/.bin/prisma migrate deploy
-            ln -sfn \$REL/api /opt/magguarantee/api/current
-            ln -sfn \$REL/web /opt/magguarantee/web/current
-            sudo systemctl restart magguarantee-api magguarantee-web
-            # держим только 5 последних релизов
-            ls -1dt /opt/magguarantee/releases/* | tail -n +6 | xargs -r rm -rf
+            cd /opt/magguarantee
+
+            # обновить tags в .env
+            sed -i "s/^API_TAG=.*/API_TAG=${IMAGE_TAG}/" .env
+            sed -i "s/^WEB_TAG=.*/WEB_TAG=${IMAGE_TAG}/" .env
+
+            # подтянуть свежие образы
+            docker compose pull api web
+
+            # миграции — ДО подмены контейнеров
+            docker compose run --rm api node node_modules/.bin/prisma migrate deploy
+
+            # атомарная подмена api/web, БД и Redis не трогаем
+            docker compose up -d --no-deps api web
+
+            # дать api 10 секунд встать
+            sleep 10
+            docker compose exec -T api wget -qO- http://localhost:3001/health
+
+            # удалить unused образы (>30 дней)
+            docker image prune -af --filter "until=720h"
           EOF
 
-      - name: Smoke test
+      - name: Public smoke test
         run: |
           sleep 5
           curl -fsS https://api.magtrans.eu/health
-          curl -fsS https://api.magtrans.eu/ready
           curl -fsS https://app.magtrans.eu/ > /dev/null
 ```
 
@@ -213,44 +404,195 @@ jobs:
 
 - `DEPLOY_SSH_KEY` — приватный ключ deploy-юзера на VPS (без passphrase).
 - `DEPLOY_HOST` — IP или DNS VPS.
+- `GITHUB_TOKEN` — авто-токен для push в ghcr.io (выдаётся самим Actions).
 
-Deploy-юзер на VPS — отдельный, не root. В `/etc/sudoers.d/magguarantee`:
+Deploy-юзер на VPS — отдельный, не root, в группе `docker` (имеет право на `docker compose` без sudo). Если хочешь дополнительный слой — в `/etc/sudoers.d/magguarantee` ограничить чем именно может управлять.
+
+## Файлы prod
+
+### `/opt/magguarantee/docker-compose.yml`
+
+```yaml
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: magguarantee-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: magguarantee
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: magguarantee
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"   # databasus через SSH-туннель
+    networks:
+      - magguarantee-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U magguarantee"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: >
+      postgres
+      -c shared_buffers=2GB
+      -c effective_cache_size=4GB
+      -c work_mem=16MB
+      -c maintenance_work_mem=512MB
+      -c max_connections=100
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  redis:
+    image: redis:7-alpine
+    container_name: magguarantee-redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru --appendonly yes
+    volumes:
+      - ./data/redis:/data
+    networks:
+      - magguarantee-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  api:
+    image: ghcr.io/${GHCR_OWNER}/magguarantee-api:${API_TAG}
+    container_name: magguarantee-api
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - magguarantee-net
+      - proxy-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  web:
+    image: ghcr.io/${GHCR_OWNER}/magguarantee-web:${WEB_TAG}
+    container_name: magguarantee-web
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - proxy-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+networks:
+  magguarantee-net:
+    driver: bridge
+  proxy-net:
+    external: true
 ```
-deploy ALL=(ALL) NOPASSWD: /bin/systemctl restart magguarantee-api, /bin/systemctl restart magguarantee-web
+
+### `apps/api/Dockerfile` (multi-stage)
+
+```dockerfile
+# ── Stage 1: deps (npm ci с воркспейс-структурой) ─────────────
+FROM node:20-alpine AS deps
+WORKDIR /app
+RUN apk add --no-cache openssl libc6-compat
+COPY package.json package-lock.json ./
+COPY apps/api/package.json ./apps/api/
+COPY apps/web/package.json ./apps/web/
+COPY packages/database/package.json ./packages/database/
+COPY packages/shared/package.json ./packages/shared/
+RUN npm ci
+
+# ── Stage 2: build ─────────────────────────────────────────────
+FROM deps AS build
+COPY tsconfig.base.json ./
+COPY packages ./packages
+COPY apps/api ./apps/api
+RUN npm run db:generate
+RUN npm run build -w api
+
+# ── Stage 3: prod (минимальный образ) ──────────────────────────
+FROM node:20-alpine AS prod
+WORKDIR /app
+ENV NODE_ENV=production
+RUN apk add --no-cache openssl wget && \
+    addgroup -S nodejs && adduser -S nestjs -G nodejs
+
+COPY --from=build --chown=nestjs:nodejs /app/apps/api/dist ./dist
+COPY --from=build --chown=nestjs:nodejs /app/node_modules ./node_modules
+COPY --from=build --chown=nestjs:nodejs /app/packages/database/src/generated ./node_modules/@magguarantee/database/src/generated
+COPY --from=build --chown=nestjs:nodejs /app/packages/database/prisma ./prisma
+
+USER nestjs
+EXPOSE 3001
+CMD ["node", "dist/main.js"]
 ```
 
-### Пример systemd-юнита
+### `apps/web/Dockerfile`
 
-`/etc/systemd/system/magguarantee-api.service`:
+Используется Next.js standalone output (см. [next.config.mjs](../magguarantee-app/apps/web/next.config.mjs) — добавить `output: 'standalone'` в Phase 10).
 
-```ini
-[Unit]
-Description=MAGGuarantee API (NestJS)
-After=network.target postgresql.service redis-server.service
-Requires=postgresql.service redis-server.service
+```dockerfile
+# ── Stage 1: deps ──────────────────────────────────────────────
+FROM node:20-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY apps/api/package.json ./apps/api/
+COPY apps/web/package.json ./apps/web/
+COPY packages/database/package.json ./packages/database/
+COPY packages/shared/package.json ./packages/shared/
+RUN npm ci
 
-[Service]
-Type=simple
-User=magguarantee
-WorkingDirectory=/opt/magguarantee/api/current
-EnvironmentFile=/etc/magguarantee/api.env
-ExecStart=/usr/bin/node dist/main.js
-Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-# защита
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/opt/magguarantee/api/shared
+# ── Stage 2: build ─────────────────────────────────────────────
+FROM deps AS build
+COPY tsconfig.base.json ./
+COPY packages ./packages
+COPY apps/web ./apps/web
+RUN npm run build -w web
 
-[Install]
-WantedBy=multi-user.target
+# ── Stage 3: prod (Next standalone) ────────────────────────────
+FROM node:20-alpine AS prod
+WORKDIR /app
+ENV NODE_ENV=production
+RUN apk add --no-cache wget && \
+    addgroup -S nodejs && adduser -S nextjs -G nodejs
+
+COPY --from=build --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
+COPY --from=build --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=build --chown=nextjs:nodejs /app/apps/web/public ./apps/web/public
+
+USER nextjs
+EXPOSE 3000
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+CMD ["node", "apps/web/server.js"]
 ```
-
-Аналогично `magguarantee-web.service` — порт 3000, `ExecStart=/usr/bin/node server.js` (Next.js standalone).
 
 ## Миграции БД
 
@@ -258,22 +600,32 @@ WantedBy=multi-user.target
 
 ```bash
 # Локально (dev):
-npm run migrate:dev -w database -- --name <descriptive>
+npm run db:migrate:dev -- --name <descriptive>
 
 # В CI/CD (prod-деплой):
-npm run migrate:deploy -w database
+docker compose run --rm api node node_modules/.bin/prisma migrate deploy
 ```
 
-`migrate:deploy` запускается **до** переключения симлинка `current` и рестарта systemd-юнита (см. секцию CI/CD выше — миграция выполняется в шаге «Activate release» до `systemctl restart`).
+`migrate deploy` запускается **до** `docker compose up -d api web` (см. workflow выше). Если миграция падает — деплой прерывается, старые контейнеры остаются работать.
 
 ⚠️ Никогда не использовать `prisma db push` в prod — только `migrate deploy`.
 
 ## Seed для prod
 
-После применения миграций — `npm run db:seed`. Создаёт:
+После применения миграций, **один раз при первом деплое**:
 
-1. **14 типов прицепов** (`Firanka`, `Plandeka`, …) — это бизнес-справочник, не "тестовые данные".
-2. **Лимиты км/ставки** — заполнить актуальными значениями MagTrans на текущий и следующий год (получить от бизнеса).
+```bash
+docker compose run --rm \
+  -e SEED_ADMIN_LOGIN=admin \
+  -e SEED_ADMIN_EMAIL=admin@magtrans.eu \
+  -e SEED_ADMIN_PASSWORD=<initial-from-1password> \
+  api npm run db:seed -w @magguarantee/database
+```
+
+Создаёт:
+
+1. **14 типов прицепов** (`Firanka`, `Plandeka`, …) — это бизнес-справочник, не «тестовые данные».
+2. **Лимиты км/ставки** — заполнить актуальными значениями MagTrans на текущий и следующий год.
 3. **App config**:
    - `stawka_eur_default = 0.5`
    - `km_dziennie_default = 540`
@@ -282,62 +634,9 @@ npm run migrate:deploy -w database
    - `min_days_to_submit = 10`
    - `login_code_ttl = 600`
    - `login_max_attempts = 5`
-4. **Один admin-пользователь** — credentials передаются IT-админу безопасным каналом (1Password share / encrypted email).
+4. **Один admin-пользователь** — credentials передаются IT-админу безопасным каналом (1Password share).
 
-```ts
-// packages/database/prisma/seed.ts
-import { PrismaClient } from '../src/generated';
-import bcrypt from 'bcrypt';
-
-async function main() {
-  const prisma = new PrismaClient();
-
-  // trailer types
-  for (const name of ['Firanka','Plandeka','Chłodnia','Wywrotka','Mega','Jumbo','Frigo','Niska','Burtowa','Kontener','Cysterna','HDS','Walking Floor']) {
-    await prisma.trailerType.upsert({ where: { name }, create: { name }, update: {} });
-  }
-
-  // first admin (creds в env, НЕ в коде)
-  if (process.env.SEED_ADMIN_LOGIN && process.env.SEED_ADMIN_PASSWORD) {
-    await prisma.user.upsert({
-      where: { login: process.env.SEED_ADMIN_LOGIN },
-      create: {
-        login: process.env.SEED_ADMIN_LOGIN,
-        email: process.env.SEED_ADMIN_EMAIL!,
-        passwordHash: await bcrypt.hash(process.env.SEED_ADMIN_PASSWORD, 12),
-        role: 'admin',
-        name: 'Administrator',
-      },
-      update: {},
-    });
-  }
-
-  // app_config
-  const cfg: [string, string][] = [
-    ['stawka_eur_default', '0.5'],
-    ['km_dziennie_default', '540'],
-    ['auth_threshold_low', '1000'],
-    ['auth_threshold_high', '5000'],
-    ['min_days_to_submit', '10'],
-    ['login_code_ttl', '600'],
-    ['login_max_attempts', '5'],
-  ];
-  for (const [key, value] of cfg) {
-    await prisma.appConfig.upsert({ where: { key }, create: { key, value }, update: {} });
-  }
-
-  // monthly_limits — пример на 2026
-  for (let m = 1; m <= 12; m++) {
-    await prisma.monthlyLimit.upsert({
-      where: { year_month: { year: 2026, month: m } },
-      create: { year: 2026, month: m, kmPerDay: 540, ratePerKm: 0.5 },
-      update: {},
-    });
-  }
-}
-
-main().catch(console.error).finally(() => process.exit(0));
-```
+См. [packages/database/prisma/seed.ts](../magguarantee-app/packages/database/prisma/seed.ts) — реализуется в Phase 1+.
 
 ## Onboarding первых пользователей
 
@@ -346,14 +645,11 @@ main().catch(console.error).finally(() => process.exit(0));
 1. **Admin вводит сотрудников MagTrans** через UI:
    - Pracownik, opiekun, planista, dyspozytor, eksport, weryfikator.
    - Каждый получает приветственный email с login + temp password (см. `account-created` template).
-   - При первом логине меняют пароль (опц.).
-2. **Opiekun или admin вводит перевозчиков** (przewoznik):
-   - Через UI создаёт `users.role=przewoznik` + `Carrier` profile.
-   - Каждый получает приветственный email.
+2. **Opiekun или admin вводит перевозчиков** (przewoznik) через UI.
 3. **Перевозчики или сотрудники добавляют автомобили / водителей / прицепы** через UI.
 4. **Перевозчики начинают подавать wnioski** через UI.
 
-Никаких скриптов, никаких CSV-импортов. Если нужно массово добавить, например, 50 перевозчиков сразу — можно подготовить простой одноразовый seed (`prisma/seed-initial-carriers.ts`), но это уже за пределами стандартного launch.
+Никаких скриптов, никаких CSV-импортов.
 
 ## Что делать с legacy `Code.gs` + `index.html`
 
@@ -365,8 +661,6 @@ main().catch(console.error).finally(() => process.exit(0));
 mkdir legacy
 git mv Code.gs legacy/Code.gs
 git mv index.html legacy/index.html
-git mv src legacy/src     # бывшая попытка модуляризации
-git mv docs/01..09 docs/legacy/      # старые docs остаются в подпапке
 ```
 
 Зачем: документация (`docs/01-08-...`) ссылается на конкретные строки `Code.gs:5183` — если что-то непонятно или забылся бизнес-flow, можно вернуться и посмотреть.
@@ -386,47 +680,64 @@ curl https://api.magtrans.eu/health
 
 # ready
 curl https://api.magtrans.eu/ready
-# → 200 OK + checks
+# → 200 OK + checks (db, redis)
 
-# login flow
-curl -X POST https://api.magtrans.eu/api/v1/auth/login \
+# login flow (без actual логина — только что endpoint живой)
+curl -X POST https://api.magtrans.eu/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"login":"admin","password":"..."}'
 # → 200 + {sessionToken, maskedEmail}
-
-# 2FA email пришёл (Mailhog в staging, реальный mailbox в prod)
 ```
 
-Лучше — Playwright e2e, запускаемый раз в час против prod:
-
-```ts
-// apps/web/tests/smoke.spec.ts
-test('login flow works in prod', async ({ page }) => {
-  await page.goto('https://app.magtrans.eu/login');
-  await page.fill('[name=login]', SMOKE_USER);
-  await page.fill('[name=password]', SMOKE_PWD);
-  await page.click('button[type=submit]');
-  await expect(page).toHaveURL(/\/login\/verify/);
-});
-```
-
-Этот test использует выделенный smoke-account, который не делает mutating действий.
+Лучше — Playwright e2e, запускаемый раз в час против prod (см. отдельный workflow `.github/workflows/smoke.yml`).
 
 ## Rollback
 
-Если деплой сломал prod:
+Через **подмену image tag** — самый простой и атомарный способ.
 
-1. **Код (api и web):** ssh на VPS, переключить симлинк `current` на предыдущий релиз и перезапустить.
-   ```bash
-   ssh deploy@vps
-   ls -1dt /opt/magguarantee/releases/*    # выбрать предыдущий
-   ln -sfn /opt/magguarantee/releases/<prev>/api /opt/magguarantee/api/current
-   ln -sfn /opt/magguarantee/releases/<prev>/web /opt/magguarantee/web/current
-   sudo systemctl restart magguarantee-api magguarantee-web
-   curl -fsS https://api.magtrans.eu/health
-   ```
-   Полезно положить это в `/usr/local/bin/magguarantee-rollback` — короткий bash-скрипт, принимающий целевой sha.
-2. **БД-миграции:** **никогда не откатывать через `prisma migrate reset`** в prod. Если миграция испортила схему — пишем новую миграцию, которая отменяет (forward-only). Помнить: rollback кода без отката миграции допустим только если новая миграция backward-compatible (чему стоит следовать всегда: добавляем колонки nullable, удаляем — отдельным релизом после).
+### Откат api/web
+
+```bash
+ssh deploy@vps
+cd /opt/magguarantee
+
+# посмотреть какие образы есть локально
+docker image ls ghcr.io/<owner>/magguarantee-api
+
+# откатить .env на предыдущий sha
+sed -i 's/^API_TAG=.*/API_TAG=sha-prev123/' .env
+sed -i 's/^WEB_TAG=.*/WEB_TAG=sha-prev123/' .env
+
+# применить
+docker compose up -d --no-deps api web
+
+# проверить
+docker compose exec api wget -qO- http://localhost:3001/health
+```
+
+Полезно положить это в `/usr/local/bin/magguarantee-rollback` — короткий bash-скрипт, принимающий целевой sha:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+SHA="${1:?usage: magguarantee-rollback <sha>}"
+cd /opt/magguarantee
+sed -i "s/^API_TAG=.*/API_TAG=${SHA}/" .env
+sed -i "s/^WEB_TAG=.*/WEB_TAG=${SHA}/" .env
+docker compose pull api web
+docker compose up -d --no-deps api web
+sleep 5
+docker compose exec -T api wget -qO- http://localhost:3001/health
+echo "rolled back to ${SHA}"
+```
+
+### Откат миграций БД
+
+**Никогда не откатывать через `prisma migrate reset`** в prod. Если миграция испортила схему — пишем новую миграцию, которая отменяет (forward-only).
+
+Помнить: rollback кода без отката миграции допустим только если новая миграция backward-compatible. Чему стоит следовать всегда:
+- добавляем колонки nullable,
+- удаляем — отдельным релизом после того как код, использующий их, уже не активен.
 
 ## Backup-стратегия
 
@@ -434,13 +745,14 @@ Single-VPS — один диск. Без offsite-бэкапов потеря д�
 
 | Что | Частота | Retention | Где |
 |---|---|---|---|
-| Postgres `pg_dump` | ежедневно | 7 дней | offsite S3 (R2 / Hetzner Object Storage) |
-| Postgres `pg_dump` | еженедельно | 4 недели | offsite S3 |
-| Postgres `pg_dump` | ежемесячно | 12 месяцев | offsite S3 |
-| VPS-снимок (Hetzner snapshot или volume snapshot) | ежедневно | 7 дней | у хостера |
+| Postgres dump | ежедневно | 7 дней | offsite S3 (R2 / Hetzner Object Storage) |
+| Postgres dump | еженедельно | 4 недели | offsite S3 |
+| Postgres dump | ежемесячно | 12 месяцев | offsite S3 |
+| VPS-снимок (Hetzner snapshot) | ежедневно | 7 дней | у хостера |
 | S3 (screenshots) | versioning | 5 лет | сам S3 (offsite by design) |
 | Application code | unlimited | через git | GitHub |
-| Secrets (`/etc/magguarantee/*.env`) | при изменении | offline (1Password / зашифрованный архив) | вне VPS |
+| Docker images | по тегам sha | 30 дней | ghcr.io |
+| Secrets (`.env`) | при изменении | offline (1Password) | вне VPS |
 
 ### Скрипт бэкапа Postgres
 
@@ -450,58 +762,135 @@ Single-VPS — один диск. Без offsite-бэкапов потеря д�
 #!/usr/bin/env bash
 set -euo pipefail
 TS=$(date +%Y-%m-%d-%H%M)
-DUMP=/var/backups/magguarantee/pg-$TS.sql.gz
-mkdir -p /var/backups/magguarantee
-sudo -u postgres pg_dump magguarantee | gzip > $DUMP
+DUMP=/opt/magguarantee/backups/pg-$TS.sql.gz
+mkdir -p /opt/magguarantee/backups
+
+# дамп через docker exec — Postgres внутри контейнера
+docker exec -t magguarantee-postgres pg_dump -U magguarantee magguarantee | gzip > "$DUMP"
+
 # offsite (rclone настроен на S3)
-rclone copy $DUMP r2:magguarantee-backups/postgres/
-# локальная ротация — держим 7 дней
-find /var/backups/magguarantee -name 'pg-*.sql.gz' -mtime +7 -delete
+rclone copy "$DUMP" r2:magguarantee-backups-prod/postgres/
+
+# локальная ротация — держим 7 дней на хосте (S3 хранит дольше)
+find /opt/magguarantee/backups -name 'pg-*.sql.gz' -mtime +7 -delete
 ```
 
-Запуск через systemd-таймер (надёжнее cron — есть отчёты, retry):
+Запуск через systemd-таймер на хосте (надёжнее cron — есть отчёты, retry):
 
 ```ini
+# /etc/systemd/system/magguarantee-pgbackup.service
+[Unit]
+Description=MAGGuarantee Postgres backup
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/magguarantee-pgbackup
+User=deploy
+StandardOutput=journal
+StandardError=journal
+
 # /etc/systemd/system/magguarantee-pgbackup.timer
+[Unit]
+Description=Daily MAGGuarantee Postgres backup
+
 [Timer]
 OnCalendar=daily
 Persistent=true
+RandomizedDelaySec=15m
+
 [Install]
 WantedBy=timers.target
 ```
+
+> systemd используется только для **бэкапов хоста**, само приложение через docker compose. Это один из немногих случаев, где systemd на VPS остаётся полезным.
 
 ### Тест восстановления — обязательно
 
 Бэкапы шрёдингера: пока не восстановил, ты не знаешь, рабочие они или нет. Минимум **раз в квартал**:
 
-1. Скачать последний дамп.
-2. Восстановить в локальный или staging Postgres (`gunzip -c pg-XXX.sql.gz | psql magguarantee_test`).
-3. Прогнать smoke-проверки (`SELECT count(*) FROM users; SELECT count(*) FROM claims;`).
+1. Скачать последний дамп с S3.
+2. Поднять временный контейнер: `docker run --rm -d --name pg-restore-test -e POSTGRES_PASSWORD=test postgres:16-alpine`.
+3. Восстановить: `gunzip -c pg-XXX.sql.gz | docker exec -i pg-restore-test psql -U postgres`.
+4. Прогнать smoke-проверки (`SELECT count(*) FROM users; SELECT count(*) FROM claims;`).
+5. `docker rm -f pg-restore-test`.
 
 ## Disaster recovery
 
 ### Сценарий 1: VPS лёг (хостер upadl, диск умер, OS не грузится)
 
 1. Создать новый VPS той же спецификации у того же или другого хостера.
-2. `apt install` всех зависимостей (пакетный список держать в `infra/setup.sh` в репозитории — bootstrap-скрипт).
-3. Восстановить Postgres из последнего offsite-дампа.
-4. Восстановить `/etc/magguarantee/*.env` из offline-секретов.
-5. Передеплоить из main (просто `git push` или ручной запуск GitHub Actions workflow).
-6. Поменять DNS A-запись на новый IP (Cloudflare TTL=300 → 5 мин на распространение).
+2. Bootstrap-скрипт `infra/setup.sh` (хранится в репозитории, поддерживается актуальным):
+   ```bash
+   #!/usr/bin/env bash
+   set -euo pipefail
+   apt update && apt upgrade -y
+   apt install -y ufw fail2ban chrony rclone unattended-upgrades
 
-RTO: 1–2 часа (если bootstrap-скрипт готов и оттестирован).
-RPO: 24 часа (или меньше, если уменьшить интервал бэкапа до 6/12 часов).
+   # Docker
+   curl -fsSL https://get.docker.com | sh
+   usermod -aG docker deploy
 
-### Сценарий 2: только Postgres сломался
+   # firewall
+   ufw allow 22 && ufw allow 80 && ufw allow 443 && ufw enable
 
-1. `systemctl stop magguarantee-api` (приложение не должно писать в битую БД).
-2. Восстановить дамп в новую БД, переименовать.
-3. `systemctl start magguarantee-api`.
+   # external network
+   docker network create proxy-net
+
+   # каталоги
+   mkdir -p /opt/{caddy,magguarantee,uptime-kuma}
+   chown -R deploy:deploy /opt
+   ```
+3. Восстановить `/opt/caddy/`, `/opt/magguarantee/` из git-репо инфраструктуры (отдельный репо `magtrans-infra`) или из бэкапа.
+4. Восстановить `.env` из offline-секретов (1Password export).
+5. Восстановить Postgres из последнего offsite-дампа:
+   ```bash
+   cd /opt/magguarantee
+   docker compose up -d postgres
+   sleep 10
+   gunzip -c /tmp/pg-LATEST.sql.gz | docker exec -i magguarantee-postgres psql -U magguarantee magguarantee
+   ```
+6. `docker compose up -d` — поднимет api, web, redis. Caddy запускается отдельно: `cd /opt/caddy && docker compose up -d`.
+7. Поменять DNS A-записи на новый IP (Cloudflare TTL=300 → 5 мин на распространение).
+
+**RTO:** 1–2 часа (если bootstrap-скрипт готов и оттестирован).
+**RPO:** 24 часа (или меньше, если уменьшить интервал бэкапа до 6/12 часов).
+
+### Сценарий 2: только Postgres сломался (corrupt data)
+
+```bash
+cd /opt/magguarantee
+docker compose stop api web   # API не должен писать в битую БД
+docker compose stop postgres
+mv data/postgres data/postgres.broken-$(date +%F)
+mkdir -p data/postgres
+docker compose up -d postgres
+sleep 10
+gunzip -c backups/pg-LATEST.sql.gz | docker exec -i magguarantee-postgres psql -U magguarantee magguarantee
+docker compose up -d api web
+```
 
 ### Чтобы DR работал
 
 - **Bootstrap-скрипт** (`infra/setup.sh` или Ansible playbook) должен быть актуален — каждый раз когда меняем что-то на VPS вручную, обновляем скрипт.
 - **Тест DR** — раз в полгода поднять VPS с нуля по скрипту, восстановить дамп, убедиться что всё работает.
+
+## Подключение databasus и ad-hoc admin доступ
+
+Postgres exposed только на `127.0.0.1:5432` хоста. Снаружи закрыт через `ufw`. Для подключения локальной тулы (databasus, DBeaver и т.п.) — **SSH-туннель**:
+
+```bash
+# с локального ноута
+ssh -L 5433:127.0.0.1:5432 deploy@vps.magtrans.eu
+
+# в databasus (или другом GUI-клиенте) подключение:
+#   host: localhost
+#   port: 5433
+#   user: magguarantee
+#   password: <из /opt/magguarantee/.env>
+#   database: magguarantee
+```
+
+Аналогично для Redis: `ssh -L 6380:magguarantee-redis:6379 deploy@vps` — но Redis обычно отлаживается через `docker compose exec redis redis-cli`.
 
 ## Чек-лист перед прод-launch (D-Day)
 
@@ -510,12 +899,14 @@ RPO: 24 часа (или меньше, если уменьшить интерв�
 - [ ] UAT с реальным admin + 2-3 будущими пользователями (carrier, opiekun) пройден на staging.
 - [ ] Все km-calc fixtures зелёные.
 - [ ] Uptime Kuma пингует endpoints, тестовый алерт пришёл на email.
-- [ ] Бэкап-стратегия работает (тестово восстановили dump в staging).
+- [ ] Бэкап-стратегия работает (тестово восстановили dump из S3 в локальный контейнер).
+- [ ] Bootstrap-скрипт `infra/setup.sh` оттестирован на чистом VPS.
 
 ### За день
 - [ ] Деплой на prod (без публичной видимости — closed beta).
 - [ ] Seed admin + начальные limits/configs.
 - [ ] DNS настроен (готов к переключению или уже указывает).
+- [ ] TLS-сертификаты получены Caddy (проверить `https://api.magtrans.eu` в браузере).
 - [ ] Smoke-тесты против prod зелёные.
 - [ ] Communication plan: кто кому что пишет в день launch.
 

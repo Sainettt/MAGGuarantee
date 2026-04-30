@@ -63,11 +63,13 @@ MAGGuarantee/                          ← корень репозитория
 |---|---|
 | Менеджер монорепо | **npm workspaces** (без Turborepo — на нашем масштабе кеш task-графа избыточен, проще обходиться `npm run X --workspaces --if-present` и `concurrently` для параллельного `dev`). npm выбран намеренно вместо pnpm — проще работа с Docker (нет content-addressable store / симлинков, образ собирается без `pnpm install` бинарника, `npm ci` встроен в Node) |
 | CI | GitHub Actions (lint + test + typecheck + build на PR) |
-| Контейнеризация | Docker (multi-stage), `docker-compose.yml` для локалки |
-| Деплой | Один VPS (Hetzner CX32 ≈ €7/мес или аналог): nginx (reverse-proxy) + systemd для api и web + Postgres + Redis на той же машине. Single point of failure осознанно — нагрузка 15–20 одновременных пользователей в пике, бизнес принял риск. |
-| Reverse-proxy / SSL | nginx (или Caddy для авто-Let's Encrypt) + certbot. Сертификаты обновляются systemd-таймером. |
+| Контейнеризация | Docker (multi-stage Dockerfile для api и web, отдельный `docker-compose.yml` для dev и prod). Всё приложение целиком в контейнерах — и в dev, и в prod. |
+| Деплой | Один VPS (Hetzner CX32 ≈ €7/мес или аналог), всё в Docker: api + web + Postgres + Redis в одном compose-стеке `/opt/magguarantee/`, shared Caddy reverse-proxy в `/opt/caddy/` (роутит несколько приложений на одном VPS по доменам). Single point of failure осознанно — нагрузка 15–20 одновременных пользователей в пике, бизнес принял риск. |
+| Reverse-proxy / SSL | **Caddy 2** в Docker. Auto-HTTPS из коробки (Let's Encrypt), HTTP/3, безопасные дефолты. Никаких certbot и systemd-таймеров — сертификаты обновляются самим Caddy в фоне. |
+| Образы и реестр | GitHub Container Registry (`ghcr.io`) — приватные образы бесплатно, нативная интеграция с GitHub Actions. Тегирование по `git-sha` + `latest`. |
 | Хранилище файлов | S3-совместимое (для `uploadAuthScreenshot`) — Cloudflare R2 / Hetzner Object Storage. Локально на диске VPS не храним — нужен offsite-бэкап. |
-| Мониторинг | Self-hosted на том же VPS: Uptime Kuma (uptime + алерты в email/Telegram) + journalctl + logrotate. Pino пишет в stdout, systemd собирает. Прометей/Графана — позже, если понадобится. |
+| Мониторинг | Self-hosted на том же VPS: Uptime Kuma (uptime + алерты в email/Telegram) + `docker logs` (json-file driver с size-rotation). Pino пишет в stdout контейнера, Docker сохраняет с ограничением размера. Прометей/Графана — позже, если понадобится. |
+| Бэкапы | `pg_dump` через `docker exec` → локальный `/opt/magguarantee/backups/` → offsite S3 через rclone. Запуск через systemd-таймер на хосте (один из немногих случаев, где systemd на VPS остаётся). |
 
 ## Слои backend (Nest)
 

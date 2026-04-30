@@ -7,7 +7,7 @@ Internal kilometer-guarantee claim management system. Replacement for the legacy
 - **API:** Node 20 + NestJS + Prisma + Postgres + Redis
 - **Web:** Next.js 15 (App Router) + Tailwind + TypeScript
 - **Monorepo:** npm workspaces + `concurrently` (для параллельного dev)
-- **Hosting:** single VPS (nginx + systemd) — see `../docs/18-launch-and-deployment.md`
+- **Hosting:** single VPS, всё в Docker — Caddy (shared reverse-proxy + auto-HTTPS) + compose-стек (api, web, Postgres, Redis). См. `../docs/18-launch-and-deployment.md`.
 
 ## Quick start
 
