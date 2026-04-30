@@ -14,7 +14,17 @@
     "next": "^15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "@magguarantee/shared": "*"
+    "@magguarantee/shared": "*",
+    "@tanstack/react-query": "^5.59.0",
+    "react-hook-form": "^7.53.0",
+    "@hookform/resolvers": "^3.9.0",
+    "next-intl": "^3.26.0",
+    "next-themes": "^0.4.3",
+    "zod": "^3.23.8",
+    "lucide-react": "^0.460.0",
+    "sonner": "^1.7.0",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^2.5.4"
   },
   "devDependencies": {
     "@types/node": "^20",

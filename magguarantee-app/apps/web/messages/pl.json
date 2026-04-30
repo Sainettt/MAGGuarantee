@@ -1,0 +1,68 @@
+{
+  "app": {
+    "name": "MAGGuarantee"
+  },
+  "common": {
+    "loading": "Ładowanie...",
+    "networkError": "Brak połączenia. Spróbuj ponownie.",
+    "logout": "Wyloguj"
+  },
+  "theme": {
+    "toggle": "Przełącz motyw",
+    "light": "Tryb jasny",
+    "dark": "Tryb ciemny"
+  },
+  "lang": {
+    "toggle": "Zmień język",
+    "pl": "Polski",
+    "en": "Angielski"
+  },
+  "login": {
+    "title": "MAGGuarantee",
+    "subtitle": "Zaloguj się, aby kontynuować",
+    "loginLabel": "Login",
+    "loginPlaceholder": "Wpisz login",
+    "passwordLabel": "Hasło",
+    "passwordPlaceholder": "Wpisz hasło",
+    "submit": "Dalej →",
+    "submitting": "Logowanie...",
+    "forgotPassword": "Nie pamiętam hasła",
+    "errorWrong": "Nieprawidłowy login lub hasło",
+    "errorNetwork": "Brak połączenia. Spróbuj ponownie."
+  },
+  "verify": {
+    "title": "MAGGuarantee",
+    "subtitle": "Weryfikacja dwuetapowa",
+    "sentTo": "Wysłaliśmy 6-cyfrowy kod na adres",
+    "codeLifetime": "Kod ważny 10 minut",
+    "codeLabel": "Kod weryfikacyjny",
+    "submit": "Weryfikuj",
+    "submitting": "Sprawdzanie...",
+    "resend": "Wyślij kod ponownie",
+    "resendIn": "Wyślij ponownie ({seconds}s)",
+    "resending": "Wysyłanie...",
+    "back": "← Wróć",
+    "errorWrong": "Nieprawidłowy kod ({attemptsLeft, plural, one {pozostała # próba} few {pozostały # próby} other {pozostało # prób}})",
+    "errorExpired": "Kod wygasł. Wróć do logowania, aby otrzymać nowy.",
+    "errorLocked": "Konto tymczasowo zablokowane. Spróbuj ponownie za {time}.",
+    "errorNetwork": "Brak połączenia. Spróbuj ponownie.",
+    "resendSuccess": "Wysłano nowy kod.",
+    "resendCooldown": "Odczekaj {seconds}s przed kolejnym wysłaniem."
+  },
+  "roles": {
+    "admin": "Administrator",
+    "pracownik": "Pracownik",
+    "opiekun": "Opiekun",
+    "planista": "Planista",
+    "dyspozytor": "Dyspozytor",
+    "przewoznik": "Przewoźnik",
+    "eksport": "Eksport",
+    "weryfikator": "Weryfikator"
+  },
+  "landing": {
+    "welcome": "Witaj, {name}",
+    "yourRole": "Rola: {role}",
+    "phasePlaceholder": "Phase 1 — placeholder. Pełny panel pojawi się w kolejnych fazach.",
+    "logout": "Wyloguj"
+  }
+}

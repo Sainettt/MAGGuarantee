@@ -1,0 +1,24 @@
+{
+  // Emission-only config. `tsconfig.json` (with `noEmit: true`) drives the
+  // type-check pass and includes `prisma/seed.ts`; this file produces the
+  // dist consumed by the api at runtime.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "target": "ES2022",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "noEmit": false,
+    "skipLibCheck": true
+  },
+  // Compile only the hand-written entry + enum re-exports. The Prisma-
+  // generated client (src/generated/) already ships its own .js + .d.ts
+  // pair plus native engine binaries — the build script copies that
+  // directory verbatim into dist/generated/ instead of recompiling it.
+  "include": ["src/index.ts", "src/enums.ts"],
+  "exclude": ["node_modules", "dist", "src/generated", "prisma"]
+}

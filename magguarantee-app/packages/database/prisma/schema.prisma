@@ -9,4 +9,84 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Models will be added in Phase 1+ (see docs/12-database-schema.md).
+// Phase 1 — Auth slice only.
+// Other models (Carrier, Vehicle, Claim, Driver, Trailer, Delegation,
+// AuditLog, MonthlyLimit, ClaimAttachment, TrailerType, ...) ship in Phase 2.
+// See docs/12-database-schema.md and docs/17-migration-roadmap.md.
+
+// ─── ENUMS ──────────────────────────────────────────────
+
+enum Role {
+  admin
+  pracownik
+  opiekun
+  planista
+  dyspozytor
+  przewoznik
+  eksport
+  weryfikator
+}
+
+// ─── USERS ──────────────────────────────────────────────
+
+model User {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  login          String    @unique
+  email          String?   @unique
+  passwordHash   String? // bcrypt; nullable to allow email-only auth (see docs/15-auth-strategy.md)
+  role           Role
+  name           String?
+  active         Boolean   @default(true)
+  // 2FA / login attempts (full semantics — but used heavily in Phase 1)
+  failedAttempts Int       @default(0)
+  lockedUntil    DateTime?
+  lastLoginAt    DateTime?
+
+  // Phase 1 relations (only auth-domain). Phase 2 will add carriers, vehicles,
+  // claims, delegations, audit entries, etc.
+  refreshTokens RefreshToken[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([role])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+// ─── REFRESH TOKENS (JWT rotation) ──────────────────────
+
+model RefreshToken {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @db.Uuid
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique // SHA-256 hex of the actual token, never the token itself
+  expiresAt DateTime
+  revokedAt DateTime?
+  ipAddress String?   @db.Inet
+  userAgent String?
+
+  // theft-detection chain — points to the token that replaced this one on refresh
+  replacedById String?       @unique @db.Uuid
+  replacedBy   RefreshToken? @relation("RefreshTokenReplacement", fields: [replacedById], references: [id])
+  replaces     RefreshToken? @relation("RefreshTokenReplacement")
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ─── APP CONFIG (key-value runtime config) ──────────────
+
+model AppConfig {
+  key         String   @id
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("app_config")
+}

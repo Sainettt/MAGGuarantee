@@ -1,0 +1,22 @@
+{
+  // Build/emit-only config used by `nest build` and `nest start --watch`.
+  // Narrowing rootDir to ./src + dropping the test/ include is what keeps
+  // the emit at dist/main.js. The looser tsconfig.json is still picked up
+  // by editors, jest, and `tsc --noEmit`.
+  //
+  // We also clear the workspace `paths` from tsconfig.base.json — at build
+  // time we want @magguarantee/shared and @magguarantee/database to be
+  // resolved as ordinary node_modules packages (via their package.json
+  // `main` → ./dist/index.js), not via path-mapping into the sibling
+  // package's src/. Otherwise tsc would pull those source files into the
+  // api program and fail with TS6059 (rootDir does not contain all source
+  // files).
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "baseUrl": ".",
+    "paths": {}
+  },
+  "include": ["src/**/*"],
+  "exclude": ["dist", "node_modules", "test", "**/*.spec.ts"]
+}

@@ -10,10 +10,11 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently -n api,web -c blue,magenta \"npm run dev -w api\" \"npm run dev -w web\"",
-    "dev:api": "npm run dev -w api",
-    "dev:web": "npm run dev -w web",
-    "build": "npm run build --workspaces --if-present",
+    "dev": "npm run build:packages && concurrently -n api,web -c blue,magenta \"npm run dev -w api\" \"npm run dev -w web\"",
+    "dev:api": "npm run build:packages && npm run dev -w api",
+    "dev:web": "npm run build:packages && npm run dev -w web",
+    "build:packages": "npm run build -w @magguarantee/shared && npm run build -w @magguarantee/database",
+    "build": "npm run build:packages && npm run build -w api && npm run build -w web",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",

@@ -6,6 +6,7 @@
     "noEmit": true,
     "allowJs": true,
     "plugins": [{ "name": "next" }],
+    "baseUrl": ".",
     "paths": {
       "@/*": ["./*"],
       "@magguarantee/shared": ["../../packages/shared/src/index.ts"],

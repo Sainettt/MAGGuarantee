@@ -1,6 +1,7 @@
-// Phase 0 placeholder.
+// Domain enum re-exports.
 //
-// Domain enums (Role, ClaimStatus, DelegationStatus, VehicleType,
-// CertificateL, EuroNorm, ...) will be added in Phase 1 in lockstep with
-// the Prisma models. See docs/12-database-schema.md.
-export {};
+// Phase 1 ships only `Role` (the auth slice). Additional enums
+// (ClaimStatus, DelegationStatus, VehicleType, CertificateL, EuroNorm) join
+// here in Phase 2 alongside their models.
+
+export { Role } from './generated';

@@ -1,12 +1,24 @@
-// Phase 0 entrypoint for @magguarantee/database.
+// @magguarantee/database — Phase 1 entrypoint.
 //
-// In Phase 1 this module will re-export the generated PrismaClient from
-// ./generated/client (produced by `prisma generate`) and expose a singleton
-// `prisma` instance. For now we only re-export the (placeholder) enums so
-// that `tsc --noEmit` works on a clean checkout where `prisma generate` has
-// not been run yet — importing from ./generated before the directory exists
-// would break typecheck.
-//
-// PrismaClient export will be added once prisma generate runs (phase 1).
+// Re-exports the generated Prisma client + a process-wide singleton `prisma`
+// instance. Callers (api-agent, seed scripts, future workers) should import
+// from here, never directly from `./generated`.
 
+import { PrismaClient } from './generated';
+
+export * from './generated';
 export * from './enums';
+
+// Lazy singleton — survives Next.js / NestJS hot reload by stashing the
+// instance on globalThis. Avoids exhausting connections during dev.
+const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
+
+export const prisma: PrismaClient =
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
+  });
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForPrisma.prisma = prisma;
+}

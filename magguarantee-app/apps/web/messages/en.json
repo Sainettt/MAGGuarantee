@@ -1,0 +1,68 @@
+{
+  "app": {
+    "name": "MAGGuarantee"
+  },
+  "common": {
+    "loading": "Loading...",
+    "networkError": "No connection. Please try again.",
+    "logout": "Log out"
+  },
+  "theme": {
+    "toggle": "Toggle theme",
+    "light": "Light mode",
+    "dark": "Dark mode"
+  },
+  "lang": {
+    "toggle": "Change language",
+    "pl": "Polish",
+    "en": "English"
+  },
+  "login": {
+    "title": "MAGGuarantee",
+    "subtitle": "Sign in to continue",
+    "loginLabel": "Login",
+    "loginPlaceholder": "Enter login",
+    "passwordLabel": "Password",
+    "passwordPlaceholder": "Enter password",
+    "submit": "Continue →",
+    "submitting": "Signing in...",
+    "forgotPassword": "Forgot password",
+    "errorWrong": "Invalid login or password",
+    "errorNetwork": "No connection. Please try again."
+  },
+  "verify": {
+    "title": "MAGGuarantee",
+    "subtitle": "Two-step verification",
+    "sentTo": "We sent a 6-digit code to",
+    "codeLifetime": "Code valid for 10 minutes",
+    "codeLabel": "Verification code",
+    "submit": "Verify",
+    "submitting": "Checking...",
+    "resend": "Resend code",
+    "resendIn": "Resend in {seconds}s",
+    "resending": "Sending...",
+    "back": "← Back",
+    "errorWrong": "Wrong code ({attemptsLeft, plural, one {# attempt remaining} other {# attempts remaining}})",
+    "errorExpired": "Code expired. Go back to login to receive a new one.",
+    "errorLocked": "Account temporarily locked. Try again in {time}.",
+    "errorNetwork": "No connection. Please try again.",
+    "resendSuccess": "New code sent.",
+    "resendCooldown": "Wait {seconds}s before resending."
+  },
+  "roles": {
+    "admin": "Administrator",
+    "pracownik": "Employee",
+    "opiekun": "Carrier-success manager",
+    "planista": "Planner",
+    "dyspozytor": "Dispatcher",
+    "przewoznik": "Carrier",
+    "eksport": "Export",
+    "weryfikator": "Verifier"
+  },
+  "landing": {
+    "welcome": "Welcome, {name}",
+    "yourRole": "Role: {role}",
+    "phasePlaceholder": "Phase 1 — placeholder. The full panel will appear in later phases.",
+    "logout": "Log out"
+  }
+}

@@ -1,1 +1,172 @@
 @import "tailwindcss";
+
+/* ─── Phase 1 — design tokens (per docs/14-design-system.md) ──────────────
+ *
+ * Tailwind v4 reads tokens from the `@theme` block. Our design system is
+ * documented in v3-style tailwind.config.ts; we mirror those tokens here in
+ * v4 syntax. CSS variables (with the `--color-*` / `--shadow-*` etc. keys)
+ * become Tailwind utility classes automatically (e.g. `bg-card`, `text-text`,
+ * `shadow-login`, `rounded-xl`).
+ */
+
+@theme {
+  /* Brand — MAGTRANS RED */
+  --color-brand: #dc2626;
+  --color-brand-light: #ef4444;
+  --color-brand-dark: #991b1b;
+  --color-brand-50: #fef2f2;
+  --color-brand-100: #fee2e2;
+  --color-brand-200: #fecaca;
+  --color-brand-400: #f87171;
+  --color-brand-500: #ef4444;
+  --color-brand-600: #dc2626;
+  --color-brand-700: #b91c1c;
+  --color-brand-800: #991b1b;
+  --color-brand-900: #7f1d1d;
+
+  /* Semantic */
+  --color-success: #22c55e;
+  --color-success-dark: #16a34a;
+  --color-success-bg: #f0fdf4;
+
+  --color-danger: #ef4444;
+  --color-danger-dark: #dc2626;
+  --color-danger-bg: #fef2f2;
+
+  --color-warning: #f97316;
+  --color-warning-dark: #c2410c;
+  --color-warning-bg: #fff7ed;
+
+  --color-info: #eab308;
+  --color-info-dark: #a16207;
+  --color-info-bg: #fefce8;
+
+  /* Surface tokens — drive the dual-theme system via the CSS variables
+   * declared on `:root` / `[data-theme="dark"]` below. Tailwind utilities
+   * `bg-bg`, `bg-card`, `text-text`, `text-text-sub`, `border-border`,
+   * `bg-input`, `bg-navy` resolve to these. */
+  --color-bg: var(--bg);
+  --color-card: var(--card);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-text-sub: var(--text-sub);
+  --color-navy: var(--navy);
+
+  /* Radius scale */
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 14px;
+  --radius-xl: 16px;
+
+  /* Shadows */
+  --shadow-card: 0 4px 24px rgba(220, 38, 38, 0.08);
+  --shadow-login: 0 8px 32px rgba(0, 0, 0, 0.08);
+  --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.2);
+  --shadow-toast: 0 8px 24px rgba(0, 0, 0, 0.2);
+
+  /* Fonts */
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "DM Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Animations */
+  --animate-modal-in: modalIn 0.2s ease;
+  --animate-modal-pop: modalPop 0.18s ease;
+  --animate-slide-in: slideIn 0.2s ease;
+  --animate-blink-red: blinkRed 1s ease-in-out infinite;
+  --animate-shake: shake 0.3s ease-in-out;
+
+  @keyframes modalIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes modalPop {
+    from {
+      opacity: 0;
+      transform: scale(0.85);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  @keyframes slideIn {
+    from {
+      opacity: 0;
+      transform: translateX(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+  @keyframes blinkRed {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.3;
+    }
+  }
+  @keyframes shake {
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+    25% {
+      transform: translateX(-4px);
+    }
+    75% {
+      transform: translateX(4px);
+    }
+  }
+}
+
+/* Dark mode driven by next-themes (which sets `class="dark"` on <html>).
+ * We also accept `[data-theme="dark"]` for future-proofing.  */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ─── Surface CSS variables (light + dark) ───────────────────────────── */
+
+:root {
+  --bg: #f5f5f5;
+  --card: #ffffff;
+  --input: #fafafa;
+  --border: #e5e5e5;
+  --text: #171717;
+  --text-sub: #737373;
+  --navy: #1a1a1a;
+}
+
+.dark,
+[data-theme="dark"] {
+  --bg: #121212;
+  --card: #1f1f1f;
+  --input: #262626;
+  --border: #404040;
+  --text: #f5f5f5;
+  --text-sub: #a3a3a3;
+  --navy: #0a0a0a;
+}
+
+/* ─── Base ───────────────────────────────────────────────────────────── */
+
+@layer base {
+  html,
+  body {
+    @apply min-h-screen bg-bg text-text font-sans antialiased;
+  }
+
+  /* Block ugly browser-default focus rings — every interactive element
+   * declares its own focus-visible ring via Tailwind utilities. */
+  :focus {
+    outline: none;
+  }
+}
