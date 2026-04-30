@@ -4,7 +4,7 @@ services:
     container_name: magguarantee-postgres
     environment:
       POSTGRES_USER: magguarantee
-      POSTGRES_PASSWORD: magguarantee
+      POSTGRES_PASSWORD: sainet123
       POSTGRES_DB: magguarantee
     ports:
       - "5432:5432"
