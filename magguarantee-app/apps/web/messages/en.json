@@ -5,7 +5,26 @@
   "common": {
     "loading": "Loading...",
     "networkError": "No connection. Please try again.",
-    "logout": "Log out"
+    "logout": "Log out",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "new": "New",
+    "search": "Search",
+    "all": "All",
+    "active": "Active",
+    "inactive": "Inactive",
+    "yes": "Yes",
+    "no": "No",
+    "actions": "Actions",
+    "saving": "Saving...",
+    "saved": "Saved",
+    "errorGeneric": "Something went wrong. Please try again.",
+    "deleteConfirmTitle": "Are you sure?",
+    "deleteConfirmBody": "This action cannot be undone.",
+    "deactivate": "Deactivate",
+    "reactivate": "Reactivate"
   },
   "theme": {
     "toggle": "Toggle theme",
@@ -64,5 +83,191 @@
     "yourRole": "Role: {role}",
     "phasePlaceholder": "Phase 1 — placeholder. The full panel will appear in later phases.",
     "logout": "Log out"
+  },
+  "nav": {
+    "carriers": "Carriers",
+    "vehicles": "Vehicles",
+    "drivers": "Drivers",
+    "trailers": "Trailers",
+    "trailerTypes": "Trailer types"
+  },
+  "carriers": {
+    "title": "Carriers",
+    "newCarrier": "New carrier",
+    "editCarrier": "Edit carrier",
+    "emptyTitle": "No carriers yet",
+    "emptyMessage": "Click \"New carrier\" to add the first one.",
+    "filters": {
+      "searchPlaceholder": "Search login / name / NIP",
+      "opiekun": "Account manager",
+      "allOpiekun": "All managers",
+      "allActive": "All",
+      "onlyActive": "Active only",
+      "onlyInactive": "Inactive only"
+    },
+    "fields": {
+      "login": "Login",
+      "name": "Name",
+      "company": "Company",
+      "email": "E-mail",
+      "password": "Temporary password (optional)",
+      "phone": "Phone",
+      "contactPerson": "Contact person",
+      "ordersEmail": "Orders e-mail",
+      "nip": "NIP",
+      "vatId": "VAT-ID",
+      "accountEur": "EUR account (IBAN)",
+      "accountPln": "PLN account",
+      "paymentTerms": "Payment terms (days)",
+      "insuranceValue": "Insurance value",
+      "insuranceExpiry": "Insurance expiry",
+      "licenseExpiry": "License expiry",
+      "numberOfPermits": "Permits count",
+      "companyAddress": "Company address",
+      "opiekun": "Account manager",
+      "active": "Active"
+    },
+    "sections": {
+      "account": "Account & contact",
+      "company": "Company data",
+      "finance": "Finance",
+      "permits": "Permits",
+      "assignment": "Assignment"
+    },
+    "tempPasswordToast": "Temporary password: {password}"
+  },
+  "vehicles": {
+    "title": "Vehicles",
+    "newVehicle": "New vehicle",
+    "editVehicle": "Edit vehicle",
+    "emptyTitle": "No vehicles yet",
+    "emptyMessage": "Click \"New vehicle\" to add the first one.",
+    "filters": {
+      "searchPlaceholder": "Search by plate number",
+      "carrier": "Carrier",
+      "allCarriers": "All carriers"
+    },
+    "fields": {
+      "carrier": "Carrier",
+      "plateNumber": "Plate number",
+      "sideNumber": "Side number",
+      "brand": "Brand",
+      "model": "Model",
+      "year": "Year",
+      "type": "Type",
+      "euro": "EURO norm",
+      "certificateL": "Certificate L",
+      "planner": "Planner",
+      "dispatcher": "Dispatcher",
+      "gps": "GPS",
+      "gpsMobilePhone": "GPS phone",
+      "fuelCard": "Fuel card",
+      "agreement": "Agreement",
+      "contract": "Contract",
+      "rateDe": "Rate DE",
+      "rateUe": "Rate UE",
+      "rateExport": "Rate export",
+      "rateImport": "Rate import",
+      "wasteAllowed": "Waste allowed",
+      "cabotageDe": "Cabotage DE",
+      "cabotageFr": "Cabotage FR",
+      "nextInspectionDate": "Next inspection",
+      "notes": "Notes",
+      "active": "Active"
+    },
+    "sections": {
+      "identification": "Identification",
+      "people": "People assigned",
+      "equipment": "Equipment",
+      "rates": "Rates",
+      "permissions": "Permissions"
+    }
+  },
+  "drivers": {
+    "title": "Drivers",
+    "newDriver": "New driver",
+    "editDriver": "Edit driver",
+    "emptyTitle": "No drivers yet",
+    "emptyMessage": "Click \"New driver\" to add the first one.",
+    "filters": {
+      "searchPlaceholder": "Search by first / last name",
+      "carrier": "Carrier",
+      "allCarriers": "All carriers"
+    },
+    "fields": {
+      "carrier": "Carrier",
+      "firstName": "First name",
+      "lastName": "Last name",
+      "phone": "Phone",
+      "phone2": "Phone (secondary)",
+      "email": "E-mail",
+      "driverLicenseNumber": "Driver license number",
+      "licenseExpiry": "License expiry",
+      "bankAccount": "Bank account",
+      "notes": "Notes",
+      "active": "Active"
+    }
+  },
+  "trailers": {
+    "title": "Trailers",
+    "newTrailer": "New trailer",
+    "editTrailer": "Edit trailer",
+    "emptyTitle": "No trailers yet",
+    "emptyMessage": "Click \"New trailer\" to add the first one.",
+    "filters": {
+      "searchPlaceholder": "Search by plate number",
+      "carrier": "Carrier",
+      "type": "Type",
+      "allCarriers": "All carriers",
+      "allTypes": "All types"
+    },
+    "fields": {
+      "carrier": "Carrier",
+      "plateNumber": "Plate number",
+      "trailerType": "Trailer type",
+      "brand": "Brand",
+      "model": "Model",
+      "year": "Year",
+      "equipment": "Equipment",
+      "nextInspectionDate": "Next inspection",
+      "innerLength": "Inner length (m)",
+      "innerWidth": "Inner width (m)",
+      "innerHeight": "Inner height (m)",
+      "capacity": "Capacity (t)",
+      "belts": "Belts",
+      "mats": "Mats",
+      "airSuspension": "Air suspension",
+      "loadFromBack": "Load from back",
+      "loadFromSide": "Load from side",
+      "loadFromTop": "Load from top",
+      "slidingRoof": "Sliding roof",
+      "edschaSlidingRoof": "Edscha sliding roof",
+      "notes": "Notes",
+      "active": "Active"
+    },
+    "sections": {
+      "identification": "Identification",
+      "dimensions": "Dimensions",
+      "equipment": "Equipment"
+    }
+  },
+  "trailerTypes": {
+    "title": "Trailer types",
+    "newType": "New type",
+    "editType": "Edit type",
+    "emptyTitle": "No trailer types yet",
+    "emptyMessage": "Click \"New type\" to add the first one.",
+    "fields": {
+      "name": "Name",
+      "shortCode": "Short code",
+      "description": "Description",
+      "active": "Active"
+    }
+  },
+  "validation": {
+    "loading": "Checking...",
+    "valid": "Verified",
+    "invalid": "Not found",
+    "error": "Service unavailable — try again later"
   }
 }

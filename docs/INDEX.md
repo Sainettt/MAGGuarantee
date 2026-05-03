@@ -43,7 +43,7 @@
 | 13 | [13-api-design.md](13-api-design.md) | REST API endpoints |
 | 14 | [14-design-system.md](14-design-system.md) | **Дизайн:** токены из CSS `index.html:8–502`, Tailwind, компоненты |
 | 15 | [15-auth-strategy.md](15-auth-strategy.md) | JWT + 2FA + OAuth + Roles + Guards |
-| 16 | [16-jobs-and-integrations.md](16-jobs-and-integrations.md) | BullMQ cron, Gmail API, S3, VIES, Biała Lista |
+| 16 | [16-jobs-and-integrations.md](16-jobs-and-integrations.md) | BullMQ cron, Gmail API, S3, VIES, Biała Lista, GPS tracker |
 | 17 | [17-migration-roadmap.md](17-migration-roadmap.md) | **Поэтапный план разработки** (10 фаз) |
 | 18 | [18-launch-and-deployment.md](18-launch-and-deployment.md) | Launch: prod-окружение, CI/CD, seed, мониторинг |
 

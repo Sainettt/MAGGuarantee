@@ -39,6 +39,7 @@ export const APP_CONFIG_KEY = {
 
 // ── Metadata keys for guards ────────────────────────────
 export const IS_PUBLIC_KEY = 'isPublic';
+export const ROLES_METADATA_KEY = 'roles';
 
 // Dummy hash used for constant-time bcrypt compare on unknown logins. Per
 // docs/15-auth-strategy.md#account-enumeration, the response shape AND the

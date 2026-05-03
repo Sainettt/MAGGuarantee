@@ -1,7 +1,14 @@
 // Domain enum re-exports.
 //
-// Phase 1 ships only `Role` (the auth slice). Additional enums
-// (ClaimStatus, DelegationStatus, VehicleType, CertificateL, EuroNorm) join
-// here in Phase 2 alongside their models.
+// Phase 1 shipped only `Role` (auth slice). Phase 2 adds the rest of the
+// domain enums alongside the Carrier/Vehicle/Claim/Delegation/Trailer models.
+// See docs/12-database-schema.md.
 
-export { Role } from './generated';
+export {
+  CertificateL,
+  ClaimStatus,
+  DelegationStatus,
+  EuroNorm,
+  Role,
+  VehicleType,
+} from './generated';

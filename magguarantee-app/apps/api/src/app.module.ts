@@ -4,14 +4,26 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 
+import { AuditModule } from './common/audit/audit.module';
 import { validateEnv } from './config/env.schema';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
+import { CarriersModule } from './modules/carriers/carriers.module';
+import { DriversModule } from './modules/drivers/drivers.module';
+import { GpsModule } from './modules/integrations/gps/gps.module';
+import { InspectionModule } from './modules/integrations/inspection/inspection.module';
+import { ViesModule } from './modules/integrations/vies/vies.module';
+import { WhiteListModule } from './modules/integrations/white-list/white-list.module';
+import { LookupsModule } from './modules/lookups/lookups.module';
 import { MailModule } from './modules/mail/mail.module';
+import { PasswordModule } from './modules/password/password.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
 import { RedisModule } from './modules/redis/redis.module';
+import { TrailerTypesModule } from './modules/trailer-types/trailer-types.module';
+import { TrailersModule } from './modules/trailers/trailers.module';
 import { UsersModule } from './modules/users/users.module';
+import { VehiclesModule } from './modules/vehicles/vehicles.module';
 
 @Module({
   imports: [
@@ -60,8 +72,20 @@ import { UsersModule } from './modules/users/users.module';
     PrismaModule,
     RedisModule,
     MailModule,
+    AuditModule,
+    PasswordModule,
     UsersModule,
     AuthModule,
+    CarriersModule,
+    VehiclesModule,
+    DriversModule,
+    TrailerTypesModule,
+    TrailersModule,
+    LookupsModule,
+    ViesModule,
+    WhiteListModule,
+    InspectionModule,
+    GpsModule,
     HealthModule,
   ],
   providers: [

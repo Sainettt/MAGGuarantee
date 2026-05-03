@@ -137,7 +137,7 @@
 
 1. Prisma модели полностью из [12-database-schema.md](12-database-schema.md).
 2. `prisma migrate dev --name entities`.
-3. Seed: 14 типов прицепов (`TrailerType`), `app_config` записи.
+3. Seed: 13 типов прицепов (`TrailerType` — точный список с `shortCode` + `description` в `Code.gs:465-478`), `app_config` записи.
 4. Модуль `users`: `UsersService`, `UsersRepository` (Prisma wrapper), `UsersController` (admin CRUD).
 5. Модуль `carriers`: то же самое + специфика — связь с User, opiekun ownership.
 6. Модули `vehicles`, `drivers`, `trailers`, `trailer-types`: CRUD + soft-delete.
@@ -148,7 +148,8 @@
 8. Audit interceptor (минимальный): декоратор `@Audit('createCarrier')` пишет в `audit_log`.
 9. Lookups endpoints (`/lookups/dyspozytor`, `/lookups/planisci`, `/lookups/opiekuni`, `/lookups/cert-types`).
 10. Внешние интеграции: VIES, Biała Lista, info-car (см. [16-jobs-and-integrations.md](16-jobs-and-integrations.md#внешние-rest-интеграции)).
-11. Unit tests: ownership guards, password hashing, репозитории.
+11. **GPS tracker — модуль-скелетон** (`apps/api/src/modules/integrations/gps/`): `GpsProvider` interface, `GpsMockProvider` (детерминированные позиции от `plateNumber`), BullMQ `gps-poll` repeatable job (репликирует контракт реального polling-а), Redis cache layer, endpoint-ы `/api/v1/integrations/gps/positions[/:vehicleId]` с ownership-фильтрацией. **Реальный API access ещё не предоставлен** — `GpsVendorProvider` остаётся заглушкой, выбор провайдера через `GPS_PROVIDER=mock|vendor` env. Полная спецификация — [16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api](16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api). Когда MAGTRANS отдаст credentials — финализируем `GpsVendorProvider` без миграций по DB и без правок UI (контракт уже стабилен).
+12. Unit tests: ownership guards, password hashing, репозитории.
 
 ### Frontend (минимальный, для UAT)
 
@@ -160,7 +161,7 @@
 ### Deliverables
 - Admin может через UI создать carrier-а, vehicle-а, driver-а, trailer-а.
 - Все mutating-actions пишутся в `audit_log`.
-- Импорт текущих 14 типов прицепов через seed (как было в `ensureNaczepyTypySheet`).
+- Импорт 13 типов прицепов через seed (как в `ensureNaczepyTypySheet`, `Code.gs:465-478`).
 - Внешние интеграции работают (VIES для NIP в форме carrier-а, Biała Lista — для IBAN).
 
 ### Зависимости

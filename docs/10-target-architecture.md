@@ -102,7 +102,7 @@ MAGGuarantee/                          ← корень репозитория
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │  Infrastructure                                      │   │
 │  │   MailModule (Gmail API), QueueModule (BullMQ),      │   │
-│  │   IntegrationsModule (VIES, Biała Lista),            │   │
+│  │   IntegrationsModule (VIES, Biała Lista, GPS*),      │   │
 │  │   StorageModule (S3 для screenshots)                 │   │
 │  └─────────────────────────────────────────────────────┘    │
 └──────────────────────────┬──────────────────────────────────┘
@@ -111,11 +111,13 @@ MAGGuarantee/                          ← корень репозитория
        ▼                   ▼                       ▼
 ┌──────────────┐    ┌──────────────┐      ┌────────────────┐
 │  PostgreSQL  │    │ Redis        │      │ Внешние REST   │
-│  (Prisma)    │    │ (BullMQ,2FA) │      │  • VIES        │
-└──────────────┘    └──────────────┘      │  • Biała Lista │
-                                          │  • Gmail API   │
+│  (Prisma)    │    │ (BullMQ,2FA, │      │  • VIES        │
+└──────────────┘    │  GPS cache)  │      │  • Biała Lista │
+                    └──────────────┘      │  • Gmail API   │
                                           │  • S3          │
+                                          │  • GPS tracker*│
                                           └────────────────┘
+                                          * API access TBD
 ```
 
 ## Маппинг слоёв GAS → Nest
@@ -160,7 +162,7 @@ MAGGuarantee/                          ← корень репозитория
 - Все бизнес-расчёты: `calcKmGwarantPerMonth`, `calcEasterGS`, `getEUBanDaysGS`, `calcBusinessDays`.
 - Все публичные API-функции (см. `13-api-design.md`).
 - Все email-шаблоны (HTML переписать на React Email).
-- Внешние интеграции: VIES, Biała Lista MF, info-car.pl.
+- Внешние интеграции: VIES, Biała Lista MF, info-car.pl, GPS tracker (положения авто из стороннего fleet-сервиса; API access ожидается — см. [16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api](16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api)).
 - Дизайн (цвета, типографика, компоненты — см. `14-design-system.md`).
 - Бизнес-правила доступа по ролям (`03-roles.md` остаётся актуален).
 
