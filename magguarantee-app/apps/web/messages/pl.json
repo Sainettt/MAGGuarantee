@@ -24,7 +24,8 @@
     "deleteConfirmTitle": "Czy na pewno?",
     "deleteConfirmBody": "Tej operacji nie można cofnąć.",
     "deactivate": "Dezaktywuj",
-    "reactivate": "Aktywuj"
+    "reactivate": "Aktywuj",
+    "clear": "Wyczyść"
   },
   "theme": {
     "toggle": "Przełącz motyw",

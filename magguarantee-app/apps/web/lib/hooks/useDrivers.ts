@@ -48,11 +48,11 @@ export function useCreateDriver(
   const qc = useQueryClient();
   return useMutation({
     mutationFn: createDriver,
+    ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: DRIVERS_KEY });
       opts?.onSuccess?.(...args);
     },
-    ...opts,
   });
 }
 
@@ -66,11 +66,11 @@ export function useUpdateDriver(
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }) => updateDriver(id, body),
+    ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: DRIVERS_KEY });
       opts?.onSuccess?.(...args);
     },
-    ...opts,
   });
 }
 

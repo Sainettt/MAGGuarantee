@@ -24,7 +24,8 @@
     "deleteConfirmTitle": "Are you sure?",
     "deleteConfirmBody": "This action cannot be undone.",
     "deactivate": "Deactivate",
-    "reactivate": "Reactivate"
+    "reactivate": "Reactivate",
+    "clear": "Clear"
   },
   "theme": {
     "toggle": "Toggle theme",

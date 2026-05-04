@@ -32,6 +32,23 @@ import { Textarea } from '@/components/ui/Textarea';
 import { FormField } from '@/components/forms/Form';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useCreateDriver, useUpdateDriver } from '@/lib/hooks/useDrivers';
+import { useFormDraft } from '@/lib/hooks/useFormDraft';
+
+const DRAFT_KEY = 'draft:drivers:new';
+
+const EMPTY_DEFAULTS: CreateDriverDto = {
+  carrierId: undefined as unknown as string,
+  firstName: '',
+  lastName: '',
+  phone: '',
+  phone2: '',
+  email: '',
+  driverLicenseNumber: '',
+  licenseExpiry: undefined,
+  bankAccount: '',
+  notes: '',
+  active: true,
+};
 
 interface Props {
   open: boolean;
@@ -53,23 +70,15 @@ export function DriverSheet({ open, driver, onClose }: Props) {
     resolver: zodResolver(
       isEdit ? UpdateDriverSchema.passthrough() : CreateDriverSchema,
     ),
-    defaultValues: {
-      carrierId: undefined,
-      firstName: '',
-      lastName: '',
-      phone: '',
-      phone2: '',
-      email: '',
-      driverLicenseNumber: '',
-      licenseExpiry: undefined,
-      bankAccount: '',
-      notes: '',
-      active: true,
-    },
+    defaultValues: { ...EMPTY_DEFAULTS },
   });
 
   // Up to 200 carriers in the picker — Phase 2 UAT-grade.
   const carriersQ = useCarriers({ limit: 200 });
+
+  // Persist create-mode drafts to sessionStorage; closing the sheet keeps
+  // the user's typing intact. Edit mode: skipped, server is source of truth.
+  const draft = useFormDraft(form, DRAFT_KEY, { enabled: !isEdit });
 
   useEffect(() => {
     if (!open) return;
@@ -88,24 +97,17 @@ export function DriverSheet({ open, driver, onClose }: Props) {
         active: driver.active,
       });
     } else {
-      form.reset({
-        carrierId: undefined,
-        firstName: '',
-        lastName: '',
-        phone: '',
-        phone2: '',
-        email: '',
-        driverLicenseNumber: '',
-        licenseExpiry: undefined,
-        bankAccount: '',
-        notes: '',
-        active: true,
-      });
+      // Reset to empty defaults first, then overlay any saved draft on top.
+      form.reset({ ...EMPTY_DEFAULTS });
+      draft.hydrate();
     }
-  }, [open, isEdit, driver, form]);
+  }, [open, isEdit, driver, form, draft]);
 
   const createM = useCreateDriver({
     onSuccess: () => {
+      // Successful create — wipe the draft and reset to empty defaults.
+      draft.clear();
+      form.reset({ ...EMPTY_DEFAULTS });
       toast.success(tCommon('saved'));
       onClose();
     },
@@ -287,6 +289,20 @@ export function DriverSheet({ open, driver, onClose }: Props) {
           </SheetBody>
 
           <SheetFooter>
+            {!isEdit && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  draft.clear();
+                  form.reset({ ...EMPTY_DEFAULTS });
+                }}
+                disabled={submitting}
+              >
+                {tCommon('clear')}
+              </Button>
+            )}
             <Button
               type="button"
               variant="ghost"

@@ -54,11 +54,11 @@ export function useCreateCarrier(
   const qc = useQueryClient();
   return useMutation({
     mutationFn: createCarrier,
+    ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: CARRIERS_KEY });
       opts?.onSuccess?.(...args);
     },
-    ...opts,
   });
 }
 
@@ -72,11 +72,11 @@ export function useUpdateCarrier(
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }) => updateCarrier(id, body),
+    ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: CARRIERS_KEY });
       opts?.onSuccess?.(...args);
     },
-    ...opts,
   });
 }
 

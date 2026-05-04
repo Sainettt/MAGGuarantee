@@ -32,8 +32,11 @@ import {
 import { Textarea } from '@/components/ui/Textarea';
 import { FormField, FormSection } from '@/components/forms/Form';
 import { useCarriers } from '@/lib/hooks/useCarriers';
+import { useFormDraft } from '@/lib/hooks/useFormDraft';
 import { useDyspozytorzy, usePlanisci } from '@/lib/hooks/useLookups';
 import { useCreateVehicle, useUpdateVehicle } from '@/lib/hooks/useVehicles';
+
+const DRAFT_KEY = 'draft:vehicles:new';
 
 interface Props {
   open: boolean;
@@ -68,6 +71,9 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
   const carriersQ = useCarriers({ limit: 200 });
   const planisciQ = usePlanisci();
   const dyspozytorzyQ = useDyspozytorzy();
+
+  // Persist create-mode drafts; closing the sheet keeps user input intact.
+  const draft = useFormDraft(form, DRAFT_KEY, { enabled: !isEdit });
 
   useEffect(() => {
     if (!open) return;
@@ -104,12 +110,17 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
         sideNumber: vehicle.sideNumber ?? '',
       });
     } else {
+      // Reset to empty defaults first, then overlay any saved draft on top.
       form.reset(getDefaults());
+      draft.hydrate();
     }
-  }, [open, isEdit, vehicle, form]);
+  }, [open, isEdit, vehicle, form, draft]);
 
   const createM = useCreateVehicle({
     onSuccess: () => {
+      // Successful create — wipe the draft and reset to empty defaults.
+      draft.clear();
+      form.reset(getDefaults());
       toast.success(tCommon('saved'));
       onClose();
     },
@@ -465,6 +476,20 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
           </SheetBody>
 
           <SheetFooter>
+            {!isEdit && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  draft.clear();
+                  form.reset(getDefaults());
+                }}
+                disabled={submitting}
+              >
+                {tCommon('clear')}
+              </Button>
+            )}
             <Button
               type="button"
               variant="ghost"

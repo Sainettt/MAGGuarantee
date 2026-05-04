@@ -48,11 +48,11 @@ export function useCreateVehicle(
   const qc = useQueryClient();
   return useMutation({
     mutationFn: createVehicle,
+    ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: VEHICLES_KEY });
       opts?.onSuccess?.(...args);
     },
-    ...opts,
   });
 }
 
@@ -66,11 +66,11 @@ export function useUpdateVehicle(
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }) => updateVehicle(id, body),
+    ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: VEHICLES_KEY });
       opts?.onSuccess?.(...args);
     },
-    ...opts,
   });
 }
 

@@ -44,7 +44,10 @@ import {
   INTEGRATION_UNAVAILABLE,
 } from '@/lib/api/integrations';
 import { useCreateCarrier, useUpdateCarrier } from '@/lib/hooks/useCarriers';
+import { useFormDraft } from '@/lib/hooks/useFormDraft';
 import { useOpiekuni } from '@/lib/hooks/useLookups';
+
+const DRAFT_KEY = 'draft:carriers:new';
 
 interface Props {
   open: boolean;
@@ -135,6 +138,10 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
     }
   };
 
+  // Persist create-mode drafts to sessionStorage; closing the sheet keeps
+  // the user's typing intact. Edit mode skipped — server is source of truth.
+  const draft = useFormDraft(form, DRAFT_KEY, { enabled: !isEdit });
+
   useEffect(() => {
     if (!open) return;
     setNipState('idle');
@@ -163,12 +170,19 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
         active: carrier.active,
       });
     } else {
+      // Reset to empty defaults first, then overlay any saved draft on top.
       form.reset(getDefaults());
+      draft.hydrate();
     }
-  }, [open, isEdit, carrier, form]);
+  }, [open, isEdit, carrier, form, draft]);
 
   const createM = useCreateCarrier({
     onSuccess: (created) => {
+      // Successful create — wipe the draft and reset the form so the next
+      // "+ New" opens a clean slate.
+      draft.clear();
+      form.reset(getDefaults());
+
       // Phase 2 dev-only: API returns the temporary password in the response.
       // Surface it in a long-lived toast so the admin can copy it.
       if (created.temporaryPassword) {
@@ -520,6 +534,24 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
           </SheetBody>
 
           <SheetFooter>
+            {!isEdit && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  draft.clear();
+                  form.reset(getDefaults());
+                  // Also clear any inline integration badges so they don't
+                  // dangle for fields that were just wiped.
+                  setNipState('idle');
+                  setAccountState('idle');
+                }}
+                disabled={submitting}
+              >
+                {tCommon('clear')}
+              </Button>
+            )}
             <Button
               type="button"
               variant="ghost"

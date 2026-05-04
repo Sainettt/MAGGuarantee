@@ -32,10 +32,20 @@ import {
 } from '@/components/ui/Sheet';
 import { Textarea } from '@/components/ui/Textarea';
 import { FormField } from '@/components/forms/Form';
+import { useFormDraft } from '@/lib/hooks/useFormDraft';
 import {
   useCreateTrailerType,
   useUpdateTrailerType,
 } from '@/lib/hooks/useTrailerTypes';
+
+const DRAFT_KEY = 'draft:trailer-types:new';
+
+const EMPTY_DEFAULTS: CreateTrailerTypeDto = {
+  name: '',
+  shortCode: '',
+  description: '',
+  active: true,
+};
 
 interface Props {
   open: boolean;
@@ -54,15 +64,18 @@ export function TrailerTypeSheet({ open, trailerType, onClose }: Props) {
     resolver: zodResolver(
       isEdit ? UpdateTrailerTypeSchema : CreateTrailerTypeSchema,
     ),
-    defaultValues: {
-      name: '',
-      shortCode: '',
-      description: '',
-      active: true,
-    },
+    defaultValues: { ...EMPTY_DEFAULTS },
   });
 
-  // Reset whenever the target row changes (or sheet opens).
+  // Persist create-mode drafts so the user doesn't lose data when they
+  // accidentally close the sheet (Esc, click-outside, X). Edit mode is
+  // skipped: we never want a stale draft to override fresh server values.
+  const draft = useFormDraft(form, DRAFT_KEY, { enabled: !isEdit });
+
+  // Reset whenever the target row changes (or sheet opens). In create mode
+  // we reset to empty defaults first, then ask useFormDraft to overlay any
+  // saved draft on top — so the draft wins, but the form falls back to a
+  // clean state when there is no draft (e.g. after edit→close→create).
   useEffect(() => {
     if (!open) return;
     if (isEdit && trailerType) {
@@ -73,17 +86,17 @@ export function TrailerTypeSheet({ open, trailerType, onClose }: Props) {
         active: trailerType.active,
       });
     } else {
-      form.reset({
-        name: '',
-        shortCode: '',
-        description: '',
-        active: true,
-      });
+      form.reset({ ...EMPTY_DEFAULTS });
+      draft.hydrate();
     }
-  }, [open, isEdit, trailerType, form]);
+  }, [open, isEdit, trailerType, form, draft]);
 
   const createM = useCreateTrailerType({
     onSuccess: () => {
+      // Successful create wipes the saved draft and resets the form to
+      // empty defaults so the next "+ New" opens a clean slate.
+      draft.clear();
+      form.reset({ ...EMPTY_DEFAULTS });
       toast.success(tCommon('saved'));
       onClose();
     },
@@ -176,6 +189,20 @@ export function TrailerTypeSheet({ open, trailerType, onClose }: Props) {
           </SheetBody>
 
           <SheetFooter>
+            {!isEdit && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  draft.clear();
+                  form.reset({ ...EMPTY_DEFAULTS });
+                }}
+                disabled={submitting}
+              >
+                {tCommon('clear')}
+              </Button>
+            )}
             <Button
               type="button"
               variant="ghost"

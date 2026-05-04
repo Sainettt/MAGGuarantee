@@ -48,11 +48,11 @@ export function useCreateTrailerType(
   const qc = useQueryClient();
   return useMutation({
     mutationFn: createTrailerType,
+    ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: TRAILER_TYPES_KEY });
       opts?.onSuccess?.(...args);
     },
-    ...opts,
   });
 }
 
@@ -66,11 +66,11 @@ export function useUpdateTrailerType(
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }) => updateTrailerType(id, body),
+    ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: TRAILER_TYPES_KEY });
       opts?.onSuccess?.(...args);
     },
-    ...opts,
   });
 }
 

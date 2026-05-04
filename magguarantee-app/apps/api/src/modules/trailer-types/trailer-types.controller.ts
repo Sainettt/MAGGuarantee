@@ -29,13 +29,13 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { TrailerTypesService } from './trailer-types.service';
 
 /**
- * Trailer-type lookup CRUD per docs/13-api-design.md (admin-only).
+ * Trailer-type lookup CRUD per docs/13-api-design.md.
  *
- * `TrailerType` is a global lookup seeded by db-agent. Per docs, only the
- * admin can mutate it.
+ * `TrailerType` is a global lookup seeded by db-agent. GET is readable by any
+ * authenticated user (used as a dropdown when creating/editing trailers, per
+ * docs/13-api-design.md#lookups). Mutations are admin-only.
  */
 @Controller('trailer-types')
-@Roles('admin')
 @UseGuards(RolesGuard)
 export class TrailerTypesController {
   constructor(private readonly types: TrailerTypesService) {}
@@ -49,6 +49,7 @@ export class TrailerTypesController {
   }
 
   @Post()
+  @Roles('admin')
   @HttpCode(HttpStatus.CREATED)
   @Audit({
     action: 'createTrailerType',
@@ -63,6 +64,7 @@ export class TrailerTypesController {
   }
 
   @Patch(':id')
+  @Roles('admin')
   @Audit({
     action: 'updateTrailerType',
     targetType: 'TrailerType',
@@ -77,6 +79,7 @@ export class TrailerTypesController {
   }
 
   @Post(':id/deactivate')
+  @Roles('admin')
   @HttpCode(HttpStatus.OK)
   @Audit({
     action: 'deactivateTrailerType',
