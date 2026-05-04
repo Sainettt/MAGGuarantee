@@ -191,6 +191,7 @@ export function TrailerSheet({ open, trailer, onClose }: Props) {
                   </FormField>
                   <FormField
                     label={t('fields.trailerType')}
+                    required
                     error={errs.trailerTypeId?.message}
                     htmlFor="trailer-typeId"
                   >
@@ -420,7 +421,11 @@ function getDefaults(): FormValues {
     carrierId: undefined as unknown as string,
     plateNumber: '',
     active: true,
-    trailerTypeId: undefined,
+    // trailerTypeId is required by CreateTrailerSchema (NOT NULL since the
+    // phase-2 migration). Coerce empty defaults to a string-shaped sentinel
+    // so RHF stays controlled; the empty `<option value="">` triggers a Zod
+    // "required" error on submit when the user hasn't picked a type yet.
+    trailerTypeId: '' as unknown as string,
     brand: '',
     model: '',
     year: undefined,

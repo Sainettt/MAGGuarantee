@@ -23,10 +23,10 @@ function makeDriver(overrides: Partial<DriverRow> = {}): DriverRow {
     loginSlug: 'jan.kowalski',
     firstName: 'Jan',
     lastName: 'Kowalski',
-    phone: null,
+    phone: '+48000000000',
     phone2: null,
     email: null,
-    driverLicenseNumber: null,
+    driverLicenseNumber: 'LIC-000',
     licenseExpiry: null,
     bankAccount: null,
     notes: null,
@@ -51,7 +51,7 @@ function makeCarrier(overrides: Partial<CarrierRow> = {}): CarrierRow {
     nip: null,
     vatId: null,
     contactPerson: null,
-    phone: null,
+    phone: '+48000000000',
     ordersEmail: null,
     accountEur: null,
     accountPln: null,
@@ -61,8 +61,8 @@ function makeCarrier(overrides: Partial<CarrierRow> = {}): CarrierRow {
     licenseExpiry: null,
     numberOfPermits: null,
     companyAddress: null,
-    opiekunId: null,
-    opiekun: null,
+    opiekunId: 'op-fixture',
+    opiekun: { id: 'op-fixture', login: 'op', name: null },
     createdAt: NOW,
     updatedAt: NOW,
     deletedAt: null,
@@ -149,6 +149,12 @@ function makeCarriersRepo(seed: CarrierRow[] = []): CarriersRepository {
   } as unknown as CarriersRepository;
 }
 
+/** Minimal payload required by the post-phase-2 schema. */
+const REQUIRED_DRIVER_FIELDS = {
+  phone: '+48111222333',
+  driverLicenseNumber: 'LIC-001',
+};
+
 describe('DriversService', () => {
   it('generates loginSlug from firstName.lastName on create', async () => {
     const carrier = makeCarrier();
@@ -160,6 +166,7 @@ describe('DriversService', () => {
       carrierId: 'c-1',
       firstName: 'Jan',
       lastName: 'Kowalski',
+      ...REQUIRED_DRIVER_FIELDS,
     });
     expect(out.loginSlug).toBe('jan.kowalski');
   });
@@ -175,6 +182,7 @@ describe('DriversService', () => {
       carrierId: 'c-1',
       firstName: 'Jan',
       lastName: 'Kowalski',
+      ...REQUIRED_DRIVER_FIELDS,
     });
     expect(out.loginSlug).toBe('jan.kowalski-2');
   });
@@ -190,6 +198,7 @@ describe('DriversService', () => {
       carrierId: 'c-1',
       firstName: 'Jan',
       lastName: 'Kowalski',
+      ...REQUIRED_DRIVER_FIELDS,
     });
     expect(out.loginSlug).toBe('jan.kowalski-3');
   });
@@ -203,6 +212,7 @@ describe('DriversService', () => {
       carrierId: 'c-1',
       firstName: 'Łukasz',
       lastName: 'Żółć',
+      ...REQUIRED_DRIVER_FIELDS,
     });
     expect(out.loginSlug).toBe('lukasz.zolc');
   });
@@ -216,6 +226,7 @@ describe('DriversService', () => {
     const out = await svc.create(makeAuth('przewoznik', 'u-self'), {
       firstName: 'Anna',
       lastName: 'Nowak',
+      ...REQUIRED_DRIVER_FIELDS,
     });
     expect(out.carrierId).toBe('c-mine');
   });
@@ -226,6 +237,7 @@ describe('DriversService', () => {
       svc.create(makeAuth('admin', 'a-1'), {
         firstName: 'Anna',
         lastName: 'Nowak',
+        ...REQUIRED_DRIVER_FIELDS,
       }),
     ).rejects.toThrow(UnprocessableEntityException);
   });
@@ -241,6 +253,7 @@ describe('DriversService', () => {
         carrierId: 'c-other',
         firstName: 'Jan',
         lastName: 'Kowalski',
+        ...REQUIRED_DRIVER_FIELDS,
       }),
     ).rejects.toThrow(ForbiddenException);
   });
@@ -256,6 +269,7 @@ describe('DriversService', () => {
         carrierId: 'c-other',
         firstName: 'Jan',
         lastName: 'Kowalski',
+        ...REQUIRED_DRIVER_FIELDS,
       }),
     ).rejects.toThrow(ForbiddenException);
   });

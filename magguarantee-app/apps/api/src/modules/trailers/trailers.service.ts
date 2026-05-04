@@ -55,14 +55,16 @@ export class TrailersService {
 
   async create(user: AuthUser, dto: CreateTrailerDto): Promise<TrailerDto> {
     await this._assertCarrierAccessibleForWrite(user, dto.carrierId);
-    if (dto.trailerTypeId) await this._assertActiveTrailerType(dto.trailerTypeId);
+    // trailerTypeId is required by the schema; still validate the type exists
+    // and is active so the FK + business rule are enforced together.
+    await this._assertActiveTrailerType(dto.trailerTypeId);
 
     try {
       const row = await this.trailers.create({
         carrierId: dto.carrierId,
         plateNumber: dto.plateNumber,
         active: dto.active,
-        trailerTypeId: dto.trailerTypeId ?? null,
+        trailerTypeId: dto.trailerTypeId,
         brand: dto.brand ?? null,
         model: dto.model ?? null,
         year: dto.year ?? null,
@@ -96,7 +98,7 @@ export class TrailersService {
   async update(id: string, dto: UpdateTrailerDto): Promise<TrailerDto> {
     const existing = await this.trailers.findById(id);
     if (!existing) throw new NotFoundException('Naczepa nie znaleziona');
-    if (dto.trailerTypeId !== undefined && dto.trailerTypeId !== null) {
+    if (dto.trailerTypeId !== undefined) {
       await this._assertActiveTrailerType(dto.trailerTypeId);
     }
 

@@ -2,18 +2,25 @@ import { Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
 
+/**
+ * Row shape returned by the trailer repository.
+ *
+ * `trailerTypeId` is non-nullable since the phase-2 migration
+ * (`phase2_required_fields_carrier_driver_trailer`); the joined
+ * `trailerType` object is therefore always present on a fresh fetch.
+ */
 export interface TrailerRow {
   id: string;
   carrierId: string;
   plateNumber: string;
   active: boolean;
-  trailerTypeId: string | null;
+  trailerTypeId: string;
   trailerType: {
     id: string;
     name: string;
     shortCode: string | null;
     active: boolean;
-  } | null;
+  };
   brand: string | null;
   model: string | null;
   year: number | null;
@@ -87,7 +94,7 @@ export class TrailersRepository {
     carrierId: string;
     plateNumber: string;
     active?: boolean;
-    trailerTypeId?: string | null;
+    trailerTypeId: string;
     brand?: string | null;
     model?: string | null;
     year?: number | null;
@@ -112,7 +119,7 @@ export class TrailersRepository {
         carrierId: data.carrierId,
         plateNumber: data.plateNumber,
         active: data.active ?? true,
-        trailerTypeId: data.trailerTypeId ?? null,
+        trailerTypeId: data.trailerTypeId,
         brand: data.brand ?? null,
         model: data.model ?? null,
         year: data.year ?? null,
@@ -215,13 +222,13 @@ interface TrailerPrismaShape {
   carrierId: string;
   plateNumber: string;
   active: boolean;
-  trailerTypeId: string | null;
+  trailerTypeId: string;
   trailerType: {
     id: string;
     name: string;
     shortCode: string | null;
     active: boolean;
-  } | null;
+  };
   brand: string | null;
   model: string | null;
   year: number | null;

@@ -95,12 +95,22 @@ export function SheetContent({
   const previousFocus = useRef<HTMLElement | null>(null);
   const [mounted, setMounted] = useState(false);
 
+  // Funnel `setOpen` through a ref so the focus/scroll/Escape effect below
+  // depends only on `open`. Without this, callers that pass an inline arrow
+  // `onOpenChange={(o) => …}` would create a fresh `setOpen` on every parent
+  // render — the effect would re-run, focus would jump back to the first
+  // input, and any text-field that triggers a state update on blur (NIP/VAT
+  // VIES check etc.) would steal focus mid-typing.
+  const setOpenRef = useRef(setOpen);
+  setOpenRef.current = setOpen;
+
   // Mount portal target only on the client.
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // Focus management + Escape + body scroll lock.
+  // Focus management + Escape + body scroll lock. Runs once per open/close
+  // transition.
   useEffect(() => {
     if (!open) return;
     previousFocus.current = document.activeElement as HTMLElement | null;
@@ -114,7 +124,7 @@ export function SheetContent({
     focusable?.focus();
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') setOpenRef.current(false);
     };
     document.addEventListener('keydown', onKey);
     return () => {
@@ -122,7 +132,7 @@ export function SheetContent({
       document.body.style.overflow = previousOverflow;
       previousFocus.current?.focus();
     };
-  }, [open, setOpen]);
+  }, [open]);
 
   if (!mounted || !open) return null;
 

@@ -23,8 +23,13 @@ function makeTrailer(overrides: Partial<TrailerRow> = {}): TrailerRow {
     carrierId: 'c-1',
     plateNumber: 'NA0001',
     active: true,
-    trailerTypeId: null,
-    trailerType: null,
+    trailerTypeId: 'tt-fixture',
+    trailerType: {
+      id: 'tt-fixture',
+      name: 'Firanka',
+      shortCode: null,
+      active: true,
+    },
     brand: null,
     model: null,
     year: null,
@@ -63,7 +68,7 @@ function makeCarrier(overrides: Partial<CarrierRow> = {}): CarrierRow {
     nip: null,
     vatId: null,
     contactPerson: null,
-    phone: null,
+    phone: '+48000000000',
     ordersEmail: null,
     accountEur: null,
     accountPln: null,
@@ -73,8 +78,8 @@ function makeCarrier(overrides: Partial<CarrierRow> = {}): CarrierRow {
     licenseExpiry: null,
     numberOfPermits: null,
     companyAddress: null,
-    opiekunId: null,
-    opiekun: null,
+    opiekunId: 'op-fixture',
+    opiekun: { id: 'op-fixture', login: 'op', name: null },
     createdAt: NOW,
     updatedAt: NOW,
     deletedAt: null,
@@ -128,11 +133,18 @@ function makeTrailersRepo(seed: TrailerRow[] = []): TrailersRepository {
           meta: { target: ['carrierId', 'plateNumber'] },
         });
       }
+      const trailerTypeId = data.trailerTypeId ?? 'tt-fixture';
       const row = makeTrailer({
         id: `t-${rows.size + 1}`,
         carrierId: data.carrierId,
         plateNumber: data.plateNumber,
-        trailerTypeId: data.trailerTypeId ?? null,
+        trailerTypeId,
+        trailerType: {
+          id: trailerTypeId,
+          name: 'Firanka',
+          shortCode: null,
+          active: true,
+        },
       });
       rows.set(row.id, row);
       return row;
@@ -230,30 +242,34 @@ describe('TrailersService', () => {
 
   it('translates duplicate (carrierId, plateNumber) into 409', async () => {
     const dup = makeTrailer({ carrierId: 'c-1', plateNumber: 'NA0001' });
+    const t = makeType({ id: 'tt-1', active: true });
     const svc = new TrailersService(
       makeTrailersRepo([dup]),
       makeCarriersRepo([makeCarrier()]),
-      makeTypesRepo(),
+      makeTypesRepo([t]),
     );
     await expect(
       svc.create(makeAuth('admin', 'a-1'), {
         carrierId: 'c-1',
         plateNumber: 'NA0001',
+        trailerTypeId: 'tt-1',
       }),
     ).rejects.toThrow(ConflictException);
   });
 
   it('opiekun cannot create on non-owned carrier (403)', async () => {
     const carrier = makeCarrier({ id: 'c-other', opiekunId: 'op-2' });
+    const t = makeType({ id: 'tt-1', active: true });
     const svc = new TrailersService(
       makeTrailersRepo(),
       makeCarriersRepo([carrier]),
-      makeTypesRepo(),
+      makeTypesRepo([t]),
     );
     await expect(
       svc.create(makeAuth('opiekun', 'op-1'), {
         carrierId: 'c-other',
         plateNumber: 'NA0009',
+        trailerTypeId: 'tt-1',
       }),
     ).rejects.toThrow(ForbiddenException);
   });

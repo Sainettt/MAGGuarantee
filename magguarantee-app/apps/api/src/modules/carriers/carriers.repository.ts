@@ -5,6 +5,10 @@ import { PrismaService } from '../prisma/prisma.service';
 /**
  * Row shape returned by the carrier repository — flattens `user` so the
  * service can map straight to the wire DTO without re-walking the join.
+ *
+ * `phone` and `opiekunId` are non-nullable since the phase-2 migration
+ * (`phase2_required_fields_carrier_driver_trailer`). The `opiekun` join
+ * object is therefore always present on a fresh fetch.
  */
 export interface CarrierRow {
   id: string;
@@ -17,7 +21,7 @@ export interface CarrierRow {
   nip: string | null;
   vatId: string | null;
   contactPerson: string | null;
-  phone: string | null;
+  phone: string;
   ordersEmail: string | null;
   accountEur: string | null;
   accountPln: string | null;
@@ -27,12 +31,12 @@ export interface CarrierRow {
   licenseExpiry: Date | null;
   numberOfPermits: number | null;
   companyAddress: string | null;
-  opiekunId: string | null;
+  opiekunId: string;
   opiekun: {
     id: string;
     login: string;
     name: string | null;
-  } | null;
+  };
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -54,11 +58,11 @@ interface CreateCarrierData {
   passwordHash: string;
   company?: string | null;
   active?: boolean;
-  // carrier-extension side
+  // carrier-extension side — `phone` and `opiekunId` are NOT NULL.
   nip?: string | null;
   vatId?: string | null;
   contactPerson?: string | null;
-  phone?: string | null;
+  phone: string;
   ordersEmail?: string | null;
   accountEur?: string | null;
   accountPln?: string | null;
@@ -68,7 +72,7 @@ interface CreateCarrierData {
   licenseExpiry?: Date | null;
   numberOfPermits?: number | null;
   companyAddress?: string | null;
-  opiekunId?: string | null;
+  opiekunId: string;
 }
 
 interface UpdateCarrierData {
@@ -80,7 +84,7 @@ interface UpdateCarrierData {
   nip?: string | null;
   vatId?: string | null;
   contactPerson?: string | null;
-  phone?: string | null;
+  phone?: string;
   ordersEmail?: string | null;
   accountEur?: string | null;
   accountPln?: string | null;
@@ -90,7 +94,7 @@ interface UpdateCarrierData {
   licenseExpiry?: Date | null;
   numberOfPermits?: number | null;
   companyAddress?: string | null;
-  opiekunId?: string | null;
+  opiekunId?: string;
 }
 
 /**
@@ -166,7 +170,7 @@ export class CarriersRepository {
           nip: data.nip ?? null,
           vatId: data.vatId ?? null,
           contactPerson: data.contactPerson ?? null,
-          phone: data.phone ?? null,
+          phone: data.phone,
           ordersEmail: data.ordersEmail ?? null,
           accountEur: data.accountEur ?? null,
           accountPln: data.accountPln ?? null,
@@ -176,7 +180,7 @@ export class CarriersRepository {
           licenseExpiry: data.licenseExpiry ?? null,
           numberOfPermits: data.numberOfPermits ?? null,
           companyAddress: data.companyAddress ?? null,
-          opiekunId: data.opiekunId ?? null,
+          opiekunId: data.opiekunId,
         },
         include: this.includeShape(),
       });
@@ -305,7 +309,7 @@ export class CarriersRepository {
     nip: string | null;
     vatId: string | null;
     contactPerson: string | null;
-    phone: string | null;
+    phone: string;
     ordersEmail: string | null;
     accountEur: string | null;
     accountPln: string | null;
@@ -315,7 +319,7 @@ export class CarriersRepository {
     licenseExpiry: Date | null;
     numberOfPermits: number | null;
     companyAddress: string | null;
-    opiekunId: string | null;
+    opiekunId: string;
     createdAt: Date;
     updatedAt: Date;
     deletedAt: Date | null;
@@ -327,7 +331,7 @@ export class CarriersRepository {
       company: string | null;
       active: boolean;
     };
-    opiekun: { id: string; login: string; name: string | null } | null;
+    opiekun: { id: string; login: string; name: string | null };
   }): CarrierRow {
     return {
       id: row.id,

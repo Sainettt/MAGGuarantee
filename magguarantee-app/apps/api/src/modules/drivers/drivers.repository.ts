@@ -2,16 +2,22 @@ import { Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
 
+/**
+ * Row shape returned by the driver repository.
+ *
+ * `phone` and `driverLicenseNumber` are non-nullable since the phase-2
+ * migration (`phase2_required_fields_carrier_driver_trailer`).
+ */
 export interface DriverRow {
   id: string;
   carrierId: string;
   loginSlug: string;
   firstName: string;
   lastName: string;
-  phone: string | null;
+  phone: string;
   phone2: string | null;
   email: string | null;
-  driverLicenseNumber: string | null;
+  driverLicenseNumber: string;
   licenseExpiry: Date | null;
   bankAccount: string | null;
   notes: string | null;
@@ -86,10 +92,10 @@ export class DriversRepository {
     loginSlug: string;
     firstName: string;
     lastName: string;
-    phone?: string | null;
+    phone: string;
     phone2?: string | null;
     email?: string | null;
-    driverLicenseNumber?: string | null;
+    driverLicenseNumber: string;
     licenseExpiry?: Date | null;
     bankAccount?: string | null;
     notes?: string | null;
@@ -101,10 +107,10 @@ export class DriversRepository {
         loginSlug: data.loginSlug,
         firstName: data.firstName,
         lastName: data.lastName,
-        phone: data.phone ?? null,
+        phone: data.phone,
         phone2: data.phone2 ?? null,
         email: data.email ?? null,
-        driverLicenseNumber: data.driverLicenseNumber ?? null,
+        driverLicenseNumber: data.driverLicenseNumber,
         licenseExpiry: data.licenseExpiry ?? null,
         bankAccount: data.bankAccount ?? null,
         notes: data.notes ?? null,
@@ -180,10 +186,10 @@ interface DriverPrismaShape {
   loginSlug: string;
   firstName: string;
   lastName: string;
-  phone: string | null;
+  phone: string;
   phone2: string | null;
   email: string | null;
-  driverLicenseNumber: string | null;
+  driverLicenseNumber: string;
   licenseExpiry: Date | null;
   bankAccount: string | null;
   notes: string | null;

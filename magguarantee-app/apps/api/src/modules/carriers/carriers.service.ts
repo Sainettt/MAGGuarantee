@@ -111,7 +111,7 @@ export class CarriersService {
         nip: dto.nip ?? null,
         vatId: dto.vatId ?? null,
         contactPerson: dto.contactPerson ?? null,
-        phone: dto.phone ?? null,
+        phone: dto.phone,
         ordersEmail: dto.ordersEmail ?? null,
         accountEur: dto.accountEur ?? null,
         accountPln: dto.accountPln ?? null,
@@ -124,10 +124,7 @@ export class CarriersService {
         opiekunId,
       });
     } catch (err) {
-      throw uniqueViolationToConflict(
-        err,
-        'Login lub email są już zajęte',
-      );
+      throw this.translateUserUniqueViolation(err);
     }
 
     if (!dto.password) {
@@ -209,10 +206,32 @@ export class CarriersService {
       return this.toDto(row);
     } catch (err) {
       if (isPrismaUniqueViolation(err)) {
-        throw uniqueViolationToConflict(err, 'Konflikt unikalności');
+        throw this.translateUserUniqueViolation(err);
       }
       throw err;
     }
+  }
+
+  /**
+   * Map Prisma's `users` unique-constraint failure to a per-field 409 message.
+   * `meta.target` carries the field that collided — we surface it directly so
+   * the UI can show "Email jest już zajęty" instead of the generic
+   * "Login lub email są już zajęte". Falls back to the generic message for
+   * any other unique constraint or non-Prisma error.
+   */
+  private translateUserUniqueViolation(err: unknown): ConflictException {
+    if (!isPrismaUniqueViolation(err)) {
+      return uniqueViolationToConflict(err, 'Login lub email są już zajęte');
+    }
+    const target = err.meta?.target;
+    const fields = Array.isArray(target) ? target : target ? [target] : [];
+    if (fields.includes('login')) {
+      return new ConflictException('Login jest już zajęty');
+    }
+    if (fields.includes('email')) {
+      return new ConflictException('Email jest już zajęty');
+    }
+    return uniqueViolationToConflict(err, 'Login lub email są już zajęte');
   }
 
   async deactivate(id: string): Promise<CarrierDto> {
@@ -261,7 +280,7 @@ export class CarriersService {
   private async _resolveOpiekunId(
     user: AuthUser,
     requested: string | undefined,
-  ): Promise<string | null> {
+  ): Promise<string> {
     // Opiekun callers: default to themselves if no opiekunId provided; if
     // they specify a different one, reject — they cannot reassign.
     if (user.role === 'opiekun') {
@@ -272,23 +291,26 @@ export class CarriersService {
       }
       return user.sub;
     }
-    if (!requested) return null;
+    // Carrier.opiekunId is NOT NULL since the phase-2 migration. The schema
+    // makes it required, but this branch defends against any legacy caller
+    // (e.g. seed scripts) that bypasses the Zod pipe.
+    if (!requested) {
+      throw new UnprocessableEntityException(
+        'Pole `opiekunId` jest wymagane',
+      );
+    }
     await this._assertIsOpiekun(requested);
     return requested;
   }
 
   private async _resolveOpiekunPatch(
     user: AuthUser,
-    requested: string | null,
-  ): Promise<{ opiekunId: string | null }> {
-    if (requested === null) {
-      if (user.role === 'opiekun') {
-        throw new ForbiddenException(
-          'Opiekun nie może odpiąć przewoźnika od siebie',
-        );
-      }
-      return { opiekunId: null };
-    }
+    requested: string | undefined,
+  ): Promise<{ opiekunId: string } | undefined> {
+    // The schema strips `null` from the optional UUID via emptyStringToUndefined,
+    // so we only ever see a string or undefined here. `undefined` means "do
+    // not touch"; the carriers.service caller passes us only strings.
+    if (requested === undefined) return undefined;
     if (user.role === 'opiekun' && requested !== user.sub) {
       throw new ForbiddenException(
         'Opiekun nie może przypisać innego opiekuna',

@@ -2,10 +2,23 @@
 //
 // Source of truth for `/api/v1/carriers/*` per docs/13-api-design.md#carriers
 // and docs/04-data-model.md (Carrier extension of User, opiekunId invariants).
+//
+// Phase 2 migration `phase2_required_fields_carrier_driver_trailer` made
+// `phone` and `opiekunId` NOT NULL — both are required on create and
+// non-nullable in the response DTO. Existing carrier UIs MUST send `opiekunId`
+// explicitly; the service-side fallback for `role=opiekun` callers is kept as
+// defense-in-depth but the schema layer enforces presence first.
 
 import { z } from 'zod';
 
-import { IsoDateSchema, IsoDateTimeSchema, UuidSchema } from './common';
+import {
+  EuVatSchema,
+  IsoDateSchema,
+  IsoDateTimeSchema,
+  UuidSchema,
+  emptyStringToUndefined,
+} from './common';
+import { PolishNipSchema } from './integrations/whitelist';
 
 // ─── Field primitives shared by create/update ────────────
 
@@ -19,24 +32,32 @@ const LoginSchema = z
 
 const NameSchema = z.string().min(1).max(128);
 const EmailSchema = z.string().email().max(160);
+const PhoneRequiredSchema = z.string().min(1).max(64);
 
 const carrierProfileFields = {
-  nip: z.string().min(1).max(32).optional(),
-  vatId: z.string().min(1).max(32).optional(),
-  contactPerson: z.string().max(255).optional(),
-  phone: z.string().max(64).optional(),
-  ordersEmail: EmailSchema.optional(),
+  /** Polish NIP (10 digits) — optional for foreign carriers. */
+  nip: emptyStringToUndefined(PolishNipSchema.max(32).optional()),
+  /** EU VAT — country code + 2–12 alphanumeric. Optional for PL-only carriers. */
+  vatId: emptyStringToUndefined(EuVatSchema.max(32).optional()),
+  contactPerson: emptyStringToUndefined(z.string().max(255).optional()),
+  /** REQUIRED — Carrier.phone is NOT NULL since phase-2 migration. */
+  phone: PhoneRequiredSchema,
+  ordersEmail: emptyStringToUndefined(EmailSchema.optional()),
   /** EUR IBAN. We don't enforce ISO format here — Phase 4 adds VIES/IBAN check. */
-  accountEur: z.string().max(64).optional(),
-  accountPln: z.string().max(64).optional(),
+  accountEur: emptyStringToUndefined(z.string().max(64).optional()),
+  accountPln: emptyStringToUndefined(z.string().max(64).optional()),
   paymentTerms: z.number().int().nonnegative().max(365).optional(),
   insuranceValue: z.number().nonnegative().optional(),
-  insuranceExpiry: IsoDateSchema.optional(),
-  licenseExpiry: IsoDateSchema.optional(),
+  insuranceExpiry: emptyStringToUndefined(IsoDateSchema.optional()),
+  licenseExpiry: emptyStringToUndefined(IsoDateSchema.optional()),
   numberOfPermits: z.number().int().nonnegative().max(10_000).optional(),
-  companyAddress: z.string().max(500).optional(),
-  /** opiekun (User with role='opiekun') — service validates the role. */
-  opiekunId: UuidSchema.optional(),
+  companyAddress: emptyStringToUndefined(z.string().max(500).optional()),
+  /**
+   * REQUIRED — Carrier.opiekunId is NOT NULL since phase-2 migration. UIs must
+   * send it explicitly; the service still validates the referenced user has
+   * role='opiekun' and is active.
+   */
+  opiekunId: UuidSchema,
 };
 
 // ─── Create ──────────────────────────────────────────────
@@ -45,16 +66,13 @@ const carrierProfileFields = {
  * POST /carriers — provisions a `User(role=przewoznik)` and a `Carrier` row
  * in the same transaction. `password` is optional; when omitted the API
  * generates one and returns it as `temporaryPassword` (Phase 2 stub).
- *
- * For role=opiekun callers the service auto-fills `opiekunId = user.sub` if
- * it isn't supplied — see CarriersService._resolveOpiekunId.
  */
 export const CreateCarrierSchema = z
   .object({
     login: LoginSchema,
     email: EmailSchema,
     name: NameSchema,
-    company: z.string().max(255).optional(),
+    company: emptyStringToUndefined(z.string().max(255).optional()),
     password: z.string().min(10).max(128).optional(),
     ...carrierProfileFields,
   })
@@ -67,23 +85,35 @@ export type CreateCarrierDto = z.infer<typeof CreateCarrierSchema>;
  * PATCH /carriers/:id — every field optional. `login` cannot be changed
  * (login is the carrier's stable identifier); to swap it admin should
  * deactivate + create new.
+ *
+ * `phone` and `opiekunId` are still optional in PATCH semantics (omit means
+ * "do not touch"), but neither may be sent as `null` since the column is
+ * NOT NULL.
  */
 export const UpdateCarrierSchema = z
   .object({
     email: EmailSchema.optional(),
     name: NameSchema.optional(),
-    company: z.string().max(255).nullable().optional(),
-    nip: z.string().min(1).max(32).nullable().optional(),
-    vatId: z.string().min(1).max(32).nullable().optional(),
-    contactPerson: z.string().max(255).nullable().optional(),
-    phone: z.string().max(64).nullable().optional(),
-    ordersEmail: EmailSchema.nullable().optional(),
-    accountEur: z.string().max(64).nullable().optional(),
-    accountPln: z.string().max(64).nullable().optional(),
+    company: emptyStringToUndefined(z.string().max(255).nullable().optional()),
+    nip: emptyStringToUndefined(PolishNipSchema.max(32).nullable().optional()),
+    vatId: emptyStringToUndefined(EuVatSchema.max(32).nullable().optional()),
+    contactPerson: emptyStringToUndefined(
+      z.string().max(255).nullable().optional(),
+    ),
+    phone: emptyStringToUndefined(PhoneRequiredSchema.optional()),
+    ordersEmail: emptyStringToUndefined(EmailSchema.nullable().optional()),
+    accountEur: emptyStringToUndefined(
+      z.string().max(64).nullable().optional(),
+    ),
+    accountPln: emptyStringToUndefined(
+      z.string().max(64).nullable().optional(),
+    ),
     paymentTerms: z.number().int().nonnegative().max(365).nullable().optional(),
     insuranceValue: z.number().nonnegative().nullable().optional(),
-    insuranceExpiry: IsoDateSchema.nullable().optional(),
-    licenseExpiry: IsoDateSchema.nullable().optional(),
+    insuranceExpiry: emptyStringToUndefined(
+      IsoDateSchema.nullable().optional(),
+    ),
+    licenseExpiry: emptyStringToUndefined(IsoDateSchema.nullable().optional()),
     numberOfPermits: z
       .number()
       .int()
@@ -91,8 +121,10 @@ export const UpdateCarrierSchema = z
       .max(10_000)
       .nullable()
       .optional(),
-    companyAddress: z.string().max(500).nullable().optional(),
-    opiekunId: UuidSchema.nullable().optional(),
+    companyAddress: emptyStringToUndefined(
+      z.string().max(500).nullable().optional(),
+    ),
+    opiekunId: emptyStringToUndefined(UuidSchema.optional()),
     active: z.boolean().optional(),
   })
   .strict();
@@ -126,7 +158,7 @@ export const CarrierDtoSchema = z.object({
   nip: z.string().nullable(),
   vatId: z.string().nullable(),
   contactPerson: z.string().nullable(),
-  phone: z.string().nullable(),
+  phone: z.string(),
   ordersEmail: z.string().email().nullable(),
   accountEur: z.string().nullable(),
   accountPln: z.string().nullable(),
@@ -136,14 +168,12 @@ export const CarrierDtoSchema = z.object({
   licenseExpiry: IsoDateSchema.nullable(),
   numberOfPermits: z.number().int().nullable(),
   companyAddress: z.string().nullable(),
-  opiekunId: UuidSchema.nullable(),
-  opiekun: z
-    .object({
-      id: UuidSchema,
-      login: z.string(),
-      name: z.string().nullable(),
-    })
-    .nullable(),
+  opiekunId: UuidSchema,
+  opiekun: z.object({
+    id: UuidSchema,
+    login: z.string(),
+    name: z.string().nullable(),
+  }),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
 });

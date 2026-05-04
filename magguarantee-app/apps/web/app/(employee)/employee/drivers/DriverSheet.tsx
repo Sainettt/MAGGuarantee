@@ -201,6 +201,7 @@ export function DriverSheet({ open, driver, onClose }: Props) {
                 </FormField>
                 <FormField
                   label={t('fields.phone')}
+                  required
                   error={errs.phone?.message}
                   htmlFor="driver-phone"
                 >
@@ -235,6 +236,7 @@ export function DriverSheet({ open, driver, onClose }: Props) {
                 </FormField>
                 <FormField
                   label={t('fields.driverLicenseNumber')}
+                  required
                   error={errs.driverLicenseNumber?.message}
                   htmlFor="driver-license"
                 >

@@ -6,7 +6,12 @@
 
 import { z } from 'zod';
 
-import { IsoDateSchema, IsoDateTimeSchema, UuidSchema } from './common';
+import {
+  IsoDateSchema,
+  IsoDateTimeSchema,
+  UuidSchema,
+  emptyStringToUndefined,
+} from './common';
 
 // ─── Field primitives ────────────────────────────────────
 
@@ -18,10 +23,10 @@ const VehicleTypeSchema = z.enum(['MEGA', 'STD', 'COIL']);
 const vehicleAttributeFields = {
   plannerId: UuidSchema.optional(),
   dispatcherId: UuidSchema.optional(),
-  brand: z.string().max(64).optional(),
-  model: z.string().max(64).optional(),
+  brand: emptyStringToUndefined(z.string().max(64).optional()),
+  model: emptyStringToUndefined(z.string().max(64).optional()),
   year: z.number().int().min(1900).max(2100).optional(),
-  notes: z.string().max(2_000).optional(),
+  notes: emptyStringToUndefined(z.string().max(2_000).optional()),
   certificateL: CertificateLSchema.optional(),
   euro: EuroNormSchema.optional(),
   adrClasses: z.array(z.string().max(16)).max(20).optional(),
@@ -41,9 +46,9 @@ const vehicleAttributeFields = {
   wasteCountries: z.array(z.string().max(8)).max(64).optional(),
   cabotageDe: z.boolean().optional(),
   cabotageFr: z.boolean().optional(),
-  gpsMobilePhone: z.string().max(32).optional(),
-  nextInspectionDate: IsoDateSchema.optional(),
-  sideNumber: z.string().max(16).optional(),
+  gpsMobilePhone: emptyStringToUndefined(z.string().max(32).optional()),
+  nextInspectionDate: emptyStringToUndefined(IsoDateSchema.optional()),
+  sideNumber: emptyStringToUndefined(z.string().max(16).optional()),
 };
 
 // ─── Create ──────────────────────────────────────────────
@@ -66,10 +71,10 @@ export const UpdateVehicleSchema = z
     active: z.boolean().optional(),
     plannerId: UuidSchema.nullable().optional(),
     dispatcherId: UuidSchema.nullable().optional(),
-    brand: z.string().max(64).nullable().optional(),
-    model: z.string().max(64).nullable().optional(),
+    brand: emptyStringToUndefined(z.string().max(64).nullable().optional()),
+    model: emptyStringToUndefined(z.string().max(64).nullable().optional()),
     year: z.number().int().min(1900).max(2100).nullable().optional(),
-    notes: z.string().max(2_000).nullable().optional(),
+    notes: emptyStringToUndefined(z.string().max(2_000).nullable().optional()),
     certificateL: CertificateLSchema.nullable().optional(),
     euro: EuroNormSchema.nullable().optional(),
     adrClasses: z.array(z.string().max(16)).max(20).optional(),
@@ -89,9 +94,15 @@ export const UpdateVehicleSchema = z
     wasteCountries: z.array(z.string().max(8)).max(64).optional(),
     cabotageDe: z.boolean().optional(),
     cabotageFr: z.boolean().optional(),
-    gpsMobilePhone: z.string().max(32).nullable().optional(),
-    nextInspectionDate: IsoDateSchema.nullable().optional(),
-    sideNumber: z.string().max(16).nullable().optional(),
+    gpsMobilePhone: emptyStringToUndefined(
+      z.string().max(32).nullable().optional(),
+    ),
+    nextInspectionDate: emptyStringToUndefined(
+      IsoDateSchema.nullable().optional(),
+    ),
+    sideNumber: emptyStringToUndefined(
+      z.string().max(16).nullable().optional(),
+    ),
   })
   .strict();
 export type UpdateVehicleDto = z.infer<typeof UpdateVehicleSchema>;

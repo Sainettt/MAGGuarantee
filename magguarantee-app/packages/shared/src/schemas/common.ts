@@ -10,6 +10,39 @@
 
 import { z } from 'zod';
 
+// ─── Form-friendly preprocessor ───────────────────────────
+
+/**
+ * Converts empty strings to `undefined` BEFORE the wrapped schema validates.
+ * Use to wrap optional string fields fed from HTML form inputs — RHF stores
+ * cleared inputs as `''` instead of `undefined`, which would otherwise trip
+ * `.email()` / `.regex()` etc. on optional fields.
+ *
+ * Also coerces `null` → `undefined` so the same helper covers JSON payloads
+ * where a deliberate "clear this field" might come in as null from PATCH.
+ */
+export const emptyStringToUndefined = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((v) => (v === '' || v === null ? undefined : v), schema);
+
+// ─── EU VAT format (generic — per-country regex omitted for MVP) ──
+
+/**
+ * EU VAT identifier: 2-letter country code + 2–12 alphanumeric characters.
+ * We don't enforce per-country format here (PL is 10 digits, IE allows
+ * letters, etc.) — Phase 4 VIES check authoritative confirms validity.
+ *
+ * NOT to be confused with `ViesVatSchema` in `./integrations/vies.ts` which
+ * is just the *digits-only* portion of the VAT used as a path-param when
+ * calling the VIES service.
+ */
+export const EuVatSchema = z
+  .string()
+  .regex(
+    /^[A-Z]{2}[A-Za-z0-9]{2,12}$/,
+    'VAT must be a country code (2 letters) followed by 2–12 alphanumeric characters',
+  );
+export type EuVat = z.infer<typeof EuVatSchema>;
+
 // ─── Identifier primitives ────────────────────────────────
 
 /** RFC-4122 UUID v4 (Postgres `gen_random_uuid()` default). */

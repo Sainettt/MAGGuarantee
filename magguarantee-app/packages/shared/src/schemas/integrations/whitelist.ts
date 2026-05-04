@@ -16,6 +16,15 @@ import { IsoDateTimeSchema } from '../common';
 export const NipSchema = z.string().regex(/^\d{10}$/, 'NIP must be 10 digits');
 export type Nip = z.infer<typeof NipSchema>;
 
+/**
+ * Alias of {@link NipSchema} re-exported under the more explicit name used by
+ * domain forms outside the white-list module (e.g. carrier create/update DTOs
+ * accept a Polish NIP). Single source of truth — any change to the regex
+ * happens here and propagates everywhere.
+ */
+export const PolishNipSchema = NipSchema;
+export type PolishNip = Nip;
+
 /** Polish bank-account number — 26 digits (IBAN-style without country prefix). */
 export const PolishBankAccountSchema = z
   .string()

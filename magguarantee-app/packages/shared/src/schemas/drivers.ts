@@ -3,16 +3,29 @@
 // Source of truth for `/api/v1/drivers/*` per docs/13-api-design.md#drivers
 // and docs/04-data-model.md (Driver invariants: loginSlug globally unique with
 // `-2`/`-3` suffix on collision, generated from firstName.lastName).
+//
+// Phase 2 migration `phase2_required_fields_carrier_driver_trailer` made
+// `phone` and `driverLicenseNumber` NOT NULL — both are required on create
+// and non-nullable in the response DTO.
 
 import { z } from 'zod';
 
-import { IsoDateSchema, IsoDateTimeSchema, UuidSchema } from './common';
+import {
+  IsoDateSchema,
+  IsoDateTimeSchema,
+  UuidSchema,
+  emptyStringToUndefined,
+} from './common';
 
 // ─── Field primitives ────────────────────────────────────
 
 const NameSchema = z.string().min(1).max(64);
-const PhoneSchema = z.string().max(32);
+/** Phone — non-empty, max 32 chars (now NOT NULL in Driver per phase 2). */
+const PhoneRequiredSchema = z.string().min(1).max(32);
+/** Optional phone (e.g. `phone2`) — same length cap, allows undefined. */
+const PhoneOptionalSchema = z.string().min(1).max(32);
 const EmailSchema = z.string().email().max(160);
+const DriverLicenseSchema = z.string().min(1).max(64);
 
 // ─── Create ──────────────────────────────────────────────
 
@@ -20,19 +33,22 @@ const EmailSchema = z.string().email().max(160);
  * POST /drivers — `carrierId` is optional in the body; if omitted (e.g. when
  * a carrier user posts), the service falls back to `currentUser.carrierProfile.id`
  * per the spec. `loginSlug` is server-generated from `firstName.lastName`.
+ *
+ * `phone` and `driverLicenseNumber` are required since the phase-2 migration
+ * made the underlying columns NOT NULL.
  */
 export const CreateDriverSchema = z
   .object({
     carrierId: UuidSchema.optional(),
     firstName: NameSchema,
     lastName: NameSchema,
-    phone: PhoneSchema.optional(),
-    phone2: PhoneSchema.optional(),
-    email: EmailSchema.optional(),
-    driverLicenseNumber: z.string().max(64).optional(),
-    licenseExpiry: IsoDateSchema.optional(),
-    bankAccount: z.string().max(64).optional(),
-    notes: z.string().max(2_000).optional(),
+    phone: PhoneRequiredSchema,
+    phone2: emptyStringToUndefined(PhoneOptionalSchema.optional()),
+    email: emptyStringToUndefined(EmailSchema.optional()),
+    driverLicenseNumber: DriverLicenseSchema,
+    licenseExpiry: emptyStringToUndefined(IsoDateSchema.optional()),
+    bankAccount: emptyStringToUndefined(z.string().max(64).optional()),
+    notes: emptyStringToUndefined(z.string().max(2_000).optional()),
     active: z.boolean().optional(),
   })
   .strict();
@@ -40,17 +56,25 @@ export type CreateDriverDto = z.infer<typeof CreateDriverSchema>;
 
 // ─── Update ──────────────────────────────────────────────
 
+/**
+ * PATCH /drivers/:id — every field optional. Required-on-create columns
+ * (`phone`, `driverLicenseNumber`) drop the `.nullable()` they used to have
+ * because the DB no longer accepts NULL there. Empty form strings are
+ * coerced to `undefined` (i.e. "leave field unchanged").
+ */
 export const UpdateDriverSchema = z
   .object({
-    firstName: NameSchema.optional(),
-    lastName: NameSchema.optional(),
-    phone: PhoneSchema.nullable().optional(),
-    phone2: PhoneSchema.nullable().optional(),
-    email: EmailSchema.nullable().optional(),
-    driverLicenseNumber: z.string().max(64).nullable().optional(),
-    licenseExpiry: IsoDateSchema.nullable().optional(),
-    bankAccount: z.string().max(64).nullable().optional(),
-    notes: z.string().max(2_000).nullable().optional(),
+    firstName: emptyStringToUndefined(NameSchema.optional()),
+    lastName: emptyStringToUndefined(NameSchema.optional()),
+    phone: emptyStringToUndefined(PhoneRequiredSchema.optional()),
+    phone2: emptyStringToUndefined(PhoneOptionalSchema.nullable().optional()),
+    email: emptyStringToUndefined(EmailSchema.nullable().optional()),
+    driverLicenseNumber: emptyStringToUndefined(DriverLicenseSchema.optional()),
+    licenseExpiry: emptyStringToUndefined(IsoDateSchema.nullable().optional()),
+    bankAccount: emptyStringToUndefined(
+      z.string().max(64).nullable().optional(),
+    ),
+    notes: emptyStringToUndefined(z.string().max(2_000).nullable().optional()),
     active: z.boolean().optional(),
   })
   .strict();
@@ -77,10 +101,10 @@ export const DriverDtoSchema = z.object({
   loginSlug: z.string(),
   firstName: z.string(),
   lastName: z.string(),
-  phone: z.string().nullable(),
+  phone: z.string(),
   phone2: z.string().nullable(),
   email: z.string().email().nullable(),
-  driverLicenseNumber: z.string().nullable(),
+  driverLicenseNumber: z.string(),
   licenseExpiry: IsoDateSchema.nullable(),
   bankAccount: z.string().nullable(),
   notes: z.string().nullable(),

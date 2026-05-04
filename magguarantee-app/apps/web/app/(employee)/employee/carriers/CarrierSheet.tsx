@@ -5,14 +5,25 @@
 // badge. Both checks run on-blur; failures degrade to "service unavailable"
 // (warning) so the form never breaks if api-agent's integrations endpoints
 // aren't deployed yet.
+//
+// Phase-2 contract changes (db-agent migration `phase2_required_fields_…`):
+//   - `phone` is now NOT NULL on the Carrier row; UI marks it required.
+//   - `opiekunId` is NOT NULL; UI surfaces a required Select preselected to
+//     the current opiekun when the form is opened by an opiekun.
+//   - `vatId` stays optional on the API but the UI now splits it into a
+//     country dropdown (EU_VAT_COUNTRIES) + a numeric/alnum suffix that we
+//     concatenate just before mutate.
+//   - `nip` accepts only 10 digits; we strip whitespace + hyphens at write
+//     time (setValueAs) so paste-from-Excel still works.
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslations } from 'next-intl';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
   CreateCarrierSchema,
+  EU_VAT_COUNTRIES,
   UpdateCarrierSchema,
   type CarrierDto,
   type CreateCarrierDto,
@@ -38,16 +49,23 @@ import {
   FieldValidationBadge,
   type FieldValidationState,
 } from '@/components/forms/FieldValidationBadge';
+import { ApiResponseError } from '@/lib/api/client';
 import {
   checkVies,
   checkWhitelist,
   INTEGRATION_UNAVAILABLE,
 } from '@/lib/api/integrations';
+import { useAuth } from '@/lib/hooks/useAuth';
 import { useCreateCarrier, useUpdateCarrier } from '@/lib/hooks/useCarriers';
 import { useFormDraft } from '@/lib/hooks/useFormDraft';
 import { useOpiekuni } from '@/lib/hooks/useLookups';
 
 const DRAFT_KEY = 'draft:carriers:new';
+
+// Codes used by EuVatSchema (regex `^[A-Z]{2}…`). The set of codes is
+// stable so we keep a literal default rather than introducing another
+// runtime constant.
+const DEFAULT_VAT_COUNTRY = 'PL';
 
 interface Props {
   open: boolean;
@@ -58,7 +76,16 @@ interface Props {
 // Single form-values shape for both modes. Create has all the fields plus
 // `password` (no `active`); Update has `active` (no `password`/`login`). The
 // onSubmit handler picks the right slice before posting.
-type CarrierFormValues = CreateCarrierDto & { active?: boolean };
+//
+// `_vatCountry` / `_vatNumber` are *form-only* helper fields. They never
+// reach the API — `cleanForm` strips them after we combine them into
+// `vatId`. RHF's `passthrough()` resolver lets these unknown keys live in
+// the form state without tripping the strict Zod schemas.
+type CarrierFormValues = CreateCarrierDto & {
+  active?: boolean;
+  _vatCountry?: string;
+  _vatNumber?: string;
+};
 
 const NUMERIC_FIELDS = [
   'paymentTerms',
@@ -66,16 +93,21 @@ const NUMERIC_FIELDS = [
   'numberOfPermits',
 ] as const;
 
+// Fields that are part of form state but never go to the API.
+const FORM_ONLY_FIELDS = ['_vatCountry', '_vatNumber'] as const;
+
 export function CarrierSheet({ open, carrier, onClose }: Props) {
   const t = useTranslations('carriers');
   const tCommon = useTranslations('common');
   const tValidation = useTranslations('validation');
   const isEdit = carrier !== null;
+  const { user } = useAuth();
 
   // Both schemas are .strict() but our form carries fields that aren't part
-  // of the wire DTO (login/password in edit, active in create). Passthrough
-  // lets RHF run the resolver against the registered fields without choking
-  // on the spectator values; onSubmit strips them before the API call.
+  // of the wire DTO (login/password in edit, active in create, plus the
+  // VAT split helpers). Passthrough lets RHF run the resolver against the
+  // registered fields without choking on the spectator values; onSubmit
+  // strips them before the API call.
   const form = useForm<CarrierFormValues>({
     resolver: zodResolver(
       isEdit
@@ -142,11 +174,20 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
   // the user's typing intact. Edit mode skipped — server is source of truth.
   const draft = useFormDraft(form, DRAFT_KEY, { enabled: !isEdit });
 
+  // Default opiekunId on create: if the current user is an opiekun,
+  // preselect their own id. Computed once per `user` change so reset()
+  // below picks it up deterministically.
+  const defaultOpiekunId = useMemo(
+    () => (user?.role === 'opiekun' ? user.id : undefined),
+    [user?.role, user?.id],
+  );
+
   useEffect(() => {
     if (!open) return;
     setNipState('idle');
     setAccountState('idle');
     if (isEdit && carrier) {
+      const split = splitVatId(carrier.vatId);
       form.reset({
         login: carrier.login,
         email: carrier.email ?? '',
@@ -166,15 +207,20 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
         licenseExpiry: carrier.licenseExpiry ?? undefined,
         numberOfPermits: carrier.numberOfPermits ?? undefined,
         companyAddress: carrier.companyAddress ?? '',
-        opiekunId: carrier.opiekunId ?? undefined,
+        opiekunId: carrier.opiekunId,
         active: carrier.active,
+        _vatCountry: split.country,
+        _vatNumber: split.number,
       });
     } else {
       // Reset to empty defaults first, then overlay any saved draft on top.
-      form.reset(getDefaults());
+      form.reset({
+        ...getDefaults(),
+        opiekunId: defaultOpiekunId as unknown as string,
+      });
       draft.hydrate();
     }
-  }, [open, isEdit, carrier, form, draft]);
+  }, [open, isEdit, carrier, form, draft, defaultOpiekunId]);
 
   const createM = useCreateCarrier({
     onSuccess: (created) => {
@@ -195,18 +241,26 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
       }
       onClose();
     },
-    onError: () => toast.error(tCommon('errorGeneric')),
+    onError: (err) => toast.error(formatApiError(err, tCommon('errorGeneric'))),
   });
   const updateM = useUpdateCarrier({
     onSuccess: () => {
       toast.success(tCommon('saved'));
       onClose();
     },
-    onError: () => toast.error(tCommon('errorGeneric')),
+    onError: (err) => toast.error(formatApiError(err, tCommon('errorGeneric'))),
   });
 
   const onSubmit = form.handleSubmit((values) => {
-    const cleaned = cleanForm(values);
+    // Compose vatId from the split country / number helpers. Empty number
+    // → omit the field entirely (optional in both Create and Update DTOs).
+    const composedVat = composeVatId(values._vatCountry, values._vatNumber);
+    const merged: CarrierFormValues = {
+      ...values,
+      vatId: composedVat ?? '',
+    };
+
+    const cleaned = cleanForm(merged);
     if (isEdit && carrier) {
       // login isn't editable per Update schema; password not allowed either.
       const { login: _login, password: _pw, ...rest } = cleaned;
@@ -296,6 +350,7 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                   </FormField>
                   <FormField
                     label={t('fields.phone')}
+                    required
                     error={errMsg('phone')}
                     htmlFor="carrier-phone"
                   >
@@ -351,6 +406,7 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <FormField
                     label={t('fields.nip')}
+                    description={t('fields.nipHint')}
                     error={errMsg('nip')}
                     htmlFor="carrier-nip"
                   >
@@ -358,7 +414,16 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                       <Input
                         id="carrier-nip"
                         className="h-10"
+                        inputMode="numeric"
+                        maxLength={10}
+                        autoComplete="off"
                         {...form.register('nip', {
+                          // Strip whitespace and hyphens so paste-from-Excel
+                          // still produces 10 digits the API accepts.
+                          setValueAs: (v) =>
+                            typeof v === 'string'
+                              ? v.replace(/[\s-]/g, '')
+                              : v,
                           onBlur: () => {
                             void checkNip();
                           },
@@ -372,14 +437,41 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                   </FormField>
                   <FormField
                     label={t('fields.vatId')}
+                    description={t('fields.vatHint')}
                     error={errMsg('vatId')}
-                    htmlFor="carrier-vatId"
+                    htmlFor="carrier-vatNumber"
                   >
-                    <Input
-                      id="carrier-vatId"
-                      className="h-10"
-                      {...form.register('vatId')}
-                    />
+                    <div className="flex gap-2">
+                      <Select
+                        id="carrier-vatCountry"
+                        aria-label={t('fields.vatCountry')}
+                        className="h-10 max-w-[8rem]"
+                        {...form.register('_vatCountry')}
+                      >
+                        {EU_VAT_COUNTRIES.map((c) => (
+                          <option key={c.code} value={c.code}>
+                            {c.code} — {c.name}
+                          </option>
+                        ))}
+                      </Select>
+                      <Input
+                        id="carrier-vatNumber"
+                        aria-label={t('fields.vatNumber')}
+                        className="h-10 flex-1"
+                        inputMode="text"
+                        maxLength={12}
+                        autoComplete="off"
+                        {...form.register('_vatNumber', {
+                          // Strip whitespace + hyphens; uppercase letters so
+                          // EuVatSchema regex (`[A-Z]{2}[A-Za-z0-9]{2,12}`)
+                          // is happy regardless of how the user typed it.
+                          setValueAs: (v) =>
+                            typeof v === 'string'
+                              ? v.replace(/[\s-]/g, '').toUpperCase()
+                              : v,
+                        })}
+                      />
+                    </div>
                   </FormField>
                 </div>
                 <FormField
@@ -508,6 +600,7 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
               <FormSection title={t('sections.assignment')}>
                 <FormField
                   label={t('fields.opiekun')}
+                  required
                   error={errMsg('opiekunId')}
                   htmlFor="carrier-opiekunId"
                 >
@@ -541,7 +634,10 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                 size="sm"
                 onClick={() => {
                   draft.clear();
-                  form.reset(getDefaults());
+                  form.reset({
+                    ...getDefaults(),
+                    opiekunId: defaultOpiekunId as unknown as string,
+                  });
                   // Also clear any inline integration badges so they don't
                   // dangle for fields that were just wiped.
                   setNipState('idle');
@@ -591,16 +687,27 @@ function getDefaults(): CarrierFormValues {
     licenseExpiry: undefined,
     numberOfPermits: undefined,
     companyAddress: '',
-    opiekunId: undefined,
+    // opiekunId is required in CreateCarrierSchema (UUID). RHF needs a
+    // string-shaped controlled value — empty string parks the Select on
+    // its placeholder option and Zod will report "Invalid uuid" on submit
+    // if the user hasn't picked one.
+    opiekunId: '' as unknown as string,
     active: true,
+    _vatCountry: DEFAULT_VAT_COUNTRY,
+    _vatNumber: '',
   };
 }
 
+/**
+ * Strip empty / undefined / null values + the form-only helper keys, coerce
+ * numeric fields. Mutates nothing.
+ */
 function cleanForm(
   values: CarrierFormValues,
 ): Record<string, unknown> & { active?: boolean } {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(values)) {
+    if ((FORM_ONLY_FIELDS as readonly string[]).includes(k)) continue;
     if (v === '' || v === undefined || v === null) continue;
     if ((NUMERIC_FIELDS as readonly string[]).includes(k)) {
       const n = typeof v === 'number' ? v : Number(v);
@@ -611,4 +718,52 @@ function cleanForm(
     }
   }
   return out;
+}
+
+/**
+ * Combine the country-code dropdown and the suffix input into the single
+ * VAT-ID string the API expects. Returns `undefined` when the suffix is
+ * empty so callers can omit the field entirely.
+ */
+function composeVatId(
+  country: string | undefined,
+  number: string | undefined,
+): string | undefined {
+  const c = (country ?? '').trim().toUpperCase();
+  const n = (number ?? '').replace(/[\s-]/g, '').toUpperCase();
+  if (!n) return undefined;
+  // Country missing — fall back to PL so the resulting string still has the
+  // 2-letter prefix EuVatSchema requires; any further validation is on the
+  // server.
+  return `${c || DEFAULT_VAT_COUNTRY}${n}`;
+}
+
+/**
+ * Pull a user-facing message off an API error. The backend uses RFC 7807
+ * problem-details with localized Polish messages for 4xx (e.g. 409 Conflict
+ * "Login lub email są już zajęte"); we surface those as-is. For 5xx (server
+ * crash) we fall through to the caller's generic fallback.
+ */
+function formatApiError(err: unknown, fallback: string): string {
+  if (err instanceof ApiResponseError && err.status >= 400 && err.status < 500) {
+    return err.message || fallback;
+  }
+  return fallback;
+}
+
+/**
+ * Inverse of {@link composeVatId} — splits an existing carrier's `vatId`
+ * back into the dropdown + suffix shape the form uses for display. Tolerant
+ * of legacy values that don't start with a 2-letter prefix.
+ */
+function splitVatId(vatId: string | null | undefined): {
+  country: string;
+  number: string;
+} {
+  if (!vatId) return { country: DEFAULT_VAT_COUNTRY, number: '' };
+  const head = vatId.slice(0, 2);
+  if (/^[A-Z]{2}$/.test(head)) {
+    return { country: head, number: vatId.slice(2) };
+  }
+  return { country: DEFAULT_VAT_COUNTRY, number: vatId };
 }

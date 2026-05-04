@@ -2,23 +2,34 @@
 //
 // Source of truth for `/api/v1/trailers/*` per docs/13-api-design.md#trailers
 // and docs/04-data-model.md (composite (carrierId, plateNumber) uniqueness;
-// trailerTypeId optional FK to TrailerType which must be active).
+// trailerTypeId FK to TrailerType which must be active).
+//
+// Phase 2 migration `phase2_required_fields_carrier_driver_trailer` made
+// `trailerTypeId` NOT NULL — required on create; non-nullable in the response.
 
 import { z } from 'zod';
 
-import { IsoDateSchema, IsoDateTimeSchema, UuidSchema } from './common';
+import {
+  IsoDateSchema,
+  IsoDateTimeSchema,
+  UuidSchema,
+  emptyStringToUndefined,
+} from './common';
 
 // ─── Field primitives ────────────────────────────────────
 
 const PlateSchema = z.string().min(2).max(16);
 
+/**
+ * Optional trailer attributes (excluding `trailerTypeId` which is now
+ * required and lives on the create schema directly).
+ */
 const trailerAttributeFields = {
-  trailerTypeId: UuidSchema.optional(),
-  brand: z.string().max(64).optional(),
-  model: z.string().max(64).optional(),
+  brand: emptyStringToUndefined(z.string().max(64).optional()),
+  model: emptyStringToUndefined(z.string().max(64).optional()),
   year: z.number().int().min(1900).max(2100).optional(),
-  equipment: z.string().max(2_000).optional(),
-  nextInspectionDate: IsoDateSchema.optional(),
+  equipment: emptyStringToUndefined(z.string().max(2_000).optional()),
+  nextInspectionDate: emptyStringToUndefined(IsoDateSchema.optional()),
   belts: z.boolean().optional(),
   mats: z.boolean().optional(),
   innerLength: z.number().nonnegative().optional(),
@@ -31,7 +42,7 @@ const trailerAttributeFields = {
   loadFromTop: z.boolean().optional(),
   slidingRoof: z.boolean().optional(),
   edschaSlidingRoof: z.boolean().optional(),
-  notes: z.string().max(2_000).optional(),
+  notes: emptyStringToUndefined(z.string().max(2_000).optional()),
 };
 
 // ─── Create ──────────────────────────────────────────────
@@ -40,6 +51,8 @@ export const CreateTrailerSchema = z
   .object({
     carrierId: UuidSchema,
     plateNumber: PlateSchema,
+    /** REQUIRED — Trailer.trailerTypeId is NOT NULL since phase-2 migration. */
+    trailerTypeId: UuidSchema,
     active: z.boolean().optional(),
     ...trailerAttributeFields,
   })
@@ -48,16 +61,24 @@ export type CreateTrailerDto = z.infer<typeof CreateTrailerSchema>;
 
 // ─── Update ──────────────────────────────────────────────
 
+/**
+ * PATCH /trailers/:id — `trailerTypeId` stays optional (omit = leave alone)
+ * but loses `.nullable()` because null is no longer valid per the DB.
+ */
 export const UpdateTrailerSchema = z
   .object({
     plateNumber: PlateSchema.optional(),
     active: z.boolean().optional(),
-    trailerTypeId: UuidSchema.nullable().optional(),
-    brand: z.string().max(64).nullable().optional(),
-    model: z.string().max(64).nullable().optional(),
+    trailerTypeId: emptyStringToUndefined(UuidSchema.optional()),
+    brand: emptyStringToUndefined(z.string().max(64).nullable().optional()),
+    model: emptyStringToUndefined(z.string().max(64).nullable().optional()),
     year: z.number().int().min(1900).max(2100).nullable().optional(),
-    equipment: z.string().max(2_000).nullable().optional(),
-    nextInspectionDate: IsoDateSchema.nullable().optional(),
+    equipment: emptyStringToUndefined(
+      z.string().max(2_000).nullable().optional(),
+    ),
+    nextInspectionDate: emptyStringToUndefined(
+      IsoDateSchema.nullable().optional(),
+    ),
     belts: z.boolean().nullable().optional(),
     mats: z.boolean().nullable().optional(),
     innerLength: z.number().nonnegative().nullable().optional(),
@@ -70,7 +91,7 @@ export const UpdateTrailerSchema = z
     loadFromTop: z.boolean().nullable().optional(),
     slidingRoof: z.boolean().nullable().optional(),
     edschaSlidingRoof: z.boolean().nullable().optional(),
-    notes: z.string().max(2_000).nullable().optional(),
+    notes: emptyStringToUndefined(z.string().max(2_000).nullable().optional()),
   })
   .strict();
 export type UpdateTrailerDto = z.infer<typeof UpdateTrailerSchema>;
@@ -96,15 +117,13 @@ export const TrailerDtoSchema = z.object({
   carrierId: UuidSchema,
   plateNumber: z.string(),
   active: z.boolean(),
-  trailerTypeId: UuidSchema.nullable(),
-  trailerType: z
-    .object({
-      id: UuidSchema,
-      name: z.string(),
-      shortCode: z.string().nullable(),
-      active: z.boolean(),
-    })
-    .nullable(),
+  trailerTypeId: UuidSchema,
+  trailerType: z.object({
+    id: UuidSchema,
+    name: z.string(),
+    shortCode: z.string().nullable(),
+    active: z.boolean(),
+  }),
   brand: z.string().nullable(),
   model: z.string().nullable(),
   year: z.number().int().nullable(),

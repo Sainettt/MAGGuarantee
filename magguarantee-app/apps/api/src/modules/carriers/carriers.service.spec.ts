@@ -29,7 +29,7 @@ function makeCarrier(overrides: Partial<CarrierRow> = {}): CarrierRow {
     nip: null,
     vatId: null,
     contactPerson: null,
-    phone: null,
+    phone: '+48000000000',
     ordersEmail: null,
     accountEur: null,
     accountPln: null,
@@ -39,8 +39,8 @@ function makeCarrier(overrides: Partial<CarrierRow> = {}): CarrierRow {
     licenseExpiry: null,
     numberOfPermits: null,
     companyAddress: null,
-    opiekunId: null,
-    opiekun: null,
+    opiekunId: 'op-fixture',
+    opiekun: { id: 'op-fixture', login: 'op', name: null },
     createdAt: NOW,
     updatedAt: NOW,
     deletedAt: null,
@@ -110,6 +110,7 @@ function makeCarriersRepo(seed: CarrierRow[] = []): CarriersRepository {
           meta: { target: ['login'] },
         });
       }
+      const opiekunId = data.opiekunId ?? 'op-fixture';
       const row = makeCarrier({
         id: `c-${rows.size + 1}`,
         userId: `u-c-${rows.size + 1}`,
@@ -117,7 +118,9 @@ function makeCarriersRepo(seed: CarrierRow[] = []): CarriersRepository {
         email: data.email ?? null,
         name: data.name,
         company: data.company ?? null,
-        opiekunId: data.opiekunId ?? null,
+        phone: data.phone ?? '+48000000000',
+        opiekunId,
+        opiekun: { id: opiekunId, login: 'op', name: null },
       });
       rows.set(row.id, row);
       return row;
@@ -159,18 +162,20 @@ function makePasswords(): PasswordService {
 }
 
 describe('CarriersService', () => {
-  it('admin can create a carrier without opiekunId', async () => {
+  it('admin must specify opiekunId — service rejects when omitted (422)', async () => {
+    // Phase 2 migration made Carrier.opiekunId NOT NULL. The schema enforces
+    // presence; this test exercises the service-side defense-in-depth path.
     const carriers = makeCarriersRepo();
     const users = makeUsersRepo();
     const svc = new CarriersService(carriers, users, makePasswords());
-    const out = await svc.create(makeAuth('admin', 'a-1'), {
-      login: 'pwz-new',
-      email: 'p@example.com',
-      name: 'Pwz New',
-    });
-    expect(out.login).toBe('pwz-new');
-    expect(out.opiekunId).toBeNull();
-    expect(out.temporaryPassword).toMatch(/.{10,}/);
+    await expect(
+      svc.create(makeAuth('admin', 'a-1'), {
+        login: 'pwz-new',
+        email: 'p@example.com',
+        name: 'Pwz New',
+        phone: '+48000000000',
+      } as never),
+    ).rejects.toThrow(UnprocessableEntityException);
   });
 
   it('opiekun caller auto-assigns opiekunId=self', async () => {
@@ -181,7 +186,8 @@ describe('CarriersService', () => {
       login: 'pwz1',
       email: 'p@example.com',
       name: 'Pwz One',
-    });
+      phone: '+48000000000',
+    } as never);
     expect(out.opiekunId).toBe('op-1');
   });
 
@@ -194,8 +200,9 @@ describe('CarriersService', () => {
         login: 'pwz1',
         email: 'p@example.com',
         name: 'P',
+        phone: '+48000000000',
         opiekunId: 'op-2',
-      }),
+      } as never),
     ).rejects.toThrow(ForbiddenException);
   });
 
@@ -209,8 +216,9 @@ describe('CarriersService', () => {
         login: 'pwz1',
         email: 'p@example.com',
         name: 'P',
+        phone: '+48000000000',
         opiekunId: 'u-x',
-      }),
+      } as never),
     ).rejects.toThrow(UnprocessableEntityException);
   });
 
@@ -223,8 +231,9 @@ describe('CarriersService', () => {
         login: 'pwz1',
         email: 'p@example.com',
         name: 'P',
+        phone: '+48000000000',
         opiekunId: 'missing',
-      }),
+      } as never),
     ).rejects.toThrow(UnprocessableEntityException);
   });
 
@@ -238,8 +247,9 @@ describe('CarriersService', () => {
         login: 'pwz1',
         email: 'p@example.com',
         name: 'P',
+        phone: '+48000000000',
         opiekunId: 'u-x',
-      }),
+      } as never),
     ).rejects.toThrow(UnprocessableEntityException);
   });
 
@@ -252,8 +262,9 @@ describe('CarriersService', () => {
       login: 'pwz1',
       email: 'p@example.com',
       name: 'P',
+      phone: '+48000000000',
       opiekunId: 'op-1',
-    });
+    } as never);
     expect(out.opiekunId).toBe('op-1');
   });
 
@@ -277,14 +288,21 @@ describe('CarriersService', () => {
 
   it('duplicate login on create → ConflictException', async () => {
     const dup = makeCarrier({ login: 'taken' });
+    const opiekun = makeUser({ id: 'op-1', role: 'opiekun', active: true });
     const carriers = makeCarriersRepo([dup]);
-    const svc = new CarriersService(carriers, makeUsersRepo(), makePasswords());
+    const svc = new CarriersService(
+      carriers,
+      makeUsersRepo([opiekun]),
+      makePasswords(),
+    );
     await expect(
       svc.create(makeAuth('admin', 'a-1'), {
         login: 'taken',
         email: 'b@example.com',
         name: 'B',
-      }),
+        phone: '+48000000000',
+        opiekunId: 'op-1',
+      } as never),
     ).rejects.toThrow(ConflictException);
   });
 
@@ -295,14 +313,5 @@ describe('CarriersService', () => {
       makePasswords(),
     );
     await expect(svc.getById('missing')).rejects.toThrow(NotFoundException);
-  });
-
-  it('opiekun cannot detach themselves on update (opiekunId=null)', async () => {
-    const c = makeCarrier({ id: 'c-1', opiekunId: 'op-1' });
-    const carriers = makeCarriersRepo([c]);
-    const svc = new CarriersService(carriers, makeUsersRepo(), makePasswords());
-    await expect(
-      svc.update(makeAuth('opiekun', 'op-1'), 'c-1', { opiekunId: null }),
-    ).rejects.toThrow(ForbiddenException);
   });
 });

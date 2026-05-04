@@ -93,9 +93,15 @@ export async function apiJson<T>(
   }
   if (!res.ok) {
     const data = (body ?? {}) as Record<string, unknown>;
+    // Backend wraps every error in an RFC 7807 envelope (ProblemDetailsFilter),
+    // so the human-readable text lives in `detail`. We keep `message` as a
+    // fallback for the rare path where Nest skips the filter (Phase 1 didn't
+    // have it everywhere) and end with the generic `HTTP <status>` last resort.
+    const detail = typeof data.detail === 'string' ? data.detail : undefined;
     const message =
-      typeof data.message === 'string' ? data.message : `HTTP ${res.status}`;
-    throw new ApiResponseError(res.status, message, data);
+      typeof data.message === 'string' ? data.message : undefined;
+    const errorMessage = detail ?? message ?? `HTTP ${res.status}`;
+    throw new ApiResponseError(res.status, errorMessage, data);
   }
   return body as T;
 }
