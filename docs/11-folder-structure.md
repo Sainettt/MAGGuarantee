@@ -244,7 +244,11 @@ MAGGuarantee/
     │       │       └── chip-color.ts
     │       │
     │       ├── i18n/
-    │       │   └── pl.json                     ← все строки UI (без переключателя пока)
+    │       │   ├── config.ts                   ← locales: ['pl', 'en'], default 'pl'
+    │       │   └── request.ts                  ← getRequestConfig для next-intl (cookie + header)
+    │       ├── messages/
+    │       │   ├── pl.json                     ← польские переводы (default)
+    │       │   └── en.json                     ← английские переводы
     │       │
     │       ├── public/
     │       │   ├── logo.svg

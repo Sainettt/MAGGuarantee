@@ -56,6 +56,7 @@ MAGGuarantee/                          ← корень репозитория
 | Уведомления | **sonner** | Toast-replacement для `showAlert` |
 | Графики | **Recharts** | Замена самописных pie/bar в dashboard |
 | Тесты | **Playwright** (e2e) + **Vitest** (unit) | Smoke-тесты ключевых flow |
+| i18n | **next-intl** | Польский (default) + английский. Cookie-based детекция (`mt_lang`), fallback через `Accept-Language`. Без URL-префиксов. Переключатель языка в header после логина и на login-странице. |
 
 ### Инфра / DevOps
 
@@ -189,7 +190,7 @@ MAGGuarantee/                          ← корень репозитория
 - Не делаем мобильное приложение.
 - Не делаем real-time (WebSockets) — нет необходимости.
 - Не делаем мультитенантность — один MagTrans, один namespace.
-- Не делаем i18n инфраструктуру с переключателем языков (UI остаётся на польском). Тексты выносим в один файл `pl.json`, чтобы потом было легко добавить — но переключатель не делаем.
+- ~~Не делаем i18n~~ — **сделано** в Phase 1: PL (default) + EN через `next-intl`, cookie-based, переключатель в header и на login. Добавление новых языков (DE/UK) — после launch.
 - Не делаем SSR-рендеринг таблиц с данными (всё CSR через TanStack Query). SSR оставляем для public страниц (login).
 
 ## Связь с остальными документами

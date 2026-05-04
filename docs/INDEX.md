@@ -88,7 +88,7 @@
 
 **Backend:** Node 20 + TypeScript + NestJS + Prisma + PostgreSQL + Redis + BullMQ + Nodemailer/Gmail API + JWT + Passport.
 
-**Frontend:** Next.js 15 (App Router) + TypeScript + Tailwind + shadcn/ui + TanStack Query + React Hook Form + Zod.
+**Frontend:** Next.js 15 (App Router) + TypeScript + Tailwind + shadcn/ui + TanStack Query + React Hook Form + Zod + next-intl (PL default + EN, cookie-based).
 
 **Инфра:** npm workspaces (без Turborepo) + Docker (всё контейнеризовано — api, web, Postgres, Redis в одном compose-стеке) + GitHub Container Registry для образов + GitHub Actions CI/CD + один VPS с **Caddy** как shared reverse-proxy (auto-HTTPS, multi-app роутинг по доменам) + Uptime Kuma для health-check.
 

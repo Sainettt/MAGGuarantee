@@ -54,7 +54,7 @@ Defined in `.claude/agents/`. Always invoke `orchestrator-agent` first for any n
 ## Stack (short version)
 
 - **Backend:** Node 20 + TypeScript + NestJS + Prisma + PostgreSQL + Redis + BullMQ + Gmail API + JWT.
-- **Frontend:** Next.js 15 (App Router) + TypeScript + Tailwind + shadcn/ui + TanStack Query + RHF + Zod.
+- **Frontend:** Next.js 15 (App Router) + TypeScript + Tailwind + shadcn/ui + TanStack Query + RHF + Zod + **next-intl** (PL default + EN, cookie-based).
 - **Infra:** npm workspaces (без Turborepo — `concurrently` для параллельного dev, `npm run X --workspaces --if-present` для остального) + Docker (всё контейнеризовано — api, web, Postgres, Redis в одном compose-стеке) + GitHub Container Registry для образов + GitHub Actions CI/CD + single VPS с **Caddy** как shared reverse-proxy (auto-HTTPS, multi-app роутинг по доменам).
 
 Full details: [`docs/10-target-architecture.md`](docs/10-target-architecture.md).
