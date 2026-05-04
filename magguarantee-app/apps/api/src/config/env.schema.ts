@@ -34,6 +34,15 @@ export const envSchema = z.object({
   MAIL_SMTP_HOST: z.string().default('localhost'),
   MAIL_SMTP_PORT: z.coerce.number().int().positive().default(1025),
   MAIL_FROM: z.string().default('no-reply@magtrans.eu'),
+
+  // ── GPS tracker (Phase 2 skeleton) ────────────────────
+  // Per docs/16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api.
+  // Mock provider is the default until MAGTRANS supplies real credentials.
+  GPS_PROVIDER: z.enum(['mock', 'vendor']).default('mock'),
+  GPS_VENDOR_BASE_URL: z.string().default(''),
+  GPS_VENDOR_API_KEY: z.string().default(''),
+  GPS_POLL_INTERVAL_SEC: z.coerce.number().int().positive().default(90),
+  GPS_CACHE_TTL_SEC: z.coerce.number().int().positive().default(300),
 });
 
 export type Env = z.infer<typeof envSchema>;

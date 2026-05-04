@@ -1,0 +1,282 @@
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
+
+import type { AuthUser } from '../auth/decorators/current-user.decorator';
+import type { CarrierRow } from '../carriers/carriers.repository';
+import { CarriersRepository } from '../carriers/carriers.repository';
+import {
+  DriversRepository,
+  type DriverRow,
+} from './drivers.repository';
+import { DriversService } from './drivers.service';
+
+const NOW = new Date('2026-05-01T10:00:00.000Z');
+
+function makeDriver(overrides: Partial<DriverRow> = {}): DriverRow {
+  return {
+    id: 'd-1',
+    carrierId: 'c-1',
+    loginSlug: 'jan.kowalski',
+    firstName: 'Jan',
+    lastName: 'Kowalski',
+    phone: null,
+    phone2: null,
+    email: null,
+    driverLicenseNumber: null,
+    licenseExpiry: null,
+    bankAccount: null,
+    notes: null,
+    active: true,
+    carrier: { id: 'c-1', login: 'pwz1', name: null },
+    createdAt: NOW,
+    updatedAt: NOW,
+    deletedAt: null,
+    ...overrides,
+  };
+}
+
+function makeCarrier(overrides: Partial<CarrierRow> = {}): CarrierRow {
+  return {
+    id: 'c-1',
+    userId: 'u-c-1',
+    login: 'pwz1',
+    email: null,
+    name: 'Pwz One',
+    company: null,
+    active: true,
+    nip: null,
+    vatId: null,
+    contactPerson: null,
+    phone: null,
+    ordersEmail: null,
+    accountEur: null,
+    accountPln: null,
+    paymentTerms: null,
+    insuranceValue: null,
+    insuranceExpiry: null,
+    licenseExpiry: null,
+    numberOfPermits: null,
+    companyAddress: null,
+    opiekunId: null,
+    opiekun: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+    deletedAt: null,
+    ...overrides,
+  };
+}
+
+function makeAuth(role: AuthUser['role'], sub = 'u-actor'): AuthUser {
+  return {
+    sub,
+    login: 'actor',
+    email: 'actor@magtrans.eu',
+    name: 'Actor',
+    role,
+  };
+}
+
+function makeDriversRepo(seed: DriverRow[] = []): DriversRepository {
+  const rows = new Map<string, DriverRow>();
+  const slugs = new Set<string>(seed.map((d) => d.loginSlug));
+  for (const d of seed) rows.set(d.id, d);
+  return {
+    findById: jest.fn(async (id: string) => rows.get(id) ?? null),
+    findByLoginSlug: jest.fn(async (slug: string) =>
+      [...rows.values()].find((d) => d.loginSlug === slug) ?? null,
+    ),
+    existsLoginSlug: jest.fn(async (slug: string) => slugs.has(slug)),
+    list: jest.fn(async (filters: { limit: number; carrierId?: string }) => {
+      let arr = [...rows.values()];
+      if (filters.carrierId)
+        arr = arr.filter((r) => r.carrierId === filters.carrierId);
+      return arr.slice(0, filters.limit + 1);
+    }),
+    create: jest.fn(async (data) => {
+      if (slugs.has(data.loginSlug)) {
+        throw Object.assign(new Error('P2002'), {
+          code: 'P2002',
+          meta: { target: ['loginSlug'] },
+        });
+      }
+      slugs.add(data.loginSlug);
+      const row = makeDriver({
+        id: `d-${rows.size + 1}`,
+        carrierId: data.carrierId,
+        loginSlug: data.loginSlug,
+        firstName: data.firstName,
+        lastName: data.lastName,
+      });
+      rows.set(row.id, row);
+      return row;
+    }),
+    update: jest.fn(async (id: string, patch: Record<string, unknown>) => {
+      const cur = rows.get(id);
+      if (!cur) throw new Error('not found');
+      const next = { ...cur, ...(patch as Partial<DriverRow>) };
+      rows.set(id, next);
+      return next;
+    }),
+    setActive: jest.fn(async (id: string, active: boolean) => {
+      const cur = rows.get(id);
+      if (!cur) throw new Error('not found');
+      const next = { ...cur, active };
+      rows.set(id, next);
+      return next;
+    }),
+    softDelete: jest.fn(async (id: string) => {
+      const cur = rows.get(id);
+      if (cur) rows.set(id, { ...cur, deletedAt: NOW });
+    }),
+  } as unknown as DriversRepository;
+}
+
+function makeCarriersRepo(seed: CarrierRow[] = []): CarriersRepository {
+  const rows = new Map<string, CarrierRow>();
+  for (const r of seed) rows.set(r.id, r);
+  return {
+    findById: jest.fn(async (id: string) => rows.get(id) ?? null),
+    list: jest.fn(async (filters: { limit: number; opiekunId?: string }) => {
+      let arr = [...rows.values()];
+      if (filters.opiekunId)
+        arr = arr.filter((r) => r.opiekunId === filters.opiekunId);
+      return arr.slice(0, filters.limit + 1);
+    }),
+  } as unknown as CarriersRepository;
+}
+
+describe('DriversService', () => {
+  it('generates loginSlug from firstName.lastName on create', async () => {
+    const carrier = makeCarrier();
+    const svc = new DriversService(
+      makeDriversRepo(),
+      makeCarriersRepo([carrier]),
+    );
+    const out = await svc.create(makeAuth('admin', 'a-1'), {
+      carrierId: 'c-1',
+      firstName: 'Jan',
+      lastName: 'Kowalski',
+    });
+    expect(out.loginSlug).toBe('jan.kowalski');
+  });
+
+  it('appends -2 when the base slug collides', async () => {
+    const existing = makeDriver({ loginSlug: 'jan.kowalski' });
+    const carrier = makeCarrier();
+    const svc = new DriversService(
+      makeDriversRepo([existing]),
+      makeCarriersRepo([carrier]),
+    );
+    const out = await svc.create(makeAuth('admin', 'a-1'), {
+      carrierId: 'c-1',
+      firstName: 'Jan',
+      lastName: 'Kowalski',
+    });
+    expect(out.loginSlug).toBe('jan.kowalski-2');
+  });
+
+  it('appends -3 when -2 is also taken', async () => {
+    const a = makeDriver({ id: 'd-a', loginSlug: 'jan.kowalski' });
+    const b = makeDriver({ id: 'd-b', loginSlug: 'jan.kowalski-2' });
+    const svc = new DriversService(
+      makeDriversRepo([a, b]),
+      makeCarriersRepo([makeCarrier()]),
+    );
+    const out = await svc.create(makeAuth('admin', 'a-1'), {
+      carrierId: 'c-1',
+      firstName: 'Jan',
+      lastName: 'Kowalski',
+    });
+    expect(out.loginSlug).toBe('jan.kowalski-3');
+  });
+
+  it('strips Polish diacritics in the slug', async () => {
+    const svc = new DriversService(
+      makeDriversRepo(),
+      makeCarriersRepo([makeCarrier()]),
+    );
+    const out = await svc.create(makeAuth('admin', 'a-1'), {
+      carrierId: 'c-1',
+      firstName: 'Łukasz',
+      lastName: 'Żółć',
+    });
+    expect(out.loginSlug).toBe('lukasz.zolc');
+  });
+
+  it('falls back to user.carrierProfile.id when przewoznik omits carrierId', async () => {
+    const carrier = makeCarrier({ id: 'c-mine', userId: 'u-self' });
+    const svc = new DriversService(
+      makeDriversRepo(),
+      makeCarriersRepo([carrier]),
+    );
+    const out = await svc.create(makeAuth('przewoznik', 'u-self'), {
+      firstName: 'Anna',
+      lastName: 'Nowak',
+    });
+    expect(out.carrierId).toBe('c-mine');
+  });
+
+  it('admin without carrierId in body → 422', async () => {
+    const svc = new DriversService(makeDriversRepo(), makeCarriersRepo());
+    await expect(
+      svc.create(makeAuth('admin', 'a-1'), {
+        firstName: 'Anna',
+        lastName: 'Nowak',
+      }),
+    ).rejects.toThrow(UnprocessableEntityException);
+  });
+
+  it('opiekun writing on non-owned carrier → 403', async () => {
+    const carrier = makeCarrier({ id: 'c-other', opiekunId: 'op-2' });
+    const svc = new DriversService(
+      makeDriversRepo(),
+      makeCarriersRepo([carrier]),
+    );
+    await expect(
+      svc.create(makeAuth('opiekun', 'op-1'), {
+        carrierId: 'c-other',
+        firstName: 'Jan',
+        lastName: 'Kowalski',
+      }),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('przewoznik writing under another carrier → 403', async () => {
+    const carrier = makeCarrier({ id: 'c-other', userId: 'u-other' });
+    const svc = new DriversService(
+      makeDriversRepo(),
+      makeCarriersRepo([carrier]),
+    );
+    await expect(
+      svc.create(makeAuth('przewoznik', 'u-self'), {
+        carrierId: 'c-other',
+        firstName: 'Jan',
+        lastName: 'Kowalski',
+      }),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('getById 404 on missing', async () => {
+    const svc = new DriversService(makeDriversRepo(), makeCarriersRepo());
+    await expect(svc.getById('missing')).rejects.toThrow(NotFoundException);
+  });
+
+  it('softDelete is idempotent in the sense that re-fetching returns null', async () => {
+    const d = makeDriver({ id: 'd-1', loginSlug: 'a.b' });
+    const repo = makeDriversRepo([d]);
+    const svc = new DriversService(repo, makeCarriersRepo());
+    await svc.softDelete('d-1');
+    expect(repo.softDelete).toHaveBeenCalledWith('d-1');
+  });
+
+  it('deactivate then reactivate cycles active', async () => {
+    const d = makeDriver({ id: 'd-1', active: true });
+    const svc = new DriversService(makeDriversRepo([d]), makeCarriersRepo());
+    await svc.deactivate('d-1');
+    await expect(svc.deactivate('d-1')).rejects.toThrow(ConflictException);
+  });
+});

@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 
 import { AppModule } from './app.module';
+import { ProblemDetailsFilter } from './common/errors/problem-details.filter';
 import type { Env } from './config/env.schema';
 
 async function bootstrap(): Promise<void> {
@@ -23,6 +24,9 @@ async function bootstrap(): Promise<void> {
 
   app.use(helmet());
   app.use(cookieParser());
+
+  // Global RFC 7807 error envelope per docs/13-api-design.md#формат-ответов.
+  app.useGlobalFilters(new ProblemDetailsFilter());
 
   const config = app.get(ConfigService<Env, true>);
 

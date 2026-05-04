@@ -233,6 +233,11 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 | GET `/integrations/vies/:country/:vat` | `viesLookup` | VIES |
 | GET `/integrations/whitelist?nip=...&account=...` | `whiteListCheckAccount` | Biała Lista |
 | GET `/integrations/inspection?vin=...` | `inspectionCheckLink` | info-car.pl URL builder |
+| GET `/integrations/gps/positions` | — (новое) | GPS tracker (TBD — см. [16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api](16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api)) |
+| GET `/integrations/gps/positions/:vehicleId` | — | GPS tracker (TBD) |
+| GET `/integrations/gps/trips/:vehicleId?from=...&to=...` | — | GPS tracker (Phase 11+) |
+
+> **GPS endpoints** в Phase 2 поднимаются как скелетон с mock-провайдером — реальные вызовы добавляются после получения credentials от MAGTRANS. Контракт ответа стабилен: `{ position, stale: boolean, lastFetchedAt }` для одиночного, `{ items, stale, lastFetchedAt }` для списка. Mock-провайдер возвращает детерминированные позиции от `plateNumber`, чтобы UI можно было разрабатывать параллельно. Ownership-фильтрация: carrier видит свои авто, opiekun — своих карьеров, planista/dyspozytor — закреплённых, admin — все. Если `Vehicle.gps = false` — 404.
 
 ### Audit — `/api/v1/audit` (admin)
 

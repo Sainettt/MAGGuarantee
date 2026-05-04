@@ -5,7 +5,26 @@
   "common": {
     "loading": "Ładowanie...",
     "networkError": "Brak połączenia. Spróbuj ponownie.",
-    "logout": "Wyloguj"
+    "logout": "Wyloguj",
+    "save": "Zapisz",
+    "cancel": "Anuluj",
+    "delete": "Usuń",
+    "edit": "Edytuj",
+    "new": "Nowy",
+    "search": "Szukaj",
+    "all": "Wszyscy",
+    "active": "Aktywny",
+    "inactive": "Nieaktywny",
+    "yes": "Tak",
+    "no": "Nie",
+    "actions": "Akcje",
+    "saving": "Zapisywanie...",
+    "saved": "Zapisano",
+    "errorGeneric": "Coś poszło nie tak. Spróbuj ponownie.",
+    "deleteConfirmTitle": "Czy na pewno?",
+    "deleteConfirmBody": "Tej operacji nie można cofnąć.",
+    "deactivate": "Dezaktywuj",
+    "reactivate": "Aktywuj"
   },
   "theme": {
     "toggle": "Przełącz motyw",
@@ -64,5 +83,191 @@
     "yourRole": "Rola: {role}",
     "phasePlaceholder": "Phase 1 — placeholder. Pełny panel pojawi się w kolejnych fazach.",
     "logout": "Wyloguj"
+  },
+  "nav": {
+    "carriers": "Przewoźnicy",
+    "vehicles": "Pojazdy",
+    "drivers": "Kierowcy",
+    "trailers": "Naczepy",
+    "trailerTypes": "Typy naczep"
+  },
+  "carriers": {
+    "title": "Przewoźnicy",
+    "newCarrier": "Nowy przewoźnik",
+    "editCarrier": "Edytuj przewoźnika",
+    "emptyTitle": "Brak przewoźników",
+    "emptyMessage": "Kliknij „Nowy przewoźnik”, aby dodać pierwszego.",
+    "filters": {
+      "searchPlaceholder": "Szukaj loginu / nazwy / NIP",
+      "opiekun": "Opiekun",
+      "allOpiekun": "Wszyscy opiekuni",
+      "allActive": "Wszyscy",
+      "onlyActive": "Tylko aktywni",
+      "onlyInactive": "Tylko nieaktywni"
+    },
+    "fields": {
+      "login": "Login",
+      "name": "Nazwa",
+      "company": "Firma",
+      "email": "E-mail",
+      "password": "Hasło tymczasowe (opcjonalne)",
+      "phone": "Telefon",
+      "contactPerson": "Osoba kontaktowa",
+      "ordersEmail": "E-mail zleceń",
+      "nip": "NIP",
+      "vatId": "VAT-ID",
+      "accountEur": "Konto EUR (IBAN)",
+      "accountPln": "Konto PLN",
+      "paymentTerms": "Termin płatności (dni)",
+      "insuranceValue": "Suma ubezpieczenia",
+      "insuranceExpiry": "Ważność OC",
+      "licenseExpiry": "Ważność licencji",
+      "numberOfPermits": "Liczba zezwoleń",
+      "companyAddress": "Adres firmy",
+      "opiekun": "Opiekun",
+      "active": "Aktywny"
+    },
+    "sections": {
+      "account": "Konto i kontakt",
+      "company": "Dane firmy",
+      "finance": "Finanse",
+      "permits": "Zezwolenia",
+      "assignment": "Przypisanie"
+    },
+    "tempPasswordToast": "Hasło tymczasowe: {password}"
+  },
+  "vehicles": {
+    "title": "Pojazdy",
+    "newVehicle": "Nowy pojazd",
+    "editVehicle": "Edytuj pojazd",
+    "emptyTitle": "Brak pojazdów",
+    "emptyMessage": "Kliknij „Nowy pojazd”, aby dodać pierwszy.",
+    "filters": {
+      "searchPlaceholder": "Szukaj numeru rejestracyjnego",
+      "carrier": "Przewoźnik",
+      "allCarriers": "Wszyscy przewoźnicy"
+    },
+    "fields": {
+      "carrier": "Przewoźnik",
+      "plateNumber": "Numer rejestracyjny",
+      "sideNumber": "Numer boczny",
+      "brand": "Marka",
+      "model": "Model",
+      "year": "Rok",
+      "type": "Typ",
+      "euro": "Norma EURO",
+      "certificateL": "Certyfikat L",
+      "planner": "Planista",
+      "dispatcher": "Dyspozytor",
+      "gps": "GPS",
+      "gpsMobilePhone": "Telefon GPS",
+      "fuelCard": "Karta paliwowa",
+      "agreement": "Porozumienie",
+      "contract": "Umowa",
+      "rateDe": "Stawka DE",
+      "rateUe": "Stawka UE",
+      "rateExport": "Stawka eksport",
+      "rateImport": "Stawka import",
+      "wasteAllowed": "Odpady",
+      "cabotageDe": "Kabotaż DE",
+      "cabotageFr": "Kabotaż FR",
+      "nextInspectionDate": "Następny przegląd",
+      "notes": "Notatki",
+      "active": "Aktywny"
+    },
+    "sections": {
+      "identification": "Identyfikacja",
+      "people": "Przypisanie",
+      "equipment": "Wyposażenie",
+      "rates": "Stawki",
+      "permissions": "Pozwolenia"
+    }
+  },
+  "drivers": {
+    "title": "Kierowcy",
+    "newDriver": "Nowy kierowca",
+    "editDriver": "Edytuj kierowcę",
+    "emptyTitle": "Brak kierowców",
+    "emptyMessage": "Kliknij „Nowy kierowca”, aby dodać pierwszego.",
+    "filters": {
+      "searchPlaceholder": "Szukaj imienia / nazwiska",
+      "carrier": "Przewoźnik",
+      "allCarriers": "Wszyscy przewoźnicy"
+    },
+    "fields": {
+      "carrier": "Przewoźnik",
+      "firstName": "Imię",
+      "lastName": "Nazwisko",
+      "phone": "Telefon",
+      "phone2": "Telefon (drugi)",
+      "email": "E-mail",
+      "driverLicenseNumber": "Numer prawa jazdy",
+      "licenseExpiry": "Ważność prawa jazdy",
+      "bankAccount": "Numer konta",
+      "notes": "Notatki",
+      "active": "Aktywny"
+    }
+  },
+  "trailers": {
+    "title": "Naczepy",
+    "newTrailer": "Nowa naczepa",
+    "editTrailer": "Edytuj naczepę",
+    "emptyTitle": "Brak naczep",
+    "emptyMessage": "Kliknij „Nowa naczepa”, aby dodać pierwszą.",
+    "filters": {
+      "searchPlaceholder": "Szukaj numeru rejestracyjnego",
+      "carrier": "Przewoźnik",
+      "type": "Typ",
+      "allCarriers": "Wszyscy przewoźnicy",
+      "allTypes": "Wszystkie typy"
+    },
+    "fields": {
+      "carrier": "Przewoźnik",
+      "plateNumber": "Numer rejestracyjny",
+      "trailerType": "Typ naczepy",
+      "brand": "Marka",
+      "model": "Model",
+      "year": "Rok",
+      "equipment": "Wyposażenie",
+      "nextInspectionDate": "Następny przegląd",
+      "innerLength": "Długość wewn. (m)",
+      "innerWidth": "Szerokość wewn. (m)",
+      "innerHeight": "Wysokość wewn. (m)",
+      "capacity": "Ładowność (t)",
+      "belts": "Pasy",
+      "mats": "Maty",
+      "airSuspension": "Zawieszenie pneum.",
+      "loadFromBack": "Załadunek tył",
+      "loadFromSide": "Załadunek bok",
+      "loadFromTop": "Załadunek góra",
+      "slidingRoof": "Dach przesuwany",
+      "edschaSlidingRoof": "Dach Edscha",
+      "notes": "Notatki",
+      "active": "Aktywny"
+    },
+    "sections": {
+      "identification": "Identyfikacja",
+      "dimensions": "Wymiary",
+      "equipment": "Wyposażenie"
+    }
+  },
+  "trailerTypes": {
+    "title": "Typy naczep",
+    "newType": "Nowy typ",
+    "editType": "Edytuj typ",
+    "emptyTitle": "Brak typów naczep",
+    "emptyMessage": "Kliknij „Nowy typ”, aby dodać pierwszy.",
+    "fields": {
+      "name": "Nazwa",
+      "shortCode": "Skrót",
+      "description": "Opis",
+      "active": "Aktywny"
+    }
+  },
+  "validation": {
+    "loading": "Sprawdzam…",
+    "valid": "Zweryfikowano",
+    "invalid": "Nie znaleziono",
+    "error": "Usługa niedostępna — spróbuj później"
   }
 }

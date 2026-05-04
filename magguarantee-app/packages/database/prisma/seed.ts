@@ -1,11 +1,13 @@
-// Phase 1 seed — auth slice only.
+// Phase 2 seed — auth slice + reference data.
 //
 // Idempotent: every upsert keys on a unique business field (login / email /
-// config-key), so re-running the script will not duplicate rows.
+// config-key / trailer-type-name / (year, month)), so re-running the script
+// will not duplicate rows. Existing rows are kept in sync with the seed
+// source-of-truth where it makes sense (users), or left untouched where the
+// admin is expected to edit through the UI (monthly limits).
 //
-// Out of scope (Phase 2+): trailer types, default monthly limits, claim
-// thresholds, etc. See docs/12-database-schema.md and
-// docs/17-migration-roadmap.md.
+// Out of scope: real claims, carriers, vehicles, etc. Those are created via
+// the API in dev/prod.
 
 import bcrypt from 'bcryptjs';
 
@@ -15,6 +17,8 @@ const prisma = new PrismaClient();
 
 const DEV_PASSWORD = 'Test1234!';
 const BCRYPT_ROUNDS = 12; // matches docs/15-auth-strategy.md
+
+// ─── Users ──────────────────────────────────────────────
 
 type SeedUser = {
   login: string;
@@ -34,14 +38,18 @@ const SEED_USERS: SeedUser[] = [
   { login: 'weryfikator1', email: 'weryfikator1@magtrans.eu', name: 'Weryfikator 1', role: Role.weryfikator },
 ];
 
+// ─── App config ─────────────────────────────────────────
+
 type AppConfigEntry = {
   key: string;
   value: string;
   description: string;
 };
 
-// Phase 1 auth-related runtime config. See docs/15-auth-strategy.md.
+// Auth-related runtime config (Phase 1) + business-rule defaults (Phase 2).
+// See docs/15-auth-strategy.md and docs/12-database-schema.md "AppConfig".
 const APP_CONFIG_ENTRIES: AppConfigEntry[] = [
+  // Phase 1 — auth
   {
     key: 'password_required',
     value: 'true',
@@ -62,7 +70,59 @@ const APP_CONFIG_ENTRIES: AppConfigEntry[] = [
     value: '300',
     description: '2FA lockout duration after max attempts (5 min).',
   },
+  // Phase 2 — claim authorization thresholds & submission window
+  {
+    key: 'auth_threshold_low',
+    value: '1000',
+    description: 'EUR — low authorization threshold (claims at/above this require authorization workflow).',
+  },
+  {
+    key: 'auth_threshold_high',
+    value: '5000',
+    description: 'EUR — high authorization threshold (claims at/above this require AUTORYZACJA — KWOTA MAKSIMA).',
+  },
+  {
+    key: 'min_days_to_submit',
+    value: '10',
+    description: 'Minimum days that must elapse after dateEnd before a claim may be submitted.',
+  },
 ];
+
+// ─── Trailer types (reference catalog) ──────────────────
+// Source: legacy Code.gs:465-478. Order preserved to keep historical mapping.
+
+type SeedTrailerType = {
+  name: string;
+  shortCode: string;
+  description: string;
+  active: boolean;
+};
+
+const SEED_TRAILER_TYPES: SeedTrailerType[] = [
+  { name: 'Firanka', shortCode: 'FIR', description: 'Naczepa kurtynowa, boki otwierane', active: true },
+  { name: 'Plandeka', shortCode: 'PLA', description: 'Naczepa plandekowa (klasyk)', active: true },
+  { name: 'Chłodnia', shortCode: 'CHL', description: 'Naczepa chłodnicza (frigo)', active: true },
+  { name: 'Wywrotka', shortCode: 'WYW', description: 'Naczepa samowyładowcza', active: true },
+  { name: 'Mega', shortCode: 'MEG', description: 'Naczepa o zwiększonej wysokości', active: true },
+  { name: 'Jumbo', shortCode: 'JUM', description: 'Naczepa ekstra wysoka i dluga', active: true },
+  { name: 'Frigo', shortCode: 'FRI', description: 'Frigo (synonim chłodni)', active: true },
+  { name: 'Niska', shortCode: 'NIS', description: 'Naczepa niskopodłogowa', active: true },
+  { name: 'Burtowa', shortCode: 'BUR', description: 'Naczepa burtowa', active: true },
+  { name: 'Kontener', shortCode: 'KON', description: 'Platforma pod kontener', active: true },
+  { name: 'Cysterna', shortCode: 'CYS', description: 'Cysterna (ADR)', active: true },
+  { name: 'HDS', shortCode: 'HDS', description: 'Naczepa z dźwigiem (hakowiec)', active: true },
+  { name: 'Walking Floor', shortCode: 'WF', description: 'Podłoga ruchoma (Walking Floor)', active: true },
+];
+
+// ─── Monthly limits (placeholders) ──────────────────────
+// Current and next year × 12 months = 24 rows. Admins edit through UI.
+// Keying on (year, month) composite unique → idempotent.
+
+const MONTHLY_LIMIT_KM_PER_DAY = '540';
+const MONTHLY_LIMIT_RATE_PER_KM = '0.5';
+const MONTHLY_LIMIT_YEARS = [new Date().getFullYear(), new Date().getFullYear() + 1];
+
+// ─── Seed functions ─────────────────────────────────────
 
 async function seedUsers(passwordHash: string): Promise<number> {
   for (const u of SEED_USERS) {
@@ -101,7 +161,57 @@ async function seedAppConfig(): Promise<number> {
   return APP_CONFIG_ENTRIES.length;
 }
 
-function printBanner(userCount: number, configCount: number): void {
+async function seedTrailerTypes(): Promise<number> {
+  for (const t of SEED_TRAILER_TYPES) {
+    await prisma.trailerType.upsert({
+      where: { name: t.name },
+      create: {
+        name: t.name,
+        shortCode: t.shortCode,
+        description: t.description,
+        active: t.active,
+      },
+      // Re-sync metadata (shortCode/description) on rerun; flip active back
+      // to seed source-of-truth so disabled-then-renabled is deterministic.
+      update: {
+        shortCode: t.shortCode,
+        description: t.description,
+        active: t.active,
+      },
+    });
+  }
+  return SEED_TRAILER_TYPES.length;
+}
+
+async function seedMonthlyLimits(): Promise<number> {
+  let count = 0;
+  for (const year of MONTHLY_LIMIT_YEARS) {
+    for (let month = 1; month <= 12; month++) {
+      await prisma.monthlyLimit.upsert({
+        where: { year_month: { year, month } },
+        create: {
+          year,
+          month,
+          kmPerDay: MONTHLY_LIMIT_KM_PER_DAY,
+          ratePerKm: MONTHLY_LIMIT_RATE_PER_KM,
+        },
+        // Don't overwrite values on rerun — admin may have tuned them.
+        update: {},
+      });
+      count++;
+    }
+  }
+  return count;
+}
+
+// ─── Output ─────────────────────────────────────────────
+
+function printBanner(
+  userCount: number,
+  configCount: number,
+  trailerTypeCount: number,
+  monthlyLimitCount: number,
+): void {
   const longestLogin = SEED_USERS.reduce((max, u) => Math.max(max, u.login.length), 0);
   const longestEmail = SEED_USERS.reduce((max, u) => Math.max(max, u.email.length), 0);
 
@@ -112,7 +222,12 @@ function printBanner(userCount: number, configCount: number): void {
     const email = `(${u.email})`.padEnd(longestEmail + 2, ' ');
     console.log(`  - ${login}   ${email}   role=${u.role}`);
   }
-  console.log(`Seeded AppConfig: ${configCount} keys`);
+  console.log(`Seeded AppConfig:   ${configCount} keys`);
+  console.log(`Seeded TrailerType: ${trailerTypeCount} entries`);
+  console.log(
+    `Seeded MonthlyLimit: ${monthlyLimitCount} rows (years ${MONTHLY_LIMIT_YEARS.join(', ')}, ` +
+      `kmPerDay=${MONTHLY_LIMIT_KM_PER_DAY}, ratePerKm=${MONTHLY_LIMIT_RATE_PER_KM})`,
+  );
   console.log('');
 }
 
@@ -120,7 +235,9 @@ async function main(): Promise<void> {
   const passwordHash = await bcrypt.hash(DEV_PASSWORD, BCRYPT_ROUNDS);
   const userCount = await seedUsers(passwordHash);
   const configCount = await seedAppConfig();
-  printBanner(userCount, configCount);
+  const trailerTypeCount = await seedTrailerTypes();
+  const monthlyLimitCount = await seedMonthlyLimits();
+  printBanner(userCount, configCount, trailerTypeCount, monthlyLimitCount);
 }
 
 main()

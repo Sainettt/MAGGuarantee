@@ -377,6 +377,148 @@ buildLink(vin: string): string {
 }
 ```
 
+### GPS tracker (статус: ожидает доступа к API)
+
+> **Status:** API access ещё не предоставлен MAGTRANS. Модуль создаётся в Phase 2 как **скелетон с mock-провайдером** — не блокирует разработку остальных частей. Реальные вызовы добавляются как только credentials/endpoint становятся доступны.
+
+#### Что это и зачем
+
+У авто перевозчиков MAGTRANS установлены GPS-трекеры, подключённые к стороннему сервису мониторинга автопарка. Сейчас, чтобы посмотреть положение авто, сотрудники открывают веб-портал этого сервиса. Цель новой интеграции — забирать данные через API и показывать их **в нашем UI** (в первую очередь на `/fleet/*` экранах для opiekun / planista / dyspozytor / weryfikator), без перехода во внешний сервис.
+
+Это **пятая внешняя интеграция** (после VIES, Biała Lista, info-car и Gmail API).
+
+#### Что нужно получить от MAGTRANS перед finalize
+
+- Имя сервиса/вендор (Wialon / GPSWOX / Webdispatcher / Frotcom / Verizon Connect / иное).
+- Базовый URL API.
+- Тип аутентификации и credentials (API key / OAuth2 client credentials / Basic auth / session token).
+- Документация эндпоинтов — минимум:
+  - получить текущую позицию авто по identifier,
+  - получить trips/history по диапазону дат (опц., для Phase 11+).
+- **Маппинг** наших `Vehicle.plateNumber` (или `Vehicle.gpsMobilePhone`, или `Vehicle.sideNumber`) → их internal vehicle id. Решить — храним ли отдельное поле `Vehicle.gpsExternalId`, или ходим по plateNumber.
+- Rate-limit и SLA внешнего API (нужно для подбора частоты polling-а).
+
+#### Архитектурный паттерн: polling + Redis cache
+
+GPS-данные высокочастотные (позиция каждые 30-60с во многих сервисах), но в нашем UI обновлять чаще раза в минуту нет смысла. Поэтому:
+
+1. **Cron** (BullMQ repeatable job) каждые **60-120 секунд** тянет позиции авто, у которых `Vehicle.gps = true` и `Vehicle.active = true`.
+2. **Кэш в Redis** — ключ `gps:position:<vehicleId>`, TTL 5 минут. Это и горячий кэш для UI, и буфер на случай падения внешнего сервиса.
+3. **API endpoint** `/api/v1/integrations/gps/...` читает **только из кэша**, не дёргает внешний сервис на каждый запрос пользователя. Это защищает нас от rate-limit-а вендора и удерживает p99 в миллисекундах.
+4. Если внешний API упал/таймаутит — отдаём данные из кэша + флаг `stale: true`, frontend показывает пометку «данные могут быть устаревшими, последнее обновление: NN мин назад».
+5. Метрики polling-а (success rate, latency) логируются через Pino + опц. Prometheus.
+
+Webhook-режим (если вендор поддерживает) — улучшение Phase 11+. Для MVP polling проще и надёжнее.
+
+#### Структура модуля
+
+```
+apps/api/src/modules/integrations/gps/
+├── gps.module.ts
+├── gps.controller.ts          # /api/v1/integrations/gps/*
+├── gps.service.ts             # фасад: read-from-cache + ownership filter
+├── gps.types.ts               # GpsPosition, GpsTrip, GpsProvider interface
+├── gps.scheduler.ts           # BullMQ repeatable job для polling-а
+├── providers/
+│   ├── gps-mock.provider.ts   # дефолт пока нет API access (детерминированные позиции от plateNumber)
+│   └── gps-vendor.provider.ts # реальная реализация — заполняется когда будут credentials
+└── gps.module-config.ts       # выбор провайдера по env: GPS_PROVIDER=mock|vendor
+```
+
+#### Контракт `GpsProvider` (внутренний абстрактный интерфейс)
+
+```ts
+// gps.types.ts
+export type GpsPosition = {
+  vehicleId: string;              // наш UUID
+  plateNumber: string;            // для UI без дополнительного lookup
+  lat: number;
+  lng: number;
+  speedKmh: number | null;
+  headingDeg: number | null;      // 0-359, опц.
+  recordedAt: string;             // ISO timestamp вендора
+  fetchedAt: string;              // ISO когда мы это закешировали
+  ignitionOn: boolean | null;
+  odometerKm: number | null;      // если вендор отдаёт
+  source: 'mock' | 'vendor';
+};
+
+export type GpsTrip = {
+  vehicleId: string;
+  startedAt: string;
+  endedAt: string | null;
+  startLat: number; startLng: number;
+  endLat: number | null; endLng: number | null;
+  distanceKm: number;
+};
+
+export interface GpsProvider {
+  getCurrentPositions(plateNumbers: string[]): Promise<GpsPosition[]>;
+  getTrips?(plateNumber: string, from: Date, to: Date): Promise<GpsTrip[]>;
+}
+```
+
+#### Mock-provider (на время отсутствия API access)
+
+Возвращает детерминированные позиции (хеш от `plateNumber` → координаты в окрестности Польши/EU + псевдо-случайное смещение от текущего времени), чтобы фронт можно было разрабатывать и QA-ить против стабильных «как-будто реальных» данных. Даёт UI команде разрабатывать `/fleet/*` экраны параллельно с переговорами по API.
+
+#### Что показываем в UI
+
+- **Список авто** (`/fleet/*` для всех ролей): иконка GPS-точки + relative timestamp (`2 мин назад`) рядом с plateNumber.
+- **Деталь авто**: мини-карта с текущим положением (Leaflet + OpenStreetMap tiles — бесплатно, self-hostable, без vendor lock-in).
+- **Сравнение пробега** в Claim verification (Phase 4+, после первой реальной интеграции): GPS-пробег за период vs `Claim.mileage` от перевозчика — потенциальная анти-фрод метрика. **Не для MVP** — рисуется как future feature.
+
+#### Endpoints
+
+См. также [13-api-design.md#external-integrations](13-api-design.md#external-integrations--apiv1integrations).
+
+| Method + Path | Доступ | Что возвращает |
+|---|---|---|
+| `GET /integrations/gps/positions` | любая роль (фильтр по ownership на сервере) | Все актуальные позиции авто, доступных текущему user-у (carrier — свои; opiekun — карьеров; planista/dyspozytor — закреплённых; admin — все) |
+| `GET /integrations/gps/positions/:vehicleId` | + ownership-check | Последняя позиция конкретного авто |
+| `GET /integrations/gps/trips/:vehicleId?from=...&to=...` | (Phase 11+) | История перемещений |
+
+Все три endpoint-а возвращают `{ position, stale: boolean, lastFetchedAt }` или `{ items, stale, lastFetchedAt }` соответственно. Если `Vehicle.gps = false` — отдаём 404.
+
+#### Cron job
+
+```ts
+// gps.scheduler.ts
+@Injectable()
+export class GpsScheduler implements OnApplicationBootstrap {
+  constructor(@InjectQueue('gps-poll') private q: Queue) {}
+  async onApplicationBootstrap() {
+    await this.q.add('poll', {}, {
+      repeat: { every: 90_000 },   // 90с
+      jobId: 'gps-poll-cron',
+    });
+  }
+}
+```
+
+`jobId` — статичный, чтобы при рестарте API не плодить дубликаты.
+
+#### Конфигурация (env)
+
+```
+GPS_PROVIDER=mock                # mock | vendor (default: mock пока нет credentials)
+GPS_VENDOR_BASE_URL=             # заполняется когда будут реквизиты
+GPS_VENDOR_API_KEY=              # секрет
+GPS_POLL_INTERVAL_SEC=90         # 60-120 разумно
+GPS_CACHE_TTL_SEC=300            # 5 минут — больше TTL polling-а, чтобы graceful degrade
+```
+
+`.env.example` дополняется этими ключами в Phase 2. Без них модуль автоматически падает в `mock`-режим — никаких runtime-падений из-за пустых секретов.
+
+#### TODO (после получения API access)
+
+1. Заполнить `GpsVendorProvider` под реальный вендор (auth, маппинг полей, error handling).
+2. Если у вендора **webhook** mode — добавить endpoint `POST /integrations/gps/webhook` с проверкой подписи + переключить с polling на push.
+3. Добавить миграцию `Vehicle.gpsExternalId String?` если plateNumber не прокатывает как identifier.
+4. Прописать Uptime Kuma / health-check на «GPS polling успешно отрабатывает за последние 5 минут».
+5. Подкрутить TTL кэша / polling-интервал по факту нагрузки.
+6. (Опционально) сохранять позиции в долгоиграющую таблицу `vehicle_gps_log` для history-фич.
+
 ## Секреты и конфиги
 
 Все ключи (Gmail private key, S3 credentials, JWT secrets) — в `.env` для dev, в secrets-manager для prod (Railway env vars / AWS Secrets Manager / Doppler).

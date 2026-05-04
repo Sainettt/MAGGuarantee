@@ -24,7 +24,7 @@ export function LoginScreen({ children }: { children: React.ReactNode }) {
         className="absolute top-6 left-8 z-20 sm:top-4 sm:left-4 transition-opacity hover:opacity-80"
       >
         <Image
-          src="/logo.svg"
+          src="/logo.png"
           alt="MAGTRANS"
           width={240}
           height={64}
