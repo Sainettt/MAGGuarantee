@@ -6,6 +6,10 @@ import { getLocale, getMessages } from 'next-intl/server';
 import { Providers } from '@/components/providers/Providers';
 
 import './globals.css';
+// Side-effect import: installs the Polish Zod error map globally so every
+// form's "this field is required" / "too short" etc. shows logist-friendly
+// Polish text instead of Zod's English defaults.
+import '@/lib/zod-locale';
 
 const dmSans = DM_Sans({
   subsets: ['latin', 'latin-ext'],
