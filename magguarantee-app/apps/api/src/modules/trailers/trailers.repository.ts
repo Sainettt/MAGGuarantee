@@ -183,8 +183,13 @@ export class TrailersRepository {
       carrierId: row.carrierId,
       plateNumber: row.plateNumber,
       active: row.active,
-      trailerTypeId: row.trailerTypeId,
-      trailerType: row.trailerType,
+      trailerTypeId: row.trailerTypeId ?? '',
+      trailerType: row.trailerType ?? {
+        id: row.trailerTypeId ?? '',
+        name: '',
+        shortCode: null,
+        active: false,
+      },
       brand: row.brand,
       model: row.model,
       year: row.year,
@@ -217,18 +222,22 @@ export class TrailersRepository {
   }
 }
 
+// Wide variant of the Prisma row to absorb the inferred-nullable shape
+// produced by the soft-delete extension's typing (the underlying schema
+// marks `trailerTypeId` NOT NULL post-Phase 2, but Prisma's `query`
+// extension still widens the inferred row).
 interface TrailerPrismaShape {
   id: string;
   carrierId: string;
   plateNumber: string;
   active: boolean;
-  trailerTypeId: string;
+  trailerTypeId: string | null;
   trailerType: {
     id: string;
     name: string;
     shortCode: string | null;
     active: boolean;
-  };
+  } | null;
   brand: string | null;
   model: string | null;
   year: number | null;

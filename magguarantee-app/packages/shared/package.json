@@ -11,12 +11,14 @@
     "build": "tsc -p tsconfig.json",
     "lint": "echo 'lint: no source yet' && exit 0",
     "typecheck": "tsc --noEmit",
-    "test": "echo 'test: no tests yet' && exit 0"
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "zod": "^3.23.0"
   },
   "devDependencies": {
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "vitest": "^2.1.0"
   }
 }

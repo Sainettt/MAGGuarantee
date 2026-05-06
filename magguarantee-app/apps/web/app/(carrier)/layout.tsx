@@ -1,9 +1,9 @@
-import { RoleShell } from '@/components/layout/RoleShell';
+import { CarrierShell } from '@/components/carrier/CarrierShell';
 
 export default function CarrierLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return <RoleShell>{children}</RoleShell>;
+  return <CarrierShell>{children}</CarrierShell>;
 }

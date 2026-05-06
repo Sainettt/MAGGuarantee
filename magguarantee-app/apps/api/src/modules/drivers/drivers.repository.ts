@@ -156,12 +156,12 @@ export class DriversRepository {
       id: row.id,
       carrierId: row.carrierId,
       loginSlug: row.loginSlug,
-      firstName: row.firstName,
-      lastName: row.lastName,
-      phone: row.phone,
+      firstName: row.firstName ?? '',
+      lastName: row.lastName ?? '',
+      phone: row.phone ?? '',
       phone2: row.phone2,
       email: row.email,
-      driverLicenseNumber: row.driverLicenseNumber,
+      driverLicenseNumber: row.driverLicenseNumber ?? '',
       licenseExpiry: row.licenseExpiry,
       bankAccount: row.bankAccount,
       notes: row.notes,
@@ -180,16 +180,20 @@ export class DriversRepository {
   }
 }
 
+// Wide variant of the Prisma row to absorb the inferred-nullable shape
+// produced by the soft-delete extension's typing (the underlying schema
+// marks `phone` / `lastName` / `driverLicenseNumber` NOT NULL post-Phase 2,
+// but Prisma's `query` extension widens scalars in the inferred type).
 interface DriverPrismaShape {
   id: string;
   carrierId: string;
   loginSlug: string;
-  firstName: string;
-  lastName: string;
-  phone: string;
+  firstName: string | null;
+  lastName: string | null;
+  phone: string | null;
   phone2: string | null;
   email: string | null;
-  driverLicenseNumber: string;
+  driverLicenseNumber: string | null;
   licenseExpiry: Date | null;
   bankAccount: string | null;
   notes: string | null;

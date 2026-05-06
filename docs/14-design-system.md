@@ -739,3 +739,178 @@ Ostatni fix: 2026-05-03T12:34:56Z
 |---|---|
 | `<GpsStatus position={...} />` | `/fleet/*` таблицы (Phase 5+), vehicle-detail header (Phase 4+) |
 | `<FieldValidationBadge state="…" />` | Inline VIES / Biała Lista feedback в формах carrier/vehicle (Phase 2+) |
+
+---
+
+## Phase 3 — carrier panel design contract
+
+> Polished UI for the carrier role: `/carrier/claims`, `/carrier/claims/new`, `/carrier/fleet/{cars,drivers,trailers}`, `/carrier/delegations`. Reference screenshots: `docs/screenshots/carrier-*.png`. Legacy CSS: [`index.html:411-426`](../index.html#L411). All tokens reuse the existing palette — no new colors.
+
+### Carrier shell (header + tab nav)
+
+Header is the standard `<AppHeader>` (logo + role badge "Przewoźnik" + `<LanguageToggle>` + `<ThemeToggle>` + logout). Below it — a sticky tab bar.
+
+| Element | Tailwind |
+|---|---|
+| Tab bar wrapper | `sticky top-[64px] z-20 bg-card border-b border-border` |
+| Tab list | `container mx-auto flex gap-1 px-4 overflow-x-auto` |
+| Tab item (default) | `px-4 py-3 text-sm font-semibold text-text-sub whitespace-nowrap border-b-2 border-transparent hover:text-text` |
+| Tab item (active) | `text-brand border-brand` (no fill — only red underline + red text) |
+| Tab item (with badge count) | append `<span class="ml-2 rounded-full bg-brand/10 dark:bg-brand/20 text-brand text-xs px-2 py-0.5">N</span>` |
+
+**Top-level tabs:** `Wnioski` / `Nowy` / `Flota` / `Wyjazdy`. Emoji prefix kept per voice rules (📋 ➕ 🚛 🚀).
+
+**Flota sub-tabs** (rendered inside `/carrier/fleet/*` layout, below the main tab bar): `Auta` (read-only) / `Kierowcy` (CRUD) / `Naczepy` (CRUD). Same visual pattern as top tabs but rendered as `<div role="tablist">` with `text-xs font-bold uppercase tracking-wider` labels and reduced padding `px-3 py-2`.
+
+### `<StatusBadge>` — extends existing `<Badge>`
+
+Existing `<Badge>` (`apps/web/components/ui/Badge.tsx`) is **sufficient**. Add a thin wrapper `<StatusBadge status={...}>` that maps enum → variant + label:
+
+| `ClaimStatus` value | Badge variant | Visible label (PL) | Icon (Lucide, 12px) |
+|---|---|---|---|
+| `NA_WERYFIKACJI` | `info` | "Weryfikacja" | `<Clock />` |
+| `ZAAKCEPTOWANO` | `success` | "Zaakceptowano" | `<CheckCircle2 />` |
+| `ODRZUCONO` | `danger` | "Odrzucono" | `<XCircle />` |
+| `REKLAMACJA` | `warning` | "Reklamacja" | `<AlertTriangle />` |
+| `OCZEKUJE_NA_AUTORYZACJE` | `info` | "Czeka na autoryzację" | `<Clock />` |
+| `AUTORYZACJA_KWOTA_MAKSIMA` | `warning` | "Autoryzacja — kwota maks." | `<AlertTriangle />` |
+
+| `DelegationStatus` value | Badge variant | Label (PL) |
+|---|---|---|
+| `zgloszony` | `info` | "Zgłoszony" |
+| `w_trasie` | `success` | "W trasie" |
+| `zjechal` | `muted` | "Zjechał" |
+| `anulowany` | `danger` | "Anulowany" |
+
+No new variants — `Badge` covers all. `<StatusBadge>` lives in `components/carrier/StatusBadge.tsx` and is also reused in employee panel later.
+
+### `<ClaimCard>` — list item on `/carrier/claims`
+
+Replaces legacy `.claim-card` (`index.html:419-426`). Layout (mobile-first single column, desktop wider):
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  WNI/2026/0042         [StatusBadge]            2 145,00 EUR   │
+│  01.04.2026 → 30.04.2026                                       │
+│  ─────────────────────────────────────────────────────────────  │
+│  Pojazd: WA12345  ·  Kierowca: J. Kowalski                     │
+│  [! Reklamacja zgłoszona]  (only when reklamacjaSubmitted)      │
+└────────────────────────────────────────────────────────────────┘
+```
+
+| Slot | Tailwind |
+|---|---|
+| Card root | `bg-card rounded-lg border border-border p-5 mb-3 transition-shadow hover:shadow-card cursor-pointer` |
+| Top row | `flex items-start justify-between gap-3 mb-1` |
+| `nrZgl` | `text-[15px] font-extrabold text-text font-mono` |
+| `paymentEur` | `text-xl font-extrabold text-text tabular-nums whitespace-nowrap` (mono digits) |
+| Date range | `text-sm text-text-sub mb-3` with `<ArrowRight size={12} />` between dates |
+| Divider | `border-t border-border my-3` |
+| Meta row | `grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-text-sub` with `<span class="font-semibold text-text">value</span>` for values |
+| Reklamacja indicator (conditional) | `mt-3 inline-flex items-center gap-1.5 rounded-md bg-warning-bg text-warning-dark dark:bg-warning/15 dark:text-warning px-2 py-1 text-xs font-bold` + `<AlertTriangle size={12} />` |
+
+Click → navigate to claim detail (`/carrier/claims/[id]`). Empty list → `<EmptyState>` with `<FileText />` icon and CTA "Złóż wniosek" linking to `/carrier/claims/new`.
+
+### `<BreakdownTable>` — preview table on new-claim form
+
+Compact read-only table fed by server preview response. Columns:
+
+| Column | Header (PL) | Format | Tailwind |
+|---|---|---|---|
+| `yearMonth` | "Miesiąc" | `2026-04` | `text-left font-mono` |
+| `workingDays` | "Dni rob." | integer | `text-right tabular-nums` |
+| `kmPerDay` | "Km/dzień" | integer | `text-right tabular-nums` |
+| `ratePerKm` | "Stawka €/km" | 4 decimals | `text-right tabular-nums` |
+| `kmInMonth` | "Km w mc" | integer with thousand-sep | `text-right tabular-nums font-semibold` |
+
+Layout: shadcn `<Table>` inside a `<Card>` (`bg-card rounded-lg border border-border overflow-hidden`). Header row uses Phase 2 DataTable header style (`bg-bg text-xs font-bold uppercase tracking-wider`). Row height `h-10` (compact, denser than DataTable). Footer row: `bg-bg font-extrabold` with label "Razem (km gwarantowane)" spanning first 4 columns and `kmGuaranteed` in the last column.
+
+Empty / loading state — see `<LivePreviewPanel>`.
+
+### `<LivePreviewPanel>` — wraps BreakdownTable + stat cards
+
+Right-hand panel on `/carrier/claims/new` (or below form on mobile). Layout:
+
+```
+┌─ Stat cards (2x2 grid) ─────────────────────┐
+│  Km rzeczywiste │ Km gwarantowane          │
+│  Różnica km     │ Wypłata (EUR)            │
+└─────────────────────────────────────────────┘
+┌─ BreakdownTable ────────────────────────────┐
+│  ...                                        │
+└─────────────────────────────────────────────┘
+```
+
+| Element | Tailwind |
+|---|---|
+| Wrapper | `flex flex-col gap-4` |
+| Stat grid | `grid grid-cols-2 gap-3` |
+| Stat card root | `bg-card rounded-lg border border-border p-4` |
+| Stat label | `text-xs font-bold uppercase tracking-wider text-text-sub` |
+| Stat value | `mt-1 text-2xl font-extrabold text-text tabular-nums` |
+| Highlight: `paymentEur` stat | left-border accent — add `border-l-4 border-brand pl-3` |
+| Highlight: negative `kmDifference` (when kmActual > kmGuaranteed → no payout) | value `text-text-sub` instead of `text-text` |
+
+**Loading state (debounce ≥400ms before firing):**
+- Stat values render as `<Skeleton className="h-7 w-24" />` (install `skeleton` shadcn primitive — see additions list).
+- BreakdownTable rows render 3 skeleton rows of `h-10`.
+- Subtle spinner top-right of panel: `<Loader2 className="animate-spin text-text-sub" size={14} />` + label "Aktualizuję podgląd…".
+
+**Error state:** if server returns 4xx/5xx, render `<EmptyState>` inside the panel with `<AlertTriangle />` and message "Nie udało się obliczyć podglądu — sprawdź dane wejściowe."
+
+**Empty state (form not yet filled enough):** muted text "Wypełnij okres i pojazd, aby zobaczyć podgląd." centered in panel, no skeleton.
+
+> **Server is the single source of truth.** Client never recomputes km/EUR locally. UI shows **exactly** what `POST /claims/preview` returned. Form submit uses the same calc on server.
+
+### Reklamacja sheet
+
+Triggered from claim detail page when status is `ODRZUCONO` and within 48h of decision. shadcn `<Sheet side="right">`, `w-[480px]` (Phase 2 standard).
+
+| Field | Type | Validation |
+|---|---|---|
+| `tresc` | `<Textarea>` rows=6, label "Treść reklamacji" | required, 20–2000 chars |
+| `kwotaReklamacji` | `<Input type="number" step="0.01">`, label "Kwota reklamacji (EUR)", suffix "€" | required, > 0, ≤ `kwotaWnioskowana − kwotaWyplacona` (max value rendered as `<FormDescription>`: "Maksymalnie: 1 234,56 €") |
+
+**48-hour countdown indicator** — sticky banner at top of the sheet body:
+
+| Element | Tailwind |
+|---|---|
+| Wrapper | `flex items-center gap-2 rounded-md bg-warning-bg dark:bg-warning/15 px-3 py-2 mb-4` |
+| Icon | `<Clock size={16} class="text-warning-dark dark:text-warning" />` |
+| Text | `text-sm text-warning-dark dark:text-warning` — "Pozostało: **23h 14min**" (bold the duration) |
+| Tick | re-render every 60s (no second-by-second — burns cycles, not informative) |
+| When < 1h remaining | swap wrapper to `bg-danger-bg text-danger-dark dark:bg-danger/15 dark:text-danger` and apply `animate-blink-red` to the icon only |
+| When expired (server source of truth) | sheet shows `<EmptyState>` "Termin reklamacji upłynął" with disabled form |
+
+Footer: standard `<SheetFooter>` — `<Button variant="ghost">Anuluj</Button>` + `<Button>Wyślij reklamację</Button>`. Submit is server-validated (server re-checks 48h window — never trust client clock).
+
+### Notes for web-agent
+
+- All carrier pages use the existing `<DataTable>` for fleet sub-pages (Auta/Kierowcy/Naczepy) — no new table primitive.
+- `/carrier/delegations` uses `<DataTable>` + `<StatusBadge>` for the status column. "Add auto" modal uses `<Dialog>` (not `<Sheet>`) — it's a compact single-step form (see `carrier-delegations-add-auto-modal.png`).
+- New-claim form layout: 2-column grid (`grid grid-cols-1 lg:grid-cols-[1fr_1.2fr] gap-6`) — left = RHF form, right = `<LivePreviewPanel>`. Mobile collapses to single column with preview below form.
+- Description textarea on new-claim form is the only difference between `carrier-new-claim-preview.png` and `carrier-new-claim-preview-with-description.png` — gate with a `<details>` / collapsible "Dodaj komentarz" toggle to reduce visual noise by default.
+
+## Phase 3 — components web-agent must add
+
+| Component | File path |
+|---|---|
+| `<StatusBadge>` | `apps/web/components/carrier/StatusBadge.tsx` (also imported by employee panel later) |
+| `<ClaimCard>` | `apps/web/components/carrier/ClaimCard.tsx` |
+| `<BreakdownTable>` | `apps/web/components/carrier/BreakdownTable.tsx` |
+| `<LivePreviewPanel>` | `apps/web/components/carrier/LivePreviewPanel.tsx` |
+| `<ReklamacjaSheet>` | `apps/web/components/carrier/ReklamacjaSheet.tsx` |
+| `<CarrierTabBar>` | `apps/web/components/carrier/CarrierTabBar.tsx` |
+| `<FleetSubTabs>` | `apps/web/components/carrier/FleetSubTabs.tsx` |
+| `<CountdownBanner>` (used inside ReklamacjaSheet) | `apps/web/components/carrier/CountdownBanner.tsx` |
+
+**shadcn primitives to install** (run from repo root, scoped to web workspace):
+
+```bash
+npm exec -w web -- shadcn@latest add skeleton tooltip
+```
+
+`skeleton` — required for `<LivePreviewPanel>` loading state (not yet present in `apps/web/components/ui/`).
+`tooltip` — required for `<GpsStatus>` (Phase 4-5) and useful for value hints on `<BreakdownTable>` numeric cells.
+
+All other primitives (`Button`, `Input`, `Textarea`, `Select`, `Sheet`, `Dialog`, `Badge`, `DataTable`, `EmptyState`, `Label`) already exist in `apps/web/components/ui/`.

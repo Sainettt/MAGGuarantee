@@ -368,6 +368,7 @@ model Claim {
   deletedAt DateTime?
 
   @@index([carrierId, status])
+  @@index([carrierId, deletedAt])
   @@index([vehicleId])
   @@index([status, statusChangedAt])
   @@index([dateStart])
@@ -429,6 +430,7 @@ model Delegation {
 
   @@index([vehicleId, status])
   @@index([carrierId, status])
+  @@index([carrierId, deletedAt, status])
   @@index([status, departureAt])
   @@map("delegations")
 }

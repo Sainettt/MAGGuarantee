@@ -86,6 +86,13 @@ const APP_CONFIG_ENTRIES: AppConfigEntry[] = [
     value: '10',
     description: 'Minimum days that must elapse after dateEnd before a claim may be submitted.',
   },
+  // Phase 3 — claim submission deadline window
+  {
+    key: 'max_days_after_unloading',
+    value: '7',
+    description:
+      'Days — maximum delay after dateEnd within which a carrier may submit a claim. Past this window the form is rejected. Source: Code.gs:6149.',
+  },
 ];
 
 // ─── Trailer types (reference catalog) ──────────────────
@@ -115,12 +122,15 @@ const SEED_TRAILER_TYPES: SeedTrailerType[] = [
 ];
 
 // ─── Monthly limits (placeholders) ──────────────────────
-// Current and next year × 12 months = 24 rows. Admins edit through UI.
-// Keying on (year, month) composite unique → idempotent.
+// Years 2026 and 2027 × 12 months = 24 rows. Admins edit through UI.
+// Keying on (year, month) composite unique → idempotent. Years are pinned
+// explicitly (rather than "current + next") so the seed produces the same
+// 24 rows regardless of when it runs — important for fixture-based tests
+// in Phase 3 km-calc and to match docs/17-migration-roadmap.md Phase 3 scope.
 
 const MONTHLY_LIMIT_KM_PER_DAY = '540';
 const MONTHLY_LIMIT_RATE_PER_KM = '0.5';
-const MONTHLY_LIMIT_YEARS = [new Date().getFullYear(), new Date().getFullYear() + 1];
+const MONTHLY_LIMIT_YEARS = [2026, 2027];
 
 // ─── Seed functions ─────────────────────────────────────
 

@@ -11,8 +11,9 @@
 //   ./trailer-types.ts — trailer-type lookup CRUD (Wave 3)
 //   ./lookups.ts       — read-only people pickers (Wave 3)
 //   ./integrations/    — VIES / Biała Lista / info-car / GPS (Wave 4)
-//   ./claims.ts        — TBD Phase 4
-//   ./delegations.ts   — TBD Phase 7
+//   ./claims.ts        — Phase 3 — claims (wnioski) submit/preview/reklamacja
+//   ./delegations.ts   — Phase 3 — delegations submit/cancel
+//   ./fleet.ts         — Phase 3 — fleet aggregates (GET /fleet/my)
 //
 // Convention: per-file we export the request schema, the response schema,
 // and inferred types alongside (DTOs). Both api and web import from
@@ -28,3 +29,6 @@ export * from './trailers';
 export * from './trailer-types';
 export * from './lookups';
 export * from './integrations';
+export * from './claims';
+export * from './delegations';
+export * from './fleet';

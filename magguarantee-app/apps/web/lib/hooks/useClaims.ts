@@ -1,0 +1,111 @@
+'use client';
+
+// TanStack Query hooks for /claims (carrier panel — Phase 3).
+//
+// The preview hook is debounced on the *consumer* side: callers pass a
+// `body` that is already debounced (we use `useDebouncedValue` in the
+// new-claim form) so this hook itself stays a plain `useQuery`. Cache
+// keying on the body lets repeat keystrokes hit the cache.
+
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type UseMutationOptions,
+} from '@tanstack/react-query';
+import type {
+  ClaimDto,
+  ClaimFilters,
+  PreviewClaimDto,
+  PreviewClaimResponse,
+  SubmitClaimDto,
+  SubmitReklamacjaDto,
+} from '@magguarantee/shared';
+
+import {
+  getClaim,
+  listClaims,
+  previewNewClaim,
+  submitClaim,
+  submitReklamacja,
+} from '@/lib/api/claims';
+
+export const CLAIMS_KEY = ['claims'] as const;
+
+export function useClaims(filters: ClaimFilters = { limit: 50 }) {
+  return useQuery({
+    queryKey: [...CLAIMS_KEY, 'list', filters],
+    queryFn: () => listClaims(filters),
+  });
+}
+
+export function useClaim(nrZgl: string | null | undefined) {
+  return useQuery({
+    queryKey: [...CLAIMS_KEY, 'detail', nrZgl],
+    queryFn: () => getClaim(nrZgl as string),
+    enabled: Boolean(nrZgl),
+  });
+}
+
+/**
+ * Live-preview the km-calc. The component is responsible for debouncing
+ * the input — this hook just keys the cache by `body` so identical bodies
+ * dedupe and successive distinct bodies still fire (until the server's
+ * 30/min rate limit kicks in).
+ *
+ * `enabled` defaults to `true` but consumers should gate it on a
+ * minimal-fields check (`vehicleId && dateStart && dateEnd && mileage`)
+ * so we don't fire bogus 422s while the form is half-empty.
+ */
+export function useClaimPreview(
+  body: PreviewClaimDto | null,
+  options?: { enabled?: boolean },
+) {
+  const enabled = (options?.enabled ?? true) && body !== null;
+  return useQuery<PreviewClaimResponse>({
+    queryKey: [...CLAIMS_KEY, 'preview', body],
+    queryFn: () => previewNewClaim(body as PreviewClaimDto),
+    enabled,
+    // Don't retry on 422 — invalid input is the user's problem to fix.
+    retry: false,
+    // Keep the prior preview visible while new keystrokes settle.
+    placeholderData: (prev) => prev,
+    staleTime: 60_000,
+  });
+}
+
+export function useSubmitClaim(
+  opts?: UseMutationOptions<
+    ClaimDto,
+    Error,
+    { body: SubmitClaimDto; idempotencyKey?: string }
+  >,
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ body, idempotencyKey }) => submitClaim(body, idempotencyKey),
+    ...opts,
+    onSuccess: (...args) => {
+      qc.invalidateQueries({ queryKey: CLAIMS_KEY });
+      opts?.onSuccess?.(...args);
+    },
+  });
+}
+
+export function useSubmitReklamacja(
+  opts?: UseMutationOptions<
+    ClaimDto,
+    Error,
+    { nrZgl: string; body: SubmitReklamacjaDto }
+  >,
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ nrZgl, body }) => submitReklamacja(nrZgl, body),
+    ...opts,
+    onSuccess: (...args) => {
+      qc.invalidateQueries({ queryKey: CLAIMS_KEY });
+      opts?.onSuccess?.(...args);
+    },
+  });
+}

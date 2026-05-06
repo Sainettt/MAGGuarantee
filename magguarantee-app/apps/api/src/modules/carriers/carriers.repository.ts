@@ -309,7 +309,12 @@ export class CarriersRepository {
     nip: string | null;
     vatId: string | null;
     contactPerson: string | null;
-    phone: string;
+    // Prisma's inferred type from `findFirst({include: ...})` post the soft-
+    // delete extension surfaces the scalar column as `string | null`, even
+    // though the schema marks it NOT NULL. We accept the wider shape here
+    // and fall back to `''` defensively — never observed in practice since
+    // the migration backfills.
+    phone: string | null;
     ordersEmail: string | null;
     accountEur: string | null;
     accountPln: string | null;
@@ -319,7 +324,7 @@ export class CarriersRepository {
     licenseExpiry: Date | null;
     numberOfPermits: number | null;
     companyAddress: string | null;
-    opiekunId: string;
+    opiekunId: string | null;
     createdAt: Date;
     updatedAt: Date;
     deletedAt: Date | null;
@@ -331,7 +336,7 @@ export class CarriersRepository {
       company: string | null;
       active: boolean;
     };
-    opiekun: { id: string; login: string; name: string | null };
+    opiekun: { id: string; login: string; name: string | null } | null;
   }): CarrierRow {
     return {
       id: row.id,
@@ -344,7 +349,7 @@ export class CarriersRepository {
       nip: row.nip,
       vatId: row.vatId,
       contactPerson: row.contactPerson,
-      phone: row.phone,
+      phone: row.phone ?? '',
       ordersEmail: row.ordersEmail,
       accountEur: row.accountEur,
       accountPln: row.accountPln,
@@ -357,8 +362,9 @@ export class CarriersRepository {
       licenseExpiry: row.licenseExpiry,
       numberOfPermits: row.numberOfPermits,
       companyAddress: row.companyAddress,
-      opiekunId: row.opiekunId,
-      opiekun: row.opiekun,
+      opiekunId: row.opiekunId ?? '',
+      opiekun:
+        row.opiekun ?? { id: row.opiekunId ?? '', login: '', name: null },
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       deletedAt: row.deletedAt,

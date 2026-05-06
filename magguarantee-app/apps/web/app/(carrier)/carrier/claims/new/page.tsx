@@ -1,0 +1,413 @@
+'use client';
+
+// Phase 3 — new-claim form. Two-column layout per docs/14: RHF form on the
+// left, <LivePreviewPanel> on the right. The preview is debounced 400ms
+// after any field change and fired against POST /claims/preview. Submit
+// button is disabled while the preview is loading or returned an error.
+
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useRouter } from 'next/navigation';
+import { useEffect, useMemo } from 'react';
+import { useForm } from 'react-hook-form';
+import { toast } from 'sonner';
+import {
+  SubmitClaimSchema,
+  type PreviewClaimDto,
+  type SubmitClaimDto,
+} from '@magguarantee/shared';
+
+import { LivePreviewPanel } from '@/components/carrier/LivePreviewPanel';
+import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
+import { Textarea } from '@/components/ui/Textarea';
+import { FormField, FormSection } from '@/components/forms/Form';
+import { useClaimPreview, useSubmitClaim } from '@/lib/hooks/useClaims';
+import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
+import { useFormDraft } from '@/lib/hooks/useFormDraft';
+import { useMyFleet } from '@/lib/hooks/useMyFleet';
+
+const DRAFT_KEY = 'draft:carrier:newClaim';
+
+type FormValues = SubmitClaimDto;
+
+function getDefaults(): FormValues {
+  return {
+    vehicleId: '' as unknown as string,
+    trailerId: undefined,
+    driverId: undefined,
+    dateStart: '',
+    dateEnd: '',
+    timeFrom: undefined,
+    timeTo: undefined,
+    mileage: 0,
+    amountRequested: 0,
+    hoursAdjusted: 0,
+    comment: undefined,
+    orderNumber: undefined,
+    orderDate: undefined,
+    attachmentIds: undefined,
+  };
+}
+
+export default function NewClaimPage() {
+  const router = useRouter();
+  const fleetQ = useMyFleet();
+
+  const form = useForm<FormValues>({
+    resolver: zodResolver(SubmitClaimSchema),
+    defaultValues: getDefaults(),
+  });
+
+  const draft = useFormDraft(form, DRAFT_KEY, { enabled: true });
+
+  useEffect(() => {
+    draft.hydrate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const watched = form.watch();
+
+  // Build a preview body when the form has the bare minimum filled. Server
+  // is the source of truth — we don't compute anything locally.
+  const previewBody: PreviewClaimDto | null = useMemo(() => {
+    if (
+      !watched.vehicleId ||
+      !watched.dateStart ||
+      !watched.dateEnd ||
+      typeof watched.mileage !== 'number' ||
+      Number.isNaN(watched.mileage) ||
+      watched.dateStart > watched.dateEnd
+    ) {
+      return null;
+    }
+    return {
+      vehicleId: watched.vehicleId,
+      dateStart: watched.dateStart,
+      dateEnd: watched.dateEnd,
+      timeFrom: watched.timeFrom || undefined,
+      timeTo: watched.timeTo || undefined,
+      mileage: watched.mileage,
+      hoursAdjusted: watched.hoursAdjusted ?? 0,
+    };
+  }, [
+    watched.vehicleId,
+    watched.dateStart,
+    watched.dateEnd,
+    watched.mileage,
+    watched.timeFrom,
+    watched.timeTo,
+    watched.hoursAdjusted,
+  ]);
+
+  // Debounce 400ms before firing the preview request.
+  const debouncedPreviewBody = useDebouncedValue(previewBody, 400);
+  const previewQ = useClaimPreview(debouncedPreviewBody, {
+    enabled: !!debouncedPreviewBody,
+  });
+
+  const submitM = useSubmitClaim({
+    onSuccess: (claim) => {
+      draft.clear();
+      toast.success(`Wniosek ${claim.nrZgl} został złożony`);
+      router.push(`/carrier/claims/${encodeURIComponent(claim.nrZgl)}`);
+    },
+    onError: (err) => {
+      const msg = err instanceof Error ? err.message : 'Nie udało się wysłać wniosku';
+      toast.error(msg);
+    },
+  });
+
+  const submitting = submitM.isPending;
+  const previewBlocked =
+    previewQ.isLoading || (previewQ.isError && !previewQ.data);
+
+  const onSubmit = form.handleSubmit((values) => {
+    // Strip empty strings so optional fields go through Zod cleanly.
+    const cleaned: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(values)) {
+      if (v === '' || v === undefined) continue;
+      cleaned[k] = v;
+    }
+    // Use a fresh idempotency key so refresh + resubmit doesn't double-insert.
+    const idempotencyKey =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : undefined;
+    submitM.mutate({ body: cleaned as SubmitClaimDto, idempotencyKey });
+  });
+
+  const errs = form.formState.errors;
+  const vehicles = fleetQ.data?.vehicles ?? [];
+  const drivers = fleetQ.data?.drivers ?? [];
+  const trailers = fleetQ.data?.trailers ?? [];
+
+  return (
+    <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+      <h1 className="text-2xl font-extrabold tracking-tight text-text mb-6">
+        Nowy wniosek
+      </h1>
+
+      <form onSubmit={onSubmit}>
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.2fr] gap-6">
+          {/* Left — RHF form */}
+          <div className="space-y-6">
+            <div className="bg-card rounded-lg border border-border p-5 space-y-6">
+              <FormSection title="Pojazd i kierowca">
+                <FormField
+                  label="Pojazd"
+                  required
+                  error={errs.vehicleId?.message}
+                  htmlFor="claim-vehicleId"
+                >
+                  <Select
+                    id="claim-vehicleId"
+                    {...form.register('vehicleId')}
+                  >
+                    <option value="">—</option>
+                    {vehicles.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.plateNumber}
+                        {v.brand || v.model
+                          ? ` — ${[v.brand, v.model].filter(Boolean).join(' ')}`
+                          : ''}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FormField
+                    label="Kierowca"
+                    error={errs.driverId?.message}
+                    htmlFor="claim-driverId"
+                  >
+                    <Select
+                      id="claim-driverId"
+                      {...form.register('driverId')}
+                    >
+                      <option value="">—</option>
+                      {drivers.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.firstName} {d.lastName}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                  <FormField
+                    label="Naczepa"
+                    error={errs.trailerId?.message}
+                    htmlFor="claim-trailerId"
+                  >
+                    <Select
+                      id="claim-trailerId"
+                      {...form.register('trailerId')}
+                    >
+                      <option value="">—</option>
+                      {trailers.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.plateNumber}
+                          {t.trailerTypeName ? ` (${t.trailerTypeName})` : ''}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                </div>
+              </FormSection>
+
+              <FormSection title="Okres">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FormField
+                    label="Data od"
+                    required
+                    error={errs.dateStart?.message}
+                    htmlFor="claim-dateStart"
+                  >
+                    <Input
+                      id="claim-dateStart"
+                      type="date"
+                      className="h-10"
+                      {...form.register('dateStart')}
+                    />
+                  </FormField>
+                  <FormField
+                    label="Data do"
+                    required
+                    error={errs.dateEnd?.message}
+                    htmlFor="claim-dateEnd"
+                  >
+                    <Input
+                      id="claim-dateEnd"
+                      type="date"
+                      className="h-10"
+                      {...form.register('dateEnd')}
+                    />
+                  </FormField>
+                  <FormField
+                    label="Godzina od"
+                    error={errs.timeFrom?.message}
+                    htmlFor="claim-timeFrom"
+                  >
+                    <Input
+                      id="claim-timeFrom"
+                      type="time"
+                      className="h-10"
+                      {...form.register('timeFrom')}
+                    />
+                  </FormField>
+                  <FormField
+                    label="Godzina do"
+                    error={errs.timeTo?.message}
+                    htmlFor="claim-timeTo"
+                  >
+                    <Input
+                      id="claim-timeTo"
+                      type="time"
+                      className="h-10"
+                      {...form.register('timeTo')}
+                    />
+                  </FormField>
+                </div>
+              </FormSection>
+
+              <FormSection title="Wartości">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FormField
+                    label="Przebieg (km)"
+                    required
+                    error={errs.mileage?.message}
+                    htmlFor="claim-mileage"
+                  >
+                    <Input
+                      id="claim-mileage"
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      className="h-10"
+                      {...form.register('mileage', {
+                        setValueAs: (v) =>
+                          v === '' || v === null ? 0 : Number(v),
+                      })}
+                    />
+                  </FormField>
+                  <FormField
+                    label="Kwota wnioskowana (EUR)"
+                    required
+                    error={errs.amountRequested?.message}
+                    htmlFor="claim-amount"
+                  >
+                    <Input
+                      id="claim-amount"
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      className="h-10"
+                      {...form.register('amountRequested', {
+                        setValueAs: (v) =>
+                          v === '' || v === null ? 0 : Number(v),
+                      })}
+                    />
+                  </FormField>
+                  <FormField
+                    label="Korekta godzin (h)"
+                    error={errs.hoursAdjusted?.message}
+                    htmlFor="claim-hours"
+                    description="Czas postoju do odjęcia od czasu trasy."
+                  >
+                    <Input
+                      id="claim-hours"
+                      type="number"
+                      step="0.5"
+                      min={0}
+                      className="h-10"
+                      {...form.register('hoursAdjusted', {
+                        setValueAs: (v) =>
+                          v === '' || v === null ? 0 : Number(v),
+                      })}
+                    />
+                  </FormField>
+                </div>
+              </FormSection>
+
+              <details>
+                <summary className="cursor-pointer text-sm font-semibold text-text-sub hover:text-text">
+                  Dodaj komentarz / numer zlecenia
+                </summary>
+                <div className="mt-4 space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <FormField
+                      label="Numer zlecenia"
+                      error={errs.orderNumber?.message}
+                      htmlFor="claim-orderNumber"
+                    >
+                      <Input
+                        id="claim-orderNumber"
+                        className="h-10"
+                        {...form.register('orderNumber')}
+                      />
+                    </FormField>
+                    <FormField
+                      label="Data zlecenia"
+                      error={errs.orderDate?.message}
+                      htmlFor="claim-orderDate"
+                    >
+                      <Input
+                        id="claim-orderDate"
+                        type="date"
+                        className="h-10"
+                        {...form.register('orderDate')}
+                      />
+                    </FormField>
+                  </div>
+                  <FormField
+                    label="Komentarz"
+                    error={errs.comment?.message}
+                    htmlFor="claim-comment"
+                  >
+                    <Textarea
+                      id="claim-comment"
+                      rows={3}
+                      {...form.register('comment')}
+                    />
+                  </FormField>
+                </div>
+              </details>
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  draft.clear();
+                  form.reset(getDefaults());
+                }}
+                disabled={submitting}
+              >
+                Wyczyść
+              </Button>
+              <Button
+                type="submit"
+                size="lg"
+                disabled={submitting || previewBlocked}
+              >
+                {submitting ? 'Wysyłanie…' : 'Złóż wniosek'}
+              </Button>
+            </div>
+          </div>
+
+          {/* Right — Live preview */}
+          <div>
+            <LivePreviewPanel
+              data={previewQ.data}
+              isLoading={previewQ.isFetching}
+              isError={previewQ.isError}
+              isEmpty={!previewBody}
+            />
+          </div>
+        </div>
+      </form>
+    </section>
+  );
+}

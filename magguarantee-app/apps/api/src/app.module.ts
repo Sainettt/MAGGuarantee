@@ -10,11 +10,15 @@ import { HealthModule } from './health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { CarriersModule } from './modules/carriers/carriers.module';
+import { ClaimsModule } from './modules/claims/claims.module';
+import { DelegationsModule } from './modules/delegations/delegations.module';
 import { DriversModule } from './modules/drivers/drivers.module';
+import { FleetModule } from './modules/fleet/fleet.module';
 import { GpsModule } from './modules/integrations/gps/gps.module';
 import { InspectionModule } from './modules/integrations/inspection/inspection.module';
 import { ViesModule } from './modules/integrations/vies/vies.module';
 import { WhiteListModule } from './modules/integrations/white-list/white-list.module';
+import { KmCalcModule } from './modules/km-calc/km-calc.module';
 import { LookupsModule } from './modules/lookups/lookups.module';
 import { MailModule } from './modules/mail/mail.module';
 import { PasswordModule } from './modules/password/password.module';
@@ -82,6 +86,10 @@ import { VehiclesModule } from './modules/vehicles/vehicles.module';
     TrailerTypesModule,
     TrailersModule,
     LookupsModule,
+    KmCalcModule,
+    ClaimsModule,
+    DelegationsModule,
+    FleetModule,
     ViesModule,
     WhiteListModule,
     InspectionModule,
