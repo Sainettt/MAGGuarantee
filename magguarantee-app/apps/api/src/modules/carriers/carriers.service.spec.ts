@@ -278,11 +278,21 @@ describe('CarriersService', () => {
     expect(out.items[0]?.id).toBe('c-mine');
   });
 
-  it('list rejects roles outside admin/pracownik/opiekun', async () => {
+  it('list rejects roles outside admin/opiekun', async () => {
     const carriers = makeCarriersRepo();
     const svc = new CarriersService(carriers, makeUsersRepo(), makePasswords());
     await expect(
       svc.list(makeAuth('przewoznik', 'p-1'), { limit: 50 }),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('list rejects pracownik (narrow claims-only role)', async () => {
+    // Per docs/03-roles.md#pracownik the pracownik role has no carrier
+    // visibility — only claims verification + dashboard.
+    const carriers = makeCarriersRepo();
+    const svc = new CarriersService(carriers, makeUsersRepo(), makePasswords());
+    await expect(
+      svc.list(makeAuth('pracownik', 'pr-1'), { limit: 50 }),
     ).rejects.toThrow(ForbiddenException);
   });
 

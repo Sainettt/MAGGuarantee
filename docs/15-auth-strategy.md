@@ -210,10 +210,19 @@ export class ClaimsController {
   @Get()
   @Roles('admin', 'pracownik', 'opiekun', 'przewoznik')
   list(@CurrentUser() user: User, @Query() q: ListQuery) { ... }
+  // Service-level scope: admin/pracownik видят все, opiekun — только своих перевозчиков, przewoznik — только свои.
 
   @Patch(':nrZgl')
-  @Roles('admin', 'pracownik')
+  @Roles('admin', 'pracownik')   // ← одно из НЕМНОГИХ мест где pracownik уместен — claims-верификация это его основная задача
   update(@Param('nrZgl') nrZgl: string, @Body() dto: UpdateClaimDto) { ... }
+}
+
+// CONTRAST: для CRUD по carrier/vehicle/driver/trailer pracownik НЕ допущен:
+@Controller('carriers')
+export class CarriersController {
+  @Patch(':id')
+  @Roles('admin', 'opiekun')   // ← pracownik сюда НЕ ходит (legacy: requireAdmin / _requireOpiekun)
+  update(...) { ... }
 }
 ```
 
@@ -250,8 +259,10 @@ export class OpiekunOwnershipGuard implements CanActivate {
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const req = ctx.switchToHttp().getRequest();
     const { user } = req;
-    // admin/pracownik пропускаются — у них доступ ко всем
-    if (['admin', 'pracownik'].includes(user.role)) return true;
+    // admin пропускается — у него доступ ко всем перевозчикам.
+    // pracownik сюда НЕ должен попадать — он не имеет доступа к carrier-эндпоинтам вообще
+    // (контроллер carriers поднимает 403 через @Roles('admin', 'opiekun')).
+    if (user.role === 'admin') return true;
     if (user.role !== 'opiekun') return true; // другая роль — другой guard
     const carrierId = req.params.carrierId ?? req.body.carrierId ?? req.params.id;
     if (!carrierId) throw new BadRequestException('No carrier in request');
@@ -269,7 +280,7 @@ export class OpiekunOwnershipGuard implements CanActivate {
 
 ```ts
 @Patch('carriers/:id')
-@Roles('admin', 'pracownik', 'opiekun')
+@Roles('admin', 'opiekun')   // ← НЕ 'pracownik' — у него нет доступа к carrier-CRUD
 @UseGuards(JwtAuthGuard, RolesGuard, OpiekunOwnershipGuard)
 update(@Param('id') id: string, ...) { ... }
 ```
@@ -330,9 +341,9 @@ function RoleSwitcher() {
 | `POST /auth/refresh` | refresh-cookie | — |
 | `GET /auth/me` | access | — |
 | `POST /auth/logout` | access | — |
-| `GET /carriers` | access | role: admin/pracownik/opiekun(own) |
+| `GET /carriers` | access | role: admin / opiekun(own) — НЕ pracownik |
 | `POST /claims` | access | role: przewoznik + ownership на vehicle |
-| `PATCH /claims/:n` | access | role: admin/pracownik |
+| `PATCH /claims/:n` | access | role: admin / pracownik |
 | `POST /delegations/:id/in-transit` | access | role: weryfikator |
 | `GET /diagnostics/*` | access | role: admin |
 

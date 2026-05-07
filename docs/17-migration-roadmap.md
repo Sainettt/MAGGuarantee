@@ -30,7 +30,7 @@
 
 Юзер предложил такой порядок, но он субоптимален:
 
-- **pracownik и admin делят 95% функциональности** — нет смысла делать их в разных фазах. Делаем вместе.
+- **pracownik и admin делят один Employee panel и оба верифицируют wnioski** — нет смысла делать их в разных фазах. Делаем вместе. (NB: pracownik — узкая роль «Opiekun wniosków», только wnioski + dashboard, без CRUD по carrier/vehicle/driver/trailer; admin — полный scope. См. [03-roles.md#pracownik](03-roles.md#pracownik).)
 - **planista — read-only** — это самая простая роль, она никак не помогает выявить риски архитектуры. Делать её перед admin = трата времени без пользы.
 - **carrier (przewoznik) — самый изолированный** — это лучший first-real-user слайс. Он видит только свои данные, простые формы, минимум зависимостей.
 

@@ -4,16 +4,18 @@
 
 ## Сводная таблица
 
-| Роль | Описание | Главный экран |
-|---|---|---|
-| `admin` | Полный доступ. Может всё. | Employee panel + Diagnostics |
-| `pracownik` | Сотрудник, верифицирующий wnioski | Employee panel |
-| `opiekun` | Куратор группы перевозчиков | Employee panel (раздел Moja opieka) |
-| `planista` | Спедитор закреплённых авто | Planista panel (read-only) |
-| `dyspozytor` | Диспетчер по конкретным авто | Dyspozytor panel (read-only) |
-| `przewoznik` | Перевозчик-субподрядчик | Carrier panel |
-| `eksport` | Эксперт экспорта | Eksport panel (read-only) |
-| `weryfikator` | Верификатор делегаций | Weryfikator panel |
+| Роль | UI-лейбл (PL) | Описание | Главный экран |
+|---|---|---|---|
+| `admin` | Admin | Полный доступ. Может всё. | Employee panel + Diagnostics |
+| `pracownik` | **Opiekun wniosków** | Узкий «оператор заявок» — только верификация wniosków | Employee panel (Dashboard + Wnioski) |
+| `opiekun` | Opiekun | Куратор группы перевозчиков | Employee panel (раздел Moja opieka) |
+| `planista` | Planista | Спедитор закреплённых авто | Planista panel (read-only) |
+| `dyspozytor` | Dyspozytor | Диспетчер по конкретным авто | Dyspozytor panel (read-only) |
+| `przewoznik` | Przewoźnik | Перевозчик-субподрядчик | Carrier panel |
+| `eksport` | Eksport | Эксперт экспорта | Eksport panel (read-only) |
+| `weryfikator` | Weryfikator | Верификатор делегаций | Weryfikator panel |
+
+> ⚠️ Роль называется `pracownik` в БД и в коде, но в UI она всегда отображается как **«Opiekun wniosków»** (claims-caretaker). Это сохраняем — пользователи MagTrans привыкли к этому термину. Не путать с ролью `opiekun` (куратор перевозчиков, совсем другой scope).
 
 ---
 
@@ -70,6 +72,7 @@
 
 - Действовать на перевозчиках с другим `opiekunId` (403).
 - Верифицировать заявления (это `pracownik`/`admin`).
+- Видеть **все** wnioski в Wnioski-вкладке. Видит только wnioski **своих** перевозчиков (фильтр scope-а — см. [Code.gs:4920-4940](../Code.gs)).
 
 ### Audit log
 
@@ -119,31 +122,81 @@
 
 ---
 
-## <a id="pracownik"></a>👨‍💼 Работник (`pracownik`) и Админ (`admin`)
+## <a id="pracownik"></a>👨‍💼 Opiekun wniosków (`pracownik`)
 
-**Кто это:** сотрудник MagTrans, верифицирующий заявления. Различия минимальны — `admin` имеет дополнительные права.
+**Кто это:** сотрудник MagTrans, чья **единственная задача — верифицировать заявления (wnioski)**. Не управляет перевозчиками, авто, водителями или прицепами. Не имеет доступа к настройкам или административным панелям.
 
-### Что могут оба
+> В legacy GAS-коде эта роль так и закомментирована: *«Pracownik = widzi wszystko, rozlicza wnioski, BEZ ustawień»* ([Code.gs:944](../Code.gs)). UI-лейбл — «Opiekun wniosków», не «Pracownik». В новой системе — то же.
 
-| Действие |
-|---|
-| Видеть все заявления с фильтром |
-| Верифицировать (изменить статус, пересчитать) |
-| Просмотр всех перевозчиков |
-| CRUD перевозчиков (всех) |
-| CRUD авто (всех) |
-| CRUD водителей (всех) |
-| CRUD прицепов |
-| Управление справочником типов прицепов |
-| Внешние проверки: VIES, Biała Lista MF, info-car link |
+### Главный экран
 
-### Только для admin
+`Employee panel` с **двумя вкладками только**:
+1. **📊 Dashboard** — KPI, urgent-список, ostatnia aktywność, monthly-trend, top-przewoźnicy, reklamacje, top-payouts, wypłaty na planistę.
+2. **📋 Wnioski** — таблица всех wniosków с фильтрами (статус, перевозчик, текстовый поиск).
 
-- Hard-delete (полное удаление, не soft).
-- Прямая правка лимитов км/ставок (`MonthlyLimit`).
-- Создание / редактирование пользователей (всех ролей).
-- Diagnostic-эндпоинты (диагностика email, сводка БД).
-- Чтение audit-log.
+Вкладки `Carriers / Vehicles / Drivers / Trailers / Trailer types` ему **не показываются** — они для `admin`. Вкладка `Moja opieka` — для `opiekun`.
+
+### Что может делать
+
+| Действие | Endpoint (legacy → new) |
+|---|---|
+| Видеть **все** заявления с фильтром по статусу/перевозчику | `getAllClaims` → `GET /claims` |
+| Верифицировать заявление (изменить статус, пересчитать km/доплату, добавить komentarz) | `updateClaimFull` → `PATCH /claims/:nrZgl` |
+| Применить korekta godzin (вычесть простой/сервис из dni jezdne) | `updateClaimFull` (поле `korektaGodzin`) |
+| Указать `nrZlecenia` (номер заказа) при акцепте | `updateClaimFull` (поле `nrZlecenia`) |
+| Запросить авторизацию у Maksima (когда `doplata > getAuthThreshold(dniJezdne)`) — отправляет email + помечает статус `OCZEKUJE NA AUTORYZACJĘ` | `sendAuthorizationRequest` → `POST /claims/:nrZgl/request-authorization` |
+| Загрузить screenshot ответа Maksima (после внесистемного email-потока) | `uploadAuthScreenshot` → `POST /claims/:nrZgl/auth-screenshot` |
+| Ввести вручную `kwotaMaksima` (override calculated `doplata` после авторизации) | `updateClaimFull` (поле `kwotaMaksima`) |
+| Обработать reklamację (zaakceptować частично с `reklamacjaZatwKwota` или odrzucić) | `updateClaimFull` (флаг `reklamacjaZlozona` + поля reklamacji) |
+| Видеть dashboard со статистикой по всем wnioskom | `getDashboardStats` → `GET /claims/dashboard` |
+| Видеть eksport-делегации (read-only) | `getDelegacjeForEksport` → `GET /delegations` (filter eksport) |
+
+### Что **НЕ** может
+
+| ❌ Запрещено | Причина / какая роль это делает |
+|---|---|
+| Создавать / редактировать / деактивировать **перевозчиков** | `admin` (все) или `opiekun` (свои) |
+| Создавать / редактировать / деактивировать **авто, водителей, прицепы** | `admin` (все) или `opiekun` (свои) |
+| Управлять справочником **типов прицепов** | `admin` |
+| Менять лимиты км / ставки EUR (`MonthlyLimit`) | `admin` |
+| Создавать / редактировать **пользователей** любой роли | `admin` |
+| Видеть / читать **audit log** | `admin` |
+| Делать **hard-delete** чего бы то ни было | `admin` |
+| Доступ к **diagnostic**-эндпоинтам | `admin` |
+| Менять статус **делегаций** (in-transit, returned) | `weryfikator` |
+| Видеть «своих» подопечных перевозчиков (Moja opieka) | `opiekun` |
+
+> Legacy enforcement: все CRUD-функции по carrier/vehicle/driver/trailer/trailer-type обёрнуты в `requireAdmin(callerLogin)` ([Code.gs:1212](../Code.gs)). `pracownik` в этих эндпоинтах получает `'Brak uprawnień (wymaga admin)'`. В UI вкладки этих сущностей просто не рендерятся для `pracownik` ([index.html:4682-4690](../index.html)).
+
+### Внешние проверки (VIES, Biała Lista MF, info-car)
+
+В legacy эти эндпоинты не имеют permission-check (любой залогиненный вызывает). В новой системе — они **используются только в формах carrier/vehicle**, поэтому де-факто доступны только `admin` и `opiekun`. `pracownik` их UI не открывает (нет вкладок Carriers/Vehicles).
+
+---
+
+## <a id="admin"></a>🛡️ Админ (`admin`)
+
+**Кто это:** супер-пользователь MagTrans. Пересечение `pracownik` ∪ `opiekun` (без ограничения по ownership) ∪ управление справочниками и пользователями ∪ диагностика.
+
+### Сверх того, что умеет `pracownik`, admin может
+
+| Действие | Endpoint (legacy → new) |
+|---|---|
+| Видеть в Employee panel **ещё 4 вкладки**: Carriers, Vehicles, Drivers, Trailers | `index.html:4682-4686` (UI guard `isAdminRole`) |
+| CRUD **перевозчиков** (всех, не только своих) | `addCarrier` / `updateCarrier` / `toggleCarrierActive` / `deleteCarrierHard` / `resetCarrierPassword` → `POST/PATCH/DELETE /carriers` |
+| CRUD **авто** (всех) + редактирование `plannerId`, `dispatcherId`, ставок (DE/UE/Ekspoort/Import) | `addVehicle` / `updateVehicleDetails` / `toggleVehicleActive` / `removeVehicle` |
+| CRUD **водителей** (всех) | `addDriver` / `updateDriver` / `toggleDriverActive` / `removeDriver` |
+| CRUD **прицепов** (всех) | `addNaczepa` / `updateNaczepa` / `toggleNaczepaActive` / `removeNaczepa` |
+| Управление **справочником типов прицепов** | `addNaczepaTyp` / `toggleNaczepaTypActive` |
+| Менять **лимиты км / ставки** (`MonthlyLimit`) | `getLimityKm` (read) / `PUT /limits` (новое в API) |
+| CRUD **пользователей** всех ролей (admin / pracownik / opiekun / planista / dyspozytor / eksport / weryfikator) | `POST/PATCH/DELETE /users` |
+| Hard-delete (cascading) перевозчиков, авто, водителей, прицепов с обязательным `powod` | `deleteCarrierHard` etc. |
+| Читать **audit log** | `GET /audit` |
+| Diagnostic-эндпоинты (диагностика email-доставки, raw-снапшот wniosków, БД-сводка) | `diagnostykaMaili`, `DIAGNOSTYKA_WNIOSKÓW` → `GET /diagnostics/*` |
+| В Carrier panel видеть **все** wnioski (а не только своих) — debug-fallback | `getClaimsForCarrier` (`if caller.rola === 'admin' пропускает фильтр nazwa`) |
+| Anulować любую делegację | `cancelDelegacja` (admin/weryfikator) |
+
+> На уровне guards в новой системе: `@Roles('admin')` для всего из этой таблицы; `@Roles('admin', 'pracownik')` — только для эндпоинтов claims-верификации. Никогда не `@Roles('admin', 'pracownik')` для CRUD entities.
 
 ---
 
@@ -166,23 +219,31 @@
 
 ## Матрица доступа
 
+> Цель таблицы — закрепить **узость scope-а pracownik**. Если какое-то действие у `pracownik` стоит ✅, оно касается только wniosków или dashboard-статистики; никаких CRUD по справочным сущностям.
+
 | Действие | admin | pracownik | opiekun | planista | dyspozytor | przewoznik | eksport | weryfikator |
 |----------|:-----:|:---------:|:-------:|:--------:|:----------:|:----------:|:-------:|:-----------:|
 | Подать заявление | — | — | — | — | — | ✅ | — | — |
 | Верифицировать заявление | ✅ | ✅ | — | — | — | — | — | — |
-| Видеть все заявления | ✅ | ✅ | — | — | — | — | — | — |
+| Видеть все заявления + dashboard | ✅ | ✅ | — | — | — | — | — | — |
+| Запросить авторизацию у Maksima (большие суммы) | ✅ | ✅ | — | — | — | — | — | — |
+| Загрузить screenshot авторизации | ✅ | ✅ | — | — | — | — | — | — |
 | Видеть свои заявления | — | — | — | — | — | ✅ | — | — |
-| CRUD перевозчиков (все) | ✅ | ✅ | — | — | — | — | — | — |
+| CRUD перевозчиков (все) | ✅ | **—** | — | — | — | — | — | — |
 | CRUD перевозчиков (свои) | — | — | ✅ | — | — | — | — | — |
-| CRUD авто (все) | ✅ | ✅ | — | — | — | — | — | — |
+| CRUD авто (все) | ✅ | **—** | — | — | — | — | — | — |
 | CRUD авто (свои перев.) | — | — | ✅ | — | — | — | — | — |
 | Видеть свои авто (planner/dispatcher) | — | — | — | ✅ | ✅ | — | — | — |
-| CRUD водителей/прицепов | ✅ | ✅ | ✅ (свои) | — | — | ✅ (свои) | — | — |
+| CRUD водителей (все) | ✅ | **—** | — | — | — | — | — | — |
+| CRUD водителей/прицепов (свои) | — | — | ✅ | — | — | ✅ | — | — |
+| CRUD прицепов (все) + типов прицепов | ✅ | **—** | — | — | — | — | — | — |
 | Зарегистрировать выезд | — | — | — | — | — | ✅ | — | — |
 | Изменить статус выезда | ✅ | — | — | — | — | — | — | ✅ |
-| Видеть выезды | ✅ | ✅ | — | — | ✅ (свои) | ✅ (свои) | ✅ | ✅ |
+| Видеть выезды | ✅ | — | — | — | ✅ (свои) | ✅ (свои) | ✅ | ✅ |
 | Управление лимитами / справочниками | ✅ | — | — | — | — | — | — | — |
+| CRUD пользователей | ✅ | — | — | — | — | — | — | — |
 | Audit log (чтение) | ✅ | — | — | — | — | — | — | — |
+| Diagnostic endpoints | ✅ | — | — | — | — | — | — | — |
 
 ---
 

@@ -22,9 +22,11 @@ import {
  * Per docs/15-auth-strategy.md#OpiekunOwnershipGuard and docs/03-roles.md
  * (#opiekun):
  *
- *  - admin / pracownik → pass through (global access)
+ *  - admin → pass through (global access)
  *  - non-opiekun roles → pass through (this guard has no opinion; other
- *    guards such as `CarrierOwnershipGuard` or `RolesGuard` cover them)
+ *    guards such as `CarrierOwnershipGuard` or `RolesGuard` cover them).
+ *    pracownik is excluded at the @Roles level on every CRUD endpoint per
+ *    docs/03-roles.md#pracownik (claims-only role).
  *  - opiekun → must own the targeted carrier; otherwise 403
  *
  * The target identifier comes from the `@OpiekunOwns(...)` decorator. If the
@@ -62,8 +64,12 @@ export class OpiekunOwnershipGuard implements CanActivate {
       throw new ForbiddenException('Brak uprawnień');
     }
 
-    // admin / pracownik bypass — they have global access per docs/03-roles.md.
-    if (user.role === 'admin' || user.role === 'pracownik') return true;
+    // admin bypass — global access per docs/03-roles.md. pracownik does NOT
+    // bypass: it is excluded from carrier/vehicle/driver/trailer CRUD at the
+    // @Roles level (docs/03-roles.md#pracownik), so it should never reach
+    // this guard via those routes; if it ever did, falling through to the
+    // opiekun branch below would still deny (it has no `opiekunId` match).
+    if (user.role === 'admin') return true;
 
     // Other roles (przewoznik, planista, dyspozytor, eksport, weryfikator)
     // are governed by their own guards; this one only fires for opiekun.

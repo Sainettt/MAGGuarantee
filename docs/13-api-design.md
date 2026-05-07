@@ -12,7 +12,7 @@
 
 - Все endpoints (кроме `/auth/login`, `/auth/verify-code`, `/auth/refresh`, `/health`) защищены `JwtAuthGuard`.
 - JWT передаётся в `Authorization: Bearer <access_token>` или в HttpOnly cookie `mt_access` (для web).
-- `RolesGuard` дополнительно проверяет роль через `@Roles('admin', 'pracownik')`.
+- `RolesGuard` дополнительно проверяет роль через `@Roles(...)`. Помни: `pracownik` — это узкая роль («Opiekun wniosków»), допущенная только к claims-эндпоинтам и dashboard. Никогда не комбинируй `@Roles('admin', 'pracownik')` для CRUD по carriers/vehicles/drivers/trailers — там должно быть `@Roles('admin', 'opiekun')`.
 - `OwnershipGuard` для opiekun-эндпоинтов: проверяет, что `carrierId` в pathparam принадлежит текущему opiekun.
 
 ### Формат ответов
@@ -113,18 +113,22 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 
 | Method + Path | GAS | Роль |
 |---|---|---|
-| GET `/carriers` | `getCarriersList` | admin/pracownik (все), opiekun (свои) |
-| GET `/carriers/:id` | `getCarrier` (lookup) | admin/pracownik/opiekun(own) |
-| POST `/carriers` | `addCarrier` / `addCarrierByOpiekun` | admin/pracownik/opiekun |
-| PATCH `/carriers/:id` | `updateCarrier` / `updateCarrierByOpiekun` | admin/pracownik/opiekun(own) |
-| POST `/carriers/:id/deactivate` | `toggleCarrierActive` (off) | admin/pracownik/opiekun(own) |
-| POST `/carriers/:id/reactivate` | `toggleCarrierActive` (on) | admin/pracownik/opiekun(own) |
-| POST `/carriers/:id/reset-password` | `resetCarrierPassword` / `resetCarrierPasswordByOpiekun` | + |
-| DELETE `/carriers/:id` | `deleteCarrierHard` / `deleteCarrierByOpiekunHard` | + (soft) |
+| GET `/carriers` | `getCarriersList` | admin (все), opiekun (свои) |
+| GET `/carriers/:id` | `getCarrier` (lookup) | admin / opiekun(own) |
+| POST `/carriers` | `addCarrier` / `addCarrierByOpiekun` | admin / opiekun |
+| PATCH `/carriers/:id` | `updateCarrier` / `updateCarrierByOpiekun` | admin / opiekun(own) |
+| POST `/carriers/:id/deactivate` | `toggleCarrierActive` (off) | admin / opiekun(own) |
+| POST `/carriers/:id/reactivate` | `toggleCarrierActive` (on) | admin / opiekun(own) |
+| POST `/carriers/:id/reset-password` | `resetCarrierPassword` / `resetCarrierPasswordByOpiekun` | admin / opiekun(own) |
+| DELETE `/carriers/:id` | `deleteCarrierHard` / `deleteCarrierByOpiekunHard` | admin (hard) / opiekun(own, soft) |
 
 > Один endpoint, один сервис. Различия admin/opiekun — на уровне `RolesGuard` + `OwnershipGuard`. Дублей `*ByOpiekun` нет.
+>
+> ⚠️ `pracownik` **не имеет доступа** ни к одному из этих эндпоинтов — это admin/opiekun-only. Legacy enforcement: `requireAdmin(callerLogin)` в `Code.gs:1318, 1991, 2070, …` (admin-функции) и `_requireOpiekun` для opiekun-вариантов. Pracownik видит только wnioski-вкладку, не Carriers.
 
 ### Vehicles — `/api/v1/vehicles`
+
+> Роль: `admin` (все), `opiekun` (свои перевозчики), `przewoznik` (свои авто, read + ограниченные write). **Не `pracownik`.**
 
 | Method + Path | GAS |
 |---|---|
@@ -140,6 +144,8 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 
 ### Drivers — `/api/v1/drivers`
 
+> Роль: `admin` (все), `opiekun` (свои), `przewoznik` (свои). **Не `pracownik`.**
+
 | Method + Path | GAS |
 |---|---|
 | GET `/drivers?carrierId=...` | `getDriversList` / `getMyDrivers` |
@@ -151,6 +157,8 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 | DELETE `/drivers/:id` | `removeDriver` / `removeMyDriver` / `removeDriverByOpiekun` |
 
 ### Trailers — `/api/v1/trailers`
+
+> Роль: `admin` (все), `opiekun` (свои), `przewoznik` (свои). **Не `pracownik`.**
 
 | Method + Path | GAS |
 |---|---|
@@ -164,6 +172,8 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 
 ### Trailer types — `/api/v1/trailer-types`
 
+> Роль: write — `admin` only; read — все employee-роли + carrier (для dropdown-а). **Pracownik** может только read через `/lookups/trailer-types`, не write.
+
 | Method + Path | GAS |
 |---|---|
 | GET `/trailer-types` | `getNaczepyTypyList` |
@@ -173,17 +183,20 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 
 ### Claims (wnioski) — `/api/v1/claims`
 
-| Method + Path | GAS |
-|---|---|
-| GET `/claims` | `getAllClaims` (admin) / `getClaimsForCarrier` (carrier — фильтр своих) — единый endpoint, фильтрация по роли в сервисе |
-| GET `/claims/:nrZgl` | `buildClaimObj` |
-| POST `/claims` | `submitNewClaim` (carrier) |
-| PATCH `/claims/:nrZgl` | `updateClaimFull` (admin/pracownik) — корректировки + decision |
-| POST `/claims/:nrZgl/reklamacja` | `submitReklamacja` (carrier) |
-| POST `/claims/:nrZgl/preview` | (новое) — server-side расчёт live preview, заменяет client-side `carrierPreviewCalc` |
-| POST `/claims/:nrZgl/auth-screenshot` | `uploadAuthScreenshot` (multipart, S3) |
-| POST `/claims/:nrZgl/request-authorization` | `sendAuthorizationRequest` |
-| GET `/claims/raw?nrZgl=...` | `getRawClaims` (admin diagnostics) |
+> Это **основной scope** для роли `pracownik`. Pracownik видит и редактирует все claims (как admin), но не имеет CRUD по carrier/vehicle/driver/trailer.
+
+| Method + Path | GAS | Роль |
+|---|---|---|
+| GET `/claims` | `getAllClaims` (admin/pracownik — все) / `getAllClaims` с opiekun-scope (свои перевозчики) / `getClaimsForCarrier` (carrier — свои) — единый endpoint, фильтрация по роли в сервисе | admin / pracownik / opiekun(scope) / przewoznik(scope) |
+| GET `/claims/:nrZgl` | `buildClaimObj` | admin / pracownik / opiekun(own carrier) / przewoznik(own) |
+| GET `/claims/dashboard` | `getDashboardStats` | admin / pracownik (полный) / opiekun (scope: свои перевозчики) |
+| POST `/claims` | `submitNewClaim` | przewoznik |
+| PATCH `/claims/:nrZgl` | `updateClaimFull` — корректировки + decision (status, korekta godzin, nrZlecenia, kwotaMaksima, reklamacjaZatwKwota) | **admin / pracownik** |
+| POST `/claims/:nrZgl/reklamacja` | `submitReklamacja` | przewoznik (own claim) |
+| POST `/claims/:nrZgl/preview` | (новое) — server-side расчёт live preview, заменяет client-side `carrierPreviewCalc` | любой залогиненный (помогает заполнить форму) |
+| POST `/claims/:nrZgl/auth-screenshot` | `uploadAuthScreenshot` (multipart, S3) — pracownik/admin/opiekun (legacy: `requireEmployee`) | admin / pracownik / opiekun |
+| POST `/claims/:nrZgl/request-authorization` | `sendAuthorizationRequest` — отсылает email Maksimu, помечает статус `OCZEKUJE_NA_AUTORYZACJĘ` | admin / pracownik / opiekun |
+| GET `/claims/raw?nrZgl=...` | `getRawClaims` (admin diagnostics) | admin |
 
 ### Delegations (выезды) — `/api/v1/delegations`
 

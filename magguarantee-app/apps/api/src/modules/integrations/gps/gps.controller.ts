@@ -29,9 +29,10 @@ import { GpsService } from './gps.service';
  * docs/16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api.
  *
  * Roles:
- *  - admin / pracownik / opiekun / planista / dyspozytor / przewoznik OK.
- *  - eksport / weryfikator → blocked (403). They have NO GPS visibility per
- *    the wave brief.
+ *  - admin / opiekun / planista / dyspozytor / przewoznik OK.
+ *  - pracownik / eksport / weryfikator → blocked (403). pracownik is a
+ *    narrow claims-only role per docs/03-roles.md#pracownik (no fleet view);
+ *    eksport / weryfikator have NO GPS visibility per the wave brief.
  *
  * The /trips endpoint is documented but Phase 11+ — we expose it as 501.
  */
@@ -41,7 +42,7 @@ export class GpsController {
   constructor(private readonly gps: GpsService) {}
 
   @Get('positions')
-  @Roles('admin', 'pracownik', 'opiekun', 'planista', 'dyspozytor', 'przewoznik')
+  @Roles('admin', 'opiekun', 'planista', 'dyspozytor', 'przewoznik')
   async listPositions(
     @CurrentUser() user: AuthUser,
   ): Promise<GpsPositionListResponse> {
@@ -49,7 +50,7 @@ export class GpsController {
   }
 
   @Get('positions/:vehicleId')
-  @Roles('admin', 'pracownik', 'opiekun', 'planista', 'dyspozytor', 'przewoznik')
+  @Roles('admin', 'opiekun', 'planista', 'dyspozytor', 'przewoznik')
   async getPosition(
     @CurrentUser() user: AuthUser,
     @Param('vehicleId', new ZodValidationPipe(UuidSchema)) vehicleId: string,
@@ -58,7 +59,7 @@ export class GpsController {
   }
 
   @Get('trips/:vehicleId')
-  @Roles('admin', 'pracownik', 'opiekun', 'planista', 'dyspozytor', 'przewoznik')
+  @Roles('admin', 'opiekun', 'planista', 'dyspozytor', 'przewoznik')
   trips(): never {
     // Phase 11+ feature per docs/16-jobs-and-integrations.md#todo-после-получения-api-access.
     // Surfacing an explicit 501 is deliberate — clients see the endpoint exists

@@ -32,10 +32,12 @@ import {
  * Phase 2 carrier service.
  *
  * Per docs/03-roles.md:
- *  - admin / pracownik can act on every carrier;
+ *  - admin can act on every carrier;
  *  - opiekun can act on carriers where `carrier.opiekunId === user.sub`
  *    (ownership enforced by `OpiekunOwnershipGuard` upstream — we only
  *    re-check on `list` because guards don't fire on collection routes).
+ *  - pracownik is NOT permitted here per docs/03-roles.md#pracownik
+ *    (narrow claims-only role — no carrier CRUD).
  *
  * Per docs/04-data-model.md `Carrier.opiekunId` MUST point to a `User` with
  * `role='opiekun'`. The service throws 422 on assignment otherwise.
@@ -61,11 +63,9 @@ export class CarriersService {
     const effective: CarrierFilters = { ...filters };
     if (user.role === 'opiekun') {
       effective.opiekunId = user.sub;
-    } else if (
-      user.role !== 'admin' &&
-      user.role !== 'pracownik'
-    ) {
-      // Other roles have no business listing carriers.
+    } else if (user.role !== 'admin') {
+      // Other roles (incl. pracownik per docs/03-roles.md#pracownik) have
+      // no business listing carriers.
       throw new ForbiddenException('Brak uprawnień do listy przewoźników');
     }
     const rows = await this.carriers.list({

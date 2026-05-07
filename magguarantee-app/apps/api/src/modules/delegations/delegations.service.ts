@@ -247,7 +247,6 @@ export class DelegationsService {
   ): Promise<DelegationFilters> {
     if (
       user.role === 'admin' ||
-      user.role === 'pracownik' ||
       user.role === 'opiekun' ||
       user.role === 'planista' ||
       user.role === 'dyspozytor' ||

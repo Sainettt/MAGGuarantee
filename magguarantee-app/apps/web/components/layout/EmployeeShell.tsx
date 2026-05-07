@@ -1,7 +1,7 @@
 'use client';
 
 // Employee shell — RoleShell + EmployeeNav. The nav itself is role-gated
-// (only admin/pracownik see admin links per docs/14). Other employee roles
+// (only admin sees admin links per docs/14). Other employee roles
 // (opiekun, planista, dyspozytor, eksport, weryfikator) get the same shell
 // but with an empty nav row that doesn't render at all (returns null when
 // the filtered list is empty).

@@ -219,7 +219,7 @@ export class VehiclesService {
     user: AuthUser,
     filters: VehicleFilters,
   ): Promise<VehicleFilters> {
-    if (user.role === 'admin' || user.role === 'pracownik') {
+    if (user.role === 'admin') {
       return filters;
     }
     if (user.role === 'opiekun') {
@@ -273,7 +273,7 @@ export class VehiclesService {
     user: AuthUser,
     carrierId: string,
   ): Promise<void> {
-    if (user.role === 'admin' || user.role === 'pracownik') return;
+    if (user.role === 'admin') return;
     const carrier = await this.carriers.findById(carrierId);
     if (!carrier) throw new NotFoundException('Przewoźnik nie znaleziony');
     if (user.role === 'opiekun') {

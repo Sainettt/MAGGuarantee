@@ -47,6 +47,12 @@ import { DelegationsService } from './delegations.service';
  * Phase 7 will add:
  *  - POST /delegations/:id/in-transit (weryfikator)
  *  - POST /delegations/:id/returned (weryfikator)
+ *
+ * `pracownik` is intentionally NOT in the role list — per
+ * docs/03-roles.md#pracownik that role is a narrow "Opiekun wniosków"
+ * scoped to claims verification only. This is stricter than legacy
+ * (`getDelegacjeForEksport` allowed pracownik) — decision locked in the
+ * wave brief.
  */
 @Controller('delegations')
 @UseGuards(RolesGuard, CarrierOwnershipGuard)
@@ -56,7 +62,6 @@ export class DelegationsController {
   @Get()
   @Roles(
     'admin',
-    'pracownik',
     'opiekun',
     'planista',
     'dyspozytor',
@@ -75,7 +80,6 @@ export class DelegationsController {
   @Get(':id')
   @Roles(
     'admin',
-    'pracownik',
     'opiekun',
     'planista',
     'dyspozytor',

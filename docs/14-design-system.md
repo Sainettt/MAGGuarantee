@@ -654,7 +654,12 @@ VIES и Biała Lista lookups триггерятся on-blur. UI должен д�
 
 ### Role-gated navigation
 
-Employee nav (top tabs или left sidebar — решит web-agent в Phase 4) содержит ссылки `Carriers / Vehicles / Drivers / Trailers / Trailer types` **только** для ролей `admin` и `pracownik`. Прочие employee-роли (opiekun, planista, dyspozytor, eksport, weryfikator) их не видят.
+Employee nav (top tabs или left sidebar — решит web-agent в Phase 4) — содержание зависит от роли:
+
+- `admin` — видит **все** вкладки: Dashboard, Wnioski, Carriers, Vehicles, Drivers, Trailers, Trailer types.
+- `pracownik` («Opiekun wniosków») — видит **только** Dashboard + Wnioski. Никаких CRUD-вкладок для справочных сущностей. Это соответствует legacy (`index.html:4682-4690`: tabs `Carriers/Vehicles/Drivers/Trailers` рендерятся `if isAdminRole`).
+- `opiekun` — видит Dashboard + Wnioski (только своих перевозчиков) + вкладку «Moja opieka» (свой scope CRUD).
+- `planista`, `dyspozytor`, `eksport`, `weryfikator` — собственные панели, не Employee panel.
 
 Pattern:
 - Список ссылок строится из конфига `nav.config.ts`, каждая запись — `{ href, label, icon, roles: Role[] }`.

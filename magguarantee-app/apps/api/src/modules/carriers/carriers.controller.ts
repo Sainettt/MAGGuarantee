@@ -42,11 +42,15 @@ import { CarriersService } from './carriers.service';
  * Carriers REST surface per docs/13-api-design.md#carriers.
  *
  * Role gating per endpoint:
- *  - GET (list / detail): admin / pracownik / opiekun(own)
- *  - POST: admin / pracownik / opiekun (auto-self-assign for opiekun)
+ *  - GET (list / detail): admin / opiekun(own)
+ *  - POST: admin / opiekun (auto-self-assign for opiekun)
  *  - PATCH / deactivate / reactivate / reset-password:
- *      admin / pracownik / opiekun(own)
+ *      admin / opiekun(own)
  *  - DELETE: admin only (soft, cascades to fleet)
+ *
+ * `pracownik` is intentionally excluded — per docs/03-roles.md#pracownik that
+ * role is a narrow "Opiekun wniosków" scoped to claims verification only and
+ * has no carrier-CRUD access.
  */
 @Controller('carriers')
 @UseGuards(RolesGuard, OpiekunOwnershipGuard)
@@ -54,7 +58,7 @@ export class CarriersController {
   constructor(private readonly carriers: CarriersService) {}
 
   @Get()
-  @Roles('admin', 'pracownik', 'opiekun')
+  @Roles('admin', 'opiekun')
   async list(
     @CurrentUser() user: AuthUser,
     @Query(new ZodValidationPipe(CarrierFiltersSchema)) query: CarrierFilters,
@@ -63,7 +67,7 @@ export class CarriersController {
   }
 
   @Get(':id')
-  @Roles('admin', 'pracownik', 'opiekun')
+  @Roles('admin', 'opiekun')
   @OpiekunOwns('id', 'param', 'carrierId')
   async getById(
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
@@ -73,7 +77,7 @@ export class CarriersController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @Roles('admin', 'pracownik', 'opiekun')
+  @Roles('admin', 'opiekun')
   @Audit({
     action: 'createCarrier',
     targetType: 'Carrier',
@@ -87,7 +91,7 @@ export class CarriersController {
   }
 
   @Patch(':id')
-  @Roles('admin', 'pracownik', 'opiekun')
+  @Roles('admin', 'opiekun')
   @OpiekunOwns('id', 'param', 'carrierId')
   @Audit({
     action: 'updateCarrier',
@@ -104,7 +108,7 @@ export class CarriersController {
 
   @Post(':id/deactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'pracownik', 'opiekun')
+  @Roles('admin', 'opiekun')
   @OpiekunOwns('id', 'param', 'carrierId')
   @Audit({
     action: 'deactivateCarrier',
@@ -119,7 +123,7 @@ export class CarriersController {
 
   @Post(':id/reactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'pracownik', 'opiekun')
+  @Roles('admin', 'opiekun')
   @OpiekunOwns('id', 'param', 'carrierId')
   @Audit({
     action: 'reactivateCarrier',
@@ -134,7 +138,7 @@ export class CarriersController {
 
   @Post(':id/reset-password')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'pracownik', 'opiekun')
+  @Roles('admin', 'opiekun')
   @OpiekunOwns('id', 'param', 'carrierId')
   @Audit({
     action: 'resetCarrierPassword',

@@ -190,8 +190,9 @@ describe('GpsService.getOne', () => {
   // ── ownership matrix ────────────────────────────────────
 
   it.each([
+    // pracownik intentionally omitted — narrow claims-only role with no GPS
+    // visibility per docs/03-roles.md#pracownik (blocked upstream by @Roles).
     ['admin', 'u-other', true],
-    ['pracownik', 'u-other', true],
     ['opiekun', 'op-1', true],
     ['opiekun', 'op-9', false],
     ['planista', 'pl-1', true],
@@ -298,8 +299,9 @@ describe('GpsService.getMany', () => {
   });
 
   it.each([
+    // pracownik intentionally omitted — narrow claims-only role per
+    // docs/03-roles.md#pracownik; no GPS scope (blocked upstream by @Roles).
     ['admin', { kind: 'all' }],
-    ['pracownik', { kind: 'all' }],
     ['opiekun', { kind: 'opiekun', userId: 'op-x' }],
     ['planista', { kind: 'planista', userId: 'pl-x' }],
     ['dyspozytor', { kind: 'dyspozytor', userId: 'dy-x' }],

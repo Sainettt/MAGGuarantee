@@ -22,40 +22,40 @@ export interface NavItem {
 }
 
 /**
- * Employee-shell navigation. Phase 2 admin tables — only `admin` and
- * `pracownik` see them. `opiekun` will get its own ownership-filtered
- * versions in Phase 5.
+ * Employee-shell navigation. Phase 2 admin tables — only `admin` sees them.
+ * `pracownik` is narrowed per docs/03-roles.md#pracownik (Dashboard + Wnioski
+ * only). `opiekun` will get its own ownership-filtered versions in Phase 5.
  */
 export const EMPLOYEE_NAV: readonly NavItem[] = [
   {
     href: '/employee/carriers',
     labelKey: 'nav.carriers',
     icon: Building2,
-    roles: ['admin', 'pracownik'],
+    roles: ['admin'],
   },
   {
     href: '/employee/vehicles',
     labelKey: 'nav.vehicles',
     icon: Truck,
-    roles: ['admin', 'pracownik'],
+    roles: ['admin'],
   },
   {
     href: '/employee/drivers',
     labelKey: 'nav.drivers',
     icon: User,
-    roles: ['admin', 'pracownik'],
+    roles: ['admin'],
   },
   {
     href: '/employee/trailers',
     labelKey: 'nav.trailers',
     icon: Container,
-    roles: ['admin', 'pracownik'],
+    roles: ['admin'],
   },
   {
     href: '/employee/trailer-types',
     labelKey: 'nav.trailerTypes',
     icon: Tags,
-    roles: ['admin', 'pracownik'],
+    roles: ['admin'],
   },
 ];
 

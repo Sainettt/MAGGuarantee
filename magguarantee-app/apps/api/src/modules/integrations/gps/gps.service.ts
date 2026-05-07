@@ -158,7 +158,6 @@ export class GpsService {
   private _scopeFor(user: AuthUser): GpsScope {
     switch (user.role) {
       case 'admin':
-      case 'pracownik':
         return { kind: 'all' };
       case 'opiekun':
         return { kind: 'opiekun', userId: user.sub };
@@ -168,8 +167,9 @@ export class GpsService {
         return { kind: 'dyspozytor', userId: user.sub };
       case 'przewoznik':
         return { kind: 'przewoznik', userId: user.sub };
-      // 'eksport' / 'weryfikator' filtered upstream by @Roles — keep an
-      // explicit defensive throw in case a future change misses that.
+      // 'pracownik' / 'eksport' / 'weryfikator' filtered upstream by @Roles
+      // — keep an explicit defensive throw in case a future change misses
+      // that. pracownik has no fleet visibility per docs/03-roles.md#pracownik.
       default:
         throw new ForbiddenException('Brak uprawnień do GPS');
     }
@@ -186,7 +186,6 @@ export class GpsService {
   ): void {
     switch (user.role) {
       case 'admin':
-      case 'pracownik':
         return;
       case 'opiekun':
         if (owner.opiekunId !== user.sub) {

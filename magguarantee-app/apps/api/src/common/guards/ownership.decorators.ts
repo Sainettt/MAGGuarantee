@@ -9,13 +9,15 @@ import {
 
 /**
  * Marks an endpoint as requiring opiekun-level ownership of the targeted
- * carrier (or carrier-bound resource). The guard is a no-op for admin /
- * pracownik (they have global access) and for non-opiekun roles.
+ * carrier (or carrier-bound resource). The guard is a no-op for admin
+ * (global access) and for non-opiekun roles. `pracownik` is excluded from
+ * carrier-CRUD endpoints at the @Roles level per docs/03-roles.md#pracownik
+ * (narrow claims-only role).
  *
  * Usage:
  *   ```ts
  *   @Patch('carriers/:id')
- *   @Roles('admin', 'pracownik', 'opiekun')
+ *   @Roles('admin', 'opiekun')
  *   @UseGuards(RolesGuard, OpiekunOwnershipGuard)
  *   @OpiekunOwns('id', 'param', 'carrierId')
  *   update(...)
@@ -35,7 +37,7 @@ export const OpiekunOwns = (
  * Usage:
  *   ```ts
  *   @Patch('vehicles/:id')
- *   @Roles('przewoznik', 'admin', 'pracownik', 'opiekun')
+ *   @Roles('przewoznik', 'admin', 'opiekun')
  *   @UseGuards(RolesGuard, CarrierOwnershipGuard)
  *   @CarrierOwns('id', 'param', 'vehicleId')
  *   update(...)

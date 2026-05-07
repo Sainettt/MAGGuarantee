@@ -134,7 +134,7 @@ export type UpdateCarrierDto = z.infer<typeof UpdateCarrierSchema>;
 
 export const CarrierFiltersSchema = z
   .object({
-    /** UUID of an opiekun User; admin/pracownik only — opiekun is implicit. */
+    /** UUID of an opiekun User; admin only — opiekun is implicit (auto-self-assigned). */
     opiekunId: UuidSchema.optional(),
     active: z.coerce.boolean().optional(),
     /** Substring search on login / name / nip. Case-insensitive in the repo. */

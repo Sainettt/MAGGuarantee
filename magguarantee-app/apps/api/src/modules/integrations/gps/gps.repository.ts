@@ -66,15 +66,16 @@ export class GpsRepository {
    * Active GPS-tracked vehicles, scoped by role.
    *
    * `scope` shape mirrors the AuthUser identity:
-   *  - admin / pracownik → all `gps=true, active=true, deletedAt=null`
+   *  - admin             → all `gps=true, active=true, deletedAt=null`
    *    (we encode that as `kind: 'all'`).
    *  - opiekun           → vehicles whose Carrier.opiekunId = userId.
    *  - planista          → vehicles whose Vehicle.plannerId = userId.
    *  - dyspozytor        → vehicles whose Vehicle.dispatcherId = userId.
    *  - przewoznik        → vehicles whose Carrier.userId = userId.
    *
-   * Eksport / weryfikator have NO GPS visibility per the wave brief — those
-   * roles never reach this method (the controller blocks via @Roles).
+   * pracownik / eksport / weryfikator have NO GPS visibility — those roles
+   * never reach this method (the controller blocks via @Roles). pracownik is
+   * a narrow claims-only role per docs/03-roles.md#pracownik.
    */
   async findManyForGps(scope: GpsScope): Promise<GpsVehicleRef[]> {
     const where: Record<string, unknown> = { gps: true, active: true };

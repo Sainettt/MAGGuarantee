@@ -45,7 +45,7 @@ export class DriversController {
   constructor(private readonly drivers: DriversService) {}
 
   @Get()
-  @Roles('admin', 'pracownik', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun', 'przewoznik')
   async list(
     @CurrentUser() user: AuthUser,
     @Query(new ZodValidationPipe(DriverFiltersSchema)) query: DriverFilters,
@@ -54,7 +54,7 @@ export class DriversController {
   }
 
   @Get(':id')
-  @Roles('admin', 'pracownik', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun', 'przewoznik')
   @OpiekunOwns('id', 'param', 'driverId')
   @CarrierOwns('id', 'param', 'driverId')
   async getById(
@@ -65,7 +65,7 @@ export class DriversController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @Roles('admin', 'pracownik', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun', 'przewoznik')
   @Audit({
     action: 'createDriver',
     targetType: 'Driver',
@@ -79,7 +79,7 @@ export class DriversController {
   }
 
   @Patch(':id')
-  @Roles('admin', 'pracownik', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun', 'przewoznik')
   @OpiekunOwns('id', 'param', 'driverId')
   @CarrierOwns('id', 'param', 'driverId')
   @Audit({
@@ -96,7 +96,7 @@ export class DriversController {
 
   @Post(':id/deactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'pracownik', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun', 'przewoznik')
   @OpiekunOwns('id', 'param', 'driverId')
   @CarrierOwns('id', 'param', 'driverId')
   @Audit({
@@ -112,7 +112,7 @@ export class DriversController {
 
   @Post(':id/reactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'pracownik', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun', 'przewoznik')
   @OpiekunOwns('id', 'param', 'driverId')
   @CarrierOwns('id', 'param', 'driverId')
   @Audit({
@@ -128,7 +128,7 @@ export class DriversController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Roles('admin', 'pracownik', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun', 'przewoznik')
   @OpiekunOwns('id', 'param', 'driverId')
   @CarrierOwns('id', 'param', 'driverId')
   @Audit({

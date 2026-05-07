@@ -52,7 +52,7 @@ export class VehiclesController {
   constructor(private readonly vehicles: VehiclesService) {}
 
   @Get()
-  @Roles('admin', 'pracownik', 'opiekun', 'planista', 'dyspozytor', 'przewoznik')
+  @Roles('admin', 'opiekun', 'planista', 'dyspozytor', 'przewoznik')
   async list(
     @CurrentUser() user: AuthUser,
     @Query(new ZodValidationPipe(VehicleFiltersSchema)) query: VehicleFilters,
@@ -61,7 +61,7 @@ export class VehiclesController {
   }
 
   @Get(':id')
-  @Roles('admin', 'pracownik', 'opiekun', 'planista', 'dyspozytor', 'przewoznik')
+  @Roles('admin', 'opiekun', 'planista', 'dyspozytor', 'przewoznik')
   @OpiekunOwns('id', 'param', 'vehicleId')
   @CarrierOwns('id', 'param', 'vehicleId')
   async getById(
@@ -72,7 +72,7 @@ export class VehiclesController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @Roles('admin', 'pracownik', 'opiekun')
+  @Roles('admin', 'opiekun')
   @OpiekunOwns('carrierId', 'body', 'carrierId')
   @Audit({
     action: 'createVehicle',
@@ -87,7 +87,7 @@ export class VehiclesController {
   }
 
   @Patch(':id')
-  @Roles('admin', 'pracownik', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun', 'przewoznik')
   @OpiekunOwns('id', 'param', 'vehicleId')
   @CarrierOwns('id', 'param', 'vehicleId')
   @Audit({
@@ -104,7 +104,7 @@ export class VehiclesController {
 
   @Post(':id/deactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'pracownik', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun', 'przewoznik')
   @OpiekunOwns('id', 'param', 'vehicleId')
   @CarrierOwns('id', 'param', 'vehicleId')
   @Audit({
@@ -120,7 +120,7 @@ export class VehiclesController {
 
   @Post(':id/reactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'pracownik', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun', 'przewoznik')
   @OpiekunOwns('id', 'param', 'vehicleId')
   @CarrierOwns('id', 'param', 'vehicleId')
   @Audit({
@@ -136,7 +136,7 @@ export class VehiclesController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Roles('admin', 'pracownik', 'opiekun')
+  @Roles('admin', 'opiekun')
   @OpiekunOwns('id', 'param', 'vehicleId')
   @Audit({
     action: 'deleteVehicle',

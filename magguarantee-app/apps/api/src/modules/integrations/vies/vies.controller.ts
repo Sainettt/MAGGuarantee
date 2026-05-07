@@ -17,8 +17,9 @@ const RL = { limit: process.env.NODE_ENV === 'test' ? 1_000 : 10, ttl: 60_000 };
  * `GET /api/v1/integrations/vies/:country/:vat`
  *
  * Auth: any authenticated user (the global JwtAuthGuard runs by default).
- * No `@Roles()` decorator — admin/pracownik/opiekun all use this in carrier
- * onboarding flows.
+ * No `@Roles()` decorator — admin/opiekun use this in carrier onboarding
+ * flows. pracownik never opens carrier UI per docs/03-roles.md#pracownik
+ * (narrow claims-only role) so it de-facto never reaches this endpoint.
  */
 @Controller('integrations/vies')
 export class ViesController {

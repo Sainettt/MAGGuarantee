@@ -45,7 +45,7 @@ export class TrailersController {
   constructor(private readonly trailers: TrailersService) {}
 
   @Get()
-  @Roles('admin', 'pracownik', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun', 'przewoznik')
   async list(
     @CurrentUser() user: AuthUser,
     @Query(new ZodValidationPipe(TrailerFiltersSchema)) query: TrailerFilters,
@@ -54,7 +54,7 @@ export class TrailersController {
   }
 
   @Get(':id')
-  @Roles('admin', 'pracownik', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun', 'przewoznik')
   @OpiekunOwns('id', 'param', 'trailerId')
   @CarrierOwns('id', 'param', 'trailerId')
   async getById(
@@ -65,7 +65,7 @@ export class TrailersController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @Roles('admin', 'pracownik', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun', 'przewoznik')
   @OpiekunOwns('carrierId', 'body', 'carrierId')
   @CarrierOwns('carrierId', 'body', 'carrierId')
   @Audit({
@@ -81,7 +81,7 @@ export class TrailersController {
   }
 
   @Patch(':id')
-  @Roles('admin', 'pracownik', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun', 'przewoznik')
   @OpiekunOwns('id', 'param', 'trailerId')
   @CarrierOwns('id', 'param', 'trailerId')
   @Audit({
@@ -98,7 +98,7 @@ export class TrailersController {
 
   @Post(':id/deactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'pracownik', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun', 'przewoznik')
   @OpiekunOwns('id', 'param', 'trailerId')
   @CarrierOwns('id', 'param', 'trailerId')
   @Audit({
@@ -114,7 +114,7 @@ export class TrailersController {
 
   @Post(':id/reactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'pracownik', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun', 'przewoznik')
   @OpiekunOwns('id', 'param', 'trailerId')
   @CarrierOwns('id', 'param', 'trailerId')
   @Audit({
@@ -130,7 +130,7 @@ export class TrailersController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Roles('admin', 'pracownik', 'opiekun')
+  @Roles('admin', 'opiekun')
   @OpiekunOwns('id', 'param', 'trailerId')
   @Audit({
     action: 'deleteTrailer',
