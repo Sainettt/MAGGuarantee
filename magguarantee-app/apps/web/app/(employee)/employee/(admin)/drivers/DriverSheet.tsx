@@ -9,7 +9,6 @@ import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
   CreateDriverSchema,
-  UpdateDriverSchema,
   type CreateDriverDto,
   type DriverDto,
   type UpdateDriverDto,
@@ -37,14 +36,18 @@ import { useFormDraft } from '@/lib/hooks/useFormDraft';
 const DRAFT_KEY = 'draft:drivers:new';
 
 const EMPTY_DEFAULTS: CreateDriverDto = {
-  carrierId: undefined as unknown as string,
+  // Empty string parks the carrier <Select> on its placeholder; Zod's
+  // UuidSchema fails clearly on submit when the user hasn't picked one.
+  carrierId: '' as unknown as string,
   firstName: '',
   lastName: '',
   phone: '',
   phone2: '',
   email: '',
   driverLicenseNumber: '',
-  licenseExpiry: undefined,
+  // licenseExpiry is now NOT NULL (phase3_blocks). Empty string keeps the
+  // <input type="date"> controlled; Zod's IsoDateSchema rejects "" on submit.
+  licenseExpiry: '',
   bankAccount: '',
   notes: '',
   active: true,
@@ -63,13 +66,13 @@ export function DriverSheet({ open, driver, onClose }: Props) {
   const tCommon = useTranslations('common');
   const isEdit = driver !== null;
 
-  // Edit mode keeps carrierId in form state for display, but UpdateSchema is
-  // strict and would reject it — passthrough allows unknown keys; onSubmit
-  // strips them before the API call.
+  // Form state matches CreateDriverDto in both modes — edit mode keeps
+  // `carrierId` in state for display only; the submit handler strips it
+  // before calling PATCH. We always validate with CreateDriverSchema so the
+  // now-required fields (email/licenseExpiry/bankAccount) are enforced on
+  // edit too.
   const form = useForm<FormValues>({
-    resolver: zodResolver(
-      isEdit ? UpdateDriverSchema.passthrough() : CreateDriverSchema,
-    ),
+    resolver: zodResolver(CreateDriverSchema),
     defaultValues: { ...EMPTY_DEFAULTS },
   });
 
@@ -91,7 +94,7 @@ export function DriverSheet({ open, driver, onClose }: Props) {
         phone2: driver.phone2 ?? '',
         email: driver.email ?? '',
         driverLicenseNumber: driver.driverLicenseNumber ?? '',
-        licenseExpiry: driver.licenseExpiry ?? undefined,
+        licenseExpiry: driver.licenseExpiry ?? '',
         bankAccount: driver.bankAccount ?? '',
         notes: driver.notes ?? '',
         active: driver.active,
@@ -248,6 +251,7 @@ export function DriverSheet({ open, driver, onClose }: Props) {
                 </FormField>
                 <FormField
                   label={t('fields.licenseExpiry')}
+                  required
                   error={errs.licenseExpiry?.message}
                   htmlFor="driver-licenseExpiry"
                 >

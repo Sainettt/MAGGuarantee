@@ -70,6 +70,10 @@ export class VehiclesService {
     if (dto.plannerId) await this._assertRole(dto.plannerId, 'planista');
     if (dto.dispatcherId)
       await this._assertRole(dto.dispatcherId, 'dyspozytor');
+    // Defence-in-depth — Zod refine in CreateVehicleSchema already enforces
+    // this, but if the pipe is bypassed we want the friendlier 422 instead
+    // of a Postgres CHECK violation surfacing as 500.
+    this._assertGpsInvariant(dto.gps ?? false, dto.gpsMobilePhone ?? null);
 
     try {
       const row = await this.vehicles.create({
@@ -82,25 +86,29 @@ export class VehiclesService {
         model: dto.model ?? null,
         year: dto.year ?? null,
         notes: dto.notes ?? null,
-        certificateL: dto.certificateL ?? null,
-        euro: dto.euro ?? null,
+        // Required post-phase3_blocks — Zod already enforced presence.
+        certificateL: dto.certificateL,
+        euro: dto.euro,
         adrClasses: dto.adrClasses ?? [],
         gps: dto.gps,
         fuelCard: dto.fuelCard,
-        type: dto.type ?? null,
+        type: dto.type,
         gb: dto.gb ?? null,
         it: dto.it ?? null,
         fr: dto.fr ?? null,
         agreement: dto.agreement ?? null,
         contract: dto.contract ?? null,
-        rateDe: dto.rateDe ?? null,
-        rateUe: dto.rateUe ?? null,
-        rateExport: dto.rateExport ?? null,
-        rateImport: dto.rateImport ?? null,
+        rateDe: dto.rateDe,
+        rateUe: dto.rateUe,
+        rateExport: dto.rateExport,
+        rateImport: dto.rateImport,
         wasteAllowed: dto.wasteAllowed,
         wasteCountries: dto.wasteCountries ?? [],
         cabotageDe: dto.cabotageDe,
         cabotageFr: dto.cabotageFr,
+        // Nullable per Revert #2 — `vehicle_gps_device_when_gps_on` CHECK
+        // enforces presence iff `gps=true`. Zod refine pre-validates so we
+        // 422 instead of 500.
         gpsMobilePhone: dto.gpsMobilePhone ?? null,
         nextInspectionDate: dto.nextInspectionDate
           ? new Date(dto.nextInspectionDate)
@@ -126,6 +134,14 @@ export class VehiclesService {
     if (dto.dispatcherId !== undefined && dto.dispatcherId !== null) {
       await this._assertRole(dto.dispatcherId, 'dyspozytor');
     }
+    // Resolve the post-patch (gps, gpsMobilePhone) values. PATCH semantics:
+    // if the field isn't in dto, fall back to the existing row.
+    const nextGps = dto.gps !== undefined ? dto.gps : existing.gps;
+    const nextDevice =
+      dto.gpsMobilePhone !== undefined
+        ? dto.gpsMobilePhone
+        : existing.gpsMobilePhone;
+    this._assertGpsInvariant(nextGps, nextDevice ?? null);
 
     const patch: Record<string, unknown> = {};
     const passthrough: (keyof UpdateVehicleDto)[] = [
@@ -293,6 +309,23 @@ export class VehiclesService {
       return;
     }
     throw new ForbiddenException('Brak uprawnień');
+  }
+
+  /**
+   * Mirrors the SQL `vehicle_gps_device_when_gps_on` CHECK constraint at
+   * the service layer so we 422 on bad input instead of bouncing off a
+   * Postgres violation. Per Revert #2 the column itself stays NULLable —
+   * non-GPS trucks have no device id.
+   */
+  private _assertGpsInvariant(
+    gps: boolean,
+    gpsMobilePhone: string | null,
+  ): void {
+    if (gps && (gpsMobilePhone === null || gpsMobilePhone.length === 0)) {
+      throw new UnprocessableEntityException(
+        'gpsMobilePhone wymagany gdy gps=true',
+      );
+    }
   }
 
   private async _assertRole(

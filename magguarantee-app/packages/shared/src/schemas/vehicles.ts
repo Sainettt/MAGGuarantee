@@ -27,25 +27,38 @@ const vehicleAttributeFields = {
   model: emptyStringToUndefined(z.string().max(64).optional()),
   year: z.number().int().min(1900).max(2100).optional(),
   notes: emptyStringToUndefined(z.string().max(2_000).optional()),
-  certificateL: CertificateLSchema.optional(),
-  euro: EuroNormSchema.optional(),
+  /** REQUIRED — Vehicle.certificateL is NOT NULL since phase3_blocks. */
+  certificateL: CertificateLSchema,
+  /** REQUIRED — Vehicle.euro is NOT NULL since phase3_blocks. */
+  euro: EuroNormSchema,
   adrClasses: z.array(z.string().max(16)).max(20).optional(),
-  gps: z.boolean().optional(),
-  fuelCard: z.boolean().optional(),
-  type: VehicleTypeSchema.optional(),
+  gps: z.boolean().optional().default(false),
+  fuelCard: z.boolean().optional().default(false),
+  /** REQUIRED — Vehicle.type is NOT NULL since phase3_blocks. */
+  type: VehicleTypeSchema,
   gb: z.boolean().optional(),
   it: z.boolean().optional(),
   fr: z.boolean().optional(),
   agreement: z.boolean().optional(),
   contract: z.boolean().optional(),
-  rateDe: z.number().nonnegative().optional(),
-  rateUe: z.number().nonnegative().optional(),
-  rateExport: z.number().nonnegative().optional(),
-  rateImport: z.number().nonnegative().optional(),
+  // EUR/km rates are negotiated AFTER vehicle creation (admin sets them once
+  // contract terms land). NULL means "not yet set"; `0` would be ambiguous
+  // ("free haulage" vs "not negotiated"). Reverted to nullable in
+  // phase3_blocks_audit_revert.
+  rateDe: z.number().nonnegative().nullable().optional(),
+  rateUe: z.number().nonnegative().nullable().optional(),
+  rateExport: z.number().nonnegative().nullable().optional(),
+  rateImport: z.number().nonnegative().nullable().optional(),
   wasteAllowed: z.boolean().optional(),
   wasteCountries: z.array(z.string().max(8)).max(64).optional(),
   cabotageDe: z.boolean().optional(),
   cabotageFr: z.boolean().optional(),
+  /**
+   * Conditional: NOT NULL only when `gps=true` (kept nullable in the column;
+   * the `vehicle_gps_device_when_gps_on` CHECK constraint enforces it). The
+   * Zod-side `.refine(...)` below makes the same rule visible to the API
+   * layer so we 422 instead of bouncing off a Postgres constraint error.
+   */
   gpsMobilePhone: emptyStringToUndefined(z.string().max(32).optional()),
   nextInspectionDate: emptyStringToUndefined(IsoDateSchema.optional()),
   sideNumber: emptyStringToUndefined(z.string().max(16).optional()),
@@ -60,7 +73,11 @@ export const CreateVehicleSchema = z
     active: z.boolean().optional(),
     ...vehicleAttributeFields,
   })
-  .strict();
+  .strict()
+  .refine((d) => !d.gps || (d.gpsMobilePhone && d.gpsMobilePhone.length > 0), {
+    message: 'gpsMobilePhone wymagany gdy gps=true',
+    path: ['gpsMobilePhone'],
+  });
 export type CreateVehicleDto = z.infer<typeof CreateVehicleSchema>;
 
 // ─── Update ──────────────────────────────────────────────
@@ -75,25 +92,33 @@ export const UpdateVehicleSchema = z
     model: emptyStringToUndefined(z.string().max(64).nullable().optional()),
     year: z.number().int().min(1900).max(2100).nullable().optional(),
     notes: emptyStringToUndefined(z.string().max(2_000).nullable().optional()),
-    certificateL: CertificateLSchema.nullable().optional(),
-    euro: EuroNormSchema.nullable().optional(),
+    // The following five fields are NOT NULL since phase3_blocks. PATCH
+    // accepts an update (omit means "do not touch") but cannot null them.
+    certificateL: CertificateLSchema.optional(),
+    euro: EuroNormSchema.optional(),
+    type: VehicleTypeSchema.optional(),
+    rateDe: z.number().nonnegative().optional(),
+    rateUe: z.number().nonnegative().optional(),
+    rateExport: z.number().nonnegative().optional(),
+    rateImport: z.number().nonnegative().optional(),
     adrClasses: z.array(z.string().max(16)).max(20).optional(),
     gps: z.boolean().optional(),
     fuelCard: z.boolean().optional(),
-    type: VehicleTypeSchema.nullable().optional(),
     gb: z.boolean().nullable().optional(),
     it: z.boolean().nullable().optional(),
     fr: z.boolean().nullable().optional(),
     agreement: z.boolean().nullable().optional(),
     contract: z.boolean().nullable().optional(),
-    rateDe: z.number().nonnegative().nullable().optional(),
-    rateUe: z.number().nonnegative().nullable().optional(),
-    rateExport: z.number().nonnegative().nullable().optional(),
-    rateImport: z.number().nonnegative().nullable().optional(),
     wasteAllowed: z.boolean().optional(),
     wasteCountries: z.array(z.string().max(8)).max(64).optional(),
     cabotageDe: z.boolean().optional(),
     cabotageFr: z.boolean().optional(),
+    /**
+     * Nullable in the column — but iff `gps=true` it must be set. The cross-
+     * field rule is enforceable here only when both `gps` and `gpsMobilePhone`
+     * are present in the patch; partial updates fall through to the Postgres
+     * CHECK constraint which raises 500 → service maps to 422.
+     */
     gpsMobilePhone: emptyStringToUndefined(
       z.string().max(32).nullable().optional(),
     ),
@@ -104,7 +129,19 @@ export const UpdateVehicleSchema = z
       z.string().max(16).nullable().optional(),
     ),
   })
-  .strict();
+  .strict()
+  .refine(
+    (d) =>
+      // Only enforce when both fields are part of the patch — partial
+      // updates (gps alone or gpsMobilePhone alone) defer to the DB CHECK.
+      d.gps === undefined ||
+      !d.gps ||
+      (d.gpsMobilePhone !== undefined && d.gpsMobilePhone !== null && d.gpsMobilePhone.length > 0),
+    {
+      message: 'gpsMobilePhone wymagany gdy gps=true',
+      path: ['gpsMobilePhone'],
+    },
+  );
 export type UpdateVehicleDto = z.infer<typeof UpdateVehicleSchema>;
 
 // ─── Filters ─────────────────────────────────────────────
@@ -133,12 +170,12 @@ export const VehicleDtoSchema = z.object({
   model: z.string().nullable(),
   year: z.number().int().nullable(),
   notes: z.string().nullable(),
-  certificateL: CertificateLSchema.nullable(),
-  euro: EuroNormSchema.nullable(),
+  certificateL: CertificateLSchema,
+  euro: EuroNormSchema,
   adrClasses: z.array(z.string()),
   gps: z.boolean(),
   fuelCard: z.boolean(),
-  type: VehicleTypeSchema.nullable(),
+  type: VehicleTypeSchema,
   gb: z.boolean().nullable(),
   it: z.boolean().nullable(),
   fr: z.boolean().nullable(),
@@ -152,6 +189,7 @@ export const VehicleDtoSchema = z.object({
   wasteCountries: z.array(z.string()),
   cabotageDe: z.boolean(),
   cabotageFr: z.boolean(),
+  /** Nullable per Revert #2 — required iff `gps=true` (CHECK enforces). */
   gpsMobilePhone: z.string().nullable(),
   nextInspectionDate: IsoDateSchema.nullable(),
   sideNumber: z.string().nullable(),

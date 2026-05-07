@@ -10,7 +10,6 @@ import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
   CreateDriverSchema,
-  UpdateDriverSchema,
   type CreateDriverDto,
   type DriverDto,
   type UpdateDriverDto,
@@ -36,14 +35,18 @@ import { useFormDraft } from '@/lib/hooks/useFormDraft';
 const DRAFT_KEY = 'draft:carrier:drivers:new';
 
 const EMPTY_DEFAULTS: CreateDriverDto = {
-  carrierId: undefined as unknown as string,
+  // Carrier scope: carrierId is filled from session in onSubmit; the form
+  // defaults it to '' so RHF stays controlled.
+  carrierId: '' as unknown as string,
   firstName: '',
   lastName: '',
   phone: '',
   phone2: '',
   email: '',
   driverLicenseNumber: '',
-  licenseExpiry: undefined,
+  // licenseExpiry is now NOT NULL (phase3_blocks). Empty string keeps the
+  // <input type="date"> controlled; Zod IsoDateSchema fails on submit.
+  licenseExpiry: '',
   bankAccount: '',
   notes: '',
   active: true,
@@ -66,10 +69,11 @@ export function DriverSheetCarrier({
 }: Props) {
   const isEdit = driver !== null;
 
+  // Always validate against CreateDriverSchema — the carrier-side form
+  // doesn't expose any field that's strictly create-only, so the same shape
+  // works for edit. Submit handler strips carrierId for PATCH.
   const form = useForm<FormValues>({
-    resolver: zodResolver(
-      isEdit ? UpdateDriverSchema.passthrough() : CreateDriverSchema,
-    ),
+    resolver: zodResolver(CreateDriverSchema),
     defaultValues: { ...EMPTY_DEFAULTS },
   });
 
@@ -86,7 +90,7 @@ export function DriverSheetCarrier({
         phone2: driver.phone2 ?? '',
         email: driver.email ?? '',
         driverLicenseNumber: driver.driverLicenseNumber ?? '',
-        licenseExpiry: driver.licenseExpiry ?? undefined,
+        licenseExpiry: driver.licenseExpiry ?? '',
         bankAccount: driver.bankAccount ?? '',
         notes: driver.notes ?? '',
         active: driver.active,
@@ -94,7 +98,7 @@ export function DriverSheetCarrier({
     } else {
       form.reset({
         ...EMPTY_DEFAULTS,
-        carrierId: carrierId ?? (undefined as unknown as string),
+        carrierId: carrierId ?? ('' as unknown as string),
       });
       draft.hydrate();
     }
@@ -228,6 +232,7 @@ export function DriverSheetCarrier({
                 </FormField>
                 <FormField
                   label="Ważność prawa jazdy"
+                  required
                   error={errs.licenseExpiry?.message}
                   htmlFor="cdriver-licenseExpiry"
                 >

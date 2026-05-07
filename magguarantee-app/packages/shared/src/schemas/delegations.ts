@@ -49,9 +49,15 @@ export const SubmitDelegationSchema = z
     driverId: emptyStringToUndefined(UuidSchema.optional()),
 
     departureAt: IsoDateTimeSchema,
-    departureCountry: emptyStringToUndefined(CountrySchema.optional()),
-    departurePostalCode: emptyStringToUndefined(PostalSchema.optional()),
+    /** REQUIRED — Delegation.departureCountry is NOT NULL since phase3_blocks. */
+    departureCountry: CountrySchema,
+    /** REQUIRED — Delegation.departurePostalCode is NOT NULL since phase3_blocks. */
+    departurePostalCode: PostalSchema,
 
+    // Return planning is optional at submit — spot-rate / one-way trips don't
+    // know it yet. Reverted to nullable in phase3_blocks_audit_revert. The
+    // `delegation_returned_complete` CHECK enforces that all three are set
+    // when status transitions to 'zjechal'.
     plannedReturnAt: emptyStringToUndefined(IsoDateTimeSchema.optional()),
     returnCountry: emptyStringToUndefined(CountrySchema.optional()),
     returnPostalCode: emptyStringToUndefined(PostalSchema.optional()),
@@ -60,13 +66,10 @@ export const SubmitDelegationSchema = z
     comment: emptyStringToUndefined(z.string().max(2_000).optional()),
   })
   .strict()
-  .refine(
-    (v) => !v.plannedReturnAt || v.plannedReturnAt >= v.departureAt,
-    {
-      message: 'plannedReturnAt must be on or after departureAt',
-      path: ['plannedReturnAt'],
-    },
-  );
+  .refine((v) => !v.plannedReturnAt || v.plannedReturnAt >= v.departureAt, {
+    message: 'plannedReturnAt must be on or after departureAt',
+    path: ['plannedReturnAt'],
+  });
 export type SubmitDelegationDto = z.infer<typeof SubmitDelegationSchema>;
 
 // ─── Cancel ──────────────────────────────────────────────
@@ -150,9 +153,11 @@ export const DelegationDtoSchema = z.object({
   driverPhoneSnapshot: z.string().nullable(),
 
   departureAt: IsoDateTimeSchema,
-  departureCountry: z.string().nullable(),
-  departurePostalCode: z.string().nullable(),
+  // NOT NULL after phase3_blocks.
+  departureCountry: z.string(),
+  departurePostalCode: z.string(),
 
+  // Nullable per phase3_blocks_audit_revert.
   plannedReturnAt: IsoDateTimeSchema.nullable(),
   returnCountry: z.string().nullable(),
   returnPostalCode: z.string().nullable(),

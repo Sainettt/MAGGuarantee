@@ -68,9 +68,11 @@
 | `email` | unique, для 2FA |
 | `passwordHash` | bcrypt; nullable если email-only auth |
 | `role` | `admin` / `pracownik` / `opiekun` / `planista` / `dyspozytor` / `przewoznik` / `eksport` / `weryfikator` |
-| `name`, `company` | контакты |
+| `name` | имя |
 | `active` | блокировка логина |
-| `liderEmail` | только для `planista` — email лидера группы (для рассылки) |
+| `liderEmail` | только для `planista` — email лидера группы (для рассылки). Per-role tech debt — см. [19-known-quirks.md](19-known-quirks.md#liderEmail) |
+
+> ⚠️ Поля `company` (Firma) на `User` **больше нет** — оно перенесено на `Carrier` миграцией `20260507223021_move_company_to_carrier`. Внутренние роли MAGTRANS (admin/pracownik/opiekun/planista/dyspozytor/eksport/weryfikator) — это сотрудники одной компании, поле было денормализованным наследием GAS-миграции, которое использовалось только перевозчиками.
 
 **Связи:**
 - 1:1 с `Carrier` (если role=przewoznik).
@@ -87,11 +89,13 @@
 | Поле | Назначение |
 |---|---|
 | `userId` | FK → User (unique) |
-| `nip`, `vatId` | налоговые идентификаторы |
+| `company` | Firma — название компании перевозчика (перенесено сюда из `User` в Phase 3) |
+| `nip` | NIP — польский налоговый ID. Foreign carriers его НЕ имеют. См. [19-known-quirks.md#nip-vatid](19-known-quirks.md) |
+| `vatId` | EU VAT (PL+NIP для PL-перевозчиков; DE/CZ/etc. для иностранных) |
 | `contactPerson`, `phone`, `ordersEmail` | контакты |
-| `accountEur`, `accountPln` | IBAN счета |
-| `paymentTerms` | срок оплаты в днях |
-| `insuranceValue`, `insuranceExpiry`, `licenseExpiry` | документы |
+| `accountEur`, `accountPln` | IBAN счета (PLN опц. — иностранцы могут не иметь) |
+| `paymentTerms` | срок оплаты в днях (default 30) |
+| `insuranceValue`, `insuranceExpiry`, `licenseExpiry` | документы (DB nullable, но обязательны на API+UI — см. three-layer pattern в [12-database-schema.md](12-database-schema.md)) |
 | `numberOfPermits` | KREPTD-выписки |
 | `companyAddress` | адрес |
 | `opiekunId` | FK → User (с role=opiekun) — кто курирует |
@@ -119,14 +123,15 @@
 | `type` | MEGA / STD / COIL |
 | `wasteAllowed`, `wasteCountries` | разрешения на отходы |
 | `rateDe`, `rateUe`, `rateExport`, `rateImport` | EUR/km по направлениям |
-| `gpsMobilePhone` | телефон GPS-устройства |
+| `gpsMobilePhone` | ID GPS-трекера (НЕ телефонный номер — misnomer, см. [19-known-quirks.md#gpsMobilePhone](19-known-quirks.md)) |
 | `nextInspectionDate` | следующий техосмотр |
 | `sideNumber` | NrBoczny |
-| `lastDroveAt` | автообновление от Delegation.markReturned |
+| `lastDroveAt` | **автообновление** от Delegation→`zjechal`. Никогда не редактируется руками — см. [19-known-quirks.md](19-known-quirks.md) |
 
-**Инварианты:**
+**Инварианты (data-model contract):**
 - Уникальность `(carrierId, plateNumber)` — один номер на перевозчика.
 - `plannerId` / `dispatcherId` — пользователи с соответствующей ролью.
+- **CHECK `vehicle_gps_device_when_gps_on`** — если `gps=true`, то `gpsMobilePhone` обязан быть not-null. Это часть data-model contract, не имплементационная деталь.
 
 ### `Driver` — водитель
 
@@ -190,20 +195,29 @@
 | `status` | `NA_WERYFIKACJI` / `ZAAKCEPTOWANO` / `ODRZUCONO` / `REKLAMACJA` / `OCZEKUJE_NA_AUTORYZACJE` / `AUTORYZACJA_KWOTA_MAKSIMA` |
 | `decidedById` | FK → User (кто верифицировал) |
 | `comment`, `orderNumber`, `orderDate` | мета |
-| **Авторизация** (для крупных сумм): | |
+| **Авторизация** (для крупных сумм; пороги по `getAuthThreshold(drivenDays)` — см. [19-known-quirks.md](19-known-quirks.md)): | |
 | `authorizationRequired`, `authorizationDescription`, `authorizationToken`, `authorizationDecidedAt` | |
-| `amountRequested`, `amountApproved`, `margin`, `amountMaximum` | |
-| `authScreenshotUrl` | URL screenshot-а в file-storage |
+| `amountRequested`, `amountApproved`, `margin`, `amountMaximum` (KwotaMaksima — manual override от Maksim) | |
+| `authScreenshotUrl` | URL screenshot-а в file-storage (audit trail Maksim'овой email-decision) |
 | **Рекламация** (зеркало для отката): | |
 | `reklamacjaSubmitted`, `reklamacjaText`, `reklamacjaResponse`, `reklamacjaAmount` | |
 | `hoursAdjusted`, `statusBeforeReklamacja` | |
 | `origDateStart`, `origDateEnd`, `origMileage` | оригинальные значения |
 
-**Инварианты:**
-- `nrZgl` уникален глобально, генерируется атомарно.
-- При переходе в `REKLAMACJA` копируются `dateStart/dateEnd/mileage` в `origDateStart/origDateEnd/origMileage`.
+**Инварианты (data-model contract):**
+- `nrZgl` уникален глобально, генерируется атомарно через `ClaimSequence` (per `YY-MM`).
+- При переходе в `REKLAMACJA` копируются `dateStart/dateEnd/mileage` в `origDateStart/origDateEnd/origMileage` (frozen mirror — см. [19-known-quirks.md](19-known-quirks.md#reklamacja-mirror)).
 - `status` всегда из enum (валидируется на API-уровне).
 - `vehicleId` может стать NULL если авто удалено — тогда показываем `vehiclePlateSnapshot`.
+- **State machine** — Claim status переходы ограничены 9 легальными ребрами. Источник истины — `apps/api/src/modules/claims/claim-state-machine.ts`. Сводка:
+  - `NA_WERYFIKACJI → OCZEKUJE_NA_AUTORYZACJE | ZAAKCEPTOWANO | ODRZUCONO`
+  - `OCZEKUJE_NA_AUTORYZACJE → ZAAKCEPTOWANO | ODRZUCONO`
+  - `ZAAKCEPTOWANO → REKLAMACJA` (carrier-инициированная — отдельный endpoint, не PATCH)
+  - `ODRZUCONO → REKLAMACJA` (то же)
+  - `REKLAMACJA → ZAAKCEPTOWANO | ODRZUCONO` (verifier-сторона)
+  - `AUTORYZACJA_KWOTA_MAKSIMA` — terminal-like, исходящих переходов нет на верификаторской стороне (legacy frozen state).
+  - Любая иная пара (from, to) — 422 `Niedozwolone przejście statusu wniosku`.
+- **CHECK `claim_accepted_payment_complete`** — при `status='ZAAKCEPTOWANO'` поля `orderNumber` (не пустое), `orderDate`, `amountApproved` обязаны быть заполнены. Часть data-model contract, не имплементация.
 
 ### `Delegation` — выезд (рейс)
 
@@ -224,10 +238,11 @@
 | `verifiedById` | FK → User (верификатор, изменивший статус) |
 | `notes` | заметки |
 
-**Инварианты:**
-- Status-переходы строгие: `zgloszony → w_trasie → zjechal`. Переход `markReturned` обновляет `Vehicle.lastDroveAt`.
+**Инварианты (data-model contract):**
+- Status-переходы строгие: `zgloszony → w_trasie → zjechal`. Переход `markReturned` обновляет `Vehicle.lastDroveAt = now()` (auto-side-effect, не выставляется руками).
 - Перевозчик может анулировать только свои `zgloszony`.
 - Верификатор может анулировать любой.
+- **CHECK `delegation_returned_complete`** — при `status='zjechal'` поля `actualReturnAt`, `returnCountry` (не пустое), `returnPostalCode` (не пустое) обязаны быть заполнены. План возврата (`plannedReturnAt`/`returnCountry`/`returnPostalCode`) на момент `zgloszony` может быть пустым (spot-rate / one-way trips).
 
 ### `MonthlyLimit` — лимиты на месяц
 
@@ -250,13 +265,15 @@ Key-value хранилище для всех бизнес-параметров, 
 
 | Ключ | Значение | Описание |
 |---|---|---|
-| `stawka_eur_default` | `0.5` | EUR/km, fallback |
-| `km_dziennie_default` | `540` | km/день, fallback |
+| `stawka_eur_default` | `0.5` | EUR/km, fallback (если для (year, month) нет `MonthlyLimit.ratePerKm`) |
+| `km_dziennie_default` | `540` | km/день, fallback (если для (year, month) нет `MonthlyLimit.kmPerDay`) |
 | `auth_threshold_low` | `1000` | EUR — порог авторизации (low) |
 | `auth_threshold_high` | `5000` | EUR — порог авторизации (high) |
 | `min_days_to_submit` | `10` | минимум дней до подачи |
 | `login_code_ttl` | `600` | секунд — время жизни 2FA-кода |
 | `login_max_attempts` | `5` | максимум попыток ввода кода |
+
+> **Authorization threshold ≠ AppConfig.** Порог авторизации зависит от количества дней в трассе, а не от суммы (см. legacy `getAuthThreshold(drivenDays)` — 1000 EUR при ≥61 дне, 800 при ≥31, 500 при ≥16, 300 при 10–15). Эти константы пока зашиты в коде; backlog — вынести в новую таблицу `AuthThresholds` или поля `MonthlyLimit`. Подробности в [19-known-quirks.md](19-known-quirks.md).
 
 ### `AuditLog` — аудит
 
@@ -302,7 +319,7 @@ Append-only журнал всех критических операций.
 | Инвариант | Где |
 |---|---|
 | `Vehicle.plateNumber` уникален в рамках Carrier | DB unique constraint |
-| `Claim.nrZgl` уникален глобально | DB unique constraint, atomic generation |
+| `Claim.nrZgl` уникален глобально | DB unique constraint, atomic generation через `ClaimSequence` |
 | `Driver.loginSlug` уникален глобально | DB unique constraint, suffix-2/-3 |
 | `Trailer.plateNumber` уникален в рамках Carrier | DB unique constraint |
 | `Carrier.opiekunId` указывает на user с role=opiekun | проверка в сервисе при assign |
@@ -310,8 +327,15 @@ Append-only журнал всех критических операций.
 | `Vehicle.dispatcherId` → User.role=dyspozytor | проверка в сервисе при assign |
 | `Claim.status` всегда из enum | DB enum |
 | `Delegation.status` всегда из enum | DB enum |
+| Claim status-переходы — только 9 легальных рёбер | `claim-state-machine.ts` + сервис; см. секцию `Claim` |
 | Status-переходы Delegation строгие | проверка в сервисе |
+| Claim ZAAKCEPTOWANO ⇒ orderNumber+orderDate+amountApproved | DB CHECK `claim_accepted_payment_complete` |
+| Delegation zjechal ⇒ actualReturnAt+returnCountry+returnPostalCode | DB CHECK `delegation_returned_complete` |
+| Vehicle gps=true ⇒ gpsMobilePhone | DB CHECK `vehicle_gps_device_when_gps_on` |
+| `Vehicle.lastDroveAt` всегда выставляется системой при Delegation→`zjechal` | сервис, не UI |
 | Audit пишется для всех mutating ops | interceptor |
+
+> **CHECK constraints как часть data-model contract.** Это не имплементационная деталь и не оптимизация — это бизнес-правила, которые должны держаться независимо от того, какой код пишет в БД. См. [12-database-schema.md#миграции](12-database-schema.md#миграции) для точного SQL и [19-known-quirks.md](19-known-quirks.md) для нюансов.
 
 ## Soft-delete
 

@@ -46,6 +46,7 @@
 | 16 | [16-jobs-and-integrations.md](16-jobs-and-integrations.md) | BullMQ cron, Gmail API, S3, VIES, Biała Lista, GPS tracker |
 | 17 | [17-migration-roadmap.md](17-migration-roadmap.md) | **Поэтапный план разработки** (10 фаз) |
 | 18 | [18-launch-and-deployment.md](18-launch-and-deployment.md) | Launch: prod-окружение, CI/CD, seed, мониторинг |
+| 19 | [19-known-quirks.md](19-known-quirks.md) | **Known quirks** — load-bearing reference: legacy quirks, business rules, foot-guns. Read BEFORE implementing claims-flow / vehicle-CRUD / delegations / authorization. |
 
 ## Быстрая навигация по ролям
 

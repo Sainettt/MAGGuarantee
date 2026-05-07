@@ -201,10 +201,10 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
         ordersEmail: carrier.ordersEmail ?? '',
         accountEur: carrier.accountEur ?? '',
         accountPln: carrier.accountPln ?? '',
-        paymentTerms: carrier.paymentTerms ?? undefined,
-        insuranceValue: carrier.insuranceValue ?? undefined,
-        insuranceExpiry: carrier.insuranceExpiry ?? undefined,
-        licenseExpiry: carrier.licenseExpiry ?? undefined,
+        paymentTerms: carrier.paymentTerms ?? 30,
+        insuranceValue: carrier.insuranceValue ?? 0,
+        insuranceExpiry: carrier.insuranceExpiry ?? '',
+        licenseExpiry: carrier.licenseExpiry ?? '',
         numberOfPermits: carrier.numberOfPermits ?? undefined,
         companyAddress: carrier.companyAddress ?? '',
         opiekunId: carrier.opiekunId,
@@ -339,6 +339,7 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                   </FormField>
                   <FormField
                     label={t('fields.contactPerson')}
+                    required
                     error={errMsg('contactPerson')}
                     htmlFor="carrier-contactPerson"
                   >
@@ -362,6 +363,7 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                   </FormField>
                   <FormField
                     label={t('fields.ordersEmail')}
+                    required
                     error={errMsg('ordersEmail')}
                     htmlFor="carrier-ordersEmail"
                   >
@@ -476,6 +478,7 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                 </div>
                 <FormField
                   label={t('fields.companyAddress')}
+                  required
                   error={errMsg('companyAddress')}
                   htmlFor="carrier-address"
                 >
@@ -491,6 +494,7 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <FormField
                     label={t('fields.accountEur')}
+                    required
                     error={errMsg('accountEur')}
                     htmlFor="carrier-accountEur"
                   >
@@ -538,6 +542,7 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                   </FormField>
                   <FormField
                     label={t('fields.insuranceValue')}
+                    required
                     error={errMsg('insuranceValue')}
                     htmlFor="carrier-insuranceValue"
                   >
@@ -545,15 +550,17 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                       id="carrier-insuranceValue"
                       type="number"
                       step="0.01"
+                      min={0}
                       className="h-10"
                       {...form.register('insuranceValue', {
                         setValueAs: (v) =>
-                          v === '' || v === null ? undefined : Number(v),
+                          v === '' || v === null ? 0 : Number(v),
                       })}
                     />
                   </FormField>
                   <FormField
                     label={t('fields.insuranceExpiry')}
+                    required
                     error={errMsg('insuranceExpiry')}
                     htmlFor="carrier-insuranceExpiry"
                   >
@@ -566,6 +573,7 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                   </FormField>
                   <FormField
                     label={t('fields.licenseExpiry')}
+                    required
                     error={errMsg('licenseExpiry')}
                     htmlFor="carrier-licenseExpiry"
                   >
@@ -681,10 +689,16 @@ function getDefaults(): CarrierFormValues {
     ordersEmail: '',
     accountEur: '',
     accountPln: '',
-    paymentTerms: undefined,
-    insuranceValue: undefined,
-    insuranceExpiry: undefined,
-    licenseExpiry: undefined,
+    // paymentTerms has a Zod default (30) but RHF needs a controlled value.
+    // 30 mirrors the schema default so the user sees the canonical value.
+    paymentTerms: 30,
+    // insuranceValue is now NOT NULL — start at 0 so the input is controlled.
+    insuranceValue: 0,
+    // insuranceExpiry / licenseExpiry are NOT NULL ISO-date strings. Empty
+    // string keeps the <input type="date"> controlled; IsoDateSchema rejects
+    // it on submit so the user sees a clear error.
+    insuranceExpiry: '',
+    licenseExpiry: '',
     numberOfPermits: undefined,
     companyAddress: '',
     // opiekunId is required in CreateCarrierSchema (UUID). RHF needs a

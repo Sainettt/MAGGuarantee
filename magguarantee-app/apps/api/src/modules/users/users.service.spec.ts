@@ -16,7 +16,6 @@ function makeRow(overrides: Partial<UserRow> = {}): UserRow {
     passwordHash: '$2b$12$xxxx',
     role: 'admin',
     name: 'Admin',
-    company: null,
     active: true,
     liderEmail: null,
     failedAttempts: 0,
@@ -47,9 +46,11 @@ function makeRepo(initial: UserRow[] = []): UsersRepository {
         ...data,
         id: data.id ?? `u-${rows.size + 1}`,
         role: (data.role as UserRow['role']) ?? 'admin',
-        email: data.email ?? null,
+        // Required post-phase3_blocks — fall back to a stub when the
+        // create() caller didn't supply (only happens in update tests).
+        email: data.email ?? 'stub@example.com',
         name: data.name ?? null,
-        passwordHash: data.passwordHash ?? null,
+        passwordHash: data.passwordHash ?? 'stub-hash',
       });
       // Mimic the real DB unique check on login.
       if ([...rows.values()].some((r) => r.login === row.login)) {

@@ -24,21 +24,22 @@ function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {
     model: null,
     year: null,
     notes: null,
-    certificateL: null,
-    euro: null,
+    // Required post-phase3_blocks.
+    certificateL: 'L1',
+    euro: 'V',
     adrClasses: [],
     gps: false,
     fuelCard: false,
-    type: null,
+    type: 'STD',
     gb: null,
     it: null,
     fr: null,
     agreement: null,
     contract: null,
-    rateDe: null,
-    rateUe: null,
-    rateExport: null,
-    rateImport: null,
+    rateDe: 0.5,
+    rateUe: 0.5,
+    rateExport: 0.5,
+    rateImport: 0.5,
     wasteAllowed: false,
     wasteCountries: [],
     cabotageDe: false,
@@ -64,23 +65,24 @@ function makeCarrier(overrides: Partial<CarrierRow> = {}): CarrierRow {
     id: 'c-1',
     userId: 'u-c-1',
     login: 'pwz1',
-    email: null,
+    // Required post-phase3_blocks.
+    email: 'carrier@magtrans.eu',
     name: 'Pwz One',
     company: null,
     active: true,
     nip: null,
     vatId: null,
-    contactPerson: null,
+    contactPerson: 'Jan Kontakt',
     phone: '+48000000000',
-    ordersEmail: null,
-    accountEur: null,
+    ordersEmail: 'zlecenia@example.com',
+    accountEur: 'PL00 0000 0000 0000',
     accountPln: null,
-    paymentTerms: null,
-    insuranceValue: null,
-    insuranceExpiry: null,
-    licenseExpiry: null,
+    paymentTerms: 30,
+    insuranceValue: 0,
+    insuranceExpiry: NOW,
+    licenseExpiry: NOW,
     numberOfPermits: null,
-    companyAddress: null,
+    companyAddress: 'ul. Testowa 1',
     opiekunId: 'op-fixture',
     opiekun: { id: 'op-fixture', login: 'op', name: null },
     createdAt: NOW,
@@ -95,10 +97,9 @@ function makeUser(overrides: Partial<UserRow> = {}): UserRow {
     id: 'u-pl-1',
     login: 'plan',
     email: 'plan@magtrans.eu',
-    passwordHash: null,
+    passwordHash: 'hash',
     role: 'planista',
     name: 'Plan',
-    company: null,
     active: true,
     liderEmail: null,
     failedAttempts: 0,
@@ -198,6 +199,17 @@ function makeUsersRepo(seed: UserRow[] = []): UsersRepository {
   } as unknown as UsersRepository;
 }
 
+/** Minimal payload required by the post-phase3_blocks schema. */
+const REQUIRED_VEHICLE_FIELDS = {
+  certificateL: 'L1' as const,
+  euro: 'V' as const,
+  type: 'STD' as const,
+  rateDe: 0.5,
+  rateUe: 0.5,
+  rateExport: 0.5,
+  rateImport: 0.5,
+};
+
 describe('VehiclesService', () => {
   it('admin can create with valid plannerId/dispatcherId', async () => {
     const planner = makeUser({ id: 'u-pl', role: 'planista' });
@@ -218,6 +230,7 @@ describe('VehiclesService', () => {
       cabotageFr: false,
       plannerId: 'u-pl',
       dispatcherId: 'u-dy',
+      ...REQUIRED_VEHICLE_FIELDS,
     });
     expect(out.plateNumber).toBe('WA0002');
     expect(out.plannerId).toBe('u-pl');
@@ -240,6 +253,7 @@ describe('VehiclesService', () => {
         cabotageDe: false,
         cabotageFr: false,
         plannerId: 'u-x',
+        ...REQUIRED_VEHICLE_FIELDS,
       }),
     ).rejects.toThrow(UnprocessableEntityException);
   });
@@ -261,6 +275,7 @@ describe('VehiclesService', () => {
         cabotageDe: false,
         cabotageFr: false,
         dispatcherId: 'u-x',
+        ...REQUIRED_VEHICLE_FIELDS,
       }),
     ).rejects.toThrow(UnprocessableEntityException);
   });
@@ -281,6 +296,7 @@ describe('VehiclesService', () => {
         wasteAllowed: false,
         cabotageDe: false,
         cabotageFr: false,
+        ...REQUIRED_VEHICLE_FIELDS,
       }),
     ).rejects.toThrow(ConflictException);
   });
@@ -301,6 +317,7 @@ describe('VehiclesService', () => {
         wasteAllowed: false,
         cabotageDe: false,
         cabotageFr: false,
+        ...REQUIRED_VEHICLE_FIELDS,
       }),
     ).rejects.toThrow(ForbiddenException);
   });
@@ -321,6 +338,7 @@ describe('VehiclesService', () => {
         wasteAllowed: false,
         cabotageDe: false,
         cabotageFr: false,
+        ...REQUIRED_VEHICLE_FIELDS,
       }),
     ).resolves.toMatchObject({ plateNumber: 'WA0002' });
   });

@@ -59,6 +59,11 @@ const HoursAdjustedSchema = z.number().min(0).max(24 * 366);
  * - `amountRequested` is what the carrier asks (legacy `KwotaWnioskowana`).
  * - `plannerId`/`opiekunId` are derived server-side from the vehicle's planner
  *   and the carrier's opiekun — clients do not send them.
+ * - `timeFrom` / `timeTo` are NOT NULL on the underlying column since
+ *   phase3_blocks; the carrier MUST supply them.
+ * - `orderNumber` / `orderDate` are intentionally NOT in the submit DTO —
+ *   they are MAGTRANS-internal and assigned by the verifier when transitioning
+ *   to ZAAKCEPTOWANO. Carrier-side submit always persists NULL.
  */
 export const SubmitClaimSchema = z
   .object({
@@ -69,16 +74,16 @@ export const SubmitClaimSchema = z
 
     dateStart: IsoDateSchema,
     dateEnd: IsoDateSchema,
-    timeFrom: emptyStringToUndefined(HhMmSchema.optional()),
-    timeTo: emptyStringToUndefined(HhMmSchema.optional()),
+    /** REQUIRED — Claim.timeFrom is NOT NULL since phase3_blocks. */
+    timeFrom: HhMmSchema,
+    /** REQUIRED — Claim.timeTo is NOT NULL since phase3_blocks. */
+    timeTo: HhMmSchema,
 
     mileage: MileageSchema,
     amountRequested: z.number().nonnegative().max(9_999_999),
     hoursAdjusted: HoursAdjustedSchema.optional().default(0),
 
     comment: emptyStringToUndefined(z.string().max(2_000).optional()),
-    orderNumber: emptyStringToUndefined(z.string().max(64).optional()),
-    orderDate: emptyStringToUndefined(IsoDateSchema.optional()),
 
     /** Optional pre-uploaded attachment IDs (auth screenshot, photos, etc.). */
     attachmentIds: z.array(UuidSchema).max(20).optional(),
@@ -236,16 +241,18 @@ export const ClaimDtoSchema = z.object({
 
   dateStart: IsoDateTimeSchema,
   dateEnd: IsoDateTimeSchema,
-  timeFrom: z.string().nullable(),
-  timeTo: z.string().nullable(),
+  // NOT NULL after phase3_blocks.
+  timeFrom: z.string(),
+  timeTo: z.string(),
 
-  drivenDays: z.number().nullable(),
-  mileage: z.number().nullable(),
-  kmPerDay: z.number().nullable(),
-  kmGuaranteed: z.number().nullable(),
-  kmDifference: z.number().nullable(),
-  paymentEur: z.number().nullable(),
-  ratePerKmEffective: z.number().nullable(),
+  // All calc columns are NOT NULL after phase3_blocks.
+  drivenDays: z.number(),
+  mileage: z.number(),
+  kmPerDay: z.number(),
+  kmGuaranteed: z.number(),
+  kmDifference: z.number(),
+  paymentEur: z.number(),
+  ratePerKmEffective: z.number(),
   breakdown: KmCalcBreakdownSchema.nullable(),
 
   status: ClaimStatusSchema,
@@ -262,7 +269,9 @@ export const ClaimDtoSchema = z.object({
   authorizationToken: z.string().nullable(),
   authorizationDecidedAt: IsoDateTimeSchema.nullable(),
 
-  amountRequested: z.number().nullable(),
+  // amountRequested is NOT NULL in DB since phase3_blocks_audit_revert
+  // (carrier always supplies it at submit).
+  amountRequested: z.number(),
   amountApproved: z.number().nullable(),
   margin: z.number().nullable(),
   amountMaximum: z.number().nullable(),
@@ -301,15 +310,114 @@ export const ClaimListItemSchema = z.object({
   vehiclePlate: z.string(),
   dateStart: IsoDateTimeSchema,
   dateEnd: IsoDateTimeSchema,
-  drivenDays: z.number().nullable(),
-  mileage: z.number().nullable(),
-  kmGuaranteed: z.number().nullable(),
-  kmDifference: z.number().nullable(),
-  paymentEur: z.number().nullable(),
-  amountRequested: z.number().nullable(),
+  // Calculation fields are NOT NULL post-phase3_blocks.
+  drivenDays: z.number(),
+  mileage: z.number(),
+  kmGuaranteed: z.number(),
+  kmDifference: z.number(),
+  paymentEur: z.number(),
+  amountRequested: z.number(),
   amountApproved: z.number().nullable(),
   authorizationRequired: z.boolean(),
   reklamacjaSubmitted: z.boolean(),
   createdAt: IsoDateTimeSchema,
 });
 export type ClaimListItem = z.infer<typeof ClaimListItemSchema>;
+
+// ─── Update claim — discriminated union by `targetStatus` ──
+//
+// The endpoint `PATCH /claims/:nrZgl` ships in Phase 4. The schema is
+// defined here so the contract is locked early and the future Service-level
+// type is wired through `ClaimsService.decide` (which currently throws
+// NotImplemented).
+//
+// Each variant carries the fields required for that single transition.
+// Legal transitions follow docs/04-data-model.md and Code.gs:5180-5345.
+// Notice that `REKLAMACJA → *` is reachable only by the verifier — the
+// carrier files a reklamacja via the dedicated POST /claims/:nrZgl/reklamacja.
+
+const UpdateClaimAmountSchema = z.number().nonnegative().max(9_999_999);
+const UpdateClaimMarginSchema = z.number().min(-9_999_999).max(9_999_999);
+const UpdateClaimCommentSchema = z.string().min(1).max(4_000);
+
+/** Common optional corrections — verifier can tweak the carrier's submission. */
+const UpdateClaimCorrectionFields = {
+  dateStart: emptyStringToUndefined(IsoDateSchema.optional()),
+  dateEnd: emptyStringToUndefined(IsoDateSchema.optional()),
+  timeFrom: emptyStringToUndefined(HhMmSchema.optional()),
+  timeTo: emptyStringToUndefined(HhMmSchema.optional()),
+  mileage: MileageSchema.optional(),
+  hoursAdjusted: HoursAdjustedSchema.optional(),
+} as const;
+
+/** NA_WERYFIKACJI → OCZEKUJE_NA_AUTORYZACJĘ — large-amount path. */
+const UpdateClaimToAuthorizationPending = z
+  .object({
+    targetStatus: z.literal('OCZEKUJE_NA_AUTORYZACJE'),
+    margin: UpdateClaimMarginSchema,
+    authorizationDescription: z.string().min(1).max(4_000),
+    ...UpdateClaimCorrectionFields,
+  })
+  .strict();
+
+/** NA_WERYFIKACJI → ZAAKCEPTOWANO  /  OCZEKUJE_NA_AUTORYZACJE → ZAAKCEPTOWANO. */
+const UpdateClaimToAccepted = z
+  .object({
+    targetStatus: z.literal('ZAAKCEPTOWANO'),
+    /** REQUIRED — needed by the CHECK constraint at DB level. */
+    orderNumber: z.string().min(1).max(64),
+    /** REQUIRED — needed by the CHECK constraint at DB level. */
+    orderDate: IsoDateSchema,
+    /** REQUIRED — needed by the CHECK constraint at DB level. */
+    amountApproved: UpdateClaimAmountSchema,
+    /** Maksim authorization override — optional, only relevant after OCZEKUJE_*. */
+    amountMaximum: UpdateClaimAmountSchema.optional(),
+    comment: emptyStringToUndefined(z.string().max(4_000).optional()),
+    ...UpdateClaimCorrectionFields,
+  })
+  .strict();
+
+/** NA_WERYFIKACJI → ODRZUCONO  /  OCZEKUJE_NA_AUTORYZACJE → ODRZUCONO. */
+const UpdateClaimToRejected = z
+  .object({
+    targetStatus: z.literal('ODRZUCONO'),
+    /** REQUIRED — rejection reason. */
+    comment: UpdateClaimCommentSchema,
+  })
+  .strict();
+
+/** REKLAMACJA → ZAAKCEPTOWANO — verifier accepts the dispute. */
+const UpdateClaimReklamacjaAccepted = z
+  .object({
+    targetStatus: z.literal('REKLAMACJA_ZAAKCEPTOWANO'),
+    /** REQUIRED — verifier reasoning recorded in the audit log. */
+    comment: UpdateClaimCommentSchema,
+    /** REQUIRED — `zatwKwota` value the verifier approved. */
+    reklamacjaAmount: UpdateClaimAmountSchema,
+    ...UpdateClaimCorrectionFields,
+  })
+  .strict();
+
+/** REKLAMACJA → ODRZUCONO — verifier rejects the dispute. */
+const UpdateClaimReklamacjaRejected = z
+  .object({
+    targetStatus: z.literal('REKLAMACJA_ODRZUCONO'),
+    /** REQUIRED — rejection reason. */
+    comment: UpdateClaimCommentSchema,
+  })
+  .strict();
+
+/**
+ * PATCH /claims/:nrZgl — discriminated by `targetStatus`. The synthetic
+ * `REKLAMACJA_ZAAKCEPTOWANO` / `REKLAMACJA_ODRZUCONO` literals are wire-only
+ * — the service translates them to `ZAAKCEPTOWANO` / `ODRZUCONO` (with a
+ * mirror to `statusBeforeReklamacja`) before persisting.
+ */
+export const UpdateClaimSchema = z.discriminatedUnion('targetStatus', [
+  UpdateClaimToAuthorizationPending,
+  UpdateClaimToAccepted,
+  UpdateClaimToRejected,
+  UpdateClaimReklamacjaAccepted,
+  UpdateClaimReklamacjaRejected,
+]);
+export type UpdateClaimDto = z.infer<typeof UpdateClaimSchema>;

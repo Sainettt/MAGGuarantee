@@ -85,7 +85,6 @@ export class UsersService {
         name: dto.name,
         role: dto.role,
         passwordHash,
-        company: dto.company ?? null,
         liderEmail: dto.liderEmail ?? null,
         active: dto.active ?? true,
       });
@@ -116,10 +115,11 @@ export class UsersService {
     }
     try {
       const updated = await this.repo.update(id, {
-        ...(dto.email !== undefined ? { email: dto.email ?? null } : {}),
+        // `email` is NOT NULL post-phase3_blocks — patch with the value
+        // verbatim; the Zod schema already rejected null upstream.
+        ...(dto.email !== undefined ? { email: dto.email } : {}),
         ...(dto.name !== undefined ? { name: dto.name } : {}),
         ...(dto.role !== undefined ? { role: dto.role } : {}),
-        ...(dto.company !== undefined ? { company: dto.company } : {}),
         ...(dto.liderEmail !== undefined ? { liderEmail: dto.liderEmail } : {}),
         ...(dto.active !== undefined ? { active: dto.active } : {}),
       });
@@ -184,7 +184,6 @@ export class UsersService {
       email: row.email,
       name: row.name,
       role: row.role,
-      company: row.company,
       active: row.active,
       liderEmail: row.liderEmail,
       lastLoginAt: row.lastLoginAt ? row.lastLoginAt.toISOString() : null,

@@ -64,11 +64,10 @@ export class DelegationsService {
       driverNameSnapshot: driverSnapshot?.name ?? null,
       driverPhoneSnapshot: driverSnapshot?.phone ?? null,
       departureAt: new Date(dto.departureAt),
-      departureCountry: dto.departureCountry ?? null,
-      departurePostalCode: dto.departurePostalCode ?? null,
-      plannedReturnAt: dto.plannedReturnAt
-        ? new Date(dto.plannedReturnAt)
-        : null,
+      // Required post-phase3_blocks — Zod already enforced presence.
+      departureCountry: dto.departureCountry,
+      departurePostalCode: dto.departurePostalCode,
+      plannedReturnAt: dto.plannedReturnAt ? new Date(dto.plannedReturnAt) : null,
       returnCountry: dto.returnCountry ?? null,
       returnPostalCode: dto.returnPostalCode ?? null,
       notes: dto.comment ?? null,
@@ -163,9 +162,8 @@ export class DelegationsService {
       departureAt: row.departureAt.toISOString(),
       departureCountry: row.departureCountry,
       departurePostalCode: row.departurePostalCode,
-      plannedReturnAt: row.plannedReturnAt
-        ? row.plannedReturnAt.toISOString()
-        : null,
+      // Nullable per phase3_blocks_audit_revert.
+      plannedReturnAt: row.plannedReturnAt ? row.plannedReturnAt.toISOString() : null,
       returnCountry: row.returnCountry,
       returnPostalCode: row.returnPostalCode,
       status: row.status,

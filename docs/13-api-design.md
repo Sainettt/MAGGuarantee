@@ -120,7 +120,7 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 | POST `/carriers/:id/deactivate` | `toggleCarrierActive` (off) | admin / opiekun(own) |
 | POST `/carriers/:id/reactivate` | `toggleCarrierActive` (on) | admin / opiekun(own) |
 | POST `/carriers/:id/reset-password` | `resetCarrierPassword` / `resetCarrierPasswordByOpiekun` | admin / opiekun(own) |
-| DELETE `/carriers/:id` | `deleteCarrierHard` / `deleteCarrierByOpiekunHard` | admin (hard) / opiekun(own, soft) |
+| DELETE `/carriers/:id` | `deleteCarrierHard` | **admin only** (hard delete). Phase 3 enforcement: `@Roles('admin')` — opiekun does NOT have a soft-delete path; deactivate via `/carriers/:id/deactivate` is the opiekun-accessible alternative. |
 
 > Один endpoint, один сервис. Различия admin/opiekun — на уровне `RolesGuard` + `OwnershipGuard`. Дублей `*ByOpiekun` нет.
 >
@@ -128,7 +128,7 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 
 ### Vehicles — `/api/v1/vehicles`
 
-> Роль: `admin` (все), `opiekun` (свои перевозчики), `przewoznik` (свои авто, read + ограниченные write). **Не `pracownik`.**
+> Роль: `admin` (все), `opiekun` (свои перевозчики), `przewoznik` (свои авто, read + ограниченные write — PATCH/deactivate/reactivate, no create/delete). **Не `pracownik`.** Phase 3 enforcement: `@Roles('admin', 'opiekun')` для POST/DELETE, `@Roles('admin', 'opiekun', 'przewoznik')` для GET/PATCH/deactivate/reactivate. См. `apps/api/src/modules/vehicles/vehicles.controller.ts`.
 
 | Method + Path | GAS |
 |---|---|
@@ -158,7 +158,7 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 
 ### Trailers — `/api/v1/trailers`
 
-> Роль: `admin` (все), `opiekun` (свои), `przewoznik` (свои). **Не `pracownik`.**
+> Роль: `admin` (все), `opiekun` (свои), `przewoznik` (свои — read + create/update/deactivate, **NO delete**). **Не `pracownik`.** Phase 3 enforcement: `@Roles('admin', 'opiekun')` для DELETE; все остальные — `@Roles('admin', 'opiekun', 'przewoznik')`. См. `apps/api/src/modules/trailers/trailers.controller.ts`.
 
 | Method + Path | GAS |
 |---|---|
@@ -191,7 +191,7 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 | GET `/claims/:nrZgl` | `buildClaimObj` | admin / pracownik / opiekun(own carrier) / przewoznik(own) |
 | GET `/claims/dashboard` | `getDashboardStats` | admin / pracownik (полный) / opiekun (scope: свои перевозчики) |
 | POST `/claims` | `submitNewClaim` | przewoznik |
-| PATCH `/claims/:nrZgl` | `updateClaimFull` — корректировки + decision (status, korekta godzin, nrZlecenia, kwotaMaksima, reklamacjaZatwKwota) | **admin / pracownik** |
+| PATCH `/claims/:nrZgl` | `updateClaimFull` — корректировки + decision (status, korekta godzin, nrZlecenia, kwotaMaksima, reklamacjaZatwKwota). **Phase 4 — controller-stub в Phase 3 (throws InternalServerError).** Body — discriminated union `UpdateClaimSchema` в `@magguarantee/shared/schemas/claims.ts` (синтетические литералы `REKLAMACJA_ZAAKCEPTOWANO`/`REKLAMACJA_ODRZUCONO` как `targetStatus` дискриминатор; service переводит обратно в underlying `ZAAKCEPTOWANO`/`ODRZUCONO` перед persistence — это нужно чтобы UI мог различать «accept reklamacja» от «accept fresh claim», но БД хранит чистый enum). State-machine — `apps/api/src/modules/claims/claim-state-machine.ts`, 9 легальных рёбер, 422 на любой illegal transition. | **admin / pracownik** |
 | POST `/claims/:nrZgl/reklamacja` | `submitReklamacja` | przewoznik (own claim) |
 | POST `/claims/:nrZgl/preview` | (новое) — server-side расчёт live preview, заменяет client-side `carrierPreviewCalc` | любой залогиненный (помогает заполнить форму) |
 | POST `/claims/:nrZgl/auth-screenshot` | `uploadAuthScreenshot` (multipart, S3) — pracownik/admin/opiekun (legacy: `requireEmployee`) | admin / pracownik / opiekun |
@@ -349,22 +349,19 @@ type PreviewResponse = {
 
 ### Update claim (verification)
 
+> Phase 3 закрепил форму через **discriminated union** на поле `targetStatus`. Источник истины — `packages/shared/src/schemas/claims.ts` (`UpdateClaimSchema`). PATCH endpoint — Phase 4 (в Phase 3 — controller-stub).
+
 ```ts
-// PATCH /claims/:nrZgl
-type UpdateClaimRequest = {
-  // редактируемые поля:
-  dateStart?: string; dateEnd?: string;
-  timeFrom?: string;  timeTo?: string;
-  mileage?: number;
-  amountApproved?: number;
-  comment?: string;
-  margin?: number;
-  hoursAdjusted?: boolean;
-  // решение:
-  decision?: 'accept' | 'reject' | 'request-authorization';
-  decisionReason?: string;
-};
+// PATCH /claims/:nrZgl — body shape (упрощённо)
+type UpdateClaimRequest =
+  | { targetStatus: 'ZAAKCEPTOWANO';            /* + поля акцепта: orderNumber, orderDate, amountApproved, ... */ }
+  | { targetStatus: 'ODRZUCONO';                /* + поля отказа: comment, ... */ }
+  | { targetStatus: 'OCZEKUJE_NA_AUTORYZACJE';  /* + поля запроса авторизации */ }
+  | { targetStatus: 'REKLAMACJA_ZAAKCEPTOWANO'; /* верификатор принял рекламацию — service переведёт в ZAAKCEPTOWANO */ }
+  | { targetStatus: 'REKLAMACJA_ODRZUCONO';     /* верификатор отклонил рекламацию — service переведёт в ODRZUCONO */ };
 ```
+
+`REKLAMACJA_ZAAKCEPTOWANO` / `REKLAMACJA_ODRZUCONO` — **synthetic wire-only литералы**, не настоящие `ClaimStatus`. UI использует их чтобы различить «accept fresh claim» от «accept reklamacja» (разные поля, разные подтверждения). Сервис translates back в underlying `ZAAKCEPTOWANO`/`ODRZUCONO` перед записью в БД — DB enum остаётся чистым. State-machine validation выполняется в `assertLegalTransition(from, to)` из `claim-state-machine.ts` после translate-back, до любых DB-операций.
 
 ## Версионирование
 

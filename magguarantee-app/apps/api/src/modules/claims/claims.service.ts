@@ -2,6 +2,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  InternalServerErrorException,
   Logger,
   NotFoundException,
   UnprocessableEntityException,
@@ -17,6 +18,7 @@ import type {
   PreviewClaimResponse,
   SubmitClaimDto,
   SubmitReklamacjaDto,
+  UpdateClaimDto,
 } from '@magguarantee/shared';
 
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
@@ -86,11 +88,12 @@ export class ClaimsService {
     this._assertSubmitWindow(dto.dateEnd, maxDaysAfter);
 
     // km-calc — reused by `previewKmCalc`. Same engine = same numbers.
+    // `timeFrom` / `timeTo` are required since phase3_blocks (NOT NULL).
     const calc = await this.kmCalc.calc({
       dateStart: dto.dateStart,
       dateEnd: dto.dateEnd,
-      timeFrom: dto.timeFrom ?? null,
-      timeTo: dto.timeTo ?? null,
+      timeFrom: dto.timeFrom,
+      timeTo: dto.timeTo,
       hoursAdjusted: dto.hoursAdjusted ?? 0,
     });
 
@@ -129,9 +132,12 @@ export class ClaimsService {
 
     const dateStart = new Date(`${dto.dateStart}T00:00:00.000Z`);
     const dateEnd = new Date(`${dto.dateEnd}T00:00:00.000Z`);
-    const orderDate = dto.orderDate
-      ? new Date(`${dto.orderDate}T00:00:00.000Z`)
-      : null;
+    // `kmPerDay` (NOT NULL post-phase3_blocks) is the trip-average km/day.
+    // Degenerate input (`drivenDays === 0`) collapses to 0 — defensive,
+    // since the min-days gate above blocks the realistic case where it
+    // would matter.
+    const kmPerDay =
+      calc.totalDays > 0 ? round2(dto.mileage / calc.totalDays) : 0;
     const now = new Date();
 
     let row: ClaimRow;
@@ -146,11 +152,13 @@ export class ClaimsService {
           vehiclePlateSnapshot: vehicle.plateNumber,
           dateStart,
           dateEnd,
-          timeFrom: dto.timeFrom ?? null,
-          timeTo: dto.timeTo ?? null,
+          // Required post-phase3_blocks (NOT NULL).
+          timeFrom: dto.timeFrom,
+          timeTo: dto.timeTo,
           drivenDays: calc.totalDays,
           mileage: dto.mileage,
-          kmPerDay: null,
+          // `kmPerDay` is NOT NULL post-phase3_blocks — calculated above.
+          kmPerDay,
           kmGuaranteed: calc.kmGuaranteed,
           kmDifference,
           paymentEur,
@@ -159,8 +167,13 @@ export class ClaimsService {
           status: 'NA_WERYFIKACJI',
           statusChangedAt: now,
           comment: dto.comment ?? null,
-          orderNumber: dto.orderNumber ?? null,
-          orderDate,
+          // Per Revert #1: `orderNumber` / `orderDate` are MAGTRANS-internal,
+          // assigned only on the verifier's transition to ZAAKCEPTOWANO. The
+          // carrier-side submit always persists NULL; the
+          // `claim_accepted_payment_complete` CHECK constraint enforces the
+          // invariant when status flips.
+          orderNumber: null,
+          orderDate: null,
           amountRequested: dto.amountRequested,
           hoursAdjusted: (dto.hoursAdjusted ?? 0) > 0,
           // Preserve the carrier's original (pre-verification) inputs, so
@@ -192,6 +205,37 @@ export class ClaimsService {
     return this.toDto(row);
   }
 
+  // ── Decide / verify (PHASE 4 — stub) ────────────────────
+
+  /**
+   * PATCH /claims/:nrZgl — verifier's decision endpoint. The full Phase 4
+   * implementation will:
+   *   1. Load the claim, assert ownership scoping (admin / pracownik only).
+   *   2. Translate the synthetic `REKLAMACJA_*` literals from
+   *      {@link UpdateClaimDto} into the underlying state-machine targets
+   *      (`ZAAKCEPTOWANO` / `ODRZUCONO`) and persist `statusBeforeReklamacja`.
+   *   3. Validate the transition via
+   *      {@link ./claim-state-machine#assertLegalTransition}.
+   *   4. Re-run km-calc when the verifier corrected dates / mileage / hours.
+   *   5. Apply the patch, audit the diff, send notifications.
+   *
+   * The stub method is exposed NOW so future code has a stable signature;
+   * the wire schema (`UpdateClaimSchema` discriminated union) is ready and
+   * lives in `@magguarantee/shared`. The controller endpoint is intentionally
+   * NOT wired in Phase 3 — calling this throws 500 to make the unfinished
+   * surface visible during integration tests.
+   */
+  // TODO Phase 4 — implement full verification flow.
+  async decide(
+    _user: AuthUser,
+    _nrZgl: string,
+    _dto: UpdateClaimDto,
+  ): Promise<ClaimDto> {
+    throw new InternalServerErrorException(
+      'Claim verification — Phase 4',
+    );
+  }
+
   // ── Preview ─────────────────────────────────────────────
 
   async previewKmCalc(
@@ -206,6 +250,9 @@ export class ClaimsService {
     const calc = await this.kmCalc.calc({
       dateStart: dto.dateStart,
       dateEnd: dto.dateEnd,
+      // PreviewClaimSchema keeps timeFrom / timeTo optional — the engine
+      // tolerates `null` for the live-preview shortcut where the carrier
+      // hasn't yet typed the times.
       timeFrom: dto.timeFrom ?? null,
       timeTo: dto.timeTo ?? null,
       hoursAdjusted: dto.hoursAdjusted ?? 0,

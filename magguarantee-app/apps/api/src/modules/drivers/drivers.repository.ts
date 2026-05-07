@@ -6,7 +6,8 @@ import { PrismaService } from '../prisma/prisma.service';
  * Row shape returned by the driver repository.
  *
  * `phone` and `driverLicenseNumber` are non-nullable since the phase-2
- * migration (`phase2_required_fields_carrier_driver_trailer`).
+ * migration. `email`, `licenseExpiry` and `bankAccount` are non-nullable
+ * since phase3_blocks.
  */
 export interface DriverRow {
   id: string;
@@ -16,6 +17,8 @@ export interface DriverRow {
   lastName: string;
   phone: string;
   phone2: string | null;
+  // Nullable per phase3_blocks_audit_revert (drivers in PL trucking often
+  // don't have email; license/bankAccount may be unknown at registration).
   email: string | null;
   driverLicenseNumber: string;
   licenseExpiry: Date | null;
@@ -182,8 +185,10 @@ export class DriversRepository {
 
 // Wide variant of the Prisma row to absorb the inferred-nullable shape
 // produced by the soft-delete extension's typing (the underlying schema
-// marks `phone` / `lastName` / `driverLicenseNumber` NOT NULL post-Phase 2,
-// but Prisma's `query` extension widens scalars in the inferred type).
+// marks scalars NOT NULL post-phase3_blocks, but Prisma's `query` extension
+// widens scalars in the inferred type). The `carrier` field is now
+// optional in the wide shape — `findFirst` may surface it as undefined when
+// `include: { carrier: ... }` is missing.
 interface DriverPrismaShape {
   id: string;
   carrierId: string;
@@ -198,7 +203,7 @@ interface DriverPrismaShape {
   bankAccount: string | null;
   notes: string | null;
   active: boolean;
-  carrier: {
+  carrier?: {
     id: string;
     user: { login: string; name: string | null };
   } | null;

@@ -25,10 +25,11 @@ function makeDriver(overrides: Partial<DriverRow> = {}): DriverRow {
     lastName: 'Kowalski',
     phone: '+48000000000',
     phone2: null,
-    email: null,
+    // Required post-phase3_blocks.
+    email: 'driver@magtrans.eu',
     driverLicenseNumber: 'LIC-000',
-    licenseExpiry: null,
-    bankAccount: null,
+    licenseExpiry: NOW,
+    bankAccount: 'PL00 0000 0000 0000',
     notes: null,
     active: true,
     carrier: { id: 'c-1', login: 'pwz1', name: null },
@@ -44,23 +45,24 @@ function makeCarrier(overrides: Partial<CarrierRow> = {}): CarrierRow {
     id: 'c-1',
     userId: 'u-c-1',
     login: 'pwz1',
-    email: null,
+    // Required post-phase3_blocks.
+    email: 'carrier@magtrans.eu',
     name: 'Pwz One',
     company: null,
     active: true,
     nip: null,
     vatId: null,
-    contactPerson: null,
+    contactPerson: 'Jan Kontakt',
     phone: '+48000000000',
-    ordersEmail: null,
-    accountEur: null,
+    ordersEmail: 'zlecenia@example.com',
+    accountEur: 'PL00 0000 0000 0000',
     accountPln: null,
-    paymentTerms: null,
-    insuranceValue: null,
-    insuranceExpiry: null,
-    licenseExpiry: null,
+    paymentTerms: 30,
+    insuranceValue: 0,
+    insuranceExpiry: NOW,
+    licenseExpiry: NOW,
     numberOfPermits: null,
-    companyAddress: null,
+    companyAddress: 'ul. Testowa 1',
     opiekunId: 'op-fixture',
     opiekun: { id: 'op-fixture', login: 'op', name: null },
     createdAt: NOW,
@@ -149,10 +151,13 @@ function makeCarriersRepo(seed: CarrierRow[] = []): CarriersRepository {
   } as unknown as CarriersRepository;
 }
 
-/** Minimal payload required by the post-phase-2 schema. */
+/** Minimal payload required by the post-phase3_blocks schema. */
 const REQUIRED_DRIVER_FIELDS = {
   phone: '+48111222333',
   driverLicenseNumber: 'LIC-001',
+  email: 'driver@magtrans.eu',
+  licenseExpiry: '2027-01-01',
+  bankAccount: 'PL00 0000 0000 0000',
 };
 
 describe('DriversService', () => {

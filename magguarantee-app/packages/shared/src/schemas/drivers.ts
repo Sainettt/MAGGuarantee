@@ -44,9 +44,14 @@ export const CreateDriverSchema = z
     lastName: NameSchema,
     phone: PhoneRequiredSchema,
     phone2: emptyStringToUndefined(PhoneOptionalSchema.optional()),
+    // email + bankAccount are optional — many PL drivers don't have an
+    // email address; bankAccount is carrier-internal HR (carrier pays
+    // driver, not MAGTRANS). licenseExpiry is REQUIRED at the API layer
+    // because driving without a valid license is illegal — the column itself
+    // is nullable to tolerate migrations/imports.
     email: emptyStringToUndefined(EmailSchema.optional()),
     driverLicenseNumber: DriverLicenseSchema,
-    licenseExpiry: emptyStringToUndefined(IsoDateSchema.optional()),
+    licenseExpiry: IsoDateSchema,
     bankAccount: emptyStringToUndefined(z.string().max(64).optional()),
     notes: emptyStringToUndefined(z.string().max(2_000).optional()),
     active: z.boolean().optional(),
@@ -68,12 +73,12 @@ export const UpdateDriverSchema = z
     lastName: emptyStringToUndefined(NameSchema.optional()),
     phone: emptyStringToUndefined(PhoneRequiredSchema.optional()),
     phone2: emptyStringToUndefined(PhoneOptionalSchema.nullable().optional()),
-    email: emptyStringToUndefined(EmailSchema.nullable().optional()),
+    // The following three fields are NOT NULL since phase3_blocks. PATCH
+    // accepts an update (omit means "do not touch") but cannot null them.
+    email: emptyStringToUndefined(EmailSchema.optional()),
     driverLicenseNumber: emptyStringToUndefined(DriverLicenseSchema.optional()),
-    licenseExpiry: emptyStringToUndefined(IsoDateSchema.nullable().optional()),
-    bankAccount: emptyStringToUndefined(
-      z.string().max(64).nullable().optional(),
-    ),
+    licenseExpiry: emptyStringToUndefined(IsoDateSchema.optional()),
+    bankAccount: emptyStringToUndefined(z.string().max(64).optional()),
     notes: emptyStringToUndefined(z.string().max(2_000).nullable().optional()),
     active: z.boolean().optional(),
   })
@@ -103,6 +108,7 @@ export const DriverDtoSchema = z.object({
   lastName: z.string(),
   phone: z.string(),
   phone2: z.string().nullable(),
+  // Nullable per phase3_blocks audit revert.
   email: z.string().email().nullable(),
   driverLicenseNumber: z.string(),
   licenseExpiry: IsoDateSchema.nullable(),

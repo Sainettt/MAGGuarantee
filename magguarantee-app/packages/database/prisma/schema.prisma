@@ -65,11 +65,10 @@ enum EuroNorm {
 model User {
   id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   login          String    @unique
-  email          String?   @unique
+  email          String    @unique
   passwordHash   String? // bcrypt; nullable to allow email-only auth (see docs/15-auth-strategy.md)
   role           Role
   name           String?
-  company        String?
   active         Boolean   @default(true)
   // 2FA / login attempts
   failedAttempts Int       @default(0)
@@ -77,7 +76,10 @@ model User {
   lastLoginAt    DateTime?
 
   // role-specific fields (NULL for other roles)
-  // planista
+  // planista — per-role tech debt; same denormalization pattern as the
+  // ex-`User.company` field (already moved to Carrier). Likely future cleanup:
+  // move to a Planista extension table OR keep on User if no other
+  // planista-only fields emerge. See docs/19-known-quirks.md#liderEmail.
   liderEmail String?
 
   // OPIEKUN — reverse relation through Carrier.opiekunId
@@ -112,19 +114,25 @@ model Carrier {
   userId String @unique @db.Uuid
   user   User   @relation("CarrierUser", fields: [userId], references: [id])
 
+  company         String? // firma — only meaningful for the carrier extension
   nip             String?
   vatId           String? // EU VAT
-  contactPerson   String? // OsobaKontaktowa
+  contactPerson   String // OsobaKontaktowa
   phone           String
-  ordersEmail     String? // EmailZlecenia
-  accountEur      String? // KontoEUR — IBAN
+  ordersEmail     String // EmailZlecenia
+  accountEur      String // KontoEUR — IBAN
   accountPln      String? // KontoPLN
-  paymentTerms    Int? // days
+  paymentTerms    Int       @default(30) // days
+  // Document fields are nullable because carrier onboarding (admin/opiekun
+  // create flow) doesn't always have copies of insurance/license certificates
+  // in hand at row-creation time; foreign carriers may also lack a directly
+  // comparable PL OCP figure. Activation gate / reminder is enforced in UI,
+  // not at the schema level.
   insuranceValue  Decimal?  @db.Decimal(12, 2)
   insuranceExpiry DateTime? @db.Date
   licenseExpiry   DateTime? @db.Date
   numberOfPermits Int? // LiczbaWypisow (KREPTD)
-  companyAddress  String?
+  companyAddress  String
 
   opiekunId String @db.Uuid
   opiekun   User   @relation("OpiekunCarriers", fields: [opiekunId], references: [id])
@@ -168,12 +176,12 @@ model Vehicle {
   model        String?
   year         Int?
   notes        String?
-  certificateL CertificateL?
-  euro         EuroNorm?
+  certificateL CertificateL
+  euro         EuroNorm
   adrClasses   String[] // CSV → array
-  gps          Boolean       @default(false)
-  fuelCard     Boolean       @default(false)
-  type         VehicleType?
+  gps          Boolean      @default(false)
+  fuelCard     Boolean      @default(false)
+  type         VehicleType
 
   gb        Boolean? // UK access
   it        Boolean?
@@ -181,7 +189,9 @@ model Vehicle {
   agreement Boolean? // Porozumienie
   contract  Boolean? // Umowa
 
-  // EUR/km rates
+  // EUR/km rates — negotiated between MAGTRANS and the carrier AFTER vehicle
+  // creation. NULL means "not yet set"; `0` would be ambiguous ("free haulage"
+  // vs "not negotiated"). Admin sets these once the contract terms land.
   rateDe     Decimal? @db.Decimal(6, 4)
   rateUe     Decimal? @db.Decimal(6, 4)
   rateExport Decimal? @db.Decimal(6, 4)
@@ -195,6 +205,10 @@ model Vehicle {
   cabotageDe Boolean @default(false)
   cabotageFr Boolean @default(false)
 
+  // tracker device ID — required iff gps=true. Enforced by the
+  // `vehicle_gps_device_when_gps_on` CHECK constraint added in
+  // 20260507_phase3_blocks/migration.sql; nullable in the column itself
+  // because vehicles without a GPS tracker simply have no device id.
   gpsMobilePhone     String?
   nextInspectionDate DateTime? @db.Date
   sideNumber         String? // NrBoczny
@@ -221,18 +235,25 @@ model Driver {
   carrierId String  @db.Uuid
   carrier   Carrier @relation(fields: [carrierId], references: [id])
 
-  loginSlug           String    @unique // имя.фамилия (or -2/-3 on collision)
+  loginSlug           String   @unique // имя.фамилия (or -2/-3 on collision)
   firstName           String
   lastName            String
   phone               String
   phone2              String?
+  // Drivers in PL trucking often don't have or use email professionally —
+  // phone is the primary channel. Required at the API/Zod level only when
+  // the form context demands it.
   email               String?
   driverLicenseNumber String
+  // Required for legally driving but not always digitized at registration
+  // time. UI surfaces a warning, not a hard block.
   licenseExpiry       DateTime? @db.Date
+  // Carrier-internal HR — driver is paid by the carrier, not by MAGTRANS.
+  // No business reason to require it at the MAGGuarantee schema level.
   bankAccount         String?
   notes               String?
-  active              Boolean   @default(true)
-  addedAt             DateTime  @default(now())
+  active              Boolean  @default(true)
+  addedAt             DateTime @default(now())
 
   delegations Delegation[]
 
@@ -314,17 +335,17 @@ model Claim {
   // period
   dateStart DateTime @db.Timestamp(0)
   dateEnd   DateTime @db.Timestamp(0)
-  timeFrom  String? // HH:MM, legacy format
-  timeTo    String?
+  timeFrom  String // HH:MM, legacy format
+  timeTo    String
 
   // calculation
-  drivenDays         Decimal? @db.Decimal(6, 2) // DniJezdne (can be fractional)
-  mileage            Decimal? @db.Decimal(10, 2) // Przebieg (km)
-  kmPerDay           Decimal? @db.Decimal(8, 2)
-  kmGuaranteed       Decimal? @db.Decimal(10, 2) // KmGwarant
-  kmDifference       Decimal? @db.Decimal(10, 2)
-  paymentEur         Decimal? @db.Decimal(12, 2) // Doplata
-  ratePerKmEffective Decimal? @db.Decimal(6, 4) // weighted EUR/km
+  drivenDays         Decimal @db.Decimal(6, 2) // DniJezdne (can be fractional)
+  mileage            Decimal @db.Decimal(10, 2) // Przebieg (km)
+  kmPerDay           Decimal @db.Decimal(8, 2)
+  kmGuaranteed       Decimal @db.Decimal(10, 2) // KmGwarant
+  kmDifference       Decimal @db.Decimal(10, 2)
+  paymentEur         Decimal @db.Decimal(12, 2) // Doplata
+  ratePerKmEffective Decimal @db.Decimal(6, 4) // weighted EUR/km
   breakdown          Json? // monthly breakdown (totalDays, kmGwarant, stawka, ...)
 
   // status & workflow
@@ -334,7 +355,10 @@ model Claim {
   decidedBy       User?       @relation("ClaimDecidedBy", fields: [decidedById], references: [id])
 
   comment     String?
-  orderNumber String? // NrZlecenia
+  // NrZlecenia — set only on transition to ZAAKCEPTOWANO; carrier-side
+  // submit creates the row with NULL. Strictness recovered via
+  // `claim_accepted_payment_complete` CHECK constraint.
+  orderNumber String?
   orderDate   DateTime? @db.Date
 
   // authorization
@@ -343,7 +367,7 @@ model Claim {
   authorizationToken       String?
   authorizationDecidedAt   DateTime?
 
-  amountRequested Decimal? @db.Decimal(12, 2) // KwotaWnioskowana
+  amountRequested Decimal @db.Decimal(12, 2) // KwotaWnioskowana — carrier always supplies this at submit
   amountApproved  Decimal? @db.Decimal(12, 2) // ZatwKwota
   margin          Decimal? @db.Decimal(12, 2)
   amountMaximum   Decimal? @db.Decimal(12, 2)
@@ -405,9 +429,13 @@ model Delegation {
   driverPhoneSnapshot String?
 
   departureAt         DateTime
-  departureCountry    String?
-  departurePostalCode String?
+  departureCountry    String
+  departurePostalCode String
 
+  // Return planning may be unknown at submit (spot-rate / one-way trips).
+  // Strictness recovered via `delegation_returned_complete` CHECK constraint:
+  // when status='zjechal' (returned) actualReturnAt + returnCountry +
+  // returnPostalCode must all be set.
   plannedReturnAt  DateTime?
   returnCountry    String?
   returnPostalCode String?

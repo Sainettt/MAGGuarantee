@@ -5,12 +5,11 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslations } from 'next-intl';
-import { useEffect } from 'react';
+import { useEffect, type ChangeEvent } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
   CreateVehicleSchema,
-  UpdateVehicleSchema,
   type CreateVehicleDto,
   type UpdateVehicleDto,
   type VehicleDto,
@@ -59,12 +58,15 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
   const tCommon = useTranslations('common');
   const isEdit = vehicle !== null;
 
-  // Edit mode keeps carrierId in form state for display; passthrough so the
-  // strict UpdateSchema doesn't reject it.
+  // Form state matches CreateVehicleDto in both modes — edit mode keeps
+  // `carrierId` in state for display only and the submit handler strips it
+  // before calling PATCH. We always validate against CreateVehicleSchema so
+  // its `.refine()` (gps→gpsMobilePhone) fires on edit too; the schema is
+  // ZodEffects after refine and doesn't expose `.passthrough()`, but since
+  // every form-registered field is part of CreateVehicleDto, .strict() is
+  // satisfied.
   const form = useForm<FormValues>({
-    resolver: zodResolver(
-      isEdit ? UpdateVehicleSchema.passthrough() : CreateVehicleSchema,
-    ),
+    resolver: zodResolver(CreateVehicleSchema) as never,
     defaultValues: getDefaults(),
   });
 
@@ -88,20 +90,20 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
         model: vehicle.model ?? '',
         year: vehicle.year ?? undefined,
         notes: vehicle.notes ?? '',
-        certificateL: vehicle.certificateL ?? undefined,
-        euro: vehicle.euro ?? undefined,
+        certificateL: vehicle.certificateL,
+        euro: vehicle.euro,
         gps: vehicle.gps,
         fuelCard: vehicle.fuelCard,
-        type: vehicle.type ?? undefined,
+        type: vehicle.type,
         gb: vehicle.gb ?? false,
         it: vehicle.it ?? false,
         fr: vehicle.fr ?? false,
         agreement: vehicle.agreement ?? false,
         contract: vehicle.contract ?? false,
-        rateDe: vehicle.rateDe ?? undefined,
-        rateUe: vehicle.rateUe ?? undefined,
-        rateExport: vehicle.rateExport ?? undefined,
-        rateImport: vehicle.rateImport ?? undefined,
+        rateDe: vehicle.rateDe ?? 0,
+        rateUe: vehicle.rateUe ?? 0,
+        rateExport: vehicle.rateExport ?? 0,
+        rateImport: vehicle.rateImport ?? 0,
         wasteAllowed: vehicle.wasteAllowed,
         cabotageDe: vehicle.cabotageDe,
         cabotageFr: vehicle.cabotageFr,
@@ -147,6 +149,8 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
 
   const submitting = createM.isPending || updateM.isPending;
   const errs = form.formState.errors;
+  // Watch the GPS toggle so the phone field shows/hides reactively.
+  const gpsOn = form.watch('gps') === true;
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
@@ -248,6 +252,7 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
                   </FormField>
                   <FormField
                     label={t('fields.type')}
+                    required
                     error={errs.type?.message}
                     htmlFor="vehicle-type"
                   >
@@ -260,6 +265,7 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
                   </FormField>
                   <FormField
                     label={t('fields.euro')}
+                    required
                     error={errs.euro?.message}
                     htmlFor="vehicle-euro"
                   >
@@ -273,6 +279,7 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
                   </FormField>
                   <FormField
                     label={t('fields.certificateL')}
+                    required
                     error={errs.certificateL?.message}
                     htmlFor="vehicle-certificateL"
                   >
@@ -343,7 +350,20 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
               <FormSection title={t('sections.equipment')}>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
                   <label className="flex items-center gap-2 text-text">
-                    <Checkbox {...form.register('gps')} />
+                    <Checkbox
+                      {...form.register('gps', {
+                        // When toggling GPS off, clear any phone value so a
+                        // stale entry isn't sent. Mirrors the legacy
+                        // _vdToggleGPSMob behavior at index.html:9625-9631.
+                        onChange: (e: ChangeEvent<HTMLInputElement>) => {
+                          if (!e.target.checked) {
+                            form.setValue('gpsMobilePhone', '', {
+                              shouldValidate: true,
+                            });
+                          }
+                        },
+                      })}
+                    />
                     {t('fields.gps')}
                   </label>
                   <label className="flex items-center gap-2 text-text">
@@ -359,17 +379,20 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
                     {t('fields.contract')}
                   </label>
                 </div>
-                <FormField
-                  label={t('fields.gpsMobilePhone')}
-                  error={errs.gpsMobilePhone?.message}
-                  htmlFor="vehicle-gpsMobilePhone"
-                >
-                  <Input
-                    id="vehicle-gpsMobilePhone"
-                    className="h-10"
-                    {...form.register('gpsMobilePhone')}
-                  />
-                </FormField>
+                {gpsOn && (
+                  <FormField
+                    label={t('fields.gpsMobilePhone')}
+                    required
+                    error={errs.gpsMobilePhone?.message}
+                    htmlFor="vehicle-gpsMobilePhone"
+                  >
+                    <Input
+                      id="vehicle-gpsMobilePhone"
+                      className="h-10"
+                      {...form.register('gpsMobilePhone')}
+                    />
+                  </FormField>
+                )}
               </FormSection>
 
               <FormSection title={t('sections.rates')}>
@@ -383,6 +406,7 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
                       id="vehicle-rateDe"
                       type="number"
                       step="0.01"
+                      min={0}
                       className="h-10"
                       {...form.register('rateDe', {
                         setValueAs: (v) =>
@@ -399,6 +423,7 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
                       id="vehicle-rateUe"
                       type="number"
                       step="0.01"
+                      min={0}
                       className="h-10"
                       {...form.register('rateUe', {
                         setValueAs: (v) =>
@@ -415,6 +440,7 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
                       id="vehicle-rateExport"
                       type="number"
                       step="0.01"
+                      min={0}
                       className="h-10"
                       {...form.register('rateExport', {
                         setValueAs: (v) =>
@@ -431,6 +457,7 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
                       id="vehicle-rateImport"
                       type="number"
                       step="0.01"
+                      min={0}
                       className="h-10"
                       {...form.register('rateImport', {
                         setValueAs: (v) =>
@@ -511,7 +538,10 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
 
 function getDefaults(): FormValues {
   return {
-    carrierId: undefined as unknown as string,
+    // RHF needs string-shaped controlled values. Empty string parks the
+    // Select on its placeholder option; Zod surfaces "required" errors on
+    // submit when the user hasn't picked one.
+    carrierId: '' as unknown as string,
     plateNumber: '',
     active: true,
     plannerId: undefined,
@@ -520,20 +550,20 @@ function getDefaults(): FormValues {
     model: '',
     year: undefined,
     notes: '',
-    certificateL: undefined,
-    euro: undefined,
+    certificateL: '' as unknown as 'L1' | 'L2' | 'L3',
+    euro: '' as unknown as 'III' | 'IV' | 'V' | 'VI',
     gps: false,
     fuelCard: false,
-    type: undefined,
+    type: '' as unknown as 'MEGA' | 'STD' | 'COIL',
     gb: false,
     it: false,
     fr: false,
     agreement: false,
     contract: false,
-    rateDe: undefined,
-    rateUe: undefined,
-    rateExport: undefined,
-    rateImport: undefined,
+    rateDe: 0,
+    rateUe: 0,
+    rateExport: 0,
+    rateImport: 0,
     wasteAllowed: false,
     cabotageDe: false,
     cabotageFr: false,

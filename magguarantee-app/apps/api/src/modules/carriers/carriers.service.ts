@@ -110,17 +110,18 @@ export class CarriersService {
         passwordHash,
         nip: dto.nip ?? null,
         vatId: dto.vatId ?? null,
-        contactPerson: dto.contactPerson ?? null,
+        // Required post-phase3_blocks — Zod already enforced presence.
+        contactPerson: dto.contactPerson,
         phone: dto.phone,
-        ordersEmail: dto.ordersEmail ?? null,
-        accountEur: dto.accountEur ?? null,
+        ordersEmail: dto.ordersEmail,
+        accountEur: dto.accountEur,
         accountPln: dto.accountPln ?? null,
-        paymentTerms: dto.paymentTerms ?? null,
+        paymentTerms: dto.paymentTerms,
         insuranceValue: dto.insuranceValue ?? null,
         insuranceExpiry: dto.insuranceExpiry ? new Date(dto.insuranceExpiry) : null,
         licenseExpiry: dto.licenseExpiry ? new Date(dto.licenseExpiry) : null,
         numberOfPermits: dto.numberOfPermits ?? null,
-        companyAddress: dto.companyAddress ?? null,
+        companyAddress: dto.companyAddress,
         opiekunId,
       });
     } catch (err) {
@@ -154,51 +155,47 @@ export class CarriersService {
         ? await this._resolveOpiekunPatch(user, dto.opiekunId)
         : undefined;
 
+    // PATCH semantics: omit means "do not touch". Some PATCH fields tolerate
+    // an explicit null in the schema (e.g. clearing `nip`) but not for the
+    // post-phase3_blocks NOT NULL columns — for those we drop null silently
+    // here so the column never sees null, even if a stale client sent one.
     try {
       const row = await this.carriers.update(id, {
-        ...(dto.email !== undefined ? { email: dto.email ?? null } : {}),
+        ...(dto.email !== undefined ? { email: dto.email } : {}),
         ...(dto.name !== undefined ? { name: dto.name } : {}),
         ...(dto.company !== undefined ? { company: dto.company } : {}),
         ...(dto.active !== undefined ? { active: dto.active } : {}),
         ...(dto.nip !== undefined ? { nip: dto.nip } : {}),
         ...(dto.vatId !== undefined ? { vatId: dto.vatId } : {}),
-        ...(dto.contactPerson !== undefined
+        ...(dto.contactPerson !== undefined && dto.contactPerson !== null
           ? { contactPerson: dto.contactPerson }
           : {}),
         ...(dto.phone !== undefined ? { phone: dto.phone } : {}),
-        ...(dto.ordersEmail !== undefined
+        ...(dto.ordersEmail !== undefined && dto.ordersEmail !== null
           ? { ordersEmail: dto.ordersEmail }
           : {}),
-        ...(dto.accountEur !== undefined
+        ...(dto.accountEur !== undefined && dto.accountEur !== null
           ? { accountEur: dto.accountEur }
           : {}),
         ...(dto.accountPln !== undefined
           ? { accountPln: dto.accountPln }
           : {}),
-        ...(dto.paymentTerms !== undefined
+        ...(dto.paymentTerms !== undefined && dto.paymentTerms !== null
           ? { paymentTerms: dto.paymentTerms }
           : {}),
-        ...(dto.insuranceValue !== undefined
+        ...(dto.insuranceValue !== undefined && dto.insuranceValue !== null
           ? { insuranceValue: dto.insuranceValue }
           : {}),
-        ...(dto.insuranceExpiry !== undefined
-          ? {
-              insuranceExpiry: dto.insuranceExpiry
-                ? new Date(dto.insuranceExpiry)
-                : null,
-            }
+        ...(dto.insuranceExpiry !== undefined && dto.insuranceExpiry !== null
+          ? { insuranceExpiry: new Date(dto.insuranceExpiry) }
           : {}),
-        ...(dto.licenseExpiry !== undefined
-          ? {
-              licenseExpiry: dto.licenseExpiry
-                ? new Date(dto.licenseExpiry)
-                : null,
-            }
+        ...(dto.licenseExpiry !== undefined && dto.licenseExpiry !== null
+          ? { licenseExpiry: new Date(dto.licenseExpiry) }
           : {}),
         ...(dto.numberOfPermits !== undefined
           ? { numberOfPermits: dto.numberOfPermits }
           : {}),
-        ...(dto.companyAddress !== undefined
+        ...(dto.companyAddress !== undefined && dto.companyAddress !== null
           ? { companyAddress: dto.companyAddress }
           : {}),
         ...(opiekunPatch !== undefined ? opiekunPatch : {}),
@@ -359,9 +356,8 @@ export class CarriersService {
       accountPln: row.accountPln,
       paymentTerms: row.paymentTerms,
       insuranceValue: row.insuranceValue,
-      insuranceExpiry: row.insuranceExpiry
-        ? toDateString(row.insuranceExpiry)
-        : null,
+      // Nullable per phase3_blocks_audit_revert.
+      insuranceExpiry: row.insuranceExpiry ? toDateString(row.insuranceExpiry) : null,
       licenseExpiry: row.licenseExpiry ? toDateString(row.licenseExpiry) : null,
       numberOfPermits: row.numberOfPermits,
       companyAddress: row.companyAddress,

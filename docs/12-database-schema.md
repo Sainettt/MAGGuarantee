@@ -2,7 +2,24 @@
 
 > Структура Postgres-схемы. Google Sheets из текущего MAGGuarantee — это **референс структуры данных** при проектировании моделей (т.к. бизнес-логика и поля изначально проектировались под них). Никакого импорта данных нет — стартуем с пустой БД + seed.
 >
-> Источник истины самой схемы — `packages/database/prisma/schema.prisma`.
+> Источник истины самой схемы — `packages/database/prisma/schema.prisma`. Если этот документ и `schema.prisma` расходятся — реальность побеждает, документ обновляется.
+
+## Three-layer required-field defense
+
+Поля делятся по тому, на каком уровне для них добивается «обязательность». Рисунок:
+
+| Слой | Что | Где задаётся |
+|---|---|---|
+| **UI** | RHF + Zod в `apps/web` | формы (carrier/admin/opiekun) |
+| **API** | Zod-схемы в `@magguarantee/shared` | `packages/shared/src/schemas/*.ts` |
+| **DB** | NOT NULL + CHECK constraints | `packages/database/prisma/schema.prisma` + `migrations/*.sql` |
+
+Какие поля закрыты на каком слое — см. таблицу «Required-field classification» в конце разделов про `Carrier`/`Vehicle`/`Driver`/`Claim`/`Delegation`. Высокоуровневая сводка:
+
+- **Strict everywhere (UI + API + DB NOT NULL):** базовый профиль перевозчика, базовые характеристики авто, расчётные поля claim'а на момент submit.
+- **API + UI required, DB nullable:** документы, для которых при импорте/драфте может не быть копии (страховка, лицензия carrier; права driver).
+- **DB nullable + status-conditional CHECK:** поля, которые становятся обязательными только при переходе в определённый статус (claim → ZAAKCEPTOWANO; vehicle → gps=true; delegation → zjechal).
+- **Optional everywhere:** поля, которые НЕ обязательны нигде (заметки, второстепенные контакты, не-PL налоговые ID, ставки, password в форсе email-only auth).
 
 ## Принципы маппинга
 
@@ -19,13 +36,15 @@
 
 ## Полная Prisma schema
 
+> Это сокращённая выжимка для документации. **Авторитетный источник** — `packages/database/prisma/schema.prisma`. Если документ и схема расходятся, читать схему. Ниже приводится только структура; CHECK constraints и status-conditional rules описаны в SQL-миграциях (см. раздел «Миграции» ниже) и резюмированы в подразделе «Required-field classification».
+
 ```prisma
 // packages/database/prisma/schema.prisma
 
 generator client {
   provider      = "prisma-client-js"
-  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
   output        = "../src/generated"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -47,11 +66,11 @@ enum Role {
 }
 
 enum ClaimStatus {
-  NA_WERYFIKACJI         @map("NA WERYFIKACJI")
+  NA_WERYFIKACJI            @map("NA WERYFIKACJI")
   ZAAKCEPTOWANO
   ODRZUCONO
   REKLAMACJA
-  OCZEKUJE_NA_AUTORYZACJE @map("OCZEKUJE NA AUTORYZACJĘ")
+  OCZEKUJE_NA_AUTORYZACJE   @map("OCZEKUJE NA AUTORYZACJĘ")
   AUTORYZACJA_KWOTA_MAKSIMA @map("AUTORYZACJA — KWOTA MAKSIMA")
 }
 
@@ -62,171 +81,150 @@ enum DelegationStatus {
   anulowany
 }
 
-enum VehicleType {
-  MEGA
-  STD
-  COIL
-}
+enum VehicleType { MEGA  STD  COIL }
+enum CertificateL { L1  L2  L3 }
+enum EuroNorm    { III  IV  V  VI }
 
-enum CertificateL {
-  L1
-  L2
-  L3
-}
-
-enum EuroNorm {
-  III
-  IV
-  V
-  VI
-}
-
-// ─── USERS (объединение всех auth-листов) ───────────────
+// ─── USERS ──────────────────────────────────────────────
 
 model User {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  login           String   @unique
-  email           String?  @unique
-  passwordHash    String?  // bcrypt; nullable если переходим на email-only
-  role            Role
-  name            String?  // Nazwa
-  company         String?  // Firma
-  active          Boolean  @default(true)
-  // 2FA / login attempts (раньше в CacheService)
-  failedAttempts  Int      @default(0)
-  lockedUntil     DateTime?
-  lastLoginAt     DateTime?
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  login          String    @unique
+  email          String    @unique
+  passwordHash   String?  // bcrypt; nullable to allow email-only auth
+  role           Role
+  name           String?
+  active         Boolean   @default(true)
+  failedAttempts Int       @default(0)
+  lockedUntil    DateTime?
+  lastLoginAt    DateTime?
 
-  // poles специфичные для ролей (NULL для остальных)
-  // planista
-  liderEmail      String?
+  // role-specific (nullable for other roles)
+  // planista — see docs/19-known-quirks.md (#liderEmail tech debt)
+  liderEmail     String?
 
-  // OPIEKUN — связь обратная через Carrier.opiekunId
-  carriers        Carrier[]    @relation("OpiekunCarriers")
-  // PRZEWOZNIK — extends через Carrier (см. ниже)
-  carrierProfile  Carrier?     @relation("CarrierUser")
+  // Relations: opiekun↔Carrier (1:N), przewoznik↔Carrier (1:1), planner/dispatcher↔Vehicle, etc.
+  carriers           Carrier[]      @relation("OpiekunCarriers")
+  carrierProfile     Carrier?       @relation("CarrierUser")
+  plannerVehicles    Vehicle[]      @relation("VehiclePlanner")
+  dispatcherVehicles Vehicle[]      @relation("VehicleDispatcher")
+  reportedDelegations Delegation[]  @relation("DelegationReporter")
+  verifiedDelegations Delegation[]  @relation("DelegationVerifier")
+  authoredClaims     Claim[]        @relation("ClaimDecidedBy")
+  auditEntries       AuditLog[]
+  refreshTokens      RefreshToken[]
 
-  // авто-связи
-  plannerVehicles    Vehicle[] @relation("VehiclePlanner")
-  dispatcherVehicles Vehicle[] @relation("VehicleDispatcher")
-
-  // активность
-  reportedDelegations  Delegation[] @relation("DelegationReporter")
-  verifiedDelegations  Delegation[] @relation("DelegationVerifier")
-  authoredClaims       Claim[]      @relation("ClaimDecidedBy")
-  auditEntries         AuditLog[]
-  refreshTokens        RefreshToken[]
-
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  deletedAt       DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   @@index([role])
   @@index([deletedAt])
   @@map("users")
 }
 
-// ─── CARRIERS (UZYTKOWNICY extension fields) ────────────
+// ─── CARRIERS (extension fields for role=przewoznik) ────
 
 model Carrier {
-  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId             String   @unique @db.Uuid
-  user               User     @relation("CarrierUser", fields: [userId], references: [id])
+  id     String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId String @unique @db.Uuid
+  user   User   @relation("CarrierUser", fields: [userId], references: [id])
 
-  nip                String?
-  vatId              String?         // EU VAT
-  contactPerson      String?         // OsobaKontaktowa
-  phone              String?
-  ordersEmail        String?         // EmailZlecenia
-  accountEur         String?         // KontoEUR — IBAN
-  accountPln         String?         // KontoPLN
-  paymentTerms       Int?            // дни
-  insuranceValue     Decimal?        @db.Decimal(12, 2)
-  insuranceExpiry    DateTime?       @db.Date
-  licenseExpiry      DateTime?       @db.Date
-  numberOfPermits    Int?            // LiczbaWypisow (KREPTD)
-  companyAddress     String?
+  company         String?  // moved from User in 20260507223021_move_company_to_carrier
+  nip             String?  // PL-only domestic — see docs/19-known-quirks.md (NIP vs VAT-UE)
+  vatId           String?  // EU VAT
+  contactPerson   String   // STRICT — UI + API + DB NOT NULL
+  phone           String   // STRICT
+  ordersEmail     String   // STRICT
+  accountEur      String   // STRICT (foreign carriers may not have PLN account)
+  accountPln      String?
+  paymentTerms    Int      @default(30)
+  // API + UI required, DB nullable — admin/opiekun create flow may lack copies
+  insuranceValue  Decimal?  @db.Decimal(12, 2)
+  insuranceExpiry DateTime? @db.Date
+  licenseExpiry   DateTime? @db.Date
+  numberOfPermits Int?      // KREPTD wypisy
+  companyAddress  String   // STRICT
 
-  opiekunId          String?  @db.Uuid
-  opiekun            User?    @relation("OpiekunCarriers", fields: [opiekunId], references: [id])
+  opiekunId String @db.Uuid
+  opiekun   User   @relation("OpiekunCarriers", fields: [opiekunId], references: [id])
 
-  vehicles           Vehicle[]
-  drivers            Driver[]
-  trailers           Trailer[]
-  claims             Claim[]
-  delegations        Delegation[]
+  vehicles    Vehicle[]
+  drivers     Driver[]
+  trailers    Trailer[]
+  claims      Claim[]
+  delegations Delegation[]
 
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-  deletedAt          DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   @@index([opiekunId])
   @@index([deletedAt])
   @@map("carriers")
 }
 
-// ─── VEHICLES (AUTA, 36 колонок) ────────────────────────
+// ─── VEHICLES ───────────────────────────────────────────
 
 model Vehicle {
-  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  carrierId           String   @db.Uuid
-  carrier             Carrier  @relation(fields: [carrierId], references: [id])
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  carrierId String  @db.Uuid
+  carrier   Carrier @relation(fields: [carrierId], references: [id])
 
-  plateNumber         String                          // NrRej
-  active              Boolean  @default(true)
-  addedAt             DateTime @default(now())
-  deactivatedAt       DateTime?
-  createdById         String?  @db.Uuid               // UtworzonePrzez
+  plateNumber   String              // NrRej, unique per carrier
+  active        Boolean   @default(true)
+  addedAt       DateTime  @default(now())
+  deactivatedAt DateTime?
+  createdById   String?   @db.Uuid
 
-  // люди
-  plannerId           String?  @db.Uuid
-  planner             User?    @relation("VehiclePlanner", fields: [plannerId], references: [id])
-  dispatcherId        String?  @db.Uuid
-  dispatcher          User?    @relation("VehicleDispatcher", fields: [dispatcherId], references: [id])
+  plannerId    String? @db.Uuid
+  planner      User?   @relation("VehiclePlanner", fields: [plannerId], references: [id])
+  dispatcherId String? @db.Uuid
+  dispatcher   User?   @relation("VehicleDispatcher", fields: [dispatcherId], references: [id])
 
-  // характеристики
-  brand               String?
-  model               String?
-  year                Int?
-  notes               String?
-  certificateL        CertificateL?
-  euro                EuroNorm?
-  adrClasses          String[]                        // CSV → array
-  gps                 Boolean   @default(false)
-  fuelCard            Boolean   @default(false)
-  type                VehicleType?
+  brand        String?
+  model        String?
+  year         Int?
+  notes        String?
+  certificateL CertificateL  // STRICT
+  euro         EuroNorm      // STRICT
+  adrClasses   String[]
+  gps          Boolean       @default(false)
+  fuelCard     Boolean       @default(false)
+  type         VehicleType   // STRICT
 
-  gb                  Boolean?  // право работы в Великобритании
-  it                  Boolean?
-  fr                  Boolean?
-  agreement           Boolean?  // Porozumienie
-  contract            Boolean?  // Umowa
+  // country access permits — see docs/19-known-quirks.md (#vehicle-gb-it-fr)
+  gb        Boolean?
+  it        Boolean?
+  fr        Boolean?
+  agreement Boolean?  // Porozumienie — see #umowa-vs-porozumienie quirk
+  contract  Boolean?  // Umowa
 
-  // ставки EUR/km
-  rateDe              Decimal?  @db.Decimal(6, 4)
-  rateUe              Decimal?  @db.Decimal(6, 4)
-  rateExport          Decimal?  @db.Decimal(6, 4)
-  rateImport          Decimal?  @db.Decimal(6, 4)
+  // EUR/km rates — Optional everywhere (NULL = "not yet negotiated")
+  rateDe     Decimal? @db.Decimal(6, 4)
+  rateUe     Decimal? @db.Decimal(6, 4)
+  rateExport Decimal? @db.Decimal(6, 4)
+  rateImport Decimal? @db.Decimal(6, 4)
 
-  // отходы
-  wasteAllowed        Boolean   @default(false)
-  wasteCountries      String[]  // CSV → array
+  wasteAllowed   Boolean  @default(false)
+  wasteCountries String[]
+  cabotageDe     Boolean  @default(false)
+  cabotageFr     Boolean  @default(false)
 
-  // кабота
-  cabotageDe          Boolean   @default(false)
-  cabotageFr          Boolean   @default(false)
+  // tracker device id — required iff gps=true (CHECK vehicle_gps_device_when_gps_on)
+  // misnomer: it's NOT a phone number — see docs/19-known-quirks.md (#gpsMobilePhone)
+  gpsMobilePhone     String?
+  nextInspectionDate DateTime? @db.Date
+  sideNumber         String?
+  // Auto-updated by delegation→zjechal — never expose as a manual UI field
+  lastDroveAt        DateTime?
 
-  gpsMobilePhone      String?
-  nextInspectionDate  DateTime? @db.Date
-  sideNumber          String?                         // NrBoczny
-  lastDroveAt         DateTime?                       // OstatnioJezdzilo (auto-update от delegations)
+  delegations Delegation[]
+  claims      Claim[]
 
-  delegations         Delegation[]
-  claims              Claim[]
-
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-  deletedAt           DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   @@unique([carrierId, plateNumber], name: "carrier_plate_unique")
   @@index([plannerId])
@@ -235,61 +233,64 @@ model Vehicle {
   @@map("vehicles")
 }
 
-// ─── DRIVERS (KIEROWCY) ─────────────────────────────────
+// ─── DRIVERS ────────────────────────────────────────────
 
 model Driver {
-  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  carrierId         String   @db.Uuid
-  carrier           Carrier  @relation(fields: [carrierId], references: [id])
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  carrierId String  @db.Uuid
+  carrier   Carrier @relation(fields: [carrierId], references: [id])
 
-  loginSlug         String   @unique                  // имя.фамилия (или -2/-3 при коллизии)
-  firstName         String
-  lastName          String
-  phone             String?
-  phone2            String?
-  email             String?
-  driverLicenseNumber String?
-  licenseExpiry     DateTime? @db.Date
-  bankAccount       String?
-  notes             String?
-  active            Boolean   @default(true)
-  addedAt           DateTime  @default(now())
+  loginSlug           String   @unique
+  firstName           String
+  lastName            String
+  phone               String
+  phone2              String?
+  // Drivers in PL trucking often skip email professionally — Optional everywhere
+  email               String?
+  driverLicenseNumber String
+  // API + UI required, DB nullable — UI surfaces a warning, not a hard block
+  licenseExpiry       DateTime? @db.Date
+  // Optional everywhere — driver paid by carrier, not MAGTRANS
+  bankAccount         String?
+  notes               String?
+  active              Boolean  @default(true)
+  addedAt             DateTime @default(now())
 
-  delegations       Delegation[]
+  delegations Delegation[]
 
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  deletedAt         DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   @@index([carrierId, active])
   @@map("drivers")
 }
 
-// ─── TRAILERS (NACZEPY) ─────────────────────────────────
+// ─── TRAILERS + TYPES ───────────────────────────────────
 
 model Trailer {
-  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  carrierId         String   @db.Uuid
-  carrier           Carrier  @relation(fields: [carrierId], references: [id])
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  carrierId String  @db.Uuid
+  carrier   Carrier @relation(fields: [carrierId], references: [id])
 
-  plateNumber       String                            // NrRej
-  trailerTypeId     String?  @db.Uuid
-  trailerType       TrailerType? @relation(fields: [trailerTypeId], references: [id])
-  brand             String?
-  model             String?
-  year              Int?
-  active            Boolean   @default(true)
-  addedAt           DateTime  @default(now())
-  equipment         String?
-  nextInspectionDate DateTime? @db.Date
+  plateNumber        String
+  trailerTypeId      String      @db.Uuid          // STRICT (FK required)
+  trailerType        TrailerType @relation(fields: [trailerTypeId], references: [id])
+  brand              String?
+  model              String?
+  year               Int?
+  active             Boolean     @default(true)
+  addedAt            DateTime    @default(now())
+  equipment          String?
+  nextInspectionDate DateTime?   @db.Date
 
-  belts             Boolean?  // Pasy
-  mats              Boolean?  // Maty
-  innerLength       Decimal?  @db.Decimal(8, 2)
-  innerWidth        Decimal?  @db.Decimal(8, 2)
-  innerHeight       Decimal?  @db.Decimal(8, 2)
-  capacity          Decimal?  @db.Decimal(10, 2)
-  airSuspension     Boolean?  // Wyprez
+  belts             Boolean?
+  mats              Boolean?
+  innerLength       Decimal? @db.Decimal(8, 2)
+  innerWidth        Decimal? @db.Decimal(8, 2)
+  innerHeight       Decimal? @db.Decimal(8, 2)
+  capacity          Decimal? @db.Decimal(10, 2)
+  airSuspension     Boolean?
   loadFromBack      Boolean?
   loadFromSide      Boolean?
   loadFromTop       Boolean?
@@ -297,98 +298,97 @@ model Trailer {
   edschaSlidingRoof Boolean?
   notes             String?
 
-  delegations       Delegation[]
+  delegations Delegation[]
 
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  deletedAt         DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   @@unique([carrierId, plateNumber])
   @@map("trailers")
 }
 
 model TrailerType {
-  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name        String  @unique
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String    @unique
   shortCode   String?
   description String?
-  active      Boolean @default(true)
+  active      Boolean   @default(true)
   trailers    Trailer[]
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   @@map("trailer_types")
 }
 
-// ─── CLAIMS (WNIOSEK, 50 колонок) ───────────────────────
+// ─── CLAIMS (WNIOSEK) ───────────────────────────────────
 
 model Claim {
-  id                  String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  nrZgl               String      @unique                // GWA/NNN/MM/RR
-  carrierId           String      @db.Uuid
-  carrier             Carrier     @relation(fields: [carrierId], references: [id])
-  vehicleId           String?     @db.Uuid               // может быть null если авто удалено
-  vehicle             Vehicle?    @relation(fields: [vehicleId], references: [id])
-  vehiclePlateSnapshot String                            // на случай удаления авто
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  nrZgl                String   @unique
+  carrierId            String   @db.Uuid
+  carrier              Carrier  @relation(fields: [carrierId], references: [id])
+  vehicleId            String?  @db.Uuid
+  vehicle              Vehicle? @relation(fields: [vehicleId], references: [id])
+  vehiclePlateSnapshot String                      // STRICT — preserved if vehicle removed
 
-  // период
-  dateStart           DateTime    @db.Timestamp(0)
-  dateEnd             DateTime    @db.Timestamp(0)
-  timeFrom            String?     // HH:MM, на случай старого формата
-  timeTo              String?
+  // period — all STRICT
+  dateStart DateTime @db.Timestamp(0)
+  dateEnd   DateTime @db.Timestamp(0)
+  timeFrom  String                                  // STRICT (was nullable pre-Phase 3)
+  timeTo    String                                  // STRICT
 
-  // расчёт
-  drivenDays          Decimal?    @db.Decimal(6, 2)     // DniJezdne (может быть дробное)
-  mileage             Decimal?    @db.Decimal(10, 2)    // Przebieg (km)
-  kmPerDay            Decimal?    @db.Decimal(8, 2)
-  kmGuaranteed        Decimal?    @db.Decimal(10, 2)    // KmGwarant
-  kmDifference        Decimal?    @db.Decimal(10, 2)
-  paymentEur          Decimal?    @db.Decimal(12, 2)    // Doplata
-  ratePerKmEffective  Decimal?    @db.Decimal(6, 4)     // взвешенная EUR/km
-  breakdown           Json?       // помесячный расчёт (totalDays, kmGwarant, stawka, ...)
+  // calculation — all STRICT (carrier supplies inputs at submit, server computes derived)
+  drivenDays         Decimal @db.Decimal(6, 2)
+  mileage            Decimal @db.Decimal(10, 2)
+  kmPerDay           Decimal @db.Decimal(8, 2)
+  kmGuaranteed       Decimal @db.Decimal(10, 2)
+  kmDifference       Decimal @db.Decimal(10, 2)
+  paymentEur         Decimal @db.Decimal(12, 2)
+  ratePerKmEffective Decimal @db.Decimal(6, 4)
+  breakdown          Json?
 
-  // статус и воркфлоу
-  status              ClaimStatus @default(NA_WERYFIKACJI)
-  statusChangedAt     DateTime?
-  decidedById         String?     @db.Uuid
-  decidedBy           User?       @relation("ClaimDecidedBy", fields: [decidedById], references: [id])
+  // workflow — see claim-state-machine.ts for legal transitions
+  status          ClaimStatus @default(NA_WERYFIKACJI)
+  statusChangedAt DateTime?
+  decidedById     String?     @db.Uuid
+  decidedBy       User?       @relation("ClaimDecidedBy", fields: [decidedById], references: [id])
 
-  comment             String?
-  orderNumber         String?     // NrZlecenia
-  orderDate           DateTime?   @db.Date
+  comment     String?
+  // status-conditional: NULL on submit; CHECK claim_accepted_payment_complete
+  // forces non-empty when status=ZAAKCEPTOWANO
+  orderNumber String?
+  orderDate   DateTime? @db.Date
 
-  // auth
-  authorizationRequired Boolean   @default(false)        // флаг крупной суммы
+  authorizationRequired    Boolean   @default(false)
   authorizationDescription String?
-  authorizationToken    String?
-  authorizationDecidedAt DateTime?
+  authorizationToken       String?
+  authorizationDecidedAt   DateTime?
 
-  amountRequested     Decimal?    @db.Decimal(12, 2)    // KwotaWnioskowana
-  amountApproved      Decimal?    @db.Decimal(12, 2)    // ZatwKwota
-  margin              Decimal?    @db.Decimal(12, 2)
-  amountMaximum       Decimal?    @db.Decimal(12, 2)
+  amountRequested Decimal  @db.Decimal(12, 2)       // STRICT — carrier supplies at submit
+  amountApproved  Decimal? @db.Decimal(12, 2)       // status-conditional via CHECK
+  margin          Decimal? @db.Decimal(12, 2)
+  amountMaximum   Decimal? @db.Decimal(12, 2)       // KwotaMaksima (Maksim override)
 
-  // рекламация (зеркало)
-  reklamacjaSubmitted Boolean     @default(false)
-  reklamacjaText      String?
-  reklamacjaResponse  String?     // OdpMagtrans
-  reklamacjaAmount    Decimal?    @db.Decimal(12, 2)
-  hoursAdjusted       Boolean     @default(false)
+  // reklamacja "frozen mirror" — see docs/19-known-quirks.md (#reklamacja-mirror)
+  reklamacjaSubmitted    Boolean      @default(false)
+  reklamacjaText         String?
+  reklamacjaResponse     String?
+  reklamacjaAmount       Decimal?     @db.Decimal(12, 2)
+  hoursAdjusted          Boolean      @default(false)
   statusBeforeReklamacja ClaimStatus?
-  origDateStart       DateTime?
-  origDateEnd         DateTime?
-  origMileage         Decimal?    @db.Decimal(10, 2)
+  origDateStart          DateTime?
+  origDateEnd            DateTime?
+  origMileage            Decimal?     @db.Decimal(10, 2)
 
-  // связи
-  authScreenshotUrl   String?     // S3 URL
-  attachments         ClaimAttachment[]
+  authScreenshotUrl String?
+  attachments       ClaimAttachment[]
 
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-  deletedAt           DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   @@index([carrierId, status])
+  @@index([carrierId, deletedAt])           // Phase 3 — carrier-panel "list my claims"
   @@index([vehicleId])
   @@index([status, statusChangedAt])
   @@index([dateStart])
@@ -396,98 +396,95 @@ model Claim {
 }
 
 model ClaimAttachment {
-  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  claimId     String  @db.Uuid
-  claim       Claim   @relation(fields: [claimId], references: [id], onDelete: Cascade)
-  url         String
-  mimeType    String?
-  size        Int?
-  uploadedById String? @db.Uuid
-  createdAt   DateTime @default(now())
-
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  claimId      String   @db.Uuid
+  claim        Claim    @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  url          String
+  mimeType     String?
+  size         Int?
+  uploadedById String?  @db.Uuid
+  createdAt    DateTime @default(now())
   @@map("claim_attachments")
 }
 
-// ─── DELEGATIONS (DELEGACJE) ────────────────────────────
+// ─── DELEGATIONS ────────────────────────────────────────
 
 model Delegation {
-  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  vehicleId           String   @db.Uuid
-  vehicle             Vehicle  @relation(fields: [vehicleId], references: [id])
-  trailerId           String?  @db.Uuid
-  trailer             Trailer? @relation(fields: [trailerId], references: [id])
-  driverId            String?  @db.Uuid
-  driver              Driver?  @relation(fields: [driverId], references: [id])
-  carrierId           String   @db.Uuid
-  carrier             Carrier  @relation(fields: [carrierId], references: [id])
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vehicleId String   @db.Uuid
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id])
+  trailerId String?  @db.Uuid
+  trailer   Trailer? @relation(fields: [trailerId], references: [id])
+  driverId  String?  @db.Uuid
+  driver    Driver?  @relation(fields: [driverId], references: [id])
+  carrierId String   @db.Uuid
+  carrier   Carrier  @relation(fields: [carrierId], references: [id])
 
   driverNameSnapshot  String?
   driverPhoneSnapshot String?
 
+  // departure — STRICT
   departureAt         DateTime
-  departureCountry    String?
-  departurePostalCode String?
+  departureCountry    String
+  departurePostalCode String
 
-  plannedReturnAt     DateTime?
-  returnCountry       String?
-  returnPostalCode    String?
+  // return planning — DB nullable + status-conditional CHECK delegation_returned_complete:
+  // when status='zjechal' all three must be set
+  plannedReturnAt  DateTime?
+  returnCountry    String?
+  returnPostalCode String?
 
-  status              DelegationStatus @default(zgloszony)
-  actualReturnAt      DateTime?
+  status         DelegationStatus @default(zgloszony)
+  actualReturnAt DateTime?
 
-  reportedById        String?  @db.Uuid
-  reportedBy          User?    @relation("DelegationReporter", fields: [reportedById], references: [id])
-  reportedAt          DateTime @default(now())
-  verifiedById        String?  @db.Uuid
-  verifiedBy          User?    @relation("DelegationVerifier", fields: [verifiedById], references: [id])
-  verifiedAt          DateTime?
+  reportedById String?   @db.Uuid
+  reportedBy   User?     @relation("DelegationReporter", fields: [reportedById], references: [id])
+  reportedAt   DateTime  @default(now())
+  verifiedById String?   @db.Uuid
+  verifiedBy   User?     @relation("DelegationVerifier", fields: [verifiedById], references: [id])
+  verifiedAt   DateTime?
 
-  notes               String?
+  notes String?
 
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-  deletedAt           DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   @@index([vehicleId, status])
   @@index([carrierId, status])
+  @@index([carrierId, deletedAt, status])      // Phase 3 — carrier-panel
   @@index([status, departureAt])
   @@map("delegations")
 }
 
-// ─── LIMITS (LIMITY KM) ─────────────────────────────────
+// ─── LIMITS, AUDIT, REFRESH, CONFIG, CLAIM-SEQUENCE ─────
 
 model MonthlyLimit {
-  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  year        Int
-  month       Int     // 1..12
-  kmPerDay    Decimal? @db.Decimal(8, 2)
-  ratePerKm   Decimal? @db.Decimal(6, 4)
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  year      Int
+  month     Int
+  kmPerDay  Decimal? @db.Decimal(8, 2)        // NULL → fallback 540 — see docs/19-known-quirks.md
+  ratePerKm Decimal? @db.Decimal(6, 4)        // NULL → fallback 0.5
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
   @@unique([year, month])
   @@map("monthly_limits")
 }
 
-// ─── AUDIT_LOG ──────────────────────────────────────────
-
 model AuditLog {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId      String?  @db.Uuid
-  user        User?    @relation(fields: [userId], references: [id])
-  userRole    Role?
-  action      String
-  targetType  String?  // 'Claim', 'Vehicle', ...
-  targetKey   String?  // nrZgl, plateNumber, ...
-  before      Json?
-  after       Json?
-  reason      String?
-  metadata    Json?
-  ipAddress   String?  @db.Inet
-
-  createdAt   DateTime @default(now())
-
+  id         String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String? @db.Uuid
+  user       User?   @relation(fields: [userId], references: [id])
+  userRole   Role?
+  action     String
+  targetType String?
+  targetKey  String?
+  before     Json?
+  after      Json?
+  reason     String?
+  metadata   Json?
+  ipAddress  String? @db.Inet
+  createdAt  DateTime @default(now())
   @@index([userId])
   @@index([targetType, targetKey])
   @@index([action])
@@ -495,36 +492,106 @@ model AuditLog {
   @@map("audit_log")
 }
 
-// ─── REFRESH TOKENS (для JWT rotation) ──────────────────
-
 model RefreshToken {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId      String   @db.Uuid
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tokenHash   String   @unique             // SHA-256, не сам токен
-  expiresAt   DateTime
-  revokedAt   DateTime?
-  ipAddress   String?  @db.Inet
-  userAgent   String?
-
-  createdAt   DateTime @default(now())
-
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String        @db.Uuid
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash    String        @unique  // SHA-256 hex
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  ipAddress    String?       @db.Inet
+  userAgent    String?
+  // theft-detection chain
+  replacedById String?       @unique @db.Uuid
+  replacedBy   RefreshToken? @relation("RefreshTokenReplacement", fields: [replacedById], references: [id])
+  replaces     RefreshToken? @relation("RefreshTokenReplacement")
+  createdAt    DateTime      @default(now())
   @@index([userId])
+  @@index([tokenHash])
   @@index([expiresAt])
   @@map("refresh_tokens")
 }
-
-// ─── APP CONFIG (заменяет CONFIG-объект и hardcoded значения) ───
 
 model AppConfig {
   key         String   @id
   value       String
   description String?
   updatedAt   DateTime @updatedAt
-
   @@map("app_config")
 }
+
+// ClaimSequence — atomic NrZgl numbering (see NrZglService).
+model ClaimSequence {
+  yearMonth  String   @id    // 'YY-MM' e.g. '26-05'
+  lastNumber Int      @default(0)
+  updatedAt  DateTime @updatedAt
+  @@map("claim_sequences")
+}
 ```
+
+## Required-field classification (per the three-layer pattern)
+
+> Резюме что закрыто на каком слое. Поля, не упомянутые ниже, помечаются как Optional everywhere (UI/API не требуют, DB nullable).
+
+### Carrier
+
+| Поле | Слой защиты | Notes |
+|---|---|---|
+| `contactPerson`, `phone`, `ordersEmail`, `accountEur`, `companyAddress` | Strict everywhere | DB NOT NULL |
+| `paymentTerms` | Strict everywhere (DB default 30) | |
+| `insuranceValue`, `insuranceExpiry`, `licenseExpiry` | API + UI required, DB nullable | Allows admin/opiekun create when copies of certs not in hand |
+| `nip`, `vatId`, `accountPln`, `numberOfPermits`, `company` | Optional everywhere | At least one of (nip, vatId) — backlog CHECK, see #19 quirks |
+
+### Vehicle
+
+| Поле | Слой защиты | Notes |
+|---|---|---|
+| `plateNumber`, `certificateL`, `euro`, `type` | Strict everywhere | DB NOT NULL |
+| `gpsMobilePhone` | DB nullable + CHECK `vehicle_gps_device_when_gps_on` | Forced when `gps=true` |
+| `rateDe`, `rateUe`, `rateExport`, `rateImport` | Optional everywhere | NULL = "not negotiated yet"; 0 would be ambiguous |
+| `gb`, `it`, `fr`, `agreement`, `contract`, `lastDroveAt`, `notes`, etc. | Optional everywhere | |
+
+### Driver
+
+| Поле | Слой защиты | Notes |
+|---|---|---|
+| `firstName`, `lastName`, `phone`, `driverLicenseNumber`, `loginSlug` | Strict everywhere | |
+| `licenseExpiry` | API + UI required, DB nullable | Driver must legally have it; UI warns rather than blocks at registration |
+| `email`, `phone2`, `bankAccount`, `notes` | Optional everywhere | Email rare in PL trucking; bank acc is HR-internal |
+
+### Trailer
+
+| Поле | Слой защиты | Notes |
+|---|---|---|
+| `plateNumber`, `trailerTypeId` | Strict everywhere | FK to TrailerType is required |
+| Все остальные характеристики | Optional everywhere | |
+
+### Claim
+
+| Поле | Слой защиты | Notes |
+|---|---|---|
+| `nrZgl`, `carrierId`, `vehiclePlateSnapshot`, `dateStart`, `dateEnd`, `timeFrom`, `timeTo` | Strict everywhere | |
+| `drivenDays`, `mileage`, `kmPerDay`, `kmGuaranteed`, `kmDifference`, `paymentEur`, `ratePerKmEffective` | Strict everywhere | Derived by server at submit |
+| `amountRequested` | Strict everywhere | Carrier always supplies at submit |
+| `orderNumber`, `orderDate`, `amountApproved` | DB nullable + CHECK `claim_accepted_payment_complete` | Required when `status='ZAAKCEPTOWANO'` |
+| `amountMaximum` | Optional (set in Maksim override path) | See quirks #5 |
+| `decidedById`, `comment`, `breakdown`, `authScreenshotUrl`, reklamacja mirror fields | Optional everywhere | |
+
+### Delegation
+
+| Поле | Слой защиты | Notes |
+|---|---|---|
+| `vehicleId`, `carrierId`, `departureAt`, `departureCountry`, `departurePostalCode` | Strict everywhere | |
+| `plannedReturnAt`, `returnCountry`, `returnPostalCode`, `actualReturnAt` | DB nullable + CHECK `delegation_returned_complete` | All required when `status='zjechal'` |
+| `trailerId`, `driverId`, `notes`, snapshots | Optional everywhere | |
+
+### User
+
+| Поле | Слой защиты | Notes |
+|---|---|---|
+| `login`, `email`, `role` | Strict everywhere | DB NOT NULL + UNIQUE on login/email |
+| `passwordHash` | Optional (DB nullable) | Allows future email-only auth flow |
+| `liderEmail` | Optional everywhere; per-role tech debt — see docs/19-known-quirks.md (#liderEmail) |  |
 
 ## Соответствие колонок Sheets → поля Prisma
 
@@ -643,7 +710,9 @@ model AppConfig {
 
 ### Auth-листы (ADMIN/PRACOWNIK/OPIEKUN/PLANISCI/DYSPOZYTOR/EKSPORT/WERYFIKATOR/UZYTKOWNICY) → User + Carrier
 
-8 листов в Sheets — это 8 таблиц с одинаковой структурой, отличаются только `Rola`. В новой схеме это **одна таблица `users`** с полем `role: Role`. Для перевозчика расширенные поля (NIP, IBAN, OpiekunLogin и т.д.) живут в отдельной таблице `Carrier`, связанной с `User` 1:1. Это дедупликация структуры.
+8 листов в Sheets — это 8 таблиц с одинаковой структурой, отличаются только `Rola`. В новой схеме это **одна таблица `users`** с полем `role: Role`. Для перевозчика расширенные поля (NIP, IBAN, OpiekunLogin, **Firma/company** и т.д.) живут в отдельной таблице `Carrier`, связанной с `User` 1:1. Это дедупликация структуры.
+
+> ⚠️ Поле `Firma/company` исторически жило на `users` (денормализация из GAS-листов). В Phase 3 миграция `20260507223021_move_company_to_carrier` перенесла его на `Carrier` (только przewoznik когда-либо имел не-NULL значение). Аналогичный pending-cleanup существует для `User.liderEmail` — see docs/19-known-quirks.md (#liderEmail).
 
 Пароли в новой схеме всегда bcrypt-hash (никогда plaintext). Поле `passwordHash` в `User` — nullable, чтобы можно было перейти на email-only auth (см. [15-auth-strategy.md](15-auth-strategy.md)).
 
@@ -662,10 +731,12 @@ model AppConfig {
 | Запрос | Индекс |
 |---|---|
 | `getAllClaims` фильтр по статусу | `claims(status, statusChangedAt)` |
-| `getClaimsForCarrier` | `claims(carrierId, status)` |
-| `getMyFleet` авто перевозчика | `vehicles(carrierId, active)` |
+| `getClaimsForCarrier` (статус-фильтр) | `claims(carrierId, status)` |
+| Carrier-panel "list my claims" (без status-фильтра) | `claims(carrierId, deletedAt)` — Phase 3 |
+| `getMyFleet` авто перевозчика | `vehicles(active, deletedAt)` (+ FK на carrier) |
 | Активные авто планисты | `vehicles(plannerId)` |
 | Делегации авто | `delegations(vehicleId, status)` |
+| Carrier delegations list (через soft-delete middleware) | `delegations(carrierId, deletedAt, status)` — Phase 3 |
 | Audit по target | `audit_log(targetType, targetKey)` |
 
 ## Soft-delete vs hard-delete
@@ -685,16 +756,17 @@ model AppConfig {
 
 ## Миграции
 
-Создаются через `prisma migrate dev --name <descriptive>`:
+Создаются через `prisma migrate dev --name <descriptive>`. **Применённые миграции в хронологическом порядке** (на момент конца Phase 3):
 
-```
-packages/database/prisma/migrations/
-├── 20260501000000_init/
-│   └── migration.sql
-├── 20260520000000_add_audit_index/
-│   └── migration.sql
-└── ...
-```
+| Миграция | Что |
+|---|---|
+| `20260430114433_init` | Phase 1 — `User`, `RefreshToken`, `AppConfig`. Минимум для auth/2FA/JWT. |
+| `20260503203801_entities` | Phase 2 — добавляет весь домен: `Carrier`, `Vehicle`, `Driver`, `Trailer`, `TrailerType`, `Claim`, `ClaimAttachment`, `Delegation`, `MonthlyLimit`, `AuditLog`, `ClaimSequence`. На этом этапе многие поля nullable (UI ещё не закрыт). |
+| `20260504123808_phase2_required_fields_carrier_driver_trailer` | Подтягивает базовые контакты и ID-поля до NOT NULL после стабилизации UI. |
+| `20260506205557_phase3_indexes` | Hot-path индексы: `claims(carrierId, deletedAt)` и `delegations(carrierId, deletedAt, status)` для carrier-panel списков, проходящих через soft-delete middleware. |
+| `20260507191424_phase3_blocks` | Strict-everywhere перевод: NOT NULL на базовый профиль `Carrier` (contactPerson/ordersEmail/accountEur/companyAddress/...), расчётные поля `Claim` (timeFrom/timeTo/drivenDays/mileage/...), driver email/license/bank, vehicle certificateL/euro/type/rates, departure-fields на delegations. **Добавляет CHECK constraints:** `claim_accepted_payment_complete` (orderNumber+orderDate+amountApproved при ZAAKCEPTOWANO) и `vehicle_gps_device_when_gps_on` (gpsMobilePhone при gps=true). |
+| `20260507195536_phase3_blocks_audit_revert` | Откатывает несколько слишком-агрессивных NOT NULL-ов из предыдущей миграции (insurance/license carrier, plannedReturn delegation, email/license/bank driver, rates vehicle, password user) — поля возвращаются в DB-nullable, обязательность остаётся на API+UI. **Закрепляет** `amountRequested` как DB NOT NULL и **добавляет** CHECK `delegation_returned_complete` (actualReturnAt+returnCountry+returnPostalCode при `zjechal`). |
+| `20260507223021_move_company_to_carrier` | Переносит поле `company` (Firma) с `users` на `carriers`. Денормализация-наследие GAS-миграции; внутренние сотрудники MAGTRANS никогда company не имели. ADD column → BACKFILL через carrier↔user 1:1 → DROP source — порядок безопасен на непустой БД. |
 
 Production deploy: `prisma migrate deploy` в CI/CD пайплайне (без `--create-only`).
 

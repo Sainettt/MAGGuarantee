@@ -56,7 +56,6 @@ export const CreateUserSchema = z
      * it instead, see UsersService.resetPassword).
      */
     password: PasswordSchema.optional(),
-    company: z.string().max(255).optional(),
     /** Only meaningful for `role=planista` per docs/03-roles.md#planista. */
     liderEmail: EmailSchema.optional(),
     active: z.boolean().optional(),
@@ -68,13 +67,16 @@ export type CreateUserDto = z.infer<typeof CreateUserSchema>;
  * PATCH /users/:id — every field optional. Role can change (e.g. promote a
  * planista to opiekun), but `przewoznik` is still excluded — the admin should
  * use the carrier endpoints for that flow.
+ *
+ * `email` is required at the column level (NOT NULL since the phase3_blocks
+ * migration), so PATCH cannot null it — the schema drops `.nullable()` on
+ * that field. Same applies to `password` flows — handled by reset-password.
  */
 export const UpdateUserSchema = z
   .object({
     email: EmailSchema.optional(),
     name: NameSchema.optional(),
     role: RoleSchema.exclude(['przewoznik']).optional(),
-    company: z.string().max(255).nullable().optional(),
     liderEmail: EmailSchema.nullable().optional(),
     active: z.boolean().optional(),
   })
@@ -98,10 +100,10 @@ export type UserFilters = z.infer<typeof UserFiltersSchema>;
 export const UserDtoSchema = z.object({
   id: UuidSchema,
   login: z.string(),
-  email: z.string().email().nullable(),
+  // NOT NULL since the phase3_blocks migration — every user has an email.
+  email: z.string().email(),
   name: z.string().nullable(),
   role: RoleSchema,
-  company: z.string().nullable(),
   active: z.boolean(),
   liderEmail: z.string().email().nullable(),
   lastLoginAt: IsoDateTimeSchema.nullable(),

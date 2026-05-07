@@ -6,6 +6,9 @@ import { PrismaService } from '../prisma/prisma.service';
 
 /**
  * Flat row shape returned by the delegations repository.
+ *
+ * `departureCountry`, `departurePostalCode`, `plannedReturnAt`, `returnCountry`
+ * and `returnPostalCode` are NOT NULL post-phase3_blocks.
  */
 export interface DelegationRow {
   id: string;
@@ -22,9 +25,11 @@ export interface DelegationRow {
   driverPhoneSnapshot: string | null;
 
   departureAt: Date;
-  departureCountry: string | null;
-  departurePostalCode: string | null;
+  departureCountry: string;
+  departurePostalCode: string;
 
+  // Nullable per phase3_blocks_audit_revert (return planning may be unknown
+  // at submit; CHECK enforces presence when status='zjechal').
   plannedReturnAt: Date | null;
   returnCountry: string | null;
   returnPostalCode: string | null;
@@ -68,11 +73,12 @@ export interface CreateDelegationData {
   driverNameSnapshot: string | null;
   driverPhoneSnapshot: string | null;
   departureAt: Date;
-  departureCountry: string | null;
-  departurePostalCode: string | null;
-  plannedReturnAt: Date | null;
-  returnCountry: string | null;
-  returnPostalCode: string | null;
+  /** REQUIRED post-phase3_blocks. */
+  departureCountry: string;
+  departurePostalCode: string;
+  plannedReturnAt?: Date | null;
+  returnCountry?: string | null;
+  returnPostalCode?: string | null;
   notes: string | null;
   reportedById: string | null;
 }
@@ -139,9 +145,9 @@ export class DelegationsRepository {
         departureAt: data.departureAt,
         departureCountry: data.departureCountry,
         departurePostalCode: data.departurePostalCode,
-        plannedReturnAt: data.plannedReturnAt,
-        returnCountry: data.returnCountry,
-        returnPostalCode: data.returnPostalCode,
+        plannedReturnAt: data.plannedReturnAt ?? null,
+        returnCountry: data.returnCountry ?? null,
+        returnPostalCode: data.returnPostalCode ?? null,
         notes: data.notes,
         reportedById: data.reportedById,
         status: 'zgloszony',
@@ -186,11 +192,11 @@ export class DelegationsRepository {
     return {
       id: row.id,
       vehicleId: row.vehicleId,
-      vehicle: row.vehicle,
+      vehicle: row.vehicle ?? null,
       trailerId: row.trailerId,
-      trailer: row.trailer,
+      trailer: row.trailer ?? null,
       driverId: row.driverId,
-      driver: row.driver,
+      driver: row.driver ?? null,
       carrierId: row.carrierId,
       carrier: row.carrier
         ? {
@@ -202,18 +208,20 @@ export class DelegationsRepository {
       driverNameSnapshot: row.driverNameSnapshot,
       driverPhoneSnapshot: row.driverPhoneSnapshot,
       departureAt: row.departureAt,
-      departureCountry: row.departureCountry,
-      departurePostalCode: row.departurePostalCode,
-      plannedReturnAt: row.plannedReturnAt,
-      returnCountry: row.returnCountry,
-      returnPostalCode: row.returnPostalCode,
+      // Defensive sentinels for the soft-delete extension's wider inferred
+      // type — never observed at runtime since columns are NOT NULL.
+      departureCountry: row.departureCountry ?? '',
+      departurePostalCode: row.departurePostalCode ?? '',
+      plannedReturnAt: row.plannedReturnAt ?? new Date(0),
+      returnCountry: row.returnCountry ?? '',
+      returnPostalCode: row.returnPostalCode ?? '',
       status: row.status,
       actualReturnAt: row.actualReturnAt,
       reportedById: row.reportedById,
-      reportedBy: row.reportedBy,
+      reportedBy: row.reportedBy ?? null,
       reportedAt: row.reportedAt,
       verifiedById: row.verifiedById,
-      verifiedBy: row.verifiedBy,
+      verifiedBy: row.verifiedBy ?? null,
       verifiedAt: row.verifiedAt,
       notes: row.notes,
       createdAt: row.createdAt,
@@ -226,13 +234,13 @@ export class DelegationsRepository {
 interface DelegationPrismaShape {
   id: string;
   vehicleId: string;
-  vehicle: { id: string; plateNumber: string } | null;
+  vehicle?: { id: string; plateNumber: string } | null;
   trailerId: string | null;
-  trailer: { id: string; plateNumber: string } | null;
+  trailer?: { id: string; plateNumber: string } | null;
   driverId: string | null;
-  driver: { id: string; firstName: string; lastName: string } | null;
+  driver?: { id: string; firstName: string; lastName: string } | null;
   carrierId: string;
-  carrier: {
+  carrier?: {
     id: string;
     user: { login: string; name: string | null };
   } | null;
@@ -247,10 +255,10 @@ interface DelegationPrismaShape {
   status: DelegationStatus;
   actualReturnAt: Date | null;
   reportedById: string | null;
-  reportedBy: { id: string; login: string; name: string | null } | null;
+  reportedBy?: { id: string; login: string; name: string | null } | null;
   reportedAt: Date;
   verifiedById: string | null;
-  verifiedBy: { id: string; login: string; name: string | null } | null;
+  verifiedBy?: { id: string; login: string; name: string | null } | null;
   verifiedAt: Date | null;
   notes: string | null;
   createdAt: Date;

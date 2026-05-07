@@ -5,11 +5,16 @@ import type { Prisma } from '@magguarantee/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { INCLUDE_SOFT_DELETED } from '../prisma/soft-delete.extension';
 
+/**
+ * Row shape returned by the user repository.
+ *
+ * `email` and `passwordHash` are NOT NULL post-phase3_blocks.
+ */
 export type UserRow = {
   id: string;
   login: string;
-  email: string | null;
-  passwordHash: string | null;
+  email: string;
+  passwordHash: string;
   role:
     | 'admin'
     | 'pracownik'
@@ -20,7 +25,6 @@ export type UserRow = {
     | 'eksport'
     | 'weryfikator';
   name: string | null;
-  company: string | null;
   active: boolean;
   liderEmail: string | null;
   failedAttempts: number;
@@ -126,11 +130,10 @@ export class UsersRepository {
 
   async create(data: {
     login: string;
-    email: string | null;
+    email: string;
     name: string | null;
     role: UserRow['role'];
-    passwordHash: string | null;
-    company?: string | null;
+    passwordHash: string;
     liderEmail?: string | null;
     active?: boolean;
   }): Promise<UserRow> {
@@ -141,7 +144,6 @@ export class UsersRepository {
         name: data.name,
         role: data.role,
         passwordHash: data.passwordHash,
-        company: data.company ?? null,
         liderEmail: data.liderEmail ?? null,
         active: data.active ?? true,
       },
@@ -149,16 +151,20 @@ export class UsersRepository {
     return row as unknown as UserRow;
   }
 
+  /**
+   * `email` and `passwordHash` cannot be nulled — the columns are NOT NULL
+   * post-phase3_blocks. The Partial<> typing reflects that: omit means
+   * "do not touch", `undefined` is fine, but the value type is non-nullable.
+   */
   async update(
     id: string,
     data: Partial<{
-      email: string | null;
+      email: string;
       name: string | null;
       role: UserRow['role'];
-      company: string | null;
       liderEmail: string | null;
       active: boolean;
-      passwordHash: string | null;
+      passwordHash: string;
     }>,
   ): Promise<UserRow> {
     const row = await this.prisma.user.update({

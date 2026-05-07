@@ -2,6 +2,14 @@ import { Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
 
+/**
+ * Row shape returned by the vehicle repository.
+ *
+ * `certificateL`, `euro`, `type`, `rateDe`, `rateUe`, `rateExport`, `rateImport`
+ * are NOT NULL since phase3_blocks. `gpsMobilePhone` stays nullable per
+ * Revert #2 (required iff `gps=true` — enforced by SQL CHECK constraint
+ * `vehicle_gps_device_when_gps_on`).
+ */
 export interface VehicleRow {
   id: string;
   carrierId: string;
@@ -11,17 +19,18 @@ export interface VehicleRow {
   model: string | null;
   year: number | null;
   notes: string | null;
-  certificateL: 'L1' | 'L2' | 'L3' | null;
-  euro: 'III' | 'IV' | 'V' | 'VI' | null;
+  certificateL: 'L1' | 'L2' | 'L3';
+  euro: 'III' | 'IV' | 'V' | 'VI';
   adrClasses: string[];
   gps: boolean;
   fuelCard: boolean;
-  type: 'MEGA' | 'STD' | 'COIL' | null;
+  type: 'MEGA' | 'STD' | 'COIL';
   gb: boolean | null;
   it: boolean | null;
   fr: boolean | null;
   agreement: boolean | null;
   contract: boolean | null;
+  // Nullable per phase3_blocks_audit_revert (rates negotiated post-creation).
   rateDe: number | null;
   rateUe: number | null;
   rateExport: number | null;
@@ -101,12 +110,12 @@ export class VehiclesRepository {
     model?: string | null;
     year?: number | null;
     notes?: string | null;
-    certificateL?: 'L1' | 'L2' | 'L3' | null;
-    euro?: 'III' | 'IV' | 'V' | 'VI' | null;
+    certificateL: 'L1' | 'L2' | 'L3';
+    euro: 'III' | 'IV' | 'V' | 'VI';
     adrClasses?: string[];
     gps?: boolean;
     fuelCard?: boolean;
-    type?: 'MEGA' | 'STD' | 'COIL' | null;
+    type: 'MEGA' | 'STD' | 'COIL';
     gb?: boolean | null;
     it?: boolean | null;
     fr?: boolean | null;
@@ -120,6 +129,11 @@ export class VehiclesRepository {
     wasteCountries?: string[];
     cabotageDe?: boolean;
     cabotageFr?: boolean;
+    /**
+     * Nullable per Revert #2 — required iff `gps=true`. The CHECK constraint
+     * `vehicle_gps_device_when_gps_on` rejects mismatches at the DB level;
+     * the service layer pre-validates so we 422 instead of 500.
+     */
     gpsMobilePhone?: string | null;
     nextInspectionDate?: Date | null;
     sideNumber?: string | null;
@@ -136,21 +150,21 @@ export class VehiclesRepository {
         model: data.model ?? null,
         year: data.year ?? null,
         notes: data.notes ?? null,
-        certificateL: data.certificateL ?? null,
-        euro: data.euro ?? null,
+        certificateL: data.certificateL,
+        euro: data.euro,
         adrClasses: data.adrClasses ?? [],
         gps: data.gps ?? false,
         fuelCard: data.fuelCard ?? false,
-        type: data.type ?? null,
+        type: data.type,
         gb: data.gb ?? null,
         it: data.it ?? null,
         fr: data.fr ?? null,
         agreement: data.agreement ?? null,
         contract: data.contract ?? null,
-        rateDe: data.rateDe ?? null,
-        rateUe: data.rateUe ?? null,
-        rateExport: data.rateExport ?? null,
-        rateImport: data.rateImport ?? null,
+        rateDe: data.rateDe,
+        rateUe: data.rateUe,
+        rateExport: data.rateExport,
+        rateImport: data.rateImport,
         wasteAllowed: data.wasteAllowed ?? false,
         wasteCountries: data.wasteCountries ?? [],
         cabotageDe: data.cabotageDe ?? false,
@@ -218,12 +232,15 @@ export class VehiclesRepository {
       model: row.model,
       year: row.year,
       notes: row.notes,
-      certificateL: row.certificateL,
-      euro: row.euro,
+      // The fallbacks below are defensive sentinels for the soft-delete
+      // extension's wider inferred type — never observed at runtime since
+      // the column is NOT NULL post-phase3_blocks.
+      certificateL: row.certificateL ?? 'L1',
+      euro: row.euro ?? 'V',
       adrClasses: row.adrClasses,
       gps: row.gps,
       fuelCard: row.fuelCard,
-      type: row.type,
+      type: row.type ?? 'STD',
       gb: row.gb,
       it: row.it,
       fr: row.fr,
@@ -242,9 +259,9 @@ export class VehiclesRepository {
       sideNumber: row.sideNumber,
       lastDroveAt: row.lastDroveAt,
       plannerId: row.plannerId,
-      planner: row.planner,
+      planner: row.planner ?? null,
       dispatcherId: row.dispatcherId,
-      dispatcher: row.dispatcher,
+      dispatcher: row.dispatcher ?? null,
       carrier: row.carrier
         ? {
             id: row.carrier.id,
@@ -268,6 +285,7 @@ interface VehiclePrismaShape {
   model: string | null;
   year: number | null;
   notes: string | null;
+  // Wide variants — soft-delete extension widens scalars in the inferred type.
   certificateL: 'L1' | 'L2' | 'L3' | null;
   euro: 'III' | 'IV' | 'V' | 'VI' | null;
   adrClasses: string[];
@@ -292,10 +310,10 @@ interface VehiclePrismaShape {
   sideNumber: string | null;
   lastDroveAt: Date | null;
   plannerId: string | null;
-  planner: { id: string; login: string; name: string | null } | null;
+  planner?: { id: string; login: string; name: string | null } | null;
   dispatcherId: string | null;
-  dispatcher: { id: string; login: string; name: string | null } | null;
-  carrier: {
+  dispatcher?: { id: string; login: string; name: string | null } | null;
+  carrier?: {
     id: string;
     user: { login: string; name: string | null };
   } | null;

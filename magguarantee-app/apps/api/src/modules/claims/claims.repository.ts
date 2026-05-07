@@ -10,9 +10,10 @@ import { PrismaService } from '../prisma/prisma.service';
 /**
  * Flat row shape returned by the claims repository — service maps to DTO.
  *
- * Decimals are surfaced as `number | null` here so the service never has
- * to call `.toNumber()`. Joins are flattened to mini-reference shapes that
- * match the wire DTOs (`{id, login, name}` / `{id, plateNumber}`).
+ * Decimals are surfaced as `number` here (NOT NULL post-phase3_blocks);
+ * `orderNumber` and `orderDate` stay nullable per Revert #1.
+ * Joins are flattened to mini-reference shapes that match the wire DTOs
+ * (`{id, login, name}` / `{id, plateNumber}`).
  */
 export interface ClaimRow {
   id: string;
@@ -27,16 +28,17 @@ export interface ClaimRow {
 
   dateStart: Date;
   dateEnd: Date;
-  timeFrom: string | null;
-  timeTo: string | null;
+  // NOT NULL post-phase3_blocks.
+  timeFrom: string;
+  timeTo: string;
 
-  drivenDays: number | null;
-  mileage: number | null;
-  kmPerDay: number | null;
-  kmGuaranteed: number | null;
-  kmDifference: number | null;
-  paymentEur: number | null;
-  ratePerKmEffective: number | null;
+  drivenDays: number;
+  mileage: number;
+  kmPerDay: number;
+  kmGuaranteed: number;
+  kmDifference: number;
+  paymentEur: number;
+  ratePerKmEffective: number;
   breakdown: KmCalcBreakdown | null;
 
   status: ClaimStatus;
@@ -45,6 +47,7 @@ export interface ClaimRow {
   decidedBy: { id: string; login: string; name: string | null } | null;
 
   comment: string | null;
+  /** Nullable per Revert #1 — set only on transition to ZAAKCEPTOWANO. */
   orderNumber: string | null;
   orderDate: Date | null;
 
@@ -53,7 +56,8 @@ export interface ClaimRow {
   authorizationToken: string | null;
   authorizationDecidedAt: Date | null;
 
-  amountRequested: number | null;
+  // amountRequested is NOT NULL since phase3_blocks_audit_revert.
+  amountRequested: number;
   amountApproved: number | null;
   margin: number | null;
   amountMaximum: number | null;
@@ -104,11 +108,13 @@ export interface CreateClaimData {
   vehiclePlateSnapshot: string;
   dateStart: Date;
   dateEnd: Date;
-  timeFrom: string | null;
-  timeTo: string | null;
+  /** NOT NULL post-phase3_blocks. */
+  timeFrom: string;
+  timeTo: string;
   drivenDays: number;
   mileage: number;
-  kmPerDay: number | null;
+  /** NOT NULL post-phase3_blocks — calculated as `mileage / drivenDays`. */
+  kmPerDay: number;
   kmGuaranteed: number;
   kmDifference: number;
   paymentEur: number;
@@ -117,6 +123,7 @@ export interface CreateClaimData {
   status: ClaimStatus;
   statusChangedAt: Date;
   comment: string | null;
+  /** Nullable per Revert #1 — only set on transition to ZAAKCEPTOWANO. */
   orderNumber: string | null;
   orderDate: Date | null;
   amountRequested: number;
@@ -294,24 +301,27 @@ export class ClaimsRepository {
           }
         : null,
       vehicleId: row.vehicleId,
-      vehicle: row.vehicle,
+      vehicle: row.vehicle ?? null,
       vehiclePlateSnapshot: row.vehiclePlateSnapshot,
       dateStart: row.dateStart,
       dateEnd: row.dateEnd,
-      timeFrom: row.timeFrom,
-      timeTo: row.timeTo,
-      drivenDays: decimalToNumber(row.drivenDays),
-      mileage: decimalToNumber(row.mileage),
-      kmPerDay: decimalToNumber(row.kmPerDay),
-      kmGuaranteed: decimalToNumber(row.kmGuaranteed),
-      kmDifference: decimalToNumber(row.kmDifference),
-      paymentEur: decimalToNumber(row.paymentEur),
-      ratePerKmEffective: decimalToNumber(row.ratePerKmEffective),
+      // Defensive sentinels for the soft-delete extension's wider inferred
+      // type — these columns are NOT NULL post-phase3_blocks. Order-related
+      // columns stay nullable per Revert #1.
+      timeFrom: row.timeFrom ?? '',
+      timeTo: row.timeTo ?? '',
+      drivenDays: decimalToNumber(row.drivenDays) ?? 0,
+      mileage: decimalToNumber(row.mileage) ?? 0,
+      kmPerDay: decimalToNumber(row.kmPerDay) ?? 0,
+      kmGuaranteed: decimalToNumber(row.kmGuaranteed) ?? 0,
+      kmDifference: decimalToNumber(row.kmDifference) ?? 0,
+      paymentEur: decimalToNumber(row.paymentEur) ?? 0,
+      ratePerKmEffective: decimalToNumber(row.ratePerKmEffective) ?? 0,
       breakdown: (row.breakdown as KmCalcBreakdown | null) ?? null,
       status: row.status,
       statusChangedAt: row.statusChangedAt,
       decidedById: row.decidedById,
-      decidedBy: row.decidedBy,
+      decidedBy: row.decidedBy ?? null,
       comment: row.comment,
       orderNumber: row.orderNumber,
       orderDate: row.orderDate,
@@ -319,7 +329,7 @@ export class ClaimsRepository {
       authorizationDescription: row.authorizationDescription,
       authorizationToken: row.authorizationToken,
       authorizationDecidedAt: row.authorizationDecidedAt,
-      amountRequested: decimalToNumber(row.amountRequested),
+      amountRequested: decimalToNumber(row.amountRequested) ?? 0,
       amountApproved: decimalToNumber(row.amountApproved),
       margin: decimalToNumber(row.margin),
       amountMaximum: decimalToNumber(row.amountMaximum),
@@ -354,12 +364,12 @@ interface ClaimPrismaShape {
   id: string;
   nrZgl: string;
   carrierId: string;
-  carrier: {
+  carrier?: {
     id: string;
     user: { login: string; name: string | null };
   } | null;
   vehicleId: string | null;
-  vehicle: { id: string; plateNumber: string } | null;
+  vehicle?: { id: string; plateNumber: string } | null;
   vehiclePlateSnapshot: string;
   dateStart: Date;
   dateEnd: Date;
@@ -376,7 +386,7 @@ interface ClaimPrismaShape {
   status: ClaimStatus;
   statusChangedAt: Date | null;
   decidedById: string | null;
-  decidedBy: { id: string; login: string; name: string | null } | null;
+  decidedBy?: { id: string; login: string; name: string | null } | null;
   comment: string | null;
   orderNumber: string | null;
   orderDate: Date | null;

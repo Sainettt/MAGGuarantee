@@ -39,19 +39,33 @@ const carrierProfileFields = {
   nip: emptyStringToUndefined(PolishNipSchema.max(32).optional()),
   /** EU VAT — country code + 2–12 alphanumeric. Optional for PL-only carriers. */
   vatId: emptyStringToUndefined(EuVatSchema.max(32).optional()),
-  contactPerson: emptyStringToUndefined(z.string().max(255).optional()),
+  /** REQUIRED — Carrier.contactPerson is NOT NULL since phase3_blocks. */
+  contactPerson: z.string().min(1).max(255),
   /** REQUIRED — Carrier.phone is NOT NULL since phase-2 migration. */
   phone: PhoneRequiredSchema,
-  ordersEmail: emptyStringToUndefined(EmailSchema.optional()),
-  /** EUR IBAN. We don't enforce ISO format here — Phase 4 adds VIES/IBAN check. */
-  accountEur: emptyStringToUndefined(z.string().max(64).optional()),
+  /** REQUIRED — Carrier.ordersEmail is NOT NULL since phase3_blocks. */
+  ordersEmail: EmailSchema,
+  /**
+   * REQUIRED — Carrier.accountEur (IBAN) is NOT NULL since phase3_blocks.
+   * We don't enforce ISO IBAN format here — Phase 4 adds VIES/IBAN check.
+   */
+  accountEur: z.string().min(1).max(64),
   accountPln: emptyStringToUndefined(z.string().max(64).optional()),
-  paymentTerms: z.number().int().nonnegative().max(365).optional(),
-  insuranceValue: z.number().nonnegative().optional(),
-  insuranceExpiry: emptyStringToUndefined(IsoDateSchema.optional()),
-  licenseExpiry: emptyStringToUndefined(IsoDateSchema.optional()),
+  /**
+   * Defaults to 30 days at the DB level since phase3_blocks. Optional in the
+   * Create DTO; required in the response DTO.
+   */
+  paymentTerms: z.number().int().nonnegative().max(365).optional().default(30),
+  // Required at the API layer — admin onboarding must have insurance and
+  // license documents in hand. The DB column itself is nullable to allow
+  // backfills / imports / migration-time stubs without a CHECK violation;
+  // the create endpoint enforces presence via this Zod schema.
+  insuranceValue: z.number().nonnegative(),
+  insuranceExpiry: IsoDateSchema,
+  licenseExpiry: IsoDateSchema,
   numberOfPermits: z.number().int().nonnegative().max(10_000).optional(),
-  companyAddress: emptyStringToUndefined(z.string().max(500).optional()),
+  /** REQUIRED — Carrier.companyAddress is NOT NULL since phase3_blocks. */
+  companyAddress: z.string().min(1).max(500),
   /**
    * REQUIRED — Carrier.opiekunId is NOT NULL since phase-2 migration. UIs must
    * send it explicitly; the service still validates the referenced user has
@@ -151,23 +165,26 @@ export const CarrierDtoSchema = z.object({
   id: UuidSchema,
   userId: UuidSchema,
   login: z.string(),
-  email: z.string().email().nullable(),
+  // NOT NULL after phase3_blocks.
+  email: z.string().email(),
   name: z.string().nullable(),
   company: z.string().nullable(),
   active: z.boolean(),
   nip: z.string().nullable(),
   vatId: z.string().nullable(),
-  contactPerson: z.string().nullable(),
+  // NOT NULL after phase3_blocks.
+  contactPerson: z.string(),
   phone: z.string(),
-  ordersEmail: z.string().email().nullable(),
-  accountEur: z.string().nullable(),
+  ordersEmail: z.string().email(),
+  accountEur: z.string(),
   accountPln: z.string().nullable(),
-  paymentTerms: z.number().int().nullable(),
+  paymentTerms: z.number().int(),
+  // Nullable per phase3_blocks_audit_revert.
   insuranceValue: z.number().nullable(),
   insuranceExpiry: IsoDateSchema.nullable(),
   licenseExpiry: IsoDateSchema.nullable(),
   numberOfPermits: z.number().int().nullable(),
-  companyAddress: z.string().nullable(),
+  companyAddress: z.string(),
   opiekunId: UuidSchema,
   opiekun: z.object({
     id: UuidSchema,

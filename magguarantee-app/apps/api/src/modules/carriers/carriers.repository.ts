@@ -6,31 +6,36 @@ import { PrismaService } from '../prisma/prisma.service';
  * Row shape returned by the carrier repository — flattens `user` so the
  * service can map straight to the wire DTO without re-walking the join.
  *
- * `phone` and `opiekunId` are non-nullable since the phase-2 migration
- * (`phase2_required_fields_carrier_driver_trailer`). The `opiekun` join
- * object is therefore always present on a fresh fetch.
+ * `phone` and `opiekunId` are non-nullable since the phase-2 migration; the
+ * phase3_blocks migration tightened the rest of the operational fields
+ * (`contactPerson`, `ordersEmail`, `accountEur`, `paymentTerms`,
+ * `insuranceValue`, `insuranceExpiry`, `licenseExpiry`, `companyAddress`)
+ * to NOT NULL — the row shape mirrors that.
+ *
+ * `email` follows the User column which is also NOT NULL post-phase3_blocks.
  */
 export interface CarrierRow {
   id: string;
   userId: string;
   login: string;
-  email: string | null;
+  email: string;
   name: string | null;
   company: string | null;
   active: boolean;
   nip: string | null;
   vatId: string | null;
-  contactPerson: string | null;
+  contactPerson: string;
   phone: string;
-  ordersEmail: string | null;
-  accountEur: string | null;
+  ordersEmail: string;
+  accountEur: string;
   accountPln: string | null;
-  paymentTerms: number | null;
+  paymentTerms: number;
+  // Nullable per phase3_blocks_audit_revert.
   insuranceValue: number | null;
   insuranceExpiry: Date | null;
   licenseExpiry: Date | null;
   numberOfPermits: number | null;
-  companyAddress: string | null;
+  companyAddress: string;
   opiekunId: string;
   opiekun: {
     id: string;
@@ -56,44 +61,45 @@ interface CreateCarrierData {
   email: string;
   name: string;
   passwordHash: string;
-  company?: string | null;
   active?: boolean;
-  // carrier-extension side — `phone` and `opiekunId` are NOT NULL.
+  // carrier-extension side — required fields per phase3_blocks.
+  company?: string | null;
   nip?: string | null;
   vatId?: string | null;
-  contactPerson?: string | null;
+  contactPerson: string;
   phone: string;
-  ordersEmail?: string | null;
-  accountEur?: string | null;
+  ordersEmail: string;
+  accountEur: string;
   accountPln?: string | null;
-  paymentTerms?: number | null;
+  paymentTerms?: number;
   insuranceValue?: number | null;
   insuranceExpiry?: Date | null;
   licenseExpiry?: Date | null;
   numberOfPermits?: number | null;
-  companyAddress?: string | null;
+  companyAddress: string;
   opiekunId: string;
 }
 
 interface UpdateCarrierData {
-  email?: string | null;
+  email?: string;
   name?: string | null;
   company?: string | null;
   active?: boolean;
   passwordHash?: string;
   nip?: string | null;
   vatId?: string | null;
-  contactPerson?: string | null;
+  // PATCH cannot null the post-phase3_blocks NOT NULL columns.
+  contactPerson?: string;
   phone?: string;
-  ordersEmail?: string | null;
-  accountEur?: string | null;
+  ordersEmail?: string;
+  accountEur?: string;
   accountPln?: string | null;
-  paymentTerms?: number | null;
+  paymentTerms?: number;
   insuranceValue?: number | null;
   insuranceExpiry?: Date | null;
   licenseExpiry?: Date | null;
   numberOfPermits?: number | null;
-  companyAddress?: string | null;
+  companyAddress?: string;
   opiekunId?: string;
 }
 
@@ -160,26 +166,29 @@ export class CarriersRepository {
           name: data.name,
           role: 'przewoznik',
           passwordHash: data.passwordHash,
-          company: data.company ?? null,
           active: data.active ?? true,
         },
       });
       const carrier = await tx.carrier.create({
         data: {
           userId: user.id,
+          company: data.company ?? null,
           nip: data.nip ?? null,
           vatId: data.vatId ?? null,
-          contactPerson: data.contactPerson ?? null,
+          contactPerson: data.contactPerson,
           phone: data.phone,
-          ordersEmail: data.ordersEmail ?? null,
-          accountEur: data.accountEur ?? null,
+          ordersEmail: data.ordersEmail,
+          accountEur: data.accountEur,
           accountPln: data.accountPln ?? null,
-          paymentTerms: data.paymentTerms ?? null,
-          insuranceValue: data.insuranceValue ?? null,
-          insuranceExpiry: data.insuranceExpiry ?? null,
-          licenseExpiry: data.licenseExpiry ?? null,
+          // DB default is 30 — only forward when caller specified.
+          ...(data.paymentTerms !== undefined
+            ? { paymentTerms: data.paymentTerms }
+            : {}),
+          insuranceValue: data.insuranceValue,
+          insuranceExpiry: data.insuranceExpiry,
+          licenseExpiry: data.licenseExpiry,
           numberOfPermits: data.numberOfPermits ?? null,
-          companyAddress: data.companyAddress ?? null,
+          companyAddress: data.companyAddress,
           opiekunId: data.opiekunId,
         },
         include: this.includeShape(),
@@ -195,11 +204,11 @@ export class CarriersRepository {
 
     if (data.email !== undefined) userPatch.email = data.email;
     if (data.name !== undefined) userPatch.name = data.name;
-    if (data.company !== undefined) userPatch.company = data.company;
     if (data.active !== undefined) userPatch.active = data.active;
     if (data.passwordHash !== undefined) userPatch.passwordHash = data.passwordHash;
 
     const carrierFields: (keyof UpdateCarrierData)[] = [
+      'company',
       'nip',
       'vatId',
       'contactPerson',
@@ -293,7 +302,6 @@ export class CarriersRepository {
           login: true,
           email: true,
           name: true,
-          company: true,
           active: true,
         },
       },
@@ -306,20 +314,21 @@ export class CarriersRepository {
   private flatten(row: {
     id: string;
     userId: string;
+    company: string | null;
     nip: string | null;
     vatId: string | null;
-    contactPerson: string | null;
     // Prisma's inferred type from `findFirst({include: ...})` post the soft-
-    // delete extension surfaces the scalar column as `string | null`, even
-    // though the schema marks it NOT NULL. We accept the wider shape here
-    // and fall back to `''` defensively — never observed in practice since
-    // the migration backfills.
+    // delete extension surfaces scalar columns as `string | null`, even
+    // though the schema marks them NOT NULL. We accept the wider shape
+    // and fall back defensively — never observed in practice since the
+    // phase3_blocks migration enforces non-null at the column level.
+    contactPerson: string | null;
     phone: string | null;
     ordersEmail: string | null;
     accountEur: string | null;
     accountPln: string | null;
     paymentTerms: number | null;
-    insuranceValue: { toNumber(): number } | null;
+    insuranceValue: { toNumber(): number } | number | null;
     insuranceExpiry: Date | null;
     licenseExpiry: Date | null;
     numberOfPermits: number | null;
@@ -333,7 +342,6 @@ export class CarriersRepository {
       login: string;
       email: string | null;
       name: string | null;
-      company: string | null;
       active: boolean;
     };
     opiekun: { id: string; login: string; name: string | null } | null;
@@ -342,26 +350,24 @@ export class CarriersRepository {
       id: row.id,
       userId: row.userId,
       login: row.user.login,
-      email: row.user.email,
+      email: row.user.email ?? '',
       name: row.user.name,
-      company: row.user.company,
+      company: row.company,
       active: row.user.active,
       nip: row.nip,
       vatId: row.vatId,
-      contactPerson: row.contactPerson,
+      contactPerson: row.contactPerson ?? '',
       phone: row.phone ?? '',
-      ordersEmail: row.ordersEmail,
-      accountEur: row.accountEur,
+      ordersEmail: row.ordersEmail ?? '',
+      accountEur: row.accountEur ?? '',
       accountPln: row.accountPln,
-      paymentTerms: row.paymentTerms,
-      insuranceValue:
-        row.insuranceValue && typeof row.insuranceValue.toNumber === 'function'
-          ? row.insuranceValue.toNumber()
-          : (row.insuranceValue as unknown as number | null),
+      paymentTerms: row.paymentTerms ?? 30,
+      // Nullable per phase3_blocks_audit_revert.
+      insuranceValue: decimalToNumber(row.insuranceValue),
       insuranceExpiry: row.insuranceExpiry,
       licenseExpiry: row.licenseExpiry,
       numberOfPermits: row.numberOfPermits,
-      companyAddress: row.companyAddress,
+      companyAddress: row.companyAddress ?? '',
       opiekunId: row.opiekunId ?? '',
       opiekun:
         row.opiekun ?? { id: row.opiekunId ?? '', login: '', name: null },
@@ -370,4 +376,15 @@ export class CarriersRepository {
       deletedAt: row.deletedAt,
     };
   }
+}
+
+function decimalToNumber(
+  v: { toNumber(): number } | number | null | undefined,
+): number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'number') return v;
+  if (typeof (v as { toNumber?: () => number }).toNumber === 'function') {
+    return (v as { toNumber(): number }).toNumber();
+  }
+  return null;
 }

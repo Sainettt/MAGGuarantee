@@ -79,6 +79,7 @@ export class DriversService {
         lastName: dto.lastName,
         phone: dto.phone,
         phone2: dto.phone2 ?? null,
+        // Optional per phase3_blocks_audit_revert.
         email: dto.email ?? null,
         driverLicenseNumber: dto.driverLicenseNumber,
         licenseExpiry: dto.licenseExpiry ? new Date(dto.licenseExpiry) : null,
@@ -114,10 +115,10 @@ export class DriversService {
     for (const k of passthrough) {
       if (dto[k] !== undefined) patch[k] = dto[k];
     }
+    // PATCH cannot null `licenseExpiry` (NOT NULL post-phase3_blocks). The
+    // Zod schema already drops null/empty; this branch sets the new value.
     if (dto.licenseExpiry !== undefined) {
-      patch.licenseExpiry = dto.licenseExpiry
-        ? new Date(dto.licenseExpiry)
-        : null;
+      patch.licenseExpiry = new Date(dto.licenseExpiry);
     }
 
     try {
@@ -264,9 +265,8 @@ export class DriversService {
       phone2: row.phone2,
       email: row.email,
       driverLicenseNumber: row.driverLicenseNumber,
-      licenseExpiry: row.licenseExpiry
-        ? row.licenseExpiry.toISOString().slice(0, 10)
-        : null,
+      // Nullable per phase3_blocks_audit_revert.
+      licenseExpiry: row.licenseExpiry ? row.licenseExpiry.toISOString().slice(0, 10) : null,
       bankAccount: row.bankAccount,
       notes: row.notes,
       active: row.active,

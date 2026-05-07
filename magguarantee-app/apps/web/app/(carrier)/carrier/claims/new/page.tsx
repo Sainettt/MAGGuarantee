@@ -38,14 +38,17 @@ function getDefaults(): FormValues {
     driverId: undefined,
     dateStart: '',
     dateEnd: '',
-    timeFrom: undefined,
-    timeTo: undefined,
+    // timeFrom / timeTo are NOT NULL since phase3_blocks. Empty string keeps
+    // the <input type="time"> controlled; HhMmSchema rejects "" on submit.
+    timeFrom: '',
+    timeTo: '',
     mileage: 0,
     amountRequested: 0,
     hoursAdjusted: 0,
     comment: undefined,
-    orderNumber: undefined,
-    orderDate: undefined,
+    // orderNumber / orderDate are intentionally NOT in the carrier submit
+    // DTO (phase3_blocks): they're MAGTRANS-internal and assigned by the
+    // verifier when transitioning to ZAAKCEPTOWANO.
     attachmentIds: undefined,
   };
 }
@@ -245,6 +248,7 @@ export default function NewClaimPage() {
                   </FormField>
                   <FormField
                     label="Godzina od"
+                    required
                     error={errs.timeFrom?.message}
                     htmlFor="claim-timeFrom"
                   >
@@ -257,6 +261,7 @@ export default function NewClaimPage() {
                   </FormField>
                   <FormField
                     label="Godzina do"
+                    required
                     error={errs.timeTo?.message}
                     htmlFor="claim-timeTo"
                   >
@@ -329,36 +334,18 @@ export default function NewClaimPage() {
                 </div>
               </FormSection>
 
+              {/*
+                orderNumber / orderDate were removed from the carrier submit
+                DTO in phase3_blocks — they are MAGTRANS-internal and filled
+                in by the verifier on PATCH /claims/:nrZgl when transitioning
+                to ZAAKCEPTOWANO. The carrier-side form keeps just the
+                comment field.
+              */}
               <details>
                 <summary className="cursor-pointer text-sm font-semibold text-text-sub hover:text-text">
-                  Dodaj komentarz / numer zlecenia
+                  Dodaj komentarz
                 </summary>
                 <div className="mt-4 space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <FormField
-                      label="Numer zlecenia"
-                      error={errs.orderNumber?.message}
-                      htmlFor="claim-orderNumber"
-                    >
-                      <Input
-                        id="claim-orderNumber"
-                        className="h-10"
-                        {...form.register('orderNumber')}
-                      />
-                    </FormField>
-                    <FormField
-                      label="Data zlecenia"
-                      error={errs.orderDate?.message}
-                      htmlFor="claim-orderDate"
-                    >
-                      <Input
-                        id="claim-orderDate"
-                        type="date"
-                        className="h-10"
-                        {...form.register('orderDate')}
-                      />
-                    </FormField>
-                  </div>
                   <FormField
                     label="Komentarz"
                     error={errs.comment?.message}

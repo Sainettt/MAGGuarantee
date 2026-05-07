@@ -33,11 +33,13 @@ const EMPTY_DEFAULTS: FormValues = {
   trailerId: undefined,
   driverId: undefined,
   departureAt: '',
-  departureCountry: undefined,
-  departurePostalCode: undefined,
-  plannedReturnAt: undefined,
-  returnCountry: undefined,
-  returnPostalCode: undefined,
+  // Country / postal / plannedReturn are NOT NULL since phase3_blocks; empty
+  // strings keep inputs controlled and Zod surfaces errors on submit.
+  departureCountry: '',
+  departurePostalCode: '',
+  plannedReturnAt: '',
+  returnCountry: '',
+  returnPostalCode: '',
   comment: undefined,
 };
 
@@ -189,6 +191,7 @@ export default function NewDelegationPage() {
               </FormField>
               <FormField
                 label="Kraj wyjazdu"
+                required
                 error={errs.departureCountry?.message}
                 htmlFor="del-departureCountry"
               >
@@ -201,6 +204,7 @@ export default function NewDelegationPage() {
               </FormField>
               <FormField
                 label="Kod pocztowy wyjazdu"
+                required
                 error={errs.departurePostalCode?.message}
                 htmlFor="del-departurePostalCode"
               >
