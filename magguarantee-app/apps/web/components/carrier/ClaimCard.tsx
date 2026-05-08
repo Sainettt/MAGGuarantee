@@ -6,6 +6,7 @@
 // optional reklamacja indicator at the bottom.
 
 import { AlertTriangle, ArrowRight } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import type { ClaimListItem } from '@magguarantee/shared';
 
@@ -38,11 +39,12 @@ export interface ClaimCardProps {
 }
 
 export function ClaimCard({ claim }: ClaimCardProps) {
+  const t = useTranslations('carrier.claims');
   return (
     <Link
       href={`/carrier/claims/${encodeURIComponent(claim.nrZgl)}`}
       className="block bg-card rounded-lg border border-border p-5 mb-3 transition-shadow hover:shadow-card focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand/40"
-      aria-label={`Wniosek ${claim.nrZgl}`}
+      aria-label={t('wniosekAria', { nrZgl: claim.nrZgl })}
     >
       <div className="flex items-start justify-between gap-3 mb-1 flex-wrap">
         <div className="flex items-center gap-3">
@@ -67,14 +69,14 @@ export function ClaimCard({ claim }: ClaimCardProps) {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-text-sub">
         <div>
-          Pojazd:{' '}
+          {t('vehicleLabel')}:{' '}
           <span className="font-semibold text-text font-mono">
             {claim.vehiclePlate}
           </span>
         </div>
         {claim.kmGuaranteed != null && claim.mileage != null && (
           <div>
-            Km:{' '}
+            {t('kmLabel')}:{' '}
             <span className="font-semibold text-text tabular-nums">
               {Math.round(claim.mileage)} / {Math.round(claim.kmGuaranteed)}
             </span>
@@ -85,7 +87,7 @@ export function ClaimCard({ claim }: ClaimCardProps) {
       {claim.reklamacjaSubmitted && (
         <div className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-warning-bg text-warning-dark dark:bg-warning/15 dark:text-warning px-2 py-1 text-xs font-bold">
           <AlertTriangle size={12} aria-hidden />
-          Reklamacja zgłoszona
+          {t('reklamacjaIndicator')}
         </div>
       )}
     </Link>

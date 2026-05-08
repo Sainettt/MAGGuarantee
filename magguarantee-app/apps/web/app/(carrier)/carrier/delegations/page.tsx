@@ -4,6 +4,7 @@
 // rows that are still `zgloszony`. Submit is on a separate page.
 
 import { Plus, Rocket, X } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
@@ -37,6 +38,9 @@ function formatDateTime(iso: string | null): string {
 }
 
 export default function CarrierDelegationsPage() {
+  const t = useTranslations('carrier.delegations');
+  const tColumns = useTranslations('carrier.delegations.columns');
+  const tStatus = useTranslations('carrier.delegations.status');
   const [status, setStatus] = useState<DelegationStatus | ''>('');
   const { data, isLoading } = useDelegations({
     status: status || undefined,
@@ -44,8 +48,8 @@ export default function CarrierDelegationsPage() {
   });
 
   const cancelM = useCancelDelegation({
-    onSuccess: () => toast.success('Wyjazd anulowany'),
-    onError: () => toast.error('Nie udało się anulować wyjazdu'),
+    onSuccess: () => toast.success(t('cancelledToast')),
+    onError: () => toast.error(t('cancelErrorToast')),
   });
 
   const [confirmTarget, setConfirmTarget] = useState<DelegationDto | null>(null);
@@ -54,7 +58,7 @@ export default function CarrierDelegationsPage() {
     () => [
       {
         id: 'vehicle',
-        header: 'Pojazd',
+        header: tColumns('vehicle'),
         cell: (row) => (
           <span className="font-mono font-semibold">
             {row.vehicle?.plateNumber ?? '—'}
@@ -63,7 +67,7 @@ export default function CarrierDelegationsPage() {
       },
       {
         id: 'driver',
-        header: 'Kierowca',
+        header: tColumns('driver'),
         cell: (row) =>
           row.driver
             ? `${row.driver.firstName} ${row.driver.lastName}`
@@ -71,22 +75,22 @@ export default function CarrierDelegationsPage() {
       },
       {
         id: 'departure',
-        header: 'Wyjazd',
+        header: tColumns('departure'),
         cell: (row) => formatDateTime(row.departureAt),
       },
       {
         id: 'plannedReturn',
-        header: 'Planowany powrót',
+        header: tColumns('plannedReturn'),
         cell: (row) => formatDateTime(row.plannedReturnAt),
       },
       {
         id: 'status',
-        header: 'Status',
+        header: tColumns('status'),
         cell: (row) => <StatusBadge status={row.status} />,
       },
       {
         id: 'actions',
-        header: <span className="sr-only">Akcje</span>,
+        header: <span className="sr-only">{tColumns('actions')}</span>,
         align: 'right',
         cell: (row) => {
           if (row.status !== 'zgloszony') return null;
@@ -98,28 +102,28 @@ export default function CarrierDelegationsPage() {
                 e.stopPropagation();
                 setConfirmTarget(row);
               }}
-              aria-label="Anuluj wyjazd"
+              aria-label={t('cancelAriaLabel')}
             >
               <X size={14} />
-              Anuluj
+              {t('cancel')}
             </Button>
           );
         },
       },
     ],
-    [],
+    [t, tColumns],
   );
 
   return (
     <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <h1 className="text-2xl font-extrabold tracking-tight text-text">
-          Wyjazdy
+          {t('title')}
         </h1>
         <Link href="/carrier/delegations/new">
           <Button size="sm">
             <Plus size={14} />
-            Nowy wyjazd
+            {t('newDelegation')}
           </Button>
         </Link>
       </div>
@@ -129,12 +133,12 @@ export default function CarrierDelegationsPage() {
           className="sm:max-w-xs"
           value={status}
           onChange={(e) => setStatus(e.target.value as DelegationStatus | '')}
-          aria-label="Filtruj po statusie"
+          aria-label={t('filterByStatus')}
         >
-          <option value="">Wszystkie statusy</option>
+          <option value="">{t('allStatuses')}</option>
           {DelegationStatusSchema.options.map((s) => (
             <option key={s} value={s}>
-              {labelFor(s)}
+              {tStatus(s)}
             </option>
           ))}
         </Select>
@@ -148,13 +152,13 @@ export default function CarrierDelegationsPage() {
         empty={
           <EmptyState
             icon={Rocket}
-            title="Brak wyjazdów"
-            message="Zarejestruj pierwszy wyjazd."
+            title={t('emptyTitle')}
+            message={t('emptyMessage')}
             action={
               <Link href="/carrier/delegations/new">
                 <Button size="sm">
                   <Plus size={14} />
-                  Nowy wyjazd
+                  {t('newDelegation')}
                 </Button>
               </Link>
             }
@@ -170,11 +174,10 @@ export default function CarrierDelegationsPage() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Anulować wyjazd?</DialogTitle>
+            <DialogTitle>{t('cancelDialogTitle')}</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-text-sub">
-            Tej operacji nie można cofnąć. Wyjazd zostanie oznaczony jako
-            anulowany.
+            {t('cancelDialogBody')}
           </p>
           <DialogFooter>
             <Button
@@ -184,7 +187,7 @@ export default function CarrierDelegationsPage() {
               onClick={() => setConfirmTarget(null)}
               disabled={cancelM.isPending}
             >
-              Wróć
+              {t('cancelBack')}
             </Button>
             <Button
               type="button"
@@ -198,24 +201,11 @@ export default function CarrierDelegationsPage() {
               }}
               disabled={cancelM.isPending}
             >
-              {cancelM.isPending ? 'Anulowanie…' : 'Anuluj wyjazd'}
+              {cancelM.isPending ? t('cancelling') : t('cancelConfirm')}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </section>
   );
-}
-
-function labelFor(s: DelegationStatus): string {
-  switch (s) {
-    case 'zgloszony':
-      return 'Zgłoszony';
-    case 'w_trasie':
-      return 'W trasie';
-    case 'zjechal':
-      return 'Zjechał';
-    case 'anulowany':
-      return 'Anulowany';
-  }
 }

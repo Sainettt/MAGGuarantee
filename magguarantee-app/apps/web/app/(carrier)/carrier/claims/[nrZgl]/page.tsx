@@ -6,6 +6,7 @@
 //   now() − statusChangedAt ≤ 48h.
 
 import { ArrowLeft, MessageSquareWarning } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
@@ -50,6 +51,9 @@ function formatEur(n: number | null): string {
 }
 
 export default function ClaimDetailPage() {
+  const t = useTranslations('carrier.claims');
+  const tDetail = useTranslations('carrier.claims.detail');
+  const tForm = useTranslations('carrier.claims.form');
   const params = useParams<{ nrZgl: string }>();
   const nrZgl = decodeURIComponent(params.nrZgl);
   const { data: claim, isLoading } = useClaim(nrZgl);
@@ -68,13 +72,13 @@ export default function ClaimDetailPage() {
     return (
       <section className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-8">
         <EmptyState
-          title="Wniosek nie znaleziony"
-          message="Sprawdź numer zgłoszenia lub wróć do listy."
+          title={t('notFoundTitle')}
+          message={t('notFoundMessage')}
           action={
             <Link href="/carrier/claims">
               <Button variant="ghost" size="sm">
                 <ArrowLeft size={14} />
-                Wróć do listy
+                {t('backToList')}
               </Button>
             </Link>
           }
@@ -101,7 +105,7 @@ export default function ClaimDetailPage() {
           className="inline-flex items-center gap-1 text-sm text-text-sub hover:text-text"
         >
           <ArrowLeft size={14} />
-          Wróć do listy
+          {t('backToList')}
         </Link>
       </div>
 
@@ -121,7 +125,7 @@ export default function ClaimDetailPage() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div>
             <div className="text-xs font-bold uppercase tracking-wider text-text-sub">
-              Pojazd
+              {tForm('vehicle')}
             </div>
             <div className="mt-1 font-mono font-semibold text-text">
               {claim.vehiclePlateSnapshot}
@@ -129,7 +133,7 @@ export default function ClaimDetailPage() {
           </div>
           <div>
             <div className="text-xs font-bold uppercase tracking-wider text-text-sub">
-              Przebieg
+              {tDetail('mileage')}
             </div>
             <div className="mt-1 tabular-nums font-semibold text-text">
               {formatNum(claim.mileage)} km
@@ -137,7 +141,7 @@ export default function ClaimDetailPage() {
           </div>
           <div>
             <div className="text-xs font-bold uppercase tracking-wider text-text-sub">
-              Km gwarantowane
+              {tDetail('kmGuaranteed')}
             </div>
             <div className="mt-1 tabular-nums font-semibold text-text">
               {formatNum(claim.kmGuaranteed)} km
@@ -145,7 +149,7 @@ export default function ClaimDetailPage() {
           </div>
           <div>
             <div className="text-xs font-bold uppercase tracking-wider text-text-sub">
-              Wypłata
+              {tDetail('payment')}
             </div>
             <div className="mt-1 tabular-nums font-extrabold text-text">
               {formatEur(claim.paymentEur)} €
@@ -161,7 +165,7 @@ export default function ClaimDetailPage() {
               onClick={() => setSheetOpen(true)}
             >
               <MessageSquareWarning size={14} />
-              Złóż reklamację
+              {tDetail('submitReklamacja')}
             </Button>
           </div>
         )}
@@ -170,7 +174,7 @@ export default function ClaimDetailPage() {
       {claim.breakdown && (
         <div className="mb-6">
           <h2 className="text-sm font-bold uppercase tracking-wider text-text-sub mb-2">
-            Podział na miesiące
+            {tDetail('monthlyBreakdown')}
           </h2>
           <BreakdownTable breakdown={claim.breakdown} />
         </div>
@@ -178,24 +182,24 @@ export default function ClaimDetailPage() {
 
       <div className="bg-card rounded-lg border border-border p-6">
         <h2 className="text-sm font-bold uppercase tracking-wider text-text-sub mb-4">
-          Szczegóły
+          {tDetail('details')}
         </h2>
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
           <div>
-            <dt className="text-text-sub">Kwota wnioskowana</dt>
+            <dt className="text-text-sub">{tDetail('amountRequested')}</dt>
             <dd className="mt-0.5 tabular-nums font-semibold text-text">
               {formatEur(claim.amountRequested)} €
             </dd>
           </div>
           <div>
-            <dt className="text-text-sub">Kwota zatwierdzona</dt>
+            <dt className="text-text-sub">{tDetail('amountApproved')}</dt>
             <dd className="mt-0.5 tabular-nums font-semibold text-text">
               {formatEur(claim.amountApproved)} €
             </dd>
           </div>
           {claim.orderNumber && (
             <div>
-              <dt className="text-text-sub">Numer zlecenia</dt>
+              <dt className="text-text-sub">{tDetail('orderNumber')}</dt>
               <dd className="mt-0.5 font-mono text-text">
                 {claim.orderNumber}
               </dd>
@@ -203,13 +207,13 @@ export default function ClaimDetailPage() {
           )}
           {claim.orderDate && (
             <div>
-              <dt className="text-text-sub">Data zlecenia</dt>
+              <dt className="text-text-sub">{tDetail('orderDate')}</dt>
               <dd className="mt-0.5 text-text">{formatDate(claim.orderDate)}</dd>
             </div>
           )}
           {claim.comment && (
             <div className="sm:col-span-2">
-              <dt className="text-text-sub">Komentarz</dt>
+              <dt className="text-text-sub">{tDetail('comment')}</dt>
               <dd className="mt-0.5 text-text whitespace-pre-wrap">
                 {claim.comment}
               </dd>
@@ -217,7 +221,7 @@ export default function ClaimDetailPage() {
           )}
           {claim.reklamacjaSubmitted && claim.reklamacjaText && (
             <div className="sm:col-span-2">
-              <dt className="text-text-sub">Treść reklamacji</dt>
+              <dt className="text-text-sub">{tDetail('reklamacjaText')}</dt>
               <dd className="mt-0.5 text-text whitespace-pre-wrap">
                 {claim.reklamacjaText}
               </dd>
@@ -225,7 +229,7 @@ export default function ClaimDetailPage() {
           )}
           {claim.reklamacjaResponse && (
             <div className="sm:col-span-2">
-              <dt className="text-text-sub">Odpowiedź na reklamację</dt>
+              <dt className="text-text-sub">{tDetail('reklamacjaResponse')}</dt>
               <dd className="mt-0.5 text-text whitespace-pre-wrap">
                 {claim.reklamacjaResponse}
               </dd>

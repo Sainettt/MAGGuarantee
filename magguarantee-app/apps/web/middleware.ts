@@ -1,33 +1,47 @@
-// Auth gate. Public routes (`/login`, `/login/verify`) skip the check;
-// everything else requires the `mt_access` cookie. Static assets are excluded
-// via the `matcher` below.
+// Auth + role gate. Public routes (`/login`, `/login/verify`) skip the check;
+// everything else requires the `mt_access` cookie AND a path that is allowed
+// for the caller's role. Static assets are excluded via the `matcher` below.
 //
-// Also enforces role-gating on admin-only employee pages. The JWT body is
-// base64-decoded (no signature check — that's the API's job) just to read
-// the `role` claim for the redirect decision. Real access control still lives
-// at the API layer (`@Roles` decorators); middleware only spares pracownik
-// the empty-page UX of hitting an admin-only screen.
+// Role enforcement: the JWT body is base64-decoded (no signature check —
+// that's the API's job) to read the `role` claim. We then consult the
+// allow-list in `lib/roles.ts` (`isAllowedForRole`). Mismatched paths are
+// redirected to the role's landing instead of returning 403; this avoids
+// flashing forbidden shells and gives the user a useful destination.
+//
+// The middleware is the FIRST line of defense — fast, no API round-trip. Each
+// route-group layout re-checks server-side via `requireRoleAccess()` against
+// `/auth/me` (defense in depth: catches forged JWTs that lie about `role`,
+// since that check uses the API as source of truth). Real entity-scope
+// authorization (e.g. "carrier can only see own claims") lives at the API
+// layer (`@Roles`, `CarrierScopeGuard`).
 //
 // i18n note: locale is resolved server-side in `i18n/request.ts` from the
 // `mt_lang` cookie / `Accept-Language` header. We don't run next-intl's
 // middleware because we don't use URL-prefixed locales.
 
 import { NextResponse, type NextRequest } from 'next/server';
+import type { Role } from '@magguarantee/shared';
+
+import {
+  isAllowedForRole,
+  isGatedPath,
+  landingFor,
+} from './lib/roles';
 
 const ACCESS_COOKIE = 'mt_access';
 
 const PUBLIC_PATHS = new Set<string>(['/login', '/login/verify']);
 
-// Employee-shell sub-paths that only `admin` may reach. Other roles get
-// redirected to `/employee` (the bare shell — Phase 3 has no employee landing
-// content yet). See docs/03-roles.md#pracownik for the scope decision.
-const ADMIN_ONLY_PREFIXES = [
-  '/employee/carriers',
-  '/employee/vehicles',
-  '/employee/drivers',
-  '/employee/trailers',
-  '/employee/trailer-types',
-];
+const KNOWN_ROLES: ReadonlySet<Role> = new Set([
+  'admin',
+  'pracownik',
+  'opiekun',
+  'planista',
+  'dyspozytor',
+  'przewoznik',
+  'eksport',
+  'weryfikator',
+]);
 
 function isPublic(pathname: string): boolean {
   if (PUBLIC_PATHS.has(pathname)) return true;
@@ -35,13 +49,7 @@ function isPublic(pathname: string): boolean {
   return pathname.startsWith('/login/');
 }
 
-function isAdminOnly(pathname: string): boolean {
-  return ADMIN_ONLY_PREFIXES.some(
-    (p) => pathname === p || pathname.startsWith(p + '/'),
-  );
-}
-
-function readRoleFromJwt(token: string): string | null {
+function readRoleFromJwt(token: string): Role | null {
   // JWT = header.payload.signature. We only need the payload's `role` claim
   // for routing — signature verification is the API's job, not ours.
   const parts = token.split('.');
@@ -53,7 +61,8 @@ function readRoleFromJwt(token: string): string | null {
     const padded = payload + '='.repeat((4 - (payload.length % 4)) % 4);
     const json = atob(padded);
     const data = JSON.parse(json) as { role?: unknown };
-    return typeof data.role === 'string' ? data.role : null;
+    if (typeof data.role !== 'string') return null;
+    return KNOWN_ROLES.has(data.role as Role) ? (data.role as Role) : null;
   } catch {
     return null;
   }
@@ -79,17 +88,33 @@ export function middleware(req: NextRequest): NextResponse {
     return NextResponse.redirect(url);
   }
 
-  // Admin-only path gating. We decode the JWT body (not verify) to read the
-  // role claim. If it's not 'admin', bounce to /employee. Anything pathological
-  // (malformed token, missing role) also bounces — safer to under-permission.
-  if (isAdminOnly(pathname)) {
-    const role = readRoleFromJwt(access);
-    if (role !== 'admin') {
-      const url = req.nextUrl.clone();
-      url.pathname = '/employee';
-      url.search = '';
-      return NextResponse.redirect(url);
-    }
+  // Root `/` is always allowed — `app/page.tsx` resolves the landing for the
+  // current user via /auth/me and redirects there. Letting it through avoids
+  // duplicating the landing logic at the edge.
+  if (pathname === '/') {
+    return NextResponse.next();
+  }
+
+  // Role-based gating. We decode the JWT body (not verify) to read the role
+  // claim. Pathological values (malformed token, missing role, unknown role)
+  // bounce to /login — safer to under-permission than to assume a default.
+  const role = readRoleFromJwt(access);
+  if (!role) {
+    const url = req.nextUrl.clone();
+    url.pathname = '/login';
+    url.search = '';
+    return NextResponse.redirect(url);
+  }
+
+  // If the path is owned by some role group and this user isn't allowed,
+  // redirect them to their own landing. Unmapped paths (404 candidates) we
+  // pass through — Next will render its 404 inside the matched layout, and
+  // since the user has SOME valid role, their landing is one click away.
+  if (isGatedPath(pathname) && !isAllowedForRole(pathname, role)) {
+    const url = req.nextUrl.clone();
+    url.pathname = landingFor(role);
+    url.search = '';
+    return NextResponse.redirect(url);
   }
 
   return NextResponse.next();

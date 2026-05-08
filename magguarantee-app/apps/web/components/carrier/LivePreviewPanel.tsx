@@ -6,6 +6,7 @@
 // recomputes anything client-side; it simply renders what the API returned.
 
 import { AlertTriangle, Loader2 } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import type { PreviewClaimResponse } from '@magguarantee/shared';
 
 import { BreakdownTable } from '@/components/carrier/BreakdownTable';
@@ -73,13 +74,14 @@ export function LivePreviewPanel({
   isError,
   isEmpty,
 }: LivePreviewPanelProps) {
+  const t = useTranslations('carrier.preview');
   // Empty state wins over loading — if the form is half-filled we don't
   // want to flash a skeleton just because the user is typing.
   if (isEmpty && !data) {
     return (
       <div className="flex flex-col gap-4">
         <div className="bg-card rounded-lg border border-border p-8 text-center text-sm text-text-sub">
-          Wypełnij okres i pojazd, aby zobaczyć podgląd.
+          {t('empty')}
         </div>
       </div>
     );
@@ -91,8 +93,8 @@ export function LivePreviewPanel({
         <div className="bg-card rounded-lg border border-border">
           <EmptyState
             icon={AlertTriangle}
-            title="Nie udało się obliczyć podglądu"
-            message="Sprawdź dane wejściowe i spróbuj ponownie."
+            title={t('errorTitle')}
+            message={t('errorMessage')}
           />
         </div>
       </div>
@@ -134,29 +136,29 @@ export function LivePreviewPanel({
           aria-live="polite"
         >
           <Loader2 size={14} className="animate-spin" aria-hidden />
-          Aktualizuję podgląd…
+          {t('updating')}
         </div>
       )}
 
       <div className="grid grid-cols-2 gap-3">
         <StatCard
-          label="Km gwarantowane"
+          label={t('kmGuaranteed')}
           value={formatInt(data.kmGuaranteed)}
         />
         <StatCard
-          label="Różnica km"
+          label={t('kmDifference')}
           value={formatInt(data.kmDifference)}
           muted={noPayout}
         />
         <StatCard
-          label="Stawka €/km"
+          label={t('ratePerKm')}
           value={new Intl.NumberFormat('pl-PL', {
             minimumFractionDigits: 4,
             maximumFractionDigits: 4,
           }).format(data.ratePerKmEffective)}
         />
         <StatCard
-          label="Wypłata (EUR)"
+          label={t('paymentEur')}
           value={
             <>
               {formatEur(data.paymentEur)}{' '}

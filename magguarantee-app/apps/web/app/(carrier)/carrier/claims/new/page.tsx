@@ -6,6 +6,7 @@
 // button is disabled while the preview is loading or returned an error.
 
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
@@ -54,6 +55,9 @@ function getDefaults(): FormValues {
 }
 
 export default function NewClaimPage() {
+  const t = useTranslations('carrier.claims');
+  const tForm = useTranslations('carrier.claims.form');
+  const tCommon = useTranslations('common');
   const router = useRouter();
   const fleetQ = useMyFleet();
 
@@ -112,11 +116,11 @@ export default function NewClaimPage() {
   const submitM = useSubmitClaim({
     onSuccess: (claim) => {
       draft.clear();
-      toast.success(`Wniosek ${claim.nrZgl} został złożony`);
+      toast.success(t('submittedToast', { nrZgl: claim.nrZgl }));
       router.push(`/carrier/claims/${encodeURIComponent(claim.nrZgl)}`);
     },
     onError: (err) => {
-      const msg = err instanceof Error ? err.message : 'Nie udało się wysłać wniosku';
+      const msg = err instanceof Error ? err.message : t('submitErrorToast');
       toast.error(msg);
     },
   });
@@ -148,7 +152,7 @@ export default function NewClaimPage() {
   return (
     <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
       <h1 className="text-2xl font-extrabold tracking-tight text-text mb-6">
-        Nowy wniosek
+        {t('newClaim')}
       </h1>
 
       <form onSubmit={onSubmit}>
@@ -156,9 +160,9 @@ export default function NewClaimPage() {
           {/* Left — RHF form */}
           <div className="space-y-6">
             <div className="bg-card rounded-lg border border-border p-5 space-y-6">
-              <FormSection title="Pojazd i kierowca">
+              <FormSection title={tForm('sectionVehicleAndDriver')}>
                 <FormField
-                  label="Pojazd"
+                  label={tForm('vehicle')}
                   required
                   error={errs.vehicleId?.message}
                   htmlFor="claim-vehicleId"
@@ -181,7 +185,7 @@ export default function NewClaimPage() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <FormField
-                    label="Kierowca"
+                    label={tForm('driver')}
                     error={errs.driverId?.message}
                     htmlFor="claim-driverId"
                   >
@@ -198,7 +202,7 @@ export default function NewClaimPage() {
                     </Select>
                   </FormField>
                   <FormField
-                    label="Naczepa"
+                    label={tForm('trailer')}
                     error={errs.trailerId?.message}
                     htmlFor="claim-trailerId"
                   >
@@ -207,10 +211,10 @@ export default function NewClaimPage() {
                       {...form.register('trailerId')}
                     >
                       <option value="">—</option>
-                      {trailers.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.plateNumber}
-                          {t.trailerTypeName ? ` (${t.trailerTypeName})` : ''}
+                      {trailers.map((tr) => (
+                        <option key={tr.id} value={tr.id}>
+                          {tr.plateNumber}
+                          {tr.trailerTypeName ? ` (${tr.trailerTypeName})` : ''}
                         </option>
                       ))}
                     </Select>
@@ -218,10 +222,10 @@ export default function NewClaimPage() {
                 </div>
               </FormSection>
 
-              <FormSection title="Okres">
+              <FormSection title={tForm('sectionPeriod')}>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <FormField
-                    label="Data od"
+                    label={tForm('dateStart')}
                     required
                     error={errs.dateStart?.message}
                     htmlFor="claim-dateStart"
@@ -234,7 +238,7 @@ export default function NewClaimPage() {
                     />
                   </FormField>
                   <FormField
-                    label="Data do"
+                    label={tForm('dateEnd')}
                     required
                     error={errs.dateEnd?.message}
                     htmlFor="claim-dateEnd"
@@ -247,7 +251,7 @@ export default function NewClaimPage() {
                     />
                   </FormField>
                   <FormField
-                    label="Godzina od"
+                    label={tForm('timeFrom')}
                     required
                     error={errs.timeFrom?.message}
                     htmlFor="claim-timeFrom"
@@ -260,7 +264,7 @@ export default function NewClaimPage() {
                     />
                   </FormField>
                   <FormField
-                    label="Godzina do"
+                    label={tForm('timeTo')}
                     required
                     error={errs.timeTo?.message}
                     htmlFor="claim-timeTo"
@@ -275,10 +279,10 @@ export default function NewClaimPage() {
                 </div>
               </FormSection>
 
-              <FormSection title="Wartości">
+              <FormSection title={tForm('sectionValues')}>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <FormField
-                    label="Przebieg (km)"
+                    label={tForm('mileage')}
                     required
                     error={errs.mileage?.message}
                     htmlFor="claim-mileage"
@@ -296,7 +300,7 @@ export default function NewClaimPage() {
                     />
                   </FormField>
                   <FormField
-                    label="Kwota wnioskowana (EUR)"
+                    label={tForm('amountRequested')}
                     required
                     error={errs.amountRequested?.message}
                     htmlFor="claim-amount"
@@ -314,10 +318,10 @@ export default function NewClaimPage() {
                     />
                   </FormField>
                   <FormField
-                    label="Korekta godzin (h)"
+                    label={tForm('hoursAdjusted')}
                     error={errs.hoursAdjusted?.message}
                     htmlFor="claim-hours"
-                    description="Czas postoju do odjęcia od czasu trasy."
+                    description={tForm('hoursAdjustedHint')}
                   >
                     <Input
                       id="claim-hours"
@@ -343,11 +347,11 @@ export default function NewClaimPage() {
               */}
               <details>
                 <summary className="cursor-pointer text-sm font-semibold text-text-sub hover:text-text">
-                  Dodaj komentarz
+                  {tForm('addComment')}
                 </summary>
                 <div className="mt-4 space-y-4">
                   <FormField
-                    label="Komentarz"
+                    label={tForm('comment')}
                     error={errs.comment?.message}
                     htmlFor="claim-comment"
                   >
@@ -372,14 +376,14 @@ export default function NewClaimPage() {
                 }}
                 disabled={submitting}
               >
-                Wyczyść
+                {tCommon('clear')}
               </Button>
               <Button
                 type="submit"
                 size="lg"
                 disabled={submitting || previewBlocked}
               >
-                {submitting ? 'Wysyłanie…' : 'Złóż wniosek'}
+                {submitting ? t('submitting') : t('submit')}
               </Button>
             </div>
           </div>

@@ -7,6 +7,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 
 import { cn } from '@/lib/utils';
 
@@ -15,7 +16,8 @@ interface Tab {
   /** Match `pathname.startsWith(matchPrefix)` for active state. */
   matchPrefix: string;
   emoji: string;
-  label: string;
+  /** i18n key under `carrier.tabs.*`. */
+  labelKey: 'claims' | 'newClaim' | 'fleet' | 'delegations';
 }
 
 const TABS: readonly Tab[] = [
@@ -23,34 +25,35 @@ const TABS: readonly Tab[] = [
     href: '/carrier/claims',
     matchPrefix: '/carrier/claims',
     emoji: '📋',
-    label: 'Wnioski',
+    labelKey: 'claims',
   },
   {
     href: '/carrier/claims/new',
     matchPrefix: '/carrier/claims/new',
     emoji: '➕',
-    label: 'Nowy',
+    labelKey: 'newClaim',
   },
   {
     href: '/carrier/fleet/vehicles',
     matchPrefix: '/carrier/fleet',
     emoji: '🚛',
-    label: 'Flota',
+    labelKey: 'fleet',
   },
   {
     href: '/carrier/delegations',
     matchPrefix: '/carrier/delegations',
     emoji: '🚀',
-    label: 'Wyjazdy',
+    labelKey: 'delegations',
   },
 ];
 
 export function CarrierTabs() {
   const pathname = usePathname();
+  const t = useTranslations('carrier.tabs');
 
   return (
     <nav
-      aria-label="Carrier sections"
+      aria-label={t('ariaLabel')}
       className="sticky top-16 z-10 bg-card/90 backdrop-blur border-b border-border"
     >
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 flex items-center gap-1 overflow-x-auto">
@@ -88,7 +91,7 @@ export function CarrierTabs() {
               )}
             >
               <span aria-hidden>{tab.emoji}</span>
-              {tab.label}
+              {t(tab.labelKey)}
             </Link>
           );
         })}

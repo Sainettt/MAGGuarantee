@@ -11,7 +11,10 @@
 // resolve to a user).
 
 import { cookies } from 'next/headers';
-import type { UserDto } from '@magguarantee/shared';
+import { redirect } from 'next/navigation';
+import type { Role, UserDto } from '@magguarantee/shared';
+
+import { landingFor } from '../roles';
 
 const SERVER_API_URL =
   process.env.API_URL ??
@@ -46,4 +49,23 @@ export async function getServerUser(): Promise<UserDto | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Server-side role gate. Used inside route-group layouts as defense in depth
+ * after the edge middleware. Behavior:
+ *  - anonymous → redirect to /login
+ *  - role not in `allowed` → redirect to that role's own landing
+ *  - otherwise → return the user for downstream use
+ *
+ * The redirect-on-mismatch (rather than 403) mirrors middleware so the user
+ * lands somewhere usable instead of staring at a forbidden screen.
+ */
+export async function requireRoleAccess(
+  allowed: readonly Role[],
+): Promise<UserDto> {
+  const user = await getServerUser();
+  if (!user) redirect('/login');
+  if (!allowed.includes(user.role)) redirect(landingFor(user.role));
+  return user;
 }

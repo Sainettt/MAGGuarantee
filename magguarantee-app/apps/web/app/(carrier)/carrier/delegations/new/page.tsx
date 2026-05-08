@@ -5,6 +5,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ArrowLeft } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
@@ -44,6 +45,9 @@ const EMPTY_DEFAULTS: FormValues = {
 };
 
 export default function NewDelegationPage() {
+  const t = useTranslations('carrier.delegations');
+  const tForm = useTranslations('carrier.delegations.form');
+  const tCommon = useTranslations('common');
   const router = useRouter();
   const fleetQ = useMyFleet();
 
@@ -63,12 +67,12 @@ export default function NewDelegationPage() {
   const submitM = useSubmitDelegation({
     onSuccess: () => {
       draft.clear();
-      toast.success('Wyjazd zarejestrowany');
+      toast.success(t('registeredToast'));
       router.push('/carrier/delegations');
     },
     onError: (err) => {
       const msg =
-        err instanceof Error ? err.message : 'Nie udało się zapisać wyjazdu';
+        err instanceof Error ? err.message : t('registerErrorToast');
       toast.error(msg);
     },
   });
@@ -100,19 +104,19 @@ export default function NewDelegationPage() {
           className="inline-flex items-center gap-1 text-sm text-text-sub hover:text-text"
         >
           <ArrowLeft size={14} />
-          Wróć do listy
+          {t('backToList')}
         </Link>
       </div>
 
       <h1 className="text-2xl font-extrabold tracking-tight text-text mb-6">
-        Nowy wyjazd
+        {t('newDelegation')}
       </h1>
 
       <form onSubmit={onSubmit}>
         <div className="bg-card rounded-lg border border-border p-5 space-y-6">
-          <FormSection title="Pojazd i kierowca">
+          <FormSection title={tForm('sectionVehicleAndDriver')}>
             <FormField
-              label="Pojazd"
+              label={tForm('vehicle')}
               required
               error={errs.vehicleId?.message}
               htmlFor="del-vehicleId"
@@ -135,7 +139,7 @@ export default function NewDelegationPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormField
-                label="Kierowca"
+                label={tForm('driver')}
                 error={errs.driverId?.message}
                 htmlFor="del-driverId"
               >
@@ -149,16 +153,16 @@ export default function NewDelegationPage() {
                 </Select>
               </FormField>
               <FormField
-                label="Naczepa"
+                label={tForm('trailer')}
                 error={errs.trailerId?.message}
                 htmlFor="del-trailerId"
               >
                 <Select id="del-trailerId" {...form.register('trailerId')}>
                   <option value="">—</option>
-                  {trailers.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.plateNumber}
-                      {t.trailerTypeName ? ` (${t.trailerTypeName})` : ''}
+                  {trailers.map((tr) => (
+                    <option key={tr.id} value={tr.id}>
+                      {tr.plateNumber}
+                      {tr.trailerTypeName ? ` (${tr.trailerTypeName})` : ''}
                     </option>
                   ))}
                 </Select>
@@ -166,10 +170,10 @@ export default function NewDelegationPage() {
             </div>
           </FormSection>
 
-          <FormSection title="Wyjazd">
+          <FormSection title={tForm('sectionDeparture')}>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <FormField
-                label="Data i godzina wyjazdu"
+                label={tForm('departureAt')}
                 required
                 error={errs.departureAt?.message}
                 htmlFor="del-departureAt"
@@ -190,7 +194,7 @@ export default function NewDelegationPage() {
                 />
               </FormField>
               <FormField
-                label="Kraj wyjazdu"
+                label={tForm('departureCountry')}
                 required
                 error={errs.departureCountry?.message}
                 htmlFor="del-departureCountry"
@@ -203,7 +207,7 @@ export default function NewDelegationPage() {
                 />
               </FormField>
               <FormField
-                label="Kod pocztowy wyjazdu"
+                label={tForm('departurePostalCode')}
                 required
                 error={errs.departurePostalCode?.message}
                 htmlFor="del-departurePostalCode"
@@ -217,10 +221,10 @@ export default function NewDelegationPage() {
             </div>
           </FormSection>
 
-          <FormSection title="Powrót">
+          <FormSection title={tForm('sectionReturn')}>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <FormField
-                label="Planowany powrót"
+                label={tForm('plannedReturnAt')}
                 error={errs.plannedReturnAt?.message}
                 htmlFor="del-plannedReturnAt"
               >
@@ -237,7 +241,7 @@ export default function NewDelegationPage() {
                 />
               </FormField>
               <FormField
-                label="Kraj powrotu"
+                label={tForm('returnCountry')}
                 error={errs.returnCountry?.message}
                 htmlFor="del-returnCountry"
               >
@@ -248,7 +252,7 @@ export default function NewDelegationPage() {
                 />
               </FormField>
               <FormField
-                label="Kod pocztowy powrotu"
+                label={tForm('returnPostalCode')}
                 error={errs.returnPostalCode?.message}
                 htmlFor="del-returnPostalCode"
               >
@@ -262,7 +266,7 @@ export default function NewDelegationPage() {
           </FormSection>
 
           <FormField
-            label="Komentarz"
+            label={tForm('comment')}
             error={errs.comment?.message}
             htmlFor="del-comment"
           >
@@ -285,10 +289,10 @@ export default function NewDelegationPage() {
             }}
             disabled={submitting}
           >
-            Wyczyść
+            {tCommon('clear')}
           </Button>
           <Button type="submit" size="lg" disabled={submitting}>
-            {submitting ? 'Zapisywanie…' : 'Zarejestruj wyjazd'}
+            {submitting ? t('saving') : t('registerSubmit')}
           </Button>
         </div>
       </form>

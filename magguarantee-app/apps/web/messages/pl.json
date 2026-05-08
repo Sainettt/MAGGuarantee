@@ -274,5 +274,217 @@
     "valid": "Zweryfikowano",
     "invalid": "Nie znaleziono",
     "error": "Usługa niedostępna — spróbuj później"
+  },
+  "carrier": {
+    "tabs": {
+      "ariaLabel": "Sekcje przewoźnika",
+      "claims": "Wnioski",
+      "newClaim": "Nowy",
+      "fleet": "Flota",
+      "delegations": "Wyjazdy"
+    },
+    "fleetTabs": {
+      "ariaLabel": "Sekcje floty",
+      "vehicles": "Auta",
+      "drivers": "Kierowcy",
+      "trailers": "Naczepy"
+    },
+    "claims": {
+      "title": "Wnioski",
+      "newClaim": "Nowy wniosek",
+      "submit": "Złóż wniosek",
+      "submitting": "Wysyłanie…",
+      "backToList": "Wróć do listy",
+      "searchPlaceholder": "Szukaj numeru zgłoszenia",
+      "filterByStatus": "Filtruj po statusie",
+      "filterByVehicle": "Filtruj po pojeździe",
+      "allStatuses": "Wszystkie statusy",
+      "allVehicles": "Wszystkie pojazdy",
+      "emptyTitle": "Brak wniosków",
+      "emptyMessage": "Złóż pierwszy wniosek o gwarancję kilometrową.",
+      "notFoundTitle": "Wniosek nie znaleziony",
+      "notFoundMessage": "Sprawdź numer zgłoszenia lub wróć do listy.",
+      "vehicleLabel": "Pojazd",
+      "kmLabel": "Km",
+      "reklamacjaIndicator": "Reklamacja zgłoszona",
+      "wniosekAria": "Wniosek {nrZgl}",
+      "submittedToast": "Wniosek {nrZgl} został złożony",
+      "submitErrorToast": "Nie udało się wysłać wniosku",
+      "detail": {
+        "mileage": "Przebieg",
+        "kmGuaranteed": "Km gwarantowane",
+        "payment": "Wypłata",
+        "submitReklamacja": "Złóż reklamację",
+        "monthlyBreakdown": "Podział na miesiące",
+        "details": "Szczegóły",
+        "amountRequested": "Kwota wnioskowana",
+        "amountApproved": "Kwota zatwierdzona",
+        "orderNumber": "Numer zlecenia",
+        "orderDate": "Data zlecenia",
+        "comment": "Komentarz",
+        "reklamacjaText": "Treść reklamacji",
+        "reklamacjaResponse": "Odpowiedź na reklamację"
+      },
+      "form": {
+        "sectionVehicleAndDriver": "Pojazd i kierowca",
+        "vehicle": "Pojazd",
+        "driver": "Kierowca",
+        "trailer": "Naczepa",
+        "sectionPeriod": "Okres",
+        "dateStart": "Data od",
+        "dateEnd": "Data do",
+        "timeFrom": "Godzina od",
+        "timeTo": "Godzina do",
+        "sectionValues": "Wartości",
+        "mileage": "Przebieg (km)",
+        "amountRequested": "Kwota wnioskowana (EUR)",
+        "hoursAdjusted": "Korekta godzin (h)",
+        "hoursAdjustedHint": "Czas postoju do odjęcia od czasu trasy.",
+        "addComment": "Dodaj komentarz",
+        "comment": "Komentarz"
+      },
+      "status": {
+        "NA_WERYFIKACJI": "Weryfikacja",
+        "ZAAKCEPTOWANO": "Zaakceptowano",
+        "ODRZUCONO": "Odrzucono",
+        "REKLAMACJA": "Reklamacja",
+        "OCZEKUJE_NA_AUTORYZACJE": "Czeka na autoryzację",
+        "AUTORYZACJA_KWOTA_MAKSIMA": "Autoryzacja — kwota maks."
+      }
+    },
+    "preview": {
+      "empty": "Wypełnij okres i pojazd, aby zobaczyć podgląd.",
+      "errorTitle": "Nie udało się obliczyć podglądu",
+      "errorMessage": "Sprawdź dane wejściowe i spróbuj ponownie.",
+      "updating": "Aktualizuję podgląd…",
+      "kmGuaranteed": "Km gwarantowane",
+      "kmDifference": "Różnica km",
+      "ratePerKm": "Stawka €/km",
+      "paymentEur": "Wypłata (EUR)"
+    },
+    "breakdown": {
+      "month": "Miesiąc",
+      "workingDays": "Dni rob.",
+      "kmPerDay": "Km/dzień",
+      "ratePerKm": "Stawka €/km",
+      "kmInMonth": "Km w mc",
+      "empty": "Brak danych do podziału",
+      "totalKmGuaranteed": "Razem (km gwarantowane)"
+    },
+    "reklamacja": {
+      "sheetTitle": "Złóż reklamację",
+      "sheetSubtitle": "Wniosek {nrZgl}",
+      "expiredTitle": "Termin reklamacji upłynął",
+      "expiredMessage": "Reklamacja może być zgłoszona w ciągu 48 godzin od decyzji.",
+      "fieldText": "Treść reklamacji",
+      "fieldTextHint": "Opisz powód reklamacji — od 20 do 2000 znaków.",
+      "fieldAmount": "Kwota reklamacji (EUR)",
+      "fieldAmountMaxHint": "Maksymalnie: {amount} €",
+      "submit": "Wyślij reklamację",
+      "submitting": "Wysyłanie…",
+      "submittedToast": "Reklamacja wysłana",
+      "submitErrorToast": "Nie udało się wysłać reklamacji",
+      "countdownExpired": "Termin reklamacji upłynął",
+      "countdownRemainingLabel": "Pozostało:"
+    },
+    "delegations": {
+      "title": "Wyjazdy",
+      "newDelegation": "Nowy wyjazd",
+      "registerSubmit": "Zarejestruj wyjazd",
+      "saving": "Zapisywanie…",
+      "backToList": "Wróć do listy",
+      "filterByStatus": "Filtruj po statusie",
+      "allStatuses": "Wszystkie statusy",
+      "emptyTitle": "Brak wyjazdów",
+      "emptyMessage": "Zarejestruj pierwszy wyjazd.",
+      "columns": {
+        "vehicle": "Pojazd",
+        "driver": "Kierowca",
+        "departure": "Wyjazd",
+        "plannedReturn": "Planowany powrót",
+        "status": "Status",
+        "actions": "Akcje"
+      },
+      "cancel": "Anuluj",
+      "cancelAriaLabel": "Anuluj wyjazd",
+      "cancelDialogTitle": "Anulować wyjazd?",
+      "cancelDialogBody": "Tej operacji nie można cofnąć. Wyjazd zostanie oznaczony jako anulowany.",
+      "cancelBack": "Wróć",
+      "cancelConfirm": "Anuluj wyjazd",
+      "cancelling": "Anulowanie…",
+      "cancelledToast": "Wyjazd anulowany",
+      "cancelErrorToast": "Nie udało się anulować wyjazdu",
+      "registeredToast": "Wyjazd zarejestrowany",
+      "registerErrorToast": "Nie udało się zapisać wyjazdu",
+      "form": {
+        "sectionVehicleAndDriver": "Pojazd i kierowca",
+        "vehicle": "Pojazd",
+        "driver": "Kierowca",
+        "trailer": "Naczepa",
+        "sectionDeparture": "Wyjazd",
+        "departureAt": "Data i godzina wyjazdu",
+        "departureCountry": "Kraj wyjazdu",
+        "departurePostalCode": "Kod pocztowy wyjazdu",
+        "sectionReturn": "Powrót",
+        "plannedReturnAt": "Planowany powrót",
+        "returnCountry": "Kraj powrotu",
+        "returnPostalCode": "Kod pocztowy powrotu",
+        "comment": "Komentarz"
+      },
+      "status": {
+        "zgloszony": "Zgłoszony",
+        "w_trasie": "W trasie",
+        "zjechal": "Zjechał",
+        "anulowany": "Anulowany"
+      }
+    },
+    "fleet": {
+      "vehicles": {
+        "title": "Pojazdy",
+        "contactOpiekun": "Skontaktuj się z opiekunem",
+        "contactOpiekunSubject": "Zmiana danych pojazdu",
+        "emptyTitle": "Brak pojazdów",
+        "emptyMessage": "Skontaktuj się z opiekunem, aby dodać pojazd.",
+        "columns": {
+          "plate": "Numer rejestracyjny",
+          "side": "Numer boczny",
+          "brandModel": "Marka / model",
+          "type": "Typ",
+          "status": "Status"
+        }
+      },
+      "drivers": {
+        "title": "Kierowcy",
+        "newDriver": "Nowy kierowca",
+        "editDriver": "Edytuj kierowcę",
+        "searchPlaceholder": "Szukaj imienia / nazwiska",
+        "emptyTitle": "Brak kierowców",
+        "emptyMessage": "Dodaj pierwszego kierowcę swojej firmy.",
+        "editAriaLabel": "Edytuj {name}",
+        "columns": {
+          "name": "Imię i nazwisko",
+          "phone": "Telefon",
+          "license": "Numer prawa jazdy",
+          "status": "Status"
+        }
+      },
+      "trailers": {
+        "title": "Naczepy",
+        "newTrailer": "Nowa naczepa",
+        "editTrailer": "Edytuj naczepę",
+        "searchPlaceholder": "Szukaj numeru rejestracyjnego",
+        "filterByType": "Filtruj po typie",
+        "allTypes": "Wszystkie typy",
+        "emptyTitle": "Brak naczep",
+        "emptyMessage": "Dodaj pierwszą naczepę swojej firmy.",
+        "editAriaLabel": "Edytuj {plate}",
+        "columns": {
+          "plate": "Numer rejestracyjny",
+          "type": "Typ",
+          "brandModel": "Marka / model",
+          "status": "Status"
+        }
+      }
+    }
   }
 }

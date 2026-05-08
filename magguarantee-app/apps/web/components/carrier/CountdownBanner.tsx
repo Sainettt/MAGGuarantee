@@ -6,6 +6,7 @@
 // + animated icon when < 1h remains.
 
 import { Clock } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { useEffect, useState } from 'react';
 
 import { cn } from '@/lib/utils';
@@ -30,6 +31,7 @@ function formatRemaining(ms: number): string {
 }
 
 export function CountdownBanner({ deadline, onExpire }: CountdownBannerProps) {
+  const t = useTranslations('carrier.reklamacja');
   const target =
     typeof deadline === 'string' ? new Date(deadline) : deadline;
   const [now, setNow] = useState(() => Date.now());
@@ -66,10 +68,10 @@ export function CountdownBanner({ deadline, onExpire }: CountdownBannerProps) {
       />
       <span className="text-sm">
         {expired ? (
-          <>Termin reklamacji upłynął</>
+          <>{t('countdownExpired')}</>
         ) : (
           <>
-            Pozostało: <b>{formatRemaining(remainingMs)}</b>
+            {t('countdownRemainingLabel')} <b>{formatRemaining(remainingMs)}</b>
           </>
         )}
       </span>

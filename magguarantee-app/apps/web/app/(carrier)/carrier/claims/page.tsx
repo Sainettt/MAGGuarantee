@@ -6,6 +6,7 @@
 
 import { FileText, Plus } from 'lucide-react';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { useState } from 'react';
 import {
   ClaimStatusSchema,
@@ -22,6 +23,8 @@ import { useClaims } from '@/lib/hooks/useClaims';
 import { useMyFleet } from '@/lib/hooks/useMyFleet';
 
 export default function CarrierClaimsListPage() {
+  const t = useTranslations('carrier.claims');
+  const tStatus = useTranslations('carrier.claims.status');
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<ClaimStatus | ''>('');
   const [vehicleId, setVehicleId] = useState<string>('');
@@ -41,12 +44,12 @@ export default function CarrierClaimsListPage() {
     <section className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-8">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <h1 className="text-2xl font-extrabold tracking-tight text-text">
-          Wnioski
+          {t('title')}
         </h1>
         <Link href="/carrier/claims/new">
           <Button size="sm">
             <Plus size={14} />
-            Nowy wniosek
+            {t('newClaim')}
           </Button>
         </Link>
       </div>
@@ -55,7 +58,7 @@ export default function CarrierClaimsListPage() {
         <Input
           type="search"
           className="h-10 sm:max-w-xs"
-          placeholder="Szukaj numeru zgłoszenia"
+          placeholder={t('searchPlaceholder')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -63,12 +66,12 @@ export default function CarrierClaimsListPage() {
           className="sm:max-w-xs"
           value={status}
           onChange={(e) => setStatus(e.target.value as ClaimStatus | '')}
-          aria-label="Filtruj po statusie"
+          aria-label={t('filterByStatus')}
         >
-          <option value="">Wszystkie statusy</option>
+          <option value="">{t('allStatuses')}</option>
           {ClaimStatusSchema.options.map((s) => (
             <option key={s} value={s}>
-              {labelForStatus(s)}
+              {tStatus(s)}
             </option>
           ))}
         </Select>
@@ -76,9 +79,9 @@ export default function CarrierClaimsListPage() {
           className="sm:max-w-xs"
           value={vehicleId}
           onChange={(e) => setVehicleId(e.target.value)}
-          aria-label="Filtruj po pojeździe"
+          aria-label={t('filterByVehicle')}
         >
-          <option value="">Wszystkie pojazdy</option>
+          <option value="">{t('allVehicles')}</option>
           {(fleetQ.data?.vehicles ?? []).map((v) => (
             <option key={v.id} value={v.id}>
               {v.plateNumber}
@@ -99,13 +102,13 @@ export default function CarrierClaimsListPage() {
         <div className="bg-card rounded-lg border border-border">
           <EmptyState
             icon={FileText}
-            title="Brak wniosków"
-            message="Złóż pierwszy wniosek o gwarancję kilometrową."
+            title={t('emptyTitle')}
+            message={t('emptyMessage')}
             action={
               <Link href="/carrier/claims/new">
                 <Button size="sm">
                   <Plus size={14} />
-                  Złóż wniosek
+                  {t('submit')}
                 </Button>
               </Link>
             }
@@ -122,21 +125,4 @@ export default function CarrierClaimsListPage() {
       )}
     </section>
   );
-}
-
-function labelForStatus(s: ClaimStatus): string {
-  switch (s) {
-    case 'NA_WERYFIKACJI':
-      return 'Weryfikacja';
-    case 'ZAAKCEPTOWANO':
-      return 'Zaakceptowano';
-    case 'ODRZUCONO':
-      return 'Odrzucono';
-    case 'REKLAMACJA':
-      return 'Reklamacja';
-    case 'OCZEKUJE_NA_AUTORYZACJE':
-      return 'Czeka na autoryzację';
-    case 'AUTORYZACJA_KWOTA_MAKSIMA':
-      return 'Autoryzacja — kwota maks.';
-  }
 }

@@ -4,6 +4,7 @@
 // trailers page, scoped automatically by the API to the carrier's own rows.
 
 import { Pencil, Plus } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { useMemo, useState } from 'react';
 import type { TrailerDto } from '@magguarantee/shared';
 
@@ -20,6 +21,9 @@ import { useTrailerTypes } from '@/lib/hooks/useTrailerTypes';
 import { TrailerSheetCarrier } from './TrailerSheetCarrier';
 
 export default function CarrierTrailersPage() {
+  const t = useTranslations('carrier.fleet.trailers');
+  const tColumns = useTranslations('carrier.fleet.trailers.columns');
+  const tCommon = useTranslations('common');
   const [search, setSearch] = useState('');
   const [trailerTypeId, setTrailerTypeId] = useState<string>('');
   const carrierIdQ = useMyCarrierId();
@@ -49,14 +53,14 @@ export default function CarrierTrailersPage() {
     () => [
       {
         id: 'plate',
-        header: 'Numer rejestracyjny',
+        header: tColumns('plate'),
         cell: (row) => (
           <span className="font-mono font-semibold">{row.plateNumber}</span>
         ),
       },
       {
         id: 'type',
-        header: 'Typ',
+        header: tColumns('type'),
         cell: (row) =>
           row.trailerType?.shortCode
             ? `[${row.trailerType.shortCode}] ${row.trailerType.name}`
@@ -64,23 +68,23 @@ export default function CarrierTrailersPage() {
       },
       {
         id: 'brand',
-        header: 'Marka / model',
+        header: tColumns('brandModel'),
         cell: (row) =>
           [row.brand, row.model].filter(Boolean).join(' ') || '—',
       },
       {
         id: 'active',
-        header: 'Status',
+        header: tColumns('status'),
         cell: (row) =>
           row.active ? (
-            <Badge variant="success">Aktywny</Badge>
+            <Badge variant="success">{tCommon('active')}</Badge>
           ) : (
-            <Badge variant="muted">Nieaktywny</Badge>
+            <Badge variant="muted">{tCommon('inactive')}</Badge>
           ),
       },
       {
         id: 'actions',
-        header: <span className="sr-only">Akcje</span>,
+        header: <span className="sr-only">{tCommon('actions')}</span>,
         align: 'right',
         cell: (row) => (
           <Button
@@ -90,26 +94,26 @@ export default function CarrierTrailersPage() {
               e.stopPropagation();
               openEdit(row);
             }}
-            aria-label={`Edytuj ${row.plateNumber}`}
+            aria-label={t('editAriaLabel', { plate: row.plateNumber })}
           >
             <Pencil size={14} />
-            Edytuj
+            {tCommon('edit')}
           </Button>
         ),
       },
     ],
-    [],
+    [t, tColumns, tCommon],
   );
 
   return (
     <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <h1 className="text-2xl font-extrabold tracking-tight text-text">
-          Naczepy
+          {t('title')}
         </h1>
         <Button size="sm" onClick={openCreate} disabled={!carrierId}>
           <Plus size={14} />
-          Nowa naczepa
+          {t('newTrailer')}
         </Button>
       </div>
 
@@ -117,7 +121,7 @@ export default function CarrierTrailersPage() {
         <Input
           type="search"
           className="h-10 sm:max-w-xs"
-          placeholder="Szukaj numeru rejestracyjnego"
+          placeholder={t('searchPlaceholder')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -125,9 +129,9 @@ export default function CarrierTrailersPage() {
           className="sm:max-w-xs"
           value={trailerTypeId}
           onChange={(e) => setTrailerTypeId(e.target.value)}
-          aria-label="Filtruj po typie"
+          aria-label={t('filterByType')}
         >
-          <option value="">Wszystkie typy</option>
+          <option value="">{t('allTypes')}</option>
           {(typesQ.data ?? []).map((tt) => (
             <option key={tt.id} value={tt.id}>
               {tt.shortCode ? `[${tt.shortCode}] ` : ''}
@@ -145,8 +149,8 @@ export default function CarrierTrailersPage() {
         isLoading={isLoading}
         empty={
           <EmptyState
-            title="Brak naczep"
-            message="Dodaj pierwszą naczepę swojej firmy."
+            title={t('emptyTitle')}
+            message={t('emptyMessage')}
           />
         }
       />

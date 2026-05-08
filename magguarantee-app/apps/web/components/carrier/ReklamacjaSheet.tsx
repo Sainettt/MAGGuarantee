@@ -6,6 +6,7 @@
 // + kwotaReklamacji), server is the source of truth on the deadline.
 
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useTranslations } from 'next-intl';
 import { useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
@@ -43,6 +44,8 @@ interface Props {
 type FormValues = SubmitReklamacjaDto;
 
 export function ReklamacjaSheet({ open, claim, onClose }: Props) {
+  const t = useTranslations('carrier.reklamacja');
+  const tCommon = useTranslations('common');
   const form = useForm<FormValues>({
     resolver: zodResolver(SubmitReklamacjaSchema),
     defaultValues: { tresc: '', kwotaReklamacji: 0 },
@@ -55,10 +58,10 @@ export function ReklamacjaSheet({ open, claim, onClose }: Props) {
 
   const submitM = useSubmitReklamacja({
     onSuccess: () => {
-      toast.success('Reklamacja wysłana');
+      toast.success(t('submittedToast'));
       onClose();
     },
-    onError: () => toast.error('Nie udało się wysłać reklamacji'),
+    onError: () => toast.error(t('submitErrorToast')),
   });
 
   const deadline = useMemo(() => {
@@ -106,9 +109,9 @@ export function ReklamacjaSheet({ open, claim, onClose }: Props) {
       <SheetContent>
         <form onSubmit={onSubmit} className="flex h-full flex-col">
           <SheetHeader>
-            <SheetTitle>Złóż reklamację</SheetTitle>
+            <SheetTitle>{t('sheetTitle')}</SheetTitle>
             <SheetDescription>
-              {claim ? `Wniosek ${claim.nrZgl}` : null}
+              {claim ? t('sheetSubtitle', { nrZgl: claim.nrZgl }) : null}
             </SheetDescription>
           </SheetHeader>
 
@@ -117,17 +120,17 @@ export function ReklamacjaSheet({ open, claim, onClose }: Props) {
 
             {expired ? (
               <EmptyState
-                title="Termin reklamacji upłynął"
-                message="Reklamacja może być zgłoszona w ciągu 48 godzin od decyzji."
+                title={t('expiredTitle')}
+                message={t('expiredMessage')}
               />
             ) : (
               <div className="space-y-4">
                 <FormField
-                  label="Treść reklamacji"
+                  label={t('fieldText')}
                   required
                   error={errs.tresc?.message}
                   htmlFor="rek-tresc"
-                  description="Opisz powód reklamacji — od 20 do 2000 znaków."
+                  description={t('fieldTextHint')}
                 >
                   <Textarea
                     id="rek-tresc"
@@ -137,16 +140,18 @@ export function ReklamacjaSheet({ open, claim, onClose }: Props) {
                 </FormField>
 
                 <FormField
-                  label="Kwota reklamacji (EUR)"
+                  label={t('fieldAmount')}
                   required
                   error={errs.kwotaReklamacji?.message}
                   htmlFor="rek-kwota"
                   description={
                     maxAmount != null
-                      ? `Maksymalnie: ${new Intl.NumberFormat('pl-PL', {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        }).format(maxAmount)} €`
+                      ? t('fieldAmountMaxHint', {
+                          amount: new Intl.NumberFormat('pl-PL', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          }).format(maxAmount),
+                        })
                       : undefined
                   }
                 >
@@ -173,14 +178,14 @@ export function ReklamacjaSheet({ open, claim, onClose }: Props) {
               onClick={onClose}
               disabled={submitting}
             >
-              Anuluj
+              {tCommon('cancel')}
             </Button>
             <Button
               type="submit"
               size="sm"
               disabled={submitting || expired}
             >
-              {submitting ? 'Wysyłanie…' : 'Wyślij reklamację'}
+              {submitting ? t('submitting') : t('submit')}
             </Button>
           </SheetFooter>
         </form>

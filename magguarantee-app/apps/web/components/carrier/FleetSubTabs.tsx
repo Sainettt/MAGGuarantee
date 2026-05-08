@@ -6,27 +6,30 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 
 import { cn } from '@/lib/utils';
 
 interface SubTab {
   href: string;
-  label: string;
+  /** i18n key under `carrier.fleetTabs.*`. */
+  labelKey: 'vehicles' | 'drivers' | 'trailers';
 }
 
 const SUBTABS: readonly SubTab[] = [
-  { href: '/carrier/fleet/vehicles', label: 'Auta' },
-  { href: '/carrier/fleet/drivers', label: 'Kierowcy' },
-  { href: '/carrier/fleet/trailers', label: 'Naczepy' },
+  { href: '/carrier/fleet/vehicles', labelKey: 'vehicles' },
+  { href: '/carrier/fleet/drivers', labelKey: 'drivers' },
+  { href: '/carrier/fleet/trailers', labelKey: 'trailers' },
 ];
 
 export function FleetSubTabs() {
   const pathname = usePathname();
+  const t = useTranslations('carrier.fleetTabs');
 
   return (
     <div
       role="tablist"
-      aria-label="Fleet sections"
+      aria-label={t('ariaLabel')}
       className="border-b border-border bg-card/40"
     >
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 flex items-center gap-1 overflow-x-auto">
@@ -47,7 +50,7 @@ export function FleetSubTabs() {
                   : 'text-text-sub border-transparent hover:text-text',
               )}
             >
-              {tab.label}
+              {t(tab.labelKey)}
             </Link>
           );
         })}

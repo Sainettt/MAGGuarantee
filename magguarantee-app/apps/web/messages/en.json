@@ -274,5 +274,217 @@
     "valid": "Verified",
     "invalid": "Not found",
     "error": "Service unavailable — try again later"
+  },
+  "carrier": {
+    "tabs": {
+      "ariaLabel": "Carrier sections",
+      "claims": "Claims",
+      "newClaim": "New",
+      "fleet": "Fleet",
+      "delegations": "Trips"
+    },
+    "fleetTabs": {
+      "ariaLabel": "Fleet sections",
+      "vehicles": "Vehicles",
+      "drivers": "Drivers",
+      "trailers": "Trailers"
+    },
+    "claims": {
+      "title": "Claims",
+      "newClaim": "New claim",
+      "submit": "Submit claim",
+      "submitting": "Submitting…",
+      "backToList": "Back to list",
+      "searchPlaceholder": "Search claim number",
+      "filterByStatus": "Filter by status",
+      "filterByVehicle": "Filter by vehicle",
+      "allStatuses": "All statuses",
+      "allVehicles": "All vehicles",
+      "emptyTitle": "No claims",
+      "emptyMessage": "Submit your first kilometer-guarantee claim.",
+      "notFoundTitle": "Claim not found",
+      "notFoundMessage": "Check the claim number or go back to the list.",
+      "vehicleLabel": "Vehicle",
+      "kmLabel": "Km",
+      "reklamacjaIndicator": "Reclamation submitted",
+      "wniosekAria": "Claim {nrZgl}",
+      "submittedToast": "Claim {nrZgl} submitted",
+      "submitErrorToast": "Failed to submit claim",
+      "detail": {
+        "mileage": "Mileage",
+        "kmGuaranteed": "Guaranteed km",
+        "payment": "Payout",
+        "submitReklamacja": "Submit reclamation",
+        "monthlyBreakdown": "Monthly breakdown",
+        "details": "Details",
+        "amountRequested": "Amount requested",
+        "amountApproved": "Amount approved",
+        "orderNumber": "Order number",
+        "orderDate": "Order date",
+        "comment": "Comment",
+        "reklamacjaText": "Reclamation text",
+        "reklamacjaResponse": "Reclamation response"
+      },
+      "form": {
+        "sectionVehicleAndDriver": "Vehicle and driver",
+        "vehicle": "Vehicle",
+        "driver": "Driver",
+        "trailer": "Trailer",
+        "sectionPeriod": "Period",
+        "dateStart": "Date from",
+        "dateEnd": "Date to",
+        "timeFrom": "Time from",
+        "timeTo": "Time to",
+        "sectionValues": "Values",
+        "mileage": "Mileage (km)",
+        "amountRequested": "Amount requested (EUR)",
+        "hoursAdjusted": "Hours adjustment (h)",
+        "hoursAdjustedHint": "Idle time to subtract from the trip duration.",
+        "addComment": "Add comment",
+        "comment": "Comment"
+      },
+      "status": {
+        "NA_WERYFIKACJI": "Verifying",
+        "ZAAKCEPTOWANO": "Accepted",
+        "ODRZUCONO": "Rejected",
+        "REKLAMACJA": "Reclamation",
+        "OCZEKUJE_NA_AUTORYZACJE": "Awaiting authorization",
+        "AUTORYZACJA_KWOTA_MAKSIMA": "Authorization — max amount"
+      }
+    },
+    "preview": {
+      "empty": "Fill in the period and vehicle to see the preview.",
+      "errorTitle": "Could not compute preview",
+      "errorMessage": "Check the inputs and try again.",
+      "updating": "Refreshing preview…",
+      "kmGuaranteed": "Guaranteed km",
+      "kmDifference": "Km difference",
+      "ratePerKm": "Rate €/km",
+      "paymentEur": "Payout (EUR)"
+    },
+    "breakdown": {
+      "month": "Month",
+      "workingDays": "Work. days",
+      "kmPerDay": "Km/day",
+      "ratePerKm": "Rate €/km",
+      "kmInMonth": "Km in mo.",
+      "empty": "No data to break down",
+      "totalKmGuaranteed": "Total (guaranteed km)"
+    },
+    "reklamacja": {
+      "sheetTitle": "Submit reclamation",
+      "sheetSubtitle": "Claim {nrZgl}",
+      "expiredTitle": "Reclamation window expired",
+      "expiredMessage": "Reclamation can be submitted within 48 hours of the decision.",
+      "fieldText": "Reclamation text",
+      "fieldTextHint": "Describe the reclamation reason — between 20 and 2000 characters.",
+      "fieldAmount": "Reclamation amount (EUR)",
+      "fieldAmountMaxHint": "Maximum: {amount} €",
+      "submit": "Send reclamation",
+      "submitting": "Sending…",
+      "submittedToast": "Reclamation sent",
+      "submitErrorToast": "Failed to send reclamation",
+      "countdownExpired": "Reclamation window expired",
+      "countdownRemainingLabel": "Remaining:"
+    },
+    "delegations": {
+      "title": "Trips",
+      "newDelegation": "New trip",
+      "registerSubmit": "Register trip",
+      "saving": "Saving…",
+      "backToList": "Back to list",
+      "filterByStatus": "Filter by status",
+      "allStatuses": "All statuses",
+      "emptyTitle": "No trips",
+      "emptyMessage": "Register your first trip.",
+      "columns": {
+        "vehicle": "Vehicle",
+        "driver": "Driver",
+        "departure": "Departure",
+        "plannedReturn": "Planned return",
+        "status": "Status",
+        "actions": "Actions"
+      },
+      "cancel": "Cancel",
+      "cancelAriaLabel": "Cancel trip",
+      "cancelDialogTitle": "Cancel trip?",
+      "cancelDialogBody": "This action cannot be undone. The trip will be marked cancelled.",
+      "cancelBack": "Back",
+      "cancelConfirm": "Cancel trip",
+      "cancelling": "Cancelling…",
+      "cancelledToast": "Trip cancelled",
+      "cancelErrorToast": "Failed to cancel trip",
+      "registeredToast": "Trip registered",
+      "registerErrorToast": "Failed to save trip",
+      "form": {
+        "sectionVehicleAndDriver": "Vehicle and driver",
+        "vehicle": "Vehicle",
+        "driver": "Driver",
+        "trailer": "Trailer",
+        "sectionDeparture": "Departure",
+        "departureAt": "Departure date and time",
+        "departureCountry": "Departure country",
+        "departurePostalCode": "Departure postal code",
+        "sectionReturn": "Return",
+        "plannedReturnAt": "Planned return",
+        "returnCountry": "Return country",
+        "returnPostalCode": "Return postal code",
+        "comment": "Comment"
+      },
+      "status": {
+        "zgloszony": "Reported",
+        "w_trasie": "In transit",
+        "zjechal": "Returned",
+        "anulowany": "Cancelled"
+      }
+    },
+    "fleet": {
+      "vehicles": {
+        "title": "Vehicles",
+        "contactOpiekun": "Contact your manager",
+        "contactOpiekunSubject": "Vehicle data change",
+        "emptyTitle": "No vehicles",
+        "emptyMessage": "Contact your manager to add a vehicle.",
+        "columns": {
+          "plate": "Plate number",
+          "side": "Side number",
+          "brandModel": "Make / model",
+          "type": "Type",
+          "status": "Status"
+        }
+      },
+      "drivers": {
+        "title": "Drivers",
+        "newDriver": "New driver",
+        "editDriver": "Edit driver",
+        "searchPlaceholder": "Search by first / last name",
+        "emptyTitle": "No drivers",
+        "emptyMessage": "Add the first driver of your company.",
+        "editAriaLabel": "Edit {name}",
+        "columns": {
+          "name": "Full name",
+          "phone": "Phone",
+          "license": "License number",
+          "status": "Status"
+        }
+      },
+      "trailers": {
+        "title": "Trailers",
+        "newTrailer": "New trailer",
+        "editTrailer": "Edit trailer",
+        "searchPlaceholder": "Search plate number",
+        "filterByType": "Filter by type",
+        "allTypes": "All types",
+        "emptyTitle": "No trailers",
+        "emptyMessage": "Add the first trailer of your company.",
+        "editAriaLabel": "Edit {plate}",
+        "columns": {
+          "plate": "Plate number",
+          "type": "Type",
+          "brandModel": "Make / model",
+          "status": "Status"
+        }
+      }
+    }
   }
 }

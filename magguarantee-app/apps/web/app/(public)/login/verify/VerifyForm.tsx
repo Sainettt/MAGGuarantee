@@ -15,7 +15,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import type { Role, UserDto } from '@magguarantee/shared';
 import { useTranslations } from 'next-intl';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -28,7 +28,7 @@ import { Button } from '@/components/ui/Button';
 import { resendCode, verifyCode } from '@/lib/api/auth';
 import { ApiResponseError } from '@/lib/api/client';
 import { ME_QUERY_KEY } from '@/lib/hooks/useAuth';
-import { landingFor } from '@/lib/roles';
+import { resolveNext } from '@/lib/roles';
 
 import {
   clearLoginSession,
@@ -57,6 +57,10 @@ export function VerifyForm() {
   const t = useTranslations('verify');
   const router = useRouter();
   const qc = useQueryClient();
+  // `?next=...` was forwarded by LoginForm. We can't trust it blindly:
+  // resolveNext() validates it's same-site, role-allowed, and not /login.
+  const searchParams = useSearchParams();
+  const next = searchParams.get('next');
 
   const [session, setSession] = useState<LoginSessionState | null>(null);
   const [errVariant, setErrVariant] = useState<LoginErrorVariant>('idle');
@@ -121,7 +125,7 @@ export function VerifyForm() {
         qc.setQueryData(ME_QUERY_KEY, user);
         clearLoginSession();
         const role = user.role as Role;
-        router.replace(landingFor(role));
+        router.replace(resolveNext(next, role));
       } catch (err) {
         if (err instanceof ApiResponseError) {
           if (err.status === 423) {

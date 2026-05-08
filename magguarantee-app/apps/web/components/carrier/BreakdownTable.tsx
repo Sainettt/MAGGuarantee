@@ -1,7 +1,10 @@
+'use client';
+
 // Phase 3 — read-only month-by-month km-calc breakdown rendered on the
 // new-claim form's preview panel. Per docs/14 § Phase 3 "<BreakdownTable>".
 // The shape mirrors `MonthBreakdownDto` from `@magguarantee/shared`.
 
+import { useTranslations } from 'next-intl';
 import type { KmCalcBreakdown } from '@magguarantee/shared';
 
 import { cn } from '@/lib/utils';
@@ -23,6 +26,7 @@ export interface BreakdownTableProps {
 }
 
 export function BreakdownTable({ breakdown, className }: BreakdownTableProps) {
+  const t = useTranslations('carrier.breakdown');
   const rows = breakdown.breakdown ?? [];
 
   return (
@@ -40,31 +44,31 @@ export function BreakdownTable({ breakdown, className }: BreakdownTableProps) {
                 scope="col"
                 className="px-3 py-2 h-10 text-left text-xs font-bold uppercase tracking-wider text-text-sub border-b border-border"
               >
-                Miesiąc
+                {t('month')}
               </th>
               <th
                 scope="col"
                 className="px-3 py-2 h-10 text-right text-xs font-bold uppercase tracking-wider text-text-sub border-b border-border"
               >
-                Dni rob.
+                {t('workingDays')}
               </th>
               <th
                 scope="col"
                 className="px-3 py-2 h-10 text-right text-xs font-bold uppercase tracking-wider text-text-sub border-b border-border"
               >
-                Km/dzień
+                {t('kmPerDay')}
               </th>
               <th
                 scope="col"
                 className="px-3 py-2 h-10 text-right text-xs font-bold uppercase tracking-wider text-text-sub border-b border-border"
               >
-                Stawka €/km
+                {t('ratePerKm')}
               </th>
               <th
                 scope="col"
                 className="px-3 py-2 h-10 text-right text-xs font-bold uppercase tracking-wider text-text-sub border-b border-border"
               >
-                Km w mc
+                {t('kmInMonth')}
               </th>
             </tr>
           </thead>
@@ -75,7 +79,7 @@ export function BreakdownTable({ breakdown, className }: BreakdownTableProps) {
                   colSpan={5}
                   className="px-3 py-8 text-center text-sm text-text-sub"
                 >
-                  Brak danych do podziału
+                  {t('empty')}
                 </td>
               </tr>
             )}
@@ -109,7 +113,7 @@ export function BreakdownTable({ breakdown, className }: BreakdownTableProps) {
                   colSpan={4}
                   className="px-3 py-2 h-10 text-text uppercase text-xs tracking-wider"
                 >
-                  Razem (km gwarantowane)
+                  {t('totalKmGuaranteed')}
                 </td>
                 <td className="px-3 py-2 h-10 text-right tabular-nums text-text">
                   {formatInt(breakdown.kmGuaranteed)}

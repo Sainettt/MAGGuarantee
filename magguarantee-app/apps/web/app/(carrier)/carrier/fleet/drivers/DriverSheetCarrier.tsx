@@ -5,6 +5,7 @@
 // only manage their own drivers).
 
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useTranslations } from 'next-intl';
 import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
@@ -67,6 +68,9 @@ export function DriverSheetCarrier({
   carrierId,
   onClose,
 }: Props) {
+  const tDrivers = useTranslations('drivers');
+  const tFields = useTranslations('drivers.fields');
+  const tCommon = useTranslations('common');
   const isEdit = driver !== null;
 
   // Always validate against CreateDriverSchema — the carrier-side form
@@ -108,17 +112,17 @@ export function DriverSheetCarrier({
     onSuccess: () => {
       draft.clear();
       form.reset({ ...EMPTY_DEFAULTS });
-      toast.success('Zapisano');
+      toast.success(tCommon('saved'));
       onClose();
     },
-    onError: () => toast.error('Coś poszło nie tak. Spróbuj ponownie.'),
+    onError: () => toast.error(tCommon('errorGeneric')),
   });
   const updateM = useUpdateDriver({
     onSuccess: () => {
-      toast.success('Zapisano');
+      toast.success(tCommon('saved'));
       onClose();
     },
-    onError: () => toast.error('Coś poszło nie tak. Spróbuj ponownie.'),
+    onError: () => toast.error(tCommon('errorGeneric')),
   });
 
   const onSubmit = form.handleSubmit((values) => {
@@ -147,7 +151,7 @@ export function DriverSheetCarrier({
         <form onSubmit={onSubmit} className="flex h-full flex-col">
           <SheetHeader>
             <SheetTitle>
-              {isEdit ? 'Edytuj kierowcę' : 'Nowy kierowca'}
+              {isEdit ? tDrivers('editDriver') : tDrivers('newDriver')}
             </SheetTitle>
             <SheetDescription>
               {isEdit && driver
@@ -160,7 +164,7 @@ export function DriverSheetCarrier({
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <FormField
-                  label="Imię"
+                  label={tFields('firstName')}
                   required
                   error={errs.firstName?.message}
                   htmlFor="cdriver-firstName"
@@ -172,7 +176,7 @@ export function DriverSheetCarrier({
                   />
                 </FormField>
                 <FormField
-                  label="Nazwisko"
+                  label={tFields('lastName')}
                   required
                   error={errs.lastName?.message}
                   htmlFor="cdriver-lastName"
@@ -184,7 +188,7 @@ export function DriverSheetCarrier({
                   />
                 </FormField>
                 <FormField
-                  label="Telefon"
+                  label={tFields('phone')}
                   required
                   error={errs.phone?.message}
                   htmlFor="cdriver-phone"
@@ -196,7 +200,7 @@ export function DriverSheetCarrier({
                   />
                 </FormField>
                 <FormField
-                  label="Telefon (drugi)"
+                  label={tFields('phone2')}
                   error={errs.phone2?.message}
                   htmlFor="cdriver-phone2"
                 >
@@ -207,7 +211,7 @@ export function DriverSheetCarrier({
                   />
                 </FormField>
                 <FormField
-                  label="E-mail"
+                  label={tFields('email')}
                   error={errs.email?.message}
                   htmlFor="cdriver-email"
                 >
@@ -219,7 +223,7 @@ export function DriverSheetCarrier({
                   />
                 </FormField>
                 <FormField
-                  label="Numer prawa jazdy"
+                  label={tFields('driverLicenseNumber')}
                   required
                   error={errs.driverLicenseNumber?.message}
                   htmlFor="cdriver-license"
@@ -231,7 +235,7 @@ export function DriverSheetCarrier({
                   />
                 </FormField>
                 <FormField
-                  label="Ważność prawa jazdy"
+                  label={tFields('licenseExpiry')}
                   required
                   error={errs.licenseExpiry?.message}
                   htmlFor="cdriver-licenseExpiry"
@@ -244,7 +248,7 @@ export function DriverSheetCarrier({
                   />
                 </FormField>
                 <FormField
-                  label="Numer konta"
+                  label={tFields('bankAccount')}
                   error={errs.bankAccount?.message}
                   htmlFor="cdriver-bankAccount"
                 >
@@ -257,7 +261,7 @@ export function DriverSheetCarrier({
               </div>
 
               <FormField
-                label="Notatki"
+                label={tFields('notes')}
                 error={errs.notes?.message}
                 htmlFor="cdriver-notes"
               >
@@ -270,7 +274,7 @@ export function DriverSheetCarrier({
 
               <label className="flex items-center gap-2 text-sm text-text">
                 <Checkbox {...form.register('active')} />
-                Aktywny
+                {tFields('active')}
               </label>
             </div>
           </SheetBody>
@@ -283,14 +287,14 @@ export function DriverSheetCarrier({
               onClick={onClose}
               disabled={submitting}
             >
-              Anuluj
+              {tCommon('cancel')}
             </Button>
             <Button
               type="submit"
               size="sm"
               disabled={submitting || (!isEdit && !carrierId)}
             >
-              {submitting ? 'Zapisywanie…' : 'Zapisz'}
+              {submitting ? tCommon('saving') : tCommon('save')}
             </Button>
           </SheetFooter>
         </form>

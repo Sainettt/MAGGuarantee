@@ -4,6 +4,7 @@
 // the opiekun, the carrier can only see them. Per docs/14 "Auta" sub-tab.
 
 import { Mail, Truck } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { useMemo } from 'react';
 import type { VehicleListItem } from '@magguarantee/shared';
 
@@ -13,6 +14,9 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { useMyFleet } from '@/lib/hooks/useMyFleet';
 
 export default function CarrierVehiclesPage() {
+  const t = useTranslations('carrier.fleet.vehicles');
+  const tColumns = useTranslations('carrier.fleet.vehicles.columns');
+  const tCommon = useTranslations('common');
   const { data, isLoading } = useMyFleet();
   const vehicles = data?.vehicles ?? [];
 
@@ -20,53 +24,55 @@ export default function CarrierVehiclesPage() {
     () => [
       {
         id: 'plate',
-        header: 'Numer rejestracyjny',
+        header: tColumns('plate'),
         cell: (row) => (
           <span className="font-mono font-semibold">{row.plateNumber}</span>
         ),
       },
       {
         id: 'side',
-        header: 'Numer boczny',
+        header: tColumns('side'),
         cell: (row) => row.sideNumber ?? '—',
       },
       {
         id: 'brand',
-        header: 'Marka / model',
+        header: tColumns('brandModel'),
         cell: (row) =>
           [row.brand, row.model].filter(Boolean).join(' ') || '—',
       },
       {
         id: 'type',
-        header: 'Typ',
+        header: tColumns('type'),
         cell: (row) => row.type ?? '—',
       },
       {
         id: 'active',
-        header: 'Status',
+        header: tColumns('status'),
         cell: (row) =>
           row.active ? (
-            <Badge variant="success">Aktywny</Badge>
+            <Badge variant="success">{tCommon('active')}</Badge>
           ) : (
-            <Badge variant="muted">Nieaktywny</Badge>
+            <Badge variant="muted">{tCommon('inactive')}</Badge>
           ),
       },
     ],
-    [],
+    [tColumns, tCommon],
   );
+
+  const mailtoSubject = encodeURIComponent(t('contactOpiekunSubject'));
 
   return (
     <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <h1 className="text-2xl font-extrabold tracking-tight text-text">
-          Pojazdy
+          {t('title')}
         </h1>
         <a
-          href="mailto:opiekun@magtrans.eu?subject=Zmiana%20danych%20pojazdu"
+          href={`mailto:opiekun@magtrans.eu?subject=${mailtoSubject}`}
           className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand hover:text-brand-dark"
         >
           <Mail size={14} />
-          Skontaktuj się z opiekunem
+          {t('contactOpiekun')}
         </a>
       </div>
 
@@ -78,8 +84,8 @@ export default function CarrierVehiclesPage() {
         empty={
           <EmptyState
             icon={Truck}
-            title="Brak pojazdów"
-            message="Skontaktuj się z opiekunem, aby dodać pojazd."
+            title={t('emptyTitle')}
+            message={t('emptyMessage')}
           />
         }
       />

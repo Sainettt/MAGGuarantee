@@ -5,6 +5,7 @@
 // the session. List/edit access is API-scoped.
 
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useTranslations } from 'next-intl';
 import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
@@ -60,6 +61,10 @@ export function TrailerSheetCarrier({
   carrierId,
   onClose,
 }: Props) {
+  const tTrailers = useTranslations('trailers');
+  const tFields = useTranslations('trailers.fields');
+  const tSections = useTranslations('trailers.sections');
+  const tCommon = useTranslations('common');
   const isEdit = trailer !== null;
 
   const form = useForm<FormValues>({
@@ -113,17 +118,17 @@ export function TrailerSheetCarrier({
     onSuccess: () => {
       draft.clear();
       form.reset(getDefaults());
-      toast.success('Zapisano');
+      toast.success(tCommon('saved'));
       onClose();
     },
-    onError: () => toast.error('Coś poszło nie tak. Spróbuj ponownie.'),
+    onError: () => toast.error(tCommon('errorGeneric')),
   });
   const updateM = useUpdateTrailer({
     onSuccess: () => {
-      toast.success('Zapisano');
+      toast.success(tCommon('saved'));
       onClose();
     },
-    onError: () => toast.error('Coś poszło nie tak. Spróbuj ponownie.'),
+    onError: () => toast.error(tCommon('errorGeneric')),
   });
 
   const onSubmit = form.handleSubmit((values) => {
@@ -147,7 +152,7 @@ export function TrailerSheetCarrier({
         <form onSubmit={onSubmit} className="flex h-full flex-col">
           <SheetHeader>
             <SheetTitle>
-              {isEdit ? 'Edytuj naczepę' : 'Nowa naczepa'}
+              {isEdit ? tTrailers('editTrailer') : tTrailers('newTrailer')}
             </SheetTitle>
             <SheetDescription>
               {isEdit && trailer ? trailer.plateNumber : null}
@@ -156,10 +161,10 @@ export function TrailerSheetCarrier({
 
           <SheetBody>
             <div className="space-y-6">
-              <FormSection title="Identyfikacja">
+              <FormSection title={tSections('identification')}>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <FormField
-                    label="Numer rejestracyjny"
+                    label={tFields('plateNumber')}
                     required
                     error={errs.plateNumber?.message}
                     htmlFor="ctrailer-plateNumber"
@@ -171,7 +176,7 @@ export function TrailerSheetCarrier({
                     />
                   </FormField>
                   <FormField
-                    label="Typ naczepy"
+                    label={tFields('trailerType')}
                     required
                     error={errs.trailerTypeId?.message}
                     htmlFor="ctrailer-typeId"
@@ -190,7 +195,7 @@ export function TrailerSheetCarrier({
                     </Select>
                   </FormField>
                   <FormField
-                    label="Marka"
+                    label={tFields('brand')}
                     error={errs.brand?.message}
                     htmlFor="ctrailer-brand"
                   >
@@ -201,7 +206,7 @@ export function TrailerSheetCarrier({
                     />
                   </FormField>
                   <FormField
-                    label="Model"
+                    label={tFields('model')}
                     error={errs.model?.message}
                     htmlFor="ctrailer-model"
                   >
@@ -212,7 +217,7 @@ export function TrailerSheetCarrier({
                     />
                   </FormField>
                   <FormField
-                    label="Rok"
+                    label={tFields('year')}
                     error={errs.year?.message}
                     htmlFor="ctrailer-year"
                   >
@@ -227,7 +232,7 @@ export function TrailerSheetCarrier({
                     />
                   </FormField>
                   <FormField
-                    label="Następny przegląd"
+                    label={tFields('nextInspectionDate')}
                     error={errs.nextInspectionDate?.message}
                     htmlFor="ctrailer-nextInspectionDate"
                   >
@@ -241,10 +246,10 @@ export function TrailerSheetCarrier({
                 </div>
               </FormSection>
 
-              <FormSection title="Wymiary">
+              <FormSection title={tSections('dimensions')}>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <FormField
-                    label="Długość wewn. (m)"
+                    label={tFields('innerLength')}
                     error={errs.innerLength?.message}
                     htmlFor="ctrailer-innerLength"
                   >
@@ -260,7 +265,7 @@ export function TrailerSheetCarrier({
                     />
                   </FormField>
                   <FormField
-                    label="Szerokość wewn. (m)"
+                    label={tFields('innerWidth')}
                     error={errs.innerWidth?.message}
                     htmlFor="ctrailer-innerWidth"
                   >
@@ -276,7 +281,7 @@ export function TrailerSheetCarrier({
                     />
                   </FormField>
                   <FormField
-                    label="Wysokość wewn. (m)"
+                    label={tFields('innerHeight')}
                     error={errs.innerHeight?.message}
                     htmlFor="ctrailer-innerHeight"
                   >
@@ -292,7 +297,7 @@ export function TrailerSheetCarrier({
                     />
                   </FormField>
                   <FormField
-                    label="Ładowność (t)"
+                    label={tFields('capacity')}
                     error={errs.capacity?.message}
                     htmlFor="ctrailer-capacity"
                   >
@@ -310,7 +315,7 @@ export function TrailerSheetCarrier({
                 </div>
               </FormSection>
 
-              <FormSection title="Wyposażenie">
+              <FormSection title={tSections('equipment')}>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
                   {(
                     [
@@ -329,12 +334,12 @@ export function TrailerSheetCarrier({
                       className="flex items-center gap-2 text-text"
                     >
                       <Checkbox {...form.register(key)} />
-                      {labelFor(key)}
+                      {tFields(key)}
                     </label>
                   ))}
                 </div>
                 <FormField
-                  label="Wyposażenie (opis)"
+                  label={tFields('equipment')}
                   error={errs.equipment?.message}
                   htmlFor="ctrailer-equipment"
                 >
@@ -345,7 +350,7 @@ export function TrailerSheetCarrier({
                   />
                 </FormField>
                 <FormField
-                  label="Notatki"
+                  label={tFields('notes')}
                   error={errs.notes?.message}
                   htmlFor="ctrailer-notes"
                 >
@@ -357,7 +362,7 @@ export function TrailerSheetCarrier({
                 </FormField>
                 <label className="flex items-center gap-2 text-sm text-text">
                   <Checkbox {...form.register('active')} />
-                  Aktywny
+                  {tFields('active')}
                 </label>
               </FormSection>
             </div>
@@ -371,14 +376,14 @@ export function TrailerSheetCarrier({
               onClick={onClose}
               disabled={submitting}
             >
-              Anuluj
+              {tCommon('cancel')}
             </Button>
             <Button
               type="submit"
               size="sm"
               disabled={submitting || (!isEdit && !carrierId)}
             >
-              {submitting ? 'Zapisywanie…' : 'Zapisz'}
+              {submitting ? tCommon('saving') : tCommon('save')}
             </Button>
           </SheetFooter>
         </form>
@@ -429,25 +434,3 @@ function cleanForm(values: FormValues): Record<string, unknown> {
   return out;
 }
 
-function labelFor(key: string): string {
-  switch (key) {
-    case 'belts':
-      return 'Pasy';
-    case 'mats':
-      return 'Maty';
-    case 'airSuspension':
-      return 'Zawieszenie pneum.';
-    case 'loadFromBack':
-      return 'Załadunek tył';
-    case 'loadFromSide':
-      return 'Załadunek bok';
-    case 'loadFromTop':
-      return 'Załadunek góra';
-    case 'slidingRoof':
-      return 'Dach przesuwany';
-    case 'edschaSlidingRoof':
-      return 'Dach Edscha';
-    default:
-      return key;
-  }
-}
