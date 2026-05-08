@@ -126,12 +126,16 @@ model Carrier {
   accountEur      String // KontoEUR — IBAN
   accountPln      String? // KontoPLN
   paymentTerms    Int       @default(30) // days
-  // Document fields are nullable because carrier onboarding (admin/opiekun
-  // create flow) doesn't always have copies of insurance/license certificates
-  // in hand at row-creation time; foreign carriers may also lack a directly
-  // comparable PL OCP figure. Activation gate / reminder is enforced in UI,
+  // OCP insurance sum (EUR/PLN). Required at every layer (UI + Zod + DB
+  // NOT NULL); Zod additionally enforces `> 0`. Without an insurance value
+  // the carrier cannot legally haul, so unlike the expiry-date documents
+  // there is no "we'll fill it in after onboarding" path.
+  insuranceValue  Decimal   @db.Decimal(12, 2)
+  // Expiry dates are nullable at the DB level because admin/opiekun
+  // onboarding doesn't always have certificate copies in hand at
+  // row-creation time, and foreign carriers may follow a different
+  // certification regime. Activation gate / reminder is enforced in UI,
   // not at the schema level.
-  insuranceValue  Decimal?  @db.Decimal(12, 2)
   insuranceExpiry DateTime? @db.Date
   licenseExpiry   DateTime? @db.Date
   numberOfPermits Int? // LiczbaWypisow (KREPTD)
@@ -238,7 +242,7 @@ model Driver {
   carrierId String  @db.Uuid
   carrier   Carrier @relation(fields: [carrierId], references: [id])
 
-  loginSlug           String   @unique // имя.фамилия (or -2/-3 on collision)
+  loginSlug           String    @unique // имя.фамилия (or -2/-3 on collision)
   firstName           String
   lastName            String
   phone               String
@@ -255,8 +259,8 @@ model Driver {
   // No business reason to require it at the MAGGuarantee schema level.
   bankAccount         String?
   notes               String?
-  active              Boolean  @default(true)
-  addedAt             DateTime @default(now())
+  active              Boolean   @default(true)
+  addedAt             DateTime  @default(now())
 
   delegations Delegation[]
 
@@ -370,7 +374,7 @@ model Claim {
   authorizationToken       String?
   authorizationDecidedAt   DateTime?
 
-  amountRequested Decimal @db.Decimal(12, 2) // KwotaWnioskowana — carrier always supplies this at submit
+  amountRequested Decimal  @db.Decimal(12, 2) // KwotaWnioskowana — carrier always supplies this at submit
   amountApproved  Decimal? @db.Decimal(12, 2) // ZatwKwota
   margin          Decimal? @db.Decimal(12, 2)
   amountMaximum   Decimal? @db.Decimal(12, 2)

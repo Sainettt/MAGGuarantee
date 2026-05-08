@@ -64,11 +64,9 @@ const carrierProfileFields = {
    * Create DTO; required in the response DTO.
    */
   paymentTerms: z.number().int().nonnegative().max(365).optional().default(30),
-  // Required at the API layer — admin onboarding must have insurance and
-  // license documents in hand. The DB column itself is nullable to allow
-  // backfills / imports / migration-time stubs without a CHECK violation;
-  // the create endpoint enforces presence via this Zod schema.
-  insuranceValue: z.number().nonnegative(),
+  // REQUIRED — must be > 0. The DB column is now NOT NULL Decimal(12,2);
+  // Zod owns the positivity check (no CHECK constraint at the DB level).
+  insuranceValue: z.number().positive(),
   insuranceExpiry: IsoDateSchema,
   licenseExpiry: IsoDateSchema,
   numberOfPermits: z.number().int().nonnegative().max(10_000).optional(),
@@ -133,7 +131,7 @@ export const UpdateCarrierSchema = z
       z.string().max(64).nullable().optional(),
     ),
     paymentTerms: z.number().int().nonnegative().max(365).nullable().optional(),
-    insuranceValue: z.number().nonnegative().nullable().optional(),
+    insuranceValue: z.number().positive().optional(),
     insuranceExpiry: emptyStringToUndefined(
       IsoDateSchema.nullable().optional(),
     ),
@@ -192,8 +190,7 @@ export const CarrierDtoSchema = z.object({
   accountEur: z.string(),
   accountPln: z.string().nullable(),
   paymentTerms: z.number().int(),
-  // Nullable per phase3_blocks_audit_revert.
-  insuranceValue: z.number().nullable(),
+  insuranceValue: z.number(),
   insuranceExpiry: IsoDateSchema.nullable(),
   licenseExpiry: IsoDateSchema.nullable(),
   numberOfPermits: z.number().int().nullable(),

@@ -35,7 +35,7 @@ function makeCarrier(overrides: Partial<CarrierRow> = {}): CarrierRow {
     accountEur: 'PL00 0000 0000 0000',
     accountPln: null,
     paymentTerms: 30,
-    insuranceValue: 0,
+    insuranceValue: 100000,
     insuranceExpiry: NOW,
     licenseExpiry: NOW,
     numberOfPermits: null,

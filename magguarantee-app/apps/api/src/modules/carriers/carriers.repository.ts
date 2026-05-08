@@ -10,7 +10,8 @@ import { PrismaService } from '../prisma/prisma.service';
  * phase3_blocks migration tightened the rest of the operational fields
  * (`contactPerson`, `ordersEmail`, `accountEur`, `paymentTerms`,
  * `insuranceValue`, `insuranceExpiry`, `licenseExpiry`, `companyAddress`)
- * to NOT NULL — the row shape mirrors that.
+ * to NOT NULL — the row shape mirrors that. `insuranceValue` is NOT NULL
+ * Decimal(12,2) and surfaces here as `number`.
  *
  * `email` follows the User column which is also NOT NULL post-phase3_blocks.
  */
@@ -32,8 +33,7 @@ export interface CarrierRow {
   accountEur: string;
   accountPln: string | null;
   paymentTerms: number;
-  // Nullable per phase3_blocks_audit_revert.
-  insuranceValue: number | null;
+  insuranceValue: number;
   insuranceExpiry: Date | null;
   licenseExpiry: Date | null;
   numberOfPermits: number | null;
@@ -75,7 +75,7 @@ interface CreateCarrierData {
   accountEur: string;
   accountPln?: string | null;
   paymentTerms?: number;
-  insuranceValue?: number | null;
+  insuranceValue: number;
   insuranceExpiry?: Date | null;
   licenseExpiry?: Date | null;
   numberOfPermits?: number | null;
@@ -98,7 +98,7 @@ interface UpdateCarrierData {
   accountEur?: string;
   accountPln?: string | null;
   paymentTerms?: number;
-  insuranceValue?: number | null;
+  insuranceValue?: number;
   insuranceExpiry?: Date | null;
   licenseExpiry?: Date | null;
   numberOfPermits?: number | null;
@@ -368,8 +368,10 @@ export class CarriersRepository {
       accountEur: row.accountEur ?? '',
       accountPln: row.accountPln,
       paymentTerms: row.paymentTerms ?? 30,
-      // Nullable per phase3_blocks_audit_revert.
-      insuranceValue: decimalToNumber(row.insuranceValue),
+      // NOT NULL Decimal(12,2) — surface as `number`. Fallback `?? 0` mirrors
+      // the same defensive pattern used for NOT NULL Decimal columns in
+      // claims.repository.ts; in practice the column never observes null.
+      insuranceValue: decimalToNumber(row.insuranceValue) ?? 0,
       insuranceExpiry: row.insuranceExpiry,
       licenseExpiry: row.licenseExpiry,
       numberOfPermits: row.numberOfPermits,

@@ -82,7 +82,13 @@ interface Props {
 // reach the API — `cleanForm` strips them after we combine them into
 // `vatId`. RHF's `passthrough()` resolver lets these unknown keys live in
 // the form state without tripping the strict Zod schemas.
-type CarrierFormValues = CreateCarrierDto & {
+//
+// `insuranceValue` is widened to `number | undefined` for the form only —
+// the wire DTO still requires `number`. Allowing undefined in form state
+// lets the input start blank; Zod then reports the missing field on submit
+// instead of the form silently sending 0.
+type CarrierFormValues = Omit<CreateCarrierDto, 'insuranceValue'> & {
+  insuranceValue?: number;
   active?: boolean;
   _vatCountry?: string;
   _vatNumber?: string;
@@ -213,7 +219,7 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
         accountEur: carrier.accountEur ?? '',
         accountPln: carrier.accountPln ?? '',
         paymentTerms: carrier.paymentTerms ?? 30,
-        insuranceValue: carrier.insuranceValue ?? 0,
+        insuranceValue: carrier.insuranceValue ?? undefined,
         insuranceExpiry: carrier.insuranceExpiry ?? '',
         licenseExpiry: carrier.licenseExpiry ?? '',
         numberOfPermits: carrier.numberOfPermits ?? undefined,
@@ -304,7 +310,31 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
           </SheetHeader>
 
           <SheetBody>
-            <div className="space-y-6">
+            {/*
+             * Clicking on empty padding inside the sheet body clears the
+             * post-submit validation noise (red borders + error messages)
+             * across all fields at once. Clicks on actual interactive
+             * controls are ignored so they can re-trigger validation if
+             * appropriate.
+             */}
+            <div
+              className="space-y-6"
+              onClick={(e) => {
+                const target = e.target as HTMLElement;
+                if (
+                  target.closest(
+                    'input, select, textarea, button, label, a, [role="combobox"], [role="button"], [role="checkbox"]',
+                  )
+                ) {
+                  return;
+                }
+                form.clearErrors();
+                setNipState('idle');
+                setNipMsg(undefined);
+                setAccountState('idle');
+                setAccountMsg(undefined);
+              }}
+            >
               <FormSection title={t('sections.account')}>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <FormField
@@ -385,6 +415,7 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                   {!isEdit && (
                     <FormField
                       label={t('fields.password')}
+                      required
                       description="≥10 chars, ≥1 letter, ≥1 digit. Leave empty to auto-generate."
                       error={errMsg('password')}
                       htmlFor="carrier-password"
@@ -566,8 +597,11 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                       min={0}
                       className="h-10"
                       {...form.register('insuranceValue', {
+                        // Empty / null input → undefined so Zod treats the
+                        // field as missing and surfaces "Required" instead of
+                        // silently coercing to 0.
                         setValueAs: (v) =>
-                          v === '' || v === null ? 0 : Number(v),
+                          v === '' || v === null ? undefined : Number(v),
                       })}
                     />
                   </FormField>
@@ -705,8 +739,11 @@ function getDefaults(): CarrierFormValues {
     // paymentTerms has a Zod default (30) but RHF needs a controlled value.
     // 30 mirrors the schema default so the user sees the canonical value.
     paymentTerms: 30,
-    // insuranceValue is now NOT NULL — start at 0 so the input is controlled.
-    insuranceValue: 0,
+    // insuranceValue is required (NOT NULL, must be > 0). Leave undefined so
+    // the <input type="number"> stays empty until the user types — submitting
+    // blank then surfaces the standard Zod "Required" / positive-number error
+    // instead of silently sending 0.
+    insuranceValue: undefined,
     // insuranceExpiry / licenseExpiry are NOT NULL ISO-date strings. Empty
     // string keeps the <input type="date"> controlled; IsoDateSchema rejects
     // it on submit so the user sees a clear error.

@@ -8,6 +8,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { LoginRequest as LoginRequestSchema } from '@magguarantee/shared';
+import { Eye, EyeOff } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
@@ -32,6 +33,7 @@ export function LoginForm() {
   const searchParams = useSearchParams();
   const next = searchParams.get('next');
   const [errVariant, setErrVariant] = useState<LoginErrorVariant>('idle');
+  const [showPassword, setShowPassword] = useState(false);
 
   const {
     register,
@@ -89,14 +91,31 @@ export function LoginForm() {
         </div>
         <div>
           <Label htmlFor="password">{t('passwordLabel')}</Label>
-          <Input
-            id="password"
-            type="password"
-            autoComplete="current-password"
-            placeholder={t('passwordPlaceholder')}
-            aria-invalid={!!errors.password || undefined}
-            {...register('password')}
-          />
+          <div className="relative">
+            <Input
+              id="password"
+              type={showPassword ? 'text' : 'password'}
+              autoComplete="current-password"
+              placeholder={t('passwordPlaceholder')}
+              aria-invalid={!!errors.password || undefined}
+              className="pr-10"
+              {...register('password')}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              aria-label={showPassword ? t('passwordHide') : t('passwordShow')}
+              aria-pressed={showPassword}
+              tabIndex={-1}
+              className="absolute inset-y-0 right-0 flex items-center px-3 text-text-sub hover:text-text outline-none focus-visible:text-text"
+            >
+              {showPassword ? (
+                <EyeOff className="h-4 w-4" aria-hidden />
+              ) : (
+                <Eye className="h-4 w-4" aria-hidden />
+              )}
+            </button>
+          </div>
         </div>
         <Button
           type="submit"

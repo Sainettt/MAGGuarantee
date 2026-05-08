@@ -117,7 +117,7 @@ export class CarriersService {
         accountEur: dto.accountEur,
         accountPln: dto.accountPln ?? null,
         paymentTerms: dto.paymentTerms,
-        insuranceValue: dto.insuranceValue ?? null,
+        insuranceValue: dto.insuranceValue,
         insuranceExpiry: dto.insuranceExpiry ? new Date(dto.insuranceExpiry) : null,
         licenseExpiry: dto.licenseExpiry ? new Date(dto.licenseExpiry) : null,
         numberOfPermits: dto.numberOfPermits ?? null,
@@ -183,7 +183,7 @@ export class CarriersService {
         ...(dto.paymentTerms !== undefined && dto.paymentTerms !== null
           ? { paymentTerms: dto.paymentTerms }
           : {}),
-        ...(dto.insuranceValue !== undefined && dto.insuranceValue !== null
+        ...(dto.insuranceValue !== undefined
           ? { insuranceValue: dto.insuranceValue }
           : {}),
         ...(dto.insuranceExpiry !== undefined && dto.insuranceExpiry !== null

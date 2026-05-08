@@ -139,8 +139,9 @@ model Carrier {
   accountEur      String   // STRICT (foreign carriers may not have PLN account)
   accountPln      String?
   paymentTerms    Int      @default(30)
+  // STRICT — UI + API + DB NOT NULL; Zod additionally enforces `> 0`
+  insuranceValue  Decimal   @db.Decimal(12, 2)
   // API + UI required, DB nullable — admin/opiekun create flow may lack copies
-  insuranceValue  Decimal?  @db.Decimal(12, 2)
   insuranceExpiry DateTime? @db.Date
   licenseExpiry   DateTime? @db.Date
   numberOfPermits Int?      // KREPTD wypisy
@@ -539,7 +540,8 @@ model ClaimSequence {
 |---|---|---|
 | `contactPerson`, `phone`, `ordersEmail`, `accountEur`, `companyAddress` | Strict everywhere | DB NOT NULL |
 | `paymentTerms` | Strict everywhere (DB default 30) | |
-| `insuranceValue`, `insuranceExpiry`, `licenseExpiry` | API + UI required, DB nullable | Allows admin/opiekun create when copies of certs not in hand |
+| `insuranceValue` | Strict everywhere | DB NOT NULL; Zod adds `> 0` |
+| `insuranceExpiry`, `licenseExpiry` | API + UI required, DB nullable | Allows admin/opiekun create when certificate copies not in hand |
 | `nip`, `vatId`, `accountPln`, `numberOfPermits`, `company` | Optional everywhere | At least one of (nip, vatId) — backlog CHECK, see #19 quirks |
 
 ### Vehicle
@@ -767,6 +769,8 @@ model ClaimSequence {
 | `20260507191424_phase3_blocks` | Strict-everywhere перевод: NOT NULL на базовый профиль `Carrier` (contactPerson/ordersEmail/accountEur/companyAddress/...), расчётные поля `Claim` (timeFrom/timeTo/drivenDays/mileage/...), driver email/license/bank, vehicle certificateL/euro/type/rates, departure-fields на delegations. **Добавляет CHECK constraints:** `claim_accepted_payment_complete` (orderNumber+orderDate+amountApproved при ZAAKCEPTOWANO) и `vehicle_gps_device_when_gps_on` (gpsMobilePhone при gps=true). |
 | `20260507195536_phase3_blocks_audit_revert` | Откатывает несколько слишком-агрессивных NOT NULL-ов из предыдущей миграции (insurance/license carrier, plannedReturn delegation, email/license/bank driver, rates vehicle, password user) — поля возвращаются в DB-nullable, обязательность остаётся на API+UI. **Закрепляет** `amountRequested` как DB NOT NULL и **добавляет** CHECK `delegation_returned_complete` (actualReturnAt+returnCountry+returnPostalCode при `zjechal`). |
 | `20260507223021_move_company_to_carrier` | Переносит поле `company` (Firma) с `users` на `carriers`. Денормализация-наследие GAS-миграции; внутренние сотрудники MAGTRANS никогда company не имели. ADD column → BACKFILL через carrier↔user 1:1 → DROP source — порядок безопасен на непустой БД. |
+| `20260508115947_carrier_nip_vat_required` | NOT NULL на `carriers.nip` и `carriers.vatId`. Налоговые ID требуются на момент создания: PL-перевозчики дают 10-значный NIP, иностранные — локальный TIN; `vatId` — EU VAT с префиксом страны. |
+| `20260508194914_phase3_insurance_value_required` | NOT NULL на `carriers.insuranceValue`. Без OCP-страховки перевозчик не может ехать; `insuranceExpiry`/`licenseExpiry` остаются nullable (могут не быть копий на момент онбординга). Бэкфилл `0` для stale-dev-строк перед SET NOT NULL — Zod на API enforce'ит `> 0`, поэтому 0 не переживает round-trip через create/update. |
 
 Production deploy: `prisma migrate deploy` в CI/CD пайплайне (без `--create-only`).
 

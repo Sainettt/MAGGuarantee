@@ -46,6 +46,8 @@
     "loginPlaceholder": "Enter login",
     "passwordLabel": "Password",
     "passwordPlaceholder": "Enter password",
+    "passwordShow": "Show password",
+    "passwordHide": "Hide password",
     "submit": "Continue →",
     "submitting": "Signing in...",
     "forgotPassword": "Forgot password",
