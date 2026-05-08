@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/Sheet';
 import { Textarea } from '@/components/ui/Textarea';
 import { FormField } from '@/components/forms/Form';
+import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useCreateDriver, useUpdateDriver } from '@/lib/hooks/useDrivers';
 import { useFormDraft } from '@/lib/hooks/useFormDraft';
 
@@ -125,22 +126,25 @@ export function DriverSheetCarrier({
     onError: () => toast.error(tCommon('errorGeneric')),
   });
 
-  const onSubmit = form.handleSubmit((values) => {
-    const cleaned: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(values)) {
-      if (v === '' || v === undefined) continue;
-      cleaned[k] = v;
-    }
-    if (isEdit && driver) {
-      const { carrierId: _carrierId, ...rest } = cleaned;
-      void _carrierId;
-      updateM.mutate({ id: driver.id, body: rest as UpdateDriverDto });
-    } else {
-      // Always force the session-derived carrierId; never trust the form.
-      cleaned.carrierId = carrierId;
-      createM.mutate(cleaned as CreateDriverDto);
-    }
-  });
+  const onSubmit = form.handleSubmit(
+    (values) => {
+      const cleaned: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(values)) {
+        if (v === '' || v === undefined) continue;
+        cleaned[k] = v;
+      }
+      if (isEdit && driver) {
+        const { carrierId: _carrierId, ...rest } = cleaned;
+        void _carrierId;
+        updateM.mutate({ id: driver.id, body: rest as UpdateDriverDto });
+      } else {
+        // Always force the session-derived carrierId; never trust the form.
+        cleaned.carrierId = carrierId;
+        createM.mutate(cleaned as CreateDriverDto);
+      }
+    },
+    onInvalidToast(form.setFocus, tCommon('validationFailedToast')),
+  );
 
   const submitting = createM.isPending || updateM.isPending;
   const errs = form.formState.errors;

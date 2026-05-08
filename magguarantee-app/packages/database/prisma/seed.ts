@@ -93,6 +93,19 @@ const APP_CONFIG_ENTRIES: AppConfigEntry[] = [
     description:
       'Days — maximum delay after dateEnd within which a carrier may submit a claim. Past this window the form is rejected. Source: Code.gs:6149.',
   },
+  // Phase 3 — claim period sanity bounds (UX guards added 2026-05).
+  {
+    key: 'max_period_days',
+    value: '90',
+    description:
+      'Days — maximum length of a single claim period (dateEnd − dateStart). Carriers occasionally try to bundle a quarter into one wniosek; this caps the period at a contract-realistic quarter.',
+  },
+  {
+    key: 'max_avg_km_per_day',
+    value: '2000',
+    description:
+      'Km/day — sanity cap on `mileage / drivenDays`. Trucks legitimately do up to ~1500 km/day in 2-driver continuous operation; anything beyond ~2000 is almost always a typo or odometer reset.',
+  },
 ];
 
 // ─── Trailer types (reference catalog) ──────────────────

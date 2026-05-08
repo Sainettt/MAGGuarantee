@@ -43,6 +43,27 @@ export const EuVatSchema = z
   );
 export type EuVat = z.infer<typeof EuVatSchema>;
 
+/**
+ * Generic tax-identification number — country-agnostic. Used by the carrier
+ * `nip` field, which historically held a 10-digit Polish NIP but in practice
+ * also receives foreign company tax IDs (Italian Codice Fiscale up to 16,
+ * various EU TINs up to 14, US EIN 9 digits, etc.). We only enforce a sane
+ * length range and an alphanumeric class — country-specific format rules
+ * (PL=10 digits, etc.) are still applied per-flow at the integration layer
+ * (e.g. Biała Lista accepts only 10-digit PL NIP).
+ *
+ * Length: min 5 (avoids accidental noise like "1" or "ab"), max 20 (covers
+ * the longest realistic tax ID with separators stripped — Italian Codice
+ * Fiscale individuale is 16, plus a margin for hyphenated/variant formats).
+ */
+export const TaxIdSchema = z
+  .string()
+  .regex(
+    /^[A-Za-z0-9]{5,20}$/,
+    'Tax ID must be 5–20 alphanumeric characters (no spaces, hyphens, or punctuation)',
+  );
+export type TaxId = z.infer<typeof TaxIdSchema>;
+
 // ─── Identifier primitives ────────────────────────────────
 
 /** RFC-4122 UUID v4 (Postgres `gen_random_uuid()` default). */

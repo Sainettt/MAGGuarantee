@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/Sheet';
 import { Textarea } from '@/components/ui/Textarea';
 import { FormField } from '@/components/forms/Form';
+import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useSubmitReklamacja } from '@/lib/hooks/useClaims';
 
 const REKLAMACJA_WINDOW_MS = 48 * 60 * 60 * 1000;
@@ -93,13 +94,16 @@ export function ReklamacjaSheet({ open, claim, onClose }: Props) {
     return diff > 0 ? diff : null;
   }, [claim]);
 
-  const onSubmit = form.handleSubmit((values) => {
-    if (!claim || expired) return;
-    submitM.mutate({
-      nrZgl: claim.nrZgl,
-      body: values,
-    });
-  });
+  const onSubmit = form.handleSubmit(
+    (values) => {
+      if (!claim || expired) return;
+      submitM.mutate({
+        nrZgl: claim.nrZgl,
+        body: values,
+      });
+    },
+    onInvalidToast(form.setFocus, tCommon('validationFailedToast')),
+  );
 
   const submitting = submitM.isPending;
   const errs = form.formState.errors;

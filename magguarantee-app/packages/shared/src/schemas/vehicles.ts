@@ -21,8 +21,8 @@ const EuroNormSchema = z.enum(['III', 'IV', 'V', 'VI']);
 const VehicleTypeSchema = z.enum(['MEGA', 'STD', 'COIL']);
 
 const vehicleAttributeFields = {
-  plannerId: UuidSchema.optional(),
-  dispatcherId: UuidSchema.optional(),
+  plannerId: UuidSchema,
+  dispatcherId: UuidSchema,
   brand: emptyStringToUndefined(z.string().max(64).optional()),
   model: emptyStringToUndefined(z.string().max(64).optional()),
   year: z.number().int().min(1900).max(2100).optional(),
@@ -32,7 +32,7 @@ const vehicleAttributeFields = {
   /** REQUIRED — Vehicle.euro is NOT NULL since phase3_blocks. */
   euro: EuroNormSchema,
   adrClasses: z.array(z.string().max(16)).max(20).optional(),
-  gps: z.boolean().optional().default(false),
+  gps: z.boolean().default(false),
   fuelCard: z.boolean().optional().default(false),
   /** REQUIRED — Vehicle.type is NOT NULL since phase3_blocks. */
   type: VehicleTypeSchema,
@@ -41,14 +41,14 @@ const vehicleAttributeFields = {
   fr: z.boolean().optional(),
   agreement: z.boolean().optional(),
   contract: z.boolean().optional(),
-  // EUR/km rates are negotiated AFTER vehicle creation (admin sets them once
-  // contract terms land). NULL means "not yet set"; `0` would be ambiguous
-  // ("free haulage" vs "not negotiated"). Reverted to nullable in
-  // phase3_blocks_audit_revert.
-  rateDe: z.number().nonnegative().nullable().optional(),
-  rateUe: z.number().nonnegative().nullable().optional(),
-  rateExport: z.number().nonnegative().nullable().optional(),
-  rateImport: z.number().nonnegative().nullable().optional(),
+  // EUR/km rates are required at vehicle creation — admin must enter all four
+  // before the carrier can submit a claim against this truck. Zero is a valid
+  // value ("free haulage" / promotional rate) and remains accepted; the
+  // missing-rate guard kicks in only when the field is left blank.
+  rateDe: z.number().nonnegative(),
+  rateUe: z.number().nonnegative(),
+  rateExport: z.number().nonnegative(),
+  rateImport: z.number().nonnegative(),
   wasteAllowed: z.boolean().optional(),
   wasteCountries: z.array(z.string().max(8)).max(64).optional(),
   cabotageDe: z.boolean().optional(),

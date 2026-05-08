@@ -38,10 +38,35 @@ import { NrZglService } from './nr-zgl.service';
 /** AppConfig keys this service consults. */
 const APP_CONFIG_MIN_DAYS = 'min_days_to_submit';
 const APP_CONFIG_MAX_DAYS_AFTER_UNLOAD = 'max_days_after_unloading';
+const APP_CONFIG_MAX_PERIOD_DAYS = 'max_period_days';
+const APP_CONFIG_MAX_AVG_KM_PER_DAY = 'max_avg_km_per_day';
 
 /** Hardcoded fallbacks if AppConfig rows are missing — match seed defaults. */
 const DEFAULT_MIN_DAYS_TO_SUBMIT = 10;
 const DEFAULT_MAX_DAYS_AFTER_UNLOAD = 7;
+const DEFAULT_MAX_PERIOD_DAYS = 90;
+const DEFAULT_MAX_AVG_KM_PER_DAY = 2000;
+
+/**
+ * Wire shape of the multi-violation 422 envelope. The `ProblemDetailsFilter`
+ * forwards the `violations` array to the client unchanged; the carrier UI
+ * renders it as a list above the form. Submit / reklamacja both use this.
+ */
+interface ViolationsPayload {
+  message: string;
+  violations: string[];
+}
+
+function violationsException(violations: string[]): UnprocessableEntityException {
+  const payload: ViolationsPayload = {
+    message:
+      violations.length === 1
+        ? violations[0]!
+        : 'Wniosek nie może zostać zapisany — patrz lista poniżej.',
+    violations,
+  };
+  return new UnprocessableEntityException(payload);
+}
 
 /**
  * Phase 3 — Claims service.
@@ -73,22 +98,98 @@ export class ClaimsService {
   async submit(user: AuthUser, dto: SubmitClaimDto): Promise<ClaimDto> {
     const carrier = await this._requireCarrierProfile(user);
 
-    // Validate fleet ownership BEFORE we touch the NrZgl counter — if any
-    // of these throw, no row is wasted.
-    const vehicle = await this._requireOwnedVehicle(carrier.id, dto.vehicleId);
+    // Hard checks — security / referential integrity. These throw 403/404
+    // before any business-rule collection, because there's no UI affordance
+    // for "you don't own this driver" except "pick another one".
     if (dto.driverId) {
       await this._requireOwnedDriver(carrier.id, dto.driverId);
     }
     if (dto.trailerId) {
       await this._requireOwnedTrailer(carrier.id, dto.trailerId);
     }
+    const vehicle = await this._findOwnedVehicleOrThrow(
+      carrier.id,
+      dto.vehicleId,
+    );
 
-    // Window validation (`min_days_to_submit`, `max_days_after_unloading`).
-    const { minDays, maxDaysAfter } = await this._loadSubmitWindowConfig();
-    this._assertSubmitWindow(dto.dateEnd, maxDaysAfter);
+    const config = await this._loadSubmitConfig();
+    const today = startOfTodayUtc();
+    const dateStart = isoDateToMidnightUtc(dto.dateStart);
+    const dateEnd = isoDateToMidnightUtc(dto.dateEnd);
+    if (!dateStart || !dateEnd) {
+      throw new UnprocessableEntityException('Nieprawidłowa data');
+    }
 
-    // km-calc — reused by `previewKmCalc`. Same engine = same numbers.
-    // `timeFrom` / `timeTo` are required since phase3_blocks (NOT NULL).
+    // ── Tier 1: pre-calc business rules ───────────────────────
+    // Collect everything we can check WITHOUT running km-calc. If the user
+    // has any of these wrong, km-calc would produce garbage anyway, so we
+    // throw the whole list at once and let them fix it.
+    const tier1: string[] = [];
+
+    if (dateEnd.getTime() > today.getTime()) {
+      tier1.push(
+        `Data rozładunku (${dto.dateEnd}) jest w przyszłości. ` +
+          `Wniosek można złożyć dopiero po zjechaniu auta.`,
+      );
+    }
+    if (dateStart.getTime() > today.getTime()) {
+      tier1.push(
+        `Data załadunku (${dto.dateStart}) jest w przyszłości.`,
+      );
+    }
+    if (dto.mileage <= 0) {
+      tier1.push(
+        `Przebieg musi być większy od zera (podano ${dto.mileage}).`,
+      );
+    }
+    if (!vehicle.active || vehicle.deletedAt) {
+      tier1.push(
+        `Pojazd ${vehicle.plateNumber} jest nieaktywny lub usunięty — ` +
+          `skontaktuj się z opiekunem.`,
+      );
+    }
+    const periodDays = daysBetweenInclusive(dateStart, dateEnd);
+    if (periodDays > config.maxPeriodDays) {
+      tier1.push(
+        `Okres wniosku nie może przekraczać ${config.maxPeriodDays} dni ` +
+          `(podano ${periodDays} dni).`,
+      );
+    }
+    const daysAfterUnload = daysBetween(dateEnd, today);
+    if (daysAfterUnload > config.maxDaysAfter) {
+      tier1.push(
+        `Termin na złożenie wniosku minął. Zgodnie z umową masz ` +
+          `${config.maxDaysAfter} dni od daty rozładunku ` +
+          `(upłynęło ${daysAfterUnload} dni).`,
+      );
+    }
+    // Overlap check — only meaningful if the dates themselves are sane.
+    if (
+      dateEnd.getTime() <= today.getTime() &&
+      dateStart.getTime() <= dateEnd.getTime()
+    ) {
+      const overlapping = await this.claims.findOverlapping({
+        carrierId: carrier.id,
+        vehicleId: vehicle.id,
+        dateStart,
+        dateEnd,
+      });
+      if (overlapping) {
+        const fmt = (d: Date) => d.toISOString().slice(0, 10);
+        tier1.push(
+          `Wniosek na pojazd ${vehicle.plateNumber} za nakładający się ` +
+            `okres już istnieje: ${overlapping.nrZgl} ` +
+            `(${fmt(overlapping.dateStart)} – ${fmt(overlapping.dateEnd)}, ` +
+            `status ${overlapping.status}).`,
+        );
+      }
+    }
+
+    if (tier1.length > 0) throw violationsException(tier1);
+
+    // ── Tier 2: km-calc dependent rules ───────────────────────
+    // Same engine as `previewKmCalc` so live preview and submit produce
+    // identical numbers. timeFrom/timeTo are NOT NULL since phase3_blocks.
     const calc = await this.kmCalc.calc({
       dateStart: dto.dateStart,
       dateEnd: dto.dateEnd,
@@ -97,17 +198,30 @@ export class ClaimsService {
       hoursAdjusted: dto.hoursAdjusted ?? 0,
     });
 
-    // Business invariants mirroring `Code.gs:6166-6174`.
-    if (calc.totalDays < minDays) {
-      throw new UnprocessableEntityException(
-        `Samochód był w trasie mniej niż ${minDays} dni roboczych (` +
-          `${calc.totalDays} dni). Minimum to ${minDays} dni.`,
+    const tier2: string[] = [];
+
+    // Code.gs:6166-6174.
+    if (calc.totalDays < config.minDays) {
+      tier2.push(
+        `Samochód był w trasie mniej niż ${config.minDays} dni roboczych ` +
+          `(${calc.totalDays} dni). Minimum to ${config.minDays} dni.`,
       );
     }
     if (calc.kmGuaranteed === 0) {
-      throw new UnprocessableEntityException(
-        'Brak limitu km gwarantowanych w tym okresie.',
-      );
+      tier2.push('Brak limitu km gwarantowanych w tym okresie.');
+    }
+    // Sanity: average km/day. Trucks legitimately do up to ~1500 km/day in
+    // 2-driver continuous operation; anything past that is almost always a
+    // typo or odometer reset. Cap configurable via `max_avg_km_per_day`.
+    if (calc.totalDays > 0) {
+      const avgKmPerDay = dto.mileage / calc.totalDays;
+      if (avgKmPerDay > config.maxAvgKmPerDay) {
+        tier2.push(
+          `Średni przebieg dzienny (${Math.round(avgKmPerDay)} km/dzień) ` +
+            `przekracza dopuszczalny maksimum (${config.maxAvgKmPerDay} km/dzień). ` +
+            `Sprawdź wartość przebiegu.`,
+        );
+      }
     }
 
     const kmDifference = calc.kmGuaranteed - dto.mileage;
@@ -115,12 +229,16 @@ export class ClaimsService {
       kmDifference > 0
         ? round2(kmDifference * calc.ratePerKmEffective)
         : 0;
-    if (paymentEur === 0) {
-      throw new UnprocessableEntityException(
-        `Km zrealizowane (${dto.mileage}) są równe lub wyższe niż km gwarantowane (` +
-          `${calc.kmGuaranteed}). Brak podstaw do dopłaty.`,
+    if (paymentEur === 0 && tier2.length === 0) {
+      // Only surface "no underrun" if everything else is sane — otherwise
+      // the user fixes the upstream issue first and this often resolves.
+      tier2.push(
+        `Km zrealizowane (${dto.mileage}) są równe lub wyższe niż km ` +
+          `gwarantowane (${calc.kmGuaranteed}). Brak podstaw do dopłaty.`,
       );
     }
+
+    if (tier2.length > 0) throw violationsException(tier2);
 
     // NrZgl + insert atomically (same Prisma transaction).
     const breakdown: KmCalcBreakdown = {
@@ -130,8 +248,8 @@ export class ClaimsService {
       breakdown: calc.breakdown,
     };
 
-    const dateStart = new Date(`${dto.dateStart}T00:00:00.000Z`);
-    const dateEnd = new Date(`${dto.dateEnd}T00:00:00.000Z`);
+    // `dateStart` / `dateEnd` were already parsed to UTC midnight at the top
+    // of submit() for the violation checks; reuse them for the insert.
     // `kmPerDay` (NOT NULL post-phase3_blocks) is the trip-average km/day.
     // Degenerate input (`drivenDays === 0`) collapses to 0 — defensive,
     // since the min-days gate above blocks the realistic case where it
@@ -533,6 +651,33 @@ export class ClaimsService {
     return { id: v.id, plateNumber: v.plateNumber };
   }
 
+  /**
+   * Like `_requireOwnedVehicle` but does NOT throw on inactive/deleted —
+   * returns the row and lets the caller add a violation. Used by the submit
+   * pipeline so an inactive vehicle is reported alongside other issues
+   * instead of short-circuiting the violation list.
+   */
+  private async _findOwnedVehicleOrThrow(
+    carrierId: string,
+    vehicleId: string,
+  ): Promise<{
+    id: string;
+    plateNumber: string;
+    active: boolean;
+    deletedAt: Date | null;
+  }> {
+    const v = await this.vehicles.findById(vehicleId);
+    if (!v || v.carrierId !== carrierId) {
+      throw new UnprocessableEntityException('Nieprawidłowy pojazd');
+    }
+    return {
+      id: v.id,
+      plateNumber: v.plateNumber,
+      active: v.active,
+      deletedAt: v.deletedAt ?? null,
+    };
+  }
+
   private async _requireOwnedDriver(
     carrierId: string,
     driverId: string,
@@ -553,50 +698,38 @@ export class ClaimsService {
     }
   }
 
-  private async _loadSubmitWindowConfig(): Promise<{
+  private async _loadSubmitConfig(): Promise<{
     minDays: number;
     maxDaysAfter: number;
+    maxPeriodDays: number;
+    maxAvgKmPerDay: number;
   }> {
     const rows = await this.prisma.client.appConfig.findMany({
       where: {
-        key: { in: [APP_CONFIG_MIN_DAYS, APP_CONFIG_MAX_DAYS_AFTER_UNLOAD] },
+        key: {
+          in: [
+            APP_CONFIG_MIN_DAYS,
+            APP_CONFIG_MAX_DAYS_AFTER_UNLOAD,
+            APP_CONFIG_MAX_PERIOD_DAYS,
+            APP_CONFIG_MAX_AVG_KM_PER_DAY,
+          ],
+        },
       },
       select: { key: true, value: true },
     });
     let minDays = DEFAULT_MIN_DAYS_TO_SUBMIT;
     let maxDaysAfter = DEFAULT_MAX_DAYS_AFTER_UNLOAD;
+    let maxPeriodDays = DEFAULT_MAX_PERIOD_DAYS;
+    let maxAvgKmPerDay = DEFAULT_MAX_AVG_KM_PER_DAY;
     for (const r of rows) {
       const v = Number(r.value);
       if (!Number.isFinite(v) || v < 0) continue;
       if (r.key === APP_CONFIG_MIN_DAYS) minDays = v;
       if (r.key === APP_CONFIG_MAX_DAYS_AFTER_UNLOAD) maxDaysAfter = v;
+      if (r.key === APP_CONFIG_MAX_PERIOD_DAYS) maxPeriodDays = v;
+      if (r.key === APP_CONFIG_MAX_AVG_KM_PER_DAY) maxAvgKmPerDay = v;
     }
-    return { minDays, maxDaysAfter };
-  }
-
-  private _assertSubmitWindow(dateEndIso: string, maxDaysAfter: number): void {
-    // `dateEndIso` is a YYYY-MM-DD calendar date; build the local-midnight
-    // Date for arithmetic. Mirrors `Code.gs:6150-6157` (`diffDays > 7`).
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateEndIso);
-    if (!m) {
-      throw new UnprocessableEntityException('Nieprawidłowa data rozładunku');
-    }
-    const dateEnd = new Date(
-      Number(m[1]),
-      Number(m[2]) - 1,
-      Number(m[3]),
-    );
-    const now = new Date();
-    const diffDays = Math.floor(
-      (now.getTime() - dateEnd.getTime()) / (1000 * 60 * 60 * 24),
-    );
-    if (diffDays > maxDaysAfter) {
-      throw new UnprocessableEntityException(
-        `Termin na złożenie wniosku minął. Zgodnie z umową współpracy ` +
-          `masz ${maxDaysAfter} dni od daty rozładunku na złożenie ` +
-          `wniosku (upłynęło ${diffDays} dni).`,
-      );
-    }
+    return { minDays, maxDaysAfter, maxPeriodDays, maxAvgKmPerDay };
   }
 
   private async _scopeListFilters(
@@ -735,6 +868,32 @@ function round2(n: number): number {
 
 function toDateString(d: Date): string {
   return d.toISOString().slice(0, 10);
+}
+
+/** UTC midnight of today — anchor for "is the date in the future" comparisons. */
+function startOfTodayUtc(): Date {
+  const now = new Date();
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+}
+
+/** Parse `YYYY-MM-DD` to UTC midnight. Returns null on malformed input. */
+function isoDateToMidnightUtc(iso: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return null;
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+}
+
+/** `to - from` in whole calendar days (floor). Negative if `from > to`. */
+function daysBetween(from: Date, to: Date): number {
+  const ms = to.getTime() - from.getTime();
+  return Math.floor(ms / (1000 * 60 * 60 * 24));
+}
+
+/** Inclusive day count between two UTC-midnight dates (e.g. same-day → 1). */
+function daysBetweenInclusive(from: Date, to: Date): number {
+  return Math.max(0, daysBetween(from, to)) + 1;
 }
 
 function isValidEmail(s: string): boolean {

@@ -70,8 +70,8 @@ function makeCarrier(overrides: Partial<CarrierRow> = {}): CarrierRow {
     name: 'Pwz One',
     company: null,
     active: true,
-    nip: null,
-    vatId: null,
+    nip: '0000000000',
+    vatId: 'PL0000000000',
     contactPerson: 'Jan Kontakt',
     phone: '+48000000000',
     ordersEmail: 'zlecenia@example.com',
@@ -204,11 +204,25 @@ const REQUIRED_VEHICLE_FIELDS = {
   certificateL: 'L1' as const,
   euro: 'V' as const,
   type: 'STD' as const,
+  // plannerId/dispatcherId are required (no .optional()); tests targeting
+  // role rejection put `'u-x'` AFTER the spread to override these defaults.
+  plannerId: 'u-pl',
+  dispatcherId: 'u-dy',
   rateDe: 0.5,
   rateUe: 0.5,
   rateExport: 0.5,
   rateImport: 0.5,
 };
+
+/** Helper — valid planista/dyspozytor users to register in users-repo so the
+ *  role check at lines 70-72 of vehicles.service passes for tests that
+ *  aren't targeting the role-rejection path. */
+function makeValidPeople(): UserRow[] {
+  return [
+    makeUser({ id: 'u-pl', role: 'planista' }),
+    makeUser({ id: 'u-dy', role: 'dyspozytor' }),
+  ];
+}
 
 describe('VehiclesService', () => {
   it('admin can create with valid plannerId/dispatcherId', async () => {
@@ -228,8 +242,6 @@ describe('VehiclesService', () => {
       wasteAllowed: false,
       cabotageDe: false,
       cabotageFr: false,
-      plannerId: 'u-pl',
-      dispatcherId: 'u-dy',
       ...REQUIRED_VEHICLE_FIELDS,
     });
     expect(out.plateNumber).toBe('WA0002');
@@ -240,7 +252,9 @@ describe('VehiclesService', () => {
     const wrong = makeUser({ id: 'u-x', role: 'opiekun' });
     const svc = new VehiclesService(
       makeVehiclesRepo(),
-      makeUsersRepo([wrong]),
+      // Register a valid dispatcher so the dispatcher check would pass — the
+      // failure must come from plannerId.
+      makeUsersRepo([wrong, makeUser({ id: 'u-dy', role: 'dyspozytor' })]),
       makeCarriersRepo([makeCarrier()]),
     );
     await expect(
@@ -252,8 +266,9 @@ describe('VehiclesService', () => {
         wasteAllowed: false,
         cabotageDe: false,
         cabotageFr: false,
-        plannerId: 'u-x',
         ...REQUIRED_VEHICLE_FIELDS,
+        // Override AFTER the spread so the wrong-role id wins.
+        plannerId: 'u-x',
       }),
     ).rejects.toThrow(UnprocessableEntityException);
   });
@@ -262,7 +277,9 @@ describe('VehiclesService', () => {
     const wrong = makeUser({ id: 'u-x', role: 'opiekun' });
     const svc = new VehiclesService(
       makeVehiclesRepo(),
-      makeUsersRepo([wrong]),
+      // Register a valid planista so the planner check would pass — failure
+      // must come from dispatcherId.
+      makeUsersRepo([wrong, makeUser({ id: 'u-pl', role: 'planista' })]),
       makeCarriersRepo([makeCarrier()]),
     );
     await expect(
@@ -274,8 +291,9 @@ describe('VehiclesService', () => {
         wasteAllowed: false,
         cabotageDe: false,
         cabotageFr: false,
-        dispatcherId: 'u-x',
         ...REQUIRED_VEHICLE_FIELDS,
+        // Override AFTER the spread so the wrong-role id wins.
+        dispatcherId: 'u-x',
       }),
     ).rejects.toThrow(UnprocessableEntityException);
   });
@@ -284,7 +302,7 @@ describe('VehiclesService', () => {
     const dup = makeVehicle({ carrierId: 'c-1', plateNumber: 'WA0001' });
     const svc = new VehiclesService(
       makeVehiclesRepo([dup]),
-      makeUsersRepo(),
+      makeUsersRepo(makeValidPeople()),
       makeCarriersRepo([makeCarrier()]),
     );
     await expect(
@@ -305,7 +323,7 @@ describe('VehiclesService', () => {
     const carrier = makeCarrier({ id: 'c-other', opiekunId: 'op-2' });
     const svc = new VehiclesService(
       makeVehiclesRepo(),
-      makeUsersRepo(),
+      makeUsersRepo(makeValidPeople()),
       makeCarriersRepo([carrier]),
     );
     await expect(
@@ -326,7 +344,7 @@ describe('VehiclesService', () => {
     const carrier = makeCarrier({ id: 'c-mine', userId: 'u-self' });
     const svc = new VehiclesService(
       makeVehiclesRepo(),
-      makeUsersRepo(),
+      makeUsersRepo(makeValidPeople()),
       makeCarriersRepo([carrier]),
     );
     await expect(

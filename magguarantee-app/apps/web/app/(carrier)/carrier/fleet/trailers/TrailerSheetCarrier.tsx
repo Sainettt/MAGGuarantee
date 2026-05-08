@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/Sheet';
 import { Textarea } from '@/components/ui/Textarea';
 import { FormField, FormSection } from '@/components/forms/Form';
+import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useFormDraft } from '@/lib/hooks/useFormDraft';
 import { useTrailerTypes } from '@/lib/hooks/useTrailerTypes';
 import { useCreateTrailer, useUpdateTrailer } from '@/lib/hooks/useTrailers';
@@ -131,17 +132,20 @@ export function TrailerSheetCarrier({
     onError: () => toast.error(tCommon('errorGeneric')),
   });
 
-  const onSubmit = form.handleSubmit((values) => {
-    const cleaned = cleanForm(values);
-    if (isEdit && trailer) {
-      const { carrierId: _carrierId, ...rest } = cleaned;
-      void _carrierId;
-      updateM.mutate({ id: trailer.id, body: rest as UpdateTrailerDto });
-    } else {
-      cleaned.carrierId = carrierId;
-      createM.mutate(cleaned as CreateTrailerDto);
-    }
-  });
+  const onSubmit = form.handleSubmit(
+    (values) => {
+      const cleaned = cleanForm(values);
+      if (isEdit && trailer) {
+        const { carrierId: _carrierId, ...rest } = cleaned;
+        void _carrierId;
+        updateM.mutate({ id: trailer.id, body: rest as UpdateTrailerDto });
+      } else {
+        cleaned.carrierId = carrierId;
+        createM.mutate(cleaned as CreateTrailerDto);
+      }
+    },
+    onInvalidToast(form.setFocus, tCommon('validationFailedToast')),
+  );
 
   const submitting = createM.isPending || updateM.isPending;
   const errs = form.formState.errors;

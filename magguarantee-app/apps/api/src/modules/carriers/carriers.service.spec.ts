@@ -26,8 +26,8 @@ function makeCarrier(overrides: Partial<CarrierRow> = {}): CarrierRow {
     name: 'Pwz One',
     company: null,
     active: true,
-    nip: null,
-    vatId: null,
+    nip: '0000000000',
+    vatId: 'PL0000000000',
     // Required post-phase3_blocks.
     contactPerson: 'Jan Kontakt',
     phone: '+48000000000',

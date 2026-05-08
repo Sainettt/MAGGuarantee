@@ -34,6 +34,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     const title = this._titleFor(status);
     const detail = this._detailFor(exception);
     const errors = this._fieldErrorsFor(exception);
+    const violations = this._violationsFor(exception);
     const type = this._typeFor(status);
 
     if (status >= 500) {
@@ -52,6 +53,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       status,
       detail,
       errors,
+      violations,
       instance: req.url,
     });
   }
@@ -108,6 +110,22 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       return exception.message;
     }
     return undefined;
+  }
+
+  /**
+   * Multi-violation business-rule list — ClaimsService throws
+   * `UnprocessableEntityException({ violations: string[] })` when the carrier
+   * submit form has ≥1 problems and we want the UI to display them all in
+   * one banner instead of forcing N round-trips.
+   */
+  private _violationsFor(exception: unknown): string[] | undefined {
+    if (!(exception instanceof HttpException)) return undefined;
+    const body = exception.getResponse();
+    if (!body || typeof body !== 'object') return undefined;
+    const v = (body as Record<string, unknown>).violations;
+    if (!Array.isArray(v)) return undefined;
+    const out = v.filter((x): x is string => typeof x === 'string');
+    return out.length > 0 ? out : undefined;
   }
 
   /**

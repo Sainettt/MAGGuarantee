@@ -169,6 +169,36 @@ export class ClaimsRepository {
     return row ? this.flatten(row) : null;
   }
 
+  /**
+   * Finds an existing non-rejected claim for the same (carrier, vehicle) whose
+   * [dateStart, dateEnd] interval overlaps the given range. Used by the submit
+   * pipeline to block duplicate / overlapping period claims.
+   *
+   * Two intervals [a1,b1] and [a2,b2] overlap iff `a1 ≤ b2 AND a2 ≤ b1`.
+   * `ODRZUCONO` (rejected) claims are excluded — those can be re-submitted
+   * with corrected data. All other statuses (NA_WERYFIKACJI, ZAAKCEPTOWANO,
+   * REKLAMACJA, OCZEKUJE_*, AUTORYZACJA_*) hold the period.
+   */
+  async findOverlapping(args: {
+    carrierId: string;
+    vehicleId: string;
+    dateStart: Date;
+    dateEnd: Date;
+  }): Promise<ClaimRow | null> {
+    const row = await this.prisma.client.claim.findFirst({
+      where: {
+        carrierId: args.carrierId,
+        vehicleId: args.vehicleId,
+        dateStart: { lte: args.dateEnd },
+        dateEnd: { gte: args.dateStart },
+        status: { not: 'ODRZUCONO' },
+      },
+      include: this.includeShape(),
+      orderBy: { createdAt: 'desc' },
+    });
+    return row ? this.flatten(row) : null;
+  }
+
   async list(filters: ClaimListFilters): Promise<ClaimRow[]> {
     const where: Record<string, unknown> = {};
     if (filters.status) where.status = filters.status;

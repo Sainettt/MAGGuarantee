@@ -25,7 +25,8 @@
     "deleteConfirmBody": "This action cannot be undone.",
     "deactivate": "Deactivate",
     "reactivate": "Reactivate",
-    "clear": "Clear"
+    "clear": "Clear",
+    "validationFailedToast": "Please fill in the highlighted fields"
   },
   "theme": {
     "toggle": "Toggle theme",
@@ -115,8 +116,8 @@
       "phone": "Phone",
       "contactPerson": "Contact person",
       "ordersEmail": "Orders e-mail",
-      "nip": "NIP",
-      "nipHint": "10 digits (Polish carriers only)",
+      "nip": "NIP / Tax ID",
+      "nipHint": "10 digits for PL NIP, or 5–20 alphanumeric for foreign tax IDs",
       "vatId": "VAT-ID",
       "vatHint": "Select country and enter the number",
       "vatCountry": "VAT country",
@@ -165,7 +166,7 @@
       "planner": "Planner",
       "dispatcher": "Dispatcher",
       "gps": "GPS",
-      "gpsMobilePhone": "GPS phone",
+      "gpsMobilePhone": "GPS number",
       "fuelCard": "Fuel card",
       "agreement": "Agreement",
       "contract": "Contract",
@@ -310,6 +311,9 @@
       "wniosekAria": "Claim {nrZgl}",
       "submittedToast": "Claim {nrZgl} submitted",
       "submitErrorToast": "Failed to submit claim",
+      "violationsToast": "Claim was not saved — see the list above.",
+      "violationsHeadingOne": "Claim cannot be saved:",
+      "violationsHeadingMany": "Claim cannot be saved — {count} issues found:",
       "detail": {
         "mileage": "Mileage",
         "kmGuaranteed": "Guaranteed km",

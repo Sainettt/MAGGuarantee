@@ -21,6 +21,7 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import { FormField, FormSection } from '@/components/forms/Form';
+import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useSubmitDelegation } from '@/lib/hooks/useDelegations';
 import { useFormDraft } from '@/lib/hooks/useFormDraft';
 import { useMyFleet } from '@/lib/hooks/useMyFleet';
@@ -77,18 +78,21 @@ export default function NewDelegationPage() {
     },
   });
 
-  const onSubmit = form.handleSubmit((values) => {
-    const cleaned: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(values)) {
-      if (v === '' || v === undefined) continue;
-      cleaned[k] = v;
-    }
-    const idempotencyKey =
-      typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? crypto.randomUUID()
-        : undefined;
-    submitM.mutate({ body: cleaned as SubmitDelegationDto, idempotencyKey });
-  });
+  const onSubmit = form.handleSubmit(
+    (values) => {
+      const cleaned: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(values)) {
+        if (v === '' || v === undefined) continue;
+        cleaned[k] = v;
+      }
+      const idempotencyKey =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : undefined;
+      submitM.mutate({ body: cleaned as SubmitDelegationDto, idempotencyKey });
+    },
+    onInvalidToast(form.setFocus, tCommon('validationFailedToast')),
+  );
 
   const submitting = submitM.isPending;
   const errs = form.formState.errors;

@@ -15,10 +15,10 @@ import {
   EuVatSchema,
   IsoDateSchema,
   IsoDateTimeSchema,
+  TaxIdSchema,
   UuidSchema,
   emptyStringToUndefined,
 } from './common';
-import { PolishNipSchema } from './integrations/whitelist';
 
 // ─── Field primitives shared by create/update ────────────
 
@@ -35,10 +35,18 @@ const EmailSchema = z.string().email().max(160);
 const PhoneRequiredSchema = z.string().min(1).max(64);
 
 const carrierProfileFields = {
-  /** Polish NIP (10 digits) — optional for foreign carriers. */
-  nip: emptyStringToUndefined(PolishNipSchema.max(32).optional()),
-  /** EU VAT — country code + 2–12 alphanumeric. Optional for PL-only carriers. */
-  vatId: emptyStringToUndefined(EuVatSchema.max(32).optional()),
+  /**
+   * REQUIRED — generic tax ID (5–20 alphanumeric). Polish carriers send the
+   * 10-digit NIP, foreign carriers their local TIN/Codice Fiscale/etc.
+   * Country-specific format rules apply per-flow (e.g. Biała Lista only
+   * validates 10-digit PL NIPs).
+   */
+  nip: TaxIdSchema,
+  /**
+   * REQUIRED — EU VAT: country code + 2–12 alphanumeric (max 14 chars total,
+   * which is the longest realistic EU VAT format — SE/LT/NL etc.).
+   */
+  vatId: EuVatSchema,
   /** REQUIRED — Carrier.contactPerson is NOT NULL since phase3_blocks. */
   contactPerson: z.string().min(1).max(255),
   /** REQUIRED — Carrier.phone is NOT NULL since phase-2 migration. */
@@ -109,8 +117,10 @@ export const UpdateCarrierSchema = z
     email: EmailSchema.optional(),
     name: NameSchema.optional(),
     company: emptyStringToUndefined(z.string().max(255).nullable().optional()),
-    nip: emptyStringToUndefined(PolishNipSchema.max(32).nullable().optional()),
-    vatId: emptyStringToUndefined(EuVatSchema.max(32).nullable().optional()),
+    // PATCH semantics: omitting the key means "do not touch". Cannot send
+    // null since the column is now NOT NULL.
+    nip: emptyStringToUndefined(TaxIdSchema.optional()),
+    vatId: emptyStringToUndefined(EuVatSchema.optional()),
     contactPerson: emptyStringToUndefined(
       z.string().max(255).nullable().optional(),
     ),
@@ -170,8 +180,11 @@ export const CarrierDtoSchema = z.object({
   name: z.string().nullable(),
   company: z.string().nullable(),
   active: z.boolean(),
-  nip: z.string().nullable(),
-  vatId: z.string().nullable(),
+  // nip/vatId are required at create — both DB column and response DTO are
+  // therefore non-null. Polish carriers send the 10-digit NIP; foreign
+  // carriers send their local TIN; vatId is the country-prefixed EU VAT.
+  nip: z.string(),
+  vatId: z.string(),
   // NOT NULL after phase3_blocks.
   contactPerson: z.string(),
   phone: z.string(),

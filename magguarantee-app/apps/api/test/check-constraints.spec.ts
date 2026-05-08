@@ -82,6 +82,8 @@ describeIfDb('phase3_blocks CHECK constraints', () => {
       data: {
         userId: carrierUser.id,
         opiekunId: opiekun.id,
+        nip: '0000000000',
+        vatId: 'PL0000000000',
         contactPerson: 'Test',
         phone: '+480000',
         ordersEmail: 'orders@example.com',

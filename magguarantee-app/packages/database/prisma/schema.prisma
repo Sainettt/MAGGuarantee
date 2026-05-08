@@ -115,8 +115,11 @@ model Carrier {
   user   User   @relation("CarrierUser", fields: [userId], references: [id])
 
   company         String? // firma — only meaningful for the carrier extension
-  nip             String?
-  vatId           String? // EU VAT
+  // Tax IDs are required at create time. Polish carriers send a 10-digit NIP;
+  // foreign carriers send their local TIN. `vatId` is the EU VAT (country
+  // prefix + 2–12 alphanumeric, max 14 chars total).
+  nip             String
+  vatId           String // EU VAT
   contactPerson   String // OsobaKontaktowa
   phone           String
   ordersEmail     String // EmailZlecenia

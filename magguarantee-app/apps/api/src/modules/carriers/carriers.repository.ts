@@ -22,8 +22,10 @@ export interface CarrierRow {
   name: string | null;
   company: string | null;
   active: boolean;
-  nip: string | null;
-  vatId: string | null;
+  // NOT NULL since 20260508_carrier_nip_vat_required. Both sides of the wire
+  // are now non-null.
+  nip: string;
+  vatId: string;
   contactPerson: string;
   phone: string;
   ordersEmail: string;
@@ -64,8 +66,9 @@ interface CreateCarrierData {
   active?: boolean;
   // carrier-extension side — required fields per phase3_blocks.
   company?: string | null;
-  nip?: string | null;
-  vatId?: string | null;
+  // Required since carrier_nip_vat_required (20260508).
+  nip: string;
+  vatId: string;
   contactPerson: string;
   phone: string;
   ordersEmail: string;
@@ -173,8 +176,8 @@ export class CarriersRepository {
         data: {
           userId: user.id,
           company: data.company ?? null,
-          nip: data.nip ?? null,
-          vatId: data.vatId ?? null,
+          nip: data.nip,
+          vatId: data.vatId,
           contactPerson: data.contactPerson,
           phone: data.phone,
           ordersEmail: data.ordersEmail,
@@ -315,6 +318,9 @@ export class CarriersRepository {
     id: string;
     userId: string;
     company: string | null;
+    // NOT NULL since carrier_nip_vat_required (20260508). The wider type
+    // surfaced by the soft-delete extension is normalised below to the
+    // non-null shape the rest of the service expects.
     nip: string | null;
     vatId: string | null;
     // Prisma's inferred type from `findFirst({include: ...})` post the soft-
@@ -354,8 +360,8 @@ export class CarriersRepository {
       name: row.user.name,
       company: row.company,
       active: row.user.active,
-      nip: row.nip,
-      vatId: row.vatId,
+      nip: row.nip ?? '',
+      vatId: row.vatId ?? '',
       contactPerson: row.contactPerson ?? '',
       phone: row.phone ?? '',
       ordersEmail: row.ordersEmail ?? '',

@@ -25,7 +25,8 @@
     "deleteConfirmBody": "Tej operacji nie można cofnąć.",
     "deactivate": "Dezaktywuj",
     "reactivate": "Aktywuj",
-    "clear": "Wyczyść"
+    "clear": "Wyczyść",
+    "validationFailedToast": "Uzupełnij podświetlone pola"
   },
   "theme": {
     "toggle": "Przełącz motyw",
@@ -115,8 +116,8 @@
       "phone": "Telefon",
       "contactPerson": "Osoba kontaktowa",
       "ordersEmail": "E-mail zleceń",
-      "nip": "NIP",
-      "nipHint": "10 cyfr (tylko dla polskich przewoźników)",
+      "nip": "NIP / Tax ID",
+      "nipHint": "10 cyfr (PL NIP) lub zagraniczny numer identyfikacji podatkowej (5–20 znaków)",
       "vatId": "VAT-ID",
       "vatHint": "Wybierz kraj i wpisz numer",
       "vatCountry": "Kraj VAT",
@@ -165,7 +166,7 @@
       "planner": "Planista",
       "dispatcher": "Dyspozytor",
       "gps": "GPS",
-      "gpsMobilePhone": "Telefon GPS",
+      "gpsMobilePhone": "Numer GPS",
       "fuelCard": "Karta paliwowa",
       "agreement": "Porozumienie",
       "contract": "Umowa",
@@ -310,6 +311,9 @@
       "wniosekAria": "Wniosek {nrZgl}",
       "submittedToast": "Wniosek {nrZgl} został złożony",
       "submitErrorToast": "Nie udało się wysłać wniosku",
+      "violationsToast": "Wniosek nie został zapisany — sprawdź listę powyżej.",
+      "violationsHeadingOne": "Wniosek nie może zostać zapisany:",
+      "violationsHeadingMany": "Wniosek nie może zostać zapisany — znaleziono {count} problemów:",
       "detail": {
         "mileage": "Przebieg",
         "kmGuaranteed": "Km gwarantowane",

@@ -55,6 +55,7 @@ import {
   checkWhitelist,
   INTEGRATION_UNAVAILABLE,
 } from '@/lib/api/integrations';
+import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { useCreateCarrier, useUpdateCarrier } from '@/lib/hooks/useCarriers';
 import { useFormDraft } from '@/lib/hooks/useFormDraft';
@@ -182,6 +183,16 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
     [user?.role, user?.id],
   );
 
+  // Keep `vatId` in form state in lockstep with the country+number split so
+  // Zod validates the composed value on submit (otherwise vatId stays '' until
+  // the submit handler composes it, and the resolver rejects ahead of that).
+  const watchedVatCountry = form.watch('_vatCountry');
+  const watchedVatNumber = form.watch('_vatNumber');
+  useEffect(() => {
+    const composed = composeVatId(watchedVatCountry, watchedVatNumber);
+    form.setValue('vatId', composed ?? '', { shouldValidate: false });
+  }, [watchedVatCountry, watchedVatNumber, form]);
+
   useEffect(() => {
     if (!open) return;
     setNipState('idle');
@@ -251,29 +262,26 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
     onError: (err) => toast.error(formatApiError(err, tCommon('errorGeneric'))),
   });
 
-  const onSubmit = form.handleSubmit((values) => {
-    // Compose vatId from the split country / number helpers. Empty number
-    // → omit the field entirely (optional in both Create and Update DTOs).
-    const composedVat = composeVatId(values._vatCountry, values._vatNumber);
-    const merged: CarrierFormValues = {
-      ...values,
-      vatId: composedVat ?? '',
-    };
-
-    const cleaned = cleanForm(merged);
-    if (isEdit && carrier) {
-      // login isn't editable per Update schema; password not allowed either.
-      const { login: _login, password: _pw, ...rest } = cleaned;
-      void _login;
-      void _pw;
-      updateM.mutate({ id: carrier.id, body: rest as UpdateCarrierDto });
-    } else {
-      // active isn't part of CreateCarrierDto.
-      const { active: _active, ...rest } = cleaned;
-      void _active;
-      createM.mutate(rest as CreateCarrierDto);
-    }
-  });
+  const onSubmit = form.handleSubmit(
+    (values) => {
+      // `vatId` is already kept in sync via the watch effect above, so
+      // `values.vatId` is the composed value Zod just validated.
+      const cleaned = cleanForm(values);
+      if (isEdit && carrier) {
+        // login isn't editable per Update schema; password not allowed either.
+        const { login: _login, password: _pw, ...rest } = cleaned;
+        void _login;
+        void _pw;
+        updateM.mutate({ id: carrier.id, body: rest as UpdateCarrierDto });
+      } else {
+        // active isn't part of CreateCarrierDto.
+        const { active: _active, ...rest } = cleaned;
+        void _active;
+        createM.mutate(rest as CreateCarrierDto);
+      }
+    },
+    onInvalidToast(form.setFocus, tCommon('validationFailedToast')),
+  );
 
   const submitting = createM.isPending || updateM.isPending;
   const errs = form.formState.errors as Record<
@@ -408,6 +416,7 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <FormField
                     label={t('fields.nip')}
+                    required
                     description={t('fields.nipHint')}
                     error={errMsg('nip')}
                     htmlFor="carrier-nip"
@@ -416,12 +425,15 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                       <Input
                         id="carrier-nip"
                         className="h-10"
-                        inputMode="numeric"
-                        maxLength={10}
+                        inputMode="text"
+                        maxLength={20}
                         autoComplete="off"
                         {...form.register('nip', {
                           // Strip whitespace and hyphens so paste-from-Excel
-                          // still produces 10 digits the API accepts.
+                          // produces a clean alphanumeric string the API
+                          // accepts (5–20 chars). Polish 10-digit NIP still
+                          // passes; foreign TINs (Italian Codice Fiscale up to
+                          // 16 etc.) also fit.
                           setValueAs: (v) =>
                             typeof v === 'string'
                               ? v.replace(/[\s-]/g, '')
@@ -439,6 +451,7 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                   </FormField>
                   <FormField
                     label={t('fields.vatId')}
+                    required
                     description={t('fields.vatHint')}
                     error={errMsg('vatId')}
                     htmlFor="carrier-vatNumber"

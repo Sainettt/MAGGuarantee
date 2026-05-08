@@ -6,9 +6,10 @@
 // button is disabled while the preview is loading or returned an error.
 
 import { zodResolver } from '@hookform/resolvers/zod';
+import { AlertTriangle, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
@@ -23,6 +24,8 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import { FormField, FormSection } from '@/components/forms/Form';
+import { ApiResponseError } from '@/lib/api/client';
+import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useClaimPreview, useSubmitClaim } from '@/lib/hooks/useClaims';
 import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
 import { useFormDraft } from '@/lib/hooks/useFormDraft';
@@ -113,13 +116,33 @@ export default function NewClaimPage() {
     enabled: !!debouncedPreviewBody,
   });
 
+  // Server-side business-rule violations from the 422 envelope (rendered as
+  // a sticky banner above the form). Cleared on every fresh submit attempt
+  // so the user only sees current issues.
+  const [violations, setViolations] = useState<string[]>([]);
+  const violationsRef = useRef<HTMLDivElement | null>(null);
+
   const submitM = useSubmitClaim({
     onSuccess: (claim) => {
+      setViolations([]);
       draft.clear();
       toast.success(t('submittedToast', { nrZgl: claim.nrZgl }));
       router.push(`/carrier/claims/${encodeURIComponent(claim.nrZgl)}`);
     },
     onError: (err) => {
+      const list = extractViolations(err);
+      if (list.length > 0) {
+        setViolations(list);
+        // Scroll to banner so the user sees it even with a long form.
+        requestAnimationFrame(() =>
+          violationsRef.current?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start',
+          }),
+        );
+        toast.error(t('violationsToast'));
+        return;
+      }
       const msg = err instanceof Error ? err.message : t('submitErrorToast');
       toast.error(msg);
     },
@@ -129,20 +152,24 @@ export default function NewClaimPage() {
   const previewBlocked =
     previewQ.isLoading || (previewQ.isError && !previewQ.data);
 
-  const onSubmit = form.handleSubmit((values) => {
-    // Strip empty strings so optional fields go through Zod cleanly.
-    const cleaned: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(values)) {
-      if (v === '' || v === undefined) continue;
-      cleaned[k] = v;
-    }
-    // Use a fresh idempotency key so refresh + resubmit doesn't double-insert.
-    const idempotencyKey =
-      typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? crypto.randomUUID()
-        : undefined;
-    submitM.mutate({ body: cleaned as SubmitClaimDto, idempotencyKey });
-  });
+  const onSubmit = form.handleSubmit(
+    (values) => {
+      setViolations([]); // hide stale banner before the new round trip
+      // Strip empty strings so optional fields go through Zod cleanly.
+      const cleaned: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(values)) {
+        if (v === '' || v === undefined) continue;
+        cleaned[k] = v;
+      }
+      // Use a fresh idempotency key so refresh + resubmit doesn't double-insert.
+      const idempotencyKey =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : undefined;
+      submitM.mutate({ body: cleaned as SubmitClaimDto, idempotencyKey });
+    },
+    onInvalidToast(form.setFocus, tCommon('validationFailedToast')),
+  );
 
   const errs = form.formState.errors;
   const vehicles = fleetQ.data?.vehicles ?? [];
@@ -154,6 +181,45 @@ export default function NewClaimPage() {
       <h1 className="text-2xl font-extrabold tracking-tight text-text mb-6">
         {t('newClaim')}
       </h1>
+
+      {violations.length > 0 && (
+        <div
+          ref={violationsRef}
+          role="alert"
+          className="mb-6 rounded-lg border border-danger/40 bg-danger-bg dark:bg-danger/10 p-4"
+        >
+          <div className="flex items-start gap-3">
+            <AlertTriangle
+              size={20}
+              className="mt-0.5 flex-none text-danger"
+              aria-hidden
+            />
+            <div className="flex-1 min-w-0">
+              <h2 className="text-sm font-bold text-danger-dark dark:text-danger">
+                {violations.length === 1
+                  ? t('violationsHeadingOne')
+                  : t('violationsHeadingMany', { count: violations.length })}
+              </h2>
+              <ul className="mt-2 space-y-1.5 text-sm text-text">
+                {violations.map((v, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span aria-hidden className="text-danger">•</span>
+                    <span className="flex-1">{v}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <button
+              type="button"
+              onClick={() => setViolations([])}
+              aria-label={tCommon('clear')}
+              className="flex-none rounded-md p-1 text-text-sub hover:bg-danger/10 hover:text-danger focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-danger/40"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      )}
 
       <form onSubmit={onSubmit}>
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.2fr] gap-6">
@@ -401,4 +467,17 @@ export default function NewClaimPage() {
       </form>
     </section>
   );
+}
+
+/**
+ * Parse the `violations: string[]` array out of a 422 envelope. Falls back
+ * to an empty list if the error doesn't carry the multi-violation shape
+ * (e.g. plain 500 / 401 / network error).
+ */
+function extractViolations(err: unknown): string[] {
+  if (!(err instanceof ApiResponseError)) return [];
+  if (err.status !== 422) return [];
+  const v = err.data?.violations;
+  if (!Array.isArray(v)) return [];
+  return v.filter((x): x is string => typeof x === 'string');
 }

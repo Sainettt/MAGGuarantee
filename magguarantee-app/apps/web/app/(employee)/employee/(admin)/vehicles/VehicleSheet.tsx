@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/Sheet';
 import { Textarea } from '@/components/ui/Textarea';
 import { FormField, FormSection } from '@/components/forms/Form';
+import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useFormDraft } from '@/lib/hooks/useFormDraft';
 import { useDyspozytorzy, usePlanisci } from '@/lib/hooks/useLookups';
@@ -100,10 +101,12 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
         fr: vehicle.fr ?? false,
         agreement: vehicle.agreement ?? false,
         contract: vehicle.contract ?? false,
-        rateDe: vehicle.rateDe ?? 0,
-        rateUe: vehicle.rateUe ?? 0,
-        rateExport: vehicle.rateExport ?? 0,
-        rateImport: vehicle.rateImport ?? 0,
+        // Existing rows from before rates were required may still hold null
+        // — surface as empty input so the user is forced to re-enter on edit.
+        rateDe: vehicle.rateDe ?? (undefined as unknown as number),
+        rateUe: vehicle.rateUe ?? (undefined as unknown as number),
+        rateExport: vehicle.rateExport ?? (undefined as unknown as number),
+        rateImport: vehicle.rateImport ?? (undefined as unknown as number),
         wasteAllowed: vehicle.wasteAllowed,
         cabotageDe: vehicle.cabotageDe,
         cabotageFr: vehicle.cabotageFr,
@@ -136,16 +139,19 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
     onError: () => toast.error(tCommon('errorGeneric')),
   });
 
-  const onSubmit = form.handleSubmit((values) => {
-    const cleaned = cleanForm(values);
-    if (isEdit && vehicle) {
-      const { carrierId: _carrierId, ...rest } = cleaned;
-      void _carrierId;
-      updateM.mutate({ id: vehicle.id, body: rest as UpdateVehicleDto });
-    } else {
-      createM.mutate(cleaned as CreateVehicleDto);
-    }
-  });
+  const onSubmit = form.handleSubmit(
+    (values) => {
+      const cleaned = cleanForm(values);
+      if (isEdit && vehicle) {
+        const { carrierId: _carrierId, ...rest } = cleaned;
+        void _carrierId;
+        updateM.mutate({ id: vehicle.id, body: rest as UpdateVehicleDto });
+      } else {
+        createM.mutate(cleaned as CreateVehicleDto);
+      }
+    },
+    onInvalidToast(form.setFocus, tCommon('validationFailedToast')),
+  );
 
   const submitting = createM.isPending || updateM.isPending;
   const errs = form.formState.errors;
@@ -312,6 +318,7 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <FormField
                     label={t('fields.planner')}
+                    required
                     error={errs.plannerId?.message}
                     htmlFor="vehicle-plannerId"
                   >
@@ -329,6 +336,7 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
                   </FormField>
                   <FormField
                     label={t('fields.dispatcher')}
+                    required
                     error={errs.dispatcherId?.message}
                     htmlFor="vehicle-dispatcherId"
                   >
@@ -399,6 +407,7 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <FormField
                     label={t('fields.rateDe')}
+                    required
                     error={errs.rateDe?.message}
                     htmlFor="vehicle-rateDe"
                   >
@@ -416,6 +425,7 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
                   </FormField>
                   <FormField
                     label={t('fields.rateUe')}
+                    required
                     error={errs.rateUe?.message}
                     htmlFor="vehicle-rateUe"
                   >
@@ -433,6 +443,7 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
                   </FormField>
                   <FormField
                     label={t('fields.rateExport')}
+                    required
                     error={errs.rateExport?.message}
                     htmlFor="vehicle-rateExport"
                   >
@@ -450,6 +461,7 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
                   </FormField>
                   <FormField
                     label={t('fields.rateImport')}
+                    required
                     error={errs.rateImport?.message}
                     htmlFor="vehicle-rateImport"
                   >
@@ -544,8 +556,11 @@ function getDefaults(): FormValues {
     carrierId: '' as unknown as string,
     plateNumber: '',
     active: true,
-    plannerId: undefined,
-    dispatcherId: undefined,
+    // plannerId / dispatcherId are required UUIDs in the schema; empty string
+    // parks the <Select> on its placeholder so Zod surfaces "required" on
+    // submit instead of crashing the input as uncontrolled.
+    plannerId: '' as unknown as string,
+    dispatcherId: '' as unknown as string,
     brand: '',
     model: '',
     year: undefined,
@@ -560,10 +575,12 @@ function getDefaults(): FormValues {
     fr: false,
     agreement: false,
     contract: false,
-    rateDe: 0,
-    rateUe: 0,
-    rateExport: 0,
-    rateImport: 0,
+    // Empty by default → Zod surfaces "required" on submit; admin must
+    // explicitly type a value (0 is allowed as "free haulage").
+    rateDe: undefined as unknown as number,
+    rateUe: undefined as unknown as number,
+    rateExport: undefined as unknown as number,
+    rateImport: undefined as unknown as number,
     wasteAllowed: false,
     cabotageDe: false,
     cabotageFr: false,

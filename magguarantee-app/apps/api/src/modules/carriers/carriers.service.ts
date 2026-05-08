@@ -108,8 +108,8 @@ export class CarriersService {
         name: dto.name,
         company: dto.company ?? null,
         passwordHash,
-        nip: dto.nip ?? null,
-        vatId: dto.vatId ?? null,
+        nip: dto.nip,
+        vatId: dto.vatId,
         // Required post-phase3_blocks — Zod already enforced presence.
         contactPerson: dto.contactPerson,
         phone: dto.phone,
