@@ -26,7 +26,8 @@
     "deactivate": "Deactivate",
     "reactivate": "Reactivate",
     "clear": "Clear",
-    "validationFailedToast": "Please fill in the highlighted fields"
+    "validationFailedToast": "Please fill in the highlighted fields",
+    "inactiveSuffix": "(inactive)"
   },
   "theme": {
     "toggle": "Toggle theme",
@@ -474,14 +475,13 @@
       },
       "trailers": {
         "title": "Trailers",
-        "newTrailer": "New trailer",
-        "editTrailer": "Edit trailer",
+        "contactOpiekun": "Contact your manager",
+        "contactOpiekunSubject": "Trailer data change",
         "searchPlaceholder": "Search plate number",
         "filterByType": "Filter by type",
         "allTypes": "All types",
         "emptyTitle": "No trailers",
-        "emptyMessage": "Add the first trailer of your company.",
-        "editAriaLabel": "Edit {plate}",
+        "emptyMessage": "Contact your manager to add a trailer.",
         "columns": {
           "plate": "Plate number",
           "type": "Type",

@@ -62,7 +62,10 @@ export default function NewClaimPage() {
   const tForm = useTranslations('carrier.claims.form');
   const tCommon = useTranslations('common');
   const router = useRouter();
-  const fleetQ = useMyFleet();
+  // Include deactivated vehicles in the dropdown — a wniosek can legitimately
+  // reference a vehicle that worked the period and was deactivated afterwards.
+  // Inactive rows are tagged "(nieaktywny)" in the option label below.
+  const fleetQ = useMyFleet({ includeInactive: true });
 
   const form = useForm<FormValues>({
     resolver: zodResolver(SubmitClaimSchema),
@@ -244,6 +247,7 @@ export default function NewClaimPage() {
                         {v.brand || v.model
                           ? ` — ${[v.brand, v.model].filter(Boolean).join(' ')}`
                           : ''}
+                        {!v.active ? ` ${tCommon('inactiveSuffix')}` : ''}
                       </option>
                     ))}
                   </Select>
@@ -263,6 +267,7 @@ export default function NewClaimPage() {
                       {drivers.map((d) => (
                         <option key={d.id} value={d.id}>
                           {d.firstName} {d.lastName}
+                          {!d.active ? ` ${tCommon('inactiveSuffix')}` : ''}
                         </option>
                       ))}
                     </Select>
@@ -281,6 +286,7 @@ export default function NewClaimPage() {
                         <option key={tr.id} value={tr.id}>
                           {tr.plateNumber}
                           {tr.trailerTypeName ? ` (${tr.trailerTypeName})` : ''}
+                          {!tr.active ? ` ${tCommon('inactiveSuffix')}` : ''}
                         </option>
                       ))}
                     </Select>

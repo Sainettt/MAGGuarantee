@@ -57,10 +57,32 @@ export type TrailerListItem = z.infer<typeof TrailerListItemSchema>;
 // ─── GET /fleet/my ───────────────────────────────────────
 
 /**
+ * Query params for `GET /fleet/my`.
+ *
+ * - `includeInactive`: when `true`, the response includes `active=false`
+ *   rows. Default `false` (active-only) — matches the new-delegation use
+ *   case where you can only register trips on operational vehicles. The
+ *   new-claim form opts in (`includeInactive=true`) because a wniosek may
+ *   legitimately reference a vehicle that was active during the period
+ *   and got deactivated afterwards but before the carrier submitted.
+ */
+export const MyFleetQuerySchema = z
+  .object({
+    includeInactive: z
+      .union([z.boolean(), z.literal('true'), z.literal('false')])
+      .transform((v) => v === true || v === 'true')
+      .optional()
+      .default(false),
+  })
+  .strict();
+export type MyFleetQuery = z.infer<typeof MyFleetQuerySchema>;
+
+/**
  * Response for `GET /fleet/my` (carrier role) — three lists in one
  * payload. The service filters to `carrierId = currentUser.carrierId`
- * and `active = true` by default; query-param flags can opt-in to
- * inactive rows for admin tooling.
+ * and `active = true` by default; pass `?includeInactive=true` to also
+ * receive deactivated rows (used by the new-claim form so historical
+ * vehicles remain selectable for past-period claims).
  */
 export const MyFleetResponseSchema = z.object({
   vehicles: z.array(VehicleListItemSchema),

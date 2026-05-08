@@ -63,11 +63,14 @@ export class TrailersController {
     return this.trailers.getById(id);
   }
 
+  // Trailers are managed by admin/opiekun ONLY — carriers consume them but
+  // never create/edit. Carrier-side panel renders a read-only list. The
+  // CarrierOwns decorator is intentionally absent here; only admin/opiekun
+  // can ever reach these handlers, so opiekun-ownership is enough.
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @Roles('admin', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun')
   @OpiekunOwns('carrierId', 'body', 'carrierId')
-  @CarrierOwns('carrierId', 'body', 'carrierId')
   @Audit({
     action: 'createTrailer',
     targetType: 'Trailer',
@@ -81,9 +84,8 @@ export class TrailersController {
   }
 
   @Patch(':id')
-  @Roles('admin', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun')
   @OpiekunOwns('id', 'param', 'trailerId')
-  @CarrierOwns('id', 'param', 'trailerId')
   @Audit({
     action: 'updateTrailer',
     targetType: 'Trailer',
@@ -98,9 +100,8 @@ export class TrailersController {
 
   @Post(':id/deactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun')
   @OpiekunOwns('id', 'param', 'trailerId')
-  @CarrierOwns('id', 'param', 'trailerId')
   @Audit({
     action: 'deactivateTrailer',
     targetType: 'Trailer',
@@ -114,9 +115,8 @@ export class TrailersController {
 
   @Post(':id/reactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun')
   @OpiekunOwns('id', 'param', 'trailerId')
-  @CarrierOwns('id', 'param', 'trailerId')
   @Audit({
     action: 'reactivateTrailer',
     targetType: 'Trailer',

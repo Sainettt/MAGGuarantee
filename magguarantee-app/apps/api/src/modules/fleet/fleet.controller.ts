@@ -1,7 +1,12 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 
-import type { MyFleetResponse } from '@magguarantee/shared';
+import {
+  MyFleetQuerySchema,
+  type MyFleetQuery,
+  type MyFleetResponse,
+} from '@magguarantee/shared';
 
+import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { CurrentUser, type AuthUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -21,7 +26,10 @@ export class FleetController {
 
   @Get('my')
   @Roles('przewoznik')
-  async my(@CurrentUser() user: AuthUser): Promise<MyFleetResponse> {
-    return this.fleet.getMyFleet(user);
+  async my(
+    @CurrentUser() user: AuthUser,
+    @Query(new ZodValidationPipe(MyFleetQuerySchema)) query: MyFleetQuery,
+  ): Promise<MyFleetResponse> {
+    return this.fleet.getMyFleet(user, query);
   }
 }

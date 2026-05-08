@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable } from '@nestjs/common';
 
 import type {
   DriverListItem,
+  MyFleetQuery,
   MyFleetResponse,
   TrailerListItem,
   VehicleListItem,
@@ -30,7 +31,10 @@ export class FleetService {
     private readonly trailers: TrailersRepository,
   ) {}
 
-  async getMyFleet(user: AuthUser): Promise<MyFleetResponse> {
+  async getMyFleet(
+    user: AuthUser,
+    query: MyFleetQuery = { includeInactive: false },
+  ): Promise<MyFleetResponse> {
     if (user.role !== 'przewoznik') {
       throw new ForbiddenException('Wymaga konta przewoźnika');
     }
@@ -40,10 +44,16 @@ export class FleetService {
       throw new ForbiddenException('Brak profilu przewoźnika');
     }
 
+    // `active` filter — when `includeInactive=true` (used by the new-claim
+    // form so historical vehicles remain selectable) we omit the predicate
+    // entirely; otherwise the active-only default keeps the new-delegation
+    // dropdown lean.
+    const activeFilter = query.includeInactive ? undefined : true;
+
     const [vehicleRows, driverRows, trailerRows] = await Promise.all([
-      this.vehicles.list({ carrierId: mine.id, active: true, limit: 200 }),
-      this.drivers.list({ carrierId: mine.id, active: true, limit: 200 }),
-      this.trailers.list({ carrierId: mine.id, active: true, limit: 200 }),
+      this.vehicles.list({ carrierId: mine.id, active: activeFilter, limit: 200 }),
+      this.drivers.list({ carrierId: mine.id, active: activeFilter, limit: 200 }),
+      this.trailers.list({ carrierId: mine.id, active: activeFilter, limit: 200 }),
     ]);
 
     const vehicles: VehicleListItem[] = vehicleRows.map((v) => ({

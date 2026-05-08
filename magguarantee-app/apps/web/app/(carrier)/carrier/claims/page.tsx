@@ -25,6 +25,7 @@ import { useMyFleet } from '@/lib/hooks/useMyFleet';
 export default function CarrierClaimsListPage() {
   const t = useTranslations('carrier.claims');
   const tStatus = useTranslations('carrier.claims.status');
+  const tCommon = useTranslations('common');
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<ClaimStatus | ''>('');
   const [vehicleId, setVehicleId] = useState<string>('');
@@ -36,7 +37,9 @@ export default function CarrierClaimsListPage() {
     limit: 50,
   });
 
-  const fleetQ = useMyFleet();
+  // Include deactivated vehicles in the filter dropdown — old claims may
+  // still reference a vehicle that was sold / deactivated afterwards.
+  const fleetQ = useMyFleet({ includeInactive: true });
 
   const items = data?.items ?? [];
 
@@ -85,6 +88,7 @@ export default function CarrierClaimsListPage() {
           {(fleetQ.data?.vehicles ?? []).map((v) => (
             <option key={v.id} value={v.id}>
               {v.plateNumber}
+              {!v.active ? ` ${tCommon('inactiveSuffix')}` : ''}
             </option>
           ))}
         </Select>

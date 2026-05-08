@@ -26,7 +26,8 @@
     "deactivate": "Dezaktywuj",
     "reactivate": "Aktywuj",
     "clear": "Wyczyść",
-    "validationFailedToast": "Uzupełnij podświetlone pola"
+    "validationFailedToast": "Uzupełnij podświetlone pola",
+    "inactiveSuffix": "(nieaktywny)"
   },
   "theme": {
     "toggle": "Przełącz motyw",
@@ -474,14 +475,13 @@
       },
       "trailers": {
         "title": "Naczepy",
-        "newTrailer": "Nowa naczepa",
-        "editTrailer": "Edytuj naczepę",
+        "contactOpiekun": "Skontaktuj się z opiekunem",
+        "contactOpiekunSubject": "Zmiana danych naczepy",
         "searchPlaceholder": "Szukaj numeru rejestracyjnego",
         "filterByType": "Filtruj po typie",
         "allTypes": "Wszystkie typy",
         "emptyTitle": "Brak naczep",
-        "emptyMessage": "Dodaj pierwszą naczepę swojej firmy.",
-        "editAriaLabel": "Edytuj {plate}",
+        "emptyMessage": "Skontaktuj się z opiekunem, aby dodać naczepę.",
         "columns": {
           "plate": "Numer rejestracyjny",
           "type": "Typ",

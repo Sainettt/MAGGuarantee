@@ -107,10 +107,7 @@ export class ClaimsService {
     if (dto.trailerId) {
       await this._requireOwnedTrailer(carrier.id, dto.trailerId);
     }
-    const vehicle = await this._findOwnedVehicleOrThrow(
-      carrier.id,
-      dto.vehicleId,
-    );
+    const vehicle = await this._requireOwnedVehicle(carrier.id, dto.vehicleId);
 
     const config = await this._loadSubmitConfig();
     const today = startOfTodayUtc();
@@ -142,12 +139,12 @@ export class ClaimsService {
         `Przebieg musi być większy od zera (podano ${dto.mileage}).`,
       );
     }
-    if (!vehicle.active || vehicle.deletedAt) {
-      tier1.push(
-        `Pojazd ${vehicle.plateNumber} jest nieaktywny lub usunięty — ` +
-          `skontaktuj się z opiekunem.`,
-      );
-    }
+    // NB: We deliberately do NOT block on `!vehicle.active`. A wniosek is
+    // about a past period — the vehicle may have been legitimately operating
+    // during that period and only got deactivated afterwards (e.g. sold,
+    // contract terminated). Soft-deleted vehicles are filtered upstream by
+    // the Prisma soft-delete extension, so `_findOwnedVehicleOrThrow` only
+    // returns rows the carrier may legitimately reference.
     const periodDays = daysBetweenInclusive(dateStart, dateEnd);
     if (periodDays > config.maxPeriodDays) {
       tier1.push(
@@ -637,6 +634,14 @@ export class ClaimsService {
     return { id: mine.id };
   }
 
+  /**
+   * Resolves a vehicle the carrier owns. Throws on missing / wrong owner —
+   * those are security problems with no UI affordance to recover. Does NOT
+   * throw on `active=false` because a wniosek targets a past period and the
+   * vehicle's *current* operational status is irrelevant; soft-deleted rows
+   * are filtered upstream by the Prisma soft-delete extension and so never
+   * reach this method (they 404 as "Nieprawidłowy pojazd").
+   */
   private async _requireOwnedVehicle(
     carrierId: string,
     vehicleId: string,
@@ -645,37 +650,7 @@ export class ClaimsService {
     if (!v || v.carrierId !== carrierId) {
       throw new UnprocessableEntityException('Nieprawidłowy pojazd');
     }
-    if (!v.active) {
-      throw new UnprocessableEntityException('Pojazd jest nieaktywny');
-    }
     return { id: v.id, plateNumber: v.plateNumber };
-  }
-
-  /**
-   * Like `_requireOwnedVehicle` but does NOT throw on inactive/deleted —
-   * returns the row and lets the caller add a violation. Used by the submit
-   * pipeline so an inactive vehicle is reported alongside other issues
-   * instead of short-circuiting the violation list.
-   */
-  private async _findOwnedVehicleOrThrow(
-    carrierId: string,
-    vehicleId: string,
-  ): Promise<{
-    id: string;
-    plateNumber: string;
-    active: boolean;
-    deletedAt: Date | null;
-  }> {
-    const v = await this.vehicles.findById(vehicleId);
-    if (!v || v.carrierId !== carrierId) {
-      throw new UnprocessableEntityException('Nieprawidłowy pojazd');
-    }
-    return {
-      id: v.id,
-      plateNumber: v.plateNumber,
-      active: v.active,
-      deletedAt: v.deletedAt ?? null,
-    };
   }
 
   private async _requireOwnedDriver(

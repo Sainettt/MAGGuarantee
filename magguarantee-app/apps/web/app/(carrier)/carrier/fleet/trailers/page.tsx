@@ -1,24 +1,21 @@
 'use client';
 
-// Phase 3 — carrier-scoped trailers CRUD. Same pattern as the employee
-// trailers page, scoped automatically by the API to the carrier's own rows.
+// Phase 3 — carrier-scoped trailer list. READ-ONLY: trailers are managed by
+// admin/opiekun, the carrier can only see them (mirror of the vehicles page
+// pattern). Per docs/14 "Naczepy" sub-tab — Phase 3 narrowed-scope decision.
 
-import { Pencil, Plus } from 'lucide-react';
+import { Container, Mail } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useMemo, useState } from 'react';
 import type { TrailerDto } from '@magguarantee/shared';
 
 import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
-import { useMyCarrierId } from '@/lib/hooks/useMyCarrierId';
 import { useTrailers } from '@/lib/hooks/useTrailers';
 import { useTrailerTypes } from '@/lib/hooks/useTrailerTypes';
-
-import { TrailerSheetCarrier } from './TrailerSheetCarrier';
 
 export default function CarrierTrailersPage() {
   const t = useTranslations('carrier.fleet.trailers');
@@ -26,8 +23,6 @@ export default function CarrierTrailersPage() {
   const tCommon = useTranslations('common');
   const [search, setSearch] = useState('');
   const [trailerTypeId, setTrailerTypeId] = useState<string>('');
-  const carrierIdQ = useMyCarrierId();
-  const carrierId = carrierIdQ.data ?? null;
 
   const { data, isLoading } = useTrailers({
     q: search.length >= 2 ? search : undefined,
@@ -36,18 +31,6 @@ export default function CarrierTrailersPage() {
   });
 
   const typesQ = useTrailerTypes({ active: true });
-
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const [target, setTarget] = useState<TrailerDto | null>(null);
-
-  const openCreate = () => {
-    setTarget(null);
-    setSheetOpen(true);
-  };
-  const openEdit = (row: TrailerDto) => {
-    setTarget(row);
-    setSheetOpen(true);
-  };
 
   const columns = useMemo<DataTableColumn<TrailerDto>[]>(
     () => [
@@ -82,28 +65,11 @@ export default function CarrierTrailersPage() {
             <Badge variant="muted">{tCommon('inactive')}</Badge>
           ),
       },
-      {
-        id: 'actions',
-        header: <span className="sr-only">{tCommon('actions')}</span>,
-        align: 'right',
-        cell: (row) => (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              openEdit(row);
-            }}
-            aria-label={t('editAriaLabel', { plate: row.plateNumber })}
-          >
-            <Pencil size={14} />
-            {tCommon('edit')}
-          </Button>
-        ),
-      },
     ],
-    [t, tColumns, tCommon],
+    [tColumns, tCommon],
   );
+
+  const mailtoSubject = encodeURIComponent(t('contactOpiekunSubject'));
 
   return (
     <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
@@ -111,10 +77,13 @@ export default function CarrierTrailersPage() {
         <h1 className="text-2xl font-extrabold tracking-tight text-text">
           {t('title')}
         </h1>
-        <Button size="sm" onClick={openCreate} disabled={!carrierId}>
-          <Plus size={14} />
-          {t('newTrailer')}
-        </Button>
+        <a
+          href={`mailto:opiekun@magtrans.eu?subject=${mailtoSubject}`}
+          className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand hover:text-brand-dark"
+        >
+          <Mail size={14} />
+          {t('contactOpiekun')}
+        </a>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-3 mb-4">
@@ -145,21 +114,14 @@ export default function CarrierTrailersPage() {
         rows={data?.items ?? []}
         columns={columns}
         rowKey={(r) => r.id}
-        onRowClick={openEdit}
         isLoading={isLoading}
         empty={
           <EmptyState
+            icon={Container}
             title={t('emptyTitle')}
             message={t('emptyMessage')}
           />
         }
-      />
-
-      <TrailerSheetCarrier
-        open={sheetOpen}
-        trailer={target}
-        carrierId={carrierId}
-        onClose={() => setSheetOpen(false)}
       />
     </section>
   );
