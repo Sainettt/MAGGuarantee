@@ -1,0 +1,42 @@
+# Caddy reverse-proxy config for the MAGGuarantee staging VPS.
+#
+# Caddy auto-fetches and renews Let's Encrypt certificates for each
+# domain block here as long as DNS for that domain points at this VPS.
+#
+# Service hostnames (magguarantee-web, magguarantee-api) resolve via the
+# proxy-net Docker network — both this container and the app containers
+# must be attached to that network.
+
+{
+    # Email used by Let's Encrypt for expiry notifications.
+    email admin@magtrans.eu
+}
+
+# ── Web (Next.js) ────────────────────────────────────────────────────────────
+staging.magtrans.eu {
+    reverse_proxy magguarantee-web:3000
+
+    encode gzip zstd
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+}
+
+# ── API (NestJS) ─────────────────────────────────────────────────────────────
+staging-api.magtrans.eu {
+    reverse_proxy magguarantee-api:3001
+
+    encode gzip zstd
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        -Server
+    }
+}

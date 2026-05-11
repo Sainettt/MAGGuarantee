@@ -15,7 +15,7 @@ import { getMyFleet, type GetMyFleetOptions } from '@/lib/api/fleet';
 
 export const MY_FLEET_KEY = ['fleet', 'my'] as const;
 
-export interface UseMyFleetOptions extends GetMyFleetOptions {}
+export type UseMyFleetOptions = GetMyFleetOptions;
 
 export function useMyFleet(opts: UseMyFleetOptions = {}) {
   const { includeInactive = false } = opts;

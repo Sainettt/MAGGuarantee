@@ -190,8 +190,7 @@
    - `POST /claims/:nrZgl/preview`.
 3. Модуль `delegations`: addDelegacja, cancelDelegacja для carrier-а.
 4. Модуль `claims/fleet`: `GET /fleet/my` — `getMyFleet` (`Code.gs:4247`).
-5. Endpoint `/users/me/drivers`, `/me/trailers` — те же что `/drivers?carrierId=current`, alias.
-6. **Тесты на km calc:** ≥30 fixtures, написанных вручную для покрытия краевых случаев (полный месяц, перекрытие, Easter, EU-banned дни, дробные дни). См. [17-migration-roadmap.md#тестирование-km-calc](#тестирование-km-calc) ниже.
+5. **Тесты на km calc:** ≥30 fixtures, написанных вручную для покрытия краевых случаев (полный месяц, перекрытие, Easter, EU-banned дни, дробные дни). См. [17-migration-roadmap.md#тестирование-km-calc](#тестирование-km-calc) ниже.
 
 ### Shared
 

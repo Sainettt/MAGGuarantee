@@ -1,0 +1,40 @@
+# Shared Caddy reverse-proxy. Lives separately from the app stack so that
+# adding/removing other projects on the same VPS doesn't touch the app's
+# Postgres/Redis lifecycle.
+#
+# On the VPS, expected location: /opt/caddy/
+#
+# Bring up once per VPS (after `docker network create proxy-net`):
+#
+#   cd /opt/caddy
+#   docker compose up -d
+#
+# Caddy reads Caddyfile from this directory. Reload after changes without
+# downtime:
+#
+#   docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp' # HTTP/3 (QUIC)
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data:/data        # TLS certificates from Let's Encrypt
+      - ./config:/config
+    networks:
+      - proxy-net
+    logging:
+      driver: json-file
+      options:
+        max-size: '50m'
+        max-file: '3'
+
+networks:
+  proxy-net:
+    external: true

@@ -1,0 +1,135 @@
+# MAGGuarantee — staging stack.
+#
+# Build context for api/web is `../magguarantee-app` (relative to this file).
+# Images are built in-place — no registry, no CI. To deploy on the VPS:
+#
+#   cd /opt/magguarantee/src
+#   git pull
+#   docker compose -f infra/docker-compose.staging.yml --env-file ../.env up -d --build
+#
+# Locally (smoke test):
+#
+#   cd MAGGuarantee
+#   docker compose -f infra/docker-compose.staging.yml --env-file infra/.env up -d --build
+#
+# Required pre-step (one-time, both VPS and local):
+#   docker network create proxy-net
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: magguarantee-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: magguarantee
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required in .env}
+      POSTGRES_DB: magguarantee
+    volumes:
+      - ${POSTGRES_DATA:-./data/postgres}:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U magguarantee']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+    logging:
+      driver: json-file
+      options:
+        max-size: '50m'
+        max-file: '3'
+
+  redis:
+    image: redis:7-alpine
+    container_name: magguarantee-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+    volumes:
+      - ${REDIS_DATA:-./data/redis}:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+    logging:
+      driver: json-file
+      options:
+        max-size: '20m'
+        max-file: '3'
+
+  # Mailhog catches all outgoing email. Web UI bound to 127.0.0.1 only — on
+  # the VPS reach it via SSH tunnel:  ssh -L 8025:localhost:8025 magguarantee-staging
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: magguarantee-mailhog
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:8025:8025'
+    networks:
+      - internal
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '2'
+
+  api:
+    build:
+      context: ../magguarantee-app
+      dockerfile: apps/api/Dockerfile
+    container_name: magguarantee-api
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    # Loopback-only exposure: convenient for local smoke tests and SSH-tunnel
+    # debugging on the VPS, but invisible to the public internet there
+    # (Caddy reaches api via the proxy-net Docker network, not via host).
+    ports:
+      - '127.0.0.1:3001:3001'
+    networks:
+      - internal
+      - proxy-net
+    logging:
+      driver: json-file
+      options:
+        max-size: '100m'
+        max-file: '5'
+
+  web:
+    build:
+      context: ../magguarantee-app
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Baked into the client bundle. Must match the URL the browser
+        # uses to reach the API (NOT the in-cluster docker hostname).
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL required in .env}
+    container_name: magguarantee-web
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      - api
+    ports:
+      - '127.0.0.1:3000:3000'
+    networks:
+      - proxy-net
+    logging:
+      driver: json-file
+      options:
+        max-size: '50m'
+        max-file: '3'
+
+networks:
+  internal:
+    driver: bridge
+  proxy-net:
+    external: true

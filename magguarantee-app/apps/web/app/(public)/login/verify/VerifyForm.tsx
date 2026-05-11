@@ -156,7 +156,7 @@ export function VerifyForm() {
         setIsVerifying(false);
       }
     },
-    [session, isVerifying, locked, qc, router, t],
+    [session, isVerifying, locked, qc, router, t, next],
   );
 
   // ── Resend ────────────────────────────────────────────────────

@@ -39,6 +39,12 @@ magguarantee-app/packages/database/src/generated/
 .env.test.local
 .env.production.local
 !.env.example
+!.env.staging.example
+
+# ─── Docker volumes (local compose runs) ────────────────
+infra/data/
+infra/caddy/data/
+infra/caddy/config/
 
 # ─── Test ───────────────────────────────────────────────
 coverage/
