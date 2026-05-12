@@ -116,6 +116,12 @@ services:
     container_name: magguarantee-web
     restart: unless-stopped
     env_file: .env
+    # `env_file` is shared with api and sets PORT=3001 (api's port). For web
+    # we override it back to 3000 because `environment:` has higher priority
+    # than `env_file:` in compose.
+    environment:
+      PORT: '3000'
+      HOSTNAME: '0.0.0.0'
     depends_on:
       - api
     ports:
