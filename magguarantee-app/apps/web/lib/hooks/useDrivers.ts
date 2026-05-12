@@ -24,6 +24,7 @@ import {
   reactivateDriver,
   updateDriver,
 } from '@/lib/api/drivers';
+import { MY_FLEET_KEY } from '@/lib/hooks/useMyFleet';
 
 export const DRIVERS_KEY = ['drivers'] as const;
 
@@ -51,6 +52,7 @@ export function useCreateDriver(
     ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: DRIVERS_KEY });
+      qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
       opts?.onSuccess?.(...args);
     },
   });
@@ -69,6 +71,7 @@ export function useUpdateDriver(
     ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: DRIVERS_KEY });
+      qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
       opts?.onSuccess?.(...args);
     },
   });
@@ -78,7 +81,10 @@ export function useDeactivateDriver() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: deactivateDriver,
-    onSuccess: () => qc.invalidateQueries({ queryKey: DRIVERS_KEY }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: DRIVERS_KEY });
+      qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+    },
   });
 }
 
@@ -86,7 +92,10 @@ export function useReactivateDriver() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: reactivateDriver,
-    onSuccess: () => qc.invalidateQueries({ queryKey: DRIVERS_KEY }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: DRIVERS_KEY });
+      qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+    },
   });
 }
 
@@ -94,6 +103,9 @@ export function useDeleteDriver() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: deleteDriver,
-    onSuccess: () => qc.invalidateQueries({ queryKey: DRIVERS_KEY }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: DRIVERS_KEY });
+      qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+    },
   });
 }

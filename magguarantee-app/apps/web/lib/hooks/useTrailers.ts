@@ -24,6 +24,7 @@ import {
   reactivateTrailer,
   updateTrailer,
 } from '@/lib/api/trailers';
+import { MY_FLEET_KEY } from '@/lib/hooks/useMyFleet';
 
 export const TRAILERS_KEY = ['trailers'] as const;
 
@@ -51,6 +52,7 @@ export function useCreateTrailer(
     ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: TRAILERS_KEY });
+      qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
       opts?.onSuccess?.(...args);
     },
   });
@@ -69,6 +71,7 @@ export function useUpdateTrailer(
     ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: TRAILERS_KEY });
+      qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
       opts?.onSuccess?.(...args);
     },
   });
@@ -78,7 +81,10 @@ export function useDeactivateTrailer() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: deactivateTrailer,
-    onSuccess: () => qc.invalidateQueries({ queryKey: TRAILERS_KEY }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: TRAILERS_KEY });
+      qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+    },
   });
 }
 
@@ -86,7 +92,10 @@ export function useReactivateTrailer() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: reactivateTrailer,
-    onSuccess: () => qc.invalidateQueries({ queryKey: TRAILERS_KEY }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: TRAILERS_KEY });
+      qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+    },
   });
 }
 
@@ -94,6 +103,9 @@ export function useDeleteTrailer() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: deleteTrailer,
-    onSuccess: () => qc.invalidateQueries({ queryKey: TRAILERS_KEY }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: TRAILERS_KEY });
+      qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+    },
   });
 }

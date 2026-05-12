@@ -24,6 +24,7 @@ import {
   reactivateVehicle,
   updateVehicle,
 } from '@/lib/api/vehicles';
+import { MY_FLEET_KEY } from '@/lib/hooks/useMyFleet';
 
 export const VEHICLES_KEY = ['vehicles'] as const;
 
@@ -51,6 +52,7 @@ export function useCreateVehicle(
     ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: VEHICLES_KEY });
+      qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
       opts?.onSuccess?.(...args);
     },
   });
@@ -69,6 +71,7 @@ export function useUpdateVehicle(
     ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: VEHICLES_KEY });
+      qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
       opts?.onSuccess?.(...args);
     },
   });
@@ -78,7 +81,10 @@ export function useDeactivateVehicle() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: deactivateVehicle,
-    onSuccess: () => qc.invalidateQueries({ queryKey: VEHICLES_KEY }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: VEHICLES_KEY });
+      qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+    },
   });
 }
 
@@ -86,7 +92,10 @@ export function useReactivateVehicle() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: reactivateVehicle,
-    onSuccess: () => qc.invalidateQueries({ queryKey: VEHICLES_KEY }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: VEHICLES_KEY });
+      qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+    },
   });
 }
 
@@ -94,6 +103,9 @@ export function useDeleteVehicle() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: deleteVehicle,
-    onSuccess: () => qc.invalidateQueries({ queryKey: VEHICLES_KEY }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: VEHICLES_KEY });
+      qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+    },
   });
 }
