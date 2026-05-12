@@ -88,8 +88,8 @@ Generate real secrets and set production URLs:
 - `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` — two different `openssl rand -base64 48`
 - `POSTGRES_DATA=/opt/magguarantee/data/postgres`
 - `REDIS_DATA=/opt/magguarantee/data/redis`
-- `WEB_URL=https://staging.magtrans.eu`
-- `NEXT_PUBLIC_API_URL=https://staging-api.magtrans.eu`
+- `WEB_URL=https://vps-29a0acba.vps.ovh.net`
+- `NEXT_PUBLIC_API_URL=https://vps-29a0acba.vps.ovh.net`
 
 **3. Bring up Caddy (one-time per VPS):**
 
@@ -99,9 +99,14 @@ cd /opt/caddy
 docker compose up -d
 ```
 
-Caddy will start requesting Let's Encrypt certificates as soon as DNS for
-both `staging.magtrans.eu` and `staging-api.magtrans.eu` resolves to this
-VPS. Watch logs: `docker compose logs -f caddy`.
+Caddy will start requesting a Let's Encrypt certificate for
+`vps-29a0acba.vps.ovh.net` (DNS already points there — managed by OVH).
+Watch logs: `docker compose logs -f caddy`. First request takes 10–30s.
+
+NOTE: web AND api share this single domain via path-based routing inside
+Caddy (`/api/*` → api container, everything else → web). When a real
+domain is registered (e.g. `*.magtrans.eu`), split the Caddyfile back
+into two `domain.com { ... }` blocks for cleaner URLs.
 
 **4. Bring up the app stack:**
 
@@ -123,11 +128,11 @@ docker compose -f infra/docker-compose.staging.yml --env-file ../.env \
 **6. Smoke test:**
 
 ```bash
-curl https://staging-api.magtrans.eu/health
+curl https://vps-29a0acba.vps.ovh.net/health
 # → 200 OK
 ```
 
-Visit `https://staging.magtrans.eu/login` in a browser.
+Visit `https://vps-29a0acba.vps.ovh.net/login` in a browser.
 
 ## Updating staging (every subsequent deploy)
 

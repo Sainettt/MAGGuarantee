@@ -1,20 +1,35 @@
 # Caddy reverse-proxy config for the MAGGuarantee staging VPS.
 #
-# Caddy auto-fetches and renews Let's Encrypt certificates for each
-# domain block here as long as DNS for that domain points at this VPS.
+# This VPS uses the default hostname provided by OVH (vps-29a0acba.vps.ovh.net).
+# We don't control its DNS zone, so creating real subdomains (app.* and api.*)
+# isn't possible. Instead we serve web AND api from the same origin via
+# path-based routing.
 #
-# Service hostnames (magguarantee-web, magguarantee-api) resolve via the
-# proxy-net Docker network — both this container and the app containers
-# must be attached to that network.
+# This also sidesteps the cross-origin cookie problem: a single origin means
+# cookies set by the API are sent automatically on every request from web,
+# and we keep SameSite=Strict + Secure (the strongest setting).
+#
+# When a real domain is registered (e.g. *.magtrans.eu), split this back into
+# two `domain.com { ... }` blocks for cleaner URLs.
 
 {
     # Email used by Let's Encrypt for expiry notifications.
-    email admin@magtrans.eu
+    email danyilfiut@gmail.com
 }
 
-# ── Web (Next.js) ────────────────────────────────────────────────────────────
-staging.magtrans.eu {
-    reverse_proxy magguarantee-web:3000
+vps-29a0acba.vps.ovh.net {
+    # /api/* → API container. The full path (including /api/v1/...) is
+    # preserved — Nest already mounts its routes under /api/v1, so Caddy
+    # doesn't need to rewrite anything.
+    @api path /api/*
+    handle @api {
+        reverse_proxy magguarantee-api:3001
+    }
+
+    # Everything else → web container.
+    handle {
+        reverse_proxy magguarantee-web:3000
+    }
 
     encode gzip zstd
 
@@ -23,20 +38,6 @@ staging.magtrans.eu {
         X-Content-Type-Options "nosniff"
         X-Frame-Options "DENY"
         Referrer-Policy "strict-origin-when-cross-origin"
-        -Server
-    }
-}
-
-# ── API (NestJS) ─────────────────────────────────────────────────────────────
-staging-api.magtrans.eu {
-    reverse_proxy magguarantee-api:3001
-
-    encode gzip zstd
-
-    header {
-        Strict-Transport-Security "max-age=31536000; includeSubDomains"
-        X-Content-Type-Options "nosniff"
-        X-Frame-Options "DENY"
         -Server
     }
 }
