@@ -2,6 +2,18 @@
 
 > Так как `Code.gs` + `index.html` никогда не были в проде и содержат фейковые данные, **миграция данных не нужна**. Новое приложение запускается с пустой БД + seed + первый admin. Этот документ описывает что нужно для перехода в prod.
 
+## Текущее состояние (2026-05-12)
+
+- **Staging — ✅ работает.** Развёрнут на OVH VPS `vps-29a0acba.vps.ovh.net`. Полный стек (postgres + redis + mailhog + api + web + shared Caddy) поднят. CI/CD через `.github/workflows/ci.yml`: push в `main` автоматически билдит и деплоит через SSH. Seed применён, логин-флоу работает end-to-end. Postgres exposed только на loopback VPS — внешний доступ через SSH-туннель.
+- **Prod — ⏳ не развёрнут.** Будет запущен на **отдельном VPS** (не на том же что staging). Шаги для перехода — см. раздел [Переход staging → prod](#переход-staging--prod) ниже.
+
+Большинство ниже описанных файлов и процессов **уже существуют в репо** и используются для staging:
+- `apps/api/Dockerfile`, `apps/web/Dockerfile` — multi-stage, готовы для прода без изменений.
+- `infra/docker-compose.staging.yml` — почти готов; для прода нужны небольшие правки (см. раздел перехода).
+- `infra/caddy/{docker-compose.yml,Caddyfile}` — почти готов; для прода поменять домен и path-routing разделить на subdomain-blocks.
+- `infra/.env.staging.example` — шаблон для VPS `.env`.
+- `Documentation/Deployment Guide/01 - Первая настройка VPS.md` (в Obsidian) — bootstrap скрипт VPS.
+
 ## Цель
 
 Превратить готовое приложение из Фазы 9 (см. [17-migration-roadmap.md](17-migration-roadmap.md)) в работающий prod-сервис, готовый принимать первых реальных пользователей.
@@ -61,6 +73,164 @@
 ```
 
 Каждое следующее приложение на VPS — отдельная папка в `/opt/`, своя `docker-compose.yml`, своя БД, общий Caddy.
+
+## Переход staging → prod
+
+Prod-VPS — это **другая физическая машина**, не та что staging. Изоляция обязательна: staging падает → prod живёт; никто не дропнет таблицу в проде «думая что в staging»; разные нагрузочные профили; разные регламенты обновлений.
+
+Большая часть инфраструктурных файлов из репо переиспользуется без изменений. Конкретно — что **остаётся**, что **меняется** и что **добавляется**.
+
+### А. Остаётся без изменений (то, что уже работает на staging)
+
+| Артефакт | Где |
+|---|---|
+| Multi-stage Dockerfile'ы для api и web | `apps/api/Dockerfile`, `apps/web/Dockerfile` |
+| `.dockerignore` | `magguarantee-app/.dockerignore` |
+| Базовая структура compose | `infra/docker-compose.staging.yml` → копируем в `docker-compose.prod.yml`, правим что нужно (см. ниже) |
+| Bootstrap-процедура VPS (Docker, ufw, fail2ban, chrony, unattended-upgrades, deploy-юзер, proxy-net network) | См. `Documentation/Deployment Guide/01 - Первая настройка VPS.md` в Obsidian — те же шаги повторить на новом VPS |
+| Shared Caddy паттерн в `/opt/caddy/` | Структура одинаковая, меняется только Caddyfile (см. Б.2) |
+| Postgres-loopback exposure для databasus / DBeaver через SSH-туннель | Аналогично staging |
+
+### Б. Меняется (правки в существующих файлах)
+
+#### Б.1 Compose для прода
+
+Создать `infra/docker-compose.prod.yml` копией staging-варианта, и поменять:
+
+1. **Mailhog убрать** — на проде он не нужен (вместо него Gmail API). Service просто удалить.
+2. **Порт api/web наружу** — убрать `ports:` пробросы на `127.0.0.1`. На проде Caddy общается с api/web только через `proxy-net` Docker-сеть. Если нужно отлаживать через SSH-туннель — добавить временно.
+3. **Тюнинг postgres** — добавить `shared_buffers=2GB`, `effective_cache_size=4GB` если VPS на 8GB+ RAM (см. пример compose в этом же документе ниже).
+4. **`POSTGRES_DATA` / `REDIS_DATA`** в `.env` — абсолютные пути на новом сервере (`/opt/magguarantee/data/...`).
+
+#### Б.2 Caddyfile для прода
+
+Сейчас на staging один блок с path-routing (`/api/*` → api, прочее → web) — потому что OVH-домен один, поддомены создать нельзя. На проде у нас **свои поддомены**, поэтому Caddyfile разбивается обратно на два чистых блока:
+
+```caddy
+{
+    email admin@magtrans.eu
+}
+
+app.magtrans.eu {
+    reverse_proxy magguarantee-web:3000
+    encode gzip zstd
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        ...
+    }
+}
+
+api.magtrans.eu {
+    reverse_proxy magguarantee-api:3001
+    ...
+}
+```
+
+Это даёт более чистые URL и стандартную CORS-модель (web → api как два отдельных origin, но оба с одинаковым parent-доменом `*.magtrans.eu` — cookies с `Domain=.magtrans.eu` будут видны обоим).
+
+#### Б.3 `.env` для прода — ВСЕ секреты новые
+
+Прод-`.env` создаётся в `/opt/magguarantee/.env` (chmod 0600) **с нуля**, секреты **не копируются со staging**. Конкретно:
+
+- `POSTGRES_PASSWORD` — новый через `openssl rand -base64 32`
+- `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` — два новых через `openssl rand -base64 48`
+- `WEB_URL=https://app.magtrans.eu`
+- `NEXT_PUBLIC_API_URL=https://api.magtrans.eu`
+- `MAIL_PROVIDER=gmail` (если Gmail API; иначе `smtp` с реальным SMTP-провайдером)
+- `S3_*` — bucket для скриншотов (новые ключи)
+
+Резервная копия `.env` — в 1Password (export → encrypted archive offline). Это критично: потеряется VPS, без копии `.env` БД восстановить не сможешь (POSTGRES_PASSWORD не подойдёт к существующим данным дампа).
+
+### В. Добавляется (новые штуки, которых нет на staging)
+
+#### В.1 Реальный домен
+
+- Купить домен (если не куплен). Cloudflare Registrar / Namecheap — ~$10/год.
+- A-записи в DNS:
+  - `app.magtrans.eu` → IP прод-VPS
+  - `api.magtrans.eu` → IP прод-VPS
+  - `status.magtrans.eu` → IP прод-VPS (для Uptime Kuma)
+- TTL — `300` пока обкатываем, потом `3600`.
+
+#### В.2 Email — Gmail API (Phase 9)
+
+Mailhog уходит. Заводим:
+- Google Cloud Project + Gmail API enabled.
+- Service account с domain-wide delegation, scope `gmail.send`.
+- Технический ящик `wnioski@magtrans.eu` через Workspace Admin (нужны admin-права на домен).
+- `GMAIL_USER`, `GMAIL_CLIENT_EMAIL`, `GMAIL_PRIVATE_KEY` в `.env`.
+
+Альтернатива (если Google слишком долго) — Brevo / Resend / SendGrid с обычным SMTP. Менее «нативно» (нет threading через In-Reply-To из коробки), но работает за 15 минут.
+
+Полная инструкция — [16-jobs-and-integrations.md#email-через-gmail-api](16-jobs-and-integrations.md).
+
+#### В.3 S3-bucket'ы
+
+Два разных bucket'а на S3-совместимом хранилище (Cloudflare R2 / Hetzner Object Storage):
+
+- `magguarantee-screenshots-prod` — для скриншотов авторизации (Phase 4+). Versioning ON, retention 5 лет.
+- `magguarantee-backups-prod` — для Postgres-дампов. Lifecycle: daily 7 дней, weekly 4 недели, monthly 12 месяцев.
+
+#### В.4 Бэкапы Postgres
+
+Скрипт `/usr/local/bin/magguarantee-pgbackup` + systemd-таймер. Делает `pg_dump` через `docker exec`, gzip'ует, отправляет в `magguarantee-backups-prod` через `rclone`. Полный пример скрипта — в этом же документе ниже, раздел [Backup-стратегия](#backup-стратегия).
+
+**Без этого нельзя запускать прод.** Single VPS = один диск, диск умрёт → потеряешь данные. Тест восстановления — раз в квартал минимум.
+
+#### В.5 Мониторинг — Uptime Kuma
+
+Отдельный compose-стек в `/opt/uptime-kuma/`, в сети `proxy-net`. Caddy роутит `status.magtrans.eu` → этот контейнер. Мониторит `https://api.magtrans.eu/health`, `https://app.magtrans.eu/`. Алерты в email/Telegram.
+
+#### В.6 Rollback-скрипт
+
+`/usr/local/bin/magguarantee-rollback <sha>` — описан в этом же документе ниже. На прод-VPS обязательно положить, протестировать перед launch.
+
+#### В.7 Отдельный CI/CD workflow
+
+Сейчас `.github/workflows/ci.yml` имеет один deploy-job `deploy-staging` который запускается на **каждый push в main**. Для прода добавляется `deploy-prod` с **другим триггером**:
+
+- Вариант 1 (рекомендую): `workflow_dispatch` — деплой только по ручной кнопке в Actions UI. Никакого автоматизма, осознанное действие.
+- Вариант 2: push tag `vX.Y.Z` (`on: push: tags: ['v*']`). Тогда `git tag v1.0.0 && git push origin v1.0.0` запускает прод-деплой.
+
+Новые GitHub Secrets:
+- `PROD_DEPLOY_SSH_KEY` — отдельный SSH-ключ от прод-VPS deploy-юзера.
+- `PROD_DEPLOY_HOST` — `vps-prod-XXX...` или хостнейм прод-VPS.
+
+Новый Deploy Key в GitHub для прод-VPS (для `git pull` на прод-сервере) — отдельный от staging.
+
+#### В.8 (опц.) Перевод на ghcr.io вместо build-on-server
+
+Сейчас на staging образ собирается прямо на VPS (`docker compose up -d --build`). Для прода может быть лучше:
+- В CI билдить образы → пушить в `ghcr.io`.
+- На VPS `docker compose pull && up -d --no-deps api web` — без билда на сервере, мгновенный rollback через подмену tag в `.env`.
+
+Это даёт атомарный rollback (поменял `API_TAG=sha-prev` → up -d, секунды). Но усложняет CI workflow + добавляет registry-аутентификацию на VPS. Делать опционально, когда build-on-server станет узким горлышком.
+
+### Г. Sequence — порядок шагов перехода на прод
+
+1. **Купить prod-VPS** (Hetzner CX32 4vCPU/8GB / VPS на OVH с большим планом — не Shared-VM где staging).
+2. **Купить домен** + настроить DNS (3 A-записи).
+3. **Bootstrap VPS** — повторить шаги из `Documentation/Deployment Guide/01 - Первая настройка VPS.md`.
+4. **Поднять Caddy** на новом VPS из `infra/caddy/` с переделанным под subdomain'ы Caddyfile.
+5. **Получить Gmail API credentials** (или временно настроить Brevo/Resend как SMTP).
+6. **Создать S3 bucket'ы** (screenshots + backups), получить access keys.
+7. **Создать prod `.env`** в `/opt/magguarantee/.env` с **новыми** секретами + S3 keys + Gmail keys.
+8. **Создать `infra/docker-compose.prod.yml`** — копия staging с правками из Б.1.
+9. **Клонировать репо** в `/opt/magguarantee/src/` через Deploy Key (новый SSH-ключ на прод-VPS, добавить в GitHub Deploy Keys).
+10. **Поднять стек** + миграции + seed (только admin, без тестовых юзеров).
+11. **Smoke-тесты** + DR-тест (попробовать восстановить дамп в чистый контейнер).
+12. **Настроить бэкапы** (`magguarantee-pgbackup` + systemd-таймер).
+13. **Развернуть Uptime Kuma** + настроить мониторы и алерты.
+14. **Добавить prod-job в `.github/workflows/ci.yml`** (workflow_dispatch или tag-trigger) + GitHub Secrets `PROD_DEPLOY_*`.
+15. **Admin через UI** создаёт сотрудников MagTrans + перевозчиков. Никаких скриптов-импортеров.
+
+### Д. Чего пока **не**должно быть на проде, даже если соблазнительно
+
+- **Тестовых юзеров из seed** (pracownik1, opiekun1, …). На проде создаём ТОЛЬКО admin'а. Тестовые роли — через UI silently.
+- **Mailhog**. Письма должны идти на реальные email-ы.
+- **Открытых портов кроме 22/80/443.** Postgres/Redis — только loopback + SSH-туннель.
+- **Деплоя на каждый push.** Прод деплоится осознанно — workflow_dispatch или tag.
+- **Одного и того же `.env` со staging.** Все секреты новые.
 
 ## Чек-лист prod-окружения
 

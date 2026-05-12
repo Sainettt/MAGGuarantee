@@ -423,6 +423,23 @@
 
 См. [18-launch-and-deployment.md](18-launch-and-deployment.md) для полного чек-листа prod-окружения, CI/CD, secrets, мониторинга.
 
+### Статус — staging уже работает (2026-05-12)
+
+Отдельный staging-стенд развёрнут на OVH VPS (`vps-29a0acba.vps.ovh.net`) под промежуточным OVH-хостнеймом. Полный CI/CD pipeline настроен в `.github/workflows/ci.yml` — каждый push в `main` автоматически билдит, тестит, и через SSH деплоит на VPS (`git pull` + миграции + `docker compose up -d --build`).
+
+Что уже сделано на staging и применимо к проду без изменений:
+- ✅ VPS bootstrap (Docker, ufw, fail2ban, chrony, unattended-upgrades).
+- ✅ Shared Caddy в `/opt/caddy/` с auto-HTTPS от Let's Encrypt.
+- ✅ Docker compose стек (postgres + redis + mailhog + api + web) в `infra/docker-compose.staging.yml`.
+- ✅ Multi-stage Dockerfiles для api/web (`apps/{api,web}/Dockerfile`) — build-on-server, без registry. Достаточно для одного разраба; при росте команды переключимся на ghcr.io.
+- ✅ ENV-шаблон `infra/.env.staging.example` + правильные права на `/opt/magguarantee/.env`.
+- ✅ Postgres exposed только на VPS-loopback для databasus / DBeaver через SSH-туннель.
+- ✅ Deploy Key (read-only SSH-ключ от GitHub) для `git pull` на VPS.
+- ✅ GitHub Actions secrets: `DEPLOY_SSH_KEY`, `DEPLOY_HOST`.
+- ✅ Seed (admin + 7 тестовых юзеров других ролей + 14 типов прицепов + app_config) выполнен.
+
+Что **отличается** от staging и должно быть переделано/добавлено для прода — см. [18-launch-and-deployment.md#переход-staging--prod](18-launch-and-deployment.md#переход-staging--prod).
+
 ### Краткие шаги
 
 1. VPS поднят (Hetzner CX32 или эквивалент), bootstrap-скрипт `infra/setup.sh` отрабатывает: установка Docker + Compose, `ufw`, `fail2ban`, `chronyd`, `rclone`, создание `proxy-net` external network. S3-bucket (Cloudflare R2 / Hetzner Object Storage) создан.
