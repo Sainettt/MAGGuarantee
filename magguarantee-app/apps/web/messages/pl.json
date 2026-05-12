@@ -379,7 +379,7 @@
       "totalKmGuaranteed": "Razem (km gwarantowane)",
       "excludedDays": "Dni wyłączone (święta / zakaz UE)",
       "excludedDaysCount": "{count, plural, =0 {brak} one {# dzień} few {# dni} many {# dni} other {# dni}}",
-      "excludedDaysHint": "Soboty i niedziele są zawsze wyłączone — poniżej tylko święta i zakazy ruchu, za które nie liczy się dopłata.",
+      "excludedDaysHint": "Soboty i niedziele są zawsze wyłączone — powyżej tylko święta i zakazy ruchu, za które nie liczy się dopłata.",
       "showDetails": "Pokaż szczegóły",
       "hideDetails": "Ukryj szczegóły",
       "noExclusions": "Brak wyłączonych dni"
