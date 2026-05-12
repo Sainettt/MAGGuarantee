@@ -1,4 +1,4 @@
-name: CI
+name: CI / CD
 
 on:
   push:
@@ -26,3 +26,69 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # CD — deploy to staging VPS on every push to main (after `build` is green).
+  # Pull requests do NOT deploy: `if: github.ref == 'refs/heads/main'` skips
+  # this job for PR runs.
+  # ───────────────────────────────────────────────────────────────────────────
+  deploy-staging:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    # Serialize deploys: if two pushes land back-to-back, the second waits
+    # for the first to finish rather than racing it. `cancel-in-progress:
+    # false` is intentional — a half-finished deploy is worse than a delayed
+    # one.
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+
+    steps:
+      - name: Load SSH key into the runner's agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Pre-trust the VPS host key
+        # Without this, `ssh` asks "Are you sure you want to continue
+        # connecting?" on first contact and hangs in non-interactive CI.
+        # ssh-keyscan grabs the host's public key fingerprint over the
+        # network and writes it to ~/.ssh/known_hosts up-front.
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy to staging
+        # `<<'EOF'` (single-quoted heredoc) prevents GitHub Actions from
+        # interpolating ${...} locally — every command below runs verbatim
+        # on the VPS. `set -euo pipefail` is bash strict mode: any failure
+        # aborts the script instead of silently moving on.
+        run: |
+          ssh deploy@${{ secrets.DEPLOY_HOST }} bash -s <<'EOF'
+            set -euo pipefail
+
+            cd /opt/magguarantee/src
+
+            echo "→ Pulling latest main"
+            git pull origin main
+
+            echo "→ Applying Prisma migrations"
+            docker compose -f infra/docker-compose.staging.yml \
+              run --rm api node_modules/.bin/prisma migrate deploy \
+                --schema=prisma/schema.prisma
+
+            echo "→ Rebuilding and restarting the stack"
+            docker compose -f infra/docker-compose.staging.yml up -d --build
+
+            echo "→ Waiting 10s for api to settle, then smoke-checking /health"
+            sleep 10
+            docker compose -f infra/docker-compose.staging.yml exec -T api \
+              wget -qO- http://localhost:3001/health > /dev/null
+
+            echo "→ Pruning unused images (older than 30 days)"
+            docker image prune -af --filter "until=720h" > /dev/null
+
+            echo "✓ Deploy succeeded"
+          EOF
