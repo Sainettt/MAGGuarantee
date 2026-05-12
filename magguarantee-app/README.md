@@ -1,5 +1,5 @@
 # MAGGuarantee — monorepo
-
+# comment for test
 Internal kilometer-guarantee claim management system. Replacement for the legacy GAS prototype (see `../Code.gs`, `../docs/`).
 
 ## Stack
