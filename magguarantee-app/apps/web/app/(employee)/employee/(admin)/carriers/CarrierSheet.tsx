@@ -310,31 +310,7 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
           </SheetHeader>
 
           <SheetBody>
-            {/*
-             * Clicking on empty padding inside the sheet body clears the
-             * post-submit validation noise (red borders + error messages)
-             * across all fields at once. Clicks on actual interactive
-             * controls are ignored so they can re-trigger validation if
-             * appropriate.
-             */}
-            <div
-              className="space-y-6"
-              onClick={(e) => {
-                const target = e.target as HTMLElement;
-                if (
-                  target.closest(
-                    'input, select, textarea, button, label, a, [role="combobox"], [role="button"], [role="checkbox"]',
-                  )
-                ) {
-                  return;
-                }
-                form.clearErrors();
-                setNipState('idle');
-                setNipMsg(undefined);
-                setAccountState('idle');
-                setAccountMsg(undefined);
-              }}
-            >
+            <div className="space-y-6">
               <FormSection title={t('sections.account')}>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <FormField
