@@ -22,6 +22,21 @@ export interface MonthLimit {
 }
 
 /**
+ * One EU heavy-vehicle ban day that fell within the claim period and was
+ * dropped from the working-day count. Weekends are intentionally NOT
+ * surfaced here — they're universal trucking knowledge and would dominate
+ * the list. Only the non-obvious exclusions (national holidays,
+ * Easter-relative, country-specific bans) are listed so the carrier can
+ * see WHY a particular weekday didn't pay.
+ */
+export interface ExcludedDay {
+  /** ISO calendar date `YYYY-MM-DD`. */
+  date: string;
+  /** Holiday label from `eu-calendar`, e.g. `'Boze Narodzenie'`. */
+  label: string;
+}
+
+/**
  * Per-month breakdown row in the calculation result. The shape is wider
  * than the GAS version — we expose `yearMonth` (`'YYYY-MM'`) directly,
  * along with the individual `kmPerDay` / `ratePerKm` used so the caller
@@ -38,6 +53,8 @@ export interface MonthBreakdown {
   ratePerKm: number;
   /** km guaranteed for this month (= round(workingDays * kmPerDay)). */
   kmInMonth: number;
+  /** Holiday days from this month that were dropped from the count. */
+  excludedDays: ExcludedDay[];
 }
 
 export interface KmCalcResult {
@@ -199,6 +216,7 @@ interface InternalMonthAcc {
   rawDays: number;
   kmPerDay: number;
   ratePerKm: number;
+  excludedDays: ExcludedDay[];
 }
 
 /**
@@ -212,7 +230,7 @@ function accumulateMonthDays(
   hStop: number | null,
   limits: Record<string, MonthLimit>,
   fallback: MonthLimit,
-  banDays: Set<string>,
+  banDays: Map<string, string>,
 ): { monthData: Map<string, InternalMonthAcc>; rawTotalDays: number } {
   const monthData = new Map<string, InternalMonthAcc>();
   let rawTotalDays = 0;
@@ -241,12 +259,20 @@ function accumulateMonthDays(
         rawDays: 0,
         kmPerDay: ml.kmPerDay,
         ratePerKm: ml.ratePerKm,
+        excludedDays: [],
       };
       monthData.set(monthKey, acc);
     }
 
+    const isWeekend = dow === 0 || dow === 6;
+    const banLabel = banDays.get(dateKey);
+    // Record holiday exclusions (only when the day isn't ALSO a weekend —
+    // matches the eu-calendar contract which already drops Sat/Sun bans).
+    if (!isWeekend && banLabel !== undefined) {
+      acc.excludedDays.push({ date: dateKey, label: banLabel });
+    }
     // Skip weekends and EU-ban days (matches Code.gs:896).
-    if (dow !== 0 && dow !== 6 && !banDays.has(dateKey)) {
+    if (!isWeekend && banLabel === undefined) {
       const fraction = fractionForDay({ isFirst, isLast, isSingle, hStart, hStop });
       acc.rawDays += fraction;
       rawTotalDays += fraction;
@@ -361,6 +387,7 @@ export function calcKmGwarantPerMonth(input: KmCalcInput): KmCalcResult {
       kmPerDay: a.kmPerDay,
       ratePerKm: a.ratePerKm,
       kmInMonth: km,
+      excludedDays: a.excludedDays,
     };
   });
 

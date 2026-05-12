@@ -78,6 +78,10 @@ describe('calcKmGwarantPerMonth — full-month', () => {
         kmPerDay: 540,
         ratePerKm: 0.5,
         kmInMonth: 10800,
+        excludedDays: [
+          { date: '2026-01-01', label: 'Nowy Rok' },
+          { date: '2026-01-06', label: 'Trzech Kroli (DE/IT/AT)' },
+        ],
       },
     ]);
   });
@@ -149,6 +153,7 @@ describe('calcKmGwarantPerMonth — cross-month weighted rate', () => {
         kmPerDay: 540,
         ratePerKm: 0.5,
         kmInMonth: 4320,
+        excludedDays: [],
       },
       {
         yearMonth: '2026-02',
@@ -156,6 +161,7 @@ describe('calcKmGwarantPerMonth — cross-month weighted rate', () => {
         kmPerDay: 540,
         ratePerKm: 0.6,
         kmInMonth: 2700,
+        excludedDays: [],
       },
     ]);
   });
@@ -200,6 +206,7 @@ describe('calcKmGwarantPerMonth — cross-year', () => {
         kmPerDay: 540,
         ratePerKm: 0.5,
         kmInMonth: 2160,
+        excludedDays: [],
       },
       {
         yearMonth: '2027-01',
@@ -207,6 +214,7 @@ describe('calcKmGwarantPerMonth — cross-year', () => {
         kmPerDay: 540,
         ratePerKm: 0.5,
         kmInMonth: 1080,
+        excludedDays: [{ date: '2027-01-01', label: 'Nowy Rok' }],
       },
     ]);
   });
@@ -292,6 +300,7 @@ describe('calcKmGwarantPerMonth — single-day', () => {
         kmPerDay: 540,
         ratePerKm: 0.5,
         kmInMonth: 0,
+        excludedDays: [],
       },
     ]);
   });
@@ -408,6 +417,7 @@ describe('calcKmGwarantPerMonth — missing-month limit fallback', () => {
         kmPerDay: 540,
         ratePerKm: 0.5,
         kmInMonth: 1620,
+        excludedDays: [],
       },
       {
         yearMonth: '2026-10',
@@ -415,8 +425,32 @@ describe('calcKmGwarantPerMonth — missing-month limit fallback', () => {
         kmPerDay: 540,
         ratePerKm: 0.5,
         kmInMonth: 1080,
+        excludedDays: [],
       },
     ]);
+  });
+});
+
+describe('calcKmGwarantPerMonth — excludedDays surface', () => {
+  it('Apr 1–10 2026 — surfaces Good Friday + Easter Monday with labels', () => {
+    const r = run({ dateStart: '2026-04-01', dateEnd: '2026-04-10' });
+    expect(r.breakdown).toHaveLength(1);
+    expect(r.breakdown[0].excludedDays).toEqual([
+      { date: '2026-04-03', label: 'Wielki Piatek (DE/NL)' },
+      { date: '2026-04-06', label: 'Poniedzialek Wielkanocny' },
+    ]);
+  });
+
+  it('May 1–8 2026 — surfaces Swieto Pracy (1 May Fri); weekends not listed', () => {
+    const r = run({ dateStart: '2026-05-01', dateEnd: '2026-05-08' });
+    expect(r.breakdown[0].excludedDays).toEqual([
+      { date: '2026-05-01', label: 'Swieto Pracy' },
+    ]);
+  });
+
+  it('Sep 1–15 2026 — no exclusions in window → empty list', () => {
+    const r = run({ dateStart: '2026-09-01', dateEnd: '2026-09-15' });
+    expect(r.breakdown[0].excludedDays).toEqual([]);
   });
 });
 

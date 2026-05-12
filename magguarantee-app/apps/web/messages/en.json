@@ -376,7 +376,13 @@
       "ratePerKm": "Rate €/km",
       "kmInMonth": "Km in mo.",
       "empty": "No data to break down",
-      "totalKmGuaranteed": "Total (guaranteed km)"
+      "totalKmGuaranteed": "Total (guaranteed km)",
+      "excludedDays": "Excluded days (holidays / EU ban)",
+      "excludedDaysCount": "{count, plural, =0 {none} one {# day} other {# days}}",
+      "excludedDaysHint": "Saturdays and Sundays are always excluded — only national holidays and EU truck bans are listed below, since those are why a workday didn't pay out.",
+      "showDetails": "Show details",
+      "hideDetails": "Hide details",
+      "noExclusions": "No excluded days"
     },
     "reklamacja": {
       "sheetTitle": "Submit reclamation",

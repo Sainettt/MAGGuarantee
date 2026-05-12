@@ -145,12 +145,27 @@ export type SubmitReklamacjaDto = z.infer<typeof SubmitReklamacjaSchema>;
  * the engine's `MonthBreakdown` interface which is also re-exported
  * from `@magguarantee/shared`.
  */
+/**
+ * One holiday / EU heavy-vehicle ban day that was dropped from this month's
+ * working-day count. Weekends are deliberately NOT included — they're
+ * universal and would dominate the list. Matches `ExcludedDay` in
+ * `domain/km-calc.ts`.
+ */
+export const ExcludedDaySchema = z.object({
+  date: IsoDateSchema,
+  label: z.string().min(1).max(120),
+});
+export type ExcludedDayDto = z.infer<typeof ExcludedDaySchema>;
+
 export const MonthBreakdownSchema = z.object({
   yearMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
   workingDays: z.number().nonnegative(),
   kmPerDay: z.number().nonnegative(),
   ratePerKm: z.number().nonnegative(),
   kmInMonth: z.number().nonnegative(),
+  // Optional + default so old persisted `Claim.breakdown` JSONB rows (which
+  // pre-date this field) still parse cleanly. New rows always include it.
+  excludedDays: z.array(ExcludedDaySchema).default([]),
 });
 export type MonthBreakdownDto = z.infer<typeof MonthBreakdownSchema>;
 

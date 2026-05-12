@@ -79,32 +79,34 @@ export function fmtIsoDateKey(d: Date): string {
 }
 
 /**
- * Returns the set of `YYYY-MM-DD` keys for EU heavy-vehicle ban days
- * across the given inclusive year range.
+ * Returns a map of `YYYY-MM-DD` → human label for EU heavy-vehicle ban days
+ * across the given inclusive year range. The label is the same string
+ * persisted on the holiday tables above (`'Nowy Rok'`, `'Wielki Piatek (DE/NL)'`,
+ * …) so callers can render WHY a particular day was excluded.
  *
  * Excludes any holiday whose date falls on a Saturday or Sunday — matches
  * `Code.gs:5943` and `Code.gs:5959`. Reason: km-calc weekend handling
  * already excludes those days, so listing them as bans is redundant.
  */
-export function getEUBanDays(yearFrom: number, yearTo: number): Set<string> {
-  const bans = new Set<string>();
+export function getEUBanDays(yearFrom: number, yearTo: number): Map<string, string> {
+  const bans = new Map<string, string>();
   if (yearFrom > yearTo) return bans;
 
   for (let y = yearFrom; y <= yearTo; y++) {
-    for (const [month, day] of FIXED_BANS) {
+    for (const [month, day, label] of FIXED_BANS) {
       const dd = new Date(y, month - 1, day);
       const dow = dd.getDay();
       if (dow !== 0 && dow !== 6) {
-        bans.add(fmtIsoDateKey(dd));
+        bans.set(fmtIsoDateKey(dd), label);
       }
     }
     const easter = calcEaster(y);
-    for (const [offset] of EASTER_RELATIVE_BANS) {
+    for (const [offset, label] of EASTER_RELATIVE_BANS) {
       const dd2 = new Date(easter);
       dd2.setDate(dd2.getDate() + offset);
       const dow2 = dd2.getDay();
       if (dow2 !== 0 && dow2 !== 6) {
-        bans.add(fmtIsoDateKey(dd2));
+        bans.set(fmtIsoDateKey(dd2), label);
       }
     }
   }
