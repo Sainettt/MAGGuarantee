@@ -34,7 +34,7 @@ cp infra/.env.staging.example infra/.env
 # Edit infra/.env — fill POSTGRES_PASSWORD, both JWT secrets, set
 # NEXT_PUBLIC_API_URL=http://localhost:3001 and WEB_URL=http://localhost:3000.
 
-docker compose -f infra/docker-compose.staging.yml --env-file infra/.env up -d --build
+docker compose -f infra/docker-compose.staging.yml up -d --build
 ```
 
 First run takes 3–5 min (image builds). Subsequent runs after code changes
@@ -43,10 +43,10 @@ are 30–60 sec thanks to layer caching.
 Run migrations + seed on first launch:
 
 ```bash
-docker compose -f infra/docker-compose.staging.yml --env-file infra/.env \
+docker compose -f infra/docker-compose.staging.yml \
   run --rm api node_modules/.bin/prisma migrate deploy --schema=prisma/schema.prisma
 
-docker compose -f infra/docker-compose.staging.yml --env-file infra/.env \
+docker compose -f infra/docker-compose.staging.yml \
   run --rm api node_modules/.bin/tsx prisma/seed.ts
 ```
 
@@ -73,13 +73,20 @@ cd /opt/magguarantee
 git clone https://github.com/<owner>/MAGGuarantee.git src
 ```
 
-**2. Create `/opt/magguarantee/.env` from the template:**
+**2. Create `infra/.env` from the template:**
 
 ```bash
-cp src/infra/.env.staging.example /opt/magguarantee/.env
-chmod 0600 /opt/magguarantee/.env
-nano /opt/magguarantee/.env
+cd /opt/magguarantee/src
+cp infra/.env.staging.example infra/.env
+chmod 0600 infra/.env
+nano infra/.env
 ```
+
+`infra/.env` is the single source of truth for the stack — `docker compose`
+auto-loads it both for `${...}` interpolation in the compose file and for
+the per-service `env_file:` directives. The file is gitignored, so it
+survives `git pull` but NOT `rm -rf src` — back it up alongside
+`/opt/magguarantee/data/` when snapshotting state.
 
 Generate real secrets and set production URLs:
 
@@ -112,16 +119,16 @@ into two `domain.com { ... }` blocks for cleaner URLs.
 
 ```bash
 cd /opt/magguarantee/src
-docker compose -f infra/docker-compose.staging.yml --env-file ../.env up -d --build
+docker compose -f infra/docker-compose.staging.yml up -d --build
 ```
 
 **5. Migrate + seed (first time only):**
 
 ```bash
-docker compose -f infra/docker-compose.staging.yml --env-file ../.env \
+docker compose -f infra/docker-compose.staging.yml \
   run --rm api node_modules/.bin/prisma migrate deploy --schema=prisma/schema.prisma
 
-docker compose -f infra/docker-compose.staging.yml --env-file ../.env \
+docker compose -f infra/docker-compose.staging.yml \
   run --rm api node_modules/.bin/tsx prisma/seed.ts
 ```
 
@@ -140,14 +147,14 @@ Visit `https://vps-29a0acba.vps.ovh.net/login` in a browser.
 ssh deploy@vps
 cd /opt/magguarantee/src
 git pull
-docker compose -f infra/docker-compose.staging.yml --env-file ../.env up -d --build
+docker compose -f infra/docker-compose.staging.yml up -d --build
 ```
 
 Caddy keeps running, no need to touch it. If a migration is included in
 the pull, run migrate before `up -d`:
 
 ```bash
-docker compose -f infra/docker-compose.staging.yml --env-file ../.env \
+docker compose -f infra/docker-compose.staging.yml \
   run --rm api node_modules/.bin/prisma migrate deploy --schema=prisma/schema.prisma
 ```
 

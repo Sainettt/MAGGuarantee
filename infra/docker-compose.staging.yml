@@ -1,16 +1,21 @@
 # MAGGuarantee — staging stack.
 #
 # Build context for api/web is `../magguarantee-app` (relative to this file).
-# Images are built in-place — no registry, no CI. To deploy on the VPS:
+# Env source of truth is `infra/.env` (gitignored). Compose auto-loads it
+# both for `${...}` interpolation in this file AND for the per-service
+# `env_file:` directives below — single file, no --env-file flag, no
+# parent-dir tricks.
+#
+# Deploy on the VPS:
 #
 #   cd /opt/magguarantee/src
 #   git pull
-#   docker compose -f infra/docker-compose.staging.yml --env-file ../.env up -d --build
+#   docker compose -f infra/docker-compose.staging.yml up -d --build
 #
 # Locally (smoke test):
 #
 #   cd MAGGuarantee
-#   docker compose -f infra/docker-compose.staging.yml --env-file infra/.env up -d --build
+#   docker compose -f infra/docker-compose.staging.yml up -d --build
 #
 # Required pre-step (one-time, both VPS and local):
 #   docker network create proxy-net
