@@ -75,9 +75,15 @@ jobs:
             git pull origin main
 
             echo "→ Applying Prisma migrations"
+            # -T disables pseudo-TTY, `< /dev/null` cuts the container's stdin
+            # off from the calling shell's stdin. Without either, `docker
+            # compose run` attaches stdin to the prisma container, which then
+            # drains the rest of this heredoc — silently truncating every
+            # command below. The script exits 0 (prisma succeeded), the GHA
+            # job goes green, and the actual deploy never happens.
             docker compose -f infra/docker-compose.staging.yml \
-              run --rm api node_modules/.bin/prisma migrate deploy \
-                --schema=prisma/schema.prisma
+              run --rm -T api node_modules/.bin/prisma migrate deploy \
+                --schema=prisma/schema.prisma < /dev/null
 
             echo "→ Rebuilding and restarting the stack"
             docker compose -f infra/docker-compose.staging.yml up -d --build
