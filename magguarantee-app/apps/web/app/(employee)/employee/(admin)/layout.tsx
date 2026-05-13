@@ -1,18 +1,21 @@
-// Admin-only route guard for the employee shell. The `(admin)` route group
-// doesn't change the URL — `/employee/carriers` still resolves to that path —
-// but everything nested under here is gated by this layout.
+// Admin-only route guard inside the employee shell. The `(admin)` route
+// group doesn't change the URL — `/employee/carriers` still resolves to
+// that path — but everything nested under here is gated by this layout.
 //
-// Why this exists: middleware.ts only checks for the `mt_access` cookie, not
-// the role. Without this guard a `pracownik` could type `/employee/carriers`
-// directly and reach the page (their nav row hides it, but the route renders).
+// Why this exists: middleware checks JWT + path allow-list, but Phase 2
+// admin pages have lived under `/employee/(admin)/*` so the guarantee
+// must hold even if a `pracownik` types `/employee/carriers` directly
+// (their nav hides the link, but the route would otherwise render).
 // docs/03-roles.md#pracownik narrows pracownik to Dashboard + Wnioski only;
-// the admin CRUD tables (Carriers, Vehicles, Drivers, Trailers, Trailer types)
-// are admin-exclusive in Phase 3.
+// the admin CRUD tables (Carriers, Vehicles, Drivers, Trailers, Trailer
+// types) — plus Phase 4 sub-slices (Limits, Users, Audit, Diagnostics) —
+// are admin-exclusive.
 //
 // We resolve the role server-side via `getServerUser()` (round-trips to
-// `/auth/me` with the caller's cookies) — same pattern as `app/page.tsx`. If
-// the user isn't admin we `redirect('/employee')` so they land on the bare
-// employee shell.
+// `/auth/me` with the caller's cookies). Non-admin → redirect to the
+// shell's `/forbidden` page (Phase 4 contract; was `/employee` before),
+// which gives the user a clear "you don't have access" view instead of a
+// silent bounce to the dashboard.
 
 import { redirect } from 'next/navigation';
 
@@ -26,11 +29,7 @@ export default async function AdminEmployeeLayout({
   children: React.ReactNode;
 }) {
   const user = await getServerUser();
-  // Defense in depth — middleware.ts already redirects non-admin away from
-  // these routes by inspecting the JWT role claim. This server-side check
-  // catches the case where the JWT was tampered with (or middleware was
-  // bypassed somehow); we still query the API as the source of truth.
   if (!user) redirect('/login');
-  if (user.role !== 'admin') redirect('/employee');
+  if (user.role !== 'admin') redirect('/employee/forbidden');
   return <>{children}</>;
 }

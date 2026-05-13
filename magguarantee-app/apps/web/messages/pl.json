@@ -90,11 +90,25 @@
     "logout": "Wyloguj"
   },
   "nav": {
+    "dashboard": "Dashboard",
+    "claims": "Wnioski",
     "carriers": "Przewoźnicy",
     "vehicles": "Pojazdy",
     "drivers": "Kierowcy",
     "trailers": "Naczepy",
-    "trailerTypes": "Typy naczep"
+    "trailerTypes": "Typy naczep",
+    "limits": "Limity",
+    "users": "Użytkownicy",
+    "audit": "Audyt",
+    "diagnostics": "Diagnostyka",
+    "openMenu": "Otwórz menu",
+    "closeMenu": "Zamknij menu",
+    "sectionLabel": "Sekcje panelu"
+  },
+  "forbidden": {
+    "title": "Brak dostępu",
+    "message": "Nie masz uprawnień do tej sekcji. Skontaktuj się z administratorem, jeśli uważasz, że to błąd.",
+    "backToDashboard": "Wróć do dashboardu"
   },
   "carriers": {
     "title": "Przewoźnicy",
@@ -278,6 +292,116 @@
     "valid": "Zweryfikowano",
     "invalid": "Nie znaleziono",
     "error": "Usługa niedostępna — spróbuj później"
+  },
+  "employee": {
+    "claims": {
+      "title": "Wnioski",
+      "emptyTitle": "Brak wniosków",
+      "emptyMessage": "Nie znaleziono wniosków pasujących do filtrów.",
+      "filters": {
+        "searchPlaceholder": "Szukaj nr zgłoszenia / NIP / rejestracji",
+        "status": "Status",
+        "allStatuses": "Wszystkie statusy",
+        "dateFrom": "Okres od",
+        "dateTo": "Okres do",
+        "carrierId": "ID przewoźnika",
+        "carrierIdPlaceholder": "UUID przewoźnika"
+      },
+      "columns": {
+        "nrZgl": "Nr zgłoszenia",
+        "carrier": "Przewoźnik",
+        "vehicle": "Pojazd",
+        "period": "Okres",
+        "mileage": "Przebieg",
+        "doplata": "Dopłata",
+        "status": "Status",
+        "updatedAt": "Zmiana"
+      },
+      "relative": {
+        "now": "przed chwilą",
+        "minutes": "{n} min temu",
+        "hours": "{n} godz. temu",
+        "days": "{n} dni temu"
+      },
+      "modal": {
+        "title": "Wniosek {nrZgl}",
+        "carrierAndPlate": "{carrier} · {plate}",
+        "submittedAt": "Złożono {date}",
+        "tabs": {
+          "edit": "Edytuj",
+          "history": "Historia",
+          "authorization": "Autoryzacja"
+        },
+        "recalc": {
+          "loading": "Przeliczam…",
+          "current": "Aktualne",
+          "error": "Nie udało się przeliczyć",
+          "diff": "Dopłata: {before} → {after}",
+          "noChange": "Bez zmian"
+        },
+        "edit": {
+          "targetStatus": "Decyzja",
+          "targetStatusPlaceholder": "Wybierz decyzję",
+          "kmGuaranteed": "Km gwarantowane",
+          "mileage": "Przebieg",
+          "hoursAdjusted": "Korekta godzin",
+          "dateStart": "Okres od",
+          "dateEnd": "Okres do",
+          "timeFrom": "Godzina od",
+          "timeTo": "Godzina do",
+          "orderNumber": "Numer zlecenia",
+          "orderDate": "Data zlecenia",
+          "amountApproved": "Kwota zatwierdzona (EUR)",
+          "amountMaximum": "Kwota maksymalna (EUR)",
+          "amountRequested": "Kwota wnioskowana",
+          "doplata": "Dopłata wyliczona",
+          "margin": "Marża",
+          "authorizationDescription": "Opis autoryzacji",
+          "comment": "Komentarz",
+          "commentRejected": "Powód odrzucenia",
+          "commentReklamacja": "Uzasadnienie decyzji",
+          "reklamacjaAmount": "Kwota reklamacji zatwierdzona (EUR)",
+          "submit": "Zatwierdź",
+          "submitting": "Zapisywanie…",
+          "savedToast": "Zapisano",
+          "errorToast": "Nie udało się zapisać"
+        },
+        "history": {
+          "empty": "Brak historii zmian.",
+          "origData": "Pierwotne dane (przed reklamacją)",
+          "origDateStart": "Okres od",
+          "origDateEnd": "Okres do",
+          "origMileage": "Przebieg",
+          "current": "Aktualne",
+          "decidedBy": "Decyzja: {actor}",
+          "decidedAt": "Data decyzji: {date}",
+          "reklamacjaText": "Treść reklamacji",
+          "reklamacjaResponse": "Odpowiedź na reklamację"
+        },
+        "auth": {
+          "notRequired": "Wniosek nie wymaga autoryzacji Maksima.",
+          "requestTitle": "Wymagaj autoryzacji",
+          "requestHelp": "Przekierowuje wniosek do autoryzacji przez Maksima. Wniosek otrzyma status „Oczekuje na autoryzację”.",
+          "margin": "Marża (EUR)",
+          "description": "Opis dla Maksima",
+          "submitRequest": "Wyślij do autoryzacji",
+          "submitting": "Wysyłanie…",
+          "savedToast": "Wniosek wysłany do autoryzacji",
+          "pendingTitle": "Wniosek oczekuje autoryzacji",
+          "pendingDescription": "Opis przekazany Maksimowi",
+          "amountMaximumLabel": "Kwota zatwierdzona przez Maksima (EUR)",
+          "amountMaximumSave": "Zapisz kwotę Maksima",
+          "amountMaximumSaved": "Kwota Maksima zapisana"
+        },
+        "targetStatus": {
+          "ZAAKCEPTOWANO": "Zaakceptuj",
+          "ODRZUCONO": "Odrzuć",
+          "OCZEKUJE_NA_AUTORYZACJE": "Wymaga autoryzacji",
+          "REKLAMACJA_ZAAKCEPTOWANO": "Zaakceptuj reklamację",
+          "REKLAMACJA_ODRZUCONO": "Odrzuć reklamację"
+        }
+      }
+    }
   },
   "carrier": {
     "tabs": {

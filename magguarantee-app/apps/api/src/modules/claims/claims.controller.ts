@@ -5,11 +5,14 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import type { Request } from 'express';
 
 import {
   ClaimDtoSchema,
@@ -17,6 +20,7 @@ import {
   PreviewClaimSchema,
   SubmitClaimSchema,
   SubmitReklamacjaSchema,
+  UpdateClaimSchema,
   type ClaimDto,
   type ClaimFilters,
   type ClaimListItem,
@@ -24,6 +28,7 @@ import {
   type PreviewClaimResponse,
   type SubmitClaimDto,
   type SubmitReklamacjaDto,
+  type UpdateClaimDto,
 } from '@magguarantee/shared';
 
 import { Audit } from '../../common/audit';
@@ -57,10 +62,12 @@ const RL_PREVIEW = {
  *  - POST /claims/:nrZgl/preview (scoped to existing — reklamacja edit)
  *  - POST /claims/:nrZgl/reklamacja (carrier disputes a decided claim)
  *
- * Phase 4 will add:
- *  - PATCH /claims/:nrZgl (verification + decision)
- *  - POST /claims/:nrZgl/auth-screenshot (multipart S3 upload)
- *  - POST /claims/:nrZgl/request-authorization
+ * Phase 4 — sub-slice 4.1 (this commit):
+ *  - PATCH /claims/:nrZgl (verification + decision, admin/pracownik only)
+ *
+ * Phase 4 — later sub-slices:
+ *  - POST /claims/:nrZgl/request-authorization (sub-slice 4.2)
+ *  - Auth-screenshot upload — REMOVED from scope (user decision).
  */
 @Controller('claims')
 @UseGuards(RolesGuard, CarrierOwnershipGuard)
@@ -129,7 +136,7 @@ export class ClaimsController {
    */
   @Post(':nrZgl/preview')
   @HttpCode(HttpStatus.OK)
-  @Roles('przewoznik')
+  @Roles('przewoznik', 'pracownik', 'admin')
   @Throttle({ default: RL_PREVIEW })
   @CarrierOwns('nrZgl', 'param', 'claimNrZgl')
   async previewExisting(
@@ -167,6 +174,33 @@ export class ClaimsController {
     return this.claims.submit(user, dto);
   }
 
+  // ── Update / verify (admin / pracownik) ─────────────────
+
+  /**
+   * `PATCH /claims/:nrZgl` — verifier's decision endpoint per
+   * docs/13-api-design.md#claims-wnioski (`PATCH /claims/:nrZgl` row,
+   * docs/13-api-design.md:194) and the per-target invariants documented in
+   * docs/13-api-design.md#update-claim-verification (lines 350-364).
+   *
+   * Body is the discriminated union `UpdateClaimSchema` from
+   * `@magguarantee/shared`; the service translates synthetic
+   * `REKLAMACJA_*` literals back into the underlying `ClaimStatus` before
+   * persisting and validates the transition against the 9-edge state
+   * machine. The audit row writes in the same `$transaction` as the
+   * mutation (`AuditWriter.log({ tx })`).
+   */
+  @Patch(':nrZgl')
+  @Roles('admin', 'pracownik')
+  async update(
+    @CurrentUser() user: AuthUser,
+    @Param('nrZgl') nrZgl: string,
+    @Body(new ZodValidationPipe(UpdateClaimSchema)) dto: UpdateClaimDto,
+    @Req() req: Request,
+  ): Promise<ClaimDto> {
+    const ip = extractRequestIp(req);
+    return this.claims.update(user, nrZgl, dto, ip);
+  }
+
   // ── Reklamacja ──────────────────────────────────────────
 
   @Post(':nrZgl/reklamacja')
@@ -186,4 +220,24 @@ export class ClaimsController {
   ): Promise<ClaimDto> {
     return this.claims.submitReklamacja(user, nrZgl, dto);
   }
+}
+
+/**
+ * Best-effort client IP extraction. Prefers `x-forwarded-for` (first hop,
+ * trimmed) when the API sits behind Caddy / nginx; falls back to Express'
+ * `req.ip`. Returns `undefined` when neither is set — `AuditWriter` accepts
+ * an absent ipAddress so the field stays NULL in that case.
+ *
+ * Mirror of `_extractIp` in `apps/api/src/common/audit/audit.interceptor.ts`
+ * — kept inline rather than extracted to keep the controller's import
+ * surface minimal.
+ */
+function extractRequestIp(req: Request): string | undefined {
+  const xff = req.headers['x-forwarded-for'];
+  const xffStr = Array.isArray(xff) ? xff[0] : xff;
+  if (typeof xffStr === 'string' && xffStr.length > 0) {
+    const first = xffStr.split(',')[0]?.trim();
+    if (first) return first;
+  }
+  return typeof req.ip === 'string' && req.ip.length > 0 ? req.ip : undefined;
 }

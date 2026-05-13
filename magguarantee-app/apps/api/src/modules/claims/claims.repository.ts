@@ -134,15 +134,55 @@ export interface CreateClaimData {
 }
 
 export interface UpdateClaimData {
+  // ── carrier-side reklamacja path (used by submitReklamacja) ──
   reklamacjaSubmitted?: boolean;
   reklamacjaText?: string | null;
   reklamacjaAmount?: number | null;
+  reklamacjaResponse?: string | null;
+
+  // ── status & workflow (Phase 4 verification) ──
   status?: ClaimStatus;
   statusChangedAt?: Date | null;
   statusBeforeReklamacja?: ClaimStatus | null;
+  decidedById?: string | null;
+
+  // ── carrier-input snapshots (preserved on first reklamacja transition) ──
   origDateStart?: Date | null;
   origDateEnd?: Date | null;
   origMileage?: number | null;
+
+  // ── verifier corrections (Phase 4) ──
+  /** Period start — `Date` at UTC midnight after isoDateToMidnightUtc. */
+  dateStart?: Date;
+  /** Period end — `Date` at UTC midnight. */
+  dateEnd?: Date;
+  /** `HH:mm`. */
+  timeFrom?: string;
+  /** `HH:mm`. */
+  timeTo?: string;
+  mileage?: number;
+  hoursAdjusted?: boolean;
+
+  // ── recomputed km-calc outputs (Phase 4) ──
+  drivenDays?: number;
+  kmPerDay?: number;
+  kmGuaranteed?: number;
+  kmDifference?: number;
+  paymentEur?: number;
+  ratePerKmEffective?: number;
+  breakdown?: KmCalcBreakdown;
+
+  // ── decision payload (Phase 4) ──
+  comment?: string | null;
+  orderNumber?: string | null;
+  orderDate?: Date | null;
+  amountApproved?: number | null;
+  amountMaximum?: number | null;
+  margin?: number | null;
+
+  // ── authorization request (Phase 4 — set when targeting OCZEKUJE_*) ──
+  authorizationRequired?: boolean;
+  authorizationDescription?: string | null;
 }
 
 /**
@@ -276,20 +316,79 @@ export class ClaimsRepository {
   async update(id: string, data: UpdateClaimData): Promise<ClaimRow> {
     const row = await this.prisma.client.claim.update({
       where: { id },
-      data: {
-        reklamacjaSubmitted: data.reklamacjaSubmitted,
-        reklamacjaText: data.reklamacjaText,
-        reklamacjaAmount: data.reklamacjaAmount,
-        status: data.status,
-        statusChangedAt: data.statusChangedAt,
-        statusBeforeReklamacja: data.statusBeforeReklamacja,
-        origDateStart: data.origDateStart,
-        origDateEnd: data.origDateEnd,
-        origMileage: data.origMileage,
-      },
+      data: this._buildUpdatePayload(data),
       include: this.includeShape(),
     });
     return this.flatten(row);
+  }
+
+  /**
+   * Same as `update()` but runs on a caller-supplied transaction client. Used
+   * by `ClaimsService.update()` (Phase 4 verification) so the row write + the
+   * `AuditWriter.log({tx})` row commit atomically.
+   */
+  async updateWithin(
+    tx: TransactionLike,
+    id: string,
+    data: UpdateClaimData,
+  ): Promise<ClaimRow> {
+    const row = await tx.claim.update({
+      where: { id },
+      data: this._buildUpdatePayload(data),
+      include: this.includeShape(),
+    });
+    return this.flatten(row);
+  }
+
+  /**
+   * Translate the service-layer `UpdateClaimData` into a Prisma update payload.
+   * Each field is written ONLY when explicitly provided — `undefined` keys
+   * pass through Prisma untouched so a partial patch doesn't accidentally
+   * NULL a column the caller didn't intend to touch.
+   *
+   * The `breakdown` JSON column is cast through `unknown` to bypass Prisma's
+   * `InputJsonValue` invariance (same pattern as `createWithin`).
+   */
+  private _buildUpdatePayload(data: UpdateClaimData): Record<string, unknown> {
+    const payload: Record<string, unknown> = {};
+    const set = <K extends keyof UpdateClaimData>(key: K): void => {
+      if (data[key] !== undefined) payload[key as string] = data[key];
+    };
+    set('reklamacjaSubmitted');
+    set('reklamacjaText');
+    set('reklamacjaAmount');
+    set('reklamacjaResponse');
+    set('status');
+    set('statusChangedAt');
+    set('statusBeforeReklamacja');
+    set('decidedById');
+    set('origDateStart');
+    set('origDateEnd');
+    set('origMileage');
+    set('dateStart');
+    set('dateEnd');
+    set('timeFrom');
+    set('timeTo');
+    set('mileage');
+    set('hoursAdjusted');
+    set('drivenDays');
+    set('kmPerDay');
+    set('kmGuaranteed');
+    set('kmDifference');
+    set('paymentEur');
+    set('ratePerKmEffective');
+    set('comment');
+    set('orderNumber');
+    set('orderDate');
+    set('amountApproved');
+    set('amountMaximum');
+    set('margin');
+    set('authorizationRequired');
+    set('authorizationDescription');
+    if (data.breakdown !== undefined) {
+      payload.breakdown = data.breakdown as unknown as object;
+    }
+    return payload;
   }
 
   // ── helpers ──────────────────────────────────────────────
@@ -459,6 +558,11 @@ interface ClaimPrismaShape {
 export interface TransactionLike {
   claim: {
     create(args: {
+      data: Record<string, unknown>;
+      include?: unknown;
+    }): Promise<ClaimPrismaShape>;
+    update(args: {
+      where: { id: string };
       data: Record<string, unknown>;
       include?: unknown;
     }): Promise<ClaimPrismaShape>;

@@ -80,8 +80,13 @@ export function SheetClose({
 
 export interface SheetContentProps
   extends React.HTMLAttributes<HTMLDivElement> {
-  /** Visual width — `default` is 480px, `wide` is 640px (per docs/14). */
-  size?: 'default' | 'wide';
+  /**
+   * Visual width — `default` is 480px, `wide` is 640px, `xl` is 720px
+   * (per docs/14: Phase 4 employee verification modal). Phase 2 only used
+   * `default` / `wide`; Phase 4 introduces `xl` for the
+   * `<ClaimVerificationModal>` which needs a two-column form.
+   */
+  size?: 'default' | 'wide' | 'xl';
 }
 
 export function SheetContent({
@@ -137,7 +142,11 @@ export function SheetContent({
   if (!mounted || !open) return null;
 
   const widthClass =
-    size === 'wide' ? 'sm:max-w-[640px]' : 'sm:max-w-[480px]';
+    size === 'xl'
+      ? 'sm:max-w-[720px]'
+      : size === 'wide'
+        ? 'sm:max-w-[640px]'
+        : 'sm:max-w-[480px]';
 
   return createPortal(
     <div className="fixed inset-0 z-40">

@@ -673,6 +673,201 @@ Phase 2 web (admin DataTable + Sheet edit forms + RHF/Zod валидация + i
 
 ---
 
+## Phase 4 — Employee panel (polished UI)
+
+> Pracownik («Opiekun wniosków») + admin. Полированный уровень, прод-ready. Все компоненты собираются из примитивов Phase 2 — **новых color/radius/shadow токенов не вводим**. Reference: `docs/screenshots/employee-*.png`, `docs/screenshots/modal-status-p1/p2.png`.
+
+### Status mapping (`ClaimStatus → semantic color`)
+
+Источник — legacy `CONFIG.KOLORY` (Code.gs:90-96). Legacy цвета — pure-HSL (#00FF00 и т.п.) для подкраски ячеек Google Sheets — **не используем в UI как есть**. Маппинг на DS semantic tokens:
+
+| `ClaimStatus` | Legacy hex | DS token (bg / text) | Badge label (PL) |
+|---|---|---|---|
+| `ZAAKCEPTOWANO` | `#00FF00` | `bg-success/15 text-success border-success/30` | "Zaakceptowano" |
+| `NA_WERYFIKACJI` | `#FFFF00` | `bg-warning/15 text-warning border-warning/30` | "Na weryfikacji" |
+| `ODRZUCONO` | `#FF0000` | `bg-danger/15 text-danger border-danger/30` | "Odrzucono" |
+| `REKLAMACJA` | `#FFA500` | `bg-warning/20 text-warning border-warning/40` (тон темнее чем weryfikacja) | "Reklamacja" |
+| `OCZEKUJE_NA_AUTORYZACJE` | `#E0E0FF` | `bg-brand/10 text-brand border-brand/30` | "Oczekuje na autoryzację" |
+| `ROBOCZY` (draft) | — | `bg-g100 text-text-sub border-border` | "Roboczy" |
+
+Зафиксировать в `packages/shared/src/claim-status.ts` как const-map, импортировать в `<StatusBadge>`.
+
+### `<StatusBadge claim>` (a.k.a. `<ClaimStatusBadge>`)
+
+**Anatomy:** `inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-xs font-medium whitespace-nowrap`. Опц. dot-prefix `<span className="h-1.5 w-1.5 rounded-full bg-current" />` для дополнительного visual cue в плотных таблицах.
+
+**Tokens:** только из status-map выше; нет hover-состояния (badge — статичный indicator, не button).
+
+**Состояния:** один static state per status; в таблице `disabled`-вид не нужен.
+
+**Использование:** column `status` в `<ClaimsTable>`, header `<ClaimVerificationModal>`, dashboard «Recent activity» list, «Required notes» list.
+
+### `<KpiCard>` (dashboard top-row)
+
+Reference: `employee-dashboard-required-notes.png` (4 верхних tile-а).
+
+**Anatomy:**
+- Wrapper: `<Card className="p-4 flex flex-col gap-1">`.
+- Label: `text-xs font-medium uppercase tracking-wider text-text-sub`.
+- Value: `text-3xl font-bold text-text` (number или `1.2k €`).
+- Delta-badge (опц.): inline `<Badge variant="outline">` с `<ArrowUp/Down />` icon, `text-success` / `text-danger` в зависимости от знака.
+- Icon-slot (опц.): `<Icon className="h-5 w-5 text-text-sub" />` в правом-верхнем углу, абсолютно.
+
+**Tokens:** `bg-card`, `border-border`, `rounded-lg`, `shadow-sm` (унаследовано от `<Card>`).
+
+**Состояния:** `loading` → `<Skeleton className="h-8 w-24" />` на месте value, label остаётся; `empty` → value = `—` (em-dash) серым.
+
+**Layout:** строка `grid grid-cols-2 md:grid-cols-4 gap-4` сверху dashboard.
+
+### `<DashboardSidebar>` (right-side панель)
+
+Reference: `employee-dashboard-monthy-trend.png`, `-top-carriers.png`, `-status-dsitribution.png`, `-complaits.png`, `-biggest-payouts.png`, `-planner-payments.png`, `-recent-activity.png`, `-required-notes.png` — каждая секция = отдельный card.
+
+**Структура:** вертикальный stack секций (`space-y-4`) в `aside.w-full lg:w-[380px] lg:shrink-0`. Каждая секция = `<Card>` с фиксированным заголовком + варьируемым контентом.
+
+| Секция | Контент-тип | Сортировка |
+|---|---|---|
+| Urgent / Required notes | list `<StatusBadge>` + claim-ref + actor | top by mtime |
+| Recent activity | feed `<AuditRow compact>` | desc by `when` |
+| Monthly trend | mini bar/line chart (recharts) | last 12 mo |
+| Top carriers | ranked list (top 5, value = sum doplata) | desc |
+| Reklamacje | list claim-cards с `REKLAMACJA` статусом | top by age |
+| Top payouts | top 5 doplata по claims | desc |
+
+**Common section header:** `<CardHeader className="pb-2">` → `<CardTitle className="text-sm font-bold uppercase tracking-wider text-text-sub">`. Body: `<CardContent className="pt-2">`. Footer-link «Zobacz wszystkie →» опц., если есть детальная страница.
+
+**Loading:** каждая секция независимо — `<Skeleton>` 3-5 строк. Не блокируем всю sidebar одним spinner-ом.
+
+**Responsive:** на `< lg` секции схлопываются в один column **под** main-контентом, не в drawer.
+
+### `<ClaimsTable>` (главная таблица employee)
+
+Reference: `employee-claims-list.png`. Переиспользует `<DataTable>` (Phase 2).
+
+**Колонки (порядок):**
+
+| Колонка | Тип | Доп. |
+|---|---|---|
+| `nrZgl` | mono `tabular-nums` | sortable, link → modal |
+| Перевозчик | text + NIP мелким `text-xs text-text-sub` второй строкой | sortable, filter |
+| Auto | plate `font-semibold` + marka мелким | filter by plate |
+| Period | `MM/YYYY` | filter (year+month dropdown) |
+| Km gwar. / Km real. | `tabular-nums` две числа, real в `text-text-sub` если < gwar | — |
+| Doplata | `tabular-nums font-semibold` + `€` suffix; красный текст если > 0 | sortable |
+| Status | `<StatusBadge>` | filter (multi-select по enum) |
+| Aktor (last edit) | initials avatar `h-6 w-6` + tooltip с pełnym именем | — |
+| Data zmiany | relative (`2 godz. temu`) + tooltip с ISO | sortable, default desc |
+| Akcje | row-hover-only kebab `<MoreHorizontal />` | — |
+
+**Row interaction:** click anywhere on row → opens `<ClaimVerificationModal>` (не правый kebab — full-row click для productivity). Kebab — только для destructive (delete draft) / secondary actions (duplicate, export PDF).
+
+**Filter bar (sticky над таблицей):** search input (по nrZgl, NIP, plate) + status multiselect + period range + carrier select. Layout — `flex flex-wrap gap-2 p-3 border-b border-border bg-bg-soft`.
+
+### `<ClaimVerificationModal>` (Sheet, не Dialog)
+
+Reference: `modal-status-p1.png` + `modal-status-p2.png`. **Locked decision:** `<Sheet side="right" className="w-full sm:w-[720px]">`. Не Dialog, не Drawer.
+
+> Note (UIUX judgement, locked anyway): 720px достаточно для двух-column form (KM / EUR в одной строке), но `Historia`-таб с large origData diff может ощущаться тесно — допустимо, scroll-y решает. Если в Phase 5 dyspozytor/weryfikator получит ещё более широкий diff-view, можно поднять до `w-[840px]` локально для конкретного экрана, **но единый компонент остаётся 720**.
+
+**Header (`<SheetHeader>`):** title = `Wniosek {nrZgl}` (`text-lg font-bold`) + line ниже — carrier name `text-sm text-text-sub` + plate. `<StatusBadge>` в правом-верхнем углу рядом с close-X.
+
+**Tabs (под header, `<Tabs>` shadcn):**
+
+| Таб | Условие | Контент |
+|---|---|---|
+| `Edit` | всегда | форма верификации: KM gwar/real (read-only), stawka €/km (input), doplata (calculated, read-only). **Live recalc badge** справа от doplata — `<Badge variant="outline" className="animate-pulse">Przeliczam…</Badge>` во время debounce, потом `<Badge variant="outline" className="text-success">Aktualne</Badge>`. Под формой — `notatka` textarea. |
+| `Historia` | `claim.origData != null` (т.е. была reklamacja или re-submit) | side-by-side diff: «Pierwotnie» / «Aktualnie», два столбца, изменённые поля подсвечены `bg-warning/10`. Read-only. |
+| `Autoryzacja` | `claim.doplata > LIMIT_OR_THRESHOLD` (бизнес-правило) | две секции: (1) кнопка «Wymaga autoryzacji» — `<Button variant="default">` с `<Mail />` icon, отправляет email Maksima + переводит claim в `OCZEKUJE_NA_AUTORYZACJE`, после клика disabled + label «Wysłano (yyyy-mm-dd hh:mm)». (2) поле `kwotaMaksima` — `<Input type="number">` с label «Kwota zatwierdzona przez Maksima (EUR)», ручной ввод после получения email-ответа; на blur — сохранение. **Никакого file-upload, никаких screenshot-ов.** |
+
+Tabs typography: `text-sm font-medium`, active — `border-b-2 border-brand text-brand`, остальные — `text-text-sub hover:text-text`.
+
+**Footer (`<SheetFooter>`, sticky):**
+- Slot слева: destructive ghost `<Button variant="ghost" className="text-danger">Odrzuć</Button>` (только если статус != ODRZUCONO/ZAAKCEPTOWANO).
+- Slot справа: `<Button variant="ghost">Anuluj</Button>` + primary `<Button>Zaakceptuj</Button>` (label меняется: «Zapisz» во вкладке Autoryzacja, «Zaakceptuj» в Edit).
+
+**Состояния:** `loading` (открыт модал, fetch claim) — skeleton header + tabs grey; `saving` — primary-button spinner, форма disabled; `error` — `<Alert variant="destructive">` сверху body, форма остаётся редактируемой.
+
+### `<AuditRow>` (строка таблицы audit + dashboard «Recent activity»)
+
+Audit-log хранится в Postgres (legacy `ensureAuditLogSheet` → Prisma `AuditLog`). Полная страница — `<DataTable>` Phase 2; одна строка = компонент ниже. Также используется в dashboard `Recent activity` секции в compact-варианте.
+
+**Anatomy (full row):**
+- Avatar/initials: `<Avatar className="h-7 w-7">` с initials `actor.name`. Цвет фона — детерминированный hash от user.id (но в пределах brand-палитры: brand-50, brand-100, g100, g200 — без радужных tailwind-цветов).
+- Action verb + target: `<span className="text-sm">` — «zaakceptował wniosek **#1234**» (target жирным).
+- Relative time: `text-xs text-text-sub` справа, tooltip с ISO timestamp.
+- Expand chevron: `<ChevronDown />`, на click — раскрытие JSON-diff под строкой (`<pre className="text-xs bg-bg-soft p-3 rounded-md overflow-x-auto">`).
+
+**Compact variant (`<AuditRow variant="compact">`):** без expand, без avatar — только initials inline + verb + target + relative time. Высота `h-9`. Используется в dashboard sidebar.
+
+**Tokens:** `bg-card` row, hover — `--table-hover` (red-tinted, Phase 2). Expanded — `bg-bg-soft`.
+
+### `<LimitsRow>` (admin → limity, inline-edit)
+
+Reference: legacy `ensureLimitySheet`. Таблица KM-гарантий per (carrier × vehicle × period).
+
+**Anatomy:** строка `<DataTable>`, но cell `limit_km` рендерится как `<TextField>` (Phase 2 input, `h-8 w-24 tabular-nums`) **встроенный** в ячейку. На focus — `border-brand`. На blur — save (POST), optimistic update value, при ошибке rollback + `<Toast variant="destructive">`.
+
+**Состояния cell:**
+- `idle` — обычный input.
+- `saving` — спиннер 12px справа от input, input disabled.
+- `success` (200ms after save) — короткая зелёная полоска под input `bg-success h-0.5`, fade-out.
+- `error` — `border-danger`, value reverted, toast.
+
+**Прочие колонки** — read-only: carrier, vehicle plate, period (MM/YYYY), updatedAt, updatedBy.
+
+**Add-row:** в footer таблицы кнопка `<Button variant="ghost"><Plus /> Dodaj limit</Button>` → открывает `<Sheet>` с RHF-формой (carrier select, vehicle select, period, limit_km).
+
+### `<UsersTable>` (admin → users CRUD)
+
+Reference: legacy `ensureUsersSheet`. Стандартный `<DataTable>` Phase 2, без особенностей.
+
+**Колонки:** email, имя, **role badge** (см. ниже), активен (boolean → `<Badge>`), 2FA enabled (icon `<ShieldCheck />` / `<ShieldOff />`), createdAt, последний логин (relative + tooltip), akcje.
+
+**Role badge:** `<Badge variant="outline">` per role:
+
+| Role | Badge color |
+|---|---|
+| `admin` | `border-brand text-brand` |
+| `pracownik` | `border-border text-text-sub` |
+| `opiekun` | `border-success/40 text-success` |
+| `planista` | `border-warning/40 text-warning` |
+| `dyspozytor` | `border-warning/40 text-warning` |
+| `eksport` | `border-brand/40 text-brand` |
+| `weryfikator` | `border-danger/40 text-danger` |
+| `przewoznik` | `border-g300 text-text-sub` |
+
+**Row akcje (kebab):** Edit (open `<Sheet>` form) / Reset password (confirm `<Dialog>` → backend генерит temp-token, email) / Deactivate (toggle `active=false`, soft, не delete) / Reactivate.
+
+**Create user:** `<Button>Dodaj użytkownika</Button>` в header → `<Sheet w-[480px]>` с формой (email, имя, role select, опц. assignedCarriers для opiekun).
+
+### Role-guarded navigation (реализация)
+
+Зафиксировано в Phase 2 spec (раздел «Role-gated navigation»), Phase 4 — реализация:
+
+- `lib/nav.config.ts` — single source of truth, hardcoded array. **Не runtime-flag, не feature-toggle.**
+- `pracownik` видит: `Dashboard`, `Wnioski`. **Точка.**
+- `admin` видит: `Dashboard`, `Wnioski`, `Carriers`, `Vehicles`, `Drivers`, `Trailers`, `Trailer types`, `Limity`, `Users`, `Audit log`.
+- Фильтрация — в server-component layout, не на клиенте.
+- Active link styling — как в Phase 2 (`bg-brand-50 text-brand` light / `bg-brand/15 text-brand-light` dark).
+
+### Phase 4 acceptance checklist (для web-agent)
+
+- [ ] `packages/shared/src/claim-status.ts` экспортирует `CLAIM_STATUS_TOKENS` map и `CLAIM_STATUS_LABELS_PL`.
+- [ ] `<StatusBadge claim={claim} />` рендерит корректный variant из map; covered storybook + unit-snapshot.
+- [ ] `<KpiCard>` принимает `{ label, value, delta?, icon? }`; имеет `loading` / `empty` варианты.
+- [ ] Dashboard layout = top KPI row (4 col) + main + `<DashboardSidebar>` (right, 380px, stack секций); каждая секция fetch-ит данные независимо (TanStack Query).
+- [ ] `<ClaimsTable>` использует `<DataTable>` Phase 2; колонки в порядке таблицы выше; full-row click → modal.
+- [ ] `<ClaimVerificationModal>` = `<Sheet side="right" w-[720px]>` с 3 табами; **в табе Autoryzacja НЕТ FileUpload компонента**; live recalc badge debounce 300ms.
+- [ ] `<AuditRow>` имеет `default` и `compact` варианты; deterministic avatar-color hash; expand → JSON-diff `<pre>`.
+- [ ] `<LimitsRow>` — inline TextField в cell, save-on-blur, optimistic update, rollback + toast on error.
+- [ ] `<UsersTable>` — role-badge color map; kebab actions; deactivate ≠ delete.
+- [ ] `lib/nav.config.ts` — pracownik видит ровно `[Dashboard, Wnioski]`, не больше.
+- [ ] **Ноль новых color/radius/shadow tokens** в Tailwind config относительно Phase 2.
+- [ ] Все компоненты работают в dark mode без override-хаков.
+- [ ] Контраст WCAG AA на всех `<StatusBadge>` вариантах (особенно warning на light).
+
+---
+
 ## GPS status indicator (forward-fix для Phase 4-5)
 
 > **Не рендерится в Phase 2.** Спецификация залочена сейчас, чтобы Phase 4 (vehicle-detail header) и Phase 5 (`/fleet/*` таблицы) не передизайнили этот элемент. API-контракт — `packages/shared` (Phase 2). Backend-контекст: [16-jobs-and-integrations.md § GPS tracker](16-jobs-and-integrations.md) (статус: ожидает доступа к API; mock-провайдер в Phase 2).

@@ -222,7 +222,12 @@
 
 ## Фаза 4 — Pracownik + Admin panel (≈ 3 недели)
 
-**Цель:** сотрудники MagTrans могут верифицировать wnioski, управлять автопарком всех перевозчиков, видеть dashboard.
+**Цель:** обе роли получают доступ к Employee panel — с разным scope-ом, **не путать**:
+
+- **`pracownik` («Opiekun wniosków»)** — узкая роль. Видит **только 2 вкладки**: Dashboard + Wnioski. Единственная задача — верифицировать заявления (изменение статуса, korekta godzin, nrZlecenia, запрос авторизации у Maksima, обработка reklamacji). Никакого CRUD по carrier/vehicle/driver/trailer/trailer-type/limits/users, никакого audit-log, никаких diagnostics. См. [03-roles.md#pracownik](03-roles.md#pracownik).
+- **`admin`** — полный scope. Всё, что умеет pracownik **плюс** CRUD по справочным сущностям и пользователям, управление лимитами, audit log, diagnostics. См. [03-roles.md#admin](03-roles.md#admin).
+
+В этой фазе делаем оба сразу, потому что они делят один `/employee` layout — разные пользователи видят разные tabs через guard на роль. Бэкенд-эндпоинты тоже общие по path, разнятся только `@Roles(...)` декораторы.
 
 ### Backend
 
@@ -247,29 +252,42 @@
 
 ### Frontend
 
-1. `app/(employee)/layout.tsx`: дизайн `#employeeScreen` — header + tabs/sidebar.
-2. `app/(employee)/dashboard/page.tsx`:
+> Видимость каждой страницы регулируется guard-ом на роль внутри `layout.tsx` — pracownik в навигации видит только пункты, помеченные **[оба]**; admin видит все. Прямой URL к admin-only странице у pracownik должен возвращать 403.
+
+1. **[оба]** `app/(employee)/layout.tsx`: дизайн `#employeeScreen` — header + tabs/sidebar. Tabs рендерятся условно по `session.user.role`: pracownik → Dashboard + Wnioski; admin → +Carriers, Vehicles, Drivers, Trailers, Trailer types, Limits, Audit, Diagnostics.
+2. **[оба]** `app/(employee)/dashboard/page.tsx`:
    - `<KpiCard>` row.
    - `<DashboardSidebar>` с 5–6 секциями (Urgent, Recent, Monthly chart, Top carriers, Reklamacje, Top payouts).
    - Recharts для pie/bar.
-3. `app/(employee)/claims/page.tsx`: таблица всех wniosków с фильтрами.
-4. **`<ClaimVerificationModal>`** — главный модал верификации (текущий `#statusModal`):
+3. **[оба]** `app/(employee)/claims/page.tsx`: таблица всех wniosków с фильтрами.
+4. **[оба] `<ClaimVerificationModal>`** — главный модал верификации (текущий `#statusModal`):
    - Все поля редактируемы.
    - Live recalculation на каждое изменение.
    - История рекламации (если есть `OrigData`).
    - 3 кнопки: «Zaakceptuj», «Odrzuć», «Wymaga autoryzacji».
    - Upload screenshot для авторизации.
-5. `app/(employee)/carriers/...` — полный CRUD (overlay из Фазы 2 → integrated).
-6. `app/(employee)/vehicles/...`, `drivers/...`, `trailers/...`, `trailer-types/...`.
-7. `app/(employee)/limits/page.tsx` — таблица помесячных лимитов с inline edit.
-8. `app/(employee)/audit/page.tsx` — список аудит-записей с фильтрами.
-9. `app/(employee)/diagnostics/page.tsx` (admin only).
+5. **[admin only]** `app/(employee)/carriers/...` — полный CRUD (overlay из Фазы 2 → integrated).
+6. **[admin only]** `app/(employee)/vehicles/...`, `drivers/...`, `trailers/...`, `trailer-types/...`.
+7. **[admin only]** `app/(employee)/limits/page.tsx` — таблица помесячных лимитов с inline edit.
+8. **[admin only]** `app/(employee)/audit/page.tsx` — список аудит-записей с фильтрами.
+9. **[admin only]** `app/(employee)/diagnostics/page.tsx`.
+10. **[admin only]** `app/(employee)/users/page.tsx` — CRUD сотрудников (admin/pracownik/opiekun/planista/dyspozytor/eksport/weryfikator), reset-password, deactivate/reactivate.
 
 ### Deliverables
-- Pracownik/admin может верифицировать wniosek end-to-end.
-- Email карьеру с правильным цветным header (по `CONFIG.KOLORY` → теперь enum в shared).
+
+**Общие (обе роли):**
+- Верификация wniosku end-to-end (статус, korekta godzin, nrZlecenia, запрос авторизации у Maksima, screenshot, обработка reklamacji).
+- Email перевозчику с правильным цветным header (по `CONFIG.KOLORY` → теперь enum в shared).
 - Email внутренним сотрудникам (planista, opiekun, lider) — отправляется.
 - Dashboard показывает правильные числа (сверка с GAS на тех же данных).
+
+**Только admin:**
+- CRUD по carriers / vehicles / drivers / trailers / trailer-types / users.
+- Управление помесячными лимитами и ставками.
+- Audit log и diagnostics доступны через UI.
+- Hard-delete с обязательным `powod`.
+
+**Guard-контракт (важно для QA):** pracownik, открыв прямой URL вида `/employee/carriers` или `/employee/users`, получает 403 — это критерий приёмки фазы.
 
 ### Зависимости
 - Фазы 0–3.

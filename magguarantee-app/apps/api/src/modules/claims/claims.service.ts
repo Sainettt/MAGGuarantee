@@ -1,8 +1,8 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
-  InternalServerErrorException,
   Logger,
   NotFoundException,
   UnprocessableEntityException,
@@ -21,6 +21,7 @@ import type {
   UpdateClaimDto,
 } from '@magguarantee/shared';
 
+import { AuditWriter } from '../audit/audit.service';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { CarriersRepository } from '../carriers/carriers.repository';
 import { DriversRepository } from '../drivers/drivers.repository';
@@ -28,10 +29,12 @@ import { KmCalcService } from '../km-calc/km-calc.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TrailersRepository } from '../trailers/trailers.repository';
 import { VehiclesRepository } from '../vehicles/vehicles.repository';
+import { assertLegalTransition } from './claim-state-machine';
 import {
   ClaimsRepository,
   type ClaimRow,
   type TransactionLike,
+  type UpdateClaimData,
 } from './claims.repository';
 import { NrZglService } from './nr-zgl.service';
 
@@ -91,6 +94,7 @@ export class ClaimsService {
     private readonly kmCalc: KmCalcService,
     private readonly nrZgl: NrZglService,
     private readonly prisma: PrismaService,
+    private readonly auditWriter: AuditWriter,
   ) {}
 
   // ── Submit ──────────────────────────────────────────────
@@ -320,35 +324,74 @@ export class ClaimsService {
     return this.toDto(row);
   }
 
-  // ── Decide / verify (PHASE 4 — stub) ────────────────────
+  // ── Update / verify (Phase 4) ──────────────────────────
 
   /**
-   * PATCH /claims/:nrZgl — verifier's decision endpoint. The full Phase 4
-   * implementation will:
-   *   1. Load the claim, assert ownership scoping (admin / pracownik only).
-   *   2. Translate the synthetic `REKLAMACJA_*` literals from
-   *      {@link UpdateClaimDto} into the underlying state-machine targets
-   *      (`ZAAKCEPTOWANO` / `ODRZUCONO`) and persist `statusBeforeReklamacja`.
-   *   3. Validate the transition via
-   *      {@link ./claim-state-machine#assertLegalTransition}.
-   *   4. Re-run km-calc when the verifier corrected dates / mileage / hours.
-   *   5. Apply the patch, audit the diff, send notifications.
+   * `PATCH /claims/:nrZgl` — verifier's decision endpoint.
    *
-   * The stub method is exposed NOW so future code has a stable signature;
-   * the wire schema (`UpdateClaimSchema` discriminated union) is ready and
-   * lives in `@magguarantee/shared`. The controller endpoint is intentionally
-   * NOT wired in Phase 3 — calling this throws 500 to make the unfinished
-   * surface visible during integration tests.
+   * Per docs/13-api-design.md#claims (`PATCH /claims/:nrZgl` row) and the
+   * `updateClaimFull` reference in `Code.gs:5183-5645`. Wired only for
+   * `admin` / `pracownik` at the controller; service-side ownership scoping
+   * is a defence-in-depth no-op for those roles.
+   *
+   * The 462-line GAS handler is split into 5 helpers per docs/17-migration-roadmap.md:234-239
+   * — see `_validateClaimUpdate`, `_recalcClaim`, `_persistClaimUpdate`,
+   * `_handleReklamacjaTransition`, `_applyDecisionEmails` below.
+   *
+   * The mutation + audit row commit atomically inside one
+   * `prisma.$transaction(...)`; email notifications are dispatched OUTSIDE
+   * the transaction (fire-and-log, like submit / reklamacja).
    */
-  // TODO Phase 4 — implement full verification flow.
-  async decide(
-    _user: AuthUser,
-    _nrZgl: string,
-    _dto: UpdateClaimDto,
+  async update(
+    user: AuthUser,
+    nrZgl: string,
+    dto: UpdateClaimDto,
+    ipAddress?: string,
   ): Promise<ClaimDto> {
-    throw new InternalServerErrorException(
-      'Claim verification — Phase 4',
-    );
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const txLike = tx as unknown as TransactionLike;
+      const existing = await this._validateClaimUpdate(nrZgl, dto);
+      const recalc = await this._recalcClaim(existing, dto);
+      const patch = this._buildUpdatePatch(
+        existing,
+        dto,
+        recalc,
+        user,
+      );
+      const reklamacjaSnapshot = this._handleReklamacjaTransition(
+        existing,
+        dto,
+      );
+      const data: UpdateClaimData = { ...patch, ...reklamacjaSnapshot };
+      const next = await this.claims.updateWithin(txLike, existing.id, data);
+
+      await this.auditWriter.log({
+        action: 'updateClaim',
+        targetType: 'Claim',
+        targetKey: existing.nrZgl,
+        before: this._snapshotForAudit(existing),
+        after: this._snapshotForAudit(next),
+        actor: {
+          userId: user.sub,
+          userRole: user.role,
+          ...(ipAddress ? { ipAddress } : {}),
+        },
+        tx,
+      });
+
+      return next;
+    });
+
+    // Email notifications — outside the transaction. Mirrors submit/reklamacja.
+    void this._applyDecisionEmails(updated).catch((err) => {
+      this.logger.error({
+        msg: 'claims.update.notify_failed',
+        nrZgl: updated.nrZgl,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+
+    return this.toDto(updated);
   }
 
   // ── Preview ─────────────────────────────────────────────
@@ -618,6 +661,355 @@ export class ClaimsService {
 
   // ── Internals ───────────────────────────────────────────
 
+  // ── update() helpers (Phase 4) ──────────────────────────
+
+  /**
+   * Loads the claim, normalises the wire-only synthetic literals, validates
+   * the transition + per-target required fields, and returns the existing
+   * row. Throws 404 on missing claim, 422 on illegal transition (via state
+   * machine), 400 on cross-field invariant violation (missing required
+   * fields per docs/01-overview.md#weryfikacja-wniosku).
+   */
+  private async _validateClaimUpdate(
+    nrZgl: string,
+    dto: UpdateClaimDto,
+  ): Promise<ClaimRow> {
+    const existing = await this.claims.findByNrZgl(nrZgl);
+    if (!existing) {
+      throw new NotFoundException('Wniosek nie znaleziony');
+    }
+
+    const targetStatus = translateSyntheticStatus(dto.targetStatus);
+
+    // State-machine check first — gives the verifier a friendly Polish 422
+    // before we run any cross-field validation.
+    assertLegalTransition(existing.status, targetStatus);
+
+    // Cross-field invariants. The discriminated union already enforces
+    // presence at the type/Zod level, but we re-check here so the service
+    // remains correct when called from tests / non-HTTP code paths that
+    // bypass the pipe.
+    if (dto.targetStatus === 'ZAAKCEPTOWANO') {
+      if (!dto.orderNumber || dto.orderNumber.trim() === '') {
+        throw new BadRequestException({
+          code: 'INVALID_STATUS_TRANSITION',
+          message: 'Numer zlecenia (nrZlecenia) jest wymagany przy akceptacji.',
+        });
+      }
+      if (!dto.orderDate) {
+        throw new BadRequestException({
+          code: 'INVALID_STATUS_TRANSITION',
+          message: 'Data zlecenia jest wymagana przy akceptacji.',
+        });
+      }
+      if (
+        dto.amountApproved === undefined ||
+        dto.amountApproved === null
+      ) {
+        throw new BadRequestException({
+          code: 'INVALID_STATUS_TRANSITION',
+          message: 'Kwota zatwierdzona (zatwKwota) jest wymagana.',
+        });
+      }
+    }
+
+    // Reklamacja-accept needs a verifier-approved amount. Reklamacja-reject
+    // needs only the rejection comment (already required by Zod schema).
+    if (
+      dto.targetStatus === 'REKLAMACJA_ZAAKCEPTOWANO' &&
+      (dto.reklamacjaAmount === undefined || dto.reklamacjaAmount === null)
+    ) {
+      throw new BadRequestException({
+        code: 'INVALID_STATUS_TRANSITION',
+        message: 'Kwota reklamacji jest wymagana przy akceptacji reklamacji.',
+      });
+    }
+
+    return existing;
+  }
+
+  /**
+   * Re-runs km-calc when the verifier changed at least one input that
+   * affects the math (dates / times / mileage / hoursAdjusted). For pure
+   * decision changes (status + nrZlecenia + komentarz + reklamacja flags
+   * only), we skip the recalc and surface the existing values — that's
+   * pure optimisation but it also keeps the audit diff clean.
+   */
+  private async _recalcClaim(
+    existing: ClaimRow,
+    dto: UpdateClaimDto,
+  ): Promise<{
+    drivenDays: number;
+    kmGuaranteed: number;
+    kmDifference: number;
+    paymentEur: number;
+    ratePerKmEffective: number;
+    kmPerDay: number;
+    breakdown: KmCalcBreakdown;
+    mileage: number;
+  } | null> {
+    const corrections = extractCorrectionFields(dto);
+    if (!corrections.touchesMath) {
+      return null;
+    }
+
+    const dateStart = corrections.dateStart ?? toIsoDateOnly(existing.dateStart);
+    const dateEnd = corrections.dateEnd ?? toIsoDateOnly(existing.dateEnd);
+    const timeFrom = corrections.timeFrom ?? existing.timeFrom;
+    const timeTo = corrections.timeTo ?? existing.timeTo;
+    const mileage = corrections.mileage ?? existing.mileage;
+    const hoursAdjusted = corrections.hoursAdjusted ?? 0;
+
+    const calc = await this.kmCalc.calc({
+      dateStart,
+      dateEnd,
+      timeFrom,
+      timeTo,
+      hoursAdjusted,
+    });
+
+    const kmDifference = calc.kmGuaranteed - mileage;
+    const paymentEur =
+      kmDifference > 0
+        ? round2(kmDifference * calc.ratePerKmEffective)
+        : 0;
+    const kmPerDay =
+      calc.totalDays > 0 ? round2(mileage / calc.totalDays) : 0;
+
+    const breakdown: KmCalcBreakdown = {
+      totalDays: calc.totalDays,
+      kmGuaranteed: calc.kmGuaranteed,
+      ratePerKmEffective: calc.ratePerKmEffective,
+      breakdown: calc.breakdown,
+    };
+
+    return {
+      drivenDays: calc.totalDays,
+      kmGuaranteed: calc.kmGuaranteed,
+      kmDifference,
+      paymentEur,
+      ratePerKmEffective: calc.ratePerKmEffective,
+      kmPerDay,
+      breakdown,
+      mileage,
+    };
+  }
+
+  /**
+   * Composes the actual `UpdateClaimData` patch from the validated DTO and
+   * the optional recalc output. Pure function — no IO, no throws. Tested
+   * indirectly via the update() spec.
+   */
+  private _buildUpdatePatch(
+    existing: ClaimRow,
+    dto: UpdateClaimDto,
+    recalc:
+      | {
+          drivenDays: number;
+          kmGuaranteed: number;
+          kmDifference: number;
+          paymentEur: number;
+          ratePerKmEffective: number;
+          kmPerDay: number;
+          breakdown: KmCalcBreakdown;
+          mileage: number;
+        }
+      | null,
+    user: AuthUser,
+  ): UpdateClaimData {
+    const patch: UpdateClaimData = {};
+    const target = translateSyntheticStatus(dto.targetStatus);
+    const now = new Date();
+
+    // Status & workflow.
+    patch.status = target;
+    patch.statusChangedAt = now;
+    patch.decidedById = user.sub;
+
+    // Correction fields — written only when the verifier actually changed
+    // them. Mirror them onto the row regardless of recalc, because some
+    // edits (e.g. timeFrom only) can affect calc while others (e.g. dateEnd
+    // pushed forward by a day) might.
+    const corrections = extractCorrectionFields(dto);
+    if (corrections.dateStart) {
+      const d = isoDateToMidnightUtc(corrections.dateStart);
+      if (d) patch.dateStart = d;
+    }
+    if (corrections.dateEnd) {
+      const d = isoDateToMidnightUtc(corrections.dateEnd);
+      if (d) patch.dateEnd = d;
+    }
+    if (corrections.timeFrom) patch.timeFrom = corrections.timeFrom;
+    if (corrections.timeTo) patch.timeTo = corrections.timeTo;
+    if (corrections.mileage !== undefined) patch.mileage = corrections.mileage;
+    if (corrections.hoursAdjusted !== undefined) {
+      // `Claim.hoursAdjusted` is a boolean flag — true iff any non-zero
+      // adjustment was applied (Code.gs:5304-5309). The numeric value lives
+      // inside the breakdown.
+      patch.hoursAdjusted = corrections.hoursAdjusted > 0;
+    }
+
+    // km-calc outputs (only if recalc actually ran).
+    if (recalc) {
+      patch.drivenDays = recalc.drivenDays;
+      patch.kmPerDay = recalc.kmPerDay;
+      patch.kmGuaranteed = recalc.kmGuaranteed;
+      patch.kmDifference = recalc.kmDifference;
+      patch.paymentEur = recalc.paymentEur;
+      patch.ratePerKmEffective = recalc.ratePerKmEffective;
+      patch.breakdown = recalc.breakdown;
+    }
+
+    // Decision payload per discriminator branch.
+    switch (dto.targetStatus) {
+      case 'OCZEKUJE_NA_AUTORYZACJE':
+        patch.margin = dto.margin;
+        patch.authorizationRequired = true;
+        patch.authorizationDescription = dto.authorizationDescription;
+        break;
+      case 'ZAAKCEPTOWANO':
+        patch.orderNumber = dto.orderNumber;
+        patch.orderDate = isoDateToMidnightUtc(dto.orderDate);
+        patch.amountApproved = dto.amountApproved;
+        if (dto.amountMaximum !== undefined) {
+          patch.amountMaximum = dto.amountMaximum;
+        }
+        if (dto.comment !== undefined) patch.comment = dto.comment ?? null;
+        break;
+      case 'ODRZUCONO':
+        patch.comment = dto.comment;
+        break;
+      case 'REKLAMACJA_ZAAKCEPTOWANO':
+        patch.reklamacjaResponse = dto.comment;
+        patch.reklamacjaAmount = dto.reklamacjaAmount;
+        // Verifier accepted reklamacja → row's effective status becomes
+        // ZAAKCEPTOWANO. `statusBeforeReklamacja` was already set when the
+        // claim entered REKLAMACJA via submitReklamacja(); we leave it alone.
+        break;
+      case 'REKLAMACJA_ODRZUCONO':
+        patch.reklamacjaResponse = dto.comment;
+        break;
+      default: {
+        const exhaustive: never = dto;
+        throw new Error(
+          `claims.update: unhandled targetStatus ${String(
+            (exhaustive as { targetStatus?: string }).targetStatus,
+          )}`,
+        );
+      }
+    }
+
+    return patch;
+  }
+
+  /**
+   * Tracks reklamacja-specific status bookkeeping.
+   *
+   * Per docs/01-overview.md#reklamacja: when a claim FIRST enters REKLAMACJA
+   * we snapshot the carrier's original inputs into the `origData*` columns
+   * so a downstream verifier can compare. The carrier-side path
+   * (`submitReklamacja`) already does this; the verifier-side update flow
+   * doesn't re-snapshot (we don't enter REKLAMACJA from this code path).
+   *
+   * Conversely, when leaving REKLAMACJA (verifier accepts/rejects the
+   * dispute), we deliberately KEEP the orig data — it's historical record.
+   *
+   * Implementation: today the verifier doesn't push a claim INTO reklamacja
+   * via this PATCH (only the carrier can, via the dedicated POST). The
+   * helper exists so the orchestration stays explicit and future flows that
+   * DO push a claim into REKLAMACJA from PATCH have a single place to wire.
+   */
+  private _handleReklamacjaTransition(
+    existing: ClaimRow,
+    dto: UpdateClaimDto,
+  ): Partial<UpdateClaimData> {
+    const target = translateSyntheticStatus(dto.targetStatus);
+
+    // Defensive: verifier-side PATCH currently has NO edge into REKLAMACJA
+    // (state-machine forbids it). Should the matrix grow such an edge, this
+    // is the spot to snapshot origData* like `submitReklamacja` does.
+    if (existing.status !== 'REKLAMACJA' && target === 'REKLAMACJA') {
+      return {
+        statusBeforeReklamacja: existing.status,
+        origDateStart: existing.origDateStart ?? existing.dateStart,
+        origDateEnd: existing.origDateEnd ?? existing.dateEnd,
+        origMileage: existing.origMileage ?? existing.mileage,
+      };
+    }
+    return {};
+  }
+
+  /**
+   * Email dispatch hook for verification outcomes. Today this re-uses the
+   * existing recipient logic (admin + carrier + planista + opiekun + lider)
+   * and writes a structured log line; the BullMQ-backed templated send
+   * lands in Phase 9 per docs/16-jobs-and-integrations.md. Bumping the
+   * implementation to real Gmail-API sends is a localised swap inside the
+   * Mail module — this caller does not change.
+   */
+  private async _applyDecisionEmails(row: ClaimRow): Promise<void> {
+    const recipients = await this._collectSubmitRecipients(row);
+    if (recipients.length === 0) {
+      this.logger.warn({
+        msg: 'claims.update.no_recipients',
+        nrZgl: row.nrZgl,
+      });
+      return;
+    }
+    this.logger.log({
+      msg: 'claims.update.notify',
+      nrZgl: row.nrZgl,
+      status: row.status,
+      paymentEur: row.paymentEur,
+      amountApproved: row.amountApproved,
+      recipients: recipients.map((r) => maskEmail(r)),
+    });
+  }
+
+  /**
+   * Audit `before`/`after` snapshot — a compact projection of the row that
+   * captures every column a verifier might have touched. We intentionally
+   * exclude unrelated columns (attachments, FK joins) so audit diffs stay
+   * legible. Pure function, no IO.
+   */
+  private _snapshotForAudit(row: ClaimRow): Record<string, unknown> {
+    return {
+      status: row.status,
+      statusChangedAt: row.statusChangedAt?.toISOString() ?? null,
+      decidedById: row.decidedById,
+      dateStart: row.dateStart.toISOString(),
+      dateEnd: row.dateEnd.toISOString(),
+      timeFrom: row.timeFrom,
+      timeTo: row.timeTo,
+      mileage: row.mileage,
+      hoursAdjusted: row.hoursAdjusted,
+      drivenDays: row.drivenDays,
+      kmPerDay: row.kmPerDay,
+      kmGuaranteed: row.kmGuaranteed,
+      kmDifference: row.kmDifference,
+      paymentEur: row.paymentEur,
+      ratePerKmEffective: row.ratePerKmEffective,
+      comment: row.comment,
+      orderNumber: row.orderNumber,
+      orderDate: row.orderDate
+        ? row.orderDate.toISOString().slice(0, 10)
+        : null,
+      amountRequested: row.amountRequested,
+      amountApproved: row.amountApproved,
+      amountMaximum: row.amountMaximum,
+      margin: row.margin,
+      authorizationRequired: row.authorizationRequired,
+      authorizationDescription: row.authorizationDescription,
+      reklamacjaSubmitted: row.reklamacjaSubmitted,
+      reklamacjaText: row.reklamacjaText,
+      reklamacjaResponse: row.reklamacjaResponse,
+      reklamacjaAmount: row.reklamacjaAmount,
+      statusBeforeReklamacja: row.statusBeforeReklamacja,
+    };
+  }
+
+  // ── end Phase 4 helpers ─────────────────────────────────
+
   private async _requireCarrierProfile(
     user: AuthUser,
   ): Promise<{ id: string }> {
@@ -883,4 +1275,76 @@ function maskEmail(email: string): string {
   const domain = email.slice(at);
   if (local.length <= 2) return `${local[0] ?? ''}***${domain}`;
   return `${local.slice(0, 2)}***${domain}`;
+}
+
+/**
+ * Map a wire-only `targetStatus` literal back to its underlying `ClaimStatus`.
+ * Synthetic `REKLAMACJA_ZAAKCEPTOWANO` / `REKLAMACJA_ODRZUCONO` collapse to
+ * `ZAAKCEPTOWANO` / `ODRZUCONO` respectively. Real `ClaimStatus` literals
+ * pass through unchanged. Pure function.
+ */
+function translateSyntheticStatus(
+  target: UpdateClaimDto['targetStatus'],
+): ClaimStatus {
+  switch (target) {
+    case 'REKLAMACJA_ZAAKCEPTOWANO':
+      return 'ZAAKCEPTOWANO';
+    case 'REKLAMACJA_ODRZUCONO':
+      return 'ODRZUCONO';
+    default:
+      return target;
+  }
+}
+
+/**
+ * Extract the verifier-correction fields from the DTO and indicate whether
+ * any of them affects the km-calc math (true → caller MUST re-run the
+ * calc engine; false → existing kmGuaranteed/paymentEur stay).
+ *
+ * Branches that don't carry correction fields (e.g. `REKLAMACJA_ODRZUCONO`
+ * which is comment-only) return `touchesMath: false` and empty correction
+ * slots.
+ */
+function extractCorrectionFields(dto: UpdateClaimDto): {
+  dateStart?: string;
+  dateEnd?: string;
+  timeFrom?: string;
+  timeTo?: string;
+  mileage?: number;
+  hoursAdjusted?: number;
+  touchesMath: boolean;
+} {
+  // Only some discriminator branches carry the correction fields. We
+  // narrow via a property-presence check — TS doesn't help us here because
+  // `UpdateClaimDto` is a union without a tagged-shape on the optional
+  // fields.
+  const r = dto as Partial<{
+    dateStart: string;
+    dateEnd: string;
+    timeFrom: string;
+    timeTo: string;
+    mileage: number;
+    hoursAdjusted: number;
+  }>;
+  const touchesMath =
+    r.dateStart !== undefined ||
+    r.dateEnd !== undefined ||
+    r.timeFrom !== undefined ||
+    r.timeTo !== undefined ||
+    r.mileage !== undefined ||
+    r.hoursAdjusted !== undefined;
+  return {
+    dateStart: r.dateStart,
+    dateEnd: r.dateEnd,
+    timeFrom: r.timeFrom,
+    timeTo: r.timeTo,
+    mileage: r.mileage,
+    hoursAdjusted: r.hoursAdjusted,
+    touchesMath,
+  };
+}
+
+/** UTC date → `YYYY-MM-DD`. Inverse of `isoDateToMidnightUtc`. */
+function toIsoDateOnly(d: Date): string {
+  return d.toISOString().slice(0, 10);
 }

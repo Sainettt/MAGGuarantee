@@ -90,11 +90,25 @@
     "logout": "Log out"
   },
   "nav": {
+    "dashboard": "Dashboard",
+    "claims": "Claims",
     "carriers": "Carriers",
     "vehicles": "Vehicles",
     "drivers": "Drivers",
     "trailers": "Trailers",
-    "trailerTypes": "Trailer types"
+    "trailerTypes": "Trailer types",
+    "limits": "Limits",
+    "users": "Users",
+    "audit": "Audit log",
+    "diagnostics": "Diagnostics",
+    "openMenu": "Open menu",
+    "closeMenu": "Close menu",
+    "sectionLabel": "Panel sections"
+  },
+  "forbidden": {
+    "title": "Access denied",
+    "message": "You don't have permission to view this section. Contact your administrator if you believe this is a mistake.",
+    "backToDashboard": "Back to dashboard"
   },
   "carriers": {
     "title": "Carriers",
@@ -278,6 +292,116 @@
     "valid": "Verified",
     "invalid": "Not found",
     "error": "Service unavailable — try again later"
+  },
+  "employee": {
+    "claims": {
+      "title": "Claims",
+      "emptyTitle": "No claims",
+      "emptyMessage": "No claims match the current filters.",
+      "filters": {
+        "searchPlaceholder": "Search claim number / NIP / plate",
+        "status": "Status",
+        "allStatuses": "All statuses",
+        "dateFrom": "Period from",
+        "dateTo": "Period to",
+        "carrierId": "Carrier ID",
+        "carrierIdPlaceholder": "Carrier UUID"
+      },
+      "columns": {
+        "nrZgl": "Claim no.",
+        "carrier": "Carrier",
+        "vehicle": "Vehicle",
+        "period": "Period",
+        "mileage": "Mileage",
+        "doplata": "Payout",
+        "status": "Status",
+        "updatedAt": "Updated"
+      },
+      "relative": {
+        "now": "just now",
+        "minutes": "{n} min ago",
+        "hours": "{n}h ago",
+        "days": "{n}d ago"
+      },
+      "modal": {
+        "title": "Claim {nrZgl}",
+        "carrierAndPlate": "{carrier} · {plate}",
+        "submittedAt": "Submitted {date}",
+        "tabs": {
+          "edit": "Edit",
+          "history": "History",
+          "authorization": "Authorization"
+        },
+        "recalc": {
+          "loading": "Recalculating…",
+          "current": "Up to date",
+          "error": "Could not recalculate",
+          "diff": "Payout: {before} → {after}",
+          "noChange": "No change"
+        },
+        "edit": {
+          "targetStatus": "Decision",
+          "targetStatusPlaceholder": "Pick a decision",
+          "kmGuaranteed": "Guaranteed km",
+          "mileage": "Mileage",
+          "hoursAdjusted": "Hours adjustment",
+          "dateStart": "Period from",
+          "dateEnd": "Period to",
+          "timeFrom": "Time from",
+          "timeTo": "Time to",
+          "orderNumber": "Order number",
+          "orderDate": "Order date",
+          "amountApproved": "Amount approved (EUR)",
+          "amountMaximum": "Maximum amount (EUR)",
+          "amountRequested": "Amount requested",
+          "doplata": "Computed payout",
+          "margin": "Margin",
+          "authorizationDescription": "Authorization description",
+          "comment": "Comment",
+          "commentRejected": "Rejection reason",
+          "commentReklamacja": "Decision rationale",
+          "reklamacjaAmount": "Approved reclamation amount (EUR)",
+          "submit": "Confirm",
+          "submitting": "Saving…",
+          "savedToast": "Saved",
+          "errorToast": "Failed to save"
+        },
+        "history": {
+          "empty": "No edit history.",
+          "origData": "Original data (before reclamation)",
+          "origDateStart": "Period from",
+          "origDateEnd": "Period to",
+          "origMileage": "Mileage",
+          "current": "Current",
+          "decidedBy": "Decided by: {actor}",
+          "decidedAt": "Decided on: {date}",
+          "reklamacjaText": "Reclamation text",
+          "reklamacjaResponse": "Reclamation response"
+        },
+        "auth": {
+          "notRequired": "This claim does not require Maksim's authorization.",
+          "requestTitle": "Request authorization",
+          "requestHelp": "Sends the claim to Maksim for authorization. The claim will move to status \"Awaiting authorization\".",
+          "margin": "Margin (EUR)",
+          "description": "Description for Maksim",
+          "submitRequest": "Send for authorization",
+          "submitting": "Sending…",
+          "savedToast": "Claim sent for authorization",
+          "pendingTitle": "Claim awaiting authorization",
+          "pendingDescription": "Description sent to Maksim",
+          "amountMaximumLabel": "Amount approved by Maksim (EUR)",
+          "amountMaximumSave": "Save Maksim amount",
+          "amountMaximumSaved": "Maksim amount saved"
+        },
+        "targetStatus": {
+          "ZAAKCEPTOWANO": "Accept",
+          "ODRZUCONO": "Reject",
+          "OCZEKUJE_NA_AUTORYZACJE": "Request authorization",
+          "REKLAMACJA_ZAAKCEPTOWANO": "Accept reclamation",
+          "REKLAMACJA_ODRZUCONO": "Reject reclamation"
+        }
+      }
+    }
   },
   "carrier": {
     "tabs": {

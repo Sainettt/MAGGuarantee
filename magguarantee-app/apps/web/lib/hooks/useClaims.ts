@@ -1,11 +1,13 @@
 'use client';
 
-// TanStack Query hooks for /claims (carrier panel — Phase 3).
+// TanStack Query hooks for /claims (carrier panel — Phase 3,
+// employee verification — Phase 4 sub-slice 4.1).
 //
 // The preview hook is debounced on the *consumer* side: callers pass a
 // `body` that is already debounced (we use `useDebouncedValue` in the
-// new-claim form) so this hook itself stays a plain `useQuery`. Cache
-// keying on the body lets repeat keystrokes hit the cache.
+// new-claim form and in the employee verification modal) so this hook
+// itself stays a plain `useQuery`. Cache keying on the body lets repeat
+// keystrokes hit the cache.
 
 import {
   useMutation,
@@ -20,14 +22,17 @@ import type {
   PreviewClaimResponse,
   SubmitClaimDto,
   SubmitReklamacjaDto,
+  UpdateClaimDto,
 } from '@magguarantee/shared';
 
 import {
   getClaim,
   listClaims,
+  previewExistingClaim,
   previewNewClaim,
   submitClaim,
   submitReklamacja,
+  updateClaim,
 } from '@/lib/api/claims';
 
 export const CLAIMS_KEY = ['claims'] as const;
@@ -102,6 +107,55 @@ export function useSubmitReklamacja(
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ nrZgl, body }) => submitReklamacja(nrZgl, body),
+    ...opts,
+    onSuccess: (...args) => {
+      qc.invalidateQueries({ queryKey: CLAIMS_KEY });
+      opts?.onSuccess?.(...args);
+    },
+  });
+}
+
+/**
+ * Live-preview against an existing claim — used by the employee
+ * verification modal's recalc badge. The component is responsible for
+ * debouncing the input.
+ *
+ * `enabled` defaults to `true` but the consumer should gate on the
+ * minimal-fields check so we don't fire 422s while the verifier is
+ * mid-edit.
+ */
+export function useClaimPreviewExisting(
+  nrZgl: string | null | undefined,
+  body: PreviewClaimDto | null,
+  options?: { enabled?: boolean },
+) {
+  const enabled =
+    (options?.enabled ?? true) && body !== null && Boolean(nrZgl);
+  return useQuery<PreviewClaimResponse>({
+    queryKey: [...CLAIMS_KEY, 'preview', nrZgl, body],
+    queryFn: () => previewExistingClaim(nrZgl as string, body as PreviewClaimDto),
+    enabled,
+    retry: false,
+    placeholderData: (prev) => prev,
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * `PATCH /claims/:nrZgl` — verifier's decision endpoint. Invalidates
+ * both the list and the single-claim cache on success so the table row
+ * + open modal both refresh.
+ */
+export function useUpdateClaim(
+  opts?: UseMutationOptions<
+    ClaimDto,
+    Error,
+    { nrZgl: string; body: UpdateClaimDto }
+  >,
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ nrZgl, body }) => updateClaim(nrZgl, body),
     ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: CLAIMS_KEY });

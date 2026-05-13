@@ -21,7 +21,7 @@ describe('NrZglService', () => {
       lastNumber: 42,
     });
     const tx = {
-      claim: { create: jest.fn() },
+      claim: { create: jest.fn(), update: jest.fn() },
       claimSequence: { upsert },
     } as Parameters<NrZglService['nextWithin']>[0];
 
@@ -42,7 +42,7 @@ describe('NrZglService', () => {
       lastNumber: 1,
     });
     const tx = {
-      claim: { create: jest.fn() },
+      claim: { create: jest.fn(), update: jest.fn() },
       claimSequence: { upsert },
     } as Parameters<NrZglService['nextWithin']>[0];
 
@@ -58,7 +58,7 @@ describe('NrZglService', () => {
       lastNumber: 1,
     });
     const tx = {
-      claim: { create: jest.fn() },
+      claim: { create: jest.fn(), update: jest.fn() },
       claimSequence: { upsert },
     } as Parameters<NrZglService['nextWithin']>[0];
 

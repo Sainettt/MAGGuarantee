@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 
 import { AuditModule } from './common/audit/audit.module';
+import { AuditWriterModule } from './modules/audit/audit.module';
 import { validateEnv } from './config/env.schema';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -77,6 +78,7 @@ import { VehiclesModule } from './modules/vehicles/vehicles.module';
     RedisModule,
     MailModule,
     AuditModule,
+    AuditWriterModule,
     PasswordModule,
     UsersModule,
     AuthModule,
