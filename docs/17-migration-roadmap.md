@@ -229,49 +229,88 @@
 
 В этой фазе делаем оба сразу, потому что они делят один `/employee` layout — разные пользователи видят разные tabs через guard на роль. Бэкенд-эндпоинты тоже общие по path, разнятся только `@Roles(...)` декораторы.
 
+### Прогресс выполнения
+
+Декомпозиция получена через `orchestrator-agent` (см. план в conversation 2026-05-13). 6 sub-slice-ов:
+
+- [x] **4.0 Foundation** (≈3 дня) — **DONE** (commit `de689f5`)
+  - [x] uiux: Phase 4 секция в `docs/14-design-system.md` (9 компонентов + ClaimStatus→token map + role-nav контракт + 12-пунктовый acceptance checklist)
+  - [x] db: `AuditLog` модель и `ClaimStatus` enum уже были на месте (db-agent проверил, ничего не менял)
+  - [x] api: `AuditWriter` (in-tx audit service) в `apps/api/src/modules/audit/` + 8 unit-тестов; экспортируется через `AuditWriterModule` (`@Global()`)
+  - [x] web: новый `/employee/layout.tsx` с role-guarded sidebar (240px desktop, slide-over mobile); `lib/nav.config.ts` (hardcode 11-link config + `filterNavForRole`); 403 page в `/employee/forbidden`; i18n `nav.*` + `forbidden.*` namespace
+
+- [x] **4.1 Claim verification core** (≈4 дня) — **DONE** (commit `de689f5`)
+  - [x] api: `ClaimsService.update()` + 5 helper-методов (`_validateClaimUpdate`, `_recalcClaim`, `_buildUpdatePatch`, `_handleReklamacjaTransition`, `_applyDecisionEmails`)
+  - [x] api: `PATCH /api/v1/claims/:nrZgl` с `@Roles('admin', 'pracownik')`, Zod-валидация через `UpdateClaimSchema` (discriminated union по `targetStatus`); все mutating-операции внутри `prisma.$transaction` с одновременной записью в audit_log
+  - [x] api: preview-endpoint `POST /api/v1/claims/:nrZgl/preview` расширен с `przewoznik` до `przewoznik|pracownik|admin` (для live recalc у верификатора). `CarrierOwnsGuard` пропускает non-carrier роли.
+  - [x] web: `/employee/claims` page (server-component shell + ClaimsListView client); `<ClaimsTable>` с колонками nrZgl/carrier/vehicle/period/km/doplata/status/updated; cursor pagination + filter bar (status, date range, full-text `q`)
+  - [x] web: `<ClaimVerificationModal>` = `<Sheet size="xl">` 720px с 3 табами (Edit / Historia / Autoryzacja); RHF + `zodResolver(UpdateClaimSchema)` с conditional rendering полей по выбранному `targetStatus`; `<RecalcBadge>` с 300ms debounce, бьёт в `/preview`; tabs primitive `components/ui/Tabs.tsx` (hand-rolled, shadcn-compatible API)
+  - [x] web: TanStack hooks `useClaimPreviewExisting` + `useUpdateClaim`; форматтеры `formatEur` / `formatKmCompact` / `formatDateShort` / `formatRelativeTime`
+  - [x] tests: 8 unit на `ClaimsService.update()` (happy-path/missing-required/illegal-transition/comment-only-skip-recalc/recalc-on-mileage/auth-transition/reklamacja-collapse/not-found), 8 на `AuditWriter`
+
+- [ ] **4.2 Authorization flow** (≈2 дня) — pending
+  - Scope: `POST /api/v1/claims/:nrZgl/request-authorization` (email Maksim-у + статус OCZEKUJE_NA_AUTORYZACJE, генерация auth-токена); dedicated endpoint для `kwotaMaksima` override (сейчас Save-кнопка в Autoryzacja-табе информационная); email-шаблон Maksim-у. **Screenshot upload выпилен** (решение от 2026-05-13). UI в `<ClaimVerificationModal>` уже подготовлен — нужно только подключить endpoint-ы.
+
+- [ ] **4.3 Dashboard** (≈3 дня) — pending
+  - Scope: `GET /api/v1/diagnostics/dashboard` (KPI counts, top carriers по выплатам, recent activity, urgent NA_WERYFIKACJI > 3 days), `<KpiCard>` row + `<DashboardSidebar>` с 6 секциями, Recharts pie/bar. По uiux-спеке секция `<KpiCard>` + `<DashboardSidebar>` готова.
+
+- [ ] **4.4 Admin справочники доводка** (≈3 дня) — pending
+  - Scope: интеграция `AuditWriter` в существующие mutating-сервисы (carriers/vehicles/drivers/trailers); hard-delete с обязательным `powod` → audit `metadata.reason`; `app/(employee)/users/page.tsx` (CRUD сотрудников — backend уже полный, только UI: `<UsersTable>` + Sheet edit + reset-password modal + deactivate confirm); полировка существующих Phase-2 admin-страниц под новый layout. **Открытый side-quest:** `GET /api/v1/lookups/carriers` endpoint для autocomplete в фильтрах claims (сейчас заменён full-text `q`).
+
+- [ ] **4.5 Admin ops: limits / audit / diagnostics** (≈3 дня) — pending
+  - Scope: `limits` модуль (GET/PUT помесячных лимитов и ставок), `audit` (GET с фильтрами `targetType=&targetKey=&userId=&action=` + pagination), `diagnostics` (mails/claims/db endpoints + resend); 3 admin-only страницы `/employee/{limits,audit,diagnostics}` (по уже зафиксированным `<LimitsRow>` / `<AuditRow>` спекам в DS).
+
+**Открытые мелочи (не блокеры, фиксятся в нужном sub-slice-е):**
+
+- **AuditService vs AuditWriter coexist.** В `apps/api/src/common/audit/` остался Wave-2 fire-and-forget service (через `@Audit()` декоратор). В `apps/api/src/modules/audit/` — новый `AuditWriter` для in-`$transaction` записей. Решение от 2026-05-13: оставить оба, использовать `AuditWriter` для всех Phase 4+ mutating actions.
+- **Status-фильтр в claims list — single-select** (так позволяет `ClaimFiltersSchema` в `packages/shared`). Multi-select требует правки schema.
+- **Web-agent использовал `bg-input`** вместо `bg-bg-soft` упомянутого в DS (последнего токена нет в `globals.css`). Решить в uiux-доводке: либо добавить токен, либо стандартизировать DS на `bg-input`.
+- **`opiekun` тоже впущен в `/employee` shell** с пустым nav-ом (роль идёт через `lib/roles.ts:ROLE_LANDING.opiekun = '/employee'`). Не блокер для Phase 4, чинится естественно в Фазе 5 при добавлении opiekun-вкладки.
+
 ### Backend
 
-1. `ClaimsService.update()` — `updateClaimFull` (`Code.gs:5183`, 462 строки) → разбита на:
-   - `_validateClaimUpdate()`
-   - `_recalcClaim()` (через `KmCalcService`)
-   - `_persistClaimUpdate()`
-   - `_handleReklamacjaTransition()`
-   - `_applyDecisionEmails()`
-2. `PATCH /claims/:nrZgl` — только admin/pracownik, с `RolesGuard`.
-3. `ClaimsService.requestAuthorization()` + `POST /claims/:nrZgl/request-authorization`.
-4. `S3Module`: загрузка scrennshot-ов авторизации.
-5. `POST /claims/:nrZgl/auth-screenshot` (multipart).
-6. Endpoint `/diagnostics/dashboard` — `getDashboardStats` (`Code.gs:7000+`):
+1. ✅ `ClaimsService.update()` — `updateClaimFull` (`Code.gs:5183`, 462 строки) → разбита на:
+   - ✅ `_validateClaimUpdate()`
+   - ✅ `_recalcClaim()` (через `KmCalcService`)
+   - ✅ `_buildUpdatePatch()` (вместо `_persistClaimUpdate()` — переименовано)
+   - ✅ `_handleReklamacjaTransition()`
+   - ✅ `_applyDecisionEmails()`
+2. ✅ `PATCH /claims/:nrZgl` — только admin/pracownik, с `RolesGuard`.
+3. ⏳ `ClaimsService.requestAuthorization()` + `POST /claims/:nrZgl/request-authorization`. **Sub-slice 4.2.**
+4. ❌ ~~`S3Module`: загрузка scrennshot-ов авторизации.~~ **Выпилено** из scope (решение от 2026-05-13).
+5. ❌ ~~`POST /claims/:nrZgl/auth-screenshot` (multipart).~~ **Выпилено.**
+6. ⏳ Endpoint `/diagnostics/dashboard` — `getDashboardStats` (`Code.gs:7000+`). **Sub-slice 4.3.**
    - KPI counts: total claims, na weryfikacji, zaakceptowano, odrzucono.
    - Топ перевозчиков по выплатам.
    - Recent activity.
    - Урgent (NA_WERYFIKACJI > 3 days).
-7. Endpoints для управления лимитами (`/limits` PUT).
-8. Управление справочниками типов прицепов (`/trailer-types`).
-9. **Audit-log запись для всех mutating actions** (`createCarrier`, `updateClaim`, `setLimits`, ...).
+7. ⏳ Endpoints для управления лимитами (`/limits` PUT). **Sub-slice 4.5.**
+8. ⏳ Управление справочниками типов прицепов (`/trailer-types`). **Sub-slice 4.4** (бэк CRUD уже есть; нужна полировка + audit-интеграция).
+9. ⏳ **Audit-log запись для всех mutating actions** (`createCarrier`, `updateClaim`, `setLimits`, ...). **Sub-slice 4.4** (инструмент `AuditWriter` готов в 4.0; ✅ интегрирован в `updateClaim`, осталось пройтись по carriers/vehicles/drivers/trailers/limits).
 
 ### Frontend
 
 > Видимость каждой страницы регулируется guard-ом на роль внутри `layout.tsx` — pracownik в навигации видит только пункты, помеченные **[оба]**; admin видит все. Прямой URL к admin-only странице у pracownik должен возвращать 403.
 
-1. **[оба]** `app/(employee)/layout.tsx`: дизайн `#employeeScreen` — header + tabs/sidebar. Tabs рендерятся условно по `session.user.role`: pracownik → Dashboard + Wnioski; admin → +Carriers, Vehicles, Drivers, Trailers, Trailer types, Limits, Audit, Diagnostics.
-2. **[оба]** `app/(employee)/dashboard/page.tsx`:
+1. ✅ **[оба]** `app/(employee)/layout.tsx`: header + sidebar (240px desktop, slide-over mobile). Tabs рендерятся условно по `session.user.role` через `filterNavForRole()` из `lib/nav.config.ts`: pracownik → Dashboard + Wnioski; admin → 11 пунктов. Реализовано в Sub-slice 4.0.
+2. ⏳ **[оба]** `app/(employee)/dashboard/page.tsx`:
    - `<KpiCard>` row.
    - `<DashboardSidebar>` с 5–6 секциями (Urgent, Recent, Monthly chart, Top carriers, Reklamacje, Top payouts).
    - Recharts для pie/bar.
-3. **[оба]** `app/(employee)/claims/page.tsx`: таблица всех wniosków с фильтрами.
-4. **[оба] `<ClaimVerificationModal>`** — главный модал верификации (текущий `#statusModal`):
-   - Все поля редактируемы.
-   - Live recalculation на каждое изменение.
-   - История рекламации (если есть `OrigData`).
-   - 3 кнопки: «Zaakceptuj», «Odrzuć», «Wymaga autoryzacji».
-   - Upload screenshot для авторизации.
-5. **[admin only]** `app/(employee)/carriers/...` — полный CRUD (overlay из Фазы 2 → integrated).
-6. **[admin only]** `app/(employee)/vehicles/...`, `drivers/...`, `trailers/...`, `trailer-types/...`.
-7. **[admin only]** `app/(employee)/limits/page.tsx` — таблица помесячных лимитов с inline edit.
-8. **[admin only]** `app/(employee)/audit/page.tsx` — список аудит-записей с фильтрами.
-9. **[admin only]** `app/(employee)/diagnostics/page.tsx`.
-10. **[admin only]** `app/(employee)/users/page.tsx` — CRUD сотрудников (admin/pracownik/opiekun/planista/dyspozytor/eksport/weryfikator), reset-password, deactivate/reactivate.
+   - **Sub-slice 4.3.** Спеки `<KpiCard>` / `<DashboardSidebar>` в DS готовы.
+3. ✅ **[оба]** `app/(employee)/claims/page.tsx`: таблица всех wniosków с фильтрами. Sub-slice 4.1.
+4. ✅ **[оба] `<ClaimVerificationModal>`** — главный модал верификации:
+   - ✅ Все поля редактируемы (discriminated по `targetStatus`).
+   - ✅ Live recalculation на каждое изменение (debounced 300ms → `/preview`).
+   - ✅ История рекламации в табе «Historia» (если есть `origData`).
+   - ✅ Таб «Autoryzacja» (с кнопкой «Wymaga autoryzacji» — она в 4.1 уже PATCH-ит на OCZEKUJE_NA_AUTORYZACJE; email Maksim-у подключится в 4.2 без правок UI).
+   - ❌ ~~Upload screenshot для авторизации.~~ **Выпилено.**
+5. ⏳ **[admin only]** `app/(employee)/carriers/...` — полный CRUD (overlay из Фазы 2 → integrated). **Sub-slice 4.4** (страницы уже живут из Phase 2; нужна полировка под новый layout + audit-интеграция в сервисах).
+6. ⏳ **[admin only]** `app/(employee)/vehicles/...`, `drivers/...`, `trailers/...`, `trailer-types/...`. **Sub-slice 4.4** (то же — миграция под новый layout).
+7. ⏳ **[admin only]** `app/(employee)/limits/page.tsx` — таблица помесячных лимитов с inline edit. **Sub-slice 4.5.**
+8. ⏳ **[admin only]** `app/(employee)/audit/page.tsx` — список аудит-записей с фильтрами. **Sub-slice 4.5.**
+9. ⏳ **[admin only]** `app/(employee)/diagnostics/page.tsx`. **Sub-slice 4.5.**
+10. ⏳ **[admin only]** `app/(employee)/users/page.tsx` — CRUD сотрудников (admin/pracownik/opiekun/planista/dyspozytor/eksport/weryfikator), reset-password, deactivate/reactivate. **Sub-slice 4.4** (api модуль `users` уже полностью готов из Phase 2; нужен только UI).
 
 ### Deliverables
 
