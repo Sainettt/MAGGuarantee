@@ -318,6 +318,7 @@ type SubmitClaimRequest = {
   timeTo: string;
   mileage: number;
   amountRequested: number;
+  hoursAdjusted?: number;  // часы простоя — Decimal(5,2), 0..999.99
   comment?: string;
   orderNumber?: string;
   orderDate?: string;
@@ -333,6 +334,17 @@ type ClaimDto = {
   dateStart: string;
   dateEnd: string;
   // ...все поля Claim
+  // Hours-adjustment split: на storage-уровне колонка `hoursAdjusted` (boolean,
+  // legacy) распилена на два Decimal(5,2)?: `origHoursAdjusted` — immutable
+  // carrier-snapshot (set-once at submit, нельзя править после), и
+  // `hoursAdjustedValue` — currently applied значение (драйвит km-calc;
+  // верификатор PATCH правит только его). При submit оба равны: response
+  // выдаёт `origHoursAdjusted: 5.5, hoursAdjustedValue: 5.5`. После PATCH с
+  // корректировкой — `origHoursAdjusted: 5.5, hoursAdjustedValue: 8` (snapshot
+  // зафиксирован, applied изменён). `null` = нет данных; `0` = карьер явно
+  // ввёл ноль.
+  origHoursAdjusted: number | null;
+  hoursAdjustedValue: number | null;
   breakdown: KmCalcBreakdown;
 };
 
@@ -353,11 +365,17 @@ type PreviewResponse = {
 
 ```ts
 // PATCH /claims/:nrZgl — body shape (упрощённо)
+// Опциональные correction-поля (`dateStart`, `dateEnd`, `timeFrom`, `timeTo`,
+// `mileage`, `hoursAdjusted`) присутствуют в трёх ветках: `ZAAKCEPTOWANO`,
+// `OCZEKUJE_NA_AUTORYZACJE`, `REKLAMACJA_ZAAKCEPTOWANO` — позволяют
+// верификатору поправить ввод карьера перед фиксацией решения. На wire-
+// уровне `hoursAdjusted` остаётся одним числом (replace-семантика); service
+// маппит его на `hoursAdjustedValue` в БД, `origHoursAdjusted` НЕ трогает.
 type UpdateClaimRequest =
-  | { targetStatus: 'ZAAKCEPTOWANO';            /* + поля акцепта: orderNumber, orderDate, amountApproved, ... */ }
+  | { targetStatus: 'ZAAKCEPTOWANO';            /* + поля акцепта: orderNumber, orderDate, amountApproved, hoursAdjusted?, ... */ }
   | { targetStatus: 'ODRZUCONO';                /* + поля отказа: comment, ... */ }
-  | { targetStatus: 'OCZEKUJE_NA_AUTORYZACJE';  /* + поля запроса авторизации */ }
-  | { targetStatus: 'REKLAMACJA_ZAAKCEPTOWANO'; /* верификатор принял рекламацию — service переведёт в ZAAKCEPTOWANO */ }
+  | { targetStatus: 'OCZEKUJE_NA_AUTORYZACJE';  /* + поля запроса авторизации, hoursAdjusted?, ... */ }
+  | { targetStatus: 'REKLAMACJA_ZAAKCEPTOWANO'; /* верификатор принял рекламацию — service переведёт в ZAAKCEPTOWANO; hoursAdjusted? разрешён */ }
   | { targetStatus: 'REKLAMACJA_ODRZUCONO';     /* верификатор отклонил рекламацию — service переведёт в ODRZUCONO */ };
 ```
 

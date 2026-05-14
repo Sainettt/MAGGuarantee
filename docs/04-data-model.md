@@ -201,8 +201,9 @@
 | `authScreenshotUrl` | URL screenshot-а в file-storage (audit trail Maksim'овой email-decision) |
 | **Рекламация** (зеркало для отката): | |
 | `reklamacjaSubmitted`, `reklamacjaText`, `reklamacjaResponse`, `reklamacjaAmount` | |
-| `hoursAdjusted`, `statusBeforeReklamacja` | |
-| `origDateStart`, `origDateEnd`, `origMileage` | оригинальные значения |
+| `statusBeforeReklamacja` | предыдущий статус до перехода в `REKLAMACJA` (для rollback) |
+| `origDateStart`, `origDateEnd`, `origMileage`, `origHoursAdjusted` | immutable carrier snapshots (set-once at submit; `submitReklamacja` re-stamps с fallback `?? текущее значение`) |
+| `hoursAdjustedValue` | currently applied korekta godzin — drives km-calc (`korektaDni = hoursAdjustedValue / 24`); верификатор PATCH может править только этот столбец, `origHoursAdjusted` остаётся неизменным |
 
 **Инварианты (data-model contract):**
 - `nrZgl` уникален глобально, генерируется атомарно через `ClaimSequence` (per `YY-MM`).

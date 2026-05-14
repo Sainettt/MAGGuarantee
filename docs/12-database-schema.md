@@ -375,7 +375,10 @@ model Claim {
   reklamacjaText         String?
   reklamacjaResponse     String?
   reklamacjaAmount       Decimal?     @db.Decimal(12, 2)
-  hoursAdjusted          Boolean      @default(false)
+  // KorektaGodzin — split into immutable carrier snapshot + verifier-mutable
+  // applied value. See "Korekta godzin — orig vs applied" below.
+  origHoursAdjusted      Decimal?     @db.Decimal(5, 2)
+  hoursAdjustedValue     Decimal?     @db.Decimal(5, 2)
   statusBeforeReklamacja ClaimStatus?
   origDateStart          DateTime?
   origDateEnd            DateTime?
@@ -530,6 +533,18 @@ model ClaimSequence {
 }
 ```
 
+## Korekta godzin — orig vs applied
+
+`Claim.origHoursAdjusted` is set once at submit (immutable snapshot of what the
+carrier entered) and is never mutated afterwards — it powers the History tab,
+the verifier "carrier claimed X" hint, and audit-trail diff detection.
+`Claim.hoursAdjustedValue` starts equal to `origHoursAdjusted` at submit and is
+the only column the verifier PATCH may overwrite; it is the value that drives
+km-calc (`korektaDni = hoursAdjustedValue / 24`). Both are `Decimal(5,2)?` —
+`NULL` means "no data" (legacy/unset rows), while `0` means "carrier
+explicitly entered zero downtime". For new submits the api layer always
+populates both columns.
+
 ## Required-field classification (per the three-layer pattern)
 
 > Резюме что закрыто на каком слое. Поля, не упомянутые ниже, помечаются как Optional everywhere (UI/API не требуют, DB nullable).
@@ -632,7 +647,7 @@ model ClaimSequence {
 | AM | OdpMagtrans | `reklamacjaResponse` | String |
 | AN | KwotaReklamacji | `reklamacjaAmount` | Decimal |
 | AO | ZatwKwota | `amountApproved` | Decimal |
-| AP | KorektaGodzin | `hoursAdjusted` | Boolean |
+| AP | KorektaGodzin | `origHoursAdjusted` + `hoursAdjustedValue` | Decimal(5,2)?, оба маппятся из одной legacy-колонки |
 | AQ | StatusPrzedReklamacja | `statusBeforeReklamacja` | enum |
 | AR | OrigData | `origDateStart`/`origDateEnd` | Timestamp (расщепляем) |
 | AT | OrigPrzebieg | `origMileage` | Decimal |

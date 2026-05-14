@@ -511,7 +511,7 @@
    - С пасхальными днями (Apr 1 – Apr 10 в год где Пасха в этом окне).
    - С EU-banned днями (выходные + общие праздники).
    - Дробные дни (старт/конец посреди дня — учёт `timeFrom`/`timeTo`).
-   - Корректировка часов (`hoursAdjusted`).
+   - Корректировка часов (`hoursAdjustedValue` — applied; `origHoursAdjusted` — immutable carrier snapshot; оба `Decimal(5,2)?`).
    - Месяцы без `LIMITY KM` записи → fallback на `CONFIG.STAWKA_EUR_ZA_KM`/`KM_DZIENNIE`.
 
 ### Sample fixture
