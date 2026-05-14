@@ -384,7 +384,14 @@ model Claim {
   reklamacjaText         String?
   reklamacjaResponse     String? // OdpMagtrans
   reklamacjaAmount       Decimal?     @db.Decimal(12, 2)
-  hoursAdjusted          Boolean      @default(false)
+  /// Immutable snapshot of the value the carrier submitted. Set once at submit
+  /// and never modified after — used by History tab + audit trail to detect
+  /// if the verifier overrode the carrier's claimed downtime.
+  origHoursAdjusted      Decimal?     @db.Decimal(5, 2)
+  /// Currently applied downtime correction in hours. Submit writes this equal
+  /// to origHoursAdjusted; verifier PATCH mutates only this column. Drives
+  /// km-calc (korektaDni = hoursAdjustedValue / 24).
+  hoursAdjustedValue     Decimal?     @db.Decimal(5, 2)
   statusBeforeReklamacja ClaimStatus?
   origDateStart          DateTime?
   origDateEnd            DateTime?

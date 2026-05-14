@@ -66,11 +66,14 @@ export interface ClaimRow {
   reklamacjaText: string | null;
   reklamacjaResponse: string | null;
   reklamacjaAmount: number | null;
-  hoursAdjusted: boolean;
   statusBeforeReklamacja: ClaimStatus | null;
   origDateStart: Date | null;
   origDateEnd: Date | null;
   origMileage: number | null;
+  /** Immutable carrier snapshot — set once at submit, never modified after. */
+  origHoursAdjusted: number | null;
+  /** Currently applied hours-adjustment — verifier PATCH mutates only this. */
+  hoursAdjustedValue: number | null;
 
   authScreenshotUrl: string | null;
   attachments: {
@@ -127,7 +130,15 @@ export interface CreateClaimData {
   orderNumber: string | null;
   orderDate: Date | null;
   amountRequested: number;
-  hoursAdjusted: boolean;
+  /**
+   * Hours-adjustment values are written EQUAL at submit. `origHoursAdjusted`
+   * is the immutable carrier snapshot; `hoursAdjustedValue` is the value
+   * that drives km-calc (verifier PATCH may mutate it later, but at submit
+   * the two are the same). `null` is reserved for "no data" — a carrier who
+   * explicitly enters `0` still gets `0` persisted.
+   */
+  origHoursAdjusted: number | null;
+  hoursAdjustedValue: number | null;
   origDateStart: Date | null;
   origDateEnd: Date | null;
   origMileage: number | null;
@@ -150,6 +161,13 @@ export interface UpdateClaimData {
   origDateStart?: Date | null;
   origDateEnd?: Date | null;
   origMileage?: number | null;
+  /**
+   * Carrier-snapshot value. Set ONLY by `ClaimsService.submit()` (and mirrored
+   * by `submitReklamacja` alongside the other `orig*` fields). The verifier
+   * PATCH path NEVER writes this — `origHoursAdjusted` is immutable after the
+   * carrier's submit.
+   */
+  origHoursAdjusted?: number | null;
 
   // ── verifier corrections (Phase 4) ──
   /** Period start — `Date` at UTC midnight after isoDateToMidnightUtc. */
@@ -161,7 +179,11 @@ export interface UpdateClaimData {
   /** `HH:mm`. */
   timeTo?: string;
   mileage?: number;
-  hoursAdjusted?: boolean;
+  /**
+   * Verifier-mutable hours-adjustment. Drives km-calc — service writes the
+   * raw numeric value here (Prisma coerces to `Decimal(5,2)`).
+   */
+  hoursAdjustedValue?: number | null;
 
   // ── recomputed km-calc outputs (Phase 4) ──
   drivenDays?: number;
@@ -303,7 +325,11 @@ export class ClaimsRepository {
         orderNumber: data.orderNumber,
         orderDate: data.orderDate,
         amountRequested: data.amountRequested,
-        hoursAdjusted: data.hoursAdjusted,
+        // Both columns receive the same numeric value at submit (Prisma coerces
+        // `number` → `Decimal(5,2)`). `origHoursAdjusted` will not be touched
+        // again; `hoursAdjustedValue` is what the verifier may later override.
+        origHoursAdjusted: data.origHoursAdjusted,
+        hoursAdjustedValue: data.hoursAdjustedValue,
         origDateStart: data.origDateStart,
         origDateEnd: data.origDateEnd,
         origMileage: data.origMileage,
@@ -365,12 +391,13 @@ export class ClaimsRepository {
     set('origDateStart');
     set('origDateEnd');
     set('origMileage');
+    set('origHoursAdjusted');
     set('dateStart');
     set('dateEnd');
     set('timeFrom');
     set('timeTo');
     set('mileage');
-    set('hoursAdjusted');
+    set('hoursAdjustedValue');
     set('drivenDays');
     set('kmPerDay');
     set('kmGuaranteed');
@@ -466,11 +493,14 @@ export class ClaimsRepository {
       reklamacjaText: row.reklamacjaText,
       reklamacjaResponse: row.reklamacjaResponse,
       reklamacjaAmount: decimalToNumber(row.reklamacjaAmount),
-      hoursAdjusted: row.hoursAdjusted,
       statusBeforeReklamacja: row.statusBeforeReklamacja,
       origDateStart: row.origDateStart,
       origDateEnd: row.origDateEnd,
       origMileage: decimalToNumber(row.origMileage),
+      // Both Decimal(5,2) columns surface as `Decimal` objects from Prisma;
+      // `decimalToNumber` preserves null and round-trips the numeric scale.
+      origHoursAdjusted: decimalToNumber(row.origHoursAdjusted),
+      hoursAdjustedValue: decimalToNumber(row.hoursAdjustedValue),
       authScreenshotUrl: row.authScreenshotUrl,
       attachments: row.attachments.map((a) => ({
         id: a.id,
@@ -531,11 +561,12 @@ interface ClaimPrismaShape {
   reklamacjaText: string | null;
   reklamacjaResponse: string | null;
   reklamacjaAmount: { toNumber(): number } | number | null;
-  hoursAdjusted: boolean;
   statusBeforeReklamacja: ClaimStatus | null;
   origDateStart: Date | null;
   origDateEnd: Date | null;
   origMileage: { toNumber(): number } | number | null;
+  origHoursAdjusted: { toNumber(): number } | number | null;
+  hoursAdjustedValue: { toNumber(): number } | number | null;
   authScreenshotUrl: string | null;
   attachments: {
     id: string;

@@ -111,11 +111,15 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     reklamacjaText: null,
     reklamacjaResponse: null,
     reklamacjaAmount: null,
-    hoursAdjusted: false,
     statusBeforeReklamacja: null,
     origDateStart: new Date('2026-04-01T00:00:00.000Z'),
     origDateEnd: new Date('2026-04-20T00:00:00.000Z'),
     origMileage: 8_000,
+    // Numeric Decimal(5,2) columns post-migration. The fixture defaults to
+    // 0/0 (both equal at submit) — individual tests override either field
+    // to assert the new submit/PATCH semantics.
+    origHoursAdjusted: 0,
+    hoursAdjustedValue: 0,
     authScreenshotUrl: null,
     attachments: [],
     createdAt: new Date('2026-04-21T08:00:00.000Z'),
@@ -210,8 +214,11 @@ function makeClaimsRepo(seed: ClaimRow[] = []): ClaimsRepoFake {
           ...(data.origMileage !== undefined
             ? { origMileage: data.origMileage }
             : {}),
-          ...(data.hoursAdjusted !== undefined
-            ? { hoursAdjusted: data.hoursAdjusted }
+          ...(data.origHoursAdjusted !== undefined
+            ? { origHoursAdjusted: data.origHoursAdjusted }
+            : {}),
+          ...(data.hoursAdjustedValue !== undefined
+            ? { hoursAdjustedValue: data.hoursAdjustedValue }
             : {}),
           ...(data.margin !== undefined ? { margin: data.margin } : {}),
           ...(data.authorizationRequired !== undefined
@@ -538,5 +545,377 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
 
     expect(repoFake.updateWithinCalls).toHaveLength(0);
     expect(audit.logs).toHaveLength(0);
+  });
+
+  // ── hours-adjusted Decimal split (orig vs value) ──────────
+  //
+  // Locks in the post-migration storage shape for the carrier hours-
+  // adjustment value: `origHoursAdjusted` is the immutable carrier snapshot
+  // (set-once at submit), `hoursAdjustedValue` is the verifier-mutable
+  // applied value that drives km-calc. See
+  // packages/database/prisma/migrations/20260514120000_claim_hours_adjusted_numeric.
+
+  it('9. PATCH with hoursAdjusted mutates ONLY hoursAdjustedValue (origHoursAdjusted preserved)', async () => {
+    // Starting state: carrier originally submitted 5.5h; nothing has changed
+    // since so both columns sit at 5.5.
+    const seeded = makeClaim({
+      origHoursAdjusted: 5.5,
+      hoursAdjustedValue: 5.5,
+    });
+    const repoFake = makeClaimsRepo([seeded]);
+    // Recalc to confirm km-calc receives the NEW value (8) and not the snapshot.
+    const km = makeKmCalcService({
+      totalDays: 19,
+      kmGuaranteed: 10_260,
+      ratePerKmEffective: 0.5,
+    });
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const dto: UpdateClaimDto = {
+      targetStatus: 'ZAAKCEPTOWANO',
+      orderNumber: 'ZL-42',
+      orderDate: '2026-04-30',
+      amountApproved: 1_100,
+      hoursAdjusted: 8,
+    };
+
+    await svc.update(makeAuth('pracownik'), seeded.nrZgl, dto);
+
+    // Persisted patch carries the new applied value and leaves the snapshot
+    // untouched (no `origHoursAdjusted` key in the update payload at all).
+    expect(repoFake.updateWithinCalls).toHaveLength(1);
+    const persisted = repoFake.updateWithinCalls[0]!.data;
+    expect(persisted.hoursAdjustedValue).toBe(8);
+    expect(persisted.origHoursAdjusted).toBeUndefined();
+
+    // Translated row reflects the split: snapshot pinned at 5.5, applied at 8.
+    const updated = repoFake.rows.get(seeded.nrZgl)!;
+    expect(updated.origHoursAdjusted).toBe(5.5);
+    expect(updated.hoursAdjustedValue).toBe(8);
+
+    // km-calc was invoked with the corrected hoursAdjusted (8), not the snapshot.
+    expect(km.calls).toHaveLength(1);
+    expect(
+      (km.calls[0]!.input as { hoursAdjusted: number }).hoursAdjusted,
+    ).toBe(8);
+
+    // Audit `before`/`after` whole-row snapshot — the History tab can read
+    // both halves to render "Carrier: 5.5 → Currently: 5.5 → Now: 8".
+    // `origHoursAdjusted` appears in both halves unchanged (set-once column),
+    // `hoursAdjustedValue` flips from 5.5 to 8.
+    expect(audit.logs).toHaveLength(1);
+    const before = audit.logs[0]!.before as {
+      origHoursAdjusted: number | null;
+      hoursAdjustedValue: number | null;
+    };
+    const after = audit.logs[0]!.after as {
+      origHoursAdjusted: number | null;
+      hoursAdjustedValue: number | null;
+    };
+    expect(before.origHoursAdjusted).toBe(5.5);
+    expect(before.hoursAdjustedValue).toBe(5.5);
+    expect(after.origHoursAdjusted).toBe(5.5);
+    expect(after.hoursAdjustedValue).toBe(8);
+  });
+
+  it('10. PATCH WITHOUT hoursAdjusted leaves BOTH columns untouched', async () => {
+    // Pure decision PATCH (ZAAKCEPTOWANO with order info only). Neither
+    // column should appear in the update payload — orig stays orig, applied
+    // stays applied.
+    const seeded = makeClaim({
+      origHoursAdjusted: 5.5,
+      hoursAdjustedValue: 5.5,
+    });
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const dto: UpdateClaimDto = {
+      targetStatus: 'ZAAKCEPTOWANO',
+      orderNumber: 'ZL-99',
+      orderDate: '2026-04-30',
+      amountApproved: 1_400,
+    };
+
+    await svc.update(makeAuth('pracownik'), seeded.nrZgl, dto);
+
+    expect(repoFake.updateWithinCalls).toHaveLength(1);
+    const persisted = repoFake.updateWithinCalls[0]!.data;
+    expect(persisted.hoursAdjustedValue).toBeUndefined();
+    expect(persisted.origHoursAdjusted).toBeUndefined();
+
+    // km-calc must NOT have been touched — no math-affecting correction.
+    expect(km.calls).toHaveLength(0);
+
+    const updated = repoFake.rows.get(seeded.nrZgl)!;
+    expect(updated.origHoursAdjusted).toBe(5.5);
+    expect(updated.hoursAdjustedValue).toBe(5.5);
+  });
+});
+
+// ─── submit + reklamacja semantics (decimal split) ───────────
+//
+// The submit pipeline writes BOTH columns equal at create time, and
+// `submitReklamacja` re-snapshots the orig fields with a `?? current`
+// fallback for parity with the other `orig*` fields. These tests pin
+// that behaviour so a future refactor of either pipeline doesn't
+// silently break the History tab.
+
+describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)', () => {
+  beforeAll(() => {
+    jest.useFakeTimers().setSystemTime(NOW);
+  });
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
+  it('11. submit writes origHoursAdjusted === hoursAdjustedValue === carrier input', async () => {
+    // Drive submit() through the full pipeline so we can assert what
+    // `claims.createWithin` received. We fake every collaborator with the
+    // minimum surface this code path touches.
+
+    interface CreateCall {
+      data: import('./claims.repository').CreateClaimData;
+    }
+    const creates: CreateCall[] = [];
+    const repo = {
+      findOverlapping: jest.fn(async () => null),
+      createWithin: jest.fn(
+        async (
+          _tx: unknown,
+          data: import('./claims.repository').CreateClaimData,
+        ): Promise<ClaimRow> => {
+          creates.push({ data });
+          // Round-trip the CreateClaimData into a ClaimRow so the caller's
+          // post-create `.toDto(row)` doesn't blow up. Only the fields the
+          // submit pipeline reads back are populated.
+          return makeClaim({
+            nrZgl: data.nrZgl,
+            carrierId: data.carrierId,
+            vehicleId: data.vehicleId,
+            vehiclePlateSnapshot: data.vehiclePlateSnapshot,
+            dateStart: data.dateStart,
+            dateEnd: data.dateEnd,
+            timeFrom: data.timeFrom,
+            timeTo: data.timeTo,
+            drivenDays: data.drivenDays,
+            mileage: data.mileage,
+            kmPerDay: data.kmPerDay,
+            kmGuaranteed: data.kmGuaranteed,
+            kmDifference: data.kmDifference,
+            paymentEur: data.paymentEur,
+            ratePerKmEffective: data.ratePerKmEffective,
+            breakdown: data.breakdown,
+            status: data.status,
+            statusChangedAt: data.statusChangedAt,
+            comment: data.comment,
+            orderNumber: data.orderNumber,
+            orderDate: data.orderDate,
+            amountRequested: data.amountRequested,
+            origHoursAdjusted: data.origHoursAdjusted,
+            hoursAdjustedValue: data.hoursAdjustedValue,
+            origDateStart: data.origDateStart,
+            origDateEnd: data.origDateEnd,
+            origMileage: data.origMileage,
+          });
+        },
+      ),
+    } as unknown as ClaimsRepository;
+
+    const carriersRepo = {
+      list: jest.fn(async () => [
+        {
+          id: 'c-1',
+          userId: 'u-carrier-1',
+        },
+      ]),
+    } as unknown as CarriersRepository;
+    const vehiclesRepo = {
+      findById: jest.fn(async () => ({
+        id: 'v-1',
+        carrierId: 'c-1',
+        plateNumber: 'WX12345',
+      })),
+    } as unknown as VehiclesRepository;
+    const driversRepo = {} as DriversRepository;
+    const trailersRepo = {} as TrailersRepository;
+    const km = {
+      calc: jest.fn(async () => ({
+        totalDays: 20,
+        kmGuaranteed: 10_800,
+        ratePerKmEffective: 0.5,
+        breakdown: [],
+      })),
+    } as unknown as KmCalcService;
+    const nrZgl = {
+      nextWithin: jest.fn(async () => 'GWA/100/04/26'),
+    } as unknown as NrZglService;
+    const prisma = {
+      client: {
+        appConfig: { findMany: jest.fn(async () => []) },
+        user: { findFirst: jest.fn(async () => null) },
+        carrier: { findFirst: jest.fn(async () => null) },
+        vehicle: { findFirst: jest.fn(async () => null) },
+      },
+      $transaction: jest.fn(async (fn: (t: unknown) => Promise<unknown>) =>
+        fn({}),
+      ),
+    } as unknown as PrismaService;
+    const audit = {
+      log: jest.fn(async () => undefined),
+    } as unknown as AuditWriter;
+
+    const svc = new ClaimsService(
+      repo,
+      carriersRepo,
+      vehiclesRepo,
+      driversRepo,
+      trailersRepo,
+      km,
+      nrZgl,
+      prisma,
+      audit,
+    );
+
+    // The fixed clock (NOW = 2026-05-15) puts the claim period safely in the
+    // past — well within the 7-day "max days after unloading" window from
+    // 2026-05-14, so the date-range gates pass.
+    const out = await svc.submit(makeAuth('przewoznik', 'u-carrier-1'), {
+      vehicleId: 'v-1',
+      dateStart: '2026-05-01',
+      dateEnd: '2026-05-13',
+      timeFrom: '08:00',
+      timeTo: '18:00',
+      mileage: 8_000,
+      amountRequested: 1_500,
+      hoursAdjusted: 5.5,
+    });
+
+    expect(creates).toHaveLength(1);
+    expect(creates[0]!.data.origHoursAdjusted).toBe(5.5);
+    expect(creates[0]!.data.hoursAdjustedValue).toBe(5.5);
+    // DTO surfaces both as numbers (Decimal → number coercion done by repo).
+    expect(out.origHoursAdjusted).toBe(5.5);
+    expect(out.hoursAdjustedValue).toBe(5.5);
+  });
+
+  it('12. submitReklamacja re-snapshots origHoursAdjusted with `?? current` fallback', async () => {
+    // Parity with the other `orig*` fields. Two sub-scenarios:
+    //
+    //  (a) Claim already has `origHoursAdjusted` from the original submit
+    //      — `??` short-circuits, snapshot preserved.
+    //  (b) Claim somehow has NULL `origHoursAdjusted` (pre-migration row,
+    //      data fix-up, etc.) — fallback to current `hoursAdjustedValue`.
+
+    interface UpdateCall {
+      id: string;
+      data: import('./claims.repository').UpdateClaimData;
+    }
+    const updates: UpdateCall[] = [];
+
+    function makeRepo(seed: ClaimRow): ClaimsRepository {
+      return {
+        findByNrZgl: jest.fn(async (nrZgl: string) =>
+          nrZgl === seed.nrZgl ? seed : null,
+        ),
+        update: jest.fn(
+          async (
+            id: string,
+            data: import('./claims.repository').UpdateClaimData,
+          ): Promise<ClaimRow> => {
+            updates.push({ id, data });
+            return { ...seed, ...data } as ClaimRow;
+          },
+        ),
+      } as unknown as ClaimsRepository;
+    }
+    const carriersRepo = {
+      list: jest.fn(async () => [
+        { id: 'c-1', userId: 'u-carrier-1' },
+      ]),
+    } as unknown as CarriersRepository;
+    const driversRepo = {} as DriversRepository;
+    const trailersRepo = {} as TrailersRepository;
+    const vehiclesRepo = {} as VehiclesRepository;
+    const km = {} as KmCalcService;
+    const nrZgl = {} as NrZglService;
+    const prisma = {
+      client: {
+        appConfig: { findMany: jest.fn(async () => []) },
+        user: { findFirst: jest.fn(async () => null) },
+        carrier: { findFirst: jest.fn(async () => null) },
+        vehicle: { findFirst: jest.fn(async () => null) },
+      },
+      $transaction: jest.fn(),
+    } as unknown as PrismaService;
+    const audit = {
+      log: jest.fn(async () => undefined),
+    } as unknown as AuditWriter;
+
+    // ── (a) snapshot already present — `??` short-circuits.
+    const claimA = makeClaim({
+      status: 'ZAAKCEPTOWANO',
+      statusChangedAt: NOW, // 0h passed, well inside the 48h window
+      reklamacjaSubmitted: false,
+      paymentEur: 1_400,
+      amountRequested: 1_500,
+      origHoursAdjusted: 5.5, // carrier's immutable snapshot
+      hoursAdjustedValue: 8, // verifier later corrected to 8
+    });
+    updates.length = 0;
+    const svcA = new ClaimsService(
+      makeRepo(claimA),
+      carriersRepo,
+      vehiclesRepo,
+      driversRepo,
+      trailersRepo,
+      km,
+      nrZgl,
+      prisma,
+      audit,
+    );
+    await svcA.submitReklamacja(
+      makeAuth('przewoznik', 'u-carrier-1'),
+      claimA.nrZgl,
+      { tresc: 'Proszę o ponowne sprawdzenie.', kwotaReklamacji: 50 },
+    );
+    expect(updates).toHaveLength(1);
+    // Snapshot pinned at original carrier value, NOT overwritten by 8.
+    expect(updates[0]!.data.origHoursAdjusted).toBe(5.5);
+
+    // ── (b) snapshot missing — fall through to `hoursAdjustedValue`.
+    const claimB = makeClaim({
+      status: 'ZAAKCEPTOWANO',
+      statusChangedAt: NOW,
+      reklamacjaSubmitted: false,
+      paymentEur: 1_400,
+      amountRequested: 1_500,
+      origHoursAdjusted: null, // legacy / fix-up state
+      hoursAdjustedValue: 3,
+    });
+    updates.length = 0;
+    const svcB = new ClaimsService(
+      makeRepo(claimB),
+      carriersRepo,
+      vehiclesRepo,
+      driversRepo,
+      trailersRepo,
+      km,
+      nrZgl,
+      prisma,
+      audit,
+    );
+    await svcB.submitReklamacja(
+      makeAuth('przewoznik', 'u-carrier-1'),
+      claimB.nrZgl,
+      { tresc: 'Drugi wniosek.', kwotaReklamacji: 50 },
+    );
+    expect(updates).toHaveLength(1);
+    // No prior snapshot → fall back to the current applied value (3).
+    expect(updates[0]!.data.origHoursAdjusted).toBe(3);
   });
 });

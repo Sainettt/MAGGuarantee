@@ -408,6 +408,12 @@ function ModalBody({ claim, onClose, t, tStatus }: ModalBodyProps) {
     claim.origDateStart !== null ||
     claim.origDateEnd !== null ||
     claim.origMileage !== null ||
+    // `origHoursAdjusted` is set on every new submit, so by itself it isn't a
+    // signal of "history". Treat it as relevant only when the verifier has
+    // actually overridden it (i.e. it diverges from the currently applied
+    // value) — otherwise non-reklamacja claims would always render the tab.
+    (claim.origHoursAdjusted !== null &&
+      claim.origHoursAdjusted !== claim.hoursAdjustedValue) ||
     claim.decidedById !== null;
 
   return (
@@ -531,6 +537,19 @@ function ModalBody({ claim, onClose, t, tStatus }: ModalBodyProps) {
                           v === '' || v === null ? undefined : Number(v),
                       })}
                     />
+                    {/* Surface the carrier's original input when the verifier
+                        (or a prior verifier) has overridden it. We render the
+                        hint only on a real divergence — equal values mean no
+                        override happened yet and the input is the source of
+                        truth on its own. */}
+                    {claim.origHoursAdjusted !== null &&
+                      claim.origHoursAdjusted !== claim.hoursAdjustedValue && (
+                        <p className="text-xs text-warning mt-1">
+                          {tEdit('hoursAdjustedOrigHint', {
+                            orig: claim.origHoursAdjusted,
+                          })}
+                        </p>
+                      )}
                   </FormField>
                   <FormField
                     label={tEdit('dateStart')}
@@ -771,7 +790,12 @@ function HistoryTab({
   const hasOrig =
     claim.origDateStart !== null ||
     claim.origDateEnd !== null ||
-    claim.origMileage !== null;
+    claim.origMileage !== null ||
+    // Only count the hours-adjustment snapshot as "orig data" when it actually
+    // diverges from the value currently driving the calc; otherwise rendering
+    // a 0 → 0 (or 5.5 → 5.5) diff row would be visual noise.
+    (claim.origHoursAdjusted !== null &&
+      claim.origHoursAdjusted !== claim.hoursAdjustedValue);
 
   return (
     <div className="space-y-4">
@@ -819,6 +843,19 @@ function HistoryTab({
               }
               current={`${Math.round(claim.mileage).toLocaleString('pl-PL')} km`}
             />
+            {/* Render the hours-adjustment diff only when the verifier has
+                actually overridden the carrier's submission. `origHoursAdjusted`
+                is a snapshot taken at submit time; `hoursAdjustedValue` is the
+                value currently driving the km-calc — divergence means an
+                override happened (see audit log for who/when). */}
+            {claim.origHoursAdjusted !== null &&
+              claim.origHoursAdjusted !== claim.hoursAdjustedValue && (
+                <DiffRow
+                  label={t('origHoursAdjusted')}
+                  orig={`${claim.origHoursAdjusted} h`}
+                  current={`${claim.hoursAdjustedValue ?? 0} h`}
+                />
+              )}
           </div>
         </section>
       )}
@@ -1052,7 +1089,11 @@ function getDefaults(
     timeFrom: claim.timeFrom,
     timeTo: claim.timeTo,
     mileage: claim.mileage,
-    hoursAdjusted: 0,
+    // Seed the form with the value currently driving the km-calc on the
+    // server (`hoursAdjustedValue`). If the verifier hasn't overridden the
+    // carrier's submission yet, this equals `origHoursAdjusted`. If they
+    // have, this is the in-effect correction — exactly what they last saved.
+    hoursAdjusted: claim.hoursAdjustedValue ?? 0,
     orderNumber: claim.orderNumber ?? '',
     orderDate: claim.orderDate ?? '',
     amountApproved:

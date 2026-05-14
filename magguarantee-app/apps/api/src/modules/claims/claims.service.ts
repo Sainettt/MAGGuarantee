@@ -100,6 +100,7 @@ export class ClaimsService {
   // ── Submit ──────────────────────────────────────────────
 
   async submit(user: AuthUser, dto: SubmitClaimDto): Promise<ClaimDto> {
+    // carrier-only path, see @Roles on POST /claims
     const carrier = await this._requireCarrierProfile(user);
 
     // Hard checks — security / referential integrity. These throw 403/404
@@ -294,7 +295,14 @@ export class ClaimsService {
           orderNumber: null,
           orderDate: null,
           amountRequested: dto.amountRequested,
-          hoursAdjusted: (dto.hoursAdjusted ?? 0) > 0,
+          // At submit, BOTH hours-adjustment columns receive the same numeric
+          // value: `origHoursAdjusted` is the immutable carrier snapshot
+          // (set-once, never modified after this point) and `hoursAdjustedValue`
+          // is the currently applied number that drives km-calc. The verifier
+          // PATCH path may later mutate `hoursAdjustedValue` alone — see
+          // `_buildUpdatePatch` / `extractCorrectionFields`.
+          origHoursAdjusted: dto.hoursAdjusted ?? 0,
+          hoursAdjustedValue: dto.hoursAdjusted ?? 0,
           // Preserve the carrier's original (pre-verification) inputs, so
           // the verifier can later see what the carrier actually submitted.
           // Mirror of GAS columns AR-AV (`Code.gs:6272-6276`).
@@ -400,11 +408,52 @@ export class ClaimsService {
     user: AuthUser,
     dto: PreviewClaimDto,
   ): Promise<PreviewClaimResponse> {
+    // carrier-only path, see @Roles on POST /claims/preview
     const carrier = await this._requireCarrierProfile(user);
     // Ensure the carrier owns the vehicle they're previewing for — defence
     // in depth even with `CarrierOwnershipGuard` at the controller.
     await this._requireOwnedVehicle(carrier.id, dto.vehicleId);
 
+    return this._runPreviewCalc(dto);
+  }
+
+  /**
+   * Variant called by `POST /claims/:nrZgl/preview`. Resolves the existing
+   * Claim first (to enforce ownership at the row level) and then runs the
+   * same math as `previewKmCalc`. Used during reklamacja edits where the
+   * carrier wants to see how a tweaked input would have changed the numbers,
+   * and by verifier roles (admin / pracownik) inspecting a claim per
+   * docs/13-api-design.md (`POST /claims/:nrZgl/preview` row).
+   */
+  async previewForExisting(
+    user: AuthUser,
+    nrZgl: string,
+    dto: PreviewClaimDto,
+  ): Promise<PreviewClaimResponse> {
+    const claim = await this.claims.findByNrZgl(nrZgl);
+    if (!claim) throw new NotFoundException('Wniosek nie znaleziony');
+    if (user.role === 'przewoznik') {
+      const carrier = await this._requireCarrierProfile(user);
+      if (claim.carrierId !== carrier.id) {
+        throw new ForbiddenException('Brak uprawnień do tego wniosku');
+      }
+    }
+    // We deliberately don't re-check vehicle ownership here: for przewoznik,
+    // claim ownership already implies vehicle access (FK chain Claim →
+    // Vehicle → Carrier); for admin / pracownik, vehicle ownership is
+    // irrelevant. The DTO's `vehicleId` is consumed only as km-calc input.
+    return this._runPreviewCalc(dto);
+  }
+
+  /**
+   * Pure math entry point for both preview routes. No role checks, no
+   * ownership checks — callers are responsible for gating access before
+   * invoking this helper. Mirrors the calc + envelope built historically
+   * inside `previewKmCalc` so behaviour is byte-identical for the carrier.
+   */
+  private async _runPreviewCalc(
+    dto: PreviewClaimDto,
+  ): Promise<PreviewClaimResponse> {
     const calc = await this.kmCalc.calc({
       dateStart: dto.dateStart,
       dateEnd: dto.dateEnd,
@@ -436,28 +485,6 @@ export class ClaimsService {
     };
   }
 
-  /**
-   * Variant called by `POST /claims/:nrZgl/preview`. Resolves the existing
-   * Claim first (to enforce ownership at the row level) and then runs the
-   * same math as `previewKmCalc`. Used during reklamacja edits where the
-   * carrier wants to see how a tweaked input would have changed the numbers.
-   */
-  async previewForExisting(
-    user: AuthUser,
-    nrZgl: string,
-    dto: PreviewClaimDto,
-  ): Promise<PreviewClaimResponse> {
-    const claim = await this.claims.findByNrZgl(nrZgl);
-    if (!claim) throw new NotFoundException('Wniosek nie znaleziony');
-    if (user.role === 'przewoznik') {
-      const carrier = await this._requireCarrierProfile(user);
-      if (claim.carrierId !== carrier.id) {
-        throw new ForbiddenException('Brak uprawnień do tego wniosku');
-      }
-    }
-    return this.previewKmCalc(user, dto);
-  }
-
   // ── Reklamacja ──────────────────────────────────────────
 
   async submitReklamacja(
@@ -465,6 +492,7 @@ export class ClaimsService {
     nrZgl: string,
     dto: SubmitReklamacjaDto,
   ): Promise<ClaimDto> {
+    // carrier-only path, see @Roles on POST /claims/:nrZgl/reklamacja
     const carrier = await this._requireCarrierProfile(user);
     const claim = await this.claims.findByNrZgl(nrZgl);
     if (!claim) throw new NotFoundException('Wniosek nie znaleziony');
@@ -525,9 +553,18 @@ export class ClaimsService {
       status: 'REKLAMACJA',
       statusChangedAt: new Date(),
       statusBeforeReklamacja: claim.status,
+      // Parity with the other `orig*` fields: `submitReklamacja` re-snapshots
+      // the carrier's "second submit" inputs with a `?? current` fallback so a
+      // claim that somehow lacks the original snapshot still gets one stamped
+      // at reklamacja time. We mirror the same shape for `origHoursAdjusted`:
+      // if the column was already set at original submit (the common case
+      // post-`hoursAdjusted`-Decimal-split migration) the `??` short-circuits
+      // and the immutable snapshot is preserved; otherwise we fall back to
+      // the current applied value.
       origDateStart: claim.origDateStart ?? claim.dateStart,
       origDateEnd: claim.origDateEnd ?? claim.dateEnd,
       origMileage: claim.origMileage ?? claim.mileage,
+      origHoursAdjusted: claim.origHoursAdjusted ?? claim.hoursAdjustedValue,
     });
 
     void this._notifyReklamacja(updated).catch((err) => {
@@ -615,13 +652,18 @@ export class ClaimsService {
       reklamacjaText: row.reklamacjaText,
       reklamacjaResponse: row.reklamacjaResponse,
       reklamacjaAmount: row.reklamacjaAmount,
-      hoursAdjusted: row.hoursAdjusted,
       statusBeforeReklamacja: row.statusBeforeReklamacja,
       origDateStart: row.origDateStart
         ? row.origDateStart.toISOString()
         : null,
       origDateEnd: row.origDateEnd ? row.origDateEnd.toISOString() : null,
       origMileage: row.origMileage,
+      // Decimal(5,2) → number — repository already round-tripped through
+      // `decimalToNumber`, so `row.*` is already `number | null`. We forward
+      // unchanged; `null` means "no data" (column NULL), `0` means the
+      // carrier explicitly entered zero.
+      origHoursAdjusted: row.origHoursAdjusted,
+      hoursAdjustedValue: row.hoursAdjustedValue,
       authScreenshotUrl: row.authScreenshotUrl,
       attachments: row.attachments.map((a) => ({
         id: a.id,
@@ -843,10 +885,12 @@ export class ClaimsService {
     if (corrections.timeTo) patch.timeTo = corrections.timeTo;
     if (corrections.mileage !== undefined) patch.mileage = corrections.mileage;
     if (corrections.hoursAdjusted !== undefined) {
-      // `Claim.hoursAdjusted` is a boolean flag — true iff any non-zero
-      // adjustment was applied (Code.gs:5304-5309). The numeric value lives
-      // inside the breakdown.
-      patch.hoursAdjusted = corrections.hoursAdjusted > 0;
+      // Verifier PATCH drives ONLY `hoursAdjustedValue` — `origHoursAdjusted`
+      // is the immutable carrier snapshot and is never written here. Prisma
+      // coerces the `number` into `Decimal(5,2)` at the persist boundary.
+      // DTO range is bounded by `HoursAdjustedSchema.max(999.99)` so we don't
+      // bounce off a Postgres numeric-overflow error.
+      patch.hoursAdjustedValue = corrections.hoursAdjusted;
     }
 
     // km-calc outputs (only if recalc actually ran).
@@ -982,7 +1026,18 @@ export class ClaimsService {
       timeFrom: row.timeFrom,
       timeTo: row.timeTo,
       mileage: row.mileage,
-      hoursAdjusted: row.hoursAdjusted,
+      // Snapshot BOTH hours-adjustment columns so a downstream diff of
+      // `before`/`after` shows the verifier's `hoursAdjustedValue` change
+      // alongside the immutable `origHoursAdjusted` (which will appear in
+      // both halves of the diff, unchanged, since it's set-once at submit).
+      // The History tab uses this to render
+      // "Carrier: X → Currently: Y → Now changing to: Z" without a second
+      // round-trip — `origHoursAdjusted` provides X, the diff provides Y and
+      // Z. Per docs/16-jobs-and-integrations.md the audit shape is a whole-
+      // row before/after snapshot (no per-field diff envelope), so we stay
+      // consistent with the rest of the columns here.
+      origHoursAdjusted: row.origHoursAdjusted,
+      hoursAdjustedValue: row.hoursAdjustedValue,
       drivenDays: row.drivenDays,
       kmPerDay: row.kmPerDay,
       kmGuaranteed: row.kmGuaranteed,

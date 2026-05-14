@@ -44,8 +44,17 @@ const HhMmSchema = z
 /** Mileage / km values — stored as Decimal(10,2) in DB. */
 const MileageSchema = z.number().nonnegative().max(9_999_999);
 
-/** Hours adjustment — non-negative, capped at the longest realistic stop. */
-const HoursAdjustedSchema = z.number().min(0).max(24 * 366);
+/**
+ * Hours adjustment — non-negative, capped to fit the storage column.
+ *
+ * Persisted as `Decimal(5,2)` on `Claim.origHoursAdjusted` /
+ * `Claim.hoursAdjustedValue`, so the max admissible value is 999.99h
+ * (about 41 days — comfortably wider than any realistic single-stop
+ * downtime). Tightening the upper bound here means a bad input bounces
+ * at the validation pipe with a clean Zod message instead of hitting a
+ * Postgres numeric-overflow error.
+ */
+const HoursAdjustedSchema = z.number().min(0).max(999.99);
 
 // ─── Submit (carrier creates a wniosek) ──────────────────
 
@@ -295,11 +304,23 @@ export const ClaimDtoSchema = z.object({
   reklamacjaText: z.string().nullable(),
   reklamacjaResponse: z.string().nullable(),
   reklamacjaAmount: z.number().nullable(),
-  hoursAdjusted: z.boolean(),
   statusBeforeReklamacja: ClaimStatusSchema.nullable(),
   origDateStart: IsoDateTimeSchema.nullable(),
   origDateEnd: IsoDateTimeSchema.nullable(),
   origMileage: z.number().nullable(),
+  /**
+   * Immutable carrier snapshot of the hours-adjustment value at submit time.
+   * Written once when the claim is created and never modified after — pairs
+   * with the other `orig*` fields above so the History tab / audit trail can
+   * show "carrier originally claimed X" alongside the current applied value.
+   */
+  origHoursAdjusted: z.number().nullable(),
+  /**
+   * Currently applied hours-adjustment value — drives km-calc
+   * (`korektaDni = hoursAdjustedValue / 24`). Starts equal to
+   * `origHoursAdjusted` at submit; verifier PATCH mutates this column.
+   */
+  hoursAdjustedValue: z.number().nullable(),
 
   authScreenshotUrl: z.string().nullable(),
   attachments: z.array(ClaimAttachmentDtoSchema),
