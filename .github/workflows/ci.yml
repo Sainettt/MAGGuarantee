@@ -74,7 +74,18 @@ jobs:
             echo "→ Pulling latest main"
             git pull origin main
 
-            echo "→ Applying Prisma migrations"
+            # Build BEFORE migrate. The Dockerfile bakes prisma/migrations into
+            # the image at build time, so a fresh image is required for
+            # `migrate deploy` to see the new migration files. Previously
+            # migrate ran against the *previous* image (which only had the
+            # old set of migrations) and silently reported "nothing to apply"
+            # — the actual schema change never landed on staging, the api was
+            # then rebuilt with a new Prisma client, and the column-mismatch
+            # exploded at the first claim query. See incident 2026-05-14.
+            echo "→ Building images (so new migrations are baked in)"
+            docker compose -f infra/docker-compose.staging.yml build
+
+            echo "→ Applying Prisma migrations from the freshly-built image"
             # -T disables pseudo-TTY, `< /dev/null` cuts the container's stdin
             # off from the calling shell's stdin. Without either, `docker
             # compose run` attaches stdin to the prisma container, which then
@@ -85,8 +96,8 @@ jobs:
               run --rm -T api node_modules/.bin/prisma migrate deploy \
                 --schema=prisma/schema.prisma < /dev/null
 
-            echo "→ Rebuilding and restarting the stack"
-            docker compose -f infra/docker-compose.staging.yml up -d --build
+            echo "→ Starting the stack (no rebuild — already built above)"
+            docker compose -f infra/docker-compose.staging.yml up -d
 
             echo "→ Waiting 10s for api to settle, then smoke-checking /health"
             sleep 10
