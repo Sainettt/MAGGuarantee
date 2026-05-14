@@ -15,13 +15,14 @@
 // generic is a union of all variants so RHF lets us swap which fields
 // are registered based on the picker without re-mounting the form.
 
-import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Controller,
   useForm,
+  type FieldErrors,
+  type Resolver,
   type SubmitHandler,
 } from 'react-hook-form';
 import { toast } from 'sonner';
@@ -124,6 +125,43 @@ function buildPreviewBody(
     hoursAdjusted,
   };
 }
+
+// Custom RHF resolver. The wire schema (`UpdateClaimSchema`) is a strict
+// discriminated union, but our form registers the *superset* of all variants
+// so the user can switch `targetStatus` without re-mounting fields. Passing
+// the raw form values straight to Zod fails because the strict variants reject
+// keys from sibling variants (e.g. `authorizationDescription` is not allowed
+// on the ZAAKCEPTOWANO variant). We strip the irrelevant keys via
+// `cleanUpdatePayload` first, then validate the cleaned payload.
+const updateClaimResolver: Resolver<FormValues> = async (values) => {
+  if (!values.targetStatus) {
+    return {
+      values: {},
+      errors: {
+        targetStatus: {
+          type: 'required',
+          message: 'required',
+        },
+      } as FieldErrors<FormValues>,
+    };
+  }
+  const cleaned = cleanUpdatePayload(values);
+  const result = UpdateClaimSchema.safeParse(cleaned);
+  if (result.success) {
+    return { values, errors: {} };
+  }
+  const errors: Record<string, { type: string; message: string }> = {};
+  for (const issue of result.error.issues) {
+    const path = issue.path.join('.') || 'targetStatus';
+    if (!errors[path]) {
+      errors[path] = { type: issue.code, message: issue.message };
+    }
+  }
+  return {
+    values: {},
+    errors: errors as FieldErrors<FormValues>,
+  };
+};
 
 /** Drop empty / undefined values so Zod's `.strict()` doesn't choke. */
 function cleanUpdatePayload(values: FormValues): UpdateClaimDto {
@@ -240,10 +278,9 @@ function ModalBody({ claim, onClose, t, tStatus }: ModalBodyProps) {
   const targets = useMemo(() => decisionTargetsFor(claim.status), [claim.status]);
 
   const form = useForm<FormValues>({
-    // The discriminated-union resolver only validates the fields belonging
-    // to the chosen variant; superset fields stay free. `passthrough` keeps
-    // RHF happy when we register more keys than any one variant declares.
-    resolver: zodResolver(UpdateClaimSchema as never) as never,
+    // Custom resolver strips sibling-variant fields before validating against
+    // the strict discriminated union — see `updateClaimResolver` above.
+    resolver: updateClaimResolver,
     defaultValues: getDefaults(claim, targets[0] ?? ''),
   });
 
