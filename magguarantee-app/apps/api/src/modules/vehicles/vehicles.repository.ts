@@ -6,9 +6,11 @@ import { PrismaService } from '../prisma/prisma.service';
  * Row shape returned by the vehicle repository.
  *
  * `certificateL`, `euro`, `type`, `rateDe`, `rateUe`, `rateExport`, `rateImport`
- * are NOT NULL since phase3_blocks. `gpsMobilePhone` stays nullable per
- * Revert #2 (required iff `gps=true` — enforced by SQL CHECK constraint
- * `vehicle_gps_device_when_gps_on`).
+ * are NOT NULL since phase3_blocks. `certificateL` was collapsed from enum
+ * `CertificateL { L1 | L2 | L3 }` to Boolean (TAK/NIE) in
+ * 20260515130307_vehicle_certificate_l_to_boolean. `gpsMobilePhone` stays
+ * nullable per Revert #2 (required iff `gps=true` — enforced by SQL CHECK
+ * constraint `vehicle_gps_device_when_gps_on`).
  */
 export interface VehicleRow {
   id: string;
@@ -19,7 +21,7 @@ export interface VehicleRow {
   model: string | null;
   year: number | null;
   notes: string | null;
-  certificateL: 'L1' | 'L2' | 'L3';
+  certificateL: boolean;
   euro: 'III' | 'IV' | 'V' | 'VI';
   adrClasses: string[];
   gps: boolean;
@@ -110,7 +112,7 @@ export class VehiclesRepository {
     model?: string | null;
     year?: number | null;
     notes?: string | null;
-    certificateL: 'L1' | 'L2' | 'L3';
+    certificateL: boolean;
     euro: 'III' | 'IV' | 'V' | 'VI';
     adrClasses?: string[];
     gps?: boolean;
@@ -235,7 +237,7 @@ export class VehiclesRepository {
       // The fallbacks below are defensive sentinels for the soft-delete
       // extension's wider inferred type — never observed at runtime since
       // the column is NOT NULL post-phase3_blocks.
-      certificateL: row.certificateL ?? 'L1',
+      certificateL: row.certificateL ?? false,
       euro: row.euro ?? 'V',
       adrClasses: row.adrClasses,
       gps: row.gps,
@@ -286,7 +288,7 @@ interface VehiclePrismaShape {
   year: number | null;
   notes: string | null;
   // Wide variants — soft-delete extension widens scalars in the inferred type.
-  certificateL: 'L1' | 'L2' | 'L3' | null;
+  certificateL: boolean | null;
   euro: 'III' | 'IV' | 'V' | 'VI' | null;
   adrClasses: string[];
   gps: boolean;

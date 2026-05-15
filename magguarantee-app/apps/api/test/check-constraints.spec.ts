@@ -123,7 +123,7 @@ describeIfDb('phase3_blocks CHECK constraints', () => {
         data: {
           carrierId,
           plateNumber: `CHK-GPS-${Date.now()}`,
-          certificateL: 'L1',
+          certificateL: true,
           euro: 'V',
           type: 'STD',
           rateDe: 0.5,
@@ -146,7 +146,7 @@ describeIfDb('phase3_blocks CHECK constraints', () => {
       data: {
         carrierId,
         plateNumber: `CHK-NOGPS-${Date.now()}`,
-        certificateL: 'L1',
+        certificateL: true,
         euro: 'V',
         type: 'STD',
         rateDe: 0.5,
@@ -167,7 +167,7 @@ describeIfDb('phase3_blocks CHECK constraints', () => {
       data: {
         carrierId,
         plateNumber: `CHK-CL-${Date.now()}`,
-        certificateL: 'L1',
+        certificateL: true,
         euro: 'V',
         type: 'STD',
         rateDe: 0.5,
@@ -218,7 +218,7 @@ describeIfDb('phase3_blocks CHECK constraints', () => {
       data: {
         carrierId,
         plateNumber: `CHK-CL2-${Date.now()}`,
-        certificateL: 'L1',
+        certificateL: true,
         euro: 'V',
         type: 'STD',
         rateDe: 0.5,

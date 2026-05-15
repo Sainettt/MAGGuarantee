@@ -1,6 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 
-import type { CertTypeListDto, LookupUserListDto } from '@magguarantee/shared';
+import type { LookupUserListDto } from '@magguarantee/shared';
 
 import { LookupsService } from './lookups.service';
 
@@ -9,6 +9,10 @@ import { LookupsService } from './lookups.service';
  *
  * Every endpoint here is accessible by all authenticated users — no
  * `@Roles()` restriction. The global `JwtAuthGuard` already handles auth.
+ *
+ * Note: `GET /lookups/cert-types` was removed in the
+ * 20260515130307_vehicle_certificate_l_to_boolean wave — `Vehicle.certificateL`
+ * is now a Boolean (TAK/NIE) so no enum lookup is needed.
  */
 @Controller('lookups')
 export class LookupsController {
@@ -27,10 +31,5 @@ export class LookupsController {
   @Get('opiekuni')
   opiekuni(): Promise<LookupUserListDto> {
     return this.lookups.opiekuni();
-  }
-
-  @Get('cert-types')
-  certTypes(): CertTypeListDto {
-    return [...this.lookups.certTypes()];
   }
 }

@@ -16,7 +16,6 @@ import {
 // ─── Field primitives ────────────────────────────────────
 
 const PlateSchema = z.string().min(2).max(16);
-const CertificateLSchema = z.enum(['L1', 'L2', 'L3']);
 const EuroNormSchema = z.enum(['III', 'IV', 'V', 'VI']);
 const VehicleTypeSchema = z.enum(['MEGA', 'STD', 'COIL']);
 
@@ -27,8 +26,12 @@ const vehicleAttributeFields = {
   model: emptyStringToUndefined(z.string().max(64).optional()),
   year: z.number().int().min(1900).max(2100).optional(),
   notes: emptyStringToUndefined(z.string().max(2_000).optional()),
-  /** REQUIRED — Vehicle.certificateL is NOT NULL since phase3_blocks. */
-  certificateL: CertificateLSchema,
+  /**
+   * REQUIRED — Vehicle.certificateL is NOT NULL.
+   * Converted from enum L1/L2/L3 to Boolean in
+   * 20260515130307_vehicle_certificate_l_to_boolean.
+   */
+  certificateL: z.boolean(),
   /** REQUIRED — Vehicle.euro is NOT NULL since phase3_blocks. */
   euro: EuroNormSchema,
   adrClasses: z.array(z.string().max(16)).max(20).optional(),
@@ -94,7 +97,7 @@ export const UpdateVehicleSchema = z
     notes: emptyStringToUndefined(z.string().max(2_000).nullable().optional()),
     // The following five fields are NOT NULL since phase3_blocks. PATCH
     // accepts an update (omit means "do not touch") but cannot null them.
-    certificateL: CertificateLSchema.optional(),
+    certificateL: z.boolean().optional(),
     euro: EuroNormSchema.optional(),
     type: VehicleTypeSchema.optional(),
     rateDe: z.number().nonnegative().optional(),
@@ -170,7 +173,7 @@ export const VehicleDtoSchema = z.object({
   model: z.string().nullable(),
   year: z.number().int().nullable(),
   notes: z.string().nullable(),
-  certificateL: CertificateLSchema,
+  certificateL: z.boolean(),
   euro: EuroNormSchema,
   adrClasses: z.array(z.string()),
   gps: z.boolean(),

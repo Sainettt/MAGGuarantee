@@ -143,6 +143,7 @@
       "accountPln": "PLN account",
       "paymentTerms": "Payment terms (days)",
       "insuranceValue": "Insurance value",
+      "insuranceMinHint": "Min. 250,000 EUR",
       "insuranceExpiry": "Insurance expiry",
       "licenseExpiry": "License expiry",
       "numberOfPermits": "Permits count",

@@ -5,7 +5,6 @@
 // See docs/12-database-schema.md.
 
 export {
-  CertificateL,
   ClaimStatus,
   DelegationStatus,
   EuroNorm,

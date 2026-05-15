@@ -140,7 +140,6 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 | POST `/vehicles/:id/reactivate` | (on) |
 | DELETE `/vehicles/:id` | `removeVehicle` / `removeVehicleByOpiekun` |
 | GET `/vehicles/active?login=...` | `getActiveVehiclesForLogin` (для carrier-login dropdown) |
-| GET `/vehicles/cert-types` | `getVehicleCertTypes` (enum lookup) |
 
 ### Drivers — `/api/v1/drivers`
 
@@ -237,7 +236,6 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 | GET `/lookups/planisci` | `getPlannerList` |
 | GET `/lookups/opiekuni` | `getOpiekunList` |
 | GET `/lookups/trailer-types` | `getNaczepyTypyList` (alias) |
-| GET `/lookups/cert-types` | `getVehicleCertTypes` |
 
 ### External integrations — `/api/v1/integrations`
 

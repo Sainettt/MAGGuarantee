@@ -82,8 +82,8 @@ enum DelegationStatus {
 }
 
 enum VehicleType { MEGA  STD  COIL }
-enum CertificateL { L1  L2  L3 }
 enum EuroNorm    { III  IV  V  VI }
+// CertificateL was collapsed to Boolean (TAK/NIE) in 2026-05; see Vehicle.certificateL below.
 
 // ─── USERS ──────────────────────────────────────────────
 
@@ -187,7 +187,7 @@ model Vehicle {
   model        String?
   year         Int?
   notes        String?
-  certificateL CertificateL  // STRICT
+  certificateL Boolean       // STRICT, TAK/NIE (was enum L1/L2/L3 until 2026-05)
   euro         EuroNorm      // STRICT
   adrClasses   String[]
   gps          Boolean       @default(false)
@@ -669,7 +669,7 @@ populates both columns.
 | G | Planista (имя) | → FK `plannerId` (lookup user) |
 | I-K | Marka, Model, Rok | `brand`, `model`, `year` |
 | L | Uwagi | `notes` |
-| M | CertyfikatL | `certificateL` |
+| M | CertyfikatL | `certificateL` (Boolean — was enum L1/L2/L3 до 2026-05) |
 | N | EURO | `euro` |
 | O | ADR (CSV) | `adrClasses[]` |
 | P-R | GPS, KartaPaliwowa, Typ | `gps`, `fuelCard`, `type` |
@@ -787,6 +787,7 @@ populates both columns.
 | `20260508115947_carrier_nip_vat_required` | NOT NULL на `carriers.nip` и `carriers.vatId`. Налоговые ID требуются на момент создания: PL-перевозчики дают 10-значный NIP, иностранные — локальный TIN; `vatId` — EU VAT с префиксом страны. (Позже частично откатано: см. `20260515112821_carrier_vat_id_optional` — `vatId` снова nullable.) |
 | `20260508194914_phase3_insurance_value_required` | NOT NULL на `carriers.insuranceValue`. Без OCP-страховки перевозчик не может ехать; `insuranceExpiry`/`licenseExpiry` остаются nullable (могут не быть копий на момент онбординга). Бэкфилл `0` для stale-dev-строк перед SET NOT NULL — Zod на API enforce'ит `> 0`, поэтому 0 не переживает round-trip через create/update. |
 | `20260515112821_carrier_vat_id_optional` | DROP NOT NULL с `carriers.vatId`. Продуктовое решение: EU VAT перестаёт быть обязательным — некоторые перевозчики регистрируются без VAT-UE и работают только с локальным NIP/TIN. `nip` остаётся NOT NULL. |
+| `20260515130307_vehicle_certificate_l_to_boolean` | Конвертирует `vehicles.certificateL` из enum `CertificateL { L1 \| L2 \| L3 }` в `Boolean NOT NULL`. Маппинг: `L1`/`L2`/`L3` → `true`, всё прочее → `false`. Шаги: ADD temp boolean с дефолтом `false` → BACKFILL через CASE → DROP старой enum-колонки → RENAME temp → DROP DEFAULT → DROP TYPE `CertificateL`. Имя поля сохранено. Продуктовое решение: три шумовых класса не используются — нужен только TAK/NIE флаг. |
 
 Production deploy: `prisma migrate deploy` в CI/CD пайплайне (без `--create-only`).
 

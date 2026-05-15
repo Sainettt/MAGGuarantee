@@ -7,8 +7,11 @@ import { UsersRepository } from '../users/users.repository';
 /**
  * Lookups for dropdowns per docs/13-api-design.md#lookups.
  *
- * The four people-pickers (`dyspozytor`, `planisci`, `opiekuni`) all return
- * active users with the matching role. Cert-types is a static enum echo.
+ * The three people-pickers (`dyspozytor`, `planisci`, `opiekuni`) all return
+ * active users with the matching role. The former `certTypes()` static enum
+ * echo was removed when `Vehicle.certificateL` was collapsed from the
+ * `CertificateL` enum to a Boolean in
+ * 20260515130307_vehicle_certificate_l_to_boolean.
  */
 @Injectable()
 export class LookupsService {
@@ -24,10 +27,6 @@ export class LookupsService {
 
   async opiekuni(): Promise<LookupUserListDto> {
     return this._listByRole('opiekun');
-  }
-
-  certTypes(): readonly ('L1' | 'L2' | 'L3')[] {
-    return ['L1', 'L2', 'L3'];
   }
 
   // ── Internals ────────────────────────────────────────────

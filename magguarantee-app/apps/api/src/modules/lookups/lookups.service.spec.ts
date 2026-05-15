@@ -91,19 +91,4 @@ describe('LookupsService', () => {
     expect(out[0]?.id).toBe('u-o-1');
   });
 
-  it('certTypes echoes the static enum', () => {
-    const svc = new LookupsService(
-      makeRepo({
-        admin: [],
-        pracownik: [],
-        opiekun: [],
-        planista: [],
-        dyspozytor: [],
-        przewoznik: [],
-        eksport: [],
-        weryfikator: [],
-      }),
-    );
-    expect(svc.certTypes()).toEqual(['L1', 'L2', 'L3']);
-  });
 });

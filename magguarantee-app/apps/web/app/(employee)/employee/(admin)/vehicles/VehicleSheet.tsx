@@ -6,7 +6,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslations } from 'next-intl';
 import { useEffect, type ChangeEvent } from 'react';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
   CreateVehicleSchema,
@@ -289,15 +289,30 @@ export function VehicleSheet({ open, vehicle, onClose }: Props) {
                     error={errs.certificateL?.message}
                     htmlFor="vehicle-certificateL"
                   >
-                    <Select
-                      id="vehicle-certificateL"
-                      {...form.register('certificateL')}
-                    >
-                      <option value="">—</option>
-                      <option value="L1">L1</option>
-                      <option value="L2">L2</option>
-                      <option value="L3">L3</option>
-                    </Select>
+                    {/*
+                      Native <select> only speaks strings, but the field is
+                      a boolean in the DTO. Controller maps both ways so Zod
+                      sees a real boolean and the option stays in sync on
+                      edit-mode reset.
+                    */}
+                    <Controller
+                      name="certificateL"
+                      control={form.control}
+                      render={({ field }) => (
+                        <Select
+                          id="vehicle-certificateL"
+                          value={field.value ? 'true' : 'false'}
+                          onChange={(e) =>
+                            field.onChange(e.target.value === 'true')
+                          }
+                          onBlur={field.onBlur}
+                          ref={field.ref}
+                        >
+                          <option value="true">{tCommon('yes')}</option>
+                          <option value="false">{tCommon('no')}</option>
+                        </Select>
+                      )}
+                    />
                   </FormField>
                   <FormField
                     label={t('fields.nextInspectionDate')}
@@ -565,7 +580,8 @@ function getDefaults(): FormValues {
     model: '',
     year: undefined,
     notes: '',
-    certificateL: '' as unknown as 'L1' | 'L2' | 'L3',
+    // Compliance default — admin must explicitly opt in to TAK.
+    certificateL: false,
     euro: '' as unknown as 'III' | 'IV' | 'V' | 'VI',
     gps: false,
     fuelCard: false,

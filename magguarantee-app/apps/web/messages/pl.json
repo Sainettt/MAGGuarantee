@@ -143,6 +143,7 @@
       "accountPln": "Konto PLN",
       "paymentTerms": "Termin płatności (dni)",
       "insuranceValue": "Suma ubezpieczenia",
+      "insuranceMinHint": "Min. 250 000 EUR",
       "insuranceExpiry": "Ważność OC",
       "licenseExpiry": "Ważność licencji",
       "numberOfPermits": "Liczba zezwoleń",

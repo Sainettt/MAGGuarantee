@@ -19,6 +19,6 @@ export type LookupUserDto = z.infer<typeof LookupUserSchema>;
 export const LookupUserListSchema = z.array(LookupUserSchema);
 export type LookupUserListDto = z.infer<typeof LookupUserListSchema>;
 
-/** Static enum echo per docs/13-api-design.md (CertificateL: L1/L2/L3). */
-export const CertTypeListSchema = z.array(z.enum(['L1', 'L2', 'L3']));
-export type CertTypeListDto = z.infer<typeof CertTypeListSchema>;
+// CertificateL was collapsed from enum L1/L2/L3 to a Boolean TAK/NIE flag in
+// 20260515130307_vehicle_certificate_l_to_boolean. No lookup needed — UI
+// renders a single TAK/NIE switch.

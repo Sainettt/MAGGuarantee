@@ -6,7 +6,6 @@
 import { useQuery } from '@tanstack/react-query';
 
 import {
-  listCertTypes,
   listDyspozytorzy,
   listOpiekuni,
   listPlanisci,
@@ -34,14 +33,6 @@ export function useOpiekuni() {
   return useQuery({
     queryKey: ['lookups', 'opiekuni'],
     queryFn: listOpiekuni,
-    staleTime: STALE,
-  });
-}
-
-export function useCertTypes() {
-  return useQuery({
-    queryKey: ['lookups', 'cert-types'],
-    queryFn: listCertTypes,
     staleTime: STALE,
   });
 }

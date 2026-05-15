@@ -116,7 +116,7 @@
 | `plannerId` | FK → User (role=planista) |
 | `dispatcherId` | FK → User (role=dyspozytor) |
 | `brand`, `model`, `year` | характеристики |
-| `certificateL` | L1 / L2 / L3 (шумовой класс) |
+| `certificateL` | Boolean — TAK/NIE (есть ли L-сертификат). До 2026-05 — enum L1/L2/L3, конвертировано миграцией `20260515130307_vehicle_certificate_l_to_boolean`. |
 | `euro` | III / IV / V / VI |
 | `adrClasses` | string[] классов опасных грузов |
 | `gps`, `fuelCard`, `cabotageDe`, `cabotageFr`, `gb`, `it`, `fr`, `agreement`, `contract` | флаги допусков |

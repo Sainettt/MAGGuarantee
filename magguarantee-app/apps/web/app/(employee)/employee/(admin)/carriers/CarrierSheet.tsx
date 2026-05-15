@@ -676,7 +676,8 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                       id="carrier-insuranceValue"
                       type="number"
                       step="0.01"
-                      min={0}
+                      min={250000}
+                      placeholder={t('fields.insuranceMinHint')}
                       className="h-10"
                       {...form.register('insuranceValue', {
                         // Empty / null input → undefined so Zod treats the

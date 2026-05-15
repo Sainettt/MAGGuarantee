@@ -24,8 +24,9 @@ function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {
     model: null,
     year: null,
     notes: null,
-    // Required post-phase3_blocks.
-    certificateL: 'L1',
+    // Required post-phase3_blocks. `certificateL` was collapsed enum→boolean
+    // in 20260515130307_vehicle_certificate_l_to_boolean.
+    certificateL: true,
     euro: 'V',
     adrClasses: [],
     gps: false,
@@ -201,7 +202,9 @@ function makeUsersRepo(seed: UserRow[] = []): UsersRepository {
 
 /** Minimal payload required by the post-phase3_blocks schema. */
 const REQUIRED_VEHICLE_FIELDS = {
-  certificateL: 'L1' as const,
+  // `certificateL` is Boolean since
+  // 20260515130307_vehicle_certificate_l_to_boolean — TAK = true, NIE = false.
+  certificateL: true,
   euro: 'V' as const,
   type: 'STD' as const,
   // plannerId/dispatcherId are required (no .optional()); tests targeting

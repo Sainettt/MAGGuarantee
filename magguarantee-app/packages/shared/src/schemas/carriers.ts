@@ -68,9 +68,11 @@ const carrierProfileFields = {
    * Create DTO; required in the response DTO.
    */
   paymentTerms: z.number().int().nonnegative().max(365).optional().default(30),
-  // REQUIRED — must be > 0. The DB column is now NOT NULL Decimal(12,2);
-  // Zod owns the positivity check (no CHECK constraint at the DB level).
-  insuranceValue: z.number().positive(),
+  // REQUIRED — must be ≥ 250 000 EUR (business rule). The DB column is now
+  // NOT NULL Decimal(12,2); Zod owns the positivity + minimum check (no CHECK
+  // constraint at the DB level). The 250k floor mirrors MAGTRANS's carrier
+  // qualification threshold and is enforced identically on Create and Update.
+  insuranceValue: z.number().positive().min(250_000),
   insuranceExpiry: IsoDateSchema,
   licenseExpiry: IsoDateSchema,
   numberOfPermits: z.number().int().nonnegative().max(10_000).optional(),
@@ -135,7 +137,8 @@ export const UpdateCarrierSchema = z
       z.string().max(64).nullable().optional(),
     ),
     paymentTerms: z.number().int().nonnegative().max(365).nullable().optional(),
-    insuranceValue: z.number().positive().optional(),
+    // Must be ≥ 250 000 EUR (business rule) — same floor as Create.
+    insuranceValue: z.number().positive().min(250_000).optional(),
     insuranceExpiry: emptyStringToUndefined(
       IsoDateSchema.nullable().optional(),
     ),

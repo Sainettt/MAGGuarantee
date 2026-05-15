@@ -47,12 +47,6 @@ enum VehicleType {
   COIL
 }
 
-enum CertificateL {
-  L1
-  L2
-  L3
-}
-
 enum EuroNorm {
   III
   IV
@@ -184,11 +178,14 @@ model Vehicle {
   model        String?
   year         Int?
   notes        String?
-  certificateL CertificateL
+  // Boolean flag: legacy L1/L2/L3 enum was collapsed to a single TAK/NIE
+  // decision in 2026-05. true = vehicle holds an L-certificate (any class),
+  // false = no certificate / NULL in the legacy column.
+  certificateL Boolean
   euro         EuroNorm
   adrClasses   String[] // CSV → array
-  gps          Boolean      @default(false)
-  fuelCard     Boolean      @default(false)
+  gps          Boolean     @default(false)
+  fuelCard     Boolean     @default(false)
   type         VehicleType
 
   gb        Boolean? // UK access
