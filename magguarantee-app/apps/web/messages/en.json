@@ -157,6 +157,10 @@
       "permits": "Permits",
       "assignment": "Assignment"
     },
+    "accountSelector": {
+      "label": "Multiple accounts found in the MF registry. Choose the EUR account:",
+      "placeholder": "Choose EUR account"
+    },
     "tempPasswordToast": "Temporary password: {password}"
   },
   "vehicles": {

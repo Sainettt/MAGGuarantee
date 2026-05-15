@@ -43,10 +43,14 @@ const carrierProfileFields = {
    */
   nip: TaxIdSchema,
   /**
-   * REQUIRED — EU VAT: country code + 2–12 alphanumeric (max 14 chars total,
-   * which is the longest realistic EU VAT format — SE/LT/NL etc.).
+   * OPTIONAL — EU VAT: country code + 2–12 alphanumeric (max 14 chars total,
+   * which is the longest realistic EU VAT format — SE/LT/NL etc.). Some
+   * carriers register without an EU VAT number and operate only with the local
+   * NIP/TIN — the column is nullable since migration
+   * `20260515112821_carrier_vat_id_optional`. NIP is the required identifier
+   * here, `vatId` is opt-in.
    */
-  vatId: EuVatSchema,
+  vatId: emptyStringToUndefined(EuVatSchema.optional()),
   /** REQUIRED — Carrier.contactPerson is NOT NULL since phase3_blocks. */
   contactPerson: z.string().min(1).max(255),
   /** REQUIRED — Carrier.phone is NOT NULL since phase-2 migration. */
@@ -178,11 +182,14 @@ export const CarrierDtoSchema = z.object({
   name: z.string().nullable(),
   company: z.string().nullable(),
   active: z.boolean(),
-  // nip/vatId are required at create — both DB column and response DTO are
+  // `nip` is required at create — both DB column and response DTO are
   // therefore non-null. Polish carriers send the 10-digit NIP; foreign
-  // carriers send their local TIN; vatId is the country-prefixed EU VAT.
+  // carriers send their local TIN. `vatId` (EU VAT, country-prefixed) is
+  // optional — the column is nullable since migration
+  // `20260515112821_carrier_vat_id_optional`, so the response surfaces `null`
+  // for carriers without an EU VAT number.
   nip: z.string(),
-  vatId: z.string(),
+  vatId: z.string().nullable(),
   // NOT NULL after phase3_blocks.
   contactPerson: z.string(),
   phone: z.string(),

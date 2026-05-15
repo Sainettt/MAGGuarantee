@@ -157,6 +157,10 @@
       "permits": "Zezwolenia",
       "assignment": "Przypisanie"
     },
+    "accountSelector": {
+      "label": "Znaleziono kilka kont w rejestrze MF. Wybierz konto EUR:",
+      "placeholder": "Wybierz konto EUR"
+    },
     "tempPasswordToast": "Hasło tymczasowe: {password}"
   },
   "vehicles": {

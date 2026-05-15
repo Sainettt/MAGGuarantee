@@ -23,10 +23,11 @@ export interface CarrierRow {
   name: string | null;
   company: string | null;
   active: boolean;
-  // NOT NULL since 20260508_carrier_nip_vat_required. Both sides of the wire
-  // are now non-null.
+  // `nip` is NOT NULL since 20260508_carrier_nip_vat_required.
+  // `vatId` is nullable again since 20260515112821_carrier_vat_id_optional —
+  // some carriers register without an EU VAT number.
   nip: string;
-  vatId: string;
+  vatId: string | null;
   contactPerson: string;
   phone: string;
   ordersEmail: string;
@@ -66,9 +67,10 @@ interface CreateCarrierData {
   active?: boolean;
   // carrier-extension side — required fields per phase3_blocks.
   company?: string | null;
-  // Required since carrier_nip_vat_required (20260508).
+  // `nip` is required since carrier_nip_vat_required (20260508).
+  // `vatId` is optional again since carrier_vat_id_optional (20260515).
   nip: string;
-  vatId: string;
+  vatId?: string | null;
   contactPerson: string;
   phone: string;
   ordersEmail: string;
@@ -177,7 +179,7 @@ export class CarriersRepository {
           userId: user.id,
           company: data.company ?? null,
           nip: data.nip,
-          vatId: data.vatId,
+          vatId: data.vatId ?? null,
           contactPerson: data.contactPerson,
           phone: data.phone,
           ordersEmail: data.ordersEmail,
@@ -318,9 +320,11 @@ export class CarriersRepository {
     id: string;
     userId: string;
     company: string | null;
-    // NOT NULL since carrier_nip_vat_required (20260508). The wider type
-    // surfaced by the soft-delete extension is normalised below to the
+    // `nip` is NOT NULL since carrier_nip_vat_required (20260508). The wider
+    // type surfaced by the soft-delete extension is normalised below to the
     // non-null shape the rest of the service expects.
+    // `vatId` is nullable again since carrier_vat_id_optional (20260515) —
+    // we surface null straight through.
     nip: string | null;
     vatId: string | null;
     // Prisma's inferred type from `findFirst({include: ...})` post the soft-
@@ -361,7 +365,7 @@ export class CarriersRepository {
       company: row.company,
       active: row.user.active,
       nip: row.nip ?? '',
-      vatId: row.vatId ?? '',
+      vatId: row.vatId,
       contactPerson: row.contactPerson ?? '',
       phone: row.phone ?? '',
       ordersEmail: row.ordersEmail ?? '',

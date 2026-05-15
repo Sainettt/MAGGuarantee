@@ -356,6 +356,10 @@ export class ViesService {
 
 ### Biała Lista MF
 
+Два эндпоинта, оба маунтятся в `modules/integrations/white-list/`.
+
+#### `GET /api/v1/integrations/whitelist?nip=&account=` — `checkAccount`
+
 ```ts
 // modules/integrations/white-list/white-list.service.ts
 async checkAccount(nip: string, account: string): Promise<WhiteListResult> {
@@ -364,7 +368,33 @@ async checkAccount(nip: string, account: string): Promise<WhiteListResult> {
 }
 ```
 
-Кешируем на 1 час — вайт-листы могут обновляться.
+Кешируем на 1 час (key: `whitelist:{NIP}:{ACCOUNT}`) — вайт-листы могут обновляться. Дата в ключе не нужна: TTL=1ч не пересекает границы суток.
+
+#### `GET /api/v1/integrations/whitelist/search?nip=` — `searchByNip`
+
+Auto-fill данных польской компании по NIP для формы создания/редактирования карьера. UI вызывает этот эндпоинт после ввода NIP и предзаполняет название, адрес и список банковских счетов из реестра MF — карьеру остаётся только подтвердить или скорректировать поля.
+
+```ts
+async searchByNip(nip: string): Promise<WhiteListSearchResult> {
+  const url = `https://wl-api.mf.gov.pl/api/search/nip/${nip}?date=${today()}`;
+  // upstream 404 → { found: false }, не error
+  return await this.fetchSearchWithRetry(url);
+}
+```
+
+Маппинг:
+
+- `result.subject` populated → `{ found: true, name, address, accountNumbers, statusVat, requestId, requestDateTime }`.
+  - `address` = `subject.residenceAddress ?? subject.workingAddress`.
+  - `accountNumbers` — массив строк как есть (EUR vs PLN не различаем, фронт разберётся).
+  - `statusVat` — `'Czynny' | 'Niezarejestrowany' | 'Zwolniony'` или `null`.
+- `result.subject === null` (NIP неизвестен MF) → `{ found: false, ... }`, **не кешируем** — статус может появиться завтра.
+- HTTP 404 от MF (NIP вне реестра — типично для **не-польских** карьеров) → `{ found: false, ... }`. Это **валидный ответ**, не ошибка: UI просто разворачивает форму на ручной ввод. Реализуется в сервисе через try/catch вокруг `fetchJsonWithRetry` — общий helper кидает `HttpException` на любой 4xx, а здесь именно 404 ловим и превращаем в sentinel `null`.
+- 5xx / network → 3 ретрая по экспоненте → `HttpException 503` каллеру (тот же helper, что и в `checkAccount`).
+
+Кеш-ключ: `whitelist-search:{NIP}`, TTL = 1ч (как у `checkAccount`, по той же причине). Кешируем только `found: true`.
+
+`requestId` / `requestDateTime` — MF audit handles, отдаём как метаданные. Если в будущем понадобится доказательная база (карьер оспаривает данные с которыми мы согласовали заявку), можно завести отдельную таблицу аудита для этих идентификаторов — сейчас за рамки MVP это выносим.
 
 ### info-car.pl
 

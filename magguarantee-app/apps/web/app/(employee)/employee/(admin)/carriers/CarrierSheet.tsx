@@ -19,7 +19,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslations } from 'next-intl';
 import { useEffect, useMemo, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, type UseFormReturn } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
   CreateCarrierSchema,
@@ -53,7 +53,9 @@ import { ApiResponseError } from '@/lib/api/client';
 import {
   checkVies,
   checkWhitelist,
+  checkWhitelistSearch,
   INTEGRATION_UNAVAILABLE,
+  type WhitelistSearchResult,
 } from '@/lib/api/integrations';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useAuth } from '@/lib/hooks/useAuth';
@@ -131,15 +133,78 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
   const [nipMsg, setNipMsg] = useState<string | undefined>(undefined);
   const [accountState, setAccountState] = useState<FieldValidationState>('idle');
   const [accountMsg, setAccountMsg] = useState<string | undefined>(undefined);
+  // ── Multi-account picker (Biała Lista search returned ≥2 accounts) ──
+  //
+  // When MF's registry returns multiple bank accounts for the NIP we don't
+  // try to guess which one is EUR — we surface the list under the
+  // `accountEur` field and let the user pick. Cleared on:
+  //   - successful selection,
+  //   - manual typing into `accountEur` (so the picker doesn't linger),
+  //   - clear-form button, sheet open/close, NIP re-lookup.
+  const [accountChoices, setAccountChoices] = useState<string[]>([]);
 
   const checkNip = async () => {
     const nip = (form.getValues('nip') ?? '').trim();
     if (!nip) {
       setNipState('idle');
+      // Drop any stale picker from a previous lookup.
+      setAccountChoices([]);
       return;
     }
     setNipState('loading');
-    const res = await checkVies('PL', nip);
+    // Reset the multi-account picker on every fresh lookup — its contents
+    // are derived from the response we're about to fetch.
+    setAccountChoices([]);
+    // VIES + Biała Lista search fire in parallel. VIES still owns the badge
+    // (works for foreign carriers too); Biała Lista contributes autofill +
+    // multi-account selector for PL carriers only and stays silent on
+    // failure / `found: false`.
+    const [viesSettled, blSettled] = await Promise.allSettled([
+      checkVies('PL', nip),
+      checkWhitelistSearch(nip),
+    ]);
+
+    // 1) Biała Lista autofill runs first — MF is authoritative for PL data.
+    //    Both autofill helpers respect the "empty fields only" rule, so a
+    //    successful MF hit wins, VIES later fills only the remaining gaps.
+    if (blSettled.status === 'fulfilled') {
+      const blRes = blSettled.value;
+      if (blRes !== INTEGRATION_UNAVAILABLE) {
+        applyWhitelistAutofill(blRes, form);
+        // Account-numbers branch — see § 2.4 of the integration spec.
+        if (blRes.found && blRes.accountNumbers.length > 0) {
+          const accounts = blRes.accountNumbers;
+          const currentEur = (form.getValues('accountEur') ?? '').trim();
+          const first = accounts[0];
+          if (accounts.length === 1 && first) {
+            if (!currentEur) {
+              form.setValue('accountEur', first, {
+                shouldDirty: true,
+                shouldValidate: true,
+              });
+            }
+          } else if (accounts.length >= 2) {
+            // ≥2 accounts → defer to user choice via the inline picker.
+            // We surface it regardless of whether `accountEur` is already
+            // filled in edit-mode — actually, only show it when the field
+            // is empty, so existing carriers aren't pestered.
+            if (!currentEur) {
+              setAccountChoices(accounts);
+            }
+          }
+        }
+      }
+    }
+
+    // 2) VIES result drives the badge (and supplements autofill).
+    if (viesSettled.status !== 'fulfilled') {
+      // Promise.allSettled only rejects on programmer errors here (the
+      // wrapper catches network failures); treat as service-unavailable.
+      setNipState('error');
+      setNipMsg(tValidation('error'));
+      return;
+    }
+    const res = viesSettled.value;
     if (res === INTEGRATION_UNAVAILABLE) {
       setNipState('error');
       setNipMsg(tValidation('error'));
@@ -148,6 +213,7 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
     if (res.valid) {
       setNipState('valid');
       setNipMsg(res.name ? `${tValidation('valid')} — ${res.name}` : undefined);
+      applyViesAutofill(res, form);
     } else {
       setNipState('invalid');
       setNipMsg(undefined);
@@ -203,6 +269,7 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
     if (!open) return;
     setNipState('idle');
     setAccountState('idle');
+    setAccountChoices([]);
     if (isEdit && carrier) {
       const split = splitVatId(carrier.vatId);
       form.reset({
@@ -409,17 +476,6 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
               </FormSection>
 
               <FormSection title={t('sections.company')}>
-                <FormField
-                  label={t('fields.company')}
-                  error={errMsg('company')}
-                  htmlFor="carrier-company"
-                >
-                  <Input
-                    id="carrier-company"
-                    className="h-10"
-                    {...form.register('company')}
-                  />
-                </FormField>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <FormField
                     label={t('fields.nip')}
@@ -458,7 +514,6 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                   </FormField>
                   <FormField
                     label={t('fields.vatId')}
-                    required
                     description={t('fields.vatHint')}
                     error={errMsg('vatId')}
                     htmlFor="carrier-vatNumber"
@@ -497,6 +552,17 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                   </FormField>
                 </div>
                 <FormField
+                  label={t('fields.company')}
+                  error={errMsg('company')}
+                  htmlFor="carrier-company"
+                >
+                  <Input
+                    id="carrier-company"
+                    className="h-10"
+                    {...form.register('company')}
+                  />
+                </FormField>
+                <FormField
                   label={t('fields.companyAddress')}
                   required
                   error={errMsg('companyAddress')}
@@ -526,8 +592,48 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                           onBlur: () => {
                             void checkAccount();
                           },
+                          // Manual typing dismisses the MF picker — once
+                          // the user starts editing the account they don't
+                          // want a dropdown nagging them.
+                          onChange: () => {
+                            if (accountChoices.length > 0) {
+                              setAccountChoices([]);
+                            }
+                          },
                         })}
                       />
+                      {accountChoices.length > 0 && (
+                        <div className="space-y-1 rounded-[8px] border border-border bg-card p-2">
+                          <p
+                            id="carrier-account-picker-label"
+                            className="text-[12px] text-text-sub"
+                          >
+                            {t('accountSelector.label')}
+                          </p>
+                          <Select
+                            aria-labelledby="carrier-account-picker-label"
+                            defaultValue=""
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (!v) return;
+                              form.setValue('accountEur', v, {
+                                shouldDirty: true,
+                                shouldValidate: true,
+                              });
+                              setAccountChoices([]);
+                            }}
+                          >
+                            <option value="" disabled>
+                              {t('accountSelector.placeholder')}
+                            </option>
+                            {accountChoices.map((acc) => (
+                              <option key={acc} value={acc}>
+                                {acc}
+                              </option>
+                            ))}
+                          </Select>
+                        </div>
+                      )}
                       <FieldValidationBadge
                         state={accountState}
                         message={accountMsg}
@@ -673,6 +779,7 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
                   // dangle for fields that were just wiped.
                   setNipState('idle');
                   setAccountState('idle');
+                  setAccountChoices([]);
                 }}
                 disabled={submitting}
               >
@@ -696,6 +803,68 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
       </SheetContent>
     </Sheet>
   );
+}
+
+/**
+ * Autofill `company` / `companyAddress` from a successful VIES lookup, but
+ * only when the user hasn't typed anything yet (Variant 1 — "empty fields
+ * only"). `shouldDirty: true` keeps `useFormDraft` in sync; `shouldValidate`
+ * runs the Zod resolver so the field's error state clears immediately.
+ */
+function applyViesAutofill(
+  res: { name: string | null; address: string | null },
+  form: UseFormReturn<CarrierFormValues>,
+): void {
+  const name = res.name?.trim();
+  if (name && !(form.getValues('company') ?? '').trim()) {
+    form.setValue('company', name, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+  }
+  // VIES address often comes with embedded newlines + double spaces; collapse
+  // to a single line so the <Textarea rows={2}> renders sanely.
+  const address = res.address?.trim().replace(/\s+/g, ' ');
+  if (address && !(form.getValues('companyAddress') ?? '').trim()) {
+    form.setValue('companyAddress', address, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+  }
+}
+
+/**
+ * Autofill `company` / `companyAddress` from a Biała Lista (MF registry)
+ * search hit. Same "empty fields only" rule as {@link applyViesAutofill}
+ * so the user's typing is never overwritten.
+ *
+ * Account numbers are intentionally NOT touched here — that logic lives in
+ * `checkNip()` because it depends on the array length (single → autofill,
+ * multi → show picker) and the picker is component-level state.
+ */
+function applyWhitelistAutofill(
+  res: WhitelistSearchResult,
+  form: UseFormReturn<CarrierFormValues>,
+): void {
+  if (!res.found) return;
+
+  const name = res.name?.trim();
+  if (name && !(form.getValues('company') ?? '').trim()) {
+    form.setValue('company', name, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+  }
+
+  // MF addresses can arrive with extra whitespace too; normalize to a single
+  // line so the <Textarea rows={2}> renders predictably.
+  const address = res.address?.trim().replace(/\s+/g, ' ');
+  if (address && !(form.getValues('companyAddress') ?? '').trim()) {
+    form.setValue('companyAddress', address, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+  }
 }
 
 function getDefaults(): CarrierFormValues {

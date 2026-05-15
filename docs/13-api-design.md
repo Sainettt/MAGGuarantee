@@ -244,7 +244,8 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 | Method + Path | GAS | Внешний API |
 |---|---|---|
 | GET `/integrations/vies/:country/:vat` | `viesLookup` | VIES |
-| GET `/integrations/whitelist?nip=...&account=...` | `whiteListCheckAccount` | Biała Lista |
+| GET `/integrations/whitelist?nip=...&account=...` | `whiteListCheckAccount` | Biała Lista — проверка пары NIP + счёт |
+| GET `/integrations/whitelist/search?nip=...` | `whiteListSearchByNip` | Biała Lista — auto-fill компании по NIP (`{ found: false }` для не-польских NIP, не ошибка) |
 | GET `/integrations/inspection?vin=...` | `inspectionCheckLink` | info-car.pl URL builder |
 | GET `/integrations/gps/positions` | — (новое) | GPS tracker (TBD — см. [16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api](16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api)) |
 | GET `/integrations/gps/positions/:vehicleId` | — | GPS tracker (TBD) |
@@ -403,7 +404,7 @@ Source of truth — Zod-схемы в `packages/shared`. Никакого OpenAP
 | `/auth/login`, `/auth/verify-code` | 5 / минуту / IP |
 | `/auth/resend-code` | 3 / 5 минут / sessionToken |
 | `/integrations/vies/*` | 10 / минуту / IP (внешний API лимиты) |
-| `/integrations/whitelist` | 10 / минуту / IP |
+| `/integrations/whitelist`, `/integrations/whitelist/search` | 10 / минуту / IP |
 | `/claims/*/preview` | 30 / минуту / user |
 | Остальные | 100 / минуту / user |
 

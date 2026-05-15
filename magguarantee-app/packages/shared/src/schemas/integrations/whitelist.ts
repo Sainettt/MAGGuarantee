@@ -60,3 +60,62 @@ export const WhiteListResponseSchema = z.object({
   cachedAt: IsoDateTimeSchema.nullable(),
 });
 export type WhiteListResponse = z.infer<typeof WhiteListResponseSchema>;
+
+// ─── Search-by-NIP ────────────────────────────────────────
+//
+// Wire surface for `GET /api/v1/integrations/whitelist/search?nip=...`
+// per docs/13-api-design.md#external-integrations and the upstream REST
+// API at https://wl-api.mf.gov.pl/api/search/nip/{NIP}.
+//
+// Use-case: auto-fill of carrier company data (name, address, account
+// numbers) once the user enters a Polish NIP — saves the carrier-creation
+// form from manual transcription and keeps records aligned with the MF
+// register. Non-Polish NIPs return `{ found: false }`; that is NOT an
+// error, the caller is expected to fall back to manual entry.
+
+/**
+ * Query params for `/whitelist/search`. We deliberately reuse the same
+ * NIP shape as `TaxIdSchema` would in the carriers DTO — the upstream
+ * only knows about Polish NIPs but we don't pre-validate strictly here;
+ * any non-conformant value just yields `{ found: false }`.
+ *
+ * Length bounds mirror `TaxIdSchema` (5..20) so the form can post the
+ * raw input without trimming the country prefix first. The strict
+ * 10-digit format check is left to the upstream registry.
+ */
+export const WhiteListSearchQuerySchema = z
+  .object({
+    nip: z.string().min(5).max(20),
+  })
+  .strict();
+export type WhiteListSearchQuery = z.infer<typeof WhiteListSearchQuerySchema>;
+
+/**
+ * Stable response DTO for `/whitelist/search`.
+ *
+ *   - `found`: convenience flag — `true` iff upstream returned a non-null
+ *     subject. `false` covers both `result.subject = null` (NIP unknown)
+ *     and upstream `404` (NIP outside the MF registry, e.g. foreign).
+ *   - `name`, `address`, `accountNumbers`, `statusVat`: flattened from
+ *     `result.subject`. `address` picks `residenceAddress` first, then
+ *     falls back to `workingAddress` per the MF schema.
+ *   - `accountNumbers`: array of digit-strings as MF returns them. The
+ *     consumer doesn't know which is EUR vs PLN — we don't try to guess.
+ *   - `requestId` / `requestDateTime`: MF audit metadata. Kept verbatim
+ *     in case we ever need to attach proof of due-diligence to a claim.
+ *   - `cachedAt`: our Redis timestamp; `null` on a fresh fetch.
+ */
+export const WhiteListSearchResponseSchema = z.object({
+  found: z.boolean(),
+  nip: z.string(),
+  name: z.string().nullable(),
+  address: z.string().nullable(),
+  accountNumbers: z.array(z.string()),
+  statusVat: z.string().nullable(),
+  requestId: z.string().nullable(),
+  requestDateTime: z.string().nullable(),
+  cachedAt: IsoDateTimeSchema.nullable(),
+});
+export type WhiteListSearchResponse = z.infer<
+  typeof WhiteListSearchResponseSchema
+>;

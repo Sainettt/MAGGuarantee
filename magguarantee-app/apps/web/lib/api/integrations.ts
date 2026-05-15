@@ -6,6 +6,7 @@
 import type {
   ViesLookupResponse,
   WhiteListResponse,
+  WhiteListSearchResponse,
 } from '@magguarantee/shared';
 
 import { apiJson, ApiResponseError } from './client';
@@ -13,6 +14,7 @@ import { toQuery } from './query';
 
 export type ViesResult = ViesLookupResponse;
 export type WhitelistResult = WhiteListResponse;
+export type WhitelistSearchResult = WhiteListSearchResponse;
 
 /** "Service unavailable" sentinel — caller maps to the warning badge. */
 export const INTEGRATION_UNAVAILABLE = Symbol('INTEGRATION_UNAVAILABLE');
@@ -51,6 +53,25 @@ export function checkWhitelist(
   return callOrUnavailable(
     apiJson<WhitelistResult>(
       `/integrations/whitelist${toQuery({ nip, account })}`,
+      { method: 'GET' },
+    ),
+  );
+}
+
+/**
+ * Look up a Polish company in the Biała Lista MF registry by NIP. Returns
+ * the canonical name, address, declared bank accounts and VAT status —
+ * used to auto-fill the carrier create/edit form.
+ *
+ * Non-Polish NIPs / NIPs outside the MF registry return `{ found: false }`;
+ * callers should fall back to VIES + manual entry.
+ */
+export function checkWhitelistSearch(
+  nip: string,
+): Promise<WhitelistSearchResult | IntegrationUnavailable> {
+  return callOrUnavailable(
+    apiJson<WhitelistSearchResult>(
+      `/integrations/whitelist/search${toQuery({ nip })}`,
       { method: 'GET' },
     ),
   );
