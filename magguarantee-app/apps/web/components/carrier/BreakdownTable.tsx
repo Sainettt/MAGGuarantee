@@ -57,7 +57,10 @@ interface MonthRowProps {
 function MonthRow({ row, locale }: MonthRowProps) {
   const t = useTranslations('carrier.breakdown');
   const [open, setOpen] = useState(false);
-  const excluded = row.excludedDays;
+  // Legacy claims persisted before `excludedDays` was added to km-calc may have
+  // breakdown rows without this field. API does not Zod-parse JSONB on read,
+  // so the default([]) in MonthBreakdownSchema doesn't kick in here.
+  const excluded = row.excludedDays ?? [];
   const hasExclusions = excluded.length > 0;
 
   return (
