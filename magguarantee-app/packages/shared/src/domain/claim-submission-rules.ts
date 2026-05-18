@@ -9,7 +9,8 @@
 // Three independent rules live here:
 //   1. `roundDays(hours)`            — canonical hours→days rounding (2 dp).
 //   2. `canSubmitByDuration(...)`    — hours-only gate: roundedDays must be
-//                                      STRICTLY greater than the threshold.
+//                                      >= threshold (boundary inclusive — at
+//                                      exactly `10.00` the carrier can submit).
 //                                      Returns RFC-7807-ready Polish messages.
 //   3. `cooldownCheck(...)`          — 6-day-per-vehicle anti-spam gate
 //                                      (boundary inclusive: 144h passes).
@@ -29,7 +30,7 @@
  * AppConfig on every request — never trust the defaults in prod code paths.
  */
 export const DEFAULTS = {
-  workedDaysThreshold: 9,
+  workedDaysThreshold: 10,
   vehicleCooldownDays: 6,
 } as const;
 
@@ -85,8 +86,8 @@ function parseIsoDateUtc(s: string): Date | null {
  * Formula: `Math.round((hours / 24) * 100) / 100`.
  *
  * - `roundDays(107.1) === 4.46`
- * - `roundDays(216)   === 9`
- * - `roundDays(216.24) === 9.01`
+ * - `roundDays(239.76) === 9.99`
+ * - `roundDays(240)   === 10`
  *
  * Negative input is clamped to `0` rather than thrown so the caller (a
  * form preview) never crashes on a typo — undefined behavior contract per
@@ -143,8 +144,8 @@ export type SubmitGateResult =
 /**
  * Authoritative carrier rule: a claim may be submitted iff `totalDays`
  * (the post-adjustment working-days total from `calcKmGwarantPerMonth`) is
- * STRICTLY GREATER than `workedDaysThreshold` — so exactly `9.00` does NOT
- * pass when the threshold is 9; `9.01` does.
+ * GREATER THAN OR EQUAL TO `workedDaysThreshold` — so exactly `10.00`
+ * passes when the threshold is 10; `9.99` does not. Boundary is inclusive.
  *
  * `totalDays` must come from km-calc, not from the raw form input. The
  * carrier-side "Korekta godzin" (hoursAdjusted) field is a *correction*
@@ -153,9 +154,9 @@ export type SubmitGateResult =
  * time. The api reads `calc.totalDays` from the same km-calc that drives
  * the right-hand "DNI ROB." breakdown the carrier sees on screen.
  *
- * The earlier calendar-span branch was removed because reaching > 9 worked
- * days within fewer than 10 calendar days requires > 24 hours/day, which is
- * physically impossible. Span was the load-bearing branch, so we collapse
+ * The earlier calendar-span branch was removed because reaching the worked-
+ * days threshold within fewer calendar days requires > 24 hours/day, which
+ * is physically impossible. Span was the load-bearing branch, so we collapse
  * the rule to the only signal that actually changes behavior on real data.
  */
 export function canSubmitByDuration(input: {
@@ -165,7 +166,7 @@ export function canSubmitByDuration(input: {
   const { totalDays, workedDaysThreshold } = input;
   const days = Number.isFinite(totalDays) && totalDays > 0 ? totalDays : 0;
 
-  if (days > workedDaysThreshold) {
+  if (days >= workedDaysThreshold) {
     return { ok: true };
   }
   return {
@@ -182,7 +183,7 @@ function buildDurationMessage(opts: {
   const threshold = formatDaysPl(opts.workedDaysThreshold);
   const current = formatDaysPl(opts.days);
   return (
-    `Wniosek mozna zlozyc dopiero, gdy przepracowano powyzej ${threshold} dni ` +
+    `Wniosek mozna zlozyc dopiero, gdy przepracowano co najmniej ${threshold} dni ` +
     `(aktualnie: ${current} dni przepracowanych).`
   );
 }

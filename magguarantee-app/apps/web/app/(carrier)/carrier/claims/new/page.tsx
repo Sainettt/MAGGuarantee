@@ -35,6 +35,33 @@ import { useMyFleet } from '@/lib/hooks/useMyFleet';
 
 const DRAFT_KEY = 'draft:carrier:newClaim';
 
+// ── AppConfig mirrors ───────────────────────────────────────────
+// Numbers used by the api in `claims.service.ts` for tier-1 (pre-calc)
+// violations. Mirrored here so the carrier-side form can preview the
+// same red banner BEFORE the user clicks Submit. AppConfig is not yet
+// exposed to the web (no `/app-config` endpoint); when api-agent ships
+// one, swap these to a `useAppConfig()` hook. The api is still the
+// authoritative source — every Submit re-runs these checks server-side.
+const CLIENT_MAX_DAYS_AFTER_UNLOAD = 7;
+const CLIENT_MAX_PERIOD_DAYS = 90;
+
+// Keys allowed in the carrier submit form. Used to filter the
+// sessionStorage draft so stale `amountRequested` / `hoursAdjusted`
+// (removed from `SubmitClaimSchema` in shared) cannot resurrect themselves
+// on hydrate and trip Zod `.strict()` validation.
+const FORM_ALLOWED_KEYS = [
+  'vehicleId',
+  'trailerId',
+  'driverId',
+  'dateStart',
+  'dateEnd',
+  'timeFrom',
+  'timeTo',
+  'mileage',
+  'comment',
+  'attachmentIds',
+] as const;
+
 type FormValues = SubmitClaimDto;
 
 function getDefaults(): FormValues {
@@ -49,14 +76,53 @@ function getDefaults(): FormValues {
     timeFrom: '',
     timeTo: '',
     mileage: 0,
-    amountRequested: 0,
-    hoursAdjusted: 0,
     comment: undefined,
     // orderNumber / orderDate are intentionally NOT in the carrier submit
     // DTO (phase3_blocks): they're MAGTRANS-internal and assigned by the
     // verifier when transitioning to ZAAKCEPTOWANO.
     attachmentIds: undefined,
   };
+}
+
+/**
+ * Drop unknown keys from a persisted draft before `form.reset(draft)`.
+ * `amountRequested` / `hoursAdjusted` were removed from `SubmitClaimSchema`
+ * — without this filter, a returning user's saved draft re-introduces them,
+ * Zod `.strict()` rejects the whole form on the next change, and the user
+ * sees a permanently invalid form with no visible offending field.
+ */
+function sanitizeDraft(draft: Record<string, unknown>): Partial<FormValues> {
+  const out: Record<string, unknown> = {};
+  for (const key of FORM_ALLOWED_KEYS) {
+    if (key in draft) out[key] = draft[key];
+  }
+  return out as Partial<FormValues>;
+}
+
+/** ISO date in UTC midnight (matches the api's `isoDateToMidnightUtc`). */
+function parseIsoDate(s: string): Date | null {
+  if (typeof s !== 'string') return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return null;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function startOfTodayUtc(): Date {
+  const now = new Date();
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+}
+
+/** Inclusive day delta — same convention as api `daysBetweenInclusive`. */
+function daysBetweenInclusive(a: Date, b: Date): number {
+  return Math.round((b.getTime() - a.getTime()) / 86_400_000) + 1;
+}
+
+/** Non-inclusive day delta — matches api `daysBetween(unload, today)`. */
+function daysBetween(a: Date, b: Date): number {
+  return Math.round((b.getTime() - a.getTime()) / 86_400_000);
 }
 
 export default function NewClaimPage() {
@@ -72,9 +138,17 @@ export default function NewClaimPage() {
   const form = useForm<FormValues>({
     resolver: zodResolver(SubmitClaimSchema),
     defaultValues: getDefaults(),
+    // Live inline validation — RHF runs the Zod resolver on every value
+    // change so required-field / format errors surface as the user types,
+    // not only after Submit. Pairs with the client-side business-rule
+    // banner below (period > 90d, deadline > 7d, dateEnd in future…).
+    mode: 'onChange',
   });
 
-  const draft = useFormDraft(form, DRAFT_KEY, { enabled: true });
+  const draft = useFormDraft(form, DRAFT_KEY, {
+    enabled: true,
+    sanitize: sanitizeDraft,
+  });
 
   useEffect(() => {
     draft.hydrate();
@@ -85,6 +159,13 @@ export default function NewClaimPage() {
 
   // Build a preview body when the form has the bare minimum filled. Server
   // is the source of truth — we don't compute anything locally.
+  //
+  // `hoursAdjusted` is pinned to 0 for the carrier form: it was removed from
+  // the carrier submit DTO entirely and on submit the api always feeds 0
+  // into km-calc. `PreviewClaimSchema` still carries the key (for the
+  // verifier modal's recalc badge) so we have to satisfy the TS type — but
+  // semantically the carrier preview always asks "what would the payout be
+  // with zero downtime?" exactly the same as `submit` does.
   const previewBody: PreviewClaimDto | null = useMemo(() => {
     if (
       !watched.vehicleId ||
@@ -103,7 +184,7 @@ export default function NewClaimPage() {
       timeFrom: watched.timeFrom || undefined,
       timeTo: watched.timeTo || undefined,
       mileage: watched.mileage,
-      hoursAdjusted: watched.hoursAdjusted ?? 0,
+      hoursAdjusted: 0,
     };
   }, [
     watched.vehicleId,
@@ -112,7 +193,6 @@ export default function NewClaimPage() {
     watched.mileage,
     watched.timeFrom,
     watched.timeTo,
-    watched.hoursAdjusted,
   ]);
 
   // Debounce 400ms before firing the preview request.
@@ -131,7 +211,8 @@ export default function NewClaimPage() {
   // open — the api re-checks anyway, and surfacing a stale "rejected"
   // banner during typing is worse than a brief moment of optimism.
   //
-  // Threshold (default 9): we use `DEFAULTS` from `@magguarantee/shared`
+  // Threshold (default 10, boundary inclusive — 10.00 passes, 9.99 does
+  // not): we read `DEFAULTS.workedDaysThreshold` from `@magguarantee/shared`
   // until a `GET /app-config` endpoint exists. TODO: swap to a
   // `useAppConfig()` hook once api-agent ships it.
   const previewTotalDays = previewQ.data?.breakdown?.totalDays;
@@ -145,6 +226,59 @@ export default function NewClaimPage() {
   const durationBlocked = durationGate?.ok === false;
   const durationMessage =
     durationGate && !durationGate.ok ? durationGate.message : null;
+
+  // ── Client-side tier-1 business rules ────────────────────────
+  // Mirror the pre-calc violations the api throws in `ClaimsService.submit`
+  // (claims.service.ts:175-210) so the carrier sees the same red-banner
+  // immediately on date entry, not only after Submit. The api re-checks
+  // everything — this is purely UX. AppConfig values are mirrored as
+  // hard-coded constants until a `GET /app-config` endpoint exists.
+  const clientViolations = useMemo<string[]>(() => {
+    const list: string[] = [];
+    const startStr = watched.dateStart;
+    const endStr = watched.dateEnd;
+    const start = startStr ? parseIsoDate(startStr) : null;
+    const end = endStr ? parseIsoDate(endStr) : null;
+
+    if (start && end) {
+      const today = startOfTodayUtc();
+      if (end.getTime() > today.getTime()) {
+        list.push(
+          tForm('violationDateEndInFuture', { date: endStr }),
+        );
+      }
+      if (start.getTime() > today.getTime()) {
+        list.push(
+          tForm('violationDateStartInFuture', { date: startStr }),
+        );
+      }
+      if (start.getTime() > end.getTime()) {
+        list.push(tForm('violationDateOrder'));
+      } else {
+        const periodDays = daysBetweenInclusive(start, end);
+        if (periodDays > CLIENT_MAX_PERIOD_DAYS) {
+          list.push(
+            tForm('violationPeriodTooLong', {
+              maxDays: CLIENT_MAX_PERIOD_DAYS,
+              periodDays,
+            }),
+          );
+        }
+        const elapsed = daysBetween(end, today);
+        if (elapsed > CLIENT_MAX_DAYS_AFTER_UNLOAD) {
+          list.push(
+            tForm('violationDeadline', {
+              maxDays: CLIENT_MAX_DAYS_AFTER_UNLOAD,
+              elapsed,
+            }),
+          );
+        }
+      }
+    }
+    return list;
+    // tForm identity is stable per render — list deps on the watched fields.
+  }, [watched.dateStart, watched.dateEnd, tForm]);
+  const clientBlocked = clientViolations.length > 0;
 
   // Server-side business-rule violations from the 422 envelope (rendered as
   // a sticky banner above the form). Cleared on every fresh submit attempt
@@ -212,44 +346,65 @@ export default function NewClaimPage() {
         {t('newClaim')}
       </h1>
 
-      {violations.length > 0 && (
-        <div
-          ref={violationsRef}
-          role="alert"
-          className="mb-6 rounded-lg border border-danger/40 bg-danger-bg dark:bg-danger/10 p-4"
-        >
-          <div className="flex items-start gap-3">
-            <AlertTriangle
-              size={20}
-              className="mt-0.5 flex-none text-danger"
-              aria-hidden
-            />
-            <div className="flex-1 min-w-0">
-              <h2 className="text-sm font-bold text-danger-dark dark:text-danger">
-                {violations.length === 1
-                  ? t('violationsHeadingOne')
-                  : t('violationsHeadingMany', { count: violations.length })}
-              </h2>
-              <ul className="mt-2 space-y-1.5 text-sm text-text">
-                {violations.map((v, i) => (
-                  <li key={i} className="flex gap-2">
-                    <span aria-hidden className="text-danger">•</span>
-                    <span className="flex-1">{v}</span>
-                  </li>
-                ))}
-              </ul>
+      {/*
+        Two violation sources feed the red banner:
+        1. `clientViolations` — synchronous tier-1 rules (period span, 7-day
+           deadline, future dates). Recomputed on every keystroke so the
+           carrier sees the same red message the api would throw on Submit,
+           but BEFORE round-tripping. Cannot be dismissed — they disappear
+           the moment the user fixes the underlying field.
+        2. `violations` — 422 envelope from a real Submit attempt. Sticky:
+           the user explicitly dismisses with the X (or a fresh Submit
+           clears them automatically).
+        Both render the same shell; only the dismiss affordance differs.
+      */}
+      {(violations.length > 0 || clientViolations.length > 0) && (() => {
+        const combined = [...clientViolations, ...violations];
+        return (
+          <div
+            ref={violationsRef}
+            role="alert"
+            className="mb-6 rounded-lg border border-danger/40 bg-danger-bg dark:bg-danger/10 p-4"
+          >
+            <div className="flex items-start gap-3">
+              <AlertTriangle
+                size={20}
+                className="mt-0.5 flex-none text-danger"
+                aria-hidden
+              />
+              <div className="flex-1 min-w-0">
+                <h2 className="text-sm font-bold text-danger-dark dark:text-danger">
+                  {combined.length === 1
+                    ? t('violationsHeadingOne')
+                    : t('violationsHeadingMany', { count: combined.length })}
+                </h2>
+                <ul className="mt-2 space-y-1.5 text-sm text-text">
+                  {combined.map((v, i) => (
+                    <li key={i} className="flex gap-2">
+                      <span aria-hidden className="text-danger">•</span>
+                      <span className="flex-1">{v}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              {/* Only the api-side stack is dismissible — client-side
+                  violations are reactive to form state, so they reappear
+                  immediately anyway. Showing the X only when there's a
+                  sticky 422 in play keeps the affordance honest. */}
+              {violations.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setViolations([])}
+                  aria-label={tCommon('clear')}
+                  className="flex-none rounded-md p-1 text-text-sub hover:bg-danger/10 hover:text-danger focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-danger/40"
+                >
+                  <X size={16} />
+                </button>
+              )}
             </div>
-            <button
-              type="button"
-              onClick={() => setViolations([])}
-              aria-label={tCommon('clear')}
-              className="flex-none rounded-md p-1 text-text-sub hover:bg-danger/10 hover:text-danger focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-danger/40"
-            >
-              <X size={16} />
-            </button>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       <form onSubmit={onSubmit}>
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.2fr] gap-6">
@@ -379,6 +534,14 @@ export default function NewClaimPage() {
               </FormSection>
 
               <FormSection title={tForm('sectionValues')}>
+                {/*
+                  Only mileage is carrier-editable now. `amountRequested` is
+                  derived server-side from `calc.paymentEur` (see api
+                  claims.service.ts:353); `hoursAdjusted` was moved to the
+                  verifier-only PATCH path and hard-coded to 0 on submit.
+                  The live `paymentEur` value the carrier will be requesting
+                  is visible in the right-hand <LivePreviewPanel> stat grid.
+                */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <FormField
                     label={tForm('mileage')}
@@ -393,42 +556,6 @@ export default function NewClaimPage() {
                       min={0}
                       className="h-10"
                       {...form.register('mileage', {
-                        setValueAs: (v) =>
-                          v === '' || v === null ? 0 : Number(v),
-                      })}
-                    />
-                  </FormField>
-                  <FormField
-                    label={tForm('amountRequested')}
-                    required
-                    error={errs.amountRequested?.message}
-                    htmlFor="claim-amount"
-                  >
-                    <Input
-                      id="claim-amount"
-                      type="number"
-                      step="0.01"
-                      min={0}
-                      className="h-10"
-                      {...form.register('amountRequested', {
-                        setValueAs: (v) =>
-                          v === '' || v === null ? 0 : Number(v),
-                      })}
-                    />
-                  </FormField>
-                  <FormField
-                    label={tForm('hoursAdjusted')}
-                    error={errs.hoursAdjusted?.message}
-                    htmlFor="claim-hours"
-                    description={tForm('hoursAdjustedHint')}
-                  >
-                    <Input
-                      id="claim-hours"
-                      type="number"
-                      step="0.5"
-                      min={0}
-                      className="h-10"
-                      {...form.register('hoursAdjusted', {
                         setValueAs: (v) =>
                           v === '' || v === null ? 0 : Number(v),
                       })}
@@ -493,7 +620,18 @@ export default function NewClaimPage() {
               <Button
                 type="submit"
                 size="lg"
-                disabled={submitting || previewBlocked || durationBlocked}
+                // Disabled if any of: (a) an in-flight submit, (b) preview
+                // failed for current input, (c) duration gate (<10 days),
+                // (d) client-side tier-1 violations (period span / 7-day
+                // deadline / future dates), (e) RHF schema invalid (with
+                // `mode: 'onChange'` this stays accurate as the user types).
+                disabled={
+                  submitting ||
+                  previewBlocked ||
+                  durationBlocked ||
+                  clientBlocked ||
+                  !form.formState.isValid
+                }
               >
                 {submitting ? t('submitting') : t('submit')}
               </Button>

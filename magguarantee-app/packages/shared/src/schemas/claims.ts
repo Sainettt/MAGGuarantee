@@ -58,6 +58,10 @@ const HoursAdjustedSchema = z.number().min(0).max(999.99);
 
 // ─── Submit (carrier creates a wniosek) ──────────────────
 
+// NOTE: `amountRequested` and `hoursAdjusted` are server/verifier-managed and
+// are NOT part of the carrier submit body — `amountRequested` is derived from
+// km-calc payment server-side, `hoursAdjusted` lives only on the verifier
+// `UpdateClaimCorrectionFields` patch below.
 /**
  * POST /claims — body shape per docs/13-api-design.md§"Submit claim".
  *
@@ -65,7 +69,12 @@ const HoursAdjustedSchema = z.number().min(0).max(999.99);
  * - `carrierId` is **derived from the JWT** — not accepted from the body.
  * - `vehicleId` ownership is enforced by `CarrierOwnershipGuard`.
  * - `mileage` (legacy `przebieg`) is the actual driven km.
- * - `amountRequested` is what the carrier asks (legacy `KwotaWnioskowana`).
+ * - `amountRequested` is **NOT** in the carrier submit body — the service
+ *   derives it from the km-calc `paymentEur` (rounded to 2 dp). Legacy GAS
+ *   allowed a manual override; we don't.
+ * - `hoursAdjusted` is **NOT** in the carrier submit body — it is a
+ *   verifier-only correction field on `UpdateClaimCorrectionFields`. Submit
+ *   always persists `0` in both `origHoursAdjusted` and `hoursAdjustedValue`.
  * - `plannerId`/`opiekunId` are derived server-side from the vehicle's planner
  *   and the carrier's opiekun — clients do not send them.
  * - `timeFrom` / `timeTo` are NOT NULL on the underlying column since
@@ -89,8 +98,6 @@ export const SubmitClaimSchema = z
     timeTo: HhMmSchema,
 
     mileage: MileageSchema,
-    amountRequested: z.number().nonnegative().max(9_999_999),
-    hoursAdjusted: HoursAdjustedSchema.optional().default(0),
 
     comment: emptyStringToUndefined(z.string().max(2_000).optional()),
 

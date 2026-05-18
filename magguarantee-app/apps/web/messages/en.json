@@ -501,11 +501,13 @@
         "timeTo": "Time to",
         "sectionValues": "Values",
         "mileage": "Mileage (km)",
-        "amountRequested": "Amount requested (EUR)",
-        "hoursAdjusted": "Hours adjustment (h)",
-        "hoursAdjustedHint": "Idle time to subtract from the trip duration.",
         "addComment": "Add comment",
-        "comment": "Comment"
+        "comment": "Comment",
+        "violationDateEndInFuture": "Unload date ({date}) is in the future. The claim can be submitted only after the vehicle is back.",
+        "violationDateStartInFuture": "Load date ({date}) is in the future.",
+        "violationDateOrder": "Unload date must be on or after the load date.",
+        "violationDeadline": "Submission deadline has passed. Per the contract you have {maxDays} days after the unload date (already elapsed: {elapsed} days).",
+        "violationPeriodTooLong": "The claim period cannot exceed {maxDays} days (given: {periodDays} days)."
       },
       "status": {
         "NA_WERYFIKACJI": "Verifying",

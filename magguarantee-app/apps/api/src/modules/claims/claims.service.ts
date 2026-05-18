@@ -46,10 +46,10 @@ import { NrZglService } from './nr-zgl.service';
 /** AppConfig keys this service consults. */
 // `min_days_to_submit` and `carrier_period_span_min_days` are intentionally
 // NOT read anymore. The duration gate collapsed to a single hours-only check
-// (`roundDays(hours) > threshold`) because the calendar-span branch was
-// unreachable for realistic data — reaching > 9 rounded days in < 10 calendar
-// days would require > 24 working hours per day. Seed rows are kept for back-
-// compat; we just ignore them.
+// (`roundDays(hours) >= threshold`, boundary inclusive at 10.00) because the
+// calendar-span branch was unreachable for realistic data — reaching the
+// rounded-days threshold in fewer calendar days would require > 24 working
+// hours per day. Seed rows are kept for back-compat; we just ignore them.
 const APP_CONFIG_MAX_DAYS_AFTER_UNLOAD = 'max_days_after_unloading';
 const APP_CONFIG_MAX_PERIOD_DAYS = 'max_period_days';
 const APP_CONFIG_MAX_AVG_KM_PER_DAY = 'max_avg_km_per_day';
@@ -232,20 +232,22 @@ export class ClaimsService {
     // ── Tier 2: km-calc dependent rules ───────────────────────
     // Same engine as `previewKmCalc` so live preview and submit produce
     // identical numbers. timeFrom/timeTo are NOT NULL since phase3_blocks.
+    // `hoursAdjusted` is verifier-only — carriers never send it; submit
+    // always feeds 0 into km-calc and persists 0 on both Decimal columns.
     const calc = await this.kmCalc.calc({
       dateStart: dto.dateStart,
       dateEnd: dto.dateEnd,
       timeFrom: dto.timeFrom,
       timeTo: dto.timeTo,
-      hoursAdjusted: dto.hoursAdjusted ?? 0,
+      hoursAdjusted: 0,
     });
 
     const tier2: string[] = [];
 
     // Duration gate — `calc.totalDays` (post-adjustment working days from
-    // km-calc) must be strictly greater than the configured threshold
-    // (default 9 → 9.01 passes, 9.00 does not). Lives in
-    // `@magguarantee/shared` so the web form's live preview and the api
+    // km-calc) must be greater than or equal to the configured threshold
+    // (default 10 → 10.00 passes, 9.99 does not — boundary inclusive). Lives
+    // in `@magguarantee/shared` so the web form's live preview and the api
     // evaluate the same predicate with the same Polish message.
     const duration = canSubmitByDuration({
       totalDays: calc.totalDays,
@@ -344,15 +346,18 @@ export class ClaimsService {
           // invariant when status flips.
           orderNumber: null,
           orderDate: null,
-          amountRequested: dto.amountRequested,
-          // At submit, BOTH hours-adjustment columns receive the same numeric
-          // value: `origHoursAdjusted` is the immutable carrier snapshot
-          // (set-once, never modified after this point) and `hoursAdjustedValue`
-          // is the currently applied number that drives km-calc. The verifier
+          // amountRequested derived from km-calc payment, not user input —
+          // legacy GAS allowed manual override, we don't. `paymentEur` is
+          // already `round2(...)` 2-dp rounded (or 0) so it fits Decimal(12,2)
+          // cleanly without further coercion.
+          amountRequested: paymentEur,
+          // Hours-adjustment is verifier-only: carriers cannot send it on
+          // submit, so both Decimal columns are seeded to 0. The verifier
           // PATCH path may later mutate `hoursAdjustedValue` alone — see
-          // `_buildUpdatePatch` / `extractCorrectionFields`.
-          origHoursAdjusted: dto.hoursAdjusted ?? 0,
-          hoursAdjustedValue: dto.hoursAdjusted ?? 0,
+          // `_buildUpdatePatch` / `extractCorrectionFields`. `origHoursAdjusted`
+          // is the immutable carrier snapshot (set-once at submit, 0 forever).
+          origHoursAdjusted: 0,
+          hoursAdjustedValue: 0,
           // Preserve the carrier's original (pre-verification) inputs, so
           // the verifier can later see what the carrier actually submitted.
           // Mirror of GAS columns AR-AV (`Code.gs:6272-6276`).

@@ -4,10 +4,11 @@
 // Pins the wiring of three pure `@magguarantee/shared` predicates into the
 // service's tier-1 pipeline:
 //
-//   • `canSubmitByDuration` — hours-only gate: `roundDays(hoursAdjusted)`
-//     must be STRICTLY greater than the configured threshold (default 9).
-//     The earlier OR with calendar-span was dropped because the span branch
-//     could never fail independently from the hours branch on realistic data.
+//   • `canSubmitByDuration` — hours-only gate: `calc.totalDays` from km-calc
+//     must be GREATER THAN OR EQUAL TO the configured threshold (default 10,
+//     boundary inclusive — 10.00 passes, 9.99 does not). The earlier OR with
+//     calendar-span was dropped because the span branch could never fail
+//     independently from the hours branch on realistic data.
 //   • `cooldownCheck` — per-vehicle anti-spam window. Replaces the legacy
 //     date-range overlap check.
 //   • `vehicleCooldownException` — 422 envelope carrying the human Polish
@@ -265,7 +266,7 @@ describe('ClaimsService.submit — carrier submission gates', () => {
   // ── duration gate (canSubmitByDuration) ──────────────────
 
   it('1. calc.totalDays = 0 → 422 duration_insufficient', async () => {
-    // Zero worked days from km-calc → NOT > 9 → reject.
+    // Zero worked days from km-calc → NOT >= 10 → reject.
     const repoFake = makeRepo(null);
     const svc = makeService(repoFake, undefined, undefined, makeKmCalc({ totalDays: 0 }));
 
@@ -276,8 +277,6 @@ describe('ClaimsService.submit — carrier submission gates', () => {
       timeFrom: '08:00',
       timeTo: '18:00',
       mileage: 8_000,
-      amountRequested: 1_500,
-      hoursAdjusted: 0,
     };
 
     let caught: unknown;
@@ -288,14 +287,14 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     }
     const v = readViolation(caught);
     expect(v).not.toBeNull();
-    expect(v!.violations[0]).toMatch(/powyzej 9,00 dni/);
+    expect(v!.violations[0]).toMatch(/co najmniej 10,00 dni/);
     expect(v!.violations[0]).toMatch(/0,00 dni przepracowanych/);
     expect(repoFake.creates).toHaveLength(0);
   });
 
-  it('2. calc.totalDays = 9.00 → 422 duration_insufficient (NOT strictly > 9)', async () => {
+  it('2. calc.totalDays = 9.99 → 422 duration_insufficient (just below the inclusive boundary)', async () => {
     const repoFake = makeRepo(null);
-    const svc = makeService(repoFake, undefined, undefined, makeKmCalc({ totalDays: 9 }));
+    const svc = makeService(repoFake, undefined, undefined, makeKmCalc({ totalDays: 9.99 }));
 
     const dto: SubmitClaimDto = {
       vehicleId: 'v-1',
@@ -304,8 +303,6 @@ describe('ClaimsService.submit — carrier submission gates', () => {
       timeFrom: '08:00',
       timeTo: '18:00',
       mileage: 8_000,
-      amountRequested: 1_500,
-      hoursAdjusted: 0,
     };
 
     let caught: unknown;
@@ -316,15 +313,15 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     }
     const v = readViolation(caught);
     expect(v).not.toBeNull();
-    expect(v!.violations[0]).toMatch(/powyzej 9,00 dni/);
-    expect(v!.violations[0]).toMatch(/9,00 dni przepracowanych/);
+    expect(v!.violations[0]).toMatch(/co najmniej 10,00 dni/);
+    expect(v!.violations[0]).toMatch(/9,99 dni przepracowanych/);
     expect(repoFake.creates).toHaveLength(0);
   });
 
-  it('3. calc.totalDays = 9.01 → submit succeeds', async () => {
-    // 9.01 is STRICTLY GREATER than threshold 9 → pass.
+  it('3. calc.totalDays = 10.00 → submit succeeds (boundary inclusive)', async () => {
+    // 10.00 equals threshold 10 → pass (>= comparison).
     const repoFake = makeRepo(null);
-    const svc = makeService(repoFake, undefined, undefined, makeKmCalc({ totalDays: 9.01 }));
+    const svc = makeService(repoFake, undefined, undefined, makeKmCalc({ totalDays: 10 }));
 
     const dto: SubmitClaimDto = {
       vehicleId: 'v-1',
@@ -333,18 +330,20 @@ describe('ClaimsService.submit — carrier submission gates', () => {
       timeFrom: '08:00',
       timeTo: '18:00',
       mileage: 8_000,
-      amountRequested: 1_500,
-      hoursAdjusted: 5.5,
     };
 
     const out = await svc.submit(makeAuth('przewoznik'), dto);
 
     expect(out.nrZgl).toBe('GWA/100/05/26');
     expect(repoFake.creates).toHaveLength(1);
-    // The carrier's `hoursAdjusted` is the km-calc input ("Korekta godzin"),
-    // not the gate's signal — both Decimal columns persist its raw value.
-    expect(repoFake.creates[0]!.data.origHoursAdjusted).toBe(5.5);
-    expect(repoFake.creates[0]!.data.hoursAdjustedValue).toBe(5.5);
+    // `hoursAdjusted` is verifier-only — submit always seeds both Decimal
+    // columns to 0 regardless of what the carrier could theoretically type.
+    expect(repoFake.creates[0]!.data.origHoursAdjusted).toBe(0);
+    expect(repoFake.creates[0]!.data.hoursAdjustedValue).toBe(0);
+    // amountRequested is derived from km-calc paymentEur — not from the body.
+    // paymentEur = (kmGuaranteed - mileage) * ratePerKmEffective
+    //            = (10_800 - 8_000) * 0.5 = 1_400.
+    expect(repoFake.creates[0]!.data.amountRequested).toBe(1_400);
   });
 
   // ── cooldown gate (cooldownCheck) ────────────────────────
@@ -371,10 +370,9 @@ describe('ClaimsService.submit — carrier submission gates', () => {
       timeFrom: '08:00',
       timeTo: '18:00',
       mileage: 8_000,
-      amountRequested: 1_500,
-      // Enough hours to pass the tier-1 duration gate so the cooldown is the
-      // ONLY blocker the submit reaches.
-      hoursAdjusted: 240,
+      // The default km-calc mock yields `totalDays: 10` (>= threshold 10),
+      // so the tier-1 duration gate passes and the cooldown is the ONLY
+      // blocker the submit reaches.
     };
 
     let caught: unknown;
@@ -413,8 +411,6 @@ describe('ClaimsService.submit — carrier submission gates', () => {
       timeFrom: '08:00',
       timeTo: '18:00',
       mileage: 8_000,
-      amountRequested: 1_500,
-      hoursAdjusted: 240,
     };
 
     const out = await svc.submit(makeAuth('przewoznik'), dto);
@@ -440,8 +436,6 @@ describe('ClaimsService.submit — carrier submission gates', () => {
       timeFrom: '08:00',
       timeTo: '18:00',
       mileage: 8_000,
-      amountRequested: 1_500,
-      hoursAdjusted: 240,
     };
 
     const out = await svc.submit(makeAuth('przewoznik'), dto);

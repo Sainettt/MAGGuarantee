@@ -1,6 +1,6 @@
 // Tests for the carrier-side submission gates.
 //
-// Three rules, three describe-blocks. Boundaries (`9.00` vs `9.01`,
+// Three rules, three describe-blocks. Boundaries (`9.99` vs `10.00`,
 // `144h-1s` vs `144h` vs `144h+1s`, span 9 vs 10, same-day, inverted) are
 // the whole point — they're the failure modes the carrier hits in practice.
 
@@ -35,11 +35,11 @@ describe('roundDays', () => {
     expect(roundDays(216)).toBe(9);
   });
 
-  it('rounds 216.24 hours to 9.01 (just-above-threshold case)', () => {
-    expect(roundDays(216.24)).toBe(9.01);
+  it('rounds 239.76 hours to 9.99 (just-below-threshold case)', () => {
+    expect(roundDays(239.76)).toBe(9.99);
   });
 
-  it('rounds 240 hours to exactly 10', () => {
+  it('rounds 240 hours to exactly 10 (threshold-boundary case)', () => {
     expect(roundDays(240)).toBe(10);
   });
 
@@ -99,7 +99,7 @@ describe('formatHoursPl', () => {
 // ─── canSubmitByDuration ─────────────────────────────────────
 
 const DURATION_BASE = {
-  workedDaysThreshold: DEFAULTS.workedDaysThreshold, // 9
+  workedDaysThreshold: DEFAULTS.workedDaysThreshold, // 10
 };
 
 describe('canSubmitByDuration', () => {
@@ -108,15 +108,10 @@ describe('canSubmitByDuration', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.reason).toBe('duration_insufficient');
-      expect(r.message).toContain('9,00'); // threshold formatted
+      expect(r.message).toContain('10,00'); // threshold formatted
       expect(r.message).toContain('0,00'); // current rounded value
+      expect(r.message).toContain('co najmniej');
     }
-  });
-
-  it('rejects exactly 9.00 worked days — NOT strictly > 9', () => {
-    const r = canSubmitByDuration({ totalDays: 9, ...DURATION_BASE });
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.message).toContain('9,00');
   });
 
   it('rejects 8.87 worked days (real-world example from carrier UI)', () => {
@@ -125,13 +120,31 @@ describe('canSubmitByDuration', () => {
     if (!r.ok) expect(r.message).toContain('8,87');
   });
 
-  it('accepts 9.01 worked days — just past the threshold', () => {
-    const r = canSubmitByDuration({ totalDays: 9.01, ...DURATION_BASE });
-    expect(r.ok).toBe(true);
+  // Boundary parametrization — the whole point of this rule lives in three
+  // numbers (just below, exactly at, just above). Future threshold flips are
+  // a single edit to `DEFAULTS.workedDaysThreshold` plus this `it.each` table.
+  it.each<[number, boolean]>([
+    [9.99, false], // just below — rejects
+    [10.0, true],  // exactly at — passes (boundary inclusive)
+    [10.01, true], // just above — passes
+  ])('boundary: totalDays=%s → ok=%s', (totalDays, expected) => {
+    const r = canSubmitByDuration({ totalDays, ...DURATION_BASE });
+    expect(r.ok).toBe(expected);
   });
 
-  it('accepts 10 worked days (comfortable margin)', () => {
-    const r = canSubmitByDuration({ totalDays: 10, ...DURATION_BASE });
+  it('rejects 9.99 — boundary is inclusive on the upper side only', () => {
+    // Spelled out separately so a regression in the message wording for the
+    // most common boundary-failure surfaces as its own assertion.
+    const r = canSubmitByDuration({ totalDays: 9.99, ...DURATION_BASE });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.message).toContain('9,99');
+      expect(r.message).toContain('10,00');
+    }
+  });
+
+  it('accepts 11 worked days (comfortable margin)', () => {
+    const r = canSubmitByDuration({ totalDays: 11, ...DURATION_BASE });
     expect(r.ok).toBe(true);
   });
 
@@ -145,13 +158,13 @@ describe('canSubmitByDuration', () => {
     expect(r.ok).toBe(false);
   });
 
-  it('honors a custom threshold (5) — 5.01 days passes', () => {
-    const r = canSubmitByDuration({ totalDays: 5.01, workedDaysThreshold: 5 });
+  it('honors a custom threshold (5) — 5.00 days passes (boundary inclusive)', () => {
+    const r = canSubmitByDuration({ totalDays: 5, workedDaysThreshold: 5 });
     expect(r.ok).toBe(true);
   });
 
-  it('honors a custom threshold (5) — 5.00 days rejects', () => {
-    const r = canSubmitByDuration({ totalDays: 5, workedDaysThreshold: 5 });
+  it('honors a custom threshold (5) — 4.99 days rejects', () => {
+    const r = canSubmitByDuration({ totalDays: 4.99, workedDaysThreshold: 5 });
     expect(r.ok).toBe(false);
   });
 });
@@ -260,7 +273,7 @@ describe('nextAllowedSubmitAt', () => {
 describe('DEFAULTS', () => {
   it('matches the AppConfig seeded values', () => {
     expect(DEFAULTS).toEqual({
-      workedDaysThreshold: 9,
+      workedDaysThreshold: 10,
       vehicleCooldownDays: 6,
     });
   });

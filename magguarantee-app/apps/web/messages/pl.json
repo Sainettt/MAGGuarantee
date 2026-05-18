@@ -501,11 +501,13 @@
         "timeTo": "Godzina do",
         "sectionValues": "Wartości",
         "mileage": "Przebieg (km)",
-        "amountRequested": "Kwota wnioskowana (EUR)",
-        "hoursAdjusted": "Korekta godzin (h)",
-        "hoursAdjustedHint": "Czas postoju do odjęcia od czasu trasy.",
         "addComment": "Dodaj komentarz",
-        "comment": "Komentarz"
+        "comment": "Komentarz",
+        "violationDateEndInFuture": "Data rozładunku ({date}) jest w przyszłości. Wniosek można złożyć dopiero po zjechaniu auta.",
+        "violationDateStartInFuture": "Data załadunku ({date}) jest w przyszłości.",
+        "violationDateOrder": "Data rozładunku musi być równa lub późniejsza od daty załadunku.",
+        "violationDeadline": "Termin na złożenie wniosku minął. Zgodnie z umową masz {maxDays} dni od daty rozładunku (upłynęło {elapsed} dni).",
+        "violationPeriodTooLong": "Okres wniosku nie może przekraczać {maxDays} dni (podano {periodDays} dni)."
       },
       "status": {
         "NA_WERYFIKACJI": "Weryfikacja",

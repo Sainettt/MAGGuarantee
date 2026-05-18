@@ -372,7 +372,8 @@ model Claim {
   authorizationToken       String?
   authorizationDecidedAt   DateTime?
 
-  amountRequested Decimal  @db.Decimal(12, 2) // KwotaWnioskowana — carrier always supplies this at submit
+  /// derived server-side from calc.paymentEur; carrier form no longer collects it
+  amountRequested Decimal  @default(0) @db.Decimal(12, 2) // KwotaWnioskowana
   amountApproved  Decimal? @db.Decimal(12, 2) // ZatwKwota
   margin          Decimal? @db.Decimal(12, 2)
   amountMaximum   Decimal? @db.Decimal(12, 2)

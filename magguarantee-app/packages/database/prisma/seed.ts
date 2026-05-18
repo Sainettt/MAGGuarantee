@@ -91,10 +91,13 @@ const APP_CONFIG_ENTRIES: AppConfigEntry[] = [
   // check plus a per-vehicle anti-spam cooldown. `min_days_to_submit` is kept
   // above for backwards compatibility but the api layer no longer reads it.
   {
+    // Semantics (2026-05): the gate is now `round(hours/24, 2) >= N` (was
+    // strict `> 9` until this release). Bumped from 9 → 10 to align with the
+    // "min 10 worked days" product wording shown to carriers in the form.
     key: 'carrier_rounded_days_override_threshold',
-    value: '9',
+    value: '10',
     description:
-      'Próg round(hours/24, 2) > N — carrier może złożyć wniosek, gdy liczba przepracowanych dni (godziny/24, 2 miejsca) jest ściśle większa niż N.',
+      'Próg round(hours/24, 2) >= N — carrier może złożyć wniosek, gdy liczba przepracowanych dni (godziny/24, 2 miejsca) jest większa lub równa N.',
   },
   {
     key: 'carrier_vehicle_cooldown_days',

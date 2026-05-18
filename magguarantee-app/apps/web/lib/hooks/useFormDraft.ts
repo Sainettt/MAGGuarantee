@@ -26,12 +26,20 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { FieldValues, UseFormReturn } from 'react-hook-form';
 
-interface Options {
+interface Options<T extends FieldValues = FieldValues> {
   /**
    * Toggle persistence on/off. Pass `false` for edit mode so we don't
    * accidentally trample server-loaded values with a stale draft.
    */
   enabled: boolean;
+  /**
+   * Optional transform applied to the stored draft just before
+   * `form.reset(draft)`. Use it to drop legacy keys that have since been
+   * removed from the form schema — otherwise a Zod `.strict()` schema will
+   * reject the form as invalid the instant we hydrate, even though nothing
+   * the user can see is wrong. Run synchronously, returns the cleaned shape.
+   */
+  sanitize?: (draft: Record<string, unknown>) => Partial<T>;
 }
 
 interface DraftHandle {
@@ -86,8 +94,13 @@ function removeDraft(key: string): void {
 export function useFormDraft<T extends FieldValues>(
   form: UseFormReturn<T>,
   storageKey: string,
-  { enabled }: Options,
+  { enabled, sanitize }: Options<T>,
 ): DraftHandle {
+  // Keep `sanitize` in a ref so callers can pass an inline lambda without
+  // making `hydrate` re-create on every render (callers list it in effect
+  // deps — see new-claim page).
+  const sanitizeRef = useRef(sanitize);
+  sanitizeRef.current = sanitize;
   // RHF's `useForm` returns a fresh object every render. To keep our
   // returned `hydrate` / `clear` callbacks referentially stable (so
   // consumers can safely list them in effect deps), funnel `form` through
@@ -119,7 +132,11 @@ export function useFormDraft<T extends FieldValues>(
     if (!enabled) return;
     const draft = readDraft(storageKey);
     if (draft && typeof draft === 'object') {
-      formRef.current.reset(draft as T);
+      const raw = draft as Record<string, unknown>;
+      const cleaned = sanitizeRef.current
+        ? (sanitizeRef.current(raw) as T)
+        : (raw as unknown as T);
+      formRef.current.reset(cleaned);
     }
   }, [enabled, storageKey]);
 

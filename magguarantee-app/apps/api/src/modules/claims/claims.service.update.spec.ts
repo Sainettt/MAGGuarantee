@@ -681,7 +681,7 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
     jest.useRealTimers();
   });
 
-  it('11. submit writes origHoursAdjusted === hoursAdjustedValue === carrier input', async () => {
+  it('11. submit writes origHoursAdjusted === hoursAdjustedValue === 0 (verifier-only field, never accepted from carrier)', async () => {
     // Drive submit() through the full pipeline so we can assert what
     // `claims.createWithin` received. We fake every collaborator with the
     // minimum surface this code path touches.
@@ -793,6 +793,9 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
     // The fixed clock (NOW = 2026-05-15) puts the claim period safely in the
     // past — well within the 7-day "max days after unloading" window from
     // 2026-05-14, so the date-range gates pass.
+    // NB: `amountRequested` / `hoursAdjusted` are NOT carrier-submit fields
+    // anymore — `amountRequested` is derived server-side from km-calc
+    // paymentEur, `hoursAdjusted` is verifier-only (PATCH path).
     const out = await svc.submit(makeAuth('przewoznik', 'u-carrier-1'), {
       vehicleId: 'v-1',
       dateStart: '2026-05-01',
@@ -800,16 +803,16 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
       timeFrom: '08:00',
       timeTo: '18:00',
       mileage: 8_000,
-      amountRequested: 1_500,
-      hoursAdjusted: 5.5,
     });
 
     expect(creates).toHaveLength(1);
-    expect(creates[0]!.data.origHoursAdjusted).toBe(5.5);
-    expect(creates[0]!.data.hoursAdjustedValue).toBe(5.5);
+    // Both Decimal(5,2) columns seeded to 0 at submit — carrier cannot send
+    // `hoursAdjusted`. Only the verifier PATCH mutates `hoursAdjustedValue`.
+    expect(creates[0]!.data.origHoursAdjusted).toBe(0);
+    expect(creates[0]!.data.hoursAdjustedValue).toBe(0);
     // DTO surfaces both as numbers (Decimal → number coercion done by repo).
-    expect(out.origHoursAdjusted).toBe(5.5);
-    expect(out.hoursAdjustedValue).toBe(5.5);
+    expect(out.origHoursAdjusted).toBe(0);
+    expect(out.hoursAdjustedValue).toBe(0);
   });
 
   it('12. submitReklamacja re-snapshots origHoursAdjusted with `?? current` fallback', async () => {
