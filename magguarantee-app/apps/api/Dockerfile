@@ -99,6 +99,14 @@ COPY --from=build --chown=nestjs:nodejs /app/packages/database/package.json ./pa
 COPY --from=build --chown=nestjs:nodejs /app/packages/shared/dist ./packages/shared/dist
 COPY --from=build --chown=nestjs:nodejs /app/packages/shared/package.json ./packages/shared/package.json
 
+# Surface api's package.json at /app so `prisma db seed` finds the
+# `"prisma": { "seed": "tsx prisma/seed.ts" }` config. Prisma resolves the
+# seed command relative to the cwd's package.json; without this file the
+# seed errors out with "you need to add a 'prisma.seed' property".
+# Dependency metadata in this file is informational only — node_modules is
+# already populated by the workspace copy above and is not re-installed.
+COPY --from=build --chown=nestjs:nodejs /app/apps/api/package.json ./package.json
+
 # Prisma schema + migrations at the conventional `./prisma` path so that
 # `prisma migrate deploy --schema=prisma/schema.prisma` works at runtime.
 COPY --from=build --chown=nestjs:nodejs /app/packages/database/prisma ./prisma
