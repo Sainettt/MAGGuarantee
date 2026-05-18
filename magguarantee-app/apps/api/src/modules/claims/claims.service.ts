@@ -20,6 +20,11 @@ import type {
   SubmitReklamacjaDto,
   UpdateClaimDto,
 } from '@magguarantee/shared';
+import {
+  canSubmitByDuration,
+  cooldownCheck,
+  DEFAULTS as CARRIER_SUBMISSION_DEFAULTS,
+} from '@magguarantee/shared';
 
 import { AuditWriter } from '../audit/audit.service';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
@@ -39,13 +44,23 @@ import {
 import { NrZglService } from './nr-zgl.service';
 
 /** AppConfig keys this service consults. */
-const APP_CONFIG_MIN_DAYS = 'min_days_to_submit';
+// `min_days_to_submit` and `carrier_period_span_min_days` are intentionally
+// NOT read anymore. The duration gate collapsed to a single hours-only check
+// (`roundDays(hours) > threshold`) because the calendar-span branch was
+// unreachable for realistic data — reaching > 9 rounded days in < 10 calendar
+// days would require > 24 working hours per day. Seed rows are kept for back-
+// compat; we just ignore them.
 const APP_CONFIG_MAX_DAYS_AFTER_UNLOAD = 'max_days_after_unloading';
 const APP_CONFIG_MAX_PERIOD_DAYS = 'max_period_days';
 const APP_CONFIG_MAX_AVG_KM_PER_DAY = 'max_avg_km_per_day';
+// AppConfig key stays `carrier_rounded_days_override_threshold` for back-compat
+// (it's already in seed + dev DB); the in-code identifier matches the semantic
+// (worked-days threshold from km-calc, not a raw-hours override).
+const APP_CONFIG_WORKED_DAYS_THRESHOLD =
+  'carrier_rounded_days_override_threshold';
+const APP_CONFIG_VEHICLE_COOLDOWN_DAYS = 'carrier_vehicle_cooldown_days';
 
 /** Hardcoded fallbacks if AppConfig rows are missing — match seed defaults. */
-const DEFAULT_MIN_DAYS_TO_SUBMIT = 10;
 const DEFAULT_MAX_DAYS_AFTER_UNLOAD = 7;
 const DEFAULT_MAX_PERIOD_DAYS = 90;
 const DEFAULT_MAX_AVG_KM_PER_DAY = 2000;
@@ -54,21 +69,50 @@ const DEFAULT_MAX_AVG_KM_PER_DAY = 2000;
  * Wire shape of the multi-violation 422 envelope. The `ProblemDetailsFilter`
  * forwards the `violations` array to the client unchanged; the carrier UI
  * renders it as a list above the form. Submit / reklamacja both use this.
+ *
+ * `extensions` is an optional bag of structured fields that the
+ * `ProblemDetailsFilter` lifts into the RFC-7807 envelope under the
+ * `extensions` key — used today by the vehicle-cooldown 422 to surface a
+ * machine-readable `nextAllowedAt` ISO timestamp alongside the human
+ * message, so the carrier UI can render a "available from <date>" CTA
+ * without parsing the localised string.
  */
 interface ViolationsPayload {
   message: string;
   violations: string[];
+  extensions?: Record<string, unknown>;
 }
 
-function violationsException(violations: string[]): UnprocessableEntityException {
+function violationsException(
+  violations: string[],
+  extensions?: Record<string, unknown>,
+): UnprocessableEntityException {
   const payload: ViolationsPayload = {
     message:
       violations.length === 1
         ? violations[0]!
         : 'Wniosek nie może zostać zapisany — patrz lista poniżej.',
     violations,
+    ...(extensions && Object.keys(extensions).length > 0
+      ? { extensions }
+      : {}),
   };
   return new UnprocessableEntityException(payload);
+}
+
+/**
+ * Convenience wrapper for the per-vehicle cooldown 422. Carries the
+ * machine-readable `nextAllowedAt` Date as an ISO string in `extensions`
+ * so the carrier UI can compute "X hours remaining" without re-parsing
+ * the Polish localised message.
+ */
+function vehicleCooldownException(
+  message: string,
+  nextAllowedAt: Date,
+): UnprocessableEntityException {
+  return violationsException([message], {
+    nextAllowedAt: nextAllowedAt.toISOString(),
+  });
 }
 
 /**
@@ -165,29 +209,25 @@ export class ClaimsService {
           `(upłynęło ${daysAfterUnload} dni).`,
       );
     }
-    // Overlap check — only meaningful if the dates themselves are sane.
-    if (
-      dateEnd.getTime() <= today.getTime() &&
-      dateStart.getTime() <= dateEnd.getTime()
-    ) {
-      const overlapping = await this.claims.findOverlapping({
-        carrierId: carrier.id,
-        vehicleId: vehicle.id,
-        dateStart,
-        dateEnd,
-      });
-      if (overlapping) {
-        const fmt = (d: Date) => d.toISOString().slice(0, 10);
-        tier1.push(
-          `Wniosek na pojazd ${vehicle.plateNumber} za nakładający się ` +
-            `okres już istnieje: ${overlapping.nrZgl} ` +
-            `(${fmt(overlapping.dateStart)} – ${fmt(overlapping.dateEnd)}, ` +
-            `status ${overlapping.status}).`,
-        );
-      }
-    }
 
     if (tier1.length > 0) throw violationsException(tier1);
+
+    // Cooldown gate — per-vehicle anti-spam (replaces the legacy date-range
+    // overlap check). The previous (non-ODRZUCONO) claim on this vehicle
+    // blocks new submits for `cooldownDays * 24h` after its `createdAt`.
+    // ODRZUCONO claims are explicitly excluded by the repository query so
+    // a rejected carrier can resubmit a corrected wniosek immediately.
+    const lastClaim = await this.claims.findLastNonRejectedForVehicle(
+      vehicle.id,
+    );
+    const cooldown = cooldownCheck({
+      now: new Date(),
+      lastCreatedAt: lastClaim?.createdAt ?? null,
+      cooldownDays: config.vehicleCooldownDays,
+    });
+    if (!cooldown.ok) {
+      throw vehicleCooldownException(cooldown.message, cooldown.nextAllowedAt);
+    }
 
     // ── Tier 2: km-calc dependent rules ───────────────────────
     // Same engine as `previewKmCalc` so live preview and submit produce
@@ -202,13 +242,19 @@ export class ClaimsService {
 
     const tier2: string[] = [];
 
-    // Code.gs:6166-6174.
-    if (calc.totalDays < config.minDays) {
-      tier2.push(
-        `Samochód był w trasie mniej niż ${config.minDays} dni roboczych ` +
-          `(${calc.totalDays} dni). Minimum to ${config.minDays} dni.`,
-      );
+    // Duration gate — `calc.totalDays` (post-adjustment working days from
+    // km-calc) must be strictly greater than the configured threshold
+    // (default 9 → 9.01 passes, 9.00 does not). Lives in
+    // `@magguarantee/shared` so the web form's live preview and the api
+    // evaluate the same predicate with the same Polish message.
+    const duration = canSubmitByDuration({
+      totalDays: calc.totalDays,
+      workedDaysThreshold: config.workedDaysThreshold,
+    });
+    if (!duration.ok) {
+      tier2.push(duration.message);
     }
+
     if (calc.kmGuaranteed === 0) {
       tier2.push('Brak limitu km gwarantowanych w tym okresie.');
     }
@@ -253,9 +299,9 @@ export class ClaimsService {
     // `dateStart` / `dateEnd` were already parsed to UTC midnight at the top
     // of submit() for the violation checks; reuse them for the insert.
     // `kmPerDay` (NOT NULL post-phase3_blocks) is the trip-average km/day.
-    // Degenerate input (`drivenDays === 0`) collapses to 0 — defensive,
-    // since the min-days gate above blocks the realistic case where it
-    // would matter.
+    // Degenerate input (`drivenDays === 0`) collapses to 0 — defensive; the
+    // upstream `canSubmitByDuration` gate plus the `kmGuaranteed === 0`
+    // tier-2 violation block the realistic case where it would matter.
     const kmPerDay =
       calc.totalDays > 0 ? round2(dto.mileage / calc.totalDays) : 0;
     const now = new Date();
@@ -1121,37 +1167,54 @@ export class ClaimsService {
   }
 
   private async _loadSubmitConfig(): Promise<{
-    minDays: number;
     maxDaysAfter: number;
     maxPeriodDays: number;
     maxAvgKmPerDay: number;
+    workedDaysThreshold: number;
+    vehicleCooldownDays: number;
   }> {
     const rows = await this.prisma.client.appConfig.findMany({
       where: {
         key: {
           in: [
-            APP_CONFIG_MIN_DAYS,
             APP_CONFIG_MAX_DAYS_AFTER_UNLOAD,
             APP_CONFIG_MAX_PERIOD_DAYS,
             APP_CONFIG_MAX_AVG_KM_PER_DAY,
+            APP_CONFIG_WORKED_DAYS_THRESHOLD,
+            APP_CONFIG_VEHICLE_COOLDOWN_DAYS,
           ],
         },
       },
       select: { key: true, value: true },
     });
-    let minDays = DEFAULT_MIN_DAYS_TO_SUBMIT;
     let maxDaysAfter = DEFAULT_MAX_DAYS_AFTER_UNLOAD;
     let maxPeriodDays = DEFAULT_MAX_PERIOD_DAYS;
     let maxAvgKmPerDay = DEFAULT_MAX_AVG_KM_PER_DAY;
+    // Carrier submission thresholds fall back to the shared `DEFAULTS` to
+    // guarantee the api and `@magguarantee/shared` agree on the same numbers
+    // when the AppConfig rows are missing. Explicit `number` annotations
+    // widen the `as const` literal types so we can reassign from AppConfig
+    // values below.
+    let workedDaysThreshold: number =
+      CARRIER_SUBMISSION_DEFAULTS.workedDaysThreshold;
+    let vehicleCooldownDays: number =
+      CARRIER_SUBMISSION_DEFAULTS.vehicleCooldownDays;
     for (const r of rows) {
       const v = Number(r.value);
       if (!Number.isFinite(v) || v < 0) continue;
-      if (r.key === APP_CONFIG_MIN_DAYS) minDays = v;
       if (r.key === APP_CONFIG_MAX_DAYS_AFTER_UNLOAD) maxDaysAfter = v;
       if (r.key === APP_CONFIG_MAX_PERIOD_DAYS) maxPeriodDays = v;
       if (r.key === APP_CONFIG_MAX_AVG_KM_PER_DAY) maxAvgKmPerDay = v;
+      if (r.key === APP_CONFIG_WORKED_DAYS_THRESHOLD) workedDaysThreshold = v;
+      if (r.key === APP_CONFIG_VEHICLE_COOLDOWN_DAYS) vehicleCooldownDays = v;
     }
-    return { minDays, maxDaysAfter, maxPeriodDays, maxAvgKmPerDay };
+    return {
+      maxDaysAfter,
+      maxPeriodDays,
+      maxAvgKmPerDay,
+      workedDaysThreshold,
+      vehicleCooldownDays,
+    };
   }
 
   private async _scopeListFilters(

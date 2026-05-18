@@ -12,7 +12,11 @@
 import { useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
-import type { KmCalcBreakdown, MonthBreakdownDto } from '@magguarantee/shared';
+import {
+  formatDaysPl,
+  type KmCalcBreakdown,
+  type MonthBreakdownDto,
+} from '@magguarantee/shared';
 
 import { cn } from '@/lib/utils';
 
@@ -94,7 +98,14 @@ function MonthRow({ row, locale }: MonthRowProps) {
           )}
         </td>
         <td className="px-3 py-2 h-10 text-right tabular-nums text-text align-middle">
-          {formatInt(row.workingDays)}
+          {/* `workingDays` is the engine's fractional adjusted-working-day count
+              (hours / 24, rounded to 2dp). We render it via the shared
+              `formatDaysPl` so the carrier always sees the comma decimal
+              separator and consistent precision across the app — see
+              packages/shared/.../claim-submission-rules.ts. The other columns
+              (kmPerDay, kmInMonth, kmGuaranteed) stay integer km values and
+              keep `formatInt`. */}
+          {formatDaysPl(row.workingDays)}
         </td>
         <td className="px-3 py-2 h-10 text-right tabular-nums text-text align-middle">
           {formatInt(row.kmPerDay)}

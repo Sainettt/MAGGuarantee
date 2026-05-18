@@ -35,6 +35,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     const detail = this._detailFor(exception);
     const errors = this._fieldErrorsFor(exception);
     const violations = this._violationsFor(exception);
+    const extensions = this._extensionsFor(exception);
     const type = this._typeFor(status);
 
     if (status >= 500) {
@@ -54,6 +55,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       detail,
       errors,
       violations,
+      extensions,
       instance: req.url,
     });
   }
@@ -126,6 +128,28 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     if (!Array.isArray(v)) return undefined;
     const out = v.filter((x): x is string => typeof x === 'string');
     return out.length > 0 ? out : undefined;
+  }
+
+  /**
+   * Lift the optional `extensions` bag from a 422 problem-details payload
+   * into the wire envelope. ClaimsService uses this today to surface a
+   * machine-readable `nextAllowedAt` ISO timestamp on the vehicle-cooldown
+   * 422 so the carrier UI can render a "available from <date>" CTA without
+   * re-parsing the localised message.
+   *
+   * The bag is opaque to the filter — any structured value the service
+   * stuffs in there round-trips to the client unchanged.
+   */
+  private _extensionsFor(
+    exception: unknown,
+  ): Record<string, unknown> | undefined {
+    if (!(exception instanceof HttpException)) return undefined;
+    const body = exception.getResponse();
+    if (!body || typeof body !== 'object') return undefined;
+    const ext = (body as Record<string, unknown>).extensions;
+    if (!ext || typeof ext !== 'object' || Array.isArray(ext)) return undefined;
+    const obj = ext as Record<string, unknown>;
+    return Object.keys(obj).length > 0 ? obj : undefined;
   }
 
   /**

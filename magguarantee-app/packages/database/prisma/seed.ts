@@ -86,6 +86,22 @@ const APP_CONFIG_ENTRIES: AppConfigEntry[] = [
     value: '10',
     description: 'Minimum days that must elapse after dateEnd before a claim may be submitted.',
   },
+  // Phase 3 — carrier wniosek submission gating (configurable thresholds + per-vehicle cooldown).
+  // Replaces the single `min_days_to_submit` gate with an hours-only duration
+  // check plus a per-vehicle anti-spam cooldown. `min_days_to_submit` is kept
+  // above for backwards compatibility but the api layer no longer reads it.
+  {
+    key: 'carrier_rounded_days_override_threshold',
+    value: '9',
+    description:
+      'Próg round(hours/24, 2) > N — carrier może złożyć wniosek, gdy liczba przepracowanych dni (godziny/24, 2 miejsca) jest ściśle większa niż N.',
+  },
+  {
+    key: 'carrier_vehicle_cooldown_days',
+    value: '6',
+    description:
+      'Cooldown w dniach między złożeniami wniosków na jeden pojazd (dokładnie 144 godziny od createdAt ostatniego wniosku o statusie != ODRZUCONO).',
+  },
   // Phase 3 — claim submission deadline window
   {
     key: 'max_days_after_unloading',

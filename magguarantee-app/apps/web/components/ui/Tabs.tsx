@@ -15,6 +15,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useId,
   useMemo,
   useState,
@@ -117,8 +118,12 @@ export function TabsTrigger({
 }: TabsTriggerProps) {
   const { value: active, setValue, baseId, values, registerValue } = useTabs();
 
-  // Register on first render so arrow navigation knows the order.
-  if (!values.includes(value)) registerValue(value);
+  // Register after render so arrow navigation knows the order — doing this
+  // during render would call setState on the parent <Tabs> while rendering a
+  // child, which React forbids.
+  useEffect(() => {
+    registerValue(value);
+  }, [registerValue, value]);
 
   const selected = active === value;
 

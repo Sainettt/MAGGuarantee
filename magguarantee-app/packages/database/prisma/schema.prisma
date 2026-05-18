@@ -406,6 +406,10 @@ model Claim {
   @@index([carrierId, status])
   @@index([carrierId, deletedAt])
   @@index([vehicleId])
+  // Phase 3 — supports carrier-submission cooldown lookup:
+  // findFirst({ where: { vehicleId, status: { not: ODRZUCONO } }, orderBy: { createdAt: 'desc' } }).
+  // Kept alongside @@index([vehicleId]) which still serves plain list({ vehicleId }).
+  @@index([vehicleId, createdAt])
   @@index([status, statusChangedAt])
   @@index([dateStart])
   @@map("claims")

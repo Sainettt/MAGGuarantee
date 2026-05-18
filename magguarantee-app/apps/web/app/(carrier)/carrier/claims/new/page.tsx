@@ -13,6 +13,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
+  canSubmitByDuration,
+  DEFAULTS as SUBMISSION_DEFAULTS,
   SubmitClaimSchema,
   type PreviewClaimDto,
   type SubmitClaimDto,
@@ -118,6 +120,31 @@ export default function NewClaimPage() {
   const previewQ = useClaimPreview(debouncedPreviewBody, {
     enabled: !!debouncedPreviewBody,
   });
+
+  // ── Duration gate (mirror of api-side `canSubmitByDuration`) ──────
+  // Evaluated client-side so the submit button can disable + show an
+  // inline hint BEFORE we hit the API. The api re-checks with the same
+  // shared function, so this is purely UX — never a security boundary.
+  //
+  // Reads `totalDays` from the live km-calc preview (same engine the api
+  // uses on submit). While the preview is still loading we hold the gate
+  // open — the api re-checks anyway, and surfacing a stale "rejected"
+  // banner during typing is worse than a brief moment of optimism.
+  //
+  // Threshold (default 9): we use `DEFAULTS` from `@magguarantee/shared`
+  // until a `GET /app-config` endpoint exists. TODO: swap to a
+  // `useAppConfig()` hook once api-agent ships it.
+  const previewTotalDays = previewQ.data?.breakdown?.totalDays;
+  const durationGate = useMemo(() => {
+    if (previewTotalDays === undefined) return null;
+    return canSubmitByDuration({
+      totalDays: previewTotalDays,
+      workedDaysThreshold: SUBMISSION_DEFAULTS.workedDaysThreshold,
+    });
+  }, [previewTotalDays]);
+  const durationBlocked = durationGate?.ok === false;
+  const durationMessage =
+    durationGate && !durationGate.ok ? durationGate.message : null;
 
   // Server-side business-rule violations from the 422 envelope (rendered as
   // a sticky banner above the form). Cleared on every fresh submit attempt
@@ -417,6 +444,19 @@ export default function NewClaimPage() {
                 to ZAAKCEPTOWANO. The carrier-side form keeps just the
                 comment field.
               */}
+              {durationMessage && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning-dark dark:text-warning"
+                >
+                  {/* Polish, fully-rendered by shared/canSubmitByDuration. We
+                      do not prepend anything — the message already names both
+                      thresholds and the carrier's current values. */}
+                  {durationMessage}
+                </div>
+              )}
+
               <details>
                 <summary className="cursor-pointer text-sm font-semibold text-text-sub hover:text-text">
                   {tForm('addComment')}
@@ -453,7 +493,7 @@ export default function NewClaimPage() {
               <Button
                 type="submit"
                 size="lg"
-                disabled={submitting || previewBlocked}
+                disabled={submitting || previewBlocked || durationBlocked}
               >
                 {submitting ? t('submitting') : t('submit')}
               </Button>

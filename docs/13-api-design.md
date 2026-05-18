@@ -35,6 +35,16 @@
 }
 ```
 
+Дополнительные опциональные поля envelope:
+
+- `violations: string[]` — мульти-violation 422 (см. `POST /claims` ниже).
+  Сервис кидает `UnprocessableEntityException({ violations })`, фильтр
+  передаёт массив в ответ. UI отрисовывает список нарушений баннером.
+- `extensions: Record<string, unknown>` — структурированные машинные поля,
+  специфичные для конкретного 422 (например `nextAllowedAt: ISO` для
+  vehicle-cooldown). Никаких глобальных ключей не зарезервировано — каждый
+  сервис документирует свои в разделе соответствующего endpoint-а.
+
 Стандартные коды:
 
 | Код | Когда |
@@ -324,6 +334,40 @@ type SubmitClaimRequest = {
   plannerId: string;
   opiekunId: string;
 };
+
+// 422 problem-details для POST /claims несёт мульти-violation envelope:
+// {
+//   type: "/problems/business-rule",
+//   title: "Unprocessable Entity",
+//   status: 422,
+//   detail: "<человеческое сообщение или сводка>",
+//   violations: string[],          // полный список нарушений на pl-PL
+//   extensions?: {                 // опционально: машинные поля
+//     nextAllowedAt?: string;      // ISO timestamp для vehicle_cooldown
+//   }
+// }
+//
+// Известные коды violations (single-violation responses кладут текст в
+// `violations[0]`, multi-violation — каждый отдельной строкой):
+//
+//   • `duration_insufficient` — окно подачи не пройдено: ни календарный span
+//     ≥ `carrier_period_span_min_days`, ни округлённые часы простоя
+//     > `carrier_rounded_days_override_threshold`. Источник истины —
+//     `canSubmitByDuration()` из `@magguarantee/shared`.
+//   • `vehicle_cooldown` — на том же `vehicleId` уже есть claim в статусе
+//     ≠ ODRZUCONO моложе `carrier_vehicle_cooldown_days * 24h` (граница
+//     inclusive: ровно 144h проходит). В `extensions.nextAllowedAt` —
+//     ISO timestamp, начиная с которого можно подать снова. Источник —
+//     `cooldownCheck()` из `@magguarantee/shared`. ODRZUCONO-claims
+//     игнорируются: после отказа карьер может подать заново сразу.
+//
+// Legacy `min_days_to_submit` AppConfig **больше не читается** сервисом
+// (заменён парой `carrier_period_span_min_days` +
+// `carrier_rounded_days_override_threshold`). Строка в seed оставлена
+// для back-compat — никакого эффекта не оказывает.
+//
+// Legacy date-range overlap-блок (`findOverlapping`) **удалён** —
+// заменён cooldown'ом по `(vehicleId, createdAt)`.
 type ClaimDto = {
   id: string;
   nrZgl: string;

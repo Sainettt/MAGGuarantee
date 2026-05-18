@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
+import { ClaimStatus as PrismaClaimStatus } from '@magguarantee/database';
 import type {
   ClaimStatus,
   KmCalcBreakdown,
@@ -232,33 +233,34 @@ export class ClaimsRepository {
   }
 
   /**
-   * Finds an existing non-rejected claim for the same (carrier, vehicle) whose
-   * [dateStart, dateEnd] interval overlaps the given range. Used by the submit
-   * pipeline to block duplicate / overlapping period claims.
+   * Finds the most recent non-ODRZUCONO claim for the given vehicle. Used by
+   * the submit pipeline to enforce the per-vehicle cooldown gate (replacing
+   * the legacy date-range overlap check). Returns only the minimum columns
+   * needed by `cooldownCheck()` from `@magguarantee/shared` — the full
+   * `ClaimRow` flattening is unnecessary here and skipping the joins keeps
+   * the hot path cheap.
    *
-   * Two intervals [a1,b1] and [a2,b2] overlap iff `a1 ≤ b2 AND a2 ≤ b1`.
-   * `ODRZUCONO` (rejected) claims are excluded — those can be re-submitted
-   * with corrected data. All other statuses (NA_WERYFIKACJI, ZAAKCEPTOWANO,
-   * REKLAMACJA, OCZEKUJE_*, AUTORYZACJA_*) hold the period.
+   * `ODRZUCONO` (rejected) claims are excluded — a carrier whose previous
+   * claim was rejected can resubmit immediately. Soft-deleted rows are
+   * filtered upstream by the Prisma soft-delete extension; the explicit
+   * `deletedAt: null` below is defence in depth.
+   *
+   * Backed by the composite index `(vehicleId, createdAt)` from the
+   * `claim_vehicle_createdat_index_and_carrier_thresholds` migration.
    */
-  async findOverlapping(args: {
-    carrierId: string;
-    vehicleId: string;
-    dateStart: Date;
-    dateEnd: Date;
-  }): Promise<ClaimRow | null> {
+  async findLastNonRejectedForVehicle(
+    vehicleId: string,
+  ): Promise<{ id: string; nrZgl: string; createdAt: Date } | null> {
     const row = await this.prisma.client.claim.findFirst({
       where: {
-        carrierId: args.carrierId,
-        vehicleId: args.vehicleId,
-        dateStart: { lte: args.dateEnd },
-        dateEnd: { gte: args.dateStart },
-        status: { not: 'ODRZUCONO' },
+        vehicleId,
+        status: { not: PrismaClaimStatus.ODRZUCONO },
+        deletedAt: null,
       },
-      include: this.includeShape(),
       orderBy: { createdAt: 'desc' },
+      select: { id: true, nrZgl: true, createdAt: true },
     });
-    return row ? this.flatten(row) : null;
+    return row ?? null;
   }
 
   async list(filters: ClaimListFilters): Promise<ClaimRow[]> {

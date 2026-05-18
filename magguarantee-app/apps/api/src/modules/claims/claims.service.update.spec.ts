@@ -683,7 +683,7 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
     }
     const creates: CreateCall[] = [];
     const repo = {
-      findOverlapping: jest.fn(async () => null),
+      findLastNonRejectedForVehicle: jest.fn(async () => null),
       createWithin: jest.fn(
         async (
           _tx: unknown,
