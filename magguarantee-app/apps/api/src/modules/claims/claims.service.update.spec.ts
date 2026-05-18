@@ -56,6 +56,10 @@ function makeAuth(role: AuthUser['role'], sub = 'u-actor'): AuthUser {
 function makeBreakdown(): KmCalcBreakdown {
   return {
     totalDays: 20,
+    // No `hoursAdjusted` correction in the default fixture, so the raw
+    // (pre-adjustment) total mirrors `totalDays`. Tests that exercise the
+    // `<HoursReadout>` divergence override either field explicitly.
+    rawTotalDays: 20,
     kmGuaranteed: 10_800,
     ratePerKmEffective: 0.5,
     breakdown: [
@@ -246,6 +250,9 @@ function makeKmCalcService(
       calls.push({ input });
       return {
         totalDays: 20,
+        // Default raw equals adjusted total; per-test overrides pass either
+        // field via `result` to exercise the divergence path.
+        rawTotalDays: 20,
         kmGuaranteed: 10_800,
         ratePerKmEffective: 0.5,
         breakdown: makeBreakdown().breakdown,
@@ -446,6 +453,7 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
     // invoked and its output propagated.
     const km = makeKmCalcService({
       totalDays: 18,
+      rawTotalDays: 18,
       kmGuaranteed: 9_720,
       ratePerKmEffective: 0.5,
     });
@@ -746,6 +754,7 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
     const km = {
       calc: jest.fn(async () => ({
         totalDays: 20,
+        rawTotalDays: 20,
         kmGuaranteed: 10_800,
         ratePerKmEffective: 0.5,
         breakdown: [],

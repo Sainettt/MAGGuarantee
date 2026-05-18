@@ -414,15 +414,15 @@ model ClaimAttachment {
 // ─── DELEGATIONS ────────────────────────────────────────
 
 model Delegation {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  vehicleId String   @db.Uuid
-  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id])
-  trailerId String?  @db.Uuid
-  trailer   Trailer? @relation(fields: [trailerId], references: [id])
-  driverId  String?  @db.Uuid
-  driver    Driver?  @relation(fields: [driverId], references: [id])
-  carrierId String   @db.Uuid
-  carrier   Carrier  @relation(fields: [carrierId], references: [id])
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vehicleId String  @db.Uuid
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id])
+  trailerId String  @db.Uuid                                            // STRICT (2026-05)
+  trailer   Trailer @relation(fields: [trailerId], references: [id])
+  driverId  String  @db.Uuid                                            // STRICT (2026-05)
+  driver    Driver  @relation(fields: [driverId], references: [id])
+  carrierId String  @db.Uuid
+  carrier   Carrier @relation(fields: [carrierId], references: [id])
 
   driverNameSnapshot  String?
   driverPhoneSnapshot String?
@@ -432,14 +432,19 @@ model Delegation {
   departureCountry    String
   departurePostalCode String
 
-  // return planning — DB nullable + status-conditional CHECK delegation_returned_complete:
-  // when status='zjechal' all three must be set
-  plannedReturnAt  DateTime?
-  returnCountry    String?
-  returnPostalCode String?
+  // return planning — STRICT at submit (2026-05 product decision; was DB
+  // nullable + CHECK delegation_returned_complete prior to migration
+  // 20260518113943_delegation_required_fields_and_date_only). plannedReturnAt
+  // is `@db.Date` (date-only) — driver commits to a day, not an hour.
+  // CHECKs `delegation_return_country_length` (2..8 chars, covers VIES `EL`)
+  // and `delegation_return_postal_code_length` (≤16 chars) live at the DB
+  // level; country-specific postal-format validation is in shared Zod.
+  plannedReturnAt  DateTime @db.Date
+  returnCountry    String
+  returnPostalCode String
 
   status         DelegationStatus @default(zgloszony)
-  actualReturnAt DateTime?
+  actualReturnAt DateTime?                                              // set on markReturned
 
   reportedById String?   @db.Uuid
   reportedBy   User?     @relation("DelegationReporter", fields: [reportedById], references: [id])
@@ -598,9 +603,10 @@ populates both columns.
 
 | Поле | Слой защиты | Notes |
 |---|---|---|
-| `vehicleId`, `carrierId`, `departureAt`, `departureCountry`, `departurePostalCode` | Strict everywhere | |
-| `plannedReturnAt`, `returnCountry`, `returnPostalCode`, `actualReturnAt` | DB nullable + CHECK `delegation_returned_complete` | All required when `status='zjechal'` |
-| `trailerId`, `driverId`, `notes`, snapshots | Optional everywhere | |
+| `vehicleId`, `carrierId`, `trailerId`, `driverId`, `departureAt`, `departureCountry`, `departurePostalCode` | Strict everywhere | `trailerId`/`driverId` made NOT NULL in 2026-05 (a delegation without trailer or driver doesn't model a real haul). |
+| `plannedReturnAt`, `returnCountry`, `returnPostalCode` | Strict everywhere | NOT NULL since `20260518113943_delegation_required_fields_and_date_only`; `plannedReturnAt` is `@db.Date` (no time). DB length CHECKs on country (2..8) + postal (≤16); format validation in shared Zod. |
+| `actualReturnAt` | DB nullable | Set by `markReturned` transition on `zjechal`. API layer enforces presence when `status='zjechal'`; no DB CHECK because the column flips together with `status` inside a single service transaction (see "Invariants for api-agent"). |
+| `notes`, snapshots | Optional everywhere | |
 
 ### User
 
@@ -788,6 +794,7 @@ populates both columns.
 | `20260508194914_phase3_insurance_value_required` | NOT NULL на `carriers.insuranceValue`. Без OCP-страховки перевозчик не может ехать; `insuranceExpiry`/`licenseExpiry` остаются nullable (могут не быть копий на момент онбординга). Бэкфилл `0` для stale-dev-строк перед SET NOT NULL — Zod на API enforce'ит `> 0`, поэтому 0 не переживает round-trip через create/update. |
 | `20260515112821_carrier_vat_id_optional` | DROP NOT NULL с `carriers.vatId`. Продуктовое решение: EU VAT перестаёт быть обязательным — некоторые перевозчики регистрируются без VAT-UE и работают только с локальным NIP/TIN. `nip` остаётся NOT NULL. |
 | `20260515130307_vehicle_certificate_l_to_boolean` | Конвертирует `vehicles.certificateL` из enum `CertificateL { L1 \| L2 \| L3 }` в `Boolean NOT NULL`. Маппинг: `L1`/`L2`/`L3` → `true`, всё прочее → `false`. Шаги: ADD temp boolean с дефолтом `false` → BACKFILL через CASE → DROP старой enum-колонки → RENAME temp → DROP DEFAULT → DROP TYPE `CertificateL`. Имя поля сохранено. Продуктовое решение: три шумовых класса не используются — нужен только TAK/NIE флаг. |
+| `20260518113943_delegation_required_fields_and_date_only` | Hard-wipe + tightening on `delegations`. TRUNCATE (user-confirmed; no backfill — fields are user-supplied planning data, not derivable), затем SET NOT NULL на `trailerId`, `driverId`, `plannedReturnAt`, `returnCountry`, `returnPostalCode`. `plannedReturnAt` меняет тип с `TIMESTAMP(3)` на `DATE` (день, без часа). DROP CHECK `delegation_returned_complete` (становится излишним — три из четырёх полей теперь NOT NULL безусловно; `actualReturnAt` остаётся nullable, его связь со статусом enforce'ит API в одной транзакции с переходом). ADD CHECK `delegation_return_country_length` (2..8 chars, чтобы вместить VIES-специфичный `EL` вместо `GR`) и `delegation_return_postal_code_length` (≤16 chars). |
 
 Production deploy: `prisma migrate deploy` в CI/CD пайплайне (без `--create-only`).
 

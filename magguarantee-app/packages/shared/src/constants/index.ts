@@ -5,3 +5,4 @@
 // raw values both api and web consume.
 
 export * from './eu-vat-countries';
+export * from './eu-postal-codes';

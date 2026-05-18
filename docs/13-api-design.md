@@ -218,6 +218,23 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 | POST `/delegations/:id/returned` | `markDelegacjaReturned` (weryfikator) |
 | POST `/delegations/:id/cancel` | `cancelDelegacja` (carrier — только свои `zgloszony`, weryfikator — любые) |
 
+**`POST /delegations` body — required fields** (post-migration `20260518113943_delegation_required_fields_and_date_only`):
+
+| Field | Type | Notes |
+|---|---|---|
+| `vehicleId` | UUID | required |
+| `trailerId` | UUID | required (was optional pre-migration) |
+| `driverId` | UUID | required (was optional pre-migration) |
+| `departureAt` | ISO datetime | required |
+| `departureCountry` | enum (`EU_VAT_COUNTRY_CODES`, VIES dialect — Greece = `EL`) | required |
+| `departurePostalCode` | string ≤ 16 chars, per-country format | required, validated against `EU_POSTAL_CODES` (see `packages/shared/src/constants/eu-postal-codes.ts`) |
+| `plannedReturnAt` | ISO date `YYYY-MM-DD` (date-only) | required; must be on or after the date portion of `departureAt` |
+| `returnCountry` | enum (same as `departureCountry`) | required |
+| `returnPostalCode` | string ≤ 16 chars, per-country format | required, same validation rule |
+| `comment` | string ≤ 2000 | optional |
+
+DB CHECK enforces `returnCountry` length 2..8 (covers `EL`) and `returnPostalCode` ≤ 16; per-country format is enforced at the Zod layer. The legacy `delegation_returned_complete` CHECK has been dropped — `status='zjechal'` ⇒ `actualReturnAt` is now enforced by the api when the weryfikator triggers the state transition.
+
 ### Fleet aggregates — `/api/v1/fleet`
 
 Агрегаты для главных экранов (вместо разрозненных `getXFleet` функций).
@@ -400,6 +417,22 @@ type PreviewResponse = {
   ratePerKmEffective: number;
   breakdown: KmCalcBreakdown;
 };
+
+// Источник истины формы `KmCalcBreakdown` — `KmCalcBreakdownSchema` в
+// `packages/shared/src/schemas/claims.ts`. Высокоуровневая форма:
+// {
+//   totalDays: number,         // зачтённые рабочие дни (после Korekta godzin)
+//   rawTotalDays: number,      // сырые рабочие дни (до Korekta godzin); legacy
+//                              // JSONB-строки без этого ключа бэкфилятся в
+//                              // `totalDays` — UI безопасно рендерит даже до
+//                              // деплоя engine-изменения.
+//   kmGuaranteed: number,
+//   ratePerKmEffective: number,
+//   breakdown: MonthBreakdown[]
+// }
+// Поле `rawTotalDays` нужно UI-компоненту `<HoursReadout>` (см.
+// docs/14-design-system.md §"Phase 3.1") чтобы показать "240,00 h surowych /
+// 215,50 h zaliczonych".
 ```
 
 ### Update claim (verification)

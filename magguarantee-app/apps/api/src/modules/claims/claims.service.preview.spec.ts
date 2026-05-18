@@ -79,6 +79,7 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     ratePerKmEffective: 0.5,
     breakdown: {
       totalDays: 20,
+      rawTotalDays: 20,
       kmGuaranteed: 10_800,
       ratePerKmEffective: 0.5,
       breakdown: [],
@@ -206,6 +207,7 @@ function makeKmCalcService(): {
   const calls: { input: unknown }[] = [];
   const result: KmCalcResult = {
     totalDays: 20,
+    rawTotalDays: 20,
     kmGuaranteed: 10_800,
     ratePerKmEffective: 0.5,
     breakdown: [],

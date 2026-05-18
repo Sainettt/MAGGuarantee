@@ -227,13 +227,13 @@
 | Поле | Назначение |
 |---|---|
 | `vehicleId` | FK → Vehicle |
-| `trailerId` | FK → Trailer (опц.) |
-| `driverId` | FK → Driver (опц.) |
+| `trailerId` | FK → Trailer |
+| `driverId` | FK → Driver |
 | `carrierId` | FK → Carrier |
 | `driverNameSnapshot`, `driverPhoneSnapshot` | snapshot контактов на момент выезда |
 | `departureAt`, `departureCountry`, `departurePostalCode` | старт |
-| `plannedReturnAt`, `returnCountry`, `returnPostalCode` | план возврата |
-| `actualReturnAt` | факт возврата |
+| `plannedReturnAt` (date-only, `@db.Date`), `returnCountry`, `returnPostalCode` | план возврата — заполняется на этапе `zgloszony` (продуктовое решение 2026-05) |
+| `actualReturnAt` (timestamp) | факт возврата, выставляется только при переходе в `zjechal` |
 | `status` | `zgloszony` → `w_trasie` → `zjechal` (или `anulowany` на любой стадии) |
 | `reportedById` | FK → User (кто зарегистрировал) |
 | `verifiedById` | FK → User (верификатор, изменивший статус) |
@@ -243,7 +243,9 @@
 - Status-переходы строгие: `zgloszony → w_trasie → zjechal`. Переход `markReturned` обновляет `Vehicle.lastDroveAt = now()` (auto-side-effect, не выставляется руками).
 - Перевозчик может анулировать только свои `zgloszony`.
 - Верификатор может анулировать любой.
-- **CHECK `delegation_returned_complete`** — при `status='zjechal'` поля `actualReturnAt`, `returnCountry` (не пустое), `returnPostalCode` (не пустое) обязаны быть заполнены. План возврата (`plannedReturnAt`/`returnCountry`/`returnPostalCode`) на момент `zgloszony` может быть пустым (spot-rate / one-way trips).
+- `trailerId`, `driverId`, `plannedReturnAt`, `returnCountry`, `returnPostalCode` — все NOT NULL (migration `20260518113943_delegation_required_fields_and_date_only`). План возврата задаётся уже на момент `zgloszony`.
+- `status='zjechal'` ⇒ `actualReturnAt` обязан быть заполнен. Раньше это гарантировал DB CHECK `delegation_returned_complete` — он удалён, теперь правило enforced на уровне api (в сервисе при переходе статуса).
+- DB CHECK на длину: `returnCountry` 2..8 символов (covers `EL`), `returnPostalCode` ≤ 16. Формат-валидация (per-country regex) — на Zod-уровне через `EU_POSTAL_CODES` (см. `packages/shared/src/constants/eu-postal-codes.ts`).
 
 ### `MonthlyLimit` — лимиты на месяц
 
@@ -310,8 +312,8 @@ Append-only журнал всех критических операций.
 | `Carrier` 1:N `Claim` | перевозчик подаёт заявления |
 | `Vehicle` 1:N `Claim` | заявление на конкретное авто |
 | `Vehicle` 1:N `Delegation` | выезды авто |
-| `Trailer` 1:N `Delegation` | (опц.) с прицепом |
-| `Driver` 1:N `Delegation` | (опц.) с водителем |
+| `Trailer` 1:N `Delegation` | прицеп обязателен |
+| `Driver` 1:N `Delegation` | водитель обязателен |
 | `Trailer` N:1 `TrailerType` | тип из справочника |
 | `User` 1:N `AuditLog` | действия |
 
@@ -331,7 +333,7 @@ Append-only журнал всех критических операций.
 | Claim status-переходы — только 9 легальных рёбер | `claim-state-machine.ts` + сервис; см. секцию `Claim` |
 | Status-переходы Delegation строгие | проверка в сервисе |
 | Claim ZAAKCEPTOWANO ⇒ orderNumber+orderDate+amountApproved | DB CHECK `claim_accepted_payment_complete` |
-| Delegation zjechal ⇒ actualReturnAt+returnCountry+returnPostalCode | DB CHECK `delegation_returned_complete` |
+| Delegation zjechal ⇒ actualReturnAt заполнен | сервис (api enforce) при переходе статуса. План возврата (`returnCountry`/`returnPostalCode`) уже NOT NULL на этапе `zgloszony` |
 | Vehicle gps=true ⇒ gpsMobilePhone | DB CHECK `vehicle_gps_device_when_gps_on` |
 | `Vehicle.lastDroveAt` всегда выставляется системой при Delegation→`zjechal` | сервис, не UI |
 | Audit пишется для всех mutating ops | interceptor |

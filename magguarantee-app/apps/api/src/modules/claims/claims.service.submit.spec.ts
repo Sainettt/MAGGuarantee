@@ -175,6 +175,9 @@ function makeKmCalc(result?: Partial<KmCalcResult>): KmCalcService {
     // the success-path tests actually reach createWithin().
     calc: jest.fn(async () => ({
       totalDays: 10,
+      // Default mirror of totalDays (no `hoursAdjusted` override in the
+      // default mock); individual cases can override either independently.
+      rawTotalDays: 10,
       kmGuaranteed: 10_800,
       ratePerKmEffective: 0.5,
       breakdown: [],

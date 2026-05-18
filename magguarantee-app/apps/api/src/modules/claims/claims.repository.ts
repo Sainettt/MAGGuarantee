@@ -475,7 +475,7 @@ export class ClaimsRepository {
       kmDifference: decimalToNumber(row.kmDifference) ?? 0,
       paymentEur: decimalToNumber(row.paymentEur) ?? 0,
       ratePerKmEffective: decimalToNumber(row.ratePerKmEffective) ?? 0,
-      breakdown: (row.breakdown as KmCalcBreakdown | null) ?? null,
+      breakdown: hydrateBreakdown(row.breakdown),
       status: row.status,
       statusChangedAt: row.statusChangedAt,
       decidedById: row.decidedById,
@@ -618,4 +618,31 @@ function decimalToNumber(
     return (v as { toNumber(): number }).toNumber();
   }
   return null;
+}
+
+/**
+ * Coerce a raw `Claim.breakdown` JSONB cell into the runtime `KmCalcBreakdown`
+ * shape. Legacy rows persisted before the `rawTotalDays` field was added
+ * (see docs/14-design-system.md §"Phase 3.1" / `KmCalcBreakdownSchema`) do
+ * NOT carry the key — backfill it from `totalDays` so the `<HoursReadout>`
+ * UI collapses to a single value rather than rendering `undefined`.
+ *
+ * The DB read path bypasses Zod parsing (we trust our own writes), so the
+ * `.transform()` defined on `KmCalcBreakdownSchema` does NOT run here. Hence
+ * the explicit hydration call.
+ */
+function hydrateBreakdown(raw: unknown): KmCalcBreakdown | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== 'object') return null;
+  const obj = raw as Partial<KmCalcBreakdown> & {
+    totalDays?: number;
+    rawTotalDays?: number;
+  };
+  const totalDays = typeof obj.totalDays === 'number' ? obj.totalDays : 0;
+  const rawTotalDays =
+    typeof obj.rawTotalDays === 'number' ? obj.rawTotalDays : totalDays;
+  return {
+    ...(obj as KmCalcBreakdown),
+    rawTotalDays,
+  };
 }

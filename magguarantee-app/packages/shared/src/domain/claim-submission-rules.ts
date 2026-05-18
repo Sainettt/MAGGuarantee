@@ -109,6 +109,26 @@ export function formatDaysPl(days: number): string {
   return DAYS_FORMATTER.format(safe);
 }
 
+/**
+ * Convert a day-count → hours and format pl-PL with 2 decimals and an `h`
+ * suffix. Used by the `<HoursReadout>` component (docs/14-design-system.md
+ * §"Phase 3.1") to render "240,00 h" from a day-count returned by the
+ * km-calc engine. Lives next to `formatDaysPl` so both formatters share the
+ * same pl-PL `Intl` instance (comma decimal, fixed 2-dp) and the web side
+ * never has to re-derive the convention.
+ *
+ * Non-finite / negative input clamps to `0,00 h` to keep the live-preview
+ * label rendering during a half-typed form input rather than crashing.
+ *
+ * - `formatHoursPl(10)   === '240,00 h'`
+ * - `formatHoursPl(8.87) === '212,88 h'`
+ * - `formatHoursPl(0)    === '0,00 h'`
+ */
+export function formatHoursPl(days: number): string {
+  const safe = Number.isFinite(days) && days > 0 ? days : 0;
+  return `${formatDaysPl(safe * 24)} h`;
+}
+
 // ─── Public API: duration gate ───────────────────────────────
 
 /**

@@ -178,12 +178,33 @@ export const MonthBreakdownSchema = z.object({
 });
 export type MonthBreakdownDto = z.infer<typeof MonthBreakdownSchema>;
 
-export const KmCalcBreakdownSchema = z.object({
-  totalDays: z.number().nonnegative(),
-  kmGuaranteed: z.number().nonnegative(),
-  ratePerKmEffective: z.number().nonnegative(),
-  breakdown: z.array(MonthBreakdownSchema),
-});
+/**
+ * Wire shape for the full km-calc envelope (persisted JSONB on
+ * `Claim.breakdown`, returned by `/preview` and `/claims/:nrZgl`).
+ *
+ * `rawTotalDays` is the pre-`hoursAdjusted` total (engine surfaces this so
+ * the UI can render `<HoursReadout>` with both raw and adjusted hours per
+ * docs/14-design-system.md §"Phase 3.1"). Legacy `Claim.breakdown` JSONB
+ * rows written before this field existed do NOT carry the key — the
+ * trailing `.transform()` backfills `rawTotalDays = totalDays` so the UI
+ * cleanly collapses to a single-value readout (the "no adjustment" path).
+ *
+ * Zod 3 cannot reference sibling fields from inside `.default(...)` (the
+ * default callback receives no args), so the missing-field fallback has to
+ * live in a post-parse transform rather than the field schema itself.
+ */
+export const KmCalcBreakdownSchema = z
+  .object({
+    totalDays: z.number().nonnegative(),
+    rawTotalDays: z.number().nonnegative().optional(),
+    kmGuaranteed: z.number().nonnegative(),
+    ratePerKmEffective: z.number().nonnegative(),
+    breakdown: z.array(MonthBreakdownSchema),
+  })
+  .transform((v) => ({
+    ...v,
+    rawTotalDays: v.rawTotalDays ?? v.totalDays,
+  }));
 export type KmCalcBreakdown = z.infer<typeof KmCalcBreakdownSchema>;
 
 // ─── Preview response ────────────────────────────────────

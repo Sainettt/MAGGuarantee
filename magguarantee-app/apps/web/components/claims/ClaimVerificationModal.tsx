@@ -34,6 +34,7 @@ import {
 } from '@magguarantee/shared';
 
 import { StatusBadge } from '@/components/carrier/StatusBadge';
+import { HoursReadout } from '@/components/claims/HoursReadout';
 import { RecalcBadge } from '@/components/claims/RecalcBadge';
 import {
   decisionTargetsFor,
@@ -481,23 +482,34 @@ function ModalBody({ claim, onClose, t, tStatus }: ModalBodyProps) {
               </p>
             )}
 
-            {/* Read-only context block */}
-            <div className="grid grid-cols-2 gap-3 rounded-md border border-border bg-input p-3">
-              <Stat
-                label={tEdit('kmGuaranteed')}
-                value={`${Math.round(claim.kmGuaranteed).toLocaleString('pl-PL')} km`}
-              />
-              <Stat
-                label={tEdit('amountRequested')}
-                value={formatEur(claim.amountRequested)}
-              />
-              <Stat
-                label={tEdit('doplata')}
-                value={formatEur(claim.paymentEur)}
-              />
-              <Stat
-                label={tEdit('mileage')}
-                value={`${Math.round(claim.mileage).toLocaleString('pl-PL')} km`}
+            {/* Read-only context block — 2×2 grid optimised for scan-parity
+                between the 4 baseline numbers the verifier reads while
+                filling the form (docs/14 §3.1B "should the modal use the
+                header layout? No — keep them visually distinct"). The
+                HoursReadout sits below the grid as its own full-width row
+                because it carries two values (raw + counted). */}
+            <div className="rounded-md border border-border bg-input p-3 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <Stat
+                  label={tEdit('kmGuaranteed')}
+                  value={`${Math.round(claim.kmGuaranteed).toLocaleString('pl-PL')} km`}
+                />
+                <Stat
+                  label={tEdit('amountRequested')}
+                  value={formatEur(claim.amountRequested)}
+                />
+                <Stat
+                  label={tEdit('doplata')}
+                  value={formatEur(claim.paymentEur)}
+                />
+                <Stat
+                  label={tEdit('mileage')}
+                  value={`${Math.round(claim.mileage).toLocaleString('pl-PL')} km`}
+                />
+              </div>
+              <HoursReadout
+                rawTotalDays={claim.breakdown?.rawTotalDays ?? null}
+                totalDays={claim.breakdown?.totalDays ?? null}
               />
             </div>
 
@@ -537,19 +549,26 @@ function ModalBody({ claim, onClose, t, tStatus }: ModalBodyProps) {
                           v === '' || v === null ? undefined : Number(v),
                       })}
                     />
-                    {/* Surface the carrier's original input when the verifier
-                        (or a prior verifier) has overridden it. We render the
-                        hint only on a real divergence — equal values mean no
-                        override happened yet and the input is the source of
-                        truth on its own. */}
-                    {claim.origHoursAdjusted !== null &&
-                      claim.origHoursAdjusted !== claim.hoursAdjustedValue && (
-                        <p className="text-xs text-warning mt-1">
-                          {tEdit('hoursAdjustedOrigHint', {
-                            orig: claim.origHoursAdjusted,
-                          })}
-                        </p>
-                      )}
+                    {/* Live HoursReadout — recomputes `totalDays` locally
+                        from the watched `hoursAdjusted` input (pure
+                        arithmetic, no /preview roundtrip per docs/14
+                        §3.1A "Live-update behaviour"). The engine works in
+                        days, the form input is in HOURS — divide by 24
+                        with the same `round2` semantics the engine uses
+                        (see km-calc.ts `applyHoursAdjustment`). The
+                        previous `text-warning` origHoursAdjusted hint is
+                        absorbed into HoursReadout.hint.override per the
+                        design system §A placement 3. */}
+                    <div className="mt-1.5">
+                      <HoursReadout
+                        live
+                        rawTotalDays={claim.breakdown?.rawTotalDays ?? null}
+                        totalDays={computeLiveTotalDays(
+                          claim.breakdown?.rawTotalDays ?? null,
+                          wHoursAdjusted,
+                        )}
+                      />
+                    </div>
                   </FormField>
                   <FormField
                     label={tEdit('dateStart')}
@@ -1066,6 +1085,34 @@ function AuthorizationTab({ claim }: { claim: ClaimDto }) {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Mirror of the km-calc engine's `applyHoursAdjustment` semantics
+ * (packages/shared/src/domain/km-calc.ts) — used only to render the live
+ * `<HoursReadout>` under the verifier's `hoursAdjusted` input. Pure
+ * arithmetic, no network roundtrip. Returns the projected post-correction
+ * `totalDays` so the readout's "counted" value updates on every keystroke.
+ *
+ * Unit reminder: the form input is in HOURS (matches `HoursAdjustedSchema`
+ * in shared/schemas/claims.ts), the engine works in DAYS — divide by 24
+ * with `round2` (same precision the engine persists). Returns `null` when
+ * we have no baseline to subtract from (legacy breakdown / fallback path).
+ */
+function computeLiveTotalDays(
+  rawTotalDays: number | null,
+  hoursAdjustedInput: number | undefined,
+): number | null {
+  if (rawTotalDays == null || !Number.isFinite(rawTotalDays)) return null;
+  if (rawTotalDays <= 0) return rawTotalDays;
+  const hours =
+    hoursAdjustedInput != null && Number.isFinite(hoursAdjustedInput)
+      ? Math.max(0, Number(hoursAdjustedInput))
+      : 0;
+  if (hours <= 0) return rawTotalDays;
+  const korektaDni = Math.round((hours / 24) * 100) / 100;
+  const adjusted = Math.max(0, Math.round((rawTotalDays - korektaDni) * 100) / 100);
+  return adjusted;
+}
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (

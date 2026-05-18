@@ -1,7 +1,18 @@
 'use client';
 
-// Phase 3 — new delegation form. Carrier picks vehicle (required) +
-// optional driver / trailer / planned return / countries / comment.
+// Phase 3 — new delegation form. Carrier picks vehicle / driver / trailer /
+// departure / planned-return (all required since the
+// `phase3_delegation_required_fields_and_date_only` migration).
+//
+// Highlights vs. the earlier draft:
+// - Country pickers are `<CountrySelect>` (EU-27 enum) instead of free-text
+//   inputs — keeps client + server enums in lockstep.
+// - Postal codes use `<MaskedPostalInput>`, masked per-country per
+//   `EU_POSTAL_CODES`. When the country changes we clear the postal — the
+//   previous-country format is almost never valid for the new one.
+// - `plannedReturnAt` is `type="date"` (the DB column is `@db.Date`).
+// - Empty-string defaults keep RHF inputs controlled; Zod rejects them at
+//   submit so the user sees inline validation errors.
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ArrowLeft } from 'lucide-react';
@@ -9,10 +20,11 @@ import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm, type Resolver } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
   SubmitDelegationSchema,
+  type EuVatCountryCode,
   type SubmitDelegationDto,
 } from '@magguarantee/shared';
 
@@ -20,7 +32,9 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
+import { CountrySelect } from '@/components/forms/CountrySelect';
 import { FormField, FormSection } from '@/components/forms/Form';
+import { MaskedPostalInput } from '@/components/forms/MaskedPostalInput';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useSubmitDelegation } from '@/lib/hooks/useDelegations';
 import { useFormDraft } from '@/lib/hooks/useFormDraft';
@@ -28,15 +42,29 @@ import { useMyFleet } from '@/lib/hooks/useMyFleet';
 
 const DRAFT_KEY = 'draft:carrier:newDelegation';
 
-type FormValues = SubmitDelegationDto;
+/**
+ * Form-shape mirror of `SubmitDelegationDto` that uses empty strings (instead
+ * of `undefined` / the enum literal) so every input is controlled from the
+ * first render. Zod takes care of rejecting the empty values at submit time.
+ */
+type FormValues = {
+  vehicleId: string;
+  trailerId: string;
+  driverId: string;
+  departureAt: string;
+  departureCountry: EuVatCountryCode | '';
+  departurePostalCode: string;
+  plannedReturnAt: string;
+  returnCountry: EuVatCountryCode | '';
+  returnPostalCode: string;
+  comment: string | undefined;
+};
 
 const EMPTY_DEFAULTS: FormValues = {
-  vehicleId: '' as unknown as string,
-  trailerId: undefined,
-  driverId: undefined,
+  vehicleId: '',
+  trailerId: '',
+  driverId: '',
   departureAt: '',
-  // Country / postal / plannedReturn are NOT NULL since phase3_blocks; empty
-  // strings keep inputs controlled and Zod surfaces errors on submit.
   departureCountry: '',
   departurePostalCode: '',
   plannedReturnAt: '',
@@ -53,7 +81,10 @@ export default function NewDelegationPage() {
   const fleetQ = useMyFleet();
 
   const form = useForm<FormValues>({
-    resolver: zodResolver(SubmitDelegationSchema),
+    // The resolver is typed against the strict DTO; cast lets us keep the
+    // form-friendly `FormValues` (empty strings) at the RHF surface — Zod
+    // converts them to validation errors instead.
+    resolver: zodResolver(SubmitDelegationSchema) as unknown as Resolver<FormValues>,
     defaultValues: { ...EMPTY_DEFAULTS },
   });
 
@@ -144,6 +175,7 @@ export default function NewDelegationPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormField
                 label={tForm('driver')}
+                required
                 error={errs.driverId?.message}
                 htmlFor="del-driverId"
               >
@@ -158,6 +190,7 @@ export default function NewDelegationPage() {
               </FormField>
               <FormField
                 label={tForm('trailer')}
+                required
                 error={errs.trailerId?.message}
                 htmlFor="del-trailerId"
               >
@@ -203,11 +236,28 @@ export default function NewDelegationPage() {
                 error={errs.departureCountry?.message}
                 htmlFor="del-departureCountry"
               >
-                <Input
-                  id="del-departureCountry"
-                  className="h-10"
-                  placeholder="PL"
-                  {...form.register('departureCountry')}
+                <Controller
+                  control={form.control}
+                  name="departureCountry"
+                  render={({ field }) => (
+                    <CountrySelect
+                      id="del-departureCountry"
+                      className="h-10"
+                      value={field.value}
+                      onChange={(e) => {
+                        field.onChange(e.target.value);
+                        // Per-country mask changes — drop the now-incompatible
+                        // postal so the user can't submit `00-001` while the
+                        // country says Germany.
+                        form.setValue('departurePostalCode', '', {
+                          shouldDirty: true,
+                          shouldValidate: false,
+                        });
+                      }}
+                      onBlur={field.onBlur}
+                      ref={field.ref}
+                    />
+                  )}
                 />
               </FormField>
               <FormField
@@ -216,10 +266,20 @@ export default function NewDelegationPage() {
                 error={errs.departurePostalCode?.message}
                 htmlFor="del-departurePostalCode"
               >
-                <Input
-                  id="del-departurePostalCode"
-                  className="h-10"
-                  {...form.register('departurePostalCode')}
+                <Controller
+                  control={form.control}
+                  name="departurePostalCode"
+                  render={({ field }) => (
+                    <MaskedPostalInput
+                      id="del-departurePostalCode"
+                      className="h-10"
+                      country={form.watch('departureCountry')}
+                      value={field.value}
+                      onChange={field.onChange}
+                      onBlur={field.onBlur}
+                      ref={field.ref}
+                    />
+                  )}
                 />
               </FormField>
             </div>
@@ -229,41 +289,64 @@ export default function NewDelegationPage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <FormField
                 label={tForm('plannedReturnAt')}
+                required
                 error={errs.plannedReturnAt?.message}
                 htmlFor="del-plannedReturnAt"
               >
                 <Input
                   id="del-plannedReturnAt"
-                  type="datetime-local"
+                  type="date"
                   className="h-10"
-                  {...form.register('plannedReturnAt', {
-                    setValueAs: (v) => {
-                      if (!v) return undefined;
-                      return new Date(v as string).toISOString();
-                    },
-                  })}
+                  {...form.register('plannedReturnAt')}
                 />
               </FormField>
               <FormField
                 label={tForm('returnCountry')}
+                required
                 error={errs.returnCountry?.message}
                 htmlFor="del-returnCountry"
               >
-                <Input
-                  id="del-returnCountry"
-                  className="h-10"
-                  {...form.register('returnCountry')}
+                <Controller
+                  control={form.control}
+                  name="returnCountry"
+                  render={({ field }) => (
+                    <CountrySelect
+                      id="del-returnCountry"
+                      className="h-10"
+                      value={field.value}
+                      onChange={(e) => {
+                        field.onChange(e.target.value);
+                        form.setValue('returnPostalCode', '', {
+                          shouldDirty: true,
+                          shouldValidate: false,
+                        });
+                      }}
+                      onBlur={field.onBlur}
+                      ref={field.ref}
+                    />
+                  )}
                 />
               </FormField>
               <FormField
                 label={tForm('returnPostalCode')}
+                required
                 error={errs.returnPostalCode?.message}
                 htmlFor="del-returnPostalCode"
               >
-                <Input
-                  id="del-returnPostalCode"
-                  className="h-10"
-                  {...form.register('returnPostalCode')}
+                <Controller
+                  control={form.control}
+                  name="returnPostalCode"
+                  render={({ field }) => (
+                    <MaskedPostalInput
+                      id="del-returnPostalCode"
+                      className="h-10"
+                      country={form.watch('returnCountry')}
+                      value={field.value}
+                      onChange={field.onChange}
+                      onBlur={field.onBlur}
+                      ref={field.ref}
+                    />
+                  )}
                 />
               </FormField>
             </div>

@@ -60,6 +60,14 @@ export interface MonthBreakdown {
 export interface KmCalcResult {
   /** Sum of working days across all months (rounded to 2 decimals). */
   totalDays: number;
+  /**
+   * Pre-adjustment total working days (sum of monthly raw days before
+   * `hoursAdjusted` is applied). Equals `totalDays` when no adjustment.
+   * Surfaced so the UI can show both "surowych" (raw) and "zaliczonych"
+   * (after correction) hours side-by-side per docs/14-design-system.md
+   * §Phase 3.1 "HoursReadout". Same 2-dp rounding as totalDays.
+   */
+  rawTotalDays: number;
   /** Sum of `kmInMonth` across the breakdown (already rounded). */
   kmGuaranteed: number;
   /** Weighted EUR/km across months proportional to km share. Rounded to 3 decimals. */
@@ -339,6 +347,7 @@ export function calcKmGwarantPerMonth(input: KmCalcInput): KmCalcResult {
   if (!start || !end || start.date > end.date) {
     return {
       totalDays: 0,
+      rawTotalDays: 0,
       kmGuaranteed: 0,
       ratePerKmEffective: round3(input.fallback.ratePerKm),
       breakdown: [],
@@ -402,6 +411,10 @@ export function calcKmGwarantPerMonth(input: KmCalcInput): KmCalcResult {
 
   return {
     totalDays,
+    // Pre-adjustment sum, rounded to 2 dp — matches `totalDays` when
+    // `hoursAdjusted` is 0 (the common case). Surfaced so the carrier /
+    // verifier UI can render `<HoursReadout>` with both values side-by-side.
+    rawTotalDays: round2(rawTotalDays),
     kmGuaranteed,
     ratePerKmEffective,
     breakdown,

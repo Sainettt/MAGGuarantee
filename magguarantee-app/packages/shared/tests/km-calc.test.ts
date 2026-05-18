@@ -69,6 +69,8 @@ describe('calcKmGwarantPerMonth — full-month', () => {
   it('Jan 2026 — 20 working days, weekends excluded', () => {
     const r = run({ dateStart: '2026-01-01', dateEnd: '2026-01-31' });
     expect(r.totalDays).toBe(20);
+    // No `hoursAdjusted` → raw equals adjusted total.
+    expect(r.rawTotalDays).toBe(20);
     expect(r.kmGuaranteed).toBe(10800);
     expect(r.ratePerKmEffective).toBe(0.5);
     expect(r.breakdown).toEqual([
@@ -89,6 +91,7 @@ describe('calcKmGwarantPerMonth — full-month', () => {
   it('Feb 2026 — 20 working days', () => {
     const r = run({ dateStart: '2026-02-01', dateEnd: '2026-02-28' });
     expect(r.totalDays).toBe(20);
+    expect(r.rawTotalDays).toBe(20);
     expect(r.kmGuaranteed).toBe(10800);
     expect(r.breakdown[0].workingDays).toBe(20);
   });
@@ -96,12 +99,14 @@ describe('calcKmGwarantPerMonth — full-month', () => {
   it('Mar 2026 — 22 working days', () => {
     const r = run({ dateStart: '2026-03-01', dateEnd: '2026-03-31' });
     expect(r.totalDays).toBe(22);
+    expect(r.rawTotalDays).toBe(22);
     expect(r.kmGuaranteed).toBe(11880);
   });
 
   it('Jul 2026 — 21 working days (incl. 14 Jul FR holiday excluded)', () => {
     const r = run({ dateStart: '2026-07-01', dateEnd: '2026-07-31' });
     expect(r.totalDays).toBe(21);
+    expect(r.rawTotalDays).toBe(21);
     expect(r.kmGuaranteed).toBe(11340);
   });
 });
@@ -310,6 +315,9 @@ describe('calcKmGwarantPerMonth — empty / inverted', () => {
   it('inverted range start>end → empty result with fallback rate', () => {
     const r = run({ dateStart: '2026-03-15', dateEnd: '2026-03-10' });
     expect(r.totalDays).toBe(0);
+    // Early-return branch must also publish rawTotalDays so the UI never
+    // sees `undefined` on the empty-period path.
+    expect(r.rawTotalDays).toBe(0);
     expect(r.kmGuaranteed).toBe(0);
     expect(r.ratePerKmEffective).toBe(0.5);
     expect(r.breakdown).toEqual([]);
@@ -318,6 +326,7 @@ describe('calcKmGwarantPerMonth — empty / inverted', () => {
   it('invalid ISO date string → empty result', () => {
     const r = run({ dateStart: 'not-a-date', dateEnd: '2026-03-15' });
     expect(r.totalDays).toBe(0);
+    expect(r.rawTotalDays).toBe(0);
     expect(r.kmGuaranteed).toBe(0);
     expect(r.breakdown).toEqual([]);
   });
@@ -359,33 +368,44 @@ describe('calcKmGwarantPerMonth — fractional days (timeFrom / timeTo)', () => 
 });
 
 describe('calcKmGwarantPerMonth — hoursAdjusted', () => {
-  it('hoursAdjusted=0 → unchanged', () => {
+  it('hoursAdjusted=0 → unchanged (rawTotalDays === totalDays)', () => {
     const r = run({
       dateStart: '2026-03-02',
       dateEnd: '2026-03-13',
       hoursAdjusted: 0,
     });
     expect(r.totalDays).toBe(10);
+    // No correction → raw mirrors adjusted exactly. UI collapses to a single
+    // `<HoursReadout>` value when these match.
+    expect(r.rawTotalDays).toBe(10);
     expect(r.kmGuaranteed).toBe(5400);
   });
 
-  it('hoursAdjusted=8 → totalDays drops by 0.33', () => {
+  it('hoursAdjusted=8 → totalDays drops by 0.33; rawTotalDays unchanged', () => {
     const r = run({
       dateStart: '2026-03-02',
       dateEnd: '2026-03-13',
       hoursAdjusted: 8,
     });
     expect(r.totalDays).toBe(9.67);
+    // Raw (pre-Korekta) stays at the full 10 working days the period would
+    // have produced — UI renders `240,00 h surowych / 232,08 h zaliczonych`.
+    expect(r.rawTotalDays).toBe(10);
+    // round2(hoursAdjusted/24) = 0.33 — the exact gap between raw and adjusted.
+    expect(r.rawTotalDays - r.totalDays).toBeCloseTo(0.33, 2);
     expect(r.kmGuaranteed).toBe(5222);
   });
 
-  it('hoursAdjusted=16 → totalDays drops by 0.67', () => {
+  it('hoursAdjusted=16 → totalDays drops by 0.67; rawTotalDays unchanged', () => {
     const r = run({
       dateStart: '2026-03-02',
       dateEnd: '2026-03-13',
       hoursAdjusted: 16,
     });
     expect(r.totalDays).toBe(9.33);
+    expect(r.rawTotalDays).toBe(10);
+    // round2(16/24) = 0.67.
+    expect(r.rawTotalDays - r.totalDays).toBeCloseTo(0.67, 2);
     expect(r.kmGuaranteed).toBe(5038);
   });
 });

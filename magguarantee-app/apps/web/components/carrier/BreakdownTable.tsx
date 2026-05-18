@@ -123,7 +123,18 @@ function MonthRow({ row, locale }: MonthRowProps) {
             <div className="text-xs font-bold uppercase tracking-wider text-text-sub mb-2">
               {t('excludedDays')}
             </div>
-            <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 text-sm text-text">
+            {/* Phase 3.1 §C — adaptive column count. ≤4 entries always
+                renders single-column even at desktop (faster vertical scan,
+                no arbitrary column boundary for short lists). ≥5 entries
+                keeps the existing 2-column layout at md+ to prevent the
+                panel from doubling row height. Mobile stays single-column
+                in both branches via `grid-cols-1`. */}
+            <ul
+              className={cn(
+                'grid grid-cols-1 gap-x-6 gap-y-1 text-sm text-text',
+                excluded.length >= 5 && 'md:grid-cols-2',
+              )}
+            >
               {excluded.map((d) => (
                 <li
                   key={d.date}

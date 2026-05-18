@@ -1114,3 +1114,226 @@ npm exec -w web -- shadcn@latest add skeleton tooltip
 `tooltip` — required for `<GpsStatus>` (Phase 4-5) and useful for value hints on `<BreakdownTable>` numeric cells.
 
 All other primitives (`Button`, `Input`, `Textarea`, `Select`, `Sheet`, `Dialog`, `Badge`, `DataTable`, `EmptyState`, `Label`) already exist in `apps/web/components/ui/`.
+
+---
+
+## Phase 3.1 — claim detail polish (hours readout, header layout, excluded-days list)
+
+> Three targeted UI polishes applied to the carrier claim detail page and the employee verification modal. No new colors, no new components, no new dependencies — only token additions, layout rules and copy decisions. References:
+>
+> - Carrier detail header: [`magguarantee-app/apps/web/app/(carrier)/carrier/claims/[nrZgl]/page.tsx`](../magguarantee-app/apps/web/app/(carrier)/carrier/claims/%5BnrZgl%5D/page.tsx) lines 112–172.
+> - Verification modal read-only block + ZAAKCEPTOWANO panel + `hoursAdjusted` input: [`magguarantee-app/apps/web/components/claims/ClaimVerificationModal.tsx`](../magguarantee-app/apps/web/components/claims/ClaimVerificationModal.tsx) lines 484–502, 525–553, 580–636.
+> - Excluded-days dropdown: [`magguarantee-app/apps/web/components/carrier/BreakdownTable.tsx`](../magguarantee-app/apps/web/components/carrier/BreakdownTable.tsx) lines 120–142.
+> - Engine: [`magguarantee-app/packages/shared/src/domain/km-calc.ts`](../magguarantee-app/packages/shared/src/domain/km-calc.ts) — `rawTotalDays` already computed internally (~L370), needs to be surfaced.
+
+### A. Hours readout pattern (`HoursReadout`)
+
+**Purpose.** Carriers and verifiers must see both the **raw** total hours of the claim period and the **counted** (adjusted) hours after exclusions/overrides. Currently only the adjusted number is visible, which hides the magnitude of the exclusion correction and makes verifier review opaque.
+
+#### Data contract (cross-package change)
+
+- Engine (`packages/shared/src/domain/km-calc.ts`) already computes `rawTotalDays` internally. Surface it:
+  - Add `rawTotalDays: number` to the engine result type (`KmCalcResult`).
+  - Add `rawTotalDays: z.number()` to `KmCalcBreakdownSchema` (shared zod schema).
+  - API serializer must include `rawTotalDays` in `breakdown` payload returned by both `/claims/preview` and `/claims/{id}`.
+- Web reads `claim.breakdown.rawTotalDays` and `claim.breakdown.totalDays` (the adjusted one). Both are **days, fractional, 2dp**. Web multiplies by 24 to derive hours and formats via the shared `formatDaysPl`-style helper (PL comma decimal, 2dp). No client-side recompute of business logic — purely a presentation transform `hours = days * 24`.
+- **Fallback rule:** when `claim.breakdown === null` (legacy/imported claims without engine output, or pre-calc state) — render `—` (em-dash) in place of the readout. Do not crash, do not show `NaN h`, do not synthesize a fake number.
+
+#### Copy (PL primary, EN secondary — i18n keys)
+
+| Key | PL | EN |
+|---|---|---|
+| `hoursReadout.label` | "Czas" | "Time" |
+| `hoursReadout.raw` | "surowe" | "raw" |
+| `hoursReadout.counted` | "zaliczone" | "counted" |
+| `hoursReadout.unit` | "h" | "h" |
+| `hoursReadout.hint.identical` | "Bez wyłączeń" | "No exclusions" |
+| `hoursReadout.hint.adjusted` | "Po wyłączeniach i korektach" | "After exclusions and overrides" |
+| `hoursReadout.hint.override` | "Po ręcznej korekcie weryfikatora" | "After manual verifier override" |
+| `hoursReadout.missing` | "—" | "—" |
+
+**Visible string template:** `Czas: 240,00 h surowych / 215,50 h zaliczonych`.
+
+When `rawTotalDays === totalDays` (no exclusions, no override) collapse to a single number: `Czas: 240,00 h` and hide the slash. This avoids visual noise on small clean claims (one-month, no holidays/exclusions).
+
+#### Visual treatment
+
+Single horizontal line with two values separated by ` / `, label prefix, optional hint underneath.
+
+```
+Czas: 240,00 h surowych / 215,50 h zaliczonych
+      └─ muted ──┘       └─ emphasised ──┘
+Po wyłączeniach i korektach
+└─ caption, text-xs text-text-sub ─────┘
+```
+
+| Slot | Tailwind |
+|---|---|
+| Wrapper | `flex flex-col gap-0.5` (vertical: line + optional hint) |
+| Inline row | `text-sm text-text inline-flex items-baseline gap-1.5 flex-wrap` |
+| Label "Czas:" | `text-text-sub font-medium` |
+| Raw value | `tabular-nums text-text-sub` (muted because it is the baseline, not the result) |
+| Separator `/` | `text-text-sub mx-0.5` |
+| Counted value | `tabular-nums font-semibold text-text` (the operative number) |
+| Unit "h" | inline with each value, same color as that value |
+| Hint | `text-xs text-text-sub` |
+| Missing breakdown | render `Czas: —` only, no hint, no second value |
+
+**Live-update behaviour next to `hoursAdjusted` input (modal):**
+
+When the verifier edits `hoursAdjusted`, the **counted** number must update live (controlled by RHF watch on `hoursAdjusted`). The **raw** number stays constant (it is the period baseline, not a user input). Hint switches to `hoursReadout.hint.override` while the value diverges from the engine's auto-computed counted total. Debounce is **not** required — this is a pure local arithmetic transform, no server roundtrip.
+
+#### Placement (locked)
+
+1. **Carrier claim detail (`[nrZgl]/page.tsx`)** — inside the new header right column, below the period dates (see § B for placement). Read-only display, no live behaviour.
+2. **Verification modal read-only context block** (`ClaimVerificationModal.tsx` lines 484–502) — render `HoursReadout` as a full-width row **below** the 2×2 Stat grid (not inside the grid — it deserves its own row because it carries two values). Read-only.
+3. **Verification modal — under `hoursAdjusted` input** (lines 525–553) — render the same `HoursReadout` with `live={true}` directly under the input, replacing the current `text-warning` hint when override is active. The existing `origHoursAdjusted` warning hint is **absorbed** into `HoursReadout.hint.override` — do not stack two hints.
+
+> **Single source of presentation** — same component, three call-sites, same copy. Do not fork the rendering between detail page and modal.
+
+### B. Claim detail header redesign
+
+**Goal.** Make the financial outcome the dominant focal point. Currently `nrZgl` is the first thing seen, the four amounts (mileage, km guaranteed, payment) are equal-weight in a 4-column grid, and `amountApproved` (the real outcome after verification) is buried in the lower `<dl>` block. After redesign: the **approved EUR amount** is the largest element on the screen; the calculation (`paymentEur`) is a fallback shown muted when no approval exists yet.
+
+#### Header layout (ASCII)
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                                                                            │
+│   2 145,00 €                                  WNI/2026/0042  [StatusBadge] │
+│   kwota zatwierdzona                          Wniosek: 2 145,00 €          │
+│                                               01.04.2026 → 30.04.2026      │
+│                                               Czas: 240,00 h / 215,50 h    │
+│                                                                            │
+│ ──────────────────────────────────────────────────────────────────────────  │
+│                                                                            │
+│   Pojazd: WA12345    Przebieg: 12 340 km    Km gwarantowane: 11 800 km     │
+│                                                                            │
+│                                              [! Zgłoś reklamację]          │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+When `amountApproved === null` (status `NA_WERYFIKACJI`, `OCZEKUJE_NA_AUTORYZACJE`, etc.):
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                                                                            │
+│   2 145,00 €                                  WNI/2026/0042  [StatusBadge] │
+│   kalkulacja                                  Wniosek: 2 145,00 €          │
+│   └─ muted, weight 600 ─┘                     01.04.2026 → 30.04.2026      │
+│                                               Czas: 240,00 h / 215,50 h    │
+│ ──────────────────────────────────────────────────────────────────────────  │
+│   Pojazd: WA12345    Przebieg: 12 340 km    Km gwarantowane: 11 800 km     │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+The number itself stays the same physical size in both states; **only the label and color change** to communicate "this is provisional". This avoids layout shift when the verifier flips the claim to `ZAAKCEPTOWANO` — the value just snaps from muted to emphasised.
+
+#### Layout primitives
+
+| Slot | Tailwind | Notes |
+|---|---|---|
+| Card root | unchanged (`bg-card rounded-lg border border-border p-6 mb-6`) | Same surface as today. |
+| Top row | `grid grid-cols-1 md:grid-cols-[1fr_auto] gap-6 items-start` | Money left, meta right. On mobile, money stacks above meta. |
+| **Money block (left)** | `flex flex-col gap-0.5` | |
+| Money value (approved) | `text-4xl md:text-5xl font-extrabold tabular-nums text-brand leading-none` | Brand red for the approved figure. Single visual hierarchy peak. |
+| Money value (calc fallback) | `text-4xl md:text-5xl font-extrabold tabular-nums text-text-sub leading-none` | Muted neutral when not yet approved. |
+| Money label (approved) | `text-xs font-bold uppercase tracking-wider text-text-sub mt-1` | "kwota zatwierdzona" |
+| Money label (calc) | `text-xs font-bold uppercase tracking-wider text-text-sub mt-1` | "kalkulacja" — same typographic slot, different word. |
+| **Meta block (right)** | `flex flex-col gap-1.5 md:items-end md:text-right` | |
+| `nrZgl` row | `inline-flex items-center gap-2` with `StatusBadge` | `text-[15px] font-extrabold text-text font-mono` for the nrZgl. Status badge sits inline on the right of it. |
+| `kwotaWnioskowana` line | `text-sm text-text-sub tabular-nums` with bold value: `Wniosek: <b class="font-semibold text-text">2 145,00 €</b>` | Always visible — even when `amountApproved` matches `paymentEur`, the requested amount is part of the audit trail. |
+| Date range | `text-sm text-text-sub` with `<ArrowRight size={12} />` between dates | Same style as `<ClaimCard>` for visual continuity. |
+| `HoursReadout` | see § A | Compact, single line. |
+| Divider | `border-t border-border my-4` | Separates money/meta block from the vehicle factual row. |
+| **Vehicle row (bottom)** | `flex flex-wrap items-center gap-x-6 gap-y-2 text-sm` | Each item: `<span class="text-text-sub">Pojazd:</span> <b class="font-semibold text-text font-mono">WA12345</b>`. |
+| Reklamacja CTA | unchanged (`mt-6 flex items-center justify-end`) | Behavior locked — only visual position adjusts if the divider already sits above it; keep button intact. |
+
+> **Locked behavior.** `<StatusBadge>`, the back-link (`← Wróć do listy`), and the reklamacja CTA keep their existing handlers, props, and visibility rules. Only their **layout placement** changes per the diagram above.
+
+#### Color decision: brand-red for approved amount
+
+This is an opinionated use of MAGTRANS RED. Rationale:
+
+- Approved EUR is the **only** number on the screen that represents a binding financial commitment by MAGTRANS. Brand-red here ties the brand visually to "the money MAGTRANS owes you".
+- Brand-red is otherwise reserved for: active tab indicator, primary CTA, focus rings, status badges. Adding it to a single hero metric per-screen is consistent with that scarcity rule.
+- Provisional (`kalkulacja`) explicitly does **not** get brand-red — it gets `text-text-sub`. This trains the user to read color: red = locked, muted = pending. The semantic stays after they learn it once.
+
+We do **not** introduce a dedicated `--text-money` token — `text-brand` (existing) covers the approved state, `text-text-sub` (existing) covers the calc state. Adding a single-use token would be over-design.
+
+The only **new utility-recipe** introduced is a typography convention, recorded as additions to the typography table below:
+
+| Style | Size | Weight | Where |
+|---|---|---|---|
+| Money hero | 36px desktop / 30px mobile (`text-4xl md:text-5xl`) | 800 | Claim detail header, single occurrence per screen. |
+| Money hero label | 12px uppercase, letter-spacing .5px | 700 | Directly below money hero. |
+
+These slot into the existing typography scale — no Tailwind config change.
+
+#### Should the verification modal read-only block (lines 484–502) use the same header layout?
+
+**Decision: no — keep them visually distinct.** Rationale:
+
+- The carrier detail header is a **landing surface** — the user arrives to "know the outcome". One dominant number maximises that.
+- The verifier modal context block is a **reference sidebar to a form** — the verifier is actively reading 4 baseline numbers (km gwar / km real / amount requested / doplata) while filling the form. A 2×2 Stat grid optimises **scan parity** between similar-rank numbers; a single hero would force the verifier to look elsewhere for the other three.
+- However: **add `HoursReadout` as a new full-width row beneath the 2×2 grid** (see § A placement 2). This is the only carry-over from § B into the modal.
+
+The two surfaces remain consistent in **components** (`StatusBadge`, `HoursReadout`, `formatEur`) but diverge in **layout** because their cognitive task differs.
+
+### C. Excluded-days dropdown — list density
+
+**Current state.** `<ul>` with `grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1` — at desktop width every list ≥2 entries renders as two columns. User feedback: hard to scan when entries are short and column boundaries arbitrary; visual asymmetry when entry count is odd.
+
+**Decision: Variant B — adaptive single-column up to 4, two-column from 5 upward, at desktop only.**
+
+- `count ≤ 4` → always `grid-cols-1` (one entry per row, even at desktop).
+- `count ≥ 5` → keep `grid-cols-1 md:grid-cols-2` (current behavior).
+- Mobile (`< md`) → always `grid-cols-1` (already the case, unchanged).
+
+**Tailwind expression:** the component should branch on `excluded.length` (cheap, already in scope of the row component) and render either `grid grid-cols-1 gap-x-6 gap-y-1` or `grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1`. No new utilities.
+
+**Rationale (UX).**
+
+- 1–4 entries is the common case (one or two public holidays per month, occasional driver illness). For that count, vertical scan is faster than two-column scan and the eye doesn't need to track which column the next date belongs to.
+- ≥5 entries usually means a heavily excluded period (December holidays, longer leave) where two columns prevent the panel from doubling the row height of the parent breakdown table. Density wins over scan-speed at that point.
+- The threshold `4` is chosen so the typical "Christmas + New Year" month (Dec 24, 25, 26, 31, Jan 1 → can hit 4 entries in one month easily) still gets the easy-to-scan single column, but 5+ entries (entire holiday week) collapse.
+
+The per-row layout (date left, label right, baseline-aligned, `border-b border-border/40` separator) is **unchanged** — it works for both column counts.
+
+### D. Palette — money accent
+
+**No new palette tokens.** Reuses existing `brand` (approved-amount) and `text-sub` (calculation fallback) from the brand palette defined at the top of this document.
+
+Confirmation of brand-color use rules (recap, not a change):
+
+- `text-brand` for **approved** EUR on claim detail header.
+- `text-text-sub` for **provisional / calculation** EUR on the same slot.
+- Status badges already encode status — color on amount is independent of and complementary to badge color.
+- Do **not** use `text-success` for approved (would conflict with `ZAAKCEPTOWANO` badge and break the "brand-red = money commitment" mental model).
+- Do **not** use `text-danger` for any money value (red text in financial UIs reads as loss/negative — wrong signal for a positive payout).
+
+### Components / shared changes summary
+
+| Change | Where | Phase 3.1 owner |
+|---|---|---|
+| Surface `rawTotalDays` in `KmCalcResult` + `KmCalcBreakdownSchema` | `packages/shared/src/domain/km-calc.ts`, `packages/shared/src/schemas/...` | api-agent + shared |
+| Include `rawTotalDays` in API claim/preview serialization | `apps/api/src/claims/...` | api-agent |
+| `<HoursReadout breakdown live? />` (new custom component) | `apps/web/components/claims/HoursReadout.tsx` (shared between carrier and employee, hence not under `/carrier/`) | web-agent |
+| Carrier detail header refactor | `apps/web/app/(carrier)/carrier/claims/[nrZgl]/page.tsx` lines 112–172 | web-agent |
+| Verifier modal: add `HoursReadout` row to read-only block; replace inline `origHoursAdjusted` hint with `<HoursReadout live>` under input | `apps/web/components/claims/ClaimVerificationModal.tsx` lines 484–502 and 525–553 | web-agent |
+| `<BreakdownTable>` excluded-days list — adaptive column count | `apps/web/components/carrier/BreakdownTable.tsx` lines 120–142 | web-agent |
+| i18n keys (`hoursReadout.*`, header copy `kwotaZatwierdzona` / `kalkulacja` / `Wniosek`) | `apps/web/messages/pl.json`, `en.json` | web-agent |
+
+### Tokens added or changed
+
+- **None.** This polish reuses `brand`, `text`, `text-sub`, `border`, `card`, existing `font-extrabold`, `tabular-nums`, `text-4xl`/`text-5xl` from the existing scale. The only additions are conceptual typography slots ("Money hero", "Money hero label") documented in the typography table above — they map to existing Tailwind utilities.
+
+### Risks for web-agent
+
+1. **Hours = days × 24 must happen in one helper** — write `formatHoursPl(days: number): string` next to the existing `formatDaysPl` in `packages/shared`, do not inline `(days * 24).toFixed(2).replace('.', ',')` in three call-sites.
+2. **Engine change must land before web change** — `rawTotalDays` must be in the API response (deployed) before the web refactor renders it. Otherwise `<HoursReadout breakdown={...} />` will see `undefined` and the fallback path (`—`) must hold without typeerror. Test the fallback explicitly.
+3. **Live update under `hoursAdjusted` is local-only** — do not trigger `/claims/preview` on every keystroke. The live number is `hoursAdjusted * 1` (input already in hours, if the input is in hours) or `hoursAdjusted` rendered raw. Confirm the input unit before wiring — currently the field is labelled `hoursAdjusted` but the engine works in `days`. If input is hours, the displayed `counted` value is just the input itself formatted; if input is days, multiply by 24. **Read the form schema before wiring.**
+4. **Layout shift on status flip** — when verifier flips `NA_WERYFIKACJI → ZAAKCEPTOWANO`, the money value stays the same size — only color and label change. Verify with React DevTools that no parent re-layout fires (the slot is the same DOM node, only className changes).
+5. **Mobile header stacking** — on `< md` the meta block drops under the money block. The `StatusBadge` must stay close to `nrZgl` (not jump to the top). Test on 360px width.
+6. **Excluded-days threshold of 4** — confirm by counting entries in any real month with engine output before shipping. If 5 is too aggressive (typical month has exactly 5 excluded days at Christmas), bump threshold up to 6. This is a one-line change and a candidate for user feedback after first prod use.
+7. **Brand-red on hero number — accessibility.** Verify `text-brand` (`#dc2626`) on `bg-card` (`#fff`) light → 5.94:1 contrast, passes AA for large text (3:1). On dark `bg-card` (`#1f1f1f`), `text-brand` is `#ef4444` per dark tokens → 4.51:1, passes AA for normal AND large text. Both safe. Do **not** swap to `brand-light` (`#ef4444`) on light mode — fails contrast for normal-sized labels.

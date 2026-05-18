@@ -29,10 +29,32 @@
     "validationFailedToast": "Uzupełnij podświetlone pola",
     "inactiveSuffix": "(nieaktywny)"
   },
+  "forms": {
+    "country": {
+      "placeholder": "Wybierz kraj"
+    },
+    "postal": {
+      "placeholderNoCountry": "Najpierw wybierz kraj",
+      "expectedFormat": "Format: {example}",
+      "invalidFormat": "Nieprawidłowy format. Oczekiwano np. {example}"
+    }
+  },
   "theme": {
     "toggle": "Przełącz motyw",
     "light": "Tryb jasny",
     "dark": "Tryb ciemny"
+  },
+  "hoursReadout": {
+    "label": "Czas",
+    "raw": "surowych",
+    "counted": "zaliczonych",
+    "unit": "h",
+    "missing": "—",
+    "hint": {
+      "identical": "Bez wyłączeń",
+      "adjusted": "Po wyłączeniach i korektach",
+      "override": "Po ręcznej korekcie weryfikatora"
+    }
   },
   "lang": {
     "toggle": "Zmień język",
@@ -461,7 +483,11 @@
         "orderDate": "Data zlecenia",
         "comment": "Komentarz",
         "reklamacjaText": "Treść reklamacji",
-        "reklamacjaResponse": "Odpowiedź na reklamację"
+        "reklamacjaResponse": "Odpowiedź na reklamację",
+        "moneyLabelApproved": "kwota zatwierdzona",
+        "moneyLabelCalc": "kalkulacja",
+        "wniosekLabel": "Wniosek",
+        "vehiclePlate": "Pojazd"
       },
       "form": {
         "sectionVehicleAndDriver": "Pojazd i kierowca",

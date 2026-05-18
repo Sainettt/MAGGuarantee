@@ -48,28 +48,26 @@ export class DelegationsService {
   async add(user: AuthUser, dto: SubmitDelegationDto): Promise<DelegationDto> {
     const carrier = await this._requireCarrierProfile(user);
     const vehicle = await this._requireOwnedVehicle(carrier.id, dto.vehicleId);
-    if (dto.trailerId) {
-      await this._requireOwnedTrailer(carrier.id, dto.trailerId);
-    }
-    let driverSnapshot: { name: string; phone: string } | null = null;
-    if (dto.driverId) {
-      driverSnapshot = await this._snapshotDriver(carrier.id, dto.driverId);
-    }
+    // Trailer + driver are required post-migration; ownership checks
+    // become unconditional.
+    await this._requireOwnedTrailer(carrier.id, dto.trailerId);
+    const driverSnapshot = await this._snapshotDriver(carrier.id, dto.driverId);
 
     const row = await this.delegations.create({
       carrierId: carrier.id,
       vehicleId: vehicle.id,
-      trailerId: dto.trailerId ?? null,
-      driverId: dto.driverId ?? null,
-      driverNameSnapshot: driverSnapshot?.name ?? null,
-      driverPhoneSnapshot: driverSnapshot?.phone ?? null,
+      trailerId: dto.trailerId,
+      driverId: dto.driverId,
+      driverNameSnapshot: driverSnapshot.name,
+      driverPhoneSnapshot: driverSnapshot.phone,
       departureAt: new Date(dto.departureAt),
-      // Required post-phase3_blocks — Zod already enforced presence.
       departureCountry: dto.departureCountry,
       departurePostalCode: dto.departurePostalCode,
-      plannedReturnAt: dto.plannedReturnAt ? new Date(dto.plannedReturnAt) : null,
-      returnCountry: dto.returnCountry ?? null,
-      returnPostalCode: dto.returnPostalCode ?? null,
+      // `plannedReturnAt` is `YYYY-MM-DD` (date-only). `new Date("YYYY-MM-DD")`
+      // parses as UTC midnight, which matches Prisma's `@db.Date` round-trip.
+      plannedReturnAt: new Date(dto.plannedReturnAt),
+      returnCountry: dto.returnCountry,
+      returnPostalCode: dto.returnPostalCode,
       notes: dto.comment ?? null,
       reportedById: user.sub,
     });
@@ -162,8 +160,9 @@ export class DelegationsService {
       departureAt: row.departureAt.toISOString(),
       departureCountry: row.departureCountry,
       departurePostalCode: row.departurePostalCode,
-      // Nullable per phase3_blocks_audit_revert.
-      plannedReturnAt: row.plannedReturnAt ? row.plannedReturnAt.toISOString() : null,
+      // Date-only (`YYYY-MM-DD`) — strip the time portion of the UTC midnight
+      // Prisma returns for a `@db.Date` column to keep the wire shape stable.
+      plannedReturnAt: row.plannedReturnAt.toISOString().slice(0, 10),
       returnCountry: row.returnCountry,
       returnPostalCode: row.returnPostalCode,
       status: row.status,

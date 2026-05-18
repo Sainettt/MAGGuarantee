@@ -289,8 +289,12 @@ export class ClaimsService {
     if (tier2.length > 0) throw violationsException(tier2);
 
     // NrZgl + insert atomically (same Prisma transaction).
+    // `rawTotalDays` is the pre-`hoursAdjusted` total — persisted alongside
+    // `totalDays` so the carrier/verifier UI can render `<HoursReadout>` with
+    // both raw and adjusted hours per docs/14-design-system.md §"Phase 3.1".
     const breakdown: KmCalcBreakdown = {
       totalDays: calc.totalDays,
+      rawTotalDays: calc.rawTotalDays,
       kmGuaranteed: calc.kmGuaranteed,
       ratePerKmEffective: calc.ratePerKmEffective,
       breakdown: calc.breakdown,
@@ -524,6 +528,10 @@ export class ClaimsService {
       ratePerKmEffective: calc.ratePerKmEffective,
       breakdown: {
         totalDays: calc.totalDays,
+        // Pre-`hoursAdjusted` raw total — surfaced so the live-preview UI
+        // can render `<HoursReadout>` with both raw and adjusted values
+        // (docs/14-design-system.md §"Phase 3.1").
+        rawTotalDays: calc.rawTotalDays,
         kmGuaranteed: calc.kmGuaranteed,
         ratePerKmEffective: calc.ratePerKmEffective,
         breakdown: calc.breakdown,
@@ -866,6 +874,10 @@ export class ClaimsService {
 
     const breakdown: KmCalcBreakdown = {
       totalDays: calc.totalDays,
+      // Same pre-adjustment raw total as on submit/preview — kept on the
+      // re-calc patch so PATCH-driven verifier edits also propagate
+      // `<HoursReadout>`-ready data into the persisted breakdown JSONB.
+      rawTotalDays: calc.rawTotalDays,
       kmGuaranteed: calc.kmGuaranteed,
       ratePerKmEffective: calc.ratePerKmEffective,
       breakdown: calc.breakdown,

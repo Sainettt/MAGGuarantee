@@ -1,16 +1,32 @@
 // Phase 3 — Delegations DTO contracts.
 //
 // Source of truth for `/api/v1/delegations/*` per docs/13-api-design.md
-// and the `Delegation` model in packages/database/prisma/schema.prisma:392+.
+// and the `Delegation` model in packages/database/prisma/schema.prisma:433+.
 //
 // Delegations are vehicle outings: carrier registers (zgloszony), weryfikator
 // flips to `w_trasie` and finally `zjechal`. Either party can move it to
 // `anulowany` per the documented role rules — carrier may cancel only
 // their own `zgloszony` rows, weryfikator may cancel anything.
+//
+// Required-fields contract (db migration
+// `20260518113943_delegation_required_fields_and_date_only`):
+//   - `driverId`, `trailerId`, `plannedReturnAt`, `returnCountry`,
+//     `returnPostalCode` are NOT NULL in the DB. The legacy
+//     `delegation_returned_complete` CHECK has been dropped — completeness at
+//     `zjechal` is now enforced by the api layer (status guard on
+//     `actualReturnAt`), and all return-planning fields are required at
+//     submit time per the 2026-05 product decision.
+//   - `plannedReturnAt` is `@db.Date` (date-only) — driver commits to a day,
+//     not a timestamp.
 
 import { z } from 'zod';
 
 import {
+  EU_VAT_COUNTRY_CODES,
+  isValidPostalCode,
+} from '../constants';
+import {
+  IsoDateSchema,
   IsoDateTimeSchema,
   UuidSchema,
   emptyStringToUndefined,
@@ -28,8 +44,17 @@ export type DelegationStatus = z.infer<typeof DelegationStatusSchema>;
 
 // ─── Field primitives ────────────────────────────────────
 
-const CountrySchema = z.string().min(2).max(8); // ISO 3166-1 alpha-2 or short label
-const PostalSchema = z.string().min(1).max(16);
+/**
+ * EU country code — VIES dialect (Greece = `EL`, not `GR`). Sourced from
+ * `EU_VAT_COUNTRY_CODES` so the enum stays in lockstep with the carrier VAT
+ * country list and the per-country postal rules.
+ */
+const CountrySchema = z.enum(EU_VAT_COUNTRY_CODES);
+
+// Postal length is bounded by the DB CHECK (`<= 16`); per-country format
+// validation happens cross-field via `.superRefine` on the object so we can
+// look up the matching rule in `EU_POSTAL_CODES`.
+const PostalLengthSchema = z.string().min(1).max(16);
 
 // ─── Submit (carrier) ────────────────────────────────────
 
@@ -38,37 +63,61 @@ const PostalSchema = z.string().min(1).max(16);
  *
  * Notes:
  * - `carrierId` is **derived from the JWT** — never accepted in the body.
- * - `vehicleId` ownership is enforced by the `CarrierOwnershipGuard`.
- * - `plannedReturnAt` may be omitted at submit time (carrier doesn't always
- *   know it yet); the weryfikator can edit it later.
+ * - `vehicleId` / `trailerId` / `driverId` ownership is enforced by
+ *   `CarrierOwnershipGuard` + service-level checks.
+ * - All return-planning fields are required (driver/trailer/return triple).
+ * - `plannedReturnAt` is date-only (`YYYY-MM-DD`) per the `@db.Date` column.
  */
 export const SubmitDelegationSchema = z
   .object({
     vehicleId: UuidSchema,
-    trailerId: emptyStringToUndefined(UuidSchema.optional()),
-    driverId: emptyStringToUndefined(UuidSchema.optional()),
+    trailerId: UuidSchema,
+    driverId: UuidSchema,
 
     departureAt: IsoDateTimeSchema,
-    /** REQUIRED — Delegation.departureCountry is NOT NULL since phase3_blocks. */
+    /** REQUIRED — Delegation.departureCountry is NOT NULL. */
     departureCountry: CountrySchema,
-    /** REQUIRED — Delegation.departurePostalCode is NOT NULL since phase3_blocks. */
-    departurePostalCode: PostalSchema,
+    /** REQUIRED — Delegation.departurePostalCode is NOT NULL. */
+    departurePostalCode: PostalLengthSchema,
 
-    // Return planning is optional at submit — spot-rate / one-way trips don't
-    // know it yet. Reverted to nullable in phase3_blocks_audit_revert. The
-    // `delegation_returned_complete` CHECK enforces that all three are set
-    // when status transitions to 'zjechal'.
-    plannedReturnAt: emptyStringToUndefined(IsoDateTimeSchema.optional()),
-    returnCountry: emptyStringToUndefined(CountrySchema.optional()),
-    returnPostalCode: emptyStringToUndefined(PostalSchema.optional()),
+    /**
+     * Date-only (`YYYY-MM-DD`) — matches the `@db.Date` column. Driver
+     * commits to a day, not a timestamp.
+     */
+    plannedReturnAt: IsoDateSchema,
+    returnCountry: CountrySchema,
+    returnPostalCode: PostalLengthSchema,
 
     /** Free-form note (e.g. cargo type, route hints). */
     comment: emptyStringToUndefined(z.string().max(2_000).optional()),
   })
   .strict()
-  .refine((v) => !v.plannedReturnAt || v.plannedReturnAt >= v.departureAt, {
-    message: 'plannedReturnAt must be on or after departureAt',
-    path: ['plannedReturnAt'],
+  .superRefine((obj, ctx) => {
+    if (!isValidPostalCode(obj.departureCountry, obj.departurePostalCode)) {
+      ctx.addIssue({
+        path: ['departurePostalCode'],
+        code: z.ZodIssueCode.custom,
+        message: `Nieprawidłowy format kodu pocztowego dla ${obj.departureCountry}`,
+      });
+    }
+    if (!isValidPostalCode(obj.returnCountry, obj.returnPostalCode)) {
+      ctx.addIssue({
+        path: ['returnPostalCode'],
+        code: z.ZodIssueCode.custom,
+        message: `Nieprawidłowy format kodu pocztowego dla ${obj.returnCountry}`,
+      });
+    }
+    // Date-level comparison (drop the time portion of `departureAt`) — the
+    // planned-return is date-only, so "same day" is allowed even if the
+    // departure timestamp is 23:50.
+    const departureDay = obj.departureAt.slice(0, 10);
+    if (obj.plannedReturnAt < departureDay) {
+      ctx.addIssue({
+        path: ['plannedReturnAt'],
+        code: z.ZodIssueCode.custom,
+        message: 'plannedReturnAt must be on or after departureAt',
+      });
+    }
   });
 export type SubmitDelegationDto = z.infer<typeof SubmitDelegationSchema>;
 
@@ -141,9 +190,10 @@ export const DelegationDtoSchema = z.object({
 
   vehicleId: UuidSchema,
   vehicle: VehicleMiniSchema.nullable(),
-  trailerId: UuidSchema.nullable(),
+  // NOT NULL post-migration.
+  trailerId: UuidSchema,
   trailer: TrailerMiniSchema.nullable(),
-  driverId: UuidSchema.nullable(),
+  driverId: UuidSchema,
   driver: DriverMiniSchema.nullable(),
 
   carrierId: UuidSchema,
@@ -153,14 +203,13 @@ export const DelegationDtoSchema = z.object({
   driverPhoneSnapshot: z.string().nullable(),
 
   departureAt: IsoDateTimeSchema,
-  // NOT NULL after phase3_blocks.
   departureCountry: z.string(),
   departurePostalCode: z.string(),
 
-  // Nullable per phase3_blocks_audit_revert.
-  plannedReturnAt: IsoDateTimeSchema.nullable(),
-  returnCountry: z.string().nullable(),
-  returnPostalCode: z.string().nullable(),
+  // All return-planning fields NOT NULL post-migration.
+  plannedReturnAt: IsoDateSchema,
+  returnCountry: z.string(),
+  returnPostalCode: z.string(),
 
   status: DelegationStatusSchema,
   actualReturnAt: IsoDateTimeSchema.nullable(),

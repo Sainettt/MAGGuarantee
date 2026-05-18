@@ -11,6 +11,7 @@ import {
   canSubmitByDuration,
   cooldownCheck,
   formatDaysPl,
+  formatHoursPl,
   nextAllowedSubmitAt,
   roundDays,
 } from '../src/domain/claim-submission-rules';
@@ -68,6 +69,30 @@ describe('formatDaysPl', () => {
 
   it('clamps non-finite to 0,00', () => {
     expect(formatDaysPl(Number.NaN)).toBe('0,00');
+  });
+});
+
+// ─── formatHoursPl ───────────────────────────────────────────
+
+describe('formatHoursPl', () => {
+  it('formats 10 days → 240,00 h', () => {
+    expect(formatHoursPl(10)).toBe('240,00 h');
+  });
+
+  it('formats 8.87 days → 212,88 h (real carrier-form value)', () => {
+    expect(formatHoursPl(8.87)).toBe('212,88 h');
+  });
+
+  it('formats 0 days → 0,00 h', () => {
+    expect(formatHoursPl(0)).toBe('0,00 h');
+  });
+
+  it('clamps non-finite to 0,00 h (defensive, live-preview path)', () => {
+    expect(formatHoursPl(Number.NaN)).toBe('0,00 h');
+  });
+
+  it('clamps negative to 0,00 h', () => {
+    expect(formatHoursPl(-3)).toBe('0,00 h');
   });
 });
 

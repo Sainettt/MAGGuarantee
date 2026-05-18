@@ -29,10 +29,32 @@
     "validationFailedToast": "Please fill in the highlighted fields",
     "inactiveSuffix": "(inactive)"
   },
+  "forms": {
+    "country": {
+      "placeholder": "Select country"
+    },
+    "postal": {
+      "placeholderNoCountry": "Select a country first",
+      "expectedFormat": "Format: {example}",
+      "invalidFormat": "Invalid format. Expected e.g. {example}"
+    }
+  },
   "theme": {
     "toggle": "Toggle theme",
     "light": "Light mode",
     "dark": "Dark mode"
+  },
+  "hoursReadout": {
+    "label": "Time",
+    "raw": "raw",
+    "counted": "counted",
+    "unit": "h",
+    "missing": "—",
+    "hint": {
+      "identical": "No exclusions",
+      "adjusted": "After exclusions and overrides",
+      "override": "After manual verifier override"
+    }
   },
   "lang": {
     "toggle": "Change language",
@@ -461,7 +483,11 @@
         "orderDate": "Order date",
         "comment": "Comment",
         "reklamacjaText": "Reclamation text",
-        "reklamacjaResponse": "Reclamation response"
+        "reklamacjaResponse": "Reclamation response",
+        "moneyLabelApproved": "amount approved",
+        "moneyLabelCalc": "calculation",
+        "wniosekLabel": "Claim",
+        "vehiclePlate": "Vehicle"
       },
       "form": {
         "sectionVehicleAndDriver": "Vehicle and driver",
