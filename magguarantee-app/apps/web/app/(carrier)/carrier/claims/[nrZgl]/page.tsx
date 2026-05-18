@@ -150,7 +150,7 @@ export default function ClaimDetailPage() {
             <div className="text-sm text-text-sub tabular-nums">
               {tDetail('wniosekLabel')}:{' '}
               <b className="font-semibold text-text">
-                {formatEur(claim.amountRequested)} €
+                {formatEur(claim.paymentEur)} €
               </b>
             </div>
             <div className="text-sm text-text-sub inline-flex items-center gap-1.5 flex-wrap md:justify-end">
@@ -225,12 +225,6 @@ export default function ClaimDetailPage() {
             <dt className="text-text-sub">{tDetail('amountApproved')}</dt>
             <dd className="mt-0.5 tabular-nums font-semibold text-text">
               {formatEur(claim.amountApproved)} €
-            </dd>
-          </div>
-          <div>
-            <dt className="text-text-sub">{tDetail('amountRequested')}</dt>
-            <dd className="mt-0.5 tabular-nums font-semibold text-text">
-              {formatEur(claim.amountRequested)} €
             </dd>
           </div>
           {claim.orderNumber && (

@@ -340,7 +340,7 @@
         "vehicle": "Pojazd",
         "period": "Okres",
         "mileage": "Przebieg",
-        "doplata": "Dopłata",
+        "doplata": "Dopłata gwarancyjna",
         "status": "Status",
         "updatedAt": "Zmiana"
       },
@@ -363,7 +363,7 @@
           "loading": "Przeliczam…",
           "current": "Aktualne",
           "error": "Nie udało się przeliczyć",
-          "diff": "Dopłata: {before} → {after}",
+          "diff": "Dopłata gwarancyjna: {before} → {after}",
           "noChange": "Bez zmian"
         },
         "edit": {
@@ -381,8 +381,7 @@
           "orderDate": "Data zlecenia",
           "amountApproved": "Kwota zatwierdzona (EUR)",
           "amountMaximum": "Kwota maksymalna (EUR)",
-          "amountRequested": "Kwota wnioskowana",
-          "doplata": "Dopłata wyliczona",
+          "doplata": "Dopłata gwarancyjna",
           "margin": "Marża",
           "authorizationDescription": "Opis autoryzacji",
           "comment": "Komentarz",
@@ -473,11 +472,10 @@
       "detail": {
         "mileage": "Przebieg",
         "kmGuaranteed": "Km gwarantowane",
-        "payment": "Wypłata",
+        "payment": "Dopłata gwarancyjna",
         "submitReklamacja": "Złóż reklamację",
         "monthlyBreakdown": "Podział na miesiące",
         "details": "Szczegóły",
-        "amountRequested": "Kwota wnioskowana",
         "amountApproved": "Kwota zatwierdzona",
         "orderNumber": "Numer zlecenia",
         "orderDate": "Data zlecenia",
@@ -486,7 +484,7 @@
         "reklamacjaResponse": "Odpowiedź na reklamację",
         "moneyLabelApproved": "kwota zatwierdzona",
         "moneyLabelCalc": "kalkulacja",
-        "wniosekLabel": "Wniosek",
+        "wniosekLabel": "Dopłata gwarancyjna",
         "vehiclePlate": "Pojazd"
       },
       "form": {
@@ -526,7 +524,7 @@
       "kmGuaranteed": "Km gwarantowane",
       "kmDifference": "Różnica km",
       "ratePerKm": "Stawka €/km",
-      "paymentEur": "Wypłata (EUR)"
+      "paymentEur": "Dopłata gwarancyjna (EUR)"
     },
     "breakdown": {
       "month": "Miesiąc",

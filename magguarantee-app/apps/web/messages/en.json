@@ -340,7 +340,7 @@
         "vehicle": "Vehicle",
         "period": "Period",
         "mileage": "Mileage",
-        "doplata": "Payout",
+        "doplata": "Guarantee payout",
         "status": "Status",
         "updatedAt": "Updated"
       },
@@ -363,7 +363,7 @@
           "loading": "Recalculating…",
           "current": "Up to date",
           "error": "Could not recalculate",
-          "diff": "Payout: {before} → {after}",
+          "diff": "Guarantee payout: {before} → {after}",
           "noChange": "No change"
         },
         "edit": {
@@ -381,8 +381,7 @@
           "orderDate": "Order date",
           "amountApproved": "Amount approved (EUR)",
           "amountMaximum": "Maximum amount (EUR)",
-          "amountRequested": "Amount requested",
-          "doplata": "Computed payout",
+          "doplata": "Guarantee payout",
           "margin": "Margin",
           "authorizationDescription": "Authorization description",
           "comment": "Comment",
@@ -473,11 +472,10 @@
       "detail": {
         "mileage": "Mileage",
         "kmGuaranteed": "Guaranteed km",
-        "payment": "Payout",
+        "payment": "Guarantee payout",
         "submitReklamacja": "Submit reclamation",
         "monthlyBreakdown": "Monthly breakdown",
         "details": "Details",
-        "amountRequested": "Amount requested",
         "amountApproved": "Amount approved",
         "orderNumber": "Order number",
         "orderDate": "Order date",
@@ -486,7 +484,7 @@
         "reklamacjaResponse": "Reclamation response",
         "moneyLabelApproved": "amount approved",
         "moneyLabelCalc": "calculation",
-        "wniosekLabel": "Claim",
+        "wniosekLabel": "Guarantee payout",
         "vehiclePlate": "Vehicle"
       },
       "form": {
@@ -526,7 +524,7 @@
       "kmGuaranteed": "Guaranteed km",
       "kmDifference": "Km difference",
       "ratePerKm": "Rate €/km",
-      "paymentEur": "Payout (EUR)"
+      "paymentEur": "Guarantee payout (EUR)"
     },
     "breakdown": {
       "month": "Month",

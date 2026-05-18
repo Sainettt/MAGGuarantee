@@ -495,10 +495,6 @@ function ModalBody({ claim, onClose, t, tStatus }: ModalBodyProps) {
                   value={`${Math.round(claim.kmGuaranteed).toLocaleString('pl-PL')} km`}
                 />
                 <Stat
-                  label={tEdit('amountRequested')}
-                  value={formatEur(claim.amountRequested)}
-                />
-                <Stat
                   label={tEdit('doplata')}
                   value={formatEur(claim.paymentEur)}
                 />
