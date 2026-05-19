@@ -8,8 +8,13 @@
 // Columns are typed: `accessor` extracts the cell value from the row, `cell`
 // optionally renders a custom node. Action columns just declare `cell` and
 // don't use `accessor`.
+//
+// Phase 3.4 — added per-column `width` and `truncate` sizing intents (docs/14
+// § Phase 3.4.B). These map to concrete Tailwind utilities on `<th>` / `<td>`
+// so admin tables can keep dense columns (NIP, login, badges) at content-fit
+// while flex columns (Name, Company) absorb the remainder and truncate.
 
-import { type ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
 
@@ -24,6 +29,34 @@ export interface DataTableColumn<T> {
   className?: string;
   /** Right-align (e.g. for numeric / action columns). */
   align?: 'left' | 'right' | 'center';
+  /**
+   * Column sizing intent — drives Tailwind width utilities on `<th>`/`<td>`.
+   *
+   * - `'tight'`  : content has a short fixed length (NIP, login, dates,
+   *                badges). Width hugs content; never stretches.
+   *                → `w-px whitespace-nowrap`
+   * - `'auto'`   : let the browser size from content (default).
+   * - `'flex'`   : column absorbs remaining width. Pair with the cell
+   *                renderer's own `truncate` / `line-clamp-N` for overflow
+   *                control. We add `min-w-0` so the cell can shrink below
+   *                its natural content width.
+   * - `number`   : explicit px width hint. Applied via inline style on both
+   *                the th and td and locked with `whitespace-nowrap`.
+   */
+  width?: 'tight' | 'auto' | 'flex' | number;
+  /**
+   * Truncation behaviour for text cells. Applied to a generated wrapper
+   * `<div>` around the cell renderer so the cell renderer itself stays
+   * agnostic. Default: no truncation, content wraps.
+   *
+   * - `'ellipsis'` : single line + ellipsis (`truncate`).
+   * - `'clamp-2'`  : 2-line cap (`line-clamp-2`).
+   *
+   * If your cell renderer already owns its own truncation (e.g. needs a
+   * `title=` attribute for the full text), leave this undefined and apply
+   * the classes inside `cell`.
+   */
+  truncate?: 'ellipsis' | 'clamp-2';
 }
 
 export interface DataTableProps<T> {
@@ -45,6 +78,24 @@ const ALIGN_CLASSES: Record<NonNullable<DataTableColumn<unknown>['align']>, stri
   right: 'text-right',
   center: 'text-center',
 };
+
+function widthClasses<T>(col: DataTableColumn<T>): string {
+  if (col.width === 'tight') return 'w-px whitespace-nowrap';
+  if (col.width === 'flex') return 'min-w-0';
+  if (typeof col.width === 'number') return 'whitespace-nowrap';
+  return '';
+}
+
+function widthStyle<T>(col: DataTableColumn<T>): CSSProperties | undefined {
+  if (typeof col.width === 'number') return { width: col.width };
+  return undefined;
+}
+
+function truncateClasses<T>(col: DataTableColumn<T>): string {
+  if (col.truncate === 'ellipsis') return 'truncate';
+  if (col.truncate === 'clamp-2') return 'line-clamp-2 break-words';
+  return '';
+}
 
 export function DataTable<T>({
   rows,
@@ -70,9 +121,11 @@ export function DataTable<T>({
                 <th
                   key={col.id}
                   scope="col"
+                  style={widthStyle(col)}
                   className={cn(
                     'px-3 py-2 text-xs font-bold uppercase tracking-wider text-text-sub border-b border-border',
                     ALIGN_CLASSES[col.align ?? 'left'],
+                    widthClasses(col),
                     col.className,
                   )}
                 >
@@ -114,18 +167,24 @@ export function DataTable<T>({
                     onRowClick && 'cursor-pointer',
                   )}
                 >
-                  {columns.map((col) => (
-                    <td
-                      key={col.id}
-                      className={cn(
-                        'px-3 py-2 h-12 text-text align-middle',
-                        ALIGN_CLASSES[col.align ?? 'left'],
-                        col.className,
-                      )}
-                    >
-                      {col.cell(row)}
-                    </td>
-                  ))}
+                  {columns.map((col) => {
+                    const trunc = truncateClasses(col);
+                    const rendered = col.cell(row);
+                    return (
+                      <td
+                        key={col.id}
+                        style={widthStyle(col)}
+                        className={cn(
+                          'px-3 py-2 h-12 text-text align-middle',
+                          ALIGN_CLASSES[col.align ?? 'left'],
+                          widthClasses(col),
+                          col.className,
+                        )}
+                      >
+                        {trunc ? <div className={trunc}>{rendered}</div> : rendered}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
           </tbody>

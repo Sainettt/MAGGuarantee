@@ -28,9 +28,11 @@ import {
   SheetTitle,
 } from '@/components/ui/Sheet';
 import { Textarea } from '@/components/ui/Textarea';
-import { TemporaryPasswordBanner } from '@/components/carrier-onboarding/TemporaryPasswordBanner';
+import { EntityAlreadyExistsNotice } from '@/components/carrier-onboarding/EntityAlreadyExistsNotice';
+import { TemporaryPasswordRow } from '@/components/carrier-onboarding/TemporaryPasswordRow';
 import { WizardStepper } from '@/components/carrier-onboarding/WizardStepper';
 import { FormField } from '@/components/forms/Form';
+import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useCreateDriver, useUpdateDriver } from '@/lib/hooks/useDrivers';
 import { useFormDraft } from '@/lib/hooks/useFormDraft';
@@ -62,6 +64,8 @@ interface Props {
   /** Phase 3.2 — wizard mode. See CarrierSheet/VehicleSheet for semantics. */
   mode?: 'standalone' | 'wizard';
   wizardCarrierId?: string;
+  /** Wizard mode only — display label for the locked carrier. See VehicleSheet. */
+  wizardCarrierLabel?: string;
   wizardTempPassword?: string | null;
   onCompleted?: (created: DriverDto) => void;
   onSkip?: () => void;
@@ -69,6 +73,8 @@ interface Props {
   wizardCurrentStep?: 1 | 2 | 3 | 4;
   wizardCompletedSteps?: number[];
   wizardSkippedSteps?: number[];
+  /** Wizard mode only — see VehicleSheet for semantics. */
+  wizardEntityAlreadyExists?: boolean;
 }
 
 type FormValues = CreateDriverDto;
@@ -79,6 +85,7 @@ export function DriverSheet({
   onClose,
   mode = 'standalone',
   wizardCarrierId,
+  wizardCarrierLabel,
   wizardTempPassword,
   onCompleted,
   onSkip,
@@ -86,6 +93,7 @@ export function DriverSheet({
   wizardCurrentStep,
   wizardCompletedSteps,
   wizardSkippedSteps,
+  wizardEntityAlreadyExists,
 }: Props) {
   const t = useTranslations('drivers');
   const tCommon = useTranslations('common');
@@ -163,21 +171,24 @@ export function DriverSheet({
     onError: () => toast.error(tCommon('errorGeneric')),
   });
 
-  const onSubmit = form.handleSubmit((values) => {
-    // Strip empty strings → undefined so optional fields don't trip Zod.
-    const cleaned: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(values)) {
-      if (v === '' || v === undefined) continue;
-      cleaned[k] = v;
-    }
-    if (isEdit && driver) {
-      const { carrierId: _carrierId, ...rest } = cleaned;
-      void _carrierId;
-      updateM.mutate({ id: driver.id, body: rest as UpdateDriverDto });
-    } else {
-      createM.mutate(cleaned as CreateDriverDto);
-    }
-  });
+  const onSubmit = form.handleSubmit(
+    (values) => {
+      // Strip empty strings → undefined so optional fields don't trip Zod.
+      const cleaned: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(values)) {
+        if (v === '' || v === undefined) continue;
+        cleaned[k] = v;
+      }
+      if (isEdit && driver) {
+        const { carrierId: _carrierId, ...rest } = cleaned;
+        void _carrierId;
+        updateM.mutate({ id: driver.id, body: rest as UpdateDriverDto });
+      } else {
+        createM.mutate(cleaned as CreateDriverDto);
+      }
+    },
+    onInvalidToast(form.setFocus, tCommon('validationFailedToast')),
+  );
 
   const submitting = createM.isPending || updateM.isPending;
   const errs = form.formState.errors;
@@ -191,7 +202,7 @@ export function DriverSheet({
     <Sheet open={open} onOpenChange={(o) => !o && handleClose()}>
       <SheetContent size={isWizard ? 'wide' : 'default'}>
         <form onSubmit={onSubmit} className="flex h-full flex-col">
-          <SheetHeader>
+          <SheetHeader className={isWizard && wizardTempPassword ? 'pb-0' : undefined}>
             <SheetTitle>
               {isWizard
                 ? tWizard('wizard.header.title', { n: wizardCurrentStep ?? 4 })
@@ -211,11 +222,20 @@ export function DriverSheet({
                 skippedSteps={wizardSkippedSteps ?? []}
               />
             )}
+            {isWizard && wizardTempPassword && (
+              <TemporaryPasswordRow
+                password={wizardTempPassword}
+                className="-mx-6 mt-3"
+              />
+            )}
           </SheetHeader>
 
           <SheetBody>
-            {isWizard && wizardTempPassword && (
-              <TemporaryPasswordBanner password={wizardTempPassword} />
+            {isWizard && wizardEntityAlreadyExists && (
+              <EntityAlreadyExistsNotice
+                message={tWizard('wizard.entityAlreadyExists.driver')}
+                dismissLabel={tCommon('clear')}
+              />
             )}
             <div className="space-y-4">
               {!isEdit && (
@@ -225,19 +245,31 @@ export function DriverSheet({
                   error={errs.carrierId?.message}
                   htmlFor="driver-carrierId"
                 >
-                  <Select
-                    id="driver-carrierId"
-                    disabled={isWizard}
-                    {...form.register('carrierId')}
-                  >
-                    <option value="">—</option>
-                    {(carriersQ.data?.items ?? []).map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.login}
-                        {c.name ? ` — ${c.name}` : ''}
-                      </option>
-                    ))}
-                  </Select>
+                  {isWizard ? (
+                    // Wizard mode — read-only display fed by orchestrator.
+                    // See VehicleSheet for the race rationale.
+                    <Input
+                      id="driver-carrierId"
+                      className="h-10 bg-input"
+                      value={wizardCarrierLabel ?? ''}
+                      readOnly
+                      disabled
+                      aria-readonly="true"
+                    />
+                  ) : (
+                    <Select
+                      id="driver-carrierId"
+                      {...form.register('carrierId')}
+                    >
+                      <option value="">—</option>
+                      {(carriersQ.data?.items ?? []).map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.login}
+                          {c.name ? ` — ${c.name}` : ''}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
                 </FormField>
               )}
 

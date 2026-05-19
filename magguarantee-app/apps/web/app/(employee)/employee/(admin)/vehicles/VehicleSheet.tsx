@@ -29,7 +29,8 @@ import {
   SheetTitle,
 } from '@/components/ui/Sheet';
 import { Textarea } from '@/components/ui/Textarea';
-import { TemporaryPasswordBanner } from '@/components/carrier-onboarding/TemporaryPasswordBanner';
+import { EntityAlreadyExistsNotice } from '@/components/carrier-onboarding/EntityAlreadyExistsNotice';
+import { TemporaryPasswordRow } from '@/components/carrier-onboarding/TemporaryPasswordRow';
 import { WizardStepper } from '@/components/carrier-onboarding/WizardStepper';
 import { FormField, FormSection } from '@/components/forms/Form';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
@@ -58,6 +59,13 @@ interface Props {
   mode?: 'standalone' | 'wizard';
   /** Wizard mode only — pre-fills + locks the carrier picker. */
   wizardCarrierId?: string;
+  /**
+   * Wizard mode only — display label for the locked carrier (e.g.
+   * `login — name`). Rendered as a read-only <Input> instead of the <Select>
+   * to dodge the race where step 1's CARRIERS invalidation leaves
+   * `useCarriers` mid-refetch when this sheet first mounts.
+   */
+  wizardCarrierLabel?: string;
   /** Wizard mode only — when set, render the sticky temp-password banner. */
   wizardTempPassword?: string | null;
   /** Wizard mode only — called on successful create. */
@@ -70,6 +78,12 @@ interface Props {
   wizardCurrentStep?: 1 | 2 | 3 | 4;
   wizardCompletedSteps?: number[];
   wizardSkippedSteps?: number[];
+  /**
+   * Wizard mode only — set to true when the resumed carrier already owns at
+   * least one vehicle (or one was created during the current wizard session).
+   * Renders an info banner explaining the operator can add another or skip.
+   */
+  wizardEntityAlreadyExists?: boolean;
 }
 
 type FormValues = CreateVehicleDto;
@@ -88,6 +102,7 @@ export function VehicleSheet({
   onClose,
   mode = 'standalone',
   wizardCarrierId,
+  wizardCarrierLabel,
   wizardTempPassword,
   onCompleted,
   onSkip,
@@ -95,6 +110,7 @@ export function VehicleSheet({
   wizardCurrentStep,
   wizardCompletedSteps,
   wizardSkippedSteps,
+  wizardEntityAlreadyExists,
 }: Props) {
   const t = useTranslations('vehicles');
   const tCommon = useTranslations('common');
@@ -228,7 +244,7 @@ export function VehicleSheet({
     <Sheet open={open} onOpenChange={(o) => !o && handleClose()}>
       <SheetContent size="wide">
         <form onSubmit={onSubmit} className="flex h-full flex-col">
-          <SheetHeader>
+          <SheetHeader className={isWizard && wizardTempPassword ? 'pb-0' : undefined}>
             <SheetTitle>
               {isWizard
                 ? tWizard('wizard.header.title', { n: wizardCurrentStep ?? 2 })
@@ -246,11 +262,20 @@ export function VehicleSheet({
                 skippedSteps={wizardSkippedSteps ?? []}
               />
             )}
+            {isWizard && wizardTempPassword && (
+              <TemporaryPasswordRow
+                password={wizardTempPassword}
+                className="-mx-6 mt-3"
+              />
+            )}
           </SheetHeader>
 
           <SheetBody>
-            {isWizard && wizardTempPassword && (
-              <TemporaryPasswordBanner password={wizardTempPassword} />
+            {isWizard && wizardEntityAlreadyExists && (
+              <EntityAlreadyExistsNotice
+                message={tWizard('wizard.entityAlreadyExists.vehicle')}
+                dismissLabel={tCommon('clear')}
+              />
             )}
             <div className="space-y-6">
               <FormSection title={t('sections.identification')}>
@@ -262,19 +287,36 @@ export function VehicleSheet({
                       error={errs.carrierId?.message}
                       htmlFor="vehicle-carrierId"
                     >
-                      <Select
-                        id="vehicle-carrierId"
-                        disabled={isWizard}
-                        {...form.register('carrierId')}
-                      >
-                        <option value="">—</option>
-                        {(carriersQ.data?.items ?? []).map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.login}
-                            {c.name ? ` — ${c.name}` : ''}
-                          </option>
-                        ))}
-                      </Select>
+                      {isWizard ? (
+                        // In wizard mode the carrier is fixed by step 1; render
+                        // a read-only <Input> showing the label the
+                        // orchestrator passed in. Form state still holds the
+                        // real `carrierId` (seeded via form.reset above) — this
+                        // input is purely cosmetic so we don't depend on the
+                        // useCarriers list query (which is mid-refetch right
+                        // after step 1's invalidation).
+                        <Input
+                          id="vehicle-carrierId"
+                          className="h-10 bg-input"
+                          value={wizardCarrierLabel ?? ''}
+                          readOnly
+                          disabled
+                          aria-readonly="true"
+                        />
+                      ) : (
+                        <Select
+                          id="vehicle-carrierId"
+                          {...form.register('carrierId')}
+                        >
+                          <option value="">—</option>
+                          {(carriersQ.data?.items ?? []).map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.login}
+                              {c.name ? ` — ${c.name}` : ''}
+                            </option>
+                          ))}
+                        </Select>
+                      )}
                     </FormField>
                   )}
                   <FormField

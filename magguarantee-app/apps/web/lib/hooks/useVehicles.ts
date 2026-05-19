@@ -24,6 +24,7 @@ import {
   reactivateVehicle,
   updateVehicle,
 } from '@/lib/api/vehicles';
+import { CARRIERS_KEY } from '@/lib/hooks/useCarriers';
 import { MY_FLEET_KEY } from '@/lib/hooks/useMyFleet';
 
 export const VEHICLES_KEY = ['vehicles'] as const;
@@ -53,6 +54,12 @@ export function useCreateVehicle(
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: VEHICLES_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+      // `Carrier.onboarding.{hasVehicle,isComplete}` is derived server-side
+      // from the live count of active vehicles, so a fresh vehicle changes
+      // every carriers list row that touches this carrier. Invalidate to
+      // refetch — otherwise the "Brak: Pojazd" chip and the "Dokończ
+      // onboarding" button linger after the wizard completes.
+      qc.invalidateQueries({ queryKey: CARRIERS_KEY });
       opts?.onSuccess?.(...args);
     },
   });
@@ -84,6 +91,9 @@ export function useDeactivateVehicle() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: VEHICLES_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+      // Deactivating the last active vehicle flips
+      // `Carrier.onboarding.hasVehicle` to false on the next read — refetch.
+      qc.invalidateQueries({ queryKey: CARRIERS_KEY });
     },
   });
 }
@@ -95,6 +105,7 @@ export function useReactivateVehicle() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: VEHICLES_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+      qc.invalidateQueries({ queryKey: CARRIERS_KEY });
     },
   });
 }
@@ -106,6 +117,7 @@ export function useDeleteVehicle() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: VEHICLES_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+      qc.invalidateQueries({ queryKey: CARRIERS_KEY });
     },
   });
 }

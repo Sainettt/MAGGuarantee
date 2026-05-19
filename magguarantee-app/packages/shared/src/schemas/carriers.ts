@@ -35,25 +35,33 @@ const EmailSchema = z.string().email().max(160);
 const PhoneRequiredSchema = z.string().min(1).max(64);
 
 /**
- * Onboarding wizard step marker — mirrors the Prisma `OnboardingStatus` enum
- * (see `packages/database/prisma/schema.prisma`, migration
- * `20260519095752_carrier_onboarding_status`). DISPLAY-ONLY: no guard or
- * business rule gates off this value. The API advances the status as
- * Vehicle / Trailer / Driver rows are created for the carrier; once
- * `COMPLETE` it never regresses.
+ * Carrier onboarding state — DERIVED on read from the live `_count` of active,
+ * non-soft-deleted Vehicle / Trailer / Driver rows owned by the carrier.
  *
- * Order matters — index in this array is treated as the "rank" of a step,
- * with later steps strictly greater than earlier ones. The advancement logic
- * in `apps/api/src/modules/{vehicles,trailers,drivers}.service.ts` relies on
- * this ordering (PENDING_VEHICLE → PENDING_TRAILER → PENDING_DRIVER → COMPLETE).
+ * The previous enum-backed `Carrier.onboardingStatus` column (migration
+ * `20260519095752_carrier_onboarding_status`) was dropped in migration
+ * `20260519142043_drop_carrier_onboarding_status` because the column and
+ * derived state could drift (e.g. last vehicle gets soft-deleted but the
+ * column stays at `COMPLETE`). The API now computes the booleans on every
+ * read from `_count.{vehicles,trailers,drivers}` so the response can never
+ * lie about the carrier's fleet shape.
+ *
+ * DISPLAY-ORIENTED today, but designed to be guard-friendly: a future
+ * `@RequiresCompleteOnboarding()` decorator reads `onboarding.isComplete`
+ * (see `CarriersService.isCarrierOnboardingComplete`).
  */
-export const OnboardingStatusSchema = z.enum([
-  'PENDING_VEHICLE',
-  'PENDING_TRAILER',
-  'PENDING_DRIVER',
-  'COMPLETE',
-]);
-export type OnboardingStatus = z.infer<typeof OnboardingStatusSchema>;
+export const OnboardingDtoSchema = z.object({
+  hasVehicle: z.boolean(),
+  hasTrailer: z.boolean(),
+  hasDriver: z.boolean(),
+  /**
+   * Composite — `hasVehicle && hasTrailer && hasDriver`. Computed by the
+   * API; clients MUST NOT recompute (kept in the wire payload so consumers
+   * don't have to know the rule).
+   */
+  isComplete: z.boolean(),
+});
+export type OnboardingDto = z.infer<typeof OnboardingDtoSchema>;
 
 const carrierProfileFields = {
   /**
@@ -190,12 +198,18 @@ export const CarrierFiltersSchema = z
     /** Substring search on login / name / nip. Case-insensitive in the repo. */
     q: z.string().min(1).max(64).optional(),
     /**
-     * Optional onboarding-step filter. Single value (matches the existing
-     * single-enum pattern used by `ClaimFiltersSchema.status` and
-     * `DelegationFiltersSchema.status`). Multi-value comma-separated input is
-     * not supported anywhere else in the codebase yet, so we keep parity.
+     * Optional onboarding-completeness filter. Single boolean (replaces the
+     * old multi-value enum filter on the now-dropped `onboardingStatus`
+     * column):
+     *   - `true`  → only carriers with at least one active vehicle AND
+     *               trailer AND driver.
+     *   - `false` → only carriers missing at least one of the three.
+     *   - omitted → all carriers.
+     *
+     * The repo translates this into Prisma `some` / `none` relation filters
+     * on the three fleet relations — see `CarriersRepository.list`.
      */
-    onboardingStatus: OnboardingStatusSchema.optional(),
+    onboardingComplete: z.coerce.boolean().optional(),
     cursor: UuidSchema.optional(),
     limit: z.coerce.number().int().min(1).max(200).default(50),
   })
@@ -234,14 +248,13 @@ export const CarrierDtoSchema = z.object({
   numberOfVehicle: z.number().int().nullable(),
   companyAddress: z.string(),
   /**
-   * Onboarding wizard progress marker. DISPLAY-ONLY — no guard or write path
-   * checks this value. Defaults to `PENDING_VEHICLE` on fresh carriers (DB
-   * default in migration `20260519095752_carrier_onboarding_status`) and is
-   * advanced by the API when the first Vehicle / Trailer / Driver is created
-   * for the carrier. Legacy carriers were backfilled to `COMPLETE` in the
-   * same migration.
+   * Derived onboarding-completeness block. `isComplete` = hasVehicle &&
+   * hasTrailer && hasDriver; the booleans are computed from the live count
+   * of active, non-soft-deleted children on every read (see
+   * `CarriersRepository.list/findOne`). Replaces the dropped
+   * `Carrier.onboardingStatus` column — see `OnboardingDtoSchema` above.
    */
-  onboardingStatus: OnboardingStatusSchema,
+  onboarding: OnboardingDtoSchema,
   opiekunId: UuidSchema,
   opiekun: z.object({
     id: UuidSchema,

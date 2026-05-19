@@ -124,35 +124,10 @@ export class VehiclesService {
       );
     }
 
-    // Onboarding wizard step advancement (display-only — never blocks).
-    // Vehicle created → bump PENDING_VEHICLE to PENDING_TRAILER. Already-
-    // advanced carriers (PENDING_TRAILER / PENDING_DRIVER / COMPLETE) stay
-    // put — `updateMany` with the WHERE filter on the lower set guarantees
-    // we never regress, even under concurrent fleet creations.
-    // Failure here MUST NOT undo the vehicle insert; we log and swallow.
-    await this._advanceCarrierOnboarding(row.carrierId, 'PENDING_TRAILER', [
-      'PENDING_VEHICLE',
-    ]);
-
+    // Onboarding state is derived on read from the live child-count snapshot
+    // (see `CarriersService.toDto`) — creating a vehicle no longer needs a
+    // side-effect to mutate any carrier-level flag.
     return this.toDto(row);
-  }
-
-  /**
-   * Conditional advance helper — see `CarriersRepository.advanceOnboardingStatus`.
-   * Wrapped here so each Service can log a consistent line if the carrier row
-   * disappeared (e.g. concurrent soft-delete) without breaking the create.
-   */
-  private async _advanceCarrierOnboarding(
-    carrierId: string,
-    next: 'PENDING_TRAILER' | 'PENDING_DRIVER' | 'COMPLETE',
-    from: ReadonlyArray<'PENDING_VEHICLE' | 'PENDING_TRAILER' | 'PENDING_DRIVER'>,
-  ): Promise<void> {
-    try {
-      await this.carriers.advanceOnboardingStatus(carrierId, next, [...from]);
-    } catch {
-      // Display-only — swallow so a stale carrier row never breaks the
-      // primary entity create. The DB-level default keeps the field sane.
-    }
   }
 
   async update(id: string, dto: UpdateVehicleDto): Promise<VehicleDto> {

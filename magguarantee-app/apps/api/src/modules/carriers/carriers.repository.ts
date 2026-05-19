@@ -1,7 +1,5 @@
 import { Injectable } from '@nestjs/common';
 
-import type { OnboardingStatus } from '@magguarantee/shared';
-
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -16,6 +14,13 @@ import { PrismaService } from '../prisma/prisma.service';
  * Decimal(12,2) and surfaces here as `number`.
  *
  * `email` follows the User column which is also NOT NULL post-phase3_blocks.
+ *
+ * Onboarding state is derived from the live `_count` of active /
+ * non-soft-deleted child fleet rows (vehicles / trailers / drivers). The
+ * previous `onboardingStatus` enum column was dropped in migration
+ * `20260519142043_drop_carrier_onboarding_status` — see
+ * `packages/shared/src/schemas/carriers.ts` for the DTO shape this surfaces
+ * into.
  */
 export interface CarrierRow {
   id: string;
@@ -42,11 +47,15 @@ export interface CarrierRow {
   numberOfVehicle: number | null;
   companyAddress: string;
   /**
-   * Onboarding wizard step. DB default `PENDING_VEHICLE` (migration
-   * `20260519095752_carrier_onboarding_status`). Advanced by Vehicle /
-   * Trailer / Driver create flows; never regresses. DISPLAY-ONLY.
+   * Live counts of active, non-soft-deleted children. Populated by the
+   * `_count.select` in `includeShape()`. The service maps these to the
+   * `onboarding.{hasVehicle,hasTrailer,hasDriver,isComplete}` DTO block.
    */
-  onboardingStatus: OnboardingStatus;
+  counts: {
+    vehicles: number;
+    trailers: number;
+    drivers: number;
+  };
   opiekunId: string;
   opiekun: {
     id: string;
@@ -62,8 +71,12 @@ export interface CarrierListFilters {
   opiekunId?: string;
   active?: boolean;
   q?: string;
-  /** Optional single-value filter on the onboarding wizard step. */
-  onboardingStatus?: OnboardingStatus;
+  /**
+   * Onboarding-completeness filter — `true` keeps only carriers with at
+   * least one active vehicle AND trailer AND driver; `false` keeps only
+   * carriers missing at least one of the three; omitted keeps all.
+   */
+  onboardingComplete?: boolean;
   cursor?: string;
   limit: number;
 }
@@ -144,10 +157,9 @@ export class CarriersRepository {
   }
 
   async list(filters: CarrierListFilters): Promise<CarrierRow[]> {
+    const andClauses: Record<string, unknown>[] = [];
     const where: Record<string, unknown> = {};
     if (filters.opiekunId) where.opiekunId = filters.opiekunId;
-    if (filters.onboardingStatus)
-      where.onboardingStatus = filters.onboardingStatus;
     if (filters.q) {
       const q = filters.q;
       where.OR = [
@@ -161,6 +173,32 @@ export class CarriersRepository {
         ...((where.user as Record<string, unknown>) ?? {}),
         active: filters.active,
       };
+    }
+    // Onboarding-completeness filter. The carrier has no `onboardingStatus`
+    // column anymore — we instead require (or forbid) at least one matching
+    // child per type via Prisma `some`/`none` relation filters.
+    //   complete=true  → vehicles.some && trailers.some && drivers.some
+    //   complete=false → NOT(complete=true), i.e. at least one of the three
+    //                    is empty. Modelled as an OR-of-`none`s, which is the
+    //                    semantic inverse of an AND-of-`some`s.
+    if (typeof filters.onboardingComplete === 'boolean') {
+      const activeChild = { active: true, deletedAt: null };
+      if (filters.onboardingComplete) {
+        andClauses.push({ vehicles: { some: activeChild } });
+        andClauses.push({ trailers: { some: activeChild } });
+        andClauses.push({ drivers: { some: activeChild } });
+      } else {
+        andClauses.push({
+          OR: [
+            { vehicles: { none: activeChild } },
+            { trailers: { none: activeChild } },
+            { drivers: { none: activeChild } },
+          ],
+        });
+      }
+    }
+    if (andClauses.length > 0) {
+      where.AND = andClauses;
     }
     const rows = await this.prisma.client.carrier.findMany({
       where,
@@ -275,41 +313,6 @@ export class CarriersRepository {
     return this.update(id, { active });
   }
 
-  /**
-   * Conditionally advance `onboardingStatus` to `next` if the current value
-   * is in `lowerStatuses`. Atomic via `updateMany`: the WHERE clause filters
-   * out rows that are already at-or-past `next`, so the column can only move
-   * forward — never regress. Returns the number of rows actually advanced
-   * (0 means the carrier was already at-or-past this step; 1 means we
-   * moved it forward).
-   *
-   * No read-modify-write race: `updateMany` is a single statement evaluated
-   * server-side. Cheaper than reading first + branching + updating, and
-   * race-free without an explicit transaction since the WHERE filter is
-   * idempotent.
-   *
-   * NOTE: we intentionally accept and pass through string literals here
-   * (not the Prisma enum runtime value) so this file doesn't need to drag
-   * in the `OnboardingStatus` Prisma const — the strings match the enum
-   * literals 1:1.
-   */
-  async advanceOnboardingStatus(
-    id: string,
-    next: OnboardingStatus,
-    lowerStatuses: OnboardingStatus[],
-  ): Promise<number> {
-    if (lowerStatuses.length === 0) return 0;
-    const res = await this.prisma.client.carrier.updateMany({
-      where: {
-        id,
-        deletedAt: null,
-        onboardingStatus: { in: lowerStatuses },
-      },
-      data: { onboardingStatus: next },
-    });
-    return res.count;
-  }
-
   async softDelete(id: string): Promise<void> {
     // Soft-deleting the carrier must cascade-soft-delete its fleet per
     // docs/04-data-model.md#cascade-при-удалении-carrier. We do this in one
@@ -347,6 +350,12 @@ export class CarriersRepository {
   // ── helpers ──────────────────────────────────────────────
 
   private includeShape() {
+    // Counts are filtered to active + non-soft-deleted children only — this
+    // mirrors the semantic of the dropped `onboardingStatus` enum (which
+    // tracked "is the carrier currently usable"). `_count` with per-relation
+    // filters requires Prisma ≥ 4.3 — we're on 5.20.x, so this is supported
+    // natively in one query (no N+1 separate counts).
+    const activeChild = { active: true, deletedAt: null };
     return {
       user: {
         select: {
@@ -359,6 +368,13 @@ export class CarriersRepository {
       },
       opiekun: {
         select: { id: true, login: true, name: true },
+      },
+      _count: {
+        select: {
+          vehicles: { where: activeChild },
+          trailers: { where: activeChild },
+          drivers: { where: activeChild },
+        },
       },
     } as const;
   }
@@ -390,12 +406,6 @@ export class CarriersRepository {
     licenseExpiry: Date | null;
     numberOfVehicle: number | null;
     companyAddress: string | null;
-    // Surfaced as the runtime enum literal (one of the 4 OnboardingStatus
-    // values). The widened `string` shape mirrors the defensive pattern used
-    // for other NOT NULL columns; in practice the column always has one of
-    // the enum values courtesy of the DB default + the soft-delete extension
-    // never strips it.
-    onboardingStatus: OnboardingStatus | string | null;
     opiekunId: string | null;
     createdAt: Date;
     updatedAt: Date;
@@ -408,6 +418,11 @@ export class CarriersRepository {
       active: boolean;
     };
     opiekun: { id: string; login: string; name: string | null } | null;
+    _count: {
+      vehicles: number;
+      trailers: number;
+      drivers: number;
+    };
   }): CarrierRow {
     return {
       id: row.id,
@@ -433,8 +448,11 @@ export class CarriersRepository {
       licenseExpiry: row.licenseExpiry,
       numberOfVehicle: row.numberOfVehicle,
       companyAddress: row.companyAddress ?? '',
-      // DB default is PENDING_VEHICLE; null is never observed in practice.
-      onboardingStatus: (row.onboardingStatus ?? 'PENDING_VEHICLE') as OnboardingStatus,
+      counts: {
+        vehicles: row._count.vehicles,
+        trailers: row._count.trailers,
+        drivers: row._count.drivers,
+      },
       opiekunId: row.opiekunId ?? '',
       opiekun:
         row.opiekun ?? { id: row.opiekunId ?? '', login: '', name: null },

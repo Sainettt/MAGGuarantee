@@ -6,14 +6,21 @@
 // `currentStep`. Each sheet is the existing standalone Sheet running in
 // `mode='wizard'`, which adds:
 //   - <WizardStepper> in the header,
-//   - <TemporaryPasswordBanner> at the top of the body (steps 2..4 only),
+//   - <TemporaryPasswordRow> inside the SheetHeader below the stepper (steps 2..4 only),
 //   - locked carrier picker on Vehicle/Trailer/Driver,
 //   - footer rewired to «Save and continue» / «Skip» / «Exit».
 //
-// Backend advances the carrier's `onboardingStatus` automatically as a side
-// effect of each vehicle/trailer/driver create, so the wizard never calls a
-// status-bump endpoint — it just chains the sheets in order and lets the API
-// move the marker.
+// Onboarding completeness is now derived on the API side from the live
+// child-row counts (vehicles/trailers/drivers) — no more
+// `Carrier.onboardingStatus` enum to bump. The wizard just chains the sheets
+// in order; the next read of /carriers will reflect the new fleet shape.
+//
+// When the wizard resumes mid-flow against a carrier that ALREADY has some
+// of those entities (e.g. a vehicle was added outside the wizard), the
+// corresponding sheet renders an info banner so the operator knows they can
+// either add another or skip. `existingEntities` is sourced from
+// useCarrierOnboarding and is also flipped to true as the operator creates
+// new entities through the wizard itself.
 
 import { CarrierSheet } from '@/app/(employee)/employee/(admin)/carriers/CarrierSheet';
 import { DriverSheet } from '@/app/(employee)/employee/(admin)/drivers/DriverSheet';
@@ -39,9 +46,17 @@ export function CarrierOnboardingWizard() {
         wizardCompletedSteps={wizard.completedSteps}
         wizardSkippedSteps={wizard.skippedSteps}
         onCompleted={(created) => {
+          // Mirror the legacy carrier-picker option text (`login — name`) so
+          // step 2..4 can render the label directly. This decouples the
+          // downstream sheets from the `useCarriers` list query which is
+          // still refetching at this exact moment due to the create
+          // invalidation — without the label the picker would flash empty.
+          const carrierLabel =
+            created.login + (created.name ? ` — ${created.name}` : '');
           wizard.carrierCreated({
             carrierId: created.id,
             temporaryPassword: created.temporaryPassword,
+            carrierLabel,
           });
         }}
         onExit={() => wizard.close()}
@@ -58,6 +73,7 @@ export function CarrierOnboardingWizard() {
 
   const commonWizardProps = {
     wizardCarrierId: wizard.carrierId,
+    wizardCarrierLabel: wizard.carrierLabel ?? '',
     wizardTempPassword: wizard.temporaryPassword,
     wizardCompletedSteps: wizard.completedSteps,
     wizardSkippedSteps: wizard.skippedSteps,
@@ -73,6 +89,7 @@ export function CarrierOnboardingWizard() {
         onClose={() => wizard.close()}
         mode="wizard"
         wizardCurrentStep={2}
+        wizardEntityAlreadyExists={wizard.existingEntities.vehicle}
         {...commonWizardProps}
         onCompleted={() => wizard.completeCurrentStep()}
       />
@@ -87,6 +104,7 @@ export function CarrierOnboardingWizard() {
         onClose={() => wizard.close()}
         mode="wizard"
         wizardCurrentStep={3}
+        wizardEntityAlreadyExists={wizard.existingEntities.trailer}
         {...commonWizardProps}
         onCompleted={() => wizard.completeCurrentStep()}
       />
@@ -101,6 +119,7 @@ export function CarrierOnboardingWizard() {
       onClose={() => wizard.close()}
       mode="wizard"
       wizardCurrentStep={4}
+      wizardEntityAlreadyExists={wizard.existingEntities.driver}
       {...commonWizardProps}
       onCompleted={() => wizard.completeCurrentStep()}
     />

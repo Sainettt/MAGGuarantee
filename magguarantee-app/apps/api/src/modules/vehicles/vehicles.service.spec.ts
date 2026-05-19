@@ -84,7 +84,7 @@ function makeCarrier(overrides: Partial<CarrierRow> = {}): CarrierRow {
     licenseExpiry: NOW,
     numberOfVehicle: null,
     companyAddress: 'ul. Testowa 1',
-    onboardingStatus: 'COMPLETE',
+    counts: { vehicles: 1, trailers: 1, drivers: 1 },
     opiekunId: 'op-fixture',
     opiekun: { id: 'op-fixture', login: 'op', name: null },
     createdAt: NOW,
@@ -190,20 +190,6 @@ function makeCarriersRepo(seed: CarrierRow[] = []): CarriersRepository {
         arr = arr.filter((r) => r.opiekunId === filters.opiekunId);
       return arr.slice(0, filters.limit + 1);
     }),
-    // Onboarding-status advancement — mirrors `updateMany` semantics: only
-    // moves the column forward if the current value is in `lowerStatuses`.
-    advanceOnboardingStatus: jest.fn(
-      async (
-        id: string,
-        next: CarrierRow['onboardingStatus'],
-        lowerStatuses: CarrierRow['onboardingStatus'][],
-      ) => {
-        const cur = rows.get(id);
-        if (!cur || !lowerStatuses.includes(cur.onboardingStatus)) return 0;
-        rows.set(id, { ...cur, onboardingStatus: next });
-        return 1;
-      },
-    ),
   } as unknown as CarriersRepository;
 }
 
@@ -414,105 +400,10 @@ describe('VehiclesService', () => {
     await expect(svc.deactivate(v.id)).rejects.toThrow(ConflictException);
   });
 
-  // ── Onboarding-status side-effect ────────────────────────
-  // Wired in `VehiclesService.create` per the API contract: vehicle created
-  // → bump carrier from PENDING_VEHICLE to PENDING_TRAILER, but never
-  // regress an already-advanced carrier.
-
-  it('advances carrier onboardingStatus PENDING_VEHICLE → PENDING_TRAILER', async () => {
-    const carrier = makeCarrier({ onboardingStatus: 'PENDING_VEHICLE' });
-    const carriersRepo = makeCarriersRepo([carrier]);
-    const svc = new VehiclesService(
-      makeVehiclesRepo(),
-      makeUsersRepo(makeValidPeople()),
-      carriersRepo,
-    );
-    await svc.create(makeAuth('admin', 'a-1'), {
-      carrierId: 'c-1',
-      plateNumber: 'WA9001',
-      gps: false,
-      fuelCard: false,
-      wasteAllowed: false,
-      cabotageDe: false,
-      cabotageFr: false,
-      ...REQUIRED_VEHICLE_FIELDS,
-    });
-    expect(carriersRepo.advanceOnboardingStatus).toHaveBeenCalledWith(
-      'c-1',
-      'PENDING_TRAILER',
-      ['PENDING_VEHICLE'],
-    );
-    const after = await carriersRepo.findById('c-1');
-    expect(after?.onboardingStatus).toBe('PENDING_TRAILER');
-  });
-
-  it('does NOT regress an already PENDING_DRIVER carrier', async () => {
-    const carrier = makeCarrier({ onboardingStatus: 'PENDING_DRIVER' });
-    const carriersRepo = makeCarriersRepo([carrier]);
-    const svc = new VehiclesService(
-      makeVehiclesRepo(),
-      makeUsersRepo(makeValidPeople()),
-      carriersRepo,
-    );
-    await svc.create(makeAuth('admin', 'a-1'), {
-      carrierId: 'c-1',
-      plateNumber: 'WA9002',
-      gps: false,
-      fuelCard: false,
-      wasteAllowed: false,
-      cabotageDe: false,
-      cabotageFr: false,
-      ...REQUIRED_VEHICLE_FIELDS,
-    });
-    const after = await carriersRepo.findById('c-1');
-    expect(after?.onboardingStatus).toBe('PENDING_DRIVER');
-  });
-
-  it('does NOT regress an already COMPLETE carrier', async () => {
-    const carrier = makeCarrier({ onboardingStatus: 'COMPLETE' });
-    const carriersRepo = makeCarriersRepo([carrier]);
-    const svc = new VehiclesService(
-      makeVehiclesRepo(),
-      makeUsersRepo(makeValidPeople()),
-      carriersRepo,
-    );
-    await svc.create(makeAuth('admin', 'a-1'), {
-      carrierId: 'c-1',
-      plateNumber: 'WA9003',
-      gps: false,
-      fuelCard: false,
-      wasteAllowed: false,
-      cabotageDe: false,
-      cabotageFr: false,
-      ...REQUIRED_VEHICLE_FIELDS,
-    });
-    const after = await carriersRepo.findById('c-1');
-    expect(after?.onboardingStatus).toBe('COMPLETE');
-  });
-
-  it('a 409 duplicate-plate failure does NOT advance onboardingStatus', async () => {
-    const dup = makeVehicle({ carrierId: 'c-1', plateNumber: 'WA0001' });
-    const carrier = makeCarrier({ onboardingStatus: 'PENDING_VEHICLE' });
-    const carriersRepo = makeCarriersRepo([carrier]);
-    const svc = new VehiclesService(
-      makeVehiclesRepo([dup]),
-      makeUsersRepo(makeValidPeople()),
-      carriersRepo,
-    );
-    await expect(
-      svc.create(makeAuth('admin', 'a-1'), {
-        carrierId: 'c-1',
-        plateNumber: 'WA0001',
-        gps: false,
-        fuelCard: false,
-        wasteAllowed: false,
-        cabotageDe: false,
-        cabotageFr: false,
-        ...REQUIRED_VEHICLE_FIELDS,
-      }),
-    ).rejects.toThrow(ConflictException);
-    expect(carriersRepo.advanceOnboardingStatus).not.toHaveBeenCalled();
-    const after = await carriersRepo.findById('c-1');
-    expect(after?.onboardingStatus).toBe('PENDING_VEHICLE');
-  });
+  // NOTE: the old advance-onboardingStatus side-effect tests were removed
+  // alongside migration `20260519142043_drop_carrier_onboarding_status`.
+  // Onboarding state is now derived on read from the live `_count` of active
+  // children — the carriers DTO mapping (`CarriersService.toDto`) owns the
+  // single source of truth. Coverage for that mapping lives in
+  // `carriers.service.spec.ts` under the "Derived onboarding block" header.
 });

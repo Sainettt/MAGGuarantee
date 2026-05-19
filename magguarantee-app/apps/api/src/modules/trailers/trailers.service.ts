@@ -94,33 +94,10 @@ export class TrailersService {
       );
     }
 
-    // Onboarding wizard step advancement (display-only — never blocks).
-    // Trailer created → bump to PENDING_DRIVER from either of the two prior
-    // steps. Out-of-wizard creates (trailer before vehicle) also advance
-    // past PENDING_VEHICLE — the spec confirms status reflects "highest step
-    // completed", so a carrier with a trailer but no vehicle is correctly
-    // waiting on a driver next. `updateMany` with the WHERE-in clause keeps
-    // already-advanced carriers untouched (no regression).
-    await this._advanceCarrierOnboarding(row.carrierId, 'PENDING_DRIVER', [
-      'PENDING_VEHICLE',
-      'PENDING_TRAILER',
-    ]);
-
+    // Onboarding state is derived on read from the live child-count snapshot
+    // (see `CarriersService.toDto`) — creating a trailer no longer mutates
+    // any carrier-level flag.
     return this.toDto(row);
-  }
-
-  /** See `VehiclesService._advanceCarrierOnboarding` for rationale. */
-  private async _advanceCarrierOnboarding(
-    carrierId: string,
-    next: 'PENDING_TRAILER' | 'PENDING_DRIVER' | 'COMPLETE',
-    from: ReadonlyArray<'PENDING_VEHICLE' | 'PENDING_TRAILER' | 'PENDING_DRIVER'>,
-  ): Promise<void> {
-    try {
-      await this.carriers.advanceOnboardingStatus(carrierId, next, [...from]);
-    } catch {
-      // Display-only — swallow so a stale carrier row never breaks the
-      // primary entity create.
-    }
   }
 
   async update(id: string, dto: UpdateTrailerDto): Promise<TrailerDto> {

@@ -24,6 +24,7 @@ import {
   reactivateTrailer,
   updateTrailer,
 } from '@/lib/api/trailers';
+import { CARRIERS_KEY } from '@/lib/hooks/useCarriers';
 import { MY_FLEET_KEY } from '@/lib/hooks/useMyFleet';
 
 export const TRAILERS_KEY = ['trailers'] as const;
@@ -53,6 +54,10 @@ export function useCreateTrailer(
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: TRAILERS_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+      // Server-derived `Carrier.onboarding.hasTrailer/isComplete` changes
+      // when a trailer is created — refetch the carriers list. See
+      // useVehicles for the same rationale.
+      qc.invalidateQueries({ queryKey: CARRIERS_KEY });
       opts?.onSuccess?.(...args);
     },
   });
@@ -84,6 +89,8 @@ export function useDeactivateTrailer() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: TRAILERS_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+      // May flip `Carrier.onboarding.hasTrailer` — see useVehicles.
+      qc.invalidateQueries({ queryKey: CARRIERS_KEY });
     },
   });
 }
@@ -95,6 +102,7 @@ export function useReactivateTrailer() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: TRAILERS_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+      qc.invalidateQueries({ queryKey: CARRIERS_KEY });
     },
   });
 }
@@ -106,6 +114,7 @@ export function useDeleteTrailer() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: TRAILERS_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+      qc.invalidateQueries({ queryKey: CARRIERS_KEY });
     },
   });
 }

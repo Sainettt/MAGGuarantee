@@ -14,7 +14,7 @@ export function WelcomePanel() {
   if (!user) return null;
   const role = user.role as Role;
   return (
-    <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12">
+    <section className="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-12">
       <div className="rounded-xl bg-card border border-border shadow-card p-8">
         <h1 className="text-[22px] font-extrabold tracking-[-0.5px] text-text">
           {t('landing.welcome', { name: user.name })}

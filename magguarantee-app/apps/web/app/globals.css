@@ -40,6 +40,14 @@
   --color-info: #eab308;
   --color-info-dark: #a16207;
   --color-info-bg: #fefce8;
+  /* Phase 3.4 — calm informational surface for the temp-password row.
+   * Reserved for the carrier-onboarding wizard header band and any future
+   * "calm informational" header bands. Do not use as a general
+   * informational surface — use bg-bg for that. Sky-50 in light mode;
+   * dark mode keeps the same hex (visible on #1f1f1f as a faint slate-blue
+   * tint; bumped to 60% alpha via a `dark:` variant only if a future audit
+   * flags contrast). */
+  --color-info-soft: #f0f9ff;
 
   /* Surface tokens — drive the dual-theme system via the CSS variables
    * declared on `:root` / `[data-theme="dark"]` below. Tailwind utilities

@@ -29,9 +29,11 @@ import {
   SheetTitle,
 } from '@/components/ui/Sheet';
 import { Textarea } from '@/components/ui/Textarea';
-import { TemporaryPasswordBanner } from '@/components/carrier-onboarding/TemporaryPasswordBanner';
+import { EntityAlreadyExistsNotice } from '@/components/carrier-onboarding/EntityAlreadyExistsNotice';
+import { TemporaryPasswordRow } from '@/components/carrier-onboarding/TemporaryPasswordRow';
 import { WizardStepper } from '@/components/carrier-onboarding/WizardStepper';
 import { FormField, FormSection } from '@/components/forms/Form';
+import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useFormDraft } from '@/lib/hooks/useFormDraft';
 import { useTrailerTypes } from '@/lib/hooks/useTrailerTypes';
@@ -46,6 +48,8 @@ interface Props {
   /** Phase 3.2 — wizard mode. See CarrierSheet/VehicleSheet for semantics. */
   mode?: 'standalone' | 'wizard';
   wizardCarrierId?: string;
+  /** Wizard mode only — display label for the locked carrier. See VehicleSheet. */
+  wizardCarrierLabel?: string;
   wizardTempPassword?: string | null;
   onCompleted?: (created: TrailerDto) => void;
   onSkip?: () => void;
@@ -53,6 +57,8 @@ interface Props {
   wizardCurrentStep?: 1 | 2 | 3 | 4;
   wizardCompletedSteps?: number[];
   wizardSkippedSteps?: number[];
+  /** Wizard mode only — see VehicleSheet for semantics. */
+  wizardEntityAlreadyExists?: boolean;
 }
 
 type FormValues = CreateTrailerDto;
@@ -71,6 +77,7 @@ export function TrailerSheet({
   onClose,
   mode = 'standalone',
   wizardCarrierId,
+  wizardCarrierLabel,
   wizardTempPassword,
   onCompleted,
   onSkip,
@@ -78,6 +85,7 @@ export function TrailerSheet({
   wizardCurrentStep,
   wizardCompletedSteps,
   wizardSkippedSteps,
+  wizardEntityAlreadyExists,
 }: Props) {
   const t = useTranslations('trailers');
   const tCommon = useTranslations('common');
@@ -164,16 +172,19 @@ export function TrailerSheet({
     onError: () => toast.error(tCommon('errorGeneric')),
   });
 
-  const onSubmit = form.handleSubmit((values) => {
-    const cleaned = cleanForm(values);
-    if (isEdit && trailer) {
-      const { carrierId: _carrierId, ...rest } = cleaned;
-      void _carrierId;
-      updateM.mutate({ id: trailer.id, body: rest as UpdateTrailerDto });
-    } else {
-      createM.mutate(cleaned as CreateTrailerDto);
-    }
-  });
+  const onSubmit = form.handleSubmit(
+    (values) => {
+      const cleaned = cleanForm(values);
+      if (isEdit && trailer) {
+        const { carrierId: _carrierId, ...rest } = cleaned;
+        void _carrierId;
+        updateM.mutate({ id: trailer.id, body: rest as UpdateTrailerDto });
+      } else {
+        createM.mutate(cleaned as CreateTrailerDto);
+      }
+    },
+    onInvalidToast(form.setFocus, tCommon('validationFailedToast')),
+  );
 
   const submitting = createM.isPending || updateM.isPending;
   const errs = form.formState.errors;
@@ -187,7 +198,7 @@ export function TrailerSheet({
     <Sheet open={open} onOpenChange={(o) => !o && handleClose()}>
       <SheetContent size="wide">
         <form onSubmit={onSubmit} className="flex h-full flex-col">
-          <SheetHeader>
+          <SheetHeader className={isWizard && wizardTempPassword ? 'pb-0' : undefined}>
             <SheetTitle>
               {isWizard
                 ? tWizard('wizard.header.title', { n: wizardCurrentStep ?? 3 })
@@ -205,11 +216,20 @@ export function TrailerSheet({
                 skippedSteps={wizardSkippedSteps ?? []}
               />
             )}
+            {isWizard && wizardTempPassword && (
+              <TemporaryPasswordRow
+                password={wizardTempPassword}
+                className="-mx-6 mt-3"
+              />
+            )}
           </SheetHeader>
 
           <SheetBody>
-            {isWizard && wizardTempPassword && (
-              <TemporaryPasswordBanner password={wizardTempPassword} />
+            {isWizard && wizardEntityAlreadyExists && (
+              <EntityAlreadyExistsNotice
+                message={tWizard('wizard.entityAlreadyExists.trailer')}
+                dismissLabel={tCommon('clear')}
+              />
             )}
             <div className="space-y-6">
               <FormSection title={t('sections.identification')}>
@@ -221,19 +241,31 @@ export function TrailerSheet({
                       error={errs.carrierId?.message}
                       htmlFor="trailer-carrierId"
                     >
-                      <Select
-                        id="trailer-carrierId"
-                        disabled={isWizard}
-                        {...form.register('carrierId')}
-                      >
-                        <option value="">—</option>
-                        {(carriersQ.data?.items ?? []).map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.login}
-                            {c.name ? ` — ${c.name}` : ''}
-                          </option>
-                        ))}
-                      </Select>
+                      {isWizard ? (
+                        // Wizard mode — read-only display fed by orchestrator.
+                        // See VehicleSheet for the race rationale.
+                        <Input
+                          id="trailer-carrierId"
+                          className="h-10 bg-input"
+                          value={wizardCarrierLabel ?? ''}
+                          readOnly
+                          disabled
+                          aria-readonly="true"
+                        />
+                      ) : (
+                        <Select
+                          id="trailer-carrierId"
+                          {...form.register('carrierId')}
+                        >
+                          <option value="">—</option>
+                          {(carriersQ.data?.items ?? []).map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.login}
+                              {c.name ? ` — ${c.name}` : ''}
+                            </option>
+                          ))}
+                        </Select>
+                      )}
                     </FormField>
                   )}
                   <FormField

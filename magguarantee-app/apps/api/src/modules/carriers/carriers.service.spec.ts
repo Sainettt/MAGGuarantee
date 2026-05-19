@@ -40,7 +40,10 @@ function makeCarrier(overrides: Partial<CarrierRow> = {}): CarrierRow {
     licenseExpiry: NOW,
     numberOfVehicle: null,
     companyAddress: 'ul. Testowa 1',
-    onboardingStatus: 'COMPLETE',
+    // Derived onboarding state — non-zero defaults mean fixtures are
+    // considered "fully onboarded" out of the box; tests that exercise
+    // partial onboarding override `counts` explicitly.
+    counts: { vehicles: 1, trailers: 1, drivers: 1 },
     opiekunId: 'op-fixture',
     opiekun: { id: 'op-fixture', login: 'op', name: null },
     createdAt: NOW,
@@ -326,32 +329,83 @@ describe('CarriersService', () => {
     await expect(svc.getById('missing')).rejects.toThrow(NotFoundException);
   });
 
-  // ── onboardingStatus filter ──────────────────────────────
-  // list() must forward the `onboardingStatus` query param through to the
-  // repo. The filter is single-value (matches ClaimFilters.status pattern).
-  // No business rule keys off it — it's display-only.
+  // ── Derived onboarding block ─────────────────────────────
+  // After dropping the `Carrier.onboardingStatus` enum column, onboarding
+  // state is derived on every read from the live `_count` of active children.
+  // `toDto` is responsible for computing both the booleans and the composite
+  // `isComplete` flag from the row's `counts` (populated by the repo's
+  // `_count.select`). These tests pin the mapping in both shapes.
 
-  it('list forwards onboardingStatus filter to the repo', async () => {
+  it('toDto carries the onboarding block — all counts > 0 → isComplete true', async () => {
+    const carrier = makeCarrier({
+      id: 'c-full',
+      login: 'pwz-full',
+      counts: { vehicles: 2, trailers: 1, drivers: 3 },
+    });
+    const carriers = makeCarriersRepo([carrier]);
+    const svc = new CarriersService(carriers, makeUsersRepo(), makePasswords());
+    const out = await svc.getById('c-full');
+    expect(out.onboarding).toEqual({
+      hasVehicle: true,
+      hasTrailer: true,
+      hasDriver: true,
+      isComplete: true,
+    });
+  });
+
+  it('toDto carries the onboarding block — vehicle count = 0 → hasVehicle/isComplete false', async () => {
+    const carrier = makeCarrier({
+      id: 'c-novehicle',
+      login: 'pwz-novehicle',
+      counts: { vehicles: 0, trailers: 1, drivers: 1 },
+    });
+    const carriers = makeCarriersRepo([carrier]);
+    const svc = new CarriersService(carriers, makeUsersRepo(), makePasswords());
+    const out = await svc.getById('c-novehicle');
+    expect(out.onboarding).toEqual({
+      hasVehicle: false,
+      hasTrailer: true,
+      hasDriver: true,
+      isComplete: false,
+    });
+  });
+
+  it('list forwards onboardingComplete filter to the repo', async () => {
     const carriers = makeCarriersRepo();
     const svc = new CarriersService(carriers, makeUsersRepo(), makePasswords());
     await svc.list(makeAuth('admin', 'a-1'), {
       limit: 50,
-      onboardingStatus: 'PENDING_VEHICLE',
+      onboardingComplete: true,
     });
     expect(carriers.list).toHaveBeenCalledWith(
-      expect.objectContaining({ onboardingStatus: 'PENDING_VEHICLE' }),
+      expect.objectContaining({ onboardingComplete: true }),
     );
   });
 
-  it('toDto carries onboardingStatus through the response', async () => {
-    const carrier = makeCarrier({
-      id: 'c-onb',
-      login: 'pwz-onb',
-      onboardingStatus: 'PENDING_TRAILER',
+  it('isCarrierOnboardingComplete is the seam for future @RequiresCompleteOnboarding guard', async () => {
+    // Three-line helper exposed so a future guard can ask the service "is
+    // this carrier fully onboarded?" without re-implementing the rule.
+    const complete = makeCarrier({
+      id: 'c-complete',
+      login: 'a',
+      counts: { vehicles: 1, trailers: 1, drivers: 1 },
     });
-    const carriers = makeCarriersRepo([carrier]);
+    const partial = makeCarrier({
+      id: 'c-partial',
+      login: 'b',
+      counts: { vehicles: 1, trailers: 0, drivers: 1 },
+    });
+    const carriers = makeCarriersRepo([complete, partial]);
     const svc = new CarriersService(carriers, makeUsersRepo(), makePasswords());
-    const out = await svc.getById('c-onb');
-    expect(out.onboardingStatus).toBe('PENDING_TRAILER');
+    await expect(svc.isCarrierOnboardingComplete('c-complete')).resolves.toBe(
+      true,
+    );
+    await expect(svc.isCarrierOnboardingComplete('c-partial')).resolves.toBe(
+      false,
+    );
+    // Missing carrier → false (defensive — guard must not grant access).
+    await expect(svc.isCarrierOnboardingComplete('c-missing')).resolves.toBe(
+      false,
+    );
   });
 });

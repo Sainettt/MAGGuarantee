@@ -25,7 +25,7 @@ export function CarrierShell({ children }: { children: React.ReactNode }) {
       <CarrierTabs />
       <main className="flex-1">
         {isLoading || !user ? (
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12">
+          <div className="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-12">
             <div className="h-8 w-48 rounded bg-input animate-pulse" />
             <div className="mt-4 h-4 w-72 rounded bg-input animate-pulse" />
           </div>

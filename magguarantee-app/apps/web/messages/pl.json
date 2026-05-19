@@ -139,7 +139,7 @@
     },
     "step": {
       "carrier": "Przewoźnik",
-      "vehicle": "Maszyna",
+      "vehicle": "Pojazd",
       "trailer": "Przyczepa",
       "driver": "Kierowca"
     },
@@ -156,34 +156,33 @@
       "saveAndContinue": "Zapisz i kontynuuj",
       "skip": "Pomiń",
       "exit": "Wyjdź"
+    },
+    "entityAlreadyExists": {
+      "vehicle": "Ten przewoźnik ma już pojazd — możesz dodać kolejny lub pominąć krok.",
+      "trailer": "Ten przewoźnik ma już naczepę — możesz dodać kolejną lub pominąć krok.",
+      "driver": "Ten przewoźnik ma już kierowcę — możesz dodać kolejnego lub pominąć krok."
     }
   },
   "tempPwd": {
-    "regionLabel": "Hasło tymczasowe — akcja wymagana",
+    "regionLabel": "Hasło tymczasowe do przekazania przewoźnikowi",
     "title": "Hasło tymczasowe",
-    "body": "Przekaż to hasło przewoźnikowi — nie zobaczysz go ponownie.",
     "reveal": "Pokaż",
     "hide": "Ukryj",
     "copy": "Kopiuj",
     "copied": "Skopiowano",
-    "toast": "Hasło skopiowane do schowka",
     "revealAria": "Pokaż hasło tymczasowe",
     "hideAria": "Ukryj hasło tymczasowe",
     "copyAria": "Skopiuj hasło tymczasowe do schowka",
     "maskedAria": "Hasło tymczasowe, ukryte. Kliknij Pokaż, aby wyświetlić."
   },
   "onboardingStatus": {
-    "PENDING_VEHICLE": "Brak maszyny",
-    "PENDING_TRAILER": "Brak przyczepy",
-    "PENDING_DRIVER": "Brak kierowcy",
-    "column": "Onboarding",
-    "resumeAction": "Dokończ onboarding",
-    "ariaPrefix": "Onboarding niezakończony: brak ",
-    "entity": {
-      "vehicle": "maszyny",
-      "trailer": "przyczepy",
-      "driver": "kierowcy"
-    }
+    "resumeAction": "Dokończ onboarding"
+  },
+  "onboardingMissing": {
+    "groupLabel": "Brakujące elementy konfiguracji",
+    "vehicle": "Brak: Pojazd",
+    "trailer": "Brak: Naczepa",
+    "driver": "Brak: Kierowca"
   },
   "carriers": {
     "title": "Przewoźnicy",
@@ -197,7 +196,11 @@
       "allOpiekun": "Wszyscy opiekuni",
       "allActive": "Wszyscy",
       "onlyActive": "Tylko aktywni",
-      "onlyInactive": "Tylko nieaktywni"
+      "onlyInactive": "Tylko nieaktywni",
+      "onboardingLabel": "Filtruj po statusie onboardingu",
+      "allOnboarding": "Onboarding: wszyscy",
+      "onlyIncomplete": "Tylko niedokończeni",
+      "onlyCompleteOnboarding": "Tylko ukończeni"
     },
     "fields": {
       "login": "Login",

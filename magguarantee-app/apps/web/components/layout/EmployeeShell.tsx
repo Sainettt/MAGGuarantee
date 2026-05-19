@@ -54,7 +54,7 @@ export function EmployeeShell({ navItems, children }: EmployeeShellProps) {
         }
       />
 
-      <div className="flex flex-1 mx-auto w-full max-w-7xl">
+      <div className="flex flex-1 mx-auto w-full max-w-screen-2xl">
         <EmployeeSidebar
           items={navItems}
           mobileOpen={mobileNavOpen}

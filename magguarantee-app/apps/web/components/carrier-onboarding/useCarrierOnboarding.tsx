@@ -14,6 +14,13 @@
 // row action the temporary password is NOT in hand — that was issued exactly
 // once on the original POST /carriers and the API stores only a hash. The
 // banner is hidden in that case.
+//
+// After the May 2026 drop of `Carrier.onboardingStatus`, this hook reads the
+// derived `onboarding: { hasVehicle, hasTrailer, hasDriver, isComplete }`
+// block on resume and infers the first missing step on its own. Steps whose
+// entity already exists are pre-populated into `completedSteps`; nothing is
+// auto-marked as skipped on resume any more (skippedSteps is reserved for
+// active "Skip" clicks during the session).
 
 import {
   createContext,
@@ -25,16 +32,36 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { OnboardingStatus } from '@magguarantee/shared';
+import type { OnboardingDto } from '@magguarantee/shared';
 
 export type StepNumber = 1 | 2 | 3 | 4;
 
+interface ExistingEntities {
+  vehicle: boolean;
+  trailer: boolean;
+  driver: boolean;
+}
+
 interface PersistedState {
   carrierId: string | null;
+  /**
+   * Display label of the created/resumed carrier (e.g. `login — name`).
+   * Carried through wizard state so steps 2..4 can render it directly,
+   * without depending on the `useCarriers` list query which may still be
+   * refetching after step 1's invalidation — see CarrierOnboardingWizard.
+   */
+  carrierLabel: string | null;
   temporaryPassword: string | null;
   currentStep: StepNumber;
   completedSteps: number[];
   skippedSteps: number[];
+  /**
+   * Snapshot of which carrier-owned entities already exist when the wizard
+   * was opened (or were created during the current wizard session). Drives
+   * the "ten przewoźnik ma już pojazd" info banner on the Vehicle/Trailer/
+   * Driver sheets — see CarrierOnboardingWizard.
+   */
+  existingEntities: ExistingEntities;
 }
 
 interface WizardState extends PersistedState {
@@ -45,12 +72,24 @@ interface WizardCtx extends WizardState {
   /** Open the wizard at the carrier step (fresh create flow). */
   start: () => void;
   /**
-   * Open the wizard mid-flow for an already-created carrier. Step is
-   * inferred from the carrier's `onboardingStatus`.
+   * Open the wizard mid-flow for an already-created carrier. The wizard
+   * jumps to the first missing step (vehicle → trailer → driver). Steps
+   * whose entity already exists are pre-marked as completed in the stepper
+   * so the operator sees their progress, not a blank slate. Pre-existing
+   * gaps are NOT marked as skipped — `skippedSteps` is reserved for
+   * "Pomiń" clicks during the current session.
    */
-  resume: (args: { carrierId: string; status: OnboardingStatus }) => void;
+  resume: (args: {
+    carrierId: string;
+    carrierLabel: string;
+    onboarding: OnboardingDto;
+  }) => void;
   /** Step 1 finished — carrier created, temporary password in hand. */
-  carrierCreated: (args: { carrierId: string; temporaryPassword: string }) => void;
+  carrierCreated: (args: {
+    carrierId: string;
+    temporaryPassword: string;
+    carrierLabel: string;
+  }) => void;
   /** Advance from the current step to the next, marking the current as completed. */
   completeCurrentStep: () => void;
   /** Skip the current step (Vehicle, Trailer, or Driver). Never allowed on step 1. */
@@ -64,35 +103,27 @@ const STORAGE_KEY = 'carrier-onboarding:active';
 const Ctx = createContext<WizardCtx | null>(null);
 
 /**
- * Wizard step inferred from the carrier's onboarding status. Used when the
- * operator clicks "Dokończ onboarding" on an existing carrier row.
+ * Pick the first missing step from the carrier's derived onboarding block.
+ * Returns null when everything is already in place — caller should no-op.
  */
-function stepForStatus(status: OnboardingStatus): StepNumber | null {
-  switch (status) {
-    case 'PENDING_VEHICLE':
-      return 2;
-    case 'PENDING_TRAILER':
-      return 3;
-    case 'PENDING_DRIVER':
-      return 4;
-    case 'COMPLETE':
-      return null;
-  }
+function firstMissingStep(onboarding: OnboardingDto): StepNumber | null {
+  if (!onboarding.hasVehicle) return 2;
+  if (!onboarding.hasTrailer) return 3;
+  if (!onboarding.hasDriver) return 4;
+  return null;
 }
 
 /**
- * When resuming at step N, every prior pending entity step is implicitly
- * "skipped" (the carrier exists but the row hasn't been filled). Step 1
- * (carrier) is always completed by virtue of the carrier existing.
+ * Build the `completedSteps` array for a resume — step 1 is always done (the
+ * carrier exists) and any step whose entity is already present counts as
+ * completed so the stepper reflects reality.
  */
-function impliedSkippedFromResume(step: StepNumber): number[] {
-  // step is 2|3|4 here — carrier (1) is already done, anything before `step`
-  // and after 1 is treated as skipped so the stepper visually communicates
-  // "you can still fill these later" without falsely claiming they were
-  // submitted.
-  const skipped: number[] = [];
-  for (let s = 2; s < step; s++) skipped.push(s);
-  return skipped;
+function completedFromOnboarding(onboarding: OnboardingDto): number[] {
+  const completed = [1];
+  if (onboarding.hasVehicle) completed.push(2);
+  if (onboarding.hasTrailer) completed.push(3);
+  if (onboarding.hasDriver) completed.push(4);
+  return completed;
 }
 
 function readPersisted(): PersistedState | null {
@@ -102,11 +133,16 @@ function readPersisted(): PersistedState | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== 'object') return null;
-    const obj = parsed as Partial<PersistedState>;
+    const obj = parsed as Partial<PersistedState> & {
+      existingEntities?: Partial<ExistingEntities>;
+    };
     if (typeof obj.currentStep !== 'number') return null;
     if (![1, 2, 3, 4].includes(obj.currentStep)) return null;
+    const ee: Partial<ExistingEntities> = obj.existingEntities ?? {};
     return {
       carrierId: typeof obj.carrierId === 'string' ? obj.carrierId : null,
+      carrierLabel:
+        typeof obj.carrierLabel === 'string' ? obj.carrierLabel : null,
       temporaryPassword:
         typeof obj.temporaryPassword === 'string'
           ? obj.temporaryPassword
@@ -118,6 +154,11 @@ function readPersisted(): PersistedState | null {
       skippedSteps: Array.isArray(obj.skippedSteps)
         ? obj.skippedSteps.filter((n) => typeof n === 'number')
         : [],
+      existingEntities: {
+        vehicle: ee.vehicle === true,
+        trailer: ee.trailer === true,
+        driver: ee.driver === true,
+      },
     };
   } catch {
     return null;
@@ -146,14 +187,22 @@ interface ProviderProps {
   children: ReactNode;
 }
 
+const EMPTY_EXISTING: ExistingEntities = {
+  vehicle: false,
+  trailer: false,
+  driver: false,
+};
+
 export function CarrierOnboardingProvider({ children }: ProviderProps) {
   const [state, setState] = useState<WizardState>(() => ({
     active: false,
     carrierId: null,
+    carrierLabel: null,
     temporaryPassword: null,
     currentStep: 1,
     completedSteps: [],
     skippedSteps: [],
+    existingEntities: { ...EMPTY_EXISTING },
   }));
   // Hydrate from sessionStorage on mount. We DON'T auto-open the sheet —
   // the operator left the page intentionally; on the next mount we just
@@ -174,45 +223,67 @@ export function CarrierOnboardingProvider({ children }: ProviderProps) {
     if (!state.active) return;
     writePersisted({
       carrierId: state.carrierId,
+      carrierLabel: state.carrierLabel,
       temporaryPassword: state.temporaryPassword,
       currentStep: state.currentStep,
       completedSteps: state.completedSteps,
       skippedSteps: state.skippedSteps,
+      existingEntities: state.existingEntities,
     });
   }, [
     state.active,
     state.carrierId,
+    state.carrierLabel,
     state.temporaryPassword,
     state.currentStep,
     state.completedSteps,
     state.skippedSteps,
+    state.existingEntities,
   ]);
 
   const start = useCallback(() => {
     setState({
       active: true,
       carrierId: null,
+      carrierLabel: null,
       temporaryPassword: null,
       currentStep: 1,
       completedSteps: [],
       skippedSteps: [],
+      existingEntities: { ...EMPTY_EXISTING },
     });
   }, []);
 
   const resume = useCallback(
-    ({ carrierId, status }: { carrierId: string; status: OnboardingStatus }) => {
-      const step = stepForStatus(status);
+    ({
+      carrierId,
+      carrierLabel,
+      onboarding,
+    }: {
+      carrierId: string;
+      carrierLabel: string;
+      onboarding: OnboardingDto;
+    }) => {
+      // Nothing to resume — caller may have raced a state refresh. No-op.
+      if (onboarding.isComplete) return;
+      const step = firstMissingStep(onboarding);
       if (step === null) return;
-      const completedSteps = [1];
-      const skippedSteps = impliedSkippedFromResume(step);
       setState({
         active: true,
         carrierId,
+        carrierLabel,
         // No temp password on resume — see file header.
         temporaryPassword: null,
         currentStep: step,
-        completedSteps,
-        skippedSteps,
+        completedSteps: completedFromOnboarding(onboarding),
+        // Per the orchestrator brief: `skippedSteps` is session-scoped only.
+        // Pre-existing gaps render as neutral "pending" in the stepper.
+        skippedSteps: [],
+        existingEntities: {
+          vehicle: onboarding.hasVehicle,
+          trailer: onboarding.hasTrailer,
+          driver: onboarding.hasDriver,
+        },
       });
     },
     [],
@@ -222,16 +293,21 @@ export function CarrierOnboardingProvider({ children }: ProviderProps) {
     ({
       carrierId,
       temporaryPassword,
+      carrierLabel,
     }: {
       carrierId: string;
       temporaryPassword: string;
+      carrierLabel: string;
     }) => {
       setState((prev) => ({
         ...prev,
         carrierId,
+        carrierLabel,
         temporaryPassword,
         currentStep: 2,
         completedSteps: [...new Set([...prev.completedSteps, 1])],
+        // Fresh carrier — no pre-existing entities yet.
+        existingEntities: { ...EMPTY_EXISTING },
       }));
     },
     [],
@@ -243,16 +319,25 @@ export function CarrierOnboardingProvider({ children }: ProviderProps) {
       const completed = [...new Set([...prev.completedSteps, cur])];
       // Remove from skipped if it was previously skipped (defensive).
       const skipped = prev.skippedSteps.filter((s) => s !== cur);
+      // Flip the corresponding existingEntities flag — the entity now exists
+      // in the database. Step 1 (carrier) is tracked separately in
+      // `completedSteps`/`carrierId`, not here.
+      const existing: ExistingEntities = { ...prev.existingEntities };
+      if (cur === 2) existing.vehicle = true;
+      else if (cur === 3) existing.trailer = true;
+      else if (cur === 4) existing.driver = true;
       if (cur === 4) {
         // Final step done — close the wizard cleanly.
         clearPersisted();
         return {
           active: false,
           carrierId: null,
+          carrierLabel: null,
           temporaryPassword: null,
           currentStep: 1,
           completedSteps: [],
           skippedSteps: [],
+          existingEntities: { ...EMPTY_EXISTING },
         };
       }
       return {
@@ -260,6 +345,7 @@ export function CarrierOnboardingProvider({ children }: ProviderProps) {
         currentStep: (cur + 1) as StepNumber,
         completedSteps: completed,
         skippedSteps: skipped,
+        existingEntities: existing,
       };
     });
   }, []);
@@ -277,10 +363,12 @@ export function CarrierOnboardingProvider({ children }: ProviderProps) {
         return {
           active: false,
           carrierId: null,
+          carrierLabel: null,
           temporaryPassword: null,
           currentStep: 1,
           completedSteps: [],
           skippedSteps: [],
+          existingEntities: { ...EMPTY_EXISTING },
         };
       }
       return {
@@ -297,10 +385,12 @@ export function CarrierOnboardingProvider({ children }: ProviderProps) {
     setState({
       active: false,
       carrierId: null,
+      carrierLabel: null,
       temporaryPassword: null,
       currentStep: 1,
       completedSteps: [],
       skippedSteps: [],
+      existingEntities: { ...EMPTY_EXISTING },
     });
   }, []);
 

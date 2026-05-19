@@ -72,7 +72,7 @@ export class CarriersService {
       opiekunId: effective.opiekunId,
       active: effective.active,
       q: effective.q,
-      onboardingStatus: effective.onboardingStatus,
+      onboardingComplete: effective.onboardingComplete,
       cursor: effective.cursor,
       limit: effective.limit,
     });
@@ -273,6 +273,31 @@ export class CarriersService {
     await this.carriers.softDelete(id);
   }
 
+  /**
+   * Cheap completeness check used as the seam for a future
+   * `@RequiresCompleteOnboarding()` guard. The guard's expected shape is:
+   *   - extract `carrierId` from `req.user` (or the request),
+   *   - call this helper,
+   *   - throw 403 if it returns false.
+   *
+   * Today there are no callers — this is intentionally a 3-line method so
+   * the guard slot has a stable, one-line dependency. The composite rule
+   * lives in exactly one place (the `_count` filter + `toDto` mapping) so
+   * the guard cannot drift from the DTO.
+   *
+   * Returns `false` for missing carriers (defensive — a guard hitting a
+   * deleted carrier should not be granted access).
+   */
+  async isCarrierOnboardingComplete(carrierId: string): Promise<boolean> {
+    const row = await this.carriers.findById(carrierId);
+    if (!row) return false;
+    return (
+      row.counts.vehicles > 0 &&
+      row.counts.trailers > 0 &&
+      row.counts.drivers > 0
+    );
+  }
+
   // ── Internals ────────────────────────────────────────────
 
   private async _resolveOpiekunId(
@@ -340,6 +365,14 @@ export class CarriersService {
   // ── DTO mapping ──────────────────────────────────────────
 
   toDto(row: CarrierRow): CarrierDto {
+    // Derive the onboarding block from the live counts surfaced by the repo
+    // (`_count.{vehicles,trailers,drivers}` filtered to active + not soft-
+    // deleted). Single source of truth — both the booleans and the composite
+    // `isComplete` flag are computed here, so clients never re-derive.
+    const hasVehicle = row.counts.vehicles > 0;
+    const hasTrailer = row.counts.trailers > 0;
+    const hasDriver = row.counts.drivers > 0;
+    const isComplete = hasVehicle && hasTrailer && hasDriver;
     return {
       id: row.id,
       userId: row.userId,
@@ -362,7 +395,7 @@ export class CarriersService {
       licenseExpiry: row.licenseExpiry ? toDateString(row.licenseExpiry) : null,
       numberOfVehicle: row.numberOfVehicle,
       companyAddress: row.companyAddress,
-      onboardingStatus: row.onboardingStatus,
+      onboarding: { hasVehicle, hasTrailer, hasDriver, isComplete },
       opiekunId: row.opiekunId,
       opiekun: row.opiekun,
       createdAt: row.createdAt.toISOString(),

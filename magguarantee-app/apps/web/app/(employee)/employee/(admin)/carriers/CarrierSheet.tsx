@@ -18,7 +18,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslations } from 'next-intl';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm, type UseFormReturn } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
@@ -173,6 +173,19 @@ export function CarrierSheet({
   const [nipMsg, setNipMsg] = useState<string | undefined>(undefined);
   const [accountState, setAccountState] = useState<FieldValidationState>('idle');
   const [accountMsg, setAccountMsg] = useState<string | undefined>(undefined);
+  // ── Stale-autofill tracking ────────────────────────────────────────
+  //
+  // We track which fields were filled by the most recent NIP lookup AND the
+  // exact value we wrote. Before the next lookup runs we compare the live
+  // value to the recorded one:
+  //   - same → user didn't touch it; clear so the new lookup can overwrite.
+  //   - different → user edited it manually; leave alone.
+  // This fixes the stale-data bug where typing NIP A → autofill → NIP B left
+  // company/address frozen with A's data because the "empty fields only"
+  // guard found them populated.
+  const autofillRef = useRef<{ values: Record<string, string> }>({
+    values: {},
+  });
   // ── Multi-account picker (Biała Lista search returned ≥2 accounts) ──
   //
   // When MF's registry returns multiple bank accounts for the NIP we don't
@@ -195,6 +208,11 @@ export function CarrierSheet({
     // Reset the multi-account picker on every fresh lookup — its contents
     // are derived from the response we're about to fetch.
     setAccountChoices([]);
+    // Clear fields that were filled by the PREVIOUS lookup if (and only if)
+    // the user hasn't edited them manually since. Without this the second
+    // lookup's "empty fields only" guard preserves stale data from the
+    // first NIP.
+    clearStaleAutofills(form, autofillRef);
     // VIES + Biała Lista search fire in parallel. VIES still owns the badge
     // (works for foreign carriers too); Biała Lista contributes autofill +
     // multi-account selector for PL carriers only and stays silent on
@@ -210,7 +228,7 @@ export function CarrierSheet({
     if (blSettled.status === 'fulfilled') {
       const blRes = blSettled.value;
       if (blRes !== INTEGRATION_UNAVAILABLE) {
-        applyWhitelistAutofill(blRes, form);
+        applyWhitelistAutofill(blRes, form, autofillRef);
         // Account-numbers branch — see § 2.4 of the integration spec.
         if (blRes.found && blRes.accountNumbers.length > 0) {
           const accounts = blRes.accountNumbers;
@@ -222,6 +240,7 @@ export function CarrierSheet({
                 shouldDirty: true,
                 shouldValidate: true,
               });
+              autofillRef.current.values.accountEur = first;
             }
           } else if (accounts.length >= 2) {
             // ≥2 accounts → defer to user choice via the inline picker.
@@ -253,7 +272,7 @@ export function CarrierSheet({
     if (res.valid) {
       setNipState('valid');
       setNipMsg(res.name ? `${tValidation('valid')} — ${res.name}` : undefined);
-      applyViesAutofill(res, form);
+      applyViesAutofill(res, form, autofillRef);
     } else {
       setNipState('invalid');
       setNipMsg(undefined);
@@ -310,6 +329,8 @@ export function CarrierSheet({
     setNipState('idle');
     setAccountState('idle');
     setAccountChoices([]);
+    // Fresh sheet open → no autofill history yet.
+    autofillRef.current = { values: {} };
     if (isEdit && carrier) {
       const split = splitVatId(carrier.vatId);
       form.reset({
@@ -356,8 +377,8 @@ export function CarrierSheet({
       if (isWizard) {
         // Wizard mode: hand the created carrier (+ temp password) to the
         // orchestrator and DON'T toast/close. The orchestrator advances to
-        // step 2 and the sticky <TemporaryPasswordBanner> renders the
-        // password from then on.
+        // step 2 and the <TemporaryPasswordRow> in the SheetHeader renders
+        // the password from then on.
         onCompleted?.(created);
         return;
       }
@@ -685,6 +706,10 @@ export function CarrierSheet({
                                 shouldDirty: true,
                                 shouldValidate: true,
                               });
+                              // Track the picker selection as autofill so a
+                              // subsequent NIP change clears it (unless the
+                              // user has further edited the field).
+                              autofillRef.current.values.accountEur = v;
                               setAccountChoices([]);
                             }}
                           >
@@ -870,6 +895,7 @@ export function CarrierSheet({
                       setNipState('idle');
                       setAccountState('idle');
                       setAccountChoices([]);
+                      autofillRef.current = { values: {} };
                     }}
                     disabled={submitting}
                   >
@@ -897,15 +923,55 @@ export function CarrierSheet({
   );
 }
 
+/** Fields that the NIP lookup writes into and tracks for "manual edit" detection. */
+const AUTOFILL_FIELDS = ['company', 'companyAddress', 'accountEur'] as const;
+type AutofillField = (typeof AUTOFILL_FIELDS)[number];
+
+type AutofillRef = { current: { values: Record<string, string> } };
+
+/**
+ * Before the next lookup runs, drop any previously-autofilled value the user
+ * hasn't touched. "Hasn't touched" = current field value still equals the
+ * exact string we wrote last time. If the user has edited the value, we
+ * leave it alone so manual edits aren't blown away.
+ */
+function clearStaleAutofills(
+  form: UseFormReturn<CarrierFormValues>,
+  ref: AutofillRef,
+): void {
+  const tracked = ref.current.values;
+  for (const field of AUTOFILL_FIELDS) {
+    const last = tracked[field];
+    if (last === undefined) continue;
+    const cur = (form.getValues(field) ?? '') as string;
+    if (cur === last) {
+      // Untouched since the last autofill — wipe so the new lookup can
+      // overwrite via the "empty fields only" guard.
+      form.setValue(field as AutofillField, '', {
+        shouldDirty: true,
+        shouldValidate: false,
+      });
+      delete tracked[field];
+    } else {
+      // User edited it manually; forget the tracking entry so we don't
+      // pester them later.
+      delete tracked[field];
+    }
+  }
+}
+
 /**
  * Autofill `company` / `companyAddress` from a successful VIES lookup, but
  * only when the user hasn't typed anything yet (Variant 1 — "empty fields
  * only"). `shouldDirty: true` keeps `useFormDraft` in sync; `shouldValidate`
- * runs the Zod resolver so the field's error state clears immediately.
+ * runs the Zod resolver so the field's error state clears immediately. The
+ * ref records each write so `clearStaleAutofills` can detect manual edits
+ * on the next NIP change.
  */
 function applyViesAutofill(
   res: { name: string | null; address: string | null },
   form: UseFormReturn<CarrierFormValues>,
+  ref: AutofillRef,
 ): void {
   const name = res.name?.trim();
   if (name && !(form.getValues('company') ?? '').trim()) {
@@ -913,6 +979,7 @@ function applyViesAutofill(
       shouldDirty: true,
       shouldValidate: true,
     });
+    ref.current.values.company = name;
   }
   // VIES address often comes with embedded newlines + double spaces; collapse
   // to a single line so the <Textarea rows={2}> renders sanely.
@@ -922,6 +989,7 @@ function applyViesAutofill(
       shouldDirty: true,
       shouldValidate: true,
     });
+    ref.current.values.companyAddress = address;
   }
 }
 
@@ -937,6 +1005,7 @@ function applyViesAutofill(
 function applyWhitelistAutofill(
   res: WhitelistSearchResult,
   form: UseFormReturn<CarrierFormValues>,
+  ref: AutofillRef,
 ): void {
   if (!res.found) return;
 
@@ -946,6 +1015,7 @@ function applyWhitelistAutofill(
       shouldDirty: true,
       shouldValidate: true,
     });
+    ref.current.values.company = name;
   }
 
   // MF addresses can arrive with extra whitespace too; normalize to a single
@@ -956,6 +1026,7 @@ function applyWhitelistAutofill(
       shouldDirty: true,
       shouldValidate: true,
     });
+    ref.current.values.companyAddress = address;
   }
 }
 

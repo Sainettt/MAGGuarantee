@@ -56,7 +56,7 @@ export function CarrierTabs() {
       aria-label={t('ariaLabel')}
       className="sticky top-16 z-10 bg-card/90 backdrop-blur border-b border-border"
     >
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 flex items-center gap-1 overflow-x-auto">
+      <div className="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 flex items-center gap-1 overflow-x-auto">
         {TABS.map((tab) => {
           // `Wnioski` is `/carrier/claims` but `Nowy` is `/carrier/claims/new`
           // — give the more specific match priority so the user clearly

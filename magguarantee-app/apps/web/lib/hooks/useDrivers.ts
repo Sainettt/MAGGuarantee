@@ -24,6 +24,7 @@ import {
   reactivateDriver,
   updateDriver,
 } from '@/lib/api/drivers';
+import { CARRIERS_KEY } from '@/lib/hooks/useCarriers';
 import { MY_FLEET_KEY } from '@/lib/hooks/useMyFleet';
 
 export const DRIVERS_KEY = ['drivers'] as const;
@@ -53,6 +54,10 @@ export function useCreateDriver(
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: DRIVERS_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+      // Server-derived `Carrier.onboarding.hasDriver/isComplete` changes
+      // when a driver is created — refetch the carriers list. See
+      // useVehicles for the same rationale.
+      qc.invalidateQueries({ queryKey: CARRIERS_KEY });
       opts?.onSuccess?.(...args);
     },
   });
@@ -84,6 +89,8 @@ export function useDeactivateDriver() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: DRIVERS_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+      // May flip `Carrier.onboarding.hasDriver` — see useVehicles.
+      qc.invalidateQueries({ queryKey: CARRIERS_KEY });
     },
   });
 }
@@ -95,6 +102,7 @@ export function useReactivateDriver() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: DRIVERS_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+      qc.invalidateQueries({ queryKey: CARRIERS_KEY });
     },
   });
 }
@@ -106,6 +114,7 @@ export function useDeleteDriver() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: DRIVERS_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+      qc.invalidateQueries({ queryKey: CARRIERS_KEY });
     },
   });
 }

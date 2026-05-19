@@ -156,34 +156,33 @@
       "saveAndContinue": "Save and continue",
       "skip": "Skip",
       "exit": "Exit"
+    },
+    "entityAlreadyExists": {
+      "vehicle": "This carrier already has a vehicle — you can add another or skip this step.",
+      "trailer": "This carrier already has a trailer — you can add another or skip this step.",
+      "driver": "This carrier already has a driver — you can add another or skip this step."
     }
   },
   "tempPwd": {
-    "regionLabel": "Temporary password — action required",
+    "regionLabel": "Temporary password to share with carrier",
     "title": "Temporary password",
-    "body": "Share this password with the carrier — you will not see it again.",
     "reveal": "Show",
     "hide": "Hide",
     "copy": "Copy",
     "copied": "Copied",
-    "toast": "Password copied to clipboard",
     "revealAria": "Show temporary password",
     "hideAria": "Hide temporary password",
     "copyAria": "Copy temporary password to clipboard",
     "maskedAria": "Temporary password, hidden. Click Show to reveal."
   },
   "onboardingStatus": {
-    "PENDING_VEHICLE": "No vehicle",
-    "PENDING_TRAILER": "No trailer",
-    "PENDING_DRIVER": "No driver",
-    "column": "Onboarding",
-    "resumeAction": "Finish onboarding",
-    "ariaPrefix": "Onboarding incomplete: no ",
-    "entity": {
-      "vehicle": "vehicle",
-      "trailer": "trailer",
-      "driver": "driver"
-    }
+    "resumeAction": "Finish onboarding"
+  },
+  "onboardingMissing": {
+    "groupLabel": "Missing onboarding items",
+    "vehicle": "Missing: Vehicle",
+    "trailer": "Missing: Trailer",
+    "driver": "Missing: Driver"
   },
   "carriers": {
     "title": "Carriers",
@@ -197,7 +196,11 @@
       "allOpiekun": "All managers",
       "allActive": "All",
       "onlyActive": "Active only",
-      "onlyInactive": "Inactive only"
+      "onlyInactive": "Inactive only",
+      "onboardingLabel": "Filter by onboarding status",
+      "allOnboarding": "Onboarding: all",
+      "onlyIncomplete": "Incomplete only",
+      "onlyCompleteOnboarding": "Complete only"
     },
     "fields": {
       "login": "Login",
@@ -221,7 +224,7 @@
       "insuranceMinHint": "Min. 250,000 EUR",
       "insuranceExpiry": "Insurance expiry",
       "licenseExpiry": "License expiry",
-      "numberOfVehicle": "Permits count",
+      "numberOfVehicle": "Vehicle count",
       "companyAddress": "Company address",
       "opiekun": "Account manager",
       "active": "Active"

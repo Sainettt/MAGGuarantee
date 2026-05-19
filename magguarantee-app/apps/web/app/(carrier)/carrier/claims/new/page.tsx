@@ -341,7 +341,7 @@ export default function NewClaimPage() {
   const trailers = fleetQ.data?.trailers ?? [];
 
   return (
-    <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+    <section className="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-8">
       <h1 className="text-2xl font-extrabold tracking-tight text-text mb-6">
         {t('newClaim')}
       </h1>

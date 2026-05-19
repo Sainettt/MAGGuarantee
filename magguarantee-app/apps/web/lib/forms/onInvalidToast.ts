@@ -20,6 +20,14 @@ export function onInvalidToast<T extends FieldValues>(
   message: string,
 ): (errors: FieldErrors<T>) => void {
   return (errors) => {
+    // Surface every failing field+reason to the console so developers can
+    // diagnose which schema rule rejected the submission. Cheap, harmless,
+    // and the alternative (silent reject + only the first field focused) is
+    // a frequent source of "I filled everything but it won't save" reports.
+    if (typeof window !== 'undefined') {
+      // eslint-disable-next-line no-console
+      console.warn('[form] validation failed', errors);
+    }
     toast.error(message);
     // First key in `errors` is the first failing field per RHF's iteration
     // order (which mirrors the schema). `setFocus` both focuses and scrolls

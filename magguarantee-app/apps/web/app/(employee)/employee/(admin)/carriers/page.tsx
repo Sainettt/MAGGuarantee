@@ -18,7 +18,7 @@ import {
   CarrierOnboardingProvider,
   useCarrierOnboarding,
 } from '@/components/carrier-onboarding/useCarrierOnboarding';
-import { OnboardingStatusBadge } from '@/components/carriers/OnboardingStatusBadge';
+import { OnboardingMissingBadge } from '@/components/carriers/OnboardingMissingBadge';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useOpiekuni } from '@/lib/hooks/useLookups';
 
@@ -42,11 +42,19 @@ function CarriersPageInner() {
   const [search, setSearch] = useState('');
   const [opiekunId, setOpiekunId] = useState<string>('');
   const [activeFilter, setActiveFilter] = useState<'' | 'true' | 'false'>('');
+  // Onboarding-completeness filter — single boolean (replaces the old
+  // enum-backed multi-select). Maps directly to the API's `onboardingComplete`
+  // query param (see CarrierFiltersSchema in @magguarantee/shared).
+  const [onboardingFilter, setOnboardingFilter] = useState<
+    '' | 'true' | 'false'
+  >('');
 
   const { data, isLoading } = useCarriers({
     q: search.length >= 2 ? search : undefined,
     opiekunId: opiekunId || undefined,
     active: activeFilter === '' ? undefined : activeFilter === 'true',
+    onboardingComplete:
+      onboardingFilter === '' ? undefined : onboardingFilter === 'true',
     limit: 50,
   });
 
@@ -73,7 +81,14 @@ function CarriersPageInner() {
   // on every render. The wizard methods are themselves stable.
   const resumeOnboarding = useCallback(
     (row: CarrierDto) => {
-      wizard.resume({ carrierId: row.id, status: row.onboardingStatus });
+      // Mirror the create-flow label format (`login — name`) so steps 2..4
+      // can render it without depending on the carriers list query.
+      const carrierLabel = row.login + (row.name ? ` — ${row.name}` : '');
+      wizard.resume({
+        carrierId: row.id,
+        carrierLabel,
+        onboarding: row.onboarding,
+      });
     },
     [wizard],
   );
@@ -83,37 +98,60 @@ function CarriersPageInner() {
       {
         id: 'login',
         header: t('fields.login'),
+        width: 'tight',
         cell: (row) => <span className="font-mono">{row.login}</span>,
       },
       {
         id: 'name',
         header: t('fields.name'),
+        // Flex column — name + missing-onboarding chips stack vertically
+        // (chips wrap below the name) so the row breathes when up to 3 chips
+        // are present. min-w-[200px] keeps short names readable.
+        width: 'flex',
+        className: 'min-w-[200px]',
         cell: (row) => (
-          <div className="flex items-center gap-2">
-            <span className="font-semibold">{row.name ?? '—'}</span>
-            <OnboardingStatusBadge status={row.onboardingStatus} />
+          <div className="flex flex-col gap-1 min-w-0">
+            <span className="font-semibold truncate">{row.name ?? '—'}</span>
+            <OnboardingMissingBadge onboarding={row.onboarding} />
           </div>
         ),
       },
       {
         id: 'company',
         header: t('fields.company'),
-        cell: (row) => row.company ?? '—',
+        // Polish business names can be 60+ chars — clamp to 2 lines, expose
+        // the full string on hover via the native `title` attribute.
+        width: 'flex',
+        className: 'min-w-[220px]',
+        cell: (row) => (
+          <span
+            className="line-clamp-2 break-words"
+            title={row.company ?? undefined}
+          >
+            {row.company ?? '—'}
+          </span>
+        ),
       },
       {
         id: 'nip',
         header: t('fields.nip'),
-        cell: (row) => row.nip ?? '—',
+        width: 'tight',
+        cell: (row) => (
+          <span className="font-mono tabular-nums">{row.nip ?? '—'}</span>
+        ),
       },
       {
         id: 'opiekun',
         header: t('fields.opiekun'),
-        cell: (row) =>
-          row.opiekun?.name ?? row.opiekun?.login ?? '—',
+        width: 'tight',
+        truncate: 'ellipsis',
+        className: 'max-w-[18ch]',
+        cell: (row) => row.opiekun?.name ?? row.opiekun?.login ?? '—',
       },
       {
         id: 'active',
         header: t('fields.active'),
+        width: 'tight',
         cell: (row) =>
           row.active ? (
             <Badge variant="success">{tCommon('active')}</Badge>
@@ -125,33 +163,38 @@ function CarriersPageInner() {
         id: 'actions',
         header: <span className="sr-only">{tCommon('actions')}</span>,
         align: 'right',
+        width: 'tight',
         cell: (row) => (
           <div className="flex items-center justify-end gap-2">
-            {row.onboardingStatus !== 'COMPLETE' && (
+            {!row.onboarding.isComplete && (
               <Button
                 variant="outline"
                 size="sm"
+                className="gap-1.5"
                 onClick={(e) => {
                   e.stopPropagation();
                   resumeOnboarding(row);
                 }}
                 aria-label={`${tWizard('onboardingStatus.resumeAction')} ${row.login}`}
               >
-                <PlayCircle size={14} />
-                {tWizard('onboardingStatus.resumeAction')}
+                <PlayCircle size={14} aria-hidden="true" />
+                <span className="hidden lg:inline">
+                  {tWizard('onboardingStatus.resumeAction')}
+                </span>
               </Button>
             )}
             <Button
               variant="outline"
               size="sm"
+              className="gap-1.5"
               onClick={(e) => {
                 e.stopPropagation();
                 openEdit(row);
               }}
               aria-label={`${tCommon('edit')} ${row.login}`}
             >
-              <Pencil size={14} />
-              {tCommon('edit')}
+              <Pencil size={14} aria-hidden="true" />
+              <span className="hidden lg:inline">{tCommon('edit')}</span>
             </Button>
           </div>
         ),
@@ -161,7 +204,7 @@ function CarriersPageInner() {
   );
 
   return (
-    <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+    <section className="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-8">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <h1 className="text-2xl font-extrabold tracking-tight text-text">
           {t('title')}
@@ -202,6 +245,18 @@ function CarriersPageInner() {
           <option value="">{t('filters.allActive')}</option>
           <option value="true">{t('filters.onlyActive')}</option>
           <option value="false">{t('filters.onlyInactive')}</option>
+        </Select>
+        <Select
+          className="sm:max-w-xs"
+          value={onboardingFilter}
+          onChange={(e) =>
+            setOnboardingFilter(e.target.value as '' | 'true' | 'false')
+          }
+          aria-label={t('filters.onboardingLabel')}
+        >
+          <option value="">{t('filters.allOnboarding')}</option>
+          <option value="false">{t('filters.onlyIncomplete')}</option>
+          <option value="true">{t('filters.onlyCompleteOnboarding')}</option>
         </Select>
       </div>
 
