@@ -127,7 +127,7 @@ type CarrierFormValues = Omit<CreateCarrierDto, 'insuranceValue'> & {
 const NUMERIC_FIELDS = [
   'paymentTerms',
   'insuranceValue',
-  'numberOfPermits',
+  'numberOfVehicle',
 ] as const;
 
 // Fields that are part of form state but never go to the API.
@@ -329,7 +329,7 @@ export function CarrierSheet({
         insuranceValue: carrier.insuranceValue ?? undefined,
         insuranceExpiry: carrier.insuranceExpiry ?? '',
         licenseExpiry: carrier.licenseExpiry ?? '',
-        numberOfPermits: carrier.numberOfPermits ?? undefined,
+        numberOfVehicle: carrier.numberOfVehicle ?? undefined,
         companyAddress: carrier.companyAddress ?? '',
         opiekunId: carrier.opiekunId,
         active: carrier.active,
@@ -784,15 +784,15 @@ export function CarrierSheet({
 
               <FormSection title={t('sections.permits')}>
                 <FormField
-                  label={t('fields.numberOfPermits')}
-                  error={errMsg('numberOfPermits')}
-                  htmlFor="carrier-numberOfPermits"
+                  label={t('fields.numberOfVehicle')}
+                  error={errMsg('numberOfVehicle')}
+                  htmlFor="carrier-numberOfVehicle"
                 >
                   <Input
-                    id="carrier-numberOfPermits"
+                    id="carrier-numberOfVehicle"
                     type="number"
                     className="h-10"
-                    {...form.register('numberOfPermits', {
+                    {...form.register('numberOfVehicle', {
                       setValueAs: (v) =>
                         v === '' || v === null ? undefined : Number(v),
                     })}
@@ -986,7 +986,7 @@ function getDefaults(): CarrierFormValues {
     // it on submit so the user sees a clear error.
     insuranceExpiry: '',
     licenseExpiry: '',
-    numberOfPermits: undefined,
+    numberOfVehicle: undefined,
     companyAddress: '',
     // opiekunId is required in CreateCarrierSchema (UUID). RHF needs a
     // string-shaped controlled value — empty string parks the Select on

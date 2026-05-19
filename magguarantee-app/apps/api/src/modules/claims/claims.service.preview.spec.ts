@@ -140,7 +140,7 @@ function makeCarrier(overrides: Partial<CarrierRow> = {}): CarrierRow {
     insuranceValue: 100_000,
     insuranceExpiry: NOW,
     licenseExpiry: NOW,
-    numberOfPermits: null,
+    numberOfVehicle: null,
     companyAddress: 'ul. Testowa 1',
     onboardingStatus: 'COMPLETE',
     opiekunId: 'op-fixture',

@@ -96,7 +96,7 @@
 | `accountEur`, `accountPln` | IBAN счета (PLN опц. — иностранцы могут не иметь) |
 | `paymentTerms` | срок оплаты в днях (default 30) |
 | `insuranceValue`, `insuranceExpiry`, `licenseExpiry` | документы (DB nullable, но обязательны на API+UI — см. three-layer pattern в [12-database-schema.md](12-database-schema.md)) |
-| `numberOfPermits` | KREPTD-выписки |
+| `numberOfVehicle` | KREPTD-выписки |
 | `companyAddress` | адрес |
 | `opiekunId` | FK → User (с role=opiekun) — кто курирует |
 

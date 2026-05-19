@@ -121,7 +121,7 @@ export class CarriersService {
         insuranceValue: dto.insuranceValue,
         insuranceExpiry: dto.insuranceExpiry ? new Date(dto.insuranceExpiry) : null,
         licenseExpiry: dto.licenseExpiry ? new Date(dto.licenseExpiry) : null,
-        numberOfPermits: dto.numberOfPermits ?? null,
+        numberOfVehicle: dto.numberOfVehicle ?? null,
         companyAddress: dto.companyAddress,
         opiekunId,
       });
@@ -193,8 +193,8 @@ export class CarriersService {
         ...(dto.licenseExpiry !== undefined && dto.licenseExpiry !== null
           ? { licenseExpiry: new Date(dto.licenseExpiry) }
           : {}),
-        ...(dto.numberOfPermits !== undefined
-          ? { numberOfPermits: dto.numberOfPermits }
+        ...(dto.numberOfVehicle !== undefined
+          ? { numberOfVehicle: dto.numberOfVehicle }
           : {}),
         ...(dto.companyAddress !== undefined && dto.companyAddress !== null
           ? { companyAddress: dto.companyAddress }
@@ -360,7 +360,7 @@ export class CarriersService {
       // Nullable per phase3_blocks_audit_revert.
       insuranceExpiry: row.insuranceExpiry ? toDateString(row.insuranceExpiry) : null,
       licenseExpiry: row.licenseExpiry ? toDateString(row.licenseExpiry) : null,
-      numberOfPermits: row.numberOfPermits,
+      numberOfVehicle: row.numberOfVehicle,
       companyAddress: row.companyAddress,
       onboardingStatus: row.onboardingStatus,
       opiekunId: row.opiekunId,

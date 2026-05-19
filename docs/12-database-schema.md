@@ -144,7 +144,7 @@ model Carrier {
   // API + UI required, DB nullable — admin/opiekun create flow may lack copies
   insuranceExpiry DateTime? @db.Date
   licenseExpiry   DateTime? @db.Date
-  numberOfPermits Int?      // KREPTD wypisy
+  numberOfVehicle Int?      // KREPTD wypisy
   companyAddress  String   // STRICT
 
   opiekunId String @db.Uuid
@@ -562,7 +562,7 @@ populates both columns.
 | `paymentTerms` | Strict everywhere (DB default 30) | |
 | `insuranceValue` | Strict everywhere | DB NOT NULL; Zod adds `> 0` |
 | `insuranceExpiry`, `licenseExpiry` | API + UI required, DB nullable | Allows admin/opiekun create when certificate copies not in hand |
-| `nip`, `vatId`, `accountPln`, `numberOfPermits`, `company` | Optional everywhere | At least one of (nip, vatId) — backlog CHECK, see #19 quirks |
+| `nip`, `vatId`, `accountPln`, `numberOfVehicle`, `company` | Optional everywhere | At least one of (nip, vatId) — backlog CHECK, see #19 quirks |
 
 ### Vehicle
 

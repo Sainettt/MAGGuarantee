@@ -96,7 +96,7 @@ const carrierProfileFields = {
   insuranceValue: z.number().positive().min(250_000),
   insuranceExpiry: IsoDateSchema,
   licenseExpiry: IsoDateSchema,
-  numberOfPermits: z.number().int().nonnegative().max(10_000).optional(),
+  numberOfVehicle: z.number().int().nonnegative().max(10_000).optional(),
   /** REQUIRED — Carrier.companyAddress is NOT NULL since phase3_blocks. */
   companyAddress: z.string().min(1).max(500),
   /**
@@ -164,7 +164,7 @@ export const UpdateCarrierSchema = z
       IsoDateSchema.nullable().optional(),
     ),
     licenseExpiry: emptyStringToUndefined(IsoDateSchema.nullable().optional()),
-    numberOfPermits: z
+    numberOfVehicle: z
       .number()
       .int()
       .nonnegative()
@@ -231,7 +231,7 @@ export const CarrierDtoSchema = z.object({
   insuranceValue: z.number(),
   insuranceExpiry: IsoDateSchema.nullable(),
   licenseExpiry: IsoDateSchema.nullable(),
-  numberOfPermits: z.number().int().nullable(),
+  numberOfVehicle: z.number().int().nullable(),
   companyAddress: z.string(),
   /**
    * Onboarding wizard progress marker. DISPLAY-ONLY — no guard or write path

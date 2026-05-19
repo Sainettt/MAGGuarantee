@@ -84,7 +84,7 @@
 - `jezdzace` — авто, которые ездили в последние N дней (по полю `Vehicle.lastDroveAt`),
 - `stojace` — авто, не выезжавшие давно,
 - `nieaktywne` — `active=false`,
-- `potencjalne` — `numberOfPermits - aktualnaLiczbaAut` (потенциал по KREPTD).
+- `potencjalne` — `numberOfVehicle - aktualnaLiczbaAut` (потенциал по KREPTD).
 
 ---
 

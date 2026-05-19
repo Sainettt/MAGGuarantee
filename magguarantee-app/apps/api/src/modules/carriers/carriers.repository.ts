@@ -39,7 +39,7 @@ export interface CarrierRow {
   insuranceValue: number;
   insuranceExpiry: Date | null;
   licenseExpiry: Date | null;
-  numberOfPermits: number | null;
+  numberOfVehicle: number | null;
   companyAddress: string;
   /**
    * Onboarding wizard step. DB default `PENDING_VEHICLE` (migration
@@ -90,7 +90,7 @@ interface CreateCarrierData {
   insuranceValue: number;
   insuranceExpiry?: Date | null;
   licenseExpiry?: Date | null;
-  numberOfPermits?: number | null;
+  numberOfVehicle?: number | null;
   companyAddress: string;
   opiekunId: string;
 }
@@ -113,7 +113,7 @@ interface UpdateCarrierData {
   insuranceValue?: number;
   insuranceExpiry?: Date | null;
   licenseExpiry?: Date | null;
-  numberOfPermits?: number | null;
+  numberOfVehicle?: number | null;
   companyAddress?: string;
   opiekunId?: string;
 }
@@ -204,7 +204,7 @@ export class CarriersRepository {
           insuranceValue: data.insuranceValue,
           insuranceExpiry: data.insuranceExpiry,
           licenseExpiry: data.licenseExpiry,
-          numberOfPermits: data.numberOfPermits ?? null,
+          numberOfVehicle: data.numberOfVehicle ?? null,
           companyAddress: data.companyAddress,
           opiekunId: data.opiekunId,
         },
@@ -237,7 +237,7 @@ export class CarriersRepository {
       'insuranceValue',
       'insuranceExpiry',
       'licenseExpiry',
-      'numberOfPermits',
+      'numberOfVehicle',
       'companyAddress',
       'opiekunId',
     ];
@@ -388,7 +388,7 @@ export class CarriersRepository {
     insuranceValue: { toNumber(): number } | number | null;
     insuranceExpiry: Date | null;
     licenseExpiry: Date | null;
-    numberOfPermits: number | null;
+    numberOfVehicle: number | null;
     companyAddress: string | null;
     // Surfaced as the runtime enum literal (one of the 4 OnboardingStatus
     // values). The widened `string` shape mirrors the defensive pattern used
@@ -431,7 +431,7 @@ export class CarriersRepository {
       insuranceValue: decimalToNumber(row.insuranceValue) ?? 0,
       insuranceExpiry: row.insuranceExpiry,
       licenseExpiry: row.licenseExpiry,
-      numberOfPermits: row.numberOfPermits,
+      numberOfVehicle: row.numberOfVehicle,
       companyAddress: row.companyAddress ?? '',
       // DB default is PENDING_VEHICLE; null is never observed in practice.
       onboardingStatus: (row.onboardingStatus ?? 'PENDING_VEHICLE') as OnboardingStatus,

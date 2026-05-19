@@ -146,7 +146,7 @@ model Carrier {
   // not at the schema level.
   insuranceExpiry DateTime? @db.Date
   licenseExpiry   DateTime? @db.Date
-  numberOfPermits Int? // LiczbaWypisow (KREPTD)
+  numberOfVehicle Int? // LiczbaWypisow (KREPTD)
   companyAddress  String
 
   // Guided-onboarding wizard progress marker — display-only (badges +

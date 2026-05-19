@@ -221,7 +221,7 @@
       "insuranceMinHint": "Min. 250 000 EUR",
       "insuranceExpiry": "Ważność OC",
       "licenseExpiry": "Ważność licencji",
-      "numberOfPermits": "Liczba zezwoleń",
+      "numberOfVehicle": "Liczba pojazdów",
       "companyAddress": "Adres firmy",
       "opiekun": "Opiekun",
       "active": "Aktywny"
