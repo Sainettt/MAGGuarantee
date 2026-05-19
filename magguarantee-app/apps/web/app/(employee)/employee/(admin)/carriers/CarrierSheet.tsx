@@ -26,6 +26,7 @@ import {
   EU_VAT_COUNTRIES,
   UpdateCarrierSchema,
   type CarrierDto,
+  type CarrierWithTemporaryPasswordDto,
   type CreateCarrierDto,
   type UpdateCarrierDto,
 } from '@magguarantee/shared';
@@ -44,6 +45,7 @@ import {
   SheetTitle,
 } from '@/components/ui/Sheet';
 import { Textarea } from '@/components/ui/Textarea';
+import { WizardStepper } from '@/components/carrier-onboarding/WizardStepper';
 import { FormField, FormSection } from '@/components/forms/Form';
 import {
   FieldValidationBadge,
@@ -74,6 +76,32 @@ interface Props {
   open: boolean;
   carrier: CarrierDto | null;
   onClose: () => void;
+  /**
+   * `standalone` (default) — original behaviour: success closes the sheet
+   * and emits a "saved" toast (plus the legacy 30s temp-password toast).
+   *
+   * `wizard` — sheet is part of the chained carrier-onboarding flow. Header
+   * gets a <WizardStepper>; footer swaps to «Save and continue» / «Skip» /
+   * «Exit». On success the parent receives the created carrier via
+   * `onCompleted`; the sheet doesn't toast and doesn't auto-close (the
+   * orchestrator advances the step instead). `onExit` fires when the user
+   * dismisses the wizard.
+   *
+   * Phase 3.2 — see docs/14-design-system.md § Phase 3.2.
+   */
+  mode?: 'standalone' | 'wizard';
+  /** Wizard mode only — called on successful create with the new carrier. */
+  onCompleted?: (created: CarrierWithTemporaryPasswordDto) => void;
+  /** Wizard mode only — fires when the user cancels/exits. */
+  onExit?: () => void;
+  /**
+   * Wizard mode only — current step (1..4) for the in-header stepper. The
+   * carrier sheet itself only ever runs at step=1, but the stepper renders
+   * all four pills so the operator sees the path ahead.
+   */
+  wizardCurrentStep?: 1 | 2 | 3 | 4;
+  wizardCompletedSteps?: number[];
+  wizardSkippedSteps?: number[];
 }
 
 // Single form-values shape for both modes. Create has all the fields plus
@@ -105,11 +133,23 @@ const NUMERIC_FIELDS = [
 // Fields that are part of form state but never go to the API.
 const FORM_ONLY_FIELDS = ['_vatCountry', '_vatNumber'] as const;
 
-export function CarrierSheet({ open, carrier, onClose }: Props) {
+export function CarrierSheet({
+  open,
+  carrier,
+  onClose,
+  mode = 'standalone',
+  onCompleted,
+  onExit,
+  wizardCurrentStep,
+  wizardCompletedSteps,
+  wizardSkippedSteps,
+}: Props) {
   const t = useTranslations('carriers');
   const tCommon = useTranslations('common');
   const tValidation = useTranslations('validation');
+  const tWizard = useTranslations();
   const isEdit = carrier !== null;
+  const isWizard = mode === 'wizard';
   const { user } = useAuth();
 
   // Both schemas are .strict() but our form carries fields that aren't part
@@ -313,6 +353,15 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
       draft.clear();
       form.reset(getDefaults());
 
+      if (isWizard) {
+        // Wizard mode: hand the created carrier (+ temp password) to the
+        // orchestrator and DON'T toast/close. The orchestrator advances to
+        // step 2 and the sticky <TemporaryPasswordBanner> renders the
+        // password from then on.
+        onCompleted?.(created);
+        return;
+      }
+
       // Phase 2 dev-only: API returns the temporary password in the response.
       // Surface it in a long-lived toast so the admin can copy it.
       if (created.temporaryPassword) {
@@ -363,17 +412,33 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
   >;
   const errMsg = (key: string): string | undefined => errs[key]?.message;
 
+  const handleClose = () => {
+    if (isWizard) onExit?.();
+    else onClose();
+  };
+
   return (
-    <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
+    <Sheet open={open} onOpenChange={(o) => !o && handleClose()}>
       <SheetContent size="wide">
         <form onSubmit={onSubmit} className="flex h-full flex-col">
           <SheetHeader>
             <SheetTitle>
-              {isEdit ? t('editCarrier') : t('newCarrier')}
+              {isWizard
+                ? tWizard('wizard.header.title', { n: wizardCurrentStep ?? 1 })
+                : isEdit
+                  ? t('editCarrier')
+                  : t('newCarrier')}
             </SheetTitle>
             <SheetDescription>
               {isEdit && carrier ? carrier.login : null}
             </SheetDescription>
+            {isWizard && (
+              <WizardStepper
+                currentStep={wizardCurrentStep ?? 1}
+                completedSteps={wizardCompletedSteps ?? []}
+                skippedSteps={wizardSkippedSteps ?? []}
+              />
+            )}
           </SheetHeader>
 
           <SheetBody>
@@ -765,40 +830,66 @@ export function CarrierSheet({ open, carrier, onClose }: Props) {
           </SheetBody>
 
           <SheetFooter>
-            {!isEdit && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  draft.clear();
-                  form.reset({
-                    ...getDefaults(),
-                    opiekunId: defaultOpiekunId as unknown as string,
-                  });
-                  // Also clear any inline integration badges so they don't
-                  // dangle for fields that were just wiped.
-                  setNipState('idle');
-                  setAccountState('idle');
-                  setAccountChoices([]);
-                }}
-                disabled={submitting}
-              >
-                {tCommon('clear')}
-              </Button>
+            {isWizard ? (
+              <>
+                {/*
+                  Carrier (step 1) has no Skip — without the carrier row the
+                  rest of the chain has nothing to attach to. We still render
+                  Exit so the operator can abandon the flow.
+                */}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onExit?.()}
+                  disabled={submitting}
+                >
+                  {tWizard('wizard.action.exit')}
+                </Button>
+                <Button type="submit" size="sm" disabled={submitting}>
+                  {submitting
+                    ? tCommon('saving')
+                    : tWizard('wizard.action.saveAndContinue')}
+                </Button>
+              </>
+            ) : (
+              <>
+                {!isEdit && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      draft.clear();
+                      form.reset({
+                        ...getDefaults(),
+                        opiekunId: defaultOpiekunId as unknown as string,
+                      });
+                      // Also clear any inline integration badges so they don't
+                      // dangle for fields that were just wiped.
+                      setNipState('idle');
+                      setAccountState('idle');
+                      setAccountChoices([]);
+                    }}
+                    disabled={submitting}
+                  >
+                    {tCommon('clear')}
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={onClose}
+                  disabled={submitting}
+                >
+                  {tCommon('cancel')}
+                </Button>
+                <Button type="submit" size="sm" disabled={submitting}>
+                  {submitting ? tCommon('saving') : tCommon('save')}
+                </Button>
+              </>
             )}
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={onClose}
-              disabled={submitting}
-            >
-              {tCommon('cancel')}
-            </Button>
-            <Button type="submit" size="sm" disabled={submitting}>
-              {submitting ? tCommon('saving') : tCommon('save')}
-            </Button>
           </SheetFooter>
         </form>
       </SheetContent>

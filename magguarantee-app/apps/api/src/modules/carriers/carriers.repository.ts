@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
+import type { OnboardingStatus } from '@magguarantee/shared';
+
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -39,6 +41,12 @@ export interface CarrierRow {
   licenseExpiry: Date | null;
   numberOfPermits: number | null;
   companyAddress: string;
+  /**
+   * Onboarding wizard step. DB default `PENDING_VEHICLE` (migration
+   * `20260519095752_carrier_onboarding_status`). Advanced by Vehicle /
+   * Trailer / Driver create flows; never regresses. DISPLAY-ONLY.
+   */
+  onboardingStatus: OnboardingStatus;
   opiekunId: string;
   opiekun: {
     id: string;
@@ -54,6 +62,8 @@ export interface CarrierListFilters {
   opiekunId?: string;
   active?: boolean;
   q?: string;
+  /** Optional single-value filter on the onboarding wizard step. */
+  onboardingStatus?: OnboardingStatus;
   cursor?: string;
   limit: number;
 }
@@ -136,6 +146,8 @@ export class CarriersRepository {
   async list(filters: CarrierListFilters): Promise<CarrierRow[]> {
     const where: Record<string, unknown> = {};
     if (filters.opiekunId) where.opiekunId = filters.opiekunId;
+    if (filters.onboardingStatus)
+      where.onboardingStatus = filters.onboardingStatus;
     if (filters.q) {
       const q = filters.q;
       where.OR = [
@@ -263,6 +275,41 @@ export class CarriersRepository {
     return this.update(id, { active });
   }
 
+  /**
+   * Conditionally advance `onboardingStatus` to `next` if the current value
+   * is in `lowerStatuses`. Atomic via `updateMany`: the WHERE clause filters
+   * out rows that are already at-or-past `next`, so the column can only move
+   * forward — never regress. Returns the number of rows actually advanced
+   * (0 means the carrier was already at-or-past this step; 1 means we
+   * moved it forward).
+   *
+   * No read-modify-write race: `updateMany` is a single statement evaluated
+   * server-side. Cheaper than reading first + branching + updating, and
+   * race-free without an explicit transaction since the WHERE filter is
+   * idempotent.
+   *
+   * NOTE: we intentionally accept and pass through string literals here
+   * (not the Prisma enum runtime value) so this file doesn't need to drag
+   * in the `OnboardingStatus` Prisma const — the strings match the enum
+   * literals 1:1.
+   */
+  async advanceOnboardingStatus(
+    id: string,
+    next: OnboardingStatus,
+    lowerStatuses: OnboardingStatus[],
+  ): Promise<number> {
+    if (lowerStatuses.length === 0) return 0;
+    const res = await this.prisma.client.carrier.updateMany({
+      where: {
+        id,
+        deletedAt: null,
+        onboardingStatus: { in: lowerStatuses },
+      },
+      data: { onboardingStatus: next },
+    });
+    return res.count;
+  }
+
   async softDelete(id: string): Promise<void> {
     // Soft-deleting the carrier must cascade-soft-delete its fleet per
     // docs/04-data-model.md#cascade-при-удалении-carrier. We do this in one
@@ -343,6 +390,12 @@ export class CarriersRepository {
     licenseExpiry: Date | null;
     numberOfPermits: number | null;
     companyAddress: string | null;
+    // Surfaced as the runtime enum literal (one of the 4 OnboardingStatus
+    // values). The widened `string` shape mirrors the defensive pattern used
+    // for other NOT NULL columns; in practice the column always has one of
+    // the enum values courtesy of the DB default + the soft-delete extension
+    // never strips it.
+    onboardingStatus: OnboardingStatus | string | null;
     opiekunId: string | null;
     createdAt: Date;
     updatedAt: Date;
@@ -380,6 +433,8 @@ export class CarriersRepository {
       licenseExpiry: row.licenseExpiry,
       numberOfPermits: row.numberOfPermits,
       companyAddress: row.companyAddress ?? '',
+      // DB default is PENDING_VEHICLE; null is never observed in practice.
+      onboardingStatus: (row.onboardingStatus ?? 'PENDING_VEHICLE') as OnboardingStatus,
       opiekunId: row.opiekunId ?? '',
       opiekun:
         row.opiekun ?? { id: row.opiekunId ?? '', login: '', name: null },

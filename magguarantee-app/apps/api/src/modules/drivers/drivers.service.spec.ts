@@ -63,6 +63,7 @@ function makeCarrier(overrides: Partial<CarrierRow> = {}): CarrierRow {
     licenseExpiry: NOW,
     numberOfPermits: null,
     companyAddress: 'ul. Testowa 1',
+    onboardingStatus: 'COMPLETE',
     opiekunId: 'op-fixture',
     opiekun: { id: 'op-fixture', login: 'op', name: null },
     createdAt: NOW,
@@ -148,6 +149,18 @@ function makeCarriersRepo(seed: CarrierRow[] = []): CarriersRepository {
         arr = arr.filter((r) => r.opiekunId === filters.opiekunId);
       return arr.slice(0, filters.limit + 1);
     }),
+    advanceOnboardingStatus: jest.fn(
+      async (
+        id: string,
+        next: CarrierRow['onboardingStatus'],
+        lowerStatuses: CarrierRow['onboardingStatus'][],
+      ) => {
+        const cur = rows.get(id);
+        if (!cur || !lowerStatuses.includes(cur.onboardingStatus)) return 0;
+        rows.set(id, { ...cur, onboardingStatus: next });
+        return 1;
+      },
+    ),
   } as unknown as CarriersRepository;
 }
 
@@ -297,5 +310,56 @@ describe('DriversService', () => {
     const svc = new DriversService(makeDriversRepo([d]), makeCarriersRepo());
     await svc.deactivate('d-1');
     await expect(svc.deactivate('d-1')).rejects.toThrow(ConflictException);
+  });
+
+  // ── Onboarding-status side-effect ────────────────────────
+  // Driver created → bump carrier to COMPLETE from any earlier step. Already-
+  // COMPLETE carriers stay put (the WHERE-in clause filters them out).
+
+  it('advances PENDING_VEHICLE → COMPLETE on driver create', async () => {
+    const carrier = makeCarrier({ onboardingStatus: 'PENDING_VEHICLE' });
+    const carriersRepo = makeCarriersRepo([carrier]);
+    const svc = new DriversService(makeDriversRepo(), carriersRepo);
+    await svc.create(makeAuth('admin', 'a-1'), {
+      carrierId: 'c-1',
+      firstName: 'Anna',
+      lastName: 'Wozniak',
+      ...REQUIRED_DRIVER_FIELDS,
+    });
+    expect(carriersRepo.advanceOnboardingStatus).toHaveBeenCalledWith(
+      'c-1',
+      'COMPLETE',
+      ['PENDING_VEHICLE', 'PENDING_TRAILER', 'PENDING_DRIVER'],
+    );
+    const after = await carriersRepo.findById('c-1');
+    expect(after?.onboardingStatus).toBe('COMPLETE');
+  });
+
+  it('advances PENDING_DRIVER → COMPLETE on driver create', async () => {
+    const carrier = makeCarrier({ onboardingStatus: 'PENDING_DRIVER' });
+    const carriersRepo = makeCarriersRepo([carrier]);
+    const svc = new DriversService(makeDriversRepo(), carriersRepo);
+    await svc.create(makeAuth('admin', 'a-1'), {
+      carrierId: 'c-1',
+      firstName: 'Beata',
+      lastName: 'Lis',
+      ...REQUIRED_DRIVER_FIELDS,
+    });
+    const after = await carriersRepo.findById('c-1');
+    expect(after?.onboardingStatus).toBe('COMPLETE');
+  });
+
+  it('does NOT regress an already COMPLETE carrier', async () => {
+    const carrier = makeCarrier({ onboardingStatus: 'COMPLETE' });
+    const carriersRepo = makeCarriersRepo([carrier]);
+    const svc = new DriversService(makeDriversRepo(), carriersRepo);
+    await svc.create(makeAuth('admin', 'a-1'), {
+      carrierId: 'c-1',
+      firstName: 'Cezary',
+      lastName: 'Mak',
+      ...REQUIRED_DRIVER_FIELDS,
+    });
+    const after = await carriersRepo.findById('c-1');
+    expect(after?.onboardingStatus).toBe('COMPLETE');
   });
 });

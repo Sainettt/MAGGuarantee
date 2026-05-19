@@ -34,6 +34,27 @@ const NameSchema = z.string().min(1).max(128);
 const EmailSchema = z.string().email().max(160);
 const PhoneRequiredSchema = z.string().min(1).max(64);
 
+/**
+ * Onboarding wizard step marker — mirrors the Prisma `OnboardingStatus` enum
+ * (see `packages/database/prisma/schema.prisma`, migration
+ * `20260519095752_carrier_onboarding_status`). DISPLAY-ONLY: no guard or
+ * business rule gates off this value. The API advances the status as
+ * Vehicle / Trailer / Driver rows are created for the carrier; once
+ * `COMPLETE` it never regresses.
+ *
+ * Order matters — index in this array is treated as the "rank" of a step,
+ * with later steps strictly greater than earlier ones. The advancement logic
+ * in `apps/api/src/modules/{vehicles,trailers,drivers}.service.ts` relies on
+ * this ordering (PENDING_VEHICLE → PENDING_TRAILER → PENDING_DRIVER → COMPLETE).
+ */
+export const OnboardingStatusSchema = z.enum([
+  'PENDING_VEHICLE',
+  'PENDING_TRAILER',
+  'PENDING_DRIVER',
+  'COMPLETE',
+]);
+export type OnboardingStatus = z.infer<typeof OnboardingStatusSchema>;
+
 const carrierProfileFields = {
   /**
    * REQUIRED — generic tax ID (5–20 alphanumeric). Polish carriers send the
@@ -168,6 +189,13 @@ export const CarrierFiltersSchema = z
     active: z.coerce.boolean().optional(),
     /** Substring search on login / name / nip. Case-insensitive in the repo. */
     q: z.string().min(1).max(64).optional(),
+    /**
+     * Optional onboarding-step filter. Single value (matches the existing
+     * single-enum pattern used by `ClaimFiltersSchema.status` and
+     * `DelegationFiltersSchema.status`). Multi-value comma-separated input is
+     * not supported anywhere else in the codebase yet, so we keep parity.
+     */
+    onboardingStatus: OnboardingStatusSchema.optional(),
     cursor: UuidSchema.optional(),
     limit: z.coerce.number().int().min(1).max(200).default(50),
   })
@@ -205,6 +233,15 @@ export const CarrierDtoSchema = z.object({
   licenseExpiry: IsoDateSchema.nullable(),
   numberOfPermits: z.number().int().nullable(),
   companyAddress: z.string(),
+  /**
+   * Onboarding wizard progress marker. DISPLAY-ONLY — no guard or write path
+   * checks this value. Defaults to `PENDING_VEHICLE` on fresh carriers (DB
+   * default in migration `20260519095752_carrier_onboarding_status`) and is
+   * advanced by the API when the first Vehicle / Trailer / Driver is created
+   * for the carrier. Legacy carriers were backfilled to `COMPLETE` in the
+   * same migration.
+   */
+  onboardingStatus: OnboardingStatusSchema,
   opiekunId: UuidSchema,
   opiekun: z.object({
     id: UuidSchema,

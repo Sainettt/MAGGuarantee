@@ -71,8 +71,9 @@ export class DriversService {
 
     const slug = await this._allocateLoginSlug(dto.firstName, dto.lastName);
 
+    let row: DriverRow;
     try {
-      const row = await this.drivers.create({
+      row = await this.drivers.create({
         carrierId,
         loginSlug: slug,
         firstName: dto.firstName,
@@ -87,12 +88,37 @@ export class DriversService {
         notes: dto.notes ?? null,
         active: dto.active,
       });
-      return this.toDto(row);
     } catch (err) {
       throw uniqueViolationToConflict(
         err,
         'Kierowca o takim slug już istnieje',
       );
+    }
+
+    // Onboarding wizard step advancement (display-only — never blocks).
+    // Driver created → carrier is fully onboarded. Bump to COMPLETE from any
+    // earlier step. Already-COMPLETE carriers stay put (the WHERE filter
+    // excludes them, so the `updateMany` is a no-op).
+    await this._advanceCarrierOnboarding(row.carrierId, 'COMPLETE', [
+      'PENDING_VEHICLE',
+      'PENDING_TRAILER',
+      'PENDING_DRIVER',
+    ]);
+
+    return this.toDto(row);
+  }
+
+  /** See `VehiclesService._advanceCarrierOnboarding` for rationale. */
+  private async _advanceCarrierOnboarding(
+    carrierId: string,
+    next: 'PENDING_TRAILER' | 'PENDING_DRIVER' | 'COMPLETE',
+    from: ReadonlyArray<'PENDING_VEHICLE' | 'PENDING_TRAILER' | 'PENDING_DRIVER'>,
+  ): Promise<void> {
+    try {
+      await this.carriers.advanceOnboardingStatus(carrierId, next, [...from]);
+    } catch {
+      // Display-only — swallow so a stale carrier row never breaks the
+      // primary entity create.
     }
   }
 

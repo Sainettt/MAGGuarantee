@@ -142,6 +142,7 @@ function makeCarrier(overrides: Partial<CarrierRow> = {}): CarrierRow {
     licenseExpiry: NOW,
     numberOfPermits: null,
     companyAddress: 'ul. Testowa 1',
+    onboardingStatus: 'COMPLETE',
     opiekunId: 'op-fixture',
     opiekun: { id: 'op-fixture', login: 'op', name: null },
     createdAt: NOW,

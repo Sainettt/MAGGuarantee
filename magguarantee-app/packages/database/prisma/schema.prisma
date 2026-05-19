@@ -54,6 +54,19 @@ enum EuroNorm {
   VI
 }
 
+// Onboarding wizard step marker for Carrier. DISPLAY-ONLY indicator — no
+// access gate or business rule depends on it beyond showing "incomplete"
+// badges in the admin/opiekun UI and resuming the carrier-create wizard
+// from the right step (Carrier → Vehicle → Trailer → Driver). Existing
+// carriers are backfilled to COMPLETE (see migration), so this enum is
+// effectively used only for fresh production-side creations.
+enum OnboardingStatus {
+  PENDING_VEHICLE
+  PENDING_TRAILER
+  PENDING_DRIVER
+  COMPLETE
+}
+
 // ─── USERS (объединение всех auth-листов) ───────────────
 
 model User {
@@ -135,6 +148,15 @@ model Carrier {
   licenseExpiry   DateTime? @db.Date
   numberOfPermits Int? // LiczbaWypisow (KREPTD)
   companyAddress  String
+
+  // Guided-onboarding wizard progress marker — display-only (badges +
+  // resume-from-step in the carrier-create wizard). Defaults to
+  // PENDING_VEHICLE so freshly-created carriers land at step 1 of the
+  // wizard; api-agent advances it as Vehicle/Trailer/Driver get created.
+  // Existing rows backfilled to COMPLETE in the same migration that adds
+  // this column (per user decision: legacy carriers are considered fully
+  // set up regardless of whether they actually have fleet entries).
+  onboardingStatus OnboardingStatus @default(PENDING_VEHICLE)
 
   opiekunId String @db.Uuid
   opiekun   User   @relation("OpiekunCarriers", fields: [opiekunId], references: [id])

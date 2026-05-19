@@ -29,6 +29,8 @@ import {
   SheetTitle,
 } from '@/components/ui/Sheet';
 import { Textarea } from '@/components/ui/Textarea';
+import { TemporaryPasswordBanner } from '@/components/carrier-onboarding/TemporaryPasswordBanner';
+import { WizardStepper } from '@/components/carrier-onboarding/WizardStepper';
 import { FormField, FormSection } from '@/components/forms/Form';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useFormDraft } from '@/lib/hooks/useFormDraft';
@@ -41,6 +43,16 @@ interface Props {
   open: boolean;
   trailer: TrailerDto | null;
   onClose: () => void;
+  /** Phase 3.2 — wizard mode. See CarrierSheet/VehicleSheet for semantics. */
+  mode?: 'standalone' | 'wizard';
+  wizardCarrierId?: string;
+  wizardTempPassword?: string | null;
+  onCompleted?: (created: TrailerDto) => void;
+  onSkip?: () => void;
+  onExit?: () => void;
+  wizardCurrentStep?: 1 | 2 | 3 | 4;
+  wizardCompletedSteps?: number[];
+  wizardSkippedSteps?: number[];
 }
 
 type FormValues = CreateTrailerDto;
@@ -53,10 +65,25 @@ const NUMERIC_FIELDS = [
   'capacity',
 ] as const;
 
-export function TrailerSheet({ open, trailer, onClose }: Props) {
+export function TrailerSheet({
+  open,
+  trailer,
+  onClose,
+  mode = 'standalone',
+  wizardCarrierId,
+  wizardTempPassword,
+  onCompleted,
+  onSkip,
+  onExit,
+  wizardCurrentStep,
+  wizardCompletedSteps,
+  wizardSkippedSteps,
+}: Props) {
   const t = useTranslations('trailers');
   const tCommon = useTranslations('common');
+  const tWizard = useTranslations();
   const isEdit = trailer !== null;
+  const isWizard = mode === 'wizard';
 
   // Edit mode keeps carrierId in form state for display; passthrough so the
   // strict UpdateSchema doesn't reject it.
@@ -70,8 +97,10 @@ export function TrailerSheet({ open, trailer, onClose }: Props) {
   const carriersQ = useCarriers({ limit: 200 });
   const typesQ = useTrailerTypes({ active: true });
 
-  // Persist create-mode drafts; closing the sheet keeps user input intact.
-  const draft = useFormDraft(form, DRAFT_KEY, { enabled: !isEdit });
+  // Persist create-mode drafts; wizard mode opts out (see VehicleSheet).
+  const draft = useFormDraft(form, DRAFT_KEY, {
+    enabled: !isEdit && !isWizard,
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -101,17 +130,27 @@ export function TrailerSheet({ open, trailer, onClose }: Props) {
         notes: trailer.notes ?? '',
       });
     } else {
-      // Reset to empty defaults first, then overlay any saved draft on top.
-      form.reset(getDefaults());
-      draft.hydrate();
+      // Reset to empty defaults first, then overlay any saved draft on top
+      // (skipped in wizard mode — see VehicleSheet for the same rationale).
+      form.reset({
+        ...getDefaults(),
+        ...(isWizard && wizardCarrierId
+          ? { carrierId: wizardCarrierId }
+          : {}),
+      });
+      if (!isWizard) draft.hydrate();
     }
-  }, [open, isEdit, trailer, form, draft]);
+  }, [open, isEdit, trailer, form, draft, isWizard, wizardCarrierId]);
 
   const createM = useCreateTrailer({
-    onSuccess: () => {
+    onSuccess: (created) => {
       // Successful create — wipe the draft and reset to empty defaults.
       draft.clear();
       form.reset(getDefaults());
+      if (isWizard) {
+        onCompleted?.(created);
+        return;
+      }
       toast.success(tCommon('saved'));
       onClose();
     },
@@ -139,20 +178,39 @@ export function TrailerSheet({ open, trailer, onClose }: Props) {
   const submitting = createM.isPending || updateM.isPending;
   const errs = form.formState.errors;
 
+  const handleClose = () => {
+    if (isWizard) onExit?.();
+    else onClose();
+  };
+
   return (
-    <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
+    <Sheet open={open} onOpenChange={(o) => !o && handleClose()}>
       <SheetContent size="wide">
         <form onSubmit={onSubmit} className="flex h-full flex-col">
           <SheetHeader>
             <SheetTitle>
-              {isEdit ? t('editTrailer') : t('newTrailer')}
+              {isWizard
+                ? tWizard('wizard.header.title', { n: wizardCurrentStep ?? 3 })
+                : isEdit
+                  ? t('editTrailer')
+                  : t('newTrailer')}
             </SheetTitle>
             <SheetDescription>
               {isEdit && trailer ? trailer.plateNumber : null}
             </SheetDescription>
+            {isWizard && (
+              <WizardStepper
+                currentStep={wizardCurrentStep ?? 3}
+                completedSteps={wizardCompletedSteps ?? []}
+                skippedSteps={wizardSkippedSteps ?? []}
+              />
+            )}
           </SheetHeader>
 
           <SheetBody>
+            {isWizard && wizardTempPassword && (
+              <TemporaryPasswordBanner password={wizardTempPassword} />
+            )}
             <div className="space-y-6">
               <FormSection title={t('sections.identification')}>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -165,6 +223,7 @@ export function TrailerSheet({ open, trailer, onClose }: Props) {
                     >
                       <Select
                         id="trailer-carrierId"
+                        disabled={isWizard}
                         {...form.register('carrierId')}
                       >
                         <option value="">—</option>
@@ -383,32 +442,62 @@ export function TrailerSheet({ open, trailer, onClose }: Props) {
           </SheetBody>
 
           <SheetFooter>
-            {!isEdit && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  draft.clear();
-                  form.reset(getDefaults());
-                }}
-                disabled={submitting}
-              >
-                {tCommon('clear')}
-              </Button>
+            {isWizard ? (
+              <>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onExit?.()}
+                  disabled={submitting}
+                >
+                  {tWizard('wizard.action.exit')}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onSkip?.()}
+                  disabled={submitting}
+                >
+                  {tWizard('wizard.action.skip')}
+                </Button>
+                <Button type="submit" size="sm" disabled={submitting}>
+                  {submitting
+                    ? tCommon('saving')
+                    : tWizard('wizard.action.saveAndContinue')}
+                </Button>
+              </>
+            ) : (
+              <>
+                {!isEdit && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      draft.clear();
+                      form.reset(getDefaults());
+                    }}
+                    disabled={submitting}
+                  >
+                    {tCommon('clear')}
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={onClose}
+                  disabled={submitting}
+                >
+                  {tCommon('cancel')}
+                </Button>
+                <Button type="submit" size="sm" disabled={submitting}>
+                  {submitting ? tCommon('saving') : tCommon('save')}
+                </Button>
+              </>
             )}
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={onClose}
-              disabled={submitting}
-            >
-              {tCommon('cancel')}
-            </Button>
-            <Button type="submit" size="sm" disabled={submitting}>
-              {submitting ? tCommon('saving') : tCommon('save')}
-            </Button>
           </SheetFooter>
         </form>
       </SheetContent>

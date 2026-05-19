@@ -132,6 +132,59 @@
     "message": "Nie masz uprawnień do tej sekcji. Skontaktuj się z administratorem, jeśli uważasz, że to błąd.",
     "backToDashboard": "Wróć do dashboardu"
   },
+  "wizard": {
+    "ariaLabel": "Postęp dodawania przewoźnika",
+    "header": {
+      "title": "Dodaj przewoźnika — krok {n} z 4"
+    },
+    "step": {
+      "carrier": "Przewoźnik",
+      "vehicle": "Maszyna",
+      "trailer": "Przyczepa",
+      "driver": "Kierowca"
+    },
+    "state": {
+      "completed": "ukończone",
+      "active": "w trakcie",
+      "skipped": "pominięte",
+      "future": "do wykonania"
+    },
+    "aria": {
+      "stepPrefix": "Krok {n}:"
+    },
+    "action": {
+      "saveAndContinue": "Zapisz i kontynuuj",
+      "skip": "Pomiń",
+      "exit": "Wyjdź"
+    }
+  },
+  "tempPwd": {
+    "regionLabel": "Hasło tymczasowe — akcja wymagana",
+    "title": "Hasło tymczasowe",
+    "body": "Przekaż to hasło przewoźnikowi — nie zobaczysz go ponownie.",
+    "reveal": "Pokaż",
+    "hide": "Ukryj",
+    "copy": "Kopiuj",
+    "copied": "Skopiowano",
+    "toast": "Hasło skopiowane do schowka",
+    "revealAria": "Pokaż hasło tymczasowe",
+    "hideAria": "Ukryj hasło tymczasowe",
+    "copyAria": "Skopiuj hasło tymczasowe do schowka",
+    "maskedAria": "Hasło tymczasowe, ukryte. Kliknij Pokaż, aby wyświetlić."
+  },
+  "onboardingStatus": {
+    "PENDING_VEHICLE": "Brak maszyny",
+    "PENDING_TRAILER": "Brak przyczepy",
+    "PENDING_DRIVER": "Brak kierowcy",
+    "column": "Onboarding",
+    "resumeAction": "Dokończ onboarding",
+    "ariaPrefix": "Onboarding niezakończony: brak ",
+    "entity": {
+      "vehicle": "maszyny",
+      "trailer": "przyczepy",
+      "driver": "kierowcy"
+    }
+  },
   "carriers": {
     "title": "Przewoźnicy",
     "newCarrier": "Nowy przewoźnik",

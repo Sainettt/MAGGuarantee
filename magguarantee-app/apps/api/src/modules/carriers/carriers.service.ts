@@ -72,6 +72,7 @@ export class CarriersService {
       opiekunId: effective.opiekunId,
       active: effective.active,
       q: effective.q,
+      onboardingStatus: effective.onboardingStatus,
       cursor: effective.cursor,
       limit: effective.limit,
     });
@@ -361,6 +362,7 @@ export class CarriersService {
       licenseExpiry: row.licenseExpiry ? toDateString(row.licenseExpiry) : null,
       numberOfPermits: row.numberOfPermits,
       companyAddress: row.companyAddress,
+      onboardingStatus: row.onboardingStatus,
       opiekunId: row.opiekunId,
       opiekun: row.opiekun,
       createdAt: row.createdAt.toISOString(),

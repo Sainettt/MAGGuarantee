@@ -5,7 +5,13 @@ import { type HTMLAttributes } from 'react';
 
 import { cn } from '@/lib/utils';
 
-type Variant = 'success' | 'danger' | 'warning' | 'info' | 'muted';
+type Variant =
+  | 'success'
+  | 'danger'
+  | 'warning'
+  | 'info'
+  | 'muted'
+  | 'onboarding-pending';
 
 const VARIANT_CLASSES: Record<Variant, string> = {
   success: 'bg-success-bg text-success-dark dark:bg-success/15 dark:text-success',
@@ -13,6 +19,11 @@ const VARIANT_CLASSES: Record<Variant, string> = {
   warning: 'bg-warning-bg text-warning-dark dark:bg-warning/15 dark:text-warning',
   info: 'bg-info-bg text-info-dark dark:bg-info/15 dark:text-info',
   muted: 'bg-input text-text-sub',
+  // Phase 3.2 — carrier onboarding pill. Reuses the existing `warning` palette
+  // at chip-pill scale per docs/14-design-system.md § Phase 3.2 #3. Border
+  // included so the pill stays legible on the `bg-table-hover` row state.
+  'onboarding-pending':
+    'border border-warning/30 bg-warning-bg text-warning-dark dark:bg-warning/15 dark:text-warning',
 };
 
 export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {

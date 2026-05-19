@@ -79,6 +79,7 @@ function makeCarrier(overrides: Partial<CarrierRow> = {}): CarrierRow {
     licenseExpiry: NOW,
     numberOfPermits: null,
     companyAddress: 'ul. Testowa 1',
+    onboardingStatus: 'COMPLETE',
     opiekunId: 'op-fixture',
     opiekun: { id: 'op-fixture', login: 'op', name: null },
     createdAt: NOW,
@@ -182,6 +183,18 @@ function makeCarriersRepo(seed: CarrierRow[] = []): CarriersRepository {
         arr = arr.filter((r) => r.opiekunId === filters.opiekunId);
       return arr.slice(0, filters.limit + 1);
     }),
+    advanceOnboardingStatus: jest.fn(
+      async (
+        id: string,
+        next: CarrierRow['onboardingStatus'],
+        lowerStatuses: CarrierRow['onboardingStatus'][],
+      ) => {
+        const cur = rows.get(id);
+        if (!cur || !lowerStatuses.includes(cur.onboardingStatus)) return 0;
+        rows.set(id, { ...cur, onboardingStatus: next });
+        return 1;
+      },
+    ),
   } as unknown as CarriersRepository;
 }
 
@@ -282,5 +295,92 @@ describe('TrailersService', () => {
       makeTypesRepo(),
     );
     await expect(svc.getById('missing')).rejects.toThrow(NotFoundException);
+  });
+
+  // ── Onboarding-status side-effect ────────────────────────
+  // Trailer created → bump carrier to PENDING_DRIVER from either of the two
+  // prior steps. Out-of-wizard (trailer-first) creates correctly advance past
+  // PENDING_VEHICLE — per spec the status reflects "highest step completed".
+  // Already-COMPLETE carriers stay put.
+
+  it('advances PENDING_VEHICLE → PENDING_DRIVER on trailer create', async () => {
+    const carrier = makeCarrier({ onboardingStatus: 'PENDING_VEHICLE' });
+    const carriersRepo = makeCarriersRepo([carrier]);
+    const t = makeType({ id: 'tt-1', active: true });
+    const svc = new TrailersService(
+      makeTrailersRepo(),
+      carriersRepo,
+      makeTypesRepo([t]),
+    );
+    await svc.create(makeAuth('admin', 'a-1'), {
+      carrierId: 'c-1',
+      plateNumber: 'NA8001',
+      trailerTypeId: 'tt-1',
+    });
+    expect(carriersRepo.advanceOnboardingStatus).toHaveBeenCalledWith(
+      'c-1',
+      'PENDING_DRIVER',
+      ['PENDING_VEHICLE', 'PENDING_TRAILER'],
+    );
+    const after = await carriersRepo.findById('c-1');
+    expect(after?.onboardingStatus).toBe('PENDING_DRIVER');
+  });
+
+  it('advances PENDING_TRAILER → PENDING_DRIVER on trailer create', async () => {
+    const carrier = makeCarrier({ onboardingStatus: 'PENDING_TRAILER' });
+    const carriersRepo = makeCarriersRepo([carrier]);
+    const t = makeType({ id: 'tt-1', active: true });
+    const svc = new TrailersService(
+      makeTrailersRepo(),
+      carriersRepo,
+      makeTypesRepo([t]),
+    );
+    await svc.create(makeAuth('admin', 'a-1'), {
+      carrierId: 'c-1',
+      plateNumber: 'NA8002',
+      trailerTypeId: 'tt-1',
+    });
+    const after = await carriersRepo.findById('c-1');
+    expect(after?.onboardingStatus).toBe('PENDING_DRIVER');
+  });
+
+  it('does NOT regress an already COMPLETE carrier', async () => {
+    const carrier = makeCarrier({ onboardingStatus: 'COMPLETE' });
+    const carriersRepo = makeCarriersRepo([carrier]);
+    const t = makeType({ id: 'tt-1', active: true });
+    const svc = new TrailersService(
+      makeTrailersRepo(),
+      carriersRepo,
+      makeTypesRepo([t]),
+    );
+    await svc.create(makeAuth('admin', 'a-1'), {
+      carrierId: 'c-1',
+      plateNumber: 'NA8003',
+      trailerTypeId: 'tt-1',
+    });
+    const after = await carriersRepo.findById('c-1');
+    expect(after?.onboardingStatus).toBe('COMPLETE');
+  });
+
+  it('a 409 duplicate-plate failure does NOT advance onboardingStatus', async () => {
+    const dup = makeTrailer({ carrierId: 'c-1', plateNumber: 'NA0001' });
+    const carrier = makeCarrier({ onboardingStatus: 'PENDING_VEHICLE' });
+    const carriersRepo = makeCarriersRepo([carrier]);
+    const t = makeType({ id: 'tt-1', active: true });
+    const svc = new TrailersService(
+      makeTrailersRepo([dup]),
+      carriersRepo,
+      makeTypesRepo([t]),
+    );
+    await expect(
+      svc.create(makeAuth('admin', 'a-1'), {
+        carrierId: 'c-1',
+        plateNumber: 'NA0001',
+        trailerTypeId: 'tt-1',
+      }),
+    ).rejects.toThrow(ConflictException);
+    expect(carriersRepo.advanceOnboardingStatus).not.toHaveBeenCalled();
+    const after = await carriersRepo.findById('c-1');
+    expect(after?.onboardingStatus).toBe('PENDING_VEHICLE');
   });
 });

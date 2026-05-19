@@ -59,8 +59,9 @@ export class TrailersService {
     // and is active so the FK + business rule are enforced together.
     await this._assertActiveTrailerType(dto.trailerTypeId);
 
+    let row: TrailerRow;
     try {
-      const row = await this.trailers.create({
+      row = await this.trailers.create({
         carrierId: dto.carrierId,
         plateNumber: dto.plateNumber,
         active: dto.active,
@@ -86,12 +87,39 @@ export class TrailersService {
         edschaSlidingRoof: dto.edschaSlidingRoof ?? null,
         notes: dto.notes ?? null,
       });
-      return this.toDto(row);
     } catch (err) {
       throw uniqueViolationToConflict(
         err,
         'Naczepa o tym numerze rejestracyjnym już istnieje u tego przewoźnika',
       );
+    }
+
+    // Onboarding wizard step advancement (display-only — never blocks).
+    // Trailer created → bump to PENDING_DRIVER from either of the two prior
+    // steps. Out-of-wizard creates (trailer before vehicle) also advance
+    // past PENDING_VEHICLE — the spec confirms status reflects "highest step
+    // completed", so a carrier with a trailer but no vehicle is correctly
+    // waiting on a driver next. `updateMany` with the WHERE-in clause keeps
+    // already-advanced carriers untouched (no regression).
+    await this._advanceCarrierOnboarding(row.carrierId, 'PENDING_DRIVER', [
+      'PENDING_VEHICLE',
+      'PENDING_TRAILER',
+    ]);
+
+    return this.toDto(row);
+  }
+
+  /** See `VehiclesService._advanceCarrierOnboarding` for rationale. */
+  private async _advanceCarrierOnboarding(
+    carrierId: string,
+    next: 'PENDING_TRAILER' | 'PENDING_DRIVER' | 'COMPLETE',
+    from: ReadonlyArray<'PENDING_VEHICLE' | 'PENDING_TRAILER' | 'PENDING_DRIVER'>,
+  ): Promise<void> {
+    try {
+      await this.carriers.advanceOnboardingStatus(carrierId, next, [...from]);
+    } catch {
+      // Display-only — swallow so a stale carrier row never breaks the
+      // primary entity create.
     }
   }
 

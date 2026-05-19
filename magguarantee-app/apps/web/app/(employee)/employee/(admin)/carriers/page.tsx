@@ -2,9 +2,9 @@
 
 // Admin CRUD — carriers.
 
-import { Pencil, Plus } from 'lucide-react';
+import { Pencil, PlayCircle, Plus } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { CarrierDto } from '@magguarantee/shared';
 
 import { Badge } from '@/components/ui/Badge';
@@ -13,13 +13,31 @@ import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { CarrierOnboardingWizard } from '@/components/carrier-onboarding/CarrierOnboardingWizard';
+import {
+  CarrierOnboardingProvider,
+  useCarrierOnboarding,
+} from '@/components/carrier-onboarding/useCarrierOnboarding';
+import { OnboardingStatusBadge } from '@/components/carriers/OnboardingStatusBadge';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useOpiekuni } from '@/lib/hooks/useLookups';
 
 import { CarrierSheet } from './CarrierSheet';
 
 export default function CarriersPage() {
+  // The wizard's state lives in a Context so the page, the table cells
+  // (Continue setup button), and the wizard itself all share the same store.
+  return (
+    <CarrierOnboardingProvider>
+      <CarriersPageInner />
+      <CarrierOnboardingWizard />
+    </CarrierOnboardingProvider>
+  );
+}
+
+function CarriersPageInner() {
   const t = useTranslations('carriers');
+  const tWizard = useTranslations();
   const tCommon = useTranslations('common');
   const [search, setSearch] = useState('');
   const [opiekunId, setOpiekunId] = useState<string>('');
@@ -34,17 +52,31 @@ export default function CarriersPage() {
 
   const opiekuniQ = useOpiekuni();
 
+  const wizard = useCarrierOnboarding();
+
+  // Edit-mode sheet stays separate from the wizard — they have different
+  // success semantics (edit toasts + closes; wizard chains forward).
   const [sheetOpen, setSheetOpen] = useState(false);
   const [target, setTarget] = useState<CarrierDto | null>(null);
 
   const openCreate = () => {
-    setTarget(null);
-    setSheetOpen(true);
+    // The "+ Add carrier" button opens the wizard, NOT the standalone create
+    // sheet — the wizard guides the operator through vehicle/trailer/driver
+    // right after. The wizard's CarrierSheet handles step 1 internally.
+    wizard.start();
   };
   const openEdit = (row: CarrierDto) => {
     setTarget(row);
     setSheetOpen(true);
   };
+  // Memoised so the `columns` useMemo can list it as a dep without churning
+  // on every render. The wizard methods are themselves stable.
+  const resumeOnboarding = useCallback(
+    (row: CarrierDto) => {
+      wizard.resume({ carrierId: row.id, status: row.onboardingStatus });
+    },
+    [wizard],
+  );
 
   const columns = useMemo<DataTableColumn<CarrierDto>[]>(
     () => [
@@ -56,7 +88,12 @@ export default function CarriersPage() {
       {
         id: 'name',
         header: t('fields.name'),
-        cell: (row) => <span className="font-semibold">{row.name ?? '—'}</span>,
+        cell: (row) => (
+          <div className="flex items-center gap-2">
+            <span className="font-semibold">{row.name ?? '—'}</span>
+            <OnboardingStatusBadge status={row.onboardingStatus} />
+          </div>
+        ),
       },
       {
         id: 'company',
@@ -89,22 +126,38 @@ export default function CarriersPage() {
         header: <span className="sr-only">{tCommon('actions')}</span>,
         align: 'right',
         cell: (row) => (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              openEdit(row);
-            }}
-            aria-label={`${tCommon('edit')} ${row.login}`}
-          >
-            <Pencil size={14} />
-            {tCommon('edit')}
-          </Button>
+          <div className="flex items-center justify-end gap-2">
+            {row.onboardingStatus !== 'COMPLETE' && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  resumeOnboarding(row);
+                }}
+                aria-label={`${tWizard('onboardingStatus.resumeAction')} ${row.login}`}
+              >
+                <PlayCircle size={14} />
+                {tWizard('onboardingStatus.resumeAction')}
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                openEdit(row);
+              }}
+              aria-label={`${tCommon('edit')} ${row.login}`}
+            >
+              <Pencil size={14} />
+              {tCommon('edit')}
+            </Button>
+          </div>
         ),
       },
     ],
-    [t, tCommon],
+    [t, tCommon, tWizard, resumeOnboarding],
   );
 
   return (

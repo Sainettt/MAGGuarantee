@@ -40,6 +40,7 @@ function makeCarrier(overrides: Partial<CarrierRow> = {}): CarrierRow {
     licenseExpiry: NOW,
     numberOfPermits: null,
     companyAddress: 'ul. Testowa 1',
+    onboardingStatus: 'COMPLETE',
     opiekunId: 'op-fixture',
     opiekun: { id: 'op-fixture', login: 'op', name: null },
     createdAt: NOW,
@@ -323,5 +324,34 @@ describe('CarriersService', () => {
       makePasswords(),
     );
     await expect(svc.getById('missing')).rejects.toThrow(NotFoundException);
+  });
+
+  // ── onboardingStatus filter ──────────────────────────────
+  // list() must forward the `onboardingStatus` query param through to the
+  // repo. The filter is single-value (matches ClaimFilters.status pattern).
+  // No business rule keys off it — it's display-only.
+
+  it('list forwards onboardingStatus filter to the repo', async () => {
+    const carriers = makeCarriersRepo();
+    const svc = new CarriersService(carriers, makeUsersRepo(), makePasswords());
+    await svc.list(makeAuth('admin', 'a-1'), {
+      limit: 50,
+      onboardingStatus: 'PENDING_VEHICLE',
+    });
+    expect(carriers.list).toHaveBeenCalledWith(
+      expect.objectContaining({ onboardingStatus: 'PENDING_VEHICLE' }),
+    );
+  });
+
+  it('toDto carries onboardingStatus through the response', async () => {
+    const carrier = makeCarrier({
+      id: 'c-onb',
+      login: 'pwz-onb',
+      onboardingStatus: 'PENDING_TRAILER',
+    });
+    const carriers = makeCarriersRepo([carrier]);
+    const svc = new CarriersService(carriers, makeUsersRepo(), makePasswords());
+    const out = await svc.getById('c-onb');
+    expect(out.onboardingStatus).toBe('PENDING_TRAILER');
   });
 });
