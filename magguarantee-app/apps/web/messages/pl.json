@@ -242,6 +242,68 @@
     },
     "tempPasswordToast": "Hasło tymczasowe: {password}"
   },
+  "fileUpload": {
+    "prompt": "Przeciągnij pliki tutaj lub kliknij, aby wybrać",
+    "promptCompact": "Dodaj kolejny plik",
+    "constraints": "JPG, PNG, WebP, PDF · maks. 10 MB",
+    "errTooLarge": "Plik przekracza 10 MB",
+    "errWrongType": "Nieobsługiwany typ pliku",
+    "errUploadFailed": "Nie udało się przesłać pliku",
+    "retry": "Spróbuj ponownie",
+    "dropzoneAria": "Wybierz pliki do przesłania",
+    "removeAria": "Usuń plik {name}",
+    "fields": {
+      "contract": "Zrzut ekranu umowy",
+      "contractHint": "Załącz skan lub zdjęcie umowy — wymagane gdy GPS jest włączony.",
+      "cabotageDe": "Zrzut ekranu pozwolenia kabotażowego DE",
+      "cabotageFr": "Zrzut ekranu pozwolenia kabotażowego FR",
+      "cabotageHint": "Załącz skan lub zdjęcie pozwolenia kabotażowego."
+    },
+    "required": {
+      "contract": "Wymagany skan umowy gdy GPS jest włączony.",
+      "cabotage_de": "Wymagany skan pozwolenia kabotażowego DE.",
+      "cabotage_fr": "Wymagany skan pozwolenia kabotażowego FR."
+    }
+  },
+  "multiSelect": {
+    "placeholder": "Wybierz kraje…",
+    "searchPlaceholder": "Szukaj kraju…",
+    "noResults": "Nie znaleziono kraju",
+    "removeAria": "Usuń {name}",
+    "selectionSummary": "Kraje docelowe, wybrano {count}"
+  },
+  "countries": {
+    "AT": "Austria",
+    "BE": "Belgia",
+    "BG": "Bułgaria",
+    "CH": "Szwajcaria",
+    "CY": "Cypr",
+    "CZ": "Czechy",
+    "DE": "Niemcy",
+    "DK": "Dania",
+    "EE": "Estonia",
+    "ES": "Hiszpania",
+    "FI": "Finlandia",
+    "FR": "Francja",
+    "GB": "Wielka Brytania",
+    "GR": "Grecja",
+    "HR": "Chorwacja",
+    "HU": "Węgry",
+    "IE": "Irlandia",
+    "IT": "Włochy",
+    "LT": "Litwa",
+    "LU": "Luksemburg",
+    "LV": "Łotwa",
+    "MT": "Malta",
+    "NL": "Holandia",
+    "NO": "Norwegia",
+    "PL": "Polska",
+    "PT": "Portugalia",
+    "RO": "Rumunia",
+    "SE": "Szwecja",
+    "SI": "Słowenia",
+    "SK": "Słowacja"
+  },
   "vehicles": {
     "title": "Pojazdy",
     "newVehicle": "Nowy pojazd",
@@ -269,7 +331,6 @@
       "gpsMobilePhone": "Numer GPS",
       "fuelCard": "Karta paliwowa",
       "agreement": "Porozumienie",
-      "contract": "Umowa",
       "rateDe": "Stawka DE",
       "rateUe": "Stawka UE",
       "rateExport": "Stawka eksport",
@@ -279,14 +340,17 @@
       "cabotageFr": "Kabotaż FR",
       "nextInspectionDate": "Następny przegląd",
       "notes": "Notatki",
-      "active": "Aktywny"
+      "active": "Aktywny",
+      "destinationCountries": "Kraje docelowe",
+      "destinationCountriesHint": "Wybierz kraje, do których pojazd realizuje przewozy."
     },
     "sections": {
       "identification": "Identyfikacja",
       "people": "Przypisanie",
       "equipment": "Wyposażenie",
       "rates": "Stawki",
-      "permissions": "Pozwolenia"
+      "permissions": "Pozwolenia",
+      "countries": "Kraje"
     }
   },
   "drivers": {

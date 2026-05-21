@@ -242,6 +242,68 @@
     },
     "tempPasswordToast": "Temporary password: {password}"
   },
+  "fileUpload": {
+    "prompt": "Drag files here or click to choose",
+    "promptCompact": "Add another file",
+    "constraints": "JPG, PNG, WebP, PDF · max. 10 MB",
+    "errTooLarge": "File exceeds 10 MB",
+    "errWrongType": "Unsupported file type",
+    "errUploadFailed": "Upload failed",
+    "retry": "Retry",
+    "dropzoneAria": "Choose files to upload",
+    "removeAria": "Remove file {name}",
+    "fields": {
+      "contract": "Contract screenshot",
+      "contractHint": "Attach a scan or photo of the contract — required when GPS is on.",
+      "cabotageDe": "DE cabotage permit screenshot",
+      "cabotageFr": "FR cabotage permit screenshot",
+      "cabotageHint": "Attach a scan or photo of the cabotage permit."
+    },
+    "required": {
+      "contract": "Contract scan required when GPS is on.",
+      "cabotage_de": "DE cabotage permit scan required.",
+      "cabotage_fr": "FR cabotage permit scan required."
+    }
+  },
+  "multiSelect": {
+    "placeholder": "Choose countries…",
+    "searchPlaceholder": "Search country…",
+    "noResults": "No country found",
+    "removeAria": "Remove {name}",
+    "selectionSummary": "Destination countries, {count} selected"
+  },
+  "countries": {
+    "AT": "Austria",
+    "BE": "Belgium",
+    "BG": "Bulgaria",
+    "CH": "Switzerland",
+    "CY": "Cyprus",
+    "CZ": "Czechia",
+    "DE": "Germany",
+    "DK": "Denmark",
+    "EE": "Estonia",
+    "ES": "Spain",
+    "FI": "Finland",
+    "FR": "France",
+    "GB": "United Kingdom",
+    "GR": "Greece",
+    "HR": "Croatia",
+    "HU": "Hungary",
+    "IE": "Ireland",
+    "IT": "Italy",
+    "LT": "Lithuania",
+    "LU": "Luxembourg",
+    "LV": "Latvia",
+    "MT": "Malta",
+    "NL": "Netherlands",
+    "NO": "Norway",
+    "PL": "Poland",
+    "PT": "Portugal",
+    "RO": "Romania",
+    "SE": "Sweden",
+    "SI": "Slovenia",
+    "SK": "Slovakia"
+  },
   "vehicles": {
     "title": "Vehicles",
     "newVehicle": "New vehicle",
@@ -269,7 +331,6 @@
       "gpsMobilePhone": "GPS number",
       "fuelCard": "Fuel card",
       "agreement": "Agreement",
-      "contract": "Contract",
       "rateDe": "Rate DE",
       "rateUe": "Rate UE",
       "rateExport": "Rate export",
@@ -279,14 +340,17 @@
       "cabotageFr": "Cabotage FR",
       "nextInspectionDate": "Next inspection",
       "notes": "Notes",
-      "active": "Active"
+      "active": "Active",
+      "destinationCountries": "Destination countries",
+      "destinationCountriesHint": "Select the countries the vehicle delivers to."
     },
     "sections": {
       "identification": "Identification",
       "people": "People assigned",
       "equipment": "Equipment",
       "rates": "Rates",
-      "permissions": "Permissions"
+      "permissions": "Permissions",
+      "countries": "Countries"
     }
   },
   "drivers": {

@@ -11,14 +11,16 @@
 
 ## 1. <a id="umowa-vs-porozumienie"></a>`Vehicle.umowa` vs `Vehicle.porozumienie` ⚠️ AMBIGUOUS
 
-The schema has both `agreement` (legacy `Porozumienie`) and `contract` (legacy `Umowa`) as independent nullable booleans on `Vehicle`. Two interpretations are plausible from the legacy UI alone (`index.html:1944-1945` — both are `<select>` Tak/Nie/—):
+> **Update 2026-05:** the `contract` (Umowa) boolean has been **removed** from `Vehicle`. The umowa is no longer modeled as a flag — the actual scanned umowa document is stored as `VehicleAttachment` rows with `category=contract` (uploaded from the Vehicle create/edit modal, bytes in MinIO). The `agreement` (Porozumienie) boolean is **unchanged** and stays on `Vehicle`. The interpretation discussion below is kept for historical context; it is moot for `contract` now — a vehicle either has a contract scan on file or it does not.
+
+Historically the schema had both `agreement` (legacy `Porozumienie`) and `contract` (legacy `Umowa`) as independent nullable booleans on `Vehicle`. Two interpretations were plausible from the legacy UI alone (`index.html:1944-1945` — both are `<select>` Tak/Nie/—):
 
 - **(a) Different concepts:** `umowa` = inclusion in MAGTRANS master fleet contract; `porozumienie` = enrolled in the km-guarantee program. Both can be `true` for the same vehicle.
 - **(b) Mutually exclusive contract types:** a vehicle is on ONE relationship, not both. In which case storing two booleans is data-smell and a single enum `vehicleRelationship: 'umowa' | 'porozumienie' | null` would be cleaner.
 
-Source of truth: `index.html:1944-1945` (form), `index.html:8614, 9725-9726` (display + payload). No business logic in `Code.gs` differentiates them currently.
+Source of truth: `index.html:1944-1945` (form), `index.html:8614, 9725-9726` (display + payload). No business logic in `Code.gs` differentiated them.
 
-**What NOT to do:** do not add business logic that depends on these fields (e.g., "only allow wniosek submission if porozumienie=true") without first confirming the interpretation with the stakeholder. If interpretation (b) wins, plan a migration to a single enum BEFORE shipping any rule that reads them.
+**What NOT to do:** do not re-add a `contract` boolean — presence of the umowa is now derived from `VehicleAttachment` rows. Do not add business logic that depends on `agreement` (e.g., "only allow wniosek submission if porozumienie=true") without first confirming the interpretation with the stakeholder.
 
 ---
 

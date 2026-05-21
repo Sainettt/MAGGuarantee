@@ -9,5 +9,6 @@ export {
   DelegationStatus,
   EuroNorm,
   Role,
+  VehicleAttachmentCategory,
   VehicleType,
 } from './generated';

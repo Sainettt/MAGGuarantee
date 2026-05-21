@@ -1963,3 +1963,337 @@ Add an exported `className` prop for the wrapper so callers (only the wizard roo
 4. **`info.soft` token discoverability.** Web-agent will be tempted to use `bg-info-soft` elsewhere now that it exists. **Reserve it for this single use case** (and any future "calm informational" header band). Document this in the Tailwind config comment next to the value: `// info.soft — reserved for temp-password row and future header info bands. Do not use as general informational surface — use bg-bg for that.`
 5. **Stepper + row vertical rhythm.** Stepper labels end at `pb-3` (Phase 3.2 § 1 spec); the new row starts with `border-t border-border` and its own `py-2.5`. The gap between stepper baseline and row top should be ~12–14px after `mt-3` (12px) is added at the call site. If it reads too tight or too loose in implementation, adjust the wizard root's `mt-*` rather than the row's internal padding — keep the row spec stable for any future reuse.
 
+---
+
+## Phase 5 — Vehicle modal: `<FileUpload>` primitive + «Kraje» multi-select section
+
+> Scope: the vehicle (pojazd) create/edit Sheet (`apps/web/app/(employee)/employee/(admin)/vehicles/VehicleSheet.tsx`) gains (a) **umowa-screenshot file uploads** rendered conditionally under checkboxes inside the FLAGI / KABOTAŻ section cards, and (b) a new **«Kraje»** section with a destination-countries multi-select placed after «Pozwolenia».
+>
+> **No new color / radius / shadow / font tokens are introduced.** Both pieces compose strictly from the existing brand palette, semantic colors (`success` / `warning` / `danger` / `info` / `text-sub`), the radius scale (`rounded-sm 8px` / `rounded 12px` / `rounded-lg 14px`), `shadow-card`, and existing shadcn primitives. Two new custom components enter the catalog: `<FileUpload>` and `<MultiSelect>`.
+>
+> Reference screenshots: `docs/screenshots/modal-vehicle-details-p1/p2/p3.png` (section-card layout, tinted backgrounds, checkbox grids), `docs/screenshots/modal-add-vehicle.png` (Sheet header/footer chrome).
+
+### Context — the vehicle Sheet section-card pattern (already established)
+
+The vehicle modal organises ~36 fields into **section cards**: a rounded container with a tinted surface, a section header (emoji + uppercase label), and a body of field rows. The legacy tints observed in the screenshots are `CERTYFIKATY` red, `KABOTAŻ` cyan, `FLAGI` green, `STAWKI` yellow, `IDENTYFIKACJA` neutral-grey. In the new system these section cards are formalised as:
+
+| Slot | Tailwind | Token |
+|---|---|---|
+| Section card wrapper | `rounded-lg border border-border p-4 space-y-3` | `rounded-lg` (14px), `border` |
+| Section tint (optional, light accent) | `bg-card` default; tinted variants use semantic `*-bg` at low prominence — but **do not over-tint**: prefer plain `bg-card` + a coloured header for the new sections | semantic `*-bg` |
+| Section header | `flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-text-sub` | "table header" typography from Phase 2 |
+| Field gap inside card | `space-y-3` between rows; `space-y-1.5` inside a `<FormItem>` | — |
+
+`<FileUpload>` and the «Kraje» `<MultiSelect>` are designed to **drop into one of these section cards** without breaking the rhythm.
+
+---
+
+### 1. `<FileUpload>` — reusable multi-file upload primitive
+
+A controlled primitive that lives inside a `<FormField>` and binds to an array-of-files value. In the vehicle modal it is rendered **conditionally**, revealed when its governing checkbox is ticked (under the GPS checkbox in FLAGI, and under each kabotaż checkbox in KABOTAŻ). The component itself knows nothing about checkboxes — the parent form mounts/unmounts it.
+
+#### 1.1 Anatomy
+
+```
++-----------------------------------------------------------+   <- dropzone (collapsed = empty state)
+|   [Upload icon]                                           |
+|   Przeciągnij pliki tutaj lub kliknij, aby wybrać         |
+|   JPG, PNG, WebP, PDF · maks. 10 MB                       |
++-----------------------------------------------------------+
+
++-----------------------------------------------------------+   <- file row (one per file, uploaded or in-progress)
+| [thumb] umowa-2024.pdf            1.4 MB           [X]     |
+| [====================------]  68%                         |   <- progress bar (only while uploading)
++-----------------------------------------------------------+
+| [thumb] skan-front.jpg            220 KB           [X]     |
++-----------------------------------------------------------+
+| [!]    za-duzy-plik.png  — Plik przekracza 10 MB   [X]     |   <- error row
++-----------------------------------------------------------+
+```
+
+The component is a vertical stack: **dropzone on top**, then a **file list** below it. When at least one file exists, the dropzone shrinks to its compact state but stays visible (multi-file: the user keeps adding).
+
+#### 1.2 Dropzone
+
+| State | Tailwind | Tokens |
+|---|---|---|
+| Idle | `flex flex-col items-center justify-center gap-1 rounded border border-dashed border-border bg-input px-4 py-5 text-center cursor-pointer transition-colors` | `rounded` (12px), `border` dashed, `bg-input` |
+| Hover | `hover:border-brand-200 hover:bg-brand-50/50` | `brand-200`, `brand-50` |
+| Drag-over (file dragged on top) | `border-brand bg-brand-50` + `border-solid` | `brand` (600), `brand-50` |
+| Focus-visible (keyboard) | `focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand` | `brand` |
+| Disabled | `opacity-50 cursor-not-allowed` (no hover/drag reaction) | — |
+| Compact (when ≥1 file present) | same as idle but `py-3`, single-line label, no helper line | — |
+
+**Dropzone contents (idle):**
+- Lucide `<UploadCloud size={20} className="text-text-sub" aria-hidden="true" />`.
+- Primary line: `text-sm text-text` — `t('fileUpload.prompt')` ("Przeciągnij pliki tutaj lub kliknij, aby wybrać"). The word "kliknij" is not a separate link — the **whole dropzone** is the click target (a `<button type="button">` wrapping a visually-hidden `<input type="file" multiple>`).
+- Helper line: `text-xs text-text-sub` — `t('fileUpload.constraints')` ("JPG, PNG, WebP, PDF · maks. 10 MB").
+
+The dropzone is a real `<button>` so it is keyboard-focusable and Enter/Space opens the native file picker. Drag-and-drop is layered on with `onDragOver` / `onDragLeave` / `onDrop` handlers on the same element.
+
+#### 1.3 File row
+
+One row per file. Height is content-driven (~`py-2`), rows separated by `divide-y divide-border` inside a `rounded border border-border` list container, or each row as `rounded border border-border` with `space-y-1.5` between — web-agent picks; the list-with-dividers reads cleaner inside an already-bordered section card.
+
+| Slot | Tailwind | Notes |
+|---|---|---|
+| Row wrapper | `flex items-center gap-3 px-3 py-2` | — |
+| Thumbnail (image) | `h-10 w-10 shrink-0 rounded-sm border border-border object-cover bg-input` | `rounded-sm` (8px). For images: `<img>` of an object-URL or server thumbnail. |
+| Thumbnail (PDF / non-image) | `h-10 w-10 shrink-0 rounded-sm border border-border bg-input flex items-center justify-center` containing Lucide `<FileText size={18} className="text-text-sub" />` | PDF gets the generic file icon — no render. |
+| Filename | `flex-1 min-w-0 truncate text-sm font-medium text-text` | `truncate` so long names don't break layout; full name in `title` attr. |
+| File size | `shrink-0 text-xs text-text-sub tabular-nums` | formatted "1.4 MB" / "220 KB". |
+| Remove button | `shrink-0 inline-flex h-8 w-8 items-center justify-center rounded-sm text-text-sub hover:bg-danger-bg hover:text-danger focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand` containing Lucide `<X size={16} />` | 32×32 hit area; see touch-target note in acceptance checklist. |
+
+#### 1.4 Upload progress
+
+Shown **only while a freshly-added file is uploading**. A second line inside the file row, below filename:
+
+| Slot | Tailwind | Tokens |
+|---|---|---|
+| Track | `mt-1 h-1 w-full overflow-hidden rounded-full bg-input` | `bg-input` |
+| Fill | `h-full rounded-full bg-brand transition-[width] duration-200` | `bg-brand` (600) |
+| Percent label | `text-xs text-text-sub tabular-nums` next to/after track, optional | — |
+
+While uploading, the **remove button stays enabled** (it cancels the in-flight upload and removes the row). The thumbnail slot shows a Lucide `<Loader2 size={18} className="animate-spin text-text-sub" />` instead of the image/PDF icon until the upload resolves.
+
+#### 1.5 Error states
+
+Three error categories, all rendered **inline on the offending file row** (not as a toast — toasts disappear; the user must see which file failed):
+
+| Error | Trigger | Visual |
+|---|---|---|
+| File too large | client-side size check `> 10 MB` | row gets `border-danger/40 bg-danger-bg`; thumbnail slot → `<AlertTriangle size={18} className="text-danger" />`; size text replaced by `text-xs text-danger` message `t('fileUpload.errTooLarge')`. The file is **not uploaded**; row exists only so the user sees the rejection and dismisses it via `[X]`. |
+| Wrong type | client-side MIME/extension check (not in JPG/PNG/WebP/PDF) | same treatment, message `t('fileUpload.errWrongType')`. |
+| Upload failed | server/network error on a valid file | same treatment, message `t('fileUpload.errUploadFailed')`, **plus** a `t('fileUpload.retry')` text-button (`text-xs font-semibold text-brand hover:underline`) to re-attempt. Retry re-uses the same row. |
+
+A field-level summary (e.g. "2 z 3 plików nie zostało przesłanych") is **not** rendered — the per-row errors are sufficient and the section card stays compact. The form's own `<FormMessage>` (Zod) handles "this field is required" separately, below the whole component.
+
+#### 1.6 Edit mode — already-uploaded files
+
+When the Sheet opens in edit mode the field is pre-populated with files already on the server. These render as **normal file rows** (§1.3) with these differences:
+
+- No progress bar (already at 100%).
+- Thumbnail uses the server-provided thumbnail/URL.
+- Remove button is present and works — clicking it marks the file for deletion. **Deletion is deferred to form submit**, consistent with the Sheet's "nothing persists until Zapisz" contract. A removed-but-not-yet-saved server file should visually leave the list immediately (optimistic); if the user hits Anuluj nothing is deleted server-side.
+- A newly-added file in edit mode behaves exactly as in create mode (uploads, shows progress).
+
+The component does not visually distinguish "existing server file" from "newly added file" once both are settled — by design, the list is one uniform set of "files attached to this field".
+
+#### 1.7 Empty / disabled / read-only
+
+- **Empty (no files):** just the idle dropzone, nothing below it.
+- **Disabled:** dropzone disabled per §1.2; existing file rows render but remove buttons are disabled (`opacity-50`).
+- **Read-only display** (if a non-admin ever views the vehicle): render the file list with **no dropzone and no remove buttons** — filename + size + thumbnail only, each filename a link that opens the file. Follows the Phase 2 rule "read-only is not a disabled input".
+
+#### 1.8 Placement inside the section card
+
+`<FileUpload>` sits inside a `<FormItem>` directly under its governing checkbox. The reveal is the parent's job; when revealed, animate with the existing `animate-slide-in` (translateX/opacity) — or a simple height/opacity fade — so it doesn't pop. Indent it slightly under the checkbox label for visual grouping: wrapper `mt-2 ml-6` (aligns with the checkbox's label text, past the 16px box + gap). The `<FormItem>` keeps `space-y-1.5` so a `<FormLabel>` ("Zrzut ekranu umowy") and `<FormMessage>` sit correctly around it.
+
+#### 1.9 Component API (for catalogue — design intent, not an implementation contract)
+
+`<FileUpload>` is a controlled component:
+
+| Prop | Purpose |
+|---|---|
+| `value` | array of file descriptors — mix of `{ id, name, size, url, thumbnailUrl }` (server) and in-flight client files. |
+| `onChange` | emits the new array on add/remove. |
+| `accept` | MIME / extension allow-list — defaults to JPG/PNG/WebP/PDF. |
+| `maxSizeMb` | per-file cap — defaults to 10. |
+| `multiple` | defaults `true`. |
+| `disabled` / `readOnly` | per §1.7. |
+| `onUpload` | async fn the form supplies that does the actual transfer and resolves to `{ id, url, thumbnailUrl }`; the component owns progress/error UI around it. |
+
+The component owns: dropzone, drag state, client-side validation, progress UI, error UI, remove. It does **not** own: where files go (the `onUpload` callback) or the checkbox that reveals it.
+
+#### 1.10 Accessibility
+
+- The dropzone is a `<button type="button">` with `aria-label={t('fileUpload.dropzoneAria')}` wrapping a visually-hidden `<input type="file" multiple accept="...">`. Click / Enter / Space all open the picker.
+- Drag-and-drop is an enhancement, never the only path — the click/keyboard path is always available.
+- Each file row: the remove `<button>` has `aria-label={t('fileUpload.removeAria', { name })}` so a screen reader announces *which* file is removed.
+- Progress: the track is `<div role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="...">`.
+- Errors: the inline error message row is associated to the file via `aria-describedby`; on a failed upload, move focus to the retry button so keyboard users land on the recovery action.
+- Drag-over state must not rely on colour alone — the dashed border switching to **solid** is the non-colour cue.
+
+#### 1.11 Acceptance checklist — `<FileUpload>`
+
+- [ ] Dropzone: click opens native picker; Enter and Space also open it (it's a real `<button>`).
+- [ ] Drag a file over the dropzone → border turns solid + `border-brand` + `bg-brand-50`; drag-leave reverts.
+- [ ] Drop one or multiple files → all added; `multiple` honoured.
+- [ ] Image files show a thumbnail (`h-10 w-10 rounded-sm object-cover`); PDFs show the `<FileText>` icon.
+- [ ] Filename truncates with ellipsis on overflow; full name available via `title`.
+- [ ] File size renders human-readable ("1.4 MB" / "220 KB"), `tabular-nums`.
+- [ ] File > 10 MB → rejected client-side, `bg-danger-bg` row, `errTooLarge` message, not uploaded.
+- [ ] Wrong type (e.g. `.docx`) → rejected client-side, `errWrongType` message.
+- [ ] Valid file → progress bar fills `bg-brand` 0→100%, `<Loader2>` spins in thumbnail slot until resolved.
+- [ ] Upload failure → `bg-danger-bg` row + `errUploadFailed` + Retry text-button; Retry re-attempts in the same row.
+- [ ] Remove button (32×32) deletes a row; while uploading it cancels the in-flight upload.
+- [ ] Edit mode: server files pre-populate as normal rows; removing one defers actual deletion to form submit; Anuluj discards the removal.
+- [ ] Read-only mode: no dropzone, no remove buttons, filenames are links.
+- [ ] Disabled: dropzone inert, remove buttons disabled, `opacity-50`.
+- [ ] Dark mode: dropzone (`bg-input` = `#262626`), dashed border, thumbnails, progress track all legible — no hacks, only token vars / `dark:` if a tweak is needed.
+- [ ] Contrast: helper line `text-text-sub` on `bg-input` ≥ 4.5:1 in both themes; drag-over signalled by border-style change, not colour alone.
+- [ ] Touch: remove button 32×32 visually — wrap in `p-1` or expand hit area to ≥44×44 via padding so it meets the touch-target rule on tablet.
+- [ ] Component is compact enough to sit inside a section card without forcing the Sheet wider than `w-[640px]`.
+- [ ] No new design tokens introduced — every class resolves to an existing token.
+
+---
+
+### 2. «Kraje» section + `<MultiSelect>` reusable pattern
+
+#### 2.1 Section placement
+
+A new section card **«Kraje»**, inserted in `VehicleSheet.tsx` **immediately after the «Pozwolenia» section**. It is a standard section card (per "Context" table above):
+
+```
++-----------------------------------------------------------+
+|  [globe]  KRAJE                                           |   <- section header
+|                                                           |
+|  KRAJE DOCELOWE                                           |   <- FormLabel
+|  +-----------------------------------------------------+  |
+|  | [Polska x] [Niemcy x] [Francja x]      [search...] v |  |   <- MultiSelect trigger w/ chips
+|  +-----------------------------------------------------+  |
+|  Wybierz kraje, do których pojazd realizuje przewozy.     |   <- FormDescription
++-----------------------------------------------------------+
+```
+
+- Section header: `[globe]` = Lucide `<Globe size={14} />`, label `t('vehicle.section.countries')` ("KRAJE"), typography `text-xs font-bold uppercase tracking-wider text-text-sub`.
+- The section contains exactly **one** `<FormField>` bound to `destinationCountries` (array of country codes).
+- `<FormLabel>` "Kraje docelowe", `<FormDescription>` one helper line, `<FormMessage>` for the Zod error.
+
+#### 2.2 Country list
+
+A **plain flat alphabetical list** — EU-27 + United Kingdom + Norway + Switzerland = **30 countries**. **No "preferred" / pinned / highlighted subset, no grouping.** The list is sorted alphabetically by the **localised** country name (so the order differs between PL and EN locales — sort at render time, not a hard-coded order). Values are stored as stable ISO-3166-1 alpha-2 codes; only the label is localised. The list is a static constant in the web app (not fetched).
+
+#### 2.3 `<MultiSelect>` — new reusable pattern
+
+No multi-select primitive exists yet. Define **`<MultiSelect>`** as a reusable custom component, built on shadcn `<Popover>` + `<Command>` (cmdk) — the same stack shadcn's own combobox example uses — so it inherits accessible listbox semantics, type-to-filter, and keyboard nav for free. It enters the custom catalogue and is **not vehicle-specific**: any future "pick many from a list" field uses it.
+
+**Closed state — the trigger.**
+
+| Slot | Tailwind | Tokens |
+|---|---|---|
+| Trigger wrapper | `flex min-h-10 w-full flex-wrap items-center gap-1.5 rounded-[10px] border border-border bg-input px-2 py-1.5 text-sm cursor-pointer transition-colors` | `rounded-[10px]` — the **form-input radius** noted in the radius scale (10px for inputs), `bg-input`, `border` |
+| Hover | `hover:border-brand-200` | `brand-200` |
+| Focus-within / open | `border-brand outline outline-2 outline-offset-2 outline-brand` (mirror `<Input>` focus) | `brand` |
+| Disabled | `opacity-50 cursor-not-allowed` | — |
+| Placeholder (no selection) | `text-text-sub` — `t('multiSelect.placeholder')` ("Wybierz kraje…") | `text-sub` |
+| Trailing chevron | Lucide `<ChevronDown size={16} className="ml-auto shrink-0 text-text-sub" />` | rotates 180° when open (`transition-transform`) |
+
+The trigger **grows vertically** as chips wrap (`flex-wrap` + `min-h-10`). It is a `<button type="button">` (not a div) for native focusability.
+
+**Selected values — chips inside the trigger.**
+
+Each picked country is a removable chip rendered inline in the trigger:
+
+| Slot | Tailwind | Tokens |
+|---|---|---|
+| Chip | `inline-flex items-center gap-1 rounded-sm border border-border bg-card pl-2 pr-1 py-0.5 text-xs font-medium text-text` | `rounded-sm` (8px), `bg-card` (white chip on `bg-input` trigger reads as a token), `border` |
+| Chip label | country name, `whitespace-nowrap` | — |
+| Chip remove | `inline-flex h-4 w-4 items-center justify-center rounded-full text-text-sub hover:bg-danger-bg hover:text-danger` with Lucide `<X size={12} />` | clicking it removes that one country; `stopPropagation` so it doesn't open the popover. `aria-label={t('multiSelect.removeAria',{name})}` |
+
+Chips are **not** semantic-coloured (no green/red) — countries carry no status, so they use the neutral `bg-card`/`border` chip, distinct from the status `<StatusChip>`. This keeps the colour vocabulary clean: coloured chips = status, neutral chips = selected tokens.
+
+Optional, if the list of selected countries gets long and wraps to 3+ lines: collapse to "`[Polska x] [Niemcy x] +5`" where `+5` is a non-removable count chip; clicking anywhere on the trigger opens the popover where all are visible/removable. Web-agent may defer this — 30 countries is a bounded set and full wrap is acceptable inside a `w-[640px]` Sheet.
+
+**Open state — the popover panel.**
+
+| Slot | Tailwind | Tokens |
+|---|---|---|
+| Popover content | `w-[--radix-popover-trigger-width] rounded border border-border bg-card shadow-card p-0` | width matched to trigger; `rounded` (12px), `shadow-card` |
+| Search input row | shadcn `<CommandInput>` — `<Search size={14}>` + input, `border-b border-border`, placeholder `t('multiSelect.searchPlaceholder')` ("Szukaj kraju…") | filters the list as you type |
+| List | `<CommandList>` `max-h-64 overflow-y-auto p-1` | caps height; scrolls for 30 items |
+| Option row | `<CommandItem>` — `flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm cursor-pointer` | `rounded-sm` |
+| Option — checkbox indicator | a 16×16 `rounded-sm border border-border` box; when selected → `bg-brand border-brand` with a white Lucide `<Check size={12} />`. (Reuse the visual of the existing `<Checkbox>` primitive — do not invent a new tick.) | `brand` |
+| Option hover / keyboard-active | `bg-brand-50 dark:bg-brand/10` (matches DataTable row hover) | `brand-50` |
+| Option selected (whole row) | the row stays in place; selection is shown by the checkbox indicator only — **the option does not leave the list** so the user can toggle it off from the same place | — |
+| Empty filter result | `<CommandEmpty>` — `py-6 text-center text-sm text-text-sub`, `t('multiSelect.noResults')` ("Nie znaleziono kraju") | — |
+
+**Interaction model:**
+
+- **Picking:** click an option (or Enter on the keyboard-active row) → toggles it. The popover **stays open** after a pick — multi-select means the user usually picks several; closing each time is hostile. The popover closes on outside-click, Esc, or chevron click.
+- **Displaying selected:** as removable chips in the trigger (above) **and** as ticked rows in the open list — two synced views.
+- **Removing:** three ways, all equivalent — (1) `x` on a chip, (2) un-tick the option in the open list, (3) Backspace in the popover search field when it's empty removes the last-added chip (combobox convention; nice-to-have, may defer).
+- No "Select all" / "Clear all" controls for v1 — 30 items, bounded; revisit only if a field with hundreds of options appears.
+
+#### 2.4 Accessibility — `<MultiSelect>`
+
+- Built on `<Command>` (cmdk) → the list is a proper `role="listbox"`, options `role="option"` with `aria-selected`, arrow-key navigation and type-ahead come for free.
+- Trigger: `<button type="button" role="combobox" aria-expanded={open} aria-haspopup="listbox" aria-controls={listId}>`.
+- Each chip's remove button has a per-country `aria-label` so removal is announced with the country name.
+- The selected-count is conveyed to SR users: trigger has `aria-label` or an associated visually-hidden live region — e.g. "Kraje docelowe, wybrano 3" — so a SR user knows the state without scanning chips.
+- Focus: opening the popover moves focus into `<CommandInput>`; Esc returns focus to the trigger.
+- Selection state in the list is **not** colour-only — the `<Check>` glyph inside the indicator box is the non-colour cue.
+- Contrast: option hover `bg-brand-50` (`#fef2f2`) vs text `text-text` — fine; chip text `text-text` on `bg-card` — fine; the brand-filled checked indicator `bg-brand` (`#dc2626`) with white `<Check>` ≥ 4.5:1.
+
+#### 2.5 `<MultiSelect>` component API (catalogue intent)
+
+| Prop | Purpose |
+|---|---|
+| `options` | `{ value, label }[]` — caller supplies, already localised; component sorts by `label` if `sort` not disabled. |
+| `value` | `string[]` of selected `value`s. |
+| `onChange` | emits new array on toggle/remove. |
+| `placeholder` / `searchPlaceholder` / `emptyText` | i18n strings. |
+| `disabled` | per §2.3. |
+| `maxVisibleChips` | optional — enables the "+N" collapse described above; omit/undefined = wrap freely. |
+
+It is generic — `<MultiSelect>` knows nothing about countries. The «Kraje» field is just `<MultiSelect options={countryOptions} … />`.
+
+#### 2.6 Acceptance checklist — «Kraje» section + `<MultiSelect>`
+
+- [ ] «Kraje» section card renders directly after «Pozwolenia», using the standard section-card layout + `<Globe>` header.
+- [ ] Country list = EU-27 + UK + Norway + Switzerland (30), flat, alphabetical by localised name, no preferred subset, no grouping.
+- [ ] Closed trigger shows placeholder when empty (`text-text-sub`) and removable chips when populated.
+- [ ] Trigger grows vertically as chips wrap; `min-h-10` matches single-line input height.
+- [ ] Opening shows a popover the width of the trigger with a search field, scrollable list (`max-h-64`), and per-option checkbox indicators.
+- [ ] Typing in the search filters the list; no matches → `<CommandEmpty>` message.
+- [ ] Clicking an option toggles it; **popover stays open** after a pick.
+- [ ] Selected options show a brand-filled `<Check>` indicator in the list AND a chip in the trigger — two views stay in sync.
+- [ ] Removing works via chip `x`, via un-ticking in the list, and (nice-to-have) via Backspace on empty search.
+- [ ] Esc / outside-click / chevron closes the popover; focus returns to the trigger.
+- [ ] Keyboard: arrow keys move the active option, Enter toggles, type-ahead jumps — inherited from `<Command>`.
+- [ ] SR announces selected count and announces each country name on chip removal.
+- [ ] Dark mode: trigger `bg-input`, chips `bg-card`, popover `bg-card` + `shadow-card`, hover `bg-brand/10` — all via tokens, no hacks.
+- [ ] Selection cue is the `<Check>` glyph, not colour alone.
+- [ ] `<MultiSelect>` is generic (no country logic baked in) and reusable for any future multi-pick field.
+- [ ] No new design tokens introduced.
+
+---
+
+### Phase 5 — catalogue & config updates
+
+**Custom component catalogue — add two entries:**
+
+| Component | Replaces / new | Where used |
+|---|---|---|
+| `<FileUpload>` | new — no legacy equivalent | Vehicle Sheet (umowa screenshots under GPS / kabotaż checkboxes); reusable for any future file field. |
+| `<MultiSelect>` | new — no legacy equivalent (legacy `#pojazdDropdown` was single-select) | Vehicle Sheet «Kraje» section; reusable for any multi-pick field. |
+
+**shadcn primitives to install (if not already present):** `command` (cmdk-based) — required by `<MultiSelect>`. `popover` and `checkbox` are already in the Phase 2 install list.
+
+```bash
+npm exec -w web -- shadcn@latest add command
+```
+
+**Tokens:** none added. Both components compose entirely from the existing palette, radius scale (`8 / 10 / 12 / 14px`), `shadow-card`, and semantic colours. This is deliberate — Phase 5 is additive components, not a token change.
+
+**Anti-patterns to avoid (carry-over rules):**
+
+- No inline `style=` — dropzone tints, progress fill width, chip layout all via Tailwind utilities / `data-*` variants.
+- No `[style*=]` dark-mode hacks — dark mode via existing CSS-var tokens + `dark:` only where a tweak is genuinely needed.
+- Errors surface **inline on the file row**, not via disappearing toasts (toasts only for clipboard-style fire-and-forget feedback).
+- `<MultiSelect>` must be built on `<Command>` for real listbox a11y — do not hand-roll a `<div>` list with `onClick`.
+- Drag-over and selection states must have a non-colour cue (border-style change; `<Check>` glyph).
+
+#### Migration impact for web-agent (Phase 5)
+
+| Change | File |
+|---|---|
+| New primitive `<FileUpload>` | `apps/web/components/ui/file-upload.tsx` (or `components/ui/` per the existing primitives convention) |
+| New primitive `<MultiSelect>` | `apps/web/components/ui/multi-select.tsx` |
+| Install shadcn `command` | `apps/web/components/ui/command.tsx` |
+| Mount `<FileUpload>` conditionally under GPS checkbox (FLAGI) and kabotaż checkboxes (KABOTAŻ) | `apps/web/app/(employee)/employee/(admin)/vehicles/VehicleSheet.tsx` |
+| Add «Kraje» section with `<MultiSelect>` bound to `destinationCountries`, after «Pozwolenia» | same `VehicleSheet.tsx` |
+| Static country-list constant (ISO codes + i18n label keys) | a constants file in `apps/web` |
+| i18n keys: `fileUpload.*` (prompt, constraints, errTooLarge, errWrongType, errUploadFailed, retry, dropzoneAria, removeAria), `multiSelect.*` (placeholder, searchPlaceholder, noResults, removeAria), `vehicle.section.countries`, country names | `apps/web/messages/pl.json`, `en.json` |
+| 0 changes to `tailwind.config.ts` / `globals.css` — no new tokens | — |
+

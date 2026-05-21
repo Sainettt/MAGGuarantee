@@ -11,6 +11,7 @@ import {
 import type {
   CreateVehicleDto,
   UpdateVehicleDto,
+  VehicleAttachmentDto,
   VehicleDto,
   VehicleFilters,
 } from '@magguarantee/shared';
@@ -20,14 +21,32 @@ import {
   deactivateVehicle,
   deleteVehicle,
   getVehicle,
+  listVehicleAttachments,
   listVehicles,
   reactivateVehicle,
   updateVehicle,
+  type VehicleAttachmentUploads,
 } from '@/lib/api/vehicles';
 import { CARRIERS_KEY } from '@/lib/hooks/useCarriers';
 import { MY_FLEET_KEY } from '@/lib/hooks/useMyFleet';
 
 export const VEHICLES_KEY = ['vehicles'] as const;
+
+/**
+ * Mutation payload for create — the validated scalar DTO plus the umowa /
+ * cabotage file uploads, since `POST /vehicles` is `multipart/form-data`.
+ */
+export interface CreateVehicleVars {
+  body: CreateVehicleDto;
+  files?: VehicleAttachmentUploads;
+}
+
+/** Mutation payload for update — id, scalar patch, and file uploads. */
+export interface UpdateVehicleVars {
+  id: string;
+  body: UpdateVehicleDto;
+  files?: VehicleAttachmentUploads;
+}
 
 export function useVehicles(filters: VehicleFilters = { limit: 50 }) {
   return useQuery({
@@ -45,11 +64,12 @@ export function useVehicle(id: string | null | undefined) {
 }
 
 export function useCreateVehicle(
-  opts?: UseMutationOptions<VehicleDto, Error, CreateVehicleDto>,
+  opts?: UseMutationOptions<VehicleDto, Error, CreateVehicleVars>,
 ) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: createVehicle,
+    mutationFn: ({ body, files }: CreateVehicleVars) =>
+      createVehicle(body, files),
     ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: VEHICLES_KEY });
@@ -66,21 +86,31 @@ export function useCreateVehicle(
 }
 
 export function useUpdateVehicle(
-  opts?: UseMutationOptions<
-    VehicleDto,
-    Error,
-    { id: string; body: UpdateVehicleDto }
-  >,
+  opts?: UseMutationOptions<VehicleDto, Error, UpdateVehicleVars>,
 ) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, body }) => updateVehicle(id, body),
+    mutationFn: ({ id, body, files }: UpdateVehicleVars) =>
+      updateVehicle(id, body, files),
     ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: VEHICLES_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
       opts?.onSuccess?.(...args);
     },
+  });
+}
+
+/**
+ * Lists the non-deleted umowa / cabotage attachments for a vehicle. The
+ * `VehicleDto` already embeds `attachments`, so this is only needed where a
+ * fresh, standalone read is required (rare). Enabled only when `id` is set.
+ */
+export function useVehicleAttachments(id: string | null | undefined) {
+  return useQuery<VehicleAttachmentDto[]>({
+    queryKey: [...VEHICLES_KEY, 'attachments', id],
+    queryFn: () => listVehicleAttachments(id as string),
+    enabled: Boolean(id),
   });
 }
 

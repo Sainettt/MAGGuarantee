@@ -82,8 +82,14 @@ enum DelegationStatus {
 }
 
 enum VehicleType { MEGA  STD  COIL }
-enum EuroNorm    { III  IV  V  VI }
+// EuroNorm — III/IV dropped 2026-05 (km-guarantee program restricted to
+// EURO V/VI). DB is greenfield, so removing the legacy values is a clean
+// enum redefinition.
+enum EuroNorm    { V  VI }
 // CertificateL was collapsed to Boolean (TAK/NIE) in 2026-05; see Vehicle.certificateL below.
+
+// Category of a file attached to a Vehicle (umowa scan, cabotage permits).
+enum VehicleAttachmentCategory { contract  cabotage_de  cabotage_fr }
 
 // ─── USERS ──────────────────────────────────────────────
 
@@ -111,6 +117,7 @@ model User {
   reportedDelegations Delegation[]  @relation("DelegationReporter")
   verifiedDelegations Delegation[]  @relation("DelegationVerifier")
   authoredClaims     Claim[]        @relation("ClaimDecidedBy")
+  uploadedVehicleAttachments VehicleAttachment[]
   auditEntries       AuditLog[]
   refreshTokens      RefreshToken[]
 
@@ -199,7 +206,11 @@ model Vehicle {
   it        Boolean?
   fr        Boolean?
   agreement Boolean?  // Porozumienie — see #umowa-vs-porozumienie quirk
-  contract  Boolean?  // Umowa
+  // legacy `contract` (Umowa) boolean dropped 2026-05 — the umowa scan is
+  // now stored as VehicleAttachment rows with category=contract.
+
+  // ISO-3166-1 alpha-2 codes; allowed-set validation lives in shared Zod.
+  destinationCountries String[]
 
   // EUR/km rates — Optional everywhere (NULL = "not yet negotiated")
   rateDe     Decimal? @db.Decimal(6, 4)
@@ -222,6 +233,7 @@ model Vehicle {
 
   delegations Delegation[]
   claims      Claim[]
+  attachments VehicleAttachment[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -232,6 +244,32 @@ model Vehicle {
   @@index([dispatcherId])
   @@index([active, deletedAt])
   @@map("vehicles")
+}
+
+// ─── VEHICLE ATTACHMENTS (umowa / cabotage screenshots) ──
+// Files uploaded from the Vehicle create/edit modal — scanned umowa,
+// cabotage permits — stored in MinIO (S3-compatible). The DB row holds
+// only metadata + the object key; the bytes live in the bucket.
+model VehicleAttachment {
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vehicleId String  @db.Uuid
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  category   VehicleAttachmentCategory
+  storageKey String  // object key in MinIO: vehicles/<vehicleId>/<category>/<fileId>.<ext>
+  fileName   String  // original upload filename
+  mimeType   String
+  size       Int     // bytes
+
+  uploadedById String? @db.Uuid
+  uploadedBy   User?   @relation(fields: [uploadedById], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // soft-delete — consistent with the global middleware
+
+  @@index([vehicleId, category])
+  @@map("vehicle_attachments")
 }
 
 // ─── DRIVERS ────────────────────────────────────────────
@@ -571,7 +609,7 @@ populates both columns.
 | `plateNumber`, `certificateL`, `euro`, `type` | Strict everywhere | DB NOT NULL |
 | `gpsMobilePhone` | DB nullable + CHECK `vehicle_gps_device_when_gps_on` | Forced when `gps=true` |
 | `rateDe`, `rateUe`, `rateExport`, `rateImport` | Optional everywhere | NULL = "not negotiated yet"; 0 would be ambiguous |
-| `gb`, `it`, `fr`, `agreement`, `contract`, `lastDroveAt`, `notes`, etc. | Optional everywhere | |
+| `gb`, `it`, `fr`, `agreement`, `destinationCountries`, `lastDroveAt`, `notes`, etc. | Optional everywhere | |
 
 ### Driver
 
@@ -680,7 +718,8 @@ populates both columns.
 | O | ADR (CSV) | `adrClasses[]` |
 | P-R | GPS, KartaPaliwowa, Typ | `gps`, `fuelCard`, `type` |
 | S | Dyspozytor (login) | → FK `dispatcherId` |
-| T-X | GB, IT, FR, Porozumienie, Umowa | `gb`, `it`, `fr`, `agreement`, `contract` |
+| T-W | GB, IT, FR, Porozumienie | `gb`, `it`, `fr`, `agreement` |
+| X | Umowa | dropped 2026-05 — umowa scan stored as `VehicleAttachment` (category=contract) |
 | Y-AB | StawkaDE, StawkaUE, StawkaEksport, StawkaImport | `rateDe`, `rateUe`, `rateExport`, `rateImport` |
 | AC | Odpady | `wasteAllowed` |
 | AD | OdpadyKraje (CSV) | `wasteCountries[]` |
@@ -795,6 +834,7 @@ populates both columns.
 | `20260515112821_carrier_vat_id_optional` | DROP NOT NULL с `carriers.vatId`. Продуктовое решение: EU VAT перестаёт быть обязательным — некоторые перевозчики регистрируются без VAT-UE и работают только с локальным NIP/TIN. `nip` остаётся NOT NULL. |
 | `20260515130307_vehicle_certificate_l_to_boolean` | Конвертирует `vehicles.certificateL` из enum `CertificateL { L1 \| L2 \| L3 }` в `Boolean NOT NULL`. Маппинг: `L1`/`L2`/`L3` → `true`, всё прочее → `false`. Шаги: ADD temp boolean с дефолтом `false` → BACKFILL через CASE → DROP старой enum-колонки → RENAME temp → DROP DEFAULT → DROP TYPE `CertificateL`. Имя поля сохранено. Продуктовое решение: три шумовых класса не используются — нужен только TAK/NIE флаг. |
 | `20260518113943_delegation_required_fields_and_date_only` | Hard-wipe + tightening on `delegations`. TRUNCATE (user-confirmed; no backfill — fields are user-supplied planning data, not derivable), затем SET NOT NULL на `trailerId`, `driverId`, `plannedReturnAt`, `returnCountry`, `returnPostalCode`. `plannedReturnAt` меняет тип с `TIMESTAMP(3)` на `DATE` (день, без часа). DROP CHECK `delegation_returned_complete` (становится излишним — три из четырёх полей теперь NOT NULL безусловно; `actualReturnAt` остаётся nullable, его связь со статусом enforce'ит API в одной транзакции с переходом). ADD CHECK `delegation_return_country_length` (2..8 chars, чтобы вместить VIES-специфичный `EL` вместо `GR`) и `delegation_return_postal_code_length` (≤16 chars). |
+| `20260521135930_vehicle_attachments_euro_v_vi_destinations` | Vehicle-modal feature. **Enum `EuroNorm`** сужен с `{III, IV, V, VI}` до `{V, VI}` — km-гарантийная программа ограничена EURO V/VI; БД greenfield, поэтому пересоздание типа безопасно. **`vehicles.contract`** (legacy Umowa boolean) удалён — скан умовы теперь хранится как строки `VehicleAttachment` с `category=contract`. **`vehicles.destinationCountries`** — новый `String[]` (ISO-3166-1 alpha-2; allowed-set валидируется в shared/Zod). Новый enum `VehicleAttachmentCategory { contract, cabotage_de, cabotage_fr }`. Новая таблица **`vehicle_attachments`** — метаданные файлов (umowa/cabotage скриншоты), сами байты в MinIO; FK на `vehicles` с `ON DELETE CASCADE`, FK на `users` (uploadedBy, nullable, `ON DELETE SET NULL`), soft-delete `deletedAt`, индекс `(vehicleId, category)`. |
 
 Production deploy: `prisma migrate deploy` в CI/CD пайплайне (без `--create-only`).
 

@@ -12,6 +12,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.config.js --runInBand"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1051.0",
     "@magguarantee/database": "^0.0.0",
     "@magguarantee/shared": "*",
     "@nestjs/common": "^10.4.0",
@@ -45,6 +46,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/cookie-parser": "^1.4.10",
     "@types/jest": "^29.5.0",
+    "@types/multer": "^1.4.13",
     "@types/node": "^20",
     "@types/nodemailer": "^8.0.0",
     "@types/passport-jwt": "^4.0.1",

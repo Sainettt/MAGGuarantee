@@ -1,16 +1,37 @@
 import { Injectable } from '@nestjs/common';
 
+import type { VehicleAttachmentCategory } from '@magguarantee/shared';
+
 import { PrismaService } from '../prisma/prisma.service';
+
+/**
+ * Attachment metadata as included on a Vehicle row. `storageKey` is carried
+ * through so the service can drive the download proxy / rollback; it is
+ * stripped at the DTO boundary (never returned to clients).
+ */
+export interface VehicleRowAttachment {
+  id: string;
+  vehicleId: string;
+  category: VehicleAttachmentCategory;
+  storageKey: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  uploadedById: string | null;
+  createdAt: Date;
+}
 
 /**
  * Row shape returned by the vehicle repository.
  *
- * `certificateL`, `euro`, `type`, `rateDe`, `rateUe`, `rateExport`, `rateImport`
- * are NOT NULL since phase3_blocks. `certificateL` was collapsed from enum
- * `CertificateL { L1 | L2 | L3 }` to Boolean (TAK/NIE) in
- * 20260515130307_vehicle_certificate_l_to_boolean. `gpsMobilePhone` stays
- * nullable per Revert #2 (required iff `gps=true` — enforced by SQL CHECK
- * constraint `vehicle_gps_device_when_gps_on`).
+ * `certificateL`, `euro`, `type` are NOT NULL since phase3_blocks.
+ * `certificateL` was collapsed from enum `CertificateL { L1 | L2 | L3 }` to
+ * Boolean (TAK/NIE) in 20260515130307_vehicle_certificate_l_to_boolean. The
+ * legacy `contract` boolean was dropped 2026-05 — the umowa is now a
+ * `VehicleAttachment` (category=contract). `euro` is restricted to `V`/`VI`
+ * (legacy III/IV removed from `enum EuroNorm`). `gpsMobilePhone` stays
+ * nullable (required iff `gps=true` — enforced by SQL CHECK constraint
+ * `vehicle_gps_device_when_gps_on`).
  */
 export interface VehicleRow {
   id: string;
@@ -22,7 +43,7 @@ export interface VehicleRow {
   year: number | null;
   notes: string | null;
   certificateL: boolean;
-  euro: 'III' | 'IV' | 'V' | 'VI';
+  euro: 'V' | 'VI';
   adrClasses: string[];
   gps: boolean;
   fuelCard: boolean;
@@ -31,7 +52,8 @@ export interface VehicleRow {
   it: boolean | null;
   fr: boolean | null;
   agreement: boolean | null;
-  contract: boolean | null;
+  /** ISO-3166-1 alpha-2 codes — never null at the row level, defaults to []. */
+  destinationCountries: string[];
   // Nullable per phase3_blocks_audit_revert (rates negotiated post-creation).
   rateDe: number | null;
   rateUe: number | null;
@@ -50,6 +72,8 @@ export interface VehicleRow {
   dispatcherId: string | null;
   dispatcher: { id: string; login: string; name: string | null } | null;
   carrier: { id: string; login: string; name: string | null } | null;
+  /** Non-deleted umowa/cabotage attachments (soft-delete extension filters). */
+  attachments: VehicleRowAttachment[];
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -113,7 +137,7 @@ export class VehiclesRepository {
     year?: number | null;
     notes?: string | null;
     certificateL: boolean;
-    euro: 'III' | 'IV' | 'V' | 'VI';
+    euro: 'V' | 'VI';
     adrClasses?: string[];
     gps?: boolean;
     fuelCard?: boolean;
@@ -122,7 +146,7 @@ export class VehiclesRepository {
     it?: boolean | null;
     fr?: boolean | null;
     agreement?: boolean | null;
-    contract?: boolean | null;
+    destinationCountries?: string[];
     rateDe?: number | null;
     rateUe?: number | null;
     rateExport?: number | null;
@@ -162,7 +186,7 @@ export class VehiclesRepository {
         it: data.it ?? null,
         fr: data.fr ?? null,
         agreement: data.agreement ?? null,
-        contract: data.contract ?? null,
+        destinationCountries: data.destinationCountries ?? [],
         rateDe: data.rateDe,
         rateUe: data.rateUe,
         rateExport: data.rateExport,
@@ -209,6 +233,15 @@ export class VehiclesRepository {
     await this.prisma.client.vehicle.delete({ where: { id } });
   }
 
+  /**
+   * Hard-deletes a vehicle row — used only by the create rollback path when a
+   * post-insert step fails. Bypasses the soft-delete extension (which
+   * rewrites the singular `delete`) via `deleteMany`.
+   */
+  async hardDelete(id: string): Promise<void> {
+    await this.prisma.client.vehicle.deleteMany({ where: { id } });
+  }
+
   // ── helpers ──────────────────────────────────────────────
 
   private includeShape() {
@@ -221,6 +254,9 @@ export class VehiclesRepository {
           user: { select: { login: true, name: true } },
         },
       },
+      // The soft-delete extension auto-filters `deletedAt` on the nested
+      // read, so this returns live attachments only.
+      attachments: { orderBy: { createdAt: 'asc' } },
     } as const;
   }
 
@@ -247,7 +283,7 @@ export class VehiclesRepository {
       it: row.it,
       fr: row.fr,
       agreement: row.agreement,
-      contract: row.contract,
+      destinationCountries: row.destinationCountries ?? [],
       rateDe: decimalToNumber(row.rateDe),
       rateUe: decimalToNumber(row.rateUe),
       rateExport: decimalToNumber(row.rateExport),
@@ -271,11 +307,34 @@ export class VehiclesRepository {
             name: row.carrier.user.name,
           }
         : null,
+      attachments: (row.attachments ?? []).map((a) => ({
+        id: a.id,
+        vehicleId: a.vehicleId,
+        category: a.category,
+        storageKey: a.storageKey,
+        fileName: a.fileName,
+        mimeType: a.mimeType,
+        size: a.size,
+        uploadedById: a.uploadedById,
+        createdAt: a.createdAt,
+      })),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       deletedAt: row.deletedAt,
     };
   }
+}
+
+interface VehicleAttachmentPrismaShape {
+  id: string;
+  vehicleId: string;
+  category: VehicleAttachmentCategory;
+  storageKey: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  uploadedById: string | null;
+  createdAt: Date;
 }
 
 interface VehiclePrismaShape {
@@ -289,7 +348,7 @@ interface VehiclePrismaShape {
   notes: string | null;
   // Wide variants — soft-delete extension widens scalars in the inferred type.
   certificateL: boolean | null;
-  euro: 'III' | 'IV' | 'V' | 'VI' | null;
+  euro: 'V' | 'VI' | null;
   adrClasses: string[];
   gps: boolean;
   fuelCard: boolean;
@@ -298,7 +357,7 @@ interface VehiclePrismaShape {
   it: boolean | null;
   fr: boolean | null;
   agreement: boolean | null;
-  contract: boolean | null;
+  destinationCountries: string[];
   rateDe: { toNumber(): number } | number | null;
   rateUe: { toNumber(): number } | number | null;
   rateExport: { toNumber(): number } | number | null;
@@ -319,6 +378,7 @@ interface VehiclePrismaShape {
     id: string;
     user: { login: string; name: string | null };
   } | null;
+  attachments?: VehicleAttachmentPrismaShape[];
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;

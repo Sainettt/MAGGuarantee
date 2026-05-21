@@ -140,16 +140,84 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 
 > Роль: `admin` (все), `opiekun` (свои перевозчики), `przewoznik` (свои авто, read + ограниченные write — PATCH/deactivate/reactivate, no create/delete). **Не `pracownik`.** Phase 3 enforcement: `@Roles('admin', 'opiekun')` для POST/DELETE, `@Roles('admin', 'opiekun', 'przewoznik')` для GET/PATCH/deactivate/reactivate. См. `apps/api/src/modules/vehicles/vehicles.controller.ts`.
 
-| Method + Path | GAS |
-|---|---|
-| GET `/vehicles?carrierId=...` | `getVehiclesForCarrier` / `getMyVehicles` (carrier) / `getAllVehiclesForAdmin` |
-| GET `/vehicles/:id` | `getVehicleDetails` |
-| POST `/vehicles` | `addVehicle` / `addVehicleByOpiekun` |
-| PATCH `/vehicles/:id` | `updateVehicleDetails` / `updateVehicleDetailsByOpiekun` |
-| POST `/vehicles/:id/deactivate` | `toggleVehicleActive` (off) |
-| POST `/vehicles/:id/reactivate` | (on) |
-| DELETE `/vehicles/:id` | `removeVehicle` / `removeVehicleByOpiekun` |
-| GET `/vehicles/active?login=...` | `getActiveVehiclesForLogin` (для carrier-login dropdown) |
+| Method + Path | GAS | Роль |
+|---|---|---|
+| GET `/vehicles?carrierId=...` | `getVehiclesForCarrier` / `getMyVehicles` (carrier) / `getAllVehiclesForAdmin` | admin / opiekun / planista / dyspozytor / przewoznik |
+| GET `/vehicles/:id` | `getVehicleDetails` | admin / opiekun / planista / dyspozytor / przewoznik |
+| POST `/vehicles` | `addVehicle` / `addVehicleByOpiekun` | admin / opiekun — **`multipart/form-data`** |
+| PATCH `/vehicles/:id` | `updateVehicleDetails` / `updateVehicleDetailsByOpiekun` | admin / opiekun / przewoznik — **`multipart/form-data`** |
+| POST `/vehicles/:id/deactivate` | `toggleVehicleActive` (off) | admin / opiekun / przewoznik |
+| POST `/vehicles/:id/reactivate` | (on) | admin / opiekun / przewoznik |
+| DELETE `/vehicles/:id` | `removeVehicle` / `removeVehicleByOpiekun` | admin / opiekun |
+| GET `/vehicles/active?login=...` | `getActiveVehiclesForLogin` (для carrier-login dropdown) | — |
+| GET `/vehicles/:id/attachments` | (новое) — список umowa/cabotage-вложений | admin / opiekun / planista / dyspozytor / przewoznik |
+| GET `/vehicles/:id/attachments/:attachmentId/download` | (новое) — proxy-стрим файла из MinIO | admin / opiekun / planista / dyspozytor / przewoznik |
+| DELETE `/vehicles/:id/attachments/:attachmentId` | (новое) — soft-delete вложения | admin / opiekun / przewoznik |
+
+#### Vehicle-modal: umowa / cabotage attachments + multipart contract
+
+Поля `Vehicle.contract` (Umowa-boolean) больше нет — скан umowa теперь
+файл, хранится в MinIO как строка `VehicleAttachment` (категория `contract`).
+Поэтому `POST /vehicles` и `PATCH /vehicles/:id` принимают
+**`multipart/form-data`**, а не JSON.
+
+**Multipart-поля:**
+
+- **Файловые части — по одному полю на категорию, каждое принимает несколько
+  файлов** (`maxCount = 10`):
+  - `contract`    → категория `contract` (скан umowa)
+  - `cabotageDe`  → категория `cabotage_de`
+  - `cabotageFr`  → категория `cabotage_fr`
+- **Скалярные части** — все поля `CreateVehicleSchema` / `UpdateVehicleSchema`
+  как текстовые части. Так как multipart передаёт всё строками, сервер
+  коэрсит их перед Zod-валидацией:
+  - boolean → строки `'true'` / `'false'`;
+  - number  → числовые строки (`'2024'`, `'0.85'`);
+  - массивы (`destinationCountries`, `adrClasses`, `wasteCountries`,
+    `removeAttachmentIds`) → **JSON-encoded строка**, напр.
+    `destinationCountries='["DE","FR"]'`;
+  - пустая часть = поле не передано (применяются `.optional()` / `.default()`).
+- **`removeAttachmentIds`** (только PATCH) — JSON-массив UUID существующих
+  вложений, которые надо удалить (soft-delete) в рамках этого запроса.
+
+**Валидация файлов:** допустимы только `image/jpeg`, `image/png`,
+`image/webp`, `application/pdf`; ≤ 10 MB на файл; нарушение → **422**.
+
+**Правило обязательных вложений (service-layer, не Zod — файлы приходят
+отдельными частями):**
+
+- `gps=true`        ⇒ ≥ 1 вложение категории `contract`;
+- `cabotageDe=true` ⇒ ≥ 1 вложение категории `cabotage_de`;
+- `cabotageFr=true` ⇒ ≥ 1 вложение категории `cabotage_fr`.
+
+На `POST` правило проверяется **до любых записей** (422, multi-violation
+envelope `{ violations: string[] }`, если файлов нет). На `PATCH` правило
+должно выполняться по итоговому набору вложений после апдейта: существующие
+не-удалённые + новозагруженные − удалённые.
+
+**Create-flow:** проверить правило → создать Vehicle → загрузить файлы в
+MinIO по ключу `vehicles/<vehicleId>/<category>/<randomFileId>.<ext>` →
+вставить строки `VehicleAttachment`. При любой пост-ошибке загруженные
+объекты MinIO и строка Vehicle откатываются (all-or-nothing).
+
+**Update-flow:** новые файлы загружаются + вставляются; `removeAttachmentIds`
+soft-delete'ятся (объект в MinIO остаётся).
+
+**Attachment-endpoints:**
+
+- `GET /vehicles/:id/attachments` → `VehicleAttachmentDto[]` (без `storageKey`
+  — это внутренний ключ). Те же read-роли/ownership, что у `GET /vehicles/:id`.
+- `GET /vehicles/:id/attachments/:attachmentId/download` → proxy-стрим байтов
+  из MinIO через API (`Content-Type`, `Content-Disposition: inline;
+  filename=...`). MinIO **не** публично доступен — pre-signed URL не отдаём.
+  Те же read-роли/ownership, что у `GET /vehicles/:id`.
+- `DELETE /vehicles/:id/attachments/:attachmentId` → soft-delete строки
+  (объект MinIO не трогаем). Те же write-роли, что у `PATCH /vehicles`.
+
+**EURO-норма:** `Vehicle.euro` ограничена `{ V, VI }` — legacy `III`/`IV`
+удалены. **`destinationCountries`** — массив ISO-3166-1 alpha-2 кодов,
+ограниченный набором EU-27 + GB + NO + CH (`EUROPEAN_COUNTRY_CODES` в
+`@magguarantee/shared`).
 
 ### Drivers — `/api/v1/drivers`
 

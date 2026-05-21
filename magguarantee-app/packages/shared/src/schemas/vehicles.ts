@@ -3,7 +3,20 @@
 // Source of truth for `/api/v1/vehicles/*` per docs/13-api-design.md#vehicles
 // and docs/04-data-model.md (Vehicle invariants: composite (carrierId, plateNumber)
 // uniqueness; plannerId → role=planista; dispatcherId → role=dyspozytor).
+//
+// ── Umowa / cabotage attachments ─────────────────────────
+// The legacy `Vehicle.contract` boolean was dropped (migration 2026-05). The
+// umowa is now a scanned file, stored in MinIO and tracked via
+// `VehicleAttachment` rows. The Vehicle create/edit modal is therefore a
+// `multipart/form-data` endpoint — files arrive as separate parts, not in the
+// JSON body. As a result the conditional "umowa screenshot required" rule
+// CANNOT be expressed in the body Zod schema below (Zod only sees the scalar
+// fields). It is enforced at the service layer instead — see
+// `VehiclesService` and the rule documented under
+// docs/13-api-design.md#vehicles. The schemas here validate ONLY the
+// non-file form fields.
 
+import { EUROPEAN_COUNTRY_CODES } from '../constants/european-countries';
 import { z } from 'zod';
 
 import {
@@ -16,8 +29,34 @@ import {
 // ─── Field primitives ────────────────────────────────────
 
 const PlateSchema = z.string().min(2).max(16);
-const EuroNormSchema = z.enum(['III', 'IV', 'V', 'VI']);
+
+/**
+ * EURO emission norm. Restricted to `V` / `VI` — the legacy `III` / `IV`
+ * variants were removed (DB `enum EuroNorm` now `{ V VI }`). MAGTRANS no
+ * longer onboards trucks below EURO V.
+ */
+export const EuroNormSchema = z.enum(['V', 'VI']);
+export type EuroNorm = z.infer<typeof EuroNormSchema>;
+
 const VehicleTypeSchema = z.enum(['MEGA', 'STD', 'COIL']);
+
+/**
+ * A single destination-country ISO-3166-1 alpha-2 code, constrained to the
+ * EU-27 + GB + NO + CH set (`EUROPEAN_COUNTRY_CODES`).
+ */
+export const DestinationCountrySchema = z.enum(EUROPEAN_COUNTRY_CODES);
+export type DestinationCountry = z.infer<typeof DestinationCountrySchema>;
+
+/**
+ * Array of destination countries the vehicle operates in. Optional on input;
+ * defaults to an empty array. Web sends this as a JSON-encoded string part in
+ * multipart bodies — the API controller coerces it before validation.
+ */
+const DestinationCountriesSchema = z
+  .array(DestinationCountrySchema)
+  .max(EUROPEAN_COUNTRY_CODES.length)
+  .optional()
+  .default([]);
 
 const vehicleAttributeFields = {
   plannerId: UuidSchema,
@@ -42,8 +81,12 @@ const vehicleAttributeFields = {
   gb: z.boolean().optional(),
   it: z.boolean().optional(),
   fr: z.boolean().optional(),
+  /** Porozumienie. The legacy `contract` (Umowa) boolean was dropped — the
+   *  umowa is now a scanned file (VehicleAttachment category=contract). */
   agreement: z.boolean().optional(),
-  contract: z.boolean().optional(),
+  /** Countries the vehicle operates in — ISO-3166-1 alpha-2, constrained to
+   *  `EUROPEAN_COUNTRY_CODES`. */
+  destinationCountries: DestinationCountriesSchema,
   // EUR/km rates are required at vehicle creation — admin must enter all four
   // before the carrier can submit a claim against this truck. Zero is a valid
   // value ("free haulage" / promotional rate) and remains accepted; the
@@ -111,7 +154,12 @@ export const UpdateVehicleSchema = z
     it: z.boolean().nullable().optional(),
     fr: z.boolean().nullable().optional(),
     agreement: z.boolean().nullable().optional(),
-    contract: z.boolean().nullable().optional(),
+    /** Destination countries — replace-semantics. Omitting leaves the column
+     *  untouched; sending `[]` clears it. */
+    destinationCountries: z
+      .array(DestinationCountrySchema)
+      .max(EUROPEAN_COUNTRY_CODES.length)
+      .optional(),
     wasteAllowed: z.boolean().optional(),
     wasteCountries: z.array(z.string().max(8)).max(64).optional(),
     cabotageDe: z.boolean().optional(),
@@ -131,6 +179,13 @@ export const UpdateVehicleSchema = z
     sideNumber: emptyStringToUndefined(
       z.string().max(16).nullable().optional(),
     ),
+    /**
+     * Attachment ids to soft-delete as part of this update (multipart field
+     * `removeAttachmentIds`). New files arrive as separate file parts; this
+     * list names existing attachments to remove. Web sends it as a JSON-
+     * encoded string part — the controller coerces it before validation.
+     */
+    removeAttachmentIds: z.array(UuidSchema).max(64).optional(),
   })
   .strict()
   .refine(
@@ -162,6 +217,41 @@ export const VehicleFiltersSchema = z
   .strict();
 export type VehicleFilters = z.infer<typeof VehicleFiltersSchema>;
 
+// ─── Attachments ─────────────────────────────────────────
+
+/**
+ * Category of a Vehicle attachment, mirroring the DB
+ * `enum VehicleAttachmentCategory`:
+ *  - `contract`    — scanned umowa (replaces the legacy `Vehicle.contract`)
+ *  - `cabotage_de` — German cabotage permit screenshot
+ *  - `cabotage_fr` — French cabotage permit screenshot
+ */
+export const VehicleAttachmentCategorySchema = z.enum([
+  'contract',
+  'cabotage_de',
+  'cabotage_fr',
+]);
+export type VehicleAttachmentCategory = z.infer<
+  typeof VehicleAttachmentCategorySchema
+>;
+
+/**
+ * Public attachment DTO. NOTE: `storageKey` is deliberately omitted — it is
+ * an internal MinIO object key and never leaves the API. Clients download
+ * bytes via `GET /vehicles/:id/attachments/:attachmentId/download`.
+ */
+export const VehicleAttachmentDtoSchema = z.object({
+  id: UuidSchema,
+  vehicleId: UuidSchema,
+  category: VehicleAttachmentCategorySchema,
+  fileName: z.string(),
+  mimeType: z.string(),
+  size: z.number().int().nonnegative(),
+  uploadedById: UuidSchema.nullable(),
+  createdAt: IsoDateTimeSchema,
+});
+export type VehicleAttachmentDto = z.infer<typeof VehicleAttachmentDtoSchema>;
+
 // ─── Response DTO ────────────────────────────────────────
 
 export const VehicleDtoSchema = z.object({
@@ -183,7 +273,8 @@ export const VehicleDtoSchema = z.object({
   it: z.boolean().nullable(),
   fr: z.boolean().nullable(),
   agreement: z.boolean().nullable(),
-  contract: z.boolean().nullable(),
+  /** ISO-3166-1 alpha-2 codes — never null, defaults to `[]`. */
+  destinationCountries: z.array(DestinationCountrySchema),
   rateDe: z.number().nullable(),
   rateUe: z.number().nullable(),
   rateExport: z.number().nullable(),
@@ -220,6 +311,8 @@ export const VehicleDtoSchema = z.object({
       name: z.string().nullable(),
     })
     .nullable(),
+  /** Non-deleted umowa/cabotage attachments for this vehicle. */
+  attachments: z.array(VehicleAttachmentDtoSchema),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
 });

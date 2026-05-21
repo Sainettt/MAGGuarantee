@@ -2,22 +2,50 @@
 
 // Create / edit drawer for a vehicle. ~36 fields total — uses the wide sheet
 // (640px) and section dividers per docs/14-design-system.md § Form patterns.
+//
+// Phase 5 (docs/14 § Phase 5):
+//  - EURO norm restricted to V / VI (DB enum dropped III / IV).
+//  - The legacy `contract` boolean is gone — the umowa is now a scanned file.
+//    A <FileUpload> for the umowa screenshot is revealed under the GPS
+//    checkbox; a <FileUpload> per kabotaż checkbox carries that permit scan.
+//  - New «Kraje» section: a <MultiSelect> bound to `destinationCountries`.
+//  - POST/PATCH are multipart/form-data — see lib/api/vehicles.ts.
+//
+// FILE STATE NOTE: attachment files are deliberately NOT part of the RHF form.
+// `CreateVehicleSchema` is `.strict()` so any extra key fails validation, and
+// `File` objects are not JSON-serialisable (they'd break `useFormDraft`).
+// They live in component `useState` instead; the submit handler hands them to
+// the mutation as a separate `files` payload.
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslations } from 'next-intl';
-import { useEffect, type ChangeEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ChangeEvent,
+} from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
   CreateVehicleSchema,
   type CreateVehicleDto,
   type UpdateVehicleDto,
+  type VehicleAttachmentCategory,
+  type VehicleAttachmentDto,
   type VehicleDto,
 } from '@magguarantee/shared';
 
 import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Checkbox';
+import {
+  FileUpload,
+  type FileUploadItem,
+  type FileUploadLabels,
+} from '@/components/ui/FileUpload';
 import { Input } from '@/components/ui/Input';
+import { MultiSelect } from '@/components/ui/MultiSelect';
 import { Select } from '@/components/ui/Select';
 import {
   Sheet,
@@ -33,11 +61,14 @@ import { EntityAlreadyExistsNotice } from '@/components/carrier-onboarding/Entit
 import { TemporaryPasswordRow } from '@/components/carrier-onboarding/TemporaryPasswordRow';
 import { WizardStepper } from '@/components/carrier-onboarding/WizardStepper';
 import { FormField, FormSection } from '@/components/forms/Form';
+import { FormDescription, FormItem, FormLabel } from '@/components/forms/Form';
+import { DESTINATION_COUNTRY_CODES } from '@/lib/constants/countries';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useFormDraft } from '@/lib/hooks/useFormDraft';
 import { useDyspozytorzy, usePlanisci } from '@/lib/hooks/useLookups';
 import { useCreateVehicle, useUpdateVehicle } from '@/lib/hooks/useVehicles';
+import type { VehicleAttachmentUploads } from '@/lib/api/vehicles';
 
 const DRAFT_KEY = 'draft:vehicles:new';
 
@@ -96,6 +127,24 @@ const NUMERIC_FIELDS = [
   'rateImport',
 ] as const;
 
+/** The three umowa / cabotage <FileUpload> slots, keyed by attachment category. */
+type FileBucketKey = 'contract' | 'cabotageDe' | 'cabotageFr';
+
+/** Maps a UI bucket key to the server `VehicleAttachmentCategory`. */
+const BUCKET_CATEGORY: Record<FileBucketKey, VehicleAttachmentCategory> = {
+  contract: 'contract',
+  cabotageDe: 'cabotage_de',
+  cabotageFr: 'cabotage_fr',
+};
+
+type FileBuckets = Record<FileBucketKey, FileUploadItem[]>;
+
+const EMPTY_BUCKETS: FileBuckets = {
+  contract: [],
+  cabotageDe: [],
+  cabotageFr: [],
+};
+
 export function VehicleSheet({
   open,
   vehicle,
@@ -115,35 +164,47 @@ export function VehicleSheet({
   const t = useTranslations('vehicles');
   const tCommon = useTranslations('common');
   const tWizard = useTranslations();
+  const tFile = useTranslations('fileUpload');
+  const tMulti = useTranslations('multiSelect');
+  const tCountry = useTranslations('countries');
   const isEdit = vehicle !== null;
   const isWizard = mode === 'wizard';
 
   // Form state matches CreateVehicleDto in both modes — edit mode keeps
   // `carrierId` in state for display only and the submit handler strips it
   // before calling PATCH. We always validate against CreateVehicleSchema so
-  // its `.refine()` (gps→gpsMobilePhone) fires on edit too; the schema is
-  // ZodEffects after refine and doesn't expose `.passthrough()`, but since
-  // every form-registered field is part of CreateVehicleDto, .strict() is
-  // satisfied.
+  // its `.refine()` (gps→gpsMobilePhone) fires on edit too.
   const form = useForm<FormValues>({
     resolver: zodResolver(CreateVehicleSchema) as never,
     defaultValues: getDefaults(),
   });
+
+  // ── Attachment file state ──────────────────────────────
+  // Kept OUTSIDE the RHF form (see file-header note). One bucket per
+  // attachment category. In edit mode buckets are seeded from the vehicle's
+  // existing server attachments.
+  const [fileBuckets, setFileBuckets] = useState<FileBuckets>(EMPTY_BUCKETS);
+  // Cross-field attachment error (mirror of the server's required-attachment
+  // 422). Surfaced inline above the footer; cleared on any file change.
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
 
   const carriersQ = useCarriers({ limit: 200 });
   const planisciQ = usePlanisci();
   const dyspozytorzyQ = useDyspozytorzy();
 
   // Persist create-mode drafts; closing the sheet keeps user input intact.
-  // Wizard mode opts out — the wizard owns its lifecycle, and per-step
-  // drafts across multiple wizard sessions would be more confusing than
-  // helpful.
+  // Wizard mode opts out. NOTE: file buckets are NOT persisted — `File`
+  // objects can't be JSON-serialised, and `useFormDraft` only ever sees the
+  // RHF form (which holds scalar fields only), so files are naturally
+  // excluded from the draft. The user re-attaches files after a draft
+  // restore; this is the documented, intentional behaviour.
   const draft = useFormDraft(form, DRAFT_KEY, {
     enabled: !isEdit && !isWizard,
   });
 
   useEffect(() => {
     if (!open) return;
+    setAttachmentError(null);
     if (isEdit && vehicle) {
       form.reset({
         carrierId: vehicle.carrierId,
@@ -164,7 +225,8 @@ export function VehicleSheet({
         it: vehicle.it ?? false,
         fr: vehicle.fr ?? false,
         agreement: vehicle.agreement ?? false,
-        contract: vehicle.contract ?? false,
+        // `contract` boolean removed — the umowa is a VehicleAttachment now.
+        destinationCountries: vehicle.destinationCountries ?? [],
         // Existing rows from before rates were required may still hold null
         // — surface as empty input so the user is forced to re-enter on edit.
         rateDe: vehicle.rateDe ?? (undefined as unknown as number),
@@ -178,53 +240,103 @@ export function VehicleSheet({
         nextInspectionDate: vehicle.nextInspectionDate ?? undefined,
         sideNumber: vehicle.sideNumber ?? '',
       });
+      // Seed the file buckets from the vehicle's existing attachments.
+      setFileBuckets(attachmentsToBuckets(vehicle.attachments ?? []));
     } else {
       // Reset to empty defaults first, then overlay any saved draft on top.
-      // In wizard mode the draft is disabled (per-form drafts would persist
-      // across unrelated wizard openings); we seed `carrierId` from the
-      // orchestrator so the locked picker shows the right carrier.
       form.reset({
         ...getDefaults(),
         ...(isWizard && wizardCarrierId
           ? { carrierId: wizardCarrierId }
           : {}),
       });
+      setFileBuckets(EMPTY_BUCKETS);
       if (!isWizard) draft.hydrate();
     }
   }, [open, isEdit, vehicle, form, draft, isWizard, wizardCarrierId]);
 
   const createM = useCreateVehicle({
     onSuccess: (created) => {
-      // Successful create — wipe the draft and reset to empty defaults.
       draft.clear();
       form.reset(getDefaults());
+      setFileBuckets(EMPTY_BUCKETS);
       if (isWizard) {
-        // Hand off to the orchestrator; no toast, the next step opens.
         onCompleted?.(created);
         return;
       }
       toast.success(tCommon('saved'));
       onClose();
     },
-    onError: () => toast.error(tCommon('errorGeneric')),
+    onError: (err) => handleSubmitError(err),
   });
   const updateM = useUpdateVehicle({
     onSuccess: () => {
       toast.success(tCommon('saved'));
       onClose();
     },
-    onError: () => toast.error(tCommon('errorGeneric')),
+    onError: (err) => handleSubmitError(err),
   });
+
+  /**
+   * Surfaces a mutation error. The server's required-attachment rule returns
+   * 422 `{ violations: string[] }`; we render those inline rather than a
+   * generic toast so the operator sees exactly which scan is missing.
+   */
+  function handleSubmitError(err: unknown) {
+    const violations = extractViolations(err);
+    if (violations.length > 0) {
+      setAttachmentError(violations.join(' · '));
+      return;
+    }
+    toast.error(tCommon('errorGeneric'));
+  }
+
+  /** Updates one file bucket and clears the cross-field attachment error. */
+  const setBucket = useCallback(
+    (key: FileBucketKey, items: FileUploadItem[]) => {
+      setFileBuckets((prev) => ({ ...prev, [key]: items }));
+      setAttachmentError(null);
+    },
+    [],
+  );
 
   const onSubmit = form.handleSubmit(
     (values) => {
+      // Client-side mirror of the server's required-attachment rule. Block
+      // the submit and surface a clear inline error if violated.
+      const missing = missingRequiredAttachments(values, fileBuckets);
+      if (missing.length > 0) {
+        setAttachmentError(
+          missing.map((cat) => tFile(`required.${cat}`)).join(' · '),
+        );
+        return;
+      }
+      setAttachmentError(null);
+
       const cleaned = cleanForm(values);
+      const newFiles = collectNewFiles(fileBuckets);
+
       if (isEdit && vehicle) {
         const { carrierId: _carrierId, ...rest } = cleaned;
         void _carrierId;
-        updateM.mutate({ id: vehicle.id, body: rest as UpdateVehicleDto });
+        const removeAttachmentIds = collectRemovedIds(
+          vehicle.attachments ?? [],
+          fileBuckets,
+        );
+        const body: Record<string, unknown> = { ...rest };
+        if (removeAttachmentIds.length > 0) {
+          body.removeAttachmentIds = removeAttachmentIds;
+        }
+        updateM.mutate({
+          id: vehicle.id,
+          body: body as UpdateVehicleDto,
+          files: newFiles,
+        });
       } else {
-        createM.mutate(cleaned as CreateVehicleDto);
+        createM.mutate({
+          body: cleaned as CreateVehicleDto,
+          files: newFiles,
+        });
       }
     },
     onInvalidToast(form.setFocus, tCommon('validationFailedToast')),
@@ -232,8 +344,38 @@ export function VehicleSheet({
 
   const submitting = createM.isPending || updateM.isPending;
   const errs = form.formState.errors;
-  // Watch the GPS toggle so the phone field shows/hides reactively.
+  // Watch the toggles that reveal conditional <FileUpload> blocks.
   const gpsOn = form.watch('gps') === true;
+  const cabotageDeOn = form.watch('cabotageDe') === true;
+  const cabotageFrOn = form.watch('cabotageFr') === true;
+
+  // i18n label bundle for <FileUpload>, memoised so the primitive doesn't
+  // re-render on every keystroke elsewhere in the form.
+  const fileLabels = useMemo<FileUploadLabels>(
+    () => ({
+      prompt: tFile('prompt'),
+      promptCompact: tFile('promptCompact'),
+      constraints: tFile('constraints'),
+      errTooLarge: tFile('errTooLarge'),
+      errWrongType: tFile('errWrongType'),
+      errUploadFailed: tFile('errUploadFailed'),
+      retry: tFile('retry'),
+      dropzoneAria: tFile('dropzoneAria'),
+      removeAria: (name: string) => tFile('removeAria', { name }),
+    }),
+    [tFile],
+  );
+
+  // Country options for the «Kraje» <MultiSelect>. Codes come from the shared
+  // constant; labels are localised here so the list re-sorts per locale.
+  const countryOptions = useMemo(
+    () =>
+      DESTINATION_COUNTRY_CODES.map((code) => ({
+        value: code,
+        label: tCountry(code),
+      })),
+    [tCountry],
+  );
 
   const handleClose = () => {
     if (isWizard) onExit?.();
@@ -288,13 +430,6 @@ export function VehicleSheet({
                       htmlFor="vehicle-carrierId"
                     >
                       {isWizard ? (
-                        // In wizard mode the carrier is fixed by step 1; render
-                        // a read-only <Input> showing the label the
-                        // orchestrator passed in. Form state still holds the
-                        // real `carrierId` (seeded via form.reset above) — this
-                        // input is purely cosmetic so we don't depend on the
-                        // useCarriers list query (which is mid-refetch right
-                        // after step 1's invalidation).
                         <Input
                           id="vehicle-carrierId"
                           className="h-10 bg-input"
@@ -398,10 +533,13 @@ export function VehicleSheet({
                     error={errs.euro?.message}
                     htmlFor="vehicle-euro"
                   >
+                    {/*
+                      EURO norm restricted to V / VI — the DB `enum EuroNorm`
+                      dropped III / IV (MAGTRANS no longer onboards trucks
+                      below EURO V). Matches `EuroNormSchema` in @shared.
+                    */}
                     <Select id="vehicle-euro" {...form.register('euro')}>
                       <option value="">—</option>
-                      <option value="III">III</option>
-                      <option value="IV">IV</option>
                       <option value="V">V</option>
                       <option value="VI">VI</option>
                     </Select>
@@ -520,24 +658,41 @@ export function VehicleSheet({
                     <Checkbox {...form.register('agreement')} />
                     {t('fields.agreement')}
                   </label>
-                  <label className="flex items-center gap-2 text-text">
-                    <Checkbox {...form.register('contract')} />
-                    {t('fields.contract')}
-                  </label>
+                  {/* The `contract` checkbox is gone — replaced by the
+                      <FileUpload> below, revealed when GPS is on. */}
                 </div>
                 {gpsOn && (
-                  <FormField
-                    label={t('fields.gpsMobilePhone')}
-                    required
-                    error={errs.gpsMobilePhone?.message}
-                    htmlFor="vehicle-gpsMobilePhone"
-                  >
-                    <Input
-                      id="vehicle-gpsMobilePhone"
-                      className="h-10"
-                      {...form.register('gpsMobilePhone')}
-                    />
-                  </FormField>
+                  <>
+                    <FormField
+                      label={t('fields.gpsMobilePhone')}
+                      required
+                      error={errs.gpsMobilePhone?.message}
+                      htmlFor="vehicle-gpsMobilePhone"
+                    >
+                      <Input
+                        id="vehicle-gpsMobilePhone"
+                        className="h-10"
+                        {...form.register('gpsMobilePhone')}
+                      />
+                    </FormField>
+                    {/* Umowa screenshot — required by the server when
+                        gps=true. Indented under the GPS checkbox per
+                        docs/14 § 5.1.8. */}
+                    <FormItem className="ml-6 mt-2 animate-slide-in">
+                      <FormLabel htmlFor="vehicle-file-contract" required>
+                        {tFile('fields.contract')}
+                      </FormLabel>
+                      <FileUpload
+                        id="vehicle-file-contract"
+                        value={fileBuckets.contract}
+                        onChange={(items) => setBucket('contract', items)}
+                        labels={fileLabels}
+                      />
+                      <FormDescription>
+                        {tFile('fields.contractHint')}
+                      </FormDescription>
+                    </FormItem>
+                  </>
                 )}
               </FormSection>
 
@@ -633,6 +788,40 @@ export function VehicleSheet({
                     {t('fields.cabotageFr')}
                   </label>
                 </div>
+                {/* Per-kabotaż umowa screenshot — revealed under the matching
+                    checkbox, required by the server when that flag is on. */}
+                {cabotageDeOn && (
+                  <FormItem className="ml-6 mt-2 animate-slide-in">
+                    <FormLabel htmlFor="vehicle-file-cabotageDe" required>
+                      {tFile('fields.cabotageDe')}
+                    </FormLabel>
+                    <FileUpload
+                      id="vehicle-file-cabotageDe"
+                      value={fileBuckets.cabotageDe}
+                      onChange={(items) => setBucket('cabotageDe', items)}
+                      labels={fileLabels}
+                    />
+                    <FormDescription>
+                      {tFile('fields.cabotageHint')}
+                    </FormDescription>
+                  </FormItem>
+                )}
+                {cabotageFrOn && (
+                  <FormItem className="ml-6 mt-2 animate-slide-in">
+                    <FormLabel htmlFor="vehicle-file-cabotageFr" required>
+                      {tFile('fields.cabotageFr')}
+                    </FormLabel>
+                    <FileUpload
+                      id="vehicle-file-cabotageFr"
+                      value={fileBuckets.cabotageFr}
+                      onChange={(items) => setBucket('cabotageFr', items)}
+                      labels={fileLabels}
+                    />
+                    <FormDescription>
+                      {tFile('fields.cabotageHint')}
+                    </FormDescription>
+                  </FormItem>
+                )}
                 <FormField
                   label={t('fields.notes')}
                   error={errs.notes?.message}
@@ -649,10 +838,53 @@ export function VehicleSheet({
                   {t('fields.active')}
                 </label>
               </FormSection>
+
+              {/* «Kraje» — destination-countries multi-select, placed
+                  immediately after «Pozwolenia» per docs/14 § 5.2.1. */}
+              <FormSection title={t('sections.countries')}>
+                <Controller
+                  name="destinationCountries"
+                  control={form.control}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel htmlFor="vehicle-destinationCountries">
+                        {t('fields.destinationCountries')}
+                      </FormLabel>
+                      <MultiSelect
+                        id="vehicle-destinationCountries"
+                        options={countryOptions}
+                        value={field.value ?? []}
+                        onChange={field.onChange}
+                        onBlur={field.onBlur}
+                        placeholder={tMulti('placeholder')}
+                        searchPlaceholder={tMulti('searchPlaceholder')}
+                        emptyText={tMulti('noResults')}
+                        removeAriaLabel={(name) =>
+                          tMulti('removeAria', { name })
+                        }
+                        selectionSummary={(count) =>
+                          tMulti('selectionSummary', { count })
+                        }
+                      />
+                      <FormDescription>
+                        {t('fields.destinationCountriesHint')}
+                      </FormDescription>
+                    </FormItem>
+                  )}
+                />
+              </FormSection>
             </div>
           </SheetBody>
 
-          <SheetFooter>
+          <SheetFooter className="flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-end">
+            {attachmentError && (
+              <p
+                className="mr-auto text-sm text-danger"
+                role="alert"
+              >
+                {attachmentError}
+              </p>
+            )}
             {isWizard ? (
               <>
                 <Button
@@ -689,6 +921,8 @@ export function VehicleSheet({
                     onClick={() => {
                       draft.clear();
                       form.reset(getDefaults());
+                      setFileBuckets(EMPTY_BUCKETS);
+                      setAttachmentError(null);
                     }}
                     disabled={submitting}
                   >
@@ -718,24 +952,18 @@ export function VehicleSheet({
 
 function getDefaults(): FormValues {
   return {
-    // RHF needs string-shaped controlled values. Empty string parks the
-    // Select on its placeholder option; Zod surfaces "required" errors on
-    // submit when the user hasn't picked one.
     carrierId: '' as unknown as string,
     plateNumber: '',
     active: true,
-    // plannerId / dispatcherId are required UUIDs in the schema; empty string
-    // parks the <Select> on its placeholder so Zod surfaces "required" on
-    // submit instead of crashing the input as uncontrolled.
     plannerId: '' as unknown as string,
     dispatcherId: '' as unknown as string,
     brand: '',
     model: '',
     year: undefined,
     notes: '',
-    // Compliance default — admin must explicitly opt in to TAK.
     certificateL: false,
-    euro: '' as unknown as 'III' | 'IV' | 'V' | 'VI',
+    // EURO norm — V / VI only since the DB enum dropped III / IV.
+    euro: '' as unknown as 'V' | 'VI',
     gps: false,
     fuelCard: false,
     type: '' as unknown as 'MEGA' | 'STD' | 'COIL',
@@ -743,9 +971,8 @@ function getDefaults(): FormValues {
     it: false,
     fr: false,
     agreement: false,
-    contract: false,
-    // Empty by default → Zod surfaces "required" on submit; admin must
-    // explicitly type a value (0 is allowed as "free haulage").
+    // `contract` boolean removed; destination countries default to empty.
+    destinationCountries: [],
     rateDe: undefined as unknown as number,
     rateUe: undefined as unknown as number,
     rateExport: undefined as unknown as number,
@@ -762,6 +989,12 @@ function getDefaults(): FormValues {
 function cleanForm(values: FormValues): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(values)) {
+    // Arrays (destinationCountries) are kept even when empty — the API
+    // treats `[]` as "clear" on PATCH, and as an explicit empty set on POST.
+    if (Array.isArray(v)) {
+      out[k] = v;
+      continue;
+    }
     if (v === '' || v === undefined || v === null) continue;
     if ((NUMERIC_FIELDS as readonly string[]).includes(k)) {
       const n = typeof v === 'number' ? v : Number(v);
@@ -772,4 +1005,113 @@ function cleanForm(values: FormValues): Record<string, unknown> {
     }
   }
   return out;
+}
+
+// ─── Attachment helpers ──────────────────────────────────
+
+/** Buckets a vehicle's server attachments into the three <FileUpload> slots. */
+function attachmentsToBuckets(
+  attachments: VehicleAttachmentDto[],
+): FileBuckets {
+  const buckets: FileBuckets = {
+    contract: [],
+    cabotageDe: [],
+    cabotageFr: [],
+  };
+  for (const att of attachments) {
+    const item: FileUploadItem = {
+      kind: 'existing',
+      id: att.id,
+      fileName: att.fileName,
+      size: att.size,
+      mimeType: att.mimeType,
+    };
+    if (att.category === 'contract') buckets.contract.push(item);
+    else if (att.category === 'cabotage_de') buckets.cabotageDe.push(item);
+    else if (att.category === 'cabotage_fr') buckets.cabotageFr.push(item);
+  }
+  return buckets;
+}
+
+/** Extracts the freshly-picked `File` objects from each bucket. */
+function collectNewFiles(buckets: FileBuckets): VehicleAttachmentUploads {
+  const pick = (items: FileUploadItem[]): File[] =>
+    items
+      .filter(
+        (it): it is Extract<FileUploadItem, { kind: 'new' }> =>
+          it.kind === 'new' && it.error === undefined,
+      )
+      .map((it) => it.file);
+  return {
+    contract: pick(buckets.contract),
+    cabotageDe: pick(buckets.cabotageDe),
+    cabotageFr: pick(buckets.cabotageFr),
+  };
+}
+
+/**
+ * Diffs the vehicle's original server attachments against the current
+ * buckets — any existing attachment id no longer present was removed by the
+ * operator and must be soft-deleted on PATCH.
+ */
+function collectRemovedIds(
+  original: VehicleAttachmentDto[],
+  buckets: FileBuckets,
+): string[] {
+  const stillPresent = new Set<string>();
+  for (const key of ['contract', 'cabotageDe', 'cabotageFr'] as const) {
+    for (const item of buckets[key]) {
+      if (item.kind === 'existing') stillPresent.add(item.id);
+    }
+  }
+  return original
+    .map((a) => a.id)
+    .filter((id) => !stillPresent.has(id));
+}
+
+/**
+ * Client-side mirror of the server's required-attachment rule:
+ *   gps=true        ⇒ ≥1 contract file
+ *   cabotageDe=true ⇒ ≥1 cabotage_de file
+ *   cabotageFr=true ⇒ ≥1 cabotage_fr file
+ * Counting existing (non-removed) + newly-added valid files. Returns the
+ * categories that are still missing.
+ */
+function missingRequiredAttachments(
+  values: FormValues,
+  buckets: FileBuckets,
+): VehicleAttachmentCategory[] {
+  const hasFiles = (items: FileUploadItem[]): boolean =>
+    items.some(
+      (it) => it.kind === 'existing' || it.error === undefined,
+    );
+  const missing: VehicleAttachmentCategory[] = [];
+  if (values.gps === true && !hasFiles(buckets.contract)) {
+    missing.push(BUCKET_CATEGORY.contract);
+  }
+  if (values.cabotageDe === true && !hasFiles(buckets.cabotageDe)) {
+    missing.push(BUCKET_CATEGORY.cabotageDe);
+  }
+  if (values.cabotageFr === true && !hasFiles(buckets.cabotageFr)) {
+    missing.push(BUCKET_CATEGORY.cabotageFr);
+  }
+  return missing;
+}
+
+/**
+ * Pulls the `violations` array from a 422 error. The API returns the
+ * required-attachment failure as `{ violations: string[] }` (wrapped by the
+ * RFC 7807 filter, so it may surface under `data` or `data.violations`).
+ */
+function extractViolations(err: unknown): string[] {
+  if (err && typeof err === 'object' && 'data' in err) {
+    const data = (err as { data?: unknown }).data;
+    if (data && typeof data === 'object' && 'violations' in data) {
+      const v = (data as { violations?: unknown }).violations;
+      if (Array.isArray(v)) {
+        return v.filter((x): x is string => typeof x === 'string');
+      }
+    }
+  }
+  return [];
 }

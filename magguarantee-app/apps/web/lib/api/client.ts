@@ -61,26 +61,8 @@ export async function fetchWithRefresh(
   return res;
 }
 
-/**
- * JSON wrapper around `fetchWithRefresh`. Decodes the response, throws an
- * `ApiResponseError` with status + body data on non-2xx so callers can
- * branch on `err.status` (401 / 423 / 429 etc.) without re-parsing.
- */
-export async function apiJson<T>(
-  path: string,
-  init: RequestInit & { json?: unknown } = {},
-): Promise<T> {
-  const { json, headers, ...rest } = init;
-  const finalInit: RequestInit = {
-    ...rest,
-    headers: {
-      Accept: 'application/json',
-      ...(json !== undefined ? { 'Content-Type': 'application/json' } : {}),
-      ...headers,
-    },
-    body: json !== undefined ? JSON.stringify(json) : init.body,
-  };
-  const res = await fetchWithRefresh(path, finalInit);
+/** Decodes a response body, throwing `ApiResponseError` on non-2xx. */
+async function decodeResponse<T>(res: Response): Promise<T> {
   if (res.status === 204) return undefined as T;
   let body: unknown = null;
   const text = await res.text();
@@ -104,4 +86,70 @@ export async function apiJson<T>(
     throw new ApiResponseError(res.status, errorMessage, data);
   }
   return body as T;
+}
+
+/**
+ * JSON wrapper around `fetchWithRefresh`. Decodes the response, throws an
+ * `ApiResponseError` with status + body data on non-2xx so callers can
+ * branch on `err.status` (401 / 423 / 429 etc.) without re-parsing.
+ */
+export async function apiJson<T>(
+  path: string,
+  init: RequestInit & { json?: unknown } = {},
+): Promise<T> {
+  const { json, headers, ...rest } = init;
+  const finalInit: RequestInit = {
+    ...rest,
+    headers: {
+      Accept: 'application/json',
+      ...(json !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...headers,
+    },
+    body: json !== undefined ? JSON.stringify(json) : init.body,
+  };
+  const res = await fetchWithRefresh(path, finalInit);
+  return decodeResponse<T>(res);
+}
+
+/**
+ * `multipart/form-data` wrapper around `fetchWithRefresh`. Used by endpoints
+ * that mix scalar fields with file uploads (e.g. vehicle create/edit).
+ *
+ * IMPORTANT: we deliberately do NOT set `Content-Type` — the browser must
+ * generate it itself so the multipart boundary is included. Setting it
+ * manually breaks the request. Only `Accept` is set.
+ */
+export async function apiForm<T>(
+  path: string,
+  body: FormData,
+  init: Omit<RequestInit, 'body'> = {},
+): Promise<T> {
+  const { headers, ...rest } = init;
+  const finalInit: RequestInit = {
+    ...rest,
+    headers: {
+      Accept: 'application/json',
+      ...headers,
+    },
+    body,
+  };
+  const res = await fetchWithRefresh(path, finalInit);
+  return decodeResponse<T>(res);
+}
+
+/**
+ * Fetches an authenticated binary resource (e.g. an attachment download) and
+ * returns it as a `Blob`. The download endpoint is NOT a public URL — it sits
+ * behind the same auth/refresh flow as every other API call, so we route it
+ * through `fetchWithRefresh` rather than dropping the path into an `<a href>`.
+ */
+export async function apiBlob(
+  path: string,
+  init: RequestInit = {},
+): Promise<Blob> {
+  const res = await fetchWithRefresh(path, init);
+  if (!res.ok) {
+    await decodeResponse<unknown>(res);
+  }
+  return res.blob();
 }

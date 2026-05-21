@@ -47,11 +47,21 @@ enum VehicleType {
   COIL
 }
 
+// EURO emission norm. III/IV dropped 2026-05 — MAGTRANS restricts the
+// km-guarantee program to EURO V/VI vehicles only. DB is greenfield (no
+// vehicle rows), so removing the legacy values is a clean enum redefinition.
 enum EuroNorm {
-  III
-  IV
   V
   VI
+}
+
+// Category of an umowa/cabotage screenshot attached to a Vehicle.
+// `contract` replaces the legacy `Vehicle.contract` boolean — instead of a
+// flag, the actual scanned umowa is stored as one or more attachment rows.
+enum VehicleAttachmentCategory {
+  contract
+  cabotage_de
+  cabotage_fr
 }
 
 // ─── USERS (объединение всех auth-листов) ───────────────
@@ -86,11 +96,12 @@ model User {
   dispatcherVehicles Vehicle[] @relation("VehicleDispatcher")
 
   // activity
-  reportedDelegations Delegation[]   @relation("DelegationReporter")
-  verifiedDelegations Delegation[]   @relation("DelegationVerifier")
-  authoredClaims      Claim[]        @relation("ClaimDecidedBy")
-  auditEntries        AuditLog[]
-  refreshTokens       RefreshToken[]
+  reportedDelegations        Delegation[]        @relation("DelegationReporter")
+  verifiedDelegations        Delegation[]        @relation("DelegationVerifier")
+  authoredClaims             Claim[]             @relation("ClaimDecidedBy")
+  uploadedVehicleAttachments VehicleAttachment[]
+  auditEntries               AuditLog[]
+  refreshTokens              RefreshToken[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -192,7 +203,14 @@ model Vehicle {
   it        Boolean?
   fr        Boolean?
   agreement Boolean? // Porozumienie
-  contract  Boolean? // Umowa
+  // Legacy `contract` (Umowa) boolean dropped 2026-05 — the umowa is now
+  // stored as a scanned file via VehicleAttachment rows with
+  // category=contract. See docs/19-known-quirks.md#umowa-vs-porozumienie.
+
+  // Countries the vehicle operates in — ISO-3166-1 alpha-2 codes. The DB
+  // keeps a plain String[]; the allowed-set validation lives in the
+  // shared/Zod layer (apps/web RHF + @magguarantee/shared API schemas).
+  destinationCountries String[]
 
   // EUR/km rates — negotiated between MAGTRANS and the carrier AFTER vehicle
   // creation. NULL means "not yet set"; `0` would be ambiguous ("free haulage"
@@ -221,6 +239,7 @@ model Vehicle {
 
   delegations Delegation[]
   claims      Claim[]
+  attachments VehicleAttachment[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -231,6 +250,34 @@ model Vehicle {
   @@index([dispatcherId])
   @@index([active, deletedAt])
   @@map("vehicles")
+}
+
+// ─── VEHICLE ATTACHMENTS (umowa / cabotage screenshots) ──
+// Files uploaded from the Vehicle create/edit modal — scanned umowa,
+// cabotage permits — stored in MinIO (S3-compatible). The DB row only
+// holds metadata + the object key; the bytes live in the bucket.
+model VehicleAttachment {
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vehicleId String  @db.Uuid
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  category   VehicleAttachmentCategory
+  // Object key in the MinIO bucket, e.g.
+  // `vehicles/<vehicleId>/<category>/<fileId>.<ext>`.
+  storageKey String
+  fileName   String // original upload filename
+  mimeType   String
+  size       Int // bytes
+
+  uploadedById String? @db.Uuid
+  uploadedBy   User?   @relation(fields: [uploadedById], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // soft-delete — consistent with the global middleware
+
+  @@index([vehicleId, category])
+  @@map("vehicle_attachments")
 }
 
 // ─── DRIVERS (KIEROWCY) ─────────────────────────────────
