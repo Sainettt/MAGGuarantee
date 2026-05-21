@@ -89,6 +89,61 @@ services:
         max-size: '10m'
         max-file: '2'
 
+  # S3-compatible object storage — vehicle umowa / cabotage screenshot
+  # uploads (VehicleAttachment). For real production this can be swapped for
+  # a managed provider (Cloudflare R2 / Hetzner) by repointing the S3_* env
+  # vars and dropping this service + minio-init.
+  minio:
+    image: minio/minio:latest
+    container_name: magguarantee-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?S3_ACCESS_KEY required in .env}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?S3_SECRET_KEY required in .env}
+    volumes:
+      - ${MINIO_DATA:-./data/minio}:/data
+    # Loopback-only — the API reaches MinIO over the `internal` network; the
+    # host ports are just for SSH-tunnel admin (console on 9001).
+    ports:
+      - '127.0.0.1:9000:9000'
+      - '127.0.0.1:9001:9001'
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+    logging:
+      driver: json-file
+      options:
+        max-size: '20m'
+        max-file: '3'
+
+  # One-shot: waits for MinIO, creates the `magguarantee` bucket if missing,
+  # then exits 0. `api` waits for this so uploads never hit a missing bucket.
+  minio-init:
+    image: minio/mc:latest
+    container_name: magguarantee-minio-init
+    restart: 'no'
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${S3_ACCESS_KEY} ${S3_SECRET_KEY} &&
+      mc mb --ignore-existing local/magguarantee &&
+      echo 'MinIO bucket magguarantee ready';
+      "
+    networks:
+      - internal
+    logging:
+      driver: json-file
+      options:
+        max-size: '5m'
+        max-file: '2'
+
   api:
     build:
       context: ../magguarantee-app
@@ -101,6 +156,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      minio-init:
+        condition: service_completed_successfully
     # Loopback-only exposure: convenient for local smoke tests and SSH-tunnel
     # debugging on the VPS, but invisible to the public internet there
     # (Caddy reaches api via the proxy-net Docker network, not via host).
