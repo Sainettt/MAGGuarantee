@@ -6,4 +6,3 @@
 
 export * from './eu-vat-countries';
 export * from './eu-postal-codes';
-export * from './european-countries';

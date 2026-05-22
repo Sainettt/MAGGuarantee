@@ -353,9 +353,7 @@
       "lastDroveAt": "Ostatni przejazd",
       "nextInspectionDate": "Następny przegląd",
       "notes": "Notatki",
-      "active": "Aktywny",
-      "destinationCountries": "Kraje docelowe",
-      "destinationCountriesHint": "Wybierz kraje, do których pojazd realizuje przewozy."
+      "active": "Aktywny"
     },
     "sections": {
       "identification": "Identyfikacja",
@@ -363,7 +361,7 @@
       "equipment": "Wyposażenie",
       "rates": "Stawki",
       "permissions": "Pozwolenia",
-      "countries": "Kraje",
+      "other": "Pozostałe",
       "attachments": "Załączniki"
     },
     "attachmentCategory": {
@@ -395,13 +393,12 @@
       "email": "E-mail",
       "driverLicenseNumber": "Numer prawa jazdy",
       "licenseExpiry": "Ważność prawa jazdy",
-      "bankAccount": "Numer konta",
       "notes": "Notatki",
       "active": "Aktywny"
     },
     "sections": {
       "personal": "Dane osobowe i kontakt",
-      "license": "Prawo jazdy i finanse",
+      "license": "Prawo jazdy",
       "assignment": "Przypisanie"
     }
   },

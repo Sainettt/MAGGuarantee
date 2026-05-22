@@ -144,7 +144,6 @@
 | `firstName`, `lastName` | имя |
 | `phone`, `phone2`, `email` | контакты |
 | `driverLicenseNumber`, `licenseExpiry` | права |
-| `bankAccount` | IBAN |
 | `active` | флаг |
 
 ### `Trailer` — прицеп

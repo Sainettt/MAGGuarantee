@@ -6,8 +6,8 @@ import { PrismaService } from '../prisma/prisma.service';
  * Row shape returned by the driver repository.
  *
  * `phone` and `driverLicenseNumber` are non-nullable since the phase-2
- * migration. `email`, `licenseExpiry` and `bankAccount` are non-nullable
- * since phase3_blocks.
+ * migration. `email` and `licenseExpiry` are non-nullable since
+ * phase3_blocks.
  */
 export interface DriverRow {
   id: string;
@@ -18,11 +18,10 @@ export interface DriverRow {
   phone: string;
   phone2: string | null;
   // Nullable per phase3_blocks_audit_revert (drivers in PL trucking often
-  // don't have email; license/bankAccount may be unknown at registration).
+  // don't have email; license may be unknown at registration).
   email: string | null;
   driverLicenseNumber: string;
   licenseExpiry: Date | null;
-  bankAccount: string | null;
   notes: string | null;
   active: boolean;
   carrier: { id: string; login: string; name: string | null } | null;
@@ -100,7 +99,6 @@ export class DriversRepository {
     email?: string | null;
     driverLicenseNumber: string;
     licenseExpiry?: Date | null;
-    bankAccount?: string | null;
     notes?: string | null;
     active?: boolean;
   }): Promise<DriverRow> {
@@ -115,7 +113,6 @@ export class DriversRepository {
         email: data.email ?? null,
         driverLicenseNumber: data.driverLicenseNumber,
         licenseExpiry: data.licenseExpiry ?? null,
-        bankAccount: data.bankAccount ?? null,
         notes: data.notes ?? null,
         active: data.active ?? true,
       },
@@ -166,7 +163,6 @@ export class DriversRepository {
       email: row.email,
       driverLicenseNumber: row.driverLicenseNumber ?? '',
       licenseExpiry: row.licenseExpiry,
-      bankAccount: row.bankAccount,
       notes: row.notes,
       active: row.active,
       carrier: row.carrier
@@ -200,7 +196,6 @@ interface DriverPrismaShape {
   email: string | null;
   driverLicenseNumber: string | null;
   licenseExpiry: Date | null;
-  bankAccount: string | null;
   notes: string | null;
   active: boolean;
   carrier?: {

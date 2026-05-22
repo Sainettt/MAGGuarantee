@@ -52,7 +52,6 @@ const EMPTY_DEFAULTS: CreateDriverDto = {
   // licenseExpiry is now NOT NULL (phase3_blocks). Empty string keeps the
   // <input type="date"> controlled; Zod's IsoDateSchema rejects "" on submit.
   licenseExpiry: '',
-  bankAccount: '',
   notes: '',
   active: true,
 };
@@ -104,8 +103,7 @@ export function DriverSheet({
   // Form state matches CreateDriverDto in both modes — edit mode keeps
   // `carrierId` in state for display only; the submit handler strips it
   // before calling PATCH. We always validate with CreateDriverSchema so the
-  // now-required fields (email/licenseExpiry/bankAccount) are enforced on
-  // edit too.
+  // now-required fields (email/licenseExpiry) are enforced on edit too.
   const form = useForm<FormValues>({
     resolver: zodResolver(CreateDriverSchema),
     defaultValues: { ...EMPTY_DEFAULTS },
@@ -132,7 +130,6 @@ export function DriverSheet({
         email: driver.email ?? '',
         driverLicenseNumber: driver.driverLicenseNumber ?? '',
         licenseExpiry: driver.licenseExpiry ?? '',
-        bankAccount: driver.bankAccount ?? '',
         notes: driver.notes ?? '',
         active: driver.active,
       });
@@ -356,17 +353,6 @@ export function DriverSheet({
                     type="date"
                     className="h-10"
                     {...form.register('licenseExpiry')}
-                  />
-                </FormField>
-                <FormField
-                  label={t('fields.bankAccount')}
-                  error={errs.bankAccount?.message}
-                  htmlFor="driver-bankAccount"
-                >
-                  <Input
-                    id="driver-bankAccount"
-                    className="h-10"
-                    {...form.register('bankAccount')}
                   />
                 </FormField>
               </div>

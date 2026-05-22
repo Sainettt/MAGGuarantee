@@ -4,12 +4,14 @@
 // VehicleDto into the generic <EntityDetailModal> props (docs/14-design-system.md
 // §6.9, §6.15). The generic shell is NOT re-implemented here.
 //
-// The section order mirrors VehicleSheet's six FormSections so the read-only
+// The section order mirrors VehicleSheet's five FormSections so the read-only
 // view and the edit Sheet feel like the same object:
-//   Identyfikacja · Przypisanie · Wyposażenie · Stawki · Pozwolenia · Kraje.
-// A seventh «Załączniki» section lists umowa/cabotage attachments — each row
-// carries an «Otwórz» action that opens the document inline in a new tab
-// (read-only "view" action, the modal itself stays non-editing).
+//   Identyfikacja · Przypisanie · Wyposażenie · Stawki · Pozwolenia.
+// A trailing «Pozostałe» section carries fields with no Sheet input of their
+// own (lastDroveAt is system-set, notes is free text). A final «Załączniki»
+// section lists umowa/cabotage attachments — each row carries an «Otwórz»
+// action that opens the document inline in a new tab (read-only "view"
+// action, the modal itself stays non-editing).
 //
 // Formatting reuses the shared helpers in components/ui/entity-detail-values.tsx
 // and lib/format/numbers.ts — no duplicated Intl wrappers.
@@ -18,7 +20,7 @@ import {
   Banknote,
   ExternalLink,
   FileText,
-  Globe2,
+  Info,
   Loader2,
   Package,
   ShieldCheck,
@@ -106,7 +108,7 @@ export function VehicleDetailModal({
     <span className="tabular-nums">{formatEur(v)}</span>
   );
 
-  // ── 6 + 1 sections — mirrors the VehicleSheet FormSection order ──────
+  // ── 5 + 1 + 1 sections — mirrors the VehicleSheet FormSection order ──
   const sections: EntityDetailSection[] = [
     {
       title: t('sections.identification'),
@@ -195,13 +197,9 @@ export function VehicleDetailModal({
       ],
     },
     {
-      title: t('sections.countries'),
-      icon: Globe2,
+      title: t('sections.other'),
+      icon: Info,
       rows: [
-        {
-          label: f('destinationCountries'),
-          value: listValue(vehicle.destinationCountries),
-        },
         { label: f('lastDroveAt'), value: dateValue(vehicle.lastDroveAt) },
         { label: f('notes'), value: textValue(vehicle.notes) },
       ],

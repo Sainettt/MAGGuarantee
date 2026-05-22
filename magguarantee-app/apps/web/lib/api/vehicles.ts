@@ -35,7 +35,6 @@ export interface VehicleAttachmentUploads {
 const ARRAY_FIELDS = new Set([
   'adrClasses',
   'wasteCountries',
-  'destinationCountries',
   'removeAttachmentIds',
 ]);
 

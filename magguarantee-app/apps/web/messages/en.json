@@ -353,9 +353,7 @@
       "lastDroveAt": "Last drove",
       "nextInspectionDate": "Next inspection",
       "notes": "Notes",
-      "active": "Active",
-      "destinationCountries": "Destination countries",
-      "destinationCountriesHint": "Select the countries the vehicle delivers to."
+      "active": "Active"
     },
     "sections": {
       "identification": "Identification",
@@ -363,7 +361,7 @@
       "equipment": "Equipment",
       "rates": "Rates",
       "permissions": "Permissions",
-      "countries": "Countries",
+      "other": "Other",
       "attachments": "Attachments"
     },
     "attachmentCategory": {
@@ -395,13 +393,12 @@
       "email": "E-mail",
       "driverLicenseNumber": "Driver license number",
       "licenseExpiry": "License expiry",
-      "bankAccount": "Bank account",
       "notes": "Notes",
       "active": "Active"
     },
     "sections": {
       "personal": "Personal details & contact",
-      "license": "License & finance",
+      "license": "License",
       "assignment": "Assignment"
     }
   },

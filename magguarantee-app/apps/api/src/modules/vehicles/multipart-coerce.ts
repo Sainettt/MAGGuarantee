@@ -13,9 +13,8 @@ import { BadRequestException } from '@nestjs/common';
  * ── Encoding contract for web (mirror exactly) ───────────
  *  - booleans  → the literal strings `'true'` / `'false'`
  *  - numbers   → numeric strings (`'2024'`, `'0.85'`)
- *  - arrays    → a JSON-encoded string, e.g. `destinationCountries='["DE","FR"]'`
- *                (`adrClasses`, `wasteCountries`, `destinationCountries`,
- *                `removeAttachmentIds`)
+ *  - arrays    → a JSON-encoded string, e.g. `wasteCountries='["DE","FR"]'`
+ *                (`adrClasses`, `wasteCountries`, `removeAttachmentIds`)
  *  - strings   → as-is
  *  - omitted   → omit the part entirely (an empty part is treated as omitted)
  */
@@ -48,7 +47,6 @@ const NUMBER_FIELDS = [
 const ARRAY_FIELDS = [
   'adrClasses',
   'wasteCountries',
-  'destinationCountries',
   'removeAttachmentIds',
 ] as const;
 

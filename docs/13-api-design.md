@@ -173,9 +173,8 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
   коэрсит их перед Zod-валидацией:
   - boolean → строки `'true'` / `'false'`;
   - number  → числовые строки (`'2024'`, `'0.85'`);
-  - массивы (`destinationCountries`, `adrClasses`, `wasteCountries`,
-    `removeAttachmentIds`) → **JSON-encoded строка**, напр.
-    `destinationCountries='["DE","FR"]'`;
+  - массивы (`adrClasses`, `wasteCountries`, `removeAttachmentIds`) →
+    **JSON-encoded строка**, напр. `wasteCountries='["DE","FR"]'`;
   - пустая часть = поле не передано (применяются `.optional()` / `.default()`).
 - **`removeAttachmentIds`** (только PATCH) — JSON-массив UUID существующих
   вложений, которые надо удалить (soft-delete) в рамках этого запроса.

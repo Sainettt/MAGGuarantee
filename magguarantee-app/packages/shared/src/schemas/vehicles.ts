@@ -16,7 +16,6 @@
 // docs/13-api-design.md#vehicles. The schemas here validate ONLY the
 // non-file form fields.
 
-import { EUROPEAN_COUNTRY_CODES } from '../constants/european-countries';
 import { z } from 'zod';
 
 import {
@@ -39,24 +38,6 @@ export const EuroNormSchema = z.enum(['V', 'VI']);
 export type EuroNorm = z.infer<typeof EuroNormSchema>;
 
 const VehicleTypeSchema = z.enum(['MEGA', 'STD', 'COIL']);
-
-/**
- * A single destination-country ISO-3166-1 alpha-2 code, constrained to the
- * EU-27 + GB + NO + CH set (`EUROPEAN_COUNTRY_CODES`).
- */
-export const DestinationCountrySchema = z.enum(EUROPEAN_COUNTRY_CODES);
-export type DestinationCountry = z.infer<typeof DestinationCountrySchema>;
-
-/**
- * Array of destination countries the vehicle operates in. Optional on input;
- * defaults to an empty array. Web sends this as a JSON-encoded string part in
- * multipart bodies — the API controller coerces it before validation.
- */
-const DestinationCountriesSchema = z
-  .array(DestinationCountrySchema)
-  .max(EUROPEAN_COUNTRY_CODES.length)
-  .optional()
-  .default([]);
 
 const vehicleAttributeFields = {
   plannerId: UuidSchema,
@@ -84,9 +65,6 @@ const vehicleAttributeFields = {
   /** Porozumienie. The legacy `contract` (Umowa) boolean was dropped — the
    *  umowa is now a scanned file (VehicleAttachment category=contract). */
   agreement: z.boolean().optional(),
-  /** Countries the vehicle operates in — ISO-3166-1 alpha-2, constrained to
-   *  `EUROPEAN_COUNTRY_CODES`. */
-  destinationCountries: DestinationCountriesSchema,
   // EUR/km rates are required at vehicle creation — admin must enter all four
   // before the carrier can submit a claim against this truck. Zero is a valid
   // value ("free haulage" / promotional rate) and remains accepted; the
@@ -154,12 +132,6 @@ export const UpdateVehicleSchema = z
     it: z.boolean().nullable().optional(),
     fr: z.boolean().nullable().optional(),
     agreement: z.boolean().nullable().optional(),
-    /** Destination countries — replace-semantics. Omitting leaves the column
-     *  untouched; sending `[]` clears it. */
-    destinationCountries: z
-      .array(DestinationCountrySchema)
-      .max(EUROPEAN_COUNTRY_CODES.length)
-      .optional(),
     wasteAllowed: z.boolean().optional(),
     wasteCountries: z.array(z.string().max(8)).max(64).optional(),
     cabotageDe: z.boolean().optional(),
@@ -273,8 +245,6 @@ export const VehicleDtoSchema = z.object({
   it: z.boolean().nullable(),
   fr: z.boolean().nullable(),
   agreement: z.boolean().nullable(),
-  /** ISO-3166-1 alpha-2 codes — never null, defaults to `[]`. */
-  destinationCountries: z.array(DestinationCountrySchema),
   rateDe: z.number().nullable(),
   rateUe: z.number().nullable(),
   rateExport: z.number().nullable(),

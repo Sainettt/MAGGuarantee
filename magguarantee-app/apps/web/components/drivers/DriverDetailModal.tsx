@@ -6,8 +6,8 @@
 //
 // DriverSheet has a FLAT layout (no FormSections), so there is no Sheet order
 // to mirror 1:1. Instead the fields are grouped into three clean logical
-// sections — personal/contact · license & finance · assignment — keyed off the
-// new `drivers.sections.*` i18n keys.
+// sections — personal/contact · license · assignment — keyed off the
+// `drivers.sections.*` i18n keys.
 //
 // Formatting reuses the shared helpers in components/ui/entity-detail-values.tsx
 // and lib/format/numbers.ts — no duplicated Intl wrappers.
@@ -82,7 +82,6 @@ export function DriverDetailModal({
           value: monoValue(driver.driverLicenseNumber),
         },
         { label: f('licenseExpiry'), value: dateValue(driver.licenseExpiry) },
-        { label: f('bankAccount'), value: monoValue(driver.bankAccount) },
       ],
     },
     {

@@ -8,7 +8,6 @@
 //  - The legacy `contract` boolean is gone — the umowa is now a scanned file.
 //    A <FileUpload> for the umowa screenshot is revealed under the GPS
 //    checkbox; a <FileUpload> per kabotaż checkbox carries that permit scan.
-//  - New «Kraje» section: a <MultiSelect> bound to `destinationCountries`.
 //  - POST/PATCH are multipart/form-data — see lib/api/vehicles.ts.
 //
 // FILE STATE NOTE: attachment files are deliberately NOT part of the RHF form.
@@ -45,7 +44,6 @@ import {
   type FileUploadLabels,
 } from '@/components/ui/FileUpload';
 import { Input } from '@/components/ui/Input';
-import { MultiSelect } from '@/components/ui/MultiSelect';
 import { Select } from '@/components/ui/Select';
 import {
   Sheet,
@@ -62,7 +60,6 @@ import { TemporaryPasswordRow } from '@/components/carrier-onboarding/TemporaryP
 import { WizardStepper } from '@/components/carrier-onboarding/WizardStepper';
 import { FormField, FormSection } from '@/components/forms/Form';
 import { FormDescription, FormItem, FormLabel } from '@/components/forms/Form';
-import { DESTINATION_COUNTRY_CODES } from '@/lib/constants/countries';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useFormDraft } from '@/lib/hooks/useFormDraft';
@@ -165,8 +162,6 @@ export function VehicleSheet({
   const tCommon = useTranslations('common');
   const tWizard = useTranslations();
   const tFile = useTranslations('fileUpload');
-  const tMulti = useTranslations('multiSelect');
-  const tCountry = useTranslations('countries');
   const isEdit = vehicle !== null;
   const isWizard = mode === 'wizard';
 
@@ -226,7 +221,6 @@ export function VehicleSheet({
         fr: vehicle.fr ?? false,
         agreement: vehicle.agreement ?? false,
         // `contract` boolean removed — the umowa is a VehicleAttachment now.
-        destinationCountries: vehicle.destinationCountries ?? [],
         // Existing rows from before rates were required may still hold null
         // — surface as empty input so the user is forced to re-enter on edit.
         rateDe: vehicle.rateDe ?? (undefined as unknown as number),
@@ -364,17 +358,6 @@ export function VehicleSheet({
       removeAria: (name: string) => tFile('removeAria', { name }),
     }),
     [tFile],
-  );
-
-  // Country options for the «Kraje» <MultiSelect>. Codes come from the shared
-  // constant; labels are localised here so the list re-sorts per locale.
-  const countryOptions = useMemo(
-    () =>
-      DESTINATION_COUNTRY_CODES.map((code) => ({
-        value: code,
-        label: tCountry(code),
-      })),
-    [tCountry],
   );
 
   const handleClose = () => {
@@ -838,41 +821,6 @@ export function VehicleSheet({
                   {t('fields.active')}
                 </label>
               </FormSection>
-
-              {/* «Kraje» — destination-countries multi-select, placed
-                  immediately after «Pozwolenia» per docs/14 § 5.2.1. */}
-              <FormSection title={t('sections.countries')}>
-                <Controller
-                  name="destinationCountries"
-                  control={form.control}
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel htmlFor="vehicle-destinationCountries">
-                        {t('fields.destinationCountries')}
-                      </FormLabel>
-                      <MultiSelect
-                        id="vehicle-destinationCountries"
-                        options={countryOptions}
-                        value={field.value ?? []}
-                        onChange={field.onChange}
-                        onBlur={field.onBlur}
-                        placeholder={tMulti('placeholder')}
-                        searchPlaceholder={tMulti('searchPlaceholder')}
-                        emptyText={tMulti('noResults')}
-                        removeAriaLabel={(name) =>
-                          tMulti('removeAria', { name })
-                        }
-                        selectionSummary={(count) =>
-                          tMulti('selectionSummary', { count })
-                        }
-                      />
-                      <FormDescription>
-                        {t('fields.destinationCountriesHint')}
-                      </FormDescription>
-                    </FormItem>
-                  )}
-                />
-              </FormSection>
             </div>
           </SheetBody>
 
@@ -971,8 +919,7 @@ function getDefaults(): FormValues {
     it: false,
     fr: false,
     agreement: false,
-    // `contract` boolean removed; destination countries default to empty.
-    destinationCountries: [],
+    // `contract` boolean removed — the umowa is a VehicleAttachment now.
     rateDe: undefined as unknown as number,
     rateUe: undefined as unknown as number,
     rateExport: undefined as unknown as number,
@@ -989,8 +936,8 @@ function getDefaults(): FormValues {
 function cleanForm(values: FormValues): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(values)) {
-    // Arrays (destinationCountries) are kept even when empty — the API
-    // treats `[]` as "clear" on PATCH, and as an explicit empty set on POST.
+    // Arrays are kept even when empty — the API treats `[]` as "clear" on
+    // PATCH, and as an explicit empty set on POST.
     if (Array.isArray(v)) {
       out[k] = v;
       continue;

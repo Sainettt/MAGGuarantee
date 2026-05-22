@@ -52,8 +52,6 @@ export interface VehicleRow {
   it: boolean | null;
   fr: boolean | null;
   agreement: boolean | null;
-  /** ISO-3166-1 alpha-2 codes — never null at the row level, defaults to []. */
-  destinationCountries: string[];
   // Nullable per phase3_blocks_audit_revert (rates negotiated post-creation).
   rateDe: number | null;
   rateUe: number | null;
@@ -146,7 +144,6 @@ export class VehiclesRepository {
     it?: boolean | null;
     fr?: boolean | null;
     agreement?: boolean | null;
-    destinationCountries?: string[];
     rateDe?: number | null;
     rateUe?: number | null;
     rateExport?: number | null;
@@ -186,7 +183,6 @@ export class VehiclesRepository {
         it: data.it ?? null,
         fr: data.fr ?? null,
         agreement: data.agreement ?? null,
-        destinationCountries: data.destinationCountries ?? [],
         rateDe: data.rateDe,
         rateUe: data.rateUe,
         rateExport: data.rateExport,
@@ -283,7 +279,6 @@ export class VehiclesRepository {
       it: row.it,
       fr: row.fr,
       agreement: row.agreement,
-      destinationCountries: row.destinationCountries ?? [],
       rateDe: decimalToNumber(row.rateDe),
       rateUe: decimalToNumber(row.rateUe),
       rateExport: decimalToNumber(row.rateExport),
@@ -357,7 +352,6 @@ interface VehiclePrismaShape {
   it: boolean | null;
   fr: boolean | null;
   agreement: boolean | null;
-  destinationCountries: string[];
   rateDe: { toNumber(): number } | number | null;
   rateUe: { toNumber(): number } | number | null;
   rateExport: { toNumber(): number } | number | null;

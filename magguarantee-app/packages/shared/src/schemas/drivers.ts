@@ -44,15 +44,13 @@ export const CreateDriverSchema = z
     lastName: NameSchema,
     phone: PhoneRequiredSchema,
     phone2: emptyStringToUndefined(PhoneOptionalSchema.optional()),
-    // email + bankAccount are optional — many PL drivers don't have an
-    // email address; bankAccount is carrier-internal HR (carrier pays
-    // driver, not MAGTRANS). licenseExpiry is REQUIRED at the API layer
-    // because driving without a valid license is illegal — the column itself
-    // is nullable to tolerate migrations/imports.
+    // email is optional — many PL drivers don't have an email address.
+    // licenseExpiry is REQUIRED at the API layer because driving without a
+    // valid license is illegal — the column itself is nullable to tolerate
+    // migrations/imports.
     email: emptyStringToUndefined(EmailSchema.optional()),
     driverLicenseNumber: DriverLicenseSchema,
     licenseExpiry: IsoDateSchema,
-    bankAccount: emptyStringToUndefined(z.string().max(64).optional()),
     notes: emptyStringToUndefined(z.string().max(2_000).optional()),
     active: z.boolean().optional(),
   })
@@ -78,7 +76,6 @@ export const UpdateDriverSchema = z
     email: emptyStringToUndefined(EmailSchema.optional()),
     driverLicenseNumber: emptyStringToUndefined(DriverLicenseSchema.optional()),
     licenseExpiry: emptyStringToUndefined(IsoDateSchema.optional()),
-    bankAccount: emptyStringToUndefined(z.string().max(64).optional()),
     notes: emptyStringToUndefined(z.string().max(2_000).nullable().optional()),
     active: z.boolean().optional(),
   })
@@ -112,7 +109,6 @@ export const DriverDtoSchema = z.object({
   email: z.string().email().nullable(),
   driverLicenseNumber: z.string(),
   licenseExpiry: IsoDateSchema.nullable(),
-  bankAccount: z.string().nullable(),
   notes: z.string().nullable(),
   active: z.boolean(),
   carrier: z

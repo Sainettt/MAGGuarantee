@@ -49,7 +49,6 @@ const EMPTY_DEFAULTS: CreateDriverDto = {
   // licenseExpiry is now NOT NULL (phase3_blocks). Empty string keeps the
   // <input type="date"> controlled; Zod IsoDateSchema fails on submit.
   licenseExpiry: '',
-  bankAccount: '',
   notes: '',
   active: true,
 };
@@ -96,7 +95,6 @@ export function DriverSheetCarrier({
         email: driver.email ?? '',
         driverLicenseNumber: driver.driverLicenseNumber ?? '',
         licenseExpiry: driver.licenseExpiry ?? '',
-        bankAccount: driver.bankAccount ?? '',
         notes: driver.notes ?? '',
         active: driver.active,
       });
@@ -249,17 +247,6 @@ export function DriverSheetCarrier({
                     type="date"
                     className="h-10"
                     {...form.register('licenseExpiry')}
-                  />
-                </FormField>
-                <FormField
-                  label={tFields('bankAccount')}
-                  error={errs.bankAccount?.message}
-                  htmlFor="cdriver-bankAccount"
-                >
-                  <Input
-                    id="cdriver-bankAccount"
-                    className="h-10"
-                    {...form.register('bankAccount')}
                   />
                 </FormField>
               </div>

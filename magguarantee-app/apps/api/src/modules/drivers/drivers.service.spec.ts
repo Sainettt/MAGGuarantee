@@ -29,7 +29,6 @@ function makeDriver(overrides: Partial<DriverRow> = {}): DriverRow {
     email: 'driver@magtrans.eu',
     driverLicenseNumber: 'LIC-000',
     licenseExpiry: NOW,
-    bankAccount: 'PL00 0000 0000 0000',
     notes: null,
     active: true,
     carrier: { id: 'c-1', login: 'pwz1', name: null },
@@ -158,7 +157,6 @@ const REQUIRED_DRIVER_FIELDS = {
   driverLicenseNumber: 'LIC-001',
   email: 'driver@magtrans.eu',
   licenseExpiry: '2027-01-01',
-  bankAccount: 'PL00 0000 0000 0000',
 };
 
 describe('DriversService', () => {

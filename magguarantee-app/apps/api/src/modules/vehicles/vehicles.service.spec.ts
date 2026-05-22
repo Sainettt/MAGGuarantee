@@ -49,7 +49,6 @@ function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {
     fr: null,
     agreement: null,
     // Legacy `contract` boolean dropped — umowa is now a VehicleAttachment.
-    destinationCountries: [],
     rateDe: 0.5,
     rateUe: 0.5,
     rateExport: 0.5,
@@ -187,7 +186,6 @@ function makeVehiclesRepo(seed: VehicleRow[] = []): VehiclesRepository {
         gps: data.gps ?? false,
         cabotageDe: data.cabotageDe ?? false,
         cabotageFr: data.cabotageFr ?? false,
-        destinationCountries: data.destinationCountries ?? [],
       });
       rows.set(row.id, row);
       return row;
@@ -376,7 +374,6 @@ function createDto(overrides: Record<string, unknown> = {}) {
     wasteAllowed: false,
     cabotageDe: false,
     cabotageFr: false,
-    destinationCountries: [],
     ...REQUIRED_VEHICLE_FIELDS,
     ...overrides,
   } as Parameters<VehiclesService['create']>[1];
@@ -400,7 +397,6 @@ describe('VehiclesService', () => {
     const out = await svc.create(makeAuth('admin', 'a-1'), createDto(), []);
     expect(out.plateNumber).toBe('WA0002');
     expect(out.plannerId).toBe('u-pl');
-    expect(out.destinationCountries).toEqual([]);
   });
 
   it('rejects wrong role for plannerId (422)', async () => {

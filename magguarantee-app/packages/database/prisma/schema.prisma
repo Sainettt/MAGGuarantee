@@ -207,11 +207,6 @@ model Vehicle {
   // stored as a scanned file via VehicleAttachment rows with
   // category=contract. See docs/19-known-quirks.md#umowa-vs-porozumienie.
 
-  // Countries the vehicle operates in — ISO-3166-1 alpha-2 codes. The DB
-  // keeps a plain String[]; the allowed-set validation lives in the
-  // shared/Zod layer (apps/web RHF + @magguarantee/shared API schemas).
-  destinationCountries String[]
-
   // EUR/km rates — negotiated between MAGTRANS and the carrier AFTER vehicle
   // creation. NULL means "not yet set"; `0` would be ambiguous ("free haulage"
   // vs "not negotiated"). Admin sets these once the contract terms land.
@@ -300,9 +295,6 @@ model Driver {
   // Required for legally driving but not always digitized at registration
   // time. UI surfaces a warning, not a hard block.
   licenseExpiry       DateTime? @db.Date
-  // Carrier-internal HR — driver is paid by the carrier, not by MAGTRANS.
-  // No business reason to require it at the MAGGuarantee schema level.
-  bankAccount         String?
   notes               String?
   active              Boolean   @default(true)
   addedAt             DateTime  @default(now())
