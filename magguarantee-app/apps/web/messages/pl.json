@@ -365,7 +365,15 @@
       "permissions": "Pozwolenia",
       "countries": "Kraje",
       "attachments": "Załączniki"
-    }
+    },
+    "attachmentCategory": {
+      "contract": "Umowa",
+      "cabotage_de": "Kabotaż DE",
+      "cabotage_fr": "Kabotaż FR"
+    },
+    "attachmentOpen": "Otwórz",
+    "attachmentOpenError": "Nie udało się otworzyć pliku. Spróbuj ponownie.",
+    "attachmentPopupBlocked": "Nie można otworzyć nowej karty. Zezwól na wyskakujące okienka dla tej strony i spróbuj ponownie."
   },
   "drivers": {
     "title": "Kierowcy",

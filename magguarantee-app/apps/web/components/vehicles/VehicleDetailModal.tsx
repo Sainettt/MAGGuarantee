@@ -7,26 +7,31 @@
 // The section order mirrors VehicleSheet's six FormSections so the read-only
 // view and the edit Sheet feel like the same object:
 //   Identyfikacja · Przypisanie · Wyposażenie · Stawki · Pozwolenia · Kraje.
-// A seventh «Załączniki» section lists umowa/cabotage attachment file names
-// (read-only, no download — v1 per the spec).
+// A seventh «Załączniki» section lists umowa/cabotage attachments — each row
+// carries an «Otwórz» action that opens the document inline in a new tab
+// (read-only "view" action, the modal itself stays non-editing).
 //
 // Formatting reuses the shared helpers in components/ui/entity-detail-values.tsx
 // and lib/format/numbers.ts — no duplicated Intl wrappers.
 
 import {
   Banknote,
+  ExternalLink,
   FileText,
   Globe2,
+  Loader2,
   Package,
   ShieldCheck,
   Truck,
   UserCog,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import type { ReactNode } from 'react';
-import type { VehicleDto } from '@magguarantee/shared';
+import { useMemo, type ReactNode } from 'react';
+import type { VehicleAttachmentDto, VehicleDto } from '@magguarantee/shared';
+import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import {
   EntityDetailModal,
   type EntityDetailSection,
@@ -39,7 +44,9 @@ import {
   monoValue,
   textValue,
 } from '@/components/ui/entity-detail-values';
+import { downloadVehicleAttachment } from '@/lib/api/vehicles';
 import { formatDateTime, formatEur } from '@/lib/format/numbers';
+import { useOpenBlobInTab } from '@/lib/hooks/useOpenBlobInTab';
 
 interface Props {
   open: boolean;
@@ -58,6 +65,17 @@ export function VehicleDetailModal({
   const t = useTranslations('vehicles');
   const tCommon = useTranslations('common');
   const tDetail = useTranslations('entityDetail');
+
+  // Popup-blocker-safe "open in new tab" flow, shared with future entities.
+  // The toast messages are localized here and passed into the generic hook.
+  const popupBlocked = t('attachmentPopupBlocked');
+  const loadFailed = t('attachmentOpenError');
+  const blobMessages = useMemo(
+    () => ({ popupBlocked, loadFailed }),
+    [popupBlocked, loadFailed],
+  );
+  const { open: openAttachment, isPending: isAttachmentPending } =
+    useOpenBlobInTab(toast.error, blobMessages);
 
   // The modal is only rendered with a target; bail defensively so the hooks
   // above still run unconditionally (rules-of-hooks safe).
@@ -190,15 +208,24 @@ export function VehicleDetailModal({
     },
   ];
 
-  // ── Attachments — list file names as plain text rows (read-only, no
-  //    download in v1). Section is rendered only when files exist. ───────
+  // ── Attachments — each row shows the localized category label and an
+  //    «Otwórz» action that opens the document inline in a new tab. Section
+  //    is rendered only when files exist. ────────────────────────────────
   if (vehicle.attachments && vehicle.attachments.length > 0) {
     sections.push({
       title: t('sections.attachments'),
       icon: FileText,
       rows: vehicle.attachments.map((att) => ({
-        label: textValue(att.category),
-        value: textValue(att.fileName),
+        label: t(`attachmentCategory.${att.category}`),
+        value: (
+          <AttachmentRowValue
+            vehicleId={vehicle.id}
+            attachment={att}
+            openLabel={t('attachmentOpen')}
+            pending={isAttachmentPending(att.id)}
+            onOpen={openAttachment}
+          />
+        ),
       })),
     });
   }
@@ -223,5 +250,60 @@ export function VehicleDetailModal({
       meta={meta}
       onEdit={onEdit}
     />
+  );
+}
+
+interface AttachmentRowValueProps {
+  vehicleId: string;
+  attachment: VehicleAttachmentDto;
+  /** Localized «Otwórz» / «Open» action label. */
+  openLabel: string;
+  /** `true` while this row's file is being fetched. */
+  pending: boolean;
+  /** The `open` callback from `useOpenBlobInTab`. */
+  onOpen: (args: {
+    key: string;
+    fetcher: () => Promise<Blob>;
+    mimeType?: string;
+  }) => Promise<void>;
+}
+
+/**
+ * The `value` cell of an attachment row: a ghost button that opens the file
+ * inline in a new tab. Shows the file name + an external-link icon, swapped
+ * for a spinner while that specific download is in flight.
+ */
+function AttachmentRowValue({
+  vehicleId,
+  attachment,
+  openLabel,
+  pending,
+  onOpen,
+}: AttachmentRowValueProps) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      disabled={pending}
+      aria-busy={pending}
+      aria-label={`${openLabel} — ${attachment.fileName}`}
+      className="-mx-2 max-w-full justify-start font-normal"
+      onClick={() =>
+        void onOpen({
+          key: attachment.id,
+          fetcher: () =>
+            downloadVehicleAttachment(vehicleId, attachment.id),
+          mimeType: attachment.mimeType,
+        })
+      }
+    >
+      {pending ? (
+        <Loader2 size={14} className="shrink-0 animate-spin" aria-hidden />
+      ) : (
+        <ExternalLink size={14} className="shrink-0" aria-hidden />
+      )}
+      <span className="truncate">{attachment.fileName}</span>
+    </Button>
   );
 }

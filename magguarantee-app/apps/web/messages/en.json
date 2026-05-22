@@ -365,7 +365,15 @@
       "permissions": "Permissions",
       "countries": "Countries",
       "attachments": "Attachments"
-    }
+    },
+    "attachmentCategory": {
+      "contract": "Contract",
+      "cabotage_de": "Cabotage DE",
+      "cabotage_fr": "Cabotage FR"
+    },
+    "attachmentOpen": "Open",
+    "attachmentOpenError": "Could not open the file. Please try again.",
+    "attachmentPopupBlocked": "Could not open a new tab. Please allow pop-ups for this site and try again."
   },
   "drivers": {
     "title": "Drivers",
