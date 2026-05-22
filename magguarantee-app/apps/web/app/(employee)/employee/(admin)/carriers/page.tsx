@@ -18,6 +18,7 @@ import {
   CarrierOnboardingProvider,
   useCarrierOnboarding,
 } from '@/components/carrier-onboarding/useCarrierOnboarding';
+import { CarrierDetailModal } from '@/components/carriers/CarrierDetailModal';
 import { OnboardingMissingBadge } from '@/components/carriers/OnboardingMissingBadge';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useOpiekuni } from '@/lib/hooks/useLookups';
@@ -67,6 +68,13 @@ function CarriersPageInner() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [target, setTarget] = useState<CarrierDto | null>(null);
 
+  // Phase 6 — read-only detail modal. A plain row click opens this; its
+  // «Edytuj» action closes it and opens the edit Sheet (docs/14 §6.11). It
+  // mirrors the sheetOpen/target pair and is never open at the same time as
+  // the Sheet (the modal closes before the Sheet opens).
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailTarget, setDetailTarget] = useState<CarrierDto | null>(null);
+
   const openCreate = () => {
     // The "+ Add carrier" button opens the wizard, NOT the standalone create
     // sheet — the wizard guides the operator through vehicle/trailer/driver
@@ -76,6 +84,17 @@ function CarriersPageInner() {
   const openEdit = (row: CarrierDto) => {
     setTarget(row);
     setSheetOpen(true);
+  };
+  // A plain row click opens the read-only detail modal (not the edit Sheet);
+  // the action-column pencil button still jumps straight to edit.
+  const openDetail = (row: CarrierDto) => {
+    setDetailTarget(row);
+    setDetailOpen(true);
+  };
+  // Detail modal «Edytuj» — the modal has already closed itself; open the
+  // existing edit Sheet for the same carrier.
+  const editFromDetail = () => {
+    if (detailTarget) openEdit(detailTarget);
   };
   // Memoised so the `columns` useMemo can list it as a dep without churning
   // on every render. The wizard methods are themselves stable.
@@ -264,11 +283,18 @@ function CarriersPageInner() {
         rows={data?.items ?? []}
         columns={columns}
         rowKey={(r) => r.id}
-        onRowClick={openEdit}
+        onRowClick={openDetail}
         isLoading={isLoading}
         empty={
           <EmptyState title={t('emptyTitle')} message={t('emptyMessage')} />
         }
+      />
+
+      <CarrierDetailModal
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        carrier={detailTarget}
+        onEdit={editFromDetail}
       />
 
       <CarrierSheet

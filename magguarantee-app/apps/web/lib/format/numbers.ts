@@ -20,6 +20,14 @@ const PL_DATE_FULL = new Intl.DateTimeFormat('pl-PL', {
   year: 'numeric',
 });
 
+const PL_DATE_TIME = new Intl.DateTimeFormat('pl-PL', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
 /** "€ 1 250,00" — used in table doplata column and recalc badge. */
 export function formatEur(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '—';
@@ -52,5 +60,15 @@ export function formatDateFull(iso: string | null | undefined): string {
     return PL_DATE_FULL.format(new Date(iso));
   } catch {
     return iso.slice(0, 10);
+  }
+}
+
+/** "dd.MM.yyyy, HH:mm" — created/updated timestamps in detail surfaces. */
+export function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  try {
+    return PL_DATE_TIME.format(new Date(iso));
+  } catch {
+    return iso.slice(0, 16).replace('T', ' ');
   }
 }

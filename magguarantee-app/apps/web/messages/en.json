@@ -240,7 +240,14 @@
       "label": "Multiple accounts found in the MF registry. Choose the EUR account:",
       "placeholder": "Choose EUR account"
     },
+    "paymentTermsValue": "{n} days",
     "tempPasswordToast": "Temporary password: {password}"
+  },
+  "entityDetail": {
+    "edit": "Edit",
+    "close": "Close",
+    "createdAt": "Created",
+    "updatedAt": "Updated"
   },
   "fileUpload": {
     "prompt": "Drag files here or click to choose",

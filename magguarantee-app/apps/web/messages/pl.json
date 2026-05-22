@@ -240,7 +240,14 @@
       "label": "Znaleziono kilka kont w rejestrze MF. Wybierz konto EUR:",
       "placeholder": "Wybierz konto EUR"
     },
+    "paymentTermsValue": "{n} dni",
     "tempPasswordToast": "Hasło tymczasowe: {password}"
+  },
+  "entityDetail": {
+    "edit": "Edytuj",
+    "close": "Zamknij",
+    "createdAt": "Utworzono",
+    "updatedAt": "Zaktualizowano"
   },
   "fileUpload": {
     "prompt": "Przeciągnij pliki tutaj lub kliknij, aby wybrać",

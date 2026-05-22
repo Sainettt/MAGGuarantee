@@ -2297,3 +2297,232 @@ npm exec -w web -- shadcn@latest add command
 | i18n keys: `fileUpload.*` (prompt, constraints, errTooLarge, errWrongType, errUploadFailed, retry, dropzoneAria, removeAria), `multiSelect.*` (placeholder, searchPlaceholder, noResults, removeAria), `vehicle.section.countries`, country names | `apps/web/messages/pl.json`, `en.json` |
 | 0 changes to `tailwind.config.ts` / `globals.css` — no new tokens | — |
 
+---
+
+## Phase 6 — `<EntityDetailModal>` — read-only entity detail surface
+
+> Scope: clicking an entity row in the admin panels (carriers first; vehicles, trailers, drivers later) opens a **centered, read-only detail modal** instead of the edit drawer. The modal carries a primary **«Edytuj»** action; clicking it **closes the detail modal and opens the existing edit `<Sheet>`** (`CarrierSheet` etc.) exactly as today. The edit form is unchanged — the detail modal is the only new surface.
+>
+> **No new color / radius / shadow / font tokens.** The component composes strictly from the existing brand palette, semantic colors, the radius scale (`8 / 12 / 14 / 16px`), `shadow-modal`, and `animate-modal-in`. It builds on the existing hand-rolled `components/ui/Dialog.tsx` primitive.
+>
+> Reference screenshots: `docs/screenshots/modal-vehicle-details-p1/p2/p3.png` — use **only for which fields exist**, NOT as a visual template (the legacy "details" modal is actually an editable form; the new modal is a true read-only view, designed fresh).
+
+### 6.0 `<Dialog>` vs `<Sheet>` — the read-only / edit split (reconciliation, locked)
+
+Earlier phases lock edit-forms to `<Sheet side="right">` and explicitly say "no `<Dialog>` for edit-forms" (§ Phase 2 *Sheet*) and lock `<ClaimVerificationModal>` as a `<Sheet>`. **`<EntityDetailModal>` does not violate those rules.** The rule is about **edit surfaces**, and the distinction is now formalised:
+
+| Surface kind | Container | Rationale |
+|---|---|---|
+| **Edit / create form** (inputs, validation, submit) | `<Sheet side="right">` | A long mutable form; a side-drawer lets the user keep table context, supports tall scrolling forms, and matches the established admin CRUD pattern. |
+| **Read-only entity detail** (display only, no inputs) | centered `<Dialog>`-family (`<EntityDetailModal>`) | A focused, glanceable snapshot. Centered modal commands attention, reads like a "card", and is the conventional shape for "view details". No data is being mutated, so the "don't lose table context" argument for a drawer does not apply. |
+| **Confirmation** (delete, deactivate) | centered `<Dialog>` | Already established. |
+
+**Locked principle:** *centered `<Dialog>` is the correct, intentional container for read-only entity detail; `<Sheet>` remains the container for edit forms.* The two are complementary, not contradictory. The handoff is one-directional: detail modal → «Edytuj» → close modal, open edit Sheet. They are never open at the same time.
+
+### 6.1 Component identity
+
+| | |
+|---|---|
+| Name | `<EntityDetailModal>` |
+| Location | `apps/web/components/ui/EntityDetailModal.tsx` (a `ui/` primitive — it is entity-agnostic) |
+| Built on | `components/ui/Dialog.tsx` (`Dialog` / `DialogContent` / etc.) — portal, focus-trap, Escape, body-scroll-lock already provided |
+| Nature | **Generic, entity-agnostic, reusable.** It knows nothing about "carrier". Callers pass a title, optional badges, an ordered list of sections, each section an ordered list of label/value rows, and a footer action set. |
+| First consumer | `CarrierDetailModal` — a thin entity-specific wrapper that maps a `CarrierDto` into the generic props. Vehicles / trailers / drivers add their own thin wrappers later; the generic shell is **not** re-implemented. |
+
+### 6.2 Geometry & sizing
+
+| Property | Value | Tailwind / token | Notes |
+|---|---|---|---|
+| Container | centered `<DialogContent>` | (from primitive) | Reuses the primitive's `bg-card border border-border rounded-xl shadow-modal animate-modal-in`. |
+| Max-width | **`max-w-2xl`** (672px) | override the primitive's default `max-w-md` via the `className` prop | Wide enough for a comfortable two-column label/value grid; not so wide it feels like a page. |
+| Width (mobile) | `w-[calc(100%-2rem)]` | (from primitive) | 16px gutter each side — unchanged. |
+| Max-height | **`max-h-[85vh]`** | `max-h-[85vh]` | Caps the modal so it never exceeds the viewport; the **body** scrolls, not the page. |
+| Internal layout | **3-zone flex column**: header (fixed) · body (`flex-1 overflow-y-auto`) · footer (fixed) | `flex flex-col` on the content; header + footer `shrink-0`, body `min-h-0 flex-1 overflow-y-auto` | Only the body scrolls. Header and footer stay pinned — they never scroll away. |
+| Padding | header `px-6 pt-6 pb-4`; body `px-6 py-5`; footer `px-6 py-4` | — | The primitive's blanket `p-6` is **overridden** (pass `className` that resets padding; `<EntityDetailModal>` owns its own zone padding). |
+| Radius | `rounded-xl` (16px) | (from primitive) | No change. |
+| Shadow | `shadow-modal` | (from primitive) | No change. |
+| Entrance animation | `animate-modal-in` (200ms, opacity + 10px translateY) | (from primitive) | No change. Exit is instant unmount (matches current Dialog behaviour). |
+| Overlay | `bg-black/40 backdrop-blur-sm` | (from primitive) | No change. |
+| z-index | `z-40` overlay / `z-50` panel | (from primitive) | Edit Sheet opens **after** this modal closes — no stacking concern. |
+
+### 6.3 Header
+
+A fixed (`shrink-0`) zone, **not** scrollable.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  Nazwa przewoźnika                              [✕]       │   <- title (H3, 17px/700)
+│  carrier-login-123                                        │   <- subtitle: mono login, text-sub
+│  ┌─────────┐ ┌────────────┐                               │
+│  │ Aktywny │ │ Onboarding │ ...                           │   <- badge row
+│  └─────────┘ └────────────┘                               │
+└──────────────────────────────────────────────────────────┘
+            border-b border-border under the header zone
+```
+
+| Element | Spec |
+|---|---|
+| Title | Entity display name. Carrier: `name` (falls back to `login` if name is null). Typography: `text-[17px] font-bold leading-tight text-text` (the "H3 / modal-header" slot). Maps to `<DialogTitle>` so it wires `aria-labelledby`. |
+| Subtitle | One muted identifier line under the title. Carrier: `login` rendered **monospace** (`font-mono text-sm text-text-sub`). Maps to `<DialogDescription>` → `aria-describedby`. Omit the line entirely if there is no meaningful secondary id. |
+| Badge row | Below the subtitle, `flex flex-wrap items-center gap-1.5 mt-2`. Holds the **status badge(s)**: (1) active/inactive — existing `<Badge variant="success">Aktywny</Badge>` / `<Badge variant="muted">Nieaktywny</Badge>`; (2) onboarding — reuse `<OnboardingMissingBadge>` / `<OnboardingStatusBadge>` already in the catalog (renders the per-step pending chips, or nothing when complete). Badges are passed in by the entity wrapper as a `ReactNode`; the generic shell just renders the slot. |
+| Close affordance | The `✕` button is already provided by `<DialogContent>` (top-right, `h-7 w-7`, Lucide `<X size={16}>`, `focus-visible` ring). **Keep it.** No second close control in the header. |
+| Divider | `border-b border-border` separates header from the scroll body, so on scroll the header reads as a pinned bar. |
+
+### 6.4 Body — section grouping
+
+The body is the only scrollable zone (`flex-1 overflow-y-auto`). Content is an ordered list of **sections**; sections are separated vertically with `space-y-5`.
+
+**Section anatomy** — reuse the established *section-card* rhythm from the vehicle Sheet (§ Phase 5, "section-card pattern"), tuned for read-only:
+
+```
+DANE KONTA I KONTAKT                          <- section header
+─────────────────────────────────────────
+Login            carrier-login-123           <- label/value row
+E-mail           biuro@example.eu
+Nazwa            Przykładowy Przewoźnik
+Telefon          +48 600 000 000
+```
+
+| Slot | Spec |
+|---|---|
+| Section header | `flex items-center gap-1.5` + an optional **Lucide icon** (14px, `text-text-sub`, `aria-hidden`) + label `text-xs font-bold uppercase tracking-wider text-text-sub`. This is the same "table-header / section-title" typography used elsewhere — keep it consistent, do NOT invent a new section-title style. |
+| Section icons (carrier) | Account & contact → `<User>` · Company data → `<Building2>` · Finance → `<Banknote>` · Permits → `<FileBadge>` · Assignment → `<UserCog>`. Icons are decorative; passing an icon is optional in the generic API. |
+| Section container | A light surface card: `rounded-lg border border-border bg-card p-4`. **Do not tint** section backgrounds — read-only detail favours calm neutrality over the colour-coded vehicle-form tints. The header sits inside the card, rows below it with `mt-3`. |
+| Empty section | If every value in a section is null/empty, the entity wrapper may omit the whole section. The generic shell renders exactly the sections it is given. |
+
+### 6.5 Label/value row — the core read-only primitive
+
+This is the heart of the pattern. **A value is text, not a disabled input.** Read-only is *not* a greyed-out form field — no input border, no input background, no `disabled` styling. Render as a description list (`<dl>` / `<dt>` / `<dd>`) for semantics and a11y.
+
+**Layout — two-column row (default, ≥ `sm`):**
+
+```
+<dt>  Label (left)   <dd>  Value (right)
+```
+
+| Property | Spec |
+|---|---|
+| Row container | `<div>` per pair, inside a `<dl>`. Grid: `grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)] gap-x-4 gap-y-1`. Label column fixed ~144px, value column flexes. |
+| Row vertical rhythm | `py-1.5` per row; rows within a section separated by a hairline `divide-y divide-border/60` **or** plain `space-y-2` — pick `divide-y` for ≥6-row sections (carrier Finance), plain spacing for short sections. Web-agent may standardise on `divide-y divide-border/60` for all — acceptable. |
+| Label (`<dt>`) | `text-sm font-medium text-text-sub`. Sentence case, not uppercase (uppercase is reserved for the *section* header). Left-aligned, top-aligned (`self-start`) so it lines up with the first line of a multi-line value. |
+| Value (`<dd>`) | `text-sm text-text`. `font-medium` for emphasis is allowed but default is `400`. Left-aligned. Wraps freely (`break-words`); never truncates in the detail modal — the user came here to read the full value. |
+| Mono values | Codes render **monospace** (`font-mono`): `login`, `nip`, `vatId`, `accountEur` (IBAN), `accountPln`. Money/number values that benefit from alignment use `tabular-nums`. |
+| Money values | `insuranceValue` → format as EUR with grouping, suffix `€` or locale currency via `Intl.NumberFormat`. `paymentTerms` → number + unit, e.g. "30 dni". |
+| Date values | `insuranceExpiry`, `licenseExpiry`, `createdAt`, `updatedAt` → format with the app's standard date formatter (`Intl.DateTimeFormat`, locale-aware via next-intl). Date-only fields show date; timestamps (`createdAt`/`updatedAt`) show date + time. **No raw ISO strings.** |
+| Empty / null value | Render an em-dash **`—`** in `text-text-sub` (not the regular `text-text`), so "no data" reads as visibly secondary. Never render an empty `<dd>`, never `null`, never `"undefined"`. |
+| Long-text / address | `companyAddress` may be multi-line — value cell wraps naturally; no textarea, no scroll box. |
+| Boolean values | If a boolean is shown as a row value (rare — `active` is a header badge, not a row) render as a small inline `<Badge>` or a localized "Tak / Nie", never a checkbox. |
+| Copy affordance (optional, additive) | Mono code values (IBAN, NIP) **may** reuse the existing `<CopyableValue>` pattern (click-to-copy + toast). This is optional polish; if added it must not change row height or layout. Not required for v1. |
+
+**Single-column collapse:** below `sm` (≤640px) the two-column grid collapses to stacked — label on its own line above the value (`grid-cols-1`, label gets `text-xs`, value `text-sm`). See § 6.7.
+
+### 6.6 Footer
+
+A fixed (`shrink-0`) zone with a top divider — never scrolls.
+
+```
+            border-t border-border above the footer zone
+┌──────────────────────────────────────────────────────────┐
+│  Utworzono 2024-01-12 · Zaktualizowano 2024-03-04        │
+│                                  [ Zamknij ]  [ Edytuj ] │
+└──────────────────────────────────────────────────────────┘
+```
+
+| Element | Spec |
+|---|---|
+| Layout | `flex items-center justify-between gap-3`. Left slot: **meta line**. Right slot: action buttons. |
+| Meta line (left) | `text-xs text-text-sub` — `createdAt` / `updatedAt` rendered with the date formatter (date + time). Format: `Utworzono {date} · Zaktualizowano {date}`. On narrow viewports this line drops below the buttons (see § 6.7) or is hidden if space-constrained — the same data also appears in the body Meta area, so the footer copy is a convenience, not the only home for it. **Decision:** put `createdAt`/`updatedAt` **in the footer meta line** as the canonical placement; do not also add a Meta section card in the body. The onboarding flags live in the header badges. This keeps the body purely the 5 domain sections. |
+| Secondary action | `<Button variant="ghost">Zamknij</Button>` — closes the modal (`onOpenChange(false)`). Equivalent to the `✕` and Escape. |
+| Primary action | `<Button variant="default">` (brand-red) with a leading Lucide `<Pencil size={14}>` icon, label **«Edytuj»**. On click: **close the detail modal, then open the edit `<Sheet>`** for this entity. The generic component exposes this as an `onEdit` callback prop — the page wires `onEdit` to "set edit target + open sheet" after the modal closes. |
+| Sticky? | The footer is **fixed within the modal** (it is a flex `shrink-0` zone, always visible) — it does not need `position: sticky` because the body, not the modal, scrolls. Functionally always-visible. |
+| Touch targets | Buttons keep `size="sm"` height ≥ the 36–40px button standard; the primary «Edytuj» must be ≥44px tall on touch viewports — web-agent: ensure `min-h-[44px]` on mobile or use the default (non-`sm`) Button size below `sm`. |
+
+### 6.7 Responsive behavior
+
+| Breakpoint | Behavior |
+|---|---|
+| ≥ `sm` (≥640px) | Two-column label/value grid (§6.5). Footer meta + buttons on one row. Modal `max-w-2xl`. |
+| < `sm` (≤640px) | Label/value rows **stack** (`grid-cols-1`): label line (`text-xs font-medium text-text-sub`) above value (`text-sm`). Section cards keep `p-4`. Footer: buttons full-row, meta line wraps to its own line **above** the buttons (`flex-col-reverse`), or is hidden if cramped. Modal width `w-[calc(100%-2rem)]`, `max-h-[85vh]` still caps height; body scroll is the norm on small screens. |
+| Very short viewport | `max-h-[85vh]` + body `overflow-y-auto` already handles it — header/footer stay pinned, body scrolls. No special case. |
+
+### 6.8 States
+
+| State | Treatment |
+|---|---|
+| `loading` (modal open, entity still fetching) | If the row data is already in the table query (carriers list returns full `CarrierDto`), there is **no fetch** — open instantly with data. If a detail endpoint is later introduced, show a skeleton: 2–3 section cards each with 3 `<Skeleton className="h-4">` rows; header shows skeleton title bar. |
+| `error` | If a detail fetch fails: `<Alert variant="destructive">` inside the body, footer keeps only «Zamknij» (no «Edytuj» on an entity that failed to load). Not needed for v1 (no detail fetch). |
+| Empty values | Per-row `—` (§6.5). The modal is never "empty" as a whole — an entity always has a login + name. |
+
+### 6.9 Generic API (catalogue intent — design contract, not an implementation signature)
+
+The component is entity-agnostic. Shape the props so any entity maps cleanly:
+
+| Prop | Meaning |
+|---|---|
+| `open` / `onOpenChange` | Standard controlled-dialog pair. |
+| `title` | Entity display name (string). |
+| `subtitle` | Optional secondary id line (rendered mono if it's a code). |
+| `badges` | `ReactNode` — the header badge row (status + onboarding). Entity wrapper builds it. |
+| `sections` | Ordered array. Each section: `{ title, icon?, rows }`. Each row: `{ label, value }` where `value` is `ReactNode` (string, `—`, mono span, badge…). The wrapper is responsible for formatting (dates, money, mono, em-dash for null). |
+| `meta` | Optional `ReactNode` for the footer-left meta line (created/updated). |
+| `onEdit` | Callback for the primary «Edytuj» action. The component closes itself, then invokes `onEdit`. |
+
+`CarrierDetailModal` is the thin wrapper: takes a `CarrierDto`, maps it into the 5 sections below, builds the badge row, builds the meta line, and forwards `onEdit` to the page (which opens `CarrierSheet`).
+
+### 6.10 Carrier field mapping — the 5 sections
+
+The carrier detail modal mirrors the **same 5 sections the edit form uses** (`CarrierSheet` `FormSection` titles), so view and edit feel like the same object.
+
+| Section | Icon | Rows (label → field) |
+|---|---|---|
+| **Dane konta i kontakt** (`sections.account`) | `<User>` | Login → `login` (mono) · E-mail → `email` · Nazwa → `name` · Osoba kontaktowa → `contactPerson` · Telefon → `phone` · E-mail do zleceń → `ordersEmail` |
+| **Dane firmy** (`sections.company`) | `<Building2>` | NIP → `nip` (mono) · VAT UE → `vatId` (mono) · Firma → `company` · Adres → `companyAddress` |
+| **Finanse** (`sections.finance`) | `<Banknote>` | Konto EUR (IBAN) → `accountEur` (mono) · Konto PLN → `accountPln` (mono) · Termin płatności → `paymentTerms` ("{n} dni") · Wartość ubezpieczenia → `insuranceValue` (EUR fmt) · Ważność ubezpieczenia → `insuranceExpiry` (date) · Ważność licencji → `licenseExpiry` (date) |
+| **Pozwolenia** (`sections.permits`) | `<FileBadge>` | Liczba pojazdów → `numberOfVehicle` |
+| **Przypisanie** (`sections.assignment`) | `<UserCog>` | Opiekun → `opiekun.name ?? opiekun.login` |
+
+- **Status** (`active`) → header badge, not a row.
+- **Onboarding flags** (`hasVehicle` / `hasTrailer` / `hasDriver` / `isComplete`) → header badge row, via the existing `<OnboardingMissingBadge>`.
+- **`createdAt` / `updatedAt`** → footer meta line.
+- i18n: reuse the existing `carriers.fields.*` and `carriers.sections.*` keys — **no new field-label keys needed**. New keys: `entityDetail.edit` ("Edytuj"), `entityDetail.close` ("Zamknij"), `entityDetail.createdAt`, `entityDetail.updatedAt` (or reuse `common.*` if present).
+
+### 6.11 Wiring on the carriers page (web-agent)
+
+Currently `carriers/page.tsx` does `onRowClick={openEdit}` — row click opens `CarrierSheet` directly. The new flow inserts the detail modal between:
+
+1. `onRowClick={openDetail}` → opens `<CarrierDetailModal>` with the clicked `CarrierDto`.
+2. Detail modal «Edytuj» → `onEdit`: the modal closes itself, then the page does `setTarget(row); setSheetOpen(true)` — the **existing** `CarrierSheet` edit drawer opens, unchanged.
+3. The row-level «Edytuj» kebab/button in the actions column — **decision for web-agent:** it may either keep opening the edit Sheet directly (power-user shortcut) or also route through the detail modal. Recommended: the explicit «Edytuj» action-column button opens edit directly; a plain **row click** opens the read-only detail modal. This gives both a "glance" and a "jump straight to edit" path.
+4. The two surfaces are never open simultaneously — modal closes before Sheet opens.
+
+### 6.12 Anti-patterns to avoid
+
+- **No disabled inputs.** A read-only value is a `<dd>` text node, never `<input disabled>` / `<input readOnly>`. No input borders, no input backgrounds in the body.
+- **No new tokens.** Colours, radius, shadow, fonts all come from the existing scale. If something "needs" a new token, it doesn't — re-check the palette.
+- **No `<Dialog>` for the edit form.** The edit form stays `<Sheet>`. Only the read-only detail is a `<Dialog>`.
+- **No inline `style=`**, no `[style*=]` dark-mode hacks — dark mode is automatic via the CSS-var surface tokens.
+- **No raw nulls / ISO strings** in the UI — always `—` for empty, always a formatted date.
+- **Do not re-implement the generic shell per entity.** Vehicles/trailers/drivers get a thin `*DetailModal` wrapper only.
+- **Do not stack** the detail modal and the edit Sheet — close one before opening the other.
+
+### 6.13 Design-system extensions introduced by Phase 6
+
+| Extension | Type |
+|---|---|
+| `<EntityDetailModal>` (generic) | New custom `ui/` primitive — composes `Dialog.tsx`. |
+| `CarrierDetailModal` | New entity wrapper (`components/carriers/`). |
+| Label/value `<dl>` read-only row recipe | Documented layout recipe (§6.5) — reusable for any future read-only detail surface. |
+| `<Dialog>` (read-only) vs `<Sheet>` (edit) split | Documented, locked principle (§6.0). |
+
+**No new colors, no new radius/shadow/font tokens, no new shadcn primitives, no new `tailwind.config.ts` / `globals.css` keys.**
+
+### 6.14 Components / shared changes summary (Phase 6)
+
+| Change | Where | Owner |
+|---|---|---|
+| `<EntityDetailModal>` (new generic primitive) | `apps/web/components/ui/EntityDetailModal.tsx` | web-agent |
+| `CarrierDetailModal` (new entity wrapper) | `apps/web/components/carriers/CarrierDetailModal.tsx` | web-agent |
+| Row click → detail modal; «Edytuj» → existing `CarrierSheet` | `apps/web/app/(employee)/employee/(admin)/carriers/page.tsx` | web-agent |
+| i18n keys `entityDetail.*` (edit, close, createdAt, updatedAt) | `apps/web/messages/pl.json`, `en.json` | web-agent |
+| 0 changes to `tailwind.config.ts` / `globals.css` | — | — |
+
