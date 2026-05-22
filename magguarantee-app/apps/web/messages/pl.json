@@ -343,8 +343,14 @@
       "rateExport": "Stawka eksport",
       "rateImport": "Stawka import",
       "wasteAllowed": "Odpady",
+      "wasteCountries": "Kraje odpadowe",
       "cabotageDe": "Kabotaż DE",
       "cabotageFr": "Kabotaż FR",
+      "adrClasses": "Klasy ADR",
+      "gb": "GB",
+      "it": "IT",
+      "fr": "FR",
+      "lastDroveAt": "Ostatni przejazd",
       "nextInspectionDate": "Następny przegląd",
       "notes": "Notatki",
       "active": "Aktywny",
@@ -357,7 +363,8 @@
       "equipment": "Wyposażenie",
       "rates": "Stawki",
       "permissions": "Pozwolenia",
-      "countries": "Kraje"
+      "countries": "Kraje",
+      "attachments": "Załączniki"
     }
   },
   "drivers": {
@@ -383,6 +390,11 @@
       "bankAccount": "Numer konta",
       "notes": "Notatki",
       "active": "Aktywny"
+    },
+    "sections": {
+      "personal": "Dane osobowe i kontakt",
+      "license": "Prawo jazdy i finanse",
+      "assignment": "Przypisanie"
     }
   },
   "trailers": {

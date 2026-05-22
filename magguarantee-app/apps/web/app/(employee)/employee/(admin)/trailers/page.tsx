@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { useMemo, useState } from 'react';
 import type { TrailerDto } from '@magguarantee/shared';
 
+import { TrailerDetailModal } from '@/components/trailers/TrailerDetailModal';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
@@ -39,6 +40,13 @@ export default function TrailersPage() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [target, setTarget] = useState<TrailerDto | null>(null);
 
+  // Phase 6 — read-only detail modal. A plain row click opens this; its
+  // «Edytuj» action closes it and opens the edit Sheet (docs/14 §6.11). It
+  // mirrors the sheetOpen/target pair and is never open at the same time as
+  // the Sheet (the modal closes before the Sheet opens).
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailTarget, setDetailTarget] = useState<TrailerDto | null>(null);
+
   const openCreate = () => {
     setTarget(null);
     setSheetOpen(true);
@@ -46,6 +54,17 @@ export default function TrailersPage() {
   const openEdit = (row: TrailerDto) => {
     setTarget(row);
     setSheetOpen(true);
+  };
+  // A plain row click opens the read-only detail modal (not the edit Sheet);
+  // the action-column pencil button still jumps straight to edit.
+  const openDetail = (row: TrailerDto) => {
+    setDetailTarget(row);
+    setDetailOpen(true);
+  };
+  // Detail modal «Edytuj» — the modal has already closed itself; open the
+  // existing edit Sheet for the same trailer.
+  const editFromDetail = () => {
+    if (detailTarget) openEdit(detailTarget);
   };
 
   const columns = useMemo<DataTableColumn<TrailerDto>[]>(
@@ -161,11 +180,18 @@ export default function TrailersPage() {
         rows={data?.items ?? []}
         columns={columns}
         rowKey={(r) => r.id}
-        onRowClick={openEdit}
+        onRowClick={openDetail}
         isLoading={isLoading}
         empty={
           <EmptyState title={t('emptyTitle')} message={t('emptyMessage')} />
         }
+      />
+
+      <TrailerDetailModal
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        trailer={detailTarget}
+        onEdit={editFromDetail}
       />
 
       <TrailerSheet

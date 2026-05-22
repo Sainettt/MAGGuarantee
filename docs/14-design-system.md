@@ -2363,7 +2363,7 @@ A fixed (`shrink-0`) zone, **not** scrollable.
 | Element | Spec |
 |---|---|
 | Title | Entity display name. Carrier: `name` (falls back to `login` if name is null). Typography: `text-[17px] font-bold leading-tight text-text` (the "H3 / modal-header" slot). Maps to `<DialogTitle>` so it wires `aria-labelledby`. |
-| Subtitle | One muted identifier line under the title. Carrier: `login` rendered **monospace** (`font-mono text-sm text-text-sub`). Maps to `<DialogDescription>` → `aria-describedby`. Omit the line entirely if there is no meaningful secondary id. |
+| Subtitle | One muted identifier line under the title. The generic shell renders it in **neutral** type (`text-sm text-text-sub`) — the entity wrapper opts into `font-mono` (by passing a `<span className="font-mono">`) only when the subtitle is a code: e.g. carrier `login`, driver licence number. Proportional subtitles (vehicle brand+model, trailer type) stay neutral. Maps to `<DialogDescription>` → `aria-describedby`. Omit the line entirely if there is no meaningful secondary id. |
 | Badge row | Below the subtitle, `flex flex-wrap items-center gap-1.5 mt-2`. Holds the **status badge(s)**: (1) active/inactive — existing `<Badge variant="success">Aktywny</Badge>` / `<Badge variant="muted">Nieaktywny</Badge>`; (2) onboarding — reuse `<OnboardingMissingBadge>` / `<OnboardingStatusBadge>` already in the catalog (renders the per-step pending chips, or nothing when complete). Badges are passed in by the entity wrapper as a `ReactNode`; the generic shell just renders the slot. |
 | Close affordance | The `✕` button is already provided by `<DialogContent>` (top-right, `h-7 w-7`, Lucide `<X size={16}>`, `focus-visible` ring). **Keep it.** No second close control in the header. |
 | Divider | `border-b border-border` separates header from the scroll body, so on scroll the header reads as a pinned bar. |
@@ -2525,4 +2525,56 @@ Currently `carriers/page.tsx` does `onRowClick={openEdit}` — row click opens `
 | Row click → detail modal; «Edytuj» → existing `CarrierSheet` | `apps/web/app/(employee)/employee/(admin)/carriers/page.tsx` | web-agent |
 | i18n keys `entityDetail.*` (edit, close, createdAt, updatedAt) | `apps/web/messages/pl.json`, `en.json` | web-agent |
 | 0 changes to `tailwind.config.ts` / `globals.css` | — | — |
+
+### 6.15 Vehicle field mapping — the 6 (+1) sections
+
+`VehicleDetailModal` mirrors the **six `VehicleSheet` `FormSection`s** in order, plus an optional seventh «Załączniki» section rendered only when the vehicle has attachments. Title = `plateNumber`; subtitle = `brand + model` (falls back to carrier name). Status (`active`) → header badge; no onboarding chips.
+
+| Section | Icon | Rows (label → field) |
+|---|---|---|
+| **Identyfikacja** (`sections.identification`) | `<Truck>` | Numer rejestracyjny → `plateNumber` (mono) · Numer boczny → `sideNumber` · Marka → `brand` · Model → `model` · Rok → `year` (num) · Typ → `type` (raw enum MEGA/STD/COIL) · Norma EURO → `euro` (raw enum V/VI) · Certyfikat L → `certificateL` (bool) · Następny przegląd → `nextInspectionDate` (date) |
+| **Przypisanie** (`sections.people`) | `<UserCog>` | Przewoźnik → `carrier.name ?? carrier.login` · Planista → `planner.name ?? planner.login` · Dyspozytor → `dispatcher.name ?? dispatcher.login` |
+| **Wyposażenie** (`sections.equipment`) | `<Package>` | GPS → `gps` (bool) · Numer GPS → `gpsMobilePhone` · Karta paliwowa → `fuelCard` (bool) · Porozumienie → `agreement` (bool) |
+| **Stawki** (`sections.rates`) | `<Banknote>` | Stawka DE → `rateDe` (EUR fmt) · Stawka UE → `rateUe` (EUR fmt) · Stawka eksport → `rateExport` (EUR fmt) · Stawka import → `rateImport` (EUR fmt) |
+| **Pozwolenia** (`sections.permissions`) | `<ShieldCheck>` | Klasy ADR → `adrClasses` (list) · Odpady → `wasteAllowed` (bool) · Kraje odpadowe → `wasteCountries` (list) · Kabotaż DE → `cabotageDe` (bool) · Kabotaż FR → `cabotageFr` (bool) · GB → `gb` (bool) · IT → `it` (bool) · FR → `fr` (bool) |
+| **Kraje** (`sections.countries`) | `<Globe2>` | Kraje docelowe → `destinationCountries` (list) · Ostatni przejazd → `lastDroveAt` (date) · Notatki → `notes` |
+| **Załączniki** (`sections.attachments`) — *only if `attachments.length > 0`* | `<FileText>` | one row per attachment: `category` → `fileName` (plain text, no download in v1) |
+
+- New i18n field keys (`vehicles.fields.*`): `adrClasses`, `wasteCountries`, `gb`, `it`, `fr`, `lastDroveAt`. New section key: `vehicles.sections.attachments`.
+- `type` / `euro` render as raw enum codes — matches the `VehicleSheet` `<Select>` options and the list-table cell (no human-label keys exist).
+
+### 6.16 Driver field mapping — 3 logical sections
+
+`DriverSheet` has a **flat layout** (no `FormSection`s), so there is no Sheet order to mirror 1:1. `DriverDetailModal` groups the fields into three clean logical sections instead. Title = `firstName + lastName`; subtitle = `driverLicenseNumber` (mono, falls back to `loginSlug`). Status (`active`) → header badge.
+
+| Section | Icon | Rows (label → field) |
+|---|---|---|
+| **Dane osobowe i kontakt** (`sections.personal`) | `<User>` | Imię → `firstName` · Nazwisko → `lastName` · Telefon → `phone` · Telefon (drugi) → `phone2` · E-mail → `email` |
+| **Prawo jazdy i finanse** (`sections.license`) | `<CreditCard>` | Numer prawa jazdy → `driverLicenseNumber` (mono) · Ważność prawa jazdy → `licenseExpiry` (date) · Numer konta → `bankAccount` (mono) |
+| **Przypisanie** (`sections.assignment`) | `<UserCog>` | Przewoźnik → `carrier.name ?? carrier.login` · Notatki → `notes` |
+
+- New i18n section keys: `drivers.sections.personal`, `drivers.sections.license`, `drivers.sections.assignment` (PL + EN). All field keys reuse existing `drivers.fields.*`.
+
+### 6.17 Trailer field mapping — the 3 sections
+
+`TrailerDetailModal` mirrors the **three `TrailerSheet` `FormSection`s** in order. Title = `plateNumber`; subtitle = `trailerType.shortCode ?? trailerType.name`. Status (`active`) → header badge.
+
+| Section | Icon | Rows (label → field) |
+|---|---|---|
+| **Identyfikacja** (`sections.identification`) | `<Container>` | Przewoźnik → `carrier.name ?? carrier.login` · Numer rejestracyjny → `plateNumber` · Typ naczepy → `trailerType` (`[shortCode] name`) · Marka → `brand` · Model → `model` · Rok → `year` (num) · Następny przegląd → `nextInspectionDate` (date) |
+| **Wymiary** (`sections.dimensions`) | `<Ruler>` | Długość wewn. (m) → `innerLength` · Szerokość wewn. (m) → `innerWidth` · Wysokość wewn. (m) → `innerHeight` · Ładowność (t) → `capacity` |
+| **Wyposażenie** (`sections.equipment`) | `<Package>` | Pasy → `belts` (bool) · Maty → `mats` (bool) · Zawieszenie pneum. → `airSuspension` (bool) · Załadunek tył → `loadFromBack` (bool) · Załadunek bok → `loadFromSide` (bool) · Załadunek góra → `loadFromTop` (bool) · Dach przesuwany → `slidingRoof` (bool) · Dach Edscha → `edschaSlidingRoof` (bool) · Wyposażenie → `equipment` · Notatki → `notes` |
+
+- Dimension/capacity units are baked into the field labels themselves (`innerLength` → "Długość wewn. (m)", `capacity` → "Ładowność (t)") — exactly as `TrailerSheet` renders them — so the values are bare numbers. No new i18n keys needed.
+
+### 6.18 Phase 6 replication — components / shared changes summary
+
+| Change | Where | Owner |
+|---|---|---|
+| `entity-detail-values.tsx` (shared value-formatter helpers: `emptyValue`/`textValue`/`monoValue`/`dateValue`/`boolValue`/`listValue`) | `apps/web/components/ui/entity-detail-values.tsx` | web-agent |
+| `CarrierDetailModal` refactored to import the shared helpers | `apps/web/components/carriers/CarrierDetailModal.tsx` | web-agent |
+| `VehicleDetailModal` / `DriverDetailModal` / `TrailerDetailModal` (new entity wrappers) | `apps/web/components/{vehicles,drivers,trailers}/` | web-agent |
+| Row click → detail modal; «Edytuj» → existing Sheet | `apps/web/app/(employee)/employee/(admin)/{vehicles,drivers,trailers}/page.tsx` | web-agent |
+| i18n: `vehicles.fields.{adrClasses,wasteCountries,gb,it,fr,lastDroveAt}`, `vehicles.sections.attachments`, `drivers.sections.{personal,license,assignment}` | `apps/web/messages/pl.json`, `en.json` | web-agent |
+| 0 changes to `EntityDetailModal.tsx`, `tailwind.config.ts`, `globals.css` | — | — |
 

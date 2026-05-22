@@ -87,7 +87,7 @@ export function EntityDetailModal({
             {title}
           </DialogTitle>
           {subtitle != null && subtitle !== '' ? (
-            <DialogDescription className="mt-1 font-mono text-sm text-text-sub">
+            <DialogDescription className="mt-1 text-sm text-text-sub">
               {subtitle}
             </DialogDescription>
           ) : (

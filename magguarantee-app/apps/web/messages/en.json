@@ -343,8 +343,14 @@
       "rateExport": "Rate export",
       "rateImport": "Rate import",
       "wasteAllowed": "Waste allowed",
+      "wasteCountries": "Waste countries",
       "cabotageDe": "Cabotage DE",
       "cabotageFr": "Cabotage FR",
+      "adrClasses": "ADR classes",
+      "gb": "GB",
+      "it": "IT",
+      "fr": "FR",
+      "lastDroveAt": "Last drove",
       "nextInspectionDate": "Next inspection",
       "notes": "Notes",
       "active": "Active",
@@ -357,7 +363,8 @@
       "equipment": "Equipment",
       "rates": "Rates",
       "permissions": "Permissions",
-      "countries": "Countries"
+      "countries": "Countries",
+      "attachments": "Attachments"
     }
   },
   "drivers": {
@@ -383,6 +390,11 @@
       "bankAccount": "Bank account",
       "notes": "Notes",
       "active": "Active"
+    },
+    "sections": {
+      "personal": "Personal details & contact",
+      "license": "License & finance",
+      "assignment": "Assignment"
     }
   },
   "trailers": {

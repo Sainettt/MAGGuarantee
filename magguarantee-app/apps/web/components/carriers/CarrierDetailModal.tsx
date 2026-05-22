@@ -10,7 +10,8 @@
 // and forwarding onEdit to the page (which opens CarrierSheet).
 //
 // Formatting reuses the shared helpers in lib/format/numbers.ts (formatEur,
-// formatDateFull, formatDateTime) — no duplicated Intl wrappers.
+// formatDateTime) and the shared value-formatter helpers in
+// components/ui/entity-detail-values.tsx — no duplicated Intl wrappers.
 
 import { Banknote, Building2, FileBadge, User, UserCog } from 'lucide-react';
 import { useTranslations } from 'next-intl';
@@ -23,7 +24,13 @@ import {
   EntityDetailModal,
   type EntityDetailSection,
 } from '@/components/ui/EntityDetailModal';
-import { formatDateFull, formatDateTime, formatEur } from '@/lib/format/numbers';
+import {
+  dateValue,
+  emptyValue,
+  monoValue,
+  textValue,
+} from '@/components/ui/entity-detail-values';
+import { formatDateTime, formatEur } from '@/lib/format/numbers';
 
 interface Props {
   open: boolean;
@@ -31,28 +38,6 @@ interface Props {
   carrier: CarrierDto | null;
   /** Forwarded to the generic «Edytuj» action — the page opens CarrierSheet. */
   onEdit: () => void;
-}
-
-/** Em-dash placeholder for null/empty values, visibly secondary (§6.5). */
-function emptyValue(): ReactNode {
-  return <span className="text-text-sub">—</span>;
-}
-
-/** Plain string value; em-dash when null/empty. */
-function textValue(value: string | null | undefined): ReactNode {
-  const v = value?.trim();
-  return v ? v : emptyValue();
-}
-
-/** Monospace code value (login, NIP, VAT-ID, IBAN); em-dash when empty. */
-function monoValue(value: string | null | undefined): ReactNode {
-  const v = value?.trim();
-  return v ? <span className="font-mono">{v}</span> : emptyValue();
-}
-
-/** Date-only value rendered via the shared full-date formatter. */
-function dateValue(iso: string | null | undefined): ReactNode {
-  return iso ? <span>{formatDateFull(iso)}</span> : emptyValue();
 }
 
 export function CarrierDetailModal({
@@ -177,7 +162,7 @@ export function CarrierDetailModal({
       open={open}
       onOpenChange={onOpenChange}
       title={carrier.name ?? carrier.login}
-      subtitle={carrier.login}
+      subtitle={<span className="font-mono">{carrier.login}</span>}
       badges={badges}
       sections={sections}
       meta={meta}
