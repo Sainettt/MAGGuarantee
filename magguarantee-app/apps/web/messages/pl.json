@@ -769,12 +769,11 @@
       },
       "drivers": {
         "title": "Kierowcy",
-        "newDriver": "Nowy kierowca",
-        "editDriver": "Edytuj kierowcę",
+        "contactOpiekun": "Skontaktuj się z opiekunem",
+        "contactOpiekunSubject": "Zmiana danych kierowcy",
         "searchPlaceholder": "Szukaj imienia / nazwiska",
         "emptyTitle": "Brak kierowców",
-        "emptyMessage": "Dodaj pierwszego kierowcę swojej firmy.",
-        "editAriaLabel": "Edytuj {name}",
+        "emptyMessage": "Skontaktuj się z opiekunem, aby dodać kierowcę.",
         "columns": {
           "name": "Imię i nazwisko",
           "phone": "Telefon",

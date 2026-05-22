@@ -63,9 +63,13 @@ export class DriversController {
     return this.drivers.getById(id);
   }
 
+  // Carriers are view-only for drivers — they consume the list/detail
+  // endpoints but never create/edit. Only admin/opiekun reach the mutating
+  // handlers, so CarrierOwns is intentionally absent (opiekun-ownership is
+  // enough). Mirrors the trailers controller pattern.
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @Roles('admin', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun')
   @Audit({
     action: 'createDriver',
     targetType: 'Driver',
@@ -79,9 +83,8 @@ export class DriversController {
   }
 
   @Patch(':id')
-  @Roles('admin', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun')
   @OpiekunOwns('id', 'param', 'driverId')
-  @CarrierOwns('id', 'param', 'driverId')
   @Audit({
     action: 'updateDriver',
     targetType: 'Driver',
@@ -96,9 +99,8 @@ export class DriversController {
 
   @Post(':id/deactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun')
   @OpiekunOwns('id', 'param', 'driverId')
-  @CarrierOwns('id', 'param', 'driverId')
   @Audit({
     action: 'deactivateDriver',
     targetType: 'Driver',
@@ -112,9 +114,8 @@ export class DriversController {
 
   @Post(':id/reactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun')
   @OpiekunOwns('id', 'param', 'driverId')
-  @CarrierOwns('id', 'param', 'driverId')
   @Audit({
     action: 'reactivateDriver',
     targetType: 'Driver',
@@ -128,9 +129,8 @@ export class DriversController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Roles('admin', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun')
   @OpiekunOwns('id', 'param', 'driverId')
-  @CarrierOwns('id', 'param', 'driverId')
   @Audit({
     action: 'deleteDriver',
     targetType: 'Driver',

@@ -36,8 +36,10 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   carrier: CarrierDto | null;
-  /** Forwarded to the generic «Edytuj» action — the page opens CarrierSheet. */
-  onEdit: () => void;
+  /** Forwarded to the generic «Edytuj» action — the page opens CarrierSheet.
+   *  Omit it for read-only consumers: the «Edytuj» button is then not
+   *  rendered (§6.6). */
+  onEdit?: () => void;
 }
 
 export function CarrierDetailModal({

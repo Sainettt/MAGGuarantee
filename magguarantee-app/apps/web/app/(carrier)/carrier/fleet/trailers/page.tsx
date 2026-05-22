@@ -9,6 +9,7 @@ import { useTranslations } from 'next-intl';
 import { useMemo, useState } from 'react';
 import type { TrailerDto } from '@magguarantee/shared';
 
+import { TrailerDetailModal } from '@/components/trailers/TrailerDetailModal';
 import { Badge } from '@/components/ui/Badge';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -31,6 +32,16 @@ export default function CarrierTrailersPage() {
   });
 
   const typesQ = useTrailerTypes({ active: true });
+
+  // Read-only detail modal — a plain row click opens it. Carriers cannot edit
+  // trailers, so no `onEdit` is passed (footer shows only «Zamknij», §6.6).
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailTarget, setDetailTarget] = useState<TrailerDto | null>(null);
+
+  const openDetail = (row: TrailerDto) => {
+    setDetailTarget(row);
+    setDetailOpen(true);
+  };
 
   const columns = useMemo<DataTableColumn<TrailerDto>[]>(
     () => [
@@ -114,6 +125,7 @@ export default function CarrierTrailersPage() {
         rows={data?.items ?? []}
         columns={columns}
         rowKey={(r) => r.id}
+        onRowClick={openDetail}
         isLoading={isLoading}
         empty={
           <EmptyState
@@ -122,6 +134,12 @@ export default function CarrierTrailersPage() {
             message={t('emptyMessage')}
           />
         }
+      />
+
+      <TrailerDetailModal
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        trailer={detailTarget}
       />
     </section>
   );

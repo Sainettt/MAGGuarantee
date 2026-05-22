@@ -54,8 +54,10 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   vehicle: VehicleDto | null;
-  /** Forwarded to the generic «Edytuj» action — the page opens VehicleSheet. */
-  onEdit: () => void;
+  /** Forwarded to the generic «Edytuj» action — the page opens VehicleSheet.
+   *  Omit it for read-only consumers: the «Edytuj» button is then not
+   *  rendered (§6.6). */
+  onEdit?: () => void;
 }
 
 export function VehicleDetailModal({

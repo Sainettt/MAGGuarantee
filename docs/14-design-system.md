@@ -2301,7 +2301,7 @@ npm exec -w web -- shadcn@latest add command
 
 ## Phase 6 — `<EntityDetailModal>` — read-only entity detail surface
 
-> Scope: clicking an entity row in the admin panels (carriers first; vehicles, trailers, drivers later) opens a **centered, read-only detail modal** instead of the edit drawer. The modal carries a primary **«Edytuj»** action; clicking it **closes the detail modal and opens the existing edit `<Sheet>`** (`CarrierSheet` etc.) exactly as today. The edit form is unchanged — the detail modal is the only new surface.
+> Scope: clicking an entity row in the admin panels (carriers first; vehicles, trailers, drivers later) opens a **centered, read-only detail modal** instead of the edit drawer. In an **editable context** (admin / opiekun) the modal carries a primary **«Edytuj»** action; clicking it **closes the detail modal and opens the existing edit `<Sheet>`** (`CarrierSheet` etc.) exactly as today. The «Edytuj» action is **optional** — in a **read-only context** (e.g. a carrier viewing their own fleet entities, which they have no rights to edit) the consumer omits the edit handler and the footer renders **only «Zamknij»** (see §6.6 / §6.9). The edit form is unchanged — the detail modal is the only new surface.
 >
 > **No new color / radius / shadow / font tokens.** The component composes strictly from the existing brand palette, semantic colors, the radius scale (`8 / 12 / 14 / 16px`), `shadow-modal`, and `animate-modal-in`. It builds on the existing hand-rolled `components/ui/Dialog.tsx` primitive.
 >
@@ -2421,21 +2421,29 @@ This is the heart of the pattern. **A value is text, not a disabled input.** Rea
 A fixed (`shrink-0`) zone with a top divider — never scrolls.
 
 ```
+  Editable context (admin / opiekun — onEdit supplied):
             border-t border-border above the footer zone
 ┌──────────────────────────────────────────────────────────┐
 │  Utworzono 2024-01-12 · Zaktualizowano 2024-03-04        │
 │                                  [ Zamknij ]  [ Edytuj ] │
 └──────────────────────────────────────────────────────────┘
+
+  Read-only context (carrier viewing own fleet — onEdit omitted):
+            border-t border-border above the footer zone
+┌──────────────────────────────────────────────────────────┐
+│  Utworzono 2024-01-12 · Zaktualizowano 2024-03-04        │
+│                                              [ Zamknij ] │
+└──────────────────────────────────────────────────────────┘
 ```
 
 | Element | Spec |
 |---|---|
-| Layout | `flex items-center justify-between gap-3`. Left slot: **meta line**. Right slot: action buttons. |
-| Meta line (left) | `text-xs text-text-sub` — `createdAt` / `updatedAt` rendered with the date formatter (date + time). Format: `Utworzono {date} · Zaktualizowano {date}`. On narrow viewports this line drops below the buttons (see § 6.7) or is hidden if space-constrained — the same data also appears in the body Meta area, so the footer copy is a convenience, not the only home for it. **Decision:** put `createdAt`/`updatedAt` **in the footer meta line** as the canonical placement; do not also add a Meta section card in the body. The onboarding flags live in the header badges. This keeps the body purely the 5 domain sections. |
-| Secondary action | `<Button variant="ghost">Zamknij</Button>` — closes the modal (`onOpenChange(false)`). Equivalent to the `✕` and Escape. |
-| Primary action | `<Button variant="default">` (brand-red) with a leading Lucide `<Pencil size={14}>` icon, label **«Edytuj»**. On click: **close the detail modal, then open the edit `<Sheet>`** for this entity. The generic component exposes this as an `onEdit` callback prop — the page wires `onEdit` to "set edit target + open sheet" after the modal closes. |
+| Layout | `flex items-center justify-between gap-3`. Left slot: **meta line**. Right slot: action button(s). |
+| Meta line (left) | `text-xs text-text-sub` — `createdAt` / `updatedAt` rendered with the date formatter (date + time). Format: `Utworzono {date} · Zaktualizowano {date}`. On narrow viewports this line drops below the buttons (see § 6.7) or is hidden if space-constrained — the same data also appears in the body Meta area, so the footer copy is a convenience, not the only home for it. **Decision:** put `createdAt`/`updatedAt` **in the footer meta line** as the canonical placement; do not also add a Meta section card in the body. The onboarding flags live in the header badges. This keeps the body purely the 5 domain sections. The meta line renders in **both** contexts (editable and read-only) — it is independent of the edit action. |
+| Secondary action | `<Button variant="ghost">Zamknij</Button>` — closes the modal (`onOpenChange(false)`). Equivalent to the `✕` and Escape. **Always rendered** in both contexts. |
+| Primary action (**optional**) | `<Button variant="default">` (brand-red) with a leading Lucide `<Pencil size={14}>` icon, label **«Edytuj»**. On click: **close the detail modal, then open the edit `<Sheet>`** for this entity. The generic component exposes this as an `onEdit` callback prop — the page wires `onEdit` to "set edit target + open sheet" after the modal closes. **This action is conditional:** it renders **only when the consumer supplies an edit handler** (`onEdit`). When `onEdit` is omitted — the **read-only context**, e.g. a carrier viewing their own fleet entity, which they have no rights to edit — the «Edytuj» button is **not rendered at all** and the footer shows **only «Zamknij»** alongside the meta line. No «Edytuj», no replacement action: the read-only footer is intentionally minimal. *Rationale:* carriers have no edit rights over fleet entities (vehicles / drivers / trailers), so the modal is a pure read surface for them; the page-level «Kontakt z opiekunem» link on the carrier fleet pages is their channel for requesting changes — there is no contact affordance inside the modal. |
 | Sticky? | The footer is **fixed within the modal** (it is a flex `shrink-0` zone, always visible) — it does not need `position: sticky` because the body, not the modal, scrolls. Functionally always-visible. |
-| Touch targets | Buttons keep `size="sm"` height ≥ the 36–40px button standard; the primary «Edytuj» must be ≥44px tall on touch viewports — web-agent: ensure `min-h-[44px]` on mobile or use the default (non-`sm`) Button size below `sm`. |
+| Touch targets | Buttons keep `size="sm"` height ≥ the 36–40px button standard; the primary «Edytuj» (when present) must be ≥44px tall on touch viewports — web-agent: ensure `min-h-[44px]` on mobile or use the default (non-`sm`) Button size below `sm`. The same touch-target floor applies to «Zamknij» when it is the sole footer button. |
 
 ### 6.7 Responsive behavior
 
@@ -2465,7 +2473,7 @@ The component is entity-agnostic. Shape the props so any entity maps cleanly:
 | `badges` | `ReactNode` — the header badge row (status + onboarding). Entity wrapper builds it. |
 | `sections` | Ordered array. Each section: `{ title, icon?, rows }`. Each row: `{ label, value }` where `value` is `ReactNode` (string, `—`, mono span, badge…). The wrapper is responsible for formatting (dates, money, mono, em-dash for null). |
 | `meta` | Optional `ReactNode` for the footer-left meta line (created/updated). |
-| `onEdit` | Callback for the primary «Edytuj» action. The component closes itself, then invokes `onEdit`. |
+| `onEdit` *(optional)* | Callback for the primary «Edytuj» action. The component closes itself, then invokes `onEdit`. **Optional:** when supplied (admin / opiekun context) the «Edytuj» button renders; when **omitted** (read-only context — e.g. a carrier viewing their own fleet, which they cannot edit) the component renders the **read-only footer**: meta line + «Zamknij» only, no «Edytuj». The presence of the edit button is driven solely by whether `onEdit` is passed. |
 
 `CarrierDetailModal` is the thin wrapper: takes a `CarrierDto`, maps it into the 5 sections below, builds the badge row, builds the meta line, and forwards `onEdit` to the page (which opens `CarrierSheet`).
 

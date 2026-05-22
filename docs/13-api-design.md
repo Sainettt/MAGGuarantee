@@ -138,16 +138,16 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 
 ### Vehicles — `/api/v1/vehicles`
 
-> Роль: `admin` (все), `opiekun` (свои перевозчики), `przewoznik` (свои авто, read + ограниченные write — PATCH/deactivate/reactivate, no create/delete). **Не `pracownik`.** Phase 3 enforcement: `@Roles('admin', 'opiekun')` для POST/DELETE, `@Roles('admin', 'opiekun', 'przewoznik')` для GET/PATCH/deactivate/reactivate. См. `apps/api/src/modules/vehicles/vehicles.controller.ts`.
+> Роль: `admin` (все), `opiekun` (свои перевозчики), `przewoznik` (свои авто — **read-only**: GET list/detail/attachments only, никаких write). **Не `pracownik`.** Enforcement: все mutating-эндпоинты (POST/PATCH/deactivate/reactivate/DELETE) — `@Roles('admin', 'opiekun')`; GET-эндпоинты — `@Roles('admin', 'opiekun', 'planista', 'dyspozytor', 'przewoznik')`. Перевозчик флоту не редактирует — carrier-панель render-ит её read-only (consistent с trailers). См. `apps/api/src/modules/vehicles/vehicles.controller.ts`.
 
 | Method + Path | GAS | Роль |
 |---|---|---|
 | GET `/vehicles?carrierId=...` | `getVehiclesForCarrier` / `getMyVehicles` (carrier) / `getAllVehiclesForAdmin` | admin / opiekun / planista / dyspozytor / przewoznik |
 | GET `/vehicles/:id` | `getVehicleDetails` | admin / opiekun / planista / dyspozytor / przewoznik |
 | POST `/vehicles` | `addVehicle` / `addVehicleByOpiekun` | admin / opiekun — **`multipart/form-data`** |
-| PATCH `/vehicles/:id` | `updateVehicleDetails` / `updateVehicleDetailsByOpiekun` | admin / opiekun / przewoznik — **`multipart/form-data`** |
-| POST `/vehicles/:id/deactivate` | `toggleVehicleActive` (off) | admin / opiekun / przewoznik |
-| POST `/vehicles/:id/reactivate` | (on) | admin / opiekun / przewoznik |
+| PATCH `/vehicles/:id` | `updateVehicleDetails` / `updateVehicleDetailsByOpiekun` | admin / opiekun — **`multipart/form-data`** |
+| POST `/vehicles/:id/deactivate` | `toggleVehicleActive` (off) | admin / opiekun |
+| POST `/vehicles/:id/reactivate` | (on) | admin / opiekun |
 | DELETE `/vehicles/:id` | `removeVehicle` / `removeVehicleByOpiekun` | admin / opiekun |
 | GET `/vehicles/active?login=...` | `getActiveVehiclesForLogin` (для carrier-login dropdown) | — |
 | GET `/vehicles/:id/attachments` | (новое) — список umowa/cabotage-вложений | admin / opiekun / planista / dyspozytor / przewoznik |
@@ -220,21 +220,21 @@ soft-delete'ятся (объект в MinIO остаётся).
 
 ### Drivers — `/api/v1/drivers`
 
-> Роль: `admin` (все), `opiekun` (свои), `przewoznik` (свои). **Не `pracownik`.**
+> Роль: `admin` (все), `opiekun` (свои), `przewoznik` (свои — **read-only**: GET list/detail only, никаких write). **Не `pracownik`.** Enforcement: все mutating-эндпоинты (POST/PATCH/deactivate/reactivate/DELETE) — `@Roles('admin', 'opiekun')`; GET-эндпоинты — `@Roles('admin', 'opiekun', 'przewoznik')`. Перевозчик водителей не редактирует — carrier-панель render-ит их read-only (consistent с trailers). См. `apps/api/src/modules/drivers/drivers.controller.ts`.
 
-| Method + Path | GAS |
-|---|---|
-| GET `/drivers?carrierId=...` | `getDriversList` / `getMyDrivers` |
-| GET `/drivers/:id` | `getDriverDetails` |
-| POST `/drivers` | `addDriver` / `addDriverByOpiekun` / `addMyDriver` |
-| PATCH `/drivers/:id` | `updateDriver` / `updateMyDriver` / `updateDriverByOpiekun` |
-| POST `/drivers/:id/deactivate` | `toggleDriverActive` |
-| POST `/drivers/:id/reactivate` | |
-| DELETE `/drivers/:id` | `removeDriver` / `removeMyDriver` / `removeDriverByOpiekun` |
+| Method + Path | GAS | Роль |
+|---|---|---|
+| GET `/drivers?carrierId=...` | `getDriversList` / `getMyDrivers` | admin / opiekun / przewoznik |
+| GET `/drivers/:id` | `getDriverDetails` | admin / opiekun / przewoznik |
+| POST `/drivers` | `addDriver` / `addDriverByOpiekun` | admin / opiekun |
+| PATCH `/drivers/:id` | `updateDriver` / `updateDriverByOpiekun` | admin / opiekun |
+| POST `/drivers/:id/deactivate` | `toggleDriverActive` | admin / opiekun |
+| POST `/drivers/:id/reactivate` | | admin / opiekun |
+| DELETE `/drivers/:id` | `removeDriver` / `removeDriverByOpiekun` | admin / opiekun |
 
 ### Trailers — `/api/v1/trailers`
 
-> Роль: `admin` (все), `opiekun` (свои), `przewoznik` (свои — read + create/update/deactivate, **NO delete**). **Не `pracownik`.** Phase 3 enforcement: `@Roles('admin', 'opiekun')` для DELETE; все остальные — `@Roles('admin', 'opiekun', 'przewoznik')`. См. `apps/api/src/modules/trailers/trailers.controller.ts`.
+> Роль: `admin` (все), `opiekun` (свои), `przewoznik` (свои — **read-only**: только GET list/detail, никаких write). **Не `pracownik`.** Enforcement: все mutating-эндпоинты (POST/PATCH/deactivate/reactivate/DELETE) — `@Roles('admin', 'opiekun')`; GET-эндпоинты — `@Roles('admin', 'opiekun', 'przewoznik')`. Перевозчик прицепы не редактирует — carrier-панель render-ит их read-only (consistent с vehicles). См. `apps/api/src/modules/trailers/trailers.controller.ts`.
 
 | Method + Path | GAS |
 |---|---|

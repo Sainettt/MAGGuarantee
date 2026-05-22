@@ -6,11 +6,15 @@
 //
 // The component knows nothing about "carrier" — callers pass a title, optional
 // subtitle/badges, an ordered list of sections (each an ordered list of
-// label/value rows), an optional footer meta node, and an onEdit callback.
+// label/value rows), an optional footer meta node, and an optional onEdit
+// callback.
 //
 // Read-only values are <dd> text nodes — NOT disabled <input>s (§6.5, §6.12).
 // The «Edytuj» primary action closes this modal, then invokes onEdit so the
 // caller can open the edit <Sheet> — the two are never open simultaneously.
+// When `onEdit` is omitted (read-only consumer, e.g. a carrier viewing its own
+// fleet), the «Edytuj» button is not rendered and the footer shows only
+// «Zamknij» alongside the meta line (§6.6).
 
 import { Pencil } from 'lucide-react';
 import { useTranslations } from 'next-intl';
@@ -53,8 +57,10 @@ export interface EntityDetailModalProps {
   sections: EntityDetailSection[];
   /** Optional footer-left meta line (created / updated). */
   meta?: ReactNode;
-  /** Primary «Edytuj» action — the modal closes itself, then calls this. */
-  onEdit: () => void;
+  /** Optional primary «Edytuj» action — the modal closes itself, then calls
+   *  this. When omitted, the «Edytuj» button is not rendered and the footer
+   *  shows only «Zamknij» (read-only consumers, §6.6). */
+  onEdit?: () => void;
 }
 
 export function EntityDetailModal({
@@ -70,10 +76,11 @@ export function EntityDetailModal({
   const t = useTranslations('entityDetail');
 
   // «Edytuj» — close this modal first, then hand off to the caller so the
-  // edit <Sheet> opens on a clean stack (§6.0, §6.6, §6.12).
+  // edit <Sheet> opens on a clean stack (§6.0, §6.6, §6.12). Only wired when
+  // the consumer supplies `onEdit`; read-only consumers omit it entirely.
   const handleEdit = () => {
     onOpenChange(false);
-    onEdit();
+    onEdit?.();
   };
 
   return (
@@ -156,23 +163,29 @@ export function EntityDetailModal({
               <span />
             )}
             <div className="flex items-center justify-end gap-2">
+              {/* «Zamknij» — always present. When it is the sole footer
+                  button (read-only consumer, no «Edytuj»), it keeps the
+                  ≥44px touch-target floor on mobile (§6.6). */}
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
+                className={cn(onEdit == null && 'min-h-[44px] sm:min-h-0')}
                 onClick={() => onOpenChange(false)}
               >
                 {t('close')}
               </Button>
-              <Button
-                type="button"
-                size="sm"
-                className="min-h-[44px] gap-1.5 sm:min-h-0"
-                onClick={handleEdit}
-              >
-                <Pencil size={14} aria-hidden="true" />
-                {t('edit')}
-              </Button>
+              {onEdit != null ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="min-h-[44px] gap-1.5 sm:min-h-0"
+                  onClick={handleEdit}
+                >
+                  <Pencil size={14} aria-hidden="true" />
+                  {t('edit')}
+                </Button>
+              ) : null}
             </div>
           </div>
         </div>

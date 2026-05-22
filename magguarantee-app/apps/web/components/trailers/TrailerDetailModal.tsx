@@ -36,8 +36,10 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   trailer: TrailerDto | null;
-  /** Forwarded to the generic «Edytuj» action — the page opens TrailerSheet. */
-  onEdit: () => void;
+  /** Forwarded to the generic «Edytuj» action — the page opens TrailerSheet.
+   *  Omit it for read-only consumers: the «Edytuj» button is then not
+   *  rendered (§6.6). */
+  onEdit?: () => void;
 }
 
 export function TrailerDetailModal({

@@ -33,8 +33,10 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   driver: DriverDto | null;
-  /** Forwarded to the generic «Edytuj» action — the page opens DriverSheet. */
-  onEdit: () => void;
+  /** Forwarded to the generic «Edytuj» action — the page opens DriverSheet.
+   *  Omit it for read-only consumers: the «Edytuj» button is then not
+   *  rendered (§6.6). */
+  onEdit?: () => void;
 }
 
 export function DriverDetailModal({

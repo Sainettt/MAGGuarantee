@@ -144,7 +144,7 @@
 7. Guards:
    - `RolesGuard` из [15-auth-strategy.md](15-auth-strategy.md).
    - `OpiekunOwnershipGuard` для opiekun-эндпоинтов.
-   - `CarrierOwnershipGuard` для carrier-эндпоинтов (свои авто/водители/прицепы).
+   - `CarrierOwnershipGuard` для carrier-эндпоинтов (read-доступ к своим авто/водителям/прицепам — мутации этих сущностей делает только admin/opiekun).
 8. Audit interceptor (минимальный): декоратор `@Audit('createCarrier')` пишет в `audit_log`.
 9. Lookups endpoints (`/lookups/dyspozytor`, `/lookups/planisci`, `/lookups/opiekuni`, `/lookups/cert-types`).
 10. Внешние интеграции: VIES, Biała Lista, info-car (см. [16-jobs-and-integrations.md](16-jobs-and-integrations.md#внешние-rest-интеграции)).
@@ -171,7 +171,7 @@
 
 ## Фаза 3 — Przewoznik (carrier) panel (≈ 2 недели)
 
-**Цель:** перевозчик может полностью пользоваться приложением — подавать wnioski, видеть свои, управлять водителями/прицепами, регистрировать выезды.
+**Цель:** перевозчик может полностью пользоваться приложением — подавать wnioski, видеть свои, просматривать свою флоту (авто/водители/прицепы — read-only), регистрировать выезды.
 
 ### Backend
 
@@ -203,9 +203,9 @@
 2. `app/(carrier)/claims/page.tsx`: список wniosków (TanStack Query), фильтры по статусу/авто/поиск, дизайн `.claim-card`.
 3. `app/(carrier)/claims/new/page.tsx`: большая форма с live-preview (debounced `POST /claims/.../preview` после каждого изменения).
 4. `app/(carrier)/claims/[nrZgl]/page.tsx`: деталь + кнопка «Reklamacja» если статус позволяет.
-5. `app/(carrier)/fleet/vehicles/page.tsx`: список своих авто (read-only — добавление через admin/opiekun).
-6. `app/(carrier)/fleet/drivers/page.tsx`: CRUD водителей.
-7. `app/(carrier)/fleet/trailers/page.tsx`: CRUD прицепов.
+5. `app/(carrier)/fleet/vehicles/page.tsx`: список своих авто (read-only — управление через admin/opiekun).
+6. `app/(carrier)/fleet/drivers/page.tsx`: список своих водителей (read-only — управление через admin/opiekun).
+7. `app/(carrier)/fleet/trailers/page.tsx`: список своих прицепов (read-only — управление через admin/opiekun).
 8. `app/(carrier)/delegations/page.tsx`: список выездов с фильтром.
 9. `app/(carrier)/delegations/new/page.tsx`: форма addDelegacja.
 

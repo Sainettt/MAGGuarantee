@@ -135,10 +135,13 @@ export class VehiclesController {
     return this.vehicles.create(user, dto, uploads);
   }
 
+  // Carriers are view-only for vehicles — the carrier panel renders a
+  // read-only list/detail. Only admin/opiekun reach the mutating handlers,
+  // so CarrierOwns is intentionally absent (opiekun-ownership is enough).
+  // Mirrors the trailers controller pattern.
   @Patch(':id')
-  @Roles('admin', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun')
   @OpiekunOwns('id', 'param', 'vehicleId')
-  @CarrierOwns('id', 'param', 'vehicleId')
   @UseInterceptors(
     FileFieldsInterceptor(ATTACHMENT_UPLOAD_FIELDS, MULTIPART_OPTIONS),
   )
@@ -162,9 +165,8 @@ export class VehiclesController {
 
   @Post(':id/deactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun')
   @OpiekunOwns('id', 'param', 'vehicleId')
-  @CarrierOwns('id', 'param', 'vehicleId')
   @Audit({
     action: 'deactivateVehicle',
     targetType: 'Vehicle',
@@ -178,9 +180,8 @@ export class VehiclesController {
 
   @Post(':id/reactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun')
   @OpiekunOwns('id', 'param', 'vehicleId')
-  @CarrierOwns('id', 'param', 'vehicleId')
   @Audit({
     action: 'reactivateVehicle',
     targetType: 'Vehicle',

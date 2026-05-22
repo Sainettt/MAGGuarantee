@@ -769,12 +769,11 @@
       },
       "drivers": {
         "title": "Drivers",
-        "newDriver": "New driver",
-        "editDriver": "Edit driver",
+        "contactOpiekun": "Contact your manager",
+        "contactOpiekunSubject": "Driver data change",
         "searchPlaceholder": "Search by first / last name",
         "emptyTitle": "No drivers",
-        "emptyMessage": "Add the first driver of your company.",
-        "editAriaLabel": "Edit {name}",
+        "emptyMessage": "Contact your manager to add a driver.",
         "columns": {
           "name": "Full name",
           "phone": "Phone",

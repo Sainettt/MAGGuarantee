@@ -1,47 +1,41 @@
 'use client';
 
-// Phase 3 — carrier-scoped drivers CRUD. Same Sheet pattern as the employee
-// page, but `carrierId` is auto-injected from the carrier's session via
-// <DriverSheetCarrier>. The list query is implicitly scoped by the API.
+// Phase 3 — carrier-scoped driver list. READ-ONLY: drivers are managed by
+// admin/opiekun, the carrier can only see them (mirror of the vehicles and
+// trailers carrier pages). Carriers are backend-locked out of driver
+// mutations, so this page exposes no create/edit surface.
 
-import { Pencil, Plus } from 'lucide-react';
+import { Mail } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useMemo, useState } from 'react';
 import type { DriverDto } from '@magguarantee/shared';
 
+import { DriverDetailModal } from '@/components/drivers/DriverDetailModal';
 import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { useDrivers } from '@/lib/hooks/useDrivers';
-import { useMyCarrierId } from '@/lib/hooks/useMyCarrierId';
-
-import { DriverSheetCarrier } from './DriverSheetCarrier';
 
 export default function CarrierDriversPage() {
   const t = useTranslations('carrier.fleet.drivers');
   const tColumns = useTranslations('carrier.fleet.drivers.columns');
   const tCommon = useTranslations('common');
   const [search, setSearch] = useState('');
-  const carrierIdQ = useMyCarrierId();
-  const carrierId = carrierIdQ.data ?? null;
 
   const { data, isLoading } = useDrivers({
     q: search.length >= 2 ? search : undefined,
     limit: 50,
   });
 
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const [target, setTarget] = useState<DriverDto | null>(null);
+  // Read-only detail modal — a plain row click opens it. Carriers cannot edit
+  // drivers, so no `onEdit` is passed (footer shows only «Zamknij», §6.6).
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailTarget, setDetailTarget] = useState<DriverDto | null>(null);
 
-  const openCreate = () => {
-    setTarget(null);
-    setSheetOpen(true);
-  };
-  const openEdit = (row: DriverDto) => {
-    setTarget(row);
-    setSheetOpen(true);
+  const openDetail = (row: DriverDto) => {
+    setDetailTarget(row);
+    setDetailOpen(true);
   };
 
   const columns = useMemo<DataTableColumn<DriverDto>[]>(
@@ -75,30 +69,11 @@ export default function CarrierDriversPage() {
             <Badge variant="muted">{tCommon('inactive')}</Badge>
           ),
       },
-      {
-        id: 'actions',
-        header: <span className="sr-only">{tCommon('actions')}</span>,
-        align: 'right',
-        cell: (row) => (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              openEdit(row);
-            }}
-            aria-label={t('editAriaLabel', {
-              name: `${row.firstName} ${row.lastName}`,
-            })}
-          >
-            <Pencil size={14} />
-            {tCommon('edit')}
-          </Button>
-        ),
-      },
     ],
-    [t, tColumns, tCommon],
+    [tColumns, tCommon],
   );
+
+  const mailtoSubject = encodeURIComponent(t('contactOpiekunSubject'));
 
   return (
     <section className="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-8">
@@ -106,10 +81,13 @@ export default function CarrierDriversPage() {
         <h1 className="text-2xl font-extrabold tracking-tight text-text">
           {t('title')}
         </h1>
-        <Button size="sm" onClick={openCreate} disabled={!carrierId}>
-          <Plus size={14} />
-          {t('newDriver')}
-        </Button>
+        <a
+          href={`mailto:opiekun@magtrans.eu?subject=${mailtoSubject}`}
+          className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand hover:text-brand-dark"
+        >
+          <Mail size={14} />
+          {t('contactOpiekun')}
+        </a>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-3 mb-4">
@@ -126,7 +104,7 @@ export default function CarrierDriversPage() {
         rows={data?.items ?? []}
         columns={columns}
         rowKey={(r) => r.id}
-        onRowClick={openEdit}
+        onRowClick={openDetail}
         isLoading={isLoading}
         empty={
           <EmptyState
@@ -136,11 +114,10 @@ export default function CarrierDriversPage() {
         }
       />
 
-      <DriverSheetCarrier
-        open={sheetOpen}
-        driver={target}
-        carrierId={carrierId}
-        onClose={() => setSheetOpen(false)}
+      <DriverDetailModal
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        driver={detailTarget}
       />
     </section>
   );
