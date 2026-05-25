@@ -61,6 +61,29 @@ export function TrailerDetailModal({
   const no = tCommon('no');
   const bool = (v: boolean | null | undefined) => boolValue(v, yes, no);
 
+  /**
+   * Boolean + optional count. When the flag is true and we have a numeric
+   * count, render `"Tak (N szt.)"` (PL) / `"Yes (N pcs.)"` (EN); when the flag
+   * is true without a count, fall back to plain "Tak"/"Yes"; null flag → em
+   * dash. Inlined here rather than promoted to a shared helper because no
+   * other entity-detail pairs a boolean with a count (per task brief).
+   */
+  const boolWithCount = (
+    flag: boolean | null | undefined,
+    count: number | null | undefined,
+  ): ReactNode => {
+    if (flag == null) return emptyValue();
+    if (flag === false) return <span>{no}</span>;
+    if (typeof count === 'number') {
+      return (
+        <span>
+          {yes} ({count} {tCommon('pcsShort')})
+        </span>
+      );
+    }
+    return <span>{yes}</span>;
+  };
+
   // ── Header badge row — only the status badge (no onboarding chips) ──
   const badges: ReactNode = trailer.active ? (
     <Badge variant="success">{tCommon('active')}</Badge>
@@ -117,20 +140,17 @@ export function TrailerDetailModal({
       title: t('sections.equipment'),
       icon: Package,
       rows: [
-        { label: f('belts'), value: bool(trailer.belts) },
-        { label: f('mats'), value: bool(trailer.mats) },
-        { label: f('airSuspension'), value: bool(trailer.airSuspension) },
-        { label: f('loadFromBack'), value: bool(trailer.loadFromBack) },
-        { label: f('loadFromSide'), value: bool(trailer.loadFromSide) },
-        { label: f('loadFromTop'), value: bool(trailer.loadFromTop) },
-        { label: f('slidingRoof'), value: bool(trailer.slidingRoof) },
         {
-          label: f('edschaSlidingRoof'),
-          value: bool(trailer.edschaSlidingRoof),
+          label: f('belts'),
+          value: boolWithCount(trailer.belts, trailer.beltsCount),
         },
+        {
+          label: f('mats'),
+          value: boolWithCount(trailer.mats, trailer.matsCount),
+        },
+        { label: f('airSuspension'), value: bool(trailer.airSuspension) },
         { label: f('certXl'), value: bool(trailer.certXl) },
         { label: f('multilock'), value: bool(trailer.multilock) },
-        { label: f('equipment'), value: textValue(trailer.equipment) },
         { label: f('notes'), value: textValue(trailer.notes) },
       ],
     },

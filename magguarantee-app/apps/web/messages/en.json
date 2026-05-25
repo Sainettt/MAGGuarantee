@@ -27,7 +27,8 @@
     "reactivate": "Reactivate",
     "clear": "Clear",
     "validationFailedToast": "Please fill in the highlighted fields",
-    "inactiveSuffix": "(inactive)"
+    "inactiveSuffix": "(inactive)",
+    "pcsShort": "pcs."
   },
   "forms": {
     "country": {
@@ -427,20 +428,16 @@
       "brand": "Brand",
       "model": "Model",
       "year": "Year",
-      "equipment": "Equipment",
       "nextInspectionDate": "Next inspection",
       "innerLength": "Inner length (m)",
       "innerWidth": "Inner width (m)",
       "innerHeight": "Inner height (m)",
       "capacity": "Capacity (t)",
       "belts": "Belts",
+      "beltsCount": "Belts count",
       "mats": "Mats",
+      "matsCount": "Mats count",
       "airSuspension": "Air suspension",
-      "loadFromBack": "Load from back",
-      "loadFromSide": "Load from side",
-      "loadFromTop": "Load from top",
-      "slidingRoof": "Sliding roof",
-      "edschaSlidingRoof": "Edscha sliding roof",
       "certXl": "XL Certificate",
       "multilock": "Multilock",
       "notes": "Notes",

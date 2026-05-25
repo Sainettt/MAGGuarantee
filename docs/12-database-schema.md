@@ -316,24 +316,20 @@ model Trailer {
   year               Int?
   active             Boolean     @default(true)
   addedAt            DateTime    @default(now())
-  equipment          String?
   nextInspectionDate DateTime?   @db.Date
 
-  belts             Boolean?
-  mats              Boolean?
-  innerLength       Decimal? @db.Decimal(8, 2)
-  innerWidth        Decimal? @db.Decimal(8, 2)
-  innerHeight       Decimal? @db.Decimal(8, 2)
-  capacity          Decimal? @db.Decimal(10, 2)
-  airSuspension     Boolean?
-  loadFromBack      Boolean?
-  loadFromSide      Boolean?
-  loadFromTop       Boolean?
-  slidingRoof       Boolean?
-  edschaSlidingRoof Boolean?
-  certXl            Boolean? // XL certification (load securing per EN 12642-XL)
-  multilock         Boolean? // multilock tie-down system
-  notes             String?
+  belts         Boolean?
+  beltsCount    Int?     // liczba pasów (nullable; UI/Zod enforce >= 0)
+  mats          Boolean?
+  matsCount     Int?     // liczba mat (nullable; UI/Zod enforce >= 0)
+  innerLength   Decimal? @db.Decimal(8, 2)
+  innerWidth    Decimal? @db.Decimal(8, 2)
+  innerHeight   Decimal? @db.Decimal(8, 2)
+  capacity      Decimal? @db.Decimal(10, 2)
+  airSuspension Boolean?
+  certXl        Boolean? // XL certification (load securing per EN 12642-XL)
+  multilock     Boolean? // multilock tie-down system
+  notes         String?
 
   delegations Delegation[]
 
@@ -834,6 +830,7 @@ populates both columns.
 | `20260521135930_vehicle_attachments_euro_v_vi_destinations` | Vehicle-modal feature. **Enum `EuroNorm`** сужен с `{III, IV, V, VI}` до `{V, VI}` — km-гарантийная программа ограничена EURO V/VI; БД greenfield, поэтому пересоздание типа безопасно. **`vehicles.contract`** (legacy Umowa boolean) удалён — скан умовы теперь хранится как строки `VehicleAttachment` с `category=contract`. **`vehicles.destinationCountries`** — новый `String[]` (ISO-3166-1 alpha-2; allowed-set валидируется в shared/Zod). Новый enum `VehicleAttachmentCategory { contract, cabotage_de, cabotage_fr }`. Новая таблица **`vehicle_attachments`** — метаданные файлов (umowa/cabotage скриншоты), сами байты в MinIO; FK на `vehicles` с `ON DELETE CASCADE`, FK на `users` (uploadedBy, nullable, `ON DELETE SET NULL`), soft-delete `deletedAt`, индекс `(vehicleId, category)`. |
 | `20260522120000_drop_vehicle_destination_countries_and_driver_bank_account` | Деструктивный `DROP COLUMN`: удаляет `vehicles.destinationCountries` (Kraje docelowe) и `drivers.bankAccount` (konto bankowe) — оба поля выпилены из продукта по продуктовому решению. Существующие значения теряются (подтверждено). `wasteCountries` не затронут. |
 | `20260525075517_vehicle_adr_trailer_certxl_multilock` | Чисто аддитивная миграция. `vehicles.adr` — `BOOLEAN NOT NULL DEFAULT false` (ADR permit flag, рядом с `cabotageDe`/`cabotageFr`). `trailers.certXl` и `trailers.multilock` — `BOOLEAN NULL` (трёх-состояние, как у соседних `belts`/`mats`/`airSuspension`). Enum `VehicleAttachmentCategory` получает значение `adr` (для ADR-сертификатов в vehicle-modal). Никаких DROP/ALTER на существующих колонках. |
+| `20260525084144_trailer_drop_equipment_and_loading_fields_add_belts_mats_count` | Деструктивная миграция на `trailers` (user-confirmed; dev-only data). **DROP COLUMN** на 6 полей: `equipment` (free-text), `slidingRoof`, `edschaSlidingRoof`, `loadFromBack`, `loadFromSide`, `loadFromTop` (boolean-флаги способа załadunku — выпилены из продукта). **ADD COLUMN** `beltsCount INTEGER NULL` (рядом с `belts`) и `matsCount INTEGER NULL` (рядом с `mats`) — счётчики, дополняющие boolean-флаги. Без `@default`, без CHECK `> 0` — UI/Zod enforce'ит `>= 0`. |
 
 Production deploy: `prisma migrate deploy` в CI/CD пайплайне (без `--create-only`).
 

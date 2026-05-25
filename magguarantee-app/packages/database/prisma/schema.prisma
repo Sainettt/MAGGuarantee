@@ -326,24 +326,20 @@ model Trailer {
   year               Int?
   active             Boolean     @default(true)
   addedAt            DateTime    @default(now())
-  equipment          String?
   nextInspectionDate DateTime?   @db.Date
 
-  belts             Boolean? // Pasy
-  mats              Boolean? // Maty
-  innerLength       Decimal? @db.Decimal(8, 2)
-  innerWidth        Decimal? @db.Decimal(8, 2)
-  innerHeight       Decimal? @db.Decimal(8, 2)
-  capacity          Decimal? @db.Decimal(10, 2)
-  airSuspension     Boolean? // Wyprez
-  loadFromBack      Boolean?
-  loadFromSide      Boolean?
-  loadFromTop       Boolean?
-  slidingRoof       Boolean?
-  edschaSlidingRoof Boolean?
-  certXl            Boolean?
-  multilock         Boolean?
-  notes             String?
+  belts         Boolean? // Pasy
+  beltsCount    Int? // Liczba pasów (nullable; UI/Zod enforce >= 0)
+  mats          Boolean? // Maty
+  matsCount     Int? // Liczba mat (nullable; UI/Zod enforce >= 0)
+  innerLength   Decimal? @db.Decimal(8, 2)
+  innerWidth    Decimal? @db.Decimal(8, 2)
+  innerHeight   Decimal? @db.Decimal(8, 2)
+  capacity      Decimal? @db.Decimal(10, 2)
+  airSuspension Boolean? // Wyprez
+  certXl        Boolean?
+  multilock     Boolean?
+  notes         String?
 
   delegations Delegation[]
 

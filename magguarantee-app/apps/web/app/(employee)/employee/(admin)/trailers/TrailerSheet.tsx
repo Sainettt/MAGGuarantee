@@ -69,6 +69,8 @@ const NUMERIC_FIELDS = [
   'innerWidth',
   'innerHeight',
   'capacity',
+  'beltsCount',
+  'matsCount',
 ] as const;
 
 export function TrailerSheet({
@@ -121,20 +123,16 @@ export function TrailerSheet({
         brand: trailer.brand ?? '',
         model: trailer.model ?? '',
         year: trailer.year ?? undefined,
-        equipment: trailer.equipment ?? '',
         nextInspectionDate: trailer.nextInspectionDate ?? undefined,
         belts: trailer.belts ?? false,
+        beltsCount: trailer.beltsCount ?? undefined,
         mats: trailer.mats ?? false,
+        matsCount: trailer.matsCount ?? undefined,
         innerLength: trailer.innerLength ?? undefined,
         innerWidth: trailer.innerWidth ?? undefined,
         innerHeight: trailer.innerHeight ?? undefined,
         capacity: trailer.capacity ?? undefined,
         airSuspension: trailer.airSuspension ?? false,
-        loadFromBack: trailer.loadFromBack ?? false,
-        loadFromSide: trailer.loadFromSide ?? false,
-        loadFromTop: trailer.loadFromTop ?? false,
-        slidingRoof: trailer.slidingRoof ?? false,
-        edschaSlidingRoof: trailer.edschaSlidingRoof ?? false,
         certXl: trailer.certXl ?? false,
         multilock: trailer.multilock ?? false,
         notes: trailer.notes ?? '',
@@ -190,6 +188,19 @@ export function TrailerSheet({
 
   const submitting = createM.isPending || updateM.isPending;
   const errs = form.formState.errors;
+
+  // Conditional count inputs — mirror the VehicleSheet cabotage/ADR pattern
+  // (form.watch + boolean compare). The count input is only rendered when its
+  // companion checkbox is on; flipping the checkbox off clears the count so it
+  // never leaks an orphaned value into the create/update payload.
+  const beltsOn = form.watch('belts') === true;
+  const matsOn = form.watch('mats') === true;
+  useEffect(() => {
+    if (!beltsOn) form.setValue('beltsCount', null as unknown as undefined);
+  }, [beltsOn, form]);
+  useEffect(() => {
+    if (!matsOn) form.setValue('matsCount', null as unknown as undefined);
+  }, [matsOn, form]);
 
   const handleClose = () => {
     if (isWizard) onExit?.();
@@ -424,40 +435,64 @@ export function TrailerSheet({
 
               <FormSection title={t('sections.equipment')}>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
-                  {(
-                    [
-                      'belts',
-                      'mats',
-                      'airSuspension',
-                      'loadFromBack',
-                      'loadFromSide',
-                      'loadFromTop',
-                      'slidingRoof',
-                      'edschaSlidingRoof',
-                      'certXl',
-                      'multilock',
-                    ] as const
-                  ).map((key) => (
-                    <label
-                      key={key}
-                      className="flex items-center gap-2 text-text"
-                    >
-                      <Checkbox {...form.register(key)} />
-                      {t(`fields.${key}`)}
+                  {/* belts + matching count input — count is revealed only
+                      when the checkbox is on (cabotage-pattern parity). */}
+                  <div className="flex flex-col gap-1">
+                    <label className="flex items-center gap-2 text-text">
+                      <Checkbox {...form.register('belts')} />
+                      {t('fields.belts')}
                     </label>
-                  ))}
+                    {beltsOn && (
+                      <Input
+                        id="trailer-beltsCount"
+                        type="number"
+                        min={0}
+                        step={1}
+                        inputMode="numeric"
+                        aria-label={t('fields.beltsCount')}
+                        placeholder={t('fields.beltsCount')}
+                        className="h-9 ml-6 max-w-[140px] animate-slide-in"
+                        {...form.register('beltsCount', {
+                          setValueAs: (v) =>
+                            v === '' || v === null ? undefined : Number(v),
+                        })}
+                      />
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="flex items-center gap-2 text-text">
+                      <Checkbox {...form.register('mats')} />
+                      {t('fields.mats')}
+                    </label>
+                    {matsOn && (
+                      <Input
+                        id="trailer-matsCount"
+                        type="number"
+                        min={0}
+                        step={1}
+                        inputMode="numeric"
+                        aria-label={t('fields.matsCount')}
+                        placeholder={t('fields.matsCount')}
+                        className="h-9 ml-6 max-w-[140px] animate-slide-in"
+                        {...form.register('matsCount', {
+                          setValueAs: (v) =>
+                            v === '' || v === null ? undefined : Number(v),
+                        })}
+                      />
+                    )}
+                  </div>
+                  {(['airSuspension', 'certXl', 'multilock'] as const).map(
+                    (key) => (
+                      <label
+                        key={key}
+                        className="flex items-center gap-2 text-text"
+                      >
+                        <Checkbox {...form.register(key)} />
+                        {t(`fields.${key}`)}
+                      </label>
+                    ),
+                  )}
                 </div>
-                <FormField
-                  label={t('fields.equipment')}
-                  error={errs.equipment?.message}
-                  htmlFor="trailer-equipment"
-                >
-                  <Textarea
-                    id="trailer-equipment"
-                    rows={2}
-                    {...form.register('equipment')}
-                  />
-                </FormField>
                 <FormField
                   label={t('fields.notes')}
                   error={errs.notes?.message}
@@ -554,20 +589,16 @@ function getDefaults(): FormValues {
     brand: '',
     model: '',
     year: undefined,
-    equipment: '',
     nextInspectionDate: undefined,
     belts: false,
+    beltsCount: undefined,
     mats: false,
+    matsCount: undefined,
     innerLength: undefined,
     innerWidth: undefined,
     innerHeight: undefined,
     capacity: undefined,
     airSuspension: false,
-    loadFromBack: false,
-    loadFromSide: false,
-    loadFromTop: false,
-    slidingRoof: false,
-    edschaSlidingRoof: false,
     certXl: false,
     multilock: false,
     notes: '',

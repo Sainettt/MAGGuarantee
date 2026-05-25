@@ -27,7 +27,8 @@
     "reactivate": "Aktywuj",
     "clear": "Wyczyść",
     "validationFailedToast": "Uzupełnij podświetlone pola",
-    "inactiveSuffix": "(nieaktywny)"
+    "inactiveSuffix": "(nieaktywny)",
+    "pcsShort": "szt."
   },
   "forms": {
     "country": {
@@ -427,20 +428,16 @@
       "brand": "Marka",
       "model": "Model",
       "year": "Rok",
-      "equipment": "Wyposażenie",
       "nextInspectionDate": "Następny przegląd",
       "innerLength": "Długość wewn. (m)",
       "innerWidth": "Szerokość wewn. (m)",
       "innerHeight": "Wysokość wewn. (m)",
       "capacity": "Ładowność (t)",
       "belts": "Pasy",
+      "beltsCount": "Liczba pasów",
       "mats": "Maty",
+      "matsCount": "Liczba mat",
       "airSuspension": "Zawieszenie pneum.",
-      "loadFromBack": "Załadunek tył",
-      "loadFromSide": "Załadunek bok",
-      "loadFromTop": "Załadunek góra",
-      "slidingRoof": "Dach przesuwany",
-      "edschaSlidingRoof": "Dach Edscha",
       "certXl": "Certyfikat XL",
       "multilock": "Multilock",
       "notes": "Notatki",

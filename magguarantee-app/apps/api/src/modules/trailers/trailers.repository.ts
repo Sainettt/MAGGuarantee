@@ -24,20 +24,16 @@ export interface TrailerRow {
   brand: string | null;
   model: string | null;
   year: number | null;
-  equipment: string | null;
   nextInspectionDate: Date | null;
   belts: boolean | null;
+  beltsCount: number | null;
   mats: boolean | null;
+  matsCount: number | null;
   innerLength: number | null;
   innerWidth: number | null;
   innerHeight: number | null;
   capacity: number | null;
   airSuspension: boolean | null;
-  loadFromBack: boolean | null;
-  loadFromSide: boolean | null;
-  loadFromTop: boolean | null;
-  slidingRoof: boolean | null;
-  edschaSlidingRoof: boolean | null;
   certXl: boolean | null;
   multilock: boolean | null;
   notes: string | null;
@@ -100,20 +96,16 @@ export class TrailersRepository {
     brand?: string | null;
     model?: string | null;
     year?: number | null;
-    equipment?: string | null;
     nextInspectionDate?: Date | null;
     belts?: boolean | null;
+    beltsCount?: number | null;
     mats?: boolean | null;
+    matsCount?: number | null;
     innerLength?: number | null;
     innerWidth?: number | null;
     innerHeight?: number | null;
     capacity?: number | null;
     airSuspension?: boolean | null;
-    loadFromBack?: boolean | null;
-    loadFromSide?: boolean | null;
-    loadFromTop?: boolean | null;
-    slidingRoof?: boolean | null;
-    edschaSlidingRoof?: boolean | null;
     certXl?: boolean | null;
     multilock?: boolean | null;
     notes?: string | null;
@@ -127,20 +119,16 @@ export class TrailersRepository {
         brand: data.brand ?? null,
         model: data.model ?? null,
         year: data.year ?? null,
-        equipment: data.equipment ?? null,
         nextInspectionDate: data.nextInspectionDate ?? null,
         belts: data.belts ?? null,
+        beltsCount: data.beltsCount ?? null,
         mats: data.mats ?? null,
+        matsCount: data.matsCount ?? null,
         innerLength: data.innerLength ?? null,
         innerWidth: data.innerWidth ?? null,
         innerHeight: data.innerHeight ?? null,
         capacity: data.capacity ?? null,
         airSuspension: data.airSuspension ?? null,
-        loadFromBack: data.loadFromBack ?? null,
-        loadFromSide: data.loadFromSide ?? null,
-        loadFromTop: data.loadFromTop ?? null,
-        slidingRoof: data.slidingRoof ?? null,
-        edschaSlidingRoof: data.edschaSlidingRoof ?? null,
         certXl: data.certXl ?? null,
         multilock: data.multilock ?? null,
         notes: data.notes ?? null,
@@ -199,20 +187,16 @@ export class TrailersRepository {
       brand: row.brand,
       model: row.model,
       year: row.year,
-      equipment: row.equipment,
       nextInspectionDate: row.nextInspectionDate,
       belts: row.belts,
+      beltsCount: row.beltsCount,
       mats: row.mats,
+      matsCount: row.matsCount,
       innerLength: decimalToNumber(row.innerLength),
       innerWidth: decimalToNumber(row.innerWidth),
       innerHeight: decimalToNumber(row.innerHeight),
       capacity: decimalToNumber(row.capacity),
       airSuspension: row.airSuspension,
-      loadFromBack: row.loadFromBack,
-      loadFromSide: row.loadFromSide,
-      loadFromTop: row.loadFromTop,
-      slidingRoof: row.slidingRoof,
-      edschaSlidingRoof: row.edschaSlidingRoof,
       certXl: row.certXl,
       multilock: row.multilock,
       notes: row.notes,
@@ -249,20 +233,16 @@ interface TrailerPrismaShape {
   brand: string | null;
   model: string | null;
   year: number | null;
-  equipment: string | null;
   nextInspectionDate: Date | null;
   belts: boolean | null;
+  beltsCount: number | null;
   mats: boolean | null;
+  matsCount: number | null;
   innerLength: { toNumber(): number } | number | null;
   innerWidth: { toNumber(): number } | number | null;
   innerHeight: { toNumber(): number } | number | null;
   capacity: { toNumber(): number } | number | null;
   airSuspension: boolean | null;
-  loadFromBack: boolean | null;
-  loadFromSide: boolean | null;
-  loadFromTop: boolean | null;
-  slidingRoof: boolean | null;
-  edschaSlidingRoof: boolean | null;
   certXl: boolean | null;
   multilock: boolean | null;
   notes: string | null;
