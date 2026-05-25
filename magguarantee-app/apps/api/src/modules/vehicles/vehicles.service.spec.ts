@@ -57,6 +57,7 @@ function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {
     wasteCountries: [],
     cabotageDe: false,
     cabotageFr: false,
+    adr: false,
     gpsMobilePhone: null,
     nextInspectionDate: null,
     sideNumber: null,
@@ -186,6 +187,7 @@ function makeVehiclesRepo(seed: VehicleRow[] = []): VehiclesRepository {
         gps: data.gps ?? false,
         cabotageDe: data.cabotageDe ?? false,
         cabotageFr: data.cabotageFr ?? false,
+        adr: data.adr ?? false,
       });
       rows.set(row.id, row);
       return row;
@@ -374,6 +376,7 @@ function createDto(overrides: Record<string, unknown> = {}) {
     wasteAllowed: false,
     cabotageDe: false,
     cabotageFr: false,
+    adr: false,
     ...REQUIRED_VEHICLE_FIELDS,
     ...overrides,
   } as Parameters<VehiclesService['create']>[1];

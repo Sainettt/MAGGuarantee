@@ -38,6 +38,8 @@ export interface TrailerRow {
   loadFromTop: boolean | null;
   slidingRoof: boolean | null;
   edschaSlidingRoof: boolean | null;
+  certXl: boolean | null;
+  multilock: boolean | null;
   notes: string | null;
   carrier: { id: string; login: string; name: string | null } | null;
   createdAt: Date;
@@ -112,6 +114,8 @@ export class TrailersRepository {
     loadFromTop?: boolean | null;
     slidingRoof?: boolean | null;
     edschaSlidingRoof?: boolean | null;
+    certXl?: boolean | null;
+    multilock?: boolean | null;
     notes?: string | null;
   }): Promise<TrailerRow> {
     const row = await this.prisma.client.trailer.create({
@@ -137,6 +141,8 @@ export class TrailersRepository {
         loadFromTop: data.loadFromTop ?? null,
         slidingRoof: data.slidingRoof ?? null,
         edschaSlidingRoof: data.edschaSlidingRoof ?? null,
+        certXl: data.certXl ?? null,
+        multilock: data.multilock ?? null,
         notes: data.notes ?? null,
       },
       include: this.includeShape(),
@@ -207,6 +213,8 @@ export class TrailersRepository {
       loadFromTop: row.loadFromTop,
       slidingRoof: row.slidingRoof,
       edschaSlidingRoof: row.edschaSlidingRoof,
+      certXl: row.certXl,
+      multilock: row.multilock,
       notes: row.notes,
       carrier: row.carrier
         ? {
@@ -255,6 +263,8 @@ interface TrailerPrismaShape {
   loadFromTop: boolean | null;
   slidingRoof: boolean | null;
   edschaSlidingRoof: boolean | null;
+  certXl: boolean | null;
+  multilock: boolean | null;
   notes: string | null;
   carrier: {
     id: string;

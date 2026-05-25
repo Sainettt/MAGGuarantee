@@ -29,6 +29,8 @@ export interface VehicleAttachmentUploads {
   cabotageDe?: File[];
   /** FR cabotage permit screenshots — multipart field `cabotageFr`. */
   cabotageFr?: File[];
+  /** ADR permit screenshots — multipart field `adr`. */
+  adr?: File[];
 }
 
 /** Scalar fields that must be JSON-encoded as multipart string parts. */
@@ -69,6 +71,7 @@ function toVehicleFormData(
   for (const file of files.contract ?? []) fd.append('contract', file);
   for (const file of files.cabotageDe ?? []) fd.append('cabotageDe', file);
   for (const file of files.cabotageFr ?? []) fd.append('cabotageFr', file);
+  for (const file of files.adr ?? []) fd.append('adr', file);
 
   return fd;
 }

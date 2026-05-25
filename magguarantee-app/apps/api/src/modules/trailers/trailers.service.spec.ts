@@ -47,6 +47,8 @@ function makeTrailer(overrides: Partial<TrailerRow> = {}): TrailerRow {
     loadFromTop: null,
     slidingRoof: null,
     edschaSlidingRoof: null,
+    certXl: null,
+    multilock: null,
     notes: null,
     carrier: { id: 'c-1', login: 'pwz1', name: null },
     createdAt: NOW,

@@ -44,6 +44,7 @@ export const ATTACHMENT_FILE_FIELDS: ReadonlyArray<{
   { field: 'contract', category: 'contract' },
   { field: 'cabotageDe', category: 'cabotage_de' },
   { field: 'cabotageFr', category: 'cabotage_fr' },
+  { field: 'adr', category: 'adr' },
 ];
 
 /** Max files accepted per category field in a single request. */

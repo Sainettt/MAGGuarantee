@@ -42,6 +42,8 @@ const trailerAttributeFields = {
   loadFromTop: z.boolean().optional(),
   slidingRoof: z.boolean().optional(),
   edschaSlidingRoof: z.boolean().optional(),
+  certXl: z.boolean().optional(),
+  multilock: z.boolean().optional(),
   notes: emptyStringToUndefined(z.string().max(2_000).optional()),
 };
 
@@ -91,6 +93,8 @@ export const UpdateTrailerSchema = z
     loadFromTop: z.boolean().nullable().optional(),
     slidingRoof: z.boolean().nullable().optional(),
     edschaSlidingRoof: z.boolean().nullable().optional(),
+    certXl: z.boolean().nullable().optional(),
+    multilock: z.boolean().nullable().optional(),
     notes: emptyStringToUndefined(z.string().max(2_000).nullable().optional()),
   })
   .strict();
@@ -141,6 +145,8 @@ export const TrailerDtoSchema = z.object({
   loadFromTop: z.boolean().nullable(),
   slidingRoof: z.boolean().nullable(),
   edschaSlidingRoof: z.boolean().nullable(),
+  certXl: z.boolean().nullable(),
+  multilock: z.boolean().nullable(),
   notes: z.string().nullable(),
   carrier: z
     .object({

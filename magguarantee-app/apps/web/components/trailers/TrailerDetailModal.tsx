@@ -128,6 +128,8 @@ export function TrailerDetailModal({
           label: f('edschaSlidingRoof'),
           value: bool(trailer.edschaSlidingRoof),
         },
+        { label: f('certXl'), value: bool(trailer.certXl) },
+        { label: f('multilock'), value: bool(trailer.multilock) },
         { label: f('equipment'), value: textValue(trailer.equipment) },
         { label: f('notes'), value: textValue(trailer.notes) },
       ],

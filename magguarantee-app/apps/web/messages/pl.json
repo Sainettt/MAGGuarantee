@@ -264,12 +264,15 @@
       "contractHint": "Załącz skan lub zdjęcie umowy — wymagane gdy GPS jest włączony.",
       "cabotageDe": "Zrzut ekranu pozwolenia kabotażowego DE",
       "cabotageFr": "Zrzut ekranu pozwolenia kabotażowego FR",
-      "cabotageHint": "Załącz skan lub zdjęcie pozwolenia kabotażowego."
+      "cabotageHint": "Załącz skan lub zdjęcie pozwolenia kabotażowego.",
+      "adr": "Zrzut ekranu pozwolenia ADR",
+      "adrHint": "Załącz skan lub zdjęcie pozwolenia ADR."
     },
     "required": {
       "contract": "Wymagany skan umowy gdy GPS jest włączony.",
       "cabotage_de": "Wymagany skan pozwolenia kabotażowego DE.",
-      "cabotage_fr": "Wymagany skan pozwolenia kabotażowego FR."
+      "cabotage_fr": "Wymagany skan pozwolenia kabotażowego FR.",
+      "adr": "Wymagany skan pozwolenia ADR."
     }
   },
   "multiSelect": {
@@ -346,6 +349,7 @@
       "wasteCountries": "Kraje odpadowe",
       "cabotageDe": "Kabotaż DE",
       "cabotageFr": "Kabotaż FR",
+      "adr": "ADR",
       "adrClasses": "Klasy ADR",
       "gb": "GB",
       "it": "IT",
@@ -367,7 +371,8 @@
     "attachmentCategory": {
       "contract": "Umowa",
       "cabotage_de": "Kabotaż DE",
-      "cabotage_fr": "Kabotaż FR"
+      "cabotage_fr": "Kabotaż FR",
+      "adr": "Pozwolenie ADR"
     },
     "attachmentOpen": "Otwórz",
     "attachmentOpenError": "Nie udało się otworzyć pliku. Spróbuj ponownie.",
@@ -436,6 +441,8 @@
       "loadFromTop": "Załadunek góra",
       "slidingRoof": "Dach przesuwany",
       "edschaSlidingRoof": "Dach Edscha",
+      "certXl": "Certyfikat XL",
+      "multilock": "Multilock",
       "notes": "Notatki",
       "active": "Aktywny"
     },

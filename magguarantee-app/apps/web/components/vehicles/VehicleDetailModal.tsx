@@ -188,6 +188,7 @@ export function VehicleDetailModal({
       title: t('sections.permissions'),
       icon: ShieldCheck,
       rows: [
+        { label: f('adr'), value: bool(vehicle.adr) },
         { label: f('adrClasses'), value: listValue(vehicle.adrClasses) },
         { label: f('wasteAllowed'), value: bool(vehicle.wasteAllowed) },
         { label: f('wasteCountries'), value: listValue(vehicle.wasteCountries) },

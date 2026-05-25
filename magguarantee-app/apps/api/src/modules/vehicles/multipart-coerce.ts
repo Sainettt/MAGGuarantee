@@ -32,6 +32,7 @@ const BOOLEAN_FIELDS = [
   'wasteAllowed',
   'cabotageDe',
   'cabotageFr',
+  'adr',
 ] as const;
 
 /** Field names that must be parsed as numbers. */

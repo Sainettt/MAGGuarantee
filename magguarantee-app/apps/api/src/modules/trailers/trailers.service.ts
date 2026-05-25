@@ -85,6 +85,8 @@ export class TrailersService {
         loadFromTop: dto.loadFromTop ?? null,
         slidingRoof: dto.slidingRoof ?? null,
         edschaSlidingRoof: dto.edschaSlidingRoof ?? null,
+        certXl: dto.certXl ?? null,
+        multilock: dto.multilock ?? null,
         notes: dto.notes ?? null,
       });
     } catch (err) {
@@ -128,6 +130,8 @@ export class TrailersService {
       'loadFromTop',
       'slidingRoof',
       'edschaSlidingRoof',
+      'certXl',
+      'multilock',
       'notes',
     ];
     for (const k of passthrough) {
@@ -281,6 +285,8 @@ export class TrailersService {
       loadFromTop: row.loadFromTop,
       slidingRoof: row.slidingRoof,
       edschaSlidingRoof: row.edschaSlidingRoof,
+      certXl: row.certXl,
+      multilock: row.multilock,
       notes: row.notes,
       carrier: row.carrier,
       createdAt: row.createdAt.toISOString(),

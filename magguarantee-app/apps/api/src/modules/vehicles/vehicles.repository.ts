@@ -61,6 +61,7 @@ export interface VehicleRow {
   wasteCountries: string[];
   cabotageDe: boolean;
   cabotageFr: boolean;
+  adr: boolean;
   gpsMobilePhone: string | null;
   nextInspectionDate: Date | null;
   sideNumber: string | null;
@@ -70,7 +71,7 @@ export interface VehicleRow {
   dispatcherId: string | null;
   dispatcher: { id: string; login: string; name: string | null } | null;
   carrier: { id: string; login: string; name: string | null } | null;
-  /** Non-deleted umowa/cabotage attachments (soft-delete extension filters). */
+  /** Non-deleted umowa/cabotage/adr attachments (soft-delete extension filters). */
   attachments: VehicleRowAttachment[];
   createdAt: Date;
   updatedAt: Date;
@@ -152,6 +153,7 @@ export class VehiclesRepository {
     wasteCountries?: string[];
     cabotageDe?: boolean;
     cabotageFr?: boolean;
+    adr?: boolean;
     /**
      * Nullable per Revert #2 — required iff `gps=true`. The CHECK constraint
      * `vehicle_gps_device_when_gps_on` rejects mismatches at the DB level;
@@ -191,6 +193,7 @@ export class VehiclesRepository {
         wasteCountries: data.wasteCountries ?? [],
         cabotageDe: data.cabotageDe ?? false,
         cabotageFr: data.cabotageFr ?? false,
+        adr: data.adr ?? false,
         gpsMobilePhone: data.gpsMobilePhone ?? null,
         nextInspectionDate: data.nextInspectionDate ?? null,
         sideNumber: data.sideNumber ?? null,
@@ -287,6 +290,7 @@ export class VehiclesRepository {
       wasteCountries: row.wasteCountries,
       cabotageDe: row.cabotageDe,
       cabotageFr: row.cabotageFr,
+      adr: row.adr,
       gpsMobilePhone: row.gpsMobilePhone,
       nextInspectionDate: row.nextInspectionDate,
       sideNumber: row.sideNumber,
@@ -360,6 +364,7 @@ interface VehiclePrismaShape {
   wasteCountries: string[];
   cabotageDe: boolean;
   cabotageFr: boolean;
+  adr: boolean;
   gpsMobilePhone: string | null;
   nextInspectionDate: Date | null;
   sideNumber: string | null;

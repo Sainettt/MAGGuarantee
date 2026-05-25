@@ -135,6 +135,8 @@ export function TrailerSheet({
         loadFromTop: trailer.loadFromTop ?? false,
         slidingRoof: trailer.slidingRoof ?? false,
         edschaSlidingRoof: trailer.edschaSlidingRoof ?? false,
+        certXl: trailer.certXl ?? false,
+        multilock: trailer.multilock ?? false,
         notes: trailer.notes ?? '',
       });
     } else {
@@ -432,6 +434,8 @@ export function TrailerSheet({
                       'loadFromTop',
                       'slidingRoof',
                       'edschaSlidingRoof',
+                      'certXl',
+                      'multilock',
                     ] as const
                   ).map((key) => (
                     <label
@@ -564,6 +568,8 @@ function getDefaults(): FormValues {
     loadFromTop: false,
     slidingRoof: false,
     edschaSlidingRoof: false,
+    certXl: false,
+    multilock: false,
     notes: '',
   };
 }

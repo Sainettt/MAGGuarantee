@@ -56,6 +56,7 @@ import {
  *   - `gps=true`        ⇒ ≥1 `contract`    attachment
  *   - `cabotageDe=true` ⇒ ≥1 `cabotage_de` attachment
  *   - `cabotageFr=true` ⇒ ≥1 `cabotage_fr` attachment
+ *   - `adr=true`        ⇒ ≥1 `adr`         attachment
  * On create the rule is checked BEFORE any DB/storage write. On update it
  * must hold over (existing live attachments + newly uploaded − removed).
  *
@@ -299,6 +300,7 @@ export class VehiclesService {
         wasteCountries: dto.wasteCountries ?? [],
         cabotageDe: dto.cabotageDe,
         cabotageFr: dto.cabotageFr,
+        adr: dto.adr,
         gpsMobilePhone: dto.gpsMobilePhone ?? null,
         nextInspectionDate: dto.nextInspectionDate
           ? new Date(dto.nextInspectionDate)
@@ -343,6 +345,7 @@ export class VehiclesService {
       'wasteCountries',
       'cabotageDe',
       'cabotageFr',
+      'adr',
       'gpsMobilePhone',
       'sideNumber',
     ];
@@ -499,6 +502,7 @@ export class VehiclesService {
       dto.gps ?? false,
       dto.cabotageDe ?? false,
       dto.cabotageFr ?? false,
+      dto.adr ?? false,
     );
     this._assertCategoriesSatisfied(required, present);
   }
@@ -518,10 +522,12 @@ export class VehiclesService {
       dto.cabotageDe !== undefined ? dto.cabotageDe : existing.cabotageDe;
     const nextCabotageFr =
       dto.cabotageFr !== undefined ? dto.cabotageFr : existing.cabotageFr;
+    const nextAdr = dto.adr !== undefined ? dto.adr : existing.adr;
     const required = this._requiredCategories(
       nextGps,
       nextCabotageDe,
       nextCabotageFr,
+      nextAdr,
     );
 
     const survivingExisting = existing.attachments.filter(
@@ -541,16 +547,18 @@ export class VehiclesService {
     return new Set(uploads.map((u) => u.category));
   }
 
-  /** Maps the three flags to the set of required attachment categories. */
+  /** Maps the four flags to the set of required attachment categories. */
   private _requiredCategories(
     gps: boolean,
     cabotageDe: boolean,
     cabotageFr: boolean,
+    adr: boolean,
   ): Set<VehicleAttachmentCategory> {
     const required = new Set<VehicleAttachmentCategory>();
     if (gps) required.add('contract');
     if (cabotageDe) required.add('cabotage_de');
     if (cabotageFr) required.add('cabotage_fr');
+    if (adr) required.add('adr');
     return required;
   }
 
@@ -720,6 +728,7 @@ export class VehiclesService {
       wasteCountries: row.wasteCountries,
       cabotageDe: row.cabotageDe,
       cabotageFr: row.cabotageFr,
+      adr: row.adr,
       gpsMobilePhone: row.gpsMobilePhone,
       nextInspectionDate: row.nextInspectionDate
         ? toDateString(row.nextInspectionDate)
@@ -747,6 +756,7 @@ const REQUIRED_ATTACHMENT_MESSAGES: Record<VehicleAttachmentCategory, string> =
       'Wymagany skan pozwolenia kabotażowego DE gdy cabotageDe=true',
     cabotage_fr:
       'Wymagany skan pozwolenia kabotażowego FR gdy cabotageFr=true',
+    adr: 'Wymagany skan certyfikatu ADR gdy adr=true',
   };
 
 /** Maps a standalone attachment repo row to the public DTO (no storageKey). */
