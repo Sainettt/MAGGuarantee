@@ -262,7 +262,7 @@
 
 **Открытые мелочи (не блокеры, фиксятся в нужном sub-slice-е):**
 
-- **AuditService vs AuditWriter coexist.** В `apps/api/src/common/audit/` остался Wave-2 fire-and-forget service (через `@Audit()` декоратор). В `apps/api/src/modules/audit/` — новый `AuditWriter` для in-`$transaction` записей. Решение от 2026-05-13: оставить оба, использовать `AuditWriter` для всех Phase 4+ mutating actions.
+- **Audit-инфраструктура унифицирована.** Wave-2 `AuditService` удалён. Единственный путь записи audit — `AuditWriter` через `AuditInterceptor`, который оборачивает handler в `prisma.$transaction` под `AsyncLocalStorage`-based `AuditContext`. Atomic audit гарантирован для всех `@Audit()`-помеченных эндпоинтов (mutation + audit-row коммитятся вместе или ни одна из них). Решено 2026-05-25, реализовано pre-Phase-4.4.
 - **Status-фильтр в claims list — single-select** (так позволяет `ClaimFiltersSchema` в `packages/shared`). Multi-select требует правки schema.
 - **Web-agent использовал `bg-input`** вместо `bg-bg-soft` упомянутого в DS (последнего токена нет в `globals.css`). Решить в uiux-доводке: либо добавить токен, либо стандартизировать DS на `bg-input`.
 - **`opiekun` тоже впущен в `/employee` shell** с пустым nav-ом (роль идёт через `lib/roles.ts:ROLE_LANDING.opiekun = '/employee'`). Не блокер для Phase 4, чинится естественно в Фазе 5 при добавлении opiekun-вкладки.
@@ -286,7 +286,7 @@
    - Урgent (NA_WERYFIKACJI > 3 days).
 7. ⏳ Endpoints для управления лимитами (`/limits` PUT). **Sub-slice 4.5.**
 8. ⏳ Управление справочниками типов прицепов (`/trailer-types`). **Sub-slice 4.4** (бэк CRUD уже есть; нужна полировка + audit-интеграция).
-9. ⏳ **Audit-log запись для всех mutating actions** (`createCarrier`, `updateClaim`, `setLimits`, ...). **Sub-slice 4.4** (инструмент `AuditWriter` готов в 4.0; ✅ интегрирован в `updateClaim`, осталось пройтись по carriers/vehicles/drivers/trailers/limits).
+9. ⏳ **Audit-log запись для всех mutating actions** (`createCarrier`, `updateClaim`, `setLimits`, ...). **Sub-slice 4.4** (инструмент `AuditWriter` готов в 4.0). Реализовано через декоратор `@Audit()` + ambient-tx interceptor — bulk-rename `prisma.client → prisma.tx` сделан pre-Phase-4.4, поэтому добавление новых audit-помеченных эндпоинтов автоматически попадает в атомарную транзакцию.
 
 ### Frontend
 

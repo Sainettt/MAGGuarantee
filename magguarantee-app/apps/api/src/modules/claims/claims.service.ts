@@ -26,6 +26,7 @@ import {
   DEFAULTS as CARRIER_SUBMISSION_DEFAULTS,
 } from '@magguarantee/shared';
 
+import { AuditContext } from '../../common/audit/audit-context';
 import { AuditWriter } from '../audit/audit.service';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { CarriersRepository } from '../carriers/carriers.repository';
@@ -312,59 +313,65 @@ export class ClaimsService {
       calc.totalDays > 0 ? round2(dto.mileage / calc.totalDays) : 0;
     const now = new Date();
 
+    // Pre-Phase-4.4: the `@Audit('submitClaim')` decorator on POST /claims
+    // makes the `AuditInterceptor` open the surrounding `prisma.$transaction`
+    // for us. Both the `nrZgl` counter bump and the claim insert run on the
+    // ambient tx via `this.prisma.tx` (cast to TransactionLike — its delegate
+    // surface is structurally compatible), and the audit row written by the
+    // interceptor on commit lands in the same tx. If the insert hits a
+    // P2002 the whole transaction rolls back — counter increment included
+    // — so no number is burned.
     let row: ClaimRow;
+    const txLike = this.prisma.tx as unknown as TransactionLike;
     try {
-      row = await this.prisma.$transaction(async (tx) => {
-        const txLike = tx as unknown as TransactionLike;
-        const nrZgl = await this.nrZgl.nextWithin(txLike, now);
-        return this.claims.createWithin(txLike, {
-          nrZgl,
-          carrierId: carrier.id,
-          vehicleId: vehicle.id,
-          vehiclePlateSnapshot: vehicle.plateNumber,
-          dateStart,
-          dateEnd,
-          // Required post-phase3_blocks (NOT NULL).
-          timeFrom: dto.timeFrom,
-          timeTo: dto.timeTo,
-          drivenDays: calc.totalDays,
-          mileage: dto.mileage,
-          // `kmPerDay` is NOT NULL post-phase3_blocks — calculated above.
-          kmPerDay,
-          kmGuaranteed: calc.kmGuaranteed,
-          kmDifference,
-          paymentEur,
-          ratePerKmEffective: calc.ratePerKmEffective,
-          breakdown,
-          status: 'NA_WERYFIKACJI',
-          statusChangedAt: now,
-          comment: dto.comment ?? null,
-          // Per Revert #1: `orderNumber` / `orderDate` are MAGTRANS-internal,
-          // assigned only on the verifier's transition to ZAAKCEPTOWANO. The
-          // carrier-side submit always persists NULL; the
-          // `claim_accepted_payment_complete` CHECK constraint enforces the
-          // invariant when status flips.
-          orderNumber: null,
-          orderDate: null,
-          // amountRequested derived from km-calc payment, not user input —
-          // legacy GAS allowed manual override, we don't. `paymentEur` is
-          // already `round2(...)` 2-dp rounded (or 0) so it fits Decimal(12,2)
-          // cleanly without further coercion.
-          amountRequested: paymentEur,
-          // Hours-adjustment is verifier-only: carriers cannot send it on
-          // submit, so both Decimal columns are seeded to 0. The verifier
-          // PATCH path may later mutate `hoursAdjustedValue` alone — see
-          // `_buildUpdatePatch` / `extractCorrectionFields`. `origHoursAdjusted`
-          // is the immutable carrier snapshot (set-once at submit, 0 forever).
-          origHoursAdjusted: 0,
-          hoursAdjustedValue: 0,
-          // Preserve the carrier's original (pre-verification) inputs, so
-          // the verifier can later see what the carrier actually submitted.
-          // Mirror of GAS columns AR-AV (`Code.gs:6272-6276`).
-          origDateStart: dateStart,
-          origDateEnd: dateEnd,
-          origMileage: dto.mileage,
-        });
+      const nrZgl = await this.nrZgl.nextWithin(txLike, now);
+      row = await this.claims.createWithin(txLike, {
+        nrZgl,
+        carrierId: carrier.id,
+        vehicleId: vehicle.id,
+        vehiclePlateSnapshot: vehicle.plateNumber,
+        dateStart,
+        dateEnd,
+        // Required post-phase3_blocks (NOT NULL).
+        timeFrom: dto.timeFrom,
+        timeTo: dto.timeTo,
+        drivenDays: calc.totalDays,
+        mileage: dto.mileage,
+        // `kmPerDay` is NOT NULL post-phase3_blocks — calculated above.
+        kmPerDay,
+        kmGuaranteed: calc.kmGuaranteed,
+        kmDifference,
+        paymentEur,
+        ratePerKmEffective: calc.ratePerKmEffective,
+        breakdown,
+        status: 'NA_WERYFIKACJI',
+        statusChangedAt: now,
+        comment: dto.comment ?? null,
+        // Per Revert #1: `orderNumber` / `orderDate` are MAGTRANS-internal,
+        // assigned only on the verifier's transition to ZAAKCEPTOWANO. The
+        // carrier-side submit always persists NULL; the
+        // `claim_accepted_payment_complete` CHECK constraint enforces the
+        // invariant when status flips.
+        orderNumber: null,
+        orderDate: null,
+        // amountRequested derived from km-calc payment, not user input —
+        // legacy GAS allowed manual override, we don't. `paymentEur` is
+        // already `round2(...)` 2-dp rounded (or 0) so it fits Decimal(12,2)
+        // cleanly without further coercion.
+        amountRequested: paymentEur,
+        // Hours-adjustment is verifier-only: carriers cannot send it on
+        // submit, so both Decimal columns are seeded to 0. The verifier
+        // PATCH path may later mutate `hoursAdjustedValue` alone — see
+        // `_buildUpdatePatch` / `extractCorrectionFields`. `origHoursAdjusted`
+        // is the immutable carrier snapshot (set-once at submit, 0 forever).
+        origHoursAdjusted: 0,
+        hoursAdjustedValue: 0,
+        // Preserve the carrier's original (pre-verification) inputs, so
+        // the verifier can later see what the carrier actually submitted.
+        // Mirror of GAS columns AR-AV (`Code.gs:6272-6276`).
+        origDateStart: dateStart,
+        origDateEnd: dateEnd,
+        origMileage: dto.mileage,
       });
     } catch (err) {
       // Translate "claim NrZgl already exists" (theoretically impossible
@@ -409,41 +416,30 @@ export class ClaimsService {
     user: AuthUser,
     nrZgl: string,
     dto: UpdateClaimDto,
-    ipAddress?: string,
+    _ipAddress?: string,
   ): Promise<ClaimDto> {
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const txLike = tx as unknown as TransactionLike;
-      const existing = await this._validateClaimUpdate(nrZgl, dto);
-      const recalc = await this._recalcClaim(existing, dto);
-      const patch = this._buildUpdatePatch(
-        existing,
-        dto,
-        recalc,
-        user,
-      );
-      const reklamacjaSnapshot = this._handleReklamacjaTransition(
-        existing,
-        dto,
-      );
-      const data: UpdateClaimData = { ...patch, ...reklamacjaSnapshot };
-      const next = await this.claims.updateWithin(txLike, existing.id, data);
+    // Pre-Phase-4.4: PATCH /claims/:nrZgl carries `@Audit('updateClaim')`,
+    // so the `AuditInterceptor` already opened a `prisma.$transaction` and
+    // we're running inside an `AuditContext`. The audit-row write happens
+    // automatically on commit — we no longer need to thread `tx` into the
+    // `AuditWriter.log(...)` call, nor open a service-side `$transaction`.
+    //
+    // Both the row update (`updateWithin` via the ambient tx) and the
+    // interceptor's audit-row insert commit atomically; if either throws
+    // the whole transaction rolls back.
+    //
+    // The `before` snapshot is stashed into the ambient `AuditContext` so
+    // the interceptor's writer picks it up — no manual log() call here.
+    const existing = await this._validateClaimUpdate(nrZgl, dto);
+    const recalc = await this._recalcClaim(existing, dto);
+    const patch = this._buildUpdatePatch(existing, dto, recalc, user);
+    const reklamacjaSnapshot = this._handleReklamacjaTransition(existing, dto);
+    const data: UpdateClaimData = { ...patch, ...reklamacjaSnapshot };
 
-      await this.auditWriter.log({
-        action: 'updateClaim',
-        targetType: 'Claim',
-        targetKey: existing.nrZgl,
-        before: this._snapshotForAudit(existing),
-        after: this._snapshotForAudit(next),
-        actor: {
-          userId: user.sub,
-          userRole: user.role,
-          ...(ipAddress ? { ipAddress } : {}),
-        },
-        tx,
-      });
+    AuditContext.setBefore(this._snapshotForAudit(existing));
 
-      return next;
-    });
+    const txLike = this.prisma.tx as unknown as TransactionLike;
+    const updated = await this.claims.updateWithin(txLike, existing.id, data);
 
     // Email notifications — outside the transaction. Mirrors submit/reklamacja.
     void this._applyDecisionEmails(updated).catch((err) => {
@@ -1190,7 +1186,7 @@ export class ClaimsService {
     workedDaysThreshold: number;
     vehicleCooldownDays: number;
   }> {
-    const rows = await this.prisma.client.appConfig.findMany({
+    const rows = await this.prisma.tx.appConfig.findMany({
       where: {
         key: {
           in: [
@@ -1310,14 +1306,14 @@ export class ClaimsService {
     const set = new Set<string>();
 
     // ADMIN — find the first user with role=admin and active=true.
-    const admin = await this.prisma.client.user.findFirst({
+    const admin = await this.prisma.tx.user.findFirst({
       where: { role: 'admin', active: true, deletedAt: null },
       select: { email: true },
     });
     if (admin?.email) set.add(admin.email.toLowerCase());
 
     // Carrier email lives on the underlying User row.
-    const carrier = await this.prisma.client.carrier.findFirst({
+    const carrier = await this.prisma.tx.carrier.findFirst({
       where: { id: row.carrierId },
       select: {
         user: { select: { email: true } },
@@ -1329,7 +1325,7 @@ export class ClaimsService {
 
     // Planista + lider — resolved via the vehicle's planner.
     if (row.vehicleId) {
-      const v = await this.prisma.client.vehicle.findFirst({
+      const v = await this.prisma.tx.vehicle.findFirst({
         where: { id: row.vehicleId },
         select: {
           planner: { select: { email: true, liderEmail: true } },
@@ -1346,13 +1342,13 @@ export class ClaimsService {
     row: ClaimRow,
   ): Promise<string[]> {
     const set = new Set<string>();
-    const admin = await this.prisma.client.user.findFirst({
+    const admin = await this.prisma.tx.user.findFirst({
       where: { role: 'admin', active: true, deletedAt: null },
       select: { email: true },
     });
     if (admin?.email) set.add(admin.email.toLowerCase());
 
-    const carrier = await this.prisma.client.carrier.findFirst({
+    const carrier = await this.prisma.tx.carrier.findFirst({
       where: { id: row.carrierId },
       select: { user: { select: { email: true } } },
     });

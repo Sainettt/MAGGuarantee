@@ -5,24 +5,44 @@ import {
   NestInterceptor,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { Observable, tap } from 'rxjs';
+import { defaultIfEmpty, firstValueFrom, from, type Observable } from 'rxjs';
+
+import type { Prisma } from '@magguarantee/database';
 
 import type { AuthUser } from '../../modules/auth/decorators/current-user.decorator';
+import { AuditWriter } from '../../modules/audit/audit.service';
+import type {
+  AuditActor,
+  AuditEntryInput,
+} from '../../modules/audit/audit.types';
+import { PrismaService } from '../../modules/prisma/prisma.service';
+import { AuditContext } from './audit-context';
 import { AUDIT_METADATA_KEY } from './audit.constants';
 import type { AuditableRequest, AuditConfig } from './audit.decorator';
-import { AuditService } from './audit.service';
 import { scrubForAudit } from './audit.scrub';
 
 /**
- * Reads `@Audit()` metadata and writes a row to `audit_log` after the
- * controller returns successfully.
+ * Reads `@Audit()` metadata and writes a row to `audit_log` in the SAME
+ * Prisma transaction as the controller's mutation.
  *
- * Behaviour, per docs/13-api-design.md#audit-на-уровне-api:
- *  - No `@Audit()` decorator → no-op.
- *  - Successful response (controller returns / observable next) → write.
- *  - Thrown exception → no write (the audit row would be misleading).
- *  - Audit write failures are logged but never propagated — the user's
- *    mutation already succeeded.
+ * Behaviour, per docs/13-api-design.md#audit-на-уровне-api + pre-Phase-4.4
+ * decision (atomic audit invariant):
+ *  - No `@Audit()` decorator → no-op (handler runs outside any transaction).
+ *  - With `@Audit()`:
+ *      1. Open `prisma.$transaction`.
+ *      2. Inside the tx callback, open `AuditContext.run({tx, actor, ip})`.
+ *      3. Inside the context, await the controller handler — anything it does
+ *         through `PrismaService.tx` enrolls into the same transaction.
+ *      4. After the handler resolves successfully, write the audit row using
+ *         `AuditWriter.log(...)` (which also picks up the ambient tx).
+ *      5. Commit — both rows persist atomically.
+ *  - Handler throws → transaction rolls back, audit row is never written.
+ *    Exception propagates to the global filter unchanged.
+ *  - `AuditWriter.log` throws (DB down, JSON too big, etc.) → transaction
+ *    rolls back too, the user's mutation is undone, and a 500 is surfaced.
+ *    This is intentional: losing the mutation is preferable to silently
+ *    losing the audit trail (docs/04-data-model.md treats audit as
+ *    non-optional for verification flows).
  *
  * Wired globally via `AuditModule` (APP_INTERCEPTOR).
  */
@@ -30,7 +50,8 @@ import { scrubForAudit } from './audit.scrub';
 export class AuditInterceptor implements NestInterceptor {
   constructor(
     private readonly reflector: Reflector,
-    private readonly audit: AuditService,
+    private readonly auditWriter: AuditWriter,
+    private readonly prisma: PrismaService,
   ) {}
 
   intercept(
@@ -49,49 +70,118 @@ export class AuditInterceptor implements NestInterceptor {
       }
     >();
 
-    return next.handle().pipe(
-      tap({
-        next: (result: unknown) => {
-          // fire-and-forget — never block the response on audit IO.
-          void this._emit(config, req, result);
-        },
-        // on error: do nothing. The exception filter will format the
-        // response; we deliberately don't write a row (per docs).
-      }),
-    );
+    return from(this._runWithAudit(config, req, next));
   }
 
   // ── internals ───────────────────────────────────────────
 
-  private async _emit(
+  /**
+   * Open a Prisma transaction, run the handler inside an `AuditContext`,
+   * write the audit row on success, and let any thrown error roll the whole
+   * thing back. Returns the handler's result on success so the rxjs adapter
+   * can forward it to the HTTP layer.
+   */
+  private async _runWithAudit(
     config: AuditConfig,
     req: AuditableRequest & { user?: AuthUser },
-    result: unknown,
-  ): Promise<void> {
-    const targetKey = this._safeTargetKey(config, req, result);
+    next: CallHandler,
+  ): Promise<unknown> {
+    const actor = this._resolveActor(req);
     const ipAddress = this._extractIp(req);
+
+    return this.prisma.$transaction(async (tx) => {
+      return AuditContext.run(
+        {
+          tx: tx as unknown as Prisma.TransactionClient,
+          actor,
+          ipAddress,
+        },
+        async () => {
+          // Convert the Observable returned by the next handler into a
+          // Promise so we can await its completion inside the transaction.
+          // `firstValueFrom` extracts the first emitted value; `defaultIfEmpty`
+          // gives a clean `undefined` for void controllers (HttpCode 204)
+          // instead of `firstValueFrom`'s default EmptyError.
+          const result = await firstValueFrom(
+            next.handle().pipe(defaultIfEmpty(undefined as unknown)),
+          );
+
+          await this._writeAuditRow({
+            config,
+            req,
+            result,
+            actor,
+            ipAddress,
+            tx: tx as unknown as Prisma.TransactionClient,
+          });
+
+          return result;
+        },
+      );
+    });
+  }
+
+  private async _writeAuditRow(args: {
+    config: AuditConfig;
+    req: AuditableRequest;
+    result: unknown;
+    actor: AuditActor;
+    ipAddress: string | null;
+    tx: Prisma.TransactionClient;
+  }): Promise<void> {
+    const { config, req, result, actor, tx } = args;
+    const targetKey = this._safeTargetKey(config, req, result);
     const userAgent = this._extractUserAgent(req);
     const after = config.omitResultBody ? undefined : scrubForAudit(result);
 
-    await this.audit.write({
-      userId: req.user?.sub ?? null,
-      userRole: req.user?.role ?? null,
+    const entry: AuditEntryInput = {
       action: config.action,
-      targetType: config.targetType ?? null,
-      targetKey: targetKey ?? null,
-      // Wave 2 doesn't capture `before` — services that need to diff have to
-      // load + pass it via a future `AuditAccumulator`. Today we leave it
-      // explicitly null so the column is still populated coherently.
-      before: undefined,
+      targetType: config.targetType,
+      targetKey: targetKey,
+      // `before` is opt-in: services that diff stash a pre-mutation snapshot
+      // via `AuditContext.setBefore(...)` and the interceptor reads it on
+      // commit. Routes that don't bother (pure creates, status setters) leave
+      // it undefined → the column stays NULL.
+      before: AuditContext.current()?.before,
       after,
-      reason: null,
-      ipAddress,
+      actor,
       metadata: {
         method: req.method,
         route: req.url,
         userAgent,
       },
-    });
+      tx,
+    };
+
+    await this.auditWriter.log(entry);
+  }
+
+  /**
+   * Map the request's authenticated `user` to the AuditWriter's actor shape.
+   * Falls back to `system` only when there's no user at all — the writer
+   * enforces the `system.` action prefix in that case, which is fine because
+   * `@Audit()`-tagged routes are always behind `JwtAuthGuard` in practice.
+   * Unauthenticated requests with `@Audit()` are a misconfiguration; the
+   * actor `'system'` path keeps the writer from crashing while still
+   * surfacing the issue in the action prefix check.
+   */
+  private _resolveActor(
+    req: AuditableRequest & { user?: AuthUser },
+  ): AuditActor {
+    if (req.user) {
+      const ipAddress = this._extractIp(req);
+      return ipAddress
+        ? {
+            userId: req.user.sub,
+            userRole: req.user.role,
+            ipAddress,
+          }
+        : {
+            userId: req.user.sub,
+            userRole: req.user.role,
+          };
+    }
+    return 'system';
   }
 
   private _safeTargetKey(
@@ -104,7 +194,8 @@ export class AuditInterceptor implements NestInterceptor {
       const value = config.targetKey(req, result);
       return typeof value === 'string' && value.length > 0 ? value : undefined;
     } catch {
-      // Don't let a buggy targetKey extractor break the audit write.
+      // Don't let a buggy targetKey extractor break the audit write — the
+      // row still goes in, just with a NULL targetKey.
       return undefined;
     }
   }
@@ -123,3 +214,4 @@ export class AuditInterceptor implements NestInterceptor {
     return typeof ua === 'string' ? ua : null;
   }
 }
+

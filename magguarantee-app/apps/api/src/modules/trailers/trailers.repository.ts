@@ -57,7 +57,7 @@ export class TrailersRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async findById(id: string): Promise<TrailerRow | null> {
-    const row = await this.prisma.client.trailer.findFirst({
+    const row = await this.prisma.tx.trailer.findFirst({
       where: { id },
       include: this.includeShape(),
     });
@@ -76,7 +76,7 @@ export class TrailersRepository {
         { model: { contains: filters.q, mode: 'insensitive' } },
       ];
     }
-    const rows = await this.prisma.client.trailer.findMany({
+    const rows = await this.prisma.tx.trailer.findMany({
       where,
       include: this.includeShape(),
       orderBy: { createdAt: 'desc' },
@@ -110,7 +110,7 @@ export class TrailersRepository {
     multilock?: boolean | null;
     notes?: string | null;
   }): Promise<TrailerRow> {
-    const row = await this.prisma.client.trailer.create({
+    const row = await this.prisma.tx.trailer.create({
       data: {
         carrierId: data.carrierId,
         plateNumber: data.plateNumber,
@@ -139,7 +139,7 @@ export class TrailersRepository {
   }
 
   async update(id: string, data: Record<string, unknown>): Promise<TrailerRow> {
-    const row = await this.prisma.client.trailer.update({
+    const row = await this.prisma.tx.trailer.update({
       where: { id },
       data,
       include: this.includeShape(),
@@ -152,7 +152,7 @@ export class TrailersRepository {
   }
 
   async softDelete(id: string): Promise<void> {
-    await this.prisma.client.trailer.delete({ where: { id } });
+    await this.prisma.tx.trailer.delete({ where: { id } });
   }
 
   // ── helpers ──────────────────────────────────────────────

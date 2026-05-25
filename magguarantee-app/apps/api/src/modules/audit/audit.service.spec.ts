@@ -7,6 +7,7 @@
 
 import type { Prisma } from '@magguarantee/database';
 
+import { AuditContext } from '../../common/audit/audit-context';
 import type { PrismaService } from '../prisma/prisma.service';
 import { AuditWriter } from './audit.service';
 import type { AuditEntryInput } from './audit.types';
@@ -144,6 +145,61 @@ describe('AuditWriter', () => {
     expect(Object.prototype.hasOwnProperty.call(before, 'cancelledAt')).toBe(
       false,
     );
+  });
+
+  it('5a. log() WITHOUT `tx` but inside AuditContext.run() uses the ambient tx', async () => {
+    // Pre-Phase-4.4 contract: feature services no longer need to thread `tx`
+    // through `AuditWriter.log({ tx })` — the interceptor opens an ambient
+    // transaction via `AuditContext.run(...)` and the writer picks it up.
+    const { prisma, createCalls: prismaCalls } = makePrisma();
+    const { tx, createCalls: txCalls } = makeTx();
+    const svc = new AuditWriter(prisma);
+
+    await AuditContext.run(
+      { tx, actor: { userId: 'u-ambient', userRole: 'admin' }, ipAddress: null },
+      async () => {
+        await svc.log({
+          action: 'updateCarrier',
+          targetType: 'Carrier',
+          targetKey: 'CAR-99',
+          actor: { userId: 'u-ambient', userRole: 'admin' },
+          // NOTE: no explicit `tx` — must be lifted from ambient context.
+        });
+      },
+    );
+
+    expect(txCalls).toHaveLength(1);
+    expect(prismaCalls).toHaveLength(0);
+    expect(txCalls[0]!.data.action).toBe('updateCarrier');
+  });
+
+  it('5b. explicit `tx` wins over ambient context even when both are present', async () => {
+    // Explicit caller-passed tx must always take precedence so legacy code
+    // that already threads it (ClaimsService.update at the moment of the
+    // refactor) stays unambiguous.
+    const { prisma, createCalls: prismaCalls } = makePrisma();
+    const { tx: ambientTx, createCalls: ambientCalls } = makeTx();
+    const { tx: explicitTx, createCalls: explicitCalls } = makeTx();
+    const svc = new AuditWriter(prisma);
+
+    await AuditContext.run(
+      {
+        tx: ambientTx,
+        actor: { userId: 'u', userRole: 'admin' },
+        ipAddress: null,
+      },
+      async () => {
+        await svc.log({
+          action: 'verifyClaim',
+          actor: { userId: 'u', userRole: 'pracownik' },
+          tx: explicitTx,
+        });
+      },
+    );
+
+    expect(explicitCalls).toHaveLength(1);
+    expect(ambientCalls).toHaveLength(0);
+    expect(prismaCalls).toHaveLength(0);
   });
 
   it('5. log() with `tx` parameter writes through the transaction client, not PrismaService', async () => {

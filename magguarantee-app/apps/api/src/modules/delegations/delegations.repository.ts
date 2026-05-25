@@ -104,7 +104,7 @@ export class DelegationsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async findById(id: string): Promise<DelegationRow | null> {
-    const row = await this.prisma.client.delegation.findFirst({
+    const row = await this.prisma.tx.delegation.findFirst({
       where: { id },
       include: this.includeShape(),
     });
@@ -131,7 +131,7 @@ export class DelegationsRepository {
         { driverNameSnapshot: { contains: q, mode: 'insensitive' } },
       ];
     }
-    const rows = await this.prisma.client.delegation.findMany({
+    const rows = await this.prisma.tx.delegation.findMany({
       where,
       include: this.includeShape(),
       orderBy: { createdAt: 'desc' },
@@ -144,7 +144,7 @@ export class DelegationsRepository {
   }
 
   async create(data: CreateDelegationData): Promise<DelegationRow> {
-    const row = await this.prisma.client.delegation.create({
+    const row = await this.prisma.tx.delegation.create({
       data: {
         carrierId: data.carrierId,
         vehicleId: data.vehicleId,
@@ -168,7 +168,7 @@ export class DelegationsRepository {
   }
 
   async update(id: string, data: UpdateDelegationData): Promise<DelegationRow> {
-    const row = await this.prisma.client.delegation.update({
+    const row = await this.prisma.tx.delegation.update({
       where: { id },
       data: {
         status: data.status,

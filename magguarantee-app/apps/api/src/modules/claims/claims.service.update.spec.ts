@@ -2,13 +2,19 @@
 //
 // Covers the 5-helper pipeline (`_validateClaimUpdate`, `_recalcClaim`,
 // `_persistClaimUpdate` via repo, `_handleReklamacjaTransition`,
-// `_applyDecisionEmails`) plus the in-`$transaction` `AuditWriter.log` call.
+// `_applyDecisionEmails`) plus the audit `before` snapshot the service
+// stashes into `AuditContext` for the interceptor to commit alongside the
+// mutation.
 //
 // Style follows `carriers.service.spec.ts`: hand-rolled fakes over `jest.fn`,
-// no jest-mock-extended dependency. The PrismaService is faked at the
-// `$transaction` + `client.appConfig.findMany` + `client.user.findFirst` +
-// `client.carrier.findFirst` + `client.vehicle.findFirst` surface — the
-// surfaces this service code-path actually touches.
+// no jest-mock-extended dependency.
+//
+// Pre-Phase-4.4 update: the service no longer opens its own
+// `prisma.$transaction(...)` and no longer calls `auditWriter.log()` itself
+// — both are now the `AuditInterceptor`'s job. Each test wraps the
+// `svc.update(...)` call in `AuditContext.run(...)` to simulate the
+// interceptor's transactional envelope; the test then asserts on the
+// captured `before` snapshot via the run-store reference.
 
 import {
   BadRequestException,
@@ -16,6 +22,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 
+import type { Prisma } from '@magguarantee/database';
 import type {
   ClaimStatus,
   KmCalcBreakdown,
@@ -23,6 +30,10 @@ import type {
   UpdateClaimDto,
 } from '@magguarantee/shared';
 
+import {
+  AuditContext,
+  type AuditContextStore,
+} from '../../common/audit/audit-context';
 import type { AuditWriter } from '../audit/audit.service';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import type { CarriersRepository } from '../carriers/carriers.repository';
@@ -38,6 +49,28 @@ import type {
   UpdateClaimData,
 } from './claims.repository';
 import type { NrZglService } from './nr-zgl.service';
+
+/**
+ * Open an `AuditContext` around a service call so the service's
+ * `AuditContext.setBefore(...)` lands on a captured store. Returns the call
+ * result alongside the store so assertions can read the captured `before`.
+ *
+ * Mirrors what the production `AuditInterceptor` does for `@Audit()`-tagged
+ * routes (opens a `prisma.$transaction` and wraps the handler in a context).
+ * Here the tx is a sentinel because the spec doesn't exercise the writer
+ * — only the service's interaction with the ambient store.
+ */
+async function withAuditContext<T>(
+  fn: () => Promise<T>,
+): Promise<{ result: T; store: AuditContextStore }> {
+  const store: AuditContextStore = {
+    tx: { __sentinel: 'tx' } as unknown as Prisma.TransactionClient,
+    actor: { userId: 'u-actor', userRole: 'pracownik' },
+    ipAddress: null,
+  };
+  const result = await AuditContext.run(store, fn);
+  return { result, store };
+}
 
 // ─── fixtures ────────────────────────────────────────────────
 
@@ -289,20 +322,27 @@ function makeAuditWriter(): {
 }
 
 function makePrismaService(): PrismaService {
-  // $transaction wraps the callback with a sentinel `tx` object so we can
-  // verify the audit log received the same handle.
-  const tx = Symbol('tx');
+  // Pre-Phase-4.4: the service uses `prisma.tx` exclusively. We expose both
+  // `client` (for non-tx paths like `_collectSubmitRecipients`) and a `tx`
+  // getter that returns the same mock surface. The transaction wrapper
+  // moved to the interceptor — the test's `withAuditContext()` helper opens
+  // an ambient context so the service sees a "tx" handle when it asks.
   const client = {
     user: { findFirst: jest.fn(async () => null) },
     carrier: { findFirst: jest.fn(async () => null) },
     vehicle: { findFirst: jest.fn(async () => null) },
     appConfig: { findMany: jest.fn(async () => []) },
+    claim: { update: jest.fn(), findFirst: jest.fn() },
+    claimSequence: { upsert: jest.fn() },
   };
   return {
     client,
-    $transaction: jest.fn(async (fn: (t: unknown) => Promise<unknown>) =>
-      fn(tx),
-    ),
+    // Test getter — the service treats `this.prisma.tx` as a Prisma delegate;
+    // the mock client above is structurally close enough for the surfaces
+    // exercised in the update() pipeline.
+    get tx() {
+      return client;
+    },
   } as unknown as PrismaService;
 }
 
@@ -354,7 +394,9 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
       amountApproved: 1_400,
     };
 
-    const out = await svc.update(makeAuth('pracownik'), seeded.nrZgl, dto);
+    const { result: out, store } = await withAuditContext(() =>
+      svc.update(makeAuth('pracownik'), seeded.nrZgl, dto),
+    );
 
     expect(out.status).toBe('ZAAKCEPTOWANO');
     expect(out.orderNumber).toBe('ZL-12345');
@@ -363,16 +405,15 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
     expect(repoFake.updateWithinCalls).toHaveLength(1);
     expect(repoFake.updateWithinCalls[0]!.data.decidedById).toBe('u-actor');
 
-    // Audit row written in the same transaction handle.
-    expect(audit.logs).toHaveLength(1);
-    expect(audit.logs[0]!.action).toBe('updateClaim');
-    expect(audit.logs[0]!.targetKey).toBe(seeded.nrZgl);
-    expect(audit.logs[0]!.tx).toBeDefined();
-    // before snapshot reflects the pre-update status, after — the new one.
-    const before = audit.logs[0]!.before as { status: ClaimStatus };
-    const after = audit.logs[0]!.after as { status: ClaimStatus };
+    // Audit row is now written by the interceptor (not the service). The
+    // service's contribution is the `before` snapshot pushed into the
+    // ambient AuditContext — the interceptor picks it up on commit. Asserting
+    // on the captured store value here gives us the same coverage of the
+    // service's audit responsibility.
+    const before = store.before as { status: ClaimStatus };
     expect(before.status).toBe('NA_WERYFIKACJI');
-    expect(after.status).toBe('ZAAKCEPTOWANO');
+    // No direct `AuditWriter.log()` call from the service anymore.
+    expect(audit.logs).toHaveLength(0);
   });
 
   it('2. NA_WERYFIKACJI → ZAAKCEPTOWANO WITHOUT orderNumber throws 400 + no writes', async () => {
@@ -589,7 +630,9 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
       hoursAdjusted: 8,
     };
 
-    await svc.update(makeAuth('pracownik'), seeded.nrZgl, dto);
+    const { store } = await withAuditContext(() =>
+      svc.update(makeAuth('pracownik'), seeded.nrZgl, dto),
+    );
 
     // Persisted patch carries the new applied value and leaves the snapshot
     // untouched (no `origHoursAdjusted` key in the update payload at all).
@@ -609,23 +652,19 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
       (km.calls[0]!.input as { hoursAdjusted: number }).hoursAdjusted,
     ).toBe(8);
 
-    // Audit `before`/`after` whole-row snapshot — the History tab can read
-    // both halves to render "Carrier: 5.5 → Currently: 5.5 → Now: 8".
-    // `origHoursAdjusted` appears in both halves unchanged (set-once column),
-    // `hoursAdjustedValue` flips from 5.5 to 8.
-    expect(audit.logs).toHaveLength(1);
-    const before = audit.logs[0]!.before as {
-      origHoursAdjusted: number | null;
-      hoursAdjustedValue: number | null;
-    };
-    const after = audit.logs[0]!.after as {
+    // Audit `before` — pushed into the ambient AuditContext by the service.
+    // The interceptor writes both `before` (from context) and `after` (from
+    // response body) on commit, so the History tab still reads
+    // "Carrier: 5.5 → Currently: 5.5 → Now: 8". The `after` half is now the
+    // controller's response — verified via the repo's translated row above.
+    const before = store.before as {
       origHoursAdjusted: number | null;
       hoursAdjustedValue: number | null;
     };
     expect(before.origHoursAdjusted).toBe(5.5);
     expect(before.hoursAdjustedValue).toBe(5.5);
-    expect(after.origHoursAdjusted).toBe(5.5);
-    expect(after.hoursAdjustedValue).toBe(8);
+    // Service no longer calls AuditWriter.log() directly.
+    expect(audit.logs).toHaveLength(0);
   });
 
   it('10. PATCH WITHOUT hoursAdjusted leaves BOTH columns untouched', async () => {
@@ -763,16 +802,17 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
     const nrZgl = {
       nextWithin: jest.fn(async () => 'GWA/100/04/26'),
     } as unknown as NrZglService;
+    const prismaClient = {
+      appConfig: { findMany: jest.fn(async () => []) },
+      user: { findFirst: jest.fn(async () => null) },
+      carrier: { findFirst: jest.fn(async () => null) },
+      vehicle: { findFirst: jest.fn(async () => null) },
+    };
     const prisma = {
-      client: {
-        appConfig: { findMany: jest.fn(async () => []) },
-        user: { findFirst: jest.fn(async () => null) },
-        carrier: { findFirst: jest.fn(async () => null) },
-        vehicle: { findFirst: jest.fn(async () => null) },
+      client: prismaClient,
+      get tx() {
+        return prismaClient;
       },
-      $transaction: jest.fn(async (fn: (t: unknown) => Promise<unknown>) =>
-        fn({}),
-      ),
     } as unknown as PrismaService;
     const audit = {
       log: jest.fn(async () => undefined),
@@ -855,14 +895,17 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
     const vehiclesRepo = {} as VehiclesRepository;
     const km = {} as KmCalcService;
     const nrZgl = {} as NrZglService;
+    const prismaReklamacjaClient = {
+      appConfig: { findMany: jest.fn(async () => []) },
+      user: { findFirst: jest.fn(async () => null) },
+      carrier: { findFirst: jest.fn(async () => null) },
+      vehicle: { findFirst: jest.fn(async () => null) },
+    };
     const prisma = {
-      client: {
-        appConfig: { findMany: jest.fn(async () => []) },
-        user: { findFirst: jest.fn(async () => null) },
-        carrier: { findFirst: jest.fn(async () => null) },
-        vehicle: { findFirst: jest.fn(async () => null) },
+      client: prismaReklamacjaClient,
+      get tx() {
+        return prismaReklamacjaClient;
       },
-      $transaction: jest.fn(),
     } as unknown as PrismaService;
     const audit = {
       log: jest.fn(async () => undefined),

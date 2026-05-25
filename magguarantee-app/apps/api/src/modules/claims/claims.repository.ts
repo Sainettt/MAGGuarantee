@@ -217,7 +217,7 @@ export class ClaimsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async findById(id: string): Promise<ClaimRow | null> {
-    const row = await this.prisma.client.claim.findFirst({
+    const row = await this.prisma.tx.claim.findFirst({
       where: { id },
       include: this.includeShape(),
     });
@@ -225,7 +225,7 @@ export class ClaimsRepository {
   }
 
   async findByNrZgl(nrZgl: string): Promise<ClaimRow | null> {
-    const row = await this.prisma.client.claim.findFirst({
+    const row = await this.prisma.tx.claim.findFirst({
       where: { nrZgl },
       include: this.includeShape(),
     });
@@ -251,7 +251,7 @@ export class ClaimsRepository {
   async findLastNonRejectedForVehicle(
     vehicleId: string,
   ): Promise<{ id: string; nrZgl: string; createdAt: Date } | null> {
-    const row = await this.prisma.client.claim.findFirst({
+    const row = await this.prisma.tx.claim.findFirst({
       where: {
         vehicleId,
         status: { not: PrismaClaimStatus.ODRZUCONO },
@@ -281,7 +281,7 @@ export class ClaimsRepository {
         { orderNumber: { contains: q, mode: 'insensitive' } },
       ];
     }
-    const rows = await this.prisma.client.claim.findMany({
+    const rows = await this.prisma.tx.claim.findMany({
       where,
       include: this.includeShape(),
       orderBy: { createdAt: 'desc' },
@@ -342,7 +342,7 @@ export class ClaimsRepository {
   }
 
   async update(id: string, data: UpdateClaimData): Promise<ClaimRow> {
-    const row = await this.prisma.client.claim.update({
+    const row = await this.prisma.tx.claim.update({
       where: { id },
       data: this._buildUpdatePayload(data),
       include: this.includeShape(),

@@ -22,14 +22,14 @@ export class TrailerTypesRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async findById(id: string): Promise<TrailerTypeRow | null> {
-    const row = await this.prisma.client.trailerType.findUnique({
+    const row = await this.prisma.tx.trailerType.findUnique({
       where: { id },
     });
     return row ? (row as TrailerTypeRow) : null;
   }
 
   async findByName(name: string): Promise<TrailerTypeRow | null> {
-    const row = await this.prisma.client.trailerType.findUnique({
+    const row = await this.prisma.tx.trailerType.findUnique({
       where: { name },
     });
     return row ? (row as TrailerTypeRow) : null;
@@ -44,7 +44,7 @@ export class TrailerTypesRepository {
         { shortCode: { contains: filters.q, mode: 'insensitive' } },
       ];
     }
-    const rows = await this.prisma.client.trailerType.findMany({
+    const rows = await this.prisma.tx.trailerType.findMany({
       where,
       orderBy: { name: 'asc' },
     });
@@ -57,7 +57,7 @@ export class TrailerTypesRepository {
     description?: string | null;
     active?: boolean;
   }): Promise<TrailerTypeRow> {
-    const row = await this.prisma.client.trailerType.create({
+    const row = await this.prisma.tx.trailerType.create({
       data: {
         name: data.name,
         shortCode: data.shortCode ?? null,
@@ -77,7 +77,7 @@ export class TrailerTypesRepository {
       active: boolean;
     }>,
   ): Promise<TrailerTypeRow> {
-    const row = await this.prisma.client.trailerType.update({
+    const row = await this.prisma.tx.trailerType.update({
       where: { id },
       data,
     });

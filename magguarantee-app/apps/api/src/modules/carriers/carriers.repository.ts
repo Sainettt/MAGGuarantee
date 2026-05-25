@@ -141,7 +141,7 @@ export class CarriersRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async findById(id: string): Promise<CarrierRow | null> {
-    const row = await this.prisma.client.carrier.findFirst({
+    const row = await this.prisma.tx.carrier.findFirst({
       where: { id },
       include: this.includeShape(),
     });
@@ -149,7 +149,7 @@ export class CarriersRepository {
   }
 
   async findByLogin(login: string): Promise<CarrierRow | null> {
-    const row = await this.prisma.client.carrier.findFirst({
+    const row = await this.prisma.tx.carrier.findFirst({
       where: { user: { login } },
       include: this.includeShape(),
     });
@@ -200,7 +200,7 @@ export class CarriersRepository {
     if (andClauses.length > 0) {
       where.AND = andClauses;
     }
-    const rows = await this.prisma.client.carrier.findMany({
+    const rows = await this.prisma.tx.carrier.findMany({
       where,
       include: this.includeShape(),
       orderBy: { createdAt: 'desc' },
@@ -213,44 +213,52 @@ export class CarriersRepository {
   }
 
   async create(data: CreateCarrierData): Promise<CarrierRow> {
-    const created = await this.prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          login: data.login,
-          email: data.email,
-          name: data.name,
-          role: 'przewoznik',
-          passwordHash: data.passwordHash,
-          active: data.active ?? true,
-        },
-      });
-      const carrier = await tx.carrier.create({
-        data: {
-          userId: user.id,
-          company: data.company ?? null,
-          nip: data.nip,
-          vatId: data.vatId ?? null,
-          contactPerson: data.contactPerson,
-          phone: data.phone,
-          ordersEmail: data.ordersEmail,
-          accountEur: data.accountEur,
-          accountPln: data.accountPln ?? null,
-          // DB default is 30 — only forward when caller specified.
-          ...(data.paymentTerms !== undefined
-            ? { paymentTerms: data.paymentTerms }
-            : {}),
-          insuranceValue: data.insuranceValue,
-          insuranceExpiry: data.insuranceExpiry,
-          licenseExpiry: data.licenseExpiry,
-          numberOfVehicle: data.numberOfVehicle ?? null,
-          companyAddress: data.companyAddress,
-          opiekunId: data.opiekunId,
-        },
-        include: this.includeShape(),
-      });
-      return carrier;
+    // Atomicity note (pre-Phase-4.4): we no longer open our own
+    // `prisma.$transaction(...)`. The `AuditInterceptor` already runs the
+    // controller inside an ambient transaction for `@Audit()`-tagged
+    // endpoints (POST /carriers carries `@Audit('createCarrier')`), and
+    // `this.prisma.tx` resolves to that same tx via `AuditContext`. So the
+    // User + Carrier inserts here, plus the audit row written by the
+    // interceptor on commit, all land in one atomic step. Outside an audited
+    // request (e.g. seed scripts) `tx` falls back to the root client and the
+    // two inserts run sequentially without rollback — acceptable for the
+    // non-HTTP paths that have no audit invariant to honour.
+    const tx = this.prisma.tx;
+    const user = await tx.user.create({
+      data: {
+        login: data.login,
+        email: data.email,
+        name: data.name,
+        role: 'przewoznik',
+        passwordHash: data.passwordHash,
+        active: data.active ?? true,
+      },
     });
-    return this.flatten(created);
+    const carrier = await tx.carrier.create({
+      data: {
+        userId: user.id,
+        company: data.company ?? null,
+        nip: data.nip,
+        vatId: data.vatId ?? null,
+        contactPerson: data.contactPerson,
+        phone: data.phone,
+        ordersEmail: data.ordersEmail,
+        accountEur: data.accountEur,
+        accountPln: data.accountPln ?? null,
+        // DB default is 30 — only forward when caller specified.
+        ...(data.paymentTerms !== undefined
+          ? { paymentTerms: data.paymentTerms }
+          : {}),
+        insuranceValue: data.insuranceValue,
+        insuranceExpiry: data.insuranceExpiry,
+        licenseExpiry: data.licenseExpiry,
+        numberOfVehicle: data.numberOfVehicle ?? null,
+        companyAddress: data.companyAddress,
+        opiekunId: data.opiekunId,
+      },
+      include: this.includeShape(),
+    });
+    return this.flatten(carrier);
   }
 
   async update(id: string, data: UpdateCarrierData): Promise<CarrierRow> {
@@ -285,28 +293,27 @@ export class CarriersRepository {
       }
     }
 
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const carrier = await tx.carrier.findFirst({ where: { id } });
-      if (!carrier) {
-        return null;
-      }
-      if (Object.keys(userPatch).length > 0) {
-        await tx.user.update({
-          where: { id: carrier.userId },
-          data: userPatch,
-        });
-      }
-      const out = await tx.carrier.update({
-        where: { id },
-        data: carrierPatch,
-        include: this.includeShape(),
-      });
-      return out;
-    });
-    if (!updated) {
+    // See `create()` for the atomicity note — ambient tx from the audit
+    // interceptor (PATCH /carriers/:id carries `@Audit('updateCarrier')`)
+    // covers the User.update + Carrier.update + audit-row write as a single
+    // commit.
+    const tx = this.prisma.tx;
+    const carrier = await tx.carrier.findFirst({ where: { id } });
+    if (!carrier) {
       throw new Error('Carrier disappeared mid-update');
     }
-    return this.flatten(updated);
+    if (Object.keys(userPatch).length > 0) {
+      await tx.user.update({
+        where: { id: carrier.userId },
+        data: userPatch,
+      });
+    }
+    const out = await tx.carrier.update({
+      where: { id },
+      data: carrierPatch,
+      include: this.includeShape(),
+    });
+    return this.flatten(out);
   }
 
   async setActive(id: string, active: boolean): Promise<CarrierRow> {
@@ -315,35 +322,34 @@ export class CarriersRepository {
 
   async softDelete(id: string): Promise<void> {
     // Soft-deleting the carrier must cascade-soft-delete its fleet per
-    // docs/04-data-model.md#cascade-при-удалении-carrier. We do this in one
-    // transaction so the audit row reflects the same atomic moment.
-    const carrier = await this.prisma.client.carrier.findFirst({
-      where: { id },
-    });
+    // docs/04-data-model.md#cascade-при-удалении-carrier. The DELETE
+    // /carriers/:id endpoint carries `@Audit('softDeleteCarrier')` so the
+    // audit interceptor opens the ambient transaction; we just enrol in it
+    // via `this.prisma.tx`. All five updates + the audit row commit as one.
+    const tx = this.prisma.tx;
+    const carrier = await tx.carrier.findFirst({ where: { id } });
     if (!carrier) return;
-    await this.prisma.$transaction(async (tx) => {
-      const now = new Date();
-      await tx.vehicle.updateMany({
-        where: { carrierId: id, deletedAt: null },
-        data: { deletedAt: now, active: false },
-      });
-      await tx.driver.updateMany({
-        where: { carrierId: id, deletedAt: null },
-        data: { deletedAt: now, active: false },
-      });
-      await tx.trailer.updateMany({
-        where: { carrierId: id, deletedAt: null },
-        data: { deletedAt: now, active: false },
-      });
-      await tx.carrier.update({
-        where: { id },
-        data: { deletedAt: now },
-      });
-      // Soft-delete the user too so login is blocked.
-      await tx.user.update({
-        where: { id: carrier.userId },
-        data: { deletedAt: now, active: false },
-      });
+    const now = new Date();
+    await tx.vehicle.updateMany({
+      where: { carrierId: id, deletedAt: null },
+      data: { deletedAt: now, active: false },
+    });
+    await tx.driver.updateMany({
+      where: { carrierId: id, deletedAt: null },
+      data: { deletedAt: now, active: false },
+    });
+    await tx.trailer.updateMany({
+      where: { carrierId: id, deletedAt: null },
+      data: { deletedAt: now, active: false },
+    });
+    await tx.carrier.update({
+      where: { id },
+      data: { deletedAt: now },
+    });
+    // Soft-delete the user too so login is blocked.
+    await tx.user.update({
+      where: { id: carrier.userId },
+      data: { deletedAt: now, active: false },
     });
   }
 

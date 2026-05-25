@@ -43,7 +43,7 @@ export class DriversRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async findById(id: string): Promise<DriverRow | null> {
-    const row = await this.prisma.client.driver.findFirst({
+    const row = await this.prisma.tx.driver.findFirst({
       where: { id },
       include: this.includeShape(),
     });
@@ -51,7 +51,7 @@ export class DriversRepository {
   }
 
   async findByLoginSlug(slug: string): Promise<DriverRow | null> {
-    const row = await this.prisma.client.driver.findFirst({
+    const row = await this.prisma.tx.driver.findFirst({
       where: { loginSlug: slug },
       include: this.includeShape(),
     });
@@ -59,7 +59,7 @@ export class DriversRepository {
   }
 
   async existsLoginSlug(slug: string): Promise<boolean> {
-    const row = await this.prisma.client.driver.findFirst({
+    const row = await this.prisma.tx.driver.findFirst({
       where: { loginSlug: slug },
       select: { id: true },
     });
@@ -77,7 +77,7 @@ export class DriversRepository {
         { loginSlug: { contains: filters.q, mode: 'insensitive' } },
       ];
     }
-    const rows = await this.prisma.client.driver.findMany({
+    const rows = await this.prisma.tx.driver.findMany({
       where,
       include: this.includeShape(),
       orderBy: { createdAt: 'desc' },
@@ -102,7 +102,7 @@ export class DriversRepository {
     notes?: string | null;
     active?: boolean;
   }): Promise<DriverRow> {
-    const row = await this.prisma.client.driver.create({
+    const row = await this.prisma.tx.driver.create({
       data: {
         carrierId: data.carrierId,
         loginSlug: data.loginSlug,
@@ -122,7 +122,7 @@ export class DriversRepository {
   }
 
   async update(id: string, data: Record<string, unknown>): Promise<DriverRow> {
-    const row = await this.prisma.client.driver.update({
+    const row = await this.prisma.tx.driver.update({
       where: { id },
       data,
       include: this.includeShape(),
@@ -135,7 +135,7 @@ export class DriversRepository {
   }
 
   async softDelete(id: string): Promise<void> {
-    await this.prisma.client.driver.delete({ where: { id } });
+    await this.prisma.tx.driver.delete({ where: { id } });
   }
 
   // ── helpers ──────────────────────────────────────────────

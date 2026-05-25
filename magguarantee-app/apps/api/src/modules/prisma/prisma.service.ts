@@ -1,7 +1,12 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 
-import { PrismaClient, prisma as prismaSingleton } from '@magguarantee/database';
+import {
+  PrismaClient,
+  prisma as prismaSingleton,
+  type Prisma,
+} from '@magguarantee/database';
 
+import { AuditContext } from '../../common/audit/audit-context';
 import { softDeleteExtension } from './soft-delete.extension';
 
 /**
@@ -44,6 +49,30 @@ export class PrismaService implements OnModuleDestroy {
   }
   get appConfig() {
     return this.client.appConfig;
+  }
+
+  /**
+   * Ambient-aware Prisma delegate surface. When a `@Audit()`-marked endpoint
+   * is being processed, the `AuditInterceptor` opens a `prisma.$transaction`
+   * and stashes the transaction client into `AuditContext`. Any repository
+   * using `this.prisma.tx.<model>.<op>` therefore enrolls into the same
+   * transaction as the audit row write — both commit together or roll back
+   * together (no more "mutation succeeded, audit row missing" window).
+   *
+   * Outside an audited request (`AuditContext.current() === undefined`) the
+   * getter falls back to the root extended client. That keeps the migration
+   * transparent for auth / cron / non-audit paths — they continue to operate
+   * on a fresh connection per call.
+   *
+   * The return type is the loose union of `PrismaClient` and
+   * `Prisma.TransactionClient` because the extended client and a tx client
+   * share the same delegate shape; callers don't care which one they got.
+   */
+  get tx(): PrismaClient | Prisma.TransactionClient {
+    return (
+      (AuditContext.current()?.tx as unknown as PrismaClient | undefined) ??
+      (this.client as unknown as PrismaClient)
+    );
   }
 
   /**

@@ -223,14 +223,20 @@ function makeKmCalcService(): {
 }
 
 function makePrismaService(): PrismaService {
+  // Preview path doesn't open any transaction — it's a pure read + km-calc.
+  // Pre-Phase-4.4 only needs `tx` on the surface; the older `$transaction`
+  // wrapper is gone.
+  const client = {
+    user: { findFirst: jest.fn(async () => null) },
+    carrier: { findFirst: jest.fn(async () => null) },
+    vehicle: { findFirst: jest.fn(async () => null) },
+    appConfig: { findMany: jest.fn(async () => []) },
+  };
   return {
-    client: {
-      user: { findFirst: jest.fn(async () => null) },
-      carrier: { findFirst: jest.fn(async () => null) },
-      vehicle: { findFirst: jest.fn(async () => null) },
-      appConfig: { findMany: jest.fn(async () => []) },
+    client,
+    get tx() {
+      return client;
     },
-    $transaction: jest.fn(),
   } as unknown as PrismaService;
 }
 

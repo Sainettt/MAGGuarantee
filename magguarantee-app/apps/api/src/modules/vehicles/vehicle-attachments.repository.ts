@@ -47,7 +47,7 @@ export class VehicleAttachmentsRepository {
 
   /** All non-deleted attachments for a vehicle, oldest first. */
   async listByVehicle(vehicleId: string): Promise<VehicleAttachmentRow[]> {
-    const rows = await this.prisma.client.vehicleAttachment.findMany({
+    const rows = await this.prisma.tx.vehicleAttachment.findMany({
       where: { vehicleId },
       orderBy: { createdAt: 'asc' },
     });
@@ -56,7 +56,7 @@ export class VehicleAttachmentsRepository {
 
   /** Single attachment by id (live rows only via the soft-delete extension). */
   async findById(id: string): Promise<VehicleAttachmentRow | null> {
-    const row = await this.prisma.client.vehicleAttachment.findFirst({
+    const row = await this.prisma.tx.vehicleAttachment.findFirst({
       where: { id },
     });
     return row ? this.flatten(row) : null;
@@ -66,7 +66,7 @@ export class VehicleAttachmentsRepository {
   async create(
     input: CreateVehicleAttachmentInput,
   ): Promise<VehicleAttachmentRow> {
-    const row = await this.prisma.client.vehicleAttachment.create({
+    const row = await this.prisma.tx.vehicleAttachment.create({
       data: {
         vehicleId: input.vehicleId,
         category: input.category,
@@ -86,7 +86,7 @@ export class VehicleAttachmentsRepository {
    * untouched on purpose (per the task brief).
    */
   async softDelete(id: string): Promise<void> {
-    await this.prisma.client.vehicleAttachment.delete({ where: { id } });
+    await this.prisma.tx.vehicleAttachment.delete({ where: { id } });
   }
 
   /**
@@ -97,7 +97,7 @@ export class VehicleAttachmentsRepository {
    * id (the extension only rewrites the singular `delete`).
    */
   async hardDelete(id: string): Promise<void> {
-    await this.prisma.client.vehicleAttachment.deleteMany({ where: { id } });
+    await this.prisma.tx.vehicleAttachment.deleteMany({ where: { id } });
   }
 
   // ── helpers ──────────────────────────────────────────────

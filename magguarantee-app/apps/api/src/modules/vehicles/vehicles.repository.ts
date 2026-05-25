@@ -93,7 +93,7 @@ export class VehiclesRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async findById(id: string): Promise<VehicleRow | null> {
-    const row = await this.prisma.client.vehicle.findFirst({
+    const row = await this.prisma.tx.vehicle.findFirst({
       where: { id },
       include: this.includeShape(),
     });
@@ -113,7 +113,7 @@ export class VehiclesRepository {
         { model: { contains: filters.q, mode: 'insensitive' } },
       ];
     }
-    const rows = await this.prisma.client.vehicle.findMany({
+    const rows = await this.prisma.tx.vehicle.findMany({
       where,
       include: this.includeShape(),
       orderBy: { createdAt: 'desc' },
@@ -164,7 +164,7 @@ export class VehiclesRepository {
     sideNumber?: string | null;
     createdById?: string | null;
   }): Promise<VehicleRow> {
-    const row = await this.prisma.client.vehicle.create({
+    const row = await this.prisma.tx.vehicle.create({
       data: {
         carrierId: data.carrierId,
         plateNumber: data.plateNumber,
@@ -208,7 +208,7 @@ export class VehiclesRepository {
     id: string,
     data: Record<string, unknown>,
   ): Promise<VehicleRow> {
-    const row = await this.prisma.client.vehicle.update({
+    const row = await this.prisma.tx.vehicle.update({
       where: { id },
       data,
       include: this.includeShape(),
@@ -217,7 +217,7 @@ export class VehiclesRepository {
   }
 
   async setActive(id: string, active: boolean): Promise<VehicleRow> {
-    const row = await this.prisma.client.vehicle.update({
+    const row = await this.prisma.tx.vehicle.update({
       where: { id },
       data: {
         active,
@@ -229,7 +229,7 @@ export class VehiclesRepository {
   }
 
   async softDelete(id: string): Promise<void> {
-    await this.prisma.client.vehicle.delete({ where: { id } });
+    await this.prisma.tx.vehicle.delete({ where: { id } });
   }
 
   /**
@@ -238,7 +238,7 @@ export class VehiclesRepository {
    * rewrites the singular `delete`) via `deleteMany`.
    */
   async hardDelete(id: string): Promise<void> {
-    await this.prisma.client.vehicle.deleteMany({ where: { id } });
+    await this.prisma.tx.vehicle.deleteMany({ where: { id } });
   }
 
   // ── helpers ──────────────────────────────────────────────

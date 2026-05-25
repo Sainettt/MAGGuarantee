@@ -12,6 +12,7 @@ import { Injectable } from '@nestjs/common';
 
 import type { Prisma } from '@magguarantee/database';
 
+import { AuditContext } from '../../common/audit/audit-context';
 import { PrismaService } from '../prisma/prisma.service';
 import type {
   AuditActor,
@@ -124,14 +125,24 @@ export class AuditWriter {
   }
 
   /**
-   * Pick the Prisma delegate target. Caller-supplied `tx` wins so the audit
-   * write joins the caller's transaction. Otherwise we go through the shared
-   * extended client (a separate connection — no ambient-transaction magic).
+   * Pick the Prisma delegate target. Resolution order:
+   *
+   *  1. Caller-supplied `tx` — explicit wins, even when an ambient context is
+   *     present. Kept for callers (legacy or future) that manage their own
+   *     `prisma.$transaction(...)` block.
+   *  2. `AuditContext.current()?.tx` — the ambient transaction opened by the
+   *     `AuditInterceptor` for `@Audit()`-tagged endpoints. This is the
+   *     standard path post-pre-Phase-4.4 refactor: services don't have to
+   *     thread `tx` around, the writer picks it up automatically.
+   *  3. `this.prisma.client` — fresh connection for system / cron / worker
+   *     code paths that have neither.
    */
   private _pickWriter(
     tx: Prisma.TransactionClient | undefined,
   ): PrismaAuditDelegate {
     if (tx) return tx as unknown as PrismaAuditDelegate;
+    const ambient = AuditContext.current()?.tx;
+    if (ambient) return ambient as unknown as PrismaAuditDelegate;
     return this.prisma.client as unknown as PrismaAuditDelegate;
   }
 }
