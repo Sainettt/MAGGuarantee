@@ -2,6 +2,7 @@
 
 import type {
   CreateDriverDto,
+  DeleteWithReasonDto,
   DriverDto,
   DriverFilters,
   UpdateDriverDto,
@@ -47,4 +48,12 @@ export function reactivateDriver(id: string): Promise<DriverDto> {
 
 export function deleteDriver(id: string): Promise<void> {
   return apiJson<void>(`/drivers/${id}`, { method: 'DELETE' });
+}
+
+/** Hard-delete — see hardDeleteCarrier doc. */
+export function hardDeleteDriver(
+  id: string,
+  body: DeleteWithReasonDto,
+): Promise<void> {
+  return apiJson<void>(`/drivers/${id}/hard`, { method: 'DELETE', json: body });
 }

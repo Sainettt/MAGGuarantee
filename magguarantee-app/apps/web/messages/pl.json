@@ -28,7 +28,77 @@
     "clear": "Wyczyść",
     "validationFailedToast": "Uzupełnij podświetlone pola",
     "inactiveSuffix": "(nieaktywny)",
-    "pcsShort": "szt."
+    "pcsShort": "szt.",
+    "copy": "Kopiuj",
+    "copied": "Skopiowano",
+    "close": "Zamknij"
+  },
+  "confirmDelete": {
+    "title": "Trwałe usunięcie — {entityLabel}",
+    "body": "Tej operacji nie da się cofnąć. {entityName} zostanie trwale usunięty. Podaj powód.",
+    "reasonLabel": "Powód usunięcia",
+    "reasonPlaceholder": "Podaj powód — minimum 3 znaki",
+    "cancel": "Anuluj",
+    "confirm": "Usuń trwale",
+    "deleting": "Usuwanie…",
+    "deletedToast": "Trwale usunięto",
+    "errorToast": "Nie udało się usunąć",
+    "entityLabel": {
+      "carrier": "przewoźnik",
+      "vehicle": "pojazd",
+      "driver": "kierowca",
+      "trailer": "naczepa",
+      "trailerType": "typ naczepy"
+    }
+  },
+  "users": {
+    "title": "Użytkownicy",
+    "newUser": "Nowy użytkownik",
+    "editUser": "Edytuj użytkownika",
+    "emptyTitle": "Brak użytkowników",
+    "emptyMessage": "Kliknij „Nowy użytkownik”, aby dodać pierwszego.",
+    "filters": {
+      "searchPlaceholder": "Szukaj loginu / nazwy",
+      "role": "Rola",
+      "allRoles": "Wszystkie role",
+      "allActive": "Wszyscy",
+      "onlyActive": "Tylko aktywni",
+      "onlyInactive": "Tylko nieaktywni"
+    },
+    "fields": {
+      "login": "Login",
+      "name": "Imię i nazwisko",
+      "email": "E-mail",
+      "role": "Rola",
+      "password": "Hasło tymczasowe",
+      "passwordHint": "≥10 znaków, ≥1 litera, ≥1 cyfra. Zostaw puste, aby wygenerować automatycznie.",
+      "liderEmail": "E-mail lidera",
+      "liderEmailHint": "Tylko dla roli planista — adres przełożonego.",
+      "active": "Aktywny",
+      "createdAt": "Utworzono"
+    },
+    "actions": {
+      "resetPassword": "Zresetuj hasło",
+      "deactivate": "Dezaktywuj",
+      "reactivate": "Aktywuj",
+      "delete": "Usuń trwale"
+    },
+    "resetPassword": {
+      "title": "Nowe hasło tymczasowe",
+      "description": "Przekaż to hasło użytkownikowi. Po zalogowaniu powinien je zmienić.",
+      "loginLabel": "Login:",
+      "passwordLabel": "Hasło:",
+      "copyAria": "Skopiuj hasło tymczasowe do schowka"
+    },
+    "confirmActivate": {
+      "deactivateTitle": "Dezaktywować użytkownika?",
+      "deactivateBody": "{login} nie będzie mógł się zalogować, ale dane pozostaną w systemie.",
+      "reactivateTitle": "Aktywować użytkownika?",
+      "reactivateBody": "{login} odzyska dostęp do systemu."
+    },
+    "tempPasswordToast": "Hasło tymczasowe: {password}",
+    "deactivatedToast": "Użytkownik dezaktywowany",
+    "reactivatedToast": "Użytkownik aktywowany"
   },
   "forms": {
     "country": {
@@ -565,9 +635,17 @@
           "savedToast": "Wniosek wysłany do autoryzacji",
           "pendingTitle": "Wniosek oczekuje autoryzacji",
           "pendingDescription": "Opis przekazany Maksimowi",
+          "pendingMaximumLabel": "Kwota Maksima zapisana (EUR)",
           "amountMaximumLabel": "Kwota zatwierdzona przez Maksima (EUR)",
           "amountMaximumSave": "Zapisz kwotę Maksima",
-          "amountMaximumSaved": "Kwota Maksima zapisana"
+          "amountMaximumSaved": "Kwota Maksima zapisana",
+          "kwotaMaksimaLabel": "Kwota Maksima (EUR)",
+          "kwotaMaksimaHelp": "Kwota, na którą Maksim ma się zgodzić. Wymagana, dodatnia, z dokładnością do 0.01 EUR.",
+          "commentLabel": "Komentarz (opcjonalnie)",
+          "commentPlaceholder": "Powód wniosku o autoryzację…",
+          "requestButton": "Wymaga autoryzacji",
+          "emailSent": "Email wysłany do Maksima",
+          "alreadyPending": "Wniosek już oczekuje na autoryzację Maksima."
         },
         "targetStatus": {
           "ZAAKCEPTOWANO": "Zaakceptuj",

@@ -18,6 +18,7 @@ import {
   ClaimDtoSchema,
   ClaimFiltersSchema,
   PreviewClaimSchema,
+  RequestAuthorizationSchema,
   SubmitClaimSchema,
   SubmitReklamacjaSchema,
   UpdateClaimSchema,
@@ -26,6 +27,7 @@ import {
   type ClaimListItem,
   type PreviewClaimDto,
   type PreviewClaimResponse,
+  type RequestAuthorizationDto,
   type SubmitClaimDto,
   type SubmitReklamacjaDto,
   type UpdateClaimDto,
@@ -199,6 +201,41 @@ export class ClaimsController {
   ): Promise<ClaimDto> {
     const ip = extractRequestIp(req);
     return this.claims.update(user, nrZgl, dto, ip);
+  }
+
+  // ── Request authorization (Phase 4.2) ───────────────────
+
+  /**
+   * `POST /claims/:nrZgl/request-authorization` per
+   * docs/13-api-design.md#claims (line 274).
+   *
+   * Admin / pracownik flags a verified claim as needing Maksim sign-off
+   * before being booked as accepted. The service:
+   *  - transitions the claim into `OCZEKUJE_NA_AUTORYZACJE`,
+   *  - mints a fresh `authorizationToken`,
+   *  - persists `Claim.amountMaximum = kwotaMaksima`,
+   *  - dispatches an email to `MAKSIM_EMAIL` (Mailhog in dev).
+   *
+   * Audit row commits in the same `prisma.$transaction` as the row update
+   * via the global `AuditInterceptor` (see `@Audit(...)` below). Email send
+   * is fire-and-log outside the transaction — same policy as submit /
+   * reklamacja / verification.
+   */
+  @Post(':nrZgl/request-authorization')
+  @HttpCode(HttpStatus.OK)
+  @Roles('admin', 'pracownik')
+  @Audit({
+    action: 'claim.requestAuthorization',
+    targetType: 'Claim',
+    targetKey: (req) => req.params?.nrZgl,
+  })
+  async requestAuthorization(
+    @CurrentUser() user: AuthUser,
+    @Param('nrZgl') nrZgl: string,
+    @Body(new ZodValidationPipe(RequestAuthorizationSchema))
+    dto: RequestAuthorizationDto,
+  ): Promise<ClaimDto> {
+    return this.claims.requestAuthorization(user, nrZgl, dto);
   }
 
   // ── Reklamacja ──────────────────────────────────────────

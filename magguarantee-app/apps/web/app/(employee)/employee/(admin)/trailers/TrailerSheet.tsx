@@ -261,10 +261,10 @@ export function TrailerSheet({
                     >
                       {isWizard ? (
                         // Wizard mode — read-only display fed by orchestrator.
-                        // See VehicleSheet for the race rationale.
+                        // See VehicleSheet for the race rationale. Primitive
+                        // Input already supplies `bg-input` + `h-10`.
                         <Input
                           id="trailer-carrierId"
-                          className="h-10 bg-input"
                           value={wizardCarrierLabel ?? ''}
                           readOnly
                           disabled
@@ -294,7 +294,6 @@ export function TrailerSheet({
                   >
                     <Input
                       id="trailer-plateNumber"
-                      className="h-10"
                       {...form.register('plateNumber')}
                     />
                   </FormField>
@@ -324,7 +323,6 @@ export function TrailerSheet({
                   >
                     <Input
                       id="trailer-brand"
-                      className="h-10"
                       {...form.register('brand')}
                     />
                   </FormField>
@@ -335,7 +333,6 @@ export function TrailerSheet({
                   >
                     <Input
                       id="trailer-model"
-                      className="h-10"
                       {...form.register('model')}
                     />
                   </FormField>
@@ -347,7 +344,6 @@ export function TrailerSheet({
                     <Input
                       id="trailer-year"
                       type="number"
-                      className="h-10"
                       {...form.register('year', {
                         setValueAs: (v) =>
                           v === '' || v === null ? undefined : Number(v),
@@ -362,7 +358,6 @@ export function TrailerSheet({
                     <Input
                       id="trailer-nextInspectionDate"
                       type="date"
-                      className="h-10"
                       {...form.register('nextInspectionDate')}
                     />
                   </FormField>
@@ -380,7 +375,6 @@ export function TrailerSheet({
                       id="trailer-innerLength"
                       type="number"
                       step="0.01"
-                      className="h-10"
                       {...form.register('innerLength', {
                         setValueAs: (v) =>
                           v === '' || v === null ? undefined : Number(v),
@@ -396,7 +390,6 @@ export function TrailerSheet({
                       id="trailer-innerWidth"
                       type="number"
                       step="0.01"
-                      className="h-10"
                       {...form.register('innerWidth', {
                         setValueAs: (v) =>
                           v === '' || v === null ? undefined : Number(v),
@@ -412,7 +405,6 @@ export function TrailerSheet({
                       id="trailer-innerHeight"
                       type="number"
                       step="0.01"
-                      className="h-10"
                       {...form.register('innerHeight', {
                         setValueAs: (v) =>
                           v === '' || v === null ? undefined : Number(v),
@@ -428,7 +420,6 @@ export function TrailerSheet({
                       id="trailer-capacity"
                       type="number"
                       step="0.01"
-                      className="h-10"
                       {...form.register('capacity', {
                         setValueAs: (v) =>
                           v === '' || v === null ? undefined : Number(v),
@@ -448,27 +439,26 @@ export function TrailerSheet({
                       {t('fields.belts')}
                     </label>
                     {beltsOn && (
-                      <div className="ml-6 animate-slide-in">
-                        <Input
-                          id="trailer-beltsCount"
-                          type="number"
-                          min={0}
-                          step={1}
-                          inputMode="numeric"
-                          aria-label={t('fields.beltsCount')}
-                          aria-invalid={!!errs.beltsCount}
-                          placeholder={t('fields.beltsCount')}
-                          className="h-9 max-w-[140px]"
-                          {...form.register('beltsCount', {
-                            setValueAs: (v) =>
-                              v === '' || v === null ? undefined : Number(v),
-                          })}
-                        />
-                        {errs.beltsCount?.message && (
-                          <p className="mt-1 text-xs text-danger">
-                            {errs.beltsCount.message as string}
-                          </p>
-                        )}
+                      <div className="ml-6 animate-slide-in max-w-[160px]">
+                        <FormField
+                          label={t('fields.beltsCount')}
+                          error={errs.beltsCount?.message as string | undefined}
+                          htmlFor="trailer-beltsCount"
+                        >
+                          <Input
+                            id="trailer-beltsCount"
+                            type="number"
+                            min={0}
+                            step={1}
+                            inputMode="numeric"
+                            aria-invalid={!!errs.beltsCount}
+                            placeholder={t('fields.beltsCount')}
+                            {...form.register('beltsCount', {
+                              setValueAs: (v) =>
+                                v === '' || v === null ? undefined : Number(v),
+                            })}
+                          />
+                        </FormField>
                       </div>
                     )}
                   </div>
@@ -478,27 +468,26 @@ export function TrailerSheet({
                       {t('fields.mats')}
                     </label>
                     {matsOn && (
-                      <div className="ml-6 animate-slide-in">
-                        <Input
-                          id="trailer-matsCount"
-                          type="number"
-                          min={0}
-                          step={1}
-                          inputMode="numeric"
-                          aria-label={t('fields.matsCount')}
-                          aria-invalid={!!errs.matsCount}
-                          placeholder={t('fields.matsCount')}
-                          className="h-9 max-w-[140px]"
-                          {...form.register('matsCount', {
-                            setValueAs: (v) =>
-                              v === '' || v === null ? undefined : Number(v),
-                          })}
-                        />
-                        {errs.matsCount?.message && (
-                          <p className="mt-1 text-xs text-danger">
-                            {errs.matsCount.message as string}
-                          </p>
-                        )}
+                      <div className="ml-6 animate-slide-in max-w-[160px]">
+                        <FormField
+                          label={t('fields.matsCount')}
+                          error={errs.matsCount?.message as string | undefined}
+                          htmlFor="trailer-matsCount"
+                        >
+                          <Input
+                            id="trailer-matsCount"
+                            type="number"
+                            min={0}
+                            step={1}
+                            inputMode="numeric"
+                            aria-invalid={!!errs.matsCount}
+                            placeholder={t('fields.matsCount')}
+                            {...form.register('matsCount', {
+                              setValueAs: (v) =>
+                                v === '' || v === null ? undefined : Number(v),
+                            })}
+                          />
+                        </FormField>
                       </div>
                     )}
                   </div>

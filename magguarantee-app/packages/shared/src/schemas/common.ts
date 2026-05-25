@@ -131,6 +131,23 @@ export const PaginatedResponse = <T extends z.ZodTypeAny>(item: T) =>
     total: z.number().int().nonnegative().optional(),
   });
 
+// ─── Hard-delete reason envelope (Phase 4.4) ──────────────
+
+/**
+ * Body schema for hard-delete (`DELETE /:id/hard`) endpoints across the
+ * lookup admin surface (carriers / vehicles / drivers / trailers /
+ * trailer-types). Hard-delete is admin-only and irreversible — the docs
+ * require a free-form justification that lands in `audit_log.metadata.reason`.
+ *
+ * Trim + min(3) prevents whitespace-only payloads; max(500) keeps the audit
+ * row's `metadata` JSON sane. The Zod pipe throws 422 on missing/short reason,
+ * matching the rest of the schema-layer validation.
+ */
+export const DeleteWithReasonSchema = z.object({
+  reason: z.string().trim().min(3).max(500),
+});
+export type DeleteWithReasonDto = z.infer<typeof DeleteWithReasonSchema>;
+
 // ─── Problem-details (RFC 7807) ───────────────────────────
 
 /**

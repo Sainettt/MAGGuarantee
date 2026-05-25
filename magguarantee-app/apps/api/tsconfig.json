@@ -12,11 +12,17 @@
     "sourceMap": true,
     "declaration": false,
     "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    // JSX (Phase 4.2) — `react-jsx` transforms <Body>...</Body> at compile
+    // time into `react/jsx-runtime` calls so we don't need to import React
+    // explicitly in every email template. Used ONLY by transactional email
+    // templates under `src/modules/mail/templates/*.tsx`; no controllers /
+    // services render JSX themselves.
+    "jsx": "react-jsx"
   },
   // Tests + src for type-check & ts-jest. The build pass uses
   // tsconfig.build.json (rootDir narrowed to ./src) so emit lands at
   // dist/main.js and not dist/apps/api/src/main.js.
-  "include": ["src/**/*", "test/**/*"],
+  "include": ["src/**/*", "src/**/*.tsx", "test/**/*"],
   "exclude": ["dist", "node_modules"]
 }

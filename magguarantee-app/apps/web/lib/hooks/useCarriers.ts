@@ -14,6 +14,7 @@ import type {
   CarrierFilters,
   CarrierWithTemporaryPasswordDto,
   CreateCarrierDto,
+  DeleteWithReasonDto,
   UpdateCarrierDto,
 } from '@magguarantee/shared';
 
@@ -22,6 +23,7 @@ import {
   deleteCarrier,
   deactivateCarrier,
   getCarrier,
+  hardDeleteCarrier,
   listCarriers,
   reactivateCarrier,
   updateCarrier,
@@ -100,6 +102,20 @@ export function useDeleteCarrier() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: deleteCarrier,
+    onSuccess: () => qc.invalidateQueries({ queryKey: CARRIERS_KEY }),
+  });
+}
+
+/**
+ * Hard-delete — irreversible. Admin-only. The mutation expects the
+ * confirm-dialog to pass `{ id, body: { reason } }` after the user has
+ * filled in the reason textarea.
+ */
+export function useHardDeleteCarrier() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: DeleteWithReasonDto }) =>
+      hardDeleteCarrier(id, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: CARRIERS_KEY }),
   });
 }

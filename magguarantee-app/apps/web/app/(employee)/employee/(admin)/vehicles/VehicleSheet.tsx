@@ -417,9 +417,12 @@ export function VehicleSheet({
                       htmlFor="vehicle-carrierId"
                     >
                       {isWizard ? (
+                        // Read-only carrier in wizard mode — primitive Input
+                        // already supplies `bg-input` + `h-10`; the
+                        // `disabled readOnly` pair stays so screen readers
+                        // and form serialisation behave correctly.
                         <Input
                           id="vehicle-carrierId"
-                          className="h-10 bg-input"
                           value={wizardCarrierLabel ?? ''}
                           readOnly
                           disabled
@@ -449,7 +452,6 @@ export function VehicleSheet({
                   >
                     <Input
                       id="vehicle-plateNumber"
-                      className="h-10"
                       {...form.register('plateNumber')}
                     />
                   </FormField>
@@ -460,7 +462,6 @@ export function VehicleSheet({
                   >
                     <Input
                       id="vehicle-sideNumber"
-                      className="h-10"
                       {...form.register('sideNumber')}
                     />
                   </FormField>
@@ -471,7 +472,6 @@ export function VehicleSheet({
                   >
                     <Input
                       id="vehicle-brand"
-                      className="h-10"
                       {...form.register('brand')}
                     />
                   </FormField>
@@ -482,7 +482,6 @@ export function VehicleSheet({
                   >
                     <Input
                       id="vehicle-model"
-                      className="h-10"
                       {...form.register('model')}
                     />
                   </FormField>
@@ -494,7 +493,6 @@ export function VehicleSheet({
                     <Input
                       id="vehicle-year"
                       type="number"
-                      className="h-10"
                       {...form.register('year', {
                         setValueAs: (v) =>
                           v === '' || v === null ? undefined : Number(v),
@@ -570,7 +568,6 @@ export function VehicleSheet({
                     <Input
                       id="vehicle-nextInspectionDate"
                       type="date"
-                      className="h-10"
                       {...form.register('nextInspectionDate')}
                     />
                   </FormField>
@@ -658,8 +655,7 @@ export function VehicleSheet({
                     >
                       <Input
                         id="vehicle-gpsMobilePhone"
-                        className="h-10"
-                        {...form.register('gpsMobilePhone')}
+                          {...form.register('gpsMobilePhone')}
                       />
                     </FormField>
                     {/* Umowa screenshot — required by the server when
@@ -696,7 +692,6 @@ export function VehicleSheet({
                       type="number"
                       step="0.01"
                       min={0}
-                      className="h-10"
                       {...form.register('rateDe', {
                         setValueAs: (v) =>
                           v === '' || v === null ? undefined : Number(v),
@@ -714,7 +709,6 @@ export function VehicleSheet({
                       type="number"
                       step="0.01"
                       min={0}
-                      className="h-10"
                       {...form.register('rateUe', {
                         setValueAs: (v) =>
                           v === '' || v === null ? undefined : Number(v),
@@ -732,7 +726,6 @@ export function VehicleSheet({
                       type="number"
                       step="0.01"
                       min={0}
-                      className="h-10"
                       {...form.register('rateExport', {
                         setValueAs: (v) =>
                           v === '' || v === null ? undefined : Number(v),
@@ -750,7 +743,6 @@ export function VehicleSheet({
                       type="number"
                       step="0.01"
                       min={0}
-                      className="h-10"
                       {...form.register('rateImport', {
                         setValueAs: (v) =>
                           v === '' || v === null ? undefined : Number(v),

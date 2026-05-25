@@ -474,7 +474,6 @@ export function CarrierSheet({
                   >
                     <Input
                       id="carrier-login"
-                      className="h-10"
                       disabled={isEdit}
                       {...form.register('login')}
                     />
@@ -488,7 +487,6 @@ export function CarrierSheet({
                     <Input
                       id="carrier-email"
                       type="email"
-                      className="h-10"
                       {...form.register('email')}
                     />
                   </FormField>
@@ -500,7 +498,6 @@ export function CarrierSheet({
                   >
                     <Input
                       id="carrier-name"
-                      className="h-10"
                       {...form.register('name')}
                     />
                   </FormField>
@@ -512,7 +509,6 @@ export function CarrierSheet({
                   >
                     <Input
                       id="carrier-contactPerson"
-                      className="h-10"
                       {...form.register('contactPerson')}
                     />
                   </FormField>
@@ -524,7 +520,6 @@ export function CarrierSheet({
                   >
                     <Input
                       id="carrier-phone"
-                      className="h-10"
                       {...form.register('phone')}
                     />
                   </FormField>
@@ -537,7 +532,6 @@ export function CarrierSheet({
                     <Input
                       id="carrier-ordersEmail"
                       type="email"
-                      className="h-10"
                       {...form.register('ordersEmail')}
                     />
                   </FormField>
@@ -552,7 +546,6 @@ export function CarrierSheet({
                       <Input
                         id="carrier-password"
                         type="text"
-                        className="h-10"
                         autoComplete="new-password"
                         {...form.register('password')}
                       />
@@ -573,7 +566,6 @@ export function CarrierSheet({
                     <div className="space-y-1">
                       <Input
                         id="carrier-nip"
-                        className="h-10"
                         inputMode="text"
                         maxLength={20}
                         autoComplete="off"
@@ -608,7 +600,7 @@ export function CarrierSheet({
                       <Select
                         id="carrier-vatCountry"
                         aria-label={t('fields.vatCountry')}
-                        className="h-10 max-w-[8rem]"
+                        className="max-w-[8rem]"
                         {...form.register('_vatCountry')}
                       >
                         {EU_VAT_COUNTRIES.map((c) => (
@@ -620,7 +612,7 @@ export function CarrierSheet({
                       <Input
                         id="carrier-vatNumber"
                         aria-label={t('fields.vatNumber')}
-                        className="h-10 flex-1"
+                        className="flex-1"
                         inputMode="text"
                         maxLength={12}
                         autoComplete="off"
@@ -644,7 +636,6 @@ export function CarrierSheet({
                 >
                   <Input
                     id="carrier-company"
-                    className="h-10"
                     {...form.register('company')}
                   />
                 </FormField>
@@ -673,7 +664,6 @@ export function CarrierSheet({
                     <div className="space-y-1">
                       <Input
                         id="carrier-accountEur"
-                        className="h-10"
                         {...form.register('accountEur', {
                           onBlur: () => {
                             void checkAccount();
@@ -737,7 +727,6 @@ export function CarrierSheet({
                   >
                     <Input
                       id="carrier-accountPln"
-                      className="h-10"
                       {...form.register('accountPln')}
                     />
                   </FormField>
@@ -749,7 +738,6 @@ export function CarrierSheet({
                     <Input
                       id="carrier-paymentTerms"
                       type="number"
-                      className="h-10"
                       {...form.register('paymentTerms', {
                         setValueAs: (v) =>
                           v === '' || v === null ? undefined : Number(v),
@@ -768,7 +756,6 @@ export function CarrierSheet({
                       step="0.01"
                       min={250000}
                       placeholder={t('fields.insuranceMinHint')}
-                      className="h-10"
                       {...form.register('insuranceValue', {
                         // Empty / null input → undefined so Zod treats the
                         // field as missing and surfaces "Required" instead of
@@ -787,7 +774,6 @@ export function CarrierSheet({
                     <Input
                       id="carrier-insuranceExpiry"
                       type="date"
-                      className="h-10"
                       {...form.register('insuranceExpiry')}
                     />
                   </FormField>
@@ -800,7 +786,6 @@ export function CarrierSheet({
                     <Input
                       id="carrier-licenseExpiry"
                       type="date"
-                      className="h-10"
                       {...form.register('licenseExpiry')}
                     />
                   </FormField>
@@ -816,7 +801,6 @@ export function CarrierSheet({
                   <Input
                     id="carrier-numberOfVehicle"
                     type="number"
-                    className="h-10"
                     {...form.register('numberOfVehicle', {
                       setValueAs: (v) =>
                         v === '' || v === null ? undefined : Number(v),

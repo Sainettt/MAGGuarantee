@@ -155,6 +155,16 @@ export class TrailersRepository {
     await this.prisma.tx.trailer.delete({ where: { id } });
   }
 
+  /**
+   * Hard-deletes a trailer row. Phase 4.4 admin-only flow with a `reason`
+   * captured upstream into the audit row's metadata. `deleteMany` bypasses
+   * the soft-delete extension that rewrites the singular `delete` →
+   * soft-delete update; we want a physical row removal here.
+   */
+  async hardDelete(id: string): Promise<void> {
+    await this.prisma.tx.trailer.deleteMany({ where: { id } });
+  }
+
   // ── helpers ──────────────────────────────────────────────
 
   private includeShape() {

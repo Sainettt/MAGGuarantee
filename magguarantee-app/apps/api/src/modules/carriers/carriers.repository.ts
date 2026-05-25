@@ -353,6 +353,26 @@ export class CarriersRepository {
     });
   }
 
+  /**
+   * Hard-deletes a carrier row plus its 1:1 User shadow. Phase 4.4 admin-only
+   * flow with an audit-trail `reason` captured upstream via
+   * `AuditContext.setMetadata({ reason })`.
+   *
+   * Uses `deleteMany` so the soft-delete extension (which rewrites the
+   * singular `delete` → soft-delete `update`) is bypassed and the row is
+   * physically removed from Postgres. Vehicles / drivers / trailers cascade
+   * via the FK's `ON DELETE CASCADE`; the User row is removed explicitly so
+   * the unique login is freed up for re-use. Runs in the ambient audit
+   * transaction so the audit row + deletes commit (or roll back) together.
+   */
+  async hardDelete(id: string): Promise<void> {
+    const tx = this.prisma.tx;
+    const carrier = await tx.carrier.findFirst({ where: { id } });
+    if (!carrier) return;
+    await tx.carrier.deleteMany({ where: { id } });
+    await tx.user.deleteMany({ where: { id: carrier.userId } });
+  }
+
   // ── helpers ──────────────────────────────────────────────
 
   private includeShape() {

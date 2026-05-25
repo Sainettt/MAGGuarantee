@@ -15,12 +15,14 @@ import {
 import {
   CarrierFiltersSchema,
   CreateCarrierSchema,
+  DeleteWithReasonSchema,
   UpdateCarrierSchema,
   UuidSchema,
   type CarrierDto,
   type CarrierFilters,
   type CarrierWithTemporaryPasswordDto,
   type CreateCarrierDto,
+  type DeleteWithReasonDto,
   type UpdateCarrierDto,
 } from '@magguarantee/shared';
 
@@ -164,5 +166,27 @@ export class CarriersController {
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
   ): Promise<void> {
     await this.carriers.softDelete(id);
+  }
+
+  /**
+   * Hard-delete (admin-only) per Phase 4.4. Mounted as a sibling of the
+   * soft-delete endpoint to keep the legacy DELETE :id contract intact for
+   * the opiekun + carrier-self flows. `reason` is required and stored in
+   * `audit_log.metadata.reason` via `AuditContext.setMetadata`.
+   */
+  @Delete(':id/hard')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles('admin')
+  @Audit({
+    action: 'hardDeleteCarrier',
+    targetType: 'Carrier',
+    targetKey: (req) => req.params?.id,
+  })
+  async hardDelete(
+    @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
+    @Body(new ZodValidationPipe(DeleteWithReasonSchema))
+    body: DeleteWithReasonDto,
+  ): Promise<void> {
+    await this.carriers.hardDelete(id, body.reason);
   }
 }

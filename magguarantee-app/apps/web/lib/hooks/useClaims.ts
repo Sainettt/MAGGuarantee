@@ -20,6 +20,7 @@ import type {
   ClaimFilters,
   PreviewClaimDto,
   PreviewClaimResponse,
+  RequestAuthorizationDto,
   SubmitClaimDto,
   SubmitReklamacjaDto,
   UpdateClaimDto,
@@ -30,6 +31,7 @@ import {
   listClaims,
   previewExistingClaim,
   previewNewClaim,
+  requestAuthorization,
   submitClaim,
   submitReklamacja,
   updateClaim,
@@ -159,6 +161,39 @@ export function useUpdateClaim(
     ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: CLAIMS_KEY });
+      opts?.onSuccess?.(...args);
+    },
+  });
+}
+
+/**
+ * `POST /claims/:nrZgl/request-authorization` — Phase 4.2 Maksim handshake.
+ *
+ * Admin / pracownik flags a claim as needing Maksim sign-off before being
+ * booked as accepted. The mutation invalidates the claim detail, list and
+ * preview caches on success so the open modal reflects the new
+ * `OCZEKUJE_NA_AUTORYZACJE` status + the persisted `amountMaximum` without
+ * a manual refetch.
+ *
+ * The `nrZgl` is bound at hook-call time so the call site stays terse —
+ * `mutateAsync(body)` rather than `mutateAsync({ nrZgl, body })`.
+ */
+export function useRequestAuthorization(
+  nrZgl: string,
+  opts?: UseMutationOptions<ClaimDto, Error, RequestAuthorizationDto>,
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: RequestAuthorizationDto) =>
+      requestAuthorization(nrZgl, body),
+    ...opts,
+    onSuccess: (...args) => {
+      // Detail + list both surface the new status; preview cache is keyed
+      // on the body so a stale preview against the old claim row would
+      // misrepresent the badge after the request lands.
+      qc.invalidateQueries({ queryKey: [...CLAIMS_KEY, 'detail', nrZgl] });
+      qc.invalidateQueries({ queryKey: CLAIMS_KEY });
+      qc.invalidateQueries({ queryKey: [...CLAIMS_KEY, 'preview', nrZgl] });
       opts?.onSuccess?.(...args);
     },
   });

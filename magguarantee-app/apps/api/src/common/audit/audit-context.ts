@@ -45,12 +45,26 @@ export interface AuditContextStore {
    * service doesn't bother to snapshot (e.g. pure create-flows).
    */
   before?: unknown;
+  /**
+   * Optional business-context metadata the service stashes via
+   * `AuditContext.setMetadata(...)`. The interceptor merges this on top of
+   * its own routing fields (method/route/userAgent) before writing — the
+   * service-side keys win on collision, but in practice they're disjoint
+   * (`reason`, `category`, ...) so callers can use the same key namespace
+   * safely.
+   *
+   * Phase 4.4 motivator: hard-delete flows need a `reason` string that ends
+   * up in `audit_log.metadata` without being threaded through every service
+   * signature. The decorator-driven `targetKey` extractor is for routing data
+   * (path params, result id) — `metadata` is for business data.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 const storage = new AsyncLocalStorage<AuditContextStore>();
 
 /**
- * Public surface of the ambient audit context. Three entry points:
+ * Public surface of the ambient audit context. Four entry points:
  *
  *  - `run(store, fn)` — open a new context for the lifetime of `fn`. Nested
  *    `run(...)` calls create child stores (the inner store wins for the inner
@@ -61,6 +75,11 @@ const storage = new AsyncLocalStorage<AuditContextStore>();
  *  - `setBefore(value)` — mutate the active store's `before` slot. No-op when
  *    called outside a `run(...)` (defence in depth — services don't have to
  *    know whether they're inside an audited request).
+ *  - `setMetadata(obj)` — merge business-context metadata into the active
+ *    store's `metadata` slot. Multiple calls accumulate (later keys win on
+ *    collision). No-op outside any `run(...)` — same defensive contract as
+ *    `setBefore`. The interceptor merges this onto its own routing metadata
+ *    on commit.
  */
 export const AuditContext = {
   current: (): AuditContextStore | undefined => storage.getStore(),
@@ -69,5 +88,10 @@ export const AuditContext = {
   setBefore: (before: unknown): void => {
     const s = storage.getStore();
     if (s) s.before = before;
+  },
+  setMetadata: (meta: Record<string, unknown>): void => {
+    const s = storage.getStore();
+    if (!s) return;
+    s.metadata = { ...(s.metadata ?? {}), ...meta };
   },
 };

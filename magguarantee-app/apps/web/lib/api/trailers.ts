@@ -2,6 +2,7 @@
 
 import type {
   CreateTrailerDto,
+  DeleteWithReasonDto,
   TrailerDto,
   TrailerFilters,
   UpdateTrailerDto,
@@ -47,4 +48,12 @@ export function reactivateTrailer(id: string): Promise<TrailerDto> {
 
 export function deleteTrailer(id: string): Promise<void> {
   return apiJson<void>(`/trailers/${id}`, { method: 'DELETE' });
+}
+
+/** Hard-delete — see hardDeleteCarrier doc. */
+export function hardDeleteTrailer(
+  id: string,
+  body: DeleteWithReasonDto,
+): Promise<void> {
+  return apiJson<void>(`/trailers/${id}/hard`, { method: 'DELETE', json: body });
 }

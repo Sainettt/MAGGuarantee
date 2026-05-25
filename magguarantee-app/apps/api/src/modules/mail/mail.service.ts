@@ -1,5 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { render } from '@react-email/render';
 
+import {
+  AuthorizationRequestEmail,
+  type AuthorizationRequestProps,
+} from './templates/authorization-request';
 import { SmtpProvider } from './providers/smtp.provider';
 
 /**
@@ -7,11 +12,17 @@ import { SmtpProvider } from './providers/smtp.provider';
  * `sendAccountCreated`, `sendPasswordReset`, etc. are added as follow-up
  * phases need them (per docs/16-jobs-and-integrations.md#email-шаблоны).
  *
+ * Phase 4.2 adds `sendAuthorizationRequest` — Maksim kwota-Maksima handshake.
+ *
  * Phase 9 swap: replace `SmtpProvider` with `GmailApiProvider` and inject the
  * latter from MailModule. The MailService itself does not change.
  */
 export interface IMailService {
   send2faCode(email: string, code: string): Promise<void>;
+  sendAuthorizationRequest(
+    email: string,
+    props: AuthorizationRequestProps,
+  ): Promise<void>;
 }
 
 @Injectable()
@@ -42,6 +53,66 @@ export class MailService implements IMailService {
       });
       throw err;
     }
+  }
+
+  /**
+   * Phase 4.2 — kwota-Maksima authorization-request email.
+   *
+   * Wraps the React-Email template into HTML + plain-text fallback and ships
+   * both through the SMTP provider (Mailhog in dev, Gmail API in Phase 9).
+   * Subject mirrors the legacy GAS `sendAuthorizationRequest` (Code.gs:5500-ish)
+   * — "Wniosek o autoryzację: <nrZgl>" — so Maksim's inbox filters survive
+   * the migration.
+   */
+  async sendAuthorizationRequest(
+    email: string,
+    props: AuthorizationRequestProps,
+  ): Promise<void> {
+    const subject = `Wniosek o autoryzację: ${props.nrZgl}`;
+    const html = await render(AuthorizationRequestEmail(props));
+    const text = this.buildAuthorizationRequestText(props);
+
+    try {
+      await this.smtp.send({ to: email, subject, text, html });
+      this.logger.log({
+        msg: 'authorization request sent',
+        nrZgl: props.nrZgl,
+        toMasked: this.maskEmail(email),
+      });
+    } catch (err) {
+      this.logger.error({
+        msg: 'authorization request send failed',
+        nrZgl: props.nrZgl,
+        toMasked: this.maskEmail(email),
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+  }
+
+  /**
+   * Plain-text fallback for the authorization-request email. Mirrors the
+   * structure of the HTML template so non-HTML clients see the same data.
+   */
+  private buildAuthorizationRequestText(
+    props: AuthorizationRequestProps,
+  ): string {
+    const lines = [
+      `MAGGuarantee — wniosek o autoryzację`,
+      ``,
+      `Nr zgłoszenia: ${props.nrZgl}`,
+      `Przewoźnik:    ${props.carrierName}`,
+      `Pojazd:        ${props.vehiclePlate}`,
+      `Okres:         ${props.periodFrom} → ${props.periodTo}`,
+      `Dopłata:       ${props.doplata} EUR`,
+      ``,
+      `Kwota Maksima do autoryzacji: ${props.kwotaMaksima} EUR`,
+    ];
+    if (props.comment) {
+      lines.push('', `Komentarz weryfikatora:`, props.comment);
+    }
+    lines.push('', `Otwórz w MAGGuarantee: ${props.deeplink}`);
+    return lines.join('\n');
   }
 
   private buildText(code: string): string {

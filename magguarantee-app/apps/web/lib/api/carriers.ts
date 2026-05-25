@@ -7,6 +7,7 @@ import type {
   CarrierFilters,
   CarrierWithTemporaryPasswordDto,
   CreateCarrierDto,
+  DeleteWithReasonDto,
   UpdateCarrierDto,
 } from '@magguarantee/shared';
 
@@ -55,4 +56,16 @@ export function reactivateCarrier(id: string): Promise<CarrierDto> {
 
 export function deleteCarrier(id: string): Promise<void> {
   return apiJson<void>(`/carriers/${id}`, { method: 'DELETE' });
+}
+
+/**
+ * Hard-delete — irreversible row removal. Admin-only on the server side;
+ * accepts a free-form `reason` (min 3, max 500) that lands in
+ * `audit_log.metadata.reason` for forensics.
+ */
+export function hardDeleteCarrier(
+  id: string,
+  body: DeleteWithReasonDto,
+): Promise<void> {
+  return apiJson<void>(`/carriers/${id}/hard`, { method: 'DELETE', json: body });
 }

@@ -83,4 +83,18 @@ export class TrailerTypesRepository {
     });
     return row as TrailerTypeRow;
   }
+
+  /**
+   * Hard-deletes a trailer-type lookup row. Phase 4.4 admin-only flow with a
+   * `reason` captured upstream into the audit row's metadata.
+   *
+   * TrailerType has no soft-delete column (it's a global lookup, not a
+   * tenant resource), so this is a straight `delete`. Trailers reference
+   * `trailerTypeId` with a `Restrict` FK in the schema — Postgres will reject
+   * the delete if any trailer still points at this type. The service-layer
+   * `hardDelete` translates that into a 409 Conflict.
+   */
+  async hardDelete(id: string): Promise<void> {
+    await this.prisma.tx.trailerType.delete({ where: { id } });
+  }
 }

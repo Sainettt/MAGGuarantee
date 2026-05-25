@@ -31,7 +31,11 @@ export function decisionTargetsFor(
 ): ClaimDecisionTarget[] {
   switch (currentStatus) {
     case 'NA_WERYFIKACJI':
-      return ['ZAAKCEPTOWANO', 'ODRZUCONO', 'OCZEKUJE_NA_AUTORYZACJE'];
+      // Phase 4.2: OCZEKUJE_NA_AUTORYZACJE убран — единственный путь в этот
+      // статус теперь через таб «Autoryzacja» (POST /request-authorization),
+      // который шлёт email Maksim-у. Edit-tab decision picker остаётся для
+      // прямых решений ZAAKCEPTOWANO/ODRZUCONO без авторизации.
+      return ['ZAAKCEPTOWANO', 'ODRZUCONO'];
     case 'OCZEKUJE_NA_AUTORYZACJE':
       return ['ZAAKCEPTOWANO', 'ODRZUCONO'];
     case 'REKLAMACJA':

@@ -13,6 +13,7 @@ import type {
   UpdateDriverDto,
 } from '@magguarantee/shared';
 
+import { AuditContext } from '../../common/audit';
 import {
   isPrismaUniqueViolation,
   uniqueViolationToConflict,
@@ -103,6 +104,7 @@ export class DriversService {
   async update(id: string, dto: UpdateDriverDto): Promise<DriverDto> {
     const existing = await this.drivers.findById(id);
     if (!existing) throw new NotFoundException('Kierowca nie znaleziony');
+    AuditContext.setBefore(this.toDto(existing));
 
     const patch: Record<string, unknown> = {};
     const passthrough: (keyof UpdateDriverDto)[] = [
@@ -141,6 +143,7 @@ export class DriversService {
     if (!existing.active) {
       throw new ConflictException('Kierowca jest już nieaktywny');
     }
+    AuditContext.setBefore(this.toDto(existing));
     const row = await this.drivers.setActive(id, false);
     return this.toDto(row);
   }
@@ -151,6 +154,7 @@ export class DriversService {
     if (existing.active) {
       throw new ConflictException('Kierowca jest już aktywny');
     }
+    AuditContext.setBefore(this.toDto(existing));
     const row = await this.drivers.setActive(id, true);
     return this.toDto(row);
   }
@@ -158,7 +162,21 @@ export class DriversService {
   async softDelete(id: string): Promise<void> {
     const existing = await this.drivers.findById(id);
     if (!existing) throw new NotFoundException('Kierowca nie znaleziony');
+    AuditContext.setBefore(this.toDto(existing));
     await this.drivers.softDelete(id);
+  }
+
+  /**
+   * Hard-deletes a driver row. Phase 4.4 admin-only flow — `reason` is
+   * required (Zod-validated upstream) and lands in
+   * `audit_log.metadata.reason` via `AuditContext.setMetadata`.
+   */
+  async hardDelete(id: string, reason: string): Promise<void> {
+    const existing = await this.drivers.findById(id);
+    if (!existing) throw new NotFoundException('Kierowca nie znaleziony');
+    AuditContext.setBefore(this.toDto(existing));
+    AuditContext.setMetadata({ reason });
+    await this.drivers.hardDelete(id);
   }
 
   // ── Internals ────────────────────────────────────────────

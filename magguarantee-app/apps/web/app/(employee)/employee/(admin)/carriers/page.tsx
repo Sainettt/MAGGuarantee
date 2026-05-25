@@ -2,13 +2,15 @@
 
 // Admin CRUD — carriers.
 
-import { Pencil, PlayCircle, Plus } from 'lucide-react';
+import { Pencil, PlayCircle, Plus, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import type { CarrierDto } from '@magguarantee/shared';
 
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { ConfirmDeleteWithReasonDialog } from '@/components/ui/ConfirmDeleteWithReasonDialog';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
@@ -20,7 +22,8 @@ import {
 } from '@/components/carrier-onboarding/useCarrierOnboarding';
 import { CarrierDetailModal } from '@/components/carriers/CarrierDetailModal';
 import { OnboardingMissingBadge } from '@/components/carriers/OnboardingMissingBadge';
-import { useCarriers } from '@/lib/hooks/useCarriers';
+import { useAuth } from '@/lib/hooks/useAuth';
+import { useCarriers, useHardDeleteCarrier } from '@/lib/hooks/useCarriers';
 import { useOpiekuni } from '@/lib/hooks/useLookups';
 
 import { CarrierSheet } from './CarrierSheet';
@@ -40,6 +43,9 @@ function CarriersPageInner() {
   const t = useTranslations('carriers');
   const tWizard = useTranslations();
   const tCommon = useTranslations('common');
+  const tConfirm = useTranslations('confirmDelete');
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [search, setSearch] = useState('');
   const [opiekunId, setOpiekunId] = useState<string>('');
   const [activeFilter, setActiveFilter] = useState<'' | 'true' | 'false'>('');
@@ -74,6 +80,13 @@ function CarriersPageInner() {
   // the Sheet (the modal closes before the Sheet opens).
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailTarget, setDetailTarget] = useState<CarrierDto | null>(null);
+
+  // Phase 4.4 — hard-delete dialog. The action button is gated to admin in
+  // the column renderer below; we still set up the target/open state at the
+  // page level so the same dialog handles every row.
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<CarrierDto | null>(null);
+  const hardDeleteM = useHardDeleteCarrier();
 
   const openCreate = () => {
     // The "+ Add carrier" button opens the wizard, NOT the standalone create
@@ -111,6 +124,11 @@ function CarriersPageInner() {
     },
     [wizard],
   );
+
+  const openHardDelete = useCallback((row: CarrierDto) => {
+    setDeleteTarget(row);
+    setDeleteOpen(true);
+  }, []);
 
   const columns = useMemo<DataTableColumn<CarrierDto>[]>(
     () => [
@@ -215,15 +233,30 @@ function CarriersPageInner() {
               <Pencil size={14} aria-hidden="true" />
               <span className="hidden lg:inline">{tCommon('edit')}</span>
             </Button>
+            {isAdmin && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-danger hover:bg-danger-bg"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openHardDelete(row);
+                }}
+                aria-label={`${tConfirm('confirm')} ${row.login}`}
+              >
+                <Trash2 size={14} aria-hidden="true" />
+                <span className="hidden lg:inline">{tConfirm('confirm')}</span>
+              </Button>
+            )}
           </div>
         ),
       },
     ],
-    [t, tCommon, tWizard, resumeOnboarding],
+    [t, tCommon, tConfirm, tWizard, resumeOnboarding, isAdmin, openHardDelete],
   );
 
   return (
-    <section className="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-8">
+    <section className="px-4 sm:px-6 lg:px-10 xl:px-12 py-8">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <h1 className="text-2xl font-extrabold tracking-tight text-text">
           {t('title')}
@@ -237,7 +270,7 @@ function CarriersPageInner() {
       <div className="flex flex-col sm:flex-row gap-3 mb-4">
         <Input
           type="search"
-          className="h-10 sm:max-w-xs"
+          className="sm:max-w-xs"
           placeholder={t('filters.searchPlaceholder')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -285,6 +318,7 @@ function CarriersPageInner() {
         rowKey={(r) => r.id}
         onRowClick={openDetail}
         isLoading={isLoading}
+        loadingLabel={tCommon('loading')}
         empty={
           <EmptyState title={t('emptyTitle')} message={t('emptyMessage')} />
         }
@@ -301,6 +335,31 @@ function CarriersPageInner() {
         open={sheetOpen}
         carrier={target}
         onClose={() => setSheetOpen(false)}
+      />
+
+      <ConfirmDeleteWithReasonDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        entityLabel={tConfirm('entityLabel.carrier')}
+        entityName={
+          deleteTarget
+            ? `${deleteTarget.login}${deleteTarget.name ? ` — ${deleteTarget.name}` : ''}`
+            : ''
+        }
+        isLoading={hardDeleteM.isPending}
+        onConfirm={async (reason) => {
+          if (!deleteTarget) return;
+          try {
+            await hardDeleteM.mutateAsync({
+              id: deleteTarget.id,
+              body: { reason },
+            });
+            toast.success(tConfirm('deletedToast'));
+          } catch (err) {
+            toast.error(tConfirm('errorToast'));
+            throw err;
+          }
+        }}
       />
     </section>
   );

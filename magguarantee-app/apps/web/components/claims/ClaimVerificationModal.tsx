@@ -15,9 +15,10 @@
 // generic is a union of all variants so RHF lets us swap which fields
 // are registered based on the picker without re-mounting the form.
 
+import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import {
   Controller,
   useForm,
@@ -27,9 +28,11 @@ import {
 } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
+  RequestAuthorizationSchema,
   UpdateClaimSchema,
   type ClaimDto,
   type PreviewClaimDto,
+  type RequestAuthorizationDto,
   type UpdateClaimDto,
 } from '@magguarantee/shared';
 
@@ -61,6 +64,7 @@ import { formatDateFull, formatEur } from '@/lib/format/numbers';
 import {
   useClaim,
   useClaimPreviewExisting,
+  useRequestAuthorization,
   useUpdateClaim,
 } from '@/lib/hooks/useClaims';
 import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
@@ -753,7 +757,7 @@ function ModalBody({ claim, onClose, t, tStatus }: ModalBodyProps) {
           </TabsContent>
 
           <TabsContent value="authorization">
-            <AuthorizationTab claim={claim} />
+            <AuthorizationTab claim={claim} onClose={onClose} />
           </TabsContent>
         </Tabs>
       </SheetBody>
@@ -932,22 +936,127 @@ function DiffRow({
 }
 
 // ── Authorization tab ──────────────────────────────────────────────
+//
+// Phase 4.2 rewrite — wires the new `POST /claims/:nrZgl/request-authorization`
+// endpoint. Replaces the Phase 4.1 PATCH-based stub.
+//
+// Behaviour by current `claim.status`:
+//   - `NA_WERYFIKACJI`           — pre-decision form: kwotaMaksima (required)
+//     + comment (optional) → "Wymaga autoryzacji" button calls the new
+//     POST. Success closes the modal and fires the "Email wysłany" toast.
+//   - `OCZEKUJE_NA_AUTORYZACJE`  — read-only summary (description + persisted
+//     amountMaximum). The Save-kwoty-as-standalone-override path is not
+//     supported by the current UpdateClaimSchema (see report Deviations).
+//   - `ZAAKCEPTOWANO` / `ODRZUCONO` — terminal: "notRequired" message.
+//   - other (e.g. REKLAMACJA / AUTORYZACJA_KWOTA_MAKSIMA) — terminal too.
 
-function AuthorizationTab({ claim }: { claim: ClaimDto }) {
+/** RHF form values for the pre-decision "Wymaga autoryzacji" form. */
+interface AuthFormValues {
+  kwotaMaksima: number | undefined;
+  comment: string;
+}
+
+const AUTH_COMMENT_MAX = 2_000;
+
+function AuthorizationTab({
+  claim,
+  onClose,
+}: {
+  claim: ClaimDto;
+  onClose: () => void;
+}) {
   const t = useTranslations('employee.claims.modal.auth');
   const tCommon = useTranslations('common');
 
-  const [margin, setMargin] = useState<string>('');
-  const [description, setDescription] = useState<string>('');
-  const [amountMaximum, setAmountMaximum] = useState<string>(
-    claim.amountMaximum != null ? String(claim.amountMaximum) : '',
-  );
+  // Case 1 — already pending authorization. Show description + the
+  // amountMaximum that the original `request-authorization` call already
+  // persisted (read-only).
+  if (claim.status === 'OCZEKUJE_NA_AUTORYZACJE') {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-md border border-border bg-input p-3 space-y-1">
+          <h4 className="text-xs font-bold uppercase tracking-wider text-text-sub">
+            {t('pendingTitle')}
+          </h4>
+          <p className="text-xs text-text-sub">{t('alreadyPending')}</p>
+          {claim.authorizationDescription && (
+            <>
+              <p className="text-xs text-text-sub pt-2">
+                {t('pendingDescription')}
+              </p>
+              <p className="whitespace-pre-wrap text-sm text-text">
+                {claim.authorizationDescription}
+              </p>
+            </>
+          )}
+        </div>
 
-  const updateM = useUpdateClaim({
+        {claim.amountMaximum != null && (
+          <div className="space-y-1">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-text-sub">
+              {t('pendingMaximumLabel')}
+            </p>
+            <p className="text-sm font-semibold text-text tabular-nums">
+              {formatEur(claim.amountMaximum)}
+            </p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Case 2 — terminal status: nothing more to do here.
+  if (
+    claim.status === 'ZAAKCEPTOWANO' ||
+    claim.status === 'ODRZUCONO' ||
+    claim.status === 'AUTORYZACJA_KWOTA_MAKSIMA' ||
+    claim.status === 'REKLAMACJA'
+  ) {
+    return (
+      <p className="rounded-md border border-border bg-input p-4 text-sm text-text-sub text-center">
+        {t('notRequired')}
+      </p>
+    );
+  }
+
+  // Case 3 — pre-decision (`NA_WERYFIKACJI`): RHF + Zod-validated
+  // request-authorization form. The wire body is `RequestAuthorizationDto`
+  // (kwotaMaksima required + positive, optional comment 1..2000 chars).
+  return <RequestAuthorizationForm claim={claim} onClose={onClose} t={t} tCommon={tCommon} />;
+}
+
+function RequestAuthorizationForm({
+  claim,
+  onClose,
+  t,
+  tCommon,
+}: {
+  claim: ClaimDto;
+  onClose: () => void;
+  t: ReturnType<typeof useTranslations<'employee.claims.modal.auth'>>;
+  tCommon: ReturnType<typeof useTranslations<'common'>>;
+}) {
+  const form = useForm<AuthFormValues>({
+    resolver: zodResolver(RequestAuthorizationSchema) as Resolver<AuthFormValues>,
+    defaultValues: {
+      // Seed with the previously-persisted amountMaximum (when re-opening
+      // after a soft-cancel) or the server-calculated doplata so the
+      // verifier doesn't have to retype the typical value.
+      kwotaMaksima:
+        claim.amountMaximum ??
+        (Number.isFinite(claim.paymentEur) ? claim.paymentEur : undefined),
+      comment: '',
+    },
+  });
+
+  const requestM = useRequestAuthorization(claim.nrZgl, {
     onSuccess: () => {
-      toast.success(t('savedToast'));
+      toast.success(t('emailSent'));
+      onClose();
     },
     onError: (err) => {
+      // 4xx → surface server message (validation / state-machine errors);
+      // network/5xx → generic toast. Mirrors the main Edit tab handler.
       const msg =
         err instanceof ApiResponseError && err.status >= 400 && err.status < 500
           ? err.message
@@ -956,84 +1065,45 @@ function AuthorizationTab({ claim }: { claim: ClaimDto }) {
     },
   });
 
-  // Case 1 — already pending authorization. Show description (read-only)
-  // + amountMaximum entry (writes a ZAAKCEPTOWANO PATCH with amountMaximum
-  // override; we don't have a dedicated "set max amount" endpoint, so we
-  // surface the value here for record-keeping. Backend will wire the
-  // dedicated transition in sub-slice 4.2.)
-  if (claim.status === 'OCZEKUJE_NA_AUTORYZACJE') {
-    return (
-      <div className="space-y-4">
-        <div className="rounded-md border border-border bg-input p-3 space-y-1">
-          <h4 className="text-xs font-bold uppercase tracking-wider text-text-sub">
-            {t('pendingTitle')}
-          </h4>
-          {claim.authorizationDescription && (
-            <>
-              <p className="text-xs text-text-sub">{t('pendingDescription')}</p>
-              <p className="whitespace-pre-wrap text-sm text-text">
-                {claim.authorizationDescription}
-              </p>
-            </>
-          )}
-        </div>
+  const errs = form.formState.errors as Record<
+    string,
+    { message?: string } | undefined
+  >;
+  const errMsg = (key: string): string | undefined => errs[key]?.message;
 
-        <FormField
-          label={t('amountMaximumLabel')}
-          htmlFor="auth-amountMaximum"
-        >
-          <Input
-            id="auth-amountMaximum"
-            type="number"
-            step="0.01"
-            min={0}
-            value={amountMaximum}
-            onChange={(e) => setAmountMaximum(e.target.value)}
-          />
-        </FormField>
-        <p className="text-xs text-text-sub">
-          {/* Note: persistence of the Maksim amount currently rides on
-              the same PATCH endpoint; a dedicated `POST /claims/:nrZgl/maksim-amount`
-              is on the api-agent backlog (sub-slice 4.2). For now the
-              button is informational — it triggers the existing PATCH
-              with `amountMaximum` and no status change is allowed yet. */}
-        </p>
-      </div>
-    );
-  }
-
-  // Case 2 — terminal status: nothing more to do here.
-  if (claim.status === 'ZAAKCEPTOWANO' || claim.status === 'ODRZUCONO') {
-    return (
-      <p className="rounded-md border border-border bg-input p-4 text-sm text-text-sub text-center">
-        {t('notRequired')}
-      </p>
-    );
-  }
-
-  // Case 3 — pre-decision: offer "Request authorization" form.
-  // This wires the existing PATCH endpoint with targetStatus =
-  // OCZEKUJE_NA_AUTORYZACJE per the task brief — Maksim email is added
-  // server-side in sub-slice 4.2 without UI changes.
-  const onRequest = () => {
-    const m = Number(margin);
-    if (!Number.isFinite(m)) {
-      toast.error(tCommon('errorGeneric'));
+  // Note: the parent ModalBody already renders a <form> wrapper for the
+  // main Edit tab — nested <form>s are invalid HTML. We render the
+  // request-authorization fields inside a plain <div> and trigger the
+  // mutation from a `type="button"` click handler that runs RHF's
+  // `handleSubmit` manually. This also keeps the verifier from
+  // accidentally firing the main Edit-tab submit when pressing Enter.
+  const onValid: SubmitHandler<AuthFormValues> = (values) => {
+    if (values.kwotaMaksima == null || !Number.isFinite(values.kwotaMaksima)) {
       return;
     }
-    if (description.trim().length < 1) {
-      toast.error(tCommon('errorGeneric'));
-      return;
-    }
-    updateM.mutate({
-      nrZgl: claim.nrZgl,
-      body: {
-        targetStatus: 'OCZEKUJE_NA_AUTORYZACJE',
-        margin: m,
-        authorizationDescription: description.trim(),
-      },
+    const body: RequestAuthorizationDto = {
+      kwotaMaksima: Number(values.kwotaMaksima),
+      comment:
+        values.comment.trim().length > 0 ? values.comment.trim() : undefined,
+    };
+    void requestM.mutateAsync(body).catch(() => {
+      // Error already surfaced via the mutation's onError handler — swallow
+      // here so the promise rejection doesn't bubble as unhandled.
     });
   };
+
+  const handleRequestClick = () => {
+    void form.handleSubmit(onValid)();
+  };
+
+  // Live char counter for the comment textarea (max 2000 per Zod schema).
+  const commentValue = form.watch('comment') ?? '';
+  const commentLen = commentValue.length;
+
+  const submitDisabled =
+    requestM.isPending ||
+    form.watch('kwotaMaksima') == null ||
+    !(Number(form.watch('kwotaMaksima')) > 0);
 
   return (
     <div className="space-y-4">
@@ -1044,36 +1114,58 @@ function AuthorizationTab({ claim }: { claim: ClaimDto }) {
         <p className="text-xs text-text-sub">{t('requestHelp')}</p>
       </div>
 
-      <FormField label={t('margin')} required htmlFor="auth-margin">
+      <FormField
+        label={t('kwotaMaksimaLabel')}
+        required
+        description={t('kwotaMaksimaHelp')}
+        error={errMsg('kwotaMaksima')}
+        htmlFor="auth-kwotaMaksima"
+      >
         <Input
-          id="auth-margin"
+          id="auth-kwotaMaksima"
           type="number"
           step="0.01"
-          value={margin}
-          onChange={(e) => setMargin(e.target.value)}
+          min={0}
+          inputMode="decimal"
+          {...form.register('kwotaMaksima', {
+            setValueAs: (v) =>
+              v === '' || v === null ? undefined : Number(v),
+          })}
         />
       </FormField>
+
       <FormField
-        label={t('description')}
-        required
-        htmlFor="auth-description"
+        label={t('commentLabel')}
+        error={errMsg('comment')}
+        htmlFor="auth-comment"
       >
         <Textarea
-          id="auth-description"
-          rows={5}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
+          id="auth-comment"
+          rows={4}
+          maxLength={AUTH_COMMENT_MAX}
+          placeholder={t('commentPlaceholder')}
+          {...form.register('comment')}
         />
+        <p className="text-xs text-text-sub text-right tabular-nums">
+          {commentLen} / {AUTH_COMMENT_MAX}
+        </p>
       </FormField>
 
       <div className="flex justify-end">
         <Button
           type="button"
           size="sm"
-          onClick={onRequest}
-          disabled={updateM.isPending}
+          onClick={handleRequestClick}
+          disabled={submitDisabled}
         >
-          {updateM.isPending ? t('submitting') : t('submitRequest')}
+          {requestM.isPending ? (
+            <>
+              <Loader2 size={14} className="animate-spin" aria-hidden />
+              {t('submitting')}
+            </>
+          ) : (
+            t('requestButton')
+          )}
         </Button>
       </div>
     </div>

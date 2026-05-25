@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -13,10 +14,12 @@ import {
 
 import {
   CreateTrailerTypeSchema,
+  DeleteWithReasonSchema,
   TrailerTypeFiltersSchema,
   UpdateTrailerTypeSchema,
   UuidSchema,
   type CreateTrailerTypeDto,
+  type DeleteWithReasonDto,
   type TrailerTypeDto,
   type TrailerTypeFilters,
   type UpdateTrailerTypeDto,
@@ -90,5 +93,29 @@ export class TrailerTypesController {
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
   ): Promise<TrailerTypeDto> {
     return this.types.deactivate(id);
+  }
+
+  /**
+   * Hard-delete (admin-only) per Phase 4.4. TrailerType has no soft-delete
+   * (it's a global lookup, no tenancy) so there's only the hard-delete
+   * endpoint. `reason` required, persisted to `audit_log.metadata.reason`.
+   *
+   * Returns 409 Conflict when the type is still referenced by a trailer
+   * (Restrict FK).
+   */
+  @Delete(':id/hard')
+  @Roles('admin')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Audit({
+    action: 'hardDeleteTrailerType',
+    targetType: 'TrailerType',
+    targetKey: (req) => req.params?.id,
+  })
+  async hardDelete(
+    @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
+    @Body(new ZodValidationPipe(DeleteWithReasonSchema))
+    body: DeleteWithReasonDto,
+  ): Promise<void> {
+    await this.types.hardDelete(id, body.reason);
   }
 }

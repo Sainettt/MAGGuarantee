@@ -11,6 +11,7 @@ import type {
   ClaimListItem,
   PreviewClaimDto,
   PreviewClaimResponse,
+  RequestAuthorizationDto,
   SubmitClaimDto,
   SubmitReklamacjaDto,
   UpdateClaimDto,
@@ -106,4 +107,29 @@ export function updateClaim(
     method: 'PATCH',
     json: body,
   });
+}
+
+/**
+ * `POST /claims/:nrZgl/request-authorization` — Phase 4.2.
+ *
+ * Admin / pracownik flags a verified claim as needing Maksim sign-off
+ * before being booked as accepted. Server-side:
+ *  - transitions the claim into `OCZEKUJE_NA_AUTORYZACJE`,
+ *  - mints a fresh `authorizationToken`,
+ *  - persists `Claim.amountMaximum = kwotaMaksima`,
+ *  - dispatches an email to Maksim (Mailhog in dev).
+ *
+ * Body is `RequestAuthorizationSchema` — `kwotaMaksima` (EUR, positive,
+ * multiple of 0.01) plus an optional `comment` (trimmed, 1..2000 chars).
+ * Returns the updated `ClaimDto` so the modal can refetch and reflect the
+ * new status without a second round-trip.
+ */
+export function requestAuthorization(
+  nrZgl: string,
+  body: RequestAuthorizationDto,
+): Promise<ClaimDto> {
+  return apiJson<ClaimDto>(
+    `/claims/${encodeURIComponent(nrZgl)}/request-authorization`,
+    { method: 'POST', json: body },
+  );
 }

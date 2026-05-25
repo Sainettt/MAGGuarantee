@@ -10,6 +10,7 @@ import {
 } from '@tanstack/react-query';
 import type {
   CreateDriverDto,
+  DeleteWithReasonDto,
   DriverDto,
   DriverFilters,
   UpdateDriverDto,
@@ -20,6 +21,7 @@ import {
   deactivateDriver,
   deleteDriver,
   getDriver,
+  hardDeleteDriver,
   listDrivers,
   reactivateDriver,
   updateDriver,
@@ -111,6 +113,20 @@ export function useDeleteDriver() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: deleteDriver,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: DRIVERS_KEY });
+      qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+      qc.invalidateQueries({ queryKey: CARRIERS_KEY });
+    },
+  });
+}
+
+/** Hard-delete — admin only. See useHardDeleteCarrier doc. */
+export function useHardDeleteDriver() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: DeleteWithReasonDto }) =>
+      hardDeleteDriver(id, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: DRIVERS_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });

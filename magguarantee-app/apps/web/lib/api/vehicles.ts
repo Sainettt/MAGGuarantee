@@ -8,6 +8,7 @@
 
 import type {
   CreateVehicleDto,
+  DeleteWithReasonDto,
   UpdateVehicleDto,
   VehicleAttachmentDto,
   VehicleDto,
@@ -119,6 +120,14 @@ export function reactivateVehicle(id: string): Promise<VehicleDto> {
 
 export function deleteVehicle(id: string): Promise<void> {
   return apiJson<void>(`/vehicles/${id}`, { method: 'DELETE' });
+}
+
+/** Hard-delete — see hardDeleteCarrier doc. */
+export function hardDeleteVehicle(
+  id: string,
+  body: DeleteWithReasonDto,
+): Promise<void> {
+  return apiJson<void>(`/vehicles/${id}/hard`, { method: 'DELETE', json: body });
 }
 
 // ─── Attachments ─────────────────────────────────────────

@@ -68,6 +68,35 @@ describe('AuditContext', () => {
     expect(() => AuditContext.setBefore({ x: 1 })).not.toThrow();
   });
 
+  it('setMetadata() merges into the active store', async () => {
+    const store = makeStore();
+    expect(store.metadata).toBeUndefined();
+    await AuditContext.run(store, async () => {
+      AuditContext.setMetadata({ reason: 'cleanup' });
+      expect(AuditContext.current()?.metadata).toEqual({ reason: 'cleanup' });
+      // Second call merges, doesn't replace.
+      AuditContext.setMetadata({ category: 'gdpr' });
+      expect(AuditContext.current()?.metadata).toEqual({
+        reason: 'cleanup',
+        category: 'gdpr',
+      });
+      // Later keys override on collision.
+      AuditContext.setMetadata({ reason: 'final' });
+      expect(AuditContext.current()?.metadata).toEqual({
+        reason: 'final',
+        category: 'gdpr',
+      });
+    });
+    // Mutations stayed on the store reference outside the run.
+    expect(store.metadata).toEqual({ reason: 'final', category: 'gdpr' });
+  });
+
+  it('setMetadata() is a silent no-op outside any run()', () => {
+    expect(() =>
+      AuditContext.setMetadata({ reason: 'orphan' }),
+    ).not.toThrow();
+  });
+
   it('concurrent run()s do not leak stores into each other', async () => {
     // Two simultaneous async chains, each with its own store. Each must see
     // only its own — that's the ALS contract we rely on.

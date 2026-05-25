@@ -15,6 +15,7 @@ import type {
   UpdateCarrierDto,
 } from '@magguarantee/shared';
 
+import { AuditContext } from '../../common/audit';
 import {
   isPrismaUniqueViolation,
   uniqueViolationToConflict,
@@ -151,6 +152,11 @@ export class CarriersService {
     const existing = await this.carriers.findById(id);
     if (!existing) throw new NotFoundException('Przewoźnik nie znaleziony');
 
+    // Stash the pre-mutation row so the audit interceptor can compute a diff
+    // on commit. Trimming to the after-shape is done in the interceptor —
+    // here we just hand off the full repo row.
+    AuditContext.setBefore(this.toDto(existing));
+
     const opiekunPatch =
       dto.opiekunId !== undefined
         ? await this._resolveOpiekunPatch(user, dto.opiekunId)
@@ -238,6 +244,7 @@ export class CarriersService {
     if (!existing.active) {
       throw new ConflictException('Przewoźnik jest już nieaktywny');
     }
+    AuditContext.setBefore(this.toDto(existing));
     const row = await this.carriers.setActive(id, false);
     return this.toDto(row);
   }
@@ -248,6 +255,7 @@ export class CarriersService {
     if (existing.active) {
       throw new ConflictException('Przewoźnik jest już aktywny');
     }
+    AuditContext.setBefore(this.toDto(existing));
     const row = await this.carriers.setActive(id, true);
     return this.toDto(row);
   }
@@ -255,6 +263,7 @@ export class CarriersService {
   async resetPassword(id: string): Promise<CarrierWithTemporaryPasswordDto> {
     const existing = await this.carriers.findById(id);
     if (!existing) throw new NotFoundException('Przewoźnik nie znaleziony');
+    AuditContext.setBefore(this.toDto(existing));
     const plain = generateRandomPassword();
     const passwordHash = await this.passwords.hash(plain);
     const row = await this.carriers.update(id, { passwordHash });
@@ -270,7 +279,27 @@ export class CarriersService {
   async softDelete(id: string): Promise<void> {
     const existing = await this.carriers.findById(id);
     if (!existing) throw new NotFoundException('Przewoźnik nie znaleziony');
+    // Capture the pre-mutation row so the audit row carries the carrier's
+    // identity (login + name) for the admin audit page diff view.
+    AuditContext.setBefore(this.toDto(existing));
     await this.carriers.softDelete(id);
+  }
+
+  /**
+   * Hard-deletes a carrier plus its 1:1 User shadow. Phase 4.4 admin-only
+   * flow — `reason` is required (validated by the Zod pipe upstream) and
+   * lands in `audit_log.metadata.reason` via `AuditContext.setMetadata`.
+   *
+   * Cascade: Vehicle/Driver/Trailer FK is `ON DELETE CASCADE` per the
+   * Prisma schema, so all carrier-owned fleet rows are removed atomically.
+   * The pre-mutation snapshot is captured for the admin audit view.
+   */
+  async hardDelete(id: string, reason: string): Promise<void> {
+    const existing = await this.carriers.findById(id);
+    if (!existing) throw new NotFoundException('Przewoźnik nie znaleziony');
+    AuditContext.setBefore(this.toDto(existing));
+    AuditContext.setMetadata({ reason });
+    await this.carriers.hardDelete(id);
   }
 
   /**

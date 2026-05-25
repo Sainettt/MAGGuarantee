@@ -42,3 +42,20 @@ export function uniqueViolationToConflict(
     : fallback;
   return new ConflictException(detail);
 }
+
+/**
+ * Prisma P2003 — foreign-key constraint violation. Surfaces when we try to
+ * delete a parent row that still has live children (e.g. hard-deleting a
+ * TrailerType while trailers still reference it). The service layer maps
+ * this to 409 Conflict with a custom message — the caller must remove the
+ * dependants first.
+ */
+export function isPrismaForeignKeyViolation(
+  err: unknown,
+): err is PrismaKnownError {
+  return (
+    !!err &&
+    typeof err === 'object' &&
+    (err as { code?: string }).code === 'P2003'
+  );
+}

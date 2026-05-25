@@ -13,6 +13,7 @@ import type {
   UpdateTrailerDto,
 } from '@magguarantee/shared';
 
+import { AuditContext } from '../../common/audit';
 import {
   isPrismaUniqueViolation,
   uniqueViolationToConflict,
@@ -101,6 +102,7 @@ export class TrailersService {
   async update(id: string, dto: UpdateTrailerDto): Promise<TrailerDto> {
     const existing = await this.trailers.findById(id);
     if (!existing) throw new NotFoundException('Naczepa nie znaleziona');
+    AuditContext.setBefore(this.toDto(existing));
     if (dto.trailerTypeId !== undefined) {
       await this._assertActiveTrailerType(dto.trailerTypeId);
     }
@@ -155,6 +157,7 @@ export class TrailersService {
     if (!existing.active) {
       throw new ConflictException('Naczepa jest już nieaktywna');
     }
+    AuditContext.setBefore(this.toDto(existing));
     const row = await this.trailers.setActive(id, false);
     return this.toDto(row);
   }
@@ -165,6 +168,7 @@ export class TrailersService {
     if (existing.active) {
       throw new ConflictException('Naczepa jest już aktywna');
     }
+    AuditContext.setBefore(this.toDto(existing));
     const row = await this.trailers.setActive(id, true);
     return this.toDto(row);
   }
@@ -172,7 +176,21 @@ export class TrailersService {
   async softDelete(id: string): Promise<void> {
     const existing = await this.trailers.findById(id);
     if (!existing) throw new NotFoundException('Naczepa nie znaleziona');
+    AuditContext.setBefore(this.toDto(existing));
     await this.trailers.softDelete(id);
+  }
+
+  /**
+   * Hard-deletes a trailer row. Phase 4.4 admin-only flow — `reason` is
+   * required (Zod-validated upstream) and lands in
+   * `audit_log.metadata.reason` via `AuditContext.setMetadata`.
+   */
+  async hardDelete(id: string, reason: string): Promise<void> {
+    const existing = await this.trailers.findById(id);
+    if (!existing) throw new NotFoundException('Naczepa nie znaleziona');
+    AuditContext.setBefore(this.toDto(existing));
+    AuditContext.setMetadata({ reason });
+    await this.trailers.hardDelete(id);
   }
 
   // ── Internals ────────────────────────────────────────────

@@ -34,6 +34,11 @@ export const envSchema = z.object({
   MAIL_SMTP_HOST: z.string().default('localhost'),
   MAIL_SMTP_PORT: z.coerce.number().int().positive().default(1025),
   MAIL_FROM: z.string().default('no-reply@magtrans.eu'),
+  // ── App URL (used for deeplinks in transactional emails) ──
+  // Same value as WEB_URL today; kept as a separate key so we can later
+  // point email links at a different host (e.g. a public mirror) without
+  // touching the CORS-driven WEB_URL.
+  APP_URL: z.string().url().default('http://localhost:3000'),
 
   // ── S3 / object storage (MinIO in dev) ────────────────
   // Vehicle umowa / cabotage screenshot uploads (VehicleAttachment). Per

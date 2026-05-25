@@ -244,10 +244,10 @@ export function DriverSheet({
                 >
                   {isWizard ? (
                     // Wizard mode — read-only display fed by orchestrator.
-                    // See VehicleSheet for the race rationale.
+                    // See VehicleSheet for the race rationale. Primitive Input
+                    // already supplies `bg-input` + `h-10`.
                     <Input
                       id="driver-carrierId"
-                      className="h-10 bg-input"
                       value={wizardCarrierLabel ?? ''}
                       readOnly
                       disabled
@@ -279,7 +279,6 @@ export function DriverSheet({
                 >
                   <Input
                     id="driver-firstName"
-                    className="h-10"
                     {...form.register('firstName')}
                   />
                 </FormField>
@@ -291,7 +290,6 @@ export function DriverSheet({
                 >
                   <Input
                     id="driver-lastName"
-                    className="h-10"
                     {...form.register('lastName')}
                   />
                 </FormField>
@@ -303,7 +301,6 @@ export function DriverSheet({
                 >
                   <Input
                     id="driver-phone"
-                    className="h-10"
                     {...form.register('phone')}
                   />
                 </FormField>
@@ -314,7 +311,6 @@ export function DriverSheet({
                 >
                   <Input
                     id="driver-phone2"
-                    className="h-10"
                     {...form.register('phone2')}
                   />
                 </FormField>
@@ -326,7 +322,6 @@ export function DriverSheet({
                   <Input
                     id="driver-email"
                     type="email"
-                    className="h-10"
                     {...form.register('email')}
                   />
                 </FormField>
@@ -338,7 +333,6 @@ export function DriverSheet({
                 >
                   <Input
                     id="driver-license"
-                    className="h-10"
                     {...form.register('driverLicenseNumber')}
                   />
                 </FormField>
@@ -351,7 +345,6 @@ export function DriverSheet({
                   <Input
                     id="driver-licenseExpiry"
                     type="date"
-                    className="h-10"
                     {...form.register('licenseExpiry')}
                   />
                 </FormField>

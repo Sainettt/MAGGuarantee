@@ -22,6 +22,8 @@
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^10.4.0",
     "@nestjs/throttler": "^6.5.0",
+    "@react-email/components": "^1.0.12",
+    "@react-email/render": "^2.0.8",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.7",
     "helmet": "^7.1.0",

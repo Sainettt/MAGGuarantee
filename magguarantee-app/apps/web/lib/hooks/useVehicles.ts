@@ -10,6 +10,7 @@ import {
 } from '@tanstack/react-query';
 import type {
   CreateVehicleDto,
+  DeleteWithReasonDto,
   UpdateVehicleDto,
   VehicleAttachmentDto,
   VehicleDto,
@@ -21,6 +22,7 @@ import {
   deactivateVehicle,
   deleteVehicle,
   getVehicle,
+  hardDeleteVehicle,
   listVehicleAttachments,
   listVehicles,
   reactivateVehicle,
@@ -144,6 +146,20 @@ export function useDeleteVehicle() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: deleteVehicle,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: VEHICLES_KEY });
+      qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+      qc.invalidateQueries({ queryKey: CARRIERS_KEY });
+    },
+  });
+}
+
+/** Hard-delete — admin only. See useHardDeleteCarrier doc. */
+export function useHardDeleteVehicle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: DeleteWithReasonDto }) =>
+      hardDeleteVehicle(id, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: VEHICLES_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });

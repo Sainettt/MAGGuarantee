@@ -11,8 +11,10 @@ import type {
   UpdateTrailerTypeDto,
 } from '@magguarantee/shared';
 
+import { AuditContext } from '../../common/audit';
 import {
   isPrismaUniqueViolation,
+  isPrismaForeignKeyViolation,
   uniqueViolationToConflict,
 } from '../../common/errors/prisma-error';
 import {
@@ -52,6 +54,7 @@ export class TrailerTypesService {
   ): Promise<TrailerTypeDto> {
     const existing = await this.repo.findById(id);
     if (!existing) throw new NotFoundException('Typ naczepy nie znaleziony');
+    AuditContext.setBefore(this.toDto(existing));
     try {
       const row = await this.repo.update(id, {
         ...(dto.name !== undefined ? { name: dto.name } : {}),
@@ -79,8 +82,35 @@ export class TrailerTypesService {
     if (!existing.active) {
       throw new ConflictException('Typ naczepy jest już nieaktywny');
     }
+    AuditContext.setBefore(this.toDto(existing));
     const row = await this.repo.update(id, { active: false });
     return this.toDto(row);
+  }
+
+  /**
+   * Hard-deletes a trailer-type lookup row. Phase 4.4 admin-only flow —
+   * `reason` is required (Zod-validated upstream) and lands in
+   * `audit_log.metadata.reason` via `AuditContext.setMetadata`.
+   *
+   * The FK from Trailer.trailerTypeId is `Restrict`: Postgres rejects the
+   * delete (P2003) when at least one trailer still references this type.
+   * We translate the error to a 409 with a hint to the operator.
+   */
+  async hardDelete(id: string, reason: string): Promise<void> {
+    const existing = await this.repo.findById(id);
+    if (!existing) throw new NotFoundException('Typ naczepy nie znaleziony');
+    AuditContext.setBefore(this.toDto(existing));
+    AuditContext.setMetadata({ reason });
+    try {
+      await this.repo.hardDelete(id);
+    } catch (err) {
+      if (isPrismaForeignKeyViolation(err)) {
+        throw new ConflictException(
+          'Nie można usunąć typu naczepy używanego przez istniejące naczepy. Usuń lub zmień typ tych naczep i spróbuj ponownie.',
+        );
+      }
+      throw err;
+    }
   }
 
   // ── DTO mapping ──────────────────────────────────────────

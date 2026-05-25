@@ -14,10 +14,12 @@ import {
 
 import {
   CreateDriverSchema,
+  DeleteWithReasonSchema,
   DriverFiltersSchema,
   UpdateDriverSchema,
   UuidSchema,
   type CreateDriverDto,
+  type DeleteWithReasonDto,
   type DriverDto,
   type DriverFilters,
   type UpdateDriverDto,
@@ -140,5 +142,26 @@ export class DriversController {
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
   ): Promise<void> {
     await this.drivers.softDelete(id);
+  }
+
+  /**
+   * Hard-delete (admin-only) per Phase 4.4. Mounted as a sibling of the
+   * soft-delete endpoint. `reason` required, persisted to
+   * `audit_log.metadata.reason`.
+   */
+  @Delete(':id/hard')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles('admin')
+  @Audit({
+    action: 'hardDeleteDriver',
+    targetType: 'Driver',
+    targetKey: (req) => req.params?.id,
+  })
+  async hardDelete(
+    @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
+    @Body(new ZodValidationPipe(DeleteWithReasonSchema))
+    body: DeleteWithReasonDto,
+  ): Promise<void> {
+    await this.drivers.hardDelete(id, body.reason);
   }
 }

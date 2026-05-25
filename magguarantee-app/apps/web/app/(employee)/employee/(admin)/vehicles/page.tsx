@@ -4,20 +4,23 @@
 // (per the Phase 2 spec — don't gold-plate). The full 36-field edit happens
 // in the sheet.
 
-import { Pencil, Plus } from 'lucide-react';
+import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import type { VehicleDto } from '@magguarantee/shared';
 
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { ConfirmDeleteWithReasonDialog } from '@/components/ui/ConfirmDeleteWithReasonDialog';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { VehicleDetailModal } from '@/components/vehicles/VehicleDetailModal';
+import { useAuth } from '@/lib/hooks/useAuth';
 import { useCarriers } from '@/lib/hooks/useCarriers';
-import { useVehicles } from '@/lib/hooks/useVehicles';
+import { useHardDeleteVehicle, useVehicles } from '@/lib/hooks/useVehicles';
 
 import { VehicleSheet } from './VehicleSheet';
 
@@ -27,6 +30,9 @@ import { VehicleSheet } from './VehicleSheet';
 export default function VehiclesPage() {
   const t = useTranslations('vehicles');
   const tCommon = useTranslations('common');
+  const tConfirm = useTranslations('confirmDelete');
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [search, setSearch] = useState('');
   const [carrierId, setCarrierId] = useState<string>('');
 
@@ -48,6 +54,10 @@ export default function VehiclesPage() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailTarget, setDetailTarget] = useState<VehicleDto | null>(null);
 
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<VehicleDto | null>(null);
+  const hardDeleteM = useHardDeleteVehicle();
+
   const openCreate = () => {
     setTarget(null);
     setSheetOpen(true);
@@ -67,6 +77,11 @@ export default function VehiclesPage() {
   const editFromDetail = () => {
     if (detailTarget) openEdit(detailTarget);
   };
+
+  const openHardDelete = useCallback((row: VehicleDto) => {
+    setDeleteTarget(row);
+    setDeleteOpen(true);
+  }, []);
 
   const columns = useMemo<DataTableColumn<VehicleDto>[]>(
     () => [
@@ -111,27 +126,46 @@ export default function VehiclesPage() {
         id: 'actions',
         header: <span className="sr-only">{tCommon('actions')}</span>,
         align: 'right',
+        width: 'tight',
         cell: (row) => (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              openEdit(row);
-            }}
-            aria-label={`${tCommon('edit')} ${row.plateNumber}`}
-          >
-            <Pencil size={14} />
-            {tCommon('edit')}
-          </Button>
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={(e) => {
+                e.stopPropagation();
+                openEdit(row);
+              }}
+              aria-label={`${tCommon('edit')} ${row.plateNumber}`}
+            >
+              <Pencil size={14} aria-hidden="true" />
+              <span className="hidden lg:inline">{tCommon('edit')}</span>
+            </Button>
+            {isAdmin && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-danger hover:bg-danger-bg"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openHardDelete(row);
+                }}
+                aria-label={`${tConfirm('confirm')} ${row.plateNumber}`}
+              >
+                <Trash2 size={14} aria-hidden="true" />
+                <span className="hidden lg:inline">{tConfirm('confirm')}</span>
+              </Button>
+            )}
+          </div>
         ),
       },
     ],
-    [t, tCommon],
+    [t, tCommon, tConfirm, isAdmin, openHardDelete],
   );
 
   return (
-    <section className="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-8">
+    <section className="px-4 sm:px-6 lg:px-10 xl:px-12 py-8">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <h1 className="text-2xl font-extrabold tracking-tight text-text">
           {t('title')}
@@ -145,7 +179,7 @@ export default function VehiclesPage() {
       <div className="flex flex-col sm:flex-row gap-3 mb-4">
         <Input
           type="search"
-          className="h-10 sm:max-w-xs"
+          className="sm:max-w-xs"
           placeholder={t('filters.searchPlaceholder')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -171,6 +205,7 @@ export default function VehiclesPage() {
         rowKey={(r) => r.id}
         onRowClick={openDetail}
         isLoading={isLoading}
+        loadingLabel={tCommon('loading')}
         empty={
           <EmptyState title={t('emptyTitle')} message={t('emptyMessage')} />
         }
@@ -187,6 +222,27 @@ export default function VehiclesPage() {
         open={sheetOpen}
         vehicle={target}
         onClose={() => setSheetOpen(false)}
+      />
+
+      <ConfirmDeleteWithReasonDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        entityLabel={tConfirm('entityLabel.vehicle')}
+        entityName={deleteTarget?.plateNumber ?? ''}
+        isLoading={hardDeleteM.isPending}
+        onConfirm={async (reason) => {
+          if (!deleteTarget) return;
+          try {
+            await hardDeleteM.mutateAsync({
+              id: deleteTarget.id,
+              body: { reason },
+            });
+            toast.success(tConfirm('deletedToast'));
+          } catch (err) {
+            toast.error(tConfirm('errorToast'));
+            throw err;
+          }
+        }}
       />
     </section>
   );

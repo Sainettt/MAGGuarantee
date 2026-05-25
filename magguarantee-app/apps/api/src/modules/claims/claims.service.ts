@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import {
   BadRequestException,
   ConflictException,
@@ -7,6 +9,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 import type {
   ClaimDto,
@@ -16,6 +19,7 @@ import type {
   KmCalcBreakdown,
   PreviewClaimDto,
   PreviewClaimResponse,
+  RequestAuthorizationDto,
   SubmitClaimDto,
   SubmitReklamacjaDto,
   UpdateClaimDto,
@@ -27,11 +31,13 @@ import {
 } from '@magguarantee/shared';
 
 import { AuditContext } from '../../common/audit/audit-context';
+import type { Env } from '../../config/env.schema';
 import { AuditWriter } from '../audit/audit.service';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { CarriersRepository } from '../carriers/carriers.repository';
 import { DriversRepository } from '../drivers/drivers.repository';
 import { KmCalcService } from '../km-calc/km-calc.service';
+import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TrailersRepository } from '../trailers/trailers.repository';
 import { VehiclesRepository } from '../vehicles/vehicles.repository';
@@ -42,6 +48,7 @@ import {
   type TransactionLike,
   type UpdateClaimData,
 } from './claims.repository';
+import { MAKSIM_EMAIL } from './maksim.config';
 import { NrZglService } from './nr-zgl.service';
 
 /** AppConfig keys this service consults. */
@@ -140,6 +147,13 @@ export class ClaimsService {
     private readonly nrZgl: NrZglService,
     private readonly prisma: PrismaService,
     private readonly auditWriter: AuditWriter,
+    // Phase 4.2 — mail handshake (kwota-Maksima request). `MailService` is
+    // an optional ctor arg so the existing 9-arg test fakes keep compiling;
+    // production wiring always passes the real provider via NestJS DI. When
+    // null/undefined, `_dispatchAuthorizationEmail` logs-and-skips instead
+    // of throwing — same fire-and-log policy as the other notifications.
+    private readonly mailService?: MailService,
+    private readonly configService?: ConfigService<Env, true>,
   ) {}
 
   // ── Submit ──────────────────────────────────────────────
@@ -451,6 +465,150 @@ export class ClaimsService {
     });
 
     return this.toDto(updated);
+  }
+
+  // ── Request authorization (Phase 4.2) ───────────────────
+
+  /**
+   * `POST /claims/:nrZgl/request-authorization` — Phase 4.2.
+   *
+   * Admin / pracownik flags a verified claim as requiring Maksim's sign-off
+   * before being moved to ZAAKCEPTOWANO. Steps:
+   *
+   *   1. Load the claim (404 if missing).
+   *   2. Assert the transition is legal via the state machine (422 otherwise).
+   *      The legal predecessor today is `NA_WERYFIKACJI` — the matrix in
+   *      `claim-state-machine.ts` is the single source of truth and may grow
+   *      additional inbound edges later (e.g. `REKLAMACJA → OCZEKUJE_*`).
+   *   3. Mint a fresh `authorizationToken` (UUID v4) — used by Maksim's
+   *      future approve-link click-through. Token is per-request; if the
+   *      verifier re-requests authorization on a claim that already had one,
+   *      we mint a new token and the old one stops being valid.
+   *   4. Update the claim atomically inside the ambient `AuditContext` tx:
+   *        - status            = OCZEKUJE_NA_AUTORYZACJE
+   *        - authorizationToken= <new uuid>
+   *        - authorizationRequired = true
+   *        - authorizationDescription = comment ?? null
+   *        - amountMaximum     = kwotaMaksima
+   *        - statusChangedAt   = now
+   *        - decidedById       = caller (so the audit trail knows who flagged)
+   *      A `before` snapshot is pushed into the ambient context for the
+   *      `AuditInterceptor` to commit alongside the row.
+   *   5. Fire the Maksim email outside the transaction (fire-and-log; never
+   *      block the response on SMTP). Same notification policy as submit /
+   *      reklamacja / verification — a 500 from Mailhog must not roll back
+   *      the state transition.
+   */
+  async requestAuthorization(
+    user: AuthUser,
+    nrZgl: string,
+    dto: RequestAuthorizationDto,
+  ): Promise<ClaimDto> {
+    const existing = await this.claims.findByNrZgl(nrZgl);
+    if (!existing) {
+      throw new NotFoundException('Wniosek nie znaleziony');
+    }
+
+    // State-machine validation — single source of truth. Throws 422 with the
+    // friendly Polish message on any illegal transition (e.g. when the claim
+    // is already pending authorization, or has been decided).
+    assertLegalTransition(existing.status, 'OCZEKUJE_NA_AUTORYZACJE');
+
+    const now = new Date();
+    const token = randomUUID();
+    const description = dto.comment ?? null;
+
+    const patch: UpdateClaimData = {
+      status: 'OCZEKUJE_NA_AUTORYZACJE',
+      statusChangedAt: now,
+      decidedById: user.sub,
+      authorizationRequired: true,
+      authorizationDescription: description,
+      authorizationToken: token,
+      amountMaximum: dto.kwotaMaksima,
+    };
+
+    AuditContext.setBefore(this._snapshotForAudit(existing));
+
+    // Run on the ambient tx (opened by the `AuditInterceptor` via the
+    // `@Audit('claim.requestAuthorization')` on the controller). Both the
+    // claim update + audit-row insert commit atomically; if either throws,
+    // the whole thing rolls back and no email is sent (see post-update void).
+    const txLike = this.prisma.tx as unknown as TransactionLike;
+    const updated = await this.claims.updateWithin(txLike, existing.id, patch);
+
+    // Email dispatch — outside the transaction. Mirrors submit / reklamacja.
+    void this._dispatchAuthorizationEmail(updated, dto).catch((err) => {
+      this.logger.error({
+        msg: 'claims.requestAuthorization.notify_failed',
+        nrZgl: updated.nrZgl,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+
+    return this.toDto(updated);
+  }
+
+  /**
+   * Builds the props for the React-Email template and ships it via the
+   * MailService. Pulls the carrier display name from the underlying User row,
+   * formats EUR amounts to two decimals, and constructs the deeplink against
+   * `APP_URL` (the env value that points at the web front-end).
+   *
+   * The MAGTRANS recipient (`MAKSIM_EMAIL`) is hardcoded per Phase 4.2
+   * acceptance — Phase 9 will move it to AppConfig.
+   */
+  private async _dispatchAuthorizationEmail(
+    row: ClaimRow,
+    dto: RequestAuthorizationDto,
+  ): Promise<void> {
+    if (!this.mailService) {
+      // Construction without a MailService instance is only valid in unit
+      // tests; production wiring always injects one. Log + return so callers
+      // see the gap without crashing.
+      this.logger.warn({
+        msg: 'claims.requestAuthorization.no_mail_service',
+        nrZgl: row.nrZgl,
+      });
+      return;
+    }
+    const appUrl =
+      this.configService?.get('APP_URL', { infer: true }) ??
+      'http://localhost:3000';
+    const carrierName = await this._resolveCarrierDisplayName(row.carrierId);
+    const periodFrom = row.dateStart.toISOString().slice(0, 10);
+    const periodTo = row.dateEnd.toISOString().slice(0, 10);
+    const doplata = row.amountRequested.toFixed(2);
+    const kwotaMaksima = dto.kwotaMaksima.toFixed(2);
+    const deeplink = `${appUrl.replace(/\/$/, '')}/employee/claims/${encodeURIComponent(row.nrZgl)}`;
+
+    await this.mailService.sendAuthorizationRequest(MAKSIM_EMAIL, {
+      nrZgl: row.nrZgl,
+      carrierName,
+      vehiclePlate: row.vehiclePlateSnapshot,
+      periodFrom,
+      periodTo,
+      doplata,
+      kwotaMaksima,
+      comment: dto.comment,
+      deeplink,
+    });
+  }
+
+  /**
+   * Resolves the carrier's display name (user.name with login fallback) for
+   * the authorization-request email. Falls back to the carrier ID slice if
+   * the FK chain is broken — defensive only; should never happen in practice.
+   */
+  private async _resolveCarrierDisplayName(carrierId: string): Promise<string> {
+    const row = await this.prisma.tx.carrier.findFirst({
+      where: { id: carrierId },
+      select: { user: { select: { login: true, name: true } } },
+    });
+    if (!row?.user) return carrierId.slice(0, 8);
+    return row.user.name && row.user.name.trim().length > 0
+      ? row.user.name
+      : row.user.login;
   }
 
   // ── Preview ─────────────────────────────────────────────

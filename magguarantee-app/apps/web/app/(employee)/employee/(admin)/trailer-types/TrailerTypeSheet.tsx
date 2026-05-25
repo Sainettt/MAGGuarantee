@@ -152,7 +152,6 @@ export function TrailerTypeSheet({ open, trailerType, onClose }: Props) {
               >
                 <Input
                   id="trailer-type-name"
-                  className="h-10"
                   {...form.register('name')}
                 />
               </FormField>
@@ -164,7 +163,6 @@ export function TrailerTypeSheet({ open, trailerType, onClose }: Props) {
               >
                 <Input
                   id="trailer-type-shortCode"
-                  className="h-10"
                   {...form.register('shortCode')}
                 />
               </FormField>

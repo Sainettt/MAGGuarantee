@@ -68,8 +68,13 @@ export interface DataTableProps<T> {
   onRowClick?: (row: T) => void;
   /** Rendered inside the table body when `rows.length === 0`. */
   empty?: ReactNode;
-  /** Loading state — show a centered "Loading…". */
+  /** Loading state — show a centered loading label. */
   isLoading?: boolean;
+  /**
+   * Loading label override. Defaults to `'Loading...'` — admin callers pass
+   * the i18n'd `common.loading` so the cell respects the active locale.
+   */
+  loadingLabel?: string;
   className?: string;
 }
 
@@ -104,6 +109,7 @@ export function DataTable<T>({
   onRowClick,
   empty,
   isLoading,
+  loadingLabel = 'Loading...',
   className,
 }: DataTableProps<T>) {
   return (
@@ -141,7 +147,7 @@ export function DataTable<T>({
                   colSpan={columns.length}
                   className="px-3 py-12 text-center text-sm text-text-sub"
                 >
-                  Loading...
+                  {loadingLabel}
                 </td>
               </tr>
             )}

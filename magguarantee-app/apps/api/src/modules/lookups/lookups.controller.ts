@@ -1,14 +1,28 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 
-import type { LookupUserListDto } from '@magguarantee/shared';
+import {
+  LookupCarrierFiltersSchema,
+  type LookupCarrierFilters,
+  type LookupCarrierListDto,
+  type LookupUserListDto,
+} from '@magguarantee/shared';
 
+import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
+import {
+  CurrentUser,
+  type AuthUser,
+} from '../auth/decorators/current-user.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import { LookupsService } from './lookups.service';
 
 /**
  * Read-only dropdown helpers per docs/13-api-design.md#lookups.
  *
- * Every endpoint here is accessible by all authenticated users — no
- * `@Roles()` restriction. The global `JwtAuthGuard` already handles auth.
+ * The three people-pickers (`dyspozytor`, `planisci`, `opiekuni`) are
+ * accessible by all authenticated users — the global `JwtAuthGuard` already
+ * handles auth. The Phase 4.4 carriers picker is role-gated (admin /
+ * pracownik / opiekun) since it surfaces carrier-PII (login + name).
  *
  * Note: `GET /lookups/cert-types` was removed in the
  * 20260515130307_vehicle_certificate_l_to_boolean wave — `Vehicle.certificateL`
@@ -31,5 +45,26 @@ export class LookupsController {
   @Get('opiekuni')
   opiekuni(): Promise<LookupUserListDto> {
     return this.lookups.opiekuni();
+  }
+
+  /**
+   * Carriers autocomplete per Phase 4.4. Capped at 100 rows, role-scoped:
+   *   - admin / pracownik → all live carriers;
+   *   - opiekun           → only carriers where `Carrier.opiekunId === user.sub`;
+   *   - any other role    → 403.
+   *
+   * `q` is a free substring match across login + name; soft-deleted carriers
+   * are excluded (the soft-delete extension on the carriers repo handles
+   * that).
+   */
+  @Get('carriers')
+  @UseGuards(RolesGuard)
+  @Roles('admin', 'pracownik', 'opiekun')
+  carriers(
+    @CurrentUser() user: AuthUser,
+    @Query(new ZodValidationPipe(LookupCarrierFiltersSchema))
+    query: LookupCarrierFilters,
+  ): Promise<LookupCarrierListDto> {
+    return this.lookups.carriersList(user, query);
   }
 }

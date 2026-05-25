@@ -29,6 +29,21 @@
 
 Главный цвет — **MAGTRANS RED** `#dc2626`. До недавнего времени в коде был «blue» — это переменная `--blue` сейчас содержит red (см. [index.html:11](../index.html#L11)).
 
+### Surface-token policy (`bg-input` is the soft-chrome surface)
+
+**Locked decision (Phase 4.4 audit).** Earlier prose в этом документе ссылается на `bg-bg-soft` для filter-bars, audit-row expanded state и JSON-diff `<pre>`-блоков. Такого токена в `globals.css` нет и не будет — его роль полностью покрывается `bg-input`.
+
+| | Token | Light | Dark | Purpose |
+|---|---|---|---|---|
+| Page background | `bg-bg` | `#f5f5f5` | `#121212` | Body / page shell. |
+| Card surface | `bg-card` | `#ffffff` | `#1f1f1f` | Tables, modals, sidebar, cards. |
+| **Soft chrome / inputs** | **`bg-input`** | `#fafafa` | `#262626` | Form fields, filter-bars, hover-emphasis on toggle buttons, JSON-diff blocks, audit-row expanded panel, disabled/read-only inputs, FileUpload dropzone, MultiSelect trigger, code-box (empty). |
+| Brand-tinted hover | `bg-brand-50` (light) / `bg-brand/10` (dark) | `#fef2f2` | `rgba(220,38,38,.10)` | Row hover, active nav-item. |
+
+Rule of thumb: если ты пишешь «нужен едва-серый фон, чуть темнее карточки, чтобы поле/панель выделялась» — это `bg-input`. Если нужно подчеркнуть бренд (hover на интерактивных строках/линках) — `bg-brand-50` + dark variant. Никаких новых neutral-уровней между `bg-bg` и `bg-card`.
+
+Все исторические упоминания `bg-bg-soft` ниже по тексту следует читать как `bg-input`; точечные правки прошли в Phase 4.4 audit.
+
 ### Цветовые токены (light)
 
 ```css
@@ -761,7 +776,7 @@ Reference: `employee-claims-list.png`. Переиспользует `<DataTable>
 
 **Row interaction:** click anywhere on row → opens `<ClaimVerificationModal>` (не правый kebab — full-row click для productivity). Kebab — только для destructive (delete draft) / secondary actions (duplicate, export PDF).
 
-**Filter bar (sticky над таблицей):** search input (по nrZgl, NIP, plate) + status multiselect + period range + carrier select. Layout — `flex flex-wrap gap-2 p-3 border-b border-border bg-bg-soft`.
+**Filter bar (sticky над таблицей):** search input (по nrZgl, NIP, plate) + status multiselect + period range + carrier select. Layout — `flex flex-wrap gap-2 p-3 border-b border-border bg-input` (см. § Surface-token policy выше).
 
 ### `<ClaimVerificationModal>` (Sheet, не Dialog)
 
@@ -795,11 +810,11 @@ Audit-log хранится в Postgres (legacy `ensureAuditLogSheet` → Prisma 
 - Avatar/initials: `<Avatar className="h-7 w-7">` с initials `actor.name`. Цвет фона — детерминированный hash от user.id (но в пределах brand-палитры: brand-50, brand-100, g100, g200 — без радужных tailwind-цветов).
 - Action verb + target: `<span className="text-sm">` — «zaakceptował wniosek **#1234**» (target жирным).
 - Relative time: `text-xs text-text-sub` справа, tooltip с ISO timestamp.
-- Expand chevron: `<ChevronDown />`, на click — раскрытие JSON-diff под строкой (`<pre className="text-xs bg-bg-soft p-3 rounded-md overflow-x-auto">`).
+- Expand chevron: `<ChevronDown />`, на click — раскрытие JSON-diff под строкой (`<pre className="text-xs bg-input p-3 rounded-md overflow-x-auto">`).
 
 **Compact variant (`<AuditRow variant="compact">`):** без expand, без avatar — только initials inline + verb + target + relative time. Высота `h-9`. Используется в dashboard sidebar.
 
-**Tokens:** `bg-card` row, hover — `--table-hover` (red-tinted, Phase 2). Expanded — `bg-bg-soft`.
+**Tokens:** `bg-card` row, hover — `--table-hover` (red-tinted, Phase 2). Expanded — `bg-input`.
 
 ### `<LimitsRow>` (admin → limity, inline-edit)
 

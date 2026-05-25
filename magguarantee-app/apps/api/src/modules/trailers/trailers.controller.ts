@@ -14,10 +14,12 @@ import {
 
 import {
   CreateTrailerSchema,
+  DeleteWithReasonSchema,
   TrailerFiltersSchema,
   UpdateTrailerSchema,
   UuidSchema,
   type CreateTrailerDto,
+  type DeleteWithReasonDto,
   type TrailerDto,
   type TrailerFilters,
   type UpdateTrailerDto,
@@ -141,5 +143,26 @@ export class TrailersController {
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
   ): Promise<void> {
     await this.trailers.softDelete(id);
+  }
+
+  /**
+   * Hard-delete (admin-only) per Phase 4.4. Mounted as a sibling of the
+   * soft-delete endpoint. `reason` required, persisted to
+   * `audit_log.metadata.reason`.
+   */
+  @Delete(':id/hard')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles('admin')
+  @Audit({
+    action: 'hardDeleteTrailer',
+    targetType: 'Trailer',
+    targetKey: (req) => req.params?.id,
+  })
+  async hardDelete(
+    @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
+    @Body(new ZodValidationPipe(DeleteWithReasonSchema))
+    body: DeleteWithReasonDto,
+  ): Promise<void> {
+    await this.trailers.hardDelete(id, body.reason);
   }
 }

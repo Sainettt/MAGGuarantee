@@ -18,6 +18,7 @@ import type {
   VehicleFilters,
 } from '@magguarantee/shared';
 
+import { AuditContext } from '../../common/audit';
 import {
   isPrismaUniqueViolation,
   uniqueViolationToConflict,
@@ -150,6 +151,10 @@ export class VehiclesService {
   ): Promise<VehicleDto> {
     const existing = await this.vehicles.findById(id);
     if (!existing) throw new NotFoundException('Pojazd nie znaleziony');
+    // Capture the pre-mutation row for the audit interceptor — the trimmer
+    // narrows this down to the keys present in `after` (= response body)
+    // before the audit row lands.
+    AuditContext.setBefore(this.toDto(existing));
     if (dto.plannerId !== undefined && dto.plannerId !== null) {
       await this._assertRole(dto.plannerId, 'planista');
     }
@@ -209,6 +214,7 @@ export class VehiclesService {
     if (!existing.active) {
       throw new ConflictException('Pojazd jest już nieaktywny');
     }
+    AuditContext.setBefore(this.toDto(existing));
     const row = await this.vehicles.setActive(id, false);
     return this.toDto(row);
   }
@@ -219,6 +225,7 @@ export class VehiclesService {
     if (existing.active) {
       throw new ConflictException('Pojazd jest już aktywny');
     }
+    AuditContext.setBefore(this.toDto(existing));
     const row = await this.vehicles.setActive(id, true);
     return this.toDto(row);
   }
@@ -226,7 +233,26 @@ export class VehiclesService {
   async softDelete(id: string): Promise<void> {
     const existing = await this.vehicles.findById(id);
     if (!existing) throw new NotFoundException('Pojazd nie znaleziony');
+    AuditContext.setBefore(this.toDto(existing));
     await this.vehicles.softDelete(id);
+  }
+
+  /**
+   * Hard-deletes a vehicle row. Phase 4.4 admin-only flow — `reason` is
+   * required (Zod-validated upstream) and lands in
+   * `audit_log.metadata.reason` via `AuditContext.setMetadata`. The pre-
+   * mutation snapshot keeps the audit row legible after the row is gone.
+   *
+   * Attachments are referenced by FK with `ON DELETE CASCADE` so the
+   * VehicleAttachment rows go with the vehicle. The MinIO objects are
+   * intentionally left in place — same policy as `deleteAttachment`.
+   */
+  async hardDelete(id: string, reason: string): Promise<void> {
+    const existing = await this.vehicles.findById(id);
+    if (!existing) throw new NotFoundException('Pojazd nie znaleziony');
+    AuditContext.setBefore(this.toDto(existing));
+    AuditContext.setMetadata({ reason });
+    await this.vehicles.hardDelete(id);
   }
 
   // ── Attachments ──────────────────────────────────────────

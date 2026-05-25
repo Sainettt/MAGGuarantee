@@ -248,14 +248,31 @@
   - [x] web: TanStack hooks `useClaimPreviewExisting` + `useUpdateClaim`; форматтеры `formatEur` / `formatKmCompact` / `formatDateShort` / `formatRelativeTime`
   - [x] tests: 8 unit на `ClaimsService.update()` (happy-path/missing-required/illegal-transition/comment-only-skip-recalc/recalc-on-mileage/auth-transition/reklamacja-collapse/not-found), 8 на `AuditWriter`
 
-- [ ] **4.2 Authorization flow** (≈2 дня) — pending
-  - Scope: `POST /api/v1/claims/:nrZgl/request-authorization` (email Maksim-у + статус OCZEKUJE_NA_AUTORYZACJE, генерация auth-токена); dedicated endpoint для `kwotaMaksima` override (сейчас Save-кнопка в Autoryzacja-табе информационная); email-шаблон Maksim-у. **Screenshot upload выпилен** (решение от 2026-05-13). UI в `<ClaimVerificationModal>` уже подготовлен — нужно только подключить endpoint-ы.
+- [x] **4.2 Authorization flow** (≈2 дня) — **DONE** (2026-05-25)
+  - [x] api: `POST /api/v1/claims/:nrZgl/request-authorization` — admin/pracownik, генерирует `authorizationToken` (UUID v4), переводит claim в `OCZEKUJE_NA_AUTORYZACJE`, шлёт email Maksim-у через Mailhog. Audit через `@Audit({action: 'claim.requestAuthorization'})` + ambient tx.
+  - [x] api: `RequestAuthorizationSchema` (Zod) в `packages/shared/src/schemas/claims.ts`. Body — `{kwotaMaksima, comment?}`.
+  - [x] api: `MailService.sendAuthorizationRequest` + React Email template `authorization-request.tsx` с MAGTRANS RED branding, deeplink `{APP_URL}/employee/claims/{nrZgl}`, plain-text fallback.
+  - [x] api: `MAKSIM_EMAIL = 'maksim.siankevich@magtrans.eu'` константа в `apps/api/src/modules/claims/maksim.config.ts` (TODO: вынести в AppConfig в Phase 9). `APP_URL` env-var добавлен.
+  - [x] api: `PATCH /claims/:nrZgl` принимает `amountMaximum` (= kwotaMaksima) внутри `UpdateClaimToAccepted` ветки — kwotaMaksima меняется **только при акцепте**, без отдельного override endpoint-а (решение от 2026-05-25: «потолок» — атрибут одобрения, не отдельная сущность).
+  - [x] web: TanStack `useRequestAuthorization(nrZgl)` хук. UI Autoryzacja-таба переписан под Phase 4.2 (RHF + `zodResolver(RequestAuthorizationSchema)`, кнопка «Wymaga autoryzacji» с email-toast, при статусе уже `OCZEKUJE_NA_AUTORYZACJE` — read-only summary с info-banner).
+  - [x] web: `decisionTargetsFor('NA_WERYFIKACJI')` в `claim-transitions.ts` больше не включает `OCZEKUJE_NA_AUTORYZACJE` — единственный путь в этот статус теперь через Autoryzacja-таб с email. Старый legacy PATCH-вариант в backend `UpdateClaimToAuthorizationPending` остаётся в schema для API-обратной совместимости, но из UI исключён.
+  - [x] tests: 9 unit на `ClaimsService.requestAuthorization()` (happy path, illegal transition, missing claim, audit before-capture, mail-failure isolation, optional-comment) + 2 на PATCH `amountMaximum` + 6 на email-шаблон.
+  - ❌ ~~Screenshot upload~~ — выпилено (2026-05-13).
 
 - [ ] **4.3 Dashboard** (≈3 дня) — pending
   - Scope: `GET /api/v1/diagnostics/dashboard` (KPI counts, top carriers по выплатам, recent activity, urgent NA_WERYFIKACJI > 3 days), `<KpiCard>` row + `<DashboardSidebar>` с 6 секциями, Recharts pie/bar. По uiux-спеке секция `<KpiCard>` + `<DashboardSidebar>` готова.
 
-- [ ] **4.4 Admin справочники доводка** (≈3 дня) — pending
-  - Scope: интеграция `AuditWriter` в существующие mutating-сервисы (carriers/vehicles/drivers/trailers); hard-delete с обязательным `powod` → audit `metadata.reason`; `app/(employee)/users/page.tsx` (CRUD сотрудников — backend уже полный, только UI: `<UsersTable>` + Sheet edit + reset-password modal + deactivate confirm); полировка существующих Phase-2 admin-страниц под новый layout. **Открытый side-quest:** `GET /api/v1/lookups/carriers` endpoint для autocomplete в фильтрах claims (сейчас заменён full-text `q`).
+- [x] **4.4 Admin справочники доводка** (≈3 дня) — **DONE** (2026-05-25)
+  - [x] api: `AuditWriter` интеграция в carriers/vehicles/drivers/trailers/trailer-types — **automated через pre-Phase-4.4 atomic-audit refactor** (commit `2d43fce`). `@Audit()` декоратор оборачивает handler в `prisma.$transaction` под `AuditContext`, mutation + audit-row atomic.
+  - [x] api: `AuditContext.setMetadata(meta)` + `AuditContext.setBefore(loaded)` API. Перед update/delete в 5 lookup-сервисах загружается current row и кладётся в `setBefore`. `AuditInterceptor` делает scoped diff — `before` тримится до ключей `after` + `id` (для коротких audit-rows; full `before` сохраняется когда `omitResultBody: true`).
+  - [x] api: hard-delete с обязательным `reason` (Zod `DeleteWithReasonSchema` min 3 max 500) → `audit_log.metadata.reason`. Отдельные endpoint-ы `DELETE /:id/hard` (только admin) на carriers/vehicles/drivers/trailers/trailer-types; soft-delete остаётся как был. `hardDeleteCarrier` каскадно удаляет shadow User row.
+  - [x] api: `GET /api/v1/lookups/carriers?q=...` — admin/pracownik/opiekun, ownership-фильтр (opiekun видит только supervised), лимит 100, response `{id, login, name, active}[]`.
+  - [x] api: TrailerType hard-delete с `Restrict` FK ловит P2003 → 409 ConflictException (помощник `isPrismaForeignKeyViolation`).
+  - [x] web: новая `/employee/users` admin-страница — `<UsersTable>` (6 колонок, role-badge с цветом по матрице), `<UserSheet>` create/edit (RHF + Zod), reset-password modal с clipboard copy, deactivate/reactivate confirm. Доступ через guard `requireRoleAccess(['admin'])`.
+  - [x] web: shared `<ConfirmDeleteWithReasonDialog>` в `components/ui/` (RHF + `DeleteWithReasonSchema`), подцеплен в 5 lookup-pages как Trash2-button (только для admin).
+  - [x] web: 8 uiux-фиксов применены механически (layout strip `mx-auto max-w-screen-2xl` × 5; `Input.tsx` default height `h-11 → h-10` + bulk-strip ~45 ad-hoc `className="h-10"`; redundant `bg-input` в wizard read-only inputs убраны; `DataTable` loading label через prop; responsive Edit-button label `<span className="hidden lg:inline">` × 4; belts/mats counter обёрнут в `<FormField>`; trailer-types filter в flex row).
+  - [x] uiux: `bg-input` зафиксирован как single surface token в `docs/14-design-system.md` (Surface-token policy section); `bg-bg-soft` deprecated.
+  - **Открытый side-quest (defer):** carrier-autocomplete фильтр в `<ClaimsTable>` через готовый `/lookups/carriers` — пока остаётся full-text `q`.
 
 - [ ] **4.5 Admin ops: limits / audit / diagnostics** (≈3 дня) — pending
   - Scope: `limits` модуль (GET/PUT помесячных лимитов и ставок), `audit` (GET с фильтрами `targetType=&targetKey=&userId=&action=` + pagination), `diagnostics` (mails/claims/db endpoints + resend); 3 admin-only страницы `/employee/{limits,audit,diagnostics}` (по уже зафиксированным `<LimitsRow>` / `<AuditRow>` спекам в DS).
@@ -264,8 +281,10 @@
 
 - **Audit-инфраструктура унифицирована.** Wave-2 `AuditService` удалён. Единственный путь записи audit — `AuditWriter` через `AuditInterceptor`, который оборачивает handler в `prisma.$transaction` под `AsyncLocalStorage`-based `AuditContext`. Atomic audit гарантирован для всех `@Audit()`-помеченных эндпоинтов (mutation + audit-row коммитятся вместе или ни одна из них). Решено 2026-05-25, реализовано pre-Phase-4.4.
 - **Status-фильтр в claims list — single-select** (так позволяет `ClaimFiltersSchema` в `packages/shared`). Multi-select требует правки schema.
-- **Web-agent использовал `bg-input`** вместо `bg-bg-soft` упомянутого в DS (последнего токена нет в `globals.css`). Решить в uiux-доводке: либо добавить токен, либо стандартизировать DS на `bg-input`.
+- **`bg-input` зафиксирован как single surface token** (решено 2026-05-25 в Phase 4.4 uiux-аудите). `bg-bg-soft` deprecated. Policy в `docs/14-design-system.md` Surface-token policy section.
 - **`opiekun` тоже впущен в `/employee` shell** с пустым nav-ом (роль идёт через `lib/roles.ts:ROLE_LANDING.opiekun = '/employee'`). Не блокер для Phase 4, чинится естественно в Фазе 5 при добавлении opiekun-вкладки.
+- **Save kwotaMaksima без смены статуса не делается.** Решено 2026-05-25: kwotaMaksima меняется только внутри `UpdateClaimToAccepted` ветки `UpdateClaimSchema` (т.е. в момент акцепта). По бизнес-flow «потолок» — атрибут одобрения, не отдельная сущность. Никаких dedicated `PATCH /claims/:nrZgl/amount-maximum`.
+- **Stale generated Prisma client** — recurring проблема при schema-изменениях. После любого редактирования `schema.prisma` нужно `npm run build -w @magguarantee/database` (не только `prisma generate` — он обновляет только `src/generated/`, а api читает из `dist/generated/`). Side-quest для будущего: chain `prisma generate` в `npm run build -w api` через prebuild-script.
 
 ### Backend
 
@@ -276,7 +295,7 @@
    - ✅ `_handleReklamacjaTransition()`
    - ✅ `_applyDecisionEmails()`
 2. ✅ `PATCH /claims/:nrZgl` — только admin/pracownik, с `RolesGuard`.
-3. ⏳ `ClaimsService.requestAuthorization()` + `POST /claims/:nrZgl/request-authorization`. **Sub-slice 4.2.**
+3. ✅ `ClaimsService.requestAuthorization()` + `POST /claims/:nrZgl/request-authorization` — admin/pracownik, UUID v4 authorizationToken, email Maksim-у через Mailhog с React Email template. **Sub-slice 4.2 DONE.**
 4. ❌ ~~`S3Module`: загрузка scrennshot-ов авторизации.~~ **Выпилено** из scope (решение от 2026-05-13).
 5. ❌ ~~`POST /claims/:nrZgl/auth-screenshot` (multipart).~~ **Выпилено.**
 6. ⏳ Endpoint `/diagnostics/dashboard` — `getDashboardStats` (`Code.gs:7000+`). **Sub-slice 4.3.**
@@ -285,8 +304,8 @@
    - Recent activity.
    - Урgent (NA_WERYFIKACJI > 3 days).
 7. ⏳ Endpoints для управления лимитами (`/limits` PUT). **Sub-slice 4.5.**
-8. ⏳ Управление справочниками типов прицепов (`/trailer-types`). **Sub-slice 4.4** (бэк CRUD уже есть; нужна полировка + audit-интеграция).
-9. ⏳ **Audit-log запись для всех mutating actions** (`createCarrier`, `updateClaim`, `setLimits`, ...). **Sub-slice 4.4** (инструмент `AuditWriter` готов в 4.0). Реализовано через декоратор `@Audit()` + ambient-tx interceptor — bulk-rename `prisma.client → prisma.tx` сделан pre-Phase-4.4, поэтому добавление новых audit-помеченных эндпоинтов автоматически попадает в атомарную транзакцию.
+8. ✅ Управление справочниками типов прицепов (`/trailer-types`) — CRUD из Phase 2 + hard-delete с `reason` + before-snapshot для audit-diff (Sub-slice 4.4 DONE).
+9. ✅ **Audit-log запись для всех mutating actions** — реализовано pre-Phase-4.4: atomic-audit refactor (commit `2d43fce`) обеспечивает запись через `@Audit()` декоратор внутри ambient `prisma.$transaction`. Все `@Audit()`-помеченные эндпоинты на carriers/vehicles/drivers/trailers/trailer-types/users/delegations/claims пишут audit-row атомарно с mutation. Phase 4.4 добавил `AuditContext.setBefore` (для before-snapshot diff) + `setMetadata` (для hard-delete `reason`).
 
 ### Frontend
 
@@ -303,14 +322,14 @@
    - ✅ Все поля редактируемы (discriminated по `targetStatus`).
    - ✅ Live recalculation на каждое изменение (debounced 300ms → `/preview`).
    - ✅ История рекламации в табе «Historia» (если есть `origData`).
-   - ✅ Таб «Autoryzacja» (с кнопкой «Wymaga autoryzacji» — она в 4.1 уже PATCH-ит на OCZEKUJE_NA_AUTORYZACJE; email Maksim-у подключится в 4.2 без правок UI).
+   - ✅ Таб «Autoryzacja» — Phase 4.2 wiring: RHF + `RequestAuthorizationSchema`, кнопка «Wymaga autoryzacji» дёргает `POST /claims/:nrZgl/request-authorization` → email Maksim-у через Mailhog. При статусе уже `OCZEKUJE_NA_AUTORYZACJE` — read-only summary. `decisionTargetsFor('NA_WERYFIKACJI')` в Edit-табе больше не предлагает этот статус (единственный путь — Autoryzacja-таб).
    - ❌ ~~Upload screenshot для авторизации.~~ **Выпилено.**
-5. ⏳ **[admin only]** `app/(employee)/carriers/...` — полный CRUD (overlay из Фазы 2 → integrated). **Sub-slice 4.4** (страницы уже живут из Phase 2; нужна полировка под новый layout + audit-интеграция в сервисах).
-6. ⏳ **[admin only]** `app/(employee)/vehicles/...`, `drivers/...`, `trailers/...`, `trailer-types/...`. **Sub-slice 4.4** (то же — миграция под новый layout).
+5. ✅ **[admin only]** `app/(employee)/employee/(admin)/carriers/...` — Sub-slice 4.4 DONE: layout strip, hard-delete с `reason` через `<ConfirmDeleteWithReasonDialog>`, h-10 polish.
+6. ✅ **[admin only]** `app/(employee)/employee/(admin)/vehicles/`, `drivers/`, `trailers/`, `trailer-types/` — Sub-slice 4.4 DONE (тот же набор фиксов).
 7. ⏳ **[admin only]** `app/(employee)/limits/page.tsx` — таблица помесячных лимитов с inline edit. **Sub-slice 4.5.**
 8. ⏳ **[admin only]** `app/(employee)/audit/page.tsx` — список аудит-записей с фильтрами. **Sub-slice 4.5.**
 9. ⏳ **[admin only]** `app/(employee)/diagnostics/page.tsx`. **Sub-slice 4.5.**
-10. ⏳ **[admin only]** `app/(employee)/users/page.tsx` — CRUD сотрудников (admin/pracownik/opiekun/planista/dyspozytor/eksport/weryfikator), reset-password, deactivate/reactivate. **Sub-slice 4.4** (api модуль `users` уже полностью готов из Phase 2; нужен только UI).
+10. ✅ **[admin only]** `app/(employee)/employee/(admin)/users/page.tsx` — Sub-slice 4.4 DONE: `<UsersTable>` 6 колонок, `<UserSheet>` create/edit (RHF+Zod), reset-password с clipboard copy, deactivate/reactivate confirm, role-badge с цветовой матрицей.
 
 ### Deliverables
 

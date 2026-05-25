@@ -12,6 +12,7 @@ import {
 } from '@tanstack/react-query';
 import type {
   CreateTrailerTypeDto,
+  DeleteWithReasonDto,
   TrailerTypeDto,
   TrailerTypeFilters,
   UpdateTrailerTypeDto,
@@ -21,6 +22,7 @@ import {
   createTrailerType,
   deactivateTrailerType,
   getTrailerType,
+  hardDeleteTrailerType,
   listTrailerTypes,
   updateTrailerType,
 } from '@/lib/api/trailerTypes';
@@ -78,6 +80,16 @@ export function useDeactivateTrailerType() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: deactivateTrailerType,
+    onSuccess: () => qc.invalidateQueries({ queryKey: TRAILER_TYPES_KEY }),
+  });
+}
+
+/** Hard-delete — admin only. See useHardDeleteCarrier doc. */
+export function useHardDeleteTrailerType() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: DeleteWithReasonDto }) =>
+      hardDeleteTrailerType(id, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: TRAILER_TYPES_KEY }),
   });
 }

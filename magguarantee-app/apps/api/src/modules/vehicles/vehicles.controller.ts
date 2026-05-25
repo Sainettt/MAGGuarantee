@@ -21,10 +21,12 @@ import type { z } from 'zod';
 
 import {
   CreateVehicleSchema,
+  DeleteWithReasonSchema,
   UpdateVehicleSchema,
   UuidSchema,
   VehicleFiltersSchema,
   type CreateVehicleDto,
+  type DeleteWithReasonDto,
   type UpdateVehicleDto,
   type VehicleAttachmentDto,
   type VehicleDto,
@@ -206,6 +208,28 @@ export class VehiclesController {
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
   ): Promise<void> {
     await this.vehicles.softDelete(id);
+  }
+
+  /**
+   * Hard-delete (admin-only) per Phase 4.4. Mounted as a sibling of the
+   * soft-delete endpoint; opiekun keeps soft-delete only by design (Phase
+   * 4.4 roadmap line 327: "Hard-delete з обов'язковим `powod`"). `reason`
+   * required, persisted to `audit_log.metadata.reason`.
+   */
+  @Delete(':id/hard')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles('admin')
+  @Audit({
+    action: 'hardDeleteVehicle',
+    targetType: 'Vehicle',
+    targetKey: (req) => req.params?.id,
+  })
+  async hardDelete(
+    @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
+    @Body(new ZodValidationPipe(DeleteWithReasonSchema))
+    body: DeleteWithReasonDto,
+  ): Promise<void> {
+    await this.vehicles.hardDelete(id, body.reason);
   }
 
   // ── Attachments ──────────────────────────────────────────

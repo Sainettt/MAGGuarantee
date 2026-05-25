@@ -206,6 +206,16 @@ export interface UpdateClaimData {
   // ── authorization request (Phase 4 — set when targeting OCZEKUJE_*) ──
   authorizationRequired?: boolean;
   authorizationDescription?: string | null;
+  /**
+   * Maksim-handshake token (UUID v4). Minted by
+   * `ClaimsService.requestAuthorization` on every fresh request — a future
+   * Maksim-approve endpoint will validate clicks against this value. The
+   * column is nullable in the schema; passing `null` here clears it.
+   *
+   * Phase 4.2 — currently written ONLY by the request-authorization path;
+   * the verifier PATCH flow leaves it `undefined` (untouched).
+   */
+  authorizationToken?: string | null;
 }
 
 /**
@@ -414,6 +424,7 @@ export class ClaimsRepository {
     set('margin');
     set('authorizationRequired');
     set('authorizationDescription');
+    set('authorizationToken');
     if (data.breakdown !== undefined) {
       payload.breakdown = data.breakdown as unknown as object;
     }

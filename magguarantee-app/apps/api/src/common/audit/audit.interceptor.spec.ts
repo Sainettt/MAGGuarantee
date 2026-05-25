@@ -415,11 +415,137 @@ describe('AuditInterceptor (pre-Phase-4.4 ambient-tx variant)', () => {
     await lastValueFrom(interceptor.intercept(ctx, makeNext(handler)));
 
     expect(logs).toHaveLength(1);
+    // `before` is trimmed to the keys present in `after` (= `id`, `name`,
+    // `active`) — same shape as before because all fields of `before` overlap.
     expect(logs[0]!.before).toEqual({ name: 'Old Name', active: true });
     expect(logs[0]!.after).toEqual({
       id: 'c-9',
       name: 'New Name',
       active: true,
+    });
+  });
+
+  it('trims `before` to the key set of `after` plus id', async () => {
+    const { writer, logs } = makeAudit();
+    const fp = makePrisma();
+    const config: AuditConfig = {
+      action: 'updateVehicle',
+      targetType: 'Vehicle',
+      targetKey: (req) => req.params?.id,
+    };
+    const interceptor = new AuditInterceptor(
+      makeReflector(config),
+      writer,
+      fp.prisma,
+    );
+    const ctx = makeCtx({
+      user: { sub: 'op-1', role: 'opiekun' },
+      params: { id: 'v-1' },
+      headers: {},
+    });
+
+    // Service stashes the FULL row; only plateNumber is in `after`.
+    const fullBefore = {
+      id: 'v-1',
+      plateNumber: 'OLD-1',
+      brand: 'Mercedes',
+      model: 'Actros',
+      year: 2018,
+      euro: 'VI',
+      adrClasses: ['1', '2'],
+      // ...and 25 more fields
+      notes: 'pre-update notes',
+    };
+    const handler = new Observable<unknown>((subscriber) => {
+      AuditContext.setBefore(fullBefore);
+      subscriber.next({ id: 'v-1', plateNumber: 'NEW-1' });
+      subscriber.complete();
+    });
+
+    await lastValueFrom(interceptor.intercept(ctx, makeNext(handler)));
+
+    expect(logs).toHaveLength(1);
+    // Only `id` + `plateNumber` survived the trim.
+    expect(logs[0]!.before).toEqual({ id: 'v-1', plateNumber: 'OLD-1' });
+    expect(logs[0]!.after).toEqual({ id: 'v-1', plateNumber: 'NEW-1' });
+  });
+
+  it('keeps full `before` when omitResultBody=true and after is empty', async () => {
+    const { writer, logs } = makeAudit();
+    const fp = makePrisma();
+    const config: AuditConfig = {
+      action: 'hardDeleteCarrier',
+      targetType: 'Carrier',
+      targetKey: (req) => req.params?.id,
+      omitResultBody: true,
+    };
+    const interceptor = new AuditInterceptor(
+      makeReflector(config),
+      writer,
+      fp.prisma,
+    );
+    const ctx = makeCtx({
+      user: { sub: 'admin-1', role: 'admin' },
+      params: { id: 'c-1' },
+      headers: {},
+    });
+
+    const before = {
+      id: 'c-1',
+      login: 'pwz1',
+      name: 'Some Carrier',
+      nip: '0000000000',
+    };
+    const handler = new Observable<unknown>((subscriber) => {
+      AuditContext.setBefore(before);
+      AuditContext.setMetadata({ reason: 'gdpr removal request' });
+      subscriber.next(undefined);
+      subscriber.complete();
+    });
+
+    await lastValueFrom(interceptor.intercept(ctx, makeNext(handler)));
+
+    expect(logs).toHaveLength(1);
+    // No after → no trimming, full snapshot preserved.
+    expect(logs[0]!.before).toEqual(before);
+    expect(logs[0]!.after).toBeUndefined();
+  });
+
+  it('merges service-side metadata onto routing metadata', async () => {
+    const { writer, logs } = makeAudit();
+    const fp = makePrisma();
+    const config: AuditConfig = {
+      action: 'hardDeleteVehicle',
+      targetType: 'Vehicle',
+      targetKey: (req) => req.params?.id,
+    };
+    const interceptor = new AuditInterceptor(
+      makeReflector(config),
+      writer,
+      fp.prisma,
+    );
+    const ctx = makeCtx({
+      user: { sub: 'admin-1', role: 'admin' },
+      params: { id: 'v-7' },
+      method: 'DELETE',
+      url: '/api/v1/vehicles/v-7/hard',
+      headers: { 'user-agent': 'jest' },
+    });
+
+    const handler = new Observable<unknown>((subscriber) => {
+      AuditContext.setMetadata({ reason: 'duplicate registration' });
+      subscriber.next(undefined);
+      subscriber.complete();
+    });
+
+    await lastValueFrom(interceptor.intercept(ctx, makeNext(handler)));
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.metadata).toEqual({
+      method: 'DELETE',
+      route: '/api/v1/vehicles/v-7/hard',
+      userAgent: 'jest',
+      reason: 'duplicate registration',
     });
   });
 });

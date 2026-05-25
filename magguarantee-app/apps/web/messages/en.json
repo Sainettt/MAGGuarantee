@@ -28,7 +28,77 @@
     "clear": "Clear",
     "validationFailedToast": "Please fill in the highlighted fields",
     "inactiveSuffix": "(inactive)",
-    "pcsShort": "pcs."
+    "pcsShort": "pcs.",
+    "copy": "Copy",
+    "copied": "Copied",
+    "close": "Close"
+  },
+  "confirmDelete": {
+    "title": "Permanently delete — {entityLabel}",
+    "body": "This action cannot be undone. {entityName} will be permanently removed. Please provide a reason.",
+    "reasonLabel": "Reason for deletion",
+    "reasonPlaceholder": "Enter reason — minimum 3 characters",
+    "cancel": "Cancel",
+    "confirm": "Delete permanently",
+    "deleting": "Deleting…",
+    "deletedToast": "Permanently deleted",
+    "errorToast": "Failed to delete",
+    "entityLabel": {
+      "carrier": "carrier",
+      "vehicle": "vehicle",
+      "driver": "driver",
+      "trailer": "trailer",
+      "trailerType": "trailer type"
+    }
+  },
+  "users": {
+    "title": "Users",
+    "newUser": "New user",
+    "editUser": "Edit user",
+    "emptyTitle": "No users yet",
+    "emptyMessage": "Click \"New user\" to add the first one.",
+    "filters": {
+      "searchPlaceholder": "Search login / name",
+      "role": "Role",
+      "allRoles": "All roles",
+      "allActive": "All",
+      "onlyActive": "Active only",
+      "onlyInactive": "Inactive only"
+    },
+    "fields": {
+      "login": "Login",
+      "name": "Full name",
+      "email": "E-mail",
+      "role": "Role",
+      "password": "Temporary password",
+      "passwordHint": "≥10 chars, ≥1 letter, ≥1 digit. Leave empty to auto-generate.",
+      "liderEmail": "Leader e-mail",
+      "liderEmailHint": "Only for the planista role — supervisor's address.",
+      "active": "Active",
+      "createdAt": "Created"
+    },
+    "actions": {
+      "resetPassword": "Reset password",
+      "deactivate": "Deactivate",
+      "reactivate": "Reactivate",
+      "delete": "Delete permanently"
+    },
+    "resetPassword": {
+      "title": "New temporary password",
+      "description": "Share this password with the user. They should change it after first login.",
+      "loginLabel": "Login:",
+      "passwordLabel": "Password:",
+      "copyAria": "Copy temporary password to clipboard"
+    },
+    "confirmActivate": {
+      "deactivateTitle": "Deactivate user?",
+      "deactivateBody": "{login} will not be able to log in, but their data stays in the system.",
+      "reactivateTitle": "Reactivate user?",
+      "reactivateBody": "{login} will regain access to the system."
+    },
+    "tempPasswordToast": "Temporary password: {password}",
+    "deactivatedToast": "User deactivated",
+    "reactivatedToast": "User reactivated"
   },
   "forms": {
     "country": {
@@ -565,9 +635,17 @@
           "savedToast": "Claim sent for authorization",
           "pendingTitle": "Claim awaiting authorization",
           "pendingDescription": "Description sent to Maksim",
+          "pendingMaximumLabel": "Persisted Maksim amount (EUR)",
           "amountMaximumLabel": "Amount approved by Maksim (EUR)",
           "amountMaximumSave": "Save Maksim amount",
-          "amountMaximumSaved": "Maksim amount saved"
+          "amountMaximumSaved": "Maksim amount saved",
+          "kwotaMaksimaLabel": "Maksim amount (EUR)",
+          "kwotaMaksimaHelp": "Amount Maksim needs to sign off on. Required, positive, two decimals.",
+          "commentLabel": "Comment (optional)",
+          "commentPlaceholder": "Reason for authorization request…",
+          "requestButton": "Require authorization",
+          "emailSent": "Email sent to Maksim",
+          "alreadyPending": "Claim is already awaiting Maksim's authorization."
         },
         "targetStatus": {
           "ZAAKCEPTOWANO": "Accept",

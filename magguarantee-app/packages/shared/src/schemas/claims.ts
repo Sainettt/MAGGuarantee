@@ -135,6 +135,41 @@ export const PreviewClaimSchema = z
   });
 export type PreviewClaimDto = z.infer<typeof PreviewClaimSchema>;
 
+// ─── Request authorization (kwota-Maksima e-mail handshake) ──
+
+/**
+ * POST /claims/:nrZgl/request-authorization — Phase 4.2.
+ *
+ * Triggered by admin / pracownik when a verified claim's payout amount
+ * exceeds the wniosek's `amountRequested` and needs Maksim's sign-off
+ * before being booked as accepted. Transitions the claim into
+ * `OCZEKUJE_NA_AUTORYZACJE`, stamps a fresh `authorizationToken` (UUID v4),
+ * stores the override amount in `Claim.amountMaximum`, and dispatches an
+ * email to Maksim with the deeplink + summary (Mailhog in dev, Gmail in
+ * Phase 9).
+ *
+ * Fields:
+ *  - `kwotaMaksima` — verifier-requested authorization amount in EUR. Stored
+ *    verbatim into `Claim.amountMaximum` (Decimal(12,2)). Must be positive
+ *    and a multiple of 0.01 so the Decimal column round-trips cleanly.
+ *  - `comment` — optional rationale shown in the email body and persisted
+ *    into `Claim.authorizationDescription`.
+ *
+ * The PATCH /claims/:nrZgl path also accepts an optional `amountMaximum`
+ * field for the accepted-status branch. The PATCH variant is for *direct
+ * override during acceptance* without going through the Maksim handshake;
+ * this endpoint is for *requesting* the handshake. Two callers, two paths.
+ */
+export const RequestAuthorizationSchema = z
+  .object({
+    kwotaMaksima: z.number().positive().multipleOf(0.01).max(9_999_999),
+    comment: emptyStringToUndefined(
+      z.string().trim().min(1).max(2_000).optional(),
+    ),
+  })
+  .strict();
+export type RequestAuthorizationDto = z.infer<typeof RequestAuthorizationSchema>;
+
 // ─── Reklamacja ──────────────────────────────────────────
 
 /**
@@ -435,6 +470,7 @@ const UpdateClaimToAccepted = z
     /** REQUIRED — needed by the CHECK constraint at DB level. */
     amountApproved: UpdateClaimAmountSchema,
     /** Maksim authorization override — optional, only relevant after OCZEKUJE_*. */
+    // Phase 4.2: kwotaMaksima override — admin/pracownik tylko, mapuje na Claim.amountMaximum.
     amountMaximum: UpdateClaimAmountSchema.optional(),
     comment: emptyStringToUndefined(z.string().max(4_000).optional()),
     ...UpdateClaimCorrectionFields,
