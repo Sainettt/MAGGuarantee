@@ -43,9 +43,44 @@ const trailerAttributeFields = {
   notes: emptyStringToUndefined(z.string().max(2_000).optional()),
 };
 
+// ─── Conditional rules ───────────────────────────────────
+
+/**
+ * Shared cross-field rule used by both create and update: when `belts` /
+ * `mats` is explicitly set to `true`, the matching count field must be
+ * provided. Extracted as a function (not chained via `.superRefine`) so
+ * callers can compose it onto a `.passthrough()` schema without losing
+ * the underlying ZodObject — `ZodEffects` doesn't expose `.passthrough()`.
+ */
+export const trailerCountsRefine = (
+  d: {
+    belts?: boolean | null;
+    beltsCount?: number | null;
+    mats?: boolean | null;
+    matsCount?: number | null;
+  },
+  ctx: z.RefinementCtx,
+): void => {
+  if (d.belts === true && (d.beltsCount === undefined || d.beltsCount === null)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'beltsCount wymagany gdy belts=true',
+      path: ['beltsCount'],
+    });
+  }
+  if (d.mats === true && (d.matsCount === undefined || d.matsCount === null)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'matsCount wymagany gdy mats=true',
+      path: ['matsCount'],
+    });
+  }
+};
+
 // ─── Create ──────────────────────────────────────────────
 
-export const CreateTrailerSchema = z
+/** Underlying ZodObject — exported so callers can extend (e.g. passthrough). */
+export const CreateTrailerObjectSchema = z
   .object({
     carrierId: UuidSchema,
     plateNumber: PlateSchema,
@@ -55,6 +90,9 @@ export const CreateTrailerSchema = z
     ...trailerAttributeFields,
   })
   .strict();
+
+export const CreateTrailerSchema =
+  CreateTrailerObjectSchema.superRefine(trailerCountsRefine);
 export type CreateTrailerDto = z.infer<typeof CreateTrailerSchema>;
 
 // ─── Update ──────────────────────────────────────────────
@@ -63,7 +101,7 @@ export type CreateTrailerDto = z.infer<typeof CreateTrailerSchema>;
  * PATCH /trailers/:id — `trailerTypeId` stays optional (omit = leave alone)
  * but loses `.nullable()` because null is no longer valid per the DB.
  */
-export const UpdateTrailerSchema = z
+export const UpdateTrailerObjectSchema = z
   .object({
     plateNumber: PlateSchema.optional(),
     active: z.boolean().optional(),
@@ -88,6 +126,9 @@ export const UpdateTrailerSchema = z
     notes: emptyStringToUndefined(z.string().max(2_000).nullable().optional()),
   })
   .strict();
+
+export const UpdateTrailerSchema =
+  UpdateTrailerObjectSchema.superRefine(trailerCountsRefine);
 export type UpdateTrailerDto = z.infer<typeof UpdateTrailerSchema>;
 
 // ─── Filters ─────────────────────────────────────────────

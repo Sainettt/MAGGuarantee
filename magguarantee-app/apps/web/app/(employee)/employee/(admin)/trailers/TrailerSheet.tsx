@@ -9,7 +9,8 @@ import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
   CreateTrailerSchema,
-  UpdateTrailerSchema,
+  UpdateTrailerObjectSchema,
+  trailerCountsRefine,
   type CreateTrailerDto,
   type TrailerDto,
   type UpdateTrailerDto,
@@ -96,10 +97,14 @@ export function TrailerSheet({
   const isWizard = mode === 'wizard';
 
   // Edit mode keeps carrierId in form state for display; passthrough so the
-  // strict UpdateSchema doesn't reject it.
+  // strict UpdateSchema doesn't reject it. We compose the cross-field
+  // belts/mats refine onto the object form because `.superRefine` would
+  // otherwise return a ZodEffects, which doesn't expose `.passthrough()`.
   const form = useForm<FormValues>({
     resolver: zodResolver(
-      isEdit ? UpdateTrailerSchema.passthrough() : CreateTrailerSchema,
+      isEdit
+        ? UpdateTrailerObjectSchema.passthrough().superRefine(trailerCountsRefine)
+        : CreateTrailerSchema,
     ),
     defaultValues: getDefaults(),
   });
@@ -443,20 +448,28 @@ export function TrailerSheet({
                       {t('fields.belts')}
                     </label>
                     {beltsOn && (
-                      <Input
-                        id="trailer-beltsCount"
-                        type="number"
-                        min={0}
-                        step={1}
-                        inputMode="numeric"
-                        aria-label={t('fields.beltsCount')}
-                        placeholder={t('fields.beltsCount')}
-                        className="h-9 ml-6 max-w-[140px] animate-slide-in"
-                        {...form.register('beltsCount', {
-                          setValueAs: (v) =>
-                            v === '' || v === null ? undefined : Number(v),
-                        })}
-                      />
+                      <div className="ml-6 animate-slide-in">
+                        <Input
+                          id="trailer-beltsCount"
+                          type="number"
+                          min={0}
+                          step={1}
+                          inputMode="numeric"
+                          aria-label={t('fields.beltsCount')}
+                          aria-invalid={!!errs.beltsCount}
+                          placeholder={t('fields.beltsCount')}
+                          className="h-9 max-w-[140px]"
+                          {...form.register('beltsCount', {
+                            setValueAs: (v) =>
+                              v === '' || v === null ? undefined : Number(v),
+                          })}
+                        />
+                        {errs.beltsCount?.message && (
+                          <p className="mt-1 text-xs text-danger">
+                            {errs.beltsCount.message as string}
+                          </p>
+                        )}
+                      </div>
                     )}
                   </div>
                   <div className="flex flex-col gap-1">
@@ -465,20 +478,28 @@ export function TrailerSheet({
                       {t('fields.mats')}
                     </label>
                     {matsOn && (
-                      <Input
-                        id="trailer-matsCount"
-                        type="number"
-                        min={0}
-                        step={1}
-                        inputMode="numeric"
-                        aria-label={t('fields.matsCount')}
-                        placeholder={t('fields.matsCount')}
-                        className="h-9 ml-6 max-w-[140px] animate-slide-in"
-                        {...form.register('matsCount', {
-                          setValueAs: (v) =>
-                            v === '' || v === null ? undefined : Number(v),
-                        })}
-                      />
+                      <div className="ml-6 animate-slide-in">
+                        <Input
+                          id="trailer-matsCount"
+                          type="number"
+                          min={0}
+                          step={1}
+                          inputMode="numeric"
+                          aria-label={t('fields.matsCount')}
+                          aria-invalid={!!errs.matsCount}
+                          placeholder={t('fields.matsCount')}
+                          className="h-9 max-w-[140px]"
+                          {...form.register('matsCount', {
+                            setValueAs: (v) =>
+                              v === '' || v === null ? undefined : Number(v),
+                          })}
+                        />
+                        {errs.matsCount?.message && (
+                          <p className="mt-1 text-xs text-danger">
+                            {errs.matsCount.message as string}
+                          </p>
+                        )}
+                      </div>
                     )}
                   </div>
                   {(['airSuspension', 'certXl', 'multilock'] as const).map(
