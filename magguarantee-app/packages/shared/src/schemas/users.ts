@@ -10,7 +10,12 @@
 
 import { z } from 'zod';
 
-import { IsoDateTimeSchema, RoleSchema, UuidSchema } from './common';
+import {
+  IsoDateTimeSchema,
+  RoleSchema,
+  UuidSchema,
+  emptyStringToUndefined,
+} from './common';
 
 // ─── Field primitives ────────────────────────────────────
 
@@ -54,10 +59,17 @@ export const CreateUserSchema = z
      * Optional plaintext password. When omitted the API generates one and
      * returns it as `temporaryPassword` (Phase 2 stub — Phase 9 will email
      * it instead, see UsersService.resetPassword).
+     *
+     * Wrapped in `emptyStringToUndefined` so RHF forms with default `''`
+     * don't trip the `.min(10)` rule when the admin leaves the field blank.
      */
-    password: PasswordSchema.optional(),
-    /** Only meaningful for `role=planista` per docs/03-roles.md#planista. */
-    liderEmail: EmailSchema.optional(),
+    password: emptyStringToUndefined(PasswordSchema.optional()),
+    /**
+     * Only meaningful for `role=planista` per docs/03-roles.md#planista.
+     * `emptyStringToUndefined` for the same reason — form-default `''` must
+     * not hit `.email()` validation.
+     */
+    liderEmail: emptyStringToUndefined(EmailSchema.optional()),
     active: z.boolean().optional(),
   })
   .strict();
@@ -74,10 +86,13 @@ export type CreateUserDto = z.infer<typeof CreateUserSchema>;
  */
 export const UpdateUserSchema = z
   .object({
-    email: EmailSchema.optional(),
-    name: NameSchema.optional(),
+    email: emptyStringToUndefined(EmailSchema.optional()),
+    name: emptyStringToUndefined(NameSchema.optional()),
     role: RoleSchema.exclude(['przewoznik']).optional(),
-    liderEmail: EmailSchema.nullable().optional(),
+    // `nullable` allowed so admin can wipe a lider-email on a planista
+    // (e.g. when promoting to opiekun). Empty-string from forms still
+    // coerces to undefined (= "leave alone"), not null (= "wipe").
+    liderEmail: emptyStringToUndefined(EmailSchema.nullable().optional()),
     active: z.boolean().optional(),
   })
   .strict();
