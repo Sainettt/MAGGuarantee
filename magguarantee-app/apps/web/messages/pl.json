@@ -734,6 +734,7 @@
         "sectionVehicleAndDriver": "Pojazd i kierowca",
         "vehicle": "Pojazd",
         "driver": "Kierowca",
+        "driverPhone": "Telefon kierowcy",
         "trailer": "Naczepa",
         "sectionDeparture": "Wyjazd",
         "departureAt": "Data i godzina wyjazdu",
@@ -743,7 +744,19 @@
         "plannedReturnAt": "Planowany powrót",
         "returnCountry": "Kraj powrotu",
         "returnPostalCode": "Kod pocztowy powrotu",
+        "actualReturnAt": "Faktyczny powrót",
+        "reportedBy": "Zgłoszony przez",
+        "reportedAt": "Zgłoszony",
+        "verifiedBy": "Zweryfikowany przez",
+        "verifiedAt": "Zweryfikowany",
+        "notes": "Notatki",
         "comment": "Komentarz"
+      },
+      "sections": {
+        "vehicleAndDriver": "Pojazd i kierowca",
+        "departure": "Wyjazd",
+        "return": "Powrót",
+        "audit": "Status i audyt"
       },
       "status": {
         "zgloszony": "Zgłoszony",

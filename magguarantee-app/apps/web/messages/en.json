@@ -734,6 +734,7 @@
         "sectionVehicleAndDriver": "Vehicle and driver",
         "vehicle": "Vehicle",
         "driver": "Driver",
+        "driverPhone": "Driver phone",
         "trailer": "Trailer",
         "sectionDeparture": "Departure",
         "departureAt": "Departure date and time",
@@ -743,7 +744,19 @@
         "plannedReturnAt": "Planned return",
         "returnCountry": "Return country",
         "returnPostalCode": "Return postal code",
+        "actualReturnAt": "Actual return",
+        "reportedBy": "Reported by",
+        "reportedAt": "Reported at",
+        "verifiedBy": "Verified by",
+        "verifiedAt": "Verified at",
+        "notes": "Notes",
         "comment": "Comment"
+      },
+      "sections": {
+        "vehicleAndDriver": "Vehicle and driver",
+        "departure": "Departure",
+        "return": "Return",
+        "audit": "Status and audit"
       },
       "status": {
         "zgloszony": "Reported",

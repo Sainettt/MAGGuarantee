@@ -246,6 +246,8 @@
 - `status='zjechal'` ⇒ `actualReturnAt` обязан быть заполнен. Раньше это гарантировал DB CHECK `delegation_returned_complete` — он удалён, теперь правило enforced на уровне api (в сервисе при переходе статуса).
 - DB CHECK на длину: `returnCountry` 2..8 символов (covers `EL`), `returnPostalCode` ≤ 16. Формат-валидация (per-country regex) — на Zod-уровне через `EU_POSTAL_CODES` (см. `packages/shared/src/constants/eu-postal-codes.ts`).
 
+> 🗓️ **PLANNED (Phase 11+):** approval workflow для Delegation + жёсткая связь `Claim.delegationId` (один wniosek на один wyjazd) + блок `departureAt < today`. Появятся новые status-ы `oczekuje_na_akceptacje` / `odrzucony`, поля `plannerSnapshotId` / `dispatcherSnapshotId` / `approvedById` / `approvedAt` / `rejectedById` / `rejectedAt` / `rejectionReason`. Полная спецификация — [17-migration-roadmap.md#фаза-11--wyjazd-approval-workflow-планируется-после-launch](17-migration-roadmap.md#фаза-11--wyjazd-approval-workflow-планируется-после-launch).
+
 ### `MonthlyLimit` — лимиты на месяц
 
 Двумерная таблица (год × месяц). На каждый месяц — `kmPerDay` (дневной лимит км) и `ratePerKm` (ставка EUR/km). Используется в расчёте `calcKmGwarantPerMonth`.

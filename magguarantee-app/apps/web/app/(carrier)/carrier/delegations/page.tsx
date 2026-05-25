@@ -15,6 +15,7 @@ import {
 } from '@magguarantee/shared';
 
 import { StatusBadge } from '@/components/carrier/StatusBadge';
+import { DelegationDetailModal } from '@/components/delegations/DelegationDetailModal';
 import { Button } from '@/components/ui/Button';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/Dialog';
@@ -53,6 +54,17 @@ export default function CarrierDelegationsPage() {
   });
 
   const [confirmTarget, setConfirmTarget] = useState<DelegationDto | null>(null);
+
+  // Read-only detail modal — a plain row click opens it. Carriers cannot edit
+  // a submitted trip, so no `onEdit` is passed (footer shows only «Zamknij»,
+  // §6.6). Mirrors the vehicles/trailers/drivers carrier-fleet pattern.
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailTarget, setDetailTarget] = useState<DelegationDto | null>(null);
+
+  const openDetail = (row: DelegationDto) => {
+    setDetailTarget(row);
+    setDetailOpen(true);
+  };
 
   const columns = useMemo<DataTableColumn<DelegationDto>[]>(
     () => [
@@ -148,6 +160,7 @@ export default function CarrierDelegationsPage() {
         rows={data?.items ?? []}
         columns={columns}
         rowKey={(r) => r.id}
+        onRowClick={openDetail}
         isLoading={isLoading}
         empty={
           <EmptyState
@@ -164,6 +177,12 @@ export default function CarrierDelegationsPage() {
             }
           />
         }
+      />
+
+      <DelegationDetailModal
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        delegation={detailTarget}
       />
 
       <Dialog

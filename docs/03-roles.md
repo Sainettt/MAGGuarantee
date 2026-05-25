@@ -17,6 +17,8 @@
 
 > ⚠️ Роль называется `pracownik` в БД и в коде, но в UI она всегда отображается как **«Opiekun wniosków»** (claims-caretaker). Это сохраняем — пользователи MagTrans привыкли к этому термину. Не путать с ролью `opiekun` (куратор перевозчиков, совсем другой scope).
 
+> 🗓️ **PLANNED (Phase 11+):** Wyjazd approval workflow добавит точку одобрения создаваемого wyjazd. Открытый вопрос — какая роль одобряет: расширить `weryfikator` (default), расширить `opiekun`, или ввести новую роль `akceptant_wyjazdow`. Решение фиксируется перед стартом Phase 11. Полная спецификация — [17-migration-roadmap.md#фаза-11--wyjazd-approval-workflow-планируется-после-launch](17-migration-roadmap.md#фаза-11--wyjazd-approval-workflow-планируется-после-launch).
+
 ---
 
 ## <a id="przewoznik"></a>🚛 Перевозчик (`przewoznik`)

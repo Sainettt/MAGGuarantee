@@ -532,6 +532,115 @@
 
 ---
 
+## Фаза 11+ — Wyjazd approval workflow (планируется после launch)
+
+> **Status:** PLANNED — спецификация зафиксирована с заказчиком 2026-05-25. Реализация после Phase 10 launch. Решение по роли одобряющего открыто (см. ниже).
+
+Главная идея: расширить wyjazd с self-service регистрации carrier-а до полноценного approval workflow с участием MagTrans, и связать wyjazd ↔ wniosek жёсткой связью (один wniosek подаётся на один конкретный wyjazd, а не на свободный календарный диапазон).
+
+### Контекст и мотивация
+
+Сейчас (Phase 3) carrier создаёт wyjazd в статусе `zgloszony` без какого-либо акцепта со стороны MagTrans — wyjazd сразу попадает в flow `zgloszony → w_trasie → zjechal`, а wnioski можно подавать на произвольный временной диапазон (from / to), никак не привязанный к зарегистрированным wyjazdami. Это даёт carrier-у слишком много свободы (можно зарегистрировать wyjazd прошлым числом, можно подать wniosek без сопутствующей delegacji вообще) и не позволяет MagTrans контролировать назначения planista/dyspozytor под конкретный рейс.
+
+В будущем — добавляем точку одобрения + связку wyjazd ↔ wniosek + блок прошлых дат.
+
+### Что делается
+
+#### Шаг A — Мелкое: блок прошлых дат
+
+- Запретить `departureAt < today` (today в timezone Europe/Warsaw, не now — carrier может зарегистрировать выезд «завтра в 02:00», но не «вчера»).
+- **Shared (`packages/shared/src/schemas/delegations.ts`)** — добавить `.superRefine` проверку в `SubmitDelegationSchema`.
+- **Frontend** — `min` атрибут на date-picker в `/(carrier)/delegations/new`.
+- **Backend** — schema-валидация автоматически отработает (ZodValidationPipe).
+- Acceptance: попытка сабмита `departureAt = вчера` через Postman → 422.
+
+#### Шаг B — Жёсткая связь wniosek ↔ wyjazd
+
+- Wnioski больше не подаются на произвольный (from, to) диапазон. Wnioski подаются на конкретный, уже завершённый (`status = zjechal`) wyjazd.
+- **DB:** `Claim.delegationId` (FK на `Delegation.id`, **unique** — один wniosek на один wyjazd максимум).
+  - Для legacy wniosków (до этой фичи) колонка `nullable`. Для новых wniosков — `NOT NULL` через app-level check (не CHECK constraint, чтобы не мешать миграции старых строк).
+- **API:** `POST /claims` принимает `delegationId` вместо `from`/`to`. Диапазон вычисляется из wyjazd:
+  - `from = delegation.departureAt` (timestamp)
+  - `to = delegation.actualReturnAt` (timestamp; обязан существовать, т.к. wyjazd должен быть в `zjechal`)
+  - km-calc получает те же входы (from, to, корректировки часов) — реализация `calcKmGwarantPerMonth` не меняется.
+- **UI carrier:** в форме нового wniosek — селект из своих wyjazdy в статусе `zjechal`, у которых ещё нет привязанного wniosek (filter `WHERE NOT EXISTS (SELECT 1 FROM claim WHERE delegation_id = d.id)`).
+- **Detail wyjazd** дополняется секцией «Powiązany wniosek» с линком (если есть).
+
+#### Шаг C — Approval workflow для wyjazd
+
+- При `POST /delegations` wyjazd создаётся в новом статусе `oczekuje_na_akceptacje` (НЕ сразу `zgloszony`).
+- Одобряющий получает:
+  - **Email** с краткой инфой о wyjazd и deeplink в приложение (`delegation-pending-approval.tsx`).
+  - **In-app entry** в его dashboard / списке «Wyjazdy do akceptacji».
+- Одобряющий открывает detail wyjazd и видит:
+  - Все поля carrier-а (departureAt, plannedReturnAt, kierowca, naczepa, postal codes, comment).
+  - Приписанных к этой машине `planista` и `dyspozytor` (из `Vehicle.plannerId` / `Vehicle.dispatcherId`).
+  - **Может изменить** `planista` / `dyspozytor` именно для этого wyjazd — это **snapshot per-wyjazd**, а не глобальное переназначение на машине. Глобальные `Vehicle.plannerId`/`dispatcherId` остаются прежними (их меняет admin/opiekun).
+- После approve:
+  - `status → zgloszony` (далее по существующему flow: `w_trasie → zjechal`).
+  - **Email-ы** уходят всем задействованным лицам:
+    - carrier (`delegation-approved-carrier.tsx`)
+    - planista (`delegation-approved-planista.tsx`)
+    - dyspozytor (`delegation-approved-dyspozytor.tsx`)
+    - opiekun carrier-а (`delegation-approved-opiekun.tsx`)
+  - Каждое из задействованных лиц может **открыть detail wyjazd** через свою панель в read-only режиме (тот же `DelegationDetailModal`, что уже сделан в Phase 3).
+  - Audit-log запись `approveDelegation` через `AuditWriter`.
+- После reject:
+  - `status → odrzucony` (новый статус) с обязательным `reason`.
+  - Email carrier-у с причиной (`delegation-rejected-carrier.tsx`).
+  - Остальные участники email-ов **не получают** (wyjazd не состоялся).
+  - Audit-log запись `rejectDelegation`.
+
+### Роль одобряющего — открытый вопрос
+
+| Вариант | Плюсы | Минусы |
+|---|---|---|
+| 1. `opiekun` | Уже знает carrier-а; минимум новых сущностей | Перегружает opiekun-а, у которого основной scope — CRUD carrier-ов |
+| 2. `weryfikator` | Уже работает с wyjazd (`markInTransit`/`markReturned` в Phase 7); естественное расширение | Нет проверки «opiekun этого carrier-а» — нужен дополнительный guard если хотим scope-нуть |
+| 3. Новая роль `akceptant_wyjazdow` | Clean separation; нагрузка на новое лицо, а не на существующее | +1 роль в матрице доступа (станет 9 ролей), +миграция, +новые seed-юзеры |
+
+**Дефолтная рекомендация:** вариант 2 — расширить scope `weryfikator`. У него уже есть read-доступ ко всем wyjazd и mutate их статуса; акцепт логически встраивается в тот же flow. Решение фиксируется перед стартом Phase 11 после обсуждения с заказчиком.
+
+### Влияние на существующие модели
+
+| Модель | Изменение |
+|---|---|
+| `Delegation.status` enum | + `oczekuje_na_akceptacje`, + `odrzucony` |
+| `Delegation` поля | + `plannerSnapshotId` (FK → User, nullable), + `dispatcherSnapshotId` (FK → User, nullable), + `approvedById` (FK → User, nullable), + `approvedAt`, + `rejectedById`, + `rejectedAt`, + `rejectionReason` (text) |
+| `Claim` поля | + `delegationId` (FK → Delegation, **unique**, nullable для legacy) |
+| `POST /delegations` (controller) | Меняет дефолтный возвращаемый status с `zgloszony` на `oczekuje_na_akceptacje` |
+| Новый endpoint | `POST /delegations/:id/approve` — одобряющий, body `{ plannerSnapshotId?, dispatcherSnapshotId? }` (опциональная переоверрайдка) |
+| Новый endpoint | `POST /delegations/:id/reject` — одобряющий, body `{ reason: string }` (required) |
+| `POST /claims` (controller) | Принимает `delegationId` вместо `from`/`to` для **новых** wniosków |
+| Carrier UI | Status-badge для новых статусов; cancel разрешён и в `oczekuje_na_akceptacje` тоже |
+| Approver UI | Новая страница `/(weryfikator|...)/delegations/pending` со списком pending wyjazdy + approve/reject actions |
+
+### Что НЕ делается в этой фазе
+
+- ❌ **Не делается** глобальная reassignment planista/dyspozytor на машине — только snapshot для конкретного wyjazd. Глобальное переназначение остаётся за admin/opiekun.
+- ❌ **Не вводится** мульти-этапный approval (только одна точка одобрения).
+- ❌ **Не вводится** SLA / автоэскалация (можно добавить позже как Phase 11.5).
+- ❌ **Не делается** legacy-миграция старых wniosков под новую FK — `Claim.delegationId` остаётся `nullable` для исторических записей, валидация `NOT NULL` живёт в DTO для **новых** submission-ов.
+
+### Зависимости
+
+- Phase 3 ✅ — wyjazd CRUD и `DelegationDetailModal` (уже сделано 2026-05-25).
+- Phase 7 — weryfikator endpoints должны быть в наличии (для варианта 2 роли одобряющего).
+- Phase 9 — Gmail API setup должен работать (новые email-шаблоны).
+- Phase 10 — launch завершён, есть staging для UAT новой фичи.
+
+### Acceptance criteria (предварительные)
+
+- [ ] Carrier не может выбрать дату `departureAt < today` ни через UI, ни через Postman.
+- [ ] При создании wyjazd carrier-у возвращается status `oczekuje_na_akceptacje`; в UI badge → «Oczekuje na akceptację».
+- [ ] Approver видит wyjazd в своём списке pending, видит globally-приписанных planista/dyspozytor, может их override-нуть для этого wyjazd.
+- [ ] После approve: carrier + planista + dyspozytor + opiekun carrier-а получают email; status флипается на `zgloszony`; в audit-log запись.
+- [ ] После reject: carrier получает email с reason; status → `odrzucony`; другие участники email-ов не получают.
+- [ ] `POST /claims` без `delegationId` для **новых** wniosков → 422 (с явным сообщением «wniosek требует powiązanego wyjazd»).
+- [ ] Каждый из задействованных может открыть detail wyjazd в read-only modal через свою панель.
+
+---
+
 ## Тестирование km-calc
 
 Это самая критичная часть — расчёт `kmGwarant` и `paymentEur`. Если расхождение, перевозчик заметит и пожалуется.
@@ -632,6 +741,7 @@ describe('calcKmGwarantPerMonth', () => {
 
 Эти задачи выходят за scope «функциональной идентичности» с тем, что задумано в `Code.gs`/`index.html`, и делаются после launch (Фаза 11+):
 
+- **[ЗАФИКСИРОВАНО]** Wyjazd approval workflow + жёсткая связь wniosek ↔ wyjazd + блок прошлых дат — спецификация в [#фаза-11--wyjazd-approval-workflow-планируется-после-launch](#фаза-11--wyjazd-approval-workflow-планируется-после-launch) выше.
 - Pagination/virtualization для очень длинных списков.
 - Внутренний чат на каждое заявление (был в legacy, выпиливается, может вернуться позже как новая фича).
 - Экспорт wniosków в PDF.
