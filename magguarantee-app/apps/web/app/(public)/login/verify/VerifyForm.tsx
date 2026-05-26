@@ -121,11 +121,36 @@ export function VerifyForm() {
           code,
         });
         const user: UserDto = res.user;
-        // Prime cache so the role landing renders without a /me round-trip.
+        // Prime cache so the role landing renders without a /me round-trip
+        // IF the client survives the navigation. We follow up with a hard
+        // navigation below — `qc.setQueryData` here is best-effort.
         qc.setQueryData(ME_QUERY_KEY, user);
         clearLoginSession();
         const role = user.role as Role;
-        router.replace(resolveNext(next, role));
+        const destination = resolveNext(next, role);
+        // HARD NAVIGATION (not router.replace) — critical for re-login flows.
+        //
+        // When an access-token expires mid-session, the user is bounced to
+        // /login via `requireRoleAccess()`'s server-side `redirect('/login')`.
+        // That RSC payload (containing the redirect-instruction) gets cached
+        // in Next.js App Router's client-side router cache. A subsequent
+        // `router.replace(landing)` would replay that cached payload and
+        // bounce the user *back* to /login even though their cookies are now
+        // fresh — a re-login redirect loop that only breaks if the user
+        // manually types the URL (which forces a full reload and bypasses
+        // the cache). See the bug report from 2026-05-26.
+        //
+        // `window.location.assign()` forces a full document reload, wiping
+        // the router cache, TanStack Query state, and any other in-memory
+        // staleness. Trade-off: we lose the SPA feel for this one navigation
+        // — acceptable, because login is already a transition into the app.
+        if (typeof window !== 'undefined') {
+          window.location.assign(destination);
+          return;
+        }
+        // SSR fallback (should be unreachable inside a client component, but
+        // keeps TypeScript happy and avoids a dangling promise).
+        router.replace(destination);
       } catch (err) {
         if (err instanceof ApiResponseError) {
           if (err.status === 423) {
