@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { render } from '@react-email/render';
 
+import { MailJobsRegistry, type MailJobPayload } from './mail-jobs.registry';
 import {
   AuthorizationRequestEmail,
   type AuthorizationRequestProps,
@@ -23,18 +24,31 @@ export interface IMailService {
     email: string,
     props: AuthorizationRequestProps,
   ): Promise<void>;
+  /** Phase 4.5 — generic resend backing `POST /diagnostics/mails/:jobId/resend`. */
+  resendBarePayload(payload: MailJobPayload): Promise<void>;
 }
 
 @Injectable()
 export class MailService implements IMailService {
   private readonly logger = new Logger(MailService.name);
 
-  constructor(private readonly smtp: SmtpProvider) {}
+  // `mailJobs` is optional so the existing 1-arg constructor in unit tests
+  // (and any future seed scripts) keeps compiling — production wiring
+  // passes it through DI. When null, send paths skip the registry write.
+  constructor(
+    private readonly smtp: SmtpProvider,
+    private readonly mailJobs?: MailJobsRegistry,
+  ) {}
 
   async send2faCode(email: string, code: string): Promise<void> {
     const subject = 'Kod weryfikacyjny — MAGGuarantee';
     const text = this.buildText(code);
     const html = this.buildHtml(code);
+    const payload: MailJobPayload = {
+      to: email,
+      subject,
+      template: '2fa-code',
+    };
 
     try {
       await this.smtp.send({ to: email, subject, text, html });
@@ -45,11 +59,17 @@ export class MailService implements IMailService {
         msg: '2fa code sent',
         toMasked: this.maskEmail(email),
       });
+      await this.mailJobs?.record({ payload, state: 'completed' });
     } catch (err) {
       this.logger.error({
         msg: '2fa code send failed',
         toMasked: this.maskEmail(email),
         error: err instanceof Error ? err.message : String(err),
+      });
+      await this.mailJobs?.record({
+        payload,
+        state: 'failed',
+        failedReason: err instanceof Error ? err.message : String(err),
       });
       throw err;
     }
@@ -71,6 +91,16 @@ export class MailService implements IMailService {
     const subject = `Wniosek o autoryzację: ${props.nrZgl}`;
     const html = await render(AuthorizationRequestEmail(props));
     const text = this.buildAuthorizationRequestText(props);
+    const payload: MailJobPayload = {
+      to: email,
+      subject,
+      template: 'authorization-request',
+      // Persisting `nrZgl` lets the resend endpoint look the row back up
+      // when a future variant of this template depends on dynamic data.
+      // The diagnostics-list response redacts everything outside the
+      // `{to, subject, template}` triple — see `DiagnosticsService.getMails`.
+      data: { nrZgl: props.nrZgl },
+    };
 
     try {
       await this.smtp.send({ to: email, subject, text, html });
@@ -79,12 +109,59 @@ export class MailService implements IMailService {
         nrZgl: props.nrZgl,
         toMasked: this.maskEmail(email),
       });
+      await this.mailJobs?.record({ payload, state: 'completed' });
     } catch (err) {
       this.logger.error({
         msg: 'authorization request send failed',
         nrZgl: props.nrZgl,
         toMasked: this.maskEmail(email),
         error: err instanceof Error ? err.message : String(err),
+      });
+      await this.mailJobs?.record({
+        payload,
+        state: 'failed',
+        failedReason: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+  }
+
+  /**
+   * Phase 4.5 — generic resend used by `POST /diagnostics/mails/:jobId/resend`.
+   *
+   * Dispatches a bare `{to, subject, text}` envelope through the SMTP
+   * provider. The text body is intentionally minimal because the original
+   * template-data was redacted at persist time — the admin re-sending a
+   * failed job is concerned with delivery, not content fidelity. Once a
+   * future Phase persists template data securely (encrypted), this method
+   * can resolve the original template+data and re-render the rich body.
+   *
+   * Records a fresh `{state: 'completed' | 'failed'}` row in the registry
+   * so the resend itself is visible in the diagnostics list. Errors bubble
+   * up so the controller can surface a 500.
+   */
+  async resendBarePayload(payload: MailJobPayload): Promise<void> {
+    const text = [
+      `Ponowne wysłanie wiadomości z systemu MAGGuarantee.`,
+      ``,
+      `Temat oryginalny: ${payload.subject}`,
+      ``,
+      `Ta wiadomość została wysłana ponownie przez administratora po`,
+      `nieudanej próbie. Jeśli oryginalna wiadomość już dotarła, prosimy`,
+      `o zignorowanie tej kopii.`,
+    ].join('\n');
+    try {
+      await this.smtp.send({
+        to: payload.to,
+        subject: payload.subject,
+        text,
+      });
+      await this.mailJobs?.record({ payload, state: 'completed' });
+    } catch (err) {
+      await this.mailJobs?.record({
+        payload,
+        state: 'failed',
+        failedReason: err instanceof Error ? err.message : String(err),
       });
       throw err;
     }

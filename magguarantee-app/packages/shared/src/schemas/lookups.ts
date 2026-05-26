@@ -6,7 +6,7 @@
 
 import { z } from 'zod';
 
-import { UuidSchema } from './common';
+import { RoleSchema, UuidSchema } from './common';
 
 /** Compact `{id, login, name}` used by the people-pickers. */
 export const LookupUserSchema = z.object({
@@ -55,3 +55,42 @@ export const LookupCarrierFiltersSchema = z
   })
   .strict();
 export type LookupCarrierFilters = z.infer<typeof LookupCarrierFiltersSchema>;
+
+// ─── Users picker (Phase 4.5) ────────────────────────────
+
+/**
+ * Compact `{id, login, name, role, active}` for the admin users autocomplete
+ * used by the audit log filter (Phase 4.5). Mirrors `LookupCarrierSchema` —
+ * intentionally narrower than the full `UserDto` from `./users.ts` so the
+ * picker payload stays small. Soft-deleted users are excluded.
+ *
+ * Role-gated to `admin` at the controller level; the picker surfaces every
+ * employee role (including inactive accounts so the admin can filter audit
+ * rows tied to deactivated users).
+ */
+export const LookupUserAdminSchema = z.object({
+  id: UuidSchema,
+  login: z.string(),
+  name: z.string().nullable(),
+  role: RoleSchema,
+  active: z.boolean(),
+});
+export type LookupUserAdminDto = z.infer<typeof LookupUserAdminSchema>;
+
+export const LookupUserAdminListSchema = z.array(LookupUserAdminSchema);
+export type LookupUserAdminListDto = z.infer<
+  typeof LookupUserAdminListSchema
+>;
+
+/**
+ * Query-param schema for `GET /lookups/users`. Free substring match across
+ * `login` + `name`; result set capped at 100 rows by the service.
+ */
+export const LookupUserAdminFiltersSchema = z
+  .object({
+    q: z.string().trim().min(1).max(64).optional(),
+  })
+  .strict();
+export type LookupUserAdminFilters = z.infer<
+  typeof LookupUserAdminFiltersSchema
+>;

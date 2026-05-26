@@ -538,6 +538,143 @@
     "invalid": "Not found",
     "error": "Service unavailable — try again later"
   },
+  "dashboard": {
+    "title": "Dashboard",
+    "subtitle": "Activity overview and claim status",
+    "kpi": {
+      "total": "Total claims",
+      "naWeryfikacji": "In verification",
+      "zaakceptowano": "Accepted",
+      "odrzucono": "Rejected",
+      "oczekujeNaAutoryzacje": "Awaiting authorization"
+    },
+    "empty": {
+      "title": "No claims yet",
+      "message": "Charts and KPIs will appear here once carriers start submitting claims."
+    },
+    "charts": {
+      "monthlyTitle": "Monthly trend (12 mo.)",
+      "count": "Claim count",
+      "sumEur": "Total payout (EUR)",
+      "statusTitle": "Status distribution",
+      "statusEmpty": "No data to display",
+      "naWeryfikacji": "Verifying",
+      "zaakceptowano": "Accepted",
+      "odrzucono": "Rejected",
+      "oczekujeNaAutoryzacje": "Awaiting authorization"
+    },
+    "sidebar": {
+      "urgent": "Needs attention",
+      "urgentEmpty": "No urgent claims",
+      "recent": "Recent activity",
+      "recentEmpty": "No activity yet",
+      "topCarriers": "Top carriers",
+      "topCarriersEmpty": "No data",
+      "reklamacje": "Reclamations",
+      "reklamacjeUnit": "open"
+    }
+  },
+  "limits": {
+    "title": "KM guarantee limits",
+    "subtitle": "km/day and €/km rates for every month of the year",
+    "prevYear": "Previous year",
+    "nextYear": "Next year",
+    "saveError": "Failed to save",
+    "columns": {
+      "month": "Month",
+      "kmPerDay": "Km / day",
+      "ratePerKm": "Rate € / km",
+      "updatedAt": "Updated"
+    },
+    "months": {
+      "1": "January",
+      "2": "February",
+      "3": "March",
+      "4": "April",
+      "5": "May",
+      "6": "June",
+      "7": "July",
+      "8": "August",
+      "9": "September",
+      "10": "October",
+      "11": "November",
+      "12": "December"
+    }
+  },
+  "audit": {
+    "title": "Audit log",
+    "subtitle": "Activity history for actions performed by system users",
+    "emptyTitle": "No entries",
+    "emptyMessage": "No audit entries match the current filters.",
+    "filters": {
+      "targetType": "Target type",
+      "allTargetTypes": "All target types",
+      "userPlaceholder": "Filter by user",
+      "userSearchPlaceholder": "Search login / name",
+      "userNoResults": "No users",
+      "actionPlaceholder": "Filter by action…",
+      "dateFrom": "Date from",
+      "dateTo": "Date to"
+    },
+    "columns": {
+      "createdAt": "When",
+      "actor": "User",
+      "action": "Action",
+      "target": "Target",
+      "reason": "Reason"
+    },
+    "detail": {
+      "title": "Event detail",
+      "actor": "User",
+      "target": "Target",
+      "action": "Action",
+      "createdAt": "When",
+      "reason": "Reason",
+      "ip": "IP address",
+      "before": "Before",
+      "after": "After",
+      "metadata": "Metadata"
+    }
+  },
+  "diagnostics": {
+    "title": "Diagnostics",
+    "subtitle": "Mail queue state, data health and infrastructure status",
+    "tabs": {
+      "mails": "Mails",
+      "claims": "Claims",
+      "db": "Database"
+    },
+    "mails": {
+      "emptyTitle": "No mail jobs",
+      "emptyMessage": "The mail queue is empty.",
+      "resend": "Resend",
+      "resentToast": "Mail re-enqueued",
+      "resendError": "Failed to send",
+      "confirmTitle": "Resend mail?",
+      "confirmBody": "Mail \"{subject}\" will be re-enqueued for delivery.",
+      "columns": {
+        "id": "ID",
+        "state": "Status",
+        "attempts": "Attempts",
+        "subject": "Subject",
+        "to": "To",
+        "createdAt": "Created"
+      }
+    },
+    "claims": {
+      "emptyTitle": "No alerts",
+      "emptyMessage": "All claim health metrics look good.",
+      "samples": "Sample IDs"
+    },
+    "db": {
+      "postgres": "PostgreSQL",
+      "redis": "Redis",
+      "tablesTitle": "Table sizes",
+      "tableName": "Name",
+      "tableSize": "Size",
+      "tablesEmpty": "No table data available"
+    }
+  },
   "employee": {
     "claims": {
       "title": "Claims",

@@ -4,6 +4,9 @@ import type {
   LookupCarrierDto,
   LookupCarrierFilters,
   LookupCarrierListDto,
+  LookupUserAdminDto,
+  LookupUserAdminFilters,
+  LookupUserAdminListDto,
   LookupUserListDto,
 } from '@magguarantee/shared';
 
@@ -13,6 +16,9 @@ import { UsersRepository } from '../users/users.repository';
 
 /** Hard cap for the carriers autocomplete result set per Phase 4.4 brief. */
 const LOOKUP_CARRIERS_LIMIT = 100;
+
+/** Hard cap for the admin-users autocomplete per Phase 4.5 brief. */
+const LOOKUP_USERS_LIMIT = 100;
 
 /**
  * Lookups for dropdowns per docs/13-api-design.md#lookups.
@@ -83,6 +89,37 @@ export class LookupsService {
         id: r.id,
         login: r.login,
         name: r.name,
+        active: r.active,
+      }),
+    );
+  }
+
+  /**
+   * Admin users-autocomplete per Phase 4.5. Returns up to 100 rows. Caller is
+   * guaranteed admin by the controller's `@Roles('admin')` — re-asserted
+   * here defensively (mirrors `carriersList`).
+   *
+   * Includes inactive users so the admin can filter audit rows tied to
+   * deactivated accounts; soft-deleted rows are excluded by the soft-delete
+   * Prisma extension.
+   */
+  async usersListAdmin(
+    user: AuthUser,
+    filters: LookupUserAdminFilters,
+  ): Promise<LookupUserAdminListDto> {
+    if (user.role !== 'admin') {
+      throw new ForbiddenException('Brak uprawnień do listy użytkowników');
+    }
+    const rows = await this.users.searchAdmin({
+      ...(filters.q !== undefined ? { q: filters.q } : {}),
+      limit: LOOKUP_USERS_LIMIT,
+    });
+    return rows.map(
+      (r): LookupUserAdminDto => ({
+        id: r.id,
+        login: r.login,
+        name: r.name,
+        role: r.role,
         active: r.active,
       }),
     );

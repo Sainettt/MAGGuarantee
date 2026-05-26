@@ -61,6 +61,14 @@ export const ADMIN_ONLY_EMPLOYEE_PREFIXES: readonly string[] = [
   '/employee/drivers',
   '/employee/trailers',
   '/employee/trailer-types',
+  // Phase 4.5 — admin ops surfaces (users CRUD shipped in 4.4; limits / audit
+  // / diagnostics added in 4.5). Each renders behind the `(admin)` layout
+  // guard too, but middleware needs the same allow-list so direct-URL
+  // navigation by non-admins is bounced at the edge.
+  '/employee/users',
+  '/employee/limits',
+  '/employee/audit',
+  '/employee/diagnostics',
 ];
 
 function startsWithPrefix(pathname: string, prefix: string): boolean {

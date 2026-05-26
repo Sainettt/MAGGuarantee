@@ -13,6 +13,7 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { CarriersModule } from './modules/carriers/carriers.module';
 import { ClaimsModule } from './modules/claims/claims.module';
 import { DelegationsModule } from './modules/delegations/delegations.module';
+import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
 import { DriversModule } from './modules/drivers/drivers.module';
 import { FleetModule } from './modules/fleet/fleet.module';
 import { GpsModule } from './modules/integrations/gps/gps.module';
@@ -20,6 +21,7 @@ import { InspectionModule } from './modules/integrations/inspection/inspection.m
 import { ViesModule } from './modules/integrations/vies/vies.module';
 import { WhiteListModule } from './modules/integrations/white-list/white-list.module';
 import { KmCalcModule } from './modules/km-calc/km-calc.module';
+import { LimitsModule } from './modules/limits/limits.module';
 import { LookupsModule } from './modules/lookups/lookups.module';
 import { MailModule } from './modules/mail/mail.module';
 import { PasswordModule } from './modules/password/password.module';
@@ -96,6 +98,9 @@ import { VehiclesModule } from './modules/vehicles/vehicles.module';
     WhiteListModule,
     InspectionModule,
     GpsModule,
+    // Phase 4.5 — admin ops surface (dashboard + audit read + diagnostics).
+    LimitsModule,
+    DiagnosticsModule,
     HealthModule,
   ],
   providers: [

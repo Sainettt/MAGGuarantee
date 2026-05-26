@@ -188,4 +188,33 @@ export class UsersRepository {
     });
     return rows as unknown as UserRow[];
   }
+
+  /**
+   * Admin users-autocomplete (Phase 4.5). Free-text substring match across
+   * `login` and `name`; soft-deleted rows are excluded by the soft-delete
+   * extension. Includes inactive users so the admin can filter audit rows
+   * tied to deactivated accounts.
+   *
+   * `q` is treated as case-insensitive (Postgres `ILIKE` via Prisma's
+   * `mode: 'insensitive'`). The cap is enforced by the service.
+   */
+  async searchAdmin(filters: {
+    q?: string;
+    limit: number;
+  }): Promise<UserRow[]> {
+    const where: Record<string, unknown> = {};
+    if (filters.q) {
+      const q = filters.q;
+      where.OR = [
+        { login: { contains: q, mode: 'insensitive' } },
+        { name: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+    const rows = await this.prisma.user.findMany({
+      where,
+      orderBy: [{ active: 'desc' }, { login: 'asc' }],
+      take: filters.limit,
+    });
+    return rows as unknown as UserRow[];
+  }
 }

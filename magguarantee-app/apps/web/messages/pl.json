@@ -538,6 +538,143 @@
     "invalid": "Nie znaleziono",
     "error": "Usługa niedostępna — spróbuj później"
   },
+  "dashboard": {
+    "title": "Dashboard",
+    "subtitle": "Przegląd aktywności i status wniosków",
+    "kpi": {
+      "total": "Wszystkie wnioski",
+      "naWeryfikacji": "Na weryfikacji",
+      "zaakceptowano": "Zaakceptowane",
+      "odrzucono": "Odrzucone",
+      "oczekujeNaAutoryzacje": "Oczekuje na autoryzację"
+    },
+    "empty": {
+      "title": "Brak wniosków",
+      "message": "Gdy pojawią się pierwsze wnioski, w tym miejscu zobaczysz wykresy i wskaźniki."
+    },
+    "charts": {
+      "monthlyTitle": "Trend miesięczny (12 mies.)",
+      "count": "Liczba wniosków",
+      "sumEur": "Suma dopłat (EUR)",
+      "statusTitle": "Rozkład statusów",
+      "statusEmpty": "Brak danych do wyświetlenia",
+      "naWeryfikacji": "Weryfikacja",
+      "zaakceptowano": "Zaakceptowano",
+      "odrzucono": "Odrzucono",
+      "oczekujeNaAutoryzacje": "Czeka na autoryzację"
+    },
+    "sidebar": {
+      "urgent": "Wymaga uwagi",
+      "urgentEmpty": "Brak pilnych wniosków",
+      "recent": "Ostatnia aktywność",
+      "recentEmpty": "Brak aktywności",
+      "topCarriers": "Top przewoźnicy",
+      "topCarriersEmpty": "Brak danych",
+      "reklamacje": "Reklamacje",
+      "reklamacjeUnit": "otwartych"
+    }
+  },
+  "limits": {
+    "title": "Limity gwarancji km",
+    "subtitle": "Stawki km/dzień i €/km dla każdego miesiąca w roku",
+    "prevYear": "Poprzedni rok",
+    "nextYear": "Następny rok",
+    "saveError": "Nie udało się zapisać",
+    "columns": {
+      "month": "Miesiąc",
+      "kmPerDay": "Km / dzień",
+      "ratePerKm": "Stawka € / km",
+      "updatedAt": "Zaktualizowano"
+    },
+    "months": {
+      "1": "Styczeń",
+      "2": "Luty",
+      "3": "Marzec",
+      "4": "Kwiecień",
+      "5": "Maj",
+      "6": "Czerwiec",
+      "7": "Lipiec",
+      "8": "Sierpień",
+      "9": "Wrzesień",
+      "10": "Październik",
+      "11": "Listopad",
+      "12": "Grudzień"
+    }
+  },
+  "audit": {
+    "title": "Audyt",
+    "subtitle": "Historia zmian wykonanych przez użytkowników systemu",
+    "emptyTitle": "Brak wpisów",
+    "emptyMessage": "Brak wpisów audytu spełniających kryteria.",
+    "filters": {
+      "targetType": "Typ obiektu",
+      "allTargetTypes": "Wszystkie typy",
+      "userPlaceholder": "Filtruj po użytkowniku",
+      "userSearchPlaceholder": "Szukaj loginu / nazwy",
+      "userNoResults": "Brak użytkowników",
+      "actionPlaceholder": "Filtruj po akcji…",
+      "dateFrom": "Data od",
+      "dateTo": "Data do"
+    },
+    "columns": {
+      "createdAt": "Czas",
+      "actor": "Użytkownik",
+      "action": "Akcja",
+      "target": "Obiekt",
+      "reason": "Powód"
+    },
+    "detail": {
+      "title": "Szczegóły zdarzenia",
+      "actor": "Użytkownik",
+      "target": "Obiekt",
+      "action": "Akcja",
+      "createdAt": "Czas",
+      "reason": "Powód",
+      "ip": "Adres IP",
+      "before": "Przed",
+      "after": "Po",
+      "metadata": "Metadane"
+    }
+  },
+  "diagnostics": {
+    "title": "Diagnostyka",
+    "subtitle": "Stan kolejki maili, jakość danych i zdrowie infrastruktury",
+    "tabs": {
+      "mails": "Maile",
+      "claims": "Wnioski",
+      "db": "Baza danych"
+    },
+    "mails": {
+      "emptyTitle": "Brak zadań mailowych",
+      "emptyMessage": "Kolejka maili jest pusta.",
+      "resend": "Wyślij ponownie",
+      "resentToast": "Mail dodany do kolejki",
+      "resendError": "Nie udało się wysłać",
+      "confirmTitle": "Wysłać mail ponownie?",
+      "confirmBody": "Mail „{subject}” zostanie ponownie zakolejkowany.",
+      "columns": {
+        "id": "ID",
+        "state": "Status",
+        "attempts": "Próby",
+        "subject": "Temat",
+        "to": "Do",
+        "createdAt": "Utworzono"
+      }
+    },
+    "claims": {
+      "emptyTitle": "Brak alertów",
+      "emptyMessage": "Wszystkie metryki wniosków są poprawne.",
+      "samples": "Przykładowe ID"
+    },
+    "db": {
+      "postgres": "PostgreSQL",
+      "redis": "Redis",
+      "tablesTitle": "Rozmiar tabel",
+      "tableName": "Nazwa",
+      "tableSize": "Rozmiar",
+      "tablesEmpty": "Brak danych o tabelach"
+    }
+  },
   "employee": {
     "claims": {
       "title": "Wnioski",

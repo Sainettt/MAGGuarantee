@@ -259,8 +259,10 @@
   - [x] tests: 9 unit на `ClaimsService.requestAuthorization()` (happy path, illegal transition, missing claim, audit before-capture, mail-failure isolation, optional-comment) + 2 на PATCH `amountMaximum` + 6 на email-шаблон.
   - ❌ ~~Screenshot upload~~ — выпилено (2026-05-13).
 
-- [ ] **4.3 Dashboard** (≈3 дня) — pending
-  - Scope: `GET /api/v1/diagnostics/dashboard` (KPI counts, top carriers по выплатам, recent activity, urgent NA_WERYFIKACJI > 3 days), `<KpiCard>` row + `<DashboardSidebar>` с 6 секциями, Recharts pie/bar. По uiux-спеке секция `<KpiCard>` + `<DashboardSidebar>` готова.
+- [x] **4.3 Dashboard** (≈3 дня) — **DONE** (2026-05-26)
+  - [x] api: новый `DiagnosticsModule` (`apps/api/src/modules/diagnostics/`) + `GET /api/v1/diagnostics/dashboard` (admin+pracownik). Response: `{kpi, urgent, recent, topCarriers, monthlySeries (rolling 12 мес), reklamacje}`. Read-only, без `@Audit`. KPI через `claim.groupBy({by:'status'})`, `urgent` = NA_WERYFIKACJI && updatedAt < now-3d (max 20), `recent` = 10 audit-row где `targetType LIKE 'claim.%'`, `topCarriers` = top-5 по `sum(paymentEur)`, `reklamacje` = count(status='REKLAMACJA').
+  - [x] web: `app/(employee)/employee/dashboard/page.tsx` (server shell) + `<DashboardView>` client. 5 `<KpiCard>` (total/naWeryfikacji/zaakceptowano/odrzucono/oczekujeNaAutoryzacje, grid 2→3→5 cols). Recharts bar для `monthlySeries` + pie для status distribution. `<DashboardSidebar>` 380px с 4 секциями (Urgent / Recent / TopCarriers / Reklamacje). `useDashboard()` хук с `staleTime: 60_000`. Recharts ^2.13.0 добавлен в deps.
+  - **Деviation:** `<KpiCard>` "purple" tone замаплен на `bg-brand` — purple-токена в палитре нет, политика 4.4 запрещает новые токены.
 
 - [x] **4.4 Admin справочники доводка** (≈3 дня) — **DONE** (2026-05-25)
   - [x] api: `AuditWriter` интеграция в carriers/vehicles/drivers/trailers/trailer-types — **automated через pre-Phase-4.4 atomic-audit refactor** (commit `2d43fce`). `@Audit()` декоратор оборачивает handler в `prisma.$transaction` под `AuditContext`, mutation + audit-row atomic.
@@ -274,8 +276,20 @@
   - [x] uiux: `bg-input` зафиксирован как single surface token в `docs/14-design-system.md` (Surface-token policy section); `bg-bg-soft` deprecated.
   - **Открытый side-quest (defer):** carrier-autocomplete фильтр в `<ClaimsTable>` через готовый `/lookups/carriers` — пока остаётся full-text `q`.
 
-- [ ] **4.5 Admin ops: limits / audit / diagnostics** (≈3 дня) — pending
-  - Scope: `limits` модуль (GET/PUT помесячных лимитов и ставок), `audit` (GET с фильтрами `targetType=&targetKey=&userId=&action=` + pagination), `diagnostics` (mails/claims/db endpoints + resend); 3 admin-only страницы `/employee/{limits,audit,diagnostics}` (по уже зафиксированным `<LimitsRow>` / `<AuditRow>` спекам в DS).
+- [x] **4.5 Admin ops: limits / audit / diagnostics** (≈3 дня) — **DONE** (2026-05-26)
+  - [x] api: новый `LimitsModule` — `GET /api/v1/limits?year=YYYY` (admin, raw rows) + `PUT /api/v1/limits/:yearMonth` (admin, audited `limits.update`, upsert по composite unique `[year, month]`, before-snapshot для UPDATE-ветки). `UpdateMonthlyLimitSchema` в `packages/shared/src/schemas/limits.ts`. 5 unit-тестов.
+  - [x] api: audit read-side — расширение существующего `AuditModule` с `AuditQueryController` + `AuditQueryService` + `AuditQueryRepository`. `GET /api/v1/audit?targetType=&targetKey=&userId=&action=&from=&to=&cursor=&limit=50` (admin). Cursor pagination на composite `(createdAt, id)` через opaque base64. Resolved `userLogin`/`userName` через join. 7 unit-тестов. Write-side (`AuditWriter`/`AuditInterceptor`/`@Audit()`) не тронут.
+  - [x] api: `DiagnosticsModule` расширен endpoint-ами `/diagnostics/mails`, `/diagnostics/mails/:jobId/resend` (audited `diagnostics.mail.resend`), `/diagnostics/claims`, `/diagnostics/db` (все admin). Postgres ping через `prisma.$queryRaw('SELECT 1')` + `pg_total_relation_size` для главных таблиц, Redis ping через существующий `RedisModule`.
+  - [x] api: `GET /api/v1/lookups/users?q=` (admin, лимит 100, ILIKE на `login`+`name`) — для autocomplete в audit-фильтре.
+  - [x] web: `app/(employee)/employee/(admin)/limits/page.tsx` — year-selector (default 2026), таблица 12 `<LimitsRow>` (month label + 2 inline number-input с save-on-blur, optimistic update), `useLimits(year)` + `useUpdateLimit()` с rollback на ошибке.
+  - [x] web: `app/(employee)/employee/(admin)/audit/page.tsx` — `<AuditTable>` через `<DataTable>`, filter-bar (targetType selector + `<UserAutocomplete>` на `/lookups/users` + action text + date-range), cursor pagination, click-row → `<Sheet size="lg">` с side-by-side `before`/`after` JSON.
+  - [x] web: `app/(employee)/employee/(admin)/diagnostics/page.tsx` — 3 секции через `<Tabs>`: Mails (queue table + Resend кнопка), Claims (health-cards), DB (ping-pills + table-sizes). Refetch intervals: mails 30s, db 60s.
+  - **Деviations:**
+    - BullMQ не в зависимостях (deferred to Phase 9 по прецеденту GPS-модуля). Mail registry реализован как Redis-backed `MailJobsRegistry` (LIST + per-job HASH ring buffer, 200-id cap, 14-day TTL) с identical контрактом — в Phase 9 swap-able на `Queue.getJobs()` proxy без правки controller/DTO.
+    - `resendMail` отправляет bare-text payload (не re-render шаблона) — registry не сохраняет полный `data` blob ради redaction. Полный re-render — future upgrade.
+    - `<AuditRow>` default variant использует row-click → `<Sheet>` вместо inline expand (DS L813). Параллель с UX `<ClaimVerificationModal>` из 4.1; компактный вариант для дашборда (`AuditRowCompact`) — как в DS.
+    - `<UserAutocomplete>` — новый компонент на базе `<Popover>` (DS не специфицировал).
+  - **Открытый side-quest:** carrier-autocomplete фильтр в `<ClaimsTable>` через `/lookups/carriers` — defer per roadmap.
 
 **Открытые мелочи (не блокеры, фиксятся в нужном sub-slice-е):**
 
@@ -298,12 +312,8 @@
 3. ✅ `ClaimsService.requestAuthorization()` + `POST /claims/:nrZgl/request-authorization` — admin/pracownik, UUID v4 authorizationToken, email Maksim-у через Mailhog с React Email template. **Sub-slice 4.2 DONE.**
 4. ❌ ~~`S3Module`: загрузка scrennshot-ов авторизации.~~ **Выпилено** из scope (решение от 2026-05-13).
 5. ❌ ~~`POST /claims/:nrZgl/auth-screenshot` (multipart).~~ **Выпилено.**
-6. ⏳ Endpoint `/diagnostics/dashboard` — `getDashboardStats` (`Code.gs:7000+`). **Sub-slice 4.3.**
-   - KPI counts: total claims, na weryfikacji, zaakceptowano, odrzucono.
-   - Топ перевозчиков по выплатам.
-   - Recent activity.
-   - Урgent (NA_WERYFIKACJI > 3 days).
-7. ⏳ Endpoints для управления лимитами (`/limits` PUT). **Sub-slice 4.5.**
+6. ✅ Endpoint `/diagnostics/dashboard` (Sub-slice 4.3 DONE) — KPI counts, top carriers по выплатам, recent activity, urgent NA_WERYFIKACJI > 3d, rolling-12-month series, reklamacje count.
+7. ✅ Endpoints для управления лимитами (`/limits` GET + PUT) — Sub-slice 4.5 DONE. Также добавлены `/audit` (read-side с cursor pagination + фильтрами), `/diagnostics/{mails,claims,db}` (+ POST resend), `/lookups/users`.
 8. ✅ Управление справочниками типов прицепов (`/trailer-types`) — CRUD из Phase 2 + hard-delete с `reason` + before-snapshot для audit-diff (Sub-slice 4.4 DONE).
 9. ✅ **Audit-log запись для всех mutating actions** — реализовано pre-Phase-4.4: atomic-audit refactor (commit `2d43fce`) обеспечивает запись через `@Audit()` декоратор внутри ambient `prisma.$transaction`. Все `@Audit()`-помеченные эндпоинты на carriers/vehicles/drivers/trailers/trailer-types/users/delegations/claims пишут audit-row атомарно с mutation. Phase 4.4 добавил `AuditContext.setBefore` (для before-snapshot diff) + `setMetadata` (для hard-delete `reason`).
 
@@ -312,11 +322,7 @@
 > Видимость каждой страницы регулируется guard-ом на роль внутри `layout.tsx` — pracownik в навигации видит только пункты, помеченные **[оба]**; admin видит все. Прямой URL к admin-only странице у pracownik должен возвращать 403.
 
 1. ✅ **[оба]** `app/(employee)/layout.tsx`: header + sidebar (240px desktop, slide-over mobile). Tabs рендерятся условно по `session.user.role` через `filterNavForRole()` из `lib/nav.config.ts`: pracownik → Dashboard + Wnioski; admin → 11 пунктов. Реализовано в Sub-slice 4.0.
-2. ⏳ **[оба]** `app/(employee)/dashboard/page.tsx`:
-   - `<KpiCard>` row.
-   - `<DashboardSidebar>` с 5–6 секциями (Urgent, Recent, Monthly chart, Top carriers, Reklamacje, Top payouts).
-   - Recharts для pie/bar.
-   - **Sub-slice 4.3.** Спеки `<KpiCard>` / `<DashboardSidebar>` в DS готовы.
+2. ✅ **[оба]** `app/(employee)/employee/dashboard/page.tsx` — Sub-slice 4.3 DONE: 5 `<KpiCard>` row, `<DashboardSidebar>` 380px (Urgent/Recent/TopCarriers/Reklamacje), Recharts bar (monthlySeries) + pie (status distribution).
 3. ✅ **[оба]** `app/(employee)/claims/page.tsx`: таблица всех wniosków с фильтрами. Sub-slice 4.1.
 4. ✅ **[оба] `<ClaimVerificationModal>`** — главный модал верификации:
    - ✅ Все поля редактируемы (discriminated по `targetStatus`).
@@ -326,9 +332,9 @@
    - ❌ ~~Upload screenshot для авторизации.~~ **Выпилено.**
 5. ✅ **[admin only]** `app/(employee)/employee/(admin)/carriers/...` — Sub-slice 4.4 DONE: layout strip, hard-delete с `reason` через `<ConfirmDeleteWithReasonDialog>`, h-10 polish.
 6. ✅ **[admin only]** `app/(employee)/employee/(admin)/vehicles/`, `drivers/`, `trailers/`, `trailer-types/` — Sub-slice 4.4 DONE (тот же набор фиксов).
-7. ⏳ **[admin only]** `app/(employee)/limits/page.tsx` — таблица помесячных лимитов с inline edit. **Sub-slice 4.5.**
-8. ⏳ **[admin only]** `app/(employee)/audit/page.tsx` — список аудит-записей с фильтрами. **Sub-slice 4.5.**
-9. ⏳ **[admin only]** `app/(employee)/diagnostics/page.tsx`. **Sub-slice 4.5.**
+7. ✅ **[admin only]** `app/(employee)/employee/(admin)/limits/page.tsx` — Sub-slice 4.5 DONE: year-selector + 12 `<LimitsRow>` с inline save-on-blur и optimistic mutation.
+8. ✅ **[admin only]** `app/(employee)/employee/(admin)/audit/page.tsx` — Sub-slice 4.5 DONE: `<AuditTable>` + filter-bar (`targetType` / `<UserAutocomplete>` / action / date-range), cursor pagination, click-row → side-by-side JSON diff в `<Sheet>`.
+9. ✅ **[admin only]** `app/(employee)/employee/(admin)/diagnostics/page.tsx` — Sub-slice 4.5 DONE: 3 секции через `<Tabs>` (Mails + Resend / ClaimsHealth / DbPing).
 10. ✅ **[admin only]** `app/(employee)/employee/(admin)/users/page.tsx` — Sub-slice 4.4 DONE: `<UsersTable>` 6 колонок, `<UserSheet>` create/edit (RHF+Zod), reset-password с clipboard copy, deactivate/reactivate confirm, role-badge с цветовой матрицей.
 
 ### Deliverables

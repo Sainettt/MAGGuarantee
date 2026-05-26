@@ -2,8 +2,11 @@ import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 
 import {
   LookupCarrierFiltersSchema,
+  LookupUserAdminFiltersSchema,
   type LookupCarrierFilters,
   type LookupCarrierListDto,
+  type LookupUserAdminFilters,
+  type LookupUserAdminListDto,
   type LookupUserListDto,
 } from '@magguarantee/shared';
 
@@ -66,5 +69,22 @@ export class LookupsController {
     query: LookupCarrierFilters,
   ): Promise<LookupCarrierListDto> {
     return this.lookups.carriersList(user, query);
+  }
+
+  /**
+   * Admin users-autocomplete per Phase 4.5. Backs the audit-log filter
+   * picker on the `/employee/audit` admin page. Capped at 100 rows; q-filter
+   * is a free substring match across `login` and `name`. Inactive users are
+   * included (audit rows survive deactivation) but soft-deleted are not.
+   */
+  @Get('users')
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  users(
+    @CurrentUser() user: AuthUser,
+    @Query(new ZodValidationPipe(LookupUserAdminFiltersSchema))
+    query: LookupUserAdminFilters,
+  ): Promise<LookupUserAdminListDto> {
+    return this.lookups.usersListAdmin(user, query);
   }
 }

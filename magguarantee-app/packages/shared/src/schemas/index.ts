@@ -32,3 +32,7 @@ export * from './integrations';
 export * from './claims';
 export * from './delegations';
 export * from './fleet';
+// Phase 4.5 — admin ops (limits / audit / diagnostics).
+export * from './limits';
+export * from './audit';
+export * from './diagnostics';

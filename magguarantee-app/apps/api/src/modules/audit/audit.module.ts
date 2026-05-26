@@ -22,11 +22,22 @@
 
 import { Global, Module } from '@nestjs/common';
 
+import { AuditQueryController } from './audit-query.controller';
+import { AuditQueryRepository } from './audit-query.repository';
+import { AuditQueryService } from './audit-query.service';
 import { AuditWriter } from './audit.service';
 
 @Global()
 @Module({
-  providers: [AuditWriter],
+  // The read-side (`GET /api/v1/audit`) is wired alongside the write-side so
+  // both stay co-located in the same module — single Prisma dependency,
+  // single import in `AppModule`. Read & write share no state at runtime:
+  // the read-side bypasses the AuditWriter / AuditContext entirely.
+  controllers: [AuditQueryController],
+  providers: [AuditWriter, AuditQueryService, AuditQueryRepository],
+  // `AuditWriter` stays exported (the `AuditInterceptor` injects it across
+  // module boundaries). The read-side classes are internal — no exports
+  // needed because the controller is the only consumer.
   exports: [AuditWriter],
 })
 export class AuditWriterModule {}
