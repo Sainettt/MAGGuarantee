@@ -65,7 +65,7 @@ export function KpiCard({
         'relative flex flex-col gap-1 p-4 rounded-xl border border-border bg-card shadow-card',
       )}
     >
-      <span className="text-xs font-bold uppercase tracking-wider text-text-sub">
+      <span className="text-xs font-bold uppercase tracking-normal text-text-sub line-clamp-2 min-h-[2rem] leading-4 pr-8">
         {label}
       </span>
       {loading ? (

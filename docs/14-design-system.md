@@ -719,20 +719,29 @@ Phase 2 web (admin DataTable + Sheet edit forms + RHF/Zod валидация + i
 
 ### `<KpiCard>` (dashboard top-row)
 
-Reference: `employee-dashboard-required-notes.png` (4 верхних tile-а).
+Reference: `employee-dashboard-required-notes.png` (верхние tile-ы). Текущая реализация в `magguarantee-app/apps/web/components/dashboard/KpiCard.tsx`.
 
 **Anatomy:**
 - Wrapper: `<Card className="p-4 flex flex-col gap-1">`.
-- Label: `text-xs font-medium uppercase tracking-wider text-text-sub`.
-- Value: `text-3xl font-bold text-text` (number или `1.2k €`).
+- Label row: занимает **всю ширину карточки** (full-width, не делит строку со status-dot / icon — те абсолютно позиционированы в правом-верхнем углу). Label располагается **под** top-right reserved zone — `pr-8` чтобы первая строка не залезала под dot/icon (status-dot `h-2 w-2` at `right-4 top-4` + опц. icon `size={18}` at `right-10 top-4` = ~28px reserved).
+- Label tokens: `text-xs font-bold tracking-normal text-text-sub` + **`line-clamp-2 min-h-[2rem] leading-4`** (≈ 2 строки × 16px line-height). **`uppercase` сохраняется** — это визуальный signature KPI-tile, отличает label от value. `tracking-wider` дропается — выигрыш ~6-8% ширины на длинных PL/EN строках.
+- Value: `text-3xl font-bold text-text` (number или `1.2k €`). Остаётся визуальным якорем — крупнее label в 3×.
 - Delta-badge (опц.): inline `<Badge variant="outline">` с `<ArrowUp/Down />` icon, `text-success` / `text-danger` в зависимости от знака.
-- Icon-slot (опц.): `<Icon className="h-5 w-5 text-text-sub" />` в правом-верхнем углу, абсолютно.
+- Icon-slot (опц.): `<Icon className="h-5 w-5 text-text-sub" />` в правом-верхнем углу, абсолютно (`right-10 top-4`).
+- Status-dot (всегда): `h-2 w-2 rounded-full` at `right-4 top-4`.
 
-**Tokens:** `bg-card`, `border-border`, `rounded-lg`, `shadow-sm` (унаследовано от `<Card>`).
+**Label overflow policy:**
+- Single-line label (≤ ~16 chars uppercase в ~170px usable): рендерится в одну строку, `min-h-[2rem]` резервирует место второй строки → визуальное выравнивание value между всеми карточками в строке остаётся одинаковым (cards-row equal-height).
+- Длинный label (`OCZEKUJE NA AUTORYZACJĘ` / `WAITING FOR AUTHORIZATION`): wrap в 2 строки через `line-clamp-2`. `leading-4` (16px) держит общую высоту label-блока ≤ 32px = `min-h-[2rem]`.
+- Truncate (`...`) на 3-й строке через `line-clamp-2` — если когда-то появится ещё более длинный label, он не сломает высоту строки grid-а.
+
+**Tokens:** `bg-card`, `border-border`, `rounded-lg`, `shadow-sm` (унаследовано от `<Card>`). **No new tokens introduced** (Phase 4.4 policy).
 
 **Состояния:** `loading` → `<Skeleton className="h-8 w-24" />` на месте value, label остаётся; `empty` → value = `—` (em-dash) серым.
 
-**Layout:** строка `grid grid-cols-2 md:grid-cols-4 gap-4` сверху dashboard.
+**Layout:** строка `grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4` сверху dashboard. На xl (5-col) usable label-width ≈ 170-190px после `p-4` + `pr-8` reserved zone — этого достаточно для двухстрочного wrap всех текущих PL/EN строк.
+
+**Rationale:** combo подходов **A + B** из брифа — drop `tracking-wider` даёт «дешёвый» ~6-8% выигрыш, multi-line wrap с `min-h-[2rem]` гарантирует равную высоту cards-row и допускает любые i18n строки без рефакторинга. `uppercase` сохраняем как signature; sentence-case (option C) был бы более «модерн», но это spec-change уровня всего DS (badge-headers, tab-labels) — out of scope единого KPI-фикса. Label-rename (option D) отклонён — `Oczekuje na autoryzację` точнее, чем `Do autoryzacji` (последнее звучит как call-to-action, а не статус).
 
 ### `<DashboardSidebar>` (right-side панель)
 

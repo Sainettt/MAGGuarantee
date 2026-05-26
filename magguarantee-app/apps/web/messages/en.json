@@ -792,6 +792,58 @@
           "REKLAMACJA_ODRZUCONO": "Reject reclamation"
         }
       }
+    },
+    "claimDetail": {
+      "loadingTitle": "Loading claim…",
+      "errorTitle": "Could not load the claim",
+      "errorMessage": "Please try again or close the window.",
+      "retry": "Try again",
+      "sections": {
+        "basics": "Basic data",
+        "calc": "Calculations (km-calc)",
+        "breakdown": "Monthly breakdown",
+        "decision": "Decision",
+        "authorization": "Authorization",
+        "reklamacjaHistory": "Reclamation history",
+        "attachments": "Attachments",
+        "comment": "Comment"
+      },
+      "fields": {
+        "carrier": "Carrier",
+        "vehicle": "Vehicle",
+        "dateStart": "Period from",
+        "dateEnd": "Period to",
+        "timeFrom": "Time from",
+        "timeTo": "Time to",
+        "drivenDays": "Driven days",
+        "mileage": "Mileage",
+        "kmPerDay": "Km/day",
+        "kmGuaranteed": "Guaranteed km",
+        "kmDifference": "Km difference",
+        "ratePerKmEffective": "Rate €/km",
+        "paymentEur": "Guarantee payout",
+        "decidedBy": "Decided by",
+        "statusChangedAt": "Decision date",
+        "orderNumber": "Order number",
+        "orderDate": "Order date",
+        "amountRequested": "Amount requested",
+        "amountApproved": "Amount approved",
+        "amountMaximum": "Maximum amount",
+        "margin": "Margin",
+        "authorizationDescription": "Authorization description",
+        "authorizationDecidedAt": "Authorization decided at",
+        "statusBeforeReklamacja": "Status before reclamation",
+        "reklamacjaText": "Reclamation text",
+        "reklamacjaResponse": "Reclamation response",
+        "reklamacjaAmount": "Reclamation amount",
+        "origDateStart": "Period from (original / current)",
+        "origDateEnd": "Period to (original / current)",
+        "origMileage": "Mileage (original / current)",
+        "origHoursAdjusted": "Hours adjustment (original / current)"
+      },
+      "attachments": {
+        "open": "Open attachment"
+      }
     }
   },
   "carrier": {

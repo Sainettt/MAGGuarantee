@@ -792,6 +792,58 @@
           "REKLAMACJA_ODRZUCONO": "Odrzuć reklamację"
         }
       }
+    },
+    "claimDetail": {
+      "loadingTitle": "Ładowanie wniosku…",
+      "errorTitle": "Nie udało się wczytać wniosku",
+      "errorMessage": "Spróbuj ponownie lub zamknij okno.",
+      "retry": "Spróbuj ponownie",
+      "sections": {
+        "basics": "Podstawowe dane",
+        "calc": "Wyliczenia (km-calc)",
+        "breakdown": "Podział na miesiące",
+        "decision": "Decyzja",
+        "authorization": "Autoryzacja",
+        "reklamacjaHistory": "Historia reklamacji",
+        "attachments": "Załączniki",
+        "comment": "Komentarz"
+      },
+      "fields": {
+        "carrier": "Przewoźnik",
+        "vehicle": "Pojazd",
+        "dateStart": "Okres od",
+        "dateEnd": "Okres do",
+        "timeFrom": "Godzina od",
+        "timeTo": "Godzina do",
+        "drivenDays": "Dni jazdy",
+        "mileage": "Przebieg",
+        "kmPerDay": "Km/dzień",
+        "kmGuaranteed": "Km gwarantowane",
+        "kmDifference": "Różnica km",
+        "ratePerKmEffective": "Stawka €/km",
+        "paymentEur": "Dopłata gwarancyjna",
+        "decidedBy": "Decyzję podjął",
+        "statusChangedAt": "Data decyzji",
+        "orderNumber": "Numer zlecenia",
+        "orderDate": "Data zlecenia",
+        "amountRequested": "Kwota wnioskowana",
+        "amountApproved": "Kwota zatwierdzona",
+        "amountMaximum": "Kwota maksymalna",
+        "margin": "Marża",
+        "authorizationDescription": "Opis autoryzacji",
+        "authorizationDecidedAt": "Data decyzji autoryzacji",
+        "statusBeforeReklamacja": "Status przed reklamacją",
+        "reklamacjaText": "Treść reklamacji",
+        "reklamacjaResponse": "Odpowiedź na reklamację",
+        "reklamacjaAmount": "Kwota reklamacji",
+        "origDateStart": "Okres od (pierwotny / aktualny)",
+        "origDateEnd": "Okres do (pierwotny / aktualny)",
+        "origMileage": "Przebieg (pierwotny / aktualny)",
+        "origHoursAdjusted": "Korekta godzin (pierwotna / aktualna)"
+      },
+      "attachments": {
+        "open": "Otwórz załącznik"
+      }
     }
   },
   "carrier": {
