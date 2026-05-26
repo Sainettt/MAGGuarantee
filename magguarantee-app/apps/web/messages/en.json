@@ -932,7 +932,11 @@
       }
     },
     "preview": {
-      "empty": "Fill in the period and vehicle to see the preview.",
+      "empty": {
+        "incomplete": "Fill in required fields to see the calculation",
+        "dateOrder": "Start date is after end date — fix dates to see the calculation",
+        "mileageZero": "Enter mileage greater than 0 to see the calculation"
+      },
       "errorTitle": "Could not compute preview",
       "errorMessage": "Check the inputs and try again.",
       "updating": "Refreshing preview…",

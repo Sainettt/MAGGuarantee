@@ -428,6 +428,50 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     expect(repoFake.findLastCalls).toEqual([{ vehicleId: 'v-1' }]);
   });
 
+  it('7. treats dateEnd = today-in-Warsaw as not-in-future even at UTC-vs-Warsaw day boundary', async () => {
+    // Regression: the previous `startOfTodayUtc()` produced "today" in UTC,
+    // so a Polish carrier submitting at 00:30 Europe/Warsaw (= 22:30 UTC the
+    // previous day) saw `today = yesterday-in-Warsaw` and got a false
+    // "Data rozładunku w przyszłości" tier-1 violation for `dateEnd = today
+    // in Warsaw`. `startOfTodayBusinessTz()` anchors "today" to the Warsaw
+    // calendar, so the comparison now works as the carrier expects.
+    //
+    // Scenario: now = 2026-05-26T00:30:00+02:00 (Warsaw) = 2026-05-25T22:30:00Z.
+    // dateEnd = '2026-05-26' (today in Warsaw) must NOT trip the future-date
+    // gate. We use a short period (5 days) and override km-calc with
+    // totalDays = 10 so the duration gate also passes — leaving only the
+    // future-date check as the candidate failure point.
+    const lateNightWarsaw = new Date('2026-05-25T22:30:00.000Z');
+    jest.setSystemTime(lateNightWarsaw);
+
+    try {
+      const repoFake = makeRepo(null);
+      const svc = makeService(
+        repoFake,
+        undefined,
+        undefined,
+        makeKmCalc({ totalDays: 10 }),
+      );
+
+      const dto: SubmitClaimDto = {
+        vehicleId: 'v-1',
+        dateStart: '2026-05-22',
+        dateEnd: '2026-05-26', // today in Warsaw, "tomorrow" in UTC.
+        timeFrom: '08:00',
+        timeTo: '18:00',
+        mileage: 8_000,
+      };
+
+      const out = await svc.submit(makeAuth('przewoznik'), dto);
+
+      expect(out.nrZgl).toBe('GWA/100/05/26');
+      expect(repoFake.creates).toHaveLength(1);
+    } finally {
+      // Restore the suite's anchor so subsequent tests aren't affected.
+      jest.setSystemTime(NOW);
+    }
+  });
+
   it('6. lastClaim status=ODRZUCONO (repo skips it → null) → submit succeeds, cooldown bypassed', async () => {
     // The repository's `findLastNonRejectedForVehicle` excludes ODRZUCONO
     // rows by construction (`status: { not: ODRZUCONO }`). The service

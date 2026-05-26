@@ -932,7 +932,11 @@
       }
     },
     "preview": {
-      "empty": "Wypełnij okres i pojazd, aby zobaczyć podgląd.",
+      "empty": {
+        "incomplete": "Wypełnij wymagane pola, aby zobaczyć kalkulację",
+        "dateOrder": "Data rozpoczęcia jest późniejsza niż data zakończenia — popraw daty, aby zobaczyć kalkulację",
+        "mileageZero": "Wpisz przebieg większy niż 0, aby zobaczyć kalkulację"
+      },
       "errorTitle": "Nie udało się obliczyć podglądu",
       "errorMessage": "Sprawdź dane wejściowe i spróbuj ponownie.",
       "updating": "Aktualizuję podgląd…",

@@ -66,6 +66,15 @@ export interface LivePreviewPanelProps {
   isError?: boolean;
   /** Form is not yet filled enough to fire a preview. */
   isEmpty?: boolean;
+  /**
+   * When `isEmpty` is true, optionally name the reason so the panel can
+   * render a specific empty-state instead of the generic "fill in fields"
+   * placeholder. Recognized values:
+   *  - 'incomplete' (default) — required fields missing
+   *  - 'date-order' — dateStart > dateEnd
+   *  - 'mileage-zero' — mileage must be > 0
+   */
+  emptyReason?: 'incomplete' | 'date-order' | 'mileage-zero';
 }
 
 export function LivePreviewPanel({
@@ -73,15 +82,33 @@ export function LivePreviewPanel({
   isLoading,
   isError,
   isEmpty,
+  emptyReason,
 }: LivePreviewPanelProps) {
   const t = useTranslations('carrier.preview');
   // Empty state wins over loading — if the form is half-filled we don't
-  // want to flash a skeleton just because the user is typing.
+  // want to flash a skeleton just because the user is typing. The reason
+  // disambiguates between "form not filled yet" and "form is filled but
+  // semantically wrong" (date-order, mileage=0) — particularly important
+  // for date-order, where the preview would otherwise vanish silently
+  // while the user is mid-edit.
   if (isEmpty && !data) {
+    let message: string;
+    switch (emptyReason) {
+      case 'date-order':
+        message = t('empty.dateOrder');
+        break;
+      case 'mileage-zero':
+        message = t('empty.mileageZero');
+        break;
+      case 'incomplete':
+      default:
+        message = t('empty.incomplete');
+        break;
+    }
     return (
       <div className="flex flex-col gap-4">
         <div className="bg-card rounded-lg border border-border p-8 text-center text-sm text-text-sub">
-          {t('empty')}
+          {message}
         </div>
       </div>
     );

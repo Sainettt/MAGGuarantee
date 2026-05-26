@@ -108,11 +108,37 @@ function parseIsoDate(s: string): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-function startOfTodayUtc(): Date {
-  const now = new Date();
-  return new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-  );
+const BUSINESS_TZ = 'Europe/Warsaw';
+
+/**
+ * "Today" as a UTC-midnight `Date` representing the current calendar date
+ * in the business timezone (Europe/Warsaw — MAGTRANS operating timezone).
+ *
+ * The previous `startOfTodayUtc()` shifted "today" backward by a day for
+ * the portion of the night where UTC is still on yesterday, producing
+ * false "date in future" violations between local midnight and ~02:00.
+ */
+function startOfTodayBusinessTz(): Date {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BUSINESS_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const y = Number(parts.find((p) => p.type === 'year')!.value);
+  const m = Number(parts.find((p) => p.type === 'month')!.value);
+  const d = Number(parts.find((p) => p.type === 'day')!.value);
+  return new Date(Date.UTC(y, m - 1, d));
+}
+
+/** YYYY-MM-DD of today in business TZ — for `<input type="date" max=...>`. */
+function todayBusinessTzIso(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: BUSINESS_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
 }
 
 /** Inclusive day delta — same convention as api `daysBetweenInclusive`. */
@@ -166,25 +192,39 @@ export default function NewClaimPage() {
   // verifier modal's recalc badge) so we have to satisfy the TS type — but
   // semantically the carrier preview always asks "what would the payout be
   // with zero downtime?" exactly the same as `submit` does.
-  const previewBody: PreviewClaimDto | null = useMemo(() => {
+  // `emptyReason` lets the right-hand <LivePreviewPanel> show *why* it's
+  // empty instead of the generic "fill in fields" placeholder. Particularly
+  // important for the `date-order` case: a user editing dateStart to a
+  // value later than dateEnd (planning to bump dateEnd next) would
+  // otherwise see the preview silently vanish with no explanation.
+  const { previewBody, emptyReason } = useMemo<{
+    previewBody: PreviewClaimDto | null;
+    emptyReason: 'incomplete' | 'date-order' | 'mileage-zero' | undefined;
+  }>(() => {
+    if (!watched.vehicleId || !watched.dateStart || !watched.dateEnd) {
+      return { previewBody: null, emptyReason: 'incomplete' };
+    }
+    if (watched.dateStart > watched.dateEnd) {
+      return { previewBody: null, emptyReason: 'date-order' };
+    }
     if (
-      !watched.vehicleId ||
-      !watched.dateStart ||
-      !watched.dateEnd ||
       typeof watched.mileage !== 'number' ||
       Number.isNaN(watched.mileage) ||
-      watched.dateStart > watched.dateEnd
+      watched.mileage <= 0
     ) {
-      return null;
+      return { previewBody: null, emptyReason: 'mileage-zero' };
     }
     return {
-      vehicleId: watched.vehicleId,
-      dateStart: watched.dateStart,
-      dateEnd: watched.dateEnd,
-      timeFrom: watched.timeFrom || undefined,
-      timeTo: watched.timeTo || undefined,
-      mileage: watched.mileage,
-      hoursAdjusted: 0,
+      previewBody: {
+        vehicleId: watched.vehicleId,
+        dateStart: watched.dateStart,
+        dateEnd: watched.dateEnd,
+        timeFrom: watched.timeFrom || undefined,
+        timeTo: watched.timeTo || undefined,
+        mileage: watched.mileage,
+        hoursAdjusted: 0,
+      },
+      emptyReason: undefined,
     };
   }, [
     watched.vehicleId,
@@ -241,7 +281,7 @@ export default function NewClaimPage() {
     const end = endStr ? parseIsoDate(endStr) : null;
 
     if (start && end) {
-      const today = startOfTodayUtc();
+      const today = startOfTodayBusinessTz();
       if (end.getTime() > today.getTime()) {
         list.push(
           tForm('violationDateEndInFuture', { date: endStr }),
@@ -488,6 +528,7 @@ export default function NewClaimPage() {
                       id="claim-dateStart"
                       type="date"
                       className="h-10"
+                      max={todayBusinessTzIso()}
                       {...form.register('dateStart')}
                     />
                   </FormField>
@@ -501,6 +542,7 @@ export default function NewClaimPage() {
                       id="claim-dateEnd"
                       type="date"
                       className="h-10"
+                      max={todayBusinessTzIso()}
                       {...form.register('dateEnd')}
                     />
                   </FormField>
@@ -645,6 +687,7 @@ export default function NewClaimPage() {
               isLoading={previewQ.isFetching}
               isError={previewQ.isError}
               isEmpty={!previewBody}
+              emptyReason={emptyReason}
             />
           </div>
         </div>
