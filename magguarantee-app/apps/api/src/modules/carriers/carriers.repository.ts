@@ -67,6 +67,34 @@ export interface CarrierRow {
   deletedAt: Date | null;
 }
 
+/**
+ * Slim per-carrier row returned by `listForOpiekunAggregate` — used by the
+ * Phase 5 `/fleet/opiekun` and `/opiekun/carriers` services. Avoids the
+ * expensive opiekun-join + flatten path of the main CarrierRow shape; we
+ * only need identity + per-vehicle `active`/`lastDroveAt` for the four-
+ * bucket classification and the three active-child counts.
+ */
+export interface OpiekunAggregateCarrierRow {
+  id: string;
+  login: string;
+  name: string | null;
+  company: string | null;
+  nip: string;
+  active: boolean;
+  /** KREPTD wypisów count — schema column is `Carrier.numberOfVehicle`. */
+  numberOfVehicle: number | null;
+  vehicles: Array<{
+    id: string;
+    active: boolean;
+    lastDroveAt: Date | null;
+  }>;
+  counts: {
+    vehicles: number;
+    drivers: number;
+    trailers: number;
+  };
+}
+
 export interface CarrierListFilters {
   opiekunId?: string;
   active?: boolean;
@@ -154,6 +182,59 @@ export class CarriersRepository {
       include: this.includeShape(),
     });
     return row ? this.flatten(row) : null;
+  }
+
+  /**
+   * Slim row shape for the Phase 5 opiekun fleet aggregate. Includes the
+   * minimal per-vehicle fields needed for the four-bucket classification
+   * (`active`, `lastDroveAt`) plus the live `_count` of active children for
+   * the lighter `/opiekun/carriers` surface. Soft-deleted rows are excluded
+   * by the Prisma soft-delete extension on both the parent Carrier and the
+   * nested Vehicle includes.
+   */
+  async listForOpiekunAggregate(filters: {
+    opiekunId?: string;
+  }): Promise<OpiekunAggregateCarrierRow[]> {
+    const where: Record<string, unknown> = {};
+    if (filters.opiekunId) where.opiekunId = filters.opiekunId;
+    const rows = await this.prisma.tx.carrier.findMany({
+      where,
+      include: {
+        user: {
+          select: { id: true, login: true, name: true, active: true },
+        },
+        vehicles: {
+          select: { id: true, active: true, lastDroveAt: true },
+        },
+        _count: {
+          select: {
+            vehicles: { where: { active: true, deletedAt: null } },
+            drivers: { where: { active: true, deletedAt: null } },
+            trailers: { where: { active: true, deletedAt: null } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      login: r.user.login,
+      name: r.user.name,
+      company: r.company,
+      nip: r.nip ?? '',
+      active: r.user.active,
+      numberOfVehicle: r.numberOfVehicle,
+      vehicles: r.vehicles.map((v) => ({
+        id: v.id,
+        active: v.active,
+        lastDroveAt: v.lastDroveAt,
+      })),
+      counts: {
+        vehicles: r._count.vehicles,
+        drivers: r._count.drivers,
+        trailers: r._count.trailers,
+      },
+    }));
   }
 
   async list(filters: CarrierListFilters): Promise<CarrierRow[]> {

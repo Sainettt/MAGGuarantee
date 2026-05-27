@@ -185,6 +185,7 @@
   "nav": {
     "dashboard": "Dashboard",
     "claims": "Claims",
+    "opieka": "My carriers",
     "carriers": "Carriers",
     "vehicles": "Vehicles",
     "drivers": "Drivers",
@@ -843,6 +844,81 @@
       },
       "attachments": {
         "open": "Open attachment"
+      }
+    }
+  },
+  "opieka": {
+    "title": "My carriers",
+    "subtitle": "Overview of assigned carriers and their fleet",
+    "emptyTitle": "No carriers assigned",
+    "emptyMessage": "Once an administrator assigns carriers to you, they will appear here.",
+    "totals": {
+      "carriers": "Carriers",
+      "totalVehicles": "Total vehicles",
+      "jezdzace": "Driving",
+      "stojace": "Standing",
+      "nieaktywne": "Inactive",
+      "potencjalne": "Potential"
+    },
+    "table": {
+      "firma": "Company",
+      "nip": "Tax ID",
+      "active": "Active",
+      "jezdzace": "Driving",
+      "stojace": "Standing",
+      "nieaktywne": "Inactive",
+      "potencjalne": "Potential",
+      "actions": "Actions",
+      "openDetail": "Open",
+      "openDetailAria": "Open details for carrier {firma}"
+    },
+    "detail": {
+      "backToList": "← Back to list",
+      "loadingTitle": "Loading carrier…",
+      "notFoundTitle": "Carrier not found",
+      "notFoundMessage": "You don't have access to this carrier, or it has been removed.",
+      "errorTitle": "Failed to load carrier",
+      "errorMessage": "Try again or go back to the list.",
+      "retry": "Try again",
+      "opiekunLabel": "Account manager",
+      "nipLabel": "Tax ID",
+      "loginLabel": "Login"
+    },
+    "tabs": {
+      "ariaLabel": "Carrier sections",
+      "vehicles": "Vehicles",
+      "drivers": "Drivers",
+      "trailers": "Trailers"
+    },
+    "vehicles": {
+      "emptyTitle": "No vehicles",
+      "emptyMessage": "This carrier has no vehicles registered yet.",
+      "columns": {
+        "plate": "Plate number",
+        "side": "Side number",
+        "brandModel": "Brand / model",
+        "type": "Type",
+        "active": "Status"
+      }
+    },
+    "drivers": {
+      "emptyTitle": "No drivers",
+      "emptyMessage": "This carrier has no drivers registered yet.",
+      "columns": {
+        "name": "Full name",
+        "phone": "Phone",
+        "license": "Driver license number",
+        "active": "Status"
+      }
+    },
+    "trailers": {
+      "emptyTitle": "No trailers",
+      "emptyMessage": "This carrier has no trailers registered yet.",
+      "columns": {
+        "plate": "Plate number",
+        "type": "Type",
+        "brandModel": "Brand / model",
+        "active": "Status"
       }
     }
   },

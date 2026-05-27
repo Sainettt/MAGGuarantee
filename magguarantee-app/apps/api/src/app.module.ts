@@ -24,6 +24,7 @@ import { KmCalcModule } from './modules/km-calc/km-calc.module';
 import { LimitsModule } from './modules/limits/limits.module';
 import { LookupsModule } from './modules/lookups/lookups.module';
 import { MailModule } from './modules/mail/mail.module';
+import { OpiekunModule } from './modules/opiekun/opiekun.module';
 import { PasswordModule } from './modules/password/password.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
 import { RedisModule } from './modules/redis/redis.module';
@@ -94,6 +95,7 @@ import { VehiclesModule } from './modules/vehicles/vehicles.module';
     ClaimsModule,
     DelegationsModule,
     FleetModule,
+    OpiekunModule,
     ViesModule,
     WhiteListModule,
     InspectionModule,

@@ -34,10 +34,11 @@ export interface NavLink {
  * Employee-panel navigation. Layout filters by role before render.
  *
  *   `pracownik` sees exactly: Dashboard + Wnioski.
- *   `admin`     sees the full list (11 items).
+ *   `opiekun`   sees exactly: Moja opieka (Phase 5).
+ *   `admin`     sees the full list (Dashboard + Wnioski + Opieka + 10 admin items).
  *
- * Other roles (opiekun, planista, dyspozytor, eksport, weryfikator) get
- * their own panels/route-groups — they don't reach the employee shell.
+ * Other roles (planista, dyspozytor, eksport, weryfikator) get their own
+ * panels/route-groups — they don't reach the employee shell.
  */
 export const EMPLOYEE_NAV: readonly NavLink[] = [
   // Both admin + pracownik
@@ -54,6 +55,14 @@ export const EMPLOYEE_NAV: readonly NavLink[] = [
     labelKey: 'nav.claims',
     iconName: 'FileText',
     roles: ['admin', 'pracownik'],
+  },
+  // Opiekun + admin — Phase 5 ownership-scoped fleet view.
+  {
+    key: 'opieka',
+    href: '/employee/opieka',
+    labelKey: 'nav.opieka',
+    iconName: 'HeartHandshake',
+    roles: ['opiekun', 'admin'],
   },
   // Admin only
   {

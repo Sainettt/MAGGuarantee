@@ -32,6 +32,8 @@ export * from './integrations';
 export * from './claims';
 export * from './delegations';
 export * from './fleet';
+// Phase 5 — opiekun-scoped surface (carriers sidebar).
+export * from './opiekun';
 // Phase 4.5 — admin ops (limits / audit / diagnostics).
 export * from './limits';
 export * from './audit';

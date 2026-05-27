@@ -358,29 +358,44 @@
 
 ---
 
-## Фаза 5 — Opiekun panel (≈ 1 неделя)
+## Фаза 5 — Opiekun panel (≈ 1 неделя) ✅ ЗАВЕРШЕНА (2026-05-27)
 
 **Цель:** опекун может управлять своими перевозчиками, видеть «Moja opieka» статистику.
 
 ### Backend
 
-Большая часть уже сделана в Фазе 2 (CRUD с `OpiekunOwnershipGuard`). Здесь добавляем:
+Большая часть уже сделана в Фазе 2 (CRUD с `OpiekunOwnershipGuard`). Добавлено в этой фазе:
 
-1. `GET /fleet/opiekun` — `getOpiekunFleet` (`Code.gs:2733`):
-   - По каждому carrier-у: jezdzace, stojace, nieaktywne, potencjalne.
-   - Один проход по всем vehicles (group by carrierId).
-2. Endpoint `getOpiekunCarriers` — список своих perevoznikов.
+1. ✅ `GET /api/v1/fleet/opiekun` — per-carrier fleet aggregates (`getOpiekunFleet`, ref `Code.gs:2733`). По каждому carrier-у: jezdzace, stojace, nieaktywne, potencjalne + cross-carrier totals. Реализовано в `apps/api/src/modules/fleet/fleet.service.ts` (`getOpiekunFleet` + `_classifyVehicles`/`_mapCarrierStats`/`_buildTotals` helpers); data layer через `CarriersRepository.listForOpiekunAggregate({ opiekunId? })`. Role-scope: opiekun → `opiekunId === user.sub`, admin → все.
+2. ✅ `GET /api/v1/opiekun/carriers` — лёгкий список перевозчиков под opiekun-ом (identity + active-child counts). Новый модуль `apps/api/src/modules/opiekun/` (controller + service), зарегистрирован в `app.module.ts`.
+3. ✅ Filter в service (НЕ через `OpiekunOwnershipGuard` — guard decorator-driven, для read-list endpoints нужен manual `where: { opiekunId: user.sub }`).
+4. ✅ Тесты: 14 cases в `fleet.service.opiekun.spec.ts` (role gating + classification) + 10 cases в `opiekun.service.spec.ts` (ownership scope).
+
+### Shared
+
+1. ✅ `packages/shared/src/schemas/fleet.ts` — добавлены `OpiekunFleetQuerySchema`, `OpiekunCarrierVehicleStatsSchema`, `OpiekunCarrierStatsSchema`, `OpiekunFleetTotalsSchema`, `OpiekunFleetResponseSchema`.
+2. ✅ `packages/shared/src/schemas/opiekun.ts` (новый) — `OpiekunCarrierCountsSchema`, `OpiekunCarrierListItemSchema`, `OpiekunCarriersResponseSchema`.
 
 ### Frontend
 
-1. `app/(employee)/opieka/page.tsx`: dashboard с per-carrier статистикой.
-2. `app/(employee)/opieka/carriers/[login]/page.tsx`: деталь — сводка авто + drill-down.
-3. RoleSwitcher: если у carrier-а есть alternate role `opiekun` — кнопка «Panel Opiekuna».
+1. ✅ `app/(employee)/employee/opieka/page.tsx`: dashboard с totals strip (6 × `<KpiCard>`) + `<DataTable>` per-carrier (Firma, NIP, Aktywny badge, 4 vehicle buckets, drill-down link). Empty state.
+2. ✅ `app/(employee)/employee/opieka/carriers/[login]/page.tsx`: read-only drill-down. Header + 3-tab `<Tabs>` (Auta / Kierowcy / Naczepy) с курированными sub-table компонентами.
+3. ✅ Nav entry `{ key: 'opieka', href: '/employee/opieka', roles: ['opiekun','admin'] }` в `lib/nav.config.ts` + `HeartHandshake` icon в `EmployeeSidebar.tsx`. Закрывает Phase-4-gap «opiekun в /employee shell с пустым nav-ом».
+4. ✅ Hooks: `useOpiekunFleet` + `useOpiekunCarriers` (TanStack Query) + API wrappers `lib/api/opiekun.ts`.
+5. ✅ i18n: `nav.opieka` + полный `opieka.*` namespace в `messages/{pl,en}.json`.
+6. ❌ ~~RoleSwitcher для alternate `opiekun` роли~~ — defer: `User` schema single-role, вернёмся когда multi-role появится.
 
 ### Deliverables
-- Opiekun видит только свои перевозчики.
-- Все mutating actions проходят через `OpiekunOwnershipGuard` — попытка править чужого карьера = 403.
-- Audit-log пишется с `userRole=opiekun`.
+- ✅ Opiekun видит только своих перевозчиков (scope filter в service).
+- ✅ Все mutating actions проходят через `OpiekunOwnershipGuard` — попытка править чужого carrier-а = 403 (уже из Phase 2).
+- ✅ Audit-log пишется с `userRole=opiekun` (автоматически через unified `@Audit` + AuditInterceptor pipeline из Phase 4).
+
+### Открытые мелочи (не блокеры)
+
+- **Drill-down делает 2 round-trip** (login → cached fleet list → carrier-by-id). Если станет узким местом — расширить `/fleet/opiekun` опциональным `?login=...` filter-ом. Не блокер.
+- **`OpiekunCarriersResponse` не consumed в UI** — wrapper + hook есть «на вырост» (например, для future sidebar/picker).
+- **Counts semantics:** `OpiekunCarriersResponse.counts.vehicles` = active+non-deleted; `OpiekunFleetResponse.carriers[].vehicles.total` = all non-deleted. Intentional разница — sidebar показывает «operational fleet size», dashboard разбивает по active/inactive.
+- **`GET /opiekun/carriers` не задокументирован** в `docs/13-api-design.md` (только `/fleet/opiekun` упомянут). Дополнить при следующей правке docs.
 
 ### Зависимости
 - Фазы 2, 4 (компоненты CRUD).

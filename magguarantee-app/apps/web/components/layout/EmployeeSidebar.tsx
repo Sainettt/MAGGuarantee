@@ -25,6 +25,7 @@ import {
   Container,
   FileText,
   Gauge,
+  HeartHandshake,
   History,
   LayoutDashboard,
   Settings2,
@@ -67,6 +68,7 @@ const ICONS: Record<string, LucideIcon> = {
   UserCog,
   History,
   Activity,
+  HeartHandshake,
 };
 
 interface EmployeeSidebarProps {

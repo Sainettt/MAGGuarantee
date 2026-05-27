@@ -4,15 +4,29 @@ import type {
   DriverListItem,
   MyFleetQuery,
   MyFleetResponse,
+  OpiekunCarrierStats,
+  OpiekunCarrierVehicleStats,
+  OpiekunFleetResponse,
   TrailerListItem,
   VehicleListItem,
 } from '@magguarantee/shared';
 
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
-import { CarriersRepository } from '../carriers/carriers.repository';
+import {
+  CarriersRepository,
+  type OpiekunAggregateCarrierRow,
+} from '../carriers/carriers.repository';
 import { DriversRepository } from '../drivers/drivers.repository';
 import { TrailersRepository } from '../trailers/trailers.repository';
 import { VehiclesRepository } from '../vehicles/vehicles.repository';
+
+/**
+ * "Driving" cut-off — `Code.gs:2827` uses a constant 7-day window past
+ * `lastDroveAt` to separate `jezdzace` from `stojace`. Kept here as a named
+ * constant so the test fixtures can reference it directly.
+ */
+const DRIVING_RECENCY_DAYS = 7;
+const DRIVING_RECENCY_MS = DRIVING_RECENCY_DAYS * 24 * 60 * 60 * 1000;
 
 /**
  * Phase 3 — Fleet aggregates service.
@@ -88,6 +102,124 @@ export class FleetService {
     }));
 
     return { vehicles, drivers, trailers };
+  }
+
+  /**
+   * Phase 5 — per-carrier fleet aggregate for the opiekun dashboard.
+   *
+   * Mirrors `Code.gs:2733-2820` (`getOpiekunFleet`) but reduced to the
+   * payload the new dashboard actually consumes: identity + the four-bucket
+   * vehicle classification (`jezdzace`, `stojace`, `nieaktywne`,
+   * `potencjalne`). Drivers / trailers / per-vehicle list endpoints already
+   * exist as dedicated routes, so we don't duplicate them here.
+   *
+   * Role gating:
+   *  - admin    → no scope filter (every non-soft-deleted carrier).
+   *  - opiekun  → `Carrier.opiekunId === user.sub` only. Filtered server-side
+   *               (the OpiekunOwnershipGuard is decorator-driven and targets
+   *               single-resource lookups, not list-aggregates).
+   *  - other    → 403 (defence in depth; `@Roles` on the controller is the
+   *               primary gate).
+   *
+   * Performs ONE repository round-trip — no per-carrier N+1.
+   */
+  async getOpiekunFleet(user: AuthUser): Promise<OpiekunFleetResponse> {
+    this._assertOpiekunOrAdmin(user);
+    const rows = await this.carriers.listForOpiekunAggregate(
+      user.role === 'opiekun' ? { opiekunId: user.sub } : {},
+    );
+    const now = Date.now();
+    const carriers = rows.map((r) => this._mapCarrierStats(r, now));
+    return {
+      carriers,
+      totals: this._buildTotals(carriers),
+    };
+  }
+
+  // ── opiekun-fleet helpers ────────────────────────────────
+
+  private _assertOpiekunOrAdmin(user: AuthUser): void {
+    if (user.role !== 'admin' && user.role !== 'opiekun') {
+      throw new ForbiddenException('Brak uprawnień (wymaga konta opiekuna)');
+    }
+  }
+
+  private _mapCarrierStats(
+    row: OpiekunAggregateCarrierRow,
+    nowMs: number,
+  ): OpiekunCarrierStats {
+    const vehicles = this._classifyVehicles(row, nowMs);
+    return {
+      carrierId: row.id,
+      login: row.login,
+      nazwa: row.name,
+      firma: row.company,
+      nip: row.nip,
+      aktywny: row.active,
+      liczbaWypisow: row.numberOfVehicle,
+      vehicles,
+    };
+  }
+
+  /**
+   * Four-bucket classification per `Code.gs:2825-2865`:
+   *   - `nieaktywne`  — `Vehicle.active=false`
+   *   - `jezdzace`    — `active=true` AND (no `lastDroveAt` OR within 7d)
+   *   - `stojace`     — `active=true` AND `lastDroveAt` older than 7d
+   *   - `potencjalne` — `max(0, numberOfVehicle ?? 0 − total)`. KREPTD
+   *                     headroom; reflects the legacy "potencjalne auta z
+   *                     KREPTD" calculation at line 2865.
+   *   - `total`       — `jezdzace + stojace + nieaktywne`.
+   */
+  private _classifyVehicles(
+    row: OpiekunAggregateCarrierRow,
+    nowMs: number,
+  ): OpiekunCarrierVehicleStats {
+    let jezdzace = 0;
+    let stojace = 0;
+    let nieaktywne = 0;
+    for (const v of row.vehicles) {
+      if (!v.active) {
+        nieaktywne += 1;
+        continue;
+      }
+      // No data → assume driving (mirrors legacy default at line 2839).
+      if (!v.lastDroveAt) {
+        jezdzace += 1;
+        continue;
+      }
+      const diffMs = nowMs - v.lastDroveAt.getTime();
+      if (Number.isFinite(diffMs) && diffMs > DRIVING_RECENCY_MS) {
+        stojace += 1;
+      } else {
+        jezdzace += 1;
+      }
+    }
+    const total = jezdzace + stojace + nieaktywne;
+    const kreptd = row.numberOfVehicle ?? 0;
+    const potencjalne = Math.max(0, kreptd - total);
+    return { jezdzace, stojace, nieaktywne, potencjalne, total };
+  }
+
+  private _buildTotals(rows: OpiekunCarrierStats[]) {
+    const zero: OpiekunCarrierVehicleStats = {
+      jezdzace: 0,
+      stojace: 0,
+      nieaktywne: 0,
+      potencjalne: 0,
+      total: 0,
+    };
+    const vehicles = rows.reduce<OpiekunCarrierVehicleStats>(
+      (acc, r) => ({
+        jezdzace: acc.jezdzace + r.vehicles.jezdzace,
+        stojace: acc.stojace + r.vehicles.stojace,
+        nieaktywne: acc.nieaktywne + r.vehicles.nieaktywne,
+        potencjalne: acc.potencjalne + r.vehicles.potencjalne,
+        total: acc.total + r.vehicles.total,
+      }),
+      zero,
+    );
+    return { liczbaPrzewoznikow: rows.length, vehicles };
   }
 }
 

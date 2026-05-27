@@ -185,6 +185,7 @@
   "nav": {
     "dashboard": "Dashboard",
     "claims": "Wnioski",
+    "opieka": "Moja opieka",
     "carriers": "Przewoźnicy",
     "vehicles": "Pojazdy",
     "drivers": "Kierowcy",
@@ -843,6 +844,81 @@
       },
       "attachments": {
         "open": "Otwórz załącznik"
+      }
+    }
+  },
+  "opieka": {
+    "title": "Moja opieka",
+    "subtitle": "Przegląd przypisanych przewoźników i ich floty",
+    "emptyTitle": "Nie masz przypisanych przewoźników",
+    "emptyMessage": "Gdy administrator przypisze do Ciebie przewoźników, pojawią się tutaj.",
+    "totals": {
+      "carriers": "Przewoźnicy",
+      "totalVehicles": "Pojazdy razem",
+      "jezdzace": "Jezdżące",
+      "stojace": "Stojące",
+      "nieaktywne": "Nieaktywne",
+      "potencjalne": "Potencjalne"
+    },
+    "table": {
+      "firma": "Firma",
+      "nip": "NIP",
+      "active": "Aktywny",
+      "jezdzace": "Jezdżące",
+      "stojace": "Stojące",
+      "nieaktywne": "Nieaktywne",
+      "potencjalne": "Potencjalne",
+      "actions": "Akcje",
+      "openDetail": "Otwórz",
+      "openDetailAria": "Otwórz szczegóły przewoźnika {firma}"
+    },
+    "detail": {
+      "backToList": "← Wróć do listy",
+      "loadingTitle": "Ładowanie przewoźnika…",
+      "notFoundTitle": "Przewoźnik nie znaleziony",
+      "notFoundMessage": "Nie masz dostępu do tego przewoźnika lub został usunięty.",
+      "errorTitle": "Nie udało się wczytać przewoźnika",
+      "errorMessage": "Spróbuj ponownie lub wróć do listy.",
+      "retry": "Spróbuj ponownie",
+      "opiekunLabel": "Opiekun",
+      "nipLabel": "NIP",
+      "loginLabel": "Login"
+    },
+    "tabs": {
+      "ariaLabel": "Sekcje przewoźnika",
+      "vehicles": "Auta",
+      "drivers": "Kierowcy",
+      "trailers": "Naczepy"
+    },
+    "vehicles": {
+      "emptyTitle": "Brak pojazdów",
+      "emptyMessage": "Ten przewoźnik nie ma jeszcze dodanych pojazdów.",
+      "columns": {
+        "plate": "Numer rejestracyjny",
+        "side": "Numer boczny",
+        "brandModel": "Marka / model",
+        "type": "Typ",
+        "active": "Status"
+      }
+    },
+    "drivers": {
+      "emptyTitle": "Brak kierowców",
+      "emptyMessage": "Ten przewoźnik nie ma jeszcze dodanych kierowców.",
+      "columns": {
+        "name": "Imię i nazwisko",
+        "phone": "Telefon",
+        "license": "Numer prawa jazdy",
+        "active": "Status"
+      }
+    },
+    "trailers": {
+      "emptyTitle": "Brak naczep",
+      "emptyMessage": "Ten przewoźnik nie ma jeszcze dodanych naczep.",
+      "columns": {
+        "plate": "Numer rejestracyjny",
+        "type": "Typ",
+        "brandModel": "Marka / model",
+        "active": "Status"
       }
     }
   },
