@@ -1,15 +1,15 @@
-// Phase 4 — `/employee` root redirect. Both admin and pracownik land on
-// `/employee/dashboard` (the dashboard page itself is built in sub-slice
-// 4.1; for now this redirect is the contract the shell promises).
-//
-// opiekun also hits `/employee` per `ROLE_LANDING` — they'll get a
-// dashboard-route 404 until Phase 5 wires their version. That's an
-// expected gap during Phase 4.0 (see task brief).
+// `/employee` root redirect — dispatches by role.
+// admin/pracownik → /employee/dashboard (Phase 4.3).
+// opiekun → /employee/opieka (Phase 5).
+// Anonymous/expired token → /login (delegated to `requireRoleAccess`).
 
 import { redirect } from 'next/navigation';
 
+import { requireRoleAccess } from '@/lib/auth/server';
+
 export const dynamic = 'force-dynamic';
 
-export default function EmployeeRootPage(): never {
-  redirect('/employee/dashboard');
+export default async function EmployeeRootPage(): Promise<never> {
+  const user = await requireRoleAccess(['admin', 'pracownik', 'opiekun']);
+  redirect(user.role === 'opiekun' ? '/employee/opieka' : '/employee/dashboard');
 }
