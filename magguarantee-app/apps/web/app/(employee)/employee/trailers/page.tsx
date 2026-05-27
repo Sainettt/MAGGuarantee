@@ -1,15 +1,14 @@
 'use client';
 
-// Admin CRUD — vehicles. The list table only shows the most useful 6 columns
-// (per the Phase 2 spec — don't gold-plate). The full 36-field edit happens
-// in the sheet.
+// Admin CRUD — trailers.
 
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import type { VehicleDto } from '@magguarantee/shared';
+import type { TrailerDto } from '@magguarantee/shared';
 
+import { TrailerDetailModal } from '@/components/trailers/TrailerDetailModal';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDeleteWithReasonDialog } from '@/components/ui/ConfirmDeleteWithReasonDialog';
@@ -17,73 +16,75 @@ import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
-import { VehicleDetailModal } from '@/components/vehicles/VehicleDetailModal';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { useCarriers } from '@/lib/hooks/useCarriers';
-import { useHardDeleteVehicle, useVehicles } from '@/lib/hooks/useVehicles';
+import { useTrailerTypes } from '@/lib/hooks/useTrailerTypes';
+import { useHardDeleteTrailer, useTrailers } from '@/lib/hooks/useTrailers';
 
-import { VehicleSheet } from './VehicleSheet';
+import { TrailerSheet } from './TrailerSheet';
 
-// TODO: GpsStatus column when Phase 5 fleet UI lands
-// (locked spec in docs/14-design-system.md § GPS status indicator).
-
-export default function VehiclesPage() {
-  const t = useTranslations('vehicles');
+export default function TrailersPage() {
+  const t = useTranslations('trailers');
   const tCommon = useTranslations('common');
   const tConfirm = useTranslations('confirmDelete');
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  // Phase 5.1 — admin OR opiekun can hard-delete (opiekun limited to their
+  // own entities; backend re-verifies and 403s any foreign id).
+  const canHardDelete = user?.role === 'admin' || user?.role === 'opiekun';
   const [search, setSearch] = useState('');
   const [carrierId, setCarrierId] = useState<string>('');
+  const [trailerTypeId, setTrailerTypeId] = useState<string>('');
 
-  const { data, isLoading } = useVehicles({
+  const { data, isLoading } = useTrailers({
     q: search.length >= 2 ? search : undefined,
     carrierId: carrierId || undefined,
+    trailerTypeId: trailerTypeId || undefined,
     limit: 50,
   });
 
   const carriersQ = useCarriers({ limit: 200 });
+  const typesQ = useTrailerTypes({ active: true });
 
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [target, setTarget] = useState<VehicleDto | null>(null);
+  const [target, setTarget] = useState<TrailerDto | null>(null);
 
   // Phase 6 — read-only detail modal. A plain row click opens this; its
   // «Edytuj» action closes it and opens the edit Sheet (docs/14 §6.11). It
   // mirrors the sheetOpen/target pair and is never open at the same time as
   // the Sheet (the modal closes before the Sheet opens).
   const [detailOpen, setDetailOpen] = useState(false);
-  const [detailTarget, setDetailTarget] = useState<VehicleDto | null>(null);
+  const [detailTarget, setDetailTarget] = useState<TrailerDto | null>(null);
 
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<VehicleDto | null>(null);
-  const hardDeleteM = useHardDeleteVehicle();
+  const [deleteTarget, setDeleteTarget] = useState<TrailerDto | null>(null);
+  const hardDeleteM = useHardDeleteTrailer();
 
   const openCreate = () => {
     setTarget(null);
     setSheetOpen(true);
   };
-  const openEdit = (row: VehicleDto) => {
+  const openEdit = (row: TrailerDto) => {
     setTarget(row);
     setSheetOpen(true);
   };
   // A plain row click opens the read-only detail modal (not the edit Sheet);
   // the action-column pencil button still jumps straight to edit.
-  const openDetail = (row: VehicleDto) => {
+  const openDetail = (row: TrailerDto) => {
     setDetailTarget(row);
     setDetailOpen(true);
   };
   // Detail modal «Edytuj» — the modal has already closed itself; open the
-  // existing edit Sheet for the same vehicle.
+  // existing edit Sheet for the same trailer.
   const editFromDetail = () => {
     if (detailTarget) openEdit(detailTarget);
   };
 
-  const openHardDelete = useCallback((row: VehicleDto) => {
+  const openHardDelete = useCallback((row: TrailerDto) => {
     setDeleteTarget(row);
     setDeleteOpen(true);
   }, []);
 
-  const columns = useMemo<DataTableColumn<VehicleDto>[]>(
+  const columns = useMemo<DataTableColumn<TrailerDto>[]>(
     () => [
       {
         id: 'plate',
@@ -98,19 +99,18 @@ export default function VehiclesPage() {
         cell: (row) => row.carrier?.name ?? row.carrier?.login ?? '—',
       },
       {
-        id: 'planner',
-        header: t('fields.planner'),
-        cell: (row) => row.planner?.name ?? row.planner?.login ?? '—',
-      },
-      {
-        id: 'dispatcher',
-        header: t('fields.dispatcher'),
-        cell: (row) => row.dispatcher?.name ?? row.dispatcher?.login ?? '—',
-      },
-      {
         id: 'type',
-        header: t('fields.type'),
-        cell: (row) => row.type ?? '—',
+        header: t('fields.trailerType'),
+        cell: (row) =>
+          row.trailerType?.shortCode
+            ? `[${row.trailerType.shortCode}] ${row.trailerType.name}`
+            : (row.trailerType?.name ?? '—'),
+      },
+      {
+        id: 'brand',
+        header: t('fields.brand'),
+        cell: (row) =>
+          [row.brand, row.model].filter(Boolean).join(' ') || '—',
       },
       {
         id: 'active',
@@ -142,7 +142,7 @@ export default function VehiclesPage() {
               <Pencil size={14} aria-hidden="true" />
               <span className="hidden lg:inline">{tCommon('edit')}</span>
             </Button>
-            {isAdmin && (
+            {canHardDelete && (
               <Button
                 variant="outline"
                 size="sm"
@@ -161,7 +161,7 @@ export default function VehiclesPage() {
         ),
       },
     ],
-    [t, tCommon, tConfirm, isAdmin, openHardDelete],
+    [t, tCommon, tConfirm, canHardDelete, openHardDelete],
   );
 
   return (
@@ -172,7 +172,7 @@ export default function VehiclesPage() {
         </h1>
         <Button size="sm" onClick={openCreate}>
           <Plus size={14} />
-          {t('newVehicle')}
+          {t('newTrailer')}
         </Button>
       </div>
 
@@ -197,6 +197,19 @@ export default function VehiclesPage() {
             </option>
           ))}
         </Select>
+        <Select
+          className="sm:max-w-xs"
+          value={trailerTypeId}
+          onChange={(e) => setTrailerTypeId(e.target.value)}
+        >
+          <option value="">{t('filters.allTypes')}</option>
+          {(typesQ.data ?? []).map((tt) => (
+            <option key={tt.id} value={tt.id}>
+              {tt.shortCode ? `[${tt.shortCode}] ` : ''}
+              {tt.name}
+            </option>
+          ))}
+        </Select>
       </div>
 
       <DataTable
@@ -211,23 +224,23 @@ export default function VehiclesPage() {
         }
       />
 
-      <VehicleDetailModal
+      <TrailerDetailModal
         open={detailOpen}
         onOpenChange={setDetailOpen}
-        vehicle={detailTarget}
+        trailer={detailTarget}
         onEdit={editFromDetail}
       />
 
-      <VehicleSheet
+      <TrailerSheet
         open={sheetOpen}
-        vehicle={target}
+        trailer={target}
         onClose={() => setSheetOpen(false)}
       />
 
       <ConfirmDeleteWithReasonDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
-        entityLabel={tConfirm('entityLabel.vehicle')}
+        entityLabel={tConfirm('entityLabel.trailer')}
         entityName={deleteTarget?.plateNumber ?? ''}
         isLoading={hardDeleteM.isPending}
         onConfirm={async (reason) => {

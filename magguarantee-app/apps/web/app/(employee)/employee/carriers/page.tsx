@@ -46,6 +46,14 @@ function CarriersPageInner() {
   const tConfirm = useTranslations('confirmDelete');
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  // Opiekun's list endpoint is auto-scoped to their own carriers (Phase 5.1
+  // backend), so the "filter by opiekun" select is meaningless for them —
+  // they would only ever see themselves in the dropdown.
+  const isOpiekun = user?.role === 'opiekun';
+  // Phase 5.1 — opiekun has CRUD on their own entities (docs/03-roles.md#opiekun),
+  // which includes the hard-delete-with-powod button. Backend re-verifies
+  // ownership and 403s any foreign id.
+  const canHardDelete = isAdmin || isOpiekun;
   const [search, setSearch] = useState('');
   const [opiekunId, setOpiekunId] = useState<string>('');
   const [activeFilter, setActiveFilter] = useState<'' | 'true' | 'false'>('');
@@ -233,7 +241,7 @@ function CarriersPageInner() {
               <Pencil size={14} aria-hidden="true" />
               <span className="hidden lg:inline">{tCommon('edit')}</span>
             </Button>
-            {isAdmin && (
+            {canHardDelete && (
               <Button
                 variant="outline"
                 size="sm"
@@ -252,7 +260,7 @@ function CarriersPageInner() {
         ),
       },
     ],
-    [t, tCommon, tConfirm, tWizard, resumeOnboarding, isAdmin, openHardDelete],
+    [t, tCommon, tConfirm, tWizard, resumeOnboarding, canHardDelete, openHardDelete],
   );
 
   return (
@@ -275,18 +283,20 @@ function CarriersPageInner() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <Select
-          className="sm:max-w-xs"
-          value={opiekunId}
-          onChange={(e) => setOpiekunId(e.target.value)}
-        >
-          <option value="">{t('filters.allOpiekun')}</option>
-          {(opiekuniQ.data ?? []).map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.name ?? u.login}
-            </option>
-          ))}
-        </Select>
+        {!isOpiekun && (
+          <Select
+            className="sm:max-w-xs"
+            value={opiekunId}
+            onChange={(e) => setOpiekunId(e.target.value)}
+          >
+            <option value="">{t('filters.allOpiekun')}</option>
+            {(opiekuniQ.data ?? []).map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name ?? u.login}
+              </option>
+            ))}
+          </Select>
+        )}
         <Select
           className="sm:max-w-xs"
           value={activeFilter}

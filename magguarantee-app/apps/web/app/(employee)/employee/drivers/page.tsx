@@ -27,7 +27,9 @@ export default function DriversPage() {
   const tCommon = useTranslations('common');
   const tConfirm = useTranslations('confirmDelete');
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  // Phase 5.1 — admin OR opiekun can hard-delete (opiekun limited to their
+  // own entities; backend re-verifies and 403s any foreign id).
+  const canHardDelete = user?.role === 'admin' || user?.role === 'opiekun';
   const [search, setSearch] = useState('');
   const [carrierId, setCarrierId] = useState<string>('');
 
@@ -134,7 +136,7 @@ export default function DriversPage() {
               <Pencil size={14} aria-hidden="true" />
               <span className="hidden lg:inline">{tCommon('edit')}</span>
             </Button>
-            {isAdmin && (
+            {canHardDelete && (
               <Button
                 variant="outline"
                 size="sm"
@@ -153,7 +155,7 @@ export default function DriversPage() {
         ),
       },
     ],
-    [t, tCommon, tConfirm, isAdmin, openHardDelete],
+    [t, tCommon, tConfirm, canHardDelete, openHardDelete],
   );
 
   return (

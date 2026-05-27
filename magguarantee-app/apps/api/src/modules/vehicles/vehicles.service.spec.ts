@@ -159,12 +159,26 @@ function makeVehiclesRepo(seed: VehicleRow[] = []): VehiclesRepository {
   for (const r of seed) rows.set(r.id, r);
   return {
     findById: jest.fn(async (id: string) => rows.get(id) ?? null),
-    list: jest.fn(async (filters: { limit: number; carrierId?: string }) => {
-      let arr = [...rows.values()];
-      if (filters.carrierId)
-        arr = arr.filter((r) => r.carrierId === filters.carrierId);
-      return arr.slice(0, filters.limit + 1);
-    }),
+    list: jest.fn(
+      async (filters: {
+        limit: number;
+        carrierId?: string;
+        carrierIds?: string[];
+      }) => {
+        let arr = [...rows.values()];
+        if (filters.carrierId) {
+          arr = arr.filter((r) => r.carrierId === filters.carrierId);
+        } else if (filters.carrierIds) {
+          if (filters.carrierIds.length === 0) {
+            arr = [];
+          } else {
+            const set = new Set(filters.carrierIds);
+            arr = arr.filter((r) => set.has(r.carrierId));
+          }
+        }
+        return arr.slice(0, filters.limit + 1);
+      },
+    ),
     create: jest.fn(async (data) => {
       // Composite unique (carrierId, plateNumber).
       if (
@@ -791,6 +805,72 @@ describe('VehiclesService', () => {
     const out = await svc.list(makeAuth('przewoznik', 'u-self'), { limit: 50 });
     expect(out.items).toHaveLength(1);
     expect(out.items[0]?.id).toBe('v-1');
+  });
+
+  // ── Phase 5.1 — opiekun list scoping ────────────────────────
+  // Per docs/03-roles.md#opiekun an opiekun sees vehicles of carriers they
+  // own. Before Phase 5.1 we required them to pass `carrierId` explicitly
+  // (422 stub). The fix: narrow by the union of their owned carriers.
+
+  it('opiekun list without carrierId returns vehicles of all their carriers (no 422)', async () => {
+    const cA = makeCarrier({ id: 'c-A', login: 'a', opiekunId: 'op-1' });
+    const cB = makeCarrier({ id: 'c-B', login: 'b', opiekunId: 'op-1' });
+    const cX = makeCarrier({ id: 'c-X', login: 'x', opiekunId: 'op-other' });
+    const { svc } = buildService({
+      vehicles: [
+        makeVehicle({ id: 'v-A1', carrierId: 'c-A' }),
+        makeVehicle({ id: 'v-B1', carrierId: 'c-B' }),
+        makeVehicle({ id: 'v-X1', carrierId: 'c-X' }),
+      ],
+      carriers: [cA, cB, cX],
+    });
+    const out = await svc.list(makeAuth('opiekun', 'op-1'), { limit: 50 });
+    const ids = out.items.map((v) => v.id).sort();
+    expect(ids).toEqual(['v-A1', 'v-B1']);
+  });
+
+  it('opiekun list with carrierId in their set keeps the narrow filter', async () => {
+    const cA = makeCarrier({ id: 'c-A', login: 'a', opiekunId: 'op-1' });
+    const cB = makeCarrier({ id: 'c-B', login: 'b', opiekunId: 'op-1' });
+    const { svc } = buildService({
+      vehicles: [
+        makeVehicle({ id: 'v-A1', carrierId: 'c-A' }),
+        makeVehicle({ id: 'v-B1', carrierId: 'c-B' }),
+      ],
+      carriers: [cA, cB],
+    });
+    const out = await svc.list(makeAuth('opiekun', 'op-1'), {
+      limit: 50,
+      carrierId: 'c-A',
+    });
+    expect(out.items.map((v) => v.id)).toEqual(['v-A1']);
+  });
+
+  it('opiekun list with carrierId NOT in their set → 403', async () => {
+    const cA = makeCarrier({ id: 'c-A', login: 'a', opiekunId: 'op-1' });
+    const cX = makeCarrier({ id: 'c-X', login: 'x', opiekunId: 'op-other' });
+    const { svc } = buildService({
+      vehicles: [
+        makeVehicle({ id: 'v-A1', carrierId: 'c-A' }),
+        makeVehicle({ id: 'v-X1', carrierId: 'c-X' }),
+      ],
+      carriers: [cA, cX],
+    });
+    await expect(
+      svc.list(makeAuth('opiekun', 'op-1'), { limit: 50, carrierId: 'c-X' }),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('opiekun with zero owned carriers gets an empty list (not 422)', async () => {
+    const { svc } = buildService({
+      vehicles: [makeVehicle({ id: 'v-X1', carrierId: 'c-X' })],
+      carriers: [
+        makeCarrier({ id: 'c-X', login: 'x', opiekunId: 'op-other' }),
+      ],
+    });
+    const out = await svc.list(makeAuth('opiekun', 'op-1'), { limit: 50 });
+    expect(out.items).toEqual([]);
+    expect(out.nextCursor).toBeNull();
   });
 
   it('getById 404 for missing vehicle', async () => {

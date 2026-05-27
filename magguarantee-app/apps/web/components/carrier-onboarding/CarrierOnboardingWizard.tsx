@@ -22,10 +22,10 @@
 // useCarrierOnboarding and is also flipped to true as the operator creates
 // new entities through the wizard itself.
 
-import { CarrierSheet } from '@/app/(employee)/employee/(admin)/carriers/CarrierSheet';
-import { DriverSheet } from '@/app/(employee)/employee/(admin)/drivers/DriverSheet';
-import { TrailerSheet } from '@/app/(employee)/employee/(admin)/trailers/TrailerSheet';
-import { VehicleSheet } from '@/app/(employee)/employee/(admin)/vehicles/VehicleSheet';
+import { CarrierSheet } from '@/app/(employee)/employee/carriers/CarrierSheet';
+import { DriverSheet } from '@/app/(employee)/employee/drivers/DriverSheet';
+import { TrailerSheet } from '@/app/(employee)/employee/trailers/TrailerSheet';
+import { VehicleSheet } from '@/app/(employee)/employee/vehicles/VehicleSheet';
 
 import { useCarrierOnboarding } from './useCarrierOnboarding';
 

@@ -390,12 +390,36 @@
 - ✅ Все mutating actions проходят через `OpiekunOwnershipGuard` — попытка править чужого carrier-а = 403 (уже из Phase 2).
 - ✅ Audit-log пишется с `userRole=opiekun` (автоматически через unified `@Audit` + AuditInterceptor pipeline из Phase 4).
 
-### Открытые мелочи (не блокеры)
+### Sub-slice 5.1 — Opiekun CRUD UI (2026-05-27) ✅ ЗАВЕРШЕНО
+
+Открытие admin entity pages для роли opiekun. Бэкенд уже умел scope-filtering из Phase 2 — Phase 5.1 закрыл оставшиеся gap-ы.
+
+**Backend (`apps/api/src/modules/`)**
+- ✅ `vehicles.service.ts:610-636` — снято Phase-2 ограничение «opiekun must pass carrierId». Теперь opiekun без фильтра видит union vehicles всех своих carrier-ов (`carrierIds: [...]` в repo). `vehicles.repository.ts` поддерживает `carrierIds?: string[]` с empty-set short-circuit.
+- ✅ `carriers.service.ts._resolveOpiekunId` уже бросал 403 для opiekun-а с `opiekunId != self` (no-op для Phase 5.1, добавлены unit-тесты которые этого факта раньше не покрывали).
+- ✅ Vehicles/Drivers/Trailers create — `_assertCarrierAccessibleForWrite` уже проверял `carrier.opiekunId === user.sub` (no-op + тест).
+- ✅ Политика «opiekun create with foreign opiekunId» = **403** (а не silent override) — consistency с update + audit-log clarity.
+- ✅ Тесты: +9 cases (4 в vehicles, 5 в carriers). api total 437/441 green (4 фейла — известная Postgres-integration suite).
+
+**Frontend (`apps/web/`)**
+- ✅ `lib/roles.ts` — убраны `/employee/{carriers,vehicles,drivers,trailers}` из `ADMIN_ONLY_EMPLOYEE_PREFIXES`. Оставлены `trailer-types`, `users`, `limits`, `audit`, `diagnostics`.
+- ✅ `lib/nav.config.ts` — добавлен `'opiekun'` в `roles` для 4 entity-пунктов.
+- ✅ Route-group рефакторинг (Option A): 4 директории (`carriers/`, `vehicles/`, `drivers/`, `trailers/`) вынесены из `app/(employee)/employee/(admin)/` в `app/(employee)/employee/`. `(admin)/layout.tsx` теперь гейтит только admin-only страницы.
+- ✅ Stale imports patched в `components/carrier-onboarding/CarrierOnboardingWizard.tsx`.
+- ✅ UI nuances для opiekun-caller:
+  - Carriers list: «filter by opiekun» Select скрыт (видит только своих).
+  - Carrier create/edit Sheet: `opiekunId` Select скрыт; в create-режиме полностью скрыт «Assignment» FormSection; `<input type="hidden">` несёт `defaultOpiekunId = self`.
+  - Vehicles/Drivers/Trailers: `canHardDelete = admin || opiekun` (раньше было только admin).
+  - `carrierId` dropdowns во всех формах автоматически сужены — backend уже фильтрует `/api/v1/carriers` для opiekun.
+  - `plannerId` / `dispatcherId` selects в vehicles sheet оставлены доступными opiekun-у (operational assignment, не ownership).
+
+**Открытые мелочи (Phase 5)**
 
 - **Drill-down делает 2 round-trip** (login → cached fleet list → carrier-by-id). Если станет узким местом — расширить `/fleet/opiekun` опциональным `?login=...` filter-ом. Не блокер.
 - **`OpiekunCarriersResponse` не consumed в UI** — wrapper + hook есть «на вырост» (например, для future sidebar/picker).
 - **Counts semantics:** `OpiekunCarriersResponse.counts.vehicles` = active+non-deleted; `OpiekunFleetResponse.carriers[].vehicles.total` = all non-deleted. Intentional разница — sidebar показывает «operational fleet size», dashboard разбивает по active/inactive.
 - **`GET /opiekun/carriers` не задокументирован** в `docs/13-api-design.md` (только `/fleet/opiekun` упомянут). Дополнить при следующей правке docs.
+- **Carrier list: колонка `opiekun` для opiekun-caller**. Сейчас показывает каждый раз его собственное имя (визуальный шум). Тривиально завернуть в `{!isOpiekun && ...}` если попросят.
 
 ### Зависимости
 - Фазы 2, 4 (компоненты CRUD).

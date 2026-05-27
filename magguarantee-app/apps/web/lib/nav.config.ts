@@ -34,7 +34,8 @@ export interface NavLink {
  * Employee-panel navigation. Layout filters by role before render.
  *
  *   `pracownik` sees exactly: Dashboard + Wnioski.
- *   `opiekun`   sees exactly: Moja opieka (Phase 5).
+ *   `opiekun`   sees: Moja opieka + Carriers / Vehicles / Drivers / Trailers
+ *               (the four CRUDs are ownership-scoped by the API — Phase 5.1).
  *   `admin`     sees the full list (Dashboard + Wnioski + Opieka + 10 admin items).
  *
  * Other roles (planista, dyspozytor, eksport, weryfikator) get their own
@@ -64,34 +65,36 @@ export const EMPLOYEE_NAV: readonly NavLink[] = [
     iconName: 'HeartHandshake',
     roles: ['opiekun', 'admin'],
   },
-  // Admin only
+  // Admin + opiekun — Phase 5.1 opened these four to opiekun (API auto-scopes
+  // the list endpoints to the caller's ownership and 403s any cross-tenant
+  // create/edit).
   {
     key: 'carriers',
     href: '/employee/carriers',
     labelKey: 'nav.carriers',
     iconName: 'Building2',
-    roles: ['admin'],
+    roles: ['admin', 'opiekun'],
   },
   {
     key: 'vehicles',
     href: '/employee/vehicles',
     labelKey: 'nav.vehicles',
     iconName: 'Truck',
-    roles: ['admin'],
+    roles: ['admin', 'opiekun'],
   },
   {
     key: 'drivers',
     href: '/employee/drivers',
     labelKey: 'nav.drivers',
     iconName: 'Users',
-    roles: ['admin'],
+    roles: ['admin', 'opiekun'],
   },
   {
     key: 'trailers',
     href: '/employee/trailers',
     labelKey: 'nav.trailers',
     iconName: 'Container',
-    roles: ['admin'],
+    roles: ['admin', 'opiekun'],
   },
   {
     key: 'trailer-types',

@@ -210,6 +210,94 @@ describe('CarriersService', () => {
     ).rejects.toThrow(ForbiddenException);
   });
 
+  // Phase 5.1 — policy choice: when an opiekun specifies a foreign
+  // `opiekunId` on create, we reject 403 (the existing test above) instead
+  // of silently overriding to `self`. Rationale documented in the change
+  // notes: silent overrides hide intent and make the audit log lie — the
+  // opiekun should learn that the field is theirs alone to fill (or omit).
+  // The "no-opiekunId on create" branch defaults to self — verified next.
+  it('opiekun creating with no opiekunId defaults to self', async () => {
+    const carriers = makeCarriersRepo();
+    const users = makeUsersRepo();
+    const svc = new CarriersService(carriers, users, makePasswords());
+    const out = await svc.create(makeAuth('opiekun', 'op-1'), {
+      login: 'pwz-no-op',
+      email: 'p@example.com',
+      name: 'P',
+      phone: '+48000000000',
+    } as never);
+    expect(out.opiekunId).toBe('op-1');
+  });
+
+  it('opiekun creating with opiekunId == self is accepted (idempotent)', async () => {
+    const carriers = makeCarriersRepo();
+    const users = makeUsersRepo();
+    const svc = new CarriersService(carriers, users, makePasswords());
+    const out = await svc.create(makeAuth('opiekun', 'op-1'), {
+      login: 'pwz-self',
+      email: 'p@example.com',
+      name: 'P',
+      phone: '+48000000000',
+      opiekunId: 'op-1',
+    } as never);
+    expect(out.opiekunId).toBe('op-1');
+  });
+
+  // Phase 5.1 — opiekun update cannot reassign a carrier to a different
+  // opiekun. Setting `opiekunId == self` is OK (no-op); any other value 403.
+  it('opiekun update cannot reassign carrier to a different opiekun', async () => {
+    const carrier = makeCarrier({
+      id: 'c-mine',
+      login: 'pwz-mine',
+      opiekunId: 'op-1',
+    });
+    const carriers = makeCarriersRepo([carrier]);
+    const svc = new CarriersService(carriers, makeUsersRepo(), makePasswords());
+    await expect(
+      svc.update(makeAuth('opiekun', 'op-1'), 'c-mine', {
+        opiekunId: 'op-2',
+      } as never),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('opiekun update with opiekunId == self is accepted (no reassignment)', async () => {
+    const opiekun = makeUser({ id: 'op-1', role: 'opiekun', active: true });
+    const carrier = makeCarrier({
+      id: 'c-mine',
+      login: 'pwz-mine',
+      opiekunId: 'op-1',
+    });
+    const carriers = makeCarriersRepo([carrier]);
+    const svc = new CarriersService(
+      carriers,
+      makeUsersRepo([opiekun]),
+      makePasswords(),
+    );
+    const out = await svc.update(makeAuth('opiekun', 'op-1'), 'c-mine', {
+      opiekunId: 'op-1',
+    } as never);
+    expect(out.opiekunId).toBe('op-1');
+  });
+
+  it('admin update CAN reassign carrier to another opiekun', async () => {
+    const op2 = makeUser({ id: 'op-2', role: 'opiekun', active: true });
+    const carrier = makeCarrier({
+      id: 'c-1',
+      login: 'pwz-1',
+      opiekunId: 'op-1',
+    });
+    const carriers = makeCarriersRepo([carrier]);
+    const svc = new CarriersService(
+      carriers,
+      makeUsersRepo([op2]),
+      makePasswords(),
+    );
+    const out = await svc.update(makeAuth('admin', 'a-1'), 'c-1', {
+      opiekunId: 'op-2',
+    } as never);
+    expect(out.opiekunId).toBe('op-2');
+  });
+
   it('admin assigning a non-opiekun user as opiekunId → 422', async () => {
     const wrongRole = makeUser({ id: 'u-x', role: 'planista' });
     const carriers = makeCarriersRepo();

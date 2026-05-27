@@ -608,32 +608,34 @@ export class VehiclesService {
   private async _scopeFilters(
     user: AuthUser,
     filters: VehicleFilters,
-  ): Promise<VehicleFilters> {
+  ): Promise<VehicleFilters & { carrierIds?: string[] }> {
     if (user.role === 'admin') {
       return filters;
     }
     if (user.role === 'opiekun') {
-      // Restrict to vehicles of carriers this opiekun owns.
+      // Restrict to vehicles of carriers this opiekun owns. Phase 5.1:
+      // opiekun no longer needs to pass `carrierId` — without one we narrow
+      // to the union of their owned carriers; with one, we verify it's in
+      // the union (else 403) and keep the more specific filter. Single
+      // carriers query + the main vehicles query — performance budget OK.
       const opiekunCarriers = await this.carriers.list({
         opiekunId: user.sub,
         limit: 200,
       });
+      const ownedIds = opiekunCarriers.map((c) => c.id);
       if (filters.carrierId) {
-        const hit = opiekunCarriers.find((c) => c.id === filters.carrierId);
-        if (!hit) {
+        if (!ownedIds.includes(filters.carrierId)) {
           throw new ForbiddenException(
             'Nie masz uprawnień do tego przewoźnika',
           );
         }
+        // `carrierId` already narrows the query — no need to forward the
+        // union set. Repo `where.carrierId = ?` uses the FK index directly.
         return filters;
       }
-      // No carrierId provided — narrow to the union of opiekun's carriers.
-      // The repo accepts a single `carrierId` filter; if there are many
-      // carriers, we have to fall back to listing all and filtering client-
-      // side. For Phase 2 we keep it simple: opiekun must pass a carrierId.
-      throw new UnprocessableEntityException(
-        'Opiekun musi wskazać `carrierId` w zapytaniu',
-      );
+      // Narrow by `carrierIds: [...]` so the SQL is `WHERE carrierId IN (...)`
+      // — single query, FK-indexed. Empty union → repo short-circuits to ∅.
+      return { ...filters, carrierIds: ownedIds };
     }
     if (user.role === 'planista') {
       return { ...filters, plannerId: user.sub };

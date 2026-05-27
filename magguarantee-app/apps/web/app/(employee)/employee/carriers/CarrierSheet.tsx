@@ -151,6 +151,11 @@ export function CarrierSheet({
   const isEdit = carrier !== null;
   const isWizard = mode === 'wizard';
   const { user } = useAuth();
+  // Phase 5.1 — opiekun callers always own the carriers they (re)create. The
+  // backend rejects a foreign `opiekunId` with 403 and defaults to `=self`
+  // when the field is omitted, so we hide the assignment picker entirely
+  // for opiekun and keep the `defaultOpiekunId` baked into form state below.
+  const isOpiekunCaller = user?.role === 'opiekun';
 
   // Both schemas are .strict() but our form carries fields that aren't part
   // of the wire DTO (login/password in edit, active in create, plus the
@@ -809,32 +814,46 @@ export function CarrierSheet({
                 </FormField>
               </FormSection>
 
-              <FormSection title={t('sections.assignment')}>
-                <FormField
-                  label={t('fields.opiekun')}
-                  required
-                  error={errMsg('opiekunId')}
-                  htmlFor="carrier-opiekunId"
-                >
-                  <Select
-                    id="carrier-opiekunId"
-                    {...form.register('opiekunId')}
-                  >
-                    <option value="">—</option>
-                    {(opiekuniQ.data ?? []).map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name ?? u.login}
-                      </option>
-                    ))}
-                  </Select>
-                </FormField>
-                {isEdit && (
-                  <label className="flex items-center gap-2 text-sm text-text">
-                    <Checkbox {...form.register('active')} />
-                    {t('fields.active')}
-                  </label>
-                )}
-              </FormSection>
+              {(!isOpiekunCaller || isEdit) && (
+                <FormSection title={t('sections.assignment')}>
+                  {!isOpiekunCaller && (
+                    <FormField
+                      label={t('fields.opiekun')}
+                      required
+                      error={errMsg('opiekunId')}
+                      htmlFor="carrier-opiekunId"
+                    >
+                      <Select
+                        id="carrier-opiekunId"
+                        {...form.register('opiekunId')}
+                      >
+                        <option value="">—</option>
+                        {(opiekuniQ.data ?? []).map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.name ?? u.login}
+                          </option>
+                        ))}
+                      </Select>
+                    </FormField>
+                  )}
+                  {isEdit && (
+                    <label className="flex items-center gap-2 text-sm text-text">
+                      <Checkbox {...form.register('active')} />
+                      {t('fields.active')}
+                    </label>
+                  )}
+                </FormSection>
+              )}
+              {/*
+                Keep the opiekunId in form state (hidden) when the caller is
+                an opiekun — `defaultOpiekunId` (set in the open effect) seeds
+                it with the caller's own id, and the backend re-enforces.
+                Without this hidden field the RHF register call is gone and
+                the form value would never reach the wire payload.
+              */}
+              {isOpiekunCaller && (
+                <input type="hidden" {...form.register('opiekunId')} />
+              )}
             </div>
           </SheetBody>
 

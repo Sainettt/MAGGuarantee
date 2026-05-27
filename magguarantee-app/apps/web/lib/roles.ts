@@ -54,12 +54,14 @@ export const ROLE_ALLOWED_PREFIXES: Record<Role, readonly string[]> = {
  * Sub-paths inside `/employee` that only `admin` may reach. `pracownik` and
  * `opiekun` share the employee shell but their nav row hides these tabs and
  * direct-URL access must be blocked too. See docs/03-roles.md#pracownik.
+ *
+ * Phase 5.1 — `carriers`, `vehicles`, `drivers`, `trailers` are now also
+ * reachable by `opiekun` (ownership-scoped by the API). They've been removed
+ * from this list and their page directories were moved out of the `(admin)`
+ * route group accordingly. `trailer-types` stays admin-only per
+ * docs/03-roles.md.
  */
 export const ADMIN_ONLY_EMPLOYEE_PREFIXES: readonly string[] = [
-  '/employee/carriers',
-  '/employee/vehicles',
-  '/employee/drivers',
-  '/employee/trailers',
   '/employee/trailer-types',
   // Phase 4.5 — admin ops surfaces (users CRUD shipped in 4.4; limits / audit
   // / diagnostics added in 4.5). Each renders behind the `(admin)` layout

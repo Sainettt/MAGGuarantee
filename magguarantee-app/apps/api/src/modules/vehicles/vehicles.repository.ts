@@ -80,6 +80,16 @@ export interface VehicleRow {
 
 export interface VehicleListFilters {
   carrierId?: string;
+  /**
+   * Restrict to vehicles whose `carrierId` is in this set. Used by the
+   * opiekun-scoped list path (`VehiclesService._scopeFilters`) — opiekun
+   * without an explicit `carrierId` filter sees the union of their owned
+   * carriers' vehicles. Stays repo-side so the single SQL query the list
+   * route fires still narrows by the FK index instead of fetching all rows
+   * and filtering client-side. Composes with `carrierId` (both apply); the
+   * service intersects before calling so an empty `in:` set returns 0 rows.
+   */
+  carrierIds?: string[];
   plannerId?: string;
   dispatcherId?: string;
   active?: boolean;
@@ -102,7 +112,24 @@ export class VehiclesRepository {
 
   async list(filters: VehicleListFilters): Promise<VehicleRow[]> {
     const where: Record<string, unknown> = {};
-    if (filters.carrierId) where.carrierId = filters.carrierId;
+    // `carrierId` and `carrierIds` are both narrowing filters; the service
+    // never sends both (if `carrierId` is in the opiekun's set it forwards
+    // only `carrierId` for the FK-index path). If a future caller does send
+    // both, the explicit `carrierId` wins — the union set is a default-scope
+    // hint, not a hard restriction at the repo level.
+    if (filters.carrierId) {
+      where.carrierId = filters.carrierId;
+    } else if (filters.carrierIds) {
+      if (filters.carrierIds.length === 0) {
+        // Empty union → 0 rows. Prisma rejects `IN ()` at the SQL layer
+        // (Postgres won't accept an empty list); we short-circuit with an
+        // impossible id filter so the route still returns the canonical
+        // `{ items: [], nextCursor: null }` shape with one cheap query.
+        where.id = '__no_such_vehicle__';
+      } else {
+        where.carrierId = { in: filters.carrierIds };
+      }
+    }
     if (filters.plannerId) where.plannerId = filters.plannerId;
     if (filters.dispatcherId) where.dispatcherId = filters.dispatcherId;
     if (typeof filters.active === 'boolean') where.active = filters.active;
