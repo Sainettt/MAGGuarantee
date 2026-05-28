@@ -369,8 +369,18 @@ export function CarrierSheet({
         opiekunId: defaultOpiekunId as unknown as string,
       });
       draft.hydrate();
+      // Phase 5.1 — opiekun callers ALWAYS own the carrier they create. If
+      // `draft.hydrate()` above pulled in a stale sessionStorage draft whose
+      // `opiekunId` was empty (saved during the brief window on a previous
+      // mount before `useAuth` resolved), the auto-assigned id would be
+      // wiped and the Zod resolver would reject the submission with
+      // "Invalid uuid". Re-apply after hydrate so the hidden input always
+      // carries the live user id.
+      if (isOpiekunCaller && defaultOpiekunId) {
+        form.setValue('opiekunId', defaultOpiekunId, { shouldValidate: false });
+      }
     }
-  }, [open, isEdit, carrier, form, draft, defaultOpiekunId]);
+  }, [open, isEdit, carrier, form, draft, defaultOpiekunId, isOpiekunCaller]);
 
   const createM = useCreateCarrier({
     onSuccess: (created) => {
