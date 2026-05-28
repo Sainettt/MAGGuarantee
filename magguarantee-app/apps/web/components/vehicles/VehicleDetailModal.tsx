@@ -187,6 +187,8 @@ export function VehicleDetailModal({
     {
       title: t('sections.permissions'),
       icon: ShieldCheck,
+      // 9 rows — too tall to pair with a sibling in the 2-col grid (§6.15).
+      span: 'full',
       rows: [
         { label: f('adr'), value: bool(vehicle.adr) },
         { label: f('adrClasses'), value: listValue(vehicle.adrClasses) },
@@ -216,6 +218,9 @@ export function VehicleDetailModal({
     sections.push({
       title: t('sections.attachments'),
       icon: FileText,
+      // Attachment rows carry tall «Otwórz» buttons that need horizontal
+      // room — span the full grid row (§6.15).
+      span: 'full',
       rows: vehicle.attachments.map((att) => ({
         label: t(`attachmentCategory.${att.category}`),
         value: (

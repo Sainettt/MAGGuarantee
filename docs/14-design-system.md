@@ -2358,11 +2358,11 @@ Earlier phases lock edit-forms to `<Sheet side="right">` and explicitly say "no 
 | Property | Value | Tailwind / token | Notes |
 |---|---|---|---|
 | Container | centered `<DialogContent>` | (from primitive) | Reuses the primitive's `bg-card border border-border rounded-xl shadow-modal animate-modal-in`. |
-| Max-width | **`max-w-2xl`** (672px) | override the primitive's default `max-w-md` via the `className` prop | Wide enough for a comfortable two-column label/value grid; not so wide it feels like a page. |
-| Width (mobile) | `w-[calc(100%-2rem)]` | (from primitive) | 16px gutter each side — unchanged. |
-| Max-height | **`max-h-[85vh]`** | `max-h-[85vh]` | Caps the modal so it never exceeds the viewport; the **body** scrolls, not the page. |
+| Max-width | **`max-w-5xl`** (1024px) | override the primitive's default `max-w-md` via the `className` prop | **Revised 2026-05-28** (user feedback: «форма read-only маленькая, её бы сделать побольше»). The previous `max-w-2xl` (672px) cramped the densest consumer — `VehicleDetailModal` carries **6 + 1 sections, up to 9 rows each** plus attachments. 1024px gives the body room for a **two-column section grid** on ≥`lg`, with ~480px per column (after `gap-4` + `px-6`), which fits IBANs, multi-line addresses, long carrier names, and attachment file names without truncation. Wider than `5xl` (e.g. `6xl`/1152px) starts to read as a page rather than a focused modal; `5xl` is the upper bound that still feels glanceable. |
+| Width (mobile / narrow desktop) | `w-[calc(100%-2rem)]` then capped by `max-w-5xl` | (from primitive, override max-width) | 16px gutter each side on phones; on viewports between `sm` and `lg` the modal scales fluidly up to 1024px. |
+| Max-height | **`max-h-[85vh]`** | `max-h-[85vh]` | Caps the modal so it never exceeds the viewport; the **body** scrolls, not the page. Unchanged. |
 | Internal layout | **3-zone flex column**: header (fixed) · body (`flex-1 overflow-y-auto`) · footer (fixed) | `flex flex-col` on the content; header + footer `shrink-0`, body `min-h-0 flex-1 overflow-y-auto` | Only the body scrolls. Header and footer stay pinned — they never scroll away. |
-| Padding | header `px-6 pt-6 pb-4`; body `px-6 py-5`; footer `px-6 py-4` | — | The primitive's blanket `p-6` is **overridden** (pass `className` that resets padding; `<EntityDetailModal>` owns its own zone padding). |
+| Padding | header `px-6 pt-6 pb-4 lg:px-8 lg:pt-7`; body `px-6 py-5 lg:px-8 lg:py-6`; footer `px-6 py-4 lg:px-8` | — | The primitive's blanket `p-6` is **overridden**. The widened modal earns a slightly more generous horizontal padding on `lg+` (`px-8` = 32px) so content does not hug the edge of the much-wider surface. |
 | Radius | `rounded-xl` (16px) | (from primitive) | No change. |
 | Shadow | `shadow-modal` | (from primitive) | No change. |
 | Entrance animation | `animate-modal-in` (200ms, opacity + 10px translateY) | (from primitive) | No change. Exit is instant unmount (matches current Dialog behaviour). |
@@ -2394,24 +2394,33 @@ A fixed (`shrink-0`) zone, **not** scrollable.
 
 ### 6.4 Body — section grouping
 
-The body is the only scrollable zone (`flex-1 overflow-y-auto`). Content is an ordered list of **sections**; sections are separated vertically with `space-y-5`.
+The body is the only scrollable zone (`flex-1 overflow-y-auto`). Content is an ordered list of **sections** laid out in a **responsive grid**:
 
-**Section anatomy** — reuse the established *section-card* rhythm from the vehicle Sheet (§ Phase 5, "section-card pattern"), tuned for read-only:
+| Breakpoint | Section layout |
+|---|---|
+| `< lg` (≤1023px) | **Single column** — sections stack vertically (`grid grid-cols-1 gap-4`). Same as the legacy behaviour, just with the new looser horizontal padding. |
+| `≥ lg` (≥1024px) | **Two-column masonry-ish grid** — `grid grid-cols-1 lg:grid-cols-2 gap-4`. Sections fall into columns in declaration order; section heights vary (carrier «Pozwolenia» has 1 row, vehicle «Permissions» has 9), so the two columns will be visually uneven — this is expected and acceptable. **Do not** attempt CSS columns / `column-fit` (breaks focus order, breaks anchor scroll). The simple grid is a11y-safe and the visual rhythm is fine: each card is a self-contained surface, so unequal column heights read as a tiled board, not as a broken layout. |
+
+The body wrapper is `<div className="grid grid-cols-1 gap-4 lg:grid-cols-2">` — no `space-y-*` (the grid provides spacing in both axes).
+
+**Wide sections (full-width override).** Three section kinds opt out of the two-column grid and span the **full row**: (a) **Attachments** (vehicle) — its rows are tall buttons that need horizontal room; (b) any section whose row count is **≥8** when the entity has only one such section (vehicle «Pozwolenia»); (c) **«Notatki» / long-text** sections that hold a single multi-line value. The wrapper opts a section in by setting `section.span = 'full'` (new optional field on `EntityDetailSection`); the shell applies `lg:col-span-2` to those cards. The default is `span: 'half'`.
+
+**Section anatomy** — softened from the original bordered-card rhythm to read calmer at the widened width:
 
 ```
-DANE KONTA I KONTAKT                          <- section header
-─────────────────────────────────────────
-Login            carrier-login-123           <- label/value row
-E-mail           biuro@example.eu
-Nazwa            Przykładowy Przewoźnik
-Telefon          +48 600 000 000
+┌─ DANE KONTA I KONTAKT ───────────────────────────────────┐
+│  Login            carrier-login-123                       │
+│  E-mail           biuro@example.eu                        │
+│  Nazwa            Przykładowy Przewoźnik                  │
+│  Telefon          +48 600 000 000                         │
+└───────────────────────────────────────────────────────────┘
 ```
 
 | Slot | Spec |
 |---|---|
-| Section header | `flex items-center gap-1.5` + an optional **Lucide icon** (14px, `text-text-sub`, `aria-hidden`) + label `text-xs font-bold uppercase tracking-wider text-text-sub`. This is the same "table-header / section-title" typography used elsewhere — keep it consistent, do NOT invent a new section-title style. |
-| Section icons (carrier) | Account & contact → `<User>` · Company data → `<Building2>` · Finance → `<Banknote>` · Permits → `<FileBadge>` · Assignment → `<UserCog>`. Icons are decorative; passing an icon is optional in the generic API. |
-| Section container | A light surface card: `rounded-lg border border-border bg-card p-4`. **Do not tint** section backgrounds — read-only detail favours calm neutrality over the colour-coded vehicle-form tints. The header sits inside the card, rows below it with `mt-3`. |
+| Section header | `flex items-center gap-2 pb-3 mb-3 border-b border-border/60` + an optional **Lucide icon** (`size={15}`, `text-text-sub`, `aria-hidden`) + label `text-[11px] font-semibold uppercase tracking-[0.08em] text-text-sub`. Slightly larger tracking + a hairline under the title cleanly separates "what is this section" from "what's the data" without needing a heavy card border. |
+| Section icons | Carrier: Account/contact → `<User>` · Company → `<Building2>` · Finance → `<Banknote>` · Permits → `<FileBadge>` · Assignment → `<UserCog>`. Vehicle / driver / trailer per §6.15–§6.17. Icons are decorative; passing an icon is optional in the generic API. |
+| Section container | `rounded-xl border border-border/60 bg-card p-5`. Border softened to `border-border/60` (was `border-border`) so cards read as light surfaces, not boxed forms; radius lifted to `rounded-xl` (was `rounded-lg`) to **match the modal's own radius** and feel like an intentional nested surface. Padding bumped to `p-5` (was `p-4`) — the modal is now wider, so internal padding scales up proportionally. **Do not tint** section backgrounds — calm neutrality wins over the colour-coded edit-form tints. **Do not add shadows** — the section card is on top of `bg-card` already; an extra shadow would compete with `shadow-modal`. |
 | Empty section | If every value in a section is null/empty, the entity wrapper may omit the whole section. The generic shell renders exactly the sections it is given. |
 
 ### 6.5 Label/value row — the core read-only primitive
@@ -2426,10 +2435,10 @@ This is the heart of the pattern. **A value is text, not a disabled input.** Rea
 
 | Property | Spec |
 |---|---|
-| Row container | `<div>` per pair, inside a `<dl>`. Grid: `grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)] gap-x-4 gap-y-1`. Label column fixed ~144px, value column flexes. |
-| Row vertical rhythm | `py-1.5` per row; rows within a section separated by a hairline `divide-y divide-border/60` **or** plain `space-y-2` — pick `divide-y` for ≥6-row sections (carrier Finance), plain spacing for short sections. Web-agent may standardise on `divide-y divide-border/60` for all — acceptable. |
-| Label (`<dt>`) | `text-sm font-medium text-text-sub`. Sentence case, not uppercase (uppercase is reserved for the *section* header). Left-aligned, top-aligned (`self-start`) so it lines up with the first line of a multi-line value. |
-| Value (`<dd>`) | `text-sm text-text`. `font-medium` for emphasis is allowed but default is `400`. Left-aligned. Wraps freely (`break-words`); never truncates in the detail modal — the user came here to read the full value. |
+| Row container | `<div>` per pair, inside a `<dl>`. Grid: `grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-[minmax(0,9rem)_minmax(0,1fr)] lg:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]`. The label column widens to **~176px on `lg+`** because the section card is now wider and a 144px label hugged the divider; 176px gives breathing room without dwarfing the value. Below `sm` rows stack (single column). |
+| Row vertical rhythm | `py-2` per row (was `py-1.5` — the widened modal earns a touch more vertical breathing room); rows within a section separated by a hairline `divide-y divide-border/60`. Standardised: **always** use `divide-y`, no per-section opt-out — consistency reads better at the new width than mixed rhythms. |
+| Label (`<dt>`) | `text-sm font-medium text-text-sub`. Sentence case, not uppercase. Left-aligned, top-aligned (`self-start`) so it lines up with the first line of a multi-line value. |
+| Value (`<dd>`) | `text-sm text-text`. `font-medium` for emphasis is allowed but default is `400`. Left-aligned. Wraps freely (`break-words`); never truncates in the detail modal. |
 | Mono values | Codes render **monospace** (`font-mono`): `login`, `nip`, `vatId`, `accountEur` (IBAN), `accountPln`. Money/number values that benefit from alignment use `tabular-nums`. |
 | Money values | `insuranceValue` → format as EUR with grouping, suffix `€` or locale currency via `Intl.NumberFormat`. `paymentTerms` → number + unit, e.g. "30 dni". |
 | Date values | `insuranceExpiry`, `licenseExpiry`, `createdAt`, `updatedAt` → format with the app's standard date formatter (`Intl.DateTimeFormat`, locale-aware via next-intl). Date-only fields show date; timestamps (`createdAt`/`updatedAt`) show date + time. **No raw ISO strings.** |
@@ -2473,8 +2482,9 @@ A fixed (`shrink-0`) zone with a top divider — never scrolls.
 
 | Breakpoint | Behavior |
 |---|---|
-| ≥ `sm` (≥640px) | Two-column label/value grid (§6.5). Footer meta + buttons on one row. Modal `max-w-2xl`. |
-| < `sm` (≤640px) | Label/value rows **stack** (`grid-cols-1`): label line (`text-xs font-medium text-text-sub`) above value (`text-sm`). Section cards keep `p-4`. Footer: buttons full-row, meta line wraps to its own line **above** the buttons (`flex-col-reverse`), or is hidden if cramped. Modal width `w-[calc(100%-2rem)]`, `max-h-[85vh]` still caps height; body scroll is the norm on small screens. |
+| `≥ lg` (≥1024px) | **Body sections in a two-column grid** (§6.4): `grid-cols-2 gap-4`. Label column inside each row widens to ~176px (§6.5). Modal `max-w-5xl` (1024px). Padding `px-8` (header/body/footer). Footer meta + buttons on one row. |
+| `sm`–`lg` (640–1023px) | **Body sections single-column** — the modal is below the two-column threshold, so all section cards stack full-width. Label/value rows are still two-column inside each section (label ~144px, §6.5). Modal scales fluidly up to `max-w-5xl`, capped by `w-[calc(100%-2rem)]` on narrower widths. Padding `px-6`. |
+| `< sm` (≤640px) | **Everything single-column.** Label/value rows **stack** (`grid-cols-1`): label line (`text-xs font-medium text-text-sub`) above value (`text-sm`). Section cards keep `p-5`. Footer: buttons full-row, meta line wraps to its own line **above** the buttons (`flex-col-reverse`), or is hidden if cramped. Modal width `w-[calc(100%-2rem)]`, `max-h-[85vh]` still caps height; body scroll is the norm. |
 | Very short viewport | `max-h-[85vh]` + body `overflow-y-auto` already handles it — header/footer stay pinned, body scrolls. No special case. |
 
 ### 6.8 States
@@ -2495,7 +2505,7 @@ The component is entity-agnostic. Shape the props so any entity maps cleanly:
 | `title` | Entity display name (string). |
 | `subtitle` | Optional secondary id line (rendered mono if it's a code). |
 | `badges` | `ReactNode` — the header badge row (status + onboarding). Entity wrapper builds it. |
-| `sections` | Ordered array. Each section: `{ title, icon?, rows }`. Each row: `{ label, value }` where `value` is `ReactNode` (string, `—`, mono span, badge…). The wrapper is responsible for formatting (dates, money, mono, em-dash for null). |
+| `sections` | Ordered array. Each section: `{ title, icon?, rows, span? }`. `span` is `'half'` (default) or `'full'`; `'full'` makes the section card span both columns on `lg+` (§6.4 — used for attachments, ≥8-row permission grids, and single-multi-line-value sections). Each row: `{ label, value }` where `value` is `ReactNode` (string, `—`, mono span, badge…). The wrapper is responsible for formatting (dates, money, mono, em-dash for null). |
 | `meta` | Optional `ReactNode` for the footer-left meta line (created/updated). |
 | `onEdit` *(optional)* | Callback for the primary «Edytuj» action. The component closes itself, then invokes `onEdit`. **Optional:** when supplied (admin / opiekun context) the «Edytuj» button renders; when **omitted** (read-only context — e.g. a carrier viewing their own fleet, which they cannot edit) the component renders the **read-only footer**: meta line + «Zamknij» only, no «Edytuj». The presence of the edit button is driven solely by whether `onEdit` is passed. |
 
@@ -2516,6 +2526,7 @@ The carrier detail modal mirrors the **same 5 sections the edit form uses** (`Ca
 - **Status** (`active`) → header badge, not a row.
 - **Onboarding flags** (`hasVehicle` / `hasTrailer` / `hasDriver` / `isComplete`) → header badge row, via the existing `<OnboardingMissingBadge>`.
 - **`createdAt` / `updatedAt`** → footer meta line.
+- **Section `span` (lg+ grid, §6.4):** all 5 carrier sections are `'half'` (default). Carrier «Pozwolenia» has only 1 row but pairs naturally with «Przypisanie» on the second column — no full-row override needed.
 - i18n: reuse the existing `carriers.fields.*` and `carriers.sections.*` keys — **no new field-label keys needed**. New keys: `entityDetail.edit` ("Edytuj"), `entityDetail.close` ("Zamknij"), `entityDetail.createdAt`, `entityDetail.updatedAt` (or reuse `common.*` if present).
 
 ### 6.11 Wiring on the carriers page (web-agent)
@@ -2574,6 +2585,7 @@ Currently `carriers/page.tsx` does `onRowClick={openEdit}` — row click opens `
 
 - New i18n field keys (`vehicles.fields.*`): `adrClasses`, `wasteCountries`, `gb`, `it`, `fr`, `lastDroveAt`. New section key: `vehicles.sections.attachments`.
 - `type` / `euro` render as raw enum codes — matches the `VehicleSheet` `<Select>` options and the list-table cell (no human-label keys exist).
+- **Section `span` (lg+ grid, §6.4):** `'full'` for **Pozwolenia** (9 rows — too tall to pair) and **Załączniki** (attachment rows need horizontal room for the file-name button). All others (`identification`, `people`, `equipment`, `rates`, `other`) are `'half'`.
 
 ### 6.16 Driver field mapping — 3 logical sections
 
@@ -2588,6 +2600,7 @@ Currently `carriers/page.tsx` does `onRowClick={openEdit}` — row click opens `
 | **Przypisanie** (`sections.assignment`) | `<UserCog>` | Przewoźnik → `carrier.name ?? carrier.login` · Notatki → `notes` |
 
 - New i18n section keys: `drivers.sections.personal`, `drivers.sections.license`, `drivers.sections.assignment` (PL + EN). All field keys reuse existing `drivers.fields.*`.
+- **Section `span` (lg+ grid, §6.4):** all 3 sections are `'half'`. With only three sections the second column will have one card and the first column two — acceptable (§6.4).
 
 ### 6.17 Trailer field mapping — the 3 sections
 
@@ -2600,6 +2613,7 @@ Currently `carriers/page.tsx` does `onRowClick={openEdit}` — row click opens `
 | **Wyposażenie** (`sections.equipment`) | `<Package>` | Pasy → `belts` (bool) · Maty → `mats` (bool) · Zawieszenie pneum. → `airSuspension` (bool) · Załadunek tył → `loadFromBack` (bool) · Załadunek bok → `loadFromSide` (bool) · Załadunek góra → `loadFromTop` (bool) · Dach przesuwany → `slidingRoof` (bool) · Dach Edscha → `edschaSlidingRoof` (bool) · Wyposażenie → `equipment` · Notatki → `notes` |
 
 - Dimension/capacity units are baked into the field labels themselves (`innerLength` → "Długość wewn. (m)", `capacity` → "Ładowność (t)") — exactly as `TrailerSheet` renders them — so the values are bare numbers. No new i18n keys needed.
+- **Section `span` (lg+ grid, §6.4):** `'full'` for **Wyposażenie** (10 rows including free-text «Notatki») — too tall to pair cleanly. `'half'` for **Identyfikacja** and **Wymiary**, which pair on the same row of the lg-grid.
 
 ### 6.18 Phase 6 replication — components / shared changes summary
 
@@ -2611,6 +2625,121 @@ Currently `carriers/page.tsx` does `onRowClick={openEdit}` — row click opens `
 | Row click → detail modal; «Edytuj» → existing Sheet | `apps/web/app/(employee)/employee/(admin)/{vehicles,drivers,trailers}/page.tsx` | web-agent |
 | i18n: `vehicles.fields.{adrClasses,wasteCountries,gb,it,fr,lastDroveAt}`, `vehicles.sections.attachments`, `drivers.sections.{personal,license,assignment}` | `apps/web/messages/pl.json`, `en.json` | web-agent |
 | 0 changes to `EntityDetailModal.tsx`, `tailwind.config.ts`, `globals.css` | — | — |
+
+### 6.19 Phase 6.1 — read-only modal "bigger + calmer" refresh (2026-05-28)
+
+> User feedback: «форма read-only маленькая, её бы сделать побольше, может агент ещё сможет улучшить ui». The previous `max-w-2xl` (672px) cramped the densest consumer (`VehicleDetailModal`, 7 sections of up to 9 rows + attachments). This sub-phase widens the modal and softens the section visual rhythm, **without changing the consumer API** (`EntityDetailModalProps` is unchanged except for an optional `section.span` field that defaults to `'half'`; all existing wrappers keep working with no edits).
+
+| Change | Where | Owner |
+|---|---|---|
+| `max-w-2xl` → `max-w-5xl` (1024px) | `EntityDetailModal.tsx` `<DialogContent>` className | web-agent |
+| Body wrapper: `space-y-5` → `grid grid-cols-1 gap-4 lg:grid-cols-2` | `EntityDetailModal.tsx` body zone | web-agent |
+| Body / header / footer padding: `lg:px-8` and `lg:py-6` (body) / `lg:pt-7` (header) | `EntityDetailModal.tsx` 3-zone wrappers | web-agent |
+| Section card: `rounded-lg border border-border p-4` → `rounded-xl border border-border/60 p-5` | `EntityDetailModal.tsx` section `<section>` | web-agent |
+| Section header: `mt-3` rows margin → header gets `pb-3 mb-3 border-b border-border/60`; icon `size={14}` → `size={15}`; label `text-xs font-bold tracking-wider` → `text-[11px] font-semibold tracking-[0.08em]` | `EntityDetailModal.tsx` section `<h3>` + body `<dl>` margin | web-agent |
+| Row grid: `sm:grid-cols-[minmax(0,9rem)_minmax(0,1fr)]` → add `lg:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]` (widen label column on `lg+`) | `EntityDetailModal.tsx` row `<div>` | web-agent |
+| Row vertical rhythm: `py-1.5` → `py-2`; always `divide-y divide-border/60` (drop the per-section opt-out) | `EntityDetailModal.tsx` `<dl>` + row `<div>` | web-agent |
+| New optional `EntityDetailSection.span?: 'half' \| 'full'`; shell applies `lg:col-span-2` when `'full'` | `EntityDetailModal.tsx` types + render | web-agent |
+| Set `span: 'full'` on vehicle «Pozwolenia» and «Załączniki»; on trailer «Wyposażenie» | `VehicleDetailModal.tsx`, `TrailerDetailModal.tsx` | web-agent |
+| 0 new tokens (radius `xl` already in scale; `border-border/60` is just an opacity util; no colour / shadow / font additions) | — | — |
+| 0 changes to consumer prop contracts beyond the additive `span?` field | — | — |
+
+### 6.20 Trailer equipment block — belts/mats + boolean toggles (2026-05-28)
+
+> **Problem statement (user feedback).** `TrailerSheet` § `sections.equipment` currently splits its 5 items into two disconnected groups: `belts` and `mats` sit in their own vertical stack at the top of the section (each rendered as `checkbox + min-w-[160px] label + a w-32` count `<Input>` that pops in to the **right** when the checkbox is on), while `airSuspension` / `certXl` / `multilock` live below in a separate `grid grid-cols-2 md:grid-cols-3`. The count input feels disconnected from its label (horizontal jump, different visual rhythm than the rest of the section), and the belts/mats rows look like an orphan block visually separated from the three "plain" booleans. Direct quote: *«maty и pasy все так же странно»*.
+>
+> **Decision — Approach 1 (compact equipment cards).** All 5 equipment items become **uniform card-cells** in a single responsive grid. The checkbox + label live on the top row of each cell; for `belts` / `mats`, when the checkbox is on, the count `<Input>` reveals **inside the same cell border, below the label** (vertical, not horizontal). Cells without a count (`airSuspension`, `certXl`, `multilock`) stay single-row. The grid is `grid grid-cols-2 md:grid-cols-3 gap-3`. No new tokens, no new animations, no new palette colors — `animate-slide-in` is reused.
+>
+> **Why this approach over the alternatives.**
+> - *Alt 2 (single grid, inline counts below label inside cell, but no border):* visually weaker — without a card border the count input still feels like a floating extra; doesn't communicate "this number belongs to this toggle".
+> - *Alt 3 (drop the boolean, treat count > 0 as "on"):* changes form semantics (Zod refine assumes `belts: boolean` distinct from `beltsCount: number?`) and breaks parity with the read-only `TrailerDetailModal` which renders `boolWithCount(flag, count)` — "Tak (N szt.)" assumes the flag is the source of truth. Rejected.
+> - *Approach 1 (chosen):* visual parity with the read-only modal (one row per item = one card per item), single grid for the whole section, no horizontal popping, mobile-safe (2 cols at 320px is comfortable with 12px gap).
+
+#### Layout — final structure
+
+```
+State: all-off ─────────────────────────────────────────────────────
+┌─────────────────────────── Wyposażenie ───────────────────────────┐
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐    │
+│  │ [ ] Pasy        │  │ [ ] Maty        │  │ [ ] Zaw. pneum. │    │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘    │
+│  ┌─────────────────┐  ┌─────────────────┐                         │
+│  │ [ ] Cert XL     │  │ [ ] Multilock   │                         │
+│  └─────────────────┘  └─────────────────┘                         │
+└────────────────────────────────────────────────────────────────────┘
+
+State: belts ON ────────────────────────────────────────────────────
+┌─────────────────────────── Wyposażenie ───────────────────────────┐
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐    │
+│  │ [x] Pasy        │  │ [ ] Maty        │  │ [ ] Zaw. pneum. │    │
+│  │ ┌─────────┐ szt.│  │                 │  │                 │    │
+│  │ │   12    │     │  │                 │  │                 │    │
+│  │ └─────────┘     │  │                 │  │                 │    │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘    │
+│  ┌─────────────────┐  ┌─────────────────┐                         │
+│  │ [ ] Cert XL     │  │ [ ] Multilock   │                         │
+│  └─────────────────┘  └─────────────────┘                         │
+└────────────────────────────────────────────────────────────────────┘
+
+State: belts ON + mats ON ──────────────────────────────────────────
+┌─────────────────────────── Wyposażenie ───────────────────────────┐
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐    │
+│  │ [x] Pasy        │  │ [x] Maty        │  │ [ ] Zaw. pneum. │    │
+│  │ ┌─────────┐ szt.│  │ ┌─────────┐ szt.│  │                 │    │
+│  │ │   12    │     │  │ │    6    │     │  │                 │    │
+│  │ └─────────┘     │  │ └─────────┘     │  │                 │    │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘    │
+│  ┌─────────────────┐  ┌─────────────────┐                         │
+│  │ [ ] Cert XL     │  │ [ ] Multilock   │                         │
+│  └─────────────────┘  └─────────────────┘                         │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+#### Tailwind classes — exact
+
+| Element | Classes |
+|---|---|
+| **Grid wrapper** | `grid grid-cols-2 md:grid-cols-3 gap-3` |
+| **Cell — base** (every cell, all 5 items) | `flex flex-col gap-2 rounded-lg border border-border bg-card px-3 py-2.5 text-sm transition-colors` |
+| **Cell — active state** (its checkbox is on; applies to all 5) | adds `border-brand/40 bg-brand/5` |
+| **Cell — focus-within** (any focusable inside cell) | adds `focus-within:border-brand focus-within:ring-1 focus-within:ring-brand/30` |
+| **Top row** (checkbox + label, all cells) | `flex items-center gap-2 text-text` (label wraps the `<Checkbox>` like elsewhere in the file) |
+| **Count row** (belts/mats only, rendered when flag is on) | `flex items-center gap-2 animate-slide-in` |
+| **Count `<Input>`** | `h-9 w-20 text-sm tabular-nums` (`type="number" min={0} step={1} inputMode="numeric"`) |
+| **Count "szt." suffix** | `text-xs text-text-sub` (uses existing `common.pcsShort` i18n key already used by `TrailerDetailModal`) |
+| **Count error message** (when `errs.beltsCount` / `errs.matsCount` is set) | `text-xs text-danger` (rendered below the count row, not inside it) |
+
+Notes:
+- We **reuse** `animate-slide-in` (`--animate-slide-in: slideIn 0.2s ease`, defined in `globals.css:83`). Today it translates **horizontally** (`translateX(-10px) → 0`); for the in-cell reveal the same animation reads fine — the 10px horizontal slide is barely noticeable inside a narrow cell but still telegraphs "something just appeared". No new keyframe is required.
+- The cell border uses existing `border-border` token; the "active" tint uses `border-brand/40 bg-brand/5` — the same opacity/brand pattern already used by `<WizardStepper>` active step and existing claim-card variants. No new palette entries.
+- We do **not** need a `min-h-[88px]` reserve on belts/mats cells: each item is its own card and CSS-grid cells auto-size per row, so only the row containing the expanded cell grows. Plain-boolean cells in the same row stay vertically centered (`items-center` on the top row + `flex-col` on the cell). This is intentionally different from the legacy "row" model where one expansion stretched the entire row of fields.
+
+#### Mobile behaviour (320px+)
+
+- At base (`< md`, i.e. < 768px) the grid is **2 columns**. With the Sheet's standard `w-[640px]` body and `px-6` padding, each cell on tablet is ~280px wide; on a 320px phone (Sheet collapses to full-width minus padding ≈ 296px) each cell is ~140px — still comfortable for a checkbox + 6–14 char label (`Pasy`, `Maty`, `Cert XL`, `Multilock`, `Zaw. pneum.` — longest is 11 chars).
+- The count `<Input>` (`w-20` = 80px) + "szt." suffix (~28px) + gap (8px) = 116px — fits comfortably inside a 140px cell with `px-3` (12px) padding each side (140 − 24 = 116). No horizontal scroll at 320px.
+- The 5th item (last cell in a 2-col grid → odd-one-out) renders alone in the bottom row. Acceptable — same pattern as the existing `<VehicleSheet>` permissions grid. No `col-span` hack.
+
+#### Anti-patterns to avoid (web-agent)
+
+- Do **not** wrap the cells in `<Card>` (shadcn `<Card>` carries its own padding/shadow and is meant for page-level surfaces). Use a plain `<div>` with the classes above.
+- Do **not** introduce `min-h-[88px]` on belts/mats cells "just in case" — CSS grid + `flex-col` already handles the height delta cleanly per row.
+- Do **not** keep the `min-w-[160px]` label hack from the legacy layout — labels are inside cells now, the cell width is the container.
+- Do **not** invent a new keyframe (`slideDown`, `expand`, etc.). `animate-slide-in` is fine; if the horizontal slide ever feels off in QA, that's a follow-up doc change, not a per-component override.
+
+#### Schema / form contract — unchanged
+
+- `belts: boolean`, `beltsCount: number?`, `mats: boolean`, `matsCount: number?`. Zod refine (`trailerCountsRefine`) still requires the count when its flag is `true`. Form `register` calls are identical to the current implementation — only the JSX wrapper structure changes.
+- The block must render identically in **standalone** and **wizard** mode (`TrailerSheet` `mode` prop). No conditional layout based on `mode`.
+
+#### Owner / scope
+
+| Change | Where | Owner |
+|---|---|---|
+| Replace belts/mats stacked rows + 3-up grid with **single 5-cell equipment grid** | `apps/web/app/(employee)/employee/trailers/TrailerSheet.tsx`, the `FormSection title={t('sections.equipment')}` block (currently ~lines 438–520) | web-agent |
+| 0 changes to `tailwind.config.ts`, `globals.css`, palette, i18n | — | — |
+| 0 changes to `CreateTrailerSchema` / `trailerCountsRefine` | — | — |
+| 0 changes to `TrailerDetailModal` (read-only renderer keeps its `boolWithCount` row pattern) | — | — |
 
 ---
 

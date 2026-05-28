@@ -42,6 +42,11 @@ export interface EntityDetailSection {
   /** Optional decorative Lucide icon for the section header. */
   icon?: ComponentType<SVGProps<SVGSVGElement> & { size?: number }>;
   rows: EntityDetailRow[];
+  /** Grid span on ≥`lg`. Default `'half'` (one column of the 2-col grid);
+   *  `'full'` makes the section card span both columns. Used for attachments,
+   *  ≥8-row permission grids, and single-multi-line-value sections (§6.4,
+   *  §6.19). */
+  span?: 'half' | 'full';
 }
 
 export interface EntityDetailModalProps {
@@ -87,9 +92,9 @@ export function EntityDetailModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/* Override the primitive's default `max-w-md` + blanket `p-6`; this
           component owns its own 3-zone padding (§6.2). */}
-      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col p-0">
+      <DialogContent className="max-w-5xl max-h-[85vh] flex flex-col p-0">
         {/* ── Header (fixed) ─────────────────────────────────── */}
-        <div className="shrink-0 border-b border-border px-6 pt-6 pb-4 pr-12">
+        <div className="shrink-0 border-b border-border px-6 pt-6 pb-4 pr-12 lg:px-8 lg:pt-7">
           <DialogTitle className="text-[17px] font-bold leading-tight text-text">
             {title}
           </DialogTitle>
@@ -110,33 +115,42 @@ export function EntityDetailModal({
         </div>
 
         {/* ── Body (scrollable) ──────────────────────────────── */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-          <div className="space-y-5">
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 lg:px-8 lg:py-6">
+          {/* Sections in a responsive grid: single column < lg, two columns
+              on lg+. Sections with `span: 'full'` occupy both columns on lg+
+              (§6.4, §6.19). */}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {sections.map((section, sIdx) => {
               const Icon = section.icon;
+              const isFull = section.span === 'full';
               return (
                 <section
                   key={sIdx}
-                  className="rounded-lg border border-border bg-card p-4"
+                  className={cn(
+                    'rounded-xl border border-border/60 bg-card p-5',
+                    isFull && 'lg:col-span-2',
+                  )}
                 >
-                  <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-text-sub">
+                  <h3 className="flex items-center gap-2 pb-3 mb-3 border-b border-border/60 text-[11px] font-semibold uppercase tracking-[0.08em] text-text-sub">
                     {Icon ? (
                       <Icon
-                        size={14}
+                        size={15}
                         className="text-text-sub"
                         aria-hidden="true"
                       />
                     ) : null}
                     {section.title}
                   </h3>
-                  <dl className="mt-3 divide-y divide-border/60">
+                  <dl className="divide-y divide-border/60">
                     {section.rows.map((row, rIdx) => (
                       <div
                         key={rIdx}
                         className={cn(
-                          'grid gap-x-4 gap-y-1 py-1.5',
+                          'grid gap-x-4 gap-y-1 py-2',
                           // Two-column ≥sm; stacks below sm (§6.5, §6.7).
-                          'grid-cols-1 sm:grid-cols-[minmax(0,9rem)_minmax(0,1fr)]',
+                          // Widen label column on lg+ since the modal itself
+                          // is wider (§6.5, §6.19).
+                          'grid-cols-1 sm:grid-cols-[minmax(0,9rem)_minmax(0,1fr)] lg:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]',
                         )}
                       >
                         <dt className="self-start text-xs font-medium text-text-sub sm:text-sm">
@@ -155,7 +169,7 @@ export function EntityDetailModal({
         </div>
 
         {/* ── Footer (fixed) ─────────────────────────────────── */}
-        <div className="shrink-0 border-t border-border px-6 py-4">
+        <div className="shrink-0 border-t border-border px-6 py-4 lg:px-8">
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
             {meta != null ? (
               <p className="text-xs text-text-sub">{meta}</p>

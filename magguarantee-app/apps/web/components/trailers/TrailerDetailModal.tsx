@@ -139,6 +139,8 @@ export function TrailerDetailModal({
     {
       title: t('sections.equipment'),
       icon: Package,
+      // 6 rows including a free-text «Notatki» row — too tall to pair (§6.17).
+      span: 'full',
       rows: [
         {
           label: f('belts'),

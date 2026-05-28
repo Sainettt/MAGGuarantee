@@ -437,84 +437,123 @@ export function TrailerSheet({
 
               <FormSection title={t('sections.equipment')}>
                 {/*
-                  belts + mats live OUTSIDE the equipment grid below — their
-                  inline count input would otherwise stretch the whole grid
-                  row when revealed. Layout is checkbox|label|<count input on
-                  the right>, all inside a fixed-height row so toggling the
-                  checkbox doesn't shove neighbouring fields around.
+                  Unified equipment grid — see docs/14-design-system.md § 6.20.
+                  All 5 toggles render as uniform card-cells. Belts/mats reveal
+                  their count <Input> INSIDE the same cell (below the label),
+                  so toggling never stretches a sibling cell's row. The active
+                  border/bg tint mirrors the WizardStepper active-step pattern
+                  and reuses the existing `animate-slide-in` keyframe — no new
+                  tokens, no new keyframes.
                 */}
-                <div className="space-y-2 mb-3">
-                  <div className="flex items-center gap-3 min-h-[40px]">
-                    <label className="flex items-center gap-2 text-text text-sm shrink-0 min-w-[160px]">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {/* Belts cell — count reveals inline when flag is on */}
+                  <div
+                    className={`flex flex-col gap-2 rounded-lg border bg-card px-3 py-2.5 text-sm transition-colors focus-within:border-brand focus-within:ring-1 focus-within:ring-brand/30 ${
+                      beltsOn
+                        ? 'border-brand/40 bg-brand/5'
+                        : 'border-border'
+                    }`}
+                  >
+                    <label className="flex items-center gap-2 text-text">
                       <Checkbox {...form.register('belts')} />
                       {t('fields.belts')}
                     </label>
                     {beltsOn && (
-                      <div className="w-32 animate-slide-in">
-                        <Input
-                          id="trailer-beltsCount"
-                          type="number"
-                          min={0}
-                          step={1}
-                          inputMode="numeric"
-                          aria-label={t('fields.beltsCount')}
-                          aria-invalid={!!errs.beltsCount}
-                          placeholder={t('fields.beltsCount')}
-                          {...form.register('beltsCount', {
-                            setValueAs: (v) =>
-                              v === '' || v === null ? undefined : Number(v),
-                          })}
-                        />
+                      <>
+                        <div className="flex items-center gap-2 animate-slide-in">
+                          <Input
+                            id="trailer-beltsCount"
+                            type="number"
+                            min={0}
+                            step={1}
+                            inputMode="numeric"
+                            aria-label={t('fields.beltsCount')}
+                            aria-invalid={!!errs.beltsCount}
+                            className="h-9 w-20 text-sm tabular-nums"
+                            {...form.register('beltsCount', {
+                              setValueAs: (v) =>
+                                v === '' || v === null
+                                  ? undefined
+                                  : Number(v),
+                            })}
+                          />
+                          <span className="text-xs text-text-sub">
+                            {tCommon('pcsShort')}
+                          </span>
+                        </div>
                         {errs.beltsCount?.message && (
-                          <p className="mt-1 text-xs text-danger">
+                          <p className="text-xs text-danger">
                             {errs.beltsCount.message as string}
                           </p>
                         )}
-                      </div>
+                      </>
                     )}
                   </div>
-                  <div className="flex items-center gap-3 min-h-[40px]">
-                    <label className="flex items-center gap-2 text-text text-sm shrink-0 min-w-[160px]">
+
+                  {/* Mats cell — count reveals inline when flag is on */}
+                  <div
+                    className={`flex flex-col gap-2 rounded-lg border bg-card px-3 py-2.5 text-sm transition-colors focus-within:border-brand focus-within:ring-1 focus-within:ring-brand/30 ${
+                      matsOn
+                        ? 'border-brand/40 bg-brand/5'
+                        : 'border-border'
+                    }`}
+                  >
+                    <label className="flex items-center gap-2 text-text">
                       <Checkbox {...form.register('mats')} />
                       {t('fields.mats')}
                     </label>
                     {matsOn && (
-                      <div className="w-32 animate-slide-in">
-                        <Input
-                          id="trailer-matsCount"
-                          type="number"
-                          min={0}
-                          step={1}
-                          inputMode="numeric"
-                          aria-label={t('fields.matsCount')}
-                          aria-invalid={!!errs.matsCount}
-                          placeholder={t('fields.matsCount')}
-                          {...form.register('matsCount', {
-                            setValueAs: (v) =>
-                              v === '' || v === null ? undefined : Number(v),
-                          })}
-                        />
+                      <>
+                        <div className="flex items-center gap-2 animate-slide-in">
+                          <Input
+                            id="trailer-matsCount"
+                            type="number"
+                            min={0}
+                            step={1}
+                            inputMode="numeric"
+                            aria-label={t('fields.matsCount')}
+                            aria-invalid={!!errs.matsCount}
+                            className="h-9 w-20 text-sm tabular-nums"
+                            {...form.register('matsCount', {
+                              setValueAs: (v) =>
+                                v === '' || v === null
+                                  ? undefined
+                                  : Number(v),
+                            })}
+                          />
+                          <span className="text-xs text-text-sub">
+                            {tCommon('pcsShort')}
+                          </span>
+                        </div>
                         {errs.matsCount?.message && (
-                          <p className="mt-1 text-xs text-danger">
+                          <p className="text-xs text-danger">
                             {errs.matsCount.message as string}
                           </p>
                         )}
-                      </div>
+                      </>
                     )}
                   </div>
-                </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
+                  {/* Plain-boolean cells — single row, active tint mirrors belts/mats */}
                   {(['airSuspension', 'certXl', 'multilock'] as const).map(
-                    (key) => (
-                      <label
-                        key={key}
-                        className="flex items-center gap-2 text-text"
-                      >
-                        <Checkbox {...form.register(key)} />
-                        {t(`fields.${key}`)}
-                      </label>
-                    ),
+                    (key) => {
+                      const on = form.watch(key) === true;
+                      return (
+                        <div
+                          key={key}
+                          className={`flex flex-col gap-2 rounded-lg border bg-card px-3 py-2.5 text-sm transition-colors focus-within:border-brand focus-within:ring-1 focus-within:ring-brand/30 ${
+                            on
+                              ? 'border-brand/40 bg-brand/5'
+                              : 'border-border'
+                          }`}
+                        >
+                          <label className="flex items-center gap-2 text-text">
+                            <Checkbox {...form.register(key)} />
+                            {t(`fields.${key}`)}
+                          </label>
+                        </div>
+                      );
+                    },
                   )}
                 </div>
                 <FormField
