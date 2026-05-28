@@ -115,7 +115,15 @@ export class VehiclesController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @Roles('admin', 'opiekun')
-  @OpiekunOwns('carrierId', 'body', 'carrierId')
+  // NOTE: deliberately NO `@OpiekunOwns('carrierId', 'body', 'carrierId')`
+  // here. Guards run BEFORE interceptors in NestJS, and this endpoint uses
+  // `FileFieldsInterceptor` (multer) to parse multipart/form-data. At guard
+  // time `req.body` is still empty (Express body-parser doesn't touch
+  // multipart), so the guard would always 400 with
+  // «Brak identyfikatora zasobu (body.carrierId)» for opiekun callers — even
+  // though `carrierId` IS in the payload. The carrier-ownership check is
+  // performed at the service layer via `_assertCarrierAccessibleForWrite`
+  // (vehicles.service.ts), which runs after Zod parses the multipart body.
   @UseInterceptors(
     FileFieldsInterceptor(ATTACHMENT_UPLOAD_FIELDS, MULTIPART_OPTIONS),
   )

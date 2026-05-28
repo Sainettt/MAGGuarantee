@@ -42,10 +42,34 @@ async function rawFetch(path: string, init: RequestInit): Promise<Response> {
   return fetch(buildUrl(path), { ...init, credentials: 'include' });
 }
 
+// Single-flight для /auth/refresh. Если несколько запросов одновременно
+// получили 401, они должны разделить ОДИН вызов /auth/refresh — иначе
+// первый ротирует refresh-токен, а второй приходит с уже-revoked токеном,
+// сервер считает это reuse-attack и ревокает все сессии юзера.
+//
+// Храним true/false, а не Response: ответ /auth/refresh нельзя честно
+// "размножить" между несколькими await'ами (body — single-use stream), да
+// и нам нужно от него только «получилось / нет».
+let inflightRefresh: Promise<boolean> | null = null;
+
+function refreshOnce(): Promise<boolean> {
+  if (inflightRefresh) return inflightRefresh;
+  inflightRefresh = rawFetch(AUTH_REFRESH_PATH, { method: 'POST' })
+    .then((res) => res.ok)
+    .catch(() => false)
+    .finally(() => {
+      inflightRefresh = null;
+    });
+  return inflightRefresh;
+}
+
 /**
  * Issue an authenticated request. On a 401 from a non-refresh endpoint, try
  * one refresh call and replay the original request. If that refresh also
  * returns 401, throw — callers (e.g. `useAuth`) treat that as anonymous.
+ *
+ * Параллельные 401-ответы делят ОДИН вызов `/auth/refresh` через
+ * `refreshOnce()` — см. комментарий у `inflightRefresh` выше.
  */
 export async function fetchWithRefresh(
   path: string,
@@ -55,8 +79,8 @@ export async function fetchWithRefresh(
   if (res.status !== 401 || path.includes('/auth/refresh') || path.includes('/auth/login') || path.includes('/auth/verify-code')) {
     return res;
   }
-  const refresh = await rawFetch(AUTH_REFRESH_PATH, { method: 'POST' });
-  if (!refresh.ok) return res;
+  const refreshed = await refreshOnce();
+  if (!refreshed) return res;
   res = await rawFetch(path, init);
   return res;
 }
