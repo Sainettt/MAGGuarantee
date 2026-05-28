@@ -32,6 +32,14 @@ export interface DriverRow {
 
 export interface DriverListFilters {
   carrierId?: string;
+  /**
+   * Phase 5.1 union-scope path (`DriversService._scopeFilters`) — opiekun
+   * without an explicit `carrierId` filter sees the union of their owned
+   * carriers' drivers. Mirrors the vehicles repo so the single SQL query
+   * still narrows by the FK index. `carrierId` (if also set) wins; an empty
+   * `carrierIds: []` short-circuits to 0 rows (Postgres can't `IN ()`).
+   */
+  carrierIds?: string[];
   active?: boolean;
   q?: string;
   cursor?: string;
@@ -68,7 +76,19 @@ export class DriversRepository {
 
   async list(filters: DriverListFilters): Promise<DriverRow[]> {
     const where: Record<string, unknown> = {};
-    if (filters.carrierId) where.carrierId = filters.carrierId;
+    // `carrierId` and `carrierIds` are both narrowing filters; the service
+    // never sends both. If a future caller does, explicit `carrierId` wins.
+    if (filters.carrierId) {
+      where.carrierId = filters.carrierId;
+    } else if (filters.carrierIds) {
+      if (filters.carrierIds.length === 0) {
+        // Empty union → 0 rows. Postgres rejects `IN ()`, so we short-circuit
+        // with an impossible id filter and keep the canonical empty-page shape.
+        where.id = '__no_such_driver__';
+      } else {
+        where.carrierId = { in: filters.carrierIds };
+      }
+    }
     if (typeof filters.active === 'boolean') where.active = filters.active;
     if (filters.q) {
       where.OR = [

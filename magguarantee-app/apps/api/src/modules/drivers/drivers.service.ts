@@ -245,21 +245,27 @@ export class DriversService {
   private async _scopeFilters(
     user: AuthUser,
     filters: DriverFilters,
-  ): Promise<DriverFilters> {
+  ): Promise<DriverFilters & { carrierIds?: string[] }> {
     if (user.role === 'admin') return filters;
     if (user.role === 'opiekun') {
-      if (!filters.carrierId) {
-        throw new UnprocessableEntityException(
-          'Opiekun musi wskazać `carrierId` w zapytaniu',
-        );
+      // Phase 5.1 — mirror VehiclesService._scopeFilters: opiekun no longer
+      // needs to pass `carrierId`. Without one we narrow to the union of
+      // their owned carriers' drivers; with one we verify it's in the union
+      // (else 403) and keep the FK-indexed `carrierId =` path.
+      const opiekunCarriers = await this.carriers.list({
+        opiekunId: user.sub,
+        limit: 200,
+      });
+      const ownedIds = opiekunCarriers.map((c) => c.id);
+      if (filters.carrierId) {
+        if (!ownedIds.includes(filters.carrierId)) {
+          throw new ForbiddenException(
+            'Nie masz uprawnień do tego przewoźnika',
+          );
+        }
+        return filters;
       }
-      const carrier = await this.carriers.findById(filters.carrierId);
-      if (!carrier || carrier.opiekunId !== user.sub) {
-        throw new ForbiddenException(
-          'Nie masz uprawnień do tego przewoźnika',
-        );
-      }
-      return filters;
+      return { ...filters, carrierIds: ownedIds };
     }
     if (user.role === 'przewoznik') {
       const list = await this.carriers.list({ limit: 200 });
