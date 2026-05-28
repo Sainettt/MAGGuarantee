@@ -48,7 +48,7 @@ const EMPTY_DEFAULTS: CreateDriverDto = {
   phone: '',
   phone2: '',
   email: '',
-  driverLicenseNumber: '',
+  passportNumber: '',
   // licenseExpiry is now NOT NULL (phase3_blocks). Empty string keeps the
   // <input type="date"> controlled; Zod's IsoDateSchema rejects "" on submit.
   licenseExpiry: '',
@@ -128,7 +128,7 @@ export function DriverSheet({
         phone: driver.phone ?? '',
         phone2: driver.phone2 ?? '',
         email: driver.email ?? '',
-        driverLicenseNumber: driver.driverLicenseNumber ?? '',
+        passportNumber: driver.passportNumber ?? '',
         licenseExpiry: driver.licenseExpiry ?? '',
         notes: driver.notes ?? '',
         active: driver.active,
@@ -326,14 +326,14 @@ export function DriverSheet({
                   />
                 </FormField>
                 <FormField
-                  label={t('fields.driverLicenseNumber')}
+                  label={t('fields.passportNumber')}
                   required
-                  error={errs.driverLicenseNumber?.message}
+                  error={errs.passportNumber?.message}
                   htmlFor="driver-license"
                 >
                   <Input
                     id="driver-license"
-                    {...form.register('driverLicenseNumber')}
+                    {...form.register('passportNumber')}
                   />
                 </FormField>
                 <FormField

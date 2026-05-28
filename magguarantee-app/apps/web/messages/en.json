@@ -468,7 +468,7 @@
       "phone": "Phone",
       "phone2": "Phone (secondary)",
       "email": "E-mail",
-      "driverLicenseNumber": "Driver license number",
+      "passportNumber": "Passport number",
       "licenseExpiry": "License expiry",
       "notes": "Notes",
       "active": "Active"
@@ -872,6 +872,12 @@
       "openDetail": "Open",
       "openDetailAria": "Open details for carrier {firma}"
     },
+    "card": {
+      "jezdzace": "Driving",
+      "stojace": "Standing",
+      "nieaktywne": "Inactive",
+      "potencjalne": "Potential"
+    },
     "detail": {
       "backToList": "← Back to list",
       "loadingTitle": "Loading carrier…",
@@ -907,7 +913,7 @@
       "columns": {
         "name": "Full name",
         "phone": "Phone",
-        "license": "Driver license number",
+        "passport": "Passport number",
         "active": "Status"
       }
     },
@@ -1141,7 +1147,7 @@
         "columns": {
           "name": "Full name",
           "phone": "Phone",
-          "license": "License number",
+          "passport": "Passport number",
           "status": "Status"
         }
       },

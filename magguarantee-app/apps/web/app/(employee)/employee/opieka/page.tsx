@@ -15,135 +15,28 @@
 // see a generic «failed to load» state — acceptable for now since direct
 // typing is the only way to land here.
 //
-// A row click navigates to the carrier-detail drill-down at
+// Phase 5.2 redesign — carriers are now rendered as a responsive card grid
+// (see `<OpiekunCarrierCard>`) instead of an 8-column DataTable. The KPI
+// strip above is unchanged. Whole-card click navigates to the drill-down at
 // `/employee/opieka/carriers/[login]` for a per-entity (vehicles / drivers /
 // trailers) read-only inspection view.
 
 import { Building2, Car, CircleSlash2, HeartHandshake, Plus, Truck } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import Link from 'next/link';
-import { useMemo } from 'react';
-import type { OpiekunCarrierStats } from '@magguarantee/shared';
 
 import { KpiCard } from '@/components/dashboard/KpiCard';
-import { Badge } from '@/components/ui/Badge';
-import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
+import OpiekunCarrierCard, {
+  OpiekunCarrierCardSkeleton,
+} from '@/components/opieka/OpiekunCarrierCard';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useOpiekunFleet } from '@/lib/hooks/useOpiekunFleet';
 
 export default function OpiekaPage() {
   const t = useTranslations('opieka');
-  const tCommon = useTranslations('common');
   const { data, isLoading } = useOpiekunFleet();
 
   const carriers = data?.carriers ?? [];
   const totals = data?.totals;
-
-  const columns = useMemo<DataTableColumn<OpiekunCarrierStats>[]>(
-    () => [
-      {
-        id: 'firma',
-        header: t('table.firma'),
-        width: 'flex',
-        className: 'min-w-[220px]',
-        cell: (row) => (
-          <div className="flex flex-col gap-0.5 min-w-0">
-            <span
-              className="font-semibold truncate"
-              title={row.firma ?? row.nazwa ?? row.login}
-            >
-              {row.firma ?? row.nazwa ?? row.login}
-            </span>
-            <span className="text-xs text-text-sub font-mono truncate">
-              {row.login}
-            </span>
-          </div>
-        ),
-      },
-      {
-        id: 'nip',
-        header: t('table.nip'),
-        width: 'tight',
-        cell: (row) => (
-          <span className="font-mono tabular-nums">{row.nip}</span>
-        ),
-      },
-      {
-        id: 'active',
-        header: t('table.active'),
-        width: 'tight',
-        cell: (row) =>
-          row.aktywny ? (
-            <Badge variant="success">{tCommon('active')}</Badge>
-          ) : (
-            <Badge variant="muted">{tCommon('inactive')}</Badge>
-          ),
-      },
-      {
-        id: 'jezdzace',
-        header: t('table.jezdzace'),
-        align: 'right',
-        width: 'tight',
-        cell: (row) => (
-          <span className="tabular-nums font-semibold text-success">
-            {row.vehicles.jezdzace}
-          </span>
-        ),
-      },
-      {
-        id: 'stojace',
-        header: t('table.stojace'),
-        align: 'right',
-        width: 'tight',
-        cell: (row) => (
-          <span className="tabular-nums font-semibold text-warning">
-            {row.vehicles.stojace}
-          </span>
-        ),
-      },
-      {
-        id: 'nieaktywne',
-        header: t('table.nieaktywne'),
-        align: 'right',
-        width: 'tight',
-        cell: (row) => (
-          <span className="tabular-nums text-text-sub">
-            {row.vehicles.nieaktywne}
-          </span>
-        ),
-      },
-      {
-        id: 'potencjalne',
-        header: t('table.potencjalne'),
-        align: 'right',
-        width: 'tight',
-        cell: (row) => (
-          <span className="tabular-nums text-info">
-            {row.vehicles.potencjalne}
-          </span>
-        ),
-      },
-      {
-        id: 'actions',
-        header: <span className="sr-only">{t('table.actions')}</span>,
-        align: 'right',
-        width: 'tight',
-        cell: (row) => (
-          <Link
-            href={`/employee/opieka/carriers/${encodeURIComponent(row.login)}`}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs font-semibold text-text hover:bg-brand-50 dark:hover:bg-brand/10 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand/40 transition-colors"
-            aria-label={t('table.openDetailAria', {
-              firma: row.firma ?? row.nazwa ?? row.login,
-            })}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {t('table.openDetail')}
-          </Link>
-        ),
-      },
-    ],
-    [t, tCommon],
-  );
 
   return (
     <section className="px-4 sm:px-6 lg:px-10 xl:px-12 py-8">
@@ -202,20 +95,28 @@ export default function OpiekaPage() {
         />
       </div>
 
-      <DataTable
-        rows={carriers}
-        columns={columns}
-        rowKey={(r) => r.carrierId}
-        isLoading={isLoading}
-        loadingLabel={tCommon('loading')}
-        empty={
-          <EmptyState
-            icon={HeartHandshake}
-            title={t('emptyTitle')}
-            message={t('emptyMessage')}
-          />
-        }
-      />
+      {/* Carrier list — Phase 5.2 card grid. Loading renders 6 skeleton
+          cards in the same grid layout; empty state replaces the grid
+          entirely (per docs/14 § 5.2.7). */}
+      {isLoading ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <OpiekunCarrierCardSkeleton key={i} />
+          ))}
+        </div>
+      ) : carriers.length === 0 ? (
+        <EmptyState
+          icon={HeartHandshake}
+          title={t('emptyTitle')}
+          message={t('emptyMessage')}
+        />
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
+          {carriers.map((carrier) => (
+            <OpiekunCarrierCard key={carrier.carrierId} carrier={carrier} />
+          ))}
+        </div>
+      )}
     </section>
   );
 }

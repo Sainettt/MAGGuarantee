@@ -102,9 +102,9 @@ export default function DriversPage() {
         cell: (row) => row.phone ?? '—',
       },
       {
-        id: 'license',
-        header: t('fields.driverLicenseNumber'),
-        cell: (row) => row.driverLicenseNumber ?? '—',
+        id: 'passport',
+        header: t('fields.passportNumber'),
+        cell: (row) => row.passportNumber ?? '—',
       },
       {
         id: 'active',

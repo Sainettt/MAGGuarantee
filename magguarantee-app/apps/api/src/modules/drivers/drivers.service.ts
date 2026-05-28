@@ -83,7 +83,7 @@ export class DriversService {
         phone2: dto.phone2 ?? null,
         // Optional per phase3_blocks_audit_revert.
         email: dto.email ?? null,
-        driverLicenseNumber: dto.driverLicenseNumber,
+        passportNumber: dto.passportNumber,
         licenseExpiry: dto.licenseExpiry ? new Date(dto.licenseExpiry) : null,
         notes: dto.notes ?? null,
         active: dto.active,
@@ -113,7 +113,7 @@ export class DriversService {
       'phone',
       'phone2',
       'email',
-      'driverLicenseNumber',
+      'passportNumber',
       'notes',
       'active',
     ];
@@ -291,7 +291,7 @@ export class DriversService {
       phone: row.phone,
       phone2: row.phone2,
       email: row.email,
-      driverLicenseNumber: row.driverLicenseNumber,
+      passportNumber: row.passportNumber,
       // Nullable per phase3_blocks_audit_revert.
       licenseExpiry: row.licenseExpiry ? row.licenseExpiry.toISOString().slice(0, 10) : null,
       notes: row.notes,

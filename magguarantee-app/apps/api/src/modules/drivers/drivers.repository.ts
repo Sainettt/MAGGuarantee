@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 /**
  * Row shape returned by the driver repository.
  *
- * `phone` and `driverLicenseNumber` are non-nullable since the phase-2
+ * `phone` and `passportNumber` are non-nullable since the phase-2
  * migration. `email` and `licenseExpiry` are non-nullable since
  * phase3_blocks.
  */
@@ -20,7 +20,7 @@ export interface DriverRow {
   // Nullable per phase3_blocks_audit_revert (drivers in PL trucking often
   // don't have email; license may be unknown at registration).
   email: string | null;
-  driverLicenseNumber: string;
+  passportNumber: string;
   licenseExpiry: Date | null;
   notes: string | null;
   active: boolean;
@@ -117,7 +117,7 @@ export class DriversRepository {
     phone: string;
     phone2?: string | null;
     email?: string | null;
-    driverLicenseNumber: string;
+    passportNumber: string;
     licenseExpiry?: Date | null;
     notes?: string | null;
     active?: boolean;
@@ -131,7 +131,7 @@ export class DriversRepository {
         phone: data.phone,
         phone2: data.phone2 ?? null,
         email: data.email ?? null,
-        driverLicenseNumber: data.driverLicenseNumber,
+        passportNumber: data.passportNumber,
         licenseExpiry: data.licenseExpiry ?? null,
         notes: data.notes ?? null,
         active: data.active ?? true,
@@ -191,7 +191,7 @@ export class DriversRepository {
       phone: row.phone ?? '',
       phone2: row.phone2,
       email: row.email,
-      driverLicenseNumber: row.driverLicenseNumber ?? '',
+      passportNumber: row.passportNumber ?? '',
       licenseExpiry: row.licenseExpiry,
       notes: row.notes,
       active: row.active,
@@ -224,7 +224,7 @@ interface DriverPrismaShape {
   phone: string | null;
   phone2: string | null;
   email: string | null;
-  driverLicenseNumber: string | null;
+  passportNumber: string | null;
   licenseExpiry: Date | null;
   notes: string | null;
   active: boolean;

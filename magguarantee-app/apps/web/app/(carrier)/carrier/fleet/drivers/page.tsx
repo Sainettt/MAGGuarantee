@@ -55,9 +55,9 @@ export default function CarrierDriversPage() {
         cell: (row) => row.phone ?? '—',
       },
       {
-        id: 'license',
-        header: tColumns('license'),
-        cell: (row) => row.driverLicenseNumber ?? '—',
+        id: 'passport',
+        header: tColumns('passport'),
+        cell: (row) => row.passportNumber ?? '—',
       },
       {
         id: 'active',

@@ -143,7 +143,8 @@
 | `loginSlug` | уникальный slug `имя.фамилия` (с суффиксом -2/-3 при коллизии) |
 | `firstName`, `lastName` | имя |
 | `phone`, `phone2`, `email` | контакты |
-| `driverLicenseNumber`, `licenseExpiry` | права |
+| `passportNumber` | номер паспорта (раньше — `driverLicenseNumber`, переименовано 2026-05-28) |
+| `licenseExpiry` | срок действия водительского удостоверения |
 | `active` | флаг |
 
 ### `Trailer` — прицеп

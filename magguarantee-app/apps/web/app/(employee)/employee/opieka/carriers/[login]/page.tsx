@@ -320,9 +320,9 @@ function DriversTable({ rows, isLoading }: DriversTableProps) {
         cell: (row) => row.phone ?? '—',
       },
       {
-        id: 'license',
-        header: t('columns.license'),
-        cell: (row) => row.driverLicenseNumber ?? '—',
+        id: 'passport',
+        header: t('columns.passport'),
+        cell: (row) => row.passportNumber ?? '—',
       },
       {
         id: 'active',

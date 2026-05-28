@@ -293,10 +293,14 @@ model Driver {
   // phone is the primary channel. Required at the API/Zod level only when
   // the form context demands it.
   email               String?
-  driverLicenseNumber String
-  // Required for legally driving but not always digitized at registration
-  // time. UI surfaces a warning, not a hard block.
-  licenseExpiry       DateTime? @db.Date
+  // Renamed from `driverLicenseNumber` on 2026-05-28 — the column now stores
+  // a passport number, not a driving-license number. DB column was renamed
+  // in-place via ALTER TABLE … RENAME COLUMN (no data loss). Column name
+  // stays camelCase to match the rest of this table's convention.
+  passportNumber String
+  // Driving-license expiry is unrelated to the passport above — kept as-is
+  // because it's still a real attribute we track for the driver.
+  licenseExpiry  DateTime? @db.Date
   notes               String?
   active              Boolean   @default(true)
   addedAt             DateTime  @default(now())

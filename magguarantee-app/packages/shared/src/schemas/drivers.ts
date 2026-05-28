@@ -5,8 +5,13 @@
 // `-2`/`-3` suffix on collision, generated from firstName.lastName).
 //
 // Phase 2 migration `phase2_required_fields_carrier_driver_trailer` made
-// `phone` and `driverLicenseNumber` NOT NULL — both are required on create
+// `phone` and `passportNumber` NOT NULL — both are required on create
 // and non-nullable in the response DTO.
+//
+// 2026-05-28 — `driverLicenseNumber` was renamed to `passportNumber` (column
+// rename in migration `20260528120000_driver_rename_license_to_passport`).
+// Validation rule unchanged: arbitrary string 1–64 chars (foreign drivers can
+// have non-standard formats, we don't lock a regex).
 
 import { z } from 'zod';
 
@@ -25,7 +30,7 @@ const PhoneRequiredSchema = z.string().min(1).max(32);
 /** Optional phone (e.g. `phone2`) — same length cap, allows undefined. */
 const PhoneOptionalSchema = z.string().min(1).max(32);
 const EmailSchema = z.string().email().max(160);
-const DriverLicenseSchema = z.string().min(1).max(64);
+const PassportNumberSchema = z.string().min(1).max(64);
 
 // ─── Create ──────────────────────────────────────────────
 
@@ -34,7 +39,7 @@ const DriverLicenseSchema = z.string().min(1).max(64);
  * a carrier user posts), the service falls back to `currentUser.carrierProfile.id`
  * per the spec. `loginSlug` is server-generated from `firstName.lastName`.
  *
- * `phone` and `driverLicenseNumber` are required since the phase-2 migration
+ * `phone` and `passportNumber` are required since the phase-2 migration
  * made the underlying columns NOT NULL.
  */
 export const CreateDriverSchema = z
@@ -49,7 +54,7 @@ export const CreateDriverSchema = z
     // valid license is illegal — the column itself is nullable to tolerate
     // migrations/imports.
     email: emptyStringToUndefined(EmailSchema.optional()),
-    driverLicenseNumber: DriverLicenseSchema,
+    passportNumber: PassportNumberSchema,
     licenseExpiry: IsoDateSchema,
     notes: emptyStringToUndefined(z.string().max(2_000).optional()),
     active: z.boolean().optional(),
@@ -61,7 +66,7 @@ export type CreateDriverDto = z.infer<typeof CreateDriverSchema>;
 
 /**
  * PATCH /drivers/:id — every field optional. Required-on-create columns
- * (`phone`, `driverLicenseNumber`) drop the `.nullable()` they used to have
+ * (`phone`, `passportNumber`) drop the `.nullable()` they used to have
  * because the DB no longer accepts NULL there. Empty form strings are
  * coerced to `undefined` (i.e. "leave field unchanged").
  */
@@ -74,7 +79,7 @@ export const UpdateDriverSchema = z
     // The following three fields are NOT NULL since phase3_blocks. PATCH
     // accepts an update (omit means "do not touch") but cannot null them.
     email: emptyStringToUndefined(EmailSchema.optional()),
-    driverLicenseNumber: emptyStringToUndefined(DriverLicenseSchema.optional()),
+    passportNumber: emptyStringToUndefined(PassportNumberSchema.optional()),
     licenseExpiry: emptyStringToUndefined(IsoDateSchema.optional()),
     notes: emptyStringToUndefined(z.string().max(2_000).nullable().optional()),
     active: z.boolean().optional(),
@@ -107,7 +112,7 @@ export const DriverDtoSchema = z.object({
   phone2: z.string().nullable(),
   // Nullable per phase3_blocks audit revert.
   email: z.string().email().nullable(),
-  driverLicenseNumber: z.string(),
+  passportNumber: z.string(),
   licenseExpiry: IsoDateSchema.nullable(),
   notes: z.string().nullable(),
   active: z.boolean(),

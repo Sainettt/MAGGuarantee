@@ -2577,12 +2577,14 @@ Currently `carriers/page.tsx` does `onRowClick={openEdit}` — row click opens `
 
 ### 6.16 Driver field mapping — 3 logical sections
 
-`DriverSheet` has a **flat layout** (no `FormSection`s), so there is no Sheet order to mirror 1:1. `DriverDetailModal` groups the fields into three clean logical sections instead. Title = `firstName + lastName`; subtitle = `driverLicenseNumber` (mono, falls back to `loginSlug`). Status (`active`) → header badge.
+`DriverSheet` has a **flat layout** (no `FormSection`s), so there is no Sheet order to mirror 1:1. `DriverDetailModal` groups the fields into three clean logical sections instead. Title = `firstName + lastName`; subtitle = `passportNumber` (mono, falls back to `loginSlug`). Status (`active`) → header badge.
+
+> 2026-05-28: `driverLicenseNumber` was renamed to `passportNumber` (semantics flipped — the column now stores the driver's passport number, not their licence number). The `sections.license` block label is kept as-is because `licenseExpiry` still belongs to a driver's licence; only the number row is repurposed.
 
 | Section | Icon | Rows (label → field) |
 |---|---|---|
 | **Dane osobowe i kontakt** (`sections.personal`) | `<User>` | Imię → `firstName` · Nazwisko → `lastName` · Telefon → `phone` · Telefon (drugi) → `phone2` · E-mail → `email` |
-| **Prawo jazdy i finanse** (`sections.license`) | `<CreditCard>` | Numer prawa jazdy → `driverLicenseNumber` (mono) · Ważność prawa jazdy → `licenseExpiry` (date) · Numer konta → `bankAccount` (mono) |
+| **Prawo jazdy i finanse** (`sections.license`) | `<CreditCard>` | Numer paszportu → `passportNumber` (mono) · Ważność prawa jazdy → `licenseExpiry` (date) · Numer konta → `bankAccount` (mono) |
 | **Przypisanie** (`sections.assignment`) | `<UserCog>` | Przewoźnik → `carrier.name ?? carrier.login` · Notatki → `notes` |
 
 - New i18n section keys: `drivers.sections.personal`, `drivers.sections.license`, `drivers.sections.assignment` (PL + EN). All field keys reuse existing `drivers.fields.*`.
@@ -2609,4 +2611,279 @@ Currently `carriers/page.tsx` does `onRowClick={openEdit}` — row click opens `
 | Row click → detail modal; «Edytuj» → existing Sheet | `apps/web/app/(employee)/employee/(admin)/{vehicles,drivers,trailers}/page.tsx` | web-agent |
 | i18n: `vehicles.fields.{adrClasses,wasteCountries,gb,it,fr,lastDroveAt}`, `vehicles.sections.attachments`, `drivers.sections.{personal,license,assignment}` | `apps/web/messages/pl.json`, `en.json` | web-agent |
 | 0 changes to `EntityDetailModal.tsx`, `tailwind.config.ts`, `globals.css` | — | — |
+
+---
+
+## Phase 5.2 — «Moja Opieka» carrier list: card-grid redesign
+
+> **Problem statement (user feedback).** The current `/employee/opieka` view renders carriers in an 8-column `<DataTable>`. At typical opiekun viewport widths (1280–1440px in a sidebar layout, or any tablet) the columns are cramped, the «firma» cell truncates aggressively, the four vehicle-bucket columns overflow into horizontal scroll, and the «Otwórz» action button is visually redundant with row click. Direct user quote: *«слишком оно все кучное и зажатое, полностью поля не видно, нужно в бок его передвигать, неудобно и не красиво»*.
+>
+> **Decision.** Replace the table with a **responsive card grid**. Carriers per opiekun are typically <30 (small N), so we do not need table affordances like column sort / sticky header / per-column filters. The four vehicle buckets compress naturally into a horizontal stat-row inside the card. Whole-card-click navigates to the drill-down, removing the redundant «Otwórz» button.
+>
+> Reuses existing tokens only — **no new palette colors, no new shadows, no new radii**. The component is `<OpiekunCarrierCard>`, new file `apps/web/components/opieka/OpiekunCarrierCard.tsx`. KPI strip above is untouched.
+
+### 5.2.1 Layout — responsive grid
+
+The KPI strip (`grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6`) stays exactly as it is today. The new carrier grid replaces the `<DataTable>` block.
+
+| Breakpoint | Columns | Tailwind classes |
+|---|---|---|
+| `< sm` (≤ 639px, phone) | **1 col** | base: `grid grid-cols-1 gap-3` |
+| `sm` (640–1023px, tablet / narrow desktop sidebar layout) | **2 col** | `sm:grid-cols-2 sm:gap-4` |
+| `lg` (1024–1535px, standard desktop) | **2 col** | (inherit `sm:grid-cols-2`) |
+| `xl` (≥ 1280px) | **3 col** | `xl:grid-cols-3` |
+| `2xl` (≥ 1536px) | **3 col** | (inherit `xl:grid-cols-3`) |
+
+Rationale for capping at 3 columns on 2xl: cards have a meaningful min-width (~320px) once the stat-row is rendered without truncation. Going to 4 cols on 2xl would shrink cards below the stat-row's natural width and force the bucket labels to wrap. Three columns at 1536px yields ~480px per card incl. gap — comfortable, breathable, no truncation.
+
+Grid container:
+
+```
+<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
+  {carriers.map(c => <OpiekunCarrierCard key={c.carrierId} carrier={c} />)}
+</div>
+```
+
+No horizontal scroll at any viewport ≥ 320px because the card itself is fluid (`w-full`) and the inner stat-row uses `flex flex-wrap` (see §5.2.4).
+
+### 5.2.2 `<OpiekunCarrierCard>` — anatomy
+
+A single carrier card. **The whole card is a `<Link href="/employee/opieka/carriers/[login]">`** — no inner action button. Keyboard / a11y: native focus + ring via Tailwind, semantic `<Link>` from `next/link`.
+
+```
+┌────────────────────────────────────────────────────┐  ← bg-card, border, rounded-lg
+│  Firma sp. z o.o.                    [ Aktywny ]   │  ← headline row
+│  carrier-login-slug                                │  ← login (mono, text-sub)
+│                                                    │
+│  NIP  1234567890                                   │  ← meta row (mono)
+│  ──────────────────────────────────────────────    │  ← divider (border-border)
+│                                                    │
+│   12      3      1      0                          │  ← stat-row (4 buckets)
+│   Jezdz.  Stoj.  Nieakt. Potenc.                   │
+└────────────────────────────────────────────────────┘
+```
+
+#### Container
+
+| Property | Value | Tailwind |
+|---|---|---|
+| Surface | `card` | `bg-card` |
+| Border | 1px `border` | `border border-border` |
+| Radius | 12px (system default) | `rounded-lg` (= `14px` in our config) — keep parity with KPI tiles |
+| Padding | 16px (mobile) / 20px (≥ sm) | `p-4 sm:p-5` |
+| Shadow (idle) | none | — |
+| Shadow (hover) | brand-tinted card shadow | `hover:shadow-card` |
+| Hover border | brand at 40% | `hover:border-brand/40` |
+| Hover bg (subtle) | brand-50 tint | `hover:bg-brand-50/30 dark:hover:bg-brand/5` |
+| Transition | 150ms color/shadow/border | `transition-[background-color,border-color,box-shadow] duration-150` |
+| Focus-visible | brand ring | `focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand/40 focus-visible:border-brand/60` |
+| Cursor | pointer (link) | (native via `<Link>`) |
+| Layout | vertical stack | `flex flex-col gap-3` |
+| Inactive carrier | dim (opacity) without losing readability | `data-[inactive=true]:opacity-70` |
+
+> **Note on `rounded-lg`.** Our Tailwind config maps `rounded-lg` → `14px` and the KPI tiles use that. Keep it for visual rhythm with the strip above.
+
+#### Headline row (firma + active badge)
+
+```
+<div class="flex items-start justify-between gap-3 min-w-0">
+  <div class="flex flex-col gap-0.5 min-w-0 flex-1">
+    <h3 class="font-semibold text-text text-[15px] leading-tight truncate"
+        title={firma ?? nazwa ?? login}>
+      {firma ?? nazwa ?? login}
+    </h3>
+    <span class="text-xs text-text-sub font-mono truncate">{login}</span>
+  </div>
+  <Badge variant={aktywny ? 'success' : 'muted'}>
+    {aktywny ? tCommon('active') : tCommon('inactive')}
+  </Badge>
+</div>
+```
+
+- Title size `15px / font-semibold` — slightly larger than DataTable's body 13px because the card has more vertical room and the firma is the primary identifier.
+- `truncate` keeps single-line; full firma on hover via `title` attribute.
+- Badge sits top-right, never wraps below the title (uses `items-start` so a wrapping title doesn't push the badge down — `flex-1` on the text column absorbs all extra space first).
+
+#### Meta row (NIP)
+
+```
+<div class="flex items-center gap-2 text-sm">
+  <span class="text-xs font-bold uppercase tracking-wider text-text-sub">NIP</span>
+  <span class="font-mono tabular-nums text-text">{nip}</span>
+</div>
+```
+
+- NIP label styled as a caption (matches the design system's caption rule: `text-xs font-bold uppercase tracking-wider`).
+- Value mono+tabular for digit alignment.
+- We intentionally do **not** add `<CopyableValue>` here in v1 — the drill-down page can host that. Card click = navigation, copying conflicts with the gesture.
+
+#### Divider
+
+`<div class="border-t border-border" />` — full-width, separates identity from stats.
+
+### 5.2.3 Vehicle bucket stat-row — color mapping
+
+The 4 buckets reuse the **existing semantic palette**, mirroring the KPI tones already used in the strip above so the colour story is consistent vertically on the page.
+
+| Bucket | Meaning | Tone | Token (text) | Reference KPI tile |
+|---|---|---|---|---|
+| `jezdzace` | Active and recently driving | **green** | `text-success` | `<KpiCard tone="green">` |
+| `stojace` | Active but idle ≥ 7 days | **orange (warning)** | `text-warning` | `<KpiCard tone="orange">` |
+| `nieaktywne` | `active=false` | **red (danger)** | `text-danger` | `<KpiCard tone="red">` |
+| `potencjalne` | KREPTD headroom | **blue (info)** | `text-info` | `<KpiCard tone="blue">` |
+
+> **Note on `nieaktywne` colour change.** The current table renders this column in `text-text-sub` (neutral grey). The redesign upgrades it to `text-danger` to match the KPI tile above (which is already `tone="red"`). This is intentional: it sharpens the four-way bucket distinction inside one small stat-row, and the user reads top-to-bottom (KPI strip → cards) so the colour story should be the same.
+
+### 5.2.4 Stat-row layout
+
+```
+<dl class="grid grid-cols-4 gap-2">
+  <StatCell value={vehicles.jezdzace}   label={t('table.jezdzace')}   tone="success" />
+  <StatCell value={vehicles.stojace}    label={t('table.stojace')}    tone="warning" />
+  <StatCell value={vehicles.nieaktywne} label={t('table.nieaktywne')} tone="danger"  />
+  <StatCell value={vehicles.potencjalne} label={t('table.potencjalne')} tone="info"  />
+</dl>
+```
+
+`<StatCell>` is an inline sub-component (not exported), one per bucket:
+
+| Element | Tailwind |
+|---|---|
+| Wrapper | `flex flex-col items-start gap-0.5 min-w-0` |
+| Value | `text-2xl font-extrabold tabular-nums leading-none text-{tone}` — i.e. `text-success` / `text-warning` / `text-danger` / `text-info` |
+| Label | `text-[11px] font-medium uppercase tracking-wide text-text-sub truncate` |
+
+Why `grid grid-cols-4` and not `flex flex-wrap`: with 4 equal cells the visual rhythm stays crisp at every width. The `min-w-0` + `truncate` on label means the abbreviated label («Jezdz.» / «Stoj.» / «Nieakt.» / «Potenc.») will truncate before causing horizontal scroll on the narrowest case (360px - 32px padding = 328px / 4 ≈ 82px per cell, comfortably enough for the 2-digit value + the truncated label).
+
+> **i18n note for web-agent.** Add **short label variants** to the `opieka` translations namespace specifically for this card so that the table labels («Jeżdżące» / «Stojące» / «Nieaktywne» / «Potencjalne») can stay long-form in places that have room. Suggested keys: `opieka.card.jezdzace`, `opieka.card.stojace`, `opieka.card.nieaktywne`, `opieka.card.potencjalne` (PL: «Jeżdż.», «Stoj.», «Nieakt.», «Potenc.»; EN: «Driving», «Idle», «Inactive», «Potential»). EN is already short enough to use as-is.
+
+### 5.2.5 ASCII mockup — desktop (xl, 3-col)
+
+```
+┌──────────────────────────────────┐ ┌──────────────────────────────────┐ ┌──────────────────────────────────┐
+│ Trans-Logistyka sp. z o.o. [Akt] │ │ Pol-Cargo Express     [Aktywny] │ │ Maxi Transport sp.j.  [Nieakt.] │
+│ trans-logistyka                  │ │ pol-cargo-exp                    │ │ maxi-trans-sp                    │
+│                                  │ │                                  │ │                                  │
+│ NIP  1234567890                  │ │ NIP  9876543210                  │ │ NIP  5555555555                  │
+│ ──────────────────────────────── │ │ ──────────────────────────────── │ │ ──────────────────────────────── │
+│  12      3      1      0         │ │  24      0      0      3         │ │   0      0      8      0         │
+│  Jezdż.  Stoj.  Nieakt. Potenc.  │ │  Jezdż.  Stoj.  Nieakt. Potenc.  │ │  Jezdż.  Stoj.  Nieakt. Potenc.  │
+└──────────────────────────────────┘ └──────────────────────────────────┘ └──────────────────────────────────┘
+   ↑ green   orange  red    blue       ↑ green   orange  red    blue       ↑ green   orange  red    blue
+```
+
+### 5.2.6 ASCII mockup — mobile (1-col, ~360px)
+
+```
+┌────────────────────────────────────┐
+│ Trans-Logistyka sp.    [Aktywny]   │
+│ trans-logistyka                    │
+│                                    │
+│ NIP  1234567890                    │
+│ ────────────────────────────────── │
+│  12      3       1       0         │
+│  Jezdż.  Stoj.   Nieakt. Potenc.   │
+└────────────────────────────────────┘
+┌────────────────────────────────────┐
+│ Pol-Cargo Express      [Aktywny]   │
+│ pol-cargo-exp                      │
+│ ...                                │
+└────────────────────────────────────┘
+```
+
+Each card is a tap target ≥ 44px tall (in practice ~140px) — easy on touch.
+
+### 5.2.7 Empty state
+
+When `carriers.length === 0` (admin sees zero carriers system-wide, or opiekun has no assigned carriers), render the existing `<EmptyState>` component directly **inside the grid container's place** (i.e. replacing the `<div class="grid ...">`, not inside it):
+
+```
+{isLoading ? <OpiekunCarrierCardSkeletonGrid /> :
+ carriers.length === 0 ? (
+   <EmptyState
+     icon={HeartHandshake}
+     title={t('emptyTitle')}
+     message={t('emptyMessage')}
+   />
+ ) : (
+   <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
+     {carriers.map(...)}
+   </div>
+ )}
+```
+
+`<EmptyState>` is already centered + padded; no extra container needed. Same component used by the legacy DataTable empty slot, so no visual regression.
+
+### 5.2.8 Loading state — skeleton grid
+
+Replace the `<DataTable isLoading>` skeleton with a card-shaped skeleton (`<OpiekunCarrierCardSkeleton>`), rendered 6 times in the same grid layout so the page reserves space without layout jump:
+
+```
+<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
+  {Array.from({ length: 6 }).map((_, i) => (
+    <div key={i}
+         class="bg-card border border-border rounded-lg p-4 sm:p-5 flex flex-col gap-3">
+      <div class="flex items-start justify-between gap-3">
+        <div class="flex flex-col gap-1.5 flex-1 min-w-0">
+          <Skeleton class="h-4 w-3/4" />
+          <Skeleton class="h-3 w-1/2" />
+        </div>
+        <Skeleton class="h-5 w-16 rounded-full" />
+      </div>
+      <Skeleton class="h-4 w-32" />
+      <div class="border-t border-border" />
+      <div class="grid grid-cols-4 gap-2">
+        {Array.from({ length: 4 }).map((_, j) => (
+          <div key={j} class="flex flex-col gap-1">
+            <Skeleton class="h-7 w-8" />
+            <Skeleton class="h-3 w-12" />
+          </div>
+        ))}
+      </div>
+    </div>
+  ))}
+</div>
+```
+
+`<Skeleton>` is the existing component at `apps/web/components/ui/Skeleton.tsx` — reuse it, no new primitive.
+
+### 5.2.9 Accessibility
+
+- Each card is a single `<Link>` (`next/link`) → keyboard `Tab` lands on the whole card; `Enter` activates. No nested interactive elements (the badge is decorative text), so no nested-focus issue.
+- `aria-label` on the link: `t('table.openDetailAria', { firma })` (reuse the existing key — already in the i18n bundle). Screen-readers announce the navigation target instead of attempting to read the entire visual contents.
+- Focus ring: `focus-visible:ring-[3px] focus-visible:ring-brand/40` — matches the «Otwórz» button focus pattern that already exists, so behaviour is consistent with the rest of the app.
+- Color is **not the only signal** for the four buckets — each value is paired with a text label below it (`Jezdż.` / `Stoj.` / `Nieakt.` / `Potenc.`). Colour-blind users still get the bucket identity from the label.
+- Inactive carriers: `aria-disabled` is **not** set — the card stays clickable (drill-down still works for inactive carriers). `data-[inactive=true]:opacity-70` is the only signal, plus the `<Badge variant="muted">` in the headline.
+
+### 5.2.10 What we drop from the legacy table
+
+| Element | Why dropped |
+|---|---|
+| 8-column `<DataTable>` | Too cramped at < 1440px; horizontal scroll fails the user-feedback test. |
+| Per-column sort headers | Small N (≤ 30 carriers per opiekun); sort is overkill. If sorting is ever needed, add a single `<Select>` above the grid («Sortuj wg: nazwa / liczba aut / status») — not currently in scope. |
+| «Otwórz» action button (right-most column) | Redundant with whole-card click. Removed entirely. |
+| Distinct row hover | Replaced with card-level hover (`hover:shadow-card hover:border-brand/40`). |
+
+### 5.2.11 Files / changes for web-agent
+
+| Change | Where | Notes |
+|---|---|---|
+| New `<OpiekunCarrierCard>` | `apps/web/components/opieka/OpiekunCarrierCard.tsx` | Pure presentational; props = `{ carrier: OpiekunCarrierStats }`. Wraps content in `<Link>` itself. |
+| New `<OpiekunCarrierCardSkeleton>` | same file, named export | Used in loading grid. |
+| Refactor page | `apps/web/app/(employee)/employee/opieka/page.tsx` | Delete `columns` definition + `<DataTable>` block; replace with the grid container + loading / empty branch from §5.2.7. KPI strip + page header stay byte-for-byte. |
+| i18n short labels | `apps/web/messages/pl.json`, `en.json` | Add `opieka.card.{jezdzace,stojace,nieaktywne,potencjalne}` (see §5.2.4). |
+| 0 changes to `tailwind.config.ts` / `globals.css` | — | All tokens used here (`bg-card`, `border-border`, `text-success/warning/danger/info`, `rounded-lg`, `shadow-card`, `bg-brand-50`, `ring-brand/40`) already exist. |
+| 0 changes to API / DTO | — | Endpoint and `OpiekunCarrierStats` shape are reused as-is. |
+
+### 5.2.12 Acceptance checklist
+
+- [ ] At 320 / 360 / 640 / 1024 / 1280 / 1536 / 1920 px viewport widths: **no horizontal scrollbar**. Verified light + dark.
+- [ ] The four bucket values use `text-success` / `text-warning` / `text-danger` / `text-info` — visually distinct in both themes.
+- [ ] Card click navigates to `/employee/opieka/carriers/[login]` (encoded). Keyboard Enter on focused card has the same effect.
+- [ ] No nested clickable elements inside the card link.
+- [ ] Skeleton renders 6 placeholder cards in the same grid layout; no layout jump when data arrives.
+- [ ] Empty state replaces the grid (not rendered inside it).
+- [ ] KPI strip above is unchanged.
+- [ ] Inactive carrier: opacity dimmed; «Nieaktywny» muted badge; still clickable.
+- [ ] AA contrast: bucket value digits on `bg-card` — verified for all four tones in both themes (success / warning / info ≥ 3:1 for large text 24px-extrabold; danger ≥ 4.5:1).
 

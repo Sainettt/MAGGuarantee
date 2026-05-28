@@ -27,7 +27,7 @@ function makeDriver(overrides: Partial<DriverRow> = {}): DriverRow {
     phone2: null,
     // Required post-phase3_blocks.
     email: 'driver@magtrans.eu',
-    driverLicenseNumber: 'LIC-000',
+    passportNumber: 'LIC-000',
     licenseExpiry: NOW,
     notes: null,
     active: true,
@@ -154,7 +154,7 @@ function makeCarriersRepo(seed: CarrierRow[] = []): CarriersRepository {
 /** Minimal payload required by the post-phase3_blocks schema. */
 const REQUIRED_DRIVER_FIELDS = {
   phone: '+48111222333',
-  driverLicenseNumber: 'LIC-001',
+  passportNumber: 'LIC-001',
   email: 'driver@magtrans.eu',
   licenseExpiry: '2027-01-01',
 };

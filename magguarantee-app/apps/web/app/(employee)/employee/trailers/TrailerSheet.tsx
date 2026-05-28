@@ -198,13 +198,19 @@ export function TrailerSheet({
   // (form.watch + boolean compare). The count input is only rendered when its
   // companion checkbox is on; flipping the checkbox off clears the count so it
   // never leaks an orphaned value into the create/update payload.
+  //
+  // IMPORTANT: clear with `undefined`, NOT `null`. `CreateTrailerSchema` uses
+  // `z.number().int().min(0).optional()` for `beltsCount`/`matsCount` —
+  // `.optional()` accepts `undefined` but Zod still runs the `z.number()`
+  // branch on `null` and rejects it with "Expected number, received null".
+  // Result: the form would 422 even when the user never touched the checkbox.
   const beltsOn = form.watch('belts') === true;
   const matsOn = form.watch('mats') === true;
   useEffect(() => {
-    if (!beltsOn) form.setValue('beltsCount', null as unknown as undefined);
+    if (!beltsOn) form.setValue('beltsCount', undefined);
   }, [beltsOn, form]);
   useEffect(() => {
-    if (!matsOn) form.setValue('matsCount', null as unknown as undefined);
+    if (!matsOn) form.setValue('matsCount', undefined);
   }, [matsOn, form]);
 
   const handleClose = () => {
@@ -430,67 +436,75 @@ export function TrailerSheet({
               </FormSection>
 
               <FormSection title={t('sections.equipment')}>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
-                  {/* belts + matching count input — count is revealed only
-                      when the checkbox is on (cabotage-pattern parity). */}
-                  <div className="flex flex-col gap-1">
-                    <label className="flex items-center gap-2 text-text">
+                {/*
+                  belts + mats live OUTSIDE the equipment grid below — their
+                  inline count input would otherwise stretch the whole grid
+                  row when revealed. Layout is checkbox|label|<count input on
+                  the right>, all inside a fixed-height row so toggling the
+                  checkbox doesn't shove neighbouring fields around.
+                */}
+                <div className="space-y-2 mb-3">
+                  <div className="flex items-center gap-3 min-h-[40px]">
+                    <label className="flex items-center gap-2 text-text text-sm shrink-0 min-w-[160px]">
                       <Checkbox {...form.register('belts')} />
                       {t('fields.belts')}
                     </label>
                     {beltsOn && (
-                      <div className="ml-6 animate-slide-in max-w-[160px]">
-                        <FormField
-                          label={t('fields.beltsCount')}
-                          error={errs.beltsCount?.message as string | undefined}
-                          htmlFor="trailer-beltsCount"
-                        >
-                          <Input
-                            id="trailer-beltsCount"
-                            type="number"
-                            min={0}
-                            step={1}
-                            inputMode="numeric"
-                            aria-invalid={!!errs.beltsCount}
-                            placeholder={t('fields.beltsCount')}
-                            {...form.register('beltsCount', {
-                              setValueAs: (v) =>
-                                v === '' || v === null ? undefined : Number(v),
-                            })}
-                          />
-                        </FormField>
+                      <div className="w-32 animate-slide-in">
+                        <Input
+                          id="trailer-beltsCount"
+                          type="number"
+                          min={0}
+                          step={1}
+                          inputMode="numeric"
+                          aria-label={t('fields.beltsCount')}
+                          aria-invalid={!!errs.beltsCount}
+                          placeholder={t('fields.beltsCount')}
+                          {...form.register('beltsCount', {
+                            setValueAs: (v) =>
+                              v === '' || v === null ? undefined : Number(v),
+                          })}
+                        />
+                        {errs.beltsCount?.message && (
+                          <p className="mt-1 text-xs text-danger">
+                            {errs.beltsCount.message as string}
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="flex items-center gap-2 text-text">
+                  <div className="flex items-center gap-3 min-h-[40px]">
+                    <label className="flex items-center gap-2 text-text text-sm shrink-0 min-w-[160px]">
                       <Checkbox {...form.register('mats')} />
                       {t('fields.mats')}
                     </label>
                     {matsOn && (
-                      <div className="ml-6 animate-slide-in max-w-[160px]">
-                        <FormField
-                          label={t('fields.matsCount')}
-                          error={errs.matsCount?.message as string | undefined}
-                          htmlFor="trailer-matsCount"
-                        >
-                          <Input
-                            id="trailer-matsCount"
-                            type="number"
-                            min={0}
-                            step={1}
-                            inputMode="numeric"
-                            aria-invalid={!!errs.matsCount}
-                            placeholder={t('fields.matsCount')}
-                            {...form.register('matsCount', {
-                              setValueAs: (v) =>
-                                v === '' || v === null ? undefined : Number(v),
-                            })}
-                          />
-                        </FormField>
+                      <div className="w-32 animate-slide-in">
+                        <Input
+                          id="trailer-matsCount"
+                          type="number"
+                          min={0}
+                          step={1}
+                          inputMode="numeric"
+                          aria-label={t('fields.matsCount')}
+                          aria-invalid={!!errs.matsCount}
+                          placeholder={t('fields.matsCount')}
+                          {...form.register('matsCount', {
+                            setValueAs: (v) =>
+                              v === '' || v === null ? undefined : Number(v),
+                          })}
+                        />
+                        {errs.matsCount?.message && (
+                          <p className="mt-1 text-xs text-danger">
+                            {errs.matsCount.message as string}
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
                   {(['airSuspension', 'certXl', 'multilock'] as const).map(
                     (key) => (
                       <label

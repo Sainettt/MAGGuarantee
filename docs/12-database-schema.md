@@ -284,7 +284,9 @@ model Driver {
   phone2              String?
   // Drivers in PL trucking often skip email professionally — Optional everywhere
   email               String?
-  driverLicenseNumber String
+  // Renamed from `driverLicenseNumber` 2026-05-28; column now stores a
+  // passport number (driver's licence number is no longer tracked here).
+  passportNumber      String
   // API + UI required, DB nullable — UI surfaces a warning, not a hard block
   licenseExpiry       DateTime? @db.Date
   notes               String?
@@ -609,7 +611,7 @@ populates both columns.
 
 | Поле | Слой защиты | Notes |
 |---|---|---|
-| `firstName`, `lastName`, `phone`, `driverLicenseNumber`, `loginSlug` | Strict everywhere | |
+| `firstName`, `lastName`, `phone`, `passportNumber`, `loginSlug` | Strict everywhere | Column was previously named `driverLicenseNumber`; renamed 2026-05-28, semantics flipped to passport number. |
 | `licenseExpiry` | API + UI required, DB nullable | Driver must legally have it; UI warns rather than blocks at registration |
 | `email`, `phone2`, `notes` | Optional everywhere | Email rare in PL trucking |
 
@@ -735,7 +737,7 @@ populates both columns.
 | D | PrzewoznikLogin | → FK `carrierId` |
 | E | Telefon | `phone` |
 | F | Email | `email` |
-| G | NrPrawaJazdy | `driverLicenseNumber` |
+| G | NrPaszportu (legacy NrPrawaJazdy) | `passportNumber` |
 | H | Aktywny | `active` |
 | I | DataDodania | `addedAt` |
 | J | PrawoJazdyWaznosc | `licenseExpiry` |
