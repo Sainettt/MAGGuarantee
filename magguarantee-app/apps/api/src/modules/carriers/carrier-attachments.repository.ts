@@ -63,6 +63,22 @@ export class CarrierAttachmentsRepository {
     return row ? this.flatten(row) : null;
   }
 
+  /**
+   * Counts the carrier's non-deleted attachments in a single category. Used by
+   * the upload guard that enforces "at most one ADR document per carrier" — a
+   * `count` keeps the existence check focused (no full-list fetch). The
+   * soft-delete extension already constrains the query to live rows, so the
+   * count never includes soft-deleted attachments.
+   */
+  async countActiveByCategory(
+    carrierId: string,
+    category: CarrierAttachmentCategory,
+  ): Promise<number> {
+    return this.prisma.tx.carrierAttachment.count({
+      where: { carrierId, category },
+    });
+  }
+
   /** Inserts one attachment row. */
   async create(
     input: CreateCarrierAttachmentInput,

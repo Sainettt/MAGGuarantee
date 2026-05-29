@@ -99,8 +99,10 @@ enum VehicleAttachmentCategory { contract  cabotage_de  cabotage_fr }
 enum DriverAttachmentCategory { adr }
 
 // Category of a file attached to a Carrier — the carrier's own company
-// documents: OCP insurance, transport license, KREPTD extract, plus a catch-all.
-enum CarrierAttachmentCategory { insurance  license  kreptd  other }
+// documents: OCP insurance, transport license, KREPTD extract, the mandatory
+// ADR document (single official doc listing the carrier's ADR vehicles/drivers),
+// plus a catch-all.
+enum CarrierAttachmentCategory { insurance  license  kreptd  adr  other }
 
 // ─── USERS ──────────────────────────────────────────────
 
@@ -902,6 +904,8 @@ populates both columns.
 | `20260525084144_trailer_drop_equipment_and_loading_fields_add_belts_mats_count` | Деструктивная миграция на `trailers` (user-confirmed; dev-only data). **DROP COLUMN** на 6 полей: `equipment` (free-text), `slidingRoof`, `edschaSlidingRoof`, `loadFromBack`, `loadFromSide`, `loadFromTop` (boolean-флаги способа załadunku — выпилены из продукта). **ADD COLUMN** `beltsCount INTEGER NULL` (рядом с `belts`) и `matsCount INTEGER NULL` (рядом с `mats`) — счётчики, дополняющие boolean-флаги. Без `@default`, без CHECK `> 0` — UI/Zod enforce'ит `>= 0`. |
 | `20260528120000_driver_rename_license_to_passport` | Переименование `drivers.driverLicenseNumber` → `passportNumber` (ALTER TABLE … RENAME COLUMN, без потери данных). Семантика колонки меняется на номер паспорта; срок действия водительского (`licenseExpiry`) остаётся отдельным полем. |
 | `20260529120000_attachments_driver_carrier_and_drop_vehicle_adr_category` | Per-entity attachment расширение + удаление vehicle ADR-категории. **Change 1:** значение `adr` удалено из enum `VehicleAttachmentCategory` (остаётся `{contract, cabotage_de, cabotage_fr}`). Postgres не умеет `DROP VALUE` in-place → тип пересоздаётся (`CREATE TYPE …_new` → `ALTER COLUMN … USING ::text::…` → RENAME → DROP old). **Перед** пересозданием — `DELETE FROM vehicle_attachments WHERE category = 'adr'` (эти attachment-строки удаляются; без DELETE USING-cast упал бы). `vehicles.adr` boolean и `vehicles.adrClasses` НЕ затронуты. **Change 2:** `drivers.adr` — `BOOLEAN NOT NULL DEFAULT false` (ADR permit flag); новый enum `DriverAttachmentCategory { adr }`; новая таблица `driver_attachments` (FK на `drivers` `ON DELETE CASCADE`, FK на `users` `ON DELETE SET NULL`, soft-delete `deletedAt`, индекс `(driverId, category)`). **Change 3:** новый enum `CarrierAttachmentCategory { insurance, license, kreptd, other }`; новая таблица `carrier_attachments` (FK на `carriers` `ON DELETE CASCADE`, FK на `users` `ON DELETE SET NULL`, soft-delete `deletedAt`, индекс `(carrierId, category)`). Чисто аддитивно кроме удаления enum-value/строк из Change 1. |
+
+| `20260529111419_carrier_attachment_category_add_adr` | Чисто аддитивная миграция enum. Значение `adr` добавлено в `CarrierAttachmentCategory` (между `kreptd` и `other`) — обязательный ADR-документ перевозчика (один официальный документ со списком ADR-машин/водителей, грузится как файл-attachment). In-place `ALTER TYPE "CarrierAttachmentCategory" ADD VALUE 'adr'` (без пересоздания типа — в отличие от удаления vehicle-`adr`, т.к. Postgres умеет ADD VALUE in-place). Ничего ещё не использует новое значение, так что отдельная транзакция не нужна. |
 
 Production deploy: `prisma migrate deploy` в CI/CD пайплайне (без `--create-only`).
 

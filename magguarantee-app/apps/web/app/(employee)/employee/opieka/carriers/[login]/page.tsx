@@ -127,9 +127,9 @@ export default function OpiekaCarrierDetailPage() {
             message={t('detail.notFoundMessage')}
           />
         ) : (
-          <div className="flex flex-col gap-2">
+          <div className="rounded-xl border border-border border-l-2 border-l-brand bg-card shadow-card px-5 py-4">
             <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-2xl font-extrabold tracking-tight text-text">
+              <h1 className="text-2xl font-extrabold tracking-tight text-text leading-tight">
                 {carrier?.company ??
                   carrierStub.firma ??
                   carrierStub.nazwa ??
@@ -141,40 +141,41 @@ export default function OpiekaCarrierDetailPage() {
                 <Badge variant="muted">{tCommon('inactive')}</Badge>
               )}
             </div>
-            <dl className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-1 text-sm text-text-sub">
-              <div>
-                <dt className="font-bold text-xs uppercase tracking-wider">
-                  {t('detail.loginLabel')}
-                </dt>
-                <dd className="font-mono text-text">{carrierStub.login}</dd>
-              </div>
-              <div>
-                <dt className="font-bold text-xs uppercase tracking-wider">
-                  {t('detail.nipLabel')}
-                </dt>
-                <dd className="font-mono tabular-nums text-text">
-                  {carrierStub.nip}
-                </dd>
-              </div>
-              <div>
-                <dt className="font-bold text-xs uppercase tracking-wider">
-                  {t('detail.opiekunLabel')}
-                </dt>
-                <dd className="text-text">
-                  {carrier?.opiekun?.name ?? carrier?.opiekun?.login ?? '—'}
-                </dd>
-              </div>
-            </dl>
+            <div className="mt-3 border-t border-border pt-3">
+              <dl className="grid grid-cols-1 sm:grid-cols-3 gap-x-8 gap-y-3">
+                <div className="flex flex-col gap-0.5">
+                  <dt className="text-[11px] font-bold uppercase tracking-wider text-text-sub">
+                    {t('detail.loginLabel')}
+                  </dt>
+                  <dd className="font-mono text-sm text-text">
+                    {carrierStub.login}
+                  </dd>
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <dt className="text-[11px] font-bold uppercase tracking-wider text-text-sub">
+                    {t('detail.nipLabel')}
+                  </dt>
+                  <dd className="font-mono tabular-nums text-sm text-text">
+                    {carrierStub.nip}
+                  </dd>
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <dt className="text-[11px] font-bold uppercase tracking-wider text-text-sub">
+                    {t('detail.opiekunLabel')}
+                  </dt>
+                  <dd className="text-sm text-text">
+                    {carrier?.opiekun?.name ?? carrier?.opiekun?.login ?? '—'}
+                  </dd>
+                </div>
+              </dl>
+            </div>
           </div>
         )}
       </header>
 
       {carrierStub && (
         <Tabs defaultValue="vehicles" className="w-full">
-          <TabsList
-            aria-label={t('tabs.ariaLabel')}
-            className="mb-4 overflow-x-auto"
-          >
+          <TabsList aria-label={t('tabs.ariaLabel')} className="mb-4">
             <TabsTrigger value="vehicles">{t('tabs.vehicles')}</TabsTrigger>
             <TabsTrigger value="drivers">{t('tabs.drivers')}</TabsTrigger>
             <TabsTrigger value="trailers">{t('tabs.trailers')}</TabsTrigger>

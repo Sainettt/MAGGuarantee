@@ -295,12 +295,17 @@ export type CarrierWithTemporaryPasswordDto = z.infer<
  *  - `insurance` — OCP insurance policy scan
  *  - `license`   — transport license scan
  *  - `kreptd`    — KREPTD extract
+ *  - `adr`       — mandatory ADR document; at most ONE per carrier (the
+ *                  single-doc rule is enforced at the service layer on upload)
  *  - `other`     — catch-all for any other document
+ *
+ * Order mirrors the DB enum `{insurance, license, kreptd, adr, other}`.
  */
 export const CarrierAttachmentCategorySchema = z.enum([
   'insurance',
   'license',
   'kreptd',
+  'adr',
   'other',
 ]);
 export type CarrierAttachmentCategory = z.infer<

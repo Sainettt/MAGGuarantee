@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 
 import type {
   CarrierAttachmentCategory,
@@ -38,6 +43,13 @@ import { CarriersRepository } from './carriers.repository';
  * the path (not the body). The `_assertCarrierExists` check below is the
  * existence/404 backstop.
  */
+/**
+ * The carrier's mandatory ADR document. Unlike the other categories
+ * (insurance / license / kreptd / other, which allow multiple uploads), there
+ * may be at most ONE active `adr` attachment per carrier — enforced on upload.
+ */
+const SINGLE_DOC_CATEGORY: CarrierAttachmentCategory = 'adr';
+
 @Injectable()
 export class CarrierAttachmentsService {
   private readonly logger = new Logger(CarrierAttachmentsService.name);
@@ -65,6 +77,9 @@ export class CarrierAttachmentsService {
       throw new NotFoundException('Brak pliku w żądaniu');
     }
     assertUploadAllowed(file);
+    // Enforce "at most one ADR document per carrier" BEFORE touching MinIO so
+    // a rejected duplicate never writes a (then-orphaned) object.
+    await this._assertSingleDocCategoryFree(carrierId, category);
 
     const key = `carriers/${carrierId}/${category}/${randomUUID()}.${storageKeyExtension(
       file.mimetype,
@@ -126,6 +141,28 @@ export class CarrierAttachmentsService {
   private async _assertCarrierExists(carrierId: string): Promise<void> {
     const carrier = await this.carriers.findById(carrierId);
     if (!carrier) throw new NotFoundException('Przewoźnik nie znaleziony');
+  }
+
+  /**
+   * Guards the single-document categories (currently only `adr`): if the
+   * carrier already has a live attachment in such a category, reject with 409
+   * so the user knows to delete the existing one first. No-op for the
+   * multi-upload categories (insurance / license / kreptd / other).
+   */
+  private async _assertSingleDocCategoryFree(
+    carrierId: string,
+    category: CarrierAttachmentCategory,
+  ): Promise<void> {
+    if (category !== SINGLE_DOC_CATEGORY) return;
+    const existing = await this.attachments.countActiveByCategory(
+      carrierId,
+      category,
+    );
+    if (existing > 0) {
+      throw new ConflictException(
+        'Dokument ADR już istnieje dla tego przewoźnika',
+      );
+    }
   }
 
   private async _loadAttachmentOf(

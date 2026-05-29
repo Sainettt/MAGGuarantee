@@ -946,7 +946,12 @@
       "deleteTitle": "Usunąć dokument?",
       "deleteBody": "Czy na pewno chcesz usunąć „{fileName}”? Tej operacji nie można cofnąć.",
       "deletedToast": "Dokument usunięty",
+      "adrMissingTitle": "Brak obowiązkowego dokumentu ADR",
+      "adrMissingMessage": "Ten przewoźnik wymaga jednego dokumentu ADR. Prześlij go, aby uzupełnić dokumentację.",
+      "adrExistsHint": "Dokument ADR już istnieje — usuń istniejący, aby wgrać nowy",
+      "adrExistsToast": "Dokument ADR już istnieje dla tego przewoźnika",
       "category": {
+        "adr": "ADR",
         "insurance": "Ubezpieczenie/OCP",
         "license": "Licencja",
         "kreptd": "KREPTD",

@@ -100,7 +100,7 @@
 | `companyAddress` | адрес |
 | `opiekunId` | FK → User (с role=opiekun) — кто курирует |
 
-**Вложения:** документы компании перевозчика (страховка OCP, лицензия, выписка KREPTD, прочее) хранятся как `CarrierAttachment` (метаданные + `storageKey` в MinIO; FK на Carrier `ON DELETE CASCADE`; soft-delete `deletedAt`). Enum `CarrierAttachmentCategory { insurance, license, kreptd, other }`. Часть per-entity attachment-паттерна.
+**Вложения:** документы компании перевозчика (страховка OCP, лицензия, выписка KREPTD, обязательный ADR-документ — один официальный документ со списком ADR-машин/водителей, прочее) хранятся как `CarrierAttachment` (метаданные + `storageKey` в MinIO; FK на Carrier `ON DELETE CASCADE`; soft-delete `deletedAt`). Enum `CarrierAttachmentCategory { insurance, license, kreptd, adr, other }`. Часть per-entity attachment-паттерна.
 
 **Инварианты:**
 - `Carrier.opiekunId` должен указывать на `User.role=opiekun`.

@@ -946,7 +946,12 @@
       "deleteTitle": "Delete document?",
       "deleteBody": "Are you sure you want to delete \"{fileName}\"? This action cannot be undone.",
       "deletedToast": "Document deleted",
+      "adrMissingTitle": "Missing mandatory ADR document",
+      "adrMissingMessage": "This carrier requires one ADR document. Upload it to complete the documentation.",
+      "adrExistsHint": "An ADR document already exists — delete the existing one to upload a new one",
+      "adrExistsToast": "An ADR document already exists for this carrier",
       "category": {
+        "adr": "ADR",
         "insurance": "Insurance/OCP",
         "license": "License",
         "kreptd": "KREPTD",

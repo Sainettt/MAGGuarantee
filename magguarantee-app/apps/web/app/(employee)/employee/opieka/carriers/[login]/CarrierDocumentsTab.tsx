@@ -10,7 +10,14 @@
 // bytes through the auth/refresh-aware client and trigger a save via a
 // throwaway object-URL anchor. Delete: confirmed in a <Dialog> then DELETEd.
 
-import { Download, FileText, Loader2, Trash2, UploadCloud } from 'lucide-react';
+import {
+  Download,
+  FileText,
+  Loader2,
+  Trash2,
+  TriangleAlert,
+  UploadCloud,
+} from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
@@ -19,6 +26,7 @@ import type {
   CarrierAttachmentDto,
 } from '@magguarantee/shared';
 
+import { ApiResponseError } from '@/lib/api/client';
 import { Button } from '@/components/ui/Button';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import {
@@ -46,6 +54,7 @@ import {
 } from '@/lib/hooks/useCarriers';
 
 const CATEGORIES: CarrierAttachmentCategory[] = [
+  'adr',
   'insurance',
   'license',
   'kreptd',
@@ -63,9 +72,16 @@ export function CarrierDocumentsTab({ carrierId }: Props) {
 
   const docsQ = useCarrierAttachments(carrierId);
 
+  // The carrier MUST have exactly one ADR document. We derive presence from
+  // the loaded list; only trustworthy once the query has settled.
+  const docs = docsQ.data ?? [];
+  const hasAdr = docs.some((d) => d.category === 'adr');
+  // Don't flash the "missing" warning while the list is still loading.
+  const adrMissing = !docsQ.isLoading && docsQ.isSuccess && !hasAdr;
+
   // ── Upload control state ──────────────────────────────
   const [category, setCategory] = useState<CarrierAttachmentCategory>(
-    'insurance',
+    'adr',
   );
   const [picked, setPicked] = useState<FileUploadItem[]>([]);
 
@@ -74,7 +90,15 @@ export function CarrierDocumentsTab({ carrierId }: Props) {
       toast.success(t('uploadedToast'));
       setPicked([]);
     },
-    onError: () => toast.error(tCommon('errorGeneric')),
+    onError: (err) => {
+      // Defense in depth: the API enforces the single-ADR rule and returns
+      // 409 if a second ADR slips past the disabled-button guard below.
+      if (err instanceof ApiResponseError && err.status === 409) {
+        toast.error(t('adrExistsToast'));
+        return;
+      }
+      toast.error(tCommon('errorGeneric'));
+    },
   });
 
   // ── Delete dialog state ───────────────────────────────
@@ -142,8 +166,11 @@ export function CarrierDocumentsTab({ carrierId }: Props) {
     return item?.file ?? null;
   }, [picked]);
 
+  // Block a duplicate ADR before the request is even attempted.
+  const adrDuplicateBlocked = category === 'adr' && hasAdr;
+
   const onUpload = () => {
-    if (!pickedFile) return;
+    if (!pickedFile || adrDuplicateBlocked) return;
     uploadM.mutate({ carrierId, category, file: pickedFile });
   };
 
@@ -228,6 +255,30 @@ export function CarrierDocumentsTab({ carrierId }: Props) {
 
   return (
     <div className="space-y-4">
+      {/* ── Mandatory-ADR warning ── shown only once the list has loaded and
+          no ADR document is present. Uses the documented amber/warning token
+          set (same convention as Badge/CountdownBanner). */}
+      {adrMissing && (
+        <div
+          role="alert"
+          className="rounded-lg border border-warning/40 bg-warning-bg p-4 dark:bg-warning/10"
+        >
+          <div className="flex items-start gap-3">
+            <TriangleAlert
+              size={20}
+              className="mt-0.5 flex-none text-warning-dark dark:text-warning"
+              aria-hidden
+            />
+            <div className="min-w-0 flex-1">
+              <h3 className="text-sm font-bold text-warning-dark dark:text-warning">
+                {t('adrMissingTitle')}
+              </h3>
+              <p className="mt-1 text-sm text-text">{t('adrMissingMessage')}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Upload control ── */}
       <div className="rounded-xl border border-border bg-card shadow-card p-4">
         <h3 className="mb-3 flex items-center gap-2 text-sm font-bold text-text">
@@ -262,17 +313,25 @@ export function CarrierDocumentsTab({ carrierId }: Props) {
           <Button
             type="button"
             size="sm"
-            disabled={!pickedFile || uploadM.isPending}
+            disabled={!pickedFile || uploadM.isPending || adrDuplicateBlocked}
             onClick={onUpload}
           >
             {uploadM.isPending ? tCommon('saving') : t('uploadButton')}
           </Button>
         </div>
+        {/* Inline hint when the user has selected ADR but one already exists —
+            the upload button is disabled above; explain why here. */}
+        {adrDuplicateBlocked && (
+          <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-warning-dark dark:text-warning">
+            <TriangleAlert size={14} className="flex-none" aria-hidden />
+            {t('adrExistsHint')}
+          </p>
+        )}
       </div>
 
       {/* ── Documents table ── */}
       <DataTable
-        rows={docsQ.data ?? []}
+        rows={docs}
         columns={columns}
         rowKey={(r) => r.id}
         isLoading={docsQ.isLoading}

@@ -76,12 +76,14 @@ enum DriverAttachmentCategory {
 }
 
 // Category of a file attached to a Carrier — the carrier's own company
-// documents: OCP insurance, transport license, KREPTD extract, and a
-// catch-all `other`.
+// documents: OCP insurance, transport license, KREPTD extract, the mandatory
+// ADR document (a single official document listing the carrier's ADR
+// vehicles/drivers), and a catch-all `other`.
 enum CarrierAttachmentCategory {
   insurance
   license
   kreptd
+  adr
   other
 }
 
