@@ -43,6 +43,30 @@ export interface AuditConfig {
    * Default: false (the scrubbed result body is stored in `after`).
    */
   omitResultBody?: boolean;
+
+  /**
+   * If true, the `AuditInterceptor` does NOT open a `prisma.$transaction`
+   * around the handler. The handler runs without an ambient DB transaction
+   * and the audit row is written standalone (on a fresh connection) after a
+   * successful response.
+   *
+   * Use this for endpoints that:
+   *  - perform external I/O inside the handler (e.g. S3 uploads) — keeping
+   *    those out of a DB transaction avoids holding a pooled connection across
+   *    network calls and blowing the default 5s interactive-tx timeout; OR
+   *  - manage their own `prisma.$transaction(...)` for multi-statement
+   *    atomicity (e.g. `claims.submit` reserving an `nrZgl` + inserting the
+   *    claim), so transactional control is explicit in the service rather than
+   *    implicit in this decorator.
+   *
+   * Trade-off: the audit row is no longer atomic with the mutation. The
+   * mutation's own atomicity must be guaranteed by the service (explicit
+   * transaction) or by compensating rollback (e.g. vehicles' upload rollback).
+   *
+   * Default: false (interceptor opens a transaction; audit row commits with
+   * the mutation).
+   */
+  manualTransaction?: boolean;
 }
 
 /**

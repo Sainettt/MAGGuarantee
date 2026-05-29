@@ -32,8 +32,16 @@ import type { AuditActor } from '../../modules/audit/audit.types';
  * enter `run(...)` and therefore see `current() === undefined`.
  */
 export interface AuditContextStore {
-  /** Active Prisma transaction client — same handle for the whole request. */
-  tx: Prisma.TransactionClient;
+  /**
+   * Active Prisma transaction client — same handle for the whole request.
+   *
+   * Optional: `@Audit({ manualTransaction: true })` endpoints run WITHOUT an
+   * interceptor-opened transaction (e.g. S3-upload routes that must not hold a
+   * DB connection across network I/O, or services that manage their own
+   * `prisma.$transaction`). When absent, `PrismaService.tx` falls back to the
+   * root client and `AuditWriter` writes the audit row standalone.
+   */
+  tx?: Prisma.TransactionClient;
   /** Identity of the actor that triggered the request. */
   actor: AuditActor;
   /** Client IP — already extracted from `x-forwarded-for` / `req.ip`. */

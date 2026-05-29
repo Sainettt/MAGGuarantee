@@ -343,6 +343,10 @@ function makePrismaService(): PrismaService {
     get tx() {
       return client;
     },
+    // submit() opens its own `prisma.$transaction(...)` — pass the mock client
+    // straight through to the callback.
+    $transaction: <T>(cb: (tx: unknown) => Promise<T>): Promise<T> =>
+      cb(client),
   } as unknown as PrismaService;
 }
 
@@ -813,6 +817,8 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
       get tx() {
         return prismaClient;
       },
+      $transaction: <T>(cb: (tx: unknown) => Promise<T>): Promise<T> =>
+        cb(prismaClient),
     } as unknown as PrismaService;
     const audit = {
       log: jest.fn(async () => undefined),

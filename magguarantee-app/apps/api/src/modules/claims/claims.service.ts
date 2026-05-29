@@ -327,65 +327,68 @@ export class ClaimsService {
       calc.totalDays > 0 ? round2(dto.mileage / calc.totalDays) : 0;
     const now = new Date();
 
-    // Pre-Phase-4.4: the `@Audit('submitClaim')` decorator on POST /claims
-    // makes the `AuditInterceptor` open the surrounding `prisma.$transaction`
-    // for us. Both the `nrZgl` counter bump and the claim insert run on the
-    // ambient tx via `this.prisma.tx` (cast to TransactionLike — its delegate
-    // surface is structurally compatible), and the audit row written by the
-    // interceptor on commit lands in the same tx. If the insert hits a
-    // P2002 the whole transaction rolls back — counter increment included
-    // — so no number is burned.
+    // The `nrZgl` counter bump and the claim insert MUST commit atomically so
+    // a duplicate insert never burns a sequence number. We open an explicit
+    // `prisma.$transaction` here rather than relying on the `@Audit` interceptor
+    // to provide an ambient one — transactional control is explicit and local
+    // to this flow (`POST /claims` is marked `manualTransaction: true`, so the
+    // interceptor does NOT wrap the handler). The audit row is written by the
+    // interceptor standalone after success. If the insert hits a P2002 the
+    // whole transaction rolls back — counter increment included — so no number
+    // is burned.
     let row: ClaimRow;
-    const txLike = this.prisma.tx as unknown as TransactionLike;
     try {
-      const nrZgl = await this.nrZgl.nextWithin(txLike, now);
-      row = await this.claims.createWithin(txLike, {
-        nrZgl,
-        carrierId: carrier.id,
-        vehicleId: vehicle.id,
-        vehiclePlateSnapshot: vehicle.plateNumber,
-        dateStart,
-        dateEnd,
-        // Required post-phase3_blocks (NOT NULL).
-        timeFrom: dto.timeFrom,
-        timeTo: dto.timeTo,
-        drivenDays: calc.totalDays,
-        mileage: dto.mileage,
-        // `kmPerDay` is NOT NULL post-phase3_blocks — calculated above.
-        kmPerDay,
-        kmGuaranteed: calc.kmGuaranteed,
-        kmDifference,
-        paymentEur,
-        ratePerKmEffective: calc.ratePerKmEffective,
-        breakdown,
-        status: 'NA_WERYFIKACJI',
-        statusChangedAt: now,
-        comment: dto.comment ?? null,
-        // Per Revert #1: `orderNumber` / `orderDate` are MAGTRANS-internal,
-        // assigned only on the verifier's transition to ZAAKCEPTOWANO. The
-        // carrier-side submit always persists NULL; the
-        // `claim_accepted_payment_complete` CHECK constraint enforces the
-        // invariant when status flips.
-        orderNumber: null,
-        orderDate: null,
-        // amountRequested derived from km-calc payment, not user input —
-        // legacy GAS allowed manual override, we don't. `paymentEur` is
-        // already `round2(...)` 2-dp rounded (or 0) so it fits Decimal(12,2)
-        // cleanly without further coercion.
-        amountRequested: paymentEur,
-        // Hours-adjustment is verifier-only: carriers cannot send it on
-        // submit, so both Decimal columns are seeded to 0. The verifier
-        // PATCH path may later mutate `hoursAdjustedValue` alone — see
-        // `_buildUpdatePatch` / `extractCorrectionFields`. `origHoursAdjusted`
-        // is the immutable carrier snapshot (set-once at submit, 0 forever).
-        origHoursAdjusted: 0,
-        hoursAdjustedValue: 0,
-        // Preserve the carrier's original (pre-verification) inputs, so
-        // the verifier can later see what the carrier actually submitted.
-        // Mirror of GAS columns AR-AV (`Code.gs:6272-6276`).
-        origDateStart: dateStart,
-        origDateEnd: dateEnd,
-        origMileage: dto.mileage,
+      row = await this.prisma.$transaction(async (tx) => {
+        const txLike = tx as unknown as TransactionLike;
+        const nrZgl = await this.nrZgl.nextWithin(txLike, now);
+        return this.claims.createWithin(txLike, {
+          nrZgl,
+          carrierId: carrier.id,
+          vehicleId: vehicle.id,
+          vehiclePlateSnapshot: vehicle.plateNumber,
+          dateStart,
+          dateEnd,
+          // Required post-phase3_blocks (NOT NULL).
+          timeFrom: dto.timeFrom,
+          timeTo: dto.timeTo,
+          drivenDays: calc.totalDays,
+          mileage: dto.mileage,
+          // `kmPerDay` is NOT NULL post-phase3_blocks — calculated above.
+          kmPerDay,
+          kmGuaranteed: calc.kmGuaranteed,
+          kmDifference,
+          paymentEur,
+          ratePerKmEffective: calc.ratePerKmEffective,
+          breakdown,
+          status: 'NA_WERYFIKACJI',
+          statusChangedAt: now,
+          comment: dto.comment ?? null,
+          // Per Revert #1: `orderNumber` / `orderDate` are MAGTRANS-internal,
+          // assigned only on the verifier's transition to ZAAKCEPTOWANO. The
+          // carrier-side submit always persists NULL; the
+          // `claim_accepted_payment_complete` CHECK constraint enforces the
+          // invariant when status flips.
+          orderNumber: null,
+          orderDate: null,
+          // amountRequested derived from km-calc payment, not user input —
+          // legacy GAS allowed manual override, we don't. `paymentEur` is
+          // already `round2(...)` 2-dp rounded (or 0) so it fits Decimal(12,2)
+          // cleanly without further coercion.
+          amountRequested: paymentEur,
+          // Hours-adjustment is verifier-only: carriers cannot send it on
+          // submit, so both Decimal columns are seeded to 0. The verifier
+          // PATCH path may later mutate `hoursAdjustedValue` alone — see
+          // `_buildUpdatePatch` / `extractCorrectionFields`. `origHoursAdjusted`
+          // is the immutable carrier snapshot (set-once at submit, 0 forever).
+          origHoursAdjusted: 0,
+          hoursAdjustedValue: 0,
+          // Preserve the carrier's original (pre-verification) inputs, so
+          // the verifier can later see what the carrier actually submitted.
+          // Mirror of GAS columns AR-AV (`Code.gs:6272-6276`).
+          origDateStart: dateStart,
+          origDateEnd: dateEnd,
+          origMileage: dto.mileage,
+        });
       });
     } catch (err) {
       // Translate "claim NrZgl already exists" (theoretically impossible

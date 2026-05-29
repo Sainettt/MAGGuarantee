@@ -32,6 +32,14 @@ interface IssueOptions {
 }
 
 /**
+ * Internal sentinel thrown from `issuePair` when the atomic "claim" of the
+ * old refresh token matches 0 rows — i.e. a concurrent refresh already
+ * rotated (revoked) it between our read and our write. Treated as token
+ * reuse by the caller: revoke all sessions and 401. Never leaves the service.
+ */
+class RefreshReuseError extends Error {}
+
+/**
  * Phase 1 auth orchestrator.
  *
  * Responsibilities:
@@ -171,10 +179,29 @@ export class AuthService {
       throw new UnauthorizedException('Account is no longer active');
     }
 
-    const tokens = await this.issuePair(user, {
-      ...ctx,
-      oldRefreshTokenId: stored.id,
-    });
+    let tokens: TokenPair;
+    try {
+      tokens = await this.issuePair(user, {
+        ...ctx,
+        oldRefreshTokenId: stored.id,
+      });
+    } catch (err) {
+      if (err instanceof RefreshReuseError) {
+        // Concurrent rotation of the SAME token slipped past the read-time
+        // `revokedAt` check above (TOCTOU). The atomic claim inside issuePair
+        // caught it — treat as theft and revoke every active session.
+        await this.revokeAllForUser(userId);
+        this.logger.warn({
+          msg: 'refresh-token reuse detected (concurrent rotation), revoked all sessions',
+          userId,
+          tokenId: stored.id,
+        });
+        throw new UnauthorizedException(
+          'Token reuse detected — all sessions revoked',
+        );
+      }
+      throw err;
+    }
     return { user: this.toUserDto(user), tokens };
   }
 
@@ -281,13 +308,21 @@ export class AuthService {
     );
     const tokenHash = this.sha256(refreshToken);
 
-    // One transaction: revoke old (if rotating) + insert new + link chain.
+    // One transaction: atomically claim+revoke old (if rotating) + insert new
+    // + link chain. The "claim" is a guarded `updateMany` that only matches a
+    // still-active row — if a concurrent refresh already rotated this token,
+    // it matches 0 rows and we abort the whole tx (no new token minted) so the
+    // caller can treat it as reuse. This closes the read-then-write TOCTOU
+    // window that the plain pre-read `revokedAt` check left open.
     const created = await this.prisma.$transaction(async (tx) => {
       if (opts.oldRefreshTokenId) {
-        await tx.refreshToken.update({
-          where: { id: opts.oldRefreshTokenId },
+        const claimed = await tx.refreshToken.updateMany({
+          where: { id: opts.oldRefreshTokenId, revokedAt: null },
           data: { revokedAt: new Date() },
         });
+        if (claimed.count !== 1) {
+          throw new RefreshReuseError();
+        }
       }
       const newRow = await tx.refreshToken.create({
         data: {

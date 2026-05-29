@@ -131,6 +131,11 @@ export class VehiclesController {
     action: 'createVehicle',
     targetType: 'Vehicle',
     targetKey: (_req, result) => (result as { id?: string }).id,
+    // Multipart + S3 upload: do NOT hold a DB transaction across the network
+    // I/O to MinIO (avoids the 5s interactive-tx timeout and connection-pool
+    // hold). Atomicity is provided by `_attachUploadsWithRollback`, which
+    // removes uploaded objects + the vehicle row on any failure.
+    manualTransaction: true,
   })
   async create(
     @CurrentUser() user: AuthUser,
@@ -159,6 +164,9 @@ export class VehiclesController {
     action: 'updateVehicle',
     targetType: 'Vehicle',
     targetKey: (req) => req.params?.id,
+    // Multipart + S3 upload — see createVehicle. Kept out of a DB transaction;
+    // attachment add/remove failures are compensated in the service.
+    manualTransaction: true,
   })
   async update(
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,

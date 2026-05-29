@@ -168,6 +168,10 @@ export class ClaimsController {
       ClaimDtoSchema.safeParse(result).success
         ? (result as { nrZgl: string }).nrZgl
         : undefined,
+    // submit() opens its own `prisma.$transaction` for the atomic nrZgl-counter
+    // bump + claim insert — transactional control is explicit in the service,
+    // not implied by this decorator. Audit row is written standalone on success.
+    manualTransaction: true,
   })
   async submit(
     @CurrentUser() user: AuthUser,

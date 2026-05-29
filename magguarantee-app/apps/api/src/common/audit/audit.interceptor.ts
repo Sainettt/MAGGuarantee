@@ -89,6 +89,20 @@ export class AuditInterceptor implements NestInterceptor {
     const actor = this._resolveActor(req);
     const ipAddress = this._extractIp(req);
 
+    // Manual-transaction mode: do NOT wrap the handler in a `prisma.$transaction`.
+    // The handler runs without an ambient DB transaction (so S3 uploads /
+    // service-managed transactions aren't held inside one) and the audit row
+    // is written standalone on success. See `AuditConfig.manualTransaction`.
+    if (config.manualTransaction) {
+      return AuditContext.run({ actor, ipAddress }, async () => {
+        const result = await firstValueFrom(
+          next.handle().pipe(defaultIfEmpty(undefined as unknown)),
+        );
+        await this._writeAuditRow({ config, req, result, actor, ipAddress });
+        return result;
+      });
+    }
+
     return this.prisma.$transaction(async (tx) => {
       return AuditContext.run(
         {
@@ -127,7 +141,11 @@ export class AuditInterceptor implements NestInterceptor {
     result: unknown;
     actor: AuditActor;
     ipAddress: string | null;
-    tx: Prisma.TransactionClient;
+    /**
+     * Transaction client to enroll the audit write into. Omitted in
+     * `manualTransaction` mode — `AuditWriter` then writes on the root client.
+     */
+    tx?: Prisma.TransactionClient;
   }): Promise<void> {
     const { config, req, result, actor, tx } = args;
     const targetKey = this._safeTargetKey(config, req, result);

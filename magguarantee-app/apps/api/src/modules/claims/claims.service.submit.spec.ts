@@ -194,13 +194,13 @@ function makeNrZgl(): NrZglService {
 }
 
 function makePrismaService(): PrismaService {
-  // Pre-Phase-4.4: submit() pulls `nrZgl.nextWithin(tx, ...)` and
-  // `claims.createWithin(tx, ...)` straight off `this.prisma.tx`. The test
-  // mocks both methods on `NrZglService` / `ClaimsRepository` directly, so
-  // `tx` just needs to be a non-null sentinel — anything truthy works for the
-  // structural check inside the service. We expose `client` for
-  // `_collectSubmitRecipients` / `_loadSubmitConfig` and a matching `tx`
-  // getter for the in-`$transaction` writes.
+  // submit() now opens its OWN `this.prisma.$transaction(async (tx) => …)` for
+  // the atomic nrZgl-bump + claim insert (no longer relying on the @Audit
+  // interceptor's ambient tx). The test mocks `nrZgl.nextWithin` /
+  // `claims.createWithin` on their services directly, so the `tx` handed to the
+  // callback just needs to be a truthy sentinel — we pass `client`. We also
+  // expose `client` + a `tx` getter for `_collectSubmitRecipients` /
+  // `_loadSubmitConfig` reads that go through `this.prisma.tx`.
   const client = {
     appConfig: { findMany: jest.fn(async () => []) },
     user: { findFirst: jest.fn(async () => null) },
@@ -212,6 +212,8 @@ function makePrismaService(): PrismaService {
     get tx() {
       return client;
     },
+    $transaction: <T>(cb: (tx: unknown) => Promise<T>): Promise<T> =>
+      cb(client),
   } as unknown as PrismaService;
 }
 
