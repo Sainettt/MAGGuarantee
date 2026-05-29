@@ -18,6 +18,7 @@ import type {
 import {
   cancelDelegation,
   getDelegation,
+  getDelegationEligibility,
   listDelegations,
   submitDelegation,
 } from '@/lib/api/delegations';
@@ -28,6 +29,20 @@ export function useDelegations(filters: DelegationFilters = { limit: 50 }) {
   return useQuery({
     queryKey: [...DELEGATIONS_KEY, 'list', filters],
     queryFn: () => listDelegations(filters),
+  });
+}
+
+/**
+ * `GET /delegations/eligibility` — carrier readiness gate for the new-trip
+ * form. Returns `{ canCreate }`. Cached briefly so navigating into the form
+ * twice doesn't refire; the form refetches on mount to catch a state change
+ * since the last visit.
+ */
+export function useDelegationEligibility() {
+  return useQuery({
+    queryKey: [...DELEGATIONS_KEY, 'eligibility'],
+    queryFn: getDelegationEligibility,
+    staleTime: 30_000,
   });
 }
 

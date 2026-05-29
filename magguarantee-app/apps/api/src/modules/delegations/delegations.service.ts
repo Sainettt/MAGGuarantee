@@ -7,14 +7,17 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 
-import type {
-  CancelDelegationDto,
-  DelegationDto,
-  DelegationFilters,
-  SubmitDelegationDto,
+import {
+  CARRIER_NOT_READY_CODE,
+  type CancelDelegationDto,
+  type DelegationDto,
+  type DelegationEligibilityResponse,
+  type DelegationFilters,
+  type SubmitDelegationDto,
 } from '@magguarantee/shared';
 
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
+import { CarrierReadinessService } from '../carriers/carrier-readiness.service';
 import { CarriersRepository } from '../carriers/carriers.repository';
 import { DriversRepository } from '../drivers/drivers.repository';
 import { TrailersRepository } from '../trailers/trailers.repository';
@@ -41,12 +44,21 @@ export class DelegationsService {
     private readonly vehicles: VehiclesRepository,
     private readonly drivers: DriversRepository,
     private readonly trailers: TrailersRepository,
+    private readonly readiness: CarrierReadinessService,
   ) {}
 
   // ── Submit ──────────────────────────────────────────────
 
   async add(user: AuthUser, dto: SubmitDelegationDto): Promise<DelegationDto> {
     const carrier = await this._requireCarrierProfile(user);
+    // Hard readiness gate — BEFORE any persistence. A carrier may only
+    // register a delegation when their fleet is complete (active vehicle +
+    // trailer + driver) and, if they operate any ADR vehicle, an ADR document
+    // is on file. The carrier gets a GENERIC, machine-readable 422 — no
+    // breakdown of which item is missing (the detail lives only on the
+    // opiekun side per the product decision). See `CarrierReadinessService`.
+    await this._assertCarrierReady(carrier.id);
+
     const vehicle = await this._requireOwnedVehicle(carrier.id, dto.vehicleId);
     // Trailer + driver are required post-migration; ownership checks
     // become unconditional.
@@ -112,6 +124,22 @@ export class DelegationsService {
         : row.notes,
     });
     return this.toDto(updated);
+  }
+
+  // ── Eligibility ─────────────────────────────────────────
+
+  /**
+   * Carrier-portal eligibility flag for the new-delegation form. Returns a
+   * single boolean — `canCreate` (= `readiness.ready`) — with NO breakdown,
+   * per the product decision: the carrier learns only whether they can
+   * proceed, not which item is missing. Derived from the same readiness
+   * computation that hard-blocks `add()`. The carrier id is resolved from the
+   * auth user (same path as `add()`).
+   */
+  async eligibility(user: AuthUser): Promise<DelegationEligibilityResponse> {
+    const carrier = await this._requireCarrierProfile(user);
+    const readiness = await this.readiness.forCarrier(carrier.id);
+    return { canCreate: readiness.ready };
   }
 
   // ── Read ────────────────────────────────────────────────
@@ -182,6 +210,24 @@ export class DelegationsService {
   }
 
   // ── Internals ───────────────────────────────────────────
+
+  /**
+   * Throws a generic 422 with a STABLE machine-readable `code` when the
+   * carrier is not ready to register a delegation. The frontend matches on
+   * `extensions.code === 'CARRIER_NOT_READY'` (the established machine-field
+   * convention — same `extensions` bag the claims vehicle-cooldown 422 uses)
+   * and renders a "skontaktuj się ze swoim opiekunem" banner. We deliberately
+   * leak NO detail about which item is missing.
+   */
+  private async _assertCarrierReady(carrierId: string): Promise<void> {
+    const readiness = await this.readiness.forCarrier(carrierId);
+    if (readiness.ready) return;
+    throw new UnprocessableEntityException({
+      message:
+        'Nie można zarejestrować wyjazdu — skontaktuj się ze swoim opiekunem.',
+      extensions: { code: CARRIER_NOT_READY_CODE },
+    });
+  }
 
   private async _requireCarrierProfile(
     user: AuthUser,

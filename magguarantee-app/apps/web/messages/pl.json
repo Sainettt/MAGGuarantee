@@ -197,7 +197,8 @@
     "diagnostics": "Diagnostyka",
     "openMenu": "Otwórz menu",
     "closeMenu": "Zamknij menu",
-    "sectionLabel": "Sekcje panelu"
+    "sectionLabel": "Sekcje panelu",
+    "opiekaAttentionBadge": "{count, plural, one {# przewoźnik wymaga uwagi} few {# przewoźników wymaga uwagi} many {# przewoźników wymaga uwagi} other {# przewoźników wymaga uwagi}}"
   },
   "forbidden": {
     "title": "Brak dostępu",
@@ -447,7 +448,8 @@
     },
     "attachmentOpen": "Otwórz",
     "attachmentOpenError": "Nie udało się otworzyć pliku. Spróbuj ponownie.",
-    "attachmentPopupBlocked": "Nie można otworzyć nowej karty. Zezwól na wyskakujące okienka dla tej strony i spróbuj ponownie."
+    "attachmentPopupBlocked": "Nie można otworzyć nowej karty. Zezwól na wyskakujące okienka dla tej strony i spróbuj ponownie.",
+    "adrDocReminderToast": "Pojazd ma ADR — pamiętaj, aby dodać dokument ADR przewoźnika w zakładce Dokumenty."
   },
   "drivers": {
     "title": "Kierowcy",
@@ -883,6 +885,13 @@
       "nieaktywne": "Nieaktywne",
       "potencjalne": "Potencjalne"
     },
+    "attention": {
+      "title": "Wymaga uwagi",
+      "reason": {
+        "incompleteFleet": "Niekompletna flota (brak pojazdu / naczepy / kierowcy)",
+        "adrDocMissing": "Brak dokumentu ADR"
+      }
+    },
     "detail": {
       "backToList": "← Wróć do listy",
       "loadingTitle": "Ładowanie przewoźnika…",
@@ -946,8 +955,8 @@
       "deleteTitle": "Usunąć dokument?",
       "deleteBody": "Czy na pewno chcesz usunąć „{fileName}”? Tej operacji nie można cofnąć.",
       "deletedToast": "Dokument usunięty",
-      "adrMissingTitle": "Brak obowiązkowego dokumentu ADR",
-      "adrMissingMessage": "Ten przewoźnik wymaga jednego dokumentu ADR. Prześlij go, aby uzupełnić dokumentację.",
+      "adrMissingTitle": "Brak dokumentu ADR",
+      "adrMissingMessage": "Ten przewoźnik posiada pojazdy ADR, ale nie ma jeszcze dokumentu ADR. Prześlij dokument ADR, aby uzupełnić dokumentację.",
       "adrExistsHint": "Dokument ADR już istnieje — usuń istniejący, aby wgrać nowy",
       "adrExistsToast": "Dokument ADR już istnieje dla tego przewoźnika",
       "category": {
@@ -1158,6 +1167,11 @@
         "w_trasie": "W trasie",
         "zjechal": "Zjechał",
         "anulowany": "Anulowany"
+      },
+      "blocked": {
+        "title": "Nie można zarejestrować wyjazdu",
+        "message": "Rejestracja wyjazdu nie jest możliwa, ponieważ nie wszystkie wymagane dane są uzupełnione w systemie. Skontaktuj się ze swoim opiekunem, aby uzupełnić brakujące informacje.",
+        "toast": "Nie można zarejestrować wyjazdu — skontaktuj się ze swoim opiekunem."
       }
     },
     "fleet": {

@@ -255,6 +255,13 @@ export function VehicleSheet({
       draft.clear();
       form.reset(getDefaults());
       setFileBuckets(EMPTY_BUCKETS);
+      // Create-with-ADR reminder: a vehicle marked ADR implies the carrier
+      // must hold an ADR document, managed separately in the carrier's
+      // Documents tab. Nudge the operator (informational, not blocking). Only
+      // on create — editing an existing vehicle doesn't change this obligation.
+      if (created.adr) {
+        toast.info(t('adrDocReminderToast'));
+      }
       if (isWizard) {
         onCompleted?.(created);
         return;

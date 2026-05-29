@@ -17,6 +17,7 @@ import {
   UuidSchema,
   type CancelDelegationDto,
   type DelegationDto,
+  type DelegationEligibilityResponse,
   type DelegationFilters,
   type SubmitDelegationDto,
 } from '@magguarantee/shared';
@@ -75,6 +76,21 @@ export class DelegationsController {
     query: DelegationFilters,
   ): Promise<{ items: DelegationDto[]; nextCursor: string | null }> {
     return this.delegations.list(user, query);
+  }
+
+  /**
+   * Carrier-portal readiness flag for the new-delegation form. Declared
+   * BEFORE `GET /:id` so the literal `eligibility` segment is matched first
+   * (Express matches routes in declaration order). Returns only a boolean —
+   * no breakdown — per the product decision (the detail lives on the opiekun
+   * fleet view via `attentionReasons`).
+   */
+  @Get('eligibility')
+  @Roles('przewoznik')
+  async eligibility(
+    @CurrentUser() user: AuthUser,
+  ): Promise<DelegationEligibilityResponse> {
+    return this.delegations.eligibility(user);
   }
 
   @Get(':id')

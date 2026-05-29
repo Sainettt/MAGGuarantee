@@ -79,6 +79,33 @@ export class CarrierAttachmentsRepository {
     });
   }
 
+  /**
+   * Batched variant of `countActiveByCategory` for a SET of carriers — one
+   * `groupBy` round-trip instead of N per-carrier counts. Returns a map of
+   * `carrierId → live attachment count in this category`; carriers with zero
+   * matching attachments are absent from the map (callers treat a missing key
+   * as 0). Used by the opiekun fleet aggregate to build the `adrDocMissing`
+   * attention flag for the whole carrier list without an N+1. The soft-delete
+   * extension constrains the query to live rows. Short-circuits on an empty
+   * id set (Postgres rejects `IN ()`).
+   */
+  async countActiveByCategoryForCarriers(
+    carrierIds: string[],
+    category: CarrierAttachmentCategory,
+  ): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (carrierIds.length === 0) return out;
+    const groups = await this.prisma.tx.carrierAttachment.groupBy({
+      by: ['carrierId'],
+      where: { carrierId: { in: carrierIds }, category },
+      _count: { carrierId: true },
+    });
+    for (const g of groups) {
+      out.set(g.carrierId, g._count.carrierId);
+    }
+    return out;
+  }
+
   /** Inserts one attachment row. */
   async create(
     input: CreateCarrierAttachmentInput,

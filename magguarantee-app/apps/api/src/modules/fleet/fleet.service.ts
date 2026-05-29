@@ -12,6 +12,12 @@ import type {
 } from '@magguarantee/shared';
 
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
+import { CarrierAttachmentsRepository } from '../carriers/carrier-attachments.repository';
+import {
+  CarrierReadinessService,
+  readinessToAttentionReasons,
+  type CarrierReadiness,
+} from '../carriers/carrier-readiness.service';
 import {
   CarriersRepository,
   type OpiekunAggregateCarrierRow,
@@ -43,6 +49,8 @@ export class FleetService {
     private readonly vehicles: VehiclesRepository,
     private readonly drivers: DriversRepository,
     private readonly trailers: TrailersRepository,
+    private readonly readiness: CarrierReadinessService,
+    private readonly carrierAttachments: CarrierAttachmentsRepository,
   ) {}
 
   async getMyFleet(
@@ -121,19 +129,59 @@ export class FleetService {
    *  - other    → 403 (defence in depth; `@Roles` on the controller is the
    *               primary gate).
    *
-   * Performs ONE repository round-trip — no per-carrier N+1.
+   * Query budget — O(1), not O(n): the carrier aggregate is one round-trip,
+   * the ADR-vehicle counts are one batched `groupBy`, and the ADR-doc counts
+   * are one batched `groupBy`. No per-carrier reads. The active vehicle /
+   * trailer / driver counts come for free on the aggregate row (`_count`).
    */
   async getOpiekunFleet(user: AuthUser): Promise<OpiekunFleetResponse> {
     this._assertOpiekunOrAdmin(user);
     const rows = await this.carriers.listForOpiekunAggregate(
       user.role === 'opiekun' ? { opiekunId: user.sub } : {},
     );
+    const readinessById = await this._computeReadinessBatch(rows);
     const now = Date.now();
-    const carriers = rows.map((r) => this._mapCarrierStats(r, now));
+    const carriers = rows.map((r) =>
+      this._mapCarrierStats(r, now, readinessById.get(r.id)),
+    );
     return {
       carriers,
       totals: this._buildTotals(carriers),
     };
+  }
+
+  /**
+   * Builds readiness for the whole opiekun-scoped carrier set with TWO
+   * batched queries (ADR vehicles + ADR docs, each `groupBy` carrierId) — no
+   * per-carrier round trips. The active vehicle/trailer/driver counts are
+   * already on the aggregate rows (`_count`), so we just zip them with the
+   * two ADR maps and hand the normalised inputs to the pure
+   * `CarrierReadinessService.forCarriers`.
+   */
+  private async _computeReadinessBatch(
+    rows: OpiekunAggregateCarrierRow[],
+  ): Promise<Map<string, CarrierReadiness>> {
+    const carrierIds = rows.map((r) => r.id);
+    const [adrVehicleCounts, adrDocCounts] = await Promise.all([
+      this.vehicles.countActiveAdrByCarriers(carrierIds),
+      this.carrierAttachments.countActiveByCategoryForCarriers(
+        carrierIds,
+        'adr',
+      ),
+    ]);
+    const inputsById = new Map(
+      rows.map((r) => [
+        r.id,
+        {
+          activeVehicles: r.counts.vehicles,
+          activeTrailers: r.counts.trailers,
+          activeDrivers: r.counts.drivers,
+          activeAdrVehicles: adrVehicleCounts.get(r.id) ?? 0,
+          activeAdrDocs: adrDocCounts.get(r.id) ?? 0,
+        },
+      ]),
+    );
+    return this.readiness.forCarriers(inputsById);
   }
 
   // ── opiekun-fleet helpers ────────────────────────────────
@@ -147,6 +195,7 @@ export class FleetService {
   private _mapCarrierStats(
     row: OpiekunAggregateCarrierRow,
     nowMs: number,
+    readiness: CarrierReadiness | undefined,
   ): OpiekunCarrierStats {
     const vehicles = this._classifyVehicles(row, nowMs);
     return {
@@ -158,6 +207,12 @@ export class FleetService {
       aktywny: row.active,
       liczbaWypisow: row.numberOfVehicle,
       vehicles,
+      // `readiness` is always present in production (computed for every row);
+      // the `?? []` is a defensive fallback so a missing key never crashes
+      // the mapper (the carrier would simply show no attention flags).
+      attentionReasons: readiness
+        ? readinessToAttentionReasons(readiness)
+        : [],
     };
   }
 

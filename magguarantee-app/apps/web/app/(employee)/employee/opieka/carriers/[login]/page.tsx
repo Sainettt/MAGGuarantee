@@ -101,6 +101,15 @@ export default function OpiekaCarrierDetailPage() {
 
   const carrier: CarrierDto | undefined = carrierQ.data;
 
+  // The ADR-document banner in the Documents tab is conditional: it only
+  // applies when the carrier actually operates at least one ADR vehicle.
+  // We already fetch the carrier's vehicles for the "Auta" tab, so derive the
+  // flag here and pass it down rather than refetching inside the tab.
+  const hasAdrVehicle = useMemo(
+    () => (vehiclesQ.data?.items ?? []).some((v) => v.adr),
+    [vehiclesQ.data],
+  );
+
   return (
     <section className="px-4 sm:px-6 lg:px-10 xl:px-12 py-8">
       {/* Back link — kept visible while the page loads so the user is never
@@ -205,7 +214,10 @@ export default function OpiekaCarrierDetailPage() {
 
           {carrierId && (
             <TabsContent value="documents">
-              <CarrierDocumentsTab carrierId={carrierId} />
+              <CarrierDocumentsTab
+                carrierId={carrierId}
+                hasAdrVehicle={hasAdrVehicle}
+              />
             </TabsContent>
           )}
         </Tabs>

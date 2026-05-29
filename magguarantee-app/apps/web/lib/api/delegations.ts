@@ -3,12 +3,25 @@
 import type {
   CancelDelegationDto,
   DelegationDto,
+  DelegationEligibilityResponse,
   DelegationFilters,
   SubmitDelegationDto,
 } from '@magguarantee/shared';
 
 import { apiJson } from './client';
 import { type Paginated, toQuery } from './query';
+
+/**
+ * GET /delegations/eligibility (przewoznik) — a single readiness boolean that
+ * mirrors the same server-side check that hard-blocks POST /delegations. No
+ * breakdown is exposed to the carrier by design (product decision); the portal
+ * uses it only to enable/disable the new-trip CTA.
+ */
+export function getDelegationEligibility(): Promise<DelegationEligibilityResponse> {
+  return apiJson<DelegationEligibilityResponse>('/delegations/eligibility', {
+    method: 'GET',
+  });
+}
 
 export function listDelegations(
   filters: DelegationFilters = { limit: 50 },

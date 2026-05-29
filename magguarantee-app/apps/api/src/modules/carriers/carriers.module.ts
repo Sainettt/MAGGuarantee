@@ -19,6 +19,12 @@ import { CarriersService } from './carriers.service';
     CarrierAttachmentsService,
     CarrierAttachmentsRepository,
   ],
-  exports: [CarriersService, CarriersRepository],
+  exports: [
+    CarriersService,
+    CarriersRepository,
+    // Exported so the readiness module can compose ADR-doc counts without
+    // re-declaring the provider (it stays a single Prisma-backed instance).
+    CarrierAttachmentsRepository,
+  ],
 })
 export class CarriersModule {}

@@ -1,6 +1,8 @@
 import { ForbiddenException } from '@nestjs/common';
 
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
+import { CarrierAttachmentsRepository } from '../carriers/carrier-attachments.repository';
+import { CarrierReadinessService } from '../carriers/carrier-readiness.service';
 import {
   CarriersRepository,
   type OpiekunAggregateCarrierRow,
@@ -74,8 +76,25 @@ function ownedBy(
   return Object.assign(makeCarrierRow(overrides), { opiekunId });
 }
 
-function noopVehiclesRepo(): VehiclesRepository {
-  return {} as unknown as VehiclesRepository;
+/**
+ * Vehicles repo stub for the opiekun-fleet path. Only the batched
+ * `countActiveAdrByCarriers` is exercised here — its return map is seeded per
+ * test via `adrVehicleCounts` (carrierId → active-ADR-vehicle count).
+ */
+function stubVehiclesRepo(
+  adrVehicleCounts: Record<string, number> = {},
+): VehiclesRepository {
+  return {
+    countActiveAdrByCarriers: jest.fn(async (ids: string[]) => {
+      const out = new Map<string, number>();
+      for (const id of ids) {
+        if (adrVehicleCounts[id] !== undefined) {
+          out.set(id, adrVehicleCounts[id]!);
+        }
+      }
+      return out;
+    }),
+  } as unknown as VehiclesRepository;
 }
 function noopDriversRepo(): DriversRepository {
   return {} as unknown as DriversRepository;
@@ -84,12 +103,52 @@ function noopTrailersRepo(): TrailersRepository {
   return {} as unknown as TrailersRepository;
 }
 
-function newSvc(seed: OpiekunAggregateCarrierRow[] = [], captured?: { value?: { opiekunId?: string } }) {
+/**
+ * Carrier-attachments repo stub — only the batched
+ * `countActiveByCategoryForCarriers` (category `adr`) is used. Seeded per test
+ * via `adrDocCounts` (carrierId → active-ADR-doc count).
+ */
+function stubAttachmentsRepo(
+  adrDocCounts: Record<string, number> = {},
+): CarrierAttachmentsRepository {
+  return {
+    countActiveByCategoryForCarriers: jest.fn(
+      async (ids: string[], _category: string) => {
+        const out = new Map<string, number>();
+        for (const id of ids) {
+          if (adrDocCounts[id] !== undefined) {
+            out.set(id, adrDocCounts[id]!);
+          }
+        }
+        return out;
+      },
+    ),
+  } as unknown as CarrierAttachmentsRepository;
+}
+
+function newSvc(
+  seed: OpiekunAggregateCarrierRow[] = [],
+  captured?: { value?: { opiekunId?: string } },
+  adr: { vehicles?: Record<string, number>; docs?: Record<string, number> } = {},
+) {
+  const carriersRepo = makeCarriersRepo(seed, captured);
+  const vehiclesRepo = stubVehiclesRepo(adr.vehicles);
+  const attachmentsRepo = stubAttachmentsRepo(adr.docs);
+  // The readiness service's batched path (`forCarriers`) is PURE — it derives
+  // from pre-fetched inputs and never touches a repo — so a real instance
+  // wired with the stub repos faithfully exercises the production code.
+  const readiness = new CarrierReadinessService(
+    carriersRepo,
+    vehiclesRepo,
+    attachmentsRepo,
+  );
   return new FleetService(
-    makeCarriersRepo(seed, captured),
-    noopVehiclesRepo(),
+    carriersRepo,
+    vehiclesRepo,
     noopDriversRepo(),
     noopTrailersRepo(),
+    readiness,
+    attachmentsRepo,
   );
 }
 
@@ -303,6 +362,101 @@ describe('FleetService.getOpiekunFleet — vehicle classification', () => {
         potencjalne: 4,
         total: 0,
       },
+      // No active vehicle/trailer/driver on this fixture → incompleteFleet.
+      attentionReasons: ['incompleteFleet'],
     });
+  });
+});
+
+describe('FleetService.getOpiekunFleet — attentionReasons (carrier readiness)', () => {
+  // A carrier with a complete active fleet (≥1 vehicle, trailer, driver) and
+  // no ADR vehicle → ready → empty attentionReasons.
+  function fullFleetRow(
+    overrides: Partial<OpiekunAggregateCarrierRow> = {},
+  ): OpiekunAggregateCarrierRow {
+    return ownedBy('op-self', {
+      counts: { vehicles: 2, drivers: 1, trailers: 1 },
+      vehicles: [{ id: 'v', active: true, lastDroveAt: null }],
+      ...overrides,
+    });
+  }
+
+  it('empty attentionReasons when the carrier is ready (full fleet, no ADR vehicle)', async () => {
+    const svc = newSvc([fullFleetRow({ id: 'c-ready' })]);
+    const out = await svc.getOpiekunFleet(makeAuth('opiekun', 'op-self'));
+    expect(out.carriers[0]?.attentionReasons).toEqual([]);
+  });
+
+  it('flags incompleteFleet when a child type is missing (no trailer)', async () => {
+    const svc = newSvc([
+      fullFleetRow({ id: 'c-no-trailer', counts: { vehicles: 1, drivers: 1, trailers: 0 } }),
+    ]);
+    const out = await svc.getOpiekunFleet(makeAuth('opiekun', 'op-self'));
+    expect(out.carriers[0]?.attentionReasons).toEqual(['incompleteFleet']);
+  });
+
+  it('flags adrDocMissing when an ADR vehicle exists but no ADR doc', async () => {
+    const svc = newSvc(
+      [fullFleetRow({ id: 'c-adr' })],
+      undefined,
+      { vehicles: { 'c-adr': 1 }, docs: {} },
+    );
+    const out = await svc.getOpiekunFleet(makeAuth('opiekun', 'op-self'));
+    expect(out.carriers[0]?.attentionReasons).toEqual(['adrDocMissing']);
+  });
+
+  it('clears adrDocMissing when the ADR doc is on file', async () => {
+    const svc = newSvc(
+      [fullFleetRow({ id: 'c-adr-ok' })],
+      undefined,
+      { vehicles: { 'c-adr-ok': 1 }, docs: { 'c-adr-ok': 1 } },
+    );
+    const out = await svc.getOpiekunFleet(makeAuth('opiekun', 'op-self'));
+    expect(out.carriers[0]?.attentionReasons).toEqual([]);
+  });
+
+  it('stacks both reasons (incomplete fleet + ADR vehicle without doc)', async () => {
+    const svc = newSvc(
+      [
+        fullFleetRow({
+          id: 'c-both',
+          counts: { vehicles: 1, drivers: 0, trailers: 1 },
+        }),
+      ],
+      undefined,
+      { vehicles: { 'c-both': 2 }, docs: {} },
+    );
+    const out = await svc.getOpiekunFleet(makeAuth('opiekun', 'op-self'));
+    expect(out.carriers[0]?.attentionReasons).toEqual([
+      'incompleteFleet',
+      'adrDocMissing',
+    ]);
+  });
+
+  it('does not require an ADR doc when the carrier has no ADR vehicle', async () => {
+    const svc = newSvc(
+      [fullFleetRow({ id: 'c-no-adr' })],
+      undefined,
+      { vehicles: {}, docs: {} },
+    );
+    const out = await svc.getOpiekunFleet(makeAuth('opiekun', 'op-self'));
+    expect(out.carriers[0]?.attentionReasons).toEqual([]);
+  });
+
+  it('zips ADR maps per carrier across a multi-carrier batch (one groupBy each)', async () => {
+    const svc = newSvc(
+      [
+        fullFleetRow({ id: 'c-1' }), // ready
+        fullFleetRow({ id: 'c-2' }), // ADR vehicle, no doc
+        fullFleetRow({ id: 'c-3', counts: { vehicles: 0, drivers: 1, trailers: 1 } }), // incomplete
+      ],
+      undefined,
+      { vehicles: { 'c-2': 1 }, docs: {} },
+    );
+    const out = await svc.getOpiekunFleet(makeAuth('opiekun', 'op-self'));
+    const byId = new Map(out.carriers.map((c) => [c.carrierId, c.attentionReasons]));
+    expect(byId.get('c-1')).toEqual([]);
+    expect(byId.get('c-2')).toEqual(['adrDocMissing']);
+    expect(byId.get('c-3')).toEqual(['incompleteFleet']);
   });
 });

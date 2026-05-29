@@ -134,6 +134,33 @@ export const CancelDelegationSchema = z
   .strict();
 export type CancelDelegationDto = z.infer<typeof CancelDelegationSchema>;
 
+// ─── Eligibility (carrier readiness) ─────────────────────
+
+/**
+ * Stable, machine-readable code surfaced in the `extensions.code` field of the
+ * 422 problem-details envelope when a carrier fails the readiness check on
+ * `POST /delegations`. The frontend pattern-matches on this code to render a
+ * generic "skontaktuj się ze swoim opiekunem" banner — the carrier gets NO
+ * breakdown of which item is missing (product decision: the detail lives only
+ * on the opiekun side, see `OpiekunCarrierStats.attentionReasons`).
+ */
+export const CARRIER_NOT_READY_CODE = 'CARRIER_NOT_READY' as const;
+
+/**
+ * Response for `GET /delegations/eligibility` (carrier role). A single boolean
+ * — `canCreate` — mirrors the same readiness computation that hard-blocks
+ * `POST /delegations`. No breakdown is exposed to the carrier by design; the
+ * carrier portal uses this only to enable/disable the new-delegation CTA.
+ */
+export const DelegationEligibilityResponseSchema = z
+  .object({
+    canCreate: z.boolean(),
+  })
+  .strict();
+export type DelegationEligibilityResponse = z.infer<
+  typeof DelegationEligibilityResponseSchema
+>;
+
 // ─── Filters ─────────────────────────────────────────────
 
 export const DelegationFiltersSchema = z

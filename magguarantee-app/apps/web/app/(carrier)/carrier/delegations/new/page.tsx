@@ -15,30 +15,53 @@
 //   submit so the user sees inline validation errors.
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ShieldAlert } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Controller, useForm, type Resolver } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
+  CARRIER_NOT_READY_CODE,
   SubmitDelegationSchema,
   type EuVatCountryCode,
   type SubmitDelegationDto,
 } from '@magguarantee/shared';
 
+import { ApiResponseError } from '@/lib/api/client';
 import { Button } from '@/components/ui/Button';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { Textarea } from '@/components/ui/Textarea';
 import { CountrySelect } from '@/components/forms/CountrySelect';
 import { FormField, FormSection } from '@/components/forms/Form';
 import { MaskedPostalInput } from '@/components/forms/MaskedPostalInput';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
-import { useSubmitDelegation } from '@/lib/hooks/useDelegations';
+import {
+  useDelegationEligibility,
+  useSubmitDelegation,
+} from '@/lib/hooks/useDelegations';
 import { useFormDraft } from '@/lib/hooks/useFormDraft';
 import { useMyFleet } from '@/lib/hooks/useMyFleet';
+
+/**
+ * Narrows an unknown mutation error to the carrier-readiness 422. The API
+ * returns RFC-7807 with `extensions.code === CARRIER_NOT_READY_CODE`; the
+ * client puts the whole decoded envelope on `err.data`, so the code lives at
+ * `err.data.extensions.code`.
+ */
+function isCarrierNotReady(err: unknown): boolean {
+  if (!(err instanceof ApiResponseError) || err.status !== 422) return false;
+  const extensions = (err.data as { extensions?: unknown } | undefined)
+    ?.extensions;
+  if (!extensions || typeof extensions !== 'object') return false;
+  return (
+    (extensions as { code?: unknown }).code === CARRIER_NOT_READY_CODE
+  );
+}
 
 const DRAFT_KEY = 'draft:carrier:newDelegation';
 
@@ -76,9 +99,18 @@ const EMPTY_DEFAULTS: FormValues = {
 export default function NewDelegationPage() {
   const t = useTranslations('carrier.delegations');
   const tForm = useTranslations('carrier.delegations.form');
+  const tBlocked = useTranslations('carrier.delegations.blocked');
   const tCommon = useTranslations('common');
   const router = useRouter();
   const fleetQ = useMyFleet();
+
+  // Carrier-readiness gate. While loading we render the form skeleton; if the
+  // carrier isn't ready we replace the form with a generic blocking state.
+  const eligibilityQ = useDelegationEligibility();
+  // Defense in depth: a 422 CARRIER_NOT_READY on submit (state changed since
+  // page load) flips this latch, swapping the form for the same blocked view.
+  const [blockedBySubmit, setBlockedBySubmit] = useState(false);
+  const blocked = eligibilityQ.data?.canCreate === false || blockedBySubmit;
 
   const form = useForm<FormValues>({
     // The resolver is typed against the strict DTO; cast lets us keep the
@@ -103,6 +135,15 @@ export default function NewDelegationPage() {
       router.push('/carrier/delegations');
     },
     onError: (err) => {
+      // Defense in depth: readiness can change between page load and submit
+      // (e.g. the opiekun deactivated the last active driver). Surface the
+      // SAME generic blocked view + a generic toast — never the raw detail,
+      // and never a breakdown of what's missing (product decision).
+      if (isCarrierNotReady(err)) {
+        setBlockedBySubmit(true);
+        toast.error(tBlocked('toast'));
+        return;
+      }
       const msg =
         err instanceof Error ? err.message : t('registerErrorToast');
       toast.error(msg);
@@ -147,6 +188,44 @@ export default function NewDelegationPage() {
         {t('newDelegation')}
       </h1>
 
+      {eligibilityQ.isLoading ? (
+        // Form skeleton while we resolve carrier readiness.
+        <div className="bg-card rounded-lg border border-border p-5 space-y-6">
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-10 w-full" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+          <Skeleton className="h-5 w-32" />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+        </div>
+      ) : blocked ? (
+        // Generic blocking state — the carrier's data isn't complete enough to
+        // register a trip. No breakdown of what's missing (product decision);
+        // the carrier is directed to their opiekun. No bypass.
+        <div className="bg-card rounded-lg border border-border p-2">
+          <EmptyState
+            icon={ShieldAlert}
+            title={tBlocked('title')}
+            message={tBlocked('message')}
+            action={
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => router.push('/carrier/delegations')}
+              >
+                {t('backToList')}
+              </Button>
+            }
+          />
+        </div>
+      ) : (
       <form onSubmit={onSubmit}>
         <div className="bg-card rounded-lg border border-border p-5 space-y-6">
           <FormSection title={tForm('sectionVehicleAndDriver')}>
@@ -383,6 +462,7 @@ export default function NewDelegationPage() {
           </Button>
         </div>
       </form>
+      )}
     </section>
   );
 }

@@ -63,21 +63,31 @@ const CATEGORIES: CarrierAttachmentCategory[] = [
 
 interface Props {
   carrierId: string;
+  /**
+   * Whether the carrier operates at least one ADR vehicle. The mandatory-ADR
+   * banner is only relevant for such carriers — a carrier with no ADR vehicle
+   * has no obligation to upload an ADR document. Derived in the parent page
+   * from the already-fetched vehicle list (see page.tsx).
+   */
+  hasAdrVehicle: boolean;
 }
 
-export function CarrierDocumentsTab({ carrierId }: Props) {
+export function CarrierDocumentsTab({ carrierId, hasAdrVehicle }: Props) {
   const t = useTranslations('opieka.documents');
   const tCommon = useTranslations('common');
   const tFile = useTranslations('fileUpload');
 
   const docsQ = useCarrierAttachments(carrierId);
 
-  // The carrier MUST have exactly one ADR document. We derive presence from
+  // The carrier may hold at most one ADR document. We derive presence from
   // the loaded list; only trustworthy once the query has settled.
   const docs = docsQ.data ?? [];
   const hasAdr = docs.some((d) => d.category === 'adr');
-  // Don't flash the "missing" warning while the list is still loading.
-  const adrMissing = !docsQ.isLoading && docsQ.isSuccess && !hasAdr;
+  // The ADR document is only required when the carrier actually has an ADR
+  // vehicle. Don't flash the "missing" warning while the list is still
+  // loading, nor for carriers that have no ADR obligation.
+  const adrMissing =
+    !docsQ.isLoading && docsQ.isSuccess && hasAdrVehicle && !hasAdr;
 
   // ── Upload control state ──────────────────────────────
   const [category, setCategory] = useState<CarrierAttachmentCategory>(
@@ -255,9 +265,10 @@ export function CarrierDocumentsTab({ carrierId }: Props) {
 
   return (
     <div className="space-y-4">
-      {/* ── Mandatory-ADR warning ── shown only once the list has loaded and
-          no ADR document is present. Uses the documented amber/warning token
-          set (same convention as Badge/CountdownBanner). */}
+      {/* ── ADR-document warning ── shown only once the list has loaded, the
+          carrier operates at least one ADR vehicle, and no ADR document is
+          present. Uses the documented amber/warning token set (same
+          convention as Badge/CountdownBanner). */}
       {adrMissing && (
         <div
           role="alert"

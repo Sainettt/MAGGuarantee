@@ -197,7 +197,8 @@
     "diagnostics": "Diagnostics",
     "openMenu": "Open menu",
     "closeMenu": "Close menu",
-    "sectionLabel": "Panel sections"
+    "sectionLabel": "Panel sections",
+    "opiekaAttentionBadge": "{count, plural, one {# carrier requires attention} other {# carriers require attention}}"
   },
   "forbidden": {
     "title": "Access denied",
@@ -447,7 +448,8 @@
     },
     "attachmentOpen": "Open",
     "attachmentOpenError": "Could not open the file. Please try again.",
-    "attachmentPopupBlocked": "Could not open a new tab. Please allow pop-ups for this site and try again."
+    "attachmentPopupBlocked": "Could not open a new tab. Please allow pop-ups for this site and try again.",
+    "adrDocReminderToast": "This vehicle is ADR — remember to add the carrier's ADR document in the Documents tab."
   },
   "drivers": {
     "title": "Drivers",
@@ -883,6 +885,13 @@
       "nieaktywne": "Inactive",
       "potencjalne": "Potential"
     },
+    "attention": {
+      "title": "Requires attention",
+      "reason": {
+        "incompleteFleet": "Incomplete fleet (missing vehicle / trailer / driver)",
+        "adrDocMissing": "Missing ADR document"
+      }
+    },
     "detail": {
       "backToList": "← Back to list",
       "loadingTitle": "Loading carrier…",
@@ -946,8 +955,8 @@
       "deleteTitle": "Delete document?",
       "deleteBody": "Are you sure you want to delete \"{fileName}\"? This action cannot be undone.",
       "deletedToast": "Document deleted",
-      "adrMissingTitle": "Missing mandatory ADR document",
-      "adrMissingMessage": "This carrier requires one ADR document. Upload it to complete the documentation.",
+      "adrMissingTitle": "Missing ADR document",
+      "adrMissingMessage": "This carrier operates ADR vehicles but has no ADR document on file yet. Upload the ADR document to complete the documentation.",
       "adrExistsHint": "An ADR document already exists — delete the existing one to upload a new one",
       "adrExistsToast": "An ADR document already exists for this carrier",
       "category": {
@@ -1158,6 +1167,11 @@
         "w_trasie": "In transit",
         "zjechal": "Returned",
         "anulowany": "Cancelled"
+      },
+      "blocked": {
+        "title": "Trip cannot be registered",
+        "message": "Registering a trip is not possible because not all required data is filled in the system. Please contact your account manager to complete the missing information.",
+        "toast": "Trip cannot be registered — please contact your account manager."
       }
     },
     "fleet": {

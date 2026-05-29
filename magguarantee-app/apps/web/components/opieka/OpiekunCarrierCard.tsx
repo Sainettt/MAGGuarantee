@@ -9,9 +9,13 @@
 // palette (`text-success` / `text-warning` / `text-danger` / `text-info`) so
 // the colour story mirrors the KPI strip above on the same page.
 
+import { TriangleAlert } from 'lucide-react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import type { OpiekunCarrierStats } from '@magguarantee/shared';
+import type {
+  CarrierAttentionReason,
+  OpiekunCarrierStats,
+} from '@magguarantee/shared';
 
 import { Badge } from '@/components/ui/Badge';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -63,6 +67,15 @@ export default function OpiekunCarrierCard({
   const displayName = carrier.firma ?? carrier.nazwa ?? carrier.login;
   const isInactive = carrier.aktywny === false;
 
+  // "Requires attention" marker — generic warning that covers an incomplete
+  // fleet AND/OR a missing ADR document. The opiekun (unlike the carrier) does
+  // see the breakdown, surfaced as the tooltip/`title` text.
+  const reasons = carrier.attentionReasons ?? [];
+  const needsAttention = reasons.length > 0;
+  const reasonText = reasons
+    .map((r: CarrierAttentionReason) => t(`attention.reason.${r}`))
+    .join(' · ');
+
   return (
     <Link
       href={`/employee/opieka/carriers/${encodeURIComponent(carrier.login)}`}
@@ -90,9 +103,20 @@ export default function OpiekunCarrierCard({
             {carrier.login}
           </span>
         </div>
-        <Badge variant={carrier.aktywny ? 'success' : 'muted'}>
-          {carrier.aktywny ? tCommon('active') : tCommon('inactive')}
-        </Badge>
+        <div className="flex flex-none items-center gap-2">
+          {needsAttention && (
+            <span
+              className="inline-flex items-center text-warning-dark dark:text-warning"
+              title={`${t('attention.title')}: ${reasonText}`}
+              aria-label={`${t('attention.title')}: ${reasonText}`}
+            >
+              <TriangleAlert size={16} aria-hidden />
+            </span>
+          )}
+          <Badge variant={carrier.aktywny ? 'success' : 'muted'}>
+            {carrier.aktywny ? tCommon('active') : tCommon('inactive')}
+          </Badge>
+        </div>
       </div>
 
       {/* Meta row — NIP. */}

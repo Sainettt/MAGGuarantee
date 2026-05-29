@@ -139,14 +139,42 @@ export type OpiekunCarrierVehicleStats = z.infer<
 >;
 
 /**
+ * Machine-readable "attention" reasons surfaced to the opiekun on the fleet
+ * dashboard. Derived from the shared carrier-readiness computation
+ * (`CarrierReadinessService` in the api):
+ *
+ *  - `incompleteFleet` — the carrier is missing at least one of an active
+ *    vehicle / trailer / driver. The carrier cannot register a delegation
+ *    until the fleet is complete.
+ *  - `adrDocMissing`   — the carrier has at least one active ADR vehicle but
+ *    no active ADR document on file. The carrier cannot register a delegation
+ *    until the ADR document is uploaded.
+ *
+ * Unlike the carrier-facing eligibility flag (`canCreateDelegation`), the
+ * opiekun DOES see the breakdown so they can chase the missing items. An
+ * empty array means nothing requires attention (the carrier is ready).
+ */
+export const CarrierAttentionReasonSchema = z.enum([
+  'incompleteFleet',
+  'adrDocMissing',
+]);
+export type CarrierAttentionReason = z.infer<
+  typeof CarrierAttentionReasonSchema
+>;
+
+/**
  * Per-carrier row in the opiekun fleet aggregate. Identity (id/login/nazwa/
- * firma/nip/aktywny/liczbaWypisow) + the four-bucket vehicle classification.
+ * firma/nip/aktywny/liczbaWypisow) + the four-bucket vehicle classification +
+ * the readiness `attentionReasons` flags.
  *
  * `liczbaWypisow` here is the carrier's KREPTD entry count — the column is
  * named `Carrier.numberOfVehicle` in the Prisma schema (per
  * docs/12-database-schema.md). The wire field keeps the Polish term used in
  * the legacy spreadsheet + UI labels for continuity with the carrier-form
  * field.
+ *
+ * `attentionReasons` is an additive (non-breaking) field — empty array means
+ * the carrier is ready and nothing requires the opiekun's attention.
  */
 export const OpiekunCarrierStatsSchema = z.object({
   carrierId: UuidSchema,
@@ -157,6 +185,7 @@ export const OpiekunCarrierStatsSchema = z.object({
   aktywny: z.boolean(),
   liczbaWypisow: z.number().int().nonnegative().nullable(),
   vehicles: OpiekunCarrierVehicleStatsSchema,
+  attentionReasons: z.array(CarrierAttentionReasonSchema),
 });
 export type OpiekunCarrierStats = z.infer<typeof OpiekunCarrierStatsSchema>;
 
