@@ -11,8 +11,14 @@
 export const COOKIE_ACCESS = 'mt_access';
 export const COOKIE_REFRESH = 'mt_refresh';
 
-// Refresh cookie is scoped to the refresh endpoint only — limits exposure.
-export const REFRESH_COOKIE_PATH = '/api/v1/auth/refresh';
+// Refresh cookie is scoped to root ('/') so the browser sends it on web-route
+// navigations (full reload / typed URL), letting the Next.js edge middleware
+// read `mt_refresh` and perform a server-side silent refresh when the access
+// cookie has expired — without this, hard navigations log the user out after
+// the 15-min access TTL despite a 30-day refresh token. Exposure stays bounded:
+// in prod web+API share one origin (Caddy path-based routing — see
+// infra/caddy/Caddyfile) and the cookie remains HttpOnly + Secure + SameSite=Strict.
+export const REFRESH_COOKIE_PATH = '/';
 
 // ── Redis key prefixes (docs/15-auth-strategy.md#2fa) ───
 export const REDIS_KEY = {

@@ -365,28 +365,84 @@ function RoleSwitcher() {
 
 ## Интеграция в Next.js (apps/web)
 
-### Middleware (защита маршрутов)
+### Middleware (защита маршрутов + silent refresh)
+
+Middleware — это первая линия защиты для **document-навигаций** (typed URL, full
+reload, server-rendered route). Здесь нет XHR-перехватчика, поэтому middleware
+сам реализует контракт `401 → refresh → retry`, что и клиентский
+`fetchWithRefresh`:
+
+- `mt_access` ставится с `maxAge == 15 мин`, поэтому браузер удаляет его через
+  15 минут — даже если `mt_refresh` валиден 30 дней. Проверка «есть ли cookie»
+  недостаточна: токен может быть просрочен ещё до удаления.
+- Поэтому middleware: декодирует payload `mt_access` (без проверки подписи — это
+  делает API) и считает `needRefresh = !access || isAccessExpired(access)`
+  (нет `exp` или `exp*1000 <= now` с запасом в несколько секунд).
+- Если `needRefresh` и есть `mt_refresh` — серверный `POST /api/v1/auth/refresh`
+  с форвардом `Cookie: mt_refresh=<value>`. API ротирует пару и отвечает
+  `Set-Cookie` для `mt_access` **и** `mt_refresh`.
+- Успех: middleware (a) форвардит сырые `Set-Cookie` строки в браузер
+  (`res.headers.append('set-cookie', sc)` — атрибуты не трогаем), (b) переписывает
+  `cookie`-заголовок запроса через `NextResponse.next({ request: { headers } })`,
+  чтобы downstream Server Components (`getServerUser` → `/auth/me`) в ЭТОМ ЖЕ
+  запросе увидели свежий access-токен. Эти `Set-Cookie` переносятся и на любой
+  итоговый ответ — включая role-mismatch redirect — чтобы ротированные токены
+  не потерялись.
+- Отказ refresh (non-ok / network error) или нет `mt_refresh` → redirect на
+  `/login` (с `?next=` для не-root, не-login путей). Без ретраев: если refresh
+  не прошёл, сервер уже инвалидировал сессию (редкий cross-tab race → login —
+  корректный безопасный исход).
+- После (возможного) refresh — role-gating по свежему `access` через
+  `lib/roles.ts` (`isGatedPath` / `isAllowedForRole` / `landingFor`).
 
 ```ts
-// apps/web/middleware.ts
+// apps/web/middleware.ts (сокращённо — полная версия в репозитории)
 import { NextResponse, type NextRequest } from 'next/server';
 
-const PUBLIC = ['/login', '/api/auth'];
+const ACCESS_COOKIE = 'mt_access';
+const REFRESH_COOKIE = 'mt_refresh';
+const API_BASE =
+  process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
-export function middleware(req: NextRequest) {
-  const isPublic = PUBLIC.some(p => req.nextUrl.pathname.startsWith(p));
-  const access = req.cookies.get('mt_access')?.value;
+export async function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+  if (isPublic(pathname)) return NextResponse.next();
 
-  if (!isPublic && !access) {
-    return NextResponse.redirect(new URL('/login', req.url));
+  let access = req.cookies.get(ACCESS_COOKIE)?.value;
+  const refresh = req.cookies.get(REFRESH_COOKIE)?.value;
+  let refreshedSetCookies: string[] = [];
+
+  if (!access || isAccessExpired(access)) {
+    if (!refresh) return loginRedirect(req);
+    try {
+      const apiRes = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
+        method: 'POST',
+        headers: { cookie: `${REFRESH_COOKIE}=${refresh}` },
+      });
+      if (!apiRes.ok) return loginRedirect(req);
+      refreshedSetCookies = apiRes.headers.getSetCookie();
+      const newAccess = parseSetCookie(refreshedSetCookies, ACCESS_COOKIE);
+      if (!newAccess) return loginRedirect(req);
+      access = newAccess; // role-gating uses the fresh claim
+    } catch {
+      return loginRedirect(req);
+    }
   }
-  return NextResponse.next();
+
+  // ...build response: rewrite request `cookie` header (so this request's
+  // Server Components see the new token) + append refreshedSetCookies to the
+  // browser response; carry them onto role-mismatch redirects too; then run
+  // role-gating with `access`.
 }
 
 export const config = {
-  matcher: ['/((?!_next|favicon.ico|public).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|svg|gif|webp|ico|txt|xml)$).*)'],
 };
 ```
+
+> Требование API (выполнено отдельно): cookie `mt_refresh` должен иметь
+> `Path=/` (а не `/api/v1/auth`), иначе браузер не пришлёт его на web-роуты и
+> middleware не сможет его прочитать.
 
 ### Hook `useAuth`
 
