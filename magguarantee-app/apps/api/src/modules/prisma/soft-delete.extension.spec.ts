@@ -24,8 +24,10 @@ import {
  */
 describe('softDeleteExtension', () => {
   it('lists the canonical soft-delete models', () => {
-    // Per docs/12-database-schema.md#soft-delete-vs-hard-delete: User,
-    // Carrier, Vehicle, Driver, Trailer, Claim, Delegation.
+    // Per docs/12-database-schema.md#soft-delete-vs-hard-delete: every model
+    // carrying a `deletedAt` column. The three *Attachment models were added
+    // after a production bug — their `.delete()` recursed because they were
+    // missing here (see docs/12-database-schema.md#soft-delete).
     expect(new Set(SOFT_DELETE_MODELS)).toEqual(
       new Set([
         'User',
@@ -35,6 +37,9 @@ describe('softDeleteExtension', () => {
         'Trailer',
         'Claim',
         'Delegation',
+        'CarrierAttachment',
+        'VehicleAttachment',
+        'DriverAttachment',
       ]),
     );
   });
@@ -64,6 +69,9 @@ describe('softDeleteExtension internals', () => {
       'Trailer',
       'Claim',
       'Delegation',
+      'CarrierAttachment',
+      'VehicleAttachment',
+      'DriverAttachment',
     ])('matches soft-delete model %s', (m) => {
       expect(_isSoftModel(m)).toBe(true);
     });

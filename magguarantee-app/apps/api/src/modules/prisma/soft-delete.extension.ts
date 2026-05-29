@@ -40,7 +40,23 @@ import { Prisma } from '@magguarantee/database';
  *
  * Excluded models: AuditLog (append-only), RefreshToken (hard-delete by
  * `expiresAt`), AppConfig (singletons), TrailerType (toggled via `active`),
- * ClaimSequence (counter row), MonthlyLimit (no deletedAt column).
+ * ClaimSequence (counter row), MonthlyLimit (no deletedAt column),
+ * ClaimAttachment (no deletedAt column — never soft-deleted).
+ *
+ * Recursion note (the bug fixed alongside the attachment-model addition): a
+ * `model`-component override CANNOT call `ctx.delete(...)` /
+ * `ctx.deleteMany(...)` to perform the "real" delete — those re-enter the
+ * override and blow the call stack. The recursion-free way to run the genuine
+ * delete (non-soft models + the `INCLUDE_SOFT_DELETED` hard-delete escape
+ * hatch) is the PRE-EXTENSION client handed to the `Prisma.defineExtension`
+ * factory: `client.<model>.delete(...)`. It keeps full Prisma semantics
+ * (cascades, P2003/P2025 codes) — important, because callers like
+ * `TrailerTypesService.hardDelete` translate P2003 into a 409. The tradeoff:
+ * that real delete runs on the root (pre-extension) client, so it is NOT
+ * enrolled in an ambient `@Audit` interactive transaction. The SOFT path
+ * (the common case, including every attachment delete) stays on `ctx.update`
+ * and therefore remains fully transaction-atomic. See the per-branch comments
+ * in `delete` / `deleteMany` below.
  */
 
 export const SOFT_DELETE_MODELS = [
@@ -51,6 +67,14 @@ export const SOFT_DELETE_MODELS = [
   'Trailer',
   'Claim',
   'Delegation',
+  // Attachment metadata rows: each has a `deletedAt` column and each
+  // repository's `softDelete()` calls `.delete()` expecting a soft-delete.
+  // Without these entries `.delete()` took the non-soft branch and recursed
+  // (RangeError → 500 → the audited DELETE transaction rolled back → the row
+  // survived). See docs/12-database-schema.md#soft-delete.
+  'CarrierAttachment',
+  'VehicleAttachment',
+  'DriverAttachment',
 ] as const;
 export type SoftDeleteModel = (typeof SOFT_DELETE_MODELS)[number];
 
@@ -201,26 +225,38 @@ export function softDeleteExtension() {
       },
 
       // ── delete / deleteMany rewritten to soft-update. ──
-      // Using the `model` component so we can call sibling operations
-      // (`update`/`updateMany`) on the same client.
+      // The soft rewrite uses the `model` component so it can call the sibling
+      // `update`/`updateMany` via `Prisma.getExtensionContext(this)` — that
+      // context is transaction-aware, so a soft delete inside a `@Audit`
+      // interactive transaction commits/rolls back atomically with the audit
+      // row.
+      //
+      // The REAL delete (non-soft models, and the `INCLUDE_SOFT_DELETED`
+      // hard-delete escape hatch) MUST NOT go through `ctx.delete(...)` — that
+      // re-enters this very override (infinite recursion → RangeError → 500).
+      // Instead it runs on `client` — the PRE-EXTENSION client captured by the
+      // `Prisma.defineExtension((client) => …)` factory above. Its delegates
+      // are not wrapped by this extension, so the call is recursion-free and
+      // preserves full Prisma semantics (cascade deletes, P2003/P2025 codes).
       model: {
         $allModels: {
           async delete<A>(this: A, args: unknown) {
             type Ctx = {
               update: (a: unknown) => Promise<unknown>;
-              delete: (a: unknown) => Promise<unknown>;
             };
             const ctx = Prisma.getExtensionContext(this) as unknown as Ctx & {
               $name?: string;
             };
             const model = ctx.$name ?? '';
             if (!isSoftModel(model)) {
-              return ctx.delete(args);
+              // Non-soft model → genuine hard delete on the base client.
+              return rawDelegate(client, model).delete(args);
             }
             const { rest, include } = takeIncludeFlag(args);
             if (include) {
-              // Hard-delete. Caller has explicitly opted in.
-              return ctx.delete(rest);
+              // Escape-hatch hard-delete. Caller explicitly opted in; run the
+              // real delete on the base client (recursion-free).
+              return rawDelegate(client, model).delete(rest);
             }
             // Re-issue as update setting deletedAt = now.
             const where = (rest as { where?: Record<string, unknown> }).where;
@@ -238,18 +274,17 @@ export function softDeleteExtension() {
           async deleteMany<A>(this: A, args: unknown) {
             type Ctx = {
               updateMany: (a: unknown) => Promise<unknown>;
-              deleteMany: (a: unknown) => Promise<unknown>;
             };
             const ctx = Prisma.getExtensionContext(this) as unknown as Ctx & {
               $name?: string;
             };
             const model = ctx.$name ?? '';
             if (!isSoftModel(model)) {
-              return ctx.deleteMany(args);
+              return rawDelegate(client, model).deleteMany(args);
             }
             const { rest, include } = takeIncludeFlag(args);
             if (include) {
-              return ctx.deleteMany(rest);
+              return rawDelegate(client, model).deleteMany(rest);
             }
             // Re-issue as updateMany — `where` may be omitted (deleteMany
             // without a filter wipes the table; we mirror that).
@@ -271,4 +306,31 @@ export function softDeleteExtension() {
       },
     }),
   );
+}
+
+/**
+ * Resolves the pre-extension delegate (e.g. `client.trailerType`) for a model
+ * by its PascalCase `$name`, used to run a recursion-free REAL delete from
+ * inside the `model` override. The `client` here is the un-extended client the
+ * `Prisma.defineExtension` factory receives, so its `delete`/`deleteMany` are
+ * NOT wrapped by this extension.
+ *
+ * @internal
+ */
+function rawDelegate(
+  client: unknown,
+  model: string,
+): {
+  delete: (a: unknown) => Promise<unknown>;
+  deleteMany: (a: unknown) => Promise<unknown>;
+} {
+  const key = model.charAt(0).toLowerCase() + model.slice(1);
+  const delegate = (client as Record<string, unknown>)[key];
+  if (!delegate || typeof delegate !== 'object') {
+    throw new Error(`[soft-delete] no Prisma delegate for model "${model}"`);
+  }
+  return delegate as {
+    delete: (a: unknown) => Promise<unknown>;
+    deleteMany: (a: unknown) => Promise<unknown>;
+  };
 }

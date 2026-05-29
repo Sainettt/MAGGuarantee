@@ -1,8 +1,11 @@
 import { Injectable } from '@nestjs/common';
 
+import type { Prisma } from '@magguarantee/database';
+
 import type { CarrierAttachmentCategory } from '@magguarantee/shared';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { INCLUDE_SOFT_DELETED } from '../prisma/soft-delete.extension';
 
 /**
  * Row shape returned by the carrier-attachment repository. `storageKey` is
@@ -135,13 +138,20 @@ export class CarrierAttachmentsRepository {
 
   /**
    * Hard-deletes a freshly-inserted attachment row. Used only by the upload
-   * rollback path, where the row was inserted moments ago in the same
-   * request and never observed by any client. Bypasses the soft-delete
-   * extension via `deleteMany` (the extension only rewrites the singular
-   * `delete`).
+   * rollback path, where the row was inserted moments ago in the same request
+   * and never observed by any client — a soft-delete would leave a permanent
+   * orphan row, so we issue a genuine hard-delete.
+   *
+   * `CarrierAttachment` is now a soft-delete model (its plain `.delete()` /
+   * `.deleteMany()` are rewritten to `deletedAt = now()`), so we opt out via
+   * the `INCLUDE_SOFT_DELETED` escape hatch — that runs a real `deleteMany`
+   * on the underlying client.
    */
   async hardDelete(id: string): Promise<void> {
-    await this.prisma.tx.carrierAttachment.deleteMany({ where: { id } });
+    await this.prisma.tx.carrierAttachment.deleteMany({
+      where: { id },
+      [INCLUDE_SOFT_DELETED]: true,
+    } as unknown as Prisma.CarrierAttachmentDeleteManyArgs);
   }
 
   // ── helpers ──────────────────────────────────────────────
