@@ -1,13 +1,28 @@
 import { Injectable } from '@nestjs/common';
 
+import type { DriverAttachmentCategory } from '@magguarantee/shared';
+
 import { PrismaService } from '../prisma/prisma.service';
+
+/** Included attachment row on a driver (live rows only). */
+export interface DriverRowAttachment {
+  id: string;
+  driverId: string;
+  category: DriverAttachmentCategory;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  uploadedById: string | null;
+  createdAt: Date;
+}
 
 /**
  * Row shape returned by the driver repository.
  *
  * `phone` and `passportNumber` are non-nullable since the phase-2
  * migration. `email` and `licenseExpiry` are non-nullable since
- * phase3_blocks.
+ * phase3_blocks. `adr` (świadectwo ADR permit flag) was added 2026-05-29
+ * alongside the `DriverAttachment` model.
  */
 export interface DriverRow {
   id: string;
@@ -24,7 +39,9 @@ export interface DriverRow {
   licenseExpiry: Date | null;
   notes: string | null;
   active: boolean;
+  adr: boolean;
   carrier: { id: string; login: string; name: string | null } | null;
+  attachments: DriverRowAttachment[];
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -121,6 +138,7 @@ export class DriversRepository {
     licenseExpiry?: Date | null;
     notes?: string | null;
     active?: boolean;
+    adr?: boolean;
   }): Promise<DriverRow> {
     const row = await this.prisma.tx.driver.create({
       data: {
@@ -135,6 +153,7 @@ export class DriversRepository {
         licenseExpiry: data.licenseExpiry ?? null,
         notes: data.notes ?? null,
         active: data.active ?? true,
+        adr: data.adr ?? false,
       },
       include: this.includeShape(),
     });
@@ -178,6 +197,21 @@ export class DriversRepository {
           user: { select: { login: true, name: true } },
         },
       },
+      // Live attachments only — the soft-delete extension filters `deletedAt`
+      // on the nested read as well as the parent.
+      attachments: {
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          driverId: true,
+          category: true,
+          fileName: true,
+          mimeType: true,
+          size: true,
+          uploadedById: true,
+          createdAt: true,
+        },
+      },
     } as const;
   }
 
@@ -195,6 +229,7 @@ export class DriversRepository {
       licenseExpiry: row.licenseExpiry,
       notes: row.notes,
       active: row.active,
+      adr: row.adr,
       carrier: row.carrier
         ? {
             id: row.carrier.id,
@@ -202,6 +237,16 @@ export class DriversRepository {
             name: row.carrier.user.name,
           }
         : null,
+      attachments: (row.attachments ?? []).map((a) => ({
+        id: a.id,
+        driverId: a.driverId,
+        category: a.category,
+        fileName: a.fileName,
+        mimeType: a.mimeType,
+        size: a.size,
+        uploadedById: a.uploadedById,
+        createdAt: a.createdAt,
+      })),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       deletedAt: row.deletedAt,
@@ -228,10 +273,21 @@ interface DriverPrismaShape {
   licenseExpiry: Date | null;
   notes: string | null;
   active: boolean;
+  adr: boolean;
   carrier?: {
     id: string;
     user: { login: string; name: string | null };
   } | null;
+  attachments?: Array<{
+    id: string;
+    driverId: string;
+    category: DriverAttachmentCategory;
+    fileName: string;
+    mimeType: string;
+    size: number;
+    uploadedById: string | null;
+    createdAt: Date;
+  }> | null;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;

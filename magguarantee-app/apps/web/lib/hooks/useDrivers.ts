@@ -25,11 +25,28 @@ import {
   listDrivers,
   reactivateDriver,
   updateDriver,
+  type DriverAttachmentUploads,
 } from '@/lib/api/drivers';
 import { CARRIERS_KEY } from '@/lib/hooks/useCarriers';
 import { MY_FLEET_KEY } from '@/lib/hooks/useMyFleet';
 
 export const DRIVERS_KEY = ['drivers'] as const;
+
+/**
+ * Mutation payload for create — the validated scalar DTO plus the ADR
+ * certificate uploads, since `POST /drivers` is `multipart/form-data`.
+ */
+export interface CreateDriverVars {
+  body: CreateDriverDto;
+  files?: DriverAttachmentUploads;
+}
+
+/** Mutation payload for update — id, scalar patch, and file uploads. */
+export interface UpdateDriverVars {
+  id: string;
+  body: UpdateDriverDto;
+  files?: DriverAttachmentUploads;
+}
 
 export function useDrivers(filters: DriverFilters = { limit: 50 }) {
   return useQuery({
@@ -47,11 +64,12 @@ export function useDriver(id: string | null | undefined) {
 }
 
 export function useCreateDriver(
-  opts?: UseMutationOptions<DriverDto, Error, CreateDriverDto>,
+  opts?: UseMutationOptions<DriverDto, Error, CreateDriverVars>,
 ) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: createDriver,
+    mutationFn: ({ body, files }: CreateDriverVars) =>
+      createDriver(body, files),
     ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: DRIVERS_KEY });
@@ -66,15 +84,12 @@ export function useCreateDriver(
 }
 
 export function useUpdateDriver(
-  opts?: UseMutationOptions<
-    DriverDto,
-    Error,
-    { id: string; body: UpdateDriverDto }
-  >,
+  opts?: UseMutationOptions<DriverDto, Error, UpdateDriverVars>,
 ) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, body }) => updateDriver(id, body),
+    mutationFn: ({ id, body, files }: UpdateDriverVars) =>
+      updateDriver(id, body, files),
     ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: DRIVERS_KEY });

@@ -5,8 +5,10 @@
 // See docs/12-database-schema.md.
 
 export {
+  CarrierAttachmentCategory,
   ClaimStatus,
   DelegationStatus,
+  DriverAttachmentCategory,
   EuroNorm,
   Role,
   VehicleAttachmentCategory,

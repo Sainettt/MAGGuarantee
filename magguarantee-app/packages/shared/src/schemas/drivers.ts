@@ -58,6 +58,16 @@ export const CreateDriverSchema = z
     licenseExpiry: IsoDateSchema,
     notes: emptyStringToUndefined(z.string().max(2_000).optional()),
     active: z.boolean().optional(),
+    /**
+     * ADR transport permit flag (świadectwo ADR). When true the API
+     * additionally requires an `adr` attachment (scanned ADR certificate) —
+     * that cross-field rule lives in the service layer
+     * (`DriversService._assertRequiredAttachmentsOnCreate` /
+     * `_assertRequiredAttachmentsOnUpdate`), because the file arrives as a
+     * separate multipart part and cannot be seen by Zod. Mirrors the cabotage
+     * required-attachment pattern formerly on the vehicle.
+     */
+    adr: z.boolean().optional().default(false),
   })
   .strict();
 export type CreateDriverDto = z.infer<typeof CreateDriverSchema>;
@@ -83,6 +93,16 @@ export const UpdateDriverSchema = z
     licenseExpiry: emptyStringToUndefined(IsoDateSchema.optional()),
     notes: emptyStringToUndefined(z.string().max(2_000).nullable().optional()),
     active: z.boolean().optional(),
+    /** Mirrors create — `adr=true` requires an `adr` attachment over the
+     *  post-update set, enforced in the service layer. */
+    adr: z.boolean().optional(),
+    /**
+     * Attachment ids to soft-delete as part of this update (multipart field
+     * `removeAttachmentIds`). New files arrive as separate file parts; this
+     * list names existing attachments to remove. Web sends it as a JSON-
+     * encoded string part — the controller coerces it before validation.
+     */
+    removeAttachmentIds: z.array(UuidSchema).max(64).optional(),
   })
   .strict();
 export type UpdateDriverDto = z.infer<typeof UpdateDriverSchema>;
@@ -100,6 +120,39 @@ export const DriverFiltersSchema = z
   .strict();
 export type DriverFilters = z.infer<typeof DriverFiltersSchema>;
 
+// ─── Attachments ─────────────────────────────────────────
+
+/**
+ * Category of a Driver attachment, mirroring the DB
+ * `enum DriverAttachmentCategory`:
+ *  - `adr` — scanned ADR certificate (świadectwo ADR), required iff
+ *            Driver.adr=true.
+ *
+ * Single value for now — kept as an enum (not a literal) to mirror the
+ * Vehicle/Carrier attachment pattern and stay extensible.
+ */
+export const DriverAttachmentCategorySchema = z.enum(['adr']);
+export type DriverAttachmentCategory = z.infer<
+  typeof DriverAttachmentCategorySchema
+>;
+
+/**
+ * Public attachment DTO. NOTE: `storageKey` is deliberately omitted — it is
+ * an internal MinIO object key and never leaves the API. Clients download
+ * bytes via `GET /drivers/:id/attachments/:attachmentId/download`.
+ */
+export const DriverAttachmentDtoSchema = z.object({
+  id: UuidSchema,
+  driverId: UuidSchema,
+  category: DriverAttachmentCategorySchema,
+  fileName: z.string(),
+  mimeType: z.string(),
+  size: z.number().int().nonnegative(),
+  uploadedById: UuidSchema.nullable(),
+  createdAt: IsoDateTimeSchema,
+});
+export type DriverAttachmentDto = z.infer<typeof DriverAttachmentDtoSchema>;
+
 // ─── Response DTO ────────────────────────────────────────
 
 export const DriverDtoSchema = z.object({
@@ -116,6 +169,8 @@ export const DriverDtoSchema = z.object({
   licenseExpiry: IsoDateSchema.nullable(),
   notes: z.string().nullable(),
   active: z.boolean(),
+  /** ADR transport permit flag — required-attachment rule in the service. */
+  adr: z.boolean(),
   carrier: z
     .object({
       id: UuidSchema,
@@ -123,6 +178,8 @@ export const DriverDtoSchema = z.object({
       name: z.string().nullable(),
     })
     .nullable(),
+  /** Non-deleted ADR attachments for this driver. */
+  attachments: z.array(DriverAttachmentDtoSchema),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
 });

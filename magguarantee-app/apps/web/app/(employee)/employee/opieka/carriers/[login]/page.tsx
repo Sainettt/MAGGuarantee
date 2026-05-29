@@ -40,6 +40,7 @@ import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
+import { CarrierDocumentsTab } from './CarrierDocumentsTab';
 import { listDrivers } from '@/lib/api/drivers';
 import { listTrailers } from '@/lib/api/trailers';
 import { listVehicles } from '@/lib/api/vehicles';
@@ -177,6 +178,7 @@ export default function OpiekaCarrierDetailPage() {
             <TabsTrigger value="vehicles">{t('tabs.vehicles')}</TabsTrigger>
             <TabsTrigger value="drivers">{t('tabs.drivers')}</TabsTrigger>
             <TabsTrigger value="trailers">{t('tabs.trailers')}</TabsTrigger>
+            <TabsTrigger value="documents">{t('tabs.documents')}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="vehicles">
@@ -199,6 +201,12 @@ export default function OpiekaCarrierDetailPage() {
               isLoading={trailersQ.isLoading}
             />
           </TabsContent>
+
+          {carrierId && (
+            <TabsContent value="documents">
+              <CarrierDocumentsTab carrierId={carrierId} />
+            </TabsContent>
+          )}
         </Tabs>
       )}
 

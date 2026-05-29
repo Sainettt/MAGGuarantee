@@ -337,14 +337,14 @@
       "cabotageDe": "DE cabotage permit screenshot",
       "cabotageFr": "FR cabotage permit screenshot",
       "cabotageHint": "Attach a scan or photo of the cabotage permit.",
-      "adr": "ADR permit screenshot",
-      "adrHint": "Attach a scan or photo of the ADR permit."
+      "adr": "ADR certificate",
+      "adrHint": "Attach a scan or photo of the driver's ADR certificate."
     },
     "required": {
       "contract": "Contract scan required when GPS is on.",
       "cabotage_de": "DE cabotage permit scan required.",
       "cabotage_fr": "FR cabotage permit scan required.",
-      "adr": "ADR permit scan required."
+      "adr": "ADR certificate scan required when ADR is checked."
     }
   },
   "multiSelect": {
@@ -443,8 +443,7 @@
     "attachmentCategory": {
       "contract": "Contract",
       "cabotage_de": "Cabotage DE",
-      "cabotage_fr": "Cabotage FR",
-      "adr": "ADR permit"
+      "cabotage_fr": "Cabotage FR"
     },
     "attachmentOpen": "Open",
     "attachmentOpenError": "Could not open the file. Please try again.",
@@ -470,14 +469,20 @@
       "email": "E-mail",
       "passportNumber": "Passport number",
       "licenseExpiry": "License expiry",
+      "adr": "ADR",
       "notes": "Notes",
       "active": "Active"
     },
     "sections": {
       "personal": "Personal details & contact",
       "license": "License",
-      "assignment": "Assignment"
-    }
+      "assignment": "Assignment",
+      "attachments": "Attachments"
+    },
+    "attachmentCategory": {
+      "adr": "ADR certificate"
+    },
+    "attachmentOpen": "Open"
   },
   "trailers": {
     "title": "Trailers",
@@ -894,7 +899,8 @@
       "ariaLabel": "Carrier sections",
       "vehicles": "Vehicles",
       "drivers": "Drivers",
-      "trailers": "Trailers"
+      "trailers": "Trailers",
+      "documents": "Documents"
     },
     "vehicles": {
       "emptyTitle": "No vehicles",
@@ -925,6 +931,33 @@
         "type": "Type",
         "brandModel": "Brand / model",
         "active": "Status"
+      }
+    },
+    "documents": {
+      "emptyTitle": "No documents",
+      "emptyMessage": "This carrier has no documents uploaded yet.",
+      "uploadHeading": "Upload document",
+      "categoryLabel": "Category",
+      "fileLabel": "File",
+      "uploadButton": "Upload",
+      "uploadedToast": "Document uploaded",
+      "downloadError": "Could not download the file. Please try again.",
+      "download": "Download",
+      "deleteTitle": "Delete document?",
+      "deleteBody": "Are you sure you want to delete \"{fileName}\"? This action cannot be undone.",
+      "deletedToast": "Document deleted",
+      "category": {
+        "insurance": "Insurance/OCP",
+        "license": "License",
+        "kreptd": "KREPTD",
+        "other": "Other"
+      },
+      "columns": {
+        "fileName": "File name",
+        "category": "Category",
+        "size": "Size",
+        "uploadedAt": "Uploaded at",
+        "actions": "Actions"
       }
     }
   },

@@ -1,15 +1,24 @@
 import { Module } from '@nestjs/common';
 
 import { PasswordModule } from '../password/password.module';
+import { StorageModule } from '../storage/storage.module';
 import { UsersModule } from '../users/users.module';
+import { CarrierAttachmentsController } from './carrier-attachments.controller';
+import { CarrierAttachmentsRepository } from './carrier-attachments.repository';
+import { CarrierAttachmentsService } from './carrier-attachments.service';
 import { CarriersController } from './carriers.controller';
 import { CarriersRepository } from './carriers.repository';
 import { CarriersService } from './carriers.service';
 
 @Module({
-  imports: [PasswordModule, UsersModule],
-  controllers: [CarriersController],
-  providers: [CarriersService, CarriersRepository],
+  imports: [PasswordModule, UsersModule, StorageModule],
+  controllers: [CarriersController, CarrierAttachmentsController],
+  providers: [
+    CarriersService,
+    CarriersRepository,
+    CarrierAttachmentsService,
+    CarrierAttachmentsRepository,
+  ],
   exports: [CarriersService, CarriersRepository],
 })
 export class CarriersModule {}

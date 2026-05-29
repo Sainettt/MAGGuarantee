@@ -3,6 +3,8 @@
 // shaping.
 
 import type {
+  CarrierAttachmentCategory,
+  CarrierAttachmentDto,
   CarrierDto,
   CarrierFilters,
   CarrierWithTemporaryPasswordDto,
@@ -11,7 +13,7 @@ import type {
   UpdateCarrierDto,
 } from '@magguarantee/shared';
 
-import { apiJson } from './client';
+import { apiBlob, apiForm, apiJson } from './client';
 import { type Paginated, toQuery } from './query';
 
 export function listCarriers(
@@ -68,4 +70,66 @@ export function hardDeleteCarrier(
   body: DeleteWithReasonDto,
 ): Promise<void> {
   return apiJson<void>(`/carriers/${id}/hard`, { method: 'DELETE', json: body });
+}
+
+// ─── Attachments (company documents) ─────────────────────
+//
+// Unlike vehicle/driver attachments (which ride the entity's create/edit
+// form), carrier documents are managed independently from a "Documents" tab —
+// hence standalone upload/list/download/delete endpoints under
+// `/carriers/:id/attachments`. Per docs/13-api-design.md#carriers. `:id` is the
+// carrier UUID.
+
+export function listCarrierAttachments(
+  carrierId: string,
+): Promise<CarrierAttachmentDto[]> {
+  return apiJson<CarrierAttachmentDto[]>(
+    `/carriers/${carrierId}/attachments`,
+    { method: 'GET' },
+  );
+}
+
+/**
+ * Uploads a single carrier document. `multipart/form-data` — the file rides as
+ * the `file` part and the document category as the `category` text part (the
+ * API field names MUST match exactly).
+ */
+export function uploadCarrierAttachment(
+  carrierId: string,
+  category: CarrierAttachmentCategory,
+  file: File,
+): Promise<CarrierAttachmentDto> {
+  const fd = new FormData();
+  fd.append('category', category);
+  fd.append('file', file);
+  return apiForm<CarrierAttachmentDto>(
+    `/carriers/${carrierId}/attachments`,
+    fd,
+    { method: 'POST' },
+  );
+}
+
+/**
+ * Downloads an attachment's bytes. The endpoint is authenticated and streams
+ * `Content-Disposition: inline` — it is NOT a public URL, so we fetch it
+ * through the auth/refresh-aware client and hand back a `Blob`.
+ */
+export function downloadCarrierAttachment(
+  carrierId: string,
+  attachmentId: string,
+): Promise<Blob> {
+  return apiBlob(
+    `/carriers/${carrierId}/attachments/${attachmentId}/download`,
+    { method: 'GET' },
+  );
+}
+
+export function deleteCarrierAttachment(
+  carrierId: string,
+  attachmentId: string,
+): Promise<void> {
+  return apiJson<void>(
+    `/carriers/${carrierId}/attachments/${attachmentId}`,
+    { method: 'DELETE' },
+  );
 }

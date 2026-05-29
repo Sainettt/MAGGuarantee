@@ -1,41 +1,29 @@
 import type { VehicleAttachmentCategory } from '@magguarantee/shared';
 
 /**
- * Vehicle-attachment upload constraints and the multipart wiring contract.
+ * Vehicle-attachment multipart wiring contract.
  *
- * Kept in one place so the controller (interceptor field config), the service
- * (validation), and the spec all reference identical literals — no magic
- * strings scattered across files.
+ * The generic upload constraints (max bytes, allowed MIME types, extension
+ * map, max-files-per-field) now live in `common/attachments` and are shared
+ * with the driver / carrier modules — re-exported here so the controller,
+ * service, and spec keep their existing import path.
  */
 
-/** Max bytes per uploaded file — 10 MB. */
-export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
-
-/** Accepted upload MIME types — scans / photos / PDFs only. */
-export const ALLOWED_ATTACHMENT_MIME_TYPES = [
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'application/pdf',
-] as const;
-
-export type AllowedAttachmentMimeType =
-  (typeof ALLOWED_ATTACHMENT_MIME_TYPES)[number];
-
-/** File extension to write into the MinIO object key, keyed by MIME type. */
-export const MIME_TYPE_EXTENSIONS: Record<AllowedAttachmentMimeType, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'application/pdf': 'pdf',
-};
+export {
+  ALLOWED_ATTACHMENT_MIME_TYPES,
+  MAX_ATTACHMENT_BYTES,
+  MAX_FILES_PER_FIELD,
+  MIME_TYPE_EXTENSIONS,
+  type AllowedAttachmentMimeType,
+} from '../../common/attachments';
 
 /**
  * Multipart file-field name → attachment category.
  *
  * The Vehicle create/edit modal is `multipart/form-data`. Files are sent in
  * one field per category, each accepting multiple files. Web MUST use these
- * exact field names.
+ * exact field names. The legacy `adr` field was removed 2026-05-29 — the ADR
+ * certificate scan moved to the Driver (świadectwo ADR).
  */
 export const ATTACHMENT_FILE_FIELDS: ReadonlyArray<{
   field: string;
@@ -44,8 +32,4 @@ export const ATTACHMENT_FILE_FIELDS: ReadonlyArray<{
   { field: 'contract', category: 'contract' },
   { field: 'cabotageDe', category: 'cabotage_de' },
   { field: 'cabotageFr', category: 'cabotage_fr' },
-  { field: 'adr', category: 'adr' },
 ];
-
-/** Max files accepted per category field in a single request. */
-export const MAX_FILES_PER_FIELD = 10;

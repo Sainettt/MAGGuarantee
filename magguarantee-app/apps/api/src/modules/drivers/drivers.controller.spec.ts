@@ -72,7 +72,15 @@ const MUTATING: (keyof DriversController)[] = [
   'delete',
 ];
 
-const READ_ONLY: (keyof DriversController)[] = ['list', 'getById'];
+const READ_ONLY: (keyof DriversController)[] = [
+  'list',
+  'getById',
+  'listAttachments',
+  'downloadAttachment',
+];
+
+/** Attachment mutation — admin + opiekun only (no przewoznik write). */
+const ATTACHMENT_MUTATING: (keyof DriversController)[] = ['deleteAttachment'];
 
 describe('DriversController — authorization', () => {
   const guard = new RolesGuard(reflector);
@@ -93,6 +101,15 @@ describe('DriversController — authorization', () => {
       expect(roles).toContain('admin');
       expect(roles).toContain('opiekun');
     });
+
+    it.each(ATTACHMENT_MUTATING)(
+      '%s is restricted to admin + opiekun (no przewoznik)',
+      (handler) => {
+        const roles = rolesFor(handler);
+        expect(roles.sort()).toEqual(['admin', 'opiekun']);
+        expect(roles).not.toContain('przewoznik');
+      },
+    );
   });
 
   describe('RolesGuard against a przewoznik token', () => {

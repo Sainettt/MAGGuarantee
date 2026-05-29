@@ -124,15 +124,14 @@ const NUMERIC_FIELDS = [
   'rateImport',
 ] as const;
 
-/** The umowa / cabotage / ADR <FileUpload> slots, keyed by attachment category. */
-type FileBucketKey = 'contract' | 'cabotageDe' | 'cabotageFr' | 'adr';
+/** The umowa / cabotage <FileUpload> slots, keyed by attachment category. */
+type FileBucketKey = 'contract' | 'cabotageDe' | 'cabotageFr';
 
 /** Maps a UI bucket key to the server `VehicleAttachmentCategory`. */
 const BUCKET_CATEGORY: Record<FileBucketKey, VehicleAttachmentCategory> = {
   contract: 'contract',
   cabotageDe: 'cabotage_de',
   cabotageFr: 'cabotage_fr',
-  adr: 'adr',
 };
 
 type FileBuckets = Record<FileBucketKey, FileUploadItem[]>;
@@ -141,7 +140,6 @@ const EMPTY_BUCKETS: FileBuckets = {
   contract: [],
   cabotageDe: [],
   cabotageFr: [],
-  adr: [],
 };
 
 export function VehicleSheet({
@@ -345,7 +343,6 @@ export function VehicleSheet({
   const gpsOn = form.watch('gps') === true;
   const cabotageDeOn = form.watch('cabotageDe') === true;
   const cabotageFrOn = form.watch('cabotageFr') === true;
-  const adrOn = form.watch('adr') === true;
 
   // i18n label bundle for <FileUpload>, memoised so the primitive doesn't
   // re-render on every keystroke elsewhere in the form.
@@ -805,22 +802,6 @@ export function VehicleSheet({
                     </FormDescription>
                   </FormItem>
                 )}
-                {adrOn && (
-                  <FormItem className="ml-6 mt-2 animate-slide-in">
-                    <FormLabel htmlFor="vehicle-file-adr" required>
-                      {tFile('fields.adr')}
-                    </FormLabel>
-                    <FileUpload
-                      id="vehicle-file-adr"
-                      value={fileBuckets.adr}
-                      onChange={(items) => setBucket('adr', items)}
-                      labels={fileLabels}
-                    />
-                    <FormDescription>
-                      {tFile('fields.adrHint')}
-                    </FormDescription>
-                  </FormItem>
-                )}
                 <FormField
                   label={t('fields.notes')}
                   error={errs.notes?.message}
@@ -973,7 +954,7 @@ function cleanForm(values: FormValues): Record<string, unknown> {
 
 // ─── Attachment helpers ──────────────────────────────────
 
-/** Buckets a vehicle's server attachments into the four <FileUpload> slots. */
+/** Buckets a vehicle's server attachments into the three <FileUpload> slots. */
 function attachmentsToBuckets(
   attachments: VehicleAttachmentDto[],
 ): FileBuckets {
@@ -981,7 +962,6 @@ function attachmentsToBuckets(
     contract: [],
     cabotageDe: [],
     cabotageFr: [],
-    adr: [],
   };
   for (const att of attachments) {
     const item: FileUploadItem = {
@@ -994,7 +974,6 @@ function attachmentsToBuckets(
     if (att.category === 'contract') buckets.contract.push(item);
     else if (att.category === 'cabotage_de') buckets.cabotageDe.push(item);
     else if (att.category === 'cabotage_fr') buckets.cabotageFr.push(item);
-    else if (att.category === 'adr') buckets.adr.push(item);
   }
   return buckets;
 }
@@ -1012,7 +991,6 @@ function collectNewFiles(buckets: FileBuckets): VehicleAttachmentUploads {
     contract: pick(buckets.contract),
     cabotageDe: pick(buckets.cabotageDe),
     cabotageFr: pick(buckets.cabotageFr),
-    adr: pick(buckets.adr),
   };
 }
 
@@ -1026,7 +1004,7 @@ function collectRemovedIds(
   buckets: FileBuckets,
 ): string[] {
   const stillPresent = new Set<string>();
-  for (const key of ['contract', 'cabotageDe', 'cabotageFr', 'adr'] as const) {
+  for (const key of ['contract', 'cabotageDe', 'cabotageFr'] as const) {
     for (const item of buckets[key]) {
       if (item.kind === 'existing') stillPresent.add(item.id);
     }
@@ -1041,7 +1019,6 @@ function collectRemovedIds(
  *   gps=true        ⇒ ≥1 contract file
  *   cabotageDe=true ⇒ ≥1 cabotage_de file
  *   cabotageFr=true ⇒ ≥1 cabotage_fr file
- *   adr=true        ⇒ ≥1 adr file
  * Counting existing (non-removed) + newly-added valid files. Returns the
  * categories that are still missing.
  */
@@ -1062,9 +1039,6 @@ function missingRequiredAttachments(
   }
   if (values.cabotageFr === true && !hasFiles(buckets.cabotageFr)) {
     missing.push(BUCKET_CATEGORY.cabotageFr);
-  }
-  if (values.adr === true && !hasFiles(buckets.adr)) {
-    missing.push(BUCKET_CATEGORY.adr);
   }
   return missing;
 }

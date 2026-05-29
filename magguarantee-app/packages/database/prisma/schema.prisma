@@ -58,11 +58,31 @@ enum EuroNorm {
 // Category of an umowa/cabotage screenshot attached to a Vehicle.
 // `contract` replaces the legacy `Vehicle.contract` boolean — instead of a
 // flag, the actual scanned umowa is stored as one or more attachment rows.
+// `adr` removed 2026-05-29 — the ADR certificate is no longer a vehicle
+// attachment; the kept `Vehicle.adr` boolean stays as the permit flag, and
+// the ADR cert scan now lives on the Driver (świadectwo ADR) via
+// DriverAttachment.
 enum VehicleAttachmentCategory {
   contract
   cabotage_de
   cabotage_fr
+}
+
+// Category of a file attached to a Driver. Single value for now — the ADR
+// driver certificate (świadectwo ADR). Kept as an enum (not a literal) to
+// mirror the Vehicle/Carrier attachment pattern and stay extensible.
+enum DriverAttachmentCategory {
   adr
+}
+
+// Category of a file attached to a Carrier — the carrier's own company
+// documents: OCP insurance, transport license, KREPTD extract, and a
+// catch-all `other`.
+enum CarrierAttachmentCategory {
+  insurance
+  license
+  kreptd
+  other
 }
 
 // ─── USERS (объединение всех auth-листов) ───────────────
@@ -101,6 +121,8 @@ model User {
   verifiedDelegations        Delegation[]        @relation("DelegationVerifier")
   authoredClaims             Claim[]             @relation("ClaimDecidedBy")
   uploadedVehicleAttachments VehicleAttachment[]
+  uploadedDriverAttachments  DriverAttachment[]
+  uploadedCarrierAttachments CarrierAttachment[]
   auditEntries               AuditLog[]
   refreshTokens              RefreshToken[]
 
@@ -156,6 +178,7 @@ model Carrier {
   trailers    Trailer[]
   claims      Claim[]
   delegations Delegation[]
+  attachments CarrierAttachment[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -164,6 +187,34 @@ model Carrier {
   @@index([opiekunId])
   @@index([deletedAt])
   @@map("carriers")
+}
+
+// ─── CARRIER ATTACHMENTS (OCP insurance / license / KREPTD) ──
+// Files uploaded from the Carrier create/edit view — the carrier's own
+// company documents — stored in MinIO. The DB row holds only metadata + the
+// object key; the bytes live in the bucket. Mirrors VehicleAttachment.
+model CarrierAttachment {
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  carrierId String  @db.Uuid
+  carrier   Carrier @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+
+  category   CarrierAttachmentCategory
+  // Object key in the MinIO bucket, e.g.
+  // `carriers/<carrierId>/<category>/<fileId>.<ext>`.
+  storageKey String
+  fileName   String // original upload filename
+  mimeType   String
+  size       Int // bytes
+
+  uploadedById String? @db.Uuid
+  uploadedBy   User?   @relation(fields: [uploadedById], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // soft-delete — consistent with the global middleware
+
+  @@index([carrierId, category])
+  @@map("carrier_attachments")
 }
 
 // ─── VEHICLES (AUTA, 36 columns) ────────────────────────
@@ -284,15 +335,15 @@ model Driver {
   carrierId String  @db.Uuid
   carrier   Carrier @relation(fields: [carrierId], references: [id])
 
-  loginSlug           String    @unique // имя.фамилия (or -2/-3 on collision)
-  firstName           String
-  lastName            String
-  phone               String
-  phone2              String?
+  loginSlug      String    @unique // имя.фамилия (or -2/-3 on collision)
+  firstName      String
+  lastName       String
+  phone          String
+  phone2         String?
   // Drivers in PL trucking often don't have or use email professionally —
   // phone is the primary channel. Required at the API/Zod level only when
   // the form context demands it.
-  email               String?
+  email          String?
   // Renamed from `driverLicenseNumber` on 2026-05-28 — the column now stores
   // a passport number, not a driving-license number. DB column was renamed
   // in-place via ALTER TABLE … RENAME COLUMN (no data loss). Column name
@@ -301,11 +352,15 @@ model Driver {
   // Driving-license expiry is unrelated to the passport above — kept as-is
   // because it's still a real attribute we track for the driver.
   licenseExpiry  DateTime? @db.Date
-  notes               String?
-  active              Boolean   @default(true)
-  addedAt             DateTime  @default(now())
+  notes          String?
+  active         Boolean   @default(true)
+  addedAt        DateTime  @default(now())
+  // ADR transport permit flag (świadectwo ADR). The certificate scan itself
+  // is stored as a DriverAttachment row (category=adr).
+  adr            Boolean   @default(false)
 
   delegations Delegation[]
+  attachments DriverAttachment[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -313,6 +368,34 @@ model Driver {
 
   @@index([carrierId, active])
   @@map("drivers")
+}
+
+// ─── DRIVER ATTACHMENTS (świadectwo ADR) ────────────────
+// Files uploaded from the Driver create/edit view — the driver's ADR
+// certificate — stored in MinIO. The DB row holds only metadata + the object
+// key; the bytes live in the bucket. Mirrors VehicleAttachment.
+model DriverAttachment {
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  driverId String @db.Uuid
+  driver   Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  category   DriverAttachmentCategory
+  // Object key in the MinIO bucket, e.g.
+  // `drivers/<driverId>/<category>/<fileId>.<ext>`.
+  storageKey String
+  fileName   String // original upload filename
+  mimeType   String
+  size       Int // bytes
+
+  uploadedById String? @db.Uuid
+  uploadedBy   User?   @relation(fields: [uploadedById], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // soft-delete — consistent with the global middleware
+
+  @@index([driverId, category])
+  @@map("driver_attachments")
 }
 
 // ─── TRAILERS (NACZEPY) ─────────────────────────────────

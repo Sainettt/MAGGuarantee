@@ -10,6 +10,8 @@ import {
   type UseMutationOptions,
 } from '@tanstack/react-query';
 import type {
+  CarrierAttachmentCategory,
+  CarrierAttachmentDto,
   CarrierDto,
   CarrierFilters,
   CarrierWithTemporaryPasswordDto,
@@ -21,15 +23,20 @@ import type {
 import {
   createCarrier,
   deleteCarrier,
+  deleteCarrierAttachment,
   deactivateCarrier,
   getCarrier,
   hardDeleteCarrier,
+  listCarrierAttachments,
   listCarriers,
   reactivateCarrier,
   updateCarrier,
+  uploadCarrierAttachment,
 } from '@/lib/api/carriers';
 
 export const CARRIERS_KEY = ['carriers'] as const;
+/** Query namespace for a carrier's company documents (attachments). */
+export const CARRIER_ATTACHMENTS_KEY = ['carrier-attachments'] as const;
 
 export function useCarriers(filters: CarrierFilters = { limit: 50 }) {
   return useQuery({
@@ -117,5 +124,69 @@ export function useHardDeleteCarrier() {
     mutationFn: ({ id, body }: { id: string; body: DeleteWithReasonDto }) =>
       hardDeleteCarrier(id, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: CARRIERS_KEY }),
+  });
+}
+
+// ─── Carrier attachments (company documents) ─────────────
+
+/** Lists a carrier's company documents. Enabled only when `id` is set. */
+export function useCarrierAttachments(id: string | null | undefined) {
+  return useQuery<CarrierAttachmentDto[]>({
+    queryKey: [...CARRIER_ATTACHMENTS_KEY, id],
+    queryFn: () => listCarrierAttachments(id as string),
+    enabled: Boolean(id),
+  });
+}
+
+export interface UploadCarrierAttachmentVars {
+  carrierId: string;
+  category: CarrierAttachmentCategory;
+  file: File;
+}
+
+/** Uploads one company document, then refetches the carrier's document list. */
+export function useUploadCarrierAttachment(
+  opts?: UseMutationOptions<
+    CarrierAttachmentDto,
+    Error,
+    UploadCarrierAttachmentVars
+  >,
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ carrierId, category, file }: UploadCarrierAttachmentVars) =>
+      uploadCarrierAttachment(carrierId, category, file),
+    ...opts,
+    onSuccess: (...args) => {
+      const [, vars] = args;
+      qc.invalidateQueries({
+        queryKey: [...CARRIER_ATTACHMENTS_KEY, vars.carrierId],
+      });
+      opts?.onSuccess?.(...args);
+    },
+  });
+}
+
+export interface DeleteCarrierAttachmentVars {
+  carrierId: string;
+  attachmentId: string;
+}
+
+/** Deletes one company document, then refetches the carrier's document list. */
+export function useDeleteCarrierAttachment(
+  opts?: UseMutationOptions<void, Error, DeleteCarrierAttachmentVars>,
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ carrierId, attachmentId }: DeleteCarrierAttachmentVars) =>
+      deleteCarrierAttachment(carrierId, attachmentId),
+    ...opts,
+    onSuccess: (...args) => {
+      const [, vars] = args;
+      qc.invalidateQueries({
+        queryKey: [...CARRIER_ATTACHMENTS_KEY, vars.carrierId],
+      });
+      opts?.onSuccess?.(...args);
+    },
   });
 }

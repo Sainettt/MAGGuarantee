@@ -281,3 +281,59 @@ export const CarrierWithTemporaryPasswordSchema = CarrierDtoSchema.extend({
 export type CarrierWithTemporaryPasswordDto = z.infer<
   typeof CarrierWithTemporaryPasswordSchema
 >;
+
+// ─── Attachments (company documents) ─────────────────────
+//
+// Unlike vehicle/driver attachments (which ride the entity's create/edit
+// form), carrier documents are managed independently from a "Documents" tab —
+// hence standalone upload/list/download/delete endpoints under
+// `/carriers/:id/attachments`. Per docs/13-api-design.md#carriers.
+
+/**
+ * Category of a Carrier attachment, mirroring the DB
+ * `enum CarrierAttachmentCategory` — the carrier's own company documents:
+ *  - `insurance` — OCP insurance policy scan
+ *  - `license`   — transport license scan
+ *  - `kreptd`    — KREPTD extract
+ *  - `other`     — catch-all for any other document
+ */
+export const CarrierAttachmentCategorySchema = z.enum([
+  'insurance',
+  'license',
+  'kreptd',
+  'other',
+]);
+export type CarrierAttachmentCategory = z.infer<
+  typeof CarrierAttachmentCategorySchema
+>;
+
+/**
+ * `POST /carriers/:id/attachments` body — the `category` text part that rides
+ * alongside the single `file` part of the multipart request. The file itself
+ * is validated (MIME / size) at the service layer, not by Zod.
+ */
+export const UploadCarrierAttachmentSchema = z
+  .object({
+    category: CarrierAttachmentCategorySchema,
+  })
+  .strict();
+export type UploadCarrierAttachmentDto = z.infer<
+  typeof UploadCarrierAttachmentSchema
+>;
+
+/**
+ * Public attachment DTO. NOTE: `storageKey` is deliberately omitted — it is
+ * an internal MinIO object key and never leaves the API. Clients download
+ * bytes via `GET /carriers/:id/attachments/:attachmentId/download`.
+ */
+export const CarrierAttachmentDtoSchema = z.object({
+  id: UuidSchema,
+  carrierId: UuidSchema,
+  category: CarrierAttachmentCategorySchema,
+  fileName: z.string(),
+  mimeType: z.string(),
+  size: z.number().int().nonnegative(),
+  uploadedById: UuidSchema.nullable(),
+  createdAt: IsoDateTimeSchema,
+});
+export type CarrierAttachmentDto = z.infer<typeof CarrierAttachmentDtoSchema>;

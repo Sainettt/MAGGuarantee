@@ -88,8 +88,19 @@ enum VehicleType { MEGA  STD  COIL }
 enum EuroNorm    { V  VI }
 // CertificateL was collapsed to Boolean (TAK/NIE) in 2026-05; see Vehicle.certificateL below.
 
-// Category of a file attached to a Vehicle (umowa scan, cabotage permits, ADR cert).
-enum VehicleAttachmentCategory { contract  cabotage_de  cabotage_fr  adr }
+// Category of a file attached to a Vehicle (umowa scan, cabotage permits).
+// `adr` value dropped 2026-05-29 — the kept `Vehicle.adr` boolean stays as the
+// permit flag; the ADR certificate scan moved to the Driver (DriverAttachment).
+enum VehicleAttachmentCategory { contract  cabotage_de  cabotage_fr }
+
+// Category of a file attached to a Driver — the ADR driver certificate
+// (świadectwo ADR). Single value for now; enum (not literal) to mirror the
+// Vehicle/Carrier attachment pattern and stay extensible.
+enum DriverAttachmentCategory { adr }
+
+// Category of a file attached to a Carrier — the carrier's own company
+// documents: OCP insurance, transport license, KREPTD extract, plus a catch-all.
+enum CarrierAttachmentCategory { insurance  license  kreptd  other }
 
 // ─── USERS ──────────────────────────────────────────────
 
@@ -118,6 +129,8 @@ model User {
   verifiedDelegations Delegation[]  @relation("DelegationVerifier")
   authoredClaims     Claim[]        @relation("ClaimDecidedBy")
   uploadedVehicleAttachments VehicleAttachment[]
+  uploadedDriverAttachments  DriverAttachment[]
+  uploadedCarrierAttachments CarrierAttachment[]
   auditEntries       AuditLog[]
   refreshTokens      RefreshToken[]
 
@@ -162,6 +175,7 @@ model Carrier {
   trailers    Trailer[]
   claims      Claim[]
   delegations Delegation[]
+  attachments CarrierAttachment[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -170,6 +184,32 @@ model Carrier {
   @@index([opiekunId])
   @@index([deletedAt])
   @@map("carriers")
+}
+
+// ─── CARRIER ATTACHMENTS (OCP insurance / license / KREPTD) ──
+// Carrier company documents uploaded from the Carrier create/edit view —
+// stored in MinIO. DB row holds metadata + object key; bytes live in the
+// bucket. Mirrors VehicleAttachment.
+model CarrierAttachment {
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  carrierId String  @db.Uuid
+  carrier   Carrier @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+
+  category   CarrierAttachmentCategory
+  storageKey String  // object key in MinIO: carriers/<carrierId>/<category>/<fileId>.<ext>
+  fileName   String
+  mimeType   String
+  size       Int
+
+  uploadedById String? @db.Uuid
+  uploadedBy   User?   @relation(fields: [uploadedById], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([carrierId, category])
+  @@map("carrier_attachments")
 }
 
 // ─── VEHICLES ───────────────────────────────────────────
@@ -292,8 +332,10 @@ model Driver {
   notes               String?
   active              Boolean  @default(true)
   addedAt             DateTime @default(now())
+  adr                 Boolean  @default(false)  // ADR permit flag (świadectwo ADR)
 
   delegations Delegation[]
+  attachments DriverAttachment[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -301,6 +343,31 @@ model Driver {
 
   @@index([carrierId, active])
   @@map("drivers")
+}
+
+// ─── DRIVER ATTACHMENTS (świadectwo ADR) ────────────────
+// Driver ADR certificate uploaded from the Driver create/edit view — stored
+// in MinIO. DB row holds metadata + object key. Mirrors VehicleAttachment.
+model DriverAttachment {
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  driverId String @db.Uuid
+  driver   Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  category   DriverAttachmentCategory
+  storageKey String  // object key in MinIO: drivers/<driverId>/<category>/<fileId>.<ext>
+  fileName   String
+  mimeType   String
+  size       Int
+
+  uploadedById String? @db.Uuid
+  uploadedBy   User?   @relation(fields: [uploadedById], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([driverId, category])
+  @@map("driver_attachments")
 }
 
 // ─── TRAILERS + TYPES ───────────────────────────────────
@@ -833,6 +900,8 @@ populates both columns.
 | `20260522120000_drop_vehicle_destination_countries_and_driver_bank_account` | Деструктивный `DROP COLUMN`: удаляет `vehicles.destinationCountries` (Kraje docelowe) и `drivers.bankAccount` (konto bankowe) — оба поля выпилены из продукта по продуктовому решению. Существующие значения теряются (подтверждено). `wasteCountries` не затронут. |
 | `20260525075517_vehicle_adr_trailer_certxl_multilock` | Чисто аддитивная миграция. `vehicles.adr` — `BOOLEAN NOT NULL DEFAULT false` (ADR permit flag, рядом с `cabotageDe`/`cabotageFr`). `trailers.certXl` и `trailers.multilock` — `BOOLEAN NULL` (трёх-состояние, как у соседних `belts`/`mats`/`airSuspension`). Enum `VehicleAttachmentCategory` получает значение `adr` (для ADR-сертификатов в vehicle-modal). Никаких DROP/ALTER на существующих колонках. |
 | `20260525084144_trailer_drop_equipment_and_loading_fields_add_belts_mats_count` | Деструктивная миграция на `trailers` (user-confirmed; dev-only data). **DROP COLUMN** на 6 полей: `equipment` (free-text), `slidingRoof`, `edschaSlidingRoof`, `loadFromBack`, `loadFromSide`, `loadFromTop` (boolean-флаги способа załadunku — выпилены из продукта). **ADD COLUMN** `beltsCount INTEGER NULL` (рядом с `belts`) и `matsCount INTEGER NULL` (рядом с `mats`) — счётчики, дополняющие boolean-флаги. Без `@default`, без CHECK `> 0` — UI/Zod enforce'ит `>= 0`. |
+| `20260528120000_driver_rename_license_to_passport` | Переименование `drivers.driverLicenseNumber` → `passportNumber` (ALTER TABLE … RENAME COLUMN, без потери данных). Семантика колонки меняется на номер паспорта; срок действия водительского (`licenseExpiry`) остаётся отдельным полем. |
+| `20260529120000_attachments_driver_carrier_and_drop_vehicle_adr_category` | Per-entity attachment расширение + удаление vehicle ADR-категории. **Change 1:** значение `adr` удалено из enum `VehicleAttachmentCategory` (остаётся `{contract, cabotage_de, cabotage_fr}`). Postgres не умеет `DROP VALUE` in-place → тип пересоздаётся (`CREATE TYPE …_new` → `ALTER COLUMN … USING ::text::…` → RENAME → DROP old). **Перед** пересозданием — `DELETE FROM vehicle_attachments WHERE category = 'adr'` (эти attachment-строки удаляются; без DELETE USING-cast упал бы). `vehicles.adr` boolean и `vehicles.adrClasses` НЕ затронуты. **Change 2:** `drivers.adr` — `BOOLEAN NOT NULL DEFAULT false` (ADR permit flag); новый enum `DriverAttachmentCategory { adr }`; новая таблица `driver_attachments` (FK на `drivers` `ON DELETE CASCADE`, FK на `users` `ON DELETE SET NULL`, soft-delete `deletedAt`, индекс `(driverId, category)`). **Change 3:** новый enum `CarrierAttachmentCategory { insurance, license, kreptd, other }`; новая таблица `carrier_attachments` (FK на `carriers` `ON DELETE CASCADE`, FK на `users` `ON DELETE SET NULL`, soft-delete `deletedAt`, индекс `(carrierId, category)`). Чисто аддитивно кроме удаления enum-value/строк из Change 1. |
 
 Production deploy: `prisma migrate deploy` в CI/CD пайплайне (без `--create-only`).
 

@@ -78,11 +78,9 @@ const vehicleAttributeFields = {
   cabotageDe: z.boolean().optional(),
   cabotageFr: z.boolean().optional(),
   /**
-   * ADR cargo flag. When true the API additionally requires an `adr`
-   * attachment (scanned ADR certificate) — that cross-field rule lives in
-   * the service layer (`VehiclesService._assertRequiredAttachmentsOnCreate` /
-   * `_assertRequiredAttachmentsOnUpdate`) next to the cabotage check, because
-   * files arrive as separate multipart parts and cannot be seen by Zod.
+   * ADR cargo permit flag. Pure boolean — no attachment is required for it.
+   * The ADR certificate scan (świadectwo ADR) moved to the Driver as a
+   * `DriverAttachment` (2026-05-29); the vehicle keeps only this checkbox.
    */
   adr: z.boolean().optional(),
   /**
@@ -144,8 +142,7 @@ export const UpdateVehicleSchema = z
     wasteCountries: z.array(z.string().max(8)).max(64).optional(),
     cabotageDe: z.boolean().optional(),
     cabotageFr: z.boolean().optional(),
-    /** Mirrors create — `adr=true` requires an `adr` attachment over the
-     *  post-update set, enforced in the service layer. */
+    /** ADR cargo permit flag — pure boolean, no attachment required. */
     adr: z.boolean().optional(),
     /**
      * Nullable in the column — but iff `gps=true` it must be set. The cross-
@@ -208,13 +205,15 @@ export type VehicleFilters = z.infer<typeof VehicleFiltersSchema>;
  *  - `contract`    — scanned umowa (replaces the legacy `Vehicle.contract`)
  *  - `cabotage_de` — German cabotage permit screenshot
  *  - `cabotage_fr` — French cabotage permit screenshot
- *  - `adr`         — scanned ADR certificate (required iff Vehicle.adr=true)
+ *
+ * The `adr` value was removed 2026-05-29 — the ADR certificate scan moved to
+ * the Driver (świadectwo ADR) as a `DriverAttachment`. The `Vehicle.adr`
+ * boolean stays as the permit flag but no longer requires an attachment.
  */
 export const VehicleAttachmentCategorySchema = z.enum([
   'contract',
   'cabotage_de',
   'cabotage_fr',
-  'adr',
 ]);
 export type VehicleAttachmentCategory = z.infer<
   typeof VehicleAttachmentCategorySchema
@@ -266,8 +265,8 @@ export const VehicleDtoSchema = z.object({
   wasteCountries: z.array(z.string()),
   cabotageDe: z.boolean(),
   cabotageFr: z.boolean(),
-  /** Default false in DB — always present on the wire. Required-attachment
-   *  rule (`adr=true` ⇒ `adr` attachment) enforced in the service layer. */
+  /** Default false in DB — always present on the wire. Pure permit flag; no
+   *  attachment is tied to it. */
   adr: z.boolean(),
   /** Nullable per Revert #2 — required iff `gps=true` (CHECK enforces). */
   gpsMobilePhone: z.string().nullable(),

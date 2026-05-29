@@ -337,14 +337,14 @@
       "cabotageDe": "Zrzut ekranu pozwolenia kabotażowego DE",
       "cabotageFr": "Zrzut ekranu pozwolenia kabotażowego FR",
       "cabotageHint": "Załącz skan lub zdjęcie pozwolenia kabotażowego.",
-      "adr": "Zrzut ekranu pozwolenia ADR",
-      "adrHint": "Załącz skan lub zdjęcie pozwolenia ADR."
+      "adr": "Świadectwo ADR",
+      "adrHint": "Załącz skan lub zdjęcie świadectwa ADR kierowcy."
     },
     "required": {
       "contract": "Wymagany skan umowy gdy GPS jest włączony.",
       "cabotage_de": "Wymagany skan pozwolenia kabotażowego DE.",
       "cabotage_fr": "Wymagany skan pozwolenia kabotażowego FR.",
-      "adr": "Wymagany skan pozwolenia ADR."
+      "adr": "Wymagany skan świadectwa ADR gdy zaznaczono ADR."
     }
   },
   "multiSelect": {
@@ -443,8 +443,7 @@
     "attachmentCategory": {
       "contract": "Umowa",
       "cabotage_de": "Kabotaż DE",
-      "cabotage_fr": "Kabotaż FR",
-      "adr": "Pozwolenie ADR"
+      "cabotage_fr": "Kabotaż FR"
     },
     "attachmentOpen": "Otwórz",
     "attachmentOpenError": "Nie udało się otworzyć pliku. Spróbuj ponownie.",
@@ -470,14 +469,20 @@
       "email": "E-mail",
       "passportNumber": "Numer paszportu",
       "licenseExpiry": "Ważność prawa jazdy",
+      "adr": "ADR",
       "notes": "Notatki",
       "active": "Aktywny"
     },
     "sections": {
       "personal": "Dane osobowe i kontakt",
       "license": "Prawo jazdy",
-      "assignment": "Przypisanie"
-    }
+      "assignment": "Przypisanie",
+      "attachments": "Załączniki"
+    },
+    "attachmentCategory": {
+      "adr": "Świadectwo ADR"
+    },
+    "attachmentOpen": "Otwórz"
   },
   "trailers": {
     "title": "Naczepy",
@@ -894,7 +899,8 @@
       "ariaLabel": "Sekcje przewoźnika",
       "vehicles": "Auta",
       "drivers": "Kierowcy",
-      "trailers": "Naczepy"
+      "trailers": "Naczepy",
+      "documents": "Dokumenty"
     },
     "vehicles": {
       "emptyTitle": "Brak pojazdów",
@@ -925,6 +931,33 @@
         "type": "Typ",
         "brandModel": "Marka / model",
         "active": "Status"
+      }
+    },
+    "documents": {
+      "emptyTitle": "Brak dokumentów",
+      "emptyMessage": "Ten przewoźnik nie ma jeszcze przesłanych dokumentów.",
+      "uploadHeading": "Prześlij dokument",
+      "categoryLabel": "Kategoria",
+      "fileLabel": "Plik",
+      "uploadButton": "Prześlij",
+      "uploadedToast": "Dokument przesłany",
+      "downloadError": "Nie udało się pobrać pliku. Spróbuj ponownie.",
+      "download": "Pobierz",
+      "deleteTitle": "Usunąć dokument?",
+      "deleteBody": "Czy na pewno chcesz usunąć „{fileName}”? Tej operacji nie można cofnąć.",
+      "deletedToast": "Dokument usunięty",
+      "category": {
+        "insurance": "Ubezpieczenie/OCP",
+        "license": "Licencja",
+        "kreptd": "KREPTD",
+        "other": "Inne"
+      },
+      "columns": {
+        "fileName": "Nazwa pliku",
+        "category": "Kategoria",
+        "size": "Rozmiar",
+        "uploadedAt": "Data przesłania",
+        "actions": "Akcje"
       }
     }
   },

@@ -100,6 +100,8 @@
 | `companyAddress` | адрес |
 | `opiekunId` | FK → User (с role=opiekun) — кто курирует |
 
+**Вложения:** документы компании перевозчика (страховка OCP, лицензия, выписка KREPTD, прочее) хранятся как `CarrierAttachment` (метаданные + `storageKey` в MinIO; FK на Carrier `ON DELETE CASCADE`; soft-delete `deletedAt`). Enum `CarrierAttachmentCategory { insurance, license, kreptd, other }`. Часть per-entity attachment-паттерна.
+
 **Инварианты:**
 - `Carrier.opiekunId` должен указывать на `User.role=opiekun`.
 - Удаление Carrier каскадно деактивирует все его Vehicle/Driver/Trailer (soft-delete).
@@ -120,6 +122,7 @@
 | `euro` | III / IV / V / VI |
 | `adrClasses` | string[] классов опасных грузов |
 | `gps`, `fuelCard`, `cabotageDe`, `cabotageFr`, `gb`, `it`, `fr`, `agreement`, `contract` | флаги допусков |
+| `adr` | Boolean — флаг ADR-допуска авто (сохранён). NB: ADR-сертификат как **vehicle**-вложение убран 2026-05-29 — сам скан świadectwo ADR теперь привязан к Driver |
 | `type` | MEGA / STD / COIL |
 | `wasteAllowed`, `wasteCountries` | разрешения на отходы |
 | `rateDe`, `rateUe`, `rateExport`, `rateImport` | EUR/km по направлениям |
@@ -127,6 +130,8 @@
 | `nextInspectionDate` | следующий техосмотр |
 | `sideNumber` | NrBoczny |
 | `lastDroveAt` | **автообновление** от Delegation→`zjechal`. Никогда не редактируется руками — см. [19-known-quirks.md](19-known-quirks.md) |
+
+**Вложения:** скан умовы и cabotage-разрешения хранятся как `VehicleAttachment` (метаданные + `storageKey` в MinIO; FK на Vehicle `ON DELETE CASCADE`; soft-delete `deletedAt`). Enum `VehicleAttachmentCategory { contract, cabotage_de, cabotage_fr }` — значение `adr` удалено 2026-05-29 (ADR-сертификат переехал на Driver). Boolean `Vehicle.adr` сохранён.
 
 **Инварианты (data-model contract):**
 - Уникальность `(carrierId, plateNumber)` — один номер на перевозчика.
@@ -145,7 +150,10 @@
 | `phone`, `phone2`, `email` | контакты |
 | `passportNumber` | номер паспорта (раньше — `driverLicenseNumber`, переименовано 2026-05-28) |
 | `licenseExpiry` | срок действия водительского удостоверения |
+| `adr` | Boolean — флаг ADR-допуска (świadectwo ADR). Сам скан сертификата — в `DriverAttachment` (category=adr) |
 | `active` | флаг |
+
+**Вложения:** скан świadectwo ADR хранится как `DriverAttachment` (метаданные + `storageKey` в MinIO; FK на Driver `ON DELETE CASCADE`; soft-delete `deletedAt`). Enum `DriverAttachmentCategory { adr }` (одно значение, расширяемо). Это часть per-entity attachment-паттерна — отдельной полиморфной таблицы Document нет.
 
 ### `Trailer` — прицеп
 
