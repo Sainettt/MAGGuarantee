@@ -34,6 +34,13 @@ import { cn } from '@/lib/utils';
 export interface EntityDetailRow {
   label: ReactNode;
   value: ReactNode;
+  /** Full-bleed row (§6.20). When `true` the row drops the label gutter and
+   *  the `value` spans the ENTIRE section width — the `<dt>` is collapsed to
+   *  `sr-only` (kept for a11y, occupies no layout track). Use for embedded
+   *  tables / charts / wide blocks (e.g. <BreakdownTable>) that must not be
+   *  squeezed into the `1fr` value column after the 11rem label gutter.
+   *  The row's `label` should be a screen-reader-only caption. */
+  fullWidth?: boolean;
 }
 
 /** An ordered group of rows with a section header and an optional icon. */
@@ -142,25 +149,38 @@ export function EntityDetailModal({
                     {section.title}
                   </h3>
                   <dl className="divide-y divide-border/60">
-                    {section.rows.map((row, rIdx) => (
-                      <div
-                        key={rIdx}
-                        className={cn(
-                          'grid gap-x-4 gap-y-1 py-2',
-                          // Two-column ≥sm; stacks below sm (§6.5, §6.7).
-                          // Widen label column on lg+ since the modal itself
-                          // is wider (§6.5, §6.19).
-                          'grid-cols-1 sm:grid-cols-[minmax(0,9rem)_minmax(0,1fr)] lg:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]',
-                        )}
-                      >
-                        <dt className="self-start text-xs font-medium text-text-sub sm:text-sm">
-                          {row.label}
-                        </dt>
-                        <dd className="self-start break-words text-sm text-text">
-                          {row.value}
-                        </dd>
-                      </div>
-                    ))}
+                    {section.rows.map((row, rIdx) =>
+                      row.fullWidth ? (
+                        // Full-bleed row (§6.20): no label gutter — the value
+                        // spans 100% of the section width. The <dt> stays in
+                        // the DOM for a11y but is `sr-only` (no layout track),
+                        // so embedded tables/charts get the full modal width.
+                        <div key={rIdx} className="py-2">
+                          <dt className="sr-only">{row.label}</dt>
+                          <dd className="break-words text-sm text-text">
+                            {row.value}
+                          </dd>
+                        </div>
+                      ) : (
+                        <div
+                          key={rIdx}
+                          className={cn(
+                            'grid gap-x-4 gap-y-1 py-2',
+                            // Two-column ≥sm; stacks below sm (§6.5, §6.7).
+                            // Widen label column on lg+ since the modal itself
+                            // is wider (§6.5, §6.19).
+                            'grid-cols-1 sm:grid-cols-[minmax(0,9rem)_minmax(0,1fr)] lg:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]',
+                          )}
+                        >
+                          <dt className="self-start text-xs font-medium text-text-sub sm:text-sm">
+                            {row.label}
+                          </dt>
+                          <dd className="self-start break-words text-sm text-text">
+                            {row.value}
+                          </dd>
+                        </div>
+                      ),
+                    )}
                   </dl>
                 </section>
               );

@@ -1069,18 +1069,23 @@ Compact read-only table fed by server preview response. Columns:
 
 Headers were **abbreviated in Phase 3.1** (`Km/dzień`→`Km/dz.`, `Stawka €/km`→`€/km`, `Km w mc`→`Km/mc`, total `…(km gwarantowane)`→`…(km gwarant.)`) so the 5-column table never wraps headers even when squeezed into the narrow employee claim modal. i18n keys unchanged: `carrier.breakdown.*` in `messages/pl.json` + `en.json`.
 
-#### Responsive behavior (canonical — same component at two widths)
+#### Responsive behavior (canonical — CONTAINER queries, not viewport breakpoints)
 
-`<BreakdownTable>` is reused at **two very different widths**: the wide carrier new-claim preview panel, and the narrow employee `<ClaimDetailModal>` (`~max-w-2xl`, further constrained by a `-mx-2 sm:col-span-2` cell). It must be non-breaking in both. Pattern: **render both layouts, toggle by breakpoint.**
+`<BreakdownTable>` is reused at **two very different widths**: the wide carrier new-claim preview panel, and the narrow employee `<ClaimDetailModal>` breakdown section. It must be non-breaking in both. Pattern: **render both layouts, toggle by the component's OWN width via a container query.**
 
-| Viewport | Layout | Tailwind |
+> **Why container queries, not `sm:` (corrects the earlier viewport-breakpoint spec).** `sm:hidden` / `hidden sm:block` are **viewport** breakpoints. The breakdown's host width has nothing to do with the viewport — it lives inside a modal section column. On any desktop viewport (`≥sm`) the viewport-toggle always picked the **table** variant, which then overflowed the narrow host column; the card variant only ever appeared on phone-width viewports. The fix is to toggle on the **container** width. The project is **Tailwind CSS v4** (`tailwindcss@^4`, `@tailwindcss/postcss@^4`, no `tailwind.config` — CSS-based config) which has **container queries in core — no plugin**. The root carries `@container`; the card/table toggle uses the arbitrary container variants `@max-[34rem]:…` / `@min-[34rem]:…`.
+
+**Threshold: `34rem` (544px).** Below `34rem` the host is too narrow for the 5-column table to stay readable even at `text-xs`/`px-2` (the abbreviated headers + 4-decimal rate + thousand-separated km total need ~30–34rem). So: container **`< 34rem` → stacked cards**, container **`≥ 34rem` → 5-column table**. The narrow `<ClaimDetailModal>` breakdown section (now full-width — see §6.20) is wide enough on `lg+` to land in the table layout; on small modals / phones it falls to cards.
+
+| Container width | Layout | Tailwind |
 |---|---|---|
-| `< sm` (≤639px — narrow modal, phone) | **Stacked card per month.** Each month = `rounded-md border border-border p-3`; the 4 metrics in a `grid grid-cols-2 gap-x-4 gap-y-2` label/value `<dl>` (`dt` = `text-text-sub`, `dd` = `tabular-nums`, `Km/mc` value `font-semibold`). Footer total = a single `bg-bg` row below the list. **No horizontal scroll, ever.** | wrapper `sm:hidden p-3` |
-| `≥ sm` (wide preview, desktop) | **5-column `<table>`**, tightened: `text-xs`, cells `px-2 py-2 h-10`, headers `whitespace-nowrap` (never wrap), `tracking-wide` (was `tracking-wider`). Footer `colSpan={4}` + value cell, unchanged structure. | wrapper `hidden sm:block overflow-x-auto` |
+| **`< 34rem`** (cramped modal column, phone) | **Stacked card per month.** Each month = `rounded-md border border-border p-3`; the 4 metrics in a `grid grid-cols-2 gap-x-4 gap-y-2` label/value `<dl>` (`dt` = `text-text-sub`, `dd` = `tabular-nums`, `Km/mc` value `font-semibold`). Footer total = a single `bg-bg` row below the list. **No horizontal scroll, ever.** | root `@container`; card wrapper `@max-[34rem]:block @min-[34rem]:hidden p-3` |
+| **`≥ 34rem`** (wide preview, roomy modal) | **5-column `<table>`**, tightened: `text-xs`, cells `px-2 py-2 h-10`, headers `whitespace-nowrap` (never wrap), `tracking-wide`. Footer `colSpan={4}` + value cell, unchanged structure. | table wrapper `@max-[34rem]:hidden @min-[34rem]:block overflow-x-auto` |
 
-- Both views share `<ExcludedDays>` (the holiday/EU-ban disclosure) and `<MonthToggle>` (chevron + `yearMonth` + count) so behavior is identical across breakpoints — the only difference is the metric layout (`<td>` cells vs. `<dl>` rows).
-- The card view is `< sm` only; on the **wide carrier panel** the table renders exactly as before (now `text-xs`/`px-2`/abbreviated, slightly denser — non-breaking).
-- Card view re-uses the same abbreviated header strings as `dt` labels (cards have horizontal room, but consistency avoids a second string set — no new i18n keys needed).
+- **Root** is the `@container` context: `@container bg-card rounded-lg border border-border overflow-hidden`.
+- Both views share `<ExcludedDays>` (the holiday/EU-ban disclosure) and `<MonthToggle>` (chevron + `yearMonth` + count) so behavior is identical across widths — the only difference is the metric layout (`<td>` cells vs. `<dl>` rows). Excluded-days expand/collapse + footer-total semantics are unchanged.
+- Card view re-uses the same abbreviated header strings as `dt` labels — no new i18n keys needed.
+- **Do not** reintroduce `sm:hidden`/`hidden sm:block` here — that is the bug this spec fixes.
 
 Empty / loading state — see `<LivePreviewPanel>`. The card view renders the same `t('empty')` message centered when `rows.length === 0`.
 
@@ -2538,7 +2543,7 @@ The component is entity-agnostic. Shape the props so any entity maps cleanly:
 | `title` | Entity display name (string). |
 | `subtitle` | Optional secondary id line (rendered mono if it's a code). |
 | `badges` | `ReactNode` — the header badge row (status + onboarding). Entity wrapper builds it. |
-| `sections` | Ordered array. Each section: `{ title, icon?, rows, span? }`. `span` is `'half'` (default) or `'full'`; `'full'` makes the section card span both columns on `lg+` (§6.4 — used for attachments, ≥8-row permission grids, and single-multi-line-value sections). Each row: `{ label, value }` where `value` is `ReactNode` (string, `—`, mono span, badge…). The wrapper is responsible for formatting (dates, money, mono, em-dash for null). |
+| `sections` | Ordered array. Each section: `{ title, icon?, rows, span? }`. `span` is `'half'` (default) or `'full'`; `'full'` makes the section card span both columns on `lg+` (§6.4 — used for attachments, ≥8-row permission grids, and single-multi-line-value sections). Each row: `{ label, value, fullWidth? }` where `value` is `ReactNode` (string, `—`, mono span, badge…). `fullWidth: true` (§6.20) drops the label gutter so `value` spans the entire section width — for embedded tables/charts; pair it with the section's `span: 'full'`. The wrapper is responsible for formatting (dates, money, mono, em-dash for null). |
 | `meta` | Optional `ReactNode` for the footer-left meta line (created/updated). |
 | `onEdit` *(optional)* | Callback for the primary «Edytuj» action. The component closes itself, then invokes `onEdit`. **Optional:** when supplied (admin / opiekun context) the «Edytuj» button renders; when **omitted** (read-only context — e.g. a carrier viewing their own fleet, which they cannot edit) the component renders the **read-only footer**: meta line + «Zamknij» only, no «Edytuj». The presence of the edit button is driven solely by whether `onEdit` is passed. |
 
@@ -2570,6 +2575,39 @@ Currently `carriers/page.tsx` does `onRowClick={openEdit}` — row click opens `
 2. Detail modal «Edytuj» → `onEdit`: the modal closes itself, then the page does `setTarget(row); setSheetOpen(true)` — the **existing** `CarrierSheet` edit drawer opens, unchanged.
 3. The row-level «Edytuj» kebab/button in the actions column — **decision for web-agent:** it may either keep opening the edit Sheet directly (power-user shortcut) or also route through the detail modal. Recommended: the explicit «Edytuj» action-column button opens edit directly; a plain **row click** opens the read-only detail modal. This gives both a "glance" and a "jump straight to edit" path.
 4. The two surfaces are never open simultaneously — modal closes before Sheet opens.
+
+### 6.20 Full-width (full-bleed) row pattern — `EntityDetailRow.fullWidth`
+
+A **reusable** `EntityDetailModal` capability for rows that must use the **entire section width**, with **no label gutter** — embedded tables, charts, or wide blocks (e.g. `<BreakdownTable>`) that would be crushed if confined to the `1fr` value column after the `lg:` 11rem label gutter.
+
+> **Problem it fixes.** A normal row is a 2-col grid `lg:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]` (label | value). Even with an empty (sr-only) label, the **value still sits in the `1fr` column after the 11rem gutter** → on a `lg` modal the value gets ~270px, which squeezes any embedded table. A `<div>` wrapper with `sm:col-span-2` inside the `<dd>` does **nothing**, because `<dd>` is already the value grid cell — the wrapper is not itself a grid item. (This was the dead `-mx-2 sm:col-span-2` hack — **removed**.)
+
+**API.** `EntityDetailRow` gains an optional `fullWidth?: boolean`.
+
+**Behavior when `fullWidth: true`:**
+- The row is **not** the 2-col grid. It renders as a single full-width block: `<div className="py-2">` containing `<dt className="sr-only">{label}</dt>` + `<dd className="break-words text-sm text-text">{value}</dd>`.
+- The `<dt>` is kept in the DOM for a11y (`sr-only`) but occupies **no layout track**, so the `<dd>` value uses **100%** of the section width.
+- `label` **should be** a screen-reader-only caption (it never renders visibly).
+- Vertical rhythm (`py-2`) and `divide-y` separators are unchanged, so a `fullWidth` row sits cleanly among normal rows.
+
+**Pairing with `span: 'full'`.** A full-width row only delivers the full *modal* width if its **section** also spans both modal columns. So a full-bleed embedded table needs **both**: the section `span: 'full'` (spans the 2-col modal grid on `lg+`, §6.4) **and** the row `fullWidth: true` (drops the in-section label gutter). Set both together.
+
+**Canonical use — `<ClaimDetailModal>` breakdown section:**
+
+```ts
+sections.push({
+  title: t('sections.breakdown'),
+  icon: Calculator,
+  span: 'full',                 // (a) span both modal columns
+  rows: [{
+    label: t('sections.breakdown'), // sr-only caption
+    value: <BreakdownTable breakdown={claim.breakdown} />,
+    fullWidth: true,            // (b) no label gutter → table gets full width
+  }],
+});
+```
+
+The `<BreakdownTable>` then container-queries itself (§ BreakdownTable Responsive behavior) into the 5-col table on `lg`-wide modals and into stacked cards on narrow/phone widths. **This is the canonical pattern for any embedded table/chart row** in an `EntityDetailModal` (future: GPS log table, payout history chart, etc.).
 
 ### 6.12 Anti-patterns to avoid
 

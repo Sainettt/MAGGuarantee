@@ -229,17 +229,17 @@ function ClaimDetailContent({
     sections.push({
       title: t('sections.breakdown'),
       icon: Calculator,
-      // Render the full <BreakdownTable> in a single row that spans both
-      // grid columns — the dt label is intentionally empty (sr-only) so
-      // the table reads as its own block, not a label/value pair.
+      // The section spans both modal columns (`span: 'full'`) AND its single
+      // row is `fullWidth` so the <BreakdownTable> gets the ENTIRE section
+      // width — no 11rem label gutter. The table then container-queries
+      // itself into the 5-col table layout (§6.20, § BreakdownTable). The
+      // label is sr-only (the table reads as its own block, not a label pair).
+      span: 'full',
       rows: [
         {
-          label: <span className="sr-only">{t('sections.breakdown')}</span>,
-          value: (
-            <div className="-mx-2 sm:col-span-2">
-              <BreakdownTable breakdown={claim.breakdown} />
-            </div>
-          ),
+          label: t('sections.breakdown'),
+          value: <BreakdownTable breakdown={claim.breakdown} />,
+          fullWidth: true,
         },
       ],
     });

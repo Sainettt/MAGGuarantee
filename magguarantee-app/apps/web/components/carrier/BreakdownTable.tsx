@@ -5,14 +5,22 @@
 // modal. Per docs/14 § Phase 3 "<BreakdownTable>" + § "Responsive breakdown".
 // The shape mirrors `MonthBreakdownDto` from `@magguarantee/shared`.
 //
-// Responsive strategy (docs/14 § "Responsive breakdown table"):
-//   • `< sm` (narrow modal / phone): a STACKED CARD per month. The 5 metrics
-//     become label/value rows — no horizontal scroll, no squished columns.
-//   • `≥ sm` (wide carrier preview panel, desktop): the classic 5-column
-//     <table>, tightened to `text-xs` + `px-2` with `whitespace-nowrap`
-//     headers so the abbreviated PL/EN labels never wrap.
-// Both views are always rendered; visibility is toggled with `sm:hidden` /
-// `hidden sm:block`. The excluded-days disclosure is shared via <ExcludedDays>.
+// Responsive strategy (docs/14 § "Responsive breakdown table") — CONTAINER
+// QUERIES, not viewport breakpoints. The breakdown renders inside a narrow
+// modal column whose width is unrelated to the viewport, so a viewport
+// breakpoint (`sm:`) would pick the wrong layout (the wide table would win on
+// any desktop viewport even when the host column is ~270px). The root is a
+// `@container`; the card/table toggle is driven by the component's OWN width:
+//   • container `< 34rem` (narrow modal column / phone): a STACKED CARD per
+//     month. The 4 metrics become label/value rows — no horizontal scroll, no
+//     squished columns.
+//   • container `≥ 34rem` (wide carrier preview panel, roomy modal): the
+//     classic 5-column <table>, tightened to `text-xs` + `px-2` with
+//     `whitespace-nowrap` headers so the abbreviated PL/EN labels never wrap.
+// Both views are always rendered; visibility is toggled with the container
+// variants `@max-[34rem]:block` / `@min-[34rem]:block` (Tailwind v4 has
+// container queries in core — no plugin). The excluded-days disclosure is
+// shared via <ExcludedDays>.
 //
 // Each month exposes a chevron when the engine surfaced any holiday /
 // EU-truck-ban days that were dropped from the count. Expanding reveals the
@@ -145,7 +153,7 @@ function MonthToggle({ row, open, onToggle, excludedCount }: MonthToggleProps) {
   );
 }
 
-// ── Table variant (≥ sm) ─────────────────────────────────────────────
+// ── Table variant (container ≥ 34rem) ───────────────────────────────
 
 function TableMonthRow({
   row,
@@ -193,7 +201,7 @@ function TableMonthRow({
   );
 }
 
-// ── Stacked-card variant (< sm) ──────────────────────────────────────
+// ── Stacked-card variant (container < 34rem) ─────────────────────────
 // Each month is a bordered card. The 4 metrics render as a 2×2 label/value
 // grid; the row total (Km/mc) is emphasised. No horizontal scroll ever.
 
@@ -257,12 +265,15 @@ export function BreakdownTable({ breakdown, className }: BreakdownTableProps) {
   return (
     <div
       className={cn(
-        'bg-card rounded-lg border border-border overflow-hidden',
+        // `@container` establishes the container-query context; the card/table
+        // toggle below is keyed on THIS element's width, not the viewport.
+        '@container bg-card rounded-lg border border-border overflow-hidden',
         className,
       )}
     >
-      {/* Stacked cards — narrow modal & phone. No horizontal scroll. */}
-      <div className="sm:hidden p-3">
+      {/* Stacked cards — container narrower than 34rem (cramped modal column,
+          phone). No horizontal scroll. */}
+      <div className="@max-[34rem]:block @min-[34rem]:hidden p-3">
         {rows.length === 0 ? (
           <p className="px-1 py-6 text-center text-sm text-text-sub">
             {t('empty')}
@@ -286,8 +297,8 @@ export function BreakdownTable({ breakdown, className }: BreakdownTableProps) {
         )}
       </div>
 
-      {/* Table — wide preview panel & desktop. */}
-      <div className="hidden sm:block overflow-x-auto">
+      {/* Table — container at least 34rem wide (preview panel, roomy modal). */}
+      <div className="@max-[34rem]:hidden @min-[34rem]:block overflow-x-auto">
         <table className="w-full text-xs">
           <thead className="bg-bg">
             <tr>
