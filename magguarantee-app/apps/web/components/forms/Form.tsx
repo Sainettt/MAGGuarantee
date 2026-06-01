@@ -8,6 +8,14 @@ import { type ReactNode, type LabelHTMLAttributes } from 'react';
 
 import { cn } from '@/lib/utils';
 
+// FormItem is a full-height flex column so that, inside a CSS-grid row
+// (grid-cols-2 / grid-cols-4), the label region absorbs the row's extra
+// height and the control + messages stay pinned to the bottom. Result: every
+// cell's input shares the same baseline regardless of whether its (PL) label
+// wraps to 1 or 2 lines. See docs/14-design-system.md § "Grid-form field
+// alignment". `h-full` is inert outside a stretched grid cell (single-column
+// forms collapse to content height — no regression). The grow is applied to
+// <FormLabel>, not here, so only the label expands.
 export function FormItem({
   className,
   children,
@@ -15,7 +23,11 @@ export function FormItem({
   className?: string;
   children?: ReactNode;
 }) {
-  return <div className={cn('space-y-1.5', className)}>{children}</div>;
+  return (
+    <div className={cn('flex h-full flex-col space-y-1.5', className)}>
+      {children}
+    </div>
+  );
 }
 
 export interface FormLabelProps extends LabelHTMLAttributes<HTMLLabelElement> {
@@ -98,7 +110,13 @@ export function FormField({
 }: FormFieldProps) {
   return (
     <FormItem className={className}>
-      <FormLabel htmlFor={htmlFor} required={required}>
+      {/* `flex-1` lets the label absorb a grid row's extra height so the
+          control below stays bottom-pinned and shares a baseline with sibling
+          cells whose labels wrap differently. `items-end` is NOT needed —
+          the label text stays top-aligned within its own grown box; only the
+          control is pushed down. Outside a stretched grid cell the label box
+          equals its text height, so this is a no-op for single-column forms. */}
+      <FormLabel htmlFor={htmlFor} required={required} className="flex-1">
         {label}
       </FormLabel>
       {children}

@@ -648,6 +648,26 @@ shadcn `<Form>` поверх `react-hook-form` + zod-resolver. Один RHF-fiel
 | Read-only display | not as disabled input — render `<dl>` с label + value |
 | Two-column rows | `grid grid-cols-1 md:grid-cols-2 gap-4` (для vehicle-form с 36 полями) |
 | Section divider | `<Separator />` + section title `text-xs font-bold uppercase tracking-wider text-text-sub` |
+| **Grid-cell input baseline** | `<FormItem>` = `flex h-full flex-col space-y-1.5`; `<FormField>` passes `flex-1` to its `<FormLabel>`. See § "Grid-form field alignment". |
+
+#### Grid-form field alignment (canonical — fixes wrapped-label misalignment)
+
+**Problem.** Inside a CSS-grid row (`grid-cols-2` / `grid-cols-4`), the grid stretches every cell to the tallest cell's height. When `<FormItem>` was a top-aligned `space-y-1.5` stack, a cell whose (PL) label wraps to 2 lines (`Długość wewn. (m)`, `Numer dokumentu tożsamości`) pushed its own input down while a 1-line-label sibling (`Ładowność (t)`, `E-mail`) kept its input at the top → inputs lost their shared baseline.
+
+**Canonical fix (applies to ALL grid forms at the shared-component level — never per-modal):**
+
+- `<FormItem>` is a **full-height flex column**: `flex h-full flex-col space-y-1.5`.
+- `<FormField>` renders its `<FormLabel>` with **`flex-1`** so the label box absorbs the row's extra height; the control + `<FormDescription>` / `<FormMessage>` stay **bottom-pinned**, so every cell's input starts at the same Y regardless of label line-count.
+- The label **text stays top-aligned** inside its grown box (label is `display:block`), only the control is pushed down — visually identical to today for 1-line labels.
+
+**Why option (b), not a reserved min-height (a):** bottom-pin self-corrects for 1/2/3-line labels and adds **zero** extra vertical space when all labels are single-line (a `min-h-[2lines]` reserve would pad every dense modal permanently).
+
+**No regression on single-column / `grid-cols-1 md:grid-cols-2` forms:** `h-full` is inert when the parent is not a stretched grid cell — a flex column with no defined parent height collapses to its content height, and `flex-1` on the label has nothing extra to absorb. So single-column forms (and the `< md` collapse of two-column forms) render exactly as before. Standalone `<FormItem>` + `<FormLabel>` usages (e.g. the DriverSheet ADR `<FileUpload>` block) are unaffected because the `flex-1` is added by `<FormField>`, not by `<FormLabel>` itself.
+
+**web-agent — exact changes in `components/forms/Form.tsx`:**
+- `FormItem` wrapper: `'space-y-1.5'` → `'flex h-full flex-col space-y-1.5'`.
+- `FormField`: the `<FormLabel>` gets `className="flex-1"`.
+- `FormLabel` / `FormMessage` / `FormDescription`: **unchanged**.
 
 ### Field validation badge (inline VIES / Biała Lista feedback)
 
@@ -1039,17 +1059,30 @@ Click → navigate to claim detail (`/carrier/claims/[id]`). Empty list → `<Em
 
 Compact read-only table fed by server preview response. Columns:
 
-| Column | Header (PL) | Format | Tailwind |
-|---|---|---|---|
-| `yearMonth` | "Miesiąc" | `2026-04` | `text-left font-mono` |
-| `workingDays` | "Dni rob." | integer | `text-right tabular-nums` |
-| `kmPerDay` | "Km/dzień" | integer | `text-right tabular-nums` |
-| `ratePerKm` | "Stawka €/km" | 4 decimals | `text-right tabular-nums` |
-| `kmInMonth` | "Km w mc" | integer with thousand-sep | `text-right tabular-nums font-semibold` |
+| Column | Header (PL) | Header (EN) | Format | Tailwind |
+|---|---|---|---|---|
+| `yearMonth` | "Miesiąc" | "Month" | `2026-04` | `text-left font-mono` |
+| `workingDays` | "Dni rob." | "Work days" | integer | `text-right tabular-nums` |
+| `kmPerDay` | "Km/dz." | "Km/day" | integer | `text-right tabular-nums` |
+| `ratePerKm` | "€/km" | "€/km" | 4 decimals | `text-right tabular-nums` |
+| `kmInMonth` | "Km/mc" | "Km/mo" | integer with thousand-sep | `text-right tabular-nums font-semibold` |
 
-Layout: shadcn `<Table>` inside a `<Card>` (`bg-card rounded-lg border border-border overflow-hidden`). Header row uses Phase 2 DataTable header style (`bg-bg text-xs font-bold uppercase tracking-wider`). Row height `h-10` (compact, denser than DataTable). Footer row: `bg-bg font-extrabold` with label "Razem (km gwarantowane)" spanning first 4 columns and `kmGuaranteed` in the last column.
+Headers were **abbreviated in Phase 3.1** (`Km/dzień`→`Km/dz.`, `Stawka €/km`→`€/km`, `Km w mc`→`Km/mc`, total `…(km gwarantowane)`→`…(km gwarant.)`) so the 5-column table never wraps headers even when squeezed into the narrow employee claim modal. i18n keys unchanged: `carrier.breakdown.*` in `messages/pl.json` + `en.json`.
 
-Empty / loading state — see `<LivePreviewPanel>`.
+#### Responsive behavior (canonical — same component at two widths)
+
+`<BreakdownTable>` is reused at **two very different widths**: the wide carrier new-claim preview panel, and the narrow employee `<ClaimDetailModal>` (`~max-w-2xl`, further constrained by a `-mx-2 sm:col-span-2` cell). It must be non-breaking in both. Pattern: **render both layouts, toggle by breakpoint.**
+
+| Viewport | Layout | Tailwind |
+|---|---|---|
+| `< sm` (≤639px — narrow modal, phone) | **Stacked card per month.** Each month = `rounded-md border border-border p-3`; the 4 metrics in a `grid grid-cols-2 gap-x-4 gap-y-2` label/value `<dl>` (`dt` = `text-text-sub`, `dd` = `tabular-nums`, `Km/mc` value `font-semibold`). Footer total = a single `bg-bg` row below the list. **No horizontal scroll, ever.** | wrapper `sm:hidden p-3` |
+| `≥ sm` (wide preview, desktop) | **5-column `<table>`**, tightened: `text-xs`, cells `px-2 py-2 h-10`, headers `whitespace-nowrap` (never wrap), `tracking-wide` (was `tracking-wider`). Footer `colSpan={4}` + value cell, unchanged structure. | wrapper `hidden sm:block overflow-x-auto` |
+
+- Both views share `<ExcludedDays>` (the holiday/EU-ban disclosure) and `<MonthToggle>` (chevron + `yearMonth` + count) so behavior is identical across breakpoints — the only difference is the metric layout (`<td>` cells vs. `<dl>` rows).
+- The card view is `< sm` only; on the **wide carrier panel** the table renders exactly as before (now `text-xs`/`px-2`/abbreviated, slightly denser — non-breaking).
+- Card view re-uses the same abbreviated header strings as `dt` labels (cards have horizontal room, but consistency avoids a second string set — no new i18n keys needed).
+
+Empty / loading state — see `<LivePreviewPanel>`. The card view renders the same `t('empty')` message centered when `rows.length === 0`.
 
 ### `<LivePreviewPanel>` — wraps BreakdownTable + stat cards
 

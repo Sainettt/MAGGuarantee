@@ -1073,10 +1073,10 @@
     },
     "breakdown": {
       "month": "Month",
-      "workingDays": "Work. days",
+      "workingDays": "Work days",
       "kmPerDay": "Km/day",
-      "ratePerKm": "Rate €/km",
-      "kmInMonth": "Km in mo.",
+      "ratePerKm": "€/km",
+      "kmInMonth": "Km/mo",
       "empty": "No data to break down",
       "totalKmGuaranteed": "Total (guaranteed km)",
       "excludedDays": "Excluded days (holidays / EU ban)",
