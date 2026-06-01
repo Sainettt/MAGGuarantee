@@ -12,7 +12,7 @@ import { BadRequestException } from '@nestjs/common';
  * ── Encoding contract for web (mirror exactly) ───────────
  *  - booleans  → the literal strings `'true'` / `'false'` (`active`, `adr`)
  *  - arrays    → a JSON-encoded string, e.g. `removeAttachmentIds='["…"]'`
- *  - strings   → as-is (firstName, lastName, phone, passportNumber, …)
+ *  - strings   → as-is (firstName, lastName, phone, idDocumentNumber, …)
  *  - omitted   → omit the part entirely (an empty part is treated as omitted)
  */
 

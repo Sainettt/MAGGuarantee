@@ -341,9 +341,9 @@ function DriversTable({ rows, isLoading }: DriversTableProps) {
         cell: (row) => row.phone ?? '—',
       },
       {
-        id: 'passport',
-        header: t('columns.passport'),
-        cell: (row) => row.passportNumber ?? '—',
+        id: 'idDocument',
+        header: t('columns.idDocument'),
+        cell: (row) => row.idDocumentNumber ?? '—',
       },
       {
         id: 'active',

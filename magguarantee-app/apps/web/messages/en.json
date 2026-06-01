@@ -467,7 +467,7 @@
       "phone": "Phone",
       "phone2": "Phone (secondary)",
       "email": "E-mail",
-      "passportNumber": "Passport number",
+      "idDocumentNumber": "Identity document number",
       "licenseExpiry": "License expiry",
       "adr": "ADR",
       "notes": "Notes",
@@ -925,7 +925,7 @@
       "columns": {
         "name": "Full name",
         "phone": "Phone",
-        "passport": "Passport number",
+        "idDocument": "Identity document number",
         "active": "Status"
       }
     },
@@ -1196,7 +1196,7 @@
         "columns": {
           "name": "Full name",
           "phone": "Phone",
-          "passport": "Passport number",
+          "idDocument": "Identity document number",
           "status": "Status"
         }
       },

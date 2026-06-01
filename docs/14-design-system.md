@@ -2589,14 +2589,14 @@ Currently `carriers/page.tsx` does `onRowClick={openEdit}` — row click opens `
 
 ### 6.16 Driver field mapping — 3 logical sections
 
-`DriverSheet` has a **flat layout** (no `FormSection`s), so there is no Sheet order to mirror 1:1. `DriverDetailModal` groups the fields into three clean logical sections instead. Title = `firstName + lastName`; subtitle = `passportNumber` (mono, falls back to `loginSlug`). Status (`active`) → header badge.
+`DriverSheet` has a **flat layout** (no `FormSection`s), so there is no Sheet order to mirror 1:1. `DriverDetailModal` groups the fields into three clean logical sections instead. Title = `firstName + lastName`; subtitle = `idDocumentNumber` (mono, falls back to `loginSlug`). Status (`active`) → header badge.
 
-> 2026-05-28: `driverLicenseNumber` was renamed to `passportNumber` (semantics flipped — the column now stores the driver's passport number, not their licence number). The `sections.license` block label is kept as-is because `licenseExpiry` still belongs to a driver's licence; only the number row is repurposed.
+> 2026-05-28: `driverLicenseNumber` was renamed to `passportNumber` (semantics flipped — the column now stores the driver's passport number, not their licence number). 2026-06-01: `passportNumber` was renamed again to `idDocumentNumber` (the field now stores any identity-document number, not strictly a passport); the user-facing label became "Numer dokumentu tożsamości" / "Identity document number". The `sections.license` block label is kept as-is because `licenseExpiry` still belongs to a driver's licence; only the number row is repurposed.
 
 | Section | Icon | Rows (label → field) |
 |---|---|---|
 | **Dane osobowe i kontakt** (`sections.personal`) | `<User>` | Imię → `firstName` · Nazwisko → `lastName` · Telefon → `phone` · Telefon (drugi) → `phone2` · E-mail → `email` |
-| **Prawo jazdy i finanse** (`sections.license`) | `<CreditCard>` | Numer paszportu → `passportNumber` (mono) · Ważność prawa jazdy → `licenseExpiry` (date) · Numer konta → `bankAccount` (mono) |
+| **Prawo jazdy i finanse** (`sections.license`) | `<CreditCard>` | Numer dokumentu tożsamości → `idDocumentNumber` (mono) · Ważność prawa jazdy → `licenseExpiry` (date) · Numer konta → `bankAccount` (mono) |
 | **Przypisanie** (`sections.assignment`) | `<UserCog>` | Przewoźnik → `carrier.name ?? carrier.login` · Notatki → `notes` |
 
 - New i18n section keys: `drivers.sections.personal`, `drivers.sections.license`, `drivers.sections.assignment` (PL + EN). All field keys reuse existing `drivers.fields.*`.

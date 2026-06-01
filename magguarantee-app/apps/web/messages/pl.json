@@ -467,7 +467,7 @@
       "phone": "Telefon",
       "phone2": "Telefon (drugi)",
       "email": "E-mail",
-      "passportNumber": "Numer paszportu",
+      "idDocumentNumber": "Numer dokumentu tożsamości",
       "licenseExpiry": "Ważność prawa jazdy",
       "adr": "ADR",
       "notes": "Notatki",
@@ -925,7 +925,7 @@
       "columns": {
         "name": "Imię i nazwisko",
         "phone": "Telefon",
-        "passport": "Numer paszportu",
+        "idDocument": "Numer dokumentu tożsamości",
         "active": "Status"
       }
     },
@@ -1196,7 +1196,7 @@
         "columns": {
           "name": "Imię i nazwisko",
           "phone": "Telefon",
-          "passport": "Numer paszportu",
+          "idDocument": "Numer dokumentu tożsamości",
           "status": "Status"
         }
       },

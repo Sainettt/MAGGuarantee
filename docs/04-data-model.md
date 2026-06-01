@@ -148,7 +148,7 @@
 | `loginSlug` | уникальный slug `имя.фамилия` (с суффиксом -2/-3 при коллизии) |
 | `firstName`, `lastName` | имя |
 | `phone`, `phone2`, `email` | контакты |
-| `passportNumber` | номер паспорта (раньше — `driverLicenseNumber`, переименовано 2026-05-28) |
+| `idDocumentNumber` | номер удостоверения личности — паспорт, dowód osobisty и т.п. (раньше `driverLicenseNumber` → `passportNumber`, переименовано 2026-06-01) |
 | `licenseExpiry` | срок действия водительского удостоверения |
 | `adr` | Boolean — флаг ADR-допуска (świadectwo ADR). Сам скан сертификата — в `DriverAttachment` (category=adr) |
 | `active` | флаг |

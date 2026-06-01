@@ -109,8 +109,8 @@ export function DriverDetailModal({
       icon: CreditCard,
       rows: [
         {
-          label: f('passportNumber'),
-          value: monoValue(driver.passportNumber),
+          label: f('idDocumentNumber'),
+          value: monoValue(driver.idDocumentNumber),
         },
         { label: f('licenseExpiry'), value: dateValue(driver.licenseExpiry) },
         { label: f('adr'), value: boolValue(driver.adr, yes, no) },
@@ -168,7 +168,7 @@ export function DriverDetailModal({
       title={`${driver.firstName} ${driver.lastName}`.trim()}
       subtitle={
         <span className="font-mono">
-          {driver.passportNumber || driver.loginSlug}
+          {driver.idDocumentNumber || driver.loginSlug}
         </span>
       }
       badges={badges}

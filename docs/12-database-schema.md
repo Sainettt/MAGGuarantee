@@ -328,9 +328,10 @@ model Driver {
   phone2              String?
   // Drivers in PL trucking often skip email professionally — Optional everywhere
   email               String?
-  // Renamed from `driverLicenseNumber` 2026-05-28; column now stores a
-  // passport number (driver's licence number is no longer tracked here).
-  passportNumber      String
+  // Generic identity-document number (passport, dowód osobisty, etc.).
+  // Was `driverLicenseNumber` → `passportNumber` → `idDocumentNumber`
+  // (renamed in-place 2026-06-01); driver's licence number is not tracked here.
+  idDocumentNumber    String
   // API + UI required, DB nullable — UI surfaces a warning, not a hard block
   licenseExpiry       DateTime? @db.Date
   notes               String?
@@ -683,7 +684,7 @@ populates both columns.
 
 | Поле | Слой защиты | Notes |
 |---|---|---|
-| `firstName`, `lastName`, `phone`, `passportNumber`, `loginSlug` | Strict everywhere | Column was previously named `driverLicenseNumber`; renamed 2026-05-28, semantics flipped to passport number. |
+| `firstName`, `lastName`, `phone`, `idDocumentNumber`, `loginSlug` | Strict everywhere | `idDocumentNumber` was `driverLicenseNumber` → `passportNumber` → `idDocumentNumber` (renamed in-place 2026-06-01); holds any identity-document number (passport, dowód osobisty, etc.). |
 | `licenseExpiry` | API + UI required, DB nullable | Driver must legally have it; UI warns rather than blocks at registration |
 | `email`, `phone2`, `notes` | Optional everywhere | Email rare in PL trucking |
 
@@ -809,7 +810,7 @@ populates both columns.
 | D | PrzewoznikLogin | → FK `carrierId` |
 | E | Telefon | `phone` |
 | F | Email | `email` |
-| G | NrPaszportu (legacy NrPrawaJazdy) | `passportNumber` |
+| G | NrPaszportu (legacy NrPrawaJazdy) | `idDocumentNumber` |
 | H | Aktywny | `active` |
 | I | DataDodania | `addedAt` |
 | J | PrawoJazdyWaznosc | `licenseExpiry` |
@@ -910,6 +911,7 @@ populates both columns.
 
 | `20260529111419_carrier_attachment_category_add_adr` | Чисто аддитивная миграция enum. Значение `adr` добавлено в `CarrierAttachmentCategory` (между `kreptd` и `other`) — обязательный ADR-документ перевозчика (один официальный документ со списком ADR-машин/водителей, грузится как файл-attachment). In-place `ALTER TYPE "CarrierAttachmentCategory" ADD VALUE 'adr'` (без пересоздания типа — в отличие от удаления vehicle-`adr`, т.к. Postgres умеет ADD VALUE in-place). Ничего ещё не использует новое значение, так что отдельная транзакция не нужна. |
 | `20260601120000_drop_vehicle_trailer_inspection_and_vehicle_adr_classes` | Деструктивный `DROP COLUMN` (user-confirmed full removal — UI + API + DB). Удаляет `vehicles.nextInspectionDate` (DATE), `trailers.nextInspectionDate` (DATE) и `vehicles.adrClasses` (TEXT[]). Сохранены отдельные соседние поля: `vehicles.adr` / `drivers.adr` (boolean permit-флаги), `vehicles.wasteCountries`, а также VehicleAttachment/DriverAttachment с ADR-сертификатами. Существующие значения теряются (подтверждено), без backfill. Hand-authored по существующей конвенции (без `--create-only`, т.к. на момент создания БД была недоступна) — не применялась к live-БД, применится через `prisma migrate deploy`. |
+| `20260601130000_driver_rename_passport_to_id_document` | Переименование `drivers.passportNumber` → `idDocumentNumber` (ALTER TABLE … RENAME COLUMN, без потери данных). Колонка теперь хранит номер любого удостоверения личности (паспорт, dowód osobisty и т.п.), а не только паспорта; тип, nullability и casing не меняются. Hand-authored по существующей конвенции (БД была недоступна на момент создания) — не применялась к live-БД, применится через `prisma migrate deploy`. |
 
 Production deploy: `prisma migrate deploy` в CI/CD пайплайне (без `--create-only`).
 

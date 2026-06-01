@@ -335,29 +335,31 @@ model Driver {
   carrierId String  @db.Uuid
   carrier   Carrier @relation(fields: [carrierId], references: [id])
 
-  loginSlug      String    @unique // имя.фамилия (or -2/-3 on collision)
-  firstName      String
-  lastName       String
-  phone          String
-  phone2         String?
+  loginSlug        String    @unique // имя.фамилия (or -2/-3 on collision)
+  firstName        String
+  lastName         String
+  phone            String
+  phone2           String?
   // Drivers in PL trucking often don't have or use email professionally —
   // phone is the primary channel. Required at the API/Zod level only when
   // the form context demands it.
-  email          String?
-  // Renamed from `driverLicenseNumber` on 2026-05-28 — the column now stores
-  // a passport number, not a driving-license number. DB column was renamed
-  // in-place via ALTER TABLE … RENAME COLUMN (no data loss). Column name
-  // stays camelCase to match the rest of this table's convention.
-  passportNumber String
-  // Driving-license expiry is unrelated to the passport above — kept as-is
+  email            String?
+  // Identity-document number for the driver — may be a passport, a national ID
+  // card (dowód osobisty) or any equivalent document, depending on what the
+  // driver presents during cross-border delegations. (Historically this column
+  // was `driverLicenseNumber`, then briefly `passportNumber`; renamed in-place
+  // each time via ALTER TABLE … RENAME COLUMN, no data loss.) Column name stays
+  // camelCase to match the rest of this table's convention.
+  idDocumentNumber String
+  // Driving-license expiry is unrelated to the id document above — kept as-is
   // because it's still a real attribute we track for the driver.
-  licenseExpiry  DateTime? @db.Date
-  notes          String?
-  active         Boolean   @default(true)
-  addedAt        DateTime  @default(now())
+  licenseExpiry    DateTime? @db.Date
+  notes            String?
+  active           Boolean   @default(true)
+  addedAt          DateTime  @default(now())
   // ADR transport permit flag (świadectwo ADR). The certificate scan itself
   // is stored as a DriverAttachment row (category=adr).
-  adr            Boolean   @default(false)
+  adr              Boolean   @default(false)
 
   delegations Delegation[]
   attachments DriverAttachment[]

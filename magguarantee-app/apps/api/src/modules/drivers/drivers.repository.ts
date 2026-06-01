@@ -19,7 +19,7 @@ export interface DriverRowAttachment {
 /**
  * Row shape returned by the driver repository.
  *
- * `phone` and `passportNumber` are non-nullable since the phase-2
+ * `phone` and `idDocumentNumber` are non-nullable since the phase-2
  * migration. `email` and `licenseExpiry` are non-nullable since
  * phase3_blocks. `adr` (świadectwo ADR permit flag) was added 2026-05-29
  * alongside the `DriverAttachment` model.
@@ -35,7 +35,7 @@ export interface DriverRow {
   // Nullable per phase3_blocks_audit_revert (drivers in PL trucking often
   // don't have email; license may be unknown at registration).
   email: string | null;
-  passportNumber: string;
+  idDocumentNumber: string;
   licenseExpiry: Date | null;
   notes: string | null;
   active: boolean;
@@ -134,7 +134,7 @@ export class DriversRepository {
     phone: string;
     phone2?: string | null;
     email?: string | null;
-    passportNumber: string;
+    idDocumentNumber: string;
     licenseExpiry?: Date | null;
     notes?: string | null;
     active?: boolean;
@@ -149,7 +149,7 @@ export class DriversRepository {
         phone: data.phone,
         phone2: data.phone2 ?? null,
         email: data.email ?? null,
-        passportNumber: data.passportNumber,
+        idDocumentNumber: data.idDocumentNumber,
         licenseExpiry: data.licenseExpiry ?? null,
         notes: data.notes ?? null,
         active: data.active ?? true,
@@ -225,7 +225,7 @@ export class DriversRepository {
       phone: row.phone ?? '',
       phone2: row.phone2,
       email: row.email,
-      passportNumber: row.passportNumber ?? '',
+      idDocumentNumber: row.idDocumentNumber ?? '',
       licenseExpiry: row.licenseExpiry,
       notes: row.notes,
       active: row.active,
@@ -269,7 +269,7 @@ interface DriverPrismaShape {
   phone: string | null;
   phone2: string | null;
   email: string | null;
-  passportNumber: string | null;
+  idDocumentNumber: string | null;
   licenseExpiry: Date | null;
   notes: string | null;
   active: boolean;
