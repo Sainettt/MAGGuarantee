@@ -741,6 +741,7 @@
           "orderDate": "Order date",
           "amountApproved": "Amount approved (EUR)",
           "amountApprovedAuto": "calculated automatically",
+          "amountApprovedLocked": "Locked field — calculated automatically from the preview",
           "amountMaximum": "Maximum amount (EUR)",
           "doplata": "Guarantee payout",
           "margin": "Margin",

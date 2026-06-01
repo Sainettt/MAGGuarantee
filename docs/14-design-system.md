@@ -681,7 +681,7 @@ The grid container declares **named row bands** and each child cell (`<FormField
 
 **Single-column responsive note:** at `< md`, `grid-cols-1 md:grid-cols-2` collapses to one column. `<FormGrid>` must apply subgrid row-spanning **only when ≥2 columns are live**, otherwise a 1-col stack would force every label into one shared band needlessly. Implement `<FormGrid>` so the subgrid cell-spanning classes are gated to the same breakpoint as the columns (e.g. `md:[&>[data-form-cell]]:row-span-2`). At 1 column the cells fall back to plain top-aligned stacks (correct — nothing to align across).
 
-#### Read-only / computed field pattern (auto-filled, non-editable)
+#### Read-only / computed field pattern (auto-filled, non-editable) — incl. the "Locked / computed field" pattern
 
 Two distinct cases — do not conflate them:
 
@@ -689,15 +689,42 @@ Two distinct cases — do not conflate them:
 
 **(b) Computed-but-required form value** — the field is part of the submitted payload and is still RHF-registered, but the user must NOT type into it; it auto-updates from a live calculation. This is **`amountApproved` (Kwota zatwierdzona)** in the ZAAKCEPTOWANO variant: it is driven by the live `/preview` doplata whenever «Korekta godzin» / mileage / dates change, and the verifier may not override it by hand.
 
-Treatment for (b) — a **read-only styled input**, NOT `disabled`:
+Treatment for (b) — the **locked / computed field** pattern, a read-only styled input (NOT `disabled`) carrying a deliberate "lock" affordance so it reads as *intentionally* locked rather than broken/greyed:
 
 - Keep it a real `<Input>` (so the value stays visible, copyable, RHF-registered, and submitted), but make it non-editable: `readOnly` + `tabIndex={-1}` + `aria-readonly="true"`. Do **not** use `disabled` — disabled inputs look broken/greyed and are dropped from some form serialisations; `readOnly` keeps it intentional and submitted.
-- Visual: muted, clearly "system-owned, not a blank you forgot to fill". Classes: `bg-input/60 text-text font-semibold tabular-nums cursor-default focus:ring-0 focus:border-border`. The `tabular-nums` + `font-semibold` signal "this is a computed amount", and removing the focus ring + keeping the muted bg signals "not for typing". Keep the EUR clearly readable.
-- Helper: a short `<FormDescription>` reading **"wyliczana automatycznie"** (PL) / **"calculated automatically"** (EN). i18n key `employee.claims.modal.edit.amountApprovedAuto`.
+- **Wrapper:** the `<Input>` sits in a `relative` `<div>` so a lock icon can be absolutely positioned inside the field's right edge. The `<FormDescription>` helper stays a **sibling below** the wrapper (not inside it) so grid alignment / band-pair behaviour is unchanged.
+- **Muted surface, more than a normal input.** A locked field reads *more* greyed than its editable siblings so the eye skips it:
+  - Surface: **`bg-input/40`** (vs `bg-input` for editable siblings — noticeably more recessed).
+  - Value text: **`text-text-sub`** (muted, not full `text-text`) — but kept `font-semibold tabular-nums` so the EUR number stays crisp and aligned.
+  - No focus emphasis: `focus:ring-0 focus:border-border` (it can still receive programmatic focus but never lights up).
+  - Right padding **`pr-9`** to clear the lock icon.
+- **Lock affordance (two parts):**
+  - In-field icon: lucide **`<Lock />`**, `pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-text-sub/70`, `aria-hidden`. Muted, never intercepts clicks.
+  - Helper icon: the same `<Lock />` at `size-3` prefixed inside the `<FormDescription>` (`flex items-center gap-1`) so the "wyliczana automatycznie" line visually reinforces the lock.
+- **Hover hint:** `cursor-not-allowed` on the input (clearly "you can't type here" on mouse-over) **plus** a native `title` attribute giving a textual reason. The project has **no `<Tooltip>` component** in `components/ui/`, so a native `title` is the correct lightweight choice — do not add a Tooltip dependency for this. i18n key `employee.claims.modal.edit.amountApprovedLocked` → PL "Pole zablokowane — wyliczane automatycznie z podglądu" / EN "Locked field — calculated automatically from the preview".
+- **Helper text:** `<FormDescription>` reading **"wyliczana automatycznie"** (PL) / **"calculated automatically"** (EN). i18n key `employee.claims.modal.edit.amountApprovedAuto`.
 - The `required` asterisk stays (it is still a required field of the payload) — but because it's always auto-populated it will never actually be empty.
 - It does NOT need to be inside a `<FormGrid>` band-pair conflict — it's a `col-span-2` full-width cell with a helper below; the helper grows downward harmlessly (no sibling in its grid row).
 
-This is the canonical pattern for any future "system computes it, user confirms it" numeric field (e.g. a recomputed payout, a derived rate).
+**Canonical class string (copy verbatim for future locked/computed fields):**
+
+```tsx
+<div className="relative">
+  <Input
+    readOnly tabIndex={-1} aria-readonly="true"
+    title={t('…Locked')}
+    className="bg-input/40 pr-9 font-semibold tabular-nums text-text-sub cursor-not-allowed focus:border-border focus:ring-0"
+    {...register(name, { setValueAs })}
+  />
+  <Lock aria-hidden className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-text-sub/70" />
+</div>
+<FormDescription className="flex items-center gap-1">
+  <Lock aria-hidden className="size-3 shrink-0" />
+  {t('…Auto')}
+</FormDescription>
+```
+
+This is the canonical pattern for any future "system computes it, user confirms it" numeric field (e.g. a recomputed payout, a derived rate). The RHF wiring (`register` + `setValueAs` + the auto-populate `useEffect`) is **independent of this presentation** — never alter it when restyling a locked field.
 
 ### Field validation badge (inline VIES / Biała Lista feedback)
 

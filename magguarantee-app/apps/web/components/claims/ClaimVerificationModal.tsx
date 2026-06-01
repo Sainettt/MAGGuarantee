@@ -16,7 +16,7 @@
 // are registered based on the picker without re-mounting the form.
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Lock } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useEffect, useMemo } from 'react';
 import {
@@ -632,23 +632,37 @@ function ModalBody({ claim, onClose, t, tStatus }: ModalBodyProps) {
                       doplata (see the amountApproved useEffect above). The
                       verifier must NOT type into it; `readOnly` (not
                       `disabled`) keeps it visible, copyable, RHF-registered and
-                      submitted while signalling "system-owned". See docs/14
-                      § "Read-only / computed field pattern" (case b). */}
-                  <Input
-                    id="claim-amountApproved"
-                    type="number"
-                    step="0.01"
-                    min={0}
-                    readOnly
-                    tabIndex={-1}
-                    aria-readonly="true"
-                    className="bg-input/60 font-semibold tabular-nums cursor-default focus:ring-0 focus:border-border"
-                    {...form.register('amountApproved', {
-                      setValueAs: (v) =>
-                        v === '' || v === null ? undefined : Number(v),
-                    })}
-                  />
-                  <FormDescription>
+                      submitted while signalling "system-owned".
+
+                      Presentation = the canonical LOCKED / COMPUTED FIELD
+                      pattern: muted surface (`bg-input/40`), muted text
+                      (`text-text-sub`), no focus ring, `cursor-not-allowed`, a
+                      right-aligned muted <Lock /> affordance, and a native
+                      `title` hover hint. See docs/14 § "Locked / computed field
+                      pattern". */}
+                  <div className="relative">
+                    <Input
+                      id="claim-amountApproved"
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      readOnly
+                      tabIndex={-1}
+                      aria-readonly="true"
+                      title={tEdit('amountApprovedLocked')}
+                      className="bg-input/40 pr-9 font-semibold tabular-nums text-text-sub cursor-not-allowed focus:border-border focus:ring-0"
+                      {...form.register('amountApproved', {
+                        setValueAs: (v) =>
+                          v === '' || v === null ? undefined : Number(v),
+                      })}
+                    />
+                    <Lock
+                      aria-hidden
+                      className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-text-sub/70"
+                    />
+                  </div>
+                  <FormDescription className="flex items-center gap-1">
+                    <Lock aria-hidden className="size-3 shrink-0" />
                     {tEdit('amountApprovedAuto')}
                   </FormDescription>
                 </FormField>
