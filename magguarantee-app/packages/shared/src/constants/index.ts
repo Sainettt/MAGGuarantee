@@ -6,3 +6,7 @@
 
 export * from './eu-vat-countries';
 export * from './eu-postal-codes';
+// Soft-UI-hint rulesets (web masked inputs only) — NEVER wired into any Zod
+// schema, unlike eu-postal-codes. See docs/14 §6.1.2 / §6.1.6.
+export * from './eu-phone-rules';
+export * from './eu-id-document-rules';

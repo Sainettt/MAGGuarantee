@@ -102,12 +102,24 @@
   },
   "forms": {
     "country": {
-      "placeholder": "Select country"
+      "placeholder": "Select country",
+      "driverLabel": "Kraj / Country",
+      "driverDescription": "Drives the format hint for phone and ID document (optional, not saved)."
     },
     "postal": {
       "placeholderNoCountry": "Select a country first",
       "expectedFormat": "Format: {example}",
       "invalidFormat": "Invalid format. Expected e.g. {example}"
+    },
+    "phone": {
+      "placeholderNoCountry": "Phone number",
+      "expectedFormat": "Expected: {callingCode} · ~{digits} digits",
+      "invalidFormat": "Unusual format. Expected e.g. {example}"
+    },
+    "document": {
+      "placeholderNoCountry": "Document number",
+      "expectedFormat": "Format: e.g. {example}",
+      "invalidFormat": "Unusual format. Expected e.g. {example}"
     }
   },
   "theme": {

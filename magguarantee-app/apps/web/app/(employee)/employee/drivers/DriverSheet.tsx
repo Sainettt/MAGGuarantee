@@ -17,13 +17,14 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
   CreateDriverSchema,
   type CreateDriverDto,
   type DriverAttachmentDto,
   type DriverDto,
+  type EuVatCountryCode,
   type UpdateDriverDto,
 } from '@magguarantee/shared';
 
@@ -49,7 +50,10 @@ import { Textarea } from '@/components/ui/Textarea';
 import { EntityAlreadyExistsNotice } from '@/components/carrier-onboarding/EntityAlreadyExistsNotice';
 import { TemporaryPasswordRow } from '@/components/carrier-onboarding/TemporaryPasswordRow';
 import { WizardStepper } from '@/components/carrier-onboarding/WizardStepper';
+import { CountrySelect } from '@/components/forms/CountrySelect';
 import { FormDescription, FormField, FormGrid, FormItem, FormLabel } from '@/components/forms/Form';
+import { MaskedDocumentInput } from '@/components/forms/MaskedDocumentInput';
+import { MaskedPhoneInput } from '@/components/forms/MaskedPhoneInput';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useCreateDriver, useUpdateDriver } from '@/lib/hooks/useDrivers';
@@ -119,6 +123,7 @@ export function DriverSheet({
   const tCommon = useTranslations('common');
   const tWizard = useTranslations();
   const tFile = useTranslations('fileUpload');
+  const tCountry = useTranslations('forms.country');
   const isEdit = driver !== null;
   const isWizard = mode === 'wizard';
 
@@ -139,6 +144,15 @@ export function DriverSheet({
   // 422). Surfaced inline above the footer; cleared on any file change.
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
 
+  // ── UI-only «Kraj / Country» selector ──────────────────────
+  // SOFT-WARNING ONLY — never escalate to RHF/Zod, never block submit. See
+  // docs/14 §6.1.2. This drives the live format hint + on-blur soft warning for
+  // phone / phone2 / idDocumentNumber. It is DELIBERATELY local component state:
+  // it is NOT an RHF field, NOT in CreateDriverDto, NOT persisted, NEVER sent to
+  // the API. (CreateDriverSchema is `.strict()`, so it would be rejected anyway
+  // — keeping it out of the form is the guardrail.)
+  const [homeCountry, setHomeCountry] = useState<EuVatCountryCode | ''>('');
+
   // Up to 200 carriers in the picker — Phase 2 UAT-grade.
   const carriersQ = useCarriers({ limit: 200 });
 
@@ -153,6 +167,10 @@ export function DriverSheet({
   useEffect(() => {
     if (!open) return;
     setAttachmentError(null);
+    // Country is UI-only and never persisted — always open on the empty state
+    // (edit mode included; see docs/14 §6.1.4). The existing phone/document
+    // values render free-text until the operator picks a country.
+    setHomeCountry('');
     if (isEdit && driver) {
       form.reset({
         carrierId: driver.carrierId,
@@ -225,6 +243,33 @@ export function DriverSheet({
     setAdrFiles(items);
     setAttachmentError(null);
   }, []);
+
+  // SOFT-WARNING ONLY — never escalate to RHF/Zod, never block submit. See
+  // docs/14 §6.1.2.
+  //
+  // Switching the UI-only country selector. We only CLEAR the dependent fields
+  // (phone / phone2 / idDocumentNumber) when moving from one ALREADY-selected
+  // country to a DIFFERENT one — the previous country's format almost never
+  // matches the new one. Selecting a country from the empty state (`'' → XX`,
+  // i.e. the edit-mode case) must NOT wipe the persisted values; it only
+  // activates the format hints. `shouldValidate: false` keeps the soft model
+  // from ever touching RHF errors.
+  const handleCountryChange = useCallback(
+    (next: EuVatCountryCode | '') => {
+      setHomeCountry((prev) => {
+        if (prev !== '' && next !== prev) {
+          form.setValue('phone', '', { shouldValidate: false, shouldDirty: true });
+          form.setValue('phone2', '', { shouldValidate: false, shouldDirty: true });
+          form.setValue('idDocumentNumber', '', {
+            shouldValidate: false,
+            shouldDirty: true,
+          });
+        }
+        return next;
+      });
+    },
+    [form],
+  );
 
   const onSubmit = form.handleSubmit(
     (values) => {
@@ -400,15 +445,44 @@ export function DriverSheet({
                     {...form.register('lastName')}
                   />
                 </FormField>
+                {/* UI-only «Kraj / Country» selector — full-width, scopes the
+                    contact fields below it. NEVER persisted/submitted; drives
+                    the soft format hints only. See docs/14 §6.1.4. */}
+                <FormField
+                  label={tCountry('driverLabel')}
+                  description={tCountry('driverDescription')}
+                  htmlFor="driver-homeCountry"
+                  className="sm:col-span-2"
+                >
+                  <CountrySelect
+                    id="driver-homeCountry"
+                    value={homeCountry}
+                    onChange={(e) =>
+                      handleCountryChange(
+                        e.target.value as EuVatCountryCode | '',
+                      )
+                    }
+                  />
+                </FormField>
                 <FormField
                   label={t('fields.phone')}
                   required
                   error={errs.phone?.message}
                   htmlFor="driver-phone"
                 >
-                  <Input
-                    id="driver-phone"
-                    {...form.register('phone')}
+                  <Controller
+                    control={form.control}
+                    name="phone"
+                    render={({ field }) => (
+                      <MaskedPhoneInput
+                        id="driver-phone"
+                        country={homeCountry}
+                        value={field.value ?? ''}
+                        onChange={field.onChange}
+                        onBlur={field.onBlur}
+                        ref={field.ref}
+                      />
+                    )}
                   />
                 </FormField>
                 <FormField
@@ -416,9 +490,19 @@ export function DriverSheet({
                   error={errs.phone2?.message}
                   htmlFor="driver-phone2"
                 >
-                  <Input
-                    id="driver-phone2"
-                    {...form.register('phone2')}
+                  <Controller
+                    control={form.control}
+                    name="phone2"
+                    render={({ field }) => (
+                      <MaskedPhoneInput
+                        id="driver-phone2"
+                        country={homeCountry}
+                        value={field.value ?? ''}
+                        onChange={field.onChange}
+                        onBlur={field.onBlur}
+                        ref={field.ref}
+                      />
+                    )}
                   />
                 </FormField>
                 <FormField
@@ -438,9 +522,19 @@ export function DriverSheet({
                   error={errs.idDocumentNumber?.message}
                   htmlFor="driver-license"
                 >
-                  <Input
-                    id="driver-license"
-                    {...form.register('idDocumentNumber')}
+                  <Controller
+                    control={form.control}
+                    name="idDocumentNumber"
+                    render={({ field }) => (
+                      <MaskedDocumentInput
+                        id="driver-license"
+                        country={homeCountry}
+                        value={field.value ?? ''}
+                        onChange={field.onChange}
+                        onBlur={field.onBlur}
+                        ref={field.ref}
+                      />
+                    )}
                   />
                 </FormField>
                 <FormField

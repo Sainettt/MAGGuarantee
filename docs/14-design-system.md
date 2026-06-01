@@ -3139,6 +3139,228 @@ Replace the `<DataTable isLoading>` skeleton with a card-shaped skeleton (`<Opie
 - [ ] Card click navigates to `/employee/opieka/carriers/[login]` (encoded). Keyboard Enter on focused card has the same effect.
 - [ ] No nested clickable elements inside the card link.
 - [ ] Skeleton renders 6 placeholder cards in the same grid layout; no layout jump when data arrives.
+
+## Phase 6.1 — Country-driven masked fields (generalized: postal + ID document + phone)
+
+> **What this section formalises.** The delegation form already ships a *country → postal-code* live-mask + soft-warning interaction (`<MaskedPostalInput>` + `EU_POSTAL_CODES`). The Driver create/edit modal (`DriverSheet`) now needs the **same interaction shape** applied to two more fields — **`idDocumentNumber` (Numer dokumentu tożsamości)** and **`phone` / `phone2`** — driven by a single per-driver «Kraj / Country» selector.
+>
+> This section generalises the pattern into one named contract — **"country-driven masked field"** — so postal, ID-document and phone all share the same UX vocabulary and the same soft-warning visual treatment, while documenting the **three deliberate asymmetries** between the postal case and the driver case so nobody "fixes" them into inconsistency later.
+
+### 6.1.1 The generalized pattern — "country-driven masked field"
+
+A country-driven masked field is a text input whose **formatting hint and on-blur soft warning are parameterised by a sibling country selector**. It has exactly these moving parts:
+
+1. **A country selector** (`<CountrySelect>`, EU-27 VIES enum) that emits an `EuVatCountryCode | ''`.
+2. **A per-country ruleset** in `packages/shared/src/constants/` — a `Record<EuVatCountryCode, Rule>` kept *total* over the union (compile-time completeness guard, like `EU_POSTAL_CODES`).
+3. **A masked / hinted input** that reads the rule for the currently-selected country and:
+   - renders a placeholder derived from the rule's `example` (or a mask-derived `__-___` skeleton where a rigid mask exists),
+   - shapes typing where a rigid character-mask is realistic (postal, *not* phone/ID — see §6.1.3),
+   - on **blur**, if the value is non-empty and a country is set, evaluates the rule and toggles a **soft warning**.
+4. **A clear-on-country-change** wiring in the parent form: when the country changes, the dependent field(s) are reset to `''` (the previous country's format almost never matches the new one).
+
+**Soft-warning visual contract (identical across all three field kinds).** This is the load-bearing styling rule — it must be byte-identical to `<MaskedPostalInput>`:
+
+| State | Hint element | Classes |
+|---|---|---|
+| Country set, value empty or being typed | expected-format hint | `text-xs text-text-sub` |
+| Country set, value non-empty, fails rule on blur | invalid hint | `text-xs text-danger`, `role="alert"`, input gets `border-danger` + `aria-invalid` |
+| No country selected | no hint row at all | — |
+
+The hint copy is always *"expected: {example}"* in the neutral state and *"unexpected format — expected something like {example}"* in the danger state. **The example is the only concrete guidance** — we never enumerate every accepted document type in the hint.
+
+### 6.1.2 The soft-warning-only contract (non-negotiable for ID + phone)
+
+> **This is the single most important rule in this section. web-agent must not violate it.**
+
+For **postal codes**, the per-country regex is *also* wired into the delegation Zod schema (cross-field validation), so a bad postal is a real submit-blocking error. **For ID document and phone, the rulesets are documentation/UX only — they are NEVER wired into any Zod schema.** The contract:
+
+- The existing Zod fields stay exactly as they are: `phone` accepts any 1–32 char string, `idDocumentNumber` accepts any 1–64 char string. **Do not touch these schemas.**
+- The country selector is **UI-only**: never added to `CreateDriverSchema` / `UpdateDriverDto`, never persisted, never submitted, never sent to the API. It lives in component state (RHF `useState` or a non-submitted RHF field that the submit handler strips — see §6.1.5).
+- A mask mismatch on blur produces **only** the inline `text-danger` hint. It must **never**:
+  - become an RHF error (`form.setError`),
+  - set `aria-invalid` on the field in a way that participates in `formState.errors`,
+  - block, gate, or even discourage submit,
+  - show a validation toast.
+- Submit is **never** hard-blocked by the country/mask. A driver from a non-EU country, a driver whose passport doesn't match the national-ID shape, a landline that's shorter than the mobile range — **all submit fine**. The warning is a *nudge*, not a gate.
+
+> **Why so permissive.** Real EU identity documents come in several shapes per country (national ID vs passport vs residence permit vs older legacy formats), and phone numbers vary by mobile/landline/length. A strict regex *will* false-warn on legitimate data. The warning's job is to catch fat-finger typos (wrong length, wrong calling code), not to enforce a format. See §6.1.6 for the realism analysis.
+
+### 6.1.3 The three asymmetries vs. the postal case
+
+| # | Postal (delegations) | ID document + phone (DriverSheet) | Why different |
+|---|---|---|---|
+| **A. Schema wiring** | Regex **is** in the Zod schema → hard error on submit. | Ruleset is **never** in any Zod schema → soft hint only. | Postal is a required, format-stable field. ID/phone accept many legitimate shapes; a hard regex would reject real documents. |
+| **B. No-country fallback** | Input is **disabled** until a country is picked (postal country is required). | Input stays an **enabled free-text input** when no country is selected. | Country here is **optional**; arbitrary strings (non-EU drivers, unusual formats) must always be enterable. Masking only *activates* once a country is chosen. |
+| **C. Mask model** | Rigid character-mask (`9` digit / `A` letter / literal) — postal formats are short and fixed. | **Lenient model, no rigid character-mask.** Phone = `{ callingCode, minNationalLen, maxNationalLen, example }` → "~N digits / +CC" hint. ID = length-range `{ minLen, maxLen, example, regex? }` → realistic-ceiling hint. | National phone lengths vary (mobile vs landline); ID accepts multiple document types. A fixed `9`-mask would corrupt legitimate input by silently dropping characters. |
+
+> **Do-not-"fix" markers.** All three asymmetries are *intentional*. A future contributor who "notices" that ID/phone aren't validated server-side, or that the input isn't disabled-without-country, or that there's no rigid mask, **must not** add Zod validation, disable the input, or impose a character-mask. The relevant source files carry inline `// SOFT-WARNING ONLY — see docs/14 §6.1.2` comments to anchor this.
+
+### 6.1.4 `DriverSheet` modal layout decision
+
+Current `DriverSheet` field block (inside `<FormGrid cols={2}>`): firstName/lastName · phone/phone2 · email/idDocumentNumber · licenseExpiry · then notes, ADR, active outside the grid.
+
+**Decision — one full-width «Kraj / Country» selector, placed as a leading row immediately above the contact fields, reading as the control for everything below it.**
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Przewoźnik (carrier)                          [create only]  │  ← unchanged
+│  ──────────────────────────────────────────────────────────  │
+│  Imię (firstName)            │  Nazwisko (lastName)           │  ← grid row, unchanged
+│  ──────────────────────────────────────────────────────────  │
+│  Kraj / Country            ⌄  [ — wybierz (optional) — ]      │  ← NEW: full-width, col-span-2
+│  Steruje formatem telefonu i numeru dokumentu (opcjonalnie)   │  ← FormDescription helper
+│  ──────────────────────────────────────────────────────────  │
+│  Telefon (phone)             │  Telefon 2 (phone2)            │  ← now country-driven
+│   +48 · ~9 cyfr               │   +48 · ~9 cyfr               │  ← soft hint (text-sub)
+│  ──────────────────────────────────────────────────────────  │
+│  E-mail                      │  Numer dokumentu tożsamości    │  ← idDocumentNumber country-driven
+│                              │   np. ABA123456                │  ← soft hint (text-sub)
+│  ──────────────────────────────────────────────────────────  │
+│  Termin ważności prawa jazdy (licenseExpiry)                 │  ← unchanged
+└──────────────────────────────────────────────────────────────┘
+```
+
+Layout rules:
+- The country select is a **full-width row**: render it as a `<FormField>` with `className="sm:col-span-2"` *inside* the existing `<FormGrid cols={2}>` (so it spans both columns), positioned **after lastName, before phone**. This makes the visual reading order "name → its country → its phone/document" and signals scope: everything below the selector is country-shaped.
+- It carries a `<FormDescription>` one-liner: *"Steruje podpowiedzią formatu telefonu i numeru dokumentu (opcjonalne)."* / EN *"Drives the format hint for phone and ID document (optional)."* — so the operator understands the selector is a helper, not a saved field.
+- The selector's placeholder reads as optional: *"— wybierz kraj (opcjonalnie) —"* — **not** the delegation-style required placeholder. There is no required asterisk on this field.
+- **`phone`, `phone2` and `idDocumentNumber` are all driven by this one selector** (a driver has one home country; phone2 is still a phone, so consistency wins — both phones share the same calling-code rule).
+- **Clear-on-change:** when the country changes, reset `phone`, `phone2`, and `idDocumentNumber` to `''` via `form.setValue(..., '', { shouldValidate: false, shouldDirty: true })`. Same rationale as the postal clear; `shouldValidate: false` keeps the soft model from ever touching RHF errors.
+- **Edit mode:** the selector opens **empty** (country is not persisted, so we can't pre-fill it). The existing phone/idDocument values render as-is in their free-text fallback state (no mask, no hint) until/unless the operator picks a country. Picking a country then **clears** those fields (consistent with create) — document this as a known, acceptable trade-off in §6.1.5; the operator only picks a country when they intend to re-enter formatted values.
+
+### 6.1.5 Spec for **web-agent** — wiring
+
+**Component strategy — add two siblings, do not over-generalise `MaskedPostalInput`.** `MaskedPostalInput` is built around a rigid character-mask + a Zod-backed validator; the phone/ID cases are lenient and Zod-free. Forcing all three into one component would couple incompatible behaviours. Instead:
+
+| Component | New file | Model | Notes |
+|---|---|---|---|
+| `<MaskedPostalInput>` | exists | rigid mask + regex | **unchanged**. |
+| `<MaskedPhoneInput>` | `apps/web/components/forms/MaskedPhoneInput.tsx` | lenient digit-count + calling code | Free-text when `country=''`. On blur (country set, value non-empty) runs `isPlausiblePhone(country, value)` → soft hint only. No character-mask; light normalisation (strip non-digits for the length check, but keep the user's literal value in RHF). |
+| `<MaskedDocumentInput>` | `apps/web/components/forms/MaskedDocumentInput.tsx` | lenient length-range (+ optional regex) | Free-text when `country=''`. On blur runs `isPlausibleIdDocument(country, value)` → soft hint only. No character-mask. |
+
+Both new components mirror `<MaskedPostalInput>`'s **visual** structure exactly: a wrapper `div.space-y-1`, the `<Input>`, and a conditional `<p class="text-xs ...">` hint that is `text-text-sub` in the neutral state and `text-danger` + `role="alert"` in the unexpected-format state. **Difference from postal:** when `country=''` these inputs are **enabled free-text** (`disabled={false}`, normal `placeholder`, no hint row), NOT disabled.
+
+Both expose the same prop surface as `MaskedPostalInput`: `{ value, onChange, country: EuVatCountryCode | '', placeholderOverride?, ...native }`, RHF-friendly via `<Controller>`.
+
+Hard constraints for web-agent:
+- **Never** call `form.setError` / surface these in `formState.errors`. The soft `blurInvalid` flag is **local component `useState`**, exactly like `MaskedPostalInput`'s `blurInvalid` — it never leaves the component.
+- **Never** add the country selector value to the submit payload. Keep it in local `useState` (recommended: `const [homeCountry, setHomeCountry] = useState<EuVatCountryCode | ''>('')`), **not** an RHF field, so it can't accidentally be serialised by `useFormDraft` or the submit cleaner. If you prefer an RHF field for ergonomics, the submit handler's existing empty-string-stripping loop must explicitly `delete cleaned.homeCountry` (and it must not be in `CreateDriverSchema`, which is `.strict()` and would reject it anyway — that rejection is itself the guardrail).
+- The country `<CountrySelect>` `onChange` must `form.setValue('phone', '', …)`, `form.setValue('phone2', '', …)`, `form.setValue('idDocumentNumber', '', …)` with `shouldValidate: false`.
+- The three driven fields move from `form.register(...)` to `<Controller>` (needed to pass `country` + custom `onChange`), exactly like the delegation postal fields. Their `error={errs.X?.message}` wiring on the `<FormField>` stays — those still show *Zod* errors (e.g. required `idDocumentNumber` empty on submit), which is correct and separate from the soft mask hint.
+- Add a `// SOFT-WARNING ONLY — never escalate to RHF/Zod, never block submit. See docs/14 §6.1.2` comment at the top of both new components and at the country `onChange` site in `DriverSheet`.
+- i18n: add a `forms.phone` and `forms.document` namespace mirroring `forms.postal` (`placeholderNoCountry`, `expectedFormat`, `invalidFormat`). For phone, `expectedFormat` interpolates `{callingCode}` + `{digits}` (e.g. *"oczekiwano: +48 · ~9 cyfr"*); for document, `{example}`.
+
+### 6.1.6 Spec for **api-agent** — the two rulesets (realism analysis + exact shapes)
+
+Two new files next to `eu-postal-codes.ts`, both exported from `packages/shared/src/constants/index.ts`, both **total over `EuVatCountryCode`** with the same compile-time completeness guard pattern. **Neither is imported by any Zod schema — that asymmetry is intentional (see §6.1.2/§6.1.3-A). Add a file-header comment stating this explicitly so nobody wires them into validation.**
+
+#### `eu-phone-rules.ts` — `EU_PHONE_RULES`
+
+Phone **cannot** be a rigid character-mask: national significant numbers vary in length (mobile vs landline vs special), and several countries have variable-length numbering plans. The lenient model is a **calling code + a national-digit-count range**, surfaced as a *"~N digits / +CC"* soft hint.
+
+```ts
+export interface EuPhoneRule {
+  /** E.164 country calling code WITHOUT the leading '+', e.g. '48' for PL. */
+  callingCode: string;
+  /** Min plausible national significant digits (excludes the calling code). */
+  minNationalLen: number;
+  /** Max plausible national significant digits (excludes the calling code). */
+  maxNationalLen: number;
+  /** A realistic example in the form the hint shows, incl. '+CC'. */
+  example: string;
+}
+
+export const EU_PHONE_RULES: Record<EuVatCountryCode, EuPhoneRule> = {
+  PL: { callingCode: '48', minNationalLen: 9, maxNationalLen: 9,  example: '+48 512 345 678' },
+  DE: { callingCode: '49', minNationalLen: 6, maxNationalLen: 11, example: '+49 151 23456789' },
+  // … the remaining 25 EU codes …
+};
+```
+
+Realism notes for api-agent authoring the other 25:
+- `minNationalLen`/`maxNationalLen` are **plausibility bounds**, deliberately wide enough to cover both mobile and landline so legitimate numbers don't warn. Err generous (e.g. DE's range 6–11 covers short landlines through long mobiles). The point is to catch "user typed 4 digits" or "user typed 20 digits", not to validate against the official numbering plan.
+- The example should be a **mobile** number in international form, since that's the common case for a driver.
+
+Validator helper signature (web-only consumer; lives in the same file for cohesion, exported):
+
+```ts
+/**
+ * SOFT plausibility check — true unless the digit count is clearly outside the
+ * national range. Strips '+', spaces, '(', ')', '-' and an optional leading
+ * country calling code before counting. NEVER used by any Zod schema.
+ * Returns true for unknown country codes (defensive — caller gates on country).
+ */
+export function isPlausiblePhone(country: string, raw: string): boolean;
+```
+
+Implementation guidance: normalise `raw` to digits; if it starts with the rule's `callingCode`, drop it; compare remaining length against `[minNationalLen, maxNationalLen]`. Empty string → `true` (no warning on empty; the component already gates on non-empty).
+
+#### `eu-id-document-rules.ts` — `EU_ID_DOCUMENT_RULES`
+
+A single strict regex would false-warn because most EU states issue several accepted document types (national ID, passport, residence card, sometimes multiple legacy national-ID formats). The model is a **length range with an optional *lenient* regex**, where the soft hint shows a realistic example and the warning fires only on a clearly-wrong length (or a clearly-wrong shape if a lenient regex is supplied).
+
+```ts
+export interface EuIdDocumentRule {
+  /** Min plausible length across the country's accepted document types. */
+  minLen: number;
+  /** Max plausible length across the country's accepted document types. */
+  maxLen: number;
+  /** A realistic example (national ID is fine) shown in the soft hint. */
+  example: string;
+  /**
+   * OPTIONAL lenient shape check. Must be permissive enough to pass national
+   * ID *and* passport *and* residence permit. Omit it entirely when the
+   * document types are too divergent to share one pattern — the length range
+   * alone is the soft check then. Case-insensitive; UI does not force case.
+   */
+  regex?: RegExp;
+}
+
+export const EU_ID_DOCUMENT_RULES: Record<EuVatCountryCode, EuIdDocumentRule> = {
+  // PL dowód osobisty: 3 letters + 6 digits ('ABA123456'). Passport: 2 letters +
+  // 7 digits. The lenient regex admits both letter/digit mixes 8–10 chars long.
+  PL: { minLen: 8, maxLen: 10, example: 'ABA123456', regex: /^[A-Z]{2,3}\d{6,7}$/i },
+  // DE Personalausweis (since 2010): 9 alphanumerics, often starting with a
+  // letter; passports differ. Keep it to a length range + a very loose
+  // alphanumeric check so passports/residence cards don't false-warn.
+  DE: { minLen: 9, maxLen: 10, example: 'L01X00T47', regex: /^[A-Z0-9]{9,10}$/i },
+  // … the remaining 25 EU codes …
+};
+```
+
+Realism notes for api-agent authoring the other 25:
+- **Prefer a generous length range; supply `regex` only when a genuinely permissive shared shape exists.** When national ID and passport diverge too much (different lengths *and* different character classes), **omit `regex`** and let the length range be the only soft check. A missing `regex` is a feature, not an oversight.
+- `minLen`/`maxLen` should bracket the *shortest accepted document* through the *longest accepted document* for that country, so a passport never warns when the example is a national ID.
+- The `example` should be the most common document a driver carries (national ID), formatted exactly as the soft hint will display it.
+
+Validator helper signature:
+
+```ts
+/**
+ * SOFT plausibility check — true unless length is outside [minLen, maxLen] OR a
+ * supplied lenient `regex` clearly fails. Trims surrounding whitespace; does NOT
+ * force case. NEVER used by any Zod schema. Returns true for unknown country
+ * codes and for empty input.
+ */
+export function isPlausibleIdDocument(country: string, raw: string): boolean;
+```
+
+#### Barrel + guards
+
+- Add both to `packages/shared/src/constants/index.ts`.
+- Each file ends with the same `const _COMPLETE: Record<(typeof EU_VAT_COUNTRY_CODES)[number], Rule> = THE_RECORD; void _COMPLETE;` guard as `eu-postal-codes.ts`, so adding a 28th EU code is a compile error until a rule is authored.
+- **No Zod import, no schema edit, no DTO change, no migration.** If anything in `packages/shared/src/schemas/` or `apps/api/` would have to change, the change is wrong — stop and re-read §6.1.2.
+
+### 6.1.7 Acceptance checklist
+
+- [ ] `DriverSheet` shows a full-width «Kraj / Country» selector between lastName and phone, with an «(opcjonalne)» placeholder and a `<FormDescription>` explaining it drives the format hints.
+- [ ] With **no country** selected, `phone`, `phone2`, `idDocumentNumber` are **plain enabled free-text inputs** (no mask, no hint row, no disabled state) and submit works with arbitrary strings.
+- [ ] Selecting a country shows the neutral `text-text-sub` expected-format hint under each of the three fields; an implausible value on blur flips that one field's hint to `text-danger` + `role="alert"` + `border-danger`.
+- [ ] The danger hint **never** appears in `form.formState.errors`, **never** blocks submit, **never** raises a validation toast. A value that "looks wrong" still saves.
+- [ ] Changing the country clears `phone`, `phone2`, `idDocumentNumber` (with `shouldValidate: false`).
+- [ ] The country value is **not** in the network request body on create or edit (verify in devtools), is **not** in `CreateDriverSchema`/`UpdateDriverDto`, and is **not** persisted.
+- [ ] `EU_PHONE_RULES` and `EU_ID_DOCUMENT_RULES` are total over EU-27 (compile guard passes) and are imported by **zero** Zod schemas.
+- [ ] Visual parity: the hint rows under phone/ID are pixel-identical in size/color/weight to the postal hint under `<MaskedPostalInput>` in both light and dark themes.
 - [ ] Empty state replaces the grid (not rendered inside it).
 - [ ] KPI strip above is unchanged.
 - [ ] Inactive carrier: opacity dimmed; «Nieaktywny» muted badge; still clickable.

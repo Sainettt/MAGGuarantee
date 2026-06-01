@@ -102,12 +102,24 @@
   },
   "forms": {
     "country": {
-      "placeholder": "Wybierz kraj"
+      "placeholder": "Wybierz kraj",
+      "driverLabel": "Kraj / Country",
+      "driverDescription": "Steruje podpowiedzią formatu telefonu i numeru dokumentu (opcjonalne, niezapisywane)."
     },
     "postal": {
       "placeholderNoCountry": "Najpierw wybierz kraj",
       "expectedFormat": "Format: {example}",
       "invalidFormat": "Nieprawidłowy format. Oczekiwano np. {example}"
+    },
+    "phone": {
+      "placeholderNoCountry": "Numer telefonu",
+      "expectedFormat": "Oczekiwano: {callingCode} · ~{digits} cyfr",
+      "invalidFormat": "Nietypowy format. Oczekiwano np. {example}"
+    },
+    "document": {
+      "placeholderNoCountry": "Numer dokumentu",
+      "expectedFormat": "Format: np. {example}",
+      "invalidFormat": "Nietypowy format. Oczekiwano np. {example}"
     }
   },
   "theme": {
@@ -467,7 +479,7 @@
       "phone": "Telefon",
       "phone2": "Telefon (drugi)",
       "email": "E-mail",
-      "idDocumentNumber": "Numer dokumentu tożsamości",
+      "idDocumentNumber": "Nr dokumentu tożsamości",
       "licenseExpiry": "Ważność prawa jazdy",
       "adr": "ADR",
       "notes": "Notatki",
@@ -927,7 +939,7 @@
       "columns": {
         "name": "Imię i nazwisko",
         "phone": "Telefon",
-        "idDocument": "Numer dokumentu tożsamości",
+        "idDocument": "Nr dokumentu tożsamości",
         "active": "Status"
       }
     },
@@ -1198,7 +1210,7 @@
         "columns": {
           "name": "Imię i nazwisko",
           "phone": "Telefon",
-          "idDocument": "Numer dokumentu tożsamości",
+          "idDocument": "Nr dokumentu tożsamości",
           "status": "Status"
         }
       },
