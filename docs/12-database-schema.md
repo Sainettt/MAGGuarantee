@@ -238,7 +238,8 @@ model Vehicle {
   notes        String?
   certificateL Boolean       // STRICT, TAK/NIE (was enum L1/L2/L3 until 2026-05)
   euro         EuroNorm      // STRICT
-  adrClasses   String[]
+  // `adrClasses` (ADR class CSV→array) dropped 2026-06 — only the `adr`
+  // boolean permit flag is kept; ADR cert scan lives on Driver.
   gps          Boolean       @default(false)
   fuelCard     Boolean       @default(false)
   type         VehicleType   // STRICT
@@ -266,7 +267,8 @@ model Vehicle {
   // tracker device id — required iff gps=true (CHECK vehicle_gps_device_when_gps_on)
   // misnomer: it's NOT a phone number — see docs/19-known-quirks.md (#gpsMobilePhone)
   gpsMobilePhone     String?
-  nextInspectionDate DateTime? @db.Date
+  // `nextInspectionDate` (NastepnyPrzeglad) dropped 2026-06 — inspection date
+  // no longer tracked on the vehicle.
   sideNumber         String?
   // Auto-updated by delegation→zjechal — never expose as a manual UI field
   lastDroveAt        DateTime?
@@ -387,7 +389,8 @@ model Trailer {
   year               Int?
   active             Boolean     @default(true)
   addedAt            DateTime    @default(now())
-  nextInspectionDate DateTime?   @db.Date
+  // `nextInspectionDate` dropped 2026-06 — inspection date no longer tracked
+  // on the trailer.
 
   belts         Boolean?
   beltsCount    Int?     // liczba pasów (nullable; UI/Zod enforce >= 0)
@@ -780,7 +783,7 @@ populates both columns.
 | L | Uwagi | `notes` |
 | M | CertyfikatL | `certificateL` (Boolean — was enum L1/L2/L3 до 2026-05) |
 | N | EURO | `euro` |
-| O | ADR (CSV) | `adrClasses[]` |
+| O | ADR (CSV) | dropped 2026-06 — only `adr` boolean permit flag kept (ADR class list removed) |
 | P-R | GPS, KartaPaliwowa, Typ | `gps`, `fuelCard`, `type` |
 | S | Dyspozytor (login) | → FK `dispatcherId` |
 | T-W | GB, IT, FR, Porozumienie | `gb`, `it`, `fr`, `agreement` |
@@ -790,7 +793,7 @@ populates both columns.
 | AD | OdpadyKraje (CSV) | `wasteCountries[]` |
 | AE-AF | KabotazDE, KabotazFR | `cabotageDe`, `cabotageFr` |
 | AG | GPSMobNr | `gpsMobilePhone` |
-| AH | NastepnyPrzeglad | `nextInspectionDate` |
+| AH | NastepnyPrzeglad | dropped 2026-06 — inspection date no longer tracked |
 | AI | NrBoczny | `sideNumber` |
 | AJ | OstatnioJezdzilo | `lastDroveAt` |
 
@@ -906,6 +909,7 @@ populates both columns.
 | `20260529120000_attachments_driver_carrier_and_drop_vehicle_adr_category` | Per-entity attachment расширение + удаление vehicle ADR-категории. **Change 1:** значение `adr` удалено из enum `VehicleAttachmentCategory` (остаётся `{contract, cabotage_de, cabotage_fr}`). Postgres не умеет `DROP VALUE` in-place → тип пересоздаётся (`CREATE TYPE …_new` → `ALTER COLUMN … USING ::text::…` → RENAME → DROP old). **Перед** пересозданием — `DELETE FROM vehicle_attachments WHERE category = 'adr'` (эти attachment-строки удаляются; без DELETE USING-cast упал бы). `vehicles.adr` boolean и `vehicles.adrClasses` НЕ затронуты. **Change 2:** `drivers.adr` — `BOOLEAN NOT NULL DEFAULT false` (ADR permit flag); новый enum `DriverAttachmentCategory { adr }`; новая таблица `driver_attachments` (FK на `drivers` `ON DELETE CASCADE`, FK на `users` `ON DELETE SET NULL`, soft-delete `deletedAt`, индекс `(driverId, category)`). **Change 3:** новый enum `CarrierAttachmentCategory { insurance, license, kreptd, other }`; новая таблица `carrier_attachments` (FK на `carriers` `ON DELETE CASCADE`, FK на `users` `ON DELETE SET NULL`, soft-delete `deletedAt`, индекс `(carrierId, category)`). Чисто аддитивно кроме удаления enum-value/строк из Change 1. |
 
 | `20260529111419_carrier_attachment_category_add_adr` | Чисто аддитивная миграция enum. Значение `adr` добавлено в `CarrierAttachmentCategory` (между `kreptd` и `other`) — обязательный ADR-документ перевозчика (один официальный документ со списком ADR-машин/водителей, грузится как файл-attachment). In-place `ALTER TYPE "CarrierAttachmentCategory" ADD VALUE 'adr'` (без пересоздания типа — в отличие от удаления vehicle-`adr`, т.к. Postgres умеет ADD VALUE in-place). Ничего ещё не использует новое значение, так что отдельная транзакция не нужна. |
+| `20260601120000_drop_vehicle_trailer_inspection_and_vehicle_adr_classes` | Деструктивный `DROP COLUMN` (user-confirmed full removal — UI + API + DB). Удаляет `vehicles.nextInspectionDate` (DATE), `trailers.nextInspectionDate` (DATE) и `vehicles.adrClasses` (TEXT[]). Сохранены отдельные соседние поля: `vehicles.adr` / `drivers.adr` (boolean permit-флаги), `vehicles.wasteCountries`, а также VehicleAttachment/DriverAttachment с ADR-сертификатами. Существующие значения теряются (подтверждено), без backfill. Hand-authored по существующей конвенции (без `--create-only`, т.к. на момент создания БД была недоступна) — не применялась к live-БД, применится через `prisma migrate deploy`. |
 
 Production deploy: `prisma migrate deploy` в CI/CD пайплайне (без `--create-only`).
 

@@ -26,7 +26,6 @@ import {
 } from '@/components/ui/EntityDetailModal';
 import {
   boolValue,
-  dateValue,
   emptyValue,
   textValue,
 } from '@/components/ui/entity-detail-values';
@@ -120,10 +119,6 @@ export function TrailerDetailModal({
         { label: f('brand'), value: textValue(trailer.brand) },
         { label: f('model'), value: textValue(trailer.model) },
         { label: f('year'), value: numValue(trailer.year) },
-        {
-          label: f('nextInspectionDate'),
-          value: dateValue(trailer.nextInspectionDate),
-        },
       ],
     },
     {

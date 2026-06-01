@@ -14,7 +14,7 @@ import { BadRequestException } from '@nestjs/common';
  *  - booleans  → the literal strings `'true'` / `'false'`
  *  - numbers   → numeric strings (`'2024'`, `'0.85'`)
  *  - arrays    → a JSON-encoded string, e.g. `wasteCountries='["DE","FR"]'`
- *                (`adrClasses`, `wasteCountries`, `removeAttachmentIds`)
+ *                (`wasteCountries`, `removeAttachmentIds`)
  *  - strings   → as-is
  *  - omitted   → omit the part entirely (an empty part is treated as omitted)
  */
@@ -45,11 +45,7 @@ const NUMBER_FIELDS = [
 ] as const;
 
 /** Field names that must be parsed as JSON arrays. */
-const ARRAY_FIELDS = [
-  'adrClasses',
-  'wasteCountries',
-  'removeAttachmentIds',
-] as const;
+const ARRAY_FIELDS = ['wasteCountries', 'removeAttachmentIds'] as const;
 
 /**
  * Normalises a raw multipart body into a JSON-shaped object ready for Zod.

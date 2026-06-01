@@ -452,7 +452,7 @@ describe('AuditInterceptor (pre-Phase-4.4 ambient-tx variant)', () => {
       model: 'Actros',
       year: 2018,
       euro: 'VI',
-      adrClasses: ['1', '2'],
+      sideNumber: 'A-12',
       // ...and 25 more fields
       notes: 'pre-update notes',
     };

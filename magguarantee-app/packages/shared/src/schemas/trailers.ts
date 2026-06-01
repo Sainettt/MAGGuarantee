@@ -10,7 +10,6 @@
 import { z } from 'zod';
 
 import {
-  IsoDateSchema,
   IsoDateTimeSchema,
   UuidSchema,
   emptyStringToUndefined,
@@ -28,7 +27,6 @@ const trailerAttributeFields = {
   brand: emptyStringToUndefined(z.string().max(64).optional()),
   model: emptyStringToUndefined(z.string().max(64).optional()),
   year: z.number().int().min(1900).max(2100).optional(),
-  nextInspectionDate: emptyStringToUndefined(IsoDateSchema.optional()),
   belts: z.boolean().optional(),
   beltsCount: z.number().int().min(0).optional(),
   mats: z.boolean().optional(),
@@ -109,9 +107,6 @@ export const UpdateTrailerObjectSchema = z
     brand: emptyStringToUndefined(z.string().max(64).nullable().optional()),
     model: emptyStringToUndefined(z.string().max(64).nullable().optional()),
     year: z.number().int().min(1900).max(2100).nullable().optional(),
-    nextInspectionDate: emptyStringToUndefined(
-      IsoDateSchema.nullable().optional(),
-    ),
     belts: z.boolean().nullable().optional(),
     beltsCount: z.number().int().min(0).nullable().optional(),
     mats: z.boolean().nullable().optional(),
@@ -162,7 +157,6 @@ export const TrailerDtoSchema = z.object({
   brand: z.string().nullable(),
   model: z.string().nullable(),
   year: z.number().int().nullable(),
-  nextInspectionDate: IsoDateSchema.nullable(),
   belts: z.boolean().nullable(),
   beltsCount: z.number().int().nullable(),
   mats: z.boolean().nullable(),

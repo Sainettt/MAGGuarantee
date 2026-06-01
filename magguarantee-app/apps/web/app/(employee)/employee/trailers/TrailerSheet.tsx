@@ -128,7 +128,6 @@ export function TrailerSheet({
         brand: trailer.brand ?? '',
         model: trailer.model ?? '',
         year: trailer.year ?? undefined,
-        nextInspectionDate: trailer.nextInspectionDate ?? undefined,
         belts: trailer.belts ?? false,
         beltsCount: trailer.beltsCount ?? undefined,
         mats: trailer.mats ?? false,
@@ -354,17 +353,6 @@ export function TrailerSheet({
                         setValueAs: (v) =>
                           v === '' || v === null ? undefined : Number(v),
                       })}
-                    />
-                  </FormField>
-                  <FormField
-                    label={t('fields.nextInspectionDate')}
-                    error={errs.nextInspectionDate?.message}
-                    htmlFor="trailer-nextInspectionDate"
-                  >
-                    <Input
-                      id="trailer-nextInspectionDate"
-                      type="date"
-                      {...form.register('nextInspectionDate')}
                     />
                   </FormField>
                 </div>
@@ -652,7 +640,6 @@ function getDefaults(): FormValues {
     brand: '',
     model: '',
     year: undefined,
-    nextInspectionDate: undefined,
     belts: false,
     beltsCount: undefined,
     mats: false,

@@ -70,9 +70,6 @@ export class TrailersService {
         brand: dto.brand ?? null,
         model: dto.model ?? null,
         year: dto.year ?? null,
-        nextInspectionDate: dto.nextInspectionDate
-          ? new Date(dto.nextInspectionDate)
-          : null,
         belts: dto.belts ?? null,
         beltsCount: dto.beltsCount ?? null,
         mats: dto.mats ?? null,
@@ -130,11 +127,6 @@ export class TrailersService {
     ];
     for (const k of passthrough) {
       if (dto[k] !== undefined) patch[k] = dto[k];
-    }
-    if (dto.nextInspectionDate !== undefined) {
-      patch.nextInspectionDate = dto.nextInspectionDate
-        ? new Date(dto.nextInspectionDate)
-        : null;
     }
 
     try {
@@ -285,9 +277,6 @@ export class TrailersService {
       brand: row.brand,
       model: row.model,
       year: row.year,
-      nextInspectionDate: row.nextInspectionDate
-        ? row.nextInspectionDate.toISOString().slice(0, 10)
-        : null,
       belts: row.belts,
       beltsCount: row.beltsCount,
       mats: row.mats,

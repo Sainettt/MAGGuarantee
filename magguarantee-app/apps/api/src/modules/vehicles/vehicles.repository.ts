@@ -44,7 +44,6 @@ export interface VehicleRow {
   notes: string | null;
   certificateL: boolean;
   euro: 'V' | 'VI';
-  adrClasses: string[];
   gps: boolean;
   fuelCard: boolean;
   type: 'MEGA' | 'STD' | 'COIL';
@@ -63,7 +62,6 @@ export interface VehicleRow {
   cabotageFr: boolean;
   adr: boolean;
   gpsMobilePhone: string | null;
-  nextInspectionDate: Date | null;
   sideNumber: string | null;
   lastDroveAt: Date | null;
   plannerId: string | null;
@@ -204,7 +202,6 @@ export class VehiclesRepository {
     notes?: string | null;
     certificateL: boolean;
     euro: 'V' | 'VI';
-    adrClasses?: string[];
     gps?: boolean;
     fuelCard?: boolean;
     type: 'MEGA' | 'STD' | 'COIL';
@@ -227,7 +224,6 @@ export class VehiclesRepository {
      * the service layer pre-validates so we 422 instead of 500.
      */
     gpsMobilePhone?: string | null;
-    nextInspectionDate?: Date | null;
     sideNumber?: string | null;
     createdById?: string | null;
   }): Promise<VehicleRow> {
@@ -244,7 +240,6 @@ export class VehiclesRepository {
         notes: data.notes ?? null,
         certificateL: data.certificateL,
         euro: data.euro,
-        adrClasses: data.adrClasses ?? [],
         gps: data.gps ?? false,
         fuelCard: data.fuelCard ?? false,
         type: data.type,
@@ -262,7 +257,6 @@ export class VehiclesRepository {
         cabotageFr: data.cabotageFr ?? false,
         adr: data.adr ?? false,
         gpsMobilePhone: data.gpsMobilePhone ?? null,
-        nextInspectionDate: data.nextInspectionDate ?? null,
         sideNumber: data.sideNumber ?? null,
         createdById: data.createdById ?? null,
       },
@@ -341,7 +335,6 @@ export class VehiclesRepository {
       // the column is NOT NULL post-phase3_blocks.
       certificateL: row.certificateL ?? false,
       euro: row.euro ?? 'V',
-      adrClasses: row.adrClasses,
       gps: row.gps,
       fuelCard: row.fuelCard,
       type: row.type ?? 'STD',
@@ -359,7 +352,6 @@ export class VehiclesRepository {
       cabotageFr: row.cabotageFr,
       adr: row.adr,
       gpsMobilePhone: row.gpsMobilePhone,
-      nextInspectionDate: row.nextInspectionDate,
       sideNumber: row.sideNumber,
       lastDroveAt: row.lastDroveAt,
       plannerId: row.plannerId,
@@ -415,7 +407,6 @@ interface VehiclePrismaShape {
   // Wide variants — soft-delete extension widens scalars in the inferred type.
   certificateL: boolean | null;
   euro: 'V' | 'VI' | null;
-  adrClasses: string[];
   gps: boolean;
   fuelCard: boolean;
   type: 'MEGA' | 'STD' | 'COIL' | null;
@@ -433,7 +424,6 @@ interface VehiclePrismaShape {
   cabotageFr: boolean;
   adr: boolean;
   gpsMobilePhone: string | null;
-  nextInspectionDate: Date | null;
   sideNumber: string | null;
   lastDroveAt: Date | null;
   plannerId: string | null;

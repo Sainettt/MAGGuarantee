@@ -134,10 +134,6 @@ export function VehicleDetailModal({
         { label: f('type'), value: textValue(vehicle.type) },
         { label: f('euro'), value: textValue(vehicle.euro) },
         { label: f('certificateL'), value: bool(vehicle.certificateL) },
-        {
-          label: f('nextInspectionDate'),
-          value: dateValue(vehicle.nextInspectionDate),
-        },
       ],
     },
     {
@@ -187,11 +183,10 @@ export function VehicleDetailModal({
     {
       title: t('sections.permissions'),
       icon: ShieldCheck,
-      // 9 rows — too tall to pair with a sibling in the 2-col grid (§6.15).
+      // 8 rows — too tall to pair with a sibling in the 2-col grid (§6.15).
       span: 'full',
       rows: [
         { label: f('adr'), value: bool(vehicle.adr) },
-        { label: f('adrClasses'), value: listValue(vehicle.adrClasses) },
         { label: f('wasteAllowed'), value: bool(vehicle.wasteAllowed) },
         { label: f('wasteCountries'), value: listValue(vehicle.wasteCountries) },
         { label: f('cabotageDe'), value: bool(vehicle.cabotageDe) },

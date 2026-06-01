@@ -248,7 +248,6 @@ model Vehicle {
   // false = no certificate / NULL in the legacy column.
   certificateL Boolean
   euro         EuroNorm
-  adrClasses   String[] // CSV → array
   gps          Boolean     @default(false)
   fuelCard     Boolean     @default(false)
   type         VehicleType
@@ -282,10 +281,9 @@ model Vehicle {
   // `vehicle_gps_device_when_gps_on` CHECK constraint added in
   // 20260507_phase3_blocks/migration.sql; nullable in the column itself
   // because vehicles without a GPS tracker simply have no device id.
-  gpsMobilePhone     String?
-  nextInspectionDate DateTime? @db.Date
-  sideNumber         String? // NrBoczny
-  lastDroveAt        DateTime? // OstatnioJezdzilo (auto-update from delegations)
+  gpsMobilePhone String?
+  sideNumber     String? // NrBoczny
+  lastDroveAt    DateTime? // OstatnioJezdzilo (auto-update from delegations)
 
   delegations Delegation[]
   claims      Claim[]
@@ -407,15 +405,14 @@ model Trailer {
   carrierId String  @db.Uuid
   carrier   Carrier @relation(fields: [carrierId], references: [id])
 
-  plateNumber        String // NrRej
-  trailerTypeId      String      @db.Uuid
-  trailerType        TrailerType @relation(fields: [trailerTypeId], references: [id])
-  brand              String?
-  model              String?
-  year               Int?
-  active             Boolean     @default(true)
-  addedAt            DateTime    @default(now())
-  nextInspectionDate DateTime?   @db.Date
+  plateNumber   String // NrRej
+  trailerTypeId String      @db.Uuid
+  trailerType   TrailerType @relation(fields: [trailerTypeId], references: [id])
+  brand         String?
+  model         String?
+  year          Int?
+  active        Boolean     @default(true)
+  addedAt       DateTime    @default(now())
 
   belts         Boolean? // Pasy
   beltsCount    Int? // Liczba pasów (nullable; UI/Zod enforce >= 0)

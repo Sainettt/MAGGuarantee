@@ -19,7 +19,6 @@
 import { z } from 'zod';
 
 import {
-  IsoDateSchema,
   IsoDateTimeSchema,
   UuidSchema,
   emptyStringToUndefined,
@@ -54,7 +53,6 @@ const vehicleAttributeFields = {
   certificateL: z.boolean(),
   /** REQUIRED — Vehicle.euro is NOT NULL since phase3_blocks. */
   euro: EuroNormSchema,
-  adrClasses: z.array(z.string().max(16)).max(20).optional(),
   gps: z.boolean().default(false),
   fuelCard: z.boolean().optional().default(false),
   /** REQUIRED — Vehicle.type is NOT NULL since phase3_blocks. */
@@ -90,7 +88,6 @@ const vehicleAttributeFields = {
    * layer so we 422 instead of bouncing off a Postgres constraint error.
    */
   gpsMobilePhone: emptyStringToUndefined(z.string().max(32).optional()),
-  nextInspectionDate: emptyStringToUndefined(IsoDateSchema.optional()),
   sideNumber: emptyStringToUndefined(z.string().max(16).optional()),
 };
 
@@ -131,7 +128,6 @@ export const UpdateVehicleSchema = z
     rateUe: z.number().nonnegative().optional(),
     rateExport: z.number().nonnegative().optional(),
     rateImport: z.number().nonnegative().optional(),
-    adrClasses: z.array(z.string().max(16)).max(20).optional(),
     gps: z.boolean().optional(),
     fuelCard: z.boolean().optional(),
     gb: z.boolean().nullable().optional(),
@@ -152,9 +148,6 @@ export const UpdateVehicleSchema = z
      */
     gpsMobilePhone: emptyStringToUndefined(
       z.string().max(32).nullable().optional(),
-    ),
-    nextInspectionDate: emptyStringToUndefined(
-      IsoDateSchema.nullable().optional(),
     ),
     sideNumber: emptyStringToUndefined(
       z.string().max(16).nullable().optional(),
@@ -249,7 +242,6 @@ export const VehicleDtoSchema = z.object({
   notes: z.string().nullable(),
   certificateL: z.boolean(),
   euro: EuroNormSchema,
-  adrClasses: z.array(z.string()),
   gps: z.boolean(),
   fuelCard: z.boolean(),
   type: VehicleTypeSchema,
@@ -270,7 +262,6 @@ export const VehicleDtoSchema = z.object({
   adr: z.boolean(),
   /** Nullable per Revert #2 — required iff `gps=true` (CHECK enforces). */
   gpsMobilePhone: z.string().nullable(),
-  nextInspectionDate: IsoDateSchema.nullable(),
   sideNumber: z.string().nullable(),
   lastDroveAt: IsoDateTimeSchema.nullable(),
   plannerId: UuidSchema.nullable(),

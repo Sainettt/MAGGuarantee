@@ -36,11 +36,7 @@ export interface VehicleAttachmentUploads {
 }
 
 /** Scalar fields that must be JSON-encoded as multipart string parts. */
-const ARRAY_FIELDS = new Set([
-  'adrClasses',
-  'wasteCountries',
-  'removeAttachmentIds',
-]);
+const ARRAY_FIELDS = new Set(['wasteCountries', 'removeAttachmentIds']);
 
 /**
  * Serialises a vehicle DTO into `FormData`. Per the API multipart contract:

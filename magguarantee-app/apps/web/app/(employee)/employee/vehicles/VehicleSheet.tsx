@@ -232,7 +232,6 @@ export function VehicleSheet({
         cabotageFr: vehicle.cabotageFr,
         adr: vehicle.adr,
         gpsMobilePhone: vehicle.gpsMobilePhone ?? '',
-        nextInspectionDate: vehicle.nextInspectionDate ?? undefined,
         sideNumber: vehicle.sideNumber ?? '',
       });
       // Seed the file buckets from the vehicle's existing attachments.
@@ -562,17 +561,6 @@ export function VehicleSheet({
                           <option value="false">{tCommon('no')}</option>
                         </Select>
                       )}
-                    />
-                  </FormField>
-                  <FormField
-                    label={t('fields.nextInspectionDate')}
-                    error={errs.nextInspectionDate?.message}
-                    htmlFor="vehicle-nextInspectionDate"
-                  >
-                    <Input
-                      id="vehicle-nextInspectionDate"
-                      type="date"
-                      {...form.register('nextInspectionDate')}
                     />
                   </FormField>
                 </div>
@@ -933,7 +921,6 @@ function getDefaults(): FormValues {
     cabotageFr: false,
     adr: false,
     gpsMobilePhone: '',
-    nextInspectionDate: undefined,
     sideNumber: '',
   };
 }

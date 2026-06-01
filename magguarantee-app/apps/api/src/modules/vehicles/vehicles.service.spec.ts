@@ -40,7 +40,6 @@ function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {
     certificateL: true,
     // EuroNorm is now { V, VI } — legacy III/IV removed.
     euro: 'V',
-    adrClasses: [],
     gps: false,
     fuelCard: false,
     type: 'STD',
@@ -59,7 +58,6 @@ function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {
     cabotageFr: false,
     adr: false,
     gpsMobilePhone: null,
-    nextInspectionDate: null,
     sideNumber: null,
     lastDroveAt: null,
     plannerId: null,

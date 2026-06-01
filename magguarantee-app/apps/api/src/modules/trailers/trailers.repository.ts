@@ -24,7 +24,6 @@ export interface TrailerRow {
   brand: string | null;
   model: string | null;
   year: number | null;
-  nextInspectionDate: Date | null;
   belts: boolean | null;
   beltsCount: number | null;
   mats: boolean | null;
@@ -116,7 +115,6 @@ export class TrailersRepository {
     brand?: string | null;
     model?: string | null;
     year?: number | null;
-    nextInspectionDate?: Date | null;
     belts?: boolean | null;
     beltsCount?: number | null;
     mats?: boolean | null;
@@ -139,7 +137,6 @@ export class TrailersRepository {
         brand: data.brand ?? null,
         model: data.model ?? null,
         year: data.year ?? null,
-        nextInspectionDate: data.nextInspectionDate ?? null,
         belts: data.belts ?? null,
         beltsCount: data.beltsCount ?? null,
         mats: data.mats ?? null,
@@ -217,7 +214,6 @@ export class TrailersRepository {
       brand: row.brand,
       model: row.model,
       year: row.year,
-      nextInspectionDate: row.nextInspectionDate,
       belts: row.belts,
       beltsCount: row.beltsCount,
       mats: row.mats,
@@ -263,7 +259,6 @@ interface TrailerPrismaShape {
   brand: string | null;
   model: string | null;
   year: number | null;
-  nextInspectionDate: Date | null;
   belts: boolean | null;
   beltsCount: number | null;
   mats: boolean | null;

@@ -312,7 +312,6 @@ export class VehiclesService {
         notes: dto.notes ?? null,
         certificateL: dto.certificateL,
         euro: dto.euro,
-        adrClasses: dto.adrClasses ?? [],
         gps: dto.gps,
         fuelCard: dto.fuelCard,
         type: dto.type,
@@ -330,9 +329,6 @@ export class VehiclesService {
         cabotageFr: dto.cabotageFr,
         adr: dto.adr,
         gpsMobilePhone: dto.gpsMobilePhone ?? null,
-        nextInspectionDate: dto.nextInspectionDate
-          ? new Date(dto.nextInspectionDate)
-          : null,
         sideNumber: dto.sideNumber ?? null,
         createdById: user.sub,
       });
@@ -357,7 +353,6 @@ export class VehiclesService {
       'notes',
       'certificateL',
       'euro',
-      'adrClasses',
       'gps',
       'fuelCard',
       'type',
@@ -379,11 +374,6 @@ export class VehiclesService {
     ];
     for (const k of passthrough) {
       if (dto[k] !== undefined) patch[k] = dto[k];
-    }
-    if (dto.nextInspectionDate !== undefined) {
-      patch.nextInspectionDate = dto.nextInspectionDate
-        ? new Date(dto.nextInspectionDate)
-        : null;
     }
     if (dto.active !== undefined && !dto.active) {
       patch.deactivatedAt = new Date();
@@ -737,7 +727,6 @@ export class VehiclesService {
       notes: row.notes,
       certificateL: row.certificateL,
       euro: row.euro,
-      adrClasses: row.adrClasses,
       gps: row.gps,
       fuelCard: row.fuelCard,
       type: row.type,
@@ -755,9 +744,6 @@ export class VehiclesService {
       cabotageFr: row.cabotageFr,
       adr: row.adr,
       gpsMobilePhone: row.gpsMobilePhone,
-      nextInspectionDate: row.nextInspectionDate
-        ? toDateString(row.nextInspectionDate)
-        : null,
       sideNumber: row.sideNumber,
       lastDroveAt: row.lastDroveAt ? row.lastDroveAt.toISOString() : null,
       plannerId: row.plannerId,
@@ -811,8 +797,4 @@ function vehicleRowAttachmentToDto(
     uploadedById: row.uploadedById,
     createdAt: row.createdAt.toISOString(),
   };
-}
-
-function toDateString(d: Date): string {
-  return d.toISOString().slice(0, 10);
 }

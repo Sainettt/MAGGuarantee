@@ -33,7 +33,6 @@ function makeTrailer(overrides: Partial<TrailerRow> = {}): TrailerRow {
     brand: null,
     model: null,
     year: null,
-    nextInspectionDate: null,
     belts: null,
     beltsCount: null,
     mats: null,
