@@ -58,7 +58,7 @@ import { Textarea } from '@/components/ui/Textarea';
 import { EntityAlreadyExistsNotice } from '@/components/carrier-onboarding/EntityAlreadyExistsNotice';
 import { TemporaryPasswordRow } from '@/components/carrier-onboarding/TemporaryPasswordRow';
 import { WizardStepper } from '@/components/carrier-onboarding/WizardStepper';
-import { FormField, FormSection } from '@/components/forms/Form';
+import { FormField, FormGrid, FormSection } from '@/components/forms/Form';
 import { FormDescription, FormItem, FormLabel } from '@/components/forms/Form';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useCarriers } from '@/lib/hooks/useCarriers';
@@ -411,7 +411,7 @@ export function VehicleSheet({
             )}
             <div className="space-y-6">
               <FormSection title={t('sections.identification')}>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormGrid cols={2}>
                   {!isEdit && (
                     <FormField
                       label={t('fields.carrier')}
@@ -563,11 +563,11 @@ export function VehicleSheet({
                       )}
                     />
                   </FormField>
-                </div>
+                </FormGrid>
               </FormSection>
 
               <FormSection title={t('sections.people')}>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormGrid cols={2}>
                   <FormField
                     label={t('fields.planner')}
                     required
@@ -604,7 +604,7 @@ export function VehicleSheet({
                       ))}
                     </Select>
                   </FormField>
-                </div>
+                </FormGrid>
               </FormSection>
 
               <FormSection title={t('sections.equipment')}>
@@ -672,7 +672,7 @@ export function VehicleSheet({
               </FormSection>
 
               <FormSection title={t('sections.rates')}>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <FormGrid cols={4}>
                   <FormField
                     label={t('fields.rateDe')}
                     required
@@ -741,7 +741,7 @@ export function VehicleSheet({
                       })}
                     />
                   </FormField>
-                </div>
+                </FormGrid>
               </FormSection>
 
               <FormSection title={t('sections.permissions')}>

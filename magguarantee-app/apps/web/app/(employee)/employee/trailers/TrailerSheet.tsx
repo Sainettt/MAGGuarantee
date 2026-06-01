@@ -33,7 +33,7 @@ import { Textarea } from '@/components/ui/Textarea';
 import { EntityAlreadyExistsNotice } from '@/components/carrier-onboarding/EntityAlreadyExistsNotice';
 import { TemporaryPasswordRow } from '@/components/carrier-onboarding/TemporaryPasswordRow';
 import { WizardStepper } from '@/components/carrier-onboarding/WizardStepper';
-import { FormField, FormSection } from '@/components/forms/Form';
+import { FormField, FormGrid, FormSection } from '@/components/forms/Form';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useFormDraft } from '@/lib/hooks/useFormDraft';
@@ -256,7 +256,7 @@ export function TrailerSheet({
             )}
             <div className="space-y-6">
               <FormSection title={t('sections.identification')}>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormGrid cols={2}>
                   {!isEdit && (
                     <FormField
                       label={t('fields.carrier')}
@@ -355,11 +355,11 @@ export function TrailerSheet({
                       })}
                     />
                   </FormField>
-                </div>
+                </FormGrid>
               </FormSection>
 
               <FormSection title={t('sections.dimensions')}>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <FormGrid cols={4}>
                   <FormField
                     label={t('fields.innerLength')}
                     error={errs.innerLength?.message}
@@ -420,7 +420,7 @@ export function TrailerSheet({
                       })}
                     />
                   </FormField>
-                </div>
+                </FormGrid>
               </FormSection>
 
               <FormSection title={t('sections.equipment')}>

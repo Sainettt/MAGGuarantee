@@ -49,7 +49,7 @@ import { Textarea } from '@/components/ui/Textarea';
 import { EntityAlreadyExistsNotice } from '@/components/carrier-onboarding/EntityAlreadyExistsNotice';
 import { TemporaryPasswordRow } from '@/components/carrier-onboarding/TemporaryPasswordRow';
 import { WizardStepper } from '@/components/carrier-onboarding/WizardStepper';
-import { FormDescription, FormField, FormItem, FormLabel } from '@/components/forms/Form';
+import { FormDescription, FormField, FormGrid, FormItem, FormLabel } from '@/components/forms/Form';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useCreateDriver, useUpdateDriver } from '@/lib/hooks/useDrivers';
@@ -377,7 +377,7 @@ export function DriverSheet({
                 </FormField>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <FormGrid cols={2}>
                 <FormField
                   label={t('fields.firstName')}
                   required
@@ -455,7 +455,7 @@ export function DriverSheet({
                     {...form.register('licenseExpiry')}
                   />
                 </FormField>
-              </div>
+              </FormGrid>
 
               <FormField
                 label={t('fields.notes')}

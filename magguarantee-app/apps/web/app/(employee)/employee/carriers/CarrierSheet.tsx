@@ -46,7 +46,7 @@ import {
 } from '@/components/ui/Sheet';
 import { Textarea } from '@/components/ui/Textarea';
 import { WizardStepper } from '@/components/carrier-onboarding/WizardStepper';
-import { FormField, FormSection } from '@/components/forms/Form';
+import { FormField, FormGrid, FormSection } from '@/components/forms/Form';
 import {
   FieldValidationBadge,
   type FieldValidationState,
@@ -480,7 +480,7 @@ export function CarrierSheet({
           <SheetBody>
             <div className="space-y-6">
               <FormSection title={t('sections.account')}>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormGrid cols={2}>
                   <FormField
                     label={t('fields.login')}
                     required={!isEdit}
@@ -566,11 +566,11 @@ export function CarrierSheet({
                       />
                     </FormField>
                   )}
-                </div>
+                </FormGrid>
               </FormSection>
 
               <FormSection title={t('sections.company')}>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormGrid cols={2}>
                   <FormField
                     label={t('fields.nip')}
                     required
@@ -643,7 +643,7 @@ export function CarrierSheet({
                       />
                     </div>
                   </FormField>
-                </div>
+                </FormGrid>
                 <FormField
                   label={t('fields.company')}
                   error={errMsg('company')}
@@ -669,7 +669,7 @@ export function CarrierSheet({
               </FormSection>
 
               <FormSection title={t('sections.finance')}>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormGrid cols={2}>
                   <FormField
                     label={t('fields.accountEur')}
                     required
@@ -804,7 +804,7 @@ export function CarrierSheet({
                       {...form.register('licenseExpiry')}
                     />
                   </FormField>
-                </div>
+                </FormGrid>
               </FormSection>
 
               <FormSection title={t('sections.permits')}>

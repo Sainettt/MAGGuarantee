@@ -645,29 +645,59 @@ shadcn `<Form>` поверх `react-hook-form` + zod-resolver. Один RHF-fiel
 | Error message | `<FormMessage>` ниже input, `text-sm text-danger`, появляется после blur или submit |
 | Description / hint | `<FormDescription>` ниже label, `text-xs text-text-sub` |
 | Disabled state | `opacity-50 cursor-not-allowed`, padding/border остаются |
-| Read-only display | not as disabled input — render `<dl>` с label + value |
-| Two-column rows | `grid grid-cols-1 md:grid-cols-2 gap-4` (для vehicle-form с 36 полями) |
+| Read-only display | not as disabled input — see § "Read-only / computed field pattern" |
+| Two-column rows | wrap the cells in `<FormGrid>` (subgrid alignment). See § "Grid-form field alignment". |
 | Section divider | `<Separator />` + section title `text-xs font-bold uppercase tracking-wider text-text-sub` |
-| **Grid-cell input baseline** | `<FormItem>` = `flex h-full flex-col space-y-1.5`; `<FormField>` passes `flex-1` to its `<FormLabel>`. See § "Grid-form field alignment". |
+| **Grid-cell input baseline** | wrap the cells in `<FormGrid cols={2}>` (or `{4}`). `<FormItem>`/`<FormField>` stay top-aligned natural stacks. See § "Grid-form field alignment". |
 
-#### Grid-form field alignment (canonical — fixes wrapped-label misalignment)
+#### Grid-form field alignment (canonical — subgrid, opt-in via `<FormGrid>`)
 
-**Problem.** Inside a CSS-grid row (`grid-cols-2` / `grid-cols-4`), the grid stretches every cell to the tallest cell's height. When `<FormItem>` was a top-aligned `space-y-1.5` stack, a cell whose (PL) label wraps to 2 lines (`Długość wewn. (m)`, `Numer dokumentu tożsamości`) pushed its own input down while a 1-line-label sibling (`Ładowność (t)`, `E-mail`) kept its input at the top → inputs lost their shared baseline.
+**Problem.** Inside a CSS-grid row (`grid-cols-2` / `grid-cols-4`), the grid stretches every cell to the tallest cell's height. With a plain top-aligned `space-y-1.5` stack, a cell whose (PL) label wraps to 2 lines (`Długość wewn. (m)`, `Numer dokumentu tożsamości`) pushes its own input down while a 1-line-label sibling (`Ładowność (t)`, `E-mail`) keeps its input at the top → inputs lose their shared baseline.
 
-**Canonical fix (applies to ALL grid forms at the shared-component level — never per-modal):**
+> #### ⛔ Anti-pattern — DO NOT bottom-pin via `flex-1` on the label
+>
+> A previous fix made `<FormItem>` = `flex h-full flex-col space-y-1.5` and gave `<FormLabel>` `flex-1`, bottom-pinning everything after the label to the cell bottom. **This is wrong and must not be reintroduced.** It only aligns cells shaped exactly `[label][input]`. The moment a cell has content *below* its input — helper text, a hint, a live readout, a `<FormDescription>` — bottom-pinning drops that content to the cell floor and lifts the input *above* it, while a plain `[label][input]` sibling pins its input to the very bottom. Result: the two inputs sit at different Y. This broke ClaimVerificationModal's «Korekta godzin» cell (which renders a `<HoursReadout>` under its `<Input>`) against its «Przebieg» sibling. **Never use cell-height-absorbing `flex-1`/`h-full` to align grid inputs.**
 
-- `<FormItem>` is a **full-height flex column**: `flex h-full flex-col space-y-1.5`.
-- `<FormField>` renders its `<FormLabel>` with **`flex-1`** so the label box absorbs the row's extra height; the control + `<FormDescription>` / `<FormMessage>` stay **bottom-pinned**, so every cell's input starts at the same Y regardless of label line-count.
-- The label **text stays top-aligned** inside its grown box (label is `display:block`), only the control is pushed down — visually identical to today for 1-line labels.
+**Canonical fix — CSS subgrid (`<FormGrid>` wrapper, opt-in):**
 
-**Why option (b), not a reserved min-height (a):** bottom-pin self-corrects for 1/2/3-line labels and adds **zero** extra vertical space when all labels are single-line (a `min-h-[2lines]` reserve would pad every dense modal permanently).
+The grid container declares **named row bands** and each child cell (`<FormField>`/`<FormItem>`) opts into the parent's rows via `grid-rows-subgrid`. Band 1 holds every cell's **label** (so all labels share a row → bottom-aligned to the tallest label), band 2 holds every cell's **input** (so all inputs share a row → top-aligned baseline). Helper / readout / error live in band 2 *with* the input and grow **downward** out of the band without ever moving the input up.
 
-**No regression on single-column / `grid-cols-1 md:grid-cols-2` forms:** `h-full` is inert when the parent is not a stretched grid cell — a flex column with no defined parent height collapses to its content height, and `flex-1` on the label has nothing extra to absorb. So single-column forms (and the `< md` collapse of two-column forms) render exactly as before. Standalone `<FormItem>` + `<FormLabel>` usages (e.g. the DriverSheet ADR `<FileUpload>` block) are unaffected because the `flex-1` is added by `<FormField>`, not by `<FormLabel>` itself.
+- `<FormItem>` reverts to a **plain top-aligned stack**: `flex flex-col gap-1.5`. No `h-full`, no `flex-1` anywhere. This guarantees requirement 3 — standalone `<FormField>`/`<FormItem>` (single-column forms, the DriverSheet/VehicleSheet ADR `<FileUpload>` blocks) render with tight label→input spacing exactly as before.
+- `<FormGrid cols={2|3|4}>` is the **only** place that turns on alignment. It renders:
+  `grid <cols-class> gap-x-4 gap-y-4 [grid-template-rows:auto_auto] *:[&>[data-form-cell]]:row-span-2` — and each `<FormField>`/`<FormItem>` it contains adds `grid grid-rows-subgrid row-span-2` so its label lands in band 1 and its input+below-content in band 2.
+- **Subgrid row-gap caveat:** with `grid-rows-subgrid`, the gap between a cell's label and its input equals the container's `gap-y` (the inter-row gap), NOT `<FormItem>`'s internal `gap-1.5`. To keep the label↔input gap tight (6px) while rows stay comfortably spaced, `<FormGrid>` sets `gap-y-1.5` for the **band gap** and adds explicit bottom margin on the input band via `[&_[data-form-cell]]:[row-gap:0.375rem]`; the visual inter-**row** separation is provided by the cell content height + a `pb-*` is **not** needed because each logical form row is its own 2-band group. Concretely `<FormGrid>` = `grid <cols> gap-x-4 gap-y-4` and each cell = `grid grid-rows-subgrid [grid-template-rows:subgrid] row-span-2 gap-y-1.5`. The `gap-y-4` is the row-to-row gap; the per-cell `gap-y-1.5` is the label→input gap. (Tailwind v4 supports `grid-rows-subgrid`; `@import "tailwindcss"` is in `globals.css`.)
 
-**web-agent — exact changes in `components/forms/Form.tsx`:**
-- `FormItem` wrapper: `'space-y-1.5'` → `'flex h-full flex-col space-y-1.5'`.
-- `FormField`: the `<FormLabel>` gets `className="flex-1"`.
-- `FormLabel` / `FormMessage` / `FormDescription`: **unchanged**.
+**How each requirement is met:**
+1. Wrapped vs single-line labels align — both labels occupy band 1, both inputs occupy band 2. ✔
+2. A cell with below-input content (HoursReadout, FormDescription) keeps its input in band 2; the extra content extends below without lifting the input. ✔
+3. Single-column / standalone fields are NOT inside a `<FormGrid>`, so `<FormItem>` is a plain tight stack — no gap inflation. ✔
+4. No `h-full`/`flex-1` anywhere → no cross-cell height coupling → no new grid regressions. ✔
+
+**Grid containers that MUST adopt `<FormGrid>`** (these are the multi-column grids; replace the raw `<div className="grid grid-cols-… gap-…">` wrapper around `<FormField>` cells):
+- `TrailerSheet.tsx` — identification grid (`grid-cols-1 md:grid-cols-2`) and dimensions grid (`grid-cols-2 md:grid-cols-4`). The equipment checkbox-card grid is NOT a `<FormField>` grid — leave it.
+- `DriverSheet.tsx` — the people grid (`grid-cols-1 md:grid-cols-2`). The ADR `<FileUpload>` `<FormItem>` is standalone — leave it.
+- `VehicleSheet.tsx` — identification grid, people grid, rates grid (`grid-cols-2 md:grid-cols-4`). The equipment/permissions checkbox-card grids are NOT `<FormField>` grids — leave them.
+- `ClaimVerificationModal.tsx` — the corrections grid (`grid-cols-2`, ~line 520, the «Przebieg»/«Korekta godzin»/dates block — this is the regression site) and the ZAAKCEPTOWANO grid (`grid-cols-2`, ~line 600). `col-span-2` cells (amountApproved, comment) keep `col-span-2` and still work as full-width subgrid cells.
+
+**Single-column responsive note:** at `< md`, `grid-cols-1 md:grid-cols-2` collapses to one column. `<FormGrid>` must apply subgrid row-spanning **only when ≥2 columns are live**, otherwise a 1-col stack would force every label into one shared band needlessly. Implement `<FormGrid>` so the subgrid cell-spanning classes are gated to the same breakpoint as the columns (e.g. `md:[&>[data-form-cell]]:row-span-2`). At 1 column the cells fall back to plain top-aligned stacks (correct — nothing to align across).
+
+#### Read-only / computed field pattern (auto-filled, non-editable)
+
+Two distinct cases — do not conflate them:
+
+**(a) Pure display value (never editable, not a form input)** — use a `<dl>`/static row, not a disabled `<input>`. Pattern already in use: ClaimVerificationModal's `Stat` rows and the Authorization tab's `pendingMaximumLabel` block (`text-[11px] uppercase tracking-wider text-text-sub` label + `text-sm font-semibold tabular-nums` value).
+
+**(b) Computed-but-required form value** — the field is part of the submitted payload and is still RHF-registered, but the user must NOT type into it; it auto-updates from a live calculation. This is **`amountApproved` (Kwota zatwierdzona)** in the ZAAKCEPTOWANO variant: it is driven by the live `/preview` doplata whenever «Korekta godzin» / mileage / dates change, and the verifier may not override it by hand.
+
+Treatment for (b) — a **read-only styled input**, NOT `disabled`:
+
+- Keep it a real `<Input>` (so the value stays visible, copyable, RHF-registered, and submitted), but make it non-editable: `readOnly` + `tabIndex={-1}` + `aria-readonly="true"`. Do **not** use `disabled` — disabled inputs look broken/greyed and are dropped from some form serialisations; `readOnly` keeps it intentional and submitted.
+- Visual: muted, clearly "system-owned, not a blank you forgot to fill". Classes: `bg-input/60 text-text font-semibold tabular-nums cursor-default focus:ring-0 focus:border-border`. The `tabular-nums` + `font-semibold` signal "this is a computed amount", and removing the focus ring + keeping the muted bg signals "not for typing". Keep the EUR clearly readable.
+- Helper: a short `<FormDescription>` reading **"wyliczana automatycznie"** (PL) / **"calculated automatically"** (EN). i18n key `employee.claims.modal.edit.amountApprovedAuto`.
+- The `required` asterisk stays (it is still a required field of the payload) — but because it's always auto-populated it will never actually be empty.
+- It does NOT need to be inside a `<FormGrid>` band-pair conflict — it's a `col-span-2` full-width cell with a helper below; the helper grows downward harmlessly (no sibling in its grid row).
+
+This is the canonical pattern for any future "system computes it, user confirms it" numeric field (e.g. a recomputed payout, a derived rate).
 
 ### Field validation badge (inline VIES / Biała Lista feedback)
 

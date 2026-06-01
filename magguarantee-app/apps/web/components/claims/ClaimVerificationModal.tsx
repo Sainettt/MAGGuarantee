@@ -43,7 +43,7 @@ import {
   decisionTargetsFor,
   type ClaimDecisionTarget,
 } from '@/components/claims/claim-transitions';
-import { FormField } from '@/components/forms/Form';
+import { FormDescription, FormField, FormGrid } from '@/components/forms/Form';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
@@ -517,7 +517,7 @@ function ModalBody({ claim, onClose, t, tStatus }: ModalBodyProps) {
             {targetStatus &&
               targetStatus !== 'ODRZUCONO' &&
               targetStatus !== 'REKLAMACJA_ODRZUCONO' && (
-                <div className="grid grid-cols-2 gap-3">
+                <FormGrid cols={2}>
                   <FormField
                     label={tEdit('mileage')}
                     error={errMsg('mileage')}
@@ -592,12 +592,12 @@ function ModalBody({ claim, onClose, t, tStatus }: ModalBodyProps) {
                       {...form.register('dateEnd')}
                     />
                   </FormField>
-                </div>
+                </FormGrid>
               )}
 
             {/* Variant-specific fields */}
             {targetStatus === 'ZAAKCEPTOWANO' && (
-              <div className="grid grid-cols-2 gap-3">
+              <FormGrid cols={2}>
                 <FormField
                   label={tEdit('orderNumber')}
                   required
@@ -628,16 +628,29 @@ function ModalBody({ claim, onClose, t, tStatus }: ModalBodyProps) {
                   htmlFor="claim-amountApproved"
                   className="col-span-2"
                 >
+                  {/* Computed-but-required field — driven by the live /preview
+                      doplata (see the amountApproved useEffect above). The
+                      verifier must NOT type into it; `readOnly` (not
+                      `disabled`) keeps it visible, copyable, RHF-registered and
+                      submitted while signalling "system-owned". See docs/14
+                      § "Read-only / computed field pattern" (case b). */}
                   <Input
                     id="claim-amountApproved"
                     type="number"
                     step="0.01"
                     min={0}
+                    readOnly
+                    tabIndex={-1}
+                    aria-readonly="true"
+                    className="bg-input/60 font-semibold tabular-nums cursor-default focus:ring-0 focus:border-border"
                     {...form.register('amountApproved', {
                       setValueAs: (v) =>
                         v === '' || v === null ? undefined : Number(v),
                     })}
                   />
+                  <FormDescription>
+                    {tEdit('amountApprovedAuto')}
+                  </FormDescription>
                 </FormField>
                 <FormField
                   label={tEdit('comment')}
@@ -651,7 +664,7 @@ function ModalBody({ claim, onClose, t, tStatus }: ModalBodyProps) {
                     {...form.register('comment')}
                   />
                 </FormField>
-              </div>
+              </FormGrid>
             )}
 
             {targetStatus === 'ODRZUCONO' && (

@@ -740,6 +740,7 @@
           "orderNumber": "Order number",
           "orderDate": "Order date",
           "amountApproved": "Amount approved (EUR)",
+          "amountApprovedAuto": "calculated automatically",
           "amountMaximum": "Maximum amount (EUR)",
           "doplata": "Guarantee payout",
           "margin": "Margin",

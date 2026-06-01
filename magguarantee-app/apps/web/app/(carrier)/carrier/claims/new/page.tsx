@@ -25,7 +25,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
-import { FormField, FormSection } from '@/components/forms/Form';
+import { FormField, FormGrid, FormSection } from '@/components/forms/Form';
 import { ApiResponseError } from '@/lib/api/client';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useClaimPreview, useSubmitClaim } from '@/lib/hooks/useClaims';
@@ -475,7 +475,7 @@ export default function NewClaimPage() {
                   </Select>
                 </FormField>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormGrid cols={2}>
                   <FormField
                     label={tForm('driver')}
                     error={errs.driverId?.message}
@@ -513,11 +513,11 @@ export default function NewClaimPage() {
                       ))}
                     </Select>
                   </FormField>
-                </div>
+                </FormGrid>
               </FormSection>
 
               <FormSection title={tForm('sectionPeriod')}>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormGrid cols={2}>
                   <FormField
                     label={tForm('dateStart')}
                     required
@@ -572,7 +572,7 @@ export default function NewClaimPage() {
                       {...form.register('timeTo')}
                     />
                   </FormField>
-                </div>
+                </FormGrid>
               </FormSection>
 
               <FormSection title={tForm('sectionValues')}>
@@ -584,7 +584,7 @@ export default function NewClaimPage() {
                   The live `paymentEur` value the carrier will be requesting
                   is visible in the right-hand <LivePreviewPanel> stat grid.
                 */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormGrid cols={2}>
                   <FormField
                     label={tForm('mileage')}
                     required
@@ -603,7 +603,7 @@ export default function NewClaimPage() {
                       })}
                     />
                   </FormField>
-                </div>
+                </FormGrid>
               </FormSection>
 
               {/*

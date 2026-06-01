@@ -37,7 +37,7 @@ import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Textarea } from '@/components/ui/Textarea';
 import { CountrySelect } from '@/components/forms/CountrySelect';
-import { FormField, FormSection } from '@/components/forms/Form';
+import { FormField, FormGrid, FormSection } from '@/components/forms/Form';
 import { MaskedPostalInput } from '@/components/forms/MaskedPostalInput';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import {
@@ -251,7 +251,7 @@ export default function NewDelegationPage() {
               </Select>
             </FormField>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FormGrid cols={2}>
               <FormField
                 label={tForm('driver')}
                 required
@@ -283,11 +283,15 @@ export default function NewDelegationPage() {
                   ))}
                 </Select>
               </FormField>
-            </div>
+            </FormGrid>
           </FormSection>
 
           <FormSection title={tForm('sectionDeparture')}>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Original mobile layout was 1-col (`grid-cols-1 md:grid-cols-3`);
+                FormGrid cols=3 defaults to a 2-col mobile base, so override
+                back to `grid-cols-1` to preserve the single-column phone stack
+                for these 3-field address rows. */}
+            <FormGrid cols={3} className="grid-cols-1">
               <FormField
                 label={tForm('departureAt')}
                 required
@@ -361,11 +365,11 @@ export default function NewDelegationPage() {
                   )}
                 />
               </FormField>
-            </div>
+            </FormGrid>
           </FormSection>
 
           <FormSection title={tForm('sectionReturn')}>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <FormGrid cols={3} className="grid-cols-1">
               <FormField
                 label={tForm('plannedReturnAt')}
                 required
@@ -428,7 +432,7 @@ export default function NewDelegationPage() {
                   )}
                 />
               </FormField>
-            </div>
+            </FormGrid>
           </FormSection>
 
           <FormField

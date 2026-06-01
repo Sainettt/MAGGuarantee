@@ -740,6 +740,7 @@
           "orderNumber": "Numer zlecenia",
           "orderDate": "Data zlecenia",
           "amountApproved": "Kwota zatwierdzona (EUR)",
+          "amountApprovedAuto": "wyliczana automatycznie",
           "amountMaximum": "Kwota maksymalna (EUR)",
           "doplata": "Dopłata gwarancyjna",
           "margin": "Marża",
