@@ -986,6 +986,111 @@
       }
     }
   },
+  "planista": {
+    "title": "Planner panel",
+    "subtitle": "Overview of the planned fleet — vehicles, drivers and trailers",
+    "readOnlyBanner": "Data is read-only — managed by an administrator.",
+    "tabs": {
+      "ariaLabel": "Planner fleet sections",
+      "vehicles": "Vehicles",
+      "drivers": "Drivers",
+      "trailers": "Trailers"
+    },
+    "vehicles": {
+      "emptyTitle": "No vehicles",
+      "emptyMessage": "No vehicles assigned to this planner.",
+      "columns": {
+        "plate": "Plate",
+        "side": "Side no.",
+        "brandModel": "Make / model",
+        "type": "Type",
+        "active": "Status"
+      }
+    },
+    "drivers": {
+      "emptyTitle": "No drivers",
+      "emptyMessage": "No drivers assigned to this planner.",
+      "columns": {
+        "name": "Driver",
+        "phone": "Phone",
+        "active": "Status"
+      }
+    },
+    "trailers": {
+      "emptyTitle": "No trailers",
+      "emptyMessage": "No trailers assigned to this planner.",
+      "columns": {
+        "plate": "Plate",
+        "type": "Type",
+        "brandModel": "Make / model",
+        "active": "Status"
+      }
+    }
+  },
+  "dyspozytor": {
+    "title": "Dispatcher panel",
+    "subtitle": "Overview of the operated fleet, trips and vehicle status",
+    "readOnlyBanner": "Data is read-only — managed by an administrator.",
+    "kpi": {
+      "vehicles": "Vehicles",
+      "driving": "Driving",
+      "idle": "Idle > 7 days",
+      "drivers": "Drivers",
+      "trailers": "Trailers"
+    },
+    "idle": {
+      "title": "Vehicles idle for more than 7 days:",
+      "daysIdle": "{days, plural, one {# day} other {# days}}"
+    },
+    "tabs": {
+      "ariaLabel": "Dispatcher fleet sections",
+      "vehicles": "Vehicles",
+      "delegations": "Trips",
+      "drivers": "Drivers",
+      "trailers": "Trailers"
+    },
+    "vehicles": {
+      "emptyTitle": "No vehicles",
+      "emptyMessage": "No vehicles assigned to this dispatcher.",
+      "columns": {
+        "plate": "Plate",
+        "side": "Side no.",
+        "brandModel": "Make / model",
+        "type": "Type",
+        "active": "Status"
+      }
+    },
+    "delegations": {
+      "emptyTitle": "No trips",
+      "emptyMessage": "No active trips to display.",
+      "columns": {
+        "vehicle": "Vehicle",
+        "driver": "Driver",
+        "route": "Route",
+        "period": "Period",
+        "status": "Status"
+      }
+    },
+    "drivers": {
+      "emptyTitle": "No drivers",
+      "emptyMessage": "No drivers assigned to this dispatcher.",
+      "columns": {
+        "name": "Driver",
+        "phone": "Phone",
+        "active": "Status"
+      }
+    },
+    "trailers": {
+      "emptyTitle": "No trailers",
+      "emptyMessage": "No trailers assigned to this dispatcher.",
+      "columns": {
+        "plate": "Plate",
+        "type": "Type",
+        "brandModel": "Make / model",
+        "active": "Status"
+      }
+    }
+  },
   "carrier": {
     "tabs": {
       "ariaLabel": "Carrier sections",

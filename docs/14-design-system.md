@@ -3366,3 +3366,168 @@ export function isPlausibleIdDocument(country: string, raw: string): boolean;
 - [ ] Inactive carrier: opacity dimmed; «Nieaktywny» muted badge; still clickable.
 - [ ] AA contrast: bucket value digits on `bg-card` — verified for all four tones in both themes (success / warning / info ≥ 3:1 for large text 24px-extrabold; danger ≥ 4.5:1).
 
+## Phase 6 — Planista / Dyspozytor read-only panels
+
+> **Naming note.** There is an earlier `## Phase 6 — <EntityDetailModal>` section above (read-only *modal* surface). This section is the Phase 6 *sub-slice 6.3* work: the two **operational role panels** (planista, dyspozytor). Different artefact, same phase number — they are unrelated. Refer to this one as the "role-panel pattern".
+
+**Reference screenshots:** `docs/screenshots/planista-fleet.png`, `docs/screenshots/dyspozytor-fleet.png`. (Ignore the violet "TRYB PODGLĄDU" GAS banner and the test data in both — see global ignore rules.) These two screens are the canonical read-only role panels: a tabbed fleet inspection surface, dyspozytor additionally fronted by a KPI stats strip.
+
+**Establishing pattern (reuse, do not re-derive):** the opieka drill-down at `app/(employee)/employee/opieka/carriers/[login]/page.tsx` already implements the canonical read-only tabbed pattern — `<Tabs>` over per-entity `<DataTable>` instances with curated read-only column sets, each with an `<EmptyState>` empty slot, **zero** row mutations. Phase 6 panels are the same pattern, scoped to a *role panel* instead of a carrier drill-down. The opieka dashboard (`opieka/page.tsx`) is the canonical KPI-strip reference for the dyspozytor variant.
+
+**Hard constraints (token policy + read-only):**
+- **No new tokens.** Everything below composes existing tokens only (Phase 4.4 surface policy). `bg-input` is the single soft-chrome surface; `bg-bg-soft` is dead. The only surfaces used here are `bg-card` (tables, cards, KPI tiles via `<Card>`/`<KpiCard>`), `bg-input` (filter-bar / search row), `bg-bg` (DataTable header per the Phase 2 DataTable spec), and the semantic accent tokens `text-success` / `text-warning` / `text-danger` / `text-info` / `text-brand`.
+- **Strictly read-only.** No action buttons, no kebab column, no inline edit, no status-change controls, no row-click-to-edit. Rows are inert (whole-row hover for affordance only, no `onClick` mutation). Delegation status changes are weryfikator territory (Phase 7) and must **not** appear here. A read-only info banner (below) states this explicitly to the user.
+
+### 6.3.1 Canonical layout — a role-scoped read-only panel inside `RoleShell`
+
+`RoleShell` (`components/layout/RoleShell.tsx`) renders only `<Header>` + `<main>` — **no sidebar** (unlike the employee shell). Sub-navigation therefore lives **in-page** as a `<Tabs>` bar, not in a rail.
+
+Page container — match the width/padding strip standardized in Phase 4.4 and used by the opieka pages:
+
+```
+<section className="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-8">
+```
+
+> Note: the opieka pages currently use `px-4 sm:px-6 lg:px-10 xl:px-12 py-8` **without** the `mx-auto max-w-screen-2xl` centering wrapper because they were authored before 4.4. For the new Phase 6 panels, **use the full 4.4 strip** (`mx-auto max-w-screen-2xl …`) — it is the standardized container and keeps the fleet tables from stretching edge-to-edge on ultra-wide monitors.
+
+Vertical composition, top to bottom:
+
+1. **Page heading** — same treatment as opieka: `<h1 className="text-2xl font-extrabold tracking-tight text-text">` + `<p className="text-sm text-text-sub">` subtitle, wrapped in `flex flex-col gap-1 mb-6`. Title = role panel name (PL «Panel planisty» / «Panel dyspozytora»), subtitle = one-line scope hint.
+2. **Read-only info banner** (both panels) — a single non-dismissible info strip replacing the legacy red/blue "tylko do podglądu" bar. Compose, do **not** invent a banner token:
+   `<div className="mb-6 flex items-center gap-2 rounded-lg border border-border bg-input px-4 py-3 text-sm text-text-sub">` with a leading Lucide `<Info size={16} className="text-info shrink-0" />`. Copy (PL): «Dane są tylko do podglądu — edytuje administrator.» (EN: «Data is read-only — managed by an administrator.»). The legacy banner also surfaces fleet counts inline; in the dyspozytor panel those counts move into the KPI strip, so keep the banner copy purely about read-only status.
+3. **KPI strip** — **dyspozytor only** (see 6.3.3). Planista has no strip.
+4. **`<Tabs>` sub-navigation + `<DataTable>` per tab** (see 6.3.2 / 6.3.3).
+
+`<Tabs>` usage — identical to the opieka drill-down (locked): `<Tabs defaultValue=… className="w-full">` → `<TabsList aria-label={…} className="mb-4">` → one `<TabsTrigger>` per tab → one `<TabsContent>` per tab wrapping a `<DataTable>`. Active-tab treatment is the brand-red `data-state=active` style already configured on the shadcn `<Tabs>` primitive — no per-panel override. The `aria-label` on `<TabsList>` is mandatory (keyboard/SR users get the group name).
+
+Each `<DataTable>` keeps its own `isLoading` (skeleton rows per the Phase 2 DataTable spec) and its own `empty={<EmptyState …/>}` slot. No filter bar is required for read-only panels, but if a search row is added it uses `bg-input` per the surface policy and is search-only (no mutating controls).
+
+### 6.3.2 Planista variant — 3 tabs
+
+Tabs (order, matching `planista-fleet.png`): **Auta** / **Kierowcy** / **Naczepy**. No KPI strip. Each tab = one read-only `<DataTable>`.
+
+Columns are a sensible read-only subset of the existing `VehicleDto` / `DriverDto` / `TrailerDto` shapes. Reuse the opieka drill-down column definitions as the baseline and extend with the planista-relevant compliance columns visible in the legacy screen.
+
+**Auta** (`VehicleDto`):
+
+| Column id | Header (PL) | Cell |
+|---|---|---|
+| `plate` | NR REJ. | `font-mono font-semibold` plate |
+| `side` | NR BOCZNY | `sideNumber ?? '—'` |
+| `carrier` | PRZEWOŹNIK | carrier company/login (`row.carrier?.company ?? '—'`) |
+| `certL` | CERT. L | `<Badge variant="muted">` with L-class (`L1`/`L3`) or `—` |
+| `euro` | EURO | `<Badge variant="muted">` EURO class or `—` |
+| `adr` | ADR | `<Badge variant="warning">` ADR class when present, else `—` |
+| `gps` | GPS | boolean → `<Check className="text-success"/>` / `<X className="text-text-sub"/>` (icon, not coloured text alone — pair with `aria-label`) |
+| `active` | STATUS | `active ? <Badge variant="success">Aktywne</Badge> : <Badge variant="muted">Nieaktywne</Badge>` |
+
+> The legacy planista screen also shows a `K.PALIW` (fuel card) column; include it **only if** `VehicleDto` exposes the flag — otherwise drop it (do not fabricate a field). Treat it like `gps` (boolean check/cross icon) when present.
+
+**Kierowcy** (`DriverDto`) — same subset as the opieka `DriversTable`:
+
+| Column id | Header (PL) | Cell |
+|---|---|---|
+| `name` | KIEROWCA | `font-semibold` `firstName lastName` |
+| `phone` | TELEFON | `phone ?? '—'` |
+| `idDocument` | DOKUMENT | `idDocumentNumber ?? '—'` |
+| `active` | STATUS | active/inactive badge as above |
+
+**Naczepy** (`TrailerDto`) — same subset as the opieka `TrailersTable`:
+
+| Column id | Header (PL) | Cell |
+|---|---|---|
+| `plate` | NR REJ. | `font-mono font-semibold` plate |
+| `type` | TYP | `trailerType.shortCode` → `[CODE] name`, else `name ?? '—'` |
+| `brand` | MARKA / MODEL | `[brand, model].filter(Boolean).join(' ') || '—'` |
+| `active` | STATUS | active/inactive badge |
+
+**Empty-state copy** (per tab, using existing `<EmptyState title message>`):
+- Auta — title «Brak aut» / message «Do tego planisty nie przypisano żadnych aut.»
+- Kierowcy — title «Brak kierowców» / message «Do tego planisty nie przypisano żadnych kierowców.»
+- Naczepy — title «Brak naczep» / message «Do tego planisty nie przypisano żadnych naczep.»
+
+(EN mirror: «No vehicles / drivers / trailers» + «No … assigned to this planner.») Add an optional Lucide icon to each `<EmptyState>` consistent with the tab (`Car` / `User` / `Truck`).
+
+### 6.3.3 Dyspozytor variant — KPI strip + 4 tabs
+
+**KPI strip** — sits between the info banner and the `<Tabs>`. Composed entirely of the existing `<KpiCard>` (`components/dashboard/KpiCard.tsx`); **no new card component**. Responsive grid mirrors the opieka strip:
+
+```
+<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+```
+
+(5 tiles → `lg:grid-cols-5`; 2-up on phones, 3-up on small tablets. If the API also returns a "naczepy total" you want as a 6th tile, switch to `lg:grid-cols-6` exactly like the opieka strip — keep the breakpoint family identical.)
+
+Bucket → tile tone mapping. This **reuses the 4.3 KpiCard tone vocabulary** and the 5.2.3 bucket→tone story so the colour reading is consistent with the opieka surfaces:
+
+| Stats bucket | Tile label (PL) | `tone` | Accent token (resolved by KpiCard) | Lucide icon |
+|---|---|---|---|---|
+| `liczbaAut` (total vehicles) | AUTA | `neutral` | `bg-text-sub` / `text-text-sub` | `Truck` |
+| `jezdzace` (driving) | JEŻDŻĄ | `green` | `bg-success` / `text-success` | `Car` |
+| `stojace > 7 dni` (idle >7d) | STOJĄ >7 DNI | `orange` | `bg-warning` / `text-warning` | `PauseCircle` |
+| `liczbaKierowcow` (drivers) | KIEROWCY | `blue` | `bg-info` / `text-info` | `User` |
+| `liczbaNaczep` (trailers) | NACZEPY | `neutral` | `bg-text-sub` / `text-text-sub` | `Container` |
+| `nieaktywne` (inactive, optional 6th) | NIEAKTYWNE | `red` | `bg-danger` / `text-danger` | `CircleSlash2` |
+
+> **Documented deviation (no purple token).** `<KpiCard>` accepts `tone="purple"` but the DS palette has **no purple** — the primitive maps `purple` onto `bg-brand`/`text-brand` (see `KpiCard.tsx` `TONE_ACCENT`). For the dyspozytor strip we deliberately **do not use `tone="purple"`**: the two totals tiles (AUTA, NACZEPY) use `tone="neutral"` so they read as inert counts, leaving the brand-red accent unused on this strip and reserving the three semantic colours (green/orange/blue, + red for the optional inactive tile) for the operationally meaningful buckets. Rationale: a dispatcher scans for *problems* (idle, inactive) and *capacity* (driving) — colour should encode operational state, not totals. The opieka strip uses `tone="purple"`→brand for its "carriers" total tile; dyspozytor diverges to `neutral` because there is no single hero-count here and a brand-red total would compete with the warning/danger signals that matter. This is an intentional, scoped deviation — no token change.
+
+**Tabs** (order, matching `dyspozytor-fleet.png`): **Auta** / **Delegacje** / **Kierowcy** / **Naczepy**. (Legacy labels the delegations tab «Wyjazdy»; standardize on **«Delegacje»** to match the domain term used elsewhere in the app — keep «Wyjazdy» only if i18n already ships it, otherwise add «Delegacje».)
+
+- **Auta / Kierowcy / Naczepy** — identical column sets to the planista variant (6.3.2). Reuse the same sub-table components; do not duplicate column definitions. (The legacy dyspozytor "Moje auta" table also shows `NR BOCZNY`, `TYP`, `PLANISTA`, and a `STAWKI €/km` quad — these are optional enrichments; include `PLANISTA` and `TYP` if the DTO carries them, but keep the read-only quad-rate column out unless the dispatcher genuinely needs it, to avoid a cramped table.)
+- **Delegacje** (read-only) — the dispatcher's delegation list. Columns (read-only subset; no status-change control — that is weryfikator/Phase 7):
+
+| Column id | Header (PL) | Cell |
+|---|---|---|
+| `vehicle` | AUTO | `font-mono font-semibold` plate (+ `sideNumber` muted if present) |
+| `driver` | KIEROWCA | `font-semibold` driver name or `—` |
+| `route` | TRASA | origin → destination string, `truncate` |
+| `period` | OKRES | start–end date range, `tabular-nums` |
+| `status` | STATUS | read-only `<StatusBadge>` (static indicator, no dropdown). Map delegation status to the existing semantic badge variants — **no new variants** |
+
+  Empty state — title «Brak delegacji» / message «Brak aktywnych delegacji do wyświetlenia.» (EN: «No delegations», «No active delegations to display.»), icon `Route` or `MapPin`.
+
+**`stojące > 7 dni` highlight treatment.** The legacy screen renders an amber sub-list of vehicle chips under the KPI strip («Auta stojące dłużej niż 7 dni: [WND10UH — 14 dni] [XCV2342 — 12 dni]»). Reproduce as a **warning-toned sub-list**, composed from existing tokens (no new token), shown **only when the count > 0**, between the KPI strip and the `<Tabs>`:
+
+```
+<div className="mb-6 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3">
+  <p className="flex items-center gap-1.5 text-sm font-semibold text-warning">
+    <AlertTriangle size={15} /> {t('idleTitle')}      {/* «Auta stojące dłużej niż 7 dni:» */}
+  </p>
+  <ul className="mt-2 flex flex-wrap gap-1.5">
+    {idle.map(v => (
+      <li key={v.id}>
+        <span className="inline-flex items-center gap-1 rounded-sm border border-warning/40 bg-card px-2 py-0.5 text-xs font-medium text-text">
+          <span className="font-mono">{v.plate}</span>
+          <span className="text-text-sub">· {v.days} {t('daysShort')}</span>
+        </span>
+      </li>
+    ))}
+  </ul>
+</div>
+```
+
+Notes: `bg-warning/10` + `border-warning/40` are token-with-opacity, **not** new tokens. Each chip is `bg-card` (a white chip on the soft warning panel reads as a token, consistent with the §5 MultiSelect chip pattern). Chips are **inert** (read-only — no remove `<X>`, no click). The whole block is conditional on `idle.length > 0`; when zero, render nothing (the STOJĄ >7 DNI KPI tile already shows `0`). Colour is not the only signal — the leading `<AlertTriangle>` icon + the explicit "X dni" text carry the meaning for colour-blind users.
+
+### 6.3.4 Components / shared changes summary (Phase 6.3)
+
+| Change | Where | Notes |
+|---|---|---|
+| New `<PlanistaPanel>` page | `apps/web/app/(planista)/…/page.tsx` (web-agent decides route) inside `RoleShell` | Heading + read-only banner + 3-tab `<Tabs>` over `<DataTable>`. |
+| New `<DyspozytorPanel>` page | `apps/web/app/(dyspozytor)/…/page.tsx` inside `RoleShell` | Heading + read-only banner + `<KpiCard>` strip + idle sub-list + 4-tab `<Tabs>` (incl. Delegacje). |
+| Reuse `<KpiCard>` | `components/dashboard/KpiCard.tsx` | No changes. `tone` from the 6.3.3 mapping; **never** `purple` here. |
+| Reuse `<DataTable>` / `<EmptyState>` / `<Tabs>` / `<StatusBadge>` / `<Badge>` | existing | Read-only column sets per 6.3.2 / 6.3.3; mirror the opieka drill-down sub-tables. |
+| New read-only sub-table components | colocated with the panel pages | `VehiclesTable` / `DriversTable` / `TrailersTable` / `DelegacjeTable` — same shape as the opieka drill-down sub-tables (no edit/delete columns). Consider lifting the opieka sub-tables into a shared `components/fleet/` module so planista + dyspozytor + opieka share one definition. |
+| i18n | `messages/pl.json`, `en.json` | Panel titles/subtitles, read-only banner copy, tab labels (incl. «Delegacje»), idle sub-list copy (`idleTitle`, `daysShort`), per-tab empty-state titles/messages. |
+| **0** changes to `tailwind.config.ts` / `globals.css` | — | All tokens used (`bg-card`, `bg-input`, `bg-bg`, `border-border`, `text-success/warning/danger/info/text-sub`, `bg-warning/10`, `border-warning/40`, brand active-tab) already exist. |
+
+### 6.3.5 Acceptance checklist (planista + dyspozytor panels)
+
+- [ ] **Read-only enforced.** No action buttons, no kebab column, no inline-edit cell, no status-change control anywhere in either panel; delegation rows render a **static** `<StatusBadge>` (no dropdown). Read-only info banner present and non-dismissible on both panels.
+- [ ] **Empty states present.** Every tab's `<DataTable>` has an `<EmptyState>` empty slot with the role-appropriate copy (6.3.2 / 6.3.3); verified by viewing a tab with zero rows.
+- [ ] **KPI strip (dyspozytor).** Five (or six) `<KpiCard>` tiles map each bucket to the 6.3.3 tone; **`tone="purple"` is not used**; totals tiles are `neutral`. Responsive grid `grid-cols-2 sm:grid-cols-3 lg:grid-cols-5` (or `-6`) with **no horizontal scroll** at 320 / 360 / 640 / 1024 / 1280 / 1536 / 1920 px.
+- [ ] **Idle (>7 dni) highlight.** Warning-toned sub-list renders only when count > 0, uses `bg-warning/10` + `border-warning/40` (token-with-opacity, no new token), chips are inert, and the meaning is carried by icon + "X dni" text — not colour alone.
+- [ ] **Token policy respected.** Zero changes to `tailwind.config.ts` / `globals.css`; no `bg-bg-soft`; soft surfaces are `bg-input` only; semantic colour only from existing `text-/bg-` semantic tokens.
+- [ ] **Tabs keyboard-accessible.** `<TabsList>` has an `aria-label`; arrow-key navigation between triggers works; active tab uses the brand-red `data-state=active` style; focus ring visible.
+- [ ] **Dark-mode verified.** Both panels — banner (`bg-input`), KPI tiles (`bg-card`), DataTable header (`bg-bg`), idle sub-list (`bg-warning/10` + `bg-card` chips), badges, and tab bar — legible with no hacks (tokens / `dark:` variants only).
+- [ ] **Container width.** Page uses the 4.4 strip `mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-8`; tables do not stretch edge-to-edge on ultra-wide.
+

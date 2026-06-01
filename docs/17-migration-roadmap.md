@@ -426,30 +426,54 @@
 
 ---
 
-## Фаза 6 — Planista, Dyspozytor (≈ 1 неделя)
+## Фаза 6 — Planista, Dyspozytor (≈ 1 неделя) ✅ ЗАВЕРШЕНА (2026-06-01)
 
 **Цель:** read-only panels для спедиторов и диспетчеров.
 
-### Backend
+### Зафиксированные решения (перед стартом)
 
-1. `GET /fleet/planista` — `getPlanistaFleet` (`Code.gs:3583`).
-2. `GET /fleet/dyspozytor` — `getDyspozytorFleet` (`Code.gs:3676`).
-3. `GET /delegations?dyspozytorId=...` — `getDelegacjeForDyspozytor` (`Code.gs:4033`).
+- **Planista panel** — полный паритет с legacy: 3 read-only вкладки Auta / Kierowcy / Naczepy (text roadmap упоминал только fleet+drivers — расширено до прицепов, т.к. backend всё равно их отдаёт).
+- **Dyspozytor panel** — полный паритет: KPI-полоска статистики (jeżdżące / stojące>7dni / nieaktywne + totals) + 4 вкладки Auta / Wyjazdy / Kierowcy / Naczepy.
+- **`GET /delegations` для dyspozytor — серверный авто-скоуп по JWT** (`where vehicle.dispatcherId = caller.sub`), а НЕ `?dyspozytorId=` query-param из исходного текста ниже. Консистентно с przewoznik→carrierId (Phase 3) и opiekun (Phase 5); client-параметр игнорируется.
+- **Без миграций БД** — `Vehicle.plannerId`/`dispatcherId` и модель `Delegation` уже в схеме.
 
-### Frontend
+### Backend ✅
 
-1. `app/(planista)/fleet/page.tsx` — таблица закреплённых авто (фильтр AUTA по plannerId).
-2. `app/(planista)/drivers/page.tsx` — read-only.
-3. `app/(dyspozytor)/fleet/page.tsx`.
-4. `app/(dyspozytor)/delegations/page.tsx` — выезды своих авто.
+1. ✅ `GET /api/v1/fleet/planista` `@Roles('planista','admin')` — `FleetService.getPlanistaFleet` (ref `getPlanistaFleet`, `Code.gs:3583`). Vehicles по `plannerId === user.sub` (admin → all) + drivers/trailers carrier-ов этих авто. Slim-мапперы `toVehicleListItem`/`toDriverListItem`/`toTrailerListItem` вынесены и переиспользуются с `getMyFleet`.
+2. ✅ `GET /api/v1/fleet/dyspozytor` `@Roles('dyspozytor','admin')` — `FleetService.getDyspozytorFleet` (ref `getDyspozytorFleet`, `Code.gs:3676`). По `dispatcherId === user.sub` + `stats` (через общий `DRIVING_RECENCY_DAYS = 7` / `_classifyVehicles`, идентично opiekun) + `stojaceList`.
+3. ✅ `GET /api/v1/delegations` — `dyspozytor` вынесен из all-access ветки `_scopeListFilters` в собственную с server-side `dispatcherId` scope; в репозитории добавлен фильтр `where: { vehicle: { dispatcherId } }` (покрыт `@@index([vehicleId, status])`). Newest-first сохранён. `pracownik` по-прежнему 403 (quirk #13 не задет).
+4. ✅ Тесты: `fleet.service.planista.spec.ts` (8), `fleet.service.dyspozytor.spec.ts` (13), `delegations.service.scope.spec.ts` (8). Полный api-сьют: 538 pass (известный Postgres-integration `check-constraints.spec.ts` падает без БД — не связан).
 
-### Deliverables
-- Planista видит только закреплённые за ним авто.
-- Dyspozytor видит свои авто и их делегации.
-- Никаких mutating actions для этих ролей.
+### Shared ✅
+
+- ✅ `packages/shared/src/schemas/fleet.ts`: `PlanistaFleetResponseSchema`, `DyspozytorFleetResponseSchema`, `DyspozytorFleetStatsSchema`, `DyspozytorStojacyItemSchema` (+ inferred-типы). Переиспользуют `VehicleListItemSchema`/`DriverListItemSchema`/`TrailerListItemSchema`. `DelegationFiltersSchema` не менялась (scope серверный).
+
+### Frontend ✅
+
+> Панели — single-page с in-page `<Tabs>` внутри `<RoleShell>` (у него нет сайдбара). Route-группы `(planista)`/`(dyspozytor)` + `layout.tsx` (`requireRoleAccess` + `RoleShell`) уже существовали из ранних фаз.
+
+1. ✅ `app/(planista)/planista/page.tsx` — heading + read-only banner + `<Tabs>` Auta/Kierowcy/Naczepy (`<DataTable>`), empty-states. `usePlanistaFleet` (`['fleet','planista']`) + `getPlanistaFleet()` в `lib/api/fleet.ts`.
+2. ✅ `app/(dyspozytor)/dyspozytor/page.tsx` — heading + banner + 5-tile KPI-полоска + warning sub-list «stojące > 7 dni» + `<Tabs>` Auta/Wyjazdy/Kierowcy/Naczepy. Вкладка Wyjazdy через существующий `useDelegations()` (без параметров — сервер авто-скоупит), статус — статичный `<StatusBadge>`, без mutation-контролов. `useDyspozytorFleet` (`['fleet','dyspozytor']`) + `getDyspozytorFleet()`.
+3. ✅ Общие компоненты `components/fleet/FleetTables.tsx` (3 read-only sub-table) + `components/fleet/ReadOnlyBanner.tsx`.
+4. ✅ i18n: namespaces `planista.*` + `dyspozytor.*` в `messages/{pl,en}.json` (PL/EN паритет ключей). Вкладка выездов — «Wyjazdy» (консистентно с carrier-UI).
+5. ✅ DS-секция «Phase 6 — Planista / Dyspozytor read-only panels» в `docs/14-design-system.md` (паттерн панели, колонки, KPI tone-map без purple, idle-highlight). Token policy соблюдена (новых токенов нет).
+
+### Deliverables ✅
+- ✅ Planista видит только закреплённые за ним авто (+ водителей/прицепы их carrier-ов); admin — debug-fallback.
+- ✅ Dyspozytor видит свои авто, их выезды и KPI-статистику.
+- ✅ Никаких mutating actions для этих ролей; прямой URL к чужому scope → пусто/403.
+
+### Открытые мелочи (не блокеры)
+- **Slim-DTO vs DS-колонки:** часть колонок из DS §6.3.2 (CERT.L / EURO / ADR / GPS / fuel-card / квад ставок / driver `idDocument`) опущены — их нет в slim `VehicleListItem`/`DriverListItem`. Если понадобятся — расширить slim-схемы или отдать full-DTO.
+- **6-й KPI-tile `autaNieaktywne`** доступен в `stats`, но не выводится (grid зафиксирован 5-up по DS). Тривиально добавить (`lg:grid-cols-6`).
+- **`GET /opiekun/carriers`** и теперь `/fleet/{planista,dyspozytor}` — все три есть в `docs/13-api-design.md`; новые response-схемы документировать при следующей правке docs.
+
+### Исходный план (до старта — оставлен для истории)
+
+Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspozytorId=...`. Frontend: отдельные страницы `app/(planista)/fleet|drivers` и `app/(dyspozytor)/fleet|delegations`. Фактическая реализация: single-page tabbed-панели + серверный scope вместо query-param (см. зафиксированные решения выше).
 
 ### Зависимости
-- Фазы 2, 4.
+- Фазы 2, 4 (+ 5 — компоненты opieka read-only паттерна).
 
 ---
 

@@ -212,3 +212,101 @@ export const OpiekunFleetResponseSchema = z.object({
   totals: OpiekunFleetTotalsSchema,
 });
 export type OpiekunFleetResponse = z.infer<typeof OpiekunFleetResponseSchema>;
+
+// ─── GET /fleet/planista ─────────────────────────────────
+
+/**
+ * Response for `GET /fleet/planista` (planista role) — read-only fleet view.
+ * Mirrors `Code.gs:3650-3657` (`getPlanistaFleet` return): the planista sees
+ * the vehicles they plan (`Vehicle.plannerId === user.sub`) plus the drivers
+ * and trailers belonging to the carriers who own those vehicles. Three lists
+ * in one payload — same shape as `MyFleetResponseSchema` so the panel reuses
+ * the carrier picker rendering.
+ *
+ * The legacy `carriers` field (a login-list, "ile przewoźników obsługuje")
+ * is intentionally OMITTED: it's a UI-only informational count the panel can
+ * derive client-side (vehicles grouped by carrier) and exposing raw logins
+ * adds no value over the per-vehicle data already returned. Reinstate as
+ * `z.array(z.string())` only if a concrete UI need surfaces.
+ */
+export const PlanistaFleetResponseSchema = z.object({
+  vehicles: z.array(VehicleListItemSchema),
+  drivers: z.array(DriverListItemSchema),
+  trailers: z.array(TrailerListItemSchema),
+});
+export type PlanistaFleetResponse = z.infer<typeof PlanistaFleetResponseSchema>;
+
+// ─── GET /fleet/dyspozytor ───────────────────────────────
+
+/**
+ * Dyspozytor KPI strip counters — maps 1:1 to the legacy `stats` object in
+ * `Code.gs:3758-3764` (`getDyspozytorFleet` return). Key names are kept
+ * verbatim so the dyspozytor panel's KPI strip reads them directly.
+ *
+ *  - `liczbaAut`        — total vehicles assigned to this dyspozytor
+ *                         (`Vehicle.dispatcherId === user.sub`).
+ *  - `autaAktywne`      — `Vehicle.active=true`.
+ *  - `autaJezdzace`     — active AND (no `lastDroveAt` OR within last 7 days);
+ *                         mirrors the legacy "no data = assume driving" default.
+ *  - `autaStojace7dni`  — active AND `lastDroveAt` older than 7 days.
+ *  - `autaNieaktywne`   — `Vehicle.active=false`.
+ *  - `liczbaKierowcow`  — drivers of the dyspozytor's carriers.
+ *  - `liczbaNaczep`     — trailers of the dyspozytor's carriers.
+ *
+ * Note `autaJezdzace + autaStojace7dni === autaAktywne`, and
+ * `autaAktywne + autaNieaktywne === liczbaAut` (legacy invariant).
+ */
+export const DyspozytorFleetStatsSchema = z.object({
+  liczbaAut: z.number().int().nonnegative(),
+  autaAktywne: z.number().int().nonnegative(),
+  autaJezdzace: z.number().int().nonnegative(),
+  autaStojace7dni: z.number().int().nonnegative(),
+  autaNieaktywne: z.number().int().nonnegative(),
+  liczbaKierowcow: z.number().int().nonnegative(),
+  liczbaNaczep: z.number().int().nonnegative(),
+});
+export type DyspozytorFleetStats = z.infer<typeof DyspozytorFleetStatsSchema>;
+
+/**
+ * One "auto stojące > 7 dni" highlight row in the dyspozytor panel — the
+ * idle-vehicle list the dyspozytor needs to chase. Mirrors the per-vehicle
+ * push in `Code.gs:3744`.
+ *
+ * Field naming follows `VehicleListItemSchema` for continuity: `plateNumber`
+ * (legacy `nrRej`) and `lastDroveAt` (legacy `ostatnioJezdzilo`). `daysIdle`
+ * is the legacy `dniBezJazdy` floor-division of the gap since `lastDroveAt`;
+ * `lastDroveAt` is nullable to cover vehicles that never reported a drive yet
+ * still surfaced here. `carrierLogin` / `plannerName` map to the legacy
+ * `przewoznikLogin` / `planista` columns.
+ */
+export const DyspozytorStojacyItemSchema = z.object({
+  plateNumber: z.string(),
+  carrierLogin: z.string(),
+  lastDroveAt: z.string().nullable(),
+  daysIdle: z.number().int(),
+  plannerName: z.string().nullable(),
+});
+export type DyspozytorStojacyItem = z.infer<typeof DyspozytorStojacyItemSchema>;
+
+/**
+ * Response for `GET /fleet/dyspozytor` (dyspozytor role) — read-only fleet
+ * view + KPI stats + idle-vehicle highlight list. Mirrors `Code.gs:3749-3766`
+ * (`getDyspozytorFleet` return). The vehicles/drivers/trailers lists reuse the
+ * same slim item shapes as `/fleet/my` and `/fleet/planista`; `stats` and
+ * `stojaceList` are the dyspozytor-specific extras.
+ *
+ * Scope is server-side: the API filters vehicles to
+ * `Vehicle.dispatcherId === user.sub` and derives drivers/trailers from the
+ * owning carriers — there is no client filter param (matching the delegations
+ * scope, which is also JWT-driven).
+ */
+export const DyspozytorFleetResponseSchema = z.object({
+  vehicles: z.array(VehicleListItemSchema),
+  drivers: z.array(DriverListItemSchema),
+  trailers: z.array(TrailerListItemSchema),
+  stats: DyspozytorFleetStatsSchema,
+  stojaceList: z.array(DyspozytorStojacyItemSchema),
+});
+export type DyspozytorFleetResponse = z.infer<
+  typeof DyspozytorFleetResponseSchema
+>;

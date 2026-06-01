@@ -24,6 +24,7 @@ import { TrailersRepository } from '../trailers/trailers.repository';
 import { VehiclesRepository } from '../vehicles/vehicles.repository';
 import {
   DelegationsRepository,
+  type DelegationListFilters,
   type DelegationRow,
 } from './delegations.repository';
 
@@ -287,12 +288,11 @@ export class DelegationsService {
   private async _scopeListFilters(
     user: AuthUser,
     filters: DelegationFilters,
-  ): Promise<DelegationFilters> {
+  ): Promise<DelegationListFilters> {
     if (
       user.role === 'admin' ||
       user.role === 'opiekun' ||
       user.role === 'planista' ||
-      user.role === 'dyspozytor' ||
       user.role === 'eksport' ||
       user.role === 'weryfikator'
     ) {
@@ -304,6 +304,14 @@ export class DelegationsService {
         throw new ForbiddenException('Brak uprawnień do tego przewoźnika');
       }
       return { ...filters, carrierId: carrier.id };
+    }
+    if (user.role === 'dyspozytor') {
+      // Phase 6.2 — dyspozytor sees ONLY delegations of vehicles they dispatch
+      // (docs/03-roles.md#dyspozytor). Server identity wins: a client-supplied
+      // `carrierId` / `vehicleId` is dropped so the dyspozytor cannot pivot
+      // outside their dispatched fleet (same posture as the przewoznik scope).
+      const { carrierId: _carrierId, vehicleId: _vehicleId, ...rest } = filters;
+      return { ...rest, dispatcherId: user.sub };
     }
     throw new ForbiddenException('Brak uprawnień');
   }

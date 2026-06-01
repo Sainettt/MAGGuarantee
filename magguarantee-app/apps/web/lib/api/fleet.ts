@@ -4,7 +4,11 @@
 // dropdown (vehicles / drivers / trailers) on the new-claim and
 // new-delegation pages. The carrier identity is taken from the JWT.
 
-import type { MyFleetResponse } from '@magguarantee/shared';
+import type {
+  DyspozytorFleetResponse,
+  MyFleetResponse,
+  PlanistaFleetResponse,
+} from '@magguarantee/shared';
 
 import { apiJson } from './client';
 
@@ -25,4 +29,27 @@ export function getMyFleet(
   const qs = params.toString();
   const path = qs ? `/fleet/my?${qs}` : '/fleet/my';
   return apiJson<MyFleetResponse>(path, { method: 'GET' });
+}
+
+/**
+ * `GET /fleet/planista` (planista / admin) — the read-only fleet the planista
+ * plans: vehicles where `Vehicle.plannerId === user.sub`, plus the drivers and
+ * trailers of the owning carriers. Three slim lists in one payload. Scope is
+ * server-side (JWT identity); there is no client filter param.
+ */
+export function getPlanistaFleet(): Promise<PlanistaFleetResponse> {
+  return apiJson<PlanistaFleetResponse>('/fleet/planista', { method: 'GET' });
+}
+
+/**
+ * `GET /fleet/dyspozytor` (dyspozytor / admin) — the read-only fleet the
+ * dispatcher operates: vehicles where `Vehicle.dispatcherId === user.sub`, plus
+ * drivers/trailers of the owning carriers, a KPI `stats` block and the
+ * `stojaceList` idle-vehicle highlight rows. Scope is server-side (JWT
+ * identity); there is no client filter param.
+ */
+export function getDyspozytorFleet(): Promise<DyspozytorFleetResponse> {
+  return apiJson<DyspozytorFleetResponse>('/fleet/dyspozytor', {
+    method: 'GET',
+  });
 }

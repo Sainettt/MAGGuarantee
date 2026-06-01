@@ -63,6 +63,15 @@ export interface DelegationListFilters {
   carrierId?: string;
   vehicleId?: string;
   driverId?: string;
+  /**
+   * Phase 6.2 dyspozytor auto-scope — restrict to delegations whose vehicle is
+   * dispatched by this user (`Delegation.vehicle.dispatcherId === dispatcherId`).
+   * Server-identity driven (never client-supplied); the service sets it from
+   * the JWT `sub`. Translated to a relation filter `vehicle: { dispatcherId }`
+   * (the `@@index([vehicleId, status])` plus the `Vehicle.dispatcherId` index
+   * keep this narrow). Composes with the scalar filters above.
+   */
+  dispatcherId?: string;
   /** ISO datetime — match delegations whose `departureAt` ≥ from. */
   from?: string;
   /** ISO datetime — match delegations whose `departureAt` ≤ to. */
@@ -117,6 +126,11 @@ export class DelegationsRepository {
     if (filters.carrierId) where.carrierId = filters.carrierId;
     if (filters.vehicleId) where.vehicleId = filters.vehicleId;
     if (filters.driverId) where.driverId = filters.driverId;
+    // Dyspozytor auto-scope — relation filter so the FK index on
+    // `Vehicle.dispatcherId` narrows the join instead of a client-side pass.
+    if (filters.dispatcherId) {
+      where.vehicle = { dispatcherId: filters.dispatcherId };
+    }
     if (filters.from || filters.to) {
       const range: Record<string, Date> = {};
       if (filters.from) range.gte = new Date(filters.from);

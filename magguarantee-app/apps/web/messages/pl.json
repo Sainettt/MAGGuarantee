@@ -986,6 +986,111 @@
       }
     }
   },
+  "planista": {
+    "title": "Panel planisty",
+    "subtitle": "Przegląd planowanej floty — pojazdy, kierowcy i naczepy",
+    "readOnlyBanner": "Dane są tylko do podglądu — edytuje administrator.",
+    "tabs": {
+      "ariaLabel": "Sekcje floty planisty",
+      "vehicles": "Auta",
+      "drivers": "Kierowcy",
+      "trailers": "Naczepy"
+    },
+    "vehicles": {
+      "emptyTitle": "Brak aut",
+      "emptyMessage": "Do tego planisty nie przypisano żadnych aut.",
+      "columns": {
+        "plate": "Nr rej.",
+        "side": "Nr boczny",
+        "brandModel": "Marka / model",
+        "type": "Typ",
+        "active": "Status"
+      }
+    },
+    "drivers": {
+      "emptyTitle": "Brak kierowców",
+      "emptyMessage": "Do tego planisty nie przypisano żadnych kierowców.",
+      "columns": {
+        "name": "Kierowca",
+        "phone": "Telefon",
+        "active": "Status"
+      }
+    },
+    "trailers": {
+      "emptyTitle": "Brak naczep",
+      "emptyMessage": "Do tego planisty nie przypisano żadnych naczep.",
+      "columns": {
+        "plate": "Nr rej.",
+        "type": "Typ",
+        "brandModel": "Marka / model",
+        "active": "Status"
+      }
+    }
+  },
+  "dyspozytor": {
+    "title": "Panel dyspozytora",
+    "subtitle": "Przegląd obsługiwanej floty, wyjazdów i statusu aut",
+    "readOnlyBanner": "Dane są tylko do podglądu — edytuje administrator.",
+    "kpi": {
+      "vehicles": "Auta",
+      "driving": "Jeżdżą",
+      "idle": "Stoją > 7 dni",
+      "drivers": "Kierowcy",
+      "trailers": "Naczepy"
+    },
+    "idle": {
+      "title": "Auta stojące dłużej niż 7 dni:",
+      "daysIdle": "{days, plural, one {# dzień} few {# dni} many {# dni} other {# dni}}"
+    },
+    "tabs": {
+      "ariaLabel": "Sekcje floty dyspozytora",
+      "vehicles": "Auta",
+      "delegations": "Wyjazdy",
+      "drivers": "Kierowcy",
+      "trailers": "Naczepy"
+    },
+    "vehicles": {
+      "emptyTitle": "Brak aut",
+      "emptyMessage": "Do tego dyspozytora nie przypisano żadnych aut.",
+      "columns": {
+        "plate": "Nr rej.",
+        "side": "Nr boczny",
+        "brandModel": "Marka / model",
+        "type": "Typ",
+        "active": "Status"
+      }
+    },
+    "delegations": {
+      "emptyTitle": "Brak wyjazdów",
+      "emptyMessage": "Brak aktywnych wyjazdów do wyświetlenia.",
+      "columns": {
+        "vehicle": "Auto",
+        "driver": "Kierowca",
+        "route": "Trasa",
+        "period": "Okres",
+        "status": "Status"
+      }
+    },
+    "drivers": {
+      "emptyTitle": "Brak kierowców",
+      "emptyMessage": "Do tego dyspozytora nie przypisano żadnych kierowców.",
+      "columns": {
+        "name": "Kierowca",
+        "phone": "Telefon",
+        "active": "Status"
+      }
+    },
+    "trailers": {
+      "emptyTitle": "Brak naczep",
+      "emptyMessage": "Do tego dyspozytora nie przypisano żadnych naczep.",
+      "columns": {
+        "plate": "Nr rej.",
+        "type": "Typ",
+        "brandModel": "Marka / model",
+        "active": "Status"
+      }
+    }
+  },
   "carrier": {
     "tabs": {
       "ariaLabel": "Sekcje przewoźnika",

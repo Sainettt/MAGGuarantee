@@ -2,11 +2,15 @@ import { ForbiddenException, Injectable } from '@nestjs/common';
 
 import type {
   DriverListItem,
+  DyspozytorFleetResponse,
+  DyspozytorFleetStats,
+  DyspozytorStojacyItem,
   MyFleetQuery,
   MyFleetResponse,
   OpiekunCarrierStats,
   OpiekunCarrierVehicleStats,
   OpiekunFleetResponse,
+  PlanistaFleetResponse,
   TrailerListItem,
   VehicleListItem,
 } from '@magguarantee/shared';
@@ -22,9 +26,9 @@ import {
   CarriersRepository,
   type OpiekunAggregateCarrierRow,
 } from '../carriers/carriers.repository';
-import { DriversRepository } from '../drivers/drivers.repository';
-import { TrailersRepository } from '../trailers/trailers.repository';
-import { VehiclesRepository } from '../vehicles/vehicles.repository';
+import { DriversRepository, type DriverRow } from '../drivers/drivers.repository';
+import { TrailersRepository, type TrailerRow } from '../trailers/trailers.repository';
+import { VehiclesRepository, type VehicleRow } from '../vehicles/vehicles.repository';
 
 /**
  * "Driving" cut-off — `Code.gs:2827` uses a constant 7-day window past
@@ -78,38 +82,11 @@ export class FleetService {
       this.trailers.list({ carrierId: mine.id, active: activeFilter, limit: 200 }),
     ]);
 
-    const vehicles: VehicleListItem[] = vehicleRows.map((v) => ({
-      id: v.id,
-      plateNumber: v.plateNumber,
-      active: v.active,
-      brand: v.brand,
-      model: v.model,
-      type: v.type,
-      sideNumber: v.sideNumber,
-    }));
-
-    const drivers: DriverListItem[] = driverRows.map((d) => ({
-      id: d.id,
-      firstName: d.firstName,
-      lastName: d.lastName,
-      phone: d.phone,
-      active: d.active,
-      licenseExpiry: d.licenseExpiry
-        ? toDateString(d.licenseExpiry)
-        : null,
-    }));
-
-    const trailers: TrailerListItem[] = trailerRows.map((t) => ({
-      id: t.id,
-      plateNumber: t.plateNumber,
-      active: t.active,
-      trailerTypeId: t.trailerTypeId,
-      trailerTypeName: t.trailerType.name,
-      brand: t.brand,
-      model: t.model,
-    }));
-
-    return { vehicles, drivers, trailers };
+    return {
+      vehicles: vehicleRows.map(toVehicleListItem),
+      drivers: driverRows.map(toDriverListItem),
+      trailers: trailerRows.map(toTrailerListItem),
+    };
   }
 
   /**
@@ -276,8 +253,232 @@ export class FleetService {
     );
     return { liczbaPrzewoznikow: rows.length, vehicles };
   }
+
+  // ── Phase 6.1 — Planista read-only fleet ─────────────────
+
+  /**
+   * Read-only fleet view for the planista panel — mirrors `Code.gs:3583-3662`
+   * (`getPlanistaFleet`) but replaces the Sheets full-scan + uppercase-name
+   * matching antipattern with parameterised Prisma queries:
+   *
+   *  1. Vehicles where `Vehicle.plannerId === user.sub`. Admin callers get NO
+   *     planner filter (debug-fallback, mirrors the opiekun admin-sees-all
+   *     pattern + the carrier-panel admin debug-fallback in docs/03-roles.md).
+   *  2. Distinct `carrierIds` derived from those vehicles → load that union's
+   *     drivers + trailers (read-only). No vehicles → empty payload, no
+   *     follow-up queries (Postgres can't `IN ()`).
+   *
+   * Read-only by contract — the planista mutates nothing (docs/03-roles.md
+   * #planista). The slim list shapes match `getMyFleet` / `getOpiekunFleet`.
+   */
+  async getPlanistaFleet(user: AuthUser): Promise<PlanistaFleetResponse> {
+    this._assertRole(user, 'planista', 'Brak uprawnień (wymaga konta planisty)');
+    const vehicleRows = await this.vehicles.list({
+      // admin → no planner scope (sees every vehicle); planista → own only.
+      plannerId: user.role === 'admin' ? undefined : user.sub,
+      limit: 500,
+    });
+    const carrierIds = distinctCarrierIds(vehicleRows);
+    const { drivers, trailers } = await this._loadCarrierDriversTrailers(
+      carrierIds,
+    );
+    return {
+      vehicles: vehicleRows.map(toVehicleListItem),
+      drivers,
+      trailers,
+    };
+  }
+
+  // ── Phase 6.2 — Dyspozytor read-only fleet + stats ───────
+
+  /**
+   * Read-only fleet view + KPI stats + idle-vehicle highlight list for the
+   * dyspozytor panel — mirrors `Code.gs:3676-3772` (`getDyspozytorFleet`).
+   *
+   *  1. Vehicles where `Vehicle.dispatcherId === user.sub` (admin → all).
+   *  2. Distinct `carrierIds` → drivers + trailers (read-only).
+   *  3. `stats` from the SAME 7-day classification opiekun uses
+   *     (`_buildDispatcherStats` reuses the shared `DRIVING_RECENCY_DAYS`
+   *     cut-off so "stojące" stays identical across opiekun + dyspozytor +
+   *     legacy).
+   *  4. `stojaceList` — one row per active vehicle idle > 7 days.
+   */
+  async getDyspozytorFleet(user: AuthUser): Promise<DyspozytorFleetResponse> {
+    this._assertRole(
+      user,
+      'dyspozytor',
+      'Brak uprawnień (wymaga konta dyspozytora)',
+    );
+    const vehicleRows = await this.vehicles.list({
+      dispatcherId: user.role === 'admin' ? undefined : user.sub,
+      limit: 500,
+    });
+    const carrierIds = distinctCarrierIds(vehicleRows);
+    const { drivers, trailers } = await this._loadCarrierDriversTrailers(
+      carrierIds,
+    );
+    const nowMs = Date.now();
+    const { stats, stojaceList } = this._buildDispatcherStats(
+      vehicleRows,
+      drivers.length,
+      trailers.length,
+      nowMs,
+    );
+    return {
+      vehicles: vehicleRows.map(toVehicleListItem),
+      drivers,
+      trailers,
+      stats,
+      stojaceList,
+    };
+  }
+
+  // ── Phase 6 shared helpers ───────────────────────────────
+
+  /**
+   * Defence-in-depth role gate (the `@Roles(...)` decorator on the controller
+   * is the primary one). `admin` always passes — every read-only panel honours
+   * the admin debug-fallback. Any other role is rejected with the role-specific
+   * message.
+   */
+  private _assertRole(
+    user: AuthUser,
+    role: AuthUser['role'],
+    message: string,
+  ): void {
+    if (user.role !== 'admin' && user.role !== role) {
+      throw new ForbiddenException(message);
+    }
+  }
+
+  /**
+   * Loads the read-only driver + trailer slim-lists for a carrier union.
+   * Short-circuits to empty lists on an empty `carrierIds` set (no vehicles →
+   * no carriers → no follow-up query; Postgres rejects `IN ()`). Both reads run
+   * in parallel and reuse the FK-indexed `carrierIds` repo filter.
+   */
+  private async _loadCarrierDriversTrailers(
+    carrierIds: string[],
+  ): Promise<{ drivers: DriverListItem[]; trailers: TrailerListItem[] }> {
+    if (carrierIds.length === 0) {
+      return { drivers: [], trailers: [] };
+    }
+    const [driverRows, trailerRows] = await Promise.all([
+      this.drivers.list({ carrierIds, limit: 500 }),
+      this.trailers.list({ carrierIds, limit: 500 }),
+    ]);
+    return {
+      drivers: driverRows.map(toDriverListItem),
+      trailers: trailerRows.map(toTrailerListItem),
+    };
+  }
+
+  /**
+   * Dyspozytor KPI stats + idle-vehicle list. Bucket rules (legacy
+   * `Code.gs:3729-3766`):
+   *   - `autaNieaktywne` — `active=false`.
+   *   - `autaAktywne`    — `active=true`.
+   *   - `autaJezdzace`   — active AND (no `lastDroveAt` OR within 7 days).
+   *   - `autaStojace7dni`— active AND `lastDroveAt` older than 7 days.
+   * Invariants: `jezdzace + stojace7dni === aktywne`,
+   * `aktywne + nieaktywne === liczbaAut`.
+   *
+   * Each idle vehicle also lands in `stojaceList` with `daysIdle` =
+   * floor(days since `lastDroveAt`). `plannerName` comes from the loaded
+   * planner relation (else null); `carrierLogin` from the carrier relation.
+   */
+  private _buildDispatcherStats(
+    vehicles: VehicleRow[],
+    driverCount: number,
+    trailerCount: number,
+    nowMs: number,
+  ): { stats: DyspozytorFleetStats; stojaceList: DyspozytorStojacyItem[] } {
+    let autaAktywne = 0;
+    let autaJezdzace = 0;
+    let autaStojace7dni = 0;
+    let autaNieaktywne = 0;
+    const stojaceList: DyspozytorStojacyItem[] = [];
+
+    for (const v of vehicles) {
+      if (!v.active) {
+        autaNieaktywne += 1;
+        continue;
+      }
+      autaAktywne += 1;
+      // No data → assume driving (legacy default at `Code.gs:3736`).
+      if (!v.lastDroveAt) {
+        autaJezdzace += 1;
+        continue;
+      }
+      const diffMs = nowMs - v.lastDroveAt.getTime();
+      if (Number.isFinite(diffMs) && diffMs > DRIVING_RECENCY_MS) {
+        autaStojace7dni += 1;
+        stojaceList.push({
+          plateNumber: v.plateNumber,
+          carrierLogin: v.carrier?.login ?? '',
+          lastDroveAt: v.lastDroveAt.toISOString(),
+          daysIdle: Math.floor(diffMs / (24 * 60 * 60 * 1000)),
+          plannerName: v.planner?.name ?? null,
+        });
+      } else {
+        autaJezdzace += 1;
+      }
+    }
+
+    const stats: DyspozytorFleetStats = {
+      liczbaAut: vehicles.length,
+      autaAktywne,
+      autaJezdzace,
+      autaStojace7dni,
+      autaNieaktywne,
+      liczbaKierowcow: driverCount,
+      liczbaNaczep: trailerCount,
+    };
+    return { stats, stojaceList };
+  }
 }
 
 function toDateString(d: Date): string {
   return d.toISOString().slice(0, 10);
+}
+
+// ─── Slim-list mappers (shared by /fleet/my, /planista, /dyspozytor) ──
+
+function distinctCarrierIds(vehicles: VehicleRow[]): string[] {
+  return [...new Set(vehicles.map((v) => v.carrierId))];
+}
+
+function toVehicleListItem(v: VehicleRow): VehicleListItem {
+  return {
+    id: v.id,
+    plateNumber: v.plateNumber,
+    active: v.active,
+    brand: v.brand,
+    model: v.model,
+    type: v.type,
+    sideNumber: v.sideNumber,
+  };
+}
+
+function toDriverListItem(d: DriverRow): DriverListItem {
+  return {
+    id: d.id,
+    firstName: d.firstName,
+    lastName: d.lastName,
+    phone: d.phone,
+    active: d.active,
+    licenseExpiry: d.licenseExpiry ? toDateString(d.licenseExpiry) : null,
+  };
+}
+
+function toTrailerListItem(t: TrailerRow): TrailerListItem {
+  return {
+    id: t.id,
+    plateNumber: t.plateNumber,
+    active: t.active,
+    trailerTypeId: t.trailerTypeId,
+    trailerTypeName: t.trailerType.name,
+    brand: t.brand,
+    model: t.model,
+  };
 }
