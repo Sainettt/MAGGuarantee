@@ -424,7 +424,7 @@ function ModalBody({ claim, onClose, t, tStatus }: ModalBodyProps) {
   return (
     <form
       onSubmit={form.handleSubmit(onSubmit)}
-      className="flex h-full flex-col"
+      className="flex min-h-0 flex-1 flex-col"
     >
       <SheetBody>
         <Tabs defaultValue="edit" className="flex flex-col gap-4">

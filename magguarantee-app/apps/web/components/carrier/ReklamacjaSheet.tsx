@@ -111,7 +111,7 @@ export function ReklamacjaSheet({ open, claim, onClose }: Props) {
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
       <SheetContent>
-        <form onSubmit={onSubmit} className="flex h-full flex-col">
+        <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
           <SheetHeader>
             <SheetTitle>{t('sheetTitle')}</SheetTitle>
             <SheetDescription>

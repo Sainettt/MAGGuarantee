@@ -200,7 +200,9 @@ export function SheetHeader({
   children?: ReactNode;
 }) {
   return (
-    <div className={cn('border-b border-border px-6 py-4 pr-12', className)}>
+    <div
+      className={cn('shrink-0 border-b border-border px-6 py-4 pr-12', className)}
+    >
       {children}
     </div>
   );
@@ -248,7 +250,7 @@ export function SheetBody({
   children?: ReactNode;
 }) {
   return (
-    <div className={cn('flex-1 overflow-y-auto px-6 py-4', className)}>
+    <div className={cn('min-h-0 flex-1 overflow-y-auto px-6 py-4', className)}>
       {children}
     </div>
   );
@@ -264,7 +266,7 @@ export function SheetFooter({
   return (
     <div
       className={cn(
-        'sticky bottom-0 border-t border-border bg-card px-6 py-3',
+        'shrink-0 border-t border-border bg-card px-6 py-3',
         'flex items-center justify-end gap-2',
         className,
       )}
