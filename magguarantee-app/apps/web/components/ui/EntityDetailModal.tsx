@@ -73,6 +73,12 @@ export interface EntityDetailModalProps {
    *  this. When omitted, the «Edytuj» button is not rendered and the footer
    *  shows only «Zamknij» (read-only consumers, §6.6). */
   onEdit?: () => void;
+  /** Optional override merged onto the `<DialogContent>` — used by consumers
+   *  to override the geometry (e.g. `max-w-2xl` for the single-column
+   *  delegation route view, §6.4.1). Width is set via className per §6.2;
+   *  `tailwind-merge` lets a later `max-w-*` win over the default `max-w-5xl`.
+   *  This is geometry only — NOT a token change. */
+  className?: string;
 }
 
 export function EntityDetailModal({
@@ -84,6 +90,7 @@ export function EntityDetailModal({
   sections,
   meta,
   onEdit,
+  className,
 }: EntityDetailModalProps) {
   const t = useTranslations('entityDetail');
 
@@ -98,8 +105,12 @@ export function EntityDetailModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/* Override the primitive's default `max-w-md` + blanket `p-6`; this
-          component owns its own 3-zone padding (§6.2). */}
-      <DialogContent className="max-w-5xl max-h-[85vh] flex flex-col p-0">
+          component owns its own 3-zone padding (§6.2). A consumer-supplied
+          `className` (e.g. `max-w-2xl`) is merged last so it can override the
+          default geometry via tailwind-merge (§6.4.1). */}
+      <DialogContent
+        className={cn('max-w-5xl max-h-[85vh] flex flex-col p-0', className)}
+      >
         {/* ── Header (fixed) ─────────────────────────────────── */}
         <div className="shrink-0 border-b border-border px-6 pt-6 pb-4 pr-12 lg:px-8 lg:pt-7">
           <DialogTitle className="text-[17px] font-bold leading-tight text-text">

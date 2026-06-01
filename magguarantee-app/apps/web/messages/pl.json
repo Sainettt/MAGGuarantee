@@ -332,7 +332,8 @@
     "edit": "Edytuj",
     "close": "Zamknij",
     "createdAt": "Utworzono",
-    "updatedAt": "Zaktualizowano"
+    "updatedAt": "Zaktualizowano",
+    "gpsDeviceId": "ID urządzenia GPS"
   },
   "fileUpload": {
     "prompt": "Przeciągnij pliki tutaj lub kliknij, aby wybrać",
@@ -994,7 +995,8 @@
       "ariaLabel": "Sekcje floty planisty",
       "vehicles": "Auta",
       "drivers": "Kierowcy",
-      "trailers": "Naczepy"
+      "trailers": "Naczepy",
+      "delegations": "Wyjazdy"
     },
     "vehicles": {
       "emptyTitle": "Brak aut",
@@ -1024,6 +1026,28 @@
         "type": "Typ",
         "brandModel": "Marka / model",
         "active": "Status"
+      }
+    },
+    "kpi": {
+      "vehicles": "Auta",
+      "driving": "Jeżdżą",
+      "idle": "Stoją > 7 dni",
+      "drivers": "Kierowcy",
+      "trailers": "Naczepy"
+    },
+    "idle": {
+      "title": "Auta stojące dłużej niż 7 dni:",
+      "daysIdle": "{days, plural, one {# dzień} few {# dni} many {# dni} other {# dni}}"
+    },
+    "delegations": {
+      "emptyTitle": "Brak wyjazdów",
+      "emptyMessage": "Brak aktywnych wyjazdów do wyświetlenia.",
+      "columns": {
+        "vehicle": "Auto",
+        "driver": "Kierowca",
+        "route": "Trasa",
+        "period": "Okres",
+        "status": "Status"
       }
     }
   },
@@ -1276,7 +1300,8 @@
         "vehicleAndDriver": "Pojazd i kierowca",
         "departure": "Wyjazd",
         "return": "Powrót",
-        "audit": "Status i audyt"
+        "audit": "Status i audyt",
+        "route": "Trasa"
       },
       "status": {
         "zgloszony": "Zgłoszony",
@@ -1288,6 +1313,19 @@
         "title": "Nie można zarejestrować wyjazdu",
         "message": "Rejestracja wyjazdu nie jest możliwa, ponieważ nie wszystkie wymagane dane są uzupełnione w systemie. Skontaktuj się ze swoim opiekunem, aby uzupełnić brakujące informacje.",
         "toast": "Nie można zarejestrować wyjazdu — skontaktuj się ze swoim opiekunem."
+      },
+      "routeCard": {
+        "aria": "Trasa wyjazdu z {from} do {to}",
+        "durationDays": "{days, plural, one {# dzień · plan.} few {# dni · plan.} many {# dni · plan.} other {# dni · plan.}}",
+        "durationUnknown": "— · plan.",
+        "departure": "Wyjazd",
+        "return": "Powrót",
+        "plannedPrefix": "plan:",
+        "actualPrefix": "faktyczny:",
+        "postalPrefix": "kod:"
+      },
+      "strip": {
+        "trailer": "Naczepa {plate}"
       }
     },
     "fleet": {
@@ -1334,6 +1372,34 @@
           "brandModel": "Marka / model",
           "status": "Status"
         }
+      }
+    }
+  },
+  "fleet": {
+    "a11y": {
+      "showDetails": "Pokaż szczegóły: {name}",
+      "showDelegationDetails": "Pokaż szczegóły wyjazdu: {name}"
+    },
+    "vehicle": {
+      "sections": {
+        "identification": "Identyfikacja",
+        "equipment": "Wyposażenie",
+        "permissions": "Pozwolenia",
+        "usage": "Eksploatacja"
+      }
+    },
+    "driver": {
+      "sections": {
+        "personal": "Dane osobowe i kontakt",
+        "documents": "Dokumenty",
+        "notes": "Notatki"
+      }
+    },
+    "trailer": {
+      "sections": {
+        "identification": "Identyfikacja",
+        "dimensions": "Wymiary",
+        "equipment": "Wyposażenie"
       }
     }
   }

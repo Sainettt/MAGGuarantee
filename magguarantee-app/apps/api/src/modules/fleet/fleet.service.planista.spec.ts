@@ -211,11 +211,25 @@ describe('FleetService.getPlanistaFleet — role gating', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('allows a planista caller', async () => {
+  it('allows a planista caller (empty fleet → zeroed stats + empty lists)', async () => {
     const svc = newSvc({ vehicles: [] });
     await expect(
       svc.getPlanistaFleet(makeAuth('planista', 'plan-self')),
-    ).resolves.toEqual({ vehicles: [], drivers: [], trailers: [] });
+    ).resolves.toEqual({
+      vehicles: [],
+      drivers: [],
+      trailers: [],
+      stats: {
+        liczbaAut: 0,
+        autaAktywne: 0,
+        autaJezdzace: 0,
+        autaStojace7dni: 0,
+        autaNieaktywne: 0,
+        liczbaKierowcow: 0,
+        liczbaNaczep: 0,
+      },
+      stojaceList: [],
+    });
   });
 });
 
@@ -289,12 +303,26 @@ describe('FleetService.getPlanistaFleet — plannerId scoping', () => {
       capturedDrivers,
     });
     const out = await svc.getPlanistaFleet(makeAuth('planista', 'plan-empty'));
-    expect(out).toEqual({ vehicles: [], drivers: [], trailers: [] });
+    expect(out).toEqual({
+      vehicles: [],
+      drivers: [],
+      trailers: [],
+      stats: {
+        liczbaAut: 0,
+        autaAktywne: 0,
+        autaJezdzace: 0,
+        autaStojace7dni: 0,
+        autaNieaktywne: 0,
+        liczbaKierowcow: 0,
+        liczbaNaczep: 0,
+      },
+      stojaceList: [],
+    });
     // No vehicles → no carrier union → drivers/trailers repos never queried.
     expect(capturedDrivers.value).toBeUndefined();
   });
 
-  it('maps vehicle rows to the slim list-item shape', async () => {
+  it('maps vehicle rows to the enriched slim list-item shape (§6.4.2 — no rate fields)', async () => {
     const svc = newSvc({
       vehicles: [
         makeVehicle({
@@ -306,6 +334,30 @@ describe('FleetService.getPlanistaFleet — plannerId scoping', () => {
           model: 'R450',
           type: 'MEGA',
           sideNumber: 'SN-7',
+          // Phase 6.4 additive fields — explicit non-default values so the
+          // mapper coverage is meaningful.
+          year: 2022,
+          euro: 'V',
+          certificateL: true,
+          gps: true,
+          gpsMobilePhone: 'TRK-12345',
+          fuelCard: true,
+          agreement: true,
+          adr: true,
+          wasteAllowed: true,
+          wasteCountries: ['DE', 'FR'],
+          cabotageDe: true,
+          cabotageFr: false,
+          gb: true,
+          it: false,
+          fr: true,
+          lastDroveAt: new Date('2026-05-20T10:00:00.000Z'),
+          notes: 'serwis co 30 tys.',
+          // Rate fields are on the row but MUST NOT appear in the slim item.
+          rateDe: 1.1,
+          rateUe: 1.2,
+          rateExport: 1.3,
+          rateImport: 1.4,
         }),
       ],
     });
@@ -318,6 +370,97 @@ describe('FleetService.getPlanistaFleet — plannerId scoping', () => {
       model: 'R450',
       type: 'MEGA',
       sideNumber: 'SN-7',
+      year: 2022,
+      euro: 'V',
+      certificateL: true,
+      gps: true,
+      gpsMobilePhone: 'TRK-12345',
+      fuelCard: true,
+      agreement: true,
+      adr: true,
+      wasteAllowed: true,
+      wasteCountries: ['DE', 'FR'],
+      cabotageDe: true,
+      cabotageFr: false,
+      gb: true,
+      it: false,
+      fr: true,
+      lastDroveAt: '2026-05-20T10:00:00.000Z',
+      notes: 'serwis co 30 tys.',
     });
+    // HARD EXCLUSION (§6.4.2): no rate fields ever reach planista/dyspozytor.
+    const item = out.vehicles[0] as Record<string, unknown>;
+    expect(item.rateDe).toBeUndefined();
+    expect(item.rateUe).toBeUndefined();
+    expect(item.rateExport).toBeUndefined();
+    expect(item.rateImport).toBeUndefined();
+  });
+});
+
+describe('FleetService.getPlanistaFleet — stats + stojaceList parity with dyspozytor (Phase 6.4)', () => {
+  const NOW = new Date('2026-05-27T12:00:00.000Z');
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  beforeAll(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(NOW);
+  });
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
+  it('computes the SAME 7-day classification + stojaceList the dyspozytor uses', async () => {
+    const svc = newSvc({
+      vehicles: [
+        // jezdzace: active + recent
+        makeVehicle({ id: 'v-r1', plannerId: 'plan-self', carrierId: 'c-1', active: true, lastDroveAt: new Date(NOW.getTime() - 1 * DAY_MS) }),
+        // jezdzace: active + null lastDroveAt (no data → driving)
+        makeVehicle({ id: 'v-r2', plannerId: 'plan-self', carrierId: 'c-1', active: true, lastDroveAt: null }),
+        // stojace: active + 10 days idle
+        makeVehicle({
+          id: 'v-s1',
+          plannerId: 'plan-self',
+          carrierId: 'c-1',
+          active: true,
+          plateNumber: 'PL-IDLE',
+          lastDroveAt: new Date(NOW.getTime() - 10 * DAY_MS),
+          carrier: { id: 'c-1', login: 'pwz-idle', name: 'Pwz Idle' },
+          planner: { id: 'plan-self', login: 'plan', name: 'Anna Planista' },
+        }),
+        // nieaktywne
+        makeVehicle({ id: 'v-n1', plannerId: 'plan-self', carrierId: 'c-1', active: false, lastDroveAt: new Date(NOW.getTime() - 30 * DAY_MS) }),
+        // belongs to another planner → excluded from the scoped set entirely
+        makeVehicle({ id: 'v-other', plannerId: 'plan-other', carrierId: 'c-2', active: true, lastDroveAt: new Date(NOW.getTime() - 90 * DAY_MS) }),
+      ],
+      drivers: [makeDriver({ id: 'd-1', carrierId: 'c-1' }), makeDriver({ id: 'd-2', carrierId: 'c-1' })],
+      trailers: [makeTrailer({ id: 't-1', carrierId: 'c-1' })],
+    });
+    const out = await svc.getPlanistaFleet(makeAuth('planista', 'plan-self'));
+    expect(out.stats).toEqual({
+      liczbaAut: 4,
+      autaAktywne: 3,
+      autaJezdzace: 2,
+      autaStojace7dni: 1,
+      autaNieaktywne: 1,
+      liczbaKierowcow: 2,
+      liczbaNaczep: 1,
+    });
+    // Legacy invariants hold (identical to dyspozytor).
+    expect(out.stats.autaJezdzace + out.stats.autaStojace7dni).toBe(
+      out.stats.autaAktywne,
+    );
+    expect(out.stats.autaAktywne + out.stats.autaNieaktywne).toBe(
+      out.stats.liczbaAut,
+    );
+    // stojaceList: one row per active idle>7d vehicle, identical field names.
+    expect(out.stojaceList).toEqual([
+      {
+        plateNumber: 'PL-IDLE',
+        carrierLogin: 'pwz-idle',
+        lastDroveAt: new Date(NOW.getTime() - 10 * DAY_MS).toISOString(),
+        daysIdle: 10,
+        plannerName: 'Anna Planista',
+      },
+    ]);
   });
 });

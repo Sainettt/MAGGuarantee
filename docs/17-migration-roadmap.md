@@ -468,6 +468,18 @@
 - **6-й KPI-tile `autaNieaktywne`** доступен в `stats`, но не выводится (grid зафиксирован 5-up по DS). Тривиально добавить (`lg:grid-cols-6`).
 - **`GET /opiekun/carriers`** и теперь `/fleet/{planista,dyspozytor}` — все три есть в `docs/13-api-design.md`; новые response-схемы документировать при следующей правке docs.
 
+### Доработка (2026-06-01, post-Phase-6 refinement)
+
+По запросу владельца продукта — улучшения поверх готовой Фазы 6 (роутинг через `orchestrator-agent`, uiux → api → web):
+
+- ✅ **Redesign detail-модалки выезда** (`DelegationDetailModal`, единый компонент → применяется везде: carrier + planista + dyspozytor). Новый «route-card» макет (DS §6.4.1): шапка = только номер авто + статус-badge (имя водителя убрано из шапки → перенесено в body-секцию), презентационный `<RouteCard>` (страна выезда → грузовик + пилюля «X dni · plan.» → страна возврата). Все 19 полей `DelegationDto` сохранены. Read-only, `max-w-2xl`.
+- ✅ **Planista = Dyspozytor (временный паритет).** Извлечён общий `<FleetPanel>` (KPI-полоска + stojaceList + 4 вкладки Auta/Wyjazdy/Kierowcy/Naczepy), обе страницы — тонкие обёртки. Помечено в коде как TEMPORARY (разойдутся позже). Backend: `PlanistaFleetResponse` расширен `stats`+`stojaceList`; `getPlanistaFleet` строит их теми же хелперами (`_buildDispatcherStats`/`DRIVING_RECENCY_DAYS=7`).
+- ✅ **Кликабельные строки → read-only модалки.** В `DataTable` добавлена клавиатурная a11y для активируемых строк (`role="button"`, `tabIndex=0`, Enter/Space, focus-ring, `rowAriaLabel`). Новые read-only модалки `FleetVehicleDetailModal`/`FleetDriverDetailModal`/`FleetTrailerDetailModal` (на `EntityDetailModal`), рендерятся из обогащённых slim-DTO **без доп. запроса**. Выезды → `DelegationDetailModal`.
+- ✅ **Обогащение slim-DTO** (DS §6.4.2): `VehicleListItem`/`DriverListItem`/`TrailerListItem` дополнены курируемыми read-only полями, отдаются через уже-заскоупленные `/fleet/*`. **Без новых endpoint'ов, без расширения ролей, без IDOR.** Финансовые ставки (`rateDe/Ue/Export/Import`) и `bankAccount` **не** экспонируются planista/dyspozytor. `gpsMobilePhone` подписан как «ID urządzenia GPS» (quirk #2), `lastDroveAt` — display-only (quirk #11).
+- ✅ **Security-hardening delegacji:** planista убран из all-access ветки `_scopeListFilters` → scope по `plannerId` (закрыта утечка из находки smoke-ревью); `getOne` защищён для planista (`plannerId`) и dyspozytor (`dispatcherId`) — закрыта by-id дыра. `pracownik` по-прежнему 403 везде (quirk #13).
+- Тесты: api 50 fleet + 33 delegations зелёные; web typecheck/lint/build чистые; PL/EN паритет 1060 ключей.
+- **Осталось вне scope:** opiekun/eksport all-access на `GET /delegations` (нет панелей — отдельно). Метка вкладки выездов оставлена «Wyjazdy» (консистентно с carrier-UI), хотя DS §6.3 предлагает «Delegacje».
+
 ### Исходный план (до старта — оставлен для истории)
 
 Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspozytorId=...`. Frontend: отдельные страницы `app/(planista)/fleet|drivers` и `app/(dyspozytor)/fleet|delegations`. Фактическая реализация: single-page tabbed-панели + серверный scope вместо query-param (см. зафиксированные решения выше).

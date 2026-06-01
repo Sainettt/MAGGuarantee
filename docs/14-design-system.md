@@ -3531,3 +3531,209 @@ Notes: `bg-warning/10` + `border-warning/40` are token-with-opacity, **not** new
 - [ ] **Dark-mode verified.** Both panels — banner (`bg-input`), KPI tiles (`bg-card`), DataTable header (`bg-bg`), idle sub-list (`bg-warning/10` + `bg-card` chips), badges, and tab bar — legible with no hacks (tokens / `dark:` variants only).
 - [ ] **Container width.** Page uses the 4.4 strip `mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-8`; tables do not stretch edge-to-edge on ultra-wide.
 
+## Phase 6.4 — Read-only fleet detail modals + clickable rows (planista / dyspozytor)
+
+> **Scope (improvement pass on the completed Phase 6.3 panels).** Three deliverables:
+> 1. **Delegation detail modal redesign** — the "route-card" layout (§6.4.1).
+> 2. **Read-only vehicle / driver / trailer detail modals** for the planista + dyspozytor fleet tabs, with the exact curated field set that defines the `/fleet/*` list-item API contract (§6.4.2).
+> 3. **Clickable-row affordance** for the read-only fleet tables + the Wyjazdy/Delegacje table (§6.4.3).
+>
+> **No new tokens** (4.4 surface-token policy holds). Everything composes from `bg-card` / `bg-input` / `bg-bg`, the semantic accent tokens (`text-success/warning/danger/info/text-sub/brand`), the existing radius scale, `shadow-modal`, `shadow-card`, and the brand palette with opacity (`/10`, `/40`, `/60`). Read-only everywhere: the only footer action is «Zamknij».
+
+### 6.4.1 Delegation detail modal — the "route-card" layout
+
+**Recommendation (EntityDetailModal vs bespoke): keep `EntityDetailModal`, add ONE full-width custom body section.** Do **not** fork a bespoke `DelegationDetailModal` shell. Rationale:
+
+- The generic shell already gives us, for free, everything the new design needs: the 3-zone flex column (pinned header / scroll body / pinned footer), the title + badge-row header, the read-only footer with the meta line + «Zamknij» only (no `onEdit` ⇒ no «Edytuj», §6.6), focus-trap, Escape, scroll-lock, `animate-modal-in`, `shadow-modal`.
+- The §6.20 `fullWidth` row + §6.4 `span: 'full'` pattern is **exactly** the escape hatch for "embedded non-label/value block inside an `EntityDetailModal`" (its canonical use is the `<BreakdownTable>` in `ClaimDetailModal`). The route card is just another such block — a `<RouteCard>` rendered as the value of a single `fullWidth` row in a `span: 'full'` section. This is a documented, supported composition, **not** a workaround.
+- Forking a bespoke centered `<Dialog>` would duplicate the header/footer/scroll/a11y plumbing and create a second surface that drifts from the locked §6.0 read-only-`Dialog` contract. Reject it.
+
+So `DelegationDetailModal.tsx` stays a thin wrapper over `<EntityDetailModal>`; the only new artefact is a presentational **`<RouteCard>`** component (new entry in the catalogue, §6.4.4) and a small **`<DriverVehicleRow>`** strip (may live inline in the wrapper — not catalogue-worthy).
+
+**Header change (required).** The header currently renders the driver name as the subtitle. **Remove it.** The new header carries **only**:
+- **Title** = `vehicle.plateNumber` (kept `font-mono`, the existing treatment).
+- **Badge row** = the `<StatusBadge status={delegation.status} />` (unchanged).
+- **Subtitle** = **omitted** (`subtitle={undefined}`). The driver moves into the body (see «Driver + vehicle» strip). Per §6.3 the shell drops the subtitle line entirely when none is passed — no empty gutter.
+
+**Body — three blocks, top to bottom:**
+
+```
+┌─ body (single full-width column — see "span" note) ────────────────────────┐
+│                                                                            │
+│  ╭─ RouteCard (section A, span:'full', fullWidth row) ──────────────────╮  │
+│  │                                                                      │  │
+│  │   ( DE )  ───────  🚚  [ 4 dni · plan. ]  ───────►  ( PL )           │  │
+│  │   wyjazd                                              powrót          │  │
+│  │   12.03.2025, 08:00          (duration pill on        plan: 16.03.2025│  │
+│  │   kod: 40-001                 the connector)          kod: 00-950     │  │
+│  │                                              faktyczny: —             │  │
+│  ╰──────────────────────────────────────────────────────────────────────╯  │
+│                                                                            │
+│  ╭─ Driver + vehicle strip (section B, span:'full', fullWidth row) ─────╮  │
+│  │   (avatar) Jan Kowalski            │  NR REJ.  WGM 1234              │  │
+│  │           +48 600 000 000          │  Naczepa  WGM 5678N            │  │
+│  ╰──────────────────────────────────────────────────────────────────────╯  │
+│                                                                            │
+│  ╭─ STATUS I AUDYT (section C, normal label/value rows) ────────────────╮  │
+│  │   Zgłoszone przez   …        Zgłoszono   …                            │  │
+│  │   Zweryfikowane     …        Zweryfikowano …                          │  │
+│  │   Notatki           …  (fullWidth row, §6.20 long-text)               │  │
+│  ╰──────────────────────────────────────────────────────────────────────╯  │
+└────────────────────────────────────────────────────────────────────────────┘
+   Footer:  Utworzono {createdAt}            [ Zamknij ]
+```
+
+**Section span decision.** All three sections are `span: 'full'` so the modal body is a single column (the route card and the driver/vehicle strip are inherently wide; pairing them into the lg 2-column grid would crush the route connector). This means the modal does **not** need the wide `max-w-5xl` of the dense vehicle modal — pass `className="max-w-2xl"` on `<EntityDetailModal>` to override back to ~672px, because a single-column route view reads better narrower (the wide variant exists for the 2-column field grids; this modal has no grid). This is a per-consumer className override of the geometry (§6.2 already establishes width is set via the `className` prop), **not** a token change.
+
+**Block A — `<RouteCard>` (new component, §6.4.4).** A three-zone horizontal composition inside one `rounded-xl border border-border/60 bg-card p-5` card (matches the §6.4 section-card recipe — no tint, no extra shadow):
+
+| Zone | Content | Spec |
+|---|---|---|
+| **Departure (left)** | Country "circle" + label «Wyjazd» + date-time + postal | Circle: `inline-flex h-12 w-12 items-center justify-center rounded-full border border-border bg-input text-sm font-bold text-text` showing the **ISO country code** (`departureCountry`, e.g. `DE`). Under it: `text-[11px] font-semibold uppercase tracking-[0.08em] text-text-sub` = «Wyjazd»; then `text-sm text-text tabular-nums` = `formatDateTime(departureAt)` (date + time, since `departureAt` is a datetime); then `text-xs text-text-sub` = «kod: {departurePostalCode}» mono. |
+| **Connector (center)** | Arrow line + truck icon + duration pill | A horizontal connector: `flex-1` with a hairline rule (`h-px bg-border` or `border-t border-border`) running behind a centered cluster. Cluster = Lucide `<Truck size={18} className="text-text-sub" />` + the **duration pill**. End the line with a Lucide `<ChevronRight>` / arrowhead pointing at the return circle. On narrow widths the connector rotates to vertical (see responsive). |
+| **Return (right)** | Country circle + label «Powrót» + planned date + postal + actual | Circle same recipe, code = `returnCountry`. Label «Powrót». Planned: `text-sm text-text tabular-nums` = «plan: {formatDateFull(plannedReturnAt)}» (date-only — `plannedReturnAt` is `@db.Date`). Postal: `text-xs text-text-sub` = «kod: {returnPostalCode}» mono. **Actual** return line (always shown, even when null): `text-xs text-text-sub` = «faktyczny: {actualReturnAt ? formatDateTime(actualReturnAt) : '—'}». The em-dash uses the standard empty treatment (§6.5). |
+
+**Duration pill** — `inline-flex items-center gap-1 rounded-full border border-border bg-input px-2.5 py-0.5 text-xs font-medium text-text-sub` with the text «{n} dni · plan.». `n` = **whole-day count between `departureAt` and `plannedReturnAt`**, computed date-only: `differenceInCalendarDays(plannedReturnAt, departureAt.slice(0,10))` (drop the time portion of `departureAt`, exactly mirroring the zod cross-field validation at `delegations.ts:113`). Pluralize via the existing PL plural i18n (`1 dzień` / `2–4 dni` / `5+ dni`) — add `delegations.routeCard.durationDays` ICU plural; the `· plan.` suffix marks it as the *planned* span (so it never reads as actual elapsed time). Guard `n >= 0` (the zod schema already forbids `plannedReturnAt < departureAt`); if for any reason the pill would be negative, render «— · plan.».
+
+**Block B — Driver + vehicle strip.** A single `rounded-xl border border-border/60 bg-card p-5` card split into two halves on `sm+` (`grid grid-cols-1 sm:grid-cols-2 gap-4`), stacked on phones:
+
+- **Driver half:** a small avatar circle (`inline-flex h-9 w-9 items-center justify-center rounded-full bg-input text-text-sub` with a Lucide `<User size={18} />` — **no** photo, no initials needed) + a two-line stack: name `text-sm font-semibold text-text` (`driver.firstName + lastName` ?? `driverNameSnapshot`, em-dash if both null) and phone `text-xs text-text-sub font-mono` (`driverPhoneSnapshot`, em-dash if null). This is where the driver name + phone live now (moved out of the header).
+- **Vehicle half:** a compact label/value pair set — «NR REJ.» → `vehicle.plateNumber` (`font-mono font-semibold`); «Naczepa» → `trailer.plateNumber` rendered as the connected string «Naczepa {plate}» (`font-mono`, em-dash → «Naczepa —» if no trailer). Use the same `text-[11px] uppercase tracking-[0.08em] text-text-sub` mini-label treatment as the route-card sub-labels for visual consistency.
+
+**Block C — «STATUS I AUDYT» section.** A normal `<EntityDetailSection>` (NOT custom) — reuses the standard label/value `<dl>` rows (§6.5), so all the system/audit fields keep their proven rendering:
+
+| Row | Field | Formatter |
+|---|---|---|
+| Zgłoszone przez | `reportedBy?.name ?? reportedBy?.login` | `textValue` |
+| Zgłoszono | `reportedAt` | `dateTimeValue` |
+| Zweryfikowane przez | `verifiedBy?.name ?? verifiedBy?.login` | `textValue` |
+| Zweryfikowano | `verifiedAt` | `dateTimeValue` |
+| Notatki | `notes` | `textValue`, **`fullWidth: true`** (§6.20 — long free-text spans the section, no label gutter; the sr-only `<dt>` keeps the «Notatki» label for SR users, and a visible inline caption is acceptable) |
+
+Section header: icon `<ClipboardCheck>` (or keep `<Info>`), label «STATUS I AUDYT». `span: 'full'`.
+
+**All fields accounted for (no field dropped).** Mapping of the 19 `DelegationDto` fields to the new layout:
+- Header: `vehicle.plateNumber` (title), `status` (badge).
+- Route card: `departureAt`, `departureCountry`, `departurePostalCode`, `plannedReturnAt`, `returnCountry`, `returnPostalCode`, `actualReturnAt` (+ the derived duration pill).
+- Driver/vehicle strip: `driver`/`driverNameSnapshot`, `driverPhoneSnapshot`, `vehicle.plateNumber` (echoed in body for the strip), `trailer.plateNumber`.
+- Status & audit section: `reportedBy`, `reportedAt`, `verifiedBy`, `verifiedAt`, `notes`.
+- Footer meta line: `createdAt`, `updatedAt` (unchanged, §6.6).
+
+**Read-only.** No `onEdit` is passed ⇒ footer is meta line + «Zamknij» only (the existing behaviour — keep it). No edit/cancel control inside the modal.
+
+**Responsive (RouteCard).**
+- `≥ sm`: horizontal — `flex items-center gap-3`, departure / connector(`flex-1`) / return. Connector line + truck + pill centered.
+- `< sm` (≤640px): the route card switches to a **vertical timeline** — departure block on top, a vertical connector (`<ArrowDown>` icon + the duration pill, with a `w-px bg-border` vertical rule), return block below. Use `flex flex-col items-start gap-3`. The circles stay `h-12 w-12`; the connector swaps `ChevronRight`→`ArrowDown`. Never horizontally scroll the card.
+
+**a11y.** The route card is decorative-structural: wrap it in a `<div role="group" aria-label={t('routeCard.aria')}>` («Trasa wyjazdu z {DE} do {PL}»). The truck/arrow icons are `aria-hidden`. The duration pill text is real text (not icon-only) so SR users hear «4 dni, planowane». Country codes in the circles are real text. Contrast: `text-text-sub` on `bg-input` and on `bg-card` both clear AA at the 12px/13px sizes used; the duration pill border (`border-border`) carries a non-colour boundary so the pill is legible without relying on the faint `bg-input` fill.
+
+### 6.4.2 Read-only detail modals — vehicle / driver / trailer (planista + dyspozytor)
+
+These three modals open when a row in the planista/dyspozytor fleet tabs (§6.4.3) is clicked. They reuse the **same `<EntityDetailModal>` shell and the same wrappers already specified for the admin context in §6.15 / §6.16 / §6.17** — but in the **read-only context** (no `onEdit` ⇒ footer is «Zamknij» only, §6.6).
+
+**The data-availability gap and the API contract.** The admin vehicle/driver/trailer modals (§6.15–§6.17) read **full** `VehicleDto`/`DriverDto`/`TrailerDto`. The planista/dyspozytor panels are served by `/fleet/planista` and `/fleet/dyspozytor`, which currently return the **slim** `VehicleListItem` / `DriverListItem` / `TrailerListItem` (see `packages/shared/src/schemas/fleet.ts`). A detail modal needs more than the slim list carries. Two options were considered:
+
+- (a) lazily fetch the full `*Dto` on row click — rejected: planista/dyspozytor have no JWT scope on the admin `/vehicles/:id` etc. endpoints, and adding role grants there widens the attack surface for fields they must not see (rates).
+- (b) **enrich the slim list-items** with a curated, non-sensitive field set so the panel renders the modal from data it already holds — **chosen.** api-agent widens the three `*ListItemSchema` with the additive fields below. Because these are **additive/optional**, they also flow into the carrier `/fleet/my` payload — which is fine: a carrier owns its own fleet and the added fields are all non-sensitive (no rates). **The field lists below ARE the api contract** — api-agent adds exactly these and nothing more.
+
+**HARD EXCLUSION (all three entities):** never include `rateDe` / `rateUe` / `rateExport` / `rateImport`. Planista/dyspozytor must not see pricing. The vehicle "Stawki" section from §6.15 is **dropped entirely** in this read-only fleet context.
+
+**Formatters:** use the existing `entity-detail-values.tsx` helpers — `textValue` / `monoValue` / `dateValue` / `boolValue(v, yes, no)` / `listValue`. Empty/null → em-dash via each helper (§6.5). An entire section is omitted by the wrapper only if **every** value in it is empty (§6.4 "Empty section").
+
+#### Vehicle detail modal (fleet read-only) — `<FleetVehicleDetailModal>`
+
+- **Title** = `plateNumber` (mono). **Subtitle** = `[brand, model].filter(Boolean).join(' ')` (neutral) or omit. **Badge** = active/inactive.
+- (a) **Slim fields already present** (keep): `plateNumber`, `sideNumber`, `brand`, `model`, `type`, `active`.
+- (b) **Additive fields api must add to `VehicleListItemSchema`:** `year`, `euro`, `certificateL`, `gps`, `gpsMobilePhone`, `fuelCard`, `agreement`, `adr`, `wasteAllowed`, `wasteCountries`, `cabotageDe`, `cabotageFr`, `gb`, `it`, `fr`, `lastDroveAt`, `notes`. **Excluded:** all four rate fields; `carrier`/`planner`/`dispatcher` relations (not needed in a role panel scoped to the viewer's own fleet — omit the §6.15 "Przypisanie" section here); `adrClasses` and `wasteCountries` only if the slim DTO doesn't already model them as arrays — `wasteCountries` is added as `z.array(z.string()).nullable()`. (`adrClasses` is **not** in `VehicleDto` — the boolean `adr` flag is what exists; surface `adr` as a bool, do not fabricate `adrClasses`.)
+
+| Section | `span` | Icon | Rows (label → field → formatter) |
+|---|---|---|---|
+| **Identyfikacja** (`sections.identification`) | half | `<Truck>` | Numer rejestracyjny → `plateNumber` `monoValue` · Numer boczny → `sideNumber` `textValue` · Marka → `brand` `textValue` · Model → `model` `textValue` · Rok → `year` `textValue(String(year))` · Typ → `type` (raw enum MEGA/STD/COIL) `textValue` · Norma EURO → `euro` (raw enum) `textValue` · Certyfikat L → `certificateL` `boolValue` |
+| **Wyposażenie** (`sections.equipment`) | half | `<Package>` | GPS → `gps` `boolValue` · **ID urządzenia GPS** → `gpsMobilePhone` `monoValue` *(Quirk #2 — label is the GPS tracker device ID, NEVER "telefon")* · Karta paliwowa → `fuelCard` `boolValue` · Porozumienie → `agreement` `boolValue` |
+| **Pozwolenia** (`sections.permissions`) | full | `<ShieldCheck>` | ADR → `adr` `boolValue` · Odpady → `wasteAllowed` `boolValue` · Kraje odpadowe → `wasteCountries` `listValue` · Kabotaż DE → `cabotageDe` `boolValue` · Kabotaż FR → `cabotageFr` `boolValue` · GB → `gb` `boolValue` · IT → `it` `boolValue` · FR → `fr` `boolValue` |
+| **Eksploatacja** (`sections.usage`) | full | `<Globe2>` | Ostatni przejazd → `lastDroveAt` `dateValue` *(Quirk #11 — display-only, never editable; fine to show here)* · Notatki → `notes` `textValue` `fullWidth: true` |
+
+#### Driver detail modal (fleet read-only) — `<FleetDriverDetailModal>`
+
+- **Title** = `firstName + lastName`. **Subtitle** = `idDocumentNumber` (mono) or omit. **Badge** = active/inactive.
+- (a) **Slim fields already present** (keep): `firstName`, `lastName`, `phone`, `active`, `licenseExpiry` (already in slim DTO).
+- (b) **Additive fields api must add to `DriverListItemSchema`:** `phone2`, `email`, `idDocumentNumber`, `adr`, `notes`. **Excluded:** `bankAccount` (financial-adjacent; keep it out of the role panels), `carrier` relation.
+
+| Section | `span` | Icon | Rows (label → field → formatter) |
+|---|---|---|---|
+| **Dane osobowe i kontakt** (`sections.personal`) | half | `<User>` | Imię → `firstName` `textValue` · Nazwisko → `lastName` `textValue` · Telefon → `phone` `textValue` · Telefon (drugi) → `phone2` `textValue` · E-mail → `email` `textValue` |
+| **Dokumenty** (`sections.documents`) | half | `<CreditCard>` | Numer dokumentu tożsamości → `idDocumentNumber` `monoValue` · Ważność prawa jazdy → `licenseExpiry` `dateValue` · ADR → `adr` `boolValue` |
+| **Notatki** (`sections.notes`) | full | `<StickyNote>` | Notatki → `notes` `textValue` `fullWidth: true` *(omit the whole section if `notes` is empty)* |
+
+#### Trailer detail modal (fleet read-only) — `<FleetTrailerDetailModal>`
+
+- **Title** = `plateNumber` (mono). **Subtitle** = `trailerType.shortCode ?? trailerType.name` (neutral) or `trailerTypeName`. **Badge** = active/inactive.
+- (a) **Slim fields already present** (keep): `plateNumber`, `trailerTypeName` (the slim DTO carries `trailerTypeId` + `trailerTypeName`), `brand`, `model`, `active`.
+- (b) **Additive fields api must add to `TrailerListItemSchema`:** `year`, `belts`, `beltsCount`, `mats`, `matsCount`, `innerLength`, `innerWidth`, `innerHeight`, `capacity`, `airSuspension`, `certXl`, `multilock`, `notes`. (No rates exist on trailers — nothing to exclude beyond the universal rule.) The slim DTO may keep `trailerTypeName` flat; the modal can render `[shortCode] name` only if `shortCode` is also added — otherwise show `trailerTypeName` as-is.
+
+| Section | `span` | Icon | Rows (label → field → formatter) |
+|---|---|---|---|
+| **Identyfikacja** (`sections.identification`) | half | `<Container>` | Numer rejestracyjny → `plateNumber` `monoValue` · Typ naczepy → `trailerTypeName` `textValue` · Marka → `brand` `textValue` · Model → `model` `textValue` · Rok → `year` `textValue(String(year))` |
+| **Wymiary** (`sections.dimensions`) | half | `<Ruler>` | Długość wewn. (m) → `innerLength` `textValue` · Szerokość wewn. (m) → `innerWidth` `textValue` · Wysokość wewn. (m) → `innerHeight` `textValue` · Ładowność (t) → `capacity` `textValue` |
+| **Wyposażenie** (`sections.equipment`) | full | `<Package>` | Pasy → `belts` `boolValue` · Liczba pasów → `beltsCount` `textValue` · Maty → `mats` `boolValue` · Liczba mat → `matsCount` `textValue` · Zawieszenie pneum. → `airSuspension` `boolValue` · Certyfikat XL → `certXl` `boolValue` · Multilock → `multilock` `boolValue` · Notatki → `notes` `textValue` `fullWidth: true` |
+
+> Dimension/capacity units are in the labels («(m)», «(t)») so the values are bare numbers — same convention as §6.17.
+
+**Empty-state handling (all three modals).** Per-row empties render `—` (the helpers do this). A section whose every value is empty is **omitted** by the wrapper (e.g. a trailer with no dimensions drops «Wymiary»; a driver with no notes drops «Notatki»). The modal as a whole is never empty — title (plate / name) + active badge always exist. No skeleton/loading/error state is needed: the data is already in the panel's `/fleet/*` query when the row is clicked (same "no second fetch" rationale as §6.8).
+
+**Wrappers vs reuse of §6.15–§6.17 wrappers.** Because the field set differs (no rates, no relations, slightly regrouped sections) and the **data shape** differs (slim+enriched list-item vs full Dto), these are **new thin wrappers** colocated with the fleet panels — `components/fleet/FleetVehicleDetailModal.tsx` etc. — NOT the admin `VehicleDetailModal`. They still compose the **same generic `<EntityDetailModal>`** and the **same `entity-detail-values.tsx` helpers** — zero new shell code. Do not re-implement the shell.
+
+### 6.4.3 Clickable-row affordance (read-only fleet + Delegacje tables)
+
+The `<DataTable>` primitive **already** supports `onRowClick` and applies `cursor-pointer` + `hover:bg-brand-50 dark:hover:bg-brand/10` when a handler is present (`components/ui/DataTable.tsx`). The Phase 6.3 fleet sub-tables (`FleetVehiclesTable` / `FleetDriversTable` / `FleetTrailersTable`) and the Delegacje table are currently **inert** (no `onRowClick`). Making them clickable is now a behaviour change *plus* an a11y gap to close — the current `<tr onClick>` is **mouse-only** (no keyboard, no role/aria). The clickable-row pattern below is the canonical recipe; web-agent applies it to all four tables and back-ports the keyboard/aria bits into the `DataTable` primitive so every future clickable table inherits it.
+
+**Visual / interaction (already present, keep):**
+- Cursor: `cursor-pointer` on the row (only when `onRowClick` is set — keep the conditional).
+- Hover background: `hover:bg-brand-50 dark:hover:bg-brand/10` (the established interactive-row hover, §4.4 "Brand-tinted hover"). No new token.
+- Transition: `transition-colors` (already on the row).
+
+**Keyboard + a11y (NEW — add to the `<tr>` when `onRowClick` is set):**
+- `tabIndex={0}` — the row enters the tab order.
+- `role="button"` — announces the row as activatable (the row is a `<tr>`; `role="button"` on it is acceptable here since the whole row is a single action target; do NOT also put interactive controls inside these read-only rows, so there's no nested-interactive conflict).
+- `aria-label` — a concise row summary so SR users know what opens, e.g. «Pokaż szczegóły: {plateNumber}» / «Pokaż szczegóły delegacji: {plate}». web-agent supplies it via an optional `rowAriaLabel?: (row: T) => string` prop on `DataTable` (additive, optional — when omitted, no `aria-label` and the row stays non-interactive-labelled but still clickable for mouse; for the fleet tables, **always** pass it).
+- `onKeyDown` — **Enter** and **Space** activate the row (`if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onRowClick(row); }`). `preventDefault` on Space stops the page from scrolling.
+- **Focus ring:** `focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset` on the `<tr>`. `ring-inset` keeps the ring inside the row bounds (a row spans the full table width; an outset ring would bleed past the table border). Reuses the brand focus-ring already used app-wide — no new token.
+
+**Implementation note for web-agent.** Add the keyboard/aria bits **inside `DataTable`** (gated on `onRowClick` being defined) rather than per-table, so the Delegacje table, the three fleet tables, and the existing admin clickable tables all get keyboard parity in one change. The admin carriers/vehicles tables already use `onRowClick` for "open detail/edit" — they currently lack keyboard activation too, so this is a net a11y win across the app. This is the **only** change to the `DataTable` primitive (additive `rowAriaLabel` prop + keyboard handler + focus ring). No token change, no styling change to existing non-clickable tables (everything stays gated on `onRowClick`).
+
+**Wiring per table:**
+- `FleetVehiclesTable` → `onRowClick={(v) => openVehicleDetail(v)}` opens `<FleetVehicleDetailModal>`.
+- `FleetDriversTable` → opens `<FleetDriverDetailModal>`.
+- `FleetTrailersTable` → opens `<FleetTrailerDetailModal>`.
+- Delegacje table (dyspozytor) → opens `<DelegationDetailModal>` (the §6.4.1 route-card modal).
+- The panel page owns the `open` + `target` state per modal kind; the modal closes on «Zamknij»/Escape/overlay. Read-only throughout — clicking a row **opens a view**, never an edit surface (§6.3 read-only constraint is preserved: a detail modal is a read surface, not a mutation).
+
+### 6.4.4 Components / shared / API changes summary (Phase 6.4)
+
+| Change | Where | Owner |
+|---|---|---|
+| Header: drop driver-name subtitle → title = plate, badge = status only | `components/delegations/DelegationDetailModal.tsx` | web-agent |
+| New `<RouteCard>` presentational component (departure circle → connector+truck+duration pill → return circle, vertical on mobile) | `components/delegations/RouteCard.tsx` | web-agent |
+| Driver+vehicle strip block (inline in the wrapper or small local component) | `components/delegations/DelegationDetailModal.tsx` | web-agent |
+| Delegation modal width override `className="max-w-2xl"`; sections become `span:'full'`; route card + driver strip as `fullWidth` rows; «Notatki» `fullWidth`; «STATUS I AUDYT» standard `<dl>` section | `components/delegations/DelegationDetailModal.tsx` | web-agent |
+| `differenceInCalendarDays(plannedReturnAt, departureAt.slice(0,10))` duration calc (date-only, ≥0 guard) | `components/delegations/RouteCard.tsx` | web-agent |
+| New `<FleetVehicleDetailModal>` / `<FleetDriverDetailModal>` / `<FleetTrailerDetailModal>` thin wrappers over `<EntityDetailModal>` (read-only, no `onEdit`, no rate fields) | `components/fleet/Fleet{Vehicle,Driver,Trailer}DetailModal.tsx` | web-agent |
+| Fleet sub-tables get `onRowClick` + open the matching detail modal; Delegacje table gets `onRowClick` → `<DelegationDetailModal>` | `components/fleet/FleetTables.tsx` + the dyspozytor panel page | web-agent |
+| `DataTable`: additive `rowAriaLabel?: (row) => string` prop + keyboard (Enter/Space) + `role="button"` + `tabIndex={0}` + `focus-visible:ring-2 ring-brand ring-inset` on the `<tr>` **when `onRowClick` is set** | `components/ui/DataTable.tsx` | web-agent |
+| **API enrich** `VehicleListItemSchema` += `year, euro, certificateL, gps, gpsMobilePhone, fuelCard, agreement, adr, wasteAllowed, wasteCountries, cabotageDe, cabotageFr, gb, it, fr, lastDroveAt, notes` (all additive/optional; **NO rate fields**) | `packages/shared/src/schemas/fleet.ts` + `fleet.service.ts` select | api-agent |
+| **API enrich** `DriverListItemSchema` += `phone2, email, idDocumentNumber, adr, notes` (additive; **NO `bankAccount`**) | same | api-agent |
+| **API enrich** `TrailerListItemSchema` += `year, belts, beltsCount, mats, matsCount, innerLength, innerWidth, innerHeight, capacity, airSuspension, certXl, multilock, notes` (additive) | same | api-agent |
+| i18n: `carrier.delegations.routeCard.{aria,durationDays(ICU plural),departure,return,plannedPrefix,actualPrefix,postalPrefix}`; `fleet.{vehicle,driver,trailer}.sections.*` + reused `fields.*`; `entityDetail.gpsDeviceId` («ID urządzenia GPS») | `messages/pl.json`, `en.json` | web-agent |
+| **0** changes to `EntityDetailModal.tsx` shell, `tailwind.config.ts`, `globals.css` | — | — |
+
+> The enriched list-items also widen the carrier `/fleet/my` payload (drivers/vehicles/trailers) — acceptable per §6.4.2: all added fields are non-sensitive and the carrier owns its own fleet. No new endpoint, no new role scope, no token change anywhere in Phase 6.4.
+
+### 6.4.5 Catalogue additions (Phase 6.4)
+
+| Component | Type | Notes |
+|---|---|---|
+| `<RouteCard>` | New custom presentational | Departure/return country circles + truck connector + planned-duration pill; horizontal on `sm+`, vertical timeline on phones. Composes existing tokens only. |
+| `<FleetVehicleDetailModal>` / `<FleetDriverDetailModal>` / `<FleetTrailerDetailModal>` | New thin wrappers | Over `<EntityDetailModal>`, read-only (no `onEdit`), rate-free curated field sets (§6.4.2). |
+| `DataTable.rowAriaLabel` + keyboard/role/focus-ring | Primitive enhancement (additive) | Canonical clickable-row a11y for every `onRowClick` table app-wide. |
+| Duration pill / mini country-circle / driver-strip recipes | Documented layout recipes (§6.4.1) | Not standalone components — composition recipes inside `<RouteCard>` / the delegation wrapper. |
+

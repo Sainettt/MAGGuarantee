@@ -50,6 +50,14 @@ interface FleetTableProps<T> {
    * table stays role-agnostic.
    */
   namespace: string;
+  /**
+   * Optional row-click handler (§6.4.3). When set the row becomes a keyboard-
+   * operable activation target (handled by the `DataTable` primitive) and a
+   * click opens the matching read-only detail modal — never an edit surface.
+   */
+  onRowClick?: (row: T) => void;
+  /** Optional accessible per-row label for the activatable `<tr>` (§6.4.3). */
+  rowAriaLabel?: (row: T) => string;
 }
 
 // ─── Auta ────────────────────────────────────────────────
@@ -58,6 +66,8 @@ export function FleetVehiclesTable({
   rows,
   isLoading,
   namespace,
+  onRowClick,
+  rowAriaLabel,
 }: FleetTableProps<VehicleListItem>) {
   const t = useTranslations(namespace);
   const tCommon = useTranslations('common');
@@ -102,6 +112,8 @@ export function FleetVehiclesTable({
       rows={rows}
       columns={columns}
       rowKey={(r) => r.id}
+      onRowClick={onRowClick}
+      rowAriaLabel={rowAriaLabel}
       isLoading={isLoading}
       loadingLabel={tCommon('loading')}
       empty={
@@ -121,6 +133,8 @@ export function FleetDriversTable({
   rows,
   isLoading,
   namespace,
+  onRowClick,
+  rowAriaLabel,
 }: FleetTableProps<DriverListItem>) {
   const t = useTranslations(namespace);
   const tCommon = useTranslations('common');
@@ -156,6 +170,8 @@ export function FleetDriversTable({
       rows={rows}
       columns={columns}
       rowKey={(r) => r.id}
+      onRowClick={onRowClick}
+      rowAriaLabel={rowAriaLabel}
       isLoading={isLoading}
       loadingLabel={tCommon('loading')}
       empty={
@@ -175,6 +191,8 @@ export function FleetTrailersTable({
   rows,
   isLoading,
   namespace,
+  onRowClick,
+  rowAriaLabel,
 }: FleetTableProps<TrailerListItem>) {
   const t = useTranslations(namespace);
   const tCommon = useTranslations('common');
@@ -214,6 +232,8 @@ export function FleetTrailersTable({
       rows={rows}
       columns={columns}
       rowKey={(r) => r.id}
+      onRowClick={onRowClick}
+      rowAriaLabel={rowAriaLabel}
       isLoading={isLoading}
       loadingLabel={tCommon('loading')}
       empty={

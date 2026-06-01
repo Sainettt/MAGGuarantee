@@ -332,7 +332,8 @@
     "edit": "Edit",
     "close": "Close",
     "createdAt": "Created",
-    "updatedAt": "Updated"
+    "updatedAt": "Updated",
+    "gpsDeviceId": "GPS device ID"
   },
   "fileUpload": {
     "prompt": "Drag files here or click to choose",
@@ -994,7 +995,8 @@
       "ariaLabel": "Planner fleet sections",
       "vehicles": "Vehicles",
       "drivers": "Drivers",
-      "trailers": "Trailers"
+      "trailers": "Trailers",
+      "delegations": "Trips"
     },
     "vehicles": {
       "emptyTitle": "No vehicles",
@@ -1024,6 +1026,28 @@
         "type": "Type",
         "brandModel": "Make / model",
         "active": "Status"
+      }
+    },
+    "kpi": {
+      "vehicles": "Vehicles",
+      "driving": "Driving",
+      "idle": "Idle > 7 days",
+      "drivers": "Drivers",
+      "trailers": "Trailers"
+    },
+    "idle": {
+      "title": "Vehicles idle for more than 7 days:",
+      "daysIdle": "{days, plural, one {# day} other {# days}}"
+    },
+    "delegations": {
+      "emptyTitle": "No trips",
+      "emptyMessage": "No active trips to display.",
+      "columns": {
+        "vehicle": "Vehicle",
+        "driver": "Driver",
+        "route": "Route",
+        "period": "Period",
+        "status": "Status"
       }
     }
   },
@@ -1276,7 +1300,8 @@
         "vehicleAndDriver": "Vehicle and driver",
         "departure": "Departure",
         "return": "Return",
-        "audit": "Status and audit"
+        "audit": "Status and audit",
+        "route": "Route"
       },
       "status": {
         "zgloszony": "Reported",
@@ -1288,6 +1313,19 @@
         "title": "Trip cannot be registered",
         "message": "Registering a trip is not possible because not all required data is filled in the system. Please contact your account manager to complete the missing information.",
         "toast": "Trip cannot be registered — please contact your account manager."
+      },
+      "routeCard": {
+        "aria": "Trip route from {from} to {to}",
+        "durationDays": "{days, plural, one {# day · plan.} other {# days · plan.}}",
+        "durationUnknown": "— · plan.",
+        "departure": "Departure",
+        "return": "Return",
+        "plannedPrefix": "planned:",
+        "actualPrefix": "actual:",
+        "postalPrefix": "postal:"
+      },
+      "strip": {
+        "trailer": "Trailer {plate}"
       }
     },
     "fleet": {
@@ -1334,6 +1372,34 @@
           "brandModel": "Make / model",
           "status": "Status"
         }
+      }
+    }
+  },
+  "fleet": {
+    "a11y": {
+      "showDetails": "Show details: {name}",
+      "showDelegationDetails": "Show trip details: {name}"
+    },
+    "vehicle": {
+      "sections": {
+        "identification": "Identification",
+        "equipment": "Equipment",
+        "permissions": "Permissions",
+        "usage": "Usage"
+      }
+    },
+    "driver": {
+      "sections": {
+        "personal": "Personal details & contact",
+        "documents": "Documents",
+        "notes": "Notes"
+      }
+    },
+    "trailer": {
+      "sections": {
+        "identification": "Identification",
+        "dimensions": "Dimensions",
+        "equipment": "Equipment"
       }
     }
   }

@@ -64,8 +64,18 @@ export interface DataTableProps<T> {
   columns: DataTableColumn<T>[];
   /** Stable key per row. */
   rowKey: (row: T) => string;
-  /** Called when the row body (not an action button) is clicked. */
+  /** Called when the row body (not an action button) is clicked. When set,
+   *  the row becomes a keyboard-operable activation target (§6.4.3):
+   *  `role="button"`, `tabIndex={0}`, Enter/Space activate, brand focus ring. */
   onRowClick?: (row: T) => void;
+  /**
+   * Optional per-row accessible label used as the `aria-label` of the
+   * activatable `<tr>` (only applied when `onRowClick` is set). Lets SR users
+   * know what a row click opens, e.g. «Pokaż szczegóły: WGM 1234» (§6.4.3).
+   * When omitted, no `aria-label` is set; the row stays mouse + keyboard
+   * clickable but is announced only by its cell content.
+   */
+  rowAriaLabel?: (row: T) => string;
   /** Rendered inside the table body when `rows.length === 0`. */
   empty?: ReactNode;
   /** Loading state — show a centered loading label. */
@@ -107,6 +117,7 @@ export function DataTable<T>({
   columns,
   rowKey,
   onRowClick,
+  rowAriaLabel,
   empty,
   isLoading,
   loadingLabel = 'Loading...',
@@ -167,10 +178,27 @@ export function DataTable<T>({
                 <tr
                   key={rowKey(row)}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  // Keyboard + a11y for activatable rows (§6.4.3). All gated on
+                  // `onRowClick` so non-clickable tables are untouched.
+                  role={onRowClick ? 'button' : undefined}
+                  tabIndex={onRowClick ? 0 : undefined}
+                  aria-label={onRowClick ? rowAriaLabel?.(row) : undefined}
+                  onKeyDown={
+                    onRowClick
+                      ? (e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            // Space would otherwise scroll the page; suppress it.
+                            e.preventDefault();
+                            onRowClick(row);
+                          }
+                        }
+                      : undefined
+                  }
                   className={cn(
                     'border-b border-border last:border-b-0',
                     'hover:bg-brand-50 dark:hover:bg-brand/10 transition-colors',
-                    onRowClick && 'cursor-pointer',
+                    onRowClick &&
+                      'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset',
                   )}
                 >
                   {columns.map((col) => {

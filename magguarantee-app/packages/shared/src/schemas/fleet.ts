@@ -20,7 +20,7 @@
 
 import { z } from 'zod';
 
-import { IsoDateSchema, UuidSchema } from './common';
+import { IsoDateSchema, IsoDateTimeSchema, UuidSchema } from './common';
 
 // ─── Slim list-item shapes ───────────────────────────────
 
@@ -28,6 +28,18 @@ import { IsoDateSchema, UuidSchema } from './common';
  * Picker-friendly vehicle row: just enough to render `<select>` options,
  * group by carrier and decide whether the row is eligible for selection
  * (`active` + `gps`).
+ *
+ * Phase 6.4 — enriched (ADDITIVE) with a curated, NON-SENSITIVE field set so
+ * the planista/dyspozytor read-only fleet detail modals render from the list
+ * payload they already hold (docs/14-design-system.md §6.4.2). The added
+ * fields ALSO widen the carrier `/fleet/my` payload — acceptable: every added
+ * field is non-sensitive and the carrier owns its own fleet.
+ *
+ * HARD EXCLUSION (§6.4.2): NEVER add `rateDe`/`rateUe`/`rateExport`/
+ * `rateImport` — planista/dyspozytor must not see pricing. `gpsMobilePhone`
+ * keeps its exact (misnamed) field name — it is the GPS tracker device ID,
+ * NOT a phone number (docs/19-known-quirks.md #2). `lastDroveAt` is
+ * display-only here (#11).
  */
 export const VehicleListItemSchema = z.object({
   id: UuidSchema,
@@ -37,6 +49,26 @@ export const VehicleListItemSchema = z.object({
   model: z.string().nullable(),
   type: z.enum(['MEGA', 'STD', 'COIL']).nullable(),
   sideNumber: z.string().nullable(),
+  // ── Phase 6.4 additive fields (§6.4.2) ──
+  year: z.number().int().nullable(),
+  euro: z.enum(['V', 'VI']),
+  certificateL: z.boolean(),
+  gps: z.boolean(),
+  /** GPS tracker device ID (misnamed column — quirk #2). NOT a phone number. */
+  gpsMobilePhone: z.string().nullable(),
+  fuelCard: z.boolean(),
+  agreement: z.boolean().nullable(),
+  adr: z.boolean(),
+  wasteAllowed: z.boolean(),
+  wasteCountries: z.array(z.string()),
+  cabotageDe: z.boolean(),
+  cabotageFr: z.boolean(),
+  gb: z.boolean().nullable(),
+  it: z.boolean().nullable(),
+  fr: z.boolean().nullable(),
+  /** Display-only (quirk #11). ISO datetime; null when never reported. */
+  lastDroveAt: IsoDateTimeSchema.nullable(),
+  notes: z.string().nullable(),
 });
 export type VehicleListItem = z.infer<typeof VehicleListItemSchema>;
 
@@ -48,6 +80,12 @@ export const DriverListItemSchema = z.object({
   active: z.boolean(),
   /** ISO date — used to flag drivers whose license is about to expire. */
   licenseExpiry: IsoDateSchema.nullable(),
+  // ── Phase 6.4 additive fields (§6.4.2) — NO `bankAccount` ──
+  phone2: z.string().nullable(),
+  email: z.string().nullable(),
+  idDocumentNumber: z.string(),
+  adr: z.boolean(),
+  notes: z.string().nullable(),
 });
 export type DriverListItem = z.infer<typeof DriverListItemSchema>;
 
@@ -59,6 +97,20 @@ export const TrailerListItemSchema = z.object({
   trailerTypeName: z.string(),
   brand: z.string().nullable(),
   model: z.string().nullable(),
+  // ── Phase 6.4 additive fields (§6.4.2) ──
+  year: z.number().int().nullable(),
+  belts: z.boolean().nullable(),
+  beltsCount: z.number().int().nullable(),
+  mats: z.boolean().nullable(),
+  matsCount: z.number().int().nullable(),
+  innerLength: z.number().nullable(),
+  innerWidth: z.number().nullable(),
+  innerHeight: z.number().nullable(),
+  capacity: z.number().nullable(),
+  airSuspension: z.boolean().nullable(),
+  certXl: z.boolean().nullable(),
+  multilock: z.boolean().nullable(),
+  notes: z.string().nullable(),
 });
 export type TrailerListItem = z.infer<typeof TrailerListItemSchema>;
 
@@ -228,13 +280,15 @@ export type OpiekunFleetResponse = z.infer<typeof OpiekunFleetResponseSchema>;
  * derive client-side (vehicles grouped by carrier) and exposing raw logins
  * adds no value over the per-vehicle data already returned. Reinstate as
  * `z.array(z.string())` only if a concrete UI need surfaces.
+ *
+ * Phase 6.4 — the planista panel now also surfaces a KPI strip + an
+ * idle-vehicle highlight list, IDENTICAL to the dyspozytor panel. Rather than
+ * duplicating the stat/stojacy shapes, `PlanistaFleetResponseSchema` REUSES
+ * `DyspozytorFleetStatsSchema` + `DyspozytorStojacyItemSchema`. Those are
+ * declared below in the dyspozytor section, so the planista response schema is
+ * itself declared AFTER them (see "GET /fleet/planista — response" near the
+ * bottom of this file) to keep the const-before-use order.
  */
-export const PlanistaFleetResponseSchema = z.object({
-  vehicles: z.array(VehicleListItemSchema),
-  drivers: z.array(DriverListItemSchema),
-  trailers: z.array(TrailerListItemSchema),
-});
-export type PlanistaFleetResponse = z.infer<typeof PlanistaFleetResponseSchema>;
 
 // ─── GET /fleet/dyspozytor ───────────────────────────────
 
@@ -310,3 +364,24 @@ export const DyspozytorFleetResponseSchema = z.object({
 export type DyspozytorFleetResponse = z.infer<
   typeof DyspozytorFleetResponseSchema
 >;
+
+// ─── GET /fleet/planista — response ──────────────────────
+
+/**
+ * Response for `GET /fleet/planista` (planista role) — read-only fleet view +
+ * KPI stats + idle-vehicle highlight list. Declared here (after the dyspozytor
+ * schemas) so it can REUSE `DyspozytorFleetStatsSchema` +
+ * `DyspozytorStojacyItemSchema` rather than duplicating them — the planista
+ * panel computes the SAME 7-day classification over its plannerId-scoped fleet
+ * (the stat/stojacy semantics are identical across planista + dyspozytor;
+ * docs/14-design-system.md §6.4). The doc block above (`GET /fleet/planista`)
+ * explains why this const lives down here instead of next to its peers.
+ */
+export const PlanistaFleetResponseSchema = z.object({
+  vehicles: z.array(VehicleListItemSchema),
+  drivers: z.array(DriverListItemSchema),
+  trailers: z.array(TrailerListItemSchema),
+  stats: DyspozytorFleetStatsSchema,
+  stojaceList: z.array(DyspozytorStojacyItemSchema),
+});
+export type PlanistaFleetResponse = z.infer<typeof PlanistaFleetResponseSchema>;

@@ -20,7 +20,18 @@ import { PrismaService } from '../prisma/prisma.service';
 export interface DelegationRow {
   id: string;
   vehicleId: string;
-  vehicle: { id: string; plateNumber: string } | null;
+  /**
+   * `plannerId` / `dispatcherId` are carried for the Phase 6.4 `getOne`
+   * ownership checks (planista/dyspozytor by-id read scope). They are NOT
+   * surfaced in the wire DTO — `DelegationsService.toDto` emits only
+   * `{ id, plateNumber }` for the vehicle mini-reference.
+   */
+  vehicle: {
+    id: string;
+    plateNumber: string;
+    plannerId: string | null;
+    dispatcherId: string | null;
+  } | null;
   trailerId: string;
   trailer: { id: string; plateNumber: string } | null;
   driverId: string;
@@ -72,6 +83,15 @@ export interface DelegationListFilters {
    * keep this narrow). Composes with the scalar filters above.
    */
   dispatcherId?: string;
+  /**
+   * Phase 6.4 planista auto-scope — restrict to delegations whose vehicle is
+   * planned by this user (`Delegation.vehicle.plannerId === plannerId`).
+   * Server-identity driven (never client-supplied); the service sets it from
+   * the JWT `sub`. Translated to a relation filter `vehicle: { plannerId }`
+   * (the `Vehicle.plannerId` FK index narrows the join). Mirrors `dispatcherId`
+   * exactly; if both are ever set they AND under the same `vehicle` relation.
+   */
+  plannerId?: string;
   /** ISO datetime — match delegations whose `departureAt` ≥ from. */
   from?: string;
   /** ISO datetime — match delegations whose `departureAt` ≤ to. */
@@ -126,10 +146,15 @@ export class DelegationsRepository {
     if (filters.carrierId) where.carrierId = filters.carrierId;
     if (filters.vehicleId) where.vehicleId = filters.vehicleId;
     if (filters.driverId) where.driverId = filters.driverId;
-    // Dyspozytor auto-scope — relation filter so the FK index on
-    // `Vehicle.dispatcherId` narrows the join instead of a client-side pass.
-    if (filters.dispatcherId) {
-      where.vehicle = { dispatcherId: filters.dispatcherId };
+    // Dyspozytor / planista auto-scope — relation filters so the FK indexes on
+    // `Vehicle.dispatcherId` / `Vehicle.plannerId` narrow the join instead of a
+    // client-side pass. If both are set (not currently sent together — the
+    // service injects exactly one) they AND under the same `vehicle` relation.
+    if (filters.dispatcherId || filters.plannerId) {
+      where.vehicle = {
+        ...(filters.dispatcherId ? { dispatcherId: filters.dispatcherId } : {}),
+        ...(filters.plannerId ? { plannerId: filters.plannerId } : {}),
+      };
     }
     if (filters.from || filters.to) {
       const range: Record<string, Date> = {};
@@ -198,7 +223,16 @@ export class DelegationsRepository {
 
   private includeShape() {
     return {
-      vehicle: { select: { id: true, plateNumber: true } },
+      // `plannerId` / `dispatcherId` feed the Phase 6.4 `getOne` ownership
+      // checks (planista/dyspozytor); they are stripped at the DTO boundary.
+      vehicle: {
+        select: {
+          id: true,
+          plateNumber: true,
+          plannerId: true,
+          dispatcherId: true,
+        },
+      },
       trailer: { select: { id: true, plateNumber: true } },
       driver: { select: { id: true, firstName: true, lastName: true } },
       carrier: {
@@ -256,7 +290,12 @@ export class DelegationsRepository {
 interface DelegationPrismaShape {
   id: string;
   vehicleId: string;
-  vehicle?: { id: string; plateNumber: string } | null;
+  vehicle?: {
+    id: string;
+    plateNumber: string;
+    plannerId: string | null;
+    dispatcherId: string | null;
+  } | null;
   trailerId: string;
   trailer?: { id: string; plateNumber: string } | null;
   driverId: string;

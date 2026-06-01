@@ -162,13 +162,45 @@ export class DelegationsService {
   async getOne(user: AuthUser, id: string): Promise<DelegationDto> {
     const row = await this.delegations.findById(id);
     if (!row) throw new NotFoundException('Delegacja nie znaleziona');
+    await this._assertCanReadOne(user, row);
+    return this.toDto(row);
+  }
+
+  /**
+   * Defence-in-depth by-id read scope (Phase 6.4). The list path is already
+   * scoped per-role in `_scopeListFilters`, but `getOne` previously only
+   * ownership-gated `przewoznik` — leaving a by-id read hole where a planista
+   * or dyspozytor could read ANY delegation by guessing/learning its id. We now
+   * mirror the list scope on the single-resource read:
+   *  - `przewoznik` → row.carrierId must equal the caller's carrier.
+   *  - `planista`   → row.vehicle.plannerId must equal `user.sub`.
+   *  - `dyspozytor` → row.vehicle.dispatcherId must equal `user.sub`.
+   *  - admin/opiekun/eksport/weryfikator → unrestricted (all-access roles).
+   *  - any other role never reaches here (controller `@Roles` excludes them,
+   *    notably `pracownik` — quirk #13).
+   */
+  private async _assertCanReadOne(
+    user: AuthUser,
+    row: DelegationRow,
+  ): Promise<void> {
     if (user.role === 'przewoznik') {
       const carrier = await this._requireCarrierProfile(user);
       if (row.carrierId !== carrier.id) {
         throw new ForbiddenException('Brak uprawnień do tej delegacji');
       }
+      return;
     }
-    return this.toDto(row);
+    if (user.role === 'planista') {
+      if (row.vehicle?.plannerId !== user.sub) {
+        throw new ForbiddenException('Brak uprawnień do tej delegacji');
+      }
+      return;
+    }
+    if (user.role === 'dyspozytor') {
+      if (row.vehicle?.dispatcherId !== user.sub) {
+        throw new ForbiddenException('Brak uprawnień do tej delegacji');
+      }
+    }
   }
 
   // ── Mappers ─────────────────────────────────────────────
@@ -289,10 +321,15 @@ export class DelegationsService {
     user: AuthUser,
     filters: DelegationFilters,
   ): Promise<DelegationListFilters> {
+    // All-access roles: admin/opiekun/eksport/weryfikator see every delegation
+    // (docs/03-roles.md). `planista` was REMOVED from this branch in Phase 6.4
+    // — it had silently leaked the full delegation list to planners. Planista
+    // is now scoped to its own dispatched-vehicle set below (mirrors the
+    // dyspozytor scope), which is also load-bearing for the planista «Wyjazdy»
+    // tab.
     if (
       user.role === 'admin' ||
       user.role === 'opiekun' ||
-      user.role === 'planista' ||
       user.role === 'eksport' ||
       user.role === 'weryfikator'
     ) {
@@ -304,6 +341,15 @@ export class DelegationsService {
         throw new ForbiddenException('Brak uprawnień do tego przewoźnika');
       }
       return { ...filters, carrierId: carrier.id };
+    }
+    if (user.role === 'planista') {
+      // Phase 6.4 — planista sees ONLY delegations of vehicles they plan
+      // (`Vehicle.plannerId === user.sub`). Mirrors the dyspozytor scope
+      // exactly: server identity wins, so a client-supplied `carrierId` /
+      // `vehicleId` is stripped to stop the planista pivoting outside their
+      // planned fleet.
+      const { carrierId: _carrierId, vehicleId: _vehicleId, ...rest } = filters;
+      return { ...rest, plannerId: user.sub };
     }
     if (user.role === 'dyspozytor') {
       // Phase 6.2 — dyspozytor sees ONLY delegations of vehicles they dispatch

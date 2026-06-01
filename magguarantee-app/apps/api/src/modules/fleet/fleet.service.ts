@@ -270,6 +270,12 @@ export class FleetService {
    *
    * Read-only by contract — the planista mutates nothing (docs/03-roles.md
    * #planista). The slim list shapes match `getMyFleet` / `getOpiekunFleet`.
+   *
+   * Phase 6.4 — the planista panel now also surfaces a KPI strip + an
+   * idle-vehicle highlight list, computed over the plannerId-scoped fleet with
+   * the SAME `_buildDispatcherStats` helper the dyspozytor uses (identical
+   * 7-day classification / `DRIVING_RECENCY_DAYS` cut-off), so the two panels
+   * stay byte-identical. `stats`/`stojaceList` reuse the dyspozytor shapes.
    */
   async getPlanistaFleet(user: AuthUser): Promise<PlanistaFleetResponse> {
     this._assertRole(user, 'planista', 'Brak uprawnień (wymaga konta planisty)');
@@ -282,10 +288,18 @@ export class FleetService {
     const { drivers, trailers } = await this._loadCarrierDriversTrailers(
       carrierIds,
     );
+    const { stats, stojaceList } = this._buildDispatcherStats(
+      vehicleRows,
+      drivers.length,
+      trailers.length,
+      Date.now(),
+    );
     return {
       vehicles: vehicleRows.map(toVehicleListItem),
       drivers,
       trailers,
+      stats,
+      stojaceList,
     };
   }
 
@@ -448,6 +462,14 @@ function distinctCarrierIds(vehicles: VehicleRow[]): string[] {
   return [...new Set(vehicles.map((v) => v.carrierId))];
 }
 
+/**
+ * Slim vehicle picker row + the Phase 6.4 additive (non-sensitive) field set
+ * that feeds the planista/dyspozytor read-only detail modals
+ * (docs/14-design-system.md §6.4.2). HARD EXCLUSION: never map the four rate
+ * fields — pricing must not reach planista/dyspozytor. `gpsMobilePhone` keeps
+ * its exact (misnamed) name (tracker device ID — quirk #2). `lastDroveAt` is
+ * serialised to an ISO datetime (display-only — quirk #11).
+ */
 function toVehicleListItem(v: VehicleRow): VehicleListItem {
   return {
     id: v.id,
@@ -457,9 +479,30 @@ function toVehicleListItem(v: VehicleRow): VehicleListItem {
     model: v.model,
     type: v.type,
     sideNumber: v.sideNumber,
+    year: v.year,
+    euro: v.euro,
+    certificateL: v.certificateL,
+    gps: v.gps,
+    gpsMobilePhone: v.gpsMobilePhone,
+    fuelCard: v.fuelCard,
+    agreement: v.agreement,
+    adr: v.adr,
+    wasteAllowed: v.wasteAllowed,
+    wasteCountries: v.wasteCountries,
+    cabotageDe: v.cabotageDe,
+    cabotageFr: v.cabotageFr,
+    gb: v.gb,
+    it: v.it,
+    fr: v.fr,
+    lastDroveAt: v.lastDroveAt ? v.lastDroveAt.toISOString() : null,
+    notes: v.notes,
   };
 }
 
+/**
+ * Slim driver picker row + the Phase 6.4 additive field set (§6.4.2).
+ * EXCLUDED: `bankAccount` (financial-adjacent — kept out of the role panels).
+ */
 function toDriverListItem(d: DriverRow): DriverListItem {
   return {
     id: d.id,
@@ -468,9 +511,20 @@ function toDriverListItem(d: DriverRow): DriverListItem {
     phone: d.phone,
     active: d.active,
     licenseExpiry: d.licenseExpiry ? toDateString(d.licenseExpiry) : null,
+    phone2: d.phone2,
+    email: d.email,
+    idDocumentNumber: d.idDocumentNumber,
+    adr: d.adr,
+    notes: d.notes,
   };
 }
 
+/**
+ * Slim trailer picker row + the Phase 6.4 additive field set (§6.4.2). No rate
+ * fields exist on trailers, so nothing extra to exclude beyond the universal
+ * rule. Dimension/capacity values are bare numbers (units live in the modal
+ * labels per §6.4.2).
+ */
 function toTrailerListItem(t: TrailerRow): TrailerListItem {
   return {
     id: t.id,
@@ -480,5 +534,18 @@ function toTrailerListItem(t: TrailerRow): TrailerListItem {
     trailerTypeName: t.trailerType.name,
     brand: t.brand,
     model: t.model,
+    year: t.year,
+    belts: t.belts,
+    beltsCount: t.beltsCount,
+    mats: t.mats,
+    matsCount: t.matsCount,
+    innerLength: t.innerLength,
+    innerWidth: t.innerWidth,
+    innerHeight: t.innerHeight,
+    capacity: t.capacity,
+    airSuspension: t.airSuspension,
+    certXl: t.certXl,
+    multilock: t.multilock,
+    notes: t.notes,
   };
 }
