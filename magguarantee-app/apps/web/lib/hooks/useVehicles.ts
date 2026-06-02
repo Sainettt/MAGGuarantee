@@ -31,6 +31,7 @@ import {
 } from '@/lib/api/vehicles';
 import { CARRIERS_KEY } from '@/lib/hooks/useCarriers';
 import { MY_FLEET_KEY } from '@/lib/hooks/useMyFleet';
+import { OPIEKUN_KEY } from '@/lib/hooks/useOpiekunFleet';
 
 export const VEHICLES_KEY = ['vehicles'] as const;
 
@@ -82,6 +83,10 @@ export function useCreateVehicle(
       // refetch — otherwise the "Brak: Pojazd" chip and the "Dokończ
       // onboarding" button linger after the wizard completes.
       qc.invalidateQueries({ queryKey: CARRIERS_KEY });
+      // A vehicle's ADR flag + the carrier's active-vehicle count feed the
+      // opiekun readiness view (adrDocMissing / incompleteFleet). Invalidate
+      // so the per-carrier "needs attention" exclamation stays fresh.
+      qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
       opts?.onSuccess?.(...args);
     },
   });
@@ -98,6 +103,9 @@ export function useUpdateVehicle(
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: VEHICLES_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+      // Editing a vehicle can toggle its ADR flag — refresh the opiekun
+      // readiness view so adrDocMissing / the attention exclamation stay fresh.
+      qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
       opts?.onSuccess?.(...args);
     },
   });
@@ -126,6 +134,8 @@ export function useDeactivateVehicle() {
       // Deactivating the last active vehicle flips
       // `Carrier.onboarding.hasVehicle` to false on the next read — refetch.
       qc.invalidateQueries({ queryKey: CARRIERS_KEY });
+      // Active-vehicle count + ADR flag feed the opiekun readiness view.
+      qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
     },
   });
 }
@@ -138,6 +148,8 @@ export function useReactivateVehicle() {
       qc.invalidateQueries({ queryKey: VEHICLES_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
       qc.invalidateQueries({ queryKey: CARRIERS_KEY });
+      // Active-vehicle count + ADR flag feed the opiekun readiness view.
+      qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
     },
   });
 }
@@ -150,6 +162,8 @@ export function useDeleteVehicle() {
       qc.invalidateQueries({ queryKey: VEHICLES_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
       qc.invalidateQueries({ queryKey: CARRIERS_KEY });
+      // Active-vehicle count + ADR flag feed the opiekun readiness view.
+      qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
     },
   });
 }
@@ -164,6 +178,8 @@ export function useHardDeleteVehicle() {
       qc.invalidateQueries({ queryKey: VEHICLES_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
       qc.invalidateQueries({ queryKey: CARRIERS_KEY });
+      // Active-vehicle count + ADR flag feed the opiekun readiness view.
+      qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
     },
   });
 }

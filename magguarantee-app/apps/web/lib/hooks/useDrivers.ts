@@ -29,6 +29,7 @@ import {
 } from '@/lib/api/drivers';
 import { CARRIERS_KEY } from '@/lib/hooks/useCarriers';
 import { MY_FLEET_KEY } from '@/lib/hooks/useMyFleet';
+import { OPIEKUN_KEY } from '@/lib/hooks/useOpiekunFleet';
 
 export const DRIVERS_KEY = ['drivers'] as const;
 
@@ -78,6 +79,9 @@ export function useCreateDriver(
       // when a driver is created — refetch the carriers list. See
       // useVehicles for the same rationale.
       qc.invalidateQueries({ queryKey: CARRIERS_KEY });
+      // Active-driver count feeds the opiekun readiness view (incompleteFleet)
+      // — invalidate so the per-carrier attention exclamation stays fresh.
+      qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
       opts?.onSuccess?.(...args);
     },
   });
@@ -94,6 +98,8 @@ export function useUpdateDriver(
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: DRIVERS_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+      // Active-driver count feeds the opiekun readiness view (incompleteFleet).
+      qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
       opts?.onSuccess?.(...args);
     },
   });
@@ -108,6 +114,8 @@ export function useDeactivateDriver() {
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
       // May flip `Carrier.onboarding.hasDriver` — see useVehicles.
       qc.invalidateQueries({ queryKey: CARRIERS_KEY });
+      // Active-driver count feeds the opiekun readiness view (incompleteFleet).
+      qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
     },
   });
 }
@@ -120,6 +128,8 @@ export function useReactivateDriver() {
       qc.invalidateQueries({ queryKey: DRIVERS_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
       qc.invalidateQueries({ queryKey: CARRIERS_KEY });
+      // Active-driver count feeds the opiekun readiness view (incompleteFleet).
+      qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
     },
   });
 }
@@ -132,6 +142,8 @@ export function useDeleteDriver() {
       qc.invalidateQueries({ queryKey: DRIVERS_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
       qc.invalidateQueries({ queryKey: CARRIERS_KEY });
+      // Active-driver count feeds the opiekun readiness view (incompleteFleet).
+      qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
     },
   });
 }
@@ -146,6 +158,8 @@ export function useHardDeleteDriver() {
       qc.invalidateQueries({ queryKey: DRIVERS_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
       qc.invalidateQueries({ queryKey: CARRIERS_KEY });
+      // Active-driver count feeds the opiekun readiness view (incompleteFleet).
+      qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
     },
   });
 }

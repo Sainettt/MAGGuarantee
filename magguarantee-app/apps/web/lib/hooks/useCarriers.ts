@@ -33,6 +33,7 @@ import {
   updateCarrier,
   uploadCarrierAttachment,
 } from '@/lib/api/carriers';
+import { OPIEKUN_KEY } from '@/lib/hooks/useOpiekunFleet';
 
 export const CARRIERS_KEY = ['carriers'] as const;
 /** Query namespace for a carrier's company documents (attachments). */
@@ -162,6 +163,10 @@ export function useUploadCarrierAttachment(
       qc.invalidateQueries({
         queryKey: [...CARRIER_ATTACHMENTS_KEY, vars.carrierId],
       });
+      // An ADR-category document upload flips the carrier's `adrDocMissing`
+      // readiness flag in the opiekun view — invalidate so the per-carrier
+      // attention exclamation stays fresh.
+      qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
       opts?.onSuccess?.(...args);
     },
   });
@@ -186,6 +191,10 @@ export function useDeleteCarrierAttachment(
       qc.invalidateQueries({
         queryKey: [...CARRIER_ATTACHMENTS_KEY, vars.carrierId],
       });
+      // Deleting an ADR-category document flips the carrier's `adrDocMissing`
+      // readiness flag in the opiekun view — invalidate so the per-carrier
+      // attention exclamation stays fresh.
+      qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
       opts?.onSuccess?.(...args);
     },
   });

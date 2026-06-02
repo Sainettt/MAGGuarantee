@@ -28,6 +28,7 @@ import {
 } from '@/lib/api/trailers';
 import { CARRIERS_KEY } from '@/lib/hooks/useCarriers';
 import { MY_FLEET_KEY } from '@/lib/hooks/useMyFleet';
+import { OPIEKUN_KEY } from '@/lib/hooks/useOpiekunFleet';
 
 export const TRAILERS_KEY = ['trailers'] as const;
 
@@ -60,6 +61,9 @@ export function useCreateTrailer(
       // when a trailer is created — refetch the carriers list. See
       // useVehicles for the same rationale.
       qc.invalidateQueries({ queryKey: CARRIERS_KEY });
+      // Active-trailer count feeds the opiekun readiness view (incompleteFleet)
+      // — invalidate so the per-carrier attention exclamation stays fresh.
+      qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
       opts?.onSuccess?.(...args);
     },
   });
@@ -79,6 +83,8 @@ export function useUpdateTrailer(
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: TRAILERS_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
+      // Active-trailer count feeds the opiekun readiness view (incompleteFleet).
+      qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
       opts?.onSuccess?.(...args);
     },
   });
@@ -93,6 +99,8 @@ export function useDeactivateTrailer() {
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
       // May flip `Carrier.onboarding.hasTrailer` — see useVehicles.
       qc.invalidateQueries({ queryKey: CARRIERS_KEY });
+      // Active-trailer count feeds the opiekun readiness view (incompleteFleet).
+      qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
     },
   });
 }
@@ -105,6 +113,8 @@ export function useReactivateTrailer() {
       qc.invalidateQueries({ queryKey: TRAILERS_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
       qc.invalidateQueries({ queryKey: CARRIERS_KEY });
+      // Active-trailer count feeds the opiekun readiness view (incompleteFleet).
+      qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
     },
   });
 }
@@ -117,6 +127,8 @@ export function useDeleteTrailer() {
       qc.invalidateQueries({ queryKey: TRAILERS_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
       qc.invalidateQueries({ queryKey: CARRIERS_KEY });
+      // Active-trailer count feeds the opiekun readiness view (incompleteFleet).
+      qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
     },
   });
 }
@@ -131,6 +143,8 @@ export function useHardDeleteTrailer() {
       qc.invalidateQueries({ queryKey: TRAILERS_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
       qc.invalidateQueries({ queryKey: CARRIERS_KEY });
+      // Active-trailer count feeds the opiekun readiness view (incompleteFleet).
+      qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
     },
   });
 }
