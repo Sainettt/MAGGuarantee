@@ -813,6 +813,47 @@ export function VehicleSheet({
                   {t('fields.active')}
                 </label>
               </FormSection>
+
+              {/* Country access permits — see docs/19-known-quirks.md #3. These
+                  are NOT ISO language codes; each flag means the vehicle holds
+                  all the permits/paperwork needed to drive into that country
+                  (GB = post-Brexit ECMT, IT = transit/weekend restrictions,
+                  FR = Loi Macron / SIPSI). Plain boolean flags — no attachment
+                  category, so no <FileUpload> reveal here (unlike kabotaż). */}
+              <FormSection title={t('sections.specialCountries')}>
+                <p className="text-xs text-text-sub">
+                  {t('sections.specialCountriesHint')}
+                </p>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
+                  <label className="flex flex-col gap-0.5 text-text">
+                    <span className="flex items-center gap-2">
+                      <Checkbox {...form.register('gb')} />
+                      {t('fields.gb')}
+                    </span>
+                    <span className="text-xs text-text-sub">
+                      {t('sections.gbHint')}
+                    </span>
+                  </label>
+                  <label className="flex flex-col gap-0.5 text-text">
+                    <span className="flex items-center gap-2">
+                      <Checkbox {...form.register('it')} />
+                      {t('fields.it')}
+                    </span>
+                    <span className="text-xs text-text-sub">
+                      {t('sections.itHint')}
+                    </span>
+                  </label>
+                  <label className="flex flex-col gap-0.5 text-text">
+                    <span className="flex items-center gap-2">
+                      <Checkbox {...form.register('fr')} />
+                      {t('fields.fr')}
+                    </span>
+                    <span className="text-xs text-text-sub">
+                      {t('sections.frHint')}
+                    </span>
+                  </label>
+                </div>
+              </FormSection>
             </div>
           </SheetBody>
 
