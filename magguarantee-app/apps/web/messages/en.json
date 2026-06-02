@@ -203,6 +203,7 @@
     "drivers": "Drivers",
     "trailers": "Trailers",
     "trailerTypes": "Trailer types",
+    "delegations": "Trips",
     "limits": "Limits",
     "users": "Users",
     "audit": "Audit log",
@@ -1400,6 +1401,31 @@
         "identification": "Identification",
         "dimensions": "Dimensions",
         "equipment": "Equipment"
+      }
+    }
+  },
+  "delegations": {
+    "admin": {
+      "title": "Trips",
+      "subtitle": "All trips in the system — read-only view",
+      "filters": {
+        "status": "Status",
+        "allStatuses": "All statuses",
+        "search": "Search",
+        "searchPlaceholder": "Search carrier / plate…",
+        "dateFrom": "Date from",
+        "dateTo": "Date to"
+      },
+      "table": {
+        "emptyTitle": "No trips",
+        "emptyMessage": "No trips match the criteria.",
+        "columns": {
+          "vehicle": "Vehicle",
+          "driver": "Driver",
+          "route": "Route",
+          "period": "Period",
+          "status": "Status"
+        }
       }
     }
   }

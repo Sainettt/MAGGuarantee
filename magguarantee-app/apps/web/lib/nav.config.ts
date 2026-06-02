@@ -103,6 +103,17 @@ export const EMPLOYEE_NAV: readonly NavLink[] = [
     iconName: 'Settings2',
     roles: ['admin'],
   },
+  // Admin-only all-access "Wyjazdy" — the same read-only delegations view
+  // planista/dyspozytor/carrier see, but unscoped (admin is all-access on
+  // `GET /delegations`). NOT visible to pracownik/opiekun (docs/19-known-
+  // quirks.md #13 — pracownik must never see delegacje; roles matrix).
+  {
+    key: 'delegations',
+    href: '/employee/delegations',
+    labelKey: 'nav.delegations',
+    iconName: 'MapPin',
+    roles: ['admin'],
+  },
   {
     key: 'limits',
     href: '/employee/limits',

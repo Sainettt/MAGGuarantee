@@ -23,13 +23,12 @@ import {
   AlertTriangle,
   Car,
   Container,
-  MapPin,
   PauseCircle,
   Truck,
   User,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import type {
   DelegationDto,
   DriverListItem,
@@ -39,9 +38,8 @@ import type {
   VehicleListItem,
 } from '@magguarantee/shared';
 
-import { StatusBadge } from '@/components/carrier/StatusBadge';
 import { KpiCard } from '@/components/dashboard/KpiCard';
-import { DelegationDetailModal } from '@/components/delegations/DelegationDetailModal';
+import { DelegationsTable } from '@/components/delegations/DelegationsTable';
 import { FleetDriverDetailModal } from '@/components/fleet/FleetDriverDetailModal';
 import {
   FleetDriversTable,
@@ -51,10 +49,7 @@ import {
 import { FleetTrailerDetailModal } from '@/components/fleet/FleetTrailerDetailModal';
 import { FleetVehicleDetailModal } from '@/components/fleet/FleetVehicleDetailModal';
 import { ReadOnlyBanner } from '@/components/fleet/ReadOnlyBanner';
-import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
-import { EmptyState } from '@/components/ui/EmptyState';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
-import { formatDateShort } from '@/lib/format/numbers';
 
 /** The fleet payload the panel reads — shared by planista + dyspozytor. */
 interface FleetData {
@@ -100,76 +95,20 @@ export function FleetPanel({
 }: Props) {
   const t = useTranslations(namespace);
   const tCommon = useTranslations('common');
-  const tDeleg = useTranslations(`${namespace}.delegations`);
   const tA11y = useTranslations('fleet.a11y');
 
   const stats = data?.stats;
   const idle = data?.stojaceList ?? [];
 
   // ── Per-modal open + target state (read-only VIEW surfaces) ───────────
+  // The delegations VIEW modal lives inside <DelegationsTable> now; the panel
+  // only owns the vehicle / driver / trailer modal targets.
   const [vehicleTarget, setVehicleTarget] = useState<VehicleListItem | null>(
     null,
   );
   const [driverTarget, setDriverTarget] = useState<DriverListItem | null>(null);
   const [trailerTarget, setTrailerTarget] = useState<TrailerListItem | null>(
     null,
-  );
-  const [delegationTarget, setDelegationTarget] =
-    useState<DelegationDto | null>(null);
-
-  const delegationColumns = useMemo<DataTableColumn<DelegationDto>[]>(
-    () => [
-      {
-        id: 'vehicle',
-        header: tDeleg('columns.vehicle'),
-        cell: (row) => (
-          <span className="font-mono font-semibold">
-            {row.vehicle?.plateNumber ?? '—'}
-          </span>
-        ),
-      },
-      {
-        id: 'driver',
-        header: tDeleg('columns.driver'),
-        cell: (row) => (
-          <span className="font-semibold">
-            {row.driver
-              ? `${row.driver.firstName} ${row.driver.lastName}`
-              : (row.driverNameSnapshot ?? '—')}
-          </span>
-        ),
-      },
-      {
-        id: 'route',
-        header: tDeleg('columns.route'),
-        width: 'flex',
-        truncate: 'ellipsis',
-        cell: (row) => (
-          <span title={`${row.departureCountry} → ${row.returnCountry}`}>
-            {row.departureCountry} → {row.returnCountry}
-          </span>
-        ),
-      },
-      {
-        id: 'period',
-        header: tDeleg('columns.period'),
-        width: 'tight',
-        cell: (row) => (
-          <span className="tabular-nums">
-            {formatDateShort(row.departureAt)} –{' '}
-            {formatDateShort(row.plannedReturnAt)}
-          </span>
-        ),
-      },
-      {
-        id: 'status',
-        header: tDeleg('columns.status'),
-        width: 'tight',
-        // Static indicator — read-only. No dropdown / mutation control.
-        cell: (row) => <StatusBadge status={row.status} />,
-      },
-    ],
-    [tDeleg],
   );
 
   return (
@@ -267,24 +206,15 @@ export function FleetPanel({
         </TabsContent>
 
         <TabsContent value="delegations">
-          <DataTable
+          <DelegationsTable
             rows={delegations}
-            columns={delegationColumns}
-            rowKey={(r) => r.id}
-            onRowClick={setDelegationTarget}
+            isLoading={delegationsLoading}
+            namespace={`${namespace}.delegations`}
+            loadingLabel={tCommon('loading')}
             rowAriaLabel={(r) =>
               tA11y('showDelegationDetails', {
                 name: r.vehicle?.plateNumber ?? '—',
               })
-            }
-            isLoading={delegationsLoading}
-            loadingLabel={tCommon('loading')}
-            empty={
-              <EmptyState
-                icon={MapPin}
-                title={tDeleg('emptyTitle')}
-                message={tDeleg('emptyMessage')}
-              />
             }
           />
         </TabsContent>
@@ -335,13 +265,6 @@ export function FleetPanel({
           if (!o) setTrailerTarget(null);
         }}
         trailer={trailerTarget}
-      />
-      <DelegationDetailModal
-        open={delegationTarget !== null}
-        onOpenChange={(o) => {
-          if (!o) setDelegationTarget(null);
-        }}
-        delegation={delegationTarget}
       />
     </section>
   );

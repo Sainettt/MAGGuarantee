@@ -71,6 +71,11 @@ export const ADMIN_ONLY_EMPLOYEE_PREFIXES: readonly string[] = [
   '/employee/limits',
   '/employee/audit',
   '/employee/diagnostics',
+  // Phase 6.x — admin all-access "Wyjazdy" (read-only delegations list).
+  // Lives under the `(admin)` route group too; this entry bounces non-admin
+  // direct-URL navigation at the edge. pracownik/opiekun must NEVER reach it
+  // (docs/19-known-quirks.md #13 + roles matrix).
+  '/employee/delegations',
 ];
 
 function startsWithPrefix(pathname: string, prefix: string): boolean {

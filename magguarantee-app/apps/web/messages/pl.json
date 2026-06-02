@@ -203,6 +203,7 @@
     "drivers": "Kierowcy",
     "trailers": "Naczepy",
     "trailerTypes": "Typy naczep",
+    "delegations": "Wyjazdy",
     "limits": "Limity",
     "users": "Użytkownicy",
     "audit": "Audyt",
@@ -1400,6 +1401,31 @@
         "identification": "Identyfikacja",
         "dimensions": "Wymiary",
         "equipment": "Wyposażenie"
+      }
+    }
+  },
+  "delegations": {
+    "admin": {
+      "title": "Wyjazdy",
+      "subtitle": "Wszystkie wyjazdy w systemie — podgląd tylko do odczytu",
+      "filters": {
+        "status": "Status",
+        "allStatuses": "Wszystkie statusy",
+        "search": "Szukaj",
+        "searchPlaceholder": "Szukaj przewoźnika / nr rej.…",
+        "dateFrom": "Data od",
+        "dateTo": "Data do"
+      },
+      "table": {
+        "emptyTitle": "Brak wyjazdów",
+        "emptyMessage": "Brak wyjazdów spełniających kryteria.",
+        "columns": {
+          "vehicle": "Auto",
+          "driver": "Kierowca",
+          "route": "Trasa",
+          "period": "Okres",
+          "status": "Status"
+        }
       }
     }
   }

@@ -28,6 +28,7 @@ import {
   HeartHandshake,
   History,
   LayoutDashboard,
+  MapPin,
   Settings2,
   Truck,
   UserCog,
@@ -74,6 +75,7 @@ const ICONS: Record<string, LucideIcon> = {
   History,
   Activity,
   HeartHandshake,
+  MapPin,
 };
 
 interface EmployeeSidebarProps {
