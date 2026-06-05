@@ -56,6 +56,26 @@ const MileageSchema = z.number().nonnegative().max(9_999_999);
  */
 const HoursAdjustedSchema = z.number().min(0).max(999.99);
 
+// ─── Cross-field date guard (shared by Submit + Preview) ──
+//
+// GUARD, not a bare comparison: only enforce start <= end when BOTH fields are
+// present AND valid ISO dates. The form defaults `dateEnd` to `''`; an empty
+// string is "dirty" not "aborted", so a naive `dateStart <= dateEnd` refine
+// runs against `''` the moment a start date is picked — and `"2026-06-01" <=
+// ""` is always false, firing a spurious error (Bug 1). Skipping when either
+// operand fails `z.string().date()` makes the refine a true no-op mid-edit;
+// the per-field `IsoDateSchema` already reports a malformed/empty date itself.
+const ISO_DATE = z.string().date();
+function datesWellOrdered(v: { dateStart: string; dateEnd: string }): boolean {
+  if (
+    !ISO_DATE.safeParse(v.dateStart).success ||
+    !ISO_DATE.safeParse(v.dateEnd).success
+  ) {
+    return true; // can't be out of order until both are valid dates
+  }
+  return v.dateStart <= v.dateEnd;
+}
+
 // ─── Submit (carrier creates a wniosek) ──────────────────
 
 // NOTE: `amountRequested` and `hoursAdjusted` are server/verifier-managed and
@@ -105,9 +125,16 @@ export const SubmitClaimSchema = z
     attachmentIds: z.array(UuidSchema).max(20).optional(),
   })
   .strict()
-  .refine((v) => v.dateStart <= v.dateEnd, {
-    message: 'dateStart must be on or before dateEnd',
-    path: ['dateStart'],
+  .refine(datesWellOrdered, {
+    // Stable MACHINE CODE — NOT English prose, NOT a translation-key path.
+    // The api's ZodValidationPipe echoes `issue.message` verbatim into a 400;
+    // the web carrier form maps this code → a localized next-intl message
+    // (the api owns no i18n catalog, the web does — so the wire stays neutral).
+    message: 'date_order',
+    // Attach to the field edited LAST (Data do) so the error lands where the
+    // user's cursor is, not on Data od (Bug 1: error used to fire on dateStart
+    // the moment a start date was picked against the empty-string default).
+    path: ['dateEnd'],
   });
 export type SubmitClaimDto = z.infer<typeof SubmitClaimSchema>;
 
@@ -129,9 +156,11 @@ export const PreviewClaimSchema = z
     hoursAdjusted: HoursAdjustedSchema.optional().default(0),
   })
   .strict()
-  .refine((v) => v.dateStart <= v.dateEnd, {
-    message: 'dateStart must be on or before dateEnd',
-    path: ['dateStart'],
+  .refine(datesWellOrdered, {
+    // Same stable machine code + dateEnd path as SubmitClaimSchema — see the
+    // comment there. Code, not prose: web localizes; api echoes verbatim.
+    message: 'date_order',
+    path: ['dateEnd'],
   });
 export type PreviewClaimDto = z.infer<typeof PreviewClaimSchema>;
 

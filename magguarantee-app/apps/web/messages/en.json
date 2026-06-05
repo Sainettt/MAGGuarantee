@@ -1195,7 +1195,11 @@
         "violationDateStartInFuture": "Load date ({date}) is in the future.",
         "violationDateOrder": "Unload date must be on or after the load date.",
         "violationDeadline": "Submission deadline has passed. Per the contract you have {maxDays} days after the unload date (already elapsed: {elapsed} days).",
-        "violationPeriodTooLong": "The claim period cannot exceed {maxDays} days (given: {periodDays} days)."
+        "violationPeriodTooLong": "The claim period cannot exceed {maxDays} days (given: {periodDays} days).",
+        "boundaryHintTimeTo": "Date to ({date}) — {reason}: this day is not counted, so the end time does not affect the calculation.",
+        "boundaryHintTimeToWeekend": "Date to ({date}) — weekend: this day is not counted, so the end time does not affect the calculation.",
+        "boundaryHintTimeFrom": "Date from ({date}) — {reason}: this day is not counted, so the start time does not affect the calculation.",
+        "boundaryHintTimeFromWeekend": "Date from ({date}) — weekend: this day is not counted, so the start time does not affect the calculation."
       },
       "status": {
         "NA_WERYFIKACJI": "Verifying",

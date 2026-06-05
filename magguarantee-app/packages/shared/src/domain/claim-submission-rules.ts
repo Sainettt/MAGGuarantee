@@ -28,10 +28,17 @@
  * preview UIs without an AppConfig fetch) can build a sensible input without
  * round-tripping to the database. The api layer overrides these from
  * AppConfig on every request — never trust the defaults in prod code paths.
+ *
+ * `maxPeriodDays` / `maxDaysAfterUnload` back the date-rule group below
+ * (`checkClaimDates`). Both are caller-injectable exactly like
+ * `workedDaysThreshold` is for `canSubmitByDuration` — the web form currently
+ * hard-codes them (no `GET /app-config` yet) and the api forwards AppConfig.
  */
 export const DEFAULTS = {
   workedDaysThreshold: 10,
   vehicleCooldownDays: 6,
+  maxPeriodDays: 90,
+  maxDaysAfterUnload: 7,
 } as const;
 
 // ─── Internals ───────────────────────────────────────────────
@@ -262,4 +269,160 @@ export function cooldownCheck(input: {
     nextAllowedAt,
     message: `Nastepny wniosek na ten pojazd mozna zlozyc od ${DATETIME_FORMATTER.format(nextAllowedAt)}`,
   };
+}
+
+// ─── Public API: date-order / future / span / deadline rules ─────────────
+//
+// WHY THESE DIFFER FROM canSubmitByDuration / cooldownCheck:
+// the two gates above are consumed by the *api* — on reject they carry a
+// fully-rendered Polish message string that the controller drops verbatim
+// into an RFC-7807 problem-details envelope (the api owns no i18n catalog).
+//
+// The functions below are consumed by the *web* carrier form, which owns the
+// next-intl catalog (apps/web/messages/{pl,en}.json). Rendering Polish prose
+// here would (a) duplicate the EN translations the form already maintains and
+// (b) force the form to string-match prose to localize it. So instead these
+// return a discriminated `DateRuleViolation` carrying a STABLE i18n MESSAGE
+// KEY + interpolation params; the web maps `key` → `tForm(key, params)`.
+//
+// Like the gates above, all functions are pure: "today" is INJECTED by the
+// caller (no `new Date()` with no args), so unit tests are deterministic and
+// the timezone decision (the web passes today-in-Europe/Warsaw) lives at the
+// call site, not buried here. `today` is a `'YYYY-MM-DD'` ISO calendar date.
+
+/**
+ * A single date-rule violation. `key` is the next-intl message key (relative
+ * to the form's `carrier.claims.form` namespace) and `params` are the ICU
+ * interpolation values that key expects. Never pre-rendered prose.
+ *
+ * The `code` discriminator is a stable machine identifier so callers can also
+ * branch on the rule without parsing the i18n key.
+ */
+export type DateRuleViolation =
+  | { code: 'date_order'; key: 'violationDateOrder'; params: Record<string, never> }
+  | {
+      code: 'date_start_future';
+      key: 'violationDateStartInFuture';
+      params: { date: string };
+    }
+  | {
+      code: 'date_end_future';
+      key: 'violationDateEndInFuture';
+      params: { date: string };
+    }
+  | {
+      code: 'period_too_long';
+      key: 'violationPeriodTooLong';
+      params: { maxDays: number; periodDays: number };
+    }
+  | {
+      code: 'deadline_passed';
+      key: 'violationDeadline';
+      params: { maxDays: number; elapsed: number };
+    };
+
+/** `'YYYY-MM-DD'` shape guard — mirrors `z.string().date()` strictness. */
+function isIsoDate(s: unknown): s is string {
+  return parseIsoDateUtc(typeof s === 'string' ? s : '') !== null;
+}
+
+/** Inclusive calendar-day span between two UTC-midnight dates. */
+function daysBetweenInclusiveUtc(a: Date, b: Date): number {
+  return Math.round((b.getTime() - a.getTime()) / MS_PER_DAY) + 1;
+}
+
+/** Non-inclusive calendar-day delta between two UTC-midnight dates. */
+function daysBetweenUtc(a: Date, b: Date): number {
+  return Math.round((b.getTime() - a.getTime()) / MS_PER_DAY);
+}
+
+/**
+ * Evaluate ALL carrier date rules in one pass and return the ordered list of
+ * violations (empty ⇒ the dates are acceptable). Mirrors the tier-1 pre-calc
+ * checks the api runs in `ClaimsService.submit` and the inline
+ * `clientViolations` the web form used to compute by hand.
+ *
+ * Inputs are the RAW form strings — `dateStart` / `dateEnd` may be empty or
+ * malformed mid-edit; this function silently skips any rule whose operands
+ * aren't valid ISO dates yet (so a half-filled form produces no noise), which
+ * is exactly why Bug 1 (premature date-order error) cannot recur here.
+ *
+ * Rules (order = display order):
+ *   1. date order — start <= end
+ *   2. future — end <= today, then start <= today
+ *   3. period span — inclusive span <= maxPeriodDays (default 90)
+ *   4. deadline — end within maxDaysAfterUnload (default 7) days of today
+ *
+ * Rules 3 & 4 are only meaningful once order holds, so they're skipped while
+ * start > end (the order violation already tells the carrier what to fix).
+ */
+export function checkClaimDates(input: {
+  dateStart: string;
+  dateEnd: string;
+  /** Today as `'YYYY-MM-DD'` in the business timezone — INJECTED by caller. */
+  today: string;
+  maxPeriodDays?: number;
+  maxDaysAfterUnload?: number;
+}): DateRuleViolation[] {
+  const maxPeriodDays = input.maxPeriodDays ?? DEFAULTS.maxPeriodDays;
+  const maxDaysAfterUnload =
+    input.maxDaysAfterUnload ?? DEFAULTS.maxDaysAfterUnload;
+
+  const start = isIsoDate(input.dateStart)
+    ? parseIsoDateUtc(input.dateStart)
+    : null;
+  const end = isIsoDate(input.dateEnd) ? parseIsoDateUtc(input.dateEnd) : null;
+  const today = isIsoDate(input.today) ? parseIsoDateUtc(input.today) : null;
+
+  // Need both endpoints to say anything about the pair. Future checks need
+  // `today` too. If a single field is present we have no relation to test.
+  if (!start || !end) return [];
+
+  const out: DateRuleViolation[] = [];
+  const orderOk = start.getTime() <= end.getTime();
+
+  if (!orderOk) {
+    out.push({ code: 'date_order', key: 'violationDateOrder', params: {} });
+  }
+
+  if (today) {
+    if (end.getTime() > today.getTime()) {
+      out.push({
+        code: 'date_end_future',
+        key: 'violationDateEndInFuture',
+        params: { date: input.dateEnd },
+      });
+    }
+    if (start.getTime() > today.getTime()) {
+      out.push({
+        code: 'date_start_future',
+        key: 'violationDateStartInFuture',
+        params: { date: input.dateStart },
+      });
+    }
+  }
+
+  // Span + deadline only make sense once the period is well-ordered.
+  if (orderOk) {
+    const periodDays = daysBetweenInclusiveUtc(start, end);
+    if (periodDays > maxPeriodDays) {
+      out.push({
+        code: 'period_too_long',
+        key: 'violationPeriodTooLong',
+        params: { maxDays: maxPeriodDays, periodDays },
+      });
+    }
+    if (today) {
+      const elapsed = daysBetweenUtc(end, today);
+      if (elapsed > maxDaysAfterUnload) {
+        out.push({
+          code: 'deadline_passed',
+          key: 'violationDeadline',
+          params: { maxDays: maxDaysAfterUnload, elapsed },
+        });
+      }
+    }
+  }
+
+  return out;
 }
