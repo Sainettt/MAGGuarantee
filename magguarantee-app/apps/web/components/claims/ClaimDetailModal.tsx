@@ -161,8 +161,8 @@ function ClaimDetailContent({
     return (
       <span className="tabular-nums">
         {new Intl.NumberFormat('pl-PL', {
-          minimumFractionDigits: 4,
-          maximumFractionDigits: 4,
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
         }).format(v)}
       </span>
     );

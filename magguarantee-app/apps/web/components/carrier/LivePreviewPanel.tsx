@@ -180,8 +180,8 @@ export function LivePreviewPanel({
         <StatCard
           label={t('ratePerKm')}
           value={new Intl.NumberFormat('pl-PL', {
-            minimumFractionDigits: 4,
-            maximumFractionDigits: 4,
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
           }).format(data.ratePerKmEffective)}
         />
         <StatCard
