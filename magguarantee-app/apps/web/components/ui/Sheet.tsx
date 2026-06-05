@@ -252,13 +252,21 @@ export function SheetBody({
   return (
     <div
       className={cn(
-        // `scrollbar-gutter: stable` reserves the scrollbar's width even when
-        // it's hidden, so the bar appearing (e.g. on hover with GTK/overlay
-        // auto-hide scrollbars) never narrows the content. Without it, the
-        // width change reflows the CSS-subgrid fields, the total height crosses
-        // the overflow threshold, the scrollbar toggles, and the form jitters
-        // up/down in a feedback loop.
-        'min-h-0 flex-1 overflow-y-auto px-6 py-4 [scrollbar-gutter:stable]',
+        'min-h-0 flex-1 overflow-y-auto px-6 py-4',
+        // `overflow-anchor: none` — disables browser scroll anchoring inside
+        // the body. Tall forms whose content has a fractional total height
+        // (e.g. the checkbox grids with wrapping labels in VehicleSheet /
+        // TrailerSheet) make the browser repeatedly re-clamp scrollTop once
+        // you've scrolled to the very bottom, which shows up as the whole form
+        // "shaking" up/down. Turning anchoring off breaks that loop.
+        '[overflow-anchor:none]',
+        // Clip any incidental horizontal overflow (focus rings, sub-pixel grid
+        // widths) so a horizontal scrollbar can't flicker in/out — that flicker
+        // survived the vertical `scrollbar-gutter` reservation below.
+        'overflow-x-hidden',
+        // Reserve the vertical scrollbar's width so the bar appearing never
+        // narrows the content and reflows the subgrid fields.
+        '[scrollbar-gutter:stable]',
         className,
       )}
     >
