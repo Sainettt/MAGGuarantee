@@ -250,7 +250,18 @@ export function SheetBody({
   children?: ReactNode;
 }) {
   return (
-    <div className={cn('min-h-0 flex-1 overflow-y-auto px-6 py-4', className)}>
+    <div
+      className={cn(
+        // `scrollbar-gutter: stable` reserves the scrollbar's width even when
+        // it's hidden, so the bar appearing (e.g. on hover with GTK/overlay
+        // auto-hide scrollbars) never narrows the content. Without it, the
+        // width change reflows the CSS-subgrid fields, the total height crosses
+        // the overflow threshold, the scrollbar toggles, and the form jitters
+        // up/down in a feedback loop.
+        'min-h-0 flex-1 overflow-y-auto px-6 py-4 [scrollbar-gutter:stable]',
+        className,
+      )}
+    >
       {children}
     </div>
   );
