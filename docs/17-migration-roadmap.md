@@ -491,6 +491,8 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
 
 ## Фаза 7 — Eksport, Weryfikator (≈ 1 неделя)
 
+> 📄 Детальная импл-спека + открытые вопросы по scope: [`20-phase-7-eksport-weryfikator.md`](20-phase-7-eksport-weryfikator.md).
+
 **Цель:** ekspert экспорта и верификатор делегаций имеют свои панели.
 
 ### Backend

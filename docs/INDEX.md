@@ -47,6 +47,7 @@
 | 17 | [17-migration-roadmap.md](17-migration-roadmap.md) | **Поэтапный план разработки** (10 фаз) |
 | 18 | [18-launch-and-deployment.md](18-launch-and-deployment.md) | Launch: prod-окружение, CI/CD, seed, мониторинг |
 | 19 | [19-known-quirks.md](19-known-quirks.md) | **Known quirks** — load-bearing reference: legacy quirks, business rules, foot-guns. Read BEFORE implementing claims-flow / vehicle-CRUD / delegations / authorization. |
+| 20 | [20-phase-7-eksport-weryfikator.md](20-phase-7-eksport-weryfikator.md) | **Phase 7 импл-спека** — роли `eksport` + `weryfikator` (статус выездов, `lastDroveAt`). Scope частично неясен → делаем как в легаси. |
 
 ## Быстрая навигация по ролям
 
