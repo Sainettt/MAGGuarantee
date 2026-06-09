@@ -1215,7 +1215,11 @@
         "violationDateStartInFuture": "Data załadunku ({date}) jest w przyszłości.",
         "violationDateOrder": "Data rozładunku musi być równa lub późniejsza od daty załadunku.",
         "violationDeadline": "Termin na złożenie wniosku minął. Zgodnie z umową masz {maxDays} dni od daty rozładunku (upłynęło {elapsed} dni).",
-        "violationPeriodTooLong": "Okres wniosku nie może przekraczać {maxDays} dni (podano {periodDays} dni)."
+        "violationPeriodTooLong": "Okres wniosku nie może przekraczać {maxDays} dni (podano {periodDays} dni).",
+        "boundaryHintTimeTo": "Data do ({date}) — {reason}: dzień nie jest liczony, więc godzina do nie wpływa na wyliczenie.",
+        "boundaryHintTimeToWeekend": "Data do ({date}) — weekend: dzień nie jest liczony, więc godzina do nie wpływa na wyliczenie.",
+        "boundaryHintTimeFrom": "Data od ({date}) — {reason}: dzień nie jest liczony, więc godzina od nie wpływa na wyliczenie.",
+        "boundaryHintTimeFromWeekend": "Data od ({date}) — weekend: dzień nie jest liczony, więc godzina od nie wpływa na wyliczenie."
       },
       "status": {
         "NA_WERYFIKACJI": "Weryfikacja",

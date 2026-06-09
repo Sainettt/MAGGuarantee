@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULTS,
   canSubmitByDuration,
+  checkClaimDates,
   cooldownCheck,
   formatDaysPl,
   formatHoursPl,
@@ -268,6 +269,217 @@ describe('nextAllowedSubmitAt', () => {
   });
 });
 
+// ─── checkClaimDates ─────────────────────────────────────────
+//
+// Boundary-driven: exactly-today, exactly 90-day span, exactly 7-day
+// deadline, inverted order, and the half-filled / malformed inputs that
+// caused Bug 1 (premature date-order error). "today" is always injected.
+
+const TODAY = '2026-06-05'; // matches the project's current date
+
+function codes(
+  out: ReturnType<typeof checkClaimDates>,
+): string[] {
+  return out.map((v) => v.code);
+}
+
+describe('checkClaimDates — empty / malformed inputs (Bug 1 guard)', () => {
+  it('returns no violations when both dates empty', () => {
+    expect(checkClaimDates({ dateStart: '', dateEnd: '', today: TODAY })).toEqual(
+      [],
+    );
+  });
+
+  it('returns no violations when only dateStart is filled (Bug 1 core case)', () => {
+    // Picking a start date against the empty-string dateEnd default must NOT
+    // produce a date_order violation.
+    const out = checkClaimDates({
+      dateStart: '2026-06-01',
+      dateEnd: '',
+      today: TODAY,
+    });
+    expect(out).toEqual([]);
+  });
+
+  it('returns no violations when only dateEnd is filled', () => {
+    expect(
+      checkClaimDates({ dateStart: '', dateEnd: '2026-06-01', today: TODAY }),
+    ).toEqual([]);
+  });
+
+  it('treats a malformed dateEnd as not-yet-present (no order error)', () => {
+    expect(
+      checkClaimDates({ dateStart: '2026-06-01', dateEnd: '2026-13-40', today: TODAY }),
+    ).toEqual([]);
+  });
+
+  it('treats a malformed today as absent — span still checked, future skipped', () => {
+    const out = checkClaimDates({
+      dateStart: '2026-01-01',
+      dateEnd: '2026-06-01',
+      today: 'not-a-date',
+    });
+    // span 152 days > 90 → period_too_long; future checks skipped (no today).
+    expect(codes(out)).toEqual(['period_too_long']);
+  });
+});
+
+describe('checkClaimDates — date order', () => {
+  it('flags date_order when start > end and attaches no params', () => {
+    const out = checkClaimDates({
+      dateStart: '2026-06-04',
+      dateEnd: '2026-06-01',
+      today: TODAY,
+    });
+    expect(codes(out)).toContain('date_order');
+    const v = out.find((x) => x.code === 'date_order')!;
+    expect(v.key).toBe('violationDateOrder');
+    expect(v.params).toEqual({});
+  });
+
+  it('allows start === end (single-day period, boundary inclusive)', () => {
+    const out = checkClaimDates({
+      dateStart: '2026-06-01',
+      dateEnd: '2026-06-01',
+      today: TODAY,
+    });
+    expect(out).toEqual([]);
+  });
+
+  it('skips span/deadline while order is broken (only reports date_order + future)', () => {
+    // start in the future AND inverted — order + start_future, but no span.
+    const out = checkClaimDates({
+      dateStart: '2026-07-01',
+      dateEnd: '2026-06-01',
+      today: TODAY,
+    });
+    expect(codes(out)).toEqual(['date_order', 'date_start_future']);
+  });
+});
+
+describe('checkClaimDates — future', () => {
+  it('flags end in the future with the date param', () => {
+    const out = checkClaimDates({
+      dateStart: '2026-06-01',
+      dateEnd: '2026-06-10',
+      today: TODAY,
+    });
+    const v = out.find((x) => x.code === 'date_end_future')!;
+    expect(v.key).toBe('violationDateEndInFuture');
+    expect(v.params).toEqual({ date: '2026-06-10' });
+  });
+
+  it('allows end exactly on today (boundary inclusive)', () => {
+    const out = checkClaimDates({
+      dateStart: '2026-06-01',
+      dateEnd: TODAY,
+      today: TODAY,
+    });
+    expect(out).toEqual([]);
+  });
+
+  it('allows start exactly on today', () => {
+    const out = checkClaimDates({
+      dateStart: TODAY,
+      dateEnd: TODAY,
+      today: TODAY,
+    });
+    expect(out).toEqual([]);
+  });
+
+  it('flags both start and end in the future', () => {
+    const out = checkClaimDates({
+      dateStart: '2026-06-06',
+      dateEnd: '2026-06-07',
+      today: TODAY,
+    });
+    expect(codes(out)).toEqual(
+      expect.arrayContaining(['date_end_future', 'date_start_future']),
+    );
+  });
+});
+
+describe('checkClaimDates — period span (default 90, inclusive)', () => {
+  it('allows a span of exactly 90 days (boundary inclusive)', () => {
+    // 2026-03-08 .. 2026-06-05 inclusive = 90 days.
+    const out = checkClaimDates({
+      dateStart: '2026-03-08',
+      dateEnd: '2026-06-05',
+      today: TODAY,
+    });
+    expect(codes(out)).not.toContain('period_too_long');
+  });
+
+  it('flags a span of 91 days with maxDays + periodDays params', () => {
+    // 2026-03-07 .. 2026-06-05 inclusive = 91 days.
+    const out = checkClaimDates({
+      dateStart: '2026-03-07',
+      dateEnd: '2026-06-05',
+      today: TODAY,
+    });
+    const v = out.find((x) => x.code === 'period_too_long')!;
+    expect(v.key).toBe('violationPeriodTooLong');
+    expect(v.params).toEqual({ maxDays: 90, periodDays: 91 });
+  });
+
+  it('honors a caller-injected maxPeriodDays', () => {
+    const out = checkClaimDates({
+      dateStart: '2026-06-01',
+      dateEnd: '2026-06-05',
+      today: TODAY,
+      maxPeriodDays: 3,
+    });
+    const v = out.find((x) => x.code === 'period_too_long')!;
+    expect(v.params).toEqual({ maxDays: 3, periodDays: 5 });
+  });
+});
+
+describe('checkClaimDates — deadline (default 7 days after unload)', () => {
+  it('allows end exactly 7 days before today (boundary inclusive)', () => {
+    // 2026-05-29 is 7 days before 2026-06-05 → still allowed.
+    const out = checkClaimDates({
+      dateStart: '2026-05-20',
+      dateEnd: '2026-05-29',
+      today: TODAY,
+    });
+    expect(codes(out)).not.toContain('deadline_passed');
+  });
+
+  it('flags end 8 days before today with maxDays + elapsed params', () => {
+    // 2026-05-28 is 8 days before 2026-06-05 → deadline passed.
+    const out = checkClaimDates({
+      dateStart: '2026-05-20',
+      dateEnd: '2026-05-28',
+      today: TODAY,
+    });
+    const v = out.find((x) => x.code === 'deadline_passed')!;
+    expect(v.key).toBe('violationDeadline');
+    expect(v.params).toEqual({ maxDays: 7, elapsed: 8 });
+  });
+
+  it('honors a caller-injected maxDaysAfterUnload', () => {
+    const out = checkClaimDates({
+      dateStart: '2026-06-01',
+      dateEnd: '2026-06-01',
+      today: TODAY,
+      maxDaysAfterUnload: 2,
+    });
+    const v = out.find((x) => x.code === 'deadline_passed')!;
+    expect(v.params).toEqual({ maxDays: 2, elapsed: 4 });
+  });
+});
+
+describe('checkClaimDates — combined ordering', () => {
+  it('reports order → future in display order', () => {
+    const out = checkClaimDates({
+      dateStart: '2026-06-08',
+      dateEnd: '2026-06-07',
+      today: TODAY,
+    });
+    expect(codes(out)).toEqual(['date_order', 'date_end_future', 'date_start_future']);
+  });
+});
+
 // ─── DEFAULTS sanity ─────────────────────────────────────────
 
 describe('DEFAULTS', () => {
@@ -275,6 +487,8 @@ describe('DEFAULTS', () => {
     expect(DEFAULTS).toEqual({
       workedDaysThreshold: 10,
       vehicleCooldownDays: 6,
+      maxPeriodDays: 90,
+      maxDaysAfterUnload: 7,
     });
   });
 });

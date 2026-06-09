@@ -14,8 +14,11 @@ import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
   canSubmitByDuration,
+  checkClaimDates,
   DEFAULTS as SUBMISSION_DEFAULTS,
   SubmitClaimSchema,
+  type DateRuleViolation,
+  type ExcludedDayDto,
   type PreviewClaimDto,
   type SubmitClaimDto,
 } from '@magguarantee/shared';
@@ -99,39 +102,18 @@ function sanitizeDraft(draft: Record<string, unknown>): Partial<FormValues> {
   return out as Partial<FormValues>;
 }
 
-/** ISO date in UTC midnight (matches the api's `isoDateToMidnightUtc`). */
-function parseIsoDate(s: string): Date | null {
-  if (typeof s !== 'string') return null;
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-  if (!m) return null;
-  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
 const BUSINESS_TZ = 'Europe/Warsaw';
 
 /**
- * "Today" as a UTC-midnight `Date` representing the current calendar date
- * in the business timezone (Europe/Warsaw — MAGTRANS operating timezone).
+ * `YYYY-MM-DD` of today in the business timezone (Europe/Warsaw — MAGTRANS
+ * operating timezone). Used both for the `<input type="date" max=...>` cap
+ * and as the injected `today` argument to the shared `checkClaimDates` rules
+ * (which are pure — they never read the wall clock themselves).
  *
- * The previous `startOfTodayUtc()` shifted "today" backward by a day for
- * the portion of the night where UTC is still on yesterday, producing
- * false "date in future" violations between local midnight and ~02:00.
+ * Computing the date in Europe/Warsaw avoids the old bug where a UTC-derived
+ * "today" rolled back a day between local midnight and ~02:00, producing
+ * false "date in future" violations.
  */
-function startOfTodayBusinessTz(): Date {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: BUSINESS_TZ,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date());
-  const y = Number(parts.find((p) => p.type === 'year')!.value);
-  const m = Number(parts.find((p) => p.type === 'month')!.value);
-  const d = Number(parts.find((p) => p.type === 'day')!.value);
-  return new Date(Date.UTC(y, m - 1, d));
-}
-
-/** YYYY-MM-DD of today in business TZ — for `<input type="date" max=...>`. */
 function todayBusinessTzIso(): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: BUSINESS_TZ,
@@ -141,14 +123,25 @@ function todayBusinessTzIso(): string {
   }).format(new Date());
 }
 
-/** Inclusive day delta — same convention as api `daysBetweenInclusive`. */
-function daysBetweenInclusive(a: Date, b: Date): number {
-  return Math.round((b.getTime() - a.getTime()) / 86_400_000) + 1;
+/** `'2026-06-04'` → `'04.06'` for compact inline hints (pl-PL day.month). */
+function formatDayMonth(iso: string): string {
+  const parts = iso.split('-');
+  return `${parts[2]}.${parts[1]}`;
 }
 
-/** Non-inclusive day delta — matches api `daysBetween(unload, today)`. */
-function daysBetween(a: Date, b: Date): number {
-  return Math.round((b.getTime() - a.getTime()) / 86_400_000);
+const WEEKDAY_TZ_FMT = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'UTC',
+  weekday: 'short',
+});
+
+/** True if the `YYYY-MM-DD` calendar date falls on Sat/Sun. */
+function isWeekendIso(iso: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return false;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  if (Number.isNaN(d.getTime())) return false;
+  const wd = WEEKDAY_TZ_FMT.format(d);
+  return wd === 'Sat' || wd === 'Sun';
 }
 
 export default function NewClaimPage() {
@@ -164,11 +157,16 @@ export default function NewClaimPage() {
   const form = useForm<FormValues>({
     resolver: zodResolver(SubmitClaimSchema),
     defaultValues: getDefaults(),
-    // Live inline validation — RHF runs the Zod resolver on every value
-    // change so required-field / format errors surface as the user types,
-    // not only after Submit. Pairs with the client-side business-rule
-    // banner below (period > 90d, deadline > 7d, dateEnd in future…).
-    mode: 'onChange',
+    // `onTouched` + `reValidateMode: 'onChange'`: validate a field once the
+    // user has touched (blurred) it, then re-validate live on every change.
+    // The previous `onChange` mode ran the cross-field date refine against the
+    // empty-string `dateEnd` default the instant a start date was picked —
+    // part of Bug 1. With `onTouched` the dateEnd refine waits until dateEnd
+    // is actually touched, and the schema-side guard (datesWellOrdered) no
+    // longer compares against an empty string anyway. Submit gating does NOT
+    // rely on `formState.isValid` alone — see the disabled logic below.
+    mode: 'onTouched',
+    reValidateMode: 'onChange',
   });
 
   const draft = useFormDraft(form, DRAFT_KEY, {
@@ -269,55 +267,29 @@ export default function NewClaimPage() {
 
   // ── Client-side tier-1 business rules ────────────────────────
   // Mirror the pre-calc violations the api throws in `ClaimsService.submit`
-  // (claims.service.ts:175-210) so the carrier sees the same red-banner
-  // immediately on date entry, not only after Submit. The api re-checks
-  // everything — this is purely UX. AppConfig values are mirrored as
-  // hard-coded constants until a `GET /app-config` endpoint exists.
-  const clientViolations = useMemo<string[]>(() => {
-    const list: string[] = [];
-    const startStr = watched.dateStart;
-    const endStr = watched.dateEnd;
-    const start = startStr ? parseIsoDate(startStr) : null;
-    const end = endStr ? parseIsoDate(endStr) : null;
+  // so the carrier sees the same red-banner immediately on date entry, not
+  // only after Submit. The api re-checks everything — this is purely UX.
+  //
+  // The rule logic itself lives in `checkClaimDates` (@magguarantee/shared) so
+  // the web and api share ONE definition of "what's an acceptable date pair".
+  // `today` is injected (business TZ) — the shared fn is pure and never reads
+  // the clock. AppConfig values are mirrored as constants until a
+  // `GET /app-config` endpoint exists; the api forwards the real AppConfig.
+  // Each returned violation carries an i18n key + params → render via tForm.
+  const dateViolations = useMemo<DateRuleViolation[]>(() => {
+    return checkClaimDates({
+      dateStart: watched.dateStart ?? '',
+      dateEnd: watched.dateEnd ?? '',
+      today: todayBusinessTzIso(),
+      maxPeriodDays: CLIENT_MAX_PERIOD_DAYS,
+      maxDaysAfterUnload: CLIENT_MAX_DAYS_AFTER_UNLOAD,
+    });
+  }, [watched.dateStart, watched.dateEnd]);
 
-    if (start && end) {
-      const today = startOfTodayBusinessTz();
-      if (end.getTime() > today.getTime()) {
-        list.push(
-          tForm('violationDateEndInFuture', { date: endStr }),
-        );
-      }
-      if (start.getTime() > today.getTime()) {
-        list.push(
-          tForm('violationDateStartInFuture', { date: startStr }),
-        );
-      }
-      if (start.getTime() > end.getTime()) {
-        list.push(tForm('violationDateOrder'));
-      } else {
-        const periodDays = daysBetweenInclusive(start, end);
-        if (periodDays > CLIENT_MAX_PERIOD_DAYS) {
-          list.push(
-            tForm('violationPeriodTooLong', {
-              maxDays: CLIENT_MAX_PERIOD_DAYS,
-              periodDays,
-            }),
-          );
-        }
-        const elapsed = daysBetween(end, today);
-        if (elapsed > CLIENT_MAX_DAYS_AFTER_UNLOAD) {
-          list.push(
-            tForm('violationDeadline', {
-              maxDays: CLIENT_MAX_DAYS_AFTER_UNLOAD,
-              elapsed,
-            }),
-          );
-        }
-      }
-    }
-    return list;
-    // tForm identity is stable per render — list deps on the watched fields.
-  }, [watched.dateStart, watched.dateEnd, tForm]);
+  const clientViolations = useMemo<string[]>(
+    () => dateViolations.map((v) => tForm(v.key, v.params)),
+    [dateViolations, tForm],
+  );
   const clientBlocked = clientViolations.length > 0;
 
   // Server-side business-rule violations from the 422 envelope (rendered as
@@ -376,6 +348,81 @@ export default function NewClaimPage() {
   );
 
   const errs = form.formState.errors;
+
+  // The cross-field refine in SubmitClaimSchema attaches the STABLE MACHINE
+  // CODE 'date_order' to `dateEnd` (the api echoes Zod issue.message verbatim;
+  // the web owns i18n). Map it to a localized message here so the raw code can
+  // never reach the UI. All other dateEnd errors (format/required) are already
+  // localized strings from the resolver and pass through untouched.
+  const dateEndError =
+    errs.dateEnd?.message === 'date_order'
+      ? tForm('violationDateOrder')
+      : errs.dateEnd?.message;
+
+  // Explicit required-fields gate — independent of `formState.isValid`.
+  // With `mode: 'onTouched'`, `isValid` does track the resolver, but an
+  // untouched fresh form should never be submittable regardless of how RHF
+  // chooses to lazily evaluate validity. This gate is the load-bearing block
+  // for the empty-form case; `isValid` then adds format-level blocking once
+  // fields are touched. (The api re-validates everything — this is UX only.)
+  const requiredFilled =
+    !!watched.vehicleId &&
+    !!watched.dateStart &&
+    !!watched.dateEnd &&
+    !!watched.timeFrom &&
+    !!watched.timeTo &&
+    typeof watched.mileage === 'number' &&
+    watched.mileage > 0;
+
+  // ── Bug 2 feedback — boundary-day "time has no effect" hints ──────
+  // The engine's `timeFrom` / `timeTo` only scale the FIRST / LAST calendar
+  // day's working fraction. When that boundary day is dropped from the count
+  // (weekend, Polish holiday, EU heavy-vehicle ban day), changing the time
+  // recalcs but the km is unchanged — so the field looks like a no-op. The
+  // engine is correct; this is a targeted inline explanation tied to the
+  // boundary day, distinct from the full excluded-days list in BreakdownTable.
+  //
+  // An excluded day's reason label comes from the engine (`ExcludedDay.label`,
+  // e.g. "Boże Ciało"); weekends aren't in `excludedDays` (universal, omitted
+  // there by design) so we detect those locally with `isWeekendIso`.
+  const excludedByDate = useMemo<Map<string, string>>(() => {
+    const map = new Map<string, string>();
+    const months = previewQ.data?.breakdown?.breakdown ?? [];
+    for (const m of months) {
+      for (const ex of (m.excludedDays ?? []) as ExcludedDayDto[]) {
+        map.set(ex.date, ex.label);
+      }
+    }
+    return map;
+  }, [previewQ.data]);
+
+  function boundaryHint(
+    iso: string | undefined,
+    holidayKey: 'boundaryHintTimeFrom' | 'boundaryHintTimeTo',
+    weekendKey: 'boundaryHintTimeFromWeekend' | 'boundaryHintTimeToWeekend',
+  ): string | null {
+    if (!iso) return null;
+    const label = excludedByDate.get(iso);
+    if (label) {
+      return tForm(holidayKey, { date: formatDayMonth(iso), reason: label });
+    }
+    if (isWeekendIso(iso)) {
+      return tForm(weekendKey, { date: formatDayMonth(iso) });
+    }
+    return null;
+  }
+
+  const timeFromHint = boundaryHint(
+    watched.dateStart,
+    'boundaryHintTimeFrom',
+    'boundaryHintTimeFromWeekend',
+  );
+  const timeToHint = boundaryHint(
+    watched.dateEnd,
+    'boundaryHintTimeTo',
+    'boundaryHintTimeToWeekend',
+  );
+
   const vehicles = fleetQ.data?.vehicles ?? [];
   const drivers = fleetQ.data?.drivers ?? [];
   const trailers = fleetQ.data?.trailers ?? [];
@@ -535,7 +582,7 @@ export default function NewClaimPage() {
                   <FormField
                     label={tForm('dateEnd')}
                     required
-                    error={errs.dateEnd?.message}
+                    error={dateEndError}
                     htmlFor="claim-dateEnd"
                   >
                     <Input
@@ -546,32 +593,54 @@ export default function NewClaimPage() {
                       {...form.register('dateEnd')}
                     />
                   </FormField>
-                  <FormField
-                    label={tForm('timeFrom')}
-                    required
-                    error={errs.timeFrom?.message}
-                    htmlFor="claim-timeFrom"
-                  >
-                    <Input
-                      id="claim-timeFrom"
-                      type="time"
-                      className="h-10"
-                      {...form.register('timeFrom')}
-                    />
-                  </FormField>
-                  <FormField
-                    label={tForm('timeTo')}
-                    required
-                    error={errs.timeTo?.message}
-                    htmlFor="claim-timeTo"
-                  >
-                    <Input
-                      id="claim-timeTo"
-                      type="time"
-                      className="h-10"
-                      {...form.register('timeTo')}
-                    />
-                  </FormField>
+                  <div>
+                    <FormField
+                      label={tForm('timeFrom')}
+                      required
+                      error={errs.timeFrom?.message}
+                      htmlFor="claim-timeFrom"
+                    >
+                      <Input
+                        id="claim-timeFrom"
+                        type="time"
+                        className="h-10"
+                        {...form.register('timeFrom')}
+                      />
+                    </FormField>
+                    {timeFromHint && (
+                      <p
+                        role="status"
+                        aria-live="polite"
+                        className="mt-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning-dark dark:text-warning"
+                      >
+                        {timeFromHint}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <FormField
+                      label={tForm('timeTo')}
+                      required
+                      error={errs.timeTo?.message}
+                      htmlFor="claim-timeTo"
+                    >
+                      <Input
+                        id="claim-timeTo"
+                        type="time"
+                        className="h-10"
+                        {...form.register('timeTo')}
+                      />
+                    </FormField>
+                    {timeToHint && (
+                      <p
+                        role="status"
+                        aria-live="polite"
+                        className="mt-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning-dark dark:text-warning"
+                      >
+                        {timeToHint}
+                      </p>
+                    )}
+                  </div>
                 </FormGrid>
               </FormSection>
 
@@ -665,13 +734,16 @@ export default function NewClaimPage() {
                 // Disabled if any of: (a) an in-flight submit, (b) preview
                 // failed for current input, (c) duration gate (<10 days),
                 // (d) client-side tier-1 violations (period span / 7-day
-                // deadline / future dates), (e) RHF schema invalid (with
-                // `mode: 'onChange'` this stays accurate as the user types).
+                // deadline / future dates / order), (e) required fields not
+                // all filled (independent gate — blocks the untouched empty
+                // form even before RHF lazily computes validity under
+                // `mode: 'onTouched'`), (f) RHF schema invalid (format-level).
                 disabled={
                   submitting ||
                   previewBlocked ||
                   durationBlocked ||
                   clientBlocked ||
+                  !requiredFilled ||
                   !form.formState.isValid
                 }
               >

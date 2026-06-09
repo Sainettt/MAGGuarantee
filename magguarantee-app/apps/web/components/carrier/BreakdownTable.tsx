@@ -44,8 +44,8 @@ function formatInt(n: number): string {
 
 function formatRate(n: number): string {
   return new Intl.NumberFormat('pl-PL', {
-    minimumFractionDigits: 4,
-    maximumFractionDigits: 4,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(n);
 }
 
