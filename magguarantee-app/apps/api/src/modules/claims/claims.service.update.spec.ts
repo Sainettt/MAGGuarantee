@@ -673,6 +673,154 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
     expect(audit.logs).toHaveLength(0);
   });
 
+  // ── Fix 3: authoritative accept-guard (no under-run ⇒ no payout) ─────
+  //
+  // A claim may only be moved into an ACCEPTED state when the (re)calculated
+  // km-difference shows an under-run (kmGuaranteed - mileage > 0). This is the
+  // server-side mirror of the carrier-UI accept-gate; a forged/stale PATCH must
+  // not be able to flip a "guarantee met/exceeded" claim into a paid state.
+  // Rejection paths are never gated by this rule.
+
+  it('13a. ZAAKCEPTOWANO when recalc shows kmDifference <= 0 → 422 + no writes', async () => {
+    const seeded = makeClaim();
+    const repoFake = makeClaimsRepo([seeded]);
+    // Verifier corrects mileage UPWARD so the carrier "drove the guarantee":
+    // recalc kmGuaranteed = 10_800, mileage = 11_000 ⇒ kmDifference = -200.
+    const km = makeKmCalcService({
+      totalDays: 20,
+      rawTotalDays: 20,
+      kmGuaranteed: 10_800,
+      ratePerKmEffective: 0.5,
+    });
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const dto: UpdateClaimDto = {
+      targetStatus: 'ZAAKCEPTOWANO',
+      orderNumber: 'ZL-7',
+      orderDate: '2026-04-30',
+      amountApproved: 0,
+      mileage: 11_000, // exceeds the guarantee → no under-run
+    };
+
+    await expect(
+      svc.update(makeAuth('pracownik'), seeded.nrZgl, dto),
+    ).rejects.toThrow(UnprocessableEntityException);
+
+    // Guard fires BEFORE any persistence — claim stays at NA_WERYFIKACJI.
+    expect(repoFake.updateWithinCalls).toHaveLength(0);
+    expect(audit.logs).toHaveLength(0);
+    expect(repoFake.rows.get(seeded.nrZgl)!.status).toBe('NA_WERYFIKACJI');
+  });
+
+  it('13b. ZAAKCEPTOWANO with no math edits but persisted kmDifference <= 0 → 422', async () => {
+    // No correction fields ⇒ recalc skipped; the guard must fall back to the
+    // persisted row value. Seed a claim whose stored kmDifference is 0.
+    const seeded = makeClaim({ kmDifference: 0, paymentEur: 0 });
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const dto: UpdateClaimDto = {
+      targetStatus: 'ZAAKCEPTOWANO',
+      orderNumber: 'ZL-8',
+      orderDate: '2026-04-30',
+      amountApproved: 0,
+    };
+
+    await expect(
+      svc.update(makeAuth('pracownik'), seeded.nrZgl, dto),
+    ).rejects.toThrow(UnprocessableEntityException);
+
+    // km-calc must NOT have run (pure decision PATCH).
+    expect(km.calls).toHaveLength(0);
+    expect(repoFake.updateWithinCalls).toHaveLength(0);
+  });
+
+  it('13c. REKLAMACJA_ZAAKCEPTOWANO when recalc shows kmDifference <= 0 → 422', async () => {
+    const seeded = makeClaim({
+      status: 'REKLAMACJA',
+      statusBeforeReklamacja: 'ODRZUCONO',
+      reklamacjaSubmitted: true,
+      reklamacjaAmount: 500,
+    });
+    const repoFake = makeClaimsRepo([seeded]);
+    // Recalc shows the guarantee was met (kmGuaranteed == mileage ⇒ 0).
+    const km = makeKmCalcService({
+      totalDays: 20,
+      rawTotalDays: 20,
+      kmGuaranteed: 8_000,
+      ratePerKmEffective: 0.5,
+    });
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const dto: UpdateClaimDto = {
+      targetStatus: 'REKLAMACJA_ZAAKCEPTOWANO',
+      comment: 'Akceptacja reklamacji.',
+      reklamacjaAmount: 450,
+      mileage: 8_000, // equals guarantee → kmDifference = 0
+    };
+
+    await expect(
+      svc.update(makeAuth('pracownik'), seeded.nrZgl, dto),
+    ).rejects.toThrow(UnprocessableEntityException);
+
+    expect(repoFake.updateWithinCalls).toHaveLength(0);
+    expect(repoFake.rows.get(seeded.nrZgl)!.status).toBe('REKLAMACJA');
+  });
+
+  it('13d. ZAAKCEPTOWANO when recalc shows kmDifference > 0 → ok (compensation due)', async () => {
+    const seeded = makeClaim();
+    const repoFake = makeClaimsRepo([seeded]);
+    // Default km-calc: kmGuaranteed = 10_800; mileage corrected to 9_000 ⇒
+    // kmDifference = 1_800 > 0 → under-run → accept allowed.
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const dto: UpdateClaimDto = {
+      targetStatus: 'ZAAKCEPTOWANO',
+      orderNumber: 'ZL-9',
+      orderDate: '2026-04-30',
+      amountApproved: 900,
+      mileage: 9_000,
+    };
+
+    const out = await svc.update(makeAuth('pracownik'), seeded.nrZgl, dto);
+
+    expect(out.status).toBe('ZAAKCEPTOWANO');
+    expect(repoFake.updateWithinCalls).toHaveLength(1);
+    // kmDifference = 10_800 - 9_000 = 1_800; paymentEur = 1_800 * 0.5 = 900.
+    expect(out.kmDifference).toBe(1_800);
+    expect(out.paymentEur).toBe(900);
+  });
+
+  it('13e. ODRZUCONO is NOT gated even when kmDifference <= 0 (rejection always allowed)', async () => {
+    // Carrier drove the guarantee (kmDifference = 0) — rejecting is fine.
+    const seeded = makeClaim({ kmDifference: 0, paymentEur: 0 });
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const dto: UpdateClaimDto = {
+      targetStatus: 'ODRZUCONO',
+      comment: 'Brak niedopałania — gwarancja wyjeżdżona.',
+    };
+
+    const out = await svc.update(makeAuth('pracownik'), seeded.nrZgl, dto);
+
+    expect(out.status).toBe('ODRZUCONO');
+    expect(repoFake.updateWithinCalls).toHaveLength(1);
+  });
+
   it('10. PATCH WITHOUT hoursAdjusted leaves BOTH columns untouched', async () => {
     // Pure decision PATCH (ZAAKCEPTOWANO with order info only). Neither
     // column should appear in the update payload — orig stays orig, applied

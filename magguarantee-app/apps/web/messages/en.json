@@ -751,7 +751,8 @@
           "secondaryHistory": "History",
           "secondaryAuthorization": "Authorization",
           "decisionRequired": "Pick a decision to save the claim.",
-          "terminalState": "The claim is in a terminal state — no decisions available."
+          "terminalState": "The claim is in a terminal state — no decisions available.",
+          "guaranteeMetHint": "Guarantee met — the claim can only be rejected."
         },
         "tabs": {
           "edit": "Edit",

@@ -3821,6 +3821,15 @@ Six facts, each a **pair**: carrier-declared value (read-only, muted) and the ve
 
 **⚠️ `hoursAdjusted` has NO carrier-declared value** (the carrier never enters a stoppage; `origHoursAdjusted = 0`, which is *not* a real declared figure). For this fact render **only the verifier input** — omit the muted "declared" top/left cell entirely. Do **not** render `0` as a declared value; that would imply the carrier declared zero stoppage, which is false. Keep this cell visually balanced with its row siblings (it spans the pair's full width as a single input, or sits alone — web-agent's call), and render the live `HoursReadout` under it (§A pattern, `live`).
 
+**⚠️ `hoursAdjusted` row visibility differs by mode (locked):**
+
+| Mode | Rule |
+|---|---|
+| `edit` | **Always rendered** — input-only cell (no muted declared sibling), unchanged from the rule above. The verifier needs the field to *enter* a stoppage correction. |
+| `view` | **Rendered ONLY when a real correction was applied** — i.e. `hoursAdjustedValue > 0`. If there is no stoppage (or the claim is not yet verified), **omit the entire row** (label + value). Do **not** render an empty/`—`/`0` row. |
+
+Rationale: the carrier never declares a stoppage, so in read-only `view` an empty «Korekta godzin» row is pure noise — it shows a fact that was never entered and never applied. Only when the verifier actually applied a stoppage (`hoursAdjustedValue > 0`) does the row carry information worth showing in `view`. The `edit`-mode treatment is unchanged (input present, no muted cell).
+
 #### Pair anatomy & the muted (declared) treatment
 
 Each pair is one `<FormGrid cols={2}>`-aligned logical row (per §"Grid-form field alignment"). On `md+` the declared value is the **left** cell, the verifier input the **right**; below `md` the declared value stacks **above** the input.
@@ -3868,6 +3877,23 @@ A single full-width block between the fact pairs and the decyzja block. This is 
 
 - Use `<FormGrid cols={2}>` for the ZAAKCEPTOWANO grid (orderNumber/orderDate side-by-side; `amountApproved` is a `col-span-2` full-width locked field). Mirrors the existing Phase 4 ClaimVerificationModal ZAAKCEPTOWANO grid.
 - The conditional block mounts/unmounts on `targetStatus` change with no layout jump above it (facts + dopłata stay fixed; only this bottom block reflows).
+
+#### No pre-selected decision on entering `edit` (locked)
+
+- On entering `edit`, **`targetStatus` is NOT pre-selected.** The `<Select>` shows a placeholder «wybierz decyzję», and **no conditional fields render** (no orderNumber/orderDate/amount for ZAAKCEPTOWANO, no komentarz for ODRZUCONO, etc.) until a decision is chosen. The decyzja block is just the empty select + (if applicable) the acceptance hint below it.
+- **Required-field validation for the decision's conditional fields fires only on «Zapisz» (submit)** — never on enter-edit, never on first render. The verifier must not see required-field errors before they have even picked a decision.
+- **Focus on entering `edit` lands on the first fact (`dateStart`), not on the decyzja block** (overrides nothing — this matches §6.5.6's existing "focus to first verifier input" rule; restated here to make explicit it is the *fact*, never the decyzja select, that receives focus).
+
+Rationale: pre-selecting a status (or rendering its required fields) makes the conditional inputs read as "screaming unfilled" the moment edit opens, and yanks focus to the bottom of the modal. The verifier's job is facts-first → read dopłata → *then* decide; the empty placeholder enforces that order and removes the false-error noise.
+
+#### Acceptance gate by recalc result (locked)
+
+The decyzja select must reflect the live dopłata recalc (§6.5.4):
+
+- **When the live recalc shows the guarantee is met or exceeded** — `kmDifference <= 0` (no shortfall ⇒ no payout) — the **acceptance options (`ZAAKCEPTOWANO`, `REKLAMACJA_ZAAKCEPTOWANO`) are disabled / unavailable** in the `<Select>`. Only rejection options (`ODRZUCONO`, `REKLAMACJA_ODRZUCONO`) remain selectable.
+- **If an acceptance was already selected and a subsequent fact edit pushes the recalc into "guarantee met" (`kmDifference <= 0`)**, the current `targetStatus` selection is **cleared back to the placeholder** (and its conditional fields unmount), forcing a re-decision among the rejection options.
+- Render a short hint next to / under the decyzja block: **«Gwarancja wyjeżdżona — wniosek można tylko odrzucić.»** (`text-xs text-text-sub`, shown only while `kmDifference <= 0`).
+- This is a **UI guard only** — the backend additionally hard-rejects any acceptance on a met-guarantee claim (`422`). The UI gate exists to prevent the verifier from ever reaching that error, not to replace the server check.
 
 ### 6.5.6 `mode: 'view' | 'edit'` — the in-place morph (no re-mount)
 
@@ -3944,6 +3970,9 @@ The Phase 4 design used three tabs (Edit / Historia / Autoryzacja). In the unifi
 - [ ] Row-click opens `view` (read-only); «Edycja» enters `edit` **in place** — no re-mount, no container swap, no slide animation, RHF values preserved.
 - [ ] Body order top→bottom: fact pairs → dopłata (locked/computed, live) → decyzja (select + conditional fields) → optional Historia/Autoryzacja sub-panel.
 - [ ] 6 fact pairs; declared cells muted `bg-input/40` + `text-text-sub` **without** lock icon; `timeFrom`/`timeTo` declared from `origTimeFrom`/`origTimeTo`; `hoursAdjusted` has input only (no declared cell, never `0`).
+- [ ] `hoursAdjusted` row in **`view`** is rendered **only when `hoursAdjustedValue > 0`**; omitted entirely (no empty/`—`/`0` row) when there is no stoppage / claim not verified. In `edit` the input is always present.
+- [ ] On entering `edit`, `targetStatus` is **not pre-selected** (placeholder «wybierz decyzję»); decision conditional fields do **not** render until a decision is chosen; decision required-field validation fires **only on «Zapisz»**; focus lands on `dateStart`, not the decyzja block.
+- [ ] Acceptance gate: when live recalc shows `kmDifference <= 0` (guarantee met), `ZAAKCEPTOWANO` / `REKLAMACJA_ZAAKCEPTOWANO` are disabled; a prior acceptance selection is cleared if an edit pushes recalc into "guarantee met"; hint «Gwarancja wyjeżdżona — wniosek można tylko odrzucić» shown; backend still hard-rejects acceptance (`422`).
 - [ ] dopłata recomputes live (300ms debounce) on any fact change, **independent of selected `targetStatus`**; `<RecalcBadge>` Przeliczam…→Aktualne.
 - [ ] Historia tab only when `origData != null`; Autoryzacja only above threshold; **no FileUpload in Autoryzacja**; both omitted when neither applies; single labelled section (no `<Tabs>`) when only one applies.
 - [ ] Footer differs by mode; Anuluj-from-edit returns to `view` + `form.reset`, does not close; ✕/Escape/Zamknij closes.
@@ -3959,5 +3988,6 @@ Documented deviations from the literal §6.5 text, each within brand/token const
 
 1. **Autoryzacja applicability gate.** §6.5.7 keys the Autoryzacja secondary tab on a business threshold (`claim.doplata > LIMIT_OR_THRESHOLD`). That limit constant is **not exposed to the client** (no DTO field / config endpoint surfaces it). To preserve functional identity with the Phase 4 flow, the Autoryzacja section is gated on **claim status** instead: shown when `status ∈ { NA_WERYFIKACJI (request-authorization form), OCZEKUJE_NA_AUTORYZACJE (read-only pending summary) }`, omitted otherwise. If a numeric threshold is later surfaced on the DTO, swap this predicate. **No FileUpload / screenshots** (the locked rule is preserved).
 2. **dopłata locked field is a static computed display, not an RHF-registered input.** §6.5.4 says "render verbatim the `amountApproved` recipe with `readOnly` RHF registration". The standalone dopłata block (above decyzja) is the *live preview consequence* and is never submitted on its own, so it renders as a static muted value (`bg-input/40` + `<Lock>` + `<FormDescription>` "wyliczana automatycznie") rather than a registered `<input readOnly>`. The **RHF-registered** locked `amountApproved` field still exists inside the ZAAKCEPTOWANO decision branch (§6.5.5), bound to the same live-computed value — so the submitted payload is unchanged.
-3. **Decyzja inputs are gated behind `edit` mode.** In `view` the decyzja block renders a muted "pick edit to decide" hint instead of the live `<Select>` — a decision is an edit, so it belongs to `edit` mode. The select + conditional fields appear the instant «Edycja» is pressed (no re-mount). This is consistent with §6.5.6's "leaf controls flip static⇄input" rule applied to the decyzja sub-tree.
+3. **Decyzja inputs are gated behind `edit` mode.** In `view` the decyzja block renders a muted "pick edit to decide" hint instead of the live `<Select>` — a decision is an edit, so it belongs to `edit` mode. The select + conditional fields appear the instant «Edycja» is pressed (no re-mount). This is consistent with §6.5.6's "leaf controls flip static⇄input" rule applied to the decyzja sub-tree. **On enter-edit the select shows the placeholder «wybierz decyzję» (no pre-selected `targetStatus`)** and no conditional fields render until a decision is picked; decision required-field validation fires only on «Zapisz» (see §6.5.5 "No pre-selected decision").
+4. **Acceptance gated by recalc result.** Acceptance options are disabled (and any prior acceptance selection cleared) whenever the live recalc yields `kmDifference <= 0` (guarantee met ⇒ no payout); only rejection options remain, with the hint «Gwarancja wyjeżdżona — wniosek można tylko odrzucić». UI guard only; backend independently hard-rejects acceptance with `422` (see §6.5.5 "Acceptance gate by recalc result").
 

@@ -28,6 +28,7 @@ import {
   canSubmitByDuration,
   cooldownCheck,
   DEFAULTS as CARRIER_SUBMISSION_DEFAULTS,
+  isCompensationDue,
 } from '@magguarantee/shared';
 
 import { AuditContext } from '../../common/audit/audit-context';
@@ -454,6 +455,11 @@ export class ClaimsService {
     // the interceptor's writer picks it up — no manual log() call here.
     const existing = await this._validateClaimUpdate(nrZgl, dto);
     const recalc = await this._recalcClaim(existing, dto);
+    // Authoritative accept-guard (Fix 3): a claim may only be ACCEPTED when the
+    // (re)calculated km-difference shows an under-run, i.e. compensation is
+    // actually due. This is the server-side mirror of the carrier-UI gate so a
+    // forged/stale PATCH can't move a "guarantee met" claim into a paid state.
+    this._assertCompensationDueForAccept(existing, dto, recalc);
     const patch = this._buildUpdatePatch(existing, dto, recalc, user);
     const reklamacjaSnapshot = this._handleReklamacjaTransition(existing, dto);
     const data: UpdateClaimData = { ...patch, ...reklamacjaSnapshot };
@@ -1064,6 +1070,50 @@ export class ClaimsService {
       breakdown,
       mileage,
     };
+  }
+
+  /**
+   * Authoritative accept-guard (Fix 3, backend half).
+   *
+   * Blocks moving a claim into an ACCEPTED state when there is no under-run —
+   * i.e. the carrier "drove the guarantee" (kmGuaranteed - mileage <= 0), so no
+   * compensation is due. This is the server-side mirror of the carrier-UI gate:
+   * the UI hides/disables the accept action, but a forged or stale PATCH must
+   * not be able to flip such a claim to a paid state.
+   *
+   * Target states that count as ACCEPT:
+   *   - `ZAAKCEPTOWANO` (fresh claim accepted by the verifier).
+   *   - `REKLAMACJA_ZAAKCEPTOWANO` (verifier accepts a reklamacja; the service
+   *     translates this synthetic wire literal back to `ZAAKCEPTOWANO`, see
+   *     docs/13-api-design.md#update-claim-verification).
+   * `ODRZUCONO` / `REKLAMACJA_ODRZUCONO` (and any other transition) are NOT
+   * gated — a "no under-run" claim can always be rejected.
+   *
+   * km-difference source: the RECALCULATED value when the verifier touched a
+   * math-affecting field (dates / times / mileage / hoursAdjusted), otherwise
+   * the value already persisted on the row (recalc skipped ⇒ math unchanged).
+   * We never trust a client-supplied amount here — only km-calc output.
+   *
+   * Pure decision helper — no IO. Throws `UnprocessableEntityException` (422).
+   */
+  private _assertCompensationDueForAccept(
+    existing: ClaimRow,
+    dto: UpdateClaimDto,
+    recalc: { kmDifference: number } | null,
+  ): void {
+    const isAccept =
+      dto.targetStatus === 'ZAAKCEPTOWANO' ||
+      dto.targetStatus === 'REKLAMACJA_ZAAKCEPTOWANO';
+    if (!isAccept) return;
+
+    // Recalc ran ⇒ use its fresh kmDifference (post-verifier-edits); otherwise
+    // the math is untouched and the persisted row value is authoritative.
+    const kmDifference = recalc ? recalc.kmDifference : existing.kmDifference;
+    if (!isCompensationDue(kmDifference)) {
+      throw new UnprocessableEntityException(
+        'Nie można zaakceptować — brak niedopałania (gwarancja wyjeżdżona).',
+      );
+    }
   }
 
   /**

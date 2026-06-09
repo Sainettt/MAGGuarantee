@@ -13,6 +13,7 @@ import {
   cooldownCheck,
   formatDaysPl,
   formatHoursPl,
+  isCompensationDue,
   nextAllowedSubmitAt,
   roundDays,
 } from '../src/domain/claim-submission-rules';
@@ -477,6 +478,26 @@ describe('checkClaimDates — combined ordering', () => {
       today: TODAY,
     });
     expect(codes(out)).toEqual(['date_order', 'date_end_future', 'date_start_future']);
+  });
+});
+
+// ─── isCompensationDue ───────────────────────────────────────
+
+describe('isCompensationDue', () => {
+  it('is true for a positive under-run (compensation owed)', () => {
+    expect(isCompensationDue(2_800)).toBe(true);
+  });
+
+  it('is true for the smallest positive under-run', () => {
+    expect(isCompensationDue(0.01)).toBe(true);
+  });
+
+  it('is false at exactly zero (guarantee met, boundary excluded)', () => {
+    expect(isCompensationDue(0)).toBe(false);
+  });
+
+  it('is false for an over-run (mileage exceeded guarantee)', () => {
+    expect(isCompensationDue(-150)).toBe(false);
   });
 });
 

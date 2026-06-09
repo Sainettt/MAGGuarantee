@@ -43,6 +43,7 @@ import { toast } from 'sonner';
 import {
   RequestAuthorizationSchema,
   UpdateClaimSchema,
+  isCompensationDue,
   type ClaimDto,
   type PreviewClaimDto,
   type RequestAuthorizationDto,
@@ -303,7 +304,7 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
 
   const form = useForm<FormValues>({
     resolver: updateClaimResolver,
-    defaultValues: getDefaults(claim, targets[0] ?? ''),
+    defaultValues: getDefaults(claim),
   });
 
   const targetStatus = form.watch('targetStatus');
@@ -364,6 +365,39 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
   const liveDoplata =
     previewQ.data?.paymentEur ?? claim.paymentEur;
 
+  // ── Acceptance gate by recalc result (§6.5.5 / §6.5.10) ──
+  // When the live recalc shows the guarantee was met (kmDifference <= 0 →
+  // no payout due) acceptance is impossible: drop the accept targets from
+  // the select, leaving only the rejection options. UI guard only — the
+  // backend independently hard-rejects acceptance with 422.
+  const liveKmDiff = previewQ.data?.kmDifference ?? claim.kmDifference;
+  const metGuarantee = !isCompensationDue(liveKmDiff);
+  const availableTargets = useMemo(
+    () =>
+      metGuarantee
+        ? targets.filter(
+            (target) =>
+              target === 'ODRZUCONO' || target === 'REKLAMACJA_ODRZUCONO',
+          )
+        : targets,
+    [metGuarantee, targets],
+  );
+
+  // Clear a stale acceptance selection if an edit pushes recalc into
+  // "guarantee met". Guarded on the value of `targetStatus` (read via the
+  // watch above) and `metGuarantee` only — `form.setValue` is stable, so no
+  // loop. Skipped while a recalc is in flight to avoid flicker.
+  useEffect(() => {
+    if (!metGuarantee) return;
+    if (recalcState === 'loading') return;
+    if (
+      targetStatus === 'ZAAKCEPTOWANO' ||
+      targetStatus === 'REKLAMACJA_ZAAKCEPTOWANO'
+    ) {
+      form.setValue('targetStatus', '');
+    }
+  }, [metGuarantee, recalcState, targetStatus, form]);
+
   // Auto-populate `amountApproved` to the live dopłata for ZAAKCEPTOWANO
   // until the verifier overrides it. (decision-scoped — only fires when the
   // accept branch is selected.)
@@ -403,7 +437,7 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
   };
   const cancelEdit = () => {
     // Discard unsaved edits, back to view; do NOT close the Dialog.
-    form.reset(getDefaults(claim, targets[0] ?? ''));
+    form.reset(getDefaults(claim));
     setMode('view');
     requestAnimationFrame(() => editButtonRef.current?.focus());
   };
@@ -505,14 +539,23 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
               {tUnified('decisionRequired')}
             </p>
           ) : (
-            <DecisionFields
-              form={form}
-              targets={targets}
-              targetStatus={targetStatus}
-              errMsg={errMsg}
-              tEdit={tEdit}
-              tStatus={tStatus}
-            />
+            <>
+              <DecisionFields
+                form={form}
+                targets={availableTargets}
+                targetStatus={targetStatus}
+                errMsg={errMsg}
+                tEdit={tEdit}
+                tStatus={tStatus}
+              />
+              {/* Acceptance gate hint — shown while recalc reports the
+                  guarantee was met (no payout due ⇒ accept removed). */}
+              {metGuarantee && (
+                <p className="text-xs text-text-sub">
+                  {tUnified('guaranteeMetHint')}
+                </p>
+              )}
+            </>
           )}
         </section>
 
@@ -844,6 +887,12 @@ function HoursAdjustedFact({
   const error = errMsg('hoursAdjusted');
 
   if (!isEdit) {
+    // §6.5.3 / §6.5.10: in read-only `view` the stoppage row appears ONLY when
+    // a correction was actually applied. The carrier never enters a stoppage,
+    // so an empty row here is pure noise — omit label + value entirely.
+    if (claim.hoursAdjustedValue == null || claim.hoursAdjustedValue <= 0) {
+      return null;
+    }
     return (
       <div className="grid grid-cols-1 gap-x-4 md:grid-cols-2">
         <div className="flex flex-col gap-1 py-1.5">
@@ -1606,12 +1655,13 @@ function computeLiveTotalDays(
   return adjusted;
 }
 
-function getDefaults(
-  claim: ClaimDto,
-  firstTarget: ClaimDecisionTarget | '',
-): FormValues {
+function getDefaults(claim: ClaimDto): FormValues {
   return {
-    targetStatus: firstTarget,
+    // §6.5.5 / §6.5.10: never pre-select a decision. The select shows its
+    // placeholder («wybierz decyzję»), so no conditional decision fields
+    // (orderNumber/orderDate/amountApproved…) render and steal focus/scroll
+    // on enter-edit. Required-field validation fires only on «Zapisz».
+    targetStatus: '',
     dateStart: claim.dateStart.slice(0, 10),
     dateEnd: claim.dateEnd.slice(0, 10),
     timeFrom: claim.timeFrom,

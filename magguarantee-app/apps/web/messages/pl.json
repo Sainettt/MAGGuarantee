@@ -751,7 +751,8 @@
           "secondaryHistory": "Historia",
           "secondaryAuthorization": "Autoryzacja",
           "decisionRequired": "Wybierz decyzję, aby zapisać wniosek.",
-          "terminalState": "Wniosek jest w stanie końcowym — brak dostępnych decyzji."
+          "terminalState": "Wniosek jest w stanie końcowym — brak dostępnych decyzji.",
+          "guaranteeMetHint": "Gwarancja wyjeżdżona — wniosek można tylko odrzucić."
         },
         "tabs": {
           "edit": "Edytuj",

@@ -85,6 +85,30 @@ function parseIsoDateUtc(s: string): Date | null {
   return d;
 }
 
+// ─── Public API: compensation eligibility ────────────────────
+
+/**
+ * Whether a kilometre-guarantee compensation is actually due for a claim.
+ *
+ * `kmDifference` is the SIGNED delta `kmGuaranteed - mileage` (see
+ * `PreviewClaimResponseSchema.kmDifference` — "can be negative if mileage >
+ * guaranteed"). Compensation is owed only when the carrier UNDER-drove the
+ * guarantee, i.e. `kmDifference > 0`. A value `<= 0` means the guarantee was
+ * met or exceeded → no payout.
+ *
+ * Pure predicate — the single source of truth shared by the api (authoritative
+ * accept-guard in `ClaimsService.update`) and the web (UI accept-gate). Keeping
+ * it here means both layers agree on the boundary (`0` → not due) without each
+ * re-deriving `> 0`.
+ *
+ * - `isCompensationDue(2_800) === true`   (under-run → pay)
+ * - `isCompensationDue(0)     === false`  (exact → no pay)
+ * - `isCompensationDue(-150)  === false`  (over-run → no pay)
+ */
+export function isCompensationDue(kmDifference: number): boolean {
+  return kmDifference > 0;
+}
+
 // ─── Public API: rounding + formatting ───────────────────────
 
 /**
