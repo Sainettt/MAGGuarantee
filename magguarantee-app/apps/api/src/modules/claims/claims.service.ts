@@ -388,6 +388,11 @@ export class ClaimsService {
           origDateStart: dateStart,
           origDateEnd: dateEnd,
           origMileage: dto.mileage,
+          // Immutable time-window snapshot — same values that go into the
+          // working `timeFrom/timeTo` columns above (`dto.timeFrom/timeTo`).
+          // Write-once at submit; the verifier PATCH never overwrites these.
+          origTimeFrom: dto.timeFrom,
+          origTimeTo: dto.timeTo,
         });
       });
     } catch (err) {
@@ -874,6 +879,10 @@ export class ClaimsService {
         : null,
       origDateEnd: row.origDateEnd ? row.origDateEnd.toISOString() : null,
       origMileage: row.origMileage,
+      // Immutable carrier time-window snapshot — `HH:mm` strings forwarded
+      // as-is (set once at submit, never mutated by the verifier PATCH).
+      origTimeFrom: row.origTimeFrom,
+      origTimeTo: row.origTimeTo,
       // Decimal(5,2) → number — repository already round-tripped through
       // `decimalToNumber`, so `row.*` is already `number | null`. We forward
       // unchanged; `null` means "no data" (column NULL), `0` means the

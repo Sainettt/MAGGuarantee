@@ -24,7 +24,7 @@
 // `live` is intentionally a thin visual marker — it only swaps the hint to
 // the override copy. The actual recomputation of `totalDays` is done by the
 // caller (verifier modal does it locally from the watched `hoursAdjusted`
-// input — see `ClaimVerificationModal.tsx`); this component renders only.
+// input — see `ClaimModal.tsx`); this component renders only.
 
 import { useTranslations } from 'next-intl';
 

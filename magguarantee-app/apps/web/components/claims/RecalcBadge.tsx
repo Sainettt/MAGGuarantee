@@ -5,7 +5,7 @@
 // call so the verifier sees how their amendments to mileage / dates /
 // hoursAdjusted change the doplata before they commit.
 //
-// Per `docs/14-design-system.md` Phase 4 § "ClaimVerificationModal":
+// Per `docs/14-design-system.md` §6.5 unified verification surface:
 //   - while debounce pending or fetch in-flight → `animate-pulse`, "Przeliczam…"
 //   - on success → muted state, optionally a delta string
 //   - on error → soft warning state, doesn't block submit

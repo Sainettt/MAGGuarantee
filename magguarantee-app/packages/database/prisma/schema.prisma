@@ -522,6 +522,14 @@ model Claim {
   origDateStart          DateTime?
   origDateEnd            DateTime?
   origMileage            Decimal?     @db.Decimal(10, 2)
+  /// Immutable snapshot of timeFrom (HH:MM, legacy string) as the carrier
+  /// submitted it. Set once at submit; verifier (pracownik) PATCH never mutates
+  /// it. Working/editable value lives in `timeFrom`.
+  origTimeFrom           String?
+  /// Immutable snapshot of timeTo (HH:MM, legacy string) as the carrier
+  /// submitted it. Set once at submit; verifier (pracownik) PATCH never mutates
+  /// it. Working/editable value lives in `timeTo`.
+  origTimeTo             String?
 
   // attachments
   authScreenshotUrl String? // S3 URL

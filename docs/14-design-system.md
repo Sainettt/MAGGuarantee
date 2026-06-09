@@ -631,6 +631,8 @@ shadcn `<Sheet side="right">` — стандарт для edit-форм Phase 2.
 
 Не используем `<Dialog>` для edit-форм Phase 2 — слишком модально для CRUD-таблиц. `<Dialog>` остаётся для подтверждений (delete) и compact actions.
 
+> ⚠️ **Единственное намеренное исключение из правила «edit-формы = `<Sheet>`»: поверхность верификации wniosku** (`<ClaimVerificationModal>`). Phase 7.1 (§6.5) переопределяет её на центральную `<Dialog>` с `mode: 'view' | 'edit'`. Причина — у неё особый workflow: read-only просмотр и редактирование это **одна и та же поверхность** с парными строками «заявлено / проверено», а не CRUD-форма по отдельной сущности; центральная модалка убирает «прыжок» между read-only Dialog и edit Sheet. Это исключение **не распространяется** на остальные edit-формы — Driver/Vehicle/Trailer/User/Limity остаются `<Sheet side="right">`. См. §6.5.
+
 ### Form patterns (RHF + Zod)
 
 shadcn `<Form>` поверх `react-hook-form` + zod-resolver. Один RHF-field = один `<FormField>`.
@@ -864,11 +866,13 @@ Reference: `employee-claims-list.png`. Переиспользует `<DataTable>
 
 **Filter bar (sticky над таблицей):** search input (по nrZgl, NIP, plate) + status multiselect + period range + carrier select. Layout — `flex flex-wrap gap-2 p-3 border-b border-border bg-input` (см. § Surface-token policy выше).
 
-### `<ClaimVerificationModal>` (Sheet, не Dialog)
+### `<ClaimVerificationModal>` (Phase 4 — Sheet; ⚠️ ПЕРЕОПРЕДЕЛЕНО Phase 7.1 → центральная `<Dialog>`, см. §6.5)
 
-Reference: `modal-status-p1.png` + `modal-status-p2.png`. **Locked decision:** `<Sheet side="right" className="w-full sm:w-[720px]">`. Не Dialog, не Drawer.
+> 🔁 **SUPERSEDED.** Этот раздел (Phase 4) описывал верификацию как `<Sheet side="right" w-[720px]>` с двумя раздельными поверхностями (read-only `ClaimDetailModal` Dialog + edit `ClaimVerificationModal` Sheet). **Phase 7.1 (§6.5) переопределяет поверхность на ОДНУ центральную `<Dialog>` с состоянием `mode: 'view' | 'edit'`** — клик по строке открывает `view`, кнопка «Edycja» разворачивает inline-поля без пере-монтирования. Ширина, раскладка сверху-вниз (факты → dopłata → decyzja), парные строки «заявлено/проверено», treatment приглушённых значений, и судьба табов Historia/Autoryzacja — всё в §6.5. Текст ниже сохранён как исторический контекст по содержимому полей/табов; **контейнер и раскладку читать из §6.5, не отсюда.**
 
-> Note (UIUX judgement, locked anyway): 720px достаточно для двух-column form (KM / EUR в одной строке), но `Historia`-таб с large origData diff может ощущаться тесно — допустимо, scroll-y решает. Если в Phase 5 dyspozytor/weryfikator получит ещё более широкий diff-view, можно поднять до `w-[840px]` локально для конкретного экрана, **но единый компонент остаётся 720**.
+Reference: `modal-status-p1.png` + `modal-status-p2.png`.
+
+> Note (Phase 4, исторический; контейнер superseded — см. §6.5): 720px Sheet считался достаточным для двух-column form (KM / EUR в одной строке), но `Historia`-таб с large origData diff может ощущаться тесно — допустимо, scroll-y решает. Если в Phase 5 dyspozytor/weryfikator получит ещё более широкий diff-view, можно поднять до `w-[840px]` локально для конкретного экрана, **но единый компонент остаётся 720**.
 
 **Header (`<SheetHeader>`):** title = `Wniosek {nrZgl}` (`text-lg font-bold`) + line ниже — carrier name `text-sm text-text-sub` + plate. `<StatusBadge>` в правом-верхнем углу рядом с close-X.
 
@@ -958,7 +962,7 @@ Reference: legacy `ensureUsersSheet`. Стандартный `<DataTable>` Phase
 - [ ] `<KpiCard>` принимает `{ label, value, delta?, icon? }`; имеет `loading` / `empty` варианты.
 - [ ] Dashboard layout = top KPI row (4 col) + main + `<DashboardSidebar>` (right, 380px, stack секций); каждая секция fetch-ит данные независимо (TanStack Query).
 - [ ] `<ClaimsTable>` использует `<DataTable>` Phase 2; колонки в порядке таблицы выше; full-row click → modal.
-- [ ] `<ClaimVerificationModal>` = `<Sheet side="right" w-[720px]>` с 3 табами; **в табе Autoryzacja НЕТ FileUpload компонента**; live recalc badge debounce 300ms.
+- [ ] ⚠️ **SUPERSEDED Phase 7.1 (§6.5):** `<ClaimVerificationModal>` теперь = центральная `<Dialog max-w-4xl>` с `mode: 'view' | 'edit'`, **не** `<Sheet>`. Сохраняются: **в секции Autoryzacja НЕТ FileUpload компонента**; live recalc badge debounce 300ms; live dopłata пересчёт при правке фактов. Раскладку (факты → dopłata → decyzja), парные строки и Historia/Autoryzacja читать из §6.5.
 - [ ] `<AuditRow>` имеет `default` и `compact` варианты; deterministic avatar-color hash; expand → JSON-diff `<pre>`.
 - [ ] `<LimitsRow>` — inline TextField в cell, save-on-blur, optimistic update, rollback + toast on error.
 - [ ] `<UsersTable>` — role-badge color map; kebab actions; deactivate ≠ delete.
@@ -2438,6 +2442,8 @@ Earlier phases lock edit-forms to `<Sheet side="right">` and explicitly say "no 
 
 **Locked principle:** *centered `<Dialog>` is the correct, intentional container for read-only entity detail; `<Sheet>` remains the container for edit forms.* The two are complementary, not contradictory. The handoff is one-directional: detail modal → «Edytuj» → close modal, open edit Sheet. They are never open at the same time.
 
+> ⚠️ **One deliberate exception to row 1 (edit-form = `<Sheet>`): the wniosek-verification surface** (`<ClaimVerificationModal>`, `pracownik`/`weryfikator`). Phase 7.1 (§6.5) puts BOTH its read-only view AND its edit mode in **one centered `<Dialog>`** with a `mode: 'view' | 'edit'` state, instead of the view-Dialog → edit-Sheet handoff above. Why this one screen and no other: verification is not CRUD-on-an-entity — it's a **side-by-side reconciliation** (carrier-declared value vs verifier-checked value, per fact), and the «Edycja» action must morph the *same* layout in place rather than re-mount into a different container, which is the whole point (no jarring jump). The §6.0 split still governs every other surface: Carrier/Vehicle/Trailer/Driver/User/Limity detail = `<Dialog>`, their edit = `<Sheet>`. **Do not generalise the §6.5 exception to any other edit form.**
+
 ### 6.1 Component identity
 
 | | |
@@ -3736,4 +3742,222 @@ The `<DataTable>` primitive **already** supports `onRowClick` and applies `curso
 | `<FleetVehicleDetailModal>` / `<FleetDriverDetailModal>` / `<FleetTrailerDetailModal>` | New thin wrappers | Over `<EntityDetailModal>`, read-only (no `onEdit`), rate-free curated field sets (§6.4.2). |
 | `DataTable.rowAriaLabel` + keyboard/role/focus-ring | Primitive enhancement (additive) | Canonical clickable-row a11y for every `onRowClick` table app-wide. |
 | Duration pill / mini country-circle / driver-strip recipes | Documented layout recipes (§6.4.1) | Not standalone components — composition recipes inside `<RouteCard>` / the delegation wrapper. |
+
+---
+
+## 6.5 Unified wniosek-verification surface (`pracownik` / `weryfikator`) — Phase 7.1
+
+> **Scope.** Replaces the two-surface verification flow (read-only `ClaimDetailModal` `<Dialog>` + editable `ClaimVerificationModal` `<Sheet side="right" w-[720px]>`) with **ONE centered `<Dialog>`** carrying a `mode: 'view' | 'edit'` state. Row-click opens `view` (read-only); the **«Edycja»** button morphs fields to editable **inline, without re-mounting** — same dialog, same layout. This is the canonical pattern for the `pracownik`/`weryfikator` claim-verification screen.
+> Reference: `docs/screenshots/modal-status-p1.png` (top — fact pairs + correction) + `modal-status-p2.png` (bottom — recalc result + decyzja). Treat the two as one logical screen.
+> **No new color / radius / shadow / font tokens.** Composes the existing palette, semantic colors, radius scale, `shadow-modal`, `animate-modal-in`, and the already-documented locked/computed-field + `HoursReadout` patterns. Builds on `components/ui/Dialog.tsx`.
+
+### 6.5.0 The deliberate deviation from the Sheet-for-CRUD lock (documented, authorised)
+
+The design system locks **edit-forms to `<Sheet side="right">`** in four places: § Phase 2 *Sheet* (the "Не используем `<Dialog>` для edit-форм" line), `<ClaimVerificationModal>` header (Phase 4), Phase 4 acceptance checklist, and §6.0 reconciliation table (row 1). **This section overrides that lock for — and only for — the wniosek-verification surface.** Each of those four sites now carries an inline ⚠️ pointer to §6.5.
+
+**Why this surface is the exception (and a Sheet is wrong here):**
+
+1. **It is not CRUD-on-an-entity.** Driver/Vehicle/Trailer/User/Limity forms edit *one record's own fields*. Verification is a **reconciliation**: for each of 6 facts the verifier reads the carrier-declared value and writes the checked value beside it. The screen's job is *comparison*, which wants a wide, centered, two-column-of-pairs canvas — not a 480–720px side rail.
+2. **The «jump» is the actual problem being solved.** Today: click row → read-only Dialog (center) → press «Edytuj» → Dialog closes, Sheet slides in from the right with a *different* layout and decyzja-at-top order. The surface physically relocates and re-lays-out mid-task. The fix is *one* surface whose fields flip from static to editable **in place** (`mode` state, no unmount), so view↔edit feels like one object.
+3. **Top-down narrative needs full width.** The intended reading order — *read declared → write checked → see recomputed dopłata → decide* — is a vertical stack of full-width blocks. A right Sheet at 720px forces the fact pairs to cramp; a centered `max-w-4xl` Dialog gives each pair room to sit side-by-side comfortably.
+
+**Guardrail:** this exception does **not** generalise. Every other edit form stays `<Sheet side="right">`; every other read-only detail stays centered `<Dialog>` (§6.0). The verification surface is sui generis because view and edit are the *same* reconciliation surface, not a detail→edit handoff.
+
+### 6.5.1 Container & width
+
+| Property | Value | Notes |
+|---|---|---|
+| Container | centered **`<Dialog>`** (`components/ui/Dialog.tsx`) | Reuses portal, focus-trap, Escape, body-scroll-lock, `bg-card border border-border rounded-xl shadow-modal animate-modal-in`, top-right close-✕. |
+| Width | **`max-w-4xl`** (56rem / 896px) | Chosen over `max-w-3xl` (768px): the edit mode renders **paired fact rows** (declared value + verifier input side-by-side, §6.5.3). At `3xl` the two columns of a pair plus their labels get tight on the 6-fact grid; `4xl` lets a pair sit comfortably as `[declared | input]` while still feeling like a focused modal, not a page. Do **not** go to `5xl` (1024px, the `EntityDetailModal` width) — that reads as a full read-only snapshot, not a working surface; the verification screen wants to feel *denser and more focused* than the entity-detail modals. |
+| Mobile / narrow | `w-[calc(100%-2rem)]` then capped by `max-w-4xl` (from primitive) | 16px gutter each side on phones; paired rows collapse to stacked (declared above input) below `md` — see §6.5.3. |
+| Height / scroll | `max-h-[calc(100dvh-4rem)]`, body `overflow-y-auto`; header + footer non-scrolling | Verification content is tall (facts + recalc + decyzja). Header (nrZgl + parties) and footer (decision buttons) stay pinned; only the body scrolls. |
+| Animation | `animate-modal-in` (200ms, opacity + 10px translateY) | No mode-change animation — see §6.5.6. |
+
+### 6.5.2 Top-down layout (the locked narrative order)
+
+The body is a single vertical stack. Same order in `view` and `edit` — only the rendering of the fact block differs.
+
+```
+┌─ <DialogHeader> (non-scrolling) ─────────────────────────────────┐
+│  Wniosek {nrZgl}            <StatusBadge>            [✕]          │
+│  {carrierName} · {plate}                                          │
+│  parties strip: PLANISTA · OPIEKUN · PRZEWOŹNIK (muted meta)      │  ← legacy "WNIOSEK / PLANISTA / OPIEKUN / PRZEWOŹNIK" bar
+├─ <DialogBody> (overflow-y-auto) ─────────────────────────────────┤
+│  ① DANE WNIOSKU / DANE PO WERYFIKACJI  (the 6 fact pairs)        │  ← §6.5.3
+│        view  → read-only paired rows                             │
+│        edit  → declared (muted, top/left) + verifier <Input>     │
+│  ─────────────────────────────────────────────────────────────  │
+│  ② DOPŁATA  (locked / computed field, live)                      │  ← §6.5.4  — ABOVE decision
+│        <RecalcBadge> + amountApproved (read-only, server-comp.)  │
+│  ─────────────────────────────────────────────────────────────  │
+│  ③ DECYZJA  (targetStatus select + conditional fields)           │  ← §6.5.5  — at the very bottom
+│        ZAAKCEPTOWANO → orderNumber / orderDate / amountApproved   │
+│        ODRZUCONO      → komentarz                                 │
+│        OCZEKUJE_NA_AUTORYZACJE → margin / authDesc                │
+│        reklamacja-variants                                        │
+│  ─────────────────────────────────────────────────────────────  │
+│  ④ Secondary sections: HISTORIA (diff) · AUTORYZACJA  (§6.5.7)   │
+├─ <DialogFooter> (non-scrolling) ─────────────────────────────────┤
+│  [Odrzuć (ghost danger)]        [Anuluj]  [Edycja → / Zapisz]    │  ← §6.5.6
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Narrative (locked):** *I read what the carrier declared → I type what I verified → I see the recomputed dopłata → I make the decision.* dopłata sits between facts and decyzja deliberately: it is the *consequence* of the facts and the *input* to the decision, so it must read after the facts and before the verdict. **Never** move decyzja above dopłata or above the facts (the legacy Sheet had decyzja near the top — that ordering is abandoned).
+
+### 6.5.3 The 6 fact pairs (the heart of edit mode)
+
+Six facts, each a **pair**: carrier-declared value (read-only, muted) and the verifier's checked value (`pracownik` input).
+
+| # | Field | i18n label (PL) | Input type | Declared value source |
+|---|---|---|---|---|
+| 1 | `dateStart` | Data załadunku | date | `origDateStart` |
+| 2 | `dateEnd` | Data rozładunku | date | `origDateEnd` |
+| 3 | `timeFrom` | Godz. zjazdu (załadunku) | time | **`origTimeFrom`** (new DTO field — NOT the live editable `timeFrom`) |
+| 4 | `timeTo` | Godz. przyjazdu (rozładunku) | time | **`origTimeTo`** (new DTO field — NOT the live editable `timeTo`) |
+| 5 | `mileage` | Przebieg / km zrealizowane | number (km) | `origMileage` |
+| 6 | `hoursAdjusted` | Korekta godzin — postój / przestój | number (h) | **none** — see special case |
+
+**⚠️ `timeFrom` / `timeTo` declared values come from the new DTO fields `origTimeFrom` / `origTimeTo`** — never from the live, verifier-editable `timeFrom` / `timeTo`. Binding the muted "declared" cell to the live editable field would make it echo the verifier's own typing. The DTO must surface `origTimeFrom` / `origTimeTo` separately (api-agent: additive, optional, mirror of `origDateStart`/`origMileage`).
+
+**⚠️ `hoursAdjusted` has NO carrier-declared value** (the carrier never enters a stoppage; `origHoursAdjusted = 0`, which is *not* a real declared figure). For this fact render **only the verifier input** — omit the muted "declared" top/left cell entirely. Do **not** render `0` as a declared value; that would imply the carrier declared zero stoppage, which is false. Keep this cell visually balanced with its row siblings (it spans the pair's full width as a single input, or sits alone — web-agent's call), and render the live `HoursReadout` under it (§A pattern, `live`).
+
+#### Pair anatomy & the muted (declared) treatment
+
+Each pair is one `<FormGrid cols={2}>`-aligned logical row (per §"Grid-form field alignment"). On `md+` the declared value is the **left** cell, the verifier input the **right**; below `md` the declared value stacks **above** the input.
+
+| Slot | view mode | edit mode |
+|---|---|---|
+| Section header (declared) | «DANE WNIOSKU» — `text-xs font-bold uppercase tracking-wider text-text-sub` | same |
+| Section header (verifier) | hidden (no second column in view) | «DANE PO WERYFIKACJI» + hint «(wypełnij po sprawdzeniu danych przewoźnika)» `text-xs text-text-sub` |
+| Declared value cell | `<dl>`-style static row: label + value | **muted read-only field** (treatment below) |
+| Verifier value cell | static row (the saved checked value, or `—`) | live `<Input type=…>` (editable) |
+
+**Muted "declared" treatment (locked) — recessed, clearly not-the-input:** the declared cell must read as *reference context*, so the eye lands on the editable verifier cell. Reuse the **locked/computed-field surface recipe** (§"Read-only / computed field pattern" (b)) MINUS the lock icon (this is reference data, not a locked computed payload field):
+
+| Token | Value | Rationale |
+|---|---|---|
+| Surface | **`bg-input/40`** | Noticeably more recessed than the editable sibling's `bg-input` — same "more greyed than a normal input" idea as the locked field. |
+| Value text | **`text-text-sub`** | Muted, not full `text-text`; keep `tabular-nums` on numeric facts (mileage/hours) so digits stay aligned. |
+| Border / focus | `border-border`, `focus:ring-0` (non-interactive: `readOnly tabIndex={-1} aria-readonly="true"`) | Never lights up; it is reference, not a control. |
+| Label | `text-[11px] uppercase tracking-wider text-text-sub` | Matches the existing `Stat`-row label slot. |
+| Icon | **none** | Unlike the computed `amountApproved` field, the declared cell carries NO `<Lock>` — it is informational reference, not a locked payload field. A lock here would wrongly imply "computed/locked". |
+
+This is intentionally the **same muted surface** as the computed-field pattern so the two "you don't type here" affordances read consistently, but **differentiated by the absence of the lock icon** (declared = reference; `amountApproved` = locked-computed).
+
+**Changed-vs-unchanged emphasis (edit mode):** when the verifier's checked value diverges from the declared value, tint the verifier input wrapper subtly with the existing warning band (`bg-warning/10`, same token used by the Historia diff) — a quiet signal "this fact was corrected". Optional polish, not required for v1; if implemented it must be a token, never inline style.
+
+### 6.5.4 Dopłata — locked / computed field, live, ABOVE the decision
+
+A single full-width block between the fact pairs and the decyzja block. This is the **`amountApproved` locked/computed-field pattern** already specified in §"Read-only / computed field pattern" (b) — render it verbatim (the canonical class string with `<Lock>` icon, `readOnly tabIndex={-1}`, `bg-input/40`, `<FormDescription>` "wyliczana automatycznie"):
+
+- **Live recalculation, decision-independent.** It recomputes via the live `/claims/preview` dopłata whenever any of the 6 facts changes (debounced 300ms — keep the Phase 4 debounce), **regardless of which `targetStatus` is selected**. The verifier sees the financial consequence of their corrections *before* committing to a decision. This is the reason it sits above decyzja, not inside the ZAAKCEPTOWANO branch.
+- **`<RecalcBadge>`** to the right of the dopłata value: `<Badge variant="outline" className="animate-pulse">Przeliczam…</Badge>` during debounce → `<Badge variant="outline" className="text-success">Aktualne</Badge>` when settled (the legacy «Przelicz» button + «Wynik przeliczenia» panel from `modal-status-p2.png` collapse into this live badge + value — no manual "Przelicz" click in the new design).
+- The breakdown detail (period split, weekend-skip count, korekta serwisowa line) from `modal-status-p2.png` renders as a **collapsible `<BreakdownTable>`** (§"BreakdownTable") under the dopłata number — `view` shows it expanded read-only; `edit` keeps it but live-updates. Use the container-query layout already specified (`< 34rem` → stacked cards, `≥ 34rem` → 5-col table); inside a `max-w-4xl` Dialog body it lands in the table layout on `lg+`.
+- **`HoursReadout`** (§A) renders `live` under the `hoursAdjusted` input (fact #6) AND once more in this dopłata block's breakdown — same component, same copy, do not fork.
+
+### 6.5.5 Decyzja — at the very bottom
+
+`targetStatus` `<Select>` first, then the fields conditional on the chosen status, then the footer. This block is the legacy «Decyzja» section from `modal-status-p2.png`, moved to the bottom of the unified surface.
+
+| `targetStatus` | Conditional fields (shown only when selected) |
+|---|---|
+| `ZAAKCEPTOWANO` | `orderNumber` (Nr zlecenia, text) · `orderDate` (Data zlecenia, date) · `amountApproved` (Kwota zatwierdzona — **the same locked/computed field as §6.5.4**; do not render a second editable copy — bind the decision's amount to the live-computed value). |
+| `ODRZUCONO` | `komentarz` (Powód odrzucenia, textarea, required). |
+| `OCZEKUJE_NA_AUTORYZACJE` | `margin` (Marża, number) · `authDesc` (Opis dla autoryzacji, textarea). Hands off to the Autoryzacja section (§6.5.7). |
+| reklamacja-variants | per existing claim-status rules (`<ReklamacjaSheet>` copy not re-spec'd here — the verification surface only *triggers* the variant; the conditional fields follow the same RHF pattern). |
+
+- Use `<FormGrid cols={2}>` for the ZAAKCEPTOWANO grid (orderNumber/orderDate side-by-side; `amountApproved` is a `col-span-2` full-width locked field). Mirrors the existing Phase 4 ClaimVerificationModal ZAAKCEPTOWANO grid.
+- The conditional block mounts/unmounts on `targetStatus` change with no layout jump above it (facts + dopłata stay fixed; only this bottom block reflows).
+
+### 6.5.6 `mode: 'view' | 'edit'` — the in-place morph (no re-mount)
+
+The whole point: view→edit must **not** swap containers or re-mount the form.
+
+- **One component**, one mounted `<Dialog>`. `mode` is local React state (or a `useState` lifted to the page if the row-click vs «Edycja»-affordance needs to seed it). Default on row-click = `'view'`.
+- **Fields are conditionally *rendered as static vs input*, not conditionally *mounted into a different tree*.** Each fact cell reads `mode` and renders either a `<dl>` static value (`view`) or an `<Input>` (`edit`). The surrounding grid, section headers, dopłata block, and decyzja block stay in the DOM across the morph — only the leaf controls change. RHF stays mounted the whole time (form is initialised on open; in `view` the inputs are simply not shown but the form state exists), so entering `edit` does **not** reset values.
+- **No slide/cross-fade between modes.** The morph is instantaneous (static text ⇄ input). Animating it would re-introduce the "jump" we are removing. Only the initial open uses `animate-modal-in`.
+- **Footer reflects mode** (§ below).
+- **a11y:** when entering `edit`, move focus to the first verifier input (`dateStart`). When leaving `edit` (Anuluj from edit, or save success), return focus to the «Edycja» trigger. The Dialog's focus-trap covers the whole surface in both modes.
+
+#### Footer per mode
+
+| Mode | Left slot | Right slot |
+|---|---|---|
+| `view` | — (or `Odrzuć` ghost-danger if the role/status permits a one-click reject, mirroring Phase 4) | `<Button variant="ghost">Zamknij</Button>` · `<Button>Edycja</Button>` (primary; enters `edit`) |
+| `edit` | `<Button variant="ghost" className="text-danger">Odrzuć</Button>` (only if status ≠ ODRZUCONO/ZAAKCEPTOWANO) | `<Button variant="ghost">Anuluj</Button>` (back to `view`, discard unsaved edits) · `<Button>Zapisz</Button>` (label = «Zaakceptuj»/«Zapisz»/«Wyślij do autoryzacji» depending on `targetStatus`, mirroring Phase 4 footer logic) |
+
+- `Anuluj` in `edit` returns to `view` and resets the RHF form to the last-saved values (`form.reset(serverValues)`) — it does NOT close the Dialog. Closing the Dialog (✕ / Escape / Zamknij) is a separate action available in both modes.
+- `Zapisz` states: `saving` → primary-button spinner, all inputs disabled; `error` → `<Alert variant="destructive">` at the top of the body, form stays editable (mirrors Phase 4 `<ClaimVerificationModal>` states).
+
+### 6.5.7 Historia & Autoryzacja inside the single Dialog
+
+The Phase 4 design used three tabs (Edit / Historia / Autoryzacja). In the unified centered surface the primary flow (facts → dopłata → decyzja) is **not** a tab — it is always the main scroll body. Historia and Autoryzacja are **secondary** and must not compete with the main narrative.
+
+**Decision: secondary tabs scoped to a sub-region, NOT top-level tabs over the whole modal.** Rationale: top-level tabs would hide the facts/dopłata/decyzja flow behind a tab and re-introduce a "where did my form go" mode-switch — the opposite of the unification goal. Instead:
+
+- The **main flow (facts → dopłata → decyzja) is always visible** as the modal body. It is never behind a tab.
+- **Historia** and **Autoryzacja** live in a **secondary tabbed sub-panel below the decyzja block** (still inside the same scrolling `<DialogBody>`), using shadcn `<Tabs>` with exactly the tabs that apply:
+  - `Historia` tab — rendered only when `claim.origData != null`. Side-by-side diff «Pierwotnie» / «Aktualnie», changed fields tinted `bg-warning/10` (same token as §6.5.3 changed-emphasis). Read-only. (This is the legacy diff content from the Phase 4 Historia tab, unchanged — only its *placement* moves from a top-level tab to this secondary sub-panel.)
+  - `Autoryzacja` tab — rendered only when the business threshold applies (`claim.doplata > LIMIT_OR_THRESHOLD`). Two sub-sections: (1) «Wymaga autoryzacji» button (`<Mail>` icon → emails Maksim, sets `OCZEKUJE_NA_AUTORYZACJE`, then disabled + «Wysłano (yyyy-mm-dd hh:mm)»); (2) `kwotaMaksima` `<Input type="number">` «Kwota zatwierdzona przez Maksima (EUR)», manual entry, save-on-blur. **Still NO FileUpload, NO screenshots** (carried over from the Phase 4 locked rule — see acceptance checklist).
+- If **neither** secondary tab applies (no origData, below threshold — the common case for a clean first-time verification) the entire secondary sub-panel is **omitted** — the modal ends at the decyzja block + footer. No empty tab bar.
+- If **only one** applies, render it as a single labelled section (no `<Tabs>` chrome for one item — a `<Tabs>` with one tab is visual noise; just a `<Separator>` + section title).
+
+> This keeps Historia/Autoryzacja discoverable and in-context (same surface, no new modal/Sheet) while guaranteeing the verifier's primary task — reconcile facts, read dopłata, decide — is never hidden behind a tab. Diff and authorization are *supporting evidence*, placed after the decision inputs, exactly where a verifier reaches for them ("let me double-check the history / kick off authorization") rather than before.
+
+### 6.5.8 Tokens
+
+**No new tokens.** Everything composes from existing tokens:
+
+| Need | Token (existing) |
+|---|---|
+| Dialog shell | `bg-card border-border rounded-xl shadow-modal animate-modal-in` |
+| Dialog width | `max-w-4xl` (stock Tailwind) |
+| Muted declared-value surface | `bg-input/40` + `text-text-sub` (reuse of locked-field surface, §"Read-only / computed field pattern") |
+| Editable input surface | `bg-input` (normal field) |
+| Locked dopłata / amountApproved | full locked/computed-field recipe (§(b)) incl. `<Lock>` |
+| Changed-fact / diff emphasis | `bg-warning/10` |
+| RecalcBadge | `<Badge variant="outline">` + `animate-pulse` / `text-success` |
+| HoursReadout | per §A (existing) |
+| BreakdownTable | per §"BreakdownTable" (existing, container-query) |
+| Section labels | `text-xs font-bold uppercase tracking-wider text-text-sub` |
+
+### 6.5.9 Catalogue & migration impact (Phase 7.1, web-agent)
+
+| Change | Where |
+|---|---|
+| `<ClaimVerificationModal>` container `<Sheet side="right" w-[720px]>` → **`<Dialog max-w-4xl>`** with `mode: 'view' \| 'edit'` state | `apps/web/components/claims/ClaimVerificationModal.tsx` |
+| Merge read-only `ClaimDetailModal` content INTO the same Dialog (`view` mode) — delete the separate detail-modal handoff for claims (the §6.0 detail→edit handoff no longer applies to this surface) | `apps/web/components/claims/*` + `ClaimsTable` row-click wiring |
+| Reorder body: fact pairs → **dopłata (above)** → decyzja (bottom) → secondary Historia/Autoryzacja sub-panel | same |
+| 6 fact pairs with muted-declared (`bg-input/40` + `text-text-sub`, **no lock icon**) + verifier input; `<FormGrid cols={2}>` alignment | same |
+| `timeFrom`/`timeTo` declared cells bind to **`origTimeFrom`/`origTimeTo`**, not live values | same |
+| `hoursAdjusted` renders **input only** (no declared cell; never render `0` as declared) | same |
+| dopłata = locked/computed field, live recalc (debounce 300ms) **independent of `targetStatus`**, `<RecalcBadge>` | same |
+| Historia/Autoryzacja → secondary `<Tabs>` sub-panel below decyzja; omitted entirely if neither applies; single section (no tabs) if only one applies; **still no FileUpload in Autoryzacja** | same |
+| Footer per mode: `view` → [Zamknij][Edycja]; `edit` → [Odrzuć][Anuluj][Zapisz] | same |
+| In-place morph: no re-mount, RHF stays mounted, `form.reset` on Anuluj-from-edit, focus to first input on enter-edit | same |
+| **API:** surface `origTimeFrom` / `origTimeTo` on the claim DTO (additive, optional, mirrors `origDateStart`/`origMileage`) | `packages/shared` claim schema + `claims.service` serializer (api-agent) |
+| **0** new color/radius/shadow/font tokens; **0** changes to `Dialog.tsx` shell, `tailwind.config.ts`, `globals.css` | — |
+
+### 6.5.10 Acceptance checklist (Phase 7.1)
+
+- [ ] Verification surface is **one centered `<Dialog max-w-4xl>`**, not a Sheet, not two modals.
+- [ ] Row-click opens `view` (read-only); «Edycja» enters `edit` **in place** — no re-mount, no container swap, no slide animation, RHF values preserved.
+- [ ] Body order top→bottom: fact pairs → dopłata (locked/computed, live) → decyzja (select + conditional fields) → optional Historia/Autoryzacja sub-panel.
+- [ ] 6 fact pairs; declared cells muted `bg-input/40` + `text-text-sub` **without** lock icon; `timeFrom`/`timeTo` declared from `origTimeFrom`/`origTimeTo`; `hoursAdjusted` has input only (no declared cell, never `0`).
+- [ ] dopłata recomputes live (300ms debounce) on any fact change, **independent of selected `targetStatus`**; `<RecalcBadge>` Przeliczam…→Aktualne.
+- [ ] Historia tab only when `origData != null`; Autoryzacja only above threshold; **no FileUpload in Autoryzacja**; both omitted when neither applies; single labelled section (no `<Tabs>`) when only one applies.
+- [ ] Footer differs by mode; Anuluj-from-edit returns to `view` + `form.reset`, does not close; ✕/Escape/Zamknij closes.
+- [ ] Focus moves to first verifier input on enter-edit, back to «Edycja» trigger on leave-edit; focus-trap covers both modes.
+- [ ] Works in dark mode via tokens only — no `[style*=]` hacks. `bg-input/40` legible on `#1f1f1f`; `text-brand` (`#ef4444` dark) dopłata number passes AA.
+- [ ] **0** new color/radius/shadow/font tokens; `Dialog.tsx`, `tailwind.config.ts`, `globals.css` unchanged.
+
+### 6.5.11 Deviations (web-agent implementation, Phase 7.1)
+
+Implementation lands as **one new component `apps/web/components/claims/ClaimModal.tsx`**, replacing both `ClaimVerificationModal.tsx` and `ClaimDetailModal.tsx` (both deleted). The catalogue (§6.5.9) said "container `ClaimVerificationModal.tsx`"; the merged surface is renamed `ClaimModal.tsx` since it is no longer "verification-only" (it now covers the read-only `view` mode too). No behavioural deviation — same DTO contract, same `UpdateClaimSchema` discriminated-union submit, same `/preview` recalc.
+
+Documented deviations from the literal §6.5 text, each within brand/token constraints:
+
+1. **Autoryzacja applicability gate.** §6.5.7 keys the Autoryzacja secondary tab on a business threshold (`claim.doplata > LIMIT_OR_THRESHOLD`). That limit constant is **not exposed to the client** (no DTO field / config endpoint surfaces it). To preserve functional identity with the Phase 4 flow, the Autoryzacja section is gated on **claim status** instead: shown when `status ∈ { NA_WERYFIKACJI (request-authorization form), OCZEKUJE_NA_AUTORYZACJE (read-only pending summary) }`, omitted otherwise. If a numeric threshold is later surfaced on the DTO, swap this predicate. **No FileUpload / screenshots** (the locked rule is preserved).
+2. **dopłata locked field is a static computed display, not an RHF-registered input.** §6.5.4 says "render verbatim the `amountApproved` recipe with `readOnly` RHF registration". The standalone dopłata block (above decyzja) is the *live preview consequence* and is never submitted on its own, so it renders as a static muted value (`bg-input/40` + `<Lock>` + `<FormDescription>` "wyliczana automatycznie") rather than a registered `<input readOnly>`. The **RHF-registered** locked `amountApproved` field still exists inside the ZAAKCEPTOWANO decision branch (§6.5.5), bound to the same live-computed value — so the submitted payload is unchanged.
+3. **Decyzja inputs are gated behind `edit` mode.** In `view` the decyzja block renders a muted "pick edit to decide" hint instead of the live `<Select>` — a decision is an edit, so it belongs to `edit` mode. The select + conditional fields appear the instant «Edycja» is pressed (no re-mount). This is consistent with §6.5.6's "leaf controls flip static⇄input" rule applied to the decyzja sub-tree.
 

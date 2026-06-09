@@ -1,22 +1,23 @@
 'use client';
 
-// Phase 4 — client view for `/employee/claims`. Owns filter / pagination /
-// modal-open state; delegates rendering to `<ClaimsTable>`, the read-only
-// `<ClaimDetailModal>` and the editing `<ClaimVerificationModal>`.
+// Phase 7.1 — client view for `/employee/claims`. Owns filter / pagination /
+// modal-open state; delegates rendering to `<ClaimsTable>` and the unified
+// `<ClaimModal>` (the verification surface, docs/14 §6.5).
 //
 // Pagination: cursor-based per `docs/13-api-design.md:54`. We keep a stack
 // of cursors so the user can step forward (next) and back (the previous
 // cursor we pushed). Simpler than maintaining a full page-cache and matches
 // the API contract.
 //
-// Phase 4.6 — two-step claim opening flow (mirrors /employee/vehicles and
-// /employee/trailers):
-//   row click  → detail modal (read-only)
-//   «Edytuj»  → verification modal (existing edit form)
-//   close     → back to list
-// A single `view` state machine (`null | 'detail' | 'edit'`) keeps the two
-// surfaces mutually exclusive — the verification modal opens on a clean
-// stack, never on top of the detail modal.
+// Phase 7.1 — single-surface claim flow (replaces the Phase 4.6 two-step
+// detail→edit handoff):
+//   row click  → <ClaimModal> opens in `view` (read-only)
+//   «Edycja»   → morphs the SAME modal to `edit` in place (no re-mount)
+//   close      → back to list
+// One `modalOpen` boolean + `selectedNrZgl` drive the modal; the view↔edit
+// morph lives INSIDE <ClaimModal>, so the list no longer tracks an edit
+// sub-state. `canEdit` (admin|pracownik) controls the «Edycja» affordance;
+// read-only roles get the modal in `view` with no edit button.
 //
 // Phase 4.6 — `?nrZgl=<...>` deeplink. The dashboard sidebar's "Urgent"
 // links jump straight to this page with the claim pre-selected. We read the
@@ -31,8 +32,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ClaimListItem, ClaimStatus } from '@magguarantee/shared';
 
-import { ClaimDetailModal } from '@/components/claims/ClaimDetailModal';
-import { ClaimVerificationModal } from '@/components/claims/ClaimVerificationModal';
+import { ClaimModal } from '@/components/claims/ClaimModal';
 import { ClaimsTable } from '@/components/claims/ClaimsTable';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -50,15 +50,6 @@ const ALL_STATUSES: ClaimStatus[] = [
   'AUTORYZACJA_KWOTA_MAKSIMA',
 ];
 
-/**
- * Two-step claim modal state machine — see file header. `null` keeps both
- * modals closed (the default list view); `'detail'` shows the read-only
- * surface; `'edit'` swaps to the verification form. Switching `'detail' →
- * 'edit'` preserves `selectedNrZgl` so the edit modal lands on the same
- * claim the user was just inspecting.
- */
-type ViewMode = null | 'detail' | 'edit';
-
 export function ClaimsListView() {
   const t = useTranslations('employee.claims');
   const tStatus = useTranslations('carrier.claims.status');
@@ -67,10 +58,9 @@ export function ClaimsListView() {
   const searchParams = useSearchParams();
 
   const { user } = useAuth();
-  // Phase 4.6 — admin + pracownik may edit; opiekun / others see the detail
-  // modal without an «Edytuj» button. Computed once per render; passed into
-  // ClaimDetailModal as an optional callback so the modal itself stays
-  // role-agnostic.
+  // Phase 7.1 — admin + pracownik may edit; opiekun / others see the unified
+  // modal in `view` without an «Edycja» button. Passed into <ClaimModal> so
+  // the modal stays role-agnostic.
   const canEdit = user?.role === 'admin' || user?.role === 'pracownik';
 
   const [search, setSearch] = useState('');
@@ -96,7 +86,7 @@ export function ClaimsListView() {
 
   const { data, isLoading } = useClaims(filters);
 
-  const [view, setView] = useState<ViewMode>(null);
+  const [modalOpen, setModalOpen] = useState(false);
   const [selectedNrZgl, setSelectedNrZgl] = useState<string | null>(null);
 
   // ── Deeplink reader (mount-only) ────────────────────────────────────
@@ -114,7 +104,7 @@ export function ClaimsListView() {
     const deeplinkNrZgl = searchParams.get('nrZgl');
     if (deeplinkNrZgl && deeplinkNrZgl.trim().length > 0) {
       setSelectedNrZgl(deeplinkNrZgl);
-      setView('detail');
+      setModalOpen(true);
       // Strip the param without a server roundtrip; `scroll: false` keeps
       // the scroll position pinned where the user was.
       router.replace('/employee/claims', { scroll: false });
@@ -125,36 +115,21 @@ export function ClaimsListView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Row click → open detail modal ───────────────────────────────────
+  // ── Row click → open the unified modal in `view` ────────────────────
   // `setSelectedNrZgl` overwrites whatever stale value the previous
-  // close-without-clear left behind; see the close handlers below for why
-  // we deliberately don't wipe nrZgl on close.
+  // close-without-clear left behind; the view↔edit morph then happens
+  // inside <ClaimModal>, so the list doesn't track an edit sub-state.
   const openRow = (row: ClaimListItem) => {
     setSelectedNrZgl(row.nrZgl);
-    setView('detail');
+    setModalOpen(true);
   };
 
-  // ── Detail → edit transition ────────────────────────────────────────
-  // <EntityDetailModal>'s «Edytuj» implementation invokes `onOpenChange(false)`
-  // FIRST and then `onEdit?.()` — both in the same micro-task. The close
-  // therefore fires BEFORE `goToEdit` runs, so we can't simultaneously wipe
-  // `selectedNrZgl` in the detail-close handler AND have it readable here.
-  //
-  // We resolve this by leaving `selectedNrZgl` alive on close (it's harmless
-  // stale state — neither modal renders unless `view !== null`, and the
-  // next `openRow` overwrites it anyway). `goToEdit` just flips the view;
-  // the edit modal mounts on the same nrZgl that fed the detail surface.
-  const goToEdit = () => {
-    setView('edit');
-  };
-
-  // ── Close handlers ──────────────────────────────────────────────────
-  // Both modals close to the same end-state (bare list). We deliberately
-  // leave `selectedNrZgl` populated so a re-open of the same row hits the
-  // useClaim cache without a fresh fetch — TanStack already keys by nrZgl,
-  // so this is just preserving the cache pointer.
+  // ── Close handler ───────────────────────────────────────────────────
+  // We deliberately leave `selectedNrZgl` populated so a re-open of the
+  // same row hits the useClaim cache without a fresh fetch — TanStack
+  // already keys by nrZgl, so this just preserves the cache pointer.
   const onModalClose = () => {
-    setView(null);
+    setModalOpen(false);
   };
 
   const resetCursor = () => {
@@ -266,22 +241,15 @@ export function ClaimsListView() {
         </div>
       )}
 
-      {/* Read-only detail modal — opened by a plain row click. Passing
-          `onEdit` enables the «Edytuj» footer button; for non-editing roles
-          (opiekun in Phase 5+) we omit it and the modal stays read-only. */}
-      <ClaimDetailModal
-        open={view === 'detail'}
+      {/* Unified verification modal (docs/14 §6.5) — opens in `view` on a
+          plain row click; «Edycja» morphs the same surface to `edit` in
+          place. `canEdit` gates the «Edycja» affordance for read-only
+          roles, which see the modal read-only. */}
+      <ClaimModal
+        open={modalOpen}
         nrZgl={selectedNrZgl}
-        onClose={onModalClose}
-        onEdit={canEdit ? goToEdit : undefined}
-      />
-
-      {/* Edit / verification modal — opened by «Edytuj» inside the detail
-          modal. Closing this returns to the bare list, NOT back to the
-          detail modal (current UX choice — keeps the dismiss path simple). */}
-      <ClaimVerificationModal
-        open={view === 'edit'}
-        nrZgl={selectedNrZgl}
+        initialMode="view"
+        canEdit={canEdit}
         onClose={onModalClose}
       />
     </section>

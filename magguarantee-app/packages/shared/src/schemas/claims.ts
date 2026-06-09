@@ -372,6 +372,15 @@ export const ClaimDtoSchema = z.object({
   origDateEnd: IsoDateTimeSchema.nullable(),
   origMileage: z.number().nullable(),
   /**
+   * Immutable carrier snapshot of the claimed time window (`HH:mm` strings),
+   * captured once at submit alongside `origDateStart/origDateEnd/origMileage`.
+   * Write-once: the verifier PATCH (which mutates `timeFrom/timeTo`) never
+   * touches these, so the History tab / audit trail can show the carrier's
+   * originally-claimed time window next to the current applied value.
+   */
+  origTimeFrom: z.string().nullable(),
+  origTimeTo: z.string().nullable(),
+  /**
    * Immutable carrier snapshot of the hours-adjustment value at submit time.
    * Written once when the claim is created and never modified after — pairs
    * with the other `orig*` fields above so the History tab / audit trail can

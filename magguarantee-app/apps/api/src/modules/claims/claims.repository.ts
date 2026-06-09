@@ -71,6 +71,9 @@ export interface ClaimRow {
   origDateStart: Date | null;
   origDateEnd: Date | null;
   origMileage: number | null;
+  /** Immutable carrier time-window snapshot (`HH:mm`) — set once at submit. */
+  origTimeFrom: string | null;
+  origTimeTo: string | null;
   /** Immutable carrier snapshot — set once at submit, never modified after. */
   origHoursAdjusted: number | null;
   /** Currently applied hours-adjustment — verifier PATCH mutates only this. */
@@ -143,6 +146,9 @@ export interface CreateClaimData {
   origDateStart: Date | null;
   origDateEnd: Date | null;
   origMileage: number | null;
+  /** Immutable carrier time-window snapshot (`HH:mm`) — set once at submit. */
+  origTimeFrom: string | null;
+  origTimeTo: string | null;
 }
 
 export interface UpdateClaimData {
@@ -345,6 +351,10 @@ export class ClaimsRepository {
         origDateStart: data.origDateStart,
         origDateEnd: data.origDateEnd,
         origMileage: data.origMileage,
+        // Immutable carrier time-window snapshot — written once here, never
+        // touched by the verifier PATCH (`_buildUpdatePayload` omits them).
+        origTimeFrom: data.origTimeFrom,
+        origTimeTo: data.origTimeTo,
       },
       include: this.includeShape(),
     });
@@ -510,6 +520,10 @@ export class ClaimsRepository {
       origDateStart: row.origDateStart,
       origDateEnd: row.origDateEnd,
       origMileage: decimalToNumber(row.origMileage),
+      // Immutable carrier time-window snapshot — plain `HH:mm` strings, no
+      // Decimal coercion. Forwarded as-is; `null` means the column is NULL.
+      origTimeFrom: row.origTimeFrom,
+      origTimeTo: row.origTimeTo,
       // Both Decimal(5,2) columns surface as `Decimal` objects from Prisma;
       // `decimalToNumber` preserves null and round-trips the numeric scale.
       origHoursAdjusted: decimalToNumber(row.origHoursAdjusted),
@@ -578,6 +592,8 @@ interface ClaimPrismaShape {
   origDateStart: Date | null;
   origDateEnd: Date | null;
   origMileage: { toNumber(): number } | number | null;
+  origTimeFrom: string | null;
+  origTimeTo: string | null;
   origHoursAdjusted: { toNumber(): number } | number | null;
   hoursAdjustedValue: { toNumber(): number } | number | null;
   authScreenshotUrl: string | null;

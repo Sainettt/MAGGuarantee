@@ -107,6 +107,8 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     origDateStart: new Date('2026-04-01T00:00:00.000Z'),
     origDateEnd: new Date('2026-04-20T00:00:00.000Z'),
     origMileage: 8_000,
+    origTimeFrom: '08:00',
+    origTimeTo: '18:00',
     // Decimal(5,2) hours-adjustment columns post-migration — preview path
     // doesn't touch them, but the fake row must satisfy the new ClaimRow shape.
     origHoursAdjusted: 0,

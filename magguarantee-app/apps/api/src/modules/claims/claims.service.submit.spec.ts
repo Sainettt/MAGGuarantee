@@ -113,6 +113,8 @@ function makeClaimRow(data: CreateClaimData): ClaimRow {
     origDateStart: data.origDateStart,
     origDateEnd: data.origDateEnd,
     origMileage: data.origMileage,
+    origTimeFrom: data.origTimeFrom,
+    origTimeTo: data.origTimeTo,
     origHoursAdjusted: data.origHoursAdjusted,
     hoursAdjustedValue: data.hoursAdjustedValue,
     authScreenshotUrl: null,
@@ -350,6 +352,12 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     // columns to 0 regardless of what the carrier could theoretically type.
     expect(repoFake.creates[0]!.data.origHoursAdjusted).toBe(0);
     expect(repoFake.creates[0]!.data.hoursAdjustedValue).toBe(0);
+    // Immutable carrier time-window snapshot — mirrors the same values that
+    // go into the working `timeFrom/timeTo` columns at submit.
+    expect(repoFake.creates[0]!.data.origTimeFrom).toBe(dto.timeFrom);
+    expect(repoFake.creates[0]!.data.origTimeTo).toBe(dto.timeTo);
+    expect(repoFake.creates[0]!.data.origTimeFrom).toBe('08:00');
+    expect(repoFake.creates[0]!.data.origTimeTo).toBe('18:00');
     // amountRequested is derived from km-calc paymentEur — not from the body.
     // paymentEur = (kmGuaranteed - mileage) * ratePerKmEffective
     //            = (10_800 - 8_000) * 0.5 = 1_400.

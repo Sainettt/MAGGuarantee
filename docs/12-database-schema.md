@@ -490,6 +490,11 @@ model Claim {
   origDateStart          DateTime?
   origDateEnd            DateTime?
   origMileage            Decimal?     @db.Decimal(10, 2)
+  // GodzinaOd/GodzinaDo — immutable carrier-submission snapshots (HH:MM legacy
+  // string). Mirror timeFrom/timeTo, written once at submit, verifier PATCH
+  // never mutates. See "Korekta godzin — orig vs applied" / orig-snapshot note.
+  origTimeFrom           String?
+  origTimeTo             String?
 
   authScreenshotUrl String?
   attachments       ClaimAttachment[]
@@ -657,6 +662,16 @@ km-calc (`korektaDni = hoursAdjustedValue / 24`). Both are `Decimal(5,2)?` —
 explicitly entered zero downtime". For new submits the api layer always
 populates both columns.
 
+The same orig-vs-working split applies to the declared time window.
+`Claim.origTimeFrom`/`Claim.origTimeTo` are immutable `String?` snapshots
+(HH:MM legacy strings) of what the carrier submitted; they are written once at
+submit and the verifier (pracownik) PATCH never mutates them — identical
+semantics to `origDateStart`/`origDateEnd`/`origMileage`. The editable working
+values live in `timeFrom`/`timeTo` (both strict `NOT NULL`), which the verifier
+PATCH may overwrite. `NULL` on the orig columns means "no snapshot" (legacy/unset
+rows). These columns power the History tab + audit-trail diff detection that
+shows whether the verifier overrode the carrier's declared hours.
+
 ## Required-field classification (per the three-layer pattern)
 
 > Резюме что закрыто на каком слое. Поля, не упомянутые ниже, помечаются как Optional everywhere (UI/API не требуют, DB nullable).
@@ -736,8 +751,8 @@ populates both columns.
 | C | Pojazd (NrRej) | → FK `vehicleId` + `vehiclePlateSnapshot` | UUID + String |
 | D | DataStart | `dateStart` | Timestamp |
 | E | DataStop | `dateEnd` | Timestamp |
-| F | GodzinaOd | `timeFrom` | String "HH:MM" |
-| G | GodzinaDo | `timeTo` | String |
+| F | GodzinaOd | `timeFrom` + `origTimeFrom` | String "HH:MM" — working + immutable submit-snapshot |
+| G | GodzinaDo | `timeTo` + `origTimeTo` | String — working + immutable submit-snapshot |
 | H | DniJezdne | `drivenDays` | Decimal(6,2) |
 | I | Przebieg | `mileage` | Decimal(10,2) |
 | J | KmNaD | `kmPerDay` | Decimal(8,2) |
