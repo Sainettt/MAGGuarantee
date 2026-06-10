@@ -41,6 +41,22 @@ enum DelegationStatus {
   anulowany
 }
 
+// Phase 7 — operational route status of a Vehicle as stamped by the
+// `weryfikator` role (or a future external GPS service). Stored as an
+// append-only history (VehicleRouteStatusLog); the derived `nieznany`
+// ("not checked today") state is computed at read time and is NOT stored.
+enum VehicleRouteStatus {
+  w_trasie
+  zjechal
+}
+
+// Origin of a route-status row. `manual` = a weryfikator/admin stamped it;
+// `gps` = future external tracking service (no associated user).
+enum VehicleStatusSource {
+  manual
+  gps
+}
+
 enum VehicleType {
   MEGA
   STD
@@ -119,12 +135,13 @@ model User {
   dispatcherVehicles Vehicle[] @relation("VehicleDispatcher")
 
   // activity
-  reportedDelegations        Delegation[]        @relation("DelegationReporter")
-  verifiedDelegations        Delegation[]        @relation("DelegationVerifier")
-  authoredClaims             Claim[]             @relation("ClaimDecidedBy")
+  reportedDelegations        Delegation[]            @relation("DelegationReporter")
+  verifiedDelegations        Delegation[]            @relation("DelegationVerifier")
+  authoredClaims             Claim[]                 @relation("ClaimDecidedBy")
   uploadedVehicleAttachments VehicleAttachment[]
   uploadedDriverAttachments  DriverAttachment[]
   uploadedCarrierAttachments CarrierAttachment[]
+  notedVehicleStatuses       VehicleRouteStatusLog[] @relation("VehicleStatusNotedBy")
   auditEntries               AuditLog[]
   refreshTokens              RefreshToken[]
 
@@ -285,9 +302,10 @@ model Vehicle {
   sideNumber     String? // NrBoczny
   lastDroveAt    DateTime? // OstatnioJezdzilo (auto-update from delegations)
 
-  delegations Delegation[]
-  claims      Claim[]
-  attachments VehicleAttachment[]
+  delegations   Delegation[]
+  claims        Claim[]
+  attachments   VehicleAttachment[]
+  routeStatuses VehicleRouteStatusLog[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -614,6 +632,36 @@ model Delegation {
   @@index([carrierId, deletedAt, status])
   @@index([status, departureAt])
   @@map("delegations")
+}
+
+// ─── VEHICLE ROUTE STATUS LOG (Phase 7 — weryfikator) ───
+// Append-only history of operational route-status stamps for a vehicle.
+// The `weryfikator` role checks the fleet daily (via external means) and
+// records each vehicle's status: `w_trasie` (en route) / `zjechal` (returned).
+// The CURRENT status for a vehicle is derived as the latest row by `notedAt`
+// with `notedAt::date = today`; if no such row exists today the vehicle is
+// considered `nieznany` ("not checked today" — NOT stored). There is
+// deliberately NO status column on Vehicle: this table is the single source
+// of truth. `source=gps` rows have no `notedById` (external service).
+model VehicleRouteStatusLog {
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vehicleId String  @db.Uuid
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  status VehicleRouteStatus
+  source VehicleStatusSource @default(manual)
+
+  // Nullable — GPS-sourced rows are not attributed to a user.
+  notedById String?  @db.Uuid
+  notedBy   User?    @relation("VehicleStatusNotedBy", fields: [notedById], references: [id])
+  notedAt   DateTime @default(now())
+  notes     String?
+
+  createdAt DateTime @default(now())
+
+  @@index([vehicleId, notedAt])
+  @@index([notedAt])
+  @@map("vehicle_route_statuses")
 }
 
 // ─── LIMITS (LIMITY KM) ─────────────────────────────────

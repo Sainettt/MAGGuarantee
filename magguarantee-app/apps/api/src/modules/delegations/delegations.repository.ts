@@ -141,9 +141,11 @@ export interface UpdateDelegationData {
   notes?: string | null;
   actualReturnAt?: Date | null;
   /**
-   * Phase 7 — set by the weryfikator transitions (`in-transit` / `returned`)
-   * to stamp who advanced the outing's status and when. The carrier cancel
-   * path leaves these undefined (no verifier involved).
+   * `verifiedBy/At` stamp who advanced an outing's status and when. The
+   * weryfikator-driven delegation transitions that used to set these were
+   * removed in the Phase 7 rework (2026-06-10 #2) — the columns remain on the
+   * model and in this update shape for completeness, but the only delegation
+   * mutation today is the carrier cancel path, which leaves them undefined.
    */
   verifiedById?: string | null;
   verifiedAt?: Date | null;

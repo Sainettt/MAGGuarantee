@@ -123,4 +123,44 @@ describe('VehiclesController — authorization', () => {
       expect(guard.canActivate(ctxFor(handler, opiekunUser))).toBe(true);
     });
   });
+
+  // ── Route status (Phase 7 weryfikator board) ─────────────
+
+  describe('route-status / route-board authorization (weryfikator + admin)', () => {
+    const ROUTE_STATUS_HANDLERS: (keyof VehiclesController)[] = [
+      'setRouteStatus',
+      'getRouteStatus',
+      'routeBoard',
+    ];
+
+    it.each(ROUTE_STATUS_HANDLERS)(
+      '%s is restricted to weryfikator + admin',
+      (handler) => {
+        const roles = rolesFor(handler);
+        expect(roles.sort()).toEqual(['admin', 'weryfikator']);
+      },
+    );
+
+    it.each(ROUTE_STATUS_HANDLERS)('allows weryfikator on %s', (handler) => {
+      const wer: AuthUser = { ...carrierUser, role: 'weryfikator' };
+      expect(guard.canActivate(ctxFor(handler, wer))).toBe(true);
+    });
+
+    it.each(ROUTE_STATUS_HANDLERS)('allows admin on %s', (handler) => {
+      const adm: AuthUser = { ...carrierUser, role: 'admin' };
+      expect(guard.canActivate(ctxFor(handler, adm))).toBe(true);
+    });
+
+    it.each(['przewoznik', 'eksport', 'planista', 'dyspozytor', 'opiekun'] as const)(
+      'rejects %s on the route-status endpoints (403)',
+      (role) => {
+        const u: AuthUser = { ...carrierUser, role };
+        for (const handler of ROUTE_STATUS_HANDLERS) {
+          expect(() => guard.canActivate(ctxFor(handler, u))).toThrow(
+            ForbiddenException,
+          );
+        }
+      },
+    );
+  });
 });

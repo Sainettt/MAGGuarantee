@@ -278,12 +278,22 @@ soft-delete'ятся (объект в MinIO остаётся).
 
 | Method + Path | GAS |
 |---|---|
-| GET `/delegations` | `getDelegacjeForCarrier` / `getDelegacjeForEksport` / `getDelegacjeForWeryfikator` / `getDelegacjeForDyspozytor` — единый endpoint, фильтрация по роли |
-| GET `/delegations/:id` | (lookup) |
+| GET `/delegations` | `getDelegacjeForCarrier` / `getDelegacjeForEksport` / `getDelegacjeForDyspozytor` — единый endpoint, фильтрация по роли. **`weryfikator` сюда больше НЕ имеет доступа** (rework 2026-06-10 #2 — см. ниже). `eksport`: active-board + `?includeHistory=true`. |
+| GET `/delegations/:id` | (lookup) — без `weryfikator` |
 | POST `/delegations` | `addDelegacja` (carrier) |
-| POST `/delegations/:id/in-transit` | `markDelegacjaInTransit` (weryfikator) |
-| POST `/delegations/:id/returned` | `markDelegacjaReturned` (weryfikator) |
-| POST `/delegations/:id/cancel` | `cancelDelegacja` (carrier — только свои `zgloszony`, weryfikator — любые) |
+| POST `/delegations/:id/cancel` | `cancelDelegacja` (**carrier-only** — свои `zgloszony`; weryfikator НЕ имеет cancel) |
+
+> ⚠️ **Удалено (rework 2026-06-10 #2):** `POST /delegations/:id/in-transit` и `POST /delegations/:id/returned` (`markDelegacjaInTransit/Returned`). `weryfikator` больше не управляет статусом выездов — он работает с операционным статусом **машин** (см. таблицу Vehicles ниже). `DelegationStatus` enum значения `w_trasie`/`zjechal` сохранены, но через приложение не проставляются. Полная спека: [`20-phase-7-eksport-weryfikator.md` § 0](20-phase-7-eksport-weryfikator.md).
+
+### Vehicle route-status (weryfikator) — `/api/v1/vehicles`
+
+Операционный статус машины «в трассе / съехал», который ежедневно проставляет `weryfikator`. Append-only история (`vehicle_route_statuses`); текущий статус = последняя запись за сегодня, иначе производный `nieznany`. Нет связи `delegation ↔ vehicle`.
+
+| Method + Path | Назначение | Роли |
+|---|---|---|
+| GET `/vehicles/route-board` | Все активные машины + `carrier` + `planner` + статус на сегодня (`w_trasie`/`zjechal`/`nieznany`) + кто/когда отметил | weryfikator / admin |
+| POST `/vehicles/:id/route-status` | Body `{ status: 'w_trasie'\|'zjechal', notes? }`. Аппендит запись (`source=manual`); при `zjechal` → `vehicle.lastDroveAt = notedAt` в той же транзакции. Re-stampable. Audit `vehicle.setRouteStatus` | weryfikator / admin |
+| GET `/vehicles/:id/route-status` | История статусов машины (newest-first): `status`, `source` (manual\|gps), `notedBy`, `notedAt`, `notes` | weryfikator / admin |
 
 **`POST /delegations` body — required fields** (post-migration `20260518113943_delegation_required_fields_and_date_only`):
 

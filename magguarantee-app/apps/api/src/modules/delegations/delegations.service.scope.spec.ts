@@ -212,7 +212,7 @@ describe('DelegationsService.list — other roles unchanged', () => {
     expect(passed.carrierId).toBe('any-carrier');
   });
 
-  it.each(['opiekun', 'eksport', 'weryfikator'] as const)(
+  it.each(['opiekun', 'eksport'] as const)(
     'all-access role=%s keeps full access (no planner scope injected)',
     async (role) => {
       const { service, listSpy } = makeService();
@@ -226,6 +226,13 @@ describe('DelegationsService.list — other roles unchanged', () => {
       expect(passed.carrierId).toBe('any-carrier');
     },
   );
+
+  it('weryfikator is rejected (REWORK 2026-06-10 #2 — no longer sees delegations)', async () => {
+    const { service } = makeService();
+    await expect(
+      service.list(auth('weryfikator', 'wer-1'), baseFilters()),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
 
   it('przewoznik is still scoped to its own carrierId', async () => {
     const { service, listSpy } = makeService();
@@ -321,7 +328,7 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it.each(['admin', 'opiekun', 'eksport', 'weryfikator'] as const)(
+  it.each(['admin', 'opiekun', 'eksport'] as const)(
     'all-access role=%s may read any delegation by id',
     async (role) => {
       const row = makeRow({

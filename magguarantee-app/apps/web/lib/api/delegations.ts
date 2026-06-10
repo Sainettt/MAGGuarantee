@@ -5,7 +5,6 @@ import type {
   DelegationDto,
   DelegationEligibilityResponse,
   DelegationFilters,
-  MarkReturnedDto,
   SubmitDelegationDto,
 } from '@magguarantee/shared';
 
@@ -58,30 +57,8 @@ export function cancelDelegation(
   });
 }
 
-/**
- * POST /delegations/:id/in-transit (weryfikator | admin) — Phase 7.
- * Empty-body transition `zgloszony → w_trasie`. The server stamps
- * `verifiedBy/At` from the JWT + clock; the client sends no payload.
- */
-export function markInTransit(id: string): Promise<DelegationDto> {
-  return apiJson<DelegationDto>(`/delegations/${id}/in-transit`, {
-    method: 'POST',
-    json: {},
-  });
-}
-
-/**
- * POST /delegations/:id/returned (weryfikator | admin) — Phase 7. Transition
- * `w_trasie → zjechal`. `actualReturnAt` is **date-only** (`YYYY-MM-DD`) per
- * the owner decision (2026-06-10); the server mirrors it into
- * `vehicle.lastDroveAt`.
- */
-export function markReturned(
-  id: string,
-  body: MarkReturnedDto,
-): Promise<DelegationDto> {
-  return apiJson<DelegationDto>(`/delegations/${id}/returned`, {
-    method: 'POST',
-    json: body,
-  });
-}
+// NOTE (Phase 7 rework 2026-06-10 #2): the weryfikator no longer advances
+// delegation status. The former `markInTransit` / `markReturned` wrappers
+// (and the `POST /delegations/:id/in-transit` / `/returned` endpoints) were
+// removed — the weryfikator now stamps a *vehicle* route-status instead. See
+// `lib/api/vehicles.ts` (`setVehicleRouteStatus`) + docs/14 §7.5.

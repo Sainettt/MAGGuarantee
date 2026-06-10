@@ -76,6 +76,19 @@ export interface VehicleRow {
   deletedAt: Date | null;
 }
 
+/**
+ * Lean per-vehicle projection for the weryfikator route board. Carries only
+ * the columns the board renders — the derived "today's status" cell is joined
+ * in by the service from `VehicleRouteStatusRepository.latestTodayByVehicles`.
+ */
+export interface VehicleBoardRow {
+  id: string;
+  plateNumber: string;
+  sideNumber: string | null;
+  carrierName: string | null;
+  plannerName: string | null;
+}
+
 export interface VehicleListFilters {
   carrierId?: string;
   /**
@@ -148,6 +161,38 @@ export class VehiclesRepository {
         : {}),
     });
     return rows.map((r) => this.flatten(r));
+  }
+
+  /**
+   * Lean projection of every ACTIVE, non-soft-deleted vehicle for the
+   * weryfikator route board (`GET /vehicles/route-board`). The soft-delete
+   * extension AND-s `deletedAt: null`; we add `active: true` explicitly so
+   * deactivated trucks never appear. Only the columns the board renders are
+   * selected (no attachments / rates / GPS device) — keeps the board query
+   * cheap and unrelated to the heavyweight `list()` include shape.
+   *
+   * `carrier`/`planner` are resolved to their display NAME (carrier name lives
+   * on the related `User`); the board shows the name, not the id.
+   */
+  async listActiveForBoard(): Promise<VehicleBoardRow[]> {
+    const rows = await this.prisma.tx.vehicle.findMany({
+      where: { active: true },
+      select: {
+        id: true,
+        plateNumber: true,
+        sideNumber: true,
+        carrier: { select: { user: { select: { name: true } } } },
+        planner: { select: { name: true } },
+      },
+      orderBy: { plateNumber: 'asc' },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      plateNumber: r.plateNumber,
+      sideNumber: r.sideNumber,
+      carrierName: r.carrier?.user?.name ?? null,
+      plannerName: r.planner?.name ?? null,
+    }));
   }
 
   /**

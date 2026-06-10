@@ -3993,13 +3993,17 @@ Documented deviations from the literal §6.5 text, each within brand/token const
 
 ## Phase 7 — Eksport / Weryfikator delegation panels
 
-> **Scope.** The two single-purpose roles' `/delegations` screens. Spec: [`20-phase-7-eksport-weryfikator.md`](20-phase-7-eksport-weryfikator.md) (owner decisions §4). `eksport` = read-only витрина; `weryfikator` = read-only table **plus exactly two per-row status actions**. This section covers only (1) the weryfikator action-UI and (2) the nav recommendation for both roles. The table/filter/history-toggle layout is **not re-derived here** — both pages reuse the Phase 6.3 read-only role-panel pattern (§"Phase 6 — Planista / Dyspozytor read-only panels") inside `RoleShell`: the 4.4 container strip, the read-only info banner (eksport only), a status filter + «historia» toggle, and a `<DataTable>` with the Phase 6.3 Delegacje column set + a static `<StatusBadge>`. The eksport page is that pattern verbatim, read-only, full stop.
+> ⚠️ **REWORK 2026-06-10 #2 — §7.1 (weryfikator delegation action-UI) is SUPERSEDED.** The weryfikator role no longer works with delegations; it now stamps a **vehicle route-status board** (table of all active vehicles, per-row «W trasie» / «Zjechał» status). The authoritative spec is **§7.5 — Weryfikator vehicle route-status board** (below). The §7.1 in-transit/returned confirm-dialogs, the `actions` column on the *delegations* table, and `<DelegationStatusActionDialog>` are removed from the build — kept below only as history (struck through). **The `eksport` parts (§7.2 nav for eksport, the read-only delegations витрина) are UNCHANGED and remain authoritative.**
+
+> **Scope (eksport — current).** The `eksport` single-purpose role's `/delegations` screen. Spec: [`20-phase-7-eksport-weryfikator.md`](20-phase-7-eksport-weryfikator.md) (owner decisions §4, rework §0). `eksport` = read-only витрина. This section covers (1) ~~the weryfikator delegation action-UI~~ **superseded → §7.5** and (2) the nav recommendation for both roles. The table/filter/history-toggle layout is **not re-derived here** — both pages reuse the Phase 6.3 read-only role-panel pattern (§"Phase 6 — Planista / Dyspozytor read-only panels") inside `RoleShell`: the 4.4 container strip, the read-only info banner (eksport only), a status filter + «historia» toggle, and a `<DataTable>` with the Phase 6.3 Delegacje column set + a static `<StatusBadge>`. The eksport page is that pattern verbatim, read-only, full stop.
 >
 > **No new tokens** (Phase 4.4 surface policy holds). Everything below composes existing primitives: `<Dialog>` (+ `DialogHeader`/`DialogDescription`/`DialogFooter`), `<Input type="date">`, `<FormField>`, `<Button>`, `<StatusBadge>`. Zero changes to `tailwind.config.ts` / `globals.css`.
 
-### 7.1 Weryfikator per-row status actions (confirm dialogs) — exactly two, **no «Anuluj»**
+### 7.1 ~~Weryfikator per-row status actions (confirm dialogs)~~ — SUPERSEDED by §7.5
 
-The weryfikator Delegacje table gets **one extra trailing column** (`actions`) on top of the read-only Phase 6.3 column set. There are **EXACTLY TWO** actions, both driven off the row status. There is **NO cancel («Anuluj») button anywhere on this page** — owner decision (2026-06-10): weryfikator has no cancel authority; cancel stays carrier-only and is not represented in this UI. Do not render a cancel button, a kebab "anuluj" item, or any anulowanie affordance here.
+> ⚠️ **Superseded (rework 2026-06-10 #2).** Weryfikator no longer acts on delegations. The whole §7.1 below — the `actions` column on the *delegations* table, the in-transit / returned confirm dialogs, `<DelegationStatusActionDialog>` — is **removed from the build**. Do not implement it. Replaced by the vehicle route-status board in **§7.5**. Kept here only as history.
+
+~~The weryfikator Delegacje table gets **one extra trailing column** (`actions`)~~ on top of the read-only Phase 6.3 column set. There are **EXACTLY TWO** actions, both driven off the row status. There is **NO cancel («Anuluj») button anywhere on this page** — owner decision (2026-06-10): weryfikator has no cancel authority; cancel stays carrier-only and is not represented in this UI. Do not render a cancel button, a kebab "anuluj" item, or any anulowanie affordance here.
 
 **Status → action mapping (row-level):**
 
@@ -4052,21 +4056,131 @@ This deviates from the plan's "empty WelcomePanel stub" only to remove a no-op s
 
 | Change | Where | Notes |
 |---|---|---|
-| New `<DelegationStatusActionDialog>` (or two small inline dialogs) | `apps/web/components/delegations/` | The two confirm dialogs of §7.1. May be one component switching on a `mode: 'in-transit' \| 'returned'` prop (date field shown only for `returned`), mirroring `ConfirmDeleteWithReasonDialog`'s shape. No new tokens. |
-| `actions` column on the weryfikator Delegacje `<DataTable>` | weryfikator delegations page | Single `<Button size="sm">` per row by status; terminal rows render `—`. **No cancel control.** |
-| Reuse `<Dialog>` / `<Input type="date">` / `<FormField>` / `<Button>` / `<StatusBadge>` / `<DataTable>` | existing | No primitive changes. Read-only Phase 6.3 panel pattern for the table itself. |
-| Role landing routes → `redirect('/.../delegations')`; delete `WelcomePanel` stubs | `app/(eksport)/eksport/page.tsx`, `app/(weryfikator)/weryfikator/page.tsx` | §7.2. |
-| shared Zod: `MarkReturnedSchema` (`{ actualReturnAt: date-only, required, ≤ today suggested }`); `in-transit` needs no body | `@magguarantee/shared` | api-agent owns the contract; DS only specifies the required/date-only/not-future expectation. |
-| i18n | `messages/pl.json`, `en.json` | `weryfikator.actions.{inTransit,returned}`, dialog titles/descriptions/labels, `actualReturnAt` label + validation messages, toasts. |
+| ~~New `<DelegationStatusActionDialog>`~~ — **REMOVED** (rework #2) | ~~`apps/web/components/delegations/`~~ | Superseded by §7.5. Do not build. |
+| ~~`actions` column on the weryfikator Delegacje `<DataTable>`~~ — **REMOVED** | — | Weryfikator no longer has a delegations table. See §7.5. |
+| Reuse `<Dialog>` / `<Input type="date">` / `<FormField>` / `<Button>` / `<StatusBadge>` / `<DataTable>` | existing | No primitive changes. Read-only Phase 6.3 panel pattern for the **eksport** table. |
+| Role landing routes → `redirect('/.../delegations')` (eksport) / `redirect('/.../vehicles')` (weryfikator, §7.5); delete `WelcomePanel` stubs | `app/(eksport)/eksport/page.tsx`, `app/(weryfikator)/weryfikator/page.tsx` | §7.2 (eksport) + §7.5 (weryfikator landing → `/weryfikator/vehicles`). |
+| ~~shared Zod: `MarkReturnedSchema`~~ — **REMOVED** (delegation in-transit/returned dropped); new `SetVehicleRouteStatusSchema` in §7.5 | `@magguarantee/shared` | api-agent owns the contract. |
+| i18n | `messages/pl.json`, `en.json` | **eksport** strings unchanged; ~~`weryfikator.actions.{inTransit,returned}`~~ delegation strings removed; new `weryfikator.*` vehicle-board strings per §7.5. |
 | **0** changes to `tailwind.config.ts` / `globals.css` | — | Token policy respected. |
 
-### 7.4 Acceptance checklist (Phase 7 action-UI + nav)
+### 7.4 ~~Acceptance checklist (Phase 7 weryfikator action-UI)~~ — SUPERSEDED by §7.5
 
-- [ ] **Exactly two actions, no cancel.** `zgloszony` row → «Oznacz w trasie»; `w_trasie` row → «Oznacz zjechał»; `zjechal`/`anulowany` → no button. **No «Anuluj» delegation-cancel control anywhere** (the only «Anuluj» on the page is the dialog-dismiss footer button).
+> ⚠️ **Superseded (rework 2026-06-10 #2).** The weryfikator delegation-action checks below no longer apply (no delegation actions for weryfikator). The **nav** check still applies but the weryfikator target changes to `/weryfikator/vehicles` (see §7.5.7). The **eksport** read-only витрина checks still apply. Use §7.5.7 for the weryfikator board's acceptance. Kept below as history.
+
+- [ ] ~~**Exactly two actions, no cancel.**~~ `zgloszony` row → «Oznacz w trasie»; `w_trasie` row → «Oznacz zjechał»; `zjechal`/`anulowany` → no button. **No «Anuluj» delegation-cancel control anywhere** (the only «Anuluj» on the page is the dialog-dismiss footer button).
 - [ ] **In-transit confirm = no input.** Plain `<Dialog>` confirm; fires `in-transit`; plate interpolated in the description.
 - [ ] **Returned confirm = one date-only field.** `<Input type="date">` (not `datetime-local`), RHF + Zod, required; submit disabled until valid; future-date guard present (suggested) with an inline message; dialog stays open on error.
 - [ ] **Token policy respected.** Zero `tailwind.config.ts` / `globals.css` changes; no new component tokens; all surfaces existing.
 - [ ] **Nav.** `eksport` and `weryfikator` landing routes `redirect()` to `/delegations`; no `WelcomePanel` stub remains; header logo/home link points at `/delegations` for these roles; no in-page `<Tabs>` (single screen).
 - [ ] **a11y.** Action buttons reach ≥44px touch target via `size="sm"` hit area; dialogs trap focus + close on Escape (from the `<Dialog>` primitive); date input has an associated `<Label>` via `<FormField htmlFor>`; status meaning carried by `<StatusBadge>` text + colour, not colour alone.
 - [ ] **Dark-mode verified.** Both dialogs (`bg-card`), date input (`bg-input`), brand buttons, status badges legible with tokens / `dark:` variants only.
+
+---
+
+### 7.5 Weryfikator vehicle route-status board (rework 2026-06-10 #2 — AUTHORITATIVE)
+
+> **Scope.** Replaces §7.1. The weryfikator no longer touches delegations. Their entire screen is now **one table of all active vehicles**, where they stamp each vehicle's *daily operational route-status* («W trasie» / «Zjechał») using info from an external GPS service + people outside the app. Spec source: [`20-phase-7-eksport-weryfikator.md` §0](20-phase-7-eksport-weryfikator.md). Route: `app/(weryfikator)/weryfikator/vehicles/page.tsx`.
+>
+> **No new tokens** (Phase 4.4 policy). Everything composes existing primitives: the Phase 6.3 read-only role-panel layout, `<DataTable>`, `<StatusBadge>` (existing `<Badge>` variants only — `success` / `muted` / `outline`), `<Button>`, `<Dialog>`. Zero `tailwind.config.ts` / `globals.css` changes.
+
+#### 7.5.1 Status model + `StatusBadge` tone-map (three states, existing variants only)
+
+The route-status is a **per-vehicle, per-day** signal derived from an append-only history table (`vehicle_route_statuses`). The stored enum has **two** values; the third is **derived** ("no history row dated today"):
+
+| Board status | Source | `<Badge>` variant | Label PL | Label EN | Tone rationale |
+|---|---|---|---|---|---|
+| `w_trasie` | stored enum | `success` | «W trasie» | "On the road" | Vehicle is actively working — the positive operational signal. Matches the existing `DelegationStatus.w_trasie → success` precedent (§`<StatusBadge>` map). |
+| `zjechal` | stored enum | `muted` | «Zjechał» | "Returned" | Vehicle is done/parked — neutral-settled, not alarming. Matches existing `DelegationStatus.zjechal → muted`. |
+| `nieznany` | **derived** (no row for today) | `outline` | «Nie sprawdzono» | "Not checked" | **Default / neutral-muted.** This is the *normal* fresh-day state, NOT an error. Use the quietest badge — `outline` (transparent fill, `border-border`, `text-text-sub`). It must read as "not yet looked at", visually *recessive* vs. the two acted states. **Never** map to `warning` / `danger` (no orange/red) — that would frame an unchecked vehicle as a problem, which it isn't until policy says so. |
+
+Tone-map decisions (locked):
+- **`w_trasie` = `success`**, **`zjechal` = `muted`** — reuse the existing delegation precedent verbatim so the same two words carry the same colour anywhere in the app.
+- **`nieznany` = `outline`**, deliberately *more recessive* than `muted` (`muted` has a soft grey fill; `outline` is fill-less). The hierarchy is: acted-positive (`success`, green) > acted-done (`muted`, grey fill) > **un-acted default** (`outline`, no fill). The eye lands on green «W trasie» rows first (those are live on the road), then the grey «Zjechał», and the unchecked rows sit quietest — correct for a board the verifier works *down* from top each morning.
+- Wrapper: extend the existing `<StatusBadge>` (or a sibling `<VehicleRouteStatusBadge>`) with a `vehicleRouteStatus` const-map in `@magguarantee/shared` next to the `DelegationStatus` map. Same anatomy as the existing badge (`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-xs font-medium whitespace-nowrap`). Optional Lucide leading icon (12px): `<Truck />` for `w_trasie`, `<ParkingSquare />` for `zjechal`, `<HelpCircle />` for `nieznany` — optional, label always present (status carried by text + colour, not colour alone — a11y).
+
+#### 7.5.2 Table layout (reuse Phase 6.3 read-only panel + `<DataTable>`)
+
+Same canonical container as the Phase 6.3 role panels (4.4 strip → page heading → `<DataTable>`), **but this one is NOT read-only** — it carries a single trailing `actions` column (the only mutating affordance the weryfikator has). No in-page `<Tabs>` — it's a single screen. A status filter (`<Select>`: wszystkie / w trasie / zjechał / nie sprawdzono) + optional search by plate/carrier sits in the `bg-input` filter row above the table (search-only chrome per the surface policy; the status filter is a read filter, not a mutation).
+
+Columns (order). **No driver column** — the verifier works at vehicle granularity:
+
+| col | header (PL) | content |
+|---|---|---|
+| `vehicle` | NUMER | `plateNumber` (primary, `font-medium tabular-nums`) + `sideNumber` under it as `text-xs text-text-sub` (`«bok {sideNumber}»`), or just plate if no side number. |
+| `carrier` | PRZEWOŹNIK | `carrier.nazwa`, `truncate` (flex col per the Phase 6.4 `DataTableColumn.width`/`truncate` strategy). |
+| `planista` | PLANISTA | `planner` full name or `—` if unassigned. |
+| `status` | STATUS | `<StatusBadge>` per §7.5.1 (the derived `nieznany` computed client/server-side from "today's latest row"). Static indicator, no dropdown. |
+| `notedMeta` | OZNACZONO | "who + when" meta cell — see §7.5.3. For `nieznany` rows renders `—` `text-text-sub`. |
+| `actions` | — (blank header) | two stamp buttons, right-aligned — see §7.5.4. |
+
+Row height + cell padding: Phase 2 `<DataTable>` standard (`h-12`, `px-3 py-2`). Whole-row click is **not** an edit (rows aren't a form); instead the row is clickable to open the **history modal** (§7.5.5) — pass `onRowClick` + `rowAriaLabel` («Pokaż historię statusu: {plateNumber}») per the Phase 6.4 clickable-row a11y enhancement. The trailing action buttons `e.stopPropagation()` so a stamp click doesn't also open history.
+
+#### 7.5.3 `notedMeta` cell — "who + when noted"
+
+Two stacked lines, compact:
+- Line 1: actor — `notedBy` full name, or **«GPS»** in `text-text-sub` when `source = gps` (`notedById` null). `text-xs font-medium`.
+- Line 2: relative-or-short timestamp `notedAt`, `text-xs text-text-sub tabular-nums` (e.g. «dziś 08:14» / today HH:mm; if the latest stored row is older than today the board still shows `nieznany`, so this cell is only populated for `w_trasie`/`zjechal` today). Optional tiny `source` hint: a `<Badge variant="muted" className="text-[10px]">GPS</Badge>` pill when GPS-sourced, so manual vs. automatic stamps are distinguishable at a glance.
+- `nieznany` rows: single `—` `text-text-sub`, no second line.
+
+#### 7.5.4 Per-row action affordance — two **re-stampable** buttons
+
+Trailing `actions` cell, right-aligned (`flex justify-end gap-2`). **Always two buttons on every row**, regardless of current status — this is NOT a state machine. The board is a daily ledger: a vehicle can be re-marked any number of times (each click appends a new history row). So unlike the old delegation actions, both «W trasie» and «Zjechał» are **always present and always enabled**.
+
+| Button | Label PL / EN | Variant | Endpoint |
+|---|---|---|---|
+| in-transit | «W trasie» / "On the road" | `<Button size="sm" variant="outline">` | `POST /vehicles/:id/route-status { status: 'w_trasie' }` |
+| returned | «Zjechał» / "Returned" | `<Button size="sm" variant="outline">` | `POST /vehicles/:id/route-status { status: 'zjechal' }` |
+
+Posture (locked):
+- These are **routine, non-destructive status stamps**, not the page's headline CTA and not destructive — so they use the quiet **`outline`** button (not brand-red, not danger). This is the key posture difference from old §7.1, where status advancement *was* the brand-red primary. Here stamping happens many times a day across many rows; a wall of red buttons would scream. Outline keeps the board calm; the *colour signal* lives in the status badge, not the buttons.
+- **Current-status button = active/pressed, not disabled.** Whichever status matches today's latest stamp renders in its semantic accent to show "this is the current state" while **staying clickable** (re-stamping is allowed — e.g. re-confirming «W trasie» appends a fresh-timestamp row). Treatment: the matching button gets `aria-pressed="true"` + a filled accent (`w_trasie` active → `variant="success"` style; `zjechal` active → a muted-filled style) while the other stays `outline`. Do **not** `disabled` the current button — disabling would block the legitimate "re-confirm / correct the timestamp" action and is the wrong affordance for an append-only ledger. For `nieznany` rows both buttons are plain `outline` (nothing stamped yet today).
+- **No confirm dialog.** Unlike §7.1, a stamp is low-stakes and high-frequency — gating each on a modal would be hostile. Click → optimistic `POST` → toast («Oznaczono: W trasie» / «Oznaczono: Zjechał») → row badge + `notedMeta` update; on error rollback + `<Toast variant="destructive">`. (If a future policy needs an undo, prefer a toast-action «Cofnij» over a pre-confirm.)
+- Touch target: `size="sm"` meets ≥44px via the `<Button>` hit-area on touch breakpoints (same rule as §7.1). On narrow viewports the two buttons may wrap or collapse to icon-only (`<Truck/>` / `<ParkingSquare/>` with `aria-label`) — keep both reachable.
+
+#### 7.5.5 Per-vehicle history — `<VehicleRouteStatusHistoryDialog>` (`<Dialog>`)
+
+Opened by row-click (§7.5.2). A centered `<Dialog>` (`bg-card`) showing the append-only route-status log for one vehicle, newest first.
+
+- `DialogHeader`: title «Historia statusu — {plateNumber}» + `DialogDescription` carrier + side number (`text-sm text-text-sub`).
+- Body: a vertical list (not a nested `<DataTable>` — it's a short log; a `<DataTable>` is overkill in a dialog). Each entry is a row:
+  - left: `<StatusBadge>` for that entry's stored `status` (`w_trasie`/`zjechal` — history never contains the derived `nieznany`).
+  - middle: actor — `notedBy` name or «GPS», `text-sm`; below it the `source` as a small `muted` pill («ręcznie» / "manual" vs «GPS»).
+  - right: `notedAt` full date-time, `text-xs text-text-sub tabular-nums`, right-aligned. Optional `notes` on its own line `text-xs text-text-sub` when present.
+  - Separator between entries: `divide-y divide-border`.
+- Newest entry gets a subtle "current" marker (`text-text` weight vs. older `text-text-sub`), since the top row of today is what drives the board badge.
+- Empty (vehicle never stamped): `<EmptyState>` inside the dialog — «Brak historii statusu dla tego pojazdu» / "No route-status history for this vehicle yet."
+- `DialogFooter`: single ghost «Zamknij» (dialog-dismiss). The history dialog is **read-only** — stamping happens from the table row, not from here (keeps one mutation entry-point).
+
+> Row-expand was considered as an alternative to the dialog; the `<Dialog>` is chosen for parity with the rest of the app's detail surfaces (Phase 6 modals) and because the board rows are dense — an inline expand would push the whole table around. If web-agent prefers an expand later it's a non-breaking swap (same data, same item layout).
+
+#### 7.5.6 Empty / `nieznany`-default board state (fresh day)
+
+Two distinct emptiness cases — do not conflate:
+- **No vehicles at all** (no active fleet): standard `<DataTable>` `empty={<EmptyState>}` slot — «Brak aktywnych pojazdów» / "No active vehicles." This is a true empty table.
+- **Fresh day — vehicles present, none stamped yet** (the *normal* morning state): this is **NOT** an empty state. The table is full of rows, every `status` cell shows the `nieznany` `outline` badge, every `notedMeta` shows `—`, both action buttons plain `outline`. The board intentionally reads as "a full list of vehicles awaiting today's check", visually calm (no orange/red), so the verifier just works down it. Do **not** render an `<EmptyState>` here and do **not** tint these rows as warnings. An optional one-line helper above the table («{n} z {total} pojazdów sprawdzonych dzisiaj» / "{n} of {total} vehicles checked today", `text-sm text-text-sub`) gives progress without alarm — recommended, not required.
+- Loading: Phase 2 `<DataTable isLoading>` skeleton rows (no special skeleton needed).
+
+#### 7.5.7 Components / shared / nav summary + acceptance (Phase 7.5)
+
+| Change | Where | Notes |
+|---|---|---|
+| New page `weryfikator/vehicles` (full-fleet board) | `app/(weryfikator)/weryfikator/vehicles/page.tsx` | Phase 6.3 panel layout + `<DataTable>` with `actions` column. No `<Tabs>`. |
+| Weryfikator landing redirect → `/weryfikator/vehicles` | `app/(weryfikator)/weryfikator/page.tsx` | `redirect()`; delete `WelcomePanel` stub; header logo/home → `/weryfikator/vehicles` (supersedes the §7.2 `/delegations` target for weryfikator only). `eksport` landing unchanged. |
+| `vehicleRouteStatus` tone-map (const-map) + `<StatusBadge>` / `<VehicleRouteStatusBadge>` support | `@magguarantee/shared` + `components/.../StatusBadge.tsx` | Three states per §7.5.1, existing `success`/`muted`/`outline` variants — **no new badge variant**. |
+| Two `outline` stamp buttons per row (always present, current = `aria-pressed` accent, never disabled) | weryfikator vehicles page | §7.5.4. No confirm dialog. |
+| `<VehicleRouteStatusHistoryDialog>` (`<Dialog>` read-only log) | `apps/web/components/vehicles/` (web-agent decides path) | §7.5.5. Row-click opens it. |
+| Reuse `<DataTable>` (+ `rowAriaLabel`/`onRowClick` from Phase 6.4) / `<Dialog>` / `<Button>` / `<Badge>`/`<StatusBadge>` / `<EmptyState>` / `<Select>` | existing | No primitive changes, no new tokens. |
+| shared Zod: `SetVehicleRouteStatusSchema` (`{ status: 'w_trasie' \| 'zjechal', notes?: string }`) | `@magguarantee/shared` | api-agent owns the contract (§0 of the phase doc). |
+| i18n | `messages/pl.json` / `en.json` | rewrite `weryfikator.*` for the vehicle board: column headers, status labels, button labels, toasts, history dialog, progress helper. Remove old `weryfikator.actions.{inTransit,returned}`. |
+| **0** changes to `tailwind.config.ts` / `globals.css` | — | Token policy respected. |
+
+Acceptance (Phase 7.5):
+- [ ] **Three-state tone-map.** `w_trasie`→`success`, `zjechal`→`muted`, `nieznany`→`outline`; the derived `nieznany` reads as neutral/recessive (no orange/red), never as an error; status carried by text + colour (a11y).
+- [ ] **Table.** Columns plate(+side) / carrier / planista / status badge / who+when meta / actions; **no driver column**; row-click opens history; action cell `stopPropagation`s.
+- [ ] **Re-stampable actions.** Two `outline` buttons on every row, always enabled (including the current status), each click appends a history row; current-status button shows `aria-pressed` accent but stays clickable; no per-stamp confirm dialog; success/error toasts.
+- [ ] **History dialog.** Read-only `<Dialog>` log newest-first (status / who / when / source manual|gps / optional notes); empty state when no history; dismiss-only footer.
+- [ ] **Fresh-day default ≠ empty.** Full board of `nieznany` `outline` rows renders as a calm list (no `<EmptyState>`, no warning tint); true `<EmptyState>` only when there are zero active vehicles; optional "{n}/{total} checked today" helper.
+- [ ] **Nav.** Weryfikator landing `redirect()`s to `/weryfikator/vehicles`; no `WelcomePanel` stub; header logo/home → `/weryfikator/vehicles`; no in-page `<Tabs>`.
+- [ ] **Token policy + dark-mode.** Zero `tailwind.config.ts`/`globals.css` changes; no new badge variant; board, badges, outline buttons, history dialog (`bg-card`) all legible in dark via tokens / `dark:` variants only.
 

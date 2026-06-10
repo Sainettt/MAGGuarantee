@@ -11,13 +11,15 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { DelegationsController } from './delegations.controller';
 
 /**
- * Authorization unit tests for the Phase 7 weryfikator transitions, plus the
- * regression that `cancel` stays carrier-only (owner decision 2026-06-10: the
- * verifier has NO cancel authority).
+ * Authorization unit tests for the delegations surface after the Phase 7
+ * rework (2026-06-10 #2): the weryfikator no longer touches delegations — its
+ * former in-transit/returned handlers were removed and it was dropped from the
+ * `list` / `getOne` `@Roles`. `eksport` stays on the outings board; cancel
+ * stays carrier-only.
  *
  * Two layers, same pattern as `drivers.controller.spec.ts`:
  *   1. The `@Roles(...)` metadata on each handler is exactly the documented set
- *      (reflection — catches an accidental decorator drift).
+ *      (reflection — catches accidental decorator drift).
  *   2. `RolesGuard` actually accepts/rejects the right tokens.
  */
 
@@ -65,52 +67,62 @@ function userWith(role: Role): AuthUser {
   };
 }
 
-const VERIFIER_TRANSITIONS: (keyof DelegationsController)[] = [
-  'markInTransit',
-  'markReturned',
-];
-
-describe('DelegationsController — Phase 7 authorization', () => {
+describe('DelegationsController — authorization (post Phase 7 rework)', () => {
   const guard = new RolesGuard(reflector);
 
-  describe('@Roles metadata on verifier transitions', () => {
-    it.each(VERIFIER_TRANSITIONS)(
-      '%s is restricted to weryfikator + admin',
+  describe('the verifier transition handlers no longer exist', () => {
+    it('markInTransit / markReturned are not methods on the controller', () => {
+      const proto = DelegationsController.prototype as unknown as Record<
+        string,
+        unknown
+      >;
+      expect(proto.markInTransit).toBeUndefined();
+      expect(proto.markReturned).toBeUndefined();
+    });
+  });
+
+  describe('list / getOne — eksport kept, weryfikator dropped', () => {
+    it.each(['list', 'getOne'] as const)(
+      '%s includes eksport but NOT weryfikator',
       (handler) => {
         const roles = rolesFor(handler);
-        expect(roles.sort()).toEqual(['admin', 'weryfikator']);
-        expect(roles).not.toContain('przewoznik');
-        expect(roles).not.toContain('eksport');
+        expect(roles).toContain('eksport');
+        expect(roles).not.toContain('weryfikator');
+        // The other documented readers are unchanged.
+        expect(roles).toEqual(
+          expect.arrayContaining([
+            'admin',
+            'opiekun',
+            'planista',
+            'dyspozytor',
+            'przewoznik',
+            'eksport',
+          ]),
+        );
+      },
+    );
+
+    it.each(['list', 'getOne'] as const)(
+      'RolesGuard rejects weryfikator on %s (403)',
+      (handler) => {
+        expect(() =>
+          guard.canActivate(ctxFor(handler, userWith('weryfikator'))),
+        ).toThrow(ForbiddenException);
+      },
+    );
+
+    it.each(['list', 'getOne'] as const)(
+      'RolesGuard allows eksport on %s',
+      (handler) => {
+        expect(guard.canActivate(ctxFor(handler, userWith('eksport')))).toBe(
+          true,
+        );
       },
     );
   });
 
-  describe('RolesGuard on verifier transitions', () => {
-    it.each(VERIFIER_TRANSITIONS)('allows weryfikator on %s', (handler) => {
-      expect(guard.canActivate(ctxFor(handler, userWith('weryfikator')))).toBe(
-        true,
-      );
-    });
-
-    it.each(VERIFIER_TRANSITIONS)('allows admin on %s', (handler) => {
-      expect(guard.canActivate(ctxFor(handler, userWith('admin')))).toBe(true);
-    });
-
-    it.each(VERIFIER_TRANSITIONS)('rejects przewoznik on %s (403)', (handler) => {
-      expect(() =>
-        guard.canActivate(ctxFor(handler, userWith('przewoznik'))),
-      ).toThrow(ForbiddenException);
-    });
-
-    it.each(VERIFIER_TRANSITIONS)('rejects eksport on %s (403)', (handler) => {
-      expect(() =>
-        guard.canActivate(ctxFor(handler, userWith('eksport'))),
-      ).toThrow(ForbiddenException);
-    });
-  });
-
-  describe('regression: cancel stays carrier-only (verifier has NO cancel)', () => {
-    it('cancel is @Roles(przewoznik) only — unchanged by Phase 7', () => {
+  describe('cancel stays carrier-only (verifier has NO cancel)', () => {
+    it('cancel is @Roles(przewoznik) only', () => {
       const roles = rolesFor('cancel');
       expect(roles).toEqual(['przewoznik']);
       expect(roles).not.toContain('weryfikator');

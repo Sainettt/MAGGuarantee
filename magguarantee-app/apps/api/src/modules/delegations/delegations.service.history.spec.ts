@@ -1,3 +1,5 @@
+import { ForbiddenException } from '@nestjs/common';
+
 import type { DelegationFilters } from '@magguarantee/shared';
 
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
@@ -56,58 +58,57 @@ function passedFilters(
   return listSpy.mock.calls[0]![0] as DelegationListFilters;
 }
 
-describe('DelegationsService.list — includeHistory (eksport/weryfikator)', () => {
-  it.each(['eksport', 'weryfikator'] as const)(
-    '%s: history OFF (default) → active-only floor statusIn=[zgloszony, w_trasie]',
-    async (role) => {
-      const { service, listSpy } = makeService();
-      await service.list(auth(role, `${role}-1`), baseFilters());
-      const passed = passedFilters(listSpy);
-      expect(passed.statusIn).toEqual(['zgloszony', 'w_trasie']);
-      expect(passed.status).toBeUndefined();
-    },
-  );
+describe('DelegationsService.list — includeHistory (eksport)', () => {
+  it('eksport: history OFF (default) → active-only floor statusIn=[zgloszony, w_trasie]', async () => {
+    const { service, listSpy } = makeService();
+    await service.list(auth('eksport', 'eksport-1'), baseFilters());
+    const passed = passedFilters(listSpy);
+    expect(passed.statusIn).toEqual(['zgloszony', 'w_trasie']);
+    expect(passed.status).toBeUndefined();
+  });
 
-  it.each(['eksport', 'weryfikator'] as const)(
-    '%s: history ON → no status floor (all statuses)',
-    async (role) => {
-      const { service, listSpy } = makeService();
-      await service.list(
-        auth(role, `${role}-1`),
-        baseFilters({ includeHistory: true }),
-      );
-      const passed = passedFilters(listSpy);
-      expect(passed.statusIn).toBeUndefined();
-      expect(passed.status).toBeUndefined();
-      // `includeHistory` must NOT leak into the repo filter object.
-      expect('includeHistory' in passed).toBe(false);
-    },
-  );
-
-  it.each(['eksport', 'weryfikator'] as const)(
-    '%s: explicit status narrows further and wins over the floor (even with history off)',
-    async (role) => {
-      const { service, listSpy } = makeService();
-      await service.list(
-        auth(role, `${role}-1`),
-        baseFilters({ status: 'zjechal' }),
-      );
-      const passed = passedFilters(listSpy);
-      // Explicit status is honoured; the active floor is NOT injected.
-      expect(passed.status).toBe('zjechal');
-      expect(passed.statusIn).toBeUndefined();
-    },
-  );
-
-  it('weryfikator: explicit status + includeHistory still narrows to that status', async () => {
+  it('eksport: history ON → no status floor (all statuses)', async () => {
     const { service, listSpy } = makeService();
     await service.list(
-      auth('weryfikator', 'wer-1'),
+      auth('eksport', 'eksport-1'),
+      baseFilters({ includeHistory: true }),
+    );
+    const passed = passedFilters(listSpy);
+    expect(passed.statusIn).toBeUndefined();
+    expect(passed.status).toBeUndefined();
+    // `includeHistory` must NOT leak into the repo filter object.
+    expect('includeHistory' in passed).toBe(false);
+  });
+
+  it('eksport: explicit status narrows further and wins over the floor (even with history off)', async () => {
+    const { service, listSpy } = makeService();
+    await service.list(
+      auth('eksport', 'eksport-1'),
+      baseFilters({ status: 'zjechal' }),
+    );
+    const passed = passedFilters(listSpy);
+    // Explicit status is honoured; the active floor is NOT injected.
+    expect(passed.status).toBe('zjechal');
+    expect(passed.statusIn).toBeUndefined();
+  });
+
+  it('eksport: explicit status + includeHistory still narrows to that status', async () => {
+    const { service, listSpy } = makeService();
+    await service.list(
+      auth('eksport', 'eksport-1'),
       baseFilters({ status: 'anulowany', includeHistory: true }),
     );
     const passed = passedFilters(listSpy);
     expect(passed.status).toBe('anulowany');
     expect(passed.statusIn).toBeUndefined();
+  });
+
+  it('weryfikator: REWORK 2026-06-10 #2 — no longer sees delegations (403, never hits repo)', async () => {
+    const { service, listSpy } = makeService();
+    await expect(
+      service.list(auth('weryfikator', 'wer-1'), baseFilters()),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(listSpy).not.toHaveBeenCalled();
   });
 });
 

@@ -12,10 +12,13 @@
 import type {
   CreateVehicleDto,
   DeleteWithReasonDto,
+  SetVehicleRouteStatusDto,
   UpdateVehicleDto,
   VehicleAttachmentDto,
   VehicleDto,
   VehicleFilters,
+  VehicleRouteBoardItemDto,
+  VehicleRouteStatusLogDto,
 } from '@magguarantee/shared';
 
 import { apiBlob, apiForm, apiJson } from './client';
@@ -160,4 +163,48 @@ export function deleteVehicleAttachment(
     `/vehicles/${vehicleId}/attachments/${attachmentId}`,
     { method: 'DELETE' },
   );
+}
+
+// ─── Route status — weryfikator board (Phase 7.5) ────────
+//
+// The weryfikator stamps a per-vehicle, per-day operational route status
+// («w trasie» / «zjechał») using info from an external GPS service + people
+// outside the app. Roles weryfikator | admin. See docs/14 §7.5.
+
+/**
+ * GET /vehicles/route-board — all active vehicles, each with today's derived
+ * `currentStatus` (`w_trasie` | `zjechal` | `nieznany`) and the who/when of
+ * the latest today-row. Not paginated — the fleet fits one board.
+ */
+export function getVehicleRouteBoard(): Promise<VehicleRouteBoardItemDto[]> {
+  return apiJson<VehicleRouteBoardItemDto[]>('/vehicles/route-board', {
+    method: 'GET',
+  });
+}
+
+/**
+ * POST /vehicles/:id/route-status — append a route-status row (re-stampable).
+ * The server records `source='manual'`, `notedById=caller`, `notedAt=now`;
+ * when `status='zjechal'` it also mirrors `notedAt` into `vehicle.lastDroveAt`.
+ */
+export function setVehicleRouteStatus(
+  id: string,
+  body: SetVehicleRouteStatusDto,
+): Promise<VehicleRouteStatusLogDto> {
+  return apiJson<VehicleRouteStatusLogDto>(`/vehicles/${id}/route-status`, {
+    method: 'POST',
+    json: body,
+  });
+}
+
+/**
+ * GET /vehicles/:id/route-status — append-only route-status history for one
+ * vehicle, newest-first. Powers the read-only history dialog.
+ */
+export function getVehicleRouteStatusHistory(
+  id: string,
+): Promise<VehicleRouteStatusLogDto[]> {
+  return apiJson<VehicleRouteStatusLogDto[]>(`/vehicles/${id}/route-status`, {
+    method: 'GET',
+  });
 }

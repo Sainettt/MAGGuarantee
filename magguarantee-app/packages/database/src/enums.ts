@@ -12,5 +12,7 @@ export {
   EuroNorm,
   Role,
   VehicleAttachmentCategory,
+  VehicleRouteStatus,
+  VehicleStatusSource,
   VehicleType,
 } from './generated';

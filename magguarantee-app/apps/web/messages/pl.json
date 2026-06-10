@@ -1483,49 +1483,54 @@
     }
   },
   "weryfikator": {
-    "delegations": {
-      "title": "Wyjazdy",
-      "subtitle": "Weryfikacja statusu wyjazdów floty",
+    "vehicles": {
+      "title": "Pojazdy",
+      "subtitle": "Dzienny status trasy floty — oznaczaj, które auta są w trasie, a które zjechały.",
       "filters": {
         "status": "Status",
         "allStatuses": "Wszystkie statusy",
-        "includeHistory": "Pokaż historię (zjechał / anulowane)"
+        "search": "Szukaj",
+        "searchPlaceholder": "Numer lub przewoźnik…"
       },
-      "table": {
-        "emptyTitle": "Brak wyjazdów",
-        "emptyMessage": "Brak wyjazdów spełniających kryteria.",
-        "columns": {
-          "vehicle": "Auto",
-          "driver": "Kierowca",
-          "route": "Trasa",
-          "period": "Okres",
-          "status": "Status",
-          "actions": "Akcje"
-        }
-      }
-    },
-    "actions": {
-      "inTransit": "Oznacz w trasie",
-      "returned": "Oznacz zjechał",
-      "inTransitToast": "Oznaczono jako w trasie",
-      "returnedToast": "Oznaczono jako zjechał",
-      "errorToast": "Nie udało się zmienić statusu wyjazdu.",
-      "dialog": {
-        "dismiss": "Anuluj",
-        "inTransit": {
-          "title": "Oznacz jako w trasie",
-          "description": "Wyjazd {plate} zostanie oznaczony jako w trasie.",
-          "confirm": "Oznacz w trasie"
+      "columns": {
+        "vehicle": "Numer",
+        "carrier": "Przewoźnik",
+        "planista": "Planista",
+        "status": "Status",
+        "noted": "Oznaczono",
+        "actions": "Akcje"
+      },
+      "status": {
+        "w_trasie": "W trasie",
+        "zjechal": "Zjechał",
+        "nieznany": "Nie sprawdzono"
+      },
+      "actions": {
+        "w_trasie": "W trasie",
+        "zjechal": "Zjechał"
+      },
+      "sideLabel": "bok {side}",
+      "progress": "Sprawdzono dziś {checked} z {total}",
+      "emptyTitle": "Brak aktywnych pojazdów",
+      "emptyMessage": "Nie ma żadnych aktywnych pojazdów do sprawdzenia.",
+      "toast": {
+        "success": "Oznaczono: {status}",
+        "error": "Nie udało się zapisać statusu pojazdu."
+      },
+      "a11y": {
+        "showHistory": "Pokaż historię statusu: {plate}"
+      },
+      "history": {
+        "title": "Historia statusu — {plate}",
+        "sideSuffix": " · bok {side}",
+        "noCarrier": "Brak przewoźnika",
+        "gpsActor": "GPS",
+        "source": {
+          "manual": "ręcznie",
+          "gps": "GPS"
         },
-        "returned": {
-          "title": "Oznacz jako zjechał",
-          "description": "Podaj faktyczną datę zjazdu dla wyjazdu {plate}.",
-          "dateLabel": "Data zjazdu",
-          "confirm": "Oznacz zjechał",
-          "errorRequired": "Podaj datę zjazdu",
-          "errorFuture": "Data zjazdu nie może być w przyszłości",
-          "errorBeforeDeparture": "Data zjazdu nie może być wcześniejsza niż data wyjazdu"
-        }
+        "emptyTitle": "Brak historii",
+        "emptyMessage": "Brak historii statusu dla tego pojazdu."
       }
     }
   }

@@ -4,6 +4,8 @@ import { CarriersModule } from '../carriers/carriers.module';
 import { StorageModule } from '../storage/storage.module';
 import { UsersModule } from '../users/users.module';
 import { VehicleAttachmentsRepository } from './vehicle-attachments.repository';
+import { VehicleRouteStatusRepository } from './vehicle-route-status.repository';
+import { VehicleRouteStatusService } from './vehicle-route-status.service';
 import { VehiclesController } from './vehicles.controller';
 import { VehiclesRepository } from './vehicles.repository';
 import { VehiclesService } from './vehicles.service';
@@ -15,6 +17,8 @@ import { VehiclesService } from './vehicles.service';
     VehiclesService,
     VehiclesRepository,
     VehicleAttachmentsRepository,
+    VehicleRouteStatusService,
+    VehicleRouteStatusRepository,
   ],
   exports: [VehiclesService, VehiclesRepository],
 })

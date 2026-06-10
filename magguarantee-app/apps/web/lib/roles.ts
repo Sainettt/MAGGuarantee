@@ -16,13 +16,15 @@ export const ROLE_LANDING: Record<Role, string> = {
   planista: '/planista',
   dyspozytor: '/dyspozytor',
   // Phase 7 — these two single-destination roles land directly on their one
-  // real screen (the delegations board). The `/eksport` and `/weryfikator`
-  // landing routes still exist and `redirect()` there, but routing them
-  // straight to `/.../delegations` skips the redirect hop entirely (post-login,
-  // access-denial bounce, and the header home link all resolve here — no loop).
-  // docs/14-design-system.md §7.2.
+  // real screen. The `/eksport` and `/weryfikator` landing routes still exist
+  // and `redirect()` there, but routing them straight to the real screen skips
+  // the redirect hop entirely (post-login, access-denial bounce, and the header
+  // home link all resolve here — no loop). docs/14-design-system.md §7.2 / §7.5.
+  //
+  // eksport → read-only delegations витрина; weryfikator → vehicle route-status
+  // board (rework 2026-06-10 #2: weryfikator no longer touches delegations).
   eksport: '/eksport/delegations',
-  weryfikator: '/weryfikator/delegations',
+  weryfikator: '/weryfikator/vehicles',
 };
 
 /** All authenticated landing paths (used by middleware to allow them). */

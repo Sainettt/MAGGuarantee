@@ -81,6 +81,14 @@ enum DelegationStatus {
   anulowany
 }
 
+// Phase 7 — operational route status of a Vehicle stamped by `weryfikator`
+// (or a future external GPS service). Append-only history (VehicleRouteStatusLog).
+// The derived `nieznany` ("not checked today") state is computed at read time
+// and is NOT a stored enum value.
+enum VehicleRouteStatus { w_trasie  zjechal }
+// Origin of a route-status row: manual (weryfikator/admin) or gps (no user).
+enum VehicleStatusSource { manual  gps }
+
 enum VehicleType { MEGA  STD  COIL }
 // EuroNorm — III/IV dropped 2026-05 (km-guarantee program restricted to
 // EURO V/VI). DB is greenfield, so removing the legacy values is a clean
@@ -133,6 +141,7 @@ model User {
   uploadedVehicleAttachments VehicleAttachment[]
   uploadedDriverAttachments  DriverAttachment[]
   uploadedCarrierAttachments CarrierAttachment[]
+  notedVehicleStatuses       VehicleRouteStatusLog[] @relation("VehicleStatusNotedBy")
   auditEntries       AuditLog[]
   refreshTokens      RefreshToken[]
 
@@ -273,9 +282,10 @@ model Vehicle {
   // Auto-updated by delegation→zjechal — never expose as a manual UI field
   lastDroveAt        DateTime?
 
-  delegations Delegation[]
-  claims      Claim[]
-  attachments VehicleAttachment[]
+  delegations   Delegation[]
+  claims        Claim[]
+  attachments   VehicleAttachment[]
+  routeStatuses VehicleRouteStatusLog[]  // Phase 7 — operational route-status history
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -576,6 +586,33 @@ model Delegation {
   @@index([carrierId, deletedAt, status])      // Phase 3 — carrier-panel
   @@index([status, departureAt])
   @@map("delegations")
+}
+
+// ─── VEHICLE ROUTE STATUS LOG (Phase 7 — weryfikator) ───
+// Append-only history of operational route-status stamps for a vehicle.
+// `weryfikator` checks the fleet daily (external means) and records each
+// vehicle's status: w_trasie / zjechal. CURRENT status for a vehicle =
+// latest row by `notedAt` with `notedAt::date = today`; absent that, the
+// vehicle is `nieznany` ("not checked today" — NOT stored). NO status column
+// on Vehicle — this table is the single source of truth. `source=gps` rows
+// have no `notedById` (external service, no user). On transition to `zjechal`
+// the api also updates `Vehicle.lastDroveAt` (same transaction).
+model VehicleRouteStatusLog {
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vehicleId String  @db.Uuid
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  status    VehicleRouteStatus
+  source    VehicleStatusSource @default(manual)
+  notedById String?  @db.Uuid                     // nullable — gps has no user
+  notedBy   User?    @relation("VehicleStatusNotedBy", fields: [notedById], references: [id])
+  notedAt   DateTime @default(now())
+  notes     String?
+  createdAt DateTime @default(now())
+
+  @@index([vehicleId, notedAt])                   // latest-per-vehicle
+  @@index([notedAt])                              // daily board
+  @@map("vehicle_route_statuses")
 }
 
 // ─── LIMITS, AUDIT, REFRESH, CONFIG, CLAIM-SEQUENCE ─────

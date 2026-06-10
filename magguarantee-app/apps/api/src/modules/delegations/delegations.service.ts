@@ -13,7 +13,6 @@ import {
   type DelegationDto,
   type DelegationEligibilityResponse,
   type DelegationFilters,
-  type MarkReturnedDto,
   type SubmitDelegationDto,
 } from '@magguarantee/shared';
 
@@ -23,7 +22,6 @@ import { CarriersRepository } from '../carriers/carriers.repository';
 import { DriversRepository } from '../drivers/drivers.repository';
 import { TrailersRepository } from '../trailers/trailers.repository';
 import { VehiclesRepository } from '../vehicles/vehicles.repository';
-import { assertLegalDelegationTransition } from './delegation-state-machine';
 import {
   DelegationsRepository,
   type DelegationListFilters,
@@ -31,9 +29,9 @@ import {
 } from './delegations.repository';
 
 /**
- * Active-board status floor for the eksport/weryfikator default list view
- * (history toggle OFF). Kept as a module constant so the allow-list isn't a
- * magic array inline in `_scopeListFilters`.
+ * Active-board status floor for the eksport default list view (history toggle
+ * OFF). Kept as a module constant so the allow-list isn't a magic array inline
+ * in `_scopeListFilters`.
  */
 const ACTIVE_DELEGATION_STATUSES = ['zgloszony', 'w_trasie'] as const;
 
@@ -41,15 +39,14 @@ const ACTIVE_DELEGATION_STATUSES = ['zgloszony', 'w_trasie'] as const;
  * Delegations service.
  *
  * Phase 3 — carrier-driven flow: register a delegation (`zgloszony`) and cancel
- * one's own `zgloszony` rows (carrier-only; unchanged in Phase 7).
+ * one's own `zgloszony` rows (carrier-only).
  *
- * Phase 7 — weryfikator/admin-driven status lifecycle:
- *   - `markInTransit` (`zgloszony → w_trasie`);
- *   - `markReturned`  (`w_trasie → zjechal`, mirrors `actualReturnAt` into
- *     `Vehicle.lastDroveAt` atomically).
- * Both transitions go through the delegation state machine (illegal source
- * status → 409) and never touch the cancel path. The eksport/weryfikator list
- * also gains an active-board default with an `includeHistory` widen toggle.
+ * Phase 7 rework (2026-06-10 #2) — the weryfikator no longer drives delegation
+ * status; that role manages per-vehicle route status in the vehicles module.
+ * The former `markInTransit` / `markReturned` transitions were removed. The
+ * only remaining special-role behaviour here is the `eksport` read-only board:
+ * an active-status floor (`{zgloszony, w_trasie}`) by default, widened to all
+ * statuses via the `includeHistory` toggle.
  */
 @Injectable()
 export class DelegationsService {
@@ -143,66 +140,6 @@ export class DelegationsService {
     return this.toDto(updated);
   }
 
-  // ── Weryfikator transitions (Phase 7) ───────────────────
-
-  /**
-   * `zgloszony → w_trasie`. Role-gated to `weryfikator | admin` at the
-   * controller (`@Roles`). The state machine rejects any other source status
-   * with 409 before any write. Stamps `verifiedBy/At` from the caller + clock.
-   *
-   * Atomicity: the controller carries `@Audit('delegation.markInTransit')`, so
-   * the `AuditInterceptor` has already opened a `prisma.$transaction` and the
-   * repository's `update` (via `prisma.tx`) plus the audit-row write commit
-   * together. No explicit `prisma.$transaction` is needed for this single-row
-   * change.
-   */
-  async markInTransit(user: AuthUser, id: string): Promise<DelegationDto> {
-    const row = await this._requireDelegation(id);
-    assertLegalDelegationTransition(row.status, 'w_trasie');
-    const updated = await this.delegations.update(row.id, {
-      status: 'w_trasie',
-      verifiedById: user.sub,
-      verifiedAt: new Date(),
-    });
-    return this.toDto(updated);
-  }
-
-  /**
-   * `w_trasie → zjechal`. Role-gated to `weryfikator | admin`. Requires the
-   * real return DAY (`actualReturnAt`, date-only). In ONE transaction it:
-   *   1. flips the delegation to `zjechal`, stamps `actualReturnAt` +
-   *      `verifiedBy/At`;
-   *   2. mirrors `actualReturnAt` into `Vehicle.lastDroveAt` — the fleet
-   *      "this truck is back" signal (legacy `Code.gs:4100`).
-   *
-   * Both writes go through `prisma.tx`, so they enrol in the SAME
-   * interceptor-opened audit transaction (`@Audit('delegation.markReturned')`)
-   * and commit atomically with the audit row. This atomic `lastDroveAt` update
-   * is the key Phase 7 deliverable.
-   */
-  async markReturned(
-    user: AuthUser,
-    id: string,
-    dto: MarkReturnedDto,
-  ): Promise<DelegationDto> {
-    const row = await this._requireDelegation(id);
-    assertLegalDelegationTransition(row.status, 'zjechal');
-    // Date-only (`YYYY-MM-DD`) → UTC midnight, exactly as `plannedReturnAt` is
-    // parsed on submit. Matches the `@db.Date`-style round-trip for both the
-    // delegation column and the mirrored `vehicle.lastDroveAt`.
-    const actualReturnAt = new Date(dto.actualReturnAt);
-    const updated = await this.delegations.update(row.id, {
-      status: 'zjechal',
-      actualReturnAt,
-      verifiedById: user.sub,
-      verifiedAt: new Date(),
-    });
-    // Same ambient transaction (`prisma.tx`): the fleet signal commits with the
-    // status flip and the audit row, or all three roll back together.
-    await this.vehicles.update(row.vehicleId, { lastDroveAt: actualReturnAt });
-    return this.toDto(updated);
-  }
-
   // ── Eligibility ─────────────────────────────────────────
 
   /**
@@ -251,9 +188,10 @@ export class DelegationsService {
    *  - `przewoznik` → row.carrierId must equal the caller's carrier.
    *  - `planista`   → row.vehicle.plannerId must equal `user.sub`.
    *  - `dyspozytor` → row.vehicle.dispatcherId must equal `user.sub`.
-   *  - admin/opiekun/eksport/weryfikator → unrestricted (all-access roles).
+   *  - admin/opiekun/eksport → unrestricted (all-access roles).
    *  - any other role never reaches here (controller `@Roles` excludes them,
-   *    notably `pracownik` — quirk #13).
+   *    notably `pracownik` — quirk #13 — and `weryfikator`, dropped in the
+   *    Phase 7 rework 2026-06-10 #2).
    */
   private async _assertCanReadOne(
     user: AuthUser,
@@ -338,16 +276,6 @@ export class DelegationsService {
     });
   }
 
-  /**
-   * Loads a delegation by id or throws 404. Shared by the verifier transitions
-   * so the not-found message stays consistent with the rest of the surface.
-   */
-  private async _requireDelegation(id: string): Promise<DelegationRow> {
-    const row = await this.delegations.findById(id);
-    if (!row) throw new NotFoundException('Delegacja nie znaleziona');
-    return row;
-  }
-
   private async _requireCarrierProfile(
     user: AuthUser,
   ): Promise<{ id: string }> {
@@ -423,17 +351,21 @@ export class DelegationsService {
     if (user.role === 'admin' || user.role === 'opiekun') {
       return rest;
     }
-    // Eksport + weryfikator (Phase 7) — all-access by carrier/vehicle/owner
-    // (no ownership scope), but with an ACTIVE-BOARD status floor by default.
-    // This is the ONLY place the `statusIn` allow-list is injected, so the
-    // restriction cannot leak to any other role's list:
+    // Eksport (Phase 7) — all-access by carrier/vehicle/owner (no ownership
+    // scope), but with an ACTIVE-BOARD status floor by default. This is the
+    // ONLY place the `statusIn` allow-list is injected, so the restriction
+    // cannot leak to any other role's list:
     //   - `includeHistory` OFF (default) and no explicit `status` → restrict to
     //     `{zgloszony, w_trasie}` via `statusIn`.
     //   - `includeHistory` ON → widen to all statuses (no `statusIn`).
     //   - an explicit `status` filter ALWAYS narrows further (the repo prefers
     //     `status` over `statusIn`), so e.g. `status=zjechal` still works even
     //     with history off.
-    if (user.role === 'eksport' || user.role === 'weryfikator') {
+    // `weryfikator` was REMOVED from this branch in the Phase 7 rework
+    // (2026-06-10 #2) — it no longer sees delegations at all (it falls through
+    // to the final `ForbiddenException` and is also blocked at the controller
+    // `@Roles`). The eksport behaviour below is unchanged.
+    if (user.role === 'eksport') {
       if (includeHistory || rest.status) {
         return rest;
       }

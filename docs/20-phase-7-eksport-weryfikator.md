@@ -13,11 +13,54 @@
 
 ---
 
+## 0. ⚠️ REWORK (2026-06-10 #2) — Weryfikator работает с МАШИНАМИ, не с выездами
+
+> **Это актуальная спека для `weryfikator`. Всё, что ниже про «weryfikator + delegacje», — superseded** (оставлено как история). `eksport` — без изменений, остаётся на выездах.
+
+Заказчик уточнил после сбора инфы: **`weryfikator` не видит выезды (delegacje) вообще.** Он получает **список всех машин** и ежедневно проставляет операционный статус каждой: «в трассе» / «съехал». Фактический выезд машины определяется **внешним сервисом + людьми вне приложения**; связи `delegation ↔ vehicle` нет и не нужно.
+
+### Решения (AskUserQuestion, 2026-06-10)
+1. **Хранение — отдельная таблица-история** (append-only). Каждая отметка = новая строка. Текущий статус = последняя строка за сегодня. Поле `source` (`manual|gps`) — задел под внешний GPS-сервис. (НЕ колонка на `vehicles`, НЕ 1:1-таблица.)
+2. **Старый delegation-поток у weryfikator убираем.** Эндпоинты `POST /delegations/:id/in-transit` + `/returned`, delegation state-machine, схемы `MarkInTransit/MarkReturned`, страница `weryfikator/delegations` и её хуки/диалоги — **удаляются**. `eksport` остаётся на выездах. `vehicle.lastDroveAt` теперь обновляется при отметке «съехал» у машины.
+3. **Статусы машины:** enum `w_trasie | zjechal` + производный `nieznany` («не проверено сегодня» = нет записи за сегодня; в enum НЕ хранится).
+
+### Модель данных (db-agent)
+- Новый enum `VehicleRouteStatus { w_trasie, zjechal }` и `VehicleStatusSource { manual, gps }`.
+- Новая таблица `vehicle_route_statuses` (`@@map`), model `VehicleRouteStatus` (или близкое имя):
+  - `id` (uuid), `vehicleId` (FK→Vehicle, `onDelete: Cascade`), `status` (`VehicleRouteStatus`), `source` (`VehicleStatusSource @default(manual)`), `notedById` (FK→User, **nullable** — gps без юзера), `notedAt` (`DateTime @default(now())`), `notes` (`String?`), `createdAt`.
+  - Индексы: `@@index([vehicleId, notedAt])` (latest-per-vehicle), `@@index([notedAt])` (доска за день).
+  - На `Vehicle` — обратная связь `routeStatuses VehicleRouteStatus[]`. **Колонку статуса на `Vehicle` НЕ добавляем** (история — единственный источник). `lastDroveAt` остаётся.
+- «Текущий статус на сегодня» = последняя по `notedAt` запись машины с `notedAt::date = сегодня`; иначе `nieznany`.
+
+### Backend (api-agent)
+- **Удалить** delegation `in-transit`/`returned` (controller + service + state-machine + shared `Mark*`-схемы); убрать `weryfikator` из `@Roles` и `_scopeListFilters` у delegations. **Eksport-ветку и `includeHistory` оставить.** `DelegationStatus` enum НЕ трогаем (значения `w_trasie/zjechal` просто перестанут проставляться через приложение — eksport-вью продолжит работать).
+- **Список машин для weryfikator:** все активные машины (`active`, `!deletedAt`) с `carrier`, `planner` и текущим статусом (на сегодня). Роли `weryfikator | admin`. Расширить существующий vehicles-list или дать отдельный endpoint.
+- **`POST /vehicles/:id/route-status`** — body `{ status: w_trasie|zjechal, notes? }`, роли `weryfikator | admin`, `@Audit('vehicle.setRouteStatus')`. Аппендит строку (`source=manual`, `notedById=caller`, `notedAt=now`); если `status=zjechal` → **в той же транзакции** `vehicle.lastDroveAt = notedAt` (date).
+- **История машины:** `GET /vehicles/:id/route-status` — список записей (для модалки истории).
+- shared: `SetVehicleRouteStatusSchema` (Zod), типы, enum-ы.
+
+### Frontend (web-agent)
+- **Удалить** `weryfikator/delegations` (page + `WeryfikatorDelegationsView` + `WeryfikatorDelegationsTable` + `DelegationStatusActionDialog`); убрать `markInTransit/markReturned` из `lib/api/delegations.ts` и соответствующие хуки.
+- **Новая страница `app/(weryfikator)/weryfikator/vehicles/page.tsx`** — таблица всех машин:
+  - Колонки: **номер** (`plateNumber` + `sideNumber`) / **перевозчик** (`carrier`) / **planista** (`planner`) / **статус** (`StatusBadge`: в трассе / съехал / не проверено) / кто+когда отметил / **действие**. **Без водителя.**
+  - Действие: кнопки «В трассе» / «Съехал» → `POST /vehicles/:id/route-status`. Можно переотмечать. История по машине — модалка/expand.
+  - Фильтр по статусу + (опц.) поиск по номеру/перевозчику.
+- Нав: лендинг weryfikator → редирект на `/weryfikator/vehicles`; обновить `ROLE_LANDING.weryfikator`.
+- i18n: переписать `weryfikator.*` под доску машин.
+
+### Что НЕ трогаем
+- **Eksport** — read-only выезды, без изменений.
+- **`DelegationStatus` enum** и **cancel** (carrier-only) — без изменений.
+
+---
+
 ## 1. Роли — что они делают (по легаси)
 
 Источники: [`03-roles.md` § Специальные роли](03-roles.md#специальные-роли) + `Code.gs`.
 
-### `weryfikator` — верификатор выездов (delegacje)
+### `weryfikator` — верификатор выездов (delegacje) — ~~SUPERSEDED, см. § 0~~
+> ⚠️ **Этот блок устарел** (rework 2026-06-10 #2): weryfikator больше НЕ работает с выездами, а с машинами. Актуальная спека — в § 0. Ниже — история.
+
 Управляет жизненным циклом выезда. По легаси (`Code.gs`):
 - **`markDelegacjaInTransit`** (`Code.gs:4071`) — `zgloszony → w_trasie`. Права: `weryfikator | admin`.
 - **`markDelegacjaReturned`** (`Code.gs:4100`) — `w_trasie → zjechal`. Требует **фактическую дату зьезда** (`dataZjazduRzeczywista`), и **обновляет `AUTA.OstatnioJezdzilo`** = `Vehicle.lastDroveAt`. Права: `weryfikator | admin`.

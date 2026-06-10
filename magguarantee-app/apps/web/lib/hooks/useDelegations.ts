@@ -12,7 +12,6 @@ import type {
   CancelDelegationDto,
   DelegationDto,
   DelegationFilters,
-  MarkReturnedDto,
   SubmitDelegationDto,
 } from '@magguarantee/shared';
 
@@ -21,8 +20,6 @@ import {
   getDelegation,
   getDelegationEligibility,
   listDelegations,
-  markInTransit,
-  markReturned,
   submitDelegation,
 } from '@/lib/api/delegations';
 
@@ -94,43 +91,7 @@ export function useCancelDelegation(
   });
 }
 
-/**
- * Phase 7 — `weryfikator | admin` flips `zgloszony → w_trasie`. Empty body.
- * Invalidates the delegations cache on success so the row's status badge +
- * available action update without a manual refetch.
- */
-export function useMarkDelegationInTransit(
-  opts?: UseMutationOptions<DelegationDto, Error, { id: string }>,
-) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id }) => markInTransit(id),
-    ...opts,
-    onSuccess: (...args) => {
-      qc.invalidateQueries({ queryKey: DELEGATIONS_KEY });
-      opts?.onSuccess?.(...args);
-    },
-  });
-}
-
-/**
- * Phase 7 — `weryfikator | admin` flips `w_trasie → zjechal` with the
- * date-only `actualReturnAt`. Invalidates the delegations cache on success.
- */
-export function useMarkDelegationReturned(
-  opts?: UseMutationOptions<
-    DelegationDto,
-    Error,
-    { id: string; body: MarkReturnedDto }
-  >,
-) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, body }) => markReturned(id, body),
-    ...opts,
-    onSuccess: (...args) => {
-      qc.invalidateQueries({ queryKey: DELEGATIONS_KEY });
-      opts?.onSuccess?.(...args);
-    },
-  });
-}
+// NOTE (Phase 7 rework 2026-06-10 #2): `useMarkDelegationInTransit` /
+// `useMarkDelegationReturned` were removed. The weryfikator no longer advances
+// delegation status; it stamps a per-vehicle route-status instead — see
+// `lib/hooks/useVehicleRouteStatus.ts` (`useSetVehicleRouteStatus`).

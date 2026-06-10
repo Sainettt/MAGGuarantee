@@ -13,16 +13,12 @@ import {
 import {
   CancelDelegationSchema,
   DelegationFiltersSchema,
-  MarkInTransitSchema,
-  MarkReturnedSchema,
   SubmitDelegationSchema,
   UuidSchema,
   type CancelDelegationDto,
   type DelegationDto,
   type DelegationEligibilityResponse,
   type DelegationFilters,
-  type MarkInTransitDto,
-  type MarkReturnedDto,
   type SubmitDelegationDto,
 } from '@magguarantee/shared';
 
@@ -49,11 +45,13 @@ import { DelegationsService } from './delegations.service';
  *  - GET /delegations/:id (single, owner-scoped for carriers)
  *  - POST /delegations/:id/cancel (carrier cancels their `zgloszony`)
  *
- * Phase 7 adds the weryfikator status lifecycle (admin may also drive it):
- *  - POST /delegations/:id/in-transit (weryfikator | admin) — zgloszony→w_trasie
- *  - POST /delegations/:id/returned   (weryfikator | admin) — w_trasie→zjechal
- * The verifier has NO cancel authority (owner decision 2026-06-10): cancel
- * stays carrier-only below, unchanged.
+ * Phase 7 rework (2026-06-10 #2): the weryfikator no longer touches
+ * delegations at all — that role now manages per-VEHICLE route status (see the
+ * vehicles module: `POST /vehicles/:id/route-status`). The former
+ * in-transit/returned delegation handlers were removed and `weryfikator` was
+ * dropped from every `@Roles(...)` here. `eksport` stays — it keeps its
+ * read-only outings board (active-status floor + `includeHistory` toggle).
+ * Cancel remains carrier-only, unchanged.
  *
  * `pracownik` is intentionally NOT in the role list — per
  * docs/03-roles.md#pracownik that role is a narrow "Opiekun wniosków"
@@ -67,15 +65,7 @@ export class DelegationsController {
   constructor(private readonly delegations: DelegationsService) {}
 
   @Get()
-  @Roles(
-    'admin',
-    'opiekun',
-    'planista',
-    'dyspozytor',
-    'przewoznik',
-    'eksport',
-    'weryfikator',
-  )
+  @Roles('admin', 'opiekun', 'planista', 'dyspozytor', 'przewoznik', 'eksport')
   async list(
     @CurrentUser() user: AuthUser,
     @Query(new ZodValidationPipe(DelegationFiltersSchema))
@@ -100,15 +90,7 @@ export class DelegationsController {
   }
 
   @Get(':id')
-  @Roles(
-    'admin',
-    'opiekun',
-    'planista',
-    'dyspozytor',
-    'przewoznik',
-    'eksport',
-    'weryfikator',
-  )
+  @Roles('admin', 'opiekun', 'planista', 'dyspozytor', 'przewoznik', 'eksport')
   @CarrierOwns('id', 'param', 'delegationId')
   async getOne(
     @CurrentUser() user: AuthUser,
@@ -150,49 +132,5 @@ export class DelegationsController {
     dto: CancelDelegationDto,
   ): Promise<DelegationDto> {
     return this.delegations.cancel(user, id, dto);
-  }
-
-  /**
-   * `zgloszony → w_trasie`. Verifier/admin only. Empty body (`.strict({})`).
-   * The `@Audit` interceptor opens the transaction the service's write +
-   * audit row commit inside; the state machine rejects a wrong source status
-   * with 409 before any write. No `CarrierOwnershipGuard` applies — the
-   * verifier is an all-access role, the guard short-circuits for non-carriers.
-   */
-  @Post(':id/in-transit')
-  @HttpCode(HttpStatus.OK)
-  @Roles('weryfikator', 'admin')
-  @Audit({
-    action: 'delegation.markInTransit',
-    targetType: 'Delegation',
-    targetKey: (req) => req.params?.id,
-  })
-  async markInTransit(
-    @CurrentUser() user: AuthUser,
-    @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
-    @Body(new ZodValidationPipe(MarkInTransitSchema)) _dto: MarkInTransitDto,
-  ): Promise<DelegationDto> {
-    return this.delegations.markInTransit(user, id);
-  }
-
-  /**
-   * `w_trasie → zjechal`. Verifier/admin only. Body `{ actualReturnAt }`
-   * (date-only, same convention as `plannedReturnAt`). Atomically mirrors
-   * `actualReturnAt` into `Vehicle.lastDroveAt` (key Phase 7 deliverable).
-   */
-  @Post(':id/returned')
-  @HttpCode(HttpStatus.OK)
-  @Roles('weryfikator', 'admin')
-  @Audit({
-    action: 'delegation.markReturned',
-    targetType: 'Delegation',
-    targetKey: (req) => req.params?.id,
-  })
-  async markReturned(
-    @CurrentUser() user: AuthUser,
-    @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
-    @Body(new ZodValidationPipe(MarkReturnedSchema)) dto: MarkReturnedDto,
-  ): Promise<DelegationDto> {
-    return this.delegations.markReturned(user, id, dto);
   }
 }

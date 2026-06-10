@@ -22,15 +22,19 @@ import type { z } from 'zod';
 import {
   CreateVehicleSchema,
   DeleteWithReasonSchema,
+  SetVehicleRouteStatusSchema,
   UpdateVehicleSchema,
   UuidSchema,
   VehicleFiltersSchema,
   type CreateVehicleDto,
   type DeleteWithReasonDto,
+  type SetVehicleRouteStatusDto,
   type UpdateVehicleDto,
   type VehicleAttachmentDto,
   type VehicleDto,
   type VehicleFilters,
+  type VehicleRouteBoardItemDto,
+  type VehicleRouteStatusLogDto,
 } from '@magguarantee/shared';
 
 import { Audit } from '../../common/audit';
@@ -57,6 +61,7 @@ import {
   MAX_ATTACHMENT_BYTES,
   MAX_FILES_PER_FIELD,
 } from './vehicle-attachments.constants';
+import { VehicleRouteStatusService } from './vehicle-route-status.service';
 import { VehiclesService } from './vehicles.service';
 
 /**
@@ -91,7 +96,28 @@ const MULTIPART_OPTIONS = {
 @Controller('vehicles')
 @UseGuards(RolesGuard, OpiekunOwnershipGuard, CarrierOwnershipGuard)
 export class VehiclesController {
-  constructor(private readonly vehicles: VehiclesService) {}
+  constructor(
+    private readonly vehicles: VehiclesService,
+    private readonly routeStatus: VehicleRouteStatusService,
+  ) {}
+
+  /**
+   * Weryfikator route board (Phase 7) — ALL active vehicles with today's
+   * derived route status. Declared BEFORE `GET /:id` so the literal
+   * `route-board` segment is matched first (Express matches in declaration
+   * order). A dedicated endpoint — NOT an overload of the ownership-scoped
+   * `GET /vehicles` — so the board is never narrowed by carrier/opiekun scope.
+   *
+   * Guards: the class-level `OpiekunOwnershipGuard` / `CarrierOwnershipGuard`
+   * are decorator-driven (no `@OpiekunOwns` / `@CarrierOwns` here → they
+   * short-circuit `true`), and both also pass through `weryfikator` / `admin`
+   * by role anyway. `RolesGuard` does the actual gate.
+   */
+  @Get('route-board')
+  @Roles('weryfikator', 'admin')
+  async routeBoard(): Promise<VehicleRouteBoardItemDto[]> {
+    return this.routeStatus.getBoard();
+  }
 
   @Get()
   @Roles('admin', 'opiekun', 'planista', 'dyspozytor', 'przewoznik')
@@ -301,6 +327,41 @@ export class VehiclesController {
     await this.vehicles.deleteAttachment(id, attachmentId);
   }
 
+  // ── Route status (Phase 7 weryfikator board) ─────────────
+
+  /**
+   * Appends a manual route-status row for a vehicle («w trasie» / «zjechał»).
+   * Weryfikator/admin only. Re-stamping the same status is allowed — a new row
+   * is appended (no 409). When `status='zjechal'` the vehicle's `lastDroveAt`
+   * is re-touched in the same `@Audit`-opened transaction (ambient `prisma.tx`
+   * — append + mirror + audit row commit atomically). No ownership decorator:
+   * the class-level ownership guards short-circuit for weryfikator/admin.
+   */
+  @Post(':id/route-status')
+  @HttpCode(HttpStatus.CREATED)
+  @Roles('weryfikator', 'admin')
+  @Audit({
+    action: 'vehicle.setRouteStatus',
+    targetType: 'Vehicle',
+    targetKey: (req) => req.params?.id,
+  })
+  async setRouteStatus(
+    @CurrentUser() user: AuthUser,
+    @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
+    @Body(new ZodValidationPipe(SetVehicleRouteStatusSchema))
+    dto: SetVehicleRouteStatusDto,
+  ): Promise<VehicleRouteStatusLogDto> {
+    return this.routeStatus.setStatus(user, id, dto);
+  }
+
+  /** Route-status history of one vehicle (newest-first). Weryfikator/admin. */
+  @Get(':id/route-status')
+  @Roles('weryfikator', 'admin')
+  async getRouteStatus(
+    @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
+  ): Promise<VehicleRouteStatusLogDto[]> {
+    return this.routeStatus.getHistory(id);
+  }
 }
 
 /**

@@ -1483,49 +1483,54 @@
     }
   },
   "weryfikator": {
-    "delegations": {
-      "title": "Trips",
-      "subtitle": "Fleet trip status verification",
+    "vehicles": {
+      "title": "Vehicles",
+      "subtitle": "Daily fleet route status — mark which vehicles are on the road and which have returned.",
       "filters": {
         "status": "Status",
         "allStatuses": "All statuses",
-        "includeHistory": "Show history (returned / cancelled)"
+        "search": "Search",
+        "searchPlaceholder": "Plate or carrier…"
       },
-      "table": {
-        "emptyTitle": "No trips",
-        "emptyMessage": "No trips match the criteria.",
-        "columns": {
-          "vehicle": "Vehicle",
-          "driver": "Driver",
-          "route": "Route",
-          "period": "Period",
-          "status": "Status",
-          "actions": "Actions"
-        }
-      }
-    },
-    "actions": {
-      "inTransit": "Mark in transit",
-      "returned": "Mark returned",
-      "inTransitToast": "Marked as in transit",
-      "returnedToast": "Marked as returned",
-      "errorToast": "Could not change the trip status.",
-      "dialog": {
-        "dismiss": "Cancel",
-        "inTransit": {
-          "title": "Mark as in transit",
-          "description": "Delegation {plate} will be marked as in transit.",
-          "confirm": "Mark in transit"
+      "columns": {
+        "vehicle": "Plate",
+        "carrier": "Carrier",
+        "planista": "Planner",
+        "status": "Status",
+        "noted": "Noted",
+        "actions": "Actions"
+      },
+      "status": {
+        "w_trasie": "On the road",
+        "zjechal": "Returned",
+        "nieznany": "Not checked"
+      },
+      "actions": {
+        "w_trasie": "On the road",
+        "zjechal": "Returned"
+      },
+      "sideLabel": "side {side}",
+      "progress": "{checked} of {total} checked today",
+      "emptyTitle": "No active vehicles",
+      "emptyMessage": "There are no active vehicles to check.",
+      "toast": {
+        "success": "Marked: {status}",
+        "error": "Could not save the vehicle status."
+      },
+      "a11y": {
+        "showHistory": "Show status history: {plate}"
+      },
+      "history": {
+        "title": "Status history — {plate}",
+        "sideSuffix": " · side {side}",
+        "noCarrier": "No carrier",
+        "gpsActor": "GPS",
+        "source": {
+          "manual": "manual",
+          "gps": "GPS"
         },
-        "returned": {
-          "title": "Mark as returned",
-          "description": "Enter the actual return date for delegation {plate}.",
-          "dateLabel": "Return date",
-          "confirm": "Mark returned",
-          "errorRequired": "Enter the return date",
-          "errorFuture": "The return date cannot be in the future",
-          "errorBeforeDeparture": "The return date cannot be earlier than the departure date"
-        }
+        "emptyTitle": "No history",
+        "emptyMessage": "No route-status history for this vehicle yet."
       }
     }
   }

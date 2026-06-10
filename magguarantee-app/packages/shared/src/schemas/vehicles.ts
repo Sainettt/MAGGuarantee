@@ -190,6 +190,116 @@ export const VehicleFiltersSchema = z
   .strict();
 export type VehicleFilters = z.infer<typeof VehicleFiltersSchema>;
 
+// ─── Route status (Phase 7 weryfikator board) ────────────
+//
+// The `weryfikator` role stamps a per-vehicle operational route status daily
+// («w trasie» / «zjechał») as an append-only history
+// (`VehicleRouteStatusLog`). The derived `nieznany` («not checked today»)
+// value is computed at read time for the board and is NOT part of the POST
+// enum below.
+//
+// The canonical source of truth for the stored statuses is the DB enum
+// `VehicleRouteStatus { w_trasie, zjechal }` exported from
+// `@magguarantee/database`. The `@magguarantee/shared` package is intentionally
+// dependency-free (zod only) and cannot import the database package, so the
+// values are mirrored here as a Zod enum — the same convention used for
+// `DelegationStatusSchema` / `VehicleAttachmentCategorySchema`. Keep these two
+// lists in lockstep.
+
+/**
+ * Stored route-status values a weryfikator/admin may set (mirror of the Prisma
+ * `VehicleRouteStatus` enum). `nieznany` is a derived board value, not a
+ * settable status, so it is deliberately absent here.
+ */
+export const VehicleRouteStatusSchema = z.enum(['w_trasie', 'zjechal']);
+export type VehicleRouteStatusValue = z.infer<typeof VehicleRouteStatusSchema>;
+
+/**
+ * Origin of a route-status row (mirror of the Prisma `VehicleStatusSource`
+ * enum). `manual` = stamped by a weryfikator/admin; `gps` = future external
+ * tracking service (no associated user). The POST endpoint always records
+ * `manual`; `source` appears only on the read DTOs.
+ */
+export const VehicleStatusSourceSchema = z.enum(['manual', 'gps']);
+export type VehicleStatusSourceValue = z.infer<typeof VehicleStatusSourceSchema>;
+
+/**
+ * Derived board status for `GET /vehicles/route-board` — the stored statuses
+ * plus `nieznany` («not checked today»). `nieznany` is computed at read time
+ * (no `VehicleRouteStatusLog` row for the vehicle dated today) and is NOT
+ * persisted.
+ */
+export const VehicleBoardStatusSchema = z.enum([
+  'w_trasie',
+  'zjechal',
+  'nieznany',
+]);
+export type VehicleBoardStatus = z.infer<typeof VehicleBoardStatusSchema>;
+
+/**
+ * POST /vehicles/:id/route-status — body for a weryfikator/admin to append a
+ * route-status row. `status` is required (`w_trasie` | `zjechal`); `notes` is
+ * an optional free-form annotation. `.strict()` rejects stray fields so a typo
+ * surfaces as 422. The server records `source='manual'`, `notedById=caller`,
+ * `notedAt=now`; when `status='zjechal'` it also mirrors `notedAt` into
+ * `Vehicle.lastDroveAt` in the same transaction.
+ */
+export const SetVehicleRouteStatusSchema = z
+  .object({
+    status: VehicleRouteStatusSchema,
+    notes: emptyStringToUndefined(z.string().max(2_000).optional()),
+  })
+  .strict();
+export type SetVehicleRouteStatusDto = z.infer<
+  typeof SetVehicleRouteStatusSchema
+>;
+
+// ─── Route status — response DTOs ────────────────────────
+
+const RouteStatusNotedBySchema = z
+  .object({
+    id: UuidSchema,
+    name: z.string().nullable(),
+  })
+  .nullable();
+
+/**
+ * One row of a vehicle's route-status history — `GET /vehicles/:id/route-status`.
+ * Newest-first. `notedBy` is null for GPS-sourced rows (no user attribution).
+ */
+export const VehicleRouteStatusLogDtoSchema = z.object({
+  id: UuidSchema,
+  vehicleId: UuidSchema,
+  status: VehicleRouteStatusSchema,
+  source: VehicleStatusSourceSchema,
+  notedBy: RouteStatusNotedBySchema,
+  notedAt: IsoDateTimeSchema,
+  notes: z.string().nullable(),
+});
+export type VehicleRouteStatusLogDto = z.infer<
+  typeof VehicleRouteStatusLogDtoSchema
+>;
+
+/**
+ * One row of the weryfikator route board — `GET /vehicles/route-board`. All
+ * active vehicles, each with today's derived `currentStatus` (or `nieznany`)
+ * and the who/when of the latest today-row. `notedBy` / `notedAt` are null
+ * when `currentStatus === 'nieznany'`.
+ */
+export const VehicleRouteBoardItemDtoSchema = z.object({
+  id: UuidSchema,
+  plateNumber: z.string(),
+  sideNumber: z.string().nullable(),
+  carrier: z.string().nullable(),
+  planner: z.string().nullable(),
+  currentStatus: VehicleBoardStatusSchema,
+  notedBy: RouteStatusNotedBySchema,
+  notedAt: IsoDateTimeSchema.nullable(),
+});
+export type VehicleRouteBoardItemDto = z.infer<
+  typeof VehicleRouteBoardItemDtoSchema
+>;
+
 // ─── Attachments ─────────────────────────────────────────
 
 /**
