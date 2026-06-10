@@ -78,7 +78,12 @@ export function VehicleRouteBoardView() {
     return allRows.filter((v) => {
       if (statusFilter && v.currentStatus !== statusFilter) return false;
       if (!q) return true;
-      const haystack = [v.plateNumber, v.sideNumber, v.opiekun?.name]
+      const haystack = [
+        v.plateNumber,
+        v.sideNumber,
+        v.carrier?.name,
+        v.opiekun?.name,
+      ]
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
@@ -98,14 +103,28 @@ export function VehicleRouteBoardView() {
         header: t('columns.vehicle'),
         width: 'tight',
         cell: (row) => (
-          <div className="flex flex-col">
-            <span className="font-medium tabular-nums">{row.plateNumber}</span>
-            {row.sideNumber && (
-              <span className="text-xs text-text-sub">
-                {t('sideLabel', { side: row.sideNumber })}
-              </span>
-            )}
-          </div>
+          <span className="font-medium tabular-nums">{row.plateNumber}</span>
+        ),
+      },
+      {
+        id: 'sideNumber',
+        header: t('columns.sideNumber'),
+        width: 'tight',
+        cell: (row) => (
+          <span className="tabular-nums text-text-sub">
+            {row.sideNumber ?? '—'}
+          </span>
+        ),
+      },
+      {
+        id: 'carrier',
+        header: t('columns.carrier'),
+        width: 'flex',
+        truncate: 'ellipsis',
+        cell: (row) => (
+          <span title={row.carrier?.name ?? undefined}>
+            {row.carrier?.name ?? '—'}
+          </span>
         ),
       },
       {

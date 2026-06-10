@@ -286,16 +286,26 @@ export type VehicleRouteStatusLogDto = z.infer<
  * and the who/when of the latest today-row. `notedBy` / `notedAt` are null
  * when `currentStatus === 'nieznany'`.
  *
- * `opiekun` is the carrier's opiekun (`vehicle.carrier.opiekun`, a `User`) —
- * the board displays the opiekun, NOT the carrier (owner correction
- * 2026-06-10, see docs/20-phase-7-eksport-weryfikator.md § 0). The relation
- * `Carrier.opiekunId → User` is NOT NULL, so every active vehicle resolves an
- * opiekun; `name` is nullable only because `User.name` itself is.
+ * The board carries BOTH `carrier` and `opiekun` (owner correction
+ * 2026-06-10 #3, see docs/20-phase-7-eksport-weryfikator.md § 0 — the carrier
+ * column was re-added alongside the opiekun, not either/or):
+ *  - `carrier` — the carrier itself (`vehicle.carrier`, `{ id, name }`). `id`
+ *    is `Carrier.id`; `name` is the carrier's display name (`carrier.user.name`),
+ *    nullable only because `User.name` itself is.
+ *  - `opiekun` — the carrier's opiekun (`vehicle.carrier.opiekun`, a `User`).
+ *    The relation `Carrier.opiekunId → User` is NOT NULL, so every active
+ *    vehicle resolves an opiekun; `name` is nullable only because `User.name` is.
  */
 export const VehicleRouteBoardItemDtoSchema = z.object({
   id: UuidSchema,
   plateNumber: z.string(),
   sideNumber: z.string().nullable(),
+  carrier: z
+    .object({
+      id: UuidSchema,
+      name: z.string().nullable(),
+    })
+    .nullable(),
   opiekun: z
     .object({
       id: UuidSchema,

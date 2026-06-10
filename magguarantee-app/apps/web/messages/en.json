@@ -1490,10 +1490,12 @@
         "status": "Status",
         "allStatuses": "All statuses",
         "search": "Search",
-        "searchPlaceholder": "Plate or account manager…"
+        "searchPlaceholder": "Plate, side no., carrier or account manager…"
       },
       "columns": {
         "vehicle": "Plate",
+        "sideNumber": "Side no.",
+        "carrier": "Carrier",
         "opiekun": "Account manager",
         "planista": "Planner",
         "status": "Status",

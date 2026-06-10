@@ -86,10 +86,16 @@ export interface VehicleBoardRow {
   plateNumber: string;
   sideNumber: string | null;
   /**
-   * The carrier's opiekun (`Vehicle.carrier.opiekun`, a `User`). The board
-   * shows the opiekun, NOT the carrier (owner correction 2026-06-10). The
-   * relation `Carrier.opiekunId → User` is NOT NULL, so this is effectively
-   * always present; `name` is nullable only because `User.name` is.
+   * The carrier itself (`Vehicle.carrier`). `id` is `Carrier.id`; `name` is
+   * the carrier's display name (`carrier.user.name`), nullable only because
+   * `User.name` is. Re-added alongside `opiekun` (owner correction 2026-06-10
+   * #3 — the board shows BOTH, not either/or).
+   */
+  carrier: { id: string; name: string | null } | null;
+  /**
+   * The carrier's opiekun (`Vehicle.carrier.opiekun`, a `User`). The relation
+   * `Carrier.opiekunId → User` is NOT NULL, so this is effectively always
+   * present; `name` is nullable only because `User.name` is.
    */
   opiekun: { id: string; name: string | null } | null;
   plannerName: string | null;
@@ -177,11 +183,13 @@ export class VehiclesRepository {
    * selected (no attachments / rates / GPS device) — keeps the board query
    * cheap and unrelated to the heavyweight `list()` include shape.
    *
-   * The board shows the carrier's OPIEKUN (`carrier.opiekun`, a `User`), not
-   * the carrier itself (owner correction 2026-06-10 — see
-   * docs/20-phase-7-eksport-weryfikator.md § 0). The `Carrier.opiekunId → User`
+   * The board shows BOTH the carrier itself (`carrier`, `{ id, name }` where
+   * `name` is `carrier.user.name`) AND the carrier's OPIEKUN (`carrier.opiekun`,
+   * a `User`) — owner correction 2026-06-10 #3 re-added the carrier column
+   * alongside the opiekun (not either/or), see
+   * docs/20-phase-7-eksport-weryfikator.md § 0. The `Carrier.opiekunId → User`
    * relation is NOT NULL, so every active vehicle resolves an opiekun.
-   * `planner` is projected to its display NAME; `opiekun` carries `{ id, name }`.
+   * `planner` is projected to its display NAME.
    */
   async listActiveForBoard(): Promise<VehicleBoardRow[]> {
     const rows = await this.prisma.tx.vehicle.findMany({
@@ -191,7 +199,11 @@ export class VehiclesRepository {
         plateNumber: true,
         sideNumber: true,
         carrier: {
-          select: { opiekun: { select: { id: true, name: true } } },
+          select: {
+            id: true,
+            user: { select: { name: true } },
+            opiekun: { select: { id: true, name: true } },
+          },
         },
         planner: { select: { name: true } },
       },
@@ -201,6 +213,9 @@ export class VehiclesRepository {
       id: r.id,
       plateNumber: r.plateNumber,
       sideNumber: r.sideNumber,
+      carrier: r.carrier
+        ? { id: r.carrier.id, name: r.carrier.user?.name ?? null }
+        : null,
       opiekun: r.carrier?.opiekun
         ? { id: r.carrier.opiekun.id, name: r.carrier.opiekun.name ?? null }
         : null,
