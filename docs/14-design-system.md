@@ -3991,3 +3991,82 @@ Documented deviations from the literal §6.5 text, each within brand/token const
 3. **Decyzja inputs are gated behind `edit` mode.** In `view` the decyzja block renders a muted "pick edit to decide" hint instead of the live `<Select>` — a decision is an edit, so it belongs to `edit` mode. The select + conditional fields appear the instant «Edycja» is pressed (no re-mount). This is consistent with §6.5.6's "leaf controls flip static⇄input" rule applied to the decyzja sub-tree. **On enter-edit the select shows the placeholder «wybierz decyzję» (no pre-selected `targetStatus`)** and no conditional fields render until a decision is picked; decision required-field validation fires only on «Zapisz» (see §6.5.5 "No pre-selected decision").
 4. **Acceptance gated by recalc result.** Acceptance options are disabled (and any prior acceptance selection cleared) whenever the live recalc yields `kmDifference <= 0` (guarantee met ⇒ no payout); only rejection options remain, with the hint «Gwarancja wyjeżdżona — wniosek można tylko odrzucić». UI guard only; backend independently hard-rejects acceptance with `422` (see §6.5.5 "Acceptance gate by recalc result").
 
+## Phase 7 — Eksport / Weryfikator delegation panels
+
+> **Scope.** The two single-purpose roles' `/delegations` screens. Spec: [`20-phase-7-eksport-weryfikator.md`](20-phase-7-eksport-weryfikator.md) (owner decisions §4). `eksport` = read-only витрина; `weryfikator` = read-only table **plus exactly two per-row status actions**. This section covers only (1) the weryfikator action-UI and (2) the nav recommendation for both roles. The table/filter/history-toggle layout is **not re-derived here** — both pages reuse the Phase 6.3 read-only role-panel pattern (§"Phase 6 — Planista / Dyspozytor read-only panels") inside `RoleShell`: the 4.4 container strip, the read-only info banner (eksport only), a status filter + «historia» toggle, and a `<DataTable>` with the Phase 6.3 Delegacje column set + a static `<StatusBadge>`. The eksport page is that pattern verbatim, read-only, full stop.
+>
+> **No new tokens** (Phase 4.4 surface policy holds). Everything below composes existing primitives: `<Dialog>` (+ `DialogHeader`/`DialogDescription`/`DialogFooter`), `<Input type="date">`, `<FormField>`, `<Button>`, `<StatusBadge>`. Zero changes to `tailwind.config.ts` / `globals.css`.
+
+### 7.1 Weryfikator per-row status actions (confirm dialogs) — exactly two, **no «Anuluj»**
+
+The weryfikator Delegacje table gets **one extra trailing column** (`actions`) on top of the read-only Phase 6.3 column set. There are **EXACTLY TWO** actions, both driven off the row status. There is **NO cancel («Anuluj») button anywhere on this page** — owner decision (2026-06-10): weryfikator has no cancel authority; cancel stays carrier-only and is not represented in this UI. Do not render a cancel button, a kebab "anuluj" item, or any anulowanie affordance here.
+
+**Status → action mapping (row-level):**
+
+| Row `status` | Action button (PL / EN) | Variant | Dialog | Endpoint |
+|---|---|---|---|---|
+| `zgloszony` | «Oznacz w trasie» / "Mark in transit" | `<Button size="sm">` (brand default) | **plain confirm** (no input) | `POST /delegations/:id/in-transit` |
+| `w_trasie` | «Oznacz zjechał» / "Mark returned" | `<Button size="sm">` (brand default) | **confirm + single date input** (`actualReturnAt`) | `POST /delegations/:id/returned` |
+| `zjechal`, `anulowany` | — (no button) | — | — | — |
+
+Terminal-status rows render **nothing** in the `actions` cell (an em-dash `—` in `text-text-sub` is acceptable to keep the column visually anchored). Each row exposes **at most one** action — the status is a strict state machine, so there is never a choice of two actions on the same row.
+
+**Button placement.** Trailing `actions` column, right-aligned cell (`text-right`), single `<Button size="sm">` per the design system's `h-8` small button (≥32px tall; on the touch breakpoints the `<Button>` primitive already meets the 44px target via its hit-area padding — keep `size="sm"`, do not shrink below it). The button is the brand-red default variant in both cases: status advancement is the page's primary affordance, not a destructive one, so it leans on the brand button rather than a muted/ghost treatment. No icon is required; if one is wanted, `<Truck size={14}/>` for in-transit and `<CheckCircle2 size={14}/>` for returned (Lucide, leading, `mr-1.5`) — optional, keep labels.
+
+**(a) `zgloszony` → «Oznacz w trasie» — plain confirm `<Dialog>` (no input).**
+A bare confirmation, no form fields. Reuse the `<Dialog>` primitive directly (this is simpler than `ConfirmDeleteWithReasonDialog` — there is no input to validate):
+- `DialogTitle` (PL): «Oznacz jako w trasie» / (EN) "Mark as in transit".
+- `DialogDescription` (PL): «Wyjazd {plate} zostanie oznaczony jako w trasie.» / (EN) "Delegation {plate} will be marked as in transit." (interpolate the vehicle plate so the verifier sees exactly which row).
+- `DialogFooter`: `<Button variant="ghost" size="sm">` «Anuluj» (this is the **dialog-dismiss** button — the standard modal "close without acting" control, NOT a delegation-cancel action; it does not call any cancel endpoint) + primary `<Button size="sm">` «Oznacz w trasie» which fires `in-transit`. On success the dialog closes, the table refetches, toast «Oznaczono jako w trasie».
+
+> Naming note for web-agent: the ghost footer button reading «Anuluj» is the universal *dismiss-the-dialog* affordance (same word the rest of the DS uses for "close this modal"). The owner decision "no Anuluj button" refers to the **delegation-cancel business action**, which is genuinely absent here. Do not conflate them, and do not remove the dialog-dismiss button.
+
+**(b) `w_trasie` → «Oznacz zjechał» — confirm `<Dialog>` with one date-only input.**
+Structurally the `ConfirmDeleteWithReasonDialog` pattern (§Phase 4.4 shared confirm dialog) with the textarea swapped for a single date field; RHF + Zod, submit disabled until valid, dialog stays open on error so the date isn't re-typed:
+- `DialogTitle` (PL): «Oznacz jako zjechał» / (EN) "Mark as returned".
+- `DialogDescription` (PL): «Podaj faktyczną datę zjazdu dla wyjazdu {plate}.» / (EN) "Enter the actual return date for delegation {plate}."
+- One `<FormField label="Data zjazdu" required>` wrapping `<Input type="date" className="h-10" autoFocus>` bound to `actualReturnAt`. **Date-only** — match the carrier delegation-create precedent (`plannedReturnAt` is `<Input type="date">`, DB column `@db.Date`); do **not** use `datetime-local`. EN label "Return date".
+- `DialogFooter`: ghost «Anuluj» (dialog-dismiss, as in (a)) + primary «Oznacz zjechał» firing `returned` with `{ actualReturnAt }`. Success → close, refetch, toast «Oznaczono jako zjechał».
+
+**Date-input validation expectation (Zod, in `@magguarantee/shared`):**
+- `actualReturnAt` — **required** (empty string → inline error «Podaj datę zjazdu»). Submit button disabled while invalid (`mode: 'onChange'`, same as the reason-dialog).
+- **date-only** string (`YYYY-MM-DD`), not a timestamp.
+- **Suggested guard (not a hard owner requirement):** reject a **future** date — the verifier records a return that has already happened. Inline message «Data zjazdu nie może być w przyszłości». A lower-bound guard (`actualReturnAt >= departureAt`) is a reasonable additional sanity check if the row's `departureAt` is in scope; treat both as suggestions for the web/api agents to confirm, not locked DS rules. The backend re-validates regardless (never trust the client clock).
+
+Both dialogs follow the established mutation flow: optimistic-free, `await onConfirm()`, close on resolve, keep open + parent toast on reject — identical to `ConfirmDeleteWithReasonDialog`.
+
+### 7.2 Nav recommendation for `eksport` / `weryfikator` (opinionated — implement directly)
+
+**Recommendation: redirect each role's landing route straight to `/delegations`. Delete the `WelcomePanel` stub for both roles.** Full design authority exercised — this is the call, web-agent may implement it directly.
+
+Rationale:
+- Each role has **exactly one destination**. A landing page whose only job is to point at the single real screen is a pointless extra click and an empty surface to maintain. The legacy app effectively dropped these roles straight onto their one list; "like legacy" is satisfied by going directly to the list.
+- `RoleShell` is already sidebar-less, so there is no nav rail to populate — a `WelcomePanel` here is a dead-end card, not a hub. Removing it removes a stub, not a feature.
+- Implementation: the role landing route (`app/(eksport)/eksport/page.tsx`, `app/(weryfikator)/weryfikator/page.tsx`) becomes a server-side `redirect('/eksport/delegations')` / `redirect('/weryfikator/delegations')` (Next.js `redirect()` in the route segment — no flash of an intermediate panel). The real screen lives at `.../delegations/page.tsx`. Keep both pages inside their existing `RoleShell` route group so the header (logo + role badge + theme/lang toggles + logout) is unchanged.
+- Because the role then has a single in-shell screen, **no in-page `<Tabs>` sub-nav is needed** (unlike planista/dyspozytor, which have multiple fleet tabs). The Delegacje table is the whole page. If a second destination is ever added to either role, reintroduce the Phase 6.3 in-page `<Tabs>` bar at that point — not before.
+- Header role-badge label: «Eksport» / «Weryfikator» (already role-driven by the shared `<Header>` — no change). The header's logo/home link should resolve to `/delegations` for these roles so "click the logo" is not a dead loop back through the redirect.
+
+This deviates from the plan's "empty WelcomePanel stub" only to remove a no-op step; it does not change which screens exist or any permission. If the owner prefers to keep a literal welcome landing for consistency with multi-destination roles, that is a one-line revert (restore the `WelcomePanel`), but the recommendation stands: **redirect, no stub.**
+
+### 7.3 Components / shared changes summary (Phase 7)
+
+| Change | Where | Notes |
+|---|---|---|
+| New `<DelegationStatusActionDialog>` (or two small inline dialogs) | `apps/web/components/delegations/` | The two confirm dialogs of §7.1. May be one component switching on a `mode: 'in-transit' \| 'returned'` prop (date field shown only for `returned`), mirroring `ConfirmDeleteWithReasonDialog`'s shape. No new tokens. |
+| `actions` column on the weryfikator Delegacje `<DataTable>` | weryfikator delegations page | Single `<Button size="sm">` per row by status; terminal rows render `—`. **No cancel control.** |
+| Reuse `<Dialog>` / `<Input type="date">` / `<FormField>` / `<Button>` / `<StatusBadge>` / `<DataTable>` | existing | No primitive changes. Read-only Phase 6.3 panel pattern for the table itself. |
+| Role landing routes → `redirect('/.../delegations')`; delete `WelcomePanel` stubs | `app/(eksport)/eksport/page.tsx`, `app/(weryfikator)/weryfikator/page.tsx` | §7.2. |
+| shared Zod: `MarkReturnedSchema` (`{ actualReturnAt: date-only, required, ≤ today suggested }`); `in-transit` needs no body | `@magguarantee/shared` | api-agent owns the contract; DS only specifies the required/date-only/not-future expectation. |
+| i18n | `messages/pl.json`, `en.json` | `weryfikator.actions.{inTransit,returned}`, dialog titles/descriptions/labels, `actualReturnAt` label + validation messages, toasts. |
+| **0** changes to `tailwind.config.ts` / `globals.css` | — | Token policy respected. |
+
+### 7.4 Acceptance checklist (Phase 7 action-UI + nav)
+
+- [ ] **Exactly two actions, no cancel.** `zgloszony` row → «Oznacz w trasie»; `w_trasie` row → «Oznacz zjechał»; `zjechal`/`anulowany` → no button. **No «Anuluj» delegation-cancel control anywhere** (the only «Anuluj» on the page is the dialog-dismiss footer button).
+- [ ] **In-transit confirm = no input.** Plain `<Dialog>` confirm; fires `in-transit`; plate interpolated in the description.
+- [ ] **Returned confirm = one date-only field.** `<Input type="date">` (not `datetime-local`), RHF + Zod, required; submit disabled until valid; future-date guard present (suggested) with an inline message; dialog stays open on error.
+- [ ] **Token policy respected.** Zero `tailwind.config.ts` / `globals.css` changes; no new component tokens; all surfaces existing.
+- [ ] **Nav.** `eksport` and `weryfikator` landing routes `redirect()` to `/delegations`; no `WelcomePanel` stub remains; header logo/home link points at `/delegations` for these roles; no in-page `<Tabs>` (single screen).
+- [ ] **a11y.** Action buttons reach ≥44px touch target via `size="sm"` hit area; dialogs trap focus + close on Escape (from the `<Dialog>` primitive); date input has an associated `<Label>` via `<FormField htmlFor>`; status meaning carried by `<StatusBadge>` text + colour, not colour alone.
+- [ ] **Dark-mode verified.** Both dialogs (`bg-card`), date input (`bg-input`), brand buttons, status badges legible with tokens / `dark:` variants only.
+

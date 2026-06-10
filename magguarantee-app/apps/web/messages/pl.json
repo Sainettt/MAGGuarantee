@@ -1458,5 +1458,75 @@
         }
       }
     }
+  },
+  "eksport": {
+    "delegations": {
+      "title": "Wyjazdy",
+      "subtitle": "Witryna wyjazdów — podgląd tylko do odczytu",
+      "readOnlyBanner": "Widok tylko do odczytu. Zmiany statusu wyjazdu wykonuje weryfikator.",
+      "filters": {
+        "status": "Status",
+        "allStatuses": "Wszystkie statusy",
+        "includeHistory": "Pokaż historię (zjechał / anulowane)"
+      },
+      "table": {
+        "emptyTitle": "Brak wyjazdów",
+        "emptyMessage": "Brak wyjazdów spełniających kryteria.",
+        "columns": {
+          "vehicle": "Auto",
+          "driver": "Kierowca",
+          "route": "Trasa",
+          "period": "Okres",
+          "status": "Status"
+        }
+      }
+    }
+  },
+  "weryfikator": {
+    "delegations": {
+      "title": "Wyjazdy",
+      "subtitle": "Weryfikacja statusu wyjazdów floty",
+      "filters": {
+        "status": "Status",
+        "allStatuses": "Wszystkie statusy",
+        "includeHistory": "Pokaż historię (zjechał / anulowane)"
+      },
+      "table": {
+        "emptyTitle": "Brak wyjazdów",
+        "emptyMessage": "Brak wyjazdów spełniających kryteria.",
+        "columns": {
+          "vehicle": "Auto",
+          "driver": "Kierowca",
+          "route": "Trasa",
+          "period": "Okres",
+          "status": "Status",
+          "actions": "Akcje"
+        }
+      }
+    },
+    "actions": {
+      "inTransit": "Oznacz w trasie",
+      "returned": "Oznacz zjechał",
+      "inTransitToast": "Oznaczono jako w trasie",
+      "returnedToast": "Oznaczono jako zjechał",
+      "errorToast": "Nie udało się zmienić statusu wyjazdu.",
+      "dialog": {
+        "dismiss": "Anuluj",
+        "inTransit": {
+          "title": "Oznacz jako w trasie",
+          "description": "Wyjazd {plate} zostanie oznaczony jako w trasie.",
+          "confirm": "Oznacz w trasie"
+        },
+        "returned": {
+          "title": "Oznacz jako zjechał",
+          "description": "Podaj faktyczną datę zjazdu dla wyjazdu {plate}.",
+          "dateLabel": "Data zjazdu",
+          "confirm": "Oznacz zjechał",
+          "errorRequired": "Podaj datę zjazdu",
+          "errorFuture": "Data zjazdu nie może być w przyszłości",
+          "errorBeforeDeparture": "Data zjazdu nie może być wcześniejsza niż data wyjazdu"
+        }
+      }
+    }
   }
 }

@@ -3,7 +3,7 @@
 > Детализация Phase 7 из [`17-migration-roadmap.md`](17-migration-roadmap.md#фаза-7--eksport-weryfikator--1-неделя).
 > Слайс по двум «специальным» ролям: **`eksport`** (read-only витрина выездов) и **`weryfikator`** (управление статусом выездов).
 >
-> **Статус:** scope частично неясен. Полный функционал этих ролей с заказчиком ещё не проговорён — поэтому **на этом этапе реализуем ровно то, что есть в легаси `Code.gs`**, а спорные места выносим в § «Открытые вопросы» и закрываем дефолтами легаси. Не доизобретаем.
+> **Статус:** scope уточнён заказчиком **2026-06-10** (ответы внесены ниже, см. § «Решения заказчика»). Базис — легаси `Code.gs`, но с **одним явным отклонением**: **`weryfikator` НЕ делает `cancel`** (нет таких полномочий). Его суть — ежедневно проверять автопарк внешними средствами (кто реально в трассе, кто съехал) и проставлять статус в приложении: `w_trasie` / `zjechal`. Cancel остаётся **carrier-only** (как сейчас). Не доизобретаем.
 
 ## Легенда
 - ✅ — уже есть в новом коде
@@ -21,7 +21,7 @@
 Управляет жизненным циклом выезда. По легаси (`Code.gs`):
 - **`markDelegacjaInTransit`** (`Code.gs:4071`) — `zgloszony → w_trasie`. Права: `weryfikator | admin`.
 - **`markDelegacjaReturned`** (`Code.gs:4100`) — `w_trasie → zjechal`. Требует **фактическую дату зьезда** (`dataZjazduRzeczywista`), и **обновляет `AUTA.OstatnioJezdzilo`** = `Vehicle.lastDroveAt`. Права: `weryfikator | admin`.
-- **`cancelDelegacja`** (`Code.gs:4150`) — анулирование. Права: `admin/weryfikator` — **любой статус**; перевозчик — только свой и только `zgloszony`.
+- ~~**`cancelDelegacja`** (`Code.gs:4150`) — анулирование.~~ **ОТКЛОНЕНО заказчиком (2026-06-10):** у `weryfikator` НЕТ права cancel. Анулирование остаётся **carrier-only** (`przewoznik`: свой выезд + только `zgloszony`), как реализовано сейчас. Не трогаем.
 - Видит **все** выезды, может включить историю архивных.
 
 ### `eksport` — эксперт экспорта
@@ -50,7 +50,7 @@ Read-only витрина выездов. По легаси (`getDelegacjeForEksp
 | `GET /delegations/eligibility` | ✅ (не про эту фазу — готовность автопарка подать выезд) |
 | `GET /delegations/:id` | ✅ |
 | `POST /delegations` (создать) | ✅ |
-| `POST /delegations/:id/cancel` | ⚠️ **только `przewoznik`** (свой + статус `zgloszony`); `weryfikator`/`admin` → **403**. Cancel для weryfikator **ещё НЕ реализован** — явно отложен на эту фазу |
+| `POST /delegations/:id/cancel` | ✅ **остаётся carrier-only** (`przewoznik`: свой + `zgloszony`). По решению заказчика (2026-06-10) НЕ расширяем под `weryfikator`. Эту фазу не трогаем. |
 | `POST /delegations/:id/in-transit` | 🔲 (есть только в комментарии контроллера, не реализован) |
 | `POST /delegations/:id/returned` | 🔲 (то же) |
 | Role-scope фильтры списка для `eksport` / `weryfikator` | 🔲 / ❓ |
@@ -73,14 +73,12 @@ Read-only витрина выездов. По легаси (`getDelegacjeForEksp
 
 2. **`POST /delegations/:id/returned`** — `weryfikator | admin`.
    - Переход `w_trasie → zjechal`.
-   - Body: `{ actualReturnAt }` (**обязательно** — легаси требует дату зьезда). Тип — обсудить: date-only (как `plannedReturnAt`) или полный timestamp. 🔗 см. вопрос 2.
+   - Body: `{ actualReturnAt }` (**обязательно** — легаси требует дату зьезда). **Тип: date-only** (решение заказчика 2026-06-10, вопрос 2) — как `plannedReturnAt`.
    - Проставить `actualReturnAt`, `verifiedById/At`.
    - **Обновить `vehicle.lastDroveAt = actualReturnAt`** (в той же транзакции). Это ключевой deliverable — фле­товый сигнал «авто вернулось».
    - Аудит (`@Audit('delegation.markReturned')`).
 
-3. **`POST /delegations/:id/cancel`** 🔲 **расширить под weryfikator** (сейчас НЕ работает для него). Проверено 2026-06-09: эндпоинт жёстко carrier-only — `@Roles('przewoznik')` на контроллере + сервис кидает `ForbiddenException` для любого не-`przewoznik` + статус-гейт только `zgloszony`; в коде прямой коммент «weryfikator handles them in Phase 7». `RolesGuard` — строгий whitelist без admin-bypass, поэтому и `admin` сейчас получает 403.
-   - Сделать: добавить `weryfikator` (и `admin`) в `@Roles` cancel-эндпоинта; разветвить сервис — `przewoznik` (свой выезд + только `zgloszony`) vs `weryfikator`/`admin` (**любой** статус, как в легаси `Code.gs:4150`).
-   - Записать `verifiedById/At` + причину в `notes` (легаси append к Uwagi).
+3. **`POST /delegations/:id/cancel`** — ⛔ **НЕ трогаем.** Решение заказчика (2026-06-10): `weryfikator` НЕ получает cancel (нет таких полномочий). Эндпоинт остаётся carrier-only как есть (`@Roles('przewoznik')` + сервисный гейт `zgloszony`). Никаких изменений прав в этой фазе. ⚠️ Это отменяет прежний build-item, который требовал расширить cancel под weryfikator/admin.
 
 4. **Role-scope список `GET /delegations`:**
    - `weryfikator` → видит **все** выезды, флаг `includeHistory` для архивных/`zjechal`/`anulowany`.
@@ -96,41 +94,37 @@ Read-only витрина выездов. По легаси (`getDelegacjeForEksp
    - Колонки: авто / прицеп / водитель / перевозчик / `departureAt` / `plannedReturnAt` / статус. Фильтр по статусу + тогл «история».
 
 2. **`app/(weryfikator)/delegations/page.tsx`** — таблица + действия смены статуса + история.
-   - Кнопки по статусу:
+   - Кнопки по статусу (**только 2 действия — cancel здесь НЕТ**):
      - `zgloszony` → **«Oznacz w trasie»** (in-transit).
-     - `w_trasie` → **«Oznacz zjechał»** → диалог с вводом **даты/времени зьезда** (`actualReturnAt`), затем returned.
-     - любой не-`zjechal` → **«Anuluj»** → диалог с **powód** (reason) → cancel.
+     - `w_trasie` → **«Oznacz zjechał»** → диалог с вводом **даты зьезда** (`actualReturnAt`, date-only), затем returned.
    - Тогл «история» (архивные `zjechal`/`anulowany`).
    - Для action-UI (confirm-диалоги смены статуса) — небольшое DS-дополнение, согласовать с uiux-agent.
 
-### Deliverables (как в легаси)
-- ✅ `weryfikator` меняет статус выезда (in-transit → returned с датой → / cancel в любом статусе), видит все выезды + историю.
+### Deliverables
+- ✅ `weryfikator` меняет статус выезда (in-transit → returned с датой зьезда), видит все выезды + историю. **Cancel — НЕ его зона** (остаётся carrier-only).
 - ✅ `returned` автоматически обновляет `Vehicle.lastDroveAt`.
-- ✅ `eksport` видит read-only список выездов (+ история).
+- ✅ `eksport` видит read-only список выездов (все активные + история).
 
 ---
 
-## 4. Открытые вопросы (scope не ясен — закрываем дефолтом легаси)
+## 4. Решения заказчика (2026-06-10) — scope зафиксирован
 
-1. **❓ Что именно видит `eksport`?** Документы расходятся: «по типу» (`03-roles`) vs «свои» (`roadmap`) vs «все активные» (легаси-код). В **новой модели `Delegation` нет ни поля `type`, ни owner-связи с eksport** — значит «фильтр по типу»/«свои» 1:1 не переносится.
-   - **Интерим (делаем сейчас):** как в легаси-дефолте — **все `zgloszony` + `w_trasie`**, read-only, + тогл истории.
-   - **Нужно от заказчика:** реальный критерий видимости (тип операции? страна? перевозчик? всё?). До ответа — дефолт выше.
+1. **✅ Что видит `eksport`: ВСЕ активные.** Без фильтра по типу/перевозчику/стране. Дефолт — **все `zgloszony` + `w_trasie`**, read-only, + тогл истории (`includeHistory` показывает `zjechal`/`anulowany`). Расхождение доков (`03-roles` «по типу» / `roadmap` «свои») закрыто в пользу легаси-кода: всё активное.
 
-2. **❓ `actualReturnAt` — дата или дата+время?** Легаси `markDelegacjaReturned` берёт `dataZjazduRzeczywista` (date). `plannedReturnAt` — date-only, `actualReturnAt` — `DateTime?`. Для `lastDroveAt` достаточно даты.
-   - **Интерим:** принимаем дату (date-only), пишем в `actualReturnAt`.
-   - 🔗 Не путать с верификацией времени приезда для **wniosku** — это отдельная зона ответственности `pracownik` (см. вопрос 3).
+2. **✅ `actualReturnAt` — date-only.** Принимаем просто дату (как `plannedReturnAt`), пишем в `actualReturnAt` и в `vehicle.lastDroveAt`. Время не нужно.
+   - 🔗 Не путать с верификацией **времени приезда для claim** — это отдельная зона `pracownik` (см. п.3).
 
-3. **🔗 Связи `Claim ↔ Delegation` НЕ делаем** (решено, см. memory `no-wniosek-delegation-linking` + заметка Obsidian «Связка»). Weryfikator ведёт **операционный** жизненный цикл выезда (статус + `lastDroveAt`); точное время приезда **для claim** отдельно проверяет `pracownik` в [`ClaimModal`](14-design-system.md) (§6.5). Эти два потока не связаны.
+3. **✅ Связи `Claim ↔ Delegation` НЕТ — подтверждено.** Так и остаётся: связи между двумя таблицами нет. Weryfikator ведёт **операционный** жизненный цикл выезда (статус + `lastDroveAt`); «человеческую» верификацию точного времени приезда **для claim** делает `pracownik` в [`ClaimModal`](14-design-system.md). Потоки не связаны. См. memory `no-wniosek-delegation-linking`.
 
-4. **❓ Будет ли роль `weryfikator` вообще укомплектована людьми?** Из обсуждения «Связки»: возможно, её функцию позже заберёт `dyspozytor` или `pracownik`. **Строим как в легаси**, но держим scope изолированным, чтобы при необходимости свернуть в другую роль без переписывания.
+4. **✅ Роль `weryfikator` будет укомплектована** — минимум 1 человек. Строим полноценно. Суть роли: ежедневно внешними средствами определять, кто реально в трассе / съехал, и проставлять статус в приложении.
 
-5. **✅ Проверено (2026-06-09): `cancel` для weryfikator в новом коде НЕ реализован.** Эндпоинт carrier-only (`@Roles('przewoznik')` + сервисный `ForbiddenException` + гейт `zgloszony`); weryfikator/admin → 403; в коде явно «отложено на Phase 7». Это **не open-question, а build-item** — делаем как в легаси (weryfikator/admin анулируют любой статус). Детали в § 3.3.
+5. **✅ `weryfikator` НЕ делает `cancel`.** ⚠️ **Это переопределяет легаси и прежний build-item §3.3.** У роли нет таких полномочий — только `in-transit` и `returned`. Cancel остаётся carrier-only (`przewoznik` + `zgloszony`), эндпоинт не трогаем.
 
 ---
 
 ## 5. Маршрут реализации (когда стартуем)
 
-`orchestrator-agent` → `db-agent` (если нужен `actualReturnAt`-тип/индексы — скорее нет, модель готова) → `api-agent` (in-transit / returned / scope-фильтры / cancel-права + shared DTO + state-machine) → `web-agent` (две страницы delegations) ‖ `uiux-agent` (action-UI weryfikator-а в DS). Проверка: typecheck по воркспейсам + api-тесты на переходы статусов + обновление `lastDroveAt`.
+`orchestrator-agent` → `db-agent` (модель готова — скорее всего no-op) → `api-agent` (in-transit / returned / scope-фильтры + shared DTO + state-machine; **cancel не трогаем**) → `web-agent` (две страницы delegations) ‖ `uiux-agent` (action-UI weryfikator-а в DS). Проверка: typecheck по воркспейсам + api-тесты на переходы статусов + обновление `lastDroveAt`.
 
 ## 6. Зависимости и ссылки
 - Роли и матрица: [`03-roles.md`](03-roles.md#специальные-роли)

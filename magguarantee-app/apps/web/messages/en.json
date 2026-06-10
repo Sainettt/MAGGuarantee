@@ -1458,5 +1458,75 @@
         }
       }
     }
+  },
+  "eksport": {
+    "delegations": {
+      "title": "Trips",
+      "subtitle": "Trips showcase — read-only view",
+      "readOnlyBanner": "Read-only view. Trip status changes are made by the verifier.",
+      "filters": {
+        "status": "Status",
+        "allStatuses": "All statuses",
+        "includeHistory": "Show history (returned / cancelled)"
+      },
+      "table": {
+        "emptyTitle": "No trips",
+        "emptyMessage": "No trips match the criteria.",
+        "columns": {
+          "vehicle": "Vehicle",
+          "driver": "Driver",
+          "route": "Route",
+          "period": "Period",
+          "status": "Status"
+        }
+      }
+    }
+  },
+  "weryfikator": {
+    "delegations": {
+      "title": "Trips",
+      "subtitle": "Fleet trip status verification",
+      "filters": {
+        "status": "Status",
+        "allStatuses": "All statuses",
+        "includeHistory": "Show history (returned / cancelled)"
+      },
+      "table": {
+        "emptyTitle": "No trips",
+        "emptyMessage": "No trips match the criteria.",
+        "columns": {
+          "vehicle": "Vehicle",
+          "driver": "Driver",
+          "route": "Route",
+          "period": "Period",
+          "status": "Status",
+          "actions": "Actions"
+        }
+      }
+    },
+    "actions": {
+      "inTransit": "Mark in transit",
+      "returned": "Mark returned",
+      "inTransitToast": "Marked as in transit",
+      "returnedToast": "Marked as returned",
+      "errorToast": "Could not change the trip status.",
+      "dialog": {
+        "dismiss": "Cancel",
+        "inTransit": {
+          "title": "Mark as in transit",
+          "description": "Delegation {plate} will be marked as in transit.",
+          "confirm": "Mark in transit"
+        },
+        "returned": {
+          "title": "Mark as returned",
+          "description": "Enter the actual return date for delegation {plate}.",
+          "dateLabel": "Return date",
+          "confirm": "Mark returned",
+          "errorRequired": "Enter the return date",
+          "errorFuture": "The return date cannot be in the future",
+          "errorBeforeDeparture": "The return date cannot be earlier than the departure date"
+        }
+      }
+    }
   }
 }

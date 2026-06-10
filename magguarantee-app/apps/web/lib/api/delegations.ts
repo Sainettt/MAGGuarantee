@@ -5,6 +5,7 @@ import type {
   DelegationDto,
   DelegationEligibilityResponse,
   DelegationFilters,
+  MarkReturnedDto,
   SubmitDelegationDto,
 } from '@magguarantee/shared';
 
@@ -52,6 +53,34 @@ export function cancelDelegation(
   body: CancelDelegationDto = {},
 ): Promise<DelegationDto> {
   return apiJson<DelegationDto>(`/delegations/${id}/cancel`, {
+    method: 'POST',
+    json: body,
+  });
+}
+
+/**
+ * POST /delegations/:id/in-transit (weryfikator | admin) — Phase 7.
+ * Empty-body transition `zgloszony → w_trasie`. The server stamps
+ * `verifiedBy/At` from the JWT + clock; the client sends no payload.
+ */
+export function markInTransit(id: string): Promise<DelegationDto> {
+  return apiJson<DelegationDto>(`/delegations/${id}/in-transit`, {
+    method: 'POST',
+    json: {},
+  });
+}
+
+/**
+ * POST /delegations/:id/returned (weryfikator | admin) — Phase 7. Transition
+ * `w_trasie → zjechal`. `actualReturnAt` is **date-only** (`YYYY-MM-DD`) per
+ * the owner decision (2026-06-10); the server mirrors it into
+ * `vehicle.lastDroveAt`.
+ */
+export function markReturned(
+  id: string,
+  body: MarkReturnedDto,
+): Promise<DelegationDto> {
+  return apiJson<DelegationDto>(`/delegations/${id}/returned`, {
     method: 'POST',
     json: body,
   });

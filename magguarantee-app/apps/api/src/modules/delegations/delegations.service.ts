@@ -13,6 +13,7 @@ import {
   type DelegationDto,
   type DelegationEligibilityResponse,
   type DelegationFilters,
+  type MarkReturnedDto,
   type SubmitDelegationDto,
 } from '@magguarantee/shared';
 
@@ -22,6 +23,7 @@ import { CarriersRepository } from '../carriers/carriers.repository';
 import { DriversRepository } from '../drivers/drivers.repository';
 import { TrailersRepository } from '../trailers/trailers.repository';
 import { VehiclesRepository } from '../vehicles/vehicles.repository';
+import { assertLegalDelegationTransition } from './delegation-state-machine';
 import {
   DelegationsRepository,
   type DelegationListFilters,
@@ -29,11 +31,25 @@ import {
 } from './delegations.repository';
 
 /**
- * Phase 3 — Delegations service.
+ * Active-board status floor for the eksport/weryfikator default list view
+ * (history toggle OFF). Kept as a module constant so the allow-list isn't a
+ * magic array inline in `_scopeListFilters`.
+ */
+const ACTIVE_DELEGATION_STATUSES = ['zgloszony', 'w_trasie'] as const;
+
+/**
+ * Delegations service.
  *
- * Carrier-driven flow only: register a delegation (zgloszony) and cancel
- * one's own zgloszony rows. The weryfikator-driven transitions
- * (`markInTransit`, `markReturned`) land in Phase 7 (out of scope).
+ * Phase 3 — carrier-driven flow: register a delegation (`zgloszony`) and cancel
+ * one's own `zgloszony` rows (carrier-only; unchanged in Phase 7).
+ *
+ * Phase 7 — weryfikator/admin-driven status lifecycle:
+ *   - `markInTransit` (`zgloszony → w_trasie`);
+ *   - `markReturned`  (`w_trasie → zjechal`, mirrors `actualReturnAt` into
+ *     `Vehicle.lastDroveAt` atomically).
+ * Both transitions go through the delegation state machine (illegal source
+ * status → 409) and never touch the cancel path. The eksport/weryfikator list
+ * also gains an active-board default with an `includeHistory` widen toggle.
  */
 @Injectable()
 export class DelegationsService {
@@ -124,6 +140,66 @@ export class DelegationsService {
         ? appendCancellationNote(row.notes, dto.reason)
         : row.notes,
     });
+    return this.toDto(updated);
+  }
+
+  // ── Weryfikator transitions (Phase 7) ───────────────────
+
+  /**
+   * `zgloszony → w_trasie`. Role-gated to `weryfikator | admin` at the
+   * controller (`@Roles`). The state machine rejects any other source status
+   * with 409 before any write. Stamps `verifiedBy/At` from the caller + clock.
+   *
+   * Atomicity: the controller carries `@Audit('delegation.markInTransit')`, so
+   * the `AuditInterceptor` has already opened a `prisma.$transaction` and the
+   * repository's `update` (via `prisma.tx`) plus the audit-row write commit
+   * together. No explicit `prisma.$transaction` is needed for this single-row
+   * change.
+   */
+  async markInTransit(user: AuthUser, id: string): Promise<DelegationDto> {
+    const row = await this._requireDelegation(id);
+    assertLegalDelegationTransition(row.status, 'w_trasie');
+    const updated = await this.delegations.update(row.id, {
+      status: 'w_trasie',
+      verifiedById: user.sub,
+      verifiedAt: new Date(),
+    });
+    return this.toDto(updated);
+  }
+
+  /**
+   * `w_trasie → zjechal`. Role-gated to `weryfikator | admin`. Requires the
+   * real return DAY (`actualReturnAt`, date-only). In ONE transaction it:
+   *   1. flips the delegation to `zjechal`, stamps `actualReturnAt` +
+   *      `verifiedBy/At`;
+   *   2. mirrors `actualReturnAt` into `Vehicle.lastDroveAt` — the fleet
+   *      "this truck is back" signal (legacy `Code.gs:4100`).
+   *
+   * Both writes go through `prisma.tx`, so they enrol in the SAME
+   * interceptor-opened audit transaction (`@Audit('delegation.markReturned')`)
+   * and commit atomically with the audit row. This atomic `lastDroveAt` update
+   * is the key Phase 7 deliverable.
+   */
+  async markReturned(
+    user: AuthUser,
+    id: string,
+    dto: MarkReturnedDto,
+  ): Promise<DelegationDto> {
+    const row = await this._requireDelegation(id);
+    assertLegalDelegationTransition(row.status, 'zjechal');
+    // Date-only (`YYYY-MM-DD`) → UTC midnight, exactly as `plannedReturnAt` is
+    // parsed on submit. Matches the `@db.Date`-style round-trip for both the
+    // delegation column and the mirrored `vehicle.lastDroveAt`.
+    const actualReturnAt = new Date(dto.actualReturnAt);
+    const updated = await this.delegations.update(row.id, {
+      status: 'zjechal',
+      actualReturnAt,
+      verifiedById: user.sub,
+      verifiedAt: new Date(),
+    });
+    // Same ambient transaction (`prisma.tx`): the fleet signal commits with the
+    // status flip and the audit row, or all three roll back together.
+    await this.vehicles.update(row.vehicleId, { lastDroveAt: actualReturnAt });
     return this.toDto(updated);
   }
 
@@ -262,6 +338,16 @@ export class DelegationsService {
     });
   }
 
+  /**
+   * Loads a delegation by id or throws 404. Shared by the verifier transitions
+   * so the not-found message stays consistent with the rest of the surface.
+   */
+  private async _requireDelegation(id: string): Promise<DelegationRow> {
+    const row = await this.delegations.findById(id);
+    if (!row) throw new NotFoundException('Delegacja nie znaleziona');
+    return row;
+  }
+
   private async _requireCarrierProfile(
     user: AuthUser,
   ): Promise<{ id: string }> {
@@ -321,26 +407,44 @@ export class DelegationsService {
     user: AuthUser,
     filters: DelegationFilters,
   ): Promise<DelegationListFilters> {
-    // All-access roles: admin/opiekun/eksport/weryfikator see every delegation
-    // (docs/03-roles.md). `planista` was REMOVED from this branch in Phase 6.4
-    // — it had silently leaked the full delegation list to planners. Planista
-    // is now scoped to its own dispatched-vehicle set below (mirrors the
-    // dyspozytor scope), which is also load-bearing for the planista «Wyjazdy»
-    // tab.
-    if (
-      user.role === 'admin' ||
-      user.role === 'opiekun' ||
-      user.role === 'eksport' ||
-      user.role === 'weryfikator'
-    ) {
-      return filters;
+    // `includeHistory` is a Phase 7 eksport/weryfikator-only toggle. Strip it
+    // up-front so it can NEVER flow into any other role's repo filters — only
+    // the eksport/weryfikator branch below re-reads it. `rest` is already a
+    // clean `DelegationListFilters` shape (no `includeHistory`), so every
+    // downstream branch is structurally safe.
+    const { includeHistory, ...rest } = filters;
+
+    // All-access, no status floor: admin/opiekun see every delegation in every
+    // status, always (docs/03-roles.md). The `includeHistory` toggle is NOT
+    // consulted here — these roles never get the active-board restriction, so
+    // their lists keep returning `zjechal`/`anulowany` rows unconditionally.
+    // `planista` was REMOVED from this branch in Phase 6.4 (it had silently
+    // leaked the full delegation list to planners) and is scoped below.
+    if (user.role === 'admin' || user.role === 'opiekun') {
+      return rest;
+    }
+    // Eksport + weryfikator (Phase 7) — all-access by carrier/vehicle/owner
+    // (no ownership scope), but with an ACTIVE-BOARD status floor by default.
+    // This is the ONLY place the `statusIn` allow-list is injected, so the
+    // restriction cannot leak to any other role's list:
+    //   - `includeHistory` OFF (default) and no explicit `status` → restrict to
+    //     `{zgloszony, w_trasie}` via `statusIn`.
+    //   - `includeHistory` ON → widen to all statuses (no `statusIn`).
+    //   - an explicit `status` filter ALWAYS narrows further (the repo prefers
+    //     `status` over `statusIn`), so e.g. `status=zjechal` still works even
+    //     with history off.
+    if (user.role === 'eksport' || user.role === 'weryfikator') {
+      if (includeHistory || rest.status) {
+        return rest;
+      }
+      return { ...rest, statusIn: [...ACTIVE_DELEGATION_STATUSES] };
     }
     if (user.role === 'przewoznik') {
       const carrier = await this._requireCarrierProfile(user);
-      if (filters.carrierId && filters.carrierId !== carrier.id) {
+      if (rest.carrierId && rest.carrierId !== carrier.id) {
         throw new ForbiddenException('Brak uprawnień do tego przewoźnika');
       }
-      return { ...filters, carrierId: carrier.id };
+      return { ...rest, carrierId: carrier.id };
     }
     if (user.role === 'planista') {
       // Phase 6.4 — planista sees ONLY delegations of vehicles they plan
@@ -348,16 +452,17 @@ export class DelegationsService {
       // exactly: server identity wins, so a client-supplied `carrierId` /
       // `vehicleId` is stripped to stop the planista pivoting outside their
       // planned fleet.
-      const { carrierId: _carrierId, vehicleId: _vehicleId, ...rest } = filters;
-      return { ...rest, plannerId: user.sub };
+      const { carrierId: _carrierId, vehicleId: _vehicleId, ...planRest } =
+        rest;
+      return { ...planRest, plannerId: user.sub };
     }
     if (user.role === 'dyspozytor') {
       // Phase 6.2 — dyspozytor sees ONLY delegations of vehicles they dispatch
       // (docs/03-roles.md#dyspozytor). Server identity wins: a client-supplied
       // `carrierId` / `vehicleId` is dropped so the dyspozytor cannot pivot
       // outside their dispatched fleet (same posture as the przewoznik scope).
-      const { carrierId: _carrierId, vehicleId: _vehicleId, ...rest } = filters;
-      return { ...rest, dispatcherId: user.sub };
+      const { carrierId: _carrierId, vehicleId: _vehicleId, ...dysRest } = rest;
+      return { ...dysRest, dispatcherId: user.sub };
     }
     throw new ForbiddenException('Brak uprawnień');
   }

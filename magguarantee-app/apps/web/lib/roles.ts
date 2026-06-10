@@ -15,8 +15,14 @@ export const ROLE_LANDING: Record<Role, string> = {
   przewoznik: '/carrier',
   planista: '/planista',
   dyspozytor: '/dyspozytor',
-  eksport: '/eksport',
-  weryfikator: '/weryfikator',
+  // Phase 7 — these two single-destination roles land directly on their one
+  // real screen (the delegations board). The `/eksport` and `/weryfikator`
+  // landing routes still exist and `redirect()` there, but routing them
+  // straight to `/.../delegations` skips the redirect hop entirely (post-login,
+  // access-denial bounce, and the header home link all resolve here — no loop).
+  // docs/14-design-system.md §7.2.
+  eksport: '/eksport/delegations',
+  weryfikator: '/weryfikator/delegations',
 };
 
 /** All authenticated landing paths (used by middleware to allow them). */

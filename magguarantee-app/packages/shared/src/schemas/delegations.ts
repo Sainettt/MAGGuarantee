@@ -134,6 +134,83 @@ export const CancelDelegationSchema = z
   .strict();
 export type CancelDelegationDto = z.infer<typeof CancelDelegationSchema>;
 
+// ─── Weryfikator transitions (Phase 7) ───────────────────
+
+/**
+ * POST /delegations/:id/in-transit — `weryfikator | admin` flips a
+ * `zgloszony` outing to `w_trasie`. No body fields: the transition stamps
+ * `verifiedBy/At` server-side from the JWT + clock. `.strict({})` rejects any
+ * stray payload so a typo on the client surfaces as 422 rather than being
+ * silently dropped (matches the empty-body convention elsewhere in the API).
+ */
+export const MarkInTransitSchema = z.object({}).strict();
+export type MarkInTransitDto = z.infer<typeof MarkInTransitSchema>;
+
+/**
+ * POST /delegations/:id/returned — `weryfikator | admin` flips a `w_trasie`
+ * outing to `zjechal`. Requires the real return DAY (`actualReturnAt`).
+ *
+ * `actualReturnAt` is **date-only** (`YYYY-MM-DD`), reusing `IsoDateSchema` —
+ * the exact same convention as `plannedReturnAt` (owner decision 2026-06-10,
+ * docs/20-phase-7-eksport-weryfikator.md §4.2). The service parses it the same
+ * way `plannedReturnAt` is parsed (`new Date('YYYY-MM-DD')` → UTC midnight, in
+ * lockstep with the `@db.Date` round-trip) and mirrors it into
+ * `vehicle.lastDroveAt`. Time-of-day is intentionally NOT collected.
+ */
+export const MarkReturnedSchema = z
+  .object({
+    actualReturnAt: IsoDateSchema,
+  })
+  .strict();
+export type MarkReturnedDto = z.infer<typeof MarkReturnedSchema>;
+
+/**
+ * Client-side form schema for the weryfikator «Oznacz zjechał» dialog (Phase 7,
+ * web). The wire contract is `MarkReturnedSchema` (date-only, required); this
+ * factory layers the **soft** sanity guards the DS asks the UI to surface
+ * inline (docs/14-design-system.md §7.1):
+ *   - `actualReturnAt` is required (empty → «Podaj datę zjazdu»),
+ *   - not in the future relative to `today` (a verifier records a return that
+ *     has already happened),
+ *   - not earlier than the row's `departureAt` day (a return can't precede the
+ *     departure).
+ *
+ * These are convenience guards only — the backend re-validates the transition
+ * regardless (never trusts the client clock). `departureAt` is the row's
+ * (timestamped) departure; only its date portion is compared. `today` is
+ * injected (`YYYY-MM-DD`) so the schema stays pure/testable. The messages are
+ * carried as Zod `message` strings here so the resolver can map them; the web
+ * form swaps them for i18n copy by error `code`/`path` where needed.
+ */
+export function makeMarkReturnedFormSchema(opts: {
+  departureAt?: string | null;
+  today: string;
+}) {
+  const departureDay = opts.departureAt ? opts.departureAt.slice(0, 10) : null;
+  return z
+    .object({
+      actualReturnAt: IsoDateSchema,
+    })
+    .strict()
+    .superRefine((obj, ctx) => {
+      if (obj.actualReturnAt > opts.today) {
+        ctx.addIssue({
+          path: ['actualReturnAt'],
+          code: z.ZodIssueCode.custom,
+          message: 'future',
+        });
+      }
+      if (departureDay && obj.actualReturnAt < departureDay) {
+        ctx.addIssue({
+          path: ['actualReturnAt'],
+          code: z.ZodIssueCode.custom,
+          message: 'beforeDeparture',
+        });
+      }
+    });
+}
+export type MarkReturnedFormValues = { actualReturnAt: string };
+
 // ─── Eligibility (carrier readiness) ─────────────────────
 
 /**
@@ -174,6 +251,19 @@ export const DelegationFiltersSchema = z
     /** ISO datetime — match delegations whose `departureAt` ≤ to. */
     to: IsoDateTimeSchema.optional(),
     q: z.string().min(1).max(64).optional(),
+    /**
+     * Phase 7 — eksport/weryfikator history toggle. These two roles see the
+     * ACTIVE board by default (`status IN {zgloszony, w_trasie}`); flipping
+     * `includeHistory=true` widens the result to all statuses (incl. `zjechal`
+     * / `anulowany`). Coerced from the query string (`"true"`/`"false"`).
+     *
+     * Scope note: this flag is ONLY consulted inside the eksport/weryfikator
+     * branch of `DelegationsService._scopeListFilters`. For every other role
+     * (carrier / planista / dyspozytor / admin / opiekun) it is a no-op — those
+     * panels continue to return all statuses unconditionally, so this cannot
+     * regress their lists. See the service for the exact mechanism.
+     */
+    includeHistory: z.coerce.boolean().optional(),
     cursor: UuidSchema.optional(),
     limit: z.coerce.number().int().min(1).max(200).default(50),
   })

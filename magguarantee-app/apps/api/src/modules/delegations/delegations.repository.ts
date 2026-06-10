@@ -71,6 +71,20 @@ export interface DelegationRow {
 
 export interface DelegationListFilters {
   status?: DelegationStatus;
+  /**
+   * Phase 7 — server-injected status allow-list (the "active board" floor for
+   * eksport/weryfikator: `['zgloszony', 'w_trasie']`). NEVER client-supplied —
+   * `DelegationsService._scopeListFilters` sets it only for those two roles
+   * when their `includeHistory` toggle is OFF. It is the ONLY mechanism that
+   * restricts which statuses appear, and it is scoped to that one branch so it
+   * cannot leak to carrier/planista/dyspozytor/admin/opiekun lists.
+   *
+   * Precedence: an explicit `status` filter WINS over `statusIn` (the service
+   * never sends both, and the repo prefers `status` if both ever arrive) so an
+   * explicit `status=zjechal` still resolves to exactly that status — "explicit
+   * status always narrows further", per the slice contract.
+   */
+  statusIn?: DelegationStatus[];
   carrierId?: string;
   vehicleId?: string;
   driverId?: string;
@@ -126,6 +140,13 @@ export interface UpdateDelegationData {
   status?: DelegationStatus;
   notes?: string | null;
   actualReturnAt?: Date | null;
+  /**
+   * Phase 7 — set by the weryfikator transitions (`in-transit` / `returned`)
+   * to stamp who advanced the outing's status and when. The carrier cancel
+   * path leaves these undefined (no verifier involved).
+   */
+  verifiedById?: string | null;
+  verifiedAt?: Date | null;
 }
 
 @Injectable()
@@ -142,7 +163,16 @@ export class DelegationsRepository {
 
   async list(filters: DelegationListFilters): Promise<DelegationRow[]> {
     const where: Record<string, unknown> = {};
-    if (filters.status) where.status = filters.status;
+    // Explicit single `status` wins over the server-injected `statusIn` floor:
+    // an explicit filter is always honoured (and narrows to exactly one status,
+    // archived or not). Only when no explicit `status` is present does the
+    // active-board allow-list apply — and that is set solely by the
+    // eksport/weryfikator scope branch in the service.
+    if (filters.status) {
+      where.status = filters.status;
+    } else if (filters.statusIn && filters.statusIn.length > 0) {
+      where.status = { in: filters.statusIn };
+    }
     if (filters.carrierId) where.carrierId = filters.carrierId;
     if (filters.vehicleId) where.vehicleId = filters.vehicleId;
     if (filters.driverId) where.driverId = filters.driverId;
@@ -207,12 +237,17 @@ export class DelegationsRepository {
   }
 
   async update(id: string, data: UpdateDelegationData): Promise<DelegationRow> {
+    // `undefined` fields are omitted by Prisma (no-op), so passing the whole
+    // shape is safe — the cancel path sends only status/notes; the Phase 7
+    // transitions add verifiedBy/At (+ actualReturnAt for `returned`).
     const row = await this.prisma.tx.delegation.update({
       where: { id },
       data: {
         status: data.status,
         notes: data.notes,
         actualReturnAt: data.actualReturnAt,
+        verifiedById: data.verifiedById,
+        verifiedAt: data.verifiedAt,
       },
       include: this.includeShape(),
     });
