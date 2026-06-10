@@ -85,7 +85,13 @@ export interface VehicleBoardRow {
   id: string;
   plateNumber: string;
   sideNumber: string | null;
-  carrierName: string | null;
+  /**
+   * The carrier's opiekun (`Vehicle.carrier.opiekun`, a `User`). The board
+   * shows the opiekun, NOT the carrier (owner correction 2026-06-10). The
+   * relation `Carrier.opiekunId → User` is NOT NULL, so this is effectively
+   * always present; `name` is nullable only because `User.name` is.
+   */
+  opiekun: { id: string; name: string | null } | null;
   plannerName: string | null;
 }
 
@@ -171,8 +177,11 @@ export class VehiclesRepository {
    * selected (no attachments / rates / GPS device) — keeps the board query
    * cheap and unrelated to the heavyweight `list()` include shape.
    *
-   * `carrier`/`planner` are resolved to their display NAME (carrier name lives
-   * on the related `User`); the board shows the name, not the id.
+   * The board shows the carrier's OPIEKUN (`carrier.opiekun`, a `User`), not
+   * the carrier itself (owner correction 2026-06-10 — see
+   * docs/20-phase-7-eksport-weryfikator.md § 0). The `Carrier.opiekunId → User`
+   * relation is NOT NULL, so every active vehicle resolves an opiekun.
+   * `planner` is projected to its display NAME; `opiekun` carries `{ id, name }`.
    */
   async listActiveForBoard(): Promise<VehicleBoardRow[]> {
     const rows = await this.prisma.tx.vehicle.findMany({
@@ -181,7 +190,9 @@ export class VehiclesRepository {
         id: true,
         plateNumber: true,
         sideNumber: true,
-        carrier: { select: { user: { select: { name: true } } } },
+        carrier: {
+          select: { opiekun: { select: { id: true, name: true } } },
+        },
         planner: { select: { name: true } },
       },
       orderBy: { plateNumber: 'asc' },
@@ -190,7 +201,9 @@ export class VehiclesRepository {
       id: r.id,
       plateNumber: r.plateNumber,
       sideNumber: r.sideNumber,
-      carrierName: r.carrier?.user?.name ?? null,
+      opiekun: r.carrier?.opiekun
+        ? { id: r.carrier.opiekun.id, name: r.carrier.opiekun.name ?? null }
+        : null,
       plannerName: r.planner?.name ?? null,
     }));
   }

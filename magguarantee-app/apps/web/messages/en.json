@@ -1490,11 +1490,11 @@
         "status": "Status",
         "allStatuses": "All statuses",
         "search": "Search",
-        "searchPlaceholder": "Plate or carrier…"
+        "searchPlaceholder": "Plate or account manager…"
       },
       "columns": {
         "vehicle": "Plate",
-        "carrier": "Carrier",
+        "opiekun": "Account manager",
         "planista": "Planner",
         "status": "Status",
         "noted": "Noted",
@@ -1523,7 +1523,7 @@
       "history": {
         "title": "Status history — {plate}",
         "sideSuffix": " · side {side}",
-        "noCarrier": "No carrier",
+        "noOpiekun": "No account manager",
         "gpsActor": "GPS",
         "source": {
           "manual": "manual",

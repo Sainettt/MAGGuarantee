@@ -78,7 +78,7 @@ export function VehicleRouteBoardView() {
     return allRows.filter((v) => {
       if (statusFilter && v.currentStatus !== statusFilter) return false;
       if (!q) return true;
-      const haystack = [v.plateNumber, v.sideNumber, v.carrier]
+      const haystack = [v.plateNumber, v.sideNumber, v.opiekun?.name]
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
@@ -109,12 +109,14 @@ export function VehicleRouteBoardView() {
         ),
       },
       {
-        id: 'carrier',
-        header: t('columns.carrier'),
+        id: 'opiekun',
+        header: t('columns.opiekun'),
         width: 'flex',
         truncate: 'ellipsis',
         cell: (row) => (
-          <span title={row.carrier ?? undefined}>{row.carrier ?? '—'}</span>
+          <span title={row.opiekun?.name ?? undefined}>
+            {row.opiekun?.name ?? '—'}
+          </span>
         ),
       },
       {

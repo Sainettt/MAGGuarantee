@@ -53,7 +53,7 @@ export function VehicleRouteStatusHistoryDialog({ vehicle, onOpenChange }: Props
             {t('title', { plate: vehicle?.plateNumber ?? '—' })}
           </DialogTitle>
           <DialogDescription>
-            {vehicle?.carrier ?? t('noCarrier')}
+            {vehicle?.opiekun?.name ?? t('noOpiekun')}
             {sideSuffix}
           </DialogDescription>
         </DialogHeader>

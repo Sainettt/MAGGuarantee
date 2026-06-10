@@ -216,7 +216,7 @@ describe('VehicleRouteStatusService.getBoard', () => {
       id: VEHICLE_ID,
       plateNumber: 'PL123',
       sideNumber: 'B-12',
-      carrierName: 'Carrier Co',
+      opiekun: { id: 'op-1', name: 'Opiekun O' },
       plannerName: 'Planner P',
       ...overrides,
     };
@@ -232,10 +232,11 @@ describe('VehicleRouteStatusService.getBoard', () => {
     expect(out[0]!.currentStatus).toBe('nieznany');
     expect(out[0]!.notedBy).toBeNull();
     expect(out[0]!.notedAt).toBeNull();
-    // Identity columns carry through.
+    // Identity columns carry through — the board shows the carrier's OPIEKUN,
+    // not the carrier (owner correction 2026-06-10).
     expect(out[0]!.plateNumber).toBe('PL123');
     expect(out[0]!.sideNumber).toBe('B-12');
-    expect(out[0]!.carrier).toBe('Carrier Co');
+    expect(out[0]!.opiekun).toEqual({ id: 'op-1', name: 'Opiekun O' });
     expect(out[0]!.planner).toBe('Planner P');
   });
 

@@ -114,7 +114,7 @@ export class VehicleRouteStatusService {
         id: v.id,
         plateNumber: v.plateNumber,
         sideNumber: v.sideNumber,
-        carrier: v.carrierName,
+        opiekun: v.opiekun,
         planner: v.plannerName,
         currentStatus,
         notedBy: today?.notedBy ?? null,

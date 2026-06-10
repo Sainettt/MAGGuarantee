@@ -291,7 +291,7 @@ soft-delete'ятся (объект в MinIO остаётся).
 
 | Method + Path | Назначение | Роли |
 |---|---|---|
-| GET `/vehicles/route-board` | Все активные машины + `carrier` + `planner` + статус на сегодня (`w_trasie`/`zjechal`/`nieznany`) + кто/когда отметил | weryfikator / admin |
+| GET `/vehicles/route-board` | Все активные машины + `opiekun` (= `carrier.opiekun`, не carrier — поправка заказчика 2026-06-10) + `planner` + статус на сегодня (`w_trasie`/`zjechal`/`nieznany`) + кто/когда отметил | weryfikator / admin |
 | POST `/vehicles/:id/route-status` | Body `{ status: 'w_trasie'\|'zjechal', notes? }`. Аппендит запись (`source=manual`); при `zjechal` → `vehicle.lastDroveAt = notedAt` в той же транзакции. Re-stampable. Audit `vehicle.setRouteStatus` | weryfikator / admin |
 | GET `/vehicles/:id/route-status` | История статусов машины (newest-first): `status`, `source` (manual\|gps), `notedBy`, `notedAt`, `notes` | weryfikator / admin |
 

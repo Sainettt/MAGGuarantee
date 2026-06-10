@@ -34,7 +34,7 @@
 
 ### Backend (api-agent)
 - **Удалить** delegation `in-transit`/`returned` (controller + service + state-machine + shared `Mark*`-схемы); убрать `weryfikator` из `@Roles` и `_scopeListFilters` у delegations. **Eksport-ветку и `includeHistory` оставить.** `DelegationStatus` enum НЕ трогаем (значения `w_trasie/zjechal` просто перестанут проставляться через приложение — eksport-вью продолжит работать).
-- **Список машин для weryfikator:** все активные машины (`active`, `!deletedAt`) с `carrier`, `planner` и текущим статусом (на сегодня). Роли `weryfikator | admin`. Расширить существующий vehicles-list или дать отдельный endpoint.
+- **Список машин для weryfikator:** все активные машины (`active`, `!deletedAt`) с **`opiekun`** (= `vehicle.carrier.opiekun`, User), `planner` и текущим статусом (на сегодня). Роли `weryfikator | admin`. Дедик. endpoint `GET /vehicles/route-board`. (⚠️ 2026-06-10: в отображении **opiekun, не carrier** — заказчик поправил.)
 - **`POST /vehicles/:id/route-status`** — body `{ status: w_trasie|zjechal, notes? }`, роли `weryfikator | admin`, `@Audit('vehicle.setRouteStatus')`. Аппендит строку (`source=manual`, `notedById=caller`, `notedAt=now`); если `status=zjechal` → **в той же транзакции** `vehicle.lastDroveAt = notedAt` (date).
 - **История машины:** `GET /vehicles/:id/route-status` — список записей (для модалки истории).
 - shared: `SetVehicleRouteStatusSchema` (Zod), типы, enum-ы.
@@ -42,9 +42,9 @@
 ### Frontend (web-agent)
 - **Удалить** `weryfikator/delegations` (page + `WeryfikatorDelegationsView` + `WeryfikatorDelegationsTable` + `DelegationStatusActionDialog`); убрать `markInTransit/markReturned` из `lib/api/delegations.ts` и соответствующие хуки.
 - **Новая страница `app/(weryfikator)/weryfikator/vehicles/page.tsx`** — таблица всех машин:
-  - Колонки: **номер** (`plateNumber` + `sideNumber`) / **перевозчик** (`carrier`) / **planista** (`planner`) / **статус** (`StatusBadge`: в трассе / съехал / не проверено) / кто+когда отметил / **действие**. **Без водителя.**
+  - Колонки: **номер** (`plateNumber` + `sideNumber`) / **opiekun** (`vehicle.carrier.opiekun`) / **planista** (`planner`) / **статус** (`StatusBadge`: в трассе / съехал / не проверено) / кто+когда отметил / **действие**. **Без водителя, без carrier** (заказчик заменил carrier на opiekun, 2026-06-10).
   - Действие: кнопки «В трассе» / «Съехал» → `POST /vehicles/:id/route-status`. Можно переотмечать. История по машине — модалка/expand.
-  - Фильтр по статусу + (опц.) поиск по номеру/перевозчику.
+  - Фильтр по статусу + (опц.) поиск по номеру/opiekun.
 - Нав: лендинг weryfikator → редирект на `/weryfikator/vehicles`; обновить `ROLE_LANDING.weryfikator`.
 - i18n: переписать `weryfikator.*` под доску машин.
 

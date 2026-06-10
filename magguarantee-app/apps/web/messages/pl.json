@@ -1490,11 +1490,11 @@
         "status": "Status",
         "allStatuses": "Wszystkie statusy",
         "search": "Szukaj",
-        "searchPlaceholder": "Numer lub przewoźnik…"
+        "searchPlaceholder": "Numer lub opiekun…"
       },
       "columns": {
         "vehicle": "Numer",
-        "carrier": "Przewoźnik",
+        "opiekun": "Opiekun",
         "planista": "Planista",
         "status": "Status",
         "noted": "Oznaczono",
@@ -1523,7 +1523,7 @@
       "history": {
         "title": "Historia statusu — {plate}",
         "sideSuffix": " · bok {side}",
-        "noCarrier": "Brak przewoźnika",
+        "noOpiekun": "Brak opiekuna",
         "gpsActor": "GPS",
         "source": {
           "manual": "ręcznie",

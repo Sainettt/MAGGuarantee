@@ -285,12 +285,23 @@ export type VehicleRouteStatusLogDto = z.infer<
  * active vehicles, each with today's derived `currentStatus` (or `nieznany`)
  * and the who/when of the latest today-row. `notedBy` / `notedAt` are null
  * when `currentStatus === 'nieznany'`.
+ *
+ * `opiekun` is the carrier's opiekun (`vehicle.carrier.opiekun`, a `User`) —
+ * the board displays the opiekun, NOT the carrier (owner correction
+ * 2026-06-10, see docs/20-phase-7-eksport-weryfikator.md § 0). The relation
+ * `Carrier.opiekunId → User` is NOT NULL, so every active vehicle resolves an
+ * opiekun; `name` is nullable only because `User.name` itself is.
  */
 export const VehicleRouteBoardItemDtoSchema = z.object({
   id: UuidSchema,
   plateNumber: z.string(),
   sideNumber: z.string().nullable(),
-  carrier: z.string().nullable(),
+  opiekun: z
+    .object({
+      id: UuidSchema,
+      name: z.string().nullable(),
+    })
+    .nullable(),
   planner: z.string().nullable(),
   currentStatus: VehicleBoardStatusSchema,
   notedBy: RouteStatusNotedBySchema,
