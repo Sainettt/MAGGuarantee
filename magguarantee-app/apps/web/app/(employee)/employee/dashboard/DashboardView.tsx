@@ -106,7 +106,8 @@ export function DashboardView() {
           )}
         </div>
         <DashboardSidebar
-          urgent={data?.urgent ?? []}
+          overdue={data?.overdue ?? []}
+          dueSoon={data?.dueSoon ?? []}
           recent={data?.recent ?? []}
           topCarriers={data?.topCarriers ?? []}
           reklamacjeCount={data?.reklamacje.count ?? 0}

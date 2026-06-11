@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 
@@ -20,6 +21,7 @@ import { GpsModule } from './modules/integrations/gps/gps.module';
 import { InspectionModule } from './modules/integrations/inspection/inspection.module';
 import { ViesModule } from './modules/integrations/vies/vies.module';
 import { WhiteListModule } from './modules/integrations/white-list/white-list.module';
+import { JobsModule } from './modules/jobs/jobs.module';
 import { KmCalcModule } from './modules/km-calc/km-calc.module';
 import { LimitsModule } from './modules/limits/limits.module';
 import { LookupsModule } from './modules/lookups/lookups.module';
@@ -32,6 +34,7 @@ import { TrailerTypesModule } from './modules/trailer-types/trailer-types.module
 import { TrailersModule } from './modules/trailers/trailers.module';
 import { UsersModule } from './modules/users/users.module';
 import { VehiclesModule } from './modules/vehicles/vehicles.module';
+import { VerificationSlaModule } from './modules/verification-sla/verification-sla.module';
 
 @Module({
   imports: [
@@ -77,6 +80,12 @@ import { VehiclesModule } from './modules/vehicles/vehicles.module';
         limit: process.env.NODE_ENV === 'test' ? 1_000 : 100,
       },
     ]),
+    // Scheduled jobs (docs/21 §5 — verification-SLA daily digest is the first).
+    ScheduleModule.forRoot(),
+    // BullMQ root (in-process workers). Global — must be imported before the
+    // feature modules that `BullModule.registerQueue(...)` (Mail / Chat).
+    // docs/16-jobs-and-integrations.md#структура-bullmq.
+    JobsModule,
     PrismaModule,
     RedisModule,
     MailModule,
@@ -103,6 +112,8 @@ import { VehiclesModule } from './modules/vehicles/vehicles.module';
     // Phase 4.5 — admin ops surface (dashboard + audit read + diagnostics).
     LimitsModule,
     DiagnosticsModule,
+    // docs/21 — pracownik verification-SLA daily-digest cron.
+    VerificationSlaModule,
     HealthModule,
   ],
   providers: [

@@ -103,6 +103,14 @@ async refresh(refreshTokenJwt: string) {
 
 ## 2FA: 6-значный email-код
 
+> **Доставка кода (Phase 9, частично):** письмо с 2FA-кодом теперь отправляется
+> **асинхронно** через BullMQ-очередь `email-send` (`MailService.enqueue2faCode`,
+> in-process worker `EmailSendProcessor`). Воркер крутится внутри API-процесса,
+> так что в dev код по-прежнему доходит до Mailhog в пределах того же окна. Сам
+> код в Redis (`2fa:code:{sessionToken}`) пишется синхронно ДО enqueue — то есть
+> `verify-code` валиден сразу, не дожидаясь доставки письма. См.
+> [16-jobs-and-integrations.md#email-очередь](16-jobs-and-integrations.md#email-очередь).
+
 Те же правила, что в GAS:
 
 | Параметр | Значение | Где |

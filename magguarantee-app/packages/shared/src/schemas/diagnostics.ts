@@ -24,6 +24,32 @@ export type DashboardClaimSummary = z.infer<
   typeof DashboardClaimSummarySchema
 >;
 
+/**
+ * One row in the verification-SLA dashboard buckets (`overdue` / `dueSoon`).
+ *
+ * Net-new for the pracownik verification-SLA "attention" widget
+ * (docs/21-pracownik-verification-sla.md §4). Replaces the old single
+ * `urgent` list — these rows are always `status === 'NA_WERYFIKACJI'` and
+ * carry the signed `workingDaysLeft` (Polish working days) so the web widget
+ * can render the «po terminie» / «{n} dni robocze» label without recomputing
+ * the calendar. `paymentEur` / `updatedAt` are intentionally dropped — the
+ * SLA widget surfaces nrZgl + carrier + plate + the deadline label only.
+ */
+export const DashboardSlaClaimSchema = z.object({
+  id: UuidSchema,
+  nrZgl: z.string(),
+  status: z.string(),
+  carrierName: z.string().nullable(),
+  vehiclePlate: z.string().nullable(),
+  /**
+   * Signed Polish-working-day distance from "now" to the SLA deadline.
+   * `< 0` → overdue, `0..3` → dueSoon. `overdue` rows always carry a
+   * negative value; `dueSoon` rows are `0..3` inclusive.
+   */
+  workingDaysLeft: z.number().int(),
+});
+export type DashboardSlaClaim = z.infer<typeof DashboardSlaClaimSchema>;
+
 export const DashboardAuditRowSummarySchema = z.object({
   id: UuidSchema,
   action: z.string(),
@@ -61,7 +87,11 @@ export const DashboardDtoSchema = z.object({
     odrzucono: z.number().int().nonnegative(),
     oczekujeNaAutoryzacje: z.number().int().nonnegative(),
   }),
-  urgent: z.array(DashboardClaimSummarySchema),
+  // Verification-SLA buckets (docs/21 §4). Mutually exclusive; `overdue`
+  // wins over `dueSoon`. Each sorted by `workingDaysLeft` ascending
+  // (most urgent first). `onTrack` claims are excluded entirely.
+  overdue: z.array(DashboardSlaClaimSchema),
+  dueSoon: z.array(DashboardSlaClaimSchema),
   recent: z.array(DashboardAuditRowSummarySchema),
   topCarriers: z.array(DashboardTopCarrierSchema),
   monthlySeries: z.array(DashboardMonthlyPointSchema),

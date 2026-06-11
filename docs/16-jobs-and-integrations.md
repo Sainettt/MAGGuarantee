@@ -2,6 +2,21 @@
 
 > Всё, что в GAS было через Triggers, MailApp, UrlFetchApp.
 
+> **Статус BullMQ (Phase 9, частично live):** BullMQ поднят **рано** и работает
+> **in-process** (воркеры крутятся внутри API Nest-процесса, без отдельного
+> worker-контейнера). Подключены **только две очереди**:
+> - `email-send` — асинхронная отправка email. Сейчас через неё идёт **только
+>   2FA login-code** (`MailService.enqueue2faCode`); все остальные mail-вызовы
+>   пока синхронны (помечены `// Phase 9: migrate to email-send queue`) и
+>   мигрируют в полном Phase 9.
+> - `chat-notify-wyjazd` — нотификация в Google Chat при регистрации выезда
+>   (см. [Google Chat notifications](#google-chat-notifications)).
+>
+> Connection: общий `REDIS_URL` (выделенное BullMQ-подключение с
+> `maxRetriesPerRequest: null` — блокирующие команды BullMQ этого требуют; нельзя
+> переиспользовать `RedisService.client`). Остальные очереди/процессоры из таблицы
+> ниже — TODO полного Phase 9.
+
 ## Background jobs (cron) — BullMQ
 
 ### Что переносим
@@ -14,7 +29,7 @@
 | onOpen | `onOpen` (`Code.gs:6950`) | при открытии Sheet | **Не нужен** |
 | Refresh-token cleanup | — (новое) | ежедневно | BullMQ scheduled job |
 
-> Чат не реализуем (см. [17-migration-roadmap.md#что-мы-не-делаем](17-migration-roadmap.md)) — `_cleanupOldChatMessages` из `Code.gs` пропускаем.
+> Внутренний per-claim чат не реализуем (см. [17-migration-roadmap.md#что-мы-не-делаем](17-migration-roadmap.md)) — `_cleanupOldChatMessages` из `Code.gs` пропускаем. **Это НЕ про** исходящую Google Chat нотификацию о выездах — та новая фича, см. [Google Chat notifications](#google-chat-notifications).
 
 ### Структура BullMQ
 
@@ -95,7 +110,14 @@ export class DailyRemindersProcessor extends WorkerHost {
 
 ### Email очередь
 
-Все исходящие email идут через очередь, не sync. Преимущество:
+> **Текущее состояние (Phase 9, частично):** очередь `email-send` уже поднята
+> (in-process worker `EmailSendProcessor`), но через неё идёт **только 2FA
+> login-code** (`MailService.enqueue2faCode` → процессор зовёт прежний
+> синхронный `send2faCode`, который сам пишет строку в `MailJobsRegistry`, так
+> что `GET /diagnostics/mails` не затронут). Остальные шаблоны ниже пока
+> синхронны и мигрируют в полном Phase 9.
+
+В целевом состоянии все исходящие email идут через очередь, не sync. Преимущество:
 - Если Gmail rate-limit (250/день free, выше для workspace) — retry.
 - Если отправка медленная — не блокируем HTTP-ответ пользователю.
 - Видим в bull-board UI кто что отправляет, ошибки, retry.
@@ -549,6 +571,64 @@ GPS_CACHE_TTL_SEC=300            # 5 минут — больше TTL polling-а,
 5. Подкрутить TTL кэша / polling-интервал по факту нагрузки.
 6. (Опционально) сохранять позиции в долгоиграющую таблицу `vehicle_gps_log` для history-фич.
 
+## Google Chat notifications
+
+> **Не путать с «no chat».** Правило «чат не реализуем» относится к ЛЕГАСИ
+> per-claim internal chat внутри приложения (`_cleanupOldChatMessages` и т.п.).
+> Здесь речь про **исходящую** нотификацию в внешний Google Chat space через
+> incoming webhook — это новая интеграция, а не возврат внутреннего чата.
+
+Когда перевозчик регистрирует выезд (`POST /delegations` → `DelegationsService.add`,
+статус `zgloszony`), система постит **сообщение из ровно 4 строк** в постоянный
+Google Chat space через incoming-webhook. Триггер — немедленно при создании
+выезда, без approval-gate. Доставка — через очередь `chat-notify-wyjazd`
+(in-process worker), POST уходит **off the request path** — нотификация **никогда
+не ломает и не задерживает** `add()` (enqueue обёрнут в try/catch, warn-only).
+
+### Контракт сообщения (4 строки, TZ Europe/Warsaw)
+
+```
+WYJAZD: <departureAt DD/MM/YYYY HH:MM> / <departureCountry> / <departurePostalCode>
+ZJAZD: <plannedReturnAt DD/MM/YYYY> / <returnCountry> / <returnPostalCode>
+ZESPÓŁ PROWADZĄCY: <planista> / <dyspozytor> / <weryfikator>
+OPIEKUN: <opiekun>
+```
+
+- `departureAt` — с временем (`HH:MM`); `plannedReturnAt` — только дата.
+- Источники команды:
+  - planista = `Vehicle.planner.name`, dyspozytor = `Vehicle.dispatcher.name`
+    (любое может быть `null` → имя просто **опускается** из строки `ZESPÓŁ`,
+    без пустого слота и без `//`).
+  - weryfikator = **единственный** активный `User` с ролью `weryfikator`
+    (`findFirst … active: true, orderBy createdAt asc`) — НЕ per-vehicle.
+    0 активных → опускается; >1 → берётся первый + `logger.warn`.
+  - opiekun = `Carrier.opiekun.name` (опекун перевозчика выезда). `null` → `—`.
+  - `ZESPÓŁ PROWADZĄCY:` склеивает присутствующие имена через ` / `.
+
+### Конфигурация
+
+- Webhook URL — env `GOOGLE_CHAT_WYJAZD_WEBHOOK_URL` (**optional**). Прецедент
+  optional-секрета — GPS vendor keys.
+- **URL не задан → процессор no-op silently** (job завершается успешно, пишется
+  log-skip) — чтобы dev / test / Mailhog не падали. В `.env.example` значение
+  пустое.
+
+### Доставка и надёжность
+
+- Очередь `chat-notify-wyjazd`, job name `wyjazd`.
+- **Dedup:** стабильный `jobId: 'chat-wyjazd-' + delegationId` — повторный
+  enqueue для того же выезда не плодит дубль.
+- Retry: `attempts: 5`, `backoff: exponential, delay 2000`. Сам POST —
+  10s timeout + 2-3 ретрая на 5xx/network (`postToChatWebhook`, POST-вариант
+  GET-only `fetchJsonWithRetry`). На исчерпании ретраев процессор **бросает** —
+  BullMQ применяет свою attempt/backoff-политику.
+
+### Future (Tier-2)
+
+@mentions конкретных людей (planista/dyspozytor/opiekun) в Chat-сообщении —
+требует Google Chat user IDs (не email/name). Выносим за рамки текущей итерации;
+сейчас постим plain-text имена.
+
 ## Секреты и конфиги
 
 Все ключи (Gmail private key, S3 credentials, JWT secrets) — в `.env` для dev, в secrets-manager для prod (Railway env vars / AWS Secrets Manager / Doppler).
@@ -661,7 +741,7 @@ export class AppModule {}
 
 ## Что НЕ делаем
 
-- Чат — выпиливается полностью (см. [17-migration-roadmap.md#что-мы-не-делаем](17-migration-roadmap.md)).
+- Внутренний per-claim чат — выпиливается полностью (см. [17-migration-roadmap.md#что-мы-не-делаем](17-migration-roadmap.md)). Это про легаси-чат внутри приложения, а **не** про исходящую Google Chat нотификацию о выездах ([Google Chat notifications](#google-chat-notifications)) — та реализована.
 - Долгая сессия для интеграций (VIES, Biała Lista) — все запросы синхронны, в крайнем случае job очереди.
 - Push-нотификации в браузер — пока не запрошено.
 - Real-time updates через WebSockets — нет необходимости (нет чата, верификация — индивидуальная).

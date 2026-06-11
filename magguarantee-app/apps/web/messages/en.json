@@ -588,14 +588,23 @@
       "oczekujeNaAutoryzacje": "Awaiting authorization"
     },
     "sidebar": {
-      "urgent": "Needs attention",
-      "urgentEmpty": "No urgent claims",
       "recent": "Recent activity",
       "recentEmpty": "No activity yet",
       "topCarriers": "Top carriers",
       "topCarriersEmpty": "No data",
       "reklamacje": "Reclamations",
       "reklamacjeUnit": "open"
+    },
+    "sla": {
+      "overdueTitle": "Overdue",
+      "dueSoonTitle": "Deadline approaching",
+      "allClear": "No claims need attention",
+      "rowAria": "Claim {nrZgl} — {status}, open verification",
+      "countdown": {
+        "overdue": "{days, plural, one {# day overdue} other {# days overdue}}",
+        "lastDay": "last day today",
+        "dueSoon": "{days, plural, one {# working day} other {# working days}}"
+      }
     }
   },
   "limits": {

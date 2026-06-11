@@ -555,6 +555,12 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
 
 **Цель:** все integrations работают как в проде. Это не отдельная phase в timeline-е — задачи распределяются по предыдущим фазам, но выделены отдельно для трекинга.
 
+> **BullMQ поднят рано (in-process):** очереди `email-send` и `chat-notify-wyjazd`
+> уже работают внутри API-процесса для двух потребителей — 2FA login-code email
+> и Google Chat нотификация о выездах. Остальные очереди/шаблоны (`daily-reminders`,
+> `weekly-report`, `token-cleanup`, миграция остальных mail-вызовов, Gmail API)
+> отложены до полного Phase 9. Deps: `@nestjs/bullmq@10.2.3`, `bullmq@5.78.0`.
+
 ### Шаги
 
 1. **Gmail API setup** (см. [16-jobs-and-integrations.md](16-jobs-and-integrations.md#email-через-gmail-api)).
@@ -637,6 +643,8 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
 ## Фаза 11+ — Wyjazd approval workflow (планируется после launch)
 
 > **Status:** PLANNED — спецификация зафиксирована с заказчиком 2026-05-25. Реализация после Phase 10 launch. Решение по роли одобряющего открыто (см. ниже).
+>
+> 🔁 **Update 2026-06-11 — связь wniosek ↔ wyjazd ПОДТВЕРЖДЕНА (не отменяется).** В одной из сессий связку ошибочно пометили «отменённой» (потеря контекста между сессиями) — это недоразумение; связь остаётся **ядром этой фазы**. По уточнённой бизнес-инфо механизм эволюционировал: gating-статус для подачи wniosek смещается с `zjechal` на новый **`zakończony`** (рейс закрыт **И** weryfikator уже проставил/проверил км по каждому дню рейса — см. daily-km доску weryfikatora, Phase 7), а `mileage` wniosku **выводится из суммы дневных км weryfikatora**, а не вводится перевозчиком. Перевозчик в идеале лишь выбирает `zakończony`-выезд и подтверждает. Открытые детали (привязка через выбор машины vs прямой выбор выезда; точная семантика `zakończony` относительно `zjechal`) — в Шаге B.
 
 Главная идея: расширить wyjazd с self-service регистрации carrier-а до полноценного approval workflow с участием MagTrans, и связать wyjazd ↔ wniosek жёсткой связью (один wniosek подаётся на один конкретный wyjazd, а не на свободный календарный диапазон).
 
@@ -667,6 +675,12 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
   - km-calc получает те же входы (from, to, корректировки часов) — реализация `calcKmGwarantPerMonth` не меняется.
 - **UI carrier:** в форме нового wniosek — селект из своих wyjazdy в статусе `zjechal`, у которых ещё нет привязанного wniosek (filter `WHERE NOT EXISTS (SELECT 1 FROM claim WHERE delegation_id = d.id)`).
 - **Detail wyjazd** дополняется секцией «Powiązany wniosek» с линком (если есть).
+
+> 🔁 **Эволюция Шага B (2026-06-11).** По уточнённому бизнес-флоу подача wniosek опирается не на `zjechal`, а на новый терминальный статус **`zakończony`** — рейс закрыт **И** weryfikator проставил/проверил км по каждому дню рейса (daily-km доска weryfikatora, Phase 7). Следствия:
+> - Перевозчик **не вводит `mileage` руками** — пробег берётся как **Σ дневных км** weryfikatora за период выезда (предзаполняется; перевозчик подтверждает либо подаёт reklamację — как с любыми другими числами).
+> - Форма wniosek сводится к **выбору `zakończony`-выезда** (или машины → её закрытых рейсов) без привязанного wniosek; период + пробег подтягиваются автоматически.
+> - `calcKmGwarantPerMonth` по-прежнему не меняется — на вход те же (from, to, корректировки часов).
+> - **Открыто:** вводить ли `zakończony` отдельным статусом после `zjechal` или это переименование/слияние; точный механизм выбора (по машине vs прямой выбор выезда). Зафиксировать перед стартом реализации.
 
 #### Шаг C — Approval workflow для wyjazd
 
@@ -702,6 +716,8 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
 | 3. Новая роль `akceptant_wyjazdow` | Clean separation; нагрузка на новое лицо, а не на существующее | +1 роль в матрице доступа (станет 9 ролей), +миграция, +новые seed-юзеры |
 
 **Дефолтная рекомендация:** вариант 2 — расширить scope `weryfikator`. У него уже есть read-доступ ко всем wyjazd и mutate их статуса; акцепт логически встраивается в тот же flow. Решение фиксируется перед стартом Phase 11 после обсуждения с заказчиком.
+
+> ⚠️ **Note 2026-06-11 — рекомендация «вариант 2» устарела.** После Phase 7 рефорка `weryfikator` занят ежедневным per-vehicle route-status/км и с выездами не работает (см. `delegations.controller.ts` — transition-хендлеры удалены). Реальный акцепт-флоу по новой инфо: роль **Arkadiusza** (назначает zespół prowadzący + указывает экспортёра) + **importer**, который ставит выезду `zaakceptowany` по факту наличия **`zlecenie` в SpedTrans** (zlecenie = твёрдый гарант, что машина выедет; `zgłoszenie` перевозчика — мягкое). Это пересматривает Шаг C (роль одобряющего + статус-машину выезда) — решение открыто.
 
 ### Влияние на существующие модели
 

@@ -256,6 +256,8 @@
 - DB CHECK на длину: `returnCountry` 2..8 символов (covers `EL`), `returnPostalCode` ≤ 16. Формат-валидация (per-country regex) — на Zod-уровне через `EU_POSTAL_CODES` (см. `packages/shared/src/constants/eu-postal-codes.ts`).
 
 > 🗓️ **PLANNED (Phase 11+):** approval workflow для Delegation + жёсткая связь `Claim.delegationId` (один wniosek на один wyjazd) + блок `departureAt < today`. Появятся новые status-ы `oczekuje_na_akceptacje` / `odrzucony`, поля `plannerSnapshotId` / `dispatcherSnapshotId` / `approvedById` / `approvedAt` / `rejectedById` / `rejectedAt` / `rejectionReason`. Полная спецификация — [17-migration-roadmap.md#фаза-11--wyjazd-approval-workflow-планируется-после-launch](17-migration-roadmap.md#фаза-11--wyjazd-approval-workflow-планируется-после-launch).
+>
+> 🔁 **Подтверждено 2026-06-11:** связь `Claim.delegationId` — **ядро фазы, не отменяется** (кратковременная «отмена» 2026-06-09 была недоразумением из-за потери контекста между сессиями). Эволюция: gating-статус выезда для подачи wniosek смещается к новому **`zakończony`** (рейс закрыт + км weryfikatora проверены по дням), а `mileage` wniosku **выводится из Σ дневных км weryfikatora** — перевозчик в идеале лишь выбирает `zakończony`-выезд и подтверждает. Детали — в roadmap-спеке (Шаг B).
 
 ### `MonthlyLimit` — лимиты на месяц
 

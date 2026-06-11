@@ -588,14 +588,23 @@
       "oczekujeNaAutoryzacje": "Czeka na autoryzację"
     },
     "sidebar": {
-      "urgent": "Wymaga uwagi",
-      "urgentEmpty": "Brak pilnych wniosków",
       "recent": "Ostatnia aktywność",
       "recentEmpty": "Brak aktywności",
       "topCarriers": "Top przewoźnicy",
       "topCarriersEmpty": "Brak danych",
       "reklamacje": "Reklamacje",
       "reklamacjeUnit": "otwartych"
+    },
+    "sla": {
+      "overdueTitle": "Po terminie",
+      "dueSoonTitle": "Zbliża się termin",
+      "allClear": "Brak wniosków wymagających uwagi",
+      "rowAria": "Wniosek {nrZgl} — {status}, otwórz weryfikację",
+      "countdown": {
+        "overdue": "{days, plural, one {# dzień po terminie} few {# dni po terminie} many {# dni po terminie} other {# dni po terminie}}",
+        "lastDay": "dziś ostatni dzień",
+        "dueSoon": "{days, plural, one {# dzień roboczy} few {# dni robocze} many {# dni roboczych} other {# dni roboczych}}"
+      }
     }
   },
   "limits": {

@@ -6,18 +6,23 @@ import type { ClaimStatus, Role } from '@magguarantee/shared';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
- * Compact claim summary used by the dashboard `urgent` list. We deliberately
- * skip the full `ClaimRow` flatten — the dashboard doesn't render breakdown
- * or attachments, and the cheaper query keeps the endpoint snappy.
+ * Compact claim row used to bucket the verification-SLA widget
+ * (docs/21-pracownik-verification-sla.md §4). We deliberately skip the full
+ * `ClaimRow` flatten — the dashboard doesn't render breakdown or attachments,
+ * and the cheaper query keeps the endpoint snappy.
+ *
+ * `anchorDate` is the SLA anchor: `statusChangedAt` falling back to
+ * `createdAt` when null (rare legacy/edge rows). The service buckets it via
+ * `bucketForAnchor` and drops `onTrack`.
  */
-export interface DashboardClaimSummaryRow {
+export interface DashboardSlaCandidateRow {
   id: string;
   nrZgl: string;
   status: ClaimStatus;
   carrierName: string | null;
   vehiclePlate: string | null;
-  paymentEur: number | null;
-  updatedAt: Date;
+  /** SLA anchor — `statusChangedAt ?? createdAt`. */
+  anchorDate: Date;
 }
 
 export interface DashboardAuditRow {
@@ -86,27 +91,29 @@ export class DiagnosticsRepository {
   }
 
   /**
-   * Urgent claims: `status=NA_WERYFIKACJI` and `updatedAt < now-3d`. Capped at
-   * 20 rows. The dashboard sidebar surfaces these as a quick-action list.
+   * ALL claims currently in `NA_WERYFIKACJI` — the "on the clock" set for the
+   * verification-SLA widget (docs/21 §4). Uses the `@@index([status,
+   * statusChangedAt])` index. The service buckets these via `bucketForAnchor`
+   * (overdue / dueSoon / drop onTrack); we return every NA_WERYFIKACJI row
+   * because the bucket depends on the Polish working-day calendar, which can't
+   * be expressed as a SQL predicate.
+   *
+   * The anchor is `statusChangedAt ?? createdAt` — `statusChangedAt` is
+   * re-stamped on every status transition (incl. a REKLAMACJA bounce back to
+   * verification), so the clock restarts correctly; the `createdAt` fallback
+   * covers rare rows where `statusChangedAt` was never set.
    */
-  async findUrgentNaWeryfikacji(args: {
-    olderThan: Date;
-    limit: number;
-  }): Promise<DashboardClaimSummaryRow[]> {
+  async findNaWeryfikacjiForSla(): Promise<DashboardSlaCandidateRow[]> {
     const rows = await this.prisma.tx.claim.findMany({
-      where: {
-        status: PrismaClaimStatus.NA_WERYFIKACJI,
-        updatedAt: { lt: args.olderThan },
-      },
-      orderBy: { updatedAt: 'asc' },
-      take: args.limit,
+      where: { status: PrismaClaimStatus.NA_WERYFIKACJI },
+      orderBy: { statusChangedAt: 'asc' },
       select: {
         id: true,
         nrZgl: true,
         status: true,
         vehiclePlateSnapshot: true,
-        paymentEur: true,
-        updatedAt: true,
+        statusChangedAt: true,
+        createdAt: true,
         carrier: { select: { user: { select: { name: true, login: true } } } },
       },
     });
@@ -116,8 +123,7 @@ export class DiagnosticsRepository {
       status: r.status as ClaimStatus,
       carrierName: r.carrier?.user.name ?? r.carrier?.user.login ?? null,
       vehiclePlate: r.vehiclePlateSnapshot ?? null,
-      paymentEur: decimalToNumber(r.paymentEur),
-      updatedAt: r.updatedAt,
+      anchorDate: r.statusChangedAt ?? r.createdAt,
     }));
   }
 

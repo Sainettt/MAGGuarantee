@@ -1,8 +1,8 @@
 'use client';
 
 // TanStack Query hook for the employee dashboard aggregate. One-shot query
-// returns all five sections (kpi / urgent / recent / topCarriers /
-// monthlySeries / reklamacje) so we don't fan out into five parallel queries
+// returns all sections (kpi / overdue / dueSoon / recent / topCarriers /
+// monthlySeries / reklamacje) so we don't fan out into parallel queries
 // from a single page. 60s staleTime matches the dashboard refresh cadence
 // implied by docs/14 § DashboardSidebar (`each section refetches
 // independently` is in spec for Phase 5+; Phase 4.3 ships a single endpoint).

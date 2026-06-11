@@ -20,6 +20,7 @@ import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { CarrierReadinessService } from '../carriers/carrier-readiness.service';
 import { CarriersRepository } from '../carriers/carriers.repository';
 import { DriversRepository } from '../drivers/drivers.repository';
+import { ChatNotifierService } from '../integrations/chat/chat-notifier.service';
 import { TrailersRepository } from '../trailers/trailers.repository';
 import { VehiclesRepository } from '../vehicles/vehicles.repository';
 import {
@@ -59,6 +60,7 @@ export class DelegationsService {
     private readonly drivers: DriversRepository,
     private readonly trailers: TrailersRepository,
     private readonly readiness: CarrierReadinessService,
+    private readonly chat: ChatNotifierService,
   ) {}
 
   // ── Submit ──────────────────────────────────────────────
@@ -97,6 +99,22 @@ export class DelegationsService {
       notes: dto.comment ?? null,
       reportedById: user.sub,
     });
+
+    // Side-effect: post the wyjazd to the standing Google Chat space. This is
+    // a fire-and-forget enqueue — the actual webhook POST happens off the
+    // request path in the `chat-notify-wyjazd` processor. It must NEVER break
+    // or delay `add()`, so any failure here is swallowed (warn-only). The
+    // notifier itself also catches internally; the try/catch is belt-and-
+    // suspenders per docs/16-jobs-and-integrations.md#google-chat-notifications.
+    try {
+      await this.chat.notifyWyjazd(row.id);
+    } catch (err) {
+      this.logger.warn({
+        msg: 'chat wyjazd notification enqueue failed (non-fatal)',
+        delegationId: row.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
 
     return this.toDto(row);
   }

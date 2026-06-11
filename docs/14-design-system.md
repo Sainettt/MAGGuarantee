@@ -4184,3 +4184,66 @@ Acceptance (Phase 7.5):
 - [ ] **Nav.** Weryfikator landing `redirect()`s to `/weryfikator/vehicles`; no `WelcomePanel` stub; header logo/home → `/weryfikator/vehicles`; no in-page `<Tabs>`.
 - [ ] **Token policy + dark-mode.** Zero `tailwind.config.ts`/`globals.css` changes; no new badge variant; board, badges, outline buttons, history dialog (`bg-card`) all legible in dark via tokens / `dark:` variants only.
 
+### 7.6 Pracownik dashboard — verification-SLA «attention» severity scale (Phase 7.6)
+
+> **Scope.** The pracownik dashboard replaces the old crude `urgent` list with two SLA «attention» buckets surfaced in `<DashboardSidebar>` (§`<DashboardSidebar>`): **`overdue`** (`workingDaysLeft < 0`) and **`dueSoon`** (`0 ≤ workingDaysLeft ≤ 3`). Spec source: [`21-pracownik-verification-sla.md` §2, §4](21-pracownik-verification-sla.md). Both buckets list `NA_WERYFIKACJI` claims; clicking a row opens the §6.5 verification Dialog.
+>
+> **No new tokens** (Phase 4.4 policy). The two urgency levels map cleanly onto the **existing `danger` (red, brand-aligned) and `warning` (amber) semantics** already used by `StatusBadge`/alert bands. `tailwind.config.ts` / `globals.css` untouched.
+
+#### 7.6.1 Severity scale — two levels, existing semantics only
+
+The palette already expresses two distinct urgency levels, so we reuse them verbatim. **`overdue` = `danger` (strongest, red — aligns with MAGTRANS RED `#dc2626`); `dueSoon` = `warning` (amber).** This mirrors the established `ODRZUCONO → danger` / `NA_WERYFIKACJI → warning` mapping, so the two attention levels read consistently with the rest of the claim UI.
+
+Per-element token classes web-agent applies (light → dark handled by the semantic tokens / `dark:` variants already in §Tailwind config; the `-bg` surfaces + `dark:bg-*/15` follow the §6 alert-band convention):
+
+| Element | `overdue` (red / `danger`) | `dueSoon` (amber / `warning`) |
+|---|---|---|
+| **Group header** (section title row in sidebar) | `text-sm font-bold uppercase tracking-wider text-danger` + leading `<AlertTriangle size={14} className="text-danger" />` + count pill `<Badge variant="outline" className="border-danger/40 text-danger">{n}</Badge>` | `text-sm font-bold uppercase tracking-wider text-warning` + leading `<Clock size={14} className="text-warning" />` + count pill `<Badge variant="outline" className="border-warning/40 text-warning">{n}</Badge>` |
+| **Per-row item** (one claim) | row wrapper `flex items-center gap-2 rounded-md px-2 py-1.5 border-l-2 border-danger bg-danger-bg/40 dark:bg-danger/10 hover:bg-danger-bg/70 dark:hover:bg-danger/15 cursor-pointer transition-colors` + `focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-inset` | same shape with `warning`: `border-l-2 border-warning bg-warning-bg/40 dark:bg-warning/10 hover:bg-warning-bg/70 dark:hover:bg-warning/15` + `focus-visible:ring-warning` |
+| Row content | `nrZgl` `font-medium tabular-nums text-text` · carrier name `text-xs text-text-sub truncate` · plate `text-xs text-text-sub tabular-nums` | identical (urgency carried by the left-border + countdown badge + header tone, not by the body text) |
+| **Countdown badge** (working-days-left) | **`po terminie`** when `< -? ` n/a → fixed label; or **`{n} dni po terminie`** if you surface the overdue magnitude. Class: `inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-semibold whitespace-nowrap bg-danger/15 text-danger border-danger/30 tabular-nums` | **«{n} dni robocze»** (ICU plural: `dzień` / `dni`; `0` → «dziś ostatni dzień»). Class: `… bg-warning/15 text-warning border-warning/30 tabular-nums` |
+
+Notes (locked):
+- **`overdue` is strictly stronger than `dueSoon`** — same colour family as the brand red, full `danger` treatment (left-border, tinted row, red badge). `dueSoon` uses the amber `warning` family one notch down. The two are mutually exclusive (overdue wins, per §2 of the spec) so a claim is never in both.
+- **A11y:** urgency is never colour-alone — every row carries a textual countdown badge («po terminie» / «{n} dni robocze»), and group headers carry an icon + a worded title. Badge contrast: `text-danger`/`text-warning` on the `/15` tinted chip meets AA at `text-xs` `font-semibold` in both themes (same recipe as `StatusBadge`).
+- **Countdown badge label** comes from `workingDaysLeft` (signed): `< 0` → «po terminie» (red); `0` → «dziś ostatni dzień» (amber); `1–3` → «{n} dni robocze» (amber, ICU plural). All `tabular-nums`.
+- **Row interaction:** whole-row click opens the §6.5 verification Dialog; pass `role="button"`, `tabIndex={0}`, Enter/Space handler, and the `focus-visible` ring per the §6.4.3 clickable-row a11y recipe. `aria-label` e.g. «Wniosek {nrZgl} — po terminie, otwórz weryfikację».
+
+#### 7.6.2 Placement in `<DashboardSidebar>` (order + empty states)
+
+The two buckets are **two stacked sections at the top of the sidebar** (`space-y-4` per §`<DashboardSidebar>`), each a `<Card>` with the §7.6.1 group header, **ordered most-urgent-first**:
+
+1. **`overdue`** section — **above** `dueSoon`. Rendered only when `overdue.length > 0`. Card may carry a subtle red accent: `border-danger/30` on the `<Card>` (optional, keep `shadow-sm`).
+2. **`dueSoon`** section — directly below. Rendered only when `dueSoon.length > 0`. Optional `border-warning/30`.
+3. The rest of the sidebar (Recent activity, Monthly trend, etc., per §`<DashboardSidebar>`) follows unchanged.
+
+Empty-state rules:
+- **One bucket empty, the other not:** omit the empty section entirely (no «brak» placeholder card — a zero-count attention card is noise). Render only the non-empty one.
+- **Both empty (nothing needs attention):** collapse the two sections into **one quiet «all-clear» card** — `<Card>` with neutral surface (no red/amber), a `<CheckCircle2 size={16} className="text-success" />` + «Brak wniosków wymagających uwagi» / "No claims need attention", `text-sm text-text-sub`. **Calm, not alarming** — this is the good state (mirrors the §7.5.6 «fresh-day ≠ error» principle and the §5 digest «empty → no email»). Do **not** render two empty red/amber shells.
+- **Loading:** each section independent `<Skeleton>` 3 rows (per §`<DashboardSidebar>` loading rule); don't block the whole sidebar.
+
+This **supersedes** the «Urgent / Required notes» row in the §`<DashboardSidebar>` section table: that single `urgent` list is replaced by the two SLA buckets above (the «Required notes» list, if still wanted, stays a separate neutral section — it is not an SLA bucket).
+
+#### 7.6.3 Digest email accent (confirmation)
+
+The daily verification-digest email (`mail/templates/verification-digest.tsx`, §5 of the spec) **keeps the brand accent `#dc2626`** — same as `authorization-request.tsx`. Email clients have poor/no support for CSS custom properties and `dark:` variants, so the digest uses **inline brand-red `#dc2626`** for the header bar / heading accent and plain-text fallback, exactly per the existing mail-template convention. Inside the body, the two buckets may be visually separated (e.g. an «Po terminie» group heading in `#dc2626` and a «Zbliża się termin» group in an amber `#f97316` heading), but the **primary brand accent stays `#dc2626`** — no per-email theme tokens, no new colours. This is a hard-coded inline-style context (email), which is the one place inline styles are correct and expected.
+
+#### 7.6.4 Components / tokens / acceptance (Phase 7.6)
+
+| Change | Where | Notes |
+|---|---|---|
+| `<SlaAttentionSection>` (two instances: `overdue` red, `dueSoon` amber) | `apps/web/components/dashboard/` | Composes `<Card>` + §7.6.1 header + clickable rows. Severity passed as a prop (`'overdue' \| 'dueSoon'`) selecting `danger`/`warning` classes. |
+| `<SlaCountdownBadge workingDaysLeft>` | same | Renders «po terminie» / «dziś ostatni dzień» / «{n} dni robocze» with the §7.6.1 badge classes; ICU plural via next-intl. |
+| All-clear card (both buckets empty) | dashboard sidebar | Neutral `<Card>` + `text-success` check + muted text. |
+| Replace old `urgent` sidebar section | `app/(employee)/employee/dashboard/` | Wire the two new sections from `DashboardDto.overdue[]` / `dueSoon[]`. |
+| i18n `dashboard.sla.{overdueTitle,dueSoonTitle,allClear,countdown.*(ICU plural)}` | `messages/pl.json` / `en.json` | — |
+| Digest email keeps inline `#dc2626` brand accent | `mail/templates/verification-digest.tsx` | api-agent; §7.6.3. No DS token (email is inline-style by design). |
+| **0** changes to `tailwind.config.ts` / `globals.css`; **0** new colour/badge variants | — | `danger`/`warning` semantics + `-bg` surfaces already exist. |
+
+Acceptance (Phase 7.6):
+- [ ] **Two-level severity, existing tokens.** `overdue` → `danger` (red, brand-aligned), `dueSoon` → `warning` (amber); applied to group header, per-row left-border + tinted surface, and countdown badge; **no new tokens / badge variants**.
+- [ ] **Order.** `overdue` section sits above `dueSoon` in `<DashboardSidebar>`; empty buckets are omitted; both-empty collapses to one calm `text-success` «all-clear» card (no red/amber empty shells).
+- [ ] **A11y.** Urgency never colour-alone (worded countdown badge + header icon/title); rows keyboard-activatable (`role=button`, Enter/Space, `focus-visible:ring-{danger,warning}`); AA contrast on `/15` badges both themes.
+- [ ] **Digest email.** Brand accent stays inline `#dc2626`; empty → no email (§5); no per-email theme tokens.
+- [ ] **Token policy + dark-mode.** Zero `tailwind.config.ts`/`globals.css` changes; all surfaces legible in dark via `dark:bg-{danger,warning}/10..15` variants.
+

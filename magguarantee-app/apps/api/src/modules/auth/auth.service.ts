@@ -95,7 +95,10 @@ export class AuthService {
     }
 
     const { sessionToken, code } = await this.twoFactor.issueCode(user.id);
-    await this.mail.send2faCode(user.email, code);
+    // Phase 9 (early) — enqueue onto the `email-send` BullMQ queue; the
+    // in-process EmailSendProcessor delivers off the request path (Mailhog in
+    // dev). See docs/15-auth-strategy.md#2fa.
+    await this.mail.enqueue2faCode(user.email, code);
 
     return {
       sessionToken,
@@ -141,7 +144,8 @@ export class AuthService {
     }
     const user = await this.users.findById(userId);
     if (user?.email) {
-      await this.mail.send2faCode(user.email, result.code);
+      // Phase 9 (early) — same async path as the login send.
+      await this.mail.enqueue2faCode(user.email, result.code);
     }
     return { ok: true, cooldownSec: result.cooldownSec };
   }

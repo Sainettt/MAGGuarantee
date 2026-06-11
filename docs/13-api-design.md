@@ -283,6 +283,11 @@ soft-delete'ятся (объект в MinIO остаётся).
 | POST `/delegations` | `addDelegacja` (carrier) |
 | POST `/delegations/:id/cancel` | `cancelDelegacja` (**carrier-only** — свои `zgloszony`; weryfikator НЕ имеет cancel) |
 
+> **Side-effect (Google Chat):** контракт `POST /delegations` не меняется. После
+> создания выезда `add()` асинхронно постит 4-строчную нотификацию в Google Chat
+> space (очередь `chat-notify-wyjazd`, off the request path — никогда не ломает и
+> не задерживает ответ). См. [16-jobs-and-integrations.md#google-chat-notifications](16-jobs-and-integrations.md#google-chat-notifications).
+
 > ⚠️ **Удалено (rework 2026-06-10 #2):** `POST /delegations/:id/in-transit` и `POST /delegations/:id/returned` (`markDelegacjaInTransit/Returned`). `weryfikator` больше не управляет статусом выездов — он работает с операционным статусом **машин** (см. таблицу Vehicles ниже). `DelegationStatus` enum значения `w_trasie`/`zjechal` сохранены, но через приложение не проставляются. Полная спека: [`20-phase-7-eksport-weryfikator.md` § 0](20-phase-7-eksport-weryfikator.md).
 
 ### Vehicle route-status (weryfikator) — `/api/v1/vehicles`

@@ -6,9 +6,9 @@ import {
 
 import type {
   DashboardAuditRowSummary,
-  DashboardClaimSummary,
   DashboardDto,
   DashboardMonthlyPoint,
+  DashboardSlaClaim,
   DashboardTopCarrier,
   DiagnosticsClaimsHealthDto,
   DiagnosticsDbHealthDto,
@@ -16,14 +16,15 @@ import type {
   DiagnosticsMailJobListDto,
   DiagnosticsResendMailResponse,
 } from '@magguarantee/shared';
+import { bucketForAnchor } from '@magguarantee/shared';
+
+import type { DashboardSlaCandidateRow } from './diagnostics.repository';
 
 import { MailJobsRegistry, type MailJobRecord } from '../mail/mail-jobs.registry';
 import { MailService } from '../mail/mail.service';
 import { RedisService } from '../redis/redis.service';
 import { DiagnosticsRepository } from './diagnostics.repository';
 
-const DASHBOARD_URGENT_OLDER_THAN_DAYS = 3;
-const DASHBOARD_URGENT_LIMIT = 20;
 const DASHBOARD_RECENT_LIMIT = 10;
 const DASHBOARD_TOP_CARRIERS_LIMIT = 5;
 const DASHBOARD_MONTHLY_WINDOW_MONTHS = 12;
@@ -62,27 +63,23 @@ export class DiagnosticsService {
   // ── Dashboard ───────────────────────────────────────────
 
   async getDashboard(now: Date = new Date()): Promise<DashboardDto> {
-    const olderThan = subtractDays(now, DASHBOARD_URGENT_OLDER_THAN_DAYS);
     const monthlyFrom = subtractMonths(
       startOfMonthUtc(now),
       DASHBOARD_MONTHLY_WINDOW_MONTHS - 1,
     );
     const monthlyTo = addMonths(startOfMonthUtc(now), 1);
 
-    // Run all five aggregations in parallel — they're independent reads.
+    // Run all aggregations in parallel — they're independent reads.
     const [
       statusCounts,
-      urgent,
+      slaCandidates,
       recent,
       topCarriers,
       monthlySeries,
       reklamacjeCount,
     ] = await Promise.all([
       this.repo.countClaimsByStatus(),
-      this.repo.findUrgentNaWeryfikacji({
-        olderThan,
-        limit: DASHBOARD_URGENT_LIMIT,
-      }),
+      this.repo.findNaWeryfikacjiForSla(),
       this.repo.findRecentClaimAudit(DASHBOARD_RECENT_LIMIT),
       this.repo.findTopCarriersByPayment({
         limit: DASHBOARD_TOP_CARRIERS_LIMIT,
@@ -90,6 +87,8 @@ export class DiagnosticsService {
       this.repo.findMonthlySeries({ from: monthlyFrom, to: monthlyTo }),
       this.repo.countReklamacje(),
     ]);
+
+    const { overdue, dueSoon } = this._bucketSla(slaCandidates, now);
 
     const total =
       statusCounts.NA_WERYFIKACJI +
@@ -111,17 +110,8 @@ export class DiagnosticsService {
           statusCounts.OCZEKUJE_NA_AUTORYZACJE +
           statusCounts.AUTORYZACJA_KWOTA_MAKSIMA,
       },
-      urgent: urgent.map(
-        (u): DashboardClaimSummary => ({
-          id: u.id,
-          nrZgl: u.nrZgl,
-          status: u.status,
-          carrierName: u.carrierName,
-          vehiclePlate: u.vehiclePlate,
-          paymentEur: u.paymentEur,
-          updatedAt: u.updatedAt.toISOString(),
-        }),
-      ),
+      overdue,
+      dueSoon,
       recent: recent.map(
         (r): DashboardAuditRowSummary => ({
           id: r.id,
@@ -149,6 +139,41 @@ export class DiagnosticsService {
       ),
       reklamacje: { count: reklamacjeCount },
     };
+  }
+
+  /**
+   * Buckets every `NA_WERYFIKACJI` candidate via the shared Polish-working-day
+   * SLA helper (docs/21 §2): `overdue` (workingDaysLeft < 0) and `dueSoon`
+   * (0..3). `onTrack` rows are dropped. Each bucket is sorted by
+   * `workingDaysLeft` ascending (most urgent / most overdue first), and the
+   * signed `workingDaysLeft` is attached per row for the web widget label.
+   */
+  private _bucketSla(
+    candidates: DashboardSlaCandidateRow[],
+    now: Date,
+  ): { overdue: DashboardSlaClaim[]; dueSoon: DashboardSlaClaim[] } {
+    const overdue: DashboardSlaClaim[] = [];
+    const dueSoon: DashboardSlaClaim[] = [];
+
+    for (const c of candidates) {
+      const { bucket, workingDaysLeft } = bucketForAnchor(c.anchorDate, now);
+      if (bucket === 'onTrack') continue;
+      const row: DashboardSlaClaim = {
+        id: c.id,
+        nrZgl: c.nrZgl,
+        status: c.status,
+        carrierName: c.carrierName,
+        vehiclePlate: c.vehiclePlate,
+        workingDaysLeft,
+      };
+      (bucket === 'overdue' ? overdue : dueSoon).push(row);
+    }
+
+    const byUrgency = (a: DashboardSlaClaim, b: DashboardSlaClaim): number =>
+      a.workingDaysLeft - b.workingDaysLeft;
+    overdue.sort(byUrgency);
+    dueSoon.sort(byUrgency);
+    return { overdue, dueSoon };
   }
 
   // ── Mails ───────────────────────────────────────────────

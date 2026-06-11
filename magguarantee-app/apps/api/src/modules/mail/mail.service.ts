@@ -1,11 +1,23 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
 import { render } from '@react-email/render';
+import type { Queue } from 'bullmq';
 
+import { QUEUE_EMAIL_SEND } from '../jobs/queue-names';
+import {
+  EMAIL_SEND_JOB,
+  type EmailSendJobData,
+} from './email-send.job';
 import { MailJobsRegistry, type MailJobPayload } from './mail-jobs.registry';
 import {
   AuthorizationRequestEmail,
   type AuthorizationRequestProps,
 } from './templates/authorization-request';
+import {
+  VerificationDigestEmail,
+  workingDaysLabel,
+  type VerificationDigestProps,
+} from './templates/verification-digest';
 import { SmtpProvider } from './providers/smtp.provider';
 
 /**
@@ -20,9 +32,25 @@ import { SmtpProvider } from './providers/smtp.provider';
  */
 export interface IMailService {
   send2faCode(email: string, code: string): Promise<void>;
+  /**
+   * Phase 9 (early) — enqueue the 2FA login-code email onto the `email-send`
+   * queue instead of sending it synchronously. The in-process
+   * `EmailSendProcessor` calls `send2faCode` off the request path. Falls back
+   * to a synchronous send when the queue is unavailable (e.g. unit tests that
+   * construct MailService without the queue) so the code is never dropped.
+   */
+  enqueue2faCode(email: string, code: string): Promise<void>;
   sendAuthorizationRequest(
     email: string,
     props: AuthorizationRequestProps,
+  ): Promise<void>;
+  /**
+   * Verification-SLA daily digest (docs/21 §5). One email per recipient
+   * listing overdue + due-soon claims awaiting verification.
+   */
+  sendVerificationDigest(
+    email: string,
+    props: VerificationDigestProps,
   ): Promise<void>;
   /** Phase 4.5 — generic resend backing `POST /diagnostics/mails/:jobId/resend`. */
   resendBarePayload(payload: MailJobPayload): Promise<void>;
@@ -32,13 +60,41 @@ export interface IMailService {
 export class MailService implements IMailService {
   private readonly logger = new Logger(MailService.name);
 
-  // `mailJobs` is optional so the existing 1-arg constructor in unit tests
-  // (and any future seed scripts) keeps compiling — production wiring
-  // passes it through DI. When null, send paths skip the registry write.
+  // `mailJobs` and `emailQueue` are optional so the existing 1-arg constructor
+  // in unit tests (and any future seed scripts) keeps compiling — production
+  // wiring passes them through DI. When `mailJobs` is null, send paths skip the
+  // registry write; when `emailQueue` is null, `enqueue2faCode` falls back to a
+  // synchronous send so the code is never dropped.
   constructor(
     private readonly smtp: SmtpProvider,
-    private readonly mailJobs?: MailJobsRegistry,
+    @Optional() private readonly mailJobs?: MailJobsRegistry,
+    @Optional()
+    @InjectQueue(QUEUE_EMAIL_SEND)
+    private readonly emailQueue?: Queue<EmailSendJobData>,
   ) {}
+
+  /**
+   * Phase 9 (early) — enqueue the 2FA login-code email. The in-process
+   * `EmailSendProcessor` dequeues and calls `send2faCode` (the SMTP path +
+   * `MailJobsRegistry` record, unchanged). If the queue is not wired (unit
+   * tests / scripts), fall back to a direct synchronous send.
+   */
+  async enqueue2faCode(email: string, code: string): Promise<void> {
+    if (!this.emailQueue) {
+      await this.send2faCode(email, code);
+      return;
+    }
+    await this.emailQueue.add(
+      EMAIL_SEND_JOB,
+      { template: '2fa-code', email, code },
+      {
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 5000 },
+        removeOnComplete: { age: 3600 * 24 * 7 },
+        removeOnFail: false,
+      },
+    );
+  }
 
   async send2faCode(email: string, code: string): Promise<void> {
     const subject = 'Kod weryfikacyjny — MAGGuarantee';
@@ -124,6 +180,90 @@ export class MailService implements IMailService {
       });
       throw err;
     }
+  }
+
+  /**
+   * Verification-SLA daily digest (docs/21 §5).
+   *
+   * Renders the React-Email digest to HTML + a plain-text fallback and ships
+   * both via the SMTP provider. The caller (cron service) invokes this once
+   * per ACTIVE pracownik recipient inside a `Promise.allSettled`, so a single
+   * bad address never blocks the rest — each send `record()`s its own
+   * `completed` / `failed` row in the mail registry. The subject carries the
+   * total at-risk count for inbox-scannability.
+   */
+  async sendVerificationDigest(
+    email: string,
+    props: VerificationDigestProps,
+  ): Promise<void> {
+    const total = props.overdue.length + props.dueSoon.length;
+    const subject = `Weryfikacja zgłoszeń — ${total} wymaga uwagi`;
+    const html = await render(VerificationDigestEmail(props));
+    const text = this.buildVerificationDigestText(props);
+    const payload: MailJobPayload = {
+      to: email,
+      subject,
+      template: 'verification-digest',
+      data: {
+        overdueCount: props.overdue.length,
+        dueSoonCount: props.dueSoon.length,
+      },
+    };
+
+    try {
+      await this.smtp.send({ to: email, subject, text, html });
+      this.logger.log({
+        msg: 'verification digest sent',
+        toMasked: this.maskEmail(email),
+        overdueCount: props.overdue.length,
+        dueSoonCount: props.dueSoon.length,
+      });
+      await this.mailJobs?.record({ payload, state: 'completed' });
+    } catch (err) {
+      this.logger.error({
+        msg: 'verification digest send failed',
+        toMasked: this.maskEmail(email),
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await this.mailJobs?.record({
+        payload,
+        state: 'failed',
+        failedReason: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+  }
+
+  /**
+   * Plain-text fallback for the verification-SLA digest. Mirrors the HTML
+   * structure: overdue group first, then due-soon, each row carrying the same
+   * «po terminie» / «{n} dni robocze» label as the template.
+   */
+  private buildVerificationDigestText(props: VerificationDigestProps): string {
+    const lines: string[] = [
+      'MAGGuarantee — zgłoszenia do weryfikacji',
+      '',
+    ];
+    if (props.overdue.length > 0) {
+      lines.push(`Po terminie (${props.overdue.length}):`);
+      for (const r of props.overdue) {
+        lines.push(
+          `  - ${r.nrZgl} — ${r.carrierName} · ${r.vehiclePlate} · ${workingDaysLabel(r.workingDaysLeft)}`,
+        );
+      }
+      lines.push('');
+    }
+    if (props.dueSoon.length > 0) {
+      lines.push(`Zbliża się termin (${props.dueSoon.length}):`);
+      for (const r of props.dueSoon) {
+        lines.push(
+          `  - ${r.nrZgl} — ${r.carrierName} · ${r.vehiclePlate} · ${workingDaysLabel(r.workingDaysLeft)}`,
+        );
+      }
+      lines.push('');
+    }
+    lines.push(`Otwórz panel weryfikacji: ${props.deeplink}`);
+    return lines.join('\n');
   }
 
   /**
