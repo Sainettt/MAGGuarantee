@@ -13,6 +13,20 @@ export interface ChatWyjazdJobData {
 export const CHAT_WYJAZD_JOB = 'wyjazd' as const;
 
 /**
+ * Delay (ms) before the worker is allowed to pick up a wyjazd job.
+ *
+ * `DelegationsService.add` runs inside the `@Audit()` transaction opened by
+ * `AuditInterceptor` — the delegation row is NOT committed until that handler
+ * resolves. The in-process worker would otherwise dequeue within a few ms and
+ * read through a separate connection that can't see the uncommitted row,
+ * producing a spurious "delegation not found, skipping" (which completes the
+ * job with no retry — silently dropping the notification). A short delay lets
+ * the audit transaction commit first; it commits in sub-second time, so 5 s is
+ * comfortably safe and imperceptible for a chat notification.
+ */
+export const CHAT_WYJAZD_ENQUEUE_DELAY_MS = 5_000;
+
+/**
  * Producer for the Google Chat wyjazd notification.
  *
  * `notifyWyjazd(delegationId)` enqueues a `chat-notify-wyjazd` job. Dedup via a
@@ -41,6 +55,9 @@ export class ChatNotifierService {
         { delegationId },
         {
           jobId: `chat-wyjazd-${delegationId}`,
+          // Wait for the `@Audit()` transaction in DelegationsService.add to
+          // commit before the worker reads the row — see the const's doc.
+          delay: CHAT_WYJAZD_ENQUEUE_DELAY_MS,
           attempts: 5,
           backoff: { type: 'exponential', delay: 2000 },
         },

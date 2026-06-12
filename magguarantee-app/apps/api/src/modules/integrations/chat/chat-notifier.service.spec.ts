@@ -5,6 +5,7 @@
 import type { Queue } from 'bullmq';
 
 import {
+  CHAT_WYJAZD_ENQUEUE_DELAY_MS,
   CHAT_WYJAZD_JOB,
   ChatNotifierService,
   type ChatWyjazdJobData,
@@ -36,6 +37,7 @@ describe('ChatNotifierService.notifyWyjazd', () => {
     expect(data).toEqual({ delegationId: 'del-42' });
     expect(opts).toEqual({
       jobId: 'chat-wyjazd-del-42',
+      delay: CHAT_WYJAZD_ENQUEUE_DELAY_MS,
       attempts: 5,
       backoff: { type: 'exponential', delay: 2000 },
     });
