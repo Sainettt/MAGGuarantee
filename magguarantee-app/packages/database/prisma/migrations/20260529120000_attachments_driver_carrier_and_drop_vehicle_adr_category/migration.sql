@@ -13,7 +13,7 @@
 CREATE TYPE "DriverAttachmentCategory" AS ENUM ('adr');
 
 -- CreateEnum
-CREATE TYPE "CarrierAttachmentCategory" AS ENUM ('insurance', 'license', 'kreptd', 'other');
+CREATE TYPE "CarrierAttachmentCategory" AS ENUM ('insurance', 'license', 'kreptd', 'adr', 'other');
 
 -- AlterEnum (Change 1): recreate VehicleAttachmentCategory without 'adr'.
 -- Step 1: drop the attachment rows that still reference the value being
