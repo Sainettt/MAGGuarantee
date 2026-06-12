@@ -379,11 +379,32 @@ export class VehiclesController {
 
   /**
    * Daily-km history of one vehicle (newest-first), optionally bounded by
-   * `?from&to` (date-only, inclusive). Weryfikator/admin. Drives the
-   * «Historia» modal. Replaces the former `GET /vehicles/:id/route-status`.
+   * `?from&to` (date-only, inclusive). Drives the «Historia» modal for
+   * weryfikator/admin AND the carrier panel's km-calendar for przewoznik.
+   *
+   * Access mirrors `GET /vehicles/:id` (getById) so the read fans out by role
+   * exactly like vehicle detail:
+   *  - weryfikator / admin / planista / dyspozytor → read any vehicle
+   *    (ownership guards short-circuit for these roles — see below);
+   *  - opiekun → only vehicles of carriers they supervise
+   *    (`OpiekunOwnershipGuard` resolves vehicleId → carrierId → opiekunId);
+   *  - przewoznik → only their OWN vehicles (`CarrierOwnershipGuard` resolves
+   *    vehicleId → carrierId and compares to the caller's carrier profile;
+   *    a foreign vehicle yields 403 → no IDOR).
+   *
+   * Both ownership guards are no-ops for the roles they don't govern:
+   * `CarrierOwnershipGuard` returns early unless role==='przewoznik';
+   * `OpiekunOwnershipGuard` bypasses admin and returns early unless
+   * role==='opiekun'. So weryfikator (and the rest) keep full «Historia»
+   * access despite the `@*Owns` decorators.
+   *
+   * The WRITE side (`PUT :id/daily-km`) stays weryfikator/admin-only — carriers
+   * and planners never edit km. Replaces the former `GET /vehicles/:id/route-status`.
    */
   @Get(':id/daily-km')
-  @Roles('weryfikator', 'admin')
+  @Roles('admin', 'opiekun', 'planista', 'dyspozytor', 'przewoznik', 'weryfikator')
+  @OpiekunOwns('id', 'param', 'vehicleId')
+  @CarrierOwns('id', 'param', 'vehicleId')
   async getDailyKm(
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
     @Query(new ZodValidationPipe(VehicleDailyKmHistoryQuerySchema))

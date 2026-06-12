@@ -5,6 +5,10 @@ import { Reflector } from '@nestjs/core';
 
 import type { Role } from '@magguarantee/shared';
 
+import {
+  CarrierOwnershipGuard,
+  OpiekunOwnershipGuard,
+} from '../../common/guards';
 import { ROLES_METADATA_KEY } from '../auth/auth.constants';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -126,10 +130,12 @@ describe('VehiclesController — authorization', () => {
 
   // ── Daily km (Phase 7 REWORK #3 weryfikator km-board) ────
 
-  describe('km-board / daily-km authorization (weryfikator + admin)', () => {
+  describe('km-board / daily-km WRITE authorization (weryfikator + admin)', () => {
+    // NOTE: `getDailyKm` (the READ) is intentionally NOT here — it now fans out
+    // by role like `getById` (carrier reads own machines' km calendar). The
+    // WRITE (`setDailyKm`) and the global board (`kmBoard`) stay locked.
     const DAILY_KM_HANDLERS: (keyof VehiclesController)[] = [
       'setDailyKm',
-      'getDailyKm',
       'kmBoard',
     ];
 
@@ -152,7 +158,7 @@ describe('VehiclesController — authorization', () => {
     });
 
     it.each(['przewoznik', 'eksport', 'planista', 'dyspozytor', 'opiekun'] as const)(
-      'rejects %s on the daily-km endpoints (403)',
+      'rejects %s on the daily-km WRITE endpoints (403)',
       (role) => {
         const u: AuthUser = { ...carrierUser, role };
         for (const handler of DAILY_KM_HANDLERS) {
@@ -162,6 +168,158 @@ describe('VehiclesController — authorization', () => {
         }
       },
     );
+  });
+
+  // ── getDailyKm READ — fans out by role like getById ──────
+  //
+  // Regression for the carrier km-calendar 403 bug: the GET must read the same
+  // role set as `getById` and be scoped by the ownership guards. We assert both
+  // the `@Roles` metadata + `RolesGuard`, and the ownership-guard behavior
+  // (carrier own → OK, carrier foreign → 403, weryfikator → OK via short-circuit).
+
+  describe('getDailyKm READ authorization (role fan-out like getById)', () => {
+    it('reads the getById role set plus weryfikator (keeps Historia access)', () => {
+      // getDailyKm fans out exactly like getById for the carrier/opiekun/planner
+      // roles, and ADDITIONALLY keeps weryfikator (its original audience).
+      expect(rolesFor('getDailyKm').sort()).toEqual([
+        'admin',
+        'dyspozytor',
+        'opiekun',
+        'planista',
+        'przewoznik',
+        'weryfikator',
+      ]);
+      const byIdRoles = rolesFor('getById');
+      for (const r of byIdRoles) {
+        expect(rolesFor('getDailyKm')).toContain(r);
+      }
+    });
+
+    it('@Roles includes przewoznik and weryfikator', () => {
+      const roles = rolesFor('getDailyKm');
+      expect(roles).toContain('przewoznik');
+      expect(roles).toContain('weryfikator');
+    });
+
+    it.each([
+      'admin',
+      'opiekun',
+      'planista',
+      'dyspozytor',
+      'przewoznik',
+      'weryfikator',
+    ] as const)('RolesGuard allows %s on getDailyKm', (role) => {
+      const u: AuthUser = { ...carrierUser, role };
+      expect(guard.canActivate(ctxFor('getDailyKm', u))).toBe(true);
+    });
+
+    it.each(['pracownik', 'eksport'] as const)(
+      'RolesGuard rejects %s on getDailyKm (403)',
+      (role) => {
+        const u: AuthUser = { ...carrierUser, role };
+        expect(() => guard.canActivate(ctxFor('getDailyKm', u))).toThrow(
+          ForbiddenException,
+        );
+      },
+    );
+  });
+
+  // Ownership-guard scoping on getDailyKm. Built with a stubbed Prisma + a full
+  // request context (user + params) so the guards actually resolve vehicleId →
+  // carrierId. The handler carries `@CarrierOwns('id','param','vehicleId')` and
+  // `@OpiekunOwns('id','param','vehicleId')`.
+
+  describe('getDailyKm ownership scoping', () => {
+    const VEHICLE_ID = 'veh-1';
+    const OWN_CARRIER_ID = 'car-own';
+    const OTHER_CARRIER_ID = 'car-other';
+
+    /**
+     * Stub PrismaService: the vehicle `veh-1` belongs to `car-own`; the carrier
+     * profile for user `u-carrier` is `car-own`.
+     */
+    function prismaStub(vehicleCarrierId: string | null) {
+      return {
+        client: {
+          vehicle: {
+            findFirst: async () =>
+              vehicleCarrierId === null
+                ? null
+                : { carrierId: vehicleCarrierId },
+          },
+          carrier: {
+            findFirst: async ({
+              where,
+            }: {
+              where: { userId?: string; id?: string };
+            }) => {
+              // carrier-guard path: resolve caller's carrier profile
+              if (where.userId === 'u-carrier') return { id: OWN_CARRIER_ID };
+              // opiekun-guard path: resolve carrier row by id
+              if (where.id) return { id: where.id, opiekunId: 'op-x' };
+              return null;
+            },
+          },
+        },
+      } as unknown as import('../prisma/prisma.service').PrismaService;
+    }
+
+    function ownershipCtx(
+      user: AuthUser,
+      vehicleId: string,
+    ): ExecutionContext {
+      const handler = handlerOf('getDailyKm');
+      return {
+        getHandler: () => handler,
+        getClass: () => VehiclesController,
+        switchToHttp: () => ({
+          getRequest: () => ({ user, params: { id: vehicleId } }),
+          getResponse: () => ({}),
+          getNext: () => undefined,
+        }),
+      } as unknown as ExecutionContext;
+    }
+
+    it('(1) przewoznik reads OWN vehicle daily-km → allowed', async () => {
+      const carrierGuard = new CarrierOwnershipGuard(
+        reflector,
+        prismaStub(OWN_CARRIER_ID),
+      );
+      const u: AuthUser = { ...carrierUser, role: 'przewoznik' };
+      await expect(
+        carrierGuard.canActivate(ownershipCtx(u, VEHICLE_ID)),
+      ).resolves.toBe(true);
+    });
+
+    it('(2) przewoznik reads a FOREIGN vehicle daily-km → 403 (no IDOR)', async () => {
+      const carrierGuard = new CarrierOwnershipGuard(
+        reflector,
+        prismaStub(OTHER_CARRIER_ID),
+      );
+      const u: AuthUser = { ...carrierUser, role: 'przewoznik' };
+      await expect(
+        carrierGuard.canActivate(ownershipCtx(u, VEHICLE_ID)),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('(3) weryfikator reads ANY vehicle daily-km → both ownership guards short-circuit', async () => {
+      const wer: AuthUser = { ...carrierUser, role: 'weryfikator' };
+      // Foreign carrier on the vehicle — irrelevant, weryfikator is not scoped.
+      const carrierGuard = new CarrierOwnershipGuard(
+        reflector,
+        prismaStub(OTHER_CARRIER_ID),
+      );
+      const opiekunGuard = new OpiekunOwnershipGuard(
+        reflector,
+        prismaStub(OTHER_CARRIER_ID),
+      );
+      await expect(
+        carrierGuard.canActivate(ownershipCtx(wer, VEHICLE_ID)),
+      ).resolves.toBe(true);
+      await expect(
+        opiekunGuard.canActivate(ownershipCtx(wer, VEHICLE_ID)),
+      ).resolves.toBe(true);
+    });
   });
 
   // ── km-report (read-only, role-scoped) ───────────────────
