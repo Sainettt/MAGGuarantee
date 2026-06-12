@@ -13,7 +13,9 @@
 // w_trasie). On → all statuses incl. zjechal / anulowany. An explicit status
 // filter still narrows on top.
 
+import { Gauge } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import type {
   DelegationFilters,
@@ -28,6 +30,7 @@ export function EksportDelegationsView() {
   const t = useTranslations('eksport.delegations');
   const tCommon = useTranslations('common');
   const tA11y = useTranslations('fleet.a11y');
+  const tKm = useTranslations('weryfikator.km');
 
   const [status, setStatus] = useState<DelegationStatus | ''>('');
   const [includeHistory, setIncludeHistory] = useState(false);
@@ -47,11 +50,20 @@ export function EksportDelegationsView() {
 
   return (
     <section className="px-4 sm:px-6 lg:px-10 xl:px-12 py-8">
-      <header className="mb-6">
-        <h1 className="text-2xl font-extrabold tracking-tight text-text">
-          {t('title')}
-        </h1>
-        <p className="mt-1 text-sm text-text-sub">{t('subtitle')}</p>
+      <header className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-extrabold tracking-tight text-text">
+            {t('title')}
+          </h1>
+          <p className="mt-1 text-sm text-text-sub">{t('subtitle')}</p>
+        </div>
+        <Link
+          href="/eksport/km"
+          className="inline-flex h-9 items-center gap-1.5 self-start rounded-[10px] border border-border bg-transparent px-3 text-[13px] font-bold text-text transition-colors hover:bg-input focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand/40"
+        >
+          <Gauge size={15} aria-hidden="true" />
+          {tKm('title.report')}
+        </Link>
       </header>
 
       <div

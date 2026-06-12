@@ -12,13 +12,15 @@
 import type {
   CreateVehicleDto,
   DeleteWithReasonDto,
-  SetVehicleRouteStatusDto,
+  KmBoardQuery,
+  SetVehicleDailyKmDto,
   UpdateVehicleDto,
   VehicleAttachmentDto,
+  VehicleDailyKmDto,
+  VehicleDailyKmHistoryQuery,
   VehicleDto,
   VehicleFilters,
-  VehicleRouteBoardItemDto,
-  VehicleRouteStatusLogDto,
+  VehicleKmBoardDto,
 } from '@magguarantee/shared';
 
 import { apiBlob, apiForm, apiJson } from './client';
@@ -165,46 +167,67 @@ export function deleteVehicleAttachment(
   );
 }
 
-// ─── Route status — weryfikator board (Phase 7.5) ────────
+// ─── Daily km — weryfikator board + read-report (Phase 7.7) ──
 //
-// The weryfikator stamps a per-vehicle, per-day operational route status
-// («w trasie» / «zjechał») using info from an external GPS service + people
-// outside the app. Roles weryfikator | admin. See docs/14 §7.5.
+// REWORK 2026-06-12 #3 (docs/14 §7.7, docs/20 §0′): the former route-status
+// board is absorbed into a DAILY km list. The weryfikator records, per
+// (vehicle, day), either `drove` (km>0) or `idle` («nie jeździ»); the absence
+// of a row is «not checked». Roles weryfikator | admin for the editable board;
+// the read-report (`/km-report`) is role-scoped server-side.
 
 /**
- * GET /vehicles/route-board — all active vehicles, each with today's derived
- * `currentStatus` (`w_trasie` | `zjechal` | `nieznany`) and the who/when of
- * the latest today-row. Not paginated — the fleet fits one board.
+ * GET /vehicles/km-board — the editable weekly km-board (all active vehicles +
+ * 7 day-cells + Σ km + derived motion status). Resolved to a Monday-anchored
+ * 7-day window. Pass `?week=YYYY-Www` or `?from=<Mon ISO>`; absent → current
+ * ISO week. Roles weryfikator | admin.
  */
-export function getVehicleRouteBoard(): Promise<VehicleRouteBoardItemDto[]> {
-  return apiJson<VehicleRouteBoardItemDto[]>('/vehicles/route-board', {
+export function getVehicleKmBoard(
+  query: KmBoardQuery = {},
+): Promise<VehicleKmBoardDto> {
+  return apiJson<VehicleKmBoardDto>(`/vehicles/km-board${toQuery(query)}`, {
     method: 'GET',
   });
 }
 
 /**
- * POST /vehicles/:id/route-status — append a route-status row (re-stampable).
- * The server records `source='manual'`, `notedById=caller`, `notedAt=now`;
- * when `status='zjechal'` it also mirrors `notedAt` into `vehicle.lastDroveAt`.
+ * GET /vehicles/km-report — the read-only weekly km-report. Same envelope as
+ * the board but server-scoped to the caller's own vehicles (planista→plannerId,
+ * dyspozytor→team, eksport/admin/weryfikator→all) and limited to vehicles that
+ * actually drove in the window.
  */
-export function setVehicleRouteStatus(
+export function getVehicleKmReport(
+  query: KmBoardQuery = {},
+): Promise<VehicleKmBoardDto> {
+  return apiJson<VehicleKmBoardDto>(`/vehicles/km-report${toQuery(query)}`, {
+    method: 'GET',
+  });
+}
+
+/**
+ * PUT /vehicles/:id/daily-km — UPSERT one (vehicle, day) mark. The server
+ * records `source='manual'`, `notedById=caller`; when `state='drove'` it bumps
+ * `Vehicle.lastDroveAt = max(lastDroveAt, date)`. Returns the saved row.
+ */
+export function setVehicleDailyKm(
   id: string,
-  body: SetVehicleRouteStatusDto,
-): Promise<VehicleRouteStatusLogDto> {
-  return apiJson<VehicleRouteStatusLogDto>(`/vehicles/${id}/route-status`, {
-    method: 'POST',
+  body: SetVehicleDailyKmDto,
+): Promise<VehicleDailyKmDto> {
+  return apiJson<VehicleDailyKmDto>(`/vehicles/${id}/daily-km`, {
+    method: 'PUT',
     json: body,
   });
 }
 
 /**
- * GET /vehicles/:id/route-status — append-only route-status history for one
- * vehicle, newest-first. Powers the read-only history dialog.
+ * GET /vehicles/:id/daily-km — per-vehicle daily-km history, newest-first.
+ * Optional `from`/`to` (date-only) bounds. Powers the read-only history dialog.
  */
-export function getVehicleRouteStatusHistory(
+export function getVehicleDailyKmHistory(
   id: string,
-): Promise<VehicleRouteStatusLogDto[]> {
-  return apiJson<VehicleRouteStatusLogDto[]>(`/vehicles/${id}/route-status`, {
-    method: 'GET',
-  });
+  query: VehicleDailyKmHistoryQuery = {},
+): Promise<VehicleDailyKmDto[]> {
+  return apiJson<VehicleDailyKmDto[]>(
+    `/vehicles/${id}/daily-km${toQuery(query)}`,
+    { method: 'GET' },
+  );
 }

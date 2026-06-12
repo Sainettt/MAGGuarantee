@@ -91,7 +91,7 @@ export function useCancelDelegation(
   });
 }
 
-// NOTE (Phase 7 rework 2026-06-10 #2): `useMarkDelegationInTransit` /
+// NOTE (Phase 7 rework 2026-06-12 #3): `useMarkDelegationInTransit` /
 // `useMarkDelegationReturned` were removed. The weryfikator no longer advances
-// delegation status; it stamps a per-vehicle route-status instead — see
-// `lib/hooks/useVehicleRouteStatus.ts` (`useSetVehicleRouteStatus`).
+// delegation status; it records each vehicle's DAILY km instead — see
+// `lib/hooks/useVehicleKm.ts` (`useSetVehicleDailyKm` / `useVehicleKmBoard`).

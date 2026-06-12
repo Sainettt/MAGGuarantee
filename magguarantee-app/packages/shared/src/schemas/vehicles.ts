@@ -19,6 +19,7 @@
 import { z } from 'zod';
 
 import {
+  IsoDateSchema,
   IsoDateTimeSchema,
   UuidSchema,
   emptyStringToUndefined,
@@ -190,73 +191,139 @@ export const VehicleFiltersSchema = z
   .strict();
 export type VehicleFilters = z.infer<typeof VehicleFiltersSchema>;
 
-// ─── Route status (Phase 7 weryfikator board) ────────────
+// ─── Daily km (Phase 7 REWORK #3 — weryfikator km-board) ──
 //
-// The `weryfikator` role stamps a per-vehicle operational route status daily
-// («w trasie» / «zjechał») as an append-only history
-// (`VehicleRouteStatusLog`). The derived `nieznany` («not checked today»)
-// value is computed at read time for the board and is NOT part of the POST
-// enum below.
+// REWORK 2026-06-12 #3 (docs/20-phase-7-eksport-weryfikator.md §0′): the
+// former per-vehicle route-status board («w trasie» / «zjechał») is absorbed
+// by a DAILY km list. The `weryfikator` role records, per (vehicle, day),
+// either `drove` (moved, km>0) or `idle` («nie jeździ», checked-but-stood,
+// km null). No row for a day = «not checked» (`nieznany`). This is the source
+// of truth for claim mileage (`Σ VehicleDailyKm.km` over the period).
 //
-// The canonical source of truth for the stored statuses is the DB enum
-// `VehicleRouteStatus { w_trasie, zjechal }` exported from
-// `@magguarantee/database`. The `@magguarantee/shared` package is intentionally
-// dependency-free (zod only) and cannot import the database package, so the
-// values are mirrored here as a Zod enum — the same convention used for
-// `DelegationStatusSchema` / `VehicleAttachmentCategorySchema`. Keep these two
-// lists in lockstep.
+// Storage is a single row per (vehicleId, date) — `@@unique([vehicleId, date])`
+// — written via UPSERT, so re-stamping a day overwrites the previous mark
+// (NOT append-only, unlike the removed route-status log).
+//
+// The `@magguarantee/shared` package is intentionally dependency-free (zod
+// only) and cannot import the database package, so the DB enums
+// `VehicleDayState { drove, idle }` and `VehicleStatusSource { manual, gps }`
+// are mirrored here as Zod enums — same convention as `DelegationStatusSchema`.
+// Keep these lists in lockstep with packages/database/prisma/schema.prisma.
 
 /**
- * Stored route-status values a weryfikator/admin may set (mirror of the Prisma
- * `VehicleRouteStatus` enum). `nieznany` is a derived board value, not a
- * settable status, so it is deliberately absent here.
+ * Per-day vehicle state a weryfikator/admin may set (mirror of the Prisma
+ * `VehicleDayState` enum). `drove` ⇒ the truck moved (`km > 0` required);
+ * `idle` ⇒ checked and stood (`km` must be null). The «not checked» state is
+ * the ABSENCE of a row, not an enum value, so it is deliberately absent here.
  */
-export const VehicleRouteStatusSchema = z.enum(['w_trasie', 'zjechal']);
-export type VehicleRouteStatusValue = z.infer<typeof VehicleRouteStatusSchema>;
+export const VehicleDayStateSchema = z.enum(['drove', 'idle']);
+export type VehicleDayState = z.infer<typeof VehicleDayStateSchema>;
 
 /**
- * Origin of a route-status row (mirror of the Prisma `VehicleStatusSource`
- * enum). `manual` = stamped by a weryfikator/admin; `gps` = future external
- * tracking service (no associated user). The POST endpoint always records
- * `manual`; `source` appears only on the read DTOs.
+ * Origin of a daily-km row (mirror of the Prisma `VehicleStatusSource` enum).
+ * `manual` = stamped by a weryfikator/admin; `gps` = future external tracking
+ * service (no associated user). The PUT endpoint always records `manual`;
+ * `source` appears only on the read DTOs.
  */
 export const VehicleStatusSourceSchema = z.enum(['manual', 'gps']);
 export type VehicleStatusSourceValue = z.infer<typeof VehicleStatusSourceSchema>;
 
 /**
- * Derived board status for `GET /vehicles/route-board` — the stored statuses
- * plus `nieznany` («not checked today»). `nieznany` is computed at read time
- * (no `VehicleRouteStatusLog` row for the vehicle dated today) and is NOT
- * persisted.
+ * Derived per-vehicle motion status for the km-board / km-report header — the
+ * two stored states plus `nieznany` («not checked in the period»). Computed at
+ * read time from the LATEST-by-date row in the period (`drove` ⇒ `w_ruchu`,
+ * `idle` ⇒ `nie_jezdzi`, no row ⇒ `nieznany`) and NOT persisted. Use
+ * `deriveVehicleMotionStatus(...)` to compute it consistently.
  */
-export const VehicleBoardStatusSchema = z.enum([
-  'w_trasie',
-  'zjechal',
+export const VehicleMotionStatusSchema = z.enum([
+  'w_ruchu',
+  'nie_jezdzi',
   'nieznany',
 ]);
-export type VehicleBoardStatus = z.infer<typeof VehicleBoardStatusSchema>;
+export type VehicleMotionStatus = z.infer<typeof VehicleMotionStatusSchema>;
 
 /**
- * POST /vehicles/:id/route-status — body for a weryfikator/admin to append a
- * route-status row. `status` is required (`w_trasie` | `zjechal`); `notes` is
- * an optional free-form annotation. `.strict()` rejects stray fields so a typo
- * surfaces as 422. The server records `source='manual'`, `notedById=caller`,
- * `notedAt=now`; when `status='zjechal'` it also mirrors `notedAt` into
- * `Vehicle.lastDroveAt` in the same transaction.
+ * Derives a vehicle's read-time motion status from the LATEST-by-date daily-km
+ * state in the period. `null` (no row in the period) ⇒ `nieznany`. Shared by
+ * the api board/report builders and the web header so both compute it
+ * identically (per docs/20 §0′ «Производный статус»).
  */
-export const SetVehicleRouteStatusSchema = z
+export function deriveVehicleMotionStatus(
+  latestState: VehicleDayState | null,
+): VehicleMotionStatus {
+  if (latestState === 'drove') return 'w_ruchu';
+  if (latestState === 'idle') return 'nie_jezdzi';
+  return 'nieznany';
+}
+
+/**
+ * PUT /vehicles/:id/daily-km — body for a weryfikator/admin to UPSERT one
+ * (vehicle, day) mark. Invariants (also re-checked server-side so a bypassed
+ * pipe still 422s rather than violating a constraint):
+ *  - `state='drove'` ⇒ `km` required and `> 0`.
+ *  - `state='idle'`  ⇒ `km` must be absent/null (the vehicle stood).
+ * `.strict()` rejects stray fields. The server records `source='manual'`,
+ * `notedById=caller`; when `state='drove'` it bumps
+ * `Vehicle.lastDroveAt = max(lastDroveAt, date)` in the same transaction.
+ */
+export const SetVehicleDailyKmSchema = z
   .object({
-    status: VehicleRouteStatusSchema,
+    date: IsoDateSchema,
+    state: VehicleDayStateSchema,
+    km: z.number().int().nonnegative().max(9_999_999).optional(),
     notes: emptyStringToUndefined(z.string().max(2_000).optional()),
   })
-  .strict();
-export type SetVehicleRouteStatusDto = z.infer<
-  typeof SetVehicleRouteStatusSchema
+  .strict()
+  .refine((d) => d.state !== 'drove' || (d.km !== undefined && d.km > 0), {
+    message: 'km_required_when_drove',
+    path: ['km'],
+  })
+  .refine((d) => d.state !== 'idle' || d.km === undefined, {
+    message: 'km_forbidden_when_idle',
+    path: ['km'],
+  });
+export type SetVehicleDailyKmDto = z.infer<typeof SetVehicleDailyKmSchema>;
+
+/**
+ * Query for `GET /vehicles/:id/daily-km` — the per-vehicle history modal. Both
+ * bounds are date-only (`YYYY-MM-DD`) and optional; when omitted the api
+ * returns the full history. `from <= to` when both present.
+ */
+export const VehicleDailyKmHistoryQuerySchema = z
+  .object({
+    from: IsoDateSchema.optional(),
+    to: IsoDateSchema.optional(),
+  })
+  .strict()
+  .refine((q) => !q.from || !q.to || q.from <= q.to, {
+    message: 'date_order',
+    path: ['to'],
+  });
+export type VehicleDailyKmHistoryQuery = z.infer<
+  typeof VehicleDailyKmHistoryQuerySchema
 >;
 
-// ─── Route status — response DTOs ────────────────────────
+/**
+ * Query for the weekly km-board / km-report. Accepts EITHER an ISO week
+ * (`YYYY-Www`, e.g. `2026-W24`) OR a `from` Monday (`YYYY-MM-DD`). When both
+ * are absent the api defaults to the current ISO week. `.strict()` rejects
+ * stray fields; the week is always resolved to a Monday-anchored 7-day window
+ * server-side (see `resolveWeekWindow` in the km-board service).
+ */
+const IsoWeekSchema = z
+  .string()
+  .regex(/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/, 'expected ISO week YYYY-Www');
+export const KmBoardQuerySchema = z
+  .object({
+    week: IsoWeekSchema.optional(),
+    from: IsoDateSchema.optional(),
+  })
+  .strict();
+export type KmBoardQuery = z.infer<typeof KmBoardQuerySchema>;
 
-const RouteStatusNotedBySchema = z
+// ─── Daily km — response DTOs ────────────────────────────
+
+const DailyKmNotedBySchema = z
   .object({
     id: UuidSchema,
     name: z.string().nullable(),
@@ -264,62 +331,78 @@ const RouteStatusNotedBySchema = z
   .nullable();
 
 /**
- * One row of a vehicle's route-status history — `GET /vehicles/:id/route-status`.
- * Newest-first. `notedBy` is null for GPS-sourced rows (no user attribution).
+ * One stored daily-km mark — used by `PUT /vehicles/:id/daily-km` (the saved
+ * row) and `GET /vehicles/:id/daily-km` (history, newest-first). `km` is null
+ * for `idle` rows; `notedBy` is null for GPS-sourced rows.
  */
-export const VehicleRouteStatusLogDtoSchema = z.object({
+export const VehicleDailyKmDtoSchema = z.object({
   id: UuidSchema,
   vehicleId: UuidSchema,
-  status: VehicleRouteStatusSchema,
+  date: IsoDateSchema,
+  state: VehicleDayStateSchema,
+  km: z.number().int().nullable(),
   source: VehicleStatusSourceSchema,
-  notedBy: RouteStatusNotedBySchema,
-  notedAt: IsoDateTimeSchema,
+  notedBy: DailyKmNotedBySchema,
   notes: z.string().nullable(),
+  updatedAt: IsoDateTimeSchema,
 });
-export type VehicleRouteStatusLogDto = z.infer<
-  typeof VehicleRouteStatusLogDtoSchema
->;
+export type VehicleDailyKmDto = z.infer<typeof VehicleDailyKmDtoSchema>;
 
 /**
- * One row of the weryfikator route board — `GET /vehicles/route-board`. All
- * active vehicles, each with today's derived `currentStatus` (or `nieznany`)
- * and the who/when of the latest today-row. `notedBy` / `notedAt` are null
- * when `currentStatus === 'nieznany'`.
- *
- * The board carries BOTH `carrier` and `opiekun` (owner correction
- * 2026-06-10 #3, see docs/20-phase-7-eksport-weryfikator.md § 0 — the carrier
- * column was re-added alongside the opiekun, not either/or):
- *  - `carrier` — the carrier itself (`vehicle.carrier`, `{ id, name }`). `id`
- *    is `Carrier.id`; `name` is the carrier's display name (`carrier.user.name`),
- *    nullable only because `User.name` itself is.
- *  - `opiekun` — the carrier's opiekun (`vehicle.carrier.opiekun`, a `User`).
- *    The relation `Carrier.opiekunId → User` is NOT NULL, so every active
- *    vehicle resolves an opiekun; `name` is nullable only because `User.name` is.
+ * One day-cell on the weekly km-board — the mark for a (vehicle, day) or the
+ * absence of one (`state=null` ⇒ «not checked»). Keyed to a `date` within the
+ * resolved 7-day window.
  */
-export const VehicleRouteBoardItemDtoSchema = z.object({
+export const VehicleKmCellDtoSchema = z.object({
+  date: IsoDateSchema,
+  state: VehicleDayStateSchema.nullable(),
+  km: z.number().int().nullable(),
+  notes: z.string().nullable(),
+});
+export type VehicleKmCellDto = z.infer<typeof VehicleKmCellDtoSchema>;
+
+/**
+ * One row of the weekly km-board / km-report — `GET /vehicles/km-board` and
+ * `GET /vehicles/km-report`. A vehicle plus its 7 day-cells, the period km
+ * sum, and the derived motion status. Identity columns mirror the former
+ * route board (carrier + opiekun + planner + sideNumber + plateNumber).
+ *
+ *  - `carrier` — the carrier itself (`vehicle.carrier`, `{ id, name }` where
+ *    `name` is `carrier.user.name`).
+ *  - `opiekun` — the carrier's opiekun (`vehicle.carrier.opiekun`, a `User`).
+ *  - `cells` — 7 entries, one per day of the resolved Monday-anchored window,
+ *    in chronological order.
+ *  - `kmSum` — `Σ km` over `drove` cells in the window.
+ *  - `motionStatus` — derived from the latest-by-date cell (`w_ruchu` /
+ *    `nie_jezdzi` / `nieznany`).
+ */
+export const VehicleKmBoardItemDtoSchema = z.object({
   id: UuidSchema,
   plateNumber: z.string(),
   sideNumber: z.string().nullable(),
   carrier: z
-    .object({
-      id: UuidSchema,
-      name: z.string().nullable(),
-    })
+    .object({ id: UuidSchema, name: z.string().nullable() })
     .nullable(),
   opiekun: z
-    .object({
-      id: UuidSchema,
-      name: z.string().nullable(),
-    })
+    .object({ id: UuidSchema, name: z.string().nullable() })
     .nullable(),
   planner: z.string().nullable(),
-  currentStatus: VehicleBoardStatusSchema,
-  notedBy: RouteStatusNotedBySchema,
-  notedAt: IsoDateTimeSchema.nullable(),
+  cells: z.array(VehicleKmCellDtoSchema),
+  kmSum: z.number().int().nonnegative(),
+  motionStatus: VehicleMotionStatusSchema,
 });
-export type VehicleRouteBoardItemDto = z.infer<
-  typeof VehicleRouteBoardItemDtoSchema
->;
+export type VehicleKmBoardItemDto = z.infer<typeof VehicleKmBoardItemDtoSchema>;
+
+/**
+ * Envelope for the weekly km-board / km-report — the resolved Monday-anchored
+ * window plus the per-vehicle rows. `weekStart` / `weekEnd` are date-only.
+ */
+export const VehicleKmBoardDtoSchema = z.object({
+  weekStart: IsoDateSchema,
+  weekEnd: IsoDateSchema,
+  items: z.array(VehicleKmBoardItemDtoSchema),
+});
+export type VehicleKmBoardDto = z.infer<typeof VehicleKmBoardDtoSchema>;
 
 // ─── Attachments ─────────────────────────────────────────
 

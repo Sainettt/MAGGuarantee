@@ -57,8 +57,8 @@ export function cancelDelegation(
   });
 }
 
-// NOTE (Phase 7 rework 2026-06-10 #2): the weryfikator no longer advances
-// delegation status. The former `markInTransit` / `markReturned` wrappers
-// (and the `POST /delegations/:id/in-transit` / `/returned` endpoints) were
-// removed — the weryfikator now stamps a *vehicle* route-status instead. See
-// `lib/api/vehicles.ts` (`setVehicleRouteStatus`) + docs/14 §7.5.
+// NOTE (Phase 7 rework 2026-06-12 #3): the weryfikator no longer advances
+// delegation status. The former `markInTransit` / `markReturned` wrappers (and
+// the `/in-transit` / `/returned` endpoints) were removed; the weryfikator now
+// records each vehicle's DAILY km on a weekly board. See `lib/api/vehicles.ts`
+// (`setVehicleDailyKm` / `getVehicleKmBoard`) + docs/14 §7.7.

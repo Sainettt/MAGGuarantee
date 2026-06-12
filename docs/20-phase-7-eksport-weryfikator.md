@@ -5,6 +5,52 @@
 >
 > **Статус:** scope уточнён заказчиком **2026-06-10** (ответы внесены ниже, см. § «Решения заказчика»). Базис — легаси `Code.gs`, но с **одним явным отклонением**: **`weryfikator` НЕ делает `cancel`** (нет таких полномочий). Его суть — ежедневно проверять автопарк внешними средствами (кто реально в трассе, кто съехал) и проставлять статус в приложении: `w_trasie` / `zjechal`. Cancel остаётся **carrier-only** (как сейчас). Не доизобретаем.
 
+## 0′. ⚠️ REWORK (2026-06-12 #3) — `VehicleDailyKm`: дневной км-лист + развязка claim↔delegation
+
+> **Это АКТУАЛЬНАЯ спека для `weryfikator`.** Заменяет §0 (route-status board) в части доски статусов и финализирует роль. `eksport` — без изменений. Решения зафиксированы с пользователем 2026-06-12 (AskUserQuestion + обсуждение). **Реализуем сейчас.**
+
+### Продуктовое решение
+
+Суть роли `weryfikator` = **ежедневно проставлять, сколько км проехала каждая машина** (новый процесс в фирме; раньше — огромный Excel вручную, сверка со SpedTrans+GPS). Деньги (`Claim`) считаются **на машину за период**, поэтому:
+
+1. **Статусы выезда (`Delegation`) — мёртвый груз.** Никто их не верифицирует; `w_trasie/zjechal` через приложение не проставляются. Роли `weryfikator`/`eksport` и `cancel` (carrier-only) **остаются** (заказчик считает их нужными), но операционной нагрузки на статус выезда больше нет. `Delegation` = мягкая заявка «дайте работу на даты» (`zgłoszenie`) + триггер gchat + источник визуальной связки в панели перевозчика.
+2. **Связи `Claim ↔ Delegation` в коде НЕТ** (FK нет) — подтверждает memory `no-wniosek-delegation-linking`; отменяет re-linking из roadmap 2026-06-11 (Phase 11 Шаг B выпиливается). Заказчику «связь» отдаётся **визуально** (клик на выезд → км-календарь машины), не кодом.
+3. **Пробег в `Claim` = `Σ VehicleDailyKm`** (state=drove) за период машины — предзаполнение; `pracownik` сверяет/правит при верификации. Ручной fallback, если данных нет. (Позже, возможно, заменится на GPS API — известный источник недоразумений принят сознательно.)
+
+### Решения (AskUserQuestion, 2026-06-12)
+1. **Одна недельная доска** (строка = машина, 7 колонок-дней). Поглощает route-board §0. Статус машины (`w ruchu` / `nie jeździ` / `nieznany`) — производное от ячеек, показывается в шапке (W RUCHU / NIE JEŻDŻĄ).
+2. **Ячейка `(машина × день)` — 3 состояния:** `drove` (км>0) / `idle` («nie jeździ», проверено-стоит) / нет строки («не проверено сегодня»).
+3. **Хранение — новая таблица `VehicleDailyKm`**, `@@unique([vehicleId, date])`.
+
+### Модель данных (db-agent)
+- Новый enum `VehicleDayState { drove, idle }`. Переиспользуем `VehicleStatusSource { manual, gps }`.
+- Новая таблица `vehicle_daily_km`, model `VehicleDailyKm`:
+  - `id` uuid, `vehicleId` (FK→Vehicle, `onDelete: Cascade`), `date` (`@db.Date`), `km` (`Int?` — null при `idle`), `state` (`VehicleDayState`), `source` (`VehicleStatusSource @default(manual)`), `notedById` (FK→User, nullable — gps без юзера), `notes` (`String?`), `createdAt`, `updatedAt`.
+  - `@@unique([vehicleId, date])` (одна отметка на машину/день — upsert), `@@index([date])` (доска недели).
+  - На `Vehicle` — обратная связь `dailyKm VehicleDailyKm[]`.
+- **Удаляем** (DB пустая, не в проде — forward-only миграция): таблицу `vehicle_route_statuses` (`VehicleRouteStatusLog`) + enum `VehicleRouteStatus`. Board §0 поглощён. `VehicleStatusSource` и `Vehicle.lastDroveAt` остаются.
+- **Производный статус машины** (НЕ хранится): по последней по `date` записи → `drove` ⇒ `w_ruchu`; `idle` ⇒ `nie_jezdzi`; нет записи в периоде ⇒ `nieznany`.
+
+### Backend (api-agent)
+- **`GET /vehicles/km-board?week=YYYY-Www`** (или `?from=<пн>`): все активные машины + 7 ячеек-дней (km/state/notes) + `Σ km` недели + производный статус + carrier/opiekun/planner/sideNumber. Роли `weryfikator | admin`. **Заменяет `GET /vehicles/route-board`.**
+- **`PUT /vehicles/:id/daily-km`** body `{ date, state: drove|idle, km?, notes? }` — **upsert** по (vehicleId, date), `source=manual`, `notedById=caller`, `@Audit('vehicle.setDailyKm')`. Если `state=drove` → в той же транзакции `vehicle.lastDroveAt = max(lastDroveAt, date)`. **Заменяет `POST /vehicles/:id/route-status`.**
+- **`GET /vehicles/:id/daily-km?from&to`** — история (модалка «Historia»). Заменяет `GET /vehicles/:id/route-status`.
+- **Km-рапорт (read-only):** `GET /vehicles/km-report?week=...` — **только ехавшие** машины (есть `drove`-дни в периоде), scoped: `planista` (свои `plannerId`), `dyspozytor` (своя команда — Phase 11; пока `dispatcherId`), `eksport`/`admin`/`weryfikator` — все. Это «Raport km — moje pojazdy» со скрина.
+- **Claim mileage:** в `POST /claims` (или предпросмотр) пробег предзаполняется `Σ VehicleDailyKm.km (state=drove)` за `[from,to]` машины; `pracownik` правит при верификации. **Без** `Claim.delegationId`.
+- **Удалить** route-status: service/repo/контроллер-методы + shared `SetVehicleRouteStatusSchema`.
+- shared: `SetVehicleDailyKmSchema` (Zod), `VehicleDailyKmDto`, `VehicleKmBoardItemDto`, enum `VehicleDayState`, derived-status helper.
+
+### Frontend (web-agent + uiux-agent)
+- **Доска weryfikator** `app/(weryfikator)/weryfikator/km/page.tsx` — недельная сетка (как Image 7): шапка (TYDZIEŃ Wnn, CIĄGNIKI, W RUCHU, NIE JEŻDŻĄ, Σ KM, NOTATEK), строки машин (nr rej / nr boczny / przewoźnik / opiekun / dyspozytor), 7 ячеек-дней (ввод km + drove/idle), `Σ KM`, notatka, «Historia». Навигация по неделям. Заменяет route-status страницу.
+- **Read-only km-рапорт** для planista/dyspozytor — та же сетка, просмотр своих машин, фильтр «только ехавшие».
+- **Панель перевозчика — клик на выезд → км-календарь:** в detail/модалке выезда показать календарик, где по `vehicleId` + пересечению `[departureAt, plannedReturnAt]` видны дневные км приписанной машины из `VehicleDailyKm`. Это «визуальная связь» выезд↔км без FK. uiux — над подачей.
+- i18n: `weryfikator.km.*`, `delegation.kmCalendar.*`.
+
+### Что НЕ трогаем
+- `eksport` (read-only выезды), `Delegation` cancel (carrier-only), `DelegationStatus` enum (мёртвый груз, но остаётся).
+
+---
+
 ## Легенда
 - ✅ — уже есть в новом коде
 - 🔲 — надо реализовать в этой фазе
@@ -15,6 +61,8 @@
 
 ## 0. ⚠️ REWORK (2026-06-10 #2) — Weryfikator работает с МАШИНАМИ, не с выездами
 
+> ⛔ **ЧАСТИЧНО SUPERSEDED — см. §0′ (REWORK 2026-06-12 #3) выше.** Идея «weryfikator работает с машинами» — верна и остаётся, но **доска статусов `w_trasie/zjechal` (`VehicleRouteStatusLog`) поглощена дневным км-листом `VehicleDailyKm`** и удаляется. Ниже — история route-status-доски.
+>
 > **Это актуальная спека для `weryfikator`. Всё, что ниже про «weryfikator + delegacje», — superseded** (оставлено как история). `eksport` — без изменений, остаётся на выездах.
 
 Заказчик уточнил после сбора инфы: **`weryfikator` не видит выезды (delegacje) вообще.** Он получает **список всех машин** и ежедневно проставляет операционный статус каждой: «в трассе» / «съехал». Фактический выезд машины определяется **внешним сервисом + людьми вне приложения**; связи `delegation ↔ vehicle` нет и не нужно.

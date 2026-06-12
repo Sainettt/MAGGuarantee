@@ -81,13 +81,14 @@ enum DelegationStatus {
   anulowany
 }
 
-// Phase 7 — operational route status of a Vehicle stamped by `weryfikator`
-// (or a future external GPS service). Append-only history (VehicleRouteStatusLog).
-// The derived `nieznany` ("not checked today") state is computed at read time
-// and is NOT a stored enum value.
-enum VehicleRouteStatus { w_trasie  zjechal }
-// Origin of a route-status row: manual (weryfikator/admin) or gps (no user).
+// Phase 7 (REWORK 2026-06-12 #3, see docs/20 §0′) — `weryfikator` records each
+// vehicle's DAILY km. Per-(vehicle, day) state. Derived motion status
+// (`w_ruchu`/`nie_jezdzi`/`nieznany`) is computed at read time, NOT stored.
+enum VehicleDayState { drove  idle }
+// Origin of a daily-km row: manual (weryfikator/admin) or gps (no user).
 enum VehicleStatusSource { manual  gps }
+// ⛔ REMOVED 2026-06-12 (#3): `enum VehicleRouteStatus { w_trasie zjechal }` +
+// model VehicleRouteStatusLog — route-status board absorbed by VehicleDailyKm.
 
 enum VehicleType { MEGA  STD  COIL }
 // EuroNorm — III/IV dropped 2026-05 (km-guarantee program restricted to
@@ -141,7 +142,7 @@ model User {
   uploadedVehicleAttachments VehicleAttachment[]
   uploadedDriverAttachments  DriverAttachment[]
   uploadedCarrierAttachments CarrierAttachment[]
-  notedVehicleStatuses       VehicleRouteStatusLog[] @relation("VehicleStatusNotedBy")
+  notedDailyKm               VehicleDailyKm[]        @relation("DailyKmNotedBy")
   auditEntries       AuditLog[]
   refreshTokens      RefreshToken[]
 
@@ -240,6 +241,9 @@ model Vehicle {
   planner      User?   @relation("VehiclePlanner", fields: [plannerId], references: [id])
   dispatcherId String? @db.Uuid
   dispatcher   User?   @relation("VehicleDispatcher", fields: [dispatcherId], references: [id])
+  // 🗓️ PLANNED (Phase 11, see docs/17 + docs/04 «Team»): dispatcherId will be
+  // REPLACED by dispatchTeamId (FK → new Team model). NOT migrated yet — the
+  // current schema above is still single-dispatcher.
 
   brand        String?
   model        String?
@@ -285,7 +289,7 @@ model Vehicle {
   delegations   Delegation[]
   claims        Claim[]
   attachments   VehicleAttachment[]
-  routeStatuses VehicleRouteStatusLog[]  // Phase 7 — operational route-status history
+  dailyKm       VehicleDailyKm[]         // Phase 7 (#3) — daily km records (weryfikator)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -590,29 +594,31 @@ model Delegation {
 
 // ─── VEHICLE ROUTE STATUS LOG (Phase 7 — weryfikator) ───
 // Append-only history of operational route-status stamps for a vehicle.
-// `weryfikator` checks the fleet daily (external means) and records each
-// vehicle's status: w_trasie / zjechal. CURRENT status for a vehicle =
-// latest row by `notedAt` with `notedAt::date = today`; absent that, the
-// vehicle is `nieznany` ("not checked today" — NOT stored). NO status column
-// on Vehicle — this table is the single source of truth. `source=gps` rows
-// have no `notedById` (external service, no user). On transition to `zjechal`
-// the api also updates `Vehicle.lastDroveAt` (same transaction).
-model VehicleRouteStatusLog {
+// `weryfikator` records each vehicle's DAILY km (external means: SpedTrans+GPS).
+// One row per (vehicle, day) — upsert. state=drove ⇒ km>0; state=idle ⇒ km null
+// ("checked, stood"); NO row for a day = "not checked" (nieznany). Derived motion
+// status (w_ruchu/nie_jezdzi/nieznany) computed at read time, NOT stored — no
+// status column on Vehicle. `source=gps` rows have no `notedById`. On a drove-row
+// the api also bumps `Vehicle.lastDroveAt = max(lastDroveAt, date)` (same txn).
+// Claim mileage is derived as Σ km (state=drove) over the period — NO Claim↔Delegation FK.
+model VehicleDailyKm {
   id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   vehicleId String  @db.Uuid
   vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
 
-  status    VehicleRouteStatus
+  date      DateTime @db.Date
+  km        Int?                                  // null when state=idle
+  state     VehicleDayState
   source    VehicleStatusSource @default(manual)
   notedById String?  @db.Uuid                     // nullable — gps has no user
-  notedBy   User?    @relation("VehicleStatusNotedBy", fields: [notedById], references: [id])
-  notedAt   DateTime @default(now())
+  notedBy   User?    @relation("DailyKmNotedBy", fields: [notedById], references: [id])
   notes     String?
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  @@index([vehicleId, notedAt])                   // latest-per-vehicle
-  @@index([notedAt])                              // daily board
-  @@map("vehicle_route_statuses")
+  @@unique([vehicleId, date])                     // one stamp per vehicle/day (upsert)
+  @@index([date])                                 // weekly board
+  @@map("vehicle_daily_km")
 }
 
 // ─── LIMITS, AUDIT, REFRESH, CONFIG, CLAIM-SEQUENCE ─────
@@ -838,7 +844,7 @@ shows whether the verifier overrode the carrier's declared hours.
 | N | EURO | `euro` |
 | O | ADR (CSV) | dropped 2026-06 — only `adr` boolean permit flag kept (ADR class list removed) |
 | P-R | GPS, KartaPaliwowa, Typ | `gps`, `fuelCard`, `type` |
-| S | Dyspozytor (login) | → FK `dispatcherId` |
+| S | Dyspozytor (login) | → FK `dispatcherId` (🗓️ Phase 11: мигрирует на `Team`/`dispatchTeamId` — см. [04-data-model.md](04-data-model.md) «Team») |
 | T-W | GB, IT, FR, Porozumienie | `gb`, `it`, `fr`, `agreement` |
 | X | Umowa | dropped 2026-05 — umowa scan stored as `VehicleAttachment` (category=contract) |
 | Y-AB | StawkaDE, StawkaUE, StawkaEksport, StawkaImport | `rateDe`, `rateUe`, `rateExport`, `rateImport` |

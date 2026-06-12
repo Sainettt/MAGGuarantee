@@ -45,6 +45,15 @@ const HhMmSchema = z
 const MileageSchema = z.number().nonnegative().max(9_999_999);
 
 /**
+ * Mileage as the carrier sends it on submit / preview — OPTIONAL. When omitted
+ * the api pre-fills it as `Σ VehicleDailyKm.km (state=drove)` over `[from,to]`
+ * of the chosen vehicle (Phase 7 REWORK #3, docs/20 §0′). The carrier may
+ * still send an explicit value to override the prefill; `pracownik` revises it
+ * at verification regardless.
+ */
+const OptionalMileageSchema = MileageSchema.optional();
+
+/**
  * Hours adjustment — non-negative, capped to fit the storage column.
  *
  * Persisted as `Decimal(5,2)` on `Claim.origHoursAdjusted` /
@@ -117,7 +126,12 @@ export const SubmitClaimSchema = z
     /** REQUIRED — Claim.timeTo is NOT NULL since phase3_blocks. */
     timeTo: HhMmSchema,
 
-    mileage: MileageSchema,
+    /**
+     * OPTIONAL — pre-filled server-side from `Σ VehicleDailyKm.km (state=drove)`
+     * over the period when omitted (Phase 7 REWORK #3). An explicit value
+     * overrides the prefill.
+     */
+    mileage: OptionalMileageSchema,
 
     comment: emptyStringToUndefined(z.string().max(2_000).optional()),
 
@@ -152,7 +166,11 @@ export const PreviewClaimSchema = z
     dateEnd: IsoDateSchema,
     timeFrom: emptyStringToUndefined(HhMmSchema.optional()),
     timeTo: emptyStringToUndefined(HhMmSchema.optional()),
-    mileage: MileageSchema,
+    /**
+     * OPTIONAL — when omitted the api pre-fills it from
+     * `Σ VehicleDailyKm.km (state=drove)` over the period (Phase 7 REWORK #3).
+     */
+    mileage: OptionalMileageSchema,
     hoursAdjusted: HoursAdjustedSchema.optional().default(0),
   })
   .strict()
@@ -281,6 +299,13 @@ export type KmCalcBreakdown = z.infer<typeof KmCalcBreakdownSchema>;
 // ─── Preview response ────────────────────────────────────
 
 export const PreviewClaimResponseSchema = z.object({
+  /**
+   * Effective mileage used for the preview math — the carrier's explicit value
+   * when supplied, otherwise the server-computed `Σ VehicleDailyKm.km
+   * (state=drove)` prefill over the period (Phase 7 REWORK #3). The web form
+   * populates the read-only/pre-filled mileage field from this.
+   */
+  mileage: z.number().nonnegative(),
   kmGuaranteed: z.number().nonnegative(),
   kmDifference: z.number(), // can be negative if mileage > guaranteed
   paymentEur: z.number().nonnegative(),

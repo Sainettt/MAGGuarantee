@@ -77,9 +77,9 @@ export interface VehicleRow {
 }
 
 /**
- * Lean per-vehicle projection for the weryfikator route board. Carries only
- * the columns the board renders — the derived "today's status" cell is joined
- * in by the service from `VehicleRouteStatusRepository.latestTodayByVehicles`.
+ * Lean per-vehicle projection for the weryfikator km-board / km-report. Carries
+ * only the columns the board renders — the day-cells are joined in by the
+ * service from `VehicleDailyKmRepository.listForWeek`.
  */
 export interface VehicleBoardRow {
   id: string;
@@ -177,23 +177,32 @@ export class VehiclesRepository {
 
   /**
    * Lean projection of every ACTIVE, non-soft-deleted vehicle for the
-   * weryfikator route board (`GET /vehicles/route-board`). The soft-delete
-   * extension AND-s `deletedAt: null`; we add `active: true` explicitly so
-   * deactivated trucks never appear. Only the columns the board renders are
-   * selected (no attachments / rates / GPS device) — keeps the board query
-   * cheap and unrelated to the heavyweight `list()` include shape.
+   * weryfikator km-board (`GET /vehicles/km-board`) and the scoped km-report
+   * (`GET /vehicles/km-report`). The soft-delete extension AND-s
+   * `deletedAt: null`; we add `active: true` explicitly so deactivated trucks
+   * never appear. Only the columns the board renders are selected (no
+   * attachments / rates / GPS device) — keeps the query cheap.
    *
-   * The board shows BOTH the carrier itself (`carrier`, `{ id, name }` where
+   * The optional `scope` narrows by `plannerId` (planista km-report) or
+   * `dispatcherId` (dyspozytor km-report); the board (weryfikator/admin) and
+   * the eksport/admin report pass no scope and see all active vehicles.
+   *
+   * The row shows BOTH the carrier itself (`carrier`, `{ id, name }` where
    * `name` is `carrier.user.name`) AND the carrier's OPIEKUN (`carrier.opiekun`,
-   * a `User`) — owner correction 2026-06-10 #3 re-added the carrier column
-   * alongside the opiekun (not either/or), see
-   * docs/20-phase-7-eksport-weryfikator.md § 0. The `Carrier.opiekunId → User`
+   * a `User`) — owner correction 2026-06-10 #3, see
+   * docs/20-phase-7-eksport-weryfikator.md §0′. The `Carrier.opiekunId → User`
    * relation is NOT NULL, so every active vehicle resolves an opiekun.
    * `planner` is projected to its display NAME.
    */
-  async listActiveForBoard(): Promise<VehicleBoardRow[]> {
+  async listActiveForBoard(scope?: {
+    plannerId?: string;
+    dispatcherId?: string;
+  }): Promise<VehicleBoardRow[]> {
+    const where: Record<string, unknown> = { active: true };
+    if (scope?.plannerId) where.plannerId = scope.plannerId;
+    if (scope?.dispatcherId) where.dispatcherId = scope.dispatcherId;
     const rows = await this.prisma.tx.vehicle.findMany({
-      where: { active: true },
+      where,
       select: {
         id: true,
         plateNumber: true,

@@ -21,10 +21,11 @@ export const ROLE_LANDING: Record<Role, string> = {
   // the redirect hop entirely (post-login, access-denial bounce, and the header
   // home link all resolve here — no loop). docs/14-design-system.md §7.2 / §7.5.
   //
-  // eksport → read-only delegations витрина; weryfikator → vehicle route-status
-  // board (rework 2026-06-10 #2: weryfikator no longer touches delegations).
+  // eksport → read-only delegations витрина; weryfikator → weekly km-board
+  // (rework 2026-06-12 #3: the route-status board is absorbed into the daily
+  // km-list, so the landing moves `/weryfikator/vehicles` → `/weryfikator/km`).
   eksport: '/eksport/delegations',
-  weryfikator: '/weryfikator/vehicles',
+  weryfikator: '/weryfikator/km',
 };
 
 /** All authenticated landing paths (used by middleware to allow them). */
@@ -84,6 +85,8 @@ export const ADMIN_ONLY_EMPLOYEE_PREFIXES: readonly string[] = [
   // direct-URL navigation at the edge. pracownik/opiekun must NEVER reach it
   // (docs/19-known-quirks.md #13 + roles matrix).
   '/employee/delegations',
+  // Phase 7.7 — admin-only read-only km-report (`<KmBoardScreen mode="view">`).
+  '/employee/km',
 ];
 
 function startsWithPrefix(pathname: string, prefix: string): boolean {

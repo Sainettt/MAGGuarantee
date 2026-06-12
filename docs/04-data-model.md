@@ -26,8 +26,8 @@
  │ le   │ │      │ │          │ │ (wniosek)│               │
  └──────┘ └──────┘ └──────────┘ └──────────┘               │
     │ │       │       │              │ vehicleId           │
-    │ │ plannerId/    │              │                     │
-    │ │ dispatcherId ─┼──────────────┼─── (User as planner/dispatcher)
+    │ │ plannerId/        │          │                     │
+    │ │ dispatchTeamId ───┼──────────┼─── (User as planner; Team as dispatch team)
     │ │       │       │              │                     │
     │ └───────┴───────┴──┐           │                     │
     │                    ▼           │                     │
@@ -71,13 +71,15 @@
 | `name` | имя |
 | `active` | блокировка логина |
 | `liderEmail` | только для `planista` — email лидера группы (для рассылки). Per-role tech debt — см. [19-known-quirks.md](19-known-quirks.md#liderEmail) |
+| `teamId` | 🗓️ **Phase 11** — только для `dyspozytor`, FK → Team (команда, в которой состоит диспетчер) |
 
 > ⚠️ Поля `company` (Firma) на `User` **больше нет** — оно перенесено на `Carrier` миграцией `20260507223021_move_company_to_carrier`. Внутренние роли MAGTRANS (admin/pracownik/opiekun/planista/dyspozytor/eksport/weryfikator) — это сотрудники одной компании, поле было денормализованным наследием GAS-миграции, которое использовалось только перевозчиками.
 
 **Связи:**
 - 1:1 с `Carrier` (если role=przewoznik).
 - 1:N с `Carrier.opiekun` (если role=opiekun).
-- 1:N с `Vehicle.planner`, `Vehicle.dispatcher`.
+- 1:N с `Vehicle.planner` (planista, ведущий спедитор).
+- N:1 с `Team` (via `User.teamId`, только для dyspozytor).
 - 1:N с `Delegation.reportedBy`, `Delegation.verifiedBy`.
 - 1:N с `Claim.decidedBy`.
 - 1:N с `AuditLog.user`.
@@ -115,8 +117,8 @@
 | `carrierId` | FK → Carrier |
 | `plateNumber` | NrRej |
 | `active` | флаг активности |
-| `plannerId` | FK → User (role=planista) |
-| `dispatcherId` | FK → User (role=dyspozytor) |
+| `plannerId` | FK → User (role=planista) — ведущий спедитор (один) |
+| `dispatchTeamId` | 🗓️ **Phase 11** — FK → Team, **заменит** `dispatcherId` (оба сменщика видят авто через членство в команде). Сейчас в схеме ещё `dispatcherId` |
 | `brand`, `model`, `year` | характеристики |
 | `certificateL` | Boolean — TAK/NIE (есть ли L-сертификат). До 2026-05 — enum L1/L2/L3, конвертировано миграцией `20260515130307_vehicle_certificate_l_to_boolean`. |
 | `euro` | III / IV / V / VI |
@@ -129,14 +131,63 @@
 | `gpsMobilePhone` | ID GPS-трекера (НЕ телефонный номер — misnomer, см. [19-known-quirks.md#gpsMobilePhone](19-known-quirks.md)) |
 | `nextInspectionDate` | следующий техосмотр |
 | `sideNumber` | NrBoczny |
-| `lastDroveAt` | **автообновление** от Delegation→`zjechal`. Никогда не редактируется руками — см. [19-known-quirks.md](19-known-quirks.md) |
+| `lastDroveAt` | **автообновление** от `VehicleDailyKm` drove-дня (`max(lastDroveAt, date)`). Никогда не редактируется руками — см. [19-known-quirks.md](19-known-quirks.md) |
 
 **Вложения:** скан умовы и cabotage-разрешения хранятся как `VehicleAttachment` (метаданные + `storageKey` в MinIO; FK на Vehicle `ON DELETE CASCADE`; soft-delete `deletedAt`). Enum `VehicleAttachmentCategory { contract, cabotage_de, cabotage_fr }` — значение `adr` удалено 2026-05-29 (ADR-сертификат переехал на Driver). Boolean `Vehicle.adr` сохранён.
 
 **Инварианты (data-model contract):**
 - Уникальность `(carrierId, plateNumber)` — один номер на перевозчика.
-- `plannerId` / `dispatcherId` — пользователи с соответствующей ролью.
+- `plannerId` — пользователь с ролью planista (ведущий спедитор).
+- `dispatchTeamId` — ссылка на активную `Team`; все её `dispatchers` (role=dyspozytor) считаются ведущими авто.
 - **CHECK `vehicle_gps_device_when_gps_on`** — если `gps=true`, то `gpsMobilePhone` обязан быть not-null. Это часть data-model contract, не имплементационная деталь.
+
+### `Team` — команда диспетчеров
+
+> 🗓️ **PLANNED (Phase 11)** — сущности ещё нет в схеме; текущая схема — одиночный `Vehicle.dispatcherId`. Ниже — **целевая** модель; миграция и реализация — Phase 11 (см. [17-migration-roadmap.md](17-migration-roadmap.md) Шаг D).
+
+Нумерованная команда диспетчеров (код вида `1.2.5`), к которой привязывается авто. Отражает реальный процесс MAGTRANS: во внешней системе maciosoft (Sped Trans) машине приписывается не один человек, а целая команда; раньше состав команд вёлся вручную в Excel (raport DAF). В MAGGuarantee справочник команд ведёт **admin** — это явная замена тому Excel.
+
+| Поле | Назначение |
+|---|---|
+| `code` | unique — код команды (`1.2.5`) |
+| `name` | опц. человекочитаемый ярлык |
+| `active` | флаг активности |
+| `dispatchers` | 1:N → User (role=dyspozytor) — состав команды (обычно 2 по сменам, но число **НЕ** фиксировано) |
+
+**Связи:**
+- 1:N с `User` (via `User.teamId`) — диспетчер состоит ровно в одной команде.
+- 1:N с `Vehicle` (via `Vehicle.dispatchTeamId`) — на одну команду назначено много авто.
+
+**Инварианты:**
+- `Team.code` уникален.
+- `User.teamId` указывает на user с role=dyspozytor.
+- `Vehicle.dispatchTeamId` ссылается на активную `Team`.
+
+> **Смену (zmiana) НЕ храним** — она меняется каждую неделю; для уведомлений достаточно имён всех диспетчеров команды.
+
+> **Спедитор — НЕ через команду.** В уведомление о выезде летит один ведущий спедитор = `Vehicle.plannerId` (planista). Team существует только для диспетчеров.
+
+**Уведомление о zgłoszeniu wyjazdu** разворачивает получателей так: `Vehicle.dispatchTeam.dispatchers` (все) + `Vehicle.planner` (один) + `Carrier.opiekun`. Верификацию/акцепт выезда выполняет диспетчер из команды авто (см. [03-roles.md](03-roles.md) и [17-migration-roadmap.md](17-migration-roadmap.md) Phase 11).
+
+### `VehicleDailyKm` — дневной километраж (weryfikator)
+
+Новый процесс: `weryfikator` ежедневно проставляет, сколько км проехала каждая машина (сверяясь со SpedTrans+GPS). Одна запись на `(машина, день)`. **Фундамент денег** — пробег в `Claim` выводится отсюда. Заменяет route-status доску (см. [20-phase-7-eksport-weryfikator.md](20-phase-7-eksport-weryfikator.md) §0′).
+
+| Поле | Назначение |
+|---|---|
+| `vehicleId` | FK → Vehicle |
+| `date` | день (date-only) |
+| `km` | Int? — км за день; null при `idle` |
+| `state` | `drove` (ехала) / `idle` (проверено-стоит). Нет записи за день = «не проверено» (`nieznany`, не хранится) |
+| `source` | `manual` (weryfikator) / `gps` (внешний, без notedBy) |
+| `notedById` | FK → User (кто отметил; null для gps) |
+| `notes` | заметка |
+
+**Инварианты:** `@@unique(vehicleId, date)` (одна отметка/день, upsert). При `state=drove` api обновляет `Vehicle.lastDroveAt = max(lastDroveAt, date)`.
+
+**Производный статус машины** (не хранится): последняя по `date` запись → `drove` ⇒ `w ruchu`; `idle` ⇒ `nie jeździ`; нет в периоде ⇒ `nieznany`.
+
+> **Деньги:** `Claim.mileage` предзаполняется как `Σ km (state=drove)` за период машины; `pracownik` сверяет. Связи `Claim↔Delegation` НЕТ (см. `Delegation`).
 
 ### `Driver` — водитель
 
@@ -194,7 +245,7 @@
 | `vehiclePlateSnapshot` | snapshot номера на случай удаления авто |
 | `dateStart`, `dateEnd` | период гарантии |
 | `timeFrom`, `timeTo` | часы (для дробных дней) |
-| `mileage` | фактический пробег км |
+| `mileage` | фактический пробег км — предзаполняется из `Σ VehicleDailyKm` (state=drove) за период; `pracownik` правит |
 | `kmGuaranteed` | расчётный гарантированный км |
 | `kmDifference` | gwarant − mileage |
 | `paymentEur` | сумма доплаты |
@@ -242,22 +293,22 @@
 | `departureAt`, `departureCountry`, `departurePostalCode` | старт |
 | `plannedReturnAt` (date-only, `@db.Date`), `returnCountry`, `returnPostalCode` | план возврата — заполняется на этапе `zgloszony` (продуктовое решение 2026-05) |
 | `actualReturnAt` (timestamp) | факт возврата, выставляется только при переходе в `zjechal` |
-| `status` | `zgloszony` → `w_trasie` → `zjechal` (или `anulowany` на любой стадии) |
+| `status` | `zgloszony` → `w_trasie` → `zjechal` / `anulowany`. ⚠️ Статус — **«мёртвый груз»** (в приложении не верифицируется, см. инвариант ниже) |
 | `reportedById` | FK → User (кто зарегистрировал) |
 | `verifiedById` | FK → User (верификатор, изменивший статус) |
 | `notes` | заметки |
 
 **Инварианты (data-model contract):**
-- Status-переходы строгие: `zgloszony → w_trasie → zjechal`. Переход `markReturned` обновляет `Vehicle.lastDroveAt = now()` (auto-side-effect, не выставляется руками).
+- **⚠️ Status выезда — «мёртвый груз» (2026-06-12):** `w_trasie/zjechal` через приложение НЕ проставляются (верификатора-человека нет; см. [20-phase-7-eksport-weryfikator.md](20-phase-7-eksport-weryfikator.md) §0′). Enum остаётся, но операционно статус не ведётся. `Vehicle.lastDroveAt` обновляет `VehicleDailyKm`, не делегация. `cancel` (`anulowany`) остаётся carrier-only.
 - Перевозчик может анулировать только свои `zgloszony`.
 - Верификатор может анулировать любой.
 - `trailerId`, `driverId`, `plannedReturnAt`, `returnCountry`, `returnPostalCode` — все NOT NULL (migration `20260518113943_delegation_required_fields_and_date_only`). План возврата задаётся уже на момент `zgloszony`.
 - `status='zjechal'` ⇒ `actualReturnAt` обязан быть заполнен. Раньше это гарантировал DB CHECK `delegation_returned_complete` — он удалён, теперь правило enforced на уровне api (в сервисе при переходе статуса).
 - DB CHECK на длину: `returnCountry` 2..8 символов (covers `EL`), `returnPostalCode` ≤ 16. Формат-валидация (per-country regex) — на Zod-уровне через `EU_POSTAL_CODES` (см. `packages/shared/src/constants/eu-postal-codes.ts`).
 
-> 🗓️ **PLANNED (Phase 11+):** approval workflow для Delegation + жёсткая связь `Claim.delegationId` (один wniosek на один wyjazd) + блок `departureAt < today`. Появятся новые status-ы `oczekuje_na_akceptacje` / `odrzucony`, поля `plannerSnapshotId` / `dispatcherSnapshotId` / `approvedById` / `approvedAt` / `rejectedById` / `rejectedAt` / `rejectionReason`. Полная спецификация — [17-migration-roadmap.md#фаза-11--wyjazd-approval-workflow-планируется-после-launch](17-migration-roadmap.md#фаза-11--wyjazd-approval-workflow-планируется-после-launch).
+> ⛔ **ОТМЕНЕНО (2026-06-12):** связь `Claim.delegationId` **НЕ вводится** — у заказчика и в его же legacy таблицы не связаны, деньги считаются на машину. `Claim.mileage` выводится из `Σ VehicleDailyKm` (см. `Claim` выше), а связка выезд↔км даётся **визуально** в панели перевозчика (клик на выезд → км-календарь машины), без FK. Это финализирует memory `no-wniosek-delegation-linking` и снимает Phase 11 Шаг B/C. Approval-workflow выездов тоже не делаем (статус — мёртвый груз).
 >
-> 🔁 **Подтверждено 2026-06-11:** связь `Claim.delegationId` — **ядро фазы, не отменяется** (кратковременная «отмена» 2026-06-09 была недоразумением из-за потери контекста между сессиями). Эволюция: gating-статус выезда для подачи wniosek смещается к новому **`zakończony`** (рейс закрыт + км weryfikatora проверены по дням), а `mileage` wniosku **выводится из Σ дневных км weryfikatora** — перевозчик в идеале лишь выбирает `zakończony`-выезд и подтверждает. Детали — в roadmap-спеке (Шаг B).
+> 🔁 **История:** ранее (2026-06-11) связь `Claim.delegationId` помечалась «ядром фазы» — это решение **отменено** заметкой выше (2026-06-12). Идея «mileage из Σ дневных км weryfikatora» **сохраняется**, но реализуется через `VehicleDailyKm` напрямую (по машине+периоду), без привязки к конкретному выезду. См. [17-migration-roadmap.md](17-migration-roadmap.md).
 
 ### `MonthlyLimit` — лимиты на месяц
 
@@ -320,7 +371,9 @@ Append-only журнал всех критических операций.
 | `User` 1:1 `Carrier` | один аккаунт carrier ↔ один профиль перевозчика |
 | `User` 1:N `Carrier` (via opiekunId) | опекун курирует много перевозчиков |
 | `Carrier` 1:N `Vehicle/Driver/Trailer` | перевозчик владеет автопарком |
-| `Vehicle` N:1 `User` (planner, dispatcher) | назначенные люди MagTrans |
+| `Vehicle` N:1 `User` (planner) | ведущий спедитор MagTrans |
+| `Vehicle` N:1 `Team` (dispatchTeam) | команда диспетчеров авто |
+| `Team` 1:N `User` (dispatchers, via teamId) | состав команды диспетчеров |
 | `Carrier` 1:N `Claim` | перевозчик подаёт заявления |
 | `Vehicle` 1:N `Claim` | заявление на конкретное авто |
 | `Vehicle` 1:N `Delegation` | выезды авто |
@@ -339,7 +392,9 @@ Append-only журнал всех критических операций.
 | `Trailer.plateNumber` уникален в рамках Carrier | DB unique constraint |
 | `Carrier.opiekunId` указывает на user с role=opiekun | проверка в сервисе при assign |
 | `Vehicle.plannerId` → User.role=planista | проверка в сервисе при assign |
-| `Vehicle.dispatcherId` → User.role=dyspozytor | проверка в сервисе при assign |
+| `Vehicle.dispatchTeamId` → активная Team | проверка в сервисе при assign |
+| `User.teamId` → User.role=dyspozytor | проверка в сервисе |
+| `Team.code` уникален | DB unique constraint |
 | `Claim.status` всегда из enum | DB enum |
 | `Delegation.status` всегда из enum | DB enum |
 | Claim status-переходы — только 9 легальных рёбер | `claim-state-machine.ts` + сервис; см. секцию `Claim` |
@@ -347,7 +402,7 @@ Append-only журнал всех критических операций.
 | Claim ZAAKCEPTOWANO ⇒ orderNumber+orderDate+amountApproved | DB CHECK `claim_accepted_payment_complete` |
 | Delegation zjechal ⇒ actualReturnAt заполнен | сервис (api enforce) при переходе статуса. План возврата (`returnCountry`/`returnPostalCode`) уже NOT NULL на этапе `zgloszony` |
 | Vehicle gps=true ⇒ gpsMobilePhone | DB CHECK `vehicle_gps_device_when_gps_on` |
-| `Vehicle.lastDroveAt` всегда выставляется системой при Delegation→`zjechal` | сервис, не UI |
+| `Vehicle.lastDroveAt` выставляется системой при `VehicleDailyKm` drove-дне (`max`) | сервис, не UI |
 | Audit пишется для всех mutating ops | interceptor |
 
 > **CHECK constraints как часть data-model contract.** Это не имплементационная деталь и не оптимизация — это бизнес-правила, которые должны держаться независимо от того, какой код пишет в БД. См. [12-database-schema.md#миграции](12-database-schema.md#миграции) для точного SQL и [19-known-quirks.md](19-known-quirks.md) для нюансов.

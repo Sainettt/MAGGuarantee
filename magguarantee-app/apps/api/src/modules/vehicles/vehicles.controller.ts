@@ -2,12 +2,14 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Res,
   UploadedFiles,
@@ -22,19 +24,23 @@ import type { z } from 'zod';
 import {
   CreateVehicleSchema,
   DeleteWithReasonSchema,
-  SetVehicleRouteStatusSchema,
+  KmBoardQuerySchema,
+  SetVehicleDailyKmSchema,
   UpdateVehicleSchema,
   UuidSchema,
+  VehicleDailyKmHistoryQuerySchema,
   VehicleFiltersSchema,
   type CreateVehicleDto,
   type DeleteWithReasonDto,
-  type SetVehicleRouteStatusDto,
+  type KmBoardQuery,
+  type SetVehicleDailyKmDto,
   type UpdateVehicleDto,
   type VehicleAttachmentDto,
+  type VehicleDailyKmDto,
+  type VehicleDailyKmHistoryQuery,
   type VehicleDto,
   type VehicleFilters,
-  type VehicleRouteBoardItemDto,
-  type VehicleRouteStatusLogDto,
+  type VehicleKmBoardDto,
 } from '@magguarantee/shared';
 
 import { Audit } from '../../common/audit';
@@ -61,7 +67,7 @@ import {
   MAX_ATTACHMENT_BYTES,
   MAX_FILES_PER_FIELD,
 } from './vehicle-attachments.constants';
-import { VehicleRouteStatusService } from './vehicle-route-status.service';
+import { VehicleDailyKmService } from './vehicle-daily-km.service';
 import { VehiclesService } from './vehicles.service';
 
 /**
@@ -98,25 +104,40 @@ const MULTIPART_OPTIONS = {
 export class VehiclesController {
   constructor(
     private readonly vehicles: VehiclesService,
-    private readonly routeStatus: VehicleRouteStatusService,
+    private readonly dailyKm: VehicleDailyKmService,
   ) {}
 
   /**
-   * Weryfikator route board (Phase 7) — ALL active vehicles with today's
-   * derived route status. Declared BEFORE `GET /:id` so the literal
-   * `route-board` segment is matched first (Express matches in declaration
-   * order). A dedicated endpoint — NOT an overload of the ownership-scoped
-   * `GET /vehicles` — so the board is never narrowed by carrier/opiekun scope.
-   *
-   * Guards: the class-level `OpiekunOwnershipGuard` / `CarrierOwnershipGuard`
-   * are decorator-driven (no `@OpiekunOwns` / `@CarrierOwns` here → they
-   * short-circuit `true`), and both also pass through `weryfikator` / `admin`
-   * by role anyway. `RolesGuard` does the actual gate.
+   * Weryfikator km-board (Phase 7 REWORK #3) — ALL active vehicles with their
+   * 7 day-cells for the resolved week, period km sum, and derived motion
+   * status. Declared BEFORE `GET /:id` so the literal `km-board` segment is
+   * matched first (Express matches in declaration order). A dedicated endpoint
+   * — NOT an overload of the ownership-scoped `GET /vehicles` — so the board is
+   * never narrowed by carrier/opiekun scope. `RolesGuard` does the gate; the
+   * class-level ownership guards short-circuit (no `@*Owns` decorator here).
+   * Replaces the former `GET /vehicles/route-board`.
    */
-  @Get('route-board')
+  @Get('km-board')
   @Roles('weryfikator', 'admin')
-  async routeBoard(): Promise<VehicleRouteBoardItemDto[]> {
-    return this.routeStatus.getBoard();
+  async kmBoard(
+    @Query(new ZodValidationPipe(KmBoardQuerySchema)) query: KmBoardQuery,
+  ): Promise<VehicleKmBoardDto> {
+    return this.dailyKm.getBoard(query);
+  }
+
+  /**
+   * Read-only km-report (Phase 7 REWORK #3) — same weekly grid, but ONLY
+   * vehicles that drove in the period, scoped by role: planista → own
+   * `plannerId`; dyspozytor → own `dispatcherId`; eksport / admin /
+   * weryfikator → all. Declared before `GET /:id` for literal-segment match.
+   */
+  @Get('km-report')
+  @Roles('planista', 'dyspozytor', 'eksport', 'admin', 'weryfikator')
+  async kmReport(
+    @CurrentUser() user: AuthUser,
+    @Query(new ZodValidationPipe(KmBoardQuerySchema)) query: KmBoardQuery,
+  ): Promise<VehicleKmBoardDto> {
+    return this.dailyKm.getReport(query, buildReportScope(user));
   }
 
   @Get()
@@ -327,40 +348,72 @@ export class VehiclesController {
     await this.vehicles.deleteAttachment(id, attachmentId);
   }
 
-  // ── Route status (Phase 7 weryfikator board) ─────────────
+  // ── Daily km (Phase 7 REWORK #3 weryfikator km-board) ────
 
   /**
-   * Appends a manual route-status row for a vehicle («w trasie» / «zjechał»).
-   * Weryfikator/admin only. Re-stamping the same status is allowed — a new row
-   * is appended (no 409). When `status='zjechal'` the vehicle's `lastDroveAt`
-   * is re-touched in the same `@Audit`-opened transaction (ambient `prisma.tx`
-   * — append + mirror + audit row commit atomically). No ownership decorator:
-   * the class-level ownership guards short-circuit for weryfikator/admin.
+   * UPSERTs one (vehicle, day) km mark. Weryfikator/admin only. `state='drove'`
+   * requires `km>0`; `state='idle'` forbids `km`. Re-stamping a day overwrites
+   * the previous mark (unique on (vehicleId, date)). When `state='drove'` the
+   * vehicle's `lastDroveAt` is bumped to `max(lastDroveAt, date)` in the same
+   * `@Audit`-opened transaction (ambient `prisma.tx` — upsert + bump + audit
+   * row commit atomically). No ownership decorator: the class-level ownership
+   * guards short-circuit for weryfikator/admin. Replaces the former
+   * `POST /vehicles/:id/route-status`.
    */
-  @Post(':id/route-status')
-  @HttpCode(HttpStatus.CREATED)
+  @Put(':id/daily-km')
+  @HttpCode(HttpStatus.OK)
   @Roles('weryfikator', 'admin')
   @Audit({
-    action: 'vehicle.setRouteStatus',
+    action: 'vehicle.setDailyKm',
     targetType: 'Vehicle',
     targetKey: (req) => req.params?.id,
   })
-  async setRouteStatus(
+  async setDailyKm(
     @CurrentUser() user: AuthUser,
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
-    @Body(new ZodValidationPipe(SetVehicleRouteStatusSchema))
-    dto: SetVehicleRouteStatusDto,
-  ): Promise<VehicleRouteStatusLogDto> {
-    return this.routeStatus.setStatus(user, id, dto);
+    @Body(new ZodValidationPipe(SetVehicleDailyKmSchema))
+    dto: SetVehicleDailyKmDto,
+  ): Promise<VehicleDailyKmDto> {
+    return this.dailyKm.setDailyKm(user, id, dto);
   }
 
-  /** Route-status history of one vehicle (newest-first). Weryfikator/admin. */
-  @Get(':id/route-status')
+  /**
+   * Daily-km history of one vehicle (newest-first), optionally bounded by
+   * `?from&to` (date-only, inclusive). Weryfikator/admin. Drives the
+   * «Historia» modal. Replaces the former `GET /vehicles/:id/route-status`.
+   */
+  @Get(':id/daily-km')
   @Roles('weryfikator', 'admin')
-  async getRouteStatus(
+  async getDailyKm(
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
-  ): Promise<VehicleRouteStatusLogDto[]> {
-    return this.routeStatus.getHistory(id);
+    @Query(new ZodValidationPipe(VehicleDailyKmHistoryQuerySchema))
+    query: VehicleDailyKmHistoryQuery,
+  ): Promise<VehicleDailyKmDto[]> {
+    return this.dailyKm.getHistory(id, query);
+  }
+}
+
+/**
+ * Maps the caller's role to the km-report vehicle scope. planista narrows to
+ * vehicles where they are the planner; dyspozytor to their dispatched
+ * vehicles; eksport / admin / weryfikator see all (empty scope). Any other
+ * role would have been blocked by `@Roles` already — defensive 403.
+ */
+function buildReportScope(user: AuthUser): {
+  plannerId?: string;
+  dispatcherId?: string;
+} {
+  switch (user.role) {
+    case 'planista':
+      return { plannerId: user.sub };
+    case 'dyspozytor':
+      return { dispatcherId: user.sub };
+    case 'eksport':
+    case 'admin':
+    case 'weryfikator':
+      return {};
+    default:
+      throw new ForbiddenException('Brak uprawnień do raportu km');
   }
 }
 

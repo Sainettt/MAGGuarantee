@@ -124,16 +124,16 @@ describe('VehiclesController — authorization', () => {
     });
   });
 
-  // ── Route status (Phase 7 weryfikator board) ─────────────
+  // ── Daily km (Phase 7 REWORK #3 weryfikator km-board) ────
 
-  describe('route-status / route-board authorization (weryfikator + admin)', () => {
-    const ROUTE_STATUS_HANDLERS: (keyof VehiclesController)[] = [
-      'setRouteStatus',
-      'getRouteStatus',
-      'routeBoard',
+  describe('km-board / daily-km authorization (weryfikator + admin)', () => {
+    const DAILY_KM_HANDLERS: (keyof VehiclesController)[] = [
+      'setDailyKm',
+      'getDailyKm',
+      'kmBoard',
     ];
 
-    it.each(ROUTE_STATUS_HANDLERS)(
+    it.each(DAILY_KM_HANDLERS)(
       '%s is restricted to weryfikator + admin',
       (handler) => {
         const roles = rolesFor(handler);
@@ -141,25 +141,57 @@ describe('VehiclesController — authorization', () => {
       },
     );
 
-    it.each(ROUTE_STATUS_HANDLERS)('allows weryfikator on %s', (handler) => {
+    it.each(DAILY_KM_HANDLERS)('allows weryfikator on %s', (handler) => {
       const wer: AuthUser = { ...carrierUser, role: 'weryfikator' };
       expect(guard.canActivate(ctxFor(handler, wer))).toBe(true);
     });
 
-    it.each(ROUTE_STATUS_HANDLERS)('allows admin on %s', (handler) => {
+    it.each(DAILY_KM_HANDLERS)('allows admin on %s', (handler) => {
       const adm: AuthUser = { ...carrierUser, role: 'admin' };
       expect(guard.canActivate(ctxFor(handler, adm))).toBe(true);
     });
 
     it.each(['przewoznik', 'eksport', 'planista', 'dyspozytor', 'opiekun'] as const)(
-      'rejects %s on the route-status endpoints (403)',
+      'rejects %s on the daily-km endpoints (403)',
       (role) => {
         const u: AuthUser = { ...carrierUser, role };
-        for (const handler of ROUTE_STATUS_HANDLERS) {
+        for (const handler of DAILY_KM_HANDLERS) {
           expect(() => guard.canActivate(ctxFor(handler, u))).toThrow(
             ForbiddenException,
           );
         }
+      },
+    );
+  });
+
+  // ── km-report (read-only, role-scoped) ───────────────────
+
+  describe('km-report authorization', () => {
+    it('is open to planista / dyspozytor / eksport / admin / weryfikator', () => {
+      expect(rolesFor('kmReport').sort()).toEqual([
+        'admin',
+        'dyspozytor',
+        'eksport',
+        'planista',
+        'weryfikator',
+      ]);
+    });
+
+    it.each(['planista', 'dyspozytor', 'eksport', 'admin', 'weryfikator'] as const)(
+      'allows %s on kmReport',
+      (role) => {
+        const u: AuthUser = { ...carrierUser, role };
+        expect(guard.canActivate(ctxFor('kmReport', u))).toBe(true);
+      },
+    );
+
+    it.each(['przewoznik', 'opiekun', 'pracownik'] as const)(
+      'rejects %s on kmReport (403)',
+      (role) => {
+        const u: AuthUser = { ...carrierUser, role };
+        expect(() => guard.canActivate(ctxFor('kmReport', u))).toThrow(
+          ForbiddenException,
+        );
       },
     );
   });

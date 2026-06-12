@@ -205,13 +205,15 @@ export default function NewClaimPage() {
     if (watched.dateStart > watched.dateEnd) {
       return { previewBody: null, emptyReason: 'date-order' };
     }
-    if (
-      typeof watched.mileage !== 'number' ||
-      Number.isNaN(watched.mileage) ||
-      watched.mileage <= 0
-    ) {
-      return { previewBody: null, emptyReason: 'mileage-zero' };
-    }
+    // Phase 7.7: `mileage` is now OPTIONAL on the preview contract — when the
+    // carrier hasn't entered a positive value we OMIT it so the server computes
+    // `Σ VehicleDailyKm` for the period and returns it in `preview.mileage`,
+    // which we then prefill into the (still editable) field below. So the
+    // preview fires as soon as vehicle + dates are valid, even with mileage 0.
+    const hasMileage =
+      typeof watched.mileage === 'number' &&
+      !Number.isNaN(watched.mileage) &&
+      watched.mileage > 0;
     return {
       previewBody: {
         vehicleId: watched.vehicleId,
@@ -219,7 +221,7 @@ export default function NewClaimPage() {
         dateEnd: watched.dateEnd,
         timeFrom: watched.timeFrom || undefined,
         timeTo: watched.timeTo || undefined,
-        mileage: watched.mileage,
+        mileage: hasMileage ? watched.mileage : undefined,
         hoursAdjusted: 0,
       },
       emptyReason: undefined,
@@ -238,6 +240,25 @@ export default function NewClaimPage() {
   const previewQ = useClaimPreview(debouncedPreviewBody, {
     enabled: !!debouncedPreviewBody,
   });
+
+  // ── Mileage prefill from the preview (Phase 7.7) ─────────────────
+  // The preview response carries the effective `mileage` (the server's
+  // `Σ VehicleDailyKm` when the carrier left the field blank). Prefill it into
+  // the still-editable field ONLY while the carrier hasn't entered a positive
+  // value of their own — so the verifier's recorded km appear automatically but
+  // a manual override is never clobbered. We guard on the *current* form value
+  // (read fresh, not the closed-over `watched`) to avoid an update loop.
+  const previewMileage = previewQ.data?.mileage;
+  useEffect(() => {
+    if (typeof previewMileage !== 'number' || previewMileage <= 0) return;
+    const current = form.getValues('mileage');
+    if (typeof current === 'number' && current > 0) return;
+    form.setValue('mileage', previewMileage, {
+      shouldDirty: false,
+      shouldValidate: true,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewMileage]);
 
   // ── Duration gate (mirror of api-side `canSubmitByDuration`) ──────
   // Evaluated client-side so the submit button can disable + show an

@@ -41,6 +41,7 @@ import { KmCalcService } from '../km-calc/km-calc.service';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TrailersRepository } from '../trailers/trailers.repository';
+import { VehicleDailyKmRepository } from '../vehicles/vehicle-daily-km.repository';
 import { VehiclesRepository } from '../vehicles/vehicles.repository';
 import { assertLegalTransition } from './claim-state-machine';
 import {
@@ -155,7 +156,32 @@ export class ClaimsService {
     // of throwing — same fire-and-log policy as the other notifications.
     private readonly mailService?: MailService,
     private readonly configService?: ConfigService<Env, true>,
+    // Phase 7 REWORK (#3) — claim mileage pre-fill source. Optional ctor arg so
+    // the existing positional test fakes keep compiling; production wiring
+    // always injects it via DI (exported from VehiclesModule). When absent the
+    // prefill is skipped and the carrier-supplied mileage is used as-is.
+    private readonly dailyKm?: VehicleDailyKmRepository,
   ) {}
+
+  /**
+   * Resolves the effective mileage for submit / preview. The carrier MAY send
+   * an explicit value (override); when omitted we pre-fill it as
+   * `Σ VehicleDailyKm.km (state=drove)` over `[dateStart, dateEnd]` of the
+   * vehicle (Phase 7 REWORK #3, docs/20 §0′). `pracownik` revises it at
+   * verification regardless. `dateEnd` is inclusive, so we pass `dateEnd + 1d`
+   * as the half-open upper bound to the repository.
+   */
+  private async _resolveMileage(
+    vehicleId: string,
+    explicit: number | undefined,
+    dateStart: Date,
+    dateEnd: Date,
+  ): Promise<number> {
+    if (explicit !== undefined) return explicit;
+    if (!this.dailyKm) return 0;
+    const toExclusive = new Date(dateEnd.getTime() + 24 * 60 * 60 * 1000);
+    return this.dailyKm.sumDroveKm(vehicleId, dateStart, toExclusive);
+  }
 
   // ── Submit ──────────────────────────────────────────────
 
@@ -182,6 +208,17 @@ export class ClaimsService {
       throw new UnprocessableEntityException('Nieprawidłowa data');
     }
 
+    // Resolve mileage: explicit carrier override OR pre-fill from
+    // `Σ VehicleDailyKm.km (state=drove)` over [dateStart, dateEnd] of the
+    // vehicle (Phase 7 REWORK #3). All downstream checks + the persisted row
+    // use this resolved value instead of `dto.mileage`.
+    const mileage = await this._resolveMileage(
+      vehicle.id,
+      dto.mileage,
+      dateStart,
+      dateEnd,
+    );
+
     // ── Tier 1: pre-calc business rules ───────────────────────
     // Collect everything we can check WITHOUT running km-calc. If the user
     // has any of these wrong, km-calc would produce garbage anyway, so we
@@ -199,9 +236,9 @@ export class ClaimsService {
         `Data załadunku (${dto.dateStart}) jest w przyszłości.`,
       );
     }
-    if (dto.mileage <= 0) {
+    if (mileage <= 0) {
       tier1.push(
-        `Przebieg musi być większy od zera (podano ${dto.mileage}).`,
+        `Przebieg musi być większy od zera (podano ${mileage}).`,
       );
     }
     // NB: We deliberately do NOT block on `!vehicle.active`. A wniosek is
@@ -280,7 +317,7 @@ export class ClaimsService {
     // 2-driver continuous operation; anything past that is almost always a
     // typo or odometer reset. Cap configurable via `max_avg_km_per_day`.
     if (calc.totalDays > 0) {
-      const avgKmPerDay = dto.mileage / calc.totalDays;
+      const avgKmPerDay = mileage / calc.totalDays;
       if (avgKmPerDay > config.maxAvgKmPerDay) {
         tier2.push(
           `Średni przebieg dzienny (${Math.round(avgKmPerDay)} km/dzień) ` +
@@ -290,7 +327,7 @@ export class ClaimsService {
       }
     }
 
-    const kmDifference = calc.kmGuaranteed - dto.mileage;
+    const kmDifference = calc.kmGuaranteed - mileage;
     const paymentEur =
       kmDifference > 0
         ? round2(kmDifference * calc.ratePerKmEffective)
@@ -299,7 +336,7 @@ export class ClaimsService {
       // Only surface "no underrun" if everything else is sane — otherwise
       // the user fixes the upstream issue first and this often resolves.
       tier2.push(
-        `Km zrealizowane (${dto.mileage}) są równe lub wyższe niż km ` +
+        `Km zrealizowane (${mileage}) są równe lub wyższe niż km ` +
           `gwarantowane (${calc.kmGuaranteed}). Brak podstaw do dopłaty.`,
       );
     }
@@ -325,7 +362,7 @@ export class ClaimsService {
     // upstream `canSubmitByDuration` gate plus the `kmGuaranteed === 0`
     // tier-2 violation block the realistic case where it would matter.
     const kmPerDay =
-      calc.totalDays > 0 ? round2(dto.mileage / calc.totalDays) : 0;
+      calc.totalDays > 0 ? round2(mileage / calc.totalDays) : 0;
     const now = new Date();
 
     // The `nrZgl` counter bump and the claim insert MUST commit atomically so
@@ -353,7 +390,7 @@ export class ClaimsService {
           timeFrom: dto.timeFrom,
           timeTo: dto.timeTo,
           drivenDays: calc.totalDays,
-          mileage: dto.mileage,
+          mileage,
           // `kmPerDay` is NOT NULL post-phase3_blocks — calculated above.
           kmPerDay,
           kmGuaranteed: calc.kmGuaranteed,
@@ -388,7 +425,7 @@ export class ClaimsService {
           // Mirror of GAS columns AR-AV (`Code.gs:6272-6276`).
           origDateStart: dateStart,
           origDateEnd: dateEnd,
-          origMileage: dto.mileage,
+          origMileage: mileage,
           // Immutable time-window snapshot — same values that go into the
           // working `timeFrom/timeTo` columns above (`dto.timeFrom/timeTo`).
           // Write-once at submit; the verifier PATCH never overwrites these.
@@ -688,13 +725,29 @@ export class ClaimsService {
       hoursAdjusted: dto.hoursAdjusted ?? 0,
     });
 
-    const kmDifference = calc.kmGuaranteed - dto.mileage;
+    // Mileage: explicit override OR pre-fill from `Σ VehicleDailyKm.km
+    // (state=drove)` over the period (Phase 7 REWORK #3). The live preview
+    // mirrors what submit() will compute so the carrier sees the prefill.
+    const dateStart = isoDateToMidnightUtc(dto.dateStart);
+    const dateEnd = isoDateToMidnightUtc(dto.dateEnd);
+    const mileage =
+      dateStart && dateEnd
+        ? await this._resolveMileage(
+            dto.vehicleId,
+            dto.mileage,
+            dateStart,
+            dateEnd,
+          )
+        : (dto.mileage ?? 0);
+
+    const kmDifference = calc.kmGuaranteed - mileage;
     const paymentEur =
       kmDifference > 0
         ? round2(kmDifference * calc.ratePerKmEffective)
         : 0;
 
     return {
+      mileage,
       kmGuaranteed: calc.kmGuaranteed,
       kmDifference,
       paymentEur,

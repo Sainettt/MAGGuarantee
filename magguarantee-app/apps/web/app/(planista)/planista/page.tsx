@@ -41,6 +41,7 @@ export default function PlanistaPanelPage() {
       isLoading={isLoading}
       delegations={delegationsQ.data?.items ?? []}
       delegationsLoading={delegationsQ.isLoading}
+      kmReportHref="/planista/km"
     />
   );
 }

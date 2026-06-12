@@ -290,15 +290,16 @@ soft-delete'ятся (объект в MinIO остаётся).
 
 > ⚠️ **Удалено (rework 2026-06-10 #2):** `POST /delegations/:id/in-transit` и `POST /delegations/:id/returned` (`markDelegacjaInTransit/Returned`). `weryfikator` больше не управляет статусом выездов — он работает с операционным статусом **машин** (см. таблицу Vehicles ниже). `DelegationStatus` enum значения `w_trasie`/`zjechal` сохранены, но через приложение не проставляются. Полная спека: [`20-phase-7-eksport-weryfikator.md` § 0](20-phase-7-eksport-weryfikator.md).
 
-### Vehicle route-status (weryfikator) — `/api/v1/vehicles`
+### Vehicle daily-km (weryfikator) — `/api/v1/vehicles`
 
-Операционный статус машины «в трассе / съехал», который ежедневно проставляет `weryfikator`. Append-only история (`vehicle_route_statuses`); текущий статус = последняя запись за сегодня, иначе производный `nieznany`. Нет связи `delegation ↔ vehicle`.
+> ⚠️ **REWORK (2026-06-12 #3):** заменяет прежнюю route-status доску («в трассе / съехал»). Полная спека: [`20-phase-7-eksport-weryfikator.md` §0′](20-phase-7-eksport-weryfikator.md). `weryfikator` ежедневно проставляет **дневной км** каждой машины. Хранение — `vehicle_daily_km` (`@@unique[vehicleId, date]`, upsert). Производный статус машины (`w_ruchu`/`nie_jezdzi`/`nieznany`) считается на чтении по последней по дате записи периода. Связи `Claim ↔ Delegation` нет; пробег в `Claim` = `Σ VehicleDailyKm.km (state=drove)` за период.
 
 | Method + Path | Назначение | Роли |
 |---|---|---|
-| GET `/vehicles/route-board` | Все активные машины + `opiekun` (= `carrier.opiekun`, не carrier — поправка заказчика 2026-06-10) + `planner` + статус на сегодня (`w_trasie`/`zjechal`/`nieznany`) + кто/когда отметил | weryfikator / admin |
-| POST `/vehicles/:id/route-status` | Body `{ status: 'w_trasie'\|'zjechal', notes? }`. Аппендит запись (`source=manual`); при `zjechal` → `vehicle.lastDroveAt = notedAt` в той же транзакции. Re-stampable. Audit `vehicle.setRouteStatus` | weryfikator / admin |
-| GET `/vehicles/:id/route-status` | История статусов машины (newest-first): `status`, `source` (manual\|gps), `notedBy`, `notedAt`, `notes` | weryfikator / admin |
+| GET `/vehicles/km-board?week=YYYY-Www` (или `?from=<пн>`) | Все активные машины + `carrier` + `opiekun` (= `carrier.opiekun`) + `planner` + `sideNumber`/`plateNumber` + 7 ячеек-дней (`state`/`km`/`notes`) + `Σ km` недели + производный `motionStatus`. Окно — Monday-anchored 7 дней | weryfikator / admin |
+| PUT `/vehicles/:id/daily-km` | Body `{ date, state: 'drove'\|'idle', km?, notes? }`. **Upsert** по (vehicleId, date), `source=manual`, `notedById=caller`. Инварианты: `drove`⇒`km>0`; `idle`⇒`km=null`. При `drove` → `vehicle.lastDroveAt = max(lastDroveAt, date)` в той же транзакции. Audit `vehicle.setDailyKm` | weryfikator / admin |
+| GET `/vehicles/:id/daily-km?from&to` | История по машине (newest-first): `date`, `state`, `km`, `source` (manual\|gps), `notedBy`, `notes`. Окно `[from, to]` (date-only, inclusive) опционально. Модалка «Historia» | weryfikator / admin |
+| GET `/vehicles/km-report?week=...` | Read-only недельный рапорт — **только машины с drove-днями** в периоде, scoped: planista→`plannerId`, dyspozytor→`dispatcherId`, eksport/admin/weryfikator→все. Та же сетка, что km-board | planista / dyspozytor / eksport / admin / weryfikator |
 
 **`POST /delegations` body — required fields** (post-migration `20260518113943_delegation_required_fields_and_date_only`):
 

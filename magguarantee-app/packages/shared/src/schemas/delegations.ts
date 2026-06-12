@@ -134,12 +134,13 @@ export const CancelDelegationSchema = z
   .strict();
 export type CancelDelegationDto = z.infer<typeof CancelDelegationSchema>;
 
-// Phase 7 rework (2026-06-10 #2): the weryfikator no longer drives delegation
-// status. The former `MarkInTransitSchema` / `MarkReturnedSchema` wire contracts
-// and the `makeMarkReturnedFormSchema` web form helper were removed alongside the
-// `POST /delegations/:id/in-transit` + `/returned` endpoints. The verifier now
-// stamps per-vehicle route status — see `schemas/vehicles.ts`
-// (`SetVehicleRouteStatusSchema`) and `docs/20-phase-7-eksport-weryfikator.md` § 0.
+// Phase 7 rework (2026-06-10 #2 → 2026-06-12 #3): the weryfikator no longer
+// drives delegation status. The former `MarkInTransitSchema` /
+// `MarkReturnedSchema` wire contracts and the `makeMarkReturnedFormSchema` web
+// form helper were removed alongside the `POST /delegations/:id/in-transit` +
+// `/returned` endpoints. The verifier now records each vehicle's DAILY km —
+// see `schemas/vehicles.ts` (`SetVehicleDailyKmSchema`) and
+// `docs/20-phase-7-eksport-weryfikator.md` §0′.
 
 // ─── Eligibility (carrier readiness) ─────────────────────
 

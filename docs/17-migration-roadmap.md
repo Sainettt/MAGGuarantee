@@ -642,6 +642,14 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
 
 ## Фаза 11+ — Wyjazd approval workflow (планируется после launch)
 
+> ⛔ **БОЛЬШАЯ ПЕРЕОЦЕНКА (2026-06-12)** — фаза сильно урезана после выяснения реального процесса:
+> - **Шаг B (`Claim.delegationId` hard-link) — ОТМЕНЁН.** Связи claim↔delegation в коде нет; `Claim.mileage` = `Σ VehicleDailyKm` (по машине+периоду). См. [20-phase-7-eksport-weryfikator.md](20-phase-7-eksport-weryfikator.md) §0′.
+> - **Шаг C (approval workflow выездов) — ОТМЕНЁН.** Статус выезда — «мёртвый груз», его никто не верифицирует; роль одобряющего не нужна (секция «Роль одобряющего» ниже устарела).
+> - **Шаг D (`Team`) — ОСТАЁТСЯ**, но только: gchat-уведомление о выездах + доступ диспетчеров к авто. Без верификации.
+> - Дневной км-лист (`VehicleDailyKm`) вынесен в **Phase 7** и делается сейчас.
+>
+> Ниже — исходная спека фазы, оставлена как контекст; читать сквозь призму этого баннера.
+
 > **Status:** PLANNED — спецификация зафиксирована с заказчиком 2026-05-25. Реализация после Phase 10 launch. Решение по роли одобряющего открыто (см. ниже).
 >
 > 🔁 **Update 2026-06-11 — связь wniosek ↔ wyjazd ПОДТВЕРЖДЕНА (не отменяется).** В одной из сессий связку ошибочно пометили «отменённой» (потеря контекста между сессиями) — это недоразумение; связь остаётся **ядром этой фазы**. По уточнённой бизнес-инфо механизм эволюционировал: gating-статус для подачи wniosek смещается с `zjechal` на новый **`zakończony`** (рейс закрыт **И** weryfikator уже проставил/проверил км по каждому дню рейса — см. daily-km доску weryfikatora, Phase 7), а `mileage` wniosku **выводится из суммы дневных км weryfikatora**, а не вводится перевозчиком. Перевозчик в идеале лишь выбирает `zakończony`-выезд и подтверждает. Открытые детали (привязка через выбор машины vs прямой выбор выезда; точная семантика `zakończony` относительно `zjechal`) — в Шаге B.
@@ -690,8 +698,8 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
   - **In-app entry** в его dashboard / списке «Wyjazdy do akceptacji».
 - Одобряющий открывает detail wyjazd и видит:
   - Все поля carrier-а (departureAt, plannedReturnAt, kierowca, naczepa, postal codes, comment).
-  - Приписанных к этой машине `planista` и `dyspozytor` (из `Vehicle.plannerId` / `Vehicle.dispatcherId`).
-  - **Может изменить** `planista` / `dyspozytor` именно для этого wyjazd — это **snapshot per-wyjazd**, а не глобальное переназначение на машине. Глобальные `Vehicle.plannerId`/`dispatcherId` остаются прежними (их меняет admin/opiekun).
+  - Приписанных к этой машине `planista` и команду диспетчеров (из `Vehicle.plannerId` / `Vehicle.dispatchTeamId`).
+  - **Может изменить** `planista` / команду именно для этого wyjazd — это **snapshot per-wyjazd**, а не глобальное переназначение на машине. Глобальные `Vehicle.plannerId`/`dispatchTeamId` остаются прежними (их меняет admin/opiekun).
 - После approve:
   - `status → zgloszony` (далее по существующему flow: `w_trasie → zjechal`).
   - **Email-ы** уходят всем задействованным лицам:
@@ -707,7 +715,24 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
   - Остальные участники email-ов **не получают** (wyjazd не состоялся).
   - Audit-log запись `rejectDelegation`.
 
-### Роль одобряющего — открытый вопрос
+#### Шаг D — Сущность `Team` (команда диспетчеров)
+
+Заменяет одиночного `Vehicle.dispatcherId` на **команду** диспетчеров. Отражает реальный процесс: в maciosoft (Sped Trans) машине приписывается целая команда (код `1.2.5`), её состав раньше вёлся вручную в Excel (raport DAF). Теперь команды ведёт `admin` в приложении.
+
+- **DB:**
+  - Новая модель `Team { code unique, name?, active, dispatchers User[], vehicles Vehicle[] }`.
+  - `User.teamId` (FK → Team, nullable; для role=dyspozytor).
+  - `Vehicle.dispatchTeamId` (FK → Team) **заменяет** `Vehicle.dispatcherId`. Forward-only деструктивная миграция (реальных данных нет — пустая БД + seed, боли нет). `Vehicle.plannerId` (ведущий спедитор) без изменений.
+  - Смену (zmiana) **НЕ** храним — меняется еженедельно, достаточно имён.
+- **Доступ:** диспетчер видит авто, где `vehicle.dispatchTeamId = его teamId` (**оба** сменщика). Эндпоинты dyspozytor-панели — фильтр по team вместо single dispatcher.
+- **Уведомление о выезде (`chat-notify-wyjazd`):** получатели = `team.dispatchers` (все) + `vehicle.planner` (один) + `carrier.opiekun`. Из строки `ZESPÓŁ PROWADZĄCY` убирается `weryfikator`. Мигрировать `chat-context.builder.ts` (`_resolveWeryfikator` удаляется; single `dyspozytor` → `team.dispatchers`) и `ChatRepository.findWyjazdRow`. См. [16-jobs-and-integrations.md](16-jobs-and-integrations.md).
+- **Админ-UI:** CRUD команд (код + состав диспетчеров).
+- **Форма машины (UI):** вместо «выбрать 1 диспетчера» — выбор **команды** (dropdown) + превью её состава (список имён); пустая команда подсвечивается («Brak dyspozytorów w zespole»). `planner` (ведущий спедитор) выбирается как раньше.
+- **Не-goal:** спедиторы **НЕ** через команду — в уведомление летит один ведущий спедитор = `Vehicle.plannerId`. Team только для диспетчеров.
+
+### Роль одобряющего — РЕШЕНО (2026-06-12)
+
+> ⛔ **ОТМЕНЕНО (2026-06-12) — approval/верификации выезда нет** (статус выезда — «мёртвый груз»). Сущность `Team` (`Vehicle.dispatchTeamId`, заменяет `dispatcherId`) **остаётся**, но только для gchat-уведомлений и доступа диспетчеров к авто — не для одобрения. Таблица вариантов ниже и текст про «роль одобряющего» — устарели, оставлены как история.
 
 | Вариант | Плюсы | Минусы |
 |---|---|---|
@@ -724,14 +749,19 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
 | Модель | Изменение |
 |---|---|
 | `Delegation.status` enum | + `oczekuje_na_akceptacje`, + `odrzucony` |
-| `Delegation` поля | + `plannerSnapshotId` (FK → User, nullable), + `dispatcherSnapshotId` (FK → User, nullable), + `approvedById` (FK → User, nullable), + `approvedAt`, + `rejectedById`, + `rejectedAt`, + `rejectionReason` (text) |
+| `Delegation` поля | + `plannerSnapshotId` (FK → User, nullable), + `dispatchTeamSnapshotId` (FK → Team, nullable), + `approvedById` (FK → User, nullable), + `approvedAt`, + `rejectedById`, + `rejectedAt`, + `rejectionReason` (text) |
 | `Claim` поля | + `delegationId` (FK → Delegation, **unique**, nullable для legacy) |
 | `POST /delegations` (controller) | Меняет дефолтный возвращаемый status с `zgloszony` на `oczekuje_na_akceptacje` |
-| Новый endpoint | `POST /delegations/:id/approve` — одобряющий, body `{ plannerSnapshotId?, dispatcherSnapshotId? }` (опциональная переоверрайдка) |
+| Новый endpoint | `POST /delegations/:id/approve` — одобряющий, body `{ plannerSnapshotId?, dispatchTeamSnapshotId? }` (опциональная переоверрайдка) |
 | Новый endpoint | `POST /delegations/:id/reject` — одобряющий, body `{ reason: string }` (required) |
 | `POST /claims` (controller) | Принимает `delegationId` вместо `from`/`to` для **новых** wniosków |
 | Carrier UI | Status-badge для новых статусов; cancel разрешён и в `oczekuje_na_akceptacje` тоже |
 | Approver UI | Новая страница `/(weryfikator|...)/delegations/pending` со списком pending wyjazdy + approve/reject actions |
+| Новая модель `Team` | `code` unique, `name?`, `active`, `dispatchers User[]`, `vehicles Vehicle[]` — admin CRUD (замена ручного Excel/DAF) |
+| `User` поля | + `teamId` (FK → Team, nullable; для dyspozytor) |
+| `Vehicle` поля | `dispatchTeamId` (FK → Team) **заменяет** `dispatcherId` (forward-only миграция; `plannerId` без изменений) |
+| `chat-notify-wyjazd` получатели | `team.dispatchers[]` + `Vehicle.planner` + `Carrier.opiekun`; `weryfikator` убран из `ZESPÓŁ PROWADZĄCY` |
+| Vehicle form UI | выбор команды + превью её состава (имена) вместо single dispatcher; пустая команда подсвечивается |
 
 ### Что НЕ делается в этой фазе
 

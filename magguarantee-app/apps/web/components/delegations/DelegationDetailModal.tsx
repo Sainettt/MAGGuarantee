@@ -23,12 +23,13 @@
 // Read-only consumer everywhere (carrier list, planista/dyspozytor Wyjazdy
 // rows) — no `onEdit` is passed, so the footer shows only «Zamknij» (§6.6).
 
-import { ClipboardCheck, Truck, User } from 'lucide-react';
+import { ClipboardCheck, Gauge, Truck, User } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { ReactNode } from 'react';
 import type { DelegationDto } from '@magguarantee/shared';
 
 import { StatusBadge } from '@/components/carrier/StatusBadge';
+import { DelegationKmCalendar } from '@/components/delegations/DelegationKmCalendar';
 import { RouteCard } from '@/components/delegations/RouteCard';
 import {
   EntityDetailModal,
@@ -115,6 +116,7 @@ export function DelegationDetailModal({
   const tForm = useTranslations('carrier.delegations.form');
   const tSections = useTranslations('carrier.delegations.sections');
   const tDetail = useTranslations('entityDetail');
+  const tKmCal = useTranslations('delegation.kmCalendar');
 
   // The modal is only rendered with a target; bail defensively so the hooks
   // above still run unconditionally (rules-of-hooks safe).
@@ -196,6 +198,30 @@ export function DelegationDetailModal({
       ],
     },
   ];
+
+  // Block D — «Przebieg w trakcie wyjazdu» km-calendar (§7.7.9). A 4th body
+  // section, fullWidth, AFTER «STATUS I AUDYT». Omitted entirely when the
+  // delegation has no resolvable vehicle (per §6.4 "empty section omitted").
+  // When a vehicle IS attached but no km rows fall in the window, the calendar
+  // renders all-`empty` tiles + a «brak danych» caption (handled inside the
+  // component) — informative, so it is shown rather than omitted. The km query
+  // lives inside <DelegationKmCalendar>, gated on the vehicleId, so non-carrier
+  // contexts (planista/dyspozytor reusing this modal) get the same read-only
+  // window without extra wiring and without breaking those contexts.
+  if (delegation.vehicleId) {
+    sections.push({
+      title: tKmCal('title'),
+      icon: Gauge,
+      span: 'full',
+      rows: [
+        {
+          label: tKmCal('title'),
+          value: <DelegationKmCalendar delegation={delegation} />,
+          fullWidth: true,
+        },
+      ],
+    });
+  }
 
   // ── Footer meta line — created / updated timestamps (§6.6) ──────────
   const meta: ReactNode = (

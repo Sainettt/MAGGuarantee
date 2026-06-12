@@ -204,6 +204,7 @@
     "trailers": "Trailers",
     "trailerTypes": "Trailer types",
     "delegations": "Trips",
+    "km": "Km report",
     "limits": "Limits",
     "users": "Users",
     "audit": "Audit log",
@@ -1492,57 +1493,97 @@
     }
   },
   "weryfikator": {
-    "vehicles": {
-      "title": "Vehicles",
-      "subtitle": "Daily fleet route status — mark which vehicles are on the road and which have returned.",
-      "filters": {
-        "status": "Status",
-        "allStatuses": "All statuses",
-        "search": "Search",
-        "searchPlaceholder": "Plate, side no., carrier or account manager…"
+    "km": {
+      "title": {
+        "board": "Km board",
+        "report": "Km report — my vehicles"
       },
-      "columns": {
-        "vehicle": "Plate",
-        "sideNumber": "Side no.",
+      "subtitle": "Daily vehicle mileage — week {week}",
+      "tiles": {
+        "week": "Week",
+        "tractors": "Tractors",
+        "inMotion": "In motion",
+        "idle": "Not driving",
+        "sumKm": "Σ km",
+        "notes": "Notes"
+      },
+      "col": {
+        "vehicle": "Vehicle",
+        "sideShort": "side {side}",
         "carrier": "Carrier",
         "opiekun": "Account manager",
-        "planista": "Planner",
-        "status": "Status",
-        "noted": "Noted",
-        "actions": "Actions"
+        "dispatcher": "Dispatcher",
+        "sumKm": "Σ km",
+        "note": "Note",
+        "history": "History"
       },
-      "status": {
-        "w_trasie": "On the road",
-        "zjechal": "Returned",
-        "nieznany": "Not checked"
+      "weekday": {
+        "mon": "Mon",
+        "tue": "Tue",
+        "wed": "Wed",
+        "thu": "Thu",
+        "fri": "Fri",
+        "sat": "Sat",
+        "sun": "Sun"
       },
-      "actions": {
-        "w_trasie": "On the road",
-        "zjechal": "Returned"
+      "cell": {
+        "drove": "Drove",
+        "idle": "Not driving",
+        "empty": "Not checked",
+        "kmPlaceholder": "km",
+        "kmRequired": "Enter km",
+        "zeroHint": "0 km? mark “not driving”",
+        "notePlaceholder": "Note for this day…"
       },
-      "sideLabel": "side {side}",
-      "progress": "{checked} of {total} checked today",
-      "emptyTitle": "No active vehicles",
-      "emptyMessage": "There are no active vehicles to check.",
       "toast": {
-        "success": "Marked: {status}",
-        "error": "Could not save the vehicle status."
+        "saveError": "Failed to save km"
       },
-      "a11y": {
-        "showHistory": "Show status history: {plate}"
+      "nav": {
+        "prev": "Previous week",
+        "next": "Next week",
+        "current": "Current week",
+        "weekLabel": "Week {week} · {from}–{to}",
+        "pickWeek": "Pick a week"
+      },
+      "progress": "{checked} of {total} vehicles filled this week",
+      "filter": {
+        "inMotionOnly": "In-motion only"
+      },
+      "readOnlyBanner": "Data is read-only — managed by the verifier.",
+      "empty": {
+        "noVehicles": "No active vehicles",
+        "noAssigned": "No vehicles assigned to you",
+        "noMotion": "No vehicle moved this week"
       },
       "history": {
-        "title": "Status history — {plate}",
-        "sideSuffix": " · side {side}",
-        "noOpiekun": "No account manager",
-        "gpsActor": "GPS",
-        "source": {
-          "manual": "manual",
-          "gps": "GPS"
-        },
-        "emptyTitle": "No history",
-        "emptyMessage": "No route-status history for this vehicle yet."
+        "title": "Km history — {plate}",
+        "desc": "side {side} · {carrier}",
+        "sourceManual": "manual",
+        "sourceGps": "GPS",
+        "empty": "No km history for this vehicle yet",
+        "close": "Close"
+      },
+      "notesPopover": {
+        "title": "Notes this week",
+        "empty": "No notes"
+      },
+      "aria": {
+        "cell": "{plate}, {weekday} {date}: {state}",
+        "grid": "Weekly km board"
       }
+    }
+  },
+  "delegation": {
+    "kmCalendar": {
+      "title": "Mileage during the trip",
+      "summary": "Reg. {plate} · {from}–{to} · {days}",
+      "days": "{n, plural, one {# day} other {# days}}",
+      "sumKm": "Σ {sum} km",
+      "drove": "{km} km",
+      "idle": "not driving",
+      "empty": "—",
+      "noData": "No km data for this period",
+      "aria": "Mileage of vehicle {plate} for {from}–{to}"
     }
   }
 }

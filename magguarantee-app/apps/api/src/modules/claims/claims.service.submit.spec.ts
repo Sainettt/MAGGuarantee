@@ -33,6 +33,7 @@ import type { DriversRepository } from '../drivers/drivers.repository';
 import type { KmCalcService } from '../km-calc/km-calc.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { TrailersRepository } from '../trailers/trailers.repository';
+import type { VehicleDailyKmRepository } from '../vehicles/vehicle-daily-km.repository';
 import type { VehiclesRepository } from '../vehicles/vehicles.repository';
 import { ClaimsService } from './claims.service';
 import type {
@@ -223,11 +224,28 @@ function makeAuditWriter(): AuditWriter {
   return { log: jest.fn(async () => undefined) } as unknown as AuditWriter;
 }
 
+/**
+ * Daily-km repo fake. `sumDroveKm` returns the configured prefill value so the
+ * `mileage` pre-fill path (Phase 7 REWORK #3) can be exercised. The spy is
+ * returned so tests can assert the queried window.
+ */
+function makeDailyKmRepo(sum: number): {
+  repo: VehicleDailyKmRepository;
+  sumSpy: jest.Mock;
+} {
+  const sumSpy = jest.fn(async () => sum);
+  return {
+    repo: { sumDroveKm: sumSpy } as unknown as VehicleDailyKmRepository,
+    sumSpy,
+  };
+}
+
 function makeService(
   repoFake: RepoFake,
   carriers?: CarriersRepository,
   vehicles?: VehiclesRepository,
   km?: KmCalcService,
+  dailyKm?: VehicleDailyKmRepository,
 ): ClaimsService {
   return new ClaimsService(
     repoFake.repo,
@@ -239,6 +257,9 @@ function makeService(
     makeNrZgl(),
     makePrismaService(),
     makeAuditWriter(),
+    undefined,
+    undefined,
+    dailyKm,
   );
 }
 
@@ -508,5 +529,55 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     // single round-trip is what guarantees ODRZUCONO claims never reach the
     // service-level cooldown logic.
     expect(repoFake.findLastCalls).toEqual([{ vehicleId: 'v-1' }]);
+  });
+
+  // ── mileage pre-fill from VehicleDailyKm (Phase 7 REWORK #3) ──
+
+  it('7. mileage omitted → pre-filled from Σ VehicleDailyKm.km (state=drove) over [from, to]', async () => {
+    const repoFake = makeRepo(null);
+    const { repo: dailyKm, sumSpy } = makeDailyKmRepo(8_000);
+    const svc = makeService(repoFake, undefined, undefined, undefined, dailyKm);
+
+    const dto: SubmitClaimDto = {
+      vehicleId: 'v-1',
+      dateStart: '2026-05-01',
+      dateEnd: '2026-05-10',
+      timeFrom: '08:00',
+      timeTo: '18:00',
+      // mileage deliberately omitted — the server pre-fills it.
+    };
+
+    const out = await svc.submit(makeAuth('przewoznik'), dto);
+
+    expect(out.nrZgl).toBe('GWA/100/05/26');
+    expect(repoFake.creates).toHaveLength(1);
+    // The persisted mileage equals the daily-km sum, not a body value.
+    expect(repoFake.creates[0]!.data.mileage).toBe(8_000);
+    expect(repoFake.creates[0]!.data.origMileage).toBe(8_000);
+    // The prefill query uses [dateStart, dateEnd + 1 day) (inclusive end).
+    expect(sumSpy).toHaveBeenCalledTimes(1);
+    const [vehicleId, from, toExclusive] = sumSpy.mock.calls[0]!;
+    expect(vehicleId).toBe('v-1');
+    expect((from as Date).toISOString()).toBe('2026-05-01T00:00:00.000Z');
+    expect((toExclusive as Date).toISOString()).toBe('2026-05-11T00:00:00.000Z');
+  });
+
+  it('8. explicit mileage overrides the prefill (daily-km repo not queried)', async () => {
+    const repoFake = makeRepo(null);
+    const { repo: dailyKm, sumSpy } = makeDailyKmRepo(999);
+    const svc = makeService(repoFake, undefined, undefined, undefined, dailyKm);
+
+    const dto: SubmitClaimDto = {
+      vehicleId: 'v-1',
+      dateStart: '2026-05-01',
+      dateEnd: '2026-05-10',
+      timeFrom: '08:00',
+      timeTo: '18:00',
+      mileage: 8_000,
+    };
+
+    await svc.submit(makeAuth('przewoznik'), dto);
+    expect(repoFake.creates[0]!.data.mileage).toBe(8_000);
+    expect(sumSpy).not.toHaveBeenCalled();
   });
 });

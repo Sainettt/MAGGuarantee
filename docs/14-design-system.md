@@ -4078,7 +4078,13 @@ This deviates from the plan's "empty WelcomePanel stub" only to remove a no-op s
 
 ---
 
-### 7.5 Weryfikator vehicle route-status board (rework 2026-06-10 #2 — AUTHORITATIVE)
+### 7.5 ~~Weryfikator vehicle route-status board~~ — SUPERSEDED by §7.7 (REWORK 2026-06-12 #3)
+
+> ⛔ **SUPERSEDED — see §7.7 (Weekly km-board, REWORK 2026-06-12 #3).** Spec source: [`20-phase-7-eksport-weryfikator.md` §0′](20-phase-7-eksport-weryfikator.md). The per-vehicle, per-day **route-status** stamp («W trasie» / «Zjechał», `VehicleRouteStatusLog`) is **absorbed into the daily km-list** (`VehicleDailyKm`). The weryfikator no longer stamps a binary route status; they record **how many km each vehicle drove each day** on a **weekly grid** (row = vehicle, 7 day-columns). The derived vehicle status (`w ruchu` / `nie jeździ` / `nieznany`) is now computed *from the km cells* and shown only as header counters, not as a per-row badge column. The `vehicles/route-board` table, the two `outline` stamp buttons, and `<VehicleRouteStatusHistoryDialog>` (route-status flavour) are **removed from the build** — kept below as history. The §7.5.1 three-state tone-map survives conceptually (it maps cleanly onto the §7.7 derived statuses) and is reused; the rest is replaced. Route changes from `/weryfikator/vehicles` → **`/weryfikator/km`**.
+>
+> Below kept as history.
+
+#### 7.5 (history) Weryfikator vehicle route-status board (rework 2026-06-10 #2)
 
 > **Scope.** Replaces §7.1. The weryfikator no longer touches delegations. Their entire screen is now **one table of all active vehicles**, where they stamp each vehicle's *daily operational route-status* («W trasie» / «Zjechał») using info from an external GPS service + people outside the app. Spec source: [`20-phase-7-eksport-weryfikator.md` §0](20-phase-7-eksport-weryfikator.md). Route: `app/(weryfikator)/weryfikator/vehicles/page.tsx`.
 >
@@ -4246,4 +4252,274 @@ Acceptance (Phase 7.6):
 - [ ] **A11y.** Urgency never colour-alone (worded countdown badge + header icon/title); rows keyboard-activatable (`role=button`, Enter/Space, `focus-visible:ring-{danger,warning}`); AA contrast on `/15` badges both themes.
 - [ ] **Digest email.** Brand accent stays inline `#dc2626`; empty → no email (§5); no per-email theme tokens.
 - [ ] **Token policy + dark-mode.** Zero `tailwind.config.ts`/`globals.css` changes; all surfaces legible in dark via `dark:bg-{danger,warning}/10..15` variants.
+
+---
+
+## 7.7 Weekly km-board + read-only km-report + delegation km-calendar (REWORK 2026-06-12 #3 — AUTHORITATIVE)
+
+> **Scope.** Supersedes §7.5 (route-status board). Three deliverables, one shared visual primitive (the weekly km-grid):
+> 1. **Weryfikator weekly km-board** — `/weryfikator/km`. Row = vehicle, 7 day-columns (PN..ND). The verifier records, per vehicle per day, **either** the km driven (`drove`) **or** "nie jeździ" (`idle`), **or** leaves it blank (not checked). The binary route-status of §7.5 is absorbed: vehicle status is now *derived from the cells* and only summarized in the header tiles.
+> 2. **Read-only km-report** — same grid, view-only, scoped to *own* vehicles, for `planista` / `dyspozytor` / `eksport` / `admin`. This is the legacy «Raport km — moje pojazdy» screen. Has a "tylko jeżdżące" (in-motion only) filter.
+> 3. **Delegation km-calendar** — inside the carrier delegation detail modal (the §6.4.1 route-card modal), a compact per-day km calendar for the period `[departureAt, plannedReturnAt]` of the assigned vehicle (join by `vehicleId`, **no FK**). The "visual link" delegation↔km.
+>
+> **Reference look.** Legacy «Raport km — moje pojazdy» (Panel Planisty): weekly grid PN..ND with km in cells, a `Σ KM` column, and a header strip of counters. (No standalone screenshot file exists for this screen — it is described in the contract; the closest structural reference for the surrounding chrome is `docs/screenshots/planista-fleet.png` for the read-only role-panel shell, and `docs/screenshots/carrier-delegations.png` for the carrier delegation row that opens the calendar modal.)
+>
+> **Spec source:** [`20-phase-7-eksport-weryfikator.md` §0′](20-phase-7-eksport-weryfikator.md).
+>
+> **HARD: no new tokens** (Phase 4.4 surface policy + no-new-token policy). Everything below composes existing tokens only: surfaces `bg-card` / `bg-input` / `bg-bg` / `bg-brand-50` (+`dark:bg-brand/10`); semantic accents `text-success` / `text-warning` / `text-danger` / `text-info` / `text-brand` / `text-text-sub` and their `bg-*/10..15` + `border-*/30..40` opacity variants; the existing radius scale, `shadow-card`, `shadow-modal`, `animate-modal-in`; the brand focus ring (`ring-brand`); `font-mono` / `tabular-nums`. **Zero changes** to `tailwind.config.ts` / `globals.css`. The §7.5.1 three-state tone-map (`success` / `muted` / `outline`) is reused for the *derived* vehicle status; it is **not** a new token.
+
+### 7.7.1 The cell state model — three states, the heart of the grid
+
+Each `(vehicle × day)` intersection has **exactly three** presentational states. This is the single most important primitive in this section — call it `<KmCell>`.
+
+| Cell state | Meaning | Source | Visual (locked) |
+|---|---|---|---|
+| **`drove`** | vehicle drove `km > 0` that day | stored `VehicleDailyKm{state:'drove', km}` | A **filled km value** + a small leading `<Check size={12} className="text-success" />`. Value `font-mono font-semibold tabular-nums text-text`. Cell surface gets a faint positive tint `bg-success/10` (token-with-opacity, not a new token) so driving days read at a glance down a column. |
+| **`idle`** | "nie jeździ" — checked, confirmed parked | stored `VehicleDailyKm{state:'idle', km:null}` | A muted dash-pill: `<span className="inline-flex items-center gap-1 text-xs text-text-sub"><ParkingSquare size={12}/> nie jeździ</span>` (PL) on a neutral `bg-input` cell. **No km number.** Reads as "looked at, nothing to count". |
+| **`empty`** | not checked today/this period | **no row exists** | Truly blank cell — `bg-card`, a single faint `—` in `text-text-sub/60` centered, no tint. Recessive, so the verifier sees what's left to do. **Never** tint as warning/danger — an unchecked day is normal, not an error (mirrors §7.5.6 "fresh-day ≠ error"). |
+
+Cell geometry: each day-column is a fixed narrow track (`w-[68px]` desktop, content-centered, `px-1.5 py-1`, `text-center`). The grid is a real table for semantics + alignment; the cells use `tabular-nums` so km columns align. Cell min touch height = the row height (`h-12`) so even on touch the whole cell is an easy target.
+
+**Derived vehicle status (NOT stored, header-only).** Per the contract: the latest dated cell in the period drives the row's *operational* status — `drove` ⇒ `w ruchu`, `idle` ⇒ `nie jeździ`, no cell at all ⇒ `nieznany`. This feeds **only the header counters** (W RUCHU / NIE JEŻDŻĄ) and the §7.7.7 read-report filter — it is **not** rendered as a per-row badge column on the board (the cells already carry the per-day truth; a redundant status column would compete). The tone vocabulary, if ever surfaced as a chip, reuses §7.5.1: `w ruchu → success`, `nie jeździ → muted`, `nieznany → outline`. No new variant.
+
+### 7.7.2 Header tiles — the counter strip (`<KpiCard>` reuse)
+
+A counter strip sits between the page heading and the grid, composed **entirely** of the existing `<KpiCard>` (no new card). It mirrors the legacy «Raport km» header counters. Responsive grid identical to the §6.3.3 dyspozytor strip family:
+
+```
+<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+```
+
+Six tiles, left→right, with the locked tone mapping (reuses the 4.3 KpiCard tone vocabulary; **`tone="purple"` is never used** — same rationale as §6.3.3, colour encodes operational state not totals):
+
+| # | Tile label (PL) | Value | `tone` | Accent token | Lucide icon | Rationale |
+|---|---|---|---|---|---|---|
+| 1 | TYDZIEŃ | `Wnn/YYYY` (ISO week, e.g. «W24/2026») | `neutral` | `text-text-sub` | `CalendarRange` | Context, not a metric — neutral. The value is the ISO-week label, `font-semibold tabular-nums`. |
+| 2 | CIĄGNIKI | total active tractors on the board | `neutral` | `text-text-sub` | `Truck` | A total count → inert neutral. |
+| 3 | W RUCHU | vehicles whose derived status = `w ruchu` | `green` | `text-success` | `Car` | The positive operational signal (matches §7.5.1 `w_trasie→success`). |
+| 4 | NIE JEŻDŻĄ | derived status = `nie jeździ` | `neutral` | `text-text-sub` | `ParkingSquare` | Settled/parked — neutral, not alarming (matches §7.5.1 `zjechal→muted`). Deliberately **not** orange: a parked truck is not a problem. |
+| 5 | Σ KM | sum of all `drove` km across the visible week | `blue` | `text-info` | `Gauge` | The headline aggregate the screen exists for; `font-mono tabular-nums`. |
+| 6 | NOTATEK | count of cells carrying a `notes` value this week | `neutral` | `text-text-sub` | `StickyNote` | A meta count → neutral. |
+
+> If the API returns a `nieznany` count worth surfacing, it can replace tile 6 or extend to `lg:grid-cols-7` — keep the breakpoint family identical and the new tile `tone="outline"`-equivalent (`neutral`). Do not introduce orange/red on this strip; the board has no "error" aggregate.
+
+### 7.7.3 The weekly grid — layout (`<KmWeekGrid>`)
+
+The core shared primitive. A horizontally-scrollable table inside a `<Card>` (`rounded-xl border border-border bg-card shadow-card overflow-hidden`). It is **not** a `<DataTable>` — the matrix layout (frozen left identity columns + 7 day tracks + trailing summary/action) is too bespoke for the generic table primitive; build it as a dedicated component but **reuse the `<DataTable>` visual grammar** (header `bg-bg`, `h-12` rows, `px-3 py-2`, `divide-y divide-border`, row hover `hover:bg-brand-50 dark:hover:bg-brand/10`).
+
+**Column structure, left→right:**
+
+1. **Identity block (frozen / sticky-left).** A single logical left region (`sticky left-0 z-10 bg-card` so it stays put during horizontal scroll; header cell `bg-bg`). It stacks per the contract's row identity — **two lines** to stay compact:
+   - line 1: `plateNumber` (`font-mono font-semibold text-text`) + `sideNumber` as `text-xs text-text-sub` («bok {sideNumber}») under or beside it.
+   - line 2: a muted meta line — `przewoźnik` · `opiekun` · `dyspozytor` joined with `·`, `text-xs text-text-sub truncate`, with a `title`/tooltip for the full string. (On `xl+` these may split into 2–3 narrow columns — `PRZEWOŹNIK` / `OPIEKUN` / `DYSPOZYTOR` — if width allows; on smaller widths collapse to the single meta line to protect the 7 day tracks.)
+2. **7 day-columns (PN..ND).** Header for each: two lines — weekday abbrev `PN/WT/ŚR/CZ/PT/SB/ND` (`text-xs font-bold uppercase`) + the date `DD.MM` (`text-[11px] text-text-sub tabular-nums`). **Today's column** header gets a brand underline accent: `border-b-2 border-brand` + the date in `text-brand font-semibold` (the only brand-red on the grid — anchors "today" for the daily worker). Weekend columns (SB/ND) get a faint `bg-input` header tint to visually separate the work week (token-with-opacity feel via `bg-input`, not a new token). Each body cell is a `<KmCell>` (§7.7.1).
+3. **`Σ KM` column (trailing summary).** Per-row week sum of `drove` km. `font-mono font-semibold tabular-nums text-text`, right-aligned, header «Σ KM». Cell surface `bg-input` to read as a derived/total column (consistent with the §6.4 "total reads as soft-chrome" feel). Zero shows a muted `0` in `text-text-sub`.
+4. **`NOTATKA` column.** A note affordance per row: if any cell in the week has notes, show a `<StickyNote size={14} className="text-text-sub" />` button that opens a small popover listing that week's notes by day; otherwise an em-dash. (Notes live on individual cells in the model; this column is a roll-up entry-point so the matrix stays clean.)
+5. **Action column — «Historia».** A trailing `<Button variant="ghost" size="sm">` with `<History size={14}/>` «Historia» opening the per-vehicle history modal (§7.7.6). Right-aligned, `text-xs`. (Read-only report variant, §7.7.7, keeps this column — history is read-only — but drops all cell editing.)
+
+**Sticky behaviour.** Header row `sticky top-0 z-20 bg-bg`; identity block `sticky left-0`. On horizontal scroll the day tracks slide under the frozen identity + over nothing on the right (Σ KM / NOTATKA / Historia are *not* frozen — they scroll with the day tracks, which is fine since they sit at the natural right edge). The card itself owns the `overflow-x-auto`; never let the page body scroll horizontally.
+
+### 7.7.4 Cell editing (weryfikator board only) — `drove` / `idle` toggle + km input
+
+The km-board is the **one mutating surface**. Editing happens **in-cell**, no modal per edit (high-frequency, like §7.5.4 stamps). Each editable `<KmCell>` exposes a tiny inline editor:
+
+- **State switch.** A 2-segment toggle inside the cell (or revealed on focus/click) — `drove` / `nie jeździ` — built from a compact `<ToggleGroup>` (Radix, already in the shadcn family) or two tiny `<Button size="sm" variant="ghost">` with `aria-pressed`. Selecting `drove` reveals the km `<Input>`; selecting `nie jeździ` clears + disables the km input and writes `state:'idle', km:null`.
+- **Km input.** `<Input inputMode="numeric" className="h-8 w-16 text-center font-mono tabular-nums">`, only when `state='drove'`. Empty + `drove` is invalid (a drove day needs a number); show the standard inline error treatment on blur (`border-danger` + sr message «Podaj km»). `0` is allowed but nudges toward `idle` (optional soft hint «0 km? oznacz „nie jeździ”» — not blocking).
+- **Persist = blur / Enter.** On commit → `PUT /vehicles/:id/daily-km { date, state, km?, notes? }` (upsert), optimistic update of the cell + the row `Σ KM` + the header `Σ KM`/counters; toast only on **error** (success is silent — committing dozens of cells should not spam toasts), rollback on failure. This is the §7.5.4 "low-stakes, high-frequency, no per-action confirm" posture, applied to a numeric field.
+- **Keyboard flow (important for a data-entry grid).** Arrow keys / Tab move between editable cells; Enter commits + moves **down** to the next vehicle same day (column-wise entry is how a verifier works a day's column). `Esc` reverts the cell. Each cell is a proper focus target with a visible `focus-visible:ring-2 ring-brand ring-inset`. This makes the board usable as a fast spreadsheet-like entry surface without a mouse.
+- **Notes per cell.** An optional small `<StickyNote>` ghost icon-button inside (or on hover of) a `drove`/`idle` cell opens a tiny popover with a `<Textarea>` for `notes`; saving adds it to the same `PUT`. The roll-up `NOTATKA` column (§7.7.3) surfaces these per row.
+
+> **Empty cell affordance.** A blank (`empty`) cell shows the `—`; clicking/focusing it opens the same inline editor defaulting to `drove` with an empty km input (the most common action is "enter today's km"). So creating a record and editing one are the same gesture.
+
+### 7.7.5 Week navigation
+
+A control row sits in the card header (or just above the grid), right-aligned, `flex items-center gap-2`:
+
+- `<Button variant="outline" size="sm">` `<ChevronLeft/>` — previous week (`aria-label` «Poprzedni tydzień»).
+- A center label / picker: the current ISO week «Tydzień {Wnn} · {DD.MM}–{DD.MM}.{YYYY}» (`text-sm font-semibold tabular-nums`). Clicking it opens a small week-picker `<Popover>` (a month calendar where selecting any day snaps to that day's ISO week; reuse the existing date-picker primitive used by `<Input type="date">` / the carrier delegation form — do not build a bespoke calendar here unless one already exists). 
+- `<Button variant="outline" size="sm">` `<ChevronRight/>` — next week («Następny tydzień»).
+- A quiet `<Button variant="ghost" size="sm">` «Bieżący tydzień» (jump-to-this-week) shown only when not on the current week.
+
+The week param is the URL source of truth (`?week=YYYY-Www`, contract §0′) so navigation is shareable/back-button-friendly. Changing weeks refetches `GET /vehicles/km-board?week=…`; show the §7.7.8 loading skeleton during the fetch (keep the header tiles visible, skeleton only the grid body).
+
+### 7.7.6 Per-vehicle history — `<VehicleKmHistoryDialog>` (`<Dialog>`)
+
+Opened by the row «Historia» button (§7.7.3). A centered `<Dialog>` (`bg-card`, `animate-modal-in`, `shadow-modal`) showing the daily-km log for one vehicle across a range (`GET /vehicles/:id/daily-km?from&to`), newest-first.
+
+- `DialogHeader`: title «Historia km — {plateNumber}» + `DialogDescription` = `bok {sideNumber} · {przewoźnik}` (`text-sm text-text-sub`).
+- Body: a vertical `divide-y divide-border` list (not a nested grid — it's a per-vehicle log). Each entry:
+  - left: the **date** `text-sm font-medium tabular-nums` + weekday abbrev under it `text-xs text-text-sub`.
+  - middle: the **state** — for `drove`, the km in `font-mono font-semibold` + a `<Check className="text-success"/>`; for `idle`, the muted «nie jeździ» pill (§7.7.1). Below, optional `notes` `text-xs text-text-sub`.
+  - right: actor + source — `notedBy` name or **«GPS»** (when `source='gps'`, `notedById` null) `text-xs text-text-sub`, with a small `<Badge variant="muted" className="text-[10px]">GPS</Badge>` / «ręcznie» pill so manual vs automatic is distinguishable (parity with §7.5.3).
+- Range control: a small from/to or "ostatnie 30 dni / ten miesiąc" toggle at the top (optional); default = the visible week ± a sensible window.
+- Empty: `<EmptyState>` inside the dialog — «Brak historii km dla tego pojazdu».
+- `DialogFooter`: single ghost «Zamknij». History is **read-only** — editing stays in the grid (one mutation entry-point, same principle as §7.5.5).
+
+### 7.7.7 Read-only km-report variant (planista / dyspozytor / eksport / admin)
+
+The **same `<KmWeekGrid>`** primitive, in a **read-only context** — this is the legacy «Raport km — moje pojazdy». Differences from the weryfikator board:
+
+- **No cell editing.** Cells render the three states (§7.7.1) but are **inert** — no toggle, no km `<Input>`, no per-cell notes editor. Cells are not focus targets for editing (they may still be focusable to read notes via the roll-up popover). The whole surface is read-only — same posture as the §6.3 read-only role panels, with the **non-dismissible read-only info banner** above the grid («Dane są tylko do podglądu — edytuje weryfikator.» / "Data is read-only — managed by the verifier.").
+- **Scope = own vehicles.** Served by `GET /vehicles/km-report?week=…`, already role-scoped server-side (`planista`→own `plannerId`, `dyspozytor`→own team, `eksport`/`admin`→all). The UI does not re-filter by owner; it trusts the scoped payload.
+- **"Tylko jeżdżące" filter (in-motion only).** A single `<Switch>` / `<Checkbox>` above the grid — «Tylko jeżdżące» / "In-motion only" — that hides rows whose week has **zero** `drove` cells (derived status ≠ `nieznany`/`idle`-only). Default **on** for the report (the report's purpose is the vehicles that actually moved; the contract scopes the report endpoint to "only vehicles with `drove` days", so this filter is mostly a within-week refinement). Compose from the existing `bg-input` filter-row pattern; it's a read filter, not a mutation.
+- **Keeps** the header counter strip (§7.7.2), the `Σ KM` / `NOTATKA` columns, week navigation (§7.7.5), and the «Historia» modal (§7.7.6 — read-only already). Drops only the editing affordances.
+- **Container + chrome.** Lives inside `RoleShell` (sidebar-less) for planista/dyspozytor/eksport, using the 4.4 container strip `mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-8`, page heading «Raport km — moje pojazdy» + a one-line scope subtitle. For `admin` it lives in the employee shell.
+
+> One component, two modes. `<KmWeekGrid mode="edit" | "view">` — the same component the weryfikator and the read-report render, gated by `mode` (exactly the §6.5 `mode: 'view' | 'edit'` precedent for the verification dialog). Do not fork two grids.
+
+### 7.7.8 States — loading / empty / empty-team / fresh-week
+
+| State | Trigger | Treatment |
+|---|---|---|
+| **Loading** | week fetch in flight | Header tiles stay (skeleton their numeric values with `<Skeleton className="h-6 w-12">`); grid body = 6–8 skeleton rows: identity block `<Skeleton>` two-line + 7 `<Skeleton className="h-5 w-10 mx-auto">` cells + `Σ` skeleton. Keep the day-column headers (week is known from the URL before the data lands). |
+| **No vehicles at all** (empty fleet / empty team) | board/report returns zero rows | Standard `<EmptyState>` in the card body (icon `Truck`): weryfikator — «Brak aktywnych pojazdów» / "No active vehicles." ; read-report — «Brak przypisanych pojazdów» / "No vehicles assigned to you." This is the **empty-team** case the contract calls out for dyspozytor/planista with no fleet. |
+| **Fresh week — vehicles present, no cells yet** (the *normal* Monday-morning state) | rows exist, every cell `empty` | **NOT an empty state.** Full grid of blank `—` cells, header counters read `W RUCHU 0 / Σ KM 0 / NOTATEK 0`, `CIĄGNIKI` = total. The board reads as "a full list awaiting this week's entry", calm (no warning tint — §7.5.6 principle). Optional one-line helper above the grid «{n} z {total} pojazdów uzupełnionych w tym tygodniu» / "{n} of {total} vehicles filled this week", `text-sm text-text-sub`. |
+| **Empty report after filter** | "Tylko jeżdżące" on, nothing moved this week | A lightweight in-card `<EmptyState>` (icon `Gauge`): «Żaden pojazd nie jeździł w tym tygodniu» / "No vehicle moved this week." with a hint to toggle the filter off or change week. Distinct from the true no-vehicles empty. |
+| **Error** | fetch fails | The standard query-error treatment used elsewhere (inline error card with retry). No bespoke token. |
+
+### 7.7.9 Delegation km-calendar (carrier delegation detail modal) — `<DelegationKmCalendar>`
+
+The "visual link" delegation↔km, **inside** the existing §6.4.1 delegation detail modal (`<EntityDetailModal>` + `<RouteCard>`). It is a **fourth body block**, a `span:'full'` section below the §6.4.1 «STATUS I AUDYT» section, rendered as a `fullWidth` row (the §6.20 escape hatch — same mechanism the `<RouteCard>` and `<BreakdownTable>` use).
+
+**What it shows.** A compact **per-day calendar** spanning the delegation period `[departureAt, plannedReturnAt]` (date-only span, same `differenceInCalendarDays` math as the §6.4.1 duration pill). For each day in the period it shows the assigned vehicle's `VehicleDailyKm` (joined by `vehicleId` + date intersection — **no FK**, the join is purely visual/data-side). This makes a carrier *see* how the truck performed during the trip without any modelled relationship.
+
+**Layout — period-strip calendar (not a full month grid).** Because a delegation is a short bounded span (the duration pill already shows «{n} dni»), render a **horizontal strip of day-cells** (one per day in the period), wrapping to multiple rows when long, NOT a full month calendar (a month grid would be mostly empty padding for a 4-day trip). Each day-cell is a small tile:
+
+```
+┌─ section (span:'full') — «Przebieg w trakcie wyjazdu» ───────────────────────┐
+│  NR REJ. WGM1234 · 12.03–16.03.2025 · 4 dni            Σ 1 240 km            │
+│                                                                              │
+│  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐                               │
+│  │ ŚR   │ │ CZ   │ │ PT   │ │ SB   │ │ ND   │                               │
+│  │ 12.03│ │ 13.03│ │ 14.03│ │ 15.03│ │ 16.03│                               │
+│  │ 420  │ │ 380  │ │ 440  │ │ ·    │ │  —   │                               │
+│  │ ✓ km │ │ ✓ km │ │ ✓ km │ │nie j.│ │brak  │                               │
+│  └──────┘ └──────┘ └──────┘ └──────┘ └──────┘                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+Day-tile anatomy (`rounded-lg border border-border bg-card p-2 text-center min-w-[64px]`):
+- top: weekday abbrev `text-[10px] uppercase text-text-sub` + date `DD.MM` `text-xs tabular-nums`.
+- middle: the **value** — `drove` ⇒ km `font-mono font-semibold tabular-nums text-text` + tile gets `bg-success/10` + a leading `<Check size={11} className="text-success"/>`; `idle` ⇒ «nie jeździ» muted `text-xs text-text-sub` on `bg-input`; `empty` (no row) ⇒ faint `—` `text-text-sub/60` (no tint). **Same three-state vocabulary as `<KmCell>` §7.7.1** — deliberate consistency so a carrier and a verifier read the same colours.
+- Departure / planned-return days may carry a tiny corner marker (a `<Plane>`/`<Flag>` `size={10} text-text-sub`) to anchor the trip ends to the §6.4.1 route card, but keep it subtle.
+
+**Section header + summary line.** Header label (PL) «Przebieg w trakcie wyjazdu» / (EN) "Mileage during the trip", icon `<Gauge size={15}/>`. A right-aligned `Σ {sum} km` (`font-mono tabular-nums`) sums only the `drove` days in the window. Sub-line under the header: `NR REJ. {plate} · {DD.MM}–{DD.MM} · {n} dni` `text-xs text-text-sub`.
+
+**No vehicle assigned / no data.**
+- If the delegation has no resolvable `vehicleId` (carrier never attached one): omit the section entirely (per §6.4 "empty section omitted") — don't render an empty calendar.
+- If a vehicle is attached but **zero** `VehicleDailyKm` rows fall in the window: still render the section with all-`empty` day tiles and a muted caption «Brak danych km dla tego okresu» / "No km data for this period." — this is informative (it tells the carrier the verifier hasn't recorded the trip yet), so it is shown rather than omitted.
+
+**Read-only.** The carrier never edits km here — this is purely a window into the verifier's data. No inputs, no toggles. Tiles are inert (not focus targets beyond reading); the whole block is `aria-label`ed «Przebieg pojazdu {plate} w okresie {od}–{do}».
+
+**Responsive.** The day-strip is `flex flex-wrap gap-2`; tiles keep `min-w-[64px]`. On a long delegation (e.g. 14 days) it wraps to 2–3 rows — acceptable and readable; never horizontal-scroll inside the modal body. On phones the modal is already full-width-ish (§6.4.1), tiles wrap naturally.
+
+**a11y / contrast.** Three-state meaning carried by **icon + text**, not colour alone (`✓`+km, «nie jeździ», `—`) — same colour-blind-safe rule as the grid. `bg-success/10` is decorative reinforcement only. `text-text-sub` on `bg-input`/`bg-card` clears AA at the 11–13px sizes used (same as the §6.4.1 route-card sub-labels). Tiles are `tabular-nums` so km align across the strip.
+
+### 7.7.10 i18n contract — `weryfikator.km.*` and `delegation.kmCalendar.*` (PL + EN)
+
+Two namespaces. Web-agent adds these to `messages/pl.json` / `messages/en.json`. ICU plurals where marked. Keys are the contract; do not rename.
+
+**`weryfikator.km.*`** (board + read-report share this namespace; report-only keys noted):
+
+| Key | PL | EN |
+|---|---|---|
+| `weryfikator.km.title` | «Raport km — moje pojazdy» *(report)* / «Tablica km» *(board)* | "Km report — my vehicles" / "Km board" |
+| `weryfikator.km.subtitle` | «Dzienny przebieg pojazdów — tydzień {week}» | "Daily vehicle mileage — week {week}" |
+| `weryfikator.km.tiles.week` | «Tydzień» | "Week" |
+| `weryfikator.km.tiles.tractors` | «Ciągniki» | "Tractors" |
+| `weryfikator.km.tiles.inMotion` | «W ruchu» | "In motion" |
+| `weryfikator.km.tiles.idle` | «Nie jeżdżą» | "Not driving" |
+| `weryfikator.km.tiles.sumKm` | «Σ km» | "Σ km" |
+| `weryfikator.km.tiles.notes` | «Notatek» | "Notes" |
+| `weryfikator.km.col.vehicle` | «Pojazd» | "Vehicle" |
+| `weryfikator.km.col.sideShort` | «bok {side}» | "side {side}" |
+| `weryfikator.km.col.carrier` | «Przewoźnik» | "Carrier" |
+| `weryfikator.km.col.opiekun` | «Opiekun» | "Account manager" |
+| `weryfikator.km.col.dispatcher` | «Dyspozytor» | "Dispatcher" |
+| `weryfikator.km.col.sumKm` | «Σ km» | "Σ km" |
+| `weryfikator.km.col.note` | «Notatka» | "Note" |
+| `weryfikator.km.col.history` | «Historia» | "History" |
+| `weryfikator.km.weekday.mon`…`.sun` | «Pn / Wt / Śr / Cz / Pt / Sb / Nd» | "Mon / Tue / Wed / Thu / Fri / Sat / Sun" |
+| `weryfikator.km.cell.drove` | «Jechał» | "Drove" |
+| `weryfikator.km.cell.idle` | «Nie jeździ» | "Not driving" |
+| `weryfikator.km.cell.empty` | «Nie sprawdzono» | "Not checked" |
+| `weryfikator.km.cell.kmPlaceholder` | «km» | "km" |
+| `weryfikator.km.cell.kmRequired` | «Podaj km» | "Enter km" |
+| `weryfikator.km.cell.zeroHint` | «0 km? oznacz „nie jeździ”» | "0 km? mark “not driving”" |
+| `weryfikator.km.cell.notePlaceholder` | «Notatka do dnia…» | "Note for this day…" |
+| `weryfikator.km.toast.saveError` | «Nie udało się zapisać km» | "Failed to save km" |
+| `weryfikator.km.nav.prev` | «Poprzedni tydzień» | "Previous week" |
+| `weryfikator.km.nav.next` | «Następny tydzień» | "Next week" |
+| `weryfikator.km.nav.current` | «Bieżący tydzień» | "Current week" |
+| `weryfikator.km.nav.weekLabel` | «Tydzień {week} · {from}–{to}» | "Week {week} · {from}–{to}" |
+| `weryfikator.km.nav.pickWeek` | «Wybierz tydzień» | "Pick a week" |
+| `weryfikator.km.progress` | «{checked} z {total} pojazdów uzupełnionych w tym tygodniu» | "{checked} of {total} vehicles filled this week" |
+| `weryfikator.km.filter.inMotionOnly` | «Tylko jeżdżące» *(report)* | "In-motion only" |
+| `weryfikator.km.readOnlyBanner` | «Dane są tylko do podglądu — edytuje weryfikator.» *(report)* | "Data is read-only — managed by the verifier." |
+| `weryfikator.km.empty.noVehicles` | «Brak aktywnych pojazdów» | "No active vehicles" |
+| `weryfikator.km.empty.noAssigned` | «Brak przypisanych pojazdów» *(report)* | "No vehicles assigned to you" |
+| `weryfikator.km.empty.noMotion` | «Żaden pojazd nie jeździł w tym tygodniu» *(report, filtered)* | "No vehicle moved this week" |
+| `weryfikator.km.history.title` | «Historia km — {plate}» | "Km history — {plate}" |
+| `weryfikator.km.history.desc` | «bok {side} · {carrier}» | "side {side} · {carrier}" |
+| `weryfikator.km.history.sourceManual` | «ręcznie» | "manual" |
+| `weryfikator.km.history.sourceGps` | «GPS» | "GPS" |
+| `weryfikator.km.history.empty` | «Brak historii km dla tego pojazdu» | "No km history for this vehicle yet" |
+| `weryfikator.km.history.close` | «Zamknij» | "Close" |
+| `weryfikator.km.notesPopover.title` | «Notatki w tym tygodniu» | "Notes this week" |
+| `weryfikator.km.notesPopover.empty` | «Brak notatek» | "No notes" |
+| `weryfikator.km.aria.cell` | «{plate}, {weekday} {date}: {state}» | "{plate}, {weekday} {date}: {state}" |
+| `weryfikator.km.aria.grid` | «Tygodniowa tablica km» | "Weekly km board" |
+
+**`delegation.kmCalendar.*`** (carrier delegation detail modal block):
+
+| Key | PL | EN |
+|---|---|---|
+| `delegation.kmCalendar.title` | «Przebieg w trakcie wyjazdu» | "Mileage during the trip" |
+| `delegation.kmCalendar.summary` | «NR REJ. {plate} · {from}–{to} · {days}» | "Reg. {plate} · {from}–{to} · {days}" |
+| `delegation.kmCalendar.days` | `{n, plural, one {# dzień} few {# dni} many {# dni} other {# dni}}` | `{n, plural, one {# day} other {# days}}` |
+| `delegation.kmCalendar.sumKm` | «Σ {sum} km» | "Σ {sum} km" |
+| `delegation.kmCalendar.drove` | «{km} km» | "{km} km" |
+| `delegation.kmCalendar.idle` | «nie jeździ» | "not driving" |
+| `delegation.kmCalendar.empty` | «—» | "—" |
+| `delegation.kmCalendar.noData` | «Brak danych km dla tego okresu» | "No km data for this period" |
+| `delegation.kmCalendar.aria` | «Przebieg pojazdu {plate} w okresie {from}–{to}» | "Mileage of vehicle {plate} for {from}–{to}" |
+| `delegation.kmCalendar.weekday.mon`…`.sun` | (reuse `weryfikator.km.weekday.*` values) | (same) |
+
+> Plural source: `delegation.kmCalendar.days` mirrors the §6.4.1 `routeCard.durationDays` ICU plural — keep the two consistent (same PL `dzień`/`dni` rules). If web-agent prefers, point both at one shared key; the values must match.
+
+### 7.7.11 Components / shared / nav summary (Phase 7.7)
+
+| Change | Where | Owner |
+|---|---|---|
+| New page `weryfikator/km` (editable weekly km-board) | `app/(weryfikator)/weryfikator/km/page.tsx` | web-agent |
+| New read-only km-report page(s) | `app/(planista)/…/km`, `app/(dyspozytor)/…/km`, `app/(eksport)/…/km` (+ admin under employee shell) — web-agent decides exact routes inside each role group | web-agent |
+| Weryfikator landing redirect → `/weryfikator/km` (supersedes §7.5 `/weryfikator/vehicles`); delete old route-status page + `WelcomePanel` stub; header logo/home → `/weryfikator/km` | `app/(weryfikator)/weryfikator/page.tsx` | web-agent |
+| New `<KmWeekGrid mode="edit"\|"view">` — the shared weekly matrix (frozen identity + 7 day tracks + Σ KM + Notatka + Historia) | `apps/web/components/km/KmWeekGrid.tsx` | web-agent |
+| New `<KmCell>` — three-state cell (drove/idle/empty) + inline editor (edit mode only) | `apps/web/components/km/KmCell.tsx` | web-agent |
+| New `<KmHeaderTiles>` (composes existing `<KpiCard>` ×6; **never** `tone="purple"`) | colocated with the km pages | web-agent |
+| New `<WeekNavigator>` (prev/next/current + week-picker `<Popover>` reusing the existing date-picker) | `apps/web/components/km/` | web-agent |
+| New `<VehicleKmHistoryDialog>` (read-only `<Dialog>` log) | `apps/web/components/km/` | web-agent |
+| New `<DelegationKmCalendar>` — period-strip day-tiles, `fullWidth` `span:'full'` block inside the §6.4.1 delegation detail modal | `apps/web/components/delegations/DelegationKmCalendar.tsx` | web-agent |
+| Wire `<DelegationKmCalendar>` as a 4th body section in `DelegationDetailModal` (after «STATUS I AUDYT»); omit when no vehicle | `components/delegations/DelegationDetailModal.tsx` | web-agent |
+| Reuse `<KpiCard>` / `<Dialog>` / `<Button>` / `<Input>` / `<ToggleGroup>` / `<Popover>` / `<Switch>` / `<EntityDetailModal>` / `<EmptyState>` / `<Skeleton>` / `<Badge>` | existing | — |
+| Derived-status tone-map reuse (`w ruchu→success`, `nie jeździ→muted`, `nieznany→outline`) | `@magguarantee/shared` (the §7.5.1 const-map) | — |
+| shared Zod: `SetVehicleDailyKmSchema { date, state: 'drove'\|'idle', km?: number, notes?: string }`, `VehicleDailyKmDto`, `VehicleKmBoardItemDto`, enum `VehicleDayState`, derived-status helper | `@magguarantee/shared` | api-agent (contract per §0′) |
+| Remove old `SetVehicleRouteStatusSchema` + route-status board page + `<VehicleRouteStatusHistoryDialog>` | shared + web | api-agent / web-agent |
+| i18n: `weryfikator.km.*` + `delegation.kmCalendar.*` (§7.7.10); remove old `weryfikator.*` route-status strings | `messages/pl.json` / `en.json` | web-agent |
+| **0** changes to `tailwind.config.ts` / `globals.css` | — | — |
+
+### 7.7.12 Acceptance checklist (Phase 7.7)
+
+- [ ] **Three-state cell.** `<KmCell>` renders exactly `drove` (km + `text-success` check + `bg-success/10`), `idle` («nie jeździ» on `bg-input`, no number), `empty` (faint `—`, no tint). Meaning carried by icon + text, never colour alone. Blank cell is never tinted as a warning.
+- [ ] **Weekly grid.** Frozen identity block (sticky-left) with plate/side + carrier·opiekun·dyspozytor; 7 PN..ND day-columns with `DD.MM` headers; **today's column** has the brand underline accent; weekend columns softly tinted; trailing `Σ KM` (`bg-input`), `NOTATKA` roll-up, «Historia» action. Horizontal scroll lives in the card, never the page.
+- [ ] **Header tiles.** Six `<KpiCard>` (TYDZIEŃ / CIĄGNIKI / W RUCHU / NIE JEŻDŻĄ / Σ KM / NOTATEK) with the §7.7.2 tones; **`tone="purple"` not used**; no orange/red aggregate; responsive `grid-cols-2 sm:grid-cols-3 lg:grid-cols-6` with no horizontal scroll at 320/360/640/1024/1280/1536/1920.
+- [ ] **Editing (board only).** In-cell `drove`/`nie jeździ` toggle; km `<Input>` only when `drove`; empty+drove invalid with inline «Podaj km»; commit on blur/Enter → upsert `PUT /vehicles/:id/daily-km`, optimistic Σ/counter update, error-only toast + rollback; keyboard cell navigation (arrows/Tab/Enter-down/Esc-revert) with visible `ring-brand` focus.
+- [ ] **Read-only report.** Same grid `mode="view"`, cells inert, non-dismissible read-only banner, «Tylko jeżdżące» filter (default on), scoped payload trusted; keeps tiles / Σ / Historia / week-nav.
+- [ ] **Week navigation.** prev/next/current + week-picker; `?week=YYYY-Www` is URL source of truth; grid-body skeleton on refetch with tiles + day-headers retained.
+- [ ] **History dialog.** Read-only `<Dialog>` log newest-first (date / state / km-or-idle / actor / source manual|GPS / optional notes); empty state; dismiss-only footer.
+- [ ] **States.** Loading skeleton; true `<EmptyState>` only for zero vehicles / empty team; **fresh week ≠ empty** (full grid of `—`, calm, optional «{n}/{total} uzupełnionych» helper); filtered-empty report has its own «żaden pojazd nie jeździł» empty.
+- [ ] **Delegation km-calendar.** A `span:'full'` `fullWidth` block in the §6.4.1 delegation detail modal, below «STATUS I AUDYT»; period-strip day-tiles `[departureAt, plannedReturnAt]` joined by `vehicleId` (no FK); same three-state vocabulary; `Σ km` summary; omitted when no vehicle; shown-with-«brak danych» when vehicle present but no km; read-only + `aria-label`ed; wraps, never horizontal-scrolls.
+- [ ] **Nav.** Weryfikator landing `redirect()`s to `/weryfikator/km`; old `/weryfikator/vehicles` route-status page + `WelcomePanel` removed; header logo/home → `/weryfikator/km`.
+- [ ] **i18n.** All `weryfikator.km.*` + `delegation.kmCalendar.*` keys present in PL + EN (§7.7.10); ICU plural for `kmCalendar.days`; old route-status `weryfikator.*` strings removed.
+- [ ] **Token policy + dark-mode.** Zero `tailwind.config.ts` / `globals.css` changes; no new colour/radius/shadow/font token; soft surfaces are `bg-input` only; tints are `bg-{success}/10` opacity variants; the whole grid + tiles + cells + calendar + history dialog legible in dark via tokens / `dark:` variants only.
 

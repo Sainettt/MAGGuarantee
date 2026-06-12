@@ -45,13 +45,13 @@ import { DelegationsService } from './delegations.service';
  *  - GET /delegations/:id (single, owner-scoped for carriers)
  *  - POST /delegations/:id/cancel (carrier cancels their `zgloszony`)
  *
- * Phase 7 rework (2026-06-10 #2): the weryfikator no longer touches
- * delegations at all — that role now manages per-VEHICLE route status (see the
- * vehicles module: `POST /vehicles/:id/route-status`). The former
- * in-transit/returned delegation handlers were removed and `weryfikator` was
- * dropped from every `@Roles(...)` here. `eksport` stays — it keeps its
- * read-only outings board (active-status floor + `includeHistory` toggle).
- * Cancel remains carrier-only, unchanged.
+ * Phase 7 rework (2026-06-10 #2 → 2026-06-12 #3): the weryfikator no longer
+ * touches delegations at all — that role now records per-VEHICLE DAILY km (see
+ * the vehicles module: `PUT /vehicles/:id/daily-km`, `GET /vehicles/km-board`).
+ * The former in-transit/returned delegation handlers were removed and
+ * `weryfikator` was dropped from every `@Roles(...)` here. `eksport` stays — it
+ * keeps its read-only outings board (active-status floor + `includeHistory`
+ * toggle). Cancel remains carrier-only, unchanged.
  *
  * `pracownik` is intentionally NOT in the role list — per
  * docs/03-roles.md#pracownik that role is a narrow "Opiekun wniosków"

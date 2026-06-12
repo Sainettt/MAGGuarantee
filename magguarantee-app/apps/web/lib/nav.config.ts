@@ -114,6 +114,15 @@ export const EMPLOYEE_NAV: readonly NavLink[] = [
     iconName: 'MapPin',
     roles: ['admin'],
   },
+  // Admin-only read-only km-report (Phase 7.7) — the same <KmBoardScreen
+  // mode="view"> the planista/dyspozytor/eksport see, unscoped for admin.
+  {
+    key: 'km',
+    href: '/employee/km',
+    labelKey: 'nav.km',
+    iconName: 'Gauge',
+    roles: ['admin'],
+  },
   {
     key: 'limits',
     href: '/employee/limits',

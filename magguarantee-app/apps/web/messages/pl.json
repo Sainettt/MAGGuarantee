@@ -204,6 +204,7 @@
     "trailers": "Naczepy",
     "trailerTypes": "Typy naczep",
     "delegations": "Wyjazdy",
+    "km": "Raport km",
     "limits": "Limity",
     "users": "Użytkownicy",
     "audit": "Audyt",
@@ -1492,57 +1493,97 @@
     }
   },
   "weryfikator": {
-    "vehicles": {
-      "title": "Pojazdy",
-      "subtitle": "Dzienny status trasy floty — oznaczaj, które auta są w trasie, a które zjechały.",
-      "filters": {
-        "status": "Status",
-        "allStatuses": "Wszystkie statusy",
-        "search": "Szukaj",
-        "searchPlaceholder": "Nr rej., nr boczny, przewoźnik lub opiekun…"
+    "km": {
+      "title": {
+        "board": "Tablica km",
+        "report": "Raport km — moje pojazdy"
       },
-      "columns": {
-        "vehicle": "Nr rej.",
-        "sideNumber": "Nr boczny",
+      "subtitle": "Dzienny przebieg pojazdów — tydzień {week}",
+      "tiles": {
+        "week": "Tydzień",
+        "tractors": "Ciągniki",
+        "inMotion": "W ruchu",
+        "idle": "Nie jeżdżą",
+        "sumKm": "Σ km",
+        "notes": "Notatek"
+      },
+      "col": {
+        "vehicle": "Pojazd",
+        "sideShort": "bok {side}",
         "carrier": "Przewoźnik",
         "opiekun": "Opiekun",
-        "planista": "Planista",
-        "status": "Status",
-        "noted": "Oznaczono",
-        "actions": "Akcje"
+        "dispatcher": "Dyspozytor",
+        "sumKm": "Σ km",
+        "note": "Notatka",
+        "history": "Historia"
       },
-      "status": {
-        "w_trasie": "W trasie",
-        "zjechal": "Zjechał",
-        "nieznany": "Nie sprawdzono"
+      "weekday": {
+        "mon": "Pn",
+        "tue": "Wt",
+        "wed": "Śr",
+        "thu": "Cz",
+        "fri": "Pt",
+        "sat": "Sb",
+        "sun": "Nd"
       },
-      "actions": {
-        "w_trasie": "W trasie",
-        "zjechal": "Zjechał"
+      "cell": {
+        "drove": "Jechał",
+        "idle": "Nie jeździ",
+        "empty": "Nie sprawdzono",
+        "kmPlaceholder": "km",
+        "kmRequired": "Podaj km",
+        "zeroHint": "0 km? oznacz „nie jeździ”",
+        "notePlaceholder": "Notatka do dnia…"
       },
-      "sideLabel": "bok {side}",
-      "progress": "Sprawdzono dziś {checked} z {total}",
-      "emptyTitle": "Brak aktywnych pojazdów",
-      "emptyMessage": "Nie ma żadnych aktywnych pojazdów do sprawdzenia.",
       "toast": {
-        "success": "Oznaczono: {status}",
-        "error": "Nie udało się zapisać statusu pojazdu."
+        "saveError": "Nie udało się zapisać km"
       },
-      "a11y": {
-        "showHistory": "Pokaż historię statusu: {plate}"
+      "nav": {
+        "prev": "Poprzedni tydzień",
+        "next": "Następny tydzień",
+        "current": "Bieżący tydzień",
+        "weekLabel": "Tydzień {week} · {from}–{to}",
+        "pickWeek": "Wybierz tydzień"
+      },
+      "progress": "{checked} z {total} pojazdów uzupełnionych w tym tygodniu",
+      "filter": {
+        "inMotionOnly": "Tylko jeżdżące"
+      },
+      "readOnlyBanner": "Dane są tylko do podglądu — edytuje weryfikator.",
+      "empty": {
+        "noVehicles": "Brak aktywnych pojazdów",
+        "noAssigned": "Brak przypisanych pojazdów",
+        "noMotion": "Żaden pojazd nie jeździł w tym tygodniu"
       },
       "history": {
-        "title": "Historia statusu — {plate}",
-        "sideSuffix": " · bok {side}",
-        "noOpiekun": "Brak opiekuna",
-        "gpsActor": "GPS",
-        "source": {
-          "manual": "ręcznie",
-          "gps": "GPS"
-        },
-        "emptyTitle": "Brak historii",
-        "emptyMessage": "Brak historii statusu dla tego pojazdu."
+        "title": "Historia km — {plate}",
+        "desc": "bok {side} · {carrier}",
+        "sourceManual": "ręcznie",
+        "sourceGps": "GPS",
+        "empty": "Brak historii km dla tego pojazdu",
+        "close": "Zamknij"
+      },
+      "notesPopover": {
+        "title": "Notatki w tym tygodniu",
+        "empty": "Brak notatek"
+      },
+      "aria": {
+        "cell": "{plate}, {weekday} {date}: {state}",
+        "grid": "Tygodniowa tablica km"
       }
+    }
+  },
+  "delegation": {
+    "kmCalendar": {
+      "title": "Przebieg w trakcie wyjazdu",
+      "summary": "NR REJ. {plate} · {from}–{to} · {days}",
+      "days": "{n, plural, one {# dzień} few {# dni} many {# dni} other {# dni}}",
+      "sumKm": "Σ {sum} km",
+      "drove": "{km} km",
+      "idle": "nie jeździ",
+      "empty": "—",
+      "noData": "Brak danych km dla tego okresu",
+      "aria": "Przebieg pojazdu {plate} w okresie {from}–{to}"
     }
   }
 }

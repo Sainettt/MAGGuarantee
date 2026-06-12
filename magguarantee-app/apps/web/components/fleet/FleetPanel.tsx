@@ -23,11 +23,13 @@ import {
   AlertTriangle,
   Car,
   Container,
+  Gauge,
   PauseCircle,
   Truck,
   User,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import Link from 'next/link';
 import { useState } from 'react';
 import type {
   DelegationDto,
@@ -81,6 +83,8 @@ interface Props {
   delegations: DelegationDto[];
   /** Delegations query loading flag. */
   delegationsLoading: boolean;
+  /** Optional «Raport km» link target (the role's read-only km-report, §7.7). */
+  kmReportHref?: string;
 }
 
 export function FleetPanel({
@@ -92,8 +96,10 @@ export function FleetPanel({
   isLoading,
   delegations,
   delegationsLoading,
+  kmReportHref,
 }: Props) {
   const t = useTranslations(namespace);
+  const tKm = useTranslations('weryfikator.km');
   const tCommon = useTranslations('common');
   const tA11y = useTranslations('fleet.a11y');
 
@@ -113,11 +119,22 @@ export function FleetPanel({
 
   return (
     <section className="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-8">
-      <div className="flex flex-col gap-1 mb-6">
-        <h1 className="text-2xl font-extrabold tracking-tight text-text">
-          {title}
-        </h1>
-        <p className="text-sm text-text-sub">{subtitle}</p>
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-extrabold tracking-tight text-text">
+            {title}
+          </h1>
+          <p className="text-sm text-text-sub">{subtitle}</p>
+        </div>
+        {kmReportHref ? (
+          <Link
+            href={kmReportHref}
+            className="inline-flex h-9 items-center gap-1.5 self-start rounded-[10px] border border-border bg-transparent px-3 text-[13px] font-bold text-text transition-colors hover:bg-input focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand/40"
+          >
+            <Gauge size={15} aria-hidden="true" />
+            {tKm('title.report')}
+          </Link>
+        ) : null}
       </div>
 
       <ReadOnlyBanner message={readOnlyBanner} />
