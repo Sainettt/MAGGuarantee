@@ -7,16 +7,17 @@
 // It is NOT a <DataTable> (the matrix layout is too bespoke) but reuses its
 // visual grammar (header `bg-bg`, `h-12` rows, `divide-y`, row hover).
 //
-// Edit mode wires Enter-to-move-down: each editable cell registers its handle
-// keyed by `${vehicleId}:${date}`, and committing with Enter focuses the same
-// column on the next vehicle.
+// Edit mode (board only): clicking a cell opens the modal <KmCellEditorDialog>
+// (§7.7.4 REWORK #4). The grid is a pure display surface — it owns no mutation
+// and no keyboard cell-chaining; it just reports which (vehicle, cell) was
+// activated via `onOpenEditor`, and the screen owns the dialog + commits.
 
 import { History, StickyNote, Truck } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { useCallback, useRef, useState } from 'react';
+import { useState } from 'react';
 import type {
-  SetVehicleDailyKmDto,
   VehicleKmBoardItemDto,
+  VehicleKmCellDto,
 } from '@magguarantee/shared';
 
 import { Button } from '@/components/ui/Button';
@@ -26,7 +27,7 @@ import {
   PopoverAnchor,
   PopoverContent,
 } from '@/components/ui/Popover';
-import { KmCell, type KmCellCommit, type KmCellHandle } from '@/components/km/KmCell';
+import { KmCell } from '@/components/km/KmCell';
 import {
   formatDayMonth,
   todayIso,
@@ -54,8 +55,8 @@ interface KmWeekGridProps {
   /** Empty-state when the board/report returns zero rows. */
   emptyTitle: string;
   emptyMessage: string;
-  /** Commit handler — edit mode only. Persisted optimistically by the caller. */
-  onCommitCell?: (id: string, body: SetVehicleDailyKmDto) => void;
+  /** Open the modal cell-editor — edit mode only. The screen owns the dialog. */
+  onOpenEditor?: (vehicle: VehicleKmBoardItemDto, cell: VehicleKmCellDto) => void;
   /** Open the per-vehicle history dialog. */
   onOpenHistory: (vehicle: VehicleKmBoardItemDto) => void;
 }
@@ -114,7 +115,7 @@ export function KmWeekGrid({
   isLoading,
   emptyTitle,
   emptyMessage,
-  onCommitCell,
+  onOpenEditor,
   onOpenHistory,
 }: KmWeekGridProps) {
   const t = useTranslations('weryfikator.km');
@@ -123,24 +124,6 @@ export function KmWeekGrid({
 
   const days = weekDays(weekStart);
   const today = todayIso();
-
-  // Cell handles for Enter-to-move-down (edit mode). Keyed `${vehicleId}:${date}`.
-  const cellRefs = useRef<Map<string, KmCellHandle | null>>(new Map());
-  const registerCell = useCallback(
-    (key: string) => (handle: KmCellHandle | null) => {
-      if (handle) cellRefs.current.set(key, handle);
-      else cellRefs.current.delete(key);
-    },
-    [],
-  );
-  const focusNextDown = useCallback(
-    (rowIdx: number, date: string) => {
-      const next = items[rowIdx + 1];
-      if (!next) return;
-      cellRefs.current.get(`${next.id}:${date}`)?.focus();
-    },
-    [items],
-  );
 
   // ── Loading skeleton (grid body only; day headers retained by caller) ──
   const skeletonRows = isLoading
@@ -240,7 +223,7 @@ export function KmWeekGrid({
             <tbody className="divide-y divide-border">
               {skeletonRows}
               {!isLoading &&
-                items.map((vehicle, rowIdx) => {
+                items.map((vehicle) => {
                   const cellByDate = new Map(
                     vehicle.cells.map((c) => [c.date, c]),
                   );
@@ -299,27 +282,15 @@ export function KmWeekGrid({
                         return (
                           <KmCell
                             key={d}
-                            ref={
-                              mode === 'edit'
-                                ? registerCell(`${vehicle.id}:${d}`)
-                                : undefined
-                            }
                             cell={cell}
                             mode={mode}
                             isWeekend={wdIdx >= 5}
                             ariaLabel={ariaLabel}
-                            onCommit={
+                            onOpenEditor={
                               mode === 'edit'
-                                ? (next: KmCellCommit) =>
-                                    onCommitCell?.(vehicle.id, {
-                                      date: d,
-                                      state: next.state,
-                                      km: next.km,
-                                      notes: next.notes,
-                                    })
+                                ? (c) => onOpenEditor?.(vehicle, c)
                                 : undefined
                             }
-                            onEnterDown={() => focusNextDown(rowIdx, d)}
                           />
                         );
                       })}

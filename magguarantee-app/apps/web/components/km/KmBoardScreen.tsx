@@ -22,24 +22,42 @@ import { toast } from 'sonner';
 import type {
   SetVehicleDailyKmDto,
   VehicleKmBoardItemDto,
+  VehicleKmCellDto,
 } from '@magguarantee/shared';
 
 import { Checkbox } from '@/components/ui/Checkbox';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { KmHeaderTiles } from '@/components/km/KmHeaderTiles';
+import {
+  KmCellEditorDialog,
+  type KmEditorTarget,
+} from '@/components/km/KmCellEditorDialog';
 import { KmWeekGrid } from '@/components/km/KmWeekGrid';
 import { VehicleKmHistoryDialog } from '@/components/km/VehicleKmHistoryDialog';
 import { WeekNavigator } from '@/components/km/WeekNavigator';
 import {
+  useClearVehicleDailyKm,
   useSetVehicleDailyKm,
   useVehicleKmBoard,
   useVehicleKmReport,
 } from '@/lib/hooks/useVehicleKm';
 import {
+  formatDayMonthYear,
   isoWeekLabel,
   isoWeekParam,
   weekParamToMonday,
+  weekdayIndexMonFirst,
 } from '@/lib/format/week';
+
+const WEEKDAY_KEYS = [
+  'mon',
+  'tue',
+  'wed',
+  'thu',
+  'fri',
+  'sat',
+  'sun',
+] as const;
 
 interface KmBoardScreenProps {
   mode: 'edit' | 'view';
@@ -47,6 +65,7 @@ interface KmBoardScreenProps {
 
 export function KmBoardScreen({ mode }: KmBoardScreenProps) {
   const t = useTranslations('weryfikator.km');
+  const tWeekday = useTranslations('weryfikator.km.weekday');
 
   const router = useRouter();
   const pathname = usePathname();
@@ -73,15 +92,44 @@ export function KmBoardScreen({ mode }: KmBoardScreenProps) {
   const data = activeQ.data;
   const isLoading = activeQ.isLoading;
 
-  // Optimistic in-cell mutation (edit only). Silent on success; error toasts.
-  const setCellM = useSetVehicleDailyKm(query, {
-    onError: () => toast.error(t('toast.saveError')),
+  // Optimistic save + clear mutations (edit only). Both are silent on success
+  // (the optimistic cache patch is the feedback); the modal surfaces its own
+  // error banner on reject, so no toast here. The mutations resolve/reject so
+  // the dialog can await them and close-on-resolve / stay-open-on-reject.
+  const setCellM = useSetVehicleDailyKm(query);
+  const clearCellM = useClearVehicleDailyKm(query, {
+    onError: () => toast.error(t('clear.error')),
   });
-  const onCommitCell = useCallback(
-    (id: string, body: SetVehicleDailyKmDto) => {
-      setCellM.mutate({ id, body });
+
+  const onSaveCell = useCallback(
+    async (id: string, body: SetVehicleDailyKmDto) => {
+      await setCellM.mutateAsync({ id, body });
     },
     [setCellM],
+  );
+  const onClearCell = useCallback(
+    async (id: string, date: string) => {
+      await clearCellM.mutateAsync({ id, date });
+    },
+    [clearCellM],
+  );
+
+  // Which (vehicle, cell) is open in the modal editor (edit/board only).
+  const [editorTarget, setEditorTarget] = useState<KmEditorTarget | null>(null);
+  const onOpenEditor = useCallback(
+    (vehicle: VehicleKmBoardItemDto, cell: VehicleKmCellDto) => {
+      const wdIdx = weekdayIndexMonFirst(cell.date);
+      setEditorTarget({
+        vehicleId: vehicle.id,
+        plateNumber: vehicle.plateNumber,
+        sideNumber: vehicle.sideNumber ?? null,
+        carrierName: vehicle.carrier?.name ?? null,
+        cell,
+        weekday: tWeekday(WEEKDAY_KEYS[wdIdx]),
+        dateLabel: formatDayMonthYear(cell.date),
+      });
+    },
+    [tWeekday],
   );
 
   // Read-report «Tylko jeżdżące» filter — default ON (the report exists for the
@@ -174,10 +222,22 @@ export function KmBoardScreen({ mode }: KmBoardScreenProps) {
           emptyMessage={
             mode === 'edit' ? t('empty.noVehicles') : t('empty.noAssigned')
           }
-          onCommitCell={mode === 'edit' ? onCommitCell : undefined}
+          onOpenEditor={mode === 'edit' ? onOpenEditor : undefined}
           onOpenHistory={setHistoryTarget}
         />
       )}
+
+      {/* Modal cell editor — board (edit) only */}
+      {mode === 'edit' ? (
+        <KmCellEditorDialog
+          target={editorTarget}
+          onOpenChange={(open) => {
+            if (!open) setEditorTarget(null);
+          }}
+          onSave={onSaveCell}
+          onClear={onClearCell}
+        />
+      ) : null}
 
       <VehicleKmHistoryDialog
         vehicle={historyTarget}

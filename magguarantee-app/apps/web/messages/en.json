@@ -1530,13 +1530,30 @@
         "drove": "Drove",
         "idle": "Not driving",
         "empty": "Not checked",
-        "kmPlaceholder": "km",
-        "kmRequired": "Enter km",
-        "zeroHint": "0 km? mark “not driving”",
-        "notePlaceholder": "Note for this day…"
+        "kmPlaceholder": "km"
       },
-      "toast": {
+      "modal": {
+        "title": "{plate} · side {side}",
+        "desc": "{carrier} · {weekday}, {date}",
+        "stateLabel": "Day status",
+        "stateDrove": "Drove",
+        "stateIdle": "Not driving",
+        "kmLabel": "Mileage (km)",
+        "kmRequired": "Enter km",
+        "kmZeroHint": "0 km? mark “not driving”",
+        "notesLabel": "Note",
+        "notesPlaceholder": "Note for this day…",
+        "save": "Save",
+        "cancel": "Cancel",
         "saveError": "Failed to save km"
+      },
+      "clear": {
+        "action": "Clear this day",
+        "confirmTitle": "Clear this day?",
+        "confirmBody": "Are you sure you want to clear the km record for {plate}, {weekday} {date}? The day will return to “Not checked”.",
+        "confirm": "Clear",
+        "cancel": "Cancel",
+        "error": "Failed to clear the day"
       },
       "nav": {
         "prev": "Previous week",

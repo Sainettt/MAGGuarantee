@@ -219,6 +219,18 @@ export function setVehicleDailyKm(
 }
 
 /**
+ * DELETE /vehicles/:id/daily-km?date=YYYY-MM-DD — clears ONE (vehicle, day)
+ * mark so the cell returns to «not checked» (row absence). Idempotent: clearing
+ * an already-absent cell still succeeds (204). Roles weryfikator | admin.
+ */
+export function deleteVehicleDailyKm(id: string, date: string): Promise<void> {
+  return apiJson<void>(
+    `/vehicles/${id}/daily-km?date=${encodeURIComponent(date)}`,
+    { method: 'DELETE' },
+  );
+}
+
+/**
  * GET /vehicles/:id/daily-km — per-vehicle daily-km history, newest-first.
  * Optional `from`/`to` (date-only) bounds. Powers the read-only history dialog.
  */

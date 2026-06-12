@@ -17,6 +17,7 @@ import {
   type VehicleDayState as VehicleDayStateValue,
 } from '@magguarantee/shared';
 
+import { AuditContext } from '../../common/audit';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import {
   VehicleDailyKmRepository,
@@ -83,6 +84,49 @@ export class VehicleDailyKmService {
     }
 
     return this._toDto(row);
+  }
+
+  /**
+   * Clears ONE (vehicle, day) mark so the cell returns to «not checked» (row
+   * absence). Validates the vehicle exists exactly like `setDailyKm` (404 on a
+   * missing vehicle). IDEMPOTENT: clearing an already-absent cell still
+   * resolves (the repo's `deleteMany` returns count 0 without throwing), so a
+   * double-clear / clearing a «not checked» cell does NOT error — the caller
+   * gets 204 either way.
+   *
+   * Deliberately does NOT touch `Vehicle.lastDroveAt`: it is only ever advanced
+   * forward (never moved backwards by an out-of-order edit — same invariant as
+   * the `drove` bump in `setDailyKm`), so removing one day's mark leaves the
+   * fleet readiness signal untouched. The delete runs through the ambient
+   * `prisma.tx` so it commits atomically with the `@Audit` row.
+   *
+   * AUDIT `before`: when a row exists for (vehicle, date) its pre-delete value
+   * (full DTO — `state` / `km` / `notes` / `date` included) is captured into
+   * the audit `before` snapshot via `AuditContext.setBefore`, so the audit log
+   * records WHAT was cleared even after the row is gone. The snapshot read goes
+   * through the SAME ambient `prisma.tx` as the delete. When no row existed the
+   * `before` stays absent (null) — but the audit row is STILL written on every
+   * successful clear: the idempotent no-op case (count 0, clearing an already
+   * «not checked» cell) is audited exactly like a real clear, and still 204s.
+   */
+  async clearDailyKm(
+    user: AuthUser,
+    vehicleId: string,
+    date: string,
+  ): Promise<void> {
+    void user;
+    await this._requireVehicle(vehicleId);
+    const day = isoDateToMidnightUtc(date);
+
+    // Snapshot the pre-delete value (if any) into the audit `before`. Mirrors
+    // the `setBefore(this.toDto(existing))` convention used by the hard/soft
+    // delete flows (vehicles/carriers/drivers/...). No row ⇒ `before` left null.
+    const existing = await this.dailyKm.findByVehicleDate(vehicleId, day);
+    if (existing) AuditContext.setBefore(this._toDto(existing));
+
+    // Idempotent: `deleteMany` returns count 0 when nothing existed; we ignore
+    // the count and never branch on it — the audit row is written regardless.
+    await this.dailyKm.deleteByVehicleDate(vehicleId, day);
   }
 
   /**

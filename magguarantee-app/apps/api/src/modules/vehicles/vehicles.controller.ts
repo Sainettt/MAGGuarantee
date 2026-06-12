@@ -23,6 +23,7 @@ import type { z } from 'zod';
 
 import {
   CreateVehicleSchema,
+  DeleteVehicleDailyKmQuerySchema,
   DeleteWithReasonSchema,
   KmBoardQuerySchema,
   SetVehicleDailyKmSchema,
@@ -31,6 +32,7 @@ import {
   VehicleDailyKmHistoryQuerySchema,
   VehicleFiltersSchema,
   type CreateVehicleDto,
+  type DeleteVehicleDailyKmQuery,
   type DeleteWithReasonDto,
   type KmBoardQuery,
   type SetVehicleDailyKmDto,
@@ -375,6 +377,33 @@ export class VehiclesController {
     dto: SetVehicleDailyKmDto,
   ): Promise<VehicleDailyKmDto> {
     return this.dailyKm.setDailyKm(user, id, dto);
+  }
+
+  /**
+   * Clears ONE (vehicle, day) km mark via `?date=YYYY-MM-DD`, returning the
+   * cell to «not checked» (row absence). Weryfikator/admin only — mirrors the
+   * PUT write gate; no ownership decorator (the class-level ownership guards
+   * short-circuit for these roles). IDEMPOTENT: clearing an already-absent /
+   * «not checked» cell still returns 204, never 404 (the service uses
+   * `deleteMany`). `Vehicle.lastDroveAt` is left untouched on delete (it only
+   * ever moves forward — see the service note). The delete + audit row commit
+   * atomically in the `@Audit`-opened transaction (ambient `prisma.tx`).
+   */
+  @Delete(':id/daily-km')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles('weryfikator', 'admin')
+  @Audit({
+    action: 'vehicle.clearDailyKm',
+    targetType: 'Vehicle',
+    targetKey: (req) => req.params?.id,
+  })
+  async clearDailyKm(
+    @CurrentUser() user: AuthUser,
+    @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
+    @Query(new ZodValidationPipe(DeleteVehicleDailyKmQuerySchema))
+    query: DeleteVehicleDailyKmQuery,
+  ): Promise<void> {
+    await this.dailyKm.clearDailyKm(user, id, query.date);
   }
 
   /**

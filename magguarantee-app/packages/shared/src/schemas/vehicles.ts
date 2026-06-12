@@ -304,6 +304,23 @@ export type VehicleDailyKmHistoryQuery = z.infer<
 >;
 
 /**
+ * Query for `DELETE /vehicles/:id/daily-km` — clears ONE (vehicle, day) mark so
+ * the cell returns to «not checked» (row absence). The day to clear is a
+ * required date-only (`YYYY-MM-DD`) query param, matching the GET history
+ * query style. `.strict()` rejects stray fields. The delete is idempotent:
+ * clearing an already-absent cell still succeeds (204), so no `to`/`from`
+ * window applies — exactly one day is targeted.
+ */
+export const DeleteVehicleDailyKmQuerySchema = z
+  .object({
+    date: IsoDateSchema,
+  })
+  .strict();
+export type DeleteVehicleDailyKmQuery = z.infer<
+  typeof DeleteVehicleDailyKmQuerySchema
+>;
+
+/**
  * Query for the weekly km-board / km-report. Accepts EITHER an ISO week
  * (`YYYY-Www`, e.g. `2026-W24`) OR a `from` Monday (`YYYY-MM-DD`). When both
  * are absent the api defaults to the current ISO week. `.strict()` rejects

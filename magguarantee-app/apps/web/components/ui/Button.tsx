@@ -6,7 +6,7 @@ import { forwardRef, type ButtonHTMLAttributes } from 'react';
 
 import { cn } from '@/lib/utils';
 
-type Variant = 'default' | 'ghost' | 'outline';
+type Variant = 'default' | 'ghost' | 'outline' | 'destructive';
 type Size = 'default' | 'sm' | 'lg';
 
 const VARIANT_CLASSES: Record<Variant, string> = {
@@ -16,6 +16,9 @@ const VARIANT_CLASSES: Record<Variant, string> = {
     'bg-transparent text-text hover:bg-input focus-visible:ring-brand/40',
   outline:
     'bg-transparent text-text border border-border hover:bg-input focus-visible:ring-brand/40',
+  // Solid danger — the confirmed-clear / destructive-confirm action (§7.7.4).
+  destructive:
+    'bg-danger text-white hover:bg-danger/90 focus-visible:ring-danger/40 disabled:bg-danger/60',
 };
 
 const SIZE_CLASSES: Record<Size, string> = {

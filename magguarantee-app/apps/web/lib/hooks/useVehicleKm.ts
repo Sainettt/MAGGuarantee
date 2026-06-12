@@ -28,6 +28,7 @@ import type {
 } from '@magguarantee/shared';
 
 import {
+  deleteVehicleDailyKm,
   getVehicleDailyKmHistory,
   getVehicleKmBoard,
   getVehicleKmReport,
@@ -98,7 +99,79 @@ export function useSetVehicleDailyKm(
       await qc.cancelQueries({ queryKey: key });
       const previous = qc.getQueryData<VehicleKmBoardDto>(key);
       if (previous) {
-        qc.setQueryData<VehicleKmBoardDto>(key, patchBoardCell(previous, vars));
+        qc.setQueryData<VehicleKmBoardDto>(
+          key,
+          patchBoardCell(previous, vars.id, vars.body.date, {
+            date: vars.body.date,
+            state: vars.body.state,
+            km: vars.body.state === 'drove' ? (vars.body.km ?? 0) : null,
+            notes: vars.body.notes ?? null,
+          }),
+        );
+      }
+      await opts?.onMutate?.(vars, ...rest);
+      return { previous };
+    },
+    onError: (err, vars, ctx, ...rest) => {
+      if (ctx?.previous) qc.setQueryData(key, ctx.previous);
+      opts?.onError?.(err, vars, ctx, ...rest);
+    },
+    onSettled: (data, err, vars, ...rest) => {
+      qc.invalidateQueries({ queryKey: key });
+      qc.invalidateQueries({
+        queryKey: [...VEHICLE_KM_KEY, 'history', vars.id],
+      });
+      opts?.onSettled?.(data, err, vars, ...rest);
+    },
+  });
+}
+
+interface ClearDailyKmVars {
+  id: string;
+  date: string;
+}
+
+/**
+ * Clears one daily-km mark (`DELETE /vehicles/:id/daily-km?date`). Optimistic
+ * mirror of `useSetVehicleDailyKm`: `onMutate` patches the (vehicle, date) cell
+ * back to the «not checked» empty state ({ state: null, km: null, notes: null })
+ * and recomputes the row Σ km. Rolls back on error; re-fetches board + history
+ * on settle so the server-derived Σ / motion-status reconcile. Silent on
+ * success — only the caller's `onError` toasts.
+ */
+export function useClearVehicleDailyKm(
+  boardQuery: KmBoardQuery,
+  opts?: UseMutationOptions<
+    void,
+    Error,
+    ClearDailyKmVars,
+    { previous: VehicleKmBoardDto | undefined }
+  >,
+) {
+  const qc = useQueryClient();
+  const key = boardKey('board', boardQuery);
+
+  return useMutation<
+    void,
+    Error,
+    ClearDailyKmVars,
+    { previous: VehicleKmBoardDto | undefined }
+  >({
+    mutationFn: ({ id, date }) => deleteVehicleDailyKm(id, date),
+    ...opts,
+    onMutate: async (vars, ...rest) => {
+      await qc.cancelQueries({ queryKey: key });
+      const previous = qc.getQueryData<VehicleKmBoardDto>(key);
+      if (previous) {
+        qc.setQueryData<VehicleKmBoardDto>(
+          key,
+          patchBoardCell(previous, vars.id, vars.date, {
+            date: vars.date,
+            state: null,
+            km: null,
+            notes: null,
+          }),
+        );
       }
       await opts?.onMutate?.(vars, ...rest);
       return { previous };
@@ -119,27 +192,22 @@ export function useSetVehicleDailyKm(
 
 /**
  * Patches one cell in a cached board envelope: replaces the matching
- * (vehicle, date) cell and recomputes the row Σ km. Motion-status is left to
- * the server reconcile (`onSettled` re-fetch) — an optimistic guess could
- * diverge from the latest-by-date rule.
+ * (vehicle, date) cell with `next` and recomputes the row Σ km. Motion-status
+ * is left to the server reconcile (`onSettled` re-fetch) — an optimistic guess
+ * could diverge from the latest-by-date rule.
  */
 function patchBoardCell(
   board: VehicleKmBoardDto,
-  { id, body }: DailyKmVars,
+  id: string,
+  date: string,
+  next: VehicleKmBoardDto['items'][number]['cells'][number],
 ): VehicleKmBoardDto {
   return {
     ...board,
     items: board.items.map((item) => {
       if (item.id !== id) return item;
       const cells = item.cells.map((cell) =>
-        cell.date === body.date
-          ? {
-              date: cell.date,
-              state: body.state,
-              km: body.state === 'drove' ? (body.km ?? 0) : null,
-              notes: body.notes ?? null,
-            }
-          : cell,
+        cell.date === date ? next : cell,
       );
       const kmSum = cells.reduce(
         (sum, c) => sum + (c.state === 'drove' ? (c.km ?? 0) : 0),

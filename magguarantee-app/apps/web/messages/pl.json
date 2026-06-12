@@ -1530,13 +1530,30 @@
         "drove": "Jechał",
         "idle": "Nie jeździ",
         "empty": "Nie sprawdzono",
-        "kmPlaceholder": "km",
-        "kmRequired": "Podaj km",
-        "zeroHint": "0 km? oznacz „nie jeździ”",
-        "notePlaceholder": "Notatka do dnia…"
+        "kmPlaceholder": "km"
       },
-      "toast": {
+      "modal": {
+        "title": "{plate} · bok {side}",
+        "desc": "{carrier} · {weekday}, {date}",
+        "stateLabel": "Status dnia",
+        "stateDrove": "Jechał",
+        "stateIdle": "Nie jeździ",
+        "kmLabel": "Przebieg (km)",
+        "kmRequired": "Podaj km",
+        "kmZeroHint": "0 km? oznacz „nie jeździ”",
+        "notesLabel": "Notatka",
+        "notesPlaceholder": "Notatka do dnia…",
+        "save": "Zapisz",
+        "cancel": "Anuluj",
         "saveError": "Nie udało się zapisać km"
+      },
+      "clear": {
+        "action": "Wyczyść ten dzień",
+        "confirmTitle": "Wyczyść ten dzień?",
+        "confirmBody": "Czy na pewno chcesz wyczyścić zapis km dla {plate}, {weekday} {date}? Dzień wróci do stanu „Nie sprawdzono”.",
+        "confirm": "Wyczyść",
+        "cancel": "Anuluj",
+        "error": "Nie udało się wyczyścić dnia"
       },
       "nav": {
         "prev": "Poprzedni tydzień",

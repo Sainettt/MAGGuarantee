@@ -81,6 +81,39 @@ export class VehicleDailyKmRepository {
   }
 
   /**
+   * Reads the single (vehicleId, date) mark, or `null` when the cell is «not
+   * checked» (no row). Goes through `prisma.tx` so a read taken inside an
+   * `@Audit`-opened interactive transaction (e.g. the pre-delete snapshot in
+   * `clearDailyKm`) sees the same uncommitted state the subsequent mutation
+   * acts on. Returns the flat `VehicleDailyKmRow` shape used everywhere else.
+   */
+  async findByVehicleDate(
+    vehicleId: string,
+    date: Date,
+  ): Promise<VehicleDailyKmRow | null> {
+    const row = await this.prisma.tx.vehicleDailyKm.findUnique({
+      where: { vehicleId_date: { vehicleId, date } },
+      include: this.includeShape(),
+    });
+    return row ? this.flatten(row) : null;
+  }
+
+  /**
+   * Clears ONE (vehicleId, date) mark so the cell returns to «not checked»
+   * (row absence). Uses `deleteMany` (not `delete`) so clearing an already-
+   * absent cell is IDEMPOTENT — it returns `count: 0` without throwing
+   * `P2025`, never a 404. Goes through `prisma.tx` so the delete enrols in the
+   * `@Audit`-opened interactive transaction and commits atomically with the
+   * audit row. Returns the number of rows removed (0 or 1).
+   */
+  async deleteByVehicleDate(vehicleId: string, date: Date): Promise<number> {
+    const { count } = await this.prisma.tx.vehicleDailyKm.deleteMany({
+      where: { vehicleId, date },
+    });
+    return count;
+  }
+
+  /**
    * Per-vehicle history (newest-first) bounded by an optional `[from, to)`
    * date window. Both bounds are half-open at the upper end so a `to` of the
    * same day is inclusive when the caller passes `to + 1 day` (the service

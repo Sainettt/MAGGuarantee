@@ -4319,17 +4319,34 @@ The core shared primitive. A horizontally-scrollable table inside a `<Card>` (`r
 
 **Sticky behaviour.** Header row `sticky top-0 z-20 bg-bg`; identity block `sticky left-0`. On horizontal scroll the day tracks slide under the frozen identity + over nothing on the right (Σ KM / NOTATKA / Historia are *not* frozen — they scroll with the day tracks, which is fine since they sit at the natural right edge). The card itself owns the `overflow-x-auto`; never let the page body scroll horizontally.
 
-### 7.7.4 Cell editing (weryfikator board only) — `drove` / `idle` toggle + km input
+### 7.7.4 Cell editing (weryfikator board only) — modal editor + clear-with-confirm
 
-The km-board is the **one mutating surface**. Editing happens **in-cell**, no modal per edit (high-frequency, like §7.5.4 stamps). Each editable `<KmCell>` exposes a tiny inline editor:
+> **REWORK 2026-06-12 #4 — AUTHORITATIVE. Supersedes the previous in-cell inline-editor spec entirely.** The old toggle-revealed-on-focus / commit-on-blur / `Esc`-revert / `Enter`-to-move-down spreadsheet editor is **removed from the build**. There is **no inline cell editor and no cell-to-cell keyboard chaining** any more. The user chose the simpler, explicit modal flow. Web-agent: ignore any older mention of in-cell editing — this subsection is the only editing spec for the board.
 
-- **State switch.** A 2-segment toggle inside the cell (or revealed on focus/click) — `drove` / `nie jeździ` — built from a compact `<ToggleGroup>` (Radix, already in the shadcn family) or two tiny `<Button size="sm" variant="ghost">` with `aria-pressed`. Selecting `drove` reveals the km `<Input>`; selecting `nie jeździ` clears + disables the km input and writes `state:'idle', km:null`.
-- **Km input.** `<Input inputMode="numeric" className="h-8 w-16 text-center font-mono tabular-nums">`, only when `state='drove'`. Empty + `drove` is invalid (a drove day needs a number); show the standard inline error treatment on blur (`border-danger` + sr message «Podaj km»). `0` is allowed but nudges toward `idle` (optional soft hint «0 km? oznacz „nie jeździ”» — not blocking).
-- **Persist = blur / Enter.** On commit → `PUT /vehicles/:id/daily-km { date, state, km?, notes? }` (upsert), optimistic update of the cell + the row `Σ KM` + the header `Σ KM`/counters; toast only on **error** (success is silent — committing dozens of cells should not spam toasts), rollback on failure. This is the §7.5.4 "low-stakes, high-frequency, no per-action confirm" posture, applied to a numeric field.
-- **Keyboard flow (important for a data-entry grid).** Arrow keys / Tab move between editable cells; Enter commits + moves **down** to the next vehicle same day (column-wise entry is how a verifier works a day's column). `Esc` reverts the cell. Each cell is a proper focus target with a visible `focus-visible:ring-2 ring-brand ring-inset`. This makes the board usable as a fast spreadsheet-like entry surface without a mouse.
-- **Notes per cell.** An optional small `<StickyNote>` ghost icon-button inside (or on hover of) a `drove`/`idle` cell opens a tiny popover with a `<Textarea>` for `notes`; saving adds it to the same `PUT`. The roll-up `NOTATKA` column (§7.7.3) surfaces these per row.
+The km-board is still the **one mutating surface**, but editing is now **deliberate, one day at a time, through a modal** — not a high-frequency inline stamp. The cell remains a *display* primitive (§7.7.1 three states); interaction on it just opens an editor.
 
-> **Empty cell affordance.** A blank (`empty`) cell shows the `—`; clicking/focusing it opens the same inline editor defaulting to `drove` with an empty km input (the most common action is "enter today's km"). So creating a record and editing one are the same gesture.
+**Opening the editor.** In `mode="edit"` (board only — **never** the read-only report §7.7.7), a `<KmCell>` is a single focusable button (`focus-visible:ring-2 ring-brand ring-inset`, full-cell `h-12` target). Click / `Enter` / `Space` opens `<KmCellEditDialog>`. This is true for **all three** states: an `empty` cell opens the editor to *create* a record; a `drove`/`idle` cell opens it to *edit* an existing one. Creating and editing are the same gesture, just pre-filled differently.
+
+**`<KmCellEditDialog>` — reuse the `<Dialog>` primitive** (the same centered `<Dialog>` grammar as the §7.7.6 history dialog: `bg-card`, `animate-modal-in`, `shadow-modal`, brand focus ring; **not** a bespoke surface). Contents top→bottom:
+
+- **`DialogHeader` — vehicle identity + the specific day.**
+  - Title: `plateNumber` (`font-mono font-semibold text-text`) + side number «bok {side}» (`text-text-sub`).
+  - `DialogDescription` (`text-sm text-text-sub`): the carrier name + the day, e.g. «{carrier} · {weekday}, {DD.MM.YYYY}». The weekday + full date make it unmistakable *which* cell is being edited (no spreadsheet ambiguity).
+- **Body — a real `<form>` (RHF + Zod, schema `SetVehicleDailyKmSchema`):**
+  - **State choice — `drove` / `idle`.** A 2-option `<ToggleGroup type="single">` (Radix, shadcn family) — «Jechał» / «Nie jeździ», `aria`-labelled, one always selected. This is the primary decision of the dialog, so it sits first and full-width.
+  - **Km numeric input — shown ONLY for `drove`.** `<Input inputMode="numeric" className="text-center font-mono tabular-nums">` with label «Przebieg (km)». Selecting `idle` **hides** the km field entirely and the payload carries `km:null` (idle has no km — never a disabled-but-present input, just absent). Empty + `drove` is invalid → standard inline field error «Podaj km» (`border-danger` + sr message), Save disabled until valid. `0` is allowed but shows the soft, non-blocking hint «0 km? oznacz „nie jeździ”».
+  - **Notes — `<Textarea>`** labelled «Notatka», optional, placeholder «Notatka do dnia…». Applies to both states. Feeds the roll-up `NOTATKA` column (§7.7.3) and the history log (§7.7.6).
+- **`DialogFooter` — actions:**
+  - Primary **«Zapisz»** (`<Button>` brand primary). On submit → `PUT /vehicles/:id/daily-km { date, state, km?, notes? }` (upsert). Follow the established modal-mutation flow: `await onSave()`, Save shows a spinner + form disabled while saving, **close on resolve**, keep the dialog **open** on reject with an `<Alert variant="destructive">` at the top of the body (so the typed km/notes aren't lost). On success, optimistically update the cell + the row `Σ KM` + the header `Σ KM`/counters; error path rolls back. Because each save is now an explicit modal commit (not a silent blur), a quiet success toast is acceptable but optional.
+  - **«Anuluj» / close** (`<Button variant="ghost">`, plus the Dialog `X` and overlay/`Esc` dismiss). Cancel makes **zero changes and zero network calls** — it never fires the `PUT`, never mutates the cell, never optimistically updates. Dismiss = pure no-op. (This is the explicit contrast with the dropped blur-commit behaviour: nothing persists unless «Zapisz» is pressed.)
+
+**«Wyczyść ten dzień» (clear this day) — destructive, confirmed.**
+
+- **Visibility.** Rendered **only when the cell already has a state** (`cell.state != null`, i.e. `drove` or `idle`). For an `empty` cell there is nothing to clear, so the action is **absent** (not disabled). Placed in the footer's left slot as a destructive ghost: `<Button variant="ghost" className="text-danger">` with a leading `<Trash2 size={14}/>` — the established left-aligned destructive-slot posture (§4 modal-footer convention; mirrors the §Phase-4.4 «Odrzuć» destructive slot).
+- **Behaviour.** Clearing **DELETES** the day's `VehicleDailyKm` record and returns the cell to the **`empty` / «Nie sprawdzono»** state (§7.7.1) — the exact target state a clear returns to. Endpoint: `DELETE /vehicles/:id/daily-km { date }` (or the contract's delete shape). On success the cell renders the faint `—`, and the row/header `Σ KM` + counters update.
+- **Confirmation — reuse the existing destructive-confirm pattern.** Clear **must** route through a second, destructive confirmation `<Dialog>` — the same `ConfirmDeleteWithReasonDialog`-family destructive-confirm the design system already defines for deletes (centered `<Dialog>`, danger framing, `await onConfirm()` flow, stays open on reject). No reason field is needed here, so it is the bare-confirm variant (like the §7.1(a) plain confirm `<Dialog>`), but styled **destructive**: the confirm button is `<Button variant="destructive">` «Wyczyść». Copy: title «Wyczyść ten dzień?», body «Czy na pewno chcesz wyczyścić zapis km dla {plate}, {weekday} {date}? Dzień wróci do stanu „Nie sprawdzono”.», confirm «Wyczyść», cancel «Anuluj». Cancelling the confirm returns to the edit dialog with no change.
+
+> **No keyboard cell-chaining.** The old arrows/Tab-between-cells + `Enter`-commits-and-moves-down + `Esc`-reverts spreadsheet navigation is **gone**. Cells are ordinary buttons in tab order; opening, editing, and saving all happen inside the modal with standard dialog keyboard semantics (`Esc` closes the modal = cancel = no-op; `Enter` in the form submits «Zapisz»). There is no cell-to-cell entry chaining — one cell, one modal, one explicit save.
 
 ### 7.7.5 Week navigation
 
@@ -4440,14 +4457,29 @@ Two namespaces. Web-agent adds these to `messages/pl.json` / `messages/en.json`.
 | `weryfikator.km.col.note` | «Notatka» | "Note" |
 | `weryfikator.km.col.history` | «Historia» | "History" |
 | `weryfikator.km.weekday.mon`…`.sun` | «Pn / Wt / Śr / Cz / Pt / Sb / Nd» | "Mon / Tue / Wed / Thu / Fri / Sat / Sun" |
-| `weryfikator.km.cell.drove` | «Jechał» | "Drove" |
-| `weryfikator.km.cell.idle` | «Nie jeździ» | "Not driving" |
-| `weryfikator.km.cell.empty` | «Nie sprawdzono» | "Not checked" |
-| `weryfikator.km.cell.kmPlaceholder` | «km» | "km" |
-| `weryfikator.km.cell.kmRequired` | «Podaj km» | "Enter km" |
-| `weryfikator.km.cell.zeroHint` | «0 km? oznacz „nie jeździ”» | "0 km? mark “not driving”" |
-| `weryfikator.km.cell.notePlaceholder` | «Notatka do dnia…» | "Note for this day…" |
-| `weryfikator.km.toast.saveError` | «Nie udało się zapisać km» | "Failed to save km" |
+| `weryfikator.km.cell.drove` *(view display + modal state label)* | «Jechał» | "Drove" |
+| `weryfikator.km.cell.idle` *(view display + modal state label)* | «Nie jeździ» | "Not driving" |
+| `weryfikator.km.cell.empty` *(view display + clear target)* | «Nie sprawdzono» | "Not checked" |
+| `weryfikator.km.cell.kmPlaceholder` *(view display unit)* | «km» | "km" |
+| `weryfikator.km.modal.title` | «{plate} · bok {side}» | "{plate} · side {side}" |
+| `weryfikator.km.modal.desc` | «{carrier} · {weekday}, {date}» | "{carrier} · {weekday}, {date}" |
+| `weryfikator.km.modal.stateLabel` | «Status dnia» | "Day status" |
+| `weryfikator.km.modal.stateDrove` | «Jechał» | "Drove" |
+| `weryfikator.km.modal.stateIdle` | «Nie jeździ» | "Not driving" |
+| `weryfikator.km.modal.kmLabel` | «Przebieg (km)» | "Mileage (km)" |
+| `weryfikator.km.modal.kmRequired` | «Podaj km» | "Enter km" |
+| `weryfikator.km.modal.kmZeroHint` | «0 km? oznacz „nie jeździ”» | "0 km? mark “not driving”" |
+| `weryfikator.km.modal.notesLabel` | «Notatka» | "Note" |
+| `weryfikator.km.modal.notesPlaceholder` | «Notatka do dnia…» | "Note for this day…" |
+| `weryfikator.km.modal.save` | «Zapisz» | "Save" |
+| `weryfikator.km.modal.cancel` | «Anuluj» | "Cancel" |
+| `weryfikator.km.modal.saveError` | «Nie udało się zapisać km» | "Failed to save km" |
+| `weryfikator.km.clear.action` | «Wyczyść ten dzień» | "Clear this day" |
+| `weryfikator.km.clear.confirmTitle` | «Wyczyść ten dzień?» | "Clear this day?" |
+| `weryfikator.km.clear.confirmBody` | «Czy na pewno chcesz wyczyścić zapis km dla {plate}, {weekday} {date}? Dzień wróci do stanu „Nie sprawdzono”.» | "Are you sure you want to clear the km record for {plate}, {weekday} {date}? The day will return to “Not checked”." |
+| `weryfikator.km.clear.confirm` | «Wyczyść» | "Clear" |
+| `weryfikator.km.clear.cancel` | «Anuluj» | "Cancel" |
+| `weryfikator.km.clear.error` | «Nie udało się wyczyścić dnia» | "Failed to clear the day" |
 | `weryfikator.km.nav.prev` | «Poprzedni tydzień» | "Previous week" |
 | `weryfikator.km.nav.next` | «Następny tydzień» | "Next week" |
 | `weryfikator.km.nav.current` | «Bieżący tydzień» | "Current week" |
@@ -4495,17 +4527,19 @@ Two namespaces. Web-agent adds these to `messages/pl.json` / `messages/en.json`.
 | New read-only km-report page(s) | `app/(planista)/…/km`, `app/(dyspozytor)/…/km`, `app/(eksport)/…/km` (+ admin under employee shell) — web-agent decides exact routes inside each role group | web-agent |
 | Weryfikator landing redirect → `/weryfikator/km` (supersedes §7.5 `/weryfikator/vehicles`); delete old route-status page + `WelcomePanel` stub; header logo/home → `/weryfikator/km` | `app/(weryfikator)/weryfikator/page.tsx` | web-agent |
 | New `<KmWeekGrid mode="edit"\|"view">` — the shared weekly matrix (frozen identity + 7 day tracks + Σ KM + Notatka + Historia) | `apps/web/components/km/KmWeekGrid.tsx` | web-agent |
-| New `<KmCell>` — three-state cell (drove/idle/empty) + inline editor (edit mode only) | `apps/web/components/km/KmCell.tsx` | web-agent |
+| New `<KmCell>` — three-state **display** cell (drove/idle/empty); in `mode="edit"` it is a focusable button that opens `<KmCellEditDialog>` (no inline editor) | `apps/web/components/km/KmCell.tsx` | web-agent |
+| New `<KmCellEditDialog>` — per-day edit modal (state toggle + km input for `drove` + notes + Save/Cancel) reusing the `<Dialog>` primitive; cancel = zero changes/zero network; «Wyczyść ten dzień» destructive action (only when `cell.state != null`) routed through the existing destructive-confirm `<Dialog>` → `DELETE` day → returns cell to `empty` | `apps/web/components/km/KmCellEditDialog.tsx` | web-agent |
 | New `<KmHeaderTiles>` (composes existing `<KpiCard>` ×6; **never** `tone="purple"`) | colocated with the km pages | web-agent |
 | New `<WeekNavigator>` (prev/next/current + week-picker `<Popover>` reusing the existing date-picker) | `apps/web/components/km/` | web-agent |
 | New `<VehicleKmHistoryDialog>` (read-only `<Dialog>` log) | `apps/web/components/km/` | web-agent |
 | New `<DelegationKmCalendar>` — period-strip day-tiles, `fullWidth` `span:'full'` block inside the §6.4.1 delegation detail modal | `apps/web/components/delegations/DelegationKmCalendar.tsx` | web-agent |
 | Wire `<DelegationKmCalendar>` as a 4th body section in `DelegationDetailModal` (after «STATUS I AUDYT»); omit when no vehicle | `components/delegations/DelegationDetailModal.tsx` | web-agent |
-| Reuse `<KpiCard>` / `<Dialog>` / `<Button>` / `<Input>` / `<ToggleGroup>` / `<Popover>` / `<Switch>` / `<EntityDetailModal>` / `<EmptyState>` / `<Skeleton>` / `<Badge>` | existing | — |
+| Reuse `<KpiCard>` / `<Dialog>` / `<Button>` / `<Input>` / `<Textarea>` / `<ToggleGroup>` / `<Popover>` / `<Switch>` / `<EntityDetailModal>` / `<EmptyState>` / `<Skeleton>` / `<Badge>` + the existing destructive-confirm dialog (`ConfirmDeleteWithReasonDialog` family, bare-confirm variant) for «Wyczyść ten dzień» | existing | — |
+| shared Zod: add the day-clear delete shape (`DELETE /vehicles/:id/daily-km { date }`) alongside `SetVehicleDailyKmSchema` | `@magguarantee/shared` | api-agent |
 | Derived-status tone-map reuse (`w ruchu→success`, `nie jeździ→muted`, `nieznany→outline`) | `@magguarantee/shared` (the §7.5.1 const-map) | — |
 | shared Zod: `SetVehicleDailyKmSchema { date, state: 'drove'\|'idle', km?: number, notes?: string }`, `VehicleDailyKmDto`, `VehicleKmBoardItemDto`, enum `VehicleDayState`, derived-status helper | `@magguarantee/shared` | api-agent (contract per §0′) |
 | Remove old `SetVehicleRouteStatusSchema` + route-status board page + `<VehicleRouteStatusHistoryDialog>` | shared + web | api-agent / web-agent |
-| i18n: `weryfikator.km.*` + `delegation.kmCalendar.*` (§7.7.10); remove old `weryfikator.*` route-status strings | `messages/pl.json` / `en.json` | web-agent |
+| i18n: `weryfikator.km.*` (incl. new `weryfikator.km.modal.*` + `weryfikator.km.clear.*`; `cell.*` kept for view-mode display) + `delegation.kmCalendar.*` (§7.7.10); remove old `weryfikator.*` route-status strings | `messages/pl.json` / `en.json` | web-agent |
 | **0** changes to `tailwind.config.ts` / `globals.css` | — | — |
 
 ### 7.7.12 Acceptance checklist (Phase 7.7)
@@ -4513,7 +4547,8 @@ Two namespaces. Web-agent adds these to `messages/pl.json` / `messages/en.json`.
 - [ ] **Three-state cell.** `<KmCell>` renders exactly `drove` (km + `text-success` check + `bg-success/10`), `idle` («nie jeździ» on `bg-input`, no number), `empty` (faint `—`, no tint). Meaning carried by icon + text, never colour alone. Blank cell is never tinted as a warning.
 - [ ] **Weekly grid.** Frozen identity block (sticky-left) with plate/side + carrier·opiekun·dyspozytor; 7 PN..ND day-columns with `DD.MM` headers; **today's column** has the brand underline accent; weekend columns softly tinted; trailing `Σ KM` (`bg-input`), `NOTATKA` roll-up, «Historia» action. Horizontal scroll lives in the card, never the page.
 - [ ] **Header tiles.** Six `<KpiCard>` (TYDZIEŃ / CIĄGNIKI / W RUCHU / NIE JEŻDŻĄ / Σ KM / NOTATEK) with the §7.7.2 tones; **`tone="purple"` not used**; no orange/red aggregate; responsive `grid-cols-2 sm:grid-cols-3 lg:grid-cols-6` with no horizontal scroll at 320/360/640/1024/1280/1536/1920.
-- [ ] **Editing (board only).** In-cell `drove`/`nie jeździ` toggle; km `<Input>` only when `drove`; empty+drove invalid with inline «Podaj km»; commit on blur/Enter → upsert `PUT /vehicles/:id/daily-km`, optimistic Σ/counter update, error-only toast + rollback; keyboard cell navigation (arrows/Tab/Enter-down/Esc-revert) with visible `ring-brand` focus.
+- [ ] **Editing (board only) — modal flow.** Clicking any cell (incl. `empty`, to create) opens `<KmCellEditDialog>` (reuses `<Dialog>`); header shows plate/side + carrier + weekday/date; `drove`/`nie jeździ` `<ToggleGroup>`; km `<Input>` shown **only** for `drove` (idle = no km field, payload `km:null`); empty+drove invalid with inline «Podaj km»; notes `<Textarea>`; «Zapisz» → upsert `PUT /vehicles/:id/daily-km`, optimistic Σ/counter update + rollback; «Anuluj»/Esc/overlay = **zero changes, zero network calls**. **No** inline cell editor, **no** spreadsheet cell-to-cell keyboard chaining.
+- [ ] **Clear-with-confirm (board only).** «Wyczyść ten dzień» destructive action appears **only** when `cell.state != null`; routes through the existing destructive-confirm `<Dialog>` (danger framing, `variant="destructive"` confirm); on confirm `DELETE`s the day's record and returns the cell to `empty` / «Nie sprawdzono»; cancel = no change.
 - [ ] **Read-only report.** Same grid `mode="view"`, cells inert, non-dismissible read-only banner, «Tylko jeżdżące» filter (default on), scoped payload trusted; keeps tiles / Σ / Historia / week-nav.
 - [ ] **Week navigation.** prev/next/current + week-picker; `?week=YYYY-Www` is URL source of truth; grid-body skeleton on refetch with tiles + day-headers retained.
 - [ ] **History dialog.** Read-only `<Dialog>` log newest-first (date / state / km-or-idle / actor / source manual|GPS / optional notes); empty state; dismiss-only footer.

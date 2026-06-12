@@ -121,6 +121,11 @@ export function formatDayMonth(iso: string): string {
   return `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
 }
 
+/** «DD.MM.YYYY» — full day label for a `YYYY-MM-DD` (km-cell editor header). */
+export function formatDayMonthYear(iso: string): string {
+  return `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}`;
+}
+
 /** Weekday index 0=Mon..6=Sun for a `YYYY-MM-DD` (for the i18n weekday keys). */
 export function weekdayIndexMonFirst(iso: string): number {
   const day = parseIsoDate(iso).getUTCDay(); // 0=Sun..6=Sat
