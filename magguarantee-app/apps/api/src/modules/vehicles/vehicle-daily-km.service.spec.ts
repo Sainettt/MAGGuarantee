@@ -1,9 +1,14 @@
-import { NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 
 import { VehicleDayState, VehicleStatusSource } from '@magguarantee/database';
 import type { SetVehicleDailyKmDto } from '@magguarantee/shared';
 
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
+import { CarriersRepository } from '../carriers/carriers.repository';
 import {
   VehicleDailyKmRepository,
   type VehicleDailyKmRow,
@@ -15,6 +20,7 @@ import {
 import {
   VehiclesRepository,
   type VehicleBoardRow,
+  type VehicleBoardScope,
 } from './vehicles.repository';
 
 const VEHICLE_ID = 'veh-1';
@@ -58,6 +64,10 @@ function makeService(opts: {
   weekRows?: VehicleDailyKmRow[];
   history?: VehicleDailyKmRow[];
   droveIds?: Set<string>;
+  /** przewoznik → resolved own carrier id (null = no profile). */
+  myCarrierId?: string | null;
+  /** opiekun → supervised carrier id set. */
+  opiekunCarrierIds?: string[];
 } = {}) {
   const vehicle =
     opts.vehicle === undefined ? { lastDroveAt: null } : opts.vehicle;
@@ -69,14 +79,26 @@ function makeService(opts: {
     async (_id: string, _data: Record<string, unknown>) => ({}),
   );
   const listActiveForBoardSpy = jest.fn(
-    async (_scope?: { plannerId?: string; dispatcherId?: string }) =>
-      opts.boardVehicles ?? [],
+    async (_scope?: VehicleBoardScope) => opts.boardVehicles ?? [],
   );
   const vehicles = {
     findById: findByIdSpy,
     update: updateSpy,
     listActiveForBoard: listActiveForBoardSpy,
   } as unknown as VehiclesRepository;
+
+  const findIdByUserIdSpy = jest.fn(
+    async (_userId: string): Promise<string | null> =>
+      opts.myCarrierId === undefined ? null : opts.myCarrierId,
+  );
+  const listIdsForOpiekunSpy = jest.fn(
+    async (_opiekunId: string): Promise<string[]> =>
+      opts.opiekunCarrierIds ?? [],
+  );
+  const carriers = {
+    findIdByUserId: findIdByUserIdSpy,
+    listIdsForOpiekun: listIdsForOpiekunSpy,
+  } as unknown as CarriersRepository;
 
   const upsertSpy = jest.fn(
     async (data: {
@@ -130,7 +152,7 @@ function makeService(opts: {
   } as unknown as VehicleDailyKmRepository;
 
   return {
-    service: new VehicleDailyKmService(vehicles, dailyKm),
+    service: new VehicleDailyKmService(vehicles, dailyKm, carriers),
     findByIdSpy,
     updateSpy,
     listActiveForBoardSpy,
@@ -138,6 +160,8 @@ function makeService(opts: {
     listByVehicleSpy,
     listForWeekSpy,
     vehicleIdsWithDroveInWeekSpy,
+    findIdByUserIdSpy,
+    listIdsForOpiekunSpy,
   };
 }
 
@@ -378,42 +402,163 @@ describe('VehicleDailyKmService.getBoard', () => {
 });
 
 describe('VehicleDailyKmService.getReport', () => {
-  it('only includes vehicles that drove, and forwards the scope', async () => {
-    const vehicles = [
-      boardVehicle({ id: 'veh-A', plateNumber: 'AAA' }),
-      boardVehicle({ id: 'veh-B', plateNumber: 'BBB' }),
-    ];
-    const weekRows = [
-      kmRow({
-        id: 'a1',
-        vehicleId: 'veh-A',
-        date: new Date('2026-06-08T00:00:00.000Z'),
-        state: VehicleDayState.drove,
-        km: 150,
-      }),
-    ];
+  const drove = (id: string, km: number) =>
+    kmRow({
+      id: `${id}-1`,
+      vehicleId: id,
+      date: new Date('2026-06-08T00:00:00.000Z'),
+      state: VehicleDayState.drove,
+      km,
+    });
+
+  // ── planista / dyspozytor: scoped + drove-only (UNCHANGED) ─────────────
+
+  it('planista: scoped by plannerId, only vehicles that drove', async () => {
     const { service, listActiveForBoardSpy } = makeService({
-      boardVehicles: vehicles,
+      boardVehicles: [
+        boardVehicle({ id: 'veh-A', plateNumber: 'AAA' }),
+        boardVehicle({ id: 'veh-B', plateNumber: 'BBB' }),
+      ],
       droveIds: new Set(['veh-A']),
-      weekRows,
+      weekRows: [drove('veh-A', 150)],
     });
     const out = await service.getReport(
       { from: '2026-06-08' },
-      { plannerId: 'planner-1' },
+      auth('planista', 'planner-1'),
     );
     expect(out.items.map((i) => i.id)).toEqual(['veh-A']);
     expect(out.items[0]!.kmSum).toBe(150);
-    // scope forwarded to the active-vehicle query
-    expect(listActiveForBoardSpy).toHaveBeenCalledWith({ plannerId: 'planner-1' });
+    expect(listActiveForBoardSpy).toHaveBeenCalledWith({
+      plannerId: 'planner-1',
+      includeIdle: false,
+    });
   });
 
-  it('empty report when nothing drove', async () => {
+  it('dyspozytor: scoped by dispatcherId, only vehicles that drove', async () => {
+    const { service, listActiveForBoardSpy } = makeService({
+      boardVehicles: [boardVehicle({ id: 'veh-A' })],
+      droveIds: new Set(['veh-A']),
+      weekRows: [drove('veh-A', 90)],
+    });
+    const out = await service.getReport(
+      { from: '2026-06-08' },
+      auth('dyspozytor', 'disp-1'),
+    );
+    expect(out.items.map((i) => i.id)).toEqual(['veh-A']);
+    expect(listActiveForBoardSpy).toHaveBeenCalledWith({
+      dispatcherId: 'disp-1',
+      includeIdle: false,
+    });
+  });
+
+  it('drove-only role: empty report when nothing drove', async () => {
     const { service } = makeService({
       boardVehicles: [boardVehicle()],
       droveIds: new Set(),
     });
-    const out = await service.getReport({ from: '2026-06-08' }, {});
+    const out = await service.getReport(
+      { from: '2026-06-08' },
+      auth('eksport', 'eks-1'),
+    );
     expect(out.items).toEqual([]);
+  });
+
+  // ── przewoznik: own carrier only, includeIdle ──────────────────────────
+
+  it('przewoznik: scoped to OWN carrier id resolved from the JWT', async () => {
+    const { service, listActiveForBoardSpy, findIdByUserIdSpy } = makeService({
+      myCarrierId: 'car-mine',
+      boardVehicles: [boardVehicle({ id: 'veh-A', carrier: { id: 'car-mine', name: 'Mine' } })],
+      weekRows: [drove('veh-A', 200)],
+    });
+    const out = await service.getReport(
+      { from: '2026-06-08' },
+      auth('przewoznik', 'pwz-user'),
+    );
+    expect(findIdByUserIdSpy).toHaveBeenCalledWith('pwz-user');
+    expect(listActiveForBoardSpy).toHaveBeenCalledWith({
+      carrierId: 'car-mine',
+      includeIdle: true,
+    });
+    expect(out.items.map((i) => i.id)).toEqual(['veh-A']);
+  });
+
+  it('przewoznik: a vehicle that did NOT drive still appears (includeIdle)', async () => {
+    const { service, vehicleIdsWithDroveInWeekSpy } = makeService({
+      myCarrierId: 'car-mine',
+      boardVehicles: [
+        boardVehicle({ id: 'veh-A', carrier: { id: 'car-mine', name: 'Mine' } }),
+        boardVehicle({ id: 'veh-idle', plateNumber: 'IDLE', carrier: { id: 'car-mine', name: 'Mine' } }),
+      ],
+      // only veh-A drove; veh-idle has no marks at all
+      droveIds: new Set(['veh-A']),
+      weekRows: [drove('veh-A', 200)],
+    });
+    const out = await service.getReport(
+      { from: '2026-06-08' },
+      auth('przewoznik', 'pwz-user'),
+    );
+    // BOTH vehicles present — non-driving one is NOT dropped.
+    expect(out.items.map((i) => i.id).sort()).toEqual(['veh-A', 'veh-idle']);
+    const idle = out.items.find((i) => i.id === 'veh-idle')!;
+    expect(idle.kmSum).toBe(0);
+    expect(idle.cells.every((c) => c.state === null)).toBe(true);
+    // includeIdle ⇒ the drove-only narrowing query is never consulted.
+    expect(vehicleIdsWithDroveInWeekSpy).not.toHaveBeenCalled();
+  });
+
+  it('przewoznik: no carrier profile → 403', async () => {
+    const { service } = makeService({ myCarrierId: null });
+    await expect(
+      service.getReport({ from: '2026-06-08' }, auth('przewoznik', 'orphan')),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  // ── opiekun: supervised carrier set only, includeIdle ──────────────────
+
+  it('opiekun: scoped to the supervised carrier-id set (no cross-carrier leak)', async () => {
+    const { service, listActiveForBoardSpy, listIdsForOpiekunSpy } = makeService({
+      opiekunCarrierIds: ['car-1', 'car-2'],
+      boardVehicles: [
+        boardVehicle({ id: 'veh-1', carrier: { id: 'car-1', name: 'C1' } }),
+        boardVehicle({ id: 'veh-2', carrier: { id: 'car-2', name: 'C2' } }),
+      ],
+      weekRows: [drove('veh-1', 100)],
+      droveIds: new Set(['veh-1']),
+    });
+    const out = await service.getReport(
+      { from: '2026-06-08' },
+      auth('opiekun', 'op-user'),
+    );
+    expect(listIdsForOpiekunSpy).toHaveBeenCalledWith('op-user');
+    expect(listActiveForBoardSpy).toHaveBeenCalledWith({
+      carrierIds: ['car-1', 'car-2'],
+      includeIdle: true,
+    });
+    // both supervised vehicles present (incl. the idle veh-2)
+    expect(out.items.map((i) => i.id).sort()).toEqual(['veh-1', 'veh-2']);
+  });
+
+  it('opiekun with NO supervised carriers → empty board (not all vehicles)', async () => {
+    const { service, listActiveForBoardSpy } = makeService({
+      opiekunCarrierIds: [],
+      // even if the repo were (wrongly) called without a filter, force a
+      // non-empty fixture so the assertion proves the empty-set scope, not an
+      // accidentally-empty fleet, drives the empty board.
+      boardVehicles: [boardVehicle({ id: 'veh-X' })],
+    });
+    const out = await service.getReport(
+      { from: '2026-06-08' },
+      auth('opiekun', 'op-empty'),
+    );
+    // The repo is asked for the empty set; in production it short-circuits to
+    // 0 rows. The mock returns its fixture, so we assert the SCOPE handed down
+    // is the empty set (the real repo guarantees the empty board).
+    expect(listActiveForBoardSpy).toHaveBeenCalledWith({
+      carrierIds: [],
+      includeIdle: true,
+    });
+    void out;
   });
 });
 

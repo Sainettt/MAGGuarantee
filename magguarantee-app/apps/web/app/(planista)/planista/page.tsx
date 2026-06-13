@@ -42,6 +42,7 @@ export default function PlanistaPanelPage() {
       delegations={delegationsQ.data?.items ?? []}
       delegationsLoading={delegationsQ.isLoading}
       kmReportHref="/planista/km"
+      myKmHref="/planista/moje-pojazdy"
     />
   );
 }

@@ -1,4 +1,5 @@
 import {
+  ForbiddenException,
   Injectable,
   NotFoundException,
   UnprocessableEntityException,
@@ -19,6 +20,7 @@ import {
 
 import { AuditContext } from '../../common/audit';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
+import { CarriersRepository } from '../carriers/carriers.repository';
 import {
   VehicleDailyKmRepository,
   type VehicleDailyKmRow,
@@ -26,7 +28,23 @@ import {
 import {
   VehiclesRepository,
   type VehicleBoardRow,
+  type VehicleBoardScope,
 } from './vehicles.repository';
+
+/**
+ * Resolved km-report scope. Extends the repo-side {@link VehicleBoardScope}
+ * narrowing axes with a service-side `includeIdle` flag:
+ *  - `includeIdle: false` (planista / dyspozytor / eksport / admin /
+ *    weryfikator) → PRESERVE today's behaviour: drop to vehicles that drove in
+ *    the week (`vehicleIdsWithDroveInWeek`).
+ *  - `includeIdle: true` (przewoznik / opiekun — the §7.8 "my vehicles km" tab)
+ *    → return EVERY scoped active vehicle, including non-driving / blank-week
+ *    ones, with empty cells where there is no data.
+ *
+ * The flag is server-derived from role/scope (NOT a client query param), so the
+ * `GET /vehicles/km-report` contract is unchanged.
+ */
+export type ReportScope = VehicleBoardScope & { includeIdle: boolean };
 
 /**
  * Phase 7 REWORK (2026-06-12 #3, docs/20 §0′) — per-vehicle DAILY km list.
@@ -46,6 +64,7 @@ export class VehicleDailyKmService {
   constructor(
     private readonly vehicles: VehiclesRepository,
     private readonly dailyKm: VehicleDailyKmRepository,
+    private readonly carriers: CarriersRepository,
   ) {}
 
   /**
@@ -169,26 +188,38 @@ export class VehicleDailyKmService {
   }
 
   /**
-   * Read-only km-report — same weekly grid, but ONLY vehicles that drove in
-   * the period, scoped to the caller's role:
+   * Read-only km-report — same weekly grid, scoped to the caller's role
+   * (`_resolveReportScope`, server-side from the JWT — no client param):
    *   planista → `plannerId`; dyspozytor → `dispatcherId`;
-   *   eksport / admin / weryfikator → all.
-   * The role scope is applied by the caller (`buildReportScope`), which passes
-   * an optional id filter through to the active-vehicle query.
+   *   przewoznik → their OWN `carrierId`; opiekun → their supervised
+   *   `carrierIds`; eksport / admin / weryfikator → all.
+   *
+   * Two motion behaviours, selected by the resolved `includeIdle` flag:
+   *   - `false` (planista / dyspozytor / eksport / admin / weryfikator) →
+   *     UNCHANGED: only vehicles that drove in the period.
+   *   - `true` (przewoznik / opiekun — the §7.8 "my vehicles km" tab) → ALL
+   *     scoped active vehicles, including non-driving ones (empty cells).
    */
   async getReport(
     query: KmBoardQuery,
-    scope: { plannerId?: string; dispatcherId?: string },
+    user: AuthUser,
   ): Promise<VehicleKmBoardDto> {
     const { start, endExclusive } = resolveWeekWindow(query);
+    const scope = await this._resolveReportScope(user);
     const vehicles = await this.vehicles.listActiveForBoard(scope);
-    const ids = vehicles.map((v) => v.id);
-    const droveIds = await this.dailyKm.vehicleIdsWithDroveInWeek(
-      ids,
-      start,
-      endExclusive,
-    );
-    const visible = vehicles.filter((v) => droveIds.has(v.id));
+
+    // Drove-only roles narrow to vehicles with a `drove` mark in the week; the
+    // "my vehicles km" tab (includeIdle) keeps every scoped active vehicle.
+    let visible = vehicles;
+    if (!scope.includeIdle) {
+      const droveIds = await this.dailyKm.vehicleIdsWithDroveInWeek(
+        vehicles.map((v) => v.id),
+        start,
+        endExclusive,
+      );
+      visible = vehicles.filter((v) => droveIds.has(v.id));
+    }
+
     const rows = await this.dailyKm.listForWeek(
       visible.map((v) => v.id),
       start,
@@ -203,6 +234,51 @@ export class VehicleDailyKmService {
       weekEnd: toIsoDate(addDaysUtc(start, 6)),
       items,
     };
+  }
+
+  /**
+   * Maps the caller's role to the km-report vehicle scope + `includeIdle` flag.
+   * Carrier ids are resolved SERVER-SIDE from the JWT (`user.sub`), never from
+   * a client param (IDOR-safe), reusing `CarriersRepository.findIdByUserId`
+   * (przewoznik → own carrier) and `listIdsForOpiekun` (opiekun → supervised
+   * set). Empty-set scopes (opiekun supervising nobody) flow through as an
+   * empty `carrierIds`, which the repo turns into an empty board.
+   *
+   *   planista → `{ plannerId }`        dyspozytor → `{ dispatcherId }`
+   *   przewoznik → `{ carrierId }`      opiekun → `{ carrierIds }`
+   *   eksport / admin / weryfikator → `{}` (all)
+   *
+   * planista / dyspozytor / eksport / admin / weryfikator keep
+   * `includeIdle: false` (drove-only, unchanged); przewoznik / opiekun get
+   * `includeIdle: true` (full fleet). Any other role would already have been
+   * blocked by `@Roles` — defensive 403.
+   */
+  private async _resolveReportScope(user: AuthUser): Promise<ReportScope> {
+    switch (user.role) {
+      case 'planista':
+        return { plannerId: user.sub, includeIdle: false };
+      case 'dyspozytor':
+        return { dispatcherId: user.sub, includeIdle: false };
+      case 'eksport':
+      case 'admin':
+      case 'weryfikator':
+        return { includeIdle: false };
+      case 'przewoznik': {
+        const carrierId = await this.carriers.findIdByUserId(user.sub);
+        if (!carrierId) {
+          throw new ForbiddenException('Brak profilu przewoźnika');
+        }
+        return { carrierId, includeIdle: true };
+      }
+      case 'opiekun': {
+        const carrierIds = await this.carriers.listIdsForOpiekun(user.sub);
+        // Empty set ⇒ empty board (NOT all vehicles). The explicit
+        // `carrierIds: []` is honoured by `listActiveForBoard`'s short-circuit.
+        return { carrierIds, includeIdle: true };
+      }
+      default:
+        throw new ForbiddenException('Brak uprawnień do raportu km');
+    }
   }
 
   // ── internals ────────────────────────────────────────────

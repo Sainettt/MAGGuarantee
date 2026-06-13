@@ -325,25 +325,32 @@ describe('VehiclesController — authorization', () => {
   // ── km-report (read-only, role-scoped) ───────────────────
 
   describe('km-report authorization', () => {
-    it('is open to planista / dyspozytor / eksport / admin / weryfikator', () => {
+    it('is open to planista / dyspozytor / eksport / admin / weryfikator / przewoznik / opiekun', () => {
       expect(rolesFor('kmReport').sort()).toEqual([
         'admin',
         'dyspozytor',
         'eksport',
+        'opiekun',
         'planista',
+        'przewoznik',
         'weryfikator',
       ]);
     });
 
-    it.each(['planista', 'dyspozytor', 'eksport', 'admin', 'weryfikator'] as const)(
-      'allows %s on kmReport',
-      (role) => {
-        const u: AuthUser = { ...carrierUser, role };
-        expect(guard.canActivate(ctxFor('kmReport', u))).toBe(true);
-      },
-    );
+    it.each([
+      'planista',
+      'dyspozytor',
+      'eksport',
+      'admin',
+      'weryfikator',
+      'przewoznik',
+      'opiekun',
+    ] as const)('allows %s on kmReport', (role) => {
+      const u: AuthUser = { ...carrierUser, role };
+      expect(guard.canActivate(ctxFor('kmReport', u))).toBe(true);
+    });
 
-    it.each(['przewoznik', 'opiekun', 'pracownik'] as const)(
+    it.each(['pracownik'] as const)(
       'rejects %s on kmReport (403)',
       (role) => {
         const u: AuthUser = { ...carrierUser, role };

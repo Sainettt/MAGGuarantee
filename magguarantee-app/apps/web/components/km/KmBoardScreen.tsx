@@ -59,12 +59,39 @@ const WEEKDAY_KEYS = [
   'sun',
 ] as const;
 
+/**
+ * §7.8 «Moje pojazdy — przebieg» role scope. When set, the screen switches its
+ * chrome (heading, subtitle, read-only banner, empty-state, filter label) to
+ * the `myKm.*` namespace and picks the role-specific subtitle. Unset ⇒ the
+ * §7.7 weryfikator board / read-report chrome (unchanged).
+ */
+type MyKmScope = 'carrier' | 'opiekun' | 'planista' | 'dyspozytor';
+
 interface KmBoardScreenProps {
   mode: 'edit' | 'view';
+  /**
+   * §7.8.5 — default state of the «Tylko jeżdżące» filter. Default `true` so
+   * §7.7 callers are unchanged; the §7.8 tab passes `false` (show ALL vehicles
+   * incl. parked/blank-week, the fleet-oversight purpose).
+   */
+  inMotionDefault?: boolean;
+  /**
+   * §7.8.1 — pass through to `<KmWeekGrid>`. Groups rows into per-carrier
+   * sections when ≥2 distinct carriers are present. Default `false`.
+   */
+  groupByCarrier?: boolean;
+  /** §7.8 — when set, render the `myKm.*` chrome scoped to this role. */
+  myKmScope?: MyKmScope;
 }
 
-export function KmBoardScreen({ mode }: KmBoardScreenProps) {
+export function KmBoardScreen({
+  mode,
+  inMotionDefault = true,
+  groupByCarrier = false,
+  myKmScope,
+}: KmBoardScreenProps) {
   const t = useTranslations('weryfikator.km');
+  const tMyKm = useTranslations('myKm');
   const tWeekday = useTranslations('weryfikator.km.weekday');
 
   const router = useRouter();
@@ -132,9 +159,11 @@ export function KmBoardScreen({ mode }: KmBoardScreenProps) {
     [tWeekday],
   );
 
-  // Read-report «Tylko jeżdżące» filter — default ON (the report exists for the
-  // vehicles that actually moved). Hides rows with zero `drove` cells.
-  const [inMotionOnly, setInMotionOnly] = useState(true);
+  // Read-report «Tylko jeżdżące» filter — default ON in §7.7 (the report exists
+  // for the vehicles that actually moved). The §7.8 tab passes
+  // `inMotionDefault={false}` so the landing view shows the FULL fleet. Hides
+  // rows with zero `drove` cells when on.
+  const [inMotionOnly, setInMotionOnly] = useState(inMotionDefault);
 
   const allItems = useMemo(() => data?.items ?? [], [data]);
   const visibleItems: VehicleKmBoardItemDto[] = useMemo(() => {
@@ -164,10 +193,16 @@ export function KmBoardScreen({ mode }: KmBoardScreenProps) {
     <section className="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-8">
       <header className="mb-6">
         <h1 className="text-2xl font-extrabold tracking-tight text-text">
-          {mode === 'edit' ? t('title.board') : t('title.report')}
+          {myKmScope
+            ? tMyKm('title')
+            : mode === 'edit'
+              ? t('title.board')
+              : t('title.report')}
         </h1>
         <p className="mt-1 text-sm text-text-sub">
-          {t('subtitle', { week: isoWeekLabel(weekStart) })}
+          {myKmScope
+            ? tMyKm(`subtitle.${myKmScope}`, { week: isoWeekLabel(weekStart) })
+            : t('subtitle', { week: isoWeekLabel(weekStart) })}
         </p>
       </header>
 
@@ -183,7 +218,7 @@ export function KmBoardScreen({ mode }: KmBoardScreenProps) {
           className="mb-4 rounded-lg border border-border bg-card px-4 py-3 text-sm text-text-sub"
           role="note"
         >
-          {t('readOnlyBanner')}
+          {myKmScope ? tMyKm('readOnlyBanner') : t('readOnlyBanner')}
         </div>
       ) : null}
 
@@ -195,7 +230,7 @@ export function KmBoardScreen({ mode }: KmBoardScreenProps) {
               checked={inMotionOnly}
               onChange={(e) => setInMotionOnly(e.target.checked)}
             />
-            {t('filter.inMotionOnly')}
+            {myKmScope ? tMyKm('filter.inMotionOnly') : t('filter.inMotionOnly')}
           </label>
         ) : !isLoading && allItems.length > 0 ? (
           <p className="text-sm text-text-sub" role="status">
@@ -218,9 +253,18 @@ export function KmBoardScreen({ mode }: KmBoardScreenProps) {
           weekStart={weekStart}
           mode={mode}
           isLoading={isLoading}
-          emptyTitle={t('empty.noVehicles')}
+          groupByCarrier={groupByCarrier}
+          emptyTitle={
+            myKmScope ? tMyKm('title') : t('empty.noVehicles')
+          }
           emptyMessage={
-            mode === 'edit' ? t('empty.noVehicles') : t('empty.noAssigned')
+            myKmScope
+              ? myKmScope === 'carrier'
+                ? tMyKm('empty.noVehicles.carrier')
+                : tMyKm('empty.noVehicles.scoped')
+              : mode === 'edit'
+                ? t('empty.noVehicles')
+                : t('empty.noAssigned')
           }
           onOpenEditor={mode === 'edit' ? onOpenEditor : undefined}
           onOpenHistory={setHistoryTarget}

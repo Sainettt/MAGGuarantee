@@ -85,6 +85,12 @@ interface Props {
   delegationsLoading: boolean;
   /** Optional «Raport km» link target (the role's read-only km-report, §7.7). */
   kmReportHref?: string;
+  /**
+   * Optional «Moje pojazdy — przebieg» link target — the §7.8 multi-carrier
+   * read-only km tab (the more-presentable, grouped, full-fleet sibling of the
+   * §7.7.7 report). Label reuses the `myKm.tab` key.
+   */
+  myKmHref?: string;
 }
 
 export function FleetPanel({
@@ -97,9 +103,11 @@ export function FleetPanel({
   delegations,
   delegationsLoading,
   kmReportHref,
+  myKmHref,
 }: Props) {
   const t = useTranslations(namespace);
   const tKm = useTranslations('weryfikator.km');
+  const tMyKm = useTranslations('myKm');
   const tCommon = useTranslations('common');
   const tA11y = useTranslations('fleet.a11y');
 
@@ -126,14 +134,27 @@ export function FleetPanel({
           </h1>
           <p className="text-sm text-text-sub">{subtitle}</p>
         </div>
-        {kmReportHref ? (
-          <Link
-            href={kmReportHref}
-            className="inline-flex h-9 items-center gap-1.5 self-start rounded-[10px] border border-border bg-transparent px-3 text-[13px] font-bold text-text transition-colors hover:bg-input focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand/40"
-          >
-            <Gauge size={15} aria-hidden="true" />
-            {tKm('title.report')}
-          </Link>
+        {kmReportHref || myKmHref ? (
+          <div className="flex flex-wrap items-center gap-2 self-start">
+            {myKmHref ? (
+              <Link
+                href={myKmHref}
+                className="inline-flex h-9 items-center gap-1.5 rounded-[10px] border border-border bg-transparent px-3 text-[13px] font-bold text-text transition-colors hover:bg-input focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand/40"
+              >
+                <Gauge size={15} aria-hidden="true" />
+                {tMyKm('tab')}
+              </Link>
+            ) : null}
+            {kmReportHref ? (
+              <Link
+                href={kmReportHref}
+                className="inline-flex h-9 items-center gap-1.5 rounded-[10px] border border-border bg-transparent px-3 text-[13px] font-bold text-text transition-colors hover:bg-input focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand/40"
+              >
+                <Gauge size={15} aria-hidden="true" />
+                {tKm('title.report')}
+              </Link>
+            ) : null}
+          </div>
         ) : null}
       </div>
 

@@ -185,6 +185,39 @@ export class CarriersRepository {
   }
 
   /**
+   * Resolves the (single) Carrier id owned by a przewoznik User — server-side
+   * IDOR-safe carrier resolution from the JWT `sub`, never from a client param.
+   * Returns `null` when the user has no live Carrier row (mis-provisioned
+   * przewoznik account). A focused `findFirst` on the indexed `userId`
+   * (soft-delete-aware) — cheaper than the legacy `list({ limit: 200 }).find(...)`
+   * scan used elsewhere (drivers/delegations), reused by the vehicles km-report
+   * scope.
+   */
+  async findIdByUserId(userId: string): Promise<string | null> {
+    const row = await this.prisma.tx.carrier.findFirst({
+      where: { userId, deletedAt: null },
+      select: { id: true },
+    });
+    return row?.id ?? null;
+  }
+
+  /**
+   * Lists the Carrier ids supervised by an opiekun (`Carrier.opiekunId ===
+   * opiekunId`, live rows only). Server-side scope resolution for the opiekun
+   * km-report — mirrors the `listForOpiekunAggregate({ opiekunId })` filter but
+   * returns only the id set (no per-vehicle / count joins). An opiekun with no
+   * supervised carriers yields an empty array, which the caller turns into an
+   * empty board (NOT all vehicles).
+   */
+  async listIdsForOpiekun(opiekunId: string): Promise<string[]> {
+    const rows = await this.prisma.tx.carrier.findMany({
+      where: { opiekunId, deletedAt: null },
+      select: { id: true },
+    });
+    return rows.map((r) => r.id);
+  }
+
+  /**
    * Slim row shape for the Phase 5 opiekun fleet aggregate. Includes the
    * minimal per-vehicle fields needed for the four-bucket classification
    * (`active`, `lastDroveAt`) plus the live `_count` of active children for

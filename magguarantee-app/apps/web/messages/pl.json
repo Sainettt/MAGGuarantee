@@ -1590,6 +1590,35 @@
       }
     }
   },
+  "myKm": {
+    "title": "Moje pojazdy — przebieg",
+    "tab": "Przebieg",
+    "subtitle": {
+      "carrier": "Tygodniowy przebieg Twoich pojazdów — tydzień {week}",
+      "opiekun": "Przebieg pojazdów Twoich przewoźników — tydzień {week}",
+      "planista": "Przebieg planowanych pojazdów — tydzień {week}",
+      "dyspozytor": "Przebieg pojazdów Twojego zespołu — tydzień {week}"
+    },
+    "readOnlyBanner": "Dane są tylko do podglądu — przebieg uzupełnia weryfikator.",
+    "group": {
+      "summary": "{count, plural, one {# pojazd} few {# pojazdy} many {# pojazdów} other {# pojazdów}} · Σ {sum} km"
+    },
+    "tiles": {
+      "carriers": "Przewoźnicy"
+    },
+    "filter": {
+      "inMotionOnly": "Tylko jeżdżące"
+    },
+    "empty": {
+      "noVehicles": {
+        "carrier": "Nie masz jeszcze pojazdów",
+        "scoped": "Brak przypisanych pojazdów"
+      }
+    },
+    "aria": {
+      "carrierGroup": "Przewoźnik {carrier}: {count} pojazdów"
+    }
+  },
   "delegation": {
     "kmCalendar": {
       "title": "Przebieg w trakcie wyjazdu",

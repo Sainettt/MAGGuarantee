@@ -101,6 +101,23 @@ export interface VehicleBoardRow {
   plannerName: string | null;
 }
 
+/**
+ * Vehicle scope for the km-board / km-report active-vehicle query
+ * (`listActiveForBoard`). All fields optional and AND-composed; an absent
+ * field means "no narrowing on that axis":
+ *  - `plannerId` / `dispatcherId` — planista / dyspozytor km-report (unchanged).
+ *  - `carrierId` — single carrier (przewoznik km-report, resolved from the JWT).
+ *  - `carrierIds` — a SET of carriers (opiekun km-report, the supervised set).
+ *    IMPORTANT: an EMPTY `carrierIds` array means "0 carriers" → 0 rows, and
+ *    must NOT degrade into "no filter" (see `listActiveForBoard`).
+ */
+export interface VehicleBoardScope {
+  plannerId?: string;
+  dispatcherId?: string;
+  carrierId?: string;
+  carrierIds?: string[];
+}
+
 export interface VehicleListFilters {
   carrierId?: string;
   /**
@@ -183,9 +200,14 @@ export class VehiclesRepository {
    * never appear. Only the columns the board renders are selected (no
    * attachments / rates / GPS device) — keeps the query cheap.
    *
-   * The optional `scope` narrows by `plannerId` (planista km-report) or
-   * `dispatcherId` (dyspozytor km-report); the board (weryfikator/admin) and
-   * the eksport/admin report pass no scope and see all active vehicles.
+   * The optional `scope` narrows by `plannerId` (planista km-report),
+   * `dispatcherId` (dyspozytor km-report), `carrierId` (przewoznik km-report —
+   * their OWN carrier, resolved server-side from the JWT) or `carrierIds` (the
+   * opiekun km-report — the set of carriers they supervise). The board
+   * (weryfikator/admin) and the eksport/admin report pass no scope and see all
+   * active vehicles. An EMPTY `carrierIds` set (opiekun supervising nobody)
+   * returns 0 rows — it must never degrade into "no filter" (mirrors the
+   * `list()` empty-union short-circuit).
    *
    * The row shows BOTH the carrier itself (`carrier`, `{ id, name }` where
    * `name` is `carrier.user.name`) AND the carrier's OPIEKUN (`carrier.opiekun`,
@@ -194,13 +216,26 @@ export class VehiclesRepository {
    * relation is NOT NULL, so every active vehicle resolves an opiekun.
    * `planner` is projected to its display NAME.
    */
-  async listActiveForBoard(scope?: {
-    plannerId?: string;
-    dispatcherId?: string;
-  }): Promise<VehicleBoardRow[]> {
+  async listActiveForBoard(
+    scope?: VehicleBoardScope,
+  ): Promise<VehicleBoardRow[]> {
     const where: Record<string, unknown> = { active: true };
     if (scope?.plannerId) where.plannerId = scope.plannerId;
     if (scope?.dispatcherId) where.dispatcherId = scope.dispatcherId;
+    // Carrier scoping (przewoznik → own; opiekun → supervised set). The
+    // explicit single `carrierId` (if both somehow present) wins; otherwise an
+    // `in:` over the set. An EMPTY set must yield 0 rows — Postgres rejects
+    // `IN ()`, so we short-circuit with an impossible id (same posture as
+    // `list()`), guaranteeing the empty-supervision opiekun gets an empty board
+    // rather than the whole fleet.
+    if (scope?.carrierId) {
+      where.carrierId = scope.carrierId;
+    } else if (scope?.carrierIds) {
+      where.carrierId =
+        scope.carrierIds.length === 0
+          ? '__no_such_vehicle__'
+          : { in: scope.carrierIds };
+    }
     const rows = await this.prisma.tx.vehicle.findMany({
       where,
       select: {

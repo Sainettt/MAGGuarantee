@@ -49,6 +49,17 @@
    * flags contrast). */
   --color-info-soft: #f0f9ff;
 
+  /* Phase 7.8 — categorical (non-semantic) accents for carrier/tag grouping
+   * (docs/14-design-system.md §7.8.2). The shipped token set has no blue and
+   * no violet; carrier-distinction needs mutually-distinguishable hues that do
+   * NOT read as state colours (success/warning/danger). Used only at low
+   * opacity as 4px rails / 2px borders — never as text or fill that implies
+   * meaning. Additive: no existing token changes, no existing usage affected.
+   * Brand-red is reserved for the "today" column accent and is never a carrier
+   * accent. */
+  --color-cat-blue: #3b82f6; /* tailwind blue-500   */
+  --color-cat-violet: #8b5cf6; /* tailwind violet-500 */
+
   /* Surface tokens — drive the dual-theme system via the CSS variables
    * declared on `:root` / `[data-theme="dark"]` below. Tailwind utilities
    * `bg-bg`, `bg-card`, `text-text`, `text-text-sub`, `border-border`,

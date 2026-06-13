@@ -16,8 +16,8 @@ interface Tab {
   /** Match `pathname.startsWith(matchPrefix)` for active state. */
   matchPrefix: string;
   emoji: string;
-  /** i18n key under `carrier.tabs.*`. */
-  labelKey: 'claims' | 'newClaim' | 'fleet' | 'delegations';
+  /** i18n key — `carrier.tabs.*` except `myKm` which reuses the `myKm.tab` key. */
+  labelKey: 'claims' | 'newClaim' | 'fleet' | 'delegations' | 'km';
 }
 
 const TABS: readonly Tab[] = [
@@ -45,11 +45,20 @@ const TABS: readonly Tab[] = [
     emoji: '🚀',
     labelKey: 'delegations',
   },
+  // Phase 7.8 — «Przebieg» (docs/14 §7.8): the read-only weekly km tab scoped
+  // to the carrier's own vehicles. Label reuses the `myKm.tab` key.
+  {
+    href: '/carrier/km',
+    matchPrefix: '/carrier/km',
+    emoji: '📈',
+    labelKey: 'km',
+  },
 ];
 
 export function CarrierTabs() {
   const pathname = usePathname();
   const t = useTranslations('carrier.tabs');
+  const tMyKm = useTranslations('myKm');
 
   return (
     <nav
@@ -91,7 +100,7 @@ export function CarrierTabs() {
               )}
             >
               <span aria-hidden>{tab.emoji}</span>
-              {t(tab.labelKey)}
+              {tab.labelKey === 'km' ? tMyKm('tab') : t(tab.labelKey)}
             </Link>
           );
         })}

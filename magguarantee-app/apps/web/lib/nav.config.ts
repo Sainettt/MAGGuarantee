@@ -65,6 +65,17 @@ export const EMPLOYEE_NAV: readonly NavLink[] = [
     iconName: 'HeartHandshake',
     roles: ['opiekun', 'admin'],
   },
+  // Opiekun + admin — Phase 7.8 «Moje pojazdy — przebieg» (docs/14 §7.8): the
+  // read-only multi-carrier weekly km tab scoped to the carriers the opiekun
+  // supervises. Label reuses the `myKm.tab` key. NOT admin-only (lives outside
+  // the `(admin)` segment) so the opiekun can reach it.
+  {
+    key: 'moje-pojazdy',
+    href: '/employee/moje-pojazdy',
+    labelKey: 'myKm.tab',
+    iconName: 'Gauge',
+    roles: ['opiekun', 'admin'],
+  },
   // Admin + opiekun — Phase 5.1 opened these four to opiekun (API auto-scopes
   // the list endpoints to the caller's ownership and 403s any cross-tenant
   // create/edit).

@@ -4558,3 +4558,152 @@ Two namespaces. Web-agent adds these to `messages/pl.json` / `messages/en.json`.
 - [ ] **i18n.** All `weryfikator.km.*` + `delegation.kmCalendar.*` keys present in PL + EN (§7.7.10); ICU plural for `kmCalendar.days`; old route-status `weryfikator.*` strings removed.
 - [ ] **Token policy + dark-mode.** Zero `tailwind.config.ts` / `globals.css` changes; no new colour/radius/shadow/font token; soft surfaces are `bg-input` only; tints are `bg-{success}/10` opacity variants; the whole grid + tiles + cells + calendar + history dialog legible in dark via tokens / `dark:` variants only.
 
+## 7.8 «Moje pojazdy — przebieg» multi-carrier read-only km tab (NEW — AUTHORITATIVE 2026-06-13)
+
+> **Scope.** A NEW, strictly **read-only** weekly km tab — a more presentable sibling of the §7.7.7 read-report — shown to four roles, each server-scoped to the vehicles that "belong" to them:
+> - `przewoznik` (carrier) → only **their own** vehicles (one carrier);
+> - `opiekun` → vehicles of the carriers they supervise (many carriers);
+> - `planista` → vehicles where they are the planner (potentially many carriers);
+> - `dyspozytor` → vehicles where they are the dispatcher (potentially many carriers).
+>
+> **It reuses everything from §7.7 unchanged:** `<KmBoardScreen mode="view">` → `<KmWeekGrid mode="view">` → `<KmCell>` (the exact three-state cell language, §7.7.1, **identical** so users don't relearn it), the §7.7.2 header tiles, the §7.7.5 week-navigation, the §7.7.6 history modal. There is **no cell editing** anywhere on this tab. The **only** net-new design concern is **visually distinguishing carriers** in a single table when a role can see vehicles from several carriers at once.
+>
+> **DECISION 1 (locked):** same WEEKLY grid with prev/next/current week navigation (§7.7.5). NOT a multi-week aggregate.
+> **DECISION 2 (locked):** show **ALL** of the role's vehicles, including ones that didn't drive / have no marks that week. The §7.7.7 «Tylko jeżdżące» filter is **OFF by default here** and surfaced only as an opt-in toggle (see §7.8.5) — the purpose of this tab is fleet *oversight*, so a parked truck must still be visible.
+>
+> **Token policy.** No new radius/shadow/font tokens; surfaces stay on existing tokens. The carrier-accent palette (§7.8.2) needs mutually-distinguishable **non-semantic category** hues, which the current set cannot supply without abusing state colours — so §7.8.2 proposes a **single, minimal, additive** colour-token pair (`--color-cat-blue` + `--color-cat-violet`) with explicit justification, **or** a zero-new-token fallback (degraded distinguishability). This is flagged as an **open question for the user** (§ summary). MAGTRANS RED (`bg-brand`/`text-brand`) is **reserved** for the "today" column accent (§7.7.3) and is **never** used as a carrier accent — brand-red must not be diluted into an arbitrary category colour.
+
+### 7.8.1 The carrier-distinction mechanism — grouped section-headers + a deterministic per-carrier accent
+
+The treatment is a **combination**: **carrier group section-rows** (primary structure) **plus** a thin **deterministic carrier accent** (secondary reinforcement). Both are driven by the per-row `carrier { id, name }` already in `VehicleKmBoardItemDto` — **no new API field**.
+
+**(a) Grouped carrier section-headers (primary).** Rows are sorted by `carrier.name` (locale `pl`, then by `plateNumber`) and rendered in contiguous carrier blocks. Each block opens with a **group header row** spanning the full table width (`<tr>` with a single `<td colSpan={allColumns}>`), styled as soft chrome — `bg-input` (the established "derived/grouping surface" tone), `h-9`, `px-3`, `sticky left-0` for the label so it stays anchored during horizontal scroll. Group header content, left→right:
+- a **4px carrier-accent rail** (`w-1 self-stretch rounded-full` using the carrier's `accentBar` class, §7.8.2) — the colour key;
+- the **carrier name** `text-sm font-semibold text-text` (`<Truck size={14} className="text-text-sub" />` leading icon);
+- a right-aligned **per-carrier roll-up** `text-xs text-text-sub tabular-nums`: «{n} pojazdów · Σ {sum} km» (vehicle count in the block + sum of that block's `drove` km this week).
+
+This makes the table scan as a sequence of small per-carrier mini-boards while keeping ONE set of frozen day-columns, ONE header, ONE week. Group headers are **not** collapsible in v1 (keep it simple; the accent + sort already do the work) — a future enhancement may add disclosure, but it is out of scope.
+
+**(b) Per-row carrier accent (secondary).** Every vehicle row carries a **2px left accent border** in the carrier's colour (`border-l-2` + the carrier's `accentBorder` class, §7.8.2), applied to the **frozen identity cell only** (so it travels with the sticky-left block and never bleeds into the scrolling day tracks). This is a quiet reinforcement so that, even when a long carrier block scrolls past its group header, the row still reads as "belonging to carrier X". The accent is **border + the group rail only** — rows do **not** get a tinted background (a full-row tint would fight the §7.7.1 `bg-success/10` "drove" cell tint, which must stay the dominant in-cell signal). Colour is therefore never the *sole* carrier signal: the group header name is the accessible source of truth; the accent is decorative reinforcement (WCAG 1.4.1 — meaning not by colour alone).
+
+**(c) Identity meta line — drop the redundant carrier name.** On this tab the §7.7.3 identity meta line (`przewoźnik · opiekun · dyspozytor`) **drops the `przewoźnik` segment inside grouped mode** (it is already the group header) and shows only the still-useful `opiekun · dyspozytor` context. (On the §7.7.7 weryfikator/admin board the full meta line is unchanged — this drop is scoped to this tab's grouped rendering.)
+
+### 7.8.2 Deterministic carrier → accent assignment (algorithm + palette)
+
+Carrier accents are computed **client-side** from `carrier.id` — the server assigns **no** colour, so the contract is untouched and the same carrier always renders the same accent everywhere (this tab, future carrier chips, etc.).
+
+**Algorithm** (mirrors the shipped `avatarBg` hash in `components/audit/AuditRow.tsx`, kept deterministic across renders):
+
+```ts
+// lib/format/carrier-accent.ts  (web-agent)
+export function carrierAccentIndex(carrierId: string): number {
+  let h = 0;
+  for (const ch of carrierId) h = (h * 31 + ch.charCodeAt(0)) & 0xffff;
+  return h % CARRIER_ACCENT_PALETTE.length;
+}
+```
+
+`carrierId` is a UUID → stable, high-entropy seed; the `& 0xffff` keeps it a small int; `% palette.length` lands in the palette. Same id ⇒ same index ⇒ same colour, with no server round-trip and no persistence.
+
+**Token reality check (read first).** The shipped token set (`globals.css @theme`) has only these semantic accent hues: `brand` `#dc2626` (red), `danger` `#ef4444` (red — visually ~brand), `success` `#22c55e` (green), `warning` `#f97316` (orange), `info` `#eab308` (**yellow**, not blue), the neutral `text-sub`, and one reserved calm surface `info-soft` `#f0f9ff` (slate-blue). **There is no blue and no purple token** — `KpiCard tone="purple"` deliberately maps to `bg-brand`. After removing the reserved/colliding hues (`brand`+`danger` are reserved for the "today" accent and read as red; `success` is the in-cell `drove` signal), the cleanly-usable *neutral category* hues are effectively **warning (orange), info (yellow), text-sub (slate)** — only **three**. That is not enough mutually-distinguishable accents for a `planista`/`dyspozytor` who can see a handful of carriers.
+
+**Decision — propose ONE minimal new token, justified.** Rather than overload state colours (which would re-teach users that orange/green *mean* something on a board where they already encode operational state), introduce a **single new, semantically-empty "category" token family** explicitly for categorical (carrier) accents — `--color-accent-cat` is **wrong**; instead add **two** neutral-but-distinct hues that the palette below + future category needs (audit avatars, tag chips) can share: a **blue** and a **violet**, the two hues a Western user most strongly reads as "just a category, not a status". This is the **only** justified token addition in §7.8 and it is additive (no existing token changes, no existing usage affected):
+
+```css
+/* globals.css @theme — NEW categorical accents (non-semantic, for carrier/tag grouping).
+ * Chosen because (a) the set lacks any blue/violet, (b) blue+violet read as
+ * neutral categories, never as success/warning/danger state. Used at low
+ * opacity as rails/borders — never as text/fill that implies meaning. */
+--color-cat-blue:   #3b82f6;   /* tailwind blue-500   */
+--color-cat-violet: #8b5cf6;   /* tailwind violet-500 */
+```
+
+> **Justification against the strict no-new-token policy.** §7.7 forbade new tokens because it composed purely from existing *state* colours and that was sufficient. §7.8's carrier-distinction is a genuinely *new need* (mutually-distinguishable **non-semantic categories**) that the existing palette cannot satisfy without abusing state colours — exactly the situation the policy's "unless justified" escape covers. Two hues is the minimum that, combined with the three already-clean families, yields six. If the user prefers ZERO new tokens, the fallback is the **3-hue + opacity-step** palette in the note below (degraded distinguishability) — flag this as an **open question for the user**.
+
+**Palette — 6 category accents.** Each entry exposes `accentBar` (the 4px group rail) and `accentBorder` (the 2px row border). All used at controlled opacity so they read as quiet rails, never as full surfaces. Disjoint from the in-cell `success`/`bg-input` state language and from the reserved brand-red "today" accent.
+
+| idx | Accent (category) | `accentBar` (4px rail) | `accentBorder` (2px row) | Source |
+|---|---|---|---|---|
+| 0 | Blue | `bg-cat-blue/70 dark:bg-cat-blue/80` | `border-cat-blue/60` | **new** `cat-blue` |
+| 1 | Violet | `bg-cat-violet/70 dark:bg-cat-violet/80` | `border-cat-violet/60` | **new** `cat-violet` |
+| 2 | Amber/orange | `bg-warning/60 dark:bg-warning/70` | `border-warning/55` | existing `warning` |
+| 3 | Yellow | `bg-info/65 dark:bg-info/75` | `border-info/60` | existing `info` |
+| 4 | Slate (neutral-strong) | `bg-text-sub/55 dark:bg-text-sub/65` | `border-text-sub/50` | existing `text-sub` |
+| 5 | Teal-ish (success-deep) | `bg-success/60 dark:bg-success/70` | `border-success/55` | existing `success` at a **deeper, 4px-rail-only** opacity, spatially separated from the full-cell `bg-success/10` drove tint |
+
+> **Why six and the wrap behaviour.** Six covers the realistic multi-carrier roles; a single `opiekun`/`planista`/`dyspozytor` rarely sees >6 carriers in one week. On overflow (>6) the hash wraps and two carriers share an accent — acceptable, because the **group-header name is the accessible source of truth** (§7.8.1c) and the accent is only a scanning aid.
+> **Why idx 5 reuses `success` despite the drove tint.** The cell uses `bg-success/10` as a full-cell wash; idx 5 uses `bg-success/60` as a 4px solid vertical rail in the frozen identity column only — different surface, saturation, and location; they never overlap spatially. If web-agent finds them confusable, drop idx 5 to a second `cat-blue`/`cat-violet` opacity step.
+> **ZERO-new-token fallback (if user vetoes the two tokens).** Build the 6 indices from the 3 clean families at two opacity steps each: `warning/60`, `warning/35`, `info/65`, `info/35`, `text-sub/55`, `success/60`. Distinguishability is weaker (orange-light vs orange-dark is subtle) but it adds no tokens. Default recommendation is the 2-token palette above; this fallback is the conservative alternative pending the open question.
+
+### 7.8.3 Single-carrier collapse (`przewoznik` and any role with one carrier)
+
+When the visible rows resolve to **exactly one** distinct `carrier.id` (always true for `przewoznik`; also true for an `opiekun`/`planista`/`dyspozytor` who happens to have a single carrier this week), the carrier-distinction treatment **gracefully collapses**:
+- **No group section-header row** is rendered (a single «{carrier}» header over the whole table is pure redundancy).
+- **No per-row accent border** (nothing to distinguish from).
+- The identity meta line behaves exactly as §7.7.3 (carrier shown there is harmless; for `przewoznik` it is their own name — web-agent may also drop it since the page title already scopes to "my vehicles").
+- The table is then **visually identical** to the plain §7.7.7 read-report grid — which is the desired outcome: a carrier sees a clean, ungrouped weekly board of just their trucks.
+
+Collapse is decided purely from the data (`new Set(items.map(i => i.carrier?.id)).size <= 1`), not from the role — so a multi-carrier role with one carrier this week also collapses, and a `przewoznik` is just the guaranteed case. **Grouped mode renders only when `distinctCarriers >= 2`.**
+
+### 7.8.4 Layout & chrome
+
+- **Container.** Lives in each role's shell. For `przewoznik` → the carrier panel as a new tab «Przebieg» (alongside the existing carrier tabs); for `opiekun` → the employee shell «Moja opieka» area / a dedicated route; for `planista`/`dyspozytor` → their `RoleShell` (sidebar-less), reusing the §7.7.7 container strip `mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-8`. Web-agent decides exact route paths inside each role group.
+- **Page heading** «Moje pojazdy — przebieg» + a one-line scope subtitle per role (§7.8.6 i18n).
+- **Header tiles (§7.7.2) are kept**, with one scoped relabel: tile #2 «CIĄGNIKI» counts the role's visible tractors; for multi-carrier roles an **optional** extra tile «PRZEWOŹNICY» (count of distinct carriers) MAY replace tile #6 «NOTATEK» on this tab — `tone="neutral"`, icon `Building2`/`Users`. Keep the §7.7.2 breakpoint family; do not add orange/red.
+- **Read-only banner.** Reuse the §7.7.7 non-dismissible read-only banner, copy scoped to this tab (§7.8.6 `myKm.readOnlyBanner`): «Dane są tylko do podglądu — przebieg uzupełnia weryfikator.»
+- **Grid.** `<KmWeekGrid mode="view">` exactly as §7.7.3/§7.7.7 — frozen identity, 7 PN..ND tracks (today-accent + weekend tint unchanged), Σ KM, NOTATKA roll-up, «Historia». In grouped mode the group-header rows are interleaved by `<KmWeekGrid>` (it already owns the `<tbody>` map; web-agent adds the group-break rows there, gated by a new `groupByCarrier?: boolean` prop — default `false` so §7.7 callers are untouched).
+
+### 7.8.5 «Tylko jeżdżące» filter — OFF by default, opt-in only (overrides §7.7.7 default for this tab)
+
+Per DECISION 2, the in-motion filter is **off by default** on this tab. It is still surfaced as a single opt-in `<Checkbox>`/`<Switch>` «Tylko jeżdżące» in the control row (same `bg-input` filter chip as §7.7.7), so a user can narrow to movers on demand — but the landing view shows the **full** fleet including parked/blank-week vehicles. `<KmBoardScreen>` gets the default wired by a prop (e.g. `inMotionDefault?: boolean`, default `true` to keep §7.7.7 unchanged; this tab passes `false`). The filtered-empty state (§7.7.8 «Żaden pojazd nie jeździł w tym tygodniu») still applies when the user *does* turn it on and nothing moved.
+
+### 7.8.6 i18n contract — `myKm.*` (PL default + EN)
+
+A NEW namespace `myKm.*` for this tab's chrome. All grid/cell/nav/history/tiles strings are **reused** from `weryfikator.km.*` (§7.7.10) — do NOT duplicate them; only the tab-specific copy below is new.
+
+| Key | PL | EN |
+|---|---|---|
+| `myKm.title` | «Moje pojazdy — przebieg» | "My vehicles — mileage" |
+| `myKm.subtitle.carrier` | «Tygodniowy przebieg Twoich pojazdów — tydzień {week}» | "Weekly mileage of your vehicles — week {week}" |
+| `myKm.subtitle.opiekun` | «Przebieg pojazdów Twoich przewoźników — tydzień {week}» | "Mileage of your carriers' vehicles — week {week}" |
+| `myKm.subtitle.planista` | «Przebieg planowanych pojazdów — tydzień {week}» | "Mileage of your planned vehicles — week {week}" |
+| `myKm.subtitle.dyspozytor` | «Przebieg pojazdów Twojego zespołu — tydzień {week}» | "Mileage of your team's vehicles — week {week}" |
+| `myKm.tab` | «Przebieg» | "Mileage" |
+| `myKm.readOnlyBanner` | «Dane są tylko do podglądu — przebieg uzupełnia weryfikator.» | "Data is read-only — mileage is recorded by the verifier." |
+| `myKm.group.summary` | `{count, plural, one {# pojazd} few {# pojazdy} many {# pojazdów} other {# pojazdów}} · Σ {sum} km` | `{count, plural, one {# vehicle} other {# vehicles}} · Σ {sum} km` |
+| `myKm.tiles.carriers` | «Przewoźnicy» | "Carriers" |
+| `myKm.filter.inMotionOnly` | «Tylko jeżdżące» | "In-motion only" |
+| `myKm.empty.noVehicles.carrier` | «Nie masz jeszcze pojazdów» | "You have no vehicles yet" |
+| `myKm.empty.noVehicles.scoped` | «Brak przypisanych pojazdów» | "No vehicles assigned to you" |
+| `myKm.aria.carrierGroup` | «Przewoźnik {carrier}: {count} pojazdów» | "Carrier {carrier}: {count} vehicles" |
+
+> Reuse from `weryfikator.km.*`: every `col.*`, `weekday.*`, `cell.*`, `nav.*`, `tiles.week|tractors|inMotion|idle|sumKm`, `history.*`, `notesPopover.*`, `aria.cell|grid`. The `myKm.*` namespace exists only for the heading/subtitle/banner/group/tab strings that differ.
+
+### 7.8.7 Components / shared / nav summary (Phase 7.8)
+
+| Change | Where | Owner |
+|---|---|---|
+| New page(s) «Moje pojazdy — przebieg» per role | `app/(carrier)/.../km` (tab), `app/(employee)/.../moja-opieka/km` or similar, `app/(planista)/.../km`, `app/(dyspozytor)/.../km` — web-agent decides exact paths | web-agent |
+| Reuse `<KmBoardScreen mode="view">` with a new `inMotionDefault={false}` prop + a new `groupByCarrier` prop wired through to `<KmWeekGrid>` | `components/km/KmBoardScreen.tsx` | web-agent |
+| Extend `<KmWeekGrid>` with `groupByCarrier?: boolean` (default `false`) → interleave carrier group-header rows (`colSpan` full) sorted by `carrier.name`, + 2px `accentBorder` on the frozen identity cell; collapse to plain grid when `distinctCarriers <= 1`; drop `przewoźnik` segment from the meta line in grouped mode | `components/km/KmWeekGrid.tsx` | web-agent |
+| New `carrierAccentIndex(id)` + `CARRIER_ACCENT_PALETTE` (`accentBar` / `accentBorder` class pairs, §7.8.2) | `apps/web/lib/format/carrier-accent.ts` | web-agent |
+| **(pending user sign-off)** add `--color-cat-blue` + `--color-cat-violet` to `globals.css @theme` (the ONLY token addition; §7.8.2). If vetoed → use the zero-new-token fallback palette | `apps/web/app/globals.css` | web-agent (after user decision) |
+| New i18n namespace `myKm.*` (§7.8.6) in PL + EN; reuse `weryfikator.km.*` for grid/cell/nav/history | `messages/pl.json` / `en.json` | web-agent |
+| New read-scoped endpoints OR reuse `GET /vehicles/km-report?week=…` with role-based server scoping for `przewoznik`/`opiekun`/`planista`/`dyspozytor` (carrier→own, opiekun→supervised carriers, planista→plannerId, dyspozytor→team). **Same `VehicleKmBoardDto` envelope** — `carrier{id,name}` + `opiekun{id,name}` already present, **no contract change** | `apps/api` (vehicles km-report controller scope) | api-agent |
+| Add `przewoznik`/`opiekun` to the roles allowed on the km-report read endpoint (currently planista/dyspozytor/eksport/admin) | api guard on `GET /vehicles/km-report` | api-agent |
+| **0** new radius/shadow/font tokens; only the §7.8.2 `cat-blue`/`cat-violet` colour pair MAY be added (pending sign-off); brand-red NOT used as a carrier accent | — | — |
+
+### 7.8.8 Acceptance checklist (Phase 7.8)
+
+- [ ] **Read-only.** No cell editing anywhere — `<KmBoardScreen mode="view">`; cells inert; non-dismissible read-only banner (`myKm.readOnlyBanner`); «Historia» modal read-only (§7.7.6).
+- [ ] **Same cell language.** `<KmCell>` renders the identical §7.7.1 three states (drove `bg-success/10`+check / idle `bg-input` / empty faint `—`). No relearning.
+- [ ] **Carrier grouping (≥2 carriers).** Rows grouped under `bg-input` carrier section-headers (sorted by `carrier.name`), each with a 4px carrier-accent rail + name + «{n} pojazdów · Σ {sum} km»; every row carries a 2px `accentBorder` on the frozen identity cell; `przewoźnik` segment dropped from the row meta line.
+- [ ] **Deterministic accent.** `carrierAccentIndex(carrier.id)` (avatarBg-style hash) → stable accent across renders/sessions; palette is the 6 §7.8.2 category hues (4 existing + the proposed `cat-blue`/`cat-violet`, or the zero-token fallback if vetoed); brand-red (`bg-brand`) NOT used as a carrier accent (reserved for the "today" column); accents disjoint from in-cell state colours; meaning never by colour alone (group name is source of truth).
+- [ ] **Single-carrier collapse.** `distinctCarriers <= 1` (always for `przewoznik`) → no group headers, no row accent border, plain §7.7.7-identical grid.
+- [ ] **All vehicles by default.** Full fleet shown including non-driving / blank-week vehicles; «Tylko jeżdżące» is OFF by default and surfaced as an opt-in toggle only (`inMotionDefault={false}`); filtered-empty state applies only when the user turns it on.
+- [ ] **Week nav + history.** §7.7.5 prev/next/current + week-picker, `?week=YYYY-Www` URL source of truth; §7.7.6 history modal reused.
+- [ ] **Header tiles.** §7.7.2 tiles kept; optional «PRZEWOŹNICY» count tile (`tone="neutral"`) on multi-carrier roles; no orange/red aggregate; responsive family unchanged.
+- [ ] **Scope.** Server-scoped payload trusted (carrier→own, opiekun→supervised, planista→plannerId, dyspozytor→team); UI does not re-filter by owner.
+- [ ] **i18n.** `myKm.*` keys present PL + EN; grid/cell/nav/history reuse `weryfikator.km.*` (not duplicated); ICU plural on `myKm.group.summary`.
+- [ ] **Token policy + dark-mode.** No new radius/shadow/font tokens; the only colour addition is the §7.8.2 `cat-blue`/`cat-violet` pair (pending sign-off — else fallback); carrier accents are opacity rails legible in dark via the listed `dark:` steps; **no API contract change** beyond role-scoping the existing read endpoint.
+

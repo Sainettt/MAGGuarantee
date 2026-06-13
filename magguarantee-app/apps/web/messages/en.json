@@ -1590,6 +1590,35 @@
       }
     }
   },
+  "myKm": {
+    "title": "My vehicles — mileage",
+    "tab": "Mileage",
+    "subtitle": {
+      "carrier": "Weekly mileage of your vehicles — week {week}",
+      "opiekun": "Mileage of your carriers' vehicles — week {week}",
+      "planista": "Mileage of your planned vehicles — week {week}",
+      "dyspozytor": "Mileage of your team's vehicles — week {week}"
+    },
+    "readOnlyBanner": "Data is read-only — mileage is recorded by the verifier.",
+    "group": {
+      "summary": "{count, plural, one {# vehicle} other {# vehicles}} · Σ {sum} km"
+    },
+    "tiles": {
+      "carriers": "Carriers"
+    },
+    "filter": {
+      "inMotionOnly": "In-motion only"
+    },
+    "empty": {
+      "noVehicles": {
+        "carrier": "You have no vehicles yet",
+        "scoped": "No vehicles assigned to you"
+      }
+    },
+    "aria": {
+      "carrierGroup": "Carrier {carrier}: {count} vehicles"
+    }
+  },
   "delegation": {
     "kmCalendar": {
       "title": "Mileage during the trip",

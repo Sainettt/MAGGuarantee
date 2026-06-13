@@ -2,7 +2,6 @@ import {
   Body,
   Controller,
   Delete,
-  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
@@ -128,18 +127,32 @@ export class VehiclesController {
   }
 
   /**
-   * Read-only km-report (Phase 7 REWORK #3) — same weekly grid, but ONLY
-   * vehicles that drove in the period, scoped by role: planista → own
-   * `plannerId`; dyspozytor → own `dispatcherId`; eksport / admin /
-   * weryfikator → all. Declared before `GET /:id` for literal-segment match.
+   * Read-only km-report (Phase 7 REWORK #3 + §7.8 "my vehicles km" tab) — same
+   * weekly grid, scoped by role SERVER-SIDE (resolved in the service from the
+   * JWT, never a client param): planista → own `plannerId`; dyspozytor → own
+   * `dispatcherId`; przewoznik → their OWN carrier; opiekun → the carriers they
+   * supervise; eksport / admin / weryfikator → all. The drove-only narrowing is
+   * preserved for planista/dyspozytor/eksport/admin/weryfikator; przewoznik /
+   * opiekun see their FULL fleet incl. non-driving vehicles (service-derived
+   * `includeIdle` — NO new query param, contract unchanged per
+   * docs/14-design-system.md §7.8.7). Declared before `GET /:id` for
+   * literal-segment match.
    */
   @Get('km-report')
-  @Roles('planista', 'dyspozytor', 'eksport', 'admin', 'weryfikator')
+  @Roles(
+    'planista',
+    'dyspozytor',
+    'eksport',
+    'admin',
+    'weryfikator',
+    'przewoznik',
+    'opiekun',
+  )
   async kmReport(
     @CurrentUser() user: AuthUser,
     @Query(new ZodValidationPipe(KmBoardQuerySchema)) query: KmBoardQuery,
   ): Promise<VehicleKmBoardDto> {
-    return this.dailyKm.getReport(query, buildReportScope(user));
+    return this.dailyKm.getReport(query, user);
   }
 
   @Get()
@@ -440,30 +453,6 @@ export class VehiclesController {
     query: VehicleDailyKmHistoryQuery,
   ): Promise<VehicleDailyKmDto[]> {
     return this.dailyKm.getHistory(id, query);
-  }
-}
-
-/**
- * Maps the caller's role to the km-report vehicle scope. planista narrows to
- * vehicles where they are the planner; dyspozytor to their dispatched
- * vehicles; eksport / admin / weryfikator see all (empty scope). Any other
- * role would have been blocked by `@Roles` already — defensive 403.
- */
-function buildReportScope(user: AuthUser): {
-  plannerId?: string;
-  dispatcherId?: string;
-} {
-  switch (user.role) {
-    case 'planista':
-      return { plannerId: user.sub };
-    case 'dyspozytor':
-      return { dispatcherId: user.sub };
-    case 'eksport':
-    case 'admin':
-    case 'weryfikator':
-      return {};
-    default:
-      throw new ForbiddenException('Brak uprawnień do raportu km');
   }
 }
 
