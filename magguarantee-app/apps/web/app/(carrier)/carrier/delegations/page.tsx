@@ -38,6 +38,22 @@ function formatDateTime(iso: string | null): string {
   }
 }
 
+// `plannedReturnAt` is date-only (`@db.Date`) — the driver commits to a day,
+// not an hour. Rendering it with a time formatter would surface a spurious
+// "02:00" (UTC-midnight shifted into PL's UTC+2), so format the date alone.
+function formatDate(iso: string | null): string {
+  if (!iso) return '—';
+  try {
+    return new Intl.DateTimeFormat('pl-PL', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    }).format(new Date(iso));
+  } catch {
+    return iso.slice(0, 10);
+  }
+}
+
 export default function CarrierDelegationsPage() {
   const t = useTranslations('carrier.delegations');
   const tColumns = useTranslations('carrier.delegations.columns');
@@ -93,7 +109,7 @@ export default function CarrierDelegationsPage() {
       {
         id: 'plannedReturn',
         header: tColumns('plannedReturn'),
-        cell: (row) => formatDateTime(row.plannedReturnAt),
+        cell: (row) => formatDate(row.plannedReturnAt),
       },
       {
         id: 'status',
