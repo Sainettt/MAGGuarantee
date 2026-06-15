@@ -419,13 +419,28 @@ export function KmWeekGrid({
                 ? items.map((vehicle) => renderVehicleRow(vehicle, null))
                 : null}
               {!isLoading && grouped
-                ? carrierGroups.map((group) => {
+                ? carrierGroups.map((group, index) => {
                     const accent = carrierAccent(group.id);
                     return (
                       <Fragment key={group.id}>
-                        {/* §7.8.1a — carrier group section-header row */}
+                        {/* §7.8.1d1 — inter-block spacer: 12px canvas-tone gap
+                            between blocks (before every header except the first).
+                            sticky-left bg-bg cell prevents a frozen-column seam
+                            on horizontal scroll; aria-hidden + no content. */}
+                        {index > 0 ? (
+                          <tr aria-hidden="true" className="h-3 bg-bg">
+                            <td
+                              colSpan={TOTAL_COLUMNS}
+                              className="sticky left-0 bg-bg p-0"
+                            />
+                          </tr>
+                        ) : null}
+                        {/* §7.8.1a/d2 — carrier group section-header row, on the
+                            bg-card body surface (NOT bg-input) so it no longer
+                            reads as a competing wash; set apart structurally by
+                            border-b + the carrier rail. */}
                         <tr
-                          className="bg-input"
+                          className="bg-card"
                           aria-label={tMyKm('aria.carrierGroup', {
                             carrier: group.name,
                             count: group.items.length,
@@ -433,7 +448,7 @@ export function KmWeekGrid({
                         >
                           <td
                             colSpan={TOTAL_COLUMNS}
-                            className="sticky left-0 z-10 h-9 bg-input px-3"
+                            className="sticky left-0 z-10 h-9 border-b border-border bg-card px-3"
                           >
                             <div className="flex items-center gap-2">
                               <span
