@@ -1530,7 +1530,9 @@
         "drove": "Jechał",
         "idle": "Nie jeździ",
         "empty": "Nie sprawdzono",
-        "kmPlaceholder": "km"
+        "kmPlaceholder": "km",
+        "locked": "zablokowane",
+        "lockedHint": "Można uzupełnić dopiero następnego dnia."
       },
       "modal": {
         "title": "{plate} · bok {side}",
@@ -1567,6 +1569,8 @@
         "inMotionOnly": "Tylko jeżdżące"
       },
       "readOnlyBanner": "Dane są tylko do podglądu — edytuje weryfikator.",
+      "lagNote": "Dane aktualne na poprzedni dzień. Dzień bieżący i przyszłe są zablokowane.",
+      "lagNoteShort": "Dane aktualne na poprzedni dzień.",
       "empty": {
         "noVehicles": "Brak aktywnych pojazdów",
         "noAssigned": "Brak przypisanych pojazdów",
@@ -1586,6 +1590,7 @@
       },
       "aria": {
         "cell": "{plate}, {weekday} {date}: {state}",
+        "cellLocked": "{plate}, {weekday} {date}: {state} — zablokowane (dzień bieżący lub przyszły)",
         "grid": "Tygodniowa tablica km"
       }
     }

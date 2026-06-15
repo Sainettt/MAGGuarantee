@@ -4282,6 +4282,50 @@ Cell geometry: each day-column is a fixed narrow track (`w-[68px]` desktop, cont
 
 **Derived vehicle status (NOT stored, header-only).** Per the contract: the latest dated cell in the period drives the row's *operational* status — `drove` ⇒ `w ruchu`, `idle` ⇒ `nie jeździ`, no cell at all ⇒ `nieznany`. This feeds **only the header counters** (W RUCHU / NIE JEŻDŻĄ) and the §7.7.7 read-report filter — it is **not** rendered as a per-row badge column on the board (the cells already carry the per-day truth; a redundant status column would compete). The tone vocabulary, if ever surfaced as a chip, reuses §7.5.1: `w ruchu → success`, `nie jeździ → muted`, `nieznany → outline`. No new variant.
 
+### 7.7.1a Locked (non-editable) cell — the time-gated 4th *modifier* (REFINEMENT 2026-06-15 — AUTHORITATIVE)
+
+> **Why this exists.** Verification is always done **a day late** (§7.7.1b lag). The verifier marks *yesterday and earlier*; **today and any future day are not yet verifiable**. So on the **edit** board (`mode="edit"`, weryfikator/admin) the day-columns for **today and all future dates** must be **non-editable**. This is **not** a 4th cell *state* — it is a **lock modifier** layered on top of the three §7.7.1 states (`drove` / `idle` / `empty`). Any of the three can be locked. A past `drove`/`idle` cell that rolls into "today" overnight keeps its value but becomes locked; a future `empty` cell is locked-and-blank. The lock is **purely time-driven** and applies **only in `mode="edit"`** — in `mode="view"` (all §7.7.7 / §7.8 read-only screens) *every* cell is already inert, so no lock affordance is shown there (it would be redundant noise; read-only cells render their plain three-state visuals).
+
+**Locked-cell rule (edit board only):** `isLocked = mode === 'edit' && day >= today` (strictly-past days editable; today + future locked). Web-agent computes `today` in the board's display timezone (Europe/Warsaw) so the boundary flips at local midnight, matching the lag note.
+
+**Visual treatment** — composes existing tokens only; **0** new tokens, no `tailwind.config.ts` / `globals.css` change:
+
+| Aspect | Locked treatment | Token / class |
+|---|---|---|
+| **Surface** | Muted, recessive — reads as "chrome, not a control". Sits **under** any state tint so a locked `drove` still shows its faint positive wash but dimmed. | base `bg-input`; for a locked `drove` keep the `bg-success/10` wash but add `opacity-60` on the cell content wrapper (the tint reads softer, value still legible) |
+| **Content opacity** | Existing content stays **readable**, just clearly de-emphasised. | content wrapper `opacity-60` (a locked `drove` km / `idle` pill / `empty` `—` all render exactly as §7.7.1, only dimmed). Do **not** drop below `opacity-60` — value must stay ≥4.5:1 legible. |
+| **Cursor** | Not-clickable. | `cursor-not-allowed` |
+| **Hover** | **No** hover affordance — the §7.7.3 row `hover:bg-brand-50` still paints the row, but the locked cell itself gets **no** cell-level hover, no brand ring, no pointer feedback. | `<KmCell>` in locked branch renders a **`<div>`/`<td>` content, NOT a `<button>`** — it is not interactive, so there is nothing to hover/press. |
+| **Focus / tab order** | **Not** a focus target — removed from tab order entirely (it is not an actionable control). | render as non-button; **no** `tabIndex`, **no** `focus-visible:ring`. (Contrast: an *editable* cell is a focusable `<button>` per §7.7.4.) |
+| **Lock cue (NOT colour-alone)** | Per the §7.7.1 a11y convention (meaning never by colour alone), the lock is signalled by a **glyph**, not the muting. A small `<Lock size={11} className="text-text-sub" />` sits in the cell's **top-right corner** (`absolute top-1 right-1`, the cell wrapper is `relative`). For `empty` locked cells (no other content) the lock glyph is the **only** mark — it replaces the faint `—` so a blank future cell reads as "locked, nothing to enter" rather than "to-do". For `drove`/`idle` locked cells the lock sits **alongside** the dimmed value (top-right corner, does not overlap the centered value). | Lucide `<Lock>` `size={11}`, `text-text-sub`; `absolute top-1 right-1` |
+| **a11y label** | The cell still announces its state **and** its locked nature to SR. | `aria-disabled="true"` on the cell wrapper + the `aria.cell` value extended with the locked suffix (see §7.7.10 `aria.cellLocked`). e.g. «WGM12345, Pn 16.06: nie sprawdzono — zablokowane (dzień bieżący/przyszły)». |
+
+**Decision rationale.** A locked cell must read as *chrome*, not as a disabled-button (a greyed button still invites a click and fails the "not focusable" goal). Rendering it as a non-button `<td>` content with `cursor-not-allowed` + `opacity-60` + a corner `<Lock>` glyph achieves: (a) clearly not-clickable, (b) content still readable, (c) meaning carried by glyph + cursor + aria, not colour, (d) sits cleanly over the three existing state visuals without a new colour. It deliberately does **not** reuse `bg-danger`/orange — a locked future day is *normal* (the day hasn't happened / isn't verifiable yet), never an error, mirroring the §7.5.6 "fresh-day ≠ error" principle.
+
+> **No tooltip required, but allowed.** Web-agent MAY add a `title` / `<Tooltip>` on the locked cell with the §7.7.10 `cell.lockedHint` copy («Można uzupełnić dopiero następnego dnia.»). It is an optional progressive enhancement; the corner `<Lock>` + `aria-disabled` are the required cues.
+
+### 7.7.1b Data-lag notice — the "as of yesterday" note (REFINEMENT 2026-06-15 — AUTHORITATIVE)
+
+> **Why.** Because verification runs a day late, every km screen — edit **and** read-only — shows data that is *current as of the previous day*. A short persistent note sets that expectation so no one reads a blank "today" column as missing data. Tone is **informational** (`role="note"`), **never** a warning — there is no problem, it is the designed cadence.
+
+**Component.** A single small inline note, **not** an `<Alert variant="destructive/warning">`. Build it as a quiet info line: a `<p role="note">` (or a thin `bg-input` chip) with a leading `<Info size={14} className="text-text-sub" />` + `text-xs text-text-sub`. **No** colour-coded severity surface (no yellow/orange/red), no dismiss button — it is **persistent** (the lag is permanent, so it is not dismissible; same posture as the non-dismissible read-only banner). It must satisfy ≥4.5:1 (`text-text-sub` on `bg-input`/`bg-card` already does).
+
+**Placement — two contexts:**
+
+| Context | Where the lag note lives | Form |
+|---|---|---|
+| **(a) Edit board** (`mode="edit"`, weryfikator/admin, §7.7) | In the **control area**, in the card header row next to the §7.7.5 `<WeekNavigator>` (left slot of the header `flex items-center justify-between` — nav stays right). **Stands alone** — the edit board has no read-only banner. On narrow widths it wraps to its own line above the grid. | Standalone `<p role="note">` info line (Info glyph + `text-xs text-text-sub`). |
+| **(b) Read-only km tabs** (`mode="view"` — §7.7.7 report **and** §7.8 multi-carrier tab, for carrier/opiekun/planista/dyspozytor/eksport/admin) | **Joins** the existing non-dismissible **read-only banner** (`weryfikator.km.readOnlyBanner` / `myKm.readOnlyBanner`) as a **second line inside the same banner block** — not a separate floating note. The banner already occupies the "meta info above the grid" slot; appending the lag line there keeps one consolidated info block instead of two stacked notes. | Render the banner as two lines: line 1 = read-only copy (existing), line 2 = the lag copy (`text-xs text-text-sub`, leading `<Info size={14}/>` shared or one glyph for the block). |
+
+**Copy (PL default + EN)** — short, factual, no alarm:
+
+| Key | PL (default) | EN |
+|---|---|---|
+| `weryfikator.km.lagNote` | «Dane aktualne na poprzedni dzień. Dzień bieżący i przyszłe są zablokowane.» | "Data as of the previous day. Today and future days are locked." |
+| `weryfikator.km.lagNoteShort` *(read-only banner line — context already says read-only, so drop the lock clause)* | «Dane aktualne na poprzedni dzień.» | "Data as of the previous day." |
+
+> **Phrasing decision.** Kept the user's PL/EN baseline verbatim as `lagNoteShort` (used in the read-only banner, where the lock clause is irrelevant — read-only cells aren't lockable). For the **edit board** the fuller `lagNote` adds the one-clause reason the *today/future* columns look frozen, so the verifier doesn't try to click them. Both are role-agnostic and reused by §7.8 (`myKm.*` reuses `weryfikator.km.lagNote*` — do **not** duplicate).
+
 ### 7.7.2 Header tiles — the counter strip (`<KpiCard>` reuse)
 
 A counter strip sits between the page heading and the grid, composed **entirely** of the existing `<KpiCard>` (no new card). It mirrors the legacy «Raport km» header counters. Responsive grid identical to the §6.3.3 dyspozytor strip family:
@@ -4461,6 +4505,8 @@ Two namespaces. Web-agent adds these to `messages/pl.json` / `messages/en.json`.
 | `weryfikator.km.cell.idle` *(view display + modal state label)* | «Nie jeździ» | "Not driving" |
 | `weryfikator.km.cell.empty` *(view display + clear target)* | «Nie sprawdzono» | "Not checked" |
 | `weryfikator.km.cell.kmPlaceholder` *(view display unit)* | «km» | "km" |
+| `weryfikator.km.cell.locked` *(SR/state suffix — today/future, edit board)* | «zablokowane» | "locked" |
+| `weryfikator.km.cell.lockedHint` *(optional tooltip on a locked cell)* | «Można uzupełnić dopiero następnego dnia.» | "Can only be filled in the next day." |
 | `weryfikator.km.modal.title` | «{plate} · bok {side}» | "{plate} · side {side}" |
 | `weryfikator.km.modal.desc` | «{carrier} · {weekday}, {date}» | "{carrier} · {weekday}, {date}" |
 | `weryfikator.km.modal.stateLabel` | «Status dnia» | "Day status" |
@@ -4500,7 +4546,10 @@ Two namespaces. Web-agent adds these to `messages/pl.json` / `messages/en.json`.
 | `weryfikator.km.notesPopover.title` | «Notatki w tym tygodniu» | "Notes this week" |
 | `weryfikator.km.notesPopover.empty` | «Brak notatek» | "No notes" |
 | `weryfikator.km.aria.cell` | «{plate}, {weekday} {date}: {state}» | "{plate}, {weekday} {date}: {state}" |
+| `weryfikator.km.aria.cellLocked` *(locked cell — edit board)* | «{plate}, {weekday} {date}: {state} — zablokowane (dzień bieżący lub przyszły)» | "{plate}, {weekday} {date}: {state} — locked (today or a future day)" |
 | `weryfikator.km.aria.grid` | «Tygodniowa tablica km» | "Weekly km board" |
+| `weryfikator.km.lagNote` *(edit board control area; §7.7.1b)* | «Dane aktualne na poprzedni dzień. Dzień bieżący i przyszłe są zablokowane.» | "Data as of the previous day. Today and future days are locked." |
+| `weryfikator.km.lagNoteShort` *(read-only banner second line; §7.7.1b)* | «Dane aktualne na poprzedni dzień.» | "Data as of the previous day." |
 
 **`delegation.kmCalendar.*`** (carrier delegation detail modal block):
 
@@ -4527,7 +4576,8 @@ Two namespaces. Web-agent adds these to `messages/pl.json` / `messages/en.json`.
 | New read-only km-report page(s) | `app/(planista)/…/km`, `app/(dyspozytor)/…/km`, `app/(eksport)/…/km` (+ admin under employee shell) — web-agent decides exact routes inside each role group | web-agent |
 | Weryfikator landing redirect → `/weryfikator/km` (supersedes §7.5 `/weryfikator/vehicles`); delete old route-status page + `WelcomePanel` stub; header logo/home → `/weryfikator/km` | `app/(weryfikator)/weryfikator/page.tsx` | web-agent |
 | New `<KmWeekGrid mode="edit"\|"view">` — the shared weekly matrix (frozen identity + 7 day tracks + Σ KM + Notatka + Historia) | `apps/web/components/km/KmWeekGrid.tsx` | web-agent |
-| New `<KmCell>` — three-state **display** cell (drove/idle/empty); in `mode="edit"` it is a focusable button that opens `<KmCellEditDialog>` (no inline editor) | `apps/web/components/km/KmCell.tsx` | web-agent |
+| New `<KmCell>` — three-state **display** cell (drove/idle/empty); in `mode="edit"` an *unlocked* cell is a focusable button that opens `<KmCellEditDialog>` (no inline editor); a **locked** cell (`day >= today`, §7.7.1a) renders as **non-button** content — `cursor-not-allowed`, content `opacity-60`, top-right `<Lock size={11}>` glyph, `aria-disabled` + `aria.cellLocked`, not focusable | `apps/web/components/km/KmCell.tsx` | web-agent |
+| New lag note + lock cue — reuse Lucide `<Info>` (lag note) and `<Lock>` (locked cell); edit board: standalone `role="note"` line in the header control area (`lagNote`); read-only banner: append `lagNoteShort` as 2nd line. **No** Alert/warning surface, not dismissible | `apps/web/components/km/` (lag note inline; lock cue inside `<KmCell>`) | web-agent |
 | New `<KmCellEditDialog>` — per-day edit modal (state toggle + km input for `drove` + notes + Save/Cancel) reusing the `<Dialog>` primitive; cancel = zero changes/zero network; «Wyczyść ten dzień» destructive action (only when `cell.state != null`) routed through the existing destructive-confirm `<Dialog>` → `DELETE` day → returns cell to `empty` | `apps/web/components/km/KmCellEditDialog.tsx` | web-agent |
 | New `<KmHeaderTiles>` (composes existing `<KpiCard>` ×6; **never** `tone="purple"`) | colocated with the km pages | web-agent |
 | New `<WeekNavigator>` (prev/next/current + week-picker `<Popover>` reusing the existing date-picker) | `apps/web/components/km/` | web-agent |
@@ -4547,6 +4597,8 @@ Two namespaces. Web-agent adds these to `messages/pl.json` / `messages/en.json`.
 - [ ] **Three-state cell.** `<KmCell>` renders exactly `drove` (km + `text-success` check + `bg-success/10`), `idle` («nie jeździ» on `bg-input`, no number), `empty` (faint `—`, no tint). Meaning carried by icon + text, never colour alone. Blank cell is never tinted as a warning.
 - [ ] **Weekly grid.** Frozen identity block (sticky-left) with plate/side + carrier·opiekun·dyspozytor; 7 PN..ND day-columns with `DD.MM` headers; **today's column** has the brand underline accent; weekend columns softly tinted; trailing `Σ KM` (`bg-input`), `NOTATKA` roll-up, «Historia» action. Horizontal scroll lives in the card, never the page.
 - [ ] **Header tiles.** Six `<KpiCard>` (TYDZIEŃ / CIĄGNIKI / W RUCHU / NIE JEŻDŻĄ / Σ KM / NOTATEK) with the §7.7.2 tones; **`tone="purple"` not used**; no orange/red aggregate; responsive `grid-cols-2 sm:grid-cols-3 lg:grid-cols-6` with no horizontal scroll at 320/360/640/1024/1280/1536/1920.
+- [ ] **Locked cells (edit board only).** `isLocked = mode==='edit' && day >= today` (Europe/Warsaw). Locked cells render as **non-button** content (not focusable, not in tab order, no cell hover, `cursor-not-allowed`), keep their dimmed-but-legible three-state visual (`opacity-60`), carry a top-right `<Lock size={11} text-text-sub>` glyph (the only mark on a locked `empty` cell — replaces the `—`), and announce via `aria-disabled` + `aria.cellLocked`. No new token; no `bg-danger`/orange (a future day is not an error). In `mode="view"` no lock affordance is shown (cells already inert).
+- [ ] **Lag notice.** Persistent `role="note"` info line «Dane aktualne na poprzedni dzień…» — **never** an Alert/warning surface, **not** dismissible, `text-xs text-text-sub` + leading `<Info size={14}>`. (a) Edit board: stands alone in the card header control area beside the `<WeekNavigator>` (`lagNote`, full copy incl. lock clause). (b) Read-only tabs (§7.7.7 + §7.8): appended as a **second line inside the existing read-only banner** (`lagNoteShort`), not a separate floating note. ≥4.5:1 in light + dark.
 - [ ] **Editing (board only) — modal flow.** Clicking any cell (incl. `empty`, to create) opens `<KmCellEditDialog>` (reuses `<Dialog>`); header shows plate/side + carrier + weekday/date; `drove`/`nie jeździ` `<ToggleGroup>`; km `<Input>` shown **only** for `drove` (idle = no km field, payload `km:null`); empty+drove invalid with inline «Podaj km»; notes `<Textarea>`; «Zapisz» → upsert `PUT /vehicles/:id/daily-km`, optimistic Σ/counter update + rollback; «Anuluj»/Esc/overlay = **zero changes, zero network calls**. **No** inline cell editor, **no** spreadsheet cell-to-cell keyboard chaining.
 - [ ] **Clear-with-confirm (board only).** «Wyczyść ten dzień» destructive action appears **only** when `cell.state != null`; routes through the existing destructive-confirm `<Dialog>` (danger framing, `variant="destructive"` confirm); on confirm `DELETE`s the day's record and returns the cell to `empty` / «Nie sprawdzono»; cancel = no change.
 - [ ] **Read-only report.** Same grid `mode="view"`, cells inert, non-dismissible read-only banner, «Tylko jeżdżące» filter (default on), scoped payload trusted; keeps tiles / Σ / Historia / week-nav.
@@ -4677,7 +4729,7 @@ A NEW namespace `myKm.*` for this tab's chrome. All grid/cell/nav/history/tiles 
 | `myKm.empty.noVehicles.scoped` | «Brak przypisanych pojazdów» | "No vehicles assigned to you" |
 | `myKm.aria.carrierGroup` | «Przewoźnik {carrier}: {count} pojazdów» | "Carrier {carrier}: {count} vehicles" |
 
-> Reuse from `weryfikator.km.*`: every `col.*`, `weekday.*`, `cell.*`, `nav.*`, `tiles.week|tractors|inMotion|idle|sumKm`, `history.*`, `notesPopover.*`, `aria.cell|grid`. The `myKm.*` namespace exists only for the heading/subtitle/banner/group/tab strings that differ.
+> Reuse from `weryfikator.km.*`: every `col.*`, `weekday.*`, `cell.*`, `nav.*`, `tiles.week|tractors|inMotion|idle|sumKm`, `history.*`, `notesPopover.*`, `aria.cell|grid`, **`lagNoteShort`** (the lag line appended to the read-only banner — §7.7.1b context (b)). The `myKm.*` namespace exists only for the heading/subtitle/banner/group/tab strings that differ. **Note:** `cell.locked`/`cell.lockedHint`/`aria.cellLocked`/`lagNote` (the *full* edit-board variants) are **not** used by `myKm.*` — those tabs are `mode="view"`, where no cell is lockable; only `lagNoteShort` applies.
 
 ### 7.8.7 Components / shared / nav summary (Phase 7.8)
 

@@ -8,6 +8,7 @@ import {
 import { VehicleDayState, VehicleStatusSource } from '@magguarantee/database';
 import {
   deriveVehicleMotionStatus,
+  isPastBusinessDay,
   type KmBoardQuery,
   type SetVehicleDailyKmDto,
   type VehicleDailyKmDto,
@@ -79,6 +80,7 @@ export class VehicleDailyKmService {
     dto: SetVehicleDailyKmDto,
   ): Promise<VehicleDailyKmDto> {
     const vehicle = await this._requireVehicle(vehicleId);
+    this._assertPastDay(dto.date);
     const date = isoDateToMidnightUtc(dto.date);
     const { state, km } = this._normalizeStateKm(dto);
 
@@ -135,6 +137,7 @@ export class VehicleDailyKmService {
   ): Promise<void> {
     void user;
     await this._requireVehicle(vehicleId);
+    this._assertPastDay(date);
     const day = isoDateToMidnightUtc(date);
 
     // Snapshot the pre-delete value (if any) into the audit `before`. Mirrors
@@ -289,6 +292,22 @@ export class VehicleDailyKmService {
     const v = await this.vehicles.findById(vehicleId);
     if (!v) throw new NotFoundException('Pojazd nie znaleziony');
     return v;
+  }
+
+  /**
+   * Server-authoritative date guard: only STRICTLY-PAST days are editable.
+   * Today (in the business timezone) and any future day are locked — both for
+   * setting AND clearing a cell. "Today" is the Europe/Warsaw calendar date via
+   * the shared {@link isPastBusinessDay} helper (NOT the UTC `todayUtc()` in this
+   * file — that lags by a day for part of the Warsaw night). Throws 422,
+   * consistent with the other `_normalizeStateKm` invariant rejects here.
+   */
+  private _assertPastDay(dateIso: string): void {
+    if (!isPastBusinessDay(dateIso)) {
+      throw new UnprocessableEntityException(
+        'Nie można edytować dnia bieżącego ani przyszłego — dozwolone są tylko dni minione.',
+      );
+    }
   }
 
   /**

@@ -14,7 +14,7 @@
 // shareable + back-button-friendly. Cell commits (edit) are optimistic +
 // silent-on-success, error-only toast + rollback (DS §7.7.4).
 
-import { Gauge } from 'lucide-react';
+import { Gauge, Info } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useMemo, useState } from 'react';
@@ -212,17 +212,27 @@ export function KmBoardScreen({
         loading={isLoading}
       />
 
-      {/* Read-only banner (report only) */}
+      {/* Read-only banner (report only) — §7.7.1b: the data-lag note JOINS this
+          block as a consolidated second line (`lagNoteShort`, no lock clause —
+          read-only cells aren't lockable), not a separate stacked note. */}
       {mode === 'view' ? (
         <div
           className="mb-4 rounded-lg border border-border bg-card px-4 py-3 text-sm text-text-sub"
           role="note"
         >
-          {myKmScope ? tMyKm('readOnlyBanner') : t('readOnlyBanner')}
+          <p>{myKmScope ? tMyKm('readOnlyBanner') : t('readOnlyBanner')}</p>
+          <p className="mt-1 flex items-center gap-1.5 text-xs text-text-sub">
+            <Info size={14} aria-hidden="true" className="shrink-0" />
+            {t('lagNoteShort')}
+          </p>
         </div>
       ) : null}
 
-      {/* Control row — week nav + (edit) progress / (view) filter */}
+      {/* Control row — week nav + (edit) lag note + progress / (view) filter.
+          §7.7.1b: on the EDIT board the data-lag note (fuller `lagNote`, incl.
+          the today/future-locked clause) stands ALONE in the header control
+          area, left slot beside <WeekNavigator>; it wraps to its own line on
+          narrow widths. */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         {mode === 'view' ? (
           <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-input px-3 py-2 text-sm text-text">
@@ -232,12 +242,21 @@ export function KmBoardScreen({
             />
             {myKmScope ? tMyKm('filter.inMotionOnly') : t('filter.inMotionOnly')}
           </label>
-        ) : !isLoading && allItems.length > 0 ? (
-          <p className="text-sm text-text-sub" role="status">
-            {t('progress', { checked, total: allItems.length })}
-          </p>
         ) : (
-          <span />
+          <div className="flex flex-col gap-1">
+            <p
+              className="flex items-center gap-1.5 text-xs text-text-sub"
+              role="note"
+            >
+              <Info size={14} aria-hidden="true" className="shrink-0" />
+              {t('lagNote')}
+            </p>
+            {!isLoading && allItems.length > 0 ? (
+              <p className="text-sm text-text-sub" role="status">
+                {t('progress', { checked, total: allItems.length })}
+              </p>
+            ) : null}
+          </div>
         )}
 
         <WeekNavigator weekStart={weekStart} onChange={setWeek} />

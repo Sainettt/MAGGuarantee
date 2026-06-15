@@ -15,9 +15,10 @@
 import { History, StickyNote, Truck } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Fragment, useMemo, useState } from 'react';
-import type {
-  VehicleKmBoardItemDto,
-  VehicleKmCellDto,
+import {
+  isPastBusinessDay,
+  type VehicleKmBoardItemDto,
+  type VehicleKmCellDto,
 } from '@magguarantee/shared';
 
 import { Button } from '@/components/ui/Button';
@@ -265,26 +266,42 @@ export function KmWeekGrid({
             notes: null,
           };
           const wdIdx = weekdayIndexMonFirst(d);
+          const stateLabel =
+            cell.state === 'drove'
+              ? tCell('drove')
+              : cell.state === 'idle'
+                ? tCell('idle')
+                : tCell('empty');
           const ariaLabel = t('aria.cell', {
             plate: vehicle.plateNumber,
             weekday: tWeekday(WEEKDAY_KEYS[wdIdx]),
             date: formatDayMonth(d),
-            state:
-              cell.state === 'drove'
-                ? tCell('drove')
-                : cell.state === 'idle'
-                  ? tCell('idle')
-                  : tCell('empty'),
+            state: stateLabel,
           });
+          // §7.7.1a — lock modifier: edit board only, today + future days
+          // (strictly-past days stay editable). `isPastBusinessDay` is the same
+          // Europe/Warsaw predicate the server's 422 guard uses, so the lock
+          // boundary matches the backend exactly.
+          const isLocked = mode === 'edit' && !isPastBusinessDay(d);
+          const lockedAriaLabel = isLocked
+            ? t('aria.cellLocked', {
+                plate: vehicle.plateNumber,
+                weekday: tWeekday(WEEKDAY_KEYS[wdIdx]),
+                date: formatDayMonth(d),
+                state: stateLabel,
+              })
+            : undefined;
           return (
             <KmCell
               key={d}
               cell={cell}
               mode={mode}
               isWeekend={wdIdx >= 5}
+              isLocked={isLocked}
               ariaLabel={ariaLabel}
+              lockedAriaLabel={lockedAriaLabel}
               onOpenEditor={
-                mode === 'edit'
+                mode === 'edit' && !isLocked
                   ? (c) => onOpenEditor?.(vehicle, c)
                   : undefined
               }

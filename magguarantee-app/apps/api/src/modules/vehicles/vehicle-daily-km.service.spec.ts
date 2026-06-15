@@ -5,7 +5,11 @@ import {
 } from '@nestjs/common';
 
 import { VehicleDayState, VehicleStatusSource } from '@magguarantee/database';
-import type { SetVehicleDailyKmDto } from '@magguarantee/shared';
+import {
+  businessTodayIso,
+  startOfBusinessTodayUtc,
+  type SetVehicleDailyKmDto,
+} from '@magguarantee/shared';
 
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { CarriersRepository } from '../carriers/carriers.repository';
@@ -298,6 +302,104 @@ describe('VehicleDailyKmService.setDailyKm', () => {
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
     expect(upsertSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('VehicleDailyKmService — past-only date guard (server-authoritative)', () => {
+  // Dates are computed RELATIVE to the shared Europe/Warsaw "today" helper, so
+  // these stay green at any wall-clock run time (and across the Warsaw night
+  // when a UTC-midnight "today" would lag). `startOfBusinessTodayUtc()` returns
+  // UTC midnight of the Warsaw calendar date; we shift it by whole days and
+  // re-encode as YYYY-MM-DD.
+  const isoOffsetDays = (days: number): string => {
+    const base = startOfBusinessTodayUtc();
+    const d = new Date(base.getTime() + days * 24 * 60 * 60 * 1000);
+    return d.toISOString().slice(0, 10);
+  };
+  const TODAY = businessTodayIso();
+  const YESTERDAY = isoOffsetDays(-1);
+  const TOMORROW = isoOffsetDays(1);
+
+  it('setDailyKm: today → 422 (locked), no upsert', async () => {
+    const { service, upsertSpy } = makeService();
+    await expect(
+      service.setDailyKm(auth('weryfikator', WER_SUB), VEHICLE_ID, {
+        date: TODAY,
+        state: 'drove',
+        km: 100,
+        notes: undefined,
+      }),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(upsertSpy).not.toHaveBeenCalled();
+  });
+
+  it('setDailyKm: future → 422 (locked), no upsert', async () => {
+    const { service, upsertSpy } = makeService();
+    await expect(
+      service.setDailyKm(auth('admin', 'adm'), VEHICLE_ID, {
+        date: TOMORROW,
+        state: 'drove',
+        km: 100,
+        notes: undefined,
+      }),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(upsertSpy).not.toHaveBeenCalled();
+  });
+
+  it('setDailyKm: strictly-past day → succeeds (upsert called)', async () => {
+    const { service, upsertSpy } = makeService();
+    const out = await service.setDailyKm(
+      auth('weryfikator', WER_SUB),
+      VEHICLE_ID,
+      { date: YESTERDAY, state: 'drove', km: 100, notes: undefined },
+    );
+    expect(upsertSpy).toHaveBeenCalledTimes(1);
+    expect(upsertSpy.mock.calls[0]![0].date.toISOString().slice(0, 10)).toBe(
+      YESTERDAY,
+    );
+    expect(out.state).toBe('drove');
+  });
+
+  it('clearDailyKm: today → 422 (locked), no delete', async () => {
+    const { service } = makeService();
+    const dailyKm = (
+      service as unknown as { dailyKm: Record<string, jest.Mock> }
+    ).dailyKm;
+    const findSpy = jest.fn(async () => null);
+    const delSpy = jest.fn(async () => ({ count: 0 }));
+    dailyKm.findByVehicleDate = findSpy;
+    dailyKm.deleteByVehicleDate = delSpy;
+    await expect(
+      service.clearDailyKm(auth('weryfikator', WER_SUB), VEHICLE_ID, TODAY),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(delSpy).not.toHaveBeenCalled();
+    expect(findSpy).not.toHaveBeenCalled();
+  });
+
+  it('clearDailyKm: future → 422 (locked), no delete', async () => {
+    const { service } = makeService();
+    const dailyKm = (
+      service as unknown as { dailyKm: Record<string, jest.Mock> }
+    ).dailyKm;
+    const delSpy = jest.fn(async () => ({ count: 0 }));
+    dailyKm.findByVehicleDate = jest.fn(async () => null);
+    dailyKm.deleteByVehicleDate = delSpy;
+    await expect(
+      service.clearDailyKm(auth('admin', 'adm'), VEHICLE_ID, TOMORROW),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(delSpy).not.toHaveBeenCalled();
+  });
+
+  it('clearDailyKm: strictly-past day → succeeds (delete called)', async () => {
+    const { service } = makeService();
+    const dailyKm = (
+      service as unknown as { dailyKm: Record<string, jest.Mock> }
+    ).dailyKm;
+    const delSpy = jest.fn(async () => ({ count: 1 }));
+    dailyKm.findByVehicleDate = jest.fn(async () => null);
+    dailyKm.deleteByVehicleDate = delSpy;
+    await service.clearDailyKm(auth('weryfikator', WER_SUB), VEHICLE_ID, YESTERDAY);
+    expect(delSpy).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -6,6 +6,8 @@
 // No date-fns dependency (the web app doesn't ship one); these are tiny pure
 // functions covering exactly what the navigator needs.
 
+import { businessTodayIso } from '@magguarantee/shared';
+
 /** Parses `YYYY-MM-DD` into a UTC-midnight Date. */
 function parseIsoDate(iso: string): Date {
   const [y, m, d] = iso.split('-').map(Number);
@@ -23,12 +25,16 @@ function toIsoDate(date: Date): string {
   )}`;
 }
 
-/** Today as `YYYY-MM-DD` in the local zone (matches the cell `date` semantics). */
+/**
+ * Today as `YYYY-MM-DD` in the MAGTRANS business timezone (Europe/Warsaw).
+ *
+ * Delegates to the shared `businessTodayIso()` — the SAME predicate the server's
+ * 422 day-edit guard uses — so the board's "today column" highlight and the
+ * §7.7.1a cell-lock boundary line up exactly with the backend, and never drift
+ * with the browser's local timezone or local-midnight.
+ */
 export function todayIso(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(
-    now.getDate(),
-  )}`;
+  return businessTodayIso();
 }
 
 /** Monday (ISO weekday 1) of the week containing the given `YYYY-MM-DD`. */

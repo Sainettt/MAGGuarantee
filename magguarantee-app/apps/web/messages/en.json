@@ -1530,7 +1530,9 @@
         "drove": "Drove",
         "idle": "Not driving",
         "empty": "Not checked",
-        "kmPlaceholder": "km"
+        "kmPlaceholder": "km",
+        "locked": "locked",
+        "lockedHint": "Can only be filled in the next day."
       },
       "modal": {
         "title": "{plate} · side {side}",
@@ -1567,6 +1569,8 @@
         "inMotionOnly": "In-motion only"
       },
       "readOnlyBanner": "Data is read-only — managed by the verifier.",
+      "lagNote": "Data as of the previous day. Today and future days are locked.",
+      "lagNoteShort": "Data as of the previous day.",
       "empty": {
         "noVehicles": "No active vehicles",
         "noAssigned": "No vehicles assigned to you",
@@ -1586,6 +1590,7 @@
       },
       "aria": {
         "cell": "{plate}, {weekday} {date}: {state}",
+        "cellLocked": "{plate}, {weekday} {date}: {state} — locked (today or a future day)",
         "grid": "Weekly km board"
       }
     }

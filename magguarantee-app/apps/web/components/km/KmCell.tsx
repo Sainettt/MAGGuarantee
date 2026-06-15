@@ -19,7 +19,7 @@
 // No new tokens: tints are `bg-{success}/10` opacity variants; the focus ring is
 // the brand ring; soft surfaces are `bg-input` only.
 
-import { Check, ParkingSquare, StickyNote } from 'lucide-react';
+import { Check, Lock, ParkingSquare, StickyNote } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { VehicleKmCellDto } from '@magguarantee/shared';
 
@@ -31,16 +31,33 @@ interface KmCellProps {
   /** Weekend (Sat/Sun) — faint `bg-input` tint to separate the work week.
    *  Today's brand accent lives on the column header (§7.7.3), not the cell. */
   isWeekend?: boolean;
+  /**
+   * §7.7.1a — time-gated lock modifier (edit board only). `true` when the cell's
+   * day is today or a future day; the cell renders as inert non-button chrome
+   * (dimmed value, corner `<Lock>`, `cursor-not-allowed`, not focusable).
+   * Always `false` in `mode="view"` (read-only cells are already inert).
+   */
+  isLocked?: boolean;
   /** a11y label for the cell button, e.g. «WGM1234, Pn 09.06: Jechał». */
   ariaLabel: string;
+  /** a11y label for a §7.7.1a locked cell (state + locked suffix). */
+  lockedAriaLabel?: string;
   /** Open the modal editor for this cell (edit mode only). */
   onOpenEditor?: (cell: VehicleKmCellDto) => void;
 }
 
 /**
  * Read-only cell body — the three locked visuals (§7.7.1). Shared by both modes.
+ * `lockedEmpty` swaps the faint `—` for nothing (§7.7.1a: the corner `<Lock>`
+ * glyph is then the only mark on a locked-and-blank future cell).
  */
-function CellDisplay({ cell }: { cell: VehicleKmCellDto }) {
+function CellDisplay({
+  cell,
+  lockedEmpty = false,
+}: {
+  cell: VehicleKmCellDto;
+  lockedEmpty?: boolean;
+}) {
   const t = useTranslations('weryfikator.km.cell');
   if (cell.state === 'drove') {
     return (
@@ -60,6 +77,10 @@ function CellDisplay({ cell }: { cell: VehicleKmCellDto }) {
       </span>
     );
   }
+  // §7.7.1a — on a locked `empty` cell the corner <Lock> glyph IS the only mark;
+  // drop the faint `—` so a blank future cell reads as "locked, nothing to
+  // enter" rather than "to-do".
+  if (lockedEmpty) return null;
   return (
     <span className="text-text-sub/60" aria-hidden="true">
       —
@@ -71,9 +92,13 @@ export function KmCell({
   cell,
   mode,
   isWeekend,
+  isLocked = false,
   ariaLabel,
+  lockedAriaLabel,
   onOpenEditor,
 }: KmCellProps) {
+  const tCell = useTranslations('weryfikator.km.cell');
+
   // Cell surface tint by state (locked §7.7.1).
   const surface =
     cell.state === 'drove'
@@ -85,6 +110,39 @@ export function KmCell({
           : 'bg-card';
 
   const hasNotes = Boolean(cell.notes && cell.notes.trim());
+
+  // ── Locked cell (§7.7.1a) — edit board only, today + future days ─────────
+  // NON-button inert chrome: dimmed value, corner <Lock>, cursor-not-allowed,
+  // NOT in the tab order, NO cell hover / brand ring. The lock sits UNDER any
+  // state tint (`bg-input` base; a locked `drove` keeps its `bg-success/10`
+  // wash). Meaning is carried by the glyph + cursor + aria, never colour alone.
+  if (isLocked) {
+    const lockedSurface = cell.state === 'drove' ? 'bg-success/10' : 'bg-input';
+    return (
+      <td className={cn('relative h-12 px-1.5 py-1 text-center align-middle', lockedSurface)}>
+        <div
+          aria-disabled="true"
+          aria-label={lockedAriaLabel ?? ariaLabel}
+          title={tCell('lockedHint')}
+          className="flex h-full w-full cursor-not-allowed items-center justify-center opacity-60"
+        >
+          <CellDisplay cell={cell} lockedEmpty={cell.state == null} />
+          {hasNotes ? (
+            <StickyNote
+              size={10}
+              className="ml-1 inline text-text-sub"
+              aria-hidden="true"
+            />
+          ) : null}
+        </div>
+        <Lock
+          size={11}
+          className="pointer-events-none absolute right-1 top-1 text-text-sub"
+          aria-hidden="true"
+        />
+      </td>
+    );
+  }
 
   // ── View mode — inert ───────────────────────────────────────────────────
   if (mode === 'view') {

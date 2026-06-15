@@ -29,6 +29,7 @@ import {
   cooldownCheck,
   DEFAULTS as CARRIER_SUBMISSION_DEFAULTS,
   isCompensationDue,
+  startOfBusinessTodayUtc,
 } from '@magguarantee/shared';
 
 import { AuditContext } from '../../common/audit/audit-context';
@@ -201,7 +202,7 @@ export class ClaimsService {
     const vehicle = await this._requireOwnedVehicle(carrier.id, dto.vehicleId);
 
     const config = await this._loadSubmitConfig();
-    const today = startOfTodayBusinessTz();
+    const today = startOfBusinessTodayUtc();
     const dateStart = isoDateToMidnightUtc(dto.dateStart);
     const dateEnd = isoDateToMidnightUtc(dto.dateEnd);
     if (!dateStart || !dateEnd) {
@@ -1641,33 +1642,14 @@ function toDateString(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-const BUSINESS_TZ = 'Europe/Warsaw';
-
 /**
  * "Today" as UTC midnight of the current calendar date in the business
- * timezone (Europe/Warsaw — MAGTRANS operating timezone).
- *
- * The previous `startOfTodayUtc()` used UTC midnight directly, which made
- * "today" lag by a day for a portion of the night in Warsaw and produced
- * false "date in future" errors on claims submitted between local midnight
- * and ~02:00. Comparing `isoDateToMidnightUtc(dateEnd)` (which encodes the
- * input YYYY-MM-DD as UTC midnight) against a UTC-midnight-of-Warsaw-today
- * gives correct calendar-day semantics: a claim with `dateEnd = today in
- * Warsaw` is equal, not greater than.
+ * timezone (Europe/Warsaw) is now sourced from the shared
+ * `startOfBusinessTodayUtc()` helper (`@magguarantee/shared`) so the API and
+ * web share ONE implementation. The previous local `startOfTodayBusinessTz()`
+ * + `BUSINESS_TZ` lived here; they were lifted verbatim into the shared package
+ * (`domain/business-date.ts`) and removed from this file to avoid divergence.
  */
-function startOfTodayBusinessTz(): Date {
-  // en-CA locale returns YYYY-MM-DD format reliably; we then split.
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: BUSINESS_TZ,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date());
-  const y = Number(parts.find((p) => p.type === 'year')!.value);
-  const m = Number(parts.find((p) => p.type === 'month')!.value);
-  const d = Number(parts.find((p) => p.type === 'day')!.value);
-  return new Date(Date.UTC(y, m - 1, d));
-}
 
 /** Parse `YYYY-MM-DD` to UTC midnight. Returns null on malformed input. */
 function isoDateToMidnightUtc(iso: string): Date | null {

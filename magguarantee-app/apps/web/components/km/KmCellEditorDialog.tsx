@@ -19,10 +19,11 @@
 import { Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useEffect, useState } from 'react';
-import type {
-  SetVehicleDailyKmDto,
-  VehicleDayState,
-  VehicleKmCellDto,
+import {
+  isPastBusinessDay,
+  type SetVehicleDailyKmDto,
+  type VehicleDayState,
+  type VehicleKmCellDto,
 } from '@magguarantee/shared';
 
 import { Button } from '@/components/ui/Button';
@@ -103,14 +104,25 @@ export function KmCellEditorDialog({
   const { vehicleId, plateNumber, sideNumber, carrierName, cell, weekday, dateLabel } =
     target;
 
+  // §7.7.1a DEFENSIVE — the grid never opens the editor on a locked (today /
+  // future) cell (those cells are non-button), but if one somehow reaches here
+  // we block Save/Clear so we never fire a mutation the server's 422 guard would
+  // reject. The grid/cell is the primary gate; this is belt-and-braces.
+  const isLockedDay = !isPastBusinessDay(cell.date);
+
   const kmNum = Number(kmText);
   const kmValid = state === 'idle' || (kmText.trim() !== '' && !Number.isNaN(kmNum));
   // `drove` requires km>0 (SetVehicleDailyKmSchema). The soft 0-km hint nudges
   // the user toward «nie jeździ»; Save stays blocked while km<=0.
   const showZeroHint = state === 'drove' && kmText.trim() !== '' && kmNum === 0;
-  const canSave = !saving && (state === 'idle' || (kmValid && kmNum > 0));
+  const canSave =
+    !saving && !isLockedDay && (state === 'idle' || (kmValid && kmNum > 0));
 
   const handleSave = async () => {
+    if (isLockedDay) {
+      setSaveFailed(true);
+      return;
+    }
     if (state === 'drove' && !(kmValid && kmNum > 0)) {
       setKmError(true);
       return;
@@ -267,7 +279,7 @@ export function KmCellEditorDialog({
                   size="sm"
                   className="text-danger hover:bg-danger/10"
                   onClick={() => setConfirmClear(true)}
-                  disabled={saving}
+                  disabled={saving || isLockedDay}
                 >
                   <Trash2 size={14} aria-hidden="true" />
                   {tClear('action')}
