@@ -87,12 +87,6 @@ export function FleetVehiclesTable({
         cell: (row) => row.sideNumber ?? '—',
       },
       {
-        id: 'brandModel',
-        header: t('columns.brandModel'),
-        cell: (row) =>
-          [row.brand, row.model].filter(Boolean).join(' ') || '—',
-      },
-      {
         id: 'type',
         header: t('columns.type'),
         cell: (row) => row.type ?? '—',
@@ -210,12 +204,6 @@ export function FleetTrailersTable({
         id: 'type',
         header: t('columns.type'),
         cell: (row) => row.trailerTypeName || '—',
-      },
-      {
-        id: 'brandModel',
-        header: t('columns.brandModel'),
-        cell: (row) =>
-          [row.brand, row.model].filter(Boolean).join(' ') || '—',
       },
       {
         id: 'active',

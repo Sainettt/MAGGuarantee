@@ -38,9 +38,6 @@ export interface VehicleRow {
   carrierId: string;
   plateNumber: string;
   active: boolean;
-  brand: string | null;
-  model: string | null;
-  year: number | null;
   notes: string | null;
   certificateL: boolean;
   euro: 'V' | 'VI';
@@ -176,8 +173,6 @@ export class VehiclesRepository {
     if (filters.q) {
       where.OR = [
         { plateNumber: { contains: filters.q, mode: 'insensitive' } },
-        { brand: { contains: filters.q, mode: 'insensitive' } },
-        { model: { contains: filters.q, mode: 'insensitive' } },
       ];
     }
     const rows = await this.prisma.tx.vehicle.findMany({
@@ -313,9 +308,6 @@ export class VehiclesRepository {
     active?: boolean;
     plannerId?: string | null;
     dispatcherId?: string | null;
-    brand?: string | null;
-    model?: string | null;
-    year?: number | null;
     notes?: string | null;
     certificateL: boolean;
     euro: 'V' | 'VI';
@@ -351,9 +343,6 @@ export class VehiclesRepository {
         active: data.active ?? true,
         plannerId: data.plannerId ?? null,
         dispatcherId: data.dispatcherId ?? null,
-        brand: data.brand ?? null,
-        model: data.model ?? null,
-        year: data.year ?? null,
         notes: data.notes ?? null,
         certificateL: data.certificateL,
         euro: data.euro,
@@ -443,9 +432,6 @@ export class VehiclesRepository {
       carrierId: row.carrierId,
       plateNumber: row.plateNumber,
       active: row.active,
-      brand: row.brand,
-      model: row.model,
-      year: row.year,
       notes: row.notes,
       // The fallbacks below are defensive sentinels for the soft-delete
       // extension's wider inferred type — never observed at runtime since
@@ -517,9 +503,6 @@ interface VehiclePrismaShape {
   carrierId: string;
   plateNumber: string;
   active: boolean;
-  brand: string | null;
-  model: string | null;
-  year: number | null;
   notes: string | null;
   // Wide variants — soft-delete extension widens scalars in the inferred type.
   certificateL: boolean | null;

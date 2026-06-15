@@ -12,7 +12,7 @@ import { BadRequestException } from '@nestjs/common';
  *
  * ── Encoding contract for web (mirror exactly) ───────────
  *  - booleans  → the literal strings `'true'` / `'false'`
- *  - numbers   → numeric strings (`'2024'`, `'0.85'`)
+ *  - numbers   → numeric strings (`'0.85'`)
  *  - arrays    → a JSON-encoded string, e.g. `wasteCountries='["DE","FR"]'`
  *                (`wasteCountries`, `removeAttachmentIds`)
  *  - strings   → as-is
@@ -37,7 +37,6 @@ const BOOLEAN_FIELDS = [
 
 /** Field names that must be parsed as numbers. */
 const NUMBER_FIELDS = [
-  'year',
   'rateDe',
   'rateUe',
   'rateExport',
@@ -69,7 +68,7 @@ export function coerceVehicleMultipartBody(
     } else if ((ARRAY_FIELDS as readonly string[]).includes(key)) {
       out[key] = parseArray(key, value);
     } else {
-      // Plain string passthrough (carrierId, plateNumber, brand, …).
+      // Plain string passthrough (carrierId, plateNumber, notes, …).
       out[key] = value;
     }
   }

@@ -24,9 +24,6 @@ const PlateSchema = z.string().min(2).max(16);
  * required and lives on the create schema directly).
  */
 const trailerAttributeFields = {
-  brand: emptyStringToUndefined(z.string().max(64).optional()),
-  model: emptyStringToUndefined(z.string().max(64).optional()),
-  year: z.number().int().min(1900).max(2100).optional(),
   belts: z.boolean().optional(),
   beltsCount: z.number().int().min(0).optional(),
   mats: z.boolean().optional(),
@@ -104,9 +101,6 @@ export const UpdateTrailerObjectSchema = z
     plateNumber: PlateSchema.optional(),
     active: z.boolean().optional(),
     trailerTypeId: emptyStringToUndefined(UuidSchema.optional()),
-    brand: emptyStringToUndefined(z.string().max(64).nullable().optional()),
-    model: emptyStringToUndefined(z.string().max(64).nullable().optional()),
-    year: z.number().int().min(1900).max(2100).nullable().optional(),
     belts: z.boolean().nullable().optional(),
     beltsCount: z.number().int().min(0).nullable().optional(),
     mats: z.boolean().nullable().optional(),
@@ -154,9 +148,6 @@ export const TrailerDtoSchema = z.object({
     shortCode: z.string().nullable(),
     active: z.boolean(),
   }),
-  brand: z.string().nullable(),
-  model: z.string().nullable(),
-  year: z.number().int().nullable(),
   belts: z.boolean().nullable(),
   beltsCount: z.number().int().nullable(),
   mats: z.boolean().nullable(),

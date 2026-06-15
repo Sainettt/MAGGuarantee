@@ -417,9 +417,6 @@
       "carrier": "Carrier",
       "plateNumber": "Plate number",
       "sideNumber": "Side number",
-      "brand": "Brand",
-      "model": "Model",
-      "year": "Year",
       "type": "Type",
       "euro": "EURO norm",
       "certificateL": "Certificate L",
@@ -521,9 +518,6 @@
       "carrier": "Carrier",
       "plateNumber": "Plate number",
       "trailerType": "Trailer type",
-      "brand": "Brand",
-      "model": "Model",
-      "year": "Year",
       "innerLength": "Inner length (m)",
       "innerWidth": "Inner width (m)",
       "innerHeight": "Inner height (m)",
@@ -966,7 +960,6 @@
       "columns": {
         "plate": "Plate number",
         "side": "Side number",
-        "brandModel": "Brand / model",
         "type": "Type",
         "active": "Status"
       }
@@ -987,7 +980,6 @@
       "columns": {
         "plate": "Plate number",
         "type": "Type",
-        "brandModel": "Brand / model",
         "active": "Status"
       }
     },
@@ -1041,7 +1033,6 @@
       "columns": {
         "plate": "Plate",
         "side": "Side no.",
-        "brandModel": "Make / model",
         "type": "Type",
         "active": "Status"
       }
@@ -1061,7 +1052,6 @@
       "columns": {
         "plate": "Plate",
         "type": "Type",
-        "brandModel": "Make / model",
         "active": "Status"
       }
     },
@@ -1116,7 +1106,6 @@
       "columns": {
         "plate": "Plate",
         "side": "Side no.",
-        "brandModel": "Make / model",
         "type": "Type",
         "active": "Status"
       }
@@ -1147,7 +1136,6 @@
       "columns": {
         "plate": "Plate",
         "type": "Type",
-        "brandModel": "Make / model",
         "active": "Status"
       }
     }
@@ -1379,7 +1367,6 @@
         "columns": {
           "plate": "Plate number",
           "side": "Side number",
-          "brandModel": "Make / model",
           "type": "Type",
           "status": "Status"
         }
@@ -1410,7 +1397,6 @@
         "columns": {
           "plate": "Plate number",
           "type": "Type",
-          "brandModel": "Make / model",
           "status": "Status"
         }
       }

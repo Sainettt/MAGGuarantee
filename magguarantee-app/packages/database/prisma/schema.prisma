@@ -257,9 +257,6 @@ model Vehicle {
   dispatcher   User?   @relation("VehicleDispatcher", fields: [dispatcherId], references: [id])
 
   // attributes
-  brand        String?
-  model        String?
-  year         Int?
   notes        String?
   // Boolean flag: legacy L1/L2/L3 enum was collapsed to a single TAK/NIE
   // decision in 2026-05. true = vehicle holds an L-certificate (any class),
@@ -431,9 +428,6 @@ model Trailer {
   plateNumber   String // NrRej
   trailerTypeId String      @db.Uuid
   trailerType   TrailerType @relation(fields: [trailerTypeId], references: [id])
-  brand         String?
-  model         String?
-  year          Int?
   active        Boolean     @default(true)
   addedAt       DateTime    @default(now())
 

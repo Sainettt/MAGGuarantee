@@ -65,7 +65,6 @@ interface Props {
 type FormValues = CreateTrailerDto;
 
 const NUMERIC_FIELDS = [
-  'year',
   'innerLength',
   'innerWidth',
   'innerHeight',
@@ -125,9 +124,6 @@ export function TrailerSheet({
         plateNumber: trailer.plateNumber,
         active: trailer.active,
         trailerTypeId: trailer.trailerTypeId ?? undefined,
-        brand: trailer.brand ?? '',
-        model: trailer.model ?? '',
-        year: trailer.year ?? undefined,
         belts: trailer.belts ?? false,
         beltsCount: trailer.beltsCount ?? undefined,
         mats: trailer.mats ?? false,
@@ -320,40 +316,6 @@ export function TrailerSheet({
                         </option>
                       ))}
                     </Select>
-                  </FormField>
-                  <FormField
-                    label={t('fields.brand')}
-                    error={errs.brand?.message}
-                    htmlFor="trailer-brand"
-                  >
-                    <Input
-                      id="trailer-brand"
-                      {...form.register('brand')}
-                    />
-                  </FormField>
-                  <FormField
-                    label={t('fields.model')}
-                    error={errs.model?.message}
-                    htmlFor="trailer-model"
-                  >
-                    <Input
-                      id="trailer-model"
-                      {...form.register('model')}
-                    />
-                  </FormField>
-                  <FormField
-                    label={t('fields.year')}
-                    error={errs.year?.message}
-                    htmlFor="trailer-year"
-                  >
-                    <Input
-                      id="trailer-year"
-                      type="number"
-                      {...form.register('year', {
-                        setValueAs: (v) =>
-                          v === '' || v === null ? undefined : Number(v),
-                      })}
-                    />
                   </FormField>
                 </FormGrid>
               </FormSection>
@@ -637,9 +599,6 @@ function getDefaults(): FormValues {
     // so RHF stays controlled; the empty `<option value="">` triggers a Zod
     // "required" error on submit when the user hasn't picked a type yet.
     trailerTypeId: '' as unknown as string,
-    brand: '',
-    model: '',
-    year: undefined,
     belts: false,
     beltsCount: undefined,
     mats: false,

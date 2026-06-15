@@ -51,12 +51,6 @@ export default function CarrierVehiclesPage() {
         cell: (row) => row.sideNumber ?? '—',
       },
       {
-        id: 'brand',
-        header: tColumns('brandModel'),
-        cell: (row) =>
-          [row.brand, row.model].filter(Boolean).join(' ') || '—',
-      },
-      {
         id: 'type',
         header: tColumns('type'),
         cell: (row) => row.type ?? '—',

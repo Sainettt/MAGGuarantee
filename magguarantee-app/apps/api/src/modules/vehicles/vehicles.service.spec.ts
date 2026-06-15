@@ -31,9 +31,6 @@ function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {
     carrierId: 'c-1',
     plateNumber: 'WA0001',
     active: true,
-    brand: null,
-    model: null,
-    year: null,
     notes: null,
     // Required post-phase3_blocks. `certificateL` was collapsed enum→boolean
     // in 20260515130307_vehicle_certificate_l_to_boolean.

@@ -45,12 +45,9 @@ export const VehicleListItemSchema = z.object({
   id: UuidSchema,
   plateNumber: z.string(),
   active: z.boolean(),
-  brand: z.string().nullable(),
-  model: z.string().nullable(),
   type: z.enum(['MEGA', 'STD', 'COIL']).nullable(),
   sideNumber: z.string().nullable(),
   // ── Phase 6.4 additive fields (§6.4.2) ──
-  year: z.number().int().nullable(),
   euro: z.enum(['V', 'VI']),
   certificateL: z.boolean(),
   gps: z.boolean(),
@@ -95,10 +92,7 @@ export const TrailerListItemSchema = z.object({
   active: z.boolean(),
   trailerTypeId: UuidSchema,
   trailerTypeName: z.string(),
-  brand: z.string().nullable(),
-  model: z.string().nullable(),
   // ── Phase 6.4 additive fields (§6.4.2) ──
-  year: z.number().int().nullable(),
   belts: z.boolean().nullable(),
   beltsCount: z.number().int().nullable(),
   mats: z.boolean().nullable(),

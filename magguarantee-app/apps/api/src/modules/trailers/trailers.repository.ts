@@ -21,9 +21,6 @@ export interface TrailerRow {
     shortCode: string | null;
     active: boolean;
   };
-  brand: string | null;
-  model: string | null;
-  year: number | null;
   belts: boolean | null;
   beltsCount: number | null;
   mats: boolean | null;
@@ -91,8 +88,6 @@ export class TrailersRepository {
     if (filters.q) {
       where.OR = [
         { plateNumber: { contains: filters.q, mode: 'insensitive' } },
-        { brand: { contains: filters.q, mode: 'insensitive' } },
-        { model: { contains: filters.q, mode: 'insensitive' } },
       ];
     }
     const rows = await this.prisma.tx.trailer.findMany({
@@ -112,9 +107,6 @@ export class TrailersRepository {
     plateNumber: string;
     active?: boolean;
     trailerTypeId: string;
-    brand?: string | null;
-    model?: string | null;
-    year?: number | null;
     belts?: boolean | null;
     beltsCount?: number | null;
     mats?: boolean | null;
@@ -134,9 +126,6 @@ export class TrailersRepository {
         plateNumber: data.plateNumber,
         active: data.active ?? true,
         trailerTypeId: data.trailerTypeId,
-        brand: data.brand ?? null,
-        model: data.model ?? null,
-        year: data.year ?? null,
         belts: data.belts ?? null,
         beltsCount: data.beltsCount ?? null,
         mats: data.mats ?? null,
@@ -211,9 +200,6 @@ export class TrailersRepository {
         shortCode: null,
         active: false,
       },
-      brand: row.brand,
-      model: row.model,
-      year: row.year,
       belts: row.belts,
       beltsCount: row.beltsCount,
       mats: row.mats,
@@ -256,9 +242,6 @@ interface TrailerPrismaShape {
     shortCode: string | null;
     active: boolean;
   } | null;
-  brand: string | null;
-  model: string | null;
-  year: number | null;
   belts: boolean | null;
   beltsCount: number | null;
   mats: boolean | null;

@@ -42,9 +42,6 @@ const VehicleTypeSchema = z.enum(['MEGA', 'STD', 'COIL']);
 const vehicleAttributeFields = {
   plannerId: UuidSchema,
   dispatcherId: UuidSchema,
-  brand: emptyStringToUndefined(z.string().max(64).optional()),
-  model: emptyStringToUndefined(z.string().max(64).optional()),
-  year: z.number().int().min(1900).max(2100).optional(),
   notes: emptyStringToUndefined(z.string().max(2_000).optional()),
   /**
    * REQUIRED — Vehicle.certificateL is NOT NULL.
@@ -116,9 +113,6 @@ export const UpdateVehicleSchema = z
     active: z.boolean().optional(),
     plannerId: UuidSchema.nullable().optional(),
     dispatcherId: UuidSchema.nullable().optional(),
-    brand: emptyStringToUndefined(z.string().max(64).nullable().optional()),
-    model: emptyStringToUndefined(z.string().max(64).nullable().optional()),
-    year: z.number().int().min(1900).max(2100).nullable().optional(),
     notes: emptyStringToUndefined(z.string().max(2_000).nullable().optional()),
     // The following five fields are NOT NULL since phase3_blocks. PATCH
     // accepts an update (omit means "do not touch") but cannot null them.
@@ -467,9 +461,6 @@ export const VehicleDtoSchema = z.object({
   carrierId: UuidSchema,
   plateNumber: z.string(),
   active: z.boolean(),
-  brand: z.string().nullable(),
-  model: z.string().nullable(),
-  year: z.number().int().nullable(),
   notes: z.string().nullable(),
   certificateL: z.boolean(),
   euro: EuroNormSchema,

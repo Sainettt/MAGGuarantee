@@ -98,7 +98,7 @@ export function WeekNavigator({ weekStart, onChange }: WeekNavigatorProps) {
       {!isCurrentWeek ? (
         <Button
           type="button"
-          variant="ghost"
+          variant="outline"
           size="sm"
           onClick={() => onChange(currentMonday)}
         >

@@ -534,9 +534,6 @@ export default function NewClaimPage() {
                     {vehicles.map((v) => (
                       <option key={v.id} value={v.id}>
                         {v.plateNumber}
-                        {v.brand || v.model
-                          ? ` — ${[v.brand, v.model].filter(Boolean).join(' ')}`
-                          : ''}
                         {!v.active ? ` ${tCommon('inactiveSuffix')}` : ''}
                       </option>
                     ))}

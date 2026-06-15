@@ -116,9 +116,6 @@ export function TrailerDetailModal({
               )
             : emptyValue(),
         },
-        { label: f('brand'), value: textValue(trailer.brand) },
-        { label: f('model'), value: textValue(trailer.model) },
-        { label: f('year'), value: numValue(trailer.year) },
       ],
     },
     {

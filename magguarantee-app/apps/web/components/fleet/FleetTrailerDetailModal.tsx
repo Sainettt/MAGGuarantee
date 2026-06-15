@@ -94,9 +94,6 @@ export function FleetTrailerDetailModal({
           label: tFields('trailerType'),
           value: textValue(trailer.trailerTypeName),
         },
-        { label: tFields('brand'), value: textValue(trailer.brand) },
-        { label: tFields('model'), value: textValue(trailer.model) },
-        { label: tFields('year'), value: numValue(trailer.year) },
       ],
     },
   ];

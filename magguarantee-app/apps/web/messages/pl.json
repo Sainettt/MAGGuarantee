@@ -417,9 +417,6 @@
       "carrier": "Przewoźnik",
       "plateNumber": "Numer rejestracyjny",
       "sideNumber": "Numer boczny",
-      "brand": "Marka",
-      "model": "Model",
-      "year": "Rok",
       "type": "Typ",
       "euro": "Norma EURO",
       "certificateL": "Certyfikat L",
@@ -521,9 +518,6 @@
       "carrier": "Przewoźnik",
       "plateNumber": "Numer rejestracyjny",
       "trailerType": "Typ naczepy",
-      "brand": "Marka",
-      "model": "Model",
-      "year": "Rok",
       "innerLength": "Długość wewn. (m)",
       "innerWidth": "Szerokość wewn. (m)",
       "innerHeight": "Wysokość wewn. (m)",
@@ -966,7 +960,6 @@
       "columns": {
         "plate": "Numer rejestracyjny",
         "side": "Numer boczny",
-        "brandModel": "Marka / model",
         "type": "Typ",
         "active": "Status"
       }
@@ -987,7 +980,6 @@
       "columns": {
         "plate": "Numer rejestracyjny",
         "type": "Typ",
-        "brandModel": "Marka / model",
         "active": "Status"
       }
     },
@@ -1041,7 +1033,6 @@
       "columns": {
         "plate": "Nr rej.",
         "side": "Nr boczny",
-        "brandModel": "Marka / model",
         "type": "Typ",
         "active": "Status"
       }
@@ -1061,7 +1052,6 @@
       "columns": {
         "plate": "Nr rej.",
         "type": "Typ",
-        "brandModel": "Marka / model",
         "active": "Status"
       }
     },
@@ -1116,7 +1106,6 @@
       "columns": {
         "plate": "Nr rej.",
         "side": "Nr boczny",
-        "brandModel": "Marka / model",
         "type": "Typ",
         "active": "Status"
       }
@@ -1147,7 +1136,6 @@
       "columns": {
         "plate": "Nr rej.",
         "type": "Typ",
-        "brandModel": "Marka / model",
         "active": "Status"
       }
     }
@@ -1379,7 +1367,6 @@
         "columns": {
           "plate": "Numer rejestracyjny",
           "side": "Numer boczny",
-          "brandModel": "Marka / model",
           "type": "Typ",
           "status": "Status"
         }
@@ -1410,7 +1397,6 @@
         "columns": {
           "plate": "Numer rejestracyjny",
           "type": "Typ",
-          "brandModel": "Marka / model",
           "status": "Status"
         }
       }

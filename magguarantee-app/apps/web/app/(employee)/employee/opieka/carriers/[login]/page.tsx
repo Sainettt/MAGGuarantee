@@ -276,12 +276,6 @@ function VehiclesTable({ rows, isLoading }: VehiclesTableProps) {
         cell: (row) => row.sideNumber ?? '—',
       },
       {
-        id: 'brand',
-        header: t('columns.brandModel'),
-        cell: (row) =>
-          [row.brand, row.model].filter(Boolean).join(' ') || '—',
-      },
-      {
         id: 'type',
         header: t('columns.type'),
         cell: (row) => row.type ?? '—',
@@ -399,12 +393,6 @@ function TrailersTable({ rows, isLoading }: TrailersTableProps) {
           row.trailerType?.shortCode
             ? `[${row.trailerType.shortCode}] ${row.trailerType.name}`
             : (row.trailerType?.name ?? '—'),
-      },
-      {
-        id: 'brand',
-        header: t('columns.brandModel'),
-        cell: (row) =>
-          [row.brand, row.model].filter(Boolean).join(' ') || '—',
       },
       {
         id: 'active',

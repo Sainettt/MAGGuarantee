@@ -107,12 +107,6 @@ export default function TrailersPage() {
             : (row.trailerType?.name ?? '—'),
       },
       {
-        id: 'brand',
-        header: t('fields.brand'),
-        cell: (row) =>
-          [row.brand, row.model].filter(Boolean).join(' ') || '—',
-      },
-      {
         id: 'active',
         header: t('fields.active'),
         cell: (row) =>

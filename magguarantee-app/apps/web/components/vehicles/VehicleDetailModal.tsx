@@ -41,7 +41,6 @@ import {
 import {
   boolValue,
   dateValue,
-  emptyValue,
   listValue,
   monoValue,
   textValue,
@@ -97,13 +96,9 @@ export function VehicleDetailModal({
     <Badge variant="muted">{tCommon('inactive')}</Badge>
   );
 
-  // ── Subtitle — brand + model, falling back to the carrier name ──────
-  const brandModel = [vehicle.brand, vehicle.model].filter(Boolean).join(' ');
+  // ── Subtitle — carrier name (or login) ─────────────────────────────
   const subtitle =
-    brandModel ||
-    vehicle.carrier?.name ||
-    vehicle.carrier?.login ||
-    undefined;
+    vehicle.carrier?.name || vehicle.carrier?.login || undefined;
 
   /** €/km rate — `formatEur` already renders its own em-dash for null. */
   const rateValue = (v: number | null | undefined): ReactNode => (
@@ -118,17 +113,6 @@ export function VehicleDetailModal({
       rows: [
         { label: f('plateNumber'), value: monoValue(vehicle.plateNumber) },
         { label: f('sideNumber'), value: textValue(vehicle.sideNumber) },
-        { label: f('brand'), value: textValue(vehicle.brand) },
-        { label: f('model'), value: textValue(vehicle.model) },
-        {
-          label: f('year'),
-          value:
-            vehicle.year != null ? (
-              <span className="tabular-nums">{vehicle.year}</span>
-            ) : (
-              emptyValue()
-            ),
-        },
         // `type` (MEGA/STD/COIL) and `euro` (V/VI) are raw enum codes — the
         // form/table render them verbatim, so do the same here.
         { label: f('type'), value: textValue(vehicle.type) },

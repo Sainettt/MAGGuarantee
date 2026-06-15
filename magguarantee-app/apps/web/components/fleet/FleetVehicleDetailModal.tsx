@@ -32,7 +32,6 @@ import {
 import {
   boolValue,
   dateValue,
-  emptyValue,
   listValue,
   monoValue,
   textValue,
@@ -66,9 +65,6 @@ export function FleetVehicleDetailModal({
     <Badge variant="muted">{tCommon('inactive')}</Badge>
   );
 
-  const brandModel = [vehicle.brand, vehicle.model].filter(Boolean).join(' ');
-  const subtitle = brandModel || undefined;
-
   const sections: EntityDetailSection[] = [
     {
       title: tSections('identification'),
@@ -76,17 +72,6 @@ export function FleetVehicleDetailModal({
       rows: [
         { label: tFields('plateNumber'), value: monoValue(vehicle.plateNumber) },
         { label: tFields('sideNumber'), value: textValue(vehicle.sideNumber) },
-        { label: tFields('brand'), value: textValue(vehicle.brand) },
-        { label: tFields('model'), value: textValue(vehicle.model) },
-        {
-          label: tFields('year'),
-          value:
-            vehicle.year != null ? (
-              <span className="tabular-nums">{vehicle.year}</span>
-            ) : (
-              emptyValue()
-            ),
-        },
         // `type` (MEGA/STD/COIL) and `euro` (V/VI) are raw enum codes.
         { label: tFields('type'), value: textValue(vehicle.type) },
         { label: tFields('euro'), value: textValue(vehicle.euro) },
@@ -148,7 +133,6 @@ export function FleetVehicleDetailModal({
       open={open}
       onOpenChange={onOpenChange}
       title={<span className="font-mono">{vehicle.plateNumber}</span>}
-      subtitle={subtitle}
       badges={badges}
       sections={sections}
     />

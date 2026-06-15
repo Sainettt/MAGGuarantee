@@ -61,12 +61,6 @@ export default function CarrierTrailersPage() {
             : (row.trailerType?.name ?? '—'),
       },
       {
-        id: 'brand',
-        header: tColumns('brandModel'),
-        cell: (row) =>
-          [row.brand, row.model].filter(Boolean).join(' ') || '—',
-      },
-      {
         id: 'active',
         header: tColumns('status'),
         cell: (row) =>

@@ -245,9 +245,6 @@ model Vehicle {
   // REPLACED by dispatchTeamId (FK → new Team model). NOT migrated yet — the
   // current schema above is still single-dispatcher.
 
-  brand        String?
-  model        String?
-  year         Int?
   notes        String?
   certificateL Boolean       // STRICT, TAK/NIE (was enum L1/L2/L3 until 2026-05)
   euro         EuroNorm      // STRICT
@@ -399,9 +396,6 @@ model Trailer {
   plateNumber        String
   trailerTypeId      String      @db.Uuid          // STRICT (FK required)
   trailerType        TrailerType @relation(fields: [trailerTypeId], references: [id])
-  brand              String?
-  model              String?
-  year               Int?
   active             Boolean     @default(true)
   addedAt            DateTime    @default(now())
   // `nextInspectionDate` dropped 2026-06 — inspection date no longer tracked
@@ -838,7 +832,7 @@ shows whether the verifier overrode the carrier's declared hours.
 | E | DataDezaktywacji | `deactivatedAt` |
 | F | UtworzonePrzez | `createdById` |
 | G | Planista (имя) | → FK `plannerId` (lookup user) |
-| I-K | Marka, Model, Rok | `brand`, `model`, `year` |
+| I-K | Marka, Model, Rok | dropped 2026-06 — brand/model/year no longer tracked on the vehicle |
 | L | Uwagi | `notes` |
 | M | CertyfikatL | `certificateL` (Boolean — was enum L1/L2/L3 до 2026-05) |
 | N | EURO | `euro` |
@@ -970,6 +964,7 @@ shows whether the verifier overrode the carrier's declared hours.
 | `20260529111419_carrier_attachment_category_add_adr` | Чисто аддитивная миграция enum. Значение `adr` добавлено в `CarrierAttachmentCategory` (между `kreptd` и `other`) — обязательный ADR-документ перевозчика (один официальный документ со списком ADR-машин/водителей, грузится как файл-attachment). In-place `ALTER TYPE "CarrierAttachmentCategory" ADD VALUE 'adr'` (без пересоздания типа — в отличие от удаления vehicle-`adr`, т.к. Postgres умеет ADD VALUE in-place). Ничего ещё не использует новое значение, так что отдельная транзакция не нужна. |
 | `20260601120000_drop_vehicle_trailer_inspection_and_vehicle_adr_classes` | Деструктивный `DROP COLUMN` (user-confirmed full removal — UI + API + DB). Удаляет `vehicles.nextInspectionDate` (DATE), `trailers.nextInspectionDate` (DATE) и `vehicles.adrClasses` (TEXT[]). Сохранены отдельные соседние поля: `vehicles.adr` / `drivers.adr` (boolean permit-флаги), `vehicles.wasteCountries`, а также VehicleAttachment/DriverAttachment с ADR-сертификатами. Существующие значения теряются (подтверждено), без backfill. Hand-authored по существующей конвенции (без `--create-only`, т.к. на момент создания БД была недоступна) — не применялась к live-БД, применится через `prisma migrate deploy`. |
 | `20260601130000_driver_rename_passport_to_id_document` | Переименование `drivers.passportNumber` → `idDocumentNumber` (ALTER TABLE … RENAME COLUMN, без потери данных). Колонка теперь хранит номер любого удостоверения личности (паспорт, dowód osobisty и т.п.), а не только паспорта; тип, nullability и casing не меняются. Hand-authored по существующей конвенции (БД была недоступна на момент создания) — не применялась к live-БД, применится через `prisma migrate deploy`. |
+| `20260615120000_drop_vehicle_trailer_brand_model_year` | Деструктивный `DROP COLUMN` (user-confirmed full removal — UI + API + DB). Удаляет `vehicles.brand`, `vehicles.model`, `vehicles.year`, `trailers.brand`, `trailers.model`, `trailers.year` — описательные характеристики авто/прицепа, выпиленные из продукта. БД greenfield (пустая + seed-only), поэтому plain DROP COLUMN корректен — без backfill, без down-миграции. Соседние поля (`notes`, размеры/оборудование прицепа) не затронуты. |
 
 Production deploy: `prisma migrate deploy` в CI/CD пайплайне (без `--create-only`).
 

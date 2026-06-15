@@ -117,7 +117,6 @@ interface Props {
 type FormValues = CreateVehicleDto;
 
 const NUMERIC_FIELDS = [
-  'year',
   'rateDe',
   'rateUe',
   'rateExport',
@@ -207,9 +206,6 @@ export function VehicleSheet({
         active: vehicle.active,
         plannerId: vehicle.plannerId ?? undefined,
         dispatcherId: vehicle.dispatcherId ?? undefined,
-        brand: vehicle.brand ?? '',
-        model: vehicle.model ?? '',
-        year: vehicle.year ?? undefined,
         notes: vehicle.notes ?? '',
         certificateL: vehicle.certificateL,
         euro: vehicle.euro,
@@ -466,40 +462,6 @@ export function VehicleSheet({
                     <Input
                       id="vehicle-sideNumber"
                       {...form.register('sideNumber')}
-                    />
-                  </FormField>
-                  <FormField
-                    label={t('fields.brand')}
-                    error={errs.brand?.message}
-                    htmlFor="vehicle-brand"
-                  >
-                    <Input
-                      id="vehicle-brand"
-                      {...form.register('brand')}
-                    />
-                  </FormField>
-                  <FormField
-                    label={t('fields.model')}
-                    error={errs.model?.message}
-                    htmlFor="vehicle-model"
-                  >
-                    <Input
-                      id="vehicle-model"
-                      {...form.register('model')}
-                    />
-                  </FormField>
-                  <FormField
-                    label={t('fields.year')}
-                    error={errs.year?.message}
-                    htmlFor="vehicle-year"
-                  >
-                    <Input
-                      id="vehicle-year"
-                      type="number"
-                      {...form.register('year', {
-                        setValueAs: (v) =>
-                          v === '' || v === null ? undefined : Number(v),
-                      })}
                     />
                   </FormField>
                   <FormField
@@ -938,9 +900,6 @@ function getDefaults(): FormValues {
     active: true,
     plannerId: '' as unknown as string,
     dispatcherId: '' as unknown as string,
-    brand: '',
-    model: '',
-    year: undefined,
     notes: '',
     certificateL: false,
     // EURO norm — V / VI only since the DB enum dropped III / IV.
