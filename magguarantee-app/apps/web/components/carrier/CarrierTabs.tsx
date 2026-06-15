@@ -42,7 +42,7 @@ const TABS: readonly Tab[] = [
   {
     href: '/carrier/delegations',
     matchPrefix: '/carrier/delegations',
-    emoji: '🚀',
+    emoji: '🗺️',
     labelKey: 'delegations',
   },
   // Phase 7.8 — «Przebieg» (docs/14 §7.8): the read-only weekly km tab scoped

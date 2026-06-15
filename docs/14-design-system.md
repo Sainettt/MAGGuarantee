@@ -328,7 +328,7 @@ npm exec -w web -- shadcn@latest add button input label dialog \
 ## Иконки
 
 В legacy используются эмодзи прямо в тексте:
-- 📋 Wnioski, ➕ Nowy, 🚛 Flota, 🚀 Wyjazdy, ✅ Zaakceptowano, ❌ Odrzucono, ⏳ Weryfikacja, ⚠️ Reklamacja, 🔄 Odśwież, 🌙 Ciemny, 🏢 Panel, 🔍 Szukaj, 📅 (date picker), ⎘ (copy).
+- 📋 Wnioski, ➕ Nowy, 🚛 Flota, 🗺️ Wyjazdy, ✅ Zaakceptowano, ❌ Odrzucono, ⏳ Weryfikacja, ⚠️ Reklamacja, 🔄 Odśwież, 🌙 Ciemny, 🏢 Panel, 🔍 Szukaj, 📅 (date picker), ⎘ (copy).
 
 **Решение:**
 - В заголовках разделов и важных кнопках — эмодзи оставляем (быстрое опознание, узнаваемость).
@@ -1063,7 +1063,7 @@ Header is the standard `<AppHeader>` (logo + role badge "Przewoźnik" + `<Langua
 | Tab item (active) | `text-brand border-brand` (no fill — only red underline + red text) |
 | Tab item (with badge count) | append `<span class="ml-2 rounded-full bg-brand/10 dark:bg-brand/20 text-brand text-xs px-2 py-0.5">N</span>` |
 
-**Top-level tabs:** `Wnioski` / `Nowy` / `Flota` / `Wyjazdy`. Emoji prefix kept per voice rules (📋 ➕ 🚛 🚀).
+**Top-level tabs:** `Wnioski` / `Nowy` / `Flota` / `Wyjazdy`. Emoji prefix kept per voice rules (📋 ➕ 🚛 🗺️).
 
 **Flota sub-tabs** (rendered inside `/carrier/fleet/*` layout, below the main tab bar): `Auta` (read-only) / `Kierowcy` (CRUD) / `Naczepy` (CRUD). Same visual pattern as top tabs but rendered as `<div role="tablist">` with `text-xs font-bold uppercase tracking-wider` labels and reduced padding `px-3 py-2`.
 
