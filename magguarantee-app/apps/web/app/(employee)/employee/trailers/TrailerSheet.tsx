@@ -112,8 +112,18 @@ export function TrailerSheet({
   const typesQ = useTrailerTypes({ active: true });
 
   // Persist create-mode drafts; wizard mode opts out (see VehicleSheet).
+  // `sanitize` drops any persisted key no longer in the form shape (e.g. the
+  // brand/model/year fields removed 2026-06) — otherwise the strict
+  // CreateTrailerSchema rejects the whole form the instant a stale draft
+  // hydrates, even though nothing the user can see is wrong.
   const draft = useFormDraft(form, DRAFT_KEY, {
     enabled: !isEdit && !isWizard,
+    sanitize: (raw) => {
+      const allowed = new Set(Object.keys(getDefaults()));
+      return Object.fromEntries(
+        Object.entries(raw).filter(([k]) => allowed.has(k)),
+      ) as Partial<FormValues>;
+    },
   });
 
   useEffect(() => {

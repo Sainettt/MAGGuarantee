@@ -25,9 +25,17 @@ const PlateSchema = z.string().min(2).max(16);
  */
 const trailerAttributeFields = {
   belts: z.boolean().optional(),
-  beltsCount: z.number().int().min(0).optional(),
+  // `.nullable()` (matching UpdateTrailerSchema): the create form can hold a
+  // `null` count (e.g. a hydrated draft, or RHF clearing the conditionally
+  // rendered input) while its checkbox is OFF. Without nullable the base
+  // `z.number()` rejects null with "Expected number, received null" on the
+  // count field even when the checkbox was never touched — the validation
+  // fails before the cross-field refine (which already null-checks) can ignore
+  // it. `cleanForm` strips null before the request, so the wire payload is
+  // unchanged. See trailerCountsRefine for the "checked ⇒ count required" rule.
+  beltsCount: z.number().int().min(0).nullable().optional(),
   mats: z.boolean().optional(),
-  matsCount: z.number().int().min(0).optional(),
+  matsCount: z.number().int().min(0).nullable().optional(),
   innerLength: z.number().nonnegative().optional(),
   innerWidth: z.number().nonnegative().optional(),
   innerHeight: z.number().nonnegative().optional(),
