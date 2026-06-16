@@ -127,7 +127,14 @@ export function VerifyForm() {
         qc.setQueryData(ME_QUERY_KEY, user);
         clearLoginSession();
         const role = user.role as Role;
-        const destination = resolveNext(next, role);
+        // Phase 9 §9.3 — forced-change gate. When the session carries
+        // mustChangePassword (admin-issued temp password), route to the
+        // non-dismissible change-password interstitial instead of the app. The
+        // middleware also enforces this server-side, but redirecting here skips
+        // a redundant gated-path → gate hop.
+        const destination = user.mustChangePassword
+          ? '/login/change-password'
+          : resolveNext(next, role);
         // HARD NAVIGATION (not router.replace) — critical for re-login flows.
         //
         // When an access-token expires mid-session, the user is bounced to

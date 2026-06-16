@@ -98,13 +98,19 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 | Method + Path | GAS-аналог | Назначение |
 |---|---|---|
 | POST `/auth/login` | `sendLoginCode` (`Code.gs:1003`) | Принимает `{login, password}`. Если ok → `{ codeSent: true, maskedEmail: 'ma***@magtrans.eu', sessionToken }` (sessionToken — короткоживущий, нужен для verify) |
-| POST `/auth/verify-code` | `verifyLoginCode` (`Code.gs:1064`) | Принимает `{sessionToken, code}`. Возвращает `{accessToken, refreshToken, user}`. Set-cookie если режим cookie. |
+| POST `/auth/verify-code` | `verifyLoginCode` (`Code.gs:1064`) | Принимает `{sessionToken, code}`. Возвращает `{accessToken, refreshToken, user}` (`user` несёт `mustChangePassword`). Set-cookie если режим cookie. |
 | POST `/auth/resend-code` | `resendLoginCode` (`Code.gs:1131`) | Принимает `{sessionToken}`. Rate-limited. |
-| POST `/auth/refresh` | — (новое, не было в GAS) | Refresh access из refresh. Rotation. |
+| POST `/auth/refresh` | — (новое, не было в GAS) | Refresh access из refresh. Rotation. `user` несёт `mustChangePassword`. |
 | POST `/auth/logout` | — | Инвалидирует refresh-токен (записывает в `revokedAt`). |
-| GET `/auth/me` | `validateCaller` | Возвращает текущего user-а на основе access-токена. |
+| GET `/auth/me` | `validateCaller` | Возвращает текущего user-а на основе access-токена (вкл. `mustChangePassword`). |
+| POST `/auth/forgot-password` | — (новое) | `{login}`. **Always 200** `{sessionToken, maskedEmail}` (anti-enumeration: decoy для неизвестного login). Шлёт reset-код на email (Redis `pwreset:*`, attempts/lockout как 2FA). Rate 5/min/IP. |
+| POST `/auth/reset-password` | — (новое) | `{sessionToken, code, newPassword}` → 204. Верифицирует код, хеширует, ставит `passwordChangedAt`, чистит `mustChangePassword`, **отзывает все refresh-токены**. Без авто-логина. Rate 10/min. |
+| POST `/auth/resend-reset-code` | — (новое) | `{sessionToken}`. Cooldown как `resend-code`. Rate 2/min. |
+| POST `/auth/change-password` | — (новое, authenticated) | `{newPassword}` — forced/voluntary смена. Чистит `mustChangePassword`, ставит `passwordChangedAt`, выдаёт свежую пару токенов (claim сброшен), **отзывает прочие сессии**. |
 | GET `/auth/google` | — (опц.) | Redirect на Google OAuth |
 | GET `/auth/google/callback` | — (опц.) | Колбэк OAuth, выдаёт JWT |
+
+> **JWT-claim `mustChangePassword`.** Access-токен несёт флаг — web-middleware декодирует `mt_access` и гейтит навигацию на `/login/change-password`, пока флаг стоит. Снимается после `change-password` (свежая пара токенов).
 
 ### Users (admin only) — `/api/v1/users`
 
@@ -116,7 +122,7 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 | PATCH `/users/:id` | Обновить |
 | POST `/users/:id/deactivate` | `Aktywny=Nie` + email |
 | POST `/users/:id/reactivate` | + email |
-| POST `/users/:id/reset-password` | Генерит новый, шлёт email |
+| POST `/users/:id/reset-password` | Body `{mode:'generate'}` или `{mode:'custom', password}`. Ставит `mustChangePassword=true` + `passwordChangedAt`, отзывает refresh-токены юзера, возвращает `temporaryPassword`. (Email-доставка — Phase 9.) |
 | DELETE `/users/:id` | Soft delete |
 
 ### Carriers — `/api/v1/carriers`

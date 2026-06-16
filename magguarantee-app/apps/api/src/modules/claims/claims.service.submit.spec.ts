@@ -63,6 +63,7 @@ function makeAuth(
     email: 'carrier@example.com',
     name: 'Carrier One',
     role,
+    mustChangePassword: false,
   };
 }
 

@@ -54,6 +54,7 @@ function makeAuth(
     email: 'actor@magtrans.eu',
     name: 'Actor',
     role,
+    mustChangePassword: false,
   };
 }
 

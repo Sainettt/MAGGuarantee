@@ -29,6 +29,19 @@ export const REDIS_KEY = {
   session: (sessionToken: string) => `2fa:session:${sessionToken}`,
 } as const;
 
+// ── Password-reset Redis key prefixes (own namespace) ───
+// Same attempts/lockout/cooldown semantics as the 2FA flow, but a distinct
+// `pwreset:*` namespace so a reset code can never satisfy a login verify and
+// vice-versa. The code is keyed by `sessionToken` (64-char hex) issued by
+// /auth/forgot-password.
+export const PWRESET_REDIS_KEY = {
+  code: (sessionToken: string) => `pwreset:code:${sessionToken}`,
+  attempts: (sessionToken: string) => `pwreset:attempts:${sessionToken}`,
+  lockout: (sessionToken: string) => `pwreset:lockout:${sessionToken}`,
+  resend: (sessionToken: string) => `pwreset:resend:${sessionToken}`,
+  session: (sessionToken: string) => `pwreset:session:${sessionToken}`,
+} as const;
+
 // ── 2FA tuning (defaults — overridden by AppConfig at runtime) ──
 export const DEFAULT_CODE_TTL_SECONDS = 600;
 export const DEFAULT_MAX_ATTEMPTS = 5;

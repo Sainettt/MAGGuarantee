@@ -31,7 +31,7 @@ const VEHICLE_ID = 'veh-1';
 const WER_SUB = 'wer-1';
 
 function auth(role: AuthUser['role'], sub: string): AuthUser {
-  return { sub, login: 'actor', email: 'actor@magtrans.eu', name: 'Actor', role };
+  return { sub, login: 'actor', email: 'actor@magtrans.eu', name: 'Actor', role, mustChangePassword: false };
 }
 
 function kmRow(overrides: Partial<VehicleDailyKmRow> = {}): VehicleDailyKmRow {

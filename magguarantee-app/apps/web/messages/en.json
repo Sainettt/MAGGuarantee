@@ -35,7 +35,9 @@
     "pagination": "Pagination",
     "prevPage": "Previous page",
     "nextPage": "Next page",
-    "clearFilters": "Clear filters"
+    "clearFilters": "Clear filters",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password"
   },
   "confirmDelete": {
     "title": "Permanently delete — {entityLabel}",
@@ -87,10 +89,18 @@
       "createdAt": "Created"
     },
     "actions": {
-      "resetPassword": "Reset password",
+      "resetPassword": "Reset password…",
       "deactivate": "Deactivate",
       "reactivate": "Reactivate",
       "delete": "Delete permanently"
+    },
+    "resetDialog": {
+      "title": "Reset user password",
+      "description": "You're setting a new password for <strong>{login}</strong>.",
+      "optionAuto": "Generate automatically",
+      "optionCustom": "Set a custom password",
+      "forceNote": "The user will be required to change this password on next login.",
+      "confirm": "Reset password"
     },
     "resetPassword": {
       "title": "New temporary password",
@@ -186,6 +196,38 @@
     "errorNetwork": "No connection. Please try again.",
     "resendSuccess": "New code sent.",
     "resendCooldown": "Wait {seconds}s before resending."
+  },
+  "forgotPassword": {
+    "subtitle": "Reset password",
+    "submit": "Send code",
+    "backToLogin": "Back to login",
+    "sentTitle": "If the account exists, we've sent a code",
+    "sentBody": "A verification code was sent to <strong>{email}</strong>.",
+    "enterCode": "Enter code",
+    "resetSubtitle": "Set a new password",
+    "codeTtl": "Code valid for 10 minutes",
+    "newPasswordLabel": "New password",
+    "confirmPasswordLabel": "Repeat password",
+    "setPassword": "Set password",
+    "successToast": "Password changed. Please sign in.",
+    "errorExpired": "Code expired. Request a new one.",
+    "errorWrongCode": "Invalid code"
+  },
+  "changePassword": {
+    "subtitle": "Set your own password",
+    "explainer": "This is a temporary password — set your own to continue.",
+    "newPasswordLabel": "New password",
+    "confirmPasswordLabel": "Repeat password",
+    "submit": "Save and continue",
+    "logout": "Log out",
+    "successToast": "Password set."
+  },
+  "passwordPolicy": {
+    "label": "Password requirements",
+    "minLen": "at least 10 characters",
+    "letter": "at least 1 letter",
+    "digit": "at least 1 digit",
+    "mismatch": "Passwords don't match"
   },
   "roles": {
     "admin": "Administrator",

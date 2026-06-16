@@ -34,6 +34,17 @@ interface CodeBoxGroupProps {
   locked?: boolean;
   /** Reset the group to all-empty (e.g. after wrong-code, focus first). */
   resetToken?: number;
+  /**
+   * Auto-fire `onComplete(code)` the moment the 6th digit is entered.
+   * Default `true` (the 2FA verify screen submits immediately). The Phase 9
+   * reset screen passes `false` — there the code is only one of several fields,
+   * so completion must NOT trigger a submit; the parent reads the live code via
+   * `onChange` and decides what to do (move focus, wait for the button).
+   */
+  autoSubmit?: boolean;
+  /** Fires on every value change with the current concatenated code. */
+  onChange?(code: string): void;
+  /** Fires once when all 6 digits are present — only when `autoSubmit`. */
   onComplete(code: string): void;
 }
 
@@ -42,6 +53,8 @@ export function CodeBoxGroup({
   error,
   locked,
   resetToken,
+  autoSubmit = true,
+  onChange,
   onComplete,
 }: CodeBoxGroupProps) {
   const [values, setValues] = useState<string[]>(EMPTY);
@@ -61,9 +74,20 @@ export function CodeBoxGroup({
     requestAnimationFrame(() => focusIndex(0));
   }, [resetToken, focusIndex]);
 
-  // When all six are filled and we haven't already reported this code, fire.
+  // Report the live code on every change (so a parent form can keep its own
+  // copy without waiting for completion — used by the reset screen).
   useEffect(() => {
-    if (locked) return;
+    onChange?.(values.join(''));
+    // `onChange` is expected stable (useCallback); we intentionally depend on
+    // `values` only so we don't re-fire on every parent re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [values]);
+
+  // When all six are filled and we haven't already reported this code, fire.
+  // Suppressed when `autoSubmit` is false — the reset screen submits via its
+  // own button, not on the 6th digit.
+  useEffect(() => {
+    if (locked || !autoSubmit) return;
     const all = values.join('');
     if (all.length === LENGTH && /^\d{6}$/.test(all)) {
       if (completedRef.current !== all) {
@@ -73,7 +97,7 @@ export function CodeBoxGroup({
     } else {
       completedRef.current = null;
     }
-  }, [values, locked, onComplete]);
+  }, [values, locked, autoSubmit, onComplete]);
 
   const setAt = useCallback((i: number, v: string) => {
     setValues((prev) => {

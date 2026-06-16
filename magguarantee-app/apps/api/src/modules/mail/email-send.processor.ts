@@ -34,12 +34,16 @@ export class EmailSendProcessor extends WorkerHost {
       case '2fa-code':
         await this.mail.send2faCode(data.email, data.code);
         return;
+      case 'password-reset':
+        await this.mail.sendPasswordReset(data.email, data.code, data.ttlMinutes);
+        return;
       default: {
-        // Exhaustiveness guard — a new template variant must add a case.
-        const exhaustive: never = data.template;
+        // Exhaustiveness guard — a new template variant must add a case above
+        // (TS flags this assignment if `EmailSendJobData` gains a member).
+        const exhaustive: never = data;
         this.logger.warn({
           msg: 'email-send: unknown template, dropping job',
-          template: exhaustive,
+          template: (exhaustive as { template?: string }).template,
         });
         return;
       }

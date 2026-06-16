@@ -120,6 +120,11 @@ model User {
   login          String    @unique
   email          String    @unique
   passwordHash   String?  // bcrypt; nullable to allow email-only auth
+  // Forced password rotation. Set true whenever an admin issues a password
+  // (create or reset); user must set a new one on next login (after 2FA).
+  // Self-service / forced change clears it. Migration 20260616120000.
+  mustChangePassword Boolean @default(false)
+  passwordChangedAt  DateTime? // stamped on every password change; NULL until first change
   role           Role
   name           String?
   active         Boolean   @default(true)

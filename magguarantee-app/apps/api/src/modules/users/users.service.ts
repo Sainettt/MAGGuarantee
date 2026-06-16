@@ -8,6 +8,7 @@ import {
 
 import type {
   CreateUserDto,
+  ResetPasswordModeDto,
   UpdateUserDto,
   UserDtoFull,
   UserFilters,
@@ -15,6 +16,7 @@ import type {
 } from '@magguarantee/shared';
 
 import { PasswordService } from '../auth/password.service';
+import { RefreshTokenRepository } from '../auth/refresh-token.repository';
 import { generateRandomPassword } from '../../common/utils/random-password';
 import {
   isPrismaUniqueViolation,
@@ -39,6 +41,7 @@ export class UsersService {
   constructor(
     private readonly repo: UsersRepository,
     private readonly passwords: PasswordService,
+    private readonly refreshTokens: RefreshTokenRepository,
   ) {}
 
   // ── Admin CRUD ───────────────────────────────────────────
@@ -87,6 +90,11 @@ export class UsersService {
         passwordHash,
         liderEmail: dto.liderEmail ?? null,
         active: dto.active ?? true,
+        // Force is always on: every admin-issued password (generated OR custom)
+        // must be changed on first login. The issuance counts as a change, so
+        // stamp `passwordChangedAt` too (docs/15-auth-strategy.md).
+        mustChangePassword: true,
+        passwordChangedAt: new Date(),
       });
     } catch (err) {
       throw uniqueViolationToConflict(
@@ -154,17 +162,39 @@ export class UsersService {
     return this.toDto(updated);
   }
 
-  async resetPassword(id: string): Promise<UserWithTemporaryPasswordDto> {
+  /**
+   * Admin reset-password. Body is a discriminated union:
+   *  - `{ mode: 'generate' }`         → API generates the password.
+   *  - `{ mode: 'custom', password }` → admin supplies it (PasswordSchema).
+   *
+   * Either way: set `mustChangePassword=true` (force is always on), stamp
+   * `passwordChangedAt`, persist the hash, REVOKE every refresh token of the
+   * target user (a reset must kill the victim's old sessions), and return the
+   * effective plaintext once as `temporaryPassword`.
+   */
+  async resetPassword(
+    id: string,
+    mode: ResetPasswordModeDto,
+  ): Promise<UserWithTemporaryPasswordDto> {
     const existing = await this.repo.findById(id);
     if (!existing) throw new NotFoundException('Użytkownik nie znaleziony');
-    const plain = generateRandomPassword();
+    const plain =
+      mode.mode === 'custom' ? mode.password : generateRandomPassword();
     const passwordHash = await this.passwords.hash(plain);
-    const updated = await this.repo.update(id, { passwordHash });
-    // TODO: replace with email send when MailService.sendAccountReset is implemented (Phase 9).
+    const updated = await this.repo.update(id, {
+      passwordHash,
+      mustChangePassword: true,
+      passwordChangedAt: new Date(),
+    });
+    // A reset invalidates the victim's existing sessions.
+    const revoked = await this.refreshTokens.revokeAllForUser(id);
+    // TODO: replace with email send when the admin-reset email ships (Phase 9).
     this.logger.log({
-      msg: 'password reset issued (Phase 2 stub — email pending)',
+      msg: 'admin password reset issued; sessions revoked',
       userId: id,
       login: updated.login,
+      mode: mode.mode,
+      revokedSessions: revoked,
     });
     return { ...this.toDto(updated), temporaryPassword: plain };
   }
@@ -186,6 +216,7 @@ export class UsersService {
       role: row.role,
       active: row.active,
       liderEmail: row.liderEmail,
+      mustChangePassword: row.mustChangePassword,
       lastLoginAt: row.lastLoginAt ? row.lastLoginAt.toISOString() : null,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
@@ -216,5 +247,23 @@ export class UsersService {
 
   updateLastLogin(id: string, at: Date): Promise<void> {
     return this.repo.updateLastLogin(id, at);
+  }
+
+  /**
+   * Persist a password change initiated by the auth slice (self-service reset
+   * confirm / forced change). Sets the new hash, stamps `passwordChangedAt`,
+   * and applies the `mustChangePassword` flag. Token revocation is the
+   * caller's responsibility (AuthService owns refresh-token lifecycle).
+   */
+  async applyPasswordChange(
+    id: string,
+    passwordHash: string,
+    opts: { mustChangePassword: boolean },
+  ): Promise<void> {
+    await this.repo.update(id, {
+      passwordHash,
+      passwordChangedAt: new Date(),
+      mustChangePassword: opts.mustChangePassword,
+    });
   }
 }

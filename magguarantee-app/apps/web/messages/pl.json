@@ -35,7 +35,9 @@
     "pagination": "Paginacja",
     "prevPage": "Poprzednia strona",
     "nextPage": "Następna strona",
-    "clearFilters": "Wyczyść filtry"
+    "clearFilters": "Wyczyść filtry",
+    "showPassword": "Pokaż hasło",
+    "hidePassword": "Ukryj hasło"
   },
   "confirmDelete": {
     "title": "Trwałe usunięcie — {entityLabel}",
@@ -87,10 +89,18 @@
       "createdAt": "Utworzono"
     },
     "actions": {
-      "resetPassword": "Zresetuj hasło",
+      "resetPassword": "Zresetuj hasło…",
       "deactivate": "Dezaktywuj",
       "reactivate": "Aktywuj",
       "delete": "Usuń trwale"
+    },
+    "resetDialog": {
+      "title": "Zresetuj hasło użytkownika",
+      "description": "Ustawiasz nowe hasło dla <strong>{login}</strong>.",
+      "optionAuto": "Wygeneruj automatycznie",
+      "optionCustom": "Ustaw własne hasło",
+      "forceNote": "Użytkownik będzie musiał zmienić to hasło przy następnym logowaniu.",
+      "confirm": "Zresetuj hasło"
     },
     "resetPassword": {
       "title": "Nowe hasło tymczasowe",
@@ -186,6 +196,38 @@
     "errorNetwork": "Brak połączenia. Spróbuj ponownie.",
     "resendSuccess": "Wysłano nowy kod.",
     "resendCooldown": "Odczekaj {seconds}s przed kolejnym wysłaniem."
+  },
+  "forgotPassword": {
+    "subtitle": "Zresetuj hasło",
+    "submit": "Wyślij kod",
+    "backToLogin": "Wróć do logowania",
+    "sentTitle": "Jeśli konto istnieje, wysłaliśmy kod",
+    "sentBody": "Kod weryfikacyjny trafił na adres <strong>{email}</strong>.",
+    "enterCode": "Wpisz kod",
+    "resetSubtitle": "Ustaw nowe hasło",
+    "codeTtl": "Kod ważny 10 minut",
+    "newPasswordLabel": "Nowe hasło",
+    "confirmPasswordLabel": "Powtórz hasło",
+    "setPassword": "Ustaw hasło",
+    "successToast": "Hasło zostało zmienione. Zaloguj się.",
+    "errorExpired": "Kod wygasł. Wyślij nowy.",
+    "errorWrongCode": "Nieprawidłowy kod"
+  },
+  "changePassword": {
+    "subtitle": "Ustaw własne hasło",
+    "explainer": "Hasło tymczasowe — ustaw własne, aby kontynuować.",
+    "newPasswordLabel": "Nowe hasło",
+    "confirmPasswordLabel": "Powtórz hasło",
+    "submit": "Zapisz i kontynuuj",
+    "logout": "Wyloguj się",
+    "successToast": "Hasło zostało ustawione."
+  },
+  "passwordPolicy": {
+    "label": "Wymagania dla hasła",
+    "minLen": "min. 10 znaków",
+    "letter": "co najmniej 1 litera",
+    "digit": "co najmniej 1 cyfra",
+    "mismatch": "Hasła nie są zgodne"
   },
   "roles": {
     "admin": "Administrator",

@@ -64,6 +64,7 @@ function userWith(role: Role): AuthUser {
     email: `${role}@magtrans.eu`,
     name: role,
     role,
+    mustChangePassword: false,
   };
 }
 

@@ -15,6 +15,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import type { UserRow } from '../users/users.repository';
 import { PasswordService } from './password.service';
+import { PasswordResetService } from './password-reset.service';
+import { RefreshTokenRepository } from './refresh-token.repository';
 import { TwoFactorService } from './two-factor.service';
 
 export interface TokenPair {
@@ -63,6 +65,8 @@ export class AuthService {
     private readonly users: UsersService,
     private readonly passwords: PasswordService,
     private readonly twoFactor: TwoFactorService,
+    private readonly passwordReset: PasswordResetService,
+    private readonly refreshTokens: RefreshTokenRepository,
     private readonly mail: MailService,
     private readonly jwt: JwtService,
     private readonly prisma: PrismaService,
@@ -150,6 +154,121 @@ export class AuthService {
     return { ok: true, cooldownSec: result.cooldownSec };
   }
 
+  // ── Forgot / reset password (anti-enumeration) ───────
+
+  /**
+   * Step 1 of the forgot-password flow. Keyed by `login`. ALWAYS returns the
+   * same `{ sessionToken, maskedEmail }` shape whether or not the account
+   * exists (docs/15-auth-strategy.md#account-enumeration, #reset-flooding):
+   *  - known login → issue a reset code into the `pwreset:*` namespace + email.
+   *  - unknown login → decoy sessionToken + plausible mask, send NOTHING.
+   */
+  async forgotPassword(
+    login: string,
+  ): Promise<{ sessionToken: string; maskedEmail: string }> {
+    const user = await this.users.findByLogin(login);
+
+    if (!user || !user.active || user.deletedAt || !user.email) {
+      const decoy = await this.passwordReset.issueDecoyToken();
+      return { sessionToken: decoy, maskedEmail: this.synthesizeMask(login) };
+    }
+
+    const { sessionToken, code } = await this.passwordReset.issueCode(user.id);
+    await this.mail.enqueuePasswordReset(user.email, code, 10);
+    return { sessionToken, maskedEmail: this.maskEmail(user.email) };
+  }
+
+  /**
+   * Step 2 — confirm with the reset code + a new password. Verifies the code
+   * (attempts/lockout via PasswordResetService), persists the new hash, stamps
+   * `passwordChangedAt`, clears `mustChangePassword`, and revokes ALL refresh
+   * tokens for the user (kills every old session). Does NOT auto-login — the
+   * user returns to /login.
+   */
+  async resetPassword(
+    sessionToken: string,
+    code: string,
+    newPassword: string,
+  ): Promise<void> {
+    const userId = await this.passwordReset.verifyCode(sessionToken, code);
+    const user = await this.users.findById(userId);
+    if (!user || !user.active || user.deletedAt) {
+      throw new UnauthorizedException('Account is no longer active');
+    }
+    const passwordHash = await this.passwords.hash(newPassword);
+    await this.users.applyPasswordChange(user.id, passwordHash, {
+      mustChangePassword: false,
+    });
+    await this.revokeAllForUser(user.id);
+    this.logger.log({
+      msg: 'password reset confirmed; all sessions revoked',
+      userId: user.id,
+    });
+  }
+
+  /**
+   * Resends the reset code under an existing session, honouring the 60s
+   * cooldown. Opaque on unknown/decoy sessions (anti-enumeration) — mirrors
+   * `resendCode` for the 2FA flow.
+   */
+  async resendResetCode(
+    sessionToken: string,
+  ): Promise<{ ok: true; cooldownSec: number }> {
+    const userId = await this.passwordReset.peekUserId(sessionToken);
+    if (!userId) {
+      return { ok: true, cooldownSec: 60 };
+    }
+    const result = await this.passwordReset.resend(sessionToken);
+    if (!result) {
+      return { ok: true, cooldownSec: 60 };
+    }
+    const user = await this.users.findById(userId);
+    if (user?.email) {
+      await this.mail.enqueuePasswordReset(user.email, result.code, 10);
+    }
+    return { ok: true, cooldownSec: result.cooldownSec };
+  }
+
+  // ── Change password (authenticated, forced-change) ───
+
+  /**
+   * Authenticated change-password — covers the forced-change flow. No
+   * current-password (the JWT session already proves identity; 2FA gated
+   * login). Persists the new hash, stamps `passwordChangedAt`, clears
+   * `mustChangePassword`, then mints a FRESH access+refresh pair carrying the
+   * cleared claim (so the middleware gate lifts immediately) and revokes the
+   * user's OTHER refresh tokens (keeps this session alive).
+   */
+  async changePassword(
+    userId: string,
+    newPassword: string,
+    ctx: { ipAddress?: string; userAgent?: string },
+  ): Promise<{ user: UserDto; tokens: TokenPair }> {
+    const user = await this.users.findById(userId);
+    if (!user || !user.active || user.deletedAt || !user.email) {
+      throw new UnauthorizedException('Account is no longer active');
+    }
+    const passwordHash = await this.passwords.hash(newPassword);
+    await this.users.applyPasswordChange(user.id, passwordHash, {
+      mustChangePassword: false,
+    });
+    // Re-fetch so the issued tokens + DTO carry the cleared flag.
+    const refreshed = await this.users.findById(userId);
+    const effective = refreshed ?? { ...user, mustChangePassword: false };
+
+    const tokens = await this.issuePair(effective, ctx);
+    // Kill every OTHER live session; keep the one we just minted.
+    await this.refreshTokens.revokeAllForUserExcept(
+      user.id,
+      tokens.refreshTokenId,
+    );
+    this.logger.log({
+      msg: 'password changed; other sessions revoked',
+      userId: user.id,
+    });
+    return { user: this.toUserDto(effective), tokens };
+  }
+
   // ── Refresh ──────────────────────────────────────────
 
   async refresh(
@@ -158,9 +277,7 @@ export class AuthService {
     ctx: { ipAddress?: string; userAgent?: string },
   ): Promise<{ user: UserDto; tokens: TokenPair }> {
     const tokenHash = this.sha256(rawRefreshToken);
-    const stored = await this.prisma.refreshToken.findUnique({
-      where: { tokenHash },
-    });
+    const stored = await this.refreshTokens.findByHash(tokenHash);
     if (!stored || stored.userId !== userId) {
       throw new UnauthorizedException('No such token');
     }
@@ -214,14 +331,9 @@ export class AuthService {
   async logout(rawRefreshToken: string | undefined): Promise<void> {
     if (!rawRefreshToken) return;
     const tokenHash = this.sha256(rawRefreshToken);
-    const stored = await this.prisma.refreshToken.findUnique({
-      where: { tokenHash },
-    });
+    const stored = await this.refreshTokens.findByHash(tokenHash);
     if (!stored || stored.revokedAt) return;
-    await this.prisma.refreshToken.update({
-      where: { id: stored.id },
-      data: { revokedAt: new Date() },
-    });
+    await this.refreshTokens.revokeById(stored.id);
   }
 
   // ── Public helpers used by controllers ───────────────
@@ -233,6 +345,7 @@ export class AuthService {
       email: user.email ?? '',
       name: user.name ?? user.login,
       role: user.role,
+      mustChangePassword: user.mustChangePassword,
     };
   }
 
@@ -296,8 +409,16 @@ export class AuthService {
     // Note: @nestjs/jwt v11 narrows `expiresIn` to its `ms`-style template
     // literal — env-driven strings ('15m', '30d') are valid at runtime but
     // not statically inferred. Cast through `unknown` to keep strict mode.
+    // `mustChangePassword` is part of the access-token claims so the Next.js
+    // edge middleware can gate the forced-change screen by decoding `mt_access`
+    // alone — without a round-trip to /auth/me. See docs/15-auth-strategy.md
+    // (forced-change gate) and apps/web/middleware.ts.
     const accessToken = await this.jwt.signAsync(
-      { sub: user.id, role: user.role },
+      {
+        sub: user.id,
+        role: user.role,
+        mustChangePassword: user.mustChangePassword,
+      },
       {
         secret: accessSecret,
         expiresIn: accessTtl as unknown as number,
@@ -357,10 +478,7 @@ export class AuthService {
   }
 
   private async revokeAllForUser(userId: string): Promise<void> {
-    await this.prisma.refreshToken.updateMany({
-      where: { userId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+    await this.refreshTokens.revokeAllForUser(userId);
   }
 
   private sha256(s: string): string {

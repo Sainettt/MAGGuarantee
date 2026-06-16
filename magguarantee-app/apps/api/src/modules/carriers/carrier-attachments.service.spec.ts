@@ -28,6 +28,7 @@ function makeUser(): AuthUser {
     email: 'op1@magtrans.eu',
     name: 'Op One',
     role: 'opiekun',
+    mustChangePassword: false,
   };
 }
 

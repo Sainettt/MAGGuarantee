@@ -63,6 +63,8 @@ function makeUser(overrides: Partial<UserRow> = {}): UserRow {
     name: 'Op One',
     active: true,
     liderEmail: null,
+    mustChangePassword: false,
+    passwordChangedAt: null,
     failedAttempts: 0,
     lockedUntil: null,
     lastLoginAt: null,
@@ -80,6 +82,7 @@ function makeAuth(role: AuthUser['role'], sub = 'u-actor'): AuthUser {
     email: 'actor@magtrans.eu',
     name: 'Actor',
     role,
+    mustChangePassword: false,
   };
 }
 

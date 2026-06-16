@@ -136,6 +136,7 @@ function makeAuth(role: AuthUser['role'], sub = 'u-actor'): AuthUser {
     email: 'actor@magtrans.eu',
     name: 'Actor',
     role,
+    mustChangePassword: false,
   };
 }
 

@@ -18,7 +18,11 @@ import {
   workingDaysLabel,
   type VerificationDigestProps,
 } from './templates/verification-digest';
+import { PasswordResetEmail } from './templates/password-reset';
 import { SmtpProvider } from './providers/smtp.provider';
+
+/** Default code validity surfaced in the reset email copy (mirrors Redis TTL). */
+const PASSWORD_RESET_TTL_MINUTES = 10;
 
 /**
  * Phase 1 outgoing-mail surface. Only `send2faCode` is implemented now;
@@ -40,6 +44,26 @@ export interface IMailService {
    * construct MailService without the queue) so the code is never dropped.
    */
   enqueue2faCode(email: string, code: string): Promise<void>;
+  /**
+   * Forgot-password reset code. Sends synchronously to Mailhog/SMTP; the
+   * `enqueuePasswordReset` variant routes through the `email-send` queue.
+   */
+  sendPasswordReset(
+    email: string,
+    code: string,
+    ttlMinutes: number,
+  ): Promise<void>;
+  /**
+   * Enqueue the forgot-password reset-code email onto the `email-send` queue.
+   * Falls back to a synchronous send when the queue is unavailable (unit
+   * tests / scripts) so the code is never dropped — same pattern as
+   * `enqueue2faCode`.
+   */
+  enqueuePasswordReset(
+    email: string,
+    code: string,
+    ttlMinutes: number,
+  ): Promise<void>;
   sendAuthorizationRequest(
     email: string,
     props: AuthorizationRequestProps,
@@ -119,6 +143,69 @@ export class MailService implements IMailService {
     } catch (err) {
       this.logger.error({
         msg: '2fa code send failed',
+        toMasked: this.maskEmail(email),
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await this.mailJobs?.record({
+        payload,
+        state: 'failed',
+        failedReason: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+  }
+
+  /**
+   * Enqueue the forgot-password reset-code email. The in-process
+   * `EmailSendProcessor` dequeues and calls `sendPasswordReset`. Falls back to
+   * a direct synchronous send when the queue is not wired (unit tests).
+   */
+  async enqueuePasswordReset(
+    email: string,
+    code: string,
+    ttlMinutes: number = PASSWORD_RESET_TTL_MINUTES,
+  ): Promise<void> {
+    if (!this.emailQueue) {
+      await this.sendPasswordReset(email, code, ttlMinutes);
+      return;
+    }
+    await this.emailQueue.add(
+      EMAIL_SEND_JOB,
+      { template: 'password-reset', email, code, ttlMinutes },
+      {
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 5000 },
+        removeOnComplete: { age: 3600 * 24 * 7 },
+        removeOnFail: false,
+      },
+    );
+  }
+
+  async sendPasswordReset(
+    email: string,
+    code: string,
+    ttlMinutes: number = PASSWORD_RESET_TTL_MINUTES,
+  ): Promise<void> {
+    const subject = 'Reset hasła — MAGGuarantee';
+    const html = await render(PasswordResetEmail({ code, ttlMinutes }));
+    const text = this.buildPasswordResetText(code, ttlMinutes);
+    const payload: MailJobPayload = {
+      to: email,
+      subject,
+      template: 'password-reset',
+    };
+
+    try {
+      await this.smtp.send({ to: email, subject, text, html });
+      // Never log the code (docs/15-auth-strategy.md#чек-лист-безопасности).
+      this.logger.log({
+        msg: 'password reset code sent',
+        toMasked: this.maskEmail(email),
+      });
+      await this.mailJobs?.record({ payload, state: 'completed' });
+    } catch (err) {
+      this.logger.error({
+        msg: 'password reset code send failed',
         toMasked: this.maskEmail(email),
         error: err instanceof Error ? err.message : String(err),
       });
@@ -330,6 +417,17 @@ export class MailService implements IMailService {
     }
     lines.push('', `Otwórz w MAGGuarantee: ${props.deeplink}`);
     return lines.join('\n');
+  }
+
+  private buildPasswordResetText(code: string, ttlMinutes: number): string {
+    return [
+      'MAGGuarantee — reset hasła',
+      '',
+      `Twój kod resetu hasła: ${code}`,
+      '',
+      `Kod ważny przez ${ttlMinutes} minut.`,
+      'Jeśli to nie Ty prosiłeś o reset hasła, zignoruj tę wiadomość.',
+    ].join('\n');
   }
 
   private buildText(code: string): string {

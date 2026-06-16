@@ -62,6 +62,7 @@ const carrierUser: AuthUser = {
   email: 'przewoznik1@magtrans.eu',
   name: 'Carrier One',
   role: 'przewoznik',
+  mustChangePassword: false,
 };
 
 const MUTATING: (keyof DriversController)[] = [

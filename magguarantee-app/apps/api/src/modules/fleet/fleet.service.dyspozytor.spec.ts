@@ -19,7 +19,7 @@ const NOW = new Date('2026-05-27T12:00:00.000Z');
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function makeAuth(role: AuthUser['role'], sub = 'dys-self'): AuthUser {
-  return { sub, login: 'actor', email: 'actor@magtrans.eu', name: 'Actor', role };
+  return { sub, login: 'actor', email: 'actor@magtrans.eu', name: 'Actor', role, mustChangePassword: false };
 }
 
 function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {

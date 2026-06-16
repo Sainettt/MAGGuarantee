@@ -23,19 +23,33 @@ const RL = {
   login: { limit: TEST_BYPASS ? 1_000 : 5, ttl: 60_000 },
   verify: { limit: TEST_BYPASS ? 1_000 : 10, ttl: 60_000 },
   resend: { limit: TEST_BYPASS ? 1_000 : 2, ttl: 60_000 },
+  // Password-management public endpoints (docs/13-api-design.md#rate-limiting,
+  // docs/15-auth-strategy.md#reset-flooding):
+  //   /auth/forgot-password    — ≈ login (5 / min / IP)
+  //   /auth/reset-password     — 10 / min / IP
+  //   /auth/resend-reset-code  — 2 / min / IP (cooldown also enforced in Redis)
+  forgot: { limit: TEST_BYPASS ? 1_000 : 5, ttl: 60_000 },
+  reset: { limit: TEST_BYPASS ? 1_000 : 10, ttl: 60_000 },
+  resendReset: { limit: TEST_BYPASS ? 1_000 : 2, ttl: 60_000 },
 } as const;
 
 import {
+  ChangePasswordRequest,
+  ForgotPasswordRequest,
+  ForgotPasswordResponse,
   LoginRequest,
   LoginResponse,
   ResendCodeRequest,
   ResendCodeResponse,
+  ResendResetCodeRequest,
+  ResetPasswordRequest,
   UserDto,
   VerifyCodeRequest,
   VerifyCodeResponse,
   RefreshResponse,
 } from '@magguarantee/shared';
 
+import { Audit } from '../../common/audit';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { AuthService, type TokenPair } from './auth.service';
 import {
@@ -104,6 +118,81 @@ export class AuthController {
     return this.auth.resendCode(body.sessionToken);
   }
 
+  // ── POST /auth/forgot-password ───────────────────────
+
+  @Public()
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: RL.forgot })
+  async forgotPassword(
+    @Body(new ZodValidationPipe(ForgotPasswordRequest))
+    body: ForgotPasswordRequest,
+  ): Promise<ForgotPasswordResponse> {
+    // Anti-enumeration: always 200 with the same shape (known + unknown login).
+    return this.auth.forgotPassword(body.login);
+  }
+
+  // ── POST /auth/reset-password ────────────────────────
+
+  @Public()
+  @Post('reset-password')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Throttle({ default: RL.reset })
+  async resetPassword(
+    @Body(new ZodValidationPipe(ResetPasswordRequest))
+    body: ResetPasswordRequest,
+  ): Promise<void> {
+    // Does NOT auto-login — the user returns to /login. All refresh tokens for
+    // the user are revoked inside the service.
+    await this.auth.resetPassword(
+      body.sessionToken,
+      body.code,
+      body.newPassword,
+    );
+  }
+
+  // ── POST /auth/resend-reset-code ─────────────────────
+
+  @Public()
+  @Post('resend-reset-code')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: RL.resendReset })
+  async resendResetCode(
+    @Body(new ZodValidationPipe(ResendResetCodeRequest))
+    body: ResendResetCodeRequest,
+  ): Promise<ResendCodeResponse> {
+    return this.auth.resendResetCode(body.sessionToken);
+  }
+
+  // ── POST /auth/change-password (authenticated) ───────
+
+  @Post('change-password')
+  @HttpCode(HttpStatus.OK)
+  @Audit({
+    action: 'changePassword',
+    targetType: 'User',
+    targetKey: (req) => (req as { user?: AuthUser }).user?.sub,
+    // Response is a fresh UserDto — no secret, but keep the audit row lean.
+    omitResultBody: true,
+  })
+  async changePassword(
+    @CurrentUser() user: AuthUser,
+    @Body(new ZodValidationPipe(ChangePasswordRequest))
+    body: ChangePasswordRequest,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<VerifyCodeResponse> {
+    // Callable while mustChangePassword=true — this is the forced-change exit.
+    const { user: dto, tokens } = await this.auth.changePassword(
+      user.sub,
+      body.newPassword,
+      this.requestContext(req),
+    );
+    // Fresh pair carries the cleared claim so the middleware gate lifts.
+    this.setAuthCookies(res, tokens);
+    return { user: dto };
+  }
+
   // ── POST /auth/refresh ───────────────────────────────
 
   @Public()
@@ -148,6 +237,7 @@ export class AuthController {
       email: user.email,
       name: user.name,
       role: user.role,
+      mustChangePassword: user.mustChangePassword,
     };
   }
 

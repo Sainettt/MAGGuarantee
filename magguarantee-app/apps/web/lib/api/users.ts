@@ -4,6 +4,7 @@
 
 import type {
   CreateUserDto,
+  ResetPasswordModeDto,
   UpdateUserDto,
   UserDtoFull,
   UserFilters,
@@ -52,12 +53,18 @@ export function reactivateUser(id: string): Promise<UserDtoFull> {
   return apiJson<UserDtoFull>(`/users/${id}/reactivate`, { method: 'POST' });
 }
 
+// Phase 9 — admin reset is now a discriminated union:
+//   { mode: 'generate' }            → API generates a random password
+//   { mode: 'custom', password }    → admin-supplied password
+// Either way the API sets mustChangePassword=true and returns the effective
+// plaintext once as `temporaryPassword`.
 export function resetUserPassword(
   id: string,
+  body: ResetPasswordModeDto,
 ): Promise<UserWithTemporaryPasswordDto> {
   return apiJson<UserWithTemporaryPasswordDto>(
     `/users/${id}/reset-password`,
-    { method: 'POST' },
+    { method: 'POST', json: body },
   );
 }
 

@@ -27,6 +27,10 @@ export type UserRow = {
   name: string | null;
   active: boolean;
   liderEmail: string | null;
+  // Forced change-password gate + last-change stamp (migration
+  // 20260616120000_user_password_lifecycle).
+  mustChangePassword: boolean;
+  passwordChangedAt: Date | null;
   failedAttempts: number;
   lockedUntil: Date | null;
   lastLoginAt: Date | null;
@@ -136,6 +140,8 @@ export class UsersRepository {
     passwordHash: string;
     liderEmail?: string | null;
     active?: boolean;
+    mustChangePassword?: boolean;
+    passwordChangedAt?: Date | null;
   }): Promise<UserRow> {
     const row = await this.prisma.user.create({
       data: {
@@ -146,6 +152,8 @@ export class UsersRepository {
         passwordHash: data.passwordHash,
         liderEmail: data.liderEmail ?? null,
         active: data.active ?? true,
+        mustChangePassword: data.mustChangePassword ?? false,
+        passwordChangedAt: data.passwordChangedAt ?? null,
       },
     });
     return row as unknown as UserRow;
@@ -165,6 +173,8 @@ export class UsersRepository {
       liderEmail: string | null;
       active: boolean;
       passwordHash: string;
+      mustChangePassword: boolean;
+      passwordChangedAt: Date | null;
     }>,
   ): Promise<UserRow> {
     const row = await this.prisma.user.update({

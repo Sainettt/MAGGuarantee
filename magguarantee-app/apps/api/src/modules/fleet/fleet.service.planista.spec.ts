@@ -22,6 +22,7 @@ function makeAuth(role: AuthUser['role'], sub = 'plan-self'): AuthUser {
     email: 'actor@magtrans.eu',
     name: 'Actor',
     role,
+    mustChangePassword: false,
   };
 }
 

@@ -107,6 +107,22 @@ function readRoleFromJwt(token: string): Role | null {
 }
 
 /**
+ * Phase 9 §9.3 — reads the `mustChangePassword` claim from the access token.
+ * When true the user has a real session (2FA passed) but is gated to the
+ * forced change-password screen until they set their own password. Decode
+ * only — the API is the source of truth for the actual gate (defense in depth).
+ */
+function mustChangePasswordFromJwt(token: string): boolean {
+  const data = decodeJwtPayload(token);
+  return data?.mustChangePassword === true;
+}
+
+// The forced-change interstitial itself — must be reachable while the gate is
+// set (otherwise the redirect would loop). Logout is posted to the API directly
+// (no web route), so it needs no allowance here.
+const CHANGE_PASSWORD_PATH = '/login/change-password';
+
+/**
  * True when the access token's `exp` claim is absent or already past (with a
  * small leeway). Decode only — never verifies the signature. A malformed token
  * counts as expired so we attempt a refresh rather than trusting it.
@@ -259,6 +275,19 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     }
     return res;
   };
+
+  // Phase 9 §9.3 — forced change-password gate. While the access token carries
+  // `mustChangePassword`, the user is authenticated but may not reach ANY app
+  // route (including `/`). Redirect every gated navigation to the interstitial.
+  // `/login/change-password` itself is already allowed by `isPublic()` above,
+  // so the redirect never loops. The gate clears when the user sets a password
+  // (the API issues a fresh access token without the claim).
+  if (mustChangePasswordFromJwt(access)) {
+    const url = req.nextUrl.clone();
+    url.pathname = CHANGE_PASSWORD_PATH;
+    url.search = '';
+    return withRefreshedCookies(NextResponse.redirect(url));
+  }
 
   // Root `/` is always allowed — `app/page.tsx` resolves the landing for the
   // current user via /auth/me and redirects there. Letting it through avoids

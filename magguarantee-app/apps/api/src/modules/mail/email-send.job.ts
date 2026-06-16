@@ -11,12 +11,21 @@
 /** BullMQ job name within the `email-send` queue. */
 export const EMAIL_SEND_JOB = 'send' as const;
 
-/** 2FA login-code email payload — the only variant wired in this phase. */
+/** 2FA login-code email payload. */
 export interface TwoFactorCodeEmailJob {
   template: '2fa-code';
   email: string;
   code: string;
 }
 
-/** Discriminated union of all `email-send` job payloads (one variant for now). */
-export type EmailSendJobData = TwoFactorCodeEmailJob;
+/** Forgot-password reset-code email payload. */
+export interface PasswordResetEmailJob {
+  template: 'password-reset';
+  email: string;
+  code: string;
+  /** Code validity in minutes (mirrors the Redis TTL). */
+  ttlMinutes: number;
+}
+
+/** Discriminated union of all `email-send` job payloads. */
+export type EmailSendJobData = TwoFactorCodeEmailJob | PasswordResetEmailJob;

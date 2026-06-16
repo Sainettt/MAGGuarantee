@@ -7,6 +7,8 @@ import { PasswordModule } from '../password/password.module';
 import { UsersModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { PasswordResetService } from './password-reset.service';
+import { RefreshTokenModule } from './refresh-token.module';
 import { JwtAccessStrategy } from './strategies/jwt-access.strategy';
 import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
 import { TwoFactorService } from './two-factor.service';
@@ -18,6 +20,7 @@ import { TwoFactorService } from './two-factor.service';
     // is just a placeholder. Required by @nestjs/jwt to provide JwtService.
     JwtModule.register({}),
     PasswordModule,
+    RefreshTokenModule,
     UsersModule,
     MailModule,
   ],
@@ -25,6 +28,7 @@ import { TwoFactorService } from './two-factor.service';
   providers: [
     AuthService,
     TwoFactorService,
+    PasswordResetService,
     JwtAccessStrategy,
     JwtRefreshStrategy,
   ],

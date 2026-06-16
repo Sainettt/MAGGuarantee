@@ -6,6 +6,8 @@
 // Bulk actions are out of scope.
 
 import {
+  Check,
+  Copy,
   KeyRound,
   Pencil,
   Plus,
@@ -17,7 +19,7 @@ import {
 import { useTranslations } from 'next-intl';
 import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import type { Role, UserDtoFull } from '@magguarantee/shared';
+import type { ResetPasswordModeDto, Role, UserDtoFull } from '@magguarantee/shared';
 
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -34,7 +36,9 @@ import {
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { ResetPasswordDialog } from '@/components/users/ResetPasswordDialog';
 import { formatDateShort } from '@/lib/format/numbers';
+import { useCopyToClipboard } from '@/lib/hooks/useCopyToClipboard';
 import {
   useDeactivateUser,
   useReactivateUser,
@@ -127,25 +131,37 @@ export function UsersListView() {
     setSheetOpen(true);
   }, []);
 
-  // ── Reset-password modal — shows the freshly generated temp password
-  //    with a copy-to-clipboard button. Backend returns the password once;
-  //    we keep it in component state, never persist it.
+  // ── Reset-password — Dialog A (choose generate/custom + confirm) →
+  //    mutate → Dialog B (result, shows the temp password once).
+  //
+  //  `resetTarget` drives Dialog A. `resetInfo` drives Dialog B. Backend
+  //  returns the password once; we keep it in component state, never persist.
+  const [resetTarget, setResetTarget] = useState<UserDtoFull | null>(null);
   const [resetInfo, setResetInfo] = useState<{
     login: string;
     password: string;
   } | null>(null);
 
   const resetM = useResetUserPassword({
-    onSuccess: (created, userId) => {
-      // We need to find the row by id to show its login alongside the password.
-      const row = (data?.items ?? []).find((u) => u.id === userId);
+    onSuccess: (created, { id }) => {
+      // Find the row by id to show its login alongside the password.
+      const row = (data?.items ?? []).find((u) => u.id === id);
+      setResetTarget(null);
       setResetInfo({
-        login: row?.login ?? '',
+        login: row?.login ?? created.login,
         password: created.temporaryPassword,
       });
     },
     onError: () => toast.error(tCommon('errorGeneric')),
   });
+
+  const onResetConfirm = useCallback(
+    (body: ResetPasswordModeDto) => {
+      if (!resetTarget) return;
+      resetM.mutate({ id: resetTarget.id, body });
+    },
+    [resetTarget, resetM],
+  );
 
   // ── Activate / deactivate confirmation
   const [confirmActivate, setConfirmActivate] = useState<{
@@ -171,15 +187,9 @@ export function UsersListView() {
     });
   };
 
-  const handleCopy = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      toast.success(tCommon('copied'));
-    } catch {
-      // Older browsers / non-secure contexts — fall back to a no-op + toast.
-      toast.error(tCommon('errorGeneric'));
-    }
-  };
+  // Shared copy mechanics (1500ms inline swap + toast.error fallback) — same
+  // as <TemporaryPasswordRow> (§9.4 DRY note).
+  const { copy: copyPassword, copied: passwordCopied } = useCopyToClipboard();
 
   const columns = useMemo<DataTableColumn<UserDtoFull>[]>(
     () => [
@@ -257,8 +267,7 @@ export function UsersListView() {
                   key: 'reset',
                   label: t('actions.resetPassword'),
                   icon: KeyRound,
-                  disabled: resetM.isPending,
-                  onSelect: () => resetM.mutate(row.id),
+                  onSelect: () => setResetTarget(row),
                 },
                 {
                   key: 'activate',
@@ -276,7 +285,7 @@ export function UsersListView() {
         ),
       },
     ],
-    [t, tCommon, tRoles, openEdit, resetM],
+    [t, tCommon, tRoles, openEdit],
   );
 
   return (
@@ -371,9 +380,18 @@ export function UsersListView() {
         onClose={() => setSheetOpen(false)}
       />
 
-      {/* Reset-password info modal — shows the fresh temp password once, with
-          a copy button. Closing wipes it from state so it doesn't sit in
-          memory forever. */}
+      {/* Dialog A — choose generate/custom + confirm BEFORE mutating. */}
+      <ResetPasswordDialog
+        user={resetTarget}
+        open={resetTarget !== null}
+        onOpenChange={(o) => !o && setResetTarget(null)}
+        onConfirm={onResetConfirm}
+        pending={resetM.isPending}
+      />
+
+      {/* Dialog B — result modal. Shows the fresh temp password once, with a
+          copy button (shared 1500ms swap + toast.error). Closing wipes it from
+          state so it doesn't sit in memory forever. */}
       <Dialog
         open={resetInfo !== null}
         onOpenChange={(o) => !o && setResetInfo(null)}
@@ -387,7 +405,7 @@ export function UsersListView() {
           </DialogHeader>
           {resetInfo && (
             <div className="space-y-3">
-              <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
+              <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm rounded-[10px] bg-info-soft border border-border px-3.5 py-3">
                 <span className="text-text-sub">
                   {t('resetPassword.loginLabel')}
                 </span>
@@ -403,10 +421,20 @@ export function UsersListView() {
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => void handleCopy(resetInfo.password)}
+                onClick={() => void copyPassword(resetInfo.password)}
                 aria-label={t('resetPassword.copyAria')}
               >
-                {tCommon('copy')}
+                {passwordCopied ? (
+                  <>
+                    <Check size={14} className="text-success" aria-hidden />
+                    {tCommon('copied')}
+                  </>
+                ) : (
+                  <>
+                    <Copy size={14} aria-hidden />
+                    {tCommon('copy')}
+                  </>
+                )}
               </Button>
             </div>
           )}

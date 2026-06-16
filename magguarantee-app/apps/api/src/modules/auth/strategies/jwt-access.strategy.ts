@@ -12,6 +12,7 @@ import { UsersService } from '../../users/users.service';
 interface AccessPayload {
   sub: string;
   role: AuthUser['role'];
+  mustChangePassword?: boolean;
   iat?: number;
   exp?: number;
 }
@@ -58,6 +59,10 @@ export class JwtAccessStrategy extends PassportStrategy(Strategy, 'jwt') {
       email: user.email,
       name: user.name ?? user.login,
       role: user.role,
+      // Authoritative value comes from the DB row (the token claim may be a
+      // stale snapshot after an admin reset). The web gate reads the token
+      // claim for edge speed, but /auth/me + guards trust this DB-sourced flag.
+      mustChangePassword: user.mustChangePassword,
     };
   }
 }

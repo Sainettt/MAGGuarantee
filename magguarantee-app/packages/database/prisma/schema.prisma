@@ -107,17 +107,24 @@ enum CarrierAttachmentCategory {
 // ─── USERS (объединение всех auth-листов) ───────────────
 
 model User {
-  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  login          String    @unique
-  email          String    @unique
-  passwordHash   String? // bcrypt; nullable to allow email-only auth (see docs/15-auth-strategy.md)
-  role           Role
-  name           String?
-  active         Boolean   @default(true)
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  login              String    @unique
+  email              String    @unique
+  passwordHash       String? // bcrypt; nullable to allow email-only auth (see docs/15-auth-strategy.md)
+  // Forced password rotation. Set true whenever an admin issues a password
+  // (create or reset); the user must set a new password on next login (after
+  // 2FA). Self-service / forced change clears it back to false.
+  mustChangePassword Boolean   @default(false)
+  // Stamped each time the password is changed (self-service reset, forced
+  // change, or admin reset). NULL until the first password change.
+  passwordChangedAt  DateTime?
+  role               Role
+  name               String?
+  active             Boolean   @default(true)
   // 2FA / login attempts
-  failedAttempts Int       @default(0)
-  lockedUntil    DateTime?
-  lastLoginAt    DateTime?
+  failedAttempts     Int       @default(0)
+  lockedUntil        DateTime?
+  lastLoginAt        DateTime?
 
   // role-specific fields (NULL for other roles)
   // planista — per-role tech debt; same denormalization pattern as the

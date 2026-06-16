@@ -10,6 +10,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { LoginRequest as LoginRequestSchema } from '@magguarantee/shared';
 import { Eye, EyeOff } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
@@ -125,6 +126,15 @@ export function LoginForm() {
         >
           {isSubmitting ? t('submitting') : t('submit')}
         </Button>
+
+        <div className="text-center">
+          <Link
+            href="/login/forgot"
+            className="text-[13px] text-text-sub hover:text-brand transition-colors focus-visible:outline-none focus-visible:text-brand"
+          >
+            {t('forgotPassword')}
+          </Link>
+        </div>
       </form>
 
       <LoginError variant={errVariant} message={errMessage} />

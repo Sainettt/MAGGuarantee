@@ -14,6 +14,7 @@ function makeAuth(role: AuthUser['role'], sub = 'op-self'): AuthUser {
     email: 'actor@magtrans.eu',
     name: 'Actor',
     role,
+    mustChangePassword: false,
   };
 }
 

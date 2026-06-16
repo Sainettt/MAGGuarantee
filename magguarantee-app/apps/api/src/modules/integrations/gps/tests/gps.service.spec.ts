@@ -86,6 +86,7 @@ function authUser(role: AuthUser['role'], sub = 'u-1'): AuthUser {
     email: 't@example.com',
     name: 'Tester',
     role,
+    mustChangePassword: false,
   };
 }
 

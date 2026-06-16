@@ -68,6 +68,7 @@ const carrierUser: AuthUser = {
   email: 'przewoznik1@magtrans.eu',
   name: 'Carrier One',
   role: 'przewoznik',
+  mustChangePassword: false,
 };
 
 /** Mutating routes the carrier-lockdown wave removed `przewoznik` from. */

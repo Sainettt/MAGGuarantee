@@ -35,7 +35,16 @@ const LoginSchema = z
 
 const NameSchema = z.string().min(1).max(128);
 const EmailSchema = z.string().email().max(160);
-const PasswordSchema = z
+
+/**
+ * Password policy — the single source of truth (docs/15-auth-strategy.md
+ * #politika-паролей): ≥10 chars, ≥1 letter, ≥1 digit.
+ *
+ * Exported so the auth-flow schemas (forgot/reset/change-password) reuse the
+ * exact same rule instead of redefining it. Do NOT redefine the policy
+ * elsewhere — import this.
+ */
+export const PasswordSchema = z
   .string()
   .min(10)
   .max(128)
@@ -121,11 +130,37 @@ export const UserDtoSchema = z.object({
   role: RoleSchema,
   active: z.boolean(),
   liderEmail: z.string().email().nullable(),
+  /**
+   * When true the user is gated to the forced change-password screen on the
+   * next login (set on every admin-issued password — create + reset). The
+   * web admin surface shows a "must set new password" badge.
+   * (User.mustChangePassword — migration 20260616120000_user_password_lifecycle.)
+   */
+  mustChangePassword: z.boolean(),
   lastLoginAt: IsoDateTimeSchema.nullable(),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
 });
 export type UserDtoFull = z.infer<typeof UserDtoSchema>;
+
+// ─── Admin reset-password (POST /users/:id/reset-password) ──
+
+/**
+ * Admin reset body — discriminated union on `mode`:
+ *  - `{ mode: 'generate' }`            → API generates a random password.
+ *  - `{ mode: 'custom', password }`    → admin supplies the password.
+ *
+ * Either way the API sets `mustChangePassword=true` (force is always on) and
+ * returns the effective plaintext once as `temporaryPassword`.
+ *
+ * `.strict()` on each member rejects stray fields (e.g. a `password` sent with
+ * mode `generate`). The discriminated union surfaces a clear Zod error path.
+ */
+export const ResetPasswordModeSchema = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('generate') }).strict(),
+  z.object({ mode: z.literal('custom'), password: PasswordSchema }).strict(),
+]);
+export type ResetPasswordModeDto = z.infer<typeof ResetPasswordModeSchema>;
 
 /**
  * Response of POST /users and POST /users/:id/reset-password while Phase 9's

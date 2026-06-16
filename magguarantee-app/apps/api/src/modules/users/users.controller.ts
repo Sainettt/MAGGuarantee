@@ -14,10 +14,12 @@ import {
 
 import {
   CreateUserSchema,
+  ResetPasswordModeSchema,
   UpdateUserSchema,
   UserFiltersSchema,
   UuidSchema,
   type CreateUserDto,
+  type ResetPasswordModeDto,
   type UpdateUserDto,
   type UserDtoFull,
   type UserFilters,
@@ -123,8 +125,10 @@ export class UsersController {
   })
   async resetPassword(
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
+    @Body(new ZodValidationPipe(ResetPasswordModeSchema))
+    mode: ResetPasswordModeDto,
   ): Promise<UserWithTemporaryPasswordDto> {
-    return this.users.resetPassword(id);
+    return this.users.resetPassword(id, mode);
   }
 
   @Delete(':id')

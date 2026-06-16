@@ -43,6 +43,7 @@ const ADMIN: HarnessRequest['user'] = {
   email: 'admin@magtrans.eu',
   name: 'Admin',
   role: 'admin',
+  mustChangePassword: false,
 };
 const PRACOWNIK: HarnessRequest['user'] = {
   sub: 'prac-1',
@@ -50,6 +51,7 @@ const PRACOWNIK: HarnessRequest['user'] = {
   email: 'prac@magtrans.eu',
   name: 'Pracownik',
   role: 'pracownik',
+  mustChangePassword: false,
 };
 
 function req(over: Partial<HarnessRequest>): HarnessRequest {

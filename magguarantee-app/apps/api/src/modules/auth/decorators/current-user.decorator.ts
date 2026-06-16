@@ -12,6 +12,10 @@ export interface AuthUser {
   email: string;
   name: string;
   role: Role;
+  // Forced change-password gate (docs/15-auth-strategy.md). When true the
+  // user has a valid session but must set a new password. DB-sourced — see
+  // JwtAccessStrategy.validate.
+  mustChangePassword: boolean;
   jti?: string; // present only on refresh tokens
 }
 

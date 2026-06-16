@@ -12,6 +12,7 @@ import {
 } from '@tanstack/react-query';
 import type {
   CreateUserDto,
+  ResetPasswordModeDto,
   UpdateUserDto,
   UserDtoFull,
   UserFilters,
@@ -111,11 +112,15 @@ export function useReactivateUser(
 }
 
 export function useResetUserPassword(
-  opts?: UseMutationOptions<UserWithTemporaryPasswordDto, Error, string>,
+  opts?: UseMutationOptions<
+    UserWithTemporaryPasswordDto,
+    Error,
+    { id: string; body: ResetPasswordModeDto }
+  >,
 ) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: resetUserPassword,
+    mutationFn: ({ id, body }) => resetUserPassword(id, body),
     ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: USERS_KEY });

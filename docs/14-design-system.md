@@ -5075,3 +5075,365 @@ panel scope is finalised** (DEFER note).
 
 **Deviation:** `lib/forms/onInvalidToast.ts` raises a generic «Uzupełnij podświetlone pola» toast + focus-move on submit-blocked across 8 forms. This brushes against §8.3's "no validation toasts", but the per-field inline `<FormMessage>`s remain the source of truth — the toast is a supplementary "can't submit yet" nudge. Kept (removing it = behavioural change to existing forms, §8.8); flagged here for the record.
 
+---
+
+## Phase 9 — Password management (forgot / reset / forced-change / admin-reset)
+
+> Four interlocking surfaces around credentials. Three live in the public `LoginCard` chrome (§ Phase 1);
+> one is an admin `Dialog` that replaces the current one-click reset in `UsersListView.tsx`.
+> **Zero new design tokens** — everything composes from `brand-*`, `card`, `border`, `input`, `text`, `text-sub`,
+> `success`, `danger`, plus the existing `bg-info-soft` alias (Phase 3.4 § C) for the temp-password chip band.
+> **Reuse, do not reinvent:** the verify `<CodeBox>`/`<CodeBoxGroup>` (§ Phase 1), `<ResendLink>`+`<BackButton>`,
+> `<EmailHintBanner>`, `<LoginError>`, `<LoginCardHeader>`, shadcn `<Input>`/`<Button>`/`<Dialog>`.
+
+### 9.0 The shared password primitives (define once, used by screens 2/3/4)
+
+Three small primitives are introduced because the new-password pair appears on **three** screens (enter-code,
+forced-change, admin custom-password). Defining them once keeps the policy hint and the eye-toggle identical
+everywhere.
+
+#### `<PasswordField>` — input with eye-toggle (reusable)
+
+A shadcn `<Input type={shown ? 'text' : 'password'}>` with a trailing icon-button. **Not** a new shadcn
+component — a thin wrapper in `components/auth/PasswordField.tsx`.
+
+| Slot | Tailwind | Notes |
+|---|---|---|
+| Input | inherits `<Input>` (§Phase 1 form-group input: `bg-input border-2 border-transparent rounded-[10px] focus:border-brand focus:bg-card`) | `autoComplete="new-password"` on set-screens; `autoComplete="current-password"` is NOT used here (no current-pwd field in any of these flows). |
+| Eye button | `absolute right-3 top-1/2 -translate-y-1/2 text-text-sub hover:text-text focus-visible:outline-2 focus-visible:outline-brand rounded-sm` | `<Eye />` / `<EyeOff />` (Lucide), `aria-hidden` icon; button `aria-label={t(shown ? 'common.hidePassword' : 'common.showPassword')}` + `aria-pressed={shown}`. Min 44×44 hit area via padding. |
+| Wrapper | `relative` | input gets `pr-11` so text never slides under the eye. |
+
+**Show-state is per-field** (toggling the new-password eye does NOT reveal the confirm field) — independent
+`useState` each. This is deliberate: matching-by-eye is a feature, blanket-reveal is not.
+
+#### `<PasswordPolicyHint>` — live inline policy checklist (reusable)
+
+Renders **below** the new-password field (not the confirm field). Three rules, each with a live
+pass/fail icon. Policy is fixed: **min 10 chars · ≥1 letter · ≥1 digit** (matches backend Zod — keep in sync
+with `shared` schema; do not redefine the regex in the component, import the predicate).
+
+| State per rule | Icon | Color | Tailwind |
+|---|---|---|---|
+| Unmet (idle / failing) | `<Circle size={14} />` (hollow) | `text-text-sub` | neutral, not alarming when the user hasn't finished typing |
+| Met | `<Check size={14} />` | `text-success` | the only color in the hint |
+
+```
+<ul role="list" aria-label={t('passwordPolicy.label')} class="mt-2 space-y-1 text-xs text-text-sub">
+  <li class="flex items-center gap-1.5"><Icon/> {t('passwordPolicy.minLen')}</li>   // min. 10 znaków
+  <li class="flex items-center gap-1.5"><Icon/> {t('passwordPolicy.letter')}</li>  // co najmniej 1 litera
+  <li class="flex items-center gap-1.5"><Icon/> {t('passwordPolicy.digit')}</li>   // co najmniej 1 cyfra
+</ul>
+```
+
+- **No red failing-state.** Unmet rules are neutral `text-text-sub` + hollow circle, never red — red is reserved
+  for genuine validation errors after submit/blur (e.g. "hasła nie są zgodne"). Live-typing should feel like
+  progress, not scolding.
+- `aria-live` is **not** set on the list (would spam SR on every keystroke). Instead, on a failed submit, the
+  inline `<FormMessage>` (`role="alert"`) announces the specific failure.
+
+#### `<ConfirmPasswordRule>` — the "passwords match" check
+
+Not its own component — a `RHF` cross-field refine (`confirm === password`) surfaced as a standard
+`<FormMessage>` under the confirm field. Validates **on blur of confirm + on submit**, not on every keystroke of
+the first field. Copy: `t('passwordPolicy.mismatch')` → "Hasła nie są zgodne".
+
+---
+
+### 9.1 Screen 1 — Request reset (`/login/forgot`)
+
+Lives in the **same `<LoginScreen>` + `<LoginCard>` chrome** as `/login`. Keyed by **login**, never email
+(confirmed product decision). Two states inside one card: **form** → **sent confirmation**.
+
+**Header** (`<LoginCardHeader>`): 🚛 chip + "MAGGuarantee" + subtitle `t('forgotPassword.subtitle')` →
+"Zresetuj hasło".
+
+**State A — form:**
+
+```
+<form>
+  <FormField name="login">           // single field, label "Login"
+    <Input autoFocus autoComplete="username" />
+  </FormField>
+  <Button type="submit" size="lg" className="w-full">{t('forgotPassword.submit')}</Button>  // "Wyślij kod"
+  <BackButton>{t('forgotPassword.backToLogin')}</BackButton>  // "Wróć do logowania" → /login
+</form>
+```
+
+- One `<Input>` only. `autoFocus`. Enter submits (single-line, single primary — §8.4).
+- `<LoginError>` slot below for the rare hard error (network/429). **Do not** surface "login not found" —
+  see security note below.
+- `<BackButton>` (reuse §Phase 1) centered under the submit, `<ArrowLeft size={14}/> {label}` → routes `/login`.
+
+**State B — sent confirmation (email-masked, mirrors 2FA):**
+
+On submit success the **same card** swaps to a confirmation that does NOT leak whether the login existed:
+
+| Slot | Spec |
+|---|---|
+| Icon | `<MailCheck size={28}/>` in the brand chip (reuse header chip styling) OR a green `<CheckCircle2>` — use the **brand chip** to stay on-brand and avoid implying "definitely sent". |
+| Message | `t('forgotPassword.sentTitle')` → "Jeśli konto istnieje, wysłaliśmy kod" + `t('forgotPassword.sentBody', {email})` → "Kod weryfikacyjny trafił na adres **da***@magtrans.eu**." Reuse the `<EmailHintBanner>` masking style for the `***`-masked address. |
+| Primary CTA | `<Button className="w-full">{t('forgotPassword.enterCode')}</Button>` → advances to Screen 2 (same card, no full navigation needed if single route, OR `/login/forgot/verify`). |
+| Secondary | `<BackButton>` → `/login`. |
+
+> **Security — enumeration resistance (confirmed decision).** The success state is **identical** whether or not
+> the login exists. The masked email is returned by the server only when the account exists; when it doesn't, the
+> server returns the **same shape** with a generic masked placeholder, so the UI cannot distinguish. The copy is
+> deliberately conditional ("Jeśli konto istnieje…"). Web-agent must NOT branch the UI on a "not found" — there is
+> no such response.
+
+---
+
+### 9.2 Screen 2 — Enter code + set new password
+
+The bridge screen: verify the emailed code **and** set the new password in one card. **Reuses the exact
+`<CodeBoxGroup>` (6 × `<CodeBox>`) from §Phase 1 — do not invent a new code input.**
+
+**Layout (top → bottom inside `<LoginCard>`):**
+
+```
+<LoginCardHeader subtitle={t('forgotPassword.resetSubtitle')} />   // "Ustaw nowe hasło"
+
+<EmailHintBanner email={maskedEmail} ttlLabel={t('forgotPassword.codeTtl')} />  // "Kod ważny 10 minut"
+
+<CodeBoxGroup ... />                       // 6-box, identical behaviour (auto-advance/paste/arrow/backspace)
+                                           //   EXCEPTION: no auto-submit here (see below)
+
+<PasswordField name="password"            label="Nowe hasło" />
+<PasswordPolicyHint />
+<PasswordField name="confirm"             label="Powtórz hasło" />   // FormMessage: mismatch
+
+<LoginError />                             // wrong/expired code, etc.
+
+<Button size="lg" className="w-full">{t('forgotPassword.setPassword')}</Button>   // "Ustaw hasło"
+<ResendLink cooldown={60} /> <BackButton />   // mirror verify screen exactly
+```
+
+**Behavioural deltas vs. the 2FA verify screen (important):**
+
+| Aspect | 2FA `/login/verify` | Screen 2 (reset) |
+|---|---|---|
+| Auto-submit on 6th digit | **Yes** (§Phase 1 #6) | **No** — the form needs the password fields too. Filling the code just moves focus to the first `<PasswordField>`. |
+| Submit trigger | code complete | explicit "Ustaw hasło" button (or Enter from confirm field) |
+| Resend cooldown | 60s | 60s — **reuse `<ResendLink>` verbatim**, same SMTP-throttle rationale |
+| Error states | wrong code / locked | wrong code / **expired code** (new copy) / password-policy fail (inline) |
+
+- `<CodeBoxGroup>` keeps **all** keyboard behaviour (auto-advance, paste-to-fill, arrow nav, backspace-to-prev)
+  — only auto-submit is suppressed. Pass an `autoSubmit={false}` prop (add to the existing component API; default
+  stays `true` so the 2FA screen is unchanged).
+- **Error → group shake** (reuse the §Phase 1 `error` state on `<CodeBoxGroup>`) for a rejected code; the
+  password fields keep their values (do not clear on a code error).
+- **Success →** redirect to `/login` with a success toast `t('forgotPassword.successToast')` ("Hasło zostało
+  zmienione. Zaloguj się.") — the user re-authenticates with the new password (do NOT auto-login; keep the 2FA
+  boundary intact).
+
+---
+
+### 9.3 Screen 3 — Forced-change interstitial (`/login/change-password`)
+
+Shown **post-2FA** when the session carries `mustChangePassword=true` (ALWAYS true after any admin-issued
+password — auto-generated OR admin-typed). **Non-dismissible:** no skip, no close-✕, no nav-to-app, no
+back-to-login. The user is authenticated but **gated** — they cannot reach the app until they set their own
+password.
+
+**Chrome:** same `<LoginScreen>` + `<LoginCard>` (the user has passed 2FA but isn't "in" the app shell yet, so
+the login chrome is correct and familiar — no app header/nav appears).
+
+```
+<LoginCardHeader subtitle={t('changePassword.subtitle')} />   // "Ustaw własne hasło"
+
+{/* explainer — calm, info-toned, NOT a warning */}
+<div class="bg-info-soft dark:bg-sky-950/40 border border-border rounded-[10px] px-4 py-3 mb-6
+            text-[13px] text-text flex items-start gap-2">
+  <KeyRound size={16} class="text-text-sub mt-0.5" aria-hidden />
+  {t('changePassword.explainer')}   // "Hasło tymczasowe — ustaw własne, aby kontynuować."
+</div>
+
+<PasswordField name="password" label="Nowe hasło" autoFocus />
+<PasswordPolicyHint />
+<PasswordField name="confirm"  label="Powtórz hasło" />
+
+<LoginError />
+
+<Button size="lg" className="w-full">{t('changePassword.submit')}</Button>   // "Zapisz i kontynuuj"
+```
+
+**Non-dismissibility — exact contract (deviates from §8.4 Esc-closes):**
+
+| Affordance | Behaviour | Why |
+|---|---|---|
+| Close-✕ | **Absent** — this is not a `<Dialog>`, it's a full-page route. No ✕ exists. | nothing to dismiss |
+| Esc | **No-op** (no overlay to close; it's a page). | n/a |
+| Browser back / direct URL to any app route | **Server/middleware redirect** back to `/login/change-password` while `mustChangePassword` holds. Design-side: do not render any nav, logout, or app-link on this screen — only the form. | the gate is enforced server-side; the UI must not present an escape hatch |
+| Logout | **One escape hatch only:** a small `<BackButton>`-styled `t('changePassword.logout')` ("Wyloguj się") link, bottom-centered, that drops the session and returns to `/login`. This is the *only* way out without setting a password. Rationale: a user must never be trapped with no exit; logging out (and abandoning the session) is acceptable, reaching the app is not. |
+
+- **No "current password" field** — the user already authenticated via the temp password + 2FA this session;
+  re-asking is friction with no security gain. (If a future audit wants re-entry, add it as `current-password`
+  above the pair — not now.)
+- **Explainer tone:** `bg-info-soft` (calm, Phase 3.4 § C) — NOT `bg-warning-bg`. The event is routine
+  onboarding, not an error. Mirror the temp-password-row tone decision.
+- **Success →** redirect into the app (the route the user was originally heading to, or role-home). Toast
+  `t('changePassword.successToast')` ("Hasło zostało ustawione.").
+
+---
+
+### 9.4 Screen 4 — Admin reset `<Dialog>` (replaces the one-click action)
+
+**Replaces** the current hazard in `UsersListView.tsx` where the kebab "Resetuj hasło" item calls
+`resetM.mutate(row.id)` **directly** — a single misclick silently regenerates a user's password. The new flow
+inserts a **confirmation + generate-vs-custom choice** `<Dialog>` *before* the mutation. The existing result
+modal (the `resetPassword.*` `<Dialog>` showing the password once with copy) is **kept as the second step**.
+
+**Two-dialog sequence:**
+
+```
+kebab "Resetuj hasło…"  →  [Dialog A: choose + confirm]  →  mutate  →  [Dialog B: result, password-once]
+```
+
+> The kebab label gains an ellipsis — `t('actions.resetPassword')` → "Resetuj hasło…" — signalling it opens a
+> dialog rather than firing an action. (§ a11y convention: "…" = "needs more input".)
+
+#### Dialog A — `<ResetPasswordDialog>` (the new confirmation + choice)
+
+shadcn `<Dialog>` (centered, `max-w-[440px]`), inherits focus-trap / Esc-to-close / scroll-lock / focus-return
+(§8.4). **This dialog IS dismissible** (unlike Screen 3) — cancelling is the safe default.
+
+| Zone | Content |
+|---|---|
+| `<DialogHeader>` | `<DialogTitle>{t('users.resetDialog.title')}</DialogTitle>` → "Zresetuj hasło użytkownika". `<DialogDescription>` names the target: `t('users.resetDialog.description', {login})` → "Ustawiasz nowe hasło dla **{login}**." (login in `font-mono`). |
+| Choice (radio group) | Two `<radio-card>`-style options (reuse the §legacy radio-card pattern → shadcn `<RadioGroup>`): <br> ⦿ `t('users.resetDialog.optionAuto')` — "Wygeneruj automatycznie" (default selected) <br> ⦾ `t('users.resetDialog.optionCustom')` — "Ustaw własne hasło" |
+| Custom-password reveal | When **"Ustaw własne"** is selected, a `<PasswordField>` + `<PasswordPolicyHint>` slide in below (single field — no confirm here; the admin sees the value via the eye-toggle, and it's surfaced again in Dialog B). `autoComplete="new-password"`, `autoFocus` when the option is picked. When "Wygeneruj" is selected, this block is unmounted. |
+| Force-change note | A persistent small note (`text-xs text-text-sub` with `<Info size={13}/>`) under the choice: `t('users.resetDialog.forceNote')` → "Użytkownik będzie musiał zmienić to hasło przy następnym logowaniu." — because `mustChangePassword` is **always** set, for both options. |
+| `<DialogFooter>` | `<Button variant="outline">{tCommon('cancel')}</Button>` + `<Button variant="default">{t('users.resetDialog.confirm')}</Button>` → "Zresetuj hasło". The confirm button is the only destructive-ish action; it stays brand-red `default` (not a `destructive` variant — this is a routine admin op, not a delete). |
+
+**Validation gating:** when "Ustaw własne" is active, the confirm button is `disabled` until the custom password
+passes the policy (`min 10 · letter · digit`). When "Wygeneruj" is active, confirm is always enabled.
+
+**Submit → mutation payload (design-shape only, api-agent owns the contract):** the dialog sends either
+`{ mode: 'auto' }` or `{ mode: 'custom', password }`. **Both** result in the existing result modal (Dialog B)
+showing the final password once. (For `custom`, the displayed password equals what the admin typed — confirming
+it was set correctly; this is why no separate confirm field is needed in Dialog A.)
+
+**Keyboard / a11y:**
+- First focus lands on the **radio group** (not the confirm button, not the ✕) — §8.5 "first focus on first
+  interactive element".
+- Enter inside the custom-password field submits the dialog **only if** policy passes; otherwise focuses the
+  `<FormMessage>` (reuse `onInvalidToast` pattern, §8.10 deviation).
+- `<RadioGroup>` arrow-keys move between the two options (Radix default).
+- Esc / Cancel / outside-click all dismiss with **no mutation** (safe). No dirty-guard needed — nothing is
+  persisted until confirm.
+
+#### Dialog B — result modal (existing, unchanged structurally)
+
+The current `resetPassword.*` `<Dialog>` in `UsersListView.tsx` is reused **as-is**: shows `login` + the
+generated/typed password in a `font-mono` chip with a copy-to-clipboard `<Button>` (reuse the §3.4 § C copy
+mechanics: `<Copy/>` → `<Check className="text-success"/>` swap for 1500ms, `toast.error` on clipboard failure).
+The password band uses `bg-info-soft` for tonal consistency with the temp-password row. Password shown **once** —
+on close it is gone (no re-fetch).
+
+> **One copy-mechanics consolidation:** the copy-to-clipboard in Dialog B should use the **same** logic as
+> `<TemporaryPasswordRow>` (§3.4 § C) — ideally extract a `useCopyToClipboard()` hook (web-agent's call) so the
+> 1500ms-swap + `toast.error`-fallback behaviour is identical in both places. Not a token change; a DRY note.
+
+---
+
+### 9.5 i18n contract (PL default + EN) — next-intl namespaces
+
+New namespaces / keys web-agent must add to `apps/web/messages/{pl,en}.json`:
+
+**`forgotPassword.*`** (Screens 1 + 2):
+
+| Key | PL | EN |
+|---|---|---|
+| `subtitle` | "Zresetuj hasło" | "Reset password" |
+| `submit` | "Wyślij kod" | "Send code" |
+| `backToLogin` | "Wróć do logowania" | "Back to login" |
+| `sentTitle` | "Jeśli konto istnieje, wysłaliśmy kod" | "If the account exists, we've sent a code" |
+| `sentBody` | "Kod weryfikacyjny trafił na adres {email}." | "A verification code was sent to {email}." |
+| `enterCode` | "Wpisz kod" | "Enter code" |
+| `resetSubtitle` | "Ustaw nowe hasło" | "Set a new password" |
+| `codeTtl` | "Kod ważny 10 minut" | "Code valid for 10 minutes" |
+| `setPassword` | "Ustaw hasło" | "Set password" |
+| `successToast` | "Hasło zostało zmienione. Zaloguj się." | "Password changed. Please sign in." |
+| `errorExpired` | "Kod wygasł. Wyślij nowy." | "Code expired. Request a new one." |
+| `errorWrongCode` | "Nieprawidłowy kod" | "Invalid code" |
+
+**`changePassword.*`** (Screen 3):
+
+| Key | PL | EN |
+|---|---|---|
+| `subtitle` | "Ustaw własne hasło" | "Set your own password" |
+| `explainer` | "Hasło tymczasowe — ustaw własne, aby kontynuować." | "This is a temporary password — set your own to continue." |
+| `submit` | "Zapisz i kontynuuj" | "Save and continue" |
+| `logout` | "Wyloguj się" | "Log out" |
+| `successToast` | "Hasło zostało ustawione." | "Password set." |
+
+**`users.resetDialog.*`** (Screen 4, Dialog A) — additive to the existing `users.resetPassword.*` (Dialog B, keep):
+
+| Key | PL | EN |
+|---|---|---|
+| `title` | "Zresetuj hasło użytkownika" | "Reset user password" |
+| `description` | "Ustawiasz nowe hasło dla {login}." | "You're setting a new password for {login}." |
+| `optionAuto` | "Wygeneruj automatycznie" | "Generate automatically" |
+| `optionCustom` | "Ustaw własne hasło" | "Set a custom password" |
+| `forceNote` | "Użytkownik będzie musiał zmienić to hasło przy następnym logowaniu." | "The user will be required to change this password on next login." |
+| `confirm` | "Zresetuj hasło" | "Reset password" |
+
+**`passwordPolicy.*`** (shared by Screens 2/3/4):
+
+| Key | PL | EN |
+|---|---|---|
+| `label` | "Wymagania dla hasła" | "Password requirements" |
+| `minLen` | "min. 10 znaków" | "at least 10 characters" |
+| `letter` | "co najmniej 1 litera" | "at least 1 letter" |
+| `digit` | "co najmniej 1 cyfra" | "at least 1 digit" |
+| `mismatch` | "Hasła nie są zgodne" | "Passwords don't match" |
+
+**`common.*`** (additive):
+
+| Key | PL | EN |
+|---|---|---|
+| `showPassword` | "Pokaż hasło" | "Show password" |
+| `hidePassword` | "Ukryj hasło" | "Hide password" |
+
+The kebab item key changes copy only: `users.actions.resetPassword` (or wherever it lives) → "Resetuj hasło…".
+
+---
+
+### 9.6 Components / shared changes summary (Phase 9)
+
+| Component | New / changed | File (web-agent) |
+|---|---|---|
+| `<PasswordField>` | **new** — `<Input>` + eye-toggle, per-field show-state | `components/auth/PasswordField.tsx` |
+| `<PasswordPolicyHint>` | **new** — live 3-rule checklist, neutral-not-red | `components/auth/PasswordPolicyHint.tsx` |
+| `<CodeBoxGroup>` | **changed** — add `autoSubmit?: boolean` prop (default `true`; reset Screen 2 passes `false`). 2FA screen unchanged. | `components/auth/CodeBox*.tsx` (existing) |
+| `/login/forgot` page | **new** — Screens 1+2 in `<LoginCard>` chrome | `app/(auth)/login/forgot/...` |
+| `/login/change-password` page | **new** — Screen 3, non-dismissible gate | `app/(auth)/login/change-password/...` |
+| `<ResetPasswordDialog>` | **new** — Dialog A (confirm + auto/custom choice) | `components/users/ResetPasswordDialog.tsx` |
+| `UsersListView.tsx` reset action | **changed** — kebab opens `<ResetPasswordDialog>` instead of calling `resetM.mutate` directly; existing result `<Dialog>` (Dialog B) kept | `app/(employee)/employee/(admin)/users/UsersListView.tsx` |
+| `useCopyToClipboard()` | **new (optional, DRY)** — extract the 1500ms-swap + toast.error copy logic shared by `<TemporaryPasswordRow>` and Dialog B | `lib/hooks/useCopyToClipboard.ts` |
+
+**Tokens added/changed:** **none.** Reuses `bg-info-soft` (Phase 3.4 § C), all `brand/card/border/input/text/
+text-sub/success/danger` tokens, the §Phase 1 form-input + `<CodeBox>` recipes.
+
+### 9.7 Acceptance checklist (Phase 9, web-agent)
+
+- [ ] **Screen 1** keyed by **login** only; sent-state is enumeration-safe (identical UI whether account exists);
+      email masked via `<EmailHintBanner>` style; `<BackButton>` → `/login`.
+- [ ] **Screen 2** reuses the exact `<CodeBoxGroup>` (auto-advance/paste/arrow/backspace) with `autoSubmit={false}`;
+      `<PasswordField>` ×2 + `<PasswordPolicyHint>`; `<ResendLink cooldown=60>` mirrors verify; success → toast +
+      redirect to `/login` (no auto-login).
+- [ ] **Screen 3** is non-dismissible: no ✕, no app nav, Esc no-op, server-side redirect re-gates; the **only**
+      exit is the "Wyloguj się" link; explainer uses `bg-info-soft` (calm, not warning).
+- [ ] **Screen 4 Dialog A** replaces the one-click mutate; `<RadioGroup>` auto/custom (auto default); custom
+      reveals `<PasswordField>`+hint, confirm disabled until policy passes; force-change note always shown; Cancel/
+      Esc/outside-click = no mutation; first focus on radio group.
+- [ ] **Screen 4 Dialog B** (result) reused; password shown once; copy uses the shared 1500ms-swap + `toast.error`
+      mechanics; `bg-info-soft` band.
+- [ ] `<PasswordPolicyHint>` rules import the shared predicate (no regex duplication); unmet = neutral, met =
+      `text-success`; never red on live-typing.
+- [ ] Eye-toggle: per-field show-state, `aria-label` (show/hide) + `aria-pressed`, icon `aria-hidden`, ≥44×44.
+- [ ] All copy via the new i18n namespaces (PL default + EN); kebab label gains "…".
+- [ ] a11y: focus-trap + focus-return on Dialog A; Screen 3 traps focus within the form (no escape to chrome);
+      contrast AA in both themes on `bg-info-soft` bands and the policy-hint icons.
+- [ ] Zero new design tokens; zero inline `style=`; zero `body.dark` hacks.
+

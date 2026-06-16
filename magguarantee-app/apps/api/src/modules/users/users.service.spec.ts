@@ -1,6 +1,7 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 
 import { PasswordService } from '../auth/password.service';
+import { RefreshTokenRepository } from '../auth/refresh-token.repository';
 import {
   UsersRepository,
   type UserRow,
@@ -18,6 +19,8 @@ function makeRow(overrides: Partial<UserRow> = {}): UserRow {
     name: 'Admin',
     active: true,
     liderEmail: null,
+    mustChangePassword: false,
+    passwordChangedAt: null,
     failedAttempts: 0,
     lockedUntil: null,
     lastLoginAt: null,
@@ -87,10 +90,34 @@ function makePasswords(): PasswordService {
   } as unknown as PasswordService;
 }
 
+function makeRefreshTokens(): {
+  repo: RefreshTokenRepository;
+  revokeAllForUser: jest.Mock;
+} {
+  const revokeAllForUser = jest.fn(async () => 0);
+  const repo = {
+    revokeAllForUser,
+    revokeAllForUserExcept: jest.fn(async () => 0),
+    findByHash: jest.fn(async () => null),
+    revokeById: jest.fn(async () => undefined),
+  } as unknown as RefreshTokenRepository;
+  return { repo, revokeAllForUser };
+}
+
+function makeService(initial: UserRow[] = []): {
+  svc: UsersService;
+  repo: UsersRepository;
+  revokeAllForUser: jest.Mock;
+} {
+  const repo = makeRepo(initial);
+  const { repo: rt, revokeAllForUser } = makeRefreshTokens();
+  const svc = new UsersService(repo, makePasswords(), rt);
+  return { svc, repo, revokeAllForUser };
+}
+
 describe('UsersService', () => {
-  it('creates a user and returns the temporary password (when none provided)', async () => {
-    const repo = makeRepo();
-    const svc = new UsersService(repo, makePasswords());
+  it('creates a user, forces mustChangePassword, returns the temp password', async () => {
+    const { svc, repo } = makeService();
     const out = await svc.create({
       login: 'kasia',
       email: 'kasia@magtrans.eu',
@@ -100,10 +127,31 @@ describe('UsersService', () => {
     expect(out.login).toBe('kasia');
     expect(out.role).toBe('pracownik');
     expect(out.temporaryPassword).toMatch(/.{10,}/);
+    // Force is always on — every admin-created user starts gated.
+    expect(out.mustChangePassword).toBe(true);
+    expect(repo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mustChangePassword: true,
+        passwordChangedAt: expect.any(Date),
+      }),
+    );
+  });
+
+  it('forces mustChangePassword even when admin supplies a custom password', async () => {
+    const { svc } = makeService();
+    const out = await svc.create({
+      login: 'jan',
+      email: 'jan@magtrans.eu',
+      name: 'Jan',
+      role: 'opiekun',
+      password: 'CustomPass123',
+    });
+    expect(out.temporaryPassword).toBe('CustomPass123');
+    expect(out.mustChangePassword).toBe(true);
   });
 
   it('rejects role=przewoznik (must use POST /carriers)', async () => {
-    const svc = new UsersService(makeRepo(), makePasswords());
+    const { svc } = makeService();
     await expect(
       // Cast-around: the schema would normally exclude 'przewoznik', but the
       // service still defends against bypass.
@@ -117,8 +165,7 @@ describe('UsersService', () => {
   });
 
   it('translates duplicate-login P2002 into ConflictException', async () => {
-    const repo = makeRepo([makeRow({ id: 'u-1', login: 'admin' })]);
-    const svc = new UsersService(repo, makePasswords());
+    const { svc } = makeService([makeRow({ id: 'u-1', login: 'admin' })]);
     await expect(
       svc.create({
         login: 'admin',
@@ -130,63 +177,100 @@ describe('UsersService', () => {
   });
 
   it('getById throws 404 for unknown user', async () => {
-    const svc = new UsersService(makeRepo(), makePasswords());
+    const { svc } = makeService();
     await expect(svc.getById('missing')).rejects.toThrow(NotFoundException);
   });
 
   it('list returns DTOs with pagination cursor when more rows exist', async () => {
-    const repo = makeRepo(
+    const { svc } = makeService(
       Array.from({ length: 3 }, (_, i) =>
         makeRow({ id: `u-${i}`, login: `l${i}` }),
       ),
     );
-    const svc = new UsersService(repo, makePasswords());
     const out = await svc.list({ limit: 2 });
     expect(out.items).toHaveLength(2);
     expect(out.nextCursor).toBe('u-1');
   });
 
   it('deactivate flips active=false and rejects double-deactivate', async () => {
-    const row = makeRow({ id: 'u-1', active: true });
-    const repo = makeRepo([row]);
-    const svc = new UsersService(repo, makePasswords());
+    const { svc } = makeService([makeRow({ id: 'u-1', active: true })]);
     const out = await svc.deactivate('u-1');
     expect(out.active).toBe(false);
     await expect(svc.deactivate('u-1')).rejects.toThrow(ConflictException);
   });
 
   it('reactivate flips active=true and rejects double-reactivate', async () => {
-    const row = makeRow({ id: 'u-1', active: false });
-    const repo = makeRepo([row]);
-    const svc = new UsersService(repo, makePasswords());
+    const { svc } = makeService([makeRow({ id: 'u-1', active: false })]);
     const out = await svc.reactivate('u-1');
     expect(out.active).toBe(true);
     await expect(svc.reactivate('u-1')).rejects.toThrow(ConflictException);
   });
 
-  it('resetPassword issues a fresh temp password and persists hash', async () => {
-    const row = makeRow({ id: 'u-1', passwordHash: 'old' });
-    const repo = makeRepo([row]);
-    const svc = new UsersService(repo, makePasswords());
-    const out = await svc.resetPassword('u-1');
-    expect(out.temporaryPassword).toMatch(/.{10,}/);
+  describe('resetPassword (admin)', () => {
+    it('mode=generate issues a fresh temp password, forces change, revokes sessions', async () => {
+      const { svc, repo, revokeAllForUser } = makeService([
+        makeRow({ id: 'u-1', passwordHash: 'old' }),
+      ]);
+      const out = await svc.resetPassword('u-1', { mode: 'generate' });
+      expect(out.temporaryPassword).toMatch(/.{10,}/);
+      expect(out.mustChangePassword).toBe(true);
+      expect(repo.update).toHaveBeenCalledWith(
+        'u-1',
+        expect.objectContaining({
+          passwordHash: expect.stringContaining('hashed:'),
+          mustChangePassword: true,
+          passwordChangedAt: expect.any(Date),
+        }),
+      );
+      // A reset must kill the victim's existing sessions.
+      expect(revokeAllForUser).toHaveBeenCalledWith('u-1');
+    });
+
+    it('mode=custom uses the supplied password verbatim', async () => {
+      const { svc, revokeAllForUser } = makeService([
+        makeRow({ id: 'u-1', passwordHash: 'old' }),
+      ]);
+      const out = await svc.resetPassword('u-1', {
+        mode: 'custom',
+        password: 'BrandNew123',
+      });
+      expect(out.temporaryPassword).toBe('BrandNew123');
+      expect(out.mustChangePassword).toBe(true);
+      expect(revokeAllForUser).toHaveBeenCalledWith('u-1');
+    });
+
+    it('throws 404 for an unknown user', async () => {
+      const { svc } = makeService();
+      await expect(
+        svc.resetPassword('missing', { mode: 'generate' }),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  it('applyPasswordChange stamps passwordChangedAt and clears the flag', async () => {
+    const { svc, repo } = makeService([
+      makeRow({ id: 'u-1', mustChangePassword: true }),
+    ]);
+    await svc.applyPasswordChange('u-1', 'new-hash', {
+      mustChangePassword: false,
+    });
     expect(repo.update).toHaveBeenCalledWith(
       'u-1',
       expect.objectContaining({
-        passwordHash: expect.stringContaining('hashed:'),
+        passwordHash: 'new-hash',
+        mustChangePassword: false,
+        passwordChangedAt: expect.any(Date),
       }),
     );
   });
 
   it('softDelete throws 404 for unknown id', async () => {
-    const svc = new UsersService(makeRepo(), makePasswords());
+    const { svc } = makeService();
     await expect(svc.softDelete('missing')).rejects.toThrow(NotFoundException);
   });
 
   it('update rejects role=przewoznik change', async () => {
-    const row = makeRow({ id: 'u-1', role: 'pracownik' });
-    const repo = makeRepo([row]);
-    const svc = new UsersService(repo, makePasswords());
+    const { svc } = makeService([makeRow({ id: 'u-1', role: 'pracownik' })]);
     await expect(
       svc.update('u-1', {
         role: 'przewoznik' as unknown as 'admin',
@@ -194,13 +278,16 @@ describe('UsersService', () => {
     ).rejects.toThrow();
   });
 
-  it('toDto serializes timestamps as ISO', () => {
-    const row = makeRow({
-      lastLoginAt: new Date('2026-05-01T10:00:00.000Z'),
-    });
-    const svc = new UsersService(makeRepo(), makePasswords());
-    const dto = svc.toDto(row);
+  it('toDto serializes timestamps as ISO and surfaces mustChangePassword', () => {
+    const { svc } = makeService();
+    const dto = svc.toDto(
+      makeRow({
+        lastLoginAt: new Date('2026-05-01T10:00:00.000Z'),
+        mustChangePassword: true,
+      }),
+    );
     expect(dto.lastLoginAt).toBe('2026-05-01T10:00:00.000Z');
     expect(dto.createdAt).toBe('2026-05-01T10:00:00.000Z');
+    expect(dto.mustChangePassword).toBe(true);
   });
 });

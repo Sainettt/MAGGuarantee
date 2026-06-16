@@ -25,6 +25,7 @@ function authCarrier(): AuthUser {
     email: 'pwz@magtrans.eu',
     name: 'Carrier',
     role: 'przewoznik',
+    mustChangePassword: false,
   };
 }
 
