@@ -85,8 +85,6 @@ export const ADMIN_ONLY_EMPLOYEE_PREFIXES: readonly string[] = [
   // direct-URL navigation at the edge. pracownik/opiekun must NEVER reach it
   // (docs/19-known-quirks.md #13 + roles matrix).
   '/employee/delegations',
-  // Phase 7.7 — admin-only read-only km-report (`<KmBoardScreen mode="view">`).
-  '/employee/km',
 ];
 
 function startsWithPrefix(pathname: string, prefix: string): boolean {
