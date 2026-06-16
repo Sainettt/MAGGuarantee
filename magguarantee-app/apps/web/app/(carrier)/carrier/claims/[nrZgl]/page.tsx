@@ -158,6 +158,12 @@ export default function ClaimDetailPage() {
               <ArrowRight size={12} aria-hidden />
               <span>{formatDate(claim.dateEnd)}</span>
             </div>
+            <div className="text-sm text-text-sub tabular-nums">
+              {tDetail('submittedAt')}:{' '}
+              <b className="font-semibold text-text">
+                {formatDate(claim.createdAt)}
+              </b>
+            </div>
             <HoursReadout
               rawTotalDays={claim.breakdown?.rawTotalDays ?? null}
               totalDays={claim.breakdown?.totalDays ?? null}

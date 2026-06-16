@@ -1326,6 +1326,7 @@ When the verifier edits `hoursAdjusted`, the **counted** number must update live
 │   2 145,00 €                                  WNI/2026/0042  [StatusBadge] │
 │   kwota zatwierdzona                          Wniosek: 2 145,00 €          │
 │                                               01.04.2026 → 30.04.2026      │
+│                                               Data zgłoszenia: 12.04.2026  │
 │                                               Czas: 240,00 h / 215,50 h    │
 │                                                                            │
 │ ──────────────────────────────────────────────────────────────────────────  │
@@ -1344,6 +1345,7 @@ When `amountApproved === null` (status `NA_WERYFIKACJI`, `OCZEKUJE_NA_AUTORYZACJ
 │   2 145,00 €                                  WNI/2026/0042  [StatusBadge] │
 │   kalkulacja                                  Wniosek: 2 145,00 €          │
 │   └─ muted, weight 600 ─┘                     01.04.2026 → 30.04.2026      │
+│                                               Data zgłoszenia: 12.04.2026  │
 │                                               Czas: 240,00 h / 215,50 h    │
 │ ──────────────────────────────────────────────────────────────────────────  │
 │   Pojazd: WA12345    Przebieg: 12 340 km    Km gwarantowane: 11 800 km     │
@@ -1367,12 +1369,15 @@ The number itself stays the same physical size in both states; **only the label 
 | `nrZgl` row | `inline-flex items-center gap-2` with `StatusBadge` | `text-[15px] font-extrabold text-text font-mono` for the nrZgl. Status badge sits inline on the right of it. |
 | `kwotaWnioskowana` line | `text-sm text-text-sub tabular-nums` with bold value: `Wniosek: <b class="font-semibold text-text">2 145,00 €</b>` | Always visible — even when `amountApproved` matches `paymentEur`, the requested amount is part of the audit trail. |
 | Date range | `text-sm text-text-sub` with `<ArrowRight size={12} />` between dates | Same style as `<ClaimCard>` for visual continuity. |
+| **`Data zgłoszenia` line** | `text-sm text-text-sub tabular-nums` — `Data zgłoszenia: <span>{formatDate(claim.createdAt)}</span>` | Directly **below the period date range, above `HoursReadout`**. Submission date (`ClaimDto.createdAt`, ISO datetime) rendered **date-only** via the page's existing `formatDate` helper (pl-PL `dd.MM.yyyy`). Muted, single line — sits in the temporal cluster with the period, not in the lower «Szczegóły» `<dl>`. Always shown (`createdAt` is never null). Label slot `tDetail('submittedAt')`. |
 | `HoursReadout` | see § A | Compact, single line. |
 | Divider | `border-t border-border my-4` | Separates money/meta block from the vehicle factual row. |
 | **Vehicle row (bottom)** | `flex flex-wrap items-center gap-x-6 gap-y-2 text-sm` | Each item: `<span class="text-text-sub">Pojazd:</span> <b class="font-semibold text-text font-mono">WA12345</b>`. |
 | Reklamacja CTA | unchanged (`mt-6 flex items-center justify-end`) | Behavior locked — only visual position adjusts if the divider already sits above it; keep button intact. |
 
 > **Locked behavior.** `<StatusBadge>`, the back-link (`← Wróć do listy`), and the reklamacja CTA keep their existing handlers, props, and visibility rules. Only their **layout placement** changes per the diagram above.
+
+> **Submission-date placement (decided).** `Data zgłoszenia` (`ClaimDto.createdAt`) lives in the **right meta-block, below the period range and above `HoursReadout`** — not in the lower «Szczegóły» `<dl>`. Rationale: `createdAt` is a claim-lifecycle timestamp of the same class as the period dates, so it belongs in the meta-block's temporal cluster where the eye already reads "which claim / when". The lower `<dl>` holds **business facts** (approved amount, order number/date, comment, reklamacja text) — dropping a lifecycle date among them mixes two data classes and makes the submission date easy to miss. Date-only (the period and `orderDate` are both date-only on this screen — consistency); `createdAt`'s time portion is not surfaced here. No API/DB change — `createdAt` is already on the wire. Label **PL «Data zgłoszenia» / EN "Submitted"**, key `carrier.claims.detail.submittedAt`.
 
 #### Color decision: brand-red for approved amount
 
@@ -1446,6 +1451,7 @@ Confirmation of brand-color use rules (recap, not a change):
 | Verifier modal: add `HoursReadout` row to read-only block; replace inline `origHoursAdjusted` hint with `<HoursReadout live>` under input | `apps/web/components/claims/ClaimVerificationModal.tsx` lines 484–502 and 525–553 | web-agent |
 | `<BreakdownTable>` excluded-days list — adaptive column count | `apps/web/components/carrier/BreakdownTable.tsx` lines 120–142 | web-agent |
 | i18n keys (`hoursReadout.*`, header copy `kwotaZatwierdzona` / `kalkulacja` / `Wniosek`) | `apps/web/messages/pl.json`, `en.json` | web-agent |
+| i18n key `carrier.claims.detail.submittedAt` (PL «Data zgłoszenia» / EN "Submitted") for the new meta-block submission-date line | `apps/web/messages/pl.json`, `en.json` | web-agent |
 
 ### Tokens added or changed
 
@@ -3572,7 +3578,6 @@ So `DelegationDetailModal.tsx` stays a thin wrapper over `<EntityDetailModal>`; 
 │  │   wyjazd                                              powrót          │  │
 │  │   12.03.2025, 08:00          (duration pill on        plan: 16.03.2025│  │
 │  │   kod: 40-001                 the connector)          kod: 00-950     │  │
-│  │                                              faktyczny: —             │  │
 │  ╰──────────────────────────────────────────────────────────────────────╯  │
 │                                                                            │
 │  ╭─ Driver + vehicle strip (section B, span:'full', fullWidth row) ─────╮  │
@@ -3597,7 +3602,9 @@ So `DelegationDetailModal.tsx` stays a thin wrapper over `<EntityDetailModal>`; 
 |---|---|---|
 | **Departure (left)** | Country "circle" + label «Wyjazd» + date-time + postal | Circle: `inline-flex h-12 w-12 items-center justify-center rounded-full border border-border bg-input text-sm font-bold text-text` showing the **ISO country code** (`departureCountry`, e.g. `DE`). Under it: `text-[11px] font-semibold uppercase tracking-[0.08em] text-text-sub` = «Wyjazd»; then `text-sm text-text tabular-nums` = `formatDateTime(departureAt)` (date + time, since `departureAt` is a datetime); then `text-xs text-text-sub` = «kod: {departurePostalCode}» mono. |
 | **Connector (center)** | Arrow line + truck icon + duration pill | A horizontal connector: `flex-1` with a hairline rule (`h-px bg-border` or `border-t border-border`) running behind a centered cluster. Cluster = Lucide `<Truck size={18} className="text-text-sub" />` + the **duration pill**. End the line with a Lucide `<ChevronRight>` / arrowhead pointing at the return circle. On narrow widths the connector rotates to vertical (see responsive). |
-| **Return (right)** | Country circle + label «Powrót» + planned date + postal + actual | Circle same recipe, code = `returnCountry`. Label «Powrót». Planned: `text-sm text-text tabular-nums` = «plan: {formatDateFull(plannedReturnAt)}» (date-only — `plannedReturnAt` is `@db.Date`). Postal: `text-xs text-text-sub` = «kod: {returnPostalCode}» mono. **Actual** return line (always shown, even when null): `text-xs text-text-sub` = «faktyczny: {actualReturnAt ? formatDateTime(actualReturnAt) : '—'}». The em-dash uses the standard empty treatment (§6.5). |
+| **Return (right)** | Country circle + label «Powrót» + planned date + postal | Circle same recipe, code = `returnCountry`. Label «Powrót». Planned: `text-sm text-text tabular-nums` = «plan: {formatDateFull(plannedReturnAt)}» (date-only — `plannedReturnAt` is `@db.Date`). Postal: `text-xs text-text-sub` = «kod: {returnPostalCode}» mono. **The «faktyczny» (actual-return) line is removed** — see note below. |
+
+> **«faktyczny» line removed (decided 2026-06-16).** The actual-return-date line («faktyczny: {actualReturnAt}») is **dropped from `<RouteCard>` globally** — it disappears in every read-only delegation modal across all three panels (carrier, eksport, admin), since they all share this one component. Rationale: for unfinished outbound trips `actualReturnAt` is always `null`, so the line rendered a permanent «faktyczny: —» that, without surrounding context, reads as ambiguous/broken rather than informative. `actualReturnAt` **stays on the wire** (`DelegationDto` / API / DB unchanged) — this is a UI-only removal. The now-unused i18n key `carrier.delegations.routeCard.actualPrefix` (pl.json/en.json) is deleted.
 
 **Duration pill** — `inline-flex items-center gap-1 rounded-full border border-border bg-input px-2.5 py-0.5 text-xs font-medium text-text-sub` with the text «{n} dni · plan.». `n` = **whole-day count between `departureAt` and `plannedReturnAt`**, computed date-only: `differenceInCalendarDays(plannedReturnAt, departureAt.slice(0,10))` (drop the time portion of `departureAt`, exactly mirroring the zod cross-field validation at `delegations.ts:113`). Pluralize via the existing PL plural i18n (`1 dzień` / `2–4 dni` / `5+ dni`) — add `delegations.routeCard.durationDays` ICU plural; the `· plan.` suffix marks it as the *planned* span (so it never reads as actual elapsed time). Guard `n >= 0` (the zod schema already forbids `plannedReturnAt < departureAt`); if for any reason the pill would be negative, render «— · plan.».
 
@@ -3620,7 +3627,7 @@ Section header: icon `<ClipboardCheck>` (or keep `<Info>`), label «STATUS I AUD
 
 **All fields accounted for (no field dropped).** Mapping of the 19 `DelegationDto` fields to the new layout:
 - Header: `vehicle.plateNumber` (title), `status` (badge).
-- Route card: `departureAt`, `departureCountry`, `departurePostalCode`, `plannedReturnAt`, `returnCountry`, `returnPostalCode`, `actualReturnAt` (+ the derived duration pill).
+- Route card: `departureAt`, `departureCountry`, `departurePostalCode`, `plannedReturnAt`, `returnCountry`, `returnPostalCode` (+ the derived duration pill). `actualReturnAt` is **no longer displayed** (UI-only removal — see «faktyczny» note above) but remains in `DelegationDto`.
 - Driver/vehicle strip: `driver`/`driverNameSnapshot`, `driverPhoneSnapshot`, `vehicle.plateNumber` (echoed in body for the strip), `trailer.plateNumber`.
 - Status & audit section: `reportedBy`, `reportedAt`, `verifiedBy`, `verifiedAt`, `notes`.
 - Footer meta line: `createdAt`, `updatedAt` (unchanged, §6.6).
@@ -3729,7 +3736,8 @@ The `<DataTable>` primitive **already** supports `onRowClick` and applies `curso
 | **API enrich** `VehicleListItemSchema` += `year, euro, certificateL, gps, gpsMobilePhone, fuelCard, agreement, adr, wasteAllowed, wasteCountries, cabotageDe, cabotageFr, gb, it, fr, lastDroveAt, notes` (all additive/optional; **NO rate fields**) | `packages/shared/src/schemas/fleet.ts` + `fleet.service.ts` select | api-agent |
 | **API enrich** `DriverListItemSchema` += `phone2, email, idDocumentNumber, adr, notes` (additive; **NO `bankAccount`**) | same | api-agent |
 | **API enrich** `TrailerListItemSchema` += `year, belts, beltsCount, mats, matsCount, innerLength, innerWidth, innerHeight, capacity, airSuspension, certXl, multilock, notes` (additive) | same | api-agent |
-| i18n: `carrier.delegations.routeCard.{aria,durationDays(ICU plural),departure,return,plannedPrefix,actualPrefix,postalPrefix}`; `fleet.{vehicle,driver,trailer}.sections.*` + reused `fields.*`; `entityDetail.gpsDeviceId` («ID urządzenia GPS») | `messages/pl.json`, `en.json` | web-agent |
+| i18n: `carrier.delegations.routeCard.{aria,durationDays(ICU plural),departure,return,plannedPrefix,postalPrefix}` (note: `actualPrefix` **removed** — see «faktyczny» row below); `fleet.{vehicle,driver,trailer}.sections.*` + reused `fields.*`; `entityDetail.gpsDeviceId` («ID urządzenia GPS») | `messages/pl.json`, `en.json` | web-agent |
+| **Remove «faktyczny» (actual-return) line from `<RouteCard>`** — delete the `text-xs text-text-sub` actual-return `<span>` in the return block (UI-only; `actualReturnAt` stays in `DelegationDto`/API/DB). Affects all 3 panels (carrier, eksport, admin) since `<RouteCard>` is shared. Also delete unused i18n key `carrier.delegations.routeCard.actualPrefix` (pl.json/en.json) | `components/delegations/RouteCard.tsx`; `messages/pl.json`, `en.json` | web-agent |
 | **0** changes to `EntityDetailModal.tsx` shell, `tailwind.config.ts`, `globals.css` | — | — |
 
 > The enriched list-items also widen the carrier `/fleet/my` payload (drivers/vehicles/trailers) — acceptable per §6.4.2: all added fields are non-sensitive and the carrier owns its own fleet. No new endpoint, no new role scope, no token change anywhere in Phase 6.4.

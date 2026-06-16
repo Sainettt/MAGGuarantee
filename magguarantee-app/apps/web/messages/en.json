@@ -1194,7 +1194,8 @@
         "moneyLabelApproved": "amount approved",
         "moneyLabelCalc": "calculation",
         "wniosekLabel": "Guarantee payout",
-        "vehiclePlate": "Vehicle"
+        "vehiclePlate": "Vehicle",
+        "submittedAt": "Submitted"
       },
       "form": {
         "sectionVehicleAndDriver": "Vehicle and driver",
@@ -1350,7 +1351,6 @@
         "departure": "Departure",
         "return": "Return",
         "plannedPrefix": "planned:",
-        "actualPrefix": "actual:",
         "postalPrefix": "postal:"
       },
       "strip": {

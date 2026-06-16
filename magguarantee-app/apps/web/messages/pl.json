@@ -1194,7 +1194,8 @@
         "moneyLabelApproved": "kwota zatwierdzona",
         "moneyLabelCalc": "kalkulacja",
         "wniosekLabel": "Dopłata gwarancyjna",
-        "vehiclePlate": "Pojazd"
+        "vehiclePlate": "Pojazd",
+        "submittedAt": "Data zgłoszenia"
       },
       "form": {
         "sectionVehicleAndDriver": "Pojazd i kierowca",
@@ -1350,7 +1351,6 @@
         "departure": "Wyjazd",
         "return": "Powrót",
         "plannedPrefix": "plan:",
-        "actualPrefix": "faktyczny:",
         "postalPrefix": "kod:"
       },
       "strip": {

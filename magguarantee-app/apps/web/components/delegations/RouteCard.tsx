@@ -101,12 +101,6 @@ export function RouteCard({ delegation }: Props) {
         {t('postalPrefix')}{' '}
         <span className="font-mono">{delegation.returnPostalCode}</span>
       </span>
-      <span className="text-xs text-text-sub">
-        {t('actualPrefix')}{' '}
-        {delegation.actualReturnAt
-          ? formatDateTime(delegation.actualReturnAt)
-          : '—'}
-      </span>
     </div>
   );
 
