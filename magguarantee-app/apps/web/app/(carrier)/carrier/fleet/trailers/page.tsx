@@ -4,13 +4,14 @@
 // admin/opiekun, the carrier can only see them (mirror of the vehicles page
 // pattern). Per docs/14 "Naczepy" sub-tab — Phase 3 narrowed-scope decision.
 
-import { Container, Mail } from 'lucide-react';
+import { Container, Mail, SearchX } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useMemo, useState } from 'react';
 import type { TrailerDto } from '@magguarantee/shared';
 
 import { TrailerDetailModal } from '@/components/trailers/TrailerDetailModal';
 import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
@@ -121,11 +122,32 @@ export default function CarrierTrailersPage() {
         rowKey={(r) => r.id}
         onRowClick={openDetail}
         isLoading={isLoading}
+        hasActiveFilters={Boolean(search.length >= 2 || trailerTypeId)}
         empty={
           <EmptyState
             icon={Container}
             title={t('emptyTitle')}
             message={t('emptyMessage')}
+          />
+        }
+        emptyFiltered={
+          <EmptyState
+            icon={SearchX}
+            title={t('emptyFiltered.title')}
+            message={t('emptyFiltered.message')}
+            action={
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setSearch('');
+                  setTrailerTypeId('');
+                }}
+              >
+                {tCommon('clearFilters')}
+              </Button>
+            }
           />
         }
       />

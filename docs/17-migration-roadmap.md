@@ -519,32 +519,77 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
 
 ---
 
-## Фаза 8 — Audit + полировка (≈ 1 неделя)
+## Фаза 8 — Audit + полировка (≈ 1 неделя) 🚧 В РАБОТЕ (старт 2026-06-16)
 
 **Цель:** просмотр audit log, исправление мелких регрессий, отшлифовка UI.
 
+> ⚠️ **DEFER — доделать после резолва eksport-панели (Phase 7).** Phase 7 не до конца
+> закрыта по вопросам экспортёра. Поэтому часть Phase 8, завязанная на eksport-панель,
+> сознательно отложена и должна быть доделана, **когда определится scope eksport-панели**:
+> 1. **Audit-coverage для mutating-эндпоинтов eksport-панели** — когда появятся
+>    eksport-specific мутации, добавить spot-check тесты что они пишут audit-row
+>    (как для остальных критичных эндпоинтов, item 3 ниже).
+> 2. **Polish/a11y/dark-mode проход по eksport-специфичным экранам** — если eksport-flow
+>    изменится при резолве, заново прогнать его через Phase 8 чек-лист.
+>
+> Всё остальное в Phase 8 делается сейчас в полном объёме. Этот блок — единственный
+> явно отложенный кусок; убрать пометку, когда eksport-панель финализирована.
+
+### Прогресс выполнения (2026-06-16)
+
+Роутинг через `orchestrator-agent`. Ключевой вывод: audit-reader (`GET /api/v1/audit`)
+и audit-страница были фактически доставлены ещё в Phase 4.5, а primitives
+(`<EmptyState>`/`<Skeleton>`/sonner/focus-trap) уже в репо — поэтому Phase 8 это
+**проход верификации + полировки**, а не разработка с нуля.
+
+- ✅ **Backend (api-agent).** Audit-reader сверен со спекой — все 6 фильтров
+  (`targetType/targetKey/userId/action/from/to`) + cursor-пагинация на месте, ничего
+  не пересобиралось. **Найден и исправлен реальный регресс:** `PATCH /claims/:nrZgl`
+  (верификация заявления) с Phase 4.1 шёл **без** `@Audit()`-декоратора → в проде
+  audit-row для верификации **не писался** (сервисные тесты маскировали это, открывая
+  audit-контекст вручную). Добавлен декоратор + переиспользуемый
+  `audit-coverage.harness.ts` (читает реальную `@Audit()`-конфигурацию через `Reflector`,
+  гоняет продакшн `AuditInterceptor` end-to-end) + `audit-coverage.spec.ts` (22 spot-check
+  теста на claims-update/request-authorization/limits-PUT/user-CRUD/hard-deletes ×5).
+  Endpoint-sweep по `13-api-design.md`: всё in-scope реализовано; `GET /ready`
+  (readiness-probe) отложен в Phase 9. Сьют: **721 pass / 4 pre-existing fail** (нужен
+  live Postgres).
+- ✅ **Design system (uiux-agent).** Добавлена секция §8.0–§8.10 в
+  [`14-design-system.md`](14-design-system.md): 5 screen-архетипов, skeleton/empty-state/
+  toast/keyboard-контракт, a11y-чек-лист (7 «key screens»), dark-mode матрица + per-screen
+  polish-матрица (28 экранов × 6 колонок).
+- ✅ **Frontend (web-agent).** Полировка по матрице: централизован table-skeleton в
+  `DataTable`, dual empty-state (data-empty vs filtered-empty), новый accessible
+  `<CursorPager>` (заменил 3 ad-hoc «←/→» блока), i18n close-labels в `Dialog`/`Sheet`,
+  aria-labels на icon-only кнопках, Recharts на CSS-var цветах для dark-mode. typecheck/
+  lint/build чисто; i18n паритет **1242 PL ↔ 1242 EN**.
+- 🚧 **Carry-overs (не блокеры, см. §8.10 в DS):** (1) dirty-form guard на 6 admin
+  edit-`<Sheet>` (поведенческое изменение — отдельный слайс); (2) live axe-прогон
+  (light+dark) на 7 key-screens — human/CI шаг; (3) eksport-экраны — △ re-pass после
+  резолва export-панели (DEFER-блок выше).
+
 ### Backend
 
-1. Audit log читалка: `GET /audit?targetType=...&targetKey=...&userId=...&from=...&to=...`.
-2. Пагинация audit (cursor-based).
-3. Spot-check: каждый mutating endpoint фактически пишет audit (тесты на самых критичных).
-4. Финализация всех остальных endpoints, не покрытых ранее (если что-то осталось из [13-api-design.md](13-api-design.md)).
+1. ✅ Audit log читалка: `GET /audit?targetType=...&targetKey=...&userId=...&from=...&to=...` (Phase 4.5, сверено).
+2. ✅ Пагинация audit (cursor-based) — Phase 4.5, сверено.
+3. ✅ Spot-check: критичные mutating endpoints фактически пишут audit (22 теста; найден+исправлен claims-verification регресс).
+4. ✅ Финализация остальных endpoints из [13-api-design.md](13-api-design.md) — всё in-scope реализовано; `GET /ready` → Phase 9.
 
 ### Frontend
 
-1. `app/(employee)/audit/page.tsx` — фильтры (по target, по user, по action, по дате) + таблица + детали записи.
-2. Полировка существующих экранов:
-   - Loading skeletons вместо голого `Loading...`.
-   - Empty states с подсказками что делать (`<EmptyState>`).
-   - Error toasts через sonner.
-   - Keyboard shortcuts (Esc — close modal, Enter — submit).
-3. Accessibility audit (axe DevTools): focus-traps в модалках, aria-labels, контраст.
-4. Проверка dark mode на всех экранах.
+1. ✅ `app/(employee)/.../audit/page.tsx` — фильтры (target/user/action/date) + таблица + детали (Phase 4.5; сверено под polished-bar).
+2. ✅ Полировка существующих экранов:
+   - ✅ Loading skeletons вместо голого `Loading...` (централизовано в `DataTable`).
+   - ✅ Empty states с подсказками (`<EmptyState>`, data-vs-filtered split).
+   - ✅ Error toasts через sonner.
+   - ✅ Keyboard shortcuts (Esc — close, Enter — submit) — кроме dirty-form guard на 6 admin sheets (carry-over).
+3. ✅ Accessibility: focus-traps, aria-labels, контраст — code-level satisfied; live axe-прогон — carry-over.
+4. ✅ Проверка dark mode на экранах (Recharts/badges на CSS-var; eksport-экраны — △ re-pass).
 
 ### Deliverables
-- Audit log полностью функционален.
-- Все экраны выглядят отполировано в обеих темах.
-- a11y нарушения < 5 (ideally 0) на ключевых экранах.
+- ✅ Audit log полностью функционален (+ закрыт регресс, при котором верификация заявлений не аудировалась).
+- ✅ Экраны отполированы в обеих темах (eksport — после резолва export-панели).
+- 🟡 a11y нарушения < 5 на ключевых экранах — code-level выполнено, требуется live axe-подтверждение.
 
 ### Зависимости
 - Фазы 4–7 (нужны mutating endpoints, чтобы было что читать в audit).

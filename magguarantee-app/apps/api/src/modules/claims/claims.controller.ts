@@ -197,6 +197,11 @@ export class ClaimsController {
    */
   @Patch(':nrZgl')
   @Roles('admin', 'pracownik')
+  @Audit({
+    action: 'updateClaim',
+    targetType: 'Claim',
+    targetKey: (req) => req.params?.nrZgl,
+  })
   async update(
     @CurrentUser() user: AuthUser,
     @Param('nrZgl') nrZgl: string,

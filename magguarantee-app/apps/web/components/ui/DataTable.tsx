@@ -17,6 +17,7 @@
 import type { CSSProperties, ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
+import { Skeleton } from '@/components/ui/Skeleton';
 
 export interface DataTableColumn<T> {
   /** Stable id used for React keys. */
@@ -76,16 +77,62 @@ export interface DataTableProps<T> {
    * clickable but is announced only by its cell content.
    */
   rowAriaLabel?: (row: T) => string;
-  /** Rendered inside the table body when `rows.length === 0`. */
+  /**
+   * Rendered inside the table body when `rows.length === 0` and no filters are
+   * active (the §8.2 "no data yet" empty — pass an `<EmptyState>` with an
+   * `action` for create-capable roles, informational only for read-only roles).
+   */
   empty?: ReactNode;
-  /** Loading state — show a centered loading label. */
+  /**
+   * §8.2 filtered-empty — rendered when `rows.length === 0` **and**
+   * `hasActiveFilters` is true. Should offer a «Wyczyść filtry» reset action,
+   * never a create CTA. When omitted, `empty` is shown for both cases.
+   */
+  emptyFiltered?: ReactNode;
+  /** Drives the §8.2 data-vs-filtered empty split. */
+  hasActiveFilters?: boolean;
+  /** Loading state — renders the §8.1 table-skeleton (geometry-preserving rows). */
   isLoading?: boolean;
   /**
-   * Loading label override. Defaults to `'Loading...'` — admin callers pass
-   * the i18n'd `common.loading` so the cell respects the active locale.
+   * Number of skeleton rows rendered while `isLoading` (§8.1 recipe: 8 rows for
+   * a full table; pass a smaller count for compact embedded tables). Default 8.
    */
-  loadingLabel?: string;
+  skeletonRows?: number;
   className?: string;
+}
+
+/** §8.1 — one skeleton `<tr>` whose cells mirror the real column count + widths
+ *  so the loaded content drops in with no layout jump. Per-cell widths are
+ *  pseudo-random-but-stable (driven by row+col index) to read as real data. */
+function TableSkeletonRow<T>({
+  columns,
+  rowIndex,
+}: {
+  columns: DataTableColumn<T>[];
+  rowIndex: number;
+}) {
+  return (
+    <tr className="border-b border-border last:border-b-0" aria-hidden>
+      {columns.map((col, colIndex) => {
+        // Deterministic width in the 50–85% band so columns look varied but
+        // never jump between renders.
+        const pct = 50 + ((rowIndex * 7 + colIndex * 13) % 36);
+        const align = ALIGN_CLASSES[col.align ?? 'left'];
+        return (
+          <td
+            key={col.id}
+            style={widthStyle(col)}
+            className={cn('px-3 py-2 h-12 align-middle', align, widthClasses(col))}
+          >
+            <Skeleton
+              className={cn('h-4', col.align === 'right' && 'ml-auto')}
+              style={{ width: `${pct}%` }}
+            />
+          </td>
+        );
+      })}
+    </tr>
+  );
 }
 
 const ALIGN_CLASSES: Record<NonNullable<DataTableColumn<unknown>['align']>, string> = {
@@ -119,8 +166,10 @@ export function DataTable<T>({
   onRowClick,
   rowAriaLabel,
   empty,
+  emptyFiltered,
+  hasActiveFilters,
   isLoading,
-  loadingLabel = 'Loading...',
+  skeletonRows = 8,
   className,
 }: DataTableProps<T>) {
   return (
@@ -152,20 +201,18 @@ export function DataTable<T>({
             </tr>
           </thead>
           <tbody>
-            {isLoading && (
-              <tr>
-                <td
-                  colSpan={columns.length}
-                  className="px-3 py-12 text-center text-sm text-text-sub"
-                >
-                  {loadingLabel}
-                </td>
-              </tr>
-            )}
+            {isLoading &&
+              Array.from({ length: skeletonRows }).map((_, i) => (
+                <TableSkeletonRow
+                  key={`sk-${i}`}
+                  columns={columns}
+                  rowIndex={i}
+                />
+              ))}
             {!isLoading && rows.length === 0 && (
               <tr>
                 <td colSpan={columns.length} className="px-3 py-0">
-                  {empty ?? (
+                  {(hasActiveFilters && emptyFiltered ? emptyFiltered : empty) ?? (
                     <p className="py-12 text-center text-sm text-text-sub">
                       No items.
                     </p>

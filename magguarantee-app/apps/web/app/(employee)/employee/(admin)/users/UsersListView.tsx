@@ -11,6 +11,8 @@ import {
   Plus,
   Power,
   PowerOff,
+  SearchX,
+  Users as UsersIcon,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useMemo, useState } from 'react';
@@ -102,6 +104,15 @@ export function UsersListView() {
         (u.name ?? '').toLowerCase().includes(q),
     );
   }, [data, search]);
+
+  const hasActiveFilters = Boolean(
+    search.trim().length >= 2 || role || activeFilter,
+  );
+  const clearFilters = () => {
+    setSearch('');
+    setRole('');
+    setActiveFilter('');
+  };
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [target, setTarget] = useState<UserDtoFull | null>(null);
@@ -332,6 +343,7 @@ export function UsersListView() {
           onChange={(e) =>
             setActiveFilter(e.target.value as '' | 'true' | 'false')
           }
+          aria-label={t('filters.activeLabel')}
         >
           <option value="">{t('filters.allActive')}</option>
           <option value="true">{t('filters.onlyActive')}</option>
@@ -345,9 +357,36 @@ export function UsersListView() {
         rowKey={(r) => r.id}
         onRowClick={openEdit}
         isLoading={isLoading}
-        loadingLabel={tCommon('loading')}
+        hasActiveFilters={hasActiveFilters}
         empty={
-          <EmptyState title={t('emptyTitle')} message={t('emptyMessage')} />
+          <EmptyState
+            icon={UsersIcon}
+            title={t('emptyTitle')}
+            message={t('emptyMessage')}
+            action={
+              <Button size="sm" onClick={openCreate}>
+                <Plus size={14} />
+                {t('newUser')}
+              </Button>
+            }
+          />
+        }
+        emptyFiltered={
+          <EmptyState
+            icon={SearchX}
+            title={t('emptyFiltered.title')}
+            message={t('emptyFiltered.message')}
+            action={
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={clearFilters}
+              >
+                {tCommon('clearFilters')}
+              </Button>
+            }
+          />
         }
       />
 

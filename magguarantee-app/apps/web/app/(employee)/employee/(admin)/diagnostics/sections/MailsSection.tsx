@@ -143,7 +143,6 @@ export function MailsSection() {
         columns={columns}
         rowKey={(r) => r.id}
         isLoading={isLoading}
-        loadingLabel={tCommon('loading')}
         empty={
           <EmptyState
             icon={Mail}

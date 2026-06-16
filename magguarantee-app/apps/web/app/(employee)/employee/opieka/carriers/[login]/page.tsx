@@ -344,7 +344,6 @@ function VehiclesTable({ rows, isLoading, onRowClick }: VehiclesTableProps) {
       onRowClick={onRowClick}
       rowAriaLabel={(r) => r.plateNumber}
       isLoading={isLoading}
-      loadingLabel={tCommon('loading')}
       empty={
         <EmptyState title={t('emptyTitle')} message={t('emptyMessage')} />
       }
@@ -406,7 +405,6 @@ function DriversTable({ rows, isLoading, onRowClick }: DriversTableProps) {
       onRowClick={onRowClick}
       rowAriaLabel={(r) => `${r.firstName} ${r.lastName}`}
       isLoading={isLoading}
-      loadingLabel={tCommon('loading')}
       empty={
         <EmptyState title={t('emptyTitle')} message={t('emptyMessage')} />
       }
@@ -464,7 +462,6 @@ function TrailersTable({ rows, isLoading, onRowClick }: TrailersTableProps) {
       onRowClick={onRowClick}
       rowAriaLabel={(r) => r.plateNumber}
       isLoading={isLoading}
-      loadingLabel={tCommon('loading')}
       empty={
         <EmptyState title={t('emptyTitle')} message={t('emptyMessage')} />
       }

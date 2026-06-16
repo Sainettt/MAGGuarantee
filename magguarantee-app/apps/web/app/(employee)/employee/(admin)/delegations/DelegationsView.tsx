@@ -27,7 +27,7 @@ import type {
   DelegationStatus,
 } from '@magguarantee/shared';
 
-import { Button } from '@/components/ui/Button';
+import { CursorPager } from '@/components/ui/CursorPager';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { DelegationsTable } from '@/components/delegations/DelegationsTable';
@@ -54,7 +54,6 @@ function toIsoEnd(date: string): string | undefined {
 export function DelegationsView() {
   const t = useTranslations('delegations.admin');
   const tStatus = useTranslations('carrier.delegations.status');
-  const tCommon = useTranslations('common');
   const tA11y = useTranslations('fleet.a11y');
 
   const [status, setStatus] = useState<DelegationStatus | ''>('');
@@ -84,6 +83,18 @@ export function DelegationsView() {
   const resetCursor = () => {
     setCursor(undefined);
     setCursorStack([]);
+  };
+
+  const hasActiveFilters = Boolean(
+    status || debouncedQ.trim().length >= 1 || from || to,
+  );
+
+  const clearFilters = () => {
+    setStatus('');
+    setQ('');
+    setFrom('');
+    setTo('');
+    resetCursor();
   };
 
   const nextPage = () => {
@@ -164,7 +175,8 @@ export function DelegationsView() {
         rows={data?.items ?? []}
         isLoading={isLoading}
         namespace="delegations.admin.table"
-        loadingLabel={tCommon('loading')}
+        hasActiveFilters={hasActiveFilters}
+        onClearFilters={clearFilters}
         rowAriaLabel={(r) =>
           tA11y('showDelegationDetails', {
             name: r.vehicle?.plateNumber ?? '—',
@@ -173,26 +185,12 @@ export function DelegationsView() {
       />
 
       {(data?.nextCursor || cursorStack.length > 0) && (
-        <div className="flex items-center justify-end gap-2 mt-4">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={prevPage}
-            disabled={cursorStack.length === 0}
-          >
-            ←
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={nextPage}
-            disabled={!data?.nextCursor}
-          >
-            →
-          </Button>
-        </div>
+        <CursorPager
+          onPrev={prevPage}
+          onNext={nextPage}
+          canPrev={cursorStack.length > 0}
+          canNext={Boolean(data?.nextCursor)}
+        />
       )}
     </section>
   );

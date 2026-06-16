@@ -6,6 +6,7 @@
 // animate-modal-in.
 
 import { X } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import {
   createContext,
   useContext,
@@ -73,6 +74,7 @@ export function DialogContent({
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) {
   const { open, setOpen, titleId, descriptionId } = useDialog();
+  const tCommon = useTranslations('common');
   const ref = useRef<HTMLDivElement | null>(null);
   const previous = useRef<HTMLElement | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -107,7 +109,7 @@ export function DialogContent({
     <div className="fixed inset-0 z-40">
       <button
         type="button"
-        aria-label="Close"
+        aria-label={tCommon('close')}
         tabIndex={-1}
         onClick={() => setOpen(false)}
         className="absolute inset-0 bg-black/40 backdrop-blur-sm"
@@ -129,7 +131,7 @@ export function DialogContent({
         {children}
         <button
           type="button"
-          aria-label="Close"
+          aria-label={tCommon('close')}
           onClick={() => setOpen(false)}
           className={cn(
             'absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-md',
@@ -137,7 +139,7 @@ export function DialogContent({
             'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand/40',
           )}
         >
-          <X size={16} />
+          <X size={16} aria-hidden />
         </button>
       </div>
     </div>,

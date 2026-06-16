@@ -28,7 +28,6 @@ import { useDelegations } from '@/lib/hooks/useDelegations';
 
 export function EksportDelegationsView() {
   const t = useTranslations('eksport.delegations');
-  const tCommon = useTranslations('common');
   const tA11y = useTranslations('fleet.a11y');
   const tKm = useTranslations('weryfikator.km');
 
@@ -85,7 +84,11 @@ export function EksportDelegationsView() {
         rows={data?.items ?? []}
         isLoading={isLoading}
         namespace="eksport.delegations.table"
-        loadingLabel={tCommon('loading')}
+        hasActiveFilters={Boolean(status || includeHistory)}
+        onClearFilters={() => {
+          setStatus('');
+          setIncludeHistory(false);
+        }}
         rowAriaLabel={(r) =>
           tA11y('showDelegationDetails', {
             name: r.vehicle?.plateNumber ?? '—',

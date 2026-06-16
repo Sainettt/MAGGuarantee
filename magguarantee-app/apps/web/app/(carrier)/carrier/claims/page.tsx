@@ -4,7 +4,7 @@
 // authenticated carrier; the UI only adds in-list filters (status,
 // vehicle, search by nrZgl).
 
-import { FileText, Plus } from 'lucide-react';
+import { FileText, Plus, SearchX } from 'lucide-react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { useState } from 'react';
@@ -42,6 +42,14 @@ export default function CarrierClaimsListPage() {
   const fleetQ = useMyFleet({ includeInactive: true });
 
   const items = data?.items ?? [];
+  const hasActiveFilters = Boolean(
+    search.length >= 2 || status || vehicleId,
+  );
+  const clearFilters = () => {
+    setSearch('');
+    setStatus('');
+    setVehicleId('');
+  };
 
   return (
     <section className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-8">
@@ -102,7 +110,27 @@ export default function CarrierClaimsListPage() {
         </div>
       )}
 
-      {!isLoading && items.length === 0 && (
+      {!isLoading && items.length === 0 && hasActiveFilters && (
+        <div className="bg-card rounded-lg border border-border">
+          <EmptyState
+            icon={SearchX}
+            title={t('emptyFiltered.title')}
+            message={t('emptyFiltered.message')}
+            action={
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={clearFilters}
+              >
+                {tCommon('clearFilters')}
+              </Button>
+            }
+          />
+        </div>
+      )}
+
+      {!isLoading && items.length === 0 && !hasActiveFilters && (
         <div className="bg-card rounded-lg border border-border">
           <EmptyState
             icon={FileText}

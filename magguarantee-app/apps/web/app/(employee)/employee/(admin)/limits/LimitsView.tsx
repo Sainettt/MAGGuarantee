@@ -18,6 +18,7 @@ import type { UpdateMonthlyLimitDto } from '@magguarantee/shared';
 
 import { LimitsRow } from '@/components/limits/LimitsRow';
 import { Button } from '@/components/ui/Button';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { useLimits, useUpdateLimit } from '@/lib/hooks/useLimits';
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -137,16 +138,25 @@ export function LimitsView() {
               </tr>
             </thead>
             <tbody>
-              {isLoading && (
-                <tr>
-                  <td
-                    colSpan={4}
-                    className="px-3 py-12 text-center text-sm text-text-sub"
+              {/* §8.1 D — keep the static month labels live, skeleton only the
+                  value cells (km/day, rate, updatedAt) until the year's limits
+                  hydrate. Preserves the 12-row geometry — no layout jump. */}
+              {isLoading &&
+                months.map(({ month, label }) => (
+                  <tr
+                    key={`sk-${month}`}
+                    className="border-b border-border last:border-b-0"
                   >
-                    {tCommon('loading')}
-                  </td>
-                </tr>
-              )}
+                    <td className="px-3 py-2 h-12 align-middle text-text font-medium">
+                      {label}
+                    </td>
+                    {[0, 1, 2].map((i) => (
+                      <td key={i} className="px-3 py-2 h-12 align-middle">
+                        <Skeleton className="h-4 w-24" />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
               {!isLoading &&
                 months.map(({ month, label }) => (
                   <LimitsRow

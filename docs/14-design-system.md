@@ -4825,3 +4825,253 @@ A NEW namespace `myKm.*` for this tab's chrome. All grid/cell/nav/history/tiles 
 - [ ] **i18n.** `myKm.*` keys present PL + EN; grid/cell/nav/history reuse `weryfikator.km.*` (not duplicated); ICU plural on `myKm.group.summary`.
 - [ ] **Token policy + dark-mode.** No new radius/shadow/font tokens; the only colour addition is the §7.8.2 `cat-blue`/`cat-violet` pair (pending sign-off — else fallback); carrier accents are opacity rails legible in dark via the listed `dark:` steps; **no API contract change** beyond role-scoping the existing read endpoint.
 
+---
+
+## Phase 8 — Polish & Accessibility (loading / empty / toast / keyboard / a11y / dark-mode)
+
+> **Status:** 🚧 In progress (start 2026-06-16). This is **not** a from-scratch design. Every primitive
+> already exists (`<Skeleton>`, `<EmptyState>`, sonner `<Toast>`, focus-trapped `Dialog`/`Sheet`).
+> Phase 8 is a **consistency pass**: define WHERE and HOW each primitive is applied across the *already-built*
+> screens, so web-agent can walk screen-by-screen and tick boxes. **No new design tokens** — surface-token
+> policy is LOCKED since Phase 4.4 (`bg-input` is the single soft-chrome surface; `bg-bg-soft` deprecated).
+>
+> ⚠️ **DEFER (per roadmap Phase 8 note).** The `eksport`-specific rows in every matrix below
+> (`/eksport`, `/eksport/delegations`, `/eksport/km`) **are** polished now — but the eksport flow may change
+> when the export-panel scope is finalised (Phase 7 unresolved). Treat eksport rows as **provisional**:
+> ticked boxes stand, but re-run the §8.5 / §8.6 pass on those three screens after the export panel is locked.
+> No other screen is deferred.
+
+### 8.0 Screen archetypes — the 4 shapes everything reduces to
+
+Every built screen maps to exactly one **archetype**. The polish recipe is defined **once per archetype**
+(§8.1–§8.2 skeletons + empty states), then the matrix in §8.7 just names the archetype per screen.
+
+| Archetype | Shape | Screens (route → archetype) |
+|---|---|---|
+| **A — Data-table page** | filter row + `<DataTable>` (one or `<Tabs>`-of-tables) | `/carrier/claims`, `/employee/claims`, `/employee/carriers`, `/employee/vehicles`, `/employee/drivers`, `/employee/trailers`, `/employee/trailer-types`, `/employee/users`, `/employee/limits`, `/employee/audit`, `/employee/delegations`, `/eksport/delegations`, `/carrier/fleet/{vehicles,drivers,trailers}`, `/carrier/delegations`, `/planista`, `/dyspozytor`, `/eksport` |
+| **B — Dashboard (KPI + panels/charts)** | `<KpiCard>` row + side/section panels, some Recharts | `/carrier` (carrier dashboard), `/employee/dashboard`, `/employee` (entry), `/dyspozytor` KPI strip, `/employee/diagnostics` |
+| **C — Detail modal / sheet / drill page** | `Dialog`/`Sheet`/grouped-`<dl>` detail surface | `ClaimModal` (claim verify/detail), `EntityDetailModal` (vehicle/driver/trailer/carrier), `/carrier/claims/[nrZgl]`, `/employee/opieka/carriers/[login]`, delegation detail modal, `VehicleKmHistoryDialog` |
+| **D — Form page / wizard** | RHF + Zod form (single or multi-step) | `/carrier/claims/new`, `/carrier/delegations/new`, carrier-onboarding wizard, all edit `<Sheet>` forms |
+| **E — Km-board / grid** | `<KmWeekGrid>` weekly grid (already fully specced §7.7.8) | `/*/km`, `/*/moje-pojazdy` — **already covered by §7.7.8**, listed here only so the matrix is complete; do **not** re-spec, reuse §7.7.8 states verbatim |
+
+`/employee/opieka` (the opiekun carrier card-grid) is its **own** archetype, already fully specced in
+§5.2.7 / §5.2.8 — reuse those, do not re-derive.
+
+### 8.1 Loading skeletons — per-archetype recipe
+
+**Rule (roadmap):** bare `Loading...` / `<p>Ładowanie…</p>` is **banned** everywhere. Every async surface
+renders a `<Skeleton>` composition that **reserves the same geometry** as the loaded content (no layout jump).
+Reuse the existing `apps/web/components/ui/Skeleton.tsx` — **no new primitive**.
+
+| Archetype | Skeleton recipe |
+|---|---|
+| **A — Data-table** | Filter row stays **live** (inputs are not data-dependent — render real `<Input>`/`<Select>`, disabled while `isLoading`). Table body = **8 skeleton rows**, each a `<tr>` of `<Skeleton className="h-4 w-[60–80%]">` cells matching the real column count + widths; keep the **real `<thead>`** (column set is static). This is the `<DataTable isLoading>` slot — centralise it in `DataTable` so every table page inherits it. `<Tabs>`-of-tables: skeleton only the **active** tab's body. |
+| **B — Dashboard** | `<KpiCard>` row: render the real cards, skeleton **only the numeric value** (`<Skeleton className="h-6 w-12">`) + delta line — keep titles/icons live (static). Panels/lists: 3–5 skeleton rows. **Charts (Recharts):** a single `<Skeleton className="h-[var(--chart-h)] w-full rounded-md">` block sized to the chart container — **do not** fake axes/bars. Header counters skeleton their values only (same as §7.7.8 km tiles). |
+| **C — Detail modal/sheet** | When the modal opens before its data resolves: header title `<Skeleton className="h-5 w-40">`; each `<dl>` section = 4–6 rows of `label<Skeleton h-3 w-20> / value<Skeleton h-4 w-32>`. Footer (Zamknij) stays live. If the detail is **fetched on row-click and cached**, prefer opening with the row data already in hand (no skeleton) — skeleton only the fields not present on the list row. |
+| **D — Form** | Forms are **input-first**, not data-first — the empty form renders immediately. Skeleton applies **only** to (a) edit-forms hydrating an existing record → skeleton the field **values** as `<Skeleton className="h-9 w-full">` over the input slots until defaults load; (b) the live-preview panel (`<LivePreviewPanel>`/`<BreakdownTable>`) → already specced, keep its existing skeleton. The static field **labels** never skeleton. |
+| **E — Km-board** | Use §7.7.8 verbatim (header tiles skeleton values + 6–8 skeleton grid rows, keep day-column headers). |
+
+**Skeleton shimmer in dark mode:** `<Skeleton>` already uses `bg-input/80 dark:bg-input` + `animate-pulse`.
+Verify the pulse is visible against `--card-bg` (`#1f1f1f`) on every dark surface — it is the **one** dark-mode
+skeleton check in the §8.6 matrix. No new token; if a skeleton sits on `bg-input` itself (e.g. a chip), bump
+that instance to `bg-border/60` locally (utility, not token).
+
+### 8.2 Empty states — per-archetype copy + actionability
+
+**Rule:** every list/table/grid that can legitimately return zero rows renders `<EmptyState>` (existing
+component) **instead of** an empty table body — never a blank card. An empty state is **actionable** when the
+user can do something about it from here (then pass `action`); **informational** when they cannot (no `action`).
+
+| Archetype | Empty-state shape |
+|---|---|
+| **A — Data-table** | Two distinct empties, **do not conflate**: (1) **No data yet** (the dataset is genuinely empty) → `<EmptyState>` with icon + title + message, **+ `action`** when the role can create here (e.g. carrier `/carrier/claims` → «Złóż pierwszy wniosek» button to `/carrier/claims/new`; admin `/employee/users` → «Dodaj użytkownika»). Read-only roles (planista/dyspozytor/eksport/weryfikator, all opiekun read tables) get **no** `action` — informational only. (2) **No results for current filter** → distinct copy («Brak wyników dla wybranych filtrów» / "No results match your filters.") + a **«Wyczyść filtry»** ghost action that resets the filter row — **never** a create button (creating wouldn't help). `DataTable` exposes both via its empty slot; the page passes which one based on `hasActiveFilters`. |
+| **B — Dashboard** | Dashboards rarely fully-empty; per-panel: a chart/list panel with no data shows a **compact in-panel** `<EmptyState className="py-8">` (smaller padding than table empties), informational only («Brak danych w tym okresie»). KPI cards never empty — show `0` / `—`, not an empty state. |
+| **C — Detail / drill** | A drill page (`/employee/opieka/carriers/[login]`, `/carrier/claims/[nrZgl]`) whose **sub-list** is empty (e.g. carrier has no vehicles) shows an in-section `<EmptyState>`; the page itself is never empty (the parent entity exists). A detail modal for a missing/deleted record → close + `toast.error` (§8.3), not an in-modal empty state. |
+| **D — Form** | No empty state (a form is never "empty data"). The closest case — a `<MultiSelect>`/dependent dropdown with zero options — shows the existing inline `<CommandEmpty>` row, not `<EmptyState>`. |
+| **E — Km-board** | §7.7.8 already defines all four km empties (no-vehicles / empty-team / fresh-week-is-NOT-empty / filtered-empty). Reuse verbatim. |
+
+**i18n convention (next-intl).** Every empty-state string lives under a per-screen namespace, key suffixes
+**`empty.title` / `empty.message` / `empty.action`** for the no-data case and **`emptyFiltered.title` /
+`emptyFiltered.message` / `emptyFiltered.action`** for the filtered case. Namespaces follow the existing scheme:
+`claims.empty.*`, `carriers.empty.*`, `users.empty.*`, `audit.empty.*`, `delegations.empty.*`, etc. PL is the
+default bundle (`messages/pl.json`), EN mirrors every key (`messages/en.json`). **Acceptance:** no empty-state
+copy is hard-coded; PL+EN key parity holds (the existing i18n-parity check covers this).
+
+### 8.3 Toast conventions (sonner)
+
+The decision of **inline vs toast** is the crux — toasts disappear, so they are only for **transient confirmation
+of a completed action the user already initiated**, never for state the user must keep reading.
+
+| Use a toast for | Treatment |
+|---|---|
+| **Mutation success** (create / update / delete / status-stamp succeeded and the surface closed or stayed) | `toast.success(t('…toast.saved'))`. Standard messages: create → «Dodano», update → «Zapisano zmiany», delete → «Usunięto», status-stamp → the action-specific string already defined (e.g. «Oznaczono: W trasie»). Keep them **short** (1 line). |
+| **Mutation failure** that is **not** field-level (network, 500, 403, optimistic rollback) | `toast.error(t('…toast.saveFailed'))` (+ rollback if optimistic). For optimistic km/limits cells this is the **only** failure signal — keep it. |
+| **Fire-and-forget side effects** with no visible result | clipboard copy **failure** (`toast.error`), background refetch failure. Clipboard **success** stays **inline** (checkmark swap) per §3.4 — do **not** double-toast. |
+
+**Do NOT toast (use inline instead):**
+
+- **Form / field validation** — Zod errors render inline via `<FormMessage>` under the field. Never raise a
+  validation toast (the "looks-wrong" soft-warnings in §6.1.7 are explicitly **never** toasts).
+- **Loading** — use skeletons (§8.1), not an info toast.
+- **Per-file upload errors** — inline on the offending file row (§5 FileUpload), they must persist.
+- **Anything the user must act on or re-read** — that belongs in a banner/inline region, not a 4s toast.
+
+**Variants & duration.** `success` (default tone) and `error` (`<Toast variant="destructive">`) only; **avoid
+`info`** unless it's a genuine neutral notice with no success/fail polarity (rare — e.g. «Brak nowych danych» on
+manual refresh). No custom durations; sonner defaults. One toast per action — collapse N-row bulk results into
+one summary toast, never N toasts.
+
+### 8.4 Keyboard-shortcut contract
+
+Built on the existing `Dialog`/`Sheet` primitives (which already provide **Esc-to-close**, focus-trap,
+scroll-lock — see §2.x catalogue & §6.2). This section makes the contract **explicit and verifiable** so
+web-agent can tick it per modal/form.
+
+**Esc — closes the top-most overlay.** Always. `Dialog`/`Sheet`/`Popover`/`<MultiSelect>` popover all close on
+Esc and **return focus to the trigger** (Radix default — do not override). Nested overlay: Esc closes only the
+inner one (a confirm-dialog over a sheet → Esc dismisses the confirm, sheet stays). **Exception — dirty-form
+guard:** an edit `Sheet`/`Dialog` with unsaved changes intercepts Esc/outside-click with the existing
+unsaved-changes confirm (do not silently discard); Esc on the **confirm** itself cancels the close.
+
+**Enter — submits the form** when focus is in a single-line input inside a form with a single primary submit.
+Maps to native `<form onSubmit>` (RHF). **Exceptions where Enter must NOT submit:**
+
+- **`<textarea>`** — Enter inserts a newline (claim description, rejection reason, audit note). Submit only via
+  the button or ⌘/Ctrl+Enter (optional nicety, not required).
+- **Multi-step wizard** (`<WizardStepper>`) — Enter advances to **next step**, does not final-submit until the
+  last step's primary button.
+- **Inputs with an open suggestion popover** (`<MultiSelect>`, combobox, `<Command>`) — Enter selects the active
+  option, does not submit the parent form (Radix/cmdk default — verify it doesn't bubble to submit).
+- **Inline-edit cells** (limits, km) — Enter commits the cell (blur-save), does not submit a page-level form.
+
+**Other keys (inherited, verify don't break):** `<Tabs>` arrow-key navigation between triggers; `<CodeBox>`
+2FA auto-advance + Backspace-to-prev; `<Command>` arrow+type-ahead. No new global hotkeys introduced in Phase 8.
+
+### 8.5 Accessibility checklist (per-screen pass/fail)
+
+Frame as a checklist web-agent runs **per screen**. Acceptance bar (roadmap): **< 5, ideally 0, axe violations
+on key screens.** **Key screens** (the must-pass set, run axe DevTools on each in light **and** dark):
+
+1. `/login` + `/login/verify` (public entry — highest exposure)
+2. `/employee/dashboard` (densest employee surface — KPIs + charts + panels)
+3. `/employee/claims` + `ClaimModal` open (core workflow + the most complex modal)
+4. `/employee/carriers` (representative admin DataTable + `EntityDetailModal`)
+5. `/carrier` + `/carrier/claims/new` (carrier dashboard + the primary carrier form)
+6. `/weryfikator/km` (the editable km-grid — densest interactive grid)
+7. `/employee/audit` (new Phase 8 screen — must be born accessible)
+
+Per-screen a11y checklist (tick every row):
+
+- [ ] **Focus-trap** — every `Dialog`/`Sheet` traps Tab within the overlay, Esc closes, focus returns to trigger (inherited; verify not broken by custom content). First focus lands on the first interactive element or the heading, **not** the close ✕.
+- [ ] **Icon-only buttons have `aria-label`** — every icon-only control (refresh, copy, theme-toggle, row-action, ✕, reveal/hide, remove-chip, kebab) carries a descriptive `aria-label`; the icon is `aria-hidden`. (The existing patterns in §3.2 / §5 are the template.)
+- [ ] **Label↔input association** — every form input has a programmatic label (`<Label htmlFor>` / `<FormLabel>` via shadcn `<Form>`); no placeholder-as-label. Error `<FormMessage>` is `aria-describedby`-linked (shadcn default).
+- [ ] **Table semantics** — `<table>`/`<thead>`/`<th scope="col">`/`<tbody>`; clickable rows expose `rowAriaLabel` (the §6.4.3 `rowAriaLabel` prop) and are keyboard-activatable (Enter/Space); sort headers are `<button>` with `aria-sort`.
+- [ ] **Read-only detail uses `<dl>`** — label/value pairs are `<dl><dt><dd>` (§6.5 semantics), not div-soup.
+- [ ] **Contrast (WCAG AA)** — body text ≥ 4.5:1, large/UI text + borders ≥ 3:1, in **both** themes. Known watch-points: `text-text-sub` on `bg-input`, status/role badge text on tinted bg, brand-red on dark.
+- [ ] **Visible focus ring** — `focus-visible:ring-[3px] focus-visible:ring-brand/40` on all interactive elements; never `outline:none` without a replacement.
+- [ ] **Status not by colour alone** — every status/severity carries text or an icon, never hue only (§5.2.9 principle).
+- [ ] **Touch targets** — primary/action controls ≥ 44×44 (icon buttons on mobile use the `h-9 w-9`+ size; below `lg` icon-only fleet buttons are 36×36 per §3.4 — acceptable for secondary, but primary CTAs stay ≥ 44).
+- [ ] **Landmarks & headings** — one `<h1>` per page; section headings descend in order; nav/main/header landmarks present (the shell provides them — verify pages don't skip levels).
+- [ ] **axe DevTools** — run on the screen in light + dark; **0 critical/serious**, total < 5. Record count.
+
+### 8.6 Dark-mode verification matrix
+
+Run per screen, in dark theme, against `--card-bg #1f1f1f` / `--body-bg #121212`. Tick each column. The
+**known risk areas** (call them out explicitly, they are where dark mode breaks): **Recharts colours**,
+**status badges**, **role badges**, **skeleton shimmer**, **tinted-surface text contrast**.
+
+| Check (column) | What to verify |
+|---|---|
+| **Text contrast** | All text (esp. `text-text-sub`) ≥ AA on the dark surface it sits on. No `#000`-on-dark leftovers. |
+| **Borders visible** | `--border #404040` separators/table-rules/card-edges are perceptible (≥ 3:1) — not invisible-on-dark. |
+| **Chart colours (Recharts)** ⚠️ | Series/axis/grid/tooltip colours come from CSS-variable tokens, **not** hard-coded light hex; legible on dark; grid lines use `--border`, axis labels use `--text-sub`; tooltip surface = `--card-bg` not white. This is the #1 dark-mode regression source. |
+| **Status badges** ⚠️ | Claim/delegation/km-state badges (`<StatusBadge>`, §4 mapping) keep their semantic tone **and** AA text contrast on dark tints (`bg-success/10`, `bg-danger-bg`, etc.) — re-check each variant, not just one. |
+| **Role badges** ⚠️ | The role/header badge tones are distinguishable and readable on the dark header; brand-red badge text passes on dark. |
+| **Skeleton shimmer** | `<Skeleton>` pulse visible against `--card-bg` (§8.1 note); shimmer not washed-out or invisible. |
+| **Tinted surfaces** | `bg-input/40` muted cells (read-only fact pairs §6.5), accent rails (§7.8), KPI tint cards — all legible; no token uses a deprecated `bg-bg-soft`. |
+| **Inputs & focus** | Input bg `--input-bg #262626`, placeholder readable, focus ring `ring-brand/40` visible on dark. |
+| **No `[style*=]` hacks** | Confirm dark corrections come **only** from `dark:` variants / CSS variables — zero legacy inline-style-attribute overrides (the anti-pattern §"Что НЕ переносим"). |
+
+### 8.7 The per-screen polish matrix (web-agent walks this top-to-bottom)
+
+Columns: **Sk** = §8.1 skeleton applied · **Em** = §8.2 empty state(s) applied · **To** = §8.3 toasts on mutations ·
+**Kb** = §8.4 keyboard contract verified · **A11y** = §8.5 checklist passed · **Dk** = §8.6 dark matrix passed.
+"Mut?" flags whether the screen has mutations (drives To/Kb relevance). Tick all that apply per row.
+
+| Screen (route) | Archetype | Mut? | Sk | Em | To | Kb | A11y | Dk |
+|---|---|---|---|---|---|---|---|---|
+| `/login` | (auth form) | yes | — | — | err only | Enter submits | ★key | ✓ |
+| `/login/verify` | (auth form, `<CodeBox>`) | yes | — | — | err only | auto-advance, no Enter-double | ★key | ✓ |
+| `/carrier` (dashboard) | B | no | ✓ | per-panel | — | — | ★key | ✓ |
+| `/carrier/claims` (list) | A | no* | ✓ | data **+action** / filtered | — | — | ✓ | ✓ |
+| `/carrier/claims/new` | D (form) | yes | preview only | — | save/err | Enter (not in textarea) | ★key | ✓ |
+| `/carrier/claims/[nrZgl]` | C | no | ✓ | sub-list | — | Esc | ✓ | ✓ |
+| `/carrier/fleet/{vehicles,drivers,trailers}` | A | yes | ✓ | data+action / filtered | save/err | sheet Esc/Enter | ✓ | ✓ |
+| `/carrier/delegations` (+`/new`) | A / D | yes | ✓ | data+action / filtered | save/err | Esc/Enter | ✓ | ✓ |
+| `/carrier/km`, `/*/moje-pojazdy` | E | view | §7.7.8 | §7.7.8 | — | Esc (history) | ✓ | ✓ |
+| `/employee/dashboard` | B | no | ✓ | per-panel | — | — | ★key | ✓ |
+| `/employee/claims` (+`ClaimModal`) | A + C | yes | ✓ | data / filtered | save/err | Esc, dirty-guard, Enter | ★key | ✓ |
+| `/employee/opieka` | (card-grid §5.2) | no | §5.2.8 | §5.2.7 | — | Enter on card | ✓ | ✓ |
+| `/employee/opieka/carriers/[login]` | C (drill) | no | ✓ | sub-list | — | Esc (modals) | ✓ | ✓ |
+| `/employee/carriers` (+`EntityDetailModal`) | A + C | yes | ✓ | data+action / filtered | save/err | Esc, sheet Enter | ★key | ✓ |
+| `/employee/{vehicles,drivers,trailers}` | A + C | yes | ✓ | data+action / filtered | save/err | Esc/Enter | ✓ | ✓ |
+| `/employee/trailer-types` | A | yes | ✓ | data+action / filtered | save/err | Esc/Enter | ✓ | ✓ |
+| `/employee/users` | A | yes | ✓ | data+action / filtered | save/err | Esc/Enter | ✓ | ✓ |
+| `/employee/limits` | A (inline-edit) | yes | ✓ | data / filtered | optimistic err | Enter commits cell (no page submit) | ✓ | ✓ |
+| `/employee/audit` (Phase 8 new) | A | no | ✓ | data / filtered | — | Esc (detail) | ★key | ✓ |
+| `/employee/diagnostics` | B | no | ✓ | per-panel | err on action | — | ✓ | ✓ |
+| `/employee/delegations` | A | maybe | ✓ | data / filtered | save/err | Esc | ✓ | ✓ |
+| `/employee/km`, `/employee/moje-pojazdy` | E | view | §7.7.8 | §7.7.8 | — | Esc | ✓ | ✓ |
+| `/planista`, `/dyspozytor` (panels) | A (+B KPI) | no | ✓ | data (no action) / filtered | — | Esc (detail modals), Tabs arrows | ✓ | ✓ |
+| `/planista/km`, `/dyspozytor/km`, `/*/moje-pojazdy` | E | view | §7.7.8 | §7.7.8 | — | Esc | ✓ | ✓ |
+| `/weryfikator` (km-board) | E (editable) | yes | §7.7.8 | §7.7.8 | stamp/err | Esc, cell-edit Enter | ✓ | ✓ |
+| `/weryfikator/km` | E (editable) | yes | §7.7.8 | §7.7.8 | stamp/err | Esc, Enter commits cell | ★key | ✓ |
+| ⚠️ `/eksport` | A | maybe | ✓ | data (no action) / filtered | save/err | Esc | △ re-pass | △ re-pass |
+| ⚠️ `/eksport/delegations` | A | maybe | ✓ | data / filtered | save/err | Esc/Enter | △ re-pass | △ re-pass |
+| ⚠️ `/eksport/km` | E | view | §7.7.8 | §7.7.8 | — | Esc | △ re-pass | △ re-pass |
+
+\* `/carrier/claims` itself is read-only-list, but its `data+action` empty state links to the create form.
+★key = §8.5 key-screen (must-pass axe in light+dark). △ re-pass = polish now, **re-run §8.5/§8.6 after eksport
+panel scope is finalised** (DEFER note).
+
+### 8.8 Phase 8 — what is explicitly NOT changing
+
+- **No new tokens** — color/radius/shadow/font/spacing scale all frozen. Any local need = a Tailwind utility
+  on the instance, never a new token. (`bg-bg-soft` stays deprecated; `bg-input` is the surface.)
+- **No primitive rewrites** — `<Skeleton>`, `<EmptyState>`, `<Toast>`(sonner), `Dialog`/`Sheet` are used as-is.
+  The only allowed primitive change is **centralising the table-skeleton + dual empty-state into `DataTable`'s
+  loading/empty slots** so every Archetype-A page inherits §8.1/§8.2 for free (mechanical, no API surface change).
+- **No layout / IA changes** — Phase 8 does not move components, change which screen shows what, or alter flows.
+- **No behavioural change** — same mutations, same DTOs, same validation. This is a presentation/a11y pass only.
+
+### 8.9 Acceptance checklist (Phase 8 polish)
+
+> Web-agent pass 1 (2026-06-16): checked-off items below reflect what landed. See
+> §8.10 for the per-row completion log + the two documented carry-overs.
+
+- [x] **Zero bare loaders.** `grep` finds no `Loading...` / `Ładowanie…` text node rendered as the loading state on any page; every async surface uses `<Skeleton>` per §8.1 archetype recipe. (Centralised the geometry-preserving table-skeleton into `<DataTable isLoading>`; removed all `loadingLabel` call-sites + the prop itself; replaced the `/employee/limits` bare loader with skeleton value-cells.)
+- [x] **Every zero-row surface uses `<EmptyState>`** with the §8.2 data-vs-filtered split; create-capable roles get an `action`, read-only roles do not; filtered-empty offers «Wyczyść filtry», never a create CTA. (Added `emptyFiltered`/`hasActiveFilters` to `<DataTable>`; wired the split on every Archetype-A list that has a filter bar.)
+- [x] **Mutation feedback consistent.** Every create/update/delete/stamp success → one short success toast; every non-field failure → one error toast (+ rollback if optimistic); validation stays inline; clipboard-success stays inline (no double-toast). (Verified — existing toast wiring already matched; see §8.10 deviation re. `onInvalidToast`.)
+- [x] **Keyboard contract holds.** Esc closes top-most overlay + returns focus; Enter submits single-line forms; Enter does NOT submit in textarea / wizard-mid-step / open-combobox / inline-cell. **Carry-over:** dirty-form guard exists only on `ClaimModal`; the 6 admin edit `<Sheet>` forms discard on Esc/outside-click without a confirm (see §8.10).
+- [x] **a11y key screens pass.** Icon-only buttons labelled (pagination chevrons, close ✕, password reveal, row actions); labels associated; tables semantic; focus rings visible. (axe DevTools run is a manual browser step — code-level checklist satisfied; see §8.10.)
+- [x] **Dark mode verified per §8.6.** Recharts colours all CSS-var-driven (tooltip = `--card`, grid = `--border`, ticks = `--text-sub`); status/role badges carry explicit `dark:` variants + icon+text; skeleton shimmer `bg-input` visible on `--card-bg`; **zero `[style*=]` hacks** (grep-confirmed).
+- [x] **i18n parity.** All Phase 8 copy (`empty.*` / `emptyFiltered.*`, `common.{pagination,prevPage,nextPage,clearFilters}`, filter aria-labels) under per-screen namespaces; PL+EN key parity holds (1242 ↔ 1242).
+- [x] **No new tokens / no layout change** — token files and component geometry unchanged (§8.8). Only allowed primitive change made: centralised table-skeleton + dual empty-state slots in `<DataTable>`.
+- [x] **eksport rows flagged.** `/eksport`, `/eksport/delegations`, `/eksport/km` polished but marked for §8.5/§8.6 re-pass once the export-panel scope lands (DEFER note).
+
+### 8.10 Web-agent completion log (pass 1 — 2026-06-16)
+
+**Infra (unlocks every Archetype-A row at once):**
+- `components/ui/DataTable.tsx` — loading slot now renders 8 geometry-preserving skeleton `<tr>`s (`skeletonRows` prop, default 8); added `emptyFiltered` + `hasActiveFilters` props for the §8.2 split; removed the dead `loadingLabel` prop.
+- `components/ui/CursorPager.tsx` (new) — accessible cursor pagination (Lucide chevrons, `aria-label`, `<nav>`); replaced the three duplicated bare-arrow («←»/«→») blocks on claims / delegations / audit.
+- `components/ui/Dialog.tsx`, `components/ui/Sheet.tsx` — close ✕ + backdrop `aria-label` now i18n (`common.close`); ✕ icon `aria-hidden`.
+
+**Rows DONE (Sk / Em / To / Kb / A11y / Dk as applicable):**
+`/employee/audit` ★, `/employee/claims`(+ClaimModal) ★, `/employee/carriers` ★, `/employee/users`, `/employee/vehicles`, `/employee/drivers`, `/employee/trailers`, `/employee/trailer-types`, `/employee/limits`, `/employee/delegations`, `/employee/diagnostics`, `/employee/dashboard` ★ (verified), `/carrier/claims`, `/carrier/fleet/{drivers,trailers}`, `/carrier/delegations`, `/eksport/delegations` △, `/login` ★ + `/login/verify` ★ (verified), planista/dyspozytor panels + `/carrier/fleet/vehicles` (read-only, inherit centralised skeleton; informational empty — no filter ⇒ no filtered-empty), all km/`moje-pojazdy` rows (E — §7.7.8 verbatim, unchanged).
+
+**Carry-overs (NOT done — need a follow-up):**
+1. **Dirty-form guard on admin edit Sheets** — `CarrierSheet`/`VehicleSheet`/`DriverSheet`/`TrailerSheet`/`UserSheet`/`TrailerTypeSheet` close immediately on Esc/outside-click. §8.4 wants the unsaved-changes confirm there; only `ClaimModal` has it. Deferred because building 6 new confirm flows is a behavioural change beyond a presentation pass (§8.8) — route as its own slice.
+2. **Live axe DevTools run** — the code-level a11y checklist is satisfied on the 7 key screens, but the actual axe-in-browser (light+dark) count must be recorded by a human/CI step; not runnable from the agent.
+
+**Deviation:** `lib/forms/onInvalidToast.ts` raises a generic «Uzupełnij podświetlone pola» toast + focus-move on submit-blocked across 8 forms. This brushes against §8.3's "no validation toasts", but the per-field inline `<FormMessage>`s remain the source of truth — the toast is a supplementary "can't submit yet" nudge. Kept (removing it = behavioural change to existing forms, §8.8); flagged here for the record.
+

@@ -31,7 +31,11 @@
     "pcsShort": "pcs.",
     "copy": "Copy",
     "copied": "Copied",
-    "close": "Close"
+    "close": "Close",
+    "pagination": "Pagination",
+    "prevPage": "Previous page",
+    "nextPage": "Next page",
+    "clearFilters": "Clear filters"
   },
   "confirmDelete": {
     "title": "Permanently delete — {entityLabel}",
@@ -56,11 +60,16 @@
     "newUser": "New user",
     "editUser": "Edit user",
     "emptyTitle": "No users yet",
-    "emptyMessage": "Click \"New user\" to add the first one.",
+    "emptyMessage": "No users have been added yet.",
+    "emptyFiltered": {
+      "title": "No results",
+      "message": "No users match the selected filters."
+    },
     "filters": {
       "searchPlaceholder": "Search login / name",
       "role": "Role",
       "allRoles": "All roles",
+      "activeLabel": "Filter by active status",
       "allActive": "All",
       "onlyActive": "Active only",
       "onlyInactive": "Inactive only"
@@ -276,7 +285,11 @@
     "newCarrier": "New carrier",
     "editCarrier": "Edit carrier",
     "emptyTitle": "No carriers yet",
-    "emptyMessage": "Click \"New carrier\" to add the first one.",
+    "emptyMessage": "No carriers have been added yet.",
+    "emptyFiltered": {
+      "title": "No results",
+      "message": "No carriers match the selected filters."
+    },
     "filters": {
       "searchPlaceholder": "Search login / name / NIP",
       "opiekun": "Account manager",
@@ -407,10 +420,15 @@
     "newVehicle": "New vehicle",
     "editVehicle": "Edit vehicle",
     "emptyTitle": "No vehicles yet",
-    "emptyMessage": "Click \"New vehicle\" to add the first one.",
+    "emptyMessage": "No vehicles have been added yet.",
+    "emptyFiltered": {
+      "title": "No results",
+      "message": "No vehicles match the selected filters."
+    },
     "filters": {
       "searchPlaceholder": "Search by plate number",
       "carrier": "Carrier",
+      "carrierLabel": "Filter by carrier",
       "allCarriers": "All carriers"
     },
     "fields": {
@@ -471,10 +489,15 @@
     "newDriver": "New driver",
     "editDriver": "Edit driver",
     "emptyTitle": "No drivers yet",
-    "emptyMessage": "Click \"New driver\" to add the first one.",
+    "emptyMessage": "No drivers have been added yet.",
+    "emptyFiltered": {
+      "title": "No results",
+      "message": "No drivers match the selected filters."
+    },
     "filters": {
       "searchPlaceholder": "Search by first / last name",
       "carrier": "Carrier",
+      "carrierLabel": "Filter by carrier",
       "allCarriers": "All carriers"
     },
     "fields": {
@@ -506,11 +529,17 @@
     "newTrailer": "New trailer",
     "editTrailer": "Edit trailer",
     "emptyTitle": "No trailers yet",
-    "emptyMessage": "Click \"New trailer\" to add the first one.",
+    "emptyMessage": "No trailers have been added yet.",
+    "emptyFiltered": {
+      "title": "No results",
+      "message": "No trailers match the selected filters."
+    },
     "filters": {
       "searchPlaceholder": "Search by plate number",
       "carrier": "Carrier",
+      "carrierLabel": "Filter by carrier",
       "type": "Type",
+      "typeLabel": "Filter by trailer type",
       "allCarriers": "All carriers",
       "allTypes": "All types"
     },
@@ -543,7 +572,11 @@
     "newType": "New type",
     "editType": "Edit type",
     "emptyTitle": "No trailer types yet",
-    "emptyMessage": "Click \"New type\" to add the first one.",
+    "emptyMessage": "No trailer types have been defined yet.",
+    "emptyFiltered": {
+      "title": "No results",
+      "message": "No trailer types match your search."
+    },
     "fields": {
       "name": "Name",
       "shortCode": "Short code",
@@ -633,7 +666,11 @@
     "title": "Audit log",
     "subtitle": "Activity history for actions performed by system users",
     "emptyTitle": "No entries",
-    "emptyMessage": "No audit entries match the current filters.",
+    "emptyMessage": "No audit events have been recorded yet.",
+    "emptyFiltered": {
+      "title": "No results",
+      "message": "No audit entries match the selected filters."
+    },
     "filters": {
       "targetType": "Target type",
       "allTargetTypes": "All target types",
@@ -707,7 +744,11 @@
     "claims": {
       "title": "Claims",
       "emptyTitle": "No claims",
-      "emptyMessage": "No claims match the current filters.",
+      "emptyMessage": "No kilometre-guarantee claims have been submitted yet.",
+      "emptyFiltered": {
+        "title": "No results",
+        "message": "No claims match the selected filters."
+      },
       "filters": {
         "searchPlaceholder": "Search claim number / NIP / plate",
         "status": "Status",
@@ -1167,6 +1208,10 @@
       "allVehicles": "All vehicles",
       "emptyTitle": "No claims",
       "emptyMessage": "Submit your first kilometer-guarantee claim.",
+      "emptyFiltered": {
+        "title": "No results",
+        "message": "No claims match the selected filters."
+      },
       "notFoundTitle": "Claim not found",
       "notFoundMessage": "Check the claim number or go back to the list.",
       "vehicleLabel": "Vehicle",
@@ -1286,6 +1331,10 @@
       "allStatuses": "All statuses",
       "emptyTitle": "No trips",
       "emptyMessage": "Register your first trip.",
+      "emptyFiltered": {
+        "title": "No results",
+        "message": "No trips with the selected status."
+      },
       "columns": {
         "vehicle": "Vehicle",
         "driver": "Driver",
@@ -1379,6 +1428,10 @@
         "searchPlaceholder": "Search by first / last name",
         "emptyTitle": "No drivers",
         "emptyMessage": "Contact your manager to add a driver.",
+        "emptyFiltered": {
+          "title": "No results",
+          "message": "No drivers match your search."
+        },
         "columns": {
           "name": "Full name",
           "phone": "Phone",
@@ -1395,6 +1448,10 @@
         "allTypes": "All types",
         "emptyTitle": "No trailers",
         "emptyMessage": "Contact your manager to add a trailer.",
+        "emptyFiltered": {
+          "title": "No results",
+          "message": "No trailers match the selected filters."
+        },
         "columns": {
           "plate": "Plate number",
           "type": "Type",
@@ -1445,7 +1502,11 @@
       },
       "table": {
         "emptyTitle": "No trips",
-        "emptyMessage": "No trips match the criteria.",
+        "emptyMessage": "No trips have been recorded in the system yet.",
+        "emptyFiltered": {
+          "title": "No results",
+          "message": "No trips match the selected filters."
+        },
         "columns": {
           "vehicle": "Vehicle",
           "driver": "Driver",
@@ -1468,7 +1529,11 @@
       },
       "table": {
         "emptyTitle": "No trips",
-        "emptyMessage": "No trips match the criteria.",
+        "emptyMessage": "No trips found to display.",
+        "emptyFiltered": {
+          "title": "No results",
+          "message": "No trips match the selected filters."
+        },
         "columns": {
           "vehicle": "Vehicle",
           "driver": "Driver",

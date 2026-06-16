@@ -31,7 +31,11 @@
     "pcsShort": "szt.",
     "copy": "Kopiuj",
     "copied": "Skopiowano",
-    "close": "Zamknij"
+    "close": "Zamknij",
+    "pagination": "Paginacja",
+    "prevPage": "Poprzednia strona",
+    "nextPage": "Następna strona",
+    "clearFilters": "Wyczyść filtry"
   },
   "confirmDelete": {
     "title": "Trwałe usunięcie — {entityLabel}",
@@ -56,11 +60,16 @@
     "newUser": "Nowy użytkownik",
     "editUser": "Edytuj użytkownika",
     "emptyTitle": "Brak użytkowników",
-    "emptyMessage": "Kliknij „Nowy użytkownik”, aby dodać pierwszego.",
+    "emptyMessage": "Nie dodano jeszcze żadnego użytkownika.",
+    "emptyFiltered": {
+      "title": "Brak wyników",
+      "message": "Brak użytkowników spełniających wybrane filtry."
+    },
     "filters": {
       "searchPlaceholder": "Szukaj loginu / nazwy",
       "role": "Rola",
       "allRoles": "Wszystkie role",
+      "activeLabel": "Filtruj po statusie aktywności",
       "allActive": "Wszyscy",
       "onlyActive": "Tylko aktywni",
       "onlyInactive": "Tylko nieaktywni"
@@ -276,7 +285,11 @@
     "newCarrier": "Nowy przewoźnik",
     "editCarrier": "Edytuj przewoźnika",
     "emptyTitle": "Brak przewoźników",
-    "emptyMessage": "Kliknij „Nowy przewoźnik”, aby dodać pierwszego.",
+    "emptyMessage": "Nie dodano jeszcze żadnego przewoźnika.",
+    "emptyFiltered": {
+      "title": "Brak wyników",
+      "message": "Brak przewoźników spełniających wybrane filtry."
+    },
     "filters": {
       "searchPlaceholder": "Szukaj loginu / nazwy / NIP",
       "opiekun": "Opiekun",
@@ -407,10 +420,15 @@
     "newVehicle": "Nowy pojazd",
     "editVehicle": "Edytuj pojazd",
     "emptyTitle": "Brak pojazdów",
-    "emptyMessage": "Kliknij „Nowy pojazd”, aby dodać pierwszy.",
+    "emptyMessage": "Nie dodano jeszcze żadnego pojazdu.",
+    "emptyFiltered": {
+      "title": "Brak wyników",
+      "message": "Brak pojazdów spełniających wybrane filtry."
+    },
     "filters": {
       "searchPlaceholder": "Szukaj numeru rejestracyjnego",
       "carrier": "Przewoźnik",
+      "carrierLabel": "Filtruj po przewoźniku",
       "allCarriers": "Wszyscy przewoźnicy"
     },
     "fields": {
@@ -471,10 +489,15 @@
     "newDriver": "Nowy kierowca",
     "editDriver": "Edytuj kierowcę",
     "emptyTitle": "Brak kierowców",
-    "emptyMessage": "Kliknij „Nowy kierowca”, aby dodać pierwszego.",
+    "emptyMessage": "Nie dodano jeszcze żadnego kierowcy.",
+    "emptyFiltered": {
+      "title": "Brak wyników",
+      "message": "Brak kierowców spełniających wybrane filtry."
+    },
     "filters": {
       "searchPlaceholder": "Szukaj imienia / nazwiska",
       "carrier": "Przewoźnik",
+      "carrierLabel": "Filtruj po przewoźniku",
       "allCarriers": "Wszyscy przewoźnicy"
     },
     "fields": {
@@ -506,11 +529,17 @@
     "newTrailer": "Nowa naczepa",
     "editTrailer": "Edytuj naczepę",
     "emptyTitle": "Brak naczep",
-    "emptyMessage": "Kliknij „Nowa naczepa”, aby dodać pierwszą.",
+    "emptyMessage": "Nie dodano jeszcze żadnej naczepy.",
+    "emptyFiltered": {
+      "title": "Brak wyników",
+      "message": "Brak naczep spełniających wybrane filtry."
+    },
     "filters": {
       "searchPlaceholder": "Szukaj numeru rejestracyjnego",
       "carrier": "Przewoźnik",
+      "carrierLabel": "Filtruj po przewoźniku",
       "type": "Typ",
+      "typeLabel": "Filtruj po typie naczepy",
       "allCarriers": "Wszyscy przewoźnicy",
       "allTypes": "Wszystkie typy"
     },
@@ -543,7 +572,11 @@
     "newType": "Nowy typ",
     "editType": "Edytuj typ",
     "emptyTitle": "Brak typów naczep",
-    "emptyMessage": "Kliknij „Nowy typ”, aby dodać pierwszy.",
+    "emptyMessage": "Nie zdefiniowano jeszcze żadnego typu naczepy.",
+    "emptyFiltered": {
+      "title": "Brak wyników",
+      "message": "Brak typów naczep spełniających wyszukiwanie."
+    },
     "fields": {
       "name": "Nazwa",
       "shortCode": "Skrót",
@@ -633,7 +666,11 @@
     "title": "Audyt",
     "subtitle": "Historia zmian wykonanych przez użytkowników systemu",
     "emptyTitle": "Brak wpisów",
-    "emptyMessage": "Brak wpisów audytu spełniających kryteria.",
+    "emptyMessage": "Nie zarejestrowano jeszcze żadnych zdarzeń audytu.",
+    "emptyFiltered": {
+      "title": "Brak wyników",
+      "message": "Brak wpisów audytu spełniających wybrane filtry."
+    },
     "filters": {
       "targetType": "Typ obiektu",
       "allTargetTypes": "Wszystkie typy",
@@ -707,7 +744,11 @@
     "claims": {
       "title": "Wnioski",
       "emptyTitle": "Brak wniosków",
-      "emptyMessage": "Nie znaleziono wniosków pasujących do filtrów.",
+      "emptyMessage": "Nie złożono jeszcze żadnych wniosków o gwarancję kilometrową.",
+      "emptyFiltered": {
+        "title": "Brak wyników",
+        "message": "Nie znaleziono wniosków pasujących do wybranych filtrów."
+      },
       "filters": {
         "searchPlaceholder": "Szukaj nr zgłoszenia / NIP / rejestracji",
         "status": "Status",
@@ -1167,6 +1208,10 @@
       "allVehicles": "Wszystkie pojazdy",
       "emptyTitle": "Brak wniosków",
       "emptyMessage": "Złóż pierwszy wniosek o gwarancję kilometrową.",
+      "emptyFiltered": {
+        "title": "Brak wyników",
+        "message": "Brak wniosków spełniających wybrane filtry."
+      },
       "notFoundTitle": "Wniosek nie znaleziony",
       "notFoundMessage": "Sprawdź numer zgłoszenia lub wróć do listy.",
       "vehicleLabel": "Pojazd",
@@ -1286,6 +1331,10 @@
       "allStatuses": "Wszystkie statusy",
       "emptyTitle": "Brak wyjazdów",
       "emptyMessage": "Zarejestruj pierwszy wyjazd.",
+      "emptyFiltered": {
+        "title": "Brak wyników",
+        "message": "Brak wyjazdów o wybranym statusie."
+      },
       "columns": {
         "vehicle": "Pojazd",
         "driver": "Kierowca",
@@ -1379,6 +1428,10 @@
         "searchPlaceholder": "Szukaj imienia / nazwiska",
         "emptyTitle": "Brak kierowców",
         "emptyMessage": "Skontaktuj się z opiekunem, aby dodać kierowcę.",
+        "emptyFiltered": {
+          "title": "Brak wyników",
+          "message": "Brak kierowców spełniających wyszukiwanie."
+        },
         "columns": {
           "name": "Imię i nazwisko",
           "phone": "Telefon",
@@ -1395,6 +1448,10 @@
         "allTypes": "Wszystkie typy",
         "emptyTitle": "Brak naczep",
         "emptyMessage": "Skontaktuj się z opiekunem, aby dodać naczepę.",
+        "emptyFiltered": {
+          "title": "Brak wyników",
+          "message": "Brak naczep spełniających wybrane filtry."
+        },
         "columns": {
           "plate": "Numer rejestracyjny",
           "type": "Typ",
@@ -1445,7 +1502,11 @@
       },
       "table": {
         "emptyTitle": "Brak wyjazdów",
-        "emptyMessage": "Brak wyjazdów spełniających kryteria.",
+        "emptyMessage": "W systemie nie zarejestrowano jeszcze żadnych wyjazdów.",
+        "emptyFiltered": {
+          "title": "Brak wyników",
+          "message": "Brak wyjazdów spełniających wybrane filtry."
+        },
         "columns": {
           "vehicle": "Auto",
           "driver": "Kierowca",
@@ -1468,7 +1529,11 @@
       },
       "table": {
         "emptyTitle": "Brak wyjazdów",
-        "emptyMessage": "Brak wyjazdów spełniających kryteria.",
+        "emptyMessage": "Nie znaleziono wyjazdów do wyświetlenia.",
+        "emptyFiltered": {
+          "title": "Brak wyników",
+          "message": "Brak wyjazdów spełniających wybrane filtry."
+        },
         "columns": {
           "vehicle": "Auto",
           "driver": "Kierowca",

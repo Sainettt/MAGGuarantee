@@ -4,7 +4,7 @@
 // (trailer types are a global lookup, no carrier filter, no pagination —
 // API returns the flat list).
 
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { Pencil, Plus, SearchX, Shapes, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
@@ -42,6 +42,9 @@ export default function TrailerTypesPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TrailerTypeDto | null>(null);
   const hardDeleteM = useHardDeleteTrailerType();
+
+  const hasActiveFilters = search.length >= 2;
+  const clearFilters = () => setSearch('');
 
   const openCreate = () => {
     setTarget(null);
@@ -162,9 +165,36 @@ export default function TrailerTypesPage() {
         rowKey={(r) => r.id}
         onRowClick={openEdit}
         isLoading={isLoading}
-        loadingLabel={tCommon('loading')}
+        hasActiveFilters={hasActiveFilters}
         empty={
-          <EmptyState title={t('emptyTitle')} message={t('emptyMessage')} />
+          <EmptyState
+            icon={Shapes}
+            title={t('emptyTitle')}
+            message={t('emptyMessage')}
+            action={
+              <Button size="sm" onClick={openCreate}>
+                <Plus size={14} />
+                {t('newType')}
+              </Button>
+            }
+          />
+        }
+        emptyFiltered={
+          <EmptyState
+            icon={SearchX}
+            title={t('emptyFiltered.title')}
+            message={t('emptyFiltered.message')}
+            action={
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={clearFilters}
+              >
+                {tCommon('clearFilters')}
+              </Button>
+            }
+          />
         }
       />
 

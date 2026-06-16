@@ -8,6 +8,7 @@
 // Row click opens `<AuditDetailSheet>` (large variant) with side-by-side
 // JSON diff between `before` and `after`.
 
+import { ScrollText, SearchX } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useMemo, useState } from 'react';
 import type {
@@ -20,6 +21,7 @@ import { AuditAvatar } from '@/components/audit/AuditRow';
 import { AuditDetailSheet } from '@/components/audit/AuditDetailSheet';
 import { UserAutocomplete } from '@/components/audit/UserAutocomplete';
 import { Button } from '@/components/ui/Button';
+import { CursorPager } from '@/components/ui/CursorPager';
 import {
   DataTable,
   type DataTableColumn,
@@ -82,9 +84,22 @@ export function AuditView() {
 
   const { data, isLoading } = useAudit(filters);
 
+  const hasActiveFilters = Boolean(
+    targetType || user || from || to || debouncedAction.trim().length >= 2,
+  );
+
   const resetCursor = () => {
     setCursor(undefined);
     setCursorStack([]);
+  };
+
+  const clearFilters = () => {
+    setTargetType('');
+    setActionFilter('');
+    setUser(null);
+    setFrom('');
+    setTo('');
+    resetCursor();
   };
 
   const nextPage = () => {
@@ -253,33 +268,35 @@ export function AuditView() {
         rowKey={(r) => r.id}
         onRowClick={openRow}
         isLoading={isLoading}
-        loadingLabel={tCommon('loading')}
+        hasActiveFilters={hasActiveFilters}
         empty={
-          <EmptyState title={t('emptyTitle')} message={t('emptyMessage')} />
+          <EmptyState
+            icon={ScrollText}
+            title={t('emptyTitle')}
+            message={t('emptyMessage')}
+          />
+        }
+        emptyFiltered={
+          <EmptyState
+            icon={SearchX}
+            title={t('emptyFiltered.title')}
+            message={t('emptyFiltered.message')}
+            action={
+              <Button type="button" variant="outline" size="sm" onClick={clearFilters}>
+                {tCommon('clearFilters')}
+              </Button>
+            }
+          />
         }
       />
 
       {(data?.nextCursor || cursorStack.length > 0) && (
-        <div className="flex items-center justify-end gap-2 mt-4">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={prevPage}
-            disabled={cursorStack.length === 0}
-          >
-            ←
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={nextPage}
-            disabled={!data?.nextCursor}
-          >
-            →
-          </Button>
-        </div>
+        <CursorPager
+          onPrev={prevPage}
+          onNext={nextPage}
+          canPrev={cursorStack.length > 0}
+          canNext={Boolean(data?.nextCursor)}
+        />
       )}
 
       <AuditDetailSheet

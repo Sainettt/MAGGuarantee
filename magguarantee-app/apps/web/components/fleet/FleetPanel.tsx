@@ -108,7 +108,6 @@ export function FleetPanel({
   const t = useTranslations(namespace);
   const tKm = useTranslations('weryfikator.km');
   const tMyKm = useTranslations('myKm');
-  const tCommon = useTranslations('common');
   const tA11y = useTranslations('fleet.a11y');
 
   const stats = data?.stats;
@@ -248,7 +247,6 @@ export function FleetPanel({
             rows={delegations}
             isLoading={delegationsLoading}
             namespace={`${namespace}.delegations`}
-            loadingLabel={tCommon('loading')}
             rowAriaLabel={(r) =>
               tA11y('showDelegationDetails', {
                 name: r.vehicle?.plateNumber ?? '—',

@@ -21,13 +21,14 @@
 // (DS §6.3 — meaning by icon + label, not colour alone). Delegation status
 // changes are a weryfikator concern (Phase 7), not surfaced here.
 
-import { MapPin } from 'lucide-react';
+import { MapPin, SearchX } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useMemo, useState } from 'react';
 import type { DelegationDto } from '@magguarantee/shared';
 
 import { StatusBadge } from '@/components/carrier/StatusBadge';
 import { DelegationDetailModal } from '@/components/delegations/DelegationDetailModal';
+import { Button } from '@/components/ui/Button';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { formatDateShort } from '@/lib/format/numbers';
@@ -44,20 +45,29 @@ interface Props {
    * `delegations.table`. Read positionally — keep the key shape in lockstep.
    */
   namespace: string;
-  /** Loading-cell label (i18n `common.loading`). */
-  loadingLabel: string;
   /** Per-row SR label for the activatable `<tr>` (e.g. «Pokaż szczegóły wyjazdu: WGM 1234»). */
   rowAriaLabel?: (row: DelegationDto) => string;
+  /**
+   * §8.2 — when true, the empty body shows the filtered-empty state (the
+   * namespace must then expose `emptyFiltered.{title,message}`) plus a
+   * «Wyczyść filtry» action wired to `onClearFilters`. When omitted the
+   * data-empty (`emptyTitle`/`emptyMessage`) is shown for both cases.
+   */
+  hasActiveFilters?: boolean;
+  /** §8.2 — resets the caller's filter bar from the filtered-empty state. */
+  onClearFilters?: () => void;
 }
 
 export function DelegationsTable({
   rows,
   isLoading,
   namespace,
-  loadingLabel,
   rowAriaLabel,
+  hasActiveFilters,
+  onClearFilters,
 }: Props) {
   const t = useTranslations(namespace);
+  const tCommon = useTranslations('common');
 
   // Read-only VIEW modal — owned here so every consumer gets the row-click →
   // detail wiring for free.
@@ -127,12 +137,31 @@ export function DelegationsTable({
         onRowClick={setTarget}
         rowAriaLabel={rowAriaLabel}
         isLoading={isLoading}
-        loadingLabel={loadingLabel}
+        hasActiveFilters={hasActiveFilters}
         empty={
           <EmptyState
             icon={MapPin}
             title={t('emptyTitle')}
             message={t('emptyMessage')}
+          />
+        }
+        emptyFiltered={
+          <EmptyState
+            icon={SearchX}
+            title={t('emptyFiltered.title')}
+            message={t('emptyFiltered.message')}
+            action={
+              onClearFilters ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={onClearFilters}
+                >
+                  {tCommon('clearFilters')}
+                </Button>
+              ) : undefined
+            }
           />
         }
       />

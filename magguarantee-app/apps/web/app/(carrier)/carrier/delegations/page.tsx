@@ -3,7 +3,7 @@
 // Phase 3 — carrier delegations list. Status filter + cancel action on
 // rows that are still `zgloszony`. Submit is on a separate page.
 
-import { Plus, Rocket, X } from 'lucide-react';
+import { Plus, Rocket, SearchX, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
@@ -58,6 +58,7 @@ export default function CarrierDelegationsPage() {
   const t = useTranslations('carrier.delegations');
   const tColumns = useTranslations('carrier.delegations.columns');
   const tStatus = useTranslations('carrier.delegations.status');
+  const tCommon = useTranslations('common');
   const [status, setStatus] = useState<DelegationStatus | ''>('');
   const { data, isLoading } = useDelegations({
     status: status || undefined,
@@ -178,6 +179,7 @@ export default function CarrierDelegationsPage() {
         rowKey={(r) => r.id}
         onRowClick={openDetail}
         isLoading={isLoading}
+        hasActiveFilters={Boolean(status)}
         empty={
           <EmptyState
             icon={Rocket}
@@ -190,6 +192,23 @@ export default function CarrierDelegationsPage() {
                   {t('newDelegation')}
                 </Button>
               </Link>
+            }
+          />
+        }
+        emptyFiltered={
+          <EmptyState
+            icon={SearchX}
+            title={t('emptyFiltered.title')}
+            message={t('emptyFiltered.message')}
+            action={
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setStatus('')}
+              >
+                {tCommon('clearFilters')}
+              </Button>
             }
           />
         }

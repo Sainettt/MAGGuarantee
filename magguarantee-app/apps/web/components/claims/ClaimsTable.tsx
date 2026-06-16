@@ -12,11 +12,13 @@
 //   - Tooltips are native `title` attributes — when shadcn Tooltip lands
 //     site-wide we can swap, but for v1 native is enough and a11y-safe.
 
+import { FileSearch, SearchX } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useMemo } from 'react';
 import type { ClaimListItem } from '@magguarantee/shared';
 
 import { StatusBadge } from '@/components/carrier/StatusBadge';
+import { Button } from '@/components/ui/Button';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import {
@@ -31,14 +33,21 @@ export interface ClaimsTableProps {
   rows: ClaimListItem[];
   isLoading?: boolean;
   onRowClick: (row: ClaimListItem) => void;
+  /** §8.2 — drives the data-vs-filtered empty split. */
+  hasActiveFilters?: boolean;
+  /** §8.2 — resets the filter bar from the filtered-empty state. */
+  onClearFilters?: () => void;
 }
 
 export function ClaimsTable({
   rows,
   isLoading,
   onRowClick,
+  hasActiveFilters,
+  onClearFilters,
 }: ClaimsTableProps) {
   const t = useTranslations('employee.claims');
+  const tCommon = useTranslations('common');
   const tRel = useTranslations();
 
   const columns = useMemo<DataTableColumn<ClaimListItem>[]>(
@@ -147,10 +156,31 @@ export function ClaimsTable({
       rowKey={(r) => r.id}
       onRowClick={onRowClick}
       isLoading={isLoading}
+      hasActiveFilters={hasActiveFilters}
       empty={
         <EmptyState
+          icon={FileSearch}
           title={t('emptyTitle')}
           message={t('emptyMessage')}
+        />
+      }
+      emptyFiltered={
+        <EmptyState
+          icon={SearchX}
+          title={t('emptyFiltered.title')}
+          message={t('emptyFiltered.message')}
+          action={
+            onClearFilters ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onClearFilters}
+              >
+                {tCommon('clearFilters')}
+              </Button>
+            ) : undefined
+          }
         />
       }
     />

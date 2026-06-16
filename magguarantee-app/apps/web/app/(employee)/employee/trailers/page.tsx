@@ -2,7 +2,7 @@
 
 // Admin CRUD — trailers.
 
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { Container, Pencil, Plus, SearchX, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
@@ -58,6 +58,15 @@ export default function TrailersPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TrailerDto | null>(null);
   const hardDeleteM = useHardDeleteTrailer();
+
+  const hasActiveFilters = Boolean(
+    search.length >= 2 || carrierId || trailerTypeId,
+  );
+  const clearFilters = () => {
+    setSearch('');
+    setCarrierId('');
+    setTrailerTypeId('');
+  };
 
   const openCreate = () => {
     setTarget(null);
@@ -182,6 +191,7 @@ export default function TrailersPage() {
           className="sm:max-w-xs"
           value={carrierId}
           onChange={(e) => setCarrierId(e.target.value)}
+          aria-label={t('filters.carrierLabel')}
         >
           <option value="">{t('filters.allCarriers')}</option>
           {(carriersQ.data?.items ?? []).map((c) => (
@@ -195,6 +205,7 @@ export default function TrailersPage() {
           className="sm:max-w-xs"
           value={trailerTypeId}
           onChange={(e) => setTrailerTypeId(e.target.value)}
+          aria-label={t('filters.typeLabel')}
         >
           <option value="">{t('filters.allTypes')}</option>
           {(typesQ.data ?? []).map((tt) => (
@@ -212,9 +223,36 @@ export default function TrailersPage() {
         rowKey={(r) => r.id}
         onRowClick={openDetail}
         isLoading={isLoading}
-        loadingLabel={tCommon('loading')}
+        hasActiveFilters={hasActiveFilters}
         empty={
-          <EmptyState title={t('emptyTitle')} message={t('emptyMessage')} />
+          <EmptyState
+            icon={Container}
+            title={t('emptyTitle')}
+            message={t('emptyMessage')}
+            action={
+              <Button size="sm" onClick={openCreate}>
+                <Plus size={14} />
+                {t('newTrailer')}
+              </Button>
+            }
+          />
+        }
+        emptyFiltered={
+          <EmptyState
+            icon={SearchX}
+            title={t('emptyFiltered.title')}
+            message={t('emptyFiltered.message')}
+            action={
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={clearFilters}
+              >
+                {tCommon('clearFilters')}
+              </Button>
+            }
+          />
         }
       />
 

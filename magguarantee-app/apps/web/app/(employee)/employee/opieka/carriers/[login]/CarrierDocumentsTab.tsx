@@ -346,7 +346,6 @@ export function CarrierDocumentsTab({ carrierId, hasAdrVehicle }: Props) {
         columns={columns}
         rowKey={(r) => r.id}
         isLoading={docsQ.isLoading}
-        loadingLabel={tCommon('loading')}
         empty={
           <EmptyState
             icon={FileText}

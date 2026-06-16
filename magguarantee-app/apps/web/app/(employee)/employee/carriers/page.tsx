@@ -2,7 +2,7 @@
 
 // Admin CRUD — carriers.
 
-import { Pencil, PlayCircle, Plus, Trash2 } from 'lucide-react';
+import { Building2, Pencil, PlayCircle, Plus, SearchX, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
@@ -137,6 +137,16 @@ function CarriersPageInner() {
     setDeleteTarget(row);
     setDeleteOpen(true);
   }, []);
+
+  const hasActiveFilters = Boolean(
+    search.length >= 2 || opiekunId || activeFilter || onboardingFilter,
+  );
+  const clearFilters = () => {
+    setSearch('');
+    setOpiekunId('');
+    setActiveFilter('');
+    setOnboardingFilter('');
+  };
 
   const columns = useMemo<DataTableColumn<CarrierDto>[]>(
     () => [
@@ -328,9 +338,36 @@ function CarriersPageInner() {
         rowKey={(r) => r.id}
         onRowClick={openDetail}
         isLoading={isLoading}
-        loadingLabel={tCommon('loading')}
+        hasActiveFilters={hasActiveFilters}
         empty={
-          <EmptyState title={t('emptyTitle')} message={t('emptyMessage')} />
+          <EmptyState
+            icon={Building2}
+            title={t('emptyTitle')}
+            message={t('emptyMessage')}
+            action={
+              <Button size="sm" onClick={openCreate}>
+                <Plus size={14} />
+                {t('newCarrier')}
+              </Button>
+            }
+          />
+        }
+        emptyFiltered={
+          <EmptyState
+            icon={SearchX}
+            title={t('emptyFiltered.title')}
+            message={t('emptyFiltered.message')}
+            action={
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={clearFilters}
+              >
+                {tCommon('clearFilters')}
+              </Button>
+            }
+          />
         }
       />
 

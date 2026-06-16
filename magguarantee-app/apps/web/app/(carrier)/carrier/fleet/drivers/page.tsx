@@ -5,13 +5,14 @@
 // trailers carrier pages). Carriers are backend-locked out of driver
 // mutations, so this page exposes no create/edit surface.
 
-import { Mail } from 'lucide-react';
+import { Mail, SearchX, UserRound } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useMemo, useState } from 'react';
 import type { DriverDto } from '@magguarantee/shared';
 
 import { DriverDetailModal } from '@/components/drivers/DriverDetailModal';
 import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
@@ -106,10 +107,29 @@ export default function CarrierDriversPage() {
         rowKey={(r) => r.id}
         onRowClick={openDetail}
         isLoading={isLoading}
+        hasActiveFilters={search.length >= 2}
         empty={
           <EmptyState
+            icon={UserRound}
             title={t('emptyTitle')}
             message={t('emptyMessage')}
+          />
+        }
+        emptyFiltered={
+          <EmptyState
+            icon={SearchX}
+            title={t('emptyFiltered.title')}
+            message={t('emptyFiltered.message')}
+            action={
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setSearch('')}
+              >
+                {tCommon('clearFilters')}
+              </Button>
+            }
           />
         }
       />

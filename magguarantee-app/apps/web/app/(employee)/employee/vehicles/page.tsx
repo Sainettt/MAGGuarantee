@@ -4,7 +4,7 @@
 // (per the Phase 2 spec — don't gold-plate). The full 36-field edit happens
 // in the sheet.
 
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { Pencil, Plus, SearchX, Truck, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
@@ -59,6 +59,12 @@ export default function VehiclesPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<VehicleDto | null>(null);
   const hardDeleteM = useHardDeleteVehicle();
+
+  const hasActiveFilters = Boolean(search.length >= 2 || carrierId);
+  const clearFilters = () => {
+    setSearch('');
+    setCarrierId('');
+  };
 
   const openCreate = () => {
     setTarget(null);
@@ -190,6 +196,7 @@ export default function VehiclesPage() {
           className="sm:max-w-xs"
           value={carrierId}
           onChange={(e) => setCarrierId(e.target.value)}
+          aria-label={t('filters.carrierLabel')}
         >
           <option value="">{t('filters.allCarriers')}</option>
           {(carriersQ.data?.items ?? []).map((c) => (
@@ -207,9 +214,36 @@ export default function VehiclesPage() {
         rowKey={(r) => r.id}
         onRowClick={openDetail}
         isLoading={isLoading}
-        loadingLabel={tCommon('loading')}
+        hasActiveFilters={hasActiveFilters}
         empty={
-          <EmptyState title={t('emptyTitle')} message={t('emptyMessage')} />
+          <EmptyState
+            icon={Truck}
+            title={t('emptyTitle')}
+            message={t('emptyMessage')}
+            action={
+              <Button size="sm" onClick={openCreate}>
+                <Plus size={14} />
+                {t('newVehicle')}
+              </Button>
+            }
+          />
+        }
+        emptyFiltered={
+          <EmptyState
+            icon={SearchX}
+            title={t('emptyFiltered.title')}
+            message={t('emptyFiltered.message')}
+            action={
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={clearFilters}
+              >
+                {tCommon('clearFilters')}
+              </Button>
+            }
+          />
         }
       />
 

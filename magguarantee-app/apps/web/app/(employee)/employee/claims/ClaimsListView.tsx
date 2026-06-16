@@ -34,7 +34,7 @@ import type { ClaimListItem, ClaimStatus } from '@magguarantee/shared';
 
 import { ClaimModal } from '@/components/claims/ClaimModal';
 import { ClaimsTable } from '@/components/claims/ClaimsTable';
-import { Button } from '@/components/ui/Button';
+import { CursorPager } from '@/components/ui/CursorPager';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { useAuth } from '@/lib/hooks/useAuth';
@@ -137,6 +137,18 @@ export function ClaimsListView() {
     setCursorStack([]);
   };
 
+  const hasActiveFilters = Boolean(
+    debouncedSearch.length >= 2 || status || dateFrom || dateTo,
+  );
+
+  const clearFilters = () => {
+    setSearch('');
+    setStatus('');
+    setDateFrom('');
+    setDateTo('');
+    resetCursor();
+  };
+
   const nextPage = () => {
     if (!data?.nextCursor) return;
     setCursorStack((s) => [...s, cursor ?? '']);
@@ -215,30 +227,18 @@ export function ClaimsListView() {
         rows={data?.items ?? []}
         isLoading={isLoading}
         onRowClick={openRow}
+        hasActiveFilters={hasActiveFilters}
+        onClearFilters={clearFilters}
       />
 
       {/* Pagination — only render when meaningful */}
       {(data?.nextCursor || cursorStack.length > 0) && (
-        <div className="flex items-center justify-end gap-2 mt-4">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={prevPage}
-            disabled={cursorStack.length === 0}
-          >
-            ←
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={nextPage}
-            disabled={!data?.nextCursor}
-          >
-            →
-          </Button>
-        </div>
+        <CursorPager
+          onPrev={prevPage}
+          onNext={nextPage}
+          canPrev={cursorStack.length > 0}
+          canNext={Boolean(data?.nextCursor)}
+        />
       )}
 
       {/* Unified verification modal (docs/14 §6.5) — opens in `view` on a

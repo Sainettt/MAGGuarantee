@@ -70,7 +70,6 @@ export function FleetVehiclesTable({
   rowAriaLabel,
 }: FleetTableProps<VehicleListItem>) {
   const t = useTranslations(namespace);
-  const tCommon = useTranslations('common');
 
   const columns = useMemo<DataTableColumn<VehicleListItem>[]>(
     () => [
@@ -109,7 +108,6 @@ export function FleetVehiclesTable({
       onRowClick={onRowClick}
       rowAriaLabel={rowAriaLabel}
       isLoading={isLoading}
-      loadingLabel={tCommon('loading')}
       empty={
         <EmptyState
           icon={Car}
@@ -131,7 +129,6 @@ export function FleetDriversTable({
   rowAriaLabel,
 }: FleetTableProps<DriverListItem>) {
   const t = useTranslations(namespace);
-  const tCommon = useTranslations('common');
 
   const columns = useMemo<DataTableColumn<DriverListItem>[]>(
     () => [
@@ -167,7 +164,6 @@ export function FleetDriversTable({
       onRowClick={onRowClick}
       rowAriaLabel={rowAriaLabel}
       isLoading={isLoading}
-      loadingLabel={tCommon('loading')}
       empty={
         <EmptyState
           icon={User}
@@ -189,7 +185,6 @@ export function FleetTrailersTable({
   rowAriaLabel,
 }: FleetTableProps<TrailerListItem>) {
   const t = useTranslations(namespace);
-  const tCommon = useTranslations('common');
 
   const columns = useMemo<DataTableColumn<TrailerListItem>[]>(
     () => [
@@ -223,7 +218,6 @@ export function FleetTrailersTable({
       onRowClick={onRowClick}
       rowAriaLabel={rowAriaLabel}
       isLoading={isLoading}
-      loadingLabel={tCommon('loading')}
       empty={
         <EmptyState
           icon={Truck}

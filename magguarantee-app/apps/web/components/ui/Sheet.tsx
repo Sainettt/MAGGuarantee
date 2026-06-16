@@ -17,6 +17,7 @@
 // trap is a Phase 3+ upgrade.
 
 import { X } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import {
   createContext,
   useContext,
@@ -96,6 +97,7 @@ export function SheetContent({
   ...props
 }: SheetContentProps) {
   const { open, setOpen, titleId, descriptionId } = useSheet();
+  const tCommon = useTranslations('common');
   const contentRef = useRef<HTMLDivElement | null>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -152,7 +154,7 @@ export function SheetContent({
     <div className="fixed inset-0 z-40">
       <button
         type="button"
-        aria-label="Close"
+        aria-label={tCommon('close')}
         tabIndex={-1}
         onClick={() => setOpen(false)}
         className="absolute inset-0 bg-black/40 backdrop-blur-sm"
@@ -176,7 +178,7 @@ export function SheetContent({
         {children}
         <button
           type="button"
-          aria-label="Close"
+          aria-label={tCommon('close')}
           onClick={() => setOpen(false)}
           className={cn(
             'absolute right-4 top-4 inline-flex h-8 w-8 items-center justify-center rounded-md',
@@ -184,7 +186,7 @@ export function SheetContent({
             'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand/40',
           )}
         >
-          <X size={18} />
+          <X size={18} aria-hidden />
         </button>
       </div>
     </div>,
