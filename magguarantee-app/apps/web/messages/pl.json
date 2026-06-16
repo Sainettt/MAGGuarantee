@@ -1195,7 +1195,8 @@
         "moneyLabelCalc": "kalkulacja",
         "wniosekLabel": "Dopłata gwarancyjna",
         "vehiclePlate": "Pojazd",
-        "submittedAt": "Data zgłoszenia"
+        "submittedAt": "Data zgłoszenia",
+        "decidedAt": "Data decyzji"
       },
       "form": {
         "sectionVehicleAndDriver": "Pojazd i kierowca",

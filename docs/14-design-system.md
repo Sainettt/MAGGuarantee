@@ -1326,7 +1326,6 @@ When the verifier edits `hoursAdjusted`, the **counted** number must update live
 │   2 145,00 €                                  WNI/2026/0042  [StatusBadge] │
 │   kwota zatwierdzona                          Wniosek: 2 145,00 €          │
 │                                               01.04.2026 → 30.04.2026      │
-│                                               Data zgłoszenia: 12.04.2026  │
 │                                               Czas: 240,00 h / 215,50 h    │
 │                                                                            │
 │ ──────────────────────────────────────────────────────────────────────────  │
@@ -1345,7 +1344,6 @@ When `amountApproved === null` (status `NA_WERYFIKACJI`, `OCZEKUJE_NA_AUTORYZACJ
 │   2 145,00 €                                  WNI/2026/0042  [StatusBadge] │
 │   kalkulacja                                  Wniosek: 2 145,00 €          │
 │   └─ muted, weight 600 ─┘                     01.04.2026 → 30.04.2026      │
-│                                               Data zgłoszenia: 12.04.2026  │
 │                                               Czas: 240,00 h / 215,50 h    │
 │ ──────────────────────────────────────────────────────────────────────────  │
 │   Pojazd: WA12345    Przebieg: 12 340 km    Km gwarantowane: 11 800 km     │
@@ -1369,7 +1367,6 @@ The number itself stays the same physical size in both states; **only the label 
 | `nrZgl` row | `inline-flex items-center gap-2` with `StatusBadge` | `text-[15px] font-extrabold text-text font-mono` for the nrZgl. Status badge sits inline on the right of it. |
 | `kwotaWnioskowana` line | `text-sm text-text-sub tabular-nums` with bold value: `Wniosek: <b class="font-semibold text-text">2 145,00 €</b>` | Always visible — even when `amountApproved` matches `paymentEur`, the requested amount is part of the audit trail. |
 | Date range | `text-sm text-text-sub` with `<ArrowRight size={12} />` between dates | Same style as `<ClaimCard>` for visual continuity. |
-| **`Data zgłoszenia` line** | `text-sm text-text-sub tabular-nums` — `Data zgłoszenia: <span>{formatDate(claim.createdAt)}</span>` | Directly **below the period date range, above `HoursReadout`**. Submission date (`ClaimDto.createdAt`, ISO datetime) rendered **date-only** via the page's existing `formatDate` helper (pl-PL `dd.MM.yyyy`). Muted, single line — sits in the temporal cluster with the period, not in the lower «Szczegóły» `<dl>`. Always shown (`createdAt` is never null). Label slot `tDetail('submittedAt')`. |
 | `HoursReadout` | see § A | Compact, single line. |
 | Divider | `border-t border-border my-4` | Separates money/meta block from the vehicle factual row. |
 | **Vehicle row (bottom)** | `flex flex-wrap items-center gap-x-6 gap-y-2 text-sm` | Each item: `<span class="text-text-sub">Pojazd:</span> <b class="font-semibold text-text font-mono">WA12345</b>`. |
@@ -1377,7 +1374,36 @@ The number itself stays the same physical size in both states; **only the label 
 
 > **Locked behavior.** `<StatusBadge>`, the back-link (`← Wróć do listy`), and the reklamacja CTA keep their existing handlers, props, and visibility rules. Only their **layout placement** changes per the diagram above.
 
-> **Submission-date placement (decided).** `Data zgłoszenia` (`ClaimDto.createdAt`) lives in the **right meta-block, below the period range and above `HoursReadout`** — not in the lower «Szczegóły» `<dl>`. Rationale: `createdAt` is a claim-lifecycle timestamp of the same class as the period dates, so it belongs in the meta-block's temporal cluster where the eye already reads "which claim / when". The lower `<dl>` holds **business facts** (approved amount, order number/date, comment, reklamacja text) — dropping a lifecycle date among them mixes two data classes and makes the submission date easy to miss. Date-only (the period and `orderDate` are both date-only on this screen — consistency); `createdAt`'s time portion is not surfaced here. No API/DB change — `createdAt` is already on the wire. Label **PL «Data zgłoszenia» / EN "Submitted"**, key `carrier.claims.detail.submittedAt`.
+> **Submission-date placement (decided — superseded 2026-06-16).** ~~`Data zgłoszenia` lives in the right meta-block.~~ **Reversed by user.** Both lifecycle dates — `Data zgłoszenia` (`claim.createdAt`) **and** the new `Data decyzji` (`claim.statusChangedAt`) — now live in the **lower «Szczegóły» `<dl>`**, not in the header meta-block. The header meta-block carries only the *period* temporal cluster (period range + `HoursReadout`); `nrZgl`, `Wniosek`, `StatusBadge`. See **§ B.1 «Szczegóły» date rows** below for the full spec (labels, keys, order, conditional rule). No API/DB change — both fields are already on the wire.
+
+#### B.1 «Szczegóły» date rows (decided 2026-06-16)
+
+The lower «Szczegóły» card is the `<dl class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">` block in `[nrZgl]/page.tsx` (heading `tDetail('details')`). It holds the claim's business-fact + lifecycle record. Two date rows are added/relocated here.
+
+**Rows (final order, top → bottom):**
+
+| # | Row | Label key | PL | EN | Render condition | dd value |
+|---|---|---|---|---|---|---|
+| 1 | **Data zgłoszenia** | `carrier.claims.detail.submittedAt` (reused) | `Data zgłoszenia` | `Submitted` | **always** (`createdAt` never null) | `formatDate(claim.createdAt)` — date-only, pl-PL `dd.MM.yyyy` |
+| 2 | **Data decyzji** | `carrier.claims.detail.decidedAt` (**new**) | `Data decyzji` | `Decision date` | **only** when `status ∈ {ZAAKCEPTOWANO, ODRZUCONO}` **and** `statusChangedAt != null` | `formatDate(claim.statusChangedAt)` — date-only, same helper |
+| 3 | Kwota zatwierdzona | `amountApproved` (existing) | — | — | always (current behavior) | unchanged |
+| 4 | Nr zlecenia | `orderNumber` (existing) | — | — | only if `claim.orderNumber` | unchanged |
+| 5 | Data zlecenia | `orderDate` (existing) | — | — | only if `claim.orderDate` | unchanged |
+| 6 | Komentarz | `comment` (existing) | — | — | only if `claim.comment` (`sm:col-span-2`) | unchanged |
+| 7 | reklamacja text | `reklamacjaText` (existing) | — | — | unchanged (`sm:col-span-2`) | unchanged |
+| 8 | reklamacja response | `reklamacjaResponse` (existing) | — | — | unchanged (`sm:col-span-2`) | unchanged |
+
+**Ordering rationale.** Both lifecycle dates go **first** in the `<dl>`, ahead of the money/order business facts. Reading order becomes a clean chronological-then-financial narrative: *"submitted on X → decided on Y → here is the approved amount, order ref, comment, reklamacja"*. The two dates are the same data class and read best adjacent (`Data zgłoszenia` immediately above `Data decyzji`); placing `Data decyzji` right under `Data zgłoszenia` lets the carrier compute turnaround at a glance. Both rows are single-column items (`<div>` inside the 2-col grid) — on `sm+` they sit side-by-side in the first grid row, which reinforces the "submitted ↔ decided" pairing; on mobile they stack.
+
+**Conditional-show rule for `Data decyzji` (locked).** Render the row **only** for *decided* statuses:
+
+- **Decided set = `{ZAAKCEPTOWANO, ODRZUCONO}`** — exactly the set the page already uses for `canSubmitReklamacja` (lines 93–94). **Single source of truth:** the row's visibility predicate is the same `status === 'ZAAKCEPTOWANO' || status === 'ODRZUCONO'` test, **plus** `statusChangedAt != null` (defensive, mirrors line 95).
+- **`REKLAMACJA_ZAAKCEPTOWANO` / `REKLAMACJA_ODRZUCONO` are NOT separate statuses** — they do not exist in the `ClaimStatus` enum (`docs/12-database-schema.md` lines 68–75). A reklamacja outcome is written back into the same `ZAAKCEPTOWANO` / `ODRZUCONO` value, and `statusChangedAt` is bumped to the reklamacja-decision moment. So the row automatically shows the **latest** decision date (initial decision, or reklamacja re-decision if one happened) with no extra branching. The reklamacja *content* stays in rows 7–8 as today.
+- `REKLAMACJA` (the in-progress re-opened state), `NA_WERYFIKACJI`, `OCZEKUJE_NA_AUTORYZACJE`, `AUTORYZACJA_KWOTA_MAKSIMA` are **non-decided** → row is **omitted entirely** (no `—` placeholder), consistent with the existing conditional rows (`orderNumber` / `orderDate` / `comment` render only when present).
+
+**Neutral label decision (`Data decyzji`).** Single neutral label for both outcomes — **not** split `Data akceptacji` / `Data odrzucenia`. Rationale: the outcome (accept vs reject) is already unambiguously communicated by `<StatusBadge>` in the header and by `amountApproved` in the `<dl>`; a separate outcome-coded date label would be redundant and would force two i18n keys + a branch for zero information gain. A neutral "when was this decided" reads cleanly regardless of outcome and stays correct after a reklamacja flips the result.
+
+**Date-only, not datetime.** `statusChangedAt` is an ISO datetime on the wire, but rendered **date-only** via the page's `formatDate` helper — matches `Data zgłoszenia`, `orderDate`, and the period range (every date on this screen is date-only; the decision *time* is not operationally meaningful to the carrier). No API/DB change — `statusChangedAt` is already read by the page for the reklamacja window.
 
 #### Color decision: brand-red for approved amount
 
@@ -1451,7 +1477,9 @@ Confirmation of brand-color use rules (recap, not a change):
 | Verifier modal: add `HoursReadout` row to read-only block; replace inline `origHoursAdjusted` hint with `<HoursReadout live>` under input | `apps/web/components/claims/ClaimVerificationModal.tsx` lines 484–502 and 525–553 | web-agent |
 | `<BreakdownTable>` excluded-days list — adaptive column count | `apps/web/components/carrier/BreakdownTable.tsx` lines 120–142 | web-agent |
 | i18n keys (`hoursReadout.*`, header copy `kwotaZatwierdzona` / `kalkulacja` / `Wniosek`) | `apps/web/messages/pl.json`, `en.json` | web-agent |
-| i18n key `carrier.claims.detail.submittedAt` (PL «Data zgłoszenia» / EN "Submitted") for the new meta-block submission-date line | `apps/web/messages/pl.json`, `en.json` | web-agent |
+| i18n key `carrier.claims.detail.submittedAt` (PL «Data zgłoszenia» / EN "Submitted") — now used for the **«Szczegóły» `<dl>` row** (relocated out of the header meta-block, see § B.1) | `apps/web/messages/pl.json`, `en.json` | web-agent |
+| i18n key `carrier.claims.detail.decidedAt` (**new** — PL «Data decyzji» / EN "Decision date") for the «Szczegóły» `<dl>` decision-date row | `apps/web/messages/pl.json`, `en.json` | web-agent |
+| Relocate `Data zgłoszenia` from header meta-block → «Szczegóły» `<dl>`; add conditional `Data decyzji` row in the same `<dl>` (see § B.1 for order + show rule) | `apps/web/app/(carrier)/carrier/claims/[nrZgl]/page.tsx` | web-agent |
 
 ### Tokens added or changed
 

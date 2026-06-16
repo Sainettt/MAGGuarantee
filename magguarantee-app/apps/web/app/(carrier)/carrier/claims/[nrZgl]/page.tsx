@@ -158,12 +158,6 @@ export default function ClaimDetailPage() {
               <ArrowRight size={12} aria-hidden />
               <span>{formatDate(claim.dateEnd)}</span>
             </div>
-            <div className="text-sm text-text-sub tabular-nums">
-              {tDetail('submittedAt')}:{' '}
-              <b className="font-semibold text-text">
-                {formatDate(claim.createdAt)}
-              </b>
-            </div>
             <HoursReadout
               rawTotalDays={claim.breakdown?.rawTotalDays ?? null}
               totalDays={claim.breakdown?.totalDays ?? null}
@@ -227,6 +221,20 @@ export default function ClaimDetailPage() {
           {tDetail('details')}
         </h2>
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+          <div>
+            <dt className="text-text-sub">{tDetail('submittedAt')}</dt>
+            <dd className="mt-0.5 text-text">{formatDate(claim.createdAt)}</dd>
+          </div>
+          {(claim.status === 'ZAAKCEPTOWANO' ||
+            claim.status === 'ODRZUCONO') &&
+            claim.statusChangedAt && (
+              <div>
+                <dt className="text-text-sub">{tDetail('decidedAt')}</dt>
+                <dd className="mt-0.5 text-text">
+                  {formatDate(claim.statusChangedAt)}
+                </dd>
+              </div>
+            )}
           <div>
             <dt className="text-text-sub">{tDetail('amountApproved')}</dt>
             <dd className="mt-0.5 tabular-nums font-semibold text-text">

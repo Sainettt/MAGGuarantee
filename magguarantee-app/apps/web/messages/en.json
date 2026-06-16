@@ -1195,7 +1195,8 @@
         "moneyLabelCalc": "calculation",
         "wniosekLabel": "Guarantee payout",
         "vehiclePlate": "Vehicle",
-        "submittedAt": "Submitted"
+        "submittedAt": "Submitted",
+        "decidedAt": "Decision date"
       },
       "form": {
         "sectionVehicleAndDriver": "Vehicle and driver",
