@@ -26,7 +26,7 @@ import { ArrowLeft } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type {
   CarrierDto,
   DriverDto,
@@ -34,12 +34,15 @@ import type {
   VehicleDto,
 } from '@magguarantee/shared';
 
+import { DriverDetailModal } from '@/components/drivers/DriverDetailModal';
+import { TrailerDetailModal } from '@/components/trailers/TrailerDetailModal';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
+import { VehicleDetailModal } from '@/components/vehicles/VehicleDetailModal';
 import { CarrierDocumentsTab } from './CarrierDocumentsTab';
 import { listDrivers } from '@/lib/api/drivers';
 import { listTrailers } from '@/lib/api/trailers';
@@ -109,6 +112,15 @@ export default function OpiekaCarrierDetailPage() {
     () => (vehiclesQ.data?.items ?? []).some((v) => v.adr),
     [vehiclesQ.data],
   );
+
+  // Read-only detail modals — one selected target per sub-table. We derive the
+  // `open` flag from a non-null target (a single source of truth) so closing
+  // the modal both hides it and clears the selection. `onEdit` is intentionally
+  // omitted everywhere: opieka is an oversight surface, so the modal footer is
+  // «Zamknij»-only (§6.6).
+  const [vehicleDetail, setVehicleDetail] = useState<VehicleDto | null>(null);
+  const [driverDetail, setDriverDetail] = useState<DriverDto | null>(null);
+  const [trailerDetail, setTrailerDetail] = useState<TrailerDto | null>(null);
 
   return (
     <section className="px-4 sm:px-6 lg:px-10 xl:px-12 py-8">
@@ -195,6 +207,7 @@ export default function OpiekaCarrierDetailPage() {
             <VehiclesTable
               rows={vehiclesQ.data?.items ?? []}
               isLoading={vehiclesQ.isLoading}
+              onRowClick={setVehicleDetail}
             />
           </TabsContent>
 
@@ -202,6 +215,7 @@ export default function OpiekaCarrierDetailPage() {
             <DriversTable
               rows={driversQ.data?.items ?? []}
               isLoading={driversQ.isLoading}
+              onRowClick={setDriverDetail}
             />
           </TabsContent>
 
@@ -209,6 +223,7 @@ export default function OpiekaCarrierDetailPage() {
             <TrailersTable
               rows={trailersQ.data?.items ?? []}
               isLoading={trailersQ.isLoading}
+              onRowClick={setTrailerDetail}
             />
           </TabsContent>
 
@@ -240,6 +255,31 @@ export default function OpiekaCarrierDetailPage() {
           />
         </div>
       )}
+
+      {/* Read-only detail modals. `open` is derived from a non-null target; on
+          close we clear the target so the next click re-opens cleanly. No
+          `onEdit` → footer is «Zamknij»-only. */}
+      <VehicleDetailModal
+        open={vehicleDetail !== null}
+        onOpenChange={(o) => {
+          if (!o) setVehicleDetail(null);
+        }}
+        vehicle={vehicleDetail}
+      />
+      <DriverDetailModal
+        open={driverDetail !== null}
+        onOpenChange={(o) => {
+          if (!o) setDriverDetail(null);
+        }}
+        driver={driverDetail}
+      />
+      <TrailerDetailModal
+        open={trailerDetail !== null}
+        onOpenChange={(o) => {
+          if (!o) setTrailerDetail(null);
+        }}
+        trailer={trailerDetail}
+      />
     </section>
   );
 }
@@ -255,9 +295,10 @@ export default function OpiekaCarrierDetailPage() {
 interface VehiclesTableProps {
   rows: VehicleDto[];
   isLoading: boolean;
+  onRowClick?: (row: VehicleDto) => void;
 }
 
-function VehiclesTable({ rows, isLoading }: VehiclesTableProps) {
+function VehiclesTable({ rows, isLoading, onRowClick }: VehiclesTableProps) {
   const t = useTranslations('opieka.vehicles');
   const tCommon = useTranslations('common');
 
@@ -300,6 +341,8 @@ function VehiclesTable({ rows, isLoading }: VehiclesTableProps) {
       rows={rows}
       columns={columns}
       rowKey={(r) => r.id}
+      onRowClick={onRowClick}
+      rowAriaLabel={(r) => r.plateNumber}
       isLoading={isLoading}
       loadingLabel={tCommon('loading')}
       empty={
@@ -312,9 +355,10 @@ function VehiclesTable({ rows, isLoading }: VehiclesTableProps) {
 interface DriversTableProps {
   rows: DriverDto[];
   isLoading: boolean;
+  onRowClick?: (row: DriverDto) => void;
 }
 
-function DriversTable({ rows, isLoading }: DriversTableProps) {
+function DriversTable({ rows, isLoading, onRowClick }: DriversTableProps) {
   const t = useTranslations('opieka.drivers');
   const tCommon = useTranslations('common');
 
@@ -359,6 +403,8 @@ function DriversTable({ rows, isLoading }: DriversTableProps) {
       rows={rows}
       columns={columns}
       rowKey={(r) => r.id}
+      onRowClick={onRowClick}
+      rowAriaLabel={(r) => `${r.firstName} ${r.lastName}`}
       isLoading={isLoading}
       loadingLabel={tCommon('loading')}
       empty={
@@ -371,9 +417,10 @@ function DriversTable({ rows, isLoading }: DriversTableProps) {
 interface TrailersTableProps {
   rows: TrailerDto[];
   isLoading: boolean;
+  onRowClick?: (row: TrailerDto) => void;
 }
 
-function TrailersTable({ rows, isLoading }: TrailersTableProps) {
+function TrailersTable({ rows, isLoading, onRowClick }: TrailersTableProps) {
   const t = useTranslations('opieka.trailers');
   const tCommon = useTranslations('common');
 
@@ -414,6 +461,8 @@ function TrailersTable({ rows, isLoading }: TrailersTableProps) {
       rows={rows}
       columns={columns}
       rowKey={(r) => r.id}
+      onRowClick={onRowClick}
+      rowAriaLabel={(r) => r.plateNumber}
       isLoading={isLoading}
       loadingLabel={tCommon('loading')}
       empty={
