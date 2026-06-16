@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDeleteWithReasonDialog } from '@/components/ui/ConfirmDeleteWithReasonDialog';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
+import { RowActionsMenu, type RowAction } from '@/components/ui/RowActionsMenu';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
@@ -127,38 +128,33 @@ export default function DriversPage() {
         header: <span className="sr-only">{tCommon('actions')}</span>,
         align: 'right',
         width: 'tight',
-        cell: (row) => (
-          <div className="flex items-center justify-end gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={(e) => {
-                e.stopPropagation();
-                openEdit(row);
-              }}
-              aria-label={`${tCommon('edit')} ${row.firstName} ${row.lastName}`}
-            >
-              <Pencil size={14} aria-hidden="true" />
-              <span className="hidden lg:inline">{tCommon('edit')}</span>
-            </Button>
-            {canHardDelete && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5 text-danger hover:bg-danger-bg"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  openHardDelete(row);
-                }}
-                aria-label={`${tConfirm('confirm')} ${row.firstName} ${row.lastName}`}
-              >
-                <Trash2 size={14} aria-hidden="true" />
-                <span className="hidden lg:inline">{tConfirm('confirm')}</span>
-              </Button>
-            )}
-          </div>
-        ),
+        cell: (row) => {
+          const actions: RowAction[] = [
+            {
+              key: 'edit',
+              label: tCommon('edit'),
+              icon: Pencil,
+              onSelect: () => openEdit(row),
+            },
+          ];
+          if (canHardDelete) {
+            actions.push({
+              key: 'delete',
+              label: tConfirm('confirm'),
+              icon: Trash2,
+              destructive: true,
+              onSelect: () => openHardDelete(row),
+            });
+          }
+          return (
+            <div className="flex items-center justify-end">
+              <RowActionsMenu
+                label={`${tCommon('actions')} — ${row.firstName} ${row.lastName}`}
+                actions={actions}
+              />
+            </div>
+          );
+        },
       },
     ],
     [t, tCommon, tConfirm, canHardDelete, openHardDelete],
