@@ -22,6 +22,7 @@ import type { Role, UserDtoFull } from '@magguarantee/shared';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
+import { RowActionsMenu } from '@/components/ui/RowActionsMenu';
 import {
   Dialog,
   DialogContent,
@@ -242,61 +243,35 @@ export function UsersListView() {
         align: 'right',
         width: 'tight',
         cell: (row) => (
-          <div className="flex items-center justify-end gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={(e) => {
-                e.stopPropagation();
-                openEdit(row);
-              }}
-              aria-label={`${tCommon('edit')} ${row.login}`}
-            >
-              <Pencil size={14} aria-hidden="true" />
-              <span className="hidden lg:inline">{tCommon('edit')}</span>
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              disabled={resetM.isPending}
-              onClick={(e) => {
-                e.stopPropagation();
-                resetM.mutate(row.id);
-              }}
-              aria-label={`${t('actions.resetPassword')} ${row.login}`}
-            >
-              <KeyRound size={14} aria-hidden="true" />
-              <span className="hidden lg:inline">
-                {t('actions.resetPassword')}
-              </span>
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={(e) => {
-                e.stopPropagation();
-                setConfirmActivate({ user: row, nextActive: !row.active });
-              }}
-              aria-label={`${
-                row.active
-                  ? t('actions.deactivate')
-                  : t('actions.reactivate')
-              } ${row.login}`}
-            >
-              {row.active ? (
-                <PowerOff size={14} aria-hidden="true" />
-              ) : (
-                <Power size={14} aria-hidden="true" />
-              )}
-              <span className="hidden lg:inline">
-                {row.active
-                  ? t('actions.deactivate')
-                  : t('actions.reactivate')}
-              </span>
-            </Button>
+          <div className="flex items-center justify-end">
+            <RowActionsMenu
+              label={`${tCommon('actions')} — ${row.login}`}
+              actions={[
+                {
+                  key: 'edit',
+                  label: tCommon('edit'),
+                  icon: Pencil,
+                  onSelect: () => openEdit(row),
+                },
+                {
+                  key: 'reset',
+                  label: t('actions.resetPassword'),
+                  icon: KeyRound,
+                  disabled: resetM.isPending,
+                  onSelect: () => resetM.mutate(row.id),
+                },
+                {
+                  key: 'activate',
+                  label: row.active
+                    ? t('actions.deactivate')
+                    : t('actions.reactivate'),
+                  icon: row.active ? PowerOff : Power,
+                  destructive: row.active,
+                  onSelect: () =>
+                    setConfirmActivate({ user: row, nextActive: !row.active }),
+                },
+              ]}
+            />
           </div>
         ),
       },

@@ -85,18 +85,28 @@ export interface PopoverContentProps {
   children?: ReactNode;
   /** Gap between the anchor and the panel, in px. */
   sideOffset?: number;
+  /**
+   * Horizontal alignment of the panel relative to the anchor.
+   * `'start'` (default) pins the panel's left edge to the anchor's left edge;
+   * `'end'` pins the panel's right edge to the anchor's right edge so a
+   * right-aligned trigger (e.g. a row-actions kebab in a table's last column)
+   * opens leftwards and never spills past the viewport's right edge.
+   */
+  align?: 'start' | 'end';
 }
 
 export function PopoverContent({
   className,
   children,
   sideOffset = 4,
+  align = 'start',
 }: PopoverContentProps) {
   const { open, setOpen, anchorRef, contentRef } = usePopover();
   const [mounted, setMounted] = useState(false);
   const [pos, setPos] = useState<{
     top: number;
-    left: number;
+    left?: number;
+    right?: number;
     width: number;
   } | null>(null);
 
@@ -114,8 +124,10 @@ export function PopoverContent({
       const r = anchor.getBoundingClientRect();
       setPos({
         top: r.bottom + sideOffset,
-        left: r.left,
         width: r.width,
+        ...(align === 'end'
+          ? { right: window.innerWidth - r.right }
+          : { left: r.left }),
       });
     };
     measure();
@@ -125,7 +137,7 @@ export function PopoverContent({
       window.removeEventListener('resize', measure);
       window.removeEventListener('scroll', measure, true);
     };
-  }, [open, sideOffset, anchorRef]);
+  }, [open, sideOffset, align, anchorRef]);
 
   // Outside-click + Escape close.
   useEffect(() => {
@@ -163,7 +175,8 @@ export function PopoverContent({
       style={{
         position: 'fixed',
         top: pos.top,
-        left: pos.left,
+        ...(pos.left != null ? { left: pos.left } : {}),
+        ...(pos.right != null ? { right: pos.right } : {}),
         // `--radix-popover-trigger-width` is referenced by docs/14 § Phase 5
         // so MultiSelect can size the panel to the trigger; we expose the
         // same custom-property name for spec compatibility.
