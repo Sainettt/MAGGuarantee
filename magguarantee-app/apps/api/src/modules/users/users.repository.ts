@@ -27,6 +27,9 @@ export type UserRow = {
   name: string | null;
   active: boolean;
   liderEmail: string | null;
+  // Phase 11 — dispatch team membership (role=dyspozytor only; NULL otherwise).
+  // Drives the dyspozytor fleet/km/delegations scope (resolved into AuthUser).
+  teamId: string | null;
   // Forced change-password gate + last-change stamp (migration
   // 20260616120000_user_password_lifecycle).
   mustChangePassword: boolean;

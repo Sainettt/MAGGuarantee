@@ -43,7 +43,8 @@ export function getPlanistaFleet(): Promise<PlanistaFleetResponse> {
 
 /**
  * `GET /fleet/dyspozytor` (dyspozytor / admin) — the read-only fleet the
- * dispatcher operates: vehicles where `Vehicle.dispatcherId === user.sub`, plus
+ * dispatcher operates: vehicles assigned to the dispatcher's TEAM
+ * (`Vehicle.dispatchTeamId === user.teamId`; Phase 11), plus
  * drivers/trailers of the owning carriers, a KPI `stats` block and the
  * `stojaceList` idle-vehicle highlight rows. Scope is server-side (JWT
  * identity); there is no client filter param.

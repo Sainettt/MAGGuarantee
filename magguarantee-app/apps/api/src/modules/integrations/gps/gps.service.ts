@@ -164,7 +164,9 @@ export class GpsService {
       case 'planista':
         return { kind: 'planista', userId: user.sub };
       case 'dyspozytor':
-        return { kind: 'dyspozytor', userId: user.sub };
+        // Phase 11 — scope by the dyspozytor's TEAM (resolved into the JWT
+        // `teamId`). No team → 0 vehicles (the repo maps null → sentinel).
+        return { kind: 'dyspozytor', teamId: user.teamId ?? null };
       case 'przewoznik':
         return { kind: 'przewoznik', userId: user.sub };
       // 'pracownik' / 'eksport' / 'weryfikator' filtered upstream by @Roles
@@ -181,7 +183,7 @@ export class GpsService {
       carrierUserId: string;
       opiekunId: string | null;
       plannerId: string | null;
-      dispatcherId: string | null;
+      dispatchTeamId: string | null;
     },
   ): void {
     switch (user.role) {
@@ -198,7 +200,10 @@ export class GpsService {
         }
         return;
       case 'dyspozytor':
-        if (owner.dispatcherId !== user.sub) {
+        // Phase 11 — dyspozytor may read GPS of a vehicle only if it is on
+        // THEIR team. A dyspozytor with no team (or a vehicle with no team)
+        // never matches → 403.
+        if (!user.teamId || owner.dispatchTeamId !== user.teamId) {
           throw new ForbiddenException('Brak uprawnień do tego pojazdu');
         }
         return;

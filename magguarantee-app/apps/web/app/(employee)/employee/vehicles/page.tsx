@@ -112,9 +112,13 @@ export default function VehiclesPage() {
         cell: (row) => row.planner?.name ?? row.planner?.login ?? '—',
       },
       {
-        id: 'dispatcher',
-        header: t('fields.dispatcher'),
-        cell: (row) => row.dispatcher?.name ?? row.dispatcher?.login ?? '—',
+        id: 'dispatchTeam',
+        header: t('fields.dispatchTeam'),
+        cell: (row) => (
+          <span className="font-mono tabular-nums">
+            {row.dispatchTeam?.code ?? '—'}
+          </span>
+        ),
       },
       {
         id: 'type',

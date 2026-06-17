@@ -26,6 +26,7 @@ import {
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { CarriersRepository } from '../carriers/carriers.repository';
 import { StorageService, type StorageObject } from '../storage/storage.service';
+import { TeamsRepository } from '../teams/teams.repository';
 import { UsersRepository } from '../users/users.repository';
 import {
   extensionForMime,
@@ -37,6 +38,7 @@ import {
   type VehicleAttachmentRow,
 } from './vehicle-attachments.repository';
 import {
+  NO_TEAM_SENTINEL,
   VehiclesRepository,
   type VehicleRow,
   type VehicleRowAttachment,
@@ -47,7 +49,8 @@ import {
  *
  * Invariants enforced here (per docs/04-data-model.md):
  *   - `plannerId` → User.role='planista'
- *   - `dispatcherId` → User.role='dyspozytor'
+ *   - `dispatchTeamId` → an ACTIVE `Team` (Phase 11 — replaces the legacy
+ *     single `dispatcherId → User.role='dyspozytor'`)
  *   - composite UNIQUE (carrierId, plateNumber) — DB; we translate the
  *     P2002 to 409 Conflict.
  *
@@ -76,6 +79,7 @@ export class VehiclesService {
     private readonly carriers: CarriersRepository,
     private readonly attachments: VehicleAttachmentsRepository,
     private readonly storage: StorageService,
+    private readonly teams: TeamsRepository,
   ) {}
 
   async list(
@@ -113,8 +117,7 @@ export class VehiclesService {
   ): Promise<VehicleDto> {
     await this._assertCarrierAccessibleForWrite(user, dto.carrierId);
     if (dto.plannerId) await this._assertRole(dto.plannerId, 'planista');
-    if (dto.dispatcherId)
-      await this._assertRole(dto.dispatcherId, 'dyspozytor');
+    if (dto.dispatchTeamId) await this._assertTeamActive(dto.dispatchTeamId);
     // Defence-in-depth — Zod refine in CreateVehicleSchema already enforces
     // this, but if the pipe is bypassed we want the friendlier 422 instead
     // of a Postgres CHECK violation surfacing as 500.
@@ -160,8 +163,10 @@ export class VehiclesService {
     if (dto.plannerId !== undefined && dto.plannerId !== null) {
       await this._assertRole(dto.plannerId, 'planista');
     }
-    if (dto.dispatcherId !== undefined && dto.dispatcherId !== null) {
-      await this._assertRole(dto.dispatcherId, 'dyspozytor');
+    // Phase 11 — reassigning to a Team requires it to exist and be active.
+    // `null` (detach) skips the check.
+    if (dto.dispatchTeamId !== undefined && dto.dispatchTeamId !== null) {
+      await this._assertTeamActive(dto.dispatchTeamId);
     }
 
     const removeIds = dto.removeAttachmentIds ?? [];
@@ -305,7 +310,7 @@ export class VehiclesService {
         plateNumber: dto.plateNumber,
         active: dto.active,
         plannerId: dto.plannerId ?? null,
-        dispatcherId: dto.dispatcherId ?? null,
+        dispatchTeamId: dto.dispatchTeamId ?? null,
         notes: dto.notes ?? null,
         certificateL: dto.certificateL,
         euro: dto.euro,
@@ -343,7 +348,7 @@ export class VehiclesService {
       'plateNumber',
       'active',
       'plannerId',
-      'dispatcherId',
+      'dispatchTeamId',
       'notes',
       'certificateL',
       'euro',
@@ -622,7 +627,13 @@ export class VehiclesService {
       return { ...filters, plannerId: user.sub };
     }
     if (user.role === 'dyspozytor') {
-      return { ...filters, dispatcherId: user.sub };
+      // Phase 11 — dyspozytor sees vehicles of THEIR dispatch team. A
+      // dyspozytor with NO team sees an EMPTY set (sentinel → 0 rows), never
+      // "all" — explicit per the locked decision.
+      return {
+        ...filters,
+        dispatchTeamId: user.teamId ?? NO_TEAM_SENTINEL,
+      };
     }
     if (user.role === 'przewoznik') {
       const own = await this.carriers.list({
@@ -687,7 +698,7 @@ export class VehiclesService {
 
   private async _assertRole(
     userId: string,
-    requiredRole: 'planista' | 'dyspozytor',
+    requiredRole: 'planista',
   ): Promise<void> {
     const target = await this.users.findById(userId);
     if (!target) {
@@ -703,6 +714,26 @@ export class VehiclesService {
     if (!target.active) {
       throw new UnprocessableEntityException(
         `Wskazany użytkownik (${requiredRole}) jest nieaktywny`,
+      );
+    }
+  }
+
+  /**
+   * Phase 11 — a vehicle may only be assigned to an EXISTING, ACTIVE dispatch
+   * Team. A missing or inactive team is a 422 (matches the role-assert posture
+   * for `plannerId`). The team's dispatcher membership is NOT validated here —
+   * a team with zero dispatchers is a legal (if temporarily empty) assignment.
+   */
+  private async _assertTeamActive(teamId: string): Promise<void> {
+    const team = await this.teams.findById(teamId);
+    if (!team) {
+      throw new UnprocessableEntityException(
+        `Wskazany zespół (${teamId}) nie istnieje`,
+      );
+    }
+    if (!team.active) {
+      throw new UnprocessableEntityException(
+        `Wskazany zespół (${teamId}) jest nieaktywny`,
       );
     }
   }
@@ -739,8 +770,8 @@ export class VehiclesService {
       lastDroveAt: row.lastDroveAt ? row.lastDroveAt.toISOString() : null,
       plannerId: row.plannerId,
       planner: row.planner,
-      dispatcherId: row.dispatcherId,
-      dispatcher: row.dispatcher,
+      dispatchTeamId: row.dispatchTeamId,
+      dispatchTeam: row.dispatchTeam,
       carrier: row.carrier,
       attachments: row.attachments.map((a) => vehicleRowAttachmentToDto(a)),
       createdAt: row.createdAt.toISOString(),

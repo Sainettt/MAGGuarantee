@@ -6,16 +6,20 @@
  *
  *   WYJAZD: <departureAt DD/MM/YYYY HH:MM> / <departureCountry> / <departurePostalCode>
  *   ZJAZD: <plannedReturnAt DD/MM/YYYY> / <returnCountry> / <returnPostalCode>
- *   ZESPÓŁ PROWADZĄCY: <planista> / <dyspozytor> / <weryfikator>
+ *   ZESPÓŁ PROWADZĄCY: <planista> / <dispatcher 1> / <dispatcher 2> / …
  *   OPIEKUN: <opiekun>
+ *
+ * Phase 11 rework: the team line is `planista / <every dispatcher name of the
+ * vehicle's dispatch TEAM>`. The legacy `weryfikator` slot was REMOVED (the
+ * role is no longer per-wyjazd; see docs/16-jobs-and-integrations.md).
  *
  * Rules:
  *   - Dates are rendered in TZ Europe/Warsaw.
  *   - `departureAt` carries a time (HH:MM); `plannedReturnAt` is date-only.
- *   - The ZESPÓŁ line joins ONLY the present team names with ` / ` — any of
- *     planista / dyspozytor / weryfikator may be absent (null/empty) and is
- *     simply omitted (no empty slot, no double slash). If all three are
- *     absent the value after the colon is empty.
+ *   - The ZESPÓŁ line joins ONLY the present names with ` / ` — the planista or
+ *     any dispatcher may be absent (null/empty) and is simply omitted (no empty
+ *     slot, no double slash). If the team is empty and there is no planista the
+ *     value after the colon is empty.
  *   - `opiekun` falls back to the em dash `—` when absent.
  *
  * This module is intentionally framework-free so it can be unit-tested in
@@ -36,17 +40,22 @@ export interface WyjazdMessageContext {
   returnPostalCode: string;
   /** `Vehicle.planner.name` — may be null/absent. */
   planista: string | null;
-  /** `Vehicle.dispatcher.name` — may be null/absent. */
-  dyspozytor: string | null;
-  /** Single active weryfikator's name — may be null/absent. */
-  weryfikator: string | null;
+  /**
+   * Phase 11 — the names of ALL dispatchers on the vehicle's dispatch TEAM
+   * (`Vehicle.dispatchTeam.dispatchers[].name`). May be empty (team unassigned
+   * or has no members); individual null/blank names are dropped by the
+   * formatter. Replaces the single `dyspozytor` field.
+   */
+  dyspozytorzy: (string | null)[];
   /** `Carrier.opiekun.name` — falls back to `—` when null/absent. */
   opiekun: string | null;
 }
 
 /** Build the 4-line Google Chat message text from the assembled context. */
 export function formatWyjazdMessage(ctx: WyjazdMessageContext): string {
-  const team = [ctx.planista, ctx.dyspozytor, ctx.weryfikator]
+  // Phase 11 — planista + every team dispatcher; weryfikator removed. Blank /
+  // null names are dropped (no empty slot, no double slash).
+  const team = [ctx.planista, ...ctx.dyspozytorzy]
     .map((n) => (n ?? '').trim())
     .filter((n) => n.length > 0)
     .join(' / ');

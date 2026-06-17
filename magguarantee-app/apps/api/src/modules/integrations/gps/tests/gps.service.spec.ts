@@ -51,7 +51,8 @@ interface OwnerRow {
   carrierUserId: string;
   opiekunId: string | null;
   plannerId: string | null;
-  dispatcherId: string | null;
+  // Phase 11 — dispatch Team FK (replaces `dispatcherId`).
+  dispatchTeamId: string | null;
   active: boolean;
 }
 
@@ -79,7 +80,11 @@ class StubProvider implements GpsProvider {
   }
 }
 
-function authUser(role: AuthUser['role'], sub = 'u-1'): AuthUser {
+function authUser(
+  role: AuthUser['role'],
+  sub = 'u-1',
+  teamId: string | null = null,
+): AuthUser {
   return {
     sub,
     login: 'tester',
@@ -87,6 +92,7 @@ function authUser(role: AuthUser['role'], sub = 'u-1'): AuthUser {
     name: 'Tester',
     role,
     mustChangePassword: false,
+    teamId,
   };
 }
 
@@ -111,14 +117,14 @@ const VEHICLE_ID = '11111111-1111-4111-8111-111111111111';
 
 const ownerByRole = {
   // Carrier user "u-self" owns vehicle v-1; opiekun "op-1"; planner "pl-1";
-  // dispatcher "dy-1".
+  // Phase 11 — the vehicle is on dispatch team "team-1".
   v1Default: (): OwnerRow => ({
     ref: { id: VEHICLE_ID, plateNumber: 'WA0001' },
     carrierId: 'c-1',
     carrierUserId: 'u-self',
     opiekunId: 'op-1',
     plannerId: 'pl-1',
-    dispatcherId: 'dy-1',
+    dispatchTeamId: 'team-1',
     active: true,
   }),
 };
@@ -191,20 +197,23 @@ describe('GpsService.getOne', () => {
   // ── ownership matrix ────────────────────────────────────
 
   it.each([
-    // pracownik intentionally omitted — narrow claims-only role with no GPS
-    // visibility per docs/03-roles.md#pracownik (blocked upstream by @Roles).
-    ['admin', 'u-other', true],
-    ['opiekun', 'op-1', true],
-    ['opiekun', 'op-9', false],
-    ['planista', 'pl-1', true],
-    ['planista', 'pl-9', false],
-    ['dyspozytor', 'dy-1', true],
-    ['dyspozytor', 'dy-9', false],
-    ['przewoznik', 'u-self', true],
-    ['przewoznik', 'u-other', false],
-  ] as Array<[AuthUser['role'], string, boolean]>)(
-    '%s/%s allowed=%s',
-    async (role, sub, allowed) => {
+    // [role, sub, teamId, allowed]. teamId is only consulted for dyspozytor
+    // (Phase 11 — GPS read is team-scoped, not per-user). pracownik intentionally
+    // omitted — narrow claims-only role with no GPS visibility (blocked upstream).
+    ['admin', 'u-other', null, true],
+    ['opiekun', 'op-1', null, true],
+    ['opiekun', 'op-9', null, false],
+    ['planista', 'pl-1', null, true],
+    ['planista', 'pl-9', null, false],
+    // Vehicle is on team-1: same team → allowed; other team / no team → 403.
+    ['dyspozytor', 'dy-1', 'team-1', true],
+    ['dyspozytor', 'dy-1', 'team-9', false],
+    ['dyspozytor', 'dy-1', null, false],
+    ['przewoznik', 'u-self', null, true],
+    ['przewoznik', 'u-other', null, false],
+  ] as Array<[AuthUser['role'], string, string | null, boolean]>)(
+    '%s/%s (team=%s) allowed=%s',
+    async (role, sub, teamId, allowed) => {
       const fix = makeFix({ vehicleId: VEHICLE_ID });
       const redis = makeRedis({
         [`gps:position:${VEHICLE_ID}`]: JSON.stringify(fix),
@@ -215,7 +224,7 @@ describe('GpsService.getOne', () => {
         makeConfig(),
         new StubProvider({}),
       );
-      const call = svc.getOne(authUser(role, sub), VEHICLE_ID);
+      const call = svc.getOne(authUser(role, sub, teamId), VEHICLE_ID);
       if (allowed) {
         await expect(call).resolves.toMatchObject({ stale: false });
       } else {
@@ -300,16 +309,19 @@ describe('GpsService.getMany', () => {
   });
 
   it.each([
-    // pracownik intentionally omitted — narrow claims-only role per
-    // docs/03-roles.md#pracownik; no GPS scope (blocked upstream by @Roles).
-    ['admin', { kind: 'all' }],
-    ['opiekun', { kind: 'opiekun', userId: 'op-x' }],
-    ['planista', { kind: 'planista', userId: 'pl-x' }],
-    ['dyspozytor', { kind: 'dyspozytor', userId: 'dy-x' }],
-    ['przewoznik', { kind: 'przewoznik', userId: 'pw-x' }],
-  ] as Array<[AuthUser['role'], GpsScope]>)(
-    'role=%s passes correct scope to repo',
-    async (role, expected) => {
+    // [role, sub, teamId, expectedScope]. dyspozytor scopes by TEAM (Phase 11),
+    // so its scope carries `teamId`, not `userId`. pracownik intentionally
+    // omitted — no GPS scope (blocked upstream by @Roles).
+    ['admin', 'u-x', null, { kind: 'all' }],
+    ['opiekun', 'op-x', null, { kind: 'opiekun', userId: 'op-x' }],
+    ['planista', 'pl-x', null, { kind: 'planista', userId: 'pl-x' }],
+    ['dyspozytor', 'dy-x', 'team-x', { kind: 'dyspozytor', teamId: 'team-x' }],
+    // Dyspozytor with no team → scope carries teamId: null (repo maps → 0 rows).
+    ['dyspozytor', 'dy-x', null, { kind: 'dyspozytor', teamId: null }],
+    ['przewoznik', 'pw-x', null, { kind: 'przewoznik', userId: 'pw-x' }],
+  ] as Array<[AuthUser['role'], string, string | null, GpsScope]>)(
+    'role=%s (team=%s) passes correct scope to repo',
+    async (role, sub, teamId, expected) => {
       const captured: GpsScope[] = [];
       const repo = makeRepo({
         byScope: (s) => {
@@ -323,9 +335,7 @@ describe('GpsService.getMany', () => {
         makeConfig(),
         new StubProvider({}),
       );
-      const sub =
-        expected.kind === 'all' ? 'u-x' : (expected as { userId: string }).userId;
-      await svc.getMany(authUser(role, sub));
+      await svc.getMany(authUser(role, sub, teamId));
       expect(captured[0]).toEqual(expected);
     },
   );

@@ -31,6 +31,7 @@ import {
   UuidSchema,
   emptyStringToUndefined,
 } from './common';
+import { VehicleDispatchTeamSchema } from './teams';
 
 // ─── Enum mirror (Prisma DelegationStatus) ───────────────
 
@@ -206,6 +207,16 @@ export type DelegationFilters = z.infer<typeof DelegationFiltersSchema>;
 const VehicleMiniSchema = z.object({
   id: UuidSchema,
   plateNumber: z.string(),
+  /**
+   * Phase 11 Шаг D (additive) — the vehicle's CURRENT dispatch team, resolved
+   * LIVE from `Vehicle.dispatchTeam` (NOT a snapshot). Identical shape to the
+   * one surfaced by `VehicleDto` / `VehicleListItem` (reuses the shared
+   * `VehicleDispatchTeamSchema`). NON-SENSITIVE (no rates) → safe for every
+   * role that already sees the delegation. `null` when the vehicle is not
+   * assigned to any team. Powers the «ZESPÓŁ PROWADZĄCY» block in
+   * `DelegationDetailModal`.
+   */
+  dispatchTeam: VehicleDispatchTeamSchema.nullable(),
 });
 
 const TrailerMiniSchema = z.object({

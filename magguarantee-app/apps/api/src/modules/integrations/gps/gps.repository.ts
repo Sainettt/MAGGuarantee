@@ -35,7 +35,8 @@ export class GpsRepository {
     carrierUserId: string;
     opiekunId: string | null;
     plannerId: string | null;
-    dispatcherId: string | null;
+    /** Phase 11 — dispatch Team FK (replaces `dispatcherId`). */
+    dispatchTeamId: string | null;
     active: boolean;
   } | null> {
     const row = await this.prisma.client.vehicle.findFirst({
@@ -45,7 +46,7 @@ export class GpsRepository {
         plateNumber: true,
         carrierId: true,
         plannerId: true,
-        dispatcherId: true,
+        dispatchTeamId: true,
         active: true,
         carrier: { select: { userId: true, opiekunId: true } },
       },
@@ -57,7 +58,7 @@ export class GpsRepository {
       carrierUserId: row.carrier.userId,
       opiekunId: row.carrier.opiekunId,
       plannerId: row.plannerId,
-      dispatcherId: row.dispatcherId,
+      dispatchTeamId: row.dispatchTeamId,
       active: row.active,
     };
   }
@@ -70,8 +71,9 @@ export class GpsRepository {
    *    (we encode that as `kind: 'all'`).
    *  - opiekun           → vehicles whose Carrier.opiekunId = userId.
    *  - planista          → vehicles whose Vehicle.plannerId = userId.
-   *  - dyspozytor        → vehicles whose Vehicle.dispatcherId = userId.
-   *  - przewoznik        → vehicles whose Carrier.userId = userId.
+   *  - dyspozytor        → Phase 11: vehicles whose Vehicle.dispatchTeamId =
+   *    the dyspozytor's `teamId`. A dyspozytor with NO team → 0 vehicles
+   *    (the scope carries `teamId: null`, matched as "no rows").
    *
    * pracownik / eksport / weryfikator have NO GPS visibility — those roles
    * never reach this method (the controller blocks via @Roles). pracownik is
@@ -91,7 +93,9 @@ export class GpsRepository {
         where.plannerId = scope.userId;
         break;
       case 'dyspozytor':
-        where.dispatcherId = scope.userId;
+        // Phase 11 — scope by the dyspozytor's TEAM. No team → 0 vehicles (an
+        // impossible team filter, never "all").
+        where.dispatchTeamId = scope.teamId ?? NO_GPS_TEAM_SENTINEL;
         break;
       case 'przewoznik':
         where.carrier = { userId: scope.userId };
@@ -111,9 +115,17 @@ export class GpsRepository {
   }
 }
 
+/**
+ * Impossible team id forcing 0 GPS rows for a dyspozytor with no team — mirrors
+ * the fleet `NO_TEAM_SENTINEL` posture (an unassigned dyspozytor sees nothing).
+ */
+const NO_GPS_TEAM_SENTINEL = '__no_dispatch_team__';
+
 export type GpsScope =
   | { kind: 'all' }
   | { kind: 'opiekun'; userId: string }
   | { kind: 'planista'; userId: string }
-  | { kind: 'dyspozytor'; userId: string }
+  // Phase 11 — dyspozytor scopes by TEAM, not by their own user id. `teamId`
+  // null = dyspozytor without a team → 0 vehicles.
+  | { kind: 'dyspozytor'; teamId: string | null }
   | { kind: 'przewoznik'; userId: string };

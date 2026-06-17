@@ -3653,6 +3653,12 @@ So `DelegationDetailModal.tsx` stays a thin wrapper over `<EntityDetailModal>`; 
 
 Section header: icon `<ClipboardCheck>` (or keep `<Info>`), label «STATUS I AUDYT». `span: 'full'`.
 
+> **Block D — «ZESPÓŁ PROWADZĄCY» (Phase 11, §7.9.7).** A further `span:'full'` `fullWidth` block **below**
+> «STATUS I AUDYT» (and below the §7.7.9 km-calendar if present), header «ZESPÓŁ PROWADZĄCY» (`<Users>`),
+> rendering `<TeamMembers variant="list" size="md">` from the **current** `Vehicle.dispatchTeam` (live by
+> `vehicleId`, **not** a delegation-time snapshot). Label mirrors the Google Chat trip-notification heading.
+> Omitted when no vehicle; amber «Brak zespołu prowadzącego» when the vehicle has no team. Full spec: §7.9.7.
+
 **All fields accounted for (no field dropped).** Mapping of the 19 `DelegationDto` fields to the new layout:
 - Header: `vehicle.plateNumber` (title), `status` (badge).
 - Route card: `departureAt`, `departureCountry`, `departurePostalCode`, `plannedReturnAt`, `returnCountry`, `returnPostalCode` (+ the derived duration pill). `actualReturnAt` is **no longer displayed** (UI-only removal — see «faktyczny» note above) but remains in `DelegationDto`.
@@ -3692,7 +3698,9 @@ These three modals open when a row in the planista/dyspozytor fleet tabs (§6.4.
 | **Identyfikacja** (`sections.identification`) | half | `<Truck>` | Numer rejestracyjny → `plateNumber` `monoValue` · Numer boczny → `sideNumber` `textValue` · Marka → `brand` `textValue` · Model → `model` `textValue` · Rok → `year` `textValue(String(year))` · Typ → `type` (raw enum MEGA/STD/COIL) `textValue` · Norma EURO → `euro` (raw enum) `textValue` · Certyfikat L → `certificateL` `boolValue` |
 | **Wyposażenie** (`sections.equipment`) | half | `<Package>` | GPS → `gps` `boolValue` · **ID urządzenia GPS** → `gpsMobilePhone` `monoValue` *(Quirk #2 — label is the GPS tracker device ID, NEVER "telefon")* · Karta paliwowa → `fuelCard` `boolValue` · Porozumienie → `agreement` `boolValue` |
 | **Pozwolenia** (`sections.permissions`) | full | `<ShieldCheck>` | ADR → `adr` `boolValue` · Odpady → `wasteAllowed` `boolValue` · Kraje odpadowe → `wasteCountries` `listValue` · Kabotaż DE → `cabotageDe` `boolValue` · Kabotaż FR → `cabotageFr` `boolValue` · GB → `gb` `boolValue` · IT → `it` `boolValue` · FR → `fr` `boolValue` |
-| **Eksploatacja** (`sections.usage`) | full | `<Globe2>` | Ostatni przejazd → `lastDroveAt` `dateValue` *(Quirk #11 — display-only, never editable; fine to show here)* · Notatki → `notes` `textValue` `fullWidth: true` |
+| **Eksploatacja** (`sections.usage`) | full | `<Globe2>` | Ostatni przejazd → `lastDroveAt` `dateValue` *(Quirk #11 — display-only, never editable; fine to show here)* · **Zespół** → `dispatchTeam` rendered via `<TeamMembers variant="chips" size="md">` as a `fullWidth` row (Phase 11, §7.9 — non-sensitive team composition; **not** a rate/relation that the §6.4.2 HARD EXCLUSION blocks) · Notatki → `notes` `textValue` `fullWidth: true` |
+
+> **«Zespół» field (Phase 11).** Both the **admin** VehicleDetailModal and this read-only **FleetVehicleDetailModal** render the vehicle's `dispatchTeam` via `<TeamMembers variant="chips" size="md">` as a `fullWidth` row in the Eksploatacja section. This requires `dispatchTeam` (`{code, name, active, members[{id,firstName,lastName}]}`) on the vehicle payload — additive, non-sensitive (no rates), consistent with the §6.4.2 "enrich the slim list-item" rationale. Empty/inactive states handled by `<TeamMembers>` itself (§7.9.3). Full spec: §7.9.
 
 #### Driver detail modal (fleet read-only) — `<FleetDriverDetailModal>`
 
@@ -4824,6 +4832,209 @@ A NEW namespace `myKm.*` for this tab's chrome. All grid/cell/nav/history/tiles 
 - [ ] **Scope.** Server-scoped payload trusted (carrier→own, opiekun→supervised, planista→plannerId, dyspozytor→team); UI does not re-filter by owner.
 - [ ] **i18n.** `myKm.*` keys present PL + EN; grid/cell/nav/history reuse `weryfikator.km.*` (not duplicated); ICU plural on `myKm.group.summary`.
 - [ ] **Token policy + dark-mode.** No new radius/shadow/font tokens; the only colour addition is the §7.8.2 `cat-blue`/`cat-violet` pair (pending sign-off — else fallback); carrier accents are opacity rails legible in dark via the listed `dark:` steps; **no API contract change** beyond role-scoping the existing read endpoint.
+
+---
+
+## Phase 11 — `<TeamMembers>` (team composition) (NEW — AUTHORITATIVE 2026-06-17)
+
+> **Status:** ✅ Locked. This formalises the **single reusable component** that renders a dispatch team's
+> identity (code + name) and its member dispatchers, wherever a team is shown across the app. It replaces the
+> ad-hoc "list the dispatchers inline" rendering that would otherwise drift between the vehicle form, the three
+> vehicle detail modals, the delegation detail modal, the dispatcher panel and the admin Team CRUD.
+>
+> **Why one component.** `Vehicle.dispatchTeam` (and `Team.members`) surfaces in **six** contexts (§7.9.6 table).
+> Each previously risked its own bespoke "kod + names" markup. `<TeamMembers>` is the **single source of truth**
+> for: how the code chip looks, how the team name sits relative to the code, how member dispatchers render
+> (avatar + name), and — critically — the three **states** (members / empty team / inactive team) that must look
+> identical everywhere.
+>
+> **No new design tokens.** Everything composes the existing palette, radius, type and spacing scale
+> (`bg-input`, `text-text`, `text-text-sub`, `bg-muted`/`text-muted-foreground` for the inactive badge,
+> `border-warning/40 bg-warning/10 text-warning` for the empty-team box — the §3.5.x soft-warning recipe already
+> used by the Reklamacja indicator and the §3.5 idle-vehicles list). No `tailwind.config.ts` / `globals.css` change.
+
+### 7.9.1 Anatomy
+
+```
+┌─ <TeamMembers> (variant="chips", size="md") ─────────────────────────────┐
+│                                                                          │
+│   1.1.13   Zespół Wschód                       [ chips row ]             │
+│   └ code   └ Team.name (text-text, omitted-no-gap if null)              │
+│                                                                          │
+│   ( JK )  Jan Kowalski    ( AN )  Anna Nowak    ( PW )  Piotr Wój…       │
+│   └ InitialsAvatar (neutral)  └ dispatcher full name                     │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+- **Identity line** — the team **code chip** (mono code-chip, always present unless `showCode={false}`) +
+  the optional **team name**. Code chip: `inline-flex items-center rounded-md bg-input px-1.5 py-0.5 font-mono
+  tabular-nums text-text` (`text-xs` at `sm`, `text-sm` at `md`). Example code `1.1.13` — **3 dot-segments**,
+  `tabular-nums` keeps segments aligned across rows. Team name: `text-text` (co-equal weight with the code,
+  **not** muted) at the same size as the code; when `team.name` is `null`/empty the name span is **not rendered
+  at all** (no residual margin, no «—» placeholder — the chip simply sits alone).
+- **Members** — each dispatcher is an `<InitialsAvatar>` + their **full name** (`firstName + ' ' + lastName`).
+  `chips` variant lays members out as a `flex flex-wrap gap-2` row of pill-ish member tokens; `list` variant
+  stacks them `flex flex-col gap-1.5` (one avatar+name per line).
+
+### 7.9.2 `<InitialsAvatar>` — new primitive
+
+A neutral, **non-coloured** initials circle. Deliberately **not** per-person tinted (decision: avatars are
+wayfinding, not identity-colour; a team of dispatchers should read as a calm uniform set, not a rainbow).
+
+| Prop | Type | Default | Notes |
+|---|---|---|---|
+| `name` | `string` | — | Source for initials; takes first letter of first two whitespace-separated tokens, uppercased (`"Jan Kowalski"` → `JK`; single-token `"Admin"` → `A`). Empty/whitespace → `?`. |
+| `size` | `'sm' \| 'md'` | `'md'` | `sm` = `h-6 w-6 text-[10px]`; `md` = `h-8 w-8 text-xs`. |
+| `className` | `string?` | — | Escape hatch only. |
+
+Base classes: `inline-flex shrink-0 items-center justify-center rounded-full bg-input font-semibold
+text-text-sub select-none`. **Neutral always** (`bg-input` fill, `text-text-sub` initials) in both light and
+dark — `bg-input` and `text-text-sub` are theme-aware CSS-var tokens, so no `dark:` override is needed. The
+circle is decorative; the **name text beside it is the accessible label**, so the avatar itself is
+`aria-hidden` (no duplicate SR announcement of the initials).
+
+> **Reuse note.** This is a generic primitive — it is **not** team-specific. It supersedes the inline
+> `<User size={18}/>` placeholder avatar in the §6.4.1 driver strip *only if web-agent chooses to*; that is
+> optional and out of scope here. The §6.4.1 driver avatar may stay a `<User>` glyph. `<InitialsAvatar>` is
+> introduced **for `<TeamMembers>`** and offered app-wide.
+
+### 7.9.3 States
+
+| State | Trigger | Treatment |
+|---|---|---|
+| **Members** (normal) | `team` present, `active`, `members.length > 0` | Identity line + member row/list per variant (§7.9.1). |
+| **Empty team** | `team` present, `members.length === 0` | **Amber soft-warning box** in place of the member row: `mt-2 inline-flex items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-2 py-1 text-xs font-bold text-warning` + `<AlertTriangle size={12} aria-hidden />` + «Brak dyspozytorów w zespole». Mirrors the §3.5 Reklamacja-indicator recipe. **The identity line (code + name) still renders** — the team exists, it just has no people. **This box stays at full contrast even when the wrapper is dimmed (inactive)** — it is the one element exempt from the `opacity-70` dim (apply the dim to the members/identity, not to the warning box; web-agent: render the warning box outside the dimmed subtree, or counter-dim it with `opacity-100`). |
+| **Inactive team** | `team.active === false` | A **`muted` badge** «Nieaktywny» appended to the identity line (`<Badge variant="muted">` — `bg-muted text-muted-foreground`, the existing inactive treatment used by the entity tables) **and** `opacity-70` on the component wrapper (`dim` the whole composition so it visually recedes). The empty-team warning box (if also empty) is exempt from the dim (above). Inactive + empty can co-occur: muted «Nieaktywny» badge **and** the full-contrast amber box. |
+
+> **State precedence.** The states compose, they don't exclude: `inactive` adds the badge + dim; `empty`
+> swaps the member area for the amber box. A team can be **inactive AND empty** (badge + dim + full-contrast
+> amber box). `members` is simply "neither empty nor (only) inactive".
+
+### 7.9.4 Variants & sizes
+
+| Axis | Value | Use |
+|---|---|---|
+| **variant** | `chips` (default) | Member tokens flow in a `flex flex-wrap gap-2` row; compact, good under a form dropdown or in a wide modal field. Each token: `inline-flex items-center gap-1.5 rounded-full bg-input/60 pl-1 pr-2.5 py-1` (avatar + name). |
+| **variant** | `list` | Members stack `flex flex-col gap-1.5`, one `flex items-center gap-2` row each (avatar + name). For narrow columns / dense detail-modal fields / the admin Team CRUD member panel where vertical scanning is preferred. |
+| **size** | `md` (default) | `InitialsAvatar size="md"` (`h-8 w-8`), code chip `text-sm`, name `text-sm`. Modals, panels, admin. |
+| **size** | `sm` | `InitialsAvatar size="sm"` (`h-6 w-6`), code chip `text-xs`, name `text-xs`. Inline previews (vehicle-form preview under the dropdown), tight table cells. |
+
+### 7.9.5 Props contract
+
+```ts
+interface TeamMembersProps {
+  team: {
+    code: string;                 // "1.1.13" — 3 dot-segments, mono code-chip
+    name: string | null;          // Team.name — text-text, omitted-no-gap if null
+    active: boolean;              // false → muted «Nieaktywny» badge + opacity-70 dim
+    members: Array<{
+      id: string;
+      firstName: string;
+      lastName: string;
+    }>;
+  };
+  variant?: 'chips' | 'list';     // default 'chips'
+  size?: 'sm' | 'md';             // default 'md'
+  showCode?: boolean;             // default true — host may suppress a DUPLICATE code only
+  className?: string;
+}
+```
+
+- **`showCode`** lets a host that already prints the code in its own header (e.g. the admin Team-CRUD row title)
+  suppress the chip to avoid a visual duplicate. **It must never be used to hide team identity entirely** — if
+  `showCode={false}`, the component **still renders the team name** (and the name carries the identity). The
+  component **never silently shows nothing**: with `showCode={false}` **and** `name == null`, fall back to
+  rendering the code chip anyway (identity is non-negotiable; the dedup only applies when the name can stand in).
+- **`members`** order is taken as-given (host sorts; component does not re-sort). Truncate long names with
+  `truncate max-w-[14ch]` inside each token (chips variant) — never wrap a single name mid-token.
+
+### 7.9.6 Per-context usage
+
+| Context | Where | variant / size / showCode | Notes |
+|---|---|---|---|
+| **Vehicle form — team preview** | `apps/web/components/.../VehicleForm` under the "Zespół dyspozytorów" dropdown | `chips` / `sm` / `showCode=true` | Live preview of the team the user just picked in the `<Select>`; updates on selection. Empty-team amber box warns the admin the chosen team has no dispatchers **before** saving. |
+| **Admin VehicleDetailModal** | §6.4.2′ admin vehicle modal — «Zespół» field (`fullWidth` row) | `chips` / `md` / `showCode=true` | Shows the vehicle's assigned `dispatchTeam`. |
+| **FleetVehicleDetailModal** (planista/dyspozytor read-only) | §6.4.2 — «Zespół» field (`fullWidth` row) | `chips` / `md` / `showCode=true` | Read-only; same data, no edit. |
+| **DelegationDetailModal** | §6.4.1 — «ZESPÓŁ PROWADZĄCY» block (see §7.9.7) | `list` / `md` / `showCode=true` | Shows the **current** `Vehicle.dispatchTeam` (live, **not** a delegation-time snapshot). |
+| **Dyspozytor panel** | dispatcher panel header / "my team" surface | `chips` / `md` / `showCode=true` | The dispatcher sees their own team composition. |
+| **Admin Team CRUD** | team list rows + team edit surface | `list` / `md` / `showCode=false` (list rows print the code in the row title) | `showCode=false` here is the canonical dedup case — the row already shows the code, so the chip is suppressed but the name + members still render. |
+
+### 7.9.7 Cross-reference — DelegationDetailModal «ZESPÓŁ PROWADZĄCY» block
+
+A **new body block** in the §6.4.1 delegation detail modal, rendered as a `span:'full'` section
+(an additional `fullWidth` row, same §6.20 escape hatch as `<RouteCard>` / the km-calendar). It sits **below
+the «STATUS I AUDYT» section** (and below the §7.7.9 km-calendar if present), so the reading order ends with
+"who is steering this trip".
+
+- **Section header** = «ZESPÓŁ PROWADZĄCY» (icon `<Users size={15}/>`). The label **deliberately mirrors the
+  heading of the Google Chat trip-notification** so the modal and the gchat message read as the same artefact.
+- **Body** = a single `<TeamMembers variant="list" size="md">` fed the **current** `Vehicle.dispatchTeam` of the
+  delegation's assigned vehicle (resolved live by `vehicleId` — **not** a snapshot captured at delegation time;
+  if the truck is reassigned to a new team, this block reflects the new team).
+- **No vehicle / no team:** if the delegation has no resolvable `vehicleId`, **omit the whole section**
+  (per §6.4 "empty section omitted"). If the vehicle exists but has **no `dispatchTeam` assigned**, render the
+  section with the `<TeamMembers>` empty-team amber box semantics — but since there is no team object at all,
+  show the same amber box with copy «Brak zespołu prowadzącego» (`team.noTeam`, see §7.9.9). (Distinct from
+  «Brak dyspozytorów w zespole», which means a team exists but is unstaffed.)
+
+### 7.9.8 a11y
+
+- **Avatars `aria-hidden`** — the adjacent full name is the accessible label; the initials circle adds nothing
+  for SR users and would otherwise double-announce.
+- **Member list is a real list** — `list` variant renders `<ul><li>` so SR users get "list, N items"; `chips`
+  variant uses `role="list"` / `role="listitem"` on the flex row + tokens to preserve the same semantics.
+- **Empty-team box** carries the warning meaning in **text** («Brak dyspozytorów w zespole»), not colour — the
+  amber tint + `<AlertTriangle aria-hidden>` are reinforcement only (colour-blind safe).
+- **Inactive** — the «Nieaktywny» badge is real text; the `opacity-70` dim is decorative and never the sole
+  signal. Contrast: even at `opacity-70`, `text-text` over `bg-card` clears AA; the amber box is exempt from the
+  dim so it always clears AA at full contrast.
+- **Code chip** is real `font-mono` text (`1.1.13`), read verbatim by SR — no `aria-label` rewrite needed.
+
+### 7.9.9 i18n — `team.*` (PL default + EN)
+
+| Key | PL | EN |
+|---|---|---|
+| `team.emptyMembers` | Brak dyspozytorów w zespole | No dispatchers in this team |
+| `team.noTeam` | Brak zespołu prowadzącego | No leading team assigned |
+| `team.inactiveBadge` | Nieaktywny | Inactive |
+| `team.leadingTeamHeader` | ZESPÓŁ PROWADZĄCY | LEADING TEAM |
+| `team.codeAria` | Kod zespołu: {code} | Team code: {code} |
+| `team.membersAria` | Dyspozytorzy zespołu {code} | Dispatchers of team {code} |
+
+PL is the default bundle (`messages/pl.json`), EN mirrors every key (`messages/en.json`). No hard-coded strings;
+PL+EN key parity holds (existing i18n-parity check covers this).
+
+### 7.9.10 Catalogue additions (Phase 11)
+
+| Component | Type | Notes |
+|---|---|---|
+| `<TeamMembers>` | New custom presentational | Single source of truth for team identity (code chip + name) + member dispatchers; 3 states (members / empty / inactive), 2 variants (`chips`/`list`), 2 sizes (`sm`/`md`); composes existing tokens only. `apps/web/components/teams/TeamMembers.tsx`. |
+| `<InitialsAvatar>` | New primitive | Neutral (`bg-input`/`text-text-sub`) initials circle, `aria-hidden`, `sm`/`md`; generic, offered app-wide. `apps/web/components/ui/InitialsAvatar.tsx`. |
+
+### 7.9.11 Components / cross-ref / acceptance (Phase 11)
+
+| Change | Where | Owner |
+|---|---|---|
+| New `<TeamMembers>` (3 states, 2 variants, 2 sizes, `showCode` dedup, identity-never-hidden rule) | `components/teams/TeamMembers.tsx` | web-agent |
+| New `<InitialsAvatar>` neutral primitive (`sm`/`md`, `aria-hidden`) | `components/ui/InitialsAvatar.tsx` | web-agent |
+| Vehicle-form: render `<TeamMembers variant="chips" size="sm">` preview under the "Zespół dyspozytorów" dropdown | `VehicleForm` | web-agent |
+| §6.4.2 «Zespół» field uses `<TeamMembers variant="chips" size="md">` in admin VehicleDetailModal + FleetVehicleDetailModal (`fullWidth` row) | `Fleet/admin vehicle modals` | web-agent |
+| §6.4.1 delegation modal: new `span:'full'` «ZESPÓŁ PROWADZĄCY» block (`<Users>` header) rendering `<TeamMembers variant="list" size="md">` from **current** `Vehicle.dispatchTeam` | `components/delegations/DelegationDetailModal.tsx` | web-agent |
+| Dyspozytor panel + admin Team CRUD use `<TeamMembers>` (`showCode=false` in CRUD list rows) | dispatcher panel + Team CRUD pages | web-agent |
+| i18n: `team.{emptyMembers,noTeam,inactiveBadge,leadingTeamHeader,codeAria,membersAria}` PL+EN | `messages/pl.json`, `en.json` | web-agent |
+| **0** changes to `tailwind.config.ts` / `globals.css` / any shell (`EntityDetailModal` reused via `fullWidth` row) | — | — |
+
+**Acceptance checklist (Phase 11):**
+
+- [ ] **One component everywhere.** All six contexts (§7.9.6) render `<TeamMembers>` — no bespoke "kod + names" markup remains.
+- [ ] **Neutral avatars.** `<InitialsAvatar>` is `bg-input`/`text-text-sub` in both themes; never per-person tinted; `aria-hidden`.
+- [ ] **Name weight + null collapse.** `team.name` is `text-text` (co-equal with the code), and disappears with **no residual gap** when null.
+- [ ] **Empty team.** Amber `border-warning/40 bg-warning/10 text-warning` box + `<AlertTriangle>` + bold «Brak dyspozytorów w zespole»; stays full-contrast even on a dimmed inactive card.
+- [ ] **Inactive.** `muted` «Nieaktywny» badge + `opacity-70` dim on the wrapper; co-occurs with the (exempt) amber box when also empty.
+- [ ] **Delegation modal block.** «ZESPÓŁ PROWADZĄCY» mirrors the gchat header, shows **current** `Vehicle.dispatchTeam` (not snapshot), omitted when no vehicle, «Brak zespołu prowadzącego» when vehicle has no team.
+- [ ] **Code chip.** `font-mono tabular-nums` `1.1.13` (3 segments); `showCode` only dedups a duplicate and **never** hides identity (name stands in; if name null, chip renders anyway).
+- [ ] **No new tokens.** Only existing palette/radius/type/spacing; no `tailwind.config.ts`/`globals.css` change.
+- [ ] **a11y.** Member list real `<ul>`/`role=list`; avatars `aria-hidden`; warning carried by text not colour; `team.*` keys PL+EN parity.
 
 ---
 

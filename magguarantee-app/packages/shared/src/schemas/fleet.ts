@@ -21,6 +21,7 @@
 import { z } from 'zod';
 
 import { IsoDateSchema, IsoDateTimeSchema, UuidSchema } from './common';
+import { VehicleDispatchTeamSchema } from './teams';
 
 // ─── Slim list-item shapes ───────────────────────────────
 
@@ -66,6 +67,13 @@ export const VehicleListItemSchema = z.object({
   /** Display-only (quirk #11). ISO datetime; null when never reported. */
   lastDroveAt: IsoDateTimeSchema.nullable(),
   notes: z.string().nullable(),
+  /**
+   * Phase 11 — the dispatch Team with its dispatcher roster (additive,
+   * non-sensitive — no rates). Feeds the dyspozytor panel +
+   * FleetVehicleDetailModal team display. `null` when the vehicle is not
+   * assigned to a team. Same shape as the full `VehicleDto.dispatchTeam`.
+   */
+  dispatchTeam: VehicleDispatchTeamSchema.nullable(),
 });
 export type VehicleListItem = z.infer<typeof VehicleListItemSchema>;
 
@@ -291,8 +299,9 @@ export type OpiekunFleetResponse = z.infer<typeof OpiekunFleetResponseSchema>;
  * `Code.gs:3758-3764` (`getDyspozytorFleet` return). Key names are kept
  * verbatim so the dyspozytor panel's KPI strip reads them directly.
  *
- *  - `liczbaAut`        — total vehicles assigned to this dyspozytor
- *                         (`Vehicle.dispatcherId === user.sub`).
+ *  - `liczbaAut`        — total vehicles assigned to this dyspozytor's TEAM
+ *                         (`Vehicle.dispatchTeamId === user.teamId`; Phase 11).
+ *                         A dyspozytor with NO team sees an empty fleet.
  *  - `autaAktywne`      — `Vehicle.active=true`.
  *  - `autaJezdzace`     — active AND (no `lastDroveAt` OR within last 7 days);
  *                         mirrors the legacy "no data = assume driving" default.
@@ -343,10 +352,11 @@ export type DyspozytorStojacyItem = z.infer<typeof DyspozytorStojacyItemSchema>;
  * same slim item shapes as `/fleet/my` and `/fleet/planista`; `stats` and
  * `stojaceList` are the dyspozytor-specific extras.
  *
- * Scope is server-side: the API filters vehicles to
- * `Vehicle.dispatcherId === user.sub` and derives drivers/trailers from the
- * owning carriers — there is no client filter param (matching the delegations
- * scope, which is also JWT-driven).
+ * Scope is server-side: the API filters vehicles to the dyspozytor's TEAM
+ * (`Vehicle.dispatchTeamId === user.teamId`; Phase 11) and derives
+ * drivers/trailers from the owning carriers — there is no client filter param
+ * (matching the delegations scope, which is also JWT-driven). A dyspozytor
+ * with NO team gets an empty fleet (explicit empty set, never "all").
  */
 export const DyspozytorFleetResponseSchema = z.object({
   vehicles: z.array(VehicleListItemSchema),

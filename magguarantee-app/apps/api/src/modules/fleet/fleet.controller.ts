@@ -74,10 +74,11 @@ export class FleetController {
 
   /**
    * Read-only fleet view + KPI stats + idle-vehicle list for the dyspozytor
-   * panel. Dyspozytor callers see only vehicles where
-   * `Vehicle.dispatcherId === user.sub` plus the drivers/trailers of the owning
-   * carriers; admin callers get the debug all-vehicles fallback. Scope is
-   * server-side (JWT-driven). See `FleetService.getDyspozytorFleet`.
+   * panel. Phase 11 — dyspozytor callers see only vehicles of THEIR dispatch
+   * team (`Vehicle.dispatchTeamId === user.teamId`) plus the drivers/trailers
+   * of the owning carriers; a dyspozytor with no team sees an empty fleet;
+   * admin callers get the debug all-vehicles fallback. Scope is server-side
+   * (JWT-driven). See `FleetService.getDyspozytorFleet`.
    */
   @Get('dyspozytor')
   @Roles('dyspozytor', 'admin')

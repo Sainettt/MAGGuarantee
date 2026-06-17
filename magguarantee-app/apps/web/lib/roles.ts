@@ -72,6 +72,10 @@ export const ROLE_ALLOWED_PREFIXES: Record<Role, readonly string[]> = {
  */
 export const ADMIN_ONLY_EMPLOYEE_PREFIXES: readonly string[] = [
   '/employee/trailer-types',
+  // Phase 11 — admin «Zespoły prowadzące» (dispatch-team CRUD). Lives under the
+  // `(admin)` route group; this entry bounces non-admin direct-URL nav at the
+  // edge (docs/03-roles.md — only admin manages catalogs/teams).
+  '/employee/teams',
   // Phase 4.5 — admin ops surfaces (users CRUD shipped in 4.4; limits / audit
   // / diagnostics added in 4.5). Each renders behind the `(admin)` layout
   // guard too, but middleware needs the same allow-list so direct-URL

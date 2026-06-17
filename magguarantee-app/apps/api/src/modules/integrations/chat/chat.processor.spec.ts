@@ -23,8 +23,9 @@ function fullCtx(): WyjazdMessageContext {
     returnCountry: 'DE',
     returnPostalCode: '10115',
     planista: 'Anna Planista',
-    dyspozytor: 'Bartek Dyspozytor',
-    weryfikator: 'Celina Weryfikator',
+    // Phase 11 — the dispatch team's roster (was a single dyspozytor +
+    // weryfikator).
+    dyspozytorzy: ['Bartek Dyspozytor', 'Celina Dyspozytor'],
     opiekun: 'Damian Opiekun',
   };
 }

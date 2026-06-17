@@ -129,8 +129,8 @@ export class VehiclesController {
   /**
    * Read-only km-report (Phase 7 REWORK #3 + §7.8 "my vehicles km" tab) — same
    * weekly grid, scoped by role SERVER-SIDE (resolved in the service from the
-   * JWT, never a client param): planista → own `plannerId`; dyspozytor → own
-   * `dispatcherId`; przewoznik → their OWN carrier; opiekun → the carriers they
+   * JWT, never a client param): planista → own `plannerId`; dyspozytor → their
+   * `dispatchTeamId` (Phase 11); przewoznik → their OWN carrier; opiekun → the carriers they
    * supervise; eksport / admin / weryfikator → all. The drove-only narrowing is
    * preserved for planista/dyspozytor/eksport/admin/weryfikator; przewoznik /
    * opiekun see their FULL fleet incl. non-driving vehicles (service-derived

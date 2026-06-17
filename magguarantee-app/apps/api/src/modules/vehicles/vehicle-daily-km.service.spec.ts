@@ -30,8 +30,20 @@ import {
 const VEHICLE_ID = 'veh-1';
 const WER_SUB = 'wer-1';
 
-function auth(role: AuthUser['role'], sub: string): AuthUser {
-  return { sub, login: 'actor', email: 'actor@magtrans.eu', name: 'Actor', role, mustChangePassword: false };
+function auth(
+  role: AuthUser['role'],
+  sub: string,
+  teamId: string | null = 'team-1',
+): AuthUser {
+  return {
+    sub,
+    login: 'actor',
+    email: 'actor@magtrans.eu',
+    name: 'Actor',
+    role,
+    mustChangePassword: false,
+    teamId,
+  };
 }
 
 function kmRow(overrides: Partial<VehicleDailyKmRow> = {}): VehicleDailyKmRow {
@@ -536,7 +548,7 @@ describe('VehicleDailyKmService.getReport', () => {
     });
   });
 
-  it('dyspozytor: scoped by dispatcherId, only vehicles that drove', async () => {
+  it('dyspozytor: scoped by dispatchTeamId (Phase 11), only vehicles that drove', async () => {
     const { service, listActiveForBoardSpy } = makeService({
       boardVehicles: [boardVehicle({ id: 'veh-A' })],
       droveIds: new Set(['veh-A']),
@@ -544,11 +556,27 @@ describe('VehicleDailyKmService.getReport', () => {
     });
     const out = await service.getReport(
       { from: '2026-06-08' },
-      auth('dyspozytor', 'disp-1'),
+      auth('dyspozytor', 'disp-1', 'team-1'),
     );
     expect(out.items.map((i) => i.id)).toEqual(['veh-A']);
     expect(listActiveForBoardSpy).toHaveBeenCalledWith({
-      dispatcherId: 'disp-1',
+      dispatchTeamId: 'team-1',
+      includeIdle: false,
+    });
+  });
+
+  it('dyspozytor with NO team: empty board (sentinel scope, never "all")', async () => {
+    const { service, listActiveForBoardSpy } = makeService({
+      boardVehicles: [],
+      droveIds: new Set(),
+    });
+    const out = await service.getReport(
+      { from: '2026-06-08' },
+      auth('dyspozytor', 'disp-noteam', null),
+    );
+    expect(out.items).toEqual([]);
+    expect(listActiveForBoardSpy).toHaveBeenCalledWith({
+      dispatchTeamId: '__no_dispatch_team__',
       includeIdle: false,
     });
   });

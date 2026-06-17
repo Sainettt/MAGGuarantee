@@ -27,6 +27,7 @@ import {
   type VehicleDailyKmRow,
 } from './vehicle-daily-km.repository';
 import {
+  NO_TEAM_SENTINEL,
   VehiclesRepository,
   type VehicleBoardRow,
   type VehicleBoardScope,
@@ -193,7 +194,8 @@ export class VehicleDailyKmService {
   /**
    * Read-only km-report — same weekly grid, scoped to the caller's role
    * (`_resolveReportScope`, server-side from the JWT — no client param):
-   *   planista → `plannerId`; dyspozytor → `dispatcherId`;
+   *   planista → `plannerId`; dyspozytor → `dispatchTeamId` (Phase 11 — their
+   *   team; no team → empty board via the sentinel);
    *   przewoznik → their OWN `carrierId`; opiekun → their supervised
    *   `carrierIds`; eksport / admin / weryfikator → all.
    *
@@ -247,7 +249,7 @@ export class VehicleDailyKmService {
    * set). Empty-set scopes (opiekun supervising nobody) flow through as an
    * empty `carrierIds`, which the repo turns into an empty board.
    *
-   *   planista → `{ plannerId }`        dyspozytor → `{ dispatcherId }`
+   *   planista → `{ plannerId }`        dyspozytor → `{ dispatchTeamId }`
    *   przewoznik → `{ carrierId }`      opiekun → `{ carrierIds }`
    *   eksport / admin / weryfikator → `{}` (all)
    *
@@ -261,7 +263,12 @@ export class VehicleDailyKmService {
       case 'planista':
         return { plannerId: user.sub, includeIdle: false };
       case 'dyspozytor':
-        return { dispatcherId: user.sub, includeIdle: false };
+        // Phase 11 — scope by the dyspozytor's TEAM. No team → empty board
+        // (sentinel → 0 rows in listActiveForBoard), never "all".
+        return {
+          dispatchTeamId: user.teamId ?? NO_TEAM_SENTINEL,
+          includeIdle: false,
+        };
       case 'eksport':
       case 'admin':
       case 'weryfikator':

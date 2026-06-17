@@ -25,6 +25,7 @@ function makeUser(overrides: Partial<UserRow> = {}): UserRow {
     name: 'Jan',
     active: true,
     liderEmail: null,
+    teamId: null,
     mustChangePassword: false,
     passwordChangedAt: null,
     failedAttempts: 0,

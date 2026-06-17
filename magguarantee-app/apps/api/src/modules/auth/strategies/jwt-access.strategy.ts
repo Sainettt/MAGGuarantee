@@ -63,6 +63,10 @@ export class JwtAccessStrategy extends PassportStrategy(Strategy, 'jwt') {
       // stale snapshot after an admin reset). The web gate reads the token
       // claim for edge speed, but /auth/me + guards trust this DB-sourced flag.
       mustChangePassword: user.mustChangePassword,
+      // Phase 11 — dispatch-team scope resolved from the DB (NOT the JWT
+      // payload), same pattern as mustChangePassword. Null for non-dyspozytor
+      // roles and for an unassigned dyspozytor → empty fleet/km scope.
+      teamId: user.teamId,
     };
   }
 }

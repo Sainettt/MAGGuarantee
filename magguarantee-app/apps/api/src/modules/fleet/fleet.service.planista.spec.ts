@@ -56,8 +56,8 @@ function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {
     lastDroveAt: null,
     plannerId: 'plan-self',
     planner: { id: 'plan-self', login: 'plan', name: 'Planner One' },
-    dispatcherId: null,
-    dispatcher: null,
+    dispatchTeamId: null,
+    dispatchTeam: null,
     carrier: { id: 'c-1', login: 'pwz1', name: 'Pwz One' },
     attachments: [],
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -345,6 +345,15 @@ describe('FleetService.getPlanistaFleet — plannerId scoping', () => {
           fr: true,
           lastDroveAt: new Date('2026-05-20T10:00:00.000Z'),
           notes: 'serwis co 30 tys.',
+          // Phase 11 — dispatch team with roster flows through to the slim item.
+          dispatchTeamId: 'team-1',
+          dispatchTeam: {
+            id: 'team-1',
+            code: '1.1.13',
+            name: 'Zespół 1.1.13',
+            active: true,
+            dispatchers: [{ id: 'd-1', login: 'd1', name: 'Disp One' }],
+          },
           // Rate fields are on the row but MUST NOT appear in the slim item.
           rateDe: 1.1,
           rateUe: 1.2,
@@ -376,6 +385,13 @@ describe('FleetService.getPlanistaFleet — plannerId scoping', () => {
       fr: true,
       lastDroveAt: '2026-05-20T10:00:00.000Z',
       notes: 'serwis co 30 tys.',
+      dispatchTeam: {
+        id: 'team-1',
+        code: '1.1.13',
+        name: 'Zespół 1.1.13',
+        active: true,
+        dispatchers: [{ id: 'd-1', login: 'd1', name: 'Disp One' }],
+      },
     });
     // HARD EXCLUSION (§6.4.2): no rate fields ever reach planista/dyspozytor.
     const item = out.vehicles[0] as Record<string, unknown>;

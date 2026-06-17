@@ -5,6 +5,7 @@ import {
   LookupUserAdminFiltersSchema,
   type LookupCarrierFilters,
   type LookupCarrierListDto,
+  type LookupTeamListDto,
   type LookupUserAdminFilters,
   type LookupUserAdminListDto,
   type LookupUserListDto,
@@ -48,6 +49,17 @@ export class LookupsController {
   @Get('opiekuni')
   opiekuni(): Promise<LookupUserListDto> {
     return this.lookups.opiekuni();
+  }
+
+  /**
+   * Dispatch-teams picker (Phase 11) per docs/13-api-design.md#lookups. Returns
+   * every team with its dispatcher roster (incl. each member's `active` flag)
+   * so the web vehicle-form renders a member preview without an N+1. Read-only,
+   * any authenticated user (team composition is non-sensitive — no rates).
+   */
+  @Get('teams')
+  teams(): Promise<LookupTeamListDto> {
+    return this.lookups.teamsList();
   }
 
   /**

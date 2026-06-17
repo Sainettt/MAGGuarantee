@@ -224,6 +224,21 @@ soft-delete'ятся (объект в MinIO остаётся).
 ограниченный набором EU-27 + GB + NO + CH (`EUROPEAN_COUNTRY_CODES` в
 `@magguarantee/shared`).
 
+**Dispatch team (Phase 11).** Поле `dispatcherId` удалено — машина теперь
+ссылается на команду через `dispatchTeamId` (nullable). В create/update —
+скалярное поле `dispatchTeamId` (UUID, optional/nullable); сервис требует, чтобы
+команда **существовала и была активна** (иначе 422). В response:
+- полный `VehicleDto` (admin/opiekun) несёт `dispatchTeamId: string | null` и
+  `dispatchTeam: { id, code, name, active, dispatchers: [{ id, name, login }] } | null`;
+- slim `VehicleListItem` / fleet-list-item (дисп-панель, `FleetVehicleDetailModal`)
+  additive-расширены тем же `dispatchTeam` (non-sensitive — без ставок, без нового
+  эндпоинта).
+
+**Scope диспетчера (Phase 11).** `GET /vehicles` (list), `GET /vehicles/km-report`,
+`GET /fleet/dyspozytor`, `GET /delegations`, GPS — для роли `dyspozytor`
+скопируются по **команде** (`Vehicle.dispatchTeamId === AuthUser.teamId`), а не
+по `user.sub`. Диспетчер **без команды** видит пустой набор.
+
 ### Drivers — `/api/v1/drivers`
 
 > Роль: `admin` (все), `opiekun` (свои), `przewoznik` (свои — **read-only**: GET list/detail only, никаких write). **Не `pracownik`.** Enforcement: все mutating-эндпоинты (POST/PATCH/deactivate/reactivate/DELETE) — `@Roles('admin', 'opiekun')`; GET-эндпоинты — `@Roles('admin', 'opiekun', 'przewoznik')`. Перевозчик водителей не редактирует — carrier-панель render-ит их read-only (consistent с trailers). См. `apps/api/src/modules/drivers/drivers.controller.ts`.
@@ -262,6 +277,26 @@ soft-delete'ятся (объект в MinIO остаётся).
 | POST `/trailer-types` | `addNaczepaTyp` |
 | PATCH `/trailer-types/:id` | (новое) |
 | POST `/trailer-types/:id/deactivate` | `toggleNaczepaTypActive` |
+
+### Teams (admin only) — `/api/v1/teams`
+
+> **Phase 11.** A `Team` is a numbered dispatch team (code like `1.1.13`) that a vehicle is assigned to (`Vehicle.dispatchTeamId`). It replaces the legacy single `Vehicle.dispatcherId` FK — a vehicle now belongs to a whole team, and every dispatcher in the team (usually 2 by shift) sees it through team membership. The catalog is an explicit replacement for the external "raport DAF" Excel.
+>
+> `Team` uses an `active` flag (NOT a `deletedAt` soft-delete). All endpoints are **admin-only** (`@Roles('admin')` + `RolesGuard`). Every mutating endpoint is audited (`@Audit`).
+
+| Method + Path | Назначение | Роль |
+|---|---|---|
+| GET `/teams?active=&q=` | Список команд с составом (`dispatchers: [{ id, name, login }]`) + `vehicleCount` | admin |
+| GET `/teams/:id` | Деталь команды | admin |
+| POST `/teams` | Создать. Body `{ code, name?, active?, dispatcherIds?[] }`. `code` валидируется регексом `^\d+\.\d+\.\d+$` (ровно 3 числовых сегмента); unique → **409**. Каждый `dispatcherId` должен быть активным `dyspozytor` (иначе **422**). Назначение диспетчера, уже состоящего в другой команде, — **молчаливый перенос** (просто перетирает `User.teamId`), без 422. | admin |
+| PATCH `/teams/:id` | Обновить `{ code?, name?, active?, dispatcherIds?[] }`. Если `dispatcherIds` присутствует — **полная замена** состава (не указанные открепляются, указанные прикрепляются). Дубликат `code` → **409**. | admin |
+| POST `/teams/:id/deactivate` | `active=false` (вывод из эксплуатации команды, на которую ссылаются машины/диспетчеры). 409 если уже неактивна. | admin |
+| POST `/teams/:id/reactivate` | `active=true`. 409 если уже активна. | admin |
+| DELETE `/teams/:id` | **Hard-delete, защищённый**: **409**, если на команду ссылаются машины (`Vehicle.dispatchTeamId`) ИЛИ диспетчеры (`User.teamId`). Для вывода из эксплуатации использовать `deactivate`. Без `reason`-body. | admin |
+
+**`teamId` в JWT.** Не кладётся в JWT-payload — резолвится из БД в `JwtAccessStrategy.validate` (как `mustChangePassword`) и кладётся в `AuthUser.teamId`. Драйвит scope диспетчера в fleet / km-report / delegations / GPS. **Диспетчер без `teamId` → пустой набор** (явно, sentinel `__no_dispatch_team__` → 0 строк; никогда не «все»).
+
+**Team DTO** (admin CRUD): `{ id, code, name, active, dispatchers: [{ id, name, login }], vehicleCount, createdAt, updatedAt }`.
 
 ### Claims (wnioski) — `/api/v1/claims`
 
@@ -348,10 +383,11 @@ DB CHECK enforces `returnCountry` length 2..8 (covers `EL`) and `returnPostalCod
 
 | Method + Path | GAS |
 |---|---|
-| GET `/lookups/dyspozytor` | `getDyspozytorList` |
+| GET `/lookups/dyspozytor` | `getDyspozytorList` (нужен для назначения диспетчеров в команды) |
 | GET `/lookups/planisci` | `getPlannerList` |
 | GET `/lookups/opiekuni` | `getOpiekunList` |
 | GET `/lookups/trailer-types` | `getNaczepyTypyList` (alias) |
+| GET `/lookups/teams` | (Phase 11) — команды с составом для дропдауна формы машины. Отдаёт `[{ id, code, name, active, dispatchers: [{ id, name, login, active }] }]` (включает `active` диспетчера — веб рисует preview состава без N+1). Read-only, любой залогиненный (состав команды non-sensitive — без ставок). |
 
 ### External integrations — `/api/v1/integrations`
 

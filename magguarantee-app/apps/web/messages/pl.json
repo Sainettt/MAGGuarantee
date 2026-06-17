@@ -54,7 +54,8 @@
       "vehicle": "pojazd",
       "driver": "kierowca",
       "trailer": "naczepa",
-      "trailerType": "typ naczepy"
+      "trailerType": "typ naczepy",
+      "team": "zespół prowadzący"
     }
   },
   "users": {
@@ -254,6 +255,7 @@
     "drivers": "Kierowcy",
     "trailers": "Naczepy",
     "trailerTypes": "Typy naczep",
+    "teams": "Zespoły prowadzące",
     "delegations": "Wyjazdy",
     "limits": "Limity",
     "users": "Użytkownicy",
@@ -480,7 +482,7 @@
       "euro": "Norma EURO",
       "certificateL": "Certyfikat L",
       "planner": "Planista",
-      "dispatcher": "Dyspozytor",
+      "dispatchTeam": "Zespół prowadzący",
       "gps": "GPS",
       "gpsMobilePhone": "Numer GPS",
       "fuelCard": "Karta paliwowa",
@@ -623,6 +625,51 @@
       "shortCode": "Skrót",
       "description": "Opis",
       "active": "Aktywny"
+    }
+  },
+  "team": {
+    "emptyMembers": "Brak dyspozytorów w zespole",
+    "noTeam": "Brak zespołu prowadzącego",
+    "inactiveBadge": "Nieaktywny",
+    "leadingTeamHeader": "ZESPÓŁ PROWADZĄCY",
+    "codeAria": "Kod zespołu: {code}",
+    "membersAria": "Dyspozytorzy zespołu {code}"
+  },
+  "teams": {
+    "title": "Zespoły prowadzące",
+    "subtitle": "Numerowane zespoły dyspozytorów, do których przypisywane są pojazdy.",
+    "newTeam": "Nowy zespół",
+    "editTeam": "Edytuj zespół",
+    "emptyTitle": "Brak zespołów",
+    "emptyMessage": "Nie zdefiniowano jeszcze żadnego zespołu prowadzącego.",
+    "emptyFiltered": {
+      "title": "Brak wyników",
+      "message": "Brak zespołów spełniających wyszukiwanie."
+    },
+    "filters": {
+      "searchPlaceholder": "Szukaj kodu lub nazwy"
+    },
+    "fields": {
+      "code": "Kod",
+      "codeHint": "Format N.N.N, np. 1.1.13",
+      "name": "Nazwa",
+      "dispatchers": "Dyspozytorzy",
+      "dispatchersHint": "Dyspozytorzy widzą pojazdy przypisane do tego zespołu.",
+      "dispatchersPlaceholder": "Wybierz dyspozytorów…",
+      "dispatchersEmpty": "Nie znaleziono dyspozytora",
+      "dispatchersSelected": "Dyspozytorzy, wybrano {count}",
+      "vehicleCount": "Pojazdy",
+      "active": "Aktywny"
+    },
+    "actions": {
+      "deactivate": "Dezaktywuj",
+      "reactivate": "Aktywuj"
+    },
+    "confirmToggle": {
+      "deactivateTitle": "Dezaktywować zespół?",
+      "deactivateBody": "Zespół {code} nie będzie dostępny do przypisania, ale dane pozostaną w systemie.",
+      "reactivateTitle": "Aktywować zespół?",
+      "reactivateBody": "Zespół {code} ponownie będzie dostępny do przypisania."
     }
   },
   "validation": {

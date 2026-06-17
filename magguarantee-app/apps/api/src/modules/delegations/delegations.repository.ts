@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 
-import type { DelegationStatus } from '@magguarantee/shared';
+import type {
+  DelegationStatus,
+  VehicleDispatchTeamDto,
+} from '@magguarantee/shared';
 
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -21,16 +24,23 @@ export interface DelegationRow {
   id: string;
   vehicleId: string;
   /**
-   * `plannerId` / `dispatcherId` are carried for the Phase 6.4 `getOne`
-   * ownership checks (planista/dyspozytor by-id read scope). They are NOT
-   * surfaced in the wire DTO — `DelegationsService.toDto` emits only
-   * `{ id, plateNumber }` for the vehicle mini-reference.
+   * `plannerId` / `dispatchTeamId` are carried for the Phase 6.4 `getOne`
+   * ownership checks (planista/dyspozytor by-id read scope). Phase 11 swapped
+   * the single `dispatcherId` for the team FK `dispatchTeamId`. Those two are
+   * NOT surfaced in the wire DTO — they are stripped at the DTO boundary.
+   *
+   * Phase 11 Шаг D (additive) — `dispatchTeam` is resolved LIVE from
+   * `Vehicle.dispatchTeam` (NOT a snapshot) and IS surfaced on the vehicle
+   * mini-reference in the wire DTO. Same shape the VehicleDto/VehicleListItem
+   * already emit (`VehicleDispatchTeamDto`). NON-SENSITIVE (no rates). `null`
+   * when the vehicle is not assigned to any team.
    */
   vehicle: {
     id: string;
     plateNumber: string;
     plannerId: string | null;
-    dispatcherId: string | null;
+    dispatchTeamId: string | null;
+    dispatchTeam: VehicleDispatchTeamDto | null;
   } | null;
   trailerId: string;
   trailer: { id: string; plateNumber: string } | null;
@@ -89,14 +99,16 @@ export interface DelegationListFilters {
   vehicleId?: string;
   driverId?: string;
   /**
-   * Phase 6.2 dyspozytor auto-scope — restrict to delegations whose vehicle is
-   * dispatched by this user (`Delegation.vehicle.dispatcherId === dispatcherId`).
-   * Server-identity driven (never client-supplied); the service sets it from
-   * the JWT `sub`. Translated to a relation filter `vehicle: { dispatcherId }`
-   * (the `@@index([vehicleId, status])` plus the `Vehicle.dispatcherId` index
-   * keep this narrow). Composes with the scalar filters above.
+   * Phase 11 dyspozytor auto-scope — restrict to delegations whose vehicle is
+   * assigned to the dyspozytor's TEAM
+   * (`Delegation.vehicle.dispatchTeamId === dispatchTeamId`). Server-identity
+   * driven (never client-supplied); the service sets it from the JWT `teamId`.
+   * Translated to a relation filter `vehicle: { dispatchTeamId }` (the
+   * `Vehicle.dispatchTeamId` index keeps the join narrow). A dyspozytor with NO
+   * team passes the NO_TEAM_SENTINEL → 0 rows. Composes with the scalar filters
+   * above. (Was `dispatcherId` pre-Phase 11.)
    */
-  dispatcherId?: string;
+  dispatchTeamId?: string;
   /**
    * Phase 6.4 planista auto-scope — restrict to delegations whose vehicle is
    * planned by this user (`Delegation.vehicle.plannerId === plannerId`).
@@ -179,12 +191,14 @@ export class DelegationsRepository {
     if (filters.vehicleId) where.vehicleId = filters.vehicleId;
     if (filters.driverId) where.driverId = filters.driverId;
     // Dyspozytor / planista auto-scope — relation filters so the FK indexes on
-    // `Vehicle.dispatcherId` / `Vehicle.plannerId` narrow the join instead of a
-    // client-side pass. If both are set (not currently sent together — the
+    // `Vehicle.dispatchTeamId` / `Vehicle.plannerId` narrow the join instead of
+    // a client-side pass. If both are set (not currently sent together — the
     // service injects exactly one) they AND under the same `vehicle` relation.
-    if (filters.dispatcherId || filters.plannerId) {
+    if (filters.dispatchTeamId || filters.plannerId) {
       where.vehicle = {
-        ...(filters.dispatcherId ? { dispatcherId: filters.dispatcherId } : {}),
+        ...(filters.dispatchTeamId
+          ? { dispatchTeamId: filters.dispatchTeamId }
+          : {}),
         ...(filters.plannerId ? { plannerId: filters.plannerId } : {}),
       };
     }
@@ -260,14 +274,29 @@ export class DelegationsRepository {
 
   private includeShape() {
     return {
-      // `plannerId` / `dispatcherId` feed the Phase 6.4 `getOne` ownership
+      // `plannerId` / `dispatchTeamId` feed the Phase 6.4/11 `getOne` ownership
       // checks (planista/dyspozytor); they are stripped at the DTO boundary.
+      // Phase 11 Шаг D — `dispatchTeam` (live, with its dispatcher roster) IS
+      // surfaced on the vehicle mini. Same select the vehicles repo uses so the
+      // shape stays in lockstep (NON-SENSITIVE: no rates).
       vehicle: {
         select: {
           id: true,
           plateNumber: true,
           plannerId: true,
-          dispatcherId: true,
+          dispatchTeamId: true,
+          dispatchTeam: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              active: true,
+              dispatchers: {
+                select: { id: true, name: true, login: true },
+                orderBy: { login: 'asc' as const },
+              },
+            },
+          },
         },
       },
       trailer: { select: { id: true, plateNumber: true } },
@@ -287,7 +316,31 @@ export class DelegationsRepository {
     return {
       id: row.id,
       vehicleId: row.vehicleId,
-      vehicle: row.vehicle ?? null,
+      vehicle: row.vehicle
+        ? {
+            id: row.vehicle.id,
+            plateNumber: row.vehicle.plateNumber,
+            plannerId: row.vehicle.plannerId,
+            dispatchTeamId: row.vehicle.dispatchTeamId,
+            // Phase 11 Шаг D — live dispatch team, normalised to the shared
+            // `VehicleDispatchTeamDto` shape (same map the vehicles repo runs).
+            dispatchTeam: row.vehicle.dispatchTeam
+              ? {
+                  id: row.vehicle.dispatchTeam.id,
+                  code: row.vehicle.dispatchTeam.code,
+                  name: row.vehicle.dispatchTeam.name,
+                  active: row.vehicle.dispatchTeam.active,
+                  dispatchers: (
+                    row.vehicle.dispatchTeam.dispatchers ?? []
+                  ).map((d) => ({
+                    id: d.id,
+                    name: d.name,
+                    login: d.login,
+                  })),
+                }
+              : null,
+          }
+        : null,
       trailerId: row.trailerId,
       trailer: row.trailer ?? null,
       driverId: row.driverId,
@@ -331,7 +384,14 @@ interface DelegationPrismaShape {
     id: string;
     plateNumber: string;
     plannerId: string | null;
-    dispatcherId: string | null;
+    dispatchTeamId: string | null;
+    dispatchTeam?: {
+      id: string;
+      code: string;
+      name: string | null;
+      active: boolean;
+      dispatchers?: { id: string; name: string | null; login: string }[];
+    } | null;
   } | null;
   trailerId: string;
   trailer?: { id: string; plateNumber: string } | null;

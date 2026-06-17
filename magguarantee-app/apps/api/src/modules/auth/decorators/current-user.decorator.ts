@@ -16,6 +16,16 @@ export interface AuthUser {
   // user has a valid session but must set a new password. DB-sourced — see
   // JwtAccessStrategy.validate.
   mustChangePassword: boolean;
+  // Phase 11 — the dispatch team this user belongs to (role=dyspozytor only;
+  // null for every other role / an unassigned dyspozytor). Resolved from the DB
+  // in JwtAccessStrategy.validate (like mustChangePassword), NOT carried in the
+  // JWT payload. A dyspozytor with teamId null/undefined sees an EMPTY
+  // fleet/km/delegation scope (explicit empty set, never "all").
+  //
+  // Optional on the type (test fixtures / non-strategy callers may omit it);
+  // the strategy ALWAYS sets it. Scope code treats `undefined` and `null`
+  // identically — both mean "no team" → empty set.
+  teamId?: string | null;
   jti?: string; // present only on refresh tokens
 }
 

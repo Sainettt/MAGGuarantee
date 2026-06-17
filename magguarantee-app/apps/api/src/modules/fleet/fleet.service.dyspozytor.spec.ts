@@ -18,8 +18,20 @@ import { FleetService } from './fleet.service';
 const NOW = new Date('2026-05-27T12:00:00.000Z');
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function makeAuth(role: AuthUser['role'], sub = 'dys-self'): AuthUser {
-  return { sub, login: 'actor', email: 'actor@magtrans.eu', name: 'Actor', role, mustChangePassword: false };
+function makeAuth(
+  role: AuthUser['role'],
+  sub = 'dys-self',
+  teamId: string | null = 'team-1',
+): AuthUser {
+  return {
+    sub,
+    login: 'actor',
+    email: 'actor@magtrans.eu',
+    name: 'Actor',
+    role,
+    mustChangePassword: false,
+    teamId,
+  };
 }
 
 function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {
@@ -52,8 +64,14 @@ function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {
     lastDroveAt: null,
     plannerId: 'plan-1',
     planner: { id: 'plan-1', login: 'plan', name: 'Planner One' },
-    dispatcherId: 'dys-self',
-    dispatcher: { id: 'dys-self', login: 'dys', name: 'Dispatcher One' },
+    dispatchTeamId: 'team-1',
+    dispatchTeam: {
+      id: 'team-1',
+      code: '1.1.13',
+      name: 'Zespół 1.1.13',
+      active: true,
+      dispatchers: [{ id: 'dys-self', login: 'dys', name: 'Dispatcher One' }],
+    },
     carrier: { id: 'c-1', login: 'pwz1', name: 'Pwz One' },
     attachments: [],
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -122,8 +140,8 @@ function stubVehiclesRepo(
   return {
     list: jest.fn(async (filters: VehicleListFilters) => {
       if (captured) captured.value = filters;
-      if (filters.dispatcherId !== undefined) {
-        return seed.filter((v) => v.dispatcherId === filters.dispatcherId);
+      if (filters.dispatchTeamId !== undefined) {
+        return seed.filter((v) => v.dispatchTeamId === filters.dispatchTeamId);
       }
       return [...seed];
     }),
@@ -205,13 +223,13 @@ describe('FleetService.getDyspozytorFleet — role gating', () => {
   });
 });
 
-describe('FleetService.getDyspozytorFleet — dispatcherId scoping', () => {
-  it('forwards dispatcherId=user.sub and returns only own vehicles', async () => {
+describe('FleetService.getDyspozytorFleet — dispatchTeamId scoping (Phase 11)', () => {
+  it('forwards dispatchTeamId=user.teamId and returns only the team vehicles', async () => {
     const captured: { value?: VehicleListFilters } = {};
     const svc = newSvc({
       vehicles: [
-        makeVehicle({ id: 'v-mine', dispatcherId: 'dys-self', carrierId: 'c-1' }),
-        makeVehicle({ id: 'v-other', dispatcherId: 'dys-other', carrierId: 'c-2' }),
+        makeVehicle({ id: 'v-mine', dispatchTeamId: 'team-1', carrierId: 'c-1' }),
+        makeVehicle({ id: 'v-other', dispatchTeamId: 'team-2', carrierId: 'c-2' }),
       ],
       drivers: [
         makeDriver({ id: 'd-1', carrierId: 'c-1' }),
@@ -219,34 +237,68 @@ describe('FleetService.getDyspozytorFleet — dispatcherId scoping', () => {
       ],
       capturedVehicles: captured,
     });
-    const out = await svc.getDyspozytorFleet(makeAuth('dyspozytor', 'dys-self'));
-    expect(captured.value?.dispatcherId).toBe('dys-self');
+    const out = await svc.getDyspozytorFleet(
+      makeAuth('dyspozytor', 'dys-self', 'team-1'),
+    );
+    expect(captured.value?.dispatchTeamId).toBe('team-1');
     expect(out.vehicles.map((v) => v.id)).toEqual(['v-mine']);
     expect(out.drivers.map((d) => d.id)).toEqual(['d-1']);
   });
 
-  it('admin sees all vehicles (no dispatcherId scope)', async () => {
+  it('admin sees all vehicles (no dispatchTeamId scope)', async () => {
     const captured: { value?: VehicleListFilters } = {};
     const svc = newSvc({
       vehicles: [
-        makeVehicle({ id: 'v-1', dispatcherId: 'dys-a', carrierId: 'c-1' }),
-        makeVehicle({ id: 'v-2', dispatcherId: 'dys-b', carrierId: 'c-2' }),
+        makeVehicle({ id: 'v-1', dispatchTeamId: 'team-a', carrierId: 'c-1' }),
+        makeVehicle({ id: 'v-2', dispatchTeamId: 'team-b', carrierId: 'c-2' }),
       ],
       capturedVehicles: captured,
     });
     const out = await svc.getDyspozytorFleet(makeAuth('admin', 'admin-1'));
-    expect(captured.value?.dispatcherId).toBeUndefined();
+    expect(captured.value?.dispatchTeamId).toBeUndefined();
     expect(out.vehicles).toHaveLength(2);
   });
 
-  it('returns empty payload + zeroed stats when no vehicles', async () => {
+  it('a dyspozytor with NO team gets an empty payload (no query, never "all")', async () => {
+    const captured: { value?: VehicleListFilters } = {};
+    const svc = newSvc({
+      // Seed vehicles that WOULD be returned if the scope leaked to "all".
+      vehicles: [
+        makeVehicle({ id: 'v-x', dispatchTeamId: 'team-1', carrierId: 'c-1' }),
+      ],
+      drivers: [makeDriver({ id: 'd-1', carrierId: 'c-1' })],
+      capturedVehicles: captured,
+    });
+    const out = await svc.getDyspozytorFleet(
+      makeAuth('dyspozytor', 'dys-noteam', null),
+    );
+    expect(out.vehicles).toEqual([]);
+    expect(out.drivers).toEqual([]);
+    expect(out.trailers).toEqual([]);
+    expect(out.stojaceList).toEqual([]);
+    expect(out.stats).toEqual({
+      liczbaAut: 0,
+      autaAktywne: 0,
+      autaJezdzace: 0,
+      autaStojace7dni: 0,
+      autaNieaktywne: 0,
+      liczbaKierowcow: 0,
+      liczbaNaczep: 0,
+    });
+    // Early return — no vehicle query was issued.
+    expect(captured.value).toBeUndefined();
+  });
+
+  it('returns empty payload + zeroed stats when the team has no vehicles', async () => {
     const svc = newSvc({
       vehicles: [
-        makeVehicle({ id: 'v-other', dispatcherId: 'someone-else', carrierId: 'c-1' }),
+        makeVehicle({ id: 'v-other', dispatchTeamId: 'team-other', carrierId: 'c-1' }),
       ],
       drivers: [makeDriver({ id: 'd-1', carrierId: 'c-1' })],
     });
-    const out = await svc.getDyspozytorFleet(makeAuth('dyspozytor', 'dys-empty'));
+    const out = await svc.getDyspozytorFleet(
+      makeAuth('dyspozytor', 'dys-self', 'team-empty'),
+    );
     expect(out.vehicles).toEqual([]);
     expect(out.drivers).toEqual([]);
     expect(out.trailers).toEqual([]);

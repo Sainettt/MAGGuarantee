@@ -14,13 +14,15 @@ export type BuildResult = WyjazdMessageContext | null;
 /**
  * Assembles the `WyjazdMessageContext` consumed by `formatWyjazdMessage`.
  *
- * Data sources (locked brief / docs/16-jobs-and-integrations.md):
- *   - planista     = `Vehicle.planner.name`   (may be null → omitted)
- *   - dyspozytor   = `Vehicle.dispatcher.name`(may be null → omitted)
- *   - weryfikator  = the SINGLE active `User` with role `weryfikator`
- *                    (NOT per-vehicle). 0 → omit. >1 → use the first + warn.
- *   - opiekun      = `Carrier.opiekun.name`   (null → `—`, handled by the
- *                    formatter)
+ * Data sources (Phase 11 rework / docs/16-jobs-and-integrations.md):
+ *   - planista     = `Vehicle.planner.name`                  (may be null → omitted)
+ *   - dyspozytorzy = `Vehicle.dispatchTeam.dispatchers[].name`(all names of the
+ *                    dispatch TEAM; may be empty → omitted; blanks dropped)
+ *   - opiekun      = `Carrier.opiekun.name`                  (null → `—`, handled
+ *                    by the formatter)
+ *
+ * The legacy `weryfikator` slot was REMOVED — the role is no longer per-wyjazd,
+ * so there is no weryfikator lookup here anymore.
  */
 @Injectable()
 export class ChatContextBuilder {
@@ -38,8 +40,6 @@ export class ChatContextBuilder {
       return null;
     }
 
-    const weryfikator = await this._resolveWeryfikator();
-
     return {
       departureAt: row.departureAt,
       departureCountry: row.departureCountry,
@@ -48,26 +48,8 @@ export class ChatContextBuilder {
       returnCountry: row.returnCountry,
       returnPostalCode: row.returnPostalCode,
       planista: row.planistaName,
-      dyspozytor: row.dyspozytorName,
-      weryfikator,
+      dyspozytorzy: row.dyspozytorNames,
       opiekun: row.opiekunName,
     };
-  }
-
-  /**
-   * Resolve the single active weryfikator name. 0 active → `null` (omitted
-   * from the ZESPÓŁ line). >1 active → take the first AND `logger.warn` so the
-   * data-integrity anomaly is visible (the role is meant to be a singleton).
-   */
-  private async _resolveWeryfikator(): Promise<string | null> {
-    const found = await this.repo.findActiveWeryfikator();
-    if (!found) return null;
-    if (found.total > 1) {
-      this.logger.warn({
-        msg: 'multiple active weryfikator users found; using the oldest',
-        total: found.total,
-      });
-    }
-    return found.name;
   }
 }

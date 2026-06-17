@@ -2,7 +2,10 @@
 // (planista, dyspozytor, opiekun). All endpoints are read-only and accessible
 // by every authenticated user.
 
-import type { LookupUserListDto } from '@magguarantee/shared';
+import type {
+  LookupTeamListDto,
+  LookupUserListDto,
+} from '@magguarantee/shared';
 
 import { apiJson } from './client';
 
@@ -16,4 +19,13 @@ export function listDyspozytorzy(): Promise<LookupUserListDto> {
 
 export function listOpiekuni(): Promise<LookupUserListDto> {
   return apiJson<LookupUserListDto>('/lookups/opiekuni', { method: 'GET' });
+}
+
+/**
+ * Phase 11 — dispatch teams for the vehicle-form dropdown. Carries each team's
+ * dispatcher roster (with a per-dispatcher `active` flag) so the form renders a
+ * <TeamMembers> preview without a second round-trip.
+ */
+export function listTeamLookups(): Promise<LookupTeamListDto> {
+  return apiJson<LookupTeamListDto>('/lookups/teams', { method: 'GET' });
 }

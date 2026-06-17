@@ -30,6 +30,7 @@ import { OpiekunModule } from './modules/opiekun/opiekun.module';
 import { PasswordModule } from './modules/password/password.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
 import { RedisModule } from './modules/redis/redis.module';
+import { TeamsModule } from './modules/teams/teams.module';
 import { TrailerTypesModule } from './modules/trailer-types/trailer-types.module';
 import { TrailersModule } from './modules/trailers/trailers.module';
 import { UsersModule } from './modules/users/users.module';
@@ -99,6 +100,7 @@ import { VerificationSlaModule } from './modules/verification-sla/verification-s
     DriversModule,
     TrailerTypesModule,
     TrailersModule,
+    TeamsModule,
     LookupsModule,
     KmCalcModule,
     ClaimsModule,

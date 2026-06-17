@@ -6,8 +6,16 @@ import {
   type CarrierListFilters,
   type CarrierRow,
 } from '../carriers/carriers.repository';
+import { TeamsService } from '../teams/teams.service';
 import { UsersRepository, type UserRow } from '../users/users.repository';
 import { LookupsService } from './lookups.service';
+
+/** TeamsService stub — only `lookup()` is exercised by LookupsService. */
+function makeTeamsService(
+  teams: Awaited<ReturnType<TeamsService['lookup']>> = [],
+): TeamsService {
+  return { lookup: jest.fn(async () => teams) } as unknown as TeamsService;
+}
 
 const NOW = new Date('2026-05-01T10:00:00.000Z');
 
@@ -21,6 +29,7 @@ function makeUser(overrides: Partial<UserRow> = {}): UserRow {
     name: 'Name',
     active: true,
     liderEmail: null,
+    teamId: null,
     mustChangePassword: false,
     passwordChangedAt: null,
     failedAttempts: 0,
@@ -139,6 +148,7 @@ describe('LookupsService — people pickers', () => {
         weryfikator: [],
       }),
       makeCarriersRepo(),
+      makeTeamsService(),
     );
     const out = await svc.dyspozytor();
     expect(out).toEqual([
@@ -161,6 +171,7 @@ describe('LookupsService — people pickers', () => {
         weryfikator: [],
       }),
       makeCarriersRepo(),
+      makeTeamsService(),
     );
     const out = await svc.planisci();
     expect(out).toEqual([{ id: 'u-p-1', login: 'p1', name: 'Name' }]);
@@ -180,6 +191,7 @@ describe('LookupsService — people pickers', () => {
         weryfikator: [],
       }),
       makeCarriersRepo(),
+      makeTeamsService(),
     );
     const out = await svc.opiekuni();
     expect(out).toHaveLength(1);
@@ -197,6 +209,7 @@ describe('LookupsService — carriers picker (Phase 4.4)', () => {
     const svc = new LookupsService(
       makeEmptyUsersRepo(),
       makeCarriersRepo(all, captured),
+      makeTeamsService(),
     );
     const out = await svc.carriersList(makeAuth('admin'), {});
     expect(out.map((r) => r.id)).toEqual(['c-1', 'c-2']);
@@ -211,6 +224,7 @@ describe('LookupsService — carriers picker (Phase 4.4)', () => {
     const svc = new LookupsService(
       makeEmptyUsersRepo(),
       makeCarriersRepo(all),
+      makeTeamsService(),
     );
     const out = await svc.carriersList(makeAuth('pracownik'), {});
     expect(out).toHaveLength(2);
@@ -225,6 +239,7 @@ describe('LookupsService — carriers picker (Phase 4.4)', () => {
     const svc = new LookupsService(
       makeEmptyUsersRepo(),
       makeCarriersRepo(all, captured),
+      makeTeamsService(),
     );
     const out = await svc.carriersList(makeAuth('opiekun', 'op-self'), {});
     expect(out.map((r) => r.id)).toEqual(['c-1']);
@@ -238,6 +253,7 @@ describe('LookupsService — carriers picker (Phase 4.4)', () => {
       const svc = new LookupsService(
         makeEmptyUsersRepo(),
         makeCarriersRepo([]),
+        makeTeamsService(),
       );
       await expect(
         svc.carriersList(makeAuth(role), {}),
@@ -254,6 +270,7 @@ describe('LookupsService — carriers picker (Phase 4.4)', () => {
     const svc = new LookupsService(
       makeEmptyUsersRepo(),
       makeCarriersRepo(all, captured),
+      makeTeamsService(),
     );
     const out = await svc.carriersList(makeAuth('admin'), { q: 'foo' });
     expect(captured.value?.q).toBe('foo');
@@ -268,6 +285,7 @@ describe('LookupsService — carriers picker (Phase 4.4)', () => {
     const svc = new LookupsService(
       makeEmptyUsersRepo(),
       makeCarriersRepo(all),
+      makeTeamsService(),
     );
     const out = await svc.carriersList(makeAuth('admin'), {});
     expect(out).toEqual([

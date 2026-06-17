@@ -55,6 +55,7 @@ import {
   SheetTitle,
 } from '@/components/ui/Sheet';
 import { Textarea } from '@/components/ui/Textarea';
+import { TeamMembers } from '@/components/teams/TeamMembers';
 import { EntityAlreadyExistsNotice } from '@/components/carrier-onboarding/EntityAlreadyExistsNotice';
 import { TemporaryPasswordRow } from '@/components/carrier-onboarding/TemporaryPasswordRow';
 import { WizardStepper } from '@/components/carrier-onboarding/WizardStepper';
@@ -63,7 +64,7 @@ import { FormDescription, FormItem, FormLabel } from '@/components/forms/Form';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useFormDraft } from '@/lib/hooks/useFormDraft';
-import { useDyspozytorzy, usePlanisci } from '@/lib/hooks/useLookups';
+import { usePlanisci, useTeamLookups } from '@/lib/hooks/useLookups';
 import { useCreateVehicle, useUpdateVehicle } from '@/lib/hooks/useVehicles';
 import type { VehicleAttachmentUploads } from '@/lib/api/vehicles';
 
@@ -184,7 +185,10 @@ export function VehicleSheet({
 
   const carriersQ = useCarriers({ limit: 200 });
   const planisciQ = usePlanisci();
-  const dyspozytorzyQ = useDyspozytorzy();
+  // Phase 11 — dispatch TEAMS (replaces the single-dispatcher picker). Carries
+  // each team's dispatcher roster so the live <TeamMembers> preview renders
+  // without a second fetch.
+  const teamsQ = useTeamLookups();
 
   // Persist create-mode drafts; closing the sheet keeps user input intact.
   // Wizard mode opts out. NOTE: file buckets are NOT persisted — `File`
@@ -215,7 +219,7 @@ export function VehicleSheet({
         plateNumber: vehicle.plateNumber,
         active: vehicle.active,
         plannerId: vehicle.plannerId ?? undefined,
-        dispatcherId: vehicle.dispatcherId ?? undefined,
+        dispatchTeamId: vehicle.dispatchTeamId ?? undefined,
         notes: vehicle.notes ?? '',
         certificateL: vehicle.certificateL,
         euro: vehicle.euro,
@@ -355,6 +359,13 @@ export function VehicleSheet({
   const gpsOn = form.watch('gps') === true;
   const cabotageDeOn = form.watch('cabotageDe') === true;
   const cabotageFrOn = form.watch('cabotageFr') === true;
+  // Phase 11 — live <TeamMembers> preview of the picked dispatch team. Resolved
+  // from the lookup roster the form already holds (no second fetch).
+  const dispatchTeamId = form.watch('dispatchTeamId');
+  const selectedTeam = useMemo(
+    () => (teamsQ.data ?? []).find((team) => team.id === dispatchTeamId) ?? null,
+    [teamsQ.data, dispatchTeamId],
+  );
 
   // i18n label bundle for <FileUpload>, memoised so the primitive doesn't
   // re-render on every keystroke elsewhere in the form.
@@ -559,22 +570,35 @@ export function VehicleSheet({
                     </Select>
                   </FormField>
                   <FormField
-                    label={t('fields.dispatcher')}
-                    required
-                    error={errs.dispatcherId?.message}
-                    htmlFor="vehicle-dispatcherId"
+                    label={t('fields.dispatchTeam')}
+                    error={errs.dispatchTeamId?.message}
+                    htmlFor="vehicle-dispatchTeamId"
                   >
                     <Select
-                      id="vehicle-dispatcherId"
-                      {...form.register('dispatcherId')}
+                      id="vehicle-dispatchTeamId"
+                      {...form.register('dispatchTeamId')}
                     >
                       <option value="">—</option>
-                      {(dyspozytorzyQ.data ?? []).map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {u.name ?? u.login}
+                      {(teamsQ.data ?? []).map((team) => (
+                        <option key={team.id} value={team.id}>
+                          {team.code}
+                          {team.name ? ` — ${team.name}` : ''}
+                          {team.active ? '' : ` (${tCommon('inactive')})`}
                         </option>
                       ))}
                     </Select>
+                    {/* Live preview of the picked team's composition — warns
+                        (amber box) when the chosen team has no dispatchers
+                        BEFORE saving (docs/14 §7.9.6). */}
+                    {selectedTeam && (
+                      <div className="mt-2">
+                        <TeamMembers
+                          team={selectedTeam}
+                          variant="chips"
+                          size="sm"
+                        />
+                      </div>
+                    )}
                   </FormField>
                 </FormGrid>
               </FormSection>
@@ -909,7 +933,9 @@ function getDefaults(): FormValues {
     plateNumber: '',
     active: true,
     plannerId: '' as unknown as string,
-    dispatcherId: '' as unknown as string,
+    // Phase 11 — dispatch TEAM (optional). Empty string is stripped by
+    // `cleanForm`, so an unpicked team is omitted from the POST/PATCH body.
+    dispatchTeamId: '' as unknown as string,
     notes: '',
     certificateL: false,
     // EURO norm — V / VI only since the DB enum dropped III / IV.

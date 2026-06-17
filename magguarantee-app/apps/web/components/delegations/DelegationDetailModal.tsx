@@ -23,25 +23,49 @@
 // Read-only consumer everywhere (carrier list, planista/dyspozytor Wyjazdy
 // rows) — no `onEdit` is passed, so the footer shows only «Zamknij» (§6.6).
 
-import { ClipboardCheck, Gauge, Truck, User } from 'lucide-react';
+import { ClipboardCheck, Gauge, Truck, User, Users } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { ReactNode } from 'react';
-import type { DelegationDto } from '@magguarantee/shared';
+import type {
+  DelegationDto,
+  VehicleDispatchTeamDto,
+} from '@magguarantee/shared';
 
 import { StatusBadge } from '@/components/carrier/StatusBadge';
 import { DelegationKmCalendar } from '@/components/delegations/DelegationKmCalendar';
 import { RouteCard } from '@/components/delegations/RouteCard';
+import { TeamMembers } from '@/components/teams/TeamMembers';
 import {
   EntityDetailModal,
   type EntityDetailSection,
 } from '@/components/ui/EntityDetailModal';
 import { emptyValue, textValue } from '@/components/ui/entity-detail-values';
+import { AlertTriangle } from 'lucide-react';
 import { formatDateTime } from '@/lib/format/numbers';
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   delegation: DelegationDto | null;
+}
+
+/**
+ * Reads the CURRENT dispatch team off the delegation's vehicle (resolved live
+ * by `vehicleId`, not a delegation-time snapshot — §7.9.7).
+ *
+ * The `DelegationDto.vehicle` mini-shape is `{ id, plateNumber }` TODAY — it
+ * does NOT yet carry `dispatchTeam`. This narrows for the field defensively so
+ * the «ZESPÓŁ PROWADZĄCY» block lights up the instant api-agent widens the
+ * delegation vehicle mini with `dispatchTeam` (additive, non-sensitive), and
+ * stays absent (`undefined`) until then. See the report's api follow-up.
+ */
+function readVehicleDispatchTeam(
+  delegation: DelegationDto,
+): VehicleDispatchTeamDto | null | undefined {
+  const vehicle = delegation.vehicle as
+    | { dispatchTeam?: VehicleDispatchTeamDto | null }
+    | null;
+  return vehicle?.dispatchTeam;
 }
 
 /** "dd.MM.yyyy, HH:mm" rendered inside an em-dash-aware <dd>. */
@@ -117,6 +141,7 @@ export function DelegationDetailModal({
   const tSections = useTranslations('carrier.delegations.sections');
   const tDetail = useTranslations('entityDetail');
   const tKmCal = useTranslations('delegation.kmCalendar');
+  const tTeam = useTranslations('team');
 
   // The modal is only rendered with a target; bail defensively so the hooks
   // above still run unconditionally (rules-of-hooks safe).
@@ -217,6 +242,44 @@ export function DelegationDetailModal({
         {
           label: tKmCal('title'),
           value: <DelegationKmCalendar delegation={delegation} />,
+          fullWidth: true,
+        },
+      ],
+    });
+  }
+
+  // Block E — «ZESPÓŁ PROWADZĄCY» (§7.9.7). A `span:'full'` block AFTER the
+  // km-calendar, so the reading order ends with "who is steering this trip".
+  // The header deliberately mirrors the Google Chat trip-notification heading.
+  //
+  // Shows the CURRENT `Vehicle.dispatchTeam` (live, not a snapshot). Omitted
+  // entirely when there is no resolvable vehicle (per §6.4 "empty section
+  // omitted"). When the vehicle exists but carries no team → the «Brak zespołu
+  // prowadzącego» amber box.
+  //
+  // NOTE: until the DelegationDto vehicle mini is widened with `dispatchTeam`
+  // (api follow-up), `currentTeam` is `undefined` and the block is omitted —
+  // it lights up automatically once the field lands. When the field IS present
+  // but `null`, the "no team" amber box renders.
+  const currentTeam = delegation.vehicleId
+    ? readVehicleDispatchTeam(delegation)
+    : undefined;
+  if (delegation.vehicleId && currentTeam !== undefined) {
+    sections.push({
+      title: tTeam('leadingTeamHeader'),
+      icon: Users,
+      span: 'full',
+      rows: [
+        {
+          label: tTeam('leadingTeamHeader'),
+          value: currentTeam ? (
+            <TeamMembers team={currentTeam} variant="list" size="md" />
+          ) : (
+            <div className="inline-flex items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-2 py-1 text-xs font-bold text-warning">
+              <AlertTriangle size={12} aria-hidden="true" />
+              {tTeam('noTeam')}
+            </div>
+          ),
           fullWidth: true,
         },
       ],

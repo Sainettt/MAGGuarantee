@@ -17,12 +17,25 @@ import {
 import { DelegationsService } from './delegations.service';
 
 const DISPATCHER_SUB = 'dys-1';
+const TEAM_ID = 'team-1';
 const PLANNER_SUB = 'plan-1';
 const CARRIER_ID = 'carrier-1';
 const CARRIER_USER = 'user-1';
 
-function auth(role: AuthUser['role'], sub: string): AuthUser {
-  return { sub, login: 'actor', email: 'actor@magtrans.eu', name: 'Actor', role, mustChangePassword: false };
+function auth(
+  role: AuthUser['role'],
+  sub: string,
+  teamId: string | null = TEAM_ID,
+): AuthUser {
+  return {
+    sub,
+    login: 'actor',
+    email: 'actor@magtrans.eu',
+    name: 'Actor',
+    role,
+    mustChangePassword: false,
+    teamId,
+  };
 }
 
 function baseFilters(overrides: Partial<DelegationFilters> = {}): DelegationFilters {
@@ -37,7 +50,11 @@ function makeRow(overrides: Partial<DelegationRow> = {}): DelegationRow {
       id: 'veh-1',
       plateNumber: 'PL123',
       plannerId: PLANNER_SUB,
-      dispatcherId: DISPATCHER_SUB,
+      dispatchTeamId: TEAM_ID,
+      // Phase 11 Шаг D — live dispatch team on the vehicle mini. `null` is the
+      // baseline case (unassigned); the dedicated mapper test below exercises a
+      // populated team.
+      dispatchTeam: null,
     },
     trailerId: 'trl-1',
     trailer: { id: 'trl-1', plateNumber: 'TR1' },
@@ -98,13 +115,21 @@ function makeService(returned: DelegationRow[] = [makeRow()]) {
   return { service, listSpy, findByIdSpy };
 }
 
-describe('DelegationsService.list — dyspozytor auto-scope', () => {
-  it('scopes to dispatcherId=user.sub (relation filter), not the all-access branch', async () => {
+describe('DelegationsService.list — dyspozytor auto-scope (Phase 11 — team)', () => {
+  it('scopes to dispatchTeamId=user.teamId (relation filter), not the all-access branch', async () => {
     const { service, listSpy } = makeService();
     await service.list(auth('dyspozytor', DISPATCHER_SUB), baseFilters());
     expect(listSpy).toHaveBeenCalledTimes(1);
     const passed = listSpy.mock.calls[0]![0] as DelegationListFilters;
-    expect(passed.dispatcherId).toBe(DISPATCHER_SUB);
+    expect(passed.dispatchTeamId).toBe(TEAM_ID);
+  });
+
+  it('a dyspozytor with NO team passes the sentinel (0 rows, never "all")', async () => {
+    const { service, listSpy } = makeService();
+    await service.list(auth('dyspozytor', DISPATCHER_SUB, null), baseFilters());
+    const passed = listSpy.mock.calls[0]![0] as DelegationListFilters;
+    // Sentinel id → no real team matches → empty result; never the all branch.
+    expect(passed.dispatchTeamId).toBe('__no_dispatch_team__');
   });
 
   it('IGNORES a client-supplied carrierId (server identity wins)', async () => {
@@ -114,7 +139,7 @@ describe('DelegationsService.list — dyspozytor auto-scope', () => {
       baseFilters({ carrierId: 'someone-elses-carrier' }),
     );
     const passed = listSpy.mock.calls[0]![0] as DelegationListFilters;
-    expect(passed.dispatcherId).toBe(DISPATCHER_SUB);
+    expect(passed.dispatchTeamId).toBe(TEAM_ID);
     expect(passed.carrierId).toBeUndefined();
   });
 
@@ -125,11 +150,11 @@ describe('DelegationsService.list — dyspozytor auto-scope', () => {
       baseFilters({ vehicleId: 'someone-elses-vehicle' }),
     );
     const passed = listSpy.mock.calls[0]![0] as DelegationListFilters;
-    expect(passed.dispatcherId).toBe(DISPATCHER_SUB);
+    expect(passed.dispatchTeamId).toBe(TEAM_ID);
     expect(passed.vehicleId).toBeUndefined();
   });
 
-  it('preserves non-scope filters (status / from / limit) alongside the dispatcher scope', async () => {
+  it('preserves non-scope filters (status / from / limit) alongside the team scope', async () => {
     const { service, listSpy } = makeService();
     await service.list(
       auth('dyspozytor', DISPATCHER_SUB),
@@ -137,7 +162,7 @@ describe('DelegationsService.list — dyspozytor auto-scope', () => {
     );
     const passed = listSpy.mock.calls[0]![0] as DelegationListFilters;
     expect(passed).toMatchObject({
-      dispatcherId: DISPATCHER_SUB,
+      dispatchTeamId: TEAM_ID,
       status: 'w_trasie',
       from: '2026-05-01T00:00:00.000Z',
       limit: 25,
@@ -159,8 +184,8 @@ describe('DelegationsService.list — planista auto-scope (Phase 6.4)', () => {
     expect(listSpy).toHaveBeenCalledTimes(1);
     const passed = listSpy.mock.calls[0]![0] as DelegationListFilters;
     expect(passed.plannerId).toBe(PLANNER_SUB);
-    // Planista must NOT receive a dispatcher scope (different axis).
-    expect(passed.dispatcherId).toBeUndefined();
+    // Planista must NOT receive a team scope (different axis).
+    expect(passed.dispatchTeamId).toBeUndefined();
   });
 
   it('IGNORES a client-supplied carrierId (server identity wins)', async () => {
@@ -209,7 +234,7 @@ describe('DelegationsService.list — other roles unchanged', () => {
       baseFilters({ carrierId: 'any-carrier' }),
     );
     const passed = listSpy.mock.calls[0]![0] as DelegationListFilters;
-    expect(passed.dispatcherId).toBeUndefined();
+    expect(passed.dispatchTeamId).toBeUndefined();
     expect(passed.plannerId).toBeUndefined();
     expect(passed.carrierId).toBe('any-carrier');
   });
@@ -224,7 +249,7 @@ describe('DelegationsService.list — other roles unchanged', () => {
       );
       const passed = listSpy.mock.calls[0]![0] as DelegationListFilters;
       expect(passed.plannerId).toBeUndefined();
-      expect(passed.dispatcherId).toBeUndefined();
+      expect(passed.dispatchTeamId).toBeUndefined();
       expect(passed.carrierId).toBe('any-carrier');
     },
   );
@@ -241,7 +266,7 @@ describe('DelegationsService.list — other roles unchanged', () => {
     await service.list(auth('przewoznik', CARRIER_USER), baseFilters());
     const passed = listSpy.mock.calls[0]![0] as DelegationListFilters;
     expect(passed.carrierId).toBe(CARRIER_ID);
-    expect(passed.dispatcherId).toBeUndefined();
+    expect(passed.dispatchTeamId).toBeUndefined();
     expect(passed.plannerId).toBeUndefined();
   });
 
@@ -260,7 +285,8 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
         id: 'veh-1',
         plateNumber: 'PL123',
         plannerId: PLANNER_SUB,
-        dispatcherId: 'other-dys',
+        dispatchTeamId: 'other-team',
+        dispatchTeam: null,
       },
     });
     const { service } = makeService([row]);
@@ -274,7 +300,8 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
         id: 'veh-1',
         plateNumber: 'PL123',
         plannerId: 'someone-else',
-        dispatcherId: DISPATCHER_SUB,
+        dispatchTeamId: TEAM_ID,
+        dispatchTeam: null,
       },
     });
     const { service } = makeService([row]);
@@ -283,35 +310,53 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('dyspozytor may read a delegation of a vehicle they dispatch', async () => {
+  it('dyspozytor may read a delegation of a vehicle on their team (Phase 11)', async () => {
     const row = makeRow({
       vehicle: {
         id: 'veh-1',
         plateNumber: 'PL123',
         plannerId: 'other-plan',
-        dispatcherId: DISPATCHER_SUB,
+        dispatchTeamId: TEAM_ID,
+        dispatchTeam: null,
       },
     });
     const { service } = makeService([row]);
     const out = await service.getOne(
-      auth('dyspozytor', DISPATCHER_SUB),
+      auth('dyspozytor', DISPATCHER_SUB, TEAM_ID),
       'deleg-1',
     );
     expect(out.id).toBe('deleg-1');
   });
 
-  it("dyspozytor is 403 on another dispatcher's delegation (Phase 6 closed this hole)", async () => {
+  it("dyspozytor is 403 on another team's delegation (Phase 11)", async () => {
     const row = makeRow({
       vehicle: {
         id: 'veh-1',
         plateNumber: 'PL123',
         plannerId: PLANNER_SUB,
-        dispatcherId: 'someone-else',
+        dispatchTeamId: 'some-other-team',
+        dispatchTeam: null,
       },
     });
     const { service } = makeService([row]);
     await expect(
-      service.getOne(auth('dyspozytor', DISPATCHER_SUB), 'deleg-1'),
+      service.getOne(auth('dyspozytor', DISPATCHER_SUB, TEAM_ID), 'deleg-1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('dyspozytor with NO team is 403 even on a team delegation (Phase 11)', async () => {
+    const row = makeRow({
+      vehicle: {
+        id: 'veh-1',
+        plateNumber: 'PL123',
+        plannerId: PLANNER_SUB,
+        dispatchTeamId: TEAM_ID,
+        dispatchTeam: null,
+      },
+    });
+    const { service } = makeService([row]);
+    await expect(
+      service.getOne(auth('dyspozytor', DISPATCHER_SUB, null), 'deleg-1'),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
@@ -339,7 +384,8 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
           id: 'veh-1',
           plateNumber: 'PL123',
           plannerId: 'p-x',
-          dispatcherId: 'd-x',
+          dispatchTeamId: 'team-x',
+          dispatchTeam: null,
         },
       });
       const { service } = makeService([row]);
@@ -347,4 +393,49 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
       expect(out.id).toBe('deleg-1');
     },
   );
+});
+
+// Phase 11 Шаг D (additive) — the vehicle mini now carries the LIVE dispatch
+// team so the «ZESPÓŁ PROWADZĄCY» block in DelegationDetailModal renders. The
+// shape must be byte-identical to the one VehicleDto/VehicleListItem emit.
+describe('DelegationsService.getOne — vehicle.dispatchTeam (live, additive)', () => {
+  it('surfaces the populated dispatch team with its dispatcher roster', async () => {
+    const row = makeRow({
+      vehicle: {
+        id: 'veh-1',
+        plateNumber: 'PL123',
+        plannerId: 'p-x',
+        dispatchTeamId: 'team-99',
+        dispatchTeam: {
+          id: 'team-99',
+          code: '1.1.13',
+          name: 'Zespół Nocny',
+          active: true,
+          dispatchers: [
+            { id: 'dys-a', name: 'Anna', login: 'anna' },
+            { id: 'dys-b', name: null, login: 'bartek' },
+          ],
+        },
+      },
+    });
+    const { service } = makeService([row]);
+    const out = await service.getOne(auth('admin', 'admin-1'), 'deleg-1');
+    expect(out.vehicle?.dispatchTeam).toEqual({
+      id: 'team-99',
+      code: '1.1.13',
+      name: 'Zespół Nocny',
+      active: true,
+      dispatchers: [
+        { id: 'dys-a', name: 'Anna', login: 'anna' },
+        { id: 'dys-b', name: null, login: 'bartek' },
+      ],
+    });
+  });
+
+  it('emits dispatchTeam=null when the vehicle is unassigned', async () => {
+    const { service } = makeService([makeRow()]);
+    const out = await service.getOne(auth('admin', 'admin-1'), 'deleg-1');
+    // `makeRow` builds an unassigned vehicle by default.
+    expect(out.vehicle?.dispatchTeam).toBeNull();
+  });
 });

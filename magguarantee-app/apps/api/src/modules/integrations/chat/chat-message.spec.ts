@@ -1,5 +1,7 @@
 // Unit tests for the pure 4-line Google Chat wyjazd formatter.
 // Locked contract: docs/16-jobs-and-integrations.md#google-chat-notifications.
+// Phase 11: the ZESPÓŁ line is `planista / <all team dispatcher names>` —
+// the weryfikator slot was removed.
 
 import {
   formatDateTimeWarsaw,
@@ -21,64 +23,66 @@ function baseCtx(overrides: Partial<WyjazdMessageContext> = {}): WyjazdMessageCo
     returnCountry: 'DE',
     returnPostalCode: '10115',
     planista: 'Anna Planista',
-    dyspozytor: 'Bartek Dyspozytor',
-    weryfikator: 'Celina Weryfikator',
+    // Phase 11 — the whole dispatch team's roster (was a single dyspozytor).
+    dyspozytorzy: ['Bartek Dyspozytor', 'Celina Dyspozytor'],
     opiekun: 'Damian Opiekun',
     ...overrides,
   };
 }
 
 describe('formatWyjazdMessage', () => {
-  it('produces exactly four lines with all fields present', () => {
+  it('produces exactly four lines with planista + all team dispatchers', () => {
     const msg = formatWyjazdMessage(baseCtx());
     const lines = msg.split('\n');
     expect(lines).toHaveLength(4);
     expect(lines[0]).toBe('WYJAZD: 15/03/2026 10:30 / PL / 00-001');
     expect(lines[1]).toBe('ZJAZD: 20/03/2026 / DE / 10115');
     expect(lines[2]).toBe(
-      'ZESPÓŁ PROWADZĄCY: Anna Planista / Bartek Dyspozytor / Celina Weryfikator',
+      'ZESPÓŁ PROWADZĄCY: Anna Planista / Bartek Dyspozytor / Celina Dyspozytor',
     );
     expect(lines[3]).toBe('OPIEKUN: Damian Opiekun');
   });
 
-  it('omits weryfikator from the ZESPÓŁ line when absent (null)', () => {
-    const msg = formatWyjazdMessage(baseCtx({ weryfikator: null }));
+  it('renders only planista when the team has no dispatchers', () => {
+    const msg = formatWyjazdMessage(baseCtx({ dyspozytorzy: [] }));
+    const team = msg.split('\n')[2];
+    expect(team).toBe('ZESPÓŁ PROWADZĄCY: Anna Planista');
+    expect(team).not.toContain('//');
+  });
+
+  it('omits planista when absent (only team dispatchers shown)', () => {
+    const msg = formatWyjazdMessage(baseCtx({ planista: null }));
+    expect(msg.split('\n')[2]).toBe(
+      'ZESPÓŁ PROWADZĄCY: Bartek Dyspozytor / Celina Dyspozytor',
+    );
+  });
+
+  it('drops a null/blank dispatcher name without a double slash', () => {
+    const msg = formatWyjazdMessage(
+      baseCtx({ dyspozytorzy: ['Bartek Dyspozytor', null, '   '] }),
+    );
     const team = msg.split('\n')[2];
     expect(team).toBe('ZESPÓŁ PROWADZĄCY: Anna Planista / Bartek Dyspozytor');
     expect(team).not.toContain('//');
   });
 
-  it('omits planista when absent', () => {
-    const msg = formatWyjazdMessage(baseCtx({ planista: null }));
-    expect(msg.split('\n')[2]).toBe(
-      'ZESPÓŁ PROWADZĄCY: Bartek Dyspozytor / Celina Weryfikator',
-    );
-  });
-
-  it('omits dyspozytor when absent', () => {
-    const msg = formatWyjazdMessage(baseCtx({ dyspozytor: null }));
-    expect(msg.split('\n')[2]).toBe(
-      'ZESPÓŁ PROWADZĄCY: Anna Planista / Celina Weryfikator',
-    );
-  });
-
-  it('renders only weryfikator when planista + dyspozytor are both absent', () => {
+  it('renders a single team dispatcher when only one is present', () => {
     const msg = formatWyjazdMessage(
-      baseCtx({ planista: null, dyspozytor: null }),
+      baseCtx({ planista: null, dyspozytorzy: ['Tylko Ten'] }),
     );
-    expect(msg.split('\n')[2]).toBe('ZESPÓŁ PROWADZĄCY: Celina Weryfikator');
+    expect(msg.split('\n')[2]).toBe('ZESPÓŁ PROWADZĄCY: Tylko Ten');
   });
 
-  it('leaves the ZESPÓŁ value empty when all three are absent', () => {
+  it('leaves the ZESPÓŁ value empty when planista + team are both absent', () => {
     const msg = formatWyjazdMessage(
-      baseCtx({ planista: null, dyspozytor: null, weryfikator: null }),
+      baseCtx({ planista: null, dyspozytorzy: [] }),
     );
     expect(msg.split('\n')[2]).toBe('ZESPÓŁ PROWADZĄCY: ');
   });
 
   it('treats empty/whitespace names as absent', () => {
     const msg = formatWyjazdMessage(
-      baseCtx({ planista: '', dyspozytor: '   ', weryfikator: 'Tylko Ten' }),
+      baseCtx({ planista: '', dyspozytorzy: ['   ', 'Tylko Ten'] }),
     );
     expect(msg.split('\n')[2]).toBe('ZESPÓŁ PROWADZĄCY: Tylko Ten');
   });

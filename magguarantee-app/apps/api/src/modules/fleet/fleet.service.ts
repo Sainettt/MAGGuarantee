@@ -28,7 +28,11 @@ import {
 } from '../carriers/carriers.repository';
 import { DriversRepository, type DriverRow } from '../drivers/drivers.repository';
 import { TrailersRepository, type TrailerRow } from '../trailers/trailers.repository';
-import { VehiclesRepository, type VehicleRow } from '../vehicles/vehicles.repository';
+import {
+  NO_TEAM_SENTINEL,
+  VehiclesRepository,
+  type VehicleRow,
+} from '../vehicles/vehicles.repository';
 
 /**
  * "Driving" cut-off — `Code.gs:2827` uses a constant 7-day window past
@@ -309,7 +313,10 @@ export class FleetService {
    * Read-only fleet view + KPI stats + idle-vehicle highlight list for the
    * dyspozytor panel — mirrors `Code.gs:3676-3772` (`getDyspozytorFleet`).
    *
-   *  1. Vehicles where `Vehicle.dispatcherId === user.sub` (admin → all).
+   *  1. Phase 11 — vehicles of the dyspozytor's TEAM
+   *     (`Vehicle.dispatchTeamId === user.teamId`; admin → all). A dyspozytor
+   *     with NO team gets an EMPTY fleet (sentinel → early return below), never
+   *     "all" — explicit per the locked decision.
    *  2. Distinct `carrierIds` → drivers + trailers (read-only).
    *  3. `stats` from the SAME 7-day classification opiekun uses
    *     (`_buildDispatcherStats` reuses the shared `DRIVING_RECENCY_DAYS`
@@ -323,8 +330,15 @@ export class FleetService {
       'dyspozytor',
       'Brak uprawnień (wymaga konta dyspozytora)',
     );
+    // A dyspozytor with no team → empty fleet (no query). Admin keeps all.
+    if (user.role === 'dyspozytor' && !user.teamId) {
+      return this._emptyDispatcherFleet();
+    }
     const vehicleRows = await this.vehicles.list({
-      dispatcherId: user.role === 'admin' ? undefined : user.sub,
+      dispatchTeamId:
+        user.role === 'admin'
+          ? undefined
+          : (user.teamId ?? NO_TEAM_SENTINEL),
       limit: 500,
     });
     const carrierIds = distinctCarrierIds(vehicleRows);
@@ -450,6 +464,29 @@ export class FleetService {
     };
     return { stats, stojaceList };
   }
+
+  /**
+   * Phase 11 — empty dyspozytor fleet for a dyspozytor with no team assigned.
+   * An explicit empty payload (zeroed KPI strip, no rows) — the dyspozytor must
+   * never fall through to "all vehicles" when they have no team.
+   */
+  private _emptyDispatcherFleet(): DyspozytorFleetResponse {
+    return {
+      vehicles: [],
+      drivers: [],
+      trailers: [],
+      stats: {
+        liczbaAut: 0,
+        autaAktywne: 0,
+        autaJezdzace: 0,
+        autaStojace7dni: 0,
+        autaNieaktywne: 0,
+        liczbaKierowcow: 0,
+        liczbaNaczep: 0,
+      },
+      stojaceList: [],
+    };
+  }
 }
 
 function toDateString(d: Date): string {
@@ -493,6 +530,8 @@ function toVehicleListItem(v: VehicleRow): VehicleListItem {
     fr: v.fr,
     lastDroveAt: v.lastDroveAt ? v.lastDroveAt.toISOString() : null,
     notes: v.notes,
+    // Phase 11 — dispatch Team with roster (additive, non-sensitive — no rates).
+    dispatchTeam: v.dispatchTeam,
   };
 }
 

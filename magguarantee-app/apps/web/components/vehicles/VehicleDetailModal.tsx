@@ -32,6 +32,7 @@ import { useMemo, type ReactNode } from 'react';
 import type { VehicleAttachmentDto, VehicleDto } from '@magguarantee/shared';
 import { toast } from 'sonner';
 
+import { TeamFieldValue } from '@/components/teams/TeamFieldValue';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import {
@@ -123,6 +124,10 @@ export function VehicleDetailModal({
     {
       title: t('sections.people'),
       icon: UserCog,
+      // The «Zespół» team-composition row needs full width (avatars + chips) —
+      // span the whole section so the <TeamMembers> chips row isn't squeezed
+      // into the value column (§6.4.2, §7.9.6).
+      span: 'full',
       rows: [
         {
           label: f('carrier'),
@@ -137,10 +142,14 @@ export function VehicleDetailModal({
           ),
         },
         {
-          label: f('dispatcher'),
-          value: textValue(
-            vehicle.dispatcher?.name ?? vehicle.dispatcher?.login,
+          label: f('dispatchTeam'),
+          value: (
+            <TeamFieldValue
+              team={vehicle.dispatchTeam}
+              label={f('dispatchTeam')}
+            />
           ),
+          fullWidth: true,
         },
       ],
     },

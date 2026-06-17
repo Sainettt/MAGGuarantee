@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 
-import type { VehicleAttachmentCategory } from '@magguarantee/shared';
+import type {
+  VehicleAttachmentCategory,
+  VehicleDispatchTeamDto,
+} from '@magguarantee/shared';
 
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -63,8 +66,10 @@ export interface VehicleRow {
   lastDroveAt: Date | null;
   plannerId: string | null;
   planner: { id: string; login: string; name: string | null } | null;
-  dispatcherId: string | null;
-  dispatcher: { id: string; login: string; name: string | null } | null;
+  // Phase 11 — dispatch Team FK + the team with its dispatcher roster
+  // (replaces the single `dispatcherId`/`dispatcher`).
+  dispatchTeamId: string | null;
+  dispatchTeam: VehicleDispatchTeamDto | null;
   carrier: { id: string; login: string; name: string | null } | null;
   /** Non-deleted umowa/cabotage/adr attachments (soft-delete extension filters). */
   attachments: VehicleRowAttachment[];
@@ -102,15 +107,20 @@ export interface VehicleBoardRow {
  * Vehicle scope for the km-board / km-report active-vehicle query
  * (`listActiveForBoard`). All fields optional and AND-composed; an absent
  * field means "no narrowing on that axis":
- *  - `plannerId` / `dispatcherId` — planista / dyspozytor km-report (unchanged).
+ *  - `plannerId` — planista km-report (unchanged).
+ *  - `dispatchTeamId` — dyspozytor km-report (Phase 11 — the dyspozytor's TEAM,
+ *    resolved from the JWT `teamId`; a dyspozytor with NO team → see below).
  *  - `carrierId` — single carrier (przewoznik km-report, resolved from the JWT).
  *  - `carrierIds` — a SET of carriers (opiekun km-report, the supervised set).
  *    IMPORTANT: an EMPTY `carrierIds` array means "0 carriers" → 0 rows, and
  *    must NOT degrade into "no filter" (see `listActiveForBoard`).
+ *  - `dispatchTeamId === NO_TEAM_SENTINEL` — the dyspozytor-without-team case:
+ *    forces 0 rows (Postgres can't match the sentinel id), mirroring the empty
+ *    `carrierIds` posture. Use {@link NO_TEAM_SENTINEL} from this module.
  */
 export interface VehicleBoardScope {
   plannerId?: string;
-  dispatcherId?: string;
+  dispatchTeamId?: string;
   carrierId?: string;
   carrierIds?: string[];
 }
@@ -128,12 +138,25 @@ export interface VehicleListFilters {
    */
   carrierIds?: string[];
   plannerId?: string;
-  dispatcherId?: string;
+  /**
+   * Phase 11 — filter to a single dispatch Team (`Vehicle.dispatchTeamId`).
+   * Replaces the legacy `dispatcherId` filter. The dyspozytor-without-team case
+   * passes {@link NO_TEAM_SENTINEL} so the SQL matches zero rows (an explicit
+   * empty set, never "all").
+   */
+  dispatchTeamId?: string;
   active?: boolean;
   q?: string;
   cursor?: string;
   limit: number;
 }
+
+/**
+ * Impossible team id used to force "0 rows" for a dyspozytor that has no team.
+ * Mirrors the `__no_such_vehicle__` empty-`IN()` short-circuit posture: an
+ * unassigned dyspozytor must see an EMPTY fleet, never the whole fleet.
+ */
+export const NO_TEAM_SENTINEL = '__no_dispatch_team__';
 
 @Injectable()
 export class VehiclesRepository {
@@ -168,7 +191,7 @@ export class VehiclesRepository {
       }
     }
     if (filters.plannerId) where.plannerId = filters.plannerId;
-    if (filters.dispatcherId) where.dispatcherId = filters.dispatcherId;
+    if (filters.dispatchTeamId) where.dispatchTeamId = filters.dispatchTeamId;
     if (typeof filters.active === 'boolean') where.active = filters.active;
     if (filters.q) {
       where.OR = [
@@ -196,7 +219,7 @@ export class VehiclesRepository {
    * attachments / rates / GPS device) — keeps the query cheap.
    *
    * The optional `scope` narrows by `plannerId` (planista km-report),
-   * `dispatcherId` (dyspozytor km-report), `carrierId` (przewoznik km-report —
+   * `dispatchTeamId` (dyspozytor km-report — Phase 11), `carrierId` (przewoznik km-report —
    * their OWN carrier, resolved server-side from the JWT) or `carrierIds` (the
    * opiekun km-report — the set of carriers they supervise). The board
    * (weryfikator/admin) and the eksport/admin report pass no scope and see all
@@ -216,7 +239,9 @@ export class VehiclesRepository {
   ): Promise<VehicleBoardRow[]> {
     const where: Record<string, unknown> = { active: true };
     if (scope?.plannerId) where.plannerId = scope.plannerId;
-    if (scope?.dispatcherId) where.dispatcherId = scope.dispatcherId;
+    // Phase 11 — dyspozytor km-report scopes by TEAM. NO_TEAM_SENTINEL (the
+    // dyspozytor-without-team case) is an impossible id → 0 rows, never "all".
+    if (scope?.dispatchTeamId) where.dispatchTeamId = scope.dispatchTeamId;
     // Carrier scoping (przewoznik → own; opiekun → supervised set). The
     // explicit single `carrierId` (if both somehow present) wins; otherwise an
     // `in:` over the set. An EMPTY set must yield 0 rows — Postgres rejects
@@ -307,7 +332,8 @@ export class VehiclesRepository {
     plateNumber: string;
     active?: boolean;
     plannerId?: string | null;
-    dispatcherId?: string | null;
+    /** Phase 11 — dispatch Team FK (replaces `dispatcherId`). */
+    dispatchTeamId?: string | null;
     notes?: string | null;
     certificateL: boolean;
     euro: 'V' | 'VI';
@@ -342,7 +368,7 @@ export class VehiclesRepository {
         plateNumber: data.plateNumber,
         active: data.active ?? true,
         plannerId: data.plannerId ?? null,
-        dispatcherId: data.dispatcherId ?? null,
+        dispatchTeamId: data.dispatchTeamId ?? null,
         notes: data.notes ?? null,
         certificateL: data.certificateL,
         euro: data.euro,
@@ -413,7 +439,20 @@ export class VehiclesRepository {
   private includeShape() {
     return {
       planner: { select: { id: true, login: true, name: true } },
-      dispatcher: { select: { id: true, login: true, name: true } },
+      // Phase 11 — the dispatch Team with its dispatcher roster (replaces the
+      // single `dispatcher` relation). NON-SENSITIVE — no rates surface here.
+      dispatchTeam: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          active: true,
+          dispatchers: {
+            select: { id: true, name: true, login: true },
+            orderBy: { login: 'asc' as const },
+          },
+        },
+      },
       carrier: {
         select: {
           id: true,
@@ -459,8 +498,20 @@ export class VehiclesRepository {
       lastDroveAt: row.lastDroveAt,
       plannerId: row.plannerId,
       planner: row.planner ?? null,
-      dispatcherId: row.dispatcherId,
-      dispatcher: row.dispatcher ?? null,
+      dispatchTeamId: row.dispatchTeamId,
+      dispatchTeam: row.dispatchTeam
+        ? {
+            id: row.dispatchTeam.id,
+            code: row.dispatchTeam.code,
+            name: row.dispatchTeam.name,
+            active: row.dispatchTeam.active,
+            dispatchers: (row.dispatchTeam.dispatchers ?? []).map((d) => ({
+              id: d.id,
+              name: d.name,
+              login: d.login,
+            })),
+          }
+        : null,
       carrier: row.carrier
         ? {
             id: row.carrier.id,
@@ -528,8 +579,14 @@ interface VehiclePrismaShape {
   lastDroveAt: Date | null;
   plannerId: string | null;
   planner?: { id: string; login: string; name: string | null } | null;
-  dispatcherId: string | null;
-  dispatcher?: { id: string; login: string; name: string | null } | null;
+  dispatchTeamId: string | null;
+  dispatchTeam?: {
+    id: string;
+    code: string;
+    name: string | null;
+    active: boolean;
+    dispatchers?: { id: string; name: string | null; login: string }[];
+  } | null;
   carrier?: {
     id: string;
     user: { login: string; name: string | null };

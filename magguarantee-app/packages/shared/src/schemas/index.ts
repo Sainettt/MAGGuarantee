@@ -27,6 +27,8 @@ export * from './vehicles';
 export * from './drivers';
 export * from './trailers';
 export * from './trailer-types';
+// Phase 11 — dispatch teams (admin CRUD + /lookups/teams).
+export * from './teams';
 export * from './lookups';
 export * from './integrations';
 export * from './claims';

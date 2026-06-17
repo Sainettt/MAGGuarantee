@@ -18,8 +18,20 @@ import { DelegationsService } from './delegations.service';
 const CARRIER_ID = 'carrier-1';
 const CARRIER_USER = 'user-1';
 
-function auth(role: AuthUser['role'], sub: string): AuthUser {
-  return { sub, login: 'actor', email: 'actor@magtrans.eu', name: 'Actor', role, mustChangePassword: false };
+function auth(
+  role: AuthUser['role'],
+  sub: string,
+  teamId: string | null = 'team-1',
+): AuthUser {
+  return {
+    sub,
+    login: 'actor',
+    email: 'actor@magtrans.eu',
+    name: 'Actor',
+    role,
+    mustChangePassword: false,
+    teamId,
+  };
 }
 
 function baseFilters(
@@ -154,11 +166,11 @@ describe('DelegationsService.list — regression: other roles unaffected by hist
     expect(passed.status).toBeUndefined();
   });
 
-  it('dyspozytor: scoped to own dispatched fleet, NO status floor', async () => {
+  it('dyspozytor: scoped to own team (Phase 11), NO status floor', async () => {
     const { service, listSpy } = makeService();
-    await service.list(auth('dyspozytor', 'dys-1'), baseFilters());
+    await service.list(auth('dyspozytor', 'dys-1', 'team-1'), baseFilters());
     const passed = passedFilters(listSpy);
-    expect(passed.dispatcherId).toBe('dys-1');
+    expect(passed.dispatchTeamId).toBe('team-1');
     expect(passed.statusIn).toBeUndefined();
     expect(passed.status).toBeUndefined();
   });

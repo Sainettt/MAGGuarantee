@@ -22,7 +22,10 @@ import { CarriersRepository } from '../carriers/carriers.repository';
 import { DriversRepository } from '../drivers/drivers.repository';
 import { ChatNotifierService } from '../integrations/chat/chat-notifier.service';
 import { TrailersRepository } from '../trailers/trailers.repository';
-import { VehiclesRepository } from '../vehicles/vehicles.repository';
+import {
+  NO_TEAM_SENTINEL,
+  VehiclesRepository,
+} from '../vehicles/vehicles.repository';
 import {
   DelegationsRepository,
   type DelegationListFilters,
@@ -205,7 +208,9 @@ export class DelegationsService {
    * mirror the list scope on the single-resource read:
    *  - `przewoznik` → row.carrierId must equal the caller's carrier.
    *  - `planista`   → row.vehicle.plannerId must equal `user.sub`.
-   *  - `dyspozytor` → row.vehicle.dispatcherId must equal `user.sub`.
+   *  - `dyspozytor` → row.vehicle.dispatchTeamId must equal the dyspozytor's
+   *    `teamId` (Phase 11 — team scope; a dyspozytor with no team matches
+   *    nothing → 403).
    *  - admin/opiekun/eksport → unrestricted (all-access roles).
    *  - any other role never reaches here (controller `@Roles` excludes them,
    *    notably `pracownik` — quirk #13 — and `weryfikator`, dropped in the
@@ -229,7 +234,8 @@ export class DelegationsService {
       return;
     }
     if (user.role === 'dyspozytor') {
-      if (row.vehicle?.dispatcherId !== user.sub) {
+      // Phase 11 — team scope. No team (or vehicle on a different team) → 403.
+      if (!user.teamId || row.vehicle?.dispatchTeamId !== user.teamId) {
         throw new ForbiddenException('Brak uprawnień do tej delegacji');
       }
     }
@@ -407,12 +413,16 @@ export class DelegationsService {
       return { ...planRest, plannerId: user.sub };
     }
     if (user.role === 'dyspozytor') {
-      // Phase 6.2 — dyspozytor sees ONLY delegations of vehicles they dispatch
+      // Phase 11 — dyspozytor sees ONLY delegations of vehicles on THEIR team
       // (docs/03-roles.md#dyspozytor). Server identity wins: a client-supplied
       // `carrierId` / `vehicleId` is dropped so the dyspozytor cannot pivot
-      // outside their dispatched fleet (same posture as the przewoznik scope).
+      // outside their team's fleet (same posture as the przewoznik scope). A
+      // dyspozytor with NO team passes the sentinel → 0 rows (never "all").
       const { carrierId: _carrierId, vehicleId: _vehicleId, ...dysRest } = rest;
-      return { ...dysRest, dispatcherId: user.sub };
+      return {
+        ...dysRest,
+        dispatchTeamId: user.teamId ?? NO_TEAM_SENTINEL,
+      };
     }
     throw new ForbiddenException('Brak uprawnień');
   }

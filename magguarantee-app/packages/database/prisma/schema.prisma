@@ -133,14 +133,21 @@ model User {
   // planista-only fields emerge. See docs/19-known-quirks.md#liderEmail.
   liderEmail String?
 
+  // DYSPOZYTOR — the dispatch team this dispatcher belongs to (Phase 11).
+  // Semantically meaningful only for role=dyspozytor; NULL for every other
+  // role. A dispatcher is a member of exactly one team. Enforced "user with
+  // role=dyspozytor" at the service layer (no DB-level role guard possible).
+  teamId String? @db.Uuid
+  team   Team?   @relation("TeamDispatchers", fields: [teamId], references: [id])
+
   // OPIEKUN — reverse relation through Carrier.opiekunId
   carriers       Carrier[] @relation("OpiekunCarriers")
   // PRZEWOZNIK — extends through Carrier (1:1)
   carrierProfile Carrier?  @relation("CarrierUser")
 
-  // vehicle assignment
-  plannerVehicles    Vehicle[] @relation("VehiclePlanner")
-  dispatcherVehicles Vehicle[] @relation("VehicleDispatcher")
+  // vehicle assignment — planista (lead spedytor) is a single user; the
+  // dispatch side moved from a single user to a Team in Phase 11 (see Team).
+  plannerVehicles Vehicle[] @relation("VehiclePlanner")
 
   // activity
   reportedDelegations        Delegation[]        @relation("DelegationReporter")
@@ -159,6 +166,7 @@ model User {
 
   @@index([role])
   @@index([deletedAt])
+  @@index([teamId])
   @@map("users")
 }
 
@@ -244,6 +252,41 @@ model CarrierAttachment {
   @@map("carrier_attachments")
 }
 
+// ─── TEAMS (dispatch teams — Phase 11) ──────────────────
+// A numbered dispatch team (code like `1.1.13`) that a vehicle is assigned to.
+// Mirrors the real MAGTRANS process: in the external maciosoft (Sped Trans)
+// system a vehicle is attached to a whole team, not a single person — formerly
+// tracked by hand in an Excel "raport DAF". In MAGGuarantee the team catalog is
+// maintained by `admin`, an explicit replacement for that Excel.
+//
+// Replaces the single `Vehicle.dispatcherId` FK (dropped in
+// `phase11_team_dispatch`). The shift/zmiana is deliberately NOT stored — it
+// rotates weekly; for notifications the names of all team dispatchers suffice.
+//
+// Uses an `active` flag (NOT a `deletedAt` soft-delete) per docs/04-data-model
+// — admin keeps a small, curated catalog of teams; hard-delete is guarded at
+// the API layer (a team referenced by users/vehicles must not be removed).
+model Team {
+  id     String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  // Team code, e.g. `1.1.13`. Globally unique. The `^\d+\.\d+\.\d+$` format is
+  // validated in the API/Zod layer — at the DB level it is just a unique String.
+  code   String  @unique
+  // Optional human-readable label.
+  name   String?
+  active Boolean @default(true)
+
+  // 1:N — the dispatchers (role=dyspozytor) that make up the team. Usually 2
+  // (by shift) but the count is NOT fixed.
+  dispatchers User[]    @relation("TeamDispatchers")
+  // 1:N — the vehicles assigned to this team.
+  vehicles    Vehicle[] @relation("VehicleDispatchTeam")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("teams")
+}
+
 // ─── VEHICLES (AUTA, 36 columns) ────────────────────────
 
 model Vehicle {
@@ -258,10 +301,15 @@ model Vehicle {
   createdById   String?   @db.Uuid // UtworzonePrzez
 
   // people
-  plannerId    String? @db.Uuid
-  planner      User?   @relation("VehiclePlanner", fields: [plannerId], references: [id])
-  dispatcherId String? @db.Uuid
-  dispatcher   User?   @relation("VehicleDispatcher", fields: [dispatcherId], references: [id])
+  plannerId      String? @db.Uuid
+  planner        User?   @relation("VehiclePlanner", fields: [plannerId], references: [id])
+  // Phase 11 — dispatch moved from a single user (`dispatcherId`) to a Team.
+  // Both on-shift dispatchers see the vehicle through team membership; the
+  // single-dispatcher FK was dropped in `phase11_team_dispatch`. Nullable —
+  // a vehicle may not be assigned to a team yet. Service layer enforces the
+  // target Team is active.
+  dispatchTeamId String? @db.Uuid
+  dispatchTeam   Team?   @relation("VehicleDispatchTeam", fields: [dispatchTeamId], references: [id])
 
   // attributes
   notes        String?
@@ -320,7 +368,7 @@ model Vehicle {
 
   @@unique([carrierId, plateNumber], name: "carrier_plate_unique")
   @@index([plannerId])
-  @@index([dispatcherId])
+  @@index([dispatchTeamId])
   @@index([active, deletedAt])
   @@map("vehicles")
 }

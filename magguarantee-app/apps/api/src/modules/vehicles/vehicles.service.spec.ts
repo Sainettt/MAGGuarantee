@@ -8,6 +8,7 @@ import {
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import type { CarrierRow } from '../carriers/carriers.repository';
 import { CarriersRepository } from '../carriers/carriers.repository';
+import { TeamsRepository, type TeamRow } from '../teams/teams.repository';
 import { UsersRepository, type UserRow } from '../users/users.repository';
 import type { CategorizedUpload } from './attachment-validation';
 import {
@@ -59,8 +60,8 @@ function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {
     lastDroveAt: null,
     plannerId: null,
     planner: null,
-    dispatcherId: null,
-    dispatcher: null,
+    dispatchTeamId: null,
+    dispatchTeam: null,
     carrier: { id: 'c-1', login: 'pwz1', name: 'Pwz One' },
     attachments: [],
     createdAt: NOW,
@@ -129,6 +130,7 @@ function makeUser(overrides: Partial<UserRow> = {}): UserRow {
     name: 'Plan',
     active: true,
     liderEmail: null,
+    teamId: null,
     mustChangePassword: false,
     passwordChangedAt: null,
     failedAttempts: 0,
@@ -195,7 +197,7 @@ function makeVehiclesRepo(seed: VehicleRow[] = []): VehiclesRepository {
         carrierId: data.carrierId,
         plateNumber: data.plateNumber,
         plannerId: data.plannerId ?? null,
-        dispatcherId: data.dispatcherId ?? null,
+        dispatchTeamId: data.dispatchTeamId ?? null,
         gps: data.gps ?? false,
         cabotageDe: data.cabotageDe ?? false,
         cabotageFr: data.cabotageFr ?? false,
@@ -248,6 +250,28 @@ function makeUsersRepo(seed: UserRow[] = []): UsersRepository {
   return {
     findById: jest.fn(async (id: string) => map.get(id) ?? null),
   } as unknown as UsersRepository;
+}
+
+function makeTeam(overrides: Partial<TeamRow> = {}): TeamRow {
+  return {
+    id: 't-1',
+    code: '1.1.13',
+    name: 'Zespół 1.1.13',
+    active: true,
+    dispatchers: [],
+    vehicleCount: 0,
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...overrides,
+  };
+}
+
+function makeTeamsRepo(seed: TeamRow[] = [makeTeam()]): TeamsRepository {
+  const map = new Map<string, TeamRow>();
+  for (const t of seed) map.set(t.id, t);
+  return {
+    findById: jest.fn(async (id: string) => map.get(id) ?? null),
+  } as unknown as TeamsRepository;
 }
 
 function makeAttachmentsRepo(
@@ -348,6 +372,7 @@ function buildService(opts: {
   users?: UserRow[];
   attachments?: VehicleAttachmentRow[];
   storage?: StorageService;
+  teams?: TeamRow[];
 }): {
   svc: VehiclesService;
   storage: StorageService;
@@ -361,6 +386,7 @@ function buildService(opts: {
     makeCarriersRepo(opts.carriers ?? []),
     attachmentsRepo,
     storage,
+    makeTeamsRepo(opts.teams ?? [makeTeam()]),
   );
   return { svc, storage, attachmentsRepo };
 }
@@ -371,7 +397,8 @@ const REQUIRED_VEHICLE_FIELDS = {
   euro: 'V' as const,
   type: 'STD' as const,
   plannerId: 'u-pl',
-  dispatcherId: 'u-dy',
+  // Phase 11 — vehicle is assigned to a dispatch Team (default fixture t-1).
+  dispatchTeamId: 't-1',
   rateDe: 0.5,
   rateUe: 0.5,
   rateExport: 0.5,
@@ -395,16 +422,13 @@ function createDto(overrides: Record<string, unknown> = {}) {
 }
 
 function makeValidPeople(): UserRow[] {
-  return [
-    makeUser({ id: 'u-pl', role: 'planista' }),
-    makeUser({ id: 'u-dy', role: 'dyspozytor' }),
-  ];
+  return [makeUser({ id: 'u-pl', role: 'planista' })];
 }
 
 describe('VehiclesService', () => {
   // ── Create — scalar / role / conflict (existing coverage) ──
 
-  it('admin can create with valid plannerId/dispatcherId', async () => {
+  it('admin can create with valid plannerId/dispatchTeamId', async () => {
     const { svc } = buildService({
       carriers: [makeCarrier()],
       users: makeValidPeople(),
@@ -427,18 +451,31 @@ describe('VehiclesService', () => {
     ).rejects.toThrow(UnprocessableEntityException);
   });
 
-  it('rejects wrong role for dispatcherId (422)', async () => {
+  it('rejects a non-existent dispatchTeamId (422)', async () => {
     const { svc } = buildService({
       carriers: [makeCarrier()],
-      users: [
-        makeUser({ id: 'u-x', role: 'opiekun' }),
-        makeUser({ id: 'u-pl', role: 'planista' }),
-      ],
+      users: makeValidPeople(),
+      teams: [makeTeam({ id: 't-1' })],
     });
     await expect(
       svc.create(
         makeAuth('admin', 'a-1'),
-        createDto({ dispatcherId: 'u-x' }),
+        createDto({ dispatchTeamId: 't-missing' }),
+        [],
+      ),
+    ).rejects.toThrow(UnprocessableEntityException);
+  });
+
+  it('rejects an inactive dispatchTeamId (422)', async () => {
+    const { svc } = buildService({
+      carriers: [makeCarrier()],
+      users: makeValidPeople(),
+      teams: [makeTeam({ id: 't-1', active: false })],
+    });
+    await expect(
+      svc.create(
+        makeAuth('admin', 'a-1'),
+        createDto({ dispatchTeamId: 't-1' }),
         [],
       ),
     ).rejects.toThrow(UnprocessableEntityException);
@@ -554,6 +591,7 @@ describe('VehiclesService', () => {
       makeCarriersRepo([makeCarrier()]),
       makeAttachmentsRepo([]),
       makeStorage(),
+      makeTeamsRepo(),
     );
     await expect(
       svc.create(
@@ -578,6 +616,7 @@ describe('VehiclesService', () => {
       makeCarriersRepo([makeCarrier()]),
       attachmentsRepo,
       storage,
+      makeTeamsRepo(),
     );
     await expect(
       svc.create(

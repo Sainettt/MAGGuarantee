@@ -54,7 +54,8 @@
       "vehicle": "vehicle",
       "driver": "driver",
       "trailer": "trailer",
-      "trailerType": "trailer type"
+      "trailerType": "trailer type",
+      "team": "leading team"
     }
   },
   "users": {
@@ -254,6 +255,7 @@
     "drivers": "Drivers",
     "trailers": "Trailers",
     "trailerTypes": "Trailer types",
+    "teams": "Leading teams",
     "delegations": "Trips",
     "limits": "Limits",
     "users": "Users",
@@ -480,7 +482,7 @@
       "euro": "EURO norm",
       "certificateL": "Certificate L",
       "planner": "Planner",
-      "dispatcher": "Dispatcher",
+      "dispatchTeam": "Leading team",
       "gps": "GPS",
       "gpsMobilePhone": "GPS number",
       "fuelCard": "Fuel card",
@@ -623,6 +625,51 @@
       "shortCode": "Short code",
       "description": "Description",
       "active": "Active"
+    }
+  },
+  "team": {
+    "emptyMembers": "No dispatchers in this team",
+    "noTeam": "No leading team assigned",
+    "inactiveBadge": "Inactive",
+    "leadingTeamHeader": "LEADING TEAM",
+    "codeAria": "Team code: {code}",
+    "membersAria": "Dispatchers of team {code}"
+  },
+  "teams": {
+    "title": "Leading teams",
+    "subtitle": "Numbered dispatcher teams that vehicles are assigned to.",
+    "newTeam": "New team",
+    "editTeam": "Edit team",
+    "emptyTitle": "No teams yet",
+    "emptyMessage": "No leading teams have been defined yet.",
+    "emptyFiltered": {
+      "title": "No results",
+      "message": "No teams match your search."
+    },
+    "filters": {
+      "searchPlaceholder": "Search by code or name"
+    },
+    "fields": {
+      "code": "Code",
+      "codeHint": "Format N.N.N, e.g. 1.1.13",
+      "name": "Name",
+      "dispatchers": "Dispatchers",
+      "dispatchersHint": "Dispatchers see vehicles assigned to this team.",
+      "dispatchersPlaceholder": "Select dispatchers…",
+      "dispatchersEmpty": "No dispatcher found",
+      "dispatchersSelected": "Dispatchers, {count} selected",
+      "vehicleCount": "Vehicles",
+      "active": "Active"
+    },
+    "actions": {
+      "deactivate": "Deactivate",
+      "reactivate": "Activate"
+    },
+    "confirmToggle": {
+      "deactivateTitle": "Deactivate team?",
+      "deactivateBody": "Team {code} will no longer be available for assignment, but its data stays in the system.",
+      "reactivateTitle": "Activate team?",
+      "reactivateBody": "Team {code} will be available for assignment again."
     }
   },
   "validation": {

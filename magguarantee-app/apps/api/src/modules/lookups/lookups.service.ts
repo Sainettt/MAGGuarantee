@@ -4,6 +4,7 @@ import type {
   LookupCarrierDto,
   LookupCarrierFilters,
   LookupCarrierListDto,
+  LookupTeamListDto,
   LookupUserAdminDto,
   LookupUserAdminFilters,
   LookupUserAdminListDto,
@@ -12,6 +13,7 @@ import type {
 
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { CarriersRepository } from '../carriers/carriers.repository';
+import { TeamsService } from '../teams/teams.service';
 import { UsersRepository } from '../users/users.repository';
 
 /** Hard cap for the carriers autocomplete result set per Phase 4.4 brief. */
@@ -42,10 +44,22 @@ export class LookupsService {
   constructor(
     private readonly users: UsersRepository,
     private readonly carriers: CarriersRepository,
+    private readonly teams: TeamsService,
   ) {}
 
   async dyspozytor(): Promise<LookupUserListDto> {
     return this._listByRole('dyspozytor');
+  }
+
+  /**
+   * `/lookups/teams` (Phase 11) — every dispatch team with its dispatcher
+   * roster (incl. each member's `active` flag), so the web vehicle-form draws a
+   * member preview without an N+1. Read-only; accessible to any authenticated
+   * user (same posture as the people-pickers) — the team composition is
+   * non-sensitive.
+   */
+  async teamsList(): Promise<LookupTeamListDto> {
+    return this.teams.lookup();
   }
 
   async planisci(): Promise<LookupUserListDto> {

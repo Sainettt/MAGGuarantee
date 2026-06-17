@@ -2,7 +2,8 @@
 //
 // Source of truth for `/api/v1/vehicles/*` per docs/13-api-design.md#vehicles
 // and docs/04-data-model.md (Vehicle invariants: composite (carrierId, plateNumber)
-// uniqueness; plannerId → role=planista; dispatcherId → role=dyspozytor).
+// uniqueness; plannerId → role=planista; dispatchTeamId → Team (Phase 11 — the
+// legacy single `dispatcherId → role=dyspozytor` FK was replaced by a Team).
 //
 // ── Umowa / cabotage attachments ─────────────────────────
 // The legacy `Vehicle.contract` boolean was dropped (migration 2026-05). The
@@ -24,6 +25,7 @@ import {
   UuidSchema,
   emptyStringToUndefined,
 } from './common';
+import { VehicleDispatchTeamSchema } from './teams';
 
 // ─── Field primitives ────────────────────────────────────
 
@@ -41,7 +43,12 @@ const VehicleTypeSchema = z.enum(['MEGA', 'STD', 'COIL']);
 
 const vehicleAttributeFields = {
   plannerId: UuidSchema,
-  dispatcherId: UuidSchema,
+  /**
+   * Phase 11 — the dispatch TEAM this vehicle is assigned to (replaces the
+   * legacy single `dispatcherId`). Optional/nullable — a vehicle may be
+   * unassigned. Service-side: must reference an ACTIVE `Team`.
+   */
+  dispatchTeamId: UuidSchema.optional(),
   notes: emptyStringToUndefined(z.string().max(2_000).optional()),
   /**
    * REQUIRED — Vehicle.certificateL is NOT NULL.
@@ -112,7 +119,8 @@ export const UpdateVehicleSchema = z
     plateNumber: PlateSchema.optional(),
     active: z.boolean().optional(),
     plannerId: UuidSchema.nullable().optional(),
-    dispatcherId: UuidSchema.nullable().optional(),
+    /** Phase 11 — reassign (or `null` to detach) the dispatch Team. */
+    dispatchTeamId: UuidSchema.nullable().optional(),
     notes: emptyStringToUndefined(z.string().max(2_000).nullable().optional()),
     // The following five fields are NOT NULL since phase3_blocks. PATCH
     // accepts an update (omit means "do not touch") but cannot null them.
@@ -176,7 +184,8 @@ export const VehicleFiltersSchema = z
   .object({
     carrierId: UuidSchema.optional(),
     plannerId: UuidSchema.optional(),
-    dispatcherId: UuidSchema.optional(),
+    /** Phase 11 — filter by dispatch Team (replaces `dispatcherId`). */
+    dispatchTeamId: UuidSchema.optional(),
     active: z.coerce.boolean().optional(),
     q: z.string().min(1).max(64).optional(),
     cursor: UuidSchema.optional(),
@@ -494,14 +503,13 @@ export const VehicleDtoSchema = z.object({
       name: z.string().nullable(),
     })
     .nullable(),
-  dispatcherId: UuidSchema.nullable(),
-  dispatcher: z
-    .object({
-      id: UuidSchema,
-      login: z.string(),
-      name: z.string().nullable(),
-    })
-    .nullable(),
+  /** Phase 11 — the dispatch Team FK (replaces `dispatcherId`). */
+  dispatchTeamId: UuidSchema.nullable(),
+  /**
+   * Phase 11 — the dispatch Team with its dispatcher roster (replaces the
+   * single `dispatcher`). NON-SENSITIVE — no rates. `null` when unassigned.
+   */
+  dispatchTeam: VehicleDispatchTeamSchema.nullable(),
   carrier: z
     .object({
       id: UuidSchema,

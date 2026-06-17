@@ -33,6 +33,7 @@ import {
   Truck,
   UserCog,
   Users,
+  Users2,
   type LucideIcon,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -76,6 +77,7 @@ const ICONS: Record<string, LucideIcon> = {
   Activity,
   HeartHandshake,
   MapPin,
+  Users2,
 };
 
 interface EmployeeSidebarProps {
