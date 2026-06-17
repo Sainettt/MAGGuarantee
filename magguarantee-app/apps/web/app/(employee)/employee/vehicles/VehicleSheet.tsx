@@ -6,9 +6,16 @@
 // Phase 5 (docs/14 § Phase 5):
 //  - EURO norm restricted to V / VI (DB enum dropped III / IV).
 //  - The legacy `contract` boolean is gone — the umowa is now a scanned file.
-//    A <FileUpload> for the umowa screenshot is revealed under the GPS
-//    checkbox; a <FileUpload> per kabotaż checkbox carries that permit scan.
 //  - POST/PATCH are multipart/form-data — see lib/api/vehicles.ts.
+//
+// 2026-06-17 (migration `drop_vehicle_gps_toggle_require_gps_device`):
+//  - The `gps` boolean toggle is GONE. Every vehicle in the km-guarantee
+//    program is GPS-tracked, so `gpsMobilePhone` (the tracker device id) is now
+//    REQUIRED, non-empty, unconditionally — no longer revealed by a checkbox.
+//  - The umowa screenshot (<FileUpload> category=contract) is now
+//    UNCONDITIONALLY REQUIRED on create — it used to be gated on gps=true. On
+//    edit we don't impose a new hard block (matches the server). Cabotage
+//    permit scans keep their per-checkbox conditional-required rule.
 //
 // FILE STATE NOTE: attachment files are deliberately NOT part of the RHF form.
 // `CreateVehicleSchema` is `.strict()` so any extra key fails validation, and
@@ -18,13 +25,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslations } from 'next-intl';
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type ChangeEvent,
-} from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
@@ -168,7 +169,7 @@ export function VehicleSheet({
   // Form state matches CreateVehicleDto in both modes — edit mode keeps
   // `carrierId` in state for display only and the submit handler strips it
   // before calling PATCH. We always validate against CreateVehicleSchema so
-  // its `.refine()` (gps→gpsMobilePhone) fires on edit too.
+  // `gpsMobilePhone`'s required, non-empty rule fires on edit too.
   const form = useForm<FormValues>({
     resolver: zodResolver(CreateVehicleSchema) as never,
     defaultValues: getDefaults(),
@@ -197,9 +198,11 @@ export function VehicleSheet({
   // excluded from the draft. The user re-attaches files after a draft
   // restore; this is the documented, intentional behaviour.
   // `sanitize` drops any persisted key no longer in the form shape (e.g. the
-  // brand/model/year fields removed 2026-06) — otherwise the strict
-  // CreateVehicleSchema rejects the whole form the instant a stale draft
-  // hydrates, even though nothing the user can see is wrong.
+  // brand/model/year fields removed 2026-06, and the `gps` toggle removed
+  // 2026-06-17) — otherwise the strict CreateVehicleSchema rejects the whole
+  // form the instant a stale draft hydrates, even though nothing the user can
+  // see is wrong. The allowed-set is derived from `getDefaults()`, so removing
+  // a field from defaults is enough to evict it from any lingering draft.
   const draft = useFormDraft(form, DRAFT_KEY, {
     enabled: !isEdit && !isWizard,
     sanitize: (raw) => {
@@ -223,7 +226,6 @@ export function VehicleSheet({
         notes: vehicle.notes ?? '',
         certificateL: vehicle.certificateL,
         euro: vehicle.euro,
-        gps: vehicle.gps,
         fuelCard: vehicle.fuelCard,
         type: vehicle.type,
         gb: vehicle.gb ?? false,
@@ -314,8 +316,9 @@ export function VehicleSheet({
   const onSubmit = form.handleSubmit(
     (values) => {
       // Client-side mirror of the server's required-attachment rule. Block
-      // the submit and surface a clear inline error if violated.
-      const missing = missingRequiredAttachments(values, fileBuckets);
+      // the submit and surface a clear inline error if violated. The umowa
+      // (contract) scan is required only on CREATE — edit doesn't re-block it.
+      const missing = missingRequiredAttachments(values, fileBuckets, isEdit);
       if (missing.length > 0) {
         setAttachmentError(
           missing.map((cat) => tFile(`required.${cat}`)).join(' · '),
@@ -355,8 +358,9 @@ export function VehicleSheet({
 
   const submitting = createM.isPending || updateM.isPending;
   const errs = form.formState.errors;
-  // Watch the toggles that reveal conditional <FileUpload> blocks.
-  const gpsOn = form.watch('gps') === true;
+  // Watch the toggles that reveal conditional <FileUpload> blocks. The umowa
+  // (contract) upload is no longer toggle-gated — it is always shown and is
+  // required on create — so only the cabotage flags are watched here.
   const cabotageDeOn = form.watch('cabotageDe') === true;
   const cabotageFrOn = form.watch('cabotageFr') === true;
   // Phase 11 — live <TeamMembers> preview of the picked dispatch team. Resolved
@@ -604,24 +608,21 @@ export function VehicleSheet({
               </FormSection>
 
               <FormSection title={t('sections.equipment')}>
+                {/* GPS-tracker device id — REQUIRED, unconditional. The legacy
+                    «GPS» on/off checkbox is gone: every vehicle is tracked, so
+                    the device id is always entered (no reveal toggle). */}
+                <FormField
+                  label={t('fields.gpsMobilePhone')}
+                  required
+                  error={errs.gpsMobilePhone?.message}
+                  htmlFor="vehicle-gpsMobilePhone"
+                >
+                  <Input
+                    id="vehicle-gpsMobilePhone"
+                    {...form.register('gpsMobilePhone')}
+                  />
+                </FormField>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
-                  <label className="flex items-center gap-2 text-text">
-                    <Checkbox
-                      {...form.register('gps', {
-                        // When toggling GPS off, clear any phone value so a
-                        // stale entry isn't sent. Mirrors the legacy
-                        // _vdToggleGPSMob behavior at index.html:9625-9631.
-                        onChange: (e: ChangeEvent<HTMLInputElement>) => {
-                          if (!e.target.checked) {
-                            form.setValue('gpsMobilePhone', '', {
-                              shouldValidate: true,
-                            });
-                          }
-                        },
-                      })}
-                    />
-                    {t('fields.gps')}
-                  </label>
                   <label className="flex items-center gap-2 text-text">
                     <Checkbox {...form.register('fuelCard')} />
                     {t('fields.fuelCard')}
@@ -630,41 +631,24 @@ export function VehicleSheet({
                     <Checkbox {...form.register('agreement')} />
                     {t('fields.agreement')}
                   </label>
-                  {/* The `contract` checkbox is gone — replaced by the
-                      <FileUpload> below, revealed when GPS is on. */}
                 </div>
-                {gpsOn && (
-                  <>
-                    <FormField
-                      label={t('fields.gpsMobilePhone')}
-                      required
-                      error={errs.gpsMobilePhone?.message}
-                      htmlFor="vehicle-gpsMobilePhone"
-                    >
-                      <Input
-                        id="vehicle-gpsMobilePhone"
-                          {...form.register('gpsMobilePhone')}
-                      />
-                    </FormField>
-                    {/* Umowa screenshot — required by the server when
-                        gps=true. Indented under the GPS checkbox per
-                        docs/14 § 5.1.8. */}
-                    <FormItem className="ml-6 mt-2 animate-slide-in">
-                      <FormLabel htmlFor="vehicle-file-contract" required>
-                        {tFile('fields.contract')}
-                      </FormLabel>
-                      <FileUpload
-                        id="vehicle-file-contract"
-                        value={fileBuckets.contract}
-                        onChange={(items) => setBucket('contract', items)}
-                        labels={fileLabels}
-                      />
-                      <FormDescription>
-                        {tFile('fields.contractHint')}
-                      </FormDescription>
-                    </FormItem>
-                  </>
-                )}
+                {/* Umowa screenshot — UNCONDITIONALLY required on create
+                    (server-enforced); shown for edit too so an operator can
+                    replace the scan, but not newly blocked there. */}
+                <FormItem className="mt-2">
+                  <FormLabel htmlFor="vehicle-file-contract" required>
+                    {tFile('fields.contract')}
+                  </FormLabel>
+                  <FileUpload
+                    id="vehicle-file-contract"
+                    value={fileBuckets.contract}
+                    onChange={(items) => setBucket('contract', items)}
+                    labels={fileLabels}
+                  />
+                  <FormDescription>
+                    {tFile('fields.contractHint')}
+                  </FormDescription>
+                </FormItem>
               </FormSection>
 
               <FormSection title={t('sections.rates')}>
@@ -940,7 +924,6 @@ function getDefaults(): FormValues {
     certificateL: false,
     // EURO norm — V / VI only since the DB enum dropped III / IV.
     euro: '' as unknown as 'V' | 'VI',
-    gps: false,
     fuelCard: false,
     type: '' as unknown as 'MEGA' | 'STD' | 'COIL',
     gb: false,
@@ -1046,22 +1029,28 @@ function collectRemovedIds(
 
 /**
  * Client-side mirror of the server's required-attachment rule:
- *   gps=true        ⇒ ≥1 contract file
+ *   create          ⇒ ≥1 contract (umowa) file — UNCONDITIONAL on create
  *   cabotageDe=true ⇒ ≥1 cabotage_de file
  *   cabotageFr=true ⇒ ≥1 cabotage_fr file
  * Counting existing (non-removed) + newly-added valid files. Returns the
  * categories that are still missing.
+ *
+ * The umowa scan is required ONLY on create (`isEdit === false`). On edit we
+ * never newly-block the operator — they may keep the existing scan, replace
+ * it, or (for legacy rows that predate the rule) save without one — mirroring
+ * the server, which enforces the contract requirement at creation time only.
  */
 function missingRequiredAttachments(
   values: FormValues,
   buckets: FileBuckets,
+  isEdit: boolean,
 ): VehicleAttachmentCategory[] {
   const hasFiles = (items: FileUploadItem[]): boolean =>
     items.some(
       (it) => it.kind === 'existing' || it.error === undefined,
     );
   const missing: VehicleAttachmentCategory[] = [];
-  if (values.gps === true && !hasFiles(buckets.contract)) {
+  if (!isEdit && !hasFiles(buckets.contract)) {
     missing.push(BUCKET_CATEGORY.contract);
   }
   if (values.cabotageDe === true && !hasFiles(buckets.cabotageDe)) {

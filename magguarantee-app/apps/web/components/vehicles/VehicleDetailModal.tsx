@@ -157,7 +157,8 @@ export function VehicleDetailModal({
       title: t('sections.equipment'),
       icon: Package,
       rows: [
-        { label: f('gps'), value: bool(vehicle.gps) },
+        // The `gps` boolean is gone — every vehicle is tracked. Show only the
+        // tracker device id (`gpsMobilePhone`), always present.
         { label: f('gpsMobilePhone'), value: textValue(vehicle.gpsMobilePhone) },
         { label: f('fuelCard'), value: bool(vehicle.fuelCard) },
         { label: f('agreement'), value: bool(vehicle.agreement) },

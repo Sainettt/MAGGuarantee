@@ -83,9 +83,10 @@ export function FleetVehicleDetailModal({
       title: tSections('equipment'),
       icon: Package,
       rows: [
-        { label: tFields('gps'), value: bool(vehicle.gps) },
         {
-          // Quirk #2 — the GPS tracker device ID, NEVER "telefon".
+          // Quirk #2 — the GPS tracker device ID, NEVER "telefon". The `gps`
+          // on/off boolean was dropped (every vehicle is tracked); the device
+          // id is always present, so this is now the only GPS row.
           label: tDetail('gpsDeviceId'),
           value: monoValue(vehicle.gpsMobilePhone),
         },

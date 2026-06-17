@@ -11,6 +11,25 @@ import { PrismaService } from '../../prisma/prisma.service';
  */
 export interface ChatWyjazdRow {
   id: string;
+  /** `Vehicle.plateNumber` — tractor plate (always present). */
+  plateNumber: string;
+  /** `Delegation.trailer.plateNumber` — trailer plate (always present). */
+  trailerPlate: string;
+  /** `Vehicle.sideNumber` (NrBoczny) — nullable; formatter omits when blank. */
+  sideNumber: string | null;
+  /** `Vehicle.gpsMobilePhone` — tracker device id (NOT NULL since 2026-06-17). */
+  gpsMobilePhone: string;
+  /** `Delegation.driverNameSnapshot` — null when not snapshotted at submit. */
+  driverNameSnapshot: string | null;
+  /** `Delegation.driverPhoneSnapshot` — null when not snapshotted at submit. */
+  driverPhoneSnapshot: string | null;
+  /**
+   * Driver relation fallback for name/phone when the snapshot is missing. The
+   * delegation always has a driver (`driverId` NOT NULL), so this is present.
+   */
+  driverFirstName: string;
+  driverLastName: string;
+  driverPhone: string;
   departureAt: Date;
   departureCountry: string;
   departurePostalCode: string;
@@ -57,8 +76,17 @@ export class ChatRepository {
         plannedReturnAt: true,
         returnCountry: true,
         returnPostalCode: true,
+        driverNameSnapshot: true,
+        driverPhoneSnapshot: true,
+        driver: {
+          select: { firstName: true, lastName: true, phone: true },
+        },
+        trailer: { select: { plateNumber: true } },
         vehicle: {
           select: {
+            plateNumber: true,
+            sideNumber: true,
+            gpsMobilePhone: true,
             planner: { select: { name: true } },
             dispatchTeam: {
               select: {
@@ -80,6 +108,15 @@ export class ChatRepository {
     if (!row) return null;
     return {
       id: row.id,
+      plateNumber: row.vehicle?.plateNumber ?? '',
+      trailerPlate: row.trailer?.plateNumber ?? '',
+      sideNumber: row.vehicle?.sideNumber ?? null,
+      gpsMobilePhone: row.vehicle?.gpsMobilePhone ?? '',
+      driverNameSnapshot: row.driverNameSnapshot,
+      driverPhoneSnapshot: row.driverPhoneSnapshot,
+      driverFirstName: row.driver?.firstName ?? '',
+      driverLastName: row.driver?.lastName ?? '',
+      driverPhone: row.driver?.phone ?? '',
       departureAt: row.departureAt,
       departureCountry: row.departureCountry,
       departurePostalCode: row.departurePostalCode,

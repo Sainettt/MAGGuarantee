@@ -195,8 +195,8 @@ const SEED_TEAMS: SeedTeam[] = [
 // A minimal Carrier (extends przewoznik1) plus one Vehicle assigned to the
 // demo team, so the full dispatch flow (vehicle form, modals, dispatcher
 // panel) is visible immediately after seeding. Only DB-NOT-NULL fields are
-// populated; everything else is left at its default / NULL. `gps=false` keeps
-// the `vehicle_gps_device_when_gps_on` CHECK satisfied without a device id.
+// populated; everything else is left at its default / NULL. `gpsMobilePhone`
+// (GPS tracker device id) is NOT NULL since 2026-06-17, so a value is supplied.
 
 const DEMO_CARRIER_USER_LOGIN = 'przewoznik1';
 const DEMO_CARRIER_OPIEKUN_LOGIN = 'opiekun1';
@@ -330,8 +330,8 @@ async function seedDemoFleet(): Promise<number> {
   });
 
   // One vehicle assigned to the demo dispatch team. Idempotent via the
-  // composite unique (carrierId, plateNumber). gps=false ⇒ the
-  // vehicle_gps_device_when_gps_on CHECK is trivially satisfied.
+  // composite unique (carrierId, plateNumber). `gpsMobilePhone` (GPS tracker
+  // device id) is NOT NULL, so a demo value is supplied.
   await prisma.vehicle.upsert({
     where: {
       carrier_plate_unique: {
@@ -345,7 +345,7 @@ async function seedDemoFleet(): Promise<number> {
       certificateL: true,
       euro: 'VI',
       type: 'STD',
-      gps: false,
+      gpsMobilePhone: 'MOB126',
       dispatchTeamId: demoTeam.id,
     },
     update: {

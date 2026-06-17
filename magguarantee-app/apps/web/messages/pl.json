@@ -405,7 +405,7 @@
     "removeAria": "Usuń plik {name}",
     "fields": {
       "contract": "Zrzut ekranu umowy",
-      "contractHint": "Załącz skan lub zdjęcie umowy — wymagane gdy GPS jest włączony.",
+      "contractHint": "Załącz skan lub zdjęcie umowy — wymagane przy dodawaniu pojazdu.",
       "cabotageDe": "Zrzut ekranu pozwolenia kabotażowego DE",
       "cabotageFr": "Zrzut ekranu pozwolenia kabotażowego FR",
       "cabotageHint": "Załącz skan lub zdjęcie pozwolenia kabotażowego.",
@@ -413,7 +413,7 @@
       "adrHint": "Załącz skan lub zdjęcie świadectwa ADR kierowcy."
     },
     "required": {
-      "contract": "Wymagany skan umowy gdy GPS jest włączony.",
+      "contract": "Skan umowy jest wymagany przy dodawaniu pojazdu.",
       "cabotage_de": "Wymagany skan pozwolenia kabotażowego DE.",
       "cabotage_fr": "Wymagany skan pozwolenia kabotażowego FR.",
       "adr": "Wymagany skan świadectwa ADR gdy zaznaczono ADR."
@@ -483,7 +483,6 @@
       "certificateL": "Certyfikat L",
       "planner": "Planista",
       "dispatchTeam": "Zespół prowadzący",
-      "gps": "GPS",
       "gpsMobilePhone": "Numer GPS",
       "fuelCard": "Karta paliwowa",
       "agreement": "Porozumienie",

@@ -54,17 +54,25 @@ import {
  *   - composite UNIQUE (carrierId, plateNumber) — DB; we translate the
  *     P2002 to 409 Conflict.
  *
- * Required-attachment rule (umowa / cabotage screenshots) — service-layer,
- * because files arrive as separate multipart parts and cannot be expressed
- * in the body Zod schema:
- *   - `gps=true`        ⇒ ≥1 `contract`    attachment
- *   - `cabotageDe=true` ⇒ ≥1 `cabotage_de` attachment
- *   - `cabotageFr=true` ⇒ ≥1 `cabotage_fr` attachment
+ * Required-attachment rule (umowa + cabotage screenshots) — service-layer,
+ * because files arrive as separate multipart parts and cannot be expressed in
+ * the body Zod schema:
+ *   - `contract` (umowa) ⇒ ≥1 attachment ALWAYS required on create
+ *   - `cabotageDe=true`  ⇒ ≥1 `cabotage_de` attachment
+ *   - `cabotageFr=true`  ⇒ ≥1 `cabotage_fr` attachment
+ * NOTE (2026-06-17, resolved): the `contract` (umowa) requirement is now
+ * UNCONDITIONAL on create. It used to be gated on the legacy `gps=true` toggle;
+ * when that boolean was dropped the trigger was temporarily removed. Product
+ * resolution: every vehicle has an umowa, so the scan is mandatory for all
+ * creates regardless of any flag. Cabotage attachments stay conditional.
  * The `adr` boolean stays on the vehicle (permit flag) but no longer requires
  * an attachment — the ADR certificate scan moved to the Driver (świadectwo
  * ADR) as a `DriverAttachment` (2026-05-29).
- * On create the rule is checked BEFORE any DB/storage write. On update it
- * must hold over (existing live attachments + newly uploaded − removed).
+ * On create the rule (incl. the unconditional `contract`) is checked BEFORE any
+ * DB/storage write. On update the rule holds over the post-update set (existing
+ * live attachments + newly uploaded − removed); the unconditional `contract`
+ * requirement applies only at create-time — update does not re-block existing
+ * vehicles.
  *
  * Role-scoped list filtering happens here because guards can only fire on
  * per-row routes; collection routes need service-side narrowing.
@@ -118,10 +126,6 @@ export class VehiclesService {
     await this._assertCarrierAccessibleForWrite(user, dto.carrierId);
     if (dto.plannerId) await this._assertRole(dto.plannerId, 'planista');
     if (dto.dispatchTeamId) await this._assertTeamActive(dto.dispatchTeamId);
-    // Defence-in-depth — Zod refine in CreateVehicleSchema already enforces
-    // this, but if the pipe is bypassed we want the friendlier 422 instead
-    // of a Postgres CHECK violation surfacing as 500.
-    this._assertGpsInvariant(dto.gps ?? false, dto.gpsMobilePhone ?? null);
 
     // Required-attachment rule — checked BEFORE any write so a missing
     // umowa/cabotage screenshot fails clean with 422 (no orphan rows).
@@ -171,15 +175,6 @@ export class VehiclesService {
 
     const removeIds = dto.removeAttachmentIds ?? [];
     const toRemove = await this._resolveRemovals(id, removeIds);
-
-    // Resolve the post-patch (gps, gpsMobilePhone) values. PATCH semantics:
-    // if the field isn't in dto, fall back to the existing row.
-    const nextGps = dto.gps !== undefined ? dto.gps : existing.gps;
-    const nextDevice =
-      dto.gpsMobilePhone !== undefined
-        ? dto.gpsMobilePhone
-        : existing.gpsMobilePhone;
-    this._assertGpsInvariant(nextGps, nextDevice ?? null);
 
     // Required-attachment rule over the post-update attachment set.
     this._assertRequiredAttachmentsOnUpdate(
@@ -314,7 +309,6 @@ export class VehiclesService {
         notes: dto.notes ?? null,
         certificateL: dto.certificateL,
         euro: dto.euro,
-        gps: dto.gps,
         fuelCard: dto.fuelCard,
         type: dto.type,
         gb: dto.gb ?? null,
@@ -330,7 +324,7 @@ export class VehiclesService {
         cabotageDe: dto.cabotageDe,
         cabotageFr: dto.cabotageFr,
         adr: dto.adr,
-        gpsMobilePhone: dto.gpsMobilePhone ?? null,
+        gpsMobilePhone: dto.gpsMobilePhone,
         sideNumber: dto.sideNumber ?? null,
         createdById: user.sub,
       });
@@ -352,7 +346,6 @@ export class VehiclesService {
       'notes',
       'certificateL',
       'euro',
-      'gps',
       'fuelCard',
       'type',
       'gb',
@@ -507,8 +500,12 @@ export class VehiclesService {
   // ── Internals: required-attachment rule ──────────────────
 
   /**
-   * Create-time rule: every flag that is `true` must have ≥1 matching
-   * uploaded file. Throws 422 listing all missing categories.
+   * Create-time rule: `contract` (umowa) is ALWAYS required, plus every
+   * cabotage flag that is `true` must have ≥1 matching uploaded file. Throws
+   * 422 listing all missing categories.
+   *
+   * NOTE (2026-06-17, resolved): `contract` is unconditional here — unlike the
+   * update path it is added regardless of any flag (every vehicle has an umowa).
    */
   private _assertRequiredAttachmentsOnCreate(
     dto: CreateVehicleDto,
@@ -516,16 +513,24 @@ export class VehiclesService {
   ): void {
     const present = this._categoriesPresent(uploads);
     const required = this._requiredCategories(
-      dto.gps ?? false,
       dto.cabotageDe ?? false,
       dto.cabotageFr ?? false,
     );
+    // Unconditional on create: umowa scan must be present.
+    required.add('contract');
     this._assertCategoriesSatisfied(required, present);
   }
 
   /**
    * Update-time rule: the post-update attachment set (existing live − removed
-   * + newly uploaded) must satisfy every flag that is `true` AFTER the patch.
+   * + newly uploaded) must satisfy every CONDITIONAL flag that is `true` AFTER
+   * the patch.
+   *
+   * The unconditional `contract` (umowa) requirement is deliberately NOT
+   * enforced here — it only applies at create-time. Editing an existing vehicle
+   * (which may predate the rule, or whose umowa is managed separately) must not
+   * be blocked on the umowa scan. Only `_requiredCategories` (cabotage) drives
+   * the update assertion.
    */
   private _assertRequiredAttachmentsOnUpdate(
     existing: VehicleRow,
@@ -533,16 +538,11 @@ export class VehiclesService {
     uploads: CategorizedUpload[],
     removedIds: Set<string>,
   ): void {
-    const nextGps = dto.gps !== undefined ? dto.gps : existing.gps;
     const nextCabotageDe =
       dto.cabotageDe !== undefined ? dto.cabotageDe : existing.cabotageDe;
     const nextCabotageFr =
       dto.cabotageFr !== undefined ? dto.cabotageFr : existing.cabotageFr;
-    const required = this._requiredCategories(
-      nextGps,
-      nextCabotageDe,
-      nextCabotageFr,
-    );
+    const required = this._requiredCategories(nextCabotageDe, nextCabotageFr);
 
     const survivingExisting = existing.attachments.filter(
       (a) => !removedIds.has(a.id),
@@ -561,14 +561,25 @@ export class VehiclesService {
     return new Set(uploads.map((u) => u.category));
   }
 
-  /** Maps the three flags to the set of required attachment categories. */
+  /**
+   * Maps the CONDITIONAL cabotage flags to the set of required attachment
+   * categories. Shared by the create and update paths.
+   *
+   * The `contract` (umowa) category is intentionally NOT added here: it is
+   * unconditionally required only at create-time (added directly by
+   * `_assertRequiredAttachmentsOnCreate`), and must NOT be re-imposed on the
+   * update path — editing an existing vehicle never re-blocks on the umowa scan.
+   *
+   * NOTE (2026-06-17, resolved): this replaces the temporary state where the
+   * umowa requirement was dropped together with the legacy `gps=true ⇒ contract`
+   * trigger. See docs/13-api-design.md#vehicles — `contract` is now mandatory
+   * on every create, unconditionally.
+   */
   private _requiredCategories(
-    gps: boolean,
     cabotageDe: boolean,
     cabotageFr: boolean,
   ): Set<VehicleAttachmentCategory> {
     const required = new Set<VehicleAttachmentCategory>();
-    if (gps) required.add('contract');
     if (cabotageDe) required.add('cabotage_de');
     if (cabotageFr) required.add('cabotage_fr');
     return required;
@@ -679,23 +690,6 @@ export class VehiclesService {
     throw new ForbiddenException('Brak uprawnień');
   }
 
-  /**
-   * Mirrors the SQL `vehicle_gps_device_when_gps_on` CHECK constraint at
-   * the service layer so we 422 on bad input instead of bouncing off a
-   * Postgres violation. Per Revert #2 the column itself stays NULLable —
-   * non-GPS trucks have no device id.
-   */
-  private _assertGpsInvariant(
-    gps: boolean,
-    gpsMobilePhone: string | null,
-  ): void {
-    if (gps && (gpsMobilePhone === null || gpsMobilePhone.length === 0)) {
-      throw new UnprocessableEntityException(
-        'gpsMobilePhone wymagany gdy gps=true',
-      );
-    }
-  }
-
   private async _assertRole(
     userId: string,
     requiredRole: 'planista',
@@ -749,7 +743,6 @@ export class VehiclesService {
       notes: row.notes,
       certificateL: row.certificateL,
       euro: row.euro,
-      gps: row.gps,
       fuelCard: row.fuelCard,
       type: row.type,
       gb: row.gb,
@@ -780,11 +773,16 @@ export class VehiclesService {
   }
 }
 
-/** Polish 422 messages for each missing required-attachment category. */
+/**
+ * Polish 422 messages for each missing required-attachment category.
+ *
+ * `contract` is unconditionally required on create (2026-06-17 product
+ * resolution — every vehicle has an umowa); cabotage messages stay phrased
+ * around their conditional flag.
+ */
 const REQUIRED_ATTACHMENT_MESSAGES: Record<VehicleAttachmentCategory, string> =
   {
-    contract:
-      'Wymagany skan umowy (contract) gdy GPS jest włączony (gps=true)',
+    contract: 'Wymagany skan umowy (contract) przy tworzeniu pojazdu',
     cabotage_de:
       'Wymagany skan pozwolenia kabotażowego DE gdy cabotageDe=true',
     cabotage_fr:

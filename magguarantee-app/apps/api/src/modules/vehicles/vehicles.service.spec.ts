@@ -38,7 +38,6 @@ function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {
     certificateL: true,
     // EuroNorm is now { V, VI } — legacy III/IV removed.
     euro: 'V',
-    gps: false,
     fuelCard: false,
     type: 'STD',
     gb: null,
@@ -55,7 +54,7 @@ function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {
     cabotageDe: false,
     cabotageFr: false,
     adr: false,
-    gpsMobilePhone: null,
+    gpsMobilePhone: '+48600100200',
     sideNumber: null,
     lastDroveAt: null,
     plannerId: null,
@@ -198,7 +197,7 @@ function makeVehiclesRepo(seed: VehicleRow[] = []): VehiclesRepository {
         plateNumber: data.plateNumber,
         plannerId: data.plannerId ?? null,
         dispatchTeamId: data.dispatchTeamId ?? null,
-        gps: data.gps ?? false,
+        gpsMobilePhone: data.gpsMobilePhone,
         cabotageDe: data.cabotageDe ?? false,
         cabotageFr: data.cabotageFr ?? false,
         adr: data.adr ?? false,
@@ -399,6 +398,8 @@ const REQUIRED_VEHICLE_FIELDS = {
   plannerId: 'u-pl',
   // Phase 11 — vehicle is assigned to a dispatch Team (default fixture t-1).
   dispatchTeamId: 't-1',
+  // Tracker device id — REQUIRED non-empty since the `gps` toggle was dropped.
+  gpsMobilePhone: '+48600100200',
   rateDe: 0.5,
   rateUe: 0.5,
   rateExport: 0.5,
@@ -410,7 +411,6 @@ function createDto(overrides: Record<string, unknown> = {}) {
   return {
     carrierId: 'c-1',
     plateNumber: 'WA0002',
-    gps: false,
     fuelCard: false,
     wasteAllowed: false,
     cabotageDe: false,
@@ -433,7 +433,9 @@ describe('VehiclesService', () => {
       carriers: [makeCarrier()],
       users: makeValidPeople(),
     });
-    const out = await svc.create(makeAuth('admin', 'a-1'), createDto(), []);
+    const out = await svc.create(makeAuth('admin', 'a-1'), createDto(), [
+      makeUpload('contract'),
+    ]);
     expect(out.plateNumber).toBe('WA0002');
     expect(out.plannerId).toBe('u-pl');
   });
@@ -491,7 +493,9 @@ describe('VehiclesService', () => {
       svc.create(
         makeAuth('admin', 'a-1'),
         createDto({ plateNumber: 'WA0001' }),
-        [],
+        // Provide the contract so we reach the duplicate-detection step (which
+        // runs after the required-attachment assert) and get a 409, not 422.
+        [makeUpload('contract')],
       ),
     ).rejects.toThrow(ConflictException);
   });
@@ -519,35 +523,27 @@ describe('VehiclesService', () => {
       svc.create(
         makeAuth('przewoznik', 'u-self'),
         createDto({ carrierId: 'c-mine' }),
-        [],
+        [makeUpload('contract')],
       ),
     ).resolves.toMatchObject({ plateNumber: 'WA0002' });
   });
 
   // ── Create — required-attachment rule ──────────────────────
 
-  it('gps=true without a contract attachment → 422', async () => {
-    const { svc } = buildService({
-      carriers: [makeCarrier()],
-      users: makeValidPeople(),
-    });
-    await expect(
-      svc.create(
-        makeAuth('admin', 'a-1'),
-        createDto({ gps: true, gpsMobilePhone: '+48500500500' }),
-        [],
-      ),
-    ).rejects.toThrow(UnprocessableEntityException);
-  });
+  // NOTE (2026-06-17, resolved): the `contract` (umowa) attachment is now
+  // UNCONDITIONALLY required on create (every vehicle has an umowa). It used to
+  // be gated on the legacy `gps=true` toggle and was temporarily dropped when
+  // that boolean was removed; it is now mandatory for every create regardless
+  // of any flag. Cabotage attachments stay conditional on their flags.
 
-  it('gps=true with a contract attachment succeeds and uploads to storage', async () => {
+  it('create with a contract attachment uploads it to storage', async () => {
     const { svc, storage, attachmentsRepo } = buildService({
       carriers: [makeCarrier()],
       users: makeValidPeople(),
     });
     const out = await svc.create(
       makeAuth('admin', 'a-1'),
-      createDto({ gps: true, gpsMobilePhone: '+48500500500' }),
+      createDto(),
       [makeUpload('contract')],
     );
     expect(out.plateNumber).toBe('WA0002');
@@ -555,21 +551,32 @@ describe('VehiclesService', () => {
     expect(attachmentsRepo.create).toHaveBeenCalledTimes(1);
   });
 
-  it('cabotageDe=true requires a cabotage_de attachment (422 when missing)', async () => {
+  it('create WITHOUT a contract attachment → 422 (umowa is unconditionally required)', async () => {
     const { svc } = buildService({
       carriers: [makeCarrier()],
       users: makeValidPeople(),
     });
     await expect(
+      svc.create(makeAuth('admin', 'a-1'), createDto(), []),
+    ).rejects.toThrow(UnprocessableEntityException);
+  });
+
+  it('cabotageDe=true requires both contract AND a cabotage_de attachment (422 when missing)', async () => {
+    const { svc } = buildService({
+      carriers: [makeCarrier()],
+      users: makeValidPeople(),
+    });
+    // Provide the contract so the failure is specifically the missing cabotage_de.
+    await expect(
       svc.create(
         makeAuth('admin', 'a-1'),
         createDto({ cabotageDe: true }),
-        [],
+        [makeUpload('contract')],
       ),
     ).rejects.toThrow(UnprocessableEntityException);
   });
 
-  it('cabotageFr=true requires a cabotage_fr attachment (422 when missing)', async () => {
+  it('cabotageFr=true requires both contract AND a cabotage_fr attachment (422 when missing)', async () => {
     const { svc } = buildService({
       carriers: [makeCarrier()],
       users: makeValidPeople(),
@@ -578,9 +585,27 @@ describe('VehiclesService', () => {
       svc.create(
         makeAuth('admin', 'a-1'),
         createDto({ cabotageFr: true }),
-        [],
+        [makeUpload('contract')],
       ),
     ).rejects.toThrow(UnprocessableEntityException);
+  });
+
+  it('create with contract + cabotage_de + cabotage_fr (all flags true) succeeds', async () => {
+    const { svc } = buildService({
+      carriers: [makeCarrier()],
+      users: makeValidPeople(),
+    });
+    await expect(
+      svc.create(
+        makeAuth('admin', 'a-1'),
+        createDto({ cabotageDe: true, cabotageFr: true }),
+        [
+          makeUpload('contract'),
+          makeUpload('cabotage_de'),
+          makeUpload('cabotage_fr'),
+        ],
+      ),
+    ).resolves.toMatchObject({ plateNumber: 'WA0002' });
   });
 
   it('required-attachment rule is checked BEFORE the vehicle is created', async () => {
@@ -593,12 +618,9 @@ describe('VehiclesService', () => {
       makeStorage(),
       makeTeamsRepo(),
     );
+    // No contract attachment → must 422 before any vehicle row is created.
     await expect(
-      svc.create(
-        makeAuth('admin', 'a-1'),
-        createDto({ cabotageDe: true }),
-        [],
-      ),
+      svc.create(makeAuth('admin', 'a-1'), createDto(), []),
     ).rejects.toThrow(UnprocessableEntityException);
     expect(vehiclesRepo.create).not.toHaveBeenCalled();
   });
@@ -622,10 +644,12 @@ describe('VehiclesService', () => {
       svc.create(
         makeAuth('admin', 'a-1'),
         createDto({ cabotageDe: true }),
-        [makeUpload('cabotage_de')],
+        // contract + cabotage_de: passes the required-attachment assert so we
+        // reach the attachment-insert step that the mock rejects.
+        [makeUpload('contract'), makeUpload('cabotage_de')],
       ),
     ).rejects.toThrow('db down');
-    // uploaded object cleaned up, vehicle row removed.
+    // first upload's object cleaned up, vehicle row removed.
     expect(storage.delete).toHaveBeenCalledTimes(1);
     expect(vehiclesRepo.hardDelete).toHaveBeenCalledTimes(1);
   });
@@ -703,46 +727,50 @@ describe('VehiclesService', () => {
 
   // ── Update — required-attachment rule over the post-update set ──
 
-  it('update flipping gps→true with no existing/new contract → 422', async () => {
+  // NOTE: the unconditional `contract` requirement applies only at CREATE.
+  // On update, only the cabotage flags trigger a required attachment — editing
+  // an existing vehicle never re-blocks on the umowa scan. The remaining update
+  // tests exercise the cabotage rule and the soft-delete + re-upload mechanics.
+
+  it('update flipping cabotageDe→true with no existing/new cabotage_de → 422', async () => {
     const { svc } = buildService({
-      vehicles: [makeVehicle({ id: 'v-1', gps: false })],
+      vehicles: [makeVehicle({ id: 'v-1', cabotageDe: false })],
       carriers: [makeCarrier()],
       users: makeValidPeople(),
     });
     await expect(
-      svc.update('v-1', { gps: true, gpsMobilePhone: '+48500500500' }, []),
+      svc.update('v-1', { cabotageDe: true }, []),
     ).rejects.toThrow(UnprocessableEntityException);
   });
 
-  it('update flipping gps→true is satisfied by an existing contract attachment', async () => {
-    const att = makeRowAttachment({ id: 'att-1', category: 'contract' });
+  it('update flipping cabotageDe→true is satisfied by an existing cabotage_de attachment', async () => {
+    const att = makeRowAttachment({ id: 'att-1', category: 'cabotage_de' });
     const { svc } = buildService({
-      vehicles: [makeVehicle({ id: 'v-1', gps: false, attachments: [att] })],
+      vehicles: [
+        makeVehicle({ id: 'v-1', cabotageDe: false, attachments: [att] }),
+      ],
       carriers: [makeCarrier()],
       users: makeValidPeople(),
       attachments: [
-        makeAttachmentRow({ id: 'att-1', category: 'contract' }),
+        makeAttachmentRow({ id: 'att-1', category: 'cabotage_de' }),
       ],
     });
     await expect(
-      svc.update('v-1', { gps: true, gpsMobilePhone: '+48500500500' }, []),
-    ).resolves.toMatchObject({ id: 'v-1', gps: true });
+      svc.update('v-1', { cabotageDe: true }, []),
+    ).resolves.toMatchObject({ id: 'v-1', cabotageDe: true });
   });
 
-  it('update rejects removing the only contract while gps stays true (422)', async () => {
-    const att = makeRowAttachment({ id: 'att-1', category: 'contract' });
+  it('update rejects removing the only cabotage_de while cabotageDe stays true (422)', async () => {
+    const att = makeRowAttachment({ id: 'att-1', category: 'cabotage_de' });
     const { svc } = buildService({
       vehicles: [
-        makeVehicle({
-          id: 'v-1',
-          gps: true,
-          gpsMobilePhone: '+48500500500',
-          attachments: [att],
-        }),
+        makeVehicle({ id: 'v-1', cabotageDe: true, attachments: [att] }),
       ],
       carriers: [makeCarrier()],
       users: makeValidPeople(),
-      attachments: [makeAttachmentRow({ id: 'att-1', category: 'contract' })],
+      attachments: [
+        makeAttachmentRow({ id: 'att-1', category: 'cabotage_de' }),
+      ],
     });
     await expect(
       svc.update('v-1', { removeAttachmentIds: ['att-1'] }, []),
@@ -752,14 +780,7 @@ describe('VehiclesService', () => {
   it('update allows removing a contract when a new one is uploaded in the same request', async () => {
     const att = makeRowAttachment({ id: 'att-1', category: 'contract' });
     const { svc, attachmentsRepo } = buildService({
-      vehicles: [
-        makeVehicle({
-          id: 'v-1',
-          gps: true,
-          gpsMobilePhone: '+48500500500',
-          attachments: [att],
-        }),
-      ],
+      vehicles: [makeVehicle({ id: 'v-1', attachments: [att] })],
       carriers: [makeCarrier()],
       users: makeValidPeople(),
       attachments: [makeAttachmentRow({ id: 'att-1', category: 'contract' })],

@@ -132,7 +132,7 @@ const ownerByRole = {
 // ─── getOne ──────────────────────────────────────────────────
 
 describe('GpsService.getOne', () => {
-  it('404 when vehicle not found / gps disabled', async () => {
+  it('404 when vehicle not found / inactive', async () => {
     const svc = new GpsService(
       makeRedis() as unknown as import('../../../redis/redis.service').RedisService,
       makeRepo({ byId: { [VEHICLE_ID]: null } }),

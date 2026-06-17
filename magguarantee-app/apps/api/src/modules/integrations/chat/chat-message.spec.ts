@@ -1,7 +1,8 @@
-// Unit tests for the pure 4-line Google Chat wyjazd formatter.
+// Unit tests for the pure 6-line Google Chat wyjazd formatter.
 // Locked contract: docs/16-jobs-and-integrations.md#google-chat-notifications.
-// Phase 11: the ZESPÓŁ line is `planista / <all team dispatcher names>` —
-// the weryfikator slot was removed.
+// The leading ZESTAW / KIEROWCA lines were added 2026-06-17 (real-screen
+// format). Phase 11: the ZESPÓŁ line is `planista / <all team dispatcher
+// names>` — the weryfikator slot was removed.
 
 import {
   formatDateTimeWarsaw,
@@ -14,6 +15,12 @@ import {
 /** A complete, all-fields-present base context. */
 function baseCtx(overrides: Partial<WyjazdMessageContext> = {}): WyjazdMessageContext {
   return {
+    plateNumber: 'WX12345',
+    trailerPlate: 'WT67890',
+    sideNumber: '101',
+    gpsMobilePhone: '+48600100200',
+    driverName: 'Jan Kowalski',
+    driverPhone: '+48700200300',
     // 2026-03-15 09:30 UTC. Warsaw is UTC+1 in March → 10:30 local.
     departureAt: new Date('2026-03-15T09:30:00.000Z'),
     departureCountry: 'PL',
@@ -31,28 +38,51 @@ function baseCtx(overrides: Partial<WyjazdMessageContext> = {}): WyjazdMessageCo
 }
 
 describe('formatWyjazdMessage', () => {
-  it('produces exactly four lines with planista + all team dispatchers', () => {
+  it('produces exactly six lines in the locked order', () => {
     const msg = formatWyjazdMessage(baseCtx());
     const lines = msg.split('\n');
-    expect(lines).toHaveLength(4);
-    expect(lines[0]).toBe('WYJAZD: 15/03/2026 10:30 / PL / 00-001');
-    expect(lines[1]).toBe('ZJAZD: 20/03/2026 / DE / 10115');
-    expect(lines[2]).toBe(
+    expect(lines).toHaveLength(6);
+    expect(lines[0]).toBe('ZESTAW: WX12345 / WT67890 / 101 / +48600100200');
+    expect(lines[1]).toBe('KIEROWCA: Jan Kowalski / +48700200300');
+    expect(lines[2]).toBe('WYJAZD: 15/03/2026 10:30 / PL / 00-001');
+    expect(lines[3]).toBe('ZJAZD: 20/03/2026 / DE / 10115');
+    expect(lines[4]).toBe(
       'ZESPÓŁ PROWADZĄCY: Anna Planista / Bartek Dyspozytor / Celina Dyspozytor',
     );
-    expect(lines[3]).toBe('OPIEKUN: Damian Opiekun');
+    expect(lines[5]).toBe('OPIEKUN: Damian Opiekun');
+  });
+
+  it('omits the sideNumber segment when null (no empty slot, no double slash)', () => {
+    const msg = formatWyjazdMessage(baseCtx({ sideNumber: null }));
+    const zestaw = msg.split('\n')[0];
+    expect(zestaw).toBe('ZESTAW: WX12345 / WT67890 / +48600100200');
+    expect(zestaw).not.toContain('//');
+  });
+
+  it('omits the sideNumber segment when blank/whitespace', () => {
+    const msg = formatWyjazdMessage(baseCtx({ sideNumber: '   ' }));
+    const zestaw = msg.split('\n')[0];
+    expect(zestaw).toBe('ZESTAW: WX12345 / WT67890 / +48600100200');
+    expect(zestaw).not.toContain('//');
+  });
+
+  it('renders the driver name + phone resolved by the builder', () => {
+    const msg = formatWyjazdMessage(
+      baseCtx({ driverName: 'Piotr Nowak', driverPhone: '+48555000111' }),
+    );
+    expect(msg.split('\n')[1]).toBe('KIEROWCA: Piotr Nowak / +48555000111');
   });
 
   it('renders only planista when the team has no dispatchers', () => {
     const msg = formatWyjazdMessage(baseCtx({ dyspozytorzy: [] }));
-    const team = msg.split('\n')[2];
+    const team = msg.split('\n')[4];
     expect(team).toBe('ZESPÓŁ PROWADZĄCY: Anna Planista');
     expect(team).not.toContain('//');
   });
 
   it('omits planista when absent (only team dispatchers shown)', () => {
     const msg = formatWyjazdMessage(baseCtx({ planista: null }));
-    expect(msg.split('\n')[2]).toBe(
+    expect(msg.split('\n')[4]).toBe(
       'ZESPÓŁ PROWADZĄCY: Bartek Dyspozytor / Celina Dyspozytor',
     );
   });
@@ -61,7 +91,7 @@ describe('formatWyjazdMessage', () => {
     const msg = formatWyjazdMessage(
       baseCtx({ dyspozytorzy: ['Bartek Dyspozytor', null, '   '] }),
     );
-    const team = msg.split('\n')[2];
+    const team = msg.split('\n')[4];
     expect(team).toBe('ZESPÓŁ PROWADZĄCY: Anna Planista / Bartek Dyspozytor');
     expect(team).not.toContain('//');
   });
@@ -70,31 +100,31 @@ describe('formatWyjazdMessage', () => {
     const msg = formatWyjazdMessage(
       baseCtx({ planista: null, dyspozytorzy: ['Tylko Ten'] }),
     );
-    expect(msg.split('\n')[2]).toBe('ZESPÓŁ PROWADZĄCY: Tylko Ten');
+    expect(msg.split('\n')[4]).toBe('ZESPÓŁ PROWADZĄCY: Tylko Ten');
   });
 
   it('leaves the ZESPÓŁ value empty when planista + team are both absent', () => {
     const msg = formatWyjazdMessage(
       baseCtx({ planista: null, dyspozytorzy: [] }),
     );
-    expect(msg.split('\n')[2]).toBe('ZESPÓŁ PROWADZĄCY: ');
+    expect(msg.split('\n')[4]).toBe('ZESPÓŁ PROWADZĄCY: ');
   });
 
   it('treats empty/whitespace names as absent', () => {
     const msg = formatWyjazdMessage(
       baseCtx({ planista: '', dyspozytorzy: ['   ', 'Tylko Ten'] }),
     );
-    expect(msg.split('\n')[2]).toBe('ZESPÓŁ PROWADZĄCY: Tylko Ten');
+    expect(msg.split('\n')[4]).toBe('ZESPÓŁ PROWADZĄCY: Tylko Ten');
   });
 
   it('falls back to em dash for opiekun when null', () => {
     const msg = formatWyjazdMessage(baseCtx({ opiekun: null }));
-    expect(msg.split('\n')[3]).toBe(`OPIEKUN: ${OPIEKUN_FALLBACK}`);
+    expect(msg.split('\n')[5]).toBe(`OPIEKUN: ${OPIEKUN_FALLBACK}`);
   });
 
   it('falls back to em dash for opiekun when blank', () => {
     const msg = formatWyjazdMessage(baseCtx({ opiekun: '   ' }));
-    expect(msg.split('\n')[3]).toBe(`OPIEKUN: ${OPIEKUN_FALLBACK}`);
+    expect(msg.split('\n')[5]).toBe(`OPIEKUN: ${OPIEKUN_FALLBACK}`);
   });
 
   it('has no trailing newline', () => {

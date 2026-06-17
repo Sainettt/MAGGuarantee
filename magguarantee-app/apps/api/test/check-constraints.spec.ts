@@ -5,8 +5,10 @@
  * `DATABASE_URL` and verify that:
  *   1. `claim_accepted_payment_complete` rejects ZAAKCEPTOWANO with NULL
  *      `orderNumber`/`orderDate`/`amountApproved`.
- *   2. `vehicle_gps_device_when_gps_on` rejects `gps=true` with NULL
- *      `gpsMobilePhone`.
+ *
+ * (The former `vehicle_gps_device_when_gps_on` CHECK was DROPPED on 2026-06-17
+ * together with the `vehicles.gps` column — `gpsMobilePhone` is now an
+ * unconditional NOT NULL, so there is no conditional constraint to test.)
  *
  * Each test is self-contained: it creates the minimum needed parent rows
  * (User → Carrier → Vehicle), executes the bad insert via raw SQL, and
@@ -116,51 +118,6 @@ describeIfDb('phase3_blocks CHECK constraints', () => {
     await prisma.$disconnect();
   });
 
-  it('vehicle_gps_device_when_gps_on rejects gps=true + gpsMobilePhone=NULL', async () => {
-    let caught: unknown;
-    try {
-      await prisma.vehicle.create({
-        data: {
-          carrierId,
-          plateNumber: `CHK-GPS-${Date.now()}`,
-          certificateL: true,
-          euro: 'V',
-          type: 'STD',
-          rateDe: 0.5,
-          rateUe: 0.5,
-          rateExport: 0.5,
-          rateImport: 0.5,
-          gps: true,
-          gpsMobilePhone: null,
-        },
-      });
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeDefined();
-    expect(isCheckViolation(caught)).toBe(true);
-  });
-
-  it('vehicle_gps_device_when_gps_on accepts gps=false + gpsMobilePhone=NULL', async () => {
-    const v = await prisma.vehicle.create({
-      data: {
-        carrierId,
-        plateNumber: `CHK-NOGPS-${Date.now()}`,
-        certificateL: true,
-        euro: 'V',
-        type: 'STD',
-        rateDe: 0.5,
-        rateUe: 0.5,
-        rateExport: 0.5,
-        rateImport: 0.5,
-        gps: false,
-        gpsMobilePhone: null,
-      },
-    });
-    cleanupIds.vehicles.push(v.id);
-    expect(v.id).toBeTruthy();
-  });
-
   it('claim_accepted_payment_complete rejects ZAAKCEPTOWANO with NULL orderNumber', async () => {
     // First make a vehicle to anchor the claim to.
     const vehicle = await prisma.vehicle.create({
@@ -174,6 +131,7 @@ describeIfDb('phase3_blocks CHECK constraints', () => {
         rateUe: 0.5,
         rateExport: 0.5,
         rateImport: 0.5,
+        gpsMobilePhone: 'CHK-DEVICE',
       },
     });
     cleanupIds.vehicles.push(vehicle.id);
@@ -225,6 +183,7 @@ describeIfDb('phase3_blocks CHECK constraints', () => {
         rateUe: 0.5,
         rateExport: 0.5,
         rateImport: 0.5,
+        gpsMobilePhone: 'CHK-DEVICE',
       },
     });
     cleanupIds.vehicles.push(vehicle.id);

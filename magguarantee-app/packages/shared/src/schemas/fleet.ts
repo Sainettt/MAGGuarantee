@@ -28,7 +28,7 @@ import { VehicleDispatchTeamSchema } from './teams';
 /**
  * Picker-friendly vehicle row: just enough to render `<select>` options,
  * group by carrier and decide whether the row is eligible for selection
- * (`active` + `gps`).
+ * (`active`).
  *
  * Phase 6.4 — enriched (ADDITIVE) with a curated, NON-SENSITIVE field set so
  * the planista/dyspozytor read-only fleet detail modals render from the list
@@ -51,9 +51,12 @@ export const VehicleListItemSchema = z.object({
   // ── Phase 6.4 additive fields (§6.4.2) ──
   euro: z.enum(['V', 'VI']),
   certificateL: z.boolean(),
-  gps: z.boolean(),
-  /** GPS tracker device ID (misnamed column — quirk #2). NOT a phone number. */
-  gpsMobilePhone: z.string().nullable(),
+  /**
+   * GPS tracker device ID (misnamed column — quirk #2). NOT a phone number.
+   * NOT NULL since 2026-06-17 (the `gps` toggle was dropped; every vehicle is
+   * tracked).
+   */
+  gpsMobilePhone: z.string(),
   fuelCard: z.boolean(),
   agreement: z.boolean().nullable(),
   adr: z.boolean(),

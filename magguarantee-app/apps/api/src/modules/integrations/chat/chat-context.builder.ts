@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 
-import { ChatRepository } from './chat.repository';
+import { ChatRepository, type ChatWyjazdRow } from './chat.repository';
 import type { WyjazdMessageContext } from './chat-message';
 
 /**
@@ -14,7 +14,15 @@ export type BuildResult = WyjazdMessageContext | null;
 /**
  * Assembles the `WyjazdMessageContext` consumed by `formatWyjazdMessage`.
  *
- * Data sources (Phase 11 rework / docs/16-jobs-and-integrations.md):
+ * Data sources (docs/16-jobs-and-integrations.md):
+ *   - ZESTAW        = `Vehicle.plateNumber` / `Delegation.trailer.plateNumber` /
+ *                     `Vehicle.sideNumber` (nullable → omitted) /
+ *                     `Vehicle.gpsMobilePhone`
+ *   - KIEROWCA      = driver name + phone, resolved here from the snapshot
+ *                     (`Delegation.driverNameSnapshot` / `driverPhoneSnapshot`)
+ *                     with a fallback to the driver relation
+ *                     (`firstName + ' ' + lastName`, `phone`). The driver is
+ *                     always present (`driverId` NOT NULL) → no em-dash fallback.
  *   - planista     = `Vehicle.planner.name`                  (may be null → omitted)
  *   - dyspozytorzy = `Vehicle.dispatchTeam.dispatchers[].name`(all names of the
  *                    dispatch TEAM; may be empty → omitted; blanks dropped)
@@ -41,6 +49,12 @@ export class ChatContextBuilder {
     }
 
     return {
+      plateNumber: row.plateNumber,
+      trailerPlate: row.trailerPlate,
+      sideNumber: row.sideNumber,
+      gpsMobilePhone: row.gpsMobilePhone,
+      driverName: this._resolveDriverName(row),
+      driverPhone: this._resolveDriverPhone(row),
       departureAt: row.departureAt,
       departureCountry: row.departureCountry,
       departurePostalCode: row.departurePostalCode,
@@ -51,5 +65,23 @@ export class ChatContextBuilder {
       dyspozytorzy: row.dyspozytorNames,
       opiekun: row.opiekunName,
     };
+  }
+
+  /**
+   * Driver display name: prefer the submit-time snapshot, fall back to the live
+   * driver relation (`firstName + ' ' + lastName`). The driver is always
+   * present, so the result is never blank for a valid delegation.
+   */
+  private _resolveDriverName(row: ChatWyjazdRow): string {
+    const snapshot = (row.driverNameSnapshot ?? '').trim();
+    if (snapshot.length > 0) return snapshot;
+    return `${row.driverFirstName} ${row.driverLastName}`.trim();
+  }
+
+  /** Driver phone: prefer the submit-time snapshot, fall back to `driver.phone`. */
+  private _resolveDriverPhone(row: ChatWyjazdRow): string {
+    const snapshot = (row.driverPhoneSnapshot ?? '').trim();
+    if (snapshot.length > 0) return snapshot;
+    return row.driverPhone;
   }
 }

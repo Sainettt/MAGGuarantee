@@ -58,7 +58,6 @@ const vehicleAttributeFields = {
   certificateL: z.boolean(),
   /** REQUIRED — Vehicle.euro is NOT NULL since phase3_blocks. */
   euro: EuroNormSchema,
-  gps: z.boolean().default(false),
   fuelCard: z.boolean().optional().default(false),
   /** REQUIRED — Vehicle.type is NOT NULL since phase3_blocks. */
   type: VehicleTypeSchema,
@@ -87,12 +86,14 @@ const vehicleAttributeFields = {
    */
   adr: z.boolean().optional(),
   /**
-   * Conditional: NOT NULL only when `gps=true` (kept nullable in the column;
-   * the `vehicle_gps_device_when_gps_on` CHECK constraint enforces it). The
-   * Zod-side `.refine(...)` below makes the same rule visible to the API
-   * layer so we 422 instead of bouncing off a Postgres constraint error.
+   * Tracker device id — REQUIRED, non-empty. Every vehicle in the km-guarantee
+   * program is GPS-tracked, so the device id is always present
+   * (`Vehicle.gpsMobilePhone` is NOT NULL since the 2026-06-17 migration
+   * `drop_vehicle_gps_toggle_require_gps_device`). The legacy `gps` boolean
+   * toggle and the conditional `vehicle_gps_device_when_gps_on` CHECK were
+   * dropped, so there is no cross-field rule anymore.
    */
-  gpsMobilePhone: emptyStringToUndefined(z.string().max(32).optional()),
+  gpsMobilePhone: z.string().min(1).max(32),
   sideNumber: emptyStringToUndefined(z.string().max(16).optional()),
 };
 
@@ -105,11 +106,7 @@ export const CreateVehicleSchema = z
     active: z.boolean().optional(),
     ...vehicleAttributeFields,
   })
-  .strict()
-  .refine((d) => !d.gps || (d.gpsMobilePhone && d.gpsMobilePhone.length > 0), {
-    message: 'gpsMobilePhone wymagany gdy gps=true',
-    path: ['gpsMobilePhone'],
-  });
+  .strict();
 export type CreateVehicleDto = z.infer<typeof CreateVehicleSchema>;
 
 // ─── Update ──────────────────────────────────────────────
@@ -131,7 +128,6 @@ export const UpdateVehicleSchema = z
     rateUe: z.number().nonnegative().optional(),
     rateExport: z.number().nonnegative().optional(),
     rateImport: z.number().nonnegative().optional(),
-    gps: z.boolean().optional(),
     fuelCard: z.boolean().optional(),
     gb: z.boolean().nullable().optional(),
     it: z.boolean().nullable().optional(),
@@ -144,14 +140,12 @@ export const UpdateVehicleSchema = z
     /** ADR cargo permit flag — pure boolean, no attachment required. */
     adr: z.boolean().optional(),
     /**
-     * Nullable in the column — but iff `gps=true` it must be set. The cross-
-     * field rule is enforceable here only when both `gps` and `gpsMobilePhone`
-     * are present in the patch; partial updates fall through to the Postgres
-     * CHECK constraint which raises 500 → service maps to 422.
+     * Tracker device id. NOT NULL in the column — a PATCH may change it but
+     * cannot null/blank it. `optional()` = "do not touch"; when present it must
+     * be non-empty. (Legacy `gps`-conditional rule removed — every vehicle is
+     * GPS-tracked.)
      */
-    gpsMobilePhone: emptyStringToUndefined(
-      z.string().max(32).nullable().optional(),
-    ),
+    gpsMobilePhone: z.string().min(1).max(32).optional(),
     sideNumber: emptyStringToUndefined(
       z.string().max(16).nullable().optional(),
     ),
@@ -163,19 +157,7 @@ export const UpdateVehicleSchema = z
      */
     removeAttachmentIds: z.array(UuidSchema).max(64).optional(),
   })
-  .strict()
-  .refine(
-    (d) =>
-      // Only enforce when both fields are part of the patch — partial
-      // updates (gps alone or gpsMobilePhone alone) defer to the DB CHECK.
-      d.gps === undefined ||
-      !d.gps ||
-      (d.gpsMobilePhone !== undefined && d.gpsMobilePhone !== null && d.gpsMobilePhone.length > 0),
-    {
-      message: 'gpsMobilePhone wymagany gdy gps=true',
-      path: ['gpsMobilePhone'],
-    },
-  );
+  .strict();
 export type UpdateVehicleDto = z.infer<typeof UpdateVehicleSchema>;
 
 // ─── Filters ─────────────────────────────────────────────
@@ -473,7 +455,6 @@ export const VehicleDtoSchema = z.object({
   notes: z.string().nullable(),
   certificateL: z.boolean(),
   euro: EuroNormSchema,
-  gps: z.boolean(),
   fuelCard: z.boolean(),
   type: VehicleTypeSchema,
   gb: z.boolean().nullable(),
@@ -491,8 +472,8 @@ export const VehicleDtoSchema = z.object({
   /** Default false in DB — always present on the wire. Pure permit flag; no
    *  attachment is tied to it. */
   adr: z.boolean(),
-  /** Nullable per Revert #2 — required iff `gps=true` (CHECK enforces). */
-  gpsMobilePhone: z.string().nullable(),
+  /** Tracker device id — always present (NOT NULL since 2026-06-17). */
+  gpsMobilePhone: z.string(),
   sideNumber: z.string().nullable(),
   lastDroveAt: IsoDateTimeSchema.nullable(),
   plannerId: UuidSchema.nullable(),

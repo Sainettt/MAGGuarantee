@@ -579,37 +579,49 @@ GPS_CACHE_TTL_SEC=300            # 5 минут — больше TTL polling-а,
 > incoming webhook — это новая интеграция, а не возврат внутреннего чата.
 
 Когда перевозчик регистрирует выезд (`POST /delegations` → `DelegationsService.add`,
-статус `zgloszony`), система постит **сообщение из ровно 4 строк** в постоянный
+статус `zgloszony`), система постит **сообщение из ровно 6 строк** в постоянный
 Google Chat space через incoming-webhook. Триггер — немедленно при создании
 выезда, без approval-gate. Доставка — через очередь `chat-notify-wyjazd`
 (in-process worker), POST уходит **off the request path** — нотификация **никогда
 не ломает и не задерживает** `add()` (enqueue обёрнут в try/catch, warn-only).
 
-### Контракт сообщения (4 строки, TZ Europe/Warsaw)
+### Контракт сообщения (6 строк, TZ Europe/Warsaw)
 
 ```
+ZESTAW: <plateNumber> / <trailerPlate> / <sideNumber?> / <gpsMobilePhone>
+KIEROWCA: <driverName> / <driverPhone>
 WYJAZD: <departureAt DD/MM/YYYY HH:MM> / <departureCountry> / <departurePostalCode>
 ZJAZD: <plannedReturnAt DD/MM/YYYY> / <returnCountry> / <returnPostalCode>
-ZESPÓŁ PROWADZĄCY: <planista> / <dyspozytor> / <weryfikator>
+ZESPÓŁ PROWADZĄCY: <planista> / <все диспетчеры команды авто>
 OPIEKUN: <opiekun>
 ```
 
 - `departureAt` — с временем (`HH:MM`); `plannedReturnAt` — только дата.
+- **ZESTAW** — `Vehicle.plateNumber` / `Delegation.trailer.plateNumber` /
+  `Vehicle.sideNumber` / `Vehicle.gpsMobilePhone`. `plateNumber`, `trailerPlate`
+  и `gpsMobilePhone` всегда присутствуют (NOT NULL в модели). `sideNumber`
+  nullable → сегмент **опускается** если `null`/пусто (без пустого слота, без
+  `//`) — то же правило, что и для строки `ZESPÓŁ`.
+- **KIEROWCA** — `<имя> / <телефон>`. Имя = `Delegation.driverNameSnapshot` с
+  фолбэком на `driver.firstName + ' ' + driver.lastName`; телефон =
+  `Delegation.driverPhoneSnapshot` с фолбэком на `driver.phone` (резолвится в
+  `chat-context.builder.ts`). Водитель всегда есть (`Delegation.driverId` NOT
+  NULL) → em-dash-фолбэка нет.
 - Источники команды:
-  - planista = `Vehicle.planner.name`, dyspozytor = `Vehicle.dispatcher.name`
-    (любое может быть `null` → имя просто **опускается** из строки `ZESPÓŁ`,
-    без пустого слота и без `//`).
-  - weryfikator = **единственный** активный `User` с ролью `weryfikator`
-    (`findFirst … active: true, orderBy createdAt asc`) — НЕ per-vehicle.
-    0 активных → опускается; >1 → берётся первый + `logger.warn`.
+  - planista = `Vehicle.planner.name` (один ведущий спедитор), диспетчеры =
+    **все** `Vehicle.dispatchTeam.dispatchers[].name` (обычно 2 по сменам, число
+    не фиксировано). Любое имя может быть `null`/пустым → **опускается** из
+    строки `ZESPÓŁ`, без пустого слота и без `//`.
   - opiekun = `Carrier.opiekun.name` (опекун перевозчика выезда). `null` → `—`.
   - `ZESPÓŁ PROWADZĄCY:` склеивает присутствующие имена через ` / `.
 
-> 🗓️ **PLANNED (вместе с фичей `Team`, Phase 11) — пересмотр получателей.** Реального человека-`weryfikator` в MAGTRANS **нет**; вместо него выезд ведёт **второй диспетчер**. После ввода сущности `Team` строка станет:
-> ```
-> ZESPÓŁ PROWADZĄCY: <planista> / <все диспетчеры команды авто>
-> ```
-> — `weryfikator` из неё **убирается**. Источники: planista = `Vehicle.planner.name` (один ведущий спедитор), диспетчеры = **все** `Vehicle.dispatchTeam.dispatchers[].name` (обычно 2 по сменам, число не фиксировано). На миграцию: `chat-context.builder.ts` (`_resolveWeryfikator`) и `ChatRepository.findWyjazdRow` (single `dyspozytorName`). См. [04-data-model.md](04-data-model.md) (сущность `Team`) и [17-migration-roadmap.md](17-migration-roadmap.md) Phase 11.
+> **Phase 11 — `weryfikator` убран из получателей.** Реального человека-`weryfikator`
+> в MAGTRANS нет; выезд ведёт **второй диспетчер**. Строка `ZESPÓŁ PROWADZĄCY`
+> теперь `planista / <все диспетчеры команды авто>` — legacy-слот `weryfikator`
+> (единственный активный `User` с ролью `weryfikator`) **удалён**. Источники:
+> planista = `Vehicle.planner.name`, диспетчеры = `Vehicle.dispatchTeam.dispatchers[].name`.
+> См. [04-data-model.md](04-data-model.md) (сущность `Team`) и
+> [17-migration-roadmap.md](17-migration-roadmap.md) Phase 11.
 
 ### Конфигурация
 

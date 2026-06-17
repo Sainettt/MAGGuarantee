@@ -1,21 +1,33 @@
 /**
  * Pure formatter for the Google Chat wyjazd-notification message.
  *
- * Produces EXACTLY four lines (no trailing newline), per the locked contract
+ * Produces EXACTLY six lines (no trailing newline), per the locked contract
  * in docs/16-jobs-and-integrations.md#google-chat-notifications:
  *
+ *   ZESTAW: <plateNumber> / <trailerPlate> / <sideNumber?> / <gpsMobilePhone>
+ *   KIEROWCA: <driverName> / <driverPhone>
  *   WYJAZD: <departureAt DD/MM/YYYY HH:MM> / <departureCountry> / <departurePostalCode>
  *   ZJAZD: <plannedReturnAt DD/MM/YYYY> / <returnCountry> / <returnPostalCode>
  *   ZESPÓŁ PROWADZĄCY: <planista> / <dispatcher 1> / <dispatcher 2> / …
  *   OPIEKUN: <opiekun>
  *
- * Phase 11 rework: the team line is `planista / <every dispatcher name of the
- * vehicle's dispatch TEAM>`. The legacy `weryfikator` slot was REMOVED (the
- * role is no longer per-wyjazd; see docs/16-jobs-and-integrations.md).
+ * The two leading lines (`ZESTAW` / `KIEROWCA`) were added 2026-06-17 to match
+ * the real chat screen confirmed by the user. Phase 11 rework: the team line is
+ * `planista / <every dispatcher name of the vehicle's dispatch TEAM>`. The
+ * legacy `weryfikator` slot was REMOVED (the role is no longer per-wyjazd; see
+ * docs/16-jobs-and-integrations.md).
  *
  * Rules:
  *   - Dates are rendered in TZ Europe/Warsaw.
  *   - `departureAt` carries a time (HH:MM); `plannedReturnAt` is date-only.
+ *   - ZESTAW joins the present segments with ` / `. `sideNumber` is nullable —
+ *     when null/blank its segment is OMITTED (no empty slot, no double slash),
+ *     the same rule as the ZESPÓŁ line. `plateNumber`, `trailerPlate` and
+ *     `gpsMobilePhone` are always present (NOT NULL in the data model).
+ *   - KIEROWCA renders `<name> / <phone>`; the driver is always present
+ *     (`Delegation.driverId` is NOT NULL), so there is no em-dash fallback —
+ *     the builder resolves name/phone from the snapshot, falling back to the
+ *     driver relation.
  *   - The ZESPÓŁ line joins ONLY the present names with ` / ` — the planista or
  *     any dispatcher may be absent (null/empty) and is simply omitted (no empty
  *     slot, no double slash). If the team is empty and there is no planista the
@@ -30,6 +42,28 @@ const WARSAW_TZ = 'Europe/Warsaw';
 export const OPIEKUN_FALLBACK = '—';
 
 export interface WyjazdMessageContext {
+  /** `Vehicle.plateNumber` — tractor plate (always present). */
+  plateNumber: string;
+  /** `Delegation.trailer.plateNumber` — trailer plate (always present). */
+  trailerPlate: string;
+  /**
+   * `Vehicle.sideNumber` (NrBoczny) — nullable. When null/blank its ZESTAW
+   * segment is omitted (no empty slot, no double slash).
+   */
+  sideNumber: string | null;
+  /** `Vehicle.gpsMobilePhone` — tracker device id (always present, NOT NULL). */
+  gpsMobilePhone: string;
+  /**
+   * Driver display name — `Delegation.driverNameSnapshot` with a fallback to
+   * `driver.firstName + ' ' + driver.lastName`, resolved by the context
+   * builder. Always present (the delegation always has a driver).
+   */
+  driverName: string;
+  /**
+   * Driver phone — `Delegation.driverPhoneSnapshot` with a fallback to
+   * `driver.phone`, resolved by the context builder. Always present.
+   */
+  driverPhone: string;
   /** Full departure timestamp (rendered with date + time). */
   departureAt: Date;
   departureCountry: string;
@@ -51,8 +85,20 @@ export interface WyjazdMessageContext {
   opiekun: string | null;
 }
 
-/** Build the 4-line Google Chat message text from the assembled context. */
+/** Build the 6-line Google Chat message text from the assembled context. */
 export function formatWyjazdMessage(ctx: WyjazdMessageContext): string {
+  // ZESTAW — tractor / trailer / [side number, omitted if blank] / device id.
+  // Same omit-when-blank rule as the ZESPÓŁ line: no empty slot, no `//`.
+  const zestaw = [
+    ctx.plateNumber,
+    ctx.trailerPlate,
+    ctx.sideNumber,
+    ctx.gpsMobilePhone,
+  ]
+    .map((n) => (n ?? '').trim())
+    .filter((n) => n.length > 0)
+    .join(' / ');
+
   // Phase 11 — planista + every team dispatcher; weryfikator removed. Blank /
   // null names are dropped (no empty slot, no double slash).
   const team = [ctx.planista, ...ctx.dyspozytorzy]
@@ -63,6 +109,8 @@ export function formatWyjazdMessage(ctx: WyjazdMessageContext): string {
   const opiekun = (ctx.opiekun ?? '').trim() || OPIEKUN_FALLBACK;
 
   return [
+    `ZESTAW: ${zestaw}`,
+    `KIEROWCA: ${ctx.driverName} / ${ctx.driverPhone}`,
     `WYJAZD: ${formatDateTimeWarsaw(ctx.departureAt)} / ${ctx.departureCountry} / ${ctx.departurePostalCode}`,
     `ZJAZD: ${formatDateWarsaw(ctx.plannedReturnAt)} / ${ctx.returnCountry} / ${ctx.returnPostalCode}`,
     `ZESPÓŁ PROWADZĄCY: ${team}`,

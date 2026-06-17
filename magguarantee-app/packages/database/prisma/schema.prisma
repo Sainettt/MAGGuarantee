@@ -318,7 +318,6 @@ model Vehicle {
   // false = no certificate / NULL in the legacy column.
   certificateL Boolean
   euro         EuroNorm
-  gps          Boolean     @default(false)
   fuelCard     Boolean     @default(false)
   type         VehicleType
 
@@ -347,11 +346,11 @@ model Vehicle {
   cabotageFr Boolean @default(false)
   adr        Boolean @default(false)
 
-  // tracker device ID — required iff gps=true. Enforced by the
-  // `vehicle_gps_device_when_gps_on` CHECK constraint added in
-  // 20260507_phase3_blocks/migration.sql; nullable in the column itself
-  // because vehicles without a GPS tracker simply have no device id.
-  gpsMobilePhone String?
+  // tracker device id — STRICT (NOT NULL). Every vehicle in the program is GPS-
+  // tracked, so the device id is always present. The legacy `gps` boolean toggle
+  // and the conditional `vehicle_gps_device_when_gps_on` CHECK were dropped
+  // 2026-06-17 (migration drop_vehicle_gps_toggle_require_gps_device).
+  gpsMobilePhone String
   sideNumber     String? // NrBoczny
   // OstatnioJezdzilo — auto-bumped by the api to max(lastDroveAt, date) on a
   // VehicleDailyKm drove-row (Phase 7 #3). Never edited by hand.

@@ -23,7 +23,6 @@ import { BadRequestException } from '@nestjs/common';
 const BOOLEAN_FIELDS = [
   'active',
   'certificateL',
-  'gps',
   'fuelCard',
   'gb',
   'it',

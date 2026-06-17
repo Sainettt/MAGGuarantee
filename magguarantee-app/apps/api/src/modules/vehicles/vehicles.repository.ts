@@ -32,9 +32,11 @@ export interface VehicleRowAttachment {
  * Boolean (TAK/NIE) in 20260515130307_vehicle_certificate_l_to_boolean. The
  * legacy `contract` boolean was dropped 2026-05 — the umowa is now a
  * `VehicleAttachment` (category=contract). `euro` is restricted to `V`/`VI`
- * (legacy III/IV removed from `enum EuroNorm`). `gpsMobilePhone` stays
- * nullable (required iff `gps=true` — enforced by SQL CHECK constraint
- * `vehicle_gps_device_when_gps_on`).
+ * (legacy III/IV removed from `enum EuroNorm`). `gpsMobilePhone` is NOT NULL
+ * since the 2026-06-17 migration `drop_vehicle_gps_toggle_require_gps_device`
+ * — every vehicle is GPS-tracked, so the device id is always present; the
+ * legacy `gps` boolean toggle and the `vehicle_gps_device_when_gps_on` CHECK
+ * were dropped together.
  */
 export interface VehicleRow {
   id: string;
@@ -44,7 +46,6 @@ export interface VehicleRow {
   notes: string | null;
   certificateL: boolean;
   euro: 'V' | 'VI';
-  gps: boolean;
   fuelCard: boolean;
   type: 'MEGA' | 'STD' | 'COIL';
   gb: boolean | null;
@@ -61,7 +62,7 @@ export interface VehicleRow {
   cabotageDe: boolean;
   cabotageFr: boolean;
   adr: boolean;
-  gpsMobilePhone: string | null;
+  gpsMobilePhone: string;
   sideNumber: string | null;
   lastDroveAt: Date | null;
   plannerId: string | null;
@@ -337,7 +338,6 @@ export class VehiclesRepository {
     notes?: string | null;
     certificateL: boolean;
     euro: 'V' | 'VI';
-    gps?: boolean;
     fuelCard?: boolean;
     type: 'MEGA' | 'STD' | 'COIL';
     gb?: boolean | null;
@@ -354,11 +354,11 @@ export class VehiclesRepository {
     cabotageFr?: boolean;
     adr?: boolean;
     /**
-     * Nullable per Revert #2 — required iff `gps=true`. The CHECK constraint
-     * `vehicle_gps_device_when_gps_on` rejects mismatches at the DB level;
-     * the service layer pre-validates so we 422 instead of 500.
+     * Tracker device id — REQUIRED (NOT NULL since 2026-06-17). Every vehicle
+     * is GPS-tracked; the legacy `gps` toggle and its conditional CHECK were
+     * dropped, so there is no cross-field rule to pre-validate anymore.
      */
-    gpsMobilePhone?: string | null;
+    gpsMobilePhone: string;
     sideNumber?: string | null;
     createdById?: string | null;
   }): Promise<VehicleRow> {
@@ -372,7 +372,6 @@ export class VehiclesRepository {
         notes: data.notes ?? null,
         certificateL: data.certificateL,
         euro: data.euro,
-        gps: data.gps ?? false,
         fuelCard: data.fuelCard ?? false,
         type: data.type,
         gb: data.gb ?? null,
@@ -388,7 +387,7 @@ export class VehiclesRepository {
         cabotageDe: data.cabotageDe ?? false,
         cabotageFr: data.cabotageFr ?? false,
         adr: data.adr ?? false,
-        gpsMobilePhone: data.gpsMobilePhone ?? null,
+        gpsMobilePhone: data.gpsMobilePhone,
         sideNumber: data.sideNumber ?? null,
         createdById: data.createdById ?? null,
       },
@@ -477,7 +476,6 @@ export class VehiclesRepository {
       // the column is NOT NULL post-phase3_blocks.
       certificateL: row.certificateL ?? false,
       euro: row.euro ?? 'V',
-      gps: row.gps,
       fuelCard: row.fuelCard,
       type: row.type ?? 'STD',
       gb: row.gb,
@@ -558,7 +556,6 @@ interface VehiclePrismaShape {
   // Wide variants — soft-delete extension widens scalars in the inferred type.
   certificateL: boolean | null;
   euro: 'V' | 'VI' | null;
-  gps: boolean;
   fuelCard: boolean;
   type: 'MEGA' | 'STD' | 'COIL' | null;
   gb: boolean | null;
@@ -574,7 +571,7 @@ interface VehiclePrismaShape {
   cabotageDe: boolean;
   cabotageFr: boolean;
   adr: boolean;
-  gpsMobilePhone: string | null;
+  gpsMobilePhone: string;
   sideNumber: string | null;
   lastDroveAt: Date | null;
   plannerId: string | null;

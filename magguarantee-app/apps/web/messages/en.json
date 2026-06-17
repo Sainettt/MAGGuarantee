@@ -405,7 +405,7 @@
     "removeAria": "Remove file {name}",
     "fields": {
       "contract": "Contract screenshot",
-      "contractHint": "Attach a scan or photo of the contract — required when GPS is on.",
+      "contractHint": "Attach a scan or photo of the contract — required when adding a vehicle.",
       "cabotageDe": "DE cabotage permit screenshot",
       "cabotageFr": "FR cabotage permit screenshot",
       "cabotageHint": "Attach a scan or photo of the cabotage permit.",
@@ -413,7 +413,7 @@
       "adrHint": "Attach a scan or photo of the driver's ADR certificate."
     },
     "required": {
-      "contract": "Contract scan required when GPS is on.",
+      "contract": "Contract scan is required when adding a vehicle.",
       "cabotage_de": "DE cabotage permit scan required.",
       "cabotage_fr": "FR cabotage permit scan required.",
       "adr": "ADR certificate scan required when ADR is checked."
@@ -483,7 +483,6 @@
       "certificateL": "Certificate L",
       "planner": "Planner",
       "dispatchTeam": "Leading team",
-      "gps": "GPS",
       "gpsMobilePhone": "GPS number",
       "fuelCard": "Fuel card",
       "agreement": "Agreement",

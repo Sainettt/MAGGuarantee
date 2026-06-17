@@ -255,7 +255,7 @@ model Vehicle {
   euro         EuroNorm      // STRICT
   // `adrClasses` (ADR class CSV→array) dropped 2026-06 — only the `adr`
   // boolean permit flag is kept; ADR cert scan lives on Driver.
-  gps          Boolean       @default(false)
+  // `gps` boolean toggle dropped 2026-06-17 — every vehicle is GPS-tracked.
   fuelCard     Boolean       @default(false)
   type         VehicleType   // STRICT
 
@@ -279,9 +279,10 @@ model Vehicle {
   cabotageFr     Boolean  @default(false)
   adr            Boolean  @default(false)  // ADR transport permit flag
 
-  // tracker device id — required iff gps=true (CHECK vehicle_gps_device_when_gps_on)
-  // misnomer: it's NOT a phone number — see docs/19-known-quirks.md (#gpsMobilePhone)
-  gpsMobilePhone     String?
+  // tracker device id — STRICT (NOT NULL since 2026-06-17). Every vehicle is
+  // GPS-tracked; the legacy `gps` toggle + CHECK vehicle_gps_device_when_gps_on
+  // were dropped. Misnomer: it's NOT a phone number — see docs/19-known-quirks.md (#gpsMobilePhone)
+  gpsMobilePhone     String
   // `nextInspectionDate` (NastepnyPrzeglad) dropped 2026-06 — inspection date
   // no longer tracked on the vehicle.
   sideNumber         String?
@@ -732,8 +733,7 @@ shows whether the verifier overrode the carrier's declared hours.
 
 | Поле | Слой защиты | Notes |
 |---|---|---|
-| `plateNumber`, `certificateL`, `euro`, `type` | Strict everywhere | DB NOT NULL |
-| `gpsMobilePhone` | DB nullable + CHECK `vehicle_gps_device_when_gps_on` | Forced when `gps=true` |
+| `plateNumber`, `certificateL`, `euro`, `type`, `gpsMobilePhone` | Strict everywhere | DB NOT NULL. `gpsMobilePhone` made NOT NULL 2026-06-17 (legacy `gps` toggle + CHECK `vehicle_gps_device_when_gps_on` dropped — every vehicle is GPS-tracked). |
 | `rateDe`, `rateUe`, `rateExport`, `rateImport` | Optional everywhere | NULL = "not negotiated yet"; 0 would be ambiguous |
 | `gb`, `it`, `fr`, `agreement`, `lastDroveAt`, `notes`, etc. | Optional everywhere | |
 
@@ -842,7 +842,7 @@ shows whether the verifier overrode the carrier's declared hours.
 | M | CertyfikatL | `certificateL` (Boolean — was enum L1/L2/L3 до 2026-05) |
 | N | EURO | `euro` |
 | O | ADR (CSV) | dropped 2026-06 — only `adr` boolean permit flag kept (ADR class list removed) |
-| P-R | GPS, KartaPaliwowa, Typ | `gps`, `fuelCard`, `type` |
+| P-R | GPS, KartaPaliwowa, Typ | `gps` dropped 2026-06-17 (every vehicle GPS-tracked); `fuelCard`, `type` |
 | S | Dyspozytor (login) | → FK `dispatcherId` (🗓️ Phase 11: мигрирует на `Team`/`dispatchTeamId` — см. [04-data-model.md](04-data-model.md) «Team») |
 | T-W | GB, IT, FR, Porozumienie | `gb`, `it`, `fr`, `agreement` |
 | X | Umowa | dropped 2026-05 — umowa scan stored as `VehicleAttachment` (category=contract) |
@@ -970,6 +970,7 @@ shows whether the verifier overrode the carrier's declared hours.
 | `20260601120000_drop_vehicle_trailer_inspection_and_vehicle_adr_classes` | Деструктивный `DROP COLUMN` (user-confirmed full removal — UI + API + DB). Удаляет `vehicles.nextInspectionDate` (DATE), `trailers.nextInspectionDate` (DATE) и `vehicles.adrClasses` (TEXT[]). Сохранены отдельные соседние поля: `vehicles.adr` / `drivers.adr` (boolean permit-флаги), `vehicles.wasteCountries`, а также VehicleAttachment/DriverAttachment с ADR-сертификатами. Существующие значения теряются (подтверждено), без backfill. Hand-authored по существующей конвенции (без `--create-only`, т.к. на момент создания БД была недоступна) — не применялась к live-БД, применится через `prisma migrate deploy`. |
 | `20260601130000_driver_rename_passport_to_id_document` | Переименование `drivers.passportNumber` → `idDocumentNumber` (ALTER TABLE … RENAME COLUMN, без потери данных). Колонка теперь хранит номер любого удостоверения личности (паспорт, dowód osobisty и т.п.), а не только паспорта; тип, nullability и casing не меняются. Hand-authored по существующей конвенции (БД была недоступна на момент создания) — не применялась к live-БД, применится через `prisma migrate deploy`. |
 | `20260615120000_drop_vehicle_trailer_brand_model_year` | Деструктивный `DROP COLUMN` (user-confirmed full removal — UI + API + DB). Удаляет `vehicles.brand`, `vehicles.model`, `vehicles.year`, `trailers.brand`, `trailers.model`, `trailers.year` — описательные характеристики авто/прицепа, выпиленные из продукта. БД greenfield (пустая + seed-only), поэтому plain DROP COLUMN корректен — без backfill, без down-миграции. Соседние поля (`notes`, размеры/оборудование прицепа) не затронуты. |
+| `20260617130000_drop_vehicle_gps_toggle_require_gps_device` | GPS-номер делается обязательным у каждого авто. Forward-only. Порядок: DROP CHECK `vehicle_gps_device_when_gps_on` (добавлен в `20260507191424_phase3_blocks`) → DROP COLUMN `vehicles.gps` (legacy «есть GPS» toggle) → defensive backfill `UPDATE … SET gpsMobilePhone='UNKNOWN' WHERE … IS NULL` (no-op на пустой БД; страхует stale dev-строки из старого `gps=false` пути) → `vehicles.gpsMobilePhone` SET NOT NULL. Продуктовое решение 2026-06-17: каждое авто в km-гарантийной программе GPS-tracked, поэтому boolean-toggle избыточен, а device id присутствует всегда. CHECK дропается ДО колонки `gps`, на которую он ссылается; Zod (`gpsMobilePhone` required, non-empty) не даёт плейсхолдеру пережить round-trip через API. |
 
 Production deploy: `prisma migrate deploy` в CI/CD пайплайне (без `--create-only`).
 

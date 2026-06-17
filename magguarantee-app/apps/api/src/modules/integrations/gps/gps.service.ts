@@ -56,8 +56,9 @@ export class GpsService {
    * Single-vehicle endpoint.
    *
    * Auth flow:
-   *   - 404 if vehicle doesn't exist OR has gps=false (intentionally
-   *     indistinguishable — don't leak existence).
+   *   - 404 if vehicle doesn't exist OR is inactive (intentionally
+   *     indistinguishable — don't leak existence). Every active vehicle is
+   *     GPS-tracked since the `gps` toggle was dropped.
    *   - 403 if the caller's role doesn't grant access to this vehicle.
    */
   async getOne(

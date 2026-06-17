@@ -9,8 +9,12 @@ import type { GpsVehicleRef } from './gps.types';
  * Per the api-agent rules ("Repositories own DB access — controllers and
  * services never call `prisma.*` directly") this is the only place that
  * touches the Vehicle table for GPS purposes. We don't reuse VehiclesRepository
- * because the filters here are different (gps=true is mandatory, the role
- * scope crosses Carrier joins, and we only ever need {id, plateNumber}).
+ * because the filters here are different (only ACTIVE vehicles are tracked, the
+ * role scope crosses Carrier joins, and we only ever need {id, plateNumber}).
+ *
+ * Tracking scope (2026-06-17): the per-vehicle `gps` boolean was dropped —
+ * every vehicle in the program is GPS-tracked — so "tracked" now means simply
+ * `active=true` (was `gps=true AND active=true`).
  *
  * `findOneForGps` and `findManyForGps` apply the same role-based ownership
  * scope as `/api/v1/vehicles` would — but the rules are spelled out in this
@@ -23,8 +27,9 @@ export class GpsRepository {
   /**
    * Look up a single vehicle for ownership / capability checks.
    *
-   * Returns `null` if the vehicle doesn't exist OR `gps=false` OR is soft-
+   * Returns `null` if the vehicle doesn't exist OR is inactive OR is soft-
    * deleted. The controller maps `null` → 404 per docs/13-api-design.md.
+   * (Every active vehicle is GPS-tracked since the `gps` toggle was dropped.)
    *
    * Returns `{ ownership: ..., ref }` so the service can run the role check
    * without a second query.
@@ -40,7 +45,7 @@ export class GpsRepository {
     active: boolean;
   } | null> {
     const row = await this.prisma.client.vehicle.findFirst({
-      where: { id: vehicleId, gps: true, active: true },
+      where: { id: vehicleId, active: true },
       select: {
         id: true,
         plateNumber: true,
@@ -67,7 +72,7 @@ export class GpsRepository {
    * Active GPS-tracked vehicles, scoped by role.
    *
    * `scope` shape mirrors the AuthUser identity:
-   *  - admin             → all `gps=true, active=true, deletedAt=null`
+   *  - admin             → all `active=true, deletedAt=null`
    *    (we encode that as `kind: 'all'`).
    *  - opiekun           → vehicles whose Carrier.opiekunId = userId.
    *  - planista          → vehicles whose Vehicle.plannerId = userId.
@@ -80,7 +85,7 @@ export class GpsRepository {
    * a narrow claims-only role per docs/03-roles.md#pracownik.
    */
   async findManyForGps(scope: GpsScope): Promise<GpsVehicleRef[]> {
-    const where: Record<string, unknown> = { gps: true, active: true };
+    const where: Record<string, unknown> = { active: true };
 
     switch (scope.kind) {
       case 'all':

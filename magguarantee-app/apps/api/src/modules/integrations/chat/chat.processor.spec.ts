@@ -1,6 +1,6 @@
 // Unit tests for the in-process chat-notify-wyjazd worker.
 //  - no-op (no POST) when the webhook URL is unset.
-//  - POSTs the 4-line message when the URL is set (mocked fetch).
+//  - POSTs the 6-line message when the URL is set (mocked fetch).
 //  - throws on POST failure so BullMQ retries.
 //  - completes silently when the delegation context is gone.
 
@@ -16,6 +16,12 @@ const WEBHOOK_URL = 'https://chat.googleapis.com/v1/spaces/AAA/messages?key=k';
 
 function fullCtx(): WyjazdMessageContext {
   return {
+    plateNumber: 'WX12345',
+    trailerPlate: 'WT67890',
+    sideNumber: '101',
+    gpsMobilePhone: '+48600100200',
+    driverName: 'Jan Kowalski',
+    driverPhone: '+48700200300',
     departureAt: new Date('2026-03-15T09:30:00.000Z'),
     departureCountry: 'PL',
     departurePostalCode: '00-001',
@@ -67,7 +73,7 @@ describe('ChatProcessor', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('POSTs the 4-line message to the webhook when enabled', async () => {
+  it('POSTs the 6-line message to the webhook when enabled', async () => {
     const fetchSpy = jest
       .spyOn(global, 'fetch')
       .mockResolvedValue(new Response(null, { status: 200 }));
@@ -85,9 +91,11 @@ describe('ChatProcessor', () => {
     expect(init?.method).toBe('POST');
     const body = JSON.parse((init?.body as string) ?? '{}') as { text: string };
     const lines = body.text.split('\n');
-    expect(lines).toHaveLength(4);
-    expect(lines[0]).toBe('WYJAZD: 15/03/2026 10:30 / PL / 00-001');
-    expect(lines[3]).toBe('OPIEKUN: Damian Opiekun');
+    expect(lines).toHaveLength(6);
+    expect(lines[0]).toBe('ZESTAW: WX12345 / WT67890 / 101 / +48600100200');
+    expect(lines[1]).toBe('KIEROWCA: Jan Kowalski / +48700200300');
+    expect(lines[2]).toBe('WYJAZD: 15/03/2026 10:30 / PL / 00-001');
+    expect(lines[5]).toBe('OPIEKUN: Damian Opiekun');
   });
 
   it('throws when the webhook returns a 5xx (BullMQ will retry)', async () => {

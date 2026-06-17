@@ -516,7 +516,6 @@ function toVehicleListItem(v: VehicleRow): VehicleListItem {
     sideNumber: v.sideNumber,
     euro: v.euro,
     certificateL: v.certificateL,
-    gps: v.gps,
     gpsMobilePhone: v.gpsMobilePhone,
     fuelCard: v.fuelCard,
     agreement: v.agreement,
