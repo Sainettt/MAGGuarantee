@@ -375,6 +375,22 @@ DB CHECK enforces `returnCountry` length 2..8 (covers `EL`) and `returnPostalCod
 | GET `/fleet/eksport` | `getEksportData` |
 | GET `/fleet/weryfikator` | `getWeryfikatorData` |
 
+### Alerts (истекающие документы) — `/api/v1/alerts`
+
+> 🗓️ **PLANNED (Sub-slice 5.2).** Расширяемый alert-движок: предупреждения о документах со сроком, которые истекают или уже истекли. Отдельный модуль `apps/api/src/modules/alerts/` на паттерне **реестра провайдеров** — каждый источник алерта = одна декларативная запись (`AlertProvider`); добавление нового типа = +1 провайдер в `ALERT_PROVIDERS` (+ поле-дата в сущность, если её ещё нет). Движок/контроллер/репозиторий при этом не меняются.
+>
+> **Scope сейчас — только документы с уже существующим полем-датой** (3 провайдера): `Carrier.insuranceExpiry` (OCP), `Carrier.licenseExpiry` (лицензия перевозчика), `Driver.licenseExpiry` (права водителя). Документы без даты (ADR, каботаж, техосмотр, паспорт, umowa, KREPTD) — НЕ обрабатываются (нет поля-даты); архитектура делает их добавление тривиальным позже.
+
+| Method + Path | Назначение | Роль |
+|---|---|---|
+| GET `/alerts?severity=&type=` | Список алертов по истекающим документам, scoped. opiekun → свои (Carrier `opiekunId` / Driver через `carrier.opiekunId`), admin → все. **pracownik — 403.** Read-only (нет мутаций, нет `@Audit`). | admin / opiekun |
+
+**Severity (1 порог из AppConfig `document_expiry_warn_days`, дефолт 30):** алерт включается если документ уже истёк ИЛИ истекает в течение N дней. `severity = 'expired'` (`daysToExpiry < 0`) \| `'warning'` (`0 ≤ daysToExpiry ≤ N`). Сортировка: `expired` первыми, затем по возрастанию `daysToExpiry`. Неактивные (`active=false`) и soft-deleted сущности исключаются.
+
+**AlertItem DTO:** `{ type, documentCategory: 'ocp'|'carrier_license'|'driver_license', severity: 'expired'|'warning', subjectLabel (имя перевозчика/водителя), carrierId, carrierName, expiresOn (ISO date 'YYYY-MM-DD'), daysToExpiry (int, <0 = просрочено) }`. **Response:** `{ items: AlertItem[], meta: { warnDays, total } }`. Shared-схема — `packages/shared/src/schemas/alerts.ts`.
+
+**Точки расширения (заложены, не в v1):** dismiss/snooze (будущая таблица `AlertDismissal`, `@@unique[userId, type, subjectId]`) — сейчас `_filterDismissed` no-op; пагинации нет (объём алертов опекуна мал).
+
 ### Limits — `/api/v1/limits`
 
 | Method + Path | GAS |

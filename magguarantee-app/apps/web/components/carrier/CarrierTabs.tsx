@@ -63,9 +63,21 @@ export function CarrierTabs() {
   return (
     <nav
       aria-label={t('ariaLabel')}
-      className="sticky top-16 z-10 bg-card/90 backdrop-blur border-b border-border"
+      // App-chrome layer (`z-20`) — same family as the global <Header>, which
+      // sits at `top-0 z-20` while this nav sits at `top-16`, so they never
+      // vertically overlap. The previous `z-10` tied with the in-page
+      // DataTable's sticky `<thead>` (also `z-10`); since the table comes later
+      // in DOM order the tie broke in its favour and the scrolling table painted
+      // OVER the nav. Lifting the nav to `z-20` keeps app-chrome strictly above
+      // page content (`z-10`).
+      className="sticky top-16 z-20 bg-card/90 backdrop-blur border-b border-border"
     >
-      <div className="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 flex items-center gap-1 overflow-x-auto">
+      {/* `overflow-y-hidden` pins the cross-axis: `overflow-x-auto` alone makes
+          the browser compute `overflow-y: auto`, and the active tab's
+          `border-b-2 -mb-px` spills 1px past the content box — enough to summon
+          a stray vertical scrollbar on the nav. Horizontal tab-scroll on narrow
+          viewports is preserved. */}
+      <div className="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 flex items-center gap-1 overflow-x-auto overflow-y-hidden">
         {TABS.map((tab) => {
           // `Wnioski` is `/carrier/claims` but `Nowy` is `/carrier/claims/new`
           // — give the more specific match priority so the user clearly

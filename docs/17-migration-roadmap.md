@@ -421,6 +421,30 @@
 - **`GET /opiekun/carriers` не задокументирован** в `docs/13-api-design.md` (только `/fleet/opiekun` упомянут). Дополнить при следующей правке docs.
 - **Carrier list: колонка `opiekun` для opiekun-caller**. Сейчас показывает каждый раз его собственное имя (визуальный шум). Тривиально завернуть в `{!isOpiekun && ...}` если попросят.
 
+### Sub-slice 5.2 — Expiring-documents alerts (📋 ЗАПЛАНИРОВАНО)
+
+Вкладка «Alerty» для opiekun: предупреждения, что у его подопечных истекают документы со сроком. Спроектирована как **расширяемый alert-движок** (паттерн реестра провайдеров) — обособленная логика, куда новые типы алертов добавляются одной записью. Решения с заказчиком 2026-06-17.
+
+**Scope v1 — только документы с уже существующим полем-датой** (3 провайдера): `Carrier.insuranceExpiry` (OCP), `Carrier.licenseExpiry` (лицензия), `Driver.licenseExpiry` (права водителя). Документы без даты (ADR, каботаж, техосмотр, паспорт, umowa, KREPTD) — НЕ обрабатываются; архитектура делает их добавление тривиальным (добавить поле-дату + 1 провайдер).
+
+**Backend** — новый модуль `apps/api/src/modules/alerts/`:
+- `AlertProvider`-интерфейс + реестр `ALERT_PROVIDERS` (декларативные записи: `type`, `model`, `dateField`, `documentCategory`, `scopeWhere` (opiekun-фильтр), `toSubject`). Добавление типа = +1 провайдер; движок/контроллер/репозиторий не меняются. Золотой тест читает длину реестра (подключение нового провайдера проверяется механически).
+- Движок (`alerts.service`): итерация провайдеров → scoped-запрос (`dateField not null AND <= today+N`) → `daysToExpiry`/severity → merge + sort (expired first, затем по возрастанию дней). Неактивные/soft-deleted исключаются.
+- `GET /api/v1/alerts` `@Roles('admin','opiekun')` — opiekun scoped (`carrier.opiekunId`), admin all, pracownik 403. Read-only (без `@Audit`). См. [13-api-design.md](13-api-design.md) «Alerts».
+- Точки расширения (заглушки): `_filterDismissed` no-op (будущая таблица `AlertDismissal` для snooze/dismiss); без пагинации.
+
+**Shared** — `packages/shared/src/schemas/alerts.ts`: `AlertItemSchema`, severity/type/category enum-ы, query/response (`{ items, meta: { warnDays, total } }`).
+
+**DB** — без миграции/новых таблиц. Один seed-ключ `AppConfig.document_expiry_warn_days = 30` (1 порог; движок работает и без него — fallback 30). Будущая `AlertDismissal` — точка расширения для snooze.
+
+**Frontend** — вкладка в `/employee/opieka`:
+- Верхние табы «Przewoźnicy» (текущее) + «Alerty» (новое); таб-контент в `AlertsTab`.
+- `lib/api/alerts.ts` + `useAlerts` + `AlertsTab`/`AlertList`/`AlertRow`/`AlertCountdownBadge`. Визуал переиспользует urgent-список дашборда pracownika (`SlaAttentionSection`/`SlaCountdownBadge`): expired→danger, warning→warning. Новых токенов нет.
+- i18n `opieka.alerts.*` + `opieka.mainTabs.*` (PL/EN паритет). v1 read-only (без dismiss/deep-link; `carrierId`/`login` в DTO заложены на будущее).
+- uiux отдельно не нужен (паттерн существует).
+
+**Решения (2026-06-17):** доступ — opiekun (свои) + admin (все), pracownik нет; 1 порог срочности; имя водителя = `firstName + lastName`, перевозчика = `name ?? company`; неактивные/удалённые исключаются.
+
 ### Зависимости
 - Фазы 2, 4 (компоненты CRUD).
 
