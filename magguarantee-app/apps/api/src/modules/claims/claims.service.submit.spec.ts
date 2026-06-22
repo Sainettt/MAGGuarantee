@@ -180,6 +180,7 @@ function makeClaimRow(data: CreateClaimData): ClaimRow {
     attachments: [],
     delegationId: 'deleg-1',
     periodAdjustedByVerifier: false,
+    autoRecalcState: 'none',
     createdAt: NOW,
     updatedAt: NOW,
     deletedAt: null,
@@ -428,6 +429,10 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     const out = await svc.submit(makeAuth('przewoznik'), dto);
 
     expect(out.nrZgl).toBe('GWA/100/05/26');
+    // DTO mapper propagates the stored auto-recalc result. A fresh submit
+    // (even on a `zjechal` outing) never runs `recalcFromDelegation`, so the
+    // column stays at its `none` default.
+    expect(out.autoRecalcState).toBe('none');
     expect(repoFake.creates).toHaveLength(1);
     // `hoursAdjusted` is verifier-only — submit always seeds both Decimal
     // columns to 0 regardless of what the carrier could theoretically type.

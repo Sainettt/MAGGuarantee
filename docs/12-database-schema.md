@@ -84,6 +84,18 @@ enum DelegationStatus {
   anulowany
 }
 
+// REWORK 2026-06-20 (#4) — explicit result of the period auto-recalc that
+// fires when a delegation reaches `zjechal`. Read directly by the frontend
+// instead of being inferred heuristically. none = no recalc event yet
+// (default); applied = recalc ran on `zjechal`; skipped = recalc was due
+// (real date divergence) but suppressed (claim already decided or period was
+// adjusted by a human). Set by the api.
+enum ClaimAutoRecalcState {
+  none
+  applied
+  skipped
+}
+
 // Phase 7 (REWORK 2026-06-12 #3, see docs/20 §0′) — `weryfikator` records each
 // vehicle's DAILY km. Per-(vehicle, day) state. Derived motion status
 // (`w_ruchu`/`nie_jezdzi`/`nieznany`) is computed at read time, NOT stored.
@@ -521,9 +533,10 @@ model Claim {
   deletedAt DateTime?
 
   // REWORK 2026-06-20 (#4, docs/20 §0″) — wniosek↔wyjazd link.
-  delegationId             String?     @db.Uuid                  // FK → Delegation, unique; required for new claims (app-level)
-  delegation               Delegation? @relation(fields: [delegationId], references: [id])
-  periodAdjustedByVerifier Boolean     @default(false)           // true once pracownik edits dateStart/dateEnd — gates auto-recalc on zjechal
+  delegationId             String?              @db.Uuid         // FK → Delegation, unique; required for new claims (app-level)
+  delegation               Delegation?          @relation(fields: [delegationId], references: [id])
+  periodAdjustedByVerifier Boolean              @default(false)  // true once pracownik edits dateStart/dateEnd — gates auto-recalc on zjechal
+  autoRecalcState          ClaimAutoRecalcState @default(none)   // explicit result of the zjechal auto-recalc; read directly by FE
 
   @@unique([delegationId])
   @@index([carrierId, status])

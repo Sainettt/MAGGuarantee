@@ -45,6 +45,21 @@ enum DelegationStatus {
   anulowany
 }
 
+// REWORK 2026-06-20 (#4, docs/20 §0″) — explicit, stored result of the period
+// auto-recalc that fires when a delegation transitions to `zjechal`. The
+// frontend reads this column directly instead of inferring the outcome
+// heuristically. Set by the api:
+//   none    — no recalc event yet (default).
+//   applied — auto-recalc ran on `zjechal`.
+//   skipped — recalc was due (real divergence between submitted period and the
+//             delegation's actual dates) but suppressed because the wniosek was
+//             already decided OR the period had been adjusted by a human.
+enum ClaimAutoRecalcState {
+  none
+  applied
+  skipped
+}
+
 // Phase 7 (REWORK 2026-06-12 #3, see docs/20 §0′) — the `weryfikator` role
 // records each vehicle's DAILY km. Per-(vehicle, day) state: `drove` (moved,
 // km>0) / `idle` ("checked, stood", km null). NO row for a day = "not checked"
@@ -613,11 +628,15 @@ model Claim {
   // claims is enforced at the app layer, NOT in the DB. Period (dateStart=
   // departureAt, dateEnd=actualReturnAt ?? plannedReturnAt) and mileage are
   // derived from the delegation.
-  delegationId             String?     @db.Uuid
-  delegation               Delegation? @relation(fields: [delegationId], references: [id])
+  delegationId             String?              @db.Uuid
+  delegation               Delegation?          @relation(fields: [delegationId], references: [id])
   // true once a pracownik PATCHes dateStart/dateEnd — the boundary that gates
   // the auto-recalc when the delegation later transitions to `zjechal`.
-  periodAdjustedByVerifier Boolean     @default(false)
+  periodAdjustedByVerifier Boolean              @default(false)
+  // Explicit, stored result of the `zjechal` auto-recalc — read directly by
+  // the frontend (no heuristic inference). `none` until a recalc event occurs;
+  // api writes `applied` / `skipped`. See enum ClaimAutoRecalcState.
+  autoRecalcState          ClaimAutoRecalcState @default(none)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

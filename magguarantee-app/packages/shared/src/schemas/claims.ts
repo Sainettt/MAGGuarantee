@@ -34,6 +34,27 @@ export const ClaimStatusSchema = z.enum([
 ]);
 export type ClaimStatus = z.infer<typeof ClaimStatusSchema>;
 
+/**
+ * Mirror of the Prisma `ClaimAutoRecalcState` enum (migration
+ * `20260622122559_claim_auto_recalc_state`). The shared package is dependency-
+ * free (Zod only) and cannot import `@magguarantee/database`, so the DB enum is
+ * mirrored here as a Zod enum — same convention as `VehicleDayStateSchema` /
+ * `DelegationStatusSchema`. Keep in lockstep with schema.prisma.
+ *
+ * Semantics (set by the api on the `w_trasie → zjechal` delegation recalc):
+ *   - `none`    — no recalc event yet (default), OR a recalc fired but there was
+ *                 no real period divergence (so the badge stays silent).
+ *   - `applied` — the auto-recalc ran and the period/km-calc were rewritten.
+ *   - `skipped` — a recalc was DUE (real divergence between the submitted period
+ *                 and the delegation's actual dates) but suppressed because the
+ *                 wniosek was already decided OR the period was human-adjusted.
+ *
+ * The frontend reads this column DIRECTLY (no heuristic inference) to render
+ * the «przeliczono» / «wymaga uwagi» badges.
+ */
+export const ClaimAutoRecalcStateSchema = z.enum(['none', 'applied', 'skipped']);
+export type ClaimAutoRecalcState = z.infer<typeof ClaimAutoRecalcStateSchema>;
+
 // ─── Field primitives ────────────────────────────────────
 
 /** `HH:mm` — 00:00 .. 23:59. Empty string ⇒ undefined for form inputs. */
@@ -514,6 +535,15 @@ export const ClaimDtoSchema = z.object({
    * `zjechal` (a human-corrected period is never silently overwritten).
    */
   periodAdjustedByVerifier: z.boolean(),
+  /**
+   * Explicit, stored result of the `w_trasie → zjechal` auto-recalc — read
+   * DIRECTLY by the frontend (no heuristic inference). `none` until a recalc
+   * event with a real period divergence occurs; `applied` when the recalc
+   * rewrote the period/km-calc; `skipped` when a recalc was due but suppressed
+   * (claim already decided OR period human-adjusted). See
+   * `ClaimAutoRecalcStateSchema`.
+   */
+  autoRecalcState: ClaimAutoRecalcStateSchema,
 
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,

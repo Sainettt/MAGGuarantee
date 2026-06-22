@@ -52,10 +52,7 @@ import {
 
 import { BreakdownTable } from '@/components/carrier/BreakdownTable';
 import { StatusBadge } from '@/components/carrier/StatusBadge';
-import {
-  AutoRecalcBadge,
-  resolveAutoRecalcState,
-} from '@/components/claims/AutoRecalcBadge';
+import { AutoRecalcBadge } from '@/components/claims/AutoRecalcBadge';
 import { HoursReadout } from '@/components/claims/HoursReadout';
 import { RecalcBadge } from '@/components/claims/RecalcBadge';
 import {
@@ -628,10 +625,10 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
 //
 // Shows the outing the wniosek was filed against: plan (`plannedReturnAt`) vs
 // fakt (`actualReturnAt`), plus the STATIC auto-recalc badge (applied/skipped).
-// `ClaimDto` carries only `delegationId` + `periodAdjustedByVerifier`, so the
-// outing detail (plan/fakt) is fetched by id; the badge state is derived by
-// `resolveAutoRecalcState` (see AutoRecalcBadge for the heuristic + deviation).
-// Renders nothing when the claim has no linked outing.
+// The outing detail (plan/fakt) is fetched by `delegationId`; the badge state is
+// read DIRECTLY from `claim.autoRecalcState` (REWORK 2026-06-20 #4 — the old
+// `resolveAutoRecalcState` heuristic is gone). Renders nothing when the claim
+// has no linked outing.
 
 function LinkedDelegationRow({ claim }: { claim: ClaimDto }) {
   const t = useTranslations('employee.claims.modal.linkedDelegation');
@@ -646,11 +643,7 @@ function LinkedDelegationRow({ claim }: { claim: ClaimDto }) {
   const planned = delegation?.plannedReturnAt ?? null;
   const actual = delegation?.actualReturnAt ?? null;
 
-  const recalcState = resolveAutoRecalcState(
-    claim.dateEnd,
-    actual,
-    claim.periodAdjustedByVerifier,
-  );
+  const recalcState = claim.autoRecalcState;
 
   return (
     <section className="space-y-2 rounded-md border border-border bg-input/40 p-3">
@@ -658,7 +651,7 @@ function LinkedDelegationRow({ claim }: { claim: ClaimDto }) {
         <h3 className="text-xs font-bold uppercase tracking-wider text-text-sub">
           {t('heading')}
         </h3>
-        {recalcState && (
+        {recalcState !== 'none' && (
           <AutoRecalcBadge
             state={recalcState}
             label={

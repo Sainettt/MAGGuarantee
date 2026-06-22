@@ -89,6 +89,7 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     attachments: [],
     delegationId: 'deleg-1',
     periodAdjustedByVerifier: false,
+    autoRecalcState: 'none',
     createdAt: new Date('2026-05-10T08:00:00.000Z'),
     updatedAt: new Date('2026-05-10T08:00:00.000Z'),
     deletedAt: null,
@@ -216,21 +217,52 @@ describe('ClaimsService.recalcFromDelegation', () => {
     expect(sumSpy).not.toHaveBeenCalled();
   });
 
-  it('SKIPS a decided claim (ZAAKCEPTOWANO): no write, audits autoRecalcSkipped', async () => {
-    const { service, updateSpy, auditLogs } = build({
+  it('applied path stamps autoRecalcState=applied on the persisted patch', async () => {
+    const { service, updateSpy } = build({ claim: makeClaim() });
+    await service.recalcFromDelegation('deleg-1', ACTUAL);
+    const patch = updateSpy.mock.calls[0]![1] as UpdateClaimData;
+    expect(patch.autoRecalcState).toBe('applied');
+  });
+
+  it('SKIPS a decided claim (ZAAKCEPTOWANO) WITH divergence: writes autoRecalcState=skipped (no recalc), audits autoRecalcSkipped', async () => {
+    // claim.dateEnd = 2026-05-09; ACTUAL = 2026-05-12 ⇒ real divergence.
+    const { service, updateSpy, auditLogs, kmCalcSpy } = build({
       claim: makeClaim({ status: 'ZAAKCEPTOWANO' }),
     });
     await service.recalcFromDelegation('deleg-1', ACTUAL);
-    expect(updateSpy).not.toHaveBeenCalled();
+    // The ONLY write is the state stamp — no period/km-calc recalc.
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    const patch = updateSpy.mock.calls[0]![1] as UpdateClaimData;
+    expect(patch).toEqual({ autoRecalcState: 'skipped' });
+    expect(kmCalcSpy).not.toHaveBeenCalled();
     expect(auditLogs.map((l) => l.action)).toEqual(['claim.autoRecalcSkipped']);
   });
 
-  it('SKIPS when periodAdjustedByVerifier=true: no write, audits autoRecalcSkipped', async () => {
-    const { service, updateSpy, auditLogs } = build({
+  it('SKIPS when periodAdjustedByVerifier=true WITH divergence: writes autoRecalcState=skipped (no recalc), audits autoRecalcSkipped', async () => {
+    const { service, updateSpy, auditLogs, kmCalcSpy } = build({
       claim: makeClaim({ periodAdjustedByVerifier: true }),
     });
     await service.recalcFromDelegation('deleg-1', ACTUAL);
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    const patch = updateSpy.mock.calls[0]![1] as UpdateClaimData;
+    expect(patch).toEqual({ autoRecalcState: 'skipped' });
+    expect(kmCalcSpy).not.toHaveBeenCalled();
+    expect(auditLogs.map((l) => l.action)).toEqual(['claim.autoRecalcSkipped']);
+  });
+
+  it('SKIPS WITHOUT divergence (dateEnd === actualReturnAt): leaves autoRecalcState=none — no write, audit only', async () => {
+    // Decided claim whose dateEnd already equals the outing's actual return —
+    // the recalc would be a no-op, so the state must NOT flip to skipped.
+    const { service, updateSpy, auditLogs } = build({
+      claim: makeClaim({
+        status: 'ZAAKCEPTOWANO',
+        dateEnd: new Date('2026-05-12T00:00:00.000Z'), // === ACTUAL day
+      }),
+    });
+    await service.recalcFromDelegation('deleg-1', ACTUAL);
+    // No write — the column stays at its current `none`.
     expect(updateSpy).not.toHaveBeenCalled();
+    // Audit row still recorded (the trigger fired), but `after` is null.
     expect(auditLogs.map((l) => l.action)).toEqual(['claim.autoRecalcSkipped']);
   });
 

@@ -607,14 +607,29 @@ export class ClaimsService {
       claim.periodAdjustedByVerifier === false;
 
     if (!recalcable) {
-      // Decided OR human-adjusted period → leave the wniosek alone; audit-only.
+      // Decided OR human-adjusted period → leave the wniosek's numbers alone.
+      // `autoRecalcState` is only set to `skipped` when there is a REAL period
+      // divergence (the wniosek's `dateEnd` differs from the outing's actual
+      // return date). Without a divergence the recalc would have been a no-op
+      // anyway, so we leave `autoRecalcState` at its current value (`none`) to
+      // avoid a false «skipped» badge on the frontend (REWORK 2026-06-20 #4).
+      const hasDivergence = !sameUtcDay(claim.dateEnd, actualReturnAt);
+      if (hasDivergence) {
+        await this.claims.update(claim.id, { autoRecalcState: 'skipped' });
+      }
+      // Audit row is written regardless (the recalc trigger fired); the
+      // `before`/`after` snapshot reflects whether the state column moved.
       await this.auditWriter.log({
         action: 'claim.autoRecalcSkipped',
         targetType: 'Claim',
         targetKey: claim.nrZgl,
         actor: AuditContext.current()?.actor ?? 'system',
-        before: { reason: this._skipReason(claim), status: claim.status },
-        after: null,
+        before: {
+          reason: this._skipReason(claim),
+          status: claim.status,
+          hasDivergence,
+        },
+        after: hasDivergence ? { autoRecalcState: 'skipped' } : null,
       });
       return;
     }
@@ -696,6 +711,8 @@ export class ClaimsService {
       // amountRequested mirrors paymentEur (same derivation as submit).
       amountRequested: paymentEur,
       breakdown,
+      // Stamp the explicit result so the frontend reads «przeliczono» directly.
+      autoRecalcState: 'applied',
       // `timeFrom/timeTo` and the `orig*` snapshots are intentionally NOT touched.
     });
 
@@ -1245,6 +1262,9 @@ export class ClaimsService {
       })),
       delegationId: row.delegationId,
       periodAdjustedByVerifier: row.periodAdjustedByVerifier,
+      // Stored auto-recalc result — forwarded verbatim so the frontend reads
+      // the outcome directly (no heuristic inference).
+      autoRecalcState: row.autoRecalcState,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
@@ -1503,12 +1523,16 @@ export class ClaimsService {
     }
     // Phase 7 REWORK (2026-06-20 #4) — a human edited the PERIOD (`dateStart`
     // and/or `dateEnd`). Mark it so a later delegation `zjechal` auto-recalc no
-    // longer silently overwrites the verifier's correction (decision #6).
+    // longer silently overwrites the verifier's correction (decision #6). The
+    // human has now taken over the period, so reset `autoRecalcState` to `none`
+    // — the «wymaga uwagi» badge (driven by a prior `skipped`) goes dark, since
+    // the attention it flagged has been addressed (REWORK 2026-06-20 #4).
     if (
       corrections.dateStart !== undefined ||
       corrections.dateEnd !== undefined
     ) {
       patch.periodAdjustedByVerifier = true;
+      patch.autoRecalcState = 'none';
     }
     if (corrections.timeFrom) patch.timeFrom = corrections.timeFrom;
     if (corrections.timeTo) patch.timeTo = corrections.timeTo;
@@ -1694,6 +1718,10 @@ export class ClaimsService {
       // shift (and the History tab can render the linked-wyjazd context).
       delegationId: row.delegationId,
       periodAdjustedByVerifier: row.periodAdjustedByVerifier,
+      // Stored auto-recalc result — captured so the History diff shows the
+      // `applied`/`skipped`/`none` transition driven by the delegation recalc
+      // and the verifier's period-edit reset.
+      autoRecalcState: row.autoRecalcState,
     };
   }
 
@@ -2066,4 +2094,16 @@ function startOfUtcDay(d: Date): Date {
   return new Date(
     Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()),
   );
+}
+
+/**
+ * Compare two timestamps by their UTC calendar day. Used by the delegation
+ * recalc skip-branch to decide whether the wniosek's `dateEnd` actually
+ * diverges from the outing's `actualReturnAt` (a same-day return is NOT a
+ * divergence and must not flip `autoRecalcState` to `skipped`). The wniosek
+ * period is stored at UTC midnight; `actualReturnAt` may carry a time, so we
+ * normalise both to day granularity here.
+ */
+function sameUtcDay(a: Date, b: Date): boolean {
+  return startOfUtcDay(a).getTime() === startOfUtcDay(b).getTime();
 }

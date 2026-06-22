@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import { ClaimStatus as PrismaClaimStatus } from '@magguarantee/database';
 import type {
+  ClaimAutoRecalcState,
   ClaimStatus,
   KmCalcBreakdown,
 } from '@magguarantee/shared';
@@ -100,6 +101,13 @@ export interface ClaimRow {
    * disables the delegation auto-recalc.
    */
   periodAdjustedByVerifier: boolean;
+  /**
+   * Stored result of the `w_trasie → zjechal` auto-recalc (Prisma
+   * `ClaimAutoRecalcState`, default `none`). The api sets `applied`/`skipped`
+   * on the delegation recalc; the frontend reads it directly. See
+   * `ClaimsService.recalcFromDelegation`.
+   */
+  autoRecalcState: ClaimAutoRecalcState;
 
   createdAt: Date;
   updatedAt: Date;
@@ -188,6 +196,14 @@ export interface UpdateClaimData {
    * delegation auto-recalc no longer overwrites it.
    */
   periodAdjustedByVerifier?: boolean;
+  /**
+   * Stored auto-recalc result (Prisma `ClaimAutoRecalcState`). Written by
+   * `ClaimsService.recalcFromDelegation` (`applied`/`skipped`) on the
+   * `w_trasie → zjechal` transition, and reset to `none` by the verifier PATCH
+   * when a human edits the period (the «wymaga uwagi» badge then goes dark).
+   * Omitted (`undefined`) ⇒ the column is left at its current value.
+   */
+  autoRecalcState?: ClaimAutoRecalcState;
 
   // ── carrier-input snapshots (preserved on first reklamacja transition) ──
   origDateStart?: Date | null;
@@ -461,6 +477,7 @@ export class ClaimsRepository {
     set('statusBeforeReklamacja');
     set('decidedById');
     set('periodAdjustedByVerifier');
+    set('autoRecalcState');
     set('origDateStart');
     set('origDateEnd');
     set('origMileage');
@@ -591,6 +608,9 @@ export class ClaimsRepository {
       })),
       delegationId: row.delegationId,
       periodAdjustedByVerifier: row.periodAdjustedByVerifier,
+      // Prisma enum default is `none`; the `?? 'none'` is a defensive sentinel
+      // for the soft-delete extension's widened inferred type.
+      autoRecalcState: row.autoRecalcState ?? 'none',
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       deletedAt: row.deletedAt,
@@ -661,6 +681,7 @@ interface ClaimPrismaShape {
   }[];
   delegationId: string | null;
   periodAdjustedByVerifier: boolean;
+  autoRecalcState: ClaimAutoRecalcState | null;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;

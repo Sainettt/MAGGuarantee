@@ -164,6 +164,7 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     attachments: [],
     delegationId: null,
     periodAdjustedByVerifier: false,
+    autoRecalcState: 'none',
     createdAt: new Date('2026-04-21T08:00:00.000Z'),
     updatedAt: new Date('2026-04-21T08:00:00.000Z'),
     deletedAt: null,
@@ -551,9 +552,12 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
     expect(
       repoFake.updateWithinCalls[0]!.data.periodAdjustedByVerifier,
     ).toBe(true);
+    // Manual period edit also RESETS the stored auto-recalc result to `none`
+    // (the «wymaga uwagi» badge goes dark — attention handled by the human).
+    expect(repoFake.updateWithinCalls[0]!.data.autoRecalcState).toBe('none');
   });
 
-  it('5c. a decision WITHOUT touching dates leaves periodAdjustedByVerifier unset', async () => {
+  it('5c. a decision WITHOUT touching dates leaves periodAdjustedByVerifier + autoRecalcState unset', async () => {
     const seeded = makeClaim();
     const repoFake = makeClaimsRepo([seeded]);
     const km = makeKmCalcService();
@@ -573,6 +577,10 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
     // applies if the outing later transitions).
     expect(
       repoFake.updateWithinCalls[0]!.data.periodAdjustedByVerifier,
+    ).toBeUndefined();
+    // No period edit ⇒ the stored auto-recalc result is NOT reset.
+    expect(
+      repoFake.updateWithinCalls[0]!.data.autoRecalcState,
     ).toBeUndefined();
   });
 
