@@ -1367,21 +1367,21 @@
         "REKLAMACJA": "Reclamation",
         "OCZEKUJE_NA_AUTORYZACJE": "Awaiting authorization",
         "AUTORYZACJA_KWOTA_MAKSIMA": "Authorization — max amount"
+      },
+      "wyjazdPicker": {
+        "section": "Trip",
+        "label": "Select a trip",
+        "help": "A claim can only be filed against a finished or ongoing trip that doesn't have a claim yet.",
+        "placeholder": "— select a trip —",
+        "loading": "Loading trips…",
+        "empty": "No trips available to file a claim against. A claim can be filed once a vehicle is marked “in transit” or “returned”.",
+        "selectedStatus": "Selected trip status:",
+        "derivedPeriod": "Period (from the trip)",
+        "temporaryPeriodHint": "Temporary period from the planned return — it will be updated after the vehicle returns.",
+        "mileageHint": "Pre-computed from daily km — you can override it.",
+        "warningBanner": "The trip is not yet marked “Returned” — are you sure you want to submit the claim?",
+        "warningAck": "I understand the trip is not finished yet"
       }
-    },
-    "wyjazdPicker": {
-      "section": "Trip",
-      "label": "Select a trip",
-      "help": "A claim can only be filed against a finished or ongoing trip that doesn't have a claim yet.",
-      "placeholder": "— select a trip —",
-      "loading": "Loading trips…",
-      "empty": "No trips available to file a claim against. A claim can be filed once a vehicle is marked “in transit” or “returned”.",
-      "selectedStatus": "Selected trip status:",
-      "derivedPeriod": "Period (from the trip)",
-      "temporaryPeriodHint": "Temporary period from the planned return — it will be updated after the vehicle returns.",
-      "mileageHint": "Pre-computed from daily km — you can override it.",
-      "warningBanner": "The trip is not yet marked “Returned” — are you sure you want to submit the claim?",
-      "warningAck": "I understand the trip is not finished yet"
     },
     "preview": {
       "empty": {
@@ -1643,7 +1643,7 @@
         },
         "columns": {
           "vehicle": "Vehicle",
-          "driver": "Driver",
+          "carrier": "Carrier",
           "route": "Route",
           "period": "Period",
           "status": "Status",
@@ -1688,7 +1688,7 @@
         },
         "columns": {
           "vehicle": "Vehicle",
-          "driver": "Driver",
+          "carrier": "Carrier",
           "route": "Route",
           "period": "Period",
           "status": "Status",
@@ -1785,6 +1785,11 @@
       "progress": "{checked} of {total} vehicles filled this week",
       "filter": {
         "inMotionOnly": "In-motion only"
+      },
+      "search": {
+        "placeholder": "Search vehicle (plate / side no. / carrier)",
+        "label": "Search vehicle",
+        "noResults": "No vehicles match your search"
       },
       "readOnlyBanner": "Data is read-only — managed by the verifier.",
       "lagNote": "Data as of the previous day. Today and future days are locked.",

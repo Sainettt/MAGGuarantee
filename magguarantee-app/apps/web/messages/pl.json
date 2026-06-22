@@ -1367,21 +1367,21 @@
         "REKLAMACJA": "Reklamacja",
         "OCZEKUJE_NA_AUTORYZACJE": "Czeka na autoryzację",
         "AUTORYZACJA_KWOTA_MAKSIMA": "Autoryzacja — kwota maks."
+      },
+      "wyjazdPicker": {
+        "section": "Wyjazd",
+        "label": "Wybierz wyjazd",
+        "help": "Wniosek można złożyć tylko do zakończonego lub trwającego wyjazdu, który nie ma jeszcze wniosku.",
+        "placeholder": "— wybierz wyjazd —",
+        "loading": "Wczytywanie wyjazdów…",
+        "empty": "Brak wyjazdów, do których można złożyć wniosek. Wniosek można złożyć po oznaczeniu auta jako „w trasie” lub „zjechał”.",
+        "selectedStatus": "Status wybranego wyjazdu:",
+        "derivedPeriod": "Okres (z wyjazdu)",
+        "temporaryPeriodHint": "Okres tymczasowy z planowanego powrotu — zostanie zaktualizowany po zjeździe.",
+        "mileageHint": "Wstępnie wyliczony z dziennych km — możesz nadpisać.",
+        "warningBanner": "Wyjazd jeszcze nie ma statusu „Zjechał” — czy na pewno chcesz złożyć wniosek?",
+        "warningAck": "Rozumiem, że wyjazd nie jest jeszcze zakończony"
       }
-    },
-    "wyjazdPicker": {
-      "section": "Wyjazd",
-      "label": "Wybierz wyjazd",
-      "help": "Wniosek można złożyć tylko do zakończonego lub trwającego wyjazdu, który nie ma jeszcze wniosku.",
-      "placeholder": "— wybierz wyjazd —",
-      "loading": "Wczytywanie wyjazdów…",
-      "empty": "Brak wyjazdów, do których można złożyć wniosek. Wniosek można złożyć po oznaczeniu auta jako „w trasie” lub „zjechał”.",
-      "selectedStatus": "Status wybranego wyjazdu:",
-      "derivedPeriod": "Okres (z wyjazdu)",
-      "temporaryPeriodHint": "Okres tymczasowy z planowanego powrotu — zostanie zaktualizowany po zjeździe.",
-      "mileageHint": "Wstępnie wyliczony z dziennych km — możesz nadpisać.",
-      "warningBanner": "Wyjazd jeszcze nie ma statusu „Zjechał” — czy na pewno chcesz złożyć wniosek?",
-      "warningAck": "Rozumiem, że wyjazd nie jest jeszcze zakończony"
     },
     "preview": {
       "empty": {
@@ -1643,7 +1643,7 @@
         },
         "columns": {
           "vehicle": "Auto",
-          "driver": "Kierowca",
+          "carrier": "Przewoźnik",
           "route": "Trasa",
           "period": "Okres",
           "status": "Status",
@@ -1688,7 +1688,7 @@
         },
         "columns": {
           "vehicle": "Auto",
-          "driver": "Kierowca",
+          "carrier": "Przewoźnik",
           "route": "Trasa",
           "period": "Okres",
           "status": "Status",
@@ -1785,6 +1785,11 @@
       "progress": "{checked} z {total} pojazdów uzupełnionych w tym tygodniu",
       "filter": {
         "inMotionOnly": "Tylko jeżdżące"
+      },
+      "search": {
+        "placeholder": "Szukaj auta (nr rej. / nr boczny / przewoźnik)",
+        "label": "Szukaj auta",
+        "noResults": "Brak aut pasujących do wyszukiwania"
       },
       "readOnlyBanner": "Dane są tylko do podglądu — edytuje weryfikator.",
       "lagNote": "Dane aktualne na poprzedni dzień. Dzień bieżący i przyszłe są zablokowane.",

@@ -185,6 +185,16 @@ export function DelegationDetailModal({
       icon: ClipboardCheck,
       span: 'full',
       rows: [
+        // Actual return date — only present once the outing has returned
+        // (status `zjechal`); the planned return lives in the RouteCard above.
+        ...(delegation.actualReturnAt
+          ? [
+              {
+                label: tForm('actualReturnAt'),
+                value: dateTimeValue(delegation.actualReturnAt),
+              },
+            ]
+          : []),
         {
           label: tForm('reportedBy'),
           value: textValue(

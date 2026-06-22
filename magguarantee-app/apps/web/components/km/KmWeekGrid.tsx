@@ -343,13 +343,19 @@ export function KmWeekGrid({
   };
 
   return (
-    <div className="rounded-xl border border-border bg-card shadow-card overflow-hidden">
+    <div className="rounded-xl border border-border bg-card shadow-card">
       {showEmpty ? (
         <div className="p-6">
           <EmptyState icon={Truck} title={emptyTitle} message={emptyMessage} />
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        // Dual-axis scroll box: horizontal for the wide matrix, vertical-capped
+        // (viewport-relative max-height) so the long vehicle list scrolls WITHIN
+        // the box. That makes the day-header <thead> the sticky context's top,
+        // so it pins (`sticky top-0`) while the rows scroll under it — the user
+        // always sees which weekday column they're filling. `rounded-xl` here
+        // (the card no longer clips) keeps the corners clean under both scrolls.
+        <div className="max-h-[calc(100vh-18rem)] overflow-auto rounded-xl">
           <table
             className="w-full border-collapse text-sm"
             aria-label={t('aria.grid')}
@@ -371,7 +377,9 @@ export function KmWeekGrid({
                       key={d}
                       scope="col"
                       className={cn(
-                        'px-1.5 py-2 text-center align-bottom',
+                        // `bg-bg` keeps the pinned header opaque over scrolling
+                        // rows; weekend cells override to the `bg-input` wash.
+                        'px-1.5 py-2 text-center align-bottom bg-bg',
                         isWeekend && 'bg-input',
                         isToday && 'border-b-2 border-brand',
                       )}

@@ -426,8 +426,13 @@ export class VehiclesController {
    *
    * Access mirrors `GET /vehicles/:id` (getById) so the read fans out by role
    * exactly like vehicle detail:
-   *  - weryfikator / admin / planista / dyspozytor → read any vehicle
-   *    (ownership guards short-circuit for these roles — see below);
+   *  - weryfikator / admin / planista / dyspozytor / eksport → read any vehicle
+   *    (ownership guards short-circuit for these roles — see below). `eksport`
+   *    has all-access read on outflows and the related km (same posture as the
+   *    km-report scope) — its read-only delegation modal renders the vehicle's
+   *    km-calendar (DelegationKmCalendar → useVehicleDailyKmHistory), so it must
+   *    reach this endpoint for ANY vehicle. The WRITE side stays weryfikator/
+   *    admin-only;
    *  - opiekun → only vehicles of carriers they supervise
    *    (`OpiekunOwnershipGuard` resolves vehicleId → carrierId → opiekunId);
    *  - przewoznik → only their OWN vehicles (`CarrierOwnershipGuard` resolves
@@ -444,7 +449,15 @@ export class VehiclesController {
    * and planners never edit km. Replaces the former `GET /vehicles/:id/route-status`.
    */
   @Get(':id/daily-km')
-  @Roles('admin', 'opiekun', 'planista', 'dyspozytor', 'przewoznik', 'weryfikator')
+  @Roles(
+    'admin',
+    'opiekun',
+    'planista',
+    'dyspozytor',
+    'przewoznik',
+    'weryfikator',
+    'eksport',
+  )
   @OpiekunOwns('id', 'param', 'vehicleId')
   @CarrierOwns('id', 'param', 'vehicleId')
   async getDailyKm(

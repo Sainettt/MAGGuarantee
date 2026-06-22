@@ -14,7 +14,7 @@
 // shareable + back-button-friendly. Cell commits (edit) are optimistic +
 // silent-on-success, error-only toast + rollback (DS §7.7.4).
 
-import { Gauge, Info } from 'lucide-react';
+import { Gauge, Info, Search, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useMemo, useState } from 'react';
@@ -27,6 +27,7 @@ import type {
 
 import { Checkbox } from '@/components/ui/Checkbox';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Input } from '@/components/ui/Input';
 import { KmHeaderTiles } from '@/components/km/KmHeaderTiles';
 import {
   KmCellEditorDialog,
@@ -92,6 +93,7 @@ export function KmBoardScreen({
 }: KmBoardScreenProps) {
   const t = useTranslations('weryfikator.km');
   const tMyKm = useTranslations('myKm');
+  const tCommon = useTranslations('common');
   const tWeekday = useTranslations('weryfikator.km.weekday');
 
   const router = useRouter();
@@ -165,13 +167,27 @@ export function KmBoardScreen({
   // rows with zero `drove` cells when on.
   const [inMotionOnly, setInMotionOnly] = useState(inMotionDefault);
 
+  // Client-side row search — plate / side number / carrier. Lets the user jump
+  // to a specific vehicle without scanning the list by eye, especially after a
+  // week switch. Filters the visible rows only (no refetch).
+  const [search, setSearch] = useState('');
+  const searchNeedle = search.trim().toLowerCase();
+
   const allItems = useMemo(() => data?.items ?? [], [data]);
   const visibleItems: VehicleKmBoardItemDto[] = useMemo(() => {
+    let rows = allItems;
     if (mode === 'view' && inMotionOnly) {
-      return allItems.filter((v) => v.cells.some((c) => c.state === 'drove'));
+      rows = rows.filter((v) => v.cells.some((c) => c.state === 'drove'));
     }
-    return allItems;
-  }, [allItems, mode, inMotionOnly]);
+    if (searchNeedle) {
+      rows = rows.filter((v) =>
+        [v.plateNumber, v.sideNumber, v.carrier?.name]
+          .filter((s): s is string => Boolean(s))
+          .some((s) => s.toLowerCase().includes(searchNeedle)),
+      );
+    }
+    return rows;
+  }, [allItems, mode, inMotionOnly, searchNeedle]);
 
   // Edit-mode progress helper: vehicles with ≥1 cell this week.
   const checked = allItems.filter((v) =>
@@ -181,13 +197,15 @@ export function KmBoardScreen({
   const [historyTarget, setHistoryTarget] =
     useState<VehicleKmBoardItemDto | null>(null);
 
-  // Filtered-empty (view + filter on, nothing moved): distinct from no-vehicles.
+  // Filtered-empty: the board HAS vehicles, but the active client filters
+  // (in-motion and/or the search needle) left nothing visible — distinct from
+  // a genuinely empty board. The search-driven case applies in BOTH modes.
   const filteredEmpty =
-    mode === 'view' &&
-    inMotionOnly &&
-    !isLoading &&
-    allItems.length > 0 &&
-    visibleItems.length === 0;
+    !isLoading && allItems.length > 0 && visibleItems.length === 0;
+  // Which message to show: search-needle takes priority over the in-motion note.
+  const filteredEmptyMessage = searchNeedle
+    ? t('search.noResults')
+    : t('empty.noMotion');
 
   return (
     <section className="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-8">
@@ -262,9 +280,39 @@ export function KmBoardScreen({
         <WeekNavigator weekStart={weekStart} onChange={setWeek} />
       </div>
 
+      {/* Vehicle search — filters the visible rows by plate / side / carrier so
+          the user can jump straight to a vehicle after switching weeks. */}
+      <div className="mb-4 max-w-md">
+        <div className="relative">
+          <Search
+            size={16}
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-sub"
+          />
+          <Input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('search.placeholder')}
+            aria-label={t('search.label')}
+            className="pl-9 pr-9"
+          />
+          {search ? (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              aria-label={tCommon('clear')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-text-sub hover:bg-input hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            >
+              <X size={14} aria-hidden="true" />
+            </button>
+          ) : null}
+        </div>
+      </div>
+
       {filteredEmpty ? (
         <div className="rounded-xl border border-border bg-card p-6 shadow-card">
-          <EmptyState icon={Gauge} message={t('empty.noMotion')} />
+          <EmptyState icon={Gauge} message={filteredEmptyMessage} />
         </div>
       ) : (
         <KmWeekGrid

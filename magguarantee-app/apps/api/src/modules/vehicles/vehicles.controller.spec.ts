@@ -179,12 +179,18 @@ describe('VehiclesController — authorization', () => {
   // (carrier own → OK, carrier foreign → 403, weryfikator → OK via short-circuit).
 
   describe('getDailyKm READ authorization (role fan-out like getById)', () => {
-    it('reads the getById role set plus weryfikator (keeps Historia access)', () => {
+    it('reads the getById role set plus weryfikator + eksport (Historia + eksport km-calendar)', () => {
       // getDailyKm fans out exactly like getById for the carrier/opiekun/planner
-      // roles, and ADDITIONALLY keeps weryfikator (its original audience).
+      // roles, ADDITIONALLY keeps weryfikator (its original audience), AND grants
+      // eksport — its read-only delegation modal renders the vehicle km-calendar
+      // (DelegationKmCalendar → useVehicleDailyKmHistory). eksport has all-access
+      // read on outflows + the related km (docs/03-roles.md matrix «Видеть
+      // выезды» + km-report all-access), so it must reach this READ for ANY
+      // vehicle. The WRITE (PUT/DELETE) stays weryfikator/admin-only.
       expect(rolesFor('getDailyKm').sort()).toEqual([
         'admin',
         'dyspozytor',
+        'eksport',
         'opiekun',
         'planista',
         'przewoznik',
@@ -209,12 +215,18 @@ describe('VehiclesController — authorization', () => {
       'dyspozytor',
       'przewoznik',
       'weryfikator',
+      'eksport',
     ] as const)('RolesGuard allows %s on getDailyKm', (role) => {
       const u: AuthUser = { ...carrierUser, role };
       expect(guard.canActivate(ctxFor('getDailyKm', u))).toBe(true);
     });
 
-    it.each(['pracownik', 'eksport'] as const)(
+    // Regression: eksport opening the read-only delegation modal renders the
+    // vehicle km-calendar (DelegationKmCalendar → useVehicleDailyKmHistory),
+    // which hits GET /vehicles/:id/daily-km. eksport USED to 403 here; it must
+    // now pass (see the allow block above). `pracownik` stays out — it has no
+    // delegation/km read in docs/03-roles.md.
+    it.each(['pracownik'] as const)(
       'RolesGuard rejects %s on getDailyKm (403)',
       (role) => {
         const u: AuthUser = { ...carrierUser, role };

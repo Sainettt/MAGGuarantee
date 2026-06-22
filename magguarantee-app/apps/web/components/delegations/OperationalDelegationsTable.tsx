@@ -26,7 +26,7 @@ interface Props {
   rows: DelegationDto[];
   isLoading: boolean;
   /**
-   * i18n namespace exposing `columns.{vehicle,driver,route,period,status,
+   * i18n namespace exposing `columns.{vehicle,carrier,route,period,status,
    * actions}` + `emptyTitle` + `emptyMessage` + `emptyFiltered.{title,message}`.
    */
   namespace: string;
@@ -67,13 +67,11 @@ export function OperationalDelegationsTable({
         ),
       },
       {
-        id: 'driver',
-        header: t('columns.driver'),
+        id: 'carrier',
+        header: t('columns.carrier'),
         cell: (row) => (
           <span className="font-semibold">
-            {row.driver
-              ? `${row.driver.firstName} ${row.driver.lastName}`
-              : (row.driverNameSnapshot ?? '—')}
+            {row.carrier?.name ?? row.carrier?.login ?? '—'}
           </span>
         ),
       },
