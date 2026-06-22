@@ -4,9 +4,15 @@
 //   - happy path (applied): NA_WERYFIKACJI + periodAdjustedByVerifier=false →
 //     dateEnd shifts to actualReturnAt, mileage re-prefilled (no carrier
 //     override), km-calc re-run, numbers persisted, `claim.autoRecalc` audited.
+//   - skip by status (FROZEN OCZEKUJE_NA_AUTORYZACJE — pracownik already sent a
+//     concrete amount to Maksim for authorization, 2026-06-22 boundary) →
+//     `autoRecalcSkipped`.
 //   - skip by status (decided ZAAKCEPTOWANO) → no write, `autoRecalcSkipped`.
 //   - skip by periodAdjustedByVerifier=true → no write, `autoRecalcSkipped`.
 //   - no-op when no claim is linked.
+//
+// NA_WERYFIKACJI is now the ONLY status where the late-`zjechal` auto-recalc
+// mutates the wniosek.
 //
 // Reuses the SAME `_resolveMileage` (via the daily-km repo) + `KmCalcService`
 // the submit/preview paths use, so the project invariant
@@ -196,13 +202,34 @@ describe('ClaimsService.recalcFromDelegation', () => {
     expect(auditLogs.map((l) => l.action)).toEqual(['claim.autoRecalc']);
   });
 
-  it('applies on OCZEKUJE_NA_AUTORYZACJE too (still "not decided")', async () => {
-    const { service, updateSpy, auditLogs } = build({
+  it('SKIPS OCZEKUJE_NA_AUTORYZACJE (FROZEN under authorization) WITH divergence: writes autoRecalcState=skipped (no recalc), audits autoRecalcSkipped', async () => {
+    // Reflects the 2026-06-22 boundary change: once pracownik sends a concrete
+    // amount to Maksim for authorization, the wniosek's number is frozen and the
+    // late-`zjechal` auto-recalc must NOT shift it. claim.dateEnd = 2026-05-09;
+    // ACTUAL = 2026-05-12 ⇒ real divergence → state stamps to `skipped`.
+    const { service, updateSpy, auditLogs, kmCalcSpy } = build({
       claim: makeClaim({ status: 'OCZEKUJE_NA_AUTORYZACJE' }),
     });
     await service.recalcFromDelegation('deleg-1', ACTUAL);
+    // The ONLY write is the state stamp — no period/km-calc recalc.
     expect(updateSpy).toHaveBeenCalledTimes(1);
-    expect(auditLogs.map((l) => l.action)).toEqual(['claim.autoRecalc']);
+    const patch = updateSpy.mock.calls[0]![1] as UpdateClaimData;
+    expect(patch).toEqual({ autoRecalcState: 'skipped' });
+    expect(kmCalcSpy).not.toHaveBeenCalled();
+    expect(auditLogs.map((l) => l.action)).toEqual(['claim.autoRecalcSkipped']);
+  });
+
+  it('SKIPS OCZEKUJE_NA_AUTORYZACJE WITHOUT divergence (dateEnd === actualReturnAt): leaves autoRecalcState=none — no write, audit only', async () => {
+    const { service, updateSpy, auditLogs, kmCalcSpy } = build({
+      claim: makeClaim({
+        status: 'OCZEKUJE_NA_AUTORYZACJE',
+        dateEnd: new Date('2026-05-12T00:00:00.000Z'), // === ACTUAL day
+      }),
+    });
+    await service.recalcFromDelegation('deleg-1', ACTUAL);
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(kmCalcSpy).not.toHaveBeenCalled();
+    expect(auditLogs.map((l) => l.action)).toEqual(['claim.autoRecalcSkipped']);
   });
 
   it('preserves a carrier mileage override (origMileage !== mileage) — no re-prefill', async () => {

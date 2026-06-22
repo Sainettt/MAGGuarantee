@@ -574,8 +574,10 @@ export class ClaimsService {
    *
    * Hard gate — applies ONLY when:
    *   - a claim is linked to the outing (else no-op), AND
-   *   - `claim.status ∈ {NA_WERYFIKACJI, OCZEKUJE_NA_AUTORYZACJE}` (not decided),
-   *     AND
+   *   - `claim.status === NA_WERYFIKACJI` (the only mutable verification window —
+   *     `OCZEKUJE_NA_AUTORYZACJE` is FROZEN: pracownik already sent a concrete
+   *     amount to Maksim for authorization, so the number must not shift under
+   *     authorization; decided statuses are likewise immutable), AND
    *   - `claim.periodAdjustedByVerifier === false` (a human-corrected period is
    *     never silently overwritten).
    *
@@ -602,8 +604,7 @@ export class ClaimsService {
     if (!claim) return; // no linked wniosek → nothing to recalc
 
     const recalcable =
-      (claim.status === 'NA_WERYFIKACJI' ||
-        claim.status === 'OCZEKUJE_NA_AUTORYZACJE') &&
+      claim.status === 'NA_WERYFIKACJI' &&
       claim.periodAdjustedByVerifier === false;
 
     if (!recalcable) {
@@ -640,6 +641,9 @@ export class ClaimsService {
   /** Human-readable skip reason for the `autoRecalcSkipped` audit row. */
   private _skipReason(claim: ClaimRow): string {
     if (claim.periodAdjustedByVerifier) return 'period_adjusted_by_verifier';
+    // FROZEN under authorization: pracownik already sent a concrete amount to
+    // Maksim, so the number must not shift while it is being authorized.
+    if (claim.status === 'OCZEKUJE_NA_AUTORYZACJE') return 'sent_for_authorization';
     return 'claim_already_decided';
   }
 

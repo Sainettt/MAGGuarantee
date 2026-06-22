@@ -32,7 +32,7 @@
 ### Авто-пересчёт wniosek при позднем `zjechal`
 
 Перевозчик подал на `w_trasie` (`dateEnd = plannedReturnAt`), позже weryfikator ставит `zjechal` с другим `actualReturnAt`. `returned()` в той же транзакции пере-считывает связанный wniosek — **с жёсткими границами**:
-- **Применяем ТОЛЬКО если** `claim.status ∈ {NA_WERYFIKACJI, OCZEKUJE_NA_AUTORYZACJE}` (не решён) **И** период не правил человек (`periodAdjustedByVerifier = false`).
+- **Применяем ТОЛЬКО если** `claim.status === NA_WERYFIKACJI` (свежий, в очереди на верификацию) **И** период не правил человек (`periodAdjustedByVerifier = false`). ⚠️ `OCZEKUJE_NA_AUTORYZACJE` **ЗАМОРОЖЕН** (pracownik уже отправил конкретную сумму Maksimу — нельзя двигать число под авторизацией; уточнено 2026-06-22). Любое решающее действие pracownik (отправка на авторизацию / решение / правка периода) → числа заморожены.
 - **Меняем:** `dateEnd = actualReturnAt` → `mileage` пере-предзаполняем `Σ VehicleDailyKm` за новый период (если нет ручного override) → km-calc заново (`kmGuaranteed/kmDifference/paymentEur/amountRequested/breakdown`). **`timeTo` НЕ трогаем** (зона pracownik). `origDateEnd/origMileage` снапшоты **сохраняем**.
 - **НЕ применяем** (решён ИЛИ правлен человеком): период не трогаем, флаг + audit `claim.autoRecalcSkipped`; UI-бейдж «требует внимания: фактическая дата съезда отличается».
 - Аудит: всегда `delegation.markReturned`; при пересчёте — `claim.autoRecalc` (before/after). **Без email** (только аудит + флаг в UI).
@@ -66,7 +66,7 @@
 - **GPS-интеграция** — только хуки (`actualReturnAt` сможет нести время, источник `manual|gps`); саму интеграцию не строим.
 
 ### Решения (locked, 2026-06-20/22 — скрин-флоу + AskUserQuestion ×9)
-1. Связь wniosek↔wyjazd — `Claim.delegationId` жёсткий FK. · 2. Период при позднем `zjechal` — авто-пересчёт `dateEnd→actualReturnAt`. · 3. weryfikator — два окна (km-доска + статусы выездов). · 4. Статус eksport — `gotowy`. · 5. Граница авто-пересчёта — только нерешённые. · 6. Конфликт правок — правка человека приоритетнее. · 7. Уведомление — аудит + флаг в UI (без email). · 8. Строгость — строго `gotowy→w_trasie` (admin форсит). · 9. Отмена после `gotowy` — admin анулирует любой активный. · 10. `delegationId` обязателен для новых. · 11. подавать из `{w_trasie+warning, zjechal}`. · 12. `mileage = Σ VehicleDailyKm` + override. · 13. `actualReturnAt`=дата (weryfikator), `timeTo`=время (pracownik). · 14. chat — пока только при создании. · 15. GPS — хуки, не интеграция.
+1. Связь wniosek↔wyjazd — `Claim.delegationId` жёсткий FK. · 2. Период при позднем `zjechal` — авто-пересчёт `dateEnd→actualReturnAt`. · 3. weryfikator — два окна (km-доска + статусы выездов). · 4. Статус eksport — `gotowy`. · 5. Граница авто-пересчёта — только `NA_WERYFIKACJI` (untouched); `OCZEKUJE_NA_AUTORYZACJE` заморожен (уточн. 2026-06-22). · 6. Конфликт правок — правка человека приоритетнее. · 7. Уведомление — аудит + флаг в UI (без email). · 8. Строгость — строго `gotowy→w_trasie` (admin форсит). · 9. Отмена после `gotowy` — admin анулирует любой активный. · 10. `delegationId` обязателен для новых. · 11. подавать из `{w_trasie+warning, zjechal}`. · 12. `mileage = Σ VehicleDailyKm` + override. · 13. `actualReturnAt`=дата (weryfikator), `timeTo`=время (pracownik). · 14. chat — пока только при создании. · 15. GPS — хуки, не интеграция.
 
 ---
 
