@@ -1,5 +1,3 @@
-import { ForbiddenException } from '@nestjs/common';
-
 import type { DelegationFilters } from '@magguarantee/shared';
 
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
@@ -73,11 +71,12 @@ function passedFilters(
 }
 
 describe('DelegationsService.list — includeHistory (eksport)', () => {
-  it('eksport: history OFF (default) → active-only floor statusIn=[zgloszony, w_trasie]', async () => {
+  it('eksport: history OFF (default) → active-only floor statusIn=[zgloszony, gotowy, w_trasie]', async () => {
     const { service, listSpy } = makeService();
     await service.list(auth('eksport', 'eksport-1'), baseFilters());
     const passed = passedFilters(listSpy);
-    expect(passed.statusIn).toEqual(['zgloszony', 'w_trasie']);
+    // Phase 7 REWORK (2026-06-20 #4) — `gotowy` joined the active board.
+    expect(passed.statusIn).toEqual(['zgloszony', 'gotowy', 'w_trasie']);
     expect(passed.status).toBeUndefined();
   });
 
@@ -117,12 +116,23 @@ describe('DelegationsService.list — includeHistory (eksport)', () => {
     expect(passed.statusIn).toBeUndefined();
   });
 
-  it('weryfikator: REWORK 2026-06-10 #2 — no longer sees delegations (403, never hits repo)', async () => {
+  it('weryfikator: REWORK 2026-06-20 #4 — sees the active board like eksport (floor injected)', async () => {
     const { service, listSpy } = makeService();
-    await expect(
-      service.list(auth('weryfikator', 'wer-1'), baseFilters()),
-    ).rejects.toBeInstanceOf(ForbiddenException);
-    expect(listSpy).not.toHaveBeenCalled();
+    await service.list(auth('weryfikator', 'wer-1'), baseFilters());
+    const passed = passedFilters(listSpy);
+    expect(passed.statusIn).toEqual(['zgloszony', 'gotowy', 'w_trasie']);
+    expect(passed.status).toBeUndefined();
+  });
+
+  it('weryfikator: history ON → no status floor (all statuses, like eksport)', async () => {
+    const { service, listSpy } = makeService();
+    await service.list(
+      auth('weryfikator', 'wer-1'),
+      baseFilters({ includeHistory: true }),
+    );
+    const passed = passedFilters(listSpy);
+    expect(passed.statusIn).toBeUndefined();
+    expect(passed.status).toBeUndefined();
   });
 });
 

@@ -79,6 +79,7 @@ function makeRow(overrides: Partial<DelegationRow> = {}): DelegationRow {
     verifiedBy: null,
     verifiedAt: null,
     notes: null,
+    claimId: null,
     createdAt: new Date('2026-05-19T08:00:00.000Z'),
     updatedAt: new Date('2026-05-19T08:00:00.000Z'),
     deletedAt: null,
@@ -254,11 +255,25 @@ describe('DelegationsService.list — other roles unchanged', () => {
     },
   );
 
-  it('weryfikator is rejected (REWORK 2026-06-10 #2 — no longer sees delegations)', async () => {
-    const { service } = makeService();
-    await expect(
-      service.list(auth('weryfikator', 'wer-1'), baseFilters()),
-    ).rejects.toBeInstanceOf(ForbiddenException);
+  it('weryfikator sees the ACTIVE board (REWORK 2026-06-20 #4 — back on delegations, like eksport)', async () => {
+    const { service, listSpy } = makeService();
+    await service.list(auth('weryfikator', 'wer-1'), baseFilters());
+    const passed = listSpy.mock.calls[0]![0] as DelegationListFilters;
+    // Active-status floor injected (default, history OFF): {zgloszony, gotowy,
+    // w_trasie}. No ownership scope (all-access like eksport).
+    expect(passed.statusIn).toEqual(['zgloszony', 'gotowy', 'w_trasie']);
+    expect(passed.dispatchTeamId).toBeUndefined();
+    expect(passed.plannerId).toBeUndefined();
+  });
+
+  it('weryfikator with includeHistory=true widens to all statuses (no floor)', async () => {
+    const { service, listSpy } = makeService();
+    await service.list(
+      auth('weryfikator', 'wer-1'),
+      baseFilters({ includeHistory: true }),
+    );
+    const passed = listSpy.mock.calls[0]![0] as DelegationListFilters;
+    expect(passed.statusIn).toBeUndefined();
   });
 
   it('przewoznik is still scoped to its own carrierId', async () => {

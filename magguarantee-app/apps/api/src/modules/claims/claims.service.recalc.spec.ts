@@ -1,0 +1,243 @@
+// Phase 7 REWORK (2026-06-20 #4) — `ClaimsService.recalcFromDelegation` tests.
+//
+// Covers the auto-recalc invoked from `DelegationsService.markReturned()`:
+//   - happy path (applied): NA_WERYFIKACJI + periodAdjustedByVerifier=false →
+//     dateEnd shifts to actualReturnAt, mileage re-prefilled (no carrier
+//     override), km-calc re-run, numbers persisted, `claim.autoRecalc` audited.
+//   - skip by status (decided ZAAKCEPTOWANO) → no write, `autoRecalcSkipped`.
+//   - skip by periodAdjustedByVerifier=true → no write, `autoRecalcSkipped`.
+//   - no-op when no claim is linked.
+//
+// Reuses the SAME `_resolveMileage` (via the daily-km repo) + `KmCalcService`
+// the submit/preview paths use, so the project invariant
+// "preview == submit == recalc" holds.
+
+import type { KmCalcResult } from '@magguarantee/shared';
+
+import type { AuditWriter } from '../audit/audit.service';
+import type { CarriersRepository } from '../carriers/carriers.repository';
+import type { DriversRepository } from '../drivers/drivers.repository';
+import type { KmCalcService } from '../km-calc/km-calc.service';
+import type { PrismaService } from '../prisma/prisma.service';
+import type { TrailersRepository } from '../trailers/trailers.repository';
+import type { VehicleDailyKmRepository } from '../vehicles/vehicle-daily-km.repository';
+import type { VehiclesRepository } from '../vehicles/vehicles.repository';
+import { ClaimsService } from './claims.service';
+import type {
+  ClaimRow,
+  ClaimsRepository,
+  UpdateClaimData,
+} from './claims.repository';
+import type { NrZglService } from './nr-zgl.service';
+
+function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
+  return {
+    id: 'claim-1',
+    nrZgl: 'GWA/001/05/26',
+    carrierId: 'c-1',
+    carrier: { id: 'c-1', login: 'pwz', name: 'Pwz' },
+    vehicleId: 'v-1',
+    vehicle: { id: 'v-1', plateNumber: 'WX1' },
+    vehiclePlateSnapshot: 'WX1',
+    dateStart: new Date('2026-05-01T00:00:00.000Z'),
+    dateEnd: new Date('2026-05-09T00:00:00.000Z'),
+    timeFrom: '08:00',
+    timeTo: '18:00',
+    drivenDays: 10,
+    mileage: 8_000,
+    kmPerDay: 800,
+    kmGuaranteed: 10_800,
+    kmDifference: 2_800,
+    paymentEur: 1_400,
+    ratePerKmEffective: 0.5,
+    breakdown: {
+      totalDays: 10,
+      rawTotalDays: 10,
+      kmGuaranteed: 10_800,
+      ratePerKmEffective: 0.5,
+      breakdown: [],
+    },
+    status: 'NA_WERYFIKACJI',
+    statusChangedAt: null,
+    decidedById: null,
+    decidedBy: null,
+    comment: null,
+    orderNumber: null,
+    orderDate: null,
+    authorizationRequired: false,
+    authorizationDescription: null,
+    authorizationToken: null,
+    authorizationDecidedAt: null,
+    amountRequested: 1_400,
+    amountApproved: null,
+    margin: null,
+    amountMaximum: null,
+    reklamacjaSubmitted: false,
+    reklamacjaText: null,
+    reklamacjaResponse: null,
+    reklamacjaAmount: null,
+    statusBeforeReklamacja: null,
+    origDateStart: new Date('2026-05-01T00:00:00.000Z'),
+    origDateEnd: new Date('2026-05-09T00:00:00.000Z'),
+    // origMileage === mileage ⇒ "carrier did not override" → re-prefill on recalc
+    origMileage: 8_000,
+    origTimeFrom: '08:00',
+    origTimeTo: '18:00',
+    origHoursAdjusted: 0,
+    hoursAdjustedValue: 0,
+    authScreenshotUrl: null,
+    attachments: [],
+    delegationId: 'deleg-1',
+    periodAdjustedByVerifier: false,
+    createdAt: new Date('2026-05-10T08:00:00.000Z'),
+    updatedAt: new Date('2026-05-10T08:00:00.000Z'),
+    deletedAt: null,
+    ...overrides,
+  };
+}
+
+interface Built {
+  service: ClaimsService;
+  updateSpy: jest.Mock;
+  auditLogs: { action: string }[];
+  kmCalcSpy: jest.Mock;
+  sumSpy: jest.Mock;
+}
+
+function build(opts: {
+  claim: ClaimRow | null;
+  kmResult?: Partial<KmCalcResult>;
+  droveSum?: number;
+}): Built {
+  const updateSpy = jest.fn(async (id: string, data: UpdateClaimData) => ({
+    ...(opts.claim as ClaimRow),
+    ...data,
+    id,
+  }));
+  const claims = {
+    findByDelegationId: jest.fn(async () => opts.claim),
+    update: updateSpy,
+  } as unknown as ClaimsRepository;
+
+  const kmCalcSpy = jest.fn(async (): Promise<KmCalcResult> => ({
+    totalDays: 12,
+    rawTotalDays: 12,
+    kmGuaranteed: 12_000,
+    ratePerKmEffective: 0.5,
+    breakdown: [],
+    ...opts.kmResult,
+  }));
+  const kmCalc = { calc: kmCalcSpy } as unknown as KmCalcService;
+
+  const sumSpy = jest.fn(async () => opts.droveSum ?? 9_000);
+  const dailyKm = {
+    sumDroveKm: sumSpy,
+  } as unknown as VehicleDailyKmRepository;
+
+  const auditLogs: { action: string }[] = [];
+  const auditWriter = {
+    log: jest.fn(async (e: { action: string }) => {
+      auditLogs.push({ action: e.action });
+    }),
+  } as unknown as AuditWriter;
+
+  const service = new ClaimsService(
+    claims,
+    {} as CarriersRepository,
+    {} as VehiclesRepository,
+    {} as DriversRepository,
+    {} as TrailersRepository,
+    kmCalc,
+    {} as NrZglService,
+    {} as PrismaService,
+    auditWriter,
+    undefined,
+    undefined,
+    dailyKm,
+  );
+  return { service, updateSpy, auditLogs, kmCalcSpy, sumSpy };
+}
+
+describe('ClaimsService.recalcFromDelegation', () => {
+  const ACTUAL = new Date('2026-05-12T00:00:00.000Z');
+
+  it('applies on NA_WERYFIKACJI + not-adjusted: shifts dateEnd, re-prefills mileage, re-runs km-calc, audits autoRecalc', async () => {
+    const { service, updateSpy, auditLogs, kmCalcSpy, sumSpy } = build({
+      claim: makeClaim(),
+      kmResult: { kmGuaranteed: 12_000, ratePerKmEffective: 0.5, totalDays: 12 },
+      droveSum: 9_000,
+    });
+
+    await service.recalcFromDelegation('deleg-1', ACTUAL);
+
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    const patch = updateSpy.mock.calls[0]![1] as UpdateClaimData;
+    // dateEnd shifted to actualReturnAt; dateStart untouched (not in patch).
+    expect((patch.dateEnd as Date).toISOString()).toBe(
+      '2026-05-12T00:00:00.000Z',
+    );
+    expect(patch.dateStart).toBeUndefined();
+    // mileage re-prefilled from Σ drove km (9_000), not the old 8_000.
+    expect(patch.mileage).toBe(9_000);
+    // km-calc was re-run with the new period (re-prefill queried daily km).
+    expect(kmCalcSpy).toHaveBeenCalledTimes(1);
+    expect(sumSpy).toHaveBeenCalledTimes(1);
+    // numbers recomputed: kmDifference = 12_000 - 9_000 = 3_000;
+    // paymentEur = 3_000 * 0.5 = 1_500; amountRequested mirrors paymentEur.
+    expect(patch.kmGuaranteed).toBe(12_000);
+    expect(patch.kmDifference).toBe(3_000);
+    expect(patch.paymentEur).toBe(1_500);
+    expect(patch.amountRequested).toBe(1_500);
+    // timeFrom/timeTo NOT touched.
+    expect(patch.timeFrom).toBeUndefined();
+    expect(patch.timeTo).toBeUndefined();
+    // audit: autoRecalc (not skipped).
+    expect(auditLogs.map((l) => l.action)).toEqual(['claim.autoRecalc']);
+  });
+
+  it('applies on OCZEKUJE_NA_AUTORYZACJE too (still "not decided")', async () => {
+    const { service, updateSpy, auditLogs } = build({
+      claim: makeClaim({ status: 'OCZEKUJE_NA_AUTORYZACJE' }),
+    });
+    await service.recalcFromDelegation('deleg-1', ACTUAL);
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect(auditLogs.map((l) => l.action)).toEqual(['claim.autoRecalc']);
+  });
+
+  it('preserves a carrier mileage override (origMileage !== mileage) — no re-prefill', async () => {
+    const { service, updateSpy, sumSpy } = build({
+      // carrier overrode: applied mileage 8_500 differs from the snapshot 8_000.
+      claim: makeClaim({ mileage: 8_500, origMileage: 8_000 }),
+    });
+    await service.recalcFromDelegation('deleg-1', ACTUAL);
+    const patch = updateSpy.mock.calls[0]![1] as UpdateClaimData;
+    expect(patch.mileage).toBe(8_500);
+    // daily-km repo never queried — the override is respected.
+    expect(sumSpy).not.toHaveBeenCalled();
+  });
+
+  it('SKIPS a decided claim (ZAAKCEPTOWANO): no write, audits autoRecalcSkipped', async () => {
+    const { service, updateSpy, auditLogs } = build({
+      claim: makeClaim({ status: 'ZAAKCEPTOWANO' }),
+    });
+    await service.recalcFromDelegation('deleg-1', ACTUAL);
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(auditLogs.map((l) => l.action)).toEqual(['claim.autoRecalcSkipped']);
+  });
+
+  it('SKIPS when periodAdjustedByVerifier=true: no write, audits autoRecalcSkipped', async () => {
+    const { service, updateSpy, auditLogs } = build({
+      claim: makeClaim({ periodAdjustedByVerifier: true }),
+    });
+    await service.recalcFromDelegation('deleg-1', ACTUAL);
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(auditLogs.map((l) => l.action)).toEqual(['claim.autoRecalcSkipped']);
+  });
+
+  it('no-op when no claim is linked: no write, no audit', async () => {
+    const { service, updateSpy, auditLogs } = build({ claim: null });
+    await service.recalcFromDelegation('deleg-1', ACTUAL);
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(auditLogs).toHaveLength(0);
+  });
+});

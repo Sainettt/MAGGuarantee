@@ -5,8 +5,75 @@
 >
 > **Статус:** scope уточнён заказчиком **2026-06-10** (ответы внесены ниже, см. § «Решения заказчика»). Базис — легаси `Code.gs`, но с **одним явным отклонением**: **`weryfikator` НЕ делает `cancel`** (нет таких полномочий). Его суть — ежедневно проверять автопарк внешними средствами (кто реально в трассе, кто съехал) и проставлять статус в приложении: `w_trasie` / `zjechal`. Cancel остаётся **carrier-only** (как сейчас). Не доизобретаем.
 
+## 0″. ⚠️ REWORK (2026-06-20 #4) — Статусы выезда ВОЗВРАЩАЮТСЯ (eksport + weryfikator) + связка wniosek↔wyjazd
+
+> **Это АКТУАЛЬНАЯ спека для статусов выезда и связки с wniosek.** Отменяет «статус = мёртвый груз» (§0′, `docs/04`) и «нет связи Claim↔Delegation» (06-12). Причина разворота: у статусов снова есть **ответственные роли** (eksport + weryfikator) — значит они не осиротевшие. **km-доска `VehicleDailyKm` (§0′) ОСТАЁТСЯ** (weryfikator ведёт её — источник `mileage`) **И** weryfikator получает отдельное окно статусов выездов. Зафиксировано с пользователем 2026-06-20/22 (скрин-флоу + AskUserQuestion ×9). **Реализуем сейчас.**
+
+### Продуктовое решение — жизненный цикл выезда снова операционный
+
+| Из → В | Роль | Смысл / данные |
+|---|---|---|
+| — → `zgloszony` | carrier | zgłoszenie: `departureAt` (дата+время), `plannedReturnAt` (только дата). Без изменений. |
+| `zgloszony → gotowy` | `eksport \| admin` | eksport нашёл `ładunek`, сделал `zlecenie` в SpedTrans → **чистый флип статуса** (данные выезда НЕ трогает; время старта знает, но не вводит — не нагружаем роль). Откат `gotowy→zgloszony` разрешён, пока не `w_trasie`. |
+| `gotowy → w_trasie` | `weryfikator \| admin` | машина выехала. «Юридический» статус: даже если машина стоит/сломалась — она `w_trasie` (привязка к грузу/рейсу, а не к факту движения в секунду). |
+| `w_trasie → zjechal` | `weryfikator \| admin` | body `{ actualReturnAt: дата }` (date-only; время НЕ вводит — его верифицирует pracownik на wniosek). `actualReturnAt` = точная дата завершения рейса. Транзакция: `vehicle.lastDroveAt = max(lastDroveAt, actualReturnAt)` + авто-пересчёт связанного wniosek (см. ниже). |
+| `* → anulowany` | carrier (свой `zgloszony`) **+ admin (любой активный)** | carrier — как раньше. **Новое:** admin анулирует любой активный (`gotowy`/`w_trasie`) — закрывает дыру «рейс сорвался после zlecenia». |
+
+**Строгий порядок:** только по цепочке `zgloszony→gotowy→w_trasie→zjechal`. weryfikator не может ставить `w_trasie`, пока eksport не поставил `gotowy` (admin есть во всех `@Roles` — может форсить).
+
+### Связка wniosek ↔ wyjazd (`Claim.delegationId`) — ВВОДИТСЯ
+
+Разворот решения 06-12 «нет FK». Теперь:
+- `Claim.delegationId` — **FK → Delegation, `@unique`** (один wniosek на выезд), nullable в БД (легаси/миграция), **обязателен для новых** wniosek (app-level).
+- Перевозчик при подаче **выбирает свой выезд** (`w_trasie`/`zjechal`, без привязанного wniosek) — период не вводит руками: `dateStart = departureAt`, `dateEnd = actualReturnAt ?? plannedReturnAt`, `mileage = Σ VehicleDailyKm (drove)` за период (предзаполнение + override).
+- Подавать можно из `{w_trasie, zjechal}`. Из `w_trasie` — **с предупреждением** «Wyjazd jeszcze nie ma statusu „Zjechał" — точно подаёшь?». Из `gotowy`/`zgloszony` — нельзя.
+- Время возврата (`timeTo`, HH:MM) — на claim, ставит/верифицирует **pracownik**; `Delegation.actualReturnAt` несёт только дату.
+
+### Авто-пересчёт wniosek при позднем `zjechal`
+
+Перевозчик подал на `w_trasie` (`dateEnd = plannedReturnAt`), позже weryfikator ставит `zjechal` с другим `actualReturnAt`. `returned()` в той же транзакции пере-считывает связанный wniosek — **с жёсткими границами**:
+- **Применяем ТОЛЬКО если** `claim.status ∈ {NA_WERYFIKACJI, OCZEKUJE_NA_AUTORYZACJE}` (не решён) **И** период не правил человек (`periodAdjustedByVerifier = false`).
+- **Меняем:** `dateEnd = actualReturnAt` → `mileage` пере-предзаполняем `Σ VehicleDailyKm` за новый период (если нет ручного override) → km-calc заново (`kmGuaranteed/kmDifference/paymentEur/amountRequested/breakdown`). **`timeTo` НЕ трогаем** (зона pracownik). `origDateEnd/origMileage` снапшоты **сохраняем**.
+- **НЕ применяем** (решён ИЛИ правлен человеком): период не трогаем, флаг + audit `claim.autoRecalcSkipped`; UI-бейдж «требует внимания: фактическая дата съезда отличается».
+- Аудит: всегда `delegation.markReturned`; при пересчёте — `claim.autoRecalc` (before/after). **Без email** (только аудит + флаг в UI).
+
+### Модель данных (db-agent)
+- `DelegationStatus` += **`gotowy`**: `zgloszony | gotowy | w_trasie | zjechal | anulowany`.
+- `Claim.delegationId String? @db.Uuid` + relation→`Delegation`, **`@unique`**, индекс; на `Delegation` — обратная `claim Claim?`.
+- `Claim.periodAdjustedByVerifier Boolean @default(false)` — маркер «период правил человек» (граница авто-пересчёта; ставится в `true`, когда pracownik PATCH-ит `dateStart/dateEnd`).
+- Forward-only миграция (БД пустая, не в проде).
+
+### Backend (api-agent)
+- Новый `delegation-state-machine.ts` (по образцу `claim-state-machine.ts`).
+- `POST /delegations/:id/ready` — `eksport|admin`, `zgloszony→gotowy` (+ откат `gotowy→zgloszony`, пока не `w_trasie`). `@Audit('delegation.markReady')`.
+- `POST /delegations/:id/in-transit` — `weryfikator|admin`, `gotowy→w_trasie`, `verifiedBy/At`. `@Audit('delegation.markInTransit')`.
+- `POST /delegations/:id/returned` — `weryfikator|admin`, `w_trasie→zjechal`, body `{ actualReturnAt: date }`, транзакция (lastDroveAt + авто-пересчёт). `@Audit('delegation.markReturned')`.
+- `POST /delegations/:id/cancel` — добавить `admin` (любой активный); carrier без изменений (свой `zgloszony`).
+- Вернуть `weryfikator` в `@Roles`/scope `GET /delegations` (активные, как eksport); `ACTIVE_DELEGATION_STATUSES` += `gotowy`.
+- `POST /claims` + `/claims/preview` принимают **`delegationId`**; период/пробег из выезда; гейт статуса `{w_trasie, zjechal}`; warning-флаг при `w_trasie` (soft).
+- Recalc — `claims.service.recalcFromDelegation()`, зовётся из `delegations.service.returned()`.
+- shared: воссоздать `MarkReadySchema` / `MarkInTransitSchema` / `MarkReturnedSchema`; `SubmitClaimSchema` += `delegationId` (период-поля производные).
+
+### Frontend (web-agent + uiux-agent)
+- **eksport** (`EksportDelegationsView`): «Oznacz Gotowy» на `zgloszony` + откат; доска дефолт `{zgloszony, gotowy, w_trasie}` + тогл истории.
+- **weryfikator**: km-доска (`weryfikator/km`) ОСТАЁТСЯ **+ новое окно** `weryfikator/delegations` — выезды с «W trasie» (из `gotowy`) и «Zjechał» (из `w_trasie`, диалог с датой, предзаполнен `plannedReturnAt`). Две вкладки.
+- **carrier** (`claims/new`): **селектор выезда** вместо ручного периода → предзаполнение; warning + подтверждение при `w_trasie`.
+- **pracownik** ClaimModal: связанный выезд (план vs факт) + бейдж авто-пересчёта.
+- i18n: `eksport.delegations.*`, `weryfikator.delegations.*`, `carrier.claims.wyjazdPicker.*`, warning/badge-ключи. uiux: бейджи 5 статусов, confirm-диалоги, warning-баннер.
+
+### Что НЕ входит в слайс
+- **Approval-роль Аркадиуша** (`zaakceptowany`, назначение zespół/экспортёра) — отдельный Phase 11. См. memory `spedtrans-zlecenie-wyjazd-approval`.
+- **GPS-интеграция** — только хуки (`actualReturnAt` сможет нести время, источник `manual|gps`); саму интеграцию не строим.
+
+### Решения (locked, 2026-06-20/22 — скрин-флоу + AskUserQuestion ×9)
+1. Связь wniosek↔wyjazd — `Claim.delegationId` жёсткий FK. · 2. Период при позднем `zjechal` — авто-пересчёт `dateEnd→actualReturnAt`. · 3. weryfikator — два окна (km-доска + статусы выездов). · 4. Статус eksport — `gotowy`. · 5. Граница авто-пересчёта — только нерешённые. · 6. Конфликт правок — правка человека приоритетнее. · 7. Уведомление — аудит + флаг в UI (без email). · 8. Строгость — строго `gotowy→w_trasie` (admin форсит). · 9. Отмена после `gotowy` — admin анулирует любой активный. · 10. `delegationId` обязателен для новых. · 11. подавать из `{w_trasie+warning, zjechal}`. · 12. `mileage = Σ VehicleDailyKm` + override. · 13. `actualReturnAt`=дата (weryfikator), `timeTo`=время (pracownik). · 14. chat — пока только при создании. · 15. GPS — хуки, не интеграция.
+
+---
+
 ## 0′. ⚠️ REWORK (2026-06-12 #3) — `VehicleDailyKm`: дневной км-лист + развязка claim↔delegation
 
+> ⚠️ **ЧАСТИЧНО SUPERSEDED — см. §0″ (REWORK 2026-06-20 #4) выше.** km-доска `VehicleDailyKm` ниже ОСТАЁТСЯ (weryfikator ведёт её + получил отдельное окно статусов выездов), но «статус = мёртвый груз» и «развязка claim↔delegation» — **ОТМЕНЕНЫ**: статусы снова операционные, `Claim.delegationId` введён.
+>
 > **Это АКТУАЛЬНАЯ спека для `weryfikator`.** Заменяет §0 (route-status board) в части доски статусов и финализирует роль. `eksport` — без изменений. Решения зафиксированы с пользователем 2026-06-12 (AskUserQuestion + обсуждение). **Реализуем сейчас.**
 
 ### Продуктовое решение
@@ -99,7 +166,6 @@
 ### Что НЕ трогаем
 - **Eksport** — read-only выезды, без изменений.
 - **`DelegationStatus` enum** и **cancel** (carrier-only) — без изменений.
-
 ---
 
 ## 1. Роли — что они делают (по легаси)

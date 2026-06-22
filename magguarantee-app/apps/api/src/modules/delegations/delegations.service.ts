@@ -1,9 +1,12 @@
 import {
   ConflictException,
   ForbiddenException,
+  forwardRef,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   UnprocessableEntityException,
 } from '@nestjs/common';
 
@@ -13,9 +16,14 @@ import {
   type DelegationDto,
   type DelegationEligibilityResponse,
   type DelegationFilters,
+  type DelegationStatus,
+  type MarkInTransitDto,
+  type MarkReadyDto,
+  type MarkReturnedDto,
   type SubmitDelegationDto,
 } from '@magguarantee/shared';
 
+import { ClaimsService } from '../claims/claims.service';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { CarrierReadinessService } from '../carriers/carrier-readiness.service';
 import { CarriersRepository } from '../carriers/carriers.repository';
@@ -27,6 +35,10 @@ import {
   VehiclesRepository,
 } from '../vehicles/vehicles.repository';
 import {
+  assertLegalDelegationTransition,
+  CANCELLABLE_DELEGATION_STATUSES,
+} from './delegation-state-machine';
+import {
   DelegationsRepository,
   type DelegationListFilters,
   type DelegationRow,
@@ -37,7 +49,9 @@ import {
  * OFF). Kept as a module constant so the allow-list isn't a magic array inline
  * in `_scopeListFilters`.
  */
-const ACTIVE_DELEGATION_STATUSES = ['zgloszony', 'w_trasie'] as const;
+// Phase 7 REWORK (2026-06-20 #4) — `gotowy` joined the active board (it is the
+// eksport-owned step between `zgloszony` and `w_trasie`).
+const ACTIVE_DELEGATION_STATUSES = ['zgloszony', 'gotowy', 'w_trasie'] as const;
 
 /**
  * Delegations service.
@@ -64,6 +78,14 @@ export class DelegationsService {
     private readonly trailers: TrailersRepository,
     private readonly readiness: CarrierReadinessService,
     private readonly chat: ChatNotifierService,
+    // Phase 7 REWORK (2026-06-20 #4) — the `returned()` transition calls the
+    // claims auto-recalc inside the `@Audit`-opened ambient transaction.
+    // `@Optional()` + `forwardRef` so the circular DelegationsModule↔ClaimsModule
+    // wiring resolves and the existing positional service-test fakes (which omit
+    // the arg) keep compiling.
+    @Optional()
+    @Inject(forwardRef(() => ClaimsService))
+    private readonly claimsService?: ClaimsService,
   ) {}
 
   // ── Submit ──────────────────────────────────────────────
@@ -132,8 +154,26 @@ export class DelegationsService {
     const row = await this.delegations.findById(id);
     if (!row) throw new NotFoundException('Delegacja nie znaleziona');
 
+    // Phase 7 REWORK (2026-06-20 #4) — admin may anulate ANY active outing
+    // (`zgloszony | gotowy | w_trasie`), closing the "rejs sorvался после
+    // zlecenia" hole. The carrier branch below is UNCHANGED (own + `zgloszony`).
+    if (user.role === 'admin') {
+      if (!CANCELLABLE_DELEGATION_STATUSES.includes(row.status)) {
+        throw new ConflictException(
+          'Można anulować tylko aktywny wyjazd (zgłoszony / gotowy / w trasie).',
+        );
+      }
+      const updated = await this.delegations.update(row.id, {
+        status: 'anulowany',
+        notes: dto.reason
+          ? appendCancellationNote(row.notes, dto.reason)
+          : row.notes,
+      });
+      return this.toDto(updated);
+    }
+
     // Ownership: carriers may only cancel their own delegations. Other roles
-    // are out of scope in Phase 3 (weryfikator handles them in Phase 7).
+    // are out of scope (weryfikator never cancels — docs/20 §0″).
     if (user.role !== 'przewoznik') {
       throw new ForbiddenException(
         'Tylko przewoźnik może anulować zgłoszoną delegację w tej fazie',
@@ -159,6 +199,130 @@ export class DelegationsService {
         : row.notes,
     });
     return this.toDto(updated);
+  }
+
+  // ── Status transitions (Phase 7 REWORK 2026-06-20 #4) ────
+
+  /**
+   * `POST /delegations/:id/ready` — eksport|admin.
+   *
+   * Default: `zgloszony → gotowy` (clean flip after a SpedTrans zlecenie). With
+   * `rollback: true`: `gotowy → zgloszony` (allowed ONLY while not yet
+   * `w_trasie` — the state machine forbids the rollback edge from any other
+   * status). The state machine validates the edge and 422s an illegal one
+   * (e.g. a rollback after the outing has already left). An optional `note`
+   * is appended to the outing notes for the audit trail.
+   */
+  async markReady(
+    user: AuthUser,
+    id: string,
+    dto: MarkReadyDto,
+  ): Promise<DelegationDto> {
+    void user;
+    const row = await this.delegations.findById(id);
+    if (!row) throw new NotFoundException('Delegacja nie znaleziona');
+
+    const target: DelegationStatus = dto.rollback ? 'zgloszony' : 'gotowy';
+    assertLegalDelegationTransition(row.status, target);
+
+    const updated = await this.delegations.update(row.id, {
+      status: target,
+      notes: dto.note ? appendNote(row.notes, dto.note) : row.notes,
+    });
+    return this.toDto(updated);
+  }
+
+  /**
+   * `POST /delegations/:id/in-transit` — weryfikator|admin. `gotowy → w_trasie`.
+   * Stamps `verifiedBy/At`. The state machine forbids skipping `gotowy`
+   * (admin is on `@Roles` but still goes through the gate — no forcing).
+   */
+  async markInTransit(
+    user: AuthUser,
+    id: string,
+    dto: MarkInTransitDto,
+  ): Promise<DelegationDto> {
+    const row = await this.delegations.findById(id);
+    if (!row) throw new NotFoundException('Delegacja nie znaleziona');
+
+    assertLegalDelegationTransition(row.status, 'w_trasie');
+
+    const updated = await this.delegations.update(row.id, {
+      status: 'w_trasie',
+      verifiedById: user.sub,
+      verifiedAt: new Date(),
+      notes: dto.note ? appendNote(row.notes, dto.note) : row.notes,
+    });
+    return this.toDto(updated);
+  }
+
+  /**
+   * `POST /delegations/:id/returned` — weryfikator|admin. `w_trasie → zjechal`.
+   *
+   * `actualReturnAt` is **date-only**. In ONE `prisma.$transaction`:
+   *   1. set `actualReturnAt` + `verifiedBy/At` + status,
+   *   2. advance `Vehicle.lastDroveAt = max(lastDroveAt, actualReturnAt)`
+   *      (never moved backwards by an out-of-order edit),
+   *   3. auto-recalc the linked wniosek (no-op when none / when the period was
+   *      human-adjusted / when the claim is already decided) — see
+   *      `ClaimsService.recalcFromDelegation`.
+   */
+  async markReturned(
+    user: AuthUser,
+    id: string,
+    dto: MarkReturnedDto,
+  ): Promise<DelegationDto> {
+    const row = await this.delegations.findById(id);
+    if (!row) throw new NotFoundException('Delegacja nie znaleziona');
+
+    assertLegalDelegationTransition(row.status, 'zjechal');
+
+    // `actualReturnAt` is date-only (`YYYY-MM-DD`) — parse to UTC midnight to
+    // match the `plannedReturnAt` / `@db.Date` round-trip.
+    const actualReturnAt = isoDateOnlyToMidnightUtc(dto.actualReturnAt);
+    if (!actualReturnAt) {
+      throw new UnprocessableEntityException('Nieprawidłowa data zjazdu');
+    }
+
+    // All writes below enrol in the SAME transaction. `POST /:id/returned`
+    // carries `@Audit('delegation.markReturned')`, so the `AuditInterceptor`
+    // already opened a `prisma.$transaction` and every repository call routes
+    // through `prisma.tx` (the ambient handle) — the status update, the
+    // `Vehicle.lastDroveAt` bump, the claim auto-recalc, and the audit row all
+    // commit together or roll back together. Mirrors `VehicleDailyKmService`.
+    const updated = await this.delegations.update(row.id, {
+      status: 'zjechal',
+      actualReturnAt,
+      verifiedById: user.sub,
+      verifiedAt: new Date(),
+      notes: dto.note ? appendNote(row.notes, dto.note) : row.notes,
+    });
+
+    // Fleet readiness signal: `max(lastDroveAt, actualReturnAt)` — never moved
+    // backwards by an out-of-order edit (same invariant as the daily-km bump).
+    const current = await this._currentLastDroveAt(row.vehicleId);
+    if (!current || actualReturnAt.getTime() > current.getTime()) {
+      await this.vehicles.update(row.vehicleId, { lastDroveAt: actualReturnAt });
+    }
+
+    // Auto-recalc the linked wniosek in the SAME transaction. No-op when no
+    // claim is linked, when the claim is already decided, or when a human
+    // adjusted the period (the gate lives inside `recalcFromDelegation`).
+    if (this.claimsService) {
+      await this.claimsService.recalcFromDelegation(row.id, actualReturnAt);
+    }
+
+    return this.toDto(updated);
+  }
+
+  /**
+   * Reads the vehicle's current `lastDroveAt` through the ambient tx so the
+   * max-comparison sees uncommitted in-transaction state. Returns `null` when
+   * the vehicle is missing (defensive — the FK guarantees it exists).
+   */
+  private async _currentLastDroveAt(vehicleId: string): Promise<Date | null> {
+    const v = await this.vehicles.findById(vehicleId);
+    return v?.lastDroveAt ?? null;
   }
 
   // ── Eligibility ─────────────────────────────────────────
@@ -275,6 +439,7 @@ export class DelegationsService {
       verifiedBy: row.verifiedBy,
       verifiedAt: row.verifiedAt ? row.verifiedAt.toISOString() : null,
       notes: row.notes,
+      claimId: row.claimId,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
@@ -362,9 +527,11 @@ export class DelegationsService {
     // `includeHistory` is a Phase 7 eksport/weryfikator-only toggle. Strip it
     // up-front so it can NEVER flow into any other role's repo filters — only
     // the eksport/weryfikator branch below re-reads it. `rest` is already a
-    // clean `DelegationListFilters` shape (no `includeHistory`), so every
-    // downstream branch is structurally safe.
-    const { includeHistory, ...rest } = filters;
+    // clean `DelegationListFilters` shape (no `includeHistory` / `claimable`),
+    // so every downstream branch is structurally safe. `claimable` is a
+    // carrier-only picker flag, re-injected (as `claimableOnly`) ONLY in the
+    // przewoznik branch below.
+    const { includeHistory, claimable, ...rest } = filters;
 
     // All-access, no status floor: admin/opiekun see every delegation in every
     // status, always (docs/03-roles.md). The `includeHistory` toggle is NOT
@@ -385,11 +552,11 @@ export class DelegationsService {
     //   - an explicit `status` filter ALWAYS narrows further (the repo prefers
     //     `status` over `statusIn`), so e.g. `status=zjechal` still works even
     //     with history off.
-    // `weryfikator` was REMOVED from this branch in the Phase 7 rework
-    // (2026-06-10 #2) — it no longer sees delegations at all (it falls through
-    // to the final `ForbiddenException` and is also blocked at the controller
-    // `@Roles`). The eksport behaviour below is unchanged.
-    if (user.role === 'eksport') {
+    // `weryfikator` is BACK on this branch (Phase 7 REWORK 2026-06-20 #4) —
+    // it manages the outing lifecycle again, so it sees the SAME active board as
+    // eksport (active-status floor by default, widened by `includeHistory`). The
+    // km-board (`VehicleDailyKm`) it keeps is unrelated to this list.
+    if (user.role === 'eksport' || user.role === 'weryfikator') {
       if (includeHistory || rest.status) {
         return rest;
       }
@@ -400,7 +567,14 @@ export class DelegationsService {
       if (rest.carrierId && rest.carrierId !== carrier.id) {
         throw new ForbiddenException('Brak uprawnień do tego przewoźnika');
       }
-      return { ...rest, carrierId: carrier.id };
+      // Phase 7 REWORK (2026-06-20 #4) — «claimable wyjazdy» picker: outings in
+      // {`w_trasie`, `zjechal`} with no claim yet. The repo applies the fixed
+      // status floor + `claim is null` predicate; the carrier pin still wins.
+      return {
+        ...rest,
+        carrierId: carrier.id,
+        ...(claimable ? { claimableOnly: true } : {}),
+      };
     }
     if (user.role === 'planista') {
       // Phase 6.4 — planista sees ONLY delegations of vehicles they plan
@@ -437,4 +611,26 @@ function appendCancellationNote(
   const ts = new Date().toISOString();
   const entry = `[ANULOWANO ${ts}] ${reason}`;
   return existing ? `${existing}\n${entry}` : entry;
+}
+
+/**
+ * Appends a free-form transition note (Phase 7 status changes) to the outing
+ * notes with a timestamp, preserving prior notes. Mirrors
+ * `appendCancellationNote` without the `[ANULOWANO]` tag.
+ */
+function appendNote(existing: string | null, note: string): string {
+  const ts = new Date().toISOString();
+  const entry = `[${ts}] ${note}`;
+  return existing ? `${existing}\n${entry}` : entry;
+}
+
+/**
+ * Parse a date-only `YYYY-MM-DD` to UTC midnight (matches the `@db.Date`
+ * round-trip Prisma performs for `plannedReturnAt` / `actualReturnAt`).
+ * Returns `null` on malformed input.
+ */
+function isoDateOnlyToMidnightUtc(iso: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return null;
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
 }

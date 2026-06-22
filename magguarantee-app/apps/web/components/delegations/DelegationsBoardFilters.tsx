@@ -18,8 +18,11 @@ import type { DelegationStatus } from '@magguarantee/shared';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Select } from '@/components/ui/Select';
 
+// §7.10.1 — 5-status lifecycle; `gotowy` slots between `zgloszony` and
+// `w_trasie` in the status filter.
 const STATUSES: readonly DelegationStatus[] = [
   'zgloszony',
+  'gotowy',
   'w_trasie',
   'zjechal',
   'anulowany',

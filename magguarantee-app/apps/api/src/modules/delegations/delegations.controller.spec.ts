@@ -11,11 +11,13 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { DelegationsController } from './delegations.controller';
 
 /**
- * Authorization unit tests for the delegations surface after the Phase 7
- * rework (2026-06-10 #2): the weryfikator no longer touches delegations — its
- * former in-transit/returned handlers were removed and it was dropped from the
- * `list` / `getOne` `@Roles`. `eksport` stays on the outings board; cancel
- * stays carrier-only.
+ * Authorization unit tests for the delegations surface after the Phase 7 REWORK
+ * (2026-06-20 #4, docs/20 §0″): the outing lifecycle is operational again.
+ *  - `eksport|admin` own `markReady` (`zgloszony↔gotowy`).
+ *  - `weryfikator|admin` own `markInTransit` + `markReturned`.
+ *  - `weryfikator` is BACK on `list` / `getOne` (active board, like eksport).
+ *  - cancel: carrier (own `zgloszony`) + admin (any active); NOT weryfikator
+ *    (it never cancels) and NOT eksport.
  *
  * Two layers, same pattern as `drivers.controller.spec.ts`:
  *   1. The `@Roles(...)` metadata on each handler is exactly the documented set
@@ -68,28 +70,26 @@ function userWith(role: Role): AuthUser {
   };
 }
 
-describe('DelegationsController — authorization (post Phase 7 rework)', () => {
+describe('DelegationsController — authorization (Phase 7 REWORK 2026-06-20 #4)', () => {
   const guard = new RolesGuard(reflector);
 
-  describe('the verifier transition handlers no longer exist', () => {
-    it('markInTransit / markReturned are not methods on the controller', () => {
+  describe('the verifier transition handlers exist again', () => {
+    it('markReady / markInTransit / markReturned are methods on the controller', () => {
       const proto = DelegationsController.prototype as unknown as Record<
         string,
         unknown
       >;
-      expect(proto.markInTransit).toBeUndefined();
-      expect(proto.markReturned).toBeUndefined();
+      expect(typeof proto.markReady).toBe('function');
+      expect(typeof proto.markInTransit).toBe('function');
+      expect(typeof proto.markReturned).toBe('function');
     });
   });
 
-  describe('list / getOne — eksport kept, weryfikator dropped', () => {
+  describe('list / getOne — weryfikator is back (active board like eksport)', () => {
     it.each(['list', 'getOne'] as const)(
-      '%s includes eksport but NOT weryfikator',
+      '%s includes BOTH eksport and weryfikator',
       (handler) => {
         const roles = rolesFor(handler);
-        expect(roles).toContain('eksport');
-        expect(roles).not.toContain('weryfikator');
-        // The other documented readers are unchanged.
         expect(roles).toEqual(
           expect.arrayContaining([
             'admin',
@@ -98,17 +98,18 @@ describe('DelegationsController — authorization (post Phase 7 rework)', () => 
             'dyspozytor',
             'przewoznik',
             'eksport',
+            'weryfikator',
           ]),
         );
       },
     );
 
     it.each(['list', 'getOne'] as const)(
-      'RolesGuard rejects weryfikator on %s (403)',
+      'RolesGuard allows weryfikator on %s',
       (handler) => {
-        expect(() =>
+        expect(
           guard.canActivate(ctxFor(handler, userWith('weryfikator'))),
-        ).toThrow(ForbiddenException);
+        ).toBe(true);
       },
     );
 
@@ -122,12 +123,57 @@ describe('DelegationsController — authorization (post Phase 7 rework)', () => 
     );
   });
 
-  describe('cancel stays carrier-only (verifier has NO cancel)', () => {
-    it('cancel is @Roles(przewoznik) only', () => {
+  describe('markReady — eksport|admin', () => {
+    it('is @Roles(eksport, admin)', () => {
+      expect(rolesFor('markReady').sort()).toEqual(['admin', 'eksport']);
+    });
+
+    it.each(['eksport', 'admin'] as const)('RolesGuard allows %s', (role) => {
+      expect(guard.canActivate(ctxFor('markReady', userWith(role)))).toBe(true);
+    });
+
+    it.each(['weryfikator', 'przewoznik', 'planista'] as const)(
+      'RolesGuard rejects %s (403)',
+      (role) => {
+        expect(() =>
+          guard.canActivate(ctxFor('markReady', userWith(role))),
+        ).toThrow(ForbiddenException);
+      },
+    );
+  });
+
+  describe('markInTransit / markReturned — weryfikator|admin', () => {
+    it.each(['markInTransit', 'markReturned'] as const)(
+      '%s is @Roles(weryfikator, admin)',
+      (handler) => {
+        expect(rolesFor(handler).sort()).toEqual(['admin', 'weryfikator']);
+      },
+    );
+
+    it.each(['markInTransit', 'markReturned'] as const)(
+      'RolesGuard rejects eksport on %s (403)',
+      (handler) => {
+        expect(() =>
+          guard.canActivate(ctxFor(handler, userWith('eksport'))),
+        ).toThrow(ForbiddenException);
+      },
+    );
+
+    it.each(['markInTransit', 'markReturned'] as const)(
+      'RolesGuard allows weryfikator on %s',
+      (handler) => {
+        expect(
+          guard.canActivate(ctxFor(handler, userWith('weryfikator'))),
+        ).toBe(true);
+      },
+    );
+  });
+
+  describe('cancel — carrier + admin (verifier still has NO cancel)', () => {
+    it('cancel is @Roles(przewoznik, admin)', () => {
       const roles = rolesFor('cancel');
-      expect(roles).toEqual(['przewoznik']);
+      expect(roles.sort()).toEqual(['admin', 'przewoznik']);
       expect(roles).not.toContain('weryfikator');
-      expect(roles).not.toContain('admin');
       expect(roles).not.toContain('eksport');
     });
 
@@ -137,10 +183,11 @@ describe('DelegationsController — authorization (post Phase 7 rework)', () => 
       ).toThrow(ForbiddenException);
     });
 
-    it('RolesGuard allows a przewoznik on cancel', () => {
-      expect(guard.canActivate(ctxFor('cancel', userWith('przewoznik')))).toBe(
-        true,
-      );
-    });
+    it.each(['przewoznik', 'admin'] as const)(
+      'RolesGuard allows %s on cancel',
+      (role) => {
+        expect(guard.canActivate(ctxFor('cancel', userWith(role)))).toBe(true);
+      },
+    );
   });
 });

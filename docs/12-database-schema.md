@@ -74,8 +74,11 @@ enum ClaimStatus {
   AUTORYZACJA_KWOTA_MAKSIMA @map("AUTORYZACJA — KWOTA MAKSIMA")
 }
 
+// REWORK 2026-06-20 (#4, docs/20 §0″) — statuses operational again:
+// carrier→zgloszony, eksport→gotowy, weryfikator→w_trasie→zjechal.
 enum DelegationStatus {
   zgloszony
+  gotowy
   w_trasie
   zjechal
   anulowany
@@ -517,6 +520,12 @@ model Claim {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
+  // REWORK 2026-06-20 (#4, docs/20 §0″) — wniosek↔wyjazd link.
+  delegationId             String?     @db.Uuid                  // FK → Delegation, unique; required for new claims (app-level)
+  delegation               Delegation? @relation(fields: [delegationId], references: [id])
+  periodAdjustedByVerifier Boolean     @default(false)           // true once pracownik edits dateStart/dateEnd — gates auto-recalc on zjechal
+
+  @@unique([delegationId])
   @@index([carrierId, status])
   @@index([carrierId, deletedAt])           // Phase 3 — carrier-panel "list my claims"
   @@index([vehicleId])
@@ -569,8 +578,11 @@ model Delegation {
   returnCountry    String
   returnPostalCode String
 
-  status         DelegationStatus @default(zgloszony)
-  actualReturnAt DateTime?                                              // set on markReturned
+  status         DelegationStatus @default(zgloszony)                   // REWORK 2026-06-20: eksport→gotowy, weryfikator→w_trasie/zjechal
+  actualReturnAt DateTime?                                              // date-only, set on markReturned (zjechal) → also bumps Vehicle.lastDroveAt
+
+  // REWORK 2026-06-20 (#4) — wniosek↔wyjazd link (one claim per delegation).
+  claim Claim?
 
   reportedById String?   @db.Uuid
   reportedBy   User?     @relation("DelegationReporter", fields: [reportedById], references: [id])

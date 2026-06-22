@@ -1080,12 +1080,15 @@ Existing `<Badge>` (`apps/web/components/ui/Badge.tsx`) is **sufficient**. Add a
 | `OCZEKUJE_NA_AUTORYZACJE` | `info` | "Czeka na autoryzację" | `<Clock />` |
 | `AUTORYZACJA_KWOTA_MAKSIMA` | `warning` | "Autoryzacja — kwota maks." | `<AlertTriangle />` |
 
-| `DelegationStatus` value | Badge variant | Label (PL) |
-|---|---|---|
-| `zgloszony` | `info` | "Zgłoszony" |
-| `w_trasie` | `success` | "W trasie" |
-| `zjechal` | `muted` | "Zjechał" |
-| `anulowany` | `danger` | "Anulowany" |
+| `DelegationStatus` value | Badge variant | Label (PL) | Icon (Lucide, 12px, optional) |
+|---|---|---|---|
+| `zgloszony` | `info` | "Zgłoszony" | `<FileText />` |
+| `gotowy` | `warning` | "Gotowy" | `<PackageCheck />` |
+| `w_trasie` | `success` | "W trasie" | `<Truck />` |
+| `zjechal` | `muted` | "Zjechał" | `<ParkingSquare />` |
+| `anulowany` | `danger` | "Anulowany" | `<XCircle />` |
+
+> ⚠️ **`gotowy` (5th status) added — REWORK 2026-06-20 #4 (see §7.10).** Full tone rationale for the 5-status lifecycle is locked in **§7.10.1**; the row above is the canonical const-map. `gotowy = warning` (amber) sits between `zgloszony` (info) and `w_trasie` (success) — " load found, zlecenie made, awaiting departure" — a transient holding state that reads as "needs the next operator step", consistent with `warning` carrying "attention/transient" elsewhere (it is NOT an error). Do not invent a new variant for it.
 
 No new variants — `Badge` covers all. `<StatusBadge>` lives in `components/carrier/StatusBadge.tsx` and is also reused in employee panel later.
 
@@ -5035,6 +5038,115 @@ PL+EN key parity holds (existing i18n-parity check covers this).
 - [ ] **Code chip.** `font-mono tabular-nums` `1.1.13` (3 segments); `showCode` only dedups a duplicate and **never** hides identity (name stands in; if name null, chip renders anyway).
 - [ ] **No new tokens.** Only existing palette/radius/type/spacing; no `tailwind.config.ts`/`globals.css` change.
 - [ ] **a11y.** Member list real `<ul>`/`role=list`; avatars `aria-hidden`; warning carried by text not colour; `team.*` keys PL+EN parity.
+
+---
+
+## 7.10 Delegation operational statuses RETURN (eksport + weryfikator) + wniosek↔wyjazd link (REWORK 2026-06-20 #4 — AUTHORITATIVE)
+
+> **Scope.** The delegation lifecycle is operational again. Two roles drive it: **`eksport`** (flips `zgloszony→gotowy` + rollback) and **`weryfikator`** (flips `gotowy→w_trasie` and `w_trasie→zjechal` with an actual-return date). The carrier picks a delegation when submitting a wniosek (`Claim.delegationId` FK), and a late `zjechal` auto-recalculates the linked wniosek. This section specifies the **four UI artefacts** uiux owns: (1) the **5-status** `<StatusBadge>` tone-map, (2) the **status-change confirm dialogs**, (3) the **carrier `w_trasie` warning banner**, (4) the **auto-recalc badge** in the pracownik `ClaimModal`.
+>
+> **Spec source (source of truth):** [`20-phase-7-eksport-weryfikator.md` §0″ — REWORK 2026-06-20 #4](20-phase-7-eksport-weryfikator.md). The km-board (§7.7) stays; weryfikator gains a **second** screen (delegation statuses) alongside the km-board — two tabs.
+>
+> **HARD: no new tokens** (project no-new-token policy). Everything composes existing semantics (`info` / `warning` / `success` / `muted` / `danger`), the existing `-bg` surfaces + `dark:bg-*/10..15` opacity variants, the §7.5 confirm-dialog pattern, the §1195 carrier warning-banner recipe, and the §6.5.4 `<RecalcBadge>` precedent. **Zero** `tailwind.config.ts` / `globals.css` changes.
+
+### 7.10.1 `<StatusBadge>` — the 5-status delegation tone-map (LOCKED)
+
+`DelegationStatus` += **`gotowy`** ⇒ the lifecycle is now `zgloszony → gotowy → w_trasie → zjechal` (+ terminal `anulowany`). This is the canonical const-map; it supersedes the prior 4-row map and is mirrored at the `<StatusBadge>` definition (§"`<StatusBadge>` — extends existing `<Badge>`"). **Reuse the existing `<Badge>` variants only — no new variant.**
+
+| `DelegationStatus` | Badge variant | Token surface (light → dark) | Label PL | Label EN | Optional icon (12px) | Tone rationale |
+|---|---|---|---|---|---|---|
+| `zgloszony` | **`info`** | `bg-info/15 text-info border-info/30` → `dark:bg-info/15` | «Zgłoszony» | "Reported" | `<FileText />` | Just-submitted, informational/neutral — nothing has happened operationally yet. Reuses the prior precedent verbatim. |
+| `gotowy` *(NEW)* | **`warning`** | `bg-warning/15 text-warning border-warning/30` → `dark:bg-warning/15` | «Gotowy» | "Ready" | `<PackageCheck />` | **Load found, zlecenie made, awaiting departure** — a *transient holding* state needing the next operator (weryfikator) to act. Amber `warning` = "in-flight / attention", NOT an error. Sits one notch warmer than `zgloszony` (info) and cooler than the active `w_trasie` (success) — a correct middle rung. Distinct from the claim `NA_WERYFIKACJI`/`REKLAMACJA` warning usage by **context** (delegation board vs claim table); the shared amber means "a human still has to move this forward" in both. |
+| `w_trasie` | **`success`** | `bg-success/15 text-success border-success/30` → `dark:bg-success/15` | «W trasie» | "On the road" | `<Truck />` | Vehicle is actively working — the positive operational signal. Reuses the long-standing precedent (§7.5.1) so the same word carries the same green everywhere. |
+| `zjechal` | **`muted`** | `bg-muted text-muted-foreground border-border` (soft grey fill) | «Zjechał» | "Returned" | `<ParkingSquare />` | Done / parked — neutral-settled, *not* alarming and *not* celebratory (the money outcome lives on the claim, not here). Reuses precedent. |
+| `anulowany` | **`danger`** | `bg-danger/15 text-danger border-danger/30` → `dark:bg-danger/15` | «Anulowany» | "Cancelled" | `<XCircle />` | Terminal, void. Reuses precedent. |
+
+**Visual hierarchy (top-of-mind for the eksport/weryfikator boards):** the eye should land on what needs action.
+`gotowy` (amber, "weryfikator: take me to the road") and `w_trasie` (green, "live") are the **acting** rows; `zgloszony` (info) is "eksport's queue"; `zjechal` (muted) and `anulowany` (danger-but-terminal) recede. The amber `gotowy` deliberately stands out on the eksport board (its rollback/advance target) and on the weryfikator board (its «Oznacz W trasie» queue).
+
+**Anatomy / a11y (unchanged):** same badge shell as all `<StatusBadge>` (`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-xs font-medium whitespace-nowrap`); status is carried by **text + colour**, never colour alone (label always rendered; icon optional). Const-map lives in `@magguarantee/shared` next to the claim-status map; `<StatusBadge status>` resolves enum → `{variant,label,icon}`.
+
+### 7.10.2 Status-change confirm dialogs (eksport + weryfikator)
+
+All dialogs reuse the **§7.1 confirm-`<Dialog>` pattern** (centered `<Dialog>`, `bg-card`, `DialogHeader`/`DialogDescription`/`DialogFooter`; ghost «Anuluj» = dialog-dismiss + one primary action; `await onConfirm()`, close on resolve, stay-open + toast on reject). **No new tokens.** The `{plate}` (and where useful `{sideNumber}`) is interpolated so the operator sees exactly which delegation. Each dialog's primary `<Button>` is the **brand-red default** (these *are* the page's primary affordance for these single-purpose roles — unlike the high-frequency km-cell stamps which stay `outline`). Touch ≥44px via the `<Button>` hit-area.
+
+| # | Role | Trigger row status | Dialog title (PL) | Body / fields | Primary button (PL) | Endpoint |
+|---|---|---|---|---|---|---|
+| **A** | eksport \| admin | `zgloszony` | «Oznacz jako gotowy» | plain confirm, no input. Desc: «Wyjazd {plate} zostanie oznaczony jako *gotowy* (ładunek znaleziony, zlecenie wystawione).» | «Oznacz gotowy» | `POST /delegations/:id/ready` |
+| **B** | eksport \| admin | `gotowy` | «Cofnij do: zgłoszony» | plain confirm, no input. Desc: «Wyjazd {plate} wróci do statusu *zgłoszony*. Możliwe tylko zanim ruszy w trasę.» | «Cofnij status» | `POST /delegations/:id/ready` (rollback; api toggles `gotowy→zgloszony`) |
+| **C** | weryfikator \| admin | `gotowy` | «Oznacz jako w trasie» | plain confirm, no input. Desc: «Wyjazd {plate} zostanie oznaczony jako *w trasie*.» | «Oznacz w trasie» | `POST /delegations/:id/in-transit` |
+| **D** | weryfikator \| admin | `w_trasie` | «Oznacz jako zjechał» | **one date-only field** — `<FormField label="Data zjazdu" required>` wrapping `<Input type="date" className="h-10" autoFocus>` bound to `actualReturnAt`, **pre-filled with `plannedReturnAt`**. Desc: «Podaj faktyczną datę zjazdu dla wyjazdu {plate}.» | «Oznacz zjechał» | `POST /delegations/:id/returned` `{ actualReturnAt }` |
+
+**Dialog A/B/C — plain confirm (no input).** Direct `<Dialog>` use; footer = ghost «Anuluj» (dismiss; this is NOT the business-cancel action — delegation-cancel stays carrier/admin-only and is not on these boards) + brand-red primary. Success → close, table refetch, toast («Oznaczono jako gotowy» / «Cofnięto do: zgłoszony» / «Oznaczono jako w trasie»).
+
+**Dialog B is a guarded rollback.** The «Cofnij do: zgłoszony» action is offered **only** on `gotowy` rows and **only** while the delegation is not yet `w_trasie` (the api enforces this; the UI simply doesn't render the action once the row advances). On the eksport board this is the row's secondary affordance (a `<Button size="sm" variant="ghost">` sitting after the primary «Oznacz gotowy» disappears, i.e. a `gotowy` row shows the rollback as its single action). Do not render a rollback on `w_trasie`/`zjechal`/`anulowany`.
+
+**Dialog D — confirm + date input (the §7.1(b) `ConfirmWithDateDialog` shape).** RHF + Zod, `mode:'onChange'`, submit disabled until valid, dialog stays open on error so the date isn't re-typed. Differences vs the legacy §7.1 returned-dialog (locked here):
+- **`actualReturnAt` is pre-filled with `plannedReturnAt`** (the planned return is the best default; the verifier overrides only if the truck came back on a different day). If `plannedReturnAt` is somehow absent, default to today.
+- **Date-only** (`YYYY-MM-DD`, DB `@db.Date`) — `<Input type="date">`, never `datetime-local`. Time of return is the pracownik's zone (`timeTo` on the claim), never entered here.
+- Required (empty → inline «Podaj datę zjazdu»). Suggested guards (not hard DS rules, api re-validates): reject a **future** date («Data zjazdu nie może być w przyszłości»); a lower-bound `actualReturnAt >= departureAt` sanity check if `departureAt` is in scope.
+- Success → close, refetch, toast «Oznaczono jako zjechał». **Side-effects are invisible to this dialog** (`vehicle.lastDroveAt` bump + linked-wniosek auto-recalc happen server-side); if the linked claim was recalculated the operator is not interrupted — the signal surfaces later on the pracownik `ClaimModal` (§7.10.4), per the "audit + UI flag, no email" decision.
+
+**Board placement (both roles).** Each delegation table gets a trailing `actions` cell. **At most one primary action per row** (strict state machine): `zgloszony`→A (eksport) ; `gotowy`→C (weryfikator) **or** B-rollback (eksport) depending on whose board ; `w_trasie`→D (weryfikator) ; `zjechal`/`anulowany`→ `—`. The weryfikator's two screens (km-board + delegation statuses) are **two `<Tabs>`** inside `RoleShell` — reintroduce the Phase 6.3 in-page `<Tabs>` bar now that the role has a second destination (this overrides the §7.5 "single screen, no tabs" note for weryfikator). Eksport stays a single screen (no tabs).
+
+### 7.10.3 Carrier `w_trasie` warning banner (`/carrier/claims/new` — delegation picker)
+
+When the carrier submits a wniosek by **picking their delegation** (selector replaces the old manual period entry; period + mileage prefill from the delegation per the spec), the chosen delegation may still be `w_trasie` (not yet `zjechal`). Submitting from `w_trasie` is **allowed but soft-warned**; from `gotowy`/`zgloszony` it is **blocked** (those options aren't offered / are disabled in the picker).
+
+**Banner — reuse the §"Reklamacja sheet" warning-banner recipe verbatim** (the existing `bg-warning-bg` informational band), no new token:
+
+| Element | Tailwind |
+|---|---|
+| Wrapper | `flex items-start gap-2 rounded-md bg-warning-bg dark:bg-warning/15 border border-warning/40 px-3 py-2 mb-4` |
+| Icon | `<AlertTriangle size={16} className="text-warning-dark dark:text-warning shrink-0 mt-0.5" />` |
+| Text | `text-sm text-warning-dark dark:text-warning` — «Wyjazd jeszcze nie ma statusu „Zjechał" — czy na pewno chcesz złożyć wniosek?» (EN: "The delegation is not yet marked 'Returned' — are you sure you want to submit the claim?") |
+| Visibility | rendered **only** when the selected delegation's status is `w_trasie`; disappears for `zjechal`. |
+| a11y | `role="status" aria-live="polite"` (informational, must NOT steal focus — same rule as the temp-password banner §1630). |
+
+**Confirmation gate (soft).** Because the warning is *soft* (the backend accepts a `w_trasie` submission), the submit must be **explicitly confirmed once** so the carrier can't fat-finger past it:
+- Either (preferred) a `<Checkbox>` directly under the banner — «Rozumiem, że wyjazd nie jest jeszcze zakończony» — that must be ticked before the «Złóż wniosek» button enables; *or*
+- a confirm `<Dialog>` on submit (same §7.1 plain-confirm shape, title «Wyjazd nie jest zakończony», body repeating the warning copy, primary «Złóż mimo to»).
+- Web-agent's call which; the checkbox keeps the flow inline (one fewer modal) and is the recommendation. For a `zjechal` delegation **no banner, no gate** — straight submit. The banner copy + key live under `carrier.claims.wyjazdPicker.warning*`.
+
+When `dateEnd` is derived from `plannedReturnAt` (because the delegation is `w_trasie`), surface a quiet inline note next to the prefilled period — `text-xs text-text-sub` «Okres tymczasowy z planowanego powrotu — zostanie zaktualizowany po zjeździe» — so the carrier understands the date may shift when the auto-recalc fires later. Not a warning band; a plain muted hint.
+
+### 7.10.4 Auto-recalc badge in the pracownik `ClaimModal` (§6.5)
+
+When a late `zjechal` carries an `actualReturnAt` ≠ the period the wniosek was filed on, the backend either **applies** an auto-recalc (claim not yet decided AND period not human-edited) or **skips** it (decided OR `periodAdjustedByVerifier`). The §6.5 verification surface must show **which** happened. This is a **status indicator** (like §6.5.4's `<RecalcBadge>` for the live debounce), but it reports a *server-side historical* event — a sibling badge, not the live one.
+
+Place it in the **linked-delegation context row** at the top of §6.5.3 (the fact-pairs block) — i.e. next to where the modal shows the linked wyjazd (plan vs. fakt). It reuses the §789 `<StatusBadge>` anatomy (`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-xs font-medium`). **Two states, existing tones only:**
+
+| State | Condition (DTO) | Badge variant | Token | Label PL | Icon | Behaviour |
+|---|---|---|---|---|---|---|
+| **Applied** | `claim.autoRecalcApplied === true` (period was auto-updated to `actualReturnAt`) | **`success`** | `bg-success/15 text-success border-success/30` | «Przeliczono wg faktycznej daty zjazdu» (EN "Recalculated to actual return date") | `<RefreshCw size={12} />` | Informational/positive — the system did the right thing automatically. Optional tooltip: «Okres zaktualizowany z {origDateEnd} na {actualReturnAt}». |
+| **Skipped / needs attention** | `claim.autoRecalcSkipped === true` (decided OR human-edited period; `actualReturnAt` differs) | **`warning`** | `bg-warning/15 text-warning border-warning/30` | «Wymaga uwagi: faktyczna data zjazdu różni się od okresu wniosku» (EN "Needs attention: actual return date differs from the claim period") | `<AlertTriangle size={12} />` | Amber attention (NOT `danger` — nothing is broken; a human must just decide whether to re-open / adjust). Optional tooltip: «Wyjazd zjechał {actualReturnAt}, okres wniosku: {dateEnd}. Pominięto auto-przeliczenie ({skipReason}).» |
+
+Rationale for tones: this mirrors the established **`success` = applied/positive**, **`warning` = transient human-attention** vocabulary used by the §7.6 SLA scale and the §7.10.1 `gotowy` status — consistent across the app. The skip state must read as "look at this", **never** as an error/`danger` (the claim is valid; only its period may want a human second look). Both badges render **only** when a linked delegation exists AND `actualReturnAt` is set; otherwise the row carries just the plan/fakt delegation info with no badge. The two states are mutually exclusive. The badge is **static** (a record of what happened), distinct from §6.5.4's live `Przeliczam…/Aktualne` recalc badge — do not conflate; both may be visible (live badge by the dopłata value, this historical badge by the delegation context row).
+
+### 7.10.5 Components / shared / nav summary (Phase 7.10)
+
+| Change | Where | Owner |
+|---|---|---|
+| `<StatusBadge>` `DelegationStatus` const-map += `gotowy` (`warning`); 5-status map per §7.10.1 | `@magguarantee/shared` (status const-map) + `components/carrier/StatusBadge.tsx` | web-agent |
+| New `<MarkReadyDialog>` (plain confirm, advance + rollback variants) | `apps/web/components/delegations/` | web-agent |
+| New `<MarkInTransitDialog>` (plain confirm) | `apps/web/components/delegations/` | web-agent |
+| New `<MarkReturnedDialog>` (confirm + date-only, pre-filled `plannedReturnAt`) | `apps/web/components/delegations/` | web-agent |
+| Eksport delegations board (`actions` col: A advance + B rollback) | `app/(eksport)/eksport/delegations/page.tsx`; default board filter `{zgloszony, gotowy, w_trasie}` + history toggle | web-agent |
+| Weryfikator gains **2nd screen** (delegation statuses) → reintroduce Phase 6.3 in-page `<Tabs>` (km-board ‖ wyjazdy); wyjazdy board `actions`: C + D | `app/(weryfikator)/…` | web-agent |
+| Carrier delegation-picker `w_trasie` warning banner + soft-confirm gate + muted "tymczasowy okres" hint | `app/(carrier)/carrier/claims/new/…` | web-agent |
+| Auto-recalc historical badge (applied `success` / skipped `warning`) in §6.5 linked-delegation row | `components/.../ClaimVerificationModal` (the §6.5 surface) | web-agent |
+| i18n: `eksport.delegations.*`, `weryfikator.delegations.*`, `carrier.claims.wyjazdPicker.*` (incl. `warning*`), `claim.autoRecalc.{applied,skipped}` | `messages/pl.json` / `en.json` | web-agent |
+| **0** changes to `tailwind.config.ts` / `globals.css`; **0** new colour/badge variants | — | — |
+
+### 7.10.6 Acceptance checklist (Phase 7.10)
+
+- [ ] **5-status tone-map.** `zgloszony`→`info`, **`gotowy`→`warning`**, `w_trasie`→`success`, `zjechal`→`muted`, `anulowany`→`danger`; label always present (a11y, not colour-alone); const-map in shared; no new variant.
+- [ ] **eksport dialogs.** `zgloszony`→«Oznacz gotowy» (plain confirm → `/ready`); `gotowy`→«Cofnij do: zgłoszony» (rollback, only pre-`w_trasie`); brand-red primary; ghost «Anuluj» = dismiss only.
+- [ ] **weryfikator dialogs.** `gotowy`→«Oznacz w trasie» (plain confirm → `/in-transit`); `w_trasie`→«Oznacz zjechał» (confirm + **date-only** `actualReturnAt`, **pre-filled `plannedReturnAt`**, future-date guard, dialog stays open on error → `/returned`).
+- [ ] **weryfikator two tabs.** km-board (§7.7) ‖ delegation statuses, Phase 6.3 in-page `<Tabs>`; eksport stays single screen.
+- [ ] **Carrier warning banner.** Shown only on `w_trasie` selection; copy «Wyjazd jeszcze nie ma statusu „Zjechał" — czy na pewno chcesz złożyć wniosek?»; `bg-warning-bg` recipe; soft-confirm gate (checkbox or confirm dialog) required before submit; `gotowy`/`zgloszony` not submittable; muted "tymczasowy okres" hint when period derived from `plannedReturnAt`.
+- [ ] **Auto-recalc badge.** §6.5 linked-delegation row shows `success` «Przeliczono wg faktycznej daty zjazdu» (applied) or `warning` «Wymaga uwagi…» (skipped); mutually exclusive; static (distinct from §6.5.4 live recalc badge); never `danger`.
+- [ ] **Token policy + dark-mode.** Zero `tailwind.config.ts`/`globals.css` changes; all surfaces legible in dark via `dark:bg-*/10..15` / `dark:text-*` variants; confirm dialogs `bg-card`, date input `bg-input`, brand-red primaries.
 
 ---
 

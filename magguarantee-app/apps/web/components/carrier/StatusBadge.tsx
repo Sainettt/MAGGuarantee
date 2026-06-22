@@ -13,7 +13,10 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
+  FileText,
   type LucideIcon,
+  PackageCheck,
+  ParkingSquare,
   Truck,
   XCircle,
 } from 'lucide-react';
@@ -38,10 +41,16 @@ const CLAIM_META: Record<ClaimStatus, StatusMeta> = {
   AUTORYZACJA_KWOTA_MAKSIMA: { variant: 'warning', icon: AlertTriangle },
 };
 
+// §7.10.1 — the LOCKED 5-status delegation tone-map. `gotowy` (NEW) is the
+// eksport-owned holding step between carrier-`zgloszony` and weryfikator-
+// `w_trasie`; it reuses the existing `warning` (amber) variant — NO new variant
+// — to read as "a human still has to move this forward". Icons are the §7.10.1
+// optional 12px Lucide set. The 6 ClaimStatus rows above stay untouched.
 const DELEGATION_META: Record<DelegationStatus, StatusMeta> = {
-  zgloszony: { variant: 'info', icon: Clock },
+  zgloszony: { variant: 'info', icon: FileText },
+  gotowy: { variant: 'warning', icon: PackageCheck },
   w_trasie: { variant: 'success', icon: Truck },
-  zjechal: { variant: 'muted', icon: CheckCircle2 },
+  zjechal: { variant: 'muted', icon: ParkingSquare },
   anulowany: { variant: 'danger', icon: XCircle },
 };
 

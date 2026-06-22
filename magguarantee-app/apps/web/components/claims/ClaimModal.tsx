@@ -52,6 +52,10 @@ import {
 
 import { BreakdownTable } from '@/components/carrier/BreakdownTable';
 import { StatusBadge } from '@/components/carrier/StatusBadge';
+import {
+  AutoRecalcBadge,
+  resolveAutoRecalcState,
+} from '@/components/claims/AutoRecalcBadge';
 import { HoursReadout } from '@/components/claims/HoursReadout';
 import { RecalcBadge } from '@/components/claims/RecalcBadge';
 import {
@@ -75,6 +79,7 @@ import {
   useUpdateClaim,
 } from '@/lib/hooks/useClaims';
 import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
+import { useDelegation } from '@/lib/hooks/useDelegations';
 import { cn } from '@/lib/utils';
 
 // ────────────────────────────────────────────────────────────────────
@@ -503,6 +508,10 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
           </p>
         )}
 
+        {/* Linked-outing context row (§7.10.4) — plan vs fakt + the static
+            auto-recalc badge. Sits at the top of the §6.5.3 fact block. */}
+        <LinkedDelegationRow claim={claim} />
+
         {/* ① Fact pairs */}
         <FactPairs
           claim={claim}
@@ -612,6 +621,91 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
         )}
       </footer>
     </form>
+  );
+}
+
+// ── Linked-delegation context row (§7.10.4) ─────────────────────────
+//
+// Shows the outing the wniosek was filed against: plan (`plannedReturnAt`) vs
+// fakt (`actualReturnAt`), plus the STATIC auto-recalc badge (applied/skipped).
+// `ClaimDto` carries only `delegationId` + `periodAdjustedByVerifier`, so the
+// outing detail (plan/fakt) is fetched by id; the badge state is derived by
+// `resolveAutoRecalcState` (see AutoRecalcBadge for the heuristic + deviation).
+// Renders nothing when the claim has no linked outing.
+
+function LinkedDelegationRow({ claim }: { claim: ClaimDto }) {
+  const t = useTranslations('employee.claims.modal.linkedDelegation');
+  const tRecalc = useTranslations('claim.autoRecalc');
+  const delegationQ = useDelegation(claim.delegationId);
+
+  if (!claim.delegationId) return null;
+
+  const delegation = delegationQ.data;
+  const plate =
+    delegation?.vehicle?.plateNumber ?? claim.vehiclePlateSnapshot ?? '—';
+  const planned = delegation?.plannedReturnAt ?? null;
+  const actual = delegation?.actualReturnAt ?? null;
+
+  const recalcState = resolveAutoRecalcState(
+    claim.dateEnd,
+    actual,
+    claim.periodAdjustedByVerifier,
+  );
+
+  return (
+    <section className="space-y-2 rounded-md border border-border bg-input/40 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-text-sub">
+          {t('heading')}
+        </h3>
+        {recalcState && (
+          <AutoRecalcBadge
+            state={recalcState}
+            label={
+              recalcState === 'applied'
+                ? tRecalc('applied')
+                : tRecalc('skipped')
+            }
+            title={
+              recalcState === 'applied'
+                ? tRecalc('appliedTooltip', {
+                    origDateEnd: formatDateFull(claim.origDateEnd ?? claim.dateEnd),
+                    actualReturnAt: formatDateFull(actual),
+                  })
+                : tRecalc('skippedTooltip', {
+                    actualReturnAt: formatDateFull(actual),
+                    dateEnd: formatDateFull(claim.dateEnd),
+                  })
+            }
+          />
+        )}
+      </div>
+
+      {delegationQ.isLoading ? (
+        <Skeleton className="h-4 w-48" />
+      ) : (
+        <dl className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-3 text-sm">
+          <div className="flex items-baseline justify-between gap-2 sm:flex-col sm:items-start sm:justify-start">
+            <dt className="text-[11px] font-medium uppercase tracking-wider text-text-sub">
+              {t('vehicle')}
+            </dt>
+            <dd className="font-mono font-semibold text-text">{plate}</dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-2 sm:flex-col sm:items-start sm:justify-start">
+            <dt className="text-[11px] font-medium uppercase tracking-wider text-text-sub">
+              {t('planned')}
+            </dt>
+            <dd className="text-text tabular-nums">{formatDateFull(planned)}</dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-2 sm:flex-col sm:items-start sm:justify-start">
+            <dt className="text-[11px] font-medium uppercase tracking-wider text-text-sub">
+              {t('actual')}
+            </dt>
+            <dd className="text-text tabular-nums">{formatDateFull(actual)}</dd>
+          </div>
+        </dl>
+      )}
+    </section>
   );
 }
 

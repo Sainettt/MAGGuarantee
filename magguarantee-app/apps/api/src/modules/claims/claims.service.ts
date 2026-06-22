@@ -4,9 +4,12 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  forwardRef,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -16,6 +19,7 @@ import type {
   ClaimFilters,
   ClaimListItem,
   ClaimStatus,
+  DelegationWarning,
   KmCalcBreakdown,
   PreviewClaimDto,
   PreviewClaimResponse,
@@ -28,6 +32,7 @@ import {
   canSubmitByDuration,
   cooldownCheck,
   DEFAULTS as CARRIER_SUBMISSION_DEFAULTS,
+  DELEGATION_NOT_YET_RETURNED_WARNING,
   isCompensationDue,
   startOfBusinessTodayUtc,
 } from '@magguarantee/shared';
@@ -36,6 +41,10 @@ import { AuditContext } from '../../common/audit/audit-context';
 import type { Env } from '../../config/env.schema';
 import { AuditWriter } from '../audit/audit.service';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
+import {
+  DelegationsRepository,
+  type DelegationRow,
+} from '../delegations/delegations.repository';
 import { CarriersRepository } from '../carriers/carriers.repository';
 import { DriversRepository } from '../drivers/drivers.repository';
 import { KmCalcService } from '../km-calc/km-calc.service';
@@ -162,6 +171,14 @@ export class ClaimsService {
     // always injects it via DI (exported from VehiclesModule). When absent the
     // prefill is skipped and the carrier-supplied mileage is used as-is.
     private readonly dailyKm?: VehicleDailyKmRepository,
+    // Phase 7 REWORK (#4) — submit derives the period/ownership from the chosen
+    // outing, and the delegation `returned()` auto-recalc reads the linked
+    // wniosek through this repo. `@Optional()` + `forwardRef` so the circular
+    // ClaimsModule↔DelegationsModule wiring resolves and existing positional
+    // test fakes (which omit the arg) keep compiling.
+    @Optional()
+    @Inject(forwardRef(() => DelegationsRepository))
+    private readonly delegations?: DelegationsRepository,
   ) {}
 
   /**
@@ -184,6 +201,70 @@ export class ClaimsService {
     return this.dailyKm.sumDroveKm(vehicleId, dateStart, toExclusive);
   }
 
+  /**
+   * Phase 7 REWORK (2026-06-20 #4) — resolves the wniosek period from the chosen
+   * outing and enforces the link invariants. Throws:
+   *  - 422 when the outing is missing, belongs to another carrier/vehicle, or is
+   *    not yet `w_trasie`/`zjechal` (i.e. still `gotowy`/`zgloszony`/`anulowany`),
+   *  - 409 when a wniosek already exists for the outing (defence-in-depth ahead
+   *    of the unique-FK P2002 catch in `submit`).
+   *
+   * Returns the period boundaries plus a soft `warning` when the outing is still
+   * `w_trasie` (the carrier may proceed; `dateEnd` then falls back to
+   * `plannedReturnAt`, and a later `zjechal` triggers the auto-recalc).
+   */
+  private async _resolveDelegationPeriod(
+    carrierId: string,
+    vehicleId: string,
+    delegationId: string,
+  ): Promise<{
+    dateStart: Date;
+    dateEnd: Date;
+    warning: DelegationWarning | null;
+  }> {
+    if (!this.delegations) {
+      throw new UnprocessableEntityException(
+        'Wybór wyjazdu jest wymagany dla nowego wniosku.',
+      );
+    }
+    const deleg = await this.delegations.findById(delegationId);
+    if (!deleg || deleg.carrierId !== carrierId) {
+      throw new UnprocessableEntityException('Nieprawidłowy wyjazd');
+    }
+    if (deleg.vehicleId !== vehicleId) {
+      throw new UnprocessableEntityException(
+        'Wybrany wyjazd dotyczy innego pojazdu.',
+      );
+    }
+    if (deleg.claimId) {
+      throw new ConflictException('Na ten wyjazd już złożono wniosek.');
+    }
+    return this._deriveDelegationPeriod(deleg);
+  }
+
+  /**
+   * Pure period derivation from an outing row + the status gate. `dateStart =
+   * date(departureAt)`, `dateEnd = actualReturnAt ?? plannedReturnAt`. Only
+   * {`w_trasie`, `zjechal`} may back a wniosek; `w_trasie` yields a soft
+   * warning (no `actualReturnAt` yet → planned date used). No IO.
+   */
+  private _deriveDelegationPeriod(deleg: DelegationRow): {
+    dateStart: Date;
+    dateEnd: Date;
+    warning: DelegationWarning | null;
+  } {
+    if (deleg.status !== 'w_trasie' && deleg.status !== 'zjechal') {
+      throw new UnprocessableEntityException(
+        'Wniosek można złożyć tylko dla wyjazdu w trasie lub zjechanego.',
+      );
+    }
+    const dateStart = startOfUtcDay(deleg.departureAt);
+    const dateEnd = startOfUtcDay(deleg.actualReturnAt ?? deleg.plannedReturnAt);
+    const warning: DelegationWarning | null =
+      deleg.status === 'w_trasie' ? DELEGATION_NOT_YET_RETURNED_WARNING : null;
+    return { dateStart, dateEnd, warning };
+  }
+
   // ── Submit ──────────────────────────────────────────────
 
   async submit(user: AuthUser, dto: SubmitClaimDto): Promise<ClaimDto> {
@@ -201,13 +282,24 @@ export class ClaimsService {
     }
     const vehicle = await this._requireOwnedVehicle(carrier.id, dto.vehicleId);
 
+    // Phase 7 REWORK (2026-06-20 #4) — the period is DERIVED from the chosen
+    // outing, not sent by the carrier. Validates ownership (same carrier +
+    // vehicle), status gate ({w_trasie, zjechal}), and returns the period
+    // boundaries (`dateStart = date(departureAt)`,
+    // `dateEnd = actualReturnAt ?? plannedReturnAt`). A still-`w_trasie` outing
+    // is NOT blocked — `_resolveDelegationPeriod` flags it (soft warning); a
+    // `gotowy`/`zgloszony` outing throws 422 here.
+    const delegationCtx = await this._resolveDelegationPeriod(
+      carrier.id,
+      vehicle.id,
+      dto.delegationId,
+    );
+    const { dateStart, dateEnd } = delegationCtx;
+
     const config = await this._loadSubmitConfig();
     const today = startOfBusinessTodayUtc();
-    const dateStart = isoDateToMidnightUtc(dto.dateStart);
-    const dateEnd = isoDateToMidnightUtc(dto.dateEnd);
-    if (!dateStart || !dateEnd) {
-      throw new UnprocessableEntityException('Nieprawidłowa data');
-    }
+    const dateStartIso = toIsoDateOnly(dateStart);
+    const dateEndIso = toIsoDateOnly(dateEnd);
 
     // Resolve mileage: explicit carrier override OR pre-fill from
     // `Σ VehicleDailyKm.km (state=drove)` over [dateStart, dateEnd] of the
@@ -228,13 +320,13 @@ export class ClaimsService {
 
     if (dateEnd.getTime() > today.getTime()) {
       tier1.push(
-        `Data rozładunku (${dto.dateEnd}) jest w przyszłości. ` +
+        `Data rozładunku (${dateEndIso}) jest w przyszłości. ` +
           `Wniosek można złożyć dopiero po zjechaniu auta.`,
       );
     }
     if (dateStart.getTime() > today.getTime()) {
       tier1.push(
-        `Data załadunku (${dto.dateStart}) jest w przyszłości.`,
+        `Data załadunku (${dateStartIso}) jest w przyszłości.`,
       );
     }
     if (mileage <= 0) {
@@ -289,8 +381,8 @@ export class ClaimsService {
     // `hoursAdjusted` is verifier-only — carriers never send it; submit
     // always feeds 0 into km-calc and persists 0 on both Decimal columns.
     const calc = await this.kmCalc.calc({
-      dateStart: dto.dateStart,
-      dateEnd: dto.dateEnd,
+      dateStart: dateStartIso,
+      dateEnd: dateEndIso,
       timeFrom: dto.timeFrom,
       timeTo: dto.timeTo,
       hoursAdjusted: 0,
@@ -432,12 +524,28 @@ export class ClaimsService {
           // Write-once at submit; the verifier PATCH never overwrites these.
           origTimeFrom: dto.timeFrom,
           origTimeTo: dto.timeTo,
+          // Phase 7 REWORK (2026-06-20 #4) — link the wniosek to the outing.
+          // The `@unique` FK guarantees one claim per outing; a second submit
+          // for the same outing hits P2002 → translated to a 409 below.
+          delegationId: dto.delegationId,
         });
       });
     } catch (err) {
-      // Translate "claim NrZgl already exists" (theoretically impossible
-      // since the counter is per-tx, but defensive).
+      // P2002 is a unique-constraint violation. Two distinct constraints can
+      // fire here: `nrZgl` (theoretically impossible — the counter is per-tx)
+      // and `delegationId` (a second wniosek on the same outing). Disambiguate
+      // on the target field so the carrier gets the right message.
       if ((err as { code?: string }).code === 'P2002') {
+        const target = (err as { meta?: { target?: unknown } }).meta?.target;
+        const onDelegation =
+          (Array.isArray(target) &&
+            target.some((t) => String(t).includes('delegation'))) ||
+          (typeof target === 'string' && target.includes('delegation'));
+        if (onDelegation) {
+          throw new ConflictException(
+            'Na ten wyjazd już złożono wniosek.',
+          );
+        }
         throw new ConflictException('Wniosek o tym numerze już istnieje');
       }
       throw err;
@@ -453,6 +561,152 @@ export class ClaimsService {
     });
 
     return this.toDto(row);
+  }
+
+  // ── Auto-recalc from delegation (Phase 7 REWORK 2026-06-20 #4) ──
+
+  /**
+   * Re-computes the linked wniosek when a delegation transitions to `zjechal`
+   * with a (possibly later) `actualReturnAt`. Called from
+   * `DelegationsService.markReturned()` INSIDE the `@Audit`-opened ambient
+   * transaction, so every read/write here (`prisma.tx`-routed) commits
+   * atomically with the outing status + `Vehicle.lastDroveAt` bump.
+   *
+   * Hard gate — applies ONLY when:
+   *   - a claim is linked to the outing (else no-op), AND
+   *   - `claim.status ∈ {NA_WERYFIKACJI, OCZEKUJE_NA_AUTORYZACJE}` (not decided),
+   *     AND
+   *   - `claim.periodAdjustedByVerifier === false` (a human-corrected period is
+   *     never silently overwritten).
+   *
+   * When applied: `dateEnd = actualReturnAt` → re-prefill `mileage` via the SAME
+   * `_resolveMileage` (only when the carrier didn't override at submit, detected
+   * via `origMileage`) → re-run km-calc via the SAME `KmCalcService` → update
+   * `kmGuaranteed/kmDifference/paymentEur/amountRequested/breakdown/
+   * ratePerKmEffective/drivenDays/kmPerDay`. `timeFrom/timeTo` and the `orig*`
+   * snapshots are NOT touched. Audit: `claim.autoRecalc` (before/after). No email.
+   *
+   * When NOT applied (decided OR human-adjusted): the period is left untouched
+   * and an audit-only `claim.autoRecalcSkipped` row is written. No email.
+   *
+   * The `_tx` param is accepted for call-site clarity (the spec's
+   * `recalcFromDelegation(delegationId, actualReturnAt, tx)` contract); routing
+   * is via the ambient `prisma.tx`, so it is intentionally unused.
+   */
+  async recalcFromDelegation(
+    delegationId: string,
+    actualReturnAt: Date,
+    _tx?: unknown,
+  ): Promise<void> {
+    const claim = await this.claims.findByDelegationId(delegationId);
+    if (!claim) return; // no linked wniosek → nothing to recalc
+
+    const recalcable =
+      (claim.status === 'NA_WERYFIKACJI' ||
+        claim.status === 'OCZEKUJE_NA_AUTORYZACJE') &&
+      claim.periodAdjustedByVerifier === false;
+
+    if (!recalcable) {
+      // Decided OR human-adjusted period → leave the wniosek alone; audit-only.
+      await this.auditWriter.log({
+        action: 'claim.autoRecalcSkipped',
+        targetType: 'Claim',
+        targetKey: claim.nrZgl,
+        actor: AuditContext.current()?.actor ?? 'system',
+        before: { reason: this._skipReason(claim), status: claim.status },
+        after: null,
+      });
+      return;
+    }
+
+    await this._applyDelegationRecalc(claim, actualReturnAt);
+  }
+
+  /** Human-readable skip reason for the `autoRecalcSkipped` audit row. */
+  private _skipReason(claim: ClaimRow): string {
+    if (claim.periodAdjustedByVerifier) return 'period_adjusted_by_verifier';
+    return 'claim_already_decided';
+  }
+
+  /**
+   * Applies the delegation-driven recalc to a recalc-eligible claim. Re-prefills
+   * mileage (only when the carrier didn't override at submit), re-runs km-calc
+   * with the SAME engine, persists the new numbers, and writes a
+   * `claim.autoRecalc` before/after audit row. No email. Private — the gate
+   * lives in the public `recalcFromDelegation`.
+   */
+  private async _applyDelegationRecalc(
+    claim: ClaimRow,
+    actualReturnAt: Date,
+  ): Promise<void> {
+    const before = this._snapshotForAudit(claim);
+
+    const dateStart = startOfUtcDay(claim.dateStart);
+    const dateEnd = startOfUtcDay(actualReturnAt);
+
+    // Re-prefill mileage via the SAME `_resolveMileage` ONLY when the carrier
+    // didn't override at submit. We detect "no manual override" by the carrier
+    // snapshot equalling the applied mileage (origMileage === mileage) — a
+    // verifier may have since changed `mileage`, in which case we respect it.
+    const carrierOverrode =
+      claim.origMileage !== null && claim.origMileage !== claim.mileage;
+    const mileage =
+      carrierOverrode || claim.vehicleId === null
+        ? claim.mileage
+        : await this._resolveMileage(
+            claim.vehicleId,
+            undefined,
+            dateStart,
+            dateEnd,
+          );
+
+    // Re-run km-calc via the SAME `KmCalcService` (preview == submit == recalc).
+    const calc = await this.kmCalc.calc({
+      dateStart: toIsoDateOnly(dateStart),
+      dateEnd: toIsoDateOnly(dateEnd),
+      timeFrom: claim.timeFrom,
+      timeTo: claim.timeTo,
+      // `hoursAdjustedValue` drives km-calc; preserve the currently-applied one.
+      hoursAdjusted: claim.hoursAdjustedValue ?? 0,
+    });
+
+    const kmDifference = calc.kmGuaranteed - mileage;
+    const paymentEur =
+      kmDifference > 0 ? round2(kmDifference * calc.ratePerKmEffective) : 0;
+    const kmPerDay =
+      calc.totalDays > 0 ? round2(mileage / calc.totalDays) : 0;
+    const breakdown: KmCalcBreakdown = {
+      totalDays: calc.totalDays,
+      rawTotalDays: calc.rawTotalDays,
+      kmGuaranteed: calc.kmGuaranteed,
+      ratePerKmEffective: calc.ratePerKmEffective,
+      breakdown: calc.breakdown,
+    };
+
+    const updated = await this.claims.update(claim.id, {
+      // dateStart is unchanged (departure day); only dateEnd shifts.
+      dateEnd,
+      mileage,
+      drivenDays: calc.totalDays,
+      kmPerDay,
+      kmGuaranteed: calc.kmGuaranteed,
+      kmDifference,
+      paymentEur,
+      ratePerKmEffective: calc.ratePerKmEffective,
+      // amountRequested mirrors paymentEur (same derivation as submit).
+      amountRequested: paymentEur,
+      breakdown,
+      // `timeFrom/timeTo` and the `orig*` snapshots are intentionally NOT touched.
+    });
+
+    await this.auditWriter.log({
+      action: 'claim.autoRecalc',
+      targetType: 'Claim',
+      targetKey: claim.nrZgl,
+      actor: AuditContext.current()?.actor ?? 'system',
+      before,
+      after: this._snapshotForAudit(updated),
+    });
   }
 
   // ── Update / verify (Phase 4) ──────────────────────────
@@ -675,7 +929,19 @@ export class ClaimsService {
     // in depth even with `CarrierOwnershipGuard` at the controller.
     await this._requireOwnedVehicle(carrier.id, dto.vehicleId);
 
-    return this._runPreviewCalc(dto);
+    // Phase 7 REWORK (2026-06-20 #4) — when the carrier has picked an outing
+    // the period (and the `w_trasie` soft warning) is DERIVED from it, mirroring
+    // what submit() will compute; the dates in the body are ignored. Otherwise
+    // the legacy date-driven live preview path runs unchanged.
+    const period = dto.delegationId
+      ? await this._resolveDelegationPeriod(
+          carrier.id,
+          dto.vehicleId,
+          dto.delegationId,
+        )
+      : null;
+
+    return this._runPreviewCalc(dto, period);
   }
 
   /**
@@ -714,10 +980,22 @@ export class ClaimsService {
    */
   private async _runPreviewCalc(
     dto: PreviewClaimDto,
+    period: {
+      dateStart: Date;
+      dateEnd: Date;
+      warning: DelegationWarning | null;
+    } | null = null,
   ): Promise<PreviewClaimResponse> {
+    // Resolve the effective period: derived from the outing when supplied,
+    // otherwise the carrier-supplied `dateStart`/`dateEnd` (legacy live preview).
+    const dateStart = period ? period.dateStart : isoDateToMidnightUtc(dto.dateStart ?? '');
+    const dateEnd = period ? period.dateEnd : isoDateToMidnightUtc(dto.dateEnd ?? '');
+    const dateStartIso = dateStart ? toIsoDateOnly(dateStart) : (dto.dateStart ?? '');
+    const dateEndIso = dateEnd ? toIsoDateOnly(dateEnd) : (dto.dateEnd ?? '');
+
     const calc = await this.kmCalc.calc({
-      dateStart: dto.dateStart,
-      dateEnd: dto.dateEnd,
+      dateStart: dateStartIso,
+      dateEnd: dateEndIso,
       // PreviewClaimSchema keeps timeFrom / timeTo optional — the engine
       // tolerates `null` for the live-preview shortcut where the carrier
       // hasn't yet typed the times.
@@ -729,8 +1007,6 @@ export class ClaimsService {
     // Mileage: explicit override OR pre-fill from `Σ VehicleDailyKm.km
     // (state=drove)` over the period (Phase 7 REWORK #3). The live preview
     // mirrors what submit() will compute so the carrier sees the prefill.
-    const dateStart = isoDateToMidnightUtc(dto.dateStart);
-    const dateEnd = isoDateToMidnightUtc(dto.dateEnd);
     const mileage =
       dateStart && dateEnd
         ? await this._resolveMileage(
@@ -763,6 +1039,15 @@ export class ClaimsService {
         ratePerKmEffective: calc.ratePerKmEffective,
         breakdown: calc.breakdown,
       },
+      // Surfaced only on the delegation-derived path so the carrier form can
+      // show the read-only period + the `w_trasie` soft-warning banner.
+      ...(period
+        ? {
+            dateStart: dateStartIso,
+            dateEnd: dateEndIso,
+            ...(period.warning ? { delegationWarning: period.warning } : {}),
+          }
+        : {}),
     };
   }
 
@@ -958,6 +1243,8 @@ export class ClaimsService {
         uploadedById: a.uploadedById,
         createdAt: a.createdAt.toISOString(),
       })),
+      delegationId: row.delegationId,
+      periodAdjustedByVerifier: row.periodAdjustedByVerifier,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
@@ -1214,6 +1501,15 @@ export class ClaimsService {
       const d = isoDateToMidnightUtc(corrections.dateEnd);
       if (d) patch.dateEnd = d;
     }
+    // Phase 7 REWORK (2026-06-20 #4) — a human edited the PERIOD (`dateStart`
+    // and/or `dateEnd`). Mark it so a later delegation `zjechal` auto-recalc no
+    // longer silently overwrites the verifier's correction (decision #6).
+    if (
+      corrections.dateStart !== undefined ||
+      corrections.dateEnd !== undefined
+    ) {
+      patch.periodAdjustedByVerifier = true;
+    }
     if (corrections.timeFrom) patch.timeFrom = corrections.timeFrom;
     if (corrections.timeTo) patch.timeTo = corrections.timeTo;
     if (corrections.mileage !== undefined) patch.mileage = corrections.mileage;
@@ -1393,6 +1689,11 @@ export class ClaimsService {
       reklamacjaResponse: row.reklamacjaResponse,
       reklamacjaAmount: row.reklamacjaAmount,
       statusBeforeReklamacja: row.statusBeforeReklamacja,
+      // Phase 7 REWORK (2026-06-20 #4) — capture the outing link + period-guard
+      // flag so the delegation auto-recalc before/after diff shows the period
+      // shift (and the History tab can render the linked-wyjazd context).
+      delegationId: row.delegationId,
+      periodAdjustedByVerifier: row.periodAdjustedByVerifier,
     };
   }
 
@@ -1753,4 +2054,16 @@ function extractCorrectionFields(dto: UpdateClaimDto): {
 /** UTC date → `YYYY-MM-DD`. Inverse of `isoDateToMidnightUtc`. */
 function toIsoDateOnly(d: Date): string {
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Truncate any `Date` to UTC midnight of its calendar day. Used to derive a
+ * claim period boundary from a delegation timestamp (`departureAt` carries a
+ * time; `plannedReturnAt`/`actualReturnAt` are already date-only but we
+ * normalise defensively).
+ */
+function startOfUtcDay(d: Date): Date {
+  return new Date(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()),
+  );
 }

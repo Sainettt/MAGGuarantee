@@ -75,8 +75,13 @@ const HoursAdjustedSchema = z.number().min(0).max(999.99);
 // operand fails `z.string().date()` makes the refine a true no-op mid-edit;
 // the per-field `IsoDateSchema` already reports a malformed/empty date itself.
 const ISO_DATE = z.string().date();
-function datesWellOrdered(v: { dateStart: string; dateEnd: string }): boolean {
+function datesWellOrdered(v: {
+  dateStart?: string;
+  dateEnd?: string;
+}): boolean {
   if (
+    v.dateStart === undefined ||
+    v.dateEnd === undefined ||
     !ISO_DATE.safeParse(v.dateStart).success ||
     !ISO_DATE.safeParse(v.dateEnd).success
   ) {
@@ -115,21 +120,35 @@ function datesWellOrdered(v: { dateStart: string; dateEnd: string }): boolean {
 export const SubmitClaimSchema = z
   .object({
     vehicleId: UuidSchema,
+    /**
+     * Phase 7 REWORK (2026-06-20 #4, docs/20 §0″) — REQUIRED for new wnioski
+     * (app-level). The carrier picks one of their own outings in
+     * {`w_trasie`, `zjechal`} that has no claim yet (see
+     * `GET /delegations?claimable=true`). The PERIOD is DERIVED server-side
+     * from the chosen outing — `dateStart = date(departureAt)`,
+     * `dateEnd = actualReturnAt ?? plannedReturnAt` — so the carrier no longer
+     * sends `dateStart`/`dateEnd`. The DB FK is `@unique`, so a second wniosek
+     * on the same outing 409s.
+     */
+    delegationId: UuidSchema,
     /** Optional snapshot links — set if the carrier picked them in the form. */
     trailerId: emptyStringToUndefined(UuidSchema.optional()),
     driverId: emptyStringToUndefined(UuidSchema.optional()),
 
-    dateStart: IsoDateSchema,
-    dateEnd: IsoDateSchema,
-    /** REQUIRED — Claim.timeFrom is NOT NULL since phase3_blocks. */
+    /**
+     * REQUIRED — Claim.timeFrom is NOT NULL since phase3_blocks. The carrier
+     * still supplies the time window (the web form pre-fills `timeFrom` from the
+     * outing's `departureAt` time); `pracownik` verifies the exact `timeTo`
+     * later. km-calc needs both for fractional boundary days.
+     */
     timeFrom: HhMmSchema,
     /** REQUIRED — Claim.timeTo is NOT NULL since phase3_blocks. */
     timeTo: HhMmSchema,
 
     /**
      * OPTIONAL — pre-filled server-side from `Σ VehicleDailyKm.km (state=drove)`
-     * over the period when omitted (Phase 7 REWORK #3). An explicit value
-     * overrides the prefill.
+     * over the DERIVED period when omitted (Phase 7 REWORK #3). An explicit
+     * value overrides the prefill.
      */
     mileage: OptionalMileageSchema,
 
@@ -138,18 +157,7 @@ export const SubmitClaimSchema = z
     /** Optional pre-uploaded attachment IDs (auth screenshot, photos, etc.). */
     attachmentIds: z.array(UuidSchema).max(20).optional(),
   })
-  .strict()
-  .refine(datesWellOrdered, {
-    // Stable MACHINE CODE — NOT English prose, NOT a translation-key path.
-    // The api's ZodValidationPipe echoes `issue.message` verbatim into a 400;
-    // the web carrier form maps this code → a localized next-intl message
-    // (the api owns no i18n catalog, the web does — so the wire stays neutral).
-    message: 'date_order',
-    // Attach to the field edited LAST (Data do) so the error lands where the
-    // user's cursor is, not on Data od (Bug 1: error used to fire on dateStart
-    // the moment a start date was picked against the empty-string default).
-    path: ['dateEnd'],
-  });
+  .strict();
 export type SubmitClaimDto = z.infer<typeof SubmitClaimSchema>;
 
 // ─── Preview (server-side live preview) ──────────────────
@@ -162,8 +170,22 @@ export type SubmitClaimDto = z.infer<typeof SubmitClaimSchema>;
 export const PreviewClaimSchema = z
   .object({
     vehicleId: UuidSchema,
-    dateStart: IsoDateSchema,
-    dateEnd: IsoDateSchema,
+    /**
+     * Phase 7 REWORK (2026-06-20 #4) — OPTIONAL on preview. When the carrier
+     * has picked an outing, the form sends `delegationId` and OMITS the dates;
+     * the api derives the period from the outing (and surfaces a
+     * `delegationWarning` when the outing is still `w_trasie`). When absent, the
+     * caller-supplied `dateStart`/`dateEnd` drive the live preview (the legacy
+     * pre-pick path).
+     */
+    delegationId: emptyStringToUndefined(UuidSchema.optional()),
+    /**
+     * OPTIONAL — required only when `delegationId` is absent (the api derives
+     * the period from the outing otherwise). The cross-field guard below still
+     * orders them when both are present.
+     */
+    dateStart: emptyStringToUndefined(IsoDateSchema.optional()),
+    dateEnd: emptyStringToUndefined(IsoDateSchema.optional()),
     timeFrom: emptyStringToUndefined(HhMmSchema.optional()),
     timeTo: emptyStringToUndefined(HhMmSchema.optional()),
     /**
@@ -296,6 +318,22 @@ export const KmCalcBreakdownSchema = z
   }));
 export type KmCalcBreakdown = z.infer<typeof KmCalcBreakdownSchema>;
 
+// ─── Delegation warning code (soft, Phase 7 REWORK 2026-06-20 #4) ──
+
+/**
+ * Soft-warning code surfaced when a carrier previews/submits a wniosek against
+ * an outing that is still `w_trasie` (not yet `zjechal`). The submit is NOT
+ * blocked — the carrier may proceed (period falls back to `plannedReturnAt`,
+ * and a later `zjechal` triggers the auto-recalc). The web carrier form renders
+ * a confirmation banner from this code. Submitting from `gotowy` / `zgloszony`
+ * is a hard 422, NOT this soft flag.
+ */
+export const DELEGATION_NOT_YET_RETURNED_WARNING = 'NOT_YET_RETURNED' as const;
+export const DelegationWarningSchema = z.enum([
+  DELEGATION_NOT_YET_RETURNED_WARNING,
+]);
+export type DelegationWarning = z.infer<typeof DelegationWarningSchema>;
+
 // ─── Preview response ────────────────────────────────────
 
 export const PreviewClaimResponseSchema = z.object({
@@ -311,6 +349,19 @@ export const PreviewClaimResponseSchema = z.object({
   paymentEur: z.number().nonnegative(),
   ratePerKmEffective: z.number().nonnegative(),
   breakdown: KmCalcBreakdownSchema,
+  /**
+   * Phase 7 REWORK (2026-06-20 #4) — derived period boundaries when the preview
+   * was computed from a `delegationId` (so the carrier form can show the
+   * read-only period it will submit). Absent on the legacy date-driven preview.
+   */
+  dateStart: IsoDateSchema.optional(),
+  dateEnd: IsoDateSchema.optional(),
+  /**
+   * Soft warning — present (= `NOT_YET_RETURNED`) when the previewed outing is
+   * still `w_trasie`. The carrier may still proceed; the web renders a confirm
+   * banner. Absent on a `zjechal` outing or the legacy date-driven preview.
+   */
+  delegationWarning: DelegationWarningSchema.optional(),
 });
 export type PreviewClaimResponse = z.infer<typeof PreviewClaimResponseSchema>;
 
@@ -450,6 +501,19 @@ export const ClaimDtoSchema = z.object({
 
   authScreenshotUrl: z.string().nullable(),
   attachments: z.array(ClaimAttachmentDtoSchema),
+
+  /**
+   * Phase 7 REWORK (2026-06-20 #4) — the outing this wniosek was filed against.
+   * `@unique` FK → Delegation. Nullable on the wire for legacy/pre-rework rows;
+   * always set for new wnioski.
+   */
+  delegationId: UuidSchema.nullable(),
+  /**
+   * Set to `true` once a pracownik PATCHes `dateStart`/`dateEnd` — the boundary
+   * that DISABLES the auto-recalc when the linked outing later transitions to
+   * `zjechal` (a human-corrected period is never silently overwritten).
+   */
+  periodAdjustedByVerifier: z.boolean(),
 
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,

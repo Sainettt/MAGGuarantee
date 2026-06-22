@@ -19,7 +19,10 @@
 // Style mirrors `claims.service.update.spec.ts` / `claims.service.preview.spec.ts`:
 // hand-rolled fakes over `jest.fn`, no jest-mock-extended.
 
-import { UnprocessableEntityException } from '@nestjs/common';
+import {
+  ConflictException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 
 import type {
   KmCalcResult,
@@ -29,6 +32,10 @@ import type {
 import type { AuditWriter } from '../audit/audit.service';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import type { CarriersRepository } from '../carriers/carriers.repository';
+import type {
+  DelegationsRepository,
+  DelegationRow,
+} from '../delegations/delegations.repository';
 import type { DriversRepository } from '../drivers/drivers.repository';
 import type { KmCalcService } from '../km-calc/km-calc.service';
 import type { PrismaService } from '../prisma/prisma.service';
@@ -42,6 +49,56 @@ import type {
   CreateClaimData,
 } from './claims.repository';
 import type { NrZglService } from './nr-zgl.service';
+
+/**
+ * Phase 7 REWORK (2026-06-20 #4) — the submit period is DERIVED from the chosen
+ * outing. A `zjechal` delegation in the past (`departureAt=2026-05-01`,
+ * `actualReturnAt=2026-05-10`) reproduces the legacy `[2026-05-01, 2026-05-10]`
+ * period every test relied on. `carrierId`/`vehicleId` match the owned fixtures.
+ */
+function makeDelegation(overrides: Partial<DelegationRow> = {}): DelegationRow {
+  return {
+    id: 'deleg-1',
+    vehicleId: 'v-1',
+    vehicle: null,
+    trailerId: 'trl-1',
+    trailer: null,
+    driverId: 'drv-1',
+    driver: null,
+    carrierId: 'c-1',
+    carrier: null,
+    driverNameSnapshot: null,
+    driverPhoneSnapshot: null,
+    departureAt: new Date('2026-05-01T06:30:00.000Z'),
+    departureCountry: 'PL',
+    departurePostalCode: '00-001',
+    plannedReturnAt: new Date('2026-05-09T00:00:00.000Z'),
+    returnCountry: 'PL',
+    returnPostalCode: '00-001',
+    status: 'zjechal',
+    actualReturnAt: new Date('2026-05-10T00:00:00.000Z'),
+    reportedById: null,
+    reportedBy: null,
+    reportedAt: new Date('2026-04-30T08:00:00.000Z'),
+    verifiedById: null,
+    verifiedBy: null,
+    verifiedAt: null,
+    notes: null,
+    claimId: null,
+    createdAt: new Date('2026-04-30T08:00:00.000Z'),
+    updatedAt: new Date('2026-04-30T08:00:00.000Z'),
+    deletedAt: null,
+    ...overrides,
+  };
+}
+
+function makeDelegationsRepo(
+  deleg: DelegationRow | null = makeDelegation(),
+): DelegationsRepository {
+  return {
+    findById: jest.fn(async (_id: string) => deleg),
+  } as unknown as DelegationsRepository;
+}
 
 // ─── Fixtures ────────────────────────────────────────────────
 
@@ -121,6 +178,8 @@ function makeClaimRow(data: CreateClaimData): ClaimRow {
     hoursAdjustedValue: data.hoursAdjustedValue,
     authScreenshotUrl: null,
     attachments: [],
+    delegationId: 'deleg-1',
+    periodAdjustedByVerifier: false,
     createdAt: NOW,
     updatedAt: NOW,
     deletedAt: null,
@@ -247,6 +306,7 @@ function makeService(
   vehicles?: VehiclesRepository,
   km?: KmCalcService,
   dailyKm?: VehicleDailyKmRepository,
+  delegations?: DelegationsRepository,
 ): ClaimsService {
   return new ClaimsService(
     repoFake.repo,
@@ -261,6 +321,8 @@ function makeService(
     undefined,
     undefined,
     dailyKm,
+    // Phase 7 REWORK (2026-06-20 #4) — submit derives the period from the outing.
+    delegations ?? makeDelegationsRepo(),
   );
 }
 
@@ -306,8 +368,7 @@ describe('ClaimsService.submit — carrier submission gates', () => {
 
     const dto: SubmitClaimDto = {
       vehicleId: 'v-1',
-      dateStart: '2026-05-01',
-      dateEnd: '2026-05-10',
+      delegationId: 'deleg-1',
       timeFrom: '08:00',
       timeTo: '18:00',
       mileage: 8_000,
@@ -332,8 +393,7 @@ describe('ClaimsService.submit — carrier submission gates', () => {
 
     const dto: SubmitClaimDto = {
       vehicleId: 'v-1',
-      dateStart: '2026-05-01',
-      dateEnd: '2026-05-10',
+      delegationId: 'deleg-1',
       timeFrom: '08:00',
       timeTo: '18:00',
       mileage: 8_000,
@@ -359,8 +419,7 @@ describe('ClaimsService.submit — carrier submission gates', () => {
 
     const dto: SubmitClaimDto = {
       vehicleId: 'v-1',
-      dateStart: '2026-05-01',
-      dateEnd: '2026-05-10',
+      delegationId: 'deleg-1',
       timeFrom: '08:00',
       timeTo: '18:00',
       mileage: 8_000,
@@ -405,8 +464,7 @@ describe('ClaimsService.submit — carrier submission gates', () => {
 
     const dto: SubmitClaimDto = {
       vehicleId: 'v-1',
-      dateStart: '2026-05-01',
-      dateEnd: '2026-05-10',
+      delegationId: 'deleg-1',
       timeFrom: '08:00',
       timeTo: '18:00',
       mileage: 8_000,
@@ -446,8 +504,7 @@ describe('ClaimsService.submit — carrier submission gates', () => {
 
     const dto: SubmitClaimDto = {
       vehicleId: 'v-1',
-      dateStart: '2026-05-01',
-      dateEnd: '2026-05-10',
+      delegationId: 'deleg-1',
       timeFrom: '08:00',
       timeTo: '18:00',
       mileage: 8_000,
@@ -478,17 +535,27 @@ describe('ClaimsService.submit — carrier submission gates', () => {
 
     try {
       const repoFake = makeRepo(null);
+      // The period is derived from the outing: departure 2026-05-22, actual
+      // return 2026-05-26 (= today in Warsaw, "tomorrow" in UTC).
+      const delegations = makeDelegationsRepo(
+        makeDelegation({
+          departureAt: new Date('2026-05-22T06:30:00.000Z'),
+          actualReturnAt: new Date('2026-05-26T00:00:00.000Z'),
+          plannedReturnAt: new Date('2026-05-26T00:00:00.000Z'),
+        }),
+      );
       const svc = makeService(
         repoFake,
         undefined,
         undefined,
         makeKmCalc({ totalDays: 10 }),
+        undefined,
+        delegations,
       );
 
       const dto: SubmitClaimDto = {
         vehicleId: 'v-1',
-        dateStart: '2026-05-22',
-        dateEnd: '2026-05-26', // today in Warsaw, "tomorrow" in UTC.
+        delegationId: 'deleg-1',
         timeFrom: '08:00',
         timeTo: '18:00',
         mileage: 8_000,
@@ -515,8 +582,7 @@ describe('ClaimsService.submit — carrier submission gates', () => {
 
     const dto: SubmitClaimDto = {
       vehicleId: 'v-1',
-      dateStart: '2026-05-01',
-      dateEnd: '2026-05-10',
+      delegationId: 'deleg-1',
       timeFrom: '08:00',
       timeTo: '18:00',
       mileage: 8_000,
@@ -541,8 +607,7 @@ describe('ClaimsService.submit — carrier submission gates', () => {
 
     const dto: SubmitClaimDto = {
       vehicleId: 'v-1',
-      dateStart: '2026-05-01',
-      dateEnd: '2026-05-10',
+      delegationId: 'deleg-1',
       timeFrom: '08:00',
       timeTo: '18:00',
       // mileage deliberately omitted — the server pre-fills it.
@@ -570,8 +635,7 @@ describe('ClaimsService.submit — carrier submission gates', () => {
 
     const dto: SubmitClaimDto = {
       vehicleId: 'v-1',
-      dateStart: '2026-05-01',
-      dateEnd: '2026-05-10',
+      delegationId: 'deleg-1',
       timeFrom: '08:00',
       timeTo: '18:00',
       mileage: 8_000,
@@ -580,5 +644,126 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     await svc.submit(makeAuth('przewoznik'), dto);
     expect(repoFake.creates[0]!.data.mileage).toBe(8_000);
     expect(sumSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ─── delegation link + period derivation (Phase 7 REWORK #4) ──
+
+describe('ClaimsService.submit — delegation link', () => {
+  beforeAll(() => {
+    jest.useFakeTimers().setSystemTime(NOW);
+  });
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
+  const dto: SubmitClaimDto = {
+    vehicleId: 'v-1',
+    delegationId: 'deleg-1',
+    timeFrom: '08:00',
+    timeTo: '18:00',
+    mileage: 8_000,
+  };
+
+  it('derives the period from the outing (dateStart=departureDay, dateEnd=actualReturnAt) and links delegationId', async () => {
+    const repoFake = makeRepo(null);
+    const svc = makeService(repoFake);
+    await svc.submit(makeAuth('przewoznik'), dto);
+    expect(repoFake.creates).toHaveLength(1);
+    const data = repoFake.creates[0]!.data;
+    // departureAt 2026-05-01T06:30 → date 2026-05-01; actualReturnAt 2026-05-10.
+    expect(data.dateStart.toISOString()).toBe('2026-05-01T00:00:00.000Z');
+    expect(data.dateEnd.toISOString()).toBe('2026-05-10T00:00:00.000Z');
+    expect(data.delegationId).toBe('deleg-1');
+  });
+
+  it('uses plannedReturnAt as dateEnd when the outing is still w_trasie (no actualReturnAt)', async () => {
+    const repoFake = makeRepo(null);
+    const delegations = makeDelegationsRepo(
+      makeDelegation({ status: 'w_trasie', actualReturnAt: null }),
+    );
+    const svc = makeService(
+      repoFake,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      delegations,
+    );
+    await svc.submit(makeAuth('przewoznik'), dto);
+    // plannedReturnAt 2026-05-09 backs dateEnd when no actual return yet.
+    expect(repoFake.creates[0]!.data.dateEnd.toISOString()).toBe(
+      '2026-05-09T00:00:00.000Z',
+    );
+  });
+
+  it('rejects an outing in gotowy (not yet w_trasie/zjechal) — 422, no write', async () => {
+    const repoFake = makeRepo(null);
+    const delegations = makeDelegationsRepo(makeDelegation({ status: 'gotowy' }));
+    const svc = makeService(
+      repoFake,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      delegations,
+    );
+    await expect(svc.submit(makeAuth('przewoznik'), dto)).rejects.toBeInstanceOf(
+      UnprocessableEntityException,
+    );
+    expect(repoFake.creates).toHaveLength(0);
+  });
+
+  it("rejects an outing belonging to another carrier — 422", async () => {
+    const repoFake = makeRepo(null);
+    const delegations = makeDelegationsRepo(
+      makeDelegation({ carrierId: 'someone-else' }),
+    );
+    const svc = makeService(
+      repoFake,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      delegations,
+    );
+    await expect(svc.submit(makeAuth('przewoznik'), dto)).rejects.toBeInstanceOf(
+      UnprocessableEntityException,
+    );
+    expect(repoFake.creates).toHaveLength(0);
+  });
+
+  it('rejects when the outing already has a claim (claimId set) — 409', async () => {
+    const repoFake = makeRepo(null);
+    const delegations = makeDelegationsRepo(
+      makeDelegation({ claimId: 'existing-claim' }),
+    );
+    const svc = makeService(
+      repoFake,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      delegations,
+    );
+    await expect(svc.submit(makeAuth('przewoznik'), dto)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(repoFake.creates).toHaveLength(0);
+  });
+
+  it('maps a P2002 on delegationId from createWithin to a 409', async () => {
+    const repoFake = makeRepo(null);
+    // Force the insert to throw a unique-violation on the delegation FK.
+    (repoFake.repo.createWithin as jest.Mock).mockRejectedValueOnce(
+      Object.assign(new Error('unique'), {
+        code: 'P2002',
+        meta: { target: ['delegationId'] },
+      }),
+    );
+    const svc = makeService(repoFake);
+    await expect(svc.submit(makeAuth('przewoznik'), dto)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
   });
 });

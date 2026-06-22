@@ -1,51 +1,116 @@
 'use client';
 
-// Phase 7 — eksport read-only delegations board (docs/14-design-system.md §7).
+// Phase 7.10 — eksport OPERATIONAL delegations board (docs/14 §7.10).
 //
-// The eksport role is a strictly read-only витрина: a status filter + a
-// «historia» toggle (drives `includeHistory`) and the SHARED read-only
-// <DelegationsTable> (auto / driver / route / period / status, row-click → the
-// read-only <DelegationDetailModal>). There are NO mutation controls anywhere
-// — that is weryfikator territory. The table reuse means this page is the
-// Phase 6.3 read-only panel pattern verbatim.
+// REWORK 2026-06-20 #4: the delegation lifecycle is operational again and
+// eksport drives the `/ready` step. The board is no longer strictly read-only:
+//   • `zgloszony` rows get a primary «Oznacz Gotowy» action (dialog A → /ready),
+//   • `gotowy` rows get a guarded rollback «Cofnij do: zgłoszony» (dialog B,
+//     `{rollback:true}` → /ready) — offered ONLY while not yet `w_trasie` (the
+//     api enforces; the row simply shows no rollback once it advances).
+// Delegation-CANCEL is NOT here (carrier/admin-only, §7.10.2). At most ONE
+// primary action per row (strict state machine, §7.10.2 board placement).
 //
-// History toggle off (default) → API returns only ACTIVE statuses (zgloszony +
-// w_trasie). On → all statuses incl. zjechal / anulowany. An explicit status
-// filter still narrows on top.
+// Default board → ACTIVE statuses {zgloszony, gotowy, w_trasie}; the «historia»
+// toggle widens to include zjechal/anulowany (server `includeHistory`). An
+// explicit status filter narrows on top. Row-click still opens the read-only
+// <DelegationDetailModal> (via <OperationalDelegationsTable>).
 
 import { Gauge } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import type {
+  DelegationDto,
   DelegationFilters,
   DelegationStatus,
 } from '@magguarantee/shared';
 
 import { DelegationsBoardFilters } from '@/components/delegations/DelegationsBoardFilters';
-import { DelegationsTable } from '@/components/delegations/DelegationsTable';
-import { useDelegations } from '@/lib/hooks/useDelegations';
+import {
+  MarkReadyDialog,
+  type MarkReadyVariant,
+} from '@/components/delegations/MarkReadyDialog';
+import { OperationalDelegationsTable } from '@/components/delegations/OperationalDelegationsTable';
+import { Button } from '@/components/ui/Button';
+import { useDelegations, useMarkDelegationReady } from '@/lib/hooks/useDelegations';
+
+interface DialogTarget {
+  delegation: DelegationDto;
+  variant: MarkReadyVariant;
+}
 
 export function EksportDelegationsView() {
   const t = useTranslations('eksport.delegations');
+  const tActions = useTranslations('eksport.delegations.actions');
   const tA11y = useTranslations('fleet.a11y');
   const tKm = useTranslations('weryfikator.km');
 
   const [status, setStatus] = useState<DelegationStatus | ''>('');
   const [includeHistory, setIncludeHistory] = useState(false);
+  const [dialog, setDialog] = useState<DialogTarget | null>(null);
 
   const filters: DelegationFilters = useMemo(
     () => ({
       limit: 50,
       status: status || undefined,
-      // Only thread the flag when on — `undefined` is dropped from the query
-      // so the API default (active-only) applies.
       includeHistory: includeHistory || undefined,
     }),
     [status, includeHistory],
   );
 
   const { data, isLoading } = useDelegations(filters);
+
+  const readyM = useMarkDelegationReady({
+    onSuccess: (_data, vars) => {
+      // The advance vs rollback toast — keyed off the body we sent.
+      toast.success(
+        vars.body?.rollback ? tActions('rolledBackToast') : tActions('readyToast'),
+      );
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : tActions('errorToast'));
+    },
+  });
+
+  const handleConfirm = async (target: DialogTarget) => {
+    await readyM.mutateAsync({
+      id: target.delegation.id,
+      body: { rollback: target.variant === 'rollback' },
+    });
+  };
+
+  const renderActions = (row: DelegationDto) => {
+    if (row.status === 'zgloszony') {
+      return (
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => setDialog({ delegation: row, variant: 'advance' })}
+        >
+          {tActions('markReady')}
+        </Button>
+      );
+    }
+    if (row.status === 'gotowy') {
+      // Guarded rollback — only offered pre-`w_trasie` (which is exactly the
+      // `gotowy` row). Ghost secondary affordance (§7.10.2).
+      return (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => setDialog({ delegation: row, variant: 'rollback' })}
+        >
+          {tActions('rollback')}
+        </Button>
+      );
+    }
+    return null;
+  };
+
+  const plate = dialog?.delegation.vehicle?.plateNumber ?? '—';
 
   return (
     <section className="px-4 sm:px-6 lg:px-10 xl:px-12 py-8">
@@ -65,13 +130,6 @@ export function EksportDelegationsView() {
         </Link>
       </header>
 
-      <div
-        className="mb-4 rounded-lg border border-border bg-card px-4 py-3 text-sm text-text-sub"
-        role="note"
-      >
-        {t('readOnlyBanner')}
-      </div>
-
       <DelegationsBoardFilters
         namespace="eksport.delegations"
         status={status}
@@ -80,7 +138,7 @@ export function EksportDelegationsView() {
         onIncludeHistoryChange={setIncludeHistory}
       />
 
-      <DelegationsTable
+      <OperationalDelegationsTable
         rows={data?.items ?? []}
         isLoading={isLoading}
         namespace="eksport.delegations.table"
@@ -94,7 +152,36 @@ export function EksportDelegationsView() {
             name: r.vehicle?.plateNumber ?? '—',
           })
         }
+        renderActions={renderActions}
       />
+
+      {dialog && (
+        <MarkReadyDialog
+          open
+          onOpenChange={(o) => {
+            if (!o) setDialog(null);
+          }}
+          variant={dialog.variant}
+          plate={plate}
+          title={
+            dialog.variant === 'advance'
+              ? tActions('advanceTitle')
+              : tActions('rollbackTitle')
+          }
+          description={
+            dialog.variant === 'advance'
+              ? tActions('advanceDescription', { plate })
+              : tActions('rollbackDescription', { plate })
+          }
+          confirmLabel={
+            dialog.variant === 'advance'
+              ? tActions('markReady')
+              : tActions('rollbackConfirm')
+          }
+          cancelLabel={tActions('cancel')}
+          onConfirm={() => handleConfirm(dialog)}
+        />
+      )}
     </section>
   );
 }

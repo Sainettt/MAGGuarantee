@@ -162,6 +162,8 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     hoursAdjustedValue: 0,
     authScreenshotUrl: null,
     attachments: [],
+    delegationId: null,
+    periodAdjustedByVerifier: false,
     createdAt: new Date('2026-04-21T08:00:00.000Z'),
     updatedAt: new Date('2026-04-21T08:00:00.000Z'),
     deletedAt: null,
@@ -525,6 +527,53 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
     // kmDifference = 9_720 - 8_500 = 1_220 → paymentEur = 1_220 * 0.5 = 610
     expect(updated.paymentEur).toBe(610);
     expect(updated.mileage).toBe(8_500);
+  });
+
+  it('5b. correcting dateStart/dateEnd sets periodAdjustedByVerifier=true (auto-recalc boundary)', async () => {
+    const seeded = makeClaim();
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService({ totalDays: 19, rawTotalDays: 19 });
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const dto: UpdateClaimDto = {
+      targetStatus: 'ZAAKCEPTOWANO',
+      orderNumber: 'ZL-77',
+      orderDate: '2026-04-30',
+      amountApproved: 1_000,
+      dateEnd: '2026-04-19', // verifier shortened the period by a day
+    };
+
+    await svc.update(makeAuth('pracownik'), seeded.nrZgl, dto);
+
+    expect(repoFake.updateWithinCalls).toHaveLength(1);
+    expect(
+      repoFake.updateWithinCalls[0]!.data.periodAdjustedByVerifier,
+    ).toBe(true);
+  });
+
+  it('5c. a decision WITHOUT touching dates leaves periodAdjustedByVerifier unset', async () => {
+    const seeded = makeClaim();
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const dto: UpdateClaimDto = {
+      targetStatus: 'ODRZUCONO',
+      comment: 'Brak podstaw.',
+    };
+
+    await svc.update(makeAuth('pracownik'), seeded.nrZgl, dto);
+
+    expect(repoFake.updateWithinCalls).toHaveLength(1);
+    // Not written → the column keeps its current value (the auto-recalc still
+    // applies if the outing later transitions).
+    expect(
+      repoFake.updateWithinCalls[0]!.data.periodAdjustedByVerifier,
+    ).toBeUndefined();
   });
 
   it('6. NA_WERYFIKACJI → OCZEKUJE_NA_AUTORYZACJE persists margin + authorizationDescription', async () => {
@@ -974,6 +1023,21 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
     const audit = {
       log: jest.fn(async () => undefined),
     } as unknown as AuditWriter;
+    // Phase 7 REWORK (2026-06-20 #4) — submit derives the period from the chosen
+    // outing. A past `zjechal` delegation reproduces the [2026-05-01,2026-05-13]
+    // period this test relied on.
+    const delegationsRepo = {
+      findById: jest.fn(async () => ({
+        id: 'deleg-1',
+        carrierId: 'c-1',
+        vehicleId: 'v-1',
+        status: 'zjechal',
+        departureAt: new Date('2026-05-01T06:30:00.000Z'),
+        plannedReturnAt: new Date('2026-05-12T00:00:00.000Z'),
+        actualReturnAt: new Date('2026-05-13T00:00:00.000Z'),
+        claimId: null,
+      })),
+    } as unknown as import('../delegations/delegations.repository').DelegationsRepository;
 
     const svc = new ClaimsService(
       repo,
@@ -985,6 +1049,10 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
       nrZgl,
       prisma,
       audit,
+      undefined,
+      undefined,
+      undefined,
+      delegationsRepo,
     );
 
     // The fixed clock (NOW = 2026-05-15) puts the claim period safely in the
@@ -995,8 +1063,7 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
     // paymentEur, `hoursAdjusted` is verifier-only (PATCH path).
     const out = await svc.submit(makeAuth('przewoznik', 'u-carrier-1'), {
       vehicleId: 'v-1',
-      dateStart: '2026-05-01',
-      dateEnd: '2026-05-13',
+      delegationId: 'deleg-1',
       timeFrom: '08:00',
       timeTo: '18:00',
       mileage: 8_000,

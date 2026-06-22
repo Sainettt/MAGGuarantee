@@ -1,11 +1,24 @@
 'use client';
 
 // Phase 3 — new-claim form. Two-column layout per docs/14: RHF form on the
-// left, <LivePreviewPanel> on the right. The preview is debounced 400ms
-// after any field change and fired against POST /claims/preview. Submit
-// button is disabled while the preview is loading or returned an error.
+// left, <LivePreviewPanel> on the right. The preview is debounced 400ms after
+// any field change and fired against POST /claims/preview. Submit is disabled
+// while the preview is loading or returned an error.
+//
+// Phase 7.10 REWORK (2026-06-20 #4, docs/14 §7.10.3): the carrier no longer
+// types the period. They PICK one of their claimable outings
+// (`GET /delegations?claimable=true` → {w_trasie, zjechal} with no linked
+// wniosek). The chosen `delegationId` is sent to preview/submit; the PERIOD
+// (`dateStart`/`dateEnd`) + the default `mileage` come BACK from the preview
+// (server-derived) and render read-only / pre-filled. `timeFrom`/`timeTo` stay
+// form fields (`timeFrom` pre-filled from the outing's `departureAt` time).
+//
+// When a `w_trasie` outing is picked the preview returns
+// `delegationWarning='NOT_YET_RETURNED'` → a soft warning banner + an inline
+// soft-confirm checkbox gate (§7.10.3, the recommended option). `zjechal`
+// outings submit straight through; `gotowy`/`zgloszony` never appear in the
+// picker (the api doesn't return them).
 
-import { zodResolver } from '@hookform/resolvers/zod';
 import { AlertTriangle, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
@@ -16,7 +29,7 @@ import {
   canSubmitByDuration,
   checkClaimDates,
   DEFAULTS as SUBMISSION_DEFAULTS,
-  SubmitClaimSchema,
+  DELEGATION_NOT_YET_RETURNED_WARNING,
   type DateRuleViolation,
   type ExcludedDayDto,
   type PreviewClaimDto,
@@ -24,40 +37,38 @@ import {
 } from '@magguarantee/shared';
 
 import { LivePreviewPanel } from '@/components/carrier/LivePreviewPanel';
+import { StatusBadge } from '@/components/carrier/StatusBadge';
 import { Button } from '@/components/ui/Button';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import { FormField, FormGrid, FormSection } from '@/components/forms/Form';
 import { ApiResponseError } from '@/lib/api/client';
+import { formatDateFull } from '@/lib/format/numbers';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useClaimPreview, useSubmitClaim } from '@/lib/hooks/useClaims';
+import { useClaimableDelegations } from '@/lib/hooks/useDelegations';
 import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
 import { useFormDraft } from '@/lib/hooks/useFormDraft';
 import { useMyFleet } from '@/lib/hooks/useMyFleet';
 
 const DRAFT_KEY = 'draft:carrier:newClaim';
 
-// ── AppConfig mirrors ───────────────────────────────────────────
-// Numbers used by the api in `claims.service.ts` for tier-1 (pre-calc)
-// violations. Mirrored here so the carrier-side form can preview the
-// same red banner BEFORE the user clicks Submit. AppConfig is not yet
-// exposed to the web (no `/app-config` endpoint); when api-agent ships
-// one, swap these to a `useAppConfig()` hook. The api is still the
-// authoritative source — every Submit re-runs these checks server-side.
+// ── AppConfig mirrors (tier-1 pre-calc rules — api is authoritative) ──
 const CLIENT_MAX_DAYS_AFTER_UNLOAD = 7;
 const CLIENT_MAX_PERIOD_DAYS = 90;
 
-// Keys allowed in the carrier submit form. Used to filter the
-// sessionStorage draft so stale `amountRequested` / `hoursAdjusted`
-// (removed from `SubmitClaimSchema` in shared) cannot resurrect themselves
-// on hydrate and trip Zod `.strict()` validation.
+// Keys allowed in the carrier submit form. Used to filter the sessionStorage
+// draft so removed keys cannot resurrect themselves on hydrate and trip Zod
+// `.strict()`. Phase 7.10: `dateStart`/`dateEnd` were REMOVED (period is now
+// server-derived from the outing) and `delegationId` was ADDED. A stale draft
+// carrying the old `dateStart`/`dateEnd` keys would otherwise break submit.
 const FORM_ALLOWED_KEYS = [
   'vehicleId',
+  'delegationId',
   'trailerId',
   'driverId',
-  'dateStart',
-  'dateEnd',
   'timeFrom',
   'timeTo',
   'mileage',
@@ -65,34 +76,42 @@ const FORM_ALLOWED_KEYS = [
   'attachmentIds',
 ] as const;
 
-type FormValues = SubmitClaimDto;
+// The form's editable values. `delegationId` is REQUIRED on submit; the
+// period is server-derived and never lives in the form. `mileage` stays
+// editable (override of the server prefill).
+interface FormValues {
+  vehicleId: string;
+  delegationId: string;
+  trailerId?: string;
+  driverId?: string;
+  timeFrom: string;
+  timeTo: string;
+  mileage: number;
+  comment?: string;
+  attachmentIds?: string[];
+}
 
 function getDefaults(): FormValues {
   return {
-    vehicleId: '' as unknown as string,
+    vehicleId: '',
+    delegationId: '',
     trailerId: undefined,
     driverId: undefined,
-    dateStart: '',
-    dateEnd: '',
     // timeFrom / timeTo are NOT NULL since phase3_blocks. Empty string keeps
-    // the <input type="time"> controlled; HhMmSchema rejects "" on submit.
+    // the <input type="time"> controlled; the submit gate rejects "".
     timeFrom: '',
     timeTo: '',
     mileage: 0,
     comment: undefined,
-    // orderNumber / orderDate are intentionally NOT in the carrier submit
-    // DTO (phase3_blocks): they're MAGTRANS-internal and assigned by the
-    // verifier when transitioning to ZAAKCEPTOWANO.
     attachmentIds: undefined,
   };
 }
 
 /**
- * Drop unknown keys from a persisted draft before `form.reset(draft)`.
- * `amountRequested` / `hoursAdjusted` were removed from `SubmitClaimSchema`
- * — without this filter, a returning user's saved draft re-introduces them,
- * Zod `.strict()` rejects the whole form on the next change, and the user
- * sees a permanently invalid form with no visible offending field.
+ * Drop unknown keys from a persisted draft before `form.reset(draft)`. Without
+ * this filter a returning user's saved draft re-introduces removed keys (e.g.
+ * the old `dateStart`/`dateEnd`), Zod `.strict()` rejects the whole form, and
+ * the user sees a permanently invalid form with no visible offending field.
  */
 function sanitizeDraft(draft: Record<string, unknown>): Partial<FormValues> {
   const out: Record<string, unknown> = {};
@@ -104,16 +123,7 @@ function sanitizeDraft(draft: Record<string, unknown>): Partial<FormValues> {
 
 const BUSINESS_TZ = 'Europe/Warsaw';
 
-/**
- * `YYYY-MM-DD` of today in the business timezone (Europe/Warsaw — MAGTRANS
- * operating timezone). Used both for the `<input type="date" max=...>` cap
- * and as the injected `today` argument to the shared `checkClaimDates` rules
- * (which are pure — they never read the wall clock themselves).
- *
- * Computing the date in Europe/Warsaw avoids the old bug where a UTC-derived
- * "today" rolled back a day between local midnight and ~02:00, producing
- * false "date in future" violations.
- */
+/** `YYYY-MM-DD` of today in the business timezone (Europe/Warsaw). */
 function todayBusinessTzIso(): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: BUSINESS_TZ,
@@ -144,27 +154,34 @@ function isWeekendIso(iso: string): boolean {
   return wd === 'Sat' || wd === 'Sun';
 }
 
+/** Extract the `HH:mm` portion from an ISO datetime (local-zone agnostic — the
+ *  api stores the carrier's claimed window verbatim, the slice mirrors it). */
+function timeFromIso(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const m = /T(\d{2}:\d{2})/.exec(iso);
+  return m?.[1] ?? '';
+}
+
 export default function NewClaimPage() {
   const t = useTranslations('carrier.claims');
   const tForm = useTranslations('carrier.claims.form');
+  const tPicker = useTranslations('carrier.claims.wyjazdPicker');
   const tCommon = useTranslations('common');
   const router = useRouter();
-  // Include deactivated vehicles in the dropdown — a wniosek can legitimately
-  // reference a vehicle that worked the period and was deactivated afterwards.
-  // Inactive rows are tagged "(nieaktywny)" in the option label below.
+  // Include deactivated vehicles — a wniosek can reference a vehicle that
+  // worked the period and was deactivated afterwards.
   const fleetQ = useMyFleet({ includeInactive: true });
+  const delegationsQ = useClaimableDelegations();
+  const delegations = useMemo(
+    () => delegationsQ.data?.items ?? [],
+    [delegationsQ.data],
+  );
 
   const form = useForm<FormValues>({
-    resolver: zodResolver(SubmitClaimSchema),
+    // No zodResolver here: the submit body is assembled + validated against
+    // SubmitClaimSchema at mutate time (api re-validates). The required-gate
+    // below is the load-bearing client block.
     defaultValues: getDefaults(),
-    // `onTouched` + `reValidateMode: 'onChange'`: validate a field once the
-    // user has touched (blurred) it, then re-validate live on every change.
-    // The previous `onChange` mode ran the cross-field date refine against the
-    // empty-string `dateEnd` default the instant a start date was picked —
-    // part of Bug 1. With `onTouched` the dateEnd refine waits until dateEnd
-    // is actually touched, and the schema-side guard (datesWellOrdered) no
-    // longer compares against an empty string anyway. Submit gating does NOT
-    // rely on `formState.isValid` alone — see the disabled logic below.
     mode: 'onTouched',
     reValidateMode: 'onChange',
   });
@@ -181,35 +198,43 @@ export default function NewClaimPage() {
 
   const watched = form.watch();
 
-  // Build a preview body when the form has the bare minimum filled. Server
-  // is the source of truth — we don't compute anything locally.
-  //
-  // `hoursAdjusted` is pinned to 0 for the carrier form: it was removed from
-  // the carrier submit DTO entirely and on submit the api always feeds 0
-  // into km-calc. `PreviewClaimSchema` still carries the key (for the
-  // verifier modal's recalc badge) so we have to satisfy the TS type — but
-  // semantically the carrier preview always asks "what would the payout be
-  // with zero downtime?" exactly the same as `submit` does.
-  // `emptyReason` lets the right-hand <LivePreviewPanel> show *why* it's
-  // empty instead of the generic "fill in fields" placeholder. Particularly
-  // important for the `date-order` case: a user editing dateStart to a
-  // value later than dateEnd (planning to bump dateEnd next) would
-  // otherwise see the preview silently vanish with no explanation.
+  // The currently-selected outing (drives the picker context + the warning).
+  const selectedDelegation = useMemo(
+    () => delegations.find((d) => d.id === watched.delegationId) ?? null,
+    [delegations, watched.delegationId],
+  );
+
+  // ── Prefill vehicle + timeFrom from the chosen outing ────────────────
+  // Picking an outing pre-selects its vehicle (the wniosek is against that
+  // vehicle) and seeds `timeFrom` from the outing's `departureAt` time — both
+  // overridable. Guarded on the *current* form value so a manual edit is never
+  // clobbered.
+  useEffect(() => {
+    if (!selectedDelegation) return;
+    if (!form.getValues('vehicleId')) {
+      form.setValue('vehicleId', selectedDelegation.vehicleId, {
+        shouldDirty: false,
+      });
+    }
+    const seedTime = timeFromIso(selectedDelegation.departureAt);
+    if (seedTime && !form.getValues('timeFrom')) {
+      form.setValue('timeFrom', seedTime, { shouldDirty: false });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDelegation?.id]);
+
+  // ── Preview body — keyed off delegationId (period derived server-side) ──
+  // We send `delegationId` and OMIT the dates; the api derives the period and
+  // returns `dateStart`/`dateEnd` (+ `delegationWarning` for w_trasie). Mileage
+  // is omitted until the carrier types a positive override so the server prefill
+  // (`Σ VehicleDailyKm`) drives the math.
   const { previewBody, emptyReason } = useMemo<{
     previewBody: PreviewClaimDto | null;
-    emptyReason: 'incomplete' | 'date-order' | 'mileage-zero' | undefined;
+    emptyReason: 'incomplete' | undefined;
   }>(() => {
-    if (!watched.vehicleId || !watched.dateStart || !watched.dateEnd) {
+    if (!watched.vehicleId || !watched.delegationId) {
       return { previewBody: null, emptyReason: 'incomplete' };
     }
-    if (watched.dateStart > watched.dateEnd) {
-      return { previewBody: null, emptyReason: 'date-order' };
-    }
-    // Phase 7.7: `mileage` is now OPTIONAL on the preview contract — when the
-    // carrier hasn't entered a positive value we OMIT it so the server computes
-    // `Σ VehicleDailyKm` for the period and returns it in `preview.mileage`,
-    // which we then prefill into the (still editable) field below. So the
-    // preview fires as soon as vehicle + dates are valid, even with mileage 0.
     const hasMileage =
       typeof watched.mileage === 'number' &&
       !Number.isNaN(watched.mileage) &&
@@ -217,8 +242,7 @@ export default function NewClaimPage() {
     return {
       previewBody: {
         vehicleId: watched.vehicleId,
-        dateStart: watched.dateStart,
-        dateEnd: watched.dateEnd,
+        delegationId: watched.delegationId,
         timeFrom: watched.timeFrom || undefined,
         timeTo: watched.timeTo || undefined,
         mileage: hasMileage ? watched.mileage : undefined,
@@ -228,26 +252,34 @@ export default function NewClaimPage() {
     };
   }, [
     watched.vehicleId,
-    watched.dateStart,
-    watched.dateEnd,
+    watched.delegationId,
     watched.mileage,
     watched.timeFrom,
     watched.timeTo,
   ]);
 
-  // Debounce 400ms before firing the preview request.
   const debouncedPreviewBody = useDebouncedValue(previewBody, 400);
   const previewQ = useClaimPreview(debouncedPreviewBody, {
     enabled: !!debouncedPreviewBody,
   });
 
-  // ── Mileage prefill from the preview (Phase 7.7) ─────────────────
-  // The preview response carries the effective `mileage` (the server's
-  // `Σ VehicleDailyKm` when the carrier left the field blank). Prefill it into
-  // the still-editable field ONLY while the carrier hasn't entered a positive
-  // value of their own — so the verifier's recorded km appear automatically but
-  // a manual override is never clobbered. We guard on the *current* form value
-  // (read fresh, not the closed-over `watched`) to avoid an update loop.
+  // Derived (read-only) period from the preview — the dates we'll submit.
+  const derivedDateStart = previewQ.data?.dateStart;
+  const derivedDateEnd = previewQ.data?.dateEnd;
+
+  // Soft-warning: the chosen outing is still `w_trasie` (not yet `zjechal`).
+  const notYetReturned =
+    previewQ.data?.delegationWarning === DELEGATION_NOT_YET_RETURNED_WARNING;
+
+  // ── Soft-confirm gate (§7.10.3) — inline checkbox. ─────────────────
+  // Must be ticked before submit enables when the outing is `w_trasie`. Reset
+  // whenever the warning is no longer active (different outing / now zjechal).
+  const [acknowledged, setAcknowledged] = useState(false);
+  useEffect(() => {
+    if (!notYetReturned) setAcknowledged(false);
+  }, [notYetReturned, watched.delegationId]);
+
+  // ── Mileage prefill from the preview ─────────────────────────────────
   const previewMileage = previewQ.data?.mileage;
   useEffect(() => {
     if (typeof previewMileage !== 'number' || previewMileage <= 0) return;
@@ -255,25 +287,12 @@ export default function NewClaimPage() {
     if (typeof current === 'number' && current > 0) return;
     form.setValue('mileage', previewMileage, {
       shouldDirty: false,
-      shouldValidate: true,
+      shouldValidate: false,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewMileage]);
 
-  // ── Duration gate (mirror of api-side `canSubmitByDuration`) ──────
-  // Evaluated client-side so the submit button can disable + show an
-  // inline hint BEFORE we hit the API. The api re-checks with the same
-  // shared function, so this is purely UX — never a security boundary.
-  //
-  // Reads `totalDays` from the live km-calc preview (same engine the api
-  // uses on submit). While the preview is still loading we hold the gate
-  // open — the api re-checks anyway, and surfacing a stale "rejected"
-  // banner during typing is worse than a brief moment of optimism.
-  //
-  // Threshold (default 10, boundary inclusive — 10.00 passes, 9.99 does
-  // not): we read `DEFAULTS.workedDaysThreshold` from `@magguarantee/shared`
-  // until a `GET /app-config` endpoint exists. TODO: swap to a
-  // `useAppConfig()` hook once api-agent ships it.
+  // ── Duration gate (mirror of api-side `canSubmitByDuration`) ──────────
   const previewTotalDays = previewQ.data?.breakdown?.totalDays;
   const durationGate = useMemo(() => {
     if (previewTotalDays === undefined) return null;
@@ -286,26 +305,21 @@ export default function NewClaimPage() {
   const durationMessage =
     durationGate && !durationGate.ok ? durationGate.message : null;
 
-  // ── Client-side tier-1 business rules ────────────────────────
-  // Mirror the pre-calc violations the api throws in `ClaimsService.submit`
-  // so the carrier sees the same red-banner immediately on date entry, not
-  // only after Submit. The api re-checks everything — this is purely UX.
-  //
-  // The rule logic itself lives in `checkClaimDates` (@magguarantee/shared) so
-  // the web and api share ONE definition of "what's an acceptable date pair".
-  // `today` is injected (business TZ) — the shared fn is pure and never reads
-  // the clock. AppConfig values are mirrored as constants until a
-  // `GET /app-config` endpoint exists; the api forwards the real AppConfig.
-  // Each returned violation carries an i18n key + params → render via tForm.
+  // ── Client-side tier-1 date rules — run against the DERIVED period. ──
+  // The carrier no longer types dates, but the same tier-1 violations (period
+  // span / 7-day deadline / future) still apply to the server-derived period;
+  // surface them inline so the carrier sees them before submit. Only runs once
+  // the preview returns the derived dates.
   const dateViolations = useMemo<DateRuleViolation[]>(() => {
+    if (!derivedDateStart || !derivedDateEnd) return [];
     return checkClaimDates({
-      dateStart: watched.dateStart ?? '',
-      dateEnd: watched.dateEnd ?? '',
+      dateStart: derivedDateStart,
+      dateEnd: derivedDateEnd,
       today: todayBusinessTzIso(),
       maxPeriodDays: CLIENT_MAX_PERIOD_DAYS,
       maxDaysAfterUnload: CLIENT_MAX_DAYS_AFTER_UNLOAD,
     });
-  }, [watched.dateStart, watched.dateEnd]);
+  }, [derivedDateStart, derivedDateEnd]);
 
   const clientViolations = useMemo<string[]>(
     () => dateViolations.map((v) => tForm(v.key, v.params)),
@@ -313,9 +327,6 @@ export default function NewClaimPage() {
   );
   const clientBlocked = clientViolations.length > 0;
 
-  // Server-side business-rule violations from the 422 envelope (rendered as
-  // a sticky banner above the form). Cleared on every fresh submit attempt
-  // so the user only sees current issues.
   const [violations, setViolations] = useState<string[]>([]);
   const violationsRef = useRef<HTMLDivElement | null>(null);
 
@@ -330,7 +341,6 @@ export default function NewClaimPage() {
       const list = extractViolations(err);
       if (list.length > 0) {
         setViolations(list);
-        // Scroll to banner so the user sees it even with a long form.
         requestAnimationFrame(() =>
           violationsRef.current?.scrollIntoView({
             behavior: 'smooth',
@@ -351,61 +361,48 @@ export default function NewClaimPage() {
 
   const onSubmit = form.handleSubmit(
     (values) => {
-      setViolations([]); // hide stale banner before the new round trip
-      // Strip empty strings so optional fields go through Zod cleanly.
-      const cleaned: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(values)) {
-        if (v === '' || v === undefined) continue;
-        cleaned[k] = v;
+      setViolations([]);
+      // Assemble the SubmitClaimDto: delegationId-driven, NO dates (server
+      // derives the period). Strip empty optional fields.
+      const body: Record<string, unknown> = {
+        vehicleId: values.vehicleId,
+        delegationId: values.delegationId,
+        timeFrom: values.timeFrom,
+        timeTo: values.timeTo,
+        mileage: values.mileage,
+      };
+      if (values.trailerId) body.trailerId = values.trailerId;
+      if (values.driverId) body.driverId = values.driverId;
+      if (values.comment) body.comment = values.comment;
+      if (values.attachmentIds && values.attachmentIds.length > 0) {
+        body.attachmentIds = values.attachmentIds;
       }
-      // Use a fresh idempotency key so refresh + resubmit doesn't double-insert.
       const idempotencyKey =
         typeof crypto !== 'undefined' && 'randomUUID' in crypto
           ? crypto.randomUUID()
           : undefined;
-      submitM.mutate({ body: cleaned as SubmitClaimDto, idempotencyKey });
+      submitM.mutate({ body: body as SubmitClaimDto, idempotencyKey });
     },
     onInvalidToast(form.setFocus, tCommon('validationFailedToast')),
   );
 
   const errs = form.formState.errors;
 
-  // The cross-field refine in SubmitClaimSchema attaches the STABLE MACHINE
-  // CODE 'date_order' to `dateEnd` (the api echoes Zod issue.message verbatim;
-  // the web owns i18n). Map it to a localized message here so the raw code can
-  // never reach the UI. All other dateEnd errors (format/required) are already
-  // localized strings from the resolver and pass through untouched.
-  const dateEndError =
-    errs.dateEnd?.message === 'date_order'
-      ? tForm('violationDateOrder')
-      : errs.dateEnd?.message;
-
-  // Explicit required-fields gate — independent of `formState.isValid`.
-  // With `mode: 'onTouched'`, `isValid` does track the resolver, but an
-  // untouched fresh form should never be submittable regardless of how RHF
-  // chooses to lazily evaluate validity. This gate is the load-bearing block
-  // for the empty-form case; `isValid` then adds format-level blocking once
-  // fields are touched. (The api re-validates everything — this is UX only.)
+  // Explicit required-fields gate (independent of resolver). The empty form is
+  // never submittable; the soft-gate adds the w_trasie acknowledgement.
   const requiredFilled =
     !!watched.vehicleId &&
-    !!watched.dateStart &&
-    !!watched.dateEnd &&
+    !!watched.delegationId &&
     !!watched.timeFrom &&
     !!watched.timeTo &&
     typeof watched.mileage === 'number' &&
     watched.mileage > 0;
 
-  // ── Bug 2 feedback — boundary-day "time has no effect" hints ──────
-  // The engine's `timeFrom` / `timeTo` only scale the FIRST / LAST calendar
-  // day's working fraction. When that boundary day is dropped from the count
-  // (weekend, Polish holiday, EU heavy-vehicle ban day), changing the time
-  // recalcs but the km is unchanged — so the field looks like a no-op. The
-  // engine is correct; this is a targeted inline explanation tied to the
-  // boundary day, distinct from the full excluded-days list in BreakdownTable.
-  //
-  // An excluded day's reason label comes from the engine (`ExcludedDay.label`,
-  // e.g. "Boże Ciało"); weekends aren't in `excludedDays` (universal, omitted
-  // there by design) so we detect those locally with `isWeekendIso`.
+  // Soft-gate: when the outing is w_trasie, the acknowledgement checkbox must
+  // be ticked. zjechal outings submit straight through (no gate).
+  const softGateBlocked = notYetReturned && !acknowledged;
+
+  // ── Boundary-day "time has no effect" hints (Bug 2) ──────────────────
   const excludedByDate = useMemo<Map<string, string>>(() => {
     const map = new Map<string, string>();
     const months = previewQ.data?.breakdown?.breakdown ?? [];
@@ -434,12 +431,12 @@ export default function NewClaimPage() {
   }
 
   const timeFromHint = boundaryHint(
-    watched.dateStart,
+    derivedDateStart,
     'boundaryHintTimeFrom',
     'boundaryHintTimeFromWeekend',
   );
   const timeToHint = boundaryHint(
-    watched.dateEnd,
+    derivedDateEnd,
     'boundaryHintTimeTo',
     'boundaryHintTimeToWeekend',
   );
@@ -448,24 +445,15 @@ export default function NewClaimPage() {
   const drivers = fleetQ.data?.drivers ?? [];
   const trailers = fleetQ.data?.trailers ?? [];
 
+  const noClaimable =
+    !delegationsQ.isLoading && delegations.length === 0;
+
   return (
     <section className="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-8">
       <h1 className="text-2xl font-extrabold tracking-tight text-text mb-6">
         {t('newClaim')}
       </h1>
 
-      {/*
-        Two violation sources feed the red banner:
-        1. `clientViolations` — synchronous tier-1 rules (period span, 7-day
-           deadline, future dates). Recomputed on every keystroke so the
-           carrier sees the same red message the api would throw on Submit,
-           but BEFORE round-tripping. Cannot be dismissed — they disappear
-           the moment the user fixes the underlying field.
-        2. `violations` — 422 envelope from a real Submit attempt. Sticky:
-           the user explicitly dismisses with the X (or a fresh Submit
-           clears them automatically).
-        Both render the same shell; only the dismiss affordance differs.
-      */}
       {(violations.length > 0 || clientViolations.length > 0) && (() => {
         const combined = [...clientViolations, ...violations];
         return (
@@ -495,10 +483,6 @@ export default function NewClaimPage() {
                   ))}
                 </ul>
               </div>
-              {/* Only the api-side stack is dismissible — client-side
-                  violations are reactive to form state, so they reappear
-                  immediately anyway. Showing the X only when there's a
-                  sticky 422 in play keeps the affordance honest. */}
               {violations.length > 0 && (
                 <button
                   type="button"
@@ -519,6 +503,100 @@ export default function NewClaimPage() {
           {/* Left — RHF form */}
           <div className="space-y-6">
             <div className="bg-card rounded-lg border border-border p-5 space-y-6">
+              {/* ① Wyjazd selector — REPLACES the old manual period entry. */}
+              <FormSection title={tPicker('section')}>
+                <FormField
+                  label={tPicker('label')}
+                  required
+                  description={tPicker('help')}
+                  error={errs.delegationId?.message}
+                  htmlFor="claim-delegationId"
+                >
+                  <Select
+                    id="claim-delegationId"
+                    disabled={delegationsQ.isLoading || noClaimable}
+                    {...form.register('delegationId')}
+                  >
+                    <option value="">
+                      {delegationsQ.isLoading
+                        ? tPicker('loading')
+                        : tPicker('placeholder')}
+                    </option>
+                    {delegations.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {(d.vehicle?.plateNumber ?? '—')} ·{' '}
+                        {formatDateFull(d.departureAt)} →{' '}
+                        {formatDateFull(d.actualReturnAt ?? d.plannedReturnAt)}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+
+                {noClaimable && (
+                  <p
+                    role="status"
+                    className="rounded-md border border-border bg-input px-3 py-2 text-sm text-text-sub"
+                  >
+                    {tPicker('empty')}
+                  </p>
+                )}
+
+                {/* Selected-outing status chip (so the carrier sees zjechał vs
+                    w trasie at a glance). */}
+                {selectedDelegation && (
+                  <div className="flex items-center gap-2 text-sm text-text-sub">
+                    <span>{tPicker('selectedStatus')}</span>
+                    <StatusBadge status={selectedDelegation.status} />
+                  </div>
+                )}
+
+                {/* §7.10.3 — w_trasie warning banner + soft-confirm checkbox. */}
+                {notYetReturned && (
+                  <div className="space-y-2">
+                    <div
+                      role="status"
+                      aria-live="polite"
+                      className="flex items-start gap-2 rounded-md bg-warning-bg dark:bg-warning/15 border border-warning/40 px-3 py-2"
+                    >
+                      <AlertTriangle
+                        size={16}
+                        className="text-warning-dark dark:text-warning shrink-0 mt-0.5"
+                        aria-hidden
+                      />
+                      <p className="text-sm text-warning-dark dark:text-warning">
+                        {tPicker('warningBanner')}
+                      </p>
+                    </div>
+                    <label className="flex items-start gap-2 text-sm text-text cursor-pointer select-none">
+                      <Checkbox
+                        className="mt-0.5"
+                        checked={acknowledged}
+                        onChange={(e) => setAcknowledged(e.target.checked)}
+                      />
+                      <span>{tPicker('warningAck')}</span>
+                    </label>
+                  </div>
+                )}
+
+                {/* Read-only derived period (server-computed from the outing). */}
+                {(derivedDateStart || derivedDateEnd) && (
+                  <div className="rounded-md border border-border bg-input/40 px-3 py-2">
+                    <p className="text-[11px] font-medium uppercase tracking-wider text-text-sub">
+                      {tPicker('derivedPeriod')}
+                    </p>
+                    <p className="mt-0.5 text-sm text-text tabular-nums">
+                      {formatDateFull(derivedDateStart)} –{' '}
+                      {formatDateFull(derivedDateEnd)}
+                    </p>
+                    {notYetReturned && (
+                      <p className="mt-1 text-xs text-text-sub">
+                        {tPicker('temporaryPeriodHint')}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </FormSection>
+
               <FormSection title={tForm('sectionVehicleAndDriver')}>
                 <FormField
                   label={tForm('vehicle')}
@@ -526,10 +604,7 @@ export default function NewClaimPage() {
                   error={errs.vehicleId?.message}
                   htmlFor="claim-vehicleId"
                 >
-                  <Select
-                    id="claim-vehicleId"
-                    {...form.register('vehicleId')}
-                  >
+                  <Select id="claim-vehicleId" {...form.register('vehicleId')}>
                     <option value="">—</option>
                     {vehicles.map((v) => (
                       <option key={v.id} value={v.id}>
@@ -546,10 +621,7 @@ export default function NewClaimPage() {
                     error={errs.driverId?.message}
                     htmlFor="claim-driverId"
                   >
-                    <Select
-                      id="claim-driverId"
-                      {...form.register('driverId')}
-                    >
+                    <Select id="claim-driverId" {...form.register('driverId')}>
                       <option value="">—</option>
                       {drivers.map((d) => (
                         <option key={d.id} value={d.id}>
@@ -564,10 +636,7 @@ export default function NewClaimPage() {
                     error={errs.trailerId?.message}
                     htmlFor="claim-trailerId"
                   >
-                    <Select
-                      id="claim-trailerId"
-                      {...form.register('trailerId')}
-                    >
+                    <Select id="claim-trailerId" {...form.register('trailerId')}>
                       <option value="">—</option>
                       {trailers.map((tr) => (
                         <option key={tr.id} value={tr.id}>
@@ -581,36 +650,10 @@ export default function NewClaimPage() {
                 </FormGrid>
               </FormSection>
 
+              {/* Period is now derived (above). Only the time window stays a
+                  carrier field — `timeFrom` pre-fills from the outing. */}
               <FormSection title={tForm('sectionPeriod')}>
                 <FormGrid cols={2}>
-                  <FormField
-                    label={tForm('dateStart')}
-                    required
-                    error={errs.dateStart?.message}
-                    htmlFor="claim-dateStart"
-                  >
-                    <Input
-                      id="claim-dateStart"
-                      type="date"
-                      className="h-10"
-                      max={todayBusinessTzIso()}
-                      {...form.register('dateStart')}
-                    />
-                  </FormField>
-                  <FormField
-                    label={tForm('dateEnd')}
-                    required
-                    error={dateEndError}
-                    htmlFor="claim-dateEnd"
-                  >
-                    <Input
-                      id="claim-dateEnd"
-                      type="date"
-                      className="h-10"
-                      max={todayBusinessTzIso()}
-                      {...form.register('dateEnd')}
-                    />
-                  </FormField>
                   <div>
                     <FormField
                       label={tForm('timeFrom')}
@@ -663,18 +706,11 @@ export default function NewClaimPage() {
               </FormSection>
 
               <FormSection title={tForm('sectionValues')}>
-                {/*
-                  Only mileage is carrier-editable now. `amountRequested` is
-                  derived server-side from `calc.paymentEur` (see api
-                  claims.service.ts:353); `hoursAdjusted` was moved to the
-                  verifier-only PATCH path and hard-coded to 0 on submit.
-                  The live `paymentEur` value the carrier will be requesting
-                  is visible in the right-hand <LivePreviewPanel> stat grid.
-                */}
                 <FormGrid cols={2}>
                   <FormField
                     label={tForm('mileage')}
                     required
+                    description={tPicker('mileageHint')}
                     error={errs.mileage?.message}
                     htmlFor="claim-mileage"
                   >
@@ -693,22 +729,12 @@ export default function NewClaimPage() {
                 </FormGrid>
               </FormSection>
 
-              {/*
-                orderNumber / orderDate were removed from the carrier submit
-                DTO in phase3_blocks — they are MAGTRANS-internal and filled
-                in by the verifier on PATCH /claims/:nrZgl when transitioning
-                to ZAAKCEPTOWANO. The carrier-side form keeps just the
-                comment field.
-              */}
               {durationMessage && (
                 <div
                   role="status"
                   aria-live="polite"
                   className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning-dark dark:text-warning"
                 >
-                  {/* Polish, fully-rendered by shared/canSubmitByDuration. We
-                      do not prepend anything — the message already names both
-                      thresholds and the carrier's current values. */}
                   {durationMessage}
                 </div>
               )}
@@ -741,6 +767,7 @@ export default function NewClaimPage() {
                 onClick={() => {
                   draft.clear();
                   form.reset(getDefaults());
+                  setAcknowledged(false);
                 }}
                 disabled={submitting}
               >
@@ -749,20 +776,13 @@ export default function NewClaimPage() {
               <Button
                 type="submit"
                 size="lg"
-                // Disabled if any of: (a) an in-flight submit, (b) preview
-                // failed for current input, (c) duration gate (<10 days),
-                // (d) client-side tier-1 violations (period span / 7-day
-                // deadline / future dates / order), (e) required fields not
-                // all filled (independent gate — blocks the untouched empty
-                // form even before RHF lazily computes validity under
-                // `mode: 'onTouched'`), (f) RHF schema invalid (format-level).
                 disabled={
                   submitting ||
                   previewBlocked ||
                   durationBlocked ||
                   clientBlocked ||
                   !requiredFilled ||
-                  !form.formState.isValid
+                  softGateBlocked
                 }
               >
                 {submitting ? t('submitting') : t('submit')}
@@ -788,8 +808,7 @@ export default function NewClaimPage() {
 
 /**
  * Parse the `violations: string[]` array out of a 422 envelope. Falls back
- * to an empty list if the error doesn't carry the multi-violation shape
- * (e.g. plain 500 / 401 / network error).
+ * to an empty list if the error doesn't carry the multi-violation shape.
  */
 function extractViolations(err: unknown): string[] {
   if (!(err instanceof ApiResponseError)) return [];

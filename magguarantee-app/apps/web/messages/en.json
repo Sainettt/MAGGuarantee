@@ -886,6 +886,12 @@
           "terminalState": "The claim is in a terminal state — no decisions available.",
           "guaranteeMetHint": "Guarantee met — the claim can only be rejected."
         },
+        "linkedDelegation": {
+          "heading": "Linked trip",
+          "vehicle": "Vehicle",
+          "planned": "Planned return",
+          "actual": "Actual return"
+        },
         "tabs": {
           "edit": "Edit",
           "history": "History",
@@ -1363,6 +1369,20 @@
         "AUTORYZACJA_KWOTA_MAKSIMA": "Authorization — max amount"
       }
     },
+    "wyjazdPicker": {
+      "section": "Trip",
+      "label": "Select a trip",
+      "help": "A claim can only be filed against a finished or ongoing trip that doesn't have a claim yet.",
+      "placeholder": "— select a trip —",
+      "loading": "Loading trips…",
+      "empty": "No trips available to file a claim against. A claim can be filed once a vehicle is marked “in transit” or “returned”.",
+      "selectedStatus": "Selected trip status:",
+      "derivedPeriod": "Period (from the trip)",
+      "temporaryPeriodHint": "Temporary period from the planned return — it will be updated after the vehicle returns.",
+      "mileageHint": "Pre-computed from daily km — you can override it.",
+      "warningBanner": "The trip is not yet marked “Returned” — are you sure you want to submit the claim?",
+      "warningAck": "I understand the trip is not finished yet"
+    },
     "preview": {
       "empty": {
         "incomplete": "Fill in required fields to see the calculation",
@@ -1472,6 +1492,7 @@
       },
       "status": {
         "zgloszony": "Reported",
+        "gotowy": "Ready",
         "w_trasie": "In transit",
         "zjechal": "Returned",
         "anulowany": "Cancelled"
@@ -1607,8 +1628,7 @@
   "eksport": {
     "delegations": {
       "title": "Trips",
-      "subtitle": "Trips showcase — read-only view",
-      "readOnlyBanner": "Read-only view. Trip status changes are made by the verifier.",
+      "subtitle": "Mark trips as ready once the order has been issued",
       "filters": {
         "status": "Status",
         "allStatuses": "All statuses",
@@ -1626,12 +1646,71 @@
           "driver": "Driver",
           "route": "Route",
           "period": "Period",
-          "status": "Status"
+          "status": "Status",
+          "actions": "Actions"
         }
+      },
+      "actions": {
+        "markReady": "Mark ready",
+        "rollback": "Roll back to: reported",
+        "advanceTitle": "Mark as ready",
+        "advanceDescription": "Trip {plate} will be marked as ready (load found, order issued).",
+        "rollbackTitle": "Roll back to: reported",
+        "rollbackDescription": "Trip {plate} will return to the reported status. Only possible before it sets off.",
+        "rollbackConfirm": "Roll back status",
+        "cancel": "Cancel",
+        "readyToast": "Marked as ready",
+        "rolledBackToast": "Rolled back to: reported",
+        "errorToast": "Failed to change the trip status"
       }
     }
   },
   "weryfikator": {
+    "tabs": {
+      "ariaLabel": "Verifier screens",
+      "km": "Vehicles / km",
+      "delegations": "Trips"
+    },
+    "delegations": {
+      "title": "Trips",
+      "subtitle": "Mark trips in transit and the vehicle's return",
+      "filters": {
+        "status": "Status",
+        "allStatuses": "All statuses",
+        "includeHistory": "Show history (returned / cancelled)"
+      },
+      "table": {
+        "emptyTitle": "No trips",
+        "emptyMessage": "No trips found to display.",
+        "emptyFiltered": {
+          "title": "No results",
+          "message": "No trips match the selected filters."
+        },
+        "columns": {
+          "vehicle": "Vehicle",
+          "driver": "Driver",
+          "route": "Route",
+          "period": "Period",
+          "status": "Status",
+          "actions": "Actions"
+        }
+      },
+      "actions": {
+        "markInTransit": "Mark in transit",
+        "markReturned": "Mark returned",
+        "inTransitTitle": "Mark as in transit",
+        "inTransitDescription": "Trip {plate} will be marked as in transit.",
+        "returnedTitle": "Mark as returned",
+        "returnedDescription": "Enter the actual return date for trip {plate}.",
+        "returnedDateLabel": "Return date",
+        "returnedRequired": "Enter the return date",
+        "returnedFuture": "The return date cannot be in the future",
+        "cancel": "Cancel",
+        "inTransitToast": "Marked as in transit",
+        "returnedToast": "Marked as returned",
+        "errorToast": "Failed to change the trip status"
+      }
+    },
     "km": {
       "title": {
         "board": "Km board",
@@ -1774,6 +1853,14 @@
       "empty": "—",
       "noData": "No km data for this period",
       "aria": "Mileage of vehicle {plate} for {from}–{to}"
+    }
+  },
+  "claim": {
+    "autoRecalc": {
+      "applied": "Recalculated to actual return date",
+      "skipped": "Needs attention: actual return date differs from the claim period",
+      "appliedTooltip": "Period updated from {origDateEnd} to {actualReturnAt}.",
+      "skippedTooltip": "Trip returned {actualReturnAt}, claim period: {dateEnd}. Auto-recalculation skipped."
     }
   }
 }

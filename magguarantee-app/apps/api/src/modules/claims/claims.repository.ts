@@ -89,6 +89,18 @@ export interface ClaimRow {
     createdAt: Date;
   }[];
 
+  /**
+   * Phase 7 REWORK (2026-06-20 #4) — the outing this wniosek was filed against
+   * (`@unique` FK → Delegation). Nullable for legacy/pre-rework rows; set at
+   * submit for new wnioski.
+   */
+  delegationId: string | null;
+  /**
+   * `true` once a pracownik PATCHed `dateStart`/`dateEnd` — the boundary that
+   * disables the delegation auto-recalc.
+   */
+  periodAdjustedByVerifier: boolean;
+
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -149,6 +161,12 @@ export interface CreateClaimData {
   /** Immutable carrier time-window snapshot (`HH:mm`) — set once at submit. */
   origTimeFrom: string | null;
   origTimeTo: string | null;
+  /**
+   * Phase 7 REWORK (2026-06-20 #4) — the outing this wniosek links to. Set at
+   * submit for new wnioski; the DB FK is `@unique`, so a duplicate surfaces as
+   * P2002 (the service maps it to a 409).
+   */
+  delegationId: string | null;
 }
 
 export interface UpdateClaimData {
@@ -163,6 +181,13 @@ export interface UpdateClaimData {
   statusChangedAt?: Date | null;
   statusBeforeReklamacja?: ClaimStatus | null;
   decidedById?: string | null;
+
+  /**
+   * Phase 7 REWORK (2026-06-20 #4) — set `true` by the verifier PATCH whenever
+   * `dateStart`/`dateEnd` change, marking the period as human-adjusted so the
+   * delegation auto-recalc no longer overwrites it.
+   */
+  periodAdjustedByVerifier?: boolean;
 
   // ── carrier-input snapshots (preserved on first reklamacja transition) ──
   origDateStart?: Date | null;
@@ -208,6 +233,12 @@ export interface UpdateClaimData {
   amountApproved?: number | null;
   amountMaximum?: number | null;
   margin?: number | null;
+  /**
+   * Phase 7 REWORK (2026-06-20 #4) — re-derived on the delegation auto-recalc
+   * (mirrors `paymentEur`, same derivation as submit). Never written by the
+   * verifier PATCH (which leaves it untouched).
+   */
+  amountRequested?: number;
 
   // ── authorization request (Phase 4 — set when targeting OCZEKUJE_*) ──
   authorizationRequired?: boolean;
@@ -243,6 +274,22 @@ export class ClaimsRepository {
   async findByNrZgl(nrZgl: string): Promise<ClaimRow | null> {
     const row = await this.prisma.tx.claim.findFirst({
       where: { nrZgl },
+      include: this.includeShape(),
+    });
+    return row ? this.flatten(row) : null;
+  }
+
+  /**
+   * Finds the (at most one — `@unique` FK) claim linked to an outing. Goes
+   * through `prisma.tx`, so a read taken inside the delegation `returned()`
+   * `@Audit`-opened transaction sees the same uncommitted state and the
+   * subsequent recalc update commits atomically with the outing status +
+   * `Vehicle.lastDroveAt` bump. Returns `null` when no wniosek is linked (the
+   * common case — the recalc is then a no-op).
+   */
+  async findByDelegationId(delegationId: string): Promise<ClaimRow | null> {
+    const row = await this.prisma.tx.claim.findFirst({
+      where: { delegationId, deletedAt: null },
       include: this.includeShape(),
     });
     return row ? this.flatten(row) : null;
@@ -355,6 +402,9 @@ export class ClaimsRepository {
         // touched by the verifier PATCH (`_buildUpdatePayload` omits them).
         origTimeFrom: data.origTimeFrom,
         origTimeTo: data.origTimeTo,
+        // Phase 7 REWORK (2026-06-20 #4) — link to the outing. `@unique` FK; a
+        // duplicate surfaces as P2002 → the service maps it to a 409.
+        delegationId: data.delegationId,
       },
       include: this.includeShape(),
     });
@@ -410,6 +460,7 @@ export class ClaimsRepository {
     set('statusChangedAt');
     set('statusBeforeReklamacja');
     set('decidedById');
+    set('periodAdjustedByVerifier');
     set('origDateStart');
     set('origDateEnd');
     set('origMileage');
@@ -432,6 +483,7 @@ export class ClaimsRepository {
     set('amountApproved');
     set('amountMaximum');
     set('margin');
+    set('amountRequested');
     set('authorizationRequired');
     set('authorizationDescription');
     set('authorizationToken');
@@ -537,6 +589,8 @@ export class ClaimsRepository {
         uploadedById: a.uploadedById,
         createdAt: a.createdAt,
       })),
+      delegationId: row.delegationId,
+      periodAdjustedByVerifier: row.periodAdjustedByVerifier,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       deletedAt: row.deletedAt,
@@ -605,6 +659,8 @@ interface ClaimPrismaShape {
     uploadedById: string | null;
     createdAt: Date;
   }[];
+  delegationId: string | null;
+  periodAdjustedByVerifier: boolean;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;

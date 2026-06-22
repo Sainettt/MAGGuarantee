@@ -74,6 +74,15 @@ export interface DelegationRow {
 
   notes: string | null;
 
+  /**
+   * Phase 7 REWORK (2026-06-20 #4) — the linked wniosek, if any (`@unique` FK on
+   * the Claim side). `null` when no claim has been filed against this outing.
+   * Used to (a) drive the carrier «claimable wyjazdy» picker and (b) let the
+   * UI surface the link. Only the id is carried — the full claim is fetched
+   * separately when needed.
+   */
+  claimId: string | null;
+
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -95,6 +104,14 @@ export interface DelegationListFilters {
    * status always narrows further", per the slice contract.
    */
   statusIn?: DelegationStatus[];
+  /**
+   * Phase 7 REWORK (2026-06-20 #4) — carrier «claimable wyjazdy» picker. When
+   * `true`, restricts to outings that can back a NEW wniosek: status ∈
+   * {`w_trasie`, `zjechal`} AND no claim linked yet (`claim is null`). Composes
+   * with `carrierId` (the scope branch always pins the carrier). Server-side
+   * only — translated to a `status IN (...) AND claim is null` predicate here.
+   */
+  claimableOnly?: boolean;
   carrierId?: string;
   vehicleId?: string;
   driverId?: string;
@@ -184,6 +201,12 @@ export class DelegationsRepository {
     // eksport/weryfikator scope branch in the service.
     if (filters.status) {
       where.status = filters.status;
+    } else if (filters.claimableOnly) {
+      // «Claimable» = active-and-returnable AND not yet claimed. The status
+      // floor is fixed here (not client-supplied) and `claim is null` excludes
+      // outings that already back a wniosek (the `@unique` FK means at most one).
+      where.status = { in: ['w_trasie', 'zjechal'] };
+      where.claim = { is: null };
     } else if (filters.statusIn && filters.statusIn.length > 0) {
       where.status = { in: filters.statusIn };
     }
@@ -309,6 +332,9 @@ export class DelegationsRepository {
       },
       reportedBy: { select: { id: true, login: true, name: true } },
       verifiedBy: { select: { id: true, login: true, name: true } },
+      // Phase 7 REWORK (2026-06-20 #4) — the linked wniosek (id only). `@unique`
+      // FK on the Claim side, so this is at most one row.
+      claim: { select: { id: true } },
     } as const;
   }
 
@@ -370,6 +396,7 @@ export class DelegationsRepository {
       verifiedBy: row.verifiedBy ?? null,
       verifiedAt: row.verifiedAt,
       notes: row.notes,
+      claimId: row.claim?.id ?? null,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       deletedAt: row.deletedAt,
@@ -419,6 +446,7 @@ interface DelegationPrismaShape {
   verifiedBy?: { id: string; login: string; name: string | null } | null;
   verifiedAt: Date | null;
   notes: string | null;
+  claim?: { id: string } | null;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;

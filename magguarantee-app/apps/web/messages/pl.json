@@ -886,6 +886,12 @@
           "terminalState": "Wniosek jest w stanie końcowym — brak dostępnych decyzji.",
           "guaranteeMetHint": "Gwarancja wyjeżdżona — wniosek można tylko odrzucić."
         },
+        "linkedDelegation": {
+          "heading": "Powiązany wyjazd",
+          "vehicle": "Auto",
+          "planned": "Planowany powrót",
+          "actual": "Faktyczny zjazd"
+        },
         "tabs": {
           "edit": "Edytuj",
           "history": "Historia",
@@ -1363,6 +1369,20 @@
         "AUTORYZACJA_KWOTA_MAKSIMA": "Autoryzacja — kwota maks."
       }
     },
+    "wyjazdPicker": {
+      "section": "Wyjazd",
+      "label": "Wybierz wyjazd",
+      "help": "Wniosek można złożyć tylko do zakończonego lub trwającego wyjazdu, który nie ma jeszcze wniosku.",
+      "placeholder": "— wybierz wyjazd —",
+      "loading": "Wczytywanie wyjazdów…",
+      "empty": "Brak wyjazdów, do których można złożyć wniosek. Wniosek można złożyć po oznaczeniu auta jako „w trasie” lub „zjechał”.",
+      "selectedStatus": "Status wybranego wyjazdu:",
+      "derivedPeriod": "Okres (z wyjazdu)",
+      "temporaryPeriodHint": "Okres tymczasowy z planowanego powrotu — zostanie zaktualizowany po zjeździe.",
+      "mileageHint": "Wstępnie wyliczony z dziennych km — możesz nadpisać.",
+      "warningBanner": "Wyjazd jeszcze nie ma statusu „Zjechał” — czy na pewno chcesz złożyć wniosek?",
+      "warningAck": "Rozumiem, że wyjazd nie jest jeszcze zakończony"
+    },
     "preview": {
       "empty": {
         "incomplete": "Wypełnij wymagane pola, aby zobaczyć kalkulację",
@@ -1472,6 +1492,7 @@
       },
       "status": {
         "zgloszony": "Zgłoszony",
+        "gotowy": "Gotowy",
         "w_trasie": "W trasie",
         "zjechal": "Zjechał",
         "anulowany": "Anulowany"
@@ -1607,8 +1628,7 @@
   "eksport": {
     "delegations": {
       "title": "Wyjazdy",
-      "subtitle": "Witryna wyjazdów — podgląd tylko do odczytu",
-      "readOnlyBanner": "Widok tylko do odczytu. Zmiany statusu wyjazdu wykonuje weryfikator.",
+      "subtitle": "Oznacz wyjazdy jako gotowe po wystawieniu zlecenia",
       "filters": {
         "status": "Status",
         "allStatuses": "Wszystkie statusy",
@@ -1626,12 +1646,71 @@
           "driver": "Kierowca",
           "route": "Trasa",
           "period": "Okres",
-          "status": "Status"
+          "status": "Status",
+          "actions": "Akcje"
         }
+      },
+      "actions": {
+        "markReady": "Oznacz gotowy",
+        "rollback": "Cofnij do: zgłoszony",
+        "advanceTitle": "Oznacz jako gotowy",
+        "advanceDescription": "Wyjazd {plate} zostanie oznaczony jako gotowy (ładunek znaleziony, zlecenie wystawione).",
+        "rollbackTitle": "Cofnij do: zgłoszony",
+        "rollbackDescription": "Wyjazd {plate} wróci do statusu zgłoszony. Możliwe tylko zanim ruszy w trasę.",
+        "rollbackConfirm": "Cofnij status",
+        "cancel": "Anuluj",
+        "readyToast": "Oznaczono jako gotowy",
+        "rolledBackToast": "Cofnięto do: zgłoszony",
+        "errorToast": "Nie udało się zmienić statusu wyjazdu"
       }
     }
   },
   "weryfikator": {
+    "tabs": {
+      "ariaLabel": "Ekrany weryfikatora",
+      "km": "Pojazdy / km",
+      "delegations": "Wyjazdy"
+    },
+    "delegations": {
+      "title": "Wyjazdy",
+      "subtitle": "Oznacz wyjazdy w trasie oraz zjazd auta",
+      "filters": {
+        "status": "Status",
+        "allStatuses": "Wszystkie statusy",
+        "includeHistory": "Pokaż historię (zjechał / anulowane)"
+      },
+      "table": {
+        "emptyTitle": "Brak wyjazdów",
+        "emptyMessage": "Nie znaleziono wyjazdów do wyświetlenia.",
+        "emptyFiltered": {
+          "title": "Brak wyników",
+          "message": "Brak wyjazdów spełniających wybrane filtry."
+        },
+        "columns": {
+          "vehicle": "Auto",
+          "driver": "Kierowca",
+          "route": "Trasa",
+          "period": "Okres",
+          "status": "Status",
+          "actions": "Akcje"
+        }
+      },
+      "actions": {
+        "markInTransit": "Oznacz w trasie",
+        "markReturned": "Oznacz zjechał",
+        "inTransitTitle": "Oznacz jako w trasie",
+        "inTransitDescription": "Wyjazd {plate} zostanie oznaczony jako w trasie.",
+        "returnedTitle": "Oznacz jako zjechał",
+        "returnedDescription": "Podaj faktyczną datę zjazdu dla wyjazdu {plate}.",
+        "returnedDateLabel": "Data zjazdu",
+        "returnedRequired": "Podaj datę zjazdu",
+        "returnedFuture": "Data zjazdu nie może być w przyszłości",
+        "cancel": "Anuluj",
+        "inTransitToast": "Oznaczono jako w trasie",
+        "returnedToast": "Oznaczono jako zjechał",
+        "errorToast": "Nie udało się zmienić statusu wyjazdu"
+      }
+    },
     "km": {
       "title": {
         "board": "Tablica km",
@@ -1774,6 +1853,14 @@
       "empty": "—",
       "noData": "Brak danych km dla tego okresu",
       "aria": "Przebieg pojazdu {plate} w okresie {from}–{to}"
+    }
+  },
+  "claim": {
+    "autoRecalc": {
+      "applied": "Przeliczono wg faktycznej daty zjazdu",
+      "skipped": "Wymaga uwagi: faktyczna data zjazdu różni się od okresu wniosku",
+      "appliedTooltip": "Okres zaktualizowany z {origDateEnd} na {actualReturnAt}.",
+      "skippedTooltip": "Wyjazd zjechał {actualReturnAt}, okres wniosku: {dateEnd}. Pominięto auto-przeliczenie."
     }
   }
 }

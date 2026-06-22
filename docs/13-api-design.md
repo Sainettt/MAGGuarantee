@@ -322,17 +322,20 @@ soft-delete'ятся (объект в MinIO остаётся).
 
 | Method + Path | GAS |
 |---|---|
-| GET `/delegations` | `getDelegacjeForCarrier` / `getDelegacjeForEksport` / `getDelegacjeForDyspozytor` — единый endpoint, фильтрация по роли. **`weryfikator` сюда больше НЕ имеет доступа** (rework 2026-06-10 #2 — см. ниже). `eksport`: active-board + `?includeHistory=true`. |
-| GET `/delegations/:id` | (lookup) — без `weryfikator` |
-| POST `/delegations` | `addDelegacja` (carrier) |
-| POST `/delegations/:id/cancel` | `cancelDelegacja` (**carrier-only** — свои `zgloszony`; weryfikator НЕ имеет cancel) |
+| GET `/delegations` | Единый endpoint, фильтрация по роли. `eksport`/`weryfikator`: active-board `{zgloszony, gotowy, w_trasie}` + `?includeHistory=true`. carrier→свои, planista→свой `plannerId`, dyspozytor→своя team. (REWORK 2026-06-20: `weryfikator` снова видит выезды — §0″.) |
+| GET `/delegations/:id` | (lookup) — incl. `weryfikator` |
+| POST `/delegations` | `addDelegacja` (carrier → `zgloszony`) |
+| POST `/delegations/:id/ready` | **NEW** — `eksport \| admin`: `zgloszony→gotowy` (+ откат `gotowy→zgloszony`, пока не `w_trasie`). Audit `delegation.markReady`. |
+| POST `/delegations/:id/in-transit` | **NEW** — `weryfikator \| admin`: `gotowy→w_trasie`. Audit `delegation.markInTransit`. |
+| POST `/delegations/:id/returned` | **NEW** — `weryfikator \| admin`: `w_trasie→zjechal`, body `{ actualReturnAt: date }`. Txn: `vehicle.lastDroveAt = max(...)` + авто-пересчёт связанного wniosek (границы — §0″). Audit `delegation.markReturned`. |
+| POST `/delegations/:id/cancel` | carrier (свои `zgloszony`) **+ admin (любой активный)** → `anulowany`. |
 
 > **Side-effect (Google Chat):** контракт `POST /delegations` не меняется. После
 > создания выезда `add()` асинхронно постит 4-строчную нотификацию в Google Chat
 > space (очередь `chat-notify-wyjazd`, off the request path — никогда не ломает и
 > не задерживает ответ). См. [16-jobs-and-integrations.md#google-chat-notifications](16-jobs-and-integrations.md#google-chat-notifications).
 
-> ⚠️ **Удалено (rework 2026-06-10 #2):** `POST /delegations/:id/in-transit` и `POST /delegations/:id/returned` (`markDelegacjaInTransit/Returned`). `weryfikator` больше не управляет статусом выездов — он работает с операционным статусом **машин** (см. таблицу Vehicles ниже). `DelegationStatus` enum значения `w_trasie`/`zjechal` сохранены, но через приложение не проставляются. Полная спека: [`20-phase-7-eksport-weryfikator.md` § 0](20-phase-7-eksport-weryfikator.md).
+> ✅ **REWORK 2026-06-20 (#4):** статусы выезда снова операционные — `in-transit`/`returned` восстановлены (у `weryfikator`) + новый `ready` (`eksport` → `gotowy`). `weryfikator` ведёт **И** km-доску машин (ниже), **И** статусы выездов (отдельное окно). `Claim.delegationId` введён — `POST /claims`/`/claims/preview` принимают `delegationId`, период и `mileage` берутся из выезда (гейт статуса `{w_trasie, zjechal}`; из `w_trasie` — soft-warning). Полная спека: [`20-phase-7-eksport-weryfikator.md` §0″](20-phase-7-eksport-weryfikator.md). (Прежнее «удалено 2026-06-10 #2 / мёртвый груз» — отменено.)
 
 ### Vehicle daily-km (weryfikator) — `/api/v1/vehicles`
 

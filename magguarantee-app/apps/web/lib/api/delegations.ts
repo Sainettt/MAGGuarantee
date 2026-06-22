@@ -5,6 +5,9 @@ import type {
   DelegationDto,
   DelegationEligibilityResponse,
   DelegationFilters,
+  MarkInTransitDto,
+  MarkReadyDto,
+  MarkReturnedDto,
   SubmitDelegationDto,
 } from '@magguarantee/shared';
 
@@ -57,8 +60,52 @@ export function cancelDelegation(
   });
 }
 
-// NOTE (Phase 7 rework 2026-06-12 #3): the weryfikator no longer advances
-// delegation status. The former `markInTransit` / `markReturned` wrappers (and
-// the `/in-transit` / `/returned` endpoints) were removed; the weryfikator now
-// records each vehicle's DAILY km on a weekly board. See `lib/api/vehicles.ts`
-// (`setVehicleDailyKm` / `getVehicleKmBoard`) + docs/14 §7.7.
+// ─── Status transitions (Phase 7 REWORK 2026-06-20 #4) ───────────────
+//
+// The delegation lifecycle is operational again (docs/20 §0″, docs/14 §7.10).
+// Three POST transition endpoints — `eksport` drives `/ready` (advance +
+// rollback), `weryfikator` drives `/in-transit` + `/returned`. The state
+// machine is enforced server-side; these are thin typed wrappers.
+
+/**
+ * POST /delegations/:id/ready — eksport|admin. `zgloszony → gotowy` by default;
+ * pass `{ rollback: true }` to undo `gotowy → zgloszony` (allowed only while the
+ * outing has not yet left — i.e. not `w_trasie`; the api enforces it).
+ */
+export function markDelegationReady(
+  id: string,
+  body: MarkReadyDto = { rollback: false },
+): Promise<DelegationDto> {
+  return apiJson<DelegationDto>(`/delegations/${id}/ready`, {
+    method: 'POST',
+    json: body,
+  });
+}
+
+/**
+ * POST /delegations/:id/in-transit — weryfikator|admin. `gotowy → w_trasie`.
+ */
+export function markDelegationInTransit(
+  id: string,
+  body: MarkInTransitDto = {},
+): Promise<DelegationDto> {
+  return apiJson<DelegationDto>(`/delegations/${id}/in-transit`, {
+    method: 'POST',
+    json: body,
+  });
+}
+
+/**
+ * POST /delegations/:id/returned — weryfikator|admin. `w_trasie → zjechal`.
+ * `actualReturnAt` is date-only (`YYYY-MM-DD`). Server-side side effects
+ * (`vehicle.lastDroveAt` bump + linked-wniosek auto-recalc) are invisible here.
+ */
+export function markDelegationReturned(
+  id: string,
+  body: MarkReturnedDto,
+): Promise<DelegationDto> {
+  return apiJson<DelegationDto>(`/delegations/${id}/returned`, {
+    method: 'POST',
+    json: body,
+  });
+}

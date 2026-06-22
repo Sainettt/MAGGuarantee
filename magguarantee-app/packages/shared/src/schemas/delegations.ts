@@ -35,8 +35,11 @@ import { VehicleDispatchTeamSchema } from './teams';
 
 // ─── Enum mirror (Prisma DelegationStatus) ───────────────
 
+// Phase 7 REWORK (2026-06-20 #4, docs/20 §0″) — `gotowy` re-introduced as the
+// eksport-owned step between carrier-`zgloszony` and weryfikator-`w_trasie`.
 export const DelegationStatusSchema = z.enum([
   'zgloszony',
+  'gotowy',
   'w_trasie',
   'zjechal',
   'anulowany',
@@ -135,13 +138,64 @@ export const CancelDelegationSchema = z
   .strict();
 export type CancelDelegationDto = z.infer<typeof CancelDelegationSchema>;
 
-// Phase 7 rework (2026-06-10 #2 → 2026-06-12 #3): the weryfikator no longer
-// drives delegation status. The former `MarkInTransitSchema` /
-// `MarkReturnedSchema` wire contracts and the `makeMarkReturnedFormSchema` web
-// form helper were removed alongside the `POST /delegations/:id/in-transit` +
-// `/returned` endpoints. The verifier now records each vehicle's DAILY km —
-// see `schemas/vehicles.ts` (`SetVehicleDailyKmSchema`) and
-// `docs/20-phase-7-eksport-weryfikator.md` §0′.
+// ─── Status transitions (Phase 7 REWORK 2026-06-20 #4) ───
+//
+// The delegation lifecycle is operational again (docs/20 §0″). Three POST
+// transition endpoints carry these bodies:
+//   - `POST /delegations/:id/ready`      — eksport|admin (`zgloszony↔gotowy`)
+//   - `POST /delegations/:id/in-transit` — weryfikator|admin (`gotowy→w_trasie`)
+//   - `POST /delegations/:id/returned`   — weryfikator|admin (`w_trasie→zjechal`)
+// The state-machine (`delegation-state-machine.ts`) is the authority on edge
+// legality; these schemas only validate the request payloads.
+
+/**
+ * POST /delegations/:id/ready — eksport (or admin) flips an outing
+ * `zgloszony → gotowy` after a SpedTrans zlecenie is in place. The same
+ * endpoint supports the rollback `gotowy → zgloszony` (allowed only while the
+ * outing has not yet left, i.e. not `w_trasie`) via `rollback: true`.
+ *
+ * `note` is an optional free-form annotation appended to the outing notes for
+ * the audit trail.
+ */
+export const MarkReadySchema = z
+  .object({
+    /**
+     * `false` (default) → `zgloszony → gotowy`.
+     * `true`            → rollback `gotowy → zgloszony` (pre-`w_trasie` only).
+     */
+    rollback: z.boolean().optional().default(false),
+    note: emptyStringToUndefined(z.string().max(2_000).optional()),
+  })
+  .strict();
+export type MarkReadyDto = z.infer<typeof MarkReadySchema>;
+
+/**
+ * POST /delegations/:id/in-transit — weryfikator (or admin) marks an outing
+ * `gotowy → w_trasie`. No body fields beyond an optional note; the service
+ * stamps `verifiedBy/At`.
+ */
+export const MarkInTransitSchema = z
+  .object({
+    note: emptyStringToUndefined(z.string().max(2_000).optional()),
+  })
+  .strict();
+export type MarkInTransitDto = z.infer<typeof MarkInTransitSchema>;
+
+/**
+ * POST /delegations/:id/returned — weryfikator (or admin) marks an outing
+ * `w_trasie → zjechal`. `actualReturnAt` is **date-only** (`YYYY-MM-DD`) — the
+ * exact return DAY (the same shape as `plannedReturnAt`); the time-of-return
+ * (`Claim.timeTo`) is the pracownik's zone, not the weryfikator's. The service
+ * writes it into `Delegation.actualReturnAt`, advances `Vehicle.lastDroveAt`,
+ * and auto-recalculates any linked wniosek — all in one transaction.
+ */
+export const MarkReturnedSchema = z
+  .object({
+    actualReturnAt: IsoDateSchema,
+    note: emptyStringToUndefined(z.string().max(2_000).optional()),
+  })
+  .strict();
+export type MarkReturnedDto = z.infer<typeof MarkReturnedSchema>;
 
 // ─── Eligibility (carrier readiness) ─────────────────────
 
@@ -196,6 +250,15 @@ export const DelegationFiltersSchema = z
      * regress their lists. See the service for the exact mechanism.
      */
     includeHistory: z.coerce.boolean().optional(),
+    /**
+     * Phase 7 REWORK (2026-06-20 #4) — carrier «claimable wyjazdy» picker. When
+     * `true`, narrows the carrier's list to outings that can back a NEW wniosek:
+     * status ∈ {`w_trasie`, `zjechal`} AND no claim linked yet. The carrier
+     * `claims/new` form fetches `GET /delegations?claimable=true` to populate
+     * the wyjazd selector. Coerced from the query string. A no-op for non-carrier
+     * roles (the scope branch only honours it for `przewoznik`).
+     */
+    claimable: z.coerce.boolean().optional(),
     cursor: UuidSchema.optional(),
     limit: z.coerce.number().int().min(1).max(200).default(50),
   })
@@ -281,6 +344,14 @@ export const DelegationDtoSchema = z.object({
   verifiedAt: IsoDateTimeSchema.nullable(),
 
   notes: z.string().nullable(),
+
+  /**
+   * Phase 7 REWORK (2026-06-20 #4) — id of the wniosek filed against this outing
+   * (`@unique` FK on the Claim side), or `null` when none. Lets the carrier
+   * panel mark outings that already have a claim and drives the «claimable»
+   * picker (those with `claimId === null` in {`w_trasie`, `zjechal`}).
+   */
+  claimId: UuidSchema.nullable(),
 
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,

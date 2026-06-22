@@ -1,7 +1,8 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 
 import { CarrierReadinessModule } from '../carriers/carrier-readiness.module';
 import { CarriersModule } from '../carriers/carriers.module';
+import { ClaimsModule } from '../claims/claims.module';
 import { DriversModule } from '../drivers/drivers.module';
 import { ChatModule } from '../integrations/chat/chat.module';
 import { TrailersModule } from '../trailers/trailers.module';
@@ -20,6 +21,11 @@ import { DelegationsService } from './delegations.service';
     // Phase 9 (early) — outbound Google Chat wyjazd notification fired from
     // `DelegationsService.add` after the delegation is created.
     ChatModule,
+    // Phase 7 REWORK (2026-06-20 #4) — the `returned()` transition calls the
+    // claims auto-recalc (`ClaimsService.recalcFromDelegation`). ClaimsModule
+    // imports DelegationsModule back (for `DelegationsRepository` on submit), so
+    // the cycle is broken with `forwardRef` on both sides.
+    forwardRef(() => ClaimsModule),
   ],
   controllers: [DelegationsController],
   providers: [DelegationsService, DelegationsRepository],

@@ -34,8 +34,12 @@ enum ClaimStatus {
   AUTORYZACJA_KWOTA_MAKSIMA @map("AUTORYZACJA — KWOTA MAKSIMA")
 }
 
+// REWORK 2026-06-20 (#4, docs/20 §0″) — delegation statuses are operational
+// again: carrier→zgloszony, eksport→gotowy, weryfikator→w_trasie→zjechal.
+// Strict chain order zgloszony→gotowy→w_trasie→zjechal (admin can force).
 enum DelegationStatus {
   zgloszony
+  gotowy
   w_trasie
   zjechal
   anulowany
@@ -604,10 +608,22 @@ model Claim {
   authScreenshotUrl String? // S3 URL
   attachments       ClaimAttachment[]
 
+  // REWORK 2026-06-20 (#4, docs/20 §0″) — wniosek↔wyjazd link. One claim per
+  // delegation (@unique). Nullable in DB (legacy/migration); required for new
+  // claims is enforced at the app layer, NOT in the DB. Period (dateStart=
+  // departureAt, dateEnd=actualReturnAt ?? plannedReturnAt) and mileage are
+  // derived from the delegation.
+  delegationId             String?     @db.Uuid
+  delegation               Delegation? @relation(fields: [delegationId], references: [id])
+  // true once a pracownik PATCHes dateStart/dateEnd — the boundary that gates
+  // the auto-recalc when the delegation later transitions to `zjechal`.
+  periodAdjustedByVerifier Boolean     @default(false)
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
+  @@unique([delegationId])
   @@index([carrierId, status])
   @@index([carrierId, deletedAt])
   @@index([vehicleId])
@@ -664,6 +680,10 @@ model Delegation {
 
   status         DelegationStatus @default(zgloszony)
   actualReturnAt DateTime?
+
+  // REWORK 2026-06-20 (#4, docs/20 §0″) — wniosek↔wyjazd link. One-to-one:
+  // the owning side is Claim.delegationId (@unique).
+  claim Claim?
 
   reportedById String?   @db.Uuid
   reportedBy   User?     @relation("DelegationReporter", fields: [reportedById], references: [id])
