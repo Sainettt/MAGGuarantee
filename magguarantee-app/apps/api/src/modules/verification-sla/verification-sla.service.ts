@@ -119,7 +119,7 @@ export class VerificationSlaService {
     const deeplink = this._buildDeeplink();
     const results = await Promise.allSettled(
       recipients.map((r) =>
-        this.mail.sendVerificationDigest(r.email, {
+        this.mail.enqueueVerificationDigest(r.email, {
           overdue,
           dueSoon,
           deeplink,

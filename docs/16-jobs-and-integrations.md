@@ -2,15 +2,23 @@
 
 > Всё, что в GAS было через Triggers, MailApp, UrlFetchApp.
 
-> **Статус BullMQ (Phase 9, частично live):** BullMQ поднят **рано** и работает
-> **in-process** (воркеры крутятся внутри API Nest-процесса, без отдельного
-> worker-контейнера). Подключены **только две очереди**:
-> - `email-send` — асинхронная отправка email. Сейчас через неё идёт **только
->   2FA login-code** (`MailService.enqueue2faCode`); все остальные mail-вызовы
->   пока синхронны (помечены `// Phase 9: migrate to email-send queue`) и
->   мигрируют в полном Phase 9.
+> **Статус BullMQ (Phase 9, email-часть готова):** BullMQ работает **in-process**
+> (воркеры крутятся внутри API Nest-процесса, без отдельного worker-контейнера).
+> Подключены две очереди:
+> - `email-send` — асинхронная отправка email. Через неё идут **все**
+>   транзакционные письма (2FA, password-reset, account-created/-deactivated/
+>   -reactivated, carrier-decision, internal-decision, carrier-submitted,
+>   authorization-request, verification-digest) — каждый отправитель имеет
+>   `enqueueX`-вариант с sync-фолбэком, когда очередь недоступна (юнит-тесты).
+>   Провайдер выбирается по env `MAIL_PROVIDER`: `smtp` → Mailhog (dev/staging),
+>   `gmail` → `GmailApiProvider` с RFC-threading (prod). См.
+>   [Email через Gmail API](#email-через-gmail-api).
 > - `chat-notify-wyjazd` — нотификация в Google Chat при регистрации выезда
 >   (см. [Google Chat notifications](#google-chat-notifications)).
+>
+> Cron-процессоры (`daily-reminders`, `weekly-report`, `token-cleanup`) пока
+> **не подняты** — их React Email шаблоны (`daily-reminder.tsx`,
+> `weekly-report.tsx`) уже есть, сами repeatable jobs — отдельный TODO.
 >
 > Connection: общий `REDIS_URL` (выделенное BullMQ-подключение с
 > `maxRetriesPerRequest: null` — блокирующие команды BullMQ этого требуют; нельзя
@@ -110,12 +118,13 @@ export class DailyRemindersProcessor extends WorkerHost {
 
 ### Email очередь
 
-> **Текущее состояние (Phase 9, частично):** очередь `email-send` уже поднята
-> (in-process worker `EmailSendProcessor`), но через неё идёт **только 2FA
-> login-code** (`MailService.enqueue2faCode` → процессор зовёт прежний
-> синхронный `send2faCode`, который сам пишет строку в `MailJobsRegistry`, так
-> что `GET /diagnostics/mails` не затронут). Остальные шаблоны ниже пока
-> синхронны и мигрируют в полном Phase 9.
+> **Текущее состояние (Phase 9, email готов):** очередь `email-send` несёт
+> **все** транзакционные письма. Каждый `enqueueX` кладёт job с
+> дискриминированным `template`; `EmailSendProcessor` диспатчит на прежний
+> синхронный `MailService.sendX` (тот пишет строку в `MailJobsRegistry`, так
+> что `GET /diagnostics/mails` работает как раньше). Если очередь не подключена
+> (юнит-тесты / скрипты) — `enqueueX` падает в синхронную отправку, письмо
+> никогда не теряется.
 
 В целевом состоянии все исходящие email идут через очередь, не sync. Преимущество:
 - Если Gmail rate-limit (250/день free, выше для workspace) — retry.

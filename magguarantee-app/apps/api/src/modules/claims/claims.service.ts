@@ -49,6 +49,7 @@ import { CarriersRepository } from '../carriers/carriers.repository';
 import { DriversRepository } from '../drivers/drivers.repository';
 import { KmCalcService } from '../km-calc/km-calc.service';
 import { MailService } from '../mail/mail.service';
+import type { Tone } from '../mail/templates/_theme';
 import { PrismaService } from '../prisma/prisma.service';
 import { TrailersRepository } from '../trailers/trailers.repository';
 import { VehicleDailyKmRepository } from '../vehicles/vehicle-daily-km.repository';
@@ -909,7 +910,7 @@ export class ClaimsService {
     const kwotaMaksima = dto.kwotaMaksima.toFixed(2);
     const deeplink = `${appUrl.replace(/\/$/, '')}/employee/claims/${encodeURIComponent(row.nrZgl)}`;
 
-    await this.mailService.sendAuthorizationRequest(MAKSIM_EMAIL, {
+    await this.mailService.enqueueAuthorizationRequest(MAKSIM_EMAIL, {
       nrZgl: row.nrZgl,
       carrierName,
       vehiclePlate: row.vehiclePlateSnapshot,
@@ -1649,22 +1650,137 @@ export class ClaimsService {
    * Mail module — this caller does not change.
    */
   private async _applyDecisionEmails(row: ClaimRow): Promise<void> {
-    const recipients = await this._collectSubmitRecipients(row);
-    if (recipients.length === 0) {
+    // Only terminal verification outcomes notify carrier + internal staff.
+    // Reklamacja and authorization transitions carry their own email flows.
+    const meta: Partial<Record<ClaimStatus, { label: string; tone: Tone }>> = {
+      ZAAKCEPTOWANO: { label: 'ZAAKCEPTOWANO', tone: 'success' },
+      ODRZUCONO: { label: 'ODRZUCONO', tone: 'danger' },
+    };
+    const decision = meta[row.status];
+    if (!decision) return;
+    if (!this.mailService) {
       this.logger.warn({
-        msg: 'claims.update.no_recipients',
+        msg: 'claims.decision.no_mail_service',
         nrZgl: row.nrZgl,
       });
       return;
     }
+
+    const targets = await this._collectDecisionTargets(row);
+    if (!targets.carrierEmail && targets.internalEmails.length === 0) {
+      this.logger.warn({
+        msg: 'claims.decision.no_recipients',
+        nrZgl: row.nrZgl,
+      });
+      return;
+    }
+
+    const appUrl = (
+      this.configService?.get('APP_URL', { infer: true }) ??
+      'http://localhost:3000'
+    ).replace(/\/$/, '');
+    const carrierName = await this._resolveCarrierDisplayName(row.carrierId);
+    const periodFrom = row.dateStart.toISOString().slice(0, 10);
+    const periodTo = row.dateEnd.toISOString().slice(0, 10);
+    // Approved payout is only meaningful for an acceptance.
+    const amount =
+      row.status === 'ZAAKCEPTOWANO'
+        ? (row.amountApproved ?? row.paymentEur).toFixed(2)
+        : undefined;
+    const nz = encodeURIComponent(row.nrZgl);
+    const warn = (msg: string) => (err: unknown) =>
+      this.logger.warn({
+        msg,
+        nrZgl: row.nrZgl,
+        error: err instanceof Error ? err.message : String(err),
+      });
+
+    if (targets.carrierEmail) {
+      void this.mailService
+        .enqueueCarrierDecision(targets.carrierEmail, {
+          nrZgl: row.nrZgl,
+          decisionLabel: decision.label,
+          tone: decision.tone,
+          vehiclePlate: row.vehiclePlateSnapshot,
+          periodFrom,
+          periodTo,
+          amount,
+          comment: row.comment ?? undefined,
+          deeplink: `${appUrl}/carrier/claims/${nz}`,
+        })
+        .catch(warn('carrier decision enqueue failed'));
+    }
+    for (const email of targets.internalEmails) {
+      void this.mailService
+        .enqueueInternalDecision(email, {
+          nrZgl: row.nrZgl,
+          decisionLabel: decision.label,
+          tone: decision.tone,
+          carrierName,
+          vehiclePlate: row.vehiclePlateSnapshot,
+          periodFrom,
+          periodTo,
+          amount,
+          comment: row.comment ?? undefined,
+          deeplink: `${appUrl}/employee/claims/${nz}`,
+        })
+        .catch(warn('internal decision enqueue failed'));
+    }
+
     this.logger.log({
-      msg: 'claims.update.notify',
+      msg: 'claims.decision.notify',
       nrZgl: row.nrZgl,
       status: row.status,
-      paymentEur: row.paymentEur,
-      amountApproved: row.amountApproved,
-      recipients: recipients.map((r) => maskEmail(r)),
+      carrier: targets.carrierEmail ? maskEmail(targets.carrierEmail) : null,
+      internal: targets.internalEmails.map((r) => maskEmail(r)),
     });
+  }
+
+  /**
+   * Split decision-email recipients into the carrier (gets `carrier-decision`)
+   * and the internal staff (get `internal-decision`): admin + opiekun +
+   * planista + lider + the company `wnioski@` mailbox (GMAIL_FROM). The
+   * carrier address is never double-sent as an internal recipient.
+   */
+  private async _collectDecisionTargets(
+    row: ClaimRow,
+  ): Promise<{ carrierEmail: string | null; internalEmails: string[] }> {
+    const internal = new Set<string>();
+
+    const admin = await this.prisma.tx.user.findFirst({
+      where: { role: 'admin', active: true, deletedAt: null },
+      select: { email: true },
+    });
+    if (admin?.email) internal.add(admin.email.toLowerCase());
+
+    const carrier = await this.prisma.tx.carrier.findFirst({
+      where: { id: row.carrierId },
+      select: {
+        user: { select: { email: true } },
+        opiekun: { select: { email: true } },
+      },
+    });
+    const carrierEmail =
+      carrier?.user.email && isValidEmail(carrier.user.email)
+        ? carrier.user.email.toLowerCase()
+        : null;
+    if (carrier?.opiekun?.email) internal.add(carrier.opiekun.email.toLowerCase());
+
+    if (row.vehicleId) {
+      const v = await this.prisma.tx.vehicle.findFirst({
+        where: { id: row.vehicleId },
+        select: { planner: { select: { email: true, liderEmail: true } } },
+      });
+      if (v?.planner?.email) internal.add(v.planner.email.toLowerCase());
+      if (v?.planner?.liderEmail)
+        internal.add(v.planner.liderEmail.toLowerCase());
+    }
+
+    const wnioski = this.configService?.get('GMAIL_FROM', { infer: true });
+    if (wnioski) internal.add(wnioski.toLowerCase());
+
+    if (carrierEmail) internal.delete(carrierEmail);
+    return { carrierEmail, internalEmails: [...internal].filter(isValidEmail) };
   }
 
   /**
@@ -1874,22 +1990,65 @@ export class ClaimsService {
    * side rather than trusting carrier-supplied IDs (defence in depth).
    */
   private async _notifySubmit(row: ClaimRow): Promise<void> {
-    const recipients = await this._collectSubmitRecipients(row);
-    if (recipients.length === 0) {
+    if (!this.mailService) {
+      this.logger.warn({
+        msg: 'claims.submit.no_mail_service',
+        nrZgl: row.nrZgl,
+      });
+      return;
+    }
+    const targets = await this._collectDecisionTargets(row);
+    if (!targets.carrierEmail && targets.internalEmails.length === 0) {
       this.logger.warn({ msg: 'claims.submit.no_recipients', nrZgl: row.nrZgl });
       return;
     }
-    // Phase 3 ships a structured log emit. `MailService.sendClaimSubmitted`
-    // lives in the mail module — we don't import it here directly today
-    // because the mail module's surface only exposes `send2faCode` until
-    // the templates land. Logging the intent so the audit trail is
-    // observable is sufficient for the brief's "fire-and-log" requirement
-    // and keeps the swap to BullMQ (Phase 9) localised.
+
+    const appUrl = (
+      this.configService?.get('APP_URL', { infer: true }) ??
+      'http://localhost:3000'
+    ).replace(/\/$/, '');
+    const carrierName = await this._resolveCarrierDisplayName(row.carrierId);
+    const periodFrom = row.dateStart.toISOString().slice(0, 10);
+    const periodTo = row.dateEnd.toISOString().slice(0, 10);
+    const amountRequested = row.amountRequested.toFixed(2);
+    const nz = encodeURIComponent(row.nrZgl);
+    const warn = (err: unknown) =>
+      this.logger.warn({
+        msg: 'claim submitted enqueue failed',
+        nrZgl: row.nrZgl,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    const base = {
+      nrZgl: row.nrZgl,
+      carrierName,
+      vehiclePlate: row.vehiclePlateSnapshot,
+      periodFrom,
+      periodTo,
+      amountRequested,
+    };
+
+    if (targets.carrierEmail) {
+      void this.mailService
+        .enqueueClaimSubmitted(targets.carrierEmail, {
+          ...base,
+          deeplink: `${appUrl}/carrier/claims/${nz}`,
+        })
+        .catch(warn);
+    }
+    for (const email of targets.internalEmails) {
+      void this.mailService
+        .enqueueClaimSubmitted(email, {
+          ...base,
+          deeplink: `${appUrl}/employee/claims/${nz}`,
+        })
+        .catch(warn);
+    }
+
     this.logger.log({
       msg: 'claims.submit.notify',
       nrZgl: row.nrZgl,
-      recipients: recipients.map((r) => maskEmail(r)),
-      paymentEur: row.paymentEur,
+      carrier: targets.carrierEmail ? maskEmail(targets.carrierEmail) : null,
+      internal: targets.internalEmails.map((r) => maskEmail(r)),
     });
   }
 
@@ -1907,42 +2066,6 @@ export class ClaimsService {
       nrZgl: row.nrZgl,
       recipients: recipients.map((r) => maskEmail(r)),
     });
-  }
-
-  private async _collectSubmitRecipients(row: ClaimRow): Promise<string[]> {
-    const set = new Set<string>();
-
-    // ADMIN — find the first user with role=admin and active=true.
-    const admin = await this.prisma.tx.user.findFirst({
-      where: { role: 'admin', active: true, deletedAt: null },
-      select: { email: true },
-    });
-    if (admin?.email) set.add(admin.email.toLowerCase());
-
-    // Carrier email lives on the underlying User row.
-    const carrier = await this.prisma.tx.carrier.findFirst({
-      where: { id: row.carrierId },
-      select: {
-        user: { select: { email: true } },
-        opiekun: { select: { email: true } },
-      },
-    });
-    if (carrier?.user.email) set.add(carrier.user.email.toLowerCase());
-    if (carrier?.opiekun?.email) set.add(carrier.opiekun.email.toLowerCase());
-
-    // Planista + lider — resolved via the vehicle's planner.
-    if (row.vehicleId) {
-      const v = await this.prisma.tx.vehicle.findFirst({
-        where: { id: row.vehicleId },
-        select: {
-          planner: { select: { email: true, liderEmail: true } },
-        },
-      });
-      if (v?.planner?.email) set.add(v.planner.email.toLowerCase());
-      if (v?.planner?.liderEmail) set.add(v.planner.liderEmail.toLowerCase());
-    }
-
-    return [...set].filter(isValidEmail);
   }
 
   private async _collectReklamacjaRecipients(
