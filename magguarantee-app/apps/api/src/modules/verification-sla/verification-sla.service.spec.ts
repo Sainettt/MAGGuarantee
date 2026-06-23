@@ -77,13 +77,13 @@ function makeHarness(opts: {
     findActivePracownikRecipients: findRecipients,
   } as unknown as VerificationSlaRepository;
 
-  const sendVerificationDigest = jest.fn(
+  const sendVerificationDigest: jest.Mock = jest.fn(
     opts.sendImpl ?? (async () => undefined),
   );
   // The cron path enqueues; with no BullMQ queue in the real service this
   // falls back to a sync send, so the fake's enqueue delegates to the send
   // mock — existing assertions on `sendVerificationDigest` stay valid.
-  const enqueueVerificationDigest = jest.fn(
+  const enqueueVerificationDigest: jest.Mock = jest.fn(
     (email: string, props: unknown) =>
       sendVerificationDigest(email, props) as Promise<void>,
   );
