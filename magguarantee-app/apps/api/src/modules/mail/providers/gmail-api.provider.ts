@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto';
 
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { google, gmail_v1 } from 'googleapis';
+// Standalone Gmail API package (~1 MB of types) instead of the `googleapis`
+// meta-package (~200 MB) — the latter forces tsc to materialise the entire
+// GoogleApis type graph and OOMs the build. Same surface for our use.
+import { gmail as createGmail, gmail_v1, auth as googleAuth } from '@googleapis/gmail';
 
 import type { Env } from '../../../config/env.schema';
 import type {
@@ -42,7 +45,7 @@ export class GmailApiProvider implements MailProvider {
       ? this.from.slice(this.from.indexOf('@') + 1)
       : 'magtrans.eu';
 
-    const auth = new google.auth.JWT({
+    const jwtClient = new googleAuth.JWT({
       email: config.get('GMAIL_CLIENT_EMAIL', { infer: true }) as string,
       // Private keys are stored with literal "\n" in single-line env vars;
       // restore real newlines so the PEM parses.
@@ -52,7 +55,7 @@ export class GmailApiProvider implements MailProvider {
       scopes: [GMAIL_SEND_SCOPE],
       subject: this.from, // Domain-Wide Delegation: impersonate the sender.
     });
-    this.gmail = google.gmail({ version: 'v1', auth });
+    this.gmail = createGmail({ version: 'v1', auth: jwtClient });
   }
 
   async send(args: SendMailArgs): Promise<SendMailResult> {
