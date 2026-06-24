@@ -182,6 +182,8 @@ function makeClaimRow(data: CreateClaimData): ClaimRow {
     authScreenshotUrl: null,
     attachments: [],
     delegationId: 'deleg-1',
+    delegationPlannedReturnAt: null,
+    delegationActualReturnAt: null,
     periodAdjustedByVerifier: false,
     autoRecalcState: 'none',
     createdAt: NOW,

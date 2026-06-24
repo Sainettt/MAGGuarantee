@@ -117,6 +117,8 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     authScreenshotUrl: null,
     attachments: [],
     delegationId: null,
+    delegationPlannedReturnAt: null,
+    delegationActualReturnAt: null,
     periodAdjustedByVerifier: false,
     autoRecalcState: 'none',
     createdAt: new Date('2026-04-21T08:00:00.000Z'),

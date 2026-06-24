@@ -1268,6 +1268,15 @@ export class ClaimsService {
         createdAt: a.createdAt.toISOString(),
       })),
       delegationId: row.delegationId,
+      // Linked-outing plan/fakt return embedded for the «POWIĄZANY WYJAZD»
+      // block. `planned` is date-only (`toDateString`); `actual` is a full ISO
+      // datetime — mirrors the Delegation DTO so the frontend formats identically.
+      delegationPlannedReturnAt: row.delegationPlannedReturnAt
+        ? toDateString(row.delegationPlannedReturnAt)
+        : null,
+      delegationActualReturnAt: row.delegationActualReturnAt
+        ? row.delegationActualReturnAt.toISOString()
+        : null,
       periodAdjustedByVerifier: row.periodAdjustedByVerifier,
       // Stored auto-recalc result — forwarded verbatim so the frontend reads
       // the outcome directly (no heuristic inference).

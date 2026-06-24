@@ -97,6 +97,13 @@ export interface ClaimRow {
    */
   delegationId: string | null;
   /**
+   * The linked outing's plan/fakt return (from the `delegation` relation),
+   * embedded so the DTO can surface them without a second query. Both `null`
+   * when there is no linked outing; `actual` `null` until `zjechal`.
+   */
+  delegationPlannedReturnAt: Date | null;
+  delegationActualReturnAt: Date | null;
+  /**
    * `true` once a pracownik PATCHed `dateStart`/`dateEnd` — the boundary that
    * disables the delegation auto-recalc.
    */
@@ -521,6 +528,11 @@ export class ClaimsRepository {
         },
       },
       vehicle: { select: { id: true, plateNumber: true } },
+      // Embed the linked outing's plan/fakt return so the pracownik ClaimModal
+      // renders them without a separate `GET /delegations/:id` (role-gated).
+      delegation: {
+        select: { plannedReturnAt: true, actualReturnAt: true },
+      },
       decidedBy: { select: { id: true, login: true, name: true } },
       attachments: {
         select: {
@@ -607,6 +619,8 @@ export class ClaimsRepository {
         createdAt: a.createdAt,
       })),
       delegationId: row.delegationId,
+      delegationPlannedReturnAt: row.delegation?.plannedReturnAt ?? null,
+      delegationActualReturnAt: row.delegation?.actualReturnAt ?? null,
       periodAdjustedByVerifier: row.periodAdjustedByVerifier,
       // Prisma enum default is `none`; the `?? 'none'` is a defensive sentinel
       // for the soft-delete extension's widened inferred type.
@@ -680,6 +694,10 @@ interface ClaimPrismaShape {
     createdAt: Date;
   }[];
   delegationId: string | null;
+  delegation?: {
+    plannedReturnAt: Date | null;
+    actualReturnAt: Date | null;
+  } | null;
   periodAdjustedByVerifier: boolean;
   autoRecalcState: ClaimAutoRecalcState | null;
   createdAt: Date;

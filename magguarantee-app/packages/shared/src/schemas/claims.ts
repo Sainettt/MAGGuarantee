@@ -530,6 +530,17 @@ export const ClaimDtoSchema = z.object({
    */
   delegationId: UuidSchema.nullable(),
   /**
+   * The linked outing's planned / actual return, EMBEDDED on the claim so the
+   * pracownik ClaimModal renders the «POWIĄZANY WYJAZD» plan/fakt without a
+   * separate `GET /delegations/:id` (which pracownik may not read per
+   * docs/03-roles.md). `null` when there is no linked outing (or, for
+   * `actual`, the outing hasn't transitioned to `zjechal` yet). `planned` is
+   * date-only (`YYYY-MM-DD`); `actual` is a full ISO datetime — mirrors the
+   * Delegation DTO shapes.
+   */
+  delegationPlannedReturnAt: IsoDateSchema.nullable(),
+  delegationActualReturnAt: IsoDateTimeSchema.nullable(),
+  /**
    * Set to `true` once a pracownik PATCHes `dateStart`/`dateEnd` — the boundary
    * that DISABLES the auto-recalc when the linked outing later transitions to
    * `zjechal` (a human-corrected period is never silently overwritten).

@@ -76,7 +76,6 @@ import {
   useUpdateClaim,
 } from '@/lib/hooks/useClaims';
 import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
-import { useDelegation } from '@/lib/hooks/useDelegations';
 import { cn } from '@/lib/utils';
 
 // ────────────────────────────────────────────────────────────────────
@@ -633,15 +632,14 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
 function LinkedDelegationRow({ claim }: { claim: ClaimDto }) {
   const t = useTranslations('employee.claims.modal.linkedDelegation');
   const tRecalc = useTranslations('claim.autoRecalc');
-  const delegationQ = useDelegation(claim.delegationId);
 
   if (!claim.delegationId) return null;
 
-  const delegation = delegationQ.data;
-  const plate =
-    delegation?.vehicle?.plateNumber ?? claim.vehiclePlateSnapshot ?? '—';
-  const planned = delegation?.plannedReturnAt ?? null;
-  const actual = delegation?.actualReturnAt ?? null;
+  // Plan/fakt return are embedded on the ClaimDto (no separate
+  // `GET /delegations/:id`, which pracownik may not read). See claims toDto.
+  const plate = claim.vehiclePlateSnapshot || '—';
+  const planned = claim.delegationPlannedReturnAt;
+  const actual = claim.delegationActualReturnAt;
 
   const recalcState = claim.autoRecalcState;
 
@@ -674,10 +672,7 @@ function LinkedDelegationRow({ claim }: { claim: ClaimDto }) {
         )}
       </div>
 
-      {delegationQ.isLoading ? (
-        <Skeleton className="h-4 w-48" />
-      ) : (
-        <dl className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-3 text-sm">
+      <dl className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-3 text-sm">
           <div className="flex items-baseline justify-between gap-2 sm:flex-col sm:items-start sm:justify-start">
             <dt className="text-[11px] font-medium uppercase tracking-wider text-text-sub">
               {t('vehicle')}
@@ -696,8 +691,7 @@ function LinkedDelegationRow({ claim }: { claim: ClaimDto }) {
             </dt>
             <dd className="text-text tabular-nums">{formatDateFull(actual)}</dd>
           </div>
-        </dl>
-      )}
+      </dl>
     </section>
   );
 }
