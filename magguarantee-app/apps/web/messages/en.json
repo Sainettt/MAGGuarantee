@@ -631,6 +631,7 @@
     "noTeam": "No leading team assigned",
     "inactiveBadge": "Inactive",
     "leadingTeamHeader": "LEADING TEAM",
+    "eksport": "Export",
     "codeAria": "Team code: {code}",
     "membersAria": "Dispatchers of team {code}"
   },

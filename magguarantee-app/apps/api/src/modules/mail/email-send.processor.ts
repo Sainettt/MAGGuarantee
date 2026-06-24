@@ -61,6 +61,12 @@ export class EmailSendProcessor extends WorkerHost {
       case 'verification-digest':
         await this.mail.sendVerificationDigest(data.email, data.props);
         return;
+      case 'delegation-announced':
+        await this.mail.sendDelegationAnnounced(data.email, data.props);
+        return;
+      case 'delegation-ready':
+        await this.mail.sendDelegationReady(data.email, data.props);
+        return;
       default: {
         // Exhaustiveness guard — a new template variant must add a case above
         // (TS flags this assignment if `EmailSendJobData` gains a member).

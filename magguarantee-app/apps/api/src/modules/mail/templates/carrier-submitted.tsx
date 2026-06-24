@@ -1,8 +1,11 @@
 /**
  * Phase 9 — "new claim submitted" notification. GAS analog: the `submitNewClaim`
- * notification. Sent to internal staff (and the carrier as a receipt) when a
- * carrier submits a new wniosek; lands in the same Gmail thread as later
- * decision emails (threadKey `wniosek-{nrZgl}`).
+ * notification. Sent to the carrier (as a receipt, no open button) and to
+ * internal staff when a carrier submits a new wniosek; lands in the same Gmail
+ * thread as later decision emails (threadKey `wniosek-{nrZgl}`).
+ *
+ * The "open wniosek" button (`deeplink`) is rendered ONLY when supplied — the
+ * caller passes it for admin/pracownik recipients only.
  */
 import { Section, Text } from '@react-email/components';
 import * as React from 'react';
@@ -16,10 +19,20 @@ export interface CarrierSubmittedProps {
   vehiclePlate: string;
   periodFrom: string;
   periodTo: string;
-  /** Amount requested in EUR, pre-formatted (two decimals). Omitted if N/A. */
+  /** Kilometres actually driven in the period. */
+  kmDriven?: string;
+  /** Kilometres guaranteed by contract for the period. */
+  kmGuaranteed?: string;
+  /** Shortfall (guaranteed − driven), the basis for compensation. */
+  kmShortfall?: string;
+  /** Worked days in the period (round(hours/24, 2)). */
+  drivenDays?: string;
+  /** Amount requested by the carrier in EUR, pre-formatted (two decimals). */
   amountRequested?: string;
-  /** Claim detail URL (already includes APP_URL). */
-  deeplink: string;
+  /** System-calculated compensation in EUR, pre-formatted (two decimals). */
+  paymentEur?: string;
+  /** Claim detail URL — present ONLY for staff who may open the wniosek. */
+  deeplink?: string;
 }
 
 export function CarrierSubmittedEmail({
@@ -28,7 +41,12 @@ export function CarrierSubmittedEmail({
   vehiclePlate,
   periodFrom,
   periodTo,
+  kmDriven,
+  kmGuaranteed,
+  kmShortfall,
+  drivenDays,
   amountRequested,
+  paymentEur,
   deeplink,
 }: CarrierSubmittedProps): React.ReactElement {
   return (
@@ -42,14 +60,36 @@ export function CarrierSubmittedEmail({
         <Field label="Okres">
           {periodFrom} → {periodTo}
         </Field>
+        {drivenDays ? (
+          <Field label="Dni przepracowane">{drivenDays}</Field>
+        ) : null}
+      </Section>
+
+      <Section style={sectionStyle}>
+        {kmGuaranteed ? (
+          <Field label="Kilometry gwarantowane">{kmGuaranteed} km</Field>
+        ) : null}
+        {kmDriven ? (
+          <Field label="Kilometry przejechane">{kmDriven} km</Field>
+        ) : null}
+        {kmShortfall ? (
+          <Field label="Niedobór kilometrów">{kmShortfall} km</Field>
+        ) : null}
+      </Section>
+
+      <Section style={sectionStyle}>
         {amountRequested ? (
           <Field label="Kwota wnioskowana">{amountRequested} EUR</Field>
+        ) : null}
+        {paymentEur ? (
+          <Field label="Wyliczona rekompensata">{paymentEur} EUR</Field>
         ) : null}
         <Text style={{ margin: '4px 0 0' }}>
           Wniosek oczekuje na weryfikację.
         </Text>
       </Section>
-      <Cta href={deeplink} label="Otwórz wniosek" />
+
+      {deeplink ? <Cta href={deeplink} label="Otwórz wniosek" /> : null}
     </MailLayout>
   );
 }

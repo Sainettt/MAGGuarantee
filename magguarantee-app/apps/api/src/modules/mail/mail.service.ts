@@ -45,6 +45,14 @@ import {
   type CarrierSubmittedProps,
 } from './templates/carrier-submitted';
 import {
+  DelegationAnnouncedEmail,
+  type DelegationAnnouncedProps,
+} from './templates/delegation-announced';
+import {
+  DelegationReadyEmail,
+  type DelegationReadyProps,
+} from './templates/delegation-ready';
+import {
   MAIL_PROVIDER_TOKEN,
   type MailProvider,
 } from './providers/mail-provider.interface';
@@ -490,8 +498,10 @@ export class MailService implements IMailService {
         '',
         'Administrator utworzył dla Ciebie konto w systemie MAGGuarantee.',
         `Login: ${props.loginName}`,
-        'Hasło tymczasowe przekaże Ci administrator; przy pierwszym logowaniu',
-        'system poprosi o ustawienie nowego hasła.',
+        `Hasło tymczasowe: ${props.temporaryPassword}`,
+        '',
+        'Przy pierwszym logowaniu system poprosi o ustawienie nowego hasła.',
+        'Nie udostępniaj tego hasła nikomu.',
         '',
         `Zaloguj się: ${props.loginUrl}`,
       ].join('\n'),
@@ -520,11 +530,13 @@ export class MailService implements IMailService {
       subject: 'Konto dezaktywowane — MAGGuarantee',
       html: await render(AccountDeactivatedEmail(props)),
       text: [
-        `Witaj ${props.name},`,
+        `Szanowny Użytkowniku ${props.name},`,
         '',
-        'Twoje konto w systemie MAGGuarantee zostało dezaktywowane.',
+        'Informujemy, że Twoje konto w systemie MAGGuarantee zostało',
+        'dezaktywowane. Dostęp do systemu został zablokowany.',
         `Login: ${props.loginName}`,
-        'Jeśli uważasz, że to pomyłka, skontaktuj się z administratorem.',
+        '',
+        'W sprawach formalnych prosimy o kontakt z administratorem.',
       ].join('\n'),
       template: 'account-deactivated',
       logMsg: 'account deactivated email sent',
@@ -660,12 +672,27 @@ export class MailService implements IMailService {
         '',
         `Pojazd: ${props.vehiclePlate}`,
         `Okres: ${props.periodFrom} → ${props.periodTo}`,
+        ...(props.drivenDays
+          ? [`Dni przepracowane: ${props.drivenDays}`]
+          : []),
+        ...(props.kmGuaranteed
+          ? [`Kilometry gwarantowane: ${props.kmGuaranteed} km`]
+          : []),
+        ...(props.kmDriven
+          ? [`Kilometry przejechane: ${props.kmDriven} km`]
+          : []),
+        ...(props.kmShortfall
+          ? [`Niedobór kilometrów: ${props.kmShortfall} km`]
+          : []),
         ...(props.amountRequested
           ? [`Kwota wnioskowana: ${props.amountRequested} EUR`]
           : []),
+        ...(props.paymentEur
+          ? [`Wyliczona rekompensata: ${props.paymentEur} EUR`]
+          : []),
         '',
         'Wniosek oczekuje na weryfikację.',
-        `Otwórz: ${props.deeplink}`,
+        ...(props.deeplink ? [`Otwórz: ${props.deeplink}`] : []),
       ].join('\n'),
       template: 'carrier-submitted',
       threadKey: `wniosek-${props.nrZgl}`,
@@ -703,6 +730,70 @@ export class MailService implements IMailService {
     return this._enqueueOr(
       { template: 'verification-digest', email, props },
       () => this.sendVerificationDigest(email, props),
+    );
+  }
+
+  // delegation-announced (new wyjazd) ─────────────────────
+  async sendDelegationAnnounced(
+    email: string,
+    props: DelegationAnnouncedProps,
+  ): Promise<void> {
+    await this._send({
+      to: email,
+      subject: `Nowy wyjazd: ${props.plateNumber}`,
+      html: await render(DelegationAnnouncedEmail(props)),
+      text: [
+        props.forCarrier
+          ? 'Twój wyjazd został zarejestrowany w systemie MAGGuarantee.'
+          : `Przewoźnik ${props.carrierName} zgłosił nowy wyjazd.`,
+        '',
+        `Pojazd: ${props.plateNumber}`,
+        `Kierowca: ${props.driverName}`,
+        `Wyjazd: ${props.departure}`,
+        `Planowany powrót: ${props.plannedReturn}`,
+      ].join('\n'),
+      template: 'delegation-announced',
+      logMsg: 'delegation announced email sent',
+    });
+  }
+
+  enqueueDelegationAnnounced(
+    email: string,
+    props: DelegationAnnouncedProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'delegation-announced', email, props },
+      () => this.sendDelegationAnnounced(email, props),
+    );
+  }
+
+  // delegation-ready (eksport → gotowy) ────────────────────
+  async sendDelegationReady(
+    email: string,
+    props: DelegationReadyProps,
+  ): Promise<void> {
+    await this._send({
+      to: email,
+      subject: `Pojazd gotowy: ${props.plateNumber}`,
+      html: await render(DelegationReadyEmail(props)),
+      text: [
+        `Witaj ${props.carrierName},`,
+        '',
+        `Pojazd ${props.plateNumber} został oznaczony jako gotowy do wyjazdu.`,
+        `Wyjazd: ${props.departure}`,
+      ].join('\n'),
+      template: 'delegation-ready',
+      logMsg: 'delegation ready email sent',
+    });
+  }
+
+  enqueueDelegationReady(
+    email: string,
+    props: DelegationReadyProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'delegation-ready', email, props },
+      () => this.sendDelegationReady(email, props),
     );
   }
 

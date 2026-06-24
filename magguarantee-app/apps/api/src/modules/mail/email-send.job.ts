@@ -13,6 +13,8 @@ import type { InternalDecisionProps } from './templates/internal-decision';
 import type { CarrierSubmittedProps } from './templates/carrier-submitted';
 import type { AuthorizationRequestProps } from './templates/authorization-request';
 import type { VerificationDigestProps } from './templates/verification-digest';
+import type { DelegationAnnouncedProps } from './templates/delegation-announced';
+import type { DelegationReadyProps } from './templates/delegation-ready';
 
 /** BullMQ job name within the `email-send` queue. */
 export const EMAIL_SEND_JOB = 'send' as const;
@@ -81,6 +83,18 @@ export interface VerificationDigestEmailJob {
   props: VerificationDigestProps;
 }
 
+export interface DelegationAnnouncedEmailJob {
+  template: 'delegation-announced';
+  email: string;
+  props: DelegationAnnouncedProps;
+}
+
+export interface DelegationReadyEmailJob {
+  template: 'delegation-ready';
+  email: string;
+  props: DelegationReadyProps;
+}
+
 /** Discriminated union of all `email-send` job payloads. */
 export type EmailSendJobData =
   | TwoFactorCodeEmailJob
@@ -92,4 +106,6 @@ export type EmailSendJobData =
   | InternalDecisionEmailJob
   | CarrierSubmittedEmailJob
   | AuthorizationRequestEmailJob
-  | VerificationDigestEmailJob;
+  | VerificationDigestEmailJob
+  | DelegationAnnouncedEmailJob
+  | DelegationReadyEmailJob;

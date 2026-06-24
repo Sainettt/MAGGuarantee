@@ -171,6 +171,7 @@ model User {
   // activity
   reportedDelegations        Delegation[]        @relation("DelegationReporter")
   verifiedDelegations        Delegation[]        @relation("DelegationVerifier")
+  readiedDelegations         Delegation[]        @relation("DelegationReadier")
   authoredClaims             Claim[]             @relation("ClaimDecidedBy")
   uploadedVehicleAttachments VehicleAttachment[]
   uploadedDriverAttachments  DriverAttachment[]
@@ -710,6 +711,13 @@ model Delegation {
   verifiedById String?   @db.Uuid
   verifiedBy   User?     @relation("DelegationVerifier", fields: [verifiedById], references: [id])
   verifiedAt   DateTime?
+
+  // Eksport who marked the outing `gotowy` (ready). Surfaced in the modal as
+  // the "zweryfikowany" actor — in MAGTRANS the export coordinator readying the
+  // load IS the verification step. Stamped in `markReady` on the forward flip.
+  readyById String?   @db.Uuid
+  readyBy   User?     @relation("DelegationReadier", fields: [readyById], references: [id])
+  readyAt   DateTime?
 
   notes String?
 

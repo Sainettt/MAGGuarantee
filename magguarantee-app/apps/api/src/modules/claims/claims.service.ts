@@ -929,7 +929,9 @@ export class ClaimsService {
    * the FK chain is broken — defensive only; should never happen in practice.
    */
   private async _resolveCarrierDisplayName(carrierId: string): Promise<string> {
-    const row = await this.prisma.tx.carrier.findFirst({
+    // Root client, not the ambient tx — see `_collectClaimRecipients`: this is
+    // called from fire-and-forget notification paths after the tx committed.
+    const row = await this.prisma.client.carrier.findFirst({
       where: { id: carrierId },
       select: { user: { select: { login: true, name: true } } },
     });
@@ -1666,7 +1668,7 @@ export class ClaimsService {
       return;
     }
 
-    const targets = await this._collectDecisionTargets(row);
+    const targets = await this._collectClaimRecipients(row);
     if (!targets.carrierEmail && targets.internalEmails.length === 0) {
       this.logger.warn({
         msg: 'claims.decision.no_recipients',
@@ -1737,23 +1739,48 @@ export class ClaimsService {
   }
 
   /**
-   * Split decision-email recipients into the carrier (gets `carrier-decision`)
-   * and the internal staff (get `internal-decision`): admin + opiekun +
-   * planista + lider + the company `wnioski@` mailbox (GMAIL_FROM). The
-   * carrier address is never double-sent as an internal recipient.
+   * Resolve recipients for claim notifications (submit + decision):
+   *  - `carrierEmail`   — the claim's carrier (gets `carrier-*` emails).
+   *  - `internalEmails` — admin + pracownik + opiekun + planista + lider +
+   *    the company `wnioski@` mailbox (GMAIL_FROM). The carrier address is
+   *    never double-sent as an internal recipient.
+   *  - `openerEmails`   — subset of internal who may OPEN a wniosek
+   *    (admin + pracownik only). Used to gate the deeplink button in the
+   *    carrier-submitted email so non-staff recipients don't get an "open"
+   *    link they aren't allowed to follow.
+   *
+   * IMPORTANT: reads via `this.prisma.client` (the root client), NOT
+   * `this.prisma.tx`. These run in a fire-and-forget continuation AFTER the
+   * caller's ambient `@Audit` transaction has committed; the ambient tx
+   * client is closed by then, so reading through it intermittently throws
+   * (that was the cause of decision emails silently failing).
    */
-  private async _collectDecisionTargets(
-    row: ClaimRow,
-  ): Promise<{ carrierEmail: string | null; internalEmails: string[] }> {
+  private async _collectClaimRecipients(row: ClaimRow): Promise<{
+    carrierEmail: string | null;
+    internalEmails: string[];
+    openerEmails: Set<string>;
+  }> {
     const internal = new Set<string>();
+    const openerEmails = new Set<string>();
 
-    const admin = await this.prisma.tx.user.findFirst({
-      where: { role: 'admin', active: true, deletedAt: null },
+    // admin + pracownik — the staff who verify wnioski (and may open them).
+    const staff = await this.prisma.client.user.findMany({
+      where: {
+        role: { in: ['admin', 'pracownik'] },
+        active: true,
+        deletedAt: null,
+      },
       select: { email: true },
     });
-    if (admin?.email) internal.add(admin.email.toLowerCase());
+    for (const u of staff) {
+      if (u.email && isValidEmail(u.email)) {
+        const e = u.email.toLowerCase();
+        internal.add(e);
+        openerEmails.add(e);
+      }
+    }
 
-    const carrier = await this.prisma.tx.carrier.findFirst({
+    const carrier = await this.prisma.client.carrier.findFirst({
       where: { id: row.carrierId },
       select: {
         user: { select: { email: true } },
@@ -1767,7 +1794,7 @@ export class ClaimsService {
     if (carrier?.opiekun?.email) internal.add(carrier.opiekun.email.toLowerCase());
 
     if (row.vehicleId) {
-      const v = await this.prisma.tx.vehicle.findFirst({
+      const v = await this.prisma.client.vehicle.findFirst({
         where: { id: row.vehicleId },
         select: { planner: { select: { email: true, liderEmail: true } } },
       });
@@ -1779,8 +1806,15 @@ export class ClaimsService {
     const wnioski = this.configService?.get('GMAIL_FROM', { infer: true });
     if (wnioski) internal.add(wnioski.toLowerCase());
 
-    if (carrierEmail) internal.delete(carrierEmail);
-    return { carrierEmail, internalEmails: [...internal].filter(isValidEmail) };
+    if (carrierEmail) {
+      internal.delete(carrierEmail);
+      openerEmails.delete(carrierEmail);
+    }
+    return {
+      carrierEmail,
+      internalEmails: [...internal].filter(isValidEmail),
+      openerEmails,
+    };
   }
 
   /**
@@ -1997,7 +2031,7 @@ export class ClaimsService {
       });
       return;
     }
-    const targets = await this._collectDecisionTargets(row);
+    const targets = await this._collectClaimRecipients(row);
     if (!targets.carrierEmail && targets.internalEmails.length === 0) {
       this.logger.warn({ msg: 'claims.submit.no_recipients', nrZgl: row.nrZgl });
       return;
@@ -2008,9 +2042,6 @@ export class ClaimsService {
       'http://localhost:3000'
     ).replace(/\/$/, '');
     const carrierName = await this._resolveCarrierDisplayName(row.carrierId);
-    const periodFrom = row.dateStart.toISOString().slice(0, 10);
-    const periodTo = row.dateEnd.toISOString().slice(0, 10);
-    const amountRequested = row.amountRequested.toFixed(2);
     const nz = encodeURIComponent(row.nrZgl);
     const warn = (err: unknown) =>
       this.logger.warn({
@@ -2018,28 +2049,39 @@ export class ClaimsService {
         nrZgl: row.nrZgl,
         error: err instanceof Error ? err.message : String(err),
       });
+    // Shared content. NO deeplink in `base` — the "open wniosek" button is
+    // added per-recipient only for admin/pracownik (openerEmails), since other
+    // recipients are not allowed to open a wniosek.
     const base = {
       nrZgl: row.nrZgl,
       carrierName,
       vehiclePlate: row.vehiclePlateSnapshot,
-      periodFrom,
-      periodTo,
-      amountRequested,
+      periodFrom: row.dateStart.toISOString().slice(0, 10),
+      periodTo: row.dateEnd.toISOString().slice(0, 10),
+      kmDriven: row.mileage.toFixed(0),
+      kmGuaranteed: row.kmGuaranteed.toFixed(0),
+      kmShortfall: row.kmDifference.toFixed(0),
+      drivenDays: row.drivenDays.toFixed(2),
+      amountRequested: row.amountRequested.toFixed(2),
+      paymentEur: row.paymentEur.toFixed(2),
     };
+    const employeeDeeplink = `${appUrl}/employee/claims/${nz}`;
 
+    // Carrier gets a receipt — no open button (only staff may open wnioski).
     if (targets.carrierEmail) {
       void this.mailService
-        .enqueueClaimSubmitted(targets.carrierEmail, {
-          ...base,
-          deeplink: `${appUrl}/carrier/claims/${nz}`,
-        })
+        .enqueueClaimSubmitted(targets.carrierEmail, { ...base })
         .catch(warn);
     }
     for (const email of targets.internalEmails) {
       void this.mailService
         .enqueueClaimSubmitted(email, {
           ...base,
-          deeplink: `${appUrl}/employee/claims/${nz}`,
+          // Button only for admin/pracownik; opiekun/planista/lider/wnioski@
+          // are notified but cannot open the wniosek.
+          ...(targets.openerEmails.has(email)
+            ? { deeplink: employeeDeeplink }
+            : {}),
         })
         .catch(warn);
     }
@@ -2072,13 +2114,15 @@ export class ClaimsService {
     row: ClaimRow,
   ): Promise<string[]> {
     const set = new Set<string>();
-    const admin = await this.prisma.tx.user.findFirst({
+    // Root client, not the ambient tx — fire-and-forget post-commit read
+    // (see `_collectClaimRecipients`).
+    const admin = await this.prisma.client.user.findFirst({
       where: { role: 'admin', active: true, deletedAt: null },
       select: { email: true },
     });
     if (admin?.email) set.add(admin.email.toLowerCase());
 
-    const carrier = await this.prisma.tx.carrier.findFirst({
+    const carrier = await this.prisma.client.carrier.findFirst({
       where: { id: row.carrierId },
       select: { user: { select: { email: true } } },
     });

@@ -148,6 +148,7 @@ export class UsersService {
         this.mailService!.enqueueAccountCreated(row.email, {
           name: row.name || row.login,
           loginName: row.login,
+          temporaryPassword: plain,
           loginUrl: this.loginUrl(),
         }),
       'created',

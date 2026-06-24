@@ -631,6 +631,7 @@
     "noTeam": "Brak zespołu prowadzącego",
     "inactiveBadge": "Nieaktywny",
     "leadingTeamHeader": "ZESPÓŁ PROWADZĄCY",
+    "eksport": "Eksport",
     "codeAria": "Kod zespołu: {code}",
     "membersAria": "Dyspozytorzy zespołu {code}"
   },

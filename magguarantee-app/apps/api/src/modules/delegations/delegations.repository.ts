@@ -71,6 +71,9 @@ export interface DelegationRow {
   verifiedById: string | null;
   verifiedBy: { id: string; login: string; name: string | null } | null;
   verifiedAt: Date | null;
+  readyById: string | null;
+  readyBy: { id: string; login: string; name: string | null } | null;
+  readyAt: Date | null;
 
   notes: string | null;
 
@@ -178,6 +181,9 @@ export interface UpdateDelegationData {
    */
   verifiedById?: string | null;
   verifiedAt?: Date | null;
+  /** Eksport who marked the outing `gotowy` (stamped in markReady). */
+  readyById?: string | null;
+  readyAt?: Date | null;
 }
 
 @Injectable()
@@ -287,6 +293,8 @@ export class DelegationsRepository {
         actualReturnAt: data.actualReturnAt,
         verifiedById: data.verifiedById,
         verifiedAt: data.verifiedAt,
+        readyById: data.readyById,
+        readyAt: data.readyAt,
       },
       include: this.includeShape(),
     });
@@ -332,6 +340,7 @@ export class DelegationsRepository {
       },
       reportedBy: { select: { id: true, login: true, name: true } },
       verifiedBy: { select: { id: true, login: true, name: true } },
+      readyBy: { select: { id: true, login: true, name: true } },
       // Phase 7 REWORK (2026-06-20 #4) — the linked wniosek (id only). `@unique`
       // FK on the Claim side, so this is at most one row.
       claim: { select: { id: true } },
@@ -395,6 +404,9 @@ export class DelegationsRepository {
       verifiedById: row.verifiedById,
       verifiedBy: row.verifiedBy ?? null,
       verifiedAt: row.verifiedAt,
+      readyById: row.readyById,
+      readyBy: row.readyBy ?? null,
+      readyAt: row.readyAt,
       notes: row.notes,
       claimId: row.claim?.id ?? null,
       createdAt: row.createdAt,
@@ -445,6 +457,9 @@ interface DelegationPrismaShape {
   verifiedById: string | null;
   verifiedBy?: { id: string; login: string; name: string | null } | null;
   verifiedAt: Date | null;
+  readyById: string | null;
+  readyBy?: { id: string; login: string; name: string | null } | null;
+  readyAt: Date | null;
   notes: string | null;
   claim?: { id: string } | null;
   createdAt: Date;

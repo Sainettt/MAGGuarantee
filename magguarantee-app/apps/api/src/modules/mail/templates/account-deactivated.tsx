@@ -24,14 +24,14 @@ export function AccountDeactivatedEmail({
       tone="danger"
     >
       <Section style={sectionStyle}>
-        <Text style={{ margin: '0 0 12px' }}>Witaj {name},</Text>
+        <Text style={{ margin: '0 0 12px' }}>Szanowny Użytkowniku {name},</Text>
         <Text style={{ margin: '0 0 12px' }}>
-          Twoje konto w systemie MAGGuarantee zostało dezaktywowane. Logowanie
-          jest tymczasowo niemożliwe.
+          Informujemy, że Twoje konto w systemie MAGGuarantee zostało
+          dezaktywowane. Dostęp do systemu został zablokowany.
         </Text>
         <Field label="Login">{loginName}</Field>
         <Text style={{ margin: 0 }}>
-          Jeśli uważasz, że to pomyłka, skontaktuj się z administratorem.
+          W sprawach formalnych prosimy o kontakt z administratorem.
         </Text>
       </Section>
     </MailLayout>

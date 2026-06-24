@@ -23,9 +23,14 @@ import {
   type SubmitDelegationDto,
 } from '@magguarantee/shared';
 
+import { ConfigService } from '@nestjs/config';
+
+import type { Env } from '../../config/env.schema';
 import { ClaimsService } from '../claims/claims.service';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { CarrierReadinessService } from '../carriers/carrier-readiness.service';
+import { MailService } from '../mail/mail.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { CarriersRepository } from '../carriers/carriers.repository';
 import { DriversRepository } from '../drivers/drivers.repository';
 import { ChatNotifierService } from '../integrations/chat/chat-notifier.service';
@@ -86,6 +91,12 @@ export class DelegationsService {
     @Optional()
     @Inject(forwardRef(() => ClaimsService))
     private readonly claimsService?: ClaimsService,
+    // Phase 9 follow-up — outgoing email on new wyjazd / ready. All optional so
+    // the existing positional service-test fakes keep compiling; notifications
+    // no-op when any is absent.
+    @Optional() private readonly mailService?: MailService,
+    @Optional() private readonly prisma?: PrismaService,
+    @Optional() private readonly configService?: ConfigService<Env, true>,
   ) {}
 
   // ── Submit ──────────────────────────────────────────────
@@ -141,7 +152,120 @@ export class DelegationsService {
       });
     }
 
+    // New-wyjazd email — carrier (confirmation) + opiekun (heads-up).
+    // Fire-and-log, off the request path; never breaks add().
+    void this._notifyWyjazd('announced', row);
+
     return this.toDto(row);
+  }
+
+  /**
+   * Outgoing wyjazd email. `announced` → carrier + opiekun; `ready` → carrier
+   * only. Fire-and-log: a mail hiccup must never break a status transition.
+   * Reads emails via `this.prisma.client` (root client) since this runs in a
+   * fire-and-forget continuation, possibly after an ambient `@Audit` tx
+   * committed. No-op when MailService / Prisma are not wired (unit tests).
+   */
+  private async _notifyWyjazd(
+    kind: 'announced' | 'ready',
+    row: DelegationRow,
+  ): Promise<void> {
+    if (!this.mailService || !this.prisma) return;
+    try {
+      const carrier = await this.prisma.client.carrier.findFirst({
+        where: { id: row.carrierId },
+        select: {
+          user: { select: { email: true, name: true, login: true } },
+          opiekun: { select: { email: true } },
+        },
+      });
+      const carrierEmail = carrier?.user.email ?? null;
+      const carrierName =
+        carrier?.user.name || carrier?.user.login || 'Przewoźnik';
+      const plateNumber = row.vehicle?.plateNumber ?? '—';
+      const driverName =
+        row.driverNameSnapshot ??
+        (row.driver
+          ? `${row.driver.firstName} ${row.driver.lastName}`
+          : '—');
+      const departure = this._fmtDeparture(row);
+      const warn = (err: unknown) =>
+        this.logger.warn({
+          msg: 'wyjazd email enqueue failed',
+          delegationId: row.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+
+      if (kind === 'announced') {
+        const plannedReturn = this._fmtPlannedReturn(row);
+        if (carrierEmail) {
+          void this.mailService
+            .enqueueDelegationAnnounced(carrierEmail, {
+              forCarrier: true,
+              carrierName,
+              plateNumber,
+              driverName,
+              departure,
+              plannedReturn,
+            })
+            .catch(warn);
+        }
+        if (carrier?.opiekun?.email) {
+          void this.mailService
+            .enqueueDelegationAnnounced(carrier.opiekun.email, {
+              forCarrier: false,
+              carrierName,
+              plateNumber,
+              driverName,
+              departure,
+              plannedReturn,
+            })
+            .catch(warn);
+        }
+      } else if (carrierEmail) {
+        void this.mailService
+          .enqueueDelegationReady(carrierEmail, {
+            carrierName,
+            plateNumber,
+            departure,
+          })
+          .catch(warn);
+      }
+    } catch (err) {
+      this.logger.warn({
+        msg: 'wyjazd notification failed',
+        delegationId: row.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  /** Departure formatted in Europe/Warsaw (real local departure time). */
+  private _fmtDeparture(row: DelegationRow): string {
+    const dt = new Intl.DateTimeFormat('pl-PL', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Europe/Warsaw',
+    }).format(row.departureAt);
+    return `${dt} · ${row.departureCountry} ${row.departurePostalCode}`;
+  }
+
+  /**
+   * Planned return formatted as date-only in UTC. `plannedReturnAt` is stored
+   * as UTC midnight (`@db.Date`); formatting in UTC avoids the local-timezone
+   * shift that would otherwise show the previous/next day.
+   */
+  private _fmtPlannedReturn(row: DelegationRow): string {
+    const d = new Intl.DateTimeFormat('pl-PL', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      timeZone: 'UTC',
+    }).format(row.plannedReturnAt);
+    return `${d} · ${row.returnCountry} ${row.returnPostalCode}`;
   }
 
   // ── Cancel ──────────────────────────────────────────────
@@ -218,7 +342,6 @@ export class DelegationsService {
     id: string,
     dto: MarkReadyDto,
   ): Promise<DelegationDto> {
-    void user;
     const row = await this.delegations.findById(id);
     if (!row) throw new NotFoundException('Delegacja nie znaleziona');
 
@@ -228,7 +351,12 @@ export class DelegationsService {
     const updated = await this.delegations.update(row.id, {
       status: target,
       notes: dto.note ? appendNote(row.notes, dto.note) : row.notes,
+      // Stamp the eksport who readied the load — forward flip only. Surfaced in
+      // the modal as the "zweryfikowany" actor (see schema / docs).
+      ...(dto.rollback ? {} : { readyById: user.sub, readyAt: new Date() }),
     });
+    // Notify the carrier the vehicle is ready (forward flip only; fire-and-log).
+    if (!dto.rollback) void this._notifyWyjazd('ready', updated);
     return this.toDto(updated);
   }
 
@@ -253,6 +381,9 @@ export class DelegationsService {
       verifiedAt: new Date(),
       notes: dto.note ? appendNote(row.notes, dto.note) : row.notes,
     });
+    // FUTURE (no email yet): once the weryfikator captures an actual departure
+    // date here, send a "pojazd w trasie od <data>" email to the carrier /
+    // opiekun. Hook would be `void this._notifyWyjazd('in-transit', updated)`.
     return this.toDto(updated);
   }
 
@@ -438,6 +569,9 @@ export class DelegationsService {
       verifiedById: row.verifiedById,
       verifiedBy: row.verifiedBy,
       verifiedAt: row.verifiedAt ? row.verifiedAt.toISOString() : null,
+      readyById: row.readyById,
+      readyBy: row.readyBy,
+      readyAt: row.readyAt ? row.readyAt.toISOString() : null,
       notes: row.notes,
       claimId: row.claimId,
       createdAt: row.createdAt.toISOString(),
