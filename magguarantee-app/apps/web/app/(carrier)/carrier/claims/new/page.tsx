@@ -64,6 +64,11 @@ const CLIENT_MAX_PERIOD_DAYS = 90;
 // `.strict()`. Phase 7.10: `dateStart`/`dateEnd` were REMOVED (period is now
 // server-derived from the outing) and `delegationId` was ADDED. A stale draft
 // carrying the old `dateStart`/`dateEnd` keys would otherwise break submit.
+// NOTE: `mileage` is deliberately NOT persisted. It is server-derived
+// (`Σ VehicleDailyKm`, live) and only becomes an override when the carrier
+// types a value in THIS session. Persisting it would resurrect a stale override
+// across reloads/redeploys — the server would then echo the old number forever
+// instead of recomputing from the weryfikator's latest km (the §7.10 bug).
 const FORM_ALLOWED_KEYS = [
   'vehicleId',
   'delegationId',
@@ -71,7 +76,6 @@ const FORM_ALLOWED_KEYS = [
   'driverId',
   'timeFrom',
   'timeTo',
-  'mileage',
   'comment',
   'attachmentIds',
 ] as const;
@@ -204,6 +208,11 @@ export default function NewClaimPage() {
     [delegations, watched.delegationId],
   );
 
+  // Did the carrier MANUALLY override the mileage this session? Only then do we
+  // send `mileage` to the preview/submit; otherwise the field mirrors the live
+  // server `Σ VehicleDailyKm` so a weryfikator km edit is reflected on reopen.
+  const [mileageOverridden, setMileageOverridden] = useState(false);
+
   // ── Prefill vehicle + timeFrom from the chosen outing ────────────────
   // Picking an outing pre-selects its vehicle (the wniosek is against that
   // vehicle) and seeds `timeFrom` from the outing's `departureAt` time — both
@@ -211,6 +220,9 @@ export default function NewClaimPage() {
   // clobbered.
   useEffect(() => {
     if (!selectedDelegation) return;
+    // A new outing → drop any prior manual override so the field re-syncs to
+    // the new outing's live server mileage.
+    setMileageOverridden(false);
     if (!form.getValues('vehicleId')) {
       form.setValue('vehicleId', selectedDelegation.vehicleId, {
         shouldDirty: false,
@@ -235,7 +247,11 @@ export default function NewClaimPage() {
     if (!watched.vehicleId || !watched.delegationId) {
       return { previewBody: null, emptyReason: 'incomplete' };
     }
-    const hasMileage =
+    // Only a MANUAL override is sent. An auto-prefilled value must NOT echo back
+    // as `mileage`, or the server's `_resolveMileage` would short-circuit on the
+    // explicit value and stop summing VehicleDailyKm live (the §7.10 stale bug).
+    const hasOverride =
+      mileageOverridden &&
       typeof watched.mileage === 'number' &&
       !Number.isNaN(watched.mileage) &&
       watched.mileage > 0;
@@ -245,7 +261,7 @@ export default function NewClaimPage() {
         delegationId: watched.delegationId,
         timeFrom: watched.timeFrom || undefined,
         timeTo: watched.timeTo || undefined,
-        mileage: hasMileage ? watched.mileage : undefined,
+        mileage: hasOverride ? watched.mileage : undefined,
         hoursAdjusted: 0,
       },
       emptyReason: undefined,
@@ -256,6 +272,7 @@ export default function NewClaimPage() {
     watched.mileage,
     watched.timeFrom,
     watched.timeTo,
+    mileageOverridden,
   ]);
 
   const debouncedPreviewBody = useDebouncedValue(previewBody, 400);
@@ -280,17 +297,22 @@ export default function NewClaimPage() {
   }, [notYetReturned, watched.delegationId]);
 
   // ── Mileage prefill from the preview ─────────────────────────────────
+  // Keep the field MIRRORING the live server mileage (`Σ VehicleDailyKm`) until
+  // the carrier overrides. Re-runs whenever the server value changes (e.g. a
+  // weryfikator km edit on reopen), so the prefill never goes stale. The
+  // equality guard prevents a setValue→watch→recompute loop. A manual override
+  // (`mileageOverridden`) freezes the field at the carrier's number.
   const previewMileage = previewQ.data?.mileage;
   useEffect(() => {
+    if (mileageOverridden) return;
     if (typeof previewMileage !== 'number' || previewMileage <= 0) return;
-    const current = form.getValues('mileage');
-    if (typeof current === 'number' && current > 0) return;
+    if (form.getValues('mileage') === previewMileage) return;
     form.setValue('mileage', previewMileage, {
       shouldDirty: false,
       shouldValidate: false,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewMileage]);
+  }, [previewMileage, mileageOverridden]);
 
   // ── Duration gate (mirror of api-side `canSubmitByDuration`) ──────────
   const previewTotalDays = previewQ.data?.breakdown?.totalDays;
@@ -723,6 +745,13 @@ export default function NewClaimPage() {
                       {...form.register('mileage', {
                         setValueAs: (v) =>
                           v === '' || v === null ? 0 : Number(v),
+                        // Manual typing → override (server stops auto-prefilling
+                        // and sends this number). Clearing to empty/0 → drop the
+                        // override so the field re-syncs to the live server sum.
+                        onChange: (e) => {
+                          const raw = (e.target as HTMLInputElement).value;
+                          setMileageOverridden(raw !== '' && Number(raw) > 0);
+                        },
                       })}
                     />
                   </FormField>
@@ -768,6 +797,7 @@ export default function NewClaimPage() {
                   draft.clear();
                   form.reset(getDefaults());
                   setAcknowledged(false);
+                  setMileageOverridden(false);
                 }}
                 disabled={submitting}
               >
