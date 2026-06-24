@@ -160,6 +160,8 @@ export function WeryfikatorDelegationsView() {
           }}
           plate={plate}
           plannedReturnAt={dialog.delegation.plannedReturnAt}
+          vehicleId={dialog.delegation.vehicle?.id ?? null}
+          departureAt={dialog.delegation.departureAt}
           title={tActions('returnedTitle')}
           description={tActions('returnedDescription', { plate })}
           dateLabel={tActions('returnedDateLabel')}
@@ -167,6 +169,9 @@ export function WeryfikatorDelegationsView() {
           cancelLabel={tActions('cancel')}
           requiredMsg={tActions('returnedRequired')}
           futureMsg={tActions('returnedFuture')}
+          incompleteWarning={(count) =>
+            tActions('returnedIncompleteKm', { count })
+          }
           onConfirm={async (actualReturnAt) => {
             await returnedM.mutateAsync({
               id: dialog.delegation.id,

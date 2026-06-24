@@ -1705,6 +1705,7 @@
         "returnedDateLabel": "Return date",
         "returnedRequired": "Enter the return date",
         "returnedFuture": "The return date cannot be in the future",
+        "returnedIncompleteKm": "Warning: {count} {count, plural, one {day} other {days}} of this trip {count, plural, one {has} other {have}} no km entered on the board. Make sure all days are filled in before marking as returned.",
         "cancel": "Cancel",
         "inTransitToast": "Marked as in transit",
         "returnedToast": "Marked as returned",

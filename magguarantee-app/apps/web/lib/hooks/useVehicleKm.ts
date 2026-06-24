@@ -34,8 +34,22 @@ import {
   getVehicleKmReport,
   setVehicleDailyKm,
 } from '@/lib/api/vehicles';
+import { CLAIMS_KEY } from './useClaims';
 
 export const VEHICLE_KM_KEY = ['vehicles', 'daily-km'] as const;
+
+/**
+ * The wniosek live-preview (`GET /claims/preview` — both the new-claim form and
+ * the verification modal) resolves its mileage as `Σ VehicleDailyKm.drove` over
+ * the period, LIVE on the server. The preview query caches the response for 60 s
+ * keyed on its request body, so a weryfikator km-board edit would otherwise be
+ * invisible to a preview that was already fetched — the modal would re-prefill
+ * the STALE km. Marking every `[...CLAIMS_KEY, 'preview', …]` query stale here
+ * (prefix-matches both `useClaimPreview` and `useClaimPreviewExisting`) forces a
+ * refetch the next time a preview mounts. Inactive previews are only flagged
+ * stale (no refetch) while the verifier is on the board, so this stays cheap.
+ */
+const CLAIMS_PREVIEW_KEY = [...CLAIMS_KEY, 'preview'] as const;
 
 /** Stable key for one weekly board/report fetch (keyed by resolved query). */
 function boardKey(scope: 'board' | 'report', query: KmBoardQuery) {
@@ -121,6 +135,8 @@ export function useSetVehicleDailyKm(
       qc.invalidateQueries({
         queryKey: [...VEHICLE_KM_KEY, 'history', vars.id],
       });
+      // The km sum feeds the wniosek preview — drop its stale cache too.
+      qc.invalidateQueries({ queryKey: CLAIMS_PREVIEW_KEY });
       opts?.onSettled?.(data, err, vars, ...rest);
     },
   });
@@ -185,6 +201,8 @@ export function useClearVehicleDailyKm(
       qc.invalidateQueries({
         queryKey: [...VEHICLE_KM_KEY, 'history', vars.id],
       });
+      // The km sum feeds the wniosek preview — drop its stale cache too.
+      qc.invalidateQueries({ queryKey: CLAIMS_PREVIEW_KEY });
       opts?.onSettled?.(data, err, vars, ...rest);
     },
   });
