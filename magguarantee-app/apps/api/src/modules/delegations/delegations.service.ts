@@ -117,6 +117,14 @@ export class DelegationsService {
     await this._requireOwnedTrailer(carrier.id, dto.trailerId);
     const driverSnapshot = await this._snapshotDriver(carrier.id, dto.driverId);
 
+    // CREATE-time invariant — at most ONE active (non-terminal) delegation per
+    // vehicle. Block (409) when this machine is already on / awaiting a trip
+    // (status ∈ {zgloszony, gotowy, w_trasie}). Terminal (`zjechal`/`anulowany`)
+    // and soft-deleted outings never block. Enforced ONLY here at create: since
+    // create maintains "≤1 active per vehicle", the invariant holds by
+    // induction across the status transitions. See docs/04-data-model.md.
+    await this._assertVehicleNotOnActiveTrip(vehicle.id);
+
     const row = await this.delegations.create({
       carrierId: carrier.id,
       vehicleId: vehicle.id,
@@ -613,6 +621,33 @@ export class DelegationsService {
     return { id: mine.id };
   }
 
+  /**
+   * CREATE-time guard for the "≤1 active delegation per vehicle" invariant.
+   * Throws 409 Conflict naming the conflicting outing (its departure date +
+   * human PL status label) when the vehicle already holds a non-terminal,
+   * non-deleted delegation. No-op when the vehicle is free. The blocking set is
+   * the module constant `ACTIVE_DELEGATION_STATUSES`. Tone mirrors the cancel
+   * path's ConflictException messages.
+   */
+  private async _assertVehicleNotOnActiveTrip(vehicleId: string): Promise<void> {
+    const conflict = await this.delegations.findActiveByVehicle(
+      vehicleId,
+      ACTIVE_DELEGATION_STATUSES,
+    );
+    if (!conflict) return;
+    const departure = new Intl.DateTimeFormat('pl-PL', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      timeZone: 'Europe/Warsaw',
+    }).format(conflict.departureAt);
+    throw new ConflictException(
+      `Ta maszyna jest już przypisana do aktywnego wyjazdu (z dnia ${departure}, ` +
+        `status: ${delegationStatusLabelPl(conflict.status)}). ` +
+        'Zakończ lub anuluj tamten wyjazd przed utworzeniem nowego.',
+    );
+  }
+
   private async _requireOwnedVehicle(
     carrierId: string,
     vehicleId: string,
@@ -737,6 +772,25 @@ export class DelegationsService {
 }
 
 // ─── Pure helpers ────────────────────────────────────────
+
+/**
+ * Human PL label for a delegation status, used in user-facing conflict
+ * messages (the "≤1 active per vehicle" 409). Mirrors the wording already used
+ * inline on the cancel path ("zgłoszony / gotowy / w trasie"). Falls back to
+ * the raw status for completeness — the active set only ever yields the first
+ * three, so the terminal labels are belt-and-suspenders.
+ */
+const DELEGATION_STATUS_LABEL_PL: Record<DelegationStatus, string> = {
+  zgloszony: 'zgłoszony',
+  gotowy: 'gotowy',
+  w_trasie: 'w trasie',
+  zjechal: 'zjechał',
+  anulowany: 'anulowany',
+};
+
+function delegationStatusLabelPl(status: DelegationStatus): string {
+  return DELEGATION_STATUS_LABEL_PL[status] ?? status;
+}
 
 function appendCancellationNote(
   existing: string | null,

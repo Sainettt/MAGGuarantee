@@ -18,9 +18,14 @@ import type { DelegationDto, VehicleDailyKmDto } from '@magguarantee/shared';
 
 import { useVehicleDailyKmHistory } from '@/lib/hooks/useVehicleKm';
 import {
+  calendarFetchTo,
+  deriveCalendarWindow,
+} from '@/lib/format/delegationCalendar';
+import {
   daySpan,
   formatDayMonth,
   inclusiveDayCount,
+  todayIso,
   weekdayIndexMonFirst,
 } from '@/lib/format/week';
 import { cn } from '@/lib/utils';
@@ -43,17 +48,31 @@ export function DelegationKmCalendar({ delegation }: Props) {
   const t = useTranslations('delegation.kmCalendar');
   const tWeekday = useTranslations('weryfikator.km.weekday');
 
-  // Date-only span. `departureAt` is a datetime, `plannedReturnAt` is date-only.
-  const fromIso = delegation.departureAt.slice(0, 10);
-  const toIso = delegation.plannedReturnAt;
-  const days = useMemo(() => daySpan(fromIso, toIso), [fromIso, toIso]);
-  const dayCount = inclusiveDayCount(fromIso, toIso);
+  // "Today" in the MAGTRANS business timezone (Europe/Warsaw) — the same
+  // predicate the km-board uses (lib/format/week → shared businessTodayIso),
+  // so the open-trip upper bound never drifts with the browser's local TZ.
+  const today = todayIso();
+
+  // FETCH range — anchored at departure, broadened on the `to` side so the
+  // query returns EVERY existing km row (incl. late-return overruns the legacy
+  // `plannedReturnAt` ceiling hid). Render window is narrowed below.
+  const fetchFrom = delegation.departureAt.slice(0, 10);
+  const fetchTo = calendarFetchTo(delegation, today);
 
   const vehicleId = delegation.vehicleId;
   const { data, isLoading } = useVehicleDailyKmHistory(vehicleId, {
-    from: fromIso,
-    to: toIso,
+    from: fetchFrom,
+    to: fetchTo,
   });
+
+  // RENDER window — data-driven; clamps the empty tail to the real trip end
+  // (actualReturnAt for zjechal, last km day for in-transit overruns).
+  const { fromIso, toIso } = useMemo(
+    () => deriveCalendarWindow(delegation, data ?? [], today),
+    [delegation, data, today],
+  );
+  const days = useMemo(() => daySpan(fromIso, toIso), [fromIso, toIso]);
+  const dayCount = inclusiveDayCount(fromIso, toIso);
 
   const byDate = useMemo(() => {
     const map = new Map<string, VehicleDailyKmDto>();

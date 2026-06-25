@@ -99,6 +99,10 @@ function makeService(readiness: CarrierReadiness) {
 
   const delegations = {
     create: createSpy,
+    // CREATE-time "≤1 active per vehicle" guard lookup — these readiness tests
+    // use a vehicle with no active outing, so the conflict lookup returns null
+    // (the guard short-circuits and create proceeds).
+    findActiveByVehicle: jest.fn(async () => null),
   } as unknown as DelegationsRepository;
 
   const carriers = {

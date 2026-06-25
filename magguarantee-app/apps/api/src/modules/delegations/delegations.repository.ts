@@ -198,6 +198,36 @@ export class DelegationsRepository {
     return row ? this.flatten(row) : null;
   }
 
+  /**
+   * CREATE-time invariant lookup — returns the conflicting NON-DELETED outing
+   * that holds this vehicle in an ACTIVE (non-terminal) status, or `null` when
+   * the vehicle is free. Used by `DelegationsService.add` to enforce
+   * "≤1 active delegation per vehicle" (docs/04-data-model.md — Delegation
+   * status lifecycle invariant).
+   *
+   * IMPORTANT: unlike `findById` / `list`, this query EXPLICITLY excludes
+   * soft-deleted rows (`deletedAt: null`) — a soft-deleted outing must never
+   * block a new one. The active set is supplied by the service (the module
+   * constant `ACTIVE_DELEGATION_STATUSES`: `{zgloszony, gotowy, w_trasie}`);
+   * terminal statuses (`zjechal`, `anulowany`) are outside it and never block.
+   * Ordered by `departureAt asc` so the earliest active outing is named first.
+   */
+  async findActiveByVehicle(
+    vehicleId: string,
+    activeStatuses: readonly DelegationStatus[],
+  ): Promise<DelegationRow | null> {
+    const row = await this.prisma.tx.delegation.findFirst({
+      where: {
+        vehicleId,
+        status: { in: [...activeStatuses] },
+        deletedAt: null,
+      },
+      include: this.includeShape(),
+      orderBy: { departureAt: 'asc' },
+    });
+    return row ? this.flatten(row) : null;
+  }
+
   async list(filters: DelegationListFilters): Promise<DelegationRow[]> {
     const where: Record<string, unknown> = {};
     // Explicit single `status` wins over the server-injected `statusIn` floor:
