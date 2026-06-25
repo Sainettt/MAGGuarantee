@@ -1309,6 +1309,8 @@ Po wyłączeniach i korektach
 
 When the verifier edits `hoursAdjusted`, the **counted** number must update live (controlled by RHF watch on `hoursAdjusted`). The **raw** number stays constant (it is the period baseline, not a user input). Hint switches to `hoursReadout.hint.override` while the value diverges from the engine's auto-computed counted total. Debounce is **not** required — this is a pure local arithmetic transform, no server roundtrip.
 
+> **Correction (2026-06-25, web-agent).** In the unified verifier modal (§6.5) the live (edit-mode) `HoursReadout` is now sourced from the **live `/preview` breakdown** (`previewQ.data.breakdown`), the SAME numbers that drive the DOPŁATA — **not** from a local `hoursAdjusted`-only transform. Consequence: when the verifier edits **GODZ. ZJAZDU / GODZ. PRZYJAZDU** the first/last partial days change, so BOTH `surowych` (`rawTotalDays`) and `zaliczonych` (`totalDays`) move (in lockstep with the dopłata), and they still differ by exactly the `hoursAdjusted` korekta. The previous "raw stays constant / pure local transform" wording above describes the read-only carrier-detail call-site (§ B / placement 1–2), which keeps reading the persisted `claim.breakdown`. Fallback to the persisted breakdown is used only before the first preview response (never `—`/NaN); `placeholderData` retains the last good preview across debounced recalcs to avoid number flicker.
+
 #### Placement (locked)
 
 1. **Carrier claim detail (`[nrZgl]/page.tsx`)** — inside the new header right column, below the period dates (see § B for placement). Read-only display, no live behaviour.

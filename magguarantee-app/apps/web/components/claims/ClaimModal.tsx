@@ -45,6 +45,7 @@ import {
   UpdateClaimSchema,
   isCompensationDue,
   type ClaimDto,
+  type KmCalcBreakdown,
   type PreviewClaimDto,
   type RequestAuthorizationDto,
   type UpdateClaimDto,
@@ -366,6 +367,19 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
   const liveDoplata =
     previewQ.data?.paymentEur ?? claim.paymentEur;
 
+  // ── Live hours readout source (§6.5.4 / Phase 3.1) ──
+  // The edit-mode HoursReadout must reflect the verifier's CURRENT working
+  // times — the same numbers that drive the live dopłata. `previewQ.data`
+  // already recomputes both rawTotalDays (pre-korekta, edited times) and
+  // totalDays (post-korekta, edited times) from `buildPreviewBody`. The query
+  // is configured with `placeholderData: (prev) => prev`, so once the first
+  // response lands `previewQ.data` is retained across in-flight debounced
+  // recalcs — no snap-back / number flicker between keystrokes. Before the
+  // first response we fall back to the persisted breakdown so the readout
+  // never renders "—" / NaN.
+  const livePreviewBreakdown = previewQ.data?.breakdown ?? null;
+  const previewNotYetLoaded = previewQ.data === undefined;
+
   // ── Acceptance gate by recalc result (§6.5.5 / §6.5.10) ──
   // When the live recalc shows the guarantee was met (kmDifference <= 0 →
   // no payout due) acceptance is impossible: drop the accept targets from
@@ -514,7 +528,8 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
           form={form}
           mode={mode}
           firstInputRef={firstInputRef}
-          wHoursAdjusted={wHoursAdjusted}
+          livePreviewBreakdown={livePreviewBreakdown}
+          previewNotYetLoaded={previewNotYetLoaded}
           errMsg={errMsg}
           tUnified={tUnified}
         />
@@ -703,7 +718,12 @@ interface FactPairsProps {
   form: UseFormReturn<FormValues>;
   mode: ClaimModalMode;
   firstInputRef: React.RefObject<HTMLInputElement | null>;
-  wHoursAdjusted: number | undefined;
+  /** Live km-calc breakdown from `previewQ.data` — recomputed from the
+   *  verifier's CURRENT working times. `null` until the first preview lands. */
+  livePreviewBreakdown: KmCalcBreakdown | null;
+  /** `true` only before the first preview response — drives the persisted
+   *  breakdown fallback so the readout never renders "—" / NaN. */
+  previewNotYetLoaded: boolean;
   errMsg: (key: string) => string | undefined;
   tUnified: ReturnType<typeof useTranslations<'employee.claims.modal.unified'>>;
 }
@@ -713,7 +733,8 @@ function FactPairs({
   form,
   mode,
   firstInputRef,
-  wHoursAdjusted,
+  livePreviewBreakdown,
+  previewNotYetLoaded,
   errMsg,
   tUnified,
 }: FactPairsProps) {
@@ -859,7 +880,8 @@ function FactPairs({
           claim={claim}
           form={form}
           mode={mode}
-          wHoursAdjusted={wHoursAdjusted}
+          livePreviewBreakdown={livePreviewBreakdown}
+          previewNotYetLoaded={previewNotYetLoaded}
           errMsg={errMsg}
           tUnified={tUnified}
         />
@@ -953,14 +975,16 @@ function HoursAdjustedFact({
   claim,
   form,
   mode,
-  wHoursAdjusted,
+  livePreviewBreakdown,
+  previewNotYetLoaded,
   errMsg,
   tUnified,
 }: {
   claim: ClaimDto;
   form: UseFormReturn<FormValues>;
   mode: ClaimModalMode;
-  wHoursAdjusted: number | undefined;
+  livePreviewBreakdown: KmCalcBreakdown | null;
+  previewNotYetLoaded: boolean;
   errMsg: (key: string) => string | undefined;
   tUnified: ReturnType<typeof useTranslations<'employee.claims.modal.unified'>>;
 }) {
@@ -1009,14 +1033,28 @@ function HoursAdjustedFact({
           })}
         />
         <div className="mt-1">
-          <HoursReadout
-            live
-            rawTotalDays={claim.breakdown?.rawTotalDays ?? null}
-            totalDays={computeLiveTotalDays(
-              claim.breakdown?.rawTotalDays ?? null,
-              wHoursAdjusted,
-            )}
-          />
+          {(() => {
+            // Both numbers come from the SAME live preview that drives the
+            // dopłata (§6.5.4) — rawTotalDays (pre-korekta, EDITED times) and
+            // totalDays (post-korekta, EDITED times). So `surowych` and
+            // `zaliczonych` both track the verifier's GODZ. ZJAZDU/PRZYJAZDU
+            // edits and differ by exactly the korekta — matching the payment.
+            // Fallback to the persisted breakdown ONLY before the first preview
+            // response arrives (so we never render "—"/NaN). `previewQ.data` is
+            // retained across in-flight debounced recalcs (placeholderData), so
+            // once loaded it never snaps back — no number flicker.
+            const source =
+              previewNotYetLoaded || livePreviewBreakdown == null
+                ? claim.breakdown
+                : livePreviewBreakdown;
+            return (
+              <HoursReadout
+                live
+                rawTotalDays={source?.rawTotalDays ?? null}
+                totalDays={source?.totalDays ?? null}
+              />
+            );
+          })()}
         </div>
         {error && (
           <p className="text-sm text-danger" role="alert">
@@ -1710,31 +1748,6 @@ function RequestAuthorizationForm({
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
-
-/**
- * Mirror of the km-calc engine's `applyHoursAdjustment` semantics — renders
- * the live <HoursReadout> under the verifier's hoursAdjusted input. Pure
- * arithmetic, no network roundtrip. The form input is in HOURS; the engine
- * works in DAYS — divide by 24 with round2.
- */
-function computeLiveTotalDays(
-  rawTotalDays: number | null,
-  hoursAdjustedInput: number | undefined,
-): number | null {
-  if (rawTotalDays == null || !Number.isFinite(rawTotalDays)) return null;
-  if (rawTotalDays <= 0) return rawTotalDays;
-  const hours =
-    hoursAdjustedInput != null && Number.isFinite(hoursAdjustedInput)
-      ? Math.max(0, Number(hoursAdjustedInput))
-      : 0;
-  if (hours <= 0) return rawTotalDays;
-  const korektaDni = Math.round((hours / 24) * 100) / 100;
-  const adjusted = Math.max(
-    0,
-    Math.round((rawTotalDays - korektaDni) * 100) / 100,
-  );
-  return adjusted;
-}
 
 function getDefaults(claim: ClaimDto): FormValues {
   return {
