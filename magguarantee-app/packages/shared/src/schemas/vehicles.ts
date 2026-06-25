@@ -389,6 +389,7 @@ export const VehicleKmBoardItemDtoSchema = z.object({
     .object({ id: UuidSchema, name: z.string().nullable() })
     .nullable(),
   planner: z.string().nullable(),
+  createdAt: IsoDateTimeSchema,
   cells: z.array(VehicleKmCellDtoSchema),
   kmSum: z.number().int().nonnegative(),
   motionStatus: VehicleMotionStatusSchema,

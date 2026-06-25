@@ -1803,13 +1803,15 @@
         "noAssigned": "Brak przypisanych pojazdów",
         "noMotion": "Żaden pojazd nie jeździł w tym tygodniu"
       },
-      "history": {
-        "title": "Historia km — {plate}",
-        "desc": "bok {side} · {carrier}",
-        "sourceManual": "ręcznie",
-        "sourceGps": "GPS",
-        "empty": "Brak historii km dla tego pojazdu",
-        "close": "Zamknij"
+      "month": {
+        "title": "Przebieg km — {plate} · bok {side}",
+        "desc": "{carrier}",
+        "prev": "Poprzedni miesiąc",
+        "next": "Następny miesiąc",
+        "gridLabel": "Kalendarz przebiegu km — {month}",
+        "sumLabel": "Σ km w miesiącu",
+        "range": "Zakres: {from}–{to}",
+        "emptyMonth": "Brak zapisów km w tym miesiącu"
       },
       "notesPopover": {
         "title": "Notatki w tym tygodniu",

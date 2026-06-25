@@ -8,7 +8,7 @@
 //   • <WeekNavigator> (URL `?week=YYYY-Www` is the source of truth)
 //   • edit: a «{n}/{total} uzupełnionych» progress helper (fresh-week ≠ empty)
 //     view: a non-dismissible read-only banner + «Tylko jeżdżące» filter (on)
-//   • <KmWeekGrid mode> + <VehicleKmHistoryDialog>
+//   • <KmWeekGrid mode> + <VehicleMonthKmModal> (read-only monthly km-calendar)
 //
 // The week lives in the URL via `usePathname`/`useSearchParams` so navigation is
 // shareable + back-button-friendly. Cell commits (edit) are optimistic +
@@ -34,7 +34,7 @@ import {
   type KmEditorTarget,
 } from '@/components/km/KmCellEditorDialog';
 import { KmWeekGrid } from '@/components/km/KmWeekGrid';
-import { VehicleKmHistoryDialog } from '@/components/km/VehicleKmHistoryDialog';
+import { VehicleMonthKmModal } from '@/components/km/VehicleMonthKmModal';
 import { WeekNavigator } from '@/components/km/WeekNavigator';
 import {
   useClearVehicleDailyKm,
@@ -350,7 +350,7 @@ export function KmBoardScreen({
         />
       ) : null}
 
-      <VehicleKmHistoryDialog
+      <VehicleMonthKmModal
         vehicle={historyTarget}
         onOpenChange={(open) => {
           if (!open) setHistoryTarget(null);

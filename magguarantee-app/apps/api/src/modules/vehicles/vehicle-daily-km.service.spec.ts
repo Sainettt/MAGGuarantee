@@ -70,6 +70,7 @@ function boardVehicle(overrides: Partial<VehicleBoardRow> = {}): VehicleBoardRow
     carrier: { id: 'car-1', name: 'Carrier C' },
     opiekun: { id: 'op-1', name: 'Opiekun O' },
     plannerName: 'Planner P',
+    createdAt: new Date('2026-01-15T10:00:00.000Z'),
     ...overrides,
   };
 }
@@ -493,6 +494,7 @@ describe('VehicleDailyKmService.getBoard', () => {
     expect(item.carrier).toEqual({ id: 'car-1', name: 'Carrier C' });
     expect(item.opiekun).toEqual({ id: 'op-1', name: 'Opiekun O' });
     expect(item.planner).toBe('Planner P');
+    expect(item.createdAt).toBe('2026-01-15T10:00:00.000Z');
   });
 
   it('motion status nieznany when no rows in the week', async () => {

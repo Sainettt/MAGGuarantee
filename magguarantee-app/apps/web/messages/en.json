@@ -1803,13 +1803,15 @@
         "noAssigned": "No vehicles assigned to you",
         "noMotion": "No vehicle moved this week"
       },
-      "history": {
-        "title": "Km history — {plate}",
-        "desc": "side {side} · {carrier}",
-        "sourceManual": "manual",
-        "sourceGps": "GPS",
-        "empty": "No km history for this vehicle yet",
-        "close": "Close"
+      "month": {
+        "title": "Mileage — {plate} · side {side}",
+        "desc": "{carrier}",
+        "prev": "Previous month",
+        "next": "Next month",
+        "gridLabel": "Mileage calendar — {month}",
+        "sumLabel": "Σ km this month",
+        "range": "Range: {from}–{to}",
+        "emptyMonth": "No km records for this month"
       },
       "notesPopover": {
         "title": "Notes this week",

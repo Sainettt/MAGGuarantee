@@ -102,6 +102,11 @@ export interface VehicleBoardRow {
    */
   opiekun: { id: string; name: string | null } | null;
   plannerName: string | null;
+  /**
+   * `Vehicle.createdAt` — surfaced on the board DTO so the monthly-km modal can
+   * bound its lower selectable month. Read-only, purely additive.
+   */
+  createdAt: Date;
 }
 
 /**
@@ -263,6 +268,7 @@ export class VehiclesRepository {
         id: true,
         plateNumber: true,
         sideNumber: true,
+        createdAt: true,
         carrier: {
           select: {
             id: true,
@@ -285,6 +291,7 @@ export class VehiclesRepository {
         ? { id: r.carrier.opiekun.id, name: r.carrier.opiekun.name ?? null }
         : null,
       plannerName: r.planner?.name ?? null,
+      createdAt: r.createdAt,
     }));
   }
 

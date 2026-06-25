@@ -390,6 +390,7 @@ export class VehicleDailyKmService {
       carrier: v.carrier,
       opiekun: v.opiekun,
       planner: v.plannerName,
+      createdAt: v.createdAt.toISOString(),
       cells,
       kmSum,
       motionStatus,
