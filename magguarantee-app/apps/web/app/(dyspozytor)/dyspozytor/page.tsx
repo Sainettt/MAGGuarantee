@@ -35,7 +35,6 @@ export default function DyspozytorPanelPage() {
       isLoading={isLoading}
       delegations={delegationsQ.data?.items ?? []}
       delegationsLoading={delegationsQ.isLoading}
-      kmReportHref="/dyspozytor/km"
       myKmHref="/dyspozytor/moje-pojazdy"
     />
   );

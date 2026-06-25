@@ -4478,6 +4478,8 @@ The **same `<KmWeekGrid>`** primitive, in a **read-only context** — this is th
 
 > One component, two modes. `<KmWeekGrid mode="edit" | "view">` — the same component the weryfikator and the read-report render, gated by `mode` (exactly the §6.5 `mode: 'view' | 'edit'` precedent for the verification dialog). Do not fork two grids.
 
+> **Note (2026-06-25):** the standalone `/planista/km` and `/dyspozytor/km` read-report routes were **removed**. Planista and dyspozytor now expose a **single** km tab — «Moje pojazdy — przebieg» (§7.8, `/{role}/moje-pojazdy`) — instead of two near-duplicate km links. The §7.7.7 read-report variant still backs eksport/admin and the §7.8 tab itself (same `<KmBoardScreen mode="view">`); only the duplicate planista/dyspozytor `/km` entry points are gone.
+
 ### 7.7.8 States — loading / empty / empty-team / fresh-week
 
 | State | Trigger | Treatment |
@@ -4684,6 +4686,8 @@ Two namespaces. Web-agent adds these to `messages/pl.json` / `messages/en.json`.
 > **DECISION 2 (locked):** show **ALL** of the role's vehicles, including ones that didn't drive / have no marks that week. The §7.7.7 «Tylko jeżdżące» filter is **OFF by default here** and surfaced only as an opt-in toggle (see §7.8.5) — the purpose of this tab is fleet *oversight*, so a parked truck must still be visible.
 >
 > **Token policy.** No new radius/shadow/font tokens; surfaces stay on existing tokens. The carrier-accent palette (§7.8.2) needs mutually-distinguishable **non-semantic category** hues, which the current set cannot supply without abusing state colours — so §7.8.2 proposes a **single, minimal, additive** colour-token pair (`--color-cat-blue` + `--color-cat-violet`) with explicit justification, **or** a zero-new-token fallback (degraded distinguishability). This is flagged as an **open question for the user** (§ summary). MAGTRANS RED (`bg-brand`/`text-brand`) is **reserved** for the "today" column accent (§7.7.3) and is **never** used as a carrier accent — brand-red must not be diluted into an arbitrary category colour.
+>
+> **Sole km tab for planista/dyspozytor (2026-06-25).** For planista and dyspozytor this «Moje pojazdy — przebieg» tab (`/{role}/moje-pojazdy`) is now their **only** km surface — the duplicate §7.7.7 «Raport km» link and its `/planista/km` · `/dyspozytor/km` routes were removed. Eksport/admin keep the §7.7.7 read-report separately.
 
 ### 7.8.1 The carrier-distinction mechanism — grouped section-headers + a deterministic per-carrier accent
 
@@ -5370,7 +5374,7 @@ Columns: **Sk** = §8.1 skeleton applied · **Em** = §8.2 empty state(s) applie
 | `/employee/delegations` | A | maybe | ✓ | data / filtered | save/err | Esc | ✓ | ✓ |
 | `/employee/km`, `/employee/moje-pojazdy` | E | view | §7.7.8 | §7.7.8 | — | Esc | ✓ | ✓ |
 | `/planista`, `/dyspozytor` (panels) | A (+B KPI) | no | ✓ | data (no action) / filtered | — | Esc (detail modals), Tabs arrows | ✓ | ✓ |
-| `/planista/km`, `/dyspozytor/km`, `/*/moje-pojazdy` | E | view | §7.7.8 | §7.7.8 | — | Esc | ✓ | ✓ |
+| `/*/moje-pojazdy` (planista/dyspozytor) | E | view | §7.7.8 | §7.7.8 | — | Esc | ✓ | ✓ |
 | `/weryfikator` (km-board) | E (editable) | yes | §7.7.8 | §7.7.8 | stamp/err | Esc, cell-edit Enter | ✓ | ✓ |
 | `/weryfikator/km` | E (editable) | yes | §7.7.8 | §7.7.8 | stamp/err | Esc, Enter commits cell | ★key | ✓ |
 | ⚠️ `/eksport` | A | maybe | ✓ | data (no action) / filtered | save/err | Esc | △ re-pass | △ re-pass |

@@ -57,23 +57,37 @@ function boardKey(scope: 'board' | 'report', query: KmBoardQuery) {
 }
 
 /**
+ * Toggle for the board/report fetch. `enabled` is optional and forwarded to
+ * `useQuery`; when OMITTED, `undefined` makes TanStack default to enabled, so
+ * existing call sites keep firing exactly as before. Callers that render both
+ * the board and the report hook (e.g. `<KmBoardScreen>`) pass `enabled` to gate
+ * the mode-irrelevant endpoint — the km-board is `weryfikator`/`admin`-only, so
+ * a disabled fetch in `view` mode avoids a spurious 403 for the other roles.
+ */
+interface KmQueryOptions {
+  enabled?: boolean;
+}
+
+/**
  * The editable weekly km-board (`GET /vehicles/km-board`). Short stale window
  * so re-stamps / GPS rows propagate quickly; the mutation also reconciles it.
  */
-export function useVehicleKmBoard(query: KmBoardQuery) {
+export function useVehicleKmBoard(query: KmBoardQuery, opts?: KmQueryOptions) {
   return useQuery({
     queryKey: boardKey('board', query),
     queryFn: () => getVehicleKmBoard(query),
     staleTime: 15_000,
+    enabled: opts?.enabled,
   });
 }
 
 /** The read-only weekly km-report (`GET /vehicles/km-report`), role-scoped. */
-export function useVehicleKmReport(query: KmBoardQuery) {
+export function useVehicleKmReport(query: KmBoardQuery, opts?: KmQueryOptions) {
   return useQuery({
     queryKey: boardKey('report', query),
     queryFn: () => getVehicleKmReport(query),
     staleTime: 15_000,
+    enabled: opts?.enabled,
   });
 }
 

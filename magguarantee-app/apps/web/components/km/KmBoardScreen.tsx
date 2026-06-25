@@ -114,9 +114,13 @@ export function KmBoardScreen({
     [pathname, router, searchParams],
   );
 
-  // Board (edit) vs report (view) — distinct endpoints, same envelope.
-  const boardQ = useVehicleKmBoard(query);
-  const reportQ = useVehicleKmReport(query);
+  // Board (edit) vs report (view) — distinct endpoints, same envelope. Only the
+  // mode-relevant query is `enabled`: the km-board is `weryfikator`/`admin`-only,
+  // so firing it in `view` mode would 403 for the other roles. The disabled
+  // query reports `isLoading: true` (status `pending` + `fetchStatus: idle`), so
+  // `isLoading`/`data` MUST be read off `activeQ` (always the enabled one) only.
+  const boardQ = useVehicleKmBoard(query, { enabled: mode === 'edit' });
+  const reportQ = useVehicleKmReport(query, { enabled: mode === 'view' });
   const activeQ = mode === 'edit' ? boardQ : reportQ;
   const data = activeQ.data;
   const isLoading = activeQ.isLoading;
