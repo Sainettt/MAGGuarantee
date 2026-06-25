@@ -66,15 +66,6 @@ const HhMmSchema = z
 const MileageSchema = z.number().nonnegative().max(9_999_999);
 
 /**
- * Mileage as the carrier sends it on submit / preview — OPTIONAL. When omitted
- * the api pre-fills it as `Σ VehicleDailyKm.km (state=drove)` over `[from,to]`
- * of the chosen vehicle (Phase 7 REWORK #3, docs/20 §0′). The carrier may
- * still send an explicit value to override the prefill; `pracownik` revises it
- * at verification regardless.
- */
-const OptionalMileageSchema = MileageSchema.optional();
-
-/**
  * Hours adjustment — non-negative, capped to fit the storage column.
  *
  * Persisted as `Decimal(5,2)` on `Claim.origHoursAdjusted` /
@@ -118,12 +109,23 @@ function datesWellOrdered(v: {
 // km-calc payment server-side, `hoursAdjusted` lives only on the verifier
 // `UpdateClaimCorrectionFields` patch below.
 /**
- * POST /claims — body shape per docs/13-api-design.md§"Submit claim".
+ * POST /claims — body shape per docs/13-api-design.md§"Submit claim" and the
+ * "everything derives from the wyjazd" principle in docs/20 §0″.
  *
  * Notes:
  * - `carrierId` is **derived from the JWT** — not accepted from the body.
- * - `vehicleId` ownership is enforced by `CarrierOwnershipGuard`.
- * - `mileage` (legacy `przebieg`) is the actual driven km.
+ * - `delegationId` ownership is enforced by `CarrierOwnershipGuard`
+ *   (`@CarrierOwns('delegationId', 'body', 'delegationId')`): the outing must
+ *   belong to the authenticated carrier.
+ * - `vehicleId` / `trailerId` / `driverId` are **NOT** in the carrier submit
+ *   body (Phase 7 §0″ finish) — they are DERIVED server-side from the chosen
+ *   outing (`Delegation.vehicleId` / `trailerId` / `driverId`, all NOT NULL).
+ *   `vehiclePlateSnapshot` comes from `Delegation.vehicle.plateNumber`; the
+ *   driver snapshots from the delegation's snapshot columns / driver relation.
+ * - `mileage` (legacy `przebieg`) is **NOT** in the carrier submit body — it is
+ *   ALWAYS `Σ VehicleDailyKm.km (state=drove)` over the derived period for the
+ *   delegation's vehicle. There is no carrier override; `pracownik` revises it
+ *   at verification.
  * - `amountRequested` is **NOT** in the carrier submit body — the service
  *   derives it from the km-calc `paymentEur` (rounded to 2 dp). Legacy GAS
  *   allowed a manual override; we don't.
@@ -140,21 +142,17 @@ function datesWellOrdered(v: {
  */
 export const SubmitClaimSchema = z
   .object({
-    vehicleId: UuidSchema,
     /**
      * Phase 7 REWORK (2026-06-20 #4, docs/20 §0″) — REQUIRED for new wnioski
      * (app-level). The carrier picks one of their own outings in
      * {`w_trasie`, `zjechal`} that has no claim yet (see
-     * `GET /delegations?claimable=true`). The PERIOD is DERIVED server-side
-     * from the chosen outing — `dateStart = date(departureAt)`,
-     * `dateEnd = actualReturnAt ?? plannedReturnAt` — so the carrier no longer
-     * sends `dateStart`/`dateEnd`. The DB FK is `@unique`, so a second wniosek
-     * on the same outing 409s.
+     * `GET /delegations?claimable=true`). The PERIOD, VEHICLE, TRAILER, DRIVER,
+     * and MILEAGE are all DERIVED server-side from the chosen outing — the
+     * carrier no longer sends `dateStart`/`dateEnd`/`vehicleId`/`trailerId`/
+     * `driverId`/`mileage`. The DB FK is `@unique`, so a second wniosek on the
+     * same outing 409s.
      */
     delegationId: UuidSchema,
-    /** Optional snapshot links — set if the carrier picked them in the form. */
-    trailerId: emptyStringToUndefined(UuidSchema.optional()),
-    driverId: emptyStringToUndefined(UuidSchema.optional()),
 
     /**
      * REQUIRED — Claim.timeFrom is NOT NULL since phase3_blocks. The carrier
@@ -165,13 +163,6 @@ export const SubmitClaimSchema = z
     timeFrom: HhMmSchema,
     /** REQUIRED — Claim.timeTo is NOT NULL since phase3_blocks. */
     timeTo: HhMmSchema,
-
-    /**
-     * OPTIONAL — pre-filled server-side from `Σ VehicleDailyKm.km (state=drove)`
-     * over the DERIVED period when omitted (Phase 7 REWORK #3). An explicit
-     * value overrides the prefill.
-     */
-    mileage: OptionalMileageSchema,
 
     comment: emptyStringToUndefined(z.string().max(2_000).optional()),
 
@@ -186,20 +177,37 @@ export type SubmitClaimDto = z.infer<typeof SubmitClaimSchema>;
 /**
  * POST /claims/:nrZgl/preview — slim subset of `SubmitClaimSchema` covering
  * just the inputs that affect the km-calc breakdown. Carrier identity and
- * vehicle ownership are enforced at the route guard, not the schema.
+ * delegation ownership are enforced at the route guard, not the schema.
+ *
+ * Two callers, two shapes:
+ *  - `POST /claims/preview` (carrier new-claim form) — sends `delegationId` and
+ *    OMITS `dateStart`/`dateEnd`/`vehicleId`/`mileage`; the api DERIVES the
+ *    period + vehicle/trailer/driver + mileage from the outing so the FE can
+ *    render them read-only before submit (Phase 7 §0″ finish), and surfaces a
+ *    `delegationWarning` when the outing is still `w_trasie`.
+ *  - `POST /claims/:nrZgl/preview` (reklamacja / verifier inspection of an
+ *    existing claim) — sends the caller-supplied `dateStart`/`dateEnd` (and an
+ *    optional `vehicleId`) to drive the live math; the existing claim already
+ *    carries the vehicle/trailer/driver context.
  */
 export const PreviewClaimSchema = z
   .object({
-    vehicleId: UuidSchema,
     /**
-     * Phase 7 REWORK (2026-06-20 #4) — OPTIONAL on preview. When the carrier
-     * has picked an outing, the form sends `delegationId` and OMITS the dates;
-     * the api derives the period from the outing (and surfaces a
+     * Phase 7 REWORK (2026-06-20 #4, docs/20 §0″) — OPTIONAL on preview. When
+     * the carrier has picked an outing, the form sends `delegationId` and OMITS
+     * `dateStart`/`dateEnd`/`vehicleId`/`mileage`; the api derives the PERIOD,
+     * VEHICLE, TRAILER, DRIVER, and MILEAGE from the outing (and surfaces a
      * `delegationWarning` when the outing is still `w_trasie`). When absent, the
-     * caller-supplied `dateStart`/`dateEnd` drive the live preview (the legacy
-     * pre-pick path).
+     * caller-supplied `dateStart`/`dateEnd` (+ optional `vehicleId`) drive the
+     * live preview (the existing-claim / verifier inspection path).
      */
     delegationId: emptyStringToUndefined(UuidSchema.optional()),
+    /**
+     * OPTIONAL — only meaningful on the existing-claim / verifier inspection
+     * path (`POST /claims/:nrZgl/preview`). On the carrier new-claim path the
+     * vehicle is derived from `delegationId`, so this is omitted there.
+     */
+    vehicleId: emptyStringToUndefined(UuidSchema.optional()),
     /**
      * OPTIONAL — required only when `delegationId` is absent (the api derives
      * the period from the outing otherwise). The cross-field guard below still
@@ -209,11 +217,6 @@ export const PreviewClaimSchema = z
     dateEnd: emptyStringToUndefined(IsoDateSchema.optional()),
     timeFrom: emptyStringToUndefined(HhMmSchema.optional()),
     timeTo: emptyStringToUndefined(HhMmSchema.optional()),
-    /**
-     * OPTIONAL — when omitted the api pre-fills it from
-     * `Σ VehicleDailyKm.km (state=drove)` over the period (Phase 7 REWORK #3).
-     */
-    mileage: OptionalMileageSchema,
     hoursAdjusted: HoursAdjustedSchema.optional().default(0),
   })
   .strict()
@@ -357,12 +360,35 @@ export type DelegationWarning = z.infer<typeof DelegationWarningSchema>;
 
 // ─── Preview response ────────────────────────────────────
 
+/**
+ * Read-only vehicle/trailer/driver context DERIVED from the chosen outing on
+ * the carrier new-claim preview path (Phase 7 §0″ finish). The carrier no
+ * longer types these; the web form renders them read-only from this block so
+ * the carrier sees exactly what the submit will persist. Absent on the
+ * existing-claim / verifier inspection path (no `delegationId`).
+ */
+export const PreviewDelegationContextSchema = z.object({
+  vehicleId: UuidSchema,
+  vehiclePlate: z.string(),
+  trailerId: UuidSchema,
+  trailerPlate: z.string().nullable(),
+  driverId: UuidSchema,
+  /** Driver display name — delegation snapshot, falling back to the relation. */
+  driverName: z.string().nullable(),
+});
+export type PreviewDelegationContext = z.infer<
+  typeof PreviewDelegationContextSchema
+>;
+
 export const PreviewClaimResponseSchema = z.object({
   /**
-   * Effective mileage used for the preview math — the carrier's explicit value
-   * when supplied, otherwise the server-computed `Σ VehicleDailyKm.km
-   * (state=drove)` prefill over the period (Phase 7 REWORK #3). The web form
-   * populates the read-only/pre-filled mileage field from this.
+   * Effective mileage used for the preview math. On the carrier new-claim path
+   * (a `delegationId` was supplied) this is ALWAYS the server-computed
+   * `Σ VehicleDailyKm.km (state=drove)` over the derived period for the
+   * delegation's vehicle (Phase 7 §0″ finish — no carrier override). On the
+   * existing-claim / verifier inspection path it falls back to the
+   * caller-supplied dates' vehicle sum. The web form renders the read-only
+   * mileage field from this.
    */
   mileage: z.number().nonnegative(),
   kmGuaranteed: z.number().nonnegative(),
@@ -383,6 +409,13 @@ export const PreviewClaimResponseSchema = z.object({
    * banner. Absent on a `zjechal` outing or the legacy date-driven preview.
    */
   delegationWarning: DelegationWarningSchema.optional(),
+  /**
+   * Read-only vehicle/trailer/driver derived from the chosen outing (Phase 7
+   * §0″ finish). Present only on the delegation-derived path so the carrier
+   * form can render these fields read-only. Absent on the existing-claim /
+   * verifier inspection path.
+   */
+  delegationContext: PreviewDelegationContextSchema.optional(),
 });
 export type PreviewClaimResponse = z.infer<typeof PreviewClaimResponseSchema>;
 

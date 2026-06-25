@@ -5091,7 +5091,18 @@ All dialogs reuse the **§7.1 confirm-`<Dialog>` pattern** (centered `<Dialog>`,
 
 ### 7.10.3 Carrier `w_trasie` warning banner (`/carrier/claims/new` — delegation picker)
 
-When the carrier submits a wniosek by **picking their delegation** (selector replaces the old manual period entry; period + mileage prefill from the delegation per the spec), the chosen delegation may still be `w_trasie` (not yet `zjechal`). Submitting from `w_trasie` is **allowed but soft-warned**; from `gotowy`/`zgloszony` it is **blocked** (those options aren't offered / are disabled in the picker).
+When the carrier submits a wniosek by **picking their delegation** (selector replaces the old manual period entry), the chosen delegation may still be `w_trasie` (not yet `zjechal`). Submitting from `w_trasie` is **allowed but soft-warned**; from `gotowy`/`zgloszony` it is **blocked** (those options aren't offered / are disabled in the picker).
+
+**Everything derives from the wyjazd (Phase 7 §0″ finish — 2026-06-25, AUTHORITATIVE).** The carrier's ONLY inputs on this form are: the **wyjazd**, the **time window** (`timeFrom` pre-filled from the delegation's `departureAt` / `timeTo`), an optional **comment**, and optional **attachments**. The four fields the carrier used to type — **vehicle, trailer, driver, mileage** — are now shown **pre-filled and READ-ONLY**, derived from the selected wyjazd (joining the period, which was already derived read-only). They mirror the §7.10.3 derived-period card's visual treatment (`rounded-md border border-border bg-input/40 px-3 py-2`, uppercase micro-label, value `text-sm text-text`), via a shared `ReadOnlyField` helper:
+
+| Read-only field | Data source | Empty/placeholder state |
+|---|---|---|
+| Vehicle plate | `selectedDelegation.vehicle.plateNumber` | before a wyjazd is picked, the whole vehicle/trailer/driver block shows one muted placeholder card («Najpierw wybierz wyjazd — pojazd, naczepa i kierowca zostaną pobrane z wyjazdu») |
+| Trailer plate | `selectedDelegation.trailer.plateNumber` | (same block placeholder) |
+| Driver name | `selectedDelegation.driver` (`firstName lastName`), falling back to `selectedDelegation.driverNameSnapshot` | (same block placeholder) |
+| Mileage (km) | **preview response** `mileage` — the server-authoritative `Σ VehicleDailyKm (state=drove)` over the derived period; updates on the same trigger as the derived period | muted `«— obliczany z wyjazdu»` until the preview returns |
+
+The submit body is the backend's `.strict()` shape — **only** `delegationId`, `timeFrom`, `timeTo`, `comment?`, `attachmentIds?` (+ the soft-confirm ack gate for `w_trasie`). The vehicle/trailer/driver/mileage are **never** sent — the api derives them from `delegationId`; sending any of them is a 400. The required-fields submit gate is just `delegationId` + `timeFrom` + `timeTo` (+ the ack when `w_trasie`). The mileage is **never carrier-editable** — there is no override input.
 
 **Banner — reuse the §"Reklamacja sheet" warning-banner recipe verbatim** (the existing `bg-warning-bg` informational band), no new token:
 

@@ -1039,6 +1039,21 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
         id: 'deleg-1',
         carrierId: 'c-1',
         vehicleId: 'v-1',
+        // Phase 7 §0″ finish — the plate snapshot derives from the outing's
+        // vehicle relation (falling back to the vehicles repo when absent).
+        vehicle: {
+          id: 'v-1',
+          plateNumber: 'WX12345',
+          plannerId: null,
+          dispatchTeamId: null,
+          dispatchTeam: null,
+        },
+        trailerId: 'trl-1',
+        trailer: { id: 'trl-1', plateNumber: 'TR9999' },
+        driverId: 'drv-1',
+        driver: { id: 'drv-1', firstName: 'Jan', lastName: 'Kowalski' },
+        driverNameSnapshot: 'Jan Kowalski',
+        driverPhoneSnapshot: '+48000000000',
         status: 'zjechal',
         departureAt: new Date('2026-05-01T06:30:00.000Z'),
         plannedReturnAt: new Date('2026-05-12T00:00:00.000Z'),
@@ -1046,6 +1061,12 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
         claimId: null,
       })),
     } as unknown as import('../delegations/delegations.repository').DelegationsRepository;
+    // Phase 7 §0″ finish — mileage is ALWAYS the daily-km sum (no body
+    // override). Inject a repo returning a non-zero sum so the submit clears
+    // the tier-1 `mileage > 0` gate.
+    const dailyKmRepo = {
+      sumDroveKm: jest.fn(async () => 8_000),
+    } as unknown as import('../vehicles/vehicle-daily-km.repository').VehicleDailyKmRepository;
 
     const svc = new ClaimsService(
       repo,
@@ -1059,7 +1080,7 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
       audit,
       undefined,
       undefined,
-      undefined,
+      dailyKmRepo,
       delegationsRepo,
     );
 
@@ -1070,11 +1091,9 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
     // anymore — `amountRequested` is derived server-side from km-calc
     // paymentEur, `hoursAdjusted` is verifier-only (PATCH path).
     const out = await svc.submit(makeAuth('przewoznik', 'u-carrier-1'), {
-      vehicleId: 'v-1',
       delegationId: 'deleg-1',
       timeFrom: '08:00',
       timeTo: '18:00',
-      mileage: 8_000,
     });
 
     expect(creates).toHaveLength(1);

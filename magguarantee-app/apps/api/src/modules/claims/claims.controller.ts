@@ -100,6 +100,12 @@ export class ClaimsController {
    * `POST /claims/preview` — unscoped, used by the carrier's new-claim form
    * to render a live km-calc preview without persisting. No `nrZgl` param
    * because the claim doesn't exist yet. Per Phase 3 user decisions.
+   *
+   * No `@CarrierOwns` body guard: `delegationId` is OPTIONAL on the preview
+   * body (Phase 7 §0″ finish) and the guard's `_extractId` 400s on a missing
+   * id. Ownership is enforced in the service — `previewKmCalc` validates the
+   * carrier owns the chosen outing (`_resolveDelegationContext`) or the
+   * fallback `vehicleId` (`_requireOwnedVehicle`).
    */
   @Post('preview')
   @HttpCode(HttpStatus.OK)
@@ -160,7 +166,12 @@ export class ClaimsController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @Roles('przewoznik')
-  @CarrierOwns('vehicleId', 'body', 'vehicleId')
+  // Phase 7 §0″ finish — vehicle/trailer/driver/mileage no longer travel in the
+  // body; ownership is now enforced via the chosen outing. The `delegationId`
+  // body field must point at an outing owned by the authenticated carrier
+  // (`delegation.carrierId === carrier`); the service re-validates this in
+  // `_resolveDelegationContext` (defence-in-depth).
+  @CarrierOwns('delegationId', 'body', 'delegationId')
   @Audit({
     action: 'submitClaim',
     targetType: 'Claim',

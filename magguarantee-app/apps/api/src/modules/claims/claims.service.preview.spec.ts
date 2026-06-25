@@ -29,6 +29,7 @@ import type { DriversRepository } from '../drivers/drivers.repository';
 import type { KmCalcService } from '../km-calc/km-calc.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { TrailersRepository } from '../trailers/trailers.repository';
+import type { VehicleDailyKmRepository } from '../vehicles/vehicle-daily-km.repository';
 import type {
   VehicleRow,
   VehiclesRepository,
@@ -174,13 +175,15 @@ function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {
   } as unknown as VehicleRow;
 }
 
+// Existing-claim / verifier inspection path (`POST /claims/:nrZgl/preview`):
+// caller-supplied dates + an optional `vehicleId` for the mileage sum. No body
+// `mileage` (Phase 7 §0″ finish — mileage is always the daily-km sum).
 const PREVIEW_DTO: PreviewClaimDto = {
   vehicleId: 'v-1',
   dateStart: '2026-04-01',
   dateEnd: '2026-04-20',
   timeFrom: '08:00',
   timeTo: '18:00',
-  mileage: 8_000,
   hoursAdjusted: 0,
 };
 
@@ -250,11 +253,23 @@ function makeAuditWriter(): AuditWriter {
   return { log: jest.fn(async () => undefined) } as unknown as AuditWriter;
 }
 
+/**
+ * Daily-km repo fake. Phase 7 §0″ finish — preview mileage is ALWAYS the
+ * daily-km sum (no body override), so the existing-claim preview path needs
+ * this injected to reproduce the `mileage: 8_000` the assertions expect.
+ */
+function makeDailyKmRepo(sum: number): VehicleDailyKmRepository {
+  return {
+    sumDroveKm: jest.fn(async () => sum),
+  } as unknown as VehicleDailyKmRepository;
+}
+
 function makeService(
   claimsRepo: ClaimsRepository,
   carriersRepo: CarriersRepository,
   vehiclesRepo: VehiclesRepository,
   km: KmCalcService,
+  dailyKm: VehicleDailyKmRepository = makeDailyKmRepo(8_000),
 ): ClaimsService {
   const noop = {} as unknown;
   return new ClaimsService(
@@ -267,6 +282,9 @@ function makeService(
     noop as NrZglService,
     makePrismaService(),
     makeAuditWriter(),
+    undefined,
+    undefined,
+    dailyKm,
   );
 }
 

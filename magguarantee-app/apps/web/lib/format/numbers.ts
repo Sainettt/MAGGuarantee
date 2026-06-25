@@ -34,6 +34,13 @@ export function formatEur(value: number | null | undefined): string {
   return `€ ${PL_NUM.format(value)}`;
 }
 
+/** "1 250,00" — full km value (pl-PL grouping, 2 dp). Used for the read-only
+ *  mileage on the carrier new-claim form. `—` for null/non-finite. */
+export function formatKm(km: number | null | undefined): string {
+  if (km == null || !Number.isFinite(km)) return '—';
+  return PL_NUM.format(km);
+}
+
 /** "3.2k" — compact km label for table; under 1000 falls back to raw. */
 export function formatKmCompact(km: number | null | undefined): string {
   if (km == null || !Number.isFinite(km)) return '—';

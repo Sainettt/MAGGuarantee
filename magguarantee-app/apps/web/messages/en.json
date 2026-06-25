@@ -1341,6 +1341,7 @@
         "vehicle": "Vehicle",
         "driver": "Driver",
         "trailer": "Trailer",
+        "vehicleReadOnlyPlaceholder": "Select a trip first — the vehicle, trailer and driver are taken from the trip.",
         "sectionPeriod": "Period",
         "dateStart": "Date from",
         "dateEnd": "Date to",
@@ -1348,6 +1349,8 @@
         "timeTo": "Time to",
         "sectionValues": "Values",
         "mileage": "Mileage (km)",
+        "mileageReadOnlyHint": "Computed from the trip's daily km — read-only.",
+        "mileageReadOnlyPlaceholder": "— computed from the trip",
         "addComment": "Add comment",
         "comment": "Comment",
         "violationDateEndInFuture": "Unload date ({date}) is in the future. The claim can be submitted only after the vehicle is back.",
@@ -1378,7 +1381,6 @@
         "selectedStatus": "Selected trip status:",
         "derivedPeriod": "Period (from the trip)",
         "temporaryPeriodHint": "Temporary period from the planned return — it will be updated after the vehicle returns.",
-        "mileageHint": "Pre-computed from daily km — you can override it.",
         "warningBanner": "The trip is not yet marked “Returned” — are you sure you want to submit the claim?",
         "warningAck": "I understand the trip is not finished yet"
       }

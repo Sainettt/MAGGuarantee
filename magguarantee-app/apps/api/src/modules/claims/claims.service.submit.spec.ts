@@ -51,24 +51,32 @@ import type {
 import type { NrZglService } from './nr-zgl.service';
 
 /**
- * Phase 7 REWORK (2026-06-20 #4) — the submit period is DERIVED from the chosen
- * outing. A `zjechal` delegation in the past (`departureAt=2026-05-01`,
- * `actualReturnAt=2026-05-10`) reproduces the legacy `[2026-05-01, 2026-05-10]`
- * period every test relied on. `carrierId`/`vehicleId` match the owned fixtures.
+ * Phase 7 §0″ finish — the submit period AND vehicle/trailer/driver/mileage are
+ * all DERIVED from the chosen outing. A `zjechal` delegation in the past
+ * (`departureAt=2026-05-01`, `actualReturnAt=2026-05-10`) reproduces the legacy
+ * `[2026-05-01, 2026-05-10]` period every test relied on. `carrierId`/
+ * `vehicleId` match the owned fixtures; the `vehicle`/`trailer`/`driver`
+ * relations + driver snapshot back the read-only context the service derives.
  */
 function makeDelegation(overrides: Partial<DelegationRow> = {}): DelegationRow {
   return {
     id: 'deleg-1',
     vehicleId: 'v-1',
-    vehicle: null,
+    vehicle: {
+      id: 'v-1',
+      plateNumber: 'WX12345',
+      plannerId: null,
+      dispatchTeamId: null,
+      dispatchTeam: null,
+    },
     trailerId: 'trl-1',
-    trailer: null,
+    trailer: { id: 'trl-1', plateNumber: 'TR9999' },
     driverId: 'drv-1',
-    driver: null,
+    driver: { id: 'drv-1', firstName: 'Jan', lastName: 'Kowalski' },
     carrierId: 'c-1',
     carrier: null,
-    driverNameSnapshot: null,
-    driverPhoneSnapshot: null,
+    driverNameSnapshot: 'Jan Kowalski',
+    driverPhoneSnapshot: '+48000000000',
     departureAt: new Date('2026-05-01T06:30:00.000Z'),
     departureCountry: 'PL',
     departurePostalCode: '00-001',
@@ -321,8 +329,13 @@ function makeService(
     makeAuditWriter(),
     undefined,
     undefined,
-    dailyKm,
-    // Phase 7 REWORK (2026-06-20 #4) — submit derives the period from the outing.
+    // Phase 7 §0″ finish — mileage is ALWAYS the daily-km sum (no body
+    // override). Default the daily-km repo to a non-zero sum so the success
+    // paths clear the `mileage > 0` tier-1 gate; tests needing a specific sum
+    // (or 0) pass their own `dailyKm`.
+    dailyKm ?? makeDailyKmRepo(8_000).repo,
+    // Phase 7 §0″ finish — submit derives the period + vehicle/trailer/driver
+    // /mileage from the outing.
     delegations ?? makeDelegationsRepo(),
   );
 }
@@ -368,11 +381,9 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     const svc = makeService(repoFake, undefined, undefined, makeKmCalc({ totalDays: 0 }));
 
     const dto: SubmitClaimDto = {
-      vehicleId: 'v-1',
       delegationId: 'deleg-1',
       timeFrom: '08:00',
       timeTo: '18:00',
-      mileage: 8_000,
     };
 
     let caught: unknown;
@@ -393,11 +404,9 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     const svc = makeService(repoFake, undefined, undefined, makeKmCalc({ totalDays: 9.99 }));
 
     const dto: SubmitClaimDto = {
-      vehicleId: 'v-1',
       delegationId: 'deleg-1',
       timeFrom: '08:00',
       timeTo: '18:00',
-      mileage: 8_000,
     };
 
     let caught: unknown;
@@ -419,11 +428,9 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     const svc = makeService(repoFake, undefined, undefined, makeKmCalc({ totalDays: 10 }));
 
     const dto: SubmitClaimDto = {
-      vehicleId: 'v-1',
       delegationId: 'deleg-1',
       timeFrom: '08:00',
       timeTo: '18:00',
-      mileage: 8_000,
     };
 
     const out = await svc.submit(makeAuth('przewoznik'), dto);
@@ -468,14 +475,12 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     const svc = makeService(repoFake);
 
     const dto: SubmitClaimDto = {
-      vehicleId: 'v-1',
       delegationId: 'deleg-1',
       timeFrom: '08:00',
       timeTo: '18:00',
-      mileage: 8_000,
       // The default km-calc mock yields `totalDays: 10` (>= threshold 10),
       // so the tier-1 duration gate passes and the cooldown is the ONLY
-      // blocker the submit reaches.
+      // blocker the submit reaches. Mileage is the daily-km sum (default 8_000).
     };
 
     let caught: unknown;
@@ -508,11 +513,9 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     const svc = makeService(repoFake);
 
     const dto: SubmitClaimDto = {
-      vehicleId: 'v-1',
       delegationId: 'deleg-1',
       timeFrom: '08:00',
       timeTo: '18:00',
-      mileage: 8_000,
     };
 
     const out = await svc.submit(makeAuth('przewoznik'), dto);
@@ -559,11 +562,9 @@ describe('ClaimsService.submit — carrier submission gates', () => {
       );
 
       const dto: SubmitClaimDto = {
-        vehicleId: 'v-1',
         delegationId: 'deleg-1',
         timeFrom: '08:00',
         timeTo: '18:00',
-        mileage: 8_000,
       };
 
       const out = await svc.submit(makeAuth('przewoznik'), dto);
@@ -586,11 +587,9 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     const svc = makeService(repoFake);
 
     const dto: SubmitClaimDto = {
-      vehicleId: 'v-1',
       delegationId: 'deleg-1',
       timeFrom: '08:00',
       timeTo: '18:00',
-      mileage: 8_000,
     };
 
     const out = await svc.submit(makeAuth('przewoznik'), dto);
@@ -605,17 +604,17 @@ describe('ClaimsService.submit — carrier submission gates', () => {
 
   // ── mileage pre-fill from VehicleDailyKm (Phase 7 REWORK #3) ──
 
-  it('7. mileage omitted → pre-filled from Σ VehicleDailyKm.km (state=drove) over [from, to]', async () => {
+  it('7. mileage is ALWAYS Σ VehicleDailyKm.km (state=drove) over the derived [from, to] of the outing vehicle', async () => {
     const repoFake = makeRepo(null);
     const { repo: dailyKm, sumSpy } = makeDailyKmRepo(8_000);
     const svc = makeService(repoFake, undefined, undefined, undefined, dailyKm);
 
+    // Phase 7 §0″ finish — the carrier never sends `mileage`; it is derived
+    // from the daily-km sum over the period of the OUTING's vehicle.
     const dto: SubmitClaimDto = {
-      vehicleId: 'v-1',
       delegationId: 'deleg-1',
       timeFrom: '08:00',
       timeTo: '18:00',
-      // mileage deliberately omitted — the server pre-fills it.
     };
 
     const out = await svc.submit(makeAuth('przewoznik'), dto);
@@ -625,7 +624,8 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     // The persisted mileage equals the daily-km sum, not a body value.
     expect(repoFake.creates[0]!.data.mileage).toBe(8_000);
     expect(repoFake.creates[0]!.data.origMileage).toBe(8_000);
-    // The prefill query uses [dateStart, dateEnd + 1 day) (inclusive end).
+    // The sum query uses [dateStart, dateEnd + 1 day) (inclusive end) for the
+    // OUTING's vehicleId (`v-1`), over the derived period [2026-05-01, 2026-05-10].
     expect(sumSpy).toHaveBeenCalledTimes(1);
     const [vehicleId, from, toExclusive] = sumSpy.mock.calls[0]!;
     expect(vehicleId).toBe('v-1');
@@ -633,22 +633,49 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     expect((toExclusive as Date).toISOString()).toBe('2026-05-11T00:00:00.000Z');
   });
 
-  it('8. explicit mileage overrides the prefill (daily-km repo not queried)', async () => {
+  it('8. a daily-km sum of 0 over the period → 422 (mileage must be > 0)', async () => {
+    // There is no carrier override anymore. If the daily-km data sums to 0 the
+    // claim is correctly rejected by the tier-1 `mileage > 0` gate.
     const repoFake = makeRepo(null);
-    const { repo: dailyKm, sumSpy } = makeDailyKmRepo(999);
+    const { repo: dailyKm } = makeDailyKmRepo(0);
     const svc = makeService(repoFake, undefined, undefined, undefined, dailyKm);
 
     const dto: SubmitClaimDto = {
-      vehicleId: 'v-1',
       delegationId: 'deleg-1',
       timeFrom: '08:00',
       timeTo: '18:00',
-      mileage: 8_000,
+    };
+
+    let caught: unknown;
+    try {
+      await svc.submit(makeAuth('przewoznik'), dto);
+    } catch (e) {
+      caught = e;
+    }
+    const v = readViolation(caught);
+    expect(v).not.toBeNull();
+    expect(v!.violations.some((m) => /Przebieg musi być większy od zera/.test(m))).toBe(
+      true,
+    );
+    expect(repoFake.creates).toHaveLength(0);
+  });
+
+  it('9. vehicle/trailer/driver + plate snapshot are taken from the outing, not the body', async () => {
+    const repoFake = makeRepo(null);
+    const svc = makeService(repoFake);
+
+    const dto: SubmitClaimDto = {
+      delegationId: 'deleg-1',
+      timeFrom: '08:00',
+      timeTo: '18:00',
     };
 
     await svc.submit(makeAuth('przewoznik'), dto);
-    expect(repoFake.creates[0]!.data.mileage).toBe(8_000);
-    expect(sumSpy).not.toHaveBeenCalled();
+    expect(repoFake.creates).toHaveLength(1);
+    const data = repoFake.creates[0]!.data;
+    // vehicleId + plate snapshot derive from the outing's vehicle relation.
+    expect(data.vehicleId).toBe('v-1');
+    expect(data.vehiclePlateSnapshot).toBe('WX12345');
   });
 });
 
@@ -663,11 +690,9 @@ describe('ClaimsService.submit — delegation link', () => {
   });
 
   const dto: SubmitClaimDto = {
-    vehicleId: 'v-1',
     delegationId: 'deleg-1',
     timeFrom: '08:00',
     timeTo: '18:00',
-    mileage: 8_000,
   };
 
   it('derives the period from the outing (dateStart=departureDay, dateEnd=actualReturnAt) and links delegationId', async () => {

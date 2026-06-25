@@ -43,15 +43,21 @@ import { Checkbox } from '@/components/ui/Checkbox';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
-import { FormField, FormGrid, FormSection } from '@/components/forms/Form';
+import {
+  FormDescription,
+  FormField,
+  FormGrid,
+  FormItem,
+  FormLabel,
+  FormSection,
+} from '@/components/forms/Form';
 import { ApiResponseError } from '@/lib/api/client';
-import { formatDateFull } from '@/lib/format/numbers';
+import { formatDateFull, formatKm } from '@/lib/format/numbers';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useClaimPreview, useSubmitClaim } from '@/lib/hooks/useClaims';
 import { useClaimableDelegations } from '@/lib/hooks/useDelegations';
 import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
 import { useFormDraft } from '@/lib/hooks/useFormDraft';
-import { useMyFleet } from '@/lib/hooks/useMyFleet';
 
 const DRAFT_KEY = 'draft:carrier:newClaim';
 
@@ -61,47 +67,39 @@ const CLIENT_MAX_PERIOD_DAYS = 90;
 
 // Keys allowed in the carrier submit form. Used to filter the sessionStorage
 // draft so removed keys cannot resurrect themselves on hydrate and trip Zod
-// `.strict()`. Phase 7.10: `dateStart`/`dateEnd` were REMOVED (period is now
-// server-derived from the outing) and `delegationId` was ADDED. A stale draft
-// carrying the old `dateStart`/`dateEnd` keys would otherwise break submit.
+// `.strict()`. Phase 7.10: `dateStart`/`dateEnd` were REMOVED earlier (period
+// is server-derived from the outing). Phase 7 §0″ finish (2026-06-25):
+// `vehicleId`/`trailerId`/`driverId`/`mileage` were ALSO REMOVED — the carrier
+// no longer enters them, they are derived read-only from the selected outing.
+// A stale draft carrying any of those old keys would otherwise resurrect them
+// into the submit body and trip the backend's `.strict()` 400.
 const FORM_ALLOWED_KEYS = [
-  'vehicleId',
   'delegationId',
-  'trailerId',
-  'driverId',
   'timeFrom',
   'timeTo',
-  'mileage',
   'comment',
   'attachmentIds',
 ] as const;
 
-// The form's editable values. `delegationId` is REQUIRED on submit; the
-// period is server-derived and never lives in the form. `mileage` stays
-// editable (override of the server prefill).
+// The form's editable values — the carrier's ONLY inputs. `delegationId` is
+// REQUIRED; the period, vehicle, trailer, driver and mileage are all
+// server-derived and never live in the form (rendered read-only from the
+// selected outing / the preview response).
 interface FormValues {
-  vehicleId: string;
   delegationId: string;
-  trailerId?: string;
-  driverId?: string;
   timeFrom: string;
   timeTo: string;
-  mileage: number;
   comment?: string;
   attachmentIds?: string[];
 }
 
 function getDefaults(): FormValues {
   return {
-    vehicleId: '',
     delegationId: '',
-    trailerId: undefined,
-    driverId: undefined,
     // timeFrom / timeTo are NOT NULL since phase3_blocks. Empty string keeps
     // the <input type="time"> controlled; the submit gate rejects "".
     timeFrom: '',
     timeTo: '',
-    mileage: 0,
     comment: undefined,
     attachmentIds: undefined,
   };
@@ -110,8 +108,9 @@ function getDefaults(): FormValues {
 /**
  * Drop unknown keys from a persisted draft before `form.reset(draft)`. Without
  * this filter a returning user's saved draft re-introduces removed keys (e.g.
- * the old `dateStart`/`dateEnd`), Zod `.strict()` rejects the whole form, and
- * the user sees a permanently invalid form with no visible offending field.
+ * the old `vehicleId`/`trailerId`/`driverId`/`mileage`/`dateStart`/`dateEnd`),
+ * Zod `.strict()` rejects the whole form, and the user sees a permanently
+ * invalid form with no visible offending field.
  */
 function sanitizeDraft(draft: Record<string, unknown>): Partial<FormValues> {
   const out: Record<string, unknown> = {};
@@ -168,9 +167,6 @@ export default function NewClaimPage() {
   const tPicker = useTranslations('carrier.claims.wyjazdPicker');
   const tCommon = useTranslations('common');
   const router = useRouter();
-  // Include deactivated vehicles — a wniosek can reference a vehicle that
-  // worked the period and was deactivated afterwards.
-  const fleetQ = useMyFleet({ includeInactive: true });
   const delegationsQ = useClaimableDelegations();
   const delegations = useMemo(
     () => delegationsQ.data?.items ?? [],
@@ -204,18 +200,26 @@ export default function NewClaimPage() {
     [delegations, watched.delegationId],
   );
 
-  // ── Prefill vehicle + timeFrom from the chosen outing ────────────────
-  // Picking an outing pre-selects its vehicle (the wniosek is against that
-  // vehicle) and seeds `timeFrom` from the outing's `departureAt` time — both
-  // overridable. Guarded on the *current* form value so a manual edit is never
-  // clobbered.
+  // ── Read-only vehicle / trailer / driver (Phase 7 §0″ finish) ─────────
+  // Derived DIRECTLY from the selected outing — the carrier no longer picks
+  // them. Display-only; the submit body never carries them (the api derives
+  // them from `delegationId`). `null` until an outing is selected → muted
+  // "pick a wyjazd first" placeholder.
+  const derivedVehiclePlate = selectedDelegation?.vehicle?.plateNumber ?? null;
+  const derivedTrailerPlate = selectedDelegation?.trailer?.plateNumber ?? null;
+  const derivedDriverName = selectedDelegation
+    ? (selectedDelegation.driver
+        ? `${selectedDelegation.driver.firstName} ${selectedDelegation.driver.lastName}`
+        : selectedDelegation.driverNameSnapshot)
+    : null;
+
+  // ── Prefill timeFrom from the chosen outing ──────────────────────────
+  // Vehicle/trailer/driver are NO LONGER form fields (Phase 7 §0″ finish) — they
+  // render read-only from the selected outing directly. Picking an outing only
+  // seeds `timeFrom` from the outing's `departureAt` time (overridable). Guarded
+  // on the *current* form value so a manual edit is never clobbered.
   useEffect(() => {
     if (!selectedDelegation) return;
-    if (!form.getValues('vehicleId')) {
-      form.setValue('vehicleId', selectedDelegation.vehicleId, {
-        shouldDirty: false,
-      });
-    }
     const seedTime = timeFromIso(selectedDelegation.departureAt);
     if (seedTime && !form.getValues('timeFrom')) {
       form.setValue('timeFrom', seedTime, { shouldDirty: false });
@@ -223,40 +227,29 @@ export default function NewClaimPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDelegation?.id]);
 
-  // ── Preview body — keyed off delegationId (period derived server-side) ──
-  // We send `delegationId` and OMIT the dates; the api derives the period and
-  // returns `dateStart`/`dateEnd` (+ `delegationWarning` for w_trasie). Mileage
-  // is omitted until the carrier types a positive override so the server prefill
-  // (`Σ VehicleDailyKm`) drives the math.
+  // ── Preview body — keyed off delegationId (everything derived server-side) ──
+  // We send ONLY `delegationId` (+ the time window) and OMIT vehicleId/mileage;
+  // the api derives the period, vehicle/trailer/driver and mileage from the
+  // outing and returns `dateStart`/`dateEnd`, `mileage`, `delegationContext`
+  // (+ `delegationWarning` for w_trasie). The carrier cannot override any of
+  // them (Phase 7 §0″ finish).
   const { previewBody, emptyReason } = useMemo<{
     previewBody: PreviewClaimDto | null;
     emptyReason: 'incomplete' | undefined;
   }>(() => {
-    if (!watched.vehicleId || !watched.delegationId) {
+    if (!watched.delegationId) {
       return { previewBody: null, emptyReason: 'incomplete' };
     }
-    const hasMileage =
-      typeof watched.mileage === 'number' &&
-      !Number.isNaN(watched.mileage) &&
-      watched.mileage > 0;
     return {
       previewBody: {
-        vehicleId: watched.vehicleId,
         delegationId: watched.delegationId,
         timeFrom: watched.timeFrom || undefined,
         timeTo: watched.timeTo || undefined,
-        mileage: hasMileage ? watched.mileage : undefined,
         hoursAdjusted: 0,
       },
       emptyReason: undefined,
     };
-  }, [
-    watched.vehicleId,
-    watched.delegationId,
-    watched.mileage,
-    watched.timeFrom,
-    watched.timeTo,
-  ]);
+  }, [watched.delegationId, watched.timeFrom, watched.timeTo]);
 
   const debouncedPreviewBody = useDebouncedValue(previewBody, 400);
   const previewQ = useClaimPreview(debouncedPreviewBody, {
@@ -279,18 +272,13 @@ export default function NewClaimPage() {
     if (!notYetReturned) setAcknowledged(false);
   }, [notYetReturned, watched.delegationId]);
 
-  // ── Mileage prefill from the preview ─────────────────────────────────
+  // ── Read-only mileage from the preview (Phase 7 §0″ finish) ──────────
+  // ALWAYS the server-computed `Σ VehicleDailyKm (state=drove)` over the derived
+  // period — the carrier can never edit it. Display-only; rendered read-only in
+  // the values section. `undefined` until the preview returns (muted placeholder).
   const previewMileage = previewQ.data?.mileage;
-  useEffect(() => {
-    if (typeof previewMileage !== 'number' || previewMileage <= 0) return;
-    const current = form.getValues('mileage');
-    if (typeof current === 'number' && current > 0) return;
-    form.setValue('mileage', previewMileage, {
-      shouldDirty: false,
-      shouldValidate: false,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewMileage]);
+  const hasPreviewMileage =
+    typeof previewMileage === 'number' && !Number.isNaN(previewMileage);
 
   // ── Duration gate (mirror of api-side `canSubmitByDuration`) ──────────
   const previewTotalDays = previewQ.data?.breakdown?.totalDays;
@@ -362,17 +350,15 @@ export default function NewClaimPage() {
   const onSubmit = form.handleSubmit(
     (values) => {
       setViolations([]);
-      // Assemble the SubmitClaimDto: delegationId-driven, NO dates (server
-      // derives the period). Strip empty optional fields.
+      // Assemble the SubmitClaimDto (Phase 7 §0″ finish): the backend body is
+      // `.strict()` and accepts ONLY these 5 keys. vehicleId/trailerId/driverId/
+      // mileage are DERIVED server-side from `delegationId` — sending any of
+      // them is a 400. Strip empty optional fields.
       const body: Record<string, unknown> = {
-        vehicleId: values.vehicleId,
         delegationId: values.delegationId,
         timeFrom: values.timeFrom,
         timeTo: values.timeTo,
-        mileage: values.mileage,
       };
-      if (values.trailerId) body.trailerId = values.trailerId;
-      if (values.driverId) body.driverId = values.driverId;
       if (values.comment) body.comment = values.comment;
       if (values.attachmentIds && values.attachmentIds.length > 0) {
         body.attachmentIds = values.attachmentIds;
@@ -388,15 +374,12 @@ export default function NewClaimPage() {
 
   const errs = form.formState.errors;
 
-  // Explicit required-fields gate (independent of resolver). The empty form is
-  // never submittable; the soft-gate adds the w_trasie acknowledgement.
+  // Explicit required-fields gate (independent of resolver). The carrier's only
+  // required inputs are the outing + the time window; the soft-gate adds the
+  // w_trasie acknowledgement. Vehicle/trailer/driver/mileage are server-derived
+  // and never user-required.
   const requiredFilled =
-    !!watched.vehicleId &&
-    !!watched.delegationId &&
-    !!watched.timeFrom &&
-    !!watched.timeTo &&
-    typeof watched.mileage === 'number' &&
-    watched.mileage > 0;
+    !!watched.delegationId && !!watched.timeFrom && !!watched.timeTo;
 
   // Soft-gate: when the outing is w_trasie, the acknowledgement checkbox must
   // be ticked. zjechal outings submit straight through (no gate).
@@ -440,10 +423,6 @@ export default function NewClaimPage() {
     'boundaryHintTimeTo',
     'boundaryHintTimeToWeekend',
   );
-
-  const vehicles = fleetQ.data?.vehicles ?? [];
-  const drivers = fleetQ.data?.drivers ?? [];
-  const trailers = fleetQ.data?.trailers ?? [];
 
   const noClaimable =
     !delegationsQ.isLoading && delegations.length === 0;
@@ -597,57 +576,33 @@ export default function NewClaimPage() {
                 )}
               </FormSection>
 
+              {/* Vehicle / trailer / driver are DERIVED read-only from the
+                  selected outing (Phase 7 §0″ finish) — the carrier no longer
+                  picks them. Same visual treatment as the derived-period card. */}
               <FormSection title={tForm('sectionVehicleAndDriver')}>
-                <FormField
-                  label={tForm('vehicle')}
-                  required
-                  error={errs.vehicleId?.message}
-                  htmlFor="claim-vehicleId"
-                >
-                  <Select id="claim-vehicleId" {...form.register('vehicleId')}>
-                    <option value="">—</option>
-                    {vehicles.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.plateNumber}
-                        {!v.active ? ` ${tCommon('inactiveSuffix')}` : ''}
-                      </option>
-                    ))}
-                  </Select>
-                </FormField>
-
-                <FormGrid cols={2}>
-                  <FormField
-                    label={tForm('driver')}
-                    error={errs.driverId?.message}
-                    htmlFor="claim-driverId"
+                {selectedDelegation ? (
+                  <FormGrid cols={2}>
+                    <ReadOnlyField
+                      label={tForm('vehicle')}
+                      value={derivedVehiclePlate}
+                    />
+                    <ReadOnlyField
+                      label={tForm('driver')}
+                      value={derivedDriverName}
+                    />
+                    <ReadOnlyField
+                      label={tForm('trailer')}
+                      value={derivedTrailerPlate}
+                    />
+                  </FormGrid>
+                ) : (
+                  <p
+                    role="status"
+                    className="rounded-md border border-border bg-input/40 px-3 py-2 text-sm text-text-sub"
                   >
-                    <Select id="claim-driverId" {...form.register('driverId')}>
-                      <option value="">—</option>
-                      {drivers.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.firstName} {d.lastName}
-                          {!d.active ? ` ${tCommon('inactiveSuffix')}` : ''}
-                        </option>
-                      ))}
-                    </Select>
-                  </FormField>
-                  <FormField
-                    label={tForm('trailer')}
-                    error={errs.trailerId?.message}
-                    htmlFor="claim-trailerId"
-                  >
-                    <Select id="claim-trailerId" {...form.register('trailerId')}>
-                      <option value="">—</option>
-                      {trailers.map((tr) => (
-                        <option key={tr.id} value={tr.id}>
-                          {tr.plateNumber}
-                          {tr.trailerTypeName ? ` (${tr.trailerTypeName})` : ''}
-                          {!tr.active ? ` ${tCommon('inactiveSuffix')}` : ''}
-                        </option>
-                      ))}
-                    </Select>
-                  </FormField>
-                </FormGrid>
+                    {tForm('vehicleReadOnlyPlaceholder')}
+                  </p>
+                )}
               </FormSection>
 
               {/* Period is now derived (above). Only the time window stays a
@@ -705,27 +660,17 @@ export default function NewClaimPage() {
                 </FormGrid>
               </FormSection>
 
+              {/* Mileage is DERIVED read-only from the preview (the
+                  server-computed Σ VehicleDailyKm over the period). The carrier
+                  can never edit it — it updates whenever the preview re-runs. */}
               <FormSection title={tForm('sectionValues')}>
                 <FormGrid cols={2}>
-                  <FormField
+                  <ReadOnlyField
                     label={tForm('mileage')}
-                    required
-                    description={tPicker('mileageHint')}
-                    error={errs.mileage?.message}
-                    htmlFor="claim-mileage"
-                  >
-                    <Input
-                      id="claim-mileage"
-                      type="number"
-                      step="0.01"
-                      min={0}
-                      className="h-10"
-                      {...form.register('mileage', {
-                        setValueAs: (v) =>
-                          v === '' || v === null ? 0 : Number(v),
-                      })}
-                    />
-                  </FormField>
+                    value={hasPreviewMileage ? formatKm(previewMileage) : null}
+                    placeholder={tForm('mileageReadOnlyPlaceholder')}
+                    description={tForm('mileageReadOnlyHint')}
+                  />
                 </FormGrid>
               </FormSection>
 
@@ -803,6 +748,42 @@ export default function NewClaimPage() {
         </div>
       </form>
     </section>
+  );
+}
+
+/**
+ * A read-only derived field — same visual treatment as the §7.10.3 derived-
+ * period card (`bg-input/40` boxed value, uppercase micro-label). Used for the
+ * vehicle / trailer / driver (from the selected outing) and the mileage (from
+ * the preview), all of which the carrier no longer enters (Phase 7 §0″ finish).
+ * `value === null` falls back to a muted `placeholder` (or `—`). Grid-aware via
+ * `<FormItem>`: the first child is the label band, the boxed value the control
+ * band, so it aligns with sibling fields inside a `<FormGrid>`.
+ */
+function ReadOnlyField({
+  label,
+  value,
+  placeholder,
+  description,
+}: {
+  label: string;
+  value: string | null | undefined;
+  placeholder?: string;
+  description?: string;
+}) {
+  const hasValue = value != null && value !== '';
+  return (
+    <FormItem>
+      <FormLabel>{label}</FormLabel>
+      <div className="rounded-md border border-border bg-input/40 px-3 py-2 min-h-10 flex items-center">
+        {hasValue ? (
+          <span className="text-sm text-text tabular-nums">{value}</span>
+        ) : (
+          <span className="text-sm text-text-sub">{placeholder ?? '—'}</span>
+        )}
+      </div>
+      {description && <FormDescription>{description}</FormDescription>}
+    </FormItem>
   );
 }
 

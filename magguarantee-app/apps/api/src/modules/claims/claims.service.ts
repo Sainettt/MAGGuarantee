@@ -182,42 +182,44 @@ export class ClaimsService {
   ) {}
 
   /**
-   * Resolves the effective mileage for submit / preview. The carrier MAY send
-   * an explicit value (override); when omitted we pre-fill it as
+   * Resolves the effective mileage for submit / preview / recalc as
    * `Σ VehicleDailyKm.km (state=drove)` over `[dateStart, dateEnd]` of the
-   * vehicle (Phase 7 REWORK #3, docs/20 §0′). `pracownik` revises it at
-   * verification regardless. `dateEnd` is inclusive, so we pass `dateEnd + 1d`
-   * as the half-open upper bound to the repository.
+   * vehicle (Phase 7 §0″ finish, docs/20 §0″). There is NO carrier override —
+   * the carrier no longer sends `mileage`; it is ALWAYS the server-computed
+   * daily-km sum. `pracownik` revises it at verification. `dateEnd` is
+   * inclusive, so we pass `dateEnd + 1d` as the half-open upper bound to the
+   * repository.
    */
   private async _resolveMileage(
     vehicleId: string,
-    explicit: number | undefined,
     dateStart: Date,
     dateEnd: Date,
   ): Promise<number> {
-    if (explicit !== undefined) return explicit;
     if (!this.dailyKm) return 0;
     const toExclusive = new Date(dateEnd.getTime() + 24 * 60 * 60 * 1000);
     return this.dailyKm.sumDroveKm(vehicleId, dateStart, toExclusive);
   }
 
   /**
-   * Phase 7 REWORK (2026-06-20 #4) — resolves the wniosek period from the chosen
-   * outing and enforces the link invariants. Throws:
-   *  - 422 when the outing is missing, belongs to another carrier/vehicle, or is
-   *    not yet `w_trasie`/`zjechal` (i.e. still `gotowy`/`zgloszony`/`anulowany`),
+   * Phase 7 §0″ — resolves the chosen outing and enforces the link invariants,
+   * returning the outing row itself (so the caller can DERIVE vehicle / trailer
+   * / driver / plate snapshot / mileage from it — the carrier no longer sends
+   * any of those). Throws:
+   *  - 422 when the outing is missing, belongs to another carrier, or is not yet
+   *    `w_trasie`/`zjechal` (i.e. still `gotowy`/`zgloszony`/`anulowany`),
    *  - 409 when a wniosek already exists for the outing (defence-in-depth ahead
    *    of the unique-FK P2002 catch in `submit`).
    *
-   * Returns the period boundaries plus a soft `warning` when the outing is still
-   * `w_trasie` (the carrier may proceed; `dateEnd` then falls back to
-   * `plannedReturnAt`, and a later `zjechal` triggers the auto-recalc).
+   * Returns the outing row plus the derived period boundaries plus a soft
+   * `warning` when the outing is still `w_trasie` (the carrier may proceed;
+   * `dateEnd` then falls back to `plannedReturnAt`, and a later `zjechal`
+   * triggers the auto-recalc).
    */
-  private async _resolveDelegationPeriod(
+  private async _resolveDelegationContext(
     carrierId: string,
-    vehicleId: string,
     delegationId: string,
   ): Promise<{
+    delegation: DelegationRow;
     dateStart: Date;
     dateEnd: Date;
     warning: DelegationWarning | null;
@@ -231,15 +233,11 @@ export class ClaimsService {
     if (!deleg || deleg.carrierId !== carrierId) {
       throw new UnprocessableEntityException('Nieprawidłowy wyjazd');
     }
-    if (deleg.vehicleId !== vehicleId) {
-      throw new UnprocessableEntityException(
-        'Wybrany wyjazd dotyczy innego pojazdu.',
-      );
-    }
     if (deleg.claimId) {
       throw new ConflictException('Na ten wyjazd już złożono wniosek.');
     }
-    return this._deriveDelegationPeriod(deleg);
+    const period = this._deriveDelegationPeriod(deleg);
+    return { delegation: deleg, ...period };
   }
 
   /**
@@ -265,52 +263,71 @@ export class ClaimsService {
     return { dateStart, dateEnd, warning };
   }
 
+  /**
+   * Resolves the vehicle plate snapshot for a claim derived from an outing.
+   * Prefers the eager `delegation.vehicle.plateNumber` relation; falls back to
+   * a repository lookup by `delegation.vehicleId` if the relation wasn't
+   * hydrated (defensive — the delegations repo always includes it). Throws 422
+   * only if neither path resolves a plate (a referential-integrity problem).
+   */
+  private async _resolveVehiclePlate(deleg: DelegationRow): Promise<string> {
+    if (deleg.vehicle?.plateNumber) return deleg.vehicle.plateNumber;
+    const v = await this.vehicles.findById(deleg.vehicleId);
+    if (v?.plateNumber) return v.plateNumber;
+    throw new UnprocessableEntityException('Nieprawidłowy pojazd');
+  }
+
+  /**
+   * Derives the driver display-name snapshot for a claim from the outing.
+   * Prefers `delegation.driverNameSnapshot` (the value the carrier already
+   * captured at outing creation); falls back to the `driver` relation
+   * (`firstName lastName`). Returns `null` when neither is available.
+   */
+  private _resolveDriverNameSnapshot(deleg: DelegationRow): string | null {
+    if (deleg.driverNameSnapshot && deleg.driverNameSnapshot.trim().length > 0) {
+      return deleg.driverNameSnapshot;
+    }
+    if (deleg.driver) {
+      const full = `${deleg.driver.firstName} ${deleg.driver.lastName}`.trim();
+      return full.length > 0 ? full : null;
+    }
+    return null;
+  }
+
   // ── Submit ──────────────────────────────────────────────
 
   async submit(user: AuthUser, dto: SubmitClaimDto): Promise<ClaimDto> {
     // carrier-only path, see @Roles on POST /claims
     const carrier = await this._requireCarrierProfile(user);
 
-    // Hard checks — security / referential integrity. These throw 403/404
-    // before any business-rule collection, because there's no UI affordance
-    // for "you don't own this driver" except "pick another one".
-    if (dto.driverId) {
-      await this._requireOwnedDriver(carrier.id, dto.driverId);
-    }
-    if (dto.trailerId) {
-      await this._requireOwnedTrailer(carrier.id, dto.trailerId);
-    }
-    const vehicle = await this._requireOwnedVehicle(carrier.id, dto.vehicleId);
-
-    // Phase 7 REWORK (2026-06-20 #4) — the period is DERIVED from the chosen
-    // outing, not sent by the carrier. Validates ownership (same carrier +
-    // vehicle), status gate ({w_trasie, zjechal}), and returns the period
-    // boundaries (`dateStart = date(departureAt)`,
+    // Phase 7 §0″ finish — EVERYTHING (period, vehicle, trailer, driver,
+    // mileage) DERIVES from the chosen outing; the carrier sends only
+    // `delegationId` + `timeFrom`/`timeTo` (+ optional comment/attachments).
+    // `_resolveDelegationContext` validates ownership (same carrier), the
+    // status gate ({w_trasie, zjechal}), the not-already-claimed invariant, and
+    // returns the outing row + derived period (`dateStart = date(departureAt)`,
     // `dateEnd = actualReturnAt ?? plannedReturnAt`). A still-`w_trasie` outing
-    // is NOT blocked — `_resolveDelegationPeriod` flags it (soft warning); a
-    // `gotowy`/`zgloszony` outing throws 422 here.
-    const delegationCtx = await this._resolveDelegationPeriod(
+    // is NOT blocked — it carries a soft warning; a `gotowy`/`zgloszony` outing
+    // throws 422. The trailer/driver belong to the carrier transitively (they
+    // were chosen by the carrier when the carrier created the outing, and the
+    // outing is owned by the carrier), so no separate ownership check is needed.
+    const delegationCtx = await this._resolveDelegationContext(
       carrier.id,
-      vehicle.id,
       dto.delegationId,
     );
-    const { dateStart, dateEnd } = delegationCtx;
+    const { delegation, dateStart, dateEnd } = delegationCtx;
+    const vehicleId = delegation.vehicleId;
+    const vehiclePlateSnapshot = await this._resolveVehiclePlate(delegation);
 
     const config = await this._loadSubmitConfig();
     const today = startOfBusinessTodayUtc();
     const dateStartIso = toIsoDateOnly(dateStart);
     const dateEndIso = toIsoDateOnly(dateEnd);
 
-    // Resolve mileage: explicit carrier override OR pre-fill from
-    // `Σ VehicleDailyKm.km (state=drove)` over [dateStart, dateEnd] of the
-    // vehicle (Phase 7 REWORK #3). All downstream checks + the persisted row
-    // use this resolved value instead of `dto.mileage`.
-    const mileage = await this._resolveMileage(
-      vehicle.id,
-      dto.mileage,
-      dateStart,
-      dateEnd,
-    );
+    // Mileage is ALWAYS `Σ VehicleDailyKm.km (state=drove)` over [dateStart,
+    // dateEnd] for the delegation's vehicle (Phase 7 §0″ finish — no carrier
+    // override). All downstream checks + the persisted row use this value.
+    const mileage = await this._resolveMileage(vehicleId, dateStart, dateEnd);
 
     // ── Tier 1: pre-calc business rules ───────────────────────
     // Collect everything we can check WITHOUT running km-calc. If the user
@@ -364,7 +381,7 @@ export class ClaimsService {
     // ODRZUCONO claims are explicitly excluded by the repository query so
     // a rejected carrier can resubmit a corrected wniosek immediately.
     const lastClaim = await this.claims.findLastNonRejectedForVehicle(
-      vehicle.id,
+      vehicleId,
     );
     const cooldown = cooldownCheck({
       now: new Date(),
@@ -475,8 +492,9 @@ export class ClaimsService {
         return this.claims.createWithin(txLike, {
           nrZgl,
           carrierId: carrier.id,
-          vehicleId: vehicle.id,
-          vehiclePlateSnapshot: vehicle.plateNumber,
+          // Vehicle + plate snapshot DERIVED from the outing (Phase 7 §0″).
+          vehicleId,
+          vehiclePlateSnapshot,
           dateStart,
           dateEnd,
           // Required post-phase3_blocks (NOT NULL).
@@ -663,21 +681,18 @@ export class ClaimsService {
     const dateStart = startOfUtcDay(claim.dateStart);
     const dateEnd = startOfUtcDay(actualReturnAt);
 
-    // Re-prefill mileage via the SAME `_resolveMileage` ONLY when the carrier
-    // didn't override at submit. We detect "no manual override" by the carrier
-    // snapshot equalling the applied mileage (origMileage === mileage) — a
-    // verifier may have since changed `mileage`, in which case we respect it.
-    const carrierOverrode =
+    // Re-prefill mileage via the SAME `_resolveMileage` (the daily-km sum over
+    // the NEW period) UNLESS a human has since changed it. The carrier no longer
+    // overrides at submit (mileage is always the daily-km sum), so the only way
+    // `mileage` can diverge from the immutable `origMileage` snapshot is a
+    // VERIFIER edit — and a human-corrected mileage must not be silently
+    // re-prefilled. `origMileage === mileage` ⇒ untouched ⇒ safe to re-prefill.
+    const mileageWasHumanEdited =
       claim.origMileage !== null && claim.origMileage !== claim.mileage;
     const mileage =
-      carrierOverrode || claim.vehicleId === null
+      mileageWasHumanEdited || claim.vehicleId === null
         ? claim.mileage
-        : await this._resolveMileage(
-            claim.vehicleId,
-            undefined,
-            dateStart,
-            dateEnd,
-          );
+        : await this._resolveMileage(claim.vehicleId, dateStart, dateEnd);
 
     // Re-run km-calc via the SAME `KmCalcService` (preview == submit == recalc).
     const calc = await this.kmCalc.calc({
@@ -946,23 +961,30 @@ export class ClaimsService {
   ): Promise<PreviewClaimResponse> {
     // carrier-only path, see @Roles on POST /claims/preview
     const carrier = await this._requireCarrierProfile(user);
+
+    // Phase 7 §0″ finish — when the carrier has picked an outing the PERIOD,
+    // VEHICLE, TRAILER, DRIVER, MILEAGE (and the `w_trasie` soft warning) are all
+    // DERIVED from it, mirroring what submit() will compute; the body carries no
+    // vehicle/mileage. When `delegationId` is absent (the existing-claim /
+    // verifier inspection path reaching this method directly), we fall back to a
+    // caller-supplied `vehicleId` + dates — ownership re-checked defence-in-depth.
+    if (dto.delegationId) {
+      const ctx = await this._resolveDelegationContext(
+        carrier.id,
+        dto.delegationId,
+      );
+      return this._runPreviewCalc(dto, ctx);
+    }
+
+    if (!dto.vehicleId) {
+      throw new UnprocessableEntityException(
+        'Wybór wyjazdu jest wymagany do podglądu wniosku.',
+      );
+    }
     // Ensure the carrier owns the vehicle they're previewing for — defence
     // in depth even with `CarrierOwnershipGuard` at the controller.
     await this._requireOwnedVehicle(carrier.id, dto.vehicleId);
-
-    // Phase 7 REWORK (2026-06-20 #4) — when the carrier has picked an outing
-    // the period (and the `w_trasie` soft warning) is DERIVED from it, mirroring
-    // what submit() will compute; the dates in the body are ignored. Otherwise
-    // the legacy date-driven live preview path runs unchanged.
-    const period = dto.delegationId
-      ? await this._resolveDelegationPeriod(
-          carrier.id,
-          dto.vehicleId,
-          dto.delegationId,
-        )
-      : null;
-
-    return this._runPreviewCalc(dto, period);
+    return this._runPreviewCalc(dto, null);
   }
 
   /**
@@ -998,19 +1020,26 @@ export class ClaimsService {
    * ownership checks — callers are responsible for gating access before
    * invoking this helper. Mirrors the calc + envelope built historically
    * inside `previewKmCalc` so behaviour is byte-identical for the carrier.
+   *
+   * `ctx` (the delegation-derived context) drives the carrier new-claim path:
+   * the period, the vehicle backing the mileage sum, and the read-only
+   * vehicle/trailer/driver `delegationContext` all come from the outing. When
+   * `ctx` is null, the legacy date-driven path runs off the body's
+   * `dateStart`/`dateEnd` (+ optional `vehicleId` for the mileage sum).
    */
   private async _runPreviewCalc(
     dto: PreviewClaimDto,
-    period: {
+    ctx: {
+      delegation: DelegationRow;
       dateStart: Date;
       dateEnd: Date;
       warning: DelegationWarning | null;
     } | null = null,
   ): Promise<PreviewClaimResponse> {
     // Resolve the effective period: derived from the outing when supplied,
-    // otherwise the carrier-supplied `dateStart`/`dateEnd` (legacy live preview).
-    const dateStart = period ? period.dateStart : isoDateToMidnightUtc(dto.dateStart ?? '');
-    const dateEnd = period ? period.dateEnd : isoDateToMidnightUtc(dto.dateEnd ?? '');
+    // otherwise the caller-supplied `dateStart`/`dateEnd` (existing-claim path).
+    const dateStart = ctx ? ctx.dateStart : isoDateToMidnightUtc(dto.dateStart ?? '');
+    const dateEnd = ctx ? ctx.dateEnd : isoDateToMidnightUtc(dto.dateEnd ?? '');
     const dateStartIso = dateStart ? toIsoDateOnly(dateStart) : (dto.dateStart ?? '');
     const dateEndIso = dateEnd ? toIsoDateOnly(dateEnd) : (dto.dateEnd ?? '');
 
@@ -1025,18 +1054,16 @@ export class ClaimsService {
       hoursAdjusted: dto.hoursAdjusted ?? 0,
     });
 
-    // Mileage: explicit override OR pre-fill from `Σ VehicleDailyKm.km
-    // (state=drove)` over the period (Phase 7 REWORK #3). The live preview
-    // mirrors what submit() will compute so the carrier sees the prefill.
+    // Mileage is ALWAYS `Σ VehicleDailyKm.km (state=drove)` over the period for
+    // the relevant vehicle (Phase 7 §0″ finish — no carrier override). The
+    // vehicle comes from the outing on the new-claim path, or from the
+    // caller-supplied `vehicleId` on the existing-claim path. With no vehicle
+    // and no valid period, mileage is 0 (the carrier hasn't picked an outing).
+    const vehicleId = ctx ? ctx.delegation.vehicleId : dto.vehicleId;
     const mileage =
-      dateStart && dateEnd
-        ? await this._resolveMileage(
-            dto.vehicleId,
-            dto.mileage,
-            dateStart,
-            dateEnd,
-          )
-        : (dto.mileage ?? 0);
+      dateStart && dateEnd && vehicleId
+        ? await this._resolveMileage(vehicleId, dateStart, dateEnd)
+        : 0;
 
     const kmDifference = calc.kmGuaranteed - mileage;
     const paymentEur =
@@ -1061,14 +1088,41 @@ export class ClaimsService {
         breakdown: calc.breakdown,
       },
       // Surfaced only on the delegation-derived path so the carrier form can
-      // show the read-only period + the `w_trasie` soft-warning banner.
-      ...(period
+      // show the read-only period + vehicle/trailer/driver + the `w_trasie`
+      // soft-warning banner.
+      ...(ctx
         ? {
             dateStart: dateStartIso,
             dateEnd: dateEndIso,
-            ...(period.warning ? { delegationWarning: period.warning } : {}),
+            delegationContext: this._buildDelegationContext(ctx.delegation),
+            ...(ctx.warning ? { delegationWarning: ctx.warning } : {}),
           }
         : {}),
+    };
+  }
+
+  /**
+   * Builds the read-only vehicle/trailer/driver context block for the preview
+   * response from the chosen outing (Phase 7 §0″ finish). Plate/driver-name are
+   * the delegation's eager relations + snapshots; the web form renders these
+   * fields read-only so the carrier sees exactly what the submit will persist /
+   * link. Pure projection — no IO.
+   */
+  private _buildDelegationContext(deleg: DelegationRow): {
+    vehicleId: string;
+    vehiclePlate: string;
+    trailerId: string;
+    trailerPlate: string | null;
+    driverId: string;
+    driverName: string | null;
+  } {
+    return {
+      vehicleId: deleg.vehicleId,
+      vehiclePlate: deleg.vehicle?.plateNumber ?? '',
+      trailerId: deleg.trailerId,
+      trailerPlate: deleg.trailer?.plateNumber ?? null,
+      driverId: deleg.driverId,
+      driverName: this._resolveDriverNameSnapshot(deleg),
     };
   }
 
@@ -1766,25 +1820,13 @@ export class ClaimsService {
     return { id: v.id, plateNumber: v.plateNumber };
   }
 
-  private async _requireOwnedDriver(
-    carrierId: string,
-    driverId: string,
-  ): Promise<void> {
-    const d = await this.drivers.findById(driverId);
-    if (!d || d.carrierId !== carrierId) {
-      throw new UnprocessableEntityException('Nieprawidłowy kierowca');
-    }
-  }
-
-  private async _requireOwnedTrailer(
-    carrierId: string,
-    trailerId: string,
-  ): Promise<void> {
-    const t = await this.trailers.findById(trailerId);
-    if (!t || t.carrierId !== carrierId) {
-      throw new UnprocessableEntityException('Nieprawidłowa naczepa');
-    }
-  }
+  // NOTE: `_requireOwnedDriver` / `_requireOwnedTrailer` were removed with the
+  // Phase 7 §0″ finish — the carrier no longer sends `driverId`/`trailerId`, so
+  // there is nothing to ownership-check at submit. The driver/trailer belong to
+  // the carrier transitively via the owned outing. The `drivers`/`trailers`
+  // repositories remain injected (DI surface stable) for future verifier-side
+  // flows; they are intentionally not consulted on the carrier submit/preview
+  // path anymore.
 
   private async _loadSubmitConfig(): Promise<{
     maxDaysAfter: number;

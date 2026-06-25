@@ -482,22 +482,27 @@ type UserDto = {
 ### Submit claim
 
 ```ts
-// POST /claims
+// POST /claims — Phase 7 §0″ finish: carrier sends ONLY the outing +
+// time-window. Everything else is server-derived from the linked delegation.
 type SubmitClaimRequest = {
-  vehicleId: string;
-  dateStart: string;       // ISO
-  dateEnd: string;
+  delegationId: string;    // chosen outing (w_trasie | zjechal, no claim yet)
   timeFrom: string;        // HH:MM
-  timeTo: string;
-  mileage: number;
-  amountRequested: number;
-  hoursAdjusted?: number;  // часы простоя — Decimal(5,2), 0..999.99
+  timeTo: string;          // HH:MM
   comment?: string;
-  orderNumber?: string;
-  orderDate?: string;
-  plannerId: string;
-  opiekunId: string;
+  attachmentIds?: string[]; // pre-uploaded attachment UUIDs (max 20)
 };
+// SERVER-DERIVED from the delegation (NOT in the body):
+//   • vehicleId / trailerId / driverId — from Delegation.vehicleId / trailerId
+//     / driverId; `vehiclePlateSnapshot` from Delegation.vehicle.plateNumber.
+//     (Claim persists only vehicleId + vehiclePlateSnapshot; trailer/driver are
+//     carried by the linked Delegation, not duplicated onto Claim.)
+//   • dateStart = date(departureAt), dateEnd = actualReturnAt ?? plannedReturnAt.
+//   • mileage = Σ VehicleDailyKm.km (state=drove) over [dateStart, dateEnd] of
+//     the delegation's vehicle. NO carrier override (was optional pre-§0″).
+//   • amountRequested = km-calc paymentEur (rounded 2dp).
+//   • hoursAdjusted — verifier-only (PATCH); submit always persists 0.
+// OWNERSHIP: @CarrierOwns('delegationId','body','delegationId') — the outing
+// must belong to the authenticated carrier (delegation.carrierId === carrier).
 
 // 422 problem-details для POST /claims несёт мульти-violation envelope:
 // {
@@ -555,14 +560,40 @@ type ClaimDto = {
   breakdown: KmCalcBreakdown;
 };
 
-// POST /claims/:nrZgl/preview
-type PreviewRequest = Pick<SubmitClaimRequest, 'vehicleId' | 'dateStart' | 'dateEnd' | 'mileage' | 'timeFrom' | 'timeTo'>;
+// POST /claims/preview (new-claim form) and POST /claims/:nrZgl/preview
+// (reklamacja / verifier inspection). Two callers, two shapes:
+//   • new-claim: { delegationId, timeFrom?, timeTo?, hoursAdjusted? } — the
+//     api derives period + vehicle/trailer/driver + mileage from the outing.
+//   • existing/verifier: { vehicleId?, dateStart?, dateEnd?, timeFrom?, timeTo?,
+//     hoursAdjusted? } — caller-supplied dates drive the math; the existing
+//     claim already carries vehicle/trailer/driver context.
+// NO `mileage` in the body (Phase 7 §0″ finish — always the daily-km sum).
+type PreviewRequest = {
+  delegationId?: string;   // new-claim path → derive everything from the outing
+  vehicleId?: string;      // existing/verifier path → vehicle for the km sum
+  dateStart?: string;      // existing/verifier path (omit on the delegation path)
+  dateEnd?: string;
+  timeFrom?: string;       // HH:MM
+  timeTo?: string;
+  hoursAdjusted?: number;  // verifier inspection only; default 0
+};
 type PreviewResponse = {
+  mileage: number;            // Σ VehicleDailyKm.km (state=drove) over the period
   kmGuaranteed: number;
   kmDifference: number;
   paymentEur: number;
   ratePerKmEffective: number;
   breakdown: KmCalcBreakdown;
+  // Present ONLY on the delegation-derived (new-claim) path, so the carrier
+  // form can render the read-only period + vehicle/trailer/driver:
+  dateStart?: string;         // derived from the outing
+  dateEnd?: string;           // derived from the outing
+  delegationWarning?: 'NOT_YET_RETURNED'; // soft warn when outing still w_trasie
+  delegationContext?: {       // read-only vehicle/trailer/driver from the outing
+    vehicleId: string; vehiclePlate: string;
+    trailerId: string; trailerPlate: string | null;
+    driverId: string; driverName: string | null;
+  };
 };
 
 // Источник истины формы `KmCalcBreakdown` — `KmCalcBreakdownSchema` в

@@ -121,10 +121,11 @@ function buildPreviewBody(
   if (!claim.vehicleId) return null;
   const dateStart = v.dateStart || claim.dateStart.slice(0, 10);
   const dateEnd = v.dateEnd || claim.dateEnd.slice(0, 10);
-  const mileage =
-    v.mileage !== undefined && Number.isFinite(v.mileage)
-      ? Number(v.mileage)
-      : claim.mileage;
+  // `mileage` was REMOVED from PreviewClaimSchema (Phase 7 §0″ finish) — the
+  // preview math always uses the server-computed Σ VehicleDailyKm over the
+  // period, never a caller-supplied override. The verifier's manual mileage
+  // edit still flows through the PATCH (UpdateClaimCorrectionFields.mileage),
+  // it just no longer drives the live recalc preview.
   const hoursAdjusted =
     v.hoursAdjusted !== undefined && Number.isFinite(v.hoursAdjusted)
       ? Number(v.hoursAdjusted)
@@ -135,7 +136,6 @@ function buildPreviewBody(
     dateEnd,
     timeFrom: v.timeFrom || claim.timeFrom,
     timeTo: v.timeTo || claim.timeTo,
-    mileage,
     hoursAdjusted,
   };
 }
@@ -316,20 +316,21 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
   // selected targetStatus. Gated only on the vehicle being known (handled
   // inside buildPreviewBody) — the verifier sees the financial consequence
   // of their corrections BEFORE committing to a decision.
+  // `mileage` is intentionally NOT watched for the preview — it no longer drives
+  // the preview math (server computes Σ VehicleDailyKm; PreviewClaimSchema
+  // dropped the field). The verifier's mileage edit still goes out via the PATCH.
   const watched = form.watch([
     'dateStart',
     'dateEnd',
     'timeFrom',
     'timeTo',
-    'mileage',
     'hoursAdjusted',
   ]);
   const wDateStart = watched[0];
   const wDateEnd = watched[1];
   const wTimeFrom = watched[2];
   const wTimeTo = watched[3];
-  const wMileage = watched[4];
-  const wHoursAdjusted = watched[5];
+  const wHoursAdjusted = watched[4];
 
   const previewBodyImmediate = useMemo<PreviewClaimDto | null>(
     () =>
@@ -338,10 +339,9 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
         dateEnd: wDateEnd,
         timeFrom: wTimeFrom,
         timeTo: wTimeTo,
-        mileage: wMileage,
         hoursAdjusted: wHoursAdjusted,
       }),
-    [claim, wDateStart, wDateEnd, wTimeFrom, wTimeTo, wMileage, wHoursAdjusted],
+    [claim, wDateStart, wDateEnd, wTimeFrom, wTimeTo, wHoursAdjusted],
   );
 
   const debouncedPreviewBody = useDebouncedValue(previewBodyImmediate, 300);

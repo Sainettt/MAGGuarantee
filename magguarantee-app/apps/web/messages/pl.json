@@ -1341,6 +1341,7 @@
         "vehicle": "Pojazd",
         "driver": "Kierowca",
         "trailer": "Naczepa",
+        "vehicleReadOnlyPlaceholder": "Najpierw wybierz wyjazd — pojazd, naczepa i kierowca zostaną pobrane z wyjazdu.",
         "sectionPeriod": "Okres",
         "dateStart": "Data od",
         "dateEnd": "Data do",
@@ -1348,6 +1349,8 @@
         "timeTo": "Godzina do",
         "sectionValues": "Wartości",
         "mileage": "Przebieg (km)",
+        "mileageReadOnlyHint": "Wyliczony z dziennych km wyjazdu — pole tylko do odczytu.",
+        "mileageReadOnlyPlaceholder": "— obliczany z wyjazdu",
         "addComment": "Dodaj komentarz",
         "comment": "Komentarz",
         "violationDateEndInFuture": "Data rozładunku ({date}) jest w przyszłości. Wniosek można złożyć dopiero po zjechaniu auta.",
@@ -1378,7 +1381,6 @@
         "selectedStatus": "Status wybranego wyjazdu:",
         "derivedPeriod": "Okres (z wyjazdu)",
         "temporaryPeriodHint": "Okres tymczasowy z planowanego powrotu — zostanie zaktualizowany po zjeździe.",
-        "mileageHint": "Wstępnie wyliczony z dziennych km — możesz nadpisać.",
         "warningBanner": "Wyjazd jeszcze nie ma statusu „Zjechał” — czy na pewno chcesz złożyć wniosek?",
         "warningAck": "Rozumiem, że wyjazd nie jest jeszcze zakończony"
       }
