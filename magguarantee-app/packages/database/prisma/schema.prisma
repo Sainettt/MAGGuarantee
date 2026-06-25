@@ -171,6 +171,7 @@ model User {
   // activity
   reportedDelegations        Delegation[]        @relation("DelegationReporter")
   verifiedDelegations        Delegation[]        @relation("DelegationVerifier")
+  readiedDelegations         Delegation[]        @relation("DelegationReadier")
   authoredClaims             Claim[]             @relation("ClaimDecidedBy")
   uploadedVehicleAttachments VehicleAttachment[]
   uploadedDriverAttachments  DriverAttachment[]
@@ -711,6 +712,13 @@ model Delegation {
   verifiedBy   User?     @relation("DelegationVerifier", fields: [verifiedById], references: [id])
   verifiedAt   DateTime?
 
+  // Eksport who marked the outing `gotowy` (ready). Surfaced in the modal as
+  // the "zweryfikowany" actor — in MAGTRANS the export coordinator readying the
+  // load IS the verification step. Stamped in `markReady` on the forward flip.
+  readyById String?   @db.Uuid
+  readyBy   User?     @relation("DelegationReadier", fields: [readyById], references: [id])
+  readyAt   DateTime?
+
   notes String?
 
   createdAt DateTime  @default(now())
@@ -843,4 +851,23 @@ model ClaimSequence {
   updatedAt  DateTime @updatedAt
 
   @@map("claim_sequences")
+}
+
+// ─── EMAIL THREADS (Phase 9 — Gmail API RFC threading) ──
+// One row per email conversation, keyed by a business `threadKey`
+// (e.g. 'wniosek-GWA/001/05/26'). On the first send `gmailThreadId` and
+// `lastMessageId` are NULL; after Gmail API returns ids we persist them so
+// subsequent sends thread correctly (threadId → gmail.users.messages.send,
+// lastMessageId → In-Reply-To/References headers). SMTP/Mailhog ignores these.
+// See docs/16-jobs-and-integrations.md §"Хранение thread-id".
+model EmailThread {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  threadKey     String  @unique // business key, e.g. 'wniosek-GWA/001/05/26'
+  gmailThreadId String? // Gmail thread id (null until first send returns it)
+  lastMessageId String? // last RFC Message-ID (for In-Reply-To/References)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("email_threads")
 }

@@ -342,6 +342,12 @@ export const DelegationDtoSchema = z.object({
   verifiedById: UuidSchema.nullable(),
   verifiedBy: UserMiniSchema.nullable(),
   verifiedAt: IsoDateTimeSchema.nullable(),
+  // Eksport who marked the outing `gotowy`. Shown in the modal as the
+  // "zweryfikowany" actor (the export coordinator readying the load IS the
+  // verification step in MAGTRANS).
+  readyById: UuidSchema.nullable(),
+  readyBy: UserMiniSchema.nullable(),
+  readyAt: IsoDateTimeSchema.nullable(),
 
   notes: z.string().nullable(),
 

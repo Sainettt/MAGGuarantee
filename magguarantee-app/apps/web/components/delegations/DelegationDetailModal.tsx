@@ -41,7 +41,7 @@ import {
 } from '@/components/ui/EntityDetailModal';
 import { emptyValue, textValue } from '@/components/ui/entity-detail-values';
 import { AlertTriangle } from 'lucide-react';
-import { formatDateTime } from '@/lib/format/numbers';
+import { formatDateFull, formatDateTime } from '@/lib/format/numbers';
 
 interface Props {
   open: boolean;
@@ -71,6 +71,16 @@ function readVehicleDispatchTeam(
 /** "dd.MM.yyyy, HH:mm" rendered inside an em-dash-aware <dd>. */
 function dateTimeValue(iso: string | null | undefined): ReactNode {
   return iso ? <span>{formatDateTime(iso)}</span> : emptyValue();
+}
+
+/**
+ * "dd.MM.yyyy" (date-only). Used for `actualReturnAt`, which the weryfikator
+ * submits as a date with no time — rendering it with `formatDateTime` showed a
+ * spurious "02:00" (UTC-midnight shifted into Europe/Warsaw). Date-only avoids
+ * the shift.
+ */
+function dateValue(iso: string | null | undefined): ReactNode {
+  return iso ? <span>{formatDateFull(iso)}</span> : emptyValue();
 }
 
 const STRIP_MINI_LABEL =
@@ -191,7 +201,8 @@ export function DelegationDetailModal({
           ? [
               {
                 label: tForm('actualReturnAt'),
-                value: dateTimeValue(delegation.actualReturnAt),
+                // Date-only — the weryfikator sets no return TIME (§E1 fix).
+                value: dateValue(delegation.actualReturnAt),
               },
             ]
           : []),
@@ -205,15 +216,18 @@ export function DelegationDetailModal({
           label: tForm('reportedAt'),
           value: dateTimeValue(delegation.reportedAt),
         },
+        // «Zweryfikowany» reflects the EKSPORT who marked the outing `gotowy`
+        // (readyBy/readyAt) — in MAGTRANS readying the load IS the verification
+        // step. (Was verifiedBy/At from the in-transit stamp — §E2/E3.)
         {
           label: tForm('verifiedBy'),
           value: textValue(
-            delegation.verifiedBy?.name ?? delegation.verifiedBy?.login,
+            delegation.readyBy?.name ?? delegation.readyBy?.login,
           ),
         },
         {
           label: tForm('verifiedAt'),
-          value: dateTimeValue(delegation.verifiedAt),
+          value: dateTimeValue(delegation.readyAt),
         },
         {
           label: tForm('notes'),
@@ -291,6 +305,14 @@ export function DelegationDetailModal({
             </div>
           ),
           fullWidth: true,
+        },
+        // Eksport grouped with the dispatchers — the staff steering this outing.
+        // Same person shown as «Zweryfikowany przez» above (readyBy).
+        {
+          label: tTeam('eksport'),
+          value: textValue(
+            delegation.readyBy?.name ?? delegation.readyBy?.login,
+          ),
         },
       ],
     });

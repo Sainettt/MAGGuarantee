@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { render } from '@react-email/render';
 import type { Queue } from 'bullmq';
@@ -19,7 +19,44 @@ import {
   type VerificationDigestProps,
 } from './templates/verification-digest';
 import { PasswordResetEmail } from './templates/password-reset';
-import { SmtpProvider } from './providers/smtp.provider';
+import { LoginCodeEmail } from './templates/login-code';
+import {
+  AccountCreatedEmail,
+  type AccountCreatedProps,
+} from './templates/account-created';
+import {
+  AccountDeactivatedEmail,
+  type AccountDeactivatedProps,
+} from './templates/account-deactivated';
+import {
+  AccountReactivatedEmail,
+  type AccountReactivatedProps,
+} from './templates/account-reactivated';
+import {
+  CarrierDecisionEmail,
+  type CarrierDecisionProps,
+} from './templates/carrier-decision';
+import {
+  InternalDecisionEmail,
+  type InternalDecisionProps,
+} from './templates/internal-decision';
+import {
+  CarrierSubmittedEmail,
+  type CarrierSubmittedProps,
+} from './templates/carrier-submitted';
+import {
+  DelegationAnnouncedEmail,
+  type DelegationAnnouncedProps,
+} from './templates/delegation-announced';
+import {
+  DelegationReadyEmail,
+  type DelegationReadyProps,
+} from './templates/delegation-ready';
+import {
+  MAIL_PROVIDER_TOKEN,
+  type MailProvider,
+} from './providers/mail-provider.interface';
+import { MailThreadingService } from './mail-threading.service';
 
 /** Default code validity surfaced in the reset email copy (mirrors Redis TTL). */
 const PASSWORD_RESET_TTL_MINUTES = 10;
@@ -90,11 +127,14 @@ export class MailService implements IMailService {
   // registry write; when `emailQueue` is null, `enqueue2faCode` falls back to a
   // synchronous send so the code is never dropped.
   constructor(
-    private readonly smtp: SmtpProvider,
+    @Inject(MAIL_PROVIDER_TOKEN) private readonly provider: MailProvider,
     @Optional() private readonly mailJobs?: MailJobsRegistry,
     @Optional()
     @InjectQueue(QUEUE_EMAIL_SEND)
     private readonly emailQueue?: Queue<EmailSendJobData>,
+    // Threading is a Gmail-only concern; absent in unit tests and a no-op
+    // under SMTP/Mailhog (see MailThreadingService).
+    @Optional() private readonly threading?: MailThreadingService,
   ) {}
 
   /**
@@ -123,7 +163,7 @@ export class MailService implements IMailService {
   async send2faCode(email: string, code: string): Promise<void> {
     const subject = 'Kod weryfikacyjny — MAGGuarantee';
     const text = this.buildText(code);
-    const html = this.buildHtml(code);
+    const html = await render(LoginCodeEmail({ code }));
     const payload: MailJobPayload = {
       to: email,
       subject,
@@ -131,7 +171,7 @@ export class MailService implements IMailService {
     };
 
     try {
-      await this.smtp.send({ to: email, subject, text, html });
+      await this.provider.send({ to: email, subject, text, html });
       // We deliberately do NOT log the code (per
       // docs/15-auth-strategy.md#чек-лист-безопасности — secrets must not be
       // logged). We log only the destination + a stable correlation cue.
@@ -196,7 +236,7 @@ export class MailService implements IMailService {
     };
 
     try {
-      await this.smtp.send({ to: email, subject, text, html });
+      await this.provider.send({ to: email, subject, text, html });
       // Never log the code (docs/15-auth-strategy.md#чек-лист-безопасности).
       this.logger.log({
         msg: 'password reset code sent',
@@ -234,6 +274,9 @@ export class MailService implements IMailService {
     const subject = `Wniosek o autoryzację: ${props.nrZgl}`;
     const html = await render(AuthorizationRequestEmail(props));
     const text = this.buildAuthorizationRequestText(props);
+    // Thread every email about one nrZgl into a single Gmail conversation
+    // (no-op under SMTP/Mailhog). Mirrors legacy `_sendThreadedEmail`.
+    const threadKey = `wniosek-${props.nrZgl}`;
     const payload: MailJobPayload = {
       to: email,
       subject,
@@ -246,7 +289,16 @@ export class MailService implements IMailService {
     };
 
     try {
-      await this.smtp.send({ to: email, subject, text, html });
+      const thread = (await this.threading?.resolve(threadKey)) ?? {};
+      const result = await this.provider.send({
+        to: email,
+        subject,
+        text,
+        html,
+        gmailThreadId: thread.gmailThreadId,
+        inReplyToMessageId: thread.inReplyToMessageId,
+      });
+      await this.threading?.record(threadKey, result);
       this.logger.log({
         msg: 'authorization request sent',
         nrZgl: props.nrZgl,
@@ -298,7 +350,7 @@ export class MailService implements IMailService {
     };
 
     try {
-      await this.smtp.send({ to: email, subject, text, html });
+      await this.provider.send({ to: email, subject, text, html });
       this.logger.log({
         msg: 'verification digest sent',
         toMasked: this.maskEmail(email),
@@ -353,6 +405,423 @@ export class MailService implements IMailService {
     return lines.join('\n');
   }
 
+  // ── Phase 9 templated emails (account lifecycle + claim notifications) ──
+
+  /**
+   * Shared send path: renders nothing (callers pass html/text), threads when a
+   * `threadKey` is given (no-op under SMTP), records to the diagnostics
+   * registry, and re-throws on failure so the queue (or caller) can retry.
+   */
+  private async _send(opts: {
+    to: string;
+    subject: string;
+    html: string;
+    text: string;
+    template: string;
+    data?: Record<string, unknown>;
+    threadKey?: string;
+    logMsg: string;
+    logExtra?: Record<string, unknown>;
+  }): Promise<void> {
+    const payload: MailJobPayload = {
+      to: opts.to,
+      subject: opts.subject,
+      template: opts.template,
+      ...(opts.data ? { data: opts.data } : {}),
+    };
+    try {
+      const thread = opts.threadKey
+        ? ((await this.threading?.resolve(opts.threadKey)) ?? {})
+        : {};
+      const result = await this.provider.send({
+        to: opts.to,
+        subject: opts.subject,
+        text: opts.text,
+        html: opts.html,
+        gmailThreadId: thread.gmailThreadId,
+        inReplyToMessageId: thread.inReplyToMessageId,
+      });
+      if (opts.threadKey) await this.threading?.record(opts.threadKey, result);
+      this.logger.log({
+        msg: opts.logMsg,
+        toMasked: this.maskEmail(opts.to),
+        ...(opts.logExtra ?? {}),
+      });
+      await this.mailJobs?.record({ payload, state: 'completed' });
+    } catch (err) {
+      this.logger.error({
+        msg: `${opts.logMsg} failed`,
+        toMasked: this.maskEmail(opts.to),
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await this.mailJobs?.record({
+        payload,
+        state: 'failed',
+        failedReason: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+  }
+
+  /**
+   * Enqueue helper mirroring `enqueue2faCode`: pushes onto the `email-send`
+   * queue, falling back to a synchronous send when the queue is unavailable
+   * (unit tests / scripts) so the email is never dropped.
+   */
+  private async _enqueueOr(
+    job: EmailSendJobData,
+    fallback: () => Promise<void>,
+  ): Promise<void> {
+    if (!this.emailQueue) {
+      await fallback();
+      return;
+    }
+    await this.emailQueue.add(EMAIL_SEND_JOB, job, {
+      attempts: 5,
+      backoff: { type: 'exponential', delay: 5000 },
+      removeOnComplete: { age: 3600 * 24 * 7 },
+      removeOnFail: false,
+    });
+  }
+
+  // account-created ────────────────────────────────────────
+  async sendAccountCreated(
+    email: string,
+    props: AccountCreatedProps,
+  ): Promise<void> {
+    await this._send({
+      to: email,
+      subject: 'Konto utworzone — MAGGuarantee',
+      html: await render(AccountCreatedEmail(props)),
+      text: [
+        `Witaj ${props.name},`,
+        '',
+        'Administrator utworzył dla Ciebie konto w systemie MAGGuarantee.',
+        `Login: ${props.loginName}`,
+        `Hasło tymczasowe: ${props.temporaryPassword}`,
+        '',
+        'Przy pierwszym logowaniu system poprosi o ustawienie nowego hasła.',
+        'Nie udostępniaj tego hasła nikomu.',
+        '',
+        `Zaloguj się: ${props.loginUrl}`,
+      ].join('\n'),
+      template: 'account-created',
+      logMsg: 'account created email sent',
+    });
+  }
+
+  enqueueAccountCreated(
+    email: string,
+    props: AccountCreatedProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'account-created', email, props },
+      () => this.sendAccountCreated(email, props),
+    );
+  }
+
+  // account-deactivated ────────────────────────────────────
+  async sendAccountDeactivated(
+    email: string,
+    props: AccountDeactivatedProps,
+  ): Promise<void> {
+    await this._send({
+      to: email,
+      subject: 'Konto dezaktywowane — MAGGuarantee',
+      html: await render(AccountDeactivatedEmail(props)),
+      text: [
+        `Szanowny Użytkowniku ${props.name},`,
+        '',
+        'Informujemy, że Twoje konto w systemie MAGGuarantee zostało',
+        'dezaktywowane. Dostęp do systemu został zablokowany.',
+        `Login: ${props.loginName}`,
+        '',
+        'W sprawach formalnych prosimy o kontakt z administratorem.',
+      ].join('\n'),
+      template: 'account-deactivated',
+      logMsg: 'account deactivated email sent',
+    });
+  }
+
+  enqueueAccountDeactivated(
+    email: string,
+    props: AccountDeactivatedProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'account-deactivated', email, props },
+      () => this.sendAccountDeactivated(email, props),
+    );
+  }
+
+  // account-reactivated ────────────────────────────────────
+  async sendAccountReactivated(
+    email: string,
+    props: AccountReactivatedProps,
+  ): Promise<void> {
+    await this._send({
+      to: email,
+      subject: 'Konto reaktywowane — MAGGuarantee',
+      html: await render(AccountReactivatedEmail(props)),
+      text: [
+        `Witaj ${props.name},`,
+        '',
+        'Twoje konto w systemie MAGGuarantee zostało ponownie aktywowane.',
+        `Login: ${props.loginName}`,
+        '',
+        `Zaloguj się: ${props.loginUrl}`,
+      ].join('\n'),
+      template: 'account-reactivated',
+      logMsg: 'account reactivated email sent',
+    });
+  }
+
+  enqueueAccountReactivated(
+    email: string,
+    props: AccountReactivatedProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'account-reactivated', email, props },
+      () => this.sendAccountReactivated(email, props),
+    );
+  }
+
+  // carrier-decision ───────────────────────────────────────
+  async sendCarrierDecision(
+    email: string,
+    props: CarrierDecisionProps,
+  ): Promise<void> {
+    await this._send({
+      to: email,
+      subject: `Wniosek ${props.nrZgl}: ${props.decisionLabel}`,
+      html: await render(CarrierDecisionEmail(props)),
+      text: this.buildDecisionText({
+        nrZgl: props.nrZgl,
+        decisionLabel: props.decisionLabel,
+        vehiclePlate: props.vehiclePlate,
+        periodFrom: props.periodFrom,
+        periodTo: props.periodTo,
+        amount: props.amount,
+        comment: props.comment,
+        deeplink: props.deeplink,
+      }),
+      template: 'carrier-decision',
+      threadKey: `wniosek-${props.nrZgl}`,
+      logMsg: 'carrier decision email sent',
+      logExtra: { nrZgl: props.nrZgl },
+    });
+  }
+
+  enqueueCarrierDecision(
+    email: string,
+    props: CarrierDecisionProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'carrier-decision', email, props },
+      () => this.sendCarrierDecision(email, props),
+    );
+  }
+
+  // internal-decision ──────────────────────────────────────
+  async sendInternalDecision(
+    email: string,
+    props: InternalDecisionProps,
+  ): Promise<void> {
+    await this._send({
+      to: email,
+      subject: `Wniosek ${props.nrZgl}: ${props.decisionLabel}`,
+      html: await render(InternalDecisionEmail(props)),
+      text: this.buildDecisionText({
+        nrZgl: props.nrZgl,
+        decisionLabel: props.decisionLabel,
+        carrierName: props.carrierName,
+        vehiclePlate: props.vehiclePlate,
+        periodFrom: props.periodFrom,
+        periodTo: props.periodTo,
+        amount: props.amount,
+        comment: props.comment,
+        deeplink: props.deeplink,
+      }),
+      template: 'internal-decision',
+      threadKey: `wniosek-${props.nrZgl}`,
+      logMsg: 'internal decision email sent',
+      logExtra: { nrZgl: props.nrZgl },
+    });
+  }
+
+  enqueueInternalDecision(
+    email: string,
+    props: InternalDecisionProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'internal-decision', email, props },
+      () => this.sendInternalDecision(email, props),
+    );
+  }
+
+  // carrier-submitted ──────────────────────────────────────
+  async sendClaimSubmitted(
+    email: string,
+    props: CarrierSubmittedProps,
+  ): Promise<void> {
+    await this._send({
+      to: email,
+      subject: `Nowy wniosek: ${props.nrZgl}`,
+      html: await render(CarrierSubmittedEmail(props)),
+      text: [
+        `Nowy wniosek ${props.nrZgl} od ${props.carrierName}.`,
+        '',
+        `Pojazd: ${props.vehiclePlate}`,
+        `Okres: ${props.periodFrom} → ${props.periodTo}`,
+        ...(props.drivenDays
+          ? [`Dni przepracowane: ${props.drivenDays}`]
+          : []),
+        ...(props.kmGuaranteed
+          ? [`Kilometry gwarantowane: ${props.kmGuaranteed} km`]
+          : []),
+        ...(props.kmDriven
+          ? [`Kilometry przejechane: ${props.kmDriven} km`]
+          : []),
+        ...(props.kmShortfall
+          ? [`Niedobór kilometrów: ${props.kmShortfall} km`]
+          : []),
+        ...(props.amountRequested
+          ? [`Kwota wnioskowana: ${props.amountRequested} EUR`]
+          : []),
+        ...(props.paymentEur
+          ? [`Wyliczona rekompensata: ${props.paymentEur} EUR`]
+          : []),
+        '',
+        'Wniosek oczekuje na weryfikację.',
+        ...(props.deeplink ? [`Otwórz: ${props.deeplink}`] : []),
+      ].join('\n'),
+      template: 'carrier-submitted',
+      threadKey: `wniosek-${props.nrZgl}`,
+      logMsg: 'claim submitted email sent',
+      logExtra: { nrZgl: props.nrZgl },
+    });
+  }
+
+  enqueueClaimSubmitted(
+    email: string,
+    props: CarrierSubmittedProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'carrier-submitted', email, props },
+      () => this.sendClaimSubmitted(email, props),
+    );
+  }
+
+  // authorization-request (enqueue variant of the existing sync method) ──
+  enqueueAuthorizationRequest(
+    email: string,
+    props: AuthorizationRequestProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'authorization-request', email, props },
+      () => this.sendAuthorizationRequest(email, props),
+    );
+  }
+
+  // verification-digest (enqueue variant of the existing sync method) ─────
+  enqueueVerificationDigest(
+    email: string,
+    props: VerificationDigestProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'verification-digest', email, props },
+      () => this.sendVerificationDigest(email, props),
+    );
+  }
+
+  // delegation-announced (new wyjazd) ─────────────────────
+  async sendDelegationAnnounced(
+    email: string,
+    props: DelegationAnnouncedProps,
+  ): Promise<void> {
+    await this._send({
+      to: email,
+      subject: `Nowy wyjazd: ${props.plateNumber}`,
+      html: await render(DelegationAnnouncedEmail(props)),
+      text: [
+        props.forCarrier
+          ? 'Twój wyjazd został zarejestrowany w systemie MAGGuarantee.'
+          : `Przewoźnik ${props.carrierName} zgłosił nowy wyjazd.`,
+        '',
+        `Pojazd: ${props.plateNumber}`,
+        `Kierowca: ${props.driverName}`,
+        `Wyjazd: ${props.departure}`,
+        `Planowany powrót: ${props.plannedReturn}`,
+      ].join('\n'),
+      template: 'delegation-announced',
+      logMsg: 'delegation announced email sent',
+    });
+  }
+
+  enqueueDelegationAnnounced(
+    email: string,
+    props: DelegationAnnouncedProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'delegation-announced', email, props },
+      () => this.sendDelegationAnnounced(email, props),
+    );
+  }
+
+  // delegation-ready (eksport → gotowy) ────────────────────
+  async sendDelegationReady(
+    email: string,
+    props: DelegationReadyProps,
+  ): Promise<void> {
+    await this._send({
+      to: email,
+      subject: `Pojazd gotowy: ${props.plateNumber}`,
+      html: await render(DelegationReadyEmail(props)),
+      text: [
+        `Witaj ${props.carrierName},`,
+        '',
+        `Pojazd ${props.plateNumber} został oznaczony jako gotowy do wyjazdu.`,
+        `Wyjazd: ${props.departure}`,
+      ].join('\n'),
+      template: 'delegation-ready',
+      logMsg: 'delegation ready email sent',
+    });
+  }
+
+  enqueueDelegationReady(
+    email: string,
+    props: DelegationReadyProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'delegation-ready', email, props },
+      () => this.sendDelegationReady(email, props),
+    );
+  }
+
+  /** Plain-text fallback shared by carrier-decision and internal-decision. */
+  private buildDecisionText(p: {
+    nrZgl: string;
+    decisionLabel: string;
+    carrierName?: string;
+    vehiclePlate: string;
+    periodFrom: string;
+    periodTo: string;
+    amount?: string;
+    comment?: string;
+    deeplink: string;
+  }): string {
+    const lines = [
+      `Wniosek ${p.nrZgl}: ${p.decisionLabel}`,
+      '',
+      ...(p.carrierName ? [`Przewoźnik: ${p.carrierName}`] : []),
+      `Pojazd: ${p.vehiclePlate}`,
+      `Okres: ${p.periodFrom} → ${p.periodTo}`,
+      ...(p.amount ? [`Kwota: ${p.amount} EUR`] : []),
+    ];
+    if (p.comment) lines.push('', `Komentarz: ${p.comment}`);
+    lines.push('', `Otwórz: ${p.deeplink}`);
+    return lines.join('\n');
+  }
+
   /**
    * Phase 4.5 — generic resend used by `POST /diagnostics/mails/:jobId/resend`.
    *
@@ -378,7 +847,7 @@ export class MailService implements IMailService {
       `o zignorowanie tej kopii.`,
     ].join('\n');
     try {
-      await this.smtp.send({
+      await this.provider.send({
         to: payload.to,
         subject: payload.subject,
         text,
@@ -439,22 +908,6 @@ export class MailService implements IMailService {
       'Kod ważny przez 10 minut.',
       'Jeśli to nie Ty próbujesz się zalogować, zignoruj tę wiadomość.',
     ].join('\n');
-  }
-
-  private buildHtml(code: string): string {
-    // Minimal HTML — full React-Email templates ship in Phase 3+.
-    return [
-      '<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto">',
-      '  <div style="background:#1e293b;padding:20px 24px;border-radius:12px 12px 0 0">',
-      '    <h2 style="color:#fff;margin:0;font-size:18px">MAGGuarantee</h2>',
-      '  </div>',
-      '  <div style="background:#f8fafc;padding:28px 24px;border-radius:0 0 12px 12px;border:1px solid #e2e8f0">',
-      '    <p style="color:#64748b;font-size:14px;margin:0 0 24px">Twój jednorazowy kod logowania:</p>',
-      `    <div style="background:#1e40af;color:#fff;font-size:36px;font-weight:700;letter-spacing:12px;text-align:center;padding:20px;border-radius:10px;margin-bottom:20px">${code}</div>`,
-      '    <p style="color:#94a3b8;font-size:12px;text-align:center;margin:0">Kod ważny przez <b>10 minut</b>. Nie udostępniaj go nikomu.</p>',
-      '  </div>',
-      '</div>',
-    ].join('');
   }
 
   private maskEmail(email: string): string {

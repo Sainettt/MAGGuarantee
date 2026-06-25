@@ -41,12 +41,32 @@ export const envSchema = z.object({
   BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(12),
 
   // ── Mail ───────────────────────────────────────────────
-  // Phase 1: SMTP (Mailhog in dev). Phase 9 swaps the provider class to
-  // Gmail API per docs/16-jobs-and-integrations.md.
-  MAIL_PROVIDER: z.enum(['smtp']).default('smtp'),
+  // Dev/staging: SMTP → Mailhog (default). Production: Gmail API
+  // (`MAIL_PROVIDER=gmail`) per docs/16-jobs-and-integrations.md. The provider
+  // is selected at runtime in MailModule; the `GMAIL_*` secrets below are
+  // required ONLY when `MAIL_PROVIDER=gmail` (enforced by superRefine).
+  MAIL_PROVIDER: z.enum(['smtp', 'gmail']).default('smtp'),
   MAIL_SMTP_HOST: z.string().default('localhost'),
   MAIL_SMTP_PORT: z.coerce.number().int().positive().default(1025),
   MAIL_FROM: z.string().default('no-reply@magtrans.eu'),
+
+  // ── Gmail API (production provider) ────────────────────
+  // Workspace service-account with Domain-Wide Delegation, impersonating
+  // `GMAIL_FROM` (e.g. wnioski@magtrans.eu). Empty in dev/staging `.env`
+  // (Mailhog path). `""` is coerced to undefined so blank-in-dev == absent;
+  // the superRefine below upgrades them to required when the provider is gmail.
+  GMAIL_CLIENT_EMAIL: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z.string().optional(),
+  ),
+  GMAIL_PRIVATE_KEY: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z.string().optional(),
+  ),
+  GMAIL_FROM: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z.string().optional(),
+  ),
   // ── App URL (used for deeplinks in transactional emails) ──
   // Same value as WEB_URL today; kept as a separate key so we can later
   // point email links at a different host (e.g. a public mirror) without
@@ -70,6 +90,26 @@ export const envSchema = z.object({
   GPS_VENDOR_API_KEY: z.string().default(''),
   GPS_POLL_INTERVAL_SEC: z.coerce.number().int().positive().default(90),
   GPS_CACHE_TTL_SEC: z.coerce.number().int().positive().default(300),
+}).superRefine((env, ctx) => {
+  // Gmail secrets are required only when the Gmail provider is selected — keeps
+  // dev/staging `.env` (Mailhog) clean while still failing fast at boot in prod
+  // if a credential is missing (rather than at first send). Mirrors the GPS
+  // optional-secret precedent.
+  if (env.MAIL_PROVIDER === 'gmail') {
+    for (const key of [
+      'GMAIL_CLIENT_EMAIL',
+      'GMAIL_PRIVATE_KEY',
+      'GMAIL_FROM',
+    ] as const) {
+      if (!env[key]) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: `${key} is required when MAIL_PROVIDER=gmail`,
+        });
+      }
+    }
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;

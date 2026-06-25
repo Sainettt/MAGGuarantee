@@ -142,6 +142,8 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     authScreenshotUrl: null,
     attachments: [],
     delegationId: null,
+    delegationPlannedReturnAt: null,
+    delegationActualReturnAt: null,
     periodAdjustedByVerifier: false,
     autoRecalcState: 'none',
     createdAt: new Date('2026-04-21T08:00:00.000Z'),
@@ -209,20 +211,27 @@ interface MailFake {
 function makeMailService(throwOnNext = false): MailFake {
   const calls: { to: string; props: unknown }[] = [];
   const fake: MailFake = {
-    svc: {
-      sendAuthorizationRequest: jest.fn(
-        async (to: string, props: unknown) => {
-          calls.push({ to, props });
-          if (fake.throwOnNext) {
-            fake.throwOnNext = false;
-            throw new Error('mailhog down');
-          }
-        },
-      ),
-    } as unknown as MailService,
+    svc: {} as unknown as MailService,
     calls,
     throwOnNext,
   };
+  const sendAuthorizationRequest = jest.fn(
+    async (to: string, props: unknown) => {
+      calls.push({ to, props });
+      if (fake.throwOnNext) {
+        fake.throwOnNext = false;
+        throw new Error('mailhog down');
+      }
+    },
+  );
+  // Production routes through `enqueueAuthorizationRequest`; with no queue the
+  // fake delegates to the send mock so existing `calls` / throw assertions hold.
+  fake.svc = {
+    sendAuthorizationRequest,
+    enqueueAuthorizationRequest: jest.fn((to: string, props: unknown) =>
+      sendAuthorizationRequest(to, props),
+    ),
+  } as unknown as MailService;
   return fake;
 }
 

@@ -631,6 +631,7 @@
     "noTeam": "Brak zespołu prowadzącego",
     "inactiveBadge": "Nieaktywny",
     "leadingTeamHeader": "ZESPÓŁ PROWADZĄCY",
+    "eksport": "Eksport",
     "codeAria": "Kod zespołu: {code}",
     "membersAria": "Dyspozytorzy zespołu {code}"
   },
@@ -1707,6 +1708,7 @@
         "returnedDateLabel": "Data zjazdu",
         "returnedRequired": "Podaj datę zjazdu",
         "returnedFuture": "Data zjazdu nie może być w przyszłości",
+        "returnedIncompleteKm": "Uwaga: dla {count} {count, plural, one {dnia} few {dni} many {dni} other {dni}} tego wyjazdu nie wpisano przebiegu na tablicy km. Sprawdź, czy uzupełniłeś wszystkie dni przed oznaczeniem zjazdu.",
         "cancel": "Anuluj",
         "inTransitToast": "Oznaczono jako w trasie",
         "returnedToast": "Oznaczono jako zjechał",

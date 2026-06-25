@@ -37,6 +37,36 @@ export class EmailSendProcessor extends WorkerHost {
       case 'password-reset':
         await this.mail.sendPasswordReset(data.email, data.code, data.ttlMinutes);
         return;
+      case 'account-created':
+        await this.mail.sendAccountCreated(data.email, data.props);
+        return;
+      case 'account-deactivated':
+        await this.mail.sendAccountDeactivated(data.email, data.props);
+        return;
+      case 'account-reactivated':
+        await this.mail.sendAccountReactivated(data.email, data.props);
+        return;
+      case 'carrier-decision':
+        await this.mail.sendCarrierDecision(data.email, data.props);
+        return;
+      case 'internal-decision':
+        await this.mail.sendInternalDecision(data.email, data.props);
+        return;
+      case 'carrier-submitted':
+        await this.mail.sendClaimSubmitted(data.email, data.props);
+        return;
+      case 'authorization-request':
+        await this.mail.sendAuthorizationRequest(data.email, data.props);
+        return;
+      case 'verification-digest':
+        await this.mail.sendVerificationDigest(data.email, data.props);
+        return;
+      case 'delegation-announced':
+        await this.mail.sendDelegationAnnounced(data.email, data.props);
+        return;
+      case 'delegation-ready':
+        await this.mail.sendDelegationReady(data.email, data.props);
+        return;
       default: {
         // Exhaustiveness guard — a new template variant must add a case above
         // (TS flags this assignment if `EmailSendJobData` gains a member).

@@ -3,8 +3,10 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 import type {
   CreateUserDto,
@@ -15,8 +17,10 @@ import type {
   UserWithTemporaryPasswordDto,
 } from '@magguarantee/shared';
 
+import type { Env } from '../../config/env.schema';
 import { PasswordService } from '../auth/password.service';
 import { RefreshTokenRepository } from '../auth/refresh-token.repository';
+import { MailService } from '../mail/mail.service';
 import { generateRandomPassword } from '../../common/utils/random-password';
 import {
   isPrismaUniqueViolation,
@@ -42,7 +46,35 @@ export class UsersService {
     private readonly repo: UsersRepository,
     private readonly passwords: PasswordService,
     private readonly refreshTokens: RefreshTokenRepository,
+    // Optional so existing unit tests (which construct the service with three
+    // args) keep compiling; production DI always injects both.
+    @Optional() private readonly mailService?: MailService,
+    @Optional() private readonly configService?: ConfigService<Env, true>,
   ) {}
+
+  /** Sign-in URL for account lifecycle emails (APP_URL root). */
+  private loginUrl(): string {
+    const appUrl =
+      this.configService?.get('APP_URL', { infer: true }) ??
+      'http://localhost:3000';
+    return appUrl.replace(/\/$/, '');
+  }
+
+  /**
+   * Fire-and-log account-lifecycle email. Never throws into the caller — a
+   * mail hiccup must not fail the admin's create/deactivate/reactivate action
+   * (the DB mutation already committed). No-op when MailService is absent
+   * (unit tests).
+   */
+  private notifyAccount(send: () => Promise<void>, context: string): void {
+    if (!this.mailService) return;
+    void send().catch((err) => {
+      this.logger.warn({
+        msg: `account ${context} email failed`,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
 
   // ── Admin CRUD ───────────────────────────────────────────
 
@@ -102,14 +134,25 @@ export class UsersService {
         'Login lub email są już zajęte',
       );
     }
-    // TODO: replace with email send when MailService.sendAccountReset is implemented (Phase 9).
     if (!dto.password) {
       this.logger.log({
-        msg: 'user created with generated password (Phase 2 stub)',
+        msg: 'user created with generated password',
         userId: row.id,
         login: row.login,
       });
     }
+    // Account-created notification (no password — the admin hands the temp
+    // password over out-of-band; it is returned on-screen below).
+    this.notifyAccount(
+      () =>
+        this.mailService!.enqueueAccountCreated(row.email, {
+          name: row.name || row.login,
+          loginName: row.login,
+          temporaryPassword: plain,
+          loginUrl: this.loginUrl(),
+        }),
+      'created',
+    );
     return { ...this.toDto(row), temporaryPassword: plain };
   }
 
@@ -147,7 +190,14 @@ export class UsersService {
       throw new ConflictException('Użytkownik jest już nieaktywny');
     }
     const updated = await this.repo.update(id, { active: false });
-    // TODO: send "account deactivated" email when Phase 9 ships.
+    this.notifyAccount(
+      () =>
+        this.mailService!.enqueueAccountDeactivated(updated.email, {
+          name: updated.name || updated.login,
+          loginName: updated.login,
+        }),
+      'deactivated',
+    );
     return this.toDto(updated);
   }
 
@@ -158,7 +208,15 @@ export class UsersService {
       throw new ConflictException('Użytkownik jest już aktywny');
     }
     const updated = await this.repo.update(id, { active: true });
-    // TODO: send "account reactivated" email when Phase 9 ships.
+    this.notifyAccount(
+      () =>
+        this.mailService!.enqueueAccountReactivated(updated.email, {
+          name: updated.name || updated.login,
+          loginName: updated.login,
+          loginUrl: this.loginUrl(),
+        }),
+      'reactivated',
+    );
     return this.toDto(updated);
   }
 
