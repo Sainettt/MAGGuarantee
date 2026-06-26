@@ -62,6 +62,7 @@ function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {
     dispatchTeamId: null,
     dispatchTeam: null,
     carrier: { id: 'c-1', login: 'pwz1', name: 'Pwz One' },
+    opiekun: null,
     attachments: [],
     createdAt: NOW,
     updatedAt: NOW,

@@ -105,6 +105,7 @@ export default function CarrierVehiclesPage() {
         open={detailOpen}
         onOpenChange={setDetailOpen}
         vehicle={detailTarget}
+        hideCarrier
       />
     </section>
   );

@@ -72,6 +72,7 @@ function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {
       dispatchers: [{ id: 'dys-self', login: 'dys', name: 'Dispatcher One' }],
     },
     carrier: { id: 'c-1', login: 'pwz1', name: 'Pwz One' },
+    opiekun: null,
     attachments: [],
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),

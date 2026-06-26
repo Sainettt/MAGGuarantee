@@ -2749,7 +2749,7 @@ The `<BreakdownTable>` then container-queries itself (§ BreakdownTable Responsi
 | Section | Icon | Rows (label → field) |
 |---|---|---|
 | **Identyfikacja** (`sections.identification`) | `<Truck>` | Numer rejestracyjny → `plateNumber` (mono) · Numer boczny → `sideNumber` · Marka → `brand` · Model → `model` · Rok → `year` (num) · Typ → `type` (raw enum MEGA/STD/COIL) · Norma EURO → `euro` (raw enum V/VI) · Certyfikat L → `certificateL` (bool) · Następny przegląd → `nextInspectionDate` (date) |
-| **Przypisanie** (`sections.people`) | `<UserCog>` | Przewoźnik → `carrier.name ?? carrier.login` · Planista → `planner.name ?? planner.login` · Dyspozytor → `dispatcher.name ?? dispatcher.login` |
+| **Przypisanie / Ludzie** (`sections.people`) | `<UserCog>` | Przewoźnik → `carrier.name ?? carrier.login` *(hidden for the przewoźnik viewer — see below)* · **Opiekun → `opiekun.name ?? opiekun.login`** *(the carrier's caretaker; resolved via `vehicle.carrier.opiekun`, surfaced on `VehicleDto.opiekun`)* · Planista → `planner.name ?? planner.login` · Zespół prowadzący → `dispatchTeam` via `<TeamMembers>` (§7.9.6; replaces the legacy single «Dyspozytor» field — `Vehicle.dispatchTeam`, not a single user) |
 | **Wyposażenie** (`sections.equipment`) | `<Package>` | GPS → `gps` (bool) · Numer GPS → `gpsMobilePhone` · Karta paliwowa → `fuelCard` (bool) · Porozumienie → `agreement` (bool) |
 | **Stawki** (`sections.rates`) | `<Banknote>` | Stawka DE → `rateDe` (EUR fmt) · Stawka UE → `rateUe` (EUR fmt) · Stawka eksport → `rateExport` (EUR fmt) · Stawka import → `rateImport` (EUR fmt) |
 | **Pozwolenia** (`sections.permissions`) | `<ShieldCheck>` | Klasy ADR → `adrClasses` (list) · Odpady → `wasteAllowed` (bool) · Kraje odpadowe → `wasteCountries` (list) · Kabotaż DE → `cabotageDe` (bool) · Kabotaż FR → `cabotageFr` (bool) · GB → `gb` (bool) · IT → `it` (bool) · FR → `fr` (bool) |
@@ -2759,6 +2759,10 @@ The `<BreakdownTable>` then container-queries itself (§ BreakdownTable Responsi
 - New i18n field keys (`vehicles.fields.*`): `adrClasses`, `wasteCountries`, `gb`, `it`, `fr`, `lastDroveAt`. New section key: `vehicles.sections.attachments`.
 - `type` / `euro` render as raw enum codes — matches the `VehicleSheet` `<Select>` options and the list-table cell (no human-label keys exist).
 - **Section `span` (lg+ grid, §6.4):** `'full'` for **Pozwolenia** (9 rows — too tall to pair) and **Załączniki** (attachment rows need horizontal room for the file-name button). All others (`identification`, `people`, `equipment`, `rates`, `other`) are `'half'`.
+
+> **2026-06-26 — canonical vehicle modal: viewers, «Opiekun» row, carrier-self hide.** This `<VehicleDetailModal>` is the **full** vehicle modal shown to **admin / opiekun / przewoźnik / planista** (planista joined this group on 2026-06-26, §6.4.2 — incl. «Stawki»). Two viewer-scoped rules:
+> - **«Opiekun» row (all viewers).** The «Przypisanie / Ludzie» section now carries an **Opiekun** row — the carrier's caretaker `User`, resolved via `vehicle.carrier.opiekun` and surfaced on `VehicleDto.opiekun` (`name ?? login`). It sits alongside Przewoźnik / Planista / Zespół prowadzący. Omitted (em-dash, §6.5) when the carrier has no opiekun.
+> - **Carrier-self hide (przewoźnik viewer only).** When the viewer is the **przewoźnik** looking at their own vehicle, the modal **omits the «Przewoźnik» row** and **drops the carrier-name subtitle fallback** (a carrier need not be told who the carrier is). The subtitle still shows `brand + model` when present; it just never falls back to the carrier name for this viewer. The przewoźnik still sees **Opiekun + Planista + Zespół prowadzący**.
 
 ### 6.16 Driver field mapping — 3 logical sections
 
@@ -3681,14 +3685,20 @@ Section header: icon `<ClipboardCheck>` (or keep `<Info>`), label «STATUS I AUD
 
 ### 6.4.2 Read-only detail modals — vehicle / driver / trailer (planista + dyspozytor)
 
-These three modals open when a row in the planista/dyspozytor fleet tabs (§6.4.3) is clicked. They reuse the **same `<EntityDetailModal>` shell and the same wrappers already specified for the admin context in §6.15 / §6.16 / §6.17** — but in the **read-only context** (no `onEdit` ⇒ footer is «Zamknij» only, §6.6).
+These modals open when a row in the planista/dyspozytor fleet tabs (§6.4.3) is clicked. They reuse the **same `<EntityDetailModal>` shell and the same wrappers already specified for the admin context in §6.15 / §6.16 / §6.17** — but in the **read-only context** (no `onEdit` ⇒ footer is «Zamknij» only, §6.6).
+
+> **2026-06-26 — planista vehicle modal = the full modal.** The slim curated field set + `<FleetVehicleDetailModal>` below now apply to the **dyspozytor** vehicle modal **only**. The **planista** vehicle modal is the full `<VehicleDetailModal>` (§6.15), incl. rates — see the dated note under «HARD EXCLUSION». Driver/trailer fleet modals stay slim/read-only for both roles.
 
 **The data-availability gap and the API contract.** The admin vehicle/driver/trailer modals (§6.15–§6.17) read **full** `VehicleDto`/`DriverDto`/`TrailerDto`. The planista/dyspozytor panels are served by `/fleet/planista` and `/fleet/dyspozytor`, which currently return the **slim** `VehicleListItem` / `DriverListItem` / `TrailerListItem` (see `packages/shared/src/schemas/fleet.ts`). A detail modal needs more than the slim list carries. Two options were considered:
 
-- (a) lazily fetch the full `*Dto` on row click — rejected: planista/dyspozytor have no JWT scope on the admin `/vehicles/:id` etc. endpoints, and adding role grants there widens the attack surface for fields they must not see (rates).
+- (a) lazily fetch the full `*Dto` on row click — rejected: planista/dyspozytor have no JWT scope on the admin `/vehicles/:id` etc. endpoints, and adding role grants there widens the attack surface for fields they must not see (rates). *(2026-06-26: this option (a) is now in fact chosen for the **planista vehicle modal** — planista is authorized for the full `GET /vehicles/:id` scoped to its `plannerId`, and the product decision is that planista **should** see rates, so the "fields they must not see" concern no longer applies to planista. Option (b) still holds for the **dyspozytor** vehicle modal and for **both** roles' driver/trailer modals — see the dated note under «HARD EXCLUSION».)*
 - (b) **enrich the slim list-items** with a curated, non-sensitive field set so the panel renders the modal from data it already holds — **chosen.** api-agent widens the three `*ListItemSchema` with the additive fields below. Because these are **additive/optional**, they also flow into the carrier `/fleet/my` payload — which is fine: a carrier owns its own fleet and the added fields are all non-sensitive (no rates). **The field lists below ARE the api contract** — api-agent adds exactly these and nothing more.
 
-**HARD EXCLUSION (all three entities):** never include `rateDe` / `rateUe` / `rateExport` / `rateImport`. Planista/dyspozytor must not see pricing. The vehicle "Stawki" section from §6.15 is **dropped entirely** in this read-only fleet context.
+**HARD EXCLUSION — dyspozytor only (vehicle rates).** Never include `rateDe` / `rateUe` / `rateExport` / `rateImport` for the **dyspozytor** viewer. Dyspozytor must not see pricing — the vehicle «Stawki» section from §6.15 is **dropped entirely** in the dyspozytor read-only fleet modal (it keeps using the slim `<FleetVehicleDetailModal>` described below).
+
+> **2026-06-26 — planista now sees rates (reversal of the earlier planista-no-rates rule).** Product decision: the **planista** read-only vehicle modal becomes the **FULL** `<VehicleDetailModal>` — the same modal opiekun/admin/przewoźnik get, **including** the «Stawki» section. Planista is already server-authorized for the full vehicle detail (`GET /vehicles/:id`, scoped server-side to its `plannerId`), so its modal is fetched from the full `VehicleDto` rather than the enriched slim list-item — no curated rate-free field set, no slim-modal wrapper. The §6.4.2 rates exclusion therefore now applies to **dyspozytor only**, not planista. Driver/trailer fleet modals are unchanged for both roles (no rates exist there anyway). The slim `<FleetVehicleDetailModal>` below remains the **dyspozytor** vehicle modal.
+
+**HARD EXCLUSION — driver/trailer (both roles):** `bankAccount` (driver, financial-adjacent) stays out of the role-panel driver modals; no rate fields exist on drivers/trailers.
 
 **Formatters:** use the existing `entity-detail-values.tsx` helpers — `textValue` / `monoValue` / `dateValue` / `boolValue(v, yes, no)` / `listValue`. Empty/null → em-dash via each helper (§6.5). An entire section is omitted by the wrapper only if **every** value in it is empty (§6.4 "Empty section").
 
@@ -4973,8 +4983,8 @@ interface TeamMembersProps {
 | Context | Where | variant / size / showCode | Notes |
 |---|---|---|---|
 | **Vehicle form — team preview** | `apps/web/components/.../VehicleForm` under the "Zespół dyspozytorów" dropdown | `chips` / `sm` / `showCode=true` | Live preview of the team the user just picked in the `<Select>`; updates on selection. Empty-team amber box warns the admin the chosen team has no dispatchers **before** saving. |
-| **Admin VehicleDetailModal** | §6.4.2′ admin vehicle modal — «Zespół» field (`fullWidth` row) | `chips` / `md` / `showCode=true` | Shows the vehicle's assigned `dispatchTeam`. |
-| **FleetVehicleDetailModal** (planista/dyspozytor read-only) | §6.4.2 — «Zespół» field (`fullWidth` row) | `chips` / `md` / `showCode=true` | Read-only; same data, no edit. |
+| **Full VehicleDetailModal** (admin / opiekun / przewoźnik / planista) | §6.15 «Przypisanie / Ludzie» — «Zespół prowadzący» field (`fullWidth` row), alongside Przewoźnik / Opiekun / Planista | `chips` / `md` / `showCode=true` | Shows the vehicle's assigned `dispatchTeam`. Planista joined this modal 2026-06-26 (§6.4.2). Przewoźnik viewer hides the Przewoźnik row (carrier-self hide, §6.15). |
+| **FleetVehicleDetailModal** (dyspozytor read-only) | §6.4.2 — «Zespół» field (`fullWidth` row) | `chips` / `md` / `showCode=true` | Read-only slim modal; same team data, no edit, no rates (dyspozytor only — §6.4.2). |
 | **DelegationDetailModal** | §6.4.1 — «ZESPÓŁ PROWADZĄCY» block (see §7.9.7) | `list` / `md` / `showCode=true` | Shows the **current** `Vehicle.dispatchTeam` (live, **not** a delegation-time snapshot). |
 | **Dyspozytor panel** | dispatcher panel header / "my team" surface | `chips` / `md` / `showCode=true` | The dispatcher sees their own team composition. |
 | **Admin Team CRUD** | team list rows + team edit surface | `list` / `md` / `showCode=false` (list rows print the code in the row title) | `showCode=false` here is the canonical dedup case — the row already shows the code, so the chip is suppressed but the name + members still render. |
@@ -5038,7 +5048,7 @@ PL+EN key parity holds (existing i18n-parity check covers this).
 | New `<TeamMembers>` (3 states, 2 variants, 2 sizes, `showCode` dedup, identity-never-hidden rule) | `components/teams/TeamMembers.tsx` | web-agent |
 | New `<InitialsAvatar>` neutral primitive (`sm`/`md`, `aria-hidden`) | `components/ui/InitialsAvatar.tsx` | web-agent |
 | Vehicle-form: render `<TeamMembers variant="chips" size="sm">` preview under the "Zespół dyspozytorów" dropdown | `VehicleForm` | web-agent |
-| §6.4.2 «Zespół» field uses `<TeamMembers variant="chips" size="md">` in admin VehicleDetailModal + FleetVehicleDetailModal (`fullWidth` row) | `Fleet/admin vehicle modals` | web-agent |
+| «Zespół prowadzący» field uses `<TeamMembers variant="chips" size="md">` in the full VehicleDetailModal (admin/opiekun/przewoźnik/planista, §6.15) + dyspozytor FleetVehicleDetailModal (§6.4.2) (`fullWidth` row) | `Fleet/admin vehicle modals` | web-agent |
 | §6.4.1 delegation modal: new `span:'full'` «ZESPÓŁ PROWADZĄCY» block (`<Users>` header) rendering `<TeamMembers variant="list" size="md">` from **current** `Vehicle.dispatchTeam` | `components/delegations/DelegationDetailModal.tsx` | web-agent |
 | Dyspozytor panel + admin Team CRUD use `<TeamMembers>` (`showCode=false` in CRUD list rows) | dispatcher panel + Team CRUD pages | web-agent |
 | i18n: `team.{emptyMembers,noTeam,inactiveBadge,leadingTeamHeader,codeAria,membersAria}` PL+EN | `messages/pl.json`, `en.json` | web-agent |

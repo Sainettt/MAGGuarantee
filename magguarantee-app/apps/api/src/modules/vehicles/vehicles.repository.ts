@@ -72,6 +72,8 @@ export interface VehicleRow {
   dispatchTeamId: string | null;
   dispatchTeam: VehicleDispatchTeamDto | null;
   carrier: { id: string; login: string; name: string | null } | null;
+  /** Carrier's opiekun (`Carrier.opiekun`, a `User`) resolved via `carrier.opiekun`. Non-sensitive; additive. */
+  opiekun: { id: string; login: string; name: string | null } | null;
   /** Non-deleted umowa/cabotage/adr attachments (soft-delete extension filters). */
   attachments: VehicleRowAttachment[];
   createdAt: Date;
@@ -463,6 +465,7 @@ export class VehiclesRepository {
         select: {
           id: true,
           user: { select: { login: true, name: true } },
+          opiekun: { select: { id: true, login: true, name: true } },
         },
       },
       // The soft-delete extension auto-filters `deletedAt` on the nested
@@ -522,6 +525,13 @@ export class VehiclesRepository {
             id: row.carrier.id,
             login: row.carrier.user.login,
             name: row.carrier.user.name,
+          }
+        : null,
+      opiekun: row.carrier?.opiekun
+        ? {
+            id: row.carrier.opiekun.id,
+            login: row.carrier.opiekun.login,
+            name: row.carrier.opiekun.name,
           }
         : null,
       attachments: (row.attachments ?? []).map((a) => ({
@@ -594,6 +604,7 @@ interface VehiclePrismaShape {
   carrier?: {
     id: string;
     user: { login: string; name: string | null };
+    opiekun?: { id: string; login: string; name: string | null } | null;
   } | null;
   attachments?: VehicleAttachmentPrismaShape[];
   createdAt: Date;

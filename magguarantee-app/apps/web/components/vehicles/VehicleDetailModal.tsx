@@ -58,6 +58,10 @@ interface Props {
    *  Omit it for read-only consumers: the «Edytuj» button is then not
    *  rendered (§6.6). */
   onEdit?: () => void;
+  /** Set when a carrier views their OWN fleet — they don't need to be told who
+   *  the carrier is. Drops the «Przewoźnik» people row and the carrier-name
+   *  subtitle; opiekun + planner + dispatchTeam stay visible. */
+  hideCarrier?: boolean;
 }
 
 export function VehicleDetailModal({
@@ -65,6 +69,7 @@ export function VehicleDetailModal({
   onOpenChange,
   vehicle,
   onEdit,
+  hideCarrier = false,
 }: Props) {
   const t = useTranslations('vehicles');
   const tCommon = useTranslations('common');
@@ -97,14 +102,47 @@ export function VehicleDetailModal({
     <Badge variant="muted">{tCommon('inactive')}</Badge>
   );
 
-  // ── Subtitle — carrier name (or login) ─────────────────────────────
-  const subtitle =
-    vehicle.carrier?.name || vehicle.carrier?.login || undefined;
+  // ── Subtitle — carrier name (or login). Dropped when `hideCarrier` (a
+  //    carrier viewing its own fleet already knows who it is). ───────────
+  const subtitle = hideCarrier
+    ? undefined
+    : vehicle.carrier?.name || vehicle.carrier?.login || undefined;
 
   /** €/km rate — `formatEur` already renders its own em-dash for null. */
   const rateValue = (v: number | null | undefined): ReactNode => (
     <span className="tabular-nums">{formatEur(v)}</span>
   );
+
+  // ── «Przypisanie» (people) rows — carrier · opiekun · planner ·
+  //    dispatchTeam. The carrier row is omitted when `hideCarrier`; opiekun /
+  //    planner / dispatchTeam are always shown. Built as a filtered array so we
+  //    don't duplicate the whole `sections` definition. ───────────────────
+  const peopleRows: EntityDetailSection['rows'] = [
+    hideCarrier
+      ? null
+      : {
+          label: f('carrier'),
+          value: textValue(vehicle.carrier?.name ?? vehicle.carrier?.login),
+        },
+    {
+      label: f('opiekun'),
+      value: textValue(vehicle.opiekun?.name ?? vehicle.opiekun?.login),
+    },
+    {
+      label: f('planner'),
+      value: textValue(vehicle.planner?.name ?? vehicle.planner?.login),
+    },
+    {
+      label: f('dispatchTeam'),
+      value: (
+        <TeamFieldValue
+          team={vehicle.dispatchTeam}
+          label={f('dispatchTeam')}
+        />
+      ),
+      fullWidth: true,
+    },
+  ].filter((row): row is NonNullable<typeof row> => row !== null);
 
   // ── 5 + 1 + 1 sections — mirrors the VehicleSheet FormSection order ──
   const sections: EntityDetailSection[] = [
@@ -128,30 +166,7 @@ export function VehicleDetailModal({
       // span the whole section so the <TeamMembers> chips row isn't squeezed
       // into the value column (§6.4.2, §7.9.6).
       span: 'full',
-      rows: [
-        {
-          label: f('carrier'),
-          value: textValue(
-            vehicle.carrier?.name ?? vehicle.carrier?.login,
-          ),
-        },
-        {
-          label: f('planner'),
-          value: textValue(
-            vehicle.planner?.name ?? vehicle.planner?.login,
-          ),
-        },
-        {
-          label: f('dispatchTeam'),
-          value: (
-            <TeamFieldValue
-              team={vehicle.dispatchTeam}
-              label={f('dispatchTeam')}
-            />
-          ),
-          fullWidth: true,
-        },
-      ],
+      rows: peopleRows,
     },
     {
       title: t('sections.equipment'),

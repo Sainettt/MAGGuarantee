@@ -499,6 +499,14 @@ export const VehicleDtoSchema = z.object({
       name: z.string().nullable(),
     })
     .nullable(),
+  /**
+   * The carrier's opiekun (`Carrier.opiekun`, a `User`), resolved via
+   * `vehicle.carrier.opiekun`. Non-sensitive; additive — never narrows
+   * authorization. `null` when no carrier/opiekun is resolvable.
+   */
+  opiekun: z
+    .object({ id: UuidSchema, login: z.string(), name: z.string().nullable() })
+    .nullable(),
   /** Non-deleted umowa/cabotage attachments for this vehicle. */
   attachments: z.array(VehicleAttachmentDtoSchema),
   createdAt: IsoDateTimeSchema,

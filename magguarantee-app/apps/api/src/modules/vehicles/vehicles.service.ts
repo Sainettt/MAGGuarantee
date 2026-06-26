@@ -766,6 +766,7 @@ export class VehiclesService {
       dispatchTeamId: row.dispatchTeamId,
       dispatchTeam: row.dispatchTeam,
       carrier: row.carrier,
+      opiekun: row.opiekun,
       attachments: row.attachments.map((a) => vehicleRowAttachmentToDto(a)),
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),

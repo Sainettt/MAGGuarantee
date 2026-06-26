@@ -50,6 +50,7 @@ import {
 } from '@/components/fleet/FleetTables';
 import { FleetTrailerDetailModal } from '@/components/fleet/FleetTrailerDetailModal';
 import { FleetVehicleDetailModal } from '@/components/fleet/FleetVehicleDetailModal';
+import { PlanistaVehicleDetailModal } from '@/components/fleet/PlanistaVehicleDetailModal';
 import { ReadOnlyBanner } from '@/components/fleet/ReadOnlyBanner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 
@@ -91,6 +92,14 @@ interface Props {
    * removed (its route was deleted).
    */
   myKmHref?: string;
+  /**
+   * When `true` (planista), a vehicle-row click opens the FULL admin-style
+   * <VehicleDetailModal> (incl. «Stawki» rates + «Opiekun»), fetched by id from
+   * the slim row's `id`. Default `false` (dyspozytor) keeps the slim
+   * <FleetVehicleDetailModal>. Only the vehicle modal differs — driver/trailer
+   * modals are identical for both roles.
+   */
+  fullVehicleDetail?: boolean;
 }
 
 export function FleetPanel({
@@ -103,6 +112,7 @@ export function FleetPanel({
   delegations,
   delegationsLoading,
   myKmHref,
+  fullVehicleDetail = false,
 }: Props) {
   const t = useTranslations(namespace);
   const tMyKm = useTranslations('myKm');
@@ -268,13 +278,26 @@ export function FleetPanel({
       </Tabs>
 
       {/* ── Read-only detail modals (§6.4.2 / §6.4.1) ───────────────────── */}
-      <FleetVehicleDetailModal
-        open={vehicleTarget !== null}
-        onOpenChange={(o) => {
-          if (!o) setVehicleTarget(null);
-        }}
-        vehicle={vehicleTarget}
-      />
+      {/* Vehicle modal — planista gets the FULL admin-style detail (rates +
+          opiekun), fetched by id; dyspozytor stays on the slim list-item modal.
+          Open/close wiring is identical for both. */}
+      {fullVehicleDetail ? (
+        <PlanistaVehicleDetailModal
+          open={vehicleTarget !== null}
+          onOpenChange={(o) => {
+            if (!o) setVehicleTarget(null);
+          }}
+          vehicleId={vehicleTarget?.id ?? null}
+        />
+      ) : (
+        <FleetVehicleDetailModal
+          open={vehicleTarget !== null}
+          onOpenChange={(o) => {
+            if (!o) setVehicleTarget(null);
+          }}
+          vehicle={vehicleTarget}
+        />
+      )}
       <FleetDriverDetailModal
         open={driverTarget !== null}
         onOpenChange={(o) => {
