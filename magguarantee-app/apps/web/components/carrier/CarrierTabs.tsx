@@ -34,7 +34,7 @@ const TABS: readonly Tab[] = [
     labelKey: 'newClaim',
   },
   {
-    href: '/carrier/fleet/vehicles',
+    href: '/carrier/fleet',
     matchPrefix: '/carrier/fleet',
     emoji: '🚛',
     labelKey: 'fleet',

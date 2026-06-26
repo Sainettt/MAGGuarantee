@@ -1530,7 +1530,13 @@
           "plate": "Plate number",
           "side": "Side number",
           "type": "Type",
-          "status": "Status"
+          "status": "Status",
+          "euro": "EURO",
+          "adr": "ADR",
+          "gb": "GB",
+          "it": "IT",
+          "fr": "FR",
+          "lastDroveAt": "Last drove"
         }
       },
       "drivers": {
@@ -1569,6 +1575,21 @@
           "type": "Type",
           "status": "Status"
         }
+      },
+      "title": "Fleet",
+      "subtitle": "Your vehicles, drivers and trailers. Data is read-only — managed by your account manager.",
+      "contactOpiekun": "Contact account manager",
+      "contactOpiekunSubject": "Fleet data change",
+      "kpi": {
+        "vehicles": "Vehicles",
+        "driving": "Driving",
+        "idle": "Idle > 7 days",
+        "drivers": "Drivers",
+        "trailers": "Trailers"
+      },
+      "idle": {
+        "title": "Vehicles idle for more than 7 days:",
+        "daysIdle": "{days, plural, one {# day} other {# days}}"
       }
     }
   },

@@ -1065,7 +1065,47 @@ Header is the standard `<AppHeader>` (logo + role badge "Przewoźnik" + `<Langua
 
 **Top-level tabs:** `Wnioski` / `Nowy` / `Flota` / `Wyjazdy`. Emoji prefix kept per voice rules (📋 ➕ 🚛 🗺️).
 
-**Flota sub-tabs** (rendered inside `/carrier/fleet/*` layout, below the main tab bar): `Auta` (read-only) / `Kierowcy` (CRUD) / `Naczepy` (CRUD). Same visual pattern as top tabs but rendered as `<div role="tablist">` with `text-xs font-bold uppercase tracking-wider` labels and reduced padding `px-3 py-2`.
+**Flota — unified panel.** See the «Carrier fleet panel (unified, planista-style)» section below. (Historical: the Flota area was three route-based sub-tabs `Auta` / `Kierowcy` / `Naczepy` rendered as a `<FleetSubTabs>` route-tablist over three sparse `/carrier/fleet/{vehicles,drivers,trailers}` pages — **superseded 2026-06-26** by one full-width page with in-page `<Tabs>` + a KPI strip. The carrier fleet stays strictly READ-ONLY.)
+
+### Carrier fleet panel (unified, planista-style) — `/carrier/fleet`
+
+> **2026-06-26 — decision.** The three cramped carrier fleet sub-routes (`/carrier/fleet/vehicles`, `/drivers`, `/trailers`) — each a sparse 3–4-column read-only `<DataTable>` behind the route-based `<FleetSubTabs>` — collapse into **ONE full-width page** that mirrors the **planista panel (§6.3.1 / §6.3.2)** as its visual reference. The old sub-routes **redirect** to the unified page; the route-based `<FleetSubTabs>` is **retired** in favour of in-page `<Tabs>`. The panel stays **strictly read-only** (carriers never edit their own fleet here).
+
+**Visual reference = the planista panel (§6.3).** Do not re-derive layout — reuse the §6.3.1 canonical role-panel composition (full-width 4.4 container strip `mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-8`, page heading, then KPI strip, then in-page `<Tabs>` over read-only `<DataTable>`s). The only carrier-specific deltas are the KPI buckets (5 tiles, below) and the enriched «Auta» columns.
+
+**KPI strip — 5 tiles, client-computed.** Same `<KpiCard>` strip pattern and the same bucket→tone vocabulary as the planista/dyspozytor strip (§6.3.3 / §6.4 — KpiCard 4.3 tones). The carrier already holds its **full** `VehicleDto` / `DriverDto` / `TrailerDto` payload from `/fleet/my`, so **all five values are computed CLIENT-SIDE** — **no API change, no new endpoint**. Responsive grid `grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6`.
+
+| Tile | Tile label (PL) | Source (client-computed) | `tone` |
+|---|---|---|---|
+| Total vehicles | AUTA | `vehicles.length` | `neutral` |
+| Driving | JEŻDŻĄ | vehicles not idle >7d | `green` |
+| Idle >7d | STOJĄ >7 DNI | vehicles whose `lastDroveAt` is > 7 days ago | `orange` |
+| Drivers | KIEROWCY | `drivers.length` | `blue` |
+| Trailers | NACZEPY | `trailers.length` | `neutral` |
+
+- **«stojące > 7 dni» rule = same as planista.** A vehicle counts as idle when `now − lastDroveAt > 7 days`; a vehicle with **no `lastDroveAt` is assumed to be driving** (not idle) — identical to the planista/dyspozytor idle rule (§6.3.3). JEŻDŻĄ = total − idle.
+- Tones follow §6.3.3: totals (AUTA, NACZEPY) are `neutral` (inert counts), JEŻDŻĄ `green`, STOJĄ >7 DNI `orange`, KIEROWCY `blue`. **Never `tone="purple"`** (no purple token — §6.3.3 deviation). The optional warning-toned «idle >7 dni» sub-list (§6.3.3) MAY be reused here verbatim if desired (inert chips, conditional on count > 0) — same tokens, no new ones.
+
+**In-page tabs.** `Auta` / `Kierowcy` / `Naczepy`, rendered with the shadcn `<Tabs>` primitive exactly as §6.3.1 (mandatory `aria-label` on `<TabsList>`, brand-red `data-state=active`), **replacing** the retired route-based `<FleetSubTabs>`. Each tab = one read-only `<DataTable>` with its own `<EmptyState>`.
+
+**«Auta» columns — enriched (carrier holds the full `VehicleDto`).** Wider than the planista subset because the carrier owns the full DTO:
+
+| Column id | Header (PL) | Cell |
+|---|---|---|
+| `plate` | NR REJ. | `font-mono font-semibold` plate |
+| `side` | NR BOCZNY | `sideNumber ?? '—'` |
+| `type` | TYP | vehicle type or `—` |
+| `euro` | EURO | `<Badge variant="muted">` EURO class or `—` |
+| `adr` | ADR | `<Badge variant="warning">` ADR class when present, else `—` (ADR = cargo permit flag — quirk #3) |
+| `gb` | GB | country-access permit → `<Check className="text-success"/>` / `—` (GB/IT/FR are country-access permits, NOT language codes — quirk #3) |
+| `it` | IT | country-access permit → check / `—` |
+| `fr` | FR | country-access permit → check / `—` |
+| `lastDroveAt` | OSTATNI PRZEJAZD | `lastDroveAt` date or `—`, `tabular-nums` |
+| `active` | STATUS | `active ? <Badge variant="success">Aktywne</Badge> : <Badge variant="muted">Nieaktywne</Badge>` |
+
+**Kierowcy / Naczepy columns are unchanged** — keep the existing carrier driver/trailer column sets (same shape as the planista subset, §6.3.2).
+
+**Vehicle detail modal.** A row click in «Auta» opens the **full `<VehicleDetailModal>` (§6.15)** with **`hideCarrier`** (carrier-self hide — the carrier need not be told who the carrier is; «Przewoźnik» row omitted + no carrier-name subtitle fallback, per the §6.15 carrier-self-hide rule). Read-only context (no `onEdit` ⇒ «Zamknij»-only footer, §6.6). Driver/trailer rows keep their existing read-only detail behaviour.
 
 ### `<StatusBadge>` — extends existing `<Badge>`
 
@@ -1212,7 +1252,7 @@ Footer: standard `<SheetFooter>` — `<Button variant="ghost">Anuluj</Button>` +
 
 ### Notes for web-agent
 
-- All carrier pages use the existing `<DataTable>` for fleet sub-pages (Auta/Kierowcy/Naczepy) — no new table primitive.
+- The carrier fleet is **one unified full-width page** (`/carrier/fleet`) with a 5-tile KPI strip + in-page `<Tabs>` (Auta/Kierowcy/Naczepy), mirroring the planista panel (§6.3) — see «Carrier fleet panel (unified, planista-style)» above. The old `/carrier/fleet/{vehicles,drivers,trailers}` sub-routes redirect to it; the route-based `<FleetSubTabs>` is retired. Each tab uses the existing `<DataTable>` — no new table primitive. Stays strictly read-only.
 - `/carrier/delegations` uses `<DataTable>` + `<StatusBadge>` for the status column. "Add auto" modal uses `<Dialog>` (not `<Sheet>`) — it's a compact single-step form (see `carrier-delegations-add-auto-modal.png`).
 - New-claim form layout: 2-column grid (`grid grid-cols-1 lg:grid-cols-[1fr_1.2fr] gap-6`) — left = RHF form, right = `<LivePreviewPanel>`. Mobile collapses to single column with preview below form.
 - Description textarea on new-claim form is the only difference between `carrier-new-claim-preview.png` and `carrier-new-claim-preview-with-description.png` — gate with a `<details>` / collapsible "Dodaj komentarz" toggle to reduce visual noise by default.
@@ -1227,7 +1267,7 @@ Footer: standard `<SheetFooter>` — `<Button variant="ghost">Anuluj</Button>` +
 | `<LivePreviewPanel>` | `apps/web/components/carrier/LivePreviewPanel.tsx` |
 | `<ReklamacjaSheet>` | `apps/web/components/carrier/ReklamacjaSheet.tsx` |
 | `<CarrierTabBar>` | `apps/web/components/carrier/CarrierTabBar.tsx` |
-| `<FleetSubTabs>` | `apps/web/components/carrier/FleetSubTabs.tsx` |
+| ~~`<FleetSubTabs>`~~ | ~~`apps/web/components/carrier/FleetSubTabs.tsx`~~ — **retired 2026-06-26**; carrier fleet now uses in-page shadcn `<Tabs>` on the unified `/carrier/fleet` page (see «Carrier fleet panel (unified, planista-style)»). |
 | `<CountdownBanner>` (used inside ReklamacjaSheet) | `apps/web/components/carrier/CountdownBanner.tsx` |
 
 **shadcn primitives to install** (run from repo root, scoped to web workspace):
@@ -1794,7 +1834,7 @@ No new colors, no new shadcn primitives, no new Tailwind config keys, no emoji.
 |---|---|---|
 | **`narrow`** (form-centred, ~720px) | `mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-8` | Single-column forms outside a Sheet: `delegations/new`, `forbidden`, login-style standalone pages. Already used by `(carrier)/delegations/new` — keep. |
 | **`detail`** (read-heavy, ~960px) | `mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-8` | Claim-detail pages, single-record read views. Already used by `(carrier)/claims/[nrZgl]` — keep. |
-| **`wide`** (table / dashboard, fluid up to ~1600px) | `mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-8` | **NEW DEFAULT for all admin list pages and dashboards.** Replaces `max-w-7xl` on: `(employee)/employee/(admin)/carriers`, `…/vehicles`, `…/drivers`, `…/trailers`, `…/trailer-types`, `(employee)/employee/claims`, `(employee)/employee` (dashboard root), and the `(carrier)/carrier/fleet/*` list pages. |
+| **`wide`** (table / dashboard, fluid up to ~1600px) | `mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-8` | **NEW DEFAULT for all admin list pages and dashboards.** Replaces `max-w-7xl` on: `(employee)/employee/(admin)/carriers`, `…/vehicles`, `…/drivers`, `…/trailers`, `…/trailer-types`, `(employee)/employee/claims`, `(employee)/employee` (dashboard root), and the unified `(carrier)/carrier/fleet` page (planista-style, §Phase 3 carrier fleet panel — was three `/fleet/*` list pages before 2026-06-26). |
 
 > `max-w-screen-2xl` resolves to **1536px** in Tailwind's default config. Combined with `xl:px-12` (48px each side) that lands content at ~1440px on a 1920px screen — meaningful gain over `max-w-7xl` (1280px) without forcing tables edge-to-edge on ultra-wide monitors. We deliberately stop at `2xl` rather than going fully fluid: on a 27″ 4K screen (2560px+) a 2200px-wide table becomes uncomfortably scan-heavy.
 
@@ -5209,7 +5249,7 @@ Every built screen maps to exactly one **archetype**. The polish recipe is defin
 
 | Archetype | Shape | Screens (route → archetype) |
 |---|---|---|
-| **A — Data-table page** | filter row + `<DataTable>` (one or `<Tabs>`-of-tables) | `/carrier/claims`, `/employee/claims`, `/employee/carriers`, `/employee/vehicles`, `/employee/drivers`, `/employee/trailers`, `/employee/trailer-types`, `/employee/users`, `/employee/limits`, `/employee/audit`, `/employee/delegations`, `/eksport/delegations`, `/carrier/fleet/{vehicles,drivers,trailers}`, `/carrier/delegations`, `/planista`, `/dyspozytor`, `/eksport` |
+| **A — Data-table page** | filter row + `<DataTable>` (one or `<Tabs>`-of-tables) | `/carrier/claims`, `/employee/claims`, `/employee/carriers`, `/employee/vehicles`, `/employee/drivers`, `/employee/trailers`, `/employee/trailer-types`, `/employee/users`, `/employee/limits`, `/employee/audit`, `/employee/delegations`, `/eksport/delegations`, `/carrier/fleet` (unified, KPI strip + in-page `<Tabs>`-of-tables — see Phase 3 carrier fleet panel), `/carrier/delegations`, `/planista`, `/dyspozytor`, `/eksport` |
 | **B — Dashboard (KPI + panels/charts)** | `<KpiCard>` row + side/section panels, some Recharts | `/carrier` (carrier dashboard), `/employee/dashboard`, `/employee` (entry), `/dyspozytor` KPI strip, `/employee/diagnostics` |
 | **C — Detail modal / sheet / drill page** | `Dialog`/`Sheet`/grouped-`<dl>` detail surface | `ClaimModal` (claim verify/detail), `EntityDetailModal` (vehicle/driver/trailer/carrier), `/carrier/claims/[nrZgl]`, `/employee/opieka/carriers/[login]`, delegation detail modal, `VehicleMonthKmModal` |
 | **D — Form page / wizard** | RHF + Zod form (single or multi-step) | `/carrier/claims/new`, `/carrier/delegations/new`, carrier-onboarding wizard, all edit `<Sheet>` forms |
@@ -5367,7 +5407,7 @@ Columns: **Sk** = §8.1 skeleton applied · **Em** = §8.2 empty state(s) applie
 | `/carrier/claims` (list) | A | no* | ✓ | data **+action** / filtered | — | — | ✓ | ✓ |
 | `/carrier/claims/new` | D (form) | yes | preview only | — | save/err | Enter (not in textarea) | ★key | ✓ |
 | `/carrier/claims/[nrZgl]` | C | no | ✓ | sub-list | — | Esc | ✓ | ✓ |
-| `/carrier/fleet/{vehicles,drivers,trailers}` | A | yes | ✓ | data+action / filtered | save/err | sheet Esc/Enter | ✓ | ✓ |
+| `/carrier/fleet` (unified, read-only) | A | no | ✓ | KPI strip + `<Tabs>`-of-tables | — | row→modal Esc | ✓ | ✓ |
 | `/carrier/delegations` (+`/new`) | A / D | yes | ✓ | data+action / filtered | save/err | Esc/Enter | ✓ | ✓ |
 | `/carrier/km`, `/*/moje-pojazdy` | E | view | §7.7.8 | §7.7.8 | — | Esc (history) | ✓ | ✓ |
 | `/employee/dashboard` | B | no | ✓ | per-panel | — | — | ★key | ✓ |

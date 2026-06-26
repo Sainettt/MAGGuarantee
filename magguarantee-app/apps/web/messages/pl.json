@@ -1530,7 +1530,13 @@
           "plate": "Numer rejestracyjny",
           "side": "Numer boczny",
           "type": "Typ",
-          "status": "Status"
+          "status": "Status",
+          "euro": "EURO",
+          "adr": "ADR",
+          "gb": "GB",
+          "it": "IT",
+          "fr": "FR",
+          "lastDroveAt": "Ostatni przejazd"
         }
       },
       "drivers": {
@@ -1569,6 +1575,21 @@
           "type": "Typ",
           "status": "Status"
         }
+      },
+      "title": "Flota",
+      "subtitle": "Twoje pojazdy, kierowcy i naczepy. Dane są tylko do podglądu — zarządza nimi opiekun.",
+      "contactOpiekun": "Skontaktuj się z opiekunem",
+      "contactOpiekunSubject": "Zmiana danych floty",
+      "kpi": {
+        "vehicles": "Auta",
+        "driving": "Jeżdżą",
+        "idle": "Stoją > 7 dni",
+        "drivers": "Kierowcy",
+        "trailers": "Naczepy"
+      },
+      "idle": {
+        "title": "Auta stojące dłużej niż 7 dni:",
+        "daysIdle": "{days, plural, one {# dzień} few {# dni} many {# dni} other {# dni}}"
       }
     }
   },
