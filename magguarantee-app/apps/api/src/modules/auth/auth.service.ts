@@ -10,6 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import type { UserDto } from '@magguarantee/shared';
 
 import type { Env } from '../../config/env.schema';
+import { REFRESH_ROTATION_GRACE_MS } from './auth.constants';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
@@ -282,7 +283,31 @@ export class AuthService {
       throw new UnauthorizedException('No such token');
     }
     if (stored.revokedAt) {
-      // Theft detected — revoke ALL active tokens for this user.
+      // The token is revoked. Distinguish a benign concurrent-rotation race
+      // from genuine theft. A normal rotation just happened iff the token was
+      // revoked very recently (within REFRESH_ROTATION_GRACE_MS) AND it points
+      // at its successor (`replacedById != null`). That is the loser of the
+      // parallel /auth/refresh calls the Next.js edge middleware fires on one
+      // page load — NOT theft, so we must NOT kill the just-minted sibling
+      // session. Anything else (revoked long ago → replay, or revoked without
+      // a successor → logout/reset/admin revoke-all) is genuine reuse.
+      const revokedAgeMs = Date.now() - stored.revokedAt.getTime();
+      const isBenignRotationRace =
+        revokedAgeMs <= REFRESH_ROTATION_GRACE_MS &&
+        stored.replacedById != null;
+
+      if (isBenignRotationRace) {
+        this.logger.debug({
+          msg: 'refresh-token already rotated (benign concurrent race), 401 only this request',
+          userId,
+          tokenId: stored.id,
+          replacedById: stored.replacedById,
+          revokedAgeMs,
+        });
+        throw new UnauthorizedException('Refresh token already rotated');
+      }
+
+      // Genuine theft — revoke ALL active tokens for this user.
       await this.revokeAllForUser(userId);
       this.logger.warn({
         msg: 'refresh-token reuse detected, revoked all sessions',
@@ -308,18 +333,19 @@ export class AuthService {
       });
     } catch (err) {
       if (err instanceof RefreshReuseError) {
-        // Concurrent rotation of the SAME token slipped past the read-time
-        // `revokedAt` check above (TOCTOU). The atomic claim inside issuePair
-        // caught it — treat as theft and revoke every active session.
-        await this.revokeAllForUser(userId);
-        this.logger.warn({
-          msg: 'refresh-token reuse detected (concurrent rotation), revoked all sessions',
+        // The atomic claim inside issuePair matched 0 rows: between our
+        // read-time `revokedAt` check (which saw the token still live) and our
+        // write, a CONCURRENT /auth/refresh rotated this exact token. This is
+        // ALWAYS a benign rotation race — a genuine replay would have had
+        // `revokedAt` already set at read time and been caught (and judged) in
+        // Part A above. So 401 only this losing request; do NOT revoke the
+        // sibling session the winner just minted.
+        this.logger.debug({
+          msg: 'refresh-token rotated concurrently (claim lost the race), 401 only this request',
           userId,
           tokenId: stored.id,
         });
-        throw new UnauthorizedException(
-          'Token reuse detected — all sessions revoked',
-        );
+        throw new UnauthorizedException('Refresh token already rotated');
       }
       throw err;
     }

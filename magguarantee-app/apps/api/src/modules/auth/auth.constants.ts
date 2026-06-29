@@ -42,6 +42,16 @@ export const PWRESET_REDIS_KEY = {
   session: (sessionToken: string) => `pwreset:session:${sessionToken}`,
 } as const;
 
+// ── Refresh-token rotation grace window ─────────────────
+// A refresh token revoked within this window AND carrying a `replacedById`
+// (i.e. a normal rotation that just happened) is a benign concurrent-rotation
+// race — the loser of the parallel document/prefetch/RSC `/auth/refresh` calls
+// the Next.js edge middleware fires on a single page load — NOT theft. We 401
+// that one losing request without revoking the user's other sessions. A token
+// revoked OUTSIDE this window, or revoked WITHOUT a `replacedById` (logout /
+// reset / admin revoke-all), is still treated as genuine reuse → revoke-all.
+export const REFRESH_ROTATION_GRACE_MS = 30_000;
+
 // ── 2FA tuning (defaults — overridden by AppConfig at runtime) ──
 export const DEFAULT_CODE_TTL_SECONDS = 600;
 export const DEFAULT_MAX_ATTEMPTS = 5;

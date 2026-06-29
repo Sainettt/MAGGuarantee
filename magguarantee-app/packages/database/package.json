@@ -14,6 +14,7 @@
     "migrate:dev": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
     "seed": "tsx prisma/seed.ts",
+    "seed:prod": "tsx prisma/seed.prod.ts",
     "prisma:format": "prisma format",
     "lint": "echo 'lint: no source yet' && exit 0",
     "typecheck": "tsc --noEmit",
