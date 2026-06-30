@@ -42,8 +42,16 @@ export function Header({ leftSlot }: HeaderProps = {}) {
     />
   );
 
+  // Top chrome layer at `z-30` — strictly ABOVE the sub-navs (e.g.
+  // <CarrierTabs>, which sticks at `top-16 z-20` with its own `backdrop-blur`
+  // stacking context). The two are siblings; at equal z-index the later-in-DOM
+  // sub-nav would paint over the header — and over the <UserMenu> dropdown,
+  // which lives INSIDE the header's stacking context and so cannot escape a
+  // `z-20` header to clear a `z-20` sub-nav. Lifting the header to `z-30` keeps
+  // the dropdown above the sub-nav band. Hierarchy: header z-30 > sub-nav z-20
+  // > page content z-10; modals portal to body at z-40/z-50 and still cover it.
   return (
-    <header className="sticky top-0 z-20 bg-card/90 backdrop-blur border-b border-border">
+    <header className="sticky top-0 z-30 bg-card/90 backdrop-blur border-b border-border">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           {leftSlot}
