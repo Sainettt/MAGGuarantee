@@ -12,6 +12,8 @@ import {
 
 import {
   CARRIER_NOT_READY_CODE,
+  DEPARTURE_IN_PAST_CODE,
+  DEPARTURE_PAST_GRACE_MS,
   type CancelDelegationDto,
   type DelegationDto,
   type DelegationEligibilityResponse,
@@ -124,6 +126,12 @@ export class DelegationsService {
     // create maintains "≤1 active per vehicle", the invariant holds by
     // induction across the status transitions. See docs/04-data-model.md.
     await this._assertVehicleNotOnActiveTrip(vehicle.id);
+
+    // A carrier may NOT register a wyjazd with a `departureAt` in the past
+    // (full-timestamp granularity, minus a small grace window — see
+    // `DEPARTURE_PAST_GRACE_MS`). Bypassable via the `ALLOW_PAST_DEPARTURE` env
+    // flag for dev/test/e2e. See the method doc.
+    this._assertDepartureNotInPast(dto.departureAt);
 
     const row = await this.delegations.create({
       carrierId: carrier.id,
@@ -605,6 +613,41 @@ export class DelegationsService {
         'Nie można zarejestrować wyjazdu — skontaktuj się ze swoim opiekunem.',
       extensions: { code: CARRIER_NOT_READY_CODE },
     });
+  }
+
+  /**
+   * Rejects (422) a delegation whose `departureAt` is in the PAST. "Past" is
+   * full-TIMESTAMP granularity with a small grace window: reject only when
+   * `new Date(departureAt).getTime() < Date.now() - DEPARTURE_PAST_GRACE_MS`
+   * (no date-only rounding, no timezone math — both sides are absolute
+   * instants). The grace (a few minutes) absorbs form fill-in time so a carrier
+   * who picks "now" and submits shortly after is not rejected; the same
+   * `DEPARTURE_PAST_GRACE_MS` constant drives the web pre-check + `min` hint, so
+   * the window can't drift. Throws the same `extensions.code` envelope shape as
+   * `_assertCarrierReady`; the frontend pattern-matches on `DEPARTURE_IN_PAST`
+   * to surface an inline field error on `departureAt`.
+   *
+   * BYPASS — do NOT "fix" this into fail-closed:
+   *  - When `configService` is ABSENT (undefined) we bypass (return without
+   *    checking). In production `ConfigService` is ALWAYS wired by the global
+   *    `ConfigModule`, so an absent config only happens in pure unit-test fakes
+   *    that omit the positional arg — and those fakes use fixed PAST fixture
+   *    dates (e.g. `delegations.service.add.spec.ts` → '2026-06-01'). Enforcing
+   *    when config is absent would break that suite. Absent config = bypass.
+   *  - When config is present AND `ALLOW_PAST_DEPARTURE` is true → bypass
+   *    (dev/test/e2e override to allow backdated departures).
+   *  - Otherwise → enforce.
+   */
+  private _assertDepartureNotInPast(departureAt: string): void {
+    // Bypass in pure unit context (no ConfigService wired) — see method doc.
+    if (!this.configService) return;
+    if (this.configService.get('ALLOW_PAST_DEPARTURE', { infer: true })) return;
+    if (new Date(departureAt).getTime() < Date.now() - DEPARTURE_PAST_GRACE_MS) {
+      throw new UnprocessableEntityException({
+        message: 'Nie można zarejestrować wyjazdu z datą w przeszłości.',
+        extensions: { code: DEPARTURE_IN_PAST_CODE },
+      });
+    }
   }
 
   private async _requireCarrierProfile(

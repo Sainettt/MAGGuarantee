@@ -355,7 +355,7 @@ soft-delete'ятся (объект в MinIO остаётся).
 | `vehicleId` | UUID | required |
 | `trailerId` | UUID | required (was optional pre-migration) |
 | `driverId` | UUID | required (was optional pre-migration) |
-| `departureAt` | ISO datetime | required |
+| `departureAt` | ISO datetime | required; must not be in the past — server rejects with 422 `DEPARTURE_IN_PAST` when `departureAt < now − 10 min` (full-timestamp granularity, with a ~10-min grace window for form fill-in — see `DEPARTURE_PAST_GRACE_MS`); bypassable via the `ALLOW_PAST_DEPARTURE` env flag (testing only) |
 | `departureCountry` | enum (`EU_VAT_COUNTRY_CODES`, VIES dialect — Greece = `EL`) | required |
 | `departurePostalCode` | string ≤ 16 chars, per-country format | required, validated against `EU_POSTAL_CODES` (see `packages/shared/src/constants/eu-postal-codes.ts`) |
 | `plannedReturnAt` | ISO date `YYYY-MM-DD` (date-only) | required; must be on or after the date portion of `departureAt` |

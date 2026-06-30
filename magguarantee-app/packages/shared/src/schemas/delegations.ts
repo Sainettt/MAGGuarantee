@@ -210,6 +210,29 @@ export type MarkReturnedDto = z.infer<typeof MarkReturnedSchema>;
 export const CARRIER_NOT_READY_CODE = 'CARRIER_NOT_READY' as const;
 
 /**
+ * Stable, machine-readable code surfaced in the `extensions.code` field of the
+ * 422 problem-details envelope when a carrier attempts to register a delegation
+ * on `POST /delegations` whose `departureAt` is in the past (full-timestamp
+ * granularity, with a small grace window — see `DEPARTURE_PAST_GRACE_MS`). The
+ * frontend pattern-matches on this code to surface an inline field error on the
+ * `departureAt` control. The rule is environment-dependent (bypassable via the
+ * `ALLOW_PAST_DEPARTURE` env flag for tests / e2e) and lives in the service
+ * only — NOT in the time-independent `SubmitDelegationSchema`.
+ */
+export const DEPARTURE_IN_PAST_CODE = 'DEPARTURE_IN_PAST' as const;
+
+/**
+ * Grace window (milliseconds) for the past-departure rule. A `departureAt` up to
+ * this far before "now" is still accepted, so a carrier who picks the current
+ * moment and submits a little later (form fill-in time) is not rejected. The
+ * guard rejects only when `departureAt < now - DEPARTURE_PAST_GRACE_MS`. BOTH
+ * layers read this single constant — the api guard (`_assertDepartureNotInPast`)
+ * and the web form (the pre-submit check + the `min` hint) — so the window can
+ * never drift between client and server.
+ */
+export const DEPARTURE_PAST_GRACE_MS = 10 * 60 * 1000; // 10 minutes
+
+/**
  * Response for `GET /delegations/eligibility` (carrier role). A single boolean
  * — `canCreate` — mirrors the same readiness computation that hard-blocks
  * `POST /delegations`. No breakdown is exposed to the carrier by design; the

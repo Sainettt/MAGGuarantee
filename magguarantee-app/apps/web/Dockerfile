@@ -43,6 +43,11 @@ COPY apps/web ./apps/web
 ARG NEXT_PUBLIC_API_URL=http://localhost:3001
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 
+# Testing/e2e-only: flip to `true` to allow registering backdated wyjazdy in
+# the UI. Baked into the client bundle at build time like NEXT_PUBLIC_API_URL.
+ARG NEXT_PUBLIC_ALLOW_PAST_DEPARTURE=false
+ENV NEXT_PUBLIC_ALLOW_PAST_DEPARTURE=$NEXT_PUBLIC_ALLOW_PAST_DEPARTURE
+
 RUN npm run build -w @magguarantee/shared && \
     npm run build -w web
 

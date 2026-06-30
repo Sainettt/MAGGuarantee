@@ -90,6 +90,27 @@ export const envSchema = z.object({
   GPS_VENDOR_API_KEY: z.string().default(''),
   GPS_POLL_INTERVAL_SEC: z.coerce.number().int().positive().default(90),
   GPS_CACHE_TTL_SEC: z.coerce.number().int().positive().default(300),
+
+  // ── Feature flags / testing ────────────────────────────
+  // ALLOW_PAST_DEPARTURE — default false = ENFORCE in prod (a carrier may NOT
+  // register a wyjazd whose `departureAt` is in the past). Set true ONLY in
+  // dev/test/e2e to allow backdated departures (fixture dates).
+  //
+  // NOTE on coercion: a bare `z.coerce.boolean()` is a footgun here — it maps
+  // ANY non-empty string (including the literal "false") to `true`, so
+  // `ALLOW_PAST_DEPARTURE=false` in `.env` would silently ENABLE the bypass.
+  // We therefore preprocess the raw string explicitly (the same `z.preprocess`
+  // precedent used for the optional URL/secret keys above): only "true"/"1"
+  // (case-insensitive) mean true; "", "false", "0", or an absent value mean
+  // false. This keeps the literal `.env` value semantics intact.
+  ALLOW_PAST_DEPARTURE: z.preprocess((v) => {
+    if (typeof v === 'boolean') return v;
+    if (typeof v === 'string') {
+      const s = v.trim().toLowerCase();
+      return s === 'true' || s === '1';
+    }
+    return false;
+  }, z.boolean().default(false)),
 }).superRefine((env, ctx) => {
   // Gmail secrets are required only when the Gmail provider is selected — keeps
   // dev/staging `.env` (Mailhog) clean while still failing fast at boot in prod

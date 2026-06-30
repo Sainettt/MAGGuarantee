@@ -1475,6 +1475,7 @@
         "departureAt": "Data i godzina wyjazdu",
         "departureCountry": "Kraj wyjazdu",
         "departurePostalCode": "Kod pocztowy wyjazdu",
+        "departureInPast": "Data wyjazdu nie może być w przeszłości.",
         "sectionReturn": "Powrót",
         "plannedReturnAt": "Planowany powrót",
         "returnCountry": "Kraj powrotu",

@@ -1475,6 +1475,7 @@
         "departureAt": "Departure date and time",
         "departureCountry": "Departure country",
         "departurePostalCode": "Departure postal code",
+        "departureInPast": "Departure date cannot be in the past.",
         "sectionReturn": "Return",
         "plannedReturnAt": "Planned return",
         "returnCountry": "Return country",

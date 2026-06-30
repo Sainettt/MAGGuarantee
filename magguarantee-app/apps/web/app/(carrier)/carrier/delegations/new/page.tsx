@@ -24,6 +24,8 @@ import { Controller, useForm, type Resolver } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
   CARRIER_NOT_READY_CODE,
+  DEPARTURE_IN_PAST_CODE,
+  DEPARTURE_PAST_GRACE_MS,
   SubmitDelegationSchema,
   type EuVatCountryCode,
   type SubmitDelegationDto,
@@ -60,6 +62,47 @@ function isCarrierNotReady(err: unknown): boolean {
   if (!extensions || typeof extensions !== 'object') return false;
   return (
     (extensions as { code?: unknown }).code === CARRIER_NOT_READY_CODE
+  );
+}
+
+/**
+ * Narrows an unknown mutation error to the past-departure 422 backstop. Same
+ * envelope shape as {@link isCarrierNotReady}, matching on
+ * `DEPARTURE_IN_PAST_CODE`. This is only the server-side safety net — the
+ * primary block is the inline pre-submit check (skipped when bypassed). The two
+ * flags (`NEXT_PUBLIC_ALLOW_PAST_DEPARTURE` vs the api `ALLOW_PAST_DEPARTURE`)
+ * are independent, so a 422 can still arrive even with the web check disabled.
+ */
+function isDepartureInPast(err: unknown): boolean {
+  if (!(err instanceof ApiResponseError) || err.status !== 422) return false;
+  const extensions = (err.data as { extensions?: unknown } | undefined)
+    ?.extensions;
+  if (!extensions || typeof extensions !== 'object') return false;
+  return (
+    (extensions as { code?: unknown }).code === DEPARTURE_IN_PAST_CODE
+  );
+}
+
+/**
+ * Build-time-baked bypass (same mechanism as `NEXT_PUBLIC_API_URL`). When
+ * `true` the past-departure block is fully disabled in the UI: no `min` hint,
+ * no pre-submit check. Independent from the api `ALLOW_PAST_DEPARTURE` flag —
+ * both must agree for a full end-to-end bypass. Testing / e2e only.
+ */
+const ALLOW_PAST_DEPARTURE =
+  process.env.NEXT_PUBLIC_ALLOW_PAST_DEPARTURE === 'true';
+
+/**
+ * Formats a `Date` as the local-time string `<input type="datetime-local">`
+ * expects: `YYYY-MM-DDTHH:mm` — local, no seconds, no `Z`. Used to seed the
+ * field `min` so the native picker can't offer past instants. Computed after
+ * mount only (never on the server) to avoid an SSR/client hydration mismatch.
+ */
+function toDatetimeLocal(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}`
   );
 }
 
@@ -112,6 +155,14 @@ export default function NewDelegationPage() {
   const [blockedBySubmit, setBlockedBySubmit] = useState(false);
   const blocked = eligibilityQ.data?.canCreate === false || blockedBySubmit;
 
+  // `min` for the departure picker. Left `undefined` on the server + first
+  // client paint (so SSR and hydration agree — a `new Date()` baked inline
+  // would differ between renders), then filled in post-mount. It's a soft UX
+  // hint only; the hard blocks are the pre-submit check + the 422 backstop.
+  const [departureMin, setDepartureMin] = useState<string | undefined>(
+    undefined,
+  );
+
   const form = useForm<FormValues>({
     // The resolver is typed against the strict DTO; cast lets us keep the
     // form-friendly `FormValues` (empty strings) at the RHF surface — Zod
@@ -125,6 +176,15 @@ export default function NewDelegationPage() {
   useEffect(() => {
     form.reset({ ...EMPTY_DEFAULTS });
     draft.hydrate();
+    // Compute `min` only after mount — never during SSR — so the initial HTML
+    // matches the first client render (no hydration mismatch). Skipped when the
+    // past-departure block is bypassed.
+    if (!ALLOW_PAST_DEPARTURE) {
+      // Floor the picker at `now - grace` so the native control mirrors the
+      // server's grace window (a carrier picking "now" stays valid for a few
+      // minutes of form fill-in). Same `DEPARTURE_PAST_GRACE_MS` as the api.
+      setDepartureMin(toDatetimeLocal(new Date(Date.now() - DEPARTURE_PAST_GRACE_MS)));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -144,6 +204,14 @@ export default function NewDelegationPage() {
         toast.error(tBlocked('toast'));
         return;
       }
+      // Backstop for the past-departure rule when the web/api flags drift, or
+      // clock skew slips a past date past the inline pre-check. Surface the
+      // same inline field error as the client-side block.
+      if (isDepartureInPast(err)) {
+        form.setError('departureAt', { message: tForm('departureInPast') });
+        form.setFocus('departureAt');
+        return;
+      }
       const msg =
         err instanceof Error ? err.message : t('registerErrorToast');
       toast.error(msg);
@@ -152,6 +220,22 @@ export default function NewDelegationPage() {
 
   const onSubmit = form.handleSubmit(
     (values) => {
+      // Instant client-side hard block — no round-trip. `values.departureAt` is
+      // already a full ISO string here (the field's `setValueAs` ran), so the
+      // `getTime()` comparison against `Date.now()` is timezone-safe. Allow a
+      // small grace window (`DEPARTURE_PAST_GRACE_MS`, shared with the api) so a
+      // carrier who picks "now" isn't rejected for the seconds spent submitting.
+      // The 422 backstop in `onError` covers flag-drift / clock-skew leaks.
+      if (
+        !ALLOW_PAST_DEPARTURE &&
+        values.departureAt &&
+        new Date(values.departureAt).getTime() < Date.now() - DEPARTURE_PAST_GRACE_MS
+      ) {
+        form.setError('departureAt', { message: tForm('departureInPast') });
+        form.setFocus('departureAt');
+        return;
+      }
+
       const cleaned: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(values)) {
         if (v === '' || v === undefined) continue;
@@ -300,6 +384,7 @@ export default function NewDelegationPage() {
                   id="del-departureAt"
                   type="datetime-local"
                   className="h-10"
+                  min={departureMin}
                   {...form.register('departureAt', {
                     setValueAs: (v) => {
                       if (!v) return '';
