@@ -58,6 +58,9 @@ function makeRow(overrides: Partial<DelegationRow> = {}): DelegationRow {
     vehicle: {
       id: VEHICLE_ID,
       plateNumber: 'PL123',
+      // Porozumienie flag carried on the vehicle mini (claims guarantee gate);
+      // transitions tests don't depend on it → `null` baseline.
+      agreement: null,
       plannerId: null,
       dispatchTeamId: null,
       dispatchTeam: null,

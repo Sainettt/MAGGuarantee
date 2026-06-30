@@ -1384,7 +1384,13 @@
         "derivedPeriod": "Okres (z wyjazdu)",
         "temporaryPeriodHint": "Okres tymczasowy z planowanego powrotu — zostanie zaktualizowany po zjeździe.",
         "warningBanner": "Wyjazd jeszcze nie ma statusu „Zjechał” — czy na pewno chcesz złożyć wniosek?",
-        "warningAck": "Rozumiem, że wyjazd nie jest jeszcze zakończony"
+        "warningAck": "Rozumiem, że wyjazd nie jest jeszcze zakończony",
+        "noGuaranteeMarker": "(bez gwarancji)"
+      },
+      "noGuarantee": {
+        "title": "Ta maszyna nie jest objęta gwarancją",
+        "message": "Nie możesz złożyć wniosku dla tej maszyny. W sprawie objęcia jej gwarancją skontaktuj się ze swoim opiekunem.",
+        "toast": "Ta maszyna nie jest objęta gwarancją — wniosek nie został złożony."
       }
     },
     "preview": {

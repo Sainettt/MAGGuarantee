@@ -1000,6 +1000,9 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
         id: 'v-1',
         carrierId: 'c-1',
         plateNumber: 'WX12345',
+        // Guarantee gate fallback — the vehicle must be under porozumienie for
+        // the submit to clear `_resolveDelegationContext`.
+        agreement: true,
       })),
     } as unknown as VehiclesRepository;
     const driversRepo = {} as DriversRepository;
@@ -1046,6 +1049,9 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
         vehicle: {
           id: 'v-1',
           plateNumber: 'WX12345',
+          // Guarantee gate — eager relation carries `agreement`; `true` so the
+          // submit clears `_resolveDelegationContext`.
+          agreement: true,
           plannerId: null,
           dispatchTeamId: null,
           dispatchTeam: null,

@@ -1384,7 +1384,13 @@
         "derivedPeriod": "Period (from the trip)",
         "temporaryPeriodHint": "Temporary period from the planned return — it will be updated after the vehicle returns.",
         "warningBanner": "The trip is not yet marked “Returned” — are you sure you want to submit the claim?",
-        "warningAck": "I understand the trip is not finished yet"
+        "warningAck": "I understand the trip is not finished yet",
+        "noGuaranteeMarker": "(no guarantee)"
+      },
+      "noGuarantee": {
+        "title": "This vehicle is not covered by the guarantee",
+        "message": "You cannot file a claim for this vehicle. To have it covered by the guarantee, contact your account manager.",
+        "toast": "This vehicle is not covered by the guarantee — the claim was not submitted."
       }
     },
     "preview": {

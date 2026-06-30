@@ -35,6 +35,7 @@ import {
   DELEGATION_NOT_YET_RETURNED_WARNING,
   isCompensationDue,
   startOfBusinessTodayUtc,
+  VEHICLE_NOT_GUARANTEED,
 } from '@magguarantee/shared';
 
 import { AuditContext } from '../../common/audit/audit-context';
@@ -237,8 +238,37 @@ export class ClaimsService {
     if (deleg.claimId) {
       throw new ConflictException('Na ten wyjazd już złożono wniosek.');
     }
+    // Guarantee gate (single seam — covers BOTH submit and preview). A wniosek
+    // may only be filed for a vehicle under "Porozumienie" (`agreement===true`).
+    // `false` AND `null`/missing both count as NOT guaranteed → 422 with the
+    // single stable `extensions.code` envelope (NOT the `violations[]` shape).
+    await this._assertVehicleGuaranteed(deleg);
     const period = this._deriveDelegationPeriod(deleg);
     return { delegation: deleg, ...period };
+  }
+
+  /**
+   * Guarantee gate for the claims flow. Resolves the vehicle's "Porozumienie"
+   * (`Vehicle.agreement`) using the SAME eager-relation-with-fallback pattern as
+   * `_resolveVehiclePlate`: prefer the eager `delegation.vehicle.agreement`
+   * relation; if the relation wasn't hydrated, fall back to a repository lookup
+   * by `delegation.vehicleId`. Only `agreement === true` passes — `false`,
+   * `null`, and a missing vehicle all throw a 422 carrying the stable
+   * `VEHICLE_NOT_GUARANTEED` code in the single-code `extensions` envelope.
+   */
+  private async _assertVehicleGuaranteed(deleg: DelegationRow): Promise<void> {
+    let agreement = deleg.vehicle?.agreement;
+    if (agreement === undefined) {
+      const v = await this.vehicles.findById(deleg.vehicleId);
+      agreement = v?.agreement ?? null;
+    }
+    if (agreement !== true) {
+      throw new UnprocessableEntityException({
+        message:
+          'Ta maszyna nie jest objęta gwarancją — skontaktuj się z opiekunem.',
+        extensions: { code: VEHICLE_NOT_GUARANTEED },
+      });
+    }
   }
 
   /**

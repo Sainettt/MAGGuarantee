@@ -12,7 +12,11 @@
 // Style mirrors `claims.service.update.spec.ts`: hand-rolled fakes, no
 // jest-mock-extended.
 
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 
 import type {
   KmCalcResult,
@@ -25,6 +29,10 @@ import type {
   CarrierRow,
   CarriersRepository,
 } from '../carriers/carriers.repository';
+import type {
+  DelegationRow,
+  DelegationsRepository,
+} from '../delegations/delegations.repository';
 import type { DriversRepository } from '../drivers/drivers.repository';
 import type { KmCalcService } from '../km-calc/km-calc.service';
 import type { PrismaService } from '../prisma/prisma.service';
@@ -272,6 +280,7 @@ function makeService(
   vehiclesRepo: VehiclesRepository,
   km: KmCalcService,
   dailyKm: VehicleDailyKmRepository = makeDailyKmRepo(8_000),
+  delegations?: DelegationsRepository,
 ): ClaimsService {
   const noop = {} as unknown;
   return new ClaimsService(
@@ -287,7 +296,72 @@ function makeService(
     undefined,
     undefined,
     dailyKm,
+    // Phase 7 §0″ — delegation-derived preview path (`dto.delegationId`). When
+    // omitted, the carrier new-claim preview falls back to the vehicleId/dates
+    // path; the guarantee-gate cases below inject a stub so the delegation seam
+    // (`_resolveDelegationContext`) is exercised.
+    delegations,
   );
+}
+
+// ─── delegation-derived preview fixtures (guarantee gate) ────
+
+/**
+ * Minimal outing row for the carrier new-claim preview path. `agreement` on the
+ * eager `vehicle` mini drives the guarantee gate in `_resolveDelegationContext`
+ * (only `true` passes; `false`/`null` → 422 `VEHICLE_NOT_GUARANTEED`).
+ */
+function makeDelegationForPreview(
+  agreement: boolean | null,
+): DelegationRow {
+  return {
+    id: 'deleg-1',
+    vehicleId: 'v-1',
+    vehicle: {
+      id: 'v-1',
+      plateNumber: 'WX12345',
+      agreement,
+      plannerId: null,
+      dispatchTeamId: null,
+      dispatchTeam: null,
+    },
+    trailerId: 'trl-1',
+    trailer: { id: 'trl-1', plateNumber: 'TR9999' },
+    driverId: 'drv-1',
+    driver: { id: 'drv-1', firstName: 'Jan', lastName: 'Kowalski' },
+    carrierId: 'c-1',
+    carrier: null,
+    driverNameSnapshot: 'Jan Kowalski',
+    driverPhoneSnapshot: '+48000000000',
+    departureAt: new Date('2026-05-01T06:30:00.000Z'),
+    departureCountry: 'PL',
+    departurePostalCode: '00-001',
+    plannedReturnAt: new Date('2026-05-09T00:00:00.000Z'),
+    returnCountry: 'PL',
+    returnPostalCode: '00-001',
+    status: 'zjechal',
+    actualReturnAt: new Date('2026-05-10T00:00:00.000Z'),
+    reportedById: null,
+    reportedBy: null,
+    reportedAt: new Date('2026-04-30T08:00:00.000Z'),
+    verifiedById: null,
+    verifiedBy: null,
+    verifiedAt: null,
+    readyById: null,
+    readyBy: null,
+    readyAt: null,
+    notes: null,
+    claimId: null,
+    createdAt: new Date('2026-04-30T08:00:00.000Z'),
+    updatedAt: new Date('2026-04-30T08:00:00.000Z'),
+    deletedAt: null,
+  };
+}
+
+function makeDelegationsRepo(deleg: DelegationRow): DelegationsRepository {
+  return {
+    findById: jest.fn(async (_id: string) => deleg),
+  } as unknown as DelegationsRepository;
 }
 
 // ─── tests ───────────────────────────────────────────────────
@@ -468,5 +542,98 @@ describe('ClaimsService.previewKmCalc — carrier-only entry point intact', () =
     ).rejects.toThrow(ForbiddenException);
 
     expect(km.calls).toHaveLength(0);
+  });
+});
+
+describe('ClaimsService.previewKmCalc — guarantee gate (delegation-derived path)', () => {
+  beforeAll(() => {
+    jest.useFakeTimers().setSystemTime(NOW);
+  });
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
+  // The carrier new-claim preview sends `delegationId` (no vehicleId/dates) and
+  // hits `_resolveDelegationContext`, where the guarantee gate fires.
+  const DELEGATION_PREVIEW_DTO: PreviewClaimDto = {
+    delegationId: 'deleg-1',
+    timeFrom: '08:00',
+    timeTo: '18:00',
+    hoursAdjusted: 0,
+  };
+
+  // Reads the single-code 422 envelope thrown by the guarantee gate.
+  function readExtensionsCode(err: unknown): string | null {
+    if (!(err instanceof UnprocessableEntityException)) return null;
+    const body = err.getResponse() as { extensions?: { code?: unknown } };
+    return typeof body.extensions?.code === 'string'
+      ? body.extensions.code
+      : null;
+  }
+
+  function makeGateService(
+    agreement: boolean | null,
+    km = makeKmCalcService(),
+  ): { svc: ClaimsService; km: ReturnType<typeof makeKmCalcService> } {
+    const carrier = makeCarrier();
+    const claimsRepo = makeClaimsRepo([]);
+    const carriersRepo = makeCarriersRepo([carrier]);
+    // Eager relation carries `agreement`; the gate prefers it and never needs
+    // the vehiclesRepo fallback here.
+    const vehiclesRepo = makeVehiclesRepo([]);
+    const delegations = makeDelegationsRepo(makeDelegationForPreview(agreement));
+    const svc = makeService(
+      claimsRepo,
+      carriersRepo,
+      vehiclesRepo,
+      km.svc,
+      makeDailyKmRepo(8_000),
+      delegations,
+    );
+    return { svc, km };
+  }
+
+  it('vehicle agreement=false → 422 VEHICLE_NOT_GUARANTEED, no km-calc', async () => {
+    const { svc, km } = makeGateService(false);
+    let caught: unknown;
+    try {
+      await svc.previewKmCalc(
+        makeAuth('przewoznik', makeCarrier().userId),
+        DELEGATION_PREVIEW_DTO,
+      );
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(UnprocessableEntityException);
+    expect(readExtensionsCode(caught)).toBe('VEHICLE_NOT_GUARANTEED');
+    // Gate fires before the math — km-calc must not have run.
+    expect(km.calls).toHaveLength(0);
+  });
+
+  it('vehicle agreement=null → same 422 (null treated as not guaranteed)', async () => {
+    const { svc, km } = makeGateService(null);
+    let caught: unknown;
+    try {
+      await svc.previewKmCalc(
+        makeAuth('przewoznik', makeCarrier().userId),
+        DELEGATION_PREVIEW_DTO,
+      );
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(UnprocessableEntityException);
+    expect(readExtensionsCode(caught)).toBe('VEHICLE_NOT_GUARANTEED');
+    expect(km.calls).toHaveLength(0);
+  });
+
+  it('vehicle agreement=true → passes the gate, reaches km-calc', async () => {
+    const { svc, km } = makeGateService(true);
+    const out = await svc.previewKmCalc(
+      makeAuth('przewoznik', makeCarrier().userId),
+      DELEGATION_PREVIEW_DTO,
+    );
+    // Guaranteed → the normal preview math runs and returns a payload.
+    expect(km.calls).toHaveLength(1);
+    expect(out.paymentEur).toBe(1_400);
   });
 });

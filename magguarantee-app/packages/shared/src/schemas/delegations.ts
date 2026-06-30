@@ -222,6 +222,20 @@ export const CARRIER_NOT_READY_CODE = 'CARRIER_NOT_READY' as const;
 export const DEPARTURE_IN_PAST_CODE = 'DEPARTURE_IN_PAST' as const;
 
 /**
+ * Stable, machine-readable code surfaced in the `extensions.code` field of the
+ * 422 problem-details envelope when a carrier attempts to preview/submit a
+ * wniosek against a delegation whose vehicle is NOT under guarantee
+ * (`Vehicle.agreement !== true` — `false` AND `null` both count as not
+ * guaranteed). The gate lives in the shared claims delegation-resolution seam
+ * (`ClaimsService._resolveDelegationContext`), so it covers BOTH the preview
+ * and the submit paths with a single check. The frontend pattern-matches on
+ * this code to render a "skontaktuj się z opiekunem" banner — same single-code
+ * envelope shape as `CARRIER_NOT_READY_CODE` / `DEPARTURE_IN_PAST_CODE` (NOT
+ * the multi-rule `violations[]` array).
+ */
+export const VEHICLE_NOT_GUARANTEED = 'VEHICLE_NOT_GUARANTEED' as const;
+
+/**
  * Grace window (milliseconds) for the past-departure rule. A `departureAt` up to
  * this far before "now" is still accepted, so a carrier who picks the current
  * moment and submits a little later (form fill-in time) is not rejected. The
@@ -293,6 +307,15 @@ export type DelegationFilters = z.infer<typeof DelegationFiltersSchema>;
 const VehicleMiniSchema = z.object({
   id: UuidSchema,
   plateNumber: z.string(),
+  /**
+   * "Porozumienie" — whether the vehicle is currently under km-guarantee.
+   * Mirrors Prisma `Vehicle.agreement` (`Boolean?`), so it is NULLABLE here.
+   * NON-SENSITIVE (it is NOT a rate) → safe to surface to the carrier. Drives
+   * the claims-picker "(bez gwarancji)" marker on the web wyjazd selector;
+   * `null` AND `false` both mean NOT guaranteed (the claims gate accepts only
+   * `agreement === true`).
+   */
+  agreement: z.boolean().nullable(),
   /**
    * Phase 11 Шаг D (additive) — the vehicle's CURRENT dispatch team, resolved
    * LIVE from `Vehicle.dispatchTeam` (NOT a snapshot). Identical shape to the

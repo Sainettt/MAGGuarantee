@@ -38,6 +38,9 @@ export interface DelegationRow {
   vehicle: {
     id: string;
     plateNumber: string;
+    // "Porozumienie" (`Vehicle.agreement`, `Boolean?`) — carried to the claims
+    // guarantee gate + the wire VehicleMini. `null`/`false` ⇒ not guaranteed.
+    agreement: boolean | null;
     plannerId: string | null;
     dispatchTeamId: string | null;
     dispatchTeam: VehicleDispatchTeamDto | null;
@@ -344,6 +347,9 @@ export class DelegationsRepository {
         select: {
           id: true,
           plateNumber: true,
+          // "Porozumienie" — drives the claims guarantee gate + the picker's
+          // "(bez gwarancji)" marker. NON-SENSITIVE (not a rate).
+          agreement: true,
           plannerId: true,
           dispatchTeamId: true,
           dispatchTeam: {
@@ -385,6 +391,7 @@ export class DelegationsRepository {
         ? {
             id: row.vehicle.id,
             plateNumber: row.vehicle.plateNumber,
+            agreement: row.vehicle.agreement,
             plannerId: row.vehicle.plannerId,
             dispatchTeamId: row.vehicle.dispatchTeamId,
             // Phase 11 Шаг D — live dispatch team, normalised to the shared
@@ -452,6 +459,7 @@ interface DelegationPrismaShape {
   vehicle?: {
     id: string;
     plateNumber: string;
+    agreement: boolean | null;
     plannerId: string | null;
     dispatchTeamId: string | null;
     dispatchTeam?: {

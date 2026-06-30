@@ -65,6 +65,10 @@ function makeDelegation(overrides: Partial<DelegationRow> = {}): DelegationRow {
     vehicle: {
       id: 'v-1',
       plateNumber: 'WX12345',
+      // Guarantee gate (`_resolveDelegationContext`) accepts only
+      // `agreement === true`. Default fixtures are guaranteed so the happy
+      // path reaches the normal flow; not-guaranteed cases override this.
+      agreement: true,
       plannerId: null,
       dispatchTeamId: null,
       dispatchTeam: null,
@@ -242,6 +246,9 @@ function makeVehiclesRepo(): VehiclesRepository {
       id,
       carrierId: 'c-1',
       plateNumber: 'WX12345',
+      // Mirror the eager-relation default so the guarantee gate's fallback
+      // path also sees a guaranteed vehicle.
+      agreement: true,
     })),
   } as unknown as VehiclesRepository;
 }
@@ -800,5 +807,94 @@ describe('ClaimsService.submit — delegation link', () => {
     await expect(svc.submit(makeAuth('przewoznik'), dto)).rejects.toBeInstanceOf(
       ConflictException,
     );
+  });
+
+  // ── guarantee gate (Vehicle.agreement, _resolveDelegationContext seam) ──
+
+  // Reads the single-code 422 envelope (NOT the `violations[]` shape) thrown by
+  // the guarantee gate; returns the stable code or null if not shaped as such.
+  function readExtensionsCode(err: unknown): string | null {
+    if (!(err instanceof UnprocessableEntityException)) return null;
+    const body = err.getResponse() as {
+      extensions?: { code?: unknown };
+    };
+    return typeof body.extensions?.code === 'string'
+      ? body.extensions.code
+      : null;
+  }
+
+  it('rejects when the outing vehicle has agreement=false — 422 VEHICLE_NOT_GUARANTEED, no write', async () => {
+    const repoFake = makeRepo(null);
+    const delegations = makeDelegationsRepo(
+      makeDelegation({
+        vehicle: {
+          id: 'v-1',
+          plateNumber: 'WX12345',
+          agreement: false,
+          plannerId: null,
+          dispatchTeamId: null,
+          dispatchTeam: null,
+        },
+      }),
+    );
+    const svc = makeService(
+      repoFake,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      delegations,
+    );
+    let caught: unknown;
+    try {
+      await svc.submit(makeAuth('przewoznik'), dto);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(UnprocessableEntityException);
+    expect(readExtensionsCode(caught)).toBe('VEHICLE_NOT_GUARANTEED');
+    // No claim persisted — the gate fires before km-calc / createWithin.
+    expect(repoFake.creates).toHaveLength(0);
+  });
+
+  it('rejects when the outing vehicle has agreement=null (null treated as not guaranteed) — 422 VEHICLE_NOT_GUARANTEED', async () => {
+    const repoFake = makeRepo(null);
+    const delegations = makeDelegationsRepo(
+      makeDelegation({
+        vehicle: {
+          id: 'v-1',
+          plateNumber: 'WX12345',
+          agreement: null,
+          plannerId: null,
+          dispatchTeamId: null,
+          dispatchTeam: null,
+        },
+      }),
+    );
+    const svc = makeService(
+      repoFake,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      delegations,
+    );
+    let caught: unknown;
+    try {
+      await svc.submit(makeAuth('przewoznik'), dto);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(UnprocessableEntityException);
+    expect(readExtensionsCode(caught)).toBe('VEHICLE_NOT_GUARANTEED');
+    expect(repoFake.creates).toHaveLength(0);
+  });
+
+  it('passes the guarantee gate when the outing vehicle has agreement=true (reaches the normal happy path)', async () => {
+    const repoFake = makeRepo(null);
+    const svc = makeService(repoFake);
+    await svc.submit(makeAuth('przewoznik'), dto);
+    // The default fixture is guaranteed (agreement=true) — the claim persists.
+    expect(repoFake.creates).toHaveLength(1);
   });
 });

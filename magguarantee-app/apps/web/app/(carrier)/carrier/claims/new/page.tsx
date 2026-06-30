@@ -19,7 +19,7 @@
 // outings submit straight through; `gotowy`/`zgloszony` never appear in the
 // picker (the api doesn't return them).
 
-import { AlertTriangle, X } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -34,12 +34,14 @@ import {
   type ExcludedDayDto,
   type PreviewClaimDto,
   type SubmitClaimDto,
+  VEHICLE_NOT_GUARANTEED,
 } from '@magguarantee/shared';
 
 import { LivePreviewPanel } from '@/components/carrier/LivePreviewPanel';
 import { StatusBadge } from '@/components/carrier/StatusBadge';
 import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Checkbox';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
@@ -165,6 +167,7 @@ export default function NewClaimPage() {
   const t = useTranslations('carrier.claims');
   const tForm = useTranslations('carrier.claims.form');
   const tPicker = useTranslations('carrier.claims.wyjazdPicker');
+  const tNoGuarantee = useTranslations('carrier.claims.noGuarantee');
   const tCommon = useTranslations('common');
   const router = useRouter();
   const delegationsQ = useClaimableDelegations();
@@ -199,6 +202,17 @@ export default function NewClaimPage() {
     () => delegations.find((d) => d.id === watched.delegationId) ?? null,
     [delegations, watched.delegationId],
   );
+
+  // ── Guarantee gate (B+C hybrid) ──────────────────────────────────────
+  // A vehicle is claimable ONLY when its `agreement === true`. `false`, `null`
+  // and `undefined` ALL count as not-guaranteed (`!== true` collapses the
+  // three). When the current selection is not guaranteed we mark it in the
+  // picker (still selectable), swap the right-column preview for a block screen,
+  // gate the preview request off and disable submit. The server 422
+  // (`VEHICLE_NOT_GUARANTEED`) remains the load-bearing backstop for the
+  // stale-data race (opiekun toggles agreement off after page load).
+  const selectedNotGuaranteed =
+    !!selectedDelegation && selectedDelegation.vehicle?.agreement !== true;
 
   // ── Read-only vehicle / trailer / driver (Phase 7 §0″ finish) ─────────
   // Derived DIRECTLY from the selected outing — the carrier no longer picks
@@ -240,6 +254,11 @@ export default function NewClaimPage() {
     if (!watched.delegationId) {
       return { previewBody: null, emptyReason: 'incomplete' };
     }
+    // Non-guaranteed selection → never fire the preview (it would only earn a
+    // pointless 422). The block screen replaces the panel anyway.
+    if (selectedNotGuaranteed) {
+      return { previewBody: null, emptyReason: 'incomplete' };
+    }
     return {
       previewBody: {
         delegationId: watched.delegationId,
@@ -249,7 +268,12 @@ export default function NewClaimPage() {
       },
       emptyReason: undefined,
     };
-  }, [watched.delegationId, watched.timeFrom, watched.timeTo]);
+  }, [
+    watched.delegationId,
+    watched.timeFrom,
+    watched.timeTo,
+    selectedNotGuaranteed,
+  ]);
 
   const debouncedPreviewBody = useDebouncedValue(previewBody, 400);
   const previewQ = useClaimPreview(debouncedPreviewBody, {
@@ -326,6 +350,15 @@ export default function NewClaimPage() {
       router.push(`/carrier/claims/${encodeURIComponent(claim.nrZgl)}`);
     },
     onError: (err) => {
+      // Defense in depth: agreement can be toggled off between page load and
+      // submit (the client gate read stale picker data). Surface a DISTINCT
+      // toast with the block message — never fall through to the generic
+      // submitErrorToast / violations list. The block screen already shows once
+      // the picker query refetches, but the toast is the immediate signal.
+      if (isVehicleNotGuaranteed(err)) {
+        toast.error(tNoGuarantee('toast'));
+        return;
+      }
       const list = extractViolations(err);
       if (list.length > 0) {
         setViolations(list);
@@ -502,10 +535,16 @@ export default function NewClaimPage() {
                         : tPicker('placeholder')}
                     </option>
                     {delegations.map((d) => (
+                      // B (hybrid): non-guaranteed outings stay SELECTABLE but
+                      // get a "(bez gwarancji)" marker. Selecting one triggers
+                      // the block screen + disabled submit (C).
                       <option key={d.id} value={d.id}>
                         {(d.vehicle?.plateNumber ?? '—')} ·{' '}
                         {formatDateFull(d.departureAt)} →{' '}
                         {formatDateFull(d.actualReturnAt ?? d.plannedReturnAt)}
+                        {d.vehicle?.agreement !== true
+                          ? ` · ${tPicker('noGuaranteeMarker')}`
+                          : ''}
                       </option>
                     ))}
                   </Select>
@@ -727,7 +766,8 @@ export default function NewClaimPage() {
                   durationBlocked ||
                   clientBlocked ||
                   !requiredFilled ||
-                  softGateBlocked
+                  softGateBlocked ||
+                  selectedNotGuaranteed
                 }
               >
                 {submitting ? t('submitting') : t('submit')}
@@ -735,15 +775,29 @@ export default function NewClaimPage() {
             </div>
           </div>
 
-          {/* Right — Live preview */}
+          {/* Right — Live preview, OR (C) the not-guaranteed block screen. The
+              preview is meaningless for a non-guaranteed vehicle, so swap the
+              whole panel for a prominent block directing the carrier to their
+              opiekun. The left column stays so the carrier still sees what they
+              picked. */}
           <div>
-            <LivePreviewPanel
-              data={previewQ.data}
-              isLoading={previewQ.isFetching}
-              isError={previewQ.isError}
-              isEmpty={!previewBody}
-              emptyReason={emptyReason}
-            />
+            {selectedNotGuaranteed ? (
+              <div className="bg-card rounded-lg border border-danger/40 p-2">
+                <EmptyState
+                  icon={ShieldAlert}
+                  title={tNoGuarantee('title')}
+                  message={tNoGuarantee('message')}
+                />
+              </div>
+            ) : (
+              <LivePreviewPanel
+                data={previewQ.data}
+                isLoading={previewQ.isFetching}
+                isError={previewQ.isError}
+                isEmpty={!previewBody}
+                emptyReason={emptyReason}
+              />
+            )}
           </div>
         </div>
       </form>
@@ -785,6 +839,23 @@ function ReadOnlyField({
       {description && <FormDescription>{description}</FormDescription>}
     </FormItem>
   );
+}
+
+/**
+ * Narrows an unknown mutation error to the not-guaranteed 422 backstop. The api
+ * returns RFC-7807 with `extensions.code === VEHICLE_NOT_GUARANTEED`; the client
+ * puts the decoded envelope on `err.data`, so the code lives at
+ * `err.data.extensions.code`. Same single-code envelope as the carrier-readiness
+ * gate (NOT the multi-rule `violations[]` array). This only fires in the
+ * stale-data race: the opiekun toggles agreement off AFTER the carrier loaded
+ * the page, so the picker data is stale and the client gate didn't catch it.
+ */
+function isVehicleNotGuaranteed(err: unknown): boolean {
+  if (!(err instanceof ApiResponseError) || err.status !== 422) return false;
+  const extensions = (err.data as { extensions?: unknown } | undefined)
+    ?.extensions;
+  if (!extensions || typeof extensions !== 'object') return false;
+  return (extensions as { code?: unknown }).code === VEHICLE_NOT_GUARANTEED;
 }
 
 /**

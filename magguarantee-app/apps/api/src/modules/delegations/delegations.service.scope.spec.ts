@@ -49,6 +49,9 @@ function makeRow(overrides: Partial<DelegationRow> = {}): DelegationRow {
     vehicle: {
       id: 'veh-1',
       plateNumber: 'PL123',
+      // Guarantee flag (Porozumienie) carried on the vehicle mini since the
+      // claims guarantee gate. `null` baseline — scope tests don't depend on it.
+      agreement: null,
       plannerId: PLANNER_SUB,
       dispatchTeamId: TEAM_ID,
       // Phase 11 Шаг D — live dispatch team on the vehicle mini. `null` is the
@@ -302,6 +305,7 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
       vehicle: {
         id: 'veh-1',
         plateNumber: 'PL123',
+        agreement: null,
         plannerId: PLANNER_SUB,
         dispatchTeamId: 'other-team',
         dispatchTeam: null,
@@ -317,6 +321,7 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
       vehicle: {
         id: 'veh-1',
         plateNumber: 'PL123',
+        agreement: null,
         plannerId: 'someone-else',
         dispatchTeamId: TEAM_ID,
         dispatchTeam: null,
@@ -333,6 +338,7 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
       vehicle: {
         id: 'veh-1',
         plateNumber: 'PL123',
+        agreement: null,
         plannerId: 'other-plan',
         dispatchTeamId: TEAM_ID,
         dispatchTeam: null,
@@ -351,6 +357,7 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
       vehicle: {
         id: 'veh-1',
         plateNumber: 'PL123',
+        agreement: null,
         plannerId: PLANNER_SUB,
         dispatchTeamId: 'some-other-team',
         dispatchTeam: null,
@@ -367,6 +374,7 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
       vehicle: {
         id: 'veh-1',
         plateNumber: 'PL123',
+        agreement: null,
         plannerId: PLANNER_SUB,
         dispatchTeamId: TEAM_ID,
         dispatchTeam: null,
@@ -401,6 +409,7 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
         vehicle: {
           id: 'veh-1',
           plateNumber: 'PL123',
+          agreement: null,
           plannerId: 'p-x',
           dispatchTeamId: 'team-x',
           dispatchTeam: null,
@@ -422,6 +431,7 @@ describe('DelegationsService.getOne — vehicle.dispatchTeam (live, additive)', 
       vehicle: {
         id: 'veh-1',
         plateNumber: 'PL123',
+        agreement: null,
         plannerId: 'p-x',
         dispatchTeamId: 'team-99',
         dispatchTeam: {
