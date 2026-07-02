@@ -50,19 +50,29 @@ export const envSchema = z.object({
   MAIL_SMTP_PORT: z.coerce.number().int().positive().default(1025),
   MAIL_FROM: z.string().default('no-reply@magtrans.eu'),
 
-  // ── Gmail API (production provider) ────────────────────
-  // Workspace service-account with Domain-Wide Delegation, impersonating
-  // `GMAIL_FROM` (e.g. wnioski@magtrans.eu). Empty in dev/staging `.env`
-  // (Mailhog path). `""` is coerced to undefined so blank-in-dev == absent;
-  // the superRefine below upgrades them to required when the provider is gmail.
-  GMAIL_CLIENT_EMAIL: z.preprocess(
+  // ── Gmail API (production provider — OAuth 2.0) ─────────
+  // Production sends via the Gmail API authenticated as ONE Workspace mailbox
+  // through OAuth 2.0 (authorization-code + a long-lived refresh token), NOT
+  // Domain-Wide Delegation — chosen for least-privilege (a leaked token can
+  // send as one mailbox, not the whole domain). Empty in dev/staging `.env`
+  // (Mailhog path); `""` is coerced to undefined so blank-in-dev == absent.
+  // The superRefine below upgrades the OAuth trio + GMAIL_FROM to required when
+  // MAIL_PROVIDER=gmail. Get GMAIL_OAUTH_REFRESH_TOKEN once via
+  // `npm run gmail:token`. See docs/16-jobs-and-integrations.md.
+  GMAIL_OAUTH_CLIENT_ID: z.preprocess(
     (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
     z.string().optional(),
   ),
-  GMAIL_PRIVATE_KEY: z.preprocess(
+  GMAIL_OAUTH_CLIENT_SECRET: z.preprocess(
     (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
     z.string().optional(),
   ),
+  GMAIL_OAUTH_REFRESH_TOKEN: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z.string().optional(),
+  ),
+  // From header shown to recipients. May be the OAuth mailbox itself or one of
+  // its aliases (a valid send-as of that mailbox, e.g. magguarantee@magtrans.eu).
   GMAIL_FROM: z.preprocess(
     (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
     z.string().optional(),
@@ -118,8 +128,9 @@ export const envSchema = z.object({
   // optional-secret precedent.
   if (env.MAIL_PROVIDER === 'gmail') {
     for (const key of [
-      'GMAIL_CLIENT_EMAIL',
-      'GMAIL_PRIVATE_KEY',
+      'GMAIL_OAUTH_CLIENT_ID',
+      'GMAIL_OAUTH_CLIENT_SECRET',
+      'GMAIL_OAUTH_REFRESH_TOKEN',
       'GMAIL_FROM',
     ] as const) {
       if (!env[key]) {

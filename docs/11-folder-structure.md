@@ -419,11 +419,11 @@ TWO_FA_CODE_TTL=600
 TWO_FA_MAX_ATTEMPTS=5
 TWO_FA_LOCKOUT_TTL=300
 
-# Mail (Gmail API)
-GMAIL_CLIENT_EMAIL=service-account@magtrans.iam.gserviceaccount.com
-GMAIL_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+# Mail (Gmail API via OAuth 2.0)
+GMAIL_OAUTH_CLIENT_ID=...apps.googleusercontent.com
+GMAIL_OAUTH_CLIENT_SECRET=...
+GMAIL_OAUTH_REFRESH_TOKEN=...
 GMAIL_FROM=wnioski@magtrans.eu
-GMAIL_DEV_REDIRECT=               # опц. для dev override
 
 # Google OAuth (опц.)
 GOOGLE_OAUTH_CLIENT_ID=

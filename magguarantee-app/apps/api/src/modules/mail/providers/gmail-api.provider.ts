@@ -14,21 +14,23 @@ import type {
   SendMailResult,
 } from './mail-provider.interface';
 
-/** Scope required to send (only) — no read/modify access requested. */
-const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
-
 /**
  * Gmail API provider — the production `MailProvider`.
  *
- * Authenticates as a Workspace service-account with Domain-Wide Delegation,
- * impersonating `GMAIL_FROM` (e.g. wnioski@magtrans.eu), and sends through the
- * Gmail REST API. Unlike SMTP this gives direct control over `In-Reply-To` /
- * `References`, which is how every email about one `nrZgl` is glued into a
- * single Gmail thread — preserving the legacy `_sendThreadedEmail` behaviour
- * (Code.gs:5788).
+ * Authenticates as ONE Workspace mailbox via OAuth 2.0 — a long-lived refresh
+ * token obtained once by that mailbox's owner (see `npm run gmail:token`) — and
+ * sends through the Gmail REST API. Unlike SMTP this gives direct control over
+ * `In-Reply-To` / `References`, which is how every email about one `nrZgl` is
+ * glued into a single Gmail thread — preserving the legacy `_sendThreadedEmail`
+ * behaviour (Code.gs:5788).
  *
- * Only instantiated when `MAIL_PROVIDER=gmail`; `MailModule` validates the
- * three `GMAIL_*` secrets are present before constructing it.
+ * From = `GMAIL_FROM`, which may be the OAuth mailbox itself or one of its
+ * aliases (a valid send-as of that mailbox). No Domain-Wide Delegation — the
+ * refresh token IS the sending identity; scope `gmail.send` is granted at
+ * consent, so it is not passed here.
+ *
+ * Only instantiated when `MAIL_PROVIDER=gmail`; the env superRefine validates
+ * the OAuth secrets + `GMAIL_FROM` are present before constructing it.
  * See docs/16-jobs-and-integrations.md §"Email через Gmail API".
  */
 @Injectable()
@@ -45,17 +47,21 @@ export class GmailApiProvider implements MailProvider {
       ? this.from.slice(this.from.indexOf('@') + 1)
       : 'magtrans.eu';
 
-    const jwtClient = new googleAuth.JWT({
-      email: config.get('GMAIL_CLIENT_EMAIL', { infer: true }) as string,
-      // Private keys are stored with literal "\n" in single-line env vars;
-      // restore real newlines so the PEM parses.
-      key: (
-        config.get('GMAIL_PRIVATE_KEY', { infer: true }) as string
-      ).replace(/\\n/g, '\n'),
-      scopes: [GMAIL_SEND_SCOPE],
-      subject: this.from, // Domain-Wide Delegation: impersonate the sender.
+    // OAuth 2.0: authenticate as ONE Workspace mailbox with a long-lived
+    // refresh token (obtained once, out of band, by that mailbox's owner — see
+    // `npm run gmail:token`). google-auth-library mints short-lived access
+    // tokens from it on demand and refreshes them transparently, so nothing
+    // here expires between sends. No impersonation / Domain-Wide Delegation.
+    const oauth2 = new googleAuth.OAuth2(
+      config.get('GMAIL_OAUTH_CLIENT_ID', { infer: true }) as string,
+      config.get('GMAIL_OAUTH_CLIENT_SECRET', { infer: true }) as string,
+    );
+    oauth2.setCredentials({
+      refresh_token: config.get('GMAIL_OAUTH_REFRESH_TOKEN', {
+        infer: true,
+      }) as string,
     });
-    this.gmail = createGmail({ version: 'v1', auth: jwtClient });
+    this.gmail = createGmail({ version: 'v1', auth: oauth2 });
   }
 
   async send(args: SendMailArgs): Promise<SendMailResult> {

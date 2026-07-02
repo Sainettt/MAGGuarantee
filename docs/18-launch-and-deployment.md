@@ -156,9 +156,10 @@ api.magtrans.eu {
 
 Mailhog уходит. Заводим:
 - Google Cloud Project + Gmail API enabled.
-- Service account с domain-wide delegation, scope `gmail.send`.
-- Технический ящик `wnioski@magtrans.eu` через Workspace Admin (нужны admin-права на домен).
-- `GMAIL_USER`, `GMAIL_CLIENT_EMAIL`, `GMAIL_PRIVATE_KEY` в `.env`.
+- OAuth consent screen **Internal** + **Publish**, scope `gmail.send`.
+- OAuth client ID (Web app) → `client_id` + `client_secret`.
+- Технический ящик `wnioski@magtrans.eu` через Workspace Admin (нужны admin-права на домен) — от его имени получаем refresh token (`npm run gmail:token`).
+- `GMAIL_OAUTH_CLIENT_ID`, `GMAIL_OAUTH_CLIENT_SECRET`, `GMAIL_OAUTH_REFRESH_TOKEN`, `GMAIL_FROM` в `.env`.
 
 Альтернатива (если Google слишком долго) — Brevo / Resend / SendGrid с обычным SMTP. Менее «нативно» (нет threading через In-Reply-To из коробки), но работает за 15 минут.
 
@@ -331,10 +332,9 @@ Mailhog уходит. Заводим:
 
 - [ ] Создан Google Cloud Project.
 - [ ] Включён Gmail API.
-- [ ] Создан service-account с domain-wide delegation.
-- [ ] В Workspace Admin → Security → API controls → Manage Domain Wide Delegation:
-  - Client ID service-account-а добавлен с scope `https://www.googleapis.com/auth/gmail.send`.
-- [ ] Технический email `wnioski@magtrans.eu` создан и доступен service-account-у.
+- [ ] OAuth consent screen: User type **Internal**, scope `https://www.googleapis.com/auth/gmail.send`, статус **Publish** (иначе refresh token протухает за 7 дней).
+- [ ] Создан OAuth client ID (**Web application**) с redirect `http://localhost:53682/oauth2callback`; получены `client_id` + `client_secret`.
+- [ ] Технический email `wnioski@magtrans.eu` создан; от его имени получен refresh token (`npm run gmail:token`).
 - [ ] (Опц.) Google OAuth credentials для SSO внутренних сотрудников.
 
 > Gmail API и все внешние интеграции (VIES, Biała Lista, info-car.pl, S3) — это **исходящий** HTTPS-трафик из api-контейнера. Caddy в этом не участвует, ничего настраивать не нужно. Контейнер выходит в интернет через Docker bridge → host → NAT.
@@ -363,10 +363,11 @@ Mailhog уходит. Заводим:
   JWT_ACCESS_TTL=15m
   JWT_REFRESH_TTL=30d
 
-  # Gmail
-  GMAIL_USER=wnioski@magtrans.eu
-  GMAIL_CLIENT_EMAIL=...
-  GMAIL_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+  # Gmail (OAuth 2.0)
+  GMAIL_OAUTH_CLIENT_ID=...
+  GMAIL_OAUTH_CLIENT_SECRET=...
+  GMAIL_OAUTH_REFRESH_TOKEN=...
+  GMAIL_FROM=wnioski@magtrans.eu
 
   # S3 (Cloudflare R2 или Hetzner Object Storage)
   S3_ENDPOINT=https://...
@@ -381,7 +382,7 @@ Mailhog уходит. Заводим:
 - [ ] **`.env` НЕ в репозитории.** Только в `/opt/magguarantee/.env` на VPS. Резервная копия — в 1Password или зашифрованном архиве offline.
 - [ ] `JWT_ACCESS_SECRET` и `JWT_REFRESH_SECRET` — **разные**, по 32+ байта.
 - [ ] `DATABASE_URL` без `sslmode` — Postgres в той же Docker-сети, плейн-тексту достаточно (трафик не выходит из сервера).
-- [ ] `GMAIL_PRIVATE_KEY` — escape `\n` правильно (Gmail API сам это требует).
+- [ ] `GMAIL_OAUTH_REFRESH_TOKEN` получен от нужного ящика; OAuth-приложение в статусе **Publish** (иначе токен умрёт через 7 дней).
 
 ### S3 (отдельно от VPS)
 

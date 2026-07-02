@@ -155,15 +155,30 @@ await this.emailQueue.add('send', {
 
 В новом стеке:
 - **Gmail API** даёт прямой контроль над `In-Reply-To` / `References` headers, что и есть RFC-стандарт thread.
-- Service-account отправляет от имени `wnioski@magtrans.eu` (через Domain-Wide Delegation).
+- Отправка идёт от **одного** Workspace-ящика через **OAuth 2.0** (long-lived refresh token); `From` = `GMAIL_FROM` (сам ящик или его alias). **Не** Domain-Wide Delegation — выбран least-privilege (утёкший токен шлёт как один ящик, а не как весь домен).
 - Можно использовать Nodemailer + Gmail API transport, либо `googleapis` SDK напрямую.
 
-### Setup
+### Setup (OAuth 2.0)
 
-1. В Google Workspace Admin: создать service-account.
-2. Включить «Domain-Wide Delegation».
-3. В Workspace admin → Security → API controls → Manage Domain Wide Delegation: добавить service-account client ID + scope `https://www.googleapis.com/auth/gmail.send`.
-4. В app: `JWT.fromJSON({client_email, private_key})` + `subject = wnioski@magtrans.eu`.
+> **Почему OAuth, а не DWD.** DWD дал бы право «слать от имени любого юзера
+> домена» — широкий радиус поражения при краже ключа. OAuth ограничен **одним**
+> ящиком (тем, что дал согласие) и scope `gmail.send`. Выбран из-за
+> least-privilege — ценой операционной возни с refresh-токеном (может быть
+> отозван при смене пароля ящика / cofnięciu dostępu; протухает за 7 дней, если
+> OAuth-приложение оставить в статусе Testing).
+
+1. GCP → OAuth consent screen: User type **Internal**, добавить scope
+   `https://www.googleapis.com/auth/gmail.send`, нажать **Publish** (иначе
+   refresh token протухает за 7 дней).
+2. GCP → Credentials → OAuth client ID, тип **Web application**, redirect URI
+   `http://localhost:53682/oauth2callback`. Получить `client_id` + `client_secret`.
+3. Получить refresh token один раз (локально, владельцем ящика-отправителя):
+   `GMAIL_OAUTH_CLIENT_ID=… GMAIL_OAUTH_CLIENT_SECRET=… npm run gmail:token` →
+   залогиниться **как ящик-отправитель** → «Allow» → скопировать
+   `GMAIL_OAUTH_REFRESH_TOKEN` в `.env`.
+4. Env: `GMAIL_OAUTH_CLIENT_ID` / `GMAIL_OAUTH_CLIENT_SECRET` /
+   `GMAIL_OAUTH_REFRESH_TOKEN` / `GMAIL_FROM`. Провайдер строит
+   `google.auth.OAuth2` + `setCredentials({ refresh_token })` и шлёт через Gmail API.
 
 ```ts
 // modules/mail/mail.service.ts
@@ -172,14 +187,15 @@ import { google } from 'googleapis';
 @Injectable()
 export class MailService {
   private gmail = google.gmail('v1');
-  private auth: GoogleAuth;
+  private auth: OAuth2Client;
 
   constructor(private config: ConfigService) {
-    this.auth = new google.auth.JWT({
-      email: config.get('GMAIL_CLIENT_EMAIL'),
-      key: config.get('GMAIL_PRIVATE_KEY'),
-      scopes: ['https://www.googleapis.com/auth/gmail.send'],
-      subject: config.get('GMAIL_FROM'),  // 'wnioski@magtrans.eu'
+    this.auth = new google.auth.OAuth2(
+      config.get('GMAIL_OAUTH_CLIENT_ID'),
+      config.get('GMAIL_OAUTH_CLIENT_SECRET'),
+    );
+    this.auth.setCredentials({
+      refresh_token: config.get('GMAIL_OAUTH_REFRESH_TOKEN'),
     });
   }
 
