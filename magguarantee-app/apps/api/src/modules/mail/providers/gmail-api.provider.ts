@@ -93,7 +93,7 @@ export class GmailApiProvider implements MailProvider {
       `From: ${this.from}`,
       `To: ${to.join(', ')}`,
       p.cc?.length ? `Cc: ${p.cc.join(', ')}` : '',
-      `Subject: ${this.sanitizeHeader(p.subject)}`,
+      `Subject: ${this.encodeHeaderValue(this.sanitizeHeader(p.subject))}`,
       `Message-ID: ${p.messageId}`,
       'MIME-Version: 1.0',
     ].filter((l) => l !== '');
@@ -114,20 +114,23 @@ export class GmailApiProvider implements MailProvider {
         '',
         `--${boundary}`,
         'Content-Type: text/plain; charset=utf-8',
+        'Content-Transfer-Encoding: base64',
         '',
-        p.text,
+        this.encodeBody(p.text),
         `--${boundary}`,
         'Content-Type: text/html; charset=utf-8',
+        'Content-Transfer-Encoding: base64',
         '',
-        p.html as string,
+        this.encodeBody(p.html as string),
         `--${boundary}--`,
       ];
     } else {
       lines = [
         ...headers,
         'Content-Type: text/plain; charset=utf-8',
+        'Content-Transfer-Encoding: base64',
         '',
-        p.text,
+        this.encodeBody(p.text),
       ];
     }
 
@@ -137,5 +140,28 @@ export class GmailApiProvider implements MailProvider {
   /** Strip CR/LF (header-injection guard) and cap length, like the legacy app. */
   private sanitizeHeader(s: string): string {
     return s.replace(/[\r\n]+/g, ' ').slice(0, 200);
+  }
+
+  /**
+   * RFC 2047-encode a header value when it contains non-ASCII — headers are
+   * ASCII-only per RFC 5322, and Gmail mangles raw UTF-8 bytes into mojibake
+   * (`—` → `Ã¢Â€Â”`). Split into ≤75-char encoded-words folded across lines:
+   * 11 code points ≤ 44 UTF-8 bytes → ≤60 base64 chars + 12 chars of markup.
+   */
+  private encodeHeaderValue(s: string): string {
+    if (!/[^\x20-\x7e]/.test(s)) return s;
+    const codePoints = Array.from(s);
+    const words: string[] = [];
+    for (let i = 0; i < codePoints.length; i += 11) {
+      const chunk = codePoints.slice(i, i + 11).join('');
+      words.push(`=?UTF-8?B?${Buffer.from(chunk, 'utf-8').toString('base64')}?=`);
+    }
+    return words.join('\r\n ');
+  }
+
+  /** Base64-encode a body part, wrapped at the RFC 2045 76-char line limit. */
+  private encodeBody(content: string): string {
+    const b64 = Buffer.from(content, 'utf-8').toString('base64');
+    return b64.match(/.{1,76}/g)?.join('\r\n') ?? '';
   }
 }
