@@ -4,13 +4,9 @@ import { NextIntlClientProvider } from 'next-intl';
 import { getLocale, getMessages } from 'next-intl/server';
 
 import { Providers } from '@/components/providers/Providers';
+import { ZodLocaleProvider } from '@/components/providers/ZodLocaleProvider';
 
 import './globals.css';
-// Side-effect import: installs the Polish Zod error map globally so every
-// form's "this field is required" / "too short" etc. shows logist-friendly
-// Polish text instead of Zod's English defaults.
-// Test text for check ci cd
-import '@/lib/zod-locale';
 
 const dmSans = DM_Sans({
   subsets: ['latin', 'latin-ext'],
@@ -36,7 +32,9 @@ export default async function RootLayout({
     <html lang={locale} suppressHydrationWarning className={dmSans.variable}>
       <body className="font-sans bg-bg text-text antialiased min-h-screen">
         <NextIntlClientProvider locale={locale} messages={messages}>
-          <Providers>{children}</Providers>
+          <ZodLocaleProvider>
+            <Providers>{children}</Providers>
+          </ZodLocaleProvider>
         </NextIntlClientProvider>
       </body>
     </html>

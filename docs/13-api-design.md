@@ -503,6 +503,10 @@ type SubmitClaimRequest = {
 //   • hoursAdjusted — verifier-only (PATCH); submit always persists 0.
 // OWNERSHIP: @CarrierOwns('delegationId','body','delegationId') — the outing
 // must belong to the authenticated carrier (delegation.carrierId === carrier).
+// GUARANTEE: a wniosek may only be filed for a vehicle under guarantee
+// (`Vehicle.agreement === true`; `false`/`null` ⇒ not guaranteed), else 422
+// `VEHICLE_NOT_GUARANTEED` (single-code `extensions.code` envelope) — gate lives
+// in the shared delegation-resolution seam, covering both preview and submit.
 
 // 422 problem-details для POST /claims несёт мульти-violation envelope:
 // {

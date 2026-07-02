@@ -677,7 +677,26 @@
     "loading": "Sprawdzam…",
     "valid": "Zweryfikowano",
     "invalid": "Nie znaleziono",
-    "error": "Usługa niedostępna — spróbuj później"
+    "error": "Usługa niedostępna — spróbuj później",
+    "zod": {
+      "required": "Uzupełnij pole",
+      "selectFromList": "Wybierz wartość z listy",
+      "invalidType": "Niepoprawny typ wartości",
+      "stringMin": "Wpisz co najmniej {min} znaków",
+      "stringMax": "Maksymalnie {max} znaków",
+      "numberMin": "Wartość nie może być mniejsza niż {min}",
+      "numberMax": "Wartość nie może być większa niż {max}",
+      "arrayMin": "Wybierz co najmniej {min}",
+      "arrayMax": "Maksymalnie {max} pozycji",
+      "dateMin": "Data jest zbyt wczesna",
+      "dateMax": "Data jest zbyt późna",
+      "email": "Niepoprawny adres e-mail",
+      "url": "Niepoprawny adres URL",
+      "enum": "Niepoprawna wartość",
+      "date": "Niepoprawna data",
+      "format": "Niepoprawny format",
+      "generic": "Niepoprawna wartość"
+    }
   },
   "dashboard": {
     "title": "Dashboard",

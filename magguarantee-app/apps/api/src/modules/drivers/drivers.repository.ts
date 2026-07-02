@@ -1,8 +1,10 @@
 import { Injectable } from '@nestjs/common';
 
+import type { Prisma } from '@magguarantee/database';
 import type { DriverAttachmentCategory } from '@magguarantee/shared';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { INCLUDE_SOFT_DELETED } from '../prisma/soft-delete.extension';
 
 /** Included attachment row on a driver (live rows only). */
 export interface DriverRowAttachment {
@@ -179,12 +181,16 @@ export class DriversRepository {
 
   /**
    * Hard-deletes a driver row. Phase 4.4 admin-only flow with a `reason`
-   * captured upstream into the audit row's metadata. `deleteMany` bypasses
-   * the soft-delete extension that rewrites the singular `delete` →
-   * soft-delete update; we want a physical row removal here.
+   * captured upstream into the audit row's metadata. The soft-delete
+   * extension rewrites BOTH `delete` and `deleteMany` into a soft-delete
+   * update, so a physical row removal MUST opt out via the
+   * `[INCLUDE_SOFT_DELETED]` escape hatch.
    */
   async hardDelete(id: string): Promise<void> {
-    await this.prisma.tx.driver.deleteMany({ where: { id } });
+    await this.prisma.tx.driver.deleteMany({
+      where: { id },
+      [INCLUDE_SOFT_DELETED]: true,
+    } as unknown as Prisma.DriverDeleteManyArgs);
   }
 
   // ── helpers ──────────────────────────────────────────────

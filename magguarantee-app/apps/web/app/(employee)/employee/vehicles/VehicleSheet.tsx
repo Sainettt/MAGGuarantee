@@ -575,6 +575,7 @@ export function VehicleSheet({
                   </FormField>
                   <FormField
                     label={t('fields.dispatchTeam')}
+                    required
                     error={errs.dispatchTeamId?.message}
                     htmlFor="vehicle-dispatchTeamId"
                   >
@@ -917,8 +918,9 @@ function getDefaults(): FormValues {
     plateNumber: '',
     active: true,
     plannerId: '' as unknown as string,
-    // Phase 11 — dispatch TEAM (optional). Empty string is stripped by
-    // `cleanForm`, so an unpicked team is omitted from the POST/PATCH body.
+    // Phase 11 — dispatch TEAM (REQUIRED). Empty string is the "not picked"
+    // sentinel; the resolver rejects it (UuidSchema) so submit stays blocked
+    // until a team is chosen — same pattern as `plannerId`.
     dispatchTeamId: '' as unknown as string,
     notes: '',
     certificateL: false,

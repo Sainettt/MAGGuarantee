@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 
+import type { Prisma } from '@magguarantee/database';
+
 import { PrismaService } from '../prisma/prisma.service';
+import { INCLUDE_SOFT_DELETED } from '../prisma/soft-delete.extension';
 
 /**
  * Row shape returned by the carrier repository — flattens `user` so the
@@ -237,6 +240,14 @@ export class CarriersRepository {
           select: { id: true, login: true, name: true, active: true },
         },
         vehicles: {
+          // Nested relation reads bypass the soft-delete extension (it only
+          // injects `deletedAt: null` on the TOP-LEVEL model — here Carrier),
+          // so filter explicitly. Without this, soft-deleted vehicles leak
+          // into the opiekun jezdzące/stojące classification (the sibling
+          // `_count.vehicles` already filters, so the two would disagree).
+          // NOT scoped to `active: true` — the classifier also buckets
+          // inactive vehicles as `nieaktywne`.
+          where: { deletedAt: null },
           select: { id: true, active: true, lastDroveAt: true },
         },
         _count: {
@@ -472,19 +483,27 @@ export class CarriersRepository {
    * flow with an audit-trail `reason` captured upstream via
    * `AuditContext.setMetadata({ reason })`.
    *
-   * Uses `deleteMany` so the soft-delete extension (which rewrites the
-   * singular `delete` → soft-delete `update`) is bypassed and the row is
-   * physically removed from Postgres. Vehicles / drivers / trailers cascade
-   * via the FK's `ON DELETE CASCADE`; the User row is removed explicitly so
-   * the unique login is freed up for re-use. Runs in the ambient audit
-   * transaction so the audit row + deletes commit (or roll back) together.
+   * The soft-delete extension rewrites BOTH `delete` and `deleteMany` into a
+   * soft-delete `update`, so each physical removal MUST opt out via the
+   * `[INCLUDE_SOFT_DELETED]` escape hatch (else the rows survive as
+   * soft-deleted ghosts). Vehicles / drivers / trailers cascade via the FK's
+   * `ON DELETE CASCADE` — which only fires on a REAL delete; the User row is
+   * removed explicitly so the unique login is freed up for re-use. Runs in the
+   * ambient audit transaction so the audit row + deletes commit (or roll back)
+   * together.
    */
   async hardDelete(id: string): Promise<void> {
     const tx = this.prisma.tx;
     const carrier = await tx.carrier.findFirst({ where: { id } });
     if (!carrier) return;
-    await tx.carrier.deleteMany({ where: { id } });
-    await tx.user.deleteMany({ where: { id: carrier.userId } });
+    await tx.carrier.deleteMany({
+      where: { id },
+      [INCLUDE_SOFT_DELETED]: true,
+    } as unknown as Prisma.CarrierDeleteManyArgs);
+    await tx.user.deleteMany({
+      where: { id: carrier.userId },
+      [INCLUDE_SOFT_DELETED]: true,
+    } as unknown as Prisma.UserDeleteManyArgs);
   }
 
   // ── helpers ──────────────────────────────────────────────

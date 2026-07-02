@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 
+import type { Prisma } from '@magguarantee/database';
+
 import { PrismaService } from '../prisma/prisma.service';
+import { INCLUDE_SOFT_DELETED } from '../prisma/soft-delete.extension';
 
 /**
  * Row shape returned by the trailer repository.
@@ -163,12 +166,16 @@ export class TrailersRepository {
 
   /**
    * Hard-deletes a trailer row. Phase 4.4 admin-only flow with a `reason`
-   * captured upstream into the audit row's metadata. `deleteMany` bypasses
-   * the soft-delete extension that rewrites the singular `delete` →
-   * soft-delete update; we want a physical row removal here.
+   * captured upstream into the audit row's metadata. The soft-delete
+   * extension rewrites BOTH `delete` and `deleteMany` into a soft-delete
+   * update, so a physical row removal MUST opt out via the
+   * `[INCLUDE_SOFT_DELETED]` escape hatch.
    */
   async hardDelete(id: string): Promise<void> {
-    await this.prisma.tx.trailer.deleteMany({ where: { id } });
+    await this.prisma.tx.trailer.deleteMany({
+      where: { id },
+      [INCLUDE_SOFT_DELETED]: true,
+    } as unknown as Prisma.TrailerDeleteManyArgs);
   }
 
   // ── helpers ──────────────────────────────────────────────

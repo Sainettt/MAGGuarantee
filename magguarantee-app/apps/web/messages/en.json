@@ -677,7 +677,26 @@
     "loading": "Checking...",
     "valid": "Verified",
     "invalid": "Not found",
-    "error": "Service unavailable — try again later"
+    "error": "Service unavailable — try again later",
+    "zod": {
+      "required": "Please fill in this field",
+      "selectFromList": "Select a value from the list",
+      "invalidType": "Invalid value type",
+      "stringMin": "Enter at least {min} characters",
+      "stringMax": "Maximum {max} characters",
+      "numberMin": "Value must be at least {min}",
+      "numberMax": "Value must be at most {max}",
+      "arrayMin": "Select at least {min}",
+      "arrayMax": "Maximum {max} items",
+      "dateMin": "Date is too early",
+      "dateMax": "Date is too late",
+      "email": "Invalid email address",
+      "url": "Invalid URL",
+      "enum": "Invalid value",
+      "date": "Invalid date",
+      "format": "Invalid format",
+      "generic": "Invalid value"
+    }
   },
   "dashboard": {
     "title": "Dashboard",

@@ -1,11 +1,13 @@
 import { Injectable } from '@nestjs/common';
 
+import type { Prisma } from '@magguarantee/database';
 import type {
   VehicleAttachmentCategory,
   VehicleDispatchTeamDto,
 } from '@magguarantee/shared';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { INCLUDE_SOFT_DELETED } from '../prisma/soft-delete.extension';
 
 /**
  * Attachment metadata as included on a Vehicle row. `storageKey` is carried
@@ -434,12 +436,19 @@ export class VehiclesRepository {
   }
 
   /**
-   * Hard-deletes a vehicle row — used only by the create rollback path when a
-   * post-insert step fails. Bypasses the soft-delete extension (which
-   * rewrites the singular `delete`) via `deleteMany`.
+   * Physically removes a vehicle row — used by the create rollback path (a
+   * failed post-insert step must leave nothing behind) and the Phase 4.4
+   * admin hard-delete. The soft-delete extension rewrites BOTH `delete` and
+   * `deleteMany` into a soft-delete update, so a REAL delete MUST opt out via
+   * the `[INCLUDE_SOFT_DELETED]` escape hatch — otherwise the row survives as
+   * a soft-deleted ghost, still occupying the `(carrierId, plateNumber)`
+   * unique slot and leaking into nested relation reads.
    */
   async hardDelete(id: string): Promise<void> {
-    await this.prisma.tx.vehicle.deleteMany({ where: { id } });
+    await this.prisma.tx.vehicle.deleteMany({
+      where: { id },
+      [INCLUDE_SOFT_DELETED]: true,
+    } as unknown as Prisma.VehicleDeleteManyArgs);
   }
 
   // ── helpers ──────────────────────────────────────────────

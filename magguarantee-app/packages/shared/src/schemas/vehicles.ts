@@ -45,10 +45,12 @@ const vehicleAttributeFields = {
   plannerId: UuidSchema,
   /**
    * Phase 11 — the dispatch TEAM this vehicle is assigned to (replaces the
-   * legacy single `dispatcherId`). Optional/nullable — a vehicle may be
-   * unassigned. Service-side: must reference an ACTIVE `Team`.
+   * legacy single `dispatcherId`). REQUIRED on create — every vehicle must be
+   * attached to a team. The DB column stays nullable (legacy rows may be
+   * unassigned), but the API contract mandates it here. Service-side: must
+   * reference an ACTIVE `Team`.
    */
-  dispatchTeamId: UuidSchema.optional(),
+  dispatchTeamId: UuidSchema,
   notes: emptyStringToUndefined(z.string().max(2_000).optional()),
   /**
    * REQUIRED — Vehicle.certificateL is NOT NULL.
@@ -116,8 +118,9 @@ export const UpdateVehicleSchema = z
     plateNumber: PlateSchema.optional(),
     active: z.boolean().optional(),
     plannerId: UuidSchema.nullable().optional(),
-    /** Phase 11 — reassign (or `null` to detach) the dispatch Team. */
-    dispatchTeamId: UuidSchema.nullable().optional(),
+    /** Phase 11 — reassign the dispatch Team. Omit = leave unchanged; it
+     *  cannot be cleared to null (a vehicle must always keep a team). */
+    dispatchTeamId: UuidSchema.optional(),
     notes: emptyStringToUndefined(z.string().max(2_000).nullable().optional()),
     // The following five fields are NOT NULL since phase3_blocks. PATCH
     // accepts an update (omit means "do not touch") but cannot null them.
