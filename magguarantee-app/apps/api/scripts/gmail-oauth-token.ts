@@ -17,15 +17,71 @@
  *
  * See docs/16-jobs-and-integrations.md §"Email через Gmail API".
  */
+import fs from 'node:fs';
 import http from 'node:http';
+import path from 'node:path';
 
 import { auth as googleAuth } from '@googleapis/gmail';
+
+// Convenience: if the two secrets aren't in the shell environment, read them
+// from a local `.env` in the current directory (apps/api/.env — same file the
+// API uses). So you can EITHER `$env:GMAIL_OAUTH_CLIENT_ID="..."` in PowerShell
+// OR just drop the values into apps/api/.env. Real shell env vars take priority.
+function loadDotEnvFallback(file: string): void {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch {
+    return; // no .env — fine, rely on the shell environment
+  }
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1); // strip UTF-8 BOM
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq === -1) continue;
+    const key = line.slice(0, eq).trim();
+    if (process.env[key] !== undefined) continue; // shell env wins
+    let val = line.slice(eq + 1).trim();
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    ) {
+      val = val.slice(1, -1);
+    }
+    process.env[key] = val;
+  }
+}
+
+// Look for .env both next to where the command was run (process.cwd()) AND
+// next to this script's package (scripts/.. == apps/api), so it works even if
+// npm sets a different cwd. Shell env vars still win over both.
+const envCandidates = [
+  path.resolve(process.cwd(), '.env'),
+  path.resolve(__dirname, '..', '.env'),
+];
+for (const candidate of envCandidates) loadDotEnvFallback(candidate);
 
 const clientId = process.env.GMAIL_OAUTH_CLIENT_ID;
 const clientSecret = process.env.GMAIL_OAUTH_CLIENT_SECRET;
 if (!clientId || !clientSecret) {
+  console.error('GMAIL_OAUTH_CLIENT_ID / GMAIL_OAUTH_CLIENT_SECRET not found.\n');
+  console.error('Diagnostics:');
+  console.error(`  cwd                       : ${process.cwd()}`);
+  for (const candidate of envCandidates) {
+    console.error(
+      `  .env checked              : ${candidate}  (exists: ${fs.existsSync(candidate)})`,
+    );
+  }
+  console.error(`  GMAIL_OAUTH_CLIENT_ID     : ${clientId ? 'found' : 'MISSING'}`);
   console.error(
-    'Set GMAIL_OAUTH_CLIENT_ID and GMAIL_OAUTH_CLIENT_SECRET before running.',
+    `  GMAIL_OAUTH_CLIENT_SECRET : ${clientSecret ? 'found' : 'MISSING'}`,
+  );
+  console.error(
+    '\nFix: put BOTH lines (EXACT names, no quotes, no `export`) in apps/api/.env:\n' +
+      '  GMAIL_OAUTH_CLIENT_ID=123-abc.apps.googleusercontent.com\n' +
+      '  GMAIL_OAUTH_CLIENT_SECRET=GOCSPX-xxxx\n' +
+      'or set them in the SAME PowerShell window with `$env:NAME="..."` (not `set`).',
   );
   process.exit(1);
 }
