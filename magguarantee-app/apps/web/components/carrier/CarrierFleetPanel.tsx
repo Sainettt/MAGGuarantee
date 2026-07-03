@@ -20,7 +20,6 @@
 import {
   AlertTriangle,
   Car,
-  Check,
   Container,
   Mail,
   PauseCircle,
@@ -35,6 +34,7 @@ import { useMemo, useState } from 'react';
 import type { DriverDto, TrailerDto, VehicleDto } from '@magguarantee/shared';
 
 import { DriverDetailModal } from '@/components/drivers/DriverDetailModal';
+import { PermitCell } from '@/components/fleet/PermitCell';
 import { TrailerDetailModal } from '@/components/trailers/TrailerDetailModal';
 import { KpiCard } from '@/components/dashboard/KpiCard';
 import { Badge } from '@/components/ui/Badge';
@@ -57,17 +57,6 @@ const IDLE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
 /** Valid in-page tab ids; also the values honoured via `?tab=`. */
 type FleetTab = 'vehicles' | 'drivers' | 'trailers';
 const TAB_VALUES: readonly FleetTab[] = ['vehicles', 'drivers', 'trailers'];
-
-/** Compact boolean cell — a success check when set, em-dash otherwise. */
-function PermitCell({ value, label }: { value: boolean | null | undefined; label: string }) {
-  return value ? (
-    <Check size={16} className="text-success" aria-label={label} />
-  ) : (
-    <span aria-hidden className="text-text-sub">
-      —
-    </span>
-  );
-}
 
 export function CarrierFleetPanel() {
   const t = useTranslations('carrier.fleet');

@@ -12,11 +12,13 @@
 // `components/fleet/` module").
 //
 // These tables are STRICTLY read-only: no edit/delete column, no row-click
-// mutation, inert rows (whole-row hover for affordance only). The column sets
-// are the DS §6.3.2 subset, intersected with what the slim DTOs actually
-// carry — the richer compliance columns from the legacy screen (CERT.L, EURO,
-// ADR, GPS, K.PALIW, PRZEWOŹNIK, PLANISTA, DOKUMENT, quad-rate) are NOT in the
-// slim list-item shapes, so they are omitted rather than fabricated.
+// mutation, inert rows (whole-row hover for affordance only). The «Auta» column
+// set mirrors the carrier reference table (§6.3.2 / §6.4): plate, side, type,
+// EURO, ADR, GB/IT/FR permits, last-drove, status. Phase 6.4 (§6.4.2) added the
+// EURO / ADR / GB / IT / FR / lastDroveAt compliance fields to the slim
+// `VehicleListItem` DTO, so these columns render real payload the list item
+// already carries — they are no longer fabricated or omitted. Per DS §6.4.2
+// the rate/pricing columns stay excluded for planista/dyspozytor.
 
 import { useTranslations } from 'next-intl';
 import { useMemo } from 'react';
@@ -26,9 +28,11 @@ import type {
   VehicleListItem,
 } from '@magguarantee/shared';
 
+import { PermitCell } from '@/components/fleet/PermitCell';
 import { Badge } from '@/components/ui/Badge';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { formatDateFull } from '@/lib/format/numbers';
 import { Car, Truck, User } from 'lucide-react';
 
 function ActiveBadge({ active }: { active: boolean }) {
@@ -89,6 +93,49 @@ export function FleetVehiclesTable({
         id: 'type',
         header: t('columns.type'),
         cell: (row) => row.type ?? '—',
+      },
+      {
+        id: 'euro',
+        header: t('columns.euro'),
+        align: 'center',
+        cell: (row) =>
+          row.euro ? <Badge variant="muted">{row.euro}</Badge> : '—',
+      },
+      {
+        id: 'adr',
+        header: t('columns.adr'),
+        align: 'center',
+        cell: (row) =>
+          row.adr ? (
+            <Badge variant="warning">ADR</Badge>
+          ) : (
+            <span className="text-text-sub">—</span>
+          ),
+      },
+      {
+        id: 'gb',
+        header: t('columns.gb'),
+        align: 'center',
+        cell: (row) => <PermitCell value={row.gb} label={t('columns.gb')} />,
+      },
+      {
+        id: 'it',
+        header: t('columns.it'),
+        align: 'center',
+        cell: (row) => <PermitCell value={row.it} label={t('columns.it')} />,
+      },
+      {
+        id: 'fr',
+        header: t('columns.fr'),
+        align: 'center',
+        cell: (row) => <PermitCell value={row.fr} label={t('columns.fr')} />,
+      },
+      {
+        id: 'lastDroveAt',
+        header: t('columns.lastDroveAt'),
+        cell: (row) => (
+          <span className="tabular-nums">{formatDateFull(row.lastDroveAt)}</span>
+        ),
       },
       {
         id: 'active',

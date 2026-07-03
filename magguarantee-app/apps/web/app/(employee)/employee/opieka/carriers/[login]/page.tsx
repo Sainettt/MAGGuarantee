@@ -35,6 +35,7 @@ import type {
 } from '@magguarantee/shared';
 
 import { DriverDetailModal } from '@/components/drivers/DriverDetailModal';
+import { PermitCell } from '@/components/fleet/PermitCell';
 import { TrailerDetailModal } from '@/components/trailers/TrailerDetailModal';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -44,6 +45,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { VehicleDetailModal } from '@/components/vehicles/VehicleDetailModal';
 import { CarrierDocumentsTab } from './CarrierDocumentsTab';
+import { formatDateFull } from '@/lib/format/numbers';
 import { listDrivers } from '@/lib/api/drivers';
 import { listTrailers } from '@/lib/api/trailers';
 import { listVehicles } from '@/lib/api/vehicles';
@@ -320,6 +322,49 @@ function VehiclesTable({ rows, isLoading, onRowClick }: VehiclesTableProps) {
         id: 'type',
         header: t('columns.type'),
         cell: (row) => row.type ?? '—',
+      },
+      {
+        id: 'euro',
+        header: t('columns.euro'),
+        align: 'center',
+        cell: (row) =>
+          row.euro ? <Badge variant="muted">{row.euro}</Badge> : '—',
+      },
+      {
+        id: 'adr',
+        header: t('columns.adr'),
+        align: 'center',
+        cell: (row) =>
+          row.adr ? (
+            <Badge variant="warning">ADR</Badge>
+          ) : (
+            <span className="text-text-sub">—</span>
+          ),
+      },
+      {
+        id: 'gb',
+        header: t('columns.gb'),
+        align: 'center',
+        cell: (row) => <PermitCell value={row.gb} label={t('columns.gb')} />,
+      },
+      {
+        id: 'it',
+        header: t('columns.it'),
+        align: 'center',
+        cell: (row) => <PermitCell value={row.it} label={t('columns.it')} />,
+      },
+      {
+        id: 'fr',
+        header: t('columns.fr'),
+        align: 'center',
+        cell: (row) => <PermitCell value={row.fr} label={t('columns.fr')} />,
+      },
+      {
+        id: 'lastDroveAt',
+        header: t('columns.lastDroveAt'),
+        cell: (row) => (
+          <span className="tabular-nums">{formatDateFull(row.lastDroveAt)}</span>
+        ),
       },
       {
         id: 'active',
