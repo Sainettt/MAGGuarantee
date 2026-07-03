@@ -324,6 +324,7 @@ function makeDelegationForPreview(
       plannerId: null,
       dispatchTeamId: null,
       dispatchTeam: null,
+      planner: null,
     },
     trailerId: 'trl-1',
     trailer: { id: 'trl-1', plateNumber: 'TR9999' },

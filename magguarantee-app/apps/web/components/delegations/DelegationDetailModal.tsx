@@ -306,6 +306,16 @@ export function DelegationDetailModal({
           ),
           fullWidth: true,
         },
+        // Planista (lead forwarder) — resolved LIVE off the delegation's
+        // vehicle (`Vehicle.planner`), so every role sees the FULL crew here:
+        // planista + dispatch team + eksport (mirrors the gchat ZESPÓŁ line).
+        {
+          label: tTeam('planista'),
+          value: textValue(
+            delegation.vehicle?.planner?.name ??
+              delegation.vehicle?.planner?.login,
+          ),
+        },
         // Eksport grouped with the dispatchers — the staff steering this outing.
         // Same person shown as «Zweryfikowany przez» above (readyBy).
         {

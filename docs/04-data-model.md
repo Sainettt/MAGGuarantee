@@ -71,7 +71,7 @@
 | `name` | имя |
 | `active` | блокировка логина |
 | `liderEmail` | только для `planista` — email лидера группы (для рассылки). Per-role tech debt — см. [19-known-quirks.md](19-known-quirks.md#liderEmail) |
-| `teamId` | 🗓️ **Phase 11** — только для `dyspozytor`, FK → Team (команда, в которой состоит диспетчер) |
+| `teamId` | ✅ **Phase 11 (реализовано 2026-06-17)** — только для `dyspozytor`, FK → Team (команда, в которой состоит диспетчер) |
 
 > ⚠️ Поля `company` (Firma) на `User` **больше нет** — оно перенесено на `Carrier` миграцией `20260507223021_move_company_to_carrier`. Внутренние роли MAGTRANS (admin/pracownik/opiekun/planista/dyspozytor/eksport/weryfikator) — это сотрудники одной компании, поле было денормализованным наследием GAS-миграции, которое использовалось только перевозчиками.
 
@@ -118,7 +118,7 @@
 | `plateNumber` | NrRej |
 | `active` | флаг активности |
 | `plannerId` | FK → User (role=planista) — ведущий спедитор (один) |
-| `dispatchTeamId` | 🗓️ **Phase 11** — FK → Team, **заменит** `dispatcherId` (оба сменщика видят авто через членство в команде). Сейчас в схеме ещё `dispatcherId` |
+| `dispatchTeamId` | ✅ **Phase 11 (реализовано 2026-06-17)** — FK → Team, **заменил** `dispatcherId` (миграция `20260617120000_phase11_team_dispatch`; оба сменщика видят авто через членство в команде) |
 | `certificateL` | Boolean — TAK/NIE (есть ли L-сертификат). До 2026-05 — enum L1/L2/L3, конвертировано миграцией `20260515130307_vehicle_certificate_l_to_boolean`. |
 | `euro` | III / IV / V / VI |
 | `adrClasses` | string[] классов опасных грузов |
@@ -142,7 +142,7 @@
 
 ### `Team` — команда диспетчеров
 
-> 🗓️ **PLANNED (Phase 11)** — сущности ещё нет в схеме; текущая схема — одиночный `Vehicle.dispatcherId`. Ниже — **целевая** модель; миграция и реализация — Phase 11 (см. [17-migration-roadmap.md](17-migration-roadmap.md) Шаг D).
+> ✅ **РЕАЛИЗОВАНО (Phase 11, 2026-06-17)** — модель `Team` в схеме, `Vehicle.dispatchTeamId` заменил одиночный `dispatcherId` (миграция `20260617120000_phase11_team_dispatch`), admin ведёт CRUD команд в UI (см. [17-migration-roadmap.md](17-migration-roadmap.md) Шаг D — фаза закрыта).
 
 Нумерованная команда диспетчеров (код вида `1.2.5`), к которой привязывается авто. Отражает реальный процесс MAGTRANS: во внешней системе maciosoft (Sped Trans) машине приписывается не один человек, а целая команда; раньше состав команд вёлся вручную в Excel (raport DAF). В MAGGuarantee справочник команд ведёт **admin** — это явная замена тому Excel.
 

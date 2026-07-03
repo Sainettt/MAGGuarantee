@@ -39,6 +39,14 @@ export class RefreshTokenRepository {
     return (row as RefreshTokenRow | null) ?? null;
   }
 
+  /** Used by the benign-race heal to walk the `replacedById` successor chain. */
+  async findById(id: string): Promise<RefreshTokenRow | null> {
+    const row = await this.prisma.refreshToken.findUnique({
+      where: { id },
+    });
+    return (row as RefreshTokenRow | null) ?? null;
+  }
+
   async revokeById(id: string): Promise<void> {
     await this.prisma.refreshToken.update({
       where: { id },

@@ -51,7 +51,11 @@ import {
 
 import { Audit } from '../../common/audit';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
-import { AuthService, type TokenPair } from './auth.service';
+import {
+  AuthService,
+  type AccessOnlyToken,
+  type TokenPair,
+} from './auth.service';
 import {
   COOKIE_ACCESS,
   COOKIE_REFRESH,
@@ -243,30 +247,47 @@ export class AuthController {
 
   // ── Helpers ──────────────────────────────────────────
 
-  private setAuthCookies(res: Response, tokens: TokenPair): void {
+  // SameSite=Lax, NOT Strict: notification emails deep-link into the app
+  // (authorization-request, carrier-decision, daily-reminder CTAs — see
+  // apps/api/src/modules/mail/templates/). A click from a mail client is a
+  // cross-site top-level navigation; Strict would omit BOTH cookies and bounce
+  // a live session to /login. Lax keeps CSRF safety: browsers don't attach
+  // Lax cookies to cross-site POST or XHR, and every mutating endpoint here
+  // is POST/PATCH/DELETE.
+  //
+  // `tokens` may be an AccessOnlyToken (benign-race heal on /auth/refresh) —
+  // then only `mt_access` is set and the refresh cookie is left untouched:
+  // the race winner's rotated pair is already in (or on its way to) the jar.
+  private setAuthCookies(
+    res: Response,
+    tokens: TokenPair | AccessOnlyToken,
+  ): void {
     const isProd =
       this.config.get('NODE_ENV', { infer: true }) === 'production';
     const accessTtlMs = parseTtlMs(
       this.config.get('JWT_ACCESS_TTL', { infer: true }),
     );
-    const refreshTtlMs = parseTtlMs(
-      this.config.get('JWT_REFRESH_TTL', { infer: true }),
-    );
 
     res.cookie(COOKIE_ACCESS, tokens.accessToken, {
       httpOnly: true,
       secure: isProd,
-      sameSite: 'strict',
+      sameSite: 'lax',
       path: '/',
       maxAge: accessTtlMs,
     });
-    res.cookie(COOKIE_REFRESH, tokens.refreshToken, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: 'strict',
-      path: REFRESH_COOKIE_PATH,
-      maxAge: refreshTtlMs,
-    });
+
+    if ('refreshToken' in tokens) {
+      const refreshTtlMs = parseTtlMs(
+        this.config.get('JWT_REFRESH_TTL', { infer: true }),
+      );
+      res.cookie(COOKIE_REFRESH, tokens.refreshToken, {
+        httpOnly: true,
+        secure: isProd,
+        sameSite: 'lax',
+        path: REFRESH_COOKIE_PATH,
+        maxAge: refreshTtlMs,
+      });
+    }
   }
 
   private clearAuthCookies(res: Response): void {
@@ -275,13 +296,13 @@ export class AuthController {
     res.clearCookie(COOKIE_ACCESS, {
       httpOnly: true,
       secure: isProd,
-      sameSite: 'strict',
+      sameSite: 'lax',
       path: '/',
     });
     res.clearCookie(COOKIE_REFRESH, {
       httpOnly: true,
       secure: isProd,
-      sameSite: 'strict',
+      sameSite: 'lax',
       path: REFRESH_COOKIE_PATH,
     });
   }

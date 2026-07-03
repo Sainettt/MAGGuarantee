@@ -194,14 +194,28 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     }
 
     try {
+      // Forward the caller's identity so the API's per-IP throttle buckets and
+      // the refresh-token audit columns (ipAddress / userAgent) see the real
+      // client instead of the web container. Caddy sets x-forwarded-for in
+      // prod; in dev it's absent and the API falls back to the socket peer.
+      const refreshHeaders: Record<string, string> = {
+        cookie: `${REFRESH_COOKIE}=${refresh}`,
+      };
+      const xff = req.headers.get('x-forwarded-for');
+      if (xff) refreshHeaders['x-forwarded-for'] = xff;
+      const ua = req.headers.get('user-agent');
+      if (ua) refreshHeaders['user-agent'] = ua;
+
       const apiRes = await fetch(REFRESH_URL, {
         method: 'POST',
-        headers: { cookie: `${REFRESH_COOKIE}=${refresh}` },
+        headers: refreshHeaders,
       });
 
       if (!apiRes.ok) {
-        // Refresh failed → the server already invalidated the session (or a
-        // rare cross-tab rotation race lost). Redirect to login; do not retry.
+        // Refresh failed → the session is genuinely dead (revoked / expired /
+        // account deactivated). Benign concurrent-rotation losers are healed
+        // server-side with an access-only 200 (see AuthService.refresh), so a
+        // non-ok here is NOT a race artifact. Redirect to login; do not retry.
         return loginRedirect(req);
       }
 

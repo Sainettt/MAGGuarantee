@@ -44,6 +44,10 @@ export interface DelegationRow {
     plannerId: string | null;
     dispatchTeamId: string | null;
     dispatchTeam: VehicleDispatchTeamDto | null;
+    // Lead forwarder (`Vehicle.planner`, live) — surfaced on the wire vehicle
+    // mini so the «ZESPÓŁ PROWADZĄCY» block shows the full crew (planista +
+    // dispatchers + eksport). Identity only, NON-SENSITIVE.
+    planner: { id: string; login: string; name: string | null } | null;
   } | null;
   trailerId: string;
   trailer: { id: string; plateNumber: string } | null;
@@ -364,6 +368,8 @@ export class DelegationsRepository {
               },
             },
           },
+          // Lead forwarder — identity only (same mini as reportedBy/readyBy).
+          planner: { select: { id: true, login: true, name: true } },
         },
       },
       trailer: { select: { id: true, plateNumber: true } },
@@ -411,6 +417,7 @@ export class DelegationsRepository {
                   })),
                 }
               : null,
+            planner: row.vehicle.planner ?? null,
           }
         : null,
       trailerId: row.trailerId,
@@ -469,6 +476,7 @@ interface DelegationPrismaShape {
       active: boolean;
       dispatchers?: { id: string; name: string | null; login: string }[];
     } | null;
+    planner?: { id: string; login: string; name: string | null } | null;
   } | null;
   trailerId: string;
   trailer?: { id: string; plateNumber: string } | null;

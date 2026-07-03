@@ -259,11 +259,12 @@ model Vehicle {
 
   plannerId    String? @db.Uuid
   planner      User?   @relation("VehiclePlanner", fields: [plannerId], references: [id])
-  dispatcherId String? @db.Uuid
-  dispatcher   User?   @relation("VehicleDispatcher", fields: [dispatcherId], references: [id])
-  // 🗓️ PLANNED (Phase 11, see docs/17 + docs/04 «Team»): dispatcherId will be
-  // REPLACED by dispatchTeamId (FK → new Team model). NOT migrated yet — the
-  // current schema above is still single-dispatcher.
+  dispatchTeamId String? @db.Uuid
+  dispatchTeam   Team?   @relation(fields: [dispatchTeamId], references: [id])
+  // ✅ Phase 11 (2026-06-17, миграция 20260617120000_phase11_team_dispatch):
+  // dispatcherId ЗАМЕНЁН на dispatchTeamId (FK → Team). Модель `Team` и
+  // `User.teamId` — в schema.prisma; их полные блоки в этот док ещё не
+  // перенесены (см. docs/04 «Team» для целевой модели — она и реализована).
 
   notes        String?
   certificateL Boolean       // STRICT, TAK/NIE (was enum L1/L2/L3 until 2026-05)
@@ -868,7 +869,7 @@ shows whether the verifier overrode the carrier's declared hours.
 | N | EURO | `euro` |
 | O | ADR (CSV) | dropped 2026-06 — only `adr` boolean permit flag kept (ADR class list removed) |
 | P-R | GPS, KartaPaliwowa, Typ | `gps` dropped 2026-06-17 (every vehicle GPS-tracked); `fuelCard`, `type` |
-| S | Dyspozytor (login) | → FK `dispatcherId` (🗓️ Phase 11: мигрирует на `Team`/`dispatchTeamId` — см. [04-data-model.md](04-data-model.md) «Team») |
+| S | Dyspozytor (login) | → FK `dispatchTeamId` → `Team` (✅ Phase 11 реализована: команда вместо одиночного `dispatcherId` — см. [04-data-model.md](04-data-model.md) «Team») |
 | T-W | GB, IT, FR, Porozumienie | `gb`, `it`, `fr`, `agreement` |
 | X | Umowa | dropped 2026-05 — umowa scan stored as `VehicleAttachment` (category=contract) |
 | Y-AB | StawkaDE, StawkaUE, StawkaEksport, StawkaImport | `rateDe`, `rateUe`, `rateExport`, `rateImport` |

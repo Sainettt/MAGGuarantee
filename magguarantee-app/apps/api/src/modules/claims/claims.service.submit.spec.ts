@@ -72,6 +72,7 @@ function makeDelegation(overrides: Partial<DelegationRow> = {}): DelegationRow {
       plannerId: null,
       dispatchTeamId: null,
       dispatchTeam: null,
+      planner: null,
     },
     trailerId: 'trl-1',
     trailer: { id: 'trl-1', plateNumber: 'TR9999' },
@@ -834,6 +835,7 @@ describe('ClaimsService.submit — delegation link', () => {
           plannerId: null,
           dispatchTeamId: null,
           dispatchTeam: null,
+          planner: null,
         },
       }),
     );
@@ -868,6 +870,7 @@ describe('ClaimsService.submit — delegation link', () => {
           plannerId: null,
           dispatchTeamId: null,
           dispatchTeam: null,
+          planner: null,
         },
       }),
     );

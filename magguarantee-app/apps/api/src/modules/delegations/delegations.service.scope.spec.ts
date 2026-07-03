@@ -58,6 +58,7 @@ function makeRow(overrides: Partial<DelegationRow> = {}): DelegationRow {
       // baseline case (unassigned); the dedicated mapper test below exercises a
       // populated team.
       dispatchTeam: null,
+      planner: null,
     },
     trailerId: 'trl-1',
     trailer: { id: 'trl-1', plateNumber: 'TR1' },
@@ -309,6 +310,7 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
         plannerId: PLANNER_SUB,
         dispatchTeamId: 'other-team',
         dispatchTeam: null,
+        planner: null,
       },
     });
     const { service } = makeService([row]);
@@ -325,6 +327,7 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
         plannerId: 'someone-else',
         dispatchTeamId: TEAM_ID,
         dispatchTeam: null,
+        planner: null,
       },
     });
     const { service } = makeService([row]);
@@ -342,6 +345,7 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
         plannerId: 'other-plan',
         dispatchTeamId: TEAM_ID,
         dispatchTeam: null,
+        planner: null,
       },
     });
     const { service } = makeService([row]);
@@ -361,6 +365,7 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
         plannerId: PLANNER_SUB,
         dispatchTeamId: 'some-other-team',
         dispatchTeam: null,
+        planner: null,
       },
     });
     const { service } = makeService([row]);
@@ -378,6 +383,7 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
         plannerId: PLANNER_SUB,
         dispatchTeamId: TEAM_ID,
         dispatchTeam: null,
+        planner: null,
       },
     });
     const { service } = makeService([row]);
@@ -413,6 +419,7 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
           plannerId: 'p-x',
           dispatchTeamId: 'team-x',
           dispatchTeam: null,
+          planner: null,
         },
       });
       const { service } = makeService([row]);
@@ -444,6 +451,8 @@ describe('DelegationsService.getOne — vehicle.dispatchTeam (live, additive)', 
             { id: 'dys-b', name: null, login: 'bartek' },
           ],
         },
+        // Lead forwarder rides the same vehicle mini (full-crew ZESPÓŁ block).
+        planner: { id: 'p-x', login: 'planner.x', name: 'Planner X' },
       },
     });
     const { service } = makeService([row]);
@@ -457,6 +466,11 @@ describe('DelegationsService.getOne — vehicle.dispatchTeam (live, additive)', 
         { id: 'dys-a', name: 'Anna', login: 'anna' },
         { id: 'dys-b', name: null, login: 'bartek' },
       ],
+    });
+    expect(out.vehicle?.planner).toEqual({
+      id: 'p-x',
+      login: 'planner.x',
+      name: 'Planner X',
     });
   });
 

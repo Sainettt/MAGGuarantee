@@ -34,7 +34,7 @@
                     user: UserDto}                │
             ◄─ Set-Cookie: mt_access (HttpOnly)   │
             ◄─ Set-Cookie: mt_refresh (HttpOnly,  │
-                                       Strict)    │
+                                       Lax)       │
                                                   │
                                                   ▼
                                   All API calls: Authorization: Bearer
@@ -44,7 +44,7 @@
 ## Решение по cookie vs header
 
 **Используем оба:**
-- **Web (Next.js):** HttpOnly cookies. Защищены от XSS (нельзя прочитать из JS), CSRF mitigated через `SameSite=Strict` + double-submit token на mutating endpoints.
+- **Web (Next.js):** HttpOnly cookies. Защищены от XSS (нельзя прочитать из JS), CSRF mitigated через `SameSite=Lax` + double-submit token на mutating endpoints. Lax, а не Strict: почтовые уведомления (authorization-request, carrier-decision, daily-reminder и т.д.) диплинкуют в приложение — клик из почтового клиента это cross-site top-level навигация, и Strict не отправил бы ни одной куки → живую сессию выкидывало бы на /login. CSRF-защита сохраняется: Lax-куки не едут на cross-site POST/XHR, а все мутирующие endpoint-ы — POST/PATCH/DELETE.
 - **Внешние интеграции / mobile (если когда-нибудь):** `Authorization: Bearer`.
 
 API одинаково принимает оба варианта (custom passport extractor).
@@ -71,7 +71,7 @@ type JwtPayload = {
 | | Access | Refresh |
 |---|---|---|
 | TTL | 15 мин | 30 дней |
-| Хранение | HttpOnly cookie или header | HttpOnly cookie (Strict) — НЕ в localStorage |
+| Хранение | HttpOnly cookie или header | HttpOnly cookie (Lax) — НЕ в localStorage |
 | Содержимое | full payload | минимум: `{sub, jti}` |
 | Подпись | `JWT_ACCESS_SECRET` | `JWT_REFRESH_SECRET` (разные!) |
 | Revocation | в основном через истечение TTL | через таблицу `refresh_tokens` (revokedAt) |
@@ -81,25 +81,15 @@ type JwtPayload = {
 При каждом `/auth/refresh`:
 1. Принимаем старый refresh.
 2. Проверяем что не `revokedAt` и не `expiresAt < now()`.
-3. **Помечаем старый `revokedAt = now()`**.
-4. Выдаём новую пару (access + refresh).
-5. Если приходит refresh, который **уже** revoked → логично воспринимать как theft → отзываем все refresh-токены user-а.
+3. **Помечаем старый `revokedAt = now()`** (атомарный claim внутри транзакции — только один конкурентный refresh может «забрать» токен).
+4. Выдаём новую пару (access + refresh); старая строка получает `replacedById` → цепочка ротаций.
+5. Если приходит refresh, который **уже** revoked — различаем два случая:
+   - **Benign concurrent-rotation race** (*reuse interval*, реализовано 2026-07-03): токен отозван ≤ `REFRESH_ROTATION_GRACE_MS` (30 с) назад И имеет `replacedById`, чья цепочка преемников жива. Это проигравший из параллельных `/auth/refresh` (edge middleware на каждый document/RSC/prefetch запрос, клиентский 401-interceptor, соседние вкладки), деливших один одноразовый токен. Ответ: **200 + свежий access-only токен** — БЕЗ второй ротации и БЕЗ refresh-куки (ротированная пара победителя уже в браузере). Без этого проигравший 401 превращался middleware'ом в редирект живой сессии на /login.
+   - **Genuine theft**: отозван вне grace-окна, или без `replacedById` (logout / reset / admin revoke-all), или цепочка преемников мертва → отзываем все refresh-токены user-а (кроме случая мёртвой цепочки — там просто 401 без revoke-all).
 
-```ts
-// auth.service.ts
-async refresh(refreshTokenJwt: string) {
-  const { sub, jti } = await this.jwt.verifyAsync(refreshTokenJwt, { secret: REFRESH_SECRET });
-  const stored = await this.refreshTokens.findByHash(sha256(refreshTokenJwt));
-  if (!stored) throw new UnauthorizedException('No such token');
-  if (stored.revokedAt) {
-    // theft suspected — отзываем всё
-    await this.refreshTokens.revokeAllForUser(sub);
-    throw new UnauthorizedException('Token reuse detected — all sessions revoked');
-  }
-  await this.refreshTokens.revoke(stored.id);
-  return this.issuePair(sub);
-}
-```
+Принятый trade-off reuse-interval'а: токен, украденный и повторённый в течение 30 с после легитимной ротации, даст атакующему один короткоживущий access-токен, не тронув детекцию кражи. Стандартная практика (Auth0 refresh token reuse interval).
+
+Реализация: `AuthService.refresh` + `healRotationRace` + `successorChainAlive` в `apps/api/src/modules/auth/auth.service.ts`; тесты — `auth.service.refresh.spec.ts`.
 
 ## 2FA: 6-значный email-код
 
@@ -362,11 +352,11 @@ function RoleSwitcher() {
 | **Brute force на login** | rate-limit 5/min/IP + lockout user после 10 неудач |
 | **Credential stuffing** | rate-limit + (опц.) проверка против HIBP |
 | **2FA brute force** | 5 attempts → lockout 5 мин |
-| **CSRF** | SameSite=Strict cookies, double-submit для cookie auth |
+| **CSRF** | SameSite=Lax cookies (не едут на cross-site POST/XHR; все мутации POST/PATCH/DELETE), double-submit для cookie auth |
 | **XSS** | React auto-escape + Helmet CSP, HttpOnly cookies |
 | **Session fixation** | Refresh rotation, revocation tracking |
-| **JWT stealing** | Short access TTL (15 мин), refresh in HttpOnly Strict cookie |
-| **Session theft (cookie)** | Strict + Secure cookies, IP/UA fingerprint в refresh_tokens (опц.) |
+| **JWT stealing** | Short access TTL (15 мин), refresh in HttpOnly Lax cookie |
+| **Session theft (cookie)** | Lax + Secure + HttpOnly cookies, IP/UA fingerprint в refresh_tokens (опц.) |
 | **Email injection в кодах** | Гарантировано константный шаблон, не user input |
 | **Account enumeration** | `/auth/login` — одинаковый response 401/202 для несуществующего user-а и неверного пароля (нельзя differentiate) |
 | **Reset flooding** | rate-limit reset endpoints |
@@ -495,7 +485,7 @@ async function fetchWithRefresh(url: string, opts: RequestInit) {
 ## Чек-лист безопасности перед prod
 
 - [ ] `JWT_ACCESS_SECRET` и `JWT_REFRESH_SECRET` — разные, ≥ 32 байта рандома.
-- [ ] Все cookies: `Secure`, `HttpOnly`, `SameSite=Strict`.
+- [ ] Все cookies: `Secure`, `HttpOnly`, `SameSite=Lax` (Lax, не Strict — иначе диплинки из писем теряют сессию; см. «Решение по cookie vs header»).
 - [ ] Helmet включён с CSP, HSTS.
 - [ ] CORS только для нашего домена (`NEXT_PUBLIC_APP_URL`).
 - [ ] Rate-limit включён на login/verify/resend.

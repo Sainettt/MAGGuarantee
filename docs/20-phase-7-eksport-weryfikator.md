@@ -62,7 +62,7 @@
 - i18n: `eksport.delegations.*`, `weryfikator.delegations.*`, `carrier.claims.wyjazdPicker.*`, warning/badge-ключи. uiux: бейджи 5 статусов, confirm-диалоги, warning-баннер.
 
 ### Что НЕ входит в слайс
-- **Approval-роль Аркадиуша** (`zaakceptowany`, назначение zespół/экспортёра) — отдельный Phase 11. См. memory `spedtrans-zlecenie-wyjazd-approval`.
+- **Approval-роль Аркадиуша** (`zaakceptowany`, назначение zespół/экспортёра) — ❌ **ОТМЕНЕНА (решение заказчика 2026-07-03):** отдельного `zaakceptowany` не будет — `gotowy` и есть акцепт; каждый ставит статус под свою ответственность, авторство фиксируется на выезде (`readyBy/readyAt` + audit). Phase 11 закрыта, см. итоговый баннер в `docs/17`.
 - **GPS-интеграция** — только хуки (`actualReturnAt` сможет нести время, источник `manual|gps`); саму интеграцию не строим.
 
 ### Решения (locked, 2026-06-20/22 — скрин-флоу + AskUserQuestion ×9)

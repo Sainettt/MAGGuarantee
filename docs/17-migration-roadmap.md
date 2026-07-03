@@ -711,6 +711,14 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
 
 ## Фаза 11+ — Wyjazd approval workflow (планируется после launch)
 
+> ✅ **ФАЗА ЗАКРЫТА (2026-07-03, решение заказчика).** Все живые куски реализованы, остаток отменён:
+> - **Шаг A (блок прошлых дат)** — ✅ реализовано (гейт в `DelegationsService.add()`, грань now−10 мин, обход env-флагами `ALLOW_PAST_DEPARTURE` / `NEXT_PUBLIC_ALLOW_PAST_DEPARTURE`).
+> - **Шаг B (связка wniosek ↔ wyjazd)** — ✅ реализовано в Phase 7 §0″ (`Claim.delegationId` `@unique`, carrier выбирает выезд, период/пробег производные, авто-пересчёт при позднем `zjechal`).
+> - **Шаг C (approval workflow)** — ✅ закрыт как есть: отдельного статуса **`zaakceptowany` НЕ будет — нынешний `gotowy` и есть акцепт** (`POST /delegations/:id/ready`, `eksport|admin`, флип после zlecenia в SpedTrans, откат до `w_trasie`). **Роли Аркадиуша НЕ будет** — каждый ставит статус под свою ответственность, авторство фиксируется на выезде (`readyBy/readyAt`, `verifiedBy/At`) + audit-log. Автоимпорт из SpedTrans не делается.
+> - **Шаг D (`Team`)** — ✅ реализовано 2026-06-17 (модель `Team`, `Vehicle.dispatchTeamId`, admin CRUD, gchat-получатели через команду).
+>
+> Всё ниже — историческая спека, оставлена как контекст; актуальное состояние — этот баннер.
+
 > ⛔ **БОЛЬШАЯ ПЕРЕОЦЕНКА (2026-06-12)** — фаза сильно урезана после выяснения реального процесса:
 > - **Шаг B (`Claim.delegationId` hard-link) — ОТМЕНЁН.** Связи claim↔delegation в коде нет; `Claim.mileage` = `Σ VehicleDailyKm` (по машине+периоду). См. [20-phase-7-eksport-weryfikator.md](20-phase-7-eksport-weryfikator.md) §0′.
 > - **Шаг C (approval workflow выездов) — ОТМЕНЁН.** Статус выезда — «мёртвый груз», его никто не верифицирует; роль одобряющего не нужна (секция «Роль одобряющего» ниже устарела).
@@ -812,6 +820,8 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
 **Дефолтная рекомендация:** вариант 2 — расширить scope `weryfikator`. У него уже есть read-доступ ко всем wyjazd и mutate их статуса; акцепт логически встраивается в тот же flow. Решение фиксируется перед стартом Phase 11 после обсуждения с заказчиком.
 
 > ⚠️ **Note 2026-06-11 — рекомендация «вариант 2» устарела.** После Phase 7 рефорка `weryfikator` занят ежедневным per-vehicle route-status/км и с выездами не работает (см. `delegations.controller.ts` — transition-хендлеры удалены). Реальный акцепт-флоу по новой инфо: роль **Arkadiusza** (назначает zespół prowadzący + указывает экспортёра) + **importer**, который ставит выезду `zaakceptowany` по факту наличия **`zlecenie` в SpedTrans** (zlecenie = твёрдый гарант, что машина выедет; `zgłoszenie` перевозчика — мягкое). Это пересматривает Шаг C (роль одобряющего + статус-машину выезда) — решение открыто.
+>
+> ✅ **РЕШЕНО 2026-07-03:** ни `zaakceptowany`, ни роли Arkadiusza, ни importer-а не будет. `gotowy` (Phase 7 §0″, ставит `eksport` после zlecenia в SpedTrans) — это и есть акцепт; каждый действует под свою ответственность, авторство пишется на выезде (`readyBy/readyAt`) и в audit-log. Шаг C закрыт.
 
 ### Влияние на существующие модели
 
@@ -958,7 +968,7 @@ describe('calcKmGwarantPerMonth', () => {
 
 Эти задачи выходят за scope «функциональной идентичности» с тем, что задумано в `Code.gs`/`index.html`, и делаются после launch (Фаза 11+):
 
-- **[ЗАФИКСИРОВАНО]** Wyjazd approval workflow + жёсткая связь wniosek ↔ wyjazd + блок прошлых дат — спецификация в [#фаза-11--wyjazd-approval-workflow-планируется-после-launch](#фаза-11--wyjazd-approval-workflow-планируется-после-launch) выше.
+- **[✅ ЗАВЕРШЕНО 2026-07-03]** Wyjazd approval workflow + жёсткая связь wniosek ↔ wyjazd + блок прошлых дат — всё реализовано (`gotowy` = акцепт, без `zaakceptowany`/роли Arkadiusza); итоговый баннер в [#фаза-11--wyjazd-approval-workflow-планируется-после-launch](#фаза-11--wyjazd-approval-workflow-планируется-после-launch) выше.
 - Pagination/virtualization для очень длинных списков.
 - Внутренний чат на каждое заявление (был в legacy, выпиливается, может вернуться позже как новая фича).
 - Экспорт wniosków в PDF.

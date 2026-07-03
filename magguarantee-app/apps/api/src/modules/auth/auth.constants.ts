@@ -17,7 +17,9 @@ export const COOKIE_REFRESH = 'mt_refresh';
 // cookie has expired — without this, hard navigations log the user out after
 // the 15-min access TTL despite a 30-day refresh token. Exposure stays bounded:
 // in prod web+API share one origin (Caddy path-based routing — see
-// infra/caddy/Caddyfile) and the cookie remains HttpOnly + Secure + SameSite=Strict.
+// infra/caddy/Caddyfile) and the cookie remains HttpOnly + Secure + SameSite=Lax
+// (Lax, not Strict, so email deeplinks keep the session — see
+// auth.controller.ts#setAuthCookies).
 export const REFRESH_COOKIE_PATH = '/';
 
 // ── Redis key prefixes (docs/15-auth-strategy.md#2fa) ───
@@ -45,11 +47,17 @@ export const PWRESET_REDIS_KEY = {
 // ── Refresh-token rotation grace window ─────────────────
 // A refresh token revoked within this window AND carrying a `replacedById`
 // (i.e. a normal rotation that just happened) is a benign concurrent-rotation
-// race — the loser of the parallel document/prefetch/RSC `/auth/refresh` calls
-// the Next.js edge middleware fires on a single page load — NOT theft. We 401
-// that one losing request without revoking the user's other sessions. A token
-// revoked OUTSIDE this window, or revoked WITHOUT a `replacedById` (logout /
-// reset / admin revoke-all), is still treated as genuine reuse → revoke-all.
+// race — the loser of parallel `/auth/refresh` calls (edge middleware per
+// document/prefetch/RSC request, the client 401-interceptor, sibling tabs)
+// sharing one single-use token — NOT theft. The loser is HEALED with a fresh
+// access-only token (the "reuse interval" pattern; no second rotation, refresh
+// cookie untouched), provided the successor `replacedById` chain is still
+// alive — so the losing request succeeds instead of bouncing a live session
+// to /login. A token revoked OUTSIDE this window, or revoked WITHOUT a
+// `replacedById` (logout / reset / admin revoke-all), is still treated as
+// genuine reuse → revoke-all. Accepted trade-off: a token stolen and replayed
+// within these 30s yields one short-lived access token without tripping
+// theft detection.
 export const REFRESH_ROTATION_GRACE_MS = 30_000;
 
 // ── 2FA tuning (defaults — overridden by AppConfig at runtime) ──

@@ -632,6 +632,7 @@
     "noTeam": "No leading team assigned",
     "inactiveBadge": "Inactive",
     "leadingTeamHeader": "LEADING TEAM",
+    "planista": "Planner",
     "eksport": "Export",
     "codeAria": "Team code: {code}",
     "membersAria": "Dispatchers of team {code}"

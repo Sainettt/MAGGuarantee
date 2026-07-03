@@ -304,6 +304,14 @@ export type DelegationFilters = z.infer<typeof DelegationFiltersSchema>;
 
 // ─── Mini-references ─────────────────────────────────────
 
+// Declared BEFORE VehicleMiniSchema — it is referenced there (`planner`), and
+// `const` initialisers evaluate top-to-bottom at module load (TDZ).
+const UserMiniSchema = z.object({
+  id: UuidSchema,
+  login: z.string(),
+  name: z.string().nullable(),
+});
+
 const VehicleMiniSchema = z.object({
   id: UuidSchema,
   plateNumber: z.string(),
@@ -326,6 +334,14 @@ const VehicleMiniSchema = z.object({
    * `DelegationDetailModal`.
    */
   dispatchTeam: VehicleDispatchTeamSchema.nullable(),
+  /**
+   * The vehicle's CURRENT lead forwarder (`Vehicle.planner`, resolved LIVE —
+   * not a snapshot), same UserMini shape as `reportedBy`/`readyBy`. Completes
+   * the «ZESPÓŁ PROWADZĄCY» block in `DelegationDetailModal` (planista +
+   * dispatch team + eksport). Identity only (no rates) → NON-SENSITIVE.
+   * `null` when the vehicle has no planner assigned.
+   */
+  planner: UserMiniSchema.nullable(),
 });
 
 const TrailerMiniSchema = z.object({
@@ -340,12 +356,6 @@ const DriverMiniSchema = z.object({
 });
 
 const CarrierMiniSchema = z.object({
-  id: UuidSchema,
-  login: z.string(),
-  name: z.string().nullable(),
-});
-
-const UserMiniSchema = z.object({
   id: UuidSchema,
   login: z.string(),
   name: z.string().nullable(),

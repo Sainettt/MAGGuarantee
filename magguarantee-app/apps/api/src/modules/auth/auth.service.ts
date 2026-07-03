@@ -17,7 +17,10 @@ import { UsersService } from '../users/users.service';
 import type { UserRow } from '../users/users.repository';
 import { PasswordService } from './password.service';
 import { PasswordResetService } from './password-reset.service';
-import { RefreshTokenRepository } from './refresh-token.repository';
+import {
+  RefreshTokenRepository,
+  type RefreshTokenRow,
+} from './refresh-token.repository';
 import { TwoFactorService } from './two-factor.service';
 
 export interface TokenPair {
@@ -25,6 +28,16 @@ export interface TokenPair {
   refreshToken: string;
   refreshTokenId: string;
   refreshExpiresAt: Date;
+}
+
+/**
+ * Result of a refresh that lost a benign concurrent-rotation race and was
+ * healed with a fresh access token only (see `healRotationRace`). No rotation
+ * happened, so there is no refresh token to set — the winner's rotated pair
+ * is already in (or on its way to) the browser jar.
+ */
+export interface AccessOnlyToken {
+  accessToken: string;
 }
 
 interface IssueOptions {
@@ -276,7 +289,7 @@ export class AuthService {
     userId: string,
     rawRefreshToken: string,
     ctx: { ipAddress?: string; userAgent?: string },
-  ): Promise<{ user: UserDto; tokens: TokenPair }> {
+  ): Promise<{ user: UserDto; tokens: TokenPair | AccessOnlyToken }> {
     const tokenHash = this.sha256(rawRefreshToken);
     const stored = await this.refreshTokens.findByHash(tokenHash);
     if (!stored || stored.userId !== userId) {
@@ -287,23 +300,34 @@ export class AuthService {
       // from genuine theft. A normal rotation just happened iff the token was
       // revoked very recently (within REFRESH_ROTATION_GRACE_MS) AND it points
       // at its successor (`replacedById != null`). That is the loser of the
-      // parallel /auth/refresh calls the Next.js edge middleware fires on one
-      // page load — NOT theft, so we must NOT kill the just-minted sibling
-      // session. Anything else (revoked long ago → replay, or revoked without
-      // a successor → logout/reset/admin revoke-all) is genuine reuse.
+      // parallel /auth/refresh calls (edge middleware per document/RSC/prefetch
+      // request, the client interceptor, sibling tabs) on one shared token —
+      // NOT theft, so we must NOT kill the just-minted sibling session.
+      // Anything else (revoked long ago → replay, or revoked without a
+      // successor → logout/reset/admin revoke-all) is genuine reuse.
       const revokedAgeMs = Date.now() - stored.revokedAt.getTime();
       const isBenignRotationRace =
         revokedAgeMs <= REFRESH_ROTATION_GRACE_MS &&
         stored.replacedById != null;
 
       if (isBenignRotationRace) {
-        this.logger.debug({
-          msg: 'refresh-token already rotated (benign concurrent race), 401 only this request',
-          userId,
-          tokenId: stored.id,
-          replacedById: stored.replacedById,
-          revokedAgeMs,
-        });
+        // Heal the loser instead of 401-ing it: the Next.js middleware
+        // translates a failed refresh into a login redirect, so a benign
+        // race on a document navigation used to bounce a LIVE session to
+        // /login. Mint an access-only token bound to the winner's session.
+        const healed = await this.healRotationRace(userId, stored.replacedById);
+        if (healed) {
+          this.logger.debug({
+            msg: 'refresh-token already rotated (benign concurrent race) — healed with access-only token',
+            userId,
+            tokenId: stored.id,
+            replacedById: stored.replacedById,
+            revokedAgeMs,
+          });
+          return healed;
+        }
+        // Successor chain is dead (logout/reset raced in) or user inactive —
+        // the session is genuinely over; 401 without revoke-all.
         throw new UnauthorizedException('Refresh token already rotated');
       }
 
@@ -338,18 +362,74 @@ export class AuthService {
         // write, a CONCURRENT /auth/refresh rotated this exact token. This is
         // ALWAYS a benign rotation race — a genuine replay would have had
         // `revokedAt` already set at read time and been caught (and judged) in
-        // Part A above. So 401 only this losing request; do NOT revoke the
-        // sibling session the winner just minted.
-        this.logger.debug({
-          msg: 'refresh-token rotated concurrently (claim lost the race), 401 only this request',
+        // Part A above. Heal the loser with an access-only token (same
+        // contract as the Part A benign branch); do NOT revoke the sibling
+        // session the winner just minted.
+        const reRead = await this.refreshTokens.findByHash(tokenHash);
+        const healed = await this.healRotationRace(
           userId,
-          tokenId: stored.id,
-        });
+          reRead?.replacedById ?? null,
+        );
+        if (healed) {
+          this.logger.debug({
+            msg: 'refresh-token rotated concurrently (claim lost the race) — healed with access-only token',
+            userId,
+            tokenId: stored.id,
+          });
+          return healed;
+        }
         throw new UnauthorizedException('Refresh token already rotated');
       }
       throw err;
     }
     return { user: this.toUserDto(user), tokens };
+  }
+
+  /**
+   * Benign concurrent-rotation heal (the "reuse interval" pattern): the caller
+   * lost a refresh race that a sibling request won moments ago. Instead of
+   * 401-ing — which the web layer translates into a login redirect for
+   * document navigations — mint a fresh ACCESS token for the same user,
+   * WITHOUT rotating again and WITHOUT touching the refresh cookie.
+   *
+   * Guarded by the successor-chain check so a session that was genuinely ended
+   * (logout / password reset / admin revoke revokes the successor) cannot be
+   * resurrected by its predecessor inside the grace window. Returns null when
+   * the session is dead or the user is no longer active — callers then 401.
+   */
+  private async healRotationRace(
+    userId: string,
+    firstSuccessorId: string | null,
+  ): Promise<{ user: UserDto; tokens: AccessOnlyToken } | null> {
+    if (!firstSuccessorId) return null;
+    if (!(await this.successorChainAlive(firstSuccessorId))) return null;
+    const user = await this.users.findById(userId);
+    if (!user || !user.active || user.deletedAt || !user.email) return null;
+    return {
+      user: this.toUserDto(user),
+      tokens: { accessToken: await this.signAccessToken(user) },
+    };
+  }
+
+  /**
+   * Follows the `replacedById` chain from a rotation's successor to its live
+   * end. Rapid successive rotations (prefetch → click → another nav) can chain
+   * several rows within one grace window, so a revoked-but-replaced link keeps
+   * the walk going; a revoked link WITHOUT a successor means the session was
+   * ended for real. Depth-capped against pathological cycles.
+   */
+  private async successorChainAlive(firstId: string): Promise<boolean> {
+    let nextId: string | null = firstId;
+    for (let depth = 0; nextId && depth < 10; depth += 1) {
+      const row: RefreshTokenRow | null =
+        await this.refreshTokens.findById(nextId);
+      if (!row) return false;
+      if (row.revokedAt === null) {
+        return row.expiresAt.getTime() > Date.now();
+      }
+      nextId = row.replacedById;
+    }
+    return false;
   }
 
   // ── Logout ───────────────────────────────────────────
@@ -415,6 +495,34 @@ export class AuthService {
     return ok;
   }
 
+  /**
+   * Signs a bare access token for `user`. Shared by `issuePair` (normal mint)
+   * and `healRotationRace` (access-only heal, no rotation).
+   *
+   * Note: @nestjs/jwt v11 narrows `expiresIn` to its `ms`-style template
+   * literal — env-driven strings ('15m', '30d') are valid at runtime but
+   * not statically inferred. Cast through `unknown` to keep strict mode.
+   * `mustChangePassword` is part of the access-token claims so the Next.js
+   * edge middleware can gate the forced-change screen by decoding `mt_access`
+   * alone — without a round-trip to /auth/me. See docs/15-auth-strategy.md
+   * (forced-change gate) and apps/web/middleware.ts.
+   */
+  private async signAccessToken(user: UserRow): Promise<string> {
+    return this.jwt.signAsync(
+      {
+        sub: user.id,
+        role: user.role,
+        mustChangePassword: user.mustChangePassword,
+      },
+      {
+        secret: this.config.get('JWT_ACCESS_SECRET', { infer: true }),
+        expiresIn: this.config.get('JWT_ACCESS_TTL', {
+          infer: true,
+        }) as unknown as number,
+      },
+    );
+  }
+
   private async issuePair(
     user: UserRow,
     opts: IssueOptions,
@@ -422,9 +530,7 @@ export class AuthService {
     const refreshTtlMs = this.parseTtlMs(
       this.config.get('JWT_REFRESH_TTL', { infer: true }),
     );
-    const accessTtl = this.config.get('JWT_ACCESS_TTL', { infer: true });
     const refreshTtl = this.config.get('JWT_REFRESH_TTL', { infer: true });
-    const accessSecret = this.config.get('JWT_ACCESS_SECRET', { infer: true });
     const refreshSecret = this.config.get('JWT_REFRESH_SECRET', {
       infer: true,
     });
@@ -432,24 +538,7 @@ export class AuthService {
     const jti = randomUUID();
     const refreshExpiresAt = new Date(Date.now() + refreshTtlMs);
 
-    // Note: @nestjs/jwt v11 narrows `expiresIn` to its `ms`-style template
-    // literal — env-driven strings ('15m', '30d') are valid at runtime but
-    // not statically inferred. Cast through `unknown` to keep strict mode.
-    // `mustChangePassword` is part of the access-token claims so the Next.js
-    // edge middleware can gate the forced-change screen by decoding `mt_access`
-    // alone — without a round-trip to /auth/me. See docs/15-auth-strategy.md
-    // (forced-change gate) and apps/web/middleware.ts.
-    const accessToken = await this.jwt.signAsync(
-      {
-        sub: user.id,
-        role: user.role,
-        mustChangePassword: user.mustChangePassword,
-      },
-      {
-        secret: accessSecret,
-        expiresIn: accessTtl as unknown as number,
-      },
-    );
+    const accessToken = await this.signAccessToken(user);
     const refreshToken = await this.jwt.signAsync(
       { sub: user.id, jti },
       {

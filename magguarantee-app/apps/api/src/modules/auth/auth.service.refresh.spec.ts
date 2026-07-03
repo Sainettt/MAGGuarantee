@@ -64,7 +64,7 @@ interface Harness {
   svc: AuthService;
   users: jest.Mocked<Pick<UsersService, 'findById'>>;
   refreshTokens: jest.Mocked<
-    Pick<RefreshTokenRepository, 'findByHash' | 'revokeAllForUser'>
+    Pick<RefreshTokenRepository, 'findByHash' | 'findById' | 'revokeAllForUser'>
   >;
   prismaTx: jest.Mock;
 }
@@ -76,6 +76,12 @@ function makeHarness(
     // When set, the issuePair $transaction throws this (simulates the
     // claim-time updateMany losing the race → RefreshReuseError).
     txThrowsReuse?: boolean;
+    // Rows returned by refreshTokens.findById — the `replacedById` successor
+    // chain the benign-race heal walks. Unlisted ids resolve to null.
+    chainRows?: Record<string, RefreshTokenRow>;
+    // What findByHash returns on the SECOND call (the branch-B re-read after
+    // a claim-time RefreshReuseError). Defaults to `storedRow`.
+    reReadRow?: RefreshTokenRow | null;
   } = {},
 ): Harness {
   const user = opts.user === undefined ? makeUser() : opts.user;
@@ -88,8 +94,14 @@ function makeHarness(
 
   const refreshTokens = {
     findByHash: jest.fn(async () => storedRow),
+    findById: jest.fn(async (id: string) => opts.chainRows?.[id] ?? null),
     revokeAllForUser: jest.fn(async () => 2),
   } as unknown as Harness['refreshTokens'];
+  if (opts.reReadRow !== undefined) {
+    refreshTokens.findByHash
+      .mockResolvedValueOnce(storedRow)
+      .mockResolvedValue(opts.reReadRow);
+  }
 
   const mail = {
     enqueue2faCode: jest.fn(async () => undefined),
@@ -164,36 +176,135 @@ describe('AuthService — refresh (rotation race vs theft)', () => {
     jest.useRealTimers();
   });
 
-  it('benign race: revoked within grace AND replacedById set → 401, NO revoke-all', async () => {
+  it('benign race (successor alive): healed with an access-only token — 200, NO rotation, NO revoke-all', async () => {
     const stored = makeRow({
       revokedAt: new Date(NOW.getTime() - 5_000), // 5s ago, well inside grace
       replacedById: 'rt-new',
     });
-    const h = makeHarness({ storedRow: stored });
+    const h = makeHarness({
+      storedRow: stored,
+      chainRows: {
+        'rt-new': makeRow({ id: 'rt-new', tokenHash: 'hash-new' }), // live
+      },
+    });
 
-    await expect(
-      h.svc.refresh('u-1', 'raw-refresh-jwt', {}),
-    ).rejects.toThrow(UnauthorizedException);
-    await expect(
-      h.svc.refresh('u-1', 'raw-refresh-jwt', {}),
-    ).rejects.toThrow('Refresh token already rotated');
+    const { user, tokens } = await h.svc.refresh('u-1', 'raw-refresh-jwt', {});
 
+    expect(tokens.accessToken).toBe('signed.jwt.token');
+    // Access-only: the loser must NOT receive (or overwrite) a refresh cookie.
+    expect('refreshToken' in tokens).toBe(false);
+    expect(user.id).toBe('u-1');
     expect(h.refreshTokens.revokeAllForUser).not.toHaveBeenCalled();
     // No rotation attempted for a token we already know is revoked.
     expect(h.prismaTx).not.toHaveBeenCalled();
   });
 
-  it('benign race at the grace boundary (exactly grace ms) → still benign', async () => {
+  it('benign race at the grace boundary (exactly grace ms) → still healed', async () => {
     const stored = makeRow({
       revokedAt: new Date(NOW.getTime() - REFRESH_ROTATION_GRACE_MS),
       replacedById: 'rt-new',
     });
-    const h = makeHarness({ storedRow: stored });
+    const h = makeHarness({
+      storedRow: stored,
+      chainRows: { 'rt-new': makeRow({ id: 'rt-new' }) },
+    });
+
+    const { tokens } = await h.svc.refresh('u-1', 'raw-refresh-jwt', {});
+    expect('refreshToken' in tokens).toBe(false);
+    expect(h.refreshTokens.revokeAllForUser).not.toHaveBeenCalled();
+  });
+
+  it('benign race but successor revoked WITHOUT replacement (logout raced in) → 401, NO revoke-all, NO heal', async () => {
+    const stored = makeRow({
+      revokedAt: new Date(NOW.getTime() - 5_000),
+      replacedById: 'rt-new',
+    });
+    const h = makeHarness({
+      storedRow: stored,
+      chainRows: {
+        'rt-new': makeRow({
+          id: 'rt-new',
+          revokedAt: new Date(NOW.getTime() - 1_000),
+          replacedById: null, // session ended for real
+        }),
+      },
+    });
 
     await expect(
       h.svc.refresh('u-1', 'raw-refresh-jwt', {}),
     ).rejects.toThrow('Refresh token already rotated');
     expect(h.refreshTokens.revokeAllForUser).not.toHaveBeenCalled();
+  });
+
+  it('benign race but successor row missing → 401, no heal', async () => {
+    const stored = makeRow({
+      revokedAt: new Date(NOW.getTime() - 5_000),
+      replacedById: 'rt-gone',
+    });
+    const h = makeHarness({ storedRow: stored }); // no chainRows → findById null
+
+    await expect(
+      h.svc.refresh('u-1', 'raw-refresh-jwt', {}),
+    ).rejects.toThrow('Refresh token already rotated');
+    expect(h.refreshTokens.revokeAllForUser).not.toHaveBeenCalled();
+  });
+
+  it('benign race, successor itself rotated (chain walk) → healed via the live grandchild', async () => {
+    const stored = makeRow({
+      revokedAt: new Date(NOW.getTime() - 5_000),
+      replacedById: 'rt-new',
+    });
+    const h = makeHarness({
+      storedRow: stored,
+      chainRows: {
+        'rt-new': makeRow({
+          id: 'rt-new',
+          revokedAt: new Date(NOW.getTime() - 2_000),
+          replacedById: 'rt-newer', // rotated again (prefetch → click → nav)
+        }),
+        'rt-newer': makeRow({ id: 'rt-newer' }), // live end of the chain
+      },
+    });
+
+    const { tokens } = await h.svc.refresh('u-1', 'raw-refresh-jwt', {});
+    expect(tokens.accessToken).toBe('signed.jwt.token');
+    expect('refreshToken' in tokens).toBe(false);
+  });
+
+  it('benign race but the live successor is expired → 401, no heal', async () => {
+    const stored = makeRow({
+      revokedAt: new Date(NOW.getTime() - 5_000),
+      replacedById: 'rt-new',
+    });
+    const h = makeHarness({
+      storedRow: stored,
+      chainRows: {
+        'rt-new': makeRow({
+          id: 'rt-new',
+          expiresAt: new Date(NOW.getTime() - 1_000),
+        }),
+      },
+    });
+
+    await expect(
+      h.svc.refresh('u-1', 'raw-refresh-jwt', {}),
+    ).rejects.toThrow('Refresh token already rotated');
+  });
+
+  it('benign race but user deactivated meanwhile → 401, no heal', async () => {
+    const stored = makeRow({
+      revokedAt: new Date(NOW.getTime() - 5_000),
+      replacedById: 'rt-new',
+    });
+    const h = makeHarness({
+      user: makeUser({ active: false }),
+      storedRow: stored,
+      chainRows: { 'rt-new': makeRow({ id: 'rt-new' }) },
+    });
+
+    await expect(
+      h.svc.refresh('u-1', 'raw-refresh-jwt', {}),
+    ).rejects.toThrow('Refresh token already rotated');
   });
 
   it('genuine theft: revoked long ago (outside grace) even with replacedById → revoke-all', async () => {
@@ -222,12 +333,38 @@ describe('AuthService — refresh (rotation race vs theft)', () => {
     expect(h.refreshTokens.revokeAllForUser).toHaveBeenCalledWith('u-1');
   });
 
-  it('claim-time RefreshReuseError (TOCTOU): tx claim loses the race → 401, NO revoke-all', async () => {
+  it('claim-time RefreshReuseError (TOCTOU): re-read shows a live successor → healed access-only, NO revoke-all', async () => {
     // Token reads as LIVE (revokedAt null), so Part A passes; the concurrent
     // rotation is only caught by the atomic claim inside issuePair → Part B.
+    // The re-read then sees the winner's rotation (revokedAt + replacedById).
+    const stored = makeRow({ revokedAt: null, replacedById: null });
+    const h = makeHarness({
+      storedRow: stored,
+      txThrowsReuse: true,
+      reReadRow: makeRow({
+        revokedAt: new Date(NOW.getTime() - 100),
+        replacedById: 'rt-new',
+      }),
+      chainRows: { 'rt-new': makeRow({ id: 'rt-new' }) },
+    });
+
+    const { user, tokens } = await h.svc.refresh('u-1', 'raw-refresh-jwt', {});
+
+    expect(tokens.accessToken).toBe('signed.jwt.token');
+    expect('refreshToken' in tokens).toBe(false);
+    expect(user.id).toBe('u-1');
+    expect(h.prismaTx).toHaveBeenCalled();
+    expect(h.refreshTokens.revokeAllForUser).not.toHaveBeenCalled();
+  });
+
+  it('claim-time RefreshReuseError but re-read shows NO successor (logout raced the claim) → 401, NO revoke-all', async () => {
     const h = makeHarness({
       storedRow: makeRow({ revokedAt: null, replacedById: null }),
       txThrowsReuse: true,
+      reReadRow: makeRow({
+        revokedAt: new Date(NOW.getTime() - 100),
+        replacedById: null, // revoked by logout, not rotation
+      }),
     });
 
     await expect(
@@ -244,6 +381,8 @@ describe('AuthService — refresh (rotation race vs theft)', () => {
 
     const { user, tokens } = await h.svc.refresh('u-1', 'raw-refresh-jwt', {});
 
+    expect('refreshToken' in tokens).toBe(true);
+    if (!('refreshToken' in tokens)) throw new Error('expected a full pair');
     expect(tokens.accessToken).toBe('signed.jwt.token');
     expect(tokens.refreshToken).toBe('signed.jwt.token');
     expect(tokens.refreshTokenId).toBe('rt-new');
