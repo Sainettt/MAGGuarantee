@@ -379,7 +379,18 @@ export function CarrierSheet({
       if (isOpiekunCaller && defaultOpiekunId) {
         form.setValue('opiekunId', defaultOpiekunId, { shouldValidate: false });
       }
+      // The hydrated draft restores the typed NIP, but the lookup-derived
+      // state (validation badges + the multi-account picker under Konto EUR)
+      // was wiped above and only ever comes back through `checkNip`, which is
+      // otherwise wired to NIP blur alone. Re-run it so reopening a draft
+      // doesn't silently lose the account picker.
+      if ((form.getValues('nip') ?? '').trim()) {
+        void checkNip();
+      }
     }
+    // `checkNip` is recreated every render — listing it would re-fire this
+    // effect on each render while the sheet is open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, isEdit, carrier, form, draft, defaultOpiekunId, isOpiekunCaller]);
 
   const createM = useCreateCarrier({
