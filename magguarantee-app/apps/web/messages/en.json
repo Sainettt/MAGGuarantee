@@ -906,7 +906,8 @@
           "secondaryAuthorization": "Authorization",
           "decisionRequired": "Pick a decision to save the claim.",
           "terminalState": "The claim is in a terminal state — no decisions available.",
-          "guaranteeMetHint": "Guarantee met — the claim can only be rejected."
+          "guaranteeMetHint": "Guarantee met — the claim can only be rejected.",
+          "progExceededHint": "Payout exceeds the authorization threshold ({prog} for {days, plural, one {# day} other {# days}} on the road) — Maksim authorization recommended."
         },
         "linkedDelegation": {
           "heading": "Linked trip",
@@ -985,11 +986,12 @@
           "amountMaximumSaved": "Maksim amount saved",
           "kwotaMaksimaLabel": "Maksim amount (EUR)",
           "kwotaMaksimaHelp": "Amount Maksim needs to sign off on. Required, positive, two decimals.",
-          "commentLabel": "Comment (optional)",
+          "commentLabel": "Comment",
           "commentPlaceholder": "Reason for authorization request…",
           "requestButton": "Require authorization",
           "emailSent": "Email sent to Maksim",
-          "alreadyPending": "Claim is already awaiting Maksim's authorization."
+          "alreadyPending": "Claim is already awaiting Maksim's authorization.",
+          "progLine": "Authorization threshold for this claim: {prog}."
         },
         "targetStatus": {
           "ZAAKCEPTOWANO": "Accept",

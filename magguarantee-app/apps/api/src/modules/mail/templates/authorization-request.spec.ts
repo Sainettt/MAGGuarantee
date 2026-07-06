@@ -36,6 +36,8 @@ const FIXTURE: AuthorizationRequestProps = {
   periodFrom: '2026-05-01',
   periodTo: '2026-05-13',
   doplata: '1400.00',
+  prog: '500.00',
+  dniWTrasie: '20.00',
   kwotaMaksima: '1550.50',
   comment: 'Powyżej progu — wymaga zgody Maksima.',
   deeplink: 'http://localhost:3000/employee/claims/GWA%2F042%2F05%2F26',
@@ -55,6 +57,25 @@ describe('AuthorizationRequestEmail', () => {
     expect(html).toContain('WX12345');
     expect(html).toContain('1550.50');
     expect(html).toContain('1400.00');
+  });
+
+  it('renders the SOFT authorization threshold (próg) row', () => {
+    const html = renderHtml(FIXTURE);
+    expect(html).toContain('Próg autoryzacji');
+    expect(html).toContain('500.00');
+  });
+
+  it('renders the Dni w trasie row when supplied and omits it when absent', () => {
+    const withDays = renderHtml(FIXTURE);
+    expect(withDays).toContain('Dni w trasie');
+    expect(withDays).toContain('20.00');
+
+    const props: AuthorizationRequestProps = { ...FIXTURE };
+    delete props.dniWTrasie;
+    const withoutDays = renderHtml(props);
+    expect(withoutDays).not.toContain('Dni w trasie');
+    // The threshold row still renders regardless of the optional trip-length row.
+    expect(withoutDays).toContain('Próg autoryzacji');
   });
 
   it('embeds the deeplink as a clickable anchor target', () => {

@@ -40,6 +40,20 @@ export interface AuthorizationRequestProps {
    * stays pure.
    */
   doplata: string;
+  /**
+   * Authorization threshold (EUR) for this trip length — the SOFT hint from
+   * `getAuthThreshold(drivenDays)` (`Code.gs:5967`). Informational context
+   * only; the system never enforces it. Pre-formatted to a two-decimal string
+   * by the caller so the template stays pure. Legacy showed this as
+   * "Próg autoryzacji: 500 €".
+   */
+  prog: string;
+  /**
+   * Trip length in driven working days (`dni w trasie`). Optional — rendered
+   * only when the caller passes it. Pre-formatted string; matches the legacy
+   * email which listed the trip length alongside the threshold.
+   */
+  dniWTrasie?: string;
   /** Kwota-Maksima override (EUR) — verifier's requested authorization amount. */
   kwotaMaksima: string;
   /** Optional verifier rationale shown above the CTA. */
@@ -126,6 +140,8 @@ export function AuthorizationRequestEmail(
     periodFrom,
     periodTo,
     doplata,
+    prog,
+    dniWTrasie,
     kwotaMaksima,
     comment,
     deeplink,
@@ -166,8 +182,18 @@ export function AuthorizationRequestEmail(
               {periodFrom} → {periodTo}
             </Text>
 
+            {dniWTrasie ? (
+              <>
+                <Text style={labelStyle}>Dni w trasie</Text>
+                <Text style={valueStyle}>{dniWTrasie}</Text>
+              </>
+            ) : null}
+
             <Text style={labelStyle}>Dopłata (kwota wnioskowana)</Text>
             <Text style={valueStyle}>{doplata} EUR</Text>
+
+            <Text style={labelStyle}>Próg autoryzacji</Text>
+            <Text style={valueStyle}>{prog} EUR</Text>
           </Section>
 
           <Hr style={{ borderColor: border, margin: 0 }} />

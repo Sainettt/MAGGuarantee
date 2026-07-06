@@ -6,10 +6,10 @@ import type { Env } from '../../../config/env.schema';
 /**
  * Google Chat wyjazd-notification config.
  *
- * Reads `GOOGLE_CHAT_WYJAZD_WEBHOOK_URL` from env. Mirrors the optional-secret
- * precedent in `modules/claims/maksim.config.ts` (typed accessor, no stringly
- * env reads scattered through the feature code) — but here the value is a
- * SECRET webhook URL, so it lives in env rather than as a source constant.
+ * Reads `GOOGLE_CHAT_WYJAZD_WEBHOOK_URL` from env via a typed accessor (no
+ * stringly env reads scattered through the feature code) — the same pattern the
+ * claims service uses for the validated `MAKSIM_EMAIL` recipient. Here the value
+ * is a SECRET webhook URL, so it stays optional (empty in dev/test/Mailhog).
  *
  * When the URL is unset (dev / test / Mailhog), `enabled` is `false` and the
  * chat processor no-ops silently — see docs/16-jobs-and-integrations.md

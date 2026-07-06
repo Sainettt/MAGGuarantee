@@ -877,10 +877,16 @@ export class MailService implements IMailService {
       `Przewoźnik:    ${props.carrierName}`,
       `Pojazd:        ${props.vehiclePlate}`,
       `Okres:         ${props.periodFrom} → ${props.periodTo}`,
+    ];
+    if (props.dniWTrasie) {
+      lines.push(`Dni w trasie:  ${props.dniWTrasie}`);
+    }
+    lines.push(
       `Dopłata:       ${props.doplata} EUR`,
+      `Próg autoryz.: ${props.prog} EUR`,
       ``,
       `Kwota Maksima do autoryzacji: ${props.kwotaMaksima} EUR`,
-    ];
+    );
     if (props.comment) {
       lines.push('', `Komentarz weryfikatora:`, props.comment);
     }

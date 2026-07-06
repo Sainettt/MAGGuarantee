@@ -267,8 +267,10 @@ export type PreviewClaimDto = z.infer<typeof PreviewClaimSchema>;
  *  - `kwotaMaksima` — verifier-requested authorization amount in EUR. Stored
  *    verbatim into `Claim.amountMaximum` (Decimal(12,2)). Must be positive
  *    and a multiple of 0.01 so the Decimal column round-trips cleanly.
- *  - `comment` — optional rationale shown in the email body and persisted
- *    into `Claim.authorizationDescription`.
+ *  - `comment` — REQUIRED rationale ("opis sprawy") shown in the email body
+ *    to Maksim and persisted into `Claim.authorizationDescription`. Trimmed,
+ *    non-empty, max 2 000 chars. `RequestAuthorizationDto.comment` is `string`
+ *    (never `undefined`) — the caller MUST provide a description.
  *
  * The PATCH /claims/:nrZgl path also accepts an optional `amountMaximum`
  * field for the accepted-status branch. The PATCH variant is for *direct
@@ -278,9 +280,7 @@ export type PreviewClaimDto = z.infer<typeof PreviewClaimSchema>;
 export const RequestAuthorizationSchema = z
   .object({
     kwotaMaksima: z.number().positive().multipleOf(0.01).max(9_999_999),
-    comment: emptyStringToUndefined(
-      z.string().trim().min(1).max(2_000).optional(),
-    ),
+    comment: z.string().trim().min(1).max(2_000),
   })
   .strict();
 export type RequestAuthorizationDto = z.infer<typeof RequestAuthorizationSchema>;

@@ -9,3 +9,4 @@ export * from './km-calc';
 export * from './claim-submission-rules';
 export * from './polish-calendar';
 export * from './business-date';
+export * from './auth-threshold';

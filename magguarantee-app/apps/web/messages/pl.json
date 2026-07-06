@@ -906,7 +906,8 @@
           "secondaryAuthorization": "Autoryzacja",
           "decisionRequired": "Wybierz decyzję, aby zapisać wniosek.",
           "terminalState": "Wniosek jest w stanie końcowym — brak dostępnych decyzji.",
-          "guaranteeMetHint": "Gwarancja wyjeżdżona — wniosek można tylko odrzucić."
+          "guaranteeMetHint": "Gwarancja wyjeżdżona — wniosek można tylko odrzucić.",
+          "progExceededHint": "Dopłata przekracza próg autoryzacji ({prog} przy {days, plural, one {# dniu} few {# dniach} many {# dniach} other {# dnia}} w trasie) — zalecana autoryzacja Maksima."
         },
         "linkedDelegation": {
           "heading": "Powiązany wyjazd",
@@ -985,11 +986,12 @@
           "amountMaximumSaved": "Kwota Maksima zapisana",
           "kwotaMaksimaLabel": "Kwota Maksima (EUR)",
           "kwotaMaksimaHelp": "Kwota, na którą Maksim ma się zgodzić. Wymagana, dodatnia, z dokładnością do 0.01 EUR.",
-          "commentLabel": "Komentarz (opcjonalnie)",
+          "commentLabel": "Komentarz",
           "commentPlaceholder": "Powód wniosku o autoryzację…",
           "requestButton": "Wymaga autoryzacji",
           "emailSent": "Email wysłany do Maksima",
-          "alreadyPending": "Wniosek już oczekuje na autoryzację Maksima."
+          "alreadyPending": "Wniosek już oczekuje na autoryzację Maksima.",
+          "progLine": "Próg autoryzacji dla tego wniosku: {prog}."
         },
         "targetStatus": {
           "ZAAKCEPTOWANO": "Zaakceptuj",

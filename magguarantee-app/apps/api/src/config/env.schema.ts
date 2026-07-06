@@ -49,6 +49,12 @@ export const envSchema = z.object({
   MAIL_SMTP_HOST: z.string().default('localhost'),
   MAIL_SMTP_PORT: z.coerce.number().int().positive().default(1025),
   MAIL_FROM: z.string().default('no-reply@magtrans.eu'),
+  // Recipient of kwota-Maksima authorization requests
+  // (`POST /claims/:nrZgl/request-authorization`). Default = the production
+  // director address; override on dev/staging stands so test clicks don't
+  // email the real director. Phase 9 may move this to AppConfig (admin-editable
+  // without redeploy) — see docs/16-jobs-and-integrations.md.
+  MAKSIM_EMAIL: z.string().email().default('maksim.siankevich@magtrans.eu'),
 
   // ── Gmail API (production provider — OAuth 2.0) ─────────
   // Production sends via the Gmail API authenticated as ONE Workspace mailbox

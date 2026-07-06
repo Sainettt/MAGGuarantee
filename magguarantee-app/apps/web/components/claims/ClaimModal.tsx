@@ -28,7 +28,7 @@
 // the layout order change.
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Loader2, Lock, Pencil } from 'lucide-react';
+import { AlertTriangle, Loader2, Lock, Pencil } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
@@ -43,6 +43,7 @@ import { toast } from 'sonner';
 import {
   RequestAuthorizationSchema,
   UpdateClaimSchema,
+  getAuthThreshold,
   isCompensationDue,
   type ClaimDto,
   type KmCalcBreakdown,
@@ -380,6 +381,20 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
   const liveDoplata =
     previewQ.data?.paymentEur ?? claim.paymentEur;
 
+  // ── Próg autoryzacji — SOFT INFORMATIONAL hint (docs/01, getAuthThreshold) ──
+  // Tracks the live recalc: dni jezdne come from the previewed breakdown when
+  // available, else the persisted `claim.drivenDays`. Nothing here gates or
+  // disables the decision/authorization actions — the legacy app never
+  // enforced this threshold either; it only surfaced it as context. The
+  // exceeds-hint additionally requires the claim to still be pre-decision
+  // (NA_WERYFIKACJI) so it disappears once a decision/authorization is in play.
+  const liveDrivenDays =
+    previewQ.data?.breakdown?.totalDays ?? claim.drivenDays;
+  const prog = getAuthThreshold(liveDrivenDays);
+  const exceedsProg = liveDoplata > prog;
+  const showExceedsHint =
+    exceedsProg && claim.status === 'NA_WERYFIKACJI';
+
   // ── Live hours readout source (§6.5.4 / Phase 3.1) ──
   // The edit-mode HoursReadout must reflect the verifier's CURRENT working
   // times — the same numbers that drive the live dopłata. `previewQ.data`
@@ -552,6 +567,9 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
           claim={claim}
           recalcState={recalcState}
           liveDoplata={liveDoplata}
+          prog={prog}
+          liveDrivenDays={liveDrivenDays}
+          showExceedsHint={showExceedsHint}
           tUnified={tUnified}
         />
 
@@ -597,6 +615,7 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
           claim={claim}
           hasHistory={hasHistory}
           hasAuthorization={hasAuthorization}
+          prog={prog}
           onClose={onClose}
         />
       </div>
@@ -1085,11 +1104,20 @@ function DoplataBlock({
   claim,
   recalcState,
   liveDoplata,
+  prog,
+  liveDrivenDays,
+  showExceedsHint,
   tUnified,
 }: {
   claim: ClaimDto;
   recalcState: 'idle' | 'loading' | 'success' | 'error';
   liveDoplata: number;
+  /** Live authorization threshold (EUR) for this claim's driven-days band. */
+  prog: number;
+  /** Driven working days the threshold band is derived from (for the hint). */
+  liveDrivenDays: number;
+  /** `true` when dopłata > próg AND the claim is still pre-decision. */
+  showExceedsHint: boolean;
   tUnified: ReturnType<typeof useTranslations<'employee.claims.modal.unified'>>;
 }) {
   const tEdit = useTranslations('employee.claims.modal.edit');
@@ -1128,6 +1156,25 @@ function DoplataBlock({
         <Lock aria-hidden className="size-3 shrink-0" />
         {tEdit('amountApprovedAuto')}
       </FormDescription>
+
+      {/* Soft próg-autoryzacji hint — informational only, never blocks
+          (matches legacy). Shown when the live dopłata exceeds the threshold
+          for this claim's driven-days band AND the claim is still
+          pre-decision. */}
+      {showExceedsHint && (
+        <p
+          role="status"
+          className="flex items-start gap-2 rounded-md bg-warning-bg px-3 py-2 text-sm text-warning-dark dark:bg-warning/15 dark:text-warning"
+        >
+          <AlertTriangle size={15} aria-hidden className="mt-0.5 shrink-0" />
+          <span>
+            {tUnified('progExceededHint', {
+              prog: formatEur(prog),
+              days: Math.max(0, Math.round(liveDrivenDays)),
+            })}
+          </span>
+        </p>
+      )}
 
       {claim.breakdown && (
         <div className="pt-1">
@@ -1367,11 +1414,14 @@ function SecondaryPanel({
   claim,
   hasHistory,
   hasAuthorization,
+  prog,
   onClose,
 }: {
   claim: ClaimDto;
   hasHistory: boolean;
   hasAuthorization: boolean;
+  /** Live authorization threshold (EUR), surfaced in the request form. */
+  prog: number;
   onClose: () => void;
 }) {
   const t = useTranslations('employee.claims.modal.unified');
@@ -1395,7 +1445,7 @@ function SecondaryPanel({
         <h3 className="text-xs font-bold uppercase tracking-wider text-text-sub">
           {t('secondaryAuthorization')}
         </h3>
-        <AuthorizationSection claim={claim} onClose={onClose} />
+        <AuthorizationSection claim={claim} prog={prog} onClose={onClose} />
       </section>
     );
   }
@@ -1414,7 +1464,7 @@ function SecondaryPanel({
           <HistorySection claim={claim} />
         </TabsContent>
         <TabsContent value="authorization">
-          <AuthorizationSection claim={claim} onClose={onClose} />
+          <AuthorizationSection claim={claim} prog={prog} onClose={onClose} />
         </TabsContent>
       </Tabs>
     </section>
@@ -1566,9 +1616,12 @@ const AUTH_COMMENT_MAX = 2_000;
 
 function AuthorizationSection({
   claim,
+  prog,
   onClose,
 }: {
   claim: ClaimDto;
+  /** Live authorization threshold (EUR) surfaced in the request form. */
+  prog: number;
   onClose: () => void;
 }) {
   const t = useTranslations('employee.claims.modal.auth');
@@ -1613,6 +1666,7 @@ function AuthorizationSection({
   return (
     <RequestAuthorizationForm
       claim={claim}
+      prog={prog}
       onClose={onClose}
       t={t}
       tCommon={tCommon}
@@ -1622,11 +1676,14 @@ function AuthorizationSection({
 
 function RequestAuthorizationForm({
   claim,
+  prog,
   onClose,
   t,
   tCommon,
 }: {
   claim: ClaimDto;
+  /** Live authorization threshold (EUR) for this claim's driven-days band. */
+  prog: number;
   onClose: () => void;
   t: ReturnType<typeof useTranslations<'employee.claims.modal.auth'>>;
   tCommon: ReturnType<typeof useTranslations<'common'>>;
@@ -1671,10 +1728,14 @@ function RequestAuthorizationForm({
     if (values.kwotaMaksima == null || !Number.isFinite(values.kwotaMaksima)) {
       return;
     }
+    // zodResolver returns the TRANSFORMED values, so by the time `onValid`
+    // runs `values.comment` is already a non-empty, trimmed string — the
+    // schema's `.trim().min(1)` blocks empty comments BEFORE this callback and
+    // surfaces the (localized) required error at the FormField. No `|| undefined`
+    // dance: `RequestAuthorizationDto.comment` is a required `string`.
     const body: RequestAuthorizationDto = {
       kwotaMaksima: Number(values.kwotaMaksima),
-      comment:
-        values.comment.trim().length > 0 ? values.comment.trim() : undefined,
+      comment: values.comment,
     };
     void requestM.mutateAsync(body).catch(() => {
       // Error surfaced via onError — swallow to avoid unhandled rejection.
@@ -1701,6 +1762,10 @@ function RequestAuthorizationForm({
           {t('requestTitle')}
         </h4>
         <p className="text-xs text-text-sub">{t('requestHelp')}</p>
+        {/* Always-visible informational threshold line (soft hint, no gate). */}
+        <p className="text-xs text-text-sub tabular-nums">
+          {t('progLine', { prog: formatEur(prog) })}
+        </p>
       </div>
 
       <FormField
@@ -1724,6 +1789,7 @@ function RequestAuthorizationForm({
 
       <FormField
         label={t('commentLabel')}
+        required
         error={errMsg('comment')}
         htmlFor={`${fieldId}-comment`}
       >

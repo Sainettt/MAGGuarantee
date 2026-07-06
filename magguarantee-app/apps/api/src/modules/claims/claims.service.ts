@@ -33,6 +33,7 @@ import {
   cooldownCheck,
   DEFAULTS as CARRIER_SUBMISSION_DEFAULTS,
   DELEGATION_NOT_YET_RETURNED_WARNING,
+  getAuthThreshold,
   isCompensationDue,
   startOfBusinessTodayUtc,
   VEHICLE_NOT_GUARANTEED,
@@ -62,7 +63,6 @@ import {
   type TransactionLike,
   type UpdateClaimData,
 } from './claims.repository';
-import { MAKSIM_EMAIL } from './maksim.config';
 import { NrZglService } from './nr-zgl.service';
 
 /** AppConfig keys this service consults. */
@@ -861,7 +861,7 @@ export class ClaimsService {
    *        - status            = OCZEKUJE_NA_AUTORYZACJE
    *        - authorizationToken= <new uuid>
    *        - authorizationRequired = true
-   *        - authorizationDescription = comment ?? null
+   *        - authorizationDescription = comment (required, non-empty)
    *        - amountMaximum     = kwotaMaksima
    *        - statusChangedAt   = now
    *        - decidedById       = caller (so the audit trail knows who flagged)
@@ -889,7 +889,9 @@ export class ClaimsService {
 
     const now = new Date();
     const token = randomUUID();
-    const description = dto.comment ?? null;
+    // `comment` is REQUIRED at the schema level (RequestAuthorizationSchema),
+    // so the DTO always carries a trimmed non-empty string here.
+    const description = dto.comment;
 
     const patch: UpdateClaimData = {
       status: 'OCZEKUJE_NA_AUTORYZACJE',
@@ -928,8 +930,9 @@ export class ClaimsService {
    * formats EUR amounts to two decimals, and constructs the deeplink against
    * `APP_URL` (the env value that points at the web front-end).
    *
-   * The MAGTRANS recipient (`MAKSIM_EMAIL`) is hardcoded per Phase 4.2
-   * acceptance — Phase 9 will move it to AppConfig.
+   * The MAGTRANS recipient (`MAKSIM_EMAIL`) is read from validated env — default
+   * is the production director address; dev/staging override it so test clicks
+   * don't email the real director. Phase 9 may move it to AppConfig.
    */
   private async _dispatchAuthorizationEmail(
     row: ClaimRow,
@@ -948,20 +951,33 @@ export class ClaimsService {
     const appUrl =
       this.configService?.get('APP_URL', { infer: true }) ??
       'http://localhost:3000';
+    // configService is optional in unit-test construction — keep the default
+    // fallback (same as the validated env default) so tests without a stub
+    // still resolve a valid recipient.
+    const maksimEmail =
+      this.configService?.get('MAKSIM_EMAIL', { infer: true }) ??
+      'maksim.siankevich@magtrans.eu';
     const carrierName = await this._resolveCarrierDisplayName(row.carrierId);
     const periodFrom = row.dateStart.toISOString().slice(0, 10);
     const periodTo = row.dateEnd.toISOString().slice(0, 10);
     const doplata = row.amountRequested.toFixed(2);
     const kwotaMaksima = dto.kwotaMaksima.toFixed(2);
+    // SOFT authorization-threshold hint (`Code.gs:5967`) — informational
+    // context in the email only, never enforced on accept. Pre-formatted like
+    // the sibling amounts so the template stays pure.
+    const prog = getAuthThreshold(row.drivenDays).toFixed(2);
+    const dniWTrasie = row.drivenDays.toFixed(2);
     const deeplink = `${appUrl.replace(/\/$/, '')}/employee/claims/${encodeURIComponent(row.nrZgl)}`;
 
-    await this.mailService.enqueueAuthorizationRequest(MAKSIM_EMAIL, {
+    await this.mailService.enqueueAuthorizationRequest(maksimEmail, {
       nrZgl: row.nrZgl,
       carrierName,
       vehiclePlate: row.vehiclePlateSnapshot,
       periodFrom,
       periodTo,
       doplata,
+      prog,
+      dniWTrasie,
       kwotaMaksima,
       comment: dto.comment,
       deeplink,

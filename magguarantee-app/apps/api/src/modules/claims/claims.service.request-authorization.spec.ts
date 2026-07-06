@@ -42,10 +42,15 @@ import type {
   ClaimsRepository,
   UpdateClaimData,
 } from './claims.repository';
-import { MAKSIM_EMAIL } from './maksim.config';
 import type { NrZglService } from './nr-zgl.service';
 
 // ─── helpers ─────────────────────────────────────────────────
+
+// Recipient of kwota-Maksima authorization requests. Now sourced from the
+// validated `MAKSIM_EMAIL` env var (default = production director address);
+// the config stub below returns this so we assert against the literal, the
+// same way `APP_URL` is stubbed and checked.
+const MAKSIM_EMAIL = 'maksim.siankevich@magtrans.eu';
 
 const NOW = new Date('2026-05-15T10:00:00.000Z');
 
@@ -235,12 +240,16 @@ function makeMailService(throwOnNext = false): MailFake {
   return fake;
 }
 
-function makeConfigService(appUrl = 'http://localhost:3000'): ConfigService<
-  Env,
-  true
-> {
+function makeConfigService(
+  appUrl = 'http://localhost:3000',
+  maksimEmail = MAKSIM_EMAIL,
+): ConfigService<Env, true> {
   return {
-    get: jest.fn((key: string) => (key === 'APP_URL' ? appUrl : undefined)),
+    get: jest.fn((key: string) => {
+      if (key === 'APP_URL') return appUrl;
+      if (key === 'MAKSIM_EMAIL') return maksimEmail;
+      return undefined;
+    }),
   } as unknown as ConfigService<Env, true>;
 }
 
@@ -360,6 +369,8 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
       nrZgl: string;
       kwotaMaksima: string;
       doplata: string;
+      prog: string;
+      dniWTrasie?: string;
       deeplink: string;
       comment?: string;
       carrierName: string;
@@ -367,6 +378,10 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
     expect(props.nrZgl).toBe('GWA/001/04/26');
     expect(props.kwotaMaksima).toBe('1550.50');
     expect(props.doplata).toBe('1400.00');
+    // SOFT authorization-threshold hint: drivenDays=20 → 16–30 band → 500 EUR
+    // (Code.gs:5967). Pre-formatted to two decimals like the sibling amounts.
+    expect(props.prog).toBe('500.00');
+    expect(props.dniWTrasie).toBe('20.00');
     expect(props.deeplink).toBe(
       'http://localhost:3000/employee/claims/GWA%2F001%2F04%2F26',
     );
@@ -385,6 +400,7 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
     await expect(
       svc.requestAuthorization(makeAuth('pracownik'), seeded.nrZgl, {
         kwotaMaksima: 1_500,
+        comment: 'Opis sprawy dla Maksima.',
       }),
     ).rejects.toThrow(UnprocessableEntityException);
 
@@ -402,6 +418,7 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
     await expect(
       svc.requestAuthorization(makeAuth('admin'), seeded.nrZgl, {
         kwotaMaksima: 1_500,
+        comment: 'Opis sprawy dla Maksima.',
       }),
     ).rejects.toThrow(UnprocessableEntityException);
 
@@ -418,6 +435,7 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
     await expect(
       svc.requestAuthorization(makeAuth('pracownik'), 'GWA/999/04/26', {
         kwotaMaksima: 1_500,
+        comment: 'Opis sprawy dla Maksima.',
       }),
     ).rejects.toThrow(NotFoundException);
 
@@ -425,7 +443,7 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
     expect(mail.calls).toHaveLength(0);
   });
 
-  it('5. optional `comment` omitted → authorizationDescription = null, email comment undefined', async () => {
+  it('5. required `comment` persisted into authorizationDescription; carrier name=null falls back to login', async () => {
     const seeded = makeClaim();
     const repoFake = makeClaimsRepo([seeded]);
     const mail = makeMailService();
@@ -437,14 +455,14 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
     const result = await svc.requestAuthorization(
       makeAuth('admin'),
       seeded.nrZgl,
-      { kwotaMaksima: 2_000 },
+      { kwotaMaksima: 2_000, comment: 'Uzasadnienie doplaty.' },
     );
 
-    expect(result.authorizationDescription).toBeNull();
+    expect(result.authorizationDescription).toBe('Uzasadnienie doplaty.');
     const patch = repoFake.updateWithinCalls[0]!.data;
-    expect(patch.authorizationDescription).toBeNull();
+    expect(patch.authorizationDescription).toBe('Uzasadnienie doplaty.');
 
-    // Carrier fallback: name=null → login is used in the email
+    // Carrier fallback: name=null → login is used in the email; comment carried
     await Promise.resolve();
     await Promise.resolve();
     expect(mail.calls).toHaveLength(1);
@@ -453,7 +471,7 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
       comment?: string;
     };
     expect(props.carrierName).toBe('pwz1');
-    expect(props.comment).toBeUndefined();
+    expect(props.comment).toBe('Uzasadnienie doplaty.');
   });
 
   it('6. mail send failure does NOT roll back the row update (fire-and-log)', async () => {
@@ -468,7 +486,7 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
     const result = await svc.requestAuthorization(
       makeAuth('pracownik'),
       seeded.nrZgl,
-      { kwotaMaksima: 1_500 },
+      { kwotaMaksima: 1_500, comment: 'Opis sprawy dla Maksima.' },
     );
 
     expect(result.status).toBe('OCZEKUJE_NA_AUTORYZACJE');
@@ -489,7 +507,7 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
     const result = await svc.requestAuthorization(
       makeAuth('pracownik'),
       seeded.nrZgl,
-      { kwotaMaksima: 1_500 },
+      { kwotaMaksima: 1_500, comment: 'Opis sprawy dla Maksima.' },
     );
 
     expect(result.status).toBe('OCZEKUJE_NA_AUTORYZACJE');
