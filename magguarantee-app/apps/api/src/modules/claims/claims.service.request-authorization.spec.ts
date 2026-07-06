@@ -3,7 +3,9 @@
 // Covers the Maksim authorization handshake:
 //   - status transition NA_WERYFIKACJI → OCZEKUJE_NA_AUTORYZACJE,
 //   - authorizationToken (UUID v4) mint,
-//   - amountMaximum + authorizationDescription persistence,
+//   - authorizationDescription persistence (the request carries NO amount —
+//     `amountMaximum` stays untouched; it is recorded later via
+//     `setAuthorizationAmount` once Maksim replies),
 //   - audit `before` snapshot pushed into the ambient AuditContext,
 //   - email dispatch via MailService.sendAuthorizationRequest()
 //     (fire-and-log — failure inside the email send does NOT roll back the
@@ -20,6 +22,7 @@ import type {
   ClaimStatus,
   KmCalcBreakdown,
   RequestAuthorizationDto,
+  SetAuthorizationAmountDto,
 } from '@magguarantee/shared';
 
 import {
@@ -318,7 +321,7 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
     jest.useRealTimers();
   });
 
-  it('1. happy path NA_WERYFIKACJI → OCZEKUJE_NA_AUTORYZACJE persists token + kwotaMaksima + description', async () => {
+  it('1. happy path NA_WERYFIKACJI → OCZEKUJE_NA_AUTORYZACJE persists token + description, leaves amountMaximum untouched', async () => {
     const seeded = makeClaim();
     const repoFake = makeClaimsRepo([seeded]);
     const mail = makeMailService();
@@ -329,7 +332,6 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
     const svc = makeService(repoFake, mail.svc, prisma, config);
 
     const dto: RequestAuthorizationDto = {
-      kwotaMaksima: 1_550.5,
       comment: 'Powyżej progu — wymaga zgody Maksima.',
     };
 
@@ -338,7 +340,9 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
     );
 
     expect(result.status).toBe('OCZEKUJE_NA_AUTORYZACJE');
-    expect(result.amountMaximum).toBe(1_550.5);
+    // The request carries NO amount — `amountMaximum` stays whatever it was
+    // (null on a fresh claim); it is recorded later via setAuthorizationAmount.
+    expect(result.amountMaximum).toBeNull();
     expect(result.authorizationRequired).toBe(true);
     expect(result.authorizationDescription).toBe(
       'Powyżej progu — wymaga zgody Maksima.',
@@ -353,7 +357,8 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
     expect(patch.status).toBe('OCZEKUJE_NA_AUTORYZACJE');
     expect(patch.authorizationRequired).toBe(true);
     expect(patch.authorizationToken).toEqual(result.authorizationToken);
-    expect(patch.amountMaximum).toBe(1_550.5);
+    // The request patch must NOT touch amountMaximum.
+    expect(patch.amountMaximum).toBeUndefined();
     expect(patch.decidedById).toBe('u-actor');
 
     // audit `before` snapshot in the ambient store — interceptor commits this
@@ -367,7 +372,7 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
     expect(mail.calls[0]!.to).toBe(MAKSIM_EMAIL);
     const props = mail.calls[0]!.props as {
       nrZgl: string;
-      kwotaMaksima: string;
+      kwotaMaksima?: string;
       doplata: string;
       prog: string;
       dniWTrasie?: string;
@@ -376,7 +381,8 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
       carrierName: string;
     };
     expect(props.nrZgl).toBe('GWA/001/04/26');
-    expect(props.kwotaMaksima).toBe('1550.50');
+    // No amount is enqueued for the request email.
+    expect(props.kwotaMaksima).toBeUndefined();
     expect(props.doplata).toBe('1400.00');
     // SOFT authorization-threshold hint: drivenDays=20 → 16–30 band → 500 EUR
     // (Code.gs:5967). Pre-formatted to two decimals like the sibling amounts.
@@ -399,7 +405,6 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
 
     await expect(
       svc.requestAuthorization(makeAuth('pracownik'), seeded.nrZgl, {
-        kwotaMaksima: 1_500,
         comment: 'Opis sprawy dla Maksima.',
       }),
     ).rejects.toThrow(UnprocessableEntityException);
@@ -417,7 +422,6 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
 
     await expect(
       svc.requestAuthorization(makeAuth('admin'), seeded.nrZgl, {
-        kwotaMaksima: 1_500,
         comment: 'Opis sprawy dla Maksima.',
       }),
     ).rejects.toThrow(UnprocessableEntityException);
@@ -434,7 +438,6 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
 
     await expect(
       svc.requestAuthorization(makeAuth('pracownik'), 'GWA/999/04/26', {
-        kwotaMaksima: 1_500,
         comment: 'Opis sprawy dla Maksima.',
       }),
     ).rejects.toThrow(NotFoundException);
@@ -455,7 +458,7 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
     const result = await svc.requestAuthorization(
       makeAuth('admin'),
       seeded.nrZgl,
-      { kwotaMaksima: 2_000, comment: 'Uzasadnienie doplaty.' },
+      { comment: 'Uzasadnienie doplaty.' },
     );
 
     expect(result.authorizationDescription).toBe('Uzasadnienie doplaty.');
@@ -486,7 +489,7 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
     const result = await svc.requestAuthorization(
       makeAuth('pracownik'),
       seeded.nrZgl,
-      { kwotaMaksima: 1_500, comment: 'Opis sprawy dla Maksima.' },
+      { comment: 'Opis sprawy dla Maksima.' },
     );
 
     expect(result.status).toBe('OCZEKUJE_NA_AUTORYZACJE');
@@ -507,11 +510,148 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
     const result = await svc.requestAuthorization(
       makeAuth('pracownik'),
       seeded.nrZgl,
-      { kwotaMaksima: 1_500, comment: 'Opis sprawy dla Maksima.' },
+      { comment: 'Opis sprawy dla Maksima.' },
     );
 
     expect(result.status).toBe('OCZEKUJE_NA_AUTORYZACJE');
     expect(repoFake.updateWithinCalls).toHaveLength(1);
+  });
+});
+
+// ─── setAuthorizationAmount — records Maksim's replied amount ───
+//
+// The kwota-Maksima is recorded AFTER Maksim's email reply, while the claim
+// sits in OCZEKUJE_NA_AUTORYZACJE. Pure amount write onto Claim.amountMaximum:
+// no status change, no token, no email. Repeat calls overwrite (corrections).
+
+describe('ClaimsService.setAuthorizationAmount — Phase 4.2 (kwota follow-up)', () => {
+  beforeAll(() => {
+    jest.useFakeTimers().setSystemTime(NOW);
+  });
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
+  it('happy path: pending claim → writes amountMaximum + audit before/after, no email', async () => {
+    const seeded = makeClaim({ status: 'OCZEKUJE_NA_AUTORYZACJE' });
+    const repoFake = makeClaimsRepo([seeded]);
+    const mail = makeMailService();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, mail.svc, prisma, makeConfigService());
+
+    const dto: SetAuthorizationAmountDto = { kwotaMaksima: 1_550.5 };
+
+    const { result, store } = await withAuditContext(() =>
+      svc.setAuthorizationAmount(makeAuth('pracownik'), seeded.nrZgl, dto),
+    );
+
+    expect(result.amountMaximum).toBe(1_550.5);
+    // Status is unchanged — this is a pure amount record.
+    expect(result.status).toBe('OCZEKUJE_NA_AUTORYZACJE');
+
+    expect(repoFake.updateWithinCalls).toHaveLength(1);
+    const patch = repoFake.updateWithinCalls[0]!.data;
+    expect(patch.amountMaximum).toBe(1_550.5);
+    // No status / token churn on this path.
+    expect(patch.status).toBeUndefined();
+    expect(patch.authorizationToken).toBeUndefined();
+
+    // audit `before` captures the pre-mutation amountMaximum (null on seed)
+    const before = store.before as {
+      amountMaximum: number | null;
+      status: ClaimStatus;
+    };
+    expect(before.amountMaximum).toBeNull();
+    expect(before.status).toBe('OCZEKUJE_NA_AUTORYZACJE');
+
+    // No email is dispatched on the amount-record path.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mail.calls).toHaveLength(0);
+  });
+
+  it('404: unknown claim throws NotFoundException, no writes', async () => {
+    const repoFake = makeClaimsRepo([]);
+    const prisma = makePrismaService();
+    const svc = makeService(
+      repoFake,
+      makeMailService().svc,
+      prisma,
+      makeConfigService(),
+    );
+
+    await expect(
+      svc.setAuthorizationAmount(makeAuth('pracownik'), 'GWA/999/04/26', {
+        kwotaMaksima: 1_200,
+      }),
+    ).rejects.toThrow(NotFoundException);
+
+    expect(repoFake.updateWithinCalls).toHaveLength(0);
+  });
+
+  it('422: claim on NA_WERYFIKACJI (not pending) throws, no writes', async () => {
+    const seeded = makeClaim({ status: 'NA_WERYFIKACJI' });
+    const repoFake = makeClaimsRepo([seeded]);
+    const prisma = makePrismaService();
+    const svc = makeService(
+      repoFake,
+      makeMailService().svc,
+      prisma,
+      makeConfigService(),
+    );
+
+    await expect(
+      svc.setAuthorizationAmount(makeAuth('pracownik'), seeded.nrZgl, {
+        kwotaMaksima: 1_200,
+      }),
+    ).rejects.toThrow(UnprocessableEntityException);
+
+    expect(repoFake.updateWithinCalls).toHaveLength(0);
+  });
+
+  it('422: claim already ZAAKCEPTOWANO throws, no writes', async () => {
+    const seeded = makeClaim({ status: 'ZAAKCEPTOWANO', amountMaximum: 1_500 });
+    const repoFake = makeClaimsRepo([seeded]);
+    const prisma = makePrismaService();
+    const svc = makeService(
+      repoFake,
+      makeMailService().svc,
+      prisma,
+      makeConfigService(),
+    );
+
+    await expect(
+      svc.setAuthorizationAmount(makeAuth('admin'), seeded.nrZgl, {
+        kwotaMaksima: 1_650,
+      }),
+    ).rejects.toThrow(UnprocessableEntityException);
+
+    expect(repoFake.updateWithinCalls).toHaveLength(0);
+  });
+
+  it('repeat call overwrites the previously-recorded amountMaximum', async () => {
+    const seeded = makeClaim({
+      status: 'OCZEKUJE_NA_AUTORYZACJE',
+      amountMaximum: 1_400,
+    });
+    const repoFake = makeClaimsRepo([seeded]);
+    const prisma = makePrismaService();
+    const svc = makeService(
+      repoFake,
+      makeMailService().svc,
+      prisma,
+      makeConfigService(),
+    );
+
+    const { result } = await withAuditContext(() =>
+      svc.setAuthorizationAmount(makeAuth('pracownik'), seeded.nrZgl, {
+        kwotaMaksima: 1_650,
+      }),
+    );
+
+    expect(result.amountMaximum).toBe(1_650);
+    expect(repoFake.updateWithinCalls).toHaveLength(1);
+    expect(repoFake.updateWithinCalls[0]!.data.amountMaximum).toBe(1_650);
   });
 });
 

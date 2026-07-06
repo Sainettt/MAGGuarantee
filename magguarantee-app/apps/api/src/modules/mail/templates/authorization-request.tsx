@@ -54,8 +54,6 @@ export interface AuthorizationRequestProps {
    * email which listed the trip length alongside the threshold.
    */
   dniWTrasie?: string;
-  /** Kwota-Maksima override (EUR) — verifier's requested authorization amount. */
-  kwotaMaksima: string;
   /** Optional verifier rationale shown above the CTA. */
   comment?: string;
   /** Full URL pointing at the claim detail page (already includes APP_URL). */
@@ -112,13 +110,6 @@ const valueStyle: React.CSSProperties = {
   fontWeight: 500,
 };
 
-const amountStyle: React.CSSProperties = {
-  fontSize: 28,
-  fontWeight: 700,
-  color: brand,
-  margin: '0 0 4px',
-};
-
 const buttonStyle: React.CSSProperties = {
   backgroundColor: brand,
   color: '#ffffff',
@@ -142,7 +133,6 @@ export function AuthorizationRequestEmail(
     doplata,
     prog,
     dniWTrasie,
-    kwotaMaksima,
     comment,
     deeplink,
   } = props;
@@ -196,16 +186,11 @@ export function AuthorizationRequestEmail(
             <Text style={valueStyle}>{prog} EUR</Text>
           </Section>
 
-          <Hr style={{ borderColor: border, margin: 0 }} />
-
-          <Section style={sectionStyle}>
-            <Text style={labelStyle}>Kwota Maksima (do autoryzacji)</Text>
-            <Text style={amountStyle}>{kwotaMaksima} EUR</Text>
-            {comment ? (
-              <>
-                <Text style={{ ...labelStyle, marginTop: 16 }}>
-                  Komentarz weryfikatora
-                </Text>
+          {comment ? (
+            <>
+              <Hr style={{ borderColor: border, margin: 0 }} />
+              <Section style={sectionStyle}>
+                <Text style={labelStyle}>Komentarz weryfikatora</Text>
                 <Text
                   style={{
                     ...valueStyle,
@@ -215,9 +200,9 @@ export function AuthorizationRequestEmail(
                 >
                   {comment}
                 </Text>
-              </>
-            ) : null}
-          </Section>
+              </Section>
+            </>
+          ) : null}
 
           <Section style={{ ...sectionStyle, textAlign: 'center' }}>
             <Button href={deeplink} style={buttonStyle}>

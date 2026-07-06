@@ -12,6 +12,7 @@ import type {
   PreviewClaimDto,
   PreviewClaimResponse,
   RequestAuthorizationDto,
+  SetAuthorizationAmountDto,
   SubmitClaimDto,
   SubmitReklamacjaDto,
   UpdateClaimDto,
@@ -116,13 +117,15 @@ export function updateClaim(
  * before being booked as accepted. Server-side:
  *  - transitions the claim into `OCZEKUJE_NA_AUTORYZACJE`,
  *  - mints a fresh `authorizationToken`,
- *  - persists `Claim.amountMaximum = kwotaMaksima`,
  *  - dispatches an email to Maksim (Mailhog in dev).
  *
- * Body is `RequestAuthorizationSchema` — `kwotaMaksima` (EUR, positive,
- * multiple of 0.01) plus an optional `comment` (trimmed, 1..2000 chars).
- * Returns the updated `ClaimDto` so the modal can refetch and reflect the
- * new status without a second round-trip.
+ * Body is `RequestAuthorizationSchema` — `comment` ONLY (trimmed, 1..2000
+ * chars), the "opis sprawy" shown to Maksim and persisted into
+ * `Claim.authorizationDescription`. The request DOES NOT carry an amount:
+ * Maksim hasn't decided anything at request time. His replied amount is
+ * recorded LATER via `PUT /claims/:nrZgl/authorization-amount`. Returns the
+ * updated `ClaimDto` so the modal can refetch and reflect the new status
+ * without a second round-trip.
  */
 export function requestAuthorization(
   nrZgl: string,
@@ -131,5 +134,28 @@ export function requestAuthorization(
   return apiJson<ClaimDto>(
     `/claims/${encodeURIComponent(nrZgl)}/request-authorization`,
     { method: 'POST', json: body },
+  );
+}
+
+/**
+ * `PUT /claims/:nrZgl/authorization-amount` — Phase 4.2 (kwota-Maksima
+ * follow-up).
+ *
+ * Records the amount Maksim assigned in his EMAIL REPLY, after the fact.
+ * Called by admin / pracownik while the claim sits in
+ * `OCZEKUJE_NA_AUTORYZACJE`; maps verbatim to `Claim.amountMaximum`. Body is
+ * `SetAuthorizationAmountSchema` — `kwotaMaksima` (EUR, positive, multiple of
+ * 0.01). Repeatable: re-calling overwrites the value (Maksim revised his
+ * reply). No email — a pure amount record. Returns the updated `ClaimDto` so
+ * the open modal refreshes with the saved amount; 422 (Polish message) if the
+ * claim is no longer pending authorization.
+ */
+export function setAuthorizationAmount(
+  nrZgl: string,
+  body: SetAuthorizationAmountDto,
+): Promise<ClaimDto> {
+  return apiJson<ClaimDto>(
+    `/claims/${encodeURIComponent(nrZgl)}/authorization-amount`,
+    { method: 'PUT', json: body },
   );
 }

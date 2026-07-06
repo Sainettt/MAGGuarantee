@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
@@ -19,6 +20,7 @@ import {
   ClaimFiltersSchema,
   PreviewClaimSchema,
   RequestAuthorizationSchema,
+  SetAuthorizationAmountSchema,
   SubmitClaimSchema,
   SubmitReklamacjaSchema,
   UpdateClaimSchema,
@@ -28,6 +30,7 @@ import {
   type PreviewClaimDto,
   type PreviewClaimResponse,
   type RequestAuthorizationDto,
+  type SetAuthorizationAmountDto,
   type SubmitClaimDto,
   type SubmitReklamacjaDto,
   type UpdateClaimDto,
@@ -256,6 +259,38 @@ export class ClaimsController {
     dto: RequestAuthorizationDto,
   ): Promise<ClaimDto> {
     return this.claims.requestAuthorization(user, nrZgl, dto);
+  }
+
+  /**
+   * `PUT /claims/:nrZgl/authorization-amount` — Phase 4.2 (kwota-Maksima
+   * follow-up) per docs/13-api-design.md#claims.
+   *
+   * Records the amount Maksim assigned in his EMAIL REPLY, once
+   * `request-authorization` has already moved the claim into
+   * `OCZEKUJE_NA_AUTORYZACJE`. The service:
+   *  - requires the claim to be pending authorization (422 otherwise),
+   *  - persists `Claim.amountMaximum = kwotaMaksima`,
+   *  - sends NO email (pure amount record).
+   *
+   * May be called again to CORRECT the value (Maksim revised his reply). The
+   * audit row commits in the same `prisma.$transaction` as the mutation via
+   * the global `AuditInterceptor` (see `@Audit(...)` below).
+   */
+  @Put(':nrZgl/authorization-amount')
+  @HttpCode(HttpStatus.OK)
+  @Roles('admin', 'pracownik')
+  @Audit({
+    action: 'claim.setAuthorizationAmount',
+    targetType: 'Claim',
+    targetKey: (req) => req.params?.nrZgl,
+  })
+  async setAuthorizationAmount(
+    @CurrentUser() user: AuthUser,
+    @Param('nrZgl') nrZgl: string,
+    @Body(new ZodValidationPipe(SetAuthorizationAmountSchema))
+    dto: SetAuthorizationAmountDto,
+  ): Promise<ClaimDto> {
+    return this.claims.setAuthorizationAmount(user, nrZgl, dto);
   }
 
   // ── Reklamacja ──────────────────────────────────────────

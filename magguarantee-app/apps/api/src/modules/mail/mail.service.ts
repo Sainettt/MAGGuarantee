@@ -884,8 +884,6 @@ export class MailService implements IMailService {
     lines.push(
       `Dopłata:       ${props.doplata} EUR`,
       `Próg autoryz.: ${props.prog} EUR`,
-      ``,
-      `Kwota Maksima do autoryzacji: ${props.kwotaMaksima} EUR`,
     );
     if (props.comment) {
       lines.push('', `Komentarz weryfikatora:`, props.comment);

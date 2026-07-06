@@ -259,14 +259,18 @@ export type PreviewClaimDto = z.infer<typeof PreviewClaimSchema>;
  * exceeds the wniosek's `amountRequested` and needs Maksim's sign-off
  * before being booked as accepted. Transitions the claim into
  * `OCZEKUJE_NA_AUTORYZACJE`, stamps a fresh `authorizationToken` (UUID v4),
- * stores the override amount in `Claim.amountMaximum`, and dispatches an
- * email to Maksim with the deeplink + summary (Mailhog in dev, Gmail in
- * Phase 9).
+ * and dispatches an email to Maksim with the deeplink + summary (Mailhog in
+ * dev, Gmail in Phase 9).
+ *
+ * Product decision (final): the request DOES NOT carry an amount. Maksim
+ * hasn't decided anything at request time, so entering a "kwota Maksima"
+ * up-front is semantically wrong (legacy `Code.gs:6010 sendAuthorizationRequest`
+ * also sent no amount). `Claim.amountMaximum` is recorded LATER — after
+ * Maksim replies — via `PUT /claims/:nrZgl/authorization-amount`
+ * (`SetAuthorizationAmountSchema`), while the claim sits in
+ * `OCZEKUJE_NA_AUTORYZACJE`.
  *
  * Fields:
- *  - `kwotaMaksima` — verifier-requested authorization amount in EUR. Stored
- *    verbatim into `Claim.amountMaximum` (Decimal(12,2)). Must be positive
- *    and a multiple of 0.01 so the Decimal column round-trips cleanly.
  *  - `comment` — REQUIRED rationale ("opis sprawy") shown in the email body
  *    to Maksim and persisted into `Claim.authorizationDescription`. Trimmed,
  *    non-empty, max 2 000 chars. `RequestAuthorizationDto.comment` is `string`
@@ -274,16 +278,39 @@ export type PreviewClaimDto = z.infer<typeof PreviewClaimSchema>;
  *
  * The PATCH /claims/:nrZgl path also accepts an optional `amountMaximum`
  * field for the accepted-status branch. The PATCH variant is for *direct
- * override during acceptance* without going through the Maksim handshake;
- * this endpoint is for *requesting* the handshake. Two callers, two paths.
+ * override during acceptance*; the dedicated `authorization-amount` endpoint
+ * is for *recording Maksim's replied amount* while pending. This endpoint is
+ * for *requesting* the handshake — three callers, three paths.
  */
 export const RequestAuthorizationSchema = z
   .object({
-    kwotaMaksima: z.number().positive().multipleOf(0.01).max(9_999_999),
     comment: z.string().trim().min(1).max(2_000),
   })
   .strict();
 export type RequestAuthorizationDto = z.infer<typeof RequestAuthorizationSchema>;
+
+/**
+ * PUT /claims/:nrZgl/authorization-amount — Phase 4.2 (kwota-Maksima follow-up).
+ *
+ * Records the amount Maksim assigned in his EMAIL REPLY. Called by admin /
+ * pracownik AFTER `request-authorization` has fired the request email, while
+ * the claim sits in `OCZEKUJE_NA_AUTORYZACJE`. Maps verbatim to
+ * `Claim.amountMaximum` (Decimal(12,2)) — hence the positive / `multipleOf(0.01)`
+ * constraint so the column round-trips cleanly. Allowed ONLY while the claim
+ * is pending authorization; may be called again to CORRECT the value (Maksim
+ * revised his reply). No email — this is a pure amount record.
+ *
+ * NOTE: `amountMaximum` no longer means "requested amount"; it now means the
+ * "kwota przyznana/wskazana przez Maksima" recorded from his reply.
+ */
+export const SetAuthorizationAmountSchema = z
+  .object({
+    kwotaMaksima: z.number().positive().multipleOf(0.01).max(9_999_999),
+  })
+  .strict();
+export type SetAuthorizationAmountDto = z.infer<
+  typeof SetAuthorizationAmountSchema
+>;
 
 // ─── Reklamacja ──────────────────────────────────────────
 

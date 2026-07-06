@@ -21,6 +21,7 @@ import type {
   PreviewClaimDto,
   PreviewClaimResponse,
   RequestAuthorizationDto,
+  SetAuthorizationAmountDto,
   SubmitClaimDto,
   SubmitReklamacjaDto,
   UpdateClaimDto,
@@ -32,6 +33,7 @@ import {
   previewExistingClaim,
   previewNewClaim,
   requestAuthorization,
+  setAuthorizationAmount,
   submitClaim,
   submitReklamacja,
   updateClaim,
@@ -194,6 +196,33 @@ export function useRequestAuthorization(
       qc.invalidateQueries({ queryKey: [...CLAIMS_KEY, 'detail', nrZgl] });
       qc.invalidateQueries({ queryKey: CLAIMS_KEY });
       qc.invalidateQueries({ queryKey: [...CLAIMS_KEY, 'preview', nrZgl] });
+      opts?.onSuccess?.(...args);
+    },
+  });
+}
+
+/**
+ * `PUT /claims/:nrZgl/authorization-amount` — Phase 4.2 (kwota-Maksima
+ * follow-up).
+ *
+ * Records Maksim's replied amount into `Claim.amountMaximum` while the claim
+ * sits in `OCZEKUJE_NA_AUTORYZACJE`. Invalidates the claim detail (so the open
+ * modal re-renders with the saved value) and the list. Repeatable — re-saving
+ * overwrites the amount. Mirrors `useRequestAuthorization`: `nrZgl` is bound at
+ * hook-call time so the call site stays terse — `mutate(body)`.
+ */
+export function useSetAuthorizationAmount(
+  nrZgl: string,
+  opts?: UseMutationOptions<ClaimDto, Error, SetAuthorizationAmountDto>,
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: SetAuthorizationAmountDto) =>
+      setAuthorizationAmount(nrZgl, body),
+    ...opts,
+    onSuccess: (...args) => {
+      qc.invalidateQueries({ queryKey: [...CLAIMS_KEY, 'detail', nrZgl] });
+      qc.invalidateQueries({ queryKey: CLAIMS_KEY });
       opts?.onSuccess?.(...args);
     },
   });

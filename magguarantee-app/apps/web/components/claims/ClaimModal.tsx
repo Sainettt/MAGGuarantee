@@ -42,6 +42,7 @@ import {
 import { toast } from 'sonner';
 import {
   RequestAuthorizationSchema,
+  SetAuthorizationAmountSchema,
   UpdateClaimSchema,
   getAuthThreshold,
   isCompensationDue,
@@ -49,6 +50,7 @@ import {
   type KmCalcBreakdown,
   type PreviewClaimDto,
   type RequestAuthorizationDto,
+  type SetAuthorizationAmountDto,
   type UpdateClaimDto,
 } from '@magguarantee/shared';
 
@@ -75,6 +77,7 @@ import {
   useClaim,
   useClaimPreviewExisting,
   useRequestAuthorization,
+  useSetAuthorizationAmount,
   useUpdateClaim,
 } from '@/lib/hooks/useClaims';
 import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
@@ -462,6 +465,25 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
       form.setValue('amountApproved', liveDoplata, { shouldDirty: false });
     }
   }, [postAuthorization, targetStatus, liveDoplata, form]);
+
+  // Complementary branch for the post-authorization accept: re-seed the
+  // editable `amountApproved` from kwota Maksima whenever it lands.
+  // Same-session Zapisz→accept is the PRIMARY flow: the verifier saves Maksim's
+  // amount via the pending mini-form, its mutation invalidates the claim detail,
+  // and the refetched `claim.amountMaximum` flows in here — but `key={claim.id}`
+  // is stable so `ModalBody` never re-mounts and the mount-time `getDefaults`
+  // prefill can't pick it up. This effect closes that gap. The dirty check runs
+  // BEFORE setValue (mirroring the sibling effect) so a verifier's manual edit
+  // to kwota zatwierdzona always wins over a later re-save of Maksim's amount.
+  useEffect(() => {
+    if (!postAuthorization) return;
+    if (form.formState.dirtyFields.amountApproved) return;
+    if (claim.amountMaximum != null) {
+      form.setValue('amountApproved', claim.amountMaximum, {
+        shouldDirty: false,
+      });
+    }
+  }, [postAuthorization, claim.amountMaximum, form]);
 
   const updateM = useUpdateClaim({
     onSuccess: () => {
@@ -1650,7 +1672,6 @@ function DiffRow({
 // ── Autoryzacja section ─────────────────────────────────────────────
 
 interface AuthFormValues {
-  kwotaMaksima: number | undefined;
   comment: string;
 }
 
@@ -1669,7 +1690,7 @@ function AuthorizationSection({
   const t = useTranslations('employee.claims.modal.auth');
   const tCommon = useTranslations('common');
 
-  // Already pending — read-only summary.
+  // Already pending — read-only summary + editable kwota-Maksima mini-form.
   if (claim.status === 'OCZEKUJE_NA_AUTORYZACJE') {
     return (
       <div className="space-y-4">
@@ -1690,16 +1711,10 @@ function AuthorizationSection({
           )}
         </div>
 
-        {claim.amountMaximum != null && (
-          <div className="space-y-1">
-            <p className="text-[11px] font-medium uppercase tracking-wider text-text-sub">
-              {t('pendingMaximumLabel')}
-            </p>
-            <p className="text-sm font-semibold text-text tabular-nums">
-              {formatEur(claim.amountMaximum)}
-            </p>
-          </div>
-        )}
+        {/* Kwota Maksima — recorded AFTER Maksim replies by email. Editable
+            mini-form: PUT /authorization-amount; re-saving overwrites the
+            value (Maksim revised his reply). */}
+        <SetAuthorizationAmountForm claim={claim} t={t} tCommon={tCommon} />
       </div>
     );
   }
@@ -1713,6 +1728,118 @@ function AuthorizationSection({
       t={t}
       tCommon={tCommon}
     />
+  );
+}
+
+// ── Kwota-Maksima mini-form (pending, OCZEKUJE_NA_AUTORYZACJE) ───────
+//
+// Records the amount Maksim assigned in his email reply into
+// `Claim.amountMaximum` via `PUT /claims/:nrZgl/authorization-amount`. Lives
+// INSIDE the parent <form> (the main edit-submit wrapper), so — like the
+// request-authorization form — the «Zapisz» control is a type="button" that
+// drives the mutation through RHF's handleSubmit; a nested <form> would be
+// invalid HTML.
+
+interface SetAmountFormValues {
+  kwotaMaksima: number | undefined;
+}
+
+function SetAuthorizationAmountForm({
+  claim,
+  t,
+  tCommon,
+}: {
+  claim: ClaimDto;
+  t: ReturnType<typeof useTranslations<'employee.claims.modal.auth'>>;
+  tCommon: ReturnType<typeof useTranslations<'common'>>;
+}) {
+  const form = useForm<SetAmountFormValues>({
+    resolver: zodResolver(
+      SetAuthorizationAmountSchema,
+    ) as Resolver<SetAmountFormValues>,
+    defaultValues: {
+      kwotaMaksima: claim.amountMaximum ?? undefined,
+    },
+  });
+
+  const setAmountM = useSetAuthorizationAmount(claim.nrZgl, {
+    onSuccess: () => {
+      toast.success(t('amountMaximumSaved'));
+    },
+    onError: (err) => {
+      const msg =
+        err instanceof ApiResponseError && err.status >= 400 && err.status < 500
+          ? err.message
+          : tCommon('errorGeneric');
+      toast.error(msg);
+    },
+  });
+
+  const errs = form.formState.errors as Record<
+    string,
+    { message?: string } | undefined
+  >;
+  const errMsg = (key: string): string | undefined => errs[key]?.message;
+
+  const onValid: SubmitHandler<SetAmountFormValues> = (values) => {
+    if (values.kwotaMaksima == null || !Number.isFinite(values.kwotaMaksima)) {
+      return;
+    }
+    const body: SetAuthorizationAmountDto = {
+      kwotaMaksima: Number(values.kwotaMaksima),
+    };
+    void setAmountM.mutateAsync(body).catch(() => {
+      // Error surfaced via onError — swallow to avoid unhandled rejection.
+    });
+  };
+
+  const handleSaveClick = () => {
+    void form.handleSubmit(onValid)();
+  };
+
+  const fieldId = useId();
+  const submitDisabled = setAmountM.isPending;
+
+  return (
+    <div className="space-y-3">
+      <FormField
+        label={t('amountMaximumLabel')}
+        description={t('amountMaximumHelp')}
+        error={errMsg('kwotaMaksima')}
+        htmlFor={`${fieldId}-kwotaMaksima`}
+      >
+        <div className="flex items-start gap-2">
+          <Input
+            id={`${fieldId}-kwotaMaksima`}
+            type="number"
+            step="0.01"
+            min={0.01}
+            inputMode="decimal"
+            className="flex-1"
+            {...form.register('kwotaMaksima', {
+              setValueAs: (v) =>
+                v === '' || v === null ? undefined : Number(v),
+            })}
+          />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={handleSaveClick}
+            disabled={submitDisabled}
+          >
+            {setAmountM.isPending ? (
+              <>
+                <Loader2 size={14} className="animate-spin" aria-hidden />
+                {t('submitting')}
+              </>
+            ) : (
+              t('amountMaximumSave')
+            )}
+          </Button>
+        </div>
+      </FormField>
+    </div>
   );
 }
 
@@ -1735,9 +1862,6 @@ function RequestAuthorizationForm({
       RequestAuthorizationSchema,
     ) as Resolver<AuthFormValues>,
     defaultValues: {
-      kwotaMaksima:
-        claim.amountMaximum ??
-        (Number.isFinite(claim.paymentEur) ? claim.paymentEur : undefined),
       comment: '',
     },
   });
@@ -1767,16 +1891,13 @@ function RequestAuthorizationForm({
   // request-authorization fields inside a plain <div> and trigger the
   // mutation from a type="button" handler via RHF's handleSubmit.
   const onValid: SubmitHandler<AuthFormValues> = (values) => {
-    if (values.kwotaMaksima == null || !Number.isFinite(values.kwotaMaksima)) {
-      return;
-    }
     // zodResolver returns the TRANSFORMED values, so by the time `onValid`
     // runs `values.comment` is already a non-empty, trimmed string — the
     // schema's `.trim().min(1)` blocks empty comments BEFORE this callback and
     // surfaces the (localized) required error at the FormField. No `|| undefined`
-    // dance: `RequestAuthorizationDto.comment` is a required `string`.
+    // dance: `RequestAuthorizationDto.comment` is a required `string`. The
+    // request carries the comment ONLY — no amount (Maksim hasn't decided yet).
     const body: RequestAuthorizationDto = {
-      kwotaMaksima: Number(values.kwotaMaksima),
       comment: values.comment,
     };
     void requestM.mutateAsync(body).catch(() => {
@@ -1792,10 +1913,10 @@ function RequestAuthorizationForm({
   const commentLen = commentValue.length;
   const fieldId = useId();
 
-  const submitDisabled =
-    requestM.isPending ||
-    form.watch('kwotaMaksima') == null ||
-    !(Number(form.watch('kwotaMaksima')) > 0);
+  // The button is disabled only while the request is in flight — an empty
+  // comment surfaces the (localized) required error on click rather than
+  // silently disabling submit.
+  const submitDisabled = requestM.isPending;
 
   return (
     <div className="space-y-4">
@@ -1810,23 +1931,28 @@ function RequestAuthorizationForm({
         </p>
       </div>
 
+      {/* Kwota Maksima — LOCKED placeholder («—»). At request time no amount
+          exists (Maksim hasn't replied yet); the actual value is recorded
+          afterwards via the pending-state mini-form. Purely visual continuity —
+          nothing here is submitted. Same locked-field recipe as the dopłata
+          block (§6.5.4): muted surface, muted text, <Lock> affordance. */}
       <FormField
         label={t('kwotaMaksimaLabel')}
-        required
         description={t('kwotaMaksimaHelp')}
-        error={errMsg('kwotaMaksima')}
-        htmlFor={`${fieldId}-kwotaMaksima`}
       >
-        <Input
-          id={`${fieldId}-kwotaMaksima`}
-          type="number"
-          step="0.01"
-          min={0}
-          inputMode="decimal"
-          {...form.register('kwotaMaksima', {
-            setValueAs: (v) => (v === '' || v === null ? undefined : Number(v)),
-          })}
-        />
+        <div className="relative">
+          <div
+            className="flex h-10 w-full items-center rounded-[10px] border border-border bg-input/40 px-3.5 pr-9 text-[14px] font-semibold tabular-nums text-text-sub"
+            aria-readonly="true"
+            title={t('kwotaMaksimaHelp')}
+          >
+            —
+          </div>
+          <Lock
+            aria-hidden
+            className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-text-sub/70"
+          />
+        </div>
       </FormField>
 
       <FormField

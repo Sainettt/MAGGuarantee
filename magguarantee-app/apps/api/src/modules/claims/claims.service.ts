@@ -24,6 +24,7 @@ import type {
   PreviewClaimDto,
   PreviewClaimResponse,
   RequestAuthorizationDto,
+  SetAuthorizationAmountDto,
   SubmitClaimDto,
   SubmitReklamacjaDto,
   UpdateClaimDto,
@@ -862,9 +863,12 @@ export class ClaimsService {
    *        - authorizationToken= <new uuid>
    *        - authorizationRequired = true
    *        - authorizationDescription = comment (required, non-empty)
-   *        - amountMaximum     = kwotaMaksima
    *        - statusChangedAt   = now
    *        - decidedById       = caller (so the audit trail knows who flagged)
+   *      `amountMaximum` is DELIBERATELY NOT touched here — the request carries
+   *      no amount (Maksim hasn't replied yet). It stays whatever it was
+   *      (normally null) and is recorded LATER via `setAuthorizationAmount`
+   *      (`PUT /claims/:nrZgl/authorization-amount`) once Maksim's reply lands.
    *      A `before` snapshot is pushed into the ambient context for the
    *      `AuditInterceptor` to commit alongside the row.
    *   5. Fire the Maksim email outside the transaction (fire-and-log; never
@@ -900,7 +904,9 @@ export class ClaimsService {
       authorizationRequired: true,
       authorizationDescription: description,
       authorizationToken: token,
-      amountMaximum: dto.kwotaMaksima,
+      // `amountMaximum` is intentionally OMITTED — the request carries no
+      // amount (Maksim hasn't decided yet). Recorded later via
+      // `setAuthorizationAmount` once his reply lands.
     };
 
     AuditContext.setBefore(this._snapshotForAudit(existing));
@@ -920,6 +926,57 @@ export class ClaimsService {
         error: err instanceof Error ? err.message : String(err),
       });
     });
+
+    return this.toDto(updated);
+  }
+
+  /**
+   * `PUT /claims/:nrZgl/authorization-amount` — Phase 4.2 (kwota-Maksima
+   * follow-up). Records the amount Maksim assigned in his EMAIL REPLY, once
+   * `request-authorization` has already put the claim into
+   * `OCZEKUJE_NA_AUTORYZACJE`. Steps:
+   *
+   *   1. Load the claim (404 if missing).
+   *   2. Require `status === OCZEKUJE_NA_AUTORYZACJE` (422 otherwise) — the
+   *      amount only makes sense while the claim is pending Maksim's sign-off.
+   *   3. Patch `amountMaximum = kwotaMaksima` atomically inside the ambient
+   *      `AuditContext` tx (mirrors `requestAuthorization`'s `setBefore` +
+   *      `updateWithin` shape). No status change, no token, NO email.
+   *
+   * Idempotent by design: it may be called again to CORRECT the value (Maksim
+   * revised his reply) — each call overwrites `amountMaximum` and writes a
+   * fresh before/after audit diff.
+   */
+  async setAuthorizationAmount(
+    user: AuthUser,
+    nrZgl: string,
+    dto: SetAuthorizationAmountDto,
+  ): Promise<ClaimDto> {
+    const existing = await this.claims.findByNrZgl(nrZgl);
+    if (!existing) {
+      throw new NotFoundException('Wniosek nie znaleziony');
+    }
+
+    // Guard, not a state transition: the amount is only recordable while the
+    // claim is pending authorization. Any other status is a 422 with a
+    // friendly Polish message (mirrors the state-machine error shape).
+    if (existing.status !== 'OCZEKUJE_NA_AUTORYZACJE') {
+      throw new UnprocessableEntityException(
+        'Kwotę Maksima można zapisać tylko dla wniosku oczekującego na autoryzację.',
+      );
+    }
+
+    const patch: UpdateClaimData = {
+      amountMaximum: dto.kwotaMaksima,
+    };
+
+    AuditContext.setBefore(this._snapshotForAudit(existing));
+
+    // Run on the ambient tx (opened by the `AuditInterceptor` via
+    // `@Audit('claim.setAuthorizationAmount')` on the controller). The row
+    // update + audit-row insert commit atomically.
+    const txLike = this.prisma.tx as unknown as TransactionLike;
+    const updated = await this.claims.updateWithin(txLike, existing.id, patch);
 
     return this.toDto(updated);
   }
@@ -961,7 +1018,6 @@ export class ClaimsService {
     const periodFrom = row.dateStart.toISOString().slice(0, 10);
     const periodTo = row.dateEnd.toISOString().slice(0, 10);
     const doplata = row.amountRequested.toFixed(2);
-    const kwotaMaksima = dto.kwotaMaksima.toFixed(2);
     // SOFT authorization-threshold hint (`Code.gs:5967`) — informational
     // context in the email only, never enforced on accept. Pre-formatted like
     // the sibling amounts so the template stays pure.
@@ -969,6 +1025,9 @@ export class ClaimsService {
     const dniWTrasie = row.drivenDays.toFixed(2);
     const deeplink = `${appUrl.replace(/\/$/, '')}/employee/claims/${encodeURIComponent(row.nrZgl)}`;
 
+    // No `kwotaMaksima` — the request email no longer carries an amount
+    // (Maksim decides it in his reply). Matches legacy `Code.gs:6010
+    // sendAuthorizationRequest`, which also sent no amount in the request.
     await this.mailService.enqueueAuthorizationRequest(maksimEmail, {
       nrZgl: row.nrZgl,
       carrierName,
@@ -978,7 +1037,6 @@ export class ClaimsService {
       doplata,
       prog,
       dniWTrasie,
-      kwotaMaksima,
       comment: dto.comment,
       deeplink,
     });

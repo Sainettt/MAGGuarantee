@@ -315,7 +315,8 @@ soft-delete'ятся (объект в MinIO остаётся).
 | POST `/claims/:nrZgl/reklamacja` | `submitReklamacja` | przewoznik (own claim) |
 | POST `/claims/:nrZgl/preview` | (новое) — server-side расчёт live preview, заменяет client-side `carrierPreviewCalc` | любой залогиненный (помогает заполнить форму) |
 | POST `/claims/:nrZgl/auth-screenshot` | `uploadAuthScreenshot` (multipart, S3) — pracownik/admin/opiekun (legacy: `requireEmployee`) | admin / pracownik / opiekun |
-| POST `/claims/:nrZgl/request-authorization` | `sendAuthorizationRequest` — отсылает email Maksimu, помечает статус `OCZEKUJE_NA_AUTORYZACJĘ` | admin / pracownik / opiekun |
+| POST `/claims/:nrZgl/request-authorization` | `sendAuthorizationRequest` — отсылает email Maksimu, помечает статус `OCZEKUJE_NA_AUTORYZACJĘ`. Body — `{ comment }` (opis sprawy, required). Kwota НЕ передаётся в запросе (Maksim ещё ничего не решил); записывается позже через `PUT /authorization-amount`. | admin / pracownik / opiekun |
+| PUT `/claims/:nrZgl/authorization-amount` | (новое) — записывает `Claim.amountMaximum` = сумму, которую Maksim указал в ответном письме, пока wniosek в `OCZEKUJE_NA_AUTORYZACJE`. Body — `{ kwotaMaksima }`. Без email; можно вызвать повторно для коррекции. 422 если статус не `OCZEKUJE_NA_AUTORYZACJE`. | admin / pracownik |
 | GET `/claims/raw?nrZgl=...` | `getRawClaims` (admin diagnostics) | admin |
 
 ### Delegations (выезды) — `/api/v1/delegations`

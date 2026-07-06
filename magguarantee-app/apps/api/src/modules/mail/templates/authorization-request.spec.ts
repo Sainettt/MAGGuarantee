@@ -1,9 +1,11 @@
 // Phase 4.2 — smoke test for the authorization-request email template.
 //
 // Asserts that the JSX template produces non-empty HTML and that the key
-// business fields (nrZgl, kwotaMaksima, deeplink, carrier) appear in the
-// output. We deliberately do NOT diff against a stored snapshot — the goal
-// is to catch wiring regressions, not to lock the visual design.
+// business fields (nrZgl, dopłata, deeplink, carrier) appear in the output.
+// The request email no longer carries a kwota-Maksima — the amount is decided
+// by Maksim in his reply and recorded via PUT /claims/:nrZgl/authorization-amount.
+// We deliberately do NOT diff against a stored snapshot — the goal is to catch
+// wiring regressions, not to lock the visual design.
 //
 // We render via `react-dom/server.renderToStaticMarkup` directly rather
 // than `@react-email/render`. The latter wraps the call in an `await
@@ -38,7 +40,6 @@ const FIXTURE: AuthorizationRequestProps = {
   doplata: '1400.00',
   prog: '500.00',
   dniWTrasie: '20.00',
-  kwotaMaksima: '1550.50',
   comment: 'Powyżej progu — wymaga zgody Maksima.',
   deeplink: 'http://localhost:3000/employee/claims/GWA%2F042%2F05%2F26',
 };
@@ -50,13 +51,20 @@ describe('AuthorizationRequestEmail', () => {
     expect(html.length).toBeGreaterThan(200);
   });
 
-  it('includes the nrZgl, carrier name, vehicle plate, and amounts', () => {
+  it('includes the nrZgl, carrier name, vehicle plate, and the dopłata', () => {
     const html = renderHtml(FIXTURE);
     expect(html).toContain('GWA/042/05/26');
     expect(html).toContain('TransLogis Sp. z o.o.');
     expect(html).toContain('WX12345');
-    expect(html).toContain('1550.50');
     expect(html).toContain('1400.00');
+  });
+
+  it('does NOT carry a kwota-Maksima amount (decided in Maksim reply)', () => {
+    const html = renderHtml(FIXTURE);
+    // The request email lists dopłata / próg only; the authorized amount is
+    // recorded later via PUT /claims/:nrZgl/authorization-amount.
+    expect(html).not.toContain('Kwota Maksima');
+    expect(html).not.toContain('do autoryzacji');
   });
 
   it('renders the SOFT authorization threshold (próg) row', () => {
