@@ -91,6 +91,13 @@ describe('audit coverage — decorator presence on critical mutating endpoints',
       targetType: 'Claim',
     },
     {
+      name: 'PATCH /claims/:nrZgl/verification',
+      controller: ClaimsController,
+      method: 'verify',
+      action: 'claim.verify',
+      targetType: 'Claim',
+    },
+    {
       name: 'POST /claims/:nrZgl/request-authorization',
       controller: ClaimsController,
       method: 'requestAuthorization',
@@ -219,6 +226,33 @@ describe('audit coverage — interceptor writes a row end-to-end', () => {
     expect(out.entry!.before).toEqual({ status: 'NA_WERYFIKACJI' });
     expect(out.entry!.after).toMatchObject({ status: 'ZAAKCEPTOWANO' });
     // Decision endpoint must commit atomically (ambient transaction).
+    expect(out.txOpens).toBe(1);
+    expect(out.committed).toBe(true);
+  });
+
+  it('PATCH /claims/:nrZgl/verification → claim.verify row, targetKey=nrZgl, before snapshot', async () => {
+    const out = await runAuditedHandler({
+      controller: ClaimsController,
+      method: 'verify',
+      req: req({
+        user: PRACOWNIK,
+        params: { nrZgl: 'ZGL-2026-04-0007' },
+        method: 'PATCH',
+        url: '/api/v1/claims/ZGL-2026-04-0007/verification',
+      }),
+      result: { nrZgl: 'ZGL-2026-04-0007', verifiedAt: '2026-05-15T10:00:00.000Z' },
+      duringHandler: () => AuditContext.setBefore({ verifiedAt: null }),
+    });
+
+    expect(out.entries).toHaveLength(1);
+    expect(out.entry!.action).toBe('claim.verify');
+    expect(out.entry!.targetType).toBe('Claim');
+    expect(out.entry!.targetKey).toBe('ZGL-2026-04-0007');
+    expect(out.entry!.before).toEqual({ verifiedAt: null });
+    expect(out.entry!.after).toMatchObject({
+      verifiedAt: '2026-05-15T10:00:00.000Z',
+    });
+    // Checkpoint must commit atomically (ambient transaction).
     expect(out.txOpens).toBe(1);
     expect(out.committed).toBe(true);
   });

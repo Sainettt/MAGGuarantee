@@ -888,6 +888,16 @@ export class MailService implements IMailService {
     if (props.comment) {
       lines.push('', `Komentarz weryfikatora:`, props.comment);
     }
+    if (props.korekty && props.korekty.length > 0) {
+      lines.push(
+        '',
+        'Korekty weryfikatora:',
+        'Weryfikator poprawił dane wprowadzone przez przewoźnika:',
+      );
+      for (const k of props.korekty) {
+        lines.push(`  ${k.label}: ${k.from} → ${k.to}`);
+      }
+    }
     lines.push('', `Otwórz w MAGGuarantee: ${props.deeplink}`);
     return lines.join('\n');
   }

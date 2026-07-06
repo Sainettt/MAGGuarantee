@@ -98,6 +98,9 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     statusChangedAt: new Date('2026-04-21T08:00:00.000Z'),
     decidedById: null,
     decidedBy: null,
+    verifiedAt: null,
+    verifiedById: null,
+    verifiedBy: null,
     comment: null,
     orderNumber: null,
     orderDate: null,
@@ -117,6 +120,7 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     origDateStart: new Date('2026-04-01T00:00:00.000Z'),
     origDateEnd: new Date('2026-04-20T00:00:00.000Z'),
     origMileage: 8_000,
+    origPaymentEur: 1_400,
     origTimeFrom: '08:00',
     origTimeTo: '18:00',
     // Decimal(5,2) hours-adjustment columns post-migration — preview path

@@ -48,6 +48,17 @@ export interface ClaimRow {
   decidedById: string | null;
   decidedBy: { id: string; login: string; name: string | null } | null;
 
+  /**
+   * Verification checkpoint (pracownik «Zapisz weryfikację»). `verifiedAt` is
+   * when the verifier confirmed the claim's data; `verifiedBy(Id)` mirrors the
+   * `decidedBy` pattern. Both `null` until verified (reset to `null` by the
+   * delegation auto-recalc — the checkpoint is invalidated when the underlying
+   * data changes).
+   */
+  verifiedAt: Date | null;
+  verifiedById: string | null;
+  verifiedBy: { id: string; login: string; name: string | null } | null;
+
   comment: string | null;
   /** Nullable per Revert #1 — set only on transition to ZAAKCEPTOWANO. */
   orderNumber: string | null;
@@ -72,6 +83,12 @@ export interface ClaimRow {
   origDateStart: Date | null;
   origDateEnd: Date | null;
   origMileage: number | null;
+  /**
+   * Immutable submit-time payment snapshot (Decimal(12,2) → number). Set once at
+   * create alongside the other `orig*` fields; never mutated by the verifier
+   * PATCH / checkpoint. `null` for legacy rows created before this column.
+   */
+  origPaymentEur: number | null;
   /** Immutable carrier time-window snapshot (`HH:mm`) — set once at submit. */
   origTimeFrom: string | null;
   origTimeTo: string | null;
@@ -173,6 +190,11 @@ export interface CreateClaimData {
   origDateStart: Date | null;
   origDateEnd: Date | null;
   origMileage: number | null;
+  /**
+   * Immutable submit-time payment snapshot — written once at create (same
+   * contract as `origMileage`). Prisma coerces `number` → `Decimal(12,2)`.
+   */
+  origPaymentEur: number | null;
   /** Immutable carrier time-window snapshot (`HH:mm`) — set once at submit. */
   origTimeFrom: string | null;
   origTimeTo: string | null;
@@ -196,6 +218,16 @@ export interface UpdateClaimData {
   statusChangedAt?: Date | null;
   statusBeforeReklamacja?: ClaimStatus | null;
   decidedById?: string | null;
+
+  /**
+   * Verification checkpoint stamp. Set by `ClaimsService.verifyClaim` (the
+   * «Zapisz weryfikację» endpoint) and RESET to `null` by the delegation
+   * auto-recalc (`_applyDelegationRecalc`) because the checkpoint is
+   * invalidated when the underlying data changes. Omitted (`undefined`) ⇒ the
+   * column keeps its current value; `null` clears it.
+   */
+  verifiedAt?: Date | null;
+  verifiedById?: string | null;
 
   /**
    * Phase 7 REWORK (2026-06-20 #4) — set `true` by the verifier PATCH whenever
@@ -421,6 +453,10 @@ export class ClaimsRepository {
         origDateStart: data.origDateStart,
         origDateEnd: data.origDateEnd,
         origMileage: data.origMileage,
+        // Immutable submit-time payment snapshot — write-once here (same
+        // contract as origMileage); the verifier PATCH / checkpoint never
+        // touches it (`_buildUpdatePayload` has no key for it).
+        origPaymentEur: data.origPaymentEur,
         // Immutable carrier time-window snapshot — written once here, never
         // touched by the verifier PATCH (`_buildUpdatePayload` omits them).
         origTimeFrom: data.origTimeFrom,
@@ -483,6 +519,8 @@ export class ClaimsRepository {
     set('statusChangedAt');
     set('statusBeforeReklamacja');
     set('decidedById');
+    set('verifiedAt');
+    set('verifiedById');
     set('periodAdjustedByVerifier');
     set('autoRecalcState');
     set('origDateStart');
@@ -534,6 +572,9 @@ export class ClaimsRepository {
         select: { plannedReturnAt: true, actualReturnAt: true },
       },
       decidedBy: { select: { id: true, login: true, name: true } },
+      // Verification checkpoint author — mirror of `decidedBy` (relation
+      // "ClaimVerifiedBy"). Populated whenever `verifiedById` is set.
+      verifiedBy: { select: { id: true, login: true, name: true } },
       attachments: {
         select: {
           id: true,
@@ -582,6 +623,9 @@ export class ClaimsRepository {
       statusChangedAt: row.statusChangedAt,
       decidedById: row.decidedById,
       decidedBy: row.decidedBy ?? null,
+      verifiedAt: row.verifiedAt,
+      verifiedById: row.verifiedById,
+      verifiedBy: row.verifiedBy ?? null,
       comment: row.comment,
       orderNumber: row.orderNumber,
       orderDate: row.orderDate,
@@ -601,6 +645,9 @@ export class ClaimsRepository {
       origDateStart: row.origDateStart,
       origDateEnd: row.origDateEnd,
       origMileage: decimalToNumber(row.origMileage),
+      // Immutable submit-time payment snapshot — same Decimal(12,2) →
+      // number round-trip as `paymentEur`; `null` preserved for legacy rows.
+      origPaymentEur: decimalToNumber(row.origPaymentEur),
       // Immutable carrier time-window snapshot — plain `HH:mm` strings, no
       // Decimal coercion. Forwarded as-is; `null` means the column is NULL.
       origTimeFrom: row.origTimeFrom,
@@ -661,6 +708,9 @@ interface ClaimPrismaShape {
   statusChangedAt: Date | null;
   decidedById: string | null;
   decidedBy?: { id: string; login: string; name: string | null } | null;
+  verifiedAt: Date | null;
+  verifiedById: string | null;
+  verifiedBy?: { id: string; login: string; name: string | null } | null;
   comment: string | null;
   orderNumber: string | null;
   orderDate: Date | null;
@@ -680,6 +730,7 @@ interface ClaimPrismaShape {
   origDateStart: Date | null;
   origDateEnd: Date | null;
   origMileage: { toNumber(): number } | number | null;
+  origPaymentEur: { toNumber(): number } | number | null;
   origTimeFrom: string | null;
   origTimeTo: string | null;
   origHoursAdjusted: { toNumber(): number } | number | null;

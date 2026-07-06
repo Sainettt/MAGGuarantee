@@ -24,6 +24,7 @@ import {
   SubmitClaimSchema,
   SubmitReklamacjaSchema,
   UpdateClaimSchema,
+  VerifyClaimSchema,
   type ClaimDto,
   type ClaimFilters,
   type ClaimListItem,
@@ -34,6 +35,7 @@ import {
   type SubmitClaimDto,
   type SubmitReklamacjaDto,
   type UpdateClaimDto,
+  type VerifyClaimDto,
 } from '@magguarantee/shared';
 
 import { Audit } from '../../common/audit';
@@ -224,6 +226,38 @@ export class ClaimsController {
   ): Promise<ClaimDto> {
     const ip = extractRequestIp(req);
     return this.claims.update(user, nrZgl, dto, ip);
+  }
+
+  // ── Verification checkpoint («Zapisz weryfikację») ──────
+
+  /**
+   * `PATCH /claims/:nrZgl/verification` — the pracownik's «Zapisz weryfikację»
+   * checkpoint per docs/13-api-design.md#claims (`PATCH
+   * /claims/:nrZgl/verification` row).
+   *
+   * The verifier persists their corrections to a `NA_WERYFIKACJI` claim BEFORE
+   * making any decision. Stamps `verifiedAt`/`verifiedById`, which UNGATES the
+   * decision transitions (`PATCH /claims/:nrZgl`) and the kwota-Maksima
+   * authorization request FROM `NA_WERYFIKACJI` (both 422 `CLAIM_NOT_VERIFIED`
+   * until verified). Body is the correction-fields-only `VerifyClaimSchema`; an
+   * EMPTY body is legal ("confirmed as-is" — stamps `verifiedAt` without
+   * recalc). Does NOT change status (verification is a flag, not a status). The
+   * audit row commits in the same `prisma.$transaction` as the mutation via the
+   * global `AuditInterceptor` (see `@Audit(...)` below); no email.
+   */
+  @Patch(':nrZgl/verification')
+  @Roles('admin', 'pracownik')
+  @Audit({
+    action: 'claim.verify',
+    targetType: 'Claim',
+    targetKey: (req) => req.params?.nrZgl,
+  })
+  async verify(
+    @CurrentUser() user: AuthUser,
+    @Param('nrZgl') nrZgl: string,
+    @Body(new ZodValidationPipe(VerifyClaimSchema)) dto: VerifyClaimDto,
+  ): Promise<ClaimDto> {
+    return this.claims.verifyClaim(user, nrZgl, dto);
   }
 
   // ── Request authorization (Phase 4.2) ───────────────────

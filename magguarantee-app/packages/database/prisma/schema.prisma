@@ -173,6 +173,7 @@ model User {
   verifiedDelegations        Delegation[]        @relation("DelegationVerifier")
   readiedDelegations         Delegation[]        @relation("DelegationReadier")
   authoredClaims             Claim[]             @relation("ClaimDecidedBy")
+  verifiedClaims             Claim[]             @relation("ClaimVerifiedBy")
   uploadedVehicleAttachments VehicleAttachment[]
   uploadedDriverAttachments  DriverAttachment[]
   uploadedCarrierAttachments CarrierAttachment[]
@@ -560,13 +561,19 @@ model Claim {
   timeTo    String
 
   // calculation
-  drivenDays         Decimal @db.Decimal(6, 2) // DniJezdne (can be fractional)
-  mileage            Decimal @db.Decimal(10, 2) // Przebieg (km)
-  kmPerDay           Decimal @db.Decimal(8, 2)
-  kmGuaranteed       Decimal @db.Decimal(10, 2) // KmGwarant
-  kmDifference       Decimal @db.Decimal(10, 2)
-  paymentEur         Decimal @db.Decimal(12, 2) // Doplata
-  ratePerKmEffective Decimal @db.Decimal(6, 4) // weighted EUR/km
+  drivenDays         Decimal  @db.Decimal(6, 2) // DniJezdne (can be fractional)
+  mileage            Decimal  @db.Decimal(10, 2) // Przebieg (km)
+  kmPerDay           Decimal  @db.Decimal(8, 2)
+  kmGuaranteed       Decimal  @db.Decimal(10, 2) // KmGwarant
+  kmDifference       Decimal  @db.Decimal(10, 2)
+  paymentEur         Decimal  @db.Decimal(12, 2) // Doplata
+  /// Immutable snapshot of the km-calc payment (Doplata) at submit time — same
+  /// type as `paymentEur` (Decimal @db.Decimal(12, 2); money is Decimal, never
+  /// Float — see docs/12 §Decimal). Set once at submit and never mutated; powers
+  /// the "Korekty weryfikatora" diff (orig vs verifier-corrected payment) in the
+  /// Maksim authorization email. Nullable: pre-existing rows have no snapshot.
+  origPaymentEur     Decimal? @db.Decimal(12, 2)
+  ratePerKmEffective Decimal  @db.Decimal(6, 4) // weighted EUR/km
   breakdown          Json? // monthly breakdown (totalDays, kmGwarant, stawka, ...)
 
   // status & workflow
@@ -574,6 +581,16 @@ model Claim {
   statusChangedAt DateTime?
   decidedById     String?     @db.Uuid
   decidedBy       User?       @relation("ClaimDecidedBy", fields: [decidedById], references: [id])
+
+  // verification checkpoint ("Zapisz weryfikację") — the pracownik persists his
+  // corrections BEFORE any accept/reject decision. `verifiedAt` = when the
+  // verification was last saved/confirmed (NULL = not verified yet). Reset to
+  // NULL by the delegation auto-recalc (owned by the api). `verifiedBy` mirrors
+  // the `decidedBy` pattern above (optional FK, ON DELETE SET NULL, no index —
+  // same as the sibling).
+  verifiedAt   DateTime?
+  verifiedById String?   @db.Uuid
+  verifiedBy   User?     @relation("ClaimVerifiedBy", fields: [verifiedById], references: [id])
 
   comment     String?
   // NrZlecenia — set only on transition to ZAAKCEPTOWANO; carrier-side

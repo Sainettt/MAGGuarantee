@@ -28,6 +28,7 @@ import type {
   SubmitClaimDto,
   SubmitReklamacjaDto,
   UpdateClaimDto,
+  VerifyClaimDto,
 } from '@magguarantee/shared';
 import {
   canSubmitByDuration,
@@ -569,6 +570,11 @@ export class ClaimsService {
           origDateStart: dateStart,
           origDateEnd: dateEnd,
           origMileage: mileage,
+          // Immutable submit-time payment snapshot — captured once so the
+          // authorization-email «Korekty weryfikatora» diff and the History tab
+          // can compare the carrier's originally-derived dopłata against the
+          // verifier's applied amount. Same write-once contract as origMileage.
+          origPaymentEur: paymentEur,
           // Immutable time-window snapshot — same values that go into the
           // working `timeFrom/timeTo` columns above (`dto.timeFrom/timeTo`).
           // Write-once at submit; the verifier PATCH never overwrites these.
@@ -764,6 +770,12 @@ export class ClaimsService {
       breakdown,
       // Stamp the explicit result so the frontend reads «przeliczono» directly.
       autoRecalcState: 'applied',
+      // Checkpoint invalidated — the underlying data changed (period/mileage/
+      // km-calc were rewritten), so any prior «Zapisz weryfikację» stamp no
+      // longer reflects the current numbers. Reset to NULL so the verifier must
+      // re-confirm before the (now-blocked) decision transitions unlock again.
+      verifiedAt: null,
+      verifiedById: null,
       // `timeFrom/timeTo` and the `orig*` snapshots are intentionally NOT touched.
     });
 
@@ -814,6 +826,12 @@ export class ClaimsService {
     // The `before` snapshot is stashed into the ambient `AuditContext` so
     // the interceptor's writer picks it up — no manual log() call here.
     const existing = await this._validateClaimUpdate(nrZgl, dto);
+    // Verification gate: a decision (akceptacja / odmowa / OCZEKUJE_* request)
+    // FROM `NA_WERYFIKACJI` is blocked until the pracownik has saved the
+    // verification checkpoint (`verifiedAt` stamped). Transitions FROM
+    // `OCZEKUJE_NA_AUTORYZACJE` and `REKLAMACJA` are NOT gated (the claim was
+    // already verified before it left NA_WERYFIKACJI). 422 CLAIM_NOT_VERIFIED.
+    this._assertVerifiedIfNaWeryfikacji(existing);
     const recalc = await this._recalcClaim(existing, dto);
     // Authoritative accept-guard (Fix 3): a claim may only be ACCEPTED when the
     // (re)calculated km-difference shows an under-run, i.e. compensation is
@@ -839,6 +857,95 @@ export class ClaimsService {
     });
 
     return this.toDto(updated);
+  }
+
+  // ── Verification checkpoint («Zapisz weryfikację») ──────
+
+  /**
+   * `PATCH /claims/:nrZgl/verification` — the pracownik's «Zapisz weryfikację»
+   * checkpoint per docs/13-api-design.md#claims.
+   *
+   * The verifier persists their corrections to a `NA_WERYFIKACJI` claim BEFORE
+   * making any decision. Stamps `verifiedAt`/`verifiedById`, which UNGATES the
+   * decision transitions (akceptacja / odmowa) and the kwota-Maksima
+   * authorization request FROM `NA_WERYFIKACJI` (all 422 `CLAIM_NOT_VERIFIED`
+   * until verified). Steps:
+   *
+   *   1. Load the claim (404 if missing).
+   *   2. Require `status === NA_WERYFIKACJI` (422 otherwise) — a checkpoint only
+   *      makes sense in the verification window.
+   *   3. Re-run km-calc when the body carries a math-affecting correction (the
+   *      SAME `_recalcClaim` the decision PATCH uses; an EMPTY body → recalc is
+   *      `null` ⇒ "confirmed as-is", no math churn).
+   *   4. Persist: the corrections (via the SHARED `_applyCorrectionsToPatch`, so
+   *      the field-by-field rules match the decision PATCH exactly) + the recalc
+   *      outputs (when math ran) + the `verifiedAt`/`verifiedById` stamp, inside
+   *      the ambient `AuditContext` transaction (setBefore + updateWithin —
+   *      mirror of `update` / `requestAuthorization`).
+   *
+   * Repeatable: a second call overwrites the stamp + corrections (re-verify).
+   * No email — this is a pure internal checkpoint. Does NOT change status (the
+   * state machine is untouched; verification is a flag, not a status).
+   */
+  async verifyClaim(
+    user: AuthUser,
+    nrZgl: string,
+    dto: VerifyClaimDto,
+  ): Promise<ClaimDto> {
+    const existing = await this.claims.findByNrZgl(nrZgl);
+    if (!existing) {
+      throw new NotFoundException('Wniosek nie znaleziony');
+    }
+
+    // A checkpoint is only valid in the verification window. Any other status
+    // is a 422 with a friendly Polish message (mirrors the sibling guards).
+    if (existing.status !== 'NA_WERYFIKACJI') {
+      throw new UnprocessableEntityException(
+        'Weryfikację można zapisać tylko dla wniosku w statusie „Na weryfikacji".',
+      );
+    }
+
+    // Re-run km-calc only when the body carries a math-affecting correction.
+    // An empty body ⇒ `touchesMath: false` ⇒ `recalc === null` ⇒ "confirmed
+    // as-is": we stamp `verifiedAt` without touching any calc column.
+    const recalc = await this._recalcClaim(existing, dto);
+
+    const now = new Date();
+    const patch: UpdateClaimData = {
+      verifiedAt: now,
+      verifiedById: user.sub,
+    };
+    // Corrections + recalc outputs — SAME field-by-field logic as the decision
+    // PATCH (periodAdjustedByVerifier + autoRecalcState:'none' on date edits;
+    // hoursAdjustedValue-only on hours edits; amountRequested mirror on recalc).
+    const corrections = extractCorrectionFields(dto);
+    this._applyCorrectionsToPatch(patch, corrections, recalc);
+
+    AuditContext.setBefore(this._snapshotForAudit(existing));
+
+    // Ambient tx opened by the `@Audit('claim.verify')` interceptor — the row
+    // update + audit-row insert commit atomically (mirror of update()).
+    const txLike = this.prisma.tx as unknown as TransactionLike;
+    const updated = await this.claims.updateWithin(txLike, existing.id, patch);
+
+    return this.toDto(updated);
+  }
+
+  /**
+   * Verification gate. Throws 422 `CLAIM_NOT_VERIFIED` when a decision /
+   * authorization request is attempted on a `NA_WERYFIKACJI` claim that has not
+   * yet been verified (no `verifiedAt` stamp). No-op for any other status — a
+   * claim in `OCZEKUJE_NA_AUTORYZACJE` / `REKLAMACJA` was already verified
+   * before it left NA_WERYFIKACJI, so those transitions are NOT gated. Pure
+   * decision helper — no IO.
+   */
+  private _assertVerifiedIfNaWeryfikacji(existing: ClaimRow): void {
+    if (existing.status === 'NA_WERYFIKACJI' && !existing.verifiedAt) {
+      throw new UnprocessableEntityException({
+        code: 'CLAIM_NOT_VERIFIED',
+        message: 'Najpierw zapisz weryfikację danych wniosku.',
+      });
+    }
   }
 
   // ── Request authorization (Phase 4.2) ───────────────────
@@ -890,6 +997,11 @@ export class ClaimsService {
     // friendly Polish message on any illegal transition (e.g. when the claim
     // is already pending authorization, or has been decided).
     assertLegalTransition(existing.status, 'OCZEKUJE_NA_AUTORYZACJE');
+
+    // Verification gate: the only legal predecessor is `NA_WERYFIKACJI`, so the
+    // request-authorization handshake is likewise blocked until the pracownik
+    // saved the verification checkpoint. 422 CLAIM_NOT_VERIFIED.
+    this._assertVerifiedIfNaWeryfikacji(existing);
 
     const now = new Date();
     const token = randomUUID();
@@ -1025,6 +1137,12 @@ export class ClaimsService {
     const dniWTrasie = row.drivenDays.toFixed(2);
     const deeplink = `${appUrl.replace(/\/$/, '')}/employee/claims/${encodeURIComponent(row.nrZgl)}`;
 
+    // «Korekty weryfikatora» diff — orig carrier data vs the currently-applied
+    // (verified) data. Only rows that actually changed are included; when the
+    // verifier confirmed the claim as-is the array is empty and the template
+    // omits the section entirely.
+    const korekty = this._buildAuthorizationKorekty(row);
+
     // No `kwotaMaksima` — the request email no longer carries an amount
     // (Maksim decides it in his reply). Matches legacy `Code.gs:6010
     // sendAuthorizationRequest`, which also sent no amount in the request.
@@ -1039,7 +1157,93 @@ export class ClaimsService {
       dniWTrasie,
       comment: dto.comment,
       deeplink,
+      // Pass the diff ONLY when non-empty so the template renders the section
+      // solely when there really were verifier corrections.
+      ...(korekty.length > 0 ? { korekty } : {}),
     });
+  }
+
+  /**
+   * Builds the «Korekty weryfikatora» diff for the authorization email — the
+   * carrier's original submit data (`orig*` snapshots) vs the currently-applied
+   * (verified) values on the row. Emits ONE preformatted `{label, from, to}`
+   * row per field the verifier actually changed; a field whose `orig*` snapshot
+   * is `null` (legacy row) or equals the current value is skipped. When nothing
+   * changed the array is empty and the caller omits the section entirely.
+   *
+   * Rows (in display order):
+   *  - Okres      — origDateStart/origDateEnd vs dateStart/dateEnd (dd.MM.yyyy,
+   *                 a single combined row emitted when EITHER boundary differs),
+   *  - Godziny    — origTimeFrom/origTimeTo vs timeFrom/timeTo (HH:mm range),
+   *  - Przebieg   — origMileage vs mileage ('X km'),
+   *  - Korekta godzin — origHoursAdjusted vs hoursAdjustedValue ('X h'),
+   *  - Dopłata    — origPaymentEur vs amountRequested (EUR, 2dp).
+   *
+   * Pure projection — no IO. Kept out of the template so the JSX stays pure.
+   */
+  private _buildAuthorizationKorekty(
+    row: ClaimRow,
+  ): Array<{ label: string; from: string; to: string }> {
+    const korekty: Array<{ label: string; from: string; to: string }> = [];
+
+    // Okres — single row when either boundary moved (needs both orig snapshots).
+    if (row.origDateStart !== null && row.origDateEnd !== null) {
+      const startMoved = !sameUtcDay(row.origDateStart, row.dateStart);
+      const endMoved = !sameUtcDay(row.origDateEnd, row.dateEnd);
+      if (startMoved || endMoved) {
+        korekty.push({
+          label: 'Okres',
+          from: `${formatDdMmYyyy(row.origDateStart)} – ${formatDdMmYyyy(row.origDateEnd)}`,
+          to: `${formatDdMmYyyy(row.dateStart)} – ${formatDdMmYyyy(row.dateEnd)}`,
+        });
+      }
+    }
+
+    // Godziny — single combined range row when either bound differs.
+    if (row.origTimeFrom !== null && row.origTimeTo !== null) {
+      if (row.origTimeFrom !== row.timeFrom || row.origTimeTo !== row.timeTo) {
+        korekty.push({
+          label: 'Godziny',
+          from: `${row.origTimeFrom} – ${row.origTimeTo}`,
+          to: `${row.timeFrom} – ${row.timeTo}`,
+        });
+      }
+    }
+
+    // Przebieg.
+    if (row.origMileage !== null && row.origMileage !== row.mileage) {
+      korekty.push({
+        label: 'Przebieg',
+        from: `${row.origMileage} km`,
+        to: `${row.mileage} km`,
+      });
+    }
+
+    // Korekta godzin (hours-adjustment).
+    if (
+      row.origHoursAdjusted !== null &&
+      row.origHoursAdjusted !== (row.hoursAdjustedValue ?? 0)
+    ) {
+      korekty.push({
+        label: 'Korekta godzin',
+        from: `${row.origHoursAdjusted} h`,
+        to: `${row.hoursAdjustedValue ?? 0} h`,
+      });
+    }
+
+    // Dopłata — orig submit-time payment vs currently-applied amountRequested.
+    if (
+      row.origPaymentEur !== null &&
+      round2(row.origPaymentEur) !== round2(row.amountRequested)
+    ) {
+      korekty.push({
+        label: 'Dopłata',
+        from: `${row.origPaymentEur.toFixed(2)} EUR`,
+        to: `${row.amountRequested.toFixed(2)} EUR`,
+      });
+    }
+
+    return korekty;
   }
 
   /**
@@ -1413,6 +1617,9 @@ export class ClaimsService {
         : null,
       decidedById: row.decidedById,
       decidedBy: row.decidedBy,
+      verifiedAt: row.verifiedAt ? row.verifiedAt.toISOString() : null,
+      verifiedById: row.verifiedById,
+      verifiedBy: row.verifiedBy,
       comment: row.comment,
       orderNumber: row.orderNumber,
       orderDate: row.orderDate ? toDateString(row.orderDate) : null,
@@ -1436,6 +1643,9 @@ export class ClaimsService {
         : null,
       origDateEnd: row.origDateEnd ? row.origDateEnd.toISOString() : null,
       origMileage: row.origMileage,
+      // Immutable submit-time payment snapshot — Decimal(12,2) already narrowed
+      // to `number | null` by the repository's `decimalToNumber`.
+      origPaymentEur: row.origPaymentEur,
       // Immutable carrier time-window snapshot — `HH:mm` strings forwarded
       // as-is (set once at submit, never mutated by the verifier PATCH).
       origTimeFrom: row.origTimeFrom,
@@ -1575,17 +1785,8 @@ export class ClaimsService {
    */
   private async _recalcClaim(
     existing: ClaimRow,
-    dto: UpdateClaimDto,
-  ): Promise<{
-    drivenDays: number;
-    kmGuaranteed: number;
-    kmDifference: number;
-    paymentEur: number;
-    ratePerKmEffective: number;
-    kmPerDay: number;
-    breakdown: KmCalcBreakdown;
-    mileage: number;
-  } | null> {
+    dto: UpdateClaimDto | VerifyClaimDto,
+  ): Promise<RecalcOutputs | null> {
     const corrections = extractCorrectionFields(dto);
     if (!corrections.touchesMath) {
       return null;
@@ -1682,41 +1883,28 @@ export class ClaimsService {
   }
 
   /**
-   * Composes the actual `UpdateClaimData` patch from the validated DTO and
-   * the optional recalc output. Pure function — no IO, no throws. Tested
-   * indirectly via the update() spec.
+   * Applies the verifier's correction fields + optional recalc outputs onto a
+   * mutable `UpdateClaimData` patch. Shared by BOTH the decision PATCH
+   * (`_buildUpdatePatch`) and the verification checkpoint (`verifyClaim`) so the
+   * field-by-field persist rules live in exactly one place:
+   *
+   *  - date edits set `periodAdjustedByVerifier=true` + reset `autoRecalcState`
+   *    to `'none'` (the delegation auto-recalc no longer silently overwrites a
+   *    human-corrected period; the «wymaga uwagi» badge goes dark),
+   *  - a `hoursAdjusted` correction writes ONLY `hoursAdjustedValue` (the
+   *    immutable carrier snapshot `origHoursAdjusted` is never touched),
+   *  - when the math re-ran (`recalc != null`) the km-calc outputs are written
+   *    and `amountRequested` is re-mirrored to `paymentEur` (the submit-time
+   *    invariant), so a stale amount never leaks into the kwota-Maksima email or
+   *    the reklamacja amount cap.
+   *
+   * Pure mutation — no IO, no throws.
    */
-  private _buildUpdatePatch(
-    existing: ClaimRow,
-    dto: UpdateClaimDto,
-    recalc:
-      | {
-          drivenDays: number;
-          kmGuaranteed: number;
-          kmDifference: number;
-          paymentEur: number;
-          ratePerKmEffective: number;
-          kmPerDay: number;
-          breakdown: KmCalcBreakdown;
-          mileage: number;
-        }
-      | null,
-    user: AuthUser,
-  ): UpdateClaimData {
-    const patch: UpdateClaimData = {};
-    const target = translateSyntheticStatus(dto.targetStatus);
-    const now = new Date();
-
-    // Status & workflow.
-    patch.status = target;
-    patch.statusChangedAt = now;
-    patch.decidedById = user.sub;
-
-    // Correction fields — written only when the verifier actually changed
-    // them. Mirror them onto the row regardless of recalc, because some
-    // edits (e.g. timeFrom only) can affect calc while others (e.g. dateEnd
-    // pushed forward by a day) might.
-    const corrections = extractCorrectionFields(dto);
+  private _applyCorrectionsToPatch(
+    patch: UpdateClaimData,
+    corrections: ExtractedCorrections,
+    recalc: RecalcOutputs | null,
+  ): void {
     if (corrections.dateStart) {
       const d = isoDateToMidnightUtc(corrections.dateStart);
       if (d) patch.dateStart = d;
@@ -1725,12 +1913,9 @@ export class ClaimsService {
       const d = isoDateToMidnightUtc(corrections.dateEnd);
       if (d) patch.dateEnd = d;
     }
-    // Phase 7 REWORK (2026-06-20 #4) — a human edited the PERIOD (`dateStart`
-    // and/or `dateEnd`). Mark it so a later delegation `zjechal` auto-recalc no
-    // longer silently overwrites the verifier's correction (decision #6). The
-    // human has now taken over the period, so reset `autoRecalcState` to `none`
-    // — the «wymaga uwagi» badge (driven by a prior `skipped`) goes dark, since
-    // the attention it flagged has been addressed (REWORK 2026-06-20 #4).
+    // A human edited the PERIOD (`dateStart`/`dateEnd`) — mark it so a later
+    // delegation `zjechal` auto-recalc no longer overwrites the correction, and
+    // reset `autoRecalcState` to `none` (the flagged attention is now handled).
     if (
       corrections.dateStart !== undefined ||
       corrections.dateEnd !== undefined
@@ -1742,15 +1927,13 @@ export class ClaimsService {
     if (corrections.timeTo) patch.timeTo = corrections.timeTo;
     if (corrections.mileage !== undefined) patch.mileage = corrections.mileage;
     if (corrections.hoursAdjusted !== undefined) {
-      // Verifier PATCH drives ONLY `hoursAdjustedValue` — `origHoursAdjusted`
-      // is the immutable carrier snapshot and is never written here. Prisma
-      // coerces the `number` into `Decimal(5,2)` at the persist boundary.
-      // DTO range is bounded by `HoursAdjustedSchema.max(999.99)` so we don't
-      // bounce off a Postgres numeric-overflow error.
+      // Drives ONLY `hoursAdjustedValue` — `origHoursAdjusted` is the immutable
+      // carrier snapshot, never written here. Prisma coerces `number` →
+      // `Decimal(5,2)`; the DTO range is bounded by `HoursAdjustedSchema`.
       patch.hoursAdjustedValue = corrections.hoursAdjusted;
     }
 
-    // km-calc outputs (only if recalc actually ran).
+    // km-calc outputs — only when the math actually re-ran.
     if (recalc) {
       patch.drivenDays = recalc.drivenDays;
       patch.kmPerDay = recalc.kmPerDay;
@@ -1759,19 +1942,36 @@ export class ClaimsService {
       patch.paymentEur = recalc.paymentEur;
       patch.ratePerKmEffective = recalc.ratePerKmEffective;
       patch.breakdown = recalc.breakdown;
-      // Restore the submit-time invariant `amountRequested === paymentEur`
-      // whenever the math re-runs. Submit derives `amountRequested: paymentEur`
-      // and `_applyDelegationRecalc` mirrors it; without this line a verifier km
-      // edit moved `paymentEur` but left `amountRequested` stale, and the stale
-      // value leaked into the kwota-Maksima authorization email
-      // (`_notifyAuthorizationRequest` reads `row.amountRequested` at send time)
-      // and the reklamacja amount cap. The human verifier is authoritative — if
-      // a transition FROM `OCZEKUJE_NA_AUTORYZACJE` carries correction fields the
-      // recalc runs and we keep mirroring, so the authorization email (sent from
-      // `request-authorization`, i.e. WHEN entering OCZEKUJE_*) always reflects
-      // the freshest amount.
+      // Restore the submit-time invariant `amountRequested === paymentEur`.
       patch.amountRequested = recalc.paymentEur;
     }
+  }
+
+  /**
+   * Composes the actual `UpdateClaimData` patch from the validated DTO and
+   * the optional recalc output. Pure function — no IO, no throws. Tested
+   * indirectly via the update() spec.
+   */
+  private _buildUpdatePatch(
+    existing: ClaimRow,
+    dto: UpdateClaimDto,
+    recalc: RecalcOutputs | null,
+    user: AuthUser,
+  ): UpdateClaimData {
+    const patch: UpdateClaimData = {};
+    const target = translateSyntheticStatus(dto.targetStatus);
+    const now = new Date();
+
+    // Status & workflow.
+    patch.status = target;
+    patch.statusChangedAt = now;
+    patch.decidedById = user.sub;
+
+    // Correction fields + recalc outputs — the SAME logic the verification
+    // checkpoint (`verifyClaim`) applies. Extracted into `_applyCorrectionsToPatch`
+    // so both paths stay byte-identical (no duplicated field-by-field rules).
+    const corrections = extractCorrectionFields(dto);
+    this._applyCorrectionsToPatch(patch, corrections, recalc);
 
     // Decision payload per discriminator branch.
     switch (dto.targetStatus) {
@@ -2037,6 +2237,10 @@ export class ClaimsService {
       status: row.status,
       statusChangedAt: row.statusChangedAt?.toISOString() ?? null,
       decidedById: row.decidedById,
+      // Verification checkpoint — captured so the before/after diff shows the
+      // «Zapisz weryfikację» stamp (and the auto-recalc reset to null).
+      verifiedAt: row.verifiedAt?.toISOString() ?? null,
+      verifiedById: row.verifiedById,
       dateStart: row.dateStart.toISOString(),
       dateEnd: row.dateEnd.toISOString(),
       timeFrom: row.timeFrom,
@@ -2340,6 +2544,18 @@ function toDateString(d: Date): string {
 }
 
 /**
+ * Format a UTC-midnight date as `dd.MM.yyyy` for the «Korekty weryfikatora»
+ * email diff (Polish date convention). Pure — reads the UTC components so the
+ * output matches the stored calendar day regardless of the server timezone.
+ */
+function formatDdMmYyyy(d: Date): string {
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const yyyy = d.getUTCFullYear();
+  return `${dd}.${mm}.${yyyy}`;
+}
+
+/**
  * "Today" as UTC midnight of the current calendar date in the business
  * timezone (Europe/Warsaw) is now sourced from the shared
  * `startOfBusinessTodayUtc()` helper (`@magguarantee/shared`) so the API and
@@ -2400,35 +2616,65 @@ function translateSyntheticStatus(
 }
 
 /**
+ * The verifier-correction carrier — the common optional-field shape that the
+ * decision PATCH (`UpdateClaimDto`, a discriminated union) and the verification
+ * checkpoint (`VerifyClaimDto`, a flat object) BOTH expose. Both `verifyClaim`
+ * and `_recalcClaim`/`_buildUpdatePatch` accept this shape so the shared
+ * `extractCorrectionFields` property-sniff is honestly typed rather than a
+ * blind `as` cast. Every field is optional — an empty object is legal (the
+ * "confirmed as-is" checkpoint case).
+ */
+type CorrectionCarrier = Partial<{
+  dateStart: string;
+  dateEnd: string;
+  timeFrom: string;
+  timeTo: string;
+  mileage: number;
+  hoursAdjusted: number;
+}>;
+
+/** Extracted correction fields + whether any of them affects km-calc math. */
+interface ExtractedCorrections extends CorrectionCarrier {
+  touchesMath: boolean;
+}
+
+/**
+ * km-calc outputs re-derived when a verifier touches a math-affecting field —
+ * the return shape shared by `_recalcClaim` (decision PATCH) and the
+ * verification checkpoint. Persisted verbatim onto the claim row (plus the
+ * `amountRequested` mirror derived from `paymentEur`).
+ */
+interface RecalcOutputs {
+  drivenDays: number;
+  kmGuaranteed: number;
+  kmDifference: number;
+  paymentEur: number;
+  ratePerKmEffective: number;
+  kmPerDay: number;
+  breakdown: KmCalcBreakdown;
+  mileage: number;
+}
+
+/**
  * Extract the verifier-correction fields from the DTO and indicate whether
  * any of them affects the km-calc math (true → caller MUST re-run the
  * calc engine; false → existing kmGuaranteed/paymentEur stay).
  *
- * Branches that don't carry correction fields (e.g. `REKLAMACJA_ODRZUCONO`
- * which is comment-only) return `touchesMath: false` and empty correction
- * slots.
+ * Accepts BOTH the decision PATCH (`UpdateClaimDto` — a discriminated union
+ * whose optional correction fields live only on some branches) and the
+ * verification checkpoint (`VerifyClaimDto` — a flat object). The union member
+ * without correction fields (`ODRZUCONO`, comment-only) shares no keys with the
+ * `CorrectionCarrier` shape, so we widen to the union type here and do the
+ * property-presence sniff internally. Branches / bodies that don't carry
+ * correction fields (e.g. `REKLAMACJA_ODRZUCONO`, or an empty checkpoint body)
+ * return `touchesMath: false` and empty correction slots.
  */
-function extractCorrectionFields(dto: UpdateClaimDto): {
-  dateStart?: string;
-  dateEnd?: string;
-  timeFrom?: string;
-  timeTo?: string;
-  mileage?: number;
-  hoursAdjusted?: number;
-  touchesMath: boolean;
-} {
-  // Only some discriminator branches carry the correction fields. We
-  // narrow via a property-presence check — TS doesn't help us here because
-  // `UpdateClaimDto` is a union without a tagged-shape on the optional
-  // fields.
-  const r = dto as Partial<{
-    dateStart: string;
-    dateEnd: string;
-    timeFrom: string;
-    timeTo: string;
-    mileage: number;
-    hoursAdjusted: number;
-  }>;
+function extractCorrectionFields(
+  dto: UpdateClaimDto | VerifyClaimDto,
+): ExtractedCorrections {
+  // The union has no single shape carrying every correction field, so read
+  // them off the widened `CorrectionCarrier` view (property-presence sniff).
+  const r = dto as CorrectionCarrier;
   const touchesMath =
     r.dateStart !== undefined ||
     r.dateEnd !== undefined ||

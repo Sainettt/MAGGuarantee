@@ -907,7 +907,8 @@
           "decisionRequired": "Wybierz decyzję, aby zapisać wniosek.",
           "terminalState": "Wniosek jest w stanie końcowym — brak dostępnych decyzji.",
           "guaranteeMetHint": "Gwarancja wyjeżdżona — wniosek można tylko odrzucić.",
-          "progExceededHint": "Dopłata przekracza próg autoryzacji ({prog} przy {days, plural, one {# dniu} few {# dniach} many {# dniach} other {# dnia}} w trasie) — zalecana autoryzacja Maksima."
+          "progExceededHint": "Dopłata przekracza próg autoryzacji ({prog} przy {days, plural, one {# dniu} few {# dniach} many {# dniach} other {# dnia}} w trasie) — zalecana autoryzacja Maksima.",
+          "verifiedBadge": "Zweryfikowano {date} przez {name}"
         },
         "linkedDelegation": {
           "heading": "Powiązany wyjazd",
@@ -955,7 +956,13 @@
           "submit": "Zatwierdź",
           "submitting": "Zapisywanie…",
           "savedToast": "Zapisano",
-          "errorToast": "Nie udało się zapisać"
+          "errorToast": "Nie udało się zapisać",
+          "verifyButton": "Zapisz weryfikację",
+          "verifiedToast": "Zapisano weryfikację",
+          "verifyRequiredHint": "Zapisz weryfikację, aby podjąć decyzję",
+          "verifyDirtyHint": "Masz niezapisane korekty — zapisz weryfikację",
+          "boardSumHint": "Wg tablicy przebiegów: {km} km",
+          "boardSumApply": "Zastosuj"
         },
         "history": {
           "empty": "Brak historii zmian.",

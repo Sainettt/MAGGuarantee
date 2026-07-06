@@ -28,7 +28,13 @@
 // the layout order change.
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { AlertTriangle, Loader2, Lock, Pencil } from 'lucide-react';
+import {
+  AlertTriangle,
+  BadgeCheck,
+  Loader2,
+  Lock,
+  Pencil,
+} from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
@@ -52,6 +58,7 @@ import {
   type RequestAuthorizationDto,
   type SetAuthorizationAmountDto,
   type UpdateClaimDto,
+  type VerifyClaimDto,
 } from '@magguarantee/shared';
 
 import { BreakdownTable } from '@/components/carrier/BreakdownTable';
@@ -79,6 +86,7 @@ import {
   useRequestAuthorization,
   useSetAuthorizationAmount,
   useUpdateClaim,
+  useVerifyClaim,
 } from '@/lib/hooks/useClaims';
 import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
 import { cn } from '@/lib/utils';
@@ -230,6 +238,38 @@ function cleanUpdatePayload(values: FormValues): UpdateClaimDto {
   }
   return out as UpdateClaimDto;
 }
+
+/**
+ * Build the `PATCH /verification` body from the current correction form values.
+ * Mirrors `cleanUpdatePayload`'s correction block exactly — omit empty / NaN so
+ * the schema's `.strict()` doesn't choke. An all-empty result is the legal
+ * "confirm as-is" body (`{}`).
+ */
+function buildVerifyPayload(values: FormValues): VerifyClaimDto {
+  const out: Record<string, unknown> = {};
+  const include = (k: string, v: unknown) => {
+    if (v === '' || v === undefined || v === null) return;
+    if (typeof v === 'number' && !Number.isFinite(v)) return;
+    out[k] = v;
+  };
+  include('dateStart', values.dateStart);
+  include('dateEnd', values.dateEnd);
+  include('timeFrom', values.timeFrom);
+  include('timeTo', values.timeTo);
+  include('mileage', values.mileage);
+  include('hoursAdjusted', values.hoursAdjusted);
+  return out as VerifyClaimDto;
+}
+
+/** The correction fields the verification checkpoint gate watches for dirtiness. */
+const CORRECTION_FIELDS = [
+  'dateStart',
+  'dateEnd',
+  'timeFrom',
+  'timeTo',
+  'mileage',
+  'hoursAdjusted',
+] as const;
 
 // ── Public component ────────────────────────────────────────────────
 // Keeps the <Dialog> mounted across the whole modal lifetime so the
@@ -505,6 +545,67 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
     updateM.mutate({ nrZgl: claim.nrZgl, body: payload });
   };
 
+  // ── Verifier checkpoint (verifier-checkpoint feature) ──
+  // A claim in NA_WERYFIKACJI must be «zweryfikowany» before the verifier may
+  // take a decision or request Maksim authorization (server gate:
+  // 422 CLAIM_NOT_VERIFIED). This mirrors that gate in the UI so the verifier
+  // can't select a decision until they save the checkpoint.
+  const needsVerification = claim.status === 'NA_WERYFIKACJI';
+  const isVerified = claim.verifiedAt != null;
+  const dirtyFields = form.formState.dirtyFields as Partial<
+    Record<keyof FormValues, boolean>
+  >;
+  const correctionsDirty = CORRECTION_FIELDS.some((f) => dirtyFields[f]);
+  // Gate is live only for NA_WERYFIKACJI; other statuses behave as before.
+  const decisionGated =
+    needsVerification && (!isVerified || correctionsDirty);
+  const gateHint = correctionsDirty
+    ? tEdit('verifyDirtyHint')
+    : tEdit('verifyRequiredHint');
+
+  const verifyM = useVerifyClaim(claim.nrZgl, {
+    onSuccess: () => {
+      toast.success(tEdit('verifiedToast'));
+      // Re-baseline the form to its current values so the correction fields go
+      // clean and the decyzja gate (correctionsDirty) unlocks. The detail-query
+      // invalidation refetches the claim (now carrying the fresh verifiedAt),
+      // but ModalBody is keyed on claim.id and won't re-mount, so the mount-time
+      // getDefaults won't re-baseline — do it explicitly here.
+      form.reset(form.getValues());
+    },
+    onError: (err) => {
+      const msg =
+        err instanceof ApiResponseError && err.status >= 400 && err.status < 500
+          ? err.message
+          : tCommon('errorGeneric');
+      toast.error(msg);
+    },
+  });
+
+  const handleVerifyClick = () => {
+    verifyM.mutate(buildVerifyPayload(form.getValues()));
+  };
+
+  // ── Board-sum hint (verifier-checkpoint feature) ──
+  // A SECOND lightweight preview with the SAME debounced body but WITHOUT
+  // `mileage` — the server responds with `mileage` = Σ VehicleDailyKm (board
+  // sum) over the dates. Lets the pracownik pull in daily-km rows the
+  // weryfikator added after submit. Distinct body ⇒ distinct query key ⇒ no
+  // collision with the main recalc preview above.
+  const boardSumBody = useMemo<PreviewClaimDto | null>(() => {
+    if (!needsVerification) return null;
+    if (debouncedPreviewBody === null) return null;
+    // Drop `mileage` so the server falls back to Σ VehicleDailyKm (board sum).
+    const rest: PreviewClaimDto = { ...debouncedPreviewBody };
+    delete rest.mileage;
+    return rest;
+  }, [needsVerification, debouncedPreviewBody]);
+
+  const boardSumQ = useClaimPreviewExisting(claim.nrZgl, boardSumBody, {
+    enabled: boardSumBody !== null,
+  });
+  const boardSum = boardSumQ.data?.mileage;
+
   // ── Mode transitions — focus management (§6.5.6) ──
   const enterEdit = () => {
     setMode('edit');
@@ -522,7 +623,8 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
     !targetStatus ||
     targets.length === 0 ||
     updateM.isPending ||
-    recalcState === 'loading';
+    recalcState === 'loading' ||
+    decisionGated;
 
   const errs = form.formState.errors as Record<
     string,
@@ -565,6 +667,23 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
         <p className="mt-0.5 text-xs text-text-sub">
           {t('submittedAt', { date: formatDateFull(claim.createdAt) })}
         </p>
+
+        {/* Verification stamp — visible once the checkpoint is saved. Vanishes
+            on its own when the delegation auto-recalc resets verifiedAt to
+            null (no extra state to manage). */}
+        {claim.verifiedAt && (
+          <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success-dark dark:bg-success/15 dark:text-success">
+            <BadgeCheck size={13} aria-hidden className="shrink-0" />
+            {t('unified.verifiedBadge', {
+              date: formatDateFull(claim.verifiedAt),
+              name:
+                claim.verifiedBy?.name ??
+                claim.verifiedBy?.login ??
+                claim.verifiedById ??
+                '—',
+            })}
+          </p>
+        )}
       </header>
 
       {/* ── Body (scrolling) ── */}
@@ -593,6 +712,9 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
           previewNotYetLoaded={previewNotYetLoaded}
           errMsg={errMsg}
           tUnified={tUnified}
+          tEdit={tEdit}
+          showBoardSum={needsVerification}
+          boardSum={boardSum}
         />
 
         {/* ② Dopłata — locked / computed, live, ABOVE decyzja */}
@@ -629,10 +751,19 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
                 targets={availableTargets}
                 targetStatus={targetStatus}
                 postAuthorization={postAuthorization}
+                decisionGated={decisionGated}
                 errMsg={errMsg}
                 tEdit={tEdit}
                 tStatus={tStatus}
               />
+              {/* Verifier-checkpoint gate hint — the verifier must save the
+                  «Zapisz weryfikację» checkpoint (and re-save after any further
+                  correction) before a decision can be taken. */}
+              {decisionGated && (
+                <p className="text-xs text-text-sub" role="status">
+                  {gateHint}
+                </p>
+              )}
               {/* Acceptance gate hint — shown while recalc reports the
                   guarantee was met (no payout due ⇒ accept removed). */}
               {metGuarantee && (
@@ -644,14 +775,20 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
           )}
         </section>
 
-        {/* ④ Secondary sub-panel — Historia / Autoryzacja (§6.5.7) */}
-        <SecondaryPanel
-          claim={claim}
-          hasHistory={hasHistory}
-          hasAuthorization={hasAuthorization}
-          prog={prog}
-          onClose={onClose}
-        />
+        {/* ④ Secondary sub-panel — Historia / Autoryzacja (§6.5.7).
+            Explicit user request: render ONLY in edit mode — view mode shows
+            no bottom tabs. */}
+        {isEdit && (
+          <SecondaryPanel
+            claim={claim}
+            hasHistory={hasHistory}
+            hasAuthorization={hasAuthorization}
+            prog={prog}
+            authGated={decisionGated}
+            authGateHint={gateHint}
+            onClose={onClose}
+          />
+        )}
       </div>
 
       {/* ── Footer (non-scrolling) ── */}
@@ -667,6 +804,29 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
             >
               {tCommon('cancel')}
             </Button>
+            {/* «Zapisz weryfikację» — verifier-checkpoint stamp. Only for
+                NA_WERYFIKACJI in edit mode. Saving unlocks the decyzja gate. */}
+            {needsVerification && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleVerifyClick}
+                disabled={verifyM.isPending || recalcState === 'loading'}
+              >
+                {verifyM.isPending ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" aria-hidden />
+                    {tEdit('submitting')}
+                  </>
+                ) : (
+                  <>
+                    <BadgeCheck size={14} aria-hidden />
+                    {tEdit('verifyButton')}
+                  </>
+                )}
+              </Button>
+            )}
             <Button type="submit" size="sm" disabled={submitDisabled}>
               {updateM.isPending ? (
                 <>
@@ -792,6 +952,12 @@ interface FactPairsProps {
   previewNotYetLoaded: boolean;
   errMsg: (key: string) => string | undefined;
   tUnified: ReturnType<typeof useTranslations<'employee.claims.modal.unified'>>;
+  tEdit: ReturnType<typeof useTranslations<'employee.claims.modal.edit'>>;
+  /** Show the board-sum hint under the km input (NA_WERYFIKACJI edit only). */
+  showBoardSum: boolean;
+  /** Server-computed Σ VehicleDailyKm over the current dates — `undefined`
+   *  until the board-sum preview query resolves. */
+  boardSum: number | undefined;
 }
 
 function FactPairs({
@@ -803,6 +969,9 @@ function FactPairs({
   previewNotYetLoaded,
   errMsg,
   tUnified,
+  tEdit,
+  showBoardSum,
+  boardSum,
 }: FactPairsProps) {
   const isEdit = mode === 'edit';
 
@@ -939,6 +1108,34 @@ function FactPairs({
             />
           }
           error={errMsg('mileage')}
+          extra={
+            // Board-sum hint — Σ VehicleDailyKm from the server (board sum) over
+            // the current dates. Lets the pracownik pull in daily-km rows the
+            // weryfikator added after submit. Only in NA_WERYFIKACJI edit, and
+            // only once the query has data.
+            showBoardSum && boardSum !== undefined ? (
+              <div className="flex flex-wrap items-center gap-2 text-xs text-text-sub">
+                <span className="tabular-nums">
+                  {tEdit('boardSumHint', {
+                    km: Math.round(boardSum).toLocaleString('pl-PL'),
+                  })}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-[12px] font-semibold"
+                  onClick={() =>
+                    form.setValue('mileage', Math.round(boardSum), {
+                      shouldDirty: true,
+                    })
+                  }
+                >
+                  {tEdit('boardSumApply')}
+                </Button>
+              </div>
+            ) : undefined
+          }
         />
 
         {/* 6 — hoursAdjusted — INPUT ONLY (no declared cell, never `0`). */}
@@ -971,6 +1168,7 @@ function FactPairRow({
   verifierDisplay,
   input,
   error,
+  extra,
 }: {
   label: string;
   isEdit: boolean;
@@ -980,6 +1178,8 @@ function FactPairRow({
   verifierDisplay: string;
   input: React.ReactNode;
   error?: string;
+  /** Optional slot rendered under the verifier input (edit mode only). */
+  extra?: React.ReactNode;
 }) {
   if (!isEdit) {
     // View mode — single static row (the saved checked value).
@@ -1027,6 +1227,7 @@ function FactPairRow({
             {error}
           </p>
         )}
+        {extra}
       </div>
     </div>
   );
@@ -1226,6 +1427,7 @@ function DecisionFields({
   targets,
   targetStatus,
   postAuthorization,
+  decisionGated,
   errMsg,
   tEdit,
   tStatus,
@@ -1237,6 +1439,9 @@ function DecisionFields({
    *  (status OCZEKUJE_NA_AUTORYZACJE) — the kwota zatwierdzona becomes an
    *  editable input prefilled with kwota Maksima instead of a locked field. */
   postAuthorization: boolean;
+  /** True when the verifier-checkpoint gate is active (NA_WERYFIKACJI and not
+   *  yet verified / has unsaved corrections) — disables the decyzja select. */
+  decisionGated: boolean;
   errMsg: (key: string) => string | undefined;
   tEdit: ReturnType<typeof useTranslations<'employee.claims.modal.edit'>>;
   tStatus: ReturnType<
@@ -1258,6 +1463,7 @@ function DecisionFields({
             <Select
               id="claim-targetStatus"
               value={field.value}
+              disabled={decisionGated}
               onChange={(e) =>
                 field.onChange(e.target.value as ClaimDecisionTarget)
               }
@@ -1479,6 +1685,8 @@ function SecondaryPanel({
   hasHistory,
   hasAuthorization,
   prog,
+  authGated,
+  authGateHint,
   onClose,
 }: {
   claim: ClaimDto;
@@ -1486,6 +1694,10 @@ function SecondaryPanel({
   hasAuthorization: boolean;
   /** Live authorization threshold (EUR), surfaced in the request form. */
   prog: number;
+  /** Mirror of the decyzja gate — blocks the request-authorization send while
+   *  the verifier-checkpoint hasn't been saved. */
+  authGated: boolean;
+  authGateHint: string;
   onClose: () => void;
 }) {
   const t = useTranslations('employee.claims.modal.unified');
@@ -1509,7 +1721,13 @@ function SecondaryPanel({
         <h3 className="text-xs font-bold uppercase tracking-wider text-text-sub">
           {t('secondaryAuthorization')}
         </h3>
-        <AuthorizationSection claim={claim} prog={prog} onClose={onClose} />
+        <AuthorizationSection
+          claim={claim}
+          prog={prog}
+          authGated={authGated}
+          authGateHint={authGateHint}
+          onClose={onClose}
+        />
       </section>
     );
   }
@@ -1528,7 +1746,13 @@ function SecondaryPanel({
           <HistorySection claim={claim} />
         </TabsContent>
         <TabsContent value="authorization">
-          <AuthorizationSection claim={claim} prog={prog} onClose={onClose} />
+          <AuthorizationSection
+            claim={claim}
+            prog={prog}
+            authGated={authGated}
+            authGateHint={authGateHint}
+            onClose={onClose}
+          />
         </TabsContent>
       </Tabs>
     </section>
@@ -1680,11 +1904,16 @@ const AUTH_COMMENT_MAX = 2_000;
 function AuthorizationSection({
   claim,
   prog,
+  authGated,
+  authGateHint,
   onClose,
 }: {
   claim: ClaimDto;
   /** Live authorization threshold (EUR) surfaced in the request form. */
   prog: number;
+  /** Mirror of the decyzja gate — blocks the request-authorization send. */
+  authGated: boolean;
+  authGateHint: string;
   onClose: () => void;
 }) {
   const t = useTranslations('employee.claims.modal.auth');
@@ -1724,6 +1953,8 @@ function AuthorizationSection({
     <RequestAuthorizationForm
       claim={claim}
       prog={prog}
+      authGated={authGated}
+      authGateHint={authGateHint}
       onClose={onClose}
       t={t}
       tCommon={tCommon}
@@ -1846,6 +2077,8 @@ function SetAuthorizationAmountForm({
 function RequestAuthorizationForm({
   claim,
   prog,
+  authGated,
+  authGateHint,
   onClose,
   t,
   tCommon,
@@ -1853,6 +2086,9 @@ function RequestAuthorizationForm({
   claim: ClaimDto;
   /** Live authorization threshold (EUR) for this claim's driven-days band. */
   prog: number;
+  /** Mirror of the decyzja gate — blocks the send button + shows the hint. */
+  authGated: boolean;
+  authGateHint: string;
   onClose: () => void;
   t: ReturnType<typeof useTranslations<'employee.claims.modal.auth'>>;
   tCommon: ReturnType<typeof useTranslations<'common'>>;
@@ -1913,10 +2149,11 @@ function RequestAuthorizationForm({
   const commentLen = commentValue.length;
   const fieldId = useId();
 
-  // The button is disabled only while the request is in flight — an empty
-  // comment surfaces the (localized) required error on click rather than
-  // silently disabling submit.
-  const submitDisabled = requestM.isPending;
+  // The button is disabled while the request is in flight OR while the
+  // verifier-checkpoint gate is active (mirrors the server's CLAIM_NOT_VERIFIED
+  // gate). An empty comment otherwise surfaces the (localized) required error
+  // on click rather than silently disabling submit.
+  const submitDisabled = requestM.isPending || authGated;
 
   return (
     <div className="space-y-4">
@@ -1973,7 +2210,12 @@ function RequestAuthorizationForm({
         </p>
       </FormField>
 
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        {authGated && (
+          <p className="text-xs text-text-sub" role="status">
+            {authGateHint}
+          </p>
+        )}
         <Button
           type="button"
           size="sm"

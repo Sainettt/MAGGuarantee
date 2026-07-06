@@ -67,6 +67,11 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     statusChangedAt: null,
     decidedById: null,
     decidedBy: null,
+    // Verified by default so the auto-recalc reset test can assert the stamp
+    // gets cleared back to null when the underlying data changes.
+    verifiedAt: new Date('2026-05-10T09:00:00.000Z'),
+    verifiedById: 'u-verifier',
+    verifiedBy: { id: 'u-verifier', login: 'ver', name: 'Verifier' },
     comment: null,
     orderNumber: null,
     orderDate: null,
@@ -87,6 +92,7 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     origDateEnd: new Date('2026-05-09T00:00:00.000Z'),
     // origMileage === mileage ⇒ "carrier did not override" → re-prefill on recalc
     origMileage: 8_000,
+    origPaymentEur: 1_400,
     origTimeFrom: '08:00',
     origTimeTo: '18:00',
     origHoursAdjusted: 0,
@@ -200,6 +206,11 @@ describe('ClaimsService.recalcFromDelegation', () => {
     // timeFrom/timeTo NOT touched.
     expect(patch.timeFrom).toBeUndefined();
     expect(patch.timeTo).toBeUndefined();
+    // Verification checkpoint INVALIDATED — the underlying data changed, so any
+    // prior «Zapisz weryfikację» stamp is cleared and the verifier must
+    // re-confirm before the (now re-gated) decision transitions unlock.
+    expect(patch.verifiedAt).toBeNull();
+    expect(patch.verifiedById).toBeNull();
     // audit: autoRecalc (not skipped).
     expect(auditLogs.map((l) => l.action)).toEqual(['claim.autoRecalc']);
   });

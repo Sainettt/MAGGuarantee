@@ -16,6 +16,7 @@ import type {
   SubmitClaimDto,
   SubmitReklamacjaDto,
   UpdateClaimDto,
+  VerifyClaimDto,
 } from '@magguarantee/shared';
 
 import { apiJson } from './client';
@@ -157,5 +158,29 @@ export function setAuthorizationAmount(
   return apiJson<ClaimDto>(
     `/claims/${encodeURIComponent(nrZgl)}/authorization-amount`,
     { method: 'PUT', json: body },
+  );
+}
+
+/**
+ * `PATCH /claims/:nrZgl/verification` — verifier's checkpoint (verifier-
+ * checkpoint feature). Admin / pracownik confirms a claim in status
+ * `NA_WERYFIKACJI` — WITH optional corrections
+ * (`dateStart`/`dateEnd`/`timeFrom`/`timeTo`/`mileage`/`hoursAdjusted`, all
+ * optional; an EMPTY body means "confirm as-is"). Stamps
+ * `verifiedAt`/`verifiedById` and re-runs km-calc only when the math-relevant
+ * fields are touched. Repeatable — re-calling overwrites the previous stamp +
+ * corrections. Decision PATCHes and request-authorization FROM `NA_WERYFIKACJI`
+ * are gated (422 `CLAIM_NOT_VERIFIED`) until this checkpoint runs. Returns the
+ * updated `ClaimDto` so the open modal reflects `verifiedAt`/`verifiedBy`
+ * without a manual refetch. 422 (Polish message) if the claim is no longer in
+ * `NA_WERYFIKACJI`.
+ */
+export function verifyClaim(
+  nrZgl: string,
+  body: VerifyClaimDto,
+): Promise<ClaimDto> {
+  return apiJson<ClaimDto>(
+    `/claims/${encodeURIComponent(nrZgl)}/verification`,
+    { method: 'PATCH', json: body },
   );
 }

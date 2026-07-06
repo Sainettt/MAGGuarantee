@@ -172,6 +172,43 @@ export const SubmitClaimSchema = z
   .strict();
 export type SubmitClaimDto = z.infer<typeof SubmitClaimSchema>;
 
+// ─── Verify (pracownik verification checkpoint) ──────────
+
+/**
+ * PATCH /claims/:nrZgl/verification — the verifier's «Zapisz weryfikację»
+ * checkpoint per docs/13-api-design.md#claims.
+ *
+ * Product decision (final): a `pracownik` (or `admin`) persists their
+ * corrections to a claim in status `NA_WERYFIKACJI` via this checkpoint BEFORE
+ * making any decision. The decision transitions (akceptacja / odmowa) and the
+ * kwota-Maksima authorization request FROM `NA_WERYFIKACJI` are then GATED
+ * (422 `CLAIM_NOT_VERIFIED`) until the claim carries a `verifiedAt` stamp.
+ * Transitions FROM `OCZEKUJE_NA_AUTORYZACJE` and `REKLAMACJA` are NOT gated.
+ *
+ * Body — the SAME optional correction fields as the verifier PATCH's
+ * `UpdateClaimCorrectionFields` (dates / times / mileage / hoursAdjusted). An
+ * EMPTY body is LEGAL — it means "confirmed as-is": the service simply stamps
+ * `verifiedAt`/`verifiedById` without re-running km-calc. When correction
+ * fields are present the service re-runs the SAME `KmCalcService` engine and
+ * persists the fresh outputs, exactly like the decision PATCH's recalc.
+ *
+ * The delegation `w_trasie → zjechal` auto-recalc INVALIDATES the checkpoint
+ * (resets `verifiedAt`/`verifiedById` to NULL) because the underlying data
+ * changed — the verifier must re-confirm. Repeatable: a second call overwrites
+ * the previous stamp + corrections. `.strict()` — no stray keys.
+ */
+export const VerifyClaimSchema = z
+  .object({
+    dateStart: emptyStringToUndefined(IsoDateSchema.optional()),
+    dateEnd: emptyStringToUndefined(IsoDateSchema.optional()),
+    timeFrom: emptyStringToUndefined(HhMmSchema.optional()),
+    timeTo: emptyStringToUndefined(HhMmSchema.optional()),
+    mileage: MileageSchema.optional(),
+    hoursAdjusted: HoursAdjustedSchema.optional(),
+  })
+  .strict();
+export type VerifyClaimDto = z.infer<typeof VerifyClaimSchema>;
+
 // ─── Preview (server-side live preview) ──────────────────
 
 /**
@@ -555,6 +592,19 @@ export const ClaimDtoSchema = z.object({
   decidedById: UuidSchema.nullable(),
   decidedBy: UserMiniSchema.nullable(),
 
+  /**
+   * Verification checkpoint (pracownik «Zapisz weryfikację»). `verifiedAt` is
+   * the timestamp the verifier confirmed the claim's data (with or without
+   * corrections); `verifiedById`/`verifiedBy` identify who — mirror of the
+   * `decidedBy` conventions above. `null` when the claim has not been verified
+   * yet (or the delegation auto-recalc invalidated a prior checkpoint because
+   * the underlying data changed). The frontend reads these to gate the decision
+   * actions and render "zweryfikowano przez X" in the ClaimModal.
+   */
+  verifiedAt: IsoDateTimeSchema.nullable(),
+  verifiedById: UuidSchema.nullable(),
+  verifiedBy: UserMiniSchema.nullable(),
+
   comment: z.string().nullable(),
   orderNumber: z.string().nullable(),
   orderDate: IsoDateSchema.nullable(),
@@ -579,6 +629,15 @@ export const ClaimDtoSchema = z.object({
   origDateStart: IsoDateTimeSchema.nullable(),
   origDateEnd: IsoDateTimeSchema.nullable(),
   origMileage: z.number().nullable(),
+  /**
+   * Immutable submit-time snapshot of the km-calc payment (`paymentEur` at
+   * create). Write-once alongside the other `orig*` fields — the verifier PATCH
+   * / checkpoint recalc never touches it, so the authorization-email diff and
+   * the History tab can show the carrier's originally-derived dopłata next to
+   * the currently-applied amount. `null` for legacy rows created before this
+   * column existed.
+   */
+  origPaymentEur: z.number().nullable(),
   /**
    * Immutable carrier snapshot of the claimed time window (`HH:mm` strings),
    * captured once at submit alongside `origDateStart/origDateEnd/origMileage`.

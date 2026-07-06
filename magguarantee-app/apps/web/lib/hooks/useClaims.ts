@@ -25,6 +25,7 @@ import type {
   SubmitClaimDto,
   SubmitReklamacjaDto,
   UpdateClaimDto,
+  VerifyClaimDto,
 } from '@magguarantee/shared';
 
 import {
@@ -37,6 +38,7 @@ import {
   submitClaim,
   submitReklamacja,
   updateClaim,
+  verifyClaim,
 } from '@/lib/api/claims';
 
 export const CLAIMS_KEY = ['claims'] as const;
@@ -219,6 +221,33 @@ export function useSetAuthorizationAmount(
   return useMutation({
     mutationFn: (body: SetAuthorizationAmountDto) =>
       setAuthorizationAmount(nrZgl, body),
+    ...opts,
+    onSuccess: (...args) => {
+      qc.invalidateQueries({ queryKey: [...CLAIMS_KEY, 'detail', nrZgl] });
+      qc.invalidateQueries({ queryKey: CLAIMS_KEY });
+      opts?.onSuccess?.(...args);
+    },
+  });
+}
+
+/**
+ * `PATCH /claims/:nrZgl/verification` — verifier's checkpoint (verifier-
+ * checkpoint feature).
+ *
+ * Admin / pracownik confirms a claim in `NA_WERYFIKACJI` (with optional
+ * corrections). Invalidates the claim detail (so the open modal re-renders with
+ * the fresh `verifiedAt`/`verifiedBy` stamp + any recalced amounts) and the
+ * list. Repeatable — re-saving overwrites the previous checkpoint. Mirrors
+ * `useSetAuthorizationAmount`: `nrZgl` is bound at hook-call time so the call
+ * site stays terse — `mutate(body)`.
+ */
+export function useVerifyClaim(
+  nrZgl: string,
+  opts?: UseMutationOptions<ClaimDto, Error, VerifyClaimDto>,
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: VerifyClaimDto) => verifyClaim(nrZgl, body),
     ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: [...CLAIMS_KEY, 'detail', nrZgl] });

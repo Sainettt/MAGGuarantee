@@ -134,6 +134,12 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     statusChangedAt: new Date('2026-04-21T08:00:00.000Z'),
     decidedById: null,
     decidedBy: null,
+    // NA_WERYFIKACJI fixtures now carry a verification stamp so the decision
+    // gate (`_assertVerifiedIfNaWeryfikacji`) passes by default; the dedicated
+    // gate tests override `verifiedAt: null` to assert the 422.
+    verifiedAt: new Date('2026-04-21T09:00:00.000Z'),
+    verifiedById: 'u-verifier',
+    verifiedBy: { id: 'u-verifier', login: 'ver', name: 'Verifier' },
     comment: null,
     orderNumber: null,
     orderDate: null,
@@ -153,6 +159,7 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     origDateStart: new Date('2026-04-01T00:00:00.000Z'),
     origDateEnd: new Date('2026-04-20T00:00:00.000Z'),
     origMileage: 8_000,
+    origPaymentEur: 1_400,
     origTimeFrom: '08:00',
     origTimeTo: '18:00',
     // Numeric Decimal(5,2) columns post-migration. The fixture defaults to
@@ -203,6 +210,12 @@ function makeClaimsRepo(seed: ClaimRow[] = []): ClaimsRepoFake {
             : {}),
           ...(data.decidedById !== undefined
             ? { decidedById: data.decidedById }
+            : {}),
+          ...(data.verifiedAt !== undefined
+            ? { verifiedAt: data.verifiedAt }
+            : {}),
+          ...(data.verifiedById !== undefined
+            ? { verifiedById: data.verifiedById }
             : {}),
           ...(data.comment !== undefined ? { comment: data.comment } : {}),
           ...(data.orderNumber !== undefined
@@ -674,6 +687,133 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
 
     expect(repoFake.updateWithinCalls).toHaveLength(0);
     expect(audit.logs).toHaveLength(0);
+  });
+
+  // ── verification gate (CLAIM_NOT_VERIFIED) ────────────────
+  //
+  // A decision FROM `NA_WERYFIKACJI` is blocked until the pracownik saved the
+  // verification checkpoint (`verifiedAt` stamped). Transitions FROM
+  // `OCZEKUJE_NA_AUTORYZACJE` and `REKLAMACJA` are NOT gated (already verified).
+
+  it('G1. unverified NA_WERYFIKACJI → ZAAKCEPTOWANO throws 422 CLAIM_NOT_VERIFIED + no writes', async () => {
+    const seeded = makeClaim({ verifiedAt: null, verifiedById: null });
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const dto: UpdateClaimDto = {
+      targetStatus: 'ZAAKCEPTOWANO',
+      orderNumber: 'ZL-1',
+      orderDate: '2026-04-30',
+      amountApproved: 1_400,
+    };
+
+    let caught: unknown;
+    try {
+      await svc.update(makeAuth('pracownik'), seeded.nrZgl, dto);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(UnprocessableEntityException);
+    // The stable machine code travels in the 422 body.
+    const body = (caught as UnprocessableEntityException).getResponse() as {
+      code?: string;
+    };
+    expect(body.code).toBe('CLAIM_NOT_VERIFIED');
+    // Gate fires before persistence — claim stays put.
+    expect(repoFake.updateWithinCalls).toHaveLength(0);
+    expect(km.calls).toHaveLength(0);
+  });
+
+  it('G2. unverified NA_WERYFIKACJI → ODRZUCONO is ALSO gated (any decision blocked)', async () => {
+    const seeded = makeClaim({ verifiedAt: null, verifiedById: null });
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    await expect(
+      svc.update(makeAuth('pracownik'), seeded.nrZgl, {
+        targetStatus: 'ODRZUCONO',
+        comment: 'Brak podstaw.',
+      }),
+    ).rejects.toThrow(UnprocessableEntityException);
+
+    expect(repoFake.updateWithinCalls).toHaveLength(0);
+  });
+
+  it('G3. verified NA_WERYFIKACJI → ZAAKCEPTOWANO passes the gate', async () => {
+    // Default fixture is now verified — the decision should go through.
+    const seeded = makeClaim();
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const out = await svc.update(makeAuth('pracownik'), seeded.nrZgl, {
+      targetStatus: 'ZAAKCEPTOWANO',
+      orderNumber: 'ZL-1',
+      orderDate: '2026-04-30',
+      amountApproved: 1_400,
+    });
+
+    expect(out.status).toBe('ZAAKCEPTOWANO');
+    expect(repoFake.updateWithinCalls).toHaveLength(1);
+  });
+
+  it('G4. OCZEKUJE_NA_AUTORYZACJE → ZAAKCEPTOWANO is NOT gated even without verifiedAt', async () => {
+    // A claim pending authorization was already verified before leaving
+    // NA_WERYFIKACJI; the gate only applies to NA_WERYFIKACJI. Seed with no
+    // stamp to prove the status short-circuit (not the stamp) drives the pass.
+    const seeded = makeClaim({
+      status: 'OCZEKUJE_NA_AUTORYZACJE',
+      verifiedAt: null,
+      verifiedById: null,
+    });
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const out = await svc.update(makeAuth('pracownik'), seeded.nrZgl, {
+      targetStatus: 'ZAAKCEPTOWANO',
+      orderNumber: 'ZL-1',
+      orderDate: '2026-04-30',
+      amountApproved: 1_400,
+    });
+
+    expect(out.status).toBe('ZAAKCEPTOWANO');
+    expect(repoFake.updateWithinCalls).toHaveLength(1);
+  });
+
+  it('G5. REKLAMACJA → ZAAKCEPTOWANO is NOT gated', async () => {
+    const seeded = makeClaim({
+      status: 'REKLAMACJA',
+      statusBeforeReklamacja: 'ODRZUCONO',
+      reklamacjaSubmitted: true,
+      reklamacjaAmount: 500,
+      verifiedAt: null,
+      verifiedById: null,
+    });
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const out = await svc.update(makeAuth('pracownik'), seeded.nrZgl, {
+      targetStatus: 'REKLAMACJA_ZAAKCEPTOWANO',
+      comment: 'Akceptacja reklamacji.',
+      reklamacjaAmount: 450,
+    });
+
+    expect(out.status).toBe('ZAAKCEPTOWANO');
+    expect(repoFake.updateWithinCalls).toHaveLength(1);
   });
 
   // ── hours-adjusted Decimal split (orig vs value) ──────────

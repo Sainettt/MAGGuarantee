@@ -56,6 +56,14 @@ export interface AuthorizationRequestProps {
   dniWTrasie?: string;
   /** Optional verifier rationale shown above the CTA. */
   comment?: string;
+  /**
+   * «Korekty weryfikatora» — the diff between the carrier's original submit data
+   * and the verified (currently-applied) data. Each row is a preformatted
+   * `{label, from, to}` triple ("Przebieg", "8000 km", "8500 km"). Only fields
+   * the verifier actually changed are present; the whole section is omitted when
+   * the array is absent or empty (the verifier confirmed the data as-is).
+   */
+  korekty?: Array<{ label: string; from: string; to: string }>;
   /** Full URL pointing at the claim detail page (already includes APP_URL). */
   deeplink: string;
 }
@@ -134,8 +142,11 @@ export function AuthorizationRequestEmail(
     prog,
     dniWTrasie,
     comment,
+    korekty,
     deeplink,
   } = props;
+
+  const hasKorekty = Array.isArray(korekty) && korekty.length > 0;
 
   return (
     <Html lang="pl">
@@ -200,6 +211,30 @@ export function AuthorizationRequestEmail(
                 >
                   {comment}
                 </Text>
+              </Section>
+            </>
+          ) : null}
+
+          {hasKorekty ? (
+            <>
+              <Hr style={{ borderColor: border, margin: 0 }} />
+              <Section style={sectionStyle}>
+                <Text style={labelStyle}>Korekty weryfikatora</Text>
+                <Text
+                  style={{
+                    fontSize: 13,
+                    color: inkMuted,
+                    margin: '0 0 8px',
+                    fontWeight: 400,
+                  }}
+                >
+                  Weryfikator poprawił dane wprowadzone przez przewoźnika:
+                </Text>
+                {korekty!.map((k) => (
+                  <Text key={k.label} style={{ ...valueStyle, margin: '0 0 6px' }}>
+                    {k.label}: {k.from} → {k.to}
+                  </Text>
+                ))}
               </Section>
             </>
           ) : null}

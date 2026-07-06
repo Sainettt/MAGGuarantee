@@ -124,6 +124,11 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     statusChangedAt: new Date('2026-04-21T08:00:00.000Z'),
     decidedById: null,
     decidedBy: null,
+    // NA_WERYFIKACJI fixtures carry a verification stamp so the
+    // request-authorization gate passes by default; gate tests override to null.
+    verifiedAt: new Date('2026-04-21T09:00:00.000Z'),
+    verifiedById: 'u-verifier',
+    verifiedBy: { id: 'u-verifier', login: 'ver', name: 'Verifier' },
     comment: null,
     orderNumber: null,
     orderDate: null,
@@ -143,6 +148,7 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     origDateStart: new Date('2026-04-01T00:00:00.000Z'),
     origDateEnd: new Date('2026-04-20T00:00:00.000Z'),
     origMileage: 8_000,
+    origPaymentEur: 1_400,
     origTimeFrom: '08:00',
     origTimeTo: '18:00',
     origHoursAdjusted: 0,
@@ -498,6 +504,32 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(mail.calls).toHaveLength(1);
+  });
+
+  it('8. unverified NA_WERYFIKACJI → request-authorization gated (422 CLAIM_NOT_VERIFIED, no email)', async () => {
+    const seeded = makeClaim({ verifiedAt: null, verifiedById: null });
+    const repoFake = makeClaimsRepo([seeded]);
+    const mail = makeMailService();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, mail.svc, prisma, makeConfigService());
+
+    let caught: unknown;
+    try {
+      await svc.requestAuthorization(makeAuth('pracownik'), seeded.nrZgl, {
+        comment: 'Powyżej progu — wymaga zgody Maksima.',
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(UnprocessableEntityException);
+    const body = (caught as UnprocessableEntityException).getResponse() as {
+      code?: string;
+    };
+    expect(body.code).toBe('CLAIM_NOT_VERIFIED');
+    // Gate fires before any write / email.
+    expect(repoFake.updateWithinCalls).toHaveLength(0);
+    await Promise.resolve();
+    expect(mail.calls).toHaveLength(0);
   });
 
   it('7. missing MailService (legacy unit-test wiring) logs warning but does not throw', async () => {

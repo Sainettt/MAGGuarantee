@@ -907,7 +907,8 @@
           "decisionRequired": "Pick a decision to save the claim.",
           "terminalState": "The claim is in a terminal state — no decisions available.",
           "guaranteeMetHint": "Guarantee met — the claim can only be rejected.",
-          "progExceededHint": "Payout exceeds the authorization threshold ({prog} for {days, plural, one {# day} other {# days}} on the road) — Maksim authorization recommended."
+          "progExceededHint": "Payout exceeds the authorization threshold ({prog} for {days, plural, one {# day} other {# days}} on the road) — Maksim authorization recommended.",
+          "verifiedBadge": "Verified {date} by {name}"
         },
         "linkedDelegation": {
           "heading": "Linked trip",
@@ -955,7 +956,13 @@
           "submit": "Confirm",
           "submitting": "Saving…",
           "savedToast": "Saved",
-          "errorToast": "Failed to save"
+          "errorToast": "Failed to save",
+          "verifyButton": "Save verification",
+          "verifiedToast": "Verification saved",
+          "verifyRequiredHint": "Save the verification to take a decision",
+          "verifyDirtyHint": "You have unsaved corrections — save the verification",
+          "boardSumHint": "Per mileage board: {km} km",
+          "boardSumApply": "Apply"
         },
         "history": {
           "empty": "No edit history.",

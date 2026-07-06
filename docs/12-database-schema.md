@@ -159,6 +159,7 @@ model User {
   reportedDelegations Delegation[]  @relation("DelegationReporter")
   verifiedDelegations Delegation[]  @relation("DelegationVerifier")
   authoredClaims     Claim[]        @relation("ClaimDecidedBy")
+  verifiedClaims     Claim[]        @relation("ClaimVerifiedBy")  // «Zapisz weryfikację» checkpoint author (mirror of authoredClaims)
   uploadedVehicleAttachments VehicleAttachment[]
   uploadedDriverAttachments  DriverAttachment[]
   uploadedCarrierAttachments CarrierAttachment[]
@@ -491,6 +492,16 @@ model Claim {
   decidedById     String?     @db.Uuid
   decidedBy       User?       @relation("ClaimDecidedBy", fields: [decidedById], references: [id])
 
+  // Verification checkpoint («Zapisz weryfikację», migration
+  // 20260706120000_claim_verification_checkpoint). Pracownik saves corrections
+  // BEFORE any decision; `verifiedAt` = when confirmed. Decisions + the auth
+  // request FROM NA_WERYFIKACJI are gated (422 CLAIM_NOT_VERIFIED) until set.
+  // Reset to NULL by the delegation auto-recalc (data changed → re-verify).
+  // `verifiedBy` mirrors `decidedBy` (optional FK, no index).
+  verifiedAt   DateTime?
+  verifiedById String?   @db.Uuid
+  verifiedBy   User?     @relation("ClaimVerifiedBy", fields: [verifiedById], references: [id])
+
   comment     String?
   // status-conditional: NULL on submit; CHECK claim_accepted_payment_complete
   // forces non-empty when status=ZAAKCEPTOWANO
@@ -520,6 +531,12 @@ model Claim {
   origDateStart          DateTime?
   origDateEnd            DateTime?
   origMileage            Decimal?     @db.Decimal(10, 2)
+  // Immutable submit-time payment snapshot (migration
+  // 20260706120000_claim_verification_checkpoint). Write-once alongside the
+  // other orig* fields; never mutated by the verifier PATCH / checkpoint. Feeds
+  // the authorization-email «Korekty weryfikatora» diff (orig dopłata vs
+  // applied amountRequested).
+  origPaymentEur         Decimal?     @db.Decimal(12, 2)
   // GodzinaOd/GodzinaDo — immutable carrier-submission snapshots (HH:MM legacy
   // string). Mirror timeFrom/timeTo, written once at submit, verifier PATCH
   // never mutates. See "Korekta godzin — orig vs applied" / orig-snapshot note.
@@ -850,7 +867,7 @@ shows whether the verifier overrode the carrier's declared hours.
 | AW | Marża | `margin` | Decimal |
 | AX | KwotaMaksima | `amountMaximum` | Decimal |
 
-Дополнительно в Claim, не имеющего колонки в Sheets: `breakdown` (JSON, помесячный расчёт), `ratePerKmEffective`, `decidedById`, `authScreenshotUrl`.
+Дополнительно в Claim, не имеющего колонки в Sheets: `breakdown` (JSON, помесячный расчёт), `ratePerKmEffective`, `decidedById`, `authScreenshotUrl`, `verifiedAt`/`verifiedById` (checkpoint «Zapisz weryfikację»), `origPaymentEur` (immutable submit-time payment snapshot).
 
 ### AUTA → Vehicle
 

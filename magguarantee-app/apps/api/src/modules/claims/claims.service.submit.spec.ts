@@ -169,6 +169,9 @@ function makeClaimRow(data: CreateClaimData): ClaimRow {
     statusChangedAt: data.statusChangedAt,
     decidedById: null,
     decidedBy: null,
+    verifiedAt: null,
+    verifiedById: null,
+    verifiedBy: null,
     comment: data.comment,
     orderNumber: data.orderNumber,
     orderDate: data.orderDate,
@@ -188,6 +191,7 @@ function makeClaimRow(data: CreateClaimData): ClaimRow {
     origDateStart: data.origDateStart,
     origDateEnd: data.origDateEnd,
     origMileage: data.origMileage,
+    origPaymentEur: data.origPaymentEur,
     origTimeFrom: data.origTimeFrom,
     origTimeTo: data.origTimeTo,
     origHoursAdjusted: data.origHoursAdjusted,
@@ -468,6 +472,13 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     // paymentEur = (kmGuaranteed - mileage) * ratePerKmEffective
     //            = (10_800 - 8_000) * 0.5 = 1_400.
     expect(repoFake.creates[0]!.data.amountRequested).toBe(1_400);
+    // Immutable submit-time payment snapshot — captured EQUAL to the derived
+    // paymentEur so the authorization-email «Korekty weryfikatora» diff and the
+    // History tab can compare against the verifier's later applied amount.
+    expect(repoFake.creates[0]!.data.origPaymentEur).toBe(1_400);
+    expect(repoFake.creates[0]!.data.origPaymentEur).toBe(
+      repoFake.creates[0]!.data.paymentEur,
+    );
   });
 
   // ── cooldown gate (cooldownCheck) ────────────────────────

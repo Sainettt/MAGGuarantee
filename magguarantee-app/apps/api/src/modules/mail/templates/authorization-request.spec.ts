@@ -113,4 +113,39 @@ describe('AuthorizationRequestEmail', () => {
     // template's amount + button styles.
     expect(html.toLowerCase()).toContain('#dc2626');
   });
+
+  // ── «Korekty weryfikatora» diff section ──────────────────
+
+  it('renders the Korekty weryfikatora section with each row when korekty supplied', () => {
+    const props: AuthorizationRequestProps = {
+      ...FIXTURE,
+      korekty: [
+        { label: 'Przebieg', from: '8000 km', to: '8500 km' },
+        { label: 'Dopłata', from: '1400.00 EUR', to: '610.00 EUR' },
+      ],
+    };
+    const html = renderHtml(props);
+    expect(html).toContain('Korekty weryfikatora');
+    // A short lead-in line explaining the verifier corrected the carrier's data.
+    expect(html).toContain('Weryfikator poprawił dane');
+    // Each diff row renders as "label: from → to".
+    expect(html).toContain('Przebieg');
+    expect(html).toContain('8000 km');
+    expect(html).toContain('8500 km');
+    expect(html).toContain('Dopłata');
+    expect(html).toContain('1400.00 EUR');
+    expect(html).toContain('610.00 EUR');
+  });
+
+  it('omits the Korekty weryfikatora section when korekty is absent', () => {
+    const html = renderHtml(FIXTURE);
+    expect(html).not.toContain('Korekty weryfikatora');
+    expect(html).not.toContain('Weryfikator poprawił dane');
+  });
+
+  it('omits the Korekty weryfikatora section when korekty is an empty array', () => {
+    const props: AuthorizationRequestProps = { ...FIXTURE, korekty: [] };
+    const html = renderHtml(props);
+    expect(html).not.toContain('Korekty weryfikatora');
+  });
 });
