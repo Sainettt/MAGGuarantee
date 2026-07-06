@@ -306,6 +306,13 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
 
   const targets = useMemo(() => decisionTargetsFor(claim.status), [claim.status]);
 
+  // ── Post-authorization accept (product decision) ──
+  // When a claim reached the verifier THROUGH Maksim's e-mail authorization
+  // flow (status OCZEKUJE_NA_AUTORYZACJE), an accept lets the verifier ENTER
+  // the amount Maksim actually approved instead of locking to the live-computed
+  // dopłata. For a direct accept from NA_WERYFIKACJI the field stays locked.
+  const postAuthorization = claim.status === 'OCZEKUJE_NA_AUTORYZACJE';
+
   // ── In-place morph state. Non-editing roles are pinned to `view`. ──
   const [mode, setMode] = useState<ClaimModalMode>(
     canEdit ? initialMode : 'view',
@@ -444,13 +451,17 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
   // Auto-populate `amountApproved` to the live dopłata for ZAAKCEPTOWANO
   // until the verifier overrides it. (decision-scoped — only fires when the
   // accept branch is selected.)
+  // SKIPPED for the post-authorization accept (OCZEKUJE_NA_AUTORYZACJE): there
+  // the field is editable and prefilled with kwota Maksima (getDefaults), so
+  // re-syncing it to the live dopłata would clobber that prefill.
   useEffect(() => {
+    if (postAuthorization) return;
     if (targetStatus !== 'ZAAKCEPTOWANO') return;
     if (form.formState.dirtyFields.amountApproved) return;
     if (typeof liveDoplata === 'number') {
       form.setValue('amountApproved', liveDoplata, { shouldDirty: false });
     }
-  }, [targetStatus, liveDoplata, form]);
+  }, [postAuthorization, targetStatus, liveDoplata, form]);
 
   const updateM = useUpdateClaim({
     onSuccess: () => {
@@ -595,6 +606,7 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
                 form={form}
                 targets={availableTargets}
                 targetStatus={targetStatus}
+                postAuthorization={postAuthorization}
                 errMsg={errMsg}
                 tEdit={tEdit}
                 tStatus={tStatus}
@@ -1191,6 +1203,7 @@ function DecisionFields({
   form,
   targets,
   targetStatus,
+  postAuthorization,
   errMsg,
   tEdit,
   tStatus,
@@ -1198,6 +1211,10 @@ function DecisionFields({
   form: UseFormReturn<FormValues>;
   targets: ClaimDecisionTarget[];
   targetStatus: FormValues['targetStatus'];
+  /** True when this claim came through Maksim's authorization flow
+   *  (status OCZEKUJE_NA_AUTORYZACJE) — the kwota zatwierdzona becomes an
+   *  editable input prefilled with kwota Maksima instead of a locked field. */
+  postAuthorization: boolean;
   errMsg: (key: string) => string | undefined;
   tEdit: ReturnType<typeof useTranslations<'employee.claims.modal.edit'>>;
   tStatus: ReturnType<
@@ -1263,35 +1280,60 @@ function DecisionFields({
             htmlFor="claim-amountApproved"
             className="col-span-2"
           >
-            {/* Same locked/computed field as the dopłata block (§6.5.5) —
-                bound to the live-computed value; verifier does NOT type
-                into it. `readOnly` (not `disabled`) keeps it
-                RHF-registered + submitted. */}
-            <div className="relative">
-              <Input
-                id="claim-amountApproved"
-                type="number"
-                step="0.01"
-                min={0}
-                readOnly
-                tabIndex={-1}
-                aria-readonly="true"
-                title={tEdit('amountApprovedLocked')}
-                className="bg-input/40 pr-9 font-semibold tabular-nums text-text-sub cursor-not-allowed focus:border-border focus:ring-0"
-                {...form.register('amountApproved', {
-                  setValueAs: (v) =>
-                    v === '' || v === null ? undefined : Number(v),
-                })}
-              />
-              <Lock
-                aria-hidden
-                className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-text-sub/70"
-              />
-            </div>
-            <FormDescription className="flex items-center gap-1">
-              <Lock aria-hidden className="size-3 shrink-0" />
-              {tEdit('amountApprovedAuto')}
-            </FormDescription>
+            {postAuthorization ? (
+              // Post-authorization accept (OCZEKUJE_NA_AUTORYZACJE): the field
+              // is EDITABLE and prefilled with kwota Maksima (getDefaults). The
+              // verifier enters the amount Maksim approved by e-mail; that
+              // user-typed value flows through the PATCH `amountApproved` and
+              // is NOT overwritten by the live-dopłata effect (gated off above).
+              <>
+                <Input
+                  id="claim-amountApproved"
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  {...form.register('amountApproved', {
+                    setValueAs: (v) =>
+                      v === '' || v === null ? undefined : Number(v),
+                  })}
+                />
+                <FormDescription>
+                  {tEdit('amountApprovedFromMaksim')}
+                </FormDescription>
+              </>
+            ) : (
+              <>
+                {/* Same locked/computed field as the dopłata block (§6.5.5) —
+                    bound to the live-computed value; verifier does NOT type
+                    into it. `readOnly` (not `disabled`) keeps it
+                    RHF-registered + submitted. */}
+                <div className="relative">
+                  <Input
+                    id="claim-amountApproved"
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    readOnly
+                    tabIndex={-1}
+                    aria-readonly="true"
+                    title={tEdit('amountApprovedLocked')}
+                    className="bg-input/40 pr-9 font-semibold tabular-nums text-text-sub cursor-not-allowed focus:border-border focus:ring-0"
+                    {...form.register('amountApproved', {
+                      setValueAs: (v) =>
+                        v === '' || v === null ? undefined : Number(v),
+                    })}
+                  />
+                  <Lock
+                    aria-hidden
+                    className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-text-sub/70"
+                  />
+                </div>
+                <FormDescription className="flex items-center gap-1">
+                  <Lock aria-hidden className="size-3 shrink-0" />
+                  {tEdit('amountApprovedAuto')}
+                </FormDescription>
+              </>
+            )}
           </FormField>
           <FormField
             label={tEdit('comment')}
@@ -1843,7 +1885,17 @@ function getDefaults(claim: ClaimDto): FormValues {
     hoursAdjusted: claim.hoursAdjustedValue ?? 0,
     orderNumber: claim.orderNumber ?? '',
     orderDate: claim.orderDate ?? '',
-    amountApproved: claim.amountApproved ?? claim.paymentEur ?? undefined,
+    // Post-authorization accept (OCZEKUJE_NA_AUTORYZACJE) prefills the editable
+    // kwota zatwierdzona with kwota Maksima so the verifier only tweaks it to
+    // what Maksim approved by e-mail; amountMaximum is always set on the
+    // request-authorization path, so paymentEur is a defensive fallback only.
+    amountApproved:
+      claim.status === 'OCZEKUJE_NA_AUTORYZACJE'
+        ? claim.amountApproved ??
+          claim.amountMaximum ??
+          claim.paymentEur ??
+          undefined
+        : claim.amountApproved ?? claim.paymentEur ?? undefined,
     amountMaximum: claim.amountMaximum ?? undefined,
     comment: claim.comment ?? '',
     margin: claim.margin ?? undefined,

@@ -943,6 +943,7 @@
           "amountApproved": "Amount approved (EUR)",
           "amountApprovedAuto": "calculated automatically",
           "amountApprovedLocked": "Locked field — calculated automatically from the preview",
+          "amountApprovedFromMaksim": "Prefilled with Maksim's amount — adjust it to the amount approved in the reply.",
           "amountMaximum": "Maximum amount (EUR)",
           "doplata": "Guarantee payout",
           "margin": "Margin",

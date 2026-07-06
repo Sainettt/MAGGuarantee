@@ -943,6 +943,7 @@
           "amountApproved": "Kwota zatwierdzona (EUR)",
           "amountApprovedAuto": "wyliczana automatycznie",
           "amountApprovedLocked": "Pole zablokowane — wyliczane automatycznie z podglądu",
+          "amountApprovedFromMaksim": "Wstępnie wypełnione kwotą Maksima — skoryguj do kwoty zatwierdzonej w odpowiedzi.",
           "amountMaximum": "Kwota maksymalna (EUR)",
           "doplata": "Dopłata gwarancyjna",
           "margin": "Marża",
