@@ -1045,7 +1045,17 @@ export class ClaimsService {
     // claim ownership already implies vehicle access (FK chain Claim →
     // Vehicle → Carrier); for admin / pracownik, vehicle ownership is
     // irrelevant. The DTO's `vehicleId` is consumed only as km-calc input.
-    return this._runPreviewCalc(dto);
+    //
+    // Mileage-override gate: only VERIFIER roles (anything but `przewoznik`,
+    // i.e. `pracownik`/`admin` — the roles wired at the controller for this
+    // route) may replace the daily-km sum with `dto.mileage` so the ClaimModal's
+    // live dopłata tracks a km edit. The carrier reklamacja-inspection path
+    // (`przewoznik`) keeps the sum — the "no carrier override" invariant from
+    // Phase 7 §0″ stands. `ctx` is null here (existing-claim path), so the flag
+    // is actually consulted; the carrier new-claim `previewKmCalc` path never
+    // sets it.
+    const allowMileageOverride = user.role !== 'przewoznik';
+    return this._runPreviewCalc(dto, null, allowMileageOverride);
   }
 
   /**
@@ -1059,6 +1069,15 @@ export class ClaimsService {
    * vehicle/trailer/driver `delegationContext` all come from the outing. When
    * `ctx` is null, the legacy date-driven path runs off the body's
    * `dateStart`/`dateEnd` (+ optional `vehicleId` for the mileage sum).
+   *
+   * `allowMileageOverride` — VERIFIER inspection-path flag. Only honoured on the
+   * existing-claim path (`ctx === null`): when a verifier (`pracownik`/`admin`)
+   * supplies `dto.mileage`, it replaces the daily-km sum so the ClaimModal's
+   * live dopłata / RecalcBadge / accept-gate track the km edit before the PATCH
+   * commits (matching what `_recalcClaim` → `_buildUpdatePatch` will persist).
+   * On the delegation-derived path (`ctx != null`) the override is ALWAYS
+   * ignored — the "no carrier override" invariant from Phase 7 §0″ stands, and
+   * the carrier reklamacja inspection passes `allowMileageOverride = false`.
    */
   private async _runPreviewCalc(
     dto: PreviewClaimDto,
@@ -1068,6 +1087,7 @@ export class ClaimsService {
       dateEnd: Date;
       warning: DelegationWarning | null;
     } | null = null,
+    allowMileageOverride = false,
   ): Promise<PreviewClaimResponse> {
     // Resolve the effective period: derived from the outing when supplied,
     // otherwise the caller-supplied `dateStart`/`dateEnd` (existing-claim path).
@@ -1087,14 +1107,24 @@ export class ClaimsService {
       hoursAdjusted: dto.hoursAdjusted ?? 0,
     });
 
-    // Mileage is ALWAYS `Σ VehicleDailyKm.km (state=drove)` over the period for
-    // the relevant vehicle (Phase 7 §0″ finish — no carrier override). The
-    // vehicle comes from the outing on the new-claim path, or from the
-    // caller-supplied `vehicleId` on the existing-claim path. With no vehicle
-    // and no valid period, mileage is 0 (the carrier hasn't picked an outing).
+    // Mileage resolution, two paths:
+    //  • Delegation-derived (new-claim) path OR carrier reklamacja inspection:
+    //    ALWAYS `Σ VehicleDailyKm.km (state=drove)` over the period for the
+    //    relevant vehicle (Phase 7 §0″ finish — no carrier override). The
+    //    vehicle comes from the outing on the new-claim path, or from the
+    //    caller-supplied `vehicleId` on the existing-claim path. With no vehicle
+    //    and no valid period, mileage is 0 (the carrier hasn't picked an outing).
+    //  • VERIFIER inspection path (existing claim, `ctx === null`,
+    //    `allowMileageOverride`): a verifier-supplied `dto.mileage` REPLACES the
+    //    sum, so the live preview tracks a km edit before the PATCH commits —
+    //    mirroring `_recalcClaim` (which honours `dto.mileage` on PATCH). The
+    //    override is confined to `ctx === null` so the delegation-derived path
+    //    (and any carrier) never leaks a manual mileage into the math.
     const vehicleId = ctx ? ctx.delegation.vehicleId : dto.vehicleId;
-    const mileage =
-      dateStart && dateEnd && vehicleId
+    const canOverride = !ctx && allowMileageOverride && dto.mileage !== undefined;
+    const mileage = canOverride
+      ? (dto.mileage as number)
+      : dateStart && dateEnd && vehicleId
         ? await this._resolveMileage(vehicleId, dateStart, dateEnd)
         : 0;
 
@@ -1655,6 +1685,18 @@ export class ClaimsService {
       patch.paymentEur = recalc.paymentEur;
       patch.ratePerKmEffective = recalc.ratePerKmEffective;
       patch.breakdown = recalc.breakdown;
+      // Restore the submit-time invariant `amountRequested === paymentEur`
+      // whenever the math re-runs. Submit derives `amountRequested: paymentEur`
+      // and `_applyDelegationRecalc` mirrors it; without this line a verifier km
+      // edit moved `paymentEur` but left `amountRequested` stale, and the stale
+      // value leaked into the kwota-Maksima authorization email
+      // (`_notifyAuthorizationRequest` reads `row.amountRequested` at send time)
+      // and the reklamacja amount cap. The human verifier is authoritative — if
+      // a transition FROM `OCZEKUJE_NA_AUTORYZACJE` carries correction fields the
+      // recalc runs and we keep mirroring, so the authorization email (sent from
+      // `request-authorization`, i.e. WHEN entering OCZEKUJE_*) always reflects
+      // the freshest amount.
+      patch.amountRequested = recalc.paymentEur;
     }
 
     // Decision payload per discriminator branch.

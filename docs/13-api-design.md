@@ -569,9 +569,15 @@ type ClaimDto = {
 //   • new-claim: { delegationId, timeFrom?, timeTo?, hoursAdjusted? } — the
 //     api derives period + vehicle/trailer/driver + mileage from the outing.
 //   • existing/verifier: { vehicleId?, dateStart?, dateEnd?, timeFrom?, timeTo?,
-//     hoursAdjusted? } — caller-supplied dates drive the math; the existing
-//     claim already carries vehicle/trailer/driver context.
-// NO `mileage` in the body (Phase 7 §0″ finish — always the daily-km sum).
+//     hoursAdjusted?, mileage? } — caller-supplied dates drive the math; the
+//     existing claim already carries vehicle/trailer/driver context.
+// On the CARRIER paths (delegationId present, or a `przewoznik` reklamacja
+// inspection) `mileage` is IGNORED — mileage is always the daily-km sum
+// (Phase 7 §0″ finish, "no carrier override"). A VERIFIER (`pracownik`/`admin`)
+// on `POST /claims/:nrZgl/preview` MAY send `mileage` to override the sum so the
+// ClaimModal's live dopłata / RecalcBadge / accept-gate / auto-populated
+// `amountApproved` track a km edit before PATCH commits — mirrors the PATCH
+// correction field `UpdateClaimCorrectionFields.mileage`.
 type PreviewRequest = {
   delegationId?: string;   // new-claim path → derive everything from the outing
   vehicleId?: string;      // existing/verifier path → vehicle for the km sum
@@ -580,6 +586,7 @@ type PreviewRequest = {
   timeFrom?: string;       // HH:MM
   timeTo?: string;
   hoursAdjusted?: number;  // verifier inspection only; default 0
+  mileage?: number;        // VERIFIER inspection override only (see note above)
 };
 type PreviewResponse = {
   mileage: number;            // Σ VehicleDailyKm.km (state=drove) over the period

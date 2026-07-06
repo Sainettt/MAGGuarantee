@@ -546,6 +546,171 @@ describe('ClaimsService.previewKmCalc — carrier-only entry point intact', () =
   });
 });
 
+describe('ClaimsService.previewForExisting — verifier mileage override', () => {
+  beforeAll(() => {
+    jest.useFakeTimers().setSystemTime(NOW);
+  });
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
+  // Existing-claim / verifier inspection preview WITH a caller-supplied
+  // `mileage`. On the verifier path this REPLACES the daily-km sum so the
+  // ClaimModal's live dopłata / RecalcBadge / accept-gate track a km edit before
+  // the PATCH commits (the bug fix). On the carrier path it is IGNORED.
+  const OVERRIDE_DTO: PreviewClaimDto = {
+    vehicleId: 'v-1',
+    dateStart: '2026-04-01',
+    dateEnd: '2026-04-20',
+    timeFrom: '08:00',
+    timeTo: '18:00',
+    hoursAdjusted: 0,
+    // Override differs from the daily-km sum fake (8_000) so we can tell which
+    // one drove the math.
+    mileage: 5_000,
+  };
+
+  it('pracownik supplying mileage → override drives kmDifference / paymentEur (sum ignored)', async () => {
+    const seeded = makeClaim();
+    const claimsRepo = makeClaimsRepo([seeded]);
+    const carriersRepo = makeCarriersRepo([]);
+    const vehiclesRepo = makeVehiclesRepo([]);
+    const km = makeKmCalcService();
+    // The daily-km repo would return 8_000, but the verifier override must win.
+    const dailyKm = makeDailyKmRepo(8_000);
+    const svc = makeService(
+      claimsRepo,
+      carriersRepo,
+      vehiclesRepo,
+      km.svc,
+      dailyKm,
+    );
+
+    const out = await svc.previewForExisting(
+      makeAuth('pracownik'),
+      seeded.nrZgl,
+      OVERRIDE_DTO,
+    );
+
+    // Override mileage 5_000 (NOT the daily-km sum 8_000).
+    expect(out.mileage).toBe(5_000);
+    // kmDifference = 10_800 - 5_000 = 5_800
+    expect(out.kmDifference).toBe(5_800);
+    // paymentEur = 5_800 * 0.5 = 2_900.00
+    expect(out.paymentEur).toBe(2_900);
+    // The sum was short-circuited — the daily-km repo is never consulted.
+    expect(dailyKm.sumDroveKm).not.toHaveBeenCalled();
+  });
+
+  it('admin supplying mileage → same override contract as pracownik', async () => {
+    const seeded = makeClaim();
+    const claimsRepo = makeClaimsRepo([seeded]);
+    const carriersRepo = makeCarriersRepo([]);
+    const vehiclesRepo = makeVehiclesRepo([]);
+    const km = makeKmCalcService();
+    const dailyKm = makeDailyKmRepo(8_000);
+    const svc = makeService(
+      claimsRepo,
+      carriersRepo,
+      vehiclesRepo,
+      km.svc,
+      dailyKm,
+    );
+
+    const out = await svc.previewForExisting(
+      makeAuth('admin'),
+      seeded.nrZgl,
+      OVERRIDE_DTO,
+    );
+
+    expect(out.mileage).toBe(5_000);
+    expect(out.paymentEur).toBe(2_900);
+    expect(dailyKm.sumDroveKm).not.toHaveBeenCalled();
+  });
+
+  it('przewoznik supplying mileage → override IGNORED, daily-km sum used', async () => {
+    // The carrier reklamacja-inspection path must NOT be able to override
+    // mileage — the "no carrier override" invariant from Phase 7 §0″ stands.
+    const carrier = makeCarrier();
+    const seeded = makeClaim({ carrierId: carrier.id });
+    const claimsRepo = makeClaimsRepo([seeded]);
+    const carriersRepo = makeCarriersRepo([carrier]);
+    const vehiclesRepo = makeVehiclesRepo([]);
+    const km = makeKmCalcService();
+    const dailyKm = makeDailyKmRepo(8_000);
+    const svc = makeService(
+      claimsRepo,
+      carriersRepo,
+      vehiclesRepo,
+      km.svc,
+      dailyKm,
+    );
+
+    const out = await svc.previewForExisting(
+      makeAuth('przewoznik', carrier.userId),
+      seeded.nrZgl,
+      OVERRIDE_DTO,
+    );
+
+    // Override dropped — mileage is the daily-km sum (8_000), NOT 5_000.
+    expect(out.mileage).toBe(8_000);
+    // kmDifference = 10_800 - 8_000 = 2_800 → paymentEur = 1_400.
+    expect(out.kmDifference).toBe(2_800);
+    expect(out.paymentEur).toBe(1_400);
+    // The sum WAS consulted (the override was ignored).
+    expect(dailyKm.sumDroveKm).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('ClaimsService.previewKmCalc — delegation-derived path ignores mileage', () => {
+  beforeAll(() => {
+    jest.useFakeTimers().setSystemTime(NOW);
+  });
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
+  it('carrier new-claim preview with a body `mileage` → override ignored, outing sum used', async () => {
+    // Even if a `mileage` slips into the delegation-derived body, the api must
+    // ALWAYS compute the daily-km sum for the outing's vehicle (`ctx != null` ⇒
+    // override never consulted). Guards against a carrier smuggling a mileage in.
+    const carrier = makeCarrier();
+    const claimsRepo = makeClaimsRepo([]);
+    const carriersRepo = makeCarriersRepo([carrier]);
+    const vehiclesRepo = makeVehiclesRepo([]);
+    const km = makeKmCalcService();
+    const dailyKm = makeDailyKmRepo(8_000);
+    const delegations = makeDelegationsRepo(makeDelegationForPreview(true));
+    const svc = makeService(
+      claimsRepo,
+      carriersRepo,
+      vehiclesRepo,
+      km.svc,
+      dailyKm,
+      delegations,
+    );
+
+    const dto: PreviewClaimDto = {
+      delegationId: 'deleg-1',
+      timeFrom: '08:00',
+      timeTo: '18:00',
+      hoursAdjusted: 0,
+      // Smuggled override — must be dropped on the delegation-derived path.
+      mileage: 1,
+    };
+
+    const out = await svc.previewKmCalc(
+      makeAuth('przewoznik', carrier.userId),
+      dto,
+    );
+
+    // Mileage is the outing's daily-km sum (8_000), NOT the smuggled `1`.
+    expect(out.mileage).toBe(8_000);
+    expect(out.paymentEur).toBe(1_400);
+    expect(dailyKm.sumDroveKm).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('ClaimsService.previewKmCalc — guarantee gate (delegation-derived path)', () => {
   beforeAll(() => {
     jest.useFakeTimers().setSystemTime(NOW);

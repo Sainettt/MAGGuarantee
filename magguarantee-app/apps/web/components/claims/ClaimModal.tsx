@@ -121,15 +121,22 @@ function buildPreviewBody(
   if (!claim.vehicleId) return null;
   const dateStart = v.dateStart || claim.dateStart.slice(0, 10);
   const dateEnd = v.dateEnd || claim.dateEnd.slice(0, 10);
-  // `mileage` was REMOVED from PreviewClaimSchema (Phase 7 §0″ finish) — the
-  // preview math always uses the server-computed Σ VehicleDailyKm over the
-  // period, never a caller-supplied override. The verifier's manual mileage
-  // edit still flows through the PATCH (UpdateClaimCorrectionFields.mileage),
-  // it just no longer drives the live recalc preview.
+  // `mileage` is back in PreviewClaimSchema (bug-fix finish): the verifier's
+  // manual km override DRIVES the live recalc. It's server-side role-gated —
+  // honored for pracownik/admin, IGNORED for przewoznik and on the
+  // delegationId-driven carrier path. We only send it when it's a finite,
+  // non-negative number; while the input is empty/NaN we omit the field so
+  // the server falls back to Σ VehicleDailyKm (no crash, just a momentary
+  // fallback). The verifier's mileage edit ALSO still flows through the PATCH
+  // (UpdateClaimCorrectionFields.mileage) as before.
   const hoursAdjusted =
     v.hoursAdjusted !== undefined && Number.isFinite(v.hoursAdjusted)
       ? Number(v.hoursAdjusted)
       : 0;
+  const mileageOverride =
+    v.mileage !== undefined && Number.isFinite(v.mileage) && Number(v.mileage) >= 0
+      ? Number(v.mileage)
+      : undefined;
   return {
     vehicleId: claim.vehicleId,
     dateStart,
@@ -137,6 +144,7 @@ function buildPreviewBody(
     timeFrom: v.timeFrom || claim.timeFrom,
     timeTo: v.timeTo || claim.timeTo,
     hoursAdjusted,
+    ...(mileageOverride !== undefined ? { mileage: mileageOverride } : {}),
   };
 }
 
@@ -316,21 +324,25 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
   // selected targetStatus. Gated only on the vehicle being known (handled
   // inside buildPreviewBody) — the verifier sees the financial consequence
   // of their corrections BEFORE committing to a decision.
-  // `mileage` is intentionally NOT watched for the preview — it no longer drives
-  // the preview math (server computes Σ VehicleDailyKm; PreviewClaimSchema
-  // dropped the field). The verifier's mileage edit still goes out via the PATCH.
+  // `mileage` IS watched: the verifier's manual km override drives the live
+  // recalc. It's honored server-side only for pracownik/admin (ignored for
+  // przewoznik and on the delegationId carrier path); buildPreviewBody sends
+  // it only while it's a finite non-negative number, otherwise omits it so the
+  // server falls back to Σ VehicleDailyKm. The PATCH still carries mileage too.
   const watched = form.watch([
     'dateStart',
     'dateEnd',
     'timeFrom',
     'timeTo',
     'hoursAdjusted',
+    'mileage',
   ]);
   const wDateStart = watched[0];
   const wDateEnd = watched[1];
   const wTimeFrom = watched[2];
   const wTimeTo = watched[3];
   const wHoursAdjusted = watched[4];
+  const wMileage = watched[5];
 
   const previewBodyImmediate = useMemo<PreviewClaimDto | null>(
     () =>
@@ -340,8 +352,9 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
         timeFrom: wTimeFrom,
         timeTo: wTimeTo,
         hoursAdjusted: wHoursAdjusted,
+        mileage: wMileage,
       }),
-    [claim, wDateStart, wDateEnd, wTimeFrom, wTimeTo, wHoursAdjusted],
+    [claim, wDateStart, wDateEnd, wTimeFrom, wTimeTo, wHoursAdjusted, wMileage],
   );
 
   const debouncedPreviewBody = useDebouncedValue(previewBodyImmediate, 300);

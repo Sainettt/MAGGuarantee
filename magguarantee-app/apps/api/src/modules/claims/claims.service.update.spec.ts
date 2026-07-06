@@ -224,6 +224,9 @@ function makeClaimsRepo(seed: ClaimRow[] = []): ClaimsRepoFake {
           ...(data.paymentEur !== undefined
             ? { paymentEur: data.paymentEur }
             : {}),
+          ...(data.amountRequested !== undefined
+            ? { amountRequested: data.amountRequested }
+            : {}),
           ...(data.drivenDays !== undefined
             ? { drivenDays: data.drivenDays }
             : {}),
@@ -497,6 +500,10 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
     const updated = repoFake.rows.get(seeded.nrZgl)!;
     expect(updated.kmGuaranteed).toBe(seeded.kmGuaranteed);
     expect(updated.paymentEur).toBe(seeded.paymentEur);
+    // No recalc ⇒ `amountRequested` is NOT mirrored (the mirror is gated on the
+    // `if (recalc)` block); the seeded value survives untouched.
+    expect(updated.amountRequested).toBe(seeded.amountRequested);
+    expect(repoFake.updateWithinCalls[0]!.data.amountRequested).toBeUndefined();
   });
 
   it('5. ZAAKCEPTOWANO with corrected mileage triggers km-calc recalc', async () => {
@@ -530,6 +537,13 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
     // kmDifference = 9_720 - 8_500 = 1_220 → paymentEur = 1_220 * 0.5 = 610
     expect(updated.paymentEur).toBe(610);
     expect(updated.mileage).toBe(8_500);
+    // INVARIANT (Fix): whenever the math re-runs, `amountRequested` mirrors the
+    // recalculated `paymentEur` — same derivation as submit / delegation
+    // auto-recalc. Seeded value was 1_500; after the verifier km edit both the
+    // patch and the persisted row must read 610, so the stale amount never
+    // leaks into the kwota-Maksima email or the reklamacja amount cap.
+    expect(updated.amountRequested).toBe(610);
+    expect(repoFake.updateWithinCalls[0]!.data.amountRequested).toBe(610);
   });
 
   it('5b. correcting dateStart/dateEnd sets periodAdjustedByVerifier=true (auto-recalc boundary)', async () => {

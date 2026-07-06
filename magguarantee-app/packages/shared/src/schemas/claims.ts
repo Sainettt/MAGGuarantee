@@ -188,7 +188,11 @@ export type SubmitClaimDto = z.infer<typeof SubmitClaimSchema>;
  *  - `POST /claims/:nrZgl/preview` (reklamacja / verifier inspection of an
  *    existing claim) — sends the caller-supplied `dateStart`/`dateEnd` (and an
  *    optional `vehicleId`) to drive the live math; the existing claim already
- *    carries the vehicle/trailer/driver context.
+ *    carries the vehicle/trailer/driver context. A VERIFIER (`pracownik` /
+ *    `admin`) may additionally send `mileage` to override the daily-km sum in
+ *    the preview (matches the PATCH correction field); a `przewoznik`
+ *    reklamacja inspection has this override IGNORED by the api. On the
+ *    `delegationId` (new-claim) path `mileage` is ALWAYS ignored.
  */
 export const PreviewClaimSchema = z
   .object({
@@ -217,6 +221,24 @@ export const PreviewClaimSchema = z
     dateEnd: emptyStringToUndefined(IsoDateSchema.optional()),
     timeFrom: emptyStringToUndefined(HhMmSchema.optional()),
     timeTo: emptyStringToUndefined(HhMmSchema.optional()),
+    /**
+     * VERIFIER inspection-path override — only meaningful on
+     * `POST /claims/:nrZgl/preview` when the caller is a verifier role
+     * (`pracownik` / `admin`). When present, it replaces the server-computed
+     * `Σ VehicleDailyKm.km (state=drove)` in the live preview so the ClaimModal's
+     * dopłata / RecalcBadge / accept-gate / auto-populated `amountApproved` all
+     * track a km edit before the PATCH commits — mirroring what the PATCH recalc
+     * will persist (`UpdateClaimCorrectionFields.mileage`).
+     *
+     * The CARRIER new-claim path (`delegationId` present, or `przewoznik`
+     * reklamacja inspection) IGNORES this field: mileage there is ALWAYS the
+     * daily-km sum — the "no carrier override" invariant from Phase 7 §0″ stands.
+     * The api enforces the gate (`allowMileageOverride` off the caller's role);
+     * the schema keeps it optional so both callers share one wire shape. Empty
+     * string → undefined (form-friendly) via the same preprocessor the sibling
+     * fields use — a cleared numeric input never reaches `.nonnegative()`.
+     */
+    mileage: emptyStringToUndefined(MileageSchema.optional()),
     hoursAdjusted: HoursAdjustedSchema.optional().default(0),
   })
   .strict()
