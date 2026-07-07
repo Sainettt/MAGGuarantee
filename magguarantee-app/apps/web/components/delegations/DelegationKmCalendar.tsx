@@ -53,10 +53,16 @@ export function DelegationKmCalendar({ delegation }: Props) {
   // so the open-trip upper bound never drifts with the browser's local TZ.
   const today = todayIso();
 
-  // FETCH range — anchored at departure, broadened on the `to` side so the
-  // query returns EVERY existing km row (incl. late-return overruns the legacy
-  // `plannedReturnAt` ceiling hid). Render window is narrowed below.
-  const fetchFrom = delegation.departureAt.slice(0, 10);
+  // FETCH range — anchored at the real trip start (the verifier-corrected
+  // `actualDepartureAt` when present, else the carrier-reported `departureAt`),
+  // broadened on the `to` side so the query returns EVERY existing km row (incl.
+  // late-return overruns the legacy `plannedReturnAt` ceiling hid). Render window
+  // is narrowed below. Using `actualDepartureAt` here keeps the strip from
+  // painting "phantom" days between the reported and actual departure.
+  const fetchFrom = (delegation.actualDepartureAt ?? delegation.departureAt).slice(
+    0,
+    10,
+  );
   const fetchTo = calendarFetchTo(delegation, today);
 
   const vehicleId = delegation.vehicleId;

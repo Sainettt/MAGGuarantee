@@ -89,6 +89,11 @@ function makeDelegation(overrides: Partial<DelegationRow> = {}): DelegationRow {
     returnCountry: 'PL',
     returnPostalCode: '00-001',
     status: 'zjechal',
+    // Default: no weryfikator-captured actual departure → `dateStart` falls back
+    // to `departureAt` (2026-05-01), preserving the legacy `[2026-05-01,
+    // 2026-05-10]` period the submit suite relies on. Tests exercising the
+    // `actualDepartureAt` override set it explicitly.
+    actualDepartureAt: null,
     actualReturnAt: new Date('2026-05-10T00:00:00.000Z'),
     reportedById: null,
     reportedBy: null,
@@ -729,6 +734,31 @@ describe('ClaimsService.submit — delegation link', () => {
     expect(data.dateStart.toISOString()).toBe('2026-05-01T00:00:00.000Z');
     expect(data.dateEnd.toISOString()).toBe('2026-05-10T00:00:00.000Z');
     expect(data.delegationId).toBe('deleg-1');
+  });
+
+  it('derives dateStart from actualDepartureAt when the weryfikator captured one (overrides departureAt)', async () => {
+    const repoFake = makeRepo(null);
+    // Weryfikator captured a later actual start (2026-05-03) than the reported
+    // departure day (2026-05-01) → the guarantee period starts on the actual day.
+    const delegations = makeDelegationsRepo(
+      makeDelegation({
+        actualDepartureAt: new Date('2026-05-03T00:00:00.000Z'),
+      }),
+    );
+    const svc = makeService(
+      repoFake,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      delegations,
+    );
+    await svc.submit(makeAuth('przewoznik'), dto);
+    const data = repoFake.creates[0]!.data;
+    // dateStart follows actualDepartureAt (2026-05-03), NOT departureAt.
+    expect(data.dateStart.toISOString()).toBe('2026-05-03T00:00:00.000Z');
+    // dateEnd unaffected (still actualReturnAt 2026-05-10).
+    expect(data.dateEnd.toISOString()).toBe('2026-05-10T00:00:00.000Z');
   });
 
   it('uses plannedReturnAt as dateEnd when the outing is still w_trasie (no actualReturnAt)', async () => {

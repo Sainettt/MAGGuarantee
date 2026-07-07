@@ -1546,8 +1546,16 @@
         "vehicleAndDriver": "Vehicle and driver",
         "departure": "Departure",
         "return": "Return",
-        "audit": "Status and audit",
+        "audit": "Status history",
+        "notes": "Notes",
         "route": "Route"
+      },
+      "audit": {
+        "registeredBy": "Registered by",
+        "readiedBy": "Accepted (export)",
+        "readiedCaption": "load accepted",
+        "confirmedInTransit": "Confirmed in transit",
+        "pending": "— pending"
       },
       "status": {
         "zgloszony": "Reported",
@@ -1567,7 +1575,9 @@
         "durationUnknown": "— · plan.",
         "departure": "Departure",
         "return": "Return",
-        "plannedPrefix": "planned:",
+        "reportedPrefix": "rep.",
+        "plannedPrefix": "plan.",
+        "actualPrefix": "act.",
         "postalPrefix": "postal:"
       },
       "strip": {
@@ -1779,7 +1789,11 @@
         "markInTransit": "Mark in transit",
         "markReturned": "Mark returned",
         "inTransitTitle": "Mark as in transit",
-        "inTransitDescription": "Trip {plate} will be marked as in transit.",
+        "inTransitDescription": "Enter the actual departure date for trip {plate}.",
+        "inTransitDateLabel": "Actual departure date",
+        "inTransitRequired": "Enter the departure date",
+        "inTransitFuture": "The departure date cannot be in the future",
+        "inTransitBeforeDeparture": "Date cannot be earlier than the reported departure date",
         "returnedTitle": "Mark as returned",
         "returnedDescription": "Enter the actual return date for trip {plate}.",
         "returnedDateLabel": "Return date",

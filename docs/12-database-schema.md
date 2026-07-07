@@ -609,8 +609,9 @@ model Delegation {
   returnCountry    String
   returnPostalCode String
 
-  status         DelegationStatus @default(zgloszony)                   // REWORK 2026-06-20: eksport→gotowy, weryfikator→w_trasie/zjechal
-  actualReturnAt DateTime?                                              // date-only, set on markReturned (zjechal) → also bumps Vehicle.lastDroveAt
+  status            DelegationStatus @default(zgloszony)               // REWORK 2026-06-20: eksport→gotowy, weryfikator→w_trasie/zjechal
+  actualDepartureAt DateTime?                                          // date-only, set on markInTransit (w_trasie) — verifier's actual departure date
+  actualReturnAt    DateTime?                                          // date-only, set on markReturned (zjechal) → also bumps Vehicle.lastDroveAt
 
   // REWORK 2026-06-20 (#4) — wniosek↔wyjazd link (one claim per delegation).
   claim Claim?
@@ -812,6 +813,7 @@ shows whether the verifier overrode the carrier's declared hours.
 |---|---|---|
 | `vehicleId`, `carrierId`, `trailerId`, `driverId`, `departureAt`, `departureCountry`, `departurePostalCode` | Strict everywhere | `trailerId`/`driverId` made NOT NULL in 2026-05 (a delegation without trailer or driver doesn't model a real haul). |
 | `plannedReturnAt`, `returnCountry`, `returnPostalCode` | Strict everywhere | NOT NULL since `20260518113943_delegation_required_fields_and_date_only`; `plannedReturnAt` is `@db.Date` (no time). DB length CHECKs on country (2..8) + postal (≤16); format validation in shared Zod. |
+| `actualDepartureAt` | DB nullable | Departure-side analogue of `actualReturnAt`. Set by the `markInTransit` transition on `w_trasie` (verifier's actual departure date). API layer enforces presence when `status='w_trasie'`; no DB CHECK because the column flips together with `status` inside a single service transaction (see "Invariants for api-agent"). |
 | `actualReturnAt` | DB nullable | Set by `markReturned` transition on `zjechal`. API layer enforces presence when `status='zjechal'`; no DB CHECK because the column flips together with `status` inside a single service transaction (see "Invariants for api-agent"). |
 | `notes`, snapshots | Optional everywhere | |
 

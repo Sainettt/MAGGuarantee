@@ -18,6 +18,7 @@ import {
 
 import type {
   CancelDelegationDto,
+  MarkInTransitDto,
   MarkReadyDto,
   MarkReturnedDto,
 } from '@magguarantee/shared';
@@ -81,6 +82,7 @@ function makeRow(overrides: Partial<DelegationRow> = {}): DelegationRow {
     returnCountry: 'PL',
     returnPostalCode: '00-001',
     status: 'zgloszony',
+    actualDepartureAt: null,
     actualReturnAt: null,
     reportedById: null,
     reportedBy: null,
@@ -106,6 +108,7 @@ interface Built {
   vehicleUpdateSpy: jest.Mock;
   vehicleFindSpy: jest.Mock;
   recalcSpy: jest.Mock;
+  recalcDepartureSpy: jest.Mock;
 }
 
 function build(opts: {
@@ -136,8 +139,10 @@ function build(opts: {
   } as unknown as VehiclesRepository;
 
   const recalcSpy = jest.fn(async () => undefined);
+  const recalcDepartureSpy = jest.fn(async () => undefined);
   const claimsService = {
     recalcFromDelegation: recalcSpy,
+    recalcDepartureFromDelegation: recalcDepartureSpy,
   } as unknown as ClaimsService;
 
   const carriers = {
@@ -154,7 +159,14 @@ function build(opts: {
     {} as unknown as ChatNotifierService,
     claimsService,
   );
-  return { service, updateSpy, vehicleUpdateSpy, vehicleFindSpy, recalcSpy };
+  return {
+    service,
+    updateSpy,
+    vehicleUpdateSpy,
+    vehicleFindSpy,
+    recalcSpy,
+    recalcDepartureSpy,
+  };
 }
 
 // ─── markReady ───────────────────────────────────────────────
@@ -198,20 +210,104 @@ describe('DelegationsService.markReady', () => {
 // ─── markInTransit ───────────────────────────────────────────
 
 describe('DelegationsService.markInTransit', () => {
-  it('gotowy → w_trasie stamps verifiedBy/At', async () => {
+  // The baseline row departs 2026-06-01; a valid actual-departure is on/after
+  // that day and not in the future. `2026-06-03` is safely in the past relative
+  // to the fixed test-clock era (the future check reads the real system clock,
+  // so we keep the valid fixture well behind any plausible run date).
+  const dto: MarkInTransitDto = { actualDepartureAt: '2026-06-03' };
+
+  it('gotowy → w_trasie persists actualDepartureAt + stamps verifiedBy/At', async () => {
     const { service, updateSpy } = build({ row: makeRow({ status: 'gotowy' }) });
-    const out = await service.markInTransit(auth('weryfikator'), 'deleg-1', {});
+    const out = await service.markInTransit(auth('weryfikator'), 'deleg-1', dto);
     expect(out.status).toBe('w_trasie');
     const patch = updateSpy.mock.calls[0]![1];
     expect(patch.status).toBe('w_trasie');
+    expect((patch.actualDepartureAt as Date).toISOString()).toBe(
+      '2026-06-03T00:00:00.000Z',
+    );
     expect(patch.verifiedById).toBe('u-weryfikator');
     expect(patch.verifiedAt).toBeInstanceOf(Date);
+  });
+
+  it('surfaces actualDepartureAt on the returned DTO', async () => {
+    const { service } = build({ row: makeRow({ status: 'gotowy' }) });
+    const out = await service.markInTransit(auth('weryfikator'), 'deleg-1', dto);
+    expect(out.actualDepartureAt).toBe('2026-06-03T00:00:00.000Z');
+  });
+
+  it('an actual-departure on the reported departure DAY is allowed (>= boundary)', async () => {
+    // departureAt is 2026-06-01T08:00Z; a same-DAY actual departure (00:00Z)
+    // must pass the not-before-departureAt gate (UTC-day granularity).
+    const { service, updateSpy } = build({ row: makeRow({ status: 'gotowy' }) });
+    const out = await service.markInTransit(auth('weryfikator'), 'deleg-1', {
+      actualDepartureAt: '2026-06-01',
+    });
+    expect(out.status).toBe('w_trasie');
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a FUTURE actual-departure (422, DEPARTURE_DATE_FUTURE) — writes nothing', async () => {
+    const { service, updateSpy } = build({ row: makeRow({ status: 'gotowy' }) });
+    let thrown: unknown;
+    try {
+      await service.markInTransit(auth('weryfikator'), 'deleg-1', {
+        actualDepartureAt: '2999-01-01',
+      });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(UnprocessableEntityException);
+    expect((thrown as UnprocessableEntityException).getResponse()).toMatchObject(
+      { extensions: { code: 'DEPARTURE_DATE_FUTURE' } },
+    );
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  it('rejects an actual-departure BEFORE the reported departureAt (422, DEPARTURE_BEFORE_REPORTED) — writes nothing', async () => {
+    // departureAt is 2026-06-01; 2026-05-31 is one day earlier → hard 422.
+    const { service, updateSpy } = build({ row: makeRow({ status: 'gotowy' }) });
+    let thrown: unknown;
+    try {
+      await service.markInTransit(auth('weryfikator'), 'deleg-1', {
+        actualDepartureAt: '2026-05-31',
+      });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(UnprocessableEntityException);
+    expect((thrown as UnprocessableEntityException).getResponse()).toMatchObject(
+      { extensions: { code: 'DEPARTURE_BEFORE_REPORTED' } },
+    );
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  it('recalcs the linked wniosek with (delegationId, actualDepartureAt)', async () => {
+    const { service, recalcDepartureSpy } = build({
+      row: makeRow({ status: 'gotowy' }),
+    });
+    await service.markInTransit(auth('weryfikator'), 'deleg-1', dto);
+    expect(recalcDepartureSpy).toHaveBeenCalledTimes(1);
+    const [delegationId, actualDepartureAt] =
+      recalcDepartureSpy.mock.calls[0]!;
+    expect(delegationId).toBe('deleg-1');
+    expect((actualDepartureAt as Date).toISOString()).toBe(
+      '2026-06-03T00:00:00.000Z',
+    );
+  });
+
+  it('does NOT bump Vehicle.lastDroveAt (that is the return-flow signal)', async () => {
+    const { service, vehicleUpdateSpy } = build({
+      row: makeRow({ status: 'gotowy' }),
+      vehicleLastDroveAt: null,
+    });
+    await service.markInTransit(auth('weryfikator'), 'deleg-1', dto);
+    expect(vehicleUpdateSpy).not.toHaveBeenCalled();
   });
 
   it('rejects in-transit from zgloszony (must go through gotowy) — 422', async () => {
     const { service, updateSpy } = build({ row: makeRow({ status: 'zgloszony' }) });
     await expect(
-      service.markInTransit(auth('weryfikator'), 'deleg-1', {}),
+      service.markInTransit(auth('weryfikator'), 'deleg-1', dto),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
     expect(updateSpy).not.toHaveBeenCalled();
   });

@@ -275,9 +275,15 @@ export class ClaimsService {
 
   /**
    * Pure period derivation from an outing row + the status gate. `dateStart =
-   * date(departureAt)`, `dateEnd = actualReturnAt ?? plannedReturnAt`. Only
-   * {`w_trasie`, `zjechal`} may back a wniosek; `w_trasie` yields a soft
-   * warning (no `actualReturnAt` yet → planned date used). No IO.
+   * date(actualDepartureAt ?? departureAt)`, `dateEnd = actualReturnAt ??
+   * plannedReturnAt`. Only {`w_trasie`, `zjechal`} may back a wniosek; `w_trasie`
+   * yields a soft warning (no `actualReturnAt` yet → planned date used). No IO.
+   *
+   * `dateStart` prefers the weryfikator-captured `actualDepartureAt` (the ACTUAL
+   * start of the guarantee period, stamped on `gotowy → w_trasie`) over the
+   * carrier-reported `departureAt`, falling back to the latter when the actual
+   * date is absent (legacy / not yet stamped). This single seam is shared by BOTH
+   * the preview and the submit paths (`_resolveDelegationContext`), so they agree.
    */
   private _deriveDelegationPeriod(deleg: DelegationRow): {
     dateStart: Date;
@@ -289,7 +295,9 @@ export class ClaimsService {
         'Wniosek można złożyć tylko dla wyjazdu w trasie lub zjechanego.',
       );
     }
-    const dateStart = startOfUtcDay(deleg.departureAt);
+    const dateStart = startOfUtcDay(
+      deleg.actualDepartureAt ?? deleg.departureAt,
+    );
     const dateEnd = startOfUtcDay(deleg.actualReturnAt ?? deleg.plannedReturnAt);
     const warning: DelegationWarning | null =
       deleg.status === 'w_trasie' ? DELEGATION_NOT_YET_RETURNED_WARNING : null;
@@ -774,6 +782,148 @@ export class ClaimsService {
       // km-calc were rewritten), so any prior «Zapisz weryfikację» stamp no
       // longer reflects the current numbers. Reset to NULL so the verifier must
       // re-confirm before the (now-blocked) decision transitions unlock again.
+      verifiedAt: null,
+      verifiedById: null,
+      // `timeFrom/timeTo` and the `orig*` snapshots are intentionally NOT touched.
+    });
+
+    await this.auditWriter.log({
+      action: 'claim.autoRecalc',
+      targetType: 'Claim',
+      targetKey: claim.nrZgl,
+      actor: AuditContext.current()?.actor ?? 'system',
+      before,
+      after: this._snapshotForAudit(updated),
+    });
+  }
+
+  // ── Auto-recalc from delegation DEPARTURE (in-transit) ──
+
+  /**
+   * Re-computes the linked wniosek when a delegation is marked `w_trasie` with a
+   * (possibly backdated) `actualDepartureAt` — the ACTUAL start of the guarantee
+   * period. Called from `DelegationsService.markInTransit()` INSIDE the
+   * `@Audit`-opened ambient transaction, so every read/write here (`prisma.tx`-
+   * routed) commits atomically with the outing status change.
+   *
+   * This is the DEPARTURE-side mirror of `recalcFromDelegation` (the return
+   * side): the same hard gate, the same «applied»/«skipped» audit contract, the
+   * same mileage-re-prefill / km-calc rules — but it shifts `dateStart` (not
+   * `dateEnd`) because moving the actual departure moves the period START.
+   *
+   * Hard gate — applies ONLY when a claim is linked AND
+   * `claim.status === NA_WERYFIKACJI` AND `claim.periodAdjustedByVerifier ===
+   * false` (identical to the return-side gate — `OCZEKUJE_NA_AUTORYZACJE` and
+   * decided statuses are frozen; a human-corrected period is never overwritten).
+   *
+   * The `_tx` param is accepted for call-site clarity (routing is via the
+   * ambient `prisma.tx`, so it is intentionally unused).
+   */
+  async recalcDepartureFromDelegation(
+    delegationId: string,
+    actualDepartureAt: Date,
+    _tx?: unknown,
+  ): Promise<void> {
+    const claim = await this.claims.findByDelegationId(delegationId);
+    if (!claim) return; // no linked wniosek → nothing to recalc
+
+    const recalcable =
+      claim.status === 'NA_WERYFIKACJI' &&
+      claim.periodAdjustedByVerifier === false;
+
+    if (!recalcable) {
+      // Decided OR human-adjusted period → leave the wniosek's numbers alone.
+      // Only stamp `skipped` when the wniosek's `dateStart` actually diverges
+      // from the outing's actual departure day (else the recalc would have been
+      // a no-op — avoid a false «skipped» badge). Mirrors the return side.
+      const hasDivergence = !sameUtcDay(claim.dateStart, actualDepartureAt);
+      if (hasDivergence) {
+        await this.claims.update(claim.id, { autoRecalcState: 'skipped' });
+      }
+      await this.auditWriter.log({
+        action: 'claim.autoRecalcSkipped',
+        targetType: 'Claim',
+        targetKey: claim.nrZgl,
+        actor: AuditContext.current()?.actor ?? 'system',
+        before: {
+          reason: this._skipReason(claim),
+          status: claim.status,
+          hasDivergence,
+        },
+        after: hasDivergence ? { autoRecalcState: 'skipped' } : null,
+      });
+      return;
+    }
+
+    await this._applyDepartureRecalc(claim, actualDepartureAt);
+  }
+
+  /**
+   * Applies the delegation-DEPARTURE-driven recalc to a recalc-eligible claim.
+   * Shifts `dateStart` to `actualDepartureAt`, re-prefills mileage over the NEW
+   * period (only when the carrier didn't override — same `origMileage` detection
+   * as the return side), re-runs km-calc with the SAME engine, persists the new
+   * numbers, and writes a `claim.autoRecalc` before/after audit row. No email.
+   * Private — the gate lives in the public `recalcDepartureFromDelegation`.
+   */
+  private async _applyDepartureRecalc(
+    claim: ClaimRow,
+    actualDepartureAt: Date,
+  ): Promise<void> {
+    const before = this._snapshotForAudit(claim);
+
+    // dateStart shifts to the actual departure day; dateEnd is unchanged.
+    const dateStart = startOfUtcDay(actualDepartureAt);
+    const dateEnd = startOfUtcDay(claim.dateEnd);
+
+    // Re-prefill mileage via the SAME `_resolveMileage` (the daily-km sum over
+    // the NEW period) UNLESS a human has since changed it. `origMileage ===
+    // mileage` ⇒ untouched ⇒ safe to re-prefill (identical rule to the return
+    // side).
+    const mileageWasHumanEdited =
+      claim.origMileage !== null && claim.origMileage !== claim.mileage;
+    const mileage =
+      mileageWasHumanEdited || claim.vehicleId === null
+        ? claim.mileage
+        : await this._resolveMileage(claim.vehicleId, dateStart, dateEnd);
+
+    // Re-run km-calc via the SAME `KmCalcService` (preview == submit == recalc).
+    const calc = await this.kmCalc.calc({
+      dateStart: toIsoDateOnly(dateStart),
+      dateEnd: toIsoDateOnly(dateEnd),
+      timeFrom: claim.timeFrom,
+      timeTo: claim.timeTo,
+      hoursAdjusted: claim.hoursAdjustedValue ?? 0,
+    });
+
+    const kmDifference = calc.kmGuaranteed - mileage;
+    const paymentEur =
+      kmDifference > 0 ? round2(kmDifference * calc.ratePerKmEffective) : 0;
+    const kmPerDay = calc.totalDays > 0 ? round2(mileage / calc.totalDays) : 0;
+    const breakdown: KmCalcBreakdown = {
+      totalDays: calc.totalDays,
+      rawTotalDays: calc.rawTotalDays,
+      kmGuaranteed: calc.kmGuaranteed,
+      ratePerKmEffective: calc.ratePerKmEffective,
+      breakdown: calc.breakdown,
+    };
+
+    const updated = await this.claims.update(claim.id, {
+      // dateEnd is unchanged (return day); only dateStart shifts.
+      dateStart,
+      mileage,
+      drivenDays: calc.totalDays,
+      kmPerDay,
+      kmGuaranteed: calc.kmGuaranteed,
+      kmDifference,
+      paymentEur,
+      ratePerKmEffective: calc.ratePerKmEffective,
+      // amountRequested mirrors paymentEur (same derivation as submit).
+      amountRequested: paymentEur,
+      breakdown,
+      autoRecalcState: 'applied',
+      // Checkpoint invalidated — the underlying data changed, so a prior
+      // «Zapisz weryfikację» stamp no longer reflects the current numbers.
       verifiedAt: null,
       verifiedById: null,
       // `timeFrom/timeTo` and the `orig*` snapshots are intentionally NOT touched.

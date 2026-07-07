@@ -84,10 +84,13 @@ export function markDelegationReady(
 
 /**
  * POST /delegations/:id/in-transit — weryfikator|admin. `gotowy → w_trasie`.
+ * `actualDepartureAt` is date-only (`YYYY-MM-DD`) — the ACTUAL start of the
+ * guarantee period, so the server auto-recalcs the linked wniosek. The api
+ * re-validates it (not in the future, not before the reported `departureAt`).
  */
 export function markDelegationInTransit(
   id: string,
-  body: MarkInTransitDto = {},
+  body: MarkInTransitDto,
 ): Promise<DelegationDto> {
   return apiJson<DelegationDto>(`/delegations/${id}/in-transit`, {
     method: 'POST',

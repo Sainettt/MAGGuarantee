@@ -27,7 +27,11 @@ import type { DelegationDto, VehicleDailyKmDto } from '@magguarantee/shared';
 /** A delegation, reduced to the fields the window rule reads. */
 type CalendarDelegation = Pick<
   DelegationDto,
-  'departureAt' | 'plannedReturnAt' | 'actualReturnAt' | 'status'
+  | 'departureAt'
+  | 'actualDepartureAt'
+  | 'plannedReturnAt'
+  | 'actualReturnAt'
+  | 'status'
 >;
 
 /** A km row, reduced to the only field the window rule reads. */
@@ -70,7 +74,10 @@ export function calendarFetchTo(
 /**
  * The RENDER window `{ fromIso, toIso }` — what the day-strip actually draws.
  *
- *   start (fromIso) = date(departureAt)            — anchor; excludes prior-trip days
+ *   start (fromIso) = date(actualDepartureAt ?? departureAt)  — anchor; the
+ *     verifier-corrected real start when present (so days between the carrier's
+ *     reported departure and the actual start are excluded), else the reported
+ *     departure; either way excludes prior-trip days
  *   renderEnd (toIso) =
  *     zjechal          → actualReturnAt            — closed; later km belong to next trip
  *     w_trasie         → max(plannedReturnAt, lastKmDate)
@@ -93,7 +100,9 @@ export function deriveCalendarWindow(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- reserved, documented signature
   today: string,
 ): { fromIso: string; toIso: string } {
-  const fromIso = dateOnly(delegation.departureAt);
+  const fromIso = dateOnly(
+    delegation.actualDepartureAt ?? delegation.departureAt,
+  );
   const plannedEnd = dateOnly(delegation.plannedReturnAt);
 
   let toIso: string;

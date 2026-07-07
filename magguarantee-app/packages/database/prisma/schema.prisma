@@ -715,8 +715,14 @@ model Delegation {
   returnCountry    String
   returnPostalCode String
 
-  status         DelegationStatus @default(zgloszony)
-  actualReturnAt DateTime?
+  status            DelegationStatus @default(zgloszony)
+  // Verifier-set actual dates. `actualDepartureAt` is set by the weryfikator on
+  // transition to `w_trasie` (in transit); `actualReturnAt` on transition to
+  // `zjechal`. Both stay `DateTime?` (nullable, NOT `@db.Date`): date-only value
+  // stored as UTC midnight, flipped together with `status` in a single service
+  // transaction, so there is no DB CHECK enforcing presence.
+  actualDepartureAt DateTime?
+  actualReturnAt    DateTime?
 
   // REWORK 2026-06-20 (#4, docs/20 §0″) — wniosek↔wyjazd link. One-to-one:
   // the owning side is Claim.delegationId (@unique).

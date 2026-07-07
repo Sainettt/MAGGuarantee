@@ -3652,9 +3652,10 @@ So `DelegationDetailModal.tsx` stays a thin wrapper over `<EntityDetailModal>`; 
 │  ╭─ RouteCard (section A, span:'full', fullWidth row) ──────────────────╮  │
 │  │                                                                      │  │
 │  │   ( DE )  ───────  🚚  [ 4 dni · plan. ]  ───────►  ( PL )           │  │
-│  │   wyjazd                                              powrót          │  │
-│  │   12.03.2025, 08:00          (duration pill on        plan: 16.03.2025│  │
-│  │   kod: 40-001                 the connector)          kod: 00-950     │  │
+│  │   Wyjazd                                              Powrót          │  │
+│  │   zgł.  12.03, 08:00        (duration pill on       plan.  16.03.2025 │  │
+│  │   fakt. 13.03  ◀actual      the connector)          fakt.  18.03.2025 │  │
+│  │   kod: 40-001                                        kod: 00-950      │  │
 │  ╰──────────────────────────────────────────────────────────────────────╯  │
 │                                                                            │
 │  ╭─ Driver + vehicle strip (section B, span:'full', fullWidth row) ─────╮  │
@@ -3662,26 +3663,33 @@ So `DelegationDetailModal.tsx` stays a thin wrapper over `<EntityDetailModal>`; 
 │  │           +48 600 000 000          │  Naczepa  WGM 5678N            │  │
 │  ╰──────────────────────────────────────────────────────────────────────╯  │
 │                                                                            │
-│  ╭─ STATUS I AUDYT (section C, normal label/value rows) ────────────────╮  │
-│  │   Zgłoszone przez   …        Zgłoszono   …                            │  │
-│  │   Zweryfikowane     …        Zweryfikowano …                          │  │
-│  │   Notatki           …  (fullWidth row, §6.20 long-text)               │  │
+│  ╭─ HISTORIA STATUSU (section C, audit-chain — §6.4.1a) ────────────────╮  │
+│  │   ● Zgłoszony przez        Jan (przewoźnik)      12.03.2025, 08:00    │  │
+│  │   ● Zaakceptowany (eksport)       Anna (eksport)        12.03.2025, 14:20    │  │
+│  │   ● Potwierdzony w trasie  Piotr (weryfikator)   13.03.2025, 06:05    │  │
+│  │   ── utworzono … · zaktualizowano … (subtle footer) ──                │  │
+│  ╰──────────────────────────────────────────────────────────────────────╯  │
+│                                                                            │
+│  ╭─ NOTATKI (section D, long-text, only if notes present) ──────────────╮  │
+│  │   …  (fullWidth row, §6.20 long-text)                                 │  │
 │  ╰──────────────────────────────────────────────────────────────────────╯  │
 └────────────────────────────────────────────────────────────────────────────┘
-   Footer:  Utworzono {createdAt}            [ Zamknij ]
+   Footer:  Utworzono {createdAt} · Zaktualizowano {updatedAt}   [ Zamknij ]
 ```
 
-**Section span decision.** All three sections are `span: 'full'` so the modal body is a single column (the route card and the driver/vehicle strip are inherently wide; pairing them into the lg 2-column grid would crush the route connector). This means the modal does **not** need the wide `max-w-5xl` of the dense vehicle modal — pass `className="max-w-2xl"` on `<EntityDetailModal>` to override back to ~672px, because a single-column route view reads better narrower (the wide variant exists for the 2-column field grids; this modal has no grid). This is a per-consumer className override of the geometry (§6.2 already establishes width is set via the `className` prop), **not** a token change.
+> **⚠️ Redesign 2026-07-07 (this section supersedes the flat «STATUS I AUDYT» `<dl>` below).** The old Block C mixed one operational date (`actualReturnAt`) with identity/audit stamps in one undifferentiated list, hid the newly-added `actualDepartureAt` entirely, and rendered the **eksport** `readyBy/At` stamp under a «Zweryfikowany» (verified) label while the **true** weryfikator `verifiedBy/At` stamp was never shown — overloading "verification". The concerns are now split cleanly into **(A) an operational timeline folded into the RouteCard** (reported-vs-actual on each end) and **(B) an honest audit chain** (§6.4.1a). See §6.4.1a for the full grouping, empty-state rules, corrected actor labels, and copy table. The tables headed «Block C — STATUS I AUDYT» below are the *old* layout and are retained only as change-history context — implement §6.4.1a.
+
+**Section span decision.** All three sections are `span: 'full'` so the modal body is a single column (the route card and the driver/vehicle strip are inherently wide; pairing them into the lg 2-column grid would crush the route connector). This means the modal does **not** need the wide `max-w-5xl` of the dense vehicle modal — pass `className="max-w-[820px]"` on `<EntityDetailModal>` to override it, because a single-column route view reads better narrower than the wide variant (which exists for the 2-column field grids; this modal has no grid). ~820px (≈ +22% over the base 2xl/672px) gives the reported-vs-actual date pairs and the audit stepper room to breathe without becoming a dense grid width. This is a per-consumer className override of the geometry (§6.2 already establishes width is set via the `className` prop), **not** a token change.
 
 **Block A — `<RouteCard>` (new component, §6.4.4).** A three-zone horizontal composition inside one `rounded-xl border border-border/60 bg-card p-5` card (matches the §6.4 section-card recipe — no tint, no extra shadow):
 
 | Zone | Content | Spec |
 |---|---|---|
-| **Departure (left)** | Country "circle" + label «Wyjazd» + date-time + postal | Circle: `inline-flex h-12 w-12 items-center justify-center rounded-full border border-border bg-input text-sm font-bold text-text` showing the **ISO country code** (`departureCountry`, e.g. `DE`). Under it: `text-[11px] font-semibold uppercase tracking-[0.08em] text-text-sub` = «Wyjazd»; then `text-sm text-text tabular-nums` = `formatDateTime(departureAt)` (date + time, since `departureAt` is a datetime); then `text-xs text-text-sub` = «kod: {departurePostalCode}» mono. |
+| **Departure (left)** | Country "circle" + label «Wyjazd» + **reported / actual date pair** + postal | Circle: `inline-flex h-12 w-12 items-center justify-center rounded-full border border-border bg-input text-sm font-bold text-text` showing the **ISO country code** (`departureCountry`, e.g. `DE`). Under it: `text-[11px] font-semibold uppercase tracking-[0.08em] text-text-sub` = «Wyjazd»; then the **reported-vs-actual date pair** (see §6.4.1a "reported-vs-actual pair" recipe): reported `departureAt` (date + time, since it is a datetime — `formatDateTime`) prefixed «zgł.», and — **only once present** — actual `actualDepartureAt` prefixed «fakt.» rendered **date-only** (`formatDateFull` — it is UTC-midnight date-only, see the ⚠️ helper note in §6.4.1a); then `text-xs text-text-sub` = «kod: {departurePostalCode}» mono. |
 | **Connector (center)** | Arrow line + truck icon + duration pill | A horizontal connector: `flex-1` with a hairline rule (`h-px bg-border` or `border-t border-border`) running behind a centered cluster. Cluster = Lucide `<Truck size={18} className="text-text-sub" />` + the **duration pill**. End the line with a Lucide `<ChevronRight>` / arrowhead pointing at the return circle. On narrow widths the connector rotates to vertical (see responsive). |
-| **Return (right)** | Country circle + label «Powrót» + planned date + postal | Circle same recipe, code = `returnCountry`. Label «Powrót». Planned: `text-sm text-text tabular-nums` = «plan: {formatDateFull(plannedReturnAt)}» (date-only — `plannedReturnAt` is `@db.Date`). Postal: `text-xs text-text-sub` = «kod: {returnPostalCode}» mono. **The «faktyczny» (actual-return) line is removed** — see note below. |
+| **Return (right)** | Country circle + label «Powrót» + **planned / actual date pair** + postal | Circle same recipe, code = `returnCountry`. Label «Powrót». The **planned-vs-actual date pair** (same recipe): planned `plannedReturnAt` (date-only — `@db.Date` — `formatDateFull`) prefixed «plan.»; and — **only once present** — actual `actualReturnAt` prefixed «fakt.» rendered **date-only** (`formatDateFull` — UTC-midnight date-only). Postal: `text-xs text-text-sub` = «kod: {returnPostalCode}» mono. |
 
-> **«faktyczny» line removed (decided 2026-06-16).** The actual-return-date line («faktyczny: {actualReturnAt}») is **dropped from `<RouteCard>` globally** — it disappears in every read-only delegation modal across all three panels (carrier, eksport, admin), since they all share this one component. Rationale: for unfinished outbound trips `actualReturnAt` is always `null`, so the line rendered a permanent «faktyczny: —» that, without surrounding context, reads as ambiguous/broken rather than informative. `actualReturnAt` **stays on the wire** (`DelegationDto` / API / DB unchanged) — this is a UI-only removal. The now-unused i18n key `carrier.delegations.routeCard.actualPrefix` (pl.json/en.json) is deleted.
+> **Reported-vs-actual folded back into `<RouteCard>` (redesign 2026-07-07, supersedes the 2026-06-16 «faktyczny line removed» decision).** The actual dates are **back in `<RouteCard>`, on both ends**, next to their reported/planned counterparts — this is the "make the reported-vs-actual distinction visually obvious" requirement, and it keeps operational dates OUT of the audit chain (§6.4.1a). The 2026-06-16 removal was rejected because it (a) hid the new `actualDepartureAt` and (b) left `actualReturnAt` orphaned in the audit `<dl>` where it read as an audit stamp, not a trip fact. The old "permanent «faktyczny: —»" complaint is solved by the **per-line empty rule** (§6.4.1a): the «fakt.» sub-line is **omitted entirely when its value is `null`**, not rendered as an em-dash — so an in-flight trip simply shows «zgł.» + «plan.» with no dangling actual lines, and the actual lines *appear* as the lifecycle advances (`actualDepartureAt` on `w_trasie`, `actualReturnAt` on `zjechal`). The reported/planned lines are **always** shown. `actualReturnAt` and `actualDepartureAt` both remain on the wire (`DelegationDto` unchanged — DTO already carries both). New i18n keys `routeCard.reportedPrefix` / `routeCard.actualPrefix` replace the deleted `actualPrefix`; `plannedPrefix` stays (relabelled value «plan.»).
 
 **Duration pill** — `inline-flex items-center gap-1 rounded-full border border-border bg-input px-2.5 py-0.5 text-xs font-medium text-text-sub` with the text «{n} dni · plan.». `n` = **whole-day count between `departureAt` and `plannedReturnAt`**, computed date-only: `differenceInCalendarDays(plannedReturnAt, departureAt.slice(0,10))` (drop the time portion of `departureAt`, exactly mirroring the zod cross-field validation at `delegations.ts:113`). Pluralize via the existing PL plural i18n (`1 dzień` / `2–4 dni` / `5+ dni`) — add `delegations.routeCard.durationDays` ICU plural; the `· plan.` suffix marks it as the *planned* span (so it never reads as actual elapsed time). Guard `n >= 0` (the zod schema already forbids `plannedReturnAt < departureAt`); if for any reason the pill would be negative, render «— · plan.».
 
@@ -3690,7 +3698,7 @@ So `DelegationDetailModal.tsx` stays a thin wrapper over `<EntityDetailModal>`; 
 - **Driver half:** a small avatar circle (`inline-flex h-9 w-9 items-center justify-center rounded-full bg-input text-text-sub` with a Lucide `<User size={18} />` — **no** photo, no initials needed) + a two-line stack: name `text-sm font-semibold text-text` (`driver.firstName + lastName` ?? `driverNameSnapshot`, em-dash if both null) and phone `text-xs text-text-sub font-mono` (`driverPhoneSnapshot`, em-dash if null). This is where the driver name + phone live now (moved out of the header).
 - **Vehicle half:** a compact label/value pair set — «NR REJ.» → `vehicle.plateNumber` (`font-mono font-semibold`); «Naczepa» → `trailer.plateNumber` rendered as the connected string «Naczepa {plate}» (`font-mono`, em-dash → «Naczepa —» if no trailer). Use the same `text-[11px] uppercase tracking-[0.08em] text-text-sub` mini-label treatment as the route-card sub-labels for visual consistency.
 
-**Block C — «STATUS I AUDYT» section.** A normal `<EntityDetailSection>` (NOT custom) — reuses the standard label/value `<dl>` rows (§6.5), so all the system/audit fields keep their proven rendering:
+**Block C — «STATUS I AUDYT» section (OLD LAYOUT — superseded by §6.4.1a).** A normal `<EntityDetailSection>` (NOT custom) — reuses the standard label/value `<dl>` rows (§6.5), so all the system/audit fields keep their proven rendering:
 
 | Row | Field | Formatter |
 |---|---|---|
@@ -3702,20 +3710,110 @@ So `DelegationDetailModal.tsx` stays a thin wrapper over `<EntityDetailModal>`; 
 
 Section header: icon `<ClipboardCheck>` (or keep `<Info>`), label «STATUS I AUDYT». `span: 'full'`.
 
+> ⚠️ The table above is the **old** Block C and is **superseded by §6.4.1a**. It is kept only for change-history. Implement §6.4.1a: the operational actuals fold into the RouteCard (Block A, above), the audit stamps become an honest chain (Block C), the eksport stamp gets its own honest label, the true `verifiedBy/At` weryfikator stamp is surfaced, and «Notatki» becomes its own Block D.
+
 > **Block D — «ZESPÓŁ PROWADZĄCY» (Phase 11, §7.9.7).** A further `span:'full'` `fullWidth` block **below**
 > «STATUS I AUDYT» (and below the §7.7.9 km-calendar if present), header «ZESPÓŁ PROWADZĄCY» (`<Users>`),
 > rendering `<TeamMembers variant="list" size="md">` from the **current** `Vehicle.dispatchTeam` (live by
 > `vehicleId`, **not** a delegation-time snapshot). Label mirrors the Google Chat trip-notification heading.
 > Omitted when no vehicle; amber «Brak zespołu prowadzącego» when the vehicle has no team. Full spec: §7.9.7.
 
-**All fields accounted for (no field dropped).** Mapping of the 19 `DelegationDto` fields to the new layout:
+**All fields accounted for (no field dropped) — updated for the §6.4.1a redesign.** Mapping of the `DelegationDto` fields to the new layout:
 - Header: `vehicle.plateNumber` (title), `status` (badge).
-- Route card: `departureAt`, `departureCountry`, `departurePostalCode`, `plannedReturnAt`, `returnCountry`, `returnPostalCode` (+ the derived duration pill). `actualReturnAt` is **no longer displayed** (UI-only removal — see «faktyczny» note above) but remains in `DelegationDto`.
-- Driver/vehicle strip: `driver`/`driverNameSnapshot`, `driverPhoneSnapshot`, `vehicle.plateNumber` (echoed in body for the strip), `trailer.plateNumber`.
-- Status & audit section: `reportedBy`, `reportedAt`, `verifiedBy`, `verifiedAt`, `notes`.
+- Route card (Block A): `departureAt` (reported) + **`actualDepartureAt` (actual, NEW)**; `departureCountry`, `departurePostalCode`; `plannedReturnAt` (planned) + `actualReturnAt` (actual); `returnCountry`, `returnPostalCode` (+ the derived duration pill).
+- Driver/vehicle strip (Block B): `driver`/`driverNameSnapshot`, `driverPhoneSnapshot`, `vehicle.plateNumber` (echoed in body for the strip), `trailer.plateNumber`.
+- Audit chain (Block C, §6.4.1a): `reportedBy`/`reportedAt`, `readyBy`/`readyAt`, `verifiedBy`/`verifiedAt`.
+- Notatki (Block D): `notes`.
 - Footer meta line: `createdAt`, `updatedAt` (unchanged, §6.6).
 
 **Read-only.** No `onEdit` is passed ⇒ footer is meta line + «Zamknij» only (the existing behaviour — keep it). No edit/cancel control inside the modal.
+
+### 6.4.1a Delegation lifecycle presentation — operational timeline + audit chain (redesign 2026-07-07)
+
+> **Why this section exists.** The user's complaint: the lifecycle info in the delegation detail modal is muddled — an operational date (`actualReturnAt`) sat in the same flat `<dl>` as identity/audit stamps; the new `actualDepartureAt` (actual start-of-guarantee, counterpart to `actualReturnAt`) was not surfaced anywhere; and the modal rendered the **eksport** `readyBy/At` stamp under a «Zweryfikowany» label while the **real** weryfikator `verifiedBy/At` stamp was invisible — so "verification" was overloaded and dishonest. This section un-muddles all three cleanly. **Presentation-only, role-neutral** — all fields are already on `DelegationDto`; no schema/API change; no role gains or loses data visibility (this modal is shared read-only across carrier / planista / dyspozytor / eksport / weryfikator — the regrouping is identical for all five).
+
+**The clean split — two concerns, two homes:**
+
+- **(A) Operational timeline → folds into `<RouteCard>` (Block A).** "Reported vs actual" on each end of the trip, next to each other, so the distinction is spatial: departure `departureAt` (reported) ↔ `actualDepartureAt` (actual start-of-guarantee); return `plannedReturnAt` (planned) ↔ `actualReturnAt` (actual). These are **trip facts**, not audit stamps — they belong on the route, paired with their reported/planned counterpart, NOT in a who-did-what list. See the updated Block A "reported-vs-actual pair" recipe (§6.4.1 Block A table).
+- **(B) Audit / lifecycle chain → Block C, «HISTORIA STATUSU».** Who-did-what-when, in lifecycle order, as a vertical stepper. Only identity + timestamp lives here.
+
+Splitting the operational actuals out of the audit list is the core of the un-muddling: after this, Block C contains **only** actor + timestamp, and the trip dates live on the route where the eye already looks for them.
+
+#### Block A — reported-vs-actual date pair (recipe)
+
+Each trip end shows a **two-line date stack** under its «Wyjazd» / «Powrót» mini-label:
+
+```
+ Wyjazd                         Powrót
+ zgł.  12.03.2025, 08:00        plan.  16.03.2025
+ fakt. 13.03.2025               fakt.  18.03.2025      ← only when actual present
+ kod: 40-001                    kod: 00-950
+```
+
+- **Reported/planned line (always shown):** prefix chip «zgł.» (departure) / «plan.» (return) in the `MINI_LABEL` treatment (`text-[11px] uppercase tracking-[0.08em] text-text-sub`), then the value in `text-sm text-text tabular-nums`. Departure value = `formatDateTime(departureAt)` (has a real time). Return value = `formatDateFull(plannedReturnAt)` (date-only).
+- **Actual line (shown ONLY when the value is non-null):** prefix chip «fakt.» (same mini-label, but tint it `text-success` to signal "confirmed/real"), then the value. Departure actual = `actualDepartureAt`; return actual = `actualReturnAt`. **Both render date-only with the date-only helper** — see the ⚠️ below.
+- **Empty rule for actual lines:** when the actual is `null`, render **nothing** — no row, no em-dash. (`actualDepartureAt` is null until `w_trasie`; `actualReturnAt` is null until `zjechal`.) This is the fix for the old "permanent «faktyczny: —»" that read as broken. The reported/planned line is never omitted.
+
+> **⚠️ Implementation note for web-agent — date-only helpers (phantom-time bug).** `actualDepartureAt` is stored **UTC-midnight date-only** (identical convention to `actualReturnAt` — see `delegations.ts` DTO doc-comment). It **MUST** be rendered with the **date-only** helper (`dateValue()` in `DelegationDetailModal.tsx` / `formatDateFull` in `RouteCard.tsx`), **NOT** `dateTimeValue()` / `formatDateTime`. Rendering it with the datetime helper shifts UTC-midnight into Europe/Warsaw and prints a phantom «02:00» — the exact bug the `dateValue()` helper was added to fix for `actualReturnAt` (see the helper's doc-comment). `departureAt` (reported) is a genuine datetime and DOES use the datetime helper — do not confuse the two.
+
+#### Block C — «HISTORIA STATUSU» audit chain
+
+A `span:'full'` section, icon `<ClipboardCheck>`, header «Historia statusu». Render it as a **vertical stepper** (three lifecycle events top-to-bottom, in order), NOT a two-column `<dl>` — the ordering carries meaning (registration → readied → confirmed-in-transit), and a stepper makes the chain legible:
+
+```
+ ● Zgłoszony przez        {reportedBy name}      {reportedAt  — dd.MM.yyyy, HH:mm}
+ ● Zaakceptowany (eksport)       {readyBy name}         {readyAt     — dd.MM.yyyy, HH:mm}
+ ● Potwierdzony w trasie  {verifiedBy name}      {verifiedAt  — dd.MM.yyyy, HH:mm}
+```
+
+**Row recipe (per step):** a small status dot (`h-2 w-2 rounded-full`, `bg-success` for stamped steps, `bg-border` for not-yet-reached), a connecting hairline (`w-px bg-border`) between dots forming the stepper spine, then a two-part text block: the **action label** (`text-sm font-medium text-text`) + actor name below (`text-xs text-text-sub`), and the **timestamp** right-aligned (`text-xs text-text-sub tabular-nums`, `dateTimeValue` — all three audit stamps are genuine datetimes). Reuse the `<TeamMembers>`-style spine treatment already used in the modal if convenient; a bespoke inline stepper is fine — not catalogue-worthy.
+
+**The three actors — corrected, honest labels (this is the "un-overload verification" fix):**
+
+| Step | Field pair | Actor role | PL action label | EN action label | Semantics (per `docs/20`) |
+|---|---|---|---|---|---|
+| 1 | `reportedBy` / `reportedAt` | carrier | **Zgłoszony przez** | **Registered by** | Carrier filed the `zgłoszenie` (`— → zgloszony`). |
+| 2 | `readyBy` / `readyAt` | eksport | **Zaakceptowany (eksport)** | **Accepted (export)** | Eksport found the load / made the zlecenie → `zgloszony → gotowy`. In MAGTRANS "readying the load = acceptance", so a caption may add «akceptacja ładunku». |
+| 3 | `verifiedBy` / `verifiedAt` | weryfikator | **Potwierdzony w trasie** | **Confirmed in transit** | Weryfikator confirmed the vehicle actually departed → `gotowy → w_trasie`. This is the **true** verification stamp — previously invisible. |
+
+Note the label collision is gone: step 2 is honestly «Zaakceptowany (eksport)» (not «Zweryfikowany»), and step 3 surfaces the real weryfikator action under «Potwierdzony w trasie». No label says a bare «Zweryfikowany» anymore.
+
+**Empty-state rule for audit steps (per step, differs from the actuals):** each audit step is shown as a **greyed, incomplete step** until its transition fires, NOT hidden. Rationale: the chain communicates *progress* — a missing step is meaningful ("not readied yet"), unlike a missing actual date. So:
+- Step 1 (`reportedAt`) is **always** populated (a delegation cannot exist un-registered — `reportedAt` is non-nullable on the DTO).
+- Steps 2 & 3: when the `*At` is `null`, render the step with a `bg-border` dot, the action label in `text-text-sub` (muted), and the value column shows the **pending caption** «— oczekuje» / «— pending» instead of a name/timestamp. When populated, the dot goes `bg-success`, label goes `text-text`, and name + timestamp show. This makes the current lifecycle position readable at a glance (how far the trip has progressed).
+- `anulowany` outings: steps that never fired stay «— oczekuje»; do **not** invent a cancel step (cancel author isn't a tracked stamp on the DTO). The `<StatusBadge>` in the header already carries the «Anulowany» state.
+
+**Subtle footer inside Block C:** `createdAt` / `updatedAt` are **not** audit steps — keep them in the modal's existing footer meta line (§6.6, «Utworzono … · Zaktualizowano …»), unchanged. Do **not** duplicate them as stepper rows. (They already live in the footer today; the redesign leaves that alone.)
+
+#### Block D — «Notatki»
+
+`notes` moves out of the audit section into its **own** `span:'full'` section, icon `<StickyNote>`, rendered as a `fullWidth` long-text row (§6.20). **Omit the whole section when `notes` is empty** (per §6.4 "empty section omitted") — no dangling «Notatki: —».
+
+#### Copy table (PL default + EN) — ready for i18n keys
+
+All keys live under `carrier.delegations.*` (the modal's existing namespace, shared by all five role views). New/changed keys marked ✚ / ✎; the old `form.actualReturnAt` / `form.verifiedBy` / `form.verifiedAt` audit usages are **removed from the modal** (the `form.*` keys may remain for the actual create/edit forms — do not delete blindly; just stop using them for the audit chain).
+
+| Key | PL | EN | Notes |
+|---|---|---|---|
+| `routeCard.departure` | Wyjazd | Departure | mini-label (existing) |
+| `routeCard.return` | Powrót | Return | mini-label (existing) |
+| `routeCard.reportedPrefix` ✚ | zgł. | rep. | departure reported-line prefix |
+| `routeCard.plannedPrefix` ✎ | plan. | plan. | return planned-line prefix (was «plan:») |
+| `routeCard.actualPrefix` ✚ | fakt. | act. | actual-line prefix (both ends); `text-success` |
+| `routeCard.postalPrefix` | kod: | code: | (existing) |
+| `routeCard.durationDays` | {days, plural, …} dni · plan. | {days, plural, …} days · plan. | (existing) |
+| `sections.route` | Trasa | Route | (existing) |
+| `sections.vehicleAndDriver` | Pojazd i kierowca | Vehicle & driver | (existing) |
+| `sections.audit` ✎ | Historia statusu | Status history | Block C header (was «Status i audyt») |
+| `sections.notes` ✚ | Notatki | Notes | Block D header |
+| `audit.registeredBy` ✚ | Zgłoszony przez | Registered by | step 1 action label |
+| `audit.readiedBy` ✚ | Zaakceptowany (eksport) | Accepted (export) | step 2 action label |
+| `audit.readiedCaption` ✚ | akceptacja ładunku | load accepted | optional step-2 sub-caption |
+| `audit.confirmedInTransit` ✚ | Potwierdzony w trasie | Confirmed in transit | step 3 action label |
+| `audit.pending` ✚ | — oczekuje | — pending | pending value for un-fired steps 2/3 |
+| `form.notes` | Notatki | Notes | reuse for Block D label / sr-only `<dt>` |
+
+> **Actor name resolution (unchanged pattern):** each step shows `*By?.name ?? *By?.login`; when the step is populated but the relation is somehow null, fall back to em-dash via `textValue`. The timestamp uses `dateTimeValue` (all three `*At` are datetimes).
 
 **Responsive (RouteCard).**
 - `≥ sm`: horizontal — `flex items-center gap-3`, departure / connector(`flex-1`) / return. Connector line + truck + pill centered.
@@ -3819,7 +3917,7 @@ The `<DataTable>` primitive **already** supports `onRowClick` and applies `curso
 | Header: drop driver-name subtitle → title = plate, badge = status only | `components/delegations/DelegationDetailModal.tsx` | web-agent |
 | New `<RouteCard>` presentational component (departure circle → connector+truck+duration pill → return circle, vertical on mobile) | `components/delegations/RouteCard.tsx` | web-agent |
 | Driver+vehicle strip block (inline in the wrapper or small local component) | `components/delegations/DelegationDetailModal.tsx` | web-agent |
-| Delegation modal width override `className="max-w-2xl"`; sections become `span:'full'`; route card + driver strip as `fullWidth` rows; «Notatki» `fullWidth`; «STATUS I AUDYT» standard `<dl>` section | `components/delegations/DelegationDetailModal.tsx` | web-agent |
+| Delegation modal width override `className="max-w-[820px]"` (≈ +22% over base 2xl); sections become `span:'full'`; route card + driver strip as `fullWidth` rows; «Notatki» `fullWidth`; «STATUS I AUDYT» standard `<dl>` section | `components/delegations/DelegationDetailModal.tsx` | web-agent |
 | `differenceInCalendarDays(plannedReturnAt, departureAt.slice(0,10))` duration calc (date-only, ≥0 guard) | `components/delegations/RouteCard.tsx` | web-agent |
 | New `<FleetVehicleDetailModal>` / `<FleetDriverDetailModal>` / `<FleetTrailerDetailModal>` thin wrappers over `<EntityDetailModal>` (read-only, no `onEdit`, no rate fields) | `components/fleet/Fleet{Vehicle,Driver,Trailer}DetailModal.tsx` | web-agent |
 | Fleet sub-tables get `onRowClick` + open the matching detail modal; Delegacje table gets `onRowClick` → `<DelegationDetailModal>` | `components/fleet/FleetTables.tsx` + the dyspozytor panel page | web-agent |
@@ -3833,11 +3931,22 @@ The `<DataTable>` primitive **already** supports `onRowClick` and applies `curso
 
 > The enriched list-items also widen the carrier `/fleet/my` payload (drivers/vehicles/trailers) — acceptable per §6.4.2: all added fields are non-sensitive and the carrier owns its own fleet. No new endpoint, no new role scope, no token change anywhere in Phase 6.4.
 
+**§6.4.1a lifecycle-presentation redesign (2026-07-07) — supersedes the two rows above marked with «faktyczny» / «STATUS I AUDYT».** Actionable changes for web-agent (presentation-only, no schema/API/token change):
+
+| Change | Where | Owner |
+|---|---|---|
+| **RouteCard: reinstate actuals as reported-vs-actual pairs.** Departure block += «fakt.» line = `actualDepartureAt` (**date-only** `formatDateFull`, NEVER `formatDateTime` — phantom-02:00 bug); return block += «fakt.» line = `actualReturnAt` (date-only). Both `text-success`-tinted prefix. **Omit each «fakt.» line entirely when its value is `null`** (no em-dash). Reported/planned lines always shown; return planned prefix relabelled «plan.» | `components/delegations/RouteCard.tsx` | web-agent |
+| **DelegationDetailModal: replace flat «STATUS I AUDYT» `<dl>` with the «Historia statusu» audit stepper** — 3 ordered steps: `reportedBy/At` («Zgłoszony przez»), `readyBy/At` («Zaakceptowany (eksport)»), `verifiedBy/At` («Potwierdzony w trasie»). Success/border dots + `— oczekuje` pending caption for un-fired steps 2/3. **Remove `actualReturnAt` from this section** (now in RouteCard). **Surface the real `verifiedBy/At`** (was hidden). **Stop labelling `readyBy/At` as «Zweryfikowany»** | `components/delegations/DelegationDetailModal.tsx` | web-agent |
+| **Notatki → own Block D** `span:'full'` `<StickyNote>` section, `fullWidth` long-text; omit when `notes` empty | `components/delegations/DelegationDetailModal.tsx` | web-agent |
+| i18n add/change: `routeCard.reportedPrefix`=«zgł.», `routeCard.actualPrefix`=«fakt.», `routeCard.plannedPrefix`✎«plan.»; `sections.audit`✎«Historia statusu»; `sections.notes`✚«Notatki»; `audit.{registeredBy,readiedBy,readiedCaption,confirmedInTransit,pending}`✚ (full copy table in §6.4.1a) | `messages/pl.json`, `en.json` | web-agent |
+| **0** schema / API / role-scope / token change — all fields (`actualDepartureAt`, `readyBy/At`, `verifiedBy/At`) already on `DelegationDto`; regrouping is role-neutral (same for carrier/planista/dyspozytor/eksport/weryfikator) | — | — |
+
 ### 6.4.5 Catalogue additions (Phase 6.4)
 
 | Component | Type | Notes |
 |---|---|---|
-| `<RouteCard>` | New custom presentational | Departure/return country circles + truck connector + planned-duration pill; horizontal on `sm+`, vertical timeline on phones. Composes existing tokens only. |
+| `<RouteCard>` | New custom presentational | Departure/return country circles + truck connector + planned-duration pill + **reported-vs-actual date pairs on each end** (§6.4.1a, redesign 2026-07-07); horizontal on `sm+`, vertical timeline on phones. Composes existing tokens only. |
+| Delegation audit stepper (Block C, «Historia statusu») | Documented layout recipe (§6.4.1a) | Vertical 3-step lifecycle chain (registered → readied/eksport → confirmed-in-transit/weryfikator) with success/border dots + pending-caption empty states. Inline recipe in `DelegationDetailModal`, not standalone. |
 | `<FleetVehicleDetailModal>` / `<FleetDriverDetailModal>` / `<FleetTrailerDetailModal>` | New thin wrappers | Over `<EntityDetailModal>`, read-only (no `onEdit`), rate-free curated field sets (§6.4.2). |
 | `DataTable.rowAriaLabel` + keyboard/role/focus-ring | Primitive enhancement (additive) | Canonical clickable-row a11y for every `onRowClick` table app-wide. |
 | Duration pill / mini country-circle / driver-strip recipes | Documented layout recipes (§6.4.1) | Not standalone components — composition recipes inside `<RouteCard>` / the delegation wrapper. |

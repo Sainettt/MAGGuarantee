@@ -313,3 +313,123 @@ describe('ClaimsService.recalcFromDelegation', () => {
     expect(auditLogs).toHaveLength(0);
   });
 });
+
+// The DEPARTURE-side mirror: `recalcDepartureFromDelegation` is invoked from
+// `DelegationsService.markInTransit()` when the weryfikator captures a (possibly
+// backdated) `actualDepartureAt`. It shifts `dateStart` (not `dateEnd`) but
+// otherwise shares the same gate + audit contract as the return side.
+describe('ClaimsService.recalcDepartureFromDelegation', () => {
+  // makeClaim() period is [2026-05-01, 2026-05-09]. A backdated actual departure
+  // of 2026-05-03 shifts dateStart forward within the period.
+  const ACTUAL_DEP = new Date('2026-05-03T00:00:00.000Z');
+
+  it('applies on NA_WERYFIKACJI + not-adjusted: shifts dateStart, re-prefills mileage, re-runs km-calc, audits autoRecalc', async () => {
+    const { service, updateSpy, auditLogs, kmCalcSpy, sumSpy } = build({
+      claim: makeClaim(),
+      kmResult: { kmGuaranteed: 12_000, ratePerKmEffective: 0.5, totalDays: 12 },
+      droveSum: 9_000,
+    });
+
+    await service.recalcDepartureFromDelegation('deleg-1', ACTUAL_DEP);
+
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    const patch = updateSpy.mock.calls[0]![1] as UpdateClaimData;
+    // dateStart shifted to actualDepartureAt; dateEnd untouched (not in patch).
+    expect((patch.dateStart as Date).toISOString()).toBe(
+      '2026-05-03T00:00:00.000Z',
+    );
+    expect(patch.dateEnd).toBeUndefined();
+    // mileage re-prefilled from Σ drove km (9_000), not the old 8_000.
+    expect(patch.mileage).toBe(9_000);
+    expect(kmCalcSpy).toHaveBeenCalledTimes(1);
+    expect(sumSpy).toHaveBeenCalledTimes(1);
+    // numbers recomputed: kmDifference = 12_000 - 9_000 = 3_000;
+    // paymentEur = 3_000 * 0.5 = 1_500; amountRequested mirrors paymentEur.
+    expect(patch.kmGuaranteed).toBe(12_000);
+    expect(patch.kmDifference).toBe(3_000);
+    expect(patch.paymentEur).toBe(1_500);
+    expect(patch.amountRequested).toBe(1_500);
+    // timeFrom/timeTo NOT touched.
+    expect(patch.timeFrom).toBeUndefined();
+    expect(patch.timeTo).toBeUndefined();
+    // Verification checkpoint invalidated (same as the return side).
+    expect(patch.verifiedAt).toBeNull();
+    expect(patch.verifiedById).toBeNull();
+    expect(patch.autoRecalcState).toBe('applied');
+    expect(auditLogs.map((l) => l.action)).toEqual(['claim.autoRecalc']);
+  });
+
+  it('re-prefills mileage over the NEW (shifted) period — daily-km queried once', async () => {
+    const { service, sumSpy } = build({ claim: makeClaim(), droveSum: 7_500 });
+    await service.recalcDepartureFromDelegation('deleg-1', ACTUAL_DEP);
+    expect(sumSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves a carrier mileage override (origMileage !== mileage) — no re-prefill', async () => {
+    const { service, updateSpy, sumSpy } = build({
+      claim: makeClaim({ mileage: 8_500, origMileage: 8_000 }),
+    });
+    await service.recalcDepartureFromDelegation('deleg-1', ACTUAL_DEP);
+    const patch = updateSpy.mock.calls[0]![1] as UpdateClaimData;
+    expect(patch.mileage).toBe(8_500);
+    expect(sumSpy).not.toHaveBeenCalled();
+  });
+
+  it('SKIPS OCZEKUJE_NA_AUTORYZACJE (FROZEN) WITH divergence: writes autoRecalcState=skipped, audits autoRecalcSkipped', async () => {
+    // claim.dateStart = 2026-05-01; ACTUAL_DEP = 2026-05-03 ⇒ real divergence.
+    const { service, updateSpy, auditLogs, kmCalcSpy } = build({
+      claim: makeClaim({ status: 'OCZEKUJE_NA_AUTORYZACJE' }),
+    });
+    await service.recalcDepartureFromDelegation('deleg-1', ACTUAL_DEP);
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    const patch = updateSpy.mock.calls[0]![1] as UpdateClaimData;
+    expect(patch).toEqual({ autoRecalcState: 'skipped' });
+    expect(kmCalcSpy).not.toHaveBeenCalled();
+    expect(auditLogs.map((l) => l.action)).toEqual(['claim.autoRecalcSkipped']);
+  });
+
+  it('SKIPS a decided claim (ZAAKCEPTOWANO) WITH divergence: writes autoRecalcState=skipped, audits autoRecalcSkipped', async () => {
+    const { service, updateSpy, auditLogs, kmCalcSpy } = build({
+      claim: makeClaim({ status: 'ZAAKCEPTOWANO' }),
+    });
+    await service.recalcDepartureFromDelegation('deleg-1', ACTUAL_DEP);
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    const patch = updateSpy.mock.calls[0]![1] as UpdateClaimData;
+    expect(patch).toEqual({ autoRecalcState: 'skipped' });
+    expect(kmCalcSpy).not.toHaveBeenCalled();
+    expect(auditLogs.map((l) => l.action)).toEqual(['claim.autoRecalcSkipped']);
+  });
+
+  it('SKIPS when periodAdjustedByVerifier=true WITH divergence: writes autoRecalcState=skipped, audits autoRecalcSkipped', async () => {
+    const { service, updateSpy, auditLogs, kmCalcSpy } = build({
+      claim: makeClaim({ periodAdjustedByVerifier: true }),
+    });
+    await service.recalcDepartureFromDelegation('deleg-1', ACTUAL_DEP);
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    const patch = updateSpy.mock.calls[0]![1] as UpdateClaimData;
+    expect(patch).toEqual({ autoRecalcState: 'skipped' });
+    expect(kmCalcSpy).not.toHaveBeenCalled();
+    expect(auditLogs.map((l) => l.action)).toEqual(['claim.autoRecalcSkipped']);
+  });
+
+  it('SKIPS WITHOUT divergence (dateStart === actualDepartureAt): leaves autoRecalcState=none — no write, audit only', async () => {
+    // Decided claim whose dateStart already equals the outing's actual departure
+    // — the recalc would be a no-op, so the state must NOT flip to skipped.
+    const { service, updateSpy, auditLogs } = build({
+      claim: makeClaim({
+        status: 'ZAAKCEPTOWANO',
+        dateStart: new Date('2026-05-03T00:00:00.000Z'), // === ACTUAL_DEP day
+      }),
+    });
+    await service.recalcDepartureFromDelegation('deleg-1', ACTUAL_DEP);
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(auditLogs.map((l) => l.action)).toEqual(['claim.autoRecalcSkipped']);
+  });
+
+  it('no-op when no claim is linked: no write, no audit', async () => {
+    const { service, updateSpy, auditLogs } = build({ claim: null });
+    await service.recalcDepartureFromDelegation('deleg-1', ACTUAL_DEP);
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(auditLogs).toHaveLength(0);
+  });
+});

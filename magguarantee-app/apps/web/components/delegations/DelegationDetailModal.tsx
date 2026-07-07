@@ -5,25 +5,42 @@
 // <EntityDetailModal> props (docs/14-design-system.md §6.4.1). The generic
 // shell is NOT re-implemented here.
 //
-// Layout (§6.4.1 "route-card"):
+// Layout (§6.4.1 + §6.4.1a lifecycle-presentation redesign 2026-07-07):
 //   Header  — title = vehicle plate (mono) + status badge ONLY (no subtitle).
 //   Block A — <RouteCard> (span:'full', fullWidth row): departure circle →
-//             truck + planned-duration pill → return circle.
+//             truck + planned-duration pill → return circle. Each end now
+//             carries a reported-vs-actual date pair (§6.4.1a) — the actual
+//             departure/return dates fold in HERE, not in the audit chain.
 //   Block B — driver + vehicle strip (span:'full', fullWidth row): driver
 //             name + phone | NR REJ. + Naczepa <plate>.
-//   Block C — «STATUS I AUDYT» (normal label/value <dl> section): reportedBy/
-//             At, verifiedBy/At, notes (notes is a fullWidth long-text row).
+//   Block C — «Historia statusu» (§6.4.1a): a vertical 3-step audit STEPPER
+//             (registered/carrier → accepted/eksport → confirmed-in-transit/
+//             weryfikator), success/border dots + «— oczekuje» pending caption.
+//             Only actor + timestamp live here (operational actuals moved to A).
+//   Block D — «Notatki» (§6.4.1a): its own span:'full' long-text section;
+//             omitted entirely when notes is empty.
 //   Footer  — «Utworzono {createdAt}» meta + «Zamknij» (read-only — no onEdit).
 //
-// All 19 DelegationDto fields are accounted for (see the §6.4.1 mapping). The
-// modal width is overridden to `max-w-2xl` — a single-column route view reads
-// better narrower than the dense 2-column field grids that the default
-// `max-w-5xl` width exists for.
+// All DelegationDto fields are accounted for (see the §6.4.1/§6.4.1a mapping).
+// The §6.4.1a redesign SURFACES the real weryfikator `verifiedBy/At` stamp
+// (step 3, previously never rendered) and stops mislabelling the eksport
+// `readyBy/At` stamp as «Zweryfikowany». The modal width is overridden to
+// `max-w-[820px]` — roomier than the base 2xl for the reported-vs-actual date
+// pairs + stepper, but still narrower than the dense 2-column field grids that
+// the default `max-w-5xl` width exists for.
 //
 // Read-only consumer everywhere (carrier list, planista/dyspozytor Wyjazdy
 // rows) — no `onEdit` is passed, so the footer shows only «Zamknij» (§6.6).
 
-import { ClipboardCheck, Gauge, Truck, User, Users } from 'lucide-react';
+import {
+  AlertTriangle,
+  ClipboardCheck,
+  Gauge,
+  StickyNote,
+  Truck,
+  User,
+  Users,
+} from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { ReactNode } from 'react';
 import type {
@@ -39,9 +56,8 @@ import {
   EntityDetailModal,
   type EntityDetailSection,
 } from '@/components/ui/EntityDetailModal';
-import { emptyValue, textValue } from '@/components/ui/entity-detail-values';
-import { AlertTriangle } from 'lucide-react';
-import { formatDateFull, formatDateTime } from '@/lib/format/numbers';
+import { textValue } from '@/components/ui/entity-detail-values';
+import { formatDateTime } from '@/lib/format/numbers';
 
 interface Props {
   open: boolean;
@@ -66,21 +82,6 @@ function readVehicleDispatchTeam(
     | { dispatchTeam?: VehicleDispatchTeamDto | null }
     | null;
   return vehicle?.dispatchTeam;
-}
-
-/** "dd.MM.yyyy, HH:mm" rendered inside an em-dash-aware <dd>. */
-function dateTimeValue(iso: string | null | undefined): ReactNode {
-  return iso ? <span>{formatDateTime(iso)}</span> : emptyValue();
-}
-
-/**
- * "dd.MM.yyyy" (date-only). Used for `actualReturnAt`, which the weryfikator
- * submits as a date with no time — rendering it with `formatDateTime` showed a
- * spurious "02:00" (UTC-midnight shifted into Europe/Warsaw). Date-only avoids
- * the shift.
- */
-function dateValue(iso: string | null | undefined): ReactNode {
-  return iso ? <span>{formatDateFull(iso)}</span> : emptyValue();
 }
 
 const STRIP_MINI_LABEL =
@@ -141,14 +142,108 @@ function DriverVehicleStrip({ delegation }: { delegation: DelegationDto }) {
   );
 }
 
+/** A single audit-actor shape shared by all three lifecycle steps. */
+type StatusActor = { name: string | null; login: string } | null | undefined;
+
+interface StatusStep {
+  /** Localized action label, e.g. «Zgłoszony przez». */
+  label: string;
+  /** The user who performed the transition (or null when not-yet-reached). */
+  actor: StatusActor;
+  /** The transition timestamp — genuine datetime, or null when un-fired. */
+  at: string | null;
+}
+
+/**
+ * «Historia statusu» — the delegation lifecycle audit chain (§6.4.1a Block C),
+ * rendered as a vertical stepper (three ordered events top-to-bottom):
+ * registered (carrier) → accepted (eksport) → confirmed-in-transit
+ * (weryfikator). The ordering carries meaning, so this is a stepper, NOT a
+ * two-column <dl>.
+ *
+ * Per step: a status dot (`bg-success` once stamped, `bg-border` when not-yet-
+ * reached) sitting on a hairline spine, then the action label + actor name, and
+ * a right-aligned timestamp. Un-fired steps 2/3 render greyed with a «— oczekuje»
+ * pending caption (they are NOT hidden — the chain communicates progress). Step
+ * 1 (`reportedAt`) is always populated. `anulowany` outings simply leave the
+ * un-fired steps pending (no invented cancel step — §6.4.1a).
+ *
+ * Presentation-only + role-neutral: shared read-only across carrier / planista /
+ * dyspozytor / eksport / weryfikator; no role gains or loses visibility.
+ */
+function StatusHistoryStepper({ steps }: { steps: StatusStep[] }) {
+  const tAudit = useTranslations('carrier.delegations.audit');
+
+  return (
+    <ol className="flex flex-col">
+      {steps.map((step, i) => {
+        const done = step.at != null;
+        const isLast = i === steps.length - 1;
+        const actorName = done ? (step.actor?.name ?? step.actor?.login) : null;
+
+        return (
+          <li key={step.label} className="flex gap-3">
+            {/* Spine — dot + connecting hairline to the next step. */}
+            <div className="flex flex-col items-center">
+              <span
+                className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
+                  done ? 'bg-success' : 'bg-border'
+                }`}
+                aria-hidden="true"
+              />
+              {!isLast && (
+                <span
+                  className="w-px flex-1 bg-border"
+                  aria-hidden="true"
+                />
+              )}
+            </div>
+
+            {/* Action label + actor | right-aligned timestamp. Trailing gap on
+                all but the last step keeps the spine hairline running between
+                dots without dangling space after the final step. */}
+            <div
+              className={`flex min-w-0 flex-1 items-start justify-between gap-3 ${
+                isLast ? '' : 'pb-4'
+              }`}
+            >
+              <div className="min-w-0">
+                <p
+                  className={`text-sm font-medium ${
+                    done ? 'text-text' : 'text-text-sub'
+                  }`}
+                >
+                  {step.label}
+                </p>
+                {done ? (
+                  <p className="truncate text-xs text-text-sub">
+                    {actorName || '—'}
+                  </p>
+                ) : (
+                  <p className="text-xs text-text-sub">{tAudit('pending')}</p>
+                )}
+              </div>
+              {done && (
+                <span className="shrink-0 whitespace-nowrap text-xs tabular-nums text-text-sub">
+                  {formatDateTime(step.at)}
+                </span>
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 export function DelegationDetailModal({
   open,
   onOpenChange,
   delegation,
 }: Props) {
   const t = useTranslations('carrier.delegations');
-  const tForm = useTranslations('carrier.delegations.form');
   const tSections = useTranslations('carrier.delegations.sections');
+  const tAudit = useTranslations('carrier.delegations.audit');
   const tDetail = useTranslations('entityDetail');
   const tKmCal = useTranslations('delegation.kmCalendar');
   const tTeam = useTranslations('team');
@@ -189,64 +284,74 @@ export function DelegationDetailModal({
         },
       ],
     },
-    // Block C — «STATUS I AUDYT» standard label/value <dl> section.
+    // Block C — «Historia statusu» lifecycle audit chain (§6.4.1a). A vertical
+    // stepper (registered → accepted/eksport → confirmed-in-transit/weryfikator),
+    // NOT a flat <dl>: the ordering carries meaning. Operational actuals
+    // (`actualReturnAt`, `actualDepartureAt`) now live in the RouteCard above —
+    // only actor + timestamp stamps live here. The three stamps are ALL genuine
+    // datetimes → `dateTimeValue` (inside the stepper). `createdAt`/`updatedAt`
+    // stay in the footer meta line — they are NOT stepper rows (§6.4.1a).
     {
       title: tSections('audit'),
       icon: ClipboardCheck,
       span: 'full',
       rows: [
-        // Actual return date — only present once the outing has returned
-        // (status `zjechal`); the planned return lives in the RouteCard above.
-        ...(delegation.actualReturnAt
-          ? [
-              {
-                label: tForm('actualReturnAt'),
-                // Date-only — the weryfikator sets no return TIME (§E1 fix).
-                value: dateValue(delegation.actualReturnAt),
-              },
-            ]
-          : []),
         {
-          label: tForm('reportedBy'),
-          value: textValue(
-            delegation.reportedBy?.name ?? delegation.reportedBy?.login,
-          ),
-        },
-        {
-          label: tForm('reportedAt'),
-          value: dateTimeValue(delegation.reportedAt),
-        },
-        // «Zweryfikowany» reflects the EKSPORT who marked the outing `gotowy`
-        // (readyBy/readyAt) — in MAGTRANS readying the load IS the verification
-        // step. (Was verifiedBy/At from the in-transit stamp — §E2/E3.)
-        {
-          label: tForm('verifiedBy'),
-          value: textValue(
-            delegation.readyBy?.name ?? delegation.readyBy?.login,
-          ),
-        },
-        {
-          label: tForm('verifiedAt'),
-          value: dateTimeValue(delegation.readyAt),
-        },
-        {
-          label: tForm('notes'),
+          label: tSections('audit'),
           value: (
-            <>
-              <span className={`${STRIP_MINI_LABEL} mb-1 block`}>
-                {tForm('notes')}
-              </span>
-              {textValue(delegation.notes)}
-            </>
+            <StatusHistoryStepper
+              steps={[
+                // Step 1 — carrier registered the zgłoszenie. Always populated
+                // (`reportedAt` is non-nullable on the DTO).
+                {
+                  label: tAudit('registeredBy'),
+                  actor: delegation.reportedBy,
+                  at: delegation.reportedAt,
+                },
+                // Step 2 — eksport readied the load (`zgloszony → gotowy`).
+                // Honestly labelled «Zaakceptowany (eksport)» — this is the
+                // readyBy/At stamp (was mislabelled «Zweryfikowany»).
+                {
+                  label: tAudit('readiedBy'),
+                  actor: delegation.readyBy,
+                  at: delegation.readyAt,
+                },
+                // Step 3 — weryfikator confirmed departure (`gotowy → w_trasie`).
+                // Surfaces the REAL verifiedBy/At stamp (previously invisible).
+                {
+                  label: tAudit('confirmedInTransit'),
+                  actor: delegation.verifiedBy,
+                  at: delegation.verifiedAt,
+                },
+              ]}
+            />
           ),
-          // Long free-text spans the section, no label gutter (§6.20). The
-          // sr-only <dt> keeps the «Notatki» label for SR users; the visible
-          // inline caption above repeats it for sighted users.
+          // Bespoke stepper block spans the section, no label gutter (§6.20).
           fullWidth: true,
         },
       ],
     },
   ];
+
+  // Block D — «Notatki» (§6.4.1a). Its own `span:'full'` long-text section
+  // (§6.20). Omitted entirely when notes is empty (per §6.4 "empty section
+  // omitted") — no dangling «Notatki: —».
+  if (delegation.notes?.trim()) {
+    sections.push({
+      title: tSections('notes'),
+      icon: StickyNote,
+      span: 'full',
+      rows: [
+        {
+          // sr-only <dt> caption for SR users; the section header carries the
+          // visible «Notatki» label (§6.20 fullWidth long-text).
+          label: tSections('notes'),
+          value: textValue(delegation.notes),
+          fullWidth: true,
+        },
+      ],
+    });
+  }
 
   // Block D — «Przebieg w trakcie wyjazdu» km-calendar (§7.7.9). A 4th body
   // section, fullWidth, AFTER «STATUS I AUDYT». Omitted entirely when the
@@ -341,9 +446,10 @@ export function DelegationDetailModal({
     <EntityDetailModal
       open={open}
       onOpenChange={onOpenChange}
-      // Single-column route view reads better narrower than the dense 2-col
-      // field grids the default `max-w-5xl` exists for (§6.4.1).
-      className="max-w-2xl"
+      // Single-column route view: ~820px — roomier than the base 2xl for the
+      // reported-vs-actual date pairs + stepper, but still narrower than the
+      // dense 2-col field grids the default `max-w-5xl` exists for (§6.4.1).
+      className="max-w-[820px]"
       title={
         <span className="font-mono">
           {delegation.vehicle?.plateNumber ?? t('title')}

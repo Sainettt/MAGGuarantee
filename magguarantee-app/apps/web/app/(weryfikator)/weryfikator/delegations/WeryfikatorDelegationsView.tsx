@@ -142,12 +142,20 @@ export function WeryfikatorDelegationsView() {
             if (!o) setDialog(null);
           }}
           plate={plate}
+          departureAt={dialog.delegation.departureAt}
           title={tActions('inTransitTitle')}
           description={tActions('inTransitDescription', { plate })}
+          dateLabel={tActions('inTransitDateLabel')}
           confirmLabel={tActions('markInTransit')}
           cancelLabel={tActions('cancel')}
-          onConfirm={async () => {
-            await inTransitM.mutateAsync({ id: dialog.delegation.id });
+          requiredMsg={tActions('inTransitRequired')}
+          futureMsg={tActions('inTransitFuture')}
+          beforeDepartureMsg={tActions('inTransitBeforeDeparture')}
+          onConfirm={async (actualDepartureAt) => {
+            await inTransitM.mutateAsync({
+              id: dialog.delegation.id,
+              body: { actualDepartureAt },
+            });
           }}
         />
       )}

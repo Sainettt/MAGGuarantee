@@ -15,20 +15,20 @@ import {
 
 const TODAY = '2026-06-25';
 
-/** Minimal delegation factory — only the fields the rule reads matter. */
-function deleg(
-  over: Partial<
-    Pick<
-      DelegationDto,
-      'departureAt' | 'plannedReturnAt' | 'actualReturnAt' | 'status'
-    >
-  >,
-): Pick<
+type DelegFields = Pick<
   DelegationDto,
-  'departureAt' | 'plannedReturnAt' | 'actualReturnAt' | 'status'
-> {
+  | 'departureAt'
+  | 'actualDepartureAt'
+  | 'plannedReturnAt'
+  | 'actualReturnAt'
+  | 'status'
+>;
+
+/** Minimal delegation factory — only the fields the rule reads matter. */
+function deleg(over: Partial<DelegFields>): DelegFields {
   return {
     departureAt: '2026-06-01T08:30:00.000Z',
+    actualDepartureAt: null,
     plannedReturnAt: '2026-06-10',
     actualReturnAt: null,
     status: 'w_trasie',
@@ -42,13 +42,45 @@ function km(date: string): Pick<VehicleDailyKmDto, 'date'> {
 }
 
 describe('deriveCalendarWindow', () => {
-  it('(g) start always = date(departureAt) (slices datetime to 10)', () => {
+  it('(g) start = date(departureAt) when no actualDepartureAt (slices datetime to 10)', () => {
     const { fromIso } = deriveCalendarWindow(
-      deleg({ departureAt: '2026-06-01T23:45:00.000Z' }),
+      deleg({ departureAt: '2026-06-01T23:45:00.000Z', actualDepartureAt: null }),
       [],
       TODAY,
     );
     expect(fromIso).toBe('2026-06-01');
+  });
+
+  it('(g2) start = date(actualDepartureAt) when the verifier moved it forward', () => {
+    // Carrier reported 2026-06-01; verifier confirmed the truck actually left
+    // 2026-06-03. The strip must start at the real start, not the reported one.
+    const { fromIso } = deriveCalendarWindow(
+      deleg({
+        departureAt: '2026-06-01T08:30:00.000Z',
+        actualDepartureAt: '2026-06-03T00:00:00.000Z',
+      }),
+      [],
+      TODAY,
+    );
+    expect(fromIso).toBe('2026-06-03');
+  });
+
+  it('(g3) km rows on "phantom" days before actualDepartureAt are excluded from the window', () => {
+    // actualDepartureAt = 2026-06-03; rows on 06-01/06-02 are pre-actual-start
+    // "phantom" days and must NOT anchor the strip or count as lastKmDate.
+    const { fromIso, toIso } = deriveCalendarWindow(
+      deleg({
+        departureAt: '2026-06-01T08:30:00.000Z',
+        actualDepartureAt: '2026-06-03T00:00:00.000Z',
+        status: 'w_trasie',
+        plannedReturnAt: '2026-06-10',
+      }),
+      [km('2026-06-01'), km('2026-06-02'), km('2026-06-07')],
+      TODAY,
+    );
+    expect(fromIso).toBe('2026-06-03');
+    // Only 06-07 is ≥ start and it's within the plan → falls back to plannedReturnAt.
+    expect(toIso).toBe('2026-06-10');
   });
 
   it('(a) zjechal with actualReturnAt > plannedReturnAt → end = actualReturnAt', () => {

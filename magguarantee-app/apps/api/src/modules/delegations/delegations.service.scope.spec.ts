@@ -75,6 +75,7 @@ function makeRow(overrides: Partial<DelegationRow> = {}): DelegationRow {
     returnCountry: 'PL',
     returnPostalCode: '00-001',
     status: 'zgloszony',
+    actualDepartureAt: null,
     actualReturnAt: null,
     reportedById: 'user-x',
     reportedBy: { id: 'user-x', login: 'pwz', name: 'Pwz' },

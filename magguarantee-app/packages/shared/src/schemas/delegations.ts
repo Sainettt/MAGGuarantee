@@ -171,11 +171,20 @@ export type MarkReadyDto = z.infer<typeof MarkReadySchema>;
 
 /**
  * POST /delegations/:id/in-transit — weryfikator (or admin) marks an outing
- * `gotowy → w_trasie`. No body fields beyond an optional note; the service
+ * `gotowy → w_trasie`.
+ *
+ * `actualDepartureAt` is **date-only** (`YYYY-MM-DD`) — the exact day the
+ * vehicle actually started driving (the same shape as `plannedReturnAt` /
+ * `MarkReturnedSchema.actualReturnAt`). It becomes the ACTUAL start of the
+ * guarantee period: the linked wniosek's `dateStart` derives from it, so the
+ * service validates it (not in the future, not before the reported
+ * `departureAt`) and auto-recalculates any linked wniosek — mirroring the
+ * `returned` flow. `note` is an optional free-form annotation; the service
  * stamps `verifiedBy/At`.
  */
 export const MarkInTransitSchema = z
   .object({
+    actualDepartureAt: IsoDateSchema,
     note: emptyStringToUndefined(z.string().max(2_000).optional()),
   })
   .strict();
@@ -220,6 +229,29 @@ export const CARRIER_NOT_READY_CODE = 'CARRIER_NOT_READY' as const;
  * only — NOT in the time-independent `SubmitDelegationSchema`.
  */
 export const DEPARTURE_IN_PAST_CODE = 'DEPARTURE_IN_PAST' as const;
+
+/**
+ * Stable, machine-readable code surfaced in the `extensions.code` field of the
+ * 422 problem-details envelope when the weryfikator marks an outing `w_trasie`
+ * (`POST /delegations/:id/in-transit`) with an `actualDepartureAt` that is in
+ * the FUTURE (max = business-today, UTC-day granularity — mirrors the claims
+ * future-date check). `actualDepartureAt` is the actual start of the guarantee
+ * period, so a future start is nonsensical. Distinct from
+ * `DEPARTURE_BEFORE_REPORTED_CODE` (the not-before-`departureAt` check).
+ */
+export const DEPARTURE_DATE_FUTURE_CODE = 'DEPARTURE_DATE_FUTURE' as const;
+
+/**
+ * Stable, machine-readable code surfaced in the `extensions.code` field of the
+ * 422 problem-details envelope when the weryfikator marks an outing `w_trasie`
+ * (`POST /delegations/:id/in-transit`) with an `actualDepartureAt` EARLIER than
+ * the carrier-reported `departureAt` (compared at UTC-day granularity —
+ * `actualDepartureAt >= startOfUtcDay(departureAt)`). A hard constraint: the
+ * actual start of driving cannot predate the reported departure day. Distinct
+ * from `DEPARTURE_DATE_FUTURE_CODE` (the not-in-the-future check).
+ */
+export const DEPARTURE_BEFORE_REPORTED_CODE =
+  'DEPARTURE_BEFORE_REPORTED' as const;
 
 /**
  * Stable, machine-readable code surfaced in the `extensions.code` field of the
@@ -390,6 +422,14 @@ export const DelegationDtoSchema = z.object({
   returnPostalCode: z.string(),
 
   status: DelegationStatusSchema,
+  /**
+   * Actual start of the guarantee period — the day the vehicle really started
+   * driving, captured by the weryfikator on the `gotowy → w_trasie` transition
+   * (`POST /delegations/:id/in-transit`). Date-only stored as UTC midnight
+   * (same convention as `actualReturnAt`); `null` until the outing goes
+   * `w_trasie`. The linked wniosek's `dateStart` derives from it.
+   */
+  actualDepartureAt: IsoDateTimeSchema.nullable(),
   actualReturnAt: IsoDateTimeSchema.nullable(),
 
   reportedById: UuidSchema.nullable(),

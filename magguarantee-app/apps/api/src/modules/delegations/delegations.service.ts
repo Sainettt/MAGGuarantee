@@ -12,8 +12,11 @@ import {
 
 import {
   CARRIER_NOT_READY_CODE,
+  DEPARTURE_BEFORE_REPORTED_CODE,
+  DEPARTURE_DATE_FUTURE_CODE,
   DEPARTURE_IN_PAST_CODE,
   DEPARTURE_PAST_GRACE_MS,
+  startOfBusinessTodayUtc,
   type CancelDelegationDto,
   type DelegationDto,
   type DelegationEligibilityResponse,
@@ -378,8 +381,21 @@ export class DelegationsService {
 
   /**
    * `POST /delegations/:id/in-transit` — weryfikator|admin. `gotowy → w_trasie`.
-   * Stamps `verifiedBy/At`. The state machine forbids skipping `gotowy`
-   * (admin is on `@Roles` but still goes through the gate — no forcing).
+   *
+   * `actualDepartureAt` is **date-only** (`YYYY-MM-DD`) — the ACTUAL start of
+   * the guarantee period (the day the vehicle really started driving). It is
+   * required and validated:
+   *   - not in the future (max = business-today, UTC-day granularity),
+   *   - not earlier than the reported `departureAt` (UTC-day: `actualDepartureAt
+   *     >= startOfUtcDay(departureAt)`).
+   *
+   * In ONE `prisma.$transaction` (opened by `@Audit('delegation.markInTransit')`):
+   *   1. set `actualDepartureAt` + status + `verifiedBy/At`,
+   *   2. auto-recalc the linked wniosek's `dateStart` (no-op when none / when the
+   *      period was human-adjusted / when the claim is already decided) — because
+   *      moving the actual departure moves the claim period start. Mirrors
+   *      `markReturned`'s `recalcFromDelegation`. NOTE: unlike `markReturned` this
+   *      does NOT bump `Vehicle.lastDroveAt` — that is the return signal.
    */
   async markInTransit(
     user: AuthUser,
@@ -391,16 +407,74 @@ export class DelegationsService {
 
     assertLegalDelegationTransition(row.status, 'w_trasie');
 
+    // `actualDepartureAt` is date-only (`YYYY-MM-DD`) — parse to UTC midnight to
+    // match the `plannedReturnAt` / `@db.Date` round-trip (same as markReturned).
+    const actualDepartureAt = isoDateOnlyToMidnightUtc(dto.actualDepartureAt);
+    if (!actualDepartureAt) {
+      throw new UnprocessableEntityException('Nieprawidłowa data wyjazdu');
+    }
+    this._assertActualDepartureValid(actualDepartureAt, row.departureAt);
+
+    // All writes below enrol in the SAME transaction opened by the
+    // `@Audit('delegation.markInTransit')` interceptor: the status update, the
+    // claim's `dateStart` auto-recalc, and the audit row commit together or roll
+    // back together. Mirrors `markReturned`.
     const updated = await this.delegations.update(row.id, {
       status: 'w_trasie',
+      actualDepartureAt,
       verifiedById: user.sub,
       verifiedAt: new Date(),
       notes: dto.note ? appendNote(row.notes, dto.note) : row.notes,
     });
-    // FUTURE (no email yet): once the weryfikator captures an actual departure
-    // date here, send a "pojazd w trasie od <data>" email to the carrier /
-    // opiekun. Hook would be `void this._notifyWyjazd('in-transit', updated)`.
+
+    // Auto-recalc the linked wniosek in the SAME transaction — the actual
+    // departure is the claim period START, so a change moves `dateStart`. No-op
+    // when no claim is linked, when the claim is already decided, or when a human
+    // adjusted the period (the gate lives inside `recalcDepartureFromDelegation`).
+    // Deliberately does NOT bump `Vehicle.lastDroveAt` (return-flow only).
+    if (this.claimsService) {
+      await this.claimsService.recalcDepartureFromDelegation(
+        row.id,
+        actualDepartureAt,
+      );
+    }
+
     return this.toDto(updated);
+  }
+
+  /**
+   * Validates the weryfikator-supplied `actualDepartureAt` (already parsed to UTC
+   * midnight) against the two business rules, throwing a 422 with a stable
+   * machine-readable `code` in the `extensions` envelope (same shape as the
+   * `DEPARTURE_IN_PAST` / guarantee gates):
+   *   1. NOT in the future — max is business-today at UTC-day granularity
+   *      (mirrors the claims future-date check). Code `DEPARTURE_DATE_FUTURE`.
+   *   2. NOT earlier than the carrier-reported `departureAt` day
+   *      (`actualDepartureAt >= startOfUtcDay(departureAt)`). Hard constraint —
+   *      the actual start of driving cannot predate the reported departure day.
+   *      Code `DEPARTURE_BEFORE_REPORTED`.
+   */
+  private _assertActualDepartureValid(
+    actualDepartureAt: Date,
+    departureAt: Date,
+  ): void {
+    const today = startOfBusinessTodayUtc();
+    if (actualDepartureAt.getTime() > today.getTime()) {
+      throw new UnprocessableEntityException({
+        message: 'Data faktycznego wyjazdu nie może być w przyszłości.',
+        extensions: { code: DEPARTURE_DATE_FUTURE_CODE },
+      });
+    }
+    // Compare at UTC-day granularity — `departureAt` carries a time-of-day, so
+    // truncate it to its calendar day; a same-day actual departure is allowed.
+    const reportedDay = startOfUtcDay(departureAt);
+    if (actualDepartureAt.getTime() < reportedDay.getTime()) {
+      throw new UnprocessableEntityException({
+        message:
+          'Data faktycznego wyjazdu nie może być wcześniejsza niż zgłoszona data wyjazdu.',
+        extensions: { code: DEPARTURE_BEFORE_REPORTED_CODE },
+      });
+    }
   }
 
   /**
@@ -576,6 +650,9 @@ export class DelegationsService {
       returnCountry: row.returnCountry,
       returnPostalCode: row.returnPostalCode,
       status: row.status,
+      actualDepartureAt: row.actualDepartureAt
+        ? row.actualDepartureAt.toISOString()
+        : null,
       actualReturnAt: row.actualReturnAt
         ? row.actualReturnAt.toISOString()
         : null,
@@ -864,4 +941,14 @@ function isoDateOnlyToMidnightUtc(iso: string): Date | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
   if (!m) return null;
   return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+}
+
+/**
+ * Truncate any `Date` to UTC midnight of its calendar day. Used by
+ * `_assertActualDepartureValid` to compare the (date-only) `actualDepartureAt`
+ * against the reported `departureAt` (which carries a time) at UTC-day
+ * granularity. Mirrors the identically-named helper in `claims.service.ts`.
+ */
+function startOfUtcDay(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }

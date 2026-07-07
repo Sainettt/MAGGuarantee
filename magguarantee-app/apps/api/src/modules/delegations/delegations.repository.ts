@@ -70,6 +70,11 @@ export interface DelegationRow {
   returnPostalCode: string;
 
   status: DelegationStatus;
+  // Actual start of the guarantee period — the day the vehicle really started
+  // driving, stamped by the weryfikator on `gotowy → w_trasie`. Date-only stored
+  // as UTC midnight (same convention as `actualReturnAt`); `null` until the
+  // outing goes `w_trasie`. Drives the linked wniosek's `dateStart`.
+  actualDepartureAt: Date | null;
   actualReturnAt: Date | null;
 
   reportedById: string | null;
@@ -178,6 +183,11 @@ export interface CreateDelegationData {
 export interface UpdateDelegationData {
   status?: DelegationStatus;
   notes?: string | null;
+  /**
+   * Actual start of the guarantee period — stamped by the weryfikator on the
+   * `gotowy → w_trasie` transition (`markInTransit`). Date-only at UTC midnight.
+   */
+  actualDepartureAt?: Date | null;
   actualReturnAt?: Date | null;
   /**
    * `verifiedBy/At` stamp who advanced an outing's status and when. The
@@ -327,6 +337,7 @@ export class DelegationsRepository {
       data: {
         status: data.status,
         notes: data.notes,
+        actualDepartureAt: data.actualDepartureAt,
         actualReturnAt: data.actualReturnAt,
         verifiedById: data.verifiedById,
         verifiedAt: data.verifiedAt,
@@ -441,6 +452,7 @@ export class DelegationsRepository {
       returnCountry: row.returnCountry,
       returnPostalCode: row.returnPostalCode,
       status: row.status,
+      actualDepartureAt: row.actualDepartureAt,
       actualReturnAt: row.actualReturnAt,
       reportedById: row.reportedById,
       reportedBy: row.reportedBy ?? null,
@@ -496,6 +508,7 @@ interface DelegationPrismaShape {
   returnCountry: string;
   returnPostalCode: string;
   status: DelegationStatus;
+  actualDepartureAt: Date | null;
   actualReturnAt: Date | null;
   reportedById: string | null;
   reportedBy?: { id: string; login: string; name: string | null } | null;

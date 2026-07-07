@@ -345,6 +345,7 @@ function makeDelegationForPreview(
     returnCountry: 'PL',
     returnPostalCode: '00-001',
     status: 'zjechal',
+    actualDepartureAt: null,
     actualReturnAt: new Date('2026-05-10T00:00:00.000Z'),
     reportedById: null,
     reportedBy: null,

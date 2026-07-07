@@ -1546,8 +1546,16 @@
         "vehicleAndDriver": "Pojazd i kierowca",
         "departure": "Wyjazd",
         "return": "Powrót",
-        "audit": "Status i audyt",
+        "audit": "Historia statusu",
+        "notes": "Notatki",
         "route": "Trasa"
+      },
+      "audit": {
+        "registeredBy": "Zgłoszony przez",
+        "readiedBy": "Zaakceptowany (eksport)",
+        "readiedCaption": "akceptacja ładunku",
+        "confirmedInTransit": "Potwierdzony w trasie",
+        "pending": "— oczekuje"
       },
       "status": {
         "zgloszony": "Zgłoszony",
@@ -1567,7 +1575,9 @@
         "durationUnknown": "— · plan.",
         "departure": "Wyjazd",
         "return": "Powrót",
-        "plannedPrefix": "plan:",
+        "reportedPrefix": "zgł.",
+        "plannedPrefix": "plan.",
+        "actualPrefix": "fakt.",
         "postalPrefix": "kod:"
       },
       "strip": {
@@ -1779,7 +1789,11 @@
         "markInTransit": "Oznacz w trasie",
         "markReturned": "Oznacz zjechał",
         "inTransitTitle": "Oznacz jako w trasie",
-        "inTransitDescription": "Wyjazd {plate} zostanie oznaczony jako w trasie.",
+        "inTransitDescription": "Podaj faktyczną datę wyjazdu dla wyjazdu {plate}.",
+        "inTransitDateLabel": "Data faktycznego wyjazdu",
+        "inTransitRequired": "Podaj datę wyjazdu",
+        "inTransitFuture": "Data wyjazdu nie może być w przyszłości",
+        "inTransitBeforeDeparture": "Data nie może być wcześniejsza niż zgłoszona data wyjazdu",
         "returnedTitle": "Oznacz jako zjechał",
         "returnedDescription": "Podaj faktyczną datę zjazdu dla wyjazdu {plate}.",
         "returnedDateLabel": "Data zjazdu",

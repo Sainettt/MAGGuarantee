@@ -144,15 +144,19 @@ export function useMarkDelegationInTransit(
   opts?: UseMutationOptions<
     DelegationDto,
     Error,
-    { id: string; body?: MarkInTransitDto }
+    { id: string; body: MarkInTransitDto }
   >,
 ) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, body }) => markDelegationInTransit(id, body ?? {}),
+    mutationFn: ({ id, body }) => markDelegationInTransit(id, body),
     ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: DELEGATIONS_KEY });
+      // `actualDepartureAt` sets the guarantee-period start, so the api
+      // auto-recalcs the linked wniosek — drop the claims cache too so the
+      // pracownik surface reflects it (§7.10.4), like `useMarkDelegationReturned`.
+      qc.invalidateQueries({ queryKey: ['claims'] });
       opts?.onSuccess?.(...args);
     },
   });

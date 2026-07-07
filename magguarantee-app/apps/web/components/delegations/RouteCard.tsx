@@ -1,9 +1,18 @@
 'use client';
 
-// Phase 6.4 — <RouteCard>. A presentational delegation-route composition
-// (docs/14-design-system.md §6.4.1 / §6.4.4). Three zones inside one section
-// card: departure country circle → connector (truck + planned-duration pill)
-// → return country circle. Horizontal on `sm+`, a vertical timeline on phones.
+// Phase 6.4 / §6.4.1a — <RouteCard>. A presentational delegation-route
+// composition (docs/14-design-system.md §6.4.1 / §6.4.1a / §6.4.4). Three zones
+// inside one section card: departure country circle → connector (truck +
+// planned-duration pill) → return country circle. Horizontal on `sm+`, a
+// vertical timeline on phones.
+//
+// Each end carries a reported-vs-actual date pair (§6.4.1a): departure shows the
+// reported `departureAt` (datetime) + — once set — the actual `actualDepartureAt`
+// (date-only); return shows the planned `plannedReturnAt` (date-only) + — once
+// set — the actual `actualReturnAt` (date-only). The «fakt.» actual line is
+// omitted entirely when its value is null (no em-dash); the reported/planned
+// line is always shown. CRITICAL: both `actual*At` are UTC-midnight date-only
+// and MUST use the date-only helper (`formatDateFull`), never `formatDateTime`.
 //
 // It is purely presentational — it reads the already-in-hand DelegationDto, has
 // no fetch, no state, no mutation. It is slotted as the value of a `fullWidth`
@@ -59,6 +68,34 @@ function CountryCircle({ code }: { code: string | null | undefined }) {
 const MINI_LABEL =
   'text-[11px] font-semibold uppercase tracking-[0.08em] text-text-sub';
 
+/**
+ * One line of the reported-vs-actual date stack (§6.4.1a "reported-vs-actual
+ * pair" recipe): a mini-label prefix chip + the formatted value. The `actual`
+ * variant tints the prefix `text-success` to signal "confirmed/real". Callers
+ * omit the actual line entirely when the value is null — this component never
+ * renders an em-dash placeholder (the empty rule lives at the call site).
+ */
+function DateLine({
+  prefix,
+  value,
+  tone = 'reported',
+}: {
+  prefix: string;
+  value: string;
+  tone?: 'reported' | 'actual';
+}) {
+  return (
+    <span className="text-sm tabular-nums text-text">
+      <span
+        className={`${MINI_LABEL} mr-1 ${tone === 'actual' ? 'text-success' : ''}`}
+      >
+        {prefix}
+      </span>
+      {value}
+    </span>
+  );
+}
+
 export function RouteCard({ delegation }: Props) {
   const t = useTranslations('carrier.delegations.routeCard');
 
@@ -80,9 +117,22 @@ export function RouteCard({ delegation }: Props) {
     <div className="flex flex-col items-start gap-1">
       <CountryCircle code={delegation.departureCountry} />
       <span className={MINI_LABEL}>{t('departure')}</span>
-      <span className="text-sm tabular-nums text-text">
-        {formatDateTime(delegation.departureAt)}
-      </span>
+      {/* Reported line — always shown. `departureAt` is a genuine datetime →
+          datetime helper. */}
+      <DateLine
+        prefix={t('reportedPrefix')}
+        value={formatDateTime(delegation.departureAt)}
+      />
+      {/* Actual line — only once `actualDepartureAt` is set (on `w_trasie`).
+          It is UTC-midnight date-only → the DATE-ONLY helper (formatDateFull),
+          NEVER formatDateTime (phantom-02:00 bug, §6.4.1a ⚠️). */}
+      {delegation.actualDepartureAt && (
+        <DateLine
+          prefix={t('actualPrefix')}
+          value={formatDateFull(delegation.actualDepartureAt)}
+          tone="actual"
+        />
+      )}
       <span className="text-xs text-text-sub">
         {t('postalPrefix')}{' '}
         <span className="font-mono">{delegation.departurePostalCode}</span>
@@ -94,9 +144,21 @@ export function RouteCard({ delegation }: Props) {
     <div className="flex flex-col items-start gap-1 sm:items-end sm:text-right">
       <CountryCircle code={delegation.returnCountry} />
       <span className={MINI_LABEL}>{t('return')}</span>
-      <span className="text-sm tabular-nums text-text">
-        {t('plannedPrefix')} {formatDateFull(delegation.plannedReturnAt)}
-      </span>
+      {/* Planned line — always shown. `plannedReturnAt` is `@db.Date` (date-only)
+          → date-only helper. */}
+      <DateLine
+        prefix={t('plannedPrefix')}
+        value={formatDateFull(delegation.plannedReturnAt)}
+      />
+      {/* Actual line — only once `actualReturnAt` is set (on `zjechal`).
+          UTC-midnight date-only → date-only helper (same phantom-02:00 fix). */}
+      {delegation.actualReturnAt && (
+        <DateLine
+          prefix={t('actualPrefix')}
+          value={formatDateFull(delegation.actualReturnAt)}
+          tone="actual"
+        />
+      )}
       <span className="text-xs text-text-sub">
         {t('postalPrefix')}{' '}
         <span className="font-mono">{delegation.returnPostalCode}</span>
