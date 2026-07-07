@@ -2,9 +2,11 @@ import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 
 import {
   GuaranteeEpisodeFiltersSchema,
+  MyGuaranteeEpisodeFiltersSchema,
   type GuaranteeComplianceResponse,
   type GuaranteeEpisodeFilters,
   type GuaranteeEpisodeListDto,
+  type MyGuaranteeEpisodeFilters,
 } from '@magguarantee/shared';
 
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
@@ -51,6 +53,24 @@ export class GuaranteeWatchdogController {
     @CurrentUser() user: AuthUser,
   ): Promise<GuaranteeComplianceResponse> {
     return this.watchdog.getMyCompliance(user);
+  }
+
+  /**
+   * `GET /guarantee-episodes/me` — przewoznik. The caller's OWN violation
+   * archive (own fleet only). Same shape + cursor pagination as the admin/opiekun
+   * list; the carrier scope is derived from the JWT — no client-supplied
+   * carrierId (it is not in the schema). Declared ABOVE the literal
+   * `guarantee-episodes` route: paths differ, but `/me` stays first so no future
+   * param route can shadow it.
+   */
+  @Get('guarantee-episodes/me')
+  @Roles('przewoznik')
+  async myEpisodes(
+    @CurrentUser() user: AuthUser,
+    @Query(new ZodValidationPipe(MyGuaranteeEpisodeFiltersSchema))
+    query: MyGuaranteeEpisodeFilters,
+  ): Promise<GuaranteeEpisodeListDto> {
+    return this.watchdog.listMyEpisodes(user, query);
   }
 
   /**

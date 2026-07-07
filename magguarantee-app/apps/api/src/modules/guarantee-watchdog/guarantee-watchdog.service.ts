@@ -17,6 +17,7 @@ import {
   type GuaranteeEpisodeFilters,
   type GuaranteeEpisodeListDto,
   type GuaranteeWatchdogResult,
+  type MyGuaranteeEpisodeFilters,
 } from '@magguarantee/shared';
 
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
@@ -609,8 +610,41 @@ export class GuaranteeWatchdogService {
       cursor: filters.cursor,
       limit: filters.limit,
     });
-    const hasNext = rows.length > filters.limit;
-    const page = hasNext ? rows.slice(0, filters.limit) : rows;
+    return this._paginateEpisodes(rows, filters.limit);
+  }
+
+  /**
+   * Carrier self-archive (`GET /guarantee-episodes/me`). Hard-rejects any
+   * non-przewoznik caller (defence-in-depth behind `@Roles('przewoznik')`).
+   * The carrier scope is ALWAYS derived from the JWT (`carrier.userId = user.sub`)
+   * — `carrierId` is not even in `MyGuaranteeEpisodeFilters`, so a client can
+   * never widen the scope (IDOR guard). Honours vehicleId/state/cursor/limit,
+   * same cursor pagination as `listEpisodes`.
+   */
+  async listMyEpisodes(
+    user: AuthUser,
+    filters: MyGuaranteeEpisodeFilters,
+  ): Promise<GuaranteeEpisodeListDto> {
+    if (user.role !== 'przewoznik') {
+      throw new ForbiddenException('Wymaga konta przewoźnika');
+    }
+    const rows = await this.repo.listEpisodes({
+      vehicleId: filters.vehicleId,
+      state: filters.state as PrismaEpisodeState | undefined,
+      carrierUserScopeId: user.sub,
+      cursor: filters.cursor,
+      limit: filters.limit,
+    });
+    return this._paginateEpisodes(rows, filters.limit);
+  }
+
+  /** Cursor-page a fetched-N+1 episode window into the wire envelope. */
+  private _paginateEpisodes(
+    rows: GuaranteeEpisodeListRow[],
+    limit: number,
+  ): GuaranteeEpisodeListDto {
+    const hasNext = rows.length > limit;
+    const page = hasNext ? rows.slice(0, limit) : rows;
     return {
       items: page.map((r) => this._toEpisodeDto(r)),
       nextCursor: hasNext ? (page[page.length - 1]?.id ?? null) : null,

@@ -758,6 +758,59 @@
       "more": "+ {count} więcej",
       "ariaRow": "Pojazd {plate}, termin {date}, {status}"
     },
+    "strip": {
+      "title": "{count, plural, one {# pojazd wymaga} few {# pojazdy wymagają} many {# pojazdów wymaga} other {# pojazdów wymaga}} pilnego zgłoszenia wyjazdu",
+      "cta": "Przejdź do Porozumień"
+    },
+    "tab": {
+      "badgeAria": "Porozumienie, {count} pilnych"
+    },
+    "porozumienie": {
+      "title": "Porozumienie o gwarancji",
+      "allClear": "Wszystkie pojazdy w porządku — nic nie wymaga zgłoszenia",
+      "reportCta": "Zgłoś wyjazd",
+      "deadline": "termin: {date}",
+      "group": {
+        "violated": "Po terminie",
+        "dueSoon": "Zbliża się termin",
+        "watched": "Pod obserwacją",
+        "okActive": "W trasie / wyjazd zgłoszony"
+      },
+      "chip": {
+        "violated": "Po terminie",
+        "dueSoon": "Zbliża się termin",
+        "watched": "Pod obserwacją",
+        "okActive": "W trasie / wyjazd zgłoszony"
+      },
+      "anchor": {
+        "zjechal": "ostatni zjazd: {date}",
+        "agreement": "od włączenia gwarancji: {date}"
+      },
+      "explainer": {
+        "title": "Jak działa porozumienie o gwarancji",
+        "obligation": "Po każdym zjeździe zgłoś kolejny wyjazd w ciągu 10 polskich dni roboczych.",
+        "reminders": "Przypomnienia wysyłamy na 3 dni i 1 dzień przed terminem.",
+        "silence": "Aktywny wyjazd zatrzymuje licznik — w trasie nic nie musisz robić.",
+        "restart": "Zjazd pojazdu restartuje licznik od nowa (10 dni roboczych)."
+      }
+    },
+    "episodes": {
+      "title": "Historia",
+      "loadMore": "Załaduj więcej",
+      "empty": "Brak historii — żaden termin nie został jeszcze przekroczony",
+      "resolvedAt": "rozwiązano {date} · {reason}",
+      "reminders": "przypomnienia: D-3 {d3} · D-1 {d1}",
+      "state": {
+        "warning": "Ostrzeżenie",
+        "violated": "Po terminie",
+        "resolved": "Rozwiązane"
+      },
+      "reason": {
+        "wyjazd": "Zgłoszono wyjazd",
+        "agreement_off": "Gwarancja wyłączona",
+        "vehicle_inactive": "Pojazd nieaktywny"
+      }
+    },
     "fleet": {
       "column": "Gwarancja",
       "inactive": "Brak odjazdu",
@@ -1415,7 +1468,8 @@
       "claims": "Wnioski",
       "newClaim": "Nowy",
       "fleet": "Flota",
-      "delegations": "Wyjazdy"
+      "delegations": "Wyjazdy",
+      "porozumienie": "Porozumienie"
     },
     "fleetTabs": {
       "ariaLabel": "Sekcje floty",
