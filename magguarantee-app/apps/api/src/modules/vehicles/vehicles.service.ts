@@ -6,8 +6,11 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   UnprocessableEntityException,
 } from '@nestjs/common';
+
+import { startOfBusinessTodayUtc } from '@magguarantee/shared';
 
 import type {
   CreateVehicleDto,
@@ -25,6 +28,7 @@ import {
 } from '../../common/errors/prisma-error';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { CarriersRepository } from '../carriers/carriers.repository';
+import { GuaranteeWatchdogService } from '../guarantee-watchdog/guarantee-watchdog.service';
 import { StorageService, type StorageObject } from '../storage/storage.service';
 import { TeamsRepository } from '../teams/teams.repository';
 import { UsersRepository } from '../users/users.repository';
@@ -88,6 +92,10 @@ export class VehiclesService {
     private readonly attachments: VehicleAttachmentsRepository,
     private readonly storage: StorageService,
     private readonly teams: TeamsRepository,
+    // Guarantee Watchdog — agreement-toggle hook (true→false resolves the open
+    // idle episode). `@Optional()` so the positional service-test fakes keep
+    // compiling; the hook no-ops when absent.
+    @Optional() private readonly guaranteeWatchdog?: GuaranteeWatchdogService,
   ) {}
 
   async list(
@@ -186,6 +194,17 @@ export class VehiclesService {
 
     const patch = this._buildUpdatePatch(dto);
 
+    // Guarantee Watchdog — maintain `Vehicle.agreementSince` on the agreement
+    // toggle (plan §4). `agreement` is `Boolean?`; NULL is treated as false. Only
+    // acts when `dto.agreement` was actually supplied (else `agreementSince` is
+    // left untouched). Date-only UTC-midnight (same convention as markReturned's
+    // `actualReturnAt`). The value lands in the SAME update as the scalar.
+    const agreementTransition = this._resolveAgreementTransition(existing, dto);
+    if (agreementTransition !== 'unchanged') {
+      patch.agreementSince =
+        agreementTransition === 'enabled' ? startOfBusinessTodayUtc() : null;
+    }
+
     let row: VehicleRow;
     try {
       row = await this.vehicles.update(id, patch);
@@ -206,8 +225,41 @@ export class VehiclesService {
     }
     await this._attachUploadsWithRollback(row, uploads, /* createdById */ null);
 
+    // Guarantee Watchdog — when the guarantee was just turned OFF, close the
+    // vehicle's open idle episode (reason agreement_off). Off-path: the hook
+    // catches everything internally; the belt-and-suspenders guard here ensures
+    // a hook failure never breaks the vehicle update. No-op when the service
+    // isn't wired (unit tests).
+    if (agreementTransition === 'disabled' && this.guaranteeWatchdog) {
+      void this.guaranteeWatchdog.onAgreementDisabled(id).catch((err) => {
+        this.logger.warn({
+          msg: 'guarantee watchdog agreement-off hook enqueue failed (non-fatal)',
+          vehicleId: id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+
     const fresh = await this.vehicles.findById(id);
     return this.toDto(fresh ?? row);
+  }
+
+  /**
+   * Classifies the agreement toggle for the watchdog `agreementSince`
+   * maintenance (plan §4). `Vehicle.agreement` is `Boolean?` — NULL is treated
+   * as false. Returns `unchanged` when `dto.agreement` was not supplied or the
+   * effective boolean did not flip. Otherwise `enabled` (false/null→true) or
+   * `disabled` (true→false/null).
+   */
+  private _resolveAgreementTransition(
+    existing: VehicleRow,
+    dto: UpdateVehicleDto,
+  ): 'enabled' | 'disabled' | 'unchanged' {
+    if (dto.agreement === undefined) return 'unchanged';
+    const before = existing.agreement === true;
+    const after = dto.agreement === true;
+    if (before === after) return 'unchanged';
+    return after ? 'enabled' : 'disabled';
   }
 
   async deactivate(id: string): Promise<VehicleDto> {

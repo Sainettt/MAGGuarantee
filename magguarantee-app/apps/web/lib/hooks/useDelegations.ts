@@ -28,6 +28,7 @@ import {
   markDelegationReturned,
   submitDelegation,
 } from '@/lib/api/delegations';
+import { GUARANTEE_KEY } from '@/lib/hooks/useGuarantee';
 
 export const DELEGATIONS_KEY = ['delegations'] as const;
 
@@ -90,6 +91,10 @@ export function useSubmitDelegation(
     ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: DELEGATIONS_KEY });
+      // Reporting a wyjazd resolves the guarantee episode server-side; drop the
+      // watchdog cache so the carrier banner / fleet badge reflect it on the
+      // next refetch (the «live truth» rule, docs/14 §12.2).
+      qc.invalidateQueries({ queryKey: GUARANTEE_KEY });
       opts?.onSuccess?.(...args);
     },
   });
@@ -157,6 +162,9 @@ export function useMarkDelegationInTransit(
       // auto-recalcs the linked wniosek — drop the claims cache too so the
       // pracownik surface reflects it (§7.10.4), like `useMarkDelegationReturned`.
       qc.invalidateQueries({ queryKey: ['claims'] });
+      // A departing vehicle pauses/resolves its watchdog counter — refresh the
+      // compliance board + carrier badges (§12.2).
+      qc.invalidateQueries({ queryKey: GUARANTEE_KEY });
       opts?.onSuccess?.(...args);
     },
   });
@@ -178,6 +186,9 @@ export function useMarkDelegationReturned(
       // A late `zjechal` may auto-recalc the linked wniosek server-side — drop
       // the claims cache too so the pracownik surface reflects it (§7.10.4).
       qc.invalidateQueries({ queryKey: ['claims'] });
+      // `zjechal` sets a fresh watchdog anchor (last return) and starts the
+      // 10-working-day counter — refresh the compliance surfaces (§12.0).
+      qc.invalidateQueries({ queryKey: GUARANTEE_KEY });
       opts?.onSuccess?.(...args);
     },
   });

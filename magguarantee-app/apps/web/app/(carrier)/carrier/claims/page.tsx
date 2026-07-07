@@ -14,6 +14,7 @@ import {
 } from '@magguarantee/shared';
 
 import { ClaimCard } from '@/components/carrier/ClaimCard';
+import { GuaranteeReminderBanner } from '@/components/carrier/GuaranteeReminderBanner';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
@@ -53,6 +54,11 @@ export default function CarrierClaimsListPage() {
 
   return (
     <section className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-8">
+      {/* Phase 12 — guarantee-watchdog reminder banner (§12.2). Renders only
+          when a guaranteed vehicle is owed a zgłoszenie-wyjazdu; silent
+          otherwise. Mounts above the title as the carrier's first read. */}
+      <GuaranteeReminderBanner />
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <h1 className="text-2xl font-extrabold tracking-tight text-text">
           {t('title')}

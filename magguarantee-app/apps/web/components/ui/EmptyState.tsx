@@ -12,6 +12,9 @@ export interface EmptyStateProps {
   message?: ReactNode;
   action?: ReactNode;
   className?: string;
+  /** Override the icon tone — e.g. `text-success` for a *positive* empty
+   *  state (a good actor with no violations, §12.5). Defaults to muted. */
+  iconClassName?: string;
 }
 
 export function EmptyState({
@@ -20,6 +23,7 @@ export function EmptyState({
   message,
   action,
   className,
+  iconClassName,
 }: EmptyStateProps) {
   return (
     <div
@@ -28,7 +32,11 @@ export function EmptyState({
         className,
       )}
     >
-      <Icon size={32} className="text-text-sub mb-3" aria-hidden />
+      <Icon
+        size={32}
+        className={cn('mb-3', iconClassName ?? 'text-text-sub')}
+        aria-hidden
+      />
       {title && (
         <p className="text-[15px] font-bold text-text">{title}</p>
       )}

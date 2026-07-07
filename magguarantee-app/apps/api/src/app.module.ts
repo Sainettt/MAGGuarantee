@@ -18,6 +18,7 @@ import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
 import { DriversModule } from './modules/drivers/drivers.module';
 import { FleetModule } from './modules/fleet/fleet.module';
 import { GpsModule } from './modules/integrations/gps/gps.module';
+import { GuaranteeWatchdogModule } from './modules/guarantee-watchdog/guarantee-watchdog.module';
 import { InspectionModule } from './modules/integrations/inspection/inspection.module';
 import { ViesModule } from './modules/integrations/vies/vies.module';
 import { WhiteListModule } from './modules/integrations/white-list/white-list.module';
@@ -116,6 +117,8 @@ import { VerificationSlaModule } from './modules/verification-sla/verification-s
     DiagnosticsModule,
     // docs/21 — pracownik verification-SLA daily-digest cron.
     VerificationSlaModule,
+    // Guarantee Watchdog — wyjazd-reminder cron + compliance board (plan §5).
+    GuaranteeWatchdogModule,
     HealthModule,
   ],
   providers: [

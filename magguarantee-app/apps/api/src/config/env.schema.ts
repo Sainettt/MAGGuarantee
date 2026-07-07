@@ -127,6 +127,52 @@ export const envSchema = z.object({
     }
     return false;
   }, z.boolean().default(false)),
+
+  // ── Guarantee Watchdog (plan §6) ───────────────────────
+  // Daily cron (07:10 Warsaw) that reminds carriers/opiekuni to report a wyjazd
+  // within N Polish working days of a guaranteed vehicle's last return and
+  // records violations. Numbers may change per договор — env is cheaper than a
+  // migration.
+  //
+  // GUARANTEE_WATCHDOG_ENABLED — kill-switch. Same explicit-coercion pattern as
+  // `ALLOW_PAST_DEPARTURE`: a bare `z.coerce.boolean()` maps the literal string
+  // "false" to `true`, so we preprocess by hand — only "true"/"1" mean enabled;
+  // "", "false", "0", or absent mean... enabled too, because the DEFAULT is on.
+  // The coercion here only distinguishes an explicit falsy value from a truthy
+  // one; the `.default(true)` handles the absent case.
+  GUARANTEE_WATCHDOG_ENABLED: z.preprocess((v) => {
+    if (typeof v === 'boolean') return v;
+    if (typeof v === 'string') {
+      const s = v.trim().toLowerCase();
+      if (s === '') return undefined; // fall through to default(true)
+      return s === 'true' || s === '1';
+    }
+    return undefined;
+  }, z.boolean().default(true)),
+
+  // Working days from the anchor (last return / agreement-enable) to the wyjazd
+  // deadline. Default 10 (plan §1).
+  GUARANTEE_DEADLINE_WORKING_DAYS: z.coerce.number().int().min(1).max(60).default(10),
+
+  // Reminder offsets (working days before the deadline), as a CSV string.
+  // Default "3,1" → remind at D-3 and D-1 (plan §1/§5). Parsed + validated to a
+  // sorted, positive, de-duplicated `number[]`. An empty/blank value yields the
+  // default offsets.
+  GUARANTEE_REMINDER_OFFSETS: z.preprocess(
+    (v) => {
+      if (Array.isArray(v)) return v;
+      if (typeof v !== 'string' || v.trim() === '') return [3, 1];
+      return v
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+        .map((s) => Number(s));
+    },
+    z
+      .array(z.number().int().positive())
+      .min(1)
+      .transform((arr) => Array.from(new Set(arr)).sort((a, b) => b - a)),
+  ),
 }).superRefine((env, ctx) => {
   // Gmail secrets are required only when the Gmail provider is selected — keeps
   // dev/staging `.env` (Mailhog) clean while still failing fast at boot in prod

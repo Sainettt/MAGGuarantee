@@ -25,7 +25,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import type {
   CarrierDto,
@@ -45,6 +45,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { VehicleDetailModal } from '@/components/vehicles/VehicleDetailModal';
 import { CarrierDocumentsTab } from './CarrierDocumentsTab';
+import { CarrierPorozumieniaTab } from './CarrierPorozumieniaTab';
 import { formatDateFull } from '@/lib/format/numbers';
 import { listDrivers } from '@/lib/api/drivers';
 import { listTrailers } from '@/lib/api/trailers';
@@ -60,6 +61,16 @@ export default function OpiekaCarrierDetailPage() {
   const login = decodeURIComponent(params.login ?? '');
   const t = useTranslations('opieka');
   const tCommon = useTranslations('common');
+  const tHistory = useTranslations('guarantee.history');
+
+  // Honour `?tab=porozumienia` (set by the board deep-link) as the initial
+  // tab; else default to «Auta». Uncontrolled afterwards.
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const VALID_TABS = ['vehicles', 'drivers', 'trailers', 'documents', 'porozumienia'];
+  const defaultTab = VALID_TABS.includes(tabParam ?? '')
+    ? (tabParam as string)
+    : 'vehicles';
 
   // Resolve login → carrierId from the cached opiekun fleet response. This is
   // already populated when the user clicked through from the list page; on a
@@ -197,12 +208,13 @@ export default function OpiekaCarrierDetailPage() {
       </header>
 
       {carrierStub && (
-        <Tabs defaultValue="vehicles" className="w-full">
+        <Tabs defaultValue={defaultTab} className="w-full">
           <TabsList aria-label={t('tabs.ariaLabel')} className="mb-4">
             <TabsTrigger value="vehicles">{t('tabs.vehicles')}</TabsTrigger>
             <TabsTrigger value="drivers">{t('tabs.drivers')}</TabsTrigger>
             <TabsTrigger value="trailers">{t('tabs.trailers')}</TabsTrigger>
             <TabsTrigger value="documents">{t('tabs.documents')}</TabsTrigger>
+            <TabsTrigger value="porozumienia">{tHistory('tab')}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="vehicles">
@@ -235,6 +247,12 @@ export default function OpiekaCarrierDetailPage() {
                 carrierId={carrierId}
                 hasAdrVehicle={hasAdrVehicle}
               />
+            </TabsContent>
+          )}
+
+          {carrierId && (
+            <TabsContent value="porozumienia">
+              <CarrierPorozumieniaTab carrierId={carrierId} />
             </TabsContent>
           )}
         </Tabs>

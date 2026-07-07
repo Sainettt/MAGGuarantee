@@ -31,8 +31,14 @@ import {
 import { useTranslations } from 'next-intl';
 import { useSearchParams } from 'next/navigation';
 import { useMemo, useState } from 'react';
-import type { DriverDto, TrailerDto, VehicleDto } from '@magguarantee/shared';
+import type {
+  DriverDto,
+  GuaranteeComplianceItem,
+  TrailerDto,
+  VehicleDto,
+} from '@magguarantee/shared';
 
+import { GuaranteeCountdownBadge } from '@/components/carrier/GuaranteeCountdownBadge';
 import { DriverDetailModal } from '@/components/drivers/DriverDetailModal';
 import { PermitCell } from '@/components/fleet/PermitCell';
 import { TrailerDetailModal } from '@/components/trailers/TrailerDetailModal';
@@ -47,6 +53,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { VehicleDetailModal } from '@/components/vehicles/VehicleDetailModal';
 import { formatDateFull } from '@/lib/format/numbers';
 import { useDrivers } from '@/lib/hooks/useDrivers';
+import { useMyGuaranteeCompliance } from '@/lib/hooks/useGuarantee';
 import { useTrailers } from '@/lib/hooks/useTrailers';
 import { useTrailerTypes } from '@/lib/hooks/useTrailerTypes';
 import { useVehicles } from '@/lib/hooks/useVehicles';
@@ -71,6 +78,7 @@ export function CarrierFleetPanel() {
   const tTrlCols = useTranslations('carrier.fleet.trailers.columns');
   const tCommon = useTranslations('common');
   const tA11y = useTranslations('fleet.a11y');
+  const tGuarantee = useTranslations('guarantee.fleet');
 
   // Honour `?tab=drivers|trailers` (set by the redirecting old sub-routes), else
   // default to «Auta». Uncontrolled afterwards — the user can switch freely.
@@ -85,6 +93,18 @@ export function CarrierFleetPanel() {
   const vehiclesQ = useVehicles({ limit: 200 });
   const driversAllQ = useDrivers({ limit: 200 });
   const trailersAllQ = useTrailers({ limit: 200 });
+
+  // ── Phase 12 — guarantee-watchdog compliance for the carrier's own fleet.
+  //    Keyed by vehicleId, joined onto the «Auta» rows for the GWARANCJA
+  //    column (§12.3). A vehicle absent from `/me` is not guaranteed → dash.
+  const complianceQ = useMyGuaranteeCompliance();
+  const guaranteeByVehicle = useMemo(() => {
+    const map = new Map<string, GuaranteeComplianceItem>();
+    for (const item of complianceQ.data?.items ?? []) {
+      map.set(item.vehicleId, item);
+    }
+    return map;
+  }, [complianceQ.data]);
 
   const vehicles = useMemo(
     () => vehiclesQ.data?.items ?? [],
@@ -223,8 +243,28 @@ export function CarrierFleetPanel() {
             <Badge variant="muted">{tCommon('inactive')}</Badge>
           ),
       },
+      {
+        // Phase 12 — GWARANCJA watchdog cell (§12.3). Right-most, grouped with
+        // STATUS as an oversight signal. Information-only: the row click still
+        // opens the read-only detail modal; the actionable CTA lives in the
+        // banner. Non-guaranteed vehicles (absent from `/me`) show a dash.
+        id: 'guarantee',
+        header: tGuarantee('column'),
+        cell: (row) => {
+          const g = guaranteeByVehicle.get(row.id);
+          if (!g) return <span className="text-text-sub">—</span>;
+          if (g.state === 'inactive') {
+            return <Badge variant="muted">{tGuarantee('inactive')}</Badge>;
+          }
+          if (g.state === 'ok_active') {
+            return <Badge variant="success">{tGuarantee('active')}</Badge>;
+          }
+          // counting / violated → worded countdown chip (its own tone).
+          return <GuaranteeCountdownBadge daysLeft={g.daysLeft ?? 0} />;
+        },
+      },
     ],
-    [tVehCols, tCommon],
+    [tVehCols, tCommon, tGuarantee, guaranteeByVehicle],
   );
 
   const driverColumns = useMemo<DataTableColumn<DriverDto>[]>(

@@ -67,6 +67,12 @@ export class EmailSendProcessor extends WorkerHost {
       case 'delegation-ready':
         await this.mail.sendDelegationReady(data.email, data.props);
         return;
+      case 'guarantee-reminder-carrier':
+        await this.mail.sendGuaranteeReminderCarrier(data.email, data.props);
+        return;
+      case 'guarantee-opiekun-digest':
+        await this.mail.sendGuaranteeOpiekunDigest(data.email, data.props);
+        return;
       default: {
         // Exhaustiveness guard — a new template variant must add a case above
         // (TS flags this assignment if `EmailSendJobData` gains a member).

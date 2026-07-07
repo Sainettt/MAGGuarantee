@@ -15,6 +15,8 @@ import type { AuthorizationRequestProps } from './templates/authorization-reques
 import type { VerificationDigestProps } from './templates/verification-digest';
 import type { DelegationAnnouncedProps } from './templates/delegation-announced';
 import type { DelegationReadyProps } from './templates/delegation-ready';
+import type { GuaranteeReminderCarrierProps } from './templates/guarantee-reminder-carrier';
+import type { GuaranteeOpiekunDigestProps } from './templates/guarantee-opiekun-digest';
 
 /** BullMQ job name within the `email-send` queue. */
 export const EMAIL_SEND_JOB = 'send' as const;
@@ -95,6 +97,20 @@ export interface DelegationReadyEmailJob {
   props: DelegationReadyProps;
 }
 
+/** Guarantee Watchdog #17 — carrier wyjazd reminder (plan §6). */
+export interface GuaranteeReminderCarrierEmailJob {
+  template: 'guarantee-reminder-carrier';
+  email: string;
+  props: GuaranteeReminderCarrierProps;
+}
+
+/** Guarantee Watchdog #18 — opiekun daily digest (plan §6). */
+export interface GuaranteeOpiekunDigestEmailJob {
+  template: 'guarantee-opiekun-digest';
+  email: string;
+  props: GuaranteeOpiekunDigestProps;
+}
+
 /** Discriminated union of all `email-send` job payloads. */
 export type EmailSendJobData =
   | TwoFactorCodeEmailJob
@@ -108,4 +124,6 @@ export type EmailSendJobData =
   | AuthorizationRequestEmailJob
   | VerificationDigestEmailJob
   | DelegationAnnouncedEmailJob
-  | DelegationReadyEmailJob;
+  | DelegationReadyEmailJob
+  | GuaranteeReminderCarrierEmailJob
+  | GuaranteeOpiekunDigestEmailJob;

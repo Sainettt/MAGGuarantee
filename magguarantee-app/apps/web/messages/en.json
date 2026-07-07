@@ -744,6 +744,91 @@
       }
     }
   },
+  "guarantee": {
+    "countdown": {
+      "overdue": "{days, plural, one {# working day overdue} other {# working days overdue}}",
+      "today": "last day today",
+      "dueSoon": "{days, plural, one {# working day} other {# working days}}",
+      "remaining": "{days, plural, one {# working day} other {# working days}}"
+    },
+    "banner": {
+      "title": "Report a departure — {count, plural, one {# vehicle needs action} other {# vehicles need action}}",
+      "cta": "Report departure",
+      "deadline": "Due: {date}",
+      "more": "+ {count} more",
+      "ariaRow": "Vehicle {plate}, due {date}, {status}"
+    },
+    "fleet": {
+      "column": "Guarantee",
+      "inactive": "No departure yet",
+      "active": "On the road"
+    },
+    "vehicleModal": {
+      "statusLabel": "Guarantee — status",
+      "deadlineLabel": "Reporting deadline"
+    },
+    "board": {
+      "title": "Agreements — departure reporting",
+      "subtitle": "Guaranteed vehicles that need a departure reported",
+      "tabCarriers": "Carriers",
+      "tabAgreements": "Agreements",
+      "tabsAriaLabel": "Care view",
+      "sectionViolated": "Overdue",
+      "sectionDueSoon": "Due soon",
+      "sectionWatched": "Under watch",
+      "showAllWatched": "Show all watched",
+      "allClear": "All carriers are on time",
+      "searchPlaceholder": "Search by plate or carrier",
+      "filterState": "Filter by state",
+      "stateAll": "All states",
+      "deadline": "due: {date}",
+      "anchor": {
+        "zjechal": "last return: {date}",
+        "agreement": "since guarantee start: {date}"
+      },
+      "kpi": {
+        "violated": "Overdue",
+        "dueSoon": "Due soon",
+        "watched": "Under watch"
+      },
+      "emptyFilteredTitle": "No results",
+      "emptyFilteredMessage": "Adjust your search criteria or clear the filters."
+    },
+    "history": {
+      "tab": "Agreements",
+      "liveHeading": "Guaranteed vehicles — current state",
+      "episodesHeading": "Episode history",
+      "emptyLive": "No guaranteed vehicles",
+      "emptyEpisodes": "This carrier has had no late departure reports",
+      "showAllVehicles": "Show all vehicles",
+      "columns": {
+        "vehicle": "Vehicle",
+        "anchor": "Anchor",
+        "deadline": "Due",
+        "state": "State",
+        "outcome": "Outcome",
+        "resolvedAt": "Closed"
+      },
+      "source": {
+        "zjechal": "return",
+        "agreement": "guarantee"
+      },
+      "state": {
+        "warning": "Warning",
+        "violated": "Overdue",
+        "resolved": "Closed"
+      },
+      "reason": {
+        "wyjazd": "Departure reported",
+        "agreement_off": "Guarantee removed",
+        "vehicle_inactive": "Vehicle deactivated"
+      },
+      "outcome": {
+        "onTime": "on time",
+        "late": "{days, plural, one {# working day late} other {# working days late}}"
+      }
+    }
+  },
   "limits": {
     "title": "KM guarantee limits",
     "subtitle": "km/day and €/km rates for every month of the year",

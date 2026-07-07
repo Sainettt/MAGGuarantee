@@ -185,6 +185,18 @@ async function seedDemoFleet(): Promise<number> {
   // One vehicle assigned to the demo dispatch team. Idempotent via the
   // composite unique (carrierId, plateNumber). `gpsMobilePhone` (GPS tracker
   // device id) is NOT NULL, so a demo value is supplied.
+  //
+  // Guarantee Watchdog (план 2026-07-07): the demo vehicle is guaranteed
+  // (agreement=true) so the watchdog board/banner has something to show in dev.
+  // `agreementSince` is stamped ~3 weeks in the past (date-only) — a plausible
+  // guarantee-enable date. With no delegations seeded, the watchdog anchors on
+  // agreementSince, which (being > 10 working days ago) puts the vehicle in a
+  // violated/counting state on the board. NO episodes are seeded — the journal
+  // table starts empty and is populated by the cron.
+  const agreementSince = new Date();
+  agreementSince.setUTCDate(agreementSince.getUTCDate() - 21);
+  agreementSince.setUTCHours(0, 0, 0, 0); // date-only → UTC midnight
+
   await prisma.vehicle.upsert({
     where: {
       carrier_plate_unique: {
@@ -200,9 +212,13 @@ async function seedDemoFleet(): Promise<number> {
       type: 'STD',
       gpsMobilePhone: 'MOB126',
       dispatchTeamId: demoTeam.id,
+      agreement: true,
+      agreementSince,
     },
     update: {
       dispatchTeamId: demoTeam.id,
+      agreement: true,
+      agreementSince,
     },
   });
 

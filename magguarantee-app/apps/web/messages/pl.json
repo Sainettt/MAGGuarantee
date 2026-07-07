@@ -744,6 +744,91 @@
       }
     }
   },
+  "guarantee": {
+    "countdown": {
+      "overdue": "{days, plural, one {# dzień po terminie} few {# dni po terminie} many {# dni po terminie} other {# dni po terminie}}",
+      "today": "dziś ostatni dzień",
+      "dueSoon": "{days, plural, one {# dzień roboczy} few {# dni robocze} many {# dni roboczych} other {# dni roboczych}}",
+      "remaining": "{days, plural, one {# dzień roboczy} few {# dni robocze} many {# dni roboczych} other {# dni roboczych}}"
+    },
+    "banner": {
+      "title": "Zgłoś wyjazd — {count, plural, one {# pojazd wymaga działania} few {# pojazdy wymagają działania} many {# pojazdów wymaga działania} other {# pojazdów wymaga działania}}",
+      "cta": "Zgłoś wyjazd",
+      "deadline": "Termin: {date}",
+      "more": "+ {count} więcej",
+      "ariaRow": "Pojazd {plate}, termin {date}, {status}"
+    },
+    "fleet": {
+      "column": "Gwarancja",
+      "inactive": "Brak odjazdu",
+      "active": "W trasie"
+    },
+    "vehicleModal": {
+      "statusLabel": "Gwarancja — status",
+      "deadlineLabel": "Termin zgłoszenia"
+    },
+    "board": {
+      "title": "Porozumienia — zgłaszanie wyjazdów",
+      "subtitle": "Pojazdy z gwarancją, które wymagają zgłoszenia wyjazdu",
+      "tabCarriers": "Przewoźnicy",
+      "tabAgreements": "Porozumienia",
+      "tabsAriaLabel": "Widok opieki",
+      "sectionViolated": "Po terminie",
+      "sectionDueSoon": "Zbliża się termin",
+      "sectionWatched": "Pod obserwacją",
+      "showAllWatched": "Pokaż wszystkie obserwowane",
+      "allClear": "Wszyscy przewoźnicy w terminie",
+      "searchPlaceholder": "Szukaj po numerze rej. lub przewoźniku",
+      "filterState": "Filtruj wg stanu",
+      "stateAll": "Wszystkie stany",
+      "deadline": "termin: {date}",
+      "anchor": {
+        "zjechal": "ostatni zjazd: {date}",
+        "agreement": "od włączenia gwarancji: {date}"
+      },
+      "kpi": {
+        "violated": "Po terminie",
+        "dueSoon": "Zbliża się termin",
+        "watched": "Pod obserwacją"
+      },
+      "emptyFilteredTitle": "Brak wyników",
+      "emptyFilteredMessage": "Zmień kryteria wyszukiwania lub wyczyść filtry."
+    },
+    "history": {
+      "tab": "Porozumienia",
+      "liveHeading": "Pojazdy z gwarancją — stan bieżący",
+      "episodesHeading": "Historia epizodów",
+      "emptyLive": "Brak pojazdów z gwarancją",
+      "emptyEpisodes": "Ten przewoźnik nie miał opóźnień w zgłaszaniu wyjazdów",
+      "showAllVehicles": "Pokaż wszystkie pojazdy",
+      "columns": {
+        "vehicle": "Pojazd",
+        "anchor": "Kotwica",
+        "deadline": "Termin",
+        "state": "Stan",
+        "outcome": "Rozliczenie",
+        "resolvedAt": "Zamknięto"
+      },
+      "source": {
+        "zjechal": "zjazd",
+        "agreement": "gwarancja"
+      },
+      "state": {
+        "warning": "Ostrzeżenie",
+        "violated": "Po terminie",
+        "resolved": "Zamknięty"
+      },
+      "reason": {
+        "wyjazd": "Zgłoszono wyjazd",
+        "agreement_off": "Zdjęto gwarancję",
+        "vehicle_inactive": "Pojazd nieaktywny"
+      },
+      "outcome": {
+        "onTime": "w terminie",
+        "late": "{days, plural, one {po terminie o # dzień} few {po terminie o # dni} many {po terminie o # dni} other {po terminie o # dni}}"
+      }
+    }
+  },
   "limits": {
     "title": "Limity gwarancji km",
     "subtitle": "Stawki km/dzień i €/km dla każdego miesiąca w roku",

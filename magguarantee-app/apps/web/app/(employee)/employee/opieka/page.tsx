@@ -25,6 +25,7 @@ import { Building2, Car, CircleSlash2, HeartHandshake, Plus, Truck } from 'lucid
 import { useTranslations } from 'next-intl';
 
 import { KpiCard } from '@/components/dashboard/KpiCard';
+import { OpiekaTabsNav } from '@/components/opieka/OpiekaTabsNav';
 import OpiekunCarrierCard, {
   OpiekunCarrierCardSkeleton,
 } from '@/components/opieka/OpiekunCarrierCard';
@@ -46,6 +47,10 @@ export default function OpiekaPage() {
         </h1>
         <p className="text-sm text-text-sub">{t('subtitle')}</p>
       </div>
+
+      {/* Phase 12 — secondary nav: Przewoźnicy (this grid) / Porozumienia
+          (watchdog board). Route-backed so both tabs are deep-linkable. */}
+      <OpiekaTabsNav />
 
       {/* Totals strip — six KPI tiles. Always rendered so the layout doesn't
           jump between loading / loaded states; values fall back to 0 while

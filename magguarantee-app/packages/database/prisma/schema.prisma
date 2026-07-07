@@ -123,6 +123,44 @@ enum CarrierAttachmentCategory {
   other
 }
 
+// ─── GUARANTEE WATCHDOG (Guarantee Watchdog — план 2026-07-07) ──────────
+// A guaranteed vehicle (Vehicle.agreement=true) must report a new wyjazd
+// (Delegation status=zgloszony) within 10 Polish working days of its last
+// return; the watchdog escalates D-3 / D-1 reminders and, past the deadline,
+// a violation. The live board/banner is computed statelessly from delegations;
+// GuaranteeIdleEpisode is the WRITE-layer journal of the "bad" cycles only —
+// it durable-fixes violations and dedups reminder emails. See план §2/§3.
+
+// Lifecycle state of an idle episode row. `warning` — a reminder (D-3 or D-1)
+// has fired but the deadline is not yet missed; `violated` — the deadline
+// passed with no wyjazd; `resolved` — closed (a wyjazd was reported, agreement
+// turned off, or the vehicle went inactive). Only non-`resolved` rows are
+// "open"; the partial unique index enforces at most one open episode per
+// vehicle.
+enum GuaranteeEpisodeState {
+  warning
+  violated
+  resolved
+}
+
+// Where the episode's anchor date came from: `zjechal` — the date of the
+// vehicle's last returned delegation (actualReturnAt); `agreement` — the
+// vehicle has never returned a delegation, so the countdown runs from
+// Vehicle.agreementSince (guarantee-enable date).
+enum GuaranteeAnchorSource {
+  zjechal
+  agreement
+}
+
+// Why an open episode was closed: `wyjazd` — a new delegation was reported
+// (the compliant outcome); `agreement_off` — the guarantee flag was turned
+// off; `vehicle_inactive` — the vehicle was deactivated / soft-deleted.
+enum GuaranteeResolveReason {
+  wyjazd
+  agreement_off
+  vehicle_inactive
+}
+
 // ─── USERS (объединение всех auth-листов) ───────────────
 
 model User {
@@ -229,12 +267,13 @@ model Carrier {
   opiekunId String @db.Uuid
   opiekun   User   @relation("OpiekunCarriers", fields: [opiekunId], references: [id])
 
-  vehicles    Vehicle[]
-  drivers     Driver[]
-  trailers    Trailer[]
-  claims      Claim[]
-  delegations Delegation[]
-  attachments CarrierAttachment[]
+  vehicles          Vehicle[]
+  drivers           Driver[]
+  trailers          Trailer[]
+  claims            Claim[]
+  delegations       Delegation[]
+  attachments       CarrierAttachment[]
+  guaranteeEpisodes GuaranteeIdleEpisode[] // Guarantee Watchdog — denormalized carrier for board/scope
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -342,10 +381,16 @@ model Vehicle {
   fuelCard     Boolean     @default(false)
   type         VehicleType
 
-  gb        Boolean? // UK access
-  it        Boolean?
-  fr        Boolean?
-  agreement Boolean? // Porozumienie
+  gb             Boolean? // UK access
+  it             Boolean?
+  fr             Boolean?
+  agreement      Boolean? // Porozumienie
+  // Guarantee Watchdog (план 2026-07-07): the date the km-guarantee was turned
+  // ON for this vehicle. Maintained by the API on the agreement toggle
+  // (false/null→true ⇒ set to today; true→false ⇒ cleared to NULL). Used as
+  // the watchdog anchor for a vehicle that has never returned a delegation
+  // (anchorSource=agreement). Date-only. The DB just stores it.
+  agreementSince DateTime? @db.Date
   // Legacy `contract` (Umowa) boolean dropped 2026-05 — the umowa is now
   // stored as a scanned file via VehicleAttachment rows with
   // category=contract. See docs/19-known-quirks.md#umowa-vs-porozumienie.
@@ -377,10 +422,11 @@ model Vehicle {
   // VehicleDailyKm drove-row (Phase 7 #3). Never edited by hand.
   lastDroveAt    DateTime?
 
-  delegations Delegation[]
-  claims      Claim[]
-  attachments VehicleAttachment[]
-  dailyKm     VehicleDailyKm[] // Phase 7 (#3) — daily km records (weryfikator)
+  delegations       Delegation[]
+  claims            Claim[]
+  attachments       VehicleAttachment[]
+  dailyKm           VehicleDailyKm[] // Phase 7 (#3) — daily km records (weryfikator)
+  guaranteeEpisodes GuaranteeIdleEpisode[] // Guarantee Watchdog — idle-episode journal
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -728,6 +774,11 @@ model Delegation {
   // the owning side is Claim.delegationId (@unique).
   claim Claim?
 
+  // Guarantee Watchdog — episodes this delegation resolved (a reported wyjazd
+  // closes an open idle episode). Back-relation of
+  // GuaranteeIdleEpisode.resolvedByDelegation.
+  resolvedGuaranteeEpisodes GuaranteeIdleEpisode[] @relation("GuaranteeEpisodeResolvedBy")
+
   reportedById String?   @db.Uuid
   reportedBy   User?     @relation("DelegationReporter", fields: [reportedById], references: [id])
   reportedAt   DateTime  @default(now())
@@ -786,6 +837,60 @@ model VehicleDailyKm {
   @@unique([vehicleId, date]) // one stamp per vehicle/day (upsert)
   @@index([date]) // weekly board
   @@map("vehicle_daily_km")
+}
+
+// ─── GUARANTEE IDLE EPISODE (Guarantee Watchdog — write layer) ──
+// Append-only journal of the "bad" guarantee cycles for a guaranteed vehicle
+// (Vehicle.agreement=true). A row is created on the FIRST escalation event of a
+// cycle (D-3 / D-1 / violation) and holds the fixed deadline, per-mail dedup
+// flags, and (once closed) the resolution outcome. Compliant cycles create NO
+// row — their trace already lives in the delegations. The live board/banner is
+// computed statelessly from delegations; this table exists to dedup reminder
+// emails and durable-fix violations (see план §2/§3).
+//
+// NO `deletedAt` / soft-delete on purpose: this is an append-only journal, and
+// the soft-delete Prisma extension only touches models listed in its explicit
+// SOFT_DELETE_MODELS allowlist (apps/api/.../soft-delete.extension.ts). A model
+// without `deletedAt` (and not in that list) is left completely untouched by
+// the extension, so no filtering is applied here.
+//
+// The "at most one OPEN episode per vehicle" invariant (state <> 'resolved') is
+// enforced by a partial unique index added by hand in the migration SQL —
+// Prisma cannot express a partial unique in the schema DSL.
+model GuaranteeIdleEpisode {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  vehicleId String  @db.Uuid // scope of the episode — the vehicle
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id])
+  // Denormalized carrier — copied from the vehicle so the opiekun/admin board
+  // can scope + group by carrier without a join through Vehicle.
+  carrierId String  @db.Uuid
+  carrier   Carrier @relation(fields: [carrierId], references: [id])
+
+  anchorAt     DateTime              @db.Date // cycle anchor (last return / agreementSince)
+  anchorSource GuaranteeAnchorSource
+  deadlineAt   DateTime              @db.Date // fixed at row creation (10 working days after anchor)
+  state        GuaranteeEpisodeState
+
+  // Per-mail dedup flags — set once the corresponding notification is enqueued.
+  reminder3SentAt DateTime? // D-3 reminder sent
+  reminder1SentAt DateTime? // D-1 reminder sent
+  violationSentAt DateTime? // "violation" section in the opiekun digest sent
+  violatedAt      DateTime? // stamped when the deadline is first crossed (state=violated)
+
+  // Resolution (set when the episode is closed).
+  resolvedAt             DateTime?
+  resolvedByDelegationId String?                 @db.Uuid
+  resolvedByDelegation   Delegation?             @relation("GuaranteeEpisodeResolvedBy", fields: [resolvedByDelegationId], references: [id])
+  resolvedDaysLeft       Int? // daysLeft at close; < 0 = closed late
+  resolvedReason         GuaranteeResolveReason?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([carrierId, state])
+  @@index([vehicleId, state])
+  @@map("guarantee_idle_episodes")
 }
 
 // ─── LIMITS (LIMITY KM) ─────────────────────────────────

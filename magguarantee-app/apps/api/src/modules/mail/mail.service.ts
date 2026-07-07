@@ -53,6 +53,14 @@ import {
   type DelegationReadyProps,
 } from './templates/delegation-ready';
 import {
+  GuaranteeReminderCarrierEmail,
+  type GuaranteeReminderCarrierProps,
+} from './templates/guarantee-reminder-carrier';
+import {
+  GuaranteeOpiekunDigestEmail,
+  type GuaranteeOpiekunDigestProps,
+} from './templates/guarantee-opiekun-digest';
+import {
   MAIL_PROVIDER_TOKEN,
   type MailProvider,
 } from './providers/mail-provider.interface';
@@ -794,6 +802,100 @@ export class MailService implements IMailService {
     return this._enqueueOr(
       { template: 'delegation-ready', email, props },
       () => this.sendDelegationReady(email, props),
+    );
+  }
+
+  // guarantee-reminder-carrier (#17 — watchdog D-3/D-1) ────
+  async sendGuaranteeReminderCarrier(
+    email: string,
+    props: GuaranteeReminderCarrierProps,
+  ): Promise<void> {
+    await this._send({
+      to: email,
+      subject: `Przypomnienie: zgłoś wyjazd — ${props.rows.length} pojazd(ów)`,
+      html: await render(GuaranteeReminderCarrierEmail(props)),
+      text: [
+        `Witaj ${props.carrierName},`,
+        '',
+        'Przypominamy o obowiązku zgłoszenia wyjazdu w ciągu ' +
+          `${props.deadlineWorkingDays} dni roboczych od ostatniego zjazdu.`,
+        'Pojazdy zbliżające się do terminu:',
+        '',
+        ...props.rows.map(
+          (r) =>
+            `  - ${r.plateNumber} — ${r.anchorLabel}` +
+            `${r.anchorSource === 'agreement' ? ' (objęcie gwarancją)' : ' (zjazd)'}` +
+            ` → termin ${r.deadlineLabel} · pozostało ${r.daysLeft} dni roboczych`,
+        ),
+        '',
+        `Zgłoś wyjazd: ${props.deeplink}`,
+      ].join('\n'),
+      template: 'guarantee-reminder-carrier',
+      logMsg: 'guarantee reminder (carrier) email sent',
+      logExtra: { vehicles: props.rows.length },
+    });
+  }
+
+  enqueueGuaranteeReminderCarrier(
+    email: string,
+    props: GuaranteeReminderCarrierProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'guarantee-reminder-carrier', email, props },
+      () => this.sendGuaranteeReminderCarrier(email, props),
+    );
+  }
+
+  // guarantee-opiekun-digest (#18 — watchdog opiekun digest) ─
+  async sendGuaranteeOpiekunDigest(
+    email: string,
+    props: GuaranteeOpiekunDigestProps,
+  ): Promise<void> {
+    const fmtGroup = (
+      g: { carrierName: string; rows: GuaranteeOpiekunDigestProps['dueSoon'][number]['rows'] },
+    ): string[] => [
+      `  ${g.carrierName}:`,
+      ...g.rows.map(
+        (r) =>
+          `    - ${r.plateNumber} — ${r.anchorLabel} → termin ${r.deadlineLabel}` +
+          ` (${r.daysLeft < 0 ? 'po terminie' : `${r.daysLeft} dni roboczych`})`,
+      ),
+    ];
+    await this._send({
+      to: email,
+      subject: `Gwarancje: przypomnienia i naruszenia — ${props.dateLabel}`,
+      html: await render(GuaranteeOpiekunDigestEmail(props)),
+      text: [
+        `Witaj ${props.opiekunName},`,
+        '',
+        `Podsumowanie na dzień ${props.dateLabel}.`,
+        '',
+        'Zbliżające się terminy:',
+        ...(props.dueSoon.length > 0
+          ? props.dueSoon.flatMap(fmtGroup)
+          : ['  Brak.']),
+        '',
+        'Naruszenia (zarejestrowane dziś):',
+        ...(props.violations.length > 0
+          ? props.violations.flatMap(fmtGroup)
+          : ['  Brak.']),
+      ].join('\n'),
+      template: 'guarantee-opiekun-digest',
+      logMsg: 'guarantee opiekun digest email sent',
+      logExtra: {
+        dueSoonCarriers: props.dueSoon.length,
+        violationCarriers: props.violations.length,
+      },
+    });
+  }
+
+  enqueueGuaranteeOpiekunDigest(
+    email: string,
+    props: GuaranteeOpiekunDigestProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'guarantee-opiekun-digest', email, props },
+      () => this.sendGuaranteeOpiekunDigest(email, props),
     );
   }
 

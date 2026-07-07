@@ -34,6 +34,7 @@ import type { Env } from '../../config/env.schema';
 import { ClaimsService } from '../claims/claims.service';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { CarrierReadinessService } from '../carriers/carrier-readiness.service';
+import { GuaranteeWatchdogService } from '../guarantee-watchdog/guarantee-watchdog.service';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CarriersRepository } from '../carriers/carriers.repository';
@@ -102,6 +103,11 @@ export class DelegationsService {
     @Optional() private readonly mailService?: MailService,
     @Optional() private readonly prisma?: PrismaService,
     @Optional() private readonly configService?: ConfigService<Env, true>,
+    // Guarantee Watchdog resolve-hook — closes the vehicle's open idle episode
+    // when a wyjazd is reported (instant banner-clear). `@Optional()` so the
+    // positional service-test fakes (which omit trailing args) keep compiling;
+    // the hook no-ops when the service is absent.
+    @Optional() private readonly guaranteeWatchdog?: GuaranteeWatchdogService,
   ) {}
 
   // ── Submit ──────────────────────────────────────────────
@@ -174,6 +180,23 @@ export class DelegationsService {
     // New-wyjazd email — carrier (confirmation) + opiekun (heads-up).
     // Fire-and-log, off the request path; never breaks add().
     void this._notifyWyjazd('announced', row);
+
+    // Guarantee Watchdog resolve-hook — a reported wyjazd closes the vehicle's
+    // open idle episode (instant banner-clear, not waiting for the cron). The
+    // hook itself catches everything; the belt-and-suspenders try/catch mirrors
+    // the chat notifier so a hook failure NEVER breaks add(). No-op when the
+    // service isn't wired (unit tests).
+    if (this.guaranteeWatchdog) {
+      void this.guaranteeWatchdog
+        .onDelegationCreated(row.vehicleId, row.id)
+        .catch((err) => {
+          this.logger.warn({
+            msg: 'guarantee watchdog resolve-hook enqueue failed (non-fatal)',
+            delegationId: row.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+    }
 
     return this.toDto(row);
   }
