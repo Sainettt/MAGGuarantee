@@ -770,13 +770,8 @@
       "allClear": "Wszystkie pojazdy w porządku — nic nie wymaga zgłoszenia",
       "reportCta": "Zgłoś wyjazd",
       "deadline": "termin: {date}",
+      "onRoad": "w trasie",
       "group": {
-        "violated": "Po terminie",
-        "dueSoon": "Zbliża się termin",
-        "watched": "Pod obserwacją",
-        "okActive": "W trasie / wyjazd zgłoszony"
-      },
-      "chip": {
         "violated": "Po terminie",
         "dueSoon": "Zbliża się termin",
         "watched": "Pod obserwacją",

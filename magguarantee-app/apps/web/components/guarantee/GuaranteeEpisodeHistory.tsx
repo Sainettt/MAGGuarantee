@@ -34,8 +34,13 @@ interface GuaranteeEpisodeHistoryProps {
   onLoadMore?: () => void;
   /** Opiekun drill-down only: show the fired-reminder micro-line (§12.7). */
   showReminders?: boolean;
-  /** Show the per-row plate/side (combined carrier feed → true). */
-  showVehicle?: boolean;
+  /**
+   * Opiekun drill-down only (§12.7): also render the internal `sideNumber` and
+   * the carrier name alongside the plate. Defaults **off** so the internal
+   * designation can never leak onto the carrier tab by omission — the carrier
+   * feed always shows `plateNumber` only.
+   */
+  showSideNumber?: boolean;
   className?: string;
 }
 
@@ -53,7 +58,7 @@ export function GuaranteeEpisodeHistory({
   hasMore = false,
   onLoadMore,
   showReminders = false,
-  showVehicle = true,
+  showSideNumber = false,
   className,
 }: GuaranteeEpisodeHistoryProps) {
   const t = useTranslations('guarantee.episodes');
@@ -93,16 +98,21 @@ export function GuaranteeEpisodeHistory({
             key={row.id}
             className="rounded-md border border-border bg-card px-3 py-2"
           >
-            {/* Header — identity (optional) + state pill. */}
+            {/* Header — identity + state pill. `plateNumber` always (mono);
+                the internal `sideNumber` + carrier name only on the opiekun
+                drill-down (`showSideNumber`), never on the carrier tab. */}
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              {showVehicle ? (
-                <span className="font-mono font-semibold text-text">
-                  {row.plateNumber ?? '—'}
-                  {row.sideNumber ? (
-                    <span className="ml-1 font-sans font-normal text-text-sub">
-                      · {row.sideNumber}
-                    </span>
-                  ) : null}
+              <span className="font-mono font-semibold text-text">
+                {row.plateNumber ?? '—'}
+                {showSideNumber && row.sideNumber ? (
+                  <span className="ml-1 font-sans font-normal text-text-sub">
+                    · {row.sideNumber}
+                  </span>
+                ) : null}
+              </span>
+              {showSideNumber && row.carrierName ? (
+                <span className="text-xs text-text-sub">
+                  {row.carrierName}
                 </span>
               ) : null}
               <span className="ml-auto">

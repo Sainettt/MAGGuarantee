@@ -1,15 +1,18 @@
 'use client';
 
-// Phase 12 — carrier «Porozumienie» tab (docs/14 §12.3).
+// Phase 12 — carrier «Porozumienie» tab (docs/14 §12.3, status rows REWORKED
+// 2026-07-07).
 //
 // The carrier's home for the guarantee obligation. Three stacked blocks:
-//   A. per-vehicle status cards — grouped Po terminie → Zbliża się → Pod
-//      obserwacją → W trasie, sorted `compareByUrgency`; a calm all-clear line
-//      replaces the owed groups when nothing is owed (silence is good).
+//   A. per-vehicle status ROWS — one full-width single column of grouped
+//      <Card> sections (Po terminie → Zbliża się → Pod obserwacją → W trasie),
+//      each header naming the state (tone + label + count), rows sorted
+//      `compareByUrgency`. NO card grid, NO per-row state chip. A calm all-clear
+//      line replaces the owed groups when nothing is owed (silence is good).
 //   B. a static, info-toned explainer of the porozumienie rules.
 //   C. the durable episode history (one combined feed, plate per row).
 //
-// Data: `useMyGuaranteeCompliance` (cards — shares the strip/badge cache) +
+// Data: `useMyGuaranteeCompliance` (rows — shares the strip/badge cache) +
 // `useMyGuaranteeEpisodes` (history, cursor-paged). Both live under
 // `GUARANTEE_KEY`, so reporting a wyjazd refreshes every block at once.
 
@@ -27,7 +30,7 @@ import { useTranslations } from 'next-intl';
 import type { GuaranteeComplianceItem } from '@magguarantee/shared';
 
 import { GuaranteeEpisodeHistory } from '@/components/guarantee/GuaranteeEpisodeHistory';
-import { GuaranteeStatusCard } from '@/components/guarantee/GuaranteeStatusCard';
+import { GuaranteeStatusRow } from '@/components/guarantee/GuaranteeStatusRow';
 import { Badge } from '@/components/ui/Badge';
 import { Skeleton } from '@/components/ui/Skeleton';
 import {
@@ -48,6 +51,9 @@ const GROUP_ORDER: readonly GuaranteeCardGroup[] = [
   'okActive',
 ];
 
+// Group-section header meta — the ONLY place the state is named (§12.3.2). The
+// count `<Badge>` reuses the board's pill treatment (border + tinted text on a
+// transparent fill); zero new tokens.
 const GROUP_META: Record<
   GuaranteeCardGroup,
   { icon: LucideIcon; text: string; pill: string }
@@ -97,19 +103,15 @@ export default function CarrierPorozumieniePage() {
         {t('title')}
       </h1>
 
-      {/* ── Block A — per-vehicle status cards ── */}
+      {/* ── Block A — per-vehicle status rows (full-width, grouped) ── */}
       {complianceQ.isLoading ? (
         <div className="space-y-4">
-          <Skeleton className="h-4 w-40" />
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {[0, 1, 2].map((i) => (
-              <Skeleton key={i} className="h-32 w-full rounded-xl" />
-            ))}
-          </div>
+          <GroupSkeleton />
+          <GroupSkeleton />
         </div>
       ) : (
-        <div className="space-y-6">
-          {/* Calm all-clear line when neither owed group has cards. */}
+        <div className="space-y-4">
+          {/* Calm all-clear line when neither owed group has rows. */}
           {nothingOwed ? (
             <div className="rounded-xl border border-border bg-card shadow-card px-4 py-6">
               <p className="flex items-center justify-center gap-2 text-sm text-text-sub">
@@ -125,33 +127,38 @@ export default function CarrierPorozumieniePage() {
             const meta = GROUP_META[g];
             const Icon = meta.icon;
             return (
-              <section key={g}>
-                <header className="mb-3 flex items-center gap-2">
-                  <Icon size={14} className={meta.text} aria-hidden />
-                  <h2
+              <section
+                key={g}
+                className="overflow-hidden rounded-xl border border-border bg-card shadow-card"
+              >
+                {/* Group header — the ONLY place the state is named. */}
+                <header className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+                  <Icon size={16} className={cn('shrink-0', meta.text)} aria-hidden />
+                  <span
                     className={cn(
-                      'flex-1 text-sm font-bold uppercase tracking-wider',
+                      'text-xs font-bold uppercase tracking-wide',
                       meta.text,
                     )}
                   >
                     {t(`group.${g}`)}
-                  </h2>
+                  </span>
                   <Badge
                     variant="muted"
-                    className={cn('border bg-transparent', meta.pill)}
+                    className={cn('ml-auto border bg-transparent', meta.pill)}
                   >
                     {items.length}
                   </Badge>
                 </header>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {/* Rows — divided, full-width, one per vehicle. */}
+                <ul className="divide-y divide-border">
                   {items.map((item) => (
-                    <GuaranteeStatusCard
+                    <GuaranteeStatusRow
                       key={item.vehicleId}
                       item={item}
                       group={g}
                     />
                   ))}
-                </div>
+                </ul>
               </section>
             );
           })}
@@ -187,9 +194,26 @@ export default function CarrierPorozumieniePage() {
           isFetchingMore={episodesQ.isFetchingNextPage}
           hasMore={Boolean(episodesQ.hasNextPage)}
           onLoadMore={() => episodesQ.fetchNextPage()}
-          showVehicle
         />
       </div>
+    </section>
+  );
+}
+
+/** Per-group loading placeholder — mirrors the section shape, never blocks. */
+function GroupSkeleton() {
+  return (
+    <section className="overflow-hidden rounded-xl border border-border bg-card shadow-card">
+      <header className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+        <Skeleton className="h-4 w-40" />
+      </header>
+      <ul className="divide-y divide-border">
+        {[0, 1].map((i) => (
+          <li key={i} className="px-4 py-3">
+            <Skeleton className="h-10 w-full" />
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

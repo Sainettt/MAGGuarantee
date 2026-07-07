@@ -770,13 +770,8 @@
       "allClear": "All vehicles in order — nothing to report",
       "reportCta": "Report wyjazd",
       "deadline": "deadline: {date}",
+      "onRoad": "on the road",
       "group": {
-        "violated": "Overdue",
-        "dueSoon": "Due soon",
-        "watched": "Watched",
-        "okActive": "On the road / reported"
-      },
-      "chip": {
         "violated": "Overdue",
         "dueSoon": "Due soon",
         "watched": "Watched",
