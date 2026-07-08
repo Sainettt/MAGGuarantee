@@ -10,4 +10,5 @@ export * from './claim-submission-rules';
 export * from './polish-calendar';
 export * from './business-date';
 export * from './auth-threshold';
+export * from './maksim-confirmation';
 export * from './guarantee-watchdog';

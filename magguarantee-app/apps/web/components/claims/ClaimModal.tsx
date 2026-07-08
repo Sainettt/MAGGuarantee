@@ -28,15 +28,27 @@
 // the layout order change.
 
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
   BadgeCheck,
+  Download,
   Loader2,
   Lock,
   Pencil,
+  ShieldAlert,
+  ShieldCheck,
+  Truck,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   Controller,
   useForm,
@@ -73,19 +85,27 @@ import {
 import { FormDescription, FormField, FormGrid } from '@/components/forms/Form';
 import { Button } from '@/components/ui/Button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/Dialog';
+import {
+  FileUpload,
+  type FileUploadItem,
+  type FileUploadLabels,
+} from '@/components/ui/FileUpload';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { Textarea } from '@/components/ui/Textarea';
+import { downloadAuthorizationConfirmation } from '@/lib/api/claims';
 import { ApiResponseError } from '@/lib/api/client';
 import { formatDateFull, formatEur } from '@/lib/format/numbers';
 import {
+  CLAIMS_KEY,
   useClaim,
   useClaimPreviewExisting,
   useRequestAuthorization,
   useSetAuthorizationAmount,
   useUpdateClaim,
+  useUploadAuthorizationConfirmation,
   useVerifyClaim,
 } from '@/lib/hooks/useClaims';
 import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
@@ -244,16 +264,31 @@ function cleanUpdatePayload(values: FormValues): UpdateClaimDto {
  * Mirrors `cleanUpdatePayload`'s correction block exactly — omit empty / NaN so
  * the schema's `.strict()` doesn't choke. An all-empty result is the legal
  * "confirm as-is" body (`{}`).
+ *
+ * `dateStart` / `dateEnd` are always prefilled by `getDefaults` (from
+ * `claim.date{Start,End}.slice(0, 10)`), so a bare emptiness check would send
+ * them on every verify and make the API treat each confirm as a period edit.
+ * They are therefore included only when the form value DIFFERS from that same
+ * claim baseline — genuine date edits are still sent, unchanged dates omitted.
  */
-function buildVerifyPayload(values: FormValues): VerifyClaimDto {
+function buildVerifyPayload(
+  values: FormValues,
+  claim: ClaimDto,
+): VerifyClaimDto {
   const out: Record<string, unknown> = {};
   const include = (k: string, v: unknown) => {
     if (v === '' || v === undefined || v === null) return;
     if (typeof v === 'number' && !Number.isFinite(v)) return;
     out[k] = v;
   };
-  include('dateStart', values.dateStart);
-  include('dateEnd', values.dateEnd);
+  // Same baseline `getDefaults` prefills the form with — compare against it so
+  // only a real change gets sent.
+  if (values.dateStart !== claim.dateStart.slice(0, 10)) {
+    include('dateStart', values.dateStart);
+  }
+  if (values.dateEnd !== claim.dateEnd.slice(0, 10)) {
+    include('dateEnd', values.dateEnd);
+  }
   include('timeFrom', values.timeFrom);
   include('timeTo', values.timeTo);
   include('mileage', values.mileage);
@@ -270,6 +305,20 @@ const CORRECTION_FIELDS = [
   'mileage',
   'hoursAdjusted',
 ] as const;
+
+/**
+ * Reads the machine-readable error code from an `ApiResponseError`'s RFC 7807
+ * body (`data.extensions.code`) — the same access path the carrier flows use
+ * (`carrier/delegations/new`, `carrier/claims/new`). Returns `undefined` when
+ * the envelope carries no `extensions.code`.
+ */
+function problemCode(err: ApiResponseError): string | undefined {
+  const extensions = (err.data as { extensions?: unknown } | undefined)
+    ?.extensions;
+  if (!extensions || typeof extensions !== 'object') return undefined;
+  const code = (extensions as { code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
+}
 
 // ── Public component ────────────────────────────────────────────────
 // Keeps the <Dialog> mounted across the whole modal lifetime so the
@@ -346,6 +395,8 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
   const tUnified = useTranslations('employee.claims.modal.unified');
   const tEdit = useTranslations('employee.claims.modal.edit');
   const tCommon = useTranslations('common');
+
+  const qc = useQueryClient();
 
   const targets = useMemo(() => decisionTargetsFor(claim.status), [claim.status]);
 
@@ -525,12 +576,76 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
     }
   }, [postAuthorization, claim.amountMaximum, form]);
 
+  const tMaksim = useTranslations('employee.claims.modal.maksimGate');
+  const tInTransit = useTranslations('employee.claims.modal.inTransitGate');
+
+  // ── Linked-outing in-transit gate (in-transit-verifier-gate feature) ──
+  // When the wniosek is filed against an outing that is still `w_trasie`, the
+  // pracownik may VIEW the claim but EVERY mutating action is hard-blocked:
+  // verify («Zapisz weryfikację»), request-authorization, AND the accept/reject
+  // decision. The server independently enforces this with 422
+  // `CLAIM_DELEGATION_IN_TRANSIT`; this derives the SAME gate from the DTO's
+  // embedded `delegationStatus` so the UI disables the actions and shows a
+  // read-only banner up front. A `'zjechal'` outing (or no linked outing) passes
+  // through unchanged. Carrier submit is NOT affected — that's a separate,
+  // intended soft-warning path.
+  const inTransitGated =
+    claim.delegationId !== null && claim.delegationStatus === 'w_trasie';
+
+  // ── Maksim authorization gate (maksim-authorization-gate feature) ──
+  // Derived DIRECTLY from the DTO — never a client-inferred cleared state.
+  // Active ⇔ armed AND not cleared. When active the accept/reject decision is
+  // HARD-BLOCKED until the verifier uploads Maksim's confirmation screenshot,
+  // which flips `maksimGateClearedAt` on the refetched claim. Drives the gate
+  // banner, the `decisionGated` disable, and the gate-hint copy. The submit
+  // error handler does NOT read this (the stale-state 422 keys on the server's
+  // machine code instead — see `updateM.onError`).
+  const maksimGateActive =
+    claim.maksimGateRequired && claim.maksimGateClearedAt == null;
+
   const updateM = useUpdateClaim({
     onSuccess: () => {
       toast.success(tEdit('savedToast'));
       onClose();
     },
     onError: (err) => {
+      // Defensive: the server independently HARD-BLOCKS accept/reject while the
+      // Maksim gate is armed (422 `extensions.code === CLAIM_AUTHORIZATION_
+      // REQUIRED`). The TARGET scenario is a STALE DTO that says "not gated"
+      // (buttons enabled locally, `maksimGateActive === false`) → the verifier
+      // submits → the server 422s. So we CANNOT key on `maksimGateActive` (it's
+      // false in exactly this case); we key on the machine code lifted from the
+      // RFC 7807 `extensions` bag — the same `err.data.extensions.code` access
+      // the carrier flows use. Then we invalidate the claim detail so the gate
+      // re-derives from the FRESH DTO (which flips the buttons back to gated) and
+      // surface the localized copy rather than the raw server detail.
+      if (
+        err instanceof ApiResponseError &&
+        problemCode(err) === 'CLAIM_AUTHORIZATION_REQUIRED'
+      ) {
+        qc.invalidateQueries({
+          queryKey: [...CLAIMS_KEY, 'detail', claim.nrZgl],
+        });
+        toast.error(tMaksim('decisionBlockedToast'));
+        return;
+      }
+      // Stale-modal safety net for the in-transit gate: the outing transitioned
+      // to `w_trasie` after the modal opened (DTO still says otherwise, buttons
+      // enabled locally) → the server 422s with `CLAIM_DELEGATION_IN_TRANSIT`.
+      // Same access path as the Maksim gate: key on the machine code from the
+      // RFC 7807 `extensions` bag, refetch the claim detail so `inTransitGated`
+      // re-derives from the FRESH DTO (disabling the actions + showing the
+      // banner), and surface the localized copy.
+      if (
+        err instanceof ApiResponseError &&
+        problemCode(err) === 'CLAIM_DELEGATION_IN_TRANSIT'
+      ) {
+        qc.invalidateQueries({
+          queryKey: [...CLAIMS_KEY, 'detail', claim.nrZgl],
+        });
+        toast.error(tInTransit('blockedToast'));
+        return;
+      }
       const msg =
         err instanceof ApiResponseError && err.status >= 400 && err.status < 500
           ? err.message
@@ -557,11 +672,27 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
   >;
   const correctionsDirty = CORRECTION_FIELDS.some((f) => dirtyFields[f]);
   // Gate is live only for NA_WERYFIKACJI; other statuses behave as before.
-  const decisionGated =
-    needsVerification && (!isVerified || correctionsDirty);
-  const gateHint = correctionsDirty
-    ? tEdit('verifyDirtyHint')
-    : tEdit('verifyRequiredHint');
+  // The in-transit gate is ADDITIVE: it blocks the verify + request-
+  // authorization actions (both keyed off `verifyGated`) regardless of the
+  // verification-checkpoint state, so a `w_trasie` outing keeps them disabled
+  // even once the checkpoint would otherwise clear.
+  const verifyGated =
+    inTransitGated || (needsVerification && (!isVerified || correctionsDirty));
+  const gateHint = inTransitGated
+    ? tInTransit('actionsBlockedHint')
+    : correctionsDirty
+      ? tEdit('verifyDirtyHint')
+      : tEdit('verifyRequiredHint');
+
+  // The decyzja is blocked while ANY gate is armed: the verifier checkpoint
+  // (verifyGated, which now also folds in the linked-outing in-transit gate) OR
+  // the Maksim over-threshold gate (maksimGateActive, derived above from the
+  // DTO). The Maksim gate only meaningfully arms once the claim is verified (the
+  // api arms it on the verification save), so all gates compose cleanly — each a
+  // HARD gate ADDITIVE to the checkpoint. `inTransitGated` is spelled out here
+  // too (belt-and-braces) so the accept/reject buttons stay disabled while the
+  // outing is `w_trasie` even if the `verifyGated` composition ever changes.
+  const decisionGated = inTransitGated || verifyGated || maksimGateActive;
 
   const verifyM = useVerifyClaim(claim.nrZgl, {
     onSuccess: () => {
@@ -574,6 +705,20 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
       form.reset(form.getValues());
     },
     onError: (err) => {
+      // Stale-modal safety net (mirrors updateM.onError): the outing flipped to
+      // `w_trasie` after open → the server 422s the verify with
+      // `CLAIM_DELEGATION_IN_TRANSIT`. Refetch the claim detail so
+      // `inTransitGated` re-derives and disables the actions + shows the banner.
+      if (
+        err instanceof ApiResponseError &&
+        problemCode(err) === 'CLAIM_DELEGATION_IN_TRANSIT'
+      ) {
+        qc.invalidateQueries({
+          queryKey: [...CLAIMS_KEY, 'detail', claim.nrZgl],
+        });
+        toast.error(tInTransit('blockedToast'));
+        return;
+      }
       const msg =
         err instanceof ApiResponseError && err.status >= 400 && err.status < 500
           ? err.message
@@ -583,7 +728,7 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
   });
 
   const handleVerifyClick = () => {
-    verifyM.mutate(buildVerifyPayload(form.getValues()));
+    verifyM.mutate(buildVerifyPayload(form.getValues(), claim));
   };
 
   // ── Board-sum hint (verifier-checkpoint feature) ──
@@ -702,6 +847,14 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
             auto-recalc badge. Sits at the top of the §6.5.3 fact block. */}
         <LinkedDelegationRow claim={claim} />
 
+        {/* In-transit gate banner — read-only explainer shown whenever the
+            linked outing is still `w_trasie`. Rendered in BOTH view and edit
+            mode (the actions it explains — verify / request-authorization /
+            decision — are disabled in both). Sits at the top of the actions
+            region so the reason every mutating control is disabled is adjacent
+            to them. */}
+        {inTransitGated && <InTransitGateBlock />}
+
         {/* ① Fact pairs */}
         <FactPairs
           claim={claim}
@@ -727,6 +880,16 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
           showExceedsHint={showExceedsHint}
           tUnified={tUnified}
         />
+
+        {/* ②b Maksim authorization gate — POST-verification hard block. The
+            banner (armed) or the confirmed affordance (cleared) sits directly
+            above Decyzja so the reason the accept/reject buttons are disabled is
+            adjacent to them. Rendered in edit mode only (view mode has no
+            decision controls to gate) and only once the gate is armed/cleared. */}
+        {isEdit &&
+          (claim.maksimGateRequired || claim.maksimGateClearedAt != null) && (
+            <MaksimGateBlock claim={claim} active={maksimGateActive} />
+          )}
 
         {/* ③ Decyzja — at the very bottom */}
         <section className="space-y-4">
@@ -756,14 +919,19 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
                 tEdit={tEdit}
                 tStatus={tStatus}
               />
-              {/* Verifier-checkpoint gate hint — the verifier must save the
-                  «Zapisz weryfikację» checkpoint (and re-save after any further
-                  correction) before a decision can be taken. */}
-              {decisionGated && (
+              {/* Gate hint under the disabled decyzja select. The verifier-
+                  checkpoint gate takes precedence (it's the first thing to
+                  clear); once verified, the Maksim over-threshold gate is what
+                  keeps the decision blocked. */}
+              {verifyGated ? (
                 <p className="text-xs text-text-sub" role="status">
                   {gateHint}
                 </p>
-              )}
+              ) : maksimGateActive ? (
+                <p className="text-xs text-text-sub" role="status">
+                  {tMaksim('decisionBlockedHint')}
+                </p>
+              ) : null}
               {/* Acceptance gate hint — shown while recalc reports the
                   guarantee was met (no payout due ⇒ accept removed). */}
               {metGuarantee && (
@@ -784,7 +952,11 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
             hasHistory={hasHistory}
             hasAuthorization={hasAuthorization}
             prog={prog}
-            authGated={decisionGated}
+            // The request-authorization (OCZEKUJE_NA_AUTORYZACJE) path is gated
+            // ONLY by the verifier checkpoint — the api does NOT re-apply the
+            // Maksim over-threshold gate there (that lives on the decision
+            // edge). So pass `verifyGated`, not the combined `decisionGated`.
+            authGated={verifyGated}
             authGateHint={gateHint}
             onClose={onClose}
           />
@@ -812,7 +984,11 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
                 variant="outline"
                 size="sm"
                 onClick={handleVerifyClick}
-                disabled={verifyM.isPending || recalcState === 'loading'}
+                disabled={
+                  verifyM.isPending ||
+                  recalcState === 'loading' ||
+                  inTransitGated
+                }
               >
                 {verifyM.isPending ? (
                   <>
@@ -1416,6 +1592,261 @@ function DoplataBlock({
           <BreakdownTable breakdown={claim.breakdown} />
         </div>
       )}
+    </section>
+  );
+}
+
+// ── ②b Maksim authorization gate block ──────────────────────────────
+//
+// POST-verification hard gate (maksim-authorization-gate feature). Two visual
+// states, both driven DIRECTLY off the DTO (never a client-inferred cleared
+// state):
+//   - active  (`maksimGateRequired && maksimGateClearedAt == null`): a danger
+//     banner + the confirmation-screenshot uploader. The decision buttons are
+//     disabled elsewhere (`decisionGated`); this block explains why and offers
+//     the unblock affordance.
+//   - cleared (`maksimGateClearedAt != null`): a confirmed affordance + a link
+//     to open the uploaded confirmation via the auth'd download proxy.
+//
+// The uploader reuses the shared <FileUpload> primitive (single-file mode) — the
+// same component the carrier/vehicle attachment flows use. On upload success the
+// hook invalidates the claim detail so `maksimGateClearedAt` flips and the
+// decision re-enables; we never guess the cleared state locally.
+
+// ── ②a Linked-outing in-transit gate block ─────────────────────────
+//
+// Read-only explainer (in-transit-verifier-gate feature). Rendered whenever the
+// wniosek's linked outing is still `w_trasie` (`inTransitGated`). Purely
+// informational — it carries NO action affordance; its whole job is to explain
+// why the verify / request-authorization / accept / reject controls are all
+// disabled. Mirrors MaksimGateBlock's ACTIVE (danger) visual language: same
+// rounded danger surface, same leading icon + title/body layout — just no
+// uploader. When the outing later flips to `zjechal`, `inTransitGated` goes
+// false, this block unmounts, and the actions re-enable.
+
+function InTransitGateBlock() {
+  const t = useTranslations('employee.claims.modal.inTransitGate');
+  return (
+    <section
+      role="status"
+      className="rounded-lg border border-danger/40 bg-danger-bg p-4 dark:bg-danger/10"
+    >
+      <div className="flex items-start gap-3">
+        <Truck size={20} className="mt-0.5 flex-none text-danger" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-bold text-danger">{t('bannerTitle')}</h3>
+          <p className="mt-1 text-sm text-text">{t('bannerBody')}</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function MaksimGateBlock({
+  claim,
+  active,
+}: {
+  claim: ClaimDto;
+  /** `maksimGateRequired && maksimGateClearedAt == null` — decision blocked. */
+  active: boolean;
+}) {
+  const t = useTranslations('employee.claims.modal.maksimGate');
+  const tFile = useTranslations('fileUpload');
+
+  // The confirmation attachment (if any) — filter the AUTORYZACJA_MAKSIMA
+  // category out of the existing attachments[] array.
+  const confirmation = useMemo(
+    () => claim.attachments.find((a) => a.category === 'AUTORYZACJA_MAKSIMA'),
+    [claim.attachments],
+  );
+
+  // ── Upload — single freshly-picked file staged in <FileUpload>, then POSTed
+  //    to the confirmation endpoint. On success the mutation invalidates the
+  //    claim detail so the fresh DTO (with maksimGateClearedAt set) flows in and
+  //    this block swaps to the cleared state.
+  const [picked, setPicked] = useState<FileUploadItem[]>([]);
+  const uploadM = useUploadAuthorizationConfirmation(claim.nrZgl, {
+    onSuccess: () => {
+      toast.success(t('uploadedToast'));
+      setPicked([]);
+    },
+    onError: (err) => {
+      const msg =
+        err instanceof ApiResponseError && err.status >= 400 && err.status < 500
+          ? err.message
+          : t('uploadErrorToast');
+      toast.error(msg);
+    },
+  });
+
+  const pickedFile = useMemo(() => {
+    const item = picked.find(
+      (it): it is Extract<FileUploadItem, { kind: 'new' }> =>
+        it.kind === 'new' && it.error === undefined,
+    );
+    return item?.file ?? null;
+  }, [picked]);
+
+  const handleUpload = () => {
+    if (!pickedFile || uploadM.isPending) return;
+    uploadM.mutate(pickedFile);
+  };
+
+  // ── Download — fetch authenticated bytes, open via an object-URL anchor. ──
+  const [downloading, setDownloading] = useState(false);
+  const handleDownload = useCallback(async () => {
+    if (!confirmation) return;
+    setDownloading(true);
+    try {
+      const blob = await downloadAuthorizationConfirmation(
+        claim.nrZgl,
+        confirmation.id,
+      );
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error(t('downloadError'));
+    } finally {
+      setDownloading(false);
+    }
+  }, [confirmation, claim.nrZgl, t]);
+
+  const fileLabels = useMemo<FileUploadLabels>(
+    () => ({
+      prompt: tFile('prompt'),
+      promptCompact: tFile('promptCompact'),
+      constraints: t('uploadHint'),
+      errTooLarge: tFile('errTooLarge'),
+      errWrongType: tFile('errWrongType'),
+      errUploadFailed: tFile('errUploadFailed'),
+      retry: tFile('retry'),
+      dropzoneAria: t('uploadHeading'),
+      removeAria: (name: string) => tFile('removeAria', { name }),
+    }),
+    [tFile, t],
+  );
+
+  // ── Cleared state — confirmed affordance + open-confirmation link. ──
+  if (!active) {
+    return (
+      <section
+        className="rounded-lg border border-success/40 bg-success/10 p-4 dark:bg-success/10"
+        aria-live="polite"
+      >
+        <div className="flex items-start gap-3">
+          <ShieldCheck
+            size={20}
+            className="mt-0.5 flex-none text-success-dark dark:text-success"
+            aria-hidden
+          />
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm font-bold text-success-dark dark:text-success">
+              {t('clearedTitle')}
+            </h3>
+            {claim.maksimGateClearedAt && (
+              <p className="mt-0.5 text-xs text-text-sub">
+                {t('clearedAt', {
+                  date: formatDateFull(claim.maksimGateClearedAt),
+                })}
+              </p>
+            )}
+            {confirmation && (
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <span className="text-xs font-medium text-text-sub">
+                  {t('confirmationFile')}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={downloading}
+                  aria-busy={downloading}
+                  onClick={() => void handleDownload()}
+                >
+                  {downloading ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" aria-hidden />
+                      {t('downloading')}
+                    </>
+                  ) : (
+                    <>
+                      <Download size={14} aria-hidden />
+                      {t('openConfirmation')}
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  // ── Active state — danger banner + confirmation uploader. ──
+  return (
+    <section
+      role="alert"
+      className="space-y-4 rounded-lg border border-danger/40 bg-danger-bg p-4 dark:bg-danger/10"
+    >
+      <div className="flex items-start gap-3">
+        <ShieldAlert
+          size={20}
+          className="mt-0.5 flex-none text-danger"
+          aria-hidden
+        />
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-bold text-danger">{t('bannerTitle')}</h3>
+          <p className="mt-1 text-sm text-text">{t('bannerBody')}</p>
+          <p className="mt-1 text-xs text-text-sub">
+            {claim.maksimGateNotifiedAt
+              ? t('notifiedAt', {
+                  date: formatDateFull(claim.maksimGateNotifiedAt),
+                })
+              : t('notifiedPending')}
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <p className="text-xs font-bold uppercase tracking-wider text-text-sub">
+          {t('uploadHeading')}
+        </p>
+        <FileUpload
+          value={picked}
+          onChange={setPicked}
+          labels={fileLabels}
+          multiple={false}
+          disabled={uploadM.isPending}
+        />
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            size="sm"
+            onClick={handleUpload}
+            disabled={!pickedFile || uploadM.isPending}
+          >
+            {uploadM.isPending ? (
+              <>
+                <Loader2 size={14} className="animate-spin" aria-hidden />
+                {t('uploading')}
+              </>
+            ) : (
+              <>
+                <ShieldCheck size={14} aria-hidden />
+                {t('uploadHeading')}
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
     </section>
   );
 }

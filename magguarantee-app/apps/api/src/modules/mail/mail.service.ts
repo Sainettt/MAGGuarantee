@@ -14,6 +14,10 @@ import {
   type AuthorizationRequestProps,
 } from './templates/authorization-request';
 import {
+  MaksimConfirmationRequestEmail,
+  type MaksimConfirmationRequestProps,
+} from './templates/maksim-confirmation-request';
+import {
   VerificationDigestEmail,
   workingDaysLabel,
   type VerificationDigestProps,
@@ -112,6 +116,16 @@ export interface IMailService {
   sendAuthorizationRequest(
     email: string,
     props: AuthorizationRequestProps,
+  ): Promise<void>;
+  /**
+   * Maksim over-threshold confirmation-request email (ADDITIVE gate on
+   * `NA_WERYFIKACJI`). Separate from `sendAuthorizationRequest` (the manual
+   * kwota-Maksima flow). Auto-fired once per verification cycle from
+   * `ClaimsService.verifyClaim` when the dopłata exceeds the threshold.
+   */
+  sendMaksimConfirmationRequest(
+    email: string,
+    props: MaksimConfirmationRequestProps,
   ): Promise<void>;
   /**
    * Verification-SLA daily digest (docs/21 §5). One email per recipient
@@ -327,6 +341,44 @@ export class MailService implements IMailService {
       });
       throw err;
     }
+  }
+
+  /**
+   * Maksim over-threshold confirmation-request email (ADDITIVE gate). Renders
+   * the dedicated `MaksimConfirmationRequestEmail` template to HTML + a
+   * plain-text fallback and ships both via the provider. Threads into the same
+   * `wniosek-<nrZgl>` Gmail conversation as the other claim emails (no-op under
+   * Mailhog). Subject is distinct from the manual authorization-request so
+   * Maksim's inbox filters can tell them apart.
+   */
+  async sendMaksimConfirmationRequest(
+    email: string,
+    props: MaksimConfirmationRequestProps,
+  ): Promise<void> {
+    const subject = `Potwierdzenie autoryzacji: ${props.nrZgl}`;
+    const html = await render(MaksimConfirmationRequestEmail(props));
+    const text = this.buildMaksimConfirmationRequestText(props);
+    await this._send({
+      to: email,
+      subject,
+      html,
+      text,
+      template: 'maksim-confirmation-request',
+      data: { nrZgl: props.nrZgl },
+      threadKey: `wniosek-${props.nrZgl}`,
+      logMsg: 'maksim confirmation request sent',
+      logExtra: { nrZgl: props.nrZgl },
+    });
+  }
+
+  enqueueMaksimConfirmationRequest(
+    email: string,
+    props: MaksimConfirmationRequestProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'maksim-confirmation-request', email, props },
+      () => this.sendMaksimConfirmationRequest(email, props),
+    );
   }
 
   /**
@@ -990,6 +1042,49 @@ export class MailService implements IMailService {
     if (props.comment) {
       lines.push('', `Komentarz weryfikatora:`, props.comment);
     }
+    if (props.korekty && props.korekty.length > 0) {
+      lines.push(
+        '',
+        'Korekty weryfikatora:',
+        'Weryfikator poprawił dane wprowadzone przez przewoźnika:',
+      );
+      for (const k of props.korekty) {
+        lines.push(`  ${k.label}: ${k.from} → ${k.to}`);
+      }
+    }
+    lines.push('', `Otwórz w MAGGuarantee: ${props.deeplink}`);
+    return lines.join('\n');
+  }
+
+  /**
+   * Plain-text fallback for the Maksim confirmation-request email. Mirrors the
+   * HTML template rows so non-HTML clients see the same data.
+   */
+  private buildMaksimConfirmationRequestText(
+    props: MaksimConfirmationRequestProps,
+  ): string {
+    const planFakt = (
+      plan: string | null,
+      fakt: string | null,
+    ): string => {
+      if (plan && fakt) return `${plan} → ${fakt}`;
+      if (plan) return plan;
+      if (fakt) return fakt;
+      return '—';
+    };
+    const lines = [
+      `MAGGuarantee — potwierdzenie autoryzacji dopłaty`,
+      ``,
+      `Nr zgłoszenia: ${props.nrZgl}`,
+      `Przewoźnik:    ${props.carrierName}`,
+      `Pojazd:        ${props.vehiclePlate}`,
+      `Dopłata:       ${props.doplata} EUR`,
+      `Próg autoryz.: ${props.prog} EUR`,
+      `Dni w trasie:  ${props.dniWTrasie}`,
+      `Okno godzin:   ${props.godzinyFrom} – ${props.godzinyTo}`,
+      `Odjazd:        ${planFakt(props.odjazdPlan, props.odjazdFakt)}`,
+      `Zjazd:         ${planFakt(props.zjazdPlan, props.zjazdFakt)}`,
+    ];
     if (props.korekty && props.korekty.length > 0) {
       lines.push(
         '',

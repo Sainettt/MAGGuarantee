@@ -37,6 +37,7 @@ import {
   DELEGATION_NOT_YET_RETURNED_WARNING,
   getAuthThreshold,
   isCompensationDue,
+  requiresMaksimConfirmation,
   startOfBusinessTodayUtc,
   VEHICLE_NOT_GUARANTEED,
 } from '@magguarantee/shared';
@@ -763,7 +764,7 @@ export class ClaimsService {
       breakdown: calc.breakdown,
     };
 
-    const updated = await this.claims.update(claim.id, {
+    const recalcPatch: UpdateClaimData = {
       // dateStart is unchanged (departure day); only dateEnd shifts.
       dateEnd,
       mileage,
@@ -778,14 +779,15 @@ export class ClaimsService {
       breakdown,
       // Stamp the explicit result so the frontend reads «przeliczono» directly.
       autoRecalcState: 'applied',
-      // Checkpoint invalidated — the underlying data changed (period/mileage/
-      // km-calc were rewritten), so any prior «Zapisz weryfikację» stamp no
-      // longer reflects the current numbers. Reset to NULL so the verifier must
-      // re-confirm before the (now-blocked) decision transitions unlock again.
-      verifiedAt: null,
-      verifiedById: null,
       // `timeFrom/timeTo` and the `orig*` snapshots are intentionally NOT touched.
-    });
+    };
+    // Checkpoint invalidated — the underlying data changed (period/mileage/
+    // km-calc were rewritten), so any prior «Zapisz weryfikację» stamp no
+    // longer reflects the current numbers. Reset the verification stamp AND the
+    // Maksim gate IN LOCKSTEP so the verifier must re-confirm (and, if still
+    // over threshold, re-notify Maksim) before the decision unlocks again.
+    this._resetVerificationState(recalcPatch);
+    const updated = await this.claims.update(claim.id, recalcPatch);
 
     await this.auditWriter.log({
       action: 'claim.autoRecalc',
@@ -908,7 +910,7 @@ export class ClaimsService {
       breakdown: calc.breakdown,
     };
 
-    const updated = await this.claims.update(claim.id, {
+    const recalcPatch: UpdateClaimData = {
       // dateEnd is unchanged (return day); only dateStart shifts.
       dateStart,
       mileage,
@@ -922,12 +924,14 @@ export class ClaimsService {
       amountRequested: paymentEur,
       breakdown,
       autoRecalcState: 'applied',
-      // Checkpoint invalidated — the underlying data changed, so a prior
-      // «Zapisz weryfikację» stamp no longer reflects the current numbers.
-      verifiedAt: null,
-      verifiedById: null,
       // `timeFrom/timeTo` and the `orig*` snapshots are intentionally NOT touched.
-    });
+    };
+    // Checkpoint invalidated — the underlying data changed, so a prior «Zapisz
+    // weryfikację» stamp no longer reflects the current numbers. Reset the
+    // verification stamp AND the Maksim gate IN LOCKSTEP (re-verification
+    // re-arms + re-sends).
+    this._resetVerificationState(recalcPatch);
+    const updated = await this.claims.update(claim.id, recalcPatch);
 
     await this.auditWriter.log({
       action: 'claim.autoRecalc',
@@ -976,12 +980,25 @@ export class ClaimsService {
     // The `before` snapshot is stashed into the ambient `AuditContext` so
     // the interceptor's writer picks it up — no manual log() call here.
     const existing = await this._validateClaimUpdate(nrZgl, dto);
+    // In-transit gate (OUTERMOST): no decision (accept / reject / OCZEKUJE_*
+    // request) may be taken while the linked outing is still `w_trasie` — the
+    // period/mileage isn't final until `zjechal`. Runs BEFORE the verification
+    // gate so a still-driving claim reports "in transit", not "not verified".
+    // No-op when there is no linked outing or it already returned. 422
+    // CLAIM_DELEGATION_IN_TRANSIT.
+    this._assertDelegationReturned(existing);
     // Verification gate: a decision (akceptacja / odmowa / OCZEKUJE_* request)
     // FROM `NA_WERYFIKACJI` is blocked until the pracownik has saved the
     // verification checkpoint (`verifiedAt` stamped). Transitions FROM
     // `OCZEKUJE_NA_AUTORYZACJE` and `REKLAMACJA` are NOT gated (the claim was
     // already verified before it left NA_WERYFIKACJI). 422 CLAIM_NOT_VERIFIED.
     this._assertVerifiedIfNaWeryfikacji(existing);
+    // Maksim authorization gate: an over-threshold verified claim can only be
+    // accepted OR rejected once the confirmation screenshot has cleared the
+    // gate. Independent of and STRICTER than CLAIM_NOT_VERIFIED. 422
+    // CLAIM_AUTHORIZATION_REQUIRED. Only the NA_WERYFIKACJI decision edge is
+    // gated — request-authorization (OCZEKUJE) and reklamacja paths are not.
+    this._assertMaksimGateCleared(existing, dto);
     const recalc = await this._recalcClaim(existing, dto);
     // Authoritative accept-guard (Fix 3): a claim may only be ACCEPTED when the
     // (re)calculated km-difference shows an under-run, i.e. compensation is
@@ -1055,6 +1072,14 @@ export class ClaimsService {
       );
     }
 
+    // In-transit gate: a verification checkpoint on a wniosek whose linked
+    // outing is still `w_trasie` is blocked (period/mileage not yet final). This
+    // sits BEFORE `_recalcClaim` + the Maksim gate arming, so the Maksim
+    // confirmation auto-email is NOT dispatched on the gated path. No-op when
+    // there is no linked outing or it already returned. 422
+    // CLAIM_DELEGATION_IN_TRANSIT.
+    this._assertDelegationReturned(existing);
+
     // Re-run km-calc only when the body carries a math-affecting correction.
     // An empty body ⇒ `touchesMath: false` ⇒ `recalc === null` ⇒ "confirmed
     // as-is": we stamp `verifiedAt` without touching any calc column.
@@ -1069,7 +1094,21 @@ export class ClaimsService {
     // PATCH (periodAdjustedByVerifier + autoRecalcState:'none' on date edits;
     // hoursAdjustedValue-only on hours edits; amountRequested mirror on recalc).
     const corrections = extractCorrectionFields(dto);
-    this._applyCorrectionsToPatch(patch, corrections, recalc);
+    this._applyCorrectionsToPatch(patch, corrections, recalc, existing);
+
+    // Maksim gate arming — decide from the FINAL numbers (recalc output when the
+    // math re-ran, otherwise the values already on the row). Mutates `patch`
+    // and returns whether the auto-email should be dispatched (fire-and-log,
+    // OUTSIDE the tx) after commit.
+    const finalPaymentEur = recalc ? recalc.paymentEur : existing.paymentEur;
+    const finalDrivenDays = recalc ? recalc.drivenDays : existing.drivenDays;
+    const shouldNotifyMaksim = this._applyMaksimGate(
+      patch,
+      existing,
+      finalPaymentEur,
+      finalDrivenDays,
+      now,
+    );
 
     AuditContext.setBefore(this._snapshotForAudit(existing));
 
@@ -1078,7 +1117,91 @@ export class ClaimsService {
     const txLike = this.prisma.tx as unknown as TransactionLike;
     const updated = await this.claims.updateWithin(txLike, existing.id, patch);
 
+    // Maksim notification — outside the transaction (fire-and-log), only on the
+    // first over-threshold save (dedup via the just-stamped notifiedAt). Mirrors
+    // the `_dispatchAuthorizationEmail` fire-and-log policy: a mail failure must
+    // not roll back the verification stamp.
+    if (shouldNotifyMaksim) {
+      void this._dispatchMaksimConfirmationEmail(updated).catch((err) => {
+        this.logger.error({
+          msg: 'claims.verify.maksim_notify_failed',
+          nrZgl: updated.nrZgl,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+
     return this.toDto(updated);
+  }
+
+  /**
+   * Arms / clears the Maksim authorization gate on the verification-save patch
+   * from the FINAL dopłata + driven days, and reports whether the auto-email
+   * should be dispatched. Pure mutation of `patch` — no IO (the email is fired
+   * by the caller, outside the tx). Rules (docs/13 §claims, brief §2.2):
+   *
+   *  - OVER threshold (`requiresMaksimConfirmation`) → `maksimGateRequired=true`.
+   *    Dedup is AMOUNT-aware: re-notify Maksim when he was NOT yet notified
+   *    (`maksimGateNotifiedAt == null`), OR the last-notified amount is unknown
+   *    (`maksimGateNotifiedAmount == null` — legacy rows), OR the final
+   *    over-threshold dopłata DIFFERS (rounded to 2dp) from the last-notified
+   *    amount. On (re)notify: stamp `maksimGateNotifiedAt=now` +
+   *    `maksimGateNotifiedAmount=round2(finalPaymentEur)`, and NULL any prior
+   *    clearance (`maksimGateClearedAt`/`ById`) — a moved amount invalidates the
+   *    old confirmation, so Maksim must re-confirm the NEW number and a
+   *    previously-unblocked decision is re-blocked (intended). Returns `true`.
+   *    When the amount is UNCHANGED vs the last notification → idempotent re-save,
+   *    return `false` and touch nothing (preserve `notifiedAt`/`notifiedAmount`
+   *    and any prior clearance).
+   *  - NOT over threshold → clear the whole gate (a correction that drops below
+   *    threshold unlocks the decision normally): `maksimGateRequired=false` +
+   *    null `notifiedAt`/`notifiedAmount`/`clearedAt`/`clearedById`. Returns
+   *    `false`.
+   *
+   * @returns `true` when the caller must enqueue the Maksim email.
+   */
+  private _applyMaksimGate(
+    patch: UpdateClaimData,
+    existing: ClaimRow,
+    finalPaymentEur: number,
+    finalDrivenDays: number,
+    now: Date,
+  ): boolean {
+    const overThreshold = requiresMaksimConfirmation({
+      paymentEur: finalPaymentEur,
+      drivenDays: finalDrivenDays,
+    });
+
+    if (!overThreshold) {
+      // Under threshold — no authorization needed; a prior gate unlocks.
+      patch.maksimGateRequired = false;
+      patch.maksimGateNotifiedAt = null;
+      patch.maksimGateNotifiedAmount = null;
+      patch.maksimGateClearedAt = null;
+      patch.maksimGateClearedById = null;
+      return false;
+    }
+
+    patch.maksimGateRequired = true;
+
+    const finalRounded = round2(finalPaymentEur);
+    const amountMoved =
+      existing.maksimGateNotifiedAmount === null ||
+      round2(existing.maksimGateNotifiedAmount) !== finalRounded;
+
+    if (existing.maksimGateNotifiedAt === null || amountMoved) {
+      // First over-threshold save on this cycle OR the over-threshold amount
+      // moved → (re)notify + re-stamp dedup. A moved amount invalidates any
+      // prior clearance: Maksim must re-confirm the NEW number.
+      patch.maksimGateNotifiedAt = now;
+      patch.maksimGateNotifiedAmount = finalRounded;
+      patch.maksimGateClearedAt = null;
+      patch.maksimGateClearedById = null;
+      return true;
+    }
+    // Already notified at this exact amount — idempotent re-save, no re-send.
+    // Leave the notifiedAt/notifiedAmount + any prior clearedAt/ById untouched.
+    return false;
   }
 
   /**
@@ -1096,6 +1219,108 @@ export class ClaimsService {
         message: 'Najpierw zapisz weryfikację danych wniosku.',
       });
     }
+  }
+
+  /**
+   * In-transit gate. HARD-blocks every verifier-side ACTION (verify /
+   * request-authorization / decision) on a wniosek whose LINKED outing is still
+   * `w_trasie` — the auto is on the road, so the period/mileage the verifier
+   * would act on is not yet final (the `zjechal` transition triggers the
+   * auto-recalc). Viewing (GET) stays open; the block lives only on the mutating
+   * paths. Throws 422 `CLAIM_DELEGATION_IN_TRANSIT`.
+   *
+   * Passes through silently when there is NO linked outing
+   * (`delegationId === null`) or the outing has already returned
+   * (`delegationStatus !== 'w_trasie'`, i.e. `zjechal` etc.) — the flow then
+   * behaves exactly as before. Pure guard — no IO. Wired as the OUTERMOST gate
+   * on `update` (before `CLAIM_NOT_VERIFIED`), on `verifyClaim` (before the
+   * recalc + Maksim auto-email), and on `requestAuthorization`.
+   */
+  private _assertDelegationReturned(existing: ClaimRow): void {
+    if (
+      existing.delegationId !== null &&
+      existing.delegationStatus === 'w_trasie'
+    ) {
+      throw new UnprocessableEntityException({
+        code: 'CLAIM_DELEGATION_IN_TRANSIT',
+        message:
+          'Nie można podjąć akcji — wyjazd jest jeszcze w trasie. Poczekaj na zjazd auta.',
+        // Surface the machine code under `extensions` so the global
+        // `ProblemDetailsFilter` lifts it into the RFC-7807 body. The filter
+        // only forwards `detail`/`errors`/`violations`/`extensions` — a
+        // top-level `code` alone is dropped. Web keys its stale-state handler on
+        // `body.extensions.code`. Mirrors the `CLAIM_AUTHORIZATION_REQUIRED`
+        // pattern above. The top-level `code`/`message` are kept for the
+        // in-process unit tests that read `getResponse().code` directly.
+        extensions: { code: 'CLAIM_DELEGATION_IN_TRANSIT' },
+      });
+    }
+  }
+
+  /**
+   * Maksim authorization gate. HARD-blocks the accept/reject decision on an
+   * over-threshold `NA_WERYFIKACJI` claim until the confirmation screenshot has
+   * cleared the gate. Throws 422 `CLAIM_AUTHORIZATION_REQUIRED` (a NEW stable
+   * code, distinct from and stricter than `CLAIM_NOT_VERIFIED`) when the gate is
+   * armed (`maksimGateRequired`) and not yet cleared (`maksimGateClearedAt ==
+   * null`). Blocks BOTH `ZAAKCEPTOWANO` and `ODRZUCONO` — no decision either way
+   * until Maksim confirmed.
+   *
+   * Scope: ONLY the `NA_WERYFIKACJI → decision` edge. The manual
+   * `request-authorization` (OCZEKUJE_NA_AUTORYZACJE) request and any reklamacja
+   * resolution (`REKLAMACJA_*`) are NOT gated here — the gate lives on the
+   * verification checkpoint, and those paths do not re-enter it. Pure decision
+   * helper — no IO.
+   */
+  private _assertMaksimGateCleared(
+    existing: ClaimRow,
+    dto: UpdateClaimDto,
+  ): void {
+    // Gate only the fresh accept/reject decision out of NA_WERYFIKACJI. The
+    // synthetic REKLAMACJA_* literals and OCZEKUJE_NA_AUTORYZACJE are excluded.
+    const isDecision =
+      dto.targetStatus === 'ZAAKCEPTOWANO' ||
+      dto.targetStatus === 'ODRZUCONO';
+    if (existing.status !== 'NA_WERYFIKACJI' || !isDecision) return;
+
+    if (existing.maksimGateRequired && existing.maksimGateClearedAt === null) {
+      throw new UnprocessableEntityException({
+        code: 'CLAIM_AUTHORIZATION_REQUIRED',
+        message:
+          'Wgraj potwierdzenie autoryzacji od Maksima, aby podjąć decyzję.',
+        // Surface the machine code under `extensions` so the global
+        // `ProblemDetailsFilter` lifts it into the RFC-7807 body. The filter
+        // only forwards `detail`/`errors`/`violations`/`extensions` — a
+        // top-level `code` alone is dropped. Web keys its stale-state handler on
+        // `body.extensions.code`. Mirrors the vehicle-cooldown 422 pattern. The
+        // top-level `code`/`message` are kept for the in-process unit tests that
+        // read `getResponse().code` directly.
+        extensions: { code: 'CLAIM_AUTHORIZATION_REQUIRED' },
+      });
+    }
+  }
+
+  /**
+   * Resets the verification checkpoint AND the Maksim authorization gate IN
+   * LOCKSTEP. The invariant this centralizes: the gate must never outlive a
+   * data change that Maksim never confirmed — so wherever `verifiedAt` is
+   * invalidated, the whole gate (required / notified / cleared / clearedBy) is
+   * cleared too, letting a re-verification re-arm (and re-send) from scratch.
+   *
+   * Mutates the supplied patch in place (no IO). Called from every
+   * verification-reset site: the delegation departure/return auto-recalc, and
+   * (implicitly) the verifier period/mileage edits — those re-run
+   * `verifyClaim`, which re-arms via `_applyMaksimGate` rather than resetting,
+   * so `verifyClaim` calls this ONLY to null a prior gate before re-deciding.
+   */
+  private _resetVerificationState(patch: UpdateClaimData): void {
+    patch.verifiedAt = null;
+    patch.verifiedById = null;
+    patch.maksimGateRequired = false;
+    patch.maksimGateNotifiedAt = null;
+    patch.maksimGateNotifiedAmount = null;
+    patch.maksimGateClearedAt = null;
+    patch.maksimGateClearedById = null;
   }
 
   // ── Request authorization (Phase 4.2) ───────────────────
@@ -1147,6 +1372,12 @@ export class ClaimsService {
     // friendly Polish message on any illegal transition (e.g. when the claim
     // is already pending authorization, or has been decided).
     assertLegalTransition(existing.status, 'OCZEKUJE_NA_AUTORYZACJE');
+
+    // In-transit gate: the authorization handshake is likewise blocked while the
+    // linked outing is still `w_trasie` (period/mileage not yet final). No-op
+    // when there is no linked outing or it already returned. 422
+    // CLAIM_DELEGATION_IN_TRANSIT.
+    this._assertDelegationReturned(existing);
 
     // Verification gate: the only legal predecessor is `NA_WERYFIKACJI`, so the
     // request-authorization handshake is likewise blocked until the pracownik
@@ -1309,6 +1540,72 @@ export class ClaimsService {
       deeplink,
       // Pass the diff ONLY when non-empty so the template renders the section
       // solely when there really were verifier corrections.
+      ...(korekty.length > 0 ? { korekty } : {}),
+    });
+  }
+
+  /**
+   * Ships the Maksim over-threshold CONFIRMATION-REQUEST email (the ADDITIVE
+   * gate on `NA_WERYFIKACJI`, distinct from the manual `request-authorization`
+   * flow — a SEPARATE template so the two never collide). Fired fire-and-log
+   * from `verifyClaim` outside the tx, guarded by the `maksimGateNotifiedAt`
+   * dedup, so a mail failure never rolls back the verification stamp.
+   *
+   * Content rows (brief §2.6): Dopłata / Próg / Dni w trasie / Okno godzin,
+   * Odjazd (zgłoszony `departureAt` → faktyczny `actualDepartureAt`), Zjazd
+   * (planowany `plannedReturnAt` → faktyczny `actualReturnAt`), and the reused
+   * «Korekty weryfikatora» diff. Date-only fields are rendered as dates (not
+   * datetime — avoids a phantom "02:00" from the timezone offset). Deeplink to
+   * the employee claim page; recipient `MAKSIM_EMAIL`.
+   */
+  private async _dispatchMaksimConfirmationEmail(row: ClaimRow): Promise<void> {
+    if (!this.mailService) {
+      this.logger.warn({
+        msg: 'claims.verify.maksim_no_mail_service',
+        nrZgl: row.nrZgl,
+      });
+      return;
+    }
+    const appUrl =
+      this.configService?.get('APP_URL', { infer: true }) ??
+      'http://localhost:3000';
+    const maksimEmail =
+      this.configService?.get('MAKSIM_EMAIL', { infer: true }) ??
+      'maksim.siankevich@magtrans.eu';
+    const carrierName = await this._resolveCarrierDisplayName(row.carrierId);
+    const deeplink = `${appUrl.replace(/\/$/, '')}/employee/claims/${encodeURIComponent(row.nrZgl)}`;
+
+    // Reuse the same diff builder as the manual authorization email.
+    const korekty = this._buildAuthorizationKorekty(row);
+
+    await this.mailService.enqueueMaksimConfirmationRequest(maksimEmail, {
+      nrZgl: row.nrZgl,
+      carrierName,
+      vehiclePlate: row.vehiclePlateSnapshot,
+      // Amounts pre-formatted here so the template stays pure. `amountRequested`
+      // mirrors `paymentEur` (the km-calc output) per the submit invariant.
+      doplata: row.amountRequested.toFixed(2),
+      prog: getAuthThreshold(row.drivenDays).toFixed(2),
+      dniWTrasie: row.drivenDays.toFixed(2),
+      // «Okno godzin» — the existing time window (no new "hours" field).
+      godzinyFrom: row.timeFrom,
+      godzinyTo: row.timeTo,
+      // Odjazd: zgłoszony (date) → faktyczny (date). Rendered as dates so a
+      // date-only `plannedReturnAt` / a `@db.Date` never shows "02:00".
+      odjazdPlan: row.delegationDepartureAt
+        ? toDateString(row.delegationDepartureAt)
+        : null,
+      odjazdFakt: row.delegationActualDepartureAt
+        ? toDateString(row.delegationActualDepartureAt)
+        : null,
+      // Zjazd: planowany → faktyczny.
+      zjazdPlan: row.delegationPlannedReturnAt
+        ? toDateString(row.delegationPlannedReturnAt)
+        : null,
+      zjazdFakt: row.delegationActualReturnAt
+        ? toDateString(row.delegationActualReturnAt)
+        : null,
+      deeplink,
       ...(korekty.length > 0 ? { korekty } : {}),
     });
   }
@@ -1807,8 +2104,18 @@ export class ClaimsService {
       origHoursAdjusted: row.origHoursAdjusted,
       hoursAdjustedValue: row.hoursAdjustedValue,
       authScreenshotUrl: row.authScreenshotUrl,
+      // Maksim authorization gate — surfaced so the web renders the block /
+      // "wgraj potwierdzenie" CTA without re-deriving from paymentEur.
+      maksimGateRequired: row.maksimGateRequired,
+      maksimGateNotifiedAt: row.maksimGateNotifiedAt
+        ? row.maksimGateNotifiedAt.toISOString()
+        : null,
+      maksimGateClearedAt: row.maksimGateClearedAt
+        ? row.maksimGateClearedAt.toISOString()
+        : null,
       attachments: row.attachments.map((a) => ({
         id: a.id,
+        category: a.category,
         url: a.url,
         mimeType: a.mimeType,
         size: a.size,
@@ -1825,6 +2132,10 @@ export class ClaimsService {
       delegationActualReturnAt: row.delegationActualReturnAt
         ? row.delegationActualReturnAt.toISOString()
         : null,
+      // Linked-outing lifecycle status — surfaced so the pracownik ClaimModal
+      // renders the read-only "w trasie" banner and the FE in-transit gate keys
+      // off the SAME field the API gates on. `null` when no linked outing.
+      delegationStatus: row.delegationStatus,
       periodAdjustedByVerifier: row.periodAdjustedByVerifier,
       // Stored auto-recalc result — forwarded verbatim so the frontend reads
       // the outcome directly (no heuristic inference).
@@ -2036,11 +2347,18 @@ export class ClaimsService {
    * Applies the verifier's correction fields + optional recalc outputs onto a
    * mutable `UpdateClaimData` patch. Shared by BOTH the decision PATCH
    * (`_buildUpdatePatch`) and the verification checkpoint (`verifyClaim`) so the
-   * field-by-field persist rules live in exactly one place:
+   * field-by-field persist rules live in exactly one place (both call sites MUST
+   * pass the SAME `existing` row they loaded, so the two paths get byte-identical
+   * value-based behaviour):
    *
    *  - date edits set `periodAdjustedByVerifier=true` + reset `autoRecalcState`
-   *    to `'none'` (the delegation auto-recalc no longer silently overwrites a
-   *    human-corrected period; the «wymaga uwagi» badge goes dark),
+   *    to `'none'` ONLY when the supplied `dateStart`/`dateEnd` actually DIFFERS
+   *    (by UTC calendar day) from the value already on `existing`. The verify
+   *    form always re-sends the current (prefilled) dates, so mere PRESENCE must
+   *    NOT latch the flag — that would gate out the late-`zjechał`
+   *    `recalcFromDelegation` (which requires `periodAdjustedByVerifier===false`)
+   *    on every no-op re-verify. When neither boundary actually moved, both the
+   *    flag and `autoRecalcState` are left untouched,
    *  - a `hoursAdjusted` correction writes ONLY `hoursAdjustedValue` (the
    *    immutable carrier snapshot `origHoursAdjusted` is never touched),
    *  - when the math re-ran (`recalc != null`) the km-calc outputs are written
@@ -2054,22 +2372,30 @@ export class ClaimsService {
     patch: UpdateClaimData,
     corrections: ExtractedCorrections,
     recalc: RecalcOutputs | null,
+    existing: ClaimRow,
   ): void {
-    if (corrections.dateStart) {
-      const d = isoDateToMidnightUtc(corrections.dateStart);
-      if (d) patch.dateStart = d;
-    }
-    if (corrections.dateEnd) {
-      const d = isoDateToMidnightUtc(corrections.dateEnd);
-      if (d) patch.dateEnd = d;
-    }
+    const parsedStart = corrections.dateStart
+      ? isoDateToMidnightUtc(corrections.dateStart)
+      : null;
+    const parsedEnd = corrections.dateEnd
+      ? isoDateToMidnightUtc(corrections.dateEnd)
+      : null;
+    // Writing an identical value is a harmless no-op — only the FLAG guard below
+    // is value-based. `patch.dateStart`/`dateEnd` are still assigned from any
+    // supplied (parseable) date so the recalc outputs stay consistent.
+    if (parsedStart) patch.dateStart = parsedStart;
+    if (parsedEnd) patch.dateEnd = parsedEnd;
     // A human edited the PERIOD (`dateStart`/`dateEnd`) — mark it so a later
     // delegation `zjechal` auto-recalc no longer overwrites the correction, and
     // reset `autoRecalcState` to `none` (the flagged attention is now handled).
-    if (
-      corrections.dateStart !== undefined ||
-      corrections.dateEnd !== undefined
-    ) {
+    // VALUE-based: only when a parsed boundary actually differs from the stored
+    // day. A verify that re-sends the prefilled (unchanged) dates leaves BOTH
+    // `periodAdjustedByVerifier` and `autoRecalcState` untouched.
+    const startChanged =
+      parsedStart !== null && !sameUtcDay(parsedStart, existing.dateStart);
+    const endChanged =
+      parsedEnd !== null && !sameUtcDay(parsedEnd, existing.dateEnd);
+    if (startChanged || endChanged) {
       patch.periodAdjustedByVerifier = true;
       patch.autoRecalcState = 'none';
     }
@@ -2121,7 +2447,7 @@ export class ClaimsService {
     // checkpoint (`verifyClaim`) applies. Extracted into `_applyCorrectionsToPatch`
     // so both paths stay byte-identical (no duplicated field-by-field rules).
     const corrections = extractCorrectionFields(dto);
-    this._applyCorrectionsToPatch(patch, corrections, recalc);
+    this._applyCorrectionsToPatch(patch, corrections, recalc, existing);
 
     // Decision payload per discriminator branch.
     switch (dto.targetStatus) {
@@ -2391,6 +2717,12 @@ export class ClaimsService {
       // «Zapisz weryfikację» stamp (and the auto-recalc reset to null).
       verifiedAt: row.verifiedAt?.toISOString() ?? null,
       verifiedById: row.verifiedById,
+      // Maksim authorization gate — captured so the History diff shows the
+      // arm/notify/clear transitions (and the auto-recalc lockstep reset).
+      maksimGateRequired: row.maksimGateRequired,
+      maksimGateNotifiedAt: row.maksimGateNotifiedAt?.toISOString() ?? null,
+      maksimGateClearedAt: row.maksimGateClearedAt?.toISOString() ?? null,
+      maksimGateClearedById: row.maksimGateClearedById,
       dateStart: row.dateStart.toISOString(),
       dateEnd: row.dateEnd.toISOString(),
       timeFrom: row.timeFrom,

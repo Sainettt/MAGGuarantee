@@ -154,10 +154,18 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     origHoursAdjusted: 0,
     hoursAdjustedValue: 0,
     authScreenshotUrl: null,
+    maksimGateRequired: false,
+    maksimGateNotifiedAt: null,
+    maksimGateNotifiedAmount: null,
+    maksimGateClearedAt: null,
+    maksimGateClearedById: null,
     attachments: [],
     delegationId: null,
+    delegationDepartureAt: null,
+    delegationActualDepartureAt: null,
     delegationPlannedReturnAt: null,
     delegationActualReturnAt: null,
+    delegationStatus: null,
     periodAdjustedByVerifier: false,
     autoRecalcState: 'none',
     createdAt: new Date('2026-04-21T08:00:00.000Z'),
@@ -543,6 +551,74 @@ describe('ClaimsService.requestAuthorization — Phase 4.2', () => {
       makeAuth('pracownik'),
       seeded.nrZgl,
       { comment: 'Opis sprawy dla Maksima.' },
+    );
+
+    expect(result.status).toBe('OCZEKUJE_NA_AUTORYZACJE');
+    expect(repoFake.updateWithinCalls).toHaveLength(1);
+  });
+
+  it('9. linked outing still w_trasie → request-authorization gated (422 CLAIM_DELEGATION_IN_TRANSIT, no email)', async () => {
+    const seeded = makeClaim({
+      delegationId: 'deleg-1',
+      delegationStatus: 'w_trasie',
+    });
+    const repoFake = makeClaimsRepo([seeded]);
+    const mail = makeMailService();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, mail.svc, prisma, makeConfigService());
+
+    let caught: unknown;
+    try {
+      await svc.requestAuthorization(makeAuth('pracownik'), seeded.nrZgl, {
+        comment: 'Auto jeszcze w trasie.',
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(UnprocessableEntityException);
+    const body = (caught as UnprocessableEntityException).getResponse() as {
+      code?: string;
+      extensions?: { code?: string };
+    };
+    expect(body.code).toBe('CLAIM_DELEGATION_IN_TRANSIT');
+    expect(body.extensions?.code).toBe('CLAIM_DELEGATION_IN_TRANSIT');
+    // Gate fires before any write / email.
+    expect(repoFake.updateWithinCalls).toHaveLength(0);
+    await Promise.resolve();
+    expect(mail.calls).toHaveLength(0);
+  });
+
+  it('10. linked outing zjechal → request-authorization passes', async () => {
+    const seeded = makeClaim({
+      delegationId: 'deleg-1',
+      delegationStatus: 'zjechal',
+    });
+    const repoFake = makeClaimsRepo([seeded]);
+    const mail = makeMailService();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, mail.svc, prisma, makeConfigService());
+
+    const result = await svc.requestAuthorization(
+      makeAuth('pracownik'),
+      seeded.nrZgl,
+      { comment: 'Auto zjechało.' },
+    );
+
+    expect(result.status).toBe('OCZEKUJE_NA_AUTORYZACJE');
+    expect(repoFake.updateWithinCalls).toHaveLength(1);
+  });
+
+  it('11. no linked outing (delegationId null) → request-authorization passes', async () => {
+    const seeded = makeClaim({ delegationId: null, delegationStatus: null });
+    const repoFake = makeClaimsRepo([seeded]);
+    const mail = makeMailService();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, mail.svc, prisma, makeConfigService());
+
+    const result = await svc.requestAuthorization(
+      makeAuth('pracownik'),
+      seeded.nrZgl,
+      { comment: 'Brak powiązanego wyjazdu.' },
     );
 
     expect(result.status).toBe('OCZEKUJE_NA_AUTORYZACJE');

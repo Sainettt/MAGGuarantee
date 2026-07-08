@@ -5,8 +5,12 @@ import { DelegationsModule } from '../delegations/delegations.module';
 import { DriversModule } from '../drivers/drivers.module';
 import { KmCalcModule } from '../km-calc/km-calc.module';
 import { MailModule } from '../mail/mail.module';
+import { StorageModule } from '../storage/storage.module';
 import { TrailersModule } from '../trailers/trailers.module';
 import { VehiclesModule } from '../vehicles/vehicles.module';
+import { ClaimAttachmentsController } from './claim-attachments.controller';
+import { ClaimAttachmentsRepository } from './claim-attachments.repository';
+import { ClaimAttachmentsService } from './claim-attachments.service';
 import { ClaimsController } from './claims.controller';
 import { ClaimsRepository } from './claims.repository';
 import { ClaimsService } from './claims.service';
@@ -27,14 +31,22 @@ import { NrZglService } from './nr-zgl.service';
     DriversModule,
     TrailersModule,
     MailModule,
+    // Maksim-authorization confirmation screenshot upload (S3-backed).
+    StorageModule,
     // Phase 7 REWORK (2026-06-20 #4) — submit derives the period/ownership from
     // the chosen outing (`DelegationsRepository`). DelegationsModule imports
     // ClaimsModule back (for the `returned()` auto-recalc), so the cycle is
     // broken with `forwardRef` on both sides.
     forwardRef(() => DelegationsModule),
   ],
-  controllers: [ClaimsController],
-  providers: [ClaimsService, ClaimsRepository, NrZglService],
+  controllers: [ClaimsController, ClaimAttachmentsController],
+  providers: [
+    ClaimsService,
+    ClaimsRepository,
+    NrZglService,
+    ClaimAttachmentsService,
+    ClaimAttachmentsRepository,
+  ],
   exports: [ClaimsService, ClaimsRepository, NrZglService],
 })
 export class ClaimsModule {}

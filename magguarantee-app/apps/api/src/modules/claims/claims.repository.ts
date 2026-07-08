@@ -2,8 +2,10 @@ import { Injectable } from '@nestjs/common';
 
 import { ClaimStatus as PrismaClaimStatus } from '@magguarantee/database';
 import type {
+  ClaimAttachmentCategory,
   ClaimAutoRecalcState,
   ClaimStatus,
+  DelegationStatus,
   KmCalcBreakdown,
 } from '@magguarantee/shared';
 
@@ -98,8 +100,35 @@ export interface ClaimRow {
   hoursAdjustedValue: number | null;
 
   authScreenshotUrl: string | null;
+
+  /**
+   * Maksim authorization gate (ADDITIVE gate on `NA_WERYFIKACJI`). Armed by
+   * `verifyClaim` when the final dopłata STRICTLY exceeds
+   * `getAuthThreshold(drivenDays)`; blocks the accept/reject decision until the
+   * confirmation screenshot lands. All four reset in lockstep with `verifiedAt`
+   * via `_resetVerificationState` whenever the verification is invalidated.
+   *
+   *  - `maksimGateRequired`     — the gate is active.
+   *  - `maksimGateNotifiedAt`   — auto-email dedup stamp (`null` = not sent).
+   *  - `maksimGateNotifiedAmount` — the over-threshold dopłata (Decimal(12,2) →
+   *    number) that the last Maksim notification carried. `null` = never
+   *    notified (or legacy row); used for AMOUNT-aware dedup so a re-verify that
+   *    MOVES the over-threshold amount re-notifies Maksim (see
+   *    `ClaimsService._applyMaksimGate`).
+   *  - `maksimGateClearedAt`    — when the screenshot lifted the gate (`null`
+   *    while still blocking).
+   *  - `maksimGateClearedById`  — who uploaded the confirmation (mirror of
+   *    `verifiedById`).
+   */
+  maksimGateRequired: boolean;
+  maksimGateNotifiedAt: Date | null;
+  maksimGateNotifiedAmount: number | null;
+  maksimGateClearedAt: Date | null;
+  maksimGateClearedById: string | null;
+
   attachments: {
     id: string;
+    category: ClaimAttachmentCategory;
     url: string;
     mimeType: string | null;
     size: number | null;
@@ -114,12 +143,30 @@ export interface ClaimRow {
    */
   delegationId: string | null;
   /**
+   * The linked outing's DEPARTURE (zgłoszony `departureAt` + verifier-set
+   * `actualDepartureAt`), embedded so the Maksim confirmation email can show
+   * "Odjazd: zgłoszony → faktyczny" without a second query. Both `null` when
+   * there is no linked outing; `actualDepartureAt` `null` until `w_trasie`.
+   */
+  delegationDepartureAt: Date | null;
+  delegationActualDepartureAt: Date | null;
+  /**
    * The linked outing's plan/fakt return (from the `delegation` relation),
    * embedded so the DTO can surface them without a second query. Both `null`
    * when there is no linked outing; `actual` `null` until `zjechal`.
    */
   delegationPlannedReturnAt: Date | null;
   delegationActualReturnAt: Date | null;
+  /**
+   * The linked outing's lifecycle status (from the `delegation` relation),
+   * embedded so the verifier-side in-transit gate (`_assertDelegationReturned`)
+   * and the pracownik ClaimModal read it without a second `GET /delegations/:id`
+   * (role-gated). `null` when there is no linked outing. The service blocks
+   * `verify` / `requestAuthorization` / `update` (accept/reject) while this is
+   * `'w_trasie'` (422 `CLAIM_DELEGATION_IN_TRANSIT`); a `'zjechal'` outing (or a
+   * claim with no `delegationId`) passes through.
+   */
+  delegationStatus: DelegationStatus | null;
   /**
    * `true` once a pracownik PATCHed `dateStart`/`dateEnd` — the boundary that
    * disables the delegation auto-recalc.
@@ -228,6 +275,27 @@ export interface UpdateClaimData {
    */
   verifiedAt?: Date | null;
   verifiedById?: string | null;
+
+  /**
+   * Maksim authorization gate columns. Armed by `verifyClaim`
+   * (`maksimGateRequired=true` + `maksimGateNotifiedAt=now` on the first
+   * over-threshold save), cleared by the confirmation upload
+   * (`maksimGateClearedAt`/`maksimGateClearedById`), and reset in lockstep with
+   * `verifiedAt` by `_resetVerificationState`. Omitted (`undefined`) ⇒ the
+   * column keeps its current value; `null` clears it.
+   */
+  maksimGateRequired?: boolean;
+  maksimGateNotifiedAt?: Date | null;
+  /**
+   * Amount-aware dedup stamp (Decimal(12,2) → number). Written alongside
+   * `maksimGateNotifiedAt` by `_applyMaksimGate` (the over-threshold dopłata the
+   * last notification carried) and reset in lockstep with `verifiedAt` by
+   * `_resetVerificationState`. Omitted (`undefined`) ⇒ the column keeps its
+   * current value; `null` clears it.
+   */
+  maksimGateNotifiedAmount?: number | null;
+  maksimGateClearedAt?: Date | null;
+  maksimGateClearedById?: string | null;
 
   /**
    * Phase 7 REWORK (2026-06-20 #4) — set `true` by the verifier PATCH whenever
@@ -521,6 +589,11 @@ export class ClaimsRepository {
     set('decidedById');
     set('verifiedAt');
     set('verifiedById');
+    set('maksimGateRequired');
+    set('maksimGateNotifiedAt');
+    set('maksimGateNotifiedAmount');
+    set('maksimGateClearedAt');
+    set('maksimGateClearedById');
     set('periodAdjustedByVerifier');
     set('autoRecalcState');
     set('origDateStart');
@@ -566,10 +639,17 @@ export class ClaimsRepository {
         },
       },
       vehicle: { select: { id: true, plateNumber: true } },
-      // Embed the linked outing's plan/fakt return so the pracownik ClaimModal
-      // renders them without a separate `GET /delegations/:id` (role-gated).
+      // Embed the linked outing's plan/fakt return AND plan/fakt departure so
+      // the pracownik ClaimModal + the Maksim confirmation email render them
+      // without a separate `GET /delegations/:id` (role-gated).
       delegation: {
-        select: { plannedReturnAt: true, actualReturnAt: true },
+        select: {
+          status: true,
+          departureAt: true,
+          actualDepartureAt: true,
+          plannedReturnAt: true,
+          actualReturnAt: true,
+        },
       },
       decidedBy: { select: { id: true, login: true, name: true } },
       // Verification checkpoint author — mirror of `decidedBy` (relation
@@ -578,6 +658,7 @@ export class ClaimsRepository {
       attachments: {
         select: {
           id: true,
+          category: true,
           url: true,
           mimeType: true,
           size: true,
@@ -657,8 +738,16 @@ export class ClaimsRepository {
       origHoursAdjusted: decimalToNumber(row.origHoursAdjusted),
       hoursAdjustedValue: decimalToNumber(row.hoursAdjustedValue),
       authScreenshotUrl: row.authScreenshotUrl,
+      maksimGateRequired: row.maksimGateRequired,
+      maksimGateNotifiedAt: row.maksimGateNotifiedAt,
+      // Amount-aware dedup stamp — same Decimal(12,2) → number round-trip as
+      // `paymentEur`/`origPaymentEur`; `null` preserved for never-notified rows.
+      maksimGateNotifiedAmount: decimalToNumber(row.maksimGateNotifiedAmount),
+      maksimGateClearedAt: row.maksimGateClearedAt,
+      maksimGateClearedById: row.maksimGateClearedById,
       attachments: row.attachments.map((a) => ({
         id: a.id,
+        category: a.category,
         url: a.url,
         mimeType: a.mimeType,
         size: a.size,
@@ -666,8 +755,11 @@ export class ClaimsRepository {
         createdAt: a.createdAt,
       })),
       delegationId: row.delegationId,
+      delegationDepartureAt: row.delegation?.departureAt ?? null,
+      delegationActualDepartureAt: row.delegation?.actualDepartureAt ?? null,
       delegationPlannedReturnAt: row.delegation?.plannedReturnAt ?? null,
       delegationActualReturnAt: row.delegation?.actualReturnAt ?? null,
+      delegationStatus: row.delegation?.status ?? null,
       periodAdjustedByVerifier: row.periodAdjustedByVerifier,
       // Prisma enum default is `none`; the `?? 'none'` is a defensive sentinel
       // for the soft-delete extension's widened inferred type.
@@ -736,8 +828,14 @@ interface ClaimPrismaShape {
   origHoursAdjusted: { toNumber(): number } | number | null;
   hoursAdjustedValue: { toNumber(): number } | number | null;
   authScreenshotUrl: string | null;
+  maksimGateRequired: boolean;
+  maksimGateNotifiedAt: Date | null;
+  maksimGateNotifiedAmount: { toNumber(): number } | number | null;
+  maksimGateClearedAt: Date | null;
+  maksimGateClearedById: string | null;
   attachments: {
     id: string;
+    category: ClaimAttachmentCategory;
     url: string;
     mimeType: string | null;
     size: number | null;
@@ -746,6 +844,9 @@ interface ClaimPrismaShape {
   }[];
   delegationId: string | null;
   delegation?: {
+    status: DelegationStatus;
+    departureAt: Date | null;
+    actualDepartureAt: Date | null;
     plannedReturnAt: Date | null;
     actualReturnAt: Date | null;
   } | null;

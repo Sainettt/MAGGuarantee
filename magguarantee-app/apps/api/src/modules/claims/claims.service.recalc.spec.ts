@@ -98,10 +98,18 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     origHoursAdjusted: 0,
     hoursAdjustedValue: 0,
     authScreenshotUrl: null,
+    maksimGateRequired: false,
+    maksimGateNotifiedAt: null,
+    maksimGateNotifiedAmount: null,
+    maksimGateClearedAt: null,
+    maksimGateClearedById: null,
     attachments: [],
     delegationId: 'deleg-1',
+    delegationDepartureAt: null,
+    delegationActualDepartureAt: null,
     delegationPlannedReturnAt: null,
     delegationActualReturnAt: null,
+    delegationStatus: 'zjechal',
     periodAdjustedByVerifier: false,
     autoRecalcState: 'none',
     createdAt: new Date('2026-05-10T08:00:00.000Z'),
@@ -211,8 +219,62 @@ describe('ClaimsService.recalcFromDelegation', () => {
     // re-confirm before the (now re-gated) decision transitions unlock.
     expect(patch.verifiedAt).toBeNull();
     expect(patch.verifiedById).toBeNull();
+    // Maksim gate reset IN LOCKSTEP with the verification stamp — the gate must
+    // never outlive a data change Maksim never confirmed. A later re-verify
+    // re-arms (and re-sends) from scratch.
+    expect(patch.maksimGateRequired).toBe(false);
+    expect(patch.maksimGateNotifiedAt).toBeNull();
+    // Amount-aware dedup stamp nulled in lockstep with the rest of the gate.
+    expect(patch.maksimGateNotifiedAmount).toBeNull();
+    expect(patch.maksimGateClearedAt).toBeNull();
+    expect(patch.maksimGateClearedById).toBeNull();
     // audit: autoRecalc (not skipped).
     expect(auditLogs.map((l) => l.action)).toEqual(['claim.autoRecalc']);
+  });
+
+  it('Fix A e2e — an already-verified, over-threshold, NOT-period-adjusted claim + a diverging late zjechał APPLIES the recalc and clears verifiedAt + the whole Maksim gate', async () => {
+    // This is the exact bug the value-based period-change detection unblocks:
+    // BEFORE the fix, a verify that re-sent the prefilled dates latched
+    // periodAdjustedByVerifier=true, which gated out THIS recalc. With the fix
+    // the flag stays false, so the late zjechał applies + resets everything.
+    const { service, updateSpy, kmCalcSpy } = build({
+      claim: makeClaim({
+        status: 'NA_WERYFIKACJI',
+        periodAdjustedByVerifier: false,
+        verifiedAt: new Date('2026-05-10T09:00:00.000Z'),
+        verifiedById: 'u-verifier',
+        // Over threshold + already notified (the 1st Maksim email fired).
+        maksimGateRequired: true,
+        maksimGateNotifiedAt: new Date('2026-05-10T09:05:00.000Z'),
+        maksimGateNotifiedAmount: 1_400,
+        maksimGateClearedAt: null,
+        maksimGateClearedById: null,
+      }),
+      kmResult: { kmGuaranteed: 12_000, ratePerKmEffective: 0.5, totalDays: 12 },
+      droveSum: 9_000,
+    });
+
+    // ACTUAL (2026-05-12) diverges from the claim's dateEnd (2026-05-09).
+    await service.recalcFromDelegation('deleg-1', ACTUAL);
+
+    // Recalc APPLIED (not skipped): km-calc ran + the period shifted.
+    expect(kmCalcSpy).toHaveBeenCalledTimes(1);
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    const patch = updateSpy.mock.calls[0]![1] as UpdateClaimData;
+    expect((patch.dateEnd as Date).toISOString()).toBe(
+      '2026-05-12T00:00:00.000Z',
+    );
+    expect(patch.autoRecalcState).toBe('applied');
+    // Verification stamp cleared via _resetVerificationState.
+    expect(patch.verifiedAt).toBeNull();
+    expect(patch.verifiedById).toBeNull();
+    // The WHOLE Maksim gate reset in lockstep — including the amount-aware
+    // dedup stamp — so a later re-verify re-arms + re-sends the 2nd email.
+    expect(patch.maksimGateRequired).toBe(false);
+    expect(patch.maksimGateNotifiedAt).toBeNull();
+    expect(patch.maksimGateNotifiedAmount).toBeNull();
+    expect(patch.maksimGateClearedAt).toBeNull();
+    expect(patch.maksimGateClearedById).toBeNull();
   });
 
   it('SKIPS OCZEKUJE_NA_AUTORYZACJE (FROZEN under authorization) WITH divergence: writes autoRecalcState=skipped (no recalc), audits autoRecalcSkipped', async () => {
@@ -355,6 +417,12 @@ describe('ClaimsService.recalcDepartureFromDelegation', () => {
     // Verification checkpoint invalidated (same as the return side).
     expect(patch.verifiedAt).toBeNull();
     expect(patch.verifiedById).toBeNull();
+    // Maksim gate reset in lockstep (same as the return side).
+    expect(patch.maksimGateRequired).toBe(false);
+    expect(patch.maksimGateNotifiedAt).toBeNull();
+    expect(patch.maksimGateNotifiedAmount).toBeNull();
+    expect(patch.maksimGateClearedAt).toBeNull();
+    expect(patch.maksimGateClearedById).toBeNull();
     expect(patch.autoRecalcState).toBe('applied');
     expect(auditLogs.map((l) => l.action)).toEqual(['claim.autoRecalc']);
   });

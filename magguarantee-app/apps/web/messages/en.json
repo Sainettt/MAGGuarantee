@@ -1040,8 +1040,33 @@
           "decisionRequired": "Pick a decision to save the claim.",
           "terminalState": "The claim is in a terminal state — no decisions available.",
           "guaranteeMetHint": "Guarantee met — the claim can only be rejected.",
-          "progExceededHint": "Payout exceeds the authorization threshold ({prog} for {days, plural, one {# day} other {# days}} on the road) — Maksim authorization recommended.",
+          "progExceededHint": "Payout will exceed the authorization threshold ({prog} for {days, plural, one {# day} other {# days}} on the road) — once you save the verification the claim will require Maksim's authorization.",
           "verifiedBadge": "Verified {date} by {name}"
+        },
+        "maksimGate": {
+          "bannerTitle": "Maksim authorization required",
+          "bannerBody": "The claim exceeds the authorization threshold — a confirmation request was sent to Maksim. Upload the confirmation screenshot to unblock the decision.",
+          "notifiedAt": "Maksim notified: {date}",
+          "notifiedPending": "The notification to Maksim is being sent…",
+          "uploadHeading": "Maksim confirmation screenshot",
+          "uploadHint": "JPG, PNG, WebP or PDF · max. 10 MB",
+          "uploading": "Uploading…",
+          "uploadedToast": "Authorization confirmation uploaded — decision unblocked",
+          "uploadErrorToast": "Could not upload the confirmation",
+          "clearedTitle": "Authorization confirmed",
+          "clearedAt": "Unblocked {date}",
+          "confirmationFile": "Maksim confirmation",
+          "openConfirmation": "Open confirmation",
+          "downloading": "Downloading…",
+          "downloadError": "Could not download the confirmation",
+          "decisionBlockedHint": "The decision is blocked until Maksim's authorization confirmation is uploaded.",
+          "decisionBlockedToast": "Upload Maksim's authorization confirmation to take a decision."
+        },
+        "inTransitGate": {
+          "bannerTitle": "Trip still in transit",
+          "bannerBody": "The linked trip has not returned yet — the vehicle is still on the road. The claim is view-only. Wait until the trip is marked as returned (zjechał) — only then can the claim be verified and decided.",
+          "actionsBlockedHint": "Actions are blocked while the trip is in transit. Wait for the return.",
+          "blockedToast": "The trip is still in transit — wait for the return to verify or decide."
         },
         "linkedDelegation": {
           "heading": "Linked trip",

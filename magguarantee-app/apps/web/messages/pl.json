@@ -1040,8 +1040,33 @@
           "decisionRequired": "Wybierz decyzję, aby zapisać wniosek.",
           "terminalState": "Wniosek jest w stanie końcowym — brak dostępnych decyzji.",
           "guaranteeMetHint": "Gwarancja wyjeżdżona — wniosek można tylko odrzucić.",
-          "progExceededHint": "Dopłata przekracza próg autoryzacji ({prog} przy {days, plural, one {# dniu} few {# dniach} many {# dniach} other {# dnia}} w trasie) — zalecana autoryzacja Maksima.",
+          "progExceededHint": "Dopłata przekroczy próg autoryzacji ({prog} przy {days, plural, one {# dniu} few {# dniach} many {# dniach} other {# dnia}} w trasie) — po zapisaniu weryfikacji wniosek będzie wymagać autoryzacji Maksima.",
           "verifiedBadge": "Zweryfikowano {date} przez {name}"
+        },
+        "maksimGate": {
+          "bannerTitle": "Wymagana autoryzacja Maksima",
+          "bannerBody": "Wniosek przekracza próg autoryzacji — wysłano prośbę o potwierdzenie do Maksima. Wgraj zrzut ekranu potwierdzenia, aby odblokować decyzję.",
+          "notifiedAt": "Powiadomiono Maksima: {date}",
+          "notifiedPending": "Powiadomienie do Maksima jest wysyłane…",
+          "uploadHeading": "Zrzut ekranu potwierdzenia Maksima",
+          "uploadHint": "JPG, PNG, WebP lub PDF · maks. 10 MB",
+          "uploading": "Przesyłanie…",
+          "uploadedToast": "Potwierdzenie autoryzacji wgrane — decyzja odblokowana",
+          "uploadErrorToast": "Nie udało się wgrać potwierdzenia",
+          "clearedTitle": "Autoryzacja potwierdzona",
+          "clearedAt": "Odblokowano {date}",
+          "confirmationFile": "Potwierdzenie Maksima",
+          "openConfirmation": "Otwórz potwierdzenie",
+          "downloading": "Pobieranie…",
+          "downloadError": "Nie udało się pobrać potwierdzenia",
+          "decisionBlockedHint": "Decyzja jest zablokowana do czasu wgrania potwierdzenia autoryzacji Maksima.",
+          "decisionBlockedToast": "Wgraj potwierdzenie autoryzacji od Maksima, aby podjąć decyzję."
+        },
+        "inTransitGate": {
+          "bannerTitle": "Wyjazd jeszcze w trasie",
+          "bannerBody": "Powiązany wyjazd nie został jeszcze zakończony — pojazd wciąż jest w trasie. Wniosek można tylko przeglądać. Poczekaj, aż wyjazd zostanie oznaczony jako zjechał — dopiero wtedy wniosek można zweryfikować i podjąć decyzję.",
+          "actionsBlockedHint": "Akcje są zablokowane, dopóki wyjazd jest w trasie. Poczekaj na zjazd.",
+          "blockedToast": "Wyjazd jest jeszcze w trasie — poczekaj na zjazd, aby zweryfikować lub podjąć decyzję."
         },
         "linkedDelegation": {
           "heading": "Powiązany wyjazd",

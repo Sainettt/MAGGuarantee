@@ -58,6 +58,9 @@ export class EmailSendProcessor extends WorkerHost {
       case 'authorization-request':
         await this.mail.sendAuthorizationRequest(data.email, data.props);
         return;
+      case 'maksim-confirmation-request':
+        await this.mail.sendMaksimConfirmationRequest(data.email, data.props);
+        return;
       case 'verification-digest':
         await this.mail.sendVerificationDigest(data.email, data.props);
         return;

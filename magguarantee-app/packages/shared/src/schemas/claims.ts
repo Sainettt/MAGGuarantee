@@ -15,6 +15,7 @@ import {
   UuidSchema,
   emptyStringToUndefined,
 } from './common';
+import { DelegationStatusSchema } from './delegations';
 
 // ─── Enums (mirror Prisma — kept as zod enums for runtime parity) ──
 
@@ -543,8 +544,31 @@ const UserMiniSchema = z.object({
   name: z.string().nullable(),
 });
 
+/**
+ * Category of a Claim attachment, mirroring the DB `enum
+ * ClaimAttachmentCategory`:
+ *  - `WNIOSEK`            — a regular wniosek attachment (default / backfill).
+ *  - `AUTORYZACJA_MAKSIMA` — the screenshot of Maksim's out-of-band
+ *    confirmation that lifts the over-threshold authorization gate on a
+ *    verified claim.
+ * Order mirrors the DB enum `{WNIOSEK, AUTORYZACJA_MAKSIMA}`.
+ */
+export const ClaimAttachmentCategorySchema = z.enum([
+  'WNIOSEK',
+  'AUTORYZACJA_MAKSIMA',
+]);
+export type ClaimAttachmentCategory = z.infer<
+  typeof ClaimAttachmentCategorySchema
+>;
+
 const ClaimAttachmentDtoSchema = z.object({
   id: UuidSchema,
+  /**
+   * Distinguishes the Maksim confirmation screenshot (`AUTORYZACJA_MAKSIMA`)
+   * from regular wniosek attachments (`WNIOSEK`, the default). The web filters
+   * on this to render the "potwierdzenie autoryzacji" chip.
+   */
+  category: ClaimAttachmentCategorySchema,
   url: z.string(),
   mimeType: z.string().nullable(),
   size: z.number().int().nonnegative().nullable(),
@@ -662,6 +686,31 @@ export const ClaimDtoSchema = z.object({
   hoursAdjustedValue: z.number().nullable(),
 
   authScreenshotUrl: z.string().nullable(),
+
+  /**
+   * Maksim authorization gate (ADDITIVE gate on `NA_WERYFIKACJI`, independent
+   * of the manual `OCZEKUJE_NA_AUTORYZACJE` / `authorizationRequired` flow).
+   *
+   * When a verifier saves a verification and the compensation STRICTLY exceeds
+   * `getAuthThreshold(drivenDays)`, the accept/reject decision is HARD-BLOCKED
+   * (422 `CLAIM_AUTHORIZATION_REQUIRED`) until the verifier uploads a screenshot
+   * of Maksim's out-of-band confirmation (a `ClaimAttachment` with
+   * `category=AUTORYZACJA_MAKSIMA`).
+   *
+   *  - `maksimGateRequired`   — the gate is active for this claim.
+   *  - `maksimGateNotifiedAt` — when the auto-email to Maksim was sent (dedup;
+   *    `null` = not sent yet). The web reads this to show "powiadomiono Maksima".
+   *  - `maksimGateClearedAt`  — when the confirmation screenshot lifted the gate
+   *    (`null` while the gate is still blocking). Once set (and `Required`
+   *    stays `true`), the decision buttons re-enable.
+   *
+   * All three reset in lockstep with `verifiedAt` whenever the verification is
+   * invalidated (verifier period/mileage edit, delegation auto-recalc).
+   */
+  maksimGateRequired: z.boolean(),
+  maksimGateNotifiedAt: IsoDateTimeSchema.nullable(),
+  maksimGateClearedAt: IsoDateTimeSchema.nullable(),
+
   attachments: z.array(ClaimAttachmentDtoSchema),
 
   /**
@@ -681,6 +730,17 @@ export const ClaimDtoSchema = z.object({
    */
   delegationPlannedReturnAt: IsoDateSchema.nullable(),
   delegationActualReturnAt: IsoDateTimeSchema.nullable(),
+  /**
+   * The linked outing's lifecycle status, EMBEDDED on the claim so the pracownik
+   * ClaimModal can render the read-only "w trasie" banner and the FE in-transit
+   * gate keys off the SAME field the API gates on. `null` when there is no
+   * linked outing (legacy / pre-rework rows). When `'w_trasie'` the verifier-side
+   * actions (verify / request-authorization / accept / reject) are HARD-blocked
+   * server-side with 422 `CLAIM_DELEGATION_IN_TRANSIT`; a `'zjechal'` outing (or
+   * a null status) passes through. Reuses `DelegationStatusSchema` so the wire
+   * enum stays in lockstep with the Delegation DTO.
+   */
+  delegationStatus: DelegationStatusSchema.nullable(),
   /**
    * Set to `true` once a pracownik PATCHes `dateStart`/`dateEnd` — the boundary
    * that DISABLES the auto-recalc when the linked outing later transitions to

@@ -168,10 +168,18 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     origHoursAdjusted: 0,
     hoursAdjustedValue: 0,
     authScreenshotUrl: null,
+    maksimGateRequired: false,
+    maksimGateNotifiedAt: null,
+    maksimGateNotifiedAmount: null,
+    maksimGateClearedAt: null,
+    maksimGateClearedById: null,
     attachments: [],
     delegationId: null,
+    delegationDepartureAt: null,
+    delegationActualDepartureAt: null,
     delegationPlannedReturnAt: null,
     delegationActualReturnAt: null,
+    delegationStatus: null,
     periodAdjustedByVerifier: false,
     autoRecalcState: 'none',
     createdAt: new Date('2026-04-21T08:00:00.000Z'),
@@ -816,6 +824,122 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
     expect(repoFake.updateWithinCalls).toHaveLength(1);
   });
 
+  // ── Maksim authorization gate (CLAIM_AUTHORIZATION_REQUIRED) ───
+  //
+  // A decision FROM `NA_WERYFIKACJI` on an over-threshold VERIFIED claim is
+  // HARD-blocked until the confirmation screenshot cleared the gate. Stricter
+  // than CLAIM_NOT_VERIFIED. Blocks BOTH accept and reject. OCZEKUJE / REKLAMACJA
+  // paths are NOT gated here.
+
+  it('M1. verified NA_WERYFIKACJI → ZAAKCEPTOWANO with armed+uncleared gate throws 422 CLAIM_AUTHORIZATION_REQUIRED + no writes', async () => {
+    const seeded = makeClaim({
+      maksimGateRequired: true,
+      maksimGateClearedAt: null,
+    });
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    let caught: unknown;
+    try {
+      await svc.update(makeAuth('pracownik'), seeded.nrZgl, {
+        targetStatus: 'ZAAKCEPTOWANO',
+        orderNumber: 'ZL-1',
+        orderDate: '2026-04-30',
+        amountApproved: 1_400,
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(UnprocessableEntityException);
+    const body = (caught as UnprocessableEntityException).getResponse() as {
+      code?: string;
+      extensions?: { code?: string };
+    };
+    expect(body.code).toBe('CLAIM_AUTHORIZATION_REQUIRED');
+    // The machine code is ALSO carried under `extensions` so the global
+    // ProblemDetailsFilter lifts it into the RFC-7807 body — this is the exact
+    // JSON path the web reads (`body.extensions.code`).
+    expect(body.extensions?.code).toBe('CLAIM_AUTHORIZATION_REQUIRED');
+    expect(repoFake.updateWithinCalls).toHaveLength(0);
+    expect(km.calls).toHaveLength(0);
+  });
+
+  it('M2. armed+uncleared gate ALSO blocks ODRZUCONO (both decisions blocked)', async () => {
+    const seeded = makeClaim({
+      maksimGateRequired: true,
+      maksimGateClearedAt: null,
+    });
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    let caught: unknown;
+    try {
+      await svc.update(makeAuth('pracownik'), seeded.nrZgl, {
+        targetStatus: 'ODRZUCONO',
+        comment: 'Odmowa.',
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(UnprocessableEntityException);
+    const body = (caught as UnprocessableEntityException).getResponse() as {
+      code?: string;
+      extensions?: { code?: string };
+    };
+    expect(body.code).toBe('CLAIM_AUTHORIZATION_REQUIRED');
+    expect(body.extensions?.code).toBe('CLAIM_AUTHORIZATION_REQUIRED');
+    expect(repoFake.updateWithinCalls).toHaveLength(0);
+  });
+
+  it('M3. armed gate that has been CLEARED passes the decision', async () => {
+    const seeded = makeClaim({
+      maksimGateRequired: true,
+      maksimGateClearedAt: new Date('2026-04-21T10:00:00.000Z'),
+      maksimGateClearedById: 'u-maksim-clearer',
+    });
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const out = await svc.update(makeAuth('pracownik'), seeded.nrZgl, {
+      targetStatus: 'ZAAKCEPTOWANO',
+      orderNumber: 'ZL-1',
+      orderDate: '2026-04-30',
+      amountApproved: 1_400,
+    });
+
+    expect(out.status).toBe('ZAAKCEPTOWANO');
+    expect(repoFake.updateWithinCalls).toHaveLength(1);
+  });
+
+  it('M4. gate NOT required (below threshold) passes without a clearance', async () => {
+    // maksimGateRequired=false is the default fixture — the decision goes through.
+    const seeded = makeClaim();
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const out = await svc.update(makeAuth('pracownik'), seeded.nrZgl, {
+      targetStatus: 'ZAAKCEPTOWANO',
+      orderNumber: 'ZL-1',
+      orderDate: '2026-04-30',
+      amountApproved: 1_400,
+    });
+
+    expect(out.status).toBe('ZAAKCEPTOWANO');
+    expect(repoFake.updateWithinCalls).toHaveLength(1);
+  });
+
   // ── hours-adjusted Decimal split (orig vs value) ──────────
   //
   // Locks in the post-migration storage shape for the carrier hours-
@@ -1069,6 +1193,171 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
     const updated = repoFake.rows.get(seeded.nrZgl)!;
     expect(updated.origHoursAdjusted).toBe(5.5);
     expect(updated.hoursAdjustedValue).toBe(5.5);
+  });
+
+  // ── in-transit gate (CLAIM_DELEGATION_IN_TRANSIT) ─────────
+  //
+  // A decision (accept / reject) is HARD-blocked while the LINKED outing is
+  // still `w_trasie` — the period/mileage isn't final until `zjechal`. This is
+  // the OUTERMOST gate: on a still-driving + unverified claim it fires BEFORE
+  // CLAIM_NOT_VERIFIED. A `zjechal` outing (or a claim with no `delegationId`)
+  // passes through. Blocks BOTH accept and reject.
+
+  it('T1. ZAAKCEPTOWANO on a claim whose linked outing is w_trasie throws 422 CLAIM_DELEGATION_IN_TRANSIT + no writes', async () => {
+    const seeded = makeClaim({
+      delegationId: 'deleg-1',
+      delegationStatus: 'w_trasie',
+    });
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    let caught: unknown;
+    try {
+      await svc.update(makeAuth('pracownik'), seeded.nrZgl, {
+        targetStatus: 'ZAAKCEPTOWANO',
+        orderNumber: 'ZL-1',
+        orderDate: '2026-04-30',
+        amountApproved: 1_400,
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(UnprocessableEntityException);
+    const body = (caught as UnprocessableEntityException).getResponse() as {
+      code?: string;
+      extensions?: { code?: string };
+    };
+    expect(body.code).toBe('CLAIM_DELEGATION_IN_TRANSIT');
+    expect(body.extensions?.code).toBe('CLAIM_DELEGATION_IN_TRANSIT');
+    // Gate fires before persistence and before km-calc.
+    expect(repoFake.updateWithinCalls).toHaveLength(0);
+    expect(km.calls).toHaveLength(0);
+  });
+
+  it('T2. ODRZUCONO on a claim whose linked outing is w_trasie is ALSO gated', async () => {
+    const seeded = makeClaim({
+      delegationId: 'deleg-1',
+      delegationStatus: 'w_trasie',
+    });
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    let caught: unknown;
+    try {
+      await svc.update(makeAuth('pracownik'), seeded.nrZgl, {
+        targetStatus: 'ODRZUCONO',
+        comment: 'Odmowa.',
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(UnprocessableEntityException);
+    const body = (caught as UnprocessableEntityException).getResponse() as {
+      code?: string;
+    };
+    expect(body.code).toBe('CLAIM_DELEGATION_IN_TRANSIT');
+    expect(repoFake.updateWithinCalls).toHaveLength(0);
+  });
+
+  it('T3. ordering — a w_trasie + UNVERIFIED claim reports IN_TRANSIT, not NOT_VERIFIED (in-transit gate is outermost)', async () => {
+    const seeded = makeClaim({
+      delegationId: 'deleg-1',
+      delegationStatus: 'w_trasie',
+      verifiedAt: null,
+      verifiedById: null,
+    });
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    let caught: unknown;
+    try {
+      await svc.update(makeAuth('pracownik'), seeded.nrZgl, {
+        targetStatus: 'ZAAKCEPTOWANO',
+        orderNumber: 'ZL-1',
+        orderDate: '2026-04-30',
+        amountApproved: 1_400,
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(UnprocessableEntityException);
+    const body = (caught as UnprocessableEntityException).getResponse() as {
+      code?: string;
+    };
+    // In-transit gate wins the race — the in-transit code, NOT CLAIM_NOT_VERIFIED.
+    expect(body.code).toBe('CLAIM_DELEGATION_IN_TRANSIT');
+    expect(repoFake.updateWithinCalls).toHaveLength(0);
+  });
+
+  it('T4. ZAAKCEPTOWANO passes when the linked outing has returned (zjechal)', async () => {
+    const seeded = makeClaim({
+      delegationId: 'deleg-1',
+      delegationStatus: 'zjechal',
+    });
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const out = await svc.update(makeAuth('pracownik'), seeded.nrZgl, {
+      targetStatus: 'ZAAKCEPTOWANO',
+      orderNumber: 'ZL-1',
+      orderDate: '2026-04-30',
+      amountApproved: 1_400,
+    });
+
+    expect(out.status).toBe('ZAAKCEPTOWANO');
+    expect(repoFake.updateWithinCalls).toHaveLength(1);
+  });
+
+  it('T5. ODRZUCONO passes when the linked outing has returned (zjechal)', async () => {
+    const seeded = makeClaim({
+      delegationId: 'deleg-1',
+      delegationStatus: 'zjechal',
+    });
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const out = await svc.update(makeAuth('pracownik'), seeded.nrZgl, {
+      targetStatus: 'ODRZUCONO',
+      comment: 'Odmowa po zjeździe.',
+    });
+
+    expect(out.status).toBe('ODRZUCONO');
+    expect(repoFake.updateWithinCalls).toHaveLength(1);
+  });
+
+  it('T6. no linked outing (delegationId null) → decision passes (gate no-op)', async () => {
+    // Default fixture already has delegationId null; assert the gate is inert.
+    const seeded = makeClaim();
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const out = await svc.update(makeAuth('pracownik'), seeded.nrZgl, {
+      targetStatus: 'ZAAKCEPTOWANO',
+      orderNumber: 'ZL-1',
+      orderDate: '2026-04-30',
+      amountApproved: 1_400,
+    });
+
+    expect(out.status).toBe('ZAAKCEPTOWANO');
+    expect(repoFake.updateWithinCalls).toHaveLength(1);
   });
 });
 

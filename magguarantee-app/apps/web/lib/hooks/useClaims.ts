@@ -38,6 +38,7 @@ import {
   submitClaim,
   submitReklamacja,
   updateClaim,
+  uploadAuthorizationConfirmation,
   verifyClaim,
 } from '@/lib/api/claims';
 
@@ -248,6 +249,33 @@ export function useVerifyClaim(
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: VerifyClaimDto) => verifyClaim(nrZgl, body),
+    ...opts,
+    onSuccess: (...args) => {
+      qc.invalidateQueries({ queryKey: [...CLAIMS_KEY, 'detail', nrZgl] });
+      qc.invalidateQueries({ queryKey: CLAIMS_KEY });
+      opts?.onSuccess?.(...args);
+    },
+  });
+}
+
+/**
+ * `POST /claims/:nrZgl/authorization-confirmation` — Maksim authorization gate.
+ *
+ * Admin / pracownik uploads the screenshot of Maksim's out-of-band confirmation
+ * that CLEARS the over-threshold decision gate. The `multipart` upload persists
+ * an `AUTORYZACJA_MAKSIMA` attachment and returns the fresh `ClaimDto` with
+ * `maksimGateClearedAt` set — the mutation invalidates the claim detail (so the
+ * open ClaimModal re-renders with the cleared gate + the new attachment) and the
+ * list. `nrZgl` is bound at hook-call time so the call site stays terse —
+ * `mutate(file)`. Mirrors `useSetAuthorizationAmount` / `useVerifyClaim`.
+ */
+export function useUploadAuthorizationConfirmation(
+  nrZgl: string,
+  opts?: UseMutationOptions<ClaimDto, Error, File>,
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => uploadAuthorizationConfirmation(nrZgl, file),
     ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: [...CLAIMS_KEY, 'detail', nrZgl] });

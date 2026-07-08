@@ -19,7 +19,7 @@ import type {
   VerifyClaimDto,
 } from '@magguarantee/shared';
 
-import { apiJson } from './client';
+import { apiBlob, apiForm, apiJson } from './client';
 import { type Paginated, toQuery } from './query';
 
 export function listClaims(
@@ -182,5 +182,47 @@ export function verifyClaim(
   return apiJson<ClaimDto>(
     `/claims/${encodeURIComponent(nrZgl)}/verification`,
     { method: 'PATCH', json: body },
+  );
+}
+
+/**
+ * `POST /claims/:nrZgl/authorization-confirmation` — Maksim authorization gate.
+ *
+ * Uploads the screenshot of Maksim's out-of-band confirmation as a
+ * `multipart/form-data` request (the file rides as the `file` part — the API
+ * field name MUST match exactly). Roles admin / pracownik. The upload is
+ * persisted as a `ClaimAttachment` with `category = AUTORYZACJA_MAKSIMA` and
+ * CLEARS the over-threshold decision gate: the returned fresh `ClaimDto`
+ * carries `maksimGateClearedAt != null`, which re-enables the Akceptuj / Odrzuć
+ * controls. The web reads that flipped field — it never guesses the cleared
+ * state locally.
+ */
+export function uploadAuthorizationConfirmation(
+  nrZgl: string,
+  file: File,
+): Promise<ClaimDto> {
+  const fd = new FormData();
+  fd.append('file', file);
+  return apiForm<ClaimDto>(
+    `/claims/${encodeURIComponent(nrZgl)}/authorization-confirmation`,
+    fd,
+    { method: 'POST' },
+  );
+}
+
+/**
+ * `GET /claims/:nrZgl/authorization-confirmation/:attachmentId/download` —
+ * streams the uploaded confirmation screenshot. The endpoint is authenticated
+ * (NOT a public URL), so we fetch it through the auth/refresh-aware client and
+ * hand back a `Blob` the caller opens via an object-URL — same recipe as the
+ * carrier / vehicle attachment downloads.
+ */
+export function downloadAuthorizationConfirmation(
+  nrZgl: string,
+  attachmentId: string,
+): Promise<Blob> {
+  return apiBlob(
+    `/claims/${encodeURIComponent(nrZgl)}/authorization-confirmation/${attachmentId}/download`,
+    { method: 'GET' },
   );
 }
