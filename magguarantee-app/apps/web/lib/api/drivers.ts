@@ -29,7 +29,11 @@ export interface DriverAttachmentUploads {
 }
 
 /** Scalar fields that must be JSON-encoded as multipart string parts. */
-const ARRAY_FIELDS = new Set(['removeAttachmentIds']);
+const ARRAY_FIELDS = new Set([
+  'languages',
+  'adrClasses',
+  'removeAttachmentIds',
+]);
 
 /**
  * Serialises a driver DTO into `FormData`. Per the API multipart contract:

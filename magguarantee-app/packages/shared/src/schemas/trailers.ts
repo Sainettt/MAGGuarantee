@@ -19,28 +19,36 @@ import {
 
 const PlateSchema = z.string().min(2).max(16);
 
+/** Minimum count required for belts / mats / beams when their flag is true. */
+const MIN_SECURING_COUNT = 3;
+
 /**
- * Optional trailer attributes (excluding `trailerTypeId` which is now
- * required and lives on the create schema directly).
+ * Optional trailer attributes (excluding `trailerTypeId` and `sideClearanceCm`
+ * which are required and live on the create schema directly).
  */
 const trailerAttributeFields = {
   belts: z.boolean().optional(),
   // `.nullable()` (matching UpdateTrailerSchema): the create form can hold a
-  // `null` count (e.g. a hydrated draft, or RHF clearing the conditionally
-  // rendered input) while its checkbox is OFF. Without nullable the base
-  // `z.number()` rejects null with "Expected number, received null" on the
-  // count field even when the checkbox was never touched — the validation
-  // fails before the cross-field refine (which already null-checks) can ignore
-  // it. `cleanForm` strips null before the request, so the wire payload is
-  // unchanged. See trailerCountsRefine for the "checked ⇒ count required" rule.
+  // `null` count while its checkbox is OFF. See trailerCountsRefine for the
+  // "checked ⇒ count required AND ≥3" rule.
   beltsCount: z.number().int().min(0).nullable().optional(),
   mats: z.boolean().optional(),
   matsCount: z.number().int().min(0).nullable().optional(),
+  /** Belki zabezpieczające — mirrors belts/mats (checked ⇒ count ≥3). */
+  beams: z.boolean().optional(),
+  beamsCount: z.number().int().min(0).nullable().optional(),
   innerLength: z.number().nonnegative().optional(),
   innerWidth: z.number().nonnegative().optional(),
   innerHeight: z.number().nonnegative().optional(),
   capacity: z.number().nonnegative().optional(),
-  airSuspension: z.boolean().optional(),
+  /** Podnoszony dach (lifting roof). */
+  liftingRoof: z.boolean().optional(),
+  /** Odsuwany dach (sliding roof). `slidingRoof=true ⇒ edscha defined`. */
+  slidingRoof: z.boolean().optional(),
+  /** Edscha sliding-roof mechanism — meaningful only when slidingRoof=true. */
+  edscha: z.boolean().optional(),
+  /** Kosz paletowy (pallet box). */
+  palletBox: z.boolean().optional(),
   certXl: z.boolean().optional(),
   multilock: z.boolean().optional(),
   notes: emptyStringToUndefined(z.string().max(2_000).optional()),
@@ -49,11 +57,14 @@ const trailerAttributeFields = {
 // ─── Conditional rules ───────────────────────────────────
 
 /**
- * Shared cross-field rule used by both create and update: when `belts` /
- * `mats` is explicitly set to `true`, the matching count field must be
- * provided. Extracted as a function (not chained via `.superRefine`) so
- * callers can compose it onto a `.passthrough()` schema without losing
- * the underlying ZodObject — `ZodEffects` doesn't expose `.passthrough()`.
+ * Shared cross-field rule used by both create and update:
+ *  - `belts` / `mats` / `beams` = true ⇒ the matching count is provided AND
+ *    ≥ {@link MIN_SECURING_COUNT} (was: merely required).
+ *  - `slidingRoof` = true ⇒ `edscha` must be set (a defined boolean).
+ *
+ * Extracted as a function (not chained via `.superRefine`) so callers can
+ * compose it onto a `.passthrough()` schema without losing the underlying
+ * ZodObject — `ZodEffects` doesn't expose `.passthrough()`.
  */
 export const trailerCountsRefine = (
   d: {
@@ -61,21 +72,41 @@ export const trailerCountsRefine = (
     beltsCount?: number | null;
     mats?: boolean | null;
     matsCount?: number | null;
+    beams?: boolean | null;
+    beamsCount?: number | null;
+    slidingRoof?: boolean | null;
+    edscha?: boolean | null;
   },
   ctx: z.RefinementCtx,
 ): void => {
-  if (d.belts === true && (d.beltsCount === undefined || d.beltsCount === null)) {
+  const assertMin = (
+    flag: boolean | null | undefined,
+    count: number | null | undefined,
+    field: string,
+  ): void => {
+    if (flag !== true) return;
+    if (count === undefined || count === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${field} wymagany gdy ${field.replace('Count', '')}=true`,
+        path: [field],
+      });
+    } else if (count < MIN_SECURING_COUNT) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${field} musi być ≥${MIN_SECURING_COUNT}`,
+        path: [field],
+      });
+    }
+  };
+  assertMin(d.belts, d.beltsCount, 'beltsCount');
+  assertMin(d.mats, d.matsCount, 'matsCount');
+  assertMin(d.beams, d.beamsCount, 'beamsCount');
+  if (d.slidingRoof === true && (d.edscha === undefined || d.edscha === null)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'beltsCount wymagany gdy belts=true',
-      path: ['beltsCount'],
-    });
-  }
-  if (d.mats === true && (d.matsCount === undefined || d.matsCount === null)) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'matsCount wymagany gdy mats=true',
-      path: ['matsCount'],
+      message: 'edscha wymagany gdy slidingRoof=true',
+      path: ['edscha'],
     });
   }
 };
@@ -90,6 +121,8 @@ export const CreateTrailerObjectSchema = z
     /** REQUIRED — Trailer.trailerTypeId is NOT NULL since phase-2 migration. */
     trailerTypeId: UuidSchema,
     active: z.boolean().optional(),
+    /** REQUIRED — Trailer.sideClearanceCm is NOT NULL (boczny prześwit, cm). */
+    sideClearanceCm: z.number().int().min(0),
     ...trailerAttributeFields,
   })
   .strict();
@@ -109,18 +142,31 @@ export const UpdateTrailerObjectSchema = z
     plateNumber: PlateSchema.optional(),
     active: z.boolean().optional(),
     trailerTypeId: emptyStringToUndefined(UuidSchema.optional()),
+    /** sideClearanceCm is NOT NULL — PATCH may change it but not null it. */
+    sideClearanceCm: z.number().int().min(0).optional(),
     belts: z.boolean().nullable().optional(),
     beltsCount: z.number().int().min(0).nullable().optional(),
     mats: z.boolean().nullable().optional(),
     matsCount: z.number().int().min(0).nullable().optional(),
+    beams: z.boolean().nullable().optional(),
+    beamsCount: z.number().int().min(0).nullable().optional(),
     innerLength: z.number().nonnegative().nullable().optional(),
     innerWidth: z.number().nonnegative().nullable().optional(),
     innerHeight: z.number().nonnegative().nullable().optional(),
     capacity: z.number().nonnegative().nullable().optional(),
-    airSuspension: z.boolean().nullable().optional(),
+    liftingRoof: z.boolean().nullable().optional(),
+    slidingRoof: z.boolean().nullable().optional(),
+    edscha: z.boolean().nullable().optional(),
+    palletBox: z.boolean().nullable().optional(),
     certXl: z.boolean().nullable().optional(),
     multilock: z.boolean().nullable().optional(),
     notes: emptyStringToUndefined(z.string().max(2_000).nullable().optional()),
+    /**
+     * Attachment ids to soft-delete as part of this update (multipart field
+     * `removeAttachmentIds`). Web sends it as a JSON-encoded string part — the
+     * controller coerces it before validation. Mirrors vehicles/drivers.
+     */
+    removeAttachmentIds: z.array(UuidSchema).max(64).optional(),
   })
   .strict();
 
@@ -142,6 +188,39 @@ export const TrailerFiltersSchema = z
   .strict();
 export type TrailerFilters = z.infer<typeof TrailerFiltersSchema>;
 
+// ─── Attachments ─────────────────────────────────────────
+
+/**
+ * Category of a Trailer attachment, mirroring the DB
+ * `enum TrailerAttachmentCategory`:
+ *  - `cert_xl` — XL certificate (certyfikat XL / EN 12642-XL). Required when
+ *    `Trailer.certXl=true`; MIME restricted to `application/pdf`.
+ *
+ * Single value for now — kept as an enum (not a literal) to mirror the
+ * Vehicle/Driver/Carrier attachment pattern and stay extensible.
+ */
+export const TrailerAttachmentCategorySchema = z.enum(['cert_xl']);
+export type TrailerAttachmentCategory = z.infer<
+  typeof TrailerAttachmentCategorySchema
+>;
+
+/**
+ * Public attachment DTO. NOTE: `storageKey` is deliberately omitted — it is
+ * an internal MinIO object key and never leaves the API. Clients download
+ * bytes via `GET /trailers/:id/attachments/:attachmentId/download`.
+ */
+export const TrailerAttachmentDtoSchema = z.object({
+  id: UuidSchema,
+  trailerId: UuidSchema,
+  category: TrailerAttachmentCategorySchema,
+  fileName: z.string(),
+  mimeType: z.string(),
+  size: z.number().int().nonnegative(),
+  uploadedById: UuidSchema.nullable(),
+  createdAt: IsoDateTimeSchema,
+});
+export type TrailerAttachmentDto = z.infer<typeof TrailerAttachmentDtoSchema>;
+
 // ─── Response DTO ────────────────────────────────────────
 
 export const TrailerDtoSchema = z.object({
@@ -160,11 +239,19 @@ export const TrailerDtoSchema = z.object({
   beltsCount: z.number().int().nullable(),
   mats: z.boolean().nullable(),
   matsCount: z.number().int().nullable(),
+  beams: z.boolean().nullable(),
+  beamsCount: z.number().int().nullable(),
   innerLength: z.number().nullable(),
   innerWidth: z.number().nullable(),
   innerHeight: z.number().nullable(),
   capacity: z.number().nullable(),
-  airSuspension: z.boolean().nullable(),
+  /** Boczny prześwit ładunkowy (cm) — NOT NULL. */
+  sideClearanceCm: z.number().int(),
+  liftingRoof: z.boolean(),
+  slidingRoof: z.boolean(),
+  /** Meaningful only when slidingRoof=true; nullable otherwise. */
+  edscha: z.boolean().nullable(),
+  palletBox: z.boolean(),
   certXl: z.boolean().nullable(),
   multilock: z.boolean().nullable(),
   notes: z.string().nullable(),
@@ -175,6 +262,8 @@ export const TrailerDtoSchema = z.object({
       name: z.string().nullable(),
     })
     .nullable(),
+  /** Non-deleted XL-certificate attachments for this trailer. */
+  attachments: z.array(TrailerAttachmentDtoSchema),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
 });

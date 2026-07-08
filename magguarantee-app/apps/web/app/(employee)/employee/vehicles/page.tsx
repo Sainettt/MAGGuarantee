@@ -23,7 +23,7 @@ import { useAuth } from '@/lib/hooks/useAuth';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useHardDeleteVehicle, useVehicles } from '@/lib/hooks/useVehicles';
 
-import { VehicleSheet } from './VehicleSheet';
+import { VehicleFormDialog } from './VehicleFormDialog';
 
 // TODO: GpsStatus column when Phase 5 fleet UI lands
 // (locked spec in docs/14-design-system.md § GPS status indicator).
@@ -98,8 +98,29 @@ export default function VehiclesPage() {
         id: 'plate',
         header: t('fields.plateNumber'),
         cell: (row) => (
-          <span className="font-mono font-semibold">{row.plateNumber}</span>
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="font-mono font-semibold">{row.plateNumber}</span>
+            {/* Amber «Brak skanu porozumienia» — non-blocking (§13.2.3). */}
+            {row.agreementScanMissing && (
+              <Badge variant="warning">{t('agreementScanMissing')}</Badge>
+            )}
+          </span>
         ),
+      },
+      {
+        id: 'fuelCard',
+        header: t('fields.fuelCard'),
+        align: 'center',
+        cell: (row) =>
+          row.fuelCard ? (
+            row.fuelCardBlocked ? (
+              <Badge variant="danger">{t('fuelCardStatus.blocked')}</Badge>
+            ) : (
+              <Badge variant="success">{t('fuelCardStatus.active')}</Badge>
+            )
+          ) : (
+            <span className="text-text-sub">—</span>
+          ),
       },
       {
         id: 'carrier',
@@ -254,7 +275,7 @@ export default function VehiclesPage() {
         onEdit={editFromDetail}
       />
 
-      <VehicleSheet
+      <VehicleFormDialog
         open={sheetOpen}
         vehicle={target}
         onClose={() => setSheetOpen(false)}

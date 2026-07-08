@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 
 import type { Prisma } from '@magguarantee/database';
-import type { DriverAttachmentCategory } from '@magguarantee/shared';
+import type {
+  DriverAttachmentCategory,
+  DriverLanguage,
+  DriverNationality,
+} from '@magguarantee/shared';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { INCLUDE_SOFT_DELETED } from '../prisma/soft-delete.extension';
@@ -42,6 +46,9 @@ export interface DriverRow {
   notes: string | null;
   active: boolean;
   adr: boolean;
+  nationality: DriverNationality;
+  languages: DriverLanguage[];
+  adrClasses: string[];
   carrier: { id: string; login: string; name: string | null } | null;
   attachments: DriverRowAttachment[];
   createdAt: Date;
@@ -141,6 +148,9 @@ export class DriversRepository {
     notes?: string | null;
     active?: boolean;
     adr?: boolean;
+    nationality: DriverNationality;
+    languages?: DriverLanguage[];
+    adrClasses?: string[];
   }): Promise<DriverRow> {
     const row = await this.prisma.tx.driver.create({
       data: {
@@ -156,6 +166,9 @@ export class DriversRepository {
         notes: data.notes ?? null,
         active: data.active ?? true,
         adr: data.adr ?? false,
+        nationality: data.nationality,
+        languages: data.languages ?? [],
+        adrClasses: data.adrClasses ?? [],
       },
       include: this.includeShape(),
     });
@@ -203,9 +216,11 @@ export class DriversRepository {
           user: { select: { login: true, name: true } },
         },
       },
-      // Live attachments only — the soft-delete extension filters `deletedAt`
-      // on the nested read as well as the parent.
+      // The soft-delete extension only intercepts TOP-LEVEL operations —
+      // nested relation reads bypass it, so the live-rows filter must be
+      // explicit here (ADR-cert enforcement reads this set).
       attachments: {
+        where: { deletedAt: null },
         orderBy: { createdAt: 'asc' },
         select: {
           id: true,
@@ -236,6 +251,9 @@ export class DriversRepository {
       notes: row.notes,
       active: row.active,
       adr: row.adr,
+      nationality: (row.nationality ?? 'OTHER') as DriverNationality,
+      languages: (row.languages ?? []) as DriverLanguage[],
+      adrClasses: row.adrClasses ?? [],
       carrier: row.carrier
         ? {
             id: row.carrier.id,
@@ -280,6 +298,9 @@ interface DriverPrismaShape {
   notes: string | null;
   active: boolean;
   adr: boolean;
+  nationality: DriverNationality | null;
+  languages: DriverLanguage[] | null;
+  adrClasses: string[] | null;
   carrier?: {
     id: string;
     user: { login: string; name: string | null };

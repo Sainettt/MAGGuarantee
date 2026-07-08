@@ -23,9 +23,9 @@
 // new entities through the wizard itself.
 
 import { CarrierSheet } from '@/app/(employee)/employee/carriers/CarrierSheet';
-import { DriverSheet } from '@/app/(employee)/employee/drivers/DriverSheet';
-import { TrailerSheet } from '@/app/(employee)/employee/trailers/TrailerSheet';
-import { VehicleSheet } from '@/app/(employee)/employee/vehicles/VehicleSheet';
+import { DriverFormDialog } from '@/app/(employee)/employee/drivers/DriverFormDialog';
+import { TrailerFormDialog } from '@/app/(employee)/employee/trailers/TrailerFormDialog';
+import { VehicleFormDialog } from '@/app/(employee)/employee/vehicles/VehicleFormDialog';
 
 import { useCarrierOnboarding } from './useCarrierOnboarding';
 
@@ -83,7 +83,7 @@ export function CarrierOnboardingWizard() {
 
   if (wizard.currentStep === 2) {
     return (
-      <VehicleSheet
+      <VehicleFormDialog
         open
         vehicle={null}
         onClose={() => wizard.close()}
@@ -98,7 +98,7 @@ export function CarrierOnboardingWizard() {
 
   if (wizard.currentStep === 3) {
     return (
-      <TrailerSheet
+      <TrailerFormDialog
         open
         trailer={null}
         onClose={() => wizard.close()}
@@ -113,7 +113,7 @@ export function CarrierOnboardingWizard() {
 
   // currentStep === 4
   return (
-    <DriverSheet
+    <DriverFormDialog
       open
       driver={null}
       onClose={() => wizard.close()}

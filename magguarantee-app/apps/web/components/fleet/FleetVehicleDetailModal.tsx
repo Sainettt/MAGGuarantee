@@ -50,6 +50,7 @@ export function FleetVehicleDetailModal({
   vehicle,
 }: Props) {
   const tFields = useTranslations('vehicles.fields');
+  const tVehicles = useTranslations('vehicles');
   const tSections = useTranslations('fleet.vehicle.sections');
   const tCommon = useTranslations('common');
   const tDetail = useTranslations('entityDetail');
@@ -85,13 +86,37 @@ export function FleetVehicleDetailModal({
       rows: [
         {
           // Quirk #2 — the GPS tracker device ID, NEVER "telefon". The `gps`
-          // on/off boolean was dropped (every vehicle is tracked); the device
-          // id is always present, so this is now the only GPS row.
+          // on/off boolean was dropped (every vehicle is tracked).
           label: tDetail('gpsDeviceId'),
           value: monoValue(vehicle.gpsMobilePhone),
         },
-        { label: tFields('fuelCard'), value: bool(vehicle.fuelCard) },
-        { label: tFields('agreement'), value: bool(vehicle.agreement) },
+        {
+          label: tFields('fuelCard'),
+          value: (
+            <span className="flex flex-wrap items-center gap-2">
+              {bool(vehicle.fuelCard)}
+              {vehicle.fuelCard &&
+                (vehicle.fuelCardBlocked ? (
+                  <Badge variant="danger">{tVehicles('fuelCardStatus.blocked')}</Badge>
+                ) : (
+                  <Badge variant="success">{tVehicles('fuelCardStatus.active')}</Badge>
+                ))}
+            </span>
+          ),
+        },
+        {
+          label: tFields('agreement'),
+          value: (
+            <span className="flex flex-wrap items-center gap-2">
+              {bool(vehicle.agreement)}
+              {vehicle.agreementScanMissing && (
+                <Badge variant="warning">
+                  {tVehicles('agreementScanMissing')}
+                </Badge>
+              )}
+            </span>
+          ),
+        },
       ],
     },
     {

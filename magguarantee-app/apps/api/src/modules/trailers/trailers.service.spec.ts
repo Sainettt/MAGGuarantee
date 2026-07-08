@@ -8,10 +8,13 @@ import {
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import type { CarrierRow } from '../carriers/carriers.repository';
 import { CarriersRepository } from '../carriers/carriers.repository';
+import { StorageService } from '../storage/storage.service';
 import {
   TrailerTypesRepository,
   type TrailerTypeRow,
 } from '../trailer-types/trailer-types.repository';
+import type { CategorizedUpload } from './attachment-validation';
+import { TrailerAttachmentsRepository } from './trailer-attachments.repository';
 import { TrailersRepository, type TrailerRow } from './trailers.repository';
 import { TrailersService } from './trailers.service';
 
@@ -34,15 +37,22 @@ function makeTrailer(overrides: Partial<TrailerRow> = {}): TrailerRow {
     beltsCount: null,
     mats: null,
     matsCount: null,
+    beams: null,
+    beamsCount: null,
     innerLength: null,
     innerWidth: null,
     innerHeight: null,
     capacity: null,
-    airSuspension: null,
+    sideClearanceCm: 60,
+    liftingRoof: false,
+    slidingRoof: false,
+    edscha: null,
+    palletBox: false,
     certXl: null,
     multilock: null,
     notes: null,
     carrier: { id: 'c-1', login: 'pwz1', name: null },
+    attachments: [],
     createdAt: NOW,
     updatedAt: NOW,
     deletedAt: null,
@@ -189,99 +199,248 @@ function makeTypesRepo(seed: TrailerTypeRow[] = []): TrailerTypesRepository {
   } as unknown as TrailerTypesRepository;
 }
 
+function makeAttachmentsRepo(): TrailerAttachmentsRepository {
+  return {
+    listByTrailer: jest.fn(async () => []),
+    findById: jest.fn(async () => null),
+    create: jest.fn(async (input: { trailerId: string }) => ({
+      id: 'att-new',
+      trailerId: input.trailerId,
+      category: 'cert_xl',
+      storageKey: 'trailers/x/cert_xl/f.pdf',
+      fileName: 'cert.pdf',
+      mimeType: 'application/pdf',
+      size: 1,
+      uploadedById: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+      deletedAt: null,
+    })),
+    softDelete: jest.fn(async () => undefined),
+    hardDelete: jest.fn(async () => undefined),
+  } as unknown as TrailerAttachmentsRepository;
+}
+
+function makeStorage(): StorageService {
+  return {
+    put: jest.fn(async () => undefined),
+    delete: jest.fn(async () => undefined),
+    getObject: jest.fn(async () => ({
+      body: undefined,
+      contentType: 'application/pdf',
+      contentLength: 1,
+    })),
+  } as unknown as StorageService;
+}
+
+/** Builds a service with the two storage-side deps stubbed. */
+function build(
+  trailersRepo: TrailersRepository,
+  carriersRepo: CarriersRepository,
+  typesRepo: TrailerTypesRepository,
+  attachmentsRepo: TrailerAttachmentsRepository = makeAttachmentsRepo(),
+  storage: StorageService = makeStorage(),
+): TrailersService {
+  return new TrailersService(
+    trailersRepo,
+    carriersRepo,
+    typesRepo,
+    attachmentsRepo,
+    storage,
+  );
+}
+
+/** A valid in-memory cert_xl (PDF) upload. */
+function makeCertXlUpload(): CategorizedUpload {
+  return {
+    category: 'cert_xl',
+    file: {
+      fieldname: 'certXl',
+      originalname: 'cert.pdf',
+      mimetype: 'application/pdf',
+      size: 2048,
+      buffer: Buffer.from('pdf'),
+    },
+  };
+}
+
+/** Base create dto — sideClearanceCm is REQUIRED. */
+function createDto(overrides: Record<string, unknown> = {}) {
+  return {
+    carrierId: 'c-1',
+    plateNumber: 'NA0002',
+    trailerTypeId: 'tt-1',
+    sideClearanceCm: 60,
+    ...overrides,
+  } as Parameters<TrailersService['create']>[1];
+}
+
 describe('TrailersService', () => {
   it('admin creates trailer with valid active trailerTypeId', async () => {
     const t = makeType({ id: 'tt-1', active: true });
-    const svc = new TrailersService(
+    const svc = build(
       makeTrailersRepo(),
       makeCarriersRepo([makeCarrier()]),
       makeTypesRepo([t]),
     );
-    const out = await svc.create(makeAuth('admin', 'a-1'), {
-      carrierId: 'c-1',
-      plateNumber: 'NA0002',
-      trailerTypeId: 'tt-1',
-    });
+    const out = await svc.create(makeAuth('admin', 'a-1'), createDto(), []);
     expect(out.plateNumber).toBe('NA0002');
     expect(out.trailerTypeId).toBe('tt-1');
   });
 
   it('rejects creation with inactive trailerTypeId (422)', async () => {
     const t = makeType({ id: 'tt-1', active: false });
-    const svc = new TrailersService(
+    const svc = build(
       makeTrailersRepo(),
       makeCarriersRepo([makeCarrier()]),
       makeTypesRepo([t]),
     );
     await expect(
-      svc.create(makeAuth('admin', 'a-1'), {
-        carrierId: 'c-1',
-        plateNumber: 'NA0002',
-        trailerTypeId: 'tt-1',
-      }),
+      svc.create(makeAuth('admin', 'a-1'), createDto(), []),
     ).rejects.toThrow(UnprocessableEntityException);
   });
 
   it('rejects creation with missing trailerTypeId (422)', async () => {
-    const svc = new TrailersService(
+    const svc = build(
       makeTrailersRepo(),
       makeCarriersRepo([makeCarrier()]),
       makeTypesRepo(),
     );
     await expect(
-      svc.create(makeAuth('admin', 'a-1'), {
-        carrierId: 'c-1',
-        plateNumber: 'NA0002',
-        trailerTypeId: 'tt-missing',
-      }),
+      svc.create(
+        makeAuth('admin', 'a-1'),
+        createDto({ trailerTypeId: 'tt-missing' }),
+        [],
+      ),
     ).rejects.toThrow(UnprocessableEntityException);
   });
 
   it('translates duplicate (carrierId, plateNumber) into 409', async () => {
     const dup = makeTrailer({ carrierId: 'c-1', plateNumber: 'NA0001' });
     const t = makeType({ id: 'tt-1', active: true });
-    const svc = new TrailersService(
+    const svc = build(
       makeTrailersRepo([dup]),
       makeCarriersRepo([makeCarrier()]),
       makeTypesRepo([t]),
     );
     await expect(
-      svc.create(makeAuth('admin', 'a-1'), {
-        carrierId: 'c-1',
-        plateNumber: 'NA0001',
-        trailerTypeId: 'tt-1',
-      }),
+      svc.create(makeAuth('admin', 'a-1'), createDto({ plateNumber: 'NA0001' }), []),
     ).rejects.toThrow(ConflictException);
   });
 
   it('opiekun cannot create on non-owned carrier (403)', async () => {
     const carrier = makeCarrier({ id: 'c-other', opiekunId: 'op-2' });
     const t = makeType({ id: 'tt-1', active: true });
-    const svc = new TrailersService(
+    const svc = build(
       makeTrailersRepo(),
       makeCarriersRepo([carrier]),
       makeTypesRepo([t]),
     );
     await expect(
-      svc.create(makeAuth('opiekun', 'op-1'), {
-        carrierId: 'c-other',
-        plateNumber: 'NA0009',
-        trailerTypeId: 'tt-1',
-      }),
+      svc.create(
+        makeAuth('opiekun', 'op-1'),
+        createDto({ carrierId: 'c-other', plateNumber: 'NA0009' }),
+        [],
+      ),
     ).rejects.toThrow(ForbiddenException);
   });
 
   it('getById 404 on missing trailer', async () => {
-    const svc = new TrailersService(
-      makeTrailersRepo(),
-      makeCarriersRepo(),
-      makeTypesRepo(),
-    );
+    const svc = build(makeTrailersRepo(), makeCarriersRepo(), makeTypesRepo());
     await expect(svc.getById('missing')).rejects.toThrow(NotFoundException);
   });
 
-  // NOTE: the old advance-onboardingStatus side-effect tests were removed
-  // alongside migration `20260519142043_drop_carrier_onboarding_status`.
-  // Onboarding state is derived on read from the live `_count` of active
-  // children — see `carriers.service.spec.ts`.
+  // ── cert_xl required-attachment rule ──────────────────────
+
+  it('certXl=true without a cert_xl upload → 422', async () => {
+    const t = makeType({ id: 'tt-1', active: true });
+    const svc = build(
+      makeTrailersRepo(),
+      makeCarriersRepo([makeCarrier()]),
+      makeTypesRepo([t]),
+    );
+    await expect(
+      svc.create(makeAuth('admin', 'a-1'), createDto({ certXl: true }), []),
+    ).rejects.toThrow(UnprocessableEntityException);
+  });
+
+  it('certXl=true WITH a cert_xl PDF upload succeeds', async () => {
+    const t = makeType({ id: 'tt-1', active: true });
+    const svc = build(
+      makeTrailersRepo(),
+      makeCarriersRepo([makeCarrier()]),
+      makeTypesRepo([t]),
+    );
+    await expect(
+      svc.create(makeAuth('admin', 'a-1'), createDto({ certXl: true }), [
+        makeCertXlUpload(),
+      ]),
+    ).resolves.toMatchObject({ plateNumber: 'NA0002' });
+  });
+
+  // ── min-3 counts + edscha cross-field rules ───────────────
+
+  it('belts=true with beltsCount<3 → 422', async () => {
+    const t = makeType({ id: 'tt-1', active: true });
+    const svc = build(
+      makeTrailersRepo(),
+      makeCarriersRepo([makeCarrier()]),
+      makeTypesRepo([t]),
+    );
+    await expect(
+      svc.create(
+        makeAuth('admin', 'a-1'),
+        createDto({ belts: true, beltsCount: 2 }),
+        [],
+      ),
+    ).rejects.toThrow(UnprocessableEntityException);
+  });
+
+  it('beams=true with beamsCount≥3 succeeds', async () => {
+    const t = makeType({ id: 'tt-1', active: true });
+    const svc = build(
+      makeTrailersRepo(),
+      makeCarriersRepo([makeCarrier()]),
+      makeTypesRepo([t]),
+    );
+    await expect(
+      svc.create(
+        makeAuth('admin', 'a-1'),
+        createDto({ beams: true, beamsCount: 3 }),
+        [],
+      ),
+    ).resolves.toMatchObject({ plateNumber: 'NA0002' });
+  });
+
+  it('slidingRoof=true without edscha → 422', async () => {
+    const t = makeType({ id: 'tt-1', active: true });
+    const svc = build(
+      makeTrailersRepo(),
+      makeCarriersRepo([makeCarrier()]),
+      makeTypesRepo([t]),
+    );
+    await expect(
+      svc.create(
+        makeAuth('admin', 'a-1'),
+        createDto({ slidingRoof: true }),
+        [],
+      ),
+    ).rejects.toThrow(UnprocessableEntityException);
+  });
+
+  it('slidingRoof=true with edscha set succeeds', async () => {
+    const t = makeType({ id: 'tt-1', active: true });
+    const svc = build(
+      makeTrailersRepo(),
+      makeCarriersRepo([makeCarrier()]),
+      makeTypesRepo([t]),
+    );
+    await expect(
+      svc.create(
+        makeAuth('admin', 'a-1'),
+        createDto({ slidingRoof: true, edscha: true }),
+        [],
+      ),
+    ).resolves.toMatchObject({ plateNumber: 'NA0002' });
+  });
 });

@@ -43,7 +43,11 @@ const NUMBER_FIELDS = [
 ] as const;
 
 /** Field names that must be parsed as JSON arrays. */
-const ARRAY_FIELDS = ['wasteCountries', 'removeAttachmentIds'] as const;
+const ARRAY_FIELDS = [
+  'wasteCountries',
+  'adrClasses',
+  'removeAttachmentIds',
+] as const;
 
 /**
  * Normalises a raw multipart body into a JSON-shaped object ready for Zod.

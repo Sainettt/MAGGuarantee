@@ -29,6 +29,7 @@
     "validationFailedToast": "Uzupełnij podświetlone pola",
     "inactiveSuffix": "(nieaktywny)",
     "pcsShort": "szt.",
+    "adrClassOption": "Klasa {n}",
     "copy": "Kopiuj",
     "copied": "Skopiowano",
     "close": "Zamknij",
@@ -395,8 +396,10 @@
   },
   "fileUpload": {
     "prompt": "Przeciągnij pliki tutaj lub kliknij, aby wybrać",
-    "promptCompact": "Dodaj kolejny plik",
-    "constraints": "JPG, PNG, WebP, PDF · maks. 10 MB",
+    "promptCompact": "Dodaj plik lub upuść",
+    "constraints": "JPG, PNG, PDF · maks. 10 MB",
+    "constraintsPdf": "tylko PDF · maks. 10 MB",
+    "change": "Zmień",
     "errTooLarge": "Plik przekracza 10 MB",
     "errWrongType": "Nieobsługiwany typ pliku",
     "errUploadFailed": "Nie udało się przesłać pliku",
@@ -404,27 +407,35 @@
     "dropzoneAria": "Wybierz pliki do przesłania",
     "removeAria": "Usuń plik {name}",
     "fields": {
-      "contract": "Zrzut ekranu umowy",
+      "contract": "Umowa",
       "contractHint": "Załącz skan lub zdjęcie umowy — wymagane przy dodawaniu pojazdu.",
-      "cabotageDe": "Zrzut ekranu pozwolenia kabotażowego DE",
-      "cabotageFr": "Zrzut ekranu pozwolenia kabotażowego FR",
+      "gps": "Umowa GPS",
+      "agreement": "Skan porozumienia",
+      "cabotageDe": "Zezwolenie kabotażowe",
+      "cabotageDeInsurance": "Ubezpieczenie kabotażowe",
       "cabotageHint": "Załącz skan lub zdjęcie pozwolenia kabotażowego.",
+      "certXl": "Certyfikat XL (PDF)",
       "adr": "Świadectwo ADR",
       "adrHint": "Załącz skan lub zdjęcie świadectwa ADR kierowcy."
     },
     "required": {
       "contract": "Skan umowy jest wymagany przy dodawaniu pojazdu.",
-      "cabotage_de": "Wymagany skan pozwolenia kabotażowego DE.",
-      "cabotage_fr": "Wymagany skan pozwolenia kabotażowego FR.",
+      "gps": "Wymagany skan umowy GPS, gdy podano numer GPS.",
+      "cabotage_de": "Wymagane zezwolenie kabotażowe DE.",
+      "cabotage_de_insurance": "Wymagane ubezpieczenie kabotażowe DE.",
+      "cert_xl": "Wymagany skan certyfikatu XL (PDF).",
       "adr": "Wymagany skan świadectwa ADR gdy zaznaczono ADR."
     }
   },
   "multiSelect": {
     "placeholder": "Wybierz kraje…",
-    "searchPlaceholder": "Szukaj kraju…",
-    "noResults": "Nie znaleziono kraju",
+    "searchPlaceholder": "Szukaj…",
+    "noResults": "Brak wyników",
     "removeAria": "Usuń {name}",
-    "selectionSummary": "Kraje docelowe, wybrano {count}"
+    "selectionSummary": "Kraje docelowe, wybrano {count}",
+    "wastePlaceholder": "Wybierz kraje odpadowe…",
+    "adrPlaceholder": "Wybierz klasy ADR…",
+    "langPlaceholder": "Wybierz języki…"
   },
   "countries": {
     "AT": "Austria",
@@ -486,6 +497,9 @@
       "dispatchTeam": "Zespół prowadzący",
       "gpsMobilePhone": "Numer GPS",
       "fuelCard": "Karta paliwowa",
+      "fuelCardNumber": "Numer karty",
+      "fuelCardExpiry": "Data ważności",
+      "fuelCardPin": "PIN",
       "agreement": "Porozumienie",
       "rateDe": "Stawka DE",
       "rateUe": "Stawka UE",
@@ -496,6 +510,7 @@
       "cabotageDe": "Kabotaż DE",
       "cabotageFr": "Kabotaż FR",
       "adr": "ADR",
+      "adrClasses": "Klasy ADR",
       "gb": "GB",
       "it": "IT",
       "fr": "FR",
@@ -503,11 +518,39 @@
       "notes": "Notatki",
       "active": "Aktywny"
     },
+    "euroBadge": "EURO VI",
+    "fuelCardStatus": {
+      "label": "Status karty",
+      "active": "Karta aktywna",
+      "blocked": "Karta zablokowana",
+      "blockedReason": "Wymaga aktywnego porozumienia i wgranego skanu"
+    },
+    "agreementScanMissing": "Brak skanu porozumienia",
+    "wasteCountryOptions": {
+      "DE": "Niemcy",
+      "NL": "Holandia",
+      "AT": "Austria",
+      "BE": "Belgia",
+      "LUX": "Luksemburg",
+      "FR": "Francja",
+      "GB": "Wielka Brytania",
+      "IT": "Włochy",
+      "CZ": "Czechy",
+      "PL": "Polska"
+    },
     "sections": {
       "identification": "Identyfikacja",
+      "basic": "Dane podstawowe",
       "people": "Przypisanie",
       "equipment": "Wyposażenie",
       "rates": "Stawki",
+      "gps": "GPS",
+      "fuelCard": "Karta paliwowa",
+      "agreement": "Porozumienie",
+      "waste": "Odpady",
+      "cabotage": "Kabotaż",
+      "adr": "ADR",
+      "documents": "Dokumenty",
       "permissions": "Pozwolenia",
       "specialCountries": "Kraje specjalne",
       "specialCountriesHint": "Kraje, do których pojazd ma wszystkie pozwolenia na wjazd.",
@@ -519,8 +562,10 @@
     },
     "attachmentCategory": {
       "contract": "Umowa",
-      "cabotage_de": "Kabotaż DE",
-      "cabotage_fr": "Kabotaż FR"
+      "gps": "Umowa GPS",
+      "agreement": "Porozumienie",
+      "cabotage_de": "Zezwolenie kabotażowe DE",
+      "cabotage_de_insurance": "Ubezpieczenie kabotażowe DE"
     },
     "attachmentOpen": "Otwórz",
     "attachmentOpenError": "Nie udało się otworzyć pliku. Spróbuj ponownie.",
@@ -552,12 +597,39 @@
       "email": "E-mail",
       "idDocumentNumber": "Nr dokumentu tożsamości",
       "licenseExpiry": "Ważność prawa jazdy",
+      "nationality": "Narodowość",
+      "languages": "Języki komunikacji",
       "adr": "ADR",
+      "adrClasses": "Klasy ADR",
       "notes": "Notatki",
       "active": "Aktywny"
     },
+    "phonePrefixLabel": "Prefiks telefonu",
+    "nationalityOptions": {
+      "BY": "Białoruś",
+      "RUS": "Rosja",
+      "UA": "Ukraina",
+      "PL": "Polska",
+      "UZB": "Uzbekistan",
+      "KRG": "Kirgistan",
+      "KZ": "Kazachstan",
+      "OTHER": "Inne"
+    },
+    "languageOptions": {
+      "PL": "polski",
+      "RU": "rosyjski",
+      "EN": "angielski",
+      "UA": "ukraiński",
+      "DE": "niemiecki",
+      "OTHER": "inny"
+    },
     "sections": {
       "personal": "Dane osobowe i kontakt",
+      "personalData": "Dane osobowe",
+      "contact": "Kontakt",
+      "nationalityLangs": "Narodowość i języki",
+      "adr": "ADR",
+      "notesSection": "Notatki",
       "license": "Prawo jazdy",
       "assignment": "Przypisanie",
       "attachments": "Załączniki"
@@ -594,11 +666,17 @@
       "innerWidth": "Szerokość wewn. (m)",
       "innerHeight": "Wysokość wewn. (m)",
       "capacity": "Ładowność (t)",
+      "sideClearanceCm": "Boczny prześwit ład. (cm)",
       "belts": "Pasy",
       "beltsCount": "Liczba pasów",
       "mats": "Maty",
       "matsCount": "Liczba mat",
-      "airSuspension": "Zawieszenie pneum.",
+      "beams": "Belki zabezpieczające",
+      "beamsCount": "Liczba belek",
+      "liftingRoof": "Dach podnoszony",
+      "slidingRoof": "Dach odsuwany",
+      "edscha": "Edscha",
+      "palletBox": "Kosz paletowy",
       "certXl": "Certyfikat XL",
       "multilock": "Multilock",
       "notes": "Notatki",
@@ -606,9 +684,18 @@
     },
     "sections": {
       "identification": "Identyfikacja",
+      "basic": "Dane podstawowe",
       "dimensions": "Wymiary",
-      "equipment": "Wyposażenie"
-    }
+      "roof": "Dach",
+      "equipment": "Wyposażenie",
+      "certXl": "Certyfikat XL",
+      "notesSection": "Notatki",
+      "attachments": "Załączniki"
+    },
+    "attachmentCategory": {
+      "cert_xl": "Certyfikat XL"
+    },
+    "attachmentOpen": "Otwórz"
   },
   "trailerTypes": {
     "title": "Typy naczep",
@@ -1841,6 +1928,7 @@
       "sections": {
         "identification": "Identyfikacja",
         "dimensions": "Wymiary",
+        "roof": "Dach",
         "equipment": "Wyposażenie"
       }
     }

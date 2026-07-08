@@ -11,8 +11,10 @@ import { BadRequestException } from '@nestjs/common';
  *
  * ── Encoding contract for web (mirror exactly) ───────────
  *  - booleans  → the literal strings `'true'` / `'false'` (`active`, `adr`)
- *  - arrays    → a JSON-encoded string, e.g. `removeAttachmentIds='["…"]'`
- *  - strings   → as-is (firstName, lastName, phone, idDocumentNumber, …)
+ *  - arrays    → a JSON-encoded string, e.g. `languages='["PL"]'`,
+ *               `adrClasses='["3"]'`, `removeAttachmentIds='["…"]'`
+ *  - strings   → as-is (firstName, lastName, phone, idDocumentNumber,
+ *               nationality, …)
  *  - omitted   → omit the part entirely (an empty part is treated as omitted)
  */
 
@@ -20,7 +22,11 @@ import { BadRequestException } from '@nestjs/common';
 const BOOLEAN_FIELDS = ['active', 'adr'] as const;
 
 /** Field names that must be parsed as JSON arrays. */
-const ARRAY_FIELDS = ['removeAttachmentIds'] as const;
+const ARRAY_FIELDS = [
+  'languages',
+  'adrClasses',
+  'removeAttachmentIds',
+] as const;
 
 /**
  * Normalises a raw multipart driver body into a JSON-shaped object ready for

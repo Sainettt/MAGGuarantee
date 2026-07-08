@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
-import type { Prisma } from '@magguarantee/database';
+import type { Prisma, WasteCountry } from '@magguarantee/database';
 import type {
   VehicleAttachmentCategory,
   VehicleDispatchTeamDto,
@@ -47,8 +47,11 @@ export interface VehicleRow {
   active: boolean;
   notes: string | null;
   certificateL: boolean;
-  euro: 'V' | 'VI';
+  euro: 'VI';
   fuelCard: boolean;
+  fuelCardNumber: string | null;
+  fuelCardExpiry: Date | null;
+  fuelCardPin: string | null;
   type: 'MEGA' | 'STD' | 'COIL';
   gb: boolean | null;
   it: boolean | null;
@@ -64,7 +67,8 @@ export interface VehicleRow {
   cabotageDe: boolean;
   cabotageFr: boolean;
   adr: boolean;
-  gpsMobilePhone: string;
+  adrClasses: string[];
+  gpsMobilePhone: string | null;
   sideNumber: string | null;
   lastDroveAt: Date | null;
   plannerId: string | null;
@@ -348,8 +352,11 @@ export class VehiclesRepository {
     dispatchTeamId?: string | null;
     notes?: string | null;
     certificateL: boolean;
-    euro: 'V' | 'VI';
+    euro: 'VI';
     fuelCard?: boolean;
+    fuelCardNumber?: string | null;
+    fuelCardExpiry?: Date | null;
+    fuelCardPin?: string | null;
     type: 'MEGA' | 'STD' | 'COIL';
     gb?: boolean | null;
     it?: boolean | null;
@@ -364,12 +371,12 @@ export class VehiclesRepository {
     cabotageDe?: boolean;
     cabotageFr?: boolean;
     adr?: boolean;
+    adrClasses?: string[];
     /**
-     * Tracker device id — REQUIRED (NOT NULL since 2026-06-17). Every vehicle
-     * is GPS-tracked; the legacy `gps` toggle and its conditional CHECK were
-     * dropped, so there is no cross-field rule to pre-validate anymore.
+     * Tracker device id — OPTIONAL/nullable again since 2026-07. When a
+     * non-empty value is present the service requires a `gps` attachment.
      */
-    gpsMobilePhone: string;
+    gpsMobilePhone?: string | null;
     sideNumber?: string | null;
     createdById?: string | null;
   }): Promise<VehicleRow> {
@@ -384,6 +391,9 @@ export class VehiclesRepository {
         certificateL: data.certificateL,
         euro: data.euro,
         fuelCard: data.fuelCard ?? false,
+        fuelCardNumber: data.fuelCardNumber ?? null,
+        fuelCardExpiry: data.fuelCardExpiry ?? null,
+        fuelCardPin: data.fuelCardPin ?? null,
         type: data.type,
         gb: data.gb ?? null,
         it: data.it ?? null,
@@ -394,11 +404,12 @@ export class VehiclesRepository {
         rateExport: data.rateExport,
         rateImport: data.rateImport,
         wasteAllowed: data.wasteAllowed ?? false,
-        wasteCountries: data.wasteCountries ?? [],
+        wasteCountries: (data.wasteCountries ?? []) as WasteCountry[],
         cabotageDe: data.cabotageDe ?? false,
         cabotageFr: data.cabotageFr ?? false,
         adr: data.adr ?? false,
-        gpsMobilePhone: data.gpsMobilePhone,
+        adrClasses: data.adrClasses ?? [],
+        gpsMobilePhone: data.gpsMobilePhone ?? null,
         sideNumber: data.sideNumber ?? null,
         createdById: data.createdById ?? null,
       },
@@ -477,9 +488,14 @@ export class VehiclesRepository {
           opiekun: { select: { id: true, login: true, name: true } },
         },
       },
-      // The soft-delete extension auto-filters `deletedAt` on the nested
-      // read, so this returns live attachments only.
-      attachments: { orderBy: { createdAt: 'asc' } },
+      // The soft-delete extension only intercepts TOP-LEVEL operations —
+      // nested relation reads bypass it, so the live-rows filter must be
+      // explicit here. Derived flags (fuelCardBlocked/agreementScanMissing)
+      // and required-attachment enforcement both depend on this filter.
+      attachments: {
+        where: { deletedAt: null },
+        orderBy: { createdAt: 'asc' },
+      },
     } as const;
   }
 
@@ -494,8 +510,11 @@ export class VehiclesRepository {
       // extension's wider inferred type — never observed at runtime since
       // the column is NOT NULL post-phase3_blocks.
       certificateL: row.certificateL ?? false,
-      euro: row.euro ?? 'V',
+      euro: row.euro ?? 'VI',
       fuelCard: row.fuelCard,
+      fuelCardNumber: row.fuelCardNumber,
+      fuelCardExpiry: row.fuelCardExpiry,
+      fuelCardPin: row.fuelCardPin,
       type: row.type ?? 'STD',
       gb: row.gb,
       it: row.it,
@@ -510,6 +529,7 @@ export class VehiclesRepository {
       cabotageDe: row.cabotageDe,
       cabotageFr: row.cabotageFr,
       adr: row.adr,
+      adrClasses: row.adrClasses ?? [],
       gpsMobilePhone: row.gpsMobilePhone,
       sideNumber: row.sideNumber,
       lastDroveAt: row.lastDroveAt,
@@ -581,8 +601,11 @@ interface VehiclePrismaShape {
   notes: string | null;
   // Wide variants — soft-delete extension widens scalars in the inferred type.
   certificateL: boolean | null;
-  euro: 'V' | 'VI' | null;
+  euro: 'VI' | null;
   fuelCard: boolean;
+  fuelCardNumber: string | null;
+  fuelCardExpiry: Date | null;
+  fuelCardPin: string | null;
   type: 'MEGA' | 'STD' | 'COIL' | null;
   gb: boolean | null;
   it: boolean | null;
@@ -597,7 +620,8 @@ interface VehiclePrismaShape {
   cabotageDe: boolean;
   cabotageFr: boolean;
   adr: boolean;
-  gpsMobilePhone: string;
+  adrClasses: string[] | null;
+  gpsMobilePhone: string | null;
   sideNumber: string | null;
   lastDroveAt: Date | null;
   plannerId: string | null;

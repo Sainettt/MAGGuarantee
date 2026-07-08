@@ -21,7 +21,7 @@ import { useAuth } from '@/lib/hooks/useAuth';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useDrivers, useHardDeleteDriver } from '@/lib/hooks/useDrivers';
 
-import { DriverSheet } from './DriverSheet';
+import { DriverFormDialog } from './DriverFormDialog';
 
 export default function DriversPage() {
   const t = useTranslations('drivers');
@@ -242,7 +242,7 @@ export default function DriversPage() {
         onEdit={editFromDetail}
       />
 
-      <DriverSheet
+      <DriverFormDialog
         open={sheetOpen}
         driver={target}
         onClose={() => setSheetOpen(false)}

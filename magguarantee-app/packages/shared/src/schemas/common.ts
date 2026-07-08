@@ -64,6 +64,28 @@ export const TaxIdSchema = z
   );
 export type TaxId = z.infer<typeof TaxIdSchema>;
 
+// ─── ADR classes (shared by Vehicle + Driver) ─────────────
+
+/**
+ * ADR top-level transport class ("1".."9"). Kept as a string enum (NOT a
+ * numeric one) because the DB stores these as `String[]` — Prisma enum values
+ * cannot start with a digit. Shared by `Vehicle.adrClasses` and
+ * `Driver.adrClasses`; both live in different domain files so the primitive
+ * belongs here (the common convention for cross-domain literals).
+ */
+export const AdrClassSchema = z.enum([
+  '1',
+  '2',
+  '3',
+  '4',
+  '5',
+  '6',
+  '7',
+  '8',
+  '9',
+]);
+export type AdrClass = z.infer<typeof AdrClassSchema>;
+
 // ─── Identifier primitives ────────────────────────────────
 
 /** RFC-4122 UUID v4 (Postgres `gen_random_uuid()` default). */

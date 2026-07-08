@@ -20,6 +20,7 @@
 import { z } from 'zod';
 
 import {
+  AdrClassSchema,
   IsoDateSchema,
   IsoDateTimeSchema,
   UuidSchema,
@@ -32,12 +33,33 @@ import { VehicleDispatchTeamSchema } from './teams';
 const PlateSchema = z.string().min(2).max(16);
 
 /**
- * EURO emission norm. Restricted to `V` / `VI` — the legacy `III` / `IV`
- * variants were removed (DB `enum EuroNorm` now `{ V VI }`). MAGTRANS no
- * longer onboards trucks below EURO V.
+ * EURO emission norm. Restricted to a SINGLE value `VI` — EURO III/IV were
+ * dropped 2026-05 and V was dropped 2026-07 (DB `enum EuroNorm` now `{ VI }`).
+ * MAGTRANS only admits EURO VI trucks to the km-guarantee program. Create
+ * defaults to `VI`.
  */
-export const EuroNormSchema = z.enum(['V', 'VI']);
+export const EuroNormSchema = z.enum(['VI']);
 export type EuroNorm = z.infer<typeof EuroNormSchema>;
+
+/**
+ * Countries where a vehicle may haul waste (`Vehicle.wasteCountries`, array).
+ * Mirror of the Prisma `enum WasteCountry` (the shared package cannot import
+ * the database package — keep this list in lockstep with schema.prisma).
+ * `LUX`/`GB` avoid ambiguous 2-letter reuse; the rest are ISO-ish shortcodes.
+ */
+export const WasteCountrySchema = z.enum([
+  'DE',
+  'NL',
+  'AT',
+  'BE',
+  'LUX',
+  'FR',
+  'GB',
+  'IT',
+  'CZ',
+  'PL',
+]);
+export type WasteCountry = z.infer<typeof WasteCountrySchema>;
 
 const VehicleTypeSchema = z.enum(['MEGA', 'STD', 'COIL']);
 
@@ -58,9 +80,25 @@ const vehicleAttributeFields = {
    * 20260515130307_vehicle_certificate_l_to_boolean.
    */
   certificateL: z.boolean(),
-  /** REQUIRED — Vehicle.euro is NOT NULL since phase3_blocks. */
-  euro: EuroNormSchema,
+  /** Vehicle.euro is NOT NULL; the sole admitted value is `VI` (defaults to VI). */
+  euro: EuroNormSchema.optional().default('VI'),
   fuelCard: z.boolean().optional().default(false),
+  /**
+   * Fuel-card detail fields. Populated only when `fuelCard=true`
+   * (cross-field-enforced by `vehicleFuelCardRefine` + the service). Nullable/
+   * optional so an omitted / empty part parses; the service normalises them to
+   * null when `fuelCard=false`.
+   *  - number — EXACTLY 16 digits
+   *  - expiry — ISO date (`YYYY-MM-DD`, `@db.Date`)
+   *  - pin    — 4–6 digits
+   */
+  fuelCardNumber: emptyStringToUndefined(
+    z.string().regex(/^\d{16}$/, 'fuelCardNumber musi mieć dokładnie 16 cyfr').optional(),
+  ),
+  fuelCardExpiry: emptyStringToUndefined(IsoDateSchema.optional()),
+  fuelCardPin: emptyStringToUndefined(
+    z.string().regex(/^\d{4,6}$/, 'fuelCardPin musi mieć 4–6 cyfr').optional(),
+  ),
   /** REQUIRED — Vehicle.type is NOT NULL since phase3_blocks. */
   type: VehicleTypeSchema,
   gb: z.boolean().optional(),
@@ -78,30 +116,107 @@ const vehicleAttributeFields = {
   rateExport: z.number().nonnegative(),
   rateImport: z.number().nonnegative(),
   wasteAllowed: z.boolean().optional(),
-  wasteCountries: z.array(z.string().max(8)).max(64).optional(),
+  /** Typed enum array (was free-text). `wasteAllowed=true ⇒ ≥1` (refine). */
+  wasteCountries: z.array(WasteCountrySchema).max(64).optional(),
   cabotageDe: z.boolean().optional(),
   cabotageFr: z.boolean().optional(),
   /**
-   * ADR cargo permit flag. Pure boolean — no attachment is required for it.
-   * The ADR certificate scan (świadectwo ADR) moved to the Driver as a
+   * ADR cargo permit flag. `adr=true ⇒ adrClasses ≥1` (refine + service). The
+   * ADR certificate scan (świadectwo ADR) lives on the Driver as a
    * `DriverAttachment` (2026-05-29); the vehicle keeps only this checkbox.
    */
   adr: z.boolean().optional(),
+  /** ADR top-level classes ("1".."9"). Meaningful only when `adr=true`. */
+  adrClasses: z.array(AdrClassSchema).max(9).optional(),
   /**
-   * Tracker device id — REQUIRED, non-empty. Every vehicle in the km-guarantee
-   * program is GPS-tracked, so the device id is always present
-   * (`Vehicle.gpsMobilePhone` is NOT NULL since the 2026-06-17 migration
-   * `drop_vehicle_gps_toggle_require_gps_device`). The legacy `gps` boolean
-   * toggle and the conditional `vehicle_gps_device_when_gps_on` CHECK were
-   * dropped, so there is no cross-field rule anymore.
+   * Tracker device id — OPTIONAL, nullable again since 2026-07 (not every
+   * vehicle carries a GPS device at create time). When a NON-EMPTY value is
+   * present the service requires a live `gps` VehicleAttachment (umowa GPS
+   * scan). Empty parts coerce to undefined.
    */
-  gpsMobilePhone: z.string().min(1).max(32),
+  gpsMobilePhone: emptyStringToUndefined(z.string().min(1).max(32).optional()),
   sideNumber: emptyStringToUndefined(z.string().max(16).optional()),
 };
 
+// ─── Cross-field refinements (shared by create + update) ──
+
+/**
+ * `fuelCard=true ⇒ fuelCardNumber + fuelCardExpiry + fuelCardPin` all present.
+ * Applied to both create and update object schemas; the service additionally
+ * asserts the post-patch effective state (Zod can't see a partial PATCH).
+ */
+export const vehicleFuelCardRefine = (
+  d: {
+    fuelCard?: boolean;
+    fuelCardNumber?: string | null;
+    fuelCardExpiry?: string | null;
+    fuelCardPin?: string | null;
+  },
+  ctx: z.RefinementCtx,
+): void => {
+  if (d.fuelCard !== true) return;
+  const missing = (v: string | null | undefined): boolean =>
+    v === undefined || v === null || v === '';
+  if (missing(d.fuelCardNumber)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'fuelCardNumber wymagany gdy fuelCard=true',
+      path: ['fuelCardNumber'],
+    });
+  }
+  if (missing(d.fuelCardExpiry)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'fuelCardExpiry wymagany gdy fuelCard=true',
+      path: ['fuelCardExpiry'],
+    });
+  }
+  if (missing(d.fuelCardPin)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'fuelCardPin wymagany gdy fuelCard=true',
+      path: ['fuelCardPin'],
+    });
+  }
+};
+
+/** `wasteAllowed=true ⇒ wasteCountries ≥1`; `adr=true ⇒ adrClasses ≥1`. */
+export const vehicleWasteAdrRefine = (
+  d: {
+    wasteAllowed?: boolean;
+    wasteCountries?: string[];
+    adr?: boolean;
+    adrClasses?: string[];
+  },
+  ctx: z.RefinementCtx,
+): void => {
+  if (d.wasteAllowed === true && (d.wasteCountries?.length ?? 0) < 1) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'wasteCountries wymaga min. 1 kraju gdy wasteAllowed=true',
+      path: ['wasteCountries'],
+    });
+  }
+  if (d.adr === true && (d.adrClasses?.length ?? 0) < 1) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'adrClasses wymaga min. 1 klasy gdy adr=true',
+      path: ['adrClasses'],
+    });
+  }
+};
+
+/** Counts the explicitly-`true` UK/IT/FR access flags. */
+const countUkItFr = (
+  gb?: boolean | null,
+  it?: boolean | null,
+  fr?: boolean | null,
+): number => [gb, it, fr].filter((v) => v === true).length;
+
 // ─── Create ──────────────────────────────────────────────
 
-export const CreateVehicleSchema = z
+/** Underlying ZodObject — exported so web/zodResolver can compose it. */
+export const CreateVehicleObjectSchema = z
   .object({
     carrierId: UuidSchema,
     plateNumber: PlateSchema,
@@ -109,11 +224,27 @@ export const CreateVehicleSchema = z
     ...vehicleAttributeFields,
   })
   .strict();
+
+export const CreateVehicleSchema = CreateVehicleObjectSchema.superRefine(
+  (d, ctx) => {
+    vehicleFuelCardRefine(d, ctx);
+    vehicleWasteAdrRefine(d, ctx);
+    // min 2 of {gb, it, fr} — enforced at create (undefined counts as false).
+    if (countUkItFr(d.gb, d.it, d.fr) < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Wymagane min. 2 z 3 dostępów: gb / it / fr',
+        path: ['gb'],
+      });
+    }
+  },
+);
 export type CreateVehicleDto = z.infer<typeof CreateVehicleSchema>;
 
 // ─── Update ──────────────────────────────────────────────
 
-export const UpdateVehicleSchema = z
+/** Underlying ZodObject — exported so web/zodResolver can compose it. */
+export const UpdateVehicleObjectSchema = z
   .object({
     plateNumber: PlateSchema.optional(),
     active: z.boolean().optional(),
@@ -122,8 +253,8 @@ export const UpdateVehicleSchema = z
      *  cannot be cleared to null (a vehicle must always keep a team). */
     dispatchTeamId: UuidSchema.optional(),
     notes: emptyStringToUndefined(z.string().max(2_000).nullable().optional()),
-    // The following five fields are NOT NULL since phase3_blocks. PATCH
-    // accepts an update (omit means "do not touch") but cannot null them.
+    // The following fields are NOT NULL since phase3_blocks. PATCH accepts an
+    // update (omit means "do not touch") but cannot null them.
     certificateL: z.boolean().optional(),
     euro: EuroNormSchema.optional(),
     type: VehicleTypeSchema.optional(),
@@ -132,23 +263,42 @@ export const UpdateVehicleSchema = z
     rateExport: z.number().nonnegative().optional(),
     rateImport: z.number().nonnegative().optional(),
     fuelCard: z.boolean().optional(),
+    /** Fuel-card detail — nullable (clearable) on update; service also clears
+     *  all three when fuelCard=false. */
+    fuelCardNumber: emptyStringToUndefined(
+      z
+        .string()
+        .regex(/^\d{16}$/, 'fuelCardNumber musi mieć dokładnie 16 cyfr')
+        .nullable()
+        .optional(),
+    ),
+    fuelCardExpiry: emptyStringToUndefined(IsoDateSchema.nullable().optional()),
+    fuelCardPin: emptyStringToUndefined(
+      z
+        .string()
+        .regex(/^\d{4,6}$/, 'fuelCardPin musi mieć 4–6 cyfr')
+        .nullable()
+        .optional(),
+    ),
     gb: z.boolean().nullable().optional(),
     it: z.boolean().nullable().optional(),
     fr: z.boolean().nullable().optional(),
     agreement: z.boolean().nullable().optional(),
     wasteAllowed: z.boolean().optional(),
-    wasteCountries: z.array(z.string().max(8)).max(64).optional(),
+    wasteCountries: z.array(WasteCountrySchema).max(64).optional(),
     cabotageDe: z.boolean().optional(),
     cabotageFr: z.boolean().optional(),
-    /** ADR cargo permit flag — pure boolean, no attachment required. */
+    /** ADR cargo permit flag. `adr=true ⇒ adrClasses ≥1` (refine + service). */
     adr: z.boolean().optional(),
+    adrClasses: z.array(AdrClassSchema).max(9).optional(),
     /**
-     * Tracker device id. NOT NULL in the column — a PATCH may change it but
-     * cannot null/blank it. `optional()` = "do not touch"; when present it must
-     * be non-empty. (Legacy `gps`-conditional rule removed — every vehicle is
-     * GPS-tracked.)
+     * Tracker device id — nullable (clearable) on update. When present it must
+     * be non-empty; a non-empty effective value requires a live `gps`
+     * attachment (service-side).
      */
-    gpsMobilePhone: z.string().min(1).max(32).optional(),
+    gpsMobilePhone: emptyStringToUndefined(
+      z.string().min(1).max(32).nullable().optional(),
+    ),
     sideNumber: emptyStringToUndefined(
       z.string().max(16).nullable().optional(),
     ),
@@ -161,6 +311,28 @@ export const UpdateVehicleSchema = z
     removeAttachmentIds: z.array(UuidSchema).max(64).optional(),
   })
   .strict();
+
+export const UpdateVehicleSchema = UpdateVehicleObjectSchema.superRefine(
+  (d, ctx) => {
+    vehicleFuelCardRefine(d, ctx);
+    vehicleWasteAdrRefine(d, ctx);
+    // min 2 of {gb, it, fr} — on PATCH only checkable when all three are
+    // present in the payload (the edit form always sends all three); the
+    // service asserts the authoritative post-patch effective state.
+    if (
+      d.gb !== undefined &&
+      d.it !== undefined &&
+      d.fr !== undefined &&
+      countUkItFr(d.gb, d.it, d.fr) < 2
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Wymagane min. 2 z 3 dostępów: gb / it / fr',
+        path: ['gb'],
+      });
+    }
+  },
+);
 export type UpdateVehicleDto = z.infer<typeof UpdateVehicleSchema>;
 
 // ─── Filters ─────────────────────────────────────────────
@@ -415,18 +587,23 @@ export type VehicleKmBoardDto = z.infer<typeof VehicleKmBoardDtoSchema>;
 /**
  * Category of a Vehicle attachment, mirroring the DB
  * `enum VehicleAttachmentCategory`:
- *  - `contract`    — scanned umowa (replaces the legacy `Vehicle.contract`)
- *  - `cabotage_de` — German cabotage permit screenshot
- *  - `cabotage_fr` — French cabotage permit screenshot
+ *  - `contract`             — scanned umowa (replaces the legacy `Vehicle.contract`)
+ *  - `gps`                  — umowa GPS scan (required when `gpsMobilePhone` is set)
+ *  - `agreement`            — porozumienie scan (SOFT — never save-blocking; gates
+ *                             the derived fuel-card BLOCKED state)
+ *  - `cabotage_de`          — German cabotage permit screenshot
+ *  - `cabotage_de_insurance`— German cabotage insurance (ubezpieczenie kabotażowe)
  *
- * The `adr` value was removed 2026-05-29 — the ADR certificate scan moved to
- * the Driver (świadectwo ADR) as a `DriverAttachment`. The `Vehicle.adr`
- * boolean stays as the permit flag but no longer requires an attachment.
+ * `cabotage_fr` was removed 2026-07 — kabotaż FR is a checkbox-only flag
+ * (`Vehicle.cabotageFr`), no scan. `adr` was removed 2026-05-29 — the ADR cert
+ * scan moved to the Driver (świadectwo ADR) as a `DriverAttachment`.
  */
 export const VehicleAttachmentCategorySchema = z.enum([
   'contract',
+  'gps',
+  'agreement',
   'cabotage_de',
-  'cabotage_fr',
+  'cabotage_de_insurance',
 ]);
 export type VehicleAttachmentCategory = z.infer<
   typeof VehicleAttachmentCategorySchema
@@ -460,6 +637,10 @@ export const VehicleDtoSchema = z.object({
   certificateL: z.boolean(),
   euro: EuroNormSchema,
   fuelCard: z.boolean(),
+  /** Fuel-card detail — populated only when `fuelCard=true`, else null. */
+  fuelCardNumber: z.string().nullable(),
+  fuelCardExpiry: IsoDateSchema.nullable(),
+  fuelCardPin: z.string().nullable(),
   type: VehicleTypeSchema,
   gb: z.boolean().nullable(),
   it: z.boolean().nullable(),
@@ -470,14 +651,15 @@ export const VehicleDtoSchema = z.object({
   rateExport: z.number().nullable(),
   rateImport: z.number().nullable(),
   wasteAllowed: z.boolean(),
-  wasteCountries: z.array(z.string()),
+  wasteCountries: z.array(WasteCountrySchema),
   cabotageDe: z.boolean(),
   cabotageFr: z.boolean(),
-  /** Default false in DB — always present on the wire. Pure permit flag; no
-   *  attachment is tied to it. */
+  /** Default false in DB — always present on the wire. `adr=true ⇒ adrClasses ≥1`. */
   adr: z.boolean(),
-  /** Tracker device id — always present (NOT NULL since 2026-06-17). */
-  gpsMobilePhone: z.string(),
+  /** ADR top-level classes ("1".."9"). Empty unless `adr=true`. */
+  adrClasses: z.array(AdrClassSchema),
+  /** Tracker device id — nullable again since 2026-07. */
+  gpsMobilePhone: z.string().nullable(),
   sideNumber: z.string().nullable(),
   lastDroveAt: IsoDateTimeSchema.nullable(),
   plannerId: UuidSchema.nullable(),
@@ -510,8 +692,20 @@ export const VehicleDtoSchema = z.object({
   opiekun: z
     .object({ id: UuidSchema, login: z.string(), name: z.string().nullable() })
     .nullable(),
-  /** Non-deleted umowa/cabotage attachments for this vehicle. */
+  /** Non-deleted umowa/gps/agreement/cabotage attachments for this vehicle. */
   attachments: z.array(VehicleAttachmentDtoSchema),
+  /**
+   * DERIVED server-side (never stored). `true` when the fuel card is present
+   * but blocked — `fuelCard=true` AND (`agreement!==true` OR no live
+   * `agreement` attachment / porozumienie scan).
+   */
+  fuelCardBlocked: z.boolean(),
+  /**
+   * DERIVED server-side (never stored). `true` when `agreement=true` but there
+   * is no live `agreement` attachment (porozumienie scan missing — SOFT, never
+   * save-blocking).
+   */
+  agreementScanMissing: z.boolean(),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
 });

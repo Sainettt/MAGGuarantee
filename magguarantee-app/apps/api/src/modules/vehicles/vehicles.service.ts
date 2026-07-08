@@ -41,6 +41,7 @@ import {
   VehicleAttachmentsRepository,
   type VehicleAttachmentRow,
 } from './vehicle-attachments.repository';
+import { computeVehicleDerivedFlags } from './vehicle-derived-flags';
 import {
   NO_TEAM_SENTINEL,
   VehiclesRepository,
@@ -135,9 +136,9 @@ export class VehiclesService {
     if (dto.plannerId) await this._assertRole(dto.plannerId, 'planista');
     if (dto.dispatchTeamId) await this._assertTeamActive(dto.dispatchTeamId);
 
-    // Required-attachment rule — checked BEFORE any write so a missing
-    // umowa/cabotage screenshot fails clean with 422 (no orphan rows).
-    this._assertRequiredAttachmentsOnCreate(dto, uploads);
+    // Required-attachment + cross-field rules — checked BEFORE any write so a
+    // missing screenshot / bad field combo fails clean with 422 (no orphans).
+    this._assertVehicleRulesOnCreate(dto, uploads);
 
     const row = await this._persistVehicle(user, dto);
     const persisted = await this._attachUploadsWithRollback(
@@ -184,15 +185,15 @@ export class VehiclesService {
     const removeIds = dto.removeAttachmentIds ?? [];
     const toRemove = await this._resolveRemovals(id, removeIds);
 
-    // Required-attachment rule over the post-update attachment set.
-    this._assertRequiredAttachmentsOnUpdate(
+    // Required-attachment + cross-field rules over the post-update state.
+    this._assertVehicleRulesOnUpdate(
       existing,
       dto,
       uploads,
       new Set(toRemove.map((a) => a.id)),
     );
 
-    const patch = this._buildUpdatePatch(dto);
+    const patch = this._buildUpdatePatch(existing, dto);
 
     // Guarantee Watchdog — maintain `Vehicle.agreementSince` on the agreement
     // toggle (plan §4). `agreement` is `Boolean?`; NULL is treated as false. Only
@@ -351,6 +352,8 @@ export class VehiclesService {
     user: AuthUser,
     dto: CreateVehicleDto,
   ): Promise<VehicleRow> {
+    // Normalise fuel-card fields: cleared to null unless fuelCard=true (rule 4).
+    const fuelCard = dto.fuelCard ?? false;
     try {
       return await this.vehicles.create({
         carrierId: dto.carrierId,
@@ -361,7 +364,11 @@ export class VehiclesService {
         notes: dto.notes ?? null,
         certificateL: dto.certificateL,
         euro: dto.euro,
-        fuelCard: dto.fuelCard,
+        fuelCard,
+        fuelCardNumber: fuelCard ? (dto.fuelCardNumber ?? null) : null,
+        fuelCardExpiry:
+          fuelCard && dto.fuelCardExpiry ? new Date(dto.fuelCardExpiry) : null,
+        fuelCardPin: fuelCard ? (dto.fuelCardPin ?? null) : null,
         type: dto.type,
         gb: dto.gb ?? null,
         it: dto.it ?? null,
@@ -376,7 +383,8 @@ export class VehiclesService {
         cabotageDe: dto.cabotageDe,
         cabotageFr: dto.cabotageFr,
         adr: dto.adr,
-        gpsMobilePhone: dto.gpsMobilePhone,
+        adrClasses: dto.adrClasses ?? [],
+        gpsMobilePhone: dto.gpsMobilePhone ?? null,
         sideNumber: dto.sideNumber ?? null,
         createdById: user.sub,
       });
@@ -388,7 +396,10 @@ export class VehiclesService {
     }
   }
 
-  private _buildUpdatePatch(dto: UpdateVehicleDto): Record<string, unknown> {
+  private _buildUpdatePatch(
+    existing: VehicleRow,
+    dto: UpdateVehicleDto,
+  ): Record<string, unknown> {
     const patch: Record<string, unknown> = {};
     const passthrough: (keyof UpdateVehicleDto)[] = [
       'plateNumber',
@@ -413,11 +424,31 @@ export class VehiclesService {
       'cabotageDe',
       'cabotageFr',
       'adr',
+      'adrClasses',
       'gpsMobilePhone',
       'sideNumber',
     ];
     for (const k of passthrough) {
       if (dto[k] !== undefined) patch[k] = dto[k];
+    }
+    // Fuel-card fields: cleared to null whenever the EFFECTIVE fuelCard is
+    // false (rule 4); otherwise apply the provided values (expiry → Date).
+    const effectiveFuelCard =
+      dto.fuelCard !== undefined ? dto.fuelCard : existing.fuelCard;
+    if (!effectiveFuelCard) {
+      patch.fuelCardNumber = null;
+      patch.fuelCardExpiry = null;
+      patch.fuelCardPin = null;
+    } else {
+      if (dto.fuelCardNumber !== undefined) {
+        patch.fuelCardNumber = dto.fuelCardNumber;
+      }
+      if (dto.fuelCardPin !== undefined) patch.fuelCardPin = dto.fuelCardPin;
+      if (dto.fuelCardExpiry !== undefined) {
+        patch.fuelCardExpiry = dto.fuelCardExpiry
+          ? new Date(dto.fuelCardExpiry)
+          : null;
+      }
     }
     if (dto.active !== undefined && !dto.active) {
       patch.deactivatedAt = new Date();
@@ -549,52 +580,59 @@ export class VehiclesService {
     return att;
   }
 
-  // ── Internals: required-attachment rule ──────────────────
+  // ── Internals: required-attachment + cross-field rules ───
 
   /**
-   * Create-time rule: `contract` (umowa) is ALWAYS required, plus every
-   * cabotage flag that is `true` must have ≥1 matching uploaded file. Throws
-   * 422 listing all missing categories.
-   *
-   * NOTE (2026-06-17, resolved): `contract` is unconditional here — unlike the
-   * update path it is added regardless of any flag (every vehicle has an umowa).
+   * Create-time rules. Throws a SINGLE 422 collecting every violation:
+   *   - attachments: `contract` (always) + `gps` (when gpsMobilePhone set) +
+   *     `cabotage_de` AND `cabotage_de_insurance` (when cabotageDe=true).
+   *   - cross-field (rules 4-7): fuel-card completeness, waste countries, adr
+   *     classes, min-2-of-{gb,it,fr}.
    */
-  private _assertRequiredAttachmentsOnCreate(
+  private _assertVehicleRulesOnCreate(
     dto: CreateVehicleDto,
     uploads: CategorizedUpload[],
   ): void {
     const present = this._categoriesPresent(uploads);
-    const required = this._requiredCategories(
-      dto.cabotageDe ?? false,
-      dto.cabotageFr ?? false,
-    );
+    const gpsPresent = this._nonEmpty(dto.gpsMobilePhone);
+    const required = this._requiredCategories(dto.cabotageDe ?? false, gpsPresent);
     // Unconditional on create: umowa scan must be present.
     required.add('contract');
-    this._assertCategoriesSatisfied(required, present);
+    const violations = [
+      ...this._attachmentViolations(required, present),
+      ...this._crossFieldViolations({
+        fuelCard: dto.fuelCard ?? false,
+        fuelCardNumber: dto.fuelCardNumber ?? null,
+        fuelCardExpiry: dto.fuelCardExpiry ?? null,
+        fuelCardPin: dto.fuelCardPin ?? null,
+        wasteAllowed: dto.wasteAllowed ?? false,
+        wasteCountries: dto.wasteCountries ?? [],
+        adr: dto.adr ?? false,
+        adrClasses: dto.adrClasses ?? [],
+        gb: dto.gb ?? null,
+        it: dto.it ?? null,
+        fr: dto.fr ?? null,
+      }),
+    ];
+    if (violations.length > 0) {
+      throw new UnprocessableEntityException({ violations });
+    }
   }
 
   /**
-   * Update-time rule: the post-update attachment set (existing live − removed
-   * + newly uploaded) must satisfy every CONDITIONAL flag that is `true` AFTER
-   * the patch.
-   *
-   * The unconditional `contract` (umowa) requirement is deliberately NOT
-   * enforced here — it only applies at create-time. Editing an existing vehicle
-   * (which may predate the rule, or whose umowa is managed separately) must not
-   * be blocked on the umowa scan. Only `_requiredCategories` (cabotage) drives
-   * the update assertion.
+   * Update-time rules over the post-update effective state. The attachment set
+   * is (existing live − removed + newly uploaded). `contract` is NOT re-imposed
+   * on update (editing an existing vehicle never re-blocks on the umowa scan);
+   * `gps` and the cabotage pair ARE re-checked against the effective flags.
    */
-  private _assertRequiredAttachmentsOnUpdate(
+  private _assertVehicleRulesOnUpdate(
     existing: VehicleRow,
     dto: UpdateVehicleDto,
     uploads: CategorizedUpload[],
     removedIds: Set<string>,
   ): void {
-    const nextCabotageDe =
-      dto.cabotageDe !== undefined ? dto.cabotageDe : existing.cabotageDe;
-    const nextCabotageFr =
-      dto.cabotageFr !== undefined ? dto.cabotageFr : existing.cabotageFr;
-    const required = this._requiredCategories(nextCabotageDe, nextCabotageFr);
+    const eff = this._effectiveState(existing, dto);
+    const required = this._requiredCategories(eff.cabotageDe, eff.gpsPresent);
 
     const survivingExisting = existing.attachments.filter(
       (a) => !removedIds.has(a.id),
@@ -603,7 +641,55 @@ export class VehiclesService {
       ...survivingExisting.map((a) => a.category),
       ...this._categoriesPresent(uploads),
     ]);
-    this._assertCategoriesSatisfied(required, present);
+    const violations = [
+      ...this._attachmentViolations(required, present),
+      ...this._crossFieldViolations(eff),
+    ];
+    if (violations.length > 0) {
+      throw new UnprocessableEntityException({ violations });
+    }
+  }
+
+  /** Merges existing + patch into the effective post-write state (rules 4-7). */
+  private _effectiveState(
+    existing: VehicleRow,
+    dto: UpdateVehicleDto,
+  ): {
+    cabotageDe: boolean;
+    gpsPresent: boolean;
+    fuelCard: boolean;
+    fuelCardNumber: string | null;
+    fuelCardExpiry: string | Date | null;
+    fuelCardPin: string | null;
+    wasteAllowed: boolean;
+    wasteCountries: string[];
+    adr: boolean;
+    adrClasses: string[];
+    gb: boolean | null;
+    it: boolean | null;
+    fr: boolean | null;
+  } {
+    const pick = <T>(next: T | undefined, prev: T): T =>
+      next !== undefined ? next : prev;
+    const gps = pick(dto.gpsMobilePhone, existing.gpsMobilePhone);
+    return {
+      cabotageDe: pick(dto.cabotageDe, existing.cabotageDe),
+      gpsPresent: this._nonEmpty(gps),
+      fuelCard: pick(dto.fuelCard, existing.fuelCard),
+      fuelCardNumber: pick(dto.fuelCardNumber, existing.fuelCardNumber),
+      fuelCardExpiry:
+        dto.fuelCardExpiry !== undefined
+          ? dto.fuelCardExpiry
+          : existing.fuelCardExpiry,
+      fuelCardPin: pick(dto.fuelCardPin, existing.fuelCardPin),
+      wasteAllowed: pick(dto.wasteAllowed, existing.wasteAllowed),
+      wasteCountries: pick(dto.wasteCountries, existing.wasteCountries),
+      adr: pick(dto.adr, existing.adr),
+      adrClasses: pick(dto.adrClasses, existing.adrClasses),
+      gb: pick(dto.gb, existing.gb),
+      it: pick(dto.it, existing.it),
+      fr: pick(dto.fr, existing.fr),
+    };
   }
 
   /** Set of attachment categories present among the uploaded files. */
@@ -614,42 +700,80 @@ export class VehiclesService {
   }
 
   /**
-   * Maps the CONDITIONAL cabotage flags to the set of required attachment
-   * categories. Shared by the create and update paths.
-   *
-   * The `contract` (umowa) category is intentionally NOT added here: it is
-   * unconditionally required only at create-time (added directly by
-   * `_assertRequiredAttachmentsOnCreate`), and must NOT be re-imposed on the
-   * update path — editing an existing vehicle never re-blocks on the umowa scan.
-   *
-   * NOTE (2026-06-17, resolved): this replaces the temporary state where the
-   * umowa requirement was dropped together with the legacy `gps=true ⇒ contract`
-   * trigger. See docs/13-api-design.md#vehicles — `contract` is now mandatory
-   * on every create, unconditionally.
+   * Maps the CONDITIONAL flags to required attachment categories (rules 2, 3):
+   *   - gpsPresent ⇒ `gps`
+   *   - cabotageDe ⇒ `cabotage_de` AND `cabotage_de_insurance`
+   * `agreement` is deliberately NOT required — the porozumienie scan is SOFT
+   * (its absence only surfaces the derived `agreementScanMissing`/
+   * `fuelCardBlocked` flags, never blocks a save). `contract` is added directly
+   * by the create path (unconditional at create-time only).
    */
   private _requiredCategories(
     cabotageDe: boolean,
-    cabotageFr: boolean,
+    gpsPresent: boolean,
   ): Set<VehicleAttachmentCategory> {
     const required = new Set<VehicleAttachmentCategory>();
-    if (cabotageDe) required.add('cabotage_de');
-    if (cabotageFr) required.add('cabotage_fr');
+    if (gpsPresent) required.add('gps');
+    if (cabotageDe) {
+      required.add('cabotage_de');
+      required.add('cabotage_de_insurance');
+    }
     return required;
   }
 
-  private _assertCategoriesSatisfied(
+  private _attachmentViolations(
     required: Set<VehicleAttachmentCategory>,
     present: Set<VehicleAttachmentCategory>,
-  ): void {
+  ): string[] {
     const violations: string[] = [];
     for (const cat of required) {
-      if (!present.has(cat)) {
-        violations.push(REQUIRED_ATTACHMENT_MESSAGES[cat]);
+      if (!present.has(cat)) violations.push(REQUIRED_ATTACHMENT_MESSAGES[cat]);
+    }
+    return violations;
+  }
+
+  /** Cross-field rules 4-7 over the effective vehicle state. */
+  private _crossFieldViolations(eff: {
+    fuelCard: boolean;
+    fuelCardNumber: string | null;
+    fuelCardExpiry: string | Date | null;
+    fuelCardPin: string | null;
+    wasteAllowed: boolean;
+    wasteCountries: string[];
+    adr: boolean;
+    adrClasses: string[];
+    gb: boolean | null;
+    it: boolean | null;
+    fr: boolean | null;
+  }): string[] {
+    const v: string[] = [];
+    // Rule 4 — fuel-card completeness.
+    if (eff.fuelCard) {
+      if (!/^\d{16}$/.test(eff.fuelCardNumber ?? '')) {
+        v.push(CROSS_FIELD_MESSAGES.fuelCardNumber);
+      }
+      if (!eff.fuelCardExpiry) v.push(CROSS_FIELD_MESSAGES.fuelCardExpiry);
+      if (!/^\d{4,6}$/.test(eff.fuelCardPin ?? '')) {
+        v.push(CROSS_FIELD_MESSAGES.fuelCardPin);
       }
     }
-    if (violations.length > 0) {
-      throw new UnprocessableEntityException({ violations });
+    // Rule 5 — waste countries.
+    if (eff.wasteAllowed && eff.wasteCountries.length < 1) {
+      v.push(CROSS_FIELD_MESSAGES.wasteCountries);
     }
+    // Rule 6 — adr classes.
+    if (eff.adr && eff.adrClasses.length < 1) {
+      v.push(CROSS_FIELD_MESSAGES.adrClasses);
+    }
+    // Rule 7 — min 2 of {gb, it, fr}.
+    const trues = [eff.gb, eff.it, eff.fr].filter((x) => x === true).length;
+    if (trues < 2) v.push(CROSS_FIELD_MESSAGES.ukItFr);
+    return v;
+  }
+
+  /** True when the string is present and non-blank. */
+  private _nonEmpty(v: string | null | undefined): boolean {
+    return typeof v === 'string' && v.trim().length > 0;
   }
 
   // ── Internals: scoping / role checks ─────────────────────
@@ -796,6 +920,11 @@ export class VehiclesService {
       certificateL: row.certificateL,
       euro: row.euro,
       fuelCard: row.fuelCard,
+      fuelCardNumber: row.fuelCardNumber,
+      fuelCardExpiry: row.fuelCardExpiry
+        ? row.fuelCardExpiry.toISOString().slice(0, 10)
+        : null,
+      fuelCardPin: row.fuelCardPin,
       type: row.type,
       gb: row.gb,
       it: row.it,
@@ -806,10 +935,11 @@ export class VehiclesService {
       rateExport: row.rateExport,
       rateImport: row.rateImport,
       wasteAllowed: row.wasteAllowed,
-      wasteCountries: row.wasteCountries,
+      wasteCountries: row.wasteCountries as VehicleDto['wasteCountries'],
       cabotageDe: row.cabotageDe,
       cabotageFr: row.cabotageFr,
       adr: row.adr,
+      adrClasses: row.adrClasses as VehicleDto['adrClasses'],
       gpsMobilePhone: row.gpsMobilePhone,
       sideNumber: row.sideNumber,
       lastDroveAt: row.lastDroveAt ? row.lastDroveAt.toISOString() : null,
@@ -820,6 +950,7 @@ export class VehiclesService {
       carrier: row.carrier,
       opiekun: row.opiekun,
       attachments: row.attachments.map((a) => vehicleRowAttachmentToDto(a)),
+      ...computeVehicleDerivedFlags(row),
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
@@ -829,18 +960,32 @@ export class VehiclesService {
 /**
  * Polish 422 messages for each missing required-attachment category.
  *
- * `contract` is unconditionally required on create (2026-06-17 product
- * resolution — every vehicle has an umowa); cabotage messages stay phrased
- * around their conditional flag.
+ * `contract` is unconditionally required on create; `gps` is required when a
+ * tracker device id is present; the two `cabotage_de*` scans are required
+ * together when cabotageDe=true. `agreement` never appears as a required
+ * violation (SOFT), but the Record must be total over the enum.
  */
 const REQUIRED_ATTACHMENT_MESSAGES: Record<VehicleAttachmentCategory, string> =
   {
     contract: 'Wymagany skan umowy (contract) przy tworzeniu pojazdu',
-    cabotage_de:
-      'Wymagany skan pozwolenia kabotażowego DE gdy cabotageDe=true',
-    cabotage_fr:
-      'Wymagany skan pozwolenia kabotażowego FR gdy cabotageFr=true',
+    gps: 'Wymagany skan umowy GPS (gps) gdy podano identyfikator GPS',
+    agreement: 'Wymagany skan porozumienia (agreement)',
+    cabotage_de: 'Wymagany skan pozwolenia kabotażowego DE gdy cabotageDe=true',
+    cabotage_de_insurance:
+      'Wymagany skan ubezpieczenia kabotażowego DE gdy cabotageDe=true',
   };
+
+/** Polish 422 messages for the cross-field rules (4-7). */
+const CROSS_FIELD_MESSAGES = {
+  fuelCardNumber:
+    'fuelCardNumber (16 cyfr) wymagany gdy fuelCard=true',
+  fuelCardExpiry: 'fuelCardExpiry wymagany gdy fuelCard=true',
+  fuelCardPin: 'fuelCardPin (4–6 cyfr) wymagany gdy fuelCard=true',
+  wasteCountries:
+    'wasteCountries wymaga min. 1 kraju gdy wasteAllowed=true',
+  adrClasses: 'adrClasses wymaga min. 1 klasy gdy adr=true',
+  ukItFr: 'Wymagane min. 2 z 3 dostępów: gb / it / fr',
+} as const;
 
 /** Maps a standalone attachment repo row to the public DTO (no storageKey). */
 function attachmentRowToDto(row: VehicleAttachmentRow): VehicleAttachmentDto {

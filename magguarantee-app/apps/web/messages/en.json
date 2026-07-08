@@ -29,6 +29,7 @@
     "validationFailedToast": "Please fill in the highlighted fields",
     "inactiveSuffix": "(inactive)",
     "pcsShort": "pcs.",
+    "adrClassOption": "Class {n}",
     "copy": "Copy",
     "copied": "Copied",
     "close": "Close",
@@ -395,8 +396,10 @@
   },
   "fileUpload": {
     "prompt": "Drag files here or click to choose",
-    "promptCompact": "Add another file",
-    "constraints": "JPG, PNG, WebP, PDF · max. 10 MB",
+    "promptCompact": "Add a file or drop",
+    "constraints": "JPG, PNG, PDF · max. 10 MB",
+    "constraintsPdf": "PDF only · max. 10 MB",
+    "change": "Change",
     "errTooLarge": "File exceeds 10 MB",
     "errWrongType": "Unsupported file type",
     "errUploadFailed": "Upload failed",
@@ -404,27 +407,35 @@
     "dropzoneAria": "Choose files to upload",
     "removeAria": "Remove file {name}",
     "fields": {
-      "contract": "Contract screenshot",
+      "contract": "Contract",
       "contractHint": "Attach a scan or photo of the contract — required when adding a vehicle.",
-      "cabotageDe": "DE cabotage permit screenshot",
-      "cabotageFr": "FR cabotage permit screenshot",
+      "gps": "GPS contract",
+      "agreement": "Agreement scan",
+      "cabotageDe": "Cabotage permit",
+      "cabotageDeInsurance": "Cabotage insurance",
       "cabotageHint": "Attach a scan or photo of the cabotage permit.",
+      "certXl": "XL certificate (PDF)",
       "adr": "ADR certificate",
       "adrHint": "Attach a scan or photo of the driver's ADR certificate."
     },
     "required": {
       "contract": "Contract scan is required when adding a vehicle.",
-      "cabotage_de": "DE cabotage permit scan required.",
-      "cabotage_fr": "FR cabotage permit scan required.",
+      "gps": "GPS contract scan required when a GPS number is set.",
+      "cabotage_de": "DE cabotage permit required.",
+      "cabotage_de_insurance": "DE cabotage insurance required.",
+      "cert_xl": "XL certificate scan (PDF) required.",
       "adr": "ADR certificate scan required when ADR is checked."
     }
   },
   "multiSelect": {
     "placeholder": "Choose countries…",
-    "searchPlaceholder": "Search country…",
-    "noResults": "No country found",
+    "searchPlaceholder": "Search…",
+    "noResults": "No results",
     "removeAria": "Remove {name}",
-    "selectionSummary": "Destination countries, {count} selected"
+    "selectionSummary": "Destination countries, {count} selected",
+    "wastePlaceholder": "Choose waste countries…",
+    "adrPlaceholder": "Choose ADR classes…",
+    "langPlaceholder": "Choose languages…"
   },
   "countries": {
     "AT": "Austria",
@@ -486,6 +497,9 @@
       "dispatchTeam": "Leading team",
       "gpsMobilePhone": "GPS number",
       "fuelCard": "Fuel card",
+      "fuelCardNumber": "Card number",
+      "fuelCardExpiry": "Expiry date",
+      "fuelCardPin": "PIN",
       "agreement": "Agreement",
       "rateDe": "Rate DE",
       "rateUe": "Rate UE",
@@ -496,6 +510,7 @@
       "cabotageDe": "Cabotage DE",
       "cabotageFr": "Cabotage FR",
       "adr": "ADR",
+      "adrClasses": "ADR classes",
       "gb": "GB",
       "it": "IT",
       "fr": "FR",
@@ -503,11 +518,39 @@
       "notes": "Notes",
       "active": "Active"
     },
+    "euroBadge": "EURO VI",
+    "fuelCardStatus": {
+      "label": "Card status",
+      "active": "Card active",
+      "blocked": "Card blocked",
+      "blockedReason": "Requires an active agreement and an uploaded scan"
+    },
+    "agreementScanMissing": "Agreement scan missing",
+    "wasteCountryOptions": {
+      "DE": "Germany",
+      "NL": "Netherlands",
+      "AT": "Austria",
+      "BE": "Belgium",
+      "LUX": "Luxembourg",
+      "FR": "France",
+      "GB": "United Kingdom",
+      "IT": "Italy",
+      "CZ": "Czechia",
+      "PL": "Poland"
+    },
     "sections": {
       "identification": "Identification",
+      "basic": "Basic details",
       "people": "People assigned",
       "equipment": "Equipment",
       "rates": "Rates",
+      "gps": "GPS",
+      "fuelCard": "Fuel card",
+      "agreement": "Agreement",
+      "waste": "Waste",
+      "cabotage": "Cabotage",
+      "adr": "ADR",
+      "documents": "Documents",
       "permissions": "Permissions",
       "specialCountries": "Special countries",
       "specialCountriesHint": "Countries the vehicle holds all entry permits for.",
@@ -519,8 +562,10 @@
     },
     "attachmentCategory": {
       "contract": "Contract",
-      "cabotage_de": "Cabotage DE",
-      "cabotage_fr": "Cabotage FR"
+      "gps": "GPS contract",
+      "agreement": "Agreement",
+      "cabotage_de": "DE cabotage permit",
+      "cabotage_de_insurance": "DE cabotage insurance"
     },
     "attachmentOpen": "Open",
     "attachmentOpenError": "Could not open the file. Please try again.",
@@ -552,12 +597,39 @@
       "email": "E-mail",
       "idDocumentNumber": "Identity document number",
       "licenseExpiry": "License expiry",
+      "nationality": "Nationality",
+      "languages": "Spoken languages",
       "adr": "ADR",
+      "adrClasses": "ADR classes",
       "notes": "Notes",
       "active": "Active"
     },
+    "phonePrefixLabel": "Phone prefix",
+    "nationalityOptions": {
+      "BY": "Belarus",
+      "RUS": "Russia",
+      "UA": "Ukraine",
+      "PL": "Poland",
+      "UZB": "Uzbekistan",
+      "KRG": "Kyrgyzstan",
+      "KZ": "Kazakhstan",
+      "OTHER": "Other"
+    },
+    "languageOptions": {
+      "PL": "Polish",
+      "RU": "Russian",
+      "EN": "English",
+      "UA": "Ukrainian",
+      "DE": "German",
+      "OTHER": "Other"
+    },
     "sections": {
       "personal": "Personal details & contact",
+      "personalData": "Personal details",
+      "contact": "Contact",
+      "nationalityLangs": "Nationality & languages",
+      "adr": "ADR",
+      "notesSection": "Notes",
       "license": "License",
       "assignment": "Assignment",
       "attachments": "Attachments"
@@ -594,11 +666,17 @@
       "innerWidth": "Inner width (m)",
       "innerHeight": "Inner height (m)",
       "capacity": "Capacity (t)",
+      "sideClearanceCm": "Side load clearance (cm)",
       "belts": "Belts",
       "beltsCount": "Belts count",
       "mats": "Mats",
       "matsCount": "Mats count",
-      "airSuspension": "Air suspension",
+      "beams": "Securing beams",
+      "beamsCount": "Beams count",
+      "liftingRoof": "Lifting roof",
+      "slidingRoof": "Sliding roof",
+      "edscha": "Edscha",
+      "palletBox": "Pallet box",
       "certXl": "XL Certificate",
       "multilock": "Multilock",
       "notes": "Notes",
@@ -606,9 +684,18 @@
     },
     "sections": {
       "identification": "Identification",
+      "basic": "Basic details",
       "dimensions": "Dimensions",
-      "equipment": "Equipment"
-    }
+      "roof": "Roof",
+      "equipment": "Equipment",
+      "certXl": "XL certificate",
+      "notesSection": "Notes",
+      "attachments": "Attachments"
+    },
+    "attachmentCategory": {
+      "cert_xl": "XL certificate"
+    },
+    "attachmentOpen": "Open"
   },
   "trailerTypes": {
     "title": "Trailer types",
@@ -1841,6 +1928,7 @@
       "sections": {
         "identification": "Identification",
         "dimensions": "Dimensions",
+        "roof": "Roof",
         "equipment": "Equipment"
       }
     }

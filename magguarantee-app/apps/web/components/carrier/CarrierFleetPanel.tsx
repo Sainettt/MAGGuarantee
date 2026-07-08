@@ -79,6 +79,7 @@ export function CarrierFleetPanel() {
   const tCommon = useTranslations('common');
   const tA11y = useTranslations('fleet.a11y');
   const tGuarantee = useTranslations('guarantee.fleet');
+  const tVeh = useTranslations('vehicles');
 
   // Honour `?tab=drivers|trailers` (set by the redirecting old sub-routes), else
   // default to «Auta». Uncontrolled afterwards — the user can switch freely.
@@ -181,8 +182,28 @@ export function CarrierFleetPanel() {
         id: 'plate',
         header: tVehCols('plate'),
         cell: (row) => (
-          <span className="font-mono font-semibold">{row.plateNumber}</span>
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="font-mono font-semibold">{row.plateNumber}</span>
+            {row.agreementScanMissing && (
+              <Badge variant="warning">{tVeh('agreementScanMissing')}</Badge>
+            )}
+          </span>
         ),
+      },
+      {
+        id: 'fuelCard',
+        header: tVeh('fields.fuelCard'),
+        align: 'center',
+        cell: (row) =>
+          row.fuelCard ? (
+            row.fuelCardBlocked ? (
+              <Badge variant="danger">{tVeh('fuelCardStatus.blocked')}</Badge>
+            ) : (
+              <Badge variant="success">{tVeh('fuelCardStatus.active')}</Badge>
+            )
+          ) : (
+            <span className="text-text-sub">—</span>
+          ),
       },
       // «Numer boczny» column removed (§12.8) — the internal MAGTRANS
       // designation must never surface to a carrier (same gating as the
@@ -262,7 +283,7 @@ export function CarrierFleetPanel() {
         },
       },
     ],
-    [tVehCols, tCommon, tGuarantee, guaranteeByVehicle],
+    [tVehCols, tVeh, tCommon, tGuarantee, guaranteeByVehicle],
   );
 
   const driverColumns = useMemo<DataTableColumn<DriverDto>[]>(

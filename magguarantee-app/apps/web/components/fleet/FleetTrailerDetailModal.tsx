@@ -15,7 +15,7 @@
 // is shown as-is. The «Wymiary» section is omitted when every dimension/
 // capacity value is empty (§6.4 "Empty section").
 
-import { Container, Package, Ruler } from 'lucide-react';
+import { Container, Package, PanelTop, Ruler } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { ReactNode } from 'react';
 import type { TrailerListItem } from '@magguarantee/shared';
@@ -103,7 +103,8 @@ export function FleetTrailerDetailModal({
     trailer.innerLength != null ||
     trailer.innerWidth != null ||
     trailer.innerHeight != null ||
-    trailer.capacity != null;
+    trailer.capacity != null ||
+    trailer.sideClearanceCm != null;
   if (hasDimensions) {
     sections.push({
       title: tSections('dimensions'),
@@ -113,14 +114,27 @@ export function FleetTrailerDetailModal({
         { label: tFields('innerWidth'), value: numValue(trailer.innerWidth) },
         { label: tFields('innerHeight'), value: numValue(trailer.innerHeight) },
         { label: tFields('capacity'), value: numValue(trailer.capacity) },
+        {
+          label: tFields('sideClearanceCm'),
+          value: numValue(trailer.sideClearanceCm),
+        },
       ],
     });
   }
 
   sections.push({
+    title: tSections('roof'),
+    icon: PanelTop,
+    rows: [
+      { label: tFields('liftingRoof'), value: bool(trailer.liftingRoof) },
+      { label: tFields('slidingRoof'), value: bool(trailer.slidingRoof) },
+      { label: tFields('edscha'), value: bool(trailer.edscha) },
+    ],
+  });
+
+  sections.push({
     title: tSections('equipment'),
     icon: Package,
-    // 7 rows including a free-text «Notatki» — too tall to pair (§6.17).
     span: 'full',
     rows: [
       {
@@ -131,9 +145,13 @@ export function FleetTrailerDetailModal({
         label: tFields('mats'),
         value: boolWithCount(trailer.mats, trailer.matsCount),
       },
-      { label: tFields('airSuspension'), value: bool(trailer.airSuspension) },
-      { label: tFields('certXl'), value: bool(trailer.certXl) },
+      {
+        label: tFields('beams'),
+        value: boolWithCount(trailer.beams, trailer.beamsCount),
+      },
+      { label: tFields('palletBox'), value: bool(trailer.palletBox) },
       { label: tFields('multilock'), value: bool(trailer.multilock) },
+      { label: tFields('certXl'), value: bool(trailer.certXl) },
       {
         label: tFields('notes'),
         value: textValue(trailer.notes),

@@ -25,12 +25,29 @@ import {
   listTrailers,
   reactivateTrailer,
   updateTrailer,
+  type TrailerAttachmentUploads,
 } from '@/lib/api/trailers';
 import { CARRIERS_KEY } from '@/lib/hooks/useCarriers';
 import { MY_FLEET_KEY } from '@/lib/hooks/useMyFleet';
 import { OPIEKUN_KEY } from '@/lib/hooks/useOpiekunFleet';
 
 export const TRAILERS_KEY = ['trailers'] as const;
+
+/**
+ * Mutation payload for create — the validated scalar DTO plus the XL-cert file
+ * uploads, since `POST /trailers` is `multipart/form-data`.
+ */
+export interface CreateTrailerVars {
+  body: CreateTrailerDto;
+  files?: TrailerAttachmentUploads;
+}
+
+/** Mutation payload for update — id, scalar patch, and file uploads. */
+export interface UpdateTrailerVars {
+  id: string;
+  body: UpdateTrailerDto;
+  files?: TrailerAttachmentUploads;
+}
 
 export function useTrailers(filters: TrailerFilters = { limit: 50 }) {
   return useQuery({
@@ -48,11 +65,12 @@ export function useTrailer(id: string | null | undefined) {
 }
 
 export function useCreateTrailer(
-  opts?: UseMutationOptions<TrailerDto, Error, CreateTrailerDto>,
+  opts?: UseMutationOptions<TrailerDto, Error, CreateTrailerVars>,
 ) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: createTrailer,
+    mutationFn: ({ body, files }: CreateTrailerVars) =>
+      createTrailer(body, files),
     ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: TRAILERS_KEY });
@@ -70,15 +88,12 @@ export function useCreateTrailer(
 }
 
 export function useUpdateTrailer(
-  opts?: UseMutationOptions<
-    TrailerDto,
-    Error,
-    { id: string; body: UpdateTrailerDto }
-  >,
+  opts?: UseMutationOptions<TrailerDto, Error, UpdateTrailerVars>,
 ) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, body }) => updateTrailer(id, body),
+    mutationFn: ({ id, body, files }: UpdateTrailerVars) =>
+      updateTrailer(id, body, files),
     ...opts,
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: TRAILERS_KEY });

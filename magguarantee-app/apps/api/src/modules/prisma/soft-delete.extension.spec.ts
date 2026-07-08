@@ -40,6 +40,7 @@ describe('softDeleteExtension', () => {
         'CarrierAttachment',
         'VehicleAttachment',
         'DriverAttachment',
+        'TrailerAttachment',
       ]),
     );
   });

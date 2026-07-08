@@ -2,8 +2,23 @@ import { Injectable } from '@nestjs/common';
 
 import type { Prisma } from '@magguarantee/database';
 
+import type { TrailerAttachmentCategory } from '@magguarantee/shared';
+
 import { PrismaService } from '../prisma/prisma.service';
 import { INCLUDE_SOFT_DELETED } from '../prisma/soft-delete.extension';
+
+/** Included attachment row on a trailer (live rows only). */
+export interface TrailerRowAttachment {
+  id: string;
+  trailerId: string;
+  category: TrailerAttachmentCategory;
+  storageKey: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  uploadedById: string | null;
+  createdAt: Date;
+}
 
 /**
  * Row shape returned by the trailer repository.
@@ -11,6 +26,8 @@ import { INCLUDE_SOFT_DELETED } from '../prisma/soft-delete.extension';
  * `trailerTypeId` is non-nullable since the phase-2 migration
  * (`phase2_required_fields_carrier_driver_trailer`); the joined
  * `trailerType` object is therefore always present on a fresh fetch.
+ * `airSuspension` was dropped; `sideClearanceCm`/`liftingRoof`/`slidingRoof`/
+ * `edscha`/`palletBox`/`beams`/`beamsCount` were added.
  */
 export interface TrailerRow {
   id: string;
@@ -28,15 +45,22 @@ export interface TrailerRow {
   beltsCount: number | null;
   mats: boolean | null;
   matsCount: number | null;
+  beams: boolean | null;
+  beamsCount: number | null;
   innerLength: number | null;
   innerWidth: number | null;
   innerHeight: number | null;
   capacity: number | null;
-  airSuspension: boolean | null;
+  sideClearanceCm: number;
+  liftingRoof: boolean;
+  slidingRoof: boolean;
+  edscha: boolean | null;
+  palletBox: boolean;
   certXl: boolean | null;
   multilock: boolean | null;
   notes: string | null;
   carrier: { id: string; login: string; name: string | null } | null;
+  attachments: TrailerRowAttachment[];
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -110,15 +134,21 @@ export class TrailersRepository {
     plateNumber: string;
     active?: boolean;
     trailerTypeId: string;
+    sideClearanceCm: number;
     belts?: boolean | null;
     beltsCount?: number | null;
     mats?: boolean | null;
     matsCount?: number | null;
+    beams?: boolean | null;
+    beamsCount?: number | null;
     innerLength?: number | null;
     innerWidth?: number | null;
     innerHeight?: number | null;
     capacity?: number | null;
-    airSuspension?: boolean | null;
+    liftingRoof?: boolean | null;
+    slidingRoof?: boolean | null;
+    edscha?: boolean | null;
+    palletBox?: boolean | null;
     certXl?: boolean | null;
     multilock?: boolean | null;
     notes?: string | null;
@@ -129,15 +159,21 @@ export class TrailersRepository {
         plateNumber: data.plateNumber,
         active: data.active ?? true,
         trailerTypeId: data.trailerTypeId,
+        sideClearanceCm: data.sideClearanceCm,
         belts: data.belts ?? null,
         beltsCount: data.beltsCount ?? null,
         mats: data.mats ?? null,
         matsCount: data.matsCount ?? null,
+        beams: data.beams ?? null,
+        beamsCount: data.beamsCount ?? null,
         innerLength: data.innerLength ?? null,
         innerWidth: data.innerWidth ?? null,
         innerHeight: data.innerHeight ?? null,
         capacity: data.capacity ?? null,
-        airSuspension: data.airSuspension ?? null,
+        liftingRoof: data.liftingRoof ?? false,
+        slidingRoof: data.slidingRoof ?? false,
+        edscha: data.edscha ?? null,
+        palletBox: data.palletBox ?? false,
         certXl: data.certXl ?? null,
         multilock: data.multilock ?? null,
         notes: data.notes ?? null,
@@ -191,6 +227,13 @@ export class TrailersRepository {
           user: { select: { login: true, name: true } },
         },
       },
+      // The soft-delete extension only intercepts TOP-LEVEL operations —
+      // nested relation reads bypass it, so the live-rows filter must be
+      // explicit here (cert_xl enforcement reads this set).
+      attachments: {
+        where: { deletedAt: null },
+        orderBy: { createdAt: 'asc' },
+      },
     } as const;
   }
 
@@ -211,11 +254,17 @@ export class TrailersRepository {
       beltsCount: row.beltsCount,
       mats: row.mats,
       matsCount: row.matsCount,
+      beams: row.beams,
+      beamsCount: row.beamsCount,
       innerLength: decimalToNumber(row.innerLength),
       innerWidth: decimalToNumber(row.innerWidth),
       innerHeight: decimalToNumber(row.innerHeight),
       capacity: decimalToNumber(row.capacity),
-      airSuspension: row.airSuspension,
+      sideClearanceCm: row.sideClearanceCm ?? 0,
+      liftingRoof: row.liftingRoof ?? false,
+      slidingRoof: row.slidingRoof ?? false,
+      edscha: row.edscha,
+      palletBox: row.palletBox ?? false,
       certXl: row.certXl,
       multilock: row.multilock,
       notes: row.notes,
@@ -226,6 +275,17 @@ export class TrailersRepository {
             name: row.carrier.user.name,
           }
         : null,
+      attachments: (row.attachments ?? []).map((a) => ({
+        id: a.id,
+        trailerId: a.trailerId,
+        category: a.category,
+        storageKey: a.storageKey,
+        fileName: a.fileName,
+        mimeType: a.mimeType,
+        size: a.size,
+        uploadedById: a.uploadedById,
+        createdAt: a.createdAt,
+      })),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       deletedAt: row.deletedAt,
@@ -253,11 +313,17 @@ interface TrailerPrismaShape {
   beltsCount: number | null;
   mats: boolean | null;
   matsCount: number | null;
+  beams: boolean | null;
+  beamsCount: number | null;
   innerLength: { toNumber(): number } | number | null;
   innerWidth: { toNumber(): number } | number | null;
   innerHeight: { toNumber(): number } | number | null;
   capacity: { toNumber(): number } | number | null;
-  airSuspension: boolean | null;
+  sideClearanceCm: number | null;
+  liftingRoof: boolean | null;
+  slidingRoof: boolean | null;
+  edscha: boolean | null;
+  palletBox: boolean | null;
   certXl: boolean | null;
   multilock: boolean | null;
   notes: string | null;
@@ -265,6 +331,17 @@ interface TrailerPrismaShape {
     id: string;
     user: { login: string; name: string | null };
   } | null;
+  attachments?: Array<{
+    id: string;
+    trailerId: string;
+    category: TrailerAttachmentCategory;
+    storageKey: string;
+    fileName: string;
+    mimeType: string;
+    size: number;
+    uploadedById: string | null;
+    createdAt: Date;
+  }> | null;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;

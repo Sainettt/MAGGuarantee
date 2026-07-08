@@ -75,6 +75,7 @@ export const SOFT_DELETE_MODELS = [
   'CarrierAttachment',
   'VehicleAttachment',
   'DriverAttachment',
+  'TrailerAttachment',
 ] as const;
 export type SoftDeleteModel = (typeof SOFT_DELETE_MODELS)[number];
 

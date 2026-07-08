@@ -20,10 +20,10 @@
  * Rules:
  *   - Dates are rendered in TZ Europe/Warsaw.
  *   - `departureAt` carries a time (HH:MM); `plannedReturnAt` is date-only.
- *   - ZESTAW joins the present segments with ` / `. `sideNumber` is nullable —
- *     when null/blank its segment is OMITTED (no empty slot, no double slash),
- *     the same rule as the ZESPÓŁ line. `plateNumber`, `trailerPlate` and
- *     `gpsMobilePhone` are always present (NOT NULL in the data model).
+ *   - ZESTAW joins the present segments with ` / `. `sideNumber` AND
+ *     `gpsMobilePhone` are nullable — when null/blank their segment is OMITTED
+ *     (no empty slot, no double slash), the same rule as the ZESPÓŁ line.
+ *     `plateNumber` and `trailerPlate` are always present.
  *   - KIEROWCA renders `<name> / <phone>`; the driver is always present
  *     (`Delegation.driverId` is NOT NULL), so there is no em-dash fallback —
  *     the builder resolves name/phone from the snapshot, falling back to the
@@ -51,8 +51,12 @@ export interface WyjazdMessageContext {
    * segment is omitted (no empty slot, no double slash).
    */
   sideNumber: string | null;
-  /** `Vehicle.gpsMobilePhone` — tracker device id (always present, NOT NULL). */
-  gpsMobilePhone: string;
+  /**
+   * `Vehicle.gpsMobilePhone` — tracker device id. Nullable again since 2026-07
+   * (not every vehicle carries a GPS device). When null/blank its ZESTAW
+   * segment is omitted gracefully (no empty slot, no double slash).
+   */
+  gpsMobilePhone: string | null;
   /**
    * Driver display name — `Delegation.driverNameSnapshot` with a fallback to
    * `driver.firstName + ' ' + driver.lastName`, resolved by the context

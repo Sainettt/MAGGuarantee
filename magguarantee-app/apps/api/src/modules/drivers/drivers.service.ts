@@ -129,6 +129,9 @@ export class DriversService {
         notes: dto.notes ?? null,
         active: dto.active,
         adr: dto.adr,
+        nationality: dto.nationality,
+        languages: dto.languages,
+        adrClasses: dto.adrClasses ?? [],
       });
     } catch (err) {
       throw uniqueViolationToConflict(
@@ -177,6 +180,8 @@ export class DriversService {
       uploads,
       new Set(toRemove.map((a) => a.id)),
     );
+    // Cross-field rules over the post-update effective state.
+    this._assertCrossFieldOnUpdate(existing, dto);
 
     const patch = this._buildUpdatePatch(dto);
 
@@ -297,6 +302,9 @@ export class DriversService {
       'notes',
       'active',
       'adr',
+      'nationality',
+      'languages',
+      'adrClasses',
     ];
     for (const k of passthrough) {
       if (dto[k] !== undefined) patch[k] = dto[k];
@@ -307,6 +315,32 @@ export class DriversService {
       patch.licenseExpiry = new Date(dto.licenseExpiry);
     }
     return patch;
+  }
+
+  /**
+   * Post-patch cross-field rules (service is authoritative — Zod can't see a
+   * partial PATCH): `adr=true ⇒ adrClasses ≥1` and `languages ≥1` over the
+   * effective (patched-or-existing) state. Throws a single 422 on violation.
+   */
+  private _assertCrossFieldOnUpdate(
+    existing: DriverRow,
+    dto: UpdateDriverDto,
+  ): void {
+    const nextAdr = dto.adr !== undefined ? dto.adr : existing.adr;
+    const nextAdrClasses =
+      dto.adrClasses !== undefined ? dto.adrClasses : existing.adrClasses;
+    const nextLanguages =
+      dto.languages !== undefined ? dto.languages : existing.languages;
+    const violations: string[] = [];
+    if (nextAdr && nextAdrClasses.length < 1) {
+      violations.push('adrClasses wymaga min. 1 klasy gdy adr=true');
+    }
+    if (nextLanguages.length < 1) {
+      violations.push('languages wymaga min. 1 języka');
+    }
+    if (violations.length > 0) {
+      throw new UnprocessableEntityException({ violations });
+    }
   }
 
   /**
@@ -608,6 +642,9 @@ export class DriversService {
       notes: row.notes,
       active: row.active,
       adr: row.adr,
+      nationality: row.nationality,
+      languages: row.languages,
+      adrClasses: row.adrClasses as DriverDto['adrClasses'],
       carrier: row.carrier,
       attachments: row.attachments.map((a) => driverRowAttachmentToDto(a)),
       createdAt: row.createdAt.toISOString(),

@@ -36,13 +36,17 @@ function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {
     // Required post-phase3_blocks. `certificateL` was collapsed enum→boolean
     // in 20260515130307_vehicle_certificate_l_to_boolean.
     certificateL: true,
-    // EuroNorm is now { V, VI } — legacy III/IV removed.
-    euro: 'V',
+    // EuroNorm is now a single value { VI } — legacy III/IV/V removed.
+    euro: 'VI',
     fuelCard: false,
+    fuelCardNumber: null,
+    fuelCardExpiry: null,
+    fuelCardPin: null,
     type: 'STD',
-    gb: null,
-    it: null,
-    fr: null,
+    // min-2-of-{gb,it,fr} invariant satisfied by default (gb + it true).
+    gb: true,
+    it: true,
+    fr: false,
     agreement: null,
     // Legacy `contract` boolean dropped — umowa is now a VehicleAttachment.
     rateDe: 0.5,
@@ -54,7 +58,8 @@ function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {
     cabotageDe: false,
     cabotageFr: false,
     adr: false,
-    gpsMobilePhone: '+48600100200',
+    adrClasses: [],
+    gpsMobilePhone: null,
     sideNumber: null,
     lastDroveAt: null,
     plannerId: null,
@@ -198,7 +203,7 @@ function makeVehiclesRepo(seed: VehicleRow[] = []): VehiclesRepository {
         plateNumber: data.plateNumber,
         plannerId: data.plannerId ?? null,
         dispatchTeamId: data.dispatchTeamId ?? null,
-        gpsMobilePhone: data.gpsMobilePhone,
+        gpsMobilePhone: data.gpsMobilePhone ?? null,
         cabotageDe: data.cabotageDe ?? false,
         cabotageFr: data.cabotageFr ?? false,
         adr: data.adr ?? false,
@@ -394,13 +399,16 @@ function buildService(opts: {
 /** Minimal payload required by the post-phase3_blocks schema. */
 const REQUIRED_VEHICLE_FIELDS = {
   certificateL: true,
-  euro: 'V' as const,
+  euro: 'VI' as const,
   type: 'STD' as const,
   plannerId: 'u-pl',
   // Phase 11 — vehicle is assigned to a dispatch Team (default fixture t-1).
   dispatchTeamId: 't-1',
-  // Tracker device id — REQUIRED non-empty since the `gps` toggle was dropped.
-  gpsMobilePhone: '+48600100200',
+  // gpsMobilePhone deliberately OMITTED — it is now optional; omitting it means
+  // no `gps` attachment is required (keeps the create tests focused on the
+  // contract/cabotage rules). min-2-of-{gb,it,fr} satisfied via gb+it below.
+  gb: true,
+  it: true,
   rateDe: 0.5,
   rateUe: 0.5,
   rateExport: 0.5,
@@ -562,22 +570,22 @@ describe('VehiclesService', () => {
     ).rejects.toThrow(UnprocessableEntityException);
   });
 
-  it('cabotageDe=true requires both contract AND a cabotage_de attachment (422 when missing)', async () => {
+  it('cabotageDe=true requires contract + cabotage_de + cabotage_de_insurance (422 when cabotage_de missing)', async () => {
     const { svc } = buildService({
       carriers: [makeCarrier()],
       users: makeValidPeople(),
     });
-    // Provide the contract so the failure is specifically the missing cabotage_de.
+    // Provide contract + insurance so the failure is the missing cabotage_de.
     await expect(
       svc.create(
         makeAuth('admin', 'a-1'),
         createDto({ cabotageDe: true }),
-        [makeUpload('contract')],
+        [makeUpload('contract'), makeUpload('cabotage_de_insurance')],
       ),
     ).rejects.toThrow(UnprocessableEntityException);
   });
 
-  it('cabotageFr=true requires both contract AND a cabotage_fr attachment (422 when missing)', async () => {
+  it('cabotageDe=true requires the cabotage_de_insurance scan too (422 when insurance missing)', async () => {
     const { svc } = buildService({
       carriers: [makeCarrier()],
       users: makeValidPeople(),
@@ -585,13 +593,27 @@ describe('VehiclesService', () => {
     await expect(
       svc.create(
         makeAuth('admin', 'a-1'),
-        createDto({ cabotageFr: true }),
+        createDto({ cabotageDe: true }),
+        [makeUpload('contract'), makeUpload('cabotage_de')],
+      ),
+    ).rejects.toThrow(UnprocessableEntityException);
+  });
+
+  it('gpsMobilePhone set ⇒ requires a gps attachment (422 when missing)', async () => {
+    const { svc } = buildService({
+      carriers: [makeCarrier()],
+      users: makeValidPeople(),
+    });
+    await expect(
+      svc.create(
+        makeAuth('admin', 'a-1'),
+        createDto({ gpsMobilePhone: '+48600100200' }),
         [makeUpload('contract')],
       ),
     ).rejects.toThrow(UnprocessableEntityException);
   });
 
-  it('create with contract + cabotage_de + cabotage_fr (all flags true) succeeds', async () => {
+  it('create with contract + cabotage_de + cabotage_de_insurance (cabotageDe true) succeeds', async () => {
     const { svc } = buildService({
       carriers: [makeCarrier()],
       users: makeValidPeople(),
@@ -603,7 +625,7 @@ describe('VehiclesService', () => {
         [
           makeUpload('contract'),
           makeUpload('cabotage_de'),
-          makeUpload('cabotage_fr'),
+          makeUpload('cabotage_de_insurance'),
         ],
       ),
     ).resolves.toMatchObject({ plateNumber: 'WA0002' });
@@ -645,9 +667,13 @@ describe('VehiclesService', () => {
       svc.create(
         makeAuth('admin', 'a-1'),
         createDto({ cabotageDe: true }),
-        // contract + cabotage_de: passes the required-attachment assert so we
-        // reach the attachment-insert step that the mock rejects.
-        [makeUpload('contract'), makeUpload('cabotage_de')],
+        // contract + cabotage_de + insurance: passes the required-attachment
+        // assert so we reach the attachment-insert step that the mock rejects.
+        [
+          makeUpload('contract'),
+          makeUpload('cabotage_de'),
+          makeUpload('cabotage_de_insurance'),
+        ],
       ),
     ).rejects.toThrow('db down');
     // first upload's object cleaned up, vehicle row removed.
@@ -709,9 +735,9 @@ describe('VehiclesService', () => {
           buffer: Buffer.from('x'),
         },
       ],
-      cabotageFr: [
+      cabotageDeInsurance: [
         {
-          fieldname: 'cabotageFr',
+          fieldname: 'cabotageDeInsurance',
           originalname: 'c.webp',
           mimetype: 'image/webp',
           size: 10,
@@ -721,7 +747,7 @@ describe('VehiclesService', () => {
     });
     expect(uploads.map((u) => u.category).sort()).toEqual([
       'cabotage_de',
-      'cabotage_fr',
+      'cabotage_de_insurance',
       'contract',
     ]);
   });
@@ -744,16 +770,25 @@ describe('VehiclesService', () => {
     ).rejects.toThrow(UnprocessableEntityException);
   });
 
-  it('update flipping cabotageDe→true is satisfied by an existing cabotage_de attachment', async () => {
-    const att = makeRowAttachment({ id: 'att-1', category: 'cabotage_de' });
+  it('update flipping cabotageDe→true is satisfied by existing cabotage_de + insurance attachments', async () => {
+    const attDe = makeRowAttachment({ id: 'att-1', category: 'cabotage_de' });
+    const attIns = makeRowAttachment({
+      id: 'att-2',
+      category: 'cabotage_de_insurance',
+    });
     const { svc } = buildService({
       vehicles: [
-        makeVehicle({ id: 'v-1', cabotageDe: false, attachments: [att] }),
+        makeVehicle({
+          id: 'v-1',
+          cabotageDe: false,
+          attachments: [attDe, attIns],
+        }),
       ],
       carriers: [makeCarrier()],
       users: makeValidPeople(),
       attachments: [
         makeAttachmentRow({ id: 'att-1', category: 'cabotage_de' }),
+        makeAttachmentRow({ id: 'att-2', category: 'cabotage_de_insurance' }),
       ],
     });
     await expect(

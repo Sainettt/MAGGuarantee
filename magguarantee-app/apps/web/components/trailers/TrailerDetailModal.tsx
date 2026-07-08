@@ -4,22 +4,31 @@
 // TrailerDto into the generic <EntityDetailModal> props (docs/14-design-system.md
 // §6.9, §6.17). The generic shell is NOT re-implemented here.
 //
-// The section order mirrors TrailerSheet's three FormSections so the read-only
-// view and the edit Sheet feel like the same object:
-//   Identyfikacja · Wymiary · Wyposażenie.
-// Dimension/capacity units come baked into the field labels themselves
-// (`innerLength` → "Długość wewn. (m)", `capacity` → "Ładowność (t)"), exactly
-// as the TrailerSheet form renders them — so the values are bare numbers.
+// The section order mirrors TrailerFormDialog's sections so the read-only view
+// and the edit dialog feel like the same object: Identyfikacja · Wymiary · Dach
+// · Wyposażenie · Załączniki. Dimension/capacity units come baked into the field
+// labels themselves (`innerLength` → "Długość wewn. (m)"), exactly as the form
+// renders them — so the values are bare numbers.
 //
 // Formatting reuses the shared helpers in components/ui/entity-detail-values.tsx
 // and lib/format/numbers.ts — no duplicated Intl wrappers.
 
-import { Container, Package, Ruler } from 'lucide-react';
+import {
+  Container,
+  ExternalLink,
+  FileText,
+  Loader2,
+  Package,
+  PanelTop,
+  Ruler,
+} from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import type { ReactNode } from 'react';
-import type { TrailerDto } from '@magguarantee/shared';
+import { useMemo, type ReactNode } from 'react';
+import type { TrailerAttachmentDto, TrailerDto } from '@magguarantee/shared';
+import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import {
   EntityDetailModal,
   type EntityDetailSection,
@@ -29,15 +38,16 @@ import {
   emptyValue,
   textValue,
 } from '@/components/ui/entity-detail-values';
+import { downloadTrailerAttachment } from '@/lib/api/trailers';
 import { formatDateTime } from '@/lib/format/numbers';
+import { useOpenBlobInTab } from '@/lib/hooks/useOpenBlobInTab';
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   trailer: TrailerDto | null;
-  /** Forwarded to the generic «Edytuj» action — the page opens TrailerSheet.
-   *  Omit it for read-only consumers: the «Edytuj» button is then not
-   *  rendered (§6.6). */
+  /** Forwarded to the generic «Edytuj» action — the page opens
+   *  TrailerFormDialog. Omit for read-only consumers (§6.6). */
   onEdit?: () => void;
 }
 
@@ -51,8 +61,17 @@ export function TrailerDetailModal({
   const tCommon = useTranslations('common');
   const tDetail = useTranslations('entityDetail');
 
-  // The modal is only rendered with a target; bail defensively so the hooks
-  // above still run unconditionally (rules-of-hooks safe).
+  // Popup-blocker-safe "open in new tab" flow (reuses the vehicle strings).
+  const tVehicles = useTranslations('vehicles');
+  const popupBlocked = tVehicles('attachmentPopupBlocked');
+  const loadFailed = tVehicles('attachmentOpenError');
+  const blobMessages = useMemo(
+    () => ({ popupBlocked, loadFailed }),
+    [popupBlocked, loadFailed],
+  );
+  const { open: openAttachment, isPending: isAttachmentPending } =
+    useOpenBlobInTab(toast.error, blobMessages);
+
   if (!trailer) return null;
 
   const f = (key: string) => t(`fields.${key}`);
@@ -60,13 +79,6 @@ export function TrailerDetailModal({
   const no = tCommon('no');
   const bool = (v: boolean | null | undefined) => boolValue(v, yes, no);
 
-  /**
-   * Boolean + optional count. When the flag is true and we have a numeric
-   * count, render `"Tak (N szt.)"` (PL) / `"Yes (N pcs.)"` (EN); when the flag
-   * is true without a count, fall back to plain "Tak"/"Yes"; null flag → em
-   * dash. Inlined here rather than promoted to a shared helper because no
-   * other entity-detail pairs a boolean with a count (per task brief).
-   */
   const boolWithCount = (
     flag: boolean | null | undefined,
     count: number | null | undefined,
@@ -83,18 +95,15 @@ export function TrailerDetailModal({
     return <span>{yes}</span>;
   };
 
-  // ── Header badge row — only the status badge (no onboarding chips) ──
   const badges: ReactNode = trailer.active ? (
     <Badge variant="success">{tCommon('active')}</Badge>
   ) : (
     <Badge variant="muted">{tCommon('inactive')}</Badge>
   );
 
-  /** Bare numeric value (units live in the field label); em-dash when null. */
   const numValue = (v: number | null | undefined): ReactNode =>
     v != null ? <span className="tabular-nums">{v}</span> : emptyValue();
 
-  // ── 3 sections — mirrors the TrailerSheet FormSection order ──────────
   const sections: EntityDetailSection[] = [
     {
       title: t('sections.identification'),
@@ -107,7 +116,6 @@ export function TrailerDetailModal({
         { label: f('plateNumber'), value: textValue(trailer.plateNumber) },
         {
           label: f('trailerType'),
-          // Trailer type — same `[shortCode] name` shape the table uses.
           value: trailer.trailerType
             ? textValue(
                 trailer.trailerType.shortCode
@@ -126,12 +134,24 @@ export function TrailerDetailModal({
         { label: f('innerWidth'), value: numValue(trailer.innerWidth) },
         { label: f('innerHeight'), value: numValue(trailer.innerHeight) },
         { label: f('capacity'), value: numValue(trailer.capacity) },
+        {
+          label: f('sideClearanceCm'),
+          value: numValue(trailer.sideClearanceCm),
+        },
+      ],
+    },
+    {
+      title: t('sections.roof'),
+      icon: PanelTop,
+      rows: [
+        { label: f('liftingRoof'), value: bool(trailer.liftingRoof) },
+        { label: f('slidingRoof'), value: bool(trailer.slidingRoof) },
+        { label: f('edscha'), value: bool(trailer.edscha) },
       ],
     },
     {
       title: t('sections.equipment'),
       icon: Package,
-      // 6 rows including a free-text «Notatki» row — too tall to pair (§6.17).
       span: 'full',
       rows: [
         {
@@ -142,15 +162,38 @@ export function TrailerDetailModal({
           label: f('mats'),
           value: boolWithCount(trailer.mats, trailer.matsCount),
         },
-        { label: f('airSuspension'), value: bool(trailer.airSuspension) },
-        { label: f('certXl'), value: bool(trailer.certXl) },
+        {
+          label: f('beams'),
+          value: boolWithCount(trailer.beams, trailer.beamsCount),
+        },
+        { label: f('palletBox'), value: bool(trailer.palletBox) },
         { label: f('multilock'), value: bool(trailer.multilock) },
+        { label: f('certXl'), value: bool(trailer.certXl) },
         { label: f('notes'), value: textValue(trailer.notes) },
       ],
     },
   ];
 
-  // ── Footer meta line — created / updated timestamps (§6.6) ──────────
+  if (trailer.attachments && trailer.attachments.length > 0) {
+    sections.push({
+      title: t('sections.attachments'),
+      icon: FileText,
+      span: 'full',
+      rows: trailer.attachments.map((att) => ({
+        label: t(`attachmentCategory.${att.category}`),
+        value: (
+          <AttachmentRowValue
+            trailerId={trailer.id}
+            attachment={att}
+            openLabel={t('attachmentOpen')}
+            pending={isAttachmentPending(att.id)}
+            onOpen={openAttachment}
+          />
+        ),
+      })),
+    });
+  }
+
   const meta: ReactNode = (
     <>
       {tDetail('createdAt')} {formatDateTime(trailer.createdAt)}
@@ -170,5 +213,51 @@ export function TrailerDetailModal({
       meta={meta}
       onEdit={onEdit}
     />
+  );
+}
+
+interface AttachmentRowValueProps {
+  trailerId: string;
+  attachment: TrailerAttachmentDto;
+  openLabel: string;
+  pending: boolean;
+  onOpen: (args: {
+    key: string;
+    fetcher: () => Promise<Blob>;
+    mimeType?: string;
+  }) => Promise<void>;
+}
+
+function AttachmentRowValue({
+  trailerId,
+  attachment,
+  openLabel,
+  pending,
+  onOpen,
+}: AttachmentRowValueProps) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      disabled={pending}
+      aria-busy={pending}
+      aria-label={`${openLabel} — ${attachment.fileName}`}
+      className="-mx-2 max-w-full justify-start font-normal"
+      onClick={() =>
+        void onOpen({
+          key: attachment.id,
+          fetcher: () => downloadTrailerAttachment(trailerId, attachment.id),
+          mimeType: attachment.mimeType,
+        })
+      }
+    >
+      {pending ? (
+        <Loader2 size={14} className="shrink-0 animate-spin" aria-hidden />
+      ) : (
+        <ExternalLink size={14} className="shrink-0" aria-hidden />
+      )}
+      <span className="truncate">{attachment.fileName}</span>
+    </Button>
   );
 }

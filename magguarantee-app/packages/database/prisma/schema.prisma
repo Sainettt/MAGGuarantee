@@ -83,25 +83,34 @@ enum VehicleType {
   COIL
 }
 
-// EURO emission norm. III/IV dropped 2026-05 — MAGTRANS restricts the
-// km-guarantee program to EURO V/VI vehicles only. DB is greenfield (no
-// vehicle rows), so removing the legacy values is a clean enum redefinition.
+// EURO emission norm. Only EURO VI is admitted to the km-guarantee program per
+// customer decision 2026-07 (III/IV were dropped 2026-05; V dropped 2026-07).
+// DB is greenfield (no vehicle rows), so reducing the enum to a single value is
+// a clean redefinition. Vehicle.euro defaults to VI.
 enum EuroNorm {
-  V
   VI
 }
 
-// Category of an umowa/cabotage screenshot attached to a Vehicle.
+// Category of a document/screenshot attached to a Vehicle.
 // `contract` replaces the legacy `Vehicle.contract` boolean — instead of a
 // flag, the actual scanned umowa is stored as one or more attachment rows.
+// `gps` = umowa GPS scan (required by the API when Vehicle.gpsMobilePhone is
+// present). `agreement` = porozumienie scan (SOFT — its absence is a warning,
+// never save-blocking; also gates the derived fuel-card BLOCKED state).
+// `cabotage_de` = kabotaż DE permit; `cabotage_de_insurance` = ubezpieczenie
+// kabotażowe DE (required by the API alongside cabotage_de).
+// `cabotage_fr` removed 2026-07 — kabotaż FR is now a checkbox-only flag
+// (Vehicle.cabotageFr Boolean), no scan.
 // `adr` removed 2026-05-29 — the ADR certificate is no longer a vehicle
 // attachment; the kept `Vehicle.adr` boolean stays as the permit flag, and
 // the ADR cert scan now lives on the Driver (świadectwo ADR) via
 // DriverAttachment.
 enum VehicleAttachmentCategory {
   contract
+  gps
+  agreement
   cabotage_de
-  cabotage_fr
+  cabotage_de_insurance
 }
 
 // Category of a file attached to a Driver. Single value for now — the ADR
@@ -109,6 +118,52 @@ enum VehicleAttachmentCategory {
 // mirror the Vehicle/Carrier attachment pattern and stay extensible.
 enum DriverAttachmentCategory {
   adr
+}
+
+// Countries where a vehicle is allowed to haul waste (Vehicle.wasteCountries).
+// Replaces the legacy free-text CSV cell with a typed enum array. `LUX` and
+// `GB` avoid ambiguous 2-letter reuse; the rest are ISO-ish shortcodes.
+enum WasteCountry {
+  DE
+  NL
+  AT
+  BE
+  LUX
+  FR
+  GB
+  IT
+  CZ
+  PL
+}
+
+// Driver nationality (Driver.nationality). NOT coupled to the phone prefix —
+// a BY/UA driver may carry a PL number and vice versa. `OTHER` is the catch-all.
+enum DriverNationality {
+  BY
+  RUS
+  UA
+  PL
+  UZB
+  KRG
+  KZ
+  OTHER
+}
+
+// Languages a driver speaks (Driver.languages, array). `OTHER` is the catch-all.
+enum DriverLanguage {
+  PL
+  RU
+  EN
+  UA
+  DE
+  OTHER
+}
+
+// Category of a file attached to a Trailer. Single value for now — the XL
+// certificate (certyfikat XL / EN 12642-XL). Kept as an enum (not a literal)
+// to mirror the Vehicle/Driver/Carrier attachment pattern and stay extensible.
+enum TrailerAttachmentCategory {
+  cert_xl
 }
 
 // Category of a file attached to a Carrier — the carrier's own company
@@ -226,6 +281,7 @@ model User {
   uploadedVehicleAttachments VehicleAttachment[]
   uploadedDriverAttachments  DriverAttachment[]
   uploadedCarrierAttachments CarrierAttachment[]
+  uploadedTrailerAttachments TrailerAttachment[]
   notedDailyKm               VehicleDailyKm[]    @relation("DailyKmNotedBy")
   auditEntries               AuditLog[]
   refreshTokens              RefreshToken[]
@@ -383,14 +439,21 @@ model Vehicle {
   dispatchTeam   Team?   @relation("VehicleDispatchTeam", fields: [dispatchTeamId], references: [id])
 
   // attributes
-  notes        String?
+  notes          String?
   // Boolean flag: legacy L1/L2/L3 enum was collapsed to a single TAK/NIE
   // decision in 2026-05. true = vehicle holds an L-certificate (any class),
   // false = no certificate / NULL in the legacy column.
-  certificateL Boolean
-  euro         EuroNorm
-  fuelCard     Boolean     @default(false)
-  type         VehicleType
+  certificateL   Boolean
+  euro           EuroNorm    @default(VI)
+  // Fuel card. `fuelCard` is the has-card flag; the card detail fields below are
+  // populated only when true (all Zod-enforced formats). The card is considered
+  // BLOCKED — a state DERIVED in the API, never stored — unless the vehicle has
+  // agreement=true AND a live `agreement` attachment (porozumienie scan) exists.
+  fuelCard       Boolean     @default(false)
+  fuelCardNumber String? // 16 digits, Zod-enforced
+  fuelCardExpiry DateTime?   @db.Date
+  fuelCardPin    String? // 4-6 digits, Zod-enforced
+  type           VehicleType
 
   gb             Boolean? // UK access
   it             Boolean?
@@ -415,19 +478,24 @@ model Vehicle {
   rateImport Decimal? @db.Decimal(6, 4)
 
   // waste
-  wasteAllowed   Boolean  @default(false)
-  wasteCountries String[] // CSV → array
+  wasteAllowed   Boolean        @default(false)
+  wasteCountries WasteCountry[] // legacy CSV → typed enum array
 
   // cabotage
-  cabotageDe Boolean @default(false)
-  cabotageFr Boolean @default(false)
-  adr        Boolean @default(false)
+  cabotageDe Boolean  @default(false)
+  cabotageFr Boolean  @default(false)
+  adr        Boolean  @default(false)
+  // ADR top-level classes ("1".."9") the vehicle is permitted for. String[]
+  // (not an enum) because Prisma enum values may not start with a digit; the
+  // "1".."9" domain is constrained in Zod. Meaningful only when adr=true.
+  adrClasses String[]
 
-  // tracker device id — STRICT (NOT NULL). Every vehicle in the program is GPS-
-  // tracked, so the device id is always present. The legacy `gps` boolean toggle
-  // and the conditional `vehicle_gps_device_when_gps_on` CHECK were dropped
-  // 2026-06-17 (migration drop_vehicle_gps_toggle_require_gps_device).
-  gpsMobilePhone String
+  // tracker device id — OPTIONAL (nullable again since 2026-07). Not every
+  // vehicle carries a GPS device at create time. When a value IS present, the
+  // API requires a `gps` VehicleAttachment (umowa GPS scan). The legacy `gps`
+  // boolean toggle and the conditional `vehicle_gps_device_when_gps_on` CHECK
+  // were dropped 2026-06-17 (migration drop_vehicle_gps_toggle_require_gps_device).
+  gpsMobilePhone String?
   sideNumber     String? // NrBoczny
   // OstatnioJezdzilo — auto-bumped by the api to max(lastDroveAt, date) on a
   // VehicleDailyKm drove-row (Phase 7 #3). Never edited by hand.
@@ -485,7 +553,7 @@ model Driver {
   carrierId String  @db.Uuid
   carrier   Carrier @relation(fields: [carrierId], references: [id])
 
-  loginSlug        String    @unique // имя.фамилия (or -2/-3 on collision)
+  loginSlug        String            @unique // имя.фамилия (or -2/-3 on collision)
   firstName        String
   lastName         String
   phone            String
@@ -503,13 +571,22 @@ model Driver {
   idDocumentNumber String
   // Driving-license expiry is unrelated to the id document above — kept as-is
   // because it's still a real attribute we track for the driver.
-  licenseExpiry    DateTime? @db.Date
+  licenseExpiry    DateTime?         @db.Date
   notes            String?
-  active           Boolean   @default(true)
-  addedAt          DateTime  @default(now())
+  active           Boolean           @default(true)
+  addedAt          DateTime          @default(now())
   // ADR transport permit flag (świadectwo ADR). The certificate scan itself
   // is stored as a DriverAttachment row (category=adr).
-  adr              Boolean   @default(false)
+  adr              Boolean           @default(false)
+  // Driver nationality — NOT NULL (greenfield reset makes this safe). NOT
+  // coupled to the phone prefix (a BY/UA driver may carry a PL number).
+  nationality      DriverNationality
+  // Languages the driver speaks (typed enum array).
+  languages        DriverLanguage[]
+  // ADR top-level classes ("1".."9") — same String[] convention as
+  // Vehicle.adrClasses (Prisma enum values can't start with a digit; domain
+  // constrained in Zod). Meaningful only when adr=true.
+  adrClasses       String[]
 
   delegations Delegation[]
   attachments DriverAttachment[]
@@ -563,20 +640,34 @@ model Trailer {
   active        Boolean     @default(true)
   addedAt       DateTime    @default(now())
 
-  belts         Boolean? // Pasy
-  beltsCount    Int? // Liczba pasów (nullable; UI/Zod enforce >= 0)
-  mats          Boolean? // Maty
-  matsCount     Int? // Liczba mat (nullable; UI/Zod enforce >= 0)
-  innerLength   Decimal? @db.Decimal(8, 2)
-  innerWidth    Decimal? @db.Decimal(8, 2)
-  innerHeight   Decimal? @db.Decimal(8, 2)
-  capacity      Decimal? @db.Decimal(10, 2)
-  airSuspension Boolean? // Wyprez
-  certXl        Boolean?
-  multilock     Boolean?
-  notes         String?
+  belts           Boolean? // Pasy
+  beltsCount      Int? // Liczba pasów (nullable; UI/Zod enforce >= 0)
+  mats            Boolean? // Maty
+  matsCount       Int? // Liczba mat (nullable; UI/Zod enforce >= 0)
+  // Belki zabezpieczające — mirrors the belts/beltsCount nullable pattern;
+  // UI/Zod enforce a minimum of 3 (like belts/mats).
+  beams           Boolean?
+  beamsCount      Int?
+  innerLength     Decimal? @db.Decimal(8, 2)
+  innerWidth      Decimal? @db.Decimal(8, 2)
+  innerHeight     Decimal? @db.Decimal(8, 2)
+  capacity        Decimal? @db.Decimal(10, 2)
+  // Boczny prześwit ładunkowy in cm — STRICT (NOT NULL).
+  sideClearanceCm Int
+  // Podnoszony dach (lifting roof).
+  liftingRoof     Boolean  @default(false)
+  // Odsuwany dach (sliding roof).
+  slidingRoof     Boolean  @default(false)
+  // Edscha sliding-roof mechanism — meaningful only when slidingRoof=true.
+  edscha          Boolean?
+  // Kosz paletowy (pallet box).
+  palletBox       Boolean  @default(false)
+  certXl          Boolean?
+  multilock       Boolean?
+  notes           String?
 
   delegations Delegation[]
+  attachments TrailerAttachment[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -598,6 +689,34 @@ model TrailerType {
   updatedAt DateTime @updatedAt
 
   @@map("trailer_types")
+}
+
+// ─── TRAILER ATTACHMENTS (certyfikat XL) ────────────────
+// Files uploaded from the Trailer create/edit view — the trailer's XL
+// certificate — stored in MinIO. The DB row holds only metadata + the object
+// key; the bytes live in the bucket. Mirrors VehicleAttachment.
+model TrailerAttachment {
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  trailerId String  @db.Uuid
+  trailer   Trailer @relation(fields: [trailerId], references: [id], onDelete: Cascade)
+
+  category   TrailerAttachmentCategory
+  // Object key in the MinIO bucket, e.g.
+  // `trailers/<trailerId>/<category>/<fileId>.<ext>`.
+  storageKey String
+  fileName   String // original upload filename
+  mimeType   String
+  size       Int // bytes
+
+  uploadedById String? @db.Uuid
+  uploadedBy   User?   @relation(fields: [uploadedById], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // soft-delete — consistent with the global middleware
+
+  @@index([trailerId, category])
+  @@map("trailer_attachments")
 }
 
 // ─── CLAIMS (WNIOSEK, 50 columns) ───────────────────────

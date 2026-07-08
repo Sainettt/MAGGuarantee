@@ -3,7 +3,8 @@
 // `createVehicle` / `updateVehicle` are `multipart/form-data` since the
 // 2026-05 migration: the umowa is a scanned file (VehicleAttachment) rather
 // than the legacy `contract` boolean. Scalar fields go in as text parts the
-// API coerces; files go in as `contract` / `cabotageDe` / `cabotageFr` parts;
+// API coerces; files go in as `contract` / `gps` / `agreement` / `cabotageDe`
+// / `cabotageDeInsurance` parts (kabotaż FR is a checkbox-only flag, no scan);
 // PATCH may also carry `removeAttachmentIds` (a JSON-encoded id array).
 //
 // NOTE: the ADR certificate scan moved to the Driver (2026-05-29) — the
@@ -34,14 +35,22 @@ import { type Paginated, toQuery } from './query';
 export interface VehicleAttachmentUploads {
   /** Umowa screenshots — multipart field `contract`. */
   contract?: File[];
+  /** Umowa GPS scan — multipart field `gps` (required when GPS number set). */
+  gps?: File[];
+  /** Porozumienie scan — multipart field `agreement` (SOFT: never blocks save). */
+  agreement?: File[];
   /** DE cabotage permit screenshots — multipart field `cabotageDe`. */
   cabotageDe?: File[];
-  /** FR cabotage permit screenshots — multipart field `cabotageFr`. */
-  cabotageFr?: File[];
+  /** DE cabotage insurance — multipart field `cabotageDeInsurance`. */
+  cabotageDeInsurance?: File[];
 }
 
 /** Scalar fields that must be JSON-encoded as multipart string parts. */
-const ARRAY_FIELDS = new Set(['wasteCountries', 'removeAttachmentIds']);
+const ARRAY_FIELDS = new Set([
+  'wasteCountries',
+  'adrClasses',
+  'removeAttachmentIds',
+]);
 
 /**
  * Serialises a vehicle DTO into `FormData`. Per the API multipart contract:
@@ -70,10 +79,14 @@ function toVehicleFormData(
     }
   }
 
-  // File parts — one append per file, all under the category field name.
+  // File parts — one append per file, all under the multipart field name
+  // (must match apps/api/.../vehicle-attachments.constants.ts exactly).
   for (const file of files.contract ?? []) fd.append('contract', file);
+  for (const file of files.gps ?? []) fd.append('gps', file);
+  for (const file of files.agreement ?? []) fd.append('agreement', file);
   for (const file of files.cabotageDe ?? []) fd.append('cabotageDe', file);
-  for (const file of files.cabotageFr ?? []) fd.append('cabotageFr', file);
+  for (const file of files.cabotageDeInsurance ?? [])
+    fd.append('cabotageDeInsurance', file);
 
   return fd;
 }

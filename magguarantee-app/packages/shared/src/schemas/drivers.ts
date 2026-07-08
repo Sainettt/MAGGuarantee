@@ -19,6 +19,7 @@
 import { z } from 'zod';
 
 import {
+  AdrClassSchema,
   IsoDateSchema,
   IsoDateTimeSchema,
   UuidSchema,
@@ -36,6 +37,51 @@ const EmailSchema = z.string().email().max(160);
 /** Identity-document number (passport, national ID, etc.) — generic string. */
 const IdDocumentNumberSchema = z.string().min(1).max(64);
 
+/**
+ * Driver nationality — mirror of the Prisma `enum DriverNationality`. NOT
+ * coupled to the phone prefix (a BY/UA driver may carry a PL number). Required
+ * on create; on update it is optional (leave unchanged) but NOT nullable.
+ */
+export const DriverNationalitySchema = z.enum([
+  'BY',
+  'RUS',
+  'UA',
+  'PL',
+  'UZB',
+  'KRG',
+  'KZ',
+  'OTHER',
+]);
+export type DriverNationality = z.infer<typeof DriverNationalitySchema>;
+
+/**
+ * Language a driver speaks — mirror of the Prisma `enum DriverLanguage`. The
+ * `languages` array requires ≥1 entry on create.
+ */
+export const DriverLanguageSchema = z.enum([
+  'PL',
+  'RU',
+  'EN',
+  'UA',
+  'DE',
+  'OTHER',
+]);
+export type DriverLanguage = z.infer<typeof DriverLanguageSchema>;
+
+/** `adr=true ⇒ adrClasses ≥1`. Shared by create + update object schemas. */
+export const driverAdrRefine = (
+  d: { adr?: boolean; adrClasses?: string[] },
+  ctx: z.RefinementCtx,
+): void => {
+  if (d.adr === true && (d.adrClasses?.length ?? 0) < 1) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'adrClasses wymaga min. 1 klasy gdy adr=true',
+      path: ['adrClasses'],
+    });
+  }
+};
+
 // ─── Create ──────────────────────────────────────────────
 
 /**
@@ -46,7 +92,8 @@ const IdDocumentNumberSchema = z.string().min(1).max(64);
  * `phone` and `idDocumentNumber` are required since the phase-2 migration
  * made the underlying columns NOT NULL.
  */
-export const CreateDriverSchema = z
+/** Underlying ZodObject — exported so web/zodResolver can compose it. */
+export const CreateDriverObjectSchema = z
   .object({
     carrierId: UuidSchema.optional(),
     firstName: NameSchema,
@@ -62,18 +109,27 @@ export const CreateDriverSchema = z
     licenseExpiry: IsoDateSchema,
     notes: emptyStringToUndefined(z.string().max(2_000).optional()),
     active: z.boolean().optional(),
+    /** Nationality — REQUIRED on create (Driver.nationality is NOT NULL). */
+    nationality: DriverNationalitySchema,
+    /** Languages the driver speaks — REQUIRED ≥1 on create. */
+    languages: z.array(DriverLanguageSchema).min(1).max(6),
     /**
      * ADR transport permit flag (świadectwo ADR). When true the API
      * additionally requires an `adr` attachment (scanned ADR certificate) —
      * that cross-field rule lives in the service layer
      * (`DriversService._assertRequiredAttachmentsOnCreate` /
      * `_assertRequiredAttachmentsOnUpdate`), because the file arrives as a
-     * separate multipart part and cannot be seen by Zod. Mirrors the cabotage
-     * required-attachment pattern formerly on the vehicle.
+     * separate multipart part and cannot be seen by Zod. `adr=true` ALSO
+     * requires `adrClasses ≥1` (driverAdrRefine + service).
      */
     adr: z.boolean().optional().default(false),
+    /** ADR top-level classes ("1".."9"). Meaningful only when adr=true. */
+    adrClasses: z.array(AdrClassSchema).max(9).optional(),
   })
   .strict();
+
+export const CreateDriverSchema =
+  CreateDriverObjectSchema.superRefine(driverAdrRefine);
 export type CreateDriverDto = z.infer<typeof CreateDriverSchema>;
 
 // ─── Update ──────────────────────────────────────────────
@@ -84,7 +140,8 @@ export type CreateDriverDto = z.infer<typeof CreateDriverSchema>;
  * because the DB no longer accepts NULL there. Empty form strings are
  * coerced to `undefined` (i.e. "leave field unchanged").
  */
-export const UpdateDriverSchema = z
+/** Underlying ZodObject — exported so web/zodResolver can compose it. */
+export const UpdateDriverObjectSchema = z
   .object({
     firstName: emptyStringToUndefined(NameSchema.optional()),
     lastName: emptyStringToUndefined(NameSchema.optional()),
@@ -97,9 +154,14 @@ export const UpdateDriverSchema = z
     licenseExpiry: emptyStringToUndefined(IsoDateSchema.optional()),
     notes: emptyStringToUndefined(z.string().max(2_000).nullable().optional()),
     active: z.boolean().optional(),
+    /** Nationality — optional (leave unchanged) but NOT nullable (NOT NULL col). */
+    nationality: DriverNationalitySchema.optional(),
+    /** Languages — optional; when present must be ≥1 (service asserts post-patch). */
+    languages: z.array(DriverLanguageSchema).min(1).max(6).optional(),
     /** Mirrors create — `adr=true` requires an `adr` attachment over the
      *  post-update set, enforced in the service layer. */
     adr: z.boolean().optional(),
+    adrClasses: z.array(AdrClassSchema).max(9).optional(),
     /**
      * Attachment ids to soft-delete as part of this update (multipart field
      * `removeAttachmentIds`). New files arrive as separate file parts; this
@@ -109,6 +171,9 @@ export const UpdateDriverSchema = z
     removeAttachmentIds: z.array(UuidSchema).max(64).optional(),
   })
   .strict();
+
+export const UpdateDriverSchema =
+  UpdateDriverObjectSchema.superRefine(driverAdrRefine);
 export type UpdateDriverDto = z.infer<typeof UpdateDriverSchema>;
 
 // ─── Filters ─────────────────────────────────────────────
@@ -173,8 +238,14 @@ export const DriverDtoSchema = z.object({
   licenseExpiry: IsoDateSchema.nullable(),
   notes: z.string().nullable(),
   active: z.boolean(),
+  /** Driver nationality (NOT NULL). */
+  nationality: DriverNationalitySchema,
+  /** Languages the driver speaks (≥1). */
+  languages: z.array(DriverLanguageSchema),
   /** ADR transport permit flag — required-attachment rule in the service. */
   adr: z.boolean(),
+  /** ADR top-level classes ("1".."9"). Empty unless adr=true. */
+  adrClasses: z.array(AdrClassSchema),
   carrier: z
     .object({
       id: UuidSchema,

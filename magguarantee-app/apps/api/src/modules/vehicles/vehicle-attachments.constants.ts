@@ -22,14 +22,17 @@ export {
  *
  * The Vehicle create/edit modal is `multipart/form-data`. Files are sent in
  * one field per category, each accepting multiple files. Web MUST use these
- * exact field names. The legacy `adr` field was removed 2026-05-29 — the ADR
- * certificate scan moved to the Driver (świadectwo ADR).
+ * exact field names. `cabotage_fr` was removed 2026-07 (checkbox-only flag);
+ * `gps`, `agreement` and `cabotage_de_insurance` were added. The legacy `adr`
+ * field was removed 2026-05-29 — the ADR cert scan moved to the Driver.
  */
 export const ATTACHMENT_FILE_FIELDS: ReadonlyArray<{
   field: string;
   category: VehicleAttachmentCategory;
 }> = [
   { field: 'contract', category: 'contract' },
+  { field: 'gps', category: 'gps' },
+  { field: 'agreement', category: 'agreement' },
   { field: 'cabotageDe', category: 'cabotage_de' },
-  { field: 'cabotageFr', category: 'cabotage_fr' },
+  { field: 'cabotageDeInsurance', category: 'cabotage_de_insurance' },
 ];

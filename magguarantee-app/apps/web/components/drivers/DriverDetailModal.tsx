@@ -36,6 +36,7 @@ import {
 import {
   boolValue,
   dateValue,
+  listValue,
   monoValue,
   textValue,
 } from '@/components/ui/entity-detail-values';
@@ -102,6 +103,16 @@ export function DriverDetailModal({
         { label: f('phone'), value: textValue(driver.phone) },
         { label: f('phone2'), value: textValue(driver.phone2) },
         { label: f('email'), value: textValue(driver.email) },
+        {
+          label: f('nationality'),
+          value: textValue(t(`nationalityOptions.${driver.nationality}`)),
+        },
+        {
+          label: f('languages'),
+          value: listValue(
+            driver.languages.map((l) => t(`languageOptions.${l}`)),
+          ),
+        },
       ],
     },
     {
@@ -114,6 +125,9 @@ export function DriverDetailModal({
         },
         { label: f('licenseExpiry'), value: dateValue(driver.licenseExpiry) },
         { label: f('adr'), value: boolValue(driver.adr, yes, no) },
+        ...(driver.adr
+          ? [{ label: f('adrClasses'), value: listValue(driver.adrClasses) }]
+          : []),
       ],
     },
     {

@@ -20,8 +20,10 @@
 
 import { z } from 'zod';
 
-import { IsoDateSchema, IsoDateTimeSchema, UuidSchema } from './common';
+import { AdrClassSchema, IsoDateSchema, IsoDateTimeSchema, UuidSchema } from './common';
+import { DriverLanguageSchema, DriverNationalitySchema } from './drivers';
 import { VehicleDispatchTeamSchema } from './teams';
+import { EuroNormSchema, WasteCountrySchema } from './vehicles';
 
 // ─── Slim list-item shapes ───────────────────────────────
 
@@ -49,24 +51,29 @@ export const VehicleListItemSchema = z.object({
   type: z.enum(['MEGA', 'STD', 'COIL']).nullable(),
   sideNumber: z.string().nullable(),
   // ── Phase 6.4 additive fields (§6.4.2) ──
-  euro: z.enum(['V', 'VI']),
+  euro: EuroNormSchema,
   certificateL: z.boolean(),
   /**
    * GPS tracker device ID (misnamed column — quirk #2). NOT a phone number.
-   * NOT NULL since 2026-06-17 (the `gps` toggle was dropped; every vehicle is
-   * tracked).
+   * Nullable again since 2026-07 (not every vehicle carries a GPS device).
    */
-  gpsMobilePhone: z.string(),
+  gpsMobilePhone: z.string().nullable(),
   fuelCard: z.boolean(),
   agreement: z.boolean().nullable(),
   adr: z.boolean(),
+  /** ADR top-level classes ("1".."9"). Empty unless adr=true. */
+  adrClasses: z.array(AdrClassSchema),
   wasteAllowed: z.boolean(),
-  wasteCountries: z.array(z.string()),
+  wasteCountries: z.array(WasteCountrySchema),
   cabotageDe: z.boolean(),
   cabotageFr: z.boolean(),
   gb: z.boolean().nullable(),
   it: z.boolean().nullable(),
   fr: z.boolean().nullable(),
+  /** DERIVED — fuel card present but blocked (no live agreement scan). */
+  fuelCardBlocked: z.boolean(),
+  /** DERIVED — agreement=true but porozumienie scan missing (SOFT). */
+  agreementScanMissing: z.boolean(),
   /** Display-only (quirk #11). ISO datetime; null when never reported. */
   lastDroveAt: IsoDateTimeSchema.nullable(),
   notes: z.string().nullable(),
@@ -92,7 +99,10 @@ export const DriverListItemSchema = z.object({
   phone2: z.string().nullable(),
   email: z.string().nullable(),
   idDocumentNumber: z.string(),
+  nationality: DriverNationalitySchema,
+  languages: z.array(DriverLanguageSchema),
   adr: z.boolean(),
+  adrClasses: z.array(AdrClassSchema),
   notes: z.string().nullable(),
 });
 export type DriverListItem = z.infer<typeof DriverListItemSchema>;
@@ -108,11 +118,17 @@ export const TrailerListItemSchema = z.object({
   beltsCount: z.number().int().nullable(),
   mats: z.boolean().nullable(),
   matsCount: z.number().int().nullable(),
+  beams: z.boolean().nullable(),
+  beamsCount: z.number().int().nullable(),
   innerLength: z.number().nullable(),
   innerWidth: z.number().nullable(),
   innerHeight: z.number().nullable(),
   capacity: z.number().nullable(),
-  airSuspension: z.boolean().nullable(),
+  sideClearanceCm: z.number().int(),
+  liftingRoof: z.boolean(),
+  slidingRoof: z.boolean(),
+  edscha: z.boolean().nullable(),
+  palletBox: z.boolean(),
   certXl: z.boolean().nullable(),
   multilock: z.boolean().nullable(),
   notes: z.string().nullable(),

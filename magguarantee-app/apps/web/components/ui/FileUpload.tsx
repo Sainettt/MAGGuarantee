@@ -21,6 +21,7 @@
 import {
   AlertTriangle,
   FileText,
+  Image as ImageIcon,
   Loader2,
   UploadCloud,
   X,
@@ -80,6 +81,9 @@ export interface FileUploadLabels {
   dropzoneAria: string;
   /** `(name) => "Remove file <name>"` */
   removeAria: (name: string) => string;
+  /** Compact single-file «Zmień» / «Change» text-button. Optional — the block
+   *  variant never renders it. */
+  change?: string;
 }
 
 const DEFAULT_ACCEPT = [
@@ -111,6 +115,18 @@ export interface FileUploadProps {
   onUpload?: (file: File) => Promise<void>;
   /** Wires the dropzone button for htmlFor / aria. */
   id?: string;
+  /**
+   * Visual footprint. `'block'` (default) = the tall dropzone + 56px-per-row
+   * list with 40px thumbnails (kept for large-drop contexts). `'compact'` = a
+   * single-row strip + inline chips (docs/14 §13.2.2) — the fleet-form default.
+   */
+  variant?: 'block' | 'compact';
+  /**
+   * On-submit required-but-empty signalling for the compact variant (§13.2.2):
+   * the strip gets `aria-invalid` + a danger border. Cleared by the parent on
+   * any file change. No effect on the block variant.
+   */
+  invalid?: boolean;
 }
 
 let localIdCounter = 0;
@@ -138,6 +154,8 @@ export function FileUpload({
   readOnly = false,
   onUpload,
   id,
+  variant = 'block',
+  invalid = false,
 }: FileUploadProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -254,6 +272,95 @@ export function FileUpload({
   };
 
   const hasFiles = value.length > 0;
+
+  // ── Compact variant ── (docs/14 §13.2.2) — the fleet-form default.
+  if (variant === 'compact') {
+    // Single-file compact: once a file exists the strip collapses to one chip
+    // plus a «Zmień» text-button; empty → the strip.
+    const singleWithFile = !multiple && hasFiles;
+    return (
+      <div className="space-y-2">
+        {/* Hidden picker — shared by the strip button and the «Zmień» link. */}
+        <input
+          ref={inputRef}
+          type="file"
+          multiple={multiple}
+          accept={accept.join(',')}
+          className="sr-only"
+          tabIndex={-1}
+          onChange={(e) => {
+            if (e.target.files?.length) addFiles(e.target.files);
+            e.target.value = '';
+          }}
+        />
+
+        {/* Strip — hidden in read-only mode and for single-file-with-file. */}
+        {!readOnly && !singleWithFile && (
+          <button
+            type="button"
+            id={id}
+            aria-label={labels.dropzoneAria}
+            aria-invalid={invalid || undefined}
+            disabled={disabled}
+            onClick={openPicker}
+            onDragOver={(e) => {
+              e.preventDefault();
+              if (!disabled) setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={onDrop}
+            className={cn(
+              'flex h-10 w-full items-center gap-2 rounded-[10px] px-3 text-sm',
+              'border border-dashed border-border bg-input text-text',
+              'cursor-pointer transition-colors',
+              'hover:border-brand-200 hover:bg-brand-50/50',
+              'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand',
+              dragOver && 'border-solid border-brand bg-brand-50',
+              invalid && 'border-danger',
+              disabled &&
+                'cursor-not-allowed opacity-50 hover:border-border hover:bg-input',
+            )}
+          >
+            <UploadCloud size={16} className="shrink-0 text-text-sub" aria-hidden />
+            <span className="truncate">{labels.promptCompact}</span>
+            <span className="ml-auto shrink-0 truncate text-xs text-text-sub">
+              {labels.constraints}
+            </span>
+          </button>
+        )}
+
+        {/* Chips — inline, wrapping. */}
+        {hasFiles && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {value.map((item) => (
+              <CompactChip
+                key={item.kind === 'new' ? item.localId : item.id}
+                item={item}
+                labels={labels}
+                disabled={disabled}
+                readOnly={readOnly}
+                onRemove={() => removeItem(item)}
+              />
+            ))}
+            {singleWithFile && !readOnly && labels.change && (
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={openPicker}
+                className={cn(
+                  'text-xs font-semibold text-brand hover:underline',
+                  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand rounded-sm',
+                  'disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline',
+                )}
+              >
+                {labels.change}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2">
@@ -481,5 +588,83 @@ function FileRow({
         </button>
       )}
     </li>
+  );
+}
+
+// ─── Compact chip ────────────────────────────────────────
+
+interface CompactChipProps {
+  item: FileUploadItem;
+  labels: FileUploadLabels;
+  disabled: boolean;
+  readOnly: boolean;
+  onRemove: () => void;
+}
+
+/**
+ * One file rendered as an inline chip (docs/14 §13.2.2) — a leading type icon
+ * (no 40px thumbnail — that block is what ate vertical space), the truncated
+ * filename, and a trailing remove `×` (mirrors the <MultiSelect> chip-remove).
+ * Client-side error files render in the danger variant so the user dismisses
+ * them via `×` — never a toast.
+ */
+function CompactChip({
+  item,
+  labels,
+  disabled,
+  readOnly,
+  onRemove,
+}: CompactChipProps) {
+  const isNew = item.kind === 'new';
+  const fileName = isNew ? item.file.name : item.fileName;
+  const mimeType = isNew ? item.file.type : item.mimeType;
+  const error = isNew ? item.error : undefined;
+
+  const errorMessage =
+    error === 'tooLarge'
+      ? labels.errTooLarge
+      : error === 'wrongType'
+        ? labels.errWrongType
+        : error === 'uploadFailed'
+          ? labels.errUploadFailed
+          : undefined;
+
+  const Icon = IMAGE_MIME.has(mimeType) ? ImageIcon : FileText;
+
+  return (
+    <span
+      title={errorMessage ?? fileName}
+      className={cn(
+        'inline-flex max-w-full items-center gap-1.5 rounded-sm border px-2 py-1',
+        'text-xs font-medium',
+        error
+          ? 'border-danger/40 bg-danger-bg text-danger'
+          : 'border-border bg-card text-text',
+      )}
+    >
+      {error ? (
+        <AlertTriangle size={14} className="shrink-0" aria-hidden />
+      ) : (
+        <Icon size={14} className="shrink-0 text-text-sub" aria-hidden />
+      )}
+      <span className="truncate max-w-[18ch]">{fileName}</span>
+      {!readOnly && (
+        <button
+          type="button"
+          aria-label={labels.removeAria(fileName)}
+          disabled={disabled}
+          onClick={onRemove}
+          className={cn(
+            'inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full',
+            'text-text-sub transition-colors',
+            'hover:bg-danger-bg hover:text-danger',
+            'focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand',
+            'disabled:cursor-not-allowed disabled:opacity-50',
+          )}
+        >
+          <X size={12} aria-hidden />
+        </button>
+      )}
+    </span>
   );
 }

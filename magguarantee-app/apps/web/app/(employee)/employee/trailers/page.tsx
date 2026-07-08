@@ -22,7 +22,7 @@ import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useTrailerTypes } from '@/lib/hooks/useTrailerTypes';
 import { useHardDeleteTrailer, useTrailers } from '@/lib/hooks/useTrailers';
 
-import { TrailerSheet } from './TrailerSheet';
+import { TrailerFormDialog } from './TrailerFormDialog';
 
 export default function TrailersPage() {
   const t = useTranslations('trailers');
@@ -259,7 +259,7 @@ export default function TrailersPage() {
         onEdit={editFromDetail}
       />
 
-      <TrailerSheet
+      <TrailerFormDialog
         open={sheetOpen}
         trailer={target}
         onClose={() => setSheetOpen(false)}

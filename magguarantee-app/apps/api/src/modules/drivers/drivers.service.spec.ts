@@ -5,6 +5,8 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 
+import type { DriverLanguage } from '@magguarantee/shared';
+
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import type { CarrierRow } from '../carriers/carriers.repository';
 import { CarriersRepository } from '../carriers/carriers.repository';
@@ -35,6 +37,9 @@ function makeDriver(overrides: Partial<DriverRow> = {}): DriverRow {
     notes: null,
     active: true,
     adr: false,
+    nationality: 'PL',
+    languages: ['PL'],
+    adrClasses: [],
     carrier: { id: 'c-1', login: 'pwz1', name: null },
     attachments: [],
     createdAt: NOW,
@@ -218,6 +223,8 @@ const REQUIRED_DRIVER_FIELDS = {
   idDocumentNumber: 'LIC-001',
   email: 'driver@magtrans.eu',
   licenseExpiry: '2027-01-01',
+  nationality: 'PL' as const,
+  languages: ['PL'] as DriverLanguage[],
 };
 
 /**

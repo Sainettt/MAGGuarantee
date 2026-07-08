@@ -6336,3 +6336,212 @@ carrier has few vehicles). The `sideNumber` and carrier-name columns exist **onl
 - [ ] **Token policy + dark-mode.** Zero `tailwind.config.ts` / `globals.css` changes; all surfaces legible in dark
       via `dark:bg-*/10..15` / `dark:text-*`; cards `bg-card`, soft chrome `bg-input`, explainer `bg-info-soft`.
 
+---
+
+## §13 — Fleet forms rework: Sheet → centered `<FormDialog>` (2026-07-08)
+
+> **Approved decision (user):** replace the three right-side `<Sheet>` fleet forms — `VehicleSheet.tsx` (~36 fields, 640px), `TrailerSheet.tsx`, `DriverSheet.tsx` — with a **large centered dialog** built on the existing `components/ui/Dialog.tsx`. A full-page route was considered and **rejected** (keeps list context, no new routes). Customer feedback: file-upload scans ate enormous vertical space; forms must be *lakoniczne, podzielone i ładne* (concise, sectioned, pretty).
+>
+> **Token policy (LOCKED):** zero new tokens. Everything below composes from existing brand palette, `success` / `warning` / `danger` / `info` semantics (+ `-bg` / `-dark`), the radius scale (`rounded-sm` 8 / `rounded-[10px]` input / `rounded` 12 / `rounded-lg` 14 / `rounded-xl` 16), `shadow-modal`, `animate-modal-in`, `animate-slide-in`, and the single-surface `bg-input` policy. No inline-style, no `!important`, no `dark:[style*=…]` overrides.
+>
+> **Scope note for web-agent:** several sub-sections below introduce **new fields / enums** (fuel-card details, waste countries, edscha, side clearance, XL-cert upload, driver nationality + languages, etc.). Those are **data-model changes owned by shared/db/api agents** — this doc specifies only the *UI, labels, grouping, and validation affordances*. Backend dependencies are collected in §13.9; do not invent DTO shape from this doc.
+
+### §13.1 — `<FormDialog>` shell contract
+
+A new shared shell **`components/forms/FormDialog.tsx`** that **composes** the existing `<Dialog>` primitive (portal, overlay `bg-black/40 backdrop-blur-sm`, focus-restore, Escape-close, `animate-modal-in` are inherited — do **not** re-implement them). The confirm-style `<Dialog>` callers (delete/deactivate) keep their current `max-w-md p-6` behaviour untouched — `<FormDialog>` overrides only via `className` on `<DialogContent>`.
+
+**Why a wrapper, not raw `<DialogContent>`:** `DialogContent` bakes in `max-w-md p-6` and has no header/body/footer bands. `cn()` uses `tailwind-merge`, so passing `max-w-[900px] p-0` on `className` *cleanly overrides* both. The wrapper adds the three structural bands (mirroring `<Sheet>`'s proven `SheetHeader/Body/Footer`) so scroll + sticky footer work.
+
+**Structure:**
+
+```
+<Dialog open onOpenChange>
+  <DialogContent className="
+      w-[calc(100%-2rem)] sm:max-w-[900px]
+      max-h-[90dvh] p-0
+      flex flex-col overflow-hidden">
+    <form className="flex min-h-0 flex-1 flex-col">
+      <FormDialogHeader/>   ← shrink-0, sticky top band
+      <FormDialogBody/>     ← min-h-0 flex-1 overflow-y-auto  (the ONLY scroller)
+      <FormDialogFooter/>   ← shrink-0, sticky bottom band
+    </form>
+  </DialogContent>
+</Dialog>
+```
+
+| Band | Tailwind | Notes |
+|---|---|---|
+| **Content box** | `w-[calc(100%-2rem)] sm:max-w-[900px] max-h-[90dvh] p-0 flex flex-col overflow-hidden` | `p-0` moves padding into the bands so the footer can sit flush. `max-h-[90dvh]` guarantees ~5dvh gutters; the body scrolls, the box never exceeds viewport. `overflow-hidden` clips band corners to the `rounded-xl` (16) already on `DialogContent`. |
+| **Header** (`FormDialogHeader`) | `shrink-0 border-b border-border px-6 py-4 pr-12` | `pr-12` clears the `<Dialog>` built-in close `×`. Contains `<DialogTitle>` + entity-context `<DialogDescription>`. |
+| **Body** (`FormDialogBody`) | `min-h-0 flex-1 overflow-y-auto px-6 py-5 [overflow-anchor:none] overflow-x-hidden [scrollbar-gutter:stable]` | Copy the anti-shake trio from `SheetBody` verbatim (tall checkbox grids caused scroll shake). Direct child: `space-y-6` section stack. |
+| **Footer** (`FormDialogFooter`) | `shrink-0 border-t border-border bg-card px-6 py-3 flex items-center justify-end gap-2` | Validation summary lives here `mr-auto` (left), actions right. |
+
+**Dimensions / breakpoints.** All three forms use **one** width — `sm:max-w-[900px]` — for consistency (the vehicle form is the widest field-count; 900px seats a comfortable 2-column grid with 3–4 col sub-grids for rates/dimensions). Do **not** vary per form.
+
+- **Desktop (≥768 `md`):** 900px box, 2-column field grids active (`FormGrid` already switches at `md:`).
+- **Tablet (640–767 `sm`):** 900px cap rarely reached; box is `calc(100%-2rem)`. Field grids still `md:`-gated, so they render **1-column** below 768 — acceptable and intentional (readable stacked forms).
+- **Mobile (<640):** full-width-minus-gutter, 1-column, body scrolls. `max-h-[90dvh]` keeps header/footer pinned.
+
+**Header — title + entity context.** `<DialogTitle>` = «Nowy pojazd» / «Edytuj pojazd» (`text-lg font-bold text-text leading-tight`, inherited). `<DialogDescription>` = the entity identity in edit mode: `plateNumber` (mono) for pojazd/naczepa, `Imię Nazwisko` for kierowca; `null` on create.
+
+**Sticky footer + validation-summary behaviour.**
+- Footer order (LTR): `[validation summary — mr-auto]` … `[Wyczyść]` (create only, `variant="outline" size="sm"`) `[Anuluj]` (`variant="ghost" size="sm"`) `[Zapisz]` (`size="sm"`, label → `common.saving` while pending).
+- **Validation summary** = the cross-field / attachment error string (the current `attachmentError` mechanism), rendered `mr-auto text-sm text-danger` with `role="alert"`. Per-field Zod errors stay **inline** under their field (`<FormMessage>`); the footer summary is reserved for *file-required* and *cross-field* rules (e.g. «min. 2 z 3 krajów», «Brak zezwolenia kabotażowego»). On submit-with-errors, keep the existing `onInvalidToast(form.setFocus, …)` — focus the first invalid field.
+
+**Section header style.** Reuse the existing `<FormSection title>` component verbatim — `h4.text-xs font-bold uppercase tracking-wider text-text-sub border-b border-border pb-2`, section wrapper `space-y-4`, body stack `space-y-6` between sections. No new heading treatment; no emoji (the legacy section emoji are an anti-pattern — drop them).
+
+**2-column grid rules.**
+- Default field layout = `<FormGrid cols={2}>` (existing subgrid-aligned component).
+- **Full-width (`className="md:col-span-2"`) when:** `notes`/`Textarea`, any `<MultiSelect>`, any `<FileUpload>` (block or compact), any checkbox-grid, any conditional `RevealInset`, and any single long field (GPS number, umowa upload).
+- **`cols={4}`** for the numeric strips: vehicle Stawki (rateDe/Ue/Export/Import) and naczepa Dane podstawowe dimensions.
+- **`cols={3}`** for the checkbox grids (special countries, permissions).
+- Do **not** attempt a masonry / two-column *section* layout — sections stack full-width; the "wide" feeling comes from the 2-col field grids inside a 900px box. (Lower risk than side-by-side sections; matches the existing `FormGrid` subgrid alignment guarantees in §"Grid-form field alignment".)
+
+### §13.2 — Shared patterns (used by all three forms)
+
+#### §13.2.1 — `RevealInset` — the one conditional-reveal pattern
+
+Every checkbox-gated field group across all three forms renders inside **one** consistent affordance — a **left-accent bordered inset**, so a revealed sub-block reads as *belonging to* the checkbox above it without wasteful `ml-6` indentation.
+
+New tiny component **`components/forms/RevealInset.tsx`** (presentational; parent still owns the `watch()` + mount/unmount):
+
+```
+<RevealInset>  →  <div class="
+    mt-2 space-y-3 animate-slide-in
+    rounded-lg border border-border border-l-2 border-l-brand/50
+    bg-input/40 p-3">
+```
+
+- Left 2px `border-l-brand/50` accent ties it to the enabling checkbox; `bg-input/40` is a calm inset fill (single-surface policy: still `bg-input`, just softened).
+- Reveals with the existing `animate-slide-in` keyframe (no pop, no new keyframe).
+- Replaces the current `ml-6 mt-2 animate-slide-in` `<FormItem>` indentation in Vehicle/Driver sheets **and** the ad-hoc `border-brand/40 bg-brand/5` equipment cells in TrailerSheet — one pattern everywhere.
+- When a reveal contains **multiple** fields (e.g. fuel card: number + expiry + PIN + status badge), lay them out inside the inset with a nested `<FormGrid cols={2}>`.
+
+#### §13.2.2 — `<FileUpload variant="compact">` — the vertical-footprint fix
+
+Add a `variant?: 'block' | 'compact'` prop to `components/ui/FileUpload.tsx`. `'block'` = today's behaviour (unchanged; keep for any future large-drop context). `'compact'` is the **default for all fleet-form uploads** and is the direct answer to the customer complaint.
+
+**Compact anatomy (single row + inline chips):**
+
+```
+Umowa GPS *                                             ← FormLabel (required asterisk)
+┌───────────────────────────────────────────────────┐
+│ ⬆  Dodaj plik lub upuść  · PDF/JPG/PNG · maks.10MB │  ← strip (the click/drop target), h-10
+└───────────────────────────────────────────────────┘
+[📄 umowa-gps.pdf ×] [🖼 skan.jpg ×]                      ← chips, wrap inline below strip
+```
+
+| Slot | Tailwind | Notes |
+|---|---|---|
+| **Strip (empty target)** | `flex h-10 w-full items-center gap-2 rounded-[10px] border border-dashed border-border bg-input px-3 text-sm text-text cursor-pointer transition-colors hover:border-brand-200 hover:bg-brand-50/50` | A real `<button type="button">` wrapping the hidden `<input type="file">`. Drag-over → `border-solid border-brand bg-brand-50` (non-colour cue = solid border, reuse block logic). Leading `<UploadCloud size={16} className="text-text-sub"/>`; label `common`-ish prompt (`fileUpload.promptCompact`) + constraints appended in `text-xs text-text-sub` (single line, truncates). |
+| **Chip (per file)** | `inline-flex max-w-full items-center gap-1.5 rounded-sm border border-border bg-card px-2 py-1 text-xs font-medium text-text` | Leading icon `<FileText size={14}/>` (PDF/other) or `<ImageIcon size={14}/>` (image) — **no 40px thumbnail** (that block is what ate height). Filename `truncate max-w-[18ch]` + `title` full name. Trailing remove `<button aria-label>` `inline-flex h-4 w-4 items-center justify-center rounded-full text-text-sub hover:bg-danger-bg hover:text-danger` with `<X size={12}/>` (mirror `<MultiSelect>` chip-remove exactly). |
+| **Chip row** | `mt-2 flex flex-wrap gap-1.5` | Chips wrap; total footprint for 1–2 files ≈ strip 40px + one 28px chip row ≈ **68px** vs the old block's ~80px dropzone + 56px-per-row list. |
+| **Error chip** | `border-danger/40 bg-danger-bg text-danger` variant of the chip; message via `title`/inline `text-danger` (client-side too-large / wrong-type — same three categories as block). | Stays visible so user dismisses via `×`; never a toast. |
+
+**Single-file compact** (`multiple={false}` — ADR świadectwo, umowa contract, GPS umowa, XL cert, kabotaż scans): once a file exists, the strip is **replaced** by the single chip plus a subtle text-button «Zmień» (`text-xs font-semibold text-brand hover:underline`) that re-opens the picker. Empty → the strip.
+
+**Required-file signalling (compact):**
+- `<FormLabel required>` renders the `*` (existing).
+- On **submit attempt** with a required-but-empty upload, the strip gets `aria-invalid` + `border-danger` (swap `border-border`→`border-danger`, keep dashed), and a `<FormMessage>` renders below (`fileUpload.required.<category>`). This mirrors the current `attachmentError` flow but moves the visible signal onto the field instead of only the footer. Keep the footer summary too for the cross-cutting cases.
+- Clearing the error: any file change resets `aria-invalid` + border (existing `setAttachmentError(null)` hook point).
+
+**Existing-vs-new files (edit mode):** identical chips — the list is one uniform "files attached to this field" set (§1.6 rule preserved). Optional nicety: existing (server) file chips may carry a download affordance (filename is a link), new local files are plain text — but **do not** add a second visual style/badge distinguishing them.
+
+**Read-only / disabled:** compact read-only = chips only (no strip, no `×`, filename is a link). Disabled = strip inert `opacity-50`, chip `×` disabled. Same rules as block §1.7.
+
+#### §13.2.3 — Status & warning affordances
+
+| Affordance | Component / tokens | Usage |
+|---|---|---|
+| **Fuel-card status badge** | `<Badge variant="success">Karta aktywna</Badge>` / `<Badge variant="danger">Karta zablokowana</Badge>` — existing variants, no new colour. | Rendered inside the fuel-card `RevealInset`, next to the PIN field. **Live-computed**, see rule below. |
+| **«Brak skanu porozumienia» soft warning** | Inline line, NOT blocking: `flex items-center gap-1.5 text-xs text-warning-dark dark:text-warning` + `<AlertTriangle size={14} aria-hidden/>`. In table/detail contexts use `<Badge variant="warning">`. | (a) **Form:** inside the porozumienie `RevealInset` when checkbox on + no scan. (b) **Vehicle table:** `<Badge variant="warning">` in the row (agreement=true, scan missing). (c) **VehicleDetailModal:** a warning row in the porozumienie field. One wording, three surfaces. |
+| **Inline validation error** | `<FormMessage>` = `text-sm text-danger role="alert"`; input gets `aria-invalid` → `border-danger` (existing `<Input>` behaviour). | Every field-level Zod error, plus the special-countries «min. 2 z 3» rule rendered as a `<FormMessage>` under the checkbox grid, and the counts «min. 3» errors under each count input (existing TrailerSheet pattern). |
+
+**Fuel-card live status rule** (`Karta zablokowana` until BOTH true): `agreement === true` **AND** the porozumienie scan bucket has ≥1 file (existing or new). Compute from `form.watch('agreement')` + porozumienie file bucket length; re-renders live as the operator ticks/uploads. When blocked, show `<Badge variant="danger">Karta zablokowana</Badge>` + a `text-xs text-text-sub` reason line («Wymaga aktywnego porozumienia i wgranego skanu»). When both satisfied → `<Badge variant="success">Karta aktywna</Badge>`.
+
+### §13.3 — Pojazd (`VehicleSheet` → `VehicleFormDialog`)
+
+Sections top-to-bottom (each a `<FormSection>`):
+
+1. **Dane podstawowe** — `FormGrid cols={2}`: `Nr rej.` (req), `Nr boczny`, `Typ` (select MEGA/STD/COIL, req), `Planista` (select, req), `Zespół dyspozytorów` (select + live `<TeamMembers>` preview, req), **static `<Badge variant="muted">EURO VI</Badge>`** (the `euro` select is **removed** — see §13.9), `Notatki` (`Textarea`, `md:col-span-2`), `Aktywny` (checkbox), `Certyfikat L` (checkbox — moved here as a plain flag). Carrier picker on create (`md:col-span-2`, top).
+2. **Kraje specjalne** — `FormGrid cols={3}` of GB / IT / FR checkboxes (keep the per-flag `text-xs text-text-sub` hint sublines). **Validation: min. 2 z 3** → inline `<FormMessage>` under the grid on submit if fewer than two checked.
+3. **Stawki** — `FormGrid cols={4}`: `rateDe` / `rateUe` / `rateExport` / `rateImport` (number, req, `step=0.01 min=0`).
+4. **GPS** — `Numer GPS` (optional input). When filled → reveal a **compact required** `<FileUpload multiple={false} variant="compact">` labelled «Umowa GPS» inside a `RevealInset`. (Empty GPS number → no upload.)
+5. **Karta paliwowa** — checkbox → `RevealInset` (`FormGrid cols={2}`): `Numer karty` (16 cyfr, masked/`inputMode=numeric`), `Data ważności` (`type=date`), `PIN`, **+ live status badge §13.2.3**.
+6. **Porozumienie** — checkbox → `RevealInset`: compact `<FileUpload multiple={false} variant="compact">` «Skan porozumienia». **Soft**: no scan = amber warning (§13.2.3), **does not block Zapisz**.
+7. **Odpady** — checkbox → `RevealInset`: `<MultiSelect>` of countries **DE NL AT BE LUX FR GB IT CZ PL**, **min. 1** (inline error).
+8. **Kabotaż** — two checkboxes: **DE** → `RevealInset` with **TWO** compact required uploads («Zezwolenie kabotażowe» + «Ubezpieczenie kabotażowe», both required); **FR** → checkbox only (no files).
+9. **ADR** — checkbox → `RevealInset`: `<MultiSelect>` klas **1–9**, **min. 1**.
+10. **Dokumenty** — compact `<FileUpload variant="compact">` «Umowa» (`contract` category) — **always required** (on create; edit keeps existing rule).
+
+Removed from the form: `euro` select (→ static badge), any `airSuspension`-style dead flags. GPS is optional now (was unconditionally-required device id) — **confirm with api-agent** (§13.9).
+
+### §13.4 — Naczepa (`TrailerSheet` → `TrailerFormDialog`)
+
+1. **Dane podstawowe** — `Nr rej.` (req), `Typ naczepy` (select, req), then `FormGrid cols={4}` dims: `Dł. wewn.`, `Szer. wewn.`, `Wys. wewn.`, `Ładowność` — **all WYMAGANE now** (were optional), plus `Boczny prześwit ładunkowy (cm)` — **WYMAGANE** (new field).
+2. **Dach** — `Podnoszony` (tak/nie), `Odsuwany` (tak/nie) → when tak, reveal (`RevealInset`) `Edscha` (tak/nie). Model these as checkboxes (tak = checked) for consistency with the rest of the form.
+3. **Wyposażenie** — `Kosz paletowy` (checkbox), `Multilock` (checkbox), `Pasy` + liczba, `Maty` + liczba, `Belki zabezpieczające` + liczba. Count inputs reveal inline under their checkbox (keep the existing equipment-cell pattern, restyled to `RevealInset` where a count appears). **All counts min. 3** (inline error under each).
+4. **Certyfikat XL** — checkbox → `RevealInset`: compact **required** `<FileUpload multiple={false} variant="compact" accept={pdf}>` «Certyfikat XL (PDF)».
+5. **Notatki** — `Textarea` (`md:col-span-2`) + `Aktywny` checkbox.
+
+Removed: `airSuspension` / zawieszenie pneumatyczne (§13.9).
+
+### §13.5 — Kierowca (`DriverSheet` → `DriverFormDialog`)
+
+1. **Dane osobowe** — `FormGrid cols={2}`: `Imię` (req), `Nazwisko` (req), `Dokument` (req), `Data ważności prawa jazdy` (`type=date`, req).
+2. **Kontakt** — `Telefon 1` (req), `Telefon 2`, `Email`. **Prefiks telefonu jest NIEZALEŻNY od narodowości** — decouple the phone-prefix control from the `homeCountry`/nationality: each phone keeps its own prefix picker (the existing `<MaskedPhoneInput>` `country` prop is driven by a dedicated per-form phone-prefix selector, **not** by Narodowość). Remove the old "country scopes contact fields" coupling.
+3. **Narodowość + Języki** — `Narodowość` select (**BY RUS UA PL UZB KRG KZ Inne**) + `Języki komunikacji` `<MultiSelect>` (**PL RU EN UA DE Inne**, min. 1).
+4. **ADR** — checkbox → `RevealInset`: `<MultiSelect>` klas **1–9** + compact **required** `<FileUpload multiple={false} variant="compact">` «Świadectwo ADR».
+5. **Notatki** — `Textarea` (`md:col-span-2`) + `Aktywny` checkbox.
+
+### §13.6 — Acceptance checklist (§13, web-agent)
+
+- [ ] `<FormDialog>` composes `<Dialog>` (portal/overlay/focus/Escape/`animate-modal-in` inherited — not re-implemented); confirm-style `<Dialog>` callers unchanged.
+- [ ] Box: `sm:max-w-[900px]`, `max-h-[90dvh]`, `p-0`, `flex flex-col overflow-hidden`; **body is the only scroller** with the `[overflow-anchor:none] overflow-x-hidden [scrollbar-gutter:stable]` anti-shake trio; footer stays pinned.
+- [ ] Header shows title + entity context (plate / name) in edit, none on create; `pr-12` clears the close `×`.
+- [ ] Footer: validation summary `mr-auto text-danger role=alert`; `[Wyczyść (create)] [Anuluj] [Zapisz]`; `onInvalidToast` focuses first invalid field.
+- [ ] Field grids: default `cols={2}`; `cols={4}` for Stawki + naczepa dims; `cols={3}` for checkbox grids; `md:col-span-2` for notes / MultiSelect / FileUpload / RevealInset.
+- [ ] Below `md`, grids render 1-column and remain readable; mobile box is `calc(100%-2rem)`.
+- [ ] `RevealInset` is the **single** conditional-reveal pattern in all three forms (left-accent inset, `animate-slide-in`); no `ml-6` indentation, no ad-hoc `bg-brand/5` cells.
+- [ ] `<FileUpload variant="compact">` used for **every** fleet upload; footprint for 1–2 files ≈ ≤70px (strip + one chip row); **no 40px thumbnail**.
+- [ ] Compact required upload: `*` on label + on-submit `aria-invalid`/`border-danger` on strip + `<FormMessage>` below; clears on file change.
+- [ ] Single-file compact collapses to one chip + «Zmień» once a file exists.
+- [ ] Fuel-card badge live-computes `Karta zablokowana` until `agreement && porozumienieScan≥1`, else `Karta aktywna`; reason subline when blocked.
+- [ ] «Brak skanu porozumienia» = amber, **non-blocking**, identical wording in form / table / detail modal.
+- [ ] Pojazd: EURO shown as static `<Badge>EURO VI</Badge>` (select gone); Kraje specjalne enforce min. 2 z 3 inline; Odpady/ADR multi-selects enforce min. 1; Kabotaż DE = two required uploads, FR = checkbox only; Umowa always required.
+- [ ] Naczepa: dims + ładowność + boczny prześwit required; Dach→Odsuwany→Edscha reveal chain; counts min. 3; XL cert required PDF; airSuspension gone.
+- [ ] Kierowca: phone prefix independent of Narodowość; Narodowość select + Języki multi-select (min. 1); ADR reveals classes multi-select + required świadectwo.
+- [ ] Dark mode: all bands / inset / chips / strip legible via existing tokens; no `dark:[style*=…]`, no inline style, no `!important`.
+- [ ] Touch: strip ≥40px tall, chip `×` and any icon buttons meet ≥44px hit area via padding on tablet.
+- [ ] Zero new tokens; zero `tailwind.config.ts` / `globals.css` changes.
+
+### §13.7 — Component inventory changes
+
+| Component | Change | File |
+|---|---|---|
+| `<FormDialog>` + `FormDialogHeader/Body/Footer` | **NEW** shared shell composing `<Dialog>` | `components/forms/FormDialog.tsx` |
+| `<RevealInset>` | **NEW** conditional-reveal inset | `components/forms/RevealInset.tsx` |
+| `<FileUpload>` | **+`variant`** (`'block'` \| `'compact'`), compact chip layout | `components/ui/FileUpload.tsx` |
+| `<VehicleFormDialog>` / `<TrailerFormDialog>` / `<DriverFormDialog>` | **REPLACE** the three `*Sheet` components (wizard mode preserved — the wizard steps embed these dialogs the same way) | `app/(employee)/employee/{vehicles,trailers,drivers}/` |
+| `<Badge>` | reused (`success` / `danger` / `warning` / `muted`) — no change | `components/ui/Badge.tsx` |
+| `<MultiSelect>` | reused for Odpady / ADR classes / Języki — no change | `components/ui/MultiSelect.tsx` |
+| legacy `*Sheet.tsx` | **retire** once dialogs land (keep `<Sheet>` primitive — still used elsewhere) | — |
+
+### §13.8 — Anti-patterns explicitly killed here
+
+- Full-width `<FileUpload>` block with 40px thumbnails inside forms → **compact variant**.
+- `ml-6` indentation + bare `animate-slide-in` `<FormItem>` for reveals → **`RevealInset`**.
+- Ad-hoc `border-brand/40 bg-brand/5` equipment cells (TrailerSheet) → **`RevealInset`**.
+- Section-header emoji (legacy) → dropped (plain `<FormSection>` uppercase label).
+- `euro` `<Select>` with a single meaningful value → static `<Badge>`.
+- Error-only-in-footer for required files → **field-level `aria-invalid` + `<FormMessage>`** (footer summary kept for cross-field).
+
+### §13.9 — Backend / data dependencies (route to shared/db/api — NOT design authority)
+
+These UI changes assume model/enum work owned by other agents. Web-agent must **not** ship the dialogs until the contract exists; orchestrator should route:
+
+- **Vehicle:** drop `euro` from the form payload (default `VI` server-side) or keep column but stop editing; `gpsMobilePhone` → **optional** (was required) + new `contract`-style attachment category «gps» revealed by GPS number; **fuel-card** fields (`fuelCardNumber` 16-digit, `fuelCardExpiry`, `fuelCardPin`) + derived blocked/active status; **porozumienie** scan attachment category (soft, non-blocking); **waste countries** array; **kabotaż DE** second attachment category «cabotage_de_insurance»; special-countries **min-2-of-3** Zod refine; ADR classes array; multi-select **min-1** refines.
+- **Trailer:** make `innerLength/Width/Height/capacity` **required**; new `sideClearanceCm` (required); `roofLift` / `roofSlide` / `edscha` booleans (edscha gated on roofSlide); counts (`beltsCount`/`matsCount`/`beamsCount`) **min 3**; new `beams` flag + count; new `paletteBasket` flag; **XL cert** required attachment; **remove `airSuspension`**.
+- **Driver:** `nationality` enum (BY/RUS/UA/PL/UZB/KRG/KZ/OTHER); `languages` array (PL/RU/EN/UA/DE/OTHER, min 1); phone-prefix decoupled from nationality; ADR classes array + required świadectwo attachment.
+- **i18n:** web-agent adds PL(default)+EN keys for all new labels/sections/badges/errors under `vehicles.*` / `trailers.*` / `drivers.*` / `fileUpload.*`.
+

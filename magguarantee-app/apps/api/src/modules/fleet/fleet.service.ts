@@ -28,6 +28,7 @@ import {
 } from '../carriers/carriers.repository';
 import { DriversRepository, type DriverRow } from '../drivers/drivers.repository';
 import { TrailersRepository, type TrailerRow } from '../trailers/trailers.repository';
+import { computeVehicleDerivedFlags } from '../vehicles/vehicle-derived-flags';
 import {
   NO_TEAM_SENTINEL,
   VehiclesRepository,
@@ -520,13 +521,16 @@ function toVehicleListItem(v: VehicleRow): VehicleListItem {
     fuelCard: v.fuelCard,
     agreement: v.agreement,
     adr: v.adr,
+    adrClasses: v.adrClasses as VehicleListItem['adrClasses'],
     wasteAllowed: v.wasteAllowed,
-    wasteCountries: v.wasteCountries,
+    wasteCountries: v.wasteCountries as VehicleListItem['wasteCountries'],
     cabotageDe: v.cabotageDe,
     cabotageFr: v.cabotageFr,
     gb: v.gb,
     it: v.it,
     fr: v.fr,
+    // Derived flags via the SHARED helper (same source as VehiclesService.toDto).
+    ...computeVehicleDerivedFlags(v),
     lastDroveAt: v.lastDroveAt ? v.lastDroveAt.toISOString() : null,
     notes: v.notes,
     // Phase 11 — dispatch Team with roster (additive, non-sensitive — no rates).
@@ -549,7 +553,10 @@ function toDriverListItem(d: DriverRow): DriverListItem {
     phone2: d.phone2,
     email: d.email,
     idDocumentNumber: d.idDocumentNumber,
+    nationality: d.nationality,
+    languages: d.languages as DriverListItem['languages'],
     adr: d.adr,
+    adrClasses: d.adrClasses as DriverListItem['adrClasses'],
     notes: d.notes,
   };
 }
@@ -571,11 +578,17 @@ function toTrailerListItem(t: TrailerRow): TrailerListItem {
     beltsCount: t.beltsCount,
     mats: t.mats,
     matsCount: t.matsCount,
+    beams: t.beams,
+    beamsCount: t.beamsCount,
     innerLength: t.innerLength,
     innerWidth: t.innerWidth,
     innerHeight: t.innerHeight,
     capacity: t.capacity,
-    airSuspension: t.airSuspension,
+    sideClearanceCm: t.sideClearanceCm,
+    liftingRoof: t.liftingRoof,
+    slidingRoof: t.slidingRoof,
+    edscha: t.edscha,
+    palletBox: t.palletBox,
     certXl: t.certXl,
     multilock: t.multilock,
     notes: t.notes,

@@ -1,18 +1,24 @@
+import { randomUUID } from 'node:crypto';
+
 import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 
 import type {
   CreateTrailerDto,
+  TrailerAttachmentCategory,
+  TrailerAttachmentDto,
   TrailerDto,
   TrailerFilters,
   UpdateTrailerDto,
 } from '@magguarantee/shared';
 
+import { storageKeyExtension } from '../../common/attachments';
 import { AuditContext } from '../../common/audit';
 import {
   isPrismaUniqueViolation,
@@ -20,18 +26,42 @@ import {
 } from '../../common/errors/prisma-error';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { CarriersRepository } from '../carriers/carriers.repository';
+import { StorageService, type StorageObject } from '../storage/storage.service';
 import { TrailerTypesRepository } from '../trailer-types/trailer-types.repository';
+import { type CategorizedUpload } from './attachment-validation';
+import {
+  TrailerAttachmentsRepository,
+  type TrailerAttachmentRow,
+} from './trailer-attachments.repository';
 import {
   TrailersRepository,
   type TrailerRow,
+  type TrailerRowAttachment,
 } from './trailers.repository';
 
+/** Minimum count required for belts / mats / beams when their flag is true. */
+const MIN_SECURING_COUNT = 3;
+
+/**
+ * Trailers CRUD service per docs/13-api-design.md#trailers.
+ *
+ * Multipart: create/update accept file parts (the XL certificate) plus scalar
+ * fields. Required-attachment rule (service-layer, file arrives out-of-band):
+ *   - `certXl=true` ⇒ ≥1 live `cert_xl` attachment (PDF-only, MIME-checked in
+ *     `collectAndValidateUploads`).
+ * Cross-field rules (service-layer, authoritative post-patch — Zod can't see a
+ * partial PATCH): belts/mats/beams counts ≥3 when flagged; slidingRoof ⇒ edscha.
+ */
 @Injectable()
 export class TrailersService {
+  private readonly logger = new Logger(TrailersService.name);
+
   constructor(
     private readonly trailers: TrailersRepository,
     private readonly carriers: CarriersRepository,
     private readonly trailerTypes: TrailerTypesRepository,
+    private readonly attachments: TrailerAttachmentsRepository,
+    private readonly storage: StorageService,
   ) {}
 
   async list(
@@ -54,11 +84,21 @@ export class TrailersService {
     return this.toDto(row);
   }
 
-  async create(user: AuthUser, dto: CreateTrailerDto): Promise<TrailerDto> {
+  /**
+   * Creates a trailer plus its XL-certificate attachment(s). Order:
+   * carrier-access check → active-type check → rules (cert_xl + counts/edscha)
+   * → create Trailer → upload files → insert attachment rows. On any post-create
+   * failure the uploaded objects and the trailer row are rolled back.
+   */
+  async create(
+    user: AuthUser,
+    dto: CreateTrailerDto,
+    uploads: CategorizedUpload[],
+  ): Promise<TrailerDto> {
     await this._assertCarrierAccessibleForWrite(user, dto.carrierId);
-    // trailerTypeId is required by the schema; still validate the type exists
-    // and is active so the FK + business rule are enforced together.
     await this._assertActiveTrailerType(dto.trailerTypeId);
+
+    this._assertTrailerRulesOnCreate(dto, uploads);
 
     let row: TrailerRow;
     try {
@@ -67,15 +107,21 @@ export class TrailersService {
         plateNumber: dto.plateNumber,
         active: dto.active,
         trailerTypeId: dto.trailerTypeId,
+        sideClearanceCm: dto.sideClearanceCm,
         belts: dto.belts ?? null,
         beltsCount: dto.beltsCount ?? null,
         mats: dto.mats ?? null,
         matsCount: dto.matsCount ?? null,
+        beams: dto.beams ?? null,
+        beamsCount: dto.beamsCount ?? null,
         innerLength: dto.innerLength ?? null,
         innerWidth: dto.innerWidth ?? null,
         innerHeight: dto.innerHeight ?? null,
         capacity: dto.capacity ?? null,
-        airSuspension: dto.airSuspension ?? null,
+        liftingRoof: dto.liftingRoof ?? false,
+        slidingRoof: dto.slidingRoof ?? false,
+        edscha: dto.edscha ?? null,
+        palletBox: dto.palletBox ?? false,
         certXl: dto.certXl ?? null,
         multilock: dto.multilock ?? null,
         notes: dto.notes ?? null,
@@ -87,13 +133,20 @@ export class TrailersService {
       );
     }
 
-    // Onboarding state is derived on read from the live child-count snapshot
-    // (see `CarriersService.toDto`) — creating a trailer no longer mutates
-    // any carrier-level flag.
-    return this.toDto(row);
+    const persisted = await this._attachUploadsWithRollback(
+      row,
+      uploads,
+      user.sub,
+      { rollbackTrailer: true },
+    );
+    return this.toDto(persisted);
   }
 
-  async update(id: string, dto: UpdateTrailerDto): Promise<TrailerDto> {
+  async update(
+    id: string,
+    dto: UpdateTrailerDto,
+    uploads: CategorizedUpload[],
+  ): Promise<TrailerDto> {
     const existing = await this.trailers.findById(id);
     if (!existing) throw new NotFoundException('Naczepa nie znaleziona');
     AuditContext.setBefore(this.toDto(existing));
@@ -101,31 +154,20 @@ export class TrailersService {
       await this._assertActiveTrailerType(dto.trailerTypeId);
     }
 
-    const patch: Record<string, unknown> = {};
-    const passthrough: (keyof UpdateTrailerDto)[] = [
-      'plateNumber',
-      'active',
-      'trailerTypeId',
-      'belts',
-      'beltsCount',
-      'mats',
-      'matsCount',
-      'innerLength',
-      'innerWidth',
-      'innerHeight',
-      'capacity',
-      'airSuspension',
-      'certXl',
-      'multilock',
-      'notes',
-    ];
-    for (const k of passthrough) {
-      if (dto[k] !== undefined) patch[k] = dto[k];
-    }
+    const removeIds = dto.removeAttachmentIds ?? [];
+    const toRemove = await this._resolveRemovals(id, removeIds);
+
+    this._assertTrailerRulesOnUpdate(
+      existing,
+      dto,
+      uploads,
+      new Set(toRemove.map((a) => a.id)),
+    );
+
+    const patch = this._buildUpdatePatch(dto);
 
     try {
-      const row = await this.trailers.update(id, patch);
-      return this.toDto(row);
+      await this.trailers.update(id, patch);
     } catch (err) {
       if (isPrismaUniqueViolation(err)) {
         throw uniqueViolationToConflict(
@@ -135,6 +177,15 @@ export class TrailersService {
       }
       throw err;
     }
+
+    for (const a of toRemove) {
+      await this.attachments.softDelete(a.id);
+      await this._deleteStorageObject(a.storageKey);
+    }
+    await this._attachUploadsWithRollback(existing, uploads, /* createdById */ null);
+
+    const fresh = await this.trailers.findById(id);
+    return this.toDto(fresh ?? existing);
   }
 
   async deactivate(id: string): Promise<TrailerDto> {
@@ -167,9 +218,10 @@ export class TrailersService {
   }
 
   /**
-   * Hard-deletes a trailer row. Phase 4.4 admin-only flow — `reason` is
-   * required (Zod-validated upstream) and lands in
-   * `audit_log.metadata.reason` via `AuditContext.setMetadata`.
+   * Hard-deletes a trailer row. Phase 4.4 admin-only flow — `reason` required
+   * (Zod-validated upstream) and lands in `audit_log.metadata.reason`. The
+   * TrailerAttachment rows cascade with the trailer; MinIO objects are left in
+   * place (same policy as the vehicle hard-delete).
    */
   async hardDelete(id: string, reason: string): Promise<void> {
     const existing = await this.trailers.findById(id);
@@ -179,7 +231,307 @@ export class TrailersService {
     await this.trailers.hardDelete(id);
   }
 
-  // ── Internals ────────────────────────────────────────────
+  // ── Attachments ──────────────────────────────────────────
+
+  /** Lists the non-deleted attachments of a trailer as public DTOs. */
+  async listAttachments(trailerId: string): Promise<TrailerAttachmentDto[]> {
+    const trailer = await this.trailers.findById(trailerId);
+    if (!trailer) throw new NotFoundException('Naczepa nie znaleziona');
+    const rows = await this.attachments.listByTrailer(trailerId);
+    return rows.map((r) => attachmentRowToDto(r));
+  }
+
+  /**
+   * Returns the byte stream + metadata for an attachment so the controller can
+   * proxy it to the HTTP response (MinIO is not publicly reachable).
+   */
+  async downloadAttachment(
+    trailerId: string,
+    attachmentId: string,
+  ): Promise<{ object: StorageObject; fileName: string; mimeType: string }> {
+    const att = await this._loadAttachmentOf(trailerId, attachmentId);
+    const object = await this.storage.getObject(att.storageKey);
+    return { object, fileName: att.fileName, mimeType: att.mimeType };
+  }
+
+  /** Soft-deletes an attachment row and removes the MinIO object. */
+  async deleteAttachment(
+    trailerId: string,
+    attachmentId: string,
+  ): Promise<void> {
+    const att = await this._loadAttachmentOf(trailerId, attachmentId);
+    await this.attachments.softDelete(att.id);
+    await this._deleteStorageObject(att.storageKey);
+  }
+
+  // ── Internals: persistence ───────────────────────────────
+
+  private _buildUpdatePatch(dto: UpdateTrailerDto): Record<string, unknown> {
+    const patch: Record<string, unknown> = {};
+    const passthrough: (keyof UpdateTrailerDto)[] = [
+      'plateNumber',
+      'active',
+      'trailerTypeId',
+      'sideClearanceCm',
+      'belts',
+      'beltsCount',
+      'mats',
+      'matsCount',
+      'beams',
+      'beamsCount',
+      'innerLength',
+      'innerWidth',
+      'innerHeight',
+      'capacity',
+      'liftingRoof',
+      'slidingRoof',
+      'edscha',
+      'palletBox',
+      'certXl',
+      'multilock',
+      'notes',
+    ];
+    for (const k of passthrough) {
+      if (dto[k] !== undefined) patch[k] = dto[k];
+    }
+    return patch;
+  }
+
+  /**
+   * Uploads each file to MinIO then inserts its `TrailerAttachment` row. On any
+   * failure everything touched here is removed; when `opts.rollbackTrailer` is
+   * set (CREATE path) the trailer row is removed too.
+   */
+  private async _attachUploadsWithRollback(
+    trailer: TrailerRow,
+    uploads: CategorizedUpload[],
+    createdById: string | null,
+    opts: { rollbackTrailer?: boolean } = {},
+  ): Promise<TrailerRow> {
+    if (uploads.length === 0) {
+      const fresh = await this.trailers.findById(trailer.id);
+      return fresh ?? trailer;
+    }
+
+    const uploadedKeys: string[] = [];
+    const insertedAttachmentIds: string[] = [];
+    try {
+      for (const up of uploads) {
+        const key = this._buildStorageKey(trailer.id, up);
+        await this.storage.put(key, up.file.buffer, up.file.mimetype);
+        uploadedKeys.push(key);
+        const row = await this.attachments.create({
+          trailerId: trailer.id,
+          category: up.category,
+          storageKey: key,
+          fileName: up.file.originalname,
+          mimeType: up.file.mimetype,
+          size: up.file.size,
+          uploadedById: createdById,
+        });
+        insertedAttachmentIds.push(row.id);
+      }
+    } catch (err) {
+      await this._rollbackUploads(uploadedKeys, insertedAttachmentIds);
+      if (opts.rollbackTrailer) {
+        try {
+          await this.trailers.hardDelete(trailer.id);
+        } catch (e) {
+          this.logger.error(
+            { err: e, trailerId: trailer.id },
+            'Rollback: failed to remove trailer row',
+          );
+        }
+      }
+      throw err;
+    }
+
+    const fresh = await this.trailers.findById(trailer.id);
+    return fresh ?? trailer;
+  }
+
+  /** Best-effort cleanup of partial uploads — never throws. */
+  private async _rollbackUploads(
+    uploadedKeys: string[],
+    insertedAttachmentIds: string[],
+  ): Promise<void> {
+    for (const id of insertedAttachmentIds) {
+      try {
+        await this.attachments.hardDelete(id);
+      } catch (e) {
+        this.logger.error(
+          { err: e, attachmentId: id },
+          'Rollback: failed to remove attachment row',
+        );
+      }
+    }
+    for (const key of uploadedKeys) {
+      try {
+        await this.storage.delete(key);
+      } catch (e) {
+        this.logger.error(
+          { err: e, key },
+          'Rollback: failed to remove storage object',
+        );
+      }
+    }
+  }
+
+  /** Best-effort MinIO object delete — logs but never throws (idempotent). */
+  private async _deleteStorageObject(key: string): Promise<void> {
+    try {
+      await this.storage.delete(key);
+    } catch (e) {
+      this.logger.error(
+        { err: e, key },
+        'Failed to remove trailer attachment storage object',
+      );
+    }
+  }
+
+  private _buildStorageKey(trailerId: string, up: CategorizedUpload): string {
+    const ext = storageKeyExtension(up.file.mimetype);
+    return `trailers/${trailerId}/${up.category}/${randomUUID()}.${ext}`;
+  }
+
+  private async _resolveRemovals(
+    trailerId: string,
+    ids: string[],
+  ): Promise<TrailerAttachmentRow[]> {
+    const rows: TrailerAttachmentRow[] = [];
+    for (const id of ids) {
+      const row = await this.attachments.findById(id);
+      if (!row || row.trailerId !== trailerId) {
+        throw new NotFoundException(
+          `Załącznik ${id} nie należy do tej naczepy`,
+        );
+      }
+      rows.push(row);
+    }
+    return rows;
+  }
+
+  private async _loadAttachmentOf(
+    trailerId: string,
+    attachmentId: string,
+  ): Promise<TrailerAttachmentRow> {
+    const trailer = await this.trailers.findById(trailerId);
+    if (!trailer) throw new NotFoundException('Naczepa nie znaleziona');
+    const att = await this.attachments.findById(attachmentId);
+    if (!att || att.trailerId !== trailerId) {
+      throw new NotFoundException('Załącznik nie znaleziony');
+    }
+    return att;
+  }
+
+  // ── Internals: required-attachment + cross-field rules ───
+
+  private _assertTrailerRulesOnCreate(
+    dto: CreateTrailerDto,
+    uploads: CategorizedUpload[],
+  ): void {
+    const present = this._categoriesPresent(uploads);
+    const violations = [
+      ...this._attachmentViolations(dto.certXl ?? false, present),
+      ...this._crossFieldViolations({
+        belts: dto.belts ?? null,
+        beltsCount: dto.beltsCount ?? null,
+        mats: dto.mats ?? null,
+        matsCount: dto.matsCount ?? null,
+        beams: dto.beams ?? null,
+        beamsCount: dto.beamsCount ?? null,
+        slidingRoof: dto.slidingRoof ?? null,
+        edscha: dto.edscha ?? null,
+      }),
+    ];
+    if (violations.length > 0) {
+      throw new UnprocessableEntityException({ violations });
+    }
+  }
+
+  private _assertTrailerRulesOnUpdate(
+    existing: TrailerRow,
+    dto: UpdateTrailerDto,
+    uploads: CategorizedUpload[],
+    removedIds: Set<string>,
+  ): void {
+    const pick = <T>(next: T | undefined, prev: T): T =>
+      next !== undefined ? next : prev;
+    const effectiveCertXl = pick(dto.certXl, existing.certXl) === true;
+    const survivingExisting = existing.attachments.filter(
+      (a) => !removedIds.has(a.id),
+    );
+    const present = new Set<TrailerAttachmentCategory>([
+      ...survivingExisting.map((a) => a.category),
+      ...this._categoriesPresent(uploads),
+    ]);
+    const violations = [
+      ...this._attachmentViolations(effectiveCertXl, present),
+      ...this._crossFieldViolations({
+        belts: pick(dto.belts, existing.belts),
+        beltsCount: pick(dto.beltsCount, existing.beltsCount),
+        mats: pick(dto.mats, existing.mats),
+        matsCount: pick(dto.matsCount, existing.matsCount),
+        beams: pick(dto.beams, existing.beams),
+        beamsCount: pick(dto.beamsCount, existing.beamsCount),
+        slidingRoof: pick(dto.slidingRoof, existing.slidingRoof),
+        edscha: pick(dto.edscha, existing.edscha),
+      }),
+    ];
+    if (violations.length > 0) {
+      throw new UnprocessableEntityException({ violations });
+    }
+  }
+
+  private _categoriesPresent(
+    uploads: CategorizedUpload[],
+  ): Set<TrailerAttachmentCategory> {
+    return new Set(uploads.map((u) => u.category));
+  }
+
+  private _attachmentViolations(
+    certXl: boolean,
+    present: Set<TrailerAttachmentCategory>,
+  ): string[] {
+    if (certXl && !present.has('cert_xl')) {
+      return ['Wymagany skan certyfikatu XL (PDF) gdy certXl=true'];
+    }
+    return [];
+  }
+
+  private _crossFieldViolations(eff: {
+    belts: boolean | null;
+    beltsCount: number | null;
+    mats: boolean | null;
+    matsCount: number | null;
+    beams: boolean | null;
+    beamsCount: number | null;
+    slidingRoof: boolean | null;
+    edscha: boolean | null;
+  }): string[] {
+    const v: string[] = [];
+    const assertMin = (
+      flag: boolean | null,
+      count: number | null,
+      label: string,
+    ): void => {
+      if (flag !== true) return;
+      if (count === null || count === undefined) {
+        v.push(`${label}Count wymagany gdy ${label}=true`);
+      } else if (count < MIN_SECURING_COUNT) {
+        v.push(`${label}Count musi być ≥${MIN_SECURING_COUNT}`);
+      }
+    };
+    assertMin(eff.belts, eff.beltsCount, 'belts');
+    assertMin(eff.mats, eff.matsCount, 'mats');
+    assertMin(eff.beams, eff.beamsCount, 'beams');
+    if (eff.slidingRoof === true && (eff.edscha === null || eff.edscha === undefined)) {
+      v.push('edscha wymagany gdy slidingRoof=true');
+    }
+    return v;
+  }
+
+  // ── Internals: scoping / role checks ─────────────────────
 
   private async _assertActiveTrailerType(typeId: string): Promise<void> {
     const t = await this.trailerTypes.findById(typeId);
@@ -227,10 +579,6 @@ export class TrailersService {
   ): Promise<TrailerFilters & { carrierIds?: string[] }> {
     if (user.role === 'admin') return filters;
     if (user.role === 'opiekun') {
-      // Phase 5.1 — mirror VehiclesService._scopeFilters: opiekun no longer
-      // needs to pass `carrierId`. Without one we narrow to the union of
-      // their owned carriers' trailers; with one we verify it's in the union
-      // (else 403) and keep the FK-indexed `carrierId =` path.
       const opiekunCarriers = await this.carriers.list({
         opiekunId: user.sub,
         limit: 200,
@@ -272,17 +620,54 @@ export class TrailersService {
       beltsCount: row.beltsCount,
       mats: row.mats,
       matsCount: row.matsCount,
+      beams: row.beams,
+      beamsCount: row.beamsCount,
       innerLength: row.innerLength,
       innerWidth: row.innerWidth,
       innerHeight: row.innerHeight,
       capacity: row.capacity,
-      airSuspension: row.airSuspension,
+      sideClearanceCm: row.sideClearanceCm,
+      liftingRoof: row.liftingRoof,
+      slidingRoof: row.slidingRoof,
+      edscha: row.edscha,
+      palletBox: row.palletBox,
       certXl: row.certXl,
       multilock: row.multilock,
       notes: row.notes,
       carrier: row.carrier,
+      attachments: row.attachments.map((a) => trailerRowAttachmentToDto(a)),
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
   }
+}
+
+/** Maps a standalone attachment repo row to the public DTO (no storageKey). */
+function attachmentRowToDto(row: TrailerAttachmentRow): TrailerAttachmentDto {
+  return {
+    id: row.id,
+    trailerId: row.trailerId,
+    category: row.category,
+    fileName: row.fileName,
+    mimeType: row.mimeType,
+    size: row.size,
+    uploadedById: row.uploadedById,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+/** Maps an included trailer-row attachment to the public DTO (no storageKey). */
+function trailerRowAttachmentToDto(
+  row: TrailerRowAttachment,
+): TrailerAttachmentDto {
+  return {
+    id: row.id,
+    trailerId: row.trailerId,
+    category: row.category,
+    fileName: row.fileName,
+    mimeType: row.mimeType,
+    size: row.size,
+    uploadedById: row.uploadedById,
+    createdAt: row.createdAt.toISOString(),
+  };
 }

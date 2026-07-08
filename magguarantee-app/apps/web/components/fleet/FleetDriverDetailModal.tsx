@@ -25,6 +25,7 @@ import {
 import {
   boolValue,
   dateValue,
+  listValue,
   monoValue,
   textValue,
 } from '@/components/ui/entity-detail-values';
@@ -37,6 +38,7 @@ interface Props {
 
 export function FleetDriverDetailModal({ open, onOpenChange, driver }: Props) {
   const tFields = useTranslations('drivers.fields');
+  const tDrivers = useTranslations('drivers');
   const tSections = useTranslations('fleet.driver.sections');
   const tCommon = useTranslations('common');
 
@@ -61,6 +63,16 @@ export function FleetDriverDetailModal({ open, onOpenChange, driver }: Props) {
         { label: tFields('phone'), value: textValue(driver.phone) },
         { label: tFields('phone2'), value: textValue(driver.phone2) },
         { label: tFields('email'), value: textValue(driver.email) },
+        {
+          label: tFields('nationality'),
+          value: textValue(tDrivers(`nationalityOptions.${driver.nationality}`)),
+        },
+        {
+          label: tFields('languages'),
+          value: listValue(
+            driver.languages.map((l) => tDrivers(`languageOptions.${l}`)),
+          ),
+        },
       ],
     },
     {
@@ -76,6 +88,14 @@ export function FleetDriverDetailModal({ open, onOpenChange, driver }: Props) {
           value: dateValue(driver.licenseExpiry),
         },
         { label: tFields('adr'), value: boolValue(driver.adr, yes, no) },
+        ...(driver.adr
+          ? [
+              {
+                label: tFields('adrClasses'),
+                value: listValue(driver.adrClasses),
+              },
+            ]
+          : []),
       ],
     },
   ];

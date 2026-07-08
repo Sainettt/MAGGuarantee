@@ -179,10 +179,35 @@ export function VehicleDetailModal({
       icon: Package,
       rows: [
         // The `gps` boolean is gone — every vehicle is tracked. Show only the
-        // tracker device id (`gpsMobilePhone`), always present.
+        // tracker device id (`gpsMobilePhone`), nullable since 2026-07.
         { label: f('gpsMobilePhone'), value: textValue(vehicle.gpsMobilePhone) },
-        { label: f('fuelCard'), value: bool(vehicle.fuelCard) },
-        { label: f('agreement'), value: bool(vehicle.agreement) },
+        {
+          label: f('fuelCard'),
+          // Live fuel-card status badge (§13.2.3) alongside the bool.
+          value: (
+            <span className="flex flex-wrap items-center gap-2">
+              {bool(vehicle.fuelCard)}
+              {vehicle.fuelCard &&
+                (vehicle.fuelCardBlocked ? (
+                  <Badge variant="danger">{t('fuelCardStatus.blocked')}</Badge>
+                ) : (
+                  <Badge variant="success">{t('fuelCardStatus.active')}</Badge>
+                ))}
+            </span>
+          ),
+        },
+        {
+          label: f('agreement'),
+          // Amber «Brak skanu porozumienia» soft warning (§13.2.3), non-blocking.
+          value: (
+            <span className="flex flex-wrap items-center gap-2">
+              {bool(vehicle.agreement)}
+              {vehicle.agreementScanMissing && (
+                <Badge variant="warning">{t('agreementScanMissing')}</Badge>
+              )}
+            </span>
+          ),
+        },
       ],
     },
     {

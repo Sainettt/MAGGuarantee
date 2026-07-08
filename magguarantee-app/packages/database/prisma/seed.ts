@@ -94,6 +94,8 @@ const SEED_TEAMS: SeedTeam[] = [
 const DEMO_CARRIER_USER_LOGIN = 'przewoznik1';
 const DEMO_CARRIER_OPIEKUN_LOGIN = 'opiekun1';
 const DEMO_VEHICLE_PLATE = 'WX 11113';
+const DEMO_TRAILER_PLATE = 'WX 99999';
+const DEMO_DRIVER_SLUG = 'andrii.kowal';
 
 // MonthlyLimit placeholders, AppConfig and TrailerType reference data live in
 // ./seed-data (shared with the production bootstrap). The km/day and rate/km
@@ -197,6 +199,14 @@ async function seedDemoFleet(): Promise<number> {
   agreementSince.setUTCDate(agreementSince.getUTCDate() - 21);
   agreementSince.setUTCHours(0, 0, 0, 0); // date-only → UTC midnight
 
+  // Fuel-card demo values (fuelCard=true → detail fields populated). NOTE: the
+  // vehicle has agreement=true but NO `agreement` VehicleAttachment (porozumienie
+  // scan) is seeded — this is INTENTIONAL so the UI demonstrates the fuel-card
+  // BLOCKED warning (card blocked unless agreement=true AND a live agreement scan).
+  const fuelCardExpiry = new Date();
+  fuelCardExpiry.setUTCFullYear(fuelCardExpiry.getUTCFullYear() + 2);
+  fuelCardExpiry.setUTCHours(0, 0, 0, 0); // date-only → UTC midnight
+
   await prisma.vehicle.upsert({
     where: {
       carrier_plate_unique: {
@@ -214,11 +224,89 @@ async function seedDemoFleet(): Promise<number> {
       dispatchTeamId: demoTeam.id,
       agreement: true,
       agreementSince,
+      // fuel card + details (16-digit number, future expiry, 4-digit PIN)
+      fuelCard: true,
+      fuelCardNumber: '1234567890123456',
+      fuelCardExpiry,
+      fuelCardPin: '1234',
+      // ADR permit + top-level classes ("1".."9")
+      adr: true,
+      adrClasses: ['3', '8'],
+      // waste haulage — valid WasteCountry enum members
+      wasteAllowed: true,
+      wasteCountries: ['DE', 'PL'],
     },
     update: {
       dispatchTeamId: demoTeam.id,
       agreement: true,
       agreementSince,
+      fuelCard: true,
+      fuelCardNumber: '1234567890123456',
+      fuelCardExpiry,
+      fuelCardPin: '1234',
+      adr: true,
+      adrClasses: ['3', '8'],
+      wasteAllowed: true,
+      wasteCountries: ['DE', 'PL'],
+    },
+  });
+
+  // One demo trailer (supplies the new NOT-NULL sideClearanceCm + the new
+  // roof/box/beams fields). Idempotent via (carrierId, plateNumber).
+  const stdTrailerType = await prisma.trailerType.findUniqueOrThrow({
+    where: { name: 'STD' },
+  });
+  await prisma.trailer.upsert({
+    where: {
+      carrierId_plateNumber: {
+        carrierId: carrier.id,
+        plateNumber: DEMO_TRAILER_PLATE,
+      },
+    },
+    create: {
+      carrierId: carrier.id,
+      plateNumber: DEMO_TRAILER_PLATE,
+      trailerTypeId: stdTrailerType.id,
+      sideClearanceCm: 270,
+      belts: true,
+      beltsCount: 12,
+      mats: true,
+      matsCount: 6,
+      beams: true,
+      beamsCount: 3,
+      liftingRoof: true,
+      slidingRoof: true,
+      edscha: true,
+      palletBox: true,
+      certXl: true,
+      multilock: true,
+    },
+    update: {
+      trailerTypeId: stdTrailerType.id,
+      sideClearanceCm: 270,
+    },
+  });
+
+  // One demo driver (supplies the new required nationality + languages).
+  // Idempotent via the unique loginSlug.
+  await prisma.driver.upsert({
+    where: { loginSlug: DEMO_DRIVER_SLUG },
+    create: {
+      carrierId: carrier.id,
+      loginSlug: DEMO_DRIVER_SLUG,
+      firstName: 'Andrii',
+      lastName: 'Kowal',
+      phone: '+48600300400',
+      idDocumentNumber: 'AB1234567',
+      nationality: 'UA',
+      languages: ['UA', 'PL', 'RU'],
+      adr: true,
+      adrClasses: ['3'],
+    },
+    update: {
+      carrierId: carrier.id,
+      nationality: 'UA',
+      languages: ['UA', 'PL', 'RU'],
     },
   });
 
