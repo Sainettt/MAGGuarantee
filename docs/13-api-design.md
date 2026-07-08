@@ -380,6 +380,19 @@ DB CHECK enforces `returnCountry` length 2..8 (covers `EL`) and `returnPostalCod
 | GET `/fleet/eksport` | `getEksportData` |
 | GET `/fleet/weryfikator` | `getWeryfikatorData` |
 
+### Guarantee Watchdog — `/api/v1/guarantee-compliance` + `/guarantee-episodes`
+
+> Гарантийный «сторож»: гарантийная машина обязана заявить wyjazd в течение N рабочих дней после последнего возврата. Live-доска считается stateless из `computeGuaranteeWatchdog` (`@magguarantee/shared`); архив нарушений читает журнал `GuaranteeIdleEpisode`. **Только чтение (нет мутаций, нет `@Audit`).** Scoping — server-side из JWT (не через ownership-гварды).
+
+| Method + Path | Назначение | Роли |
+|---|---|---|
+| GET `/guarantee-compliance` | Live-доска: строка на каждую гарантийную машину (`vehicleId`-keyed) + summary. admin → все; opiekun → свои (`carrier.opiekunId = user.sub`) | admin / opiekun |
+| GET `/guarantee-compliance/me` | Своя гарантийная flota перевозчика (баннер + бейджи), тот же item-shape минус carrier-блок | przewoznik |
+| GET `/guarantee-episodes?carrierId=&vehicleId=&state=&cursor=&limit=` | Архив нарушений, newest-first, cursor-пагинация по `id`. admin → все; opiekun → свои (`carrier.opiekunId`) | admin / opiekun |
+| GET `/guarantee-episodes/me?vehicleId=&state=&cursor=&limit=` | **Свой** архив нарушений перевозчика (только своя flota). Тот же shape/пагинация, что и admin/opiekun-список; carrier-scope выводится из JWT (`carrier.userId = user.sub`). **`carrierId` НЕ принимается** (нет в схеме `MyGuaranteeEpisodeFiltersSchema`) — client не может расширить scope (IDOR-guard) | przewoznik |
+
+Схемы — `packages/shared/src/schemas/guarantee-watchdog.ts` (`GuaranteeEpisodeFiltersSchema`, `MyGuaranteeEpisodeFiltersSchema`; response `GuaranteeEpisodeListDto`).
+
 ### Alerts (истекающие документы) — `/api/v1/alerts`
 
 > 🗓️ **PLANNED (Sub-slice 5.2).** Расширяемый alert-движок: предупреждения о документах со сроком, которые истекают или уже истекли. Отдельный модуль `apps/api/src/modules/alerts/` на паттерне **реестра провайдеров** — каждый источник алерта = одна декларативная запись (`AlertProvider`); добавление нового типа = +1 провайдер в `ALERT_PROVIDERS` (+ поле-дата в сущность, если её ещё нет). Движок/контроллер/репозиторий при этом не меняются.

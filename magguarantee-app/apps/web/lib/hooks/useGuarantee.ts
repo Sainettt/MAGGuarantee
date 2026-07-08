@@ -14,13 +14,15 @@
 // callers that can't see them (`enabled`) so a carrier-scoped page never fires
 // an admin-only endpoint.
 
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 
 import {
   getGuaranteeCompliance,
   getGuaranteeEpisodes,
   getMyGuaranteeCompliance,
+  getMyGuaranteeEpisodes,
   type GetGuaranteeEpisodesOptions,
+  type GetMyGuaranteeEpisodesOptions,
 } from '@/lib/api/guarantee';
 
 export const GUARANTEE_KEY = ['guarantee'] as const;
@@ -56,6 +58,31 @@ export function useGuaranteeEpisodes(
   return useQuery({
     queryKey: [...GUARANTEE_KEY, 'episodes', opts],
     queryFn: () => getGuaranteeEpisodes(opts),
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * `GET /guarantee-episodes/me` — the CARRIER's own episode archive, cursor-paged
+ * as an infinite query so the Porozumienie tab's «Załaduj więcej» button appends
+ * pages (§12.7) instead of replacing them. Lives under the shared `GUARANTEE_KEY`
+ * namespace, so the delegation-submit mutation's
+ * `qc.invalidateQueries({ queryKey: GUARANTEE_KEY })` refreshes the history too
+ * (a reported wyjazd may resolve an open episode → a new resolved row). `cursor`
+ * is owned by the query (page param), so it's excluded from the caller options.
+ */
+export function useMyGuaranteeEpisodes(
+  opts: Omit<GetMyGuaranteeEpisodesOptions, 'cursor'> = {},
+  options: { enabled?: boolean } = {},
+) {
+  const { enabled = true } = options;
+  return useInfiniteQuery({
+    queryKey: [...GUARANTEE_KEY, 'episodes', 'me', opts],
+    queryFn: ({ pageParam }) =>
+      getMyGuaranteeEpisodes({ ...opts, cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     enabled,
     staleTime: 60_000,
   });

@@ -58,3 +58,32 @@ export function getGuaranteeEpisodes(
     { method: 'GET' },
   );
 }
+
+/**
+ * Options for `GET /guarantee-episodes/me` (carrier self-scoped archive).
+ * `carrierId` is intentionally absent — the carrier is derived from the JWT
+ * server-side and can NEVER be client-supplied (matches the `.strict()`
+ * `MyGuaranteeEpisodeFiltersSchema` IDOR guard in @magguarantee/shared).
+ */
+export interface GetMyGuaranteeEpisodesOptions {
+  vehicleId?: string;
+  state?: GuaranteeEpisodeStateDto;
+  cursor?: string;
+  limit?: number;
+}
+
+/** `GET /guarantee-episodes/me` — carrier's own cursor-paginated archive. */
+export function getMyGuaranteeEpisodes(
+  opts: GetMyGuaranteeEpisodesOptions = {},
+): Promise<GuaranteeEpisodeListDto> {
+  const qs = new URLSearchParams();
+  if (opts.vehicleId) qs.set('vehicleId', opts.vehicleId);
+  if (opts.state) qs.set('state', opts.state);
+  if (opts.cursor) qs.set('cursor', opts.cursor);
+  if (opts.limit != null) qs.set('limit', String(opts.limit));
+  const query = qs.toString();
+  return apiJson<GuaranteeEpisodeListDto>(
+    `/guarantee-episodes/me${query ? `?${query}` : ''}`,
+    { method: 'GET' },
+  );
+}

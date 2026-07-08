@@ -147,6 +147,25 @@ export type GuaranteeEpisodeFilters = z.infer<
 >;
 
 /**
+ * Query-string filters for the CARRIER self-scoped archive
+ * (`GET /guarantee-episodes/me`). Identical to `GuaranteeEpisodeFiltersSchema`
+ * MINUS `carrierId` — the carrier is derived from the JWT server-side and can
+ * NEVER be client-supplied (IDOR guard). Response reuses `GuaranteeEpisodeListDto`.
+ */
+export const MyGuaranteeEpisodeFiltersSchema = z
+  .object({
+    vehicleId: UuidSchema.optional(),
+    state: GuaranteeEpisodeStateSchema.optional(),
+    /** Opaque cursor — the episode `id` of the last row of the previous page. */
+    cursor: UuidSchema.optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(50),
+  })
+  .strict();
+export type MyGuaranteeEpisodeFilters = z.infer<
+  typeof MyGuaranteeEpisodeFiltersSchema
+>;
+
+/**
  * One row of the durable episode journal. Carries both the vehicle + carrier
  * reference (for the archive table) and every dedup/resolution flag so the
  * admin/opiekun can see the full life of a bad cycle.

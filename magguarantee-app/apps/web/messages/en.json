@@ -758,6 +758,54 @@
       "more": "+ {count} more",
       "ariaRow": "Vehicle {plate}, due {date}, {status}"
     },
+    "strip": {
+      "title": "{count, plural, one {# vehicle needs} other {# vehicles need}} an urgent wyjazd report",
+      "cta": "Go to Agreement"
+    },
+    "tab": {
+      "badgeAria": "Agreement, {count} urgent"
+    },
+    "porozumienie": {
+      "title": "Guarantee agreement",
+      "allClear": "All vehicles in order — nothing to report",
+      "reportCta": "Report wyjazd",
+      "deadline": "deadline: {date}",
+      "onRoad": "on the road",
+      "group": {
+        "violated": "Overdue",
+        "dueSoon": "Due soon",
+        "watched": "Watched",
+        "okActive": "On the road / reported"
+      },
+      "anchor": {
+        "zjechal": "last return: {date}",
+        "agreement": "since guarantee start: {date}"
+      },
+      "explainer": {
+        "title": "How the guarantee agreement works",
+        "obligation": "After each return, report the next wyjazd within 10 Polish working days.",
+        "reminders": "Reminders are sent 3 days and 1 day before the deadline.",
+        "silence": "An active wyjazd pauses the counter — nothing to do on the road.",
+        "restart": "A vehicle's return restarts the counter (10 working days)."
+      }
+    },
+    "episodes": {
+      "title": "History",
+      "loadMore": "Load more",
+      "empty": "No history yet — no deadline has been missed",
+      "resolvedAt": "resolved {date} · {reason}",
+      "reminders": "reminders: D-3 {d3} · D-1 {d1}",
+      "state": {
+        "warning": "Warning",
+        "violated": "Overdue",
+        "resolved": "Resolved"
+      },
+      "reason": {
+        "wyjazd": "Wyjazd reported",
+        "agreement_off": "Guarantee switched off",
+        "vehicle_inactive": "Vehicle inactive"
+      }
+    },
     "fleet": {
       "column": "Guarantee",
       "inactive": "No departure yet",
@@ -1415,7 +1463,8 @@
       "claims": "Claims",
       "newClaim": "New",
       "fleet": "Fleet",
-      "delegations": "Trips"
+      "delegations": "Trips",
+      "porozumienie": "Agreement"
     },
     "fleetTabs": {
       "ariaLabel": "Fleet sections",

@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
+import { useMyGuaranteeCompliance } from '@/lib/hooks/useGuarantee';
 import { cn } from '@/lib/utils';
 
 interface Tab {
@@ -17,7 +18,7 @@ interface Tab {
   matchPrefix: string;
   emoji: string;
   /** i18n key — `carrier.tabs.*` except `myKm` which reuses the `myKm.tab` key. */
-  labelKey: 'claims' | 'newClaim' | 'fleet' | 'delegations' | 'km';
+  labelKey: 'claims' | 'newClaim' | 'fleet' | 'delegations' | 'porozumienie' | 'km';
 }
 
 const TABS: readonly Tab[] = [
@@ -45,6 +46,15 @@ const TABS: readonly Tab[] = [
     emoji: '🗺️',
     labelKey: 'delegations',
   },
+  // Phase 12 — «Porozumienie» (docs/14 §12.3): the guarantee-obligation home.
+  // Sits next to the wyjazd flow it drives. Carries an attention badge counting
+  // owed vehicles (violated + dueSoon), hidden when 0.
+  {
+    href: '/carrier/porozumienie',
+    matchPrefix: '/carrier/porozumienie',
+    emoji: '🤝',
+    labelKey: 'porozumienie',
+  },
   // Phase 7.8 — «Przebieg» (docs/14 §7.8): the read-only weekly km tab scoped
   // to the carrier's own vehicles. Label reuses the `myKm.tab` key.
   {
@@ -59,6 +69,18 @@ export function CarrierTabs() {
   const pathname = usePathname();
   const t = useTranslations('carrier.tabs');
   const tMyKm = useTranslations('myKm');
+  const tGuarantee = useTranslations('guarantee.tab');
+
+  // Attention badge on «Porozumienie» — owed vehicles (violated + dueSoon) from
+  // the SAME cached `/me` query the strip + cards read (`GUARANTEE_KEY`), so a
+  // reported wyjazd shrinks it on the next refetch with no extra fetch. Hidden
+  // at 0 and while loading (`summary` undefined) — silence is good (§12.3.1).
+  const { data: guaranteeData, isLoading: guaranteeLoading } =
+    useMyGuaranteeCompliance();
+  const owedViolated = guaranteeData?.summary.violated ?? 0;
+  const owedDueSoon = guaranteeData?.summary.dueSoon ?? 0;
+  const owedCount = owedViolated + owedDueSoon;
+  const showGuaranteeBadge = !guaranteeLoading && owedCount > 0;
 
   return (
     <nav
@@ -97,11 +119,21 @@ export function CarrierTabs() {
             }
           }
 
+          const isPorozumienie = tab.labelKey === 'porozumienie';
+          const withBadge = isPorozumienie && showGuaranteeBadge;
+
           return (
             <Link
               key={tab.href}
               href={tab.href}
               aria-current={active ? 'page' : undefined}
+              // When the attention badge is shown, fold its count into the tab's
+              // accessible name so it's announced as words, never colour alone.
+              aria-label={
+                withBadge
+                  ? tGuarantee('badgeAria', { count: owedCount })
+                  : undefined
+              }
               className={cn(
                 'inline-flex items-center gap-2 px-4 py-3 text-sm font-semibold whitespace-nowrap',
                 'border-b-2 -mb-px transition-colors',
@@ -113,6 +145,18 @@ export function CarrierTabs() {
             >
               <span aria-hidden>{tab.emoji}</span>
               {tab.labelKey === 'km' ? tMyKm('tab') : t(tab.labelKey)}
+              {withBadge ? (
+                <span
+                  aria-hidden
+                  className={cn(
+                    'ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1',
+                    'rounded-full text-[11px] font-bold text-white',
+                    owedViolated > 0 ? 'bg-danger' : 'bg-warning',
+                  )}
+                >
+                  {owedCount}
+                </span>
+              ) : null}
             </Link>
           );
         })}

@@ -290,6 +290,10 @@ export class DelegationsRepository {
         { departureCountry: { contains: q, mode: 'insensitive' } },
         { returnCountry: { contains: q, mode: 'insensitive' } },
         { driverNameSnapshot: { contains: q, mode: 'insensitive' } },
+        { vehicle: { plateNumber: { contains: q, mode: 'insensitive' } } },
+        { vehicle: { sideNumber: { contains: q, mode: 'insensitive' } } },
+        { carrier: { user: { name: { contains: q, mode: 'insensitive' } } } },
+        { carrier: { user: { login: { contains: q, mode: 'insensitive' } } } },
       ];
     }
     const rows = await this.prisma.tx.delegation.findMany({

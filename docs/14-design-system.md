@@ -1093,7 +1093,6 @@ Header is the standard `<AppHeader>` (logo + role badge "Przewoźnik" + `<Langua
 | Column id | Header (PL) | Cell |
 |---|---|---|
 | `plate` | NR REJ. | `font-mono font-semibold` plate |
-| `side` | NR BOCZNY | `sideNumber ?? '—'` |
 | `type` | TYP | vehicle type or `—` |
 | `euro` | EURO | `<Badge variant="muted">` EURO class or `—` |
 | `adr` | ADR | `<Badge variant="warning">` ADR class when present, else `—` (ADR = cargo permit flag — quirk #3) |
@@ -1102,6 +1101,12 @@ Header is the standard `<AppHeader>` (logo + role badge "Przewoźnik" + `<Langua
 | `fr` | FR | country-access permit → check / `—` |
 | `lastDroveAt` | OSTATNI PRZEJAZD | `lastDroveAt` date or `—`, `tabular-nums` |
 | `active` | STATUS | `active ? <Badge variant="success">Aktywne</Badge> : <Badge variant="muted">Nieaktywne</Badge>` |
+
+> **2026-07-07 — `NR BOCZNY` column removed (carrier surface).** `sideNumber` is the **internal MAGTRANS
+> designation** and must **never** appear on a carrier-facing surface. The «Auta» table therefore **drops the
+> `side` / NR BOCZNY column** entirely (it remains on the planista/dyspozytor/opiekun fleet tables, which are
+> MAGTRANS-internal). Same rule governs the guarantee status rows (§12.3.2) and the shared episode history (§12.7,
+> `showSideNumber` default `false`), and the vehicle detail modal opened from this panel (§6.15 carrier-self hide).
 
 **Kierowcy / Naczepy columns are unchanged** — keep the existing carrier driver/trailer column sets (same shape as the planista subset, §6.3.2).
 
@@ -2802,7 +2807,7 @@ The `<BreakdownTable>` then container-queries itself (§ BreakdownTable Responsi
 
 > **2026-06-26 — canonical vehicle modal: viewers, «Opiekun» row, carrier-self hide.** This `<VehicleDetailModal>` is the **full** vehicle modal shown to **admin / opiekun / przewoźnik / planista** (planista joined this group on 2026-06-26, §6.4.2 — incl. «Stawki»). Two viewer-scoped rules:
 > - **«Opiekun» row (all viewers).** The «Przypisanie / Ludzie» section now carries an **Opiekun** row — the carrier's caretaker `User`, resolved via `vehicle.carrier.opiekun` and surfaced on `VehicleDto.opiekun` (`name ?? login`). It sits alongside Przewoźnik / Planista / Zespół prowadzący. Omitted (em-dash, §6.5) when the carrier has no opiekun.
-> - **Carrier-self hide (przewoźnik viewer only).** When the viewer is the **przewoźnik** looking at their own vehicle, the modal **omits the «Przewoźnik» row** and **drops the carrier-name subtitle fallback** (a carrier need not be told who the carrier is). The subtitle still shows `brand + model` when present; it just never falls back to the carrier name for this viewer. The przewoźnik still sees **Opiekun + Planista + Zespół prowadzący**.
+> - **Carrier-self hide (przewoźnik viewer only).** When the viewer is the **przewoźnik** looking at their own vehicle, the modal **omits the «Przewoźnik» row**, **drops the carrier-name subtitle fallback** (a carrier need not be told who the carrier is), and — **added 2026-07-07** — **omits the «Numer boczny» row** in «Identyfikacja» (the internal MAGTRANS `sideNumber` designation is our info and must never surface to a carrier; same rule as §12.3.2 status rows, §12.7 episode history `showSideNumber=false`, and the CarrierFleetPanel «Auta» table). The subtitle still shows `brand + model` when present; it just never falls back to the carrier name for this viewer. The przewoźnik still sees **Opiekun + Planista + Zespół prowadzący**.
 
 ### 6.16 Driver field mapping — 3 logical sections
 
@@ -5949,387 +5954,385 @@ text-sub/success/danger` tokens, the §Phase 1 form-input + `<CodeBox>` recipes.
 
 ---
 
-## Phase 12 — Guarantee Watchdog (obowiązek zgłaszania wyjazdów) — UI spec (AUTHORITATIVE 2026-07-07)
+## §12 — Guarantee Watchdog (Porozumienie o gwarancji przebiegu)
 
-> **What this is.** Every vehicle with an active *Porozumienie* (`agreement = true`) must have a new **wyjazd** reported within **10 polskich dni roboczych** of its last return. When it doesn't, the app reminds the carrier (D-3 / D-1) and shows compliance to the opiekun and admin. Full business rules + data contract: [`MAGGuarantee — Guarantee Watchdog — plan realizacji` §1, §7, §9]. UI freedom belongs to this spec; api-agent already exposes the shapes below.
+> **Scope.** The **Guarantee Watchdog** enforces the porozumienie obligation: a guaranteed vehicle must have a
+> reported **wyjazd** at least once every **10 Polish working days** after its last **zjazd** (or since the
+> guarantee was switched on). The watchdog is a *read-only* surface family — carriers resolve episodes
+> **implicitly** by reporting a wyjazd (`POST /delegations`), there are **no manual episode writes**. This section
+> is the design contract for the **four** watchdog artefacts and reconciles what shipped in Phase 12 (commit
+> `451cc31`) with the new carrier-facing **«Porozumienie»** tab:
+>   1. §12.0 the **state → severity** model (the one map every surface obeys — already in `lib/guarantee.ts`);
+>   2. §12.1 the **`<GuaranteeCountdownBadge>`** working-days chip (shipped);
+>   3. §12.2 the carrier **Wnioski escalation strip** (evolves the shipped `<GuaranteeReminderBanner>`);
+>   4. §12.3 the new carrier **«Porozumienie» tab** (`/carrier/porozumienie`) — grouped full-width status **rows** (reworked 2026-07-07, replaces the rejected card grid) + explainer + nav badge;
+>   5. §12.4 the opiekun/admin **compliance board** (shipped `<GuaranteeComplianceBoard>`);
+>   6. §12.7 the shared **episode-archive** history layout (carrier tab + opiekun drill-down).
 >
-> **Token policy (hard rule, no exceptions).** This feature introduces **ZERO new design tokens** — no new colours, radii, shadows, or `Badge` variants. It **reuses the verification-SLA attention language verbatim**: `danger` (red, brand-aligned `#dc2626`) for `violated`, `warning` (amber) for the `counting` warning window (`daysLeft ≤ 3`), and neutral/muted for the calm `counting`-with-room and `inactive`/`ok_active` states. This is the same amber→red escalation already locked in **§7.6** (`SlaAttentionSection` / `SlaCountdownBadge`). If a colour decision is ambiguous, copy §7.6, do not invent.
+> **Spec source (data contract):** `packages/shared/src/schemas/guarantee-watchdog.ts` (the three read
+> endpoints: `GET /guarantee-compliance`, `…/me`, `GET /guarantee-episodes`) + the pure domain fn
+> `computeGuaranteeWatchdog`. The web derivations live in `apps/web/lib/guarantee.ts`.
+>
+> **HARD: no new tokens** (project no-new-token policy). Everything composes the existing severity semantics
+> (`danger` / `warning` / `success` / `muted` / `info`), their `-bg` / `dark:bg-*/10..15` opacity surfaces, the
+> `bg-input` soft-chrome, the `bg-info-soft` calm alias (Phase 3.4 § C), the §7.6 SLA attention-section shape,
+> and the §7.10.1 `<StatusBadge>` anatomy. **Zero** `tailwind.config.ts` / `globals.css` changes.
+>
+> **The governing principle — «silence is the good state».** When a carrier owes nothing, the watchdog is quiet:
+> the Wnioski strip does **not** render, the nav badge is **hidden**, and the Porozumienie tab greets them with a
+> calm all-clear line — never a green «wszystko OK» placeholder screaming for attention (§7.6 empty-state rule).
+> Alarm is spent only on what is actually owed.
 
-### 12.0 The state → tone map (single source of truth)
+### §12.0 — The state → severity model (the single source everyone obeys)
 
-The API returns a live `state` per vehicle: `'inactive' | 'ok_active' | 'counting' | 'violated'`, plus a **signed** `daysLeft` (working days; `0` = deadline is today, negative = overdue by N). Everything below derives from these two fields.
+The live watchdog reports one of **four** states per vehicle (`GuaranteeWatchdogStatusDto`). Every watchdog UI
+maps that state to a **severity tone** through **one** function — `watchdogSeverity()` in `lib/guarantee.ts` — so
+the banner, the badge, the cards and the board can never disagree. **Do not re-derive this map in a component.**
 
-| API `state` | Meaning | Watchdog-UI severity | Tone family | Surfaced in carrier UI? | Surfaced on board? |
-|---|---|---|---|---|---|
-| `inactive` | No anchor (never returned + no `agreementSince`) — not counting | — (invisible) | none | **No** — nothing to show | **No** (filtered out) |
-| `ok_active` | Has an active delegation (`zgloszony`/`gotowy`/`w_trasie`) — counter paused | — (compliant) | `success`/muted | **No** (nothing owed) | Optional «W trasie / zgłoszony» quiet row, muted |
-| `counting`, `daysLeft ≥ 4` | Counting, comfortable room | **calm** | neutral (muted chip) | Badge only, muted | Row present, neutral |
-| `counting`, `0 ≤ daysLeft ≤ 3` | Counting, deadline near (the reminder window) | **dueSoon** | `warning` (amber) | **Banner + amber badge + CTA** | **Amber section** |
-| `violated`, `daysLeft < 0` | Deadline missed | **violated** | `danger` (red) | **Banner + red badge + CTA** | **Red section (top)** |
+| Live state (`item.state`) | Condition | Watchdog severity | Tone family | Meaning |
+|---|---|---|---|---|
+| `violated` | deadline passed (`daysLeft < 0`) | **`violated`** | `danger` (red) | Obligation broken — a wyjazd is overdue. |
+| `counting` + `daysLeft ≤ 3` | counter running, ≤3 wd of room | **`dueSoon`** | `warning` (amber) | Closing in — report soon. |
+| `counting` + `daysLeft ≥ 4` | counter running, comfortable room | **`calm`** | `muted` (neutral) | Under observation, nothing owed *yet*. |
+| `ok_active` | an active delegation silences the counter | **`none`** | `success` (calm-positive) | In trasie / wyjazd zgłoszony — the good state. |
+| `inactive` | no live guarantee (off / not guaranteed) | **`none`** | — (hidden) | Not part of the watchdog. |
 
-- The **carrier-facing alert threshold is `daysLeft ≤ 3` OR `violated`** — matching the D-3 email. A vehicle with `daysLeft ≥ 4` gets a muted informational badge on the fleet row but **never** raises the dashboard banner (no alarm fatigue; the carrier still has ≥4 working days).
-- `inactive` and `ok_active` are **compliant / not-owed** — never red, never amber, never in the banner. `ok_active` on the opiekun board is at most a quiet muted row (the counter is legitimately paused).
-- **`violated` is strictly stronger than `dueSoon`** (red wins), and they are mutually exclusive by construction — a vehicle is never in both. Same invariant as §7.6.
+- **Owed = `violated` ∨ `dueSoon`** (`isOwed()`). This is the set that raises the carrier's attention (strip +
+  nav badge) and populates the opiekun board's action sections.
+- **Ordering** everywhere is `compareByUrgency()`: `violated` first (most-negative `daysLeft` on top), then
+  `dueSoon` ascending by `daysLeft`. A `null` `daysLeft` sorts last within its group.
+- **Urgency is never colour-alone.** Every watchdog surface pairs the tone with a **worded** «N dni robocze» /
+  «po terminie» countdown and/or a text state-chip (a11y — same discipline as §7.10.1 `<StatusBadge>`).
+- **`ok_active` visibility diverges by audience (LOCKED):** the **opiekun/admin board hides** `ok_active`/`inactive`
+  (it is a problem-list, §12.4). The **carrier Porozumienie tab SHOWS `ok_active`** as a calm-positive card
+  (§12.3.2) — the carrier deserves to see their compliant, in-trasie vehicles, not just their debts.
 
-### 12.1 Countdown label rules — `<GuaranteeCountdownBadge daysLeft>` (new, mirrors `<SlaCountdownBadge>`)
+### §12.1 — `<GuaranteeCountdownBadge>` (shipped) — the working-days chip
 
-A new sibling of §7.6's `<SlaCountdownBadge>`, in `apps/web/components/carrier/` (reused by the board via import). **Same chip geometry, same class recipe, same ICU-plural discipline** — only the label wording and the sign-of-`daysLeft` semantics differ (SLA counts *working days left to verify*; watchdog counts *working days left to report a wyjazd*).
+A sibling of §7.6.1's `<SlaCountdownBadge>`: identical chip geometry
+(`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-semibold whitespace-nowrap tabular-nums`),
+driven by the signed `daysLeft` the API returns. **This is the shipped component — do not restyle it; §12.3/§12.7
+reuse it verbatim.**
 
-Base class (identical to §7.6): `inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-semibold whitespace-nowrap tabular-nums`.
-
-| `daysLeft` | Label (PL) | Tone classes |
+| `daysLeft` | Label (ICU plural, PL) | Tone classes |
 |---|---|---|
-| `< 0` (overdue) | «po terminie» / «{n} dni po terminie» (`guarantee.countdown.overdue`, ICU plural on `Math.abs(daysLeft)`) | `bg-danger/15 text-danger border-danger/30` |
-| `= 0` (deadline today) | «dziś ostatni dzień» (`guarantee.countdown.today`) | `bg-warning/15 text-warning border-warning/30` |
-| `1 ≤ n ≤ 3` (near) | «{n} dni robocze» (`guarantee.countdown.dueSoon`, ICU plural) | `bg-warning/15 text-warning border-warning/30` |
-| `≥ 4` (comfortable) | «{n} dni robocze» (`guarantee.countdown.remaining`, ICU plural) | muted: `bg-input text-text-sub border-border` |
+| `< 0` | «po terminie» / «{n} dni po terminie» | `bg-danger/15 text-danger border-danger/30` |
+| `= 0` | «dziś ostatni dzień» | `bg-warning/15 text-warning border-warning/30` |
+| `1 – 3` | «{n} dni robocze» | `bg-warning/15 text-warning border-warning/30` |
+| `≥ 4` | «{n} dni robocze» | `bg-input text-text-sub border-border` (soft chrome — a comfortable countdown never looks alarming) |
 
-- **`0` is amber, not red.** Deadline day is still a chance to comply (the carrier can report today), so it reads as urgent-warning, not failure — mirrors §7.6's «dziś ostatni dzień».
-- The `≥ 4` variant uses the **muted / neutral** surface (`bg-input text-text-sub border-border` — the soft-chrome surface from §Surface-token policy) so a comfortable countdown never looks alarming. It only appears on the fleet-row badge and the board's neutral rows; it is **never** in the banner.
-- **A11y:** urgency is never colour-alone — every chip carries a worded countdown. Copy must literally say **«dni robocze»** (working days) per the client requirement — the plural forms below encode this.
-- All digits `tabular-nums`.
+The `≥ 4` muted variant only appears where a *calm* countdown is welcome — the fleet-row badge, the board's «Pod
+obserwacją» rows, and the Porozumienie calm cards; it must **never** appear inside the escalation strip. Overdue
+surfaces the magnitude as a positive count so the «dni» plural reads correctly.
 
-### 12.2 Przewoźnik — dashboard banner (`<GuaranteeReminderBanner>`)
+### §12.2 — Carrier Wnioski **escalation strip** (evolves the shipped banner)
 
-**Where it lives.** The carrier has no dedicated dashboard — `/carrier` redirects to `/carrier/claims` (see `app/(carrier)/carrier/page.tsx`). The claims list **is** the carrier's home surface, so the banner mounts at the **top of `app/(carrier)/carrier/claims/page.tsx`**, above the `<h1>` title row — the first thing the carrier sees on login. New component: `apps/web/components/carrier/GuaranteeReminderBanner.tsx`. Data: `GET /guarantee-compliance/me` (the carrier's own vehicles + their live watchdog state).
+**What shipped (`<GuaranteeReminderBanner>`):** a roll-up card at the top of `/carrier/claims` listing up to 5
+owed vehicles (all `isOwed`, i.e. `daysLeft ≤ 3`) with per-row countdown badges, CTA → `/carrier/delegations/new`.
 
-**Aggregation (1..n vehicles).** The banner is **one card that aggregates every vehicle owed a zgłoszenie**, never one banner per vehicle (a carrier may have 5 guaranteed vehicles all lapsing). It considers only vehicles with `state === 'violated'` OR (`state === 'counting'` AND `daysLeft ≤ 3`). Call this the **`owed` set**. If `owed.length === 0`, the banner **does not render at all** (no «wszystko OK» placeholder — a green all-clear card on the claims list is noise; silence is the good state, per the §7.6 empty-state principle and the §5 «empty → no email» rule).
+**What §12 makes it (target — web-agent refactors):** now that the full per-vehicle detail has a **home** (the
+Porozumierie tab, §12.3), the Wnioski surface no longer needs to carry the whole list. It becomes a **one-line
+escalation strip** — the Wnioski page is for filing claims, so the watchdog only interrupts there when something
+is **genuinely urgent**, then points at the tab that owns the detail.
 
-**Severity of the whole banner = the worst vehicle in it.** If **any** vehicle is `violated`, the banner is **red (`danger`)**; otherwise (all owed vehicles are `dueSoon`) it is **amber (`warning`)**. Tone drives the icon, the left accent, the header colour, and the surface tint — exactly the §7.6 severity-prop pattern.
-
-**Anatomy** (composes the §7.6 alert-band recipe — card shell + tinted surface + left border + per-vehicle rows):
-
-```
-┌─ border-l-4 border-danger, bg-danger-bg/40 dark:bg-danger/10, rounded-xl ─┐
-│  [!] Zgłoś wyjazd — {n} pojazd(ów) wymaga działania      [Zgłoś wyjazd →] │  ← header row
-│  ────────────────────────────────────────────────────────────────────────  │
-│  WA12345 · Volvo FH        Termin: 14.04.2026   [3 dni po terminie]        │  ← per-vehicle row (red chip)
-│  GD98765 · Scania R        Termin: 18.04.2026   [2 dni robocze]            │  ← per-vehicle row (amber chip)
-│  …                                                                          │
-└────────────────────────────────────────────────────────────────────────────┘
-```
-
-| Slot | Tailwind | Notes |
-|---|---|---|
-| Card root | `rounded-xl border-l-4 p-4 mb-6` + tone: red → `border-danger bg-danger-bg/40 dark:bg-danger/10`, amber → `border-warning bg-warning-bg/40 dark:bg-warning/10` | Left accent bar carries severity, like §7.6 rows |
-| Header icon | red → `<AlertTriangle size={16} className="text-danger" />`, amber → `<Clock size={16} className="text-warning" />` | Same icon vocabulary as §7.6 (`overdue`→AlertTriangle, `dueSoon`→Clock) |
-| Header title | `text-sm font-bold text-danger` / `text-warning`, ICU-plural count `guarantee.banner.title` | «Zgłoś wyjazd — {n} pojazd wymaga / pojazdy wymagają / pojazdów wymaga działania» |
-| CTA button | `<Button size="sm">` → `Link href="/carrier/delegations/new"`; label `guarantee.banner.cta` «Zgłoś wyjazd» + `<ArrowRight size={14} />` | Primary brand-red button (existing). ≥44px touch target |
-| Per-vehicle row | `flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5 border-t border-border/60 text-sm` | First row has no top border |
-| Row identity | `<span className="font-mono font-semibold text-text">{plate}</span>` + `· {sideNumber ?? type}` in `text-text-sub` | Plate is the anchor |
-| Row deadline | `text-xs text-text-sub` «Termin: {deadlineAt, dd.MM.yyyy}» (`guarantee.banner.deadline`) | `tabular-nums` |
-| Row countdown | `<GuaranteeCountdownBadge daysLeft={v.daysLeft} />` (right-aligned via `ml-auto`) | Per-vehicle chip, its own tone (a vehicle-level red chip can appear inside an amber banner? **No** — if any vehicle is red the whole banner is red; but individual amber rows keep amber chips, red rows keep red chips. The banner tone = worst; each row chip = that row's own severity.) |
-
-- **CTA deep-link.** «Zgłoś wyjazd» links to `/carrier/delegations/new` (the zgłoszenie-wyjazdu form). *(Factual correction 2026-07-07: the spec originally guessed `/carrier/claims/new`, which is the wniosek form — the departure-report form lives at `/carrier/delegations/new`; verified against the shipped carrier routes.)* If the API later gives a per-vehicle deep-link (`?vehicleId=`), rows MAY each become clickable; v1 keeps a single top-level CTA to keep the banner calm.
-- **Ordering inside the banner:** `violated` rows first (most negative `daysLeft` at top), then `dueSoon` ascending by `daysLeft`. Most urgent reads first, top-to-bottom.
-- **Collapse for long lists:** if `owed.length > 5`, show the first 5 rows and a muted «+ {n} więcej» (`guarantee.banner.more`) line; the CTA still covers all. (Rare — most carriers have ≤5 guaranteed vehicles.)
-- **Loading:** while `/guarantee-compliance/me` is in flight, render **nothing** (no skeleton banner — a phantom red bar that vanishes is worse than a late-appearing one). The claims list below is the primary content and loads independently.
-- **Live dismissal is implicit:** after the carrier submits a wyjazd, the resolve-hook closes the episode server-side; on the next `/me` refetch (TanStack Query invalidation on claim/delegation mutation) the vehicle drops out of `owed` and the banner shrinks or disappears. No manual «dismiss» button — the banner is a live truth, not a notification to ack.
-
-### 12.3 Przewoźnik — per-vehicle badge in `CarrierFleetPanel` («Auta» tab)
-
-The banner is the loud, aggregate alert; the fleet table is where the carrier sees **which** specific vehicle and its exact countdown at rest. Add **one new column** to the «Auta» `<DataTable>` in `CarrierFleetPanel.tsx` (the column set defined in §Carrier-fleet-panel).
-
-| Column id | Header (PL) | Cell |
-|---|---|---|
-| `guarantee` | GWARANCJA | see states below |
-
-Placement: **after `active` (STATUS)**, as the right-most column — it's an oversight/attention signal, grouped with status. Header `guarantee.fleet.column` «Gwarancja».
-
-Cell states (driven by the vehicle's watchdog `state` + `daysLeft`, joined client-side from `/guarantee-compliance/me` keyed by vehicle id):
-
-| Vehicle watchdog state | Cell content |
+| Aspect | Contract |
 |---|---|
-| Not guaranteed (`agreement !== true`, vehicle absent from `/me`) | `<span className="text-text-sub">—</span>` (dash; the column is empty for non-guaranteed vehicles — most of the fleet) |
-| `inactive` | `<Badge variant="muted">Brak odjazdu</Badge>` — quiet, no anchor yet (`guarantee.fleet.inactive`) |
-| `ok_active` | `<Badge variant="success">W trasie</Badge>` — counter paused, compliant (`guarantee.fleet.active`) |
-| `counting`, `daysLeft ≥ 4` | `<GuaranteeCountdownBadge daysLeft>` (muted `≥ 4` variant) — comfortable |
-| `counting`, `0 ≤ daysLeft ≤ 3` | `<GuaranteeCountdownBadge daysLeft>` (amber) |
-| `violated` | `<GuaranteeCountdownBadge daysLeft>` (red) |
+| **Visibility (LOCKED)** | Render **only** when at least one owed vehicle is `violated` **or** has `daysLeft ≤ 1`. At `daysLeft` 2–3 the strip stays silent (that lives on the tab + nav badge). Nothing owed / still loading → render **nothing** (silence is good; a phantom red bar that vanishes is worse than a late one). |
+| **Tone** | `danger` if any qualifying vehicle is `violated`, else `warning`. Worst-vehicle-wins, same rule as the shipped banner. |
+| **Shape** | Single line: `border-l-4` tinted card (`border-danger bg-danger-bg/40 dark:bg-danger/10` or the `warning` equivalent), icon (`<AlertTriangle>` violated / `<Clock>` dueSoon) + one ICU-plural sentence + a trailing link. **No per-vehicle rows** here anymore. `role="region" aria-label`. |
+| **Copy (PL / EN)** | «{count, plural, one {# pojazd wymaga} other {# pojazdy wymagają}} pilnego zgłoszenia wyjazdu» / "{count} vehicle(s) need an urgent wyjazd report". |
+| **Action (LOCKED)** | Deep-links to **`/carrier/porozumienie`** (the tab that owns the detail), **not** `/carrier/delegations/new`. A `<Link>` styled as a `Button size="sm"` («Przejdź do Porozumień» + `<ArrowRight size={14}/>`, `min-h-[44px]`). The carrier reports the wyjazd from the tab's per-card CTA. |
+| **Count basis** | `owed.filter(v => v.state==='violated' || (v.daysLeft ?? 99) <= 1).length`. |
 
-- The badge is **information-only in the table** (the row-click still opens the read-only `<VehicleDetailModal>`); the actionable CTA lives in the banner. Keep it that way — a per-row «Zgłoś» button would clutter a read-only fleet table.
-- **`<VehicleDetailModal>` echo (optional, recommended):** in the vehicle detail modal, add a single read-only row in the existing «Porozumienie»/agreement section: label «Gwarancja — status», value = the same `<GuaranteeCountdownBadge>` + «Termin zgłoszenia: {deadlineAt}» when counting/violated, or the muted state badge otherwise. Reuses the §6.5 label/value row; no new primitive. Only render for guaranteed vehicles.
+> **Reconciliation note for web-agent.** Keep the shipped component file, but (a) narrow its visibility predicate
+> from `isOwed` to the escalation predicate above, (b) collapse the `<ul>` of rows into the single sentence, and
+> (c) retarget the CTA to `/carrier/porozumienie`. The `<GuaranteeCountdownBadge>` import can drop from this file
+> (the strip carries no per-vehicle badge). All other watchdog surfaces keep the badge.
 
-### 12.4 Opiekun & admin — compliance board (`<GuaranteeComplianceBoard>`)
+### §12.3 — Carrier **«Porozumienie» tab** (`/carrier/porozumienie`) — NEW
 
-**Where it lives (decision).** The opiekun surface `/employee/opieka` (§Phase 5.2) is a **card grid of carriers** with a KPI strip — it is *fleet-classification* oriented, not *watchdog* oriented, and shoehorning a watchdog list into a card grid would fight that layout. **Decision: add a dedicated route `/employee/opieka/porozumienia`** («Porozumienia» = agreements) reached by a **secondary in-page nav on the opieka surface** (a `<Tabs>` strip at the top of `/employee/opieka` with two tabs: «Przewoźnicy» (the existing card grid, default) and «Porozumienia» (the new board)). This keeps the watchdog board inside the opiekun's existing mental home («Moja Opieka») without disturbing the card grid.
+The carrier's home for the guarantee obligation. One route, three stacked blocks: **(A) per-vehicle status
+rows** (grouped, full-width — §12.3.2, *reworked 2026-07-07*), **(B) a static explainer**, **(C) the episode
+history** (§12.7). Data: `GET /guarantee-compliance/me` (rows, via `useMyGuaranteeCompliance`) +
+`GET /guarantee-episodes` scoped to the carrier (history). Reuses the shipped board/badge vocabulary — **no new
+component families**.
 
-- **Admin** reaches the identical board. Admin already navigates the employee surface; the board is the **same component** rendered under the admin's own opieka/oversight entry. The API scopes rows automatically (admin → all carriers; opiekun → only `carrier.opiekunId = user.sub`), so the component needs **no role branching** — it renders whatever `GET /guarantee-compliance` returns. Add the «Porozumienia» tab to the admin's opieka entry point too (same `<Tabs>`).
-- New component: `apps/web/components/guarantee/GuaranteeComplianceBoard.tsx`. Data: `GET /guarantee-compliance` (live board). Episode history: `GET /guarantee-episodes?carrierId=&vehicleId=&state=`.
+#### §12.3.1 — Tab entry + nav attention badge
 
-**Board layout — severity-grouped sections (reuses `<SlaAttentionSection>` shape).** The board is **two stacked attention sections, most-urgent-first**, identical in structure to the §7.6.2 dashboard-sidebar buckets — but rendered full-width as a page, and per-row showing the vehicle + carrier + deadline + countdown:
+Add a sixth tab to `<CarrierTabs>`, keeping the emoji-prefix convention (§Phase 3): **🤝 «Porozumienie»**,
+`href: '/carrier/porozumienie'`, `matchPrefix: '/carrier/porozumienie'`, `labelKey: 'porozumienie'` (namespace
+`carrier.tabs`). Placement: after «Wyjazdy», before «Przebieg» (obligation sits next to the wyjazd flow it drives).
 
-1. **`Po terminie` (violated)** — `danger` section, on top. Rendered only when `violated.length > 0`. Card `border-danger/30`, header `text-danger` + `<AlertTriangle size={14} />` + count pill.
-2. **`Zbliża się termin` (dueSoon: counting, `daysLeft ≤ 3`)** — `warning` section, below. Rendered only when non-empty. `border-warning/30`, `text-warning` + `<Clock size={14} />` + count pill.
-3. **`Pod obserwacją` (counting, `daysLeft ≥ 4`)** — optional **neutral / muted** section (a `<Card>`, no red/amber), collapsed by default or shown compact, so the opiekun can see healthy-but-counting vehicles without alarm. Muted countdown badges. This section may be behind a «Pokaż wszystkie» toggle to keep the board focused on problems.
-4. `ok_active` / `inactive` vehicles are **not shown** on the board (nothing owed). They surface only in the per-carrier fleet views.
+**Attention badge on the tab (LOCKED):**
 
-**Both-empty (nothing owed across all supervised carriers):** collapse to **one calm all-clear `<Card>`** — neutral surface, `<CheckCircle2 size={16} className="text-success" />` + «Wszyscy przewoźnicy w terminie» (`guarantee.board.allClear`), `text-sm text-text-sub`. Calm, not alarming — this is the good state (mirrors §7.6.2). Never render empty red/amber shells.
-
-**Row content (per vehicle) inside a section.** Each row is a **link to the carrier drill-down + episode history** (`/employee/opieka/carriers/[login]?tab=porozumienia&vehicleId={id}` — see §12.5). Row shape mirrors §7.6.1 (`border-l-2` in the section tone, tinted surface, hover, `focus-visible` ring):
-
-```
-│ WA12345 · Volvo FH                              [3 dni po terminie]  │
-│ Firma Sp. z o.o. · ostatni zjazd: 30.03.2026 · termin: 14.04.2026   │
-```
-
-| Slot | Tailwind |
+| Property | Contract |
 |---|---|
-| Row wrapper | §7.6.1 recipe: `flex items-center gap-2 rounded-md px-2 py-2 border-l-2` + section tone (`border-danger bg-danger-bg/40 …` / `border-warning …`), hover + `focus-visible:ring-{danger,warning}` |
-| Primary line | plate `font-mono font-semibold text-text` + `· {sideNumber ?? type}` `text-text-sub` |
-| Secondary line | `text-xs text-text-sub`: carrier name · «ostatni zjazd: {anchorAt}» (when `anchorSource==='zjechal'`) OR «od {agreementSince}» (when `anchorSource==='agreement'`) · «termin: {deadlineAt}» — all `tabular-nums` |
-| Countdown | `<GuaranteeCountdownBadge daysLeft>` right-aligned (`ml-auto`) |
+| **Count** | `summary.violated + summary.dueSoon` from `GET /guarantee-compliance/me` (the two *owed* buckets — matches §12.0 `isOwed`). |
+| **Hidden when 0** | No badge, no dot — silence is good. Also hidden while the query is loading (no phantom badge). |
+| **Tone** | `danger` if `summary.violated > 0`, else `warning`. Worst-bucket-wins. |
+| **Shape** | Tiny numeric pill riding the tab label — reuse the existing `<Badge>` count style used elsewhere on tab counters: `ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[11px] font-bold`, tone `bg-danger text-white` / `bg-warning text-white` (solid, high-contrast — a nav badge must read at a glance; this is the one place the watchdog uses a *filled* severity, mirroring existing nav counters). |
+| **a11y** | The badge value is announced as part of the tab label via `aria-label` — e.g. «Porozumienie, {count} pilnych» — never colour/number alone. |
 
-- **anchorSource disclosure:** show «ostatni zjazd: {anchorAt}» for `zjechal`, and «od włączenia gwarancji: {anchorAt}» for `agreement` (the vehicle never returned; the clock runs from when the agreement went on). Keys `guarantee.board.anchor.zjechal` / `guarantee.board.anchor.agreement`.
+The badge shares the `useMyGuaranteeCompliance` cache with the strip and cards, so a reported wyjazd (which
+invalidates `GUARANTEE_KEY`) shrinks the badge on the next refetch without a manual refresh.
 
-**Filtering & sorting (top of board).** A single filter row (reuse `<Input>` + `<Select>`, §Filter-row pattern):
-- **Search** by plate / carrier name (`guarantee.board.searchPlaceholder`).
-- **State `<Select>`:** «Wszystkie stany» / «Po terminie» / «Zbliża się termin» / «Pod obserwacją» (`guarantee.board.filterState` + options). Selecting one shows only that section.
-- **Default sort** is severity-then-urgency (violated by most-negative `daysLeft`, then dueSoon by ascending `daysLeft`) — the section grouping already encodes this, so no explicit sort control is needed in v1.
-- Empty-filtered → `<EmptyState icon={SearchX}>` with a clear-filters action (§Empty-state pattern), distinct from the calm all-clear.
+#### §12.3.2 — Per-vehicle **status rows** (block A) — REWORKED 2026-07-07
 
-**KPI strip (optional, recommended).** Above the sections, a compact 3-tile `<KpiCard>` strip (same pattern as opieka §Phase 5.2): «Po terminie» (`tone="red"`), «Zbliża się termin» (`tone="orange"`), «Pod obserwacją» (`tone="neutral"`). Client-computed counts from the board response. Gives the opiekun the shape of the problem at a glance before scrolling rows.
+> **Why this changed (rejected v1).** The first cut rendered per-vehicle **floating cards** in a
+> `sm:grid-cols-2 xl:grid-cols-3` grid, each card carrying its own `<GuaranteeStateChip>`. It shipped and was
+> rejected for four concrete reasons: **(1)** long PL state labels («Zbliża się termin», «W trasie / wyjazd
+> zgłoszony») **overflowed the card's right edge**; **(2)** the **muted-gray calm chip** («Pod obserwacją») read as
+> flat gray-on-gray; **(3)** the internal **`sideNumber` leaked** to the carrier (incl. the «· —» dash placeholder);
+> **(4)** the **card-grid layout itself** looked broken — one lone card in a row, three cramped in the next, floating
+> over a wide empty canvas that scaled badly with fleet size. **The fix adopts the opiekun board's stacked-row
+> format** (§12.4 — the row style the user has seen and not complained about) for the carrier surface too: one
+> **full-width, single-column list of grouped rows** that fills the content column identically whether the carrier
+> has 1 vehicle or 20.
 
-**Loading:** per-section independent `<Skeleton>` (3 rows each), don't block the whole board — same rule as §7.6.2.
+**Structure — grouped sections of full-width rows, not cards.** Each non-empty group is one `<Card>`; **the group
+header carries the state** (tone + worded label + count). Because the state is named once, in the header, the
+individual rows need **no per-row state chip** — this is what structurally kills the v1 overflow *and* the ugly gray
+calm chip at once (there is no long PL state string competing for width inside a row's budget). `<GuaranteeStateChip>`
+is **retired** (§12.8). The a11y rule of §12.0 (state is worded + icon'd, never colour-alone) is satisfied by the
+group header. Groups, order, and the calm all-clear line are **unchanged** from v1:
 
-### 12.5 Episode history — per carrier / per vehicle
+| Group (order) | Contains | Header tone | Header icon | Section header copy (PL / EN) |
+|---|---|---|---|---|
+| 1. Po terminie | `violated` | `danger` (`text-danger`) | `<AlertTriangle>` | «Po terminie» / "Overdue" |
+| 2. Zbliża się termin | `dueSoon` (`counting`, `daysLeft ≤ 3`) | `warning` (`text-warning`) | `<Clock>` | «Zbliża się termin» / "Due soon" |
+| 3. Pod obserwacją | `calm` (`counting`, `daysLeft ≥ 4`) | `muted` (`text-text-sub`) | `<Eye>` | «Pod obserwacją» / "Watched" |
+| 4. W trasie | `ok_active` | `success` (`text-success`) | `<Truck>` | «W trasie / wyjazd zgłoszony» / "On the road / reported" |
 
-The board rows above show the **live** state. The **durable history** of past idle episodes (who lapsed, when, resolved late or on time) lives in the **carrier drill-down** at `/employee/opieka/carriers/[login]` — that page already hosts a `<Tabs>` (Auta / Kierowcy / Naczepy / Dokumenty; §Phase 5 drill-down). **Add a 5th tab: «Porozumienia»** (`guarantee.history.tab`). This is where per-carrier and per-vehicle history is shown, so the board rows deep-link into it (`?tab=porozumienia&vehicleId={id}` optionally pre-filters to one vehicle).
+When groups 1–2 are empty, the tab opens with a **calm all-clear line** at the top (reuse the board's card:
+`<CheckCircle2 className="text-success"/>` + «Wszystkie pojazdy w porządku — nic nie wymaga zgłoszenia»), and
+groups 3–4 follow below. Never show an empty red/amber shell.
 
-**Tab content = live-state table + episode-history table**, stacked:
+**Group-section anatomy** (one `<Card>` per non-empty group — mirrors the §12.4 board section):
 
-1. **Live per-vehicle state** (top) — a compact `<DataTable>` of *this carrier's* guaranteed vehicles: columns `Pojazd` (plate + side), `Kotwica` (anchorAt + a small source tag «zjazd»/«gwarancja»), `Termin` (deadlineAt), `Stan` (`<GuaranteeCountdownBadge>` or state badge per §12.3). Sorted worst-first. Empty → «Brak pojazdów z gwarancją» (`guarantee.history.emptyLive`).
-2. **Historia epizodów** (below, `<h3>` sub-heading) — a `<DataTable>` of past `GuaranteeIdleEpisode` rows for this carrier (from `/guarantee-episodes?carrierId=`), most-recent-first:
-
-| Column id | Header (PL) | Cell |
-|---|---|---|
-| `vehicle` | POJAZD | plate `font-mono` (+ side) — resolved from the episode's vehicleId |
-| `anchorAt` | KOTWICA | `anchorAt` date + muted source tag «zjazd»/«gwarancja» (`guarantee.history.source.*`) |
-| `deadlineAt` | TERMIN | `deadlineAt` date, `tabular-nums` |
-| `state` | STAN | episode `state` → badge: `warning`→`<Badge variant="warning">Ostrzeżenie</Badge>`, `violated`→`<Badge variant="danger">Po terminie</Badge>`, `resolved`→`<Badge variant="muted">Zamknięty</Badge>` (`guarantee.history.state.*`) |
-| `outcome` | ROZLICZENIE | when `resolved`: `resolvedReason` label + «({resolvedDaysLeft ≥ 0 ? 'w terminie' : 'po terminie o N'})». `resolvedDaysLeft ≥ 0` → `text-success` «w terminie», `< 0` → `text-danger` «po terminie o {N} dni». Open episodes → `—`. |
-| `resolvedAt` | ZAMKNIĘTO | `resolvedAt` date or `—`, `tabular-nums` |
-
-- `resolvedReason` labels (`guarantee.history.reason.*`): `wyjazd` → «Zgłoszono wyjazd», `agreement_off` → «Zdjęto gwarancję», `vehicle_inactive` → «Pojazd nieaktywny».
-- **The `resolvedDaysLeft` outcome is the human answer to «czy zgłoszono w terminie?»** — `≥ 0` green, `< 0` red. This is the exact same 10-day norm as legacy email #8 (see plan §10), so the wording «w terminie / po terminie» is deliberately identical.
-- **Empty history** (carrier never lapsed) → calm `<EmptyState icon={CheckCircle2}>` «Brak historii naruszeń» / «Ten przewoźnik nie miał opóźnień» (`guarantee.history.emptyEpisodes`) — a *positive* empty state (this carrier is a good actor), `text-success` icon, not a sad grey one.
-
-**Per-vehicle drill (optional).** When the board deep-links with `?vehicleId=`, the «Porozumienia» tab pre-filters both tables to that vehicle and shows a «Pokaż wszystkie pojazdy» clear-filter chip. No separate route — a client-side filter on the same tab.
-
-### 12.6 Copy, tone & voice notes (PL primary)
-
-- **Must say «dni robocze».** Every countdown that names a number of days uses «dni robocze / dzień roboczy» (working days) — hard client requirement. The ICU plural forms below encode Polish plural (`one`/`few`/`many`) correctly.
-- **Carrier tone = actionable, not scolding.** The banner says «Zgłoś wyjazd» (do this), names the deadline, and gives a button. It does **not** say «naruszyłeś umowę» or moralize. Even `violated` copy is «po terminie» (past deadline) + a CTA — a nudge, not a punishment.
-- **Opiekun/admin tone = factual oversight.** «Po terminie», «Zbliża się termin», «Pod obserwacją» — neutral operational language. The history «outcome» is the only place a verdict («w terminie / po terminie») appears, because that is its literal job.
-- **No em-dash-as-drama.** Use plain «—» only as an empty-value placeholder in tables, per house style.
-
-### 12.7 Components / files summary (web-agent)
-
-| Change | File | Notes |
-|---|---|---|
-| `<GuaranteeCountdownBadge daysLeft>` (new) | `apps/web/components/carrier/GuaranteeCountdownBadge.tsx` | Sibling of `<SlaCountdownBadge>`; 4 label variants (§12.1); ICU plural; reused everywhere below. |
-| `<GuaranteeReminderBanner>` (new) | `apps/web/components/carrier/GuaranteeReminderBanner.tsx` | Aggregate carrier banner (§12.2); consumes `/guarantee-compliance/me`. |
-| Mount banner | `app/(carrier)/carrier/claims/page.tsx` | Top of the page, above `<h1>`. |
-| «Gwarancja» column (new) | `components/carrier/CarrierFleetPanel.tsx` («Auta» columns) | §12.3; joins `/me` by vehicle id. |
-| Agreement-status row (optional) | `components/vehicles/VehicleDetailModal.tsx` | §12.3 echo; §6.5 label/value row, guaranteed vehicles only. |
-| `<GuaranteeComplianceBoard>` (new) | `apps/web/components/guarantee/GuaranteeComplianceBoard.tsx` | §12.4; reuses `<SlaAttentionSection>` shape + `<KpiCard>` strip. |
-| «Porozumienia» board route (new) | `app/(employee)/employee/opieka/porozumienia/page.tsx` + a `<Tabs>` strip on `/employee/opieka` | §12.4; opiekun + admin, same component, API-scoped. |
-| «Porozumienia» tab (new) | `app/(employee)/employee/opieka/carriers/[login]/page.tsx` | §12.5; live-state table + episode-history table. |
-| i18n `guarantee.*` | `messages/pl.json` + `messages/en.json` | Full key list in §12.8. |
-| **0** changes to `globals.css` / Tailwind config; **0** new colour/badge variants | — | `danger`/`warning`/`success`/muted + `-bg` surfaces already exist (§7.6 / §Surface-token policy). |
-
-### 12.8 i18n contract — `guarantee.*` (PL default + EN parity, full key list)
-
-New namespace `guarantee` in `messages/pl.json` and `messages/en.json`. Every key below is required; ICU-plural strings follow the exact shape already used in `dashboard.sla.countdown`.
-
-```jsonc
-// messages/pl.json
-"guarantee": {
-  "countdown": {
-    "overdue":   "{days, plural, one {# dzień po terminie} few {# dni po terminie} many {# dni po terminie} other {# dni po terminie}}",
-    "today":     "dziś ostatni dzień",
-    "dueSoon":   "{days, plural, one {# dzień roboczy} few {# dni robocze} many {# dni roboczych} other {# dni roboczych}}",
-    "remaining": "{days, plural, one {# dzień roboczy} few {# dni robocze} many {# dni roboczych} other {# dni roboczych}}"
-  },
-  "banner": {
-    "title":    "Zgłoś wyjazd — {count, plural, one {# pojazd wymaga działania} few {# pojazdy wymagają działania} many {# pojazdów wymaga działania} other {# pojazdów wymaga działania}}",
-    "cta":      "Zgłoś wyjazd",
-    "deadline": "Termin: {date}",
-    "more":     "+ {count} więcej",
-    "ariaRow":  "Pojazd {plate}, termin {date}, {status}"
-  },
-  "fleet": {
-    "column":   "Gwarancja",
-    "inactive": "Brak odjazdu",
-    "active":   "W trasie"
-  },
-  "vehicleModal": {
-    "statusLabel":   "Gwarancja — status",
-    "deadlineLabel": "Termin zgłoszenia"
-  },
-  "board": {
-    "title":            "Porozumienia — zgłaszanie wyjazdów",
-    "subtitle":         "Pojazdy z gwarancją, które wymagają zgłoszenia wyjazdu",
-    "tabCarriers":      "Przewoźnicy",
-    "tabAgreements":    "Porozumienia",
-    "tabsAriaLabel":    "Widok opieki",
-    "sectionViolated":  "Po terminie",
-    "sectionDueSoon":   "Zbliża się termin",
-    "sectionWatched":   "Pod obserwacją",
-    "showAllWatched":   "Pokaż wszystkie obserwowane",
-    "allClear":         "Wszyscy przewoźnicy w terminie",
-    "searchPlaceholder":"Szukaj po numerze rej. lub przewoźniku",
-    "filterState":      "Filtruj wg stanu",
-    "stateAll":         "Wszystkie stany",
-    "anchor": {
-      "zjechal":   "ostatni zjazd: {date}",
-      "agreement": "od włączenia gwarancji: {date}"
-    },
-    "kpi": {
-      "violated": "Po terminie",
-      "dueSoon":  "Zbliża się termin",
-      "watched":  "Pod obserwacją"
-    },
-    "emptyFilteredTitle":   "Brak wyników",
-    "emptyFilteredMessage": "Zmień kryteria wyszukiwania lub wyczyść filtry."
-  },
-  "history": {
-    "tab":            "Porozumienia",
-    "liveHeading":    "Pojazdy z gwarancją — stan bieżący",
-    "episodesHeading":"Historia epizodów",
-    "emptyLive":      "Brak pojazdów z gwarancją",
-    "emptyEpisodes":  "Ten przewoźnik nie miał opóźnień w zgłaszaniu wyjazdów",
-    "showAllVehicles":"Pokaż wszystkie pojazdy",
-    "columns": {
-      "vehicle":    "Pojazd",
-      "anchor":     "Kotwica",
-      "deadline":   "Termin",
-      "state":      "Stan",
-      "outcome":    "Rozliczenie",
-      "resolvedAt": "Zamknięto"
-    },
-    "source": {
-      "zjechal":   "zjazd",
-      "agreement": "gwarancja"
-    },
-    "state": {
-      "warning":  "Ostrzeżenie",
-      "violated": "Po terminie",
-      "resolved": "Zamknięty"
-    },
-    "reason": {
-      "wyjazd":           "Zgłoszono wyjazd",
-      "agreement_off":    "Zdjęto gwarancję",
-      "vehicle_inactive": "Pojazd nieaktywny"
-    },
-    "outcome": {
-      "onTime":   "w terminie",
-      "late":     "{days, plural, one {po terminie o # dzień} few {po terminie o # dni} many {po terminie o # dni} other {po terminie o # dni}}"
-    }
-  }
-}
+```
+<Card class="overflow-hidden">
+  {/* group header — the ONLY place the state is named (tone + worded label + count) */}
+  <div class="flex items-center gap-2 px-4 py-2.5 border-b border-border">
+    <GroupIcon class="{severity-text} shrink-0" size={16} />
+    <span class="text-xs font-bold uppercase tracking-wide {severity-text}">{groupLabel}</span>
+    <Badge variant="{severity}" class="ml-auto">{group.length}</Badge>
+  </div>
+  {/* rows — divided, full-width, one per vehicle */}
+  <ul class="divide-y divide-border">
+    {group.map(v => <GuaranteeStatusRow vehicle={v} />)}
+  </ul>
+</Card>
 ```
 
-```jsonc
-// messages/en.json
-"guarantee": {
-  "countdown": {
-    "overdue":   "{days, plural, one {# working day overdue} other {# working days overdue}}",
-    "today":     "last day today",
-    "dueSoon":   "{days, plural, one {# working day} other {# working days}}",
-    "remaining": "{days, plural, one {# working day} other {# working days}}"
-  },
-  "banner": {
-    "title":    "Report a departure — {count, plural, one {# vehicle needs action} other {# vehicles need action}}",
-    "cta":      "Report departure",
-    "deadline": "Due: {date}",
-    "more":     "+ {count} more",
-    "ariaRow":  "Vehicle {plate}, due {date}, {status}"
-  },
-  "fleet": {
-    "column":   "Guarantee",
-    "inactive": "No departure yet",
-    "active":   "On the road"
-  },
-  "vehicleModal": {
-    "statusLabel":   "Guarantee — status",
-    "deadlineLabel": "Reporting deadline"
-  },
-  "board": {
-    "title":            "Agreements — departure reporting",
-    "subtitle":         "Guaranteed vehicles that need a departure reported",
-    "tabCarriers":      "Carriers",
-    "tabAgreements":    "Agreements",
-    "tabsAriaLabel":    "Care view",
-    "sectionViolated":  "Overdue",
-    "sectionDueSoon":   "Due soon",
-    "sectionWatched":   "Under watch",
-    "showAllWatched":   "Show all watched",
-    "allClear":         "All carriers are on time",
-    "searchPlaceholder":"Search by plate or carrier",
-    "filterState":      "Filter by state",
-    "stateAll":         "All states",
-    "anchor": {
-      "zjechal":   "last return: {date}",
-      "agreement": "since guarantee start: {date}"
-    },
-    "kpi": {
-      "violated": "Overdue",
-      "dueSoon":  "Due soon",
-      "watched":  "Under watch"
-    },
-    "emptyFilteredTitle":   "No results",
-    "emptyFilteredMessage": "Adjust your search criteria or clear the filters."
-  },
-  "history": {
-    "tab":            "Agreements",
-    "liveHeading":    "Guaranteed vehicles — current state",
-    "episodesHeading":"Episode history",
-    "emptyLive":      "No guaranteed vehicles",
-    "emptyEpisodes":  "This carrier has had no late departure reports",
-    "showAllVehicles":"Show all vehicles",
-    "columns": {
-      "vehicle":    "Vehicle",
-      "anchor":     "Anchor",
-      "deadline":   "Due",
-      "state":      "State",
-      "outcome":    "Outcome",
-      "resolvedAt": "Closed"
-    },
-    "source": {
-      "zjechal":   "return",
-      "agreement": "guarantee"
-    },
-    "state": {
-      "warning":  "Warning",
-      "violated": "Overdue",
-      "resolved": "Closed"
-    },
-    "reason": {
-      "wyjazd":           "Departure reported",
-      "agreement_off":    "Guarantee removed",
-      "vehicle_inactive": "Vehicle deactivated"
-    },
-    "outcome": {
-      "onTime":   "on time",
-      "late":     "{days, plural, one {# working day late} other {# working days late}}"
-    }
-  }
-}
+**Row anatomy** (`<GuaranteeStatusRow>` — replaces the retired `<GuaranteeStatusCard>`; reuses §12.2 tinted-surface
+tokens, no new tokens):
+
+```
+<li class="flex flex-col gap-3 border-l-4 {row-border} {row-bg} px-4 py-3
+           sm:flex-row sm:items-center">
+  {/* identity + meta — grows, truncates; NO sideNumber (carrier never sees internal designation) */}
+  <div class="min-w-0 flex-1">
+    <span class="font-mono font-semibold text-text">{plateNumber}</span>
+    <p class="mt-0.5 text-xs text-text-sub tabular-nums truncate">{metaLine}</p>
+  </div>
+  {/* right cluster — never shrinks, never overflows */}
+  <div class="flex items-center gap-2 shrink-0 max-sm:justify-end">
+    <GuaranteeCountdownBadge daysLeft={daysLeft} />   {/* omitted for ok_active */}
+    <Link href="/carrier/delegations/new?vehicleId={id}">
+      <Button size="sm" variant={okActive ? 'outline' : 'default'}
+              class="min-h-[44px] whitespace-nowrap">
+        Zgłoś wyjazd <ArrowRight size={14}/>
+      </Button>
+    </Link>
+  </div>
+</li>
 ```
 
-- `countdown.dueSoon` and `countdown.remaining` share identical wording («{n} dni robocze») but are **kept as separate keys** because their *tone class* differs (amber vs muted, §12.1) and a future copy tweak may want to distinguish «zostały {n} dni» (comfortable) from a plain count. Both must say «dni robocze».
-- `history.outcome.onTime` / `.late` build the ROZLICZENIE cell: `resolvedDaysLeft ≥ 0` → green `onTime`; `< 0` → red `late` with `days = Math.abs(resolvedDaysLeft)`.
+| Element | Contract |
+|---|---|
+| **Left border + row bg (severity)** | `violated` → `border-danger` + `bg-danger-bg/30 dark:bg-danger/10`; `dueSoon` → `border-warning` + `bg-warning-bg/30 dark:bg-warning/10`; `calm` → `border-border` + **plain `bg-card`** (quiet — no gray fill, the fix for the rejected gray chip); `ok_active` → `border-success` + plain `bg-card`. Worst-wins tint family, same as the strip and board. |
+| **Identity** | `plateNumber` only (`font-mono font-semibold text-text`). **`sideNumber` is NEVER rendered on this surface** (nor the «· —» dash) — see the gating rule below. Carrier name is redundant (own fleet) and omitted. |
+| **Meta line** | Anchor + deadline joined by « · », one truncating line: `anchorSource === 'zjechal'` → «ostatni zjazd: {DD.MM.YYYY} · termin: {DD.MM.YYYY}»; `anchorSource === 'agreement'` → «od włączenia gwarancji: {DD.MM.YYYY} · termin: {DD.MM.YYYY}». For `ok_active`: «w trasie» (+ departure date if known) — **no deadline** (counter paused). `text-xs text-text-sub tabular-nums truncate`. |
+| **Countdown badge** | `<GuaranteeCountdownBadge daysLeft>` (§12.1, verbatim). Omitted for `ok_active`. The `≥4` (calm) variant renders its soft-chrome `bg-input text-text-sub` here — the calm group's only accent, quiet by design. |
+| **CTA (per row — KEPT)** | «Zgłoś wyjazd» → `/carrier/delegations/new` (optionally `?vehicleId=` to prefill). `Button size="sm"`, `min-h-[44px]` touch target, `whitespace-nowrap`. Shown on **every** row incl. `ok_active` (a carrier may report the next wyjazd early) — but on `ok_active` render it `variant="outline"` so it recedes (nothing owed). |
+| **Loading** | Per-group `<Skeleton>` rows (reuse the board skeleton shape), don't block the page. |
 
-### 12.9 Acceptance checklist (Phase 12, web-agent)
+**sideNumber gating (LOCKED — carrier never, opiekun keeps):** the `sideNumber` is the **internal MAGTRANS
+designation** and must **never** reach a carrier-facing surface. `<GuaranteeStatusRow>` is a **carrier-only**
+component — it has **no side-number slot at all** (do not add a prop; there is nothing to gate — the field is simply
+absent). The opiekun/admin `<GuaranteeComplianceBoard>` (§12.4) is a **separate** component and **keeps** `sideNumber`
+in its rows (supervisor info). The **shared** `<GuaranteeEpisodeHistory>` (§12.7) is the one component used by both
+audiences — there the field is gated by a prop (§12.7). See also §12.8 for the fleet-panel column removal.
 
-- [ ] **Zero new tokens.** No `globals.css` / Tailwind changes, no new `Badge` variant; all colour via existing `danger`/`warning`/`success`/muted + `-bg` surfaces (§7.6 recipe).
-- [ ] **«dni robocze» everywhere.** Every day-count label says working days (PL plural correct: `dzień`/`dni robocze`/`dni roboczych`); EN parity present for all keys.
-- [ ] **Banner aggregates.** One banner on `/carrier/claims`, aggregating all owed vehicles; tone = worst vehicle (red if any `violated`, else amber); hidden entirely when nothing owed; CTA → `/carrier/delegations/new` (departure-report form; §12.2 factual correction 2026-07-07); ≥44px CTA touch target.
-- [ ] **Threshold correct.** Carrier alarm only for `violated` OR `counting`+`daysLeft ≤ 3`; `daysLeft ≥ 4` is a muted row badge, never banner; `inactive`/`ok_active` never red/amber.
-- [ ] **Countdown semantics.** `< 0` red «po terminie»; `0` amber «dziś ostatni dzień»; `1–3` amber «{n} dni robocze»; `≥ 4` muted «{n} dni robocze». All `tabular-nums`.
-- [ ] **Board placement.** «Porozumienia» tab on `/employee/opieka` (opiekun + admin, same component, API-scoped, no role branching in UI); severity-grouped sections violated→dueSoon→(watched); both-empty → one calm `text-success` all-clear; per-section skeletons.
-- [ ] **History.** «Porozumienia» tab on carrier drill-down shows live-state table + episode-history table; ROZLICZENIE renders «w terminie» (green, `resolvedDaysLeft ≥ 0`) / «po terminie o N dni» (red, `< 0`); positive empty state when no history.
-- [ ] **A11y.** Urgency never colour-alone (worded countdown chip + section icon/title); board rows keyboard-activatable with `focus-visible:ring-{danger,warning}` (§6.4.3 recipe); AA contrast on `/15` chips both themes.
-- [ ] **Live truth.** Banner/badges reflect the server state on refetch; no manual dismiss; submitting a wyjazd (resolve-hook) drops the vehicle from the banner on the next invalidation.
+**Overflow rules (the load-bearing fix for feedback #1):**
+- The identity/meta column is `min-w-0 flex-1`; the meta line uses `truncate` — a long carrier/date string clips with
+  an ellipsis, it can **never** push the row wider. `min-w-0` is mandatory (without it a flex child refuses to shrink
+  below its content and the row overflows — the exact v1 failure).
+- The right cluster is `shrink-0`: the countdown pill (`whitespace-nowrap`, §12.1) and the CTA (`whitespace-nowrap`)
+  hold their intrinsic width and are never compressed or wrapped mid-word.
+- The plate never truncates (short, mono).
+- Because the **state label lives in the group header, not the row**, no long PL state string is ever rendered inside
+  a row's width budget — overflow like v1's is structurally impossible.
+
+**Responsive:** always **one full-width single column of group `<Card>`s** — no grid, ever (the rejected v1 grid is
+gone). Each row is horizontal on `sm+` (`sm:flex-row sm:items-center`) and **stacks on mobile** (`flex-col`): the meta
+line sits on top and the right cluster becomes a full-width footer (`max-sm:justify-end`), CTA keeping `min-h-[44px]`.
+No horizontal scroll at any width. This layout fills the content column consistently for **any** fleet size (1 → 20+).
+
+#### §12.3.3 — Static explainer (block B) — the porozumienie rules
+
+A calm, **info-toned** (never `warning`) block that states the obligation. Placed **between** the cards and the
+history so a first-time carrier can learn the rules without hunting. Reuse the Phase 9 §9.3 calm-explainer recipe
+(`bg-info-soft dark:bg-sky-950/40 border border-border rounded-[10px] px-4 py-3`) with an `<Info size={16}
+className="text-text-sub"/>` lead icon; **not** an alarm band.
+
+Content — a titled `<ul>` of four rules (i18n `guarantee.porozumienie.explainer.*`):
+
+| # | PL | EN |
+|---|---|---|
+| title | «Jak działa porozumienie o gwarancji» | "How the guarantee agreement works" |
+| 1 · obligation | «Po każdym zjeździe zgłoś kolejny wyjazd w ciągu **10 polskich dni roboczych**.» | "After each return, report the next wyjazd within **10 Polish working days**." |
+| 2 · reminders | «Przypomnienia wysyłamy na **3 dni** i **1 dzień** przed terminem.» | "Reminders are sent **3 days** and **1 day** before the deadline." |
+| 3 · what silences | «Aktywny wyjazd **zatrzymuje** licznik — w trasie nic nie musisz robić.» | "An active wyjazd **pauses** the counter — nothing to do while on the road." |
+| 4 · what restarts | «Zjazd pojazdu **restartuje** licznik od nowa (10 dni roboczych).» | "A vehicle's return **restarts** the counter (10 working days)." |
+
+Static content — no data fetch, no interactivity (a `<details>`/collapse is web-agent's option if vertical space
+is tight, defaulting **open** on first visit).
+
+### §12.4 — Opiekun / admin **compliance board** (shipped `<GuaranteeComplianceBoard>`)
+
+The problem-list for supervisors. **One** component for both roles (API scopes rows server-side: admin → all
+carriers, opiekun → supervised carriers only — no role branching in the UI). This is the shipped
+`<GuaranteeComplianceBoard>`; documented here for completeness and continuity — **no redesign**.
+
+- **KPI strip** (3 tiles, §Phase 5.2 `<KpiCard>`): «Po terminie» (`danger`, `summary.violated`) · «Zbliża się
+  termin» (`orange`, `summary.dueSoon`) · «Pod obserwacją» (`neutral`, the calm-counting count). When a
+  search/filter is active the tiles reflect the filtered view.
+- **Filter row:** search (plate ∨ carrier name) + a state `<Select>` (all / violated / dueSoon / watched).
+- **Three severity sections** (mirroring §7.6.2 `<SlaAttentionSection>`): **Po terminie → Zbliża się termin → Pod
+  obserwacją**, most-urgent-first, each a `<Card>` with a tinted left-border row list + `<GuaranteeCountdownBadge>`.
+  `ok_active`/`inactive` are **filtered out entirely** (they live in the per-carrier fleet views, not here).
+- **«Pod obserwacją» is opt-in** when unfiltered (a «Pokaż wszystkie ({n})» button) so the board stays focused on
+  what needs action.
+- **All-clear:** when nothing is owed across every in-scope carrier, the whole board collapses to **one calm
+  card** (`<CheckCircle2 className="text-success"/>` + «all clear») — never an empty red/amber shell. A filter that
+  matched nothing shows the distinct `<EmptyState>` (`<SearchX>`), with a clear-filters action.
+- **Row deep-link:** each row links to the opiekun drill-down «Porozumienia» tab
+  (`/employee/opieka/carriers/[login]?tab=porozumienia&vehicleId=…`), where the per-vehicle detail + episode
+  history (§12.7) live. `login` is resolved client-side from the cached opiekun-fleet response.
+
+### §12.7 — Episode-archive **history** layout (shared: carrier tab + opiekun drill-down)
+
+The durable violation journal (`GET /guarantee-episodes`, `useGuaranteeEpisodes`). Rendered as block **C** of the
+carrier Porozumienie tab (scoped to the carrier's own fleet, server-side) **and** on the opiekun drill-down
+«Porozumienia» tab (scoped to one carrier/vehicle). **One `<GuaranteeEpisodeHistory>` component, all states
+shown, newest first, cursor «load more».**
+
+| Aspect | Contract |
+|---|---|
+| **States shown** | **All** — `warning`, `violated`, `resolved` (unlike the live board, the archive is a full record, not a to-do). |
+| **Order** | Newest first (server returns descending; the list preserves it). |
+| **Pagination** | Cursor «load more» — `useGuaranteeEpisodes` with `nextCursor`; a `<Button variant="outline">` «Załaduj więcej» appends the next page. No infinite-scroll (deterministic, mobile-friendly). |
+| **Layout** | Mobile-first **stacked list** of rows (not a wide DataTable — the carrier tab is card-shaped and mobile-second-class). Each row: `rounded-md border border-border bg-card px-3 py-2`. On `sm+` it may relax into aligned columns, but the stacked shape is the baseline. |
+| **Empty** | `<EmptyState>` (calm, `<History>`/`<CheckCircle2>` icon) — «Brak historii — żaden termin nie został jeszcze przekroczony» / "No history yet". Silence-is-good tone, never alarming. |
+| **Loading** | 3 `<Skeleton>` rows. |
+
+**Row content** (per `GuaranteeEpisodeDto`):
+
+| Slot | Source | Rendering |
+|---|---|---|
+| State pill | `episode.state` | §7.10.1 `<StatusBadge>` anatomy — `warning` «Ostrzeżenie» · `danger` «Po terminie» (`violated`) · `success` «Rozwiązane» (`resolved`). Text + colour, never colour-alone. |
+| Anchor | `anchorAt` + `anchorSource` | «od {DD.MM.YYYY}» with the §12.3.2 wording («ostatni zjazd» / «od włączenia gwarancji»). `text-xs text-text-sub tabular-nums`. |
+| Deadline | `deadlineAt` | «termin: {DD.MM.YYYY}». |
+| Resolution | `resolvedAt` + `resolvedReason` | Shown only when `state === 'resolved'`: «rozwiązano {DD.MM.YYYY} · {reason}» where reason maps `wyjazd` → «Zgłoszono wyjazd» · `agreement_off` → «Gwarancja wyłączona» · `vehicle_inactive` → «Pojazd nieaktywny». |
+| Reminders (opiekun only, optional) | `reminder3SentAt` / `reminder1SentAt` / `violationSentAt` | On the opiekun drill-down, a muted micro-line «przypomnienia: D-3 ✓ · D-1 ✓» helps supervisors see what fired. Omit on the carrier tab (noise). |
+
+**Identity + sideNumber gating (LOCKED — `<GuaranteeEpisodeHistory>` is the shared component).** Because this one
+component renders on **both** the carrier tab and the opiekun drill-down, the internal `sideNumber` is gated by a
+prop, **defaulting off** so it can never leak by omission:
+
+| Prop | Default | Carrier tab | Opiekun drill-down |
+|---|---|---|---|
+| `showSideNumber?: boolean` | `false` | **`false`** — rows show **`plateNumber` only** (mono) as identity; `sideNumber` (and the «· —» dash when absent) is **never rendered**; carrier name omitted (own fleet). | **pass `showSideNumber`** — rows may show `plateNumber · sideNumber` and the carrier name (multi-vehicle supervisor context). |
+
+Recommendation for the carrier tab: **one combined feed** under block C with the `plateNumber` shown per row (a
+carrier has few vehicles). The `sideNumber` and carrier-name columns exist **only** on the opiekun surface.
+
+### §12.8 — Components / i18n / acceptance summary
+
+| Change | Where | Owner |
+|---|---|---|
+| `<GuaranteeReminderBanner>` → **escalation strip** (narrow visibility to `violated ∨ daysLeft ≤ 1`, collapse rows to one line, retarget CTA → `/carrier/porozumienie`) | `components/carrier/GuaranteeReminderBanner.tsx` | web-agent |
+| `<CarrierTabs>` += 🤝 «Porozumienie» tab + attention badge (`summary.violated + summary.dueSoon`, hidden at 0) | `components/carrier/CarrierTabs.tsx` | web-agent |
+| **New** `/carrier/porozumienie` page (grouped status **rows** §12.3.2 + explainer §12.3.3 + history §12.7) | `app/(carrier)/carrier/porozumienie/…` | web-agent |
+| ~~`<GuaranteeStateChip>`~~ **RETIRED (rework 2026-07-07)** — the state is carried by the group-section header (tone + worded label + count); there is **no per-row state chip**. Do not build/keep this component. | — | — |
+| **New** `<GuaranteeStatusRow>` (per-vehicle **row**, §12.3.2 — replaces the rejected `<GuaranteeStatusCard>` grid; full-width, no `sideNumber`, right-cluster countdown + «Zgłoś wyjazd») + a trivial grouped-section `<Card>` wrapper (header names the state) | `components/guarantee/` | web-agent |
+| **New** `<GuaranteeEpisodeHistory>` (§12.7 cursor list, shared carrier + opiekun drill-down) — **`showSideNumber` prop, default `false`**; carrier never passes it, opiekun opts in | `components/guarantee/` | web-agent |
+| Reuse verbatim: `<GuaranteeCountdownBadge>`, `<GuaranteeComplianceBoard>`, `useMyGuaranteeCompliance` / `useGuaranteeCompliance` / `useGuaranteeEpisodes` (share `GUARANTEE_KEY` cache) | existing | — |
+| i18n: `carrier.tabs.porozumienie`, `guarantee.strip.*`, `guarantee.tab.*` / `guarantee.porozumienie.*` (cards, groups, explainer), `guarantee.episodes.*` (state pills, resolve reasons, load-more, empty) | `messages/{pl,en}.json` | web-agent |
+| **0** changes to `tailwind.config.ts` / `globals.css`; **0** new colour/badge variants | — | — |
+
+**i18n additions (PL default + EN)** — new keys web-agent must add:
+
+| Key | PL | EN |
+|---|---|---|
+| `carrier.tabs.porozumienie` | «Porozumienie» | "Agreement" |
+| `guarantee.strip.title` | «{count, plural, one {# pojazd wymaga} other {# pojazdy wymagają}} pilnego zgłoszenia wyjazdu» | "{count} vehicle(s) need an urgent wyjazd report" |
+| `guarantee.strip.cta` | «Przejdź do Porozumień» | "Go to Agreement" |
+| `guarantee.tab.badgeAria` | «Porozumienie, {count} pilnych» | "Agreement, {count} urgent" |
+| `guarantee.porozumienie.allClear` | «Wszystkie pojazdy w porządku — nic nie wymaga zgłoszenia» | "All vehicles in order — nothing to report" |
+| `guarantee.porozumienie.group.violated` | «Po terminie» | "Overdue" |
+| `guarantee.porozumienie.group.dueSoon` | «Zbliża się termin» | "Due soon" |
+| `guarantee.porozumienie.group.watched` | «Pod obserwacją» | "Watched" |
+| `guarantee.porozumienie.group.okActive` | «W trasie / wyjazd zgłoszony» | "On the road / reported" |
+| ~~`guarantee.porozumienie.chip.violated`~~ | *retired 2026-07-07 — state now shown in the group header only; reuse `…group.violated`* | — |
+| ~~`guarantee.porozumienie.chip.dueSoon`~~ | *retired — reuse `…group.dueSoon`* | — |
+| ~~`guarantee.porozumienie.chip.watched`~~ | *retired — reuse `…group.watched`* | — |
+| ~~`guarantee.porozumienie.chip.okActive`~~ | *retired — reuse `…group.okActive`* | — |
+| `guarantee.porozumienie.anchor.zjechal` | «ostatni zjazd: {date}» | "last return: {date}" |
+| `guarantee.porozumienie.anchor.agreement` | «od włączenia gwarancji: {date}» | "since guarantee start: {date}" |
+| `guarantee.porozumienie.deadline` | «termin: {date}» | "deadline: {date}" |
+| `guarantee.porozumienie.reportCta` | «Zgłoś wyjazd» | "Report wyjazd" |
+| `guarantee.porozumienie.explainer.title` | «Jak działa porozumienie o gwarancji» | "How the guarantee agreement works" |
+| `guarantee.porozumienie.explainer.obligation` | «Po każdym zjeździe zgłoś kolejny wyjazd w ciągu 10 polskich dni roboczych.» | "After each return, report the next wyjazd within 10 Polish working days." |
+| `guarantee.porozumienie.explainer.reminders` | «Przypomnienia wysyłamy na 3 dni i 1 dzień przed terminem.» | "Reminders are sent 3 days and 1 day before the deadline." |
+| `guarantee.porozumienie.explainer.silence` | «Aktywny wyjazd zatrzymuje licznik — w trasie nic nie musisz robić.» | "An active wyjazd pauses the counter — nothing to do on the road." |
+| `guarantee.porozumienie.explainer.restart` | «Zjazd pojazdu restartuje licznik od nowa (10 dni roboczych).» | "A vehicle's return restarts the counter (10 working days)." |
+| `guarantee.episodes.title` | «Historia» | "History" |
+| `guarantee.episodes.state.warning` | «Ostrzeżenie» | "Warning" |
+| `guarantee.episodes.state.violated` | «Po terminie» | "Overdue" |
+| `guarantee.episodes.state.resolved` | «Rozwiązane» | "Resolved" |
+| `guarantee.episodes.reason.wyjazd` | «Zgłoszono wyjazd» | "Wyjazd reported" |
+| `guarantee.episodes.reason.agreement_off` | «Gwarancja wyłączona» | "Guarantee switched off" |
+| `guarantee.episodes.reason.vehicle_inactive` | «Pojazd nieaktywny» | "Vehicle inactive" |
+| `guarantee.episodes.resolvedAt` | «rozwiązano {date} · {reason}» | "resolved {date} · {reason}" |
+| `guarantee.episodes.loadMore` | «Załaduj więcej» | "Load more" |
+| `guarantee.episodes.empty` | «Brak historii — żaden termin nie został jeszcze przekroczony» | "No history yet — no deadline has been missed" |
+
+### §12.9 — Acceptance checklist (§12, web-agent)
+
+- [ ] **Severity model.** Every surface derives tone via `watchdogSeverity()` / `isOwed()` / `compareByUrgency()`
+      from `lib/guarantee.ts` — no re-derived maps. `ok_active` hidden on the board, **shown** on the carrier tab.
+- [ ] **Countdown badge** unchanged (§12.1); reused by cards + history; `≥4` stays muted `bg-input`, never in the strip.
+- [ ] **Wnioski strip** renders only for `violated ∨ daysLeft ≤ 1`; one line, no per-vehicle rows; CTA →
+      `/carrier/porozumienie`; nothing owed / loading → renders nothing.
+- [ ] **Nav badge** = `summary.violated + summary.dueSoon`; hidden at 0 and while loading; `danger` if any violated
+      else `warning`; announced in the tab `aria-label`.
+- [ ] **Porozumienie status rows (REWORKED — no card grid).** Full-width single column of grouped `<Card>` sections
+      (Po terminie → Zbliża się → Pod obserwacją → W trasie), **no `grid-cols`**; the **group header** carries the
+      state (tone + worded label + count) — **no per-row `<GuaranteeStateChip>`** (retired). Each row: `plateNumber`
+      only (**no `sideNumber`, no «· —»**), truncating meta line (anchor · deadline; deadline omitted on ok_active),
+      right-cluster countdown (omitted on ok_active) + «Zgłoś wyjazd» CTA (`outline` + no urgency on ok_active);
+      `min-w-0 flex-1` + `truncate` on meta, `shrink-0` right cluster → **no overflow at any width**; stacks on
+      mobile; ≥44px touch; per-group skeletons; calm all-clear line when no owed groups.
+- [ ] **sideNumber never reaches the carrier.** Absent from status rows, from `<GuaranteeEpisodeHistory>` when
+      `showSideNumber` is false (carrier default), and from the CarrierFleetPanel «Auta» table. Opiekun board +
+      opiekun drill-down keep it.
+- [ ] **Explainer** is `bg-info-soft` calm (NOT warning), 4 rules, static, default-open.
+- [ ] **Episode history** shows all states, newest first, cursor «Załaduj więcej»; resolve-reason mapped; calm
+      empty state; `<Skeleton>` loading; shared by carrier tab + opiekun drill-down.
+- [ ] **Silence-is-good** honoured across all four surfaces (strip, badge, tab all-clear, empty history).
+- [ ] **i18n** PL default + EN for every new key; ICU plural on the strip; a11y label on the nav badge.
+- [ ] **Token policy + dark-mode.** Zero `tailwind.config.ts` / `globals.css` changes; all surfaces legible in dark
+      via `dark:bg-*/10..15` / `dark:text-*`; cards `bg-card`, soft chrome `bg-input`, explainer `bg-info-soft`.
 

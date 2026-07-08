@@ -151,13 +151,19 @@ export function VehicleDetailModal({
       icon: Truck,
       rows: [
         { label: f('plateNumber'), value: monoValue(vehicle.plateNumber) },
-        { label: f('sideNumber'), value: textValue(vehicle.sideNumber) },
+        // «Numer boczny» — the internal MAGTRANS designation. Dropped for the
+        // carrier-self viewer (`hideCarrier`): a carrier must never see the
+        // internal side-number (§6.15 carrier-self hide, same rule as the
+        // §12.3.2 status rows / §12.7 episode history / CarrierFleetPanel).
+        hideCarrier
+          ? null
+          : { label: f('sideNumber'), value: textValue(vehicle.sideNumber) },
         // `type` (MEGA/STD/COIL) and `euro` (V/VI) are raw enum codes — the
         // form/table render them verbatim, so do the same here.
         { label: f('type'), value: textValue(vehicle.type) },
         { label: f('euro'), value: textValue(vehicle.euro) },
         { label: f('certificateL'), value: bool(vehicle.certificateL) },
-      ],
+      ].filter((row): row is NonNullable<typeof row> => row !== null),
     },
     {
       title: t('sections.people'),

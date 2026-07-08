@@ -276,15 +276,20 @@ export class GuaranteeWatchdogRepository {
   }
 
   /**
-   * Archive list (`GET /guarantee-episodes`). Newest first, cursor-paginated on
-   * `id`. `opiekunScopeId` restricts to episodes whose carrier is supervised by
-   * the opiekun (`carrier.opiekunId`); omit for admin (all).
+   * Archive list (`GET /guarantee-episodes` + `/me`). Newest first,
+   * cursor-paginated on `id`. `opiekunScopeId` restricts to episodes whose
+   * carrier is supervised by the opiekun (`carrier.opiekunId`);
+   * `carrierUserScopeId` restricts to episodes whose carrier is owned by that
+   * login-user (`carrier.userId`) — the carrier `/me` scope. Both omit for admin
+   * (all). The two scopes are mutually exclusive by construction (the service
+   * passes exactly one, derived from the JWT).
    */
   async listEpisodes(filters: {
     carrierId?: string;
     vehicleId?: string;
     state?: PrismaEpisodeState;
     opiekunScopeId?: string;
+    carrierUserScopeId?: string;
     cursor?: string;
     limit: number;
   }): Promise<GuaranteeEpisodeListRow[]> {
@@ -294,6 +299,9 @@ export class GuaranteeWatchdogRepository {
     if (filters.state) where.state = filters.state;
     if (filters.opiekunScopeId) {
       where.carrier = { opiekunId: filters.opiekunScopeId };
+    }
+    if (filters.carrierUserScopeId) {
+      where.carrier = { userId: filters.carrierUserScopeId };
     }
 
     const rows = await this.prisma.client.guaranteeIdleEpisode.findMany({

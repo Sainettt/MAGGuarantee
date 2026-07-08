@@ -24,6 +24,7 @@ import {
   GuaranteeWatchdogService,
 } from './guarantee-watchdog.service';
 import type {
+  GuaranteeEpisodeListRow,
   GuaranteeEpisodeRow,
   GuaranteeWatchdogRepository,
   WatchdogVehicleScopeRow,
@@ -645,5 +646,107 @@ describe('GuaranteeWatchdogService — board scoping', () => {
     const h = makeHarness({ scope: [] });
 
     await expect(h.service.getComplianceBoard(carrierUser, NOW)).rejects.toThrow();
+  });
+});
+
+describe('GuaranteeWatchdogService — carrier episode archive (listMyEpisodes)', () => {
+  const carrierUser: AuthUser = {
+    sub: 'usr-car-1',
+    login: 'car1',
+    email: 'car1@example.com',
+    name: 'Car One',
+    role: 'przewoznik',
+    mustChangePassword: false,
+  };
+
+  /** A list-row shaped like the repo returns (episode + joined identity). */
+  function makeListRow(
+    overrides: Partial<GuaranteeEpisodeListRow> = {},
+  ): GuaranteeEpisodeListRow {
+    const ep = makeEpisode(overrides);
+    return {
+      ...ep,
+      plateNumber: 'WX00001',
+      sideNumber: null,
+      carrierName: 'Car One',
+      ...overrides,
+    };
+  }
+
+  it('rejects a non-przewoznik caller (role gate, defence-in-depth)', async () => {
+    const admin: AuthUser = { ...carrierUser, sub: 'adm-1', role: 'admin' };
+    const h = makeHarness();
+
+    await expect(
+      h.service.listMyEpisodes(admin, { limit: 50 }),
+    ).rejects.toThrow();
+    expect(h.repo.listEpisodes).not.toHaveBeenCalled();
+  });
+
+  it('forces the carrier scope from the JWT (never a client carrierId)', async () => {
+    const h = makeHarness();
+    h.repo.listEpisodes.mockResolvedValueOnce([]);
+
+    await h.service.listMyEpisodes(carrierUser, { limit: 50 });
+
+    const [args] = h.repo.listEpisodes.mock.calls[0] as [
+      Record<string, unknown>,
+    ];
+    expect(args.carrierUserScopeId).toBe('usr-car-1');
+    // The /me path must NOT pass any admin/opiekun scope or a carrierId.
+    expect(args.carrierId).toBeUndefined();
+    expect(args.opiekunScopeId).toBeUndefined();
+  });
+
+  it('passes vehicleId and state filters through to the repo', async () => {
+    const h = makeHarness();
+    h.repo.listEpisodes.mockResolvedValueOnce([]);
+
+    await h.service.listMyEpisodes(carrierUser, {
+      vehicleId: 'veh-42',
+      state: 'violated',
+      limit: 50,
+    });
+
+    const [args] = h.repo.listEpisodes.mock.calls[0] as [
+      Record<string, unknown>,
+    ];
+    expect(args.vehicleId).toBe('veh-42');
+    expect(args.state).toBe('violated');
+  });
+
+  it('returns own episodes mapped to the wire DTO (no nextCursor when short)', async () => {
+    const h = makeHarness();
+    h.repo.listEpisodes.mockResolvedValueOnce([
+      makeListRow({ id: 'ep-a', vehicleId: 'veh-1' }),
+      makeListRow({ id: 'ep-b', vehicleId: 'veh-2' }),
+    ]);
+
+    const res = await h.service.listMyEpisodes(carrierUser, { limit: 50 });
+
+    expect(res.items.map((i) => i.id)).toEqual(['ep-a', 'ep-b']);
+    expect(res.nextCursor).toBeNull();
+  });
+
+  it('cursor-paginates: N+1 fetched → trims to limit and emits nextCursor', async () => {
+    const h = makeHarness();
+    // limit=2, repo returns 3 (the N+1 probe row) → page trimmed, cursor = last kept.
+    h.repo.listEpisodes.mockResolvedValueOnce([
+      makeListRow({ id: 'ep-a' }),
+      makeListRow({ id: 'ep-b' }),
+      makeListRow({ id: 'ep-c' }),
+    ]);
+
+    const res = await h.service.listMyEpisodes(carrierUser, { limit: 2 });
+
+    expect(res.items.map((i) => i.id)).toEqual(['ep-a', 'ep-b']);
+    expect(res.nextCursor).toBe('ep-b');
+    // The cursor is forwarded on the follow-up call.
+    h.repo.listEpisodes.mockResolvedValueOnce([]);
+    await h.service.listMyEpisodes(carrierUser, { cursor: 'ep-b', limit: 2 });
+    const [args] = h.repo.listEpisodes.mock.calls[1] as [
+      Record<string, unknown>,
+    ];
+    expect(args.cursor).toBe('ep-b');
   });
 });

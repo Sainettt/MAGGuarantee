@@ -184,11 +184,9 @@ export function CarrierFleetPanel() {
           <span className="font-mono font-semibold">{row.plateNumber}</span>
         ),
       },
-      {
-        id: 'side',
-        header: tVehCols('side'),
-        cell: (row) => row.sideNumber ?? '—',
-      },
+      // «Numer boczny» column removed (§12.8) — the internal MAGTRANS
+      // designation must never surface to a carrier (same gating as the
+      // §12.3.2 status rows / §12.7 episode history / vehicle detail modal).
       {
         id: 'type',
         header: tVehCols('type'),
