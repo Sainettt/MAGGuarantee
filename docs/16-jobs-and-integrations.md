@@ -36,6 +36,8 @@
 | onEdit | `onEditTrigger` (`Code.gs:6977`) | реал-тайм при правке Sheet | **Не нужен** (нет Sheets) |
 | onOpen | `onOpen` (`Code.gs:6950`) | при открытии Sheet | **Не нужен** |
 | Refresh-token cleanup | — (новое) | ежедневно | BullMQ scheduled job |
+| Verification-SLA digest | — (новое, docs/21) | ежедневно 07:00 | `@Cron` в API-процессе |
+| **Guarantee Watchdog** | — (новое, план 2026-07-07) | ежедневно **07:10** Europe/Warsaw | `@Cron` в API-процессе (стаггер после verification-sla) |
 
 > Внутренний per-claim чат не реализуем (см. [17-migration-roadmap.md#что-мы-не-делаем](17-migration-roadmap.md)) — `_cleanupOldChatMessages` из `Code.gs` пропускаем. **Это НЕ про** исходящую Google Chat нотификацию о выездах — та новая фича, см. [Google Chat notifications](#google-chat-notifications).
 
@@ -115,6 +117,39 @@ export class DailyRemindersProcessor extends WorkerHost {
   }
 }
 ```
+
+### Guarantee Watchdog
+
+> 🆕 План 2026-07-07. Крон **`@Cron('10 7 * * *', { timeZone: 'Europe/Warsaw' })`** в API-процессе (`apps/api/src/modules/guarantee-watchdog/`) — стаггер после verification-sla (07:00). Идемпотентный: повторный запуск в тот же день — no-op (дедуп по sent-флагам эпизода). Kill-switch `GUARANTEE_WATCHDOG_ENABLED=false` → выход с лог-строкой.
+
+**Что делает крон (по каждой гарантийной машине в scope):**
+
+1. Скоуп: `Vehicle.agreement = true` (NULL = false), машина активна (`active`, `deletedAt` null), перевозчик жив. Одна и та же scope-выборка кормит **и** крон, **и** board-эндпоинты (single source of truth в сервисе).
+2. `computeGuaranteeWatchdog()` (shared) → `{ status, anchorAt, anchorSource, deadlineAt, daysLeft }`. Anchor = `date(actualReturnAt)` последнего `zjechal` ?? `Vehicle.agreementSince`. Дедлайн = `addPolishWorkingDays(anchor, 10)`.
+3. **Триггеры (порядок важен; catch-up = одно самое актуальное письмо):**
+   - `daysLeft < 0` → эпизод `violated` (создать/эскалировать, `violatedAt` один раз); секция «наруszenia» в дайджесте опекуна (`violationSentAt` после успешного enqueue). **Перевозчику при нарушении письма нет.**
+   - `0 ≤ daysLeft ≤ 1 && reminder1SentAt null` → D-1 (при отметке заодно backfill `reminder3SentAt`, гасит поздний D-3).
+   - `2 ≤ daysLeft ≤ 3 && reminder3SentAt null` → D-3.
+   - `daysLeft > 3` (counting) → строки эпизода **нет** (журнал фиксирует только «плохие» циклы).
+4. **Ensure-эпизод:** при первом триггере создаётся строка; при реоткрытии после `anulowany` (тот же `anchorAt`) sent-флаги копируются из последнего эпизода того же якоря — не резендим. Partial-unique «один открытый эпизод на машину» — гонка ловится через unique_violation → update существующей открытой строки.
+5. **Auto-resolve** открытого эпизода: `ok_active` → `wyjazd`; agreement off / вне scope → `agreement_off`; машина/перевозчик мертвы → `vehicle_inactive` (fallback для того, что не поймали хуки).
+6. **Fan-out (после per-vehicle прохода):** группировка → **одно письмо на перевозчика** в день (все его due-машины) + **один дайджест на опекуна** (`carrier.opiekunId`; секции «zbliżające się terminy» + «наруszenia»). Sent-флаги ставятся **только** после успешного enqueue; per-mail try/catch; лог-строка сводки (`checked/due3/due1/violated/resolved/mailsSent`).
+
+**Хуки (мгновенная реакция, не ждать крона):**
+
+- `DelegationsService.add()` — resolve-hook: новый выезд закрывает открытый эпизод машины (`resolved`, `resolvedByDelegationId`, `resolvedDaysLeft`, reason `wyjazd`). Off-path try/catch по образцу `_notifyWyjazd` — сбой хука **никогда** не ломает `add()`.
+- `VehiclesService.update()` — toggle-hook: `agreement` false/null→true ⇒ `Vehicle.agreementSince = today` (date-only UTC-midnight); true→false ⇒ `agreementSince = null` + закрыть открытый эпизод (`agreement_off`).
+- Реоткрытие после `anulowany` — намеренно оставлено крону (баннер появится на следующее утро; снятие мгновенное).
+
+**Env (`env.schema.ts`, паттерн `ALLOW_PAST_DEPARTURE`):**
+
+| Ключ | Дефолт | Назначение |
+|---|---|---|
+| `GUARANTEE_WATCHDOG_ENABLED` | `true` | Kill-switch на выкатку (только `false`/`0` выключает) |
+| `GUARANTEE_DEADLINE_WORKING_DAYS` | `10` | Рабочих дней от якоря до дедлайна |
+| `GUARANTEE_REMINDER_OFFSETS` | `"3,1"` | CSV офсетов напоминаний (раб. дни до дедлайна); парсится + де-дуп + сортируется |
+
+Аудит: крон в `AuditLog` не пишет — таблица `GuaranteeIdleEpisode` сама журнал (append-only, закрытие = переход в `resolved`, никогда не delete).
 
 ### Email очередь
 
@@ -320,6 +355,10 @@ const html = await render(<CarrierDecisionEmail claim={claim} decision="ZAAKCEPT
 | `daily-reminder.tsx` | `sendDailyReminders` | Ежедневно для зависших |
 | `weekly-report.tsx` | `sendWeeklyReport` | Понедельник |
 | `authorization-request.tsx` | `sendAuthorizationRequest` | Когда нужна авторизация суммы |
+| `guarantee-reminder-carrier.tsx` (#17) | (новое, Guarantee Watchdog) | Крон 07:10 — напоминание перевозчику D-3/D-1 (одно письмо, список машин); CTA «Zgłoś wyjazd» → `/carrier/delegations/new` |
+| `guarantee-opiekun-digest.tsx` (#18) | (новое, Guarantee Watchdog) | Крон 07:10 — дайджест опекуну: секция «zbliżające się terminy» (D-3/D-1) + секция «naruszenia» (эпизоды, впервые ставшие `violated` сегодня). Персональный `User.email`, **не** группа |
+
+> **Guarantee Watchdog — получатели:** перевозчик резолвится как `carrier-submitted` / `delegation-announced` — **login-user email** (`Carrier.user.email` через `User.id = Carrier.userId`), **не** `ordersEmail`. Опекун — персональный `User.email` (`Carrier.opiekunId → User`). При нарушении перевозчику письма **нет** (решение заказчика) — нарушение только в дайджесте опекуна (#18). Отправка через `MailService.enqueueGuarantee*` (`_enqueueOr` → очередь `email-send` с sync-фолбэком, `MailJobsRegistry`/diagnostics подхватываются автоматически).
 
 ## Файловое хранилище — S3
 

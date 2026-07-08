@@ -396,6 +396,22 @@ DB CHECK enforces `returnCountry` length 2..8 (covers `EL`) and `returnPostalCod
 
 **Точки расширения (заложены, не в v1):** dismiss/snooze (будущая таблица `AlertDismissal`, `@@unique[userId, type, subjectId]`) — сейчас `_filterDismissed` no-op; пагинации нет (объём алертов опекуна мал).
 
+### Guarantee Watchdog (compliance выездов) — `/api/v1/guarantee-compliance`, `/api/v1/guarantee-episodes`
+
+> 🆕 **Guarantee Watchdog** (план 2026-07-07). Машина под гарантией (`Vehicle.agreement === true`) обязана зарегистрировать выезд (`POST /delegations` → `zgloszony`) в течение **10 польских рабочих дней** от последнего съезда (`actualReturnAt` последнего `zjechal`) или от даты включения гарантии (`Vehicle.agreementSince`, если машина ещё ни разу не съезжала). Live-доска считается statelessly из делегаций (shared `computeGuaranteeWatchdog`); журнал «плохих» циклов + дедуп писем хранится в `GuaranteeIdleEpisode`. Крон 07:10 Europe/Warsaw шлёт напоминания D-3/D-1 перевозчику (одно письмо, список машин) и дайджест опекуну (+секция «наруszenia»). Полностью read-only surface — **нет** ручных мутаций эпизодов в v1. Отдельного письма о нарушении перевозчику нет (решение заказчика). См. [16-jobs-and-integrations.md#guarantee-watchdog](16-jobs-and-integrations.md#guarantee-watchdog).
+
+| Method + Path | Назначение | Роли |
+|---|---|---|
+| GET `/guarantee-compliance` | Live-доска: по одной строке на каждую гарантийную машину (keyed by `vehicleId`), `{ items, summary }`. `admin` → все; `opiekun` → только свои перевозчики (service-scope `carrier.opiekunId = user.sub`). Read-only, без `@Audit`. | admin / opiekun |
+| GET `/guarantee-compliance/me` | Свой парк перевозчика (для баннера/бейджей на дашборде и во флоте). Та же форма строки без блока `carrier`. Keyed by `vehicleId`. | przewoznik |
+| GET `/guarantee-episodes?carrierId=&vehicleId=&state=` | Архив эпизодов (нарушений), newest-first, cursor-пагинация по `id`. `admin` → все; `opiekun` → свои перевозчики (repo-scope `carrier.opiekunId`). | admin / opiekun |
+
+**`GuaranteeComplianceItem` DTO** (одна строка доски): `{ vehicleId, plateNumber, sideNumber, carrier?: { id, name } (нет на /me), anchorAt: date|null, anchorSource: 'zjechal'|'agreement'|null, deadlineAt: date|null, daysLeft: int|null, state: 'inactive'|'ok_active'|'counting'|'violated', openEpisode: { id, state, violatedAt, reminder3SentAt, reminder1SentAt } | null }`. Anchor-поля `null` для `inactive`/`ok_active` (счётчик выключен). **Response:** `{ items: GuaranteeComplianceItem[], summary: { violated, dueSoon, watched } }` (`dueSoon` = `counting && daysLeft ≤ 3`; `watched` = все гарантийные машины в scope). Shared-схема — `packages/shared/src/schemas/guarantee-watchdog.ts`.
+
+**`GuaranteeEpisodeDto`** (архив): `{ id, vehicleId, plateNumber, sideNumber, carrierId, carrierName, anchorAt: date, anchorSource, deadlineAt: date, state: 'warning'|'violated'|'resolved', reminder3SentAt, reminder1SentAt, violationSentAt, violatedAt, resolvedAt, resolvedByDelegationId, resolvedDaysLeft: int|null, resolvedReason: 'wyjazd'|'agreement_off'|'vehicle_inactive'|null, createdAt, updatedAt }`. **Response:** `{ items: GuaranteeEpisodeDto[], nextCursor: uuid|null }`.
+
+**Защита endpoints:** глобальный `JwtAuthGuard` + `RolesGuard` (`@Roles`). Скоуп опекуна — service-level (`carrier.opiekunId = user.sub`), **не** через `OpiekunOwnershipGuard` (тот decorator-driven для single-resource). `pracownik` доступа не имеет в v1.
+
 ### Limits — `/api/v1/limits`
 
 | Method + Path | GAS |

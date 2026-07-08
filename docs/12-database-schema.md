@@ -128,6 +128,14 @@ enum DriverAttachmentCategory { adr }
 // plus a catch-all.
 enum CarrierAttachmentCategory { insurance  license  kreptd  adr  other }
 
+// Guarantee Watchdog (план 2026-07-07). Lifecycle state of an idle-episode row
+// (warning = a D-3/D-1 reminder fired; violated = deadline missed; resolved =
+// closed). Anchor origin (zjechal = last returned delegation; agreement = never
+// returned, counts from Vehicle.agreementSince). Close reason.
+enum GuaranteeEpisodeState  { warning  violated  resolved }
+enum GuaranteeAnchorSource  { zjechal  agreement }
+enum GuaranteeResolveReason { wyjazd  agreement_off  vehicle_inactive }
+
 // ─── USERS ──────────────────────────────────────────────
 
 model User {
@@ -203,12 +211,13 @@ model Carrier {
   opiekunId String @db.Uuid
   opiekun   User   @relation("OpiekunCarriers", fields: [opiekunId], references: [id])
 
-  vehicles    Vehicle[]
-  drivers     Driver[]
-  trailers    Trailer[]
-  claims      Claim[]
-  delegations Delegation[]
-  attachments CarrierAttachment[]
+  vehicles          Vehicle[]
+  drivers           Driver[]
+  trailers          Trailer[]
+  claims            Claim[]
+  delegations       Delegation[]
+  attachments       CarrierAttachment[]
+  guaranteeEpisodes GuaranteeIdleEpisode[]   // Guarantee Watchdog — denormalized carrier
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -281,6 +290,10 @@ model Vehicle {
   it        Boolean?
   fr        Boolean?
   agreement Boolean?  // Porozumienie — see #umowa-vs-porozumienie quirk
+  // Guarantee Watchdog (план 2026-07-07) — date the km-guarantee was enabled.
+  // API sets it on the agreement toggle (false/null→true ⇒ today; true→false ⇒
+  // NULL). Watchdog anchor for a vehicle that never returned a delegation.
+  agreementSince DateTime? @db.Date
   // legacy `contract` (Umowa) boolean dropped 2026-05 — the umowa scan is
   // now stored as VehicleAttachment rows with category=contract.
 
@@ -306,10 +319,11 @@ model Vehicle {
   // Auto-updated by delegation→zjechal — never expose as a manual UI field
   lastDroveAt        DateTime?
 
-  delegations   Delegation[]
-  claims        Claim[]
-  attachments   VehicleAttachment[]
-  dailyKm       VehicleDailyKm[]         // Phase 7 (#3) — daily km records (weryfikator)
+  delegations       Delegation[]
+  claims            Claim[]
+  attachments       VehicleAttachment[]
+  dailyKm           VehicleDailyKm[]         // Phase 7 (#3) — daily km records (weryfikator)
+  guaranteeEpisodes GuaranteeIdleEpisode[]   // Guarantee Watchdog — idle-episode journal
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -616,6 +630,10 @@ model Delegation {
   // REWORK 2026-06-20 (#4) — wniosek↔wyjazd link (one claim per delegation).
   claim Claim?
 
+  // Guarantee Watchdog — episodes this delegation resolved (a reported wyjazd
+  // closes an open idle episode). Back-relation of resolvedByDelegation.
+  resolvedGuaranteeEpisodes GuaranteeIdleEpisode[] @relation("GuaranteeEpisodeResolvedBy")
+
   reportedById String?   @db.Uuid
   reportedBy   User?     @relation("DelegationReporter", fields: [reportedById], references: [id])
   reportedAt   DateTime  @default(now())
@@ -663,6 +681,50 @@ model VehicleDailyKm {
   @@unique([vehicleId, date])                     // one stamp per vehicle/day (upsert)
   @@index([date])                                 // weekly board
   @@map("vehicle_daily_km")
+}
+
+// ─── GUARANTEE IDLE EPISODE (Guarantee Watchdog — write layer) ──
+// Append-only journal of the "bad" guarantee cycles for a guaranteed vehicle
+// (Vehicle.agreement=true). A row is created on the FIRST escalation event of a
+// cycle (D-3 / D-1 / violation), holds the fixed deadline + per-mail dedup
+// flags, and (once closed) the resolution outcome. Compliant cycles create NO
+// row. The live board/banner is computed statelessly from delegations; this
+// table dedups reminder emails and durable-fixes violations. See план §2/§3.
+// NO deletedAt — append-only journal; the soft-delete extension ignores models
+// not in its allowlist. The "one open episode per vehicle" invariant is a
+// PARTIAL UNIQUE index (state <> 'resolved') hand-added in the migration.
+model GuaranteeIdleEpisode {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vehicleId     String   @db.Uuid            // scope of the episode
+  vehicle       Vehicle  @relation(fields: [vehicleId], references: [id])
+  carrierId     String   @db.Uuid            // denormalized for board/opiekun scope
+  carrier       Carrier  @relation(fields: [carrierId], references: [id])
+
+  anchorAt      DateTime @db.Date            // cycle anchor (last return / agreementSince)
+  anchorSource  GuaranteeAnchorSource
+  deadlineAt    DateTime @db.Date            // fixed at row creation (anchor + 10 working days)
+  state         GuaranteeEpisodeState
+
+  reminder3SentAt DateTime?                  // dedup D-3
+  reminder1SentAt DateTime?                  // dedup D-1
+  violationSentAt DateTime?                  // dedup "violation" section in opiekun digest
+  violatedAt      DateTime?                  // stamped when deadline first crossed
+
+  resolvedAt             DateTime?
+  resolvedByDelegationId String?     @db.Uuid
+  resolvedByDelegation   Delegation? @relation("GuaranteeEpisodeResolvedBy", fields: [resolvedByDelegationId], references: [id])
+  resolvedDaysLeft       Int?                // daysLeft at close; < 0 = closed late
+  resolvedReason         GuaranteeResolveReason?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([carrierId, state])
+  @@index([vehicleId, state])
+  @@map("guarantee_idle_episodes")
+  // + PARTIAL UNIQUE (raw SQL in migration):
+  //   CREATE UNIQUE INDEX "GuaranteeIdleEpisode_open_vehicle_key"
+  //     ON "guarantee_idle_episodes"("vehicleId") WHERE "state" <> 'resolved';
 }
 
 // ─── LIMITS, AUDIT, REFRESH, CONFIG, CLAIM-SEQUENCE ─────
@@ -969,6 +1031,9 @@ shows whether the verifier overrode the carrier's declared hours.
 | Активные авто планисты | `vehicles(plannerId)` |
 | Делегации авто | `delegations(vehicleId, status)` |
 | Carrier delegations list (через soft-delete middleware) | `delegations(carrierId, deletedAt, status)` — Phase 3 |
+| Watchdog-борд опекуна/админа (по перевозчику + state) | `guarantee_idle_episodes(carrierId, state)` |
+| Watchdog per-машина (ensure-эпизод, история) | `guarantee_idle_episodes(vehicleId, state)` |
+| «≤1 открытый эпизод на машину» (write-инвариант) | PARTIAL UNIQUE `guarantee_idle_episodes(vehicleId) WHERE state <> 'resolved'` |
 | Audit по target | `audit_log(targetType, targetKey)` |
 
 ## Soft-delete vs hard-delete
@@ -981,6 +1046,7 @@ shows whether the verifier overrode the carrier's declared hours.
 | Driver/Trailer | soft |
 | Claim | soft, никогда не удаляем (compliance) |
 | Delegation | soft |
+| GuaranteeIdleEpisode | append-only журнал, `deletedAt` нет; не в allowlist soft-delete-extension → extension его не трогает (закрытие эпизода = `state='resolved'` + `resolvedReason`, не удаление) |
 | RefreshToken | hard (по `expiresAt < now()`) |
 | AuditLog | append-only, никогда не удаляем |
 
@@ -1016,6 +1082,7 @@ shows whether the verifier overrode the carrier's declared hours.
 | `20260601130000_driver_rename_passport_to_id_document` | Переименование `drivers.passportNumber` → `idDocumentNumber` (ALTER TABLE … RENAME COLUMN, без потери данных). Колонка теперь хранит номер любого удостоверения личности (паспорт, dowód osobisty и т.п.), а не только паспорта; тип, nullability и casing не меняются. Hand-authored по существующей конвенции (БД была недоступна на момент создания) — не применялась к live-БД, применится через `prisma migrate deploy`. |
 | `20260615120000_drop_vehicle_trailer_brand_model_year` | Деструктивный `DROP COLUMN` (user-confirmed full removal — UI + API + DB). Удаляет `vehicles.brand`, `vehicles.model`, `vehicles.year`, `trailers.brand`, `trailers.model`, `trailers.year` — описательные характеристики авто/прицепа, выпиленные из продукта. БД greenfield (пустая + seed-only), поэтому plain DROP COLUMN корректен — без backfill, без down-миграции. Соседние поля (`notes`, размеры/оборудование прицепа) не затронуты. |
 | `20260617130000_drop_vehicle_gps_toggle_require_gps_device` | GPS-номер делается обязательным у каждого авто. Forward-only. Порядок: DROP CHECK `vehicle_gps_device_when_gps_on` (добавлен в `20260507191424_phase3_blocks`) → DROP COLUMN `vehicles.gps` (legacy «есть GPS» toggle) → defensive backfill `UPDATE … SET gpsMobilePhone='UNKNOWN' WHERE … IS NULL` (no-op на пустой БД; страхует stale dev-строки из старого `gps=false` пути) → `vehicles.gpsMobilePhone` SET NOT NULL. Продуктовое решение 2026-06-17: каждое авто в km-гарантийной программе GPS-tracked, поэтому boolean-toggle избыточен, а device id присутствует всегда. CHECK дропается ДО колонки `gps`, на которую он ссылается; Zod (`gpsMobilePhone` required, non-empty) не даёт плейсхолдеру пережить round-trip через API. |
+| `20260707130000_guarantee_watchdog` | Guarantee Watchdog (план 2026-07-07). Аддитивная миграция. Новые enum-ы `GuaranteeEpisodeState {warning, violated, resolved}`, `GuaranteeAnchorSource {zjechal, agreement}`, `GuaranteeResolveReason {wyjazd, agreement_off, vehicle_inactive}`. Новая таблица **`guarantee_idle_episodes`** — журнал «плохих» гарантийных циклов машины (FK на `vehicles` и `carriers` `ON DELETE RESTRICT`; nullable FK `resolvedByDelegationId` на `delegations` `ON DELETE SET NULL`; **без `deletedAt`** — append-only журнал, soft-delete-extension его игнорирует; индексы `(carrierId, state)`, `(vehicleId, state)`). Hand-added SQL: **partial unique** `GuaranteeIdleEpisode_open_vehicle_key` `ON ("vehicleId") WHERE "state" <> 'resolved'` — не выразимо в Prisma DSL, держит инвариант «≤1 открытый эпизод на машину». Новая колонка **`vehicles.agreementSince DATE`** (дата включения гарантии; API ведёт её на toggle agreement). **Бэкфилл:** `UPDATE vehicles SET agreementSince = CURRENT_DATE WHERE agreement = true AND agreementSince IS NULL` — rollout-grace: уже-гарантийные машины получают свежее 10-раб.-дневное окно с дня деплоя. Hand-authored (БД недоступна для интерактивного `migrate dev` в среде агента) — SQL идентичен `migrate diff` (проверено `migrate status` = «up to date»), применена через `prisma migrate deploy`. |
 
 Production deploy: `prisma migrate deploy` в CI/CD пайплайне (без `--create-only`).
 
