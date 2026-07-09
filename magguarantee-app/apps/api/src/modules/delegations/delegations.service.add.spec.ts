@@ -56,10 +56,7 @@ function readyState(): CarrierReadiness {
     hasVehicle: true,
     hasTrailer: true,
     hasDriver: true,
-    hasAdrVehicle: false,
-    hasAdrDoc: false,
     incompleteFleet: false,
-    adrDocMissing: false,
     ready: true,
   };
 }

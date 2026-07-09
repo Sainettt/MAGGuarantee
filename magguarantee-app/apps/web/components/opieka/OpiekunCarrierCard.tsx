@@ -12,10 +12,7 @@
 import { TriangleAlert } from 'lucide-react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import type {
-  CarrierAttentionReason,
-  OpiekunCarrierStats,
-} from '@magguarantee/shared';
+import type { OpiekunCarrierStats } from '@magguarantee/shared';
 
 import { Badge } from '@/components/ui/Badge';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -67,13 +64,13 @@ export default function OpiekunCarrierCard({
   const displayName = carrier.firma ?? carrier.nazwa ?? carrier.login;
   const isInactive = carrier.aktywny === false;
 
-  // "Requires attention" marker — generic warning that covers an incomplete
-  // fleet AND/OR a missing ADR document. The opiekun (unlike the carrier) does
-  // see the breakdown, surfaced as the tooltip/`title` text.
+  // "Requires attention" marker — the sole reason today is an incomplete fleet
+  // (missing vehicle / trailer / driver). The opiekun (unlike the carrier) sees
+  // the breakdown, surfaced as the tooltip/`title` text.
   const reasons = carrier.attentionReasons ?? [];
   const needsAttention = reasons.length > 0;
   const reasonText = reasons
-    .map((r: CarrierAttentionReason) => t(`attention.reason.${r}`))
+    .map((r) => t(`attention.reason.${r}`))
     .join(' · ');
 
   return (

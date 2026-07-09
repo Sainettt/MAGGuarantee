@@ -295,17 +295,20 @@ export type CarrierWithTemporaryPasswordDto = z.infer<
  *  - `insurance` — OCP insurance policy scan
  *  - `license`   — transport license scan
  *  - `kreptd`    — KREPTD extract
- *  - `adr`       — mandatory ADR document; at most ONE per carrier (the
- *                  single-doc rule is enforced at the service layer on upload)
  *  - `other`     — catch-all for any other document
  *
- * Order mirrors the DB enum `{insurance, license, kreptd, adr, other}`.
+ * Order mirrors the DB enum `{insurance, license, kreptd, other}`.
+ *
+ * The carrier-level `adr` category was REMOVED (2026-07): the carrier-level ADR
+ * document is no longer a concept. ADR now lives per-vehicle (flag + classes,
+ * no file) and per-driver (świadectwo scan, a `DriverAttachment`). Every
+ * remaining carrier category may hold MULTIPLE files (there is no single-doc
+ * category anymore).
  */
 export const CarrierAttachmentCategorySchema = z.enum([
   'insurance',
   'license',
   'kreptd',
-  'adr',
   'other',
 ]);
 export type CarrierAttachmentCategory = z.infer<
@@ -342,3 +345,134 @@ export const CarrierAttachmentDtoSchema = z.object({
   createdAt: IsoDateTimeSchema,
 });
 export type CarrierAttachmentDto = z.infer<typeof CarrierAttachmentDtoSchema>;
+
+// ─── Documents overview (opiekun "Dokumenty" tab) ─────────
+//
+// READ-ONLY aggregate for `GET /carriers/:id/documents/overview` — a single
+// drill-down that gathers EVERY document tied to one carrier, grouped by the
+// entity that owns it, so the opiekun "Dokumenty" tab can render them without
+// N calls per vehicle/driver/trailer. Per docs/13-api-design.md#carriers.
+//
+// Downloads are NOT re-invented here: each grouped entry carries the ids the
+// existing per-entity download route needs. The web layer streams bytes via:
+//   - carrierDocs  → GET /carriers/:carrierId/attachments/:attachmentId/download
+//   - vehicleDocs  → GET /vehicles/:vehicleId/attachments/:attachmentId/download
+//   - trailerDocs  → GET /trailers/:trailerId/attachments/:attachmentId/download
+//   - driverDocs   → GET /drivers/:driverId/attachments/:attachmentId/download
+// `vehicleAdr` carries NO file (ADR per-vehicle is a flag + classes only).
+
+/**
+ * Vehicle-document categories that surface as FILES in the overview — mirrors
+ * the DB `enum VehicleAttachmentCategory` (see `vehicles.ts`) 1:1, in the same
+ * order. `agreement` (porozumienie scan) IS included: for the opiekun it is core
+ * guarantee paperwork, and the "Dokumenty" tab gathers EVERY document type
+ * (docs/14-design-system.md §5R lists "Porozumienie" as a visible type).
+ */
+export const CarrierDocVehicleCategorySchema = z.enum([
+  'contract',
+  'gps',
+  'agreement',
+  'cabotage_de',
+  'cabotage_de_insurance',
+]);
+export type CarrierDocVehicleCategory = z.infer<
+  typeof CarrierDocVehicleCategorySchema
+>;
+
+/** Lean vehicle identity carried on each vehicle-document entry. */
+export const CarrierDocVehicleRefSchema = z.object({
+  id: UuidSchema,
+  /** `Vehicle.plateNumber` — the registration plate (label on the tab). */
+  registration: z.string(),
+  /** Internal side/board number (`Vehicle.sideNumber`); null when unset. */
+  sideNumber: z.string().nullable(),
+});
+export type CarrierDocVehicleRef = z.infer<typeof CarrierDocVehicleRefSchema>;
+
+/** One vehicle-attachment file entry (download via the vehicles route). */
+export const CarrierDocVehicleEntrySchema = z.object({
+  attachmentId: UuidSchema,
+  fileName: z.string(),
+  size: z.number().int().nonnegative(),
+  createdAt: IsoDateTimeSchema,
+  vehicle: CarrierDocVehicleRefSchema,
+});
+export type CarrierDocVehicleEntry = z.infer<
+  typeof CarrierDocVehicleEntrySchema
+>;
+
+/**
+ * Per-category map of vehicle-document files. Every key is always present
+ * (empty array when the carrier has no file in that category) so the UI can
+ * render a stable set of sections.
+ */
+export const CarrierDocVehicleDocsSchema = z.object({
+  contract: z.array(CarrierDocVehicleEntrySchema),
+  gps: z.array(CarrierDocVehicleEntrySchema),
+  agreement: z.array(CarrierDocVehicleEntrySchema),
+  cabotage_de: z.array(CarrierDocVehicleEntrySchema),
+  cabotage_de_insurance: z.array(CarrierDocVehicleEntrySchema),
+});
+export type CarrierDocVehicleDocs = z.infer<typeof CarrierDocVehicleDocsSchema>;
+
+/**
+ * Vehicles flagged `adr:true` — NO file (per-vehicle ADR is a flag + classes
+ * only). Surfaced so the opiekun sees which trucks declare ADR and with which
+ * classes.
+ */
+export const CarrierDocVehicleAdrSchema = z.object({
+  vehicleId: UuidSchema,
+  plate: z.string(),
+  adrClasses: z.array(z.string()),
+});
+export type CarrierDocVehicleAdr = z.infer<typeof CarrierDocVehicleAdrSchema>;
+
+/** One trailer XL-certificate entry (download via the trailers route). */
+export const CarrierDocTrailerEntrySchema = z.object({
+  attachmentId: UuidSchema,
+  fileName: z.string(),
+  size: z.number().int().nonnegative(),
+  createdAt: IsoDateTimeSchema,
+  trailerId: UuidSchema,
+  /** `Trailer.plateNumber` — the trailer registration plate. */
+  registration: z.string(),
+});
+export type CarrierDocTrailerEntry = z.infer<
+  typeof CarrierDocTrailerEntrySchema
+>;
+
+/** One driver ADR-certificate (świadectwo) entry (download via drivers route). */
+export const CarrierDocDriverEntrySchema = z.object({
+  attachmentId: UuidSchema,
+  fileName: z.string(),
+  size: z.number().int().nonnegative(),
+  createdAt: IsoDateTimeSchema,
+  driverId: UuidSchema,
+  /** Driver full name (`firstName + ' ' + lastName`). */
+  fullName: z.string(),
+});
+export type CarrierDocDriverEntry = z.infer<typeof CarrierDocDriverEntrySchema>;
+
+/**
+ * Response of `GET /carriers/:id/documents/overview`. Groups EVERY live
+ * (soft-delete `deletedAt:null`) document tied to the carrier, by owning
+ * entity, for the opiekun "Dokumenty" tab. Read-only — the web layer downloads
+ * bytes via the EXISTING per-entity download routes using the ids each entry
+ * carries (see the section header above).
+ */
+export const CarrierDocumentsOverviewDtoSchema = z.object({
+  carrierId: UuidSchema,
+  /** The carrier's own company documents (insurance/license/kreptd/other). */
+  carrierDocs: z.array(CarrierAttachmentDtoSchema),
+  /** Vehicle files grouped per category (contract/gps/agreement/cabotage_de/…). */
+  vehicleDocs: CarrierDocVehicleDocsSchema,
+  /** Vehicles declaring ADR (flag + classes) — NO files. */
+  vehicleAdr: z.array(CarrierDocVehicleAdrSchema),
+  /** Trailer XL-certificate files (cert_xl). */
+  trailerDocs: z.array(CarrierDocTrailerEntrySchema),
+  /** Driver ADR-certificate (świadectwo) files. */
+  driverDocs: z.array(CarrierDocDriverEntrySchema),
+});
+export type CarrierDocumentsOverviewDto = z.infer<
+  typeof CarrierDocumentsOverviewDtoSchema
+>;

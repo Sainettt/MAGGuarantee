@@ -569,8 +569,7 @@
     },
     "attachmentOpen": "Open",
     "attachmentOpenError": "Could not open the file. Please try again.",
-    "attachmentPopupBlocked": "Could not open a new tab. Please allow pop-ups for this site and try again.",
-    "adrDocReminderToast": "This vehicle is ADR — remember to add the carrier's ADR document in the Documents tab."
+    "attachmentPopupBlocked": "Could not open a new tab. Please allow pop-ups for this site and try again."
   },
   "drivers": {
     "title": "Drivers",
@@ -1342,8 +1341,7 @@
     "attention": {
       "title": "Requires attention",
       "reason": {
-        "incompleteFleet": "Incomplete fleet (missing vehicle / trailer / driver)",
-        "adrDocMissing": "Missing ADR document"
+        "incompleteFleet": "Incomplete fleet (missing vehicle / trailer / driver)"
       }
     },
     "detail": {
@@ -1401,11 +1399,6 @@
       }
     },
     "documents": {
-      "emptyTitle": "No documents",
-      "emptyMessage": "This carrier has no documents uploaded yet.",
-      "uploadHeading": "Upload document",
-      "categoryLabel": "Category",
-      "fileLabel": "File",
       "uploadButton": "Upload",
       "uploadedToast": "Document uploaded",
       "downloadError": "Could not download the file. Please try again.",
@@ -1413,23 +1406,57 @@
       "deleteTitle": "Delete document?",
       "deleteBody": "Are you sure you want to delete \"{fileName}\"? This action cannot be undone.",
       "deletedToast": "Document deleted",
-      "adrMissingTitle": "Missing ADR document",
-      "adrMissingMessage": "This carrier operates ADR vehicles but has no ADR document on file yet. Upload the ADR document to complete the documentation.",
-      "adrExistsHint": "An ADR document already exists — delete the existing one to upload a new one",
-      "adrExistsToast": "An ADR document already exists for this carrier",
       "category": {
-        "adr": "ADR",
         "insurance": "Insurance/OCP",
         "license": "License",
         "kreptd": "KREPTD",
         "other": "Other"
       },
+      "group": {
+        "company": "Company documents",
+        "vehicles": "Vehicle documents",
+        "adrVehicles": "Vehicle ADR",
+        "trailers": "Trailer documents",
+        "drivers": "Driver documents"
+      },
+      "type": {
+        "contract": "Contract",
+        "gps": "GPS agreement",
+        "agreement": "Guarantee agreement",
+        "cabotage_de": "Cabotage permit DE",
+        "cabotage_de_insurance": "Cabotage insurance DE",
+        "cert_xl": "XL certificate",
+        "driverAdr": "Driver ADR certificate"
+      },
+      "count": {
+        "files": "{count, plural, one {# file} other {# files}}",
+        "vehicles": "{count, plural, one {# vehicle} other {# vehicles}}",
+        "trailers": "{count, plural, one {# trailer} other {# trailers}}",
+        "drivers": "{count, plural, one {# driver} other {# drivers}}",
+        "summary": "{files} · {entities}",
+        "noFiles": "No files",
+        "adrVehiclesCount": "{count, plural, one {# vehicle with ADR} other {# vehicles with ADR}}",
+        "noAdrVehicles": "No ADR vehicles"
+      },
       "columns": {
         "fileName": "File name",
-        "category": "Category",
         "size": "Size",
         "uploadedAt": "Uploaded at",
-        "actions": "Actions"
+        "actions": "Actions",
+        "entityVehicle": "Vehicle",
+        "entityTrailer": "Trailer",
+        "entityDriver": "Driver"
+      },
+      "sheet": {
+        "manageInVehicle": "Managed in the vehicle window.",
+        "manageInTrailer": "Managed in the trailer window.",
+        "manageInDriver": "Managed in the driver window.",
+        "uploadHint": "Upload a document for this category.",
+        "openAria": "Open list: {type}"
+      },
+      "empty": {
+        "title": "No documents",
+        "message": "No documents of this type have been uploaded yet."
       }
     }
   },

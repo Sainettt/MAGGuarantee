@@ -116,10 +116,10 @@ export class DelegationsService {
     const carrier = await this._requireCarrierProfile(user);
     // Hard readiness gate — BEFORE any persistence. A carrier may only
     // register a delegation when their fleet is complete (active vehicle +
-    // trailer + driver) and, if they operate any ADR vehicle, an ADR document
-    // is on file. The carrier gets a GENERIC, machine-readable 422 — no
+    // trailer + driver). The carrier gets a GENERIC, machine-readable 422 — no
     // breakdown of which item is missing (the detail lives only on the
-    // opiekun side per the product decision). See `CarrierReadinessService`.
+    // opiekun side per the product decision). ADR no longer gates readiness
+    // (carrier-level ADR concept removed 2026-07). See `CarrierReadinessService`.
     await this._assertCarrierReady(carrier.id);
 
     const vehicle = await this._requireOwnedVehicle(carrier.id, dto.vehicleId);

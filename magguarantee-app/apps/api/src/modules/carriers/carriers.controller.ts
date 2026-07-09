@@ -19,6 +19,7 @@ import {
   UpdateCarrierSchema,
   UuidSchema,
   type CarrierDto,
+  type CarrierDocumentsOverviewDto,
   type CarrierFilters,
   type CarrierWithTemporaryPasswordDto,
   type CreateCarrierDto,
@@ -38,6 +39,7 @@ import {
 } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { CarrierDocumentsService } from './carrier-documents.service';
 import { CarriersService } from './carriers.service';
 
 /**
@@ -57,7 +59,10 @@ import { CarriersService } from './carriers.service';
 @Controller('carriers')
 @UseGuards(RolesGuard, OpiekunOwnershipGuard)
 export class CarriersController {
-  constructor(private readonly carriers: CarriersService) {}
+  constructor(
+    private readonly carriers: CarriersService,
+    private readonly documents: CarrierDocumentsService,
+  ) {}
 
   @Get()
   @Roles('admin', 'opiekun')
@@ -75,6 +80,24 @@ export class CarriersController {
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
   ): Promise<CarrierDto> {
     return this.carriers.getById(id);
+  }
+
+  /**
+   * READ-ONLY documents overview for the opiekun "Dokumenty" tab — every live
+   * document tied to the carrier (company docs + per-vehicle / per-trailer /
+   * per-driver files + ADR-flagged vehicles), grouped for the UI. Downloads
+   * reuse the EXISTING per-entity download routes (the DTO carries the ids).
+   * Same scoping as the carrier detail / attachments endpoints: admin sees all,
+   * opiekun only their own carriers (`OpiekunOwnershipGuard`). Per
+   * docs/13-api-design.md#carriers.
+   */
+  @Get(':id/documents/overview')
+  @Roles('admin', 'opiekun')
+  @OpiekunOwns('id', 'param', 'carrierId')
+  async documentsOverview(
+    @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
+  ): Promise<CarrierDocumentsOverviewDto> {
+    return this.documents.overview(id);
   }
 
   @Post()

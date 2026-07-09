@@ -242,7 +242,6 @@ export function VehicleFormDialog({
       draft.clear();
       form.reset(getDefaults());
       setFileBuckets(EMPTY_BUCKETS);
-      if (created.adr) toast.info(t('adrDocReminderToast'));
       if (isWizard) {
         onCompleted?.(created);
         return;

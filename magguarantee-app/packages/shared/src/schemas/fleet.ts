@@ -219,18 +219,18 @@ export type OpiekunCarrierVehicleStats = z.infer<
  *  - `incompleteFleet` — the carrier is missing at least one of an active
  *    vehicle / trailer / driver. The carrier cannot register a delegation
  *    until the fleet is complete.
- *  - `adrDocMissing`   — the carrier has at least one active ADR vehicle but
- *    no active ADR document on file. The carrier cannot register a delegation
- *    until the ADR document is uploaded.
+ *
+ * The `adrDocMissing` reason was REMOVED (2026-07): the carrier-level ADR
+ * document is no longer a concept, so readiness no longer depends on ADR at
+ * all — `ready` is now simply "the fleet is complete". `incompleteFleet` is
+ * therefore the only attention reason the opiekun can see. The enum is kept
+ * (rather than collapsing to a literal) to stay extensible.
  *
  * Unlike the carrier-facing eligibility flag (`canCreateDelegation`), the
  * opiekun DOES see the breakdown so they can chase the missing items. An
  * empty array means nothing requires attention (the carrier is ready).
  */
-export const CarrierAttentionReasonSchema = z.enum([
-  'incompleteFleet',
-  'adrDocMissing',
-]);
+export const CarrierAttentionReasonSchema = z.enum(['incompleteFleet']);
 export type CarrierAttentionReason = z.infer<
   typeof CarrierAttentionReasonSchema
 >;

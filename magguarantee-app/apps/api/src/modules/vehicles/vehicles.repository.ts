@@ -303,46 +303,6 @@ export class VehiclesRepository {
     }));
   }
 
-  /**
-   * Counts a single carrier's active, non-soft-deleted vehicles flagged
-   * `adr=true`. Used by the carrier-readiness check (`adrDocMissing` rule):
-   * if a carrier operates any ADR vehicle they must also hold an active ADR
-   * document. A focused `count` keeps the existence check cheap — mirrors the
-   * style of `CarrierAttachmentsRepository.countActiveByCategory`. The
-   * soft-delete extension constrains the query to live rows, and we add the
-   * explicit `active: true` predicate so deactivated vehicles never count.
-   */
-  async countActiveAdr(carrierId: string): Promise<number> {
-    return this.prisma.tx.vehicle.count({
-      where: { carrierId, adr: true, active: true },
-    });
-  }
-
-  /**
-   * Batched variant of `countActiveAdr` for a SET of carriers — one
-   * `groupBy` round-trip instead of N per-carrier counts. Returns a map of
-   * `carrierId → active-ADR-vehicle count`; carriers with zero ADR vehicles
-   * are simply absent from the map (callers treat "missing key" as 0). Used
-   * by the opiekun fleet aggregate so building `attentionReasons` for the
-   * whole carrier list stays O(1) queries, not O(n). Short-circuits on an
-   * empty id set (Postgres rejects `IN ()`).
-   */
-  async countActiveAdrByCarriers(
-    carrierIds: string[],
-  ): Promise<Map<string, number>> {
-    const out = new Map<string, number>();
-    if (carrierIds.length === 0) return out;
-    const groups = await this.prisma.tx.vehicle.groupBy({
-      by: ['carrierId'],
-      where: { carrierId: { in: carrierIds }, adr: true, active: true },
-      _count: { carrierId: true },
-    });
-    for (const g of groups) {
-      out.set(g.carrierId, g._count.carrierId);
-    }
-    return out;
-  }
-
   async create(data: {
     carrierId: string;
     plateNumber: string;

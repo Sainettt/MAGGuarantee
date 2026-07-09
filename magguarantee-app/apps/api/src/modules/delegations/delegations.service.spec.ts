@@ -49,24 +49,16 @@ function readyState(overrides: Partial<CarrierReadiness> = {}): CarrierReadiness
     hasVehicle: true,
     hasTrailer: true,
     hasDriver: true,
-    hasAdrVehicle: false,
-    hasAdrDoc: false,
     incompleteFleet: false,
-    adrDocMissing: false,
     ready: true,
     ...overrides,
   };
 }
 
-function notReadyState(reason: 'fleet' | 'adr'): CarrierReadiness {
-  if (reason === 'fleet') {
-    return readyState({ hasTrailer: false, incompleteFleet: true, ready: false });
-  }
-  return readyState({
-    hasAdrVehicle: true,
-    adrDocMissing: true,
-    ready: false,
-  });
+// Readiness now derives ONLY from the active fleet (ADR removed 2026-07), so
+// the sole "not ready" cause is an incomplete fleet.
+function notReadyState(): CarrierReadiness {
+  return readyState({ hasTrailer: false, incompleteFleet: true, ready: false });
 }
 
 /**
@@ -173,27 +165,12 @@ async function expectCarrierNotReady(promise: Promise<unknown>) {
 
 describe('DelegationsService.add — carrier-readiness hard block', () => {
   it('(a) incomplete fleet → 422 CARRIER_NOT_READY, no row created', async () => {
-    const { service, createSpy } = makeService(notReadyState('fleet'));
+    const { service, createSpy } = makeService(notReadyState());
     await expectCarrierNotReady(service.add(authCarrier(), submitDto()));
     expect(createSpy).not.toHaveBeenCalled();
   });
 
-  it('(b) ADR vehicle without ADR doc → 422 CARRIER_NOT_READY, no row created', async () => {
-    const { service, createSpy } = makeService(notReadyState('adr'));
-    await expectCarrierNotReady(service.add(authCarrier(), submitDto()));
-    expect(createSpy).not.toHaveBeenCalled();
-  });
-
-  it('(c) full fleet + ADR vehicle + ADR doc → succeeds', async () => {
-    const { service, createSpy } = makeService(
-      readyState({ hasAdrVehicle: true, hasAdrDoc: true }),
-    );
-    const out = await service.add(authCarrier(), submitDto());
-    expect(out.id).toBe('deleg-1');
-    expect(createSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it('(d) full fleet + no ADR vehicle → succeeds', async () => {
+  it('(b) full fleet → succeeds', async () => {
     const { service, createSpy } = makeService(readyState());
     const out = await service.add(authCarrier(), submitDto());
     expect(out.id).toBe('deleg-1');
@@ -201,16 +178,14 @@ describe('DelegationsService.add — carrier-readiness hard block', () => {
   });
 
   it('readiness is checked BEFORE any persistence (create never runs on 422)', async () => {
-    const { service, createSpy, readinessSvc } = makeService(
-      notReadyState('fleet'),
-    );
+    const { service, createSpy, readinessSvc } = makeService(notReadyState());
     await expectCarrierNotReady(service.add(authCarrier(), submitDto()));
     expect(readinessSvc.forCarrier).toHaveBeenCalledWith(CARRIER_ID);
     expect(createSpy).not.toHaveBeenCalled();
   });
 
   it('the 422 detail does not leak which item is missing (generic message)', async () => {
-    const { service } = makeService(notReadyState('adr'));
+    const { service } = makeService(notReadyState());
     try {
       await service.add(authCarrier(), submitDto());
       throw new Error('expected to throw');
@@ -219,7 +194,6 @@ describe('DelegationsService.add — carrier-readiness hard block', () => {
         message?: string;
         violations?: string[];
       };
-      expect(body.message).not.toMatch(/adr/i);
       expect(body.message).not.toMatch(/naczep|kierowc|pojazd/i);
       // No per-item violations array — generic only.
       expect(body.violations).toBeUndefined();
@@ -236,7 +210,7 @@ describe('DelegationsService.eligibility — carrier portal flag', () => {
   });
 
   it('canCreate=false when not ready (no breakdown exposed)', async () => {
-    const { service } = makeService(notReadyState('adr'));
+    const { service } = makeService(notReadyState());
     const out = await service.eligibility(authCarrier());
     expect(out).toEqual({ canCreate: false });
     // The eligibility response carries ONLY the boolean — no reasons.

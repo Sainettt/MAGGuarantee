@@ -117,15 +117,6 @@ export default function OpiekaCarrierDetailPage() {
 
   const carrier: CarrierDto | undefined = carrierQ.data;
 
-  // The ADR-document banner in the Documents tab is conditional: it only
-  // applies when the carrier actually operates at least one ADR vehicle.
-  // We already fetch the carrier's vehicles for the "Auta" tab, so derive the
-  // flag here and pass it down rather than refetching inside the tab.
-  const hasAdrVehicle = useMemo(
-    () => (vehiclesQ.data?.items ?? []).some((v) => v.adr),
-    [vehiclesQ.data],
-  );
-
   // Read-only detail modals — one selected target per sub-table. We derive the
   // `open` flag from a non-null target (a single source of truth) so closing
   // the modal both hides it and clears the selection. `onEdit` is intentionally
@@ -243,10 +234,7 @@ export default function OpiekaCarrierDetailPage() {
 
           {carrierId && (
             <TabsContent value="documents">
-              <CarrierDocumentsTab
-                carrierId={carrierId}
-                hasAdrVehicle={hasAdrVehicle}
-              />
+              <CarrierDocumentsTab carrierId={carrierId} />
             </TabsContent>
           )}
 

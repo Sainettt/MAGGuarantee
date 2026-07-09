@@ -1,7 +1,6 @@
 import { ForbiddenException } from '@nestjs/common';
 
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
-import { CarrierAttachmentsRepository } from '../carriers/carrier-attachments.repository';
 import { CarrierReadinessService } from '../carriers/carrier-readiness.service';
 import { CarriersRepository } from '../carriers/carriers.repository';
 import { DriversRepository, type DriverRow } from '../drivers/drivers.repository';
@@ -209,7 +208,6 @@ function newSvc(opts: {
     stubDriversRepo(opts.drivers ?? [], opts.capturedDrivers),
     stubTrailersRepo(opts.trailers ?? []),
     noop<CarrierReadinessService>(),
-    noop<CarrierAttachmentsRepository>(),
   );
 }
 

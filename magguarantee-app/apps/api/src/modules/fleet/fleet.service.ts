@@ -16,7 +16,6 @@ import type {
 } from '@magguarantee/shared';
 
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
-import { CarrierAttachmentsRepository } from '../carriers/carrier-attachments.repository';
 import {
   CarrierReadinessService,
   readinessToAttentionReasons,
@@ -59,7 +58,6 @@ export class FleetService {
     private readonly drivers: DriversRepository,
     private readonly trailers: TrailersRepository,
     private readonly readiness: CarrierReadinessService,
-    private readonly carrierAttachments: CarrierAttachmentsRepository,
   ) {}
 
   async getMyFleet(
@@ -111,17 +109,17 @@ export class FleetService {
    *  - other    → 403 (defence in depth; `@Roles` on the controller is the
    *               primary gate).
    *
-   * Query budget — O(1), not O(n): the carrier aggregate is one round-trip,
-   * the ADR-vehicle counts are one batched `groupBy`, and the ADR-doc counts
-   * are one batched `groupBy`. No per-carrier reads. The active vehicle /
-   * trailer / driver counts come for free on the aggregate row (`_count`).
+   * Query budget — O(1), not O(n): the carrier aggregate is one round-trip and
+   * the active vehicle / trailer / driver counts come for free on the aggregate
+   * row (`_count`). Readiness is a PURE derivation of those counts (ADR queries
+   * removed with the carrier-level ADR concept, 2026-07) — no extra reads.
    */
   async getOpiekunFleet(user: AuthUser): Promise<OpiekunFleetResponse> {
     this._assertOpiekunOrAdmin(user);
     const rows = await this.carriers.listForOpiekunAggregate(
       user.role === 'opiekun' ? { opiekunId: user.sub } : {},
     );
-    const readinessById = await this._computeReadinessBatch(rows);
+    const readinessById = this._computeReadinessBatch(rows);
     const now = Date.now();
     const carriers = rows.map((r) =>
       this._mapCarrierStats(r, now, readinessById.get(r.id)),
@@ -133,24 +131,15 @@ export class FleetService {
   }
 
   /**
-   * Builds readiness for the whole opiekun-scoped carrier set with TWO
-   * batched queries (ADR vehicles + ADR docs, each `groupBy` carrierId) — no
-   * per-carrier round trips. The active vehicle/trailer/driver counts are
-   * already on the aggregate rows (`_count`), so we just zip them with the
-   * two ADR maps and hand the normalised inputs to the pure
-   * `CarrierReadinessService.forCarriers`.
+   * Builds readiness for the whole opiekun-scoped carrier set — PURE, no DB
+   * access. The active vehicle/trailer/driver counts are already on the
+   * aggregate rows (`_count`), so we just normalise them and hand them to
+   * `CarrierReadinessService.forCarriers`. Readiness no longer depends on ADR
+   * (carrier-level ADR concept removed 2026-07).
    */
-  private async _computeReadinessBatch(
+  private _computeReadinessBatch(
     rows: OpiekunAggregateCarrierRow[],
-  ): Promise<Map<string, CarrierReadiness>> {
-    const carrierIds = rows.map((r) => r.id);
-    const [adrVehicleCounts, adrDocCounts] = await Promise.all([
-      this.vehicles.countActiveAdrByCarriers(carrierIds),
-      this.carrierAttachments.countActiveByCategoryForCarriers(
-        carrierIds,
-        'adr',
-      ),
-    ]);
+  ): Map<string, CarrierReadiness> {
     const inputsById = new Map(
       rows.map((r) => [
         r.id,
@@ -158,8 +147,6 @@ export class FleetService {
           activeVehicles: r.counts.vehicles,
           activeTrailers: r.counts.trailers,
           activeDrivers: r.counts.drivers,
-          activeAdrVehicles: adrVehicleCounts.get(r.id) ?? 0,
-          activeAdrDocs: adrDocCounts.get(r.id) ?? 0,
         },
       ]),
     );

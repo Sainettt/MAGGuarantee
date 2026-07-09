@@ -569,8 +569,7 @@
     },
     "attachmentOpen": "Otwórz",
     "attachmentOpenError": "Nie udało się otworzyć pliku. Spróbuj ponownie.",
-    "attachmentPopupBlocked": "Nie można otworzyć nowej karty. Zezwól na wyskakujące okienka dla tej strony i spróbuj ponownie.",
-    "adrDocReminderToast": "Pojazd ma ADR — pamiętaj, aby dodać dokument ADR przewoźnika w zakładce Dokumenty."
+    "attachmentPopupBlocked": "Nie można otworzyć nowej karty. Zezwól na wyskakujące okienka dla tej strony i spróbuj ponownie."
   },
   "drivers": {
     "title": "Kierowcy",
@@ -1342,8 +1341,7 @@
     "attention": {
       "title": "Wymaga uwagi",
       "reason": {
-        "incompleteFleet": "Niekompletna flota (brak pojazdu / naczepy / kierowcy)",
-        "adrDocMissing": "Brak dokumentu ADR"
+        "incompleteFleet": "Niekompletna flota (brak pojazdu / naczepy / kierowcy)"
       }
     },
     "detail": {
@@ -1401,11 +1399,6 @@
       }
     },
     "documents": {
-      "emptyTitle": "Brak dokumentów",
-      "emptyMessage": "Ten przewoźnik nie ma jeszcze przesłanych dokumentów.",
-      "uploadHeading": "Prześlij dokument",
-      "categoryLabel": "Kategoria",
-      "fileLabel": "Plik",
       "uploadButton": "Prześlij",
       "uploadedToast": "Dokument przesłany",
       "downloadError": "Nie udało się pobrać pliku. Spróbuj ponownie.",
@@ -1413,23 +1406,57 @@
       "deleteTitle": "Usunąć dokument?",
       "deleteBody": "Czy na pewno chcesz usunąć „{fileName}”? Tej operacji nie można cofnąć.",
       "deletedToast": "Dokument usunięty",
-      "adrMissingTitle": "Brak dokumentu ADR",
-      "adrMissingMessage": "Ten przewoźnik posiada pojazdy ADR, ale nie ma jeszcze dokumentu ADR. Prześlij dokument ADR, aby uzupełnić dokumentację.",
-      "adrExistsHint": "Dokument ADR już istnieje — usuń istniejący, aby wgrać nowy",
-      "adrExistsToast": "Dokument ADR już istnieje dla tego przewoźnika",
       "category": {
-        "adr": "ADR",
         "insurance": "Ubezpieczenie/OCP",
         "license": "Licencja",
         "kreptd": "KREPTD",
         "other": "Inne"
       },
+      "group": {
+        "company": "Dokumenty firmowe",
+        "vehicles": "Dokumenty pojazdów",
+        "adrVehicles": "ADR pojazdów",
+        "trailers": "Dokumenty naczep",
+        "drivers": "Dokumenty kierowców"
+      },
+      "type": {
+        "contract": "Umowa",
+        "gps": "Umowa GPS",
+        "agreement": "Porozumienie",
+        "cabotage_de": "Zezwolenie kabotażowe DE",
+        "cabotage_de_insurance": "Ubezpieczenie kabotażowe DE",
+        "cert_xl": "Certyfikat XL",
+        "driverAdr": "Świadectwo ADR kierowcy"
+      },
+      "count": {
+        "files": "{count, plural, one {# plik} few {# pliki} many {# plików} other {# pliku}}",
+        "vehicles": "{count, plural, one {# pojazd} few {# pojazdy} many {# pojazdów} other {# pojazdu}}",
+        "trailers": "{count, plural, one {# naczepa} few {# naczepy} many {# naczep} other {# naczepy}}",
+        "drivers": "{count, plural, one {# kierowca} few {# kierowców} many {# kierowców} other {# kierowcy}}",
+        "summary": "{files} · {entities}",
+        "noFiles": "Brak plików",
+        "adrVehiclesCount": "{count, plural, one {# pojazd z ADR} few {# pojazdy z ADR} many {# pojazdów z ADR} other {# pojazdu z ADR}}",
+        "noAdrVehicles": "Brak pojazdów ADR"
+      },
       "columns": {
         "fileName": "Nazwa pliku",
-        "category": "Kategoria",
         "size": "Rozmiar",
         "uploadedAt": "Data przesłania",
-        "actions": "Akcje"
+        "actions": "Akcje",
+        "entityVehicle": "Pojazd",
+        "entityTrailer": "Naczepa",
+        "entityDriver": "Kierowca"
+      },
+      "sheet": {
+        "manageInVehicle": "Zarządzaj w oknie pojazdu.",
+        "manageInTrailer": "Zarządzaj w oknie naczepy.",
+        "manageInDriver": "Zarządzaj w oknie kierowcy.",
+        "uploadHint": "Prześlij dokument dla tej kategorii.",
+        "openAria": "Otwórz listę: {type}"
+      },
+      "empty": {
+        "title": "Brak dokumentów",
+        "message": "Nie przesłano jeszcze dokumentów tego typu."
       }
     }
   },

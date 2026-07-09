@@ -2,8 +2,6 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 
 import type { CarrierAttentionReason } from '@magguarantee/shared';
 
-import { VehiclesRepository } from '../vehicles/vehicles.repository';
-import { CarrierAttachmentsRepository } from './carrier-attachments.repository';
 import { CarriersRepository } from './carriers.repository';
 
 /**
@@ -15,20 +13,19 @@ import { CarriersRepository } from './carriers.repository';
  *  - `hasVehicle` / `hasTrailer` / `hasDriver` — count of active
  *    (`active:true`, `deletedAt:null`) children > 0 (the existing onboarding
  *    counts mechanism).
- *  - `hasAdrVehicle` — exists an active ADR vehicle (`adr:true`).
- *  - `hasAdrDoc` — exists an active `adr`-category carrier attachment.
  *  - `incompleteFleet` — NOT (vehicle AND trailer AND driver).
- *  - `adrDocMissing` — has an ADR vehicle but no ADR document.
- *  - `ready` — full fleet AND (no ADR vehicle OR an ADR doc on file).
+ *  - `ready` — full fleet (active vehicle AND trailer AND driver).
+ *
+ * ADR removed (2026-07): the carrier-level ADR document is no longer a
+ * concept, so readiness no longer depends on ADR at all. `ready` is now simply
+ * "the fleet is complete" — ADR lives per-vehicle (flag) and per-driver
+ * (świadectwo scan) and never gates delegation creation.
  */
 export interface CarrierReadiness {
   hasVehicle: boolean;
   hasTrailer: boolean;
   hasDriver: boolean;
-  hasAdrVehicle: boolean;
-  hasAdrDoc: boolean;
   incompleteFleet: boolean;
-  adrDocMissing: boolean;
   ready: boolean;
 }
 
@@ -42,8 +39,6 @@ export interface CarrierReadinessInputs {
   activeVehicles: number;
   activeTrailers: number;
   activeDrivers: number;
-  activeAdrVehicles: number;
-  activeAdrDocs: number;
 }
 
 /**
@@ -52,24 +47,19 @@ export interface CarrierReadinessInputs {
  * Per the wave brief the rule is defined ONCE here and reused — never
  * duplicated. Two entry points:
  *  - `forCarrier(carrierId)` — single carrier, used by the delegation hard
- *    block and the carrier eligibility flag. Three parallel queries.
+ *    block and the carrier eligibility flag. One read (the carrier row carries
+ *    the active fleet counts via `_count`).
  *  - `forCarriers(inputsById)` — derives readiness for a pre-fetched batch
  *    (used by the opiekun fleet list, which aggregates the counts itself to
  *    avoid an N+1).
  */
 @Injectable()
 export class CarrierReadinessService {
-  constructor(
-    private readonly carriers: CarriersRepository,
-    private readonly vehicles: VehiclesRepository,
-    private readonly attachments: CarrierAttachmentsRepository,
-  ) {}
+  constructor(private readonly carriers: CarriersRepository) {}
 
   /**
    * Computes readiness for one carrier. The carrier's active fleet counts come
-   * from the existing `_count` mechanism on `CarrierRow`; the ADR-vehicle and
-   * ADR-doc counts come from focused `count` queries. All three reads run in
-   * parallel.
+   * from the existing `_count` mechanism on `CarrierRow` — a single read.
    *
    * @throws NotFoundException when the carrier does not exist (or is
    *   soft-deleted) — callers that only need a boolean should catch or
@@ -77,11 +67,7 @@ export class CarrierReadinessService {
    *   is defensive.
    */
   async forCarrier(carrierId: string): Promise<CarrierReadiness> {
-    const [carrier, activeAdrVehicles, activeAdrDocs] = await Promise.all([
-      this.carriers.findById(carrierId),
-      this.vehicles.countActiveAdr(carrierId),
-      this.attachments.countActiveByCategory(carrierId, 'adr'),
-    ]);
+    const carrier = await this.carriers.findById(carrierId);
     if (!carrier) {
       throw new NotFoundException('Przewoźnik nie znaleziony');
     }
@@ -89,8 +75,6 @@ export class CarrierReadinessService {
       activeVehicles: carrier.counts.vehicles,
       activeTrailers: carrier.counts.trailers,
       activeDrivers: carrier.counts.drivers,
-      activeAdrVehicles,
-      activeAdrDocs,
     });
   }
 
@@ -122,38 +106,29 @@ export function deriveReadiness(
   const hasVehicle = inputs.activeVehicles > 0;
   const hasTrailer = inputs.activeTrailers > 0;
   const hasDriver = inputs.activeDrivers > 0;
-  const hasAdrVehicle = inputs.activeAdrVehicles > 0;
-  const hasAdrDoc = inputs.activeAdrDocs > 0;
 
   const incompleteFleet = !(hasVehicle && hasTrailer && hasDriver);
-  // An ADR document is only required when the carrier actually operates an
-  // ADR vehicle. Non-ADR fleets are never blocked on the ADR doc.
-  const adrDocMissing = hasAdrVehicle && !hasAdrDoc;
-  const ready = !incompleteFleet && !adrDocMissing;
+  const ready = !incompleteFleet;
 
   return {
     hasVehicle,
     hasTrailer,
     hasDriver,
-    hasAdrVehicle,
-    hasAdrDoc,
     incompleteFleet,
-    adrDocMissing,
     ready,
   };
 }
 
 /**
  * Maps a `CarrierReadiness` to the opiekun-facing `attentionReasons` array.
- * Empty array means the carrier is ready. Order is stable: fleet first, then
- * the ADR doc. Lives here (next to the rule) so the wire enum and the
- * derivation can't drift.
+ * Empty array means the carrier is ready. `incompleteFleet` is now the only
+ * possible reason (ADR removed 2026-07). Lives here (next to the rule) so the
+ * wire enum and the derivation can't drift.
  */
 export function readinessToAttentionReasons(
   readiness: CarrierReadiness,
 ): CarrierAttentionReason[] {
   const reasons: CarrierAttentionReason[] = [];
   if (readiness.incompleteFleet) reasons.push('incompleteFleet');
-  if (readiness.adrDocMissing) reasons.push('adrDocMissing');
   return reasons;
 }

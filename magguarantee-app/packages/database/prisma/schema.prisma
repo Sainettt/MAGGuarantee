@@ -167,14 +167,15 @@ enum TrailerAttachmentCategory {
 }
 
 // Category of a file attached to a Carrier — the carrier's own company
-// documents: OCP insurance, transport license, KREPTD extract, the mandatory
-// ADR document (a single official document listing the carrier's ADR
-// vehicles/drivers), and a catch-all `other`.
+// documents: OCP insurance, transport license, KREPTD extract, and a catch-all
+// `other`. ADR is NOT modeled at the carrier level: it lives per-vehicle
+// (Vehicle.adr / adrClasses) and per-driver (świadectwo scan via
+// DriverAttachmentCategory.adr). The former carrier-level `adr` category was a
+// legacy modeling bug and was dropped in migration 20260709120000.
 enum CarrierAttachmentCategory {
   insurance
   license
   kreptd
-  adr
   other
 }
 

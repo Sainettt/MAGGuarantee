@@ -123,10 +123,12 @@ enum VehicleAttachmentCategory { contract  cabotage_de  cabotage_fr }
 enum DriverAttachmentCategory { adr }
 
 // Category of a file attached to a Carrier — the carrier's own company
-// documents: OCP insurance, transport license, KREPTD extract, the mandatory
-// ADR document (single official doc listing the carrier's ADR vehicles/drivers),
-// plus a catch-all.
-enum CarrierAttachmentCategory { insurance  license  kreptd  adr  other }
+// documents: OCP insurance, transport license, KREPTD extract, plus a
+// catch-all. `adr` value dropped 2026-07-09 — a company-level ADR document
+// was a legacy modeling bug; ADR is per-vehicle (Vehicle.adr + adrClasses)
+// and per-driver (DriverAttachment `adr` scan). Existing `adr` rows were
+// re-categorized to `other` by the migration.
+enum CarrierAttachmentCategory { insurance  license  kreptd  other }
 
 // Guarantee Watchdog (план 2026-07-07). Lifecycle state of an idle-episode row
 // (warning = a D-3/D-1 reminder fired; violated = deadline missed; resolved =

@@ -1,6 +1,5 @@
 import { NotFoundException } from '@nestjs/common';
 
-import { CarrierAttachmentsRepository } from './carrier-attachments.repository';
 import {
   CarrierReadinessService,
   deriveReadiness,
@@ -8,9 +7,12 @@ import {
   type CarrierReadinessInputs,
 } from './carrier-readiness.service';
 import { CarriersRepository, type CarrierRow } from './carriers.repository';
-import { VehiclesRepository } from '../vehicles/vehicles.repository';
 
 // ─── Pure derivation ──────────────────────────────────────
+//
+// Readiness now derives ONLY from the active fleet counts (vehicle + trailer +
+// driver). The carrier-level ADR document was removed as a concept (2026-07),
+// so there is no ADR input and no `adrDocMissing` reason anymore.
 
 function inputs(
   overrides: Partial<CarrierReadinessInputs> = {},
@@ -19,23 +21,18 @@ function inputs(
     activeVehicles: 1,
     activeTrailers: 1,
     activeDrivers: 1,
-    activeAdrVehicles: 0,
-    activeAdrDocs: 0,
     ...overrides,
   };
 }
 
 describe('deriveReadiness (pure rule)', () => {
-  it('ready: full fleet, no ADR vehicle', () => {
+  it('ready: full fleet', () => {
     const r = deriveReadiness(inputs());
     expect(r).toMatchObject({
       hasVehicle: true,
       hasTrailer: true,
       hasDriver: true,
-      hasAdrVehicle: false,
-      hasAdrDoc: false,
       incompleteFleet: false,
-      adrDocMissing: false,
       ready: true,
     });
   });
@@ -50,32 +47,23 @@ describe('deriveReadiness (pure rule)', () => {
     expect(r.ready).toBe(false);
   });
 
-  it('ADR vehicle without ADR doc → adrDocMissing, not ready', () => {
-    const r = deriveReadiness(inputs({ activeAdrVehicles: 2, activeAdrDocs: 0 }));
-    expect(r.hasAdrVehicle).toBe(true);
-    expect(r.adrDocMissing).toBe(true);
-    expect(r.ready).toBe(false);
-  });
-
-  it('ADR vehicle WITH ADR doc → ready', () => {
-    const r = deriveReadiness(inputs({ activeAdrVehicles: 1, activeAdrDocs: 1 }));
-    expect(r.adrDocMissing).toBe(false);
-    expect(r.ready).toBe(true);
-  });
-
-  it('ADR doc without ADR vehicle → still ready (doc not required)', () => {
-    const r = deriveReadiness(inputs({ activeAdrVehicles: 0, activeAdrDocs: 1 }));
-    expect(r.adrDocMissing).toBe(false);
-    expect(r.ready).toBe(true);
-  });
-
-  it('both problems → not ready, both derived flags set', () => {
+  it('all three missing → incompleteFleet, not ready', () => {
     const r = deriveReadiness(
-      inputs({ activeTrailers: 0, activeAdrVehicles: 1, activeAdrDocs: 0 }),
+      inputs({ activeVehicles: 0, activeTrailers: 0, activeDrivers: 0 }),
     );
+    expect(r.hasVehicle).toBe(false);
+    expect(r.hasTrailer).toBe(false);
+    expect(r.hasDriver).toBe(false);
     expect(r.incompleteFleet).toBe(true);
-    expect(r.adrDocMissing).toBe(true);
     expect(r.ready).toBe(false);
+  });
+
+  it('multiple active children of each type → still ready', () => {
+    const r = deriveReadiness(
+      inputs({ activeVehicles: 5, activeTrailers: 3, activeDrivers: 4 }),
+    );
+    expect(r.ready).toBe(true);
+    expect(r.incompleteFleet).toBe(false);
   });
 });
 
@@ -83,26 +71,10 @@ describe('readinessToAttentionReasons', () => {
   it('empty when ready', () => {
     expect(readinessToAttentionReasons(deriveReadiness(inputs()))).toEqual([]);
   });
-  it('incompleteFleet only', () => {
+  it('incompleteFleet is the only reason emitted', () => {
     expect(
       readinessToAttentionReasons(deriveReadiness(inputs({ activeDrivers: 0 }))),
     ).toEqual(['incompleteFleet']);
-  });
-  it('adrDocMissing only', () => {
-    expect(
-      readinessToAttentionReasons(
-        deriveReadiness(inputs({ activeAdrVehicles: 1 })),
-      ),
-    ).toEqual(['adrDocMissing']);
-  });
-  it('stable order: fleet then ADR', () => {
-    expect(
-      readinessToAttentionReasons(
-        deriveReadiness(
-          inputs({ activeVehicles: 0, activeAdrVehicles: 1 }),
-        ),
-      ),
-    ).toEqual(['incompleteFleet', 'adrDocMissing']);
   });
 });
 
@@ -121,23 +93,15 @@ function carrierRow(
 
 function makeService(opts: {
   carrier: CarrierRow | null;
-  adrVehicles?: number;
-  adrDocs?: number;
 }): CarrierReadinessService {
   const carriers = {
     findById: jest.fn(async () => opts.carrier),
   } as unknown as CarriersRepository;
-  const vehicles = {
-    countActiveAdr: jest.fn(async () => opts.adrVehicles ?? 0),
-  } as unknown as VehiclesRepository;
-  const attachments = {
-    countActiveByCategory: jest.fn(async () => opts.adrDocs ?? 0),
-  } as unknown as CarrierAttachmentsRepository;
-  return new CarrierReadinessService(carriers, vehicles, attachments);
+  return new CarrierReadinessService(carriers);
 }
 
 describe('CarrierReadinessService.forCarrier', () => {
-  it('ready: full fleet, no ADR vehicle', async () => {
+  it('ready: full fleet', async () => {
     const svc = makeService({
       carrier: carrierRow({ vehicles: 1, trailers: 1, drivers: 1 }),
     });
@@ -153,24 +117,13 @@ describe('CarrierReadinessService.forCarrier', () => {
     expect(r.incompleteFleet).toBe(true);
   });
 
-  it('not ready: ADR vehicle without doc', async () => {
+  it('not ready: missing driver', async () => {
     const svc = makeService({
-      carrier: carrierRow({ vehicles: 1, trailers: 1, drivers: 1 }),
-      adrVehicles: 1,
-      adrDocs: 0,
+      carrier: carrierRow({ vehicles: 1, trailers: 1, drivers: 0 }),
     });
     const r = await svc.forCarrier('c-1');
     expect(r.ready).toBe(false);
-    expect(r.adrDocMissing).toBe(true);
-  });
-
-  it('ready: ADR vehicle with doc', async () => {
-    const svc = makeService({
-      carrier: carrierRow({ vehicles: 1, trailers: 1, drivers: 1 }),
-      adrVehicles: 1,
-      adrDocs: 1,
-    });
-    await expect(svc.forCarrier('c-1')).resolves.toMatchObject({ ready: true });
+    expect(r.incompleteFleet).toBe(true);
   });
 
   it('404 when the carrier does not exist', async () => {
@@ -188,11 +141,10 @@ describe('CarrierReadinessService.forCarriers (batched, pure)', () => {
       new Map<string, CarrierReadinessInputs>([
         ['ready', inputs()],
         ['incomplete', inputs({ activeVehicles: 0 })],
-        ['adr', inputs({ activeAdrVehicles: 1 })],
       ]),
     );
     expect(out.get('ready')?.ready).toBe(true);
     expect(out.get('incomplete')?.incompleteFleet).toBe(true);
-    expect(out.get('adr')?.adrDocMissing).toBe(true);
+    expect(out.get('incomplete')?.ready).toBe(false);
   });
 });

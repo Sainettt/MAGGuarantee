@@ -5954,6 +5954,291 @@ text-sub/success/danger` tokens, the §Phase 1 form-input + `<CodeBox>` recipes.
 
 ---
 
+## Phase 5-rework — Opiekun «Dokumenty» tab as a fleet-wide document-type catalog
+
+> **Scope.** Full redesign of the **«Dokumenty»** tab inside the opiekun carrier drill-down
+> (`/employee/opieka/carriers/[login]` → tab `documents`, component
+> `app/(employee)/employee/opieka/carriers/[login]/CarrierDocumentsTab.tsx`). The tab stops being a flat
+> `<DataTable>` of the carrier's **company** documents and becomes a **document-TYPE-first overview of every
+> document across the carrier's whole fleet** — company docs, per-vehicle docs, per-trailer docs, per-driver docs,
+> plus a fileless «ADR pojazdów» display row. The opiekun scans document *types*, expands one, and sees the
+> concrete files with their owning entity (plate / registration / driver name).
+>
+> **Business decisions (final, do not re-litigate):**
+> 1. The **carrier-level company ADR document is removed as a concept.** Its `adr` category disappears from the
+>    upload control **and** from the type catalog. The **«Brak dokumentu ADR» warning banner is deleted.** There
+>    are **no readiness/attention warnings anywhere in this tab** — documents are purely informational; a type with
+>    zero files shows a **neutral** empty state, never amber.
+> 2. Company documents (`CarrierAttachment`: `insurance` / `license` / `kreptd` / `other`) remain **managed here**
+>    — upload / delete / download stay in this tab, which is their only management surface.
+> 3. Vehicle / trailer / driver documents are **download-only here** (they are created & deleted in their own
+>    entity modals; this tab is a read + download aggregate).
+>
+> **HARD: no new tokens, no new primitives.** Everything composes existing catalog components: `<Tabs>`,
+> `<DataTable>`, `<Sheet side="right">`, `<Badge>`, `<EmptyState>`, `<FileUpload>`, `<Button>`, `<Dialog>`
+> (delete confirm), `bg-input` soft-chrome (§Surface-token policy), `bg-card`/`border`/`shadow-card`. Zero
+> `tailwind.config.ts` / `globals.css` changes.
+>
+> **No new API.** The parent `page.tsx` already fetches everything: `vehiclesQ` / `driversQ` / `trailersQ`
+> (each DTO carries its `attachments[]` array, and Vehicle/Driver carry `adr` + `adrClasses`), plus
+> `useCarrierAttachments(carrierId)` for company docs. The tab derives every type-row from those in-memory lists;
+> only downloads hit the network (existing per-entity `…/attachments/:id/download` endpoints).
+
+### 5R.0 — The chosen interaction: master (type catalog) → detail (Sheet)
+
+Three shapes were on the table; the decision:
+
+| Option | Verdict |
+|---|---|
+| **Accordion** (inline expand per type) | ✗ Rejected — no `<Accordion>`/`<Collapsible>` primitive exists in the catalog, and adding one violates the no-new-primitive lock. Inline-expanding a `<DataTable>` inside a card is fragile at the 5 owning-entity kinds. |
+| **Master-detail on one page** (left type list + right pane) | ✗ Rejected — the tab already lives two levels deep (page → tab); a second in-tab split-pane fights the drill-down mental model and breaks below `md`. |
+| **Type catalog (cards) → click a type → `<Sheet side="right">` with the file `<DataTable>`** | ✓ **Chosen.** Mirrors the established drill-down grammar (row/card → right-side Sheet, §6.4.x). The catalog stays scannable; the file list is a focused, dismissible surface; identical behaviour on mobile (Sheet is full-height). |
+
+**One deliberate exception to the "Sheet = edit only" lock.** §6.0 locks `<Sheet side="right">` to edit-forms and
+centered `<Dialog>` to read-only detail. **Company-doc types open a Sheet because they are a management surface**
+(upload + delete + download live there). For **consistency**, download-only types (vehicle/trailer/driver) open
+the **same** Sheet shell — the file list is identical; only the management footer differs (present for company,
+absent for the rest). This keeps one detail component, one interaction, one keyboard model. Documented deviation,
+scoped to this tab only.
+
+### 5R.1 — Layout structure (top → bottom)
+
+The tab content is a single vertical stack (`space-y-4`) inside the existing `<TabsContent value="documents">`:
+
+```
+<TabsContent value="documents">                       // unchanged wrapper (page.tsx)
+  ▸ Section: «Dokumenty firmowe»    → 4 type-cards  (insurance · license · kreptd · other)   [MANAGED]
+  ▸ Section: «Dokumenty pojazdów»   → 5 type-cards  (contract · gps · agreement · cabotage_de · cabotage_de_insurance)
+  ▸ Section: «ADR pojazdów»         → 1 display card (fileless — see 5R.4)
+  ▸ Section: «Dokumenty naczep»     → 1 type-card   (cert_xl)
+  ▸ Section: «Dokumenty kierowców»  → 1 type-card   (adr — świadectwo ADR kierowcy)
+</TabsContent>
+```
+
+- **Group headers.** Each owning-entity group gets a small section header: `text-xs font-bold uppercase
+  tracking-wider text-text-sub` + count of file-bearing types, styled exactly like the identity `<dt>` labels in
+  the page header (visual consistency). Order is fixed as above.
+- **Type-card grid.** Within a group, type-cards sit in a responsive grid:
+  `grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3`. This survives the narrow content column of the drill-down
+  and collapses to one column on mobile.
+
+### 5R.2 — `<DocumentTypeCard>` (the catalog tile — new component, composed only)
+
+The clickable master tile. **Not** a new primitive — a composition of `bg-card` + `border` + `<Badge>`, reusing
+the exact hover/focus recipe of `<OpiekunCarrierCard>` so the two card families feel identical.
+
+| Slot | Content / Tailwind |
+|---|---|
+| **Container** | `<button type="button">` (or `<div role="button" tabIndex=0>`) — `group flex items-center gap-3 p-4 bg-card border border-border rounded-lg text-left w-full transition-[background-color,border-color,box-shadow] duration-150 hover:shadow-card hover:border-brand/40 hover:bg-brand-50/30 dark:hover:bg-brand/5 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand/40 focus-visible:border-brand/60`. Whole card is the click target → opens the Sheet. |
+| **Icon** | `<FileText size={20} className="flex-none text-text-sub" aria-hidden />`. Do **not** vary the icon per type (avoids an emoji/icon zoo — §"Иконки"). |
+| **Title** | type label (from i18n, see 5R.7) — `text-sm font-bold text-text truncate`. |
+| **Count line** | the file/entity summary — `text-xs text-text-sub`. Copy: **`{files} plik(i) · {entities} {entityWord}`** e.g. «3 pliki · 2 pojazdy». Pluralisation via next-intl ICU (5R.7). When zero: `text-text-sub` **neutral** «Brak plików» — never amber, no icon. |
+| **Chevron** | `<ChevronRight size={16} className="flex-none text-text-sub ml-auto" aria-hidden />` — the standard "opens a panel" affordance (matches §6.4.3 clickable-row). |
+
+- **Count badge alternative (rejected):** a coloured `<Badge>` count was considered but reserved — a badge reads
+  as *status*; these counts are neutral inventory. Plain `text-text-sub` count line keeps the "no warnings" rule
+  honest. A `<Badge variant="muted">{files}</Badge>` MAY sit before the chevron **only** as a neutral count chip
+  if the count line feels weak in review — muted only, never semantic.
+- **Zero-file cards still render and are still clickable** — the Sheet then shows the neutral empty state. (Never
+  hide a type; the opiekun needs to see that e.g. «cert_xl» exists as a concept and is empty.)
+
+### 5R.3 — `<DocumentTypeSheet>` (the detail surface — `<Sheet side="right">`)
+
+Opening a type-card mounts a `<Sheet side="right" className="w-full sm:w-[560px]">` carrying that type's file list.
+
+**Header (`<SheetHeader>`):** title = the type label (`text-lg font-bold`); sub-line = the group name +
+count summary (`text-sm text-text-sub`), e.g. «Dokumenty pojazdów · 3 pliki · 2 pojazdy». Close-✕ inherited.
+
+**Body — a `<DataTable>`** of the concrete files for this type. Columns (adapt per group; **owning-entity column
+is the differentiator**):
+
+| Col id | Header (i18n) | Cell | Notes |
+|---|---|---|---|
+| `entity` | «Pojazd» / «Naczepa» / «Kierowca» / — (company) | vehicle `plateNumber` (`font-mono font-semibold`) · trailer `plateNumber` · driver `firstName lastName` (`font-semibold`). **Omitted entirely for company docs** (owner is the carrier itself). | `width: 'flex'`, `truncate: 'ellipsis'` |
+| `fileName` | «Nazwa pliku» | `font-medium` + `title={fileName}` | `truncate: 'ellipsis'` |
+| `size` | «Rozmiar» | `tabular-nums text-text-sub` via existing `formatBytes` | `width:'tight' align:'right'` |
+| `createdAt` | «Data przesłania» | `tabular-nums text-text-sub` via `formatDateTime` | `width:'tight'` |
+| `actions` | «Akcje» | download `<Button variant="ghost" size="sm">` (`<Download>` → `<Loader2 animate-spin>` while fetching; label hidden below `lg`); **for company types only**, a second `<Trash2>` ghost button → delete `<Dialog>` | `width:'tight' align:'right'` |
+
+- **Download mechanics unchanged** — the existing authenticated-bytes-→-object-URL-anchor pattern
+  (`downloadCarrierAttachment` for company; the analogous vehicle/trailer/driver download helpers for the rest).
+  `downloadingId` state gates the spinner + `disabled`.
+- **Empty state** — when the type has zero files: `<EmptyState icon={FileText} title={t('empty.title')}
+  message={t('empty.message')} />` (neutral, `text-text-sub`; **no `TriangleAlert`, no amber, no `iconClassName`
+  override**). Copy is generic-informational (5R.7) — «Brak dokumentów tego typu».
+
+**Footer (`<SheetFooter>`) — the management fork:**
+
+- **Company-doc types (`insurance` / `license` / `kreptd` / `other`):** the upload control lives here, **scoped to
+  the open type** (no category `<Select>` — the type is already chosen by which card was clicked). Layout:
+  `<FileUpload multiple={false}>` + a primary `<Button size="sm">{t('uploadButton')}</Button>`, disabled until a
+  valid file is picked / while pending. Success → `toast.success(t('uploadedToast'))`, clear picker, list refetches
+  (query invalidation). This **replaces** the old shared upload card + category dropdown — the per-type Sheet makes
+  the category implicit, killing a whole control.
+- **Download-only types (vehicle / trailer / driver / — includes cert_xl, driver adr, and all 5 vehicle
+  categories):** footer is a single `<Button variant="ghost">{tCommon('close')}</Button>` (or no footer; the ✕
+  suffices). **No `<FileUpload>`.** A one-line `text-xs text-text-sub` note states where to manage them, e.g.
+  «Zarządzaj w oknie pojazdu» / «…naczepy» / «…kierowcy» (5R.7) — informational pointer, not an action.
+
+**Delete (company types only):** reuse the existing confirm `<Dialog>` verbatim (title/body/footer already in
+`opieka.documents.delete*`); brand-red `default` confirm = the danger affordance (§ConfirmDelete convention).
+
+### 5R.4 — «ADR pojazdów» — the fileless display card (no Sheet, no files)
+
+ADR is a *cargo-permit flag* on the vehicle, not a document. This section is **display-only**:
+
+- **One `<DocumentTypeCard>`-shaped tile**, but **non-clickable** (no chevron, no hover-lift, `cursor-default`;
+  render as a plain `<div>`, not a button). Title «ADR pojazdów», count line = «{n} pojazdów z ADR» (or neutral
+  «Brak pojazdów ADR» when zero).
+- **Below the title**, inline list of the ADR vehicles, each as: plate (`font-mono text-sm`) followed by its
+  `adrClasses` rendered as **`<Badge variant="muted">{class}</Badge>`** chips (classes "1".."9"), wrapped
+  `flex flex-wrap gap-1`. Muted, never `warning` — the "no warnings in this tab" rule applies to ADR too (this
+  overrides the §6.3.1 `<Badge variant="warning">ADR` fleet-table convention **for this informational tab only**).
+- Source: `vehiclesQ.data.items.filter(v => v.adr)`; classes from `v.adrClasses`. Zero network cost.
+- If there are many ADR vehicles, the tile may grow tall — that is fine (it is the only expandable-in-place
+  content); optionally cap at ~8 rows with a «+N więcej» muted line, but a plain wrap is acceptable.
+
+### 5R.5 — Loading & empty behaviour
+
+- **Loading skeleton.** While `vehiclesQ` / `driversQ` / `trailersQ` / `useCarrierAttachments` are loading, render
+  a **grid of card-shaped skeletons** reusing the `<OpiekunCarrierCardSkeleton>` geometry idea: per group, 2–3
+  `bg-card border border-border rounded-lg p-4` blocks each holding `<Skeleton className="h-4 w-32" />` +
+  `<Skeleton className="h-3 w-20" />`. No bare spinner (§8.1). Group headers may render immediately (static text).
+- **Sheet `<DataTable>` loading.** Inherits the centralised `<DataTable isLoading>` skeleton rows (§8.10) — no
+  extra work.
+- **Tab-level empty.** A carrier with an empty fleet AND no company docs still shows all group headers with
+  neutral «Brak plików» type-cards. **Do not** render a single global "no documents" empty screen — the catalog of
+  *types* is itself the information (the opiekun learns which document kinds are tracked). This is the intentional
+  departure from the old flat-table `emptyTitle`/`emptyMessage`.
+
+### 5R.6 — Mobile / responsive
+
+- Type-card grid: `grid-cols-1` on mobile, `sm:grid-cols-2`, `xl:grid-cols-3`. Cards are ≥44px tall (touch).
+- The Sheet is `w-full` below `sm` (full-screen drawer), `sm:w-[560px]` above — identical to the admin edit
+  Sheets. The in-Sheet `<DataTable>` scrolls horizontally on narrow widths per the standard DataTable behaviour;
+  the `entity` + `fileName` columns are `truncate:'ellipsis'` so the row never explodes.
+- The company-type upload footer stacks (`<FileUpload>` full-width above the button) on mobile.
+
+### 5R.7 — i18n contract (PL default + EN) — namespace `opieka.documents.*`
+
+**Additive + restructuring.** Keep the existing `opieka.documents.category.{insurance,license,kreptd,other}`,
+`columns.*`, `download`, `delete*`, `uploadedToast`, `deletedToast`, `downloadError`, `uploadButton`. **Remove**
+the ADR-banner + company-ADR-category keys (5R.8). Add the following:
+
+**Group headers — `opieka.documents.group.*`:**
+
+| Key | PL | EN |
+|---|---|---|
+| `company` | "Dokumenty firmowe" | "Company documents" |
+| `vehicles` | "Dokumenty pojazdów" | "Vehicle documents" |
+| `adrVehicles` | "ADR pojazdów" | "Vehicle ADR" |
+| `trailers` | "Dokumenty naczep" | "Trailer documents" |
+| `drivers` | "Dokumenty kierowców" | "Driver documents" |
+
+**Vehicle / trailer / driver type labels — `opieka.documents.type.*`** (company types reuse the existing
+`category.*` labels; these are the download-only types):
+
+| Key | PL | EN |
+|---|---|---|
+| `contract` | "Umowa" | "Contract" |
+| `gps` | "Umowa GPS" | "GPS agreement" |
+| `agreement` | "Porozumienie" | "Guarantee agreement" |
+| `cabotage_de` | "Zezwolenie kabotażowe DE" | "Cabotage permit DE" |
+| `cabotage_de_insurance` | "Ubezpieczenie kabotażowe DE" | "Cabotage insurance DE" |
+| `cert_xl` | "Certyfikat XL" | "XL certificate" |
+| `driverAdr` | "Świadectwo ADR kierowcy" | "Driver ADR certificate" |
+
+**Count line & owning-entity — `opieka.documents.count.*` (ICU plural):**
+
+| Key | PL | EN |
+|---|---|---|
+| `files` | "{count, plural, one {# plik} few {# pliki} many {# plików} other {# pliku}}" | "{count, plural, one {# file} other {# files}}" |
+| `vehicles` | "{count, plural, one {# pojazd} few {# pojazdy} many {# pojazdów} other {# pojazdu}}" | "{count, plural, one {# vehicle} other {# vehicles}}" |
+| `trailers` | "{count, plural, one {# naczepa} few {# naczepy} many {# naczep} other {# naczepy}}" | "{count, plural, one {# trailer} other {# trailers}}" |
+| `drivers` | "{count, plural, one {# kierowca} few {# kierowców} many {# kierowców} other {# kierowcy}}" | "{count, plural, one {# driver} other {# drivers}}" |
+| `summary` | "{files} · {entities}" | "{files} · {entities}" |
+| `noFiles` | "Brak plików" | "No files" |
+| `adrVehiclesCount` | "{count, plural, one {# pojazd z ADR} few {# pojazdy z ADR} many {# pojazdów z ADR} other {# pojazdu z ADR}}" | "{count, plural, one {# vehicle with ADR} other {# vehicles with ADR}}" |
+| `noAdrVehicles` | "Brak pojazdów ADR" | "No ADR vehicles" |
+
+**Column headers — `opieka.documents.columns.*` (additive to existing):**
+
+| Key | PL | EN |
+|---|---|---|
+| `entityVehicle` | "Pojazd" | "Vehicle" |
+| `entityTrailer` | "Naczepa" | "Trailer" |
+| `entityDriver` | "Kierowca" | "Driver" |
+
+**Sheet chrome & empty — `opieka.documents.sheet.*` / `.empty.*`:**
+
+| Key | PL | EN |
+|---|---|---|
+| `empty.title` | "Brak dokumentów" | "No documents" |
+| `empty.message` | "Nie przesłano jeszcze dokumentów tego typu." | "No documents of this type have been uploaded yet." |
+| `manageInVehicle` | "Zarządzaj w oknie pojazdu." | "Managed in the vehicle window." |
+| `manageInTrailer` | "Zarządzaj w oknie naczepy." | "Managed in the trailer window." |
+| `manageInDriver` | "Zarządzaj w oknie kierowcy." | "Managed in the driver window." |
+| `uploadHint` | "Prześlij dokument dla tej kategorii." | "Upload a document for this category." |
+| `openAria` | "Otwórz listę: {type}" | "Open list: {type}" |
+
+> `common.close` (existing) is used for the Sheet footer of download-only types. `uploadHeading`/`categoryLabel`/
+> `fileLabel` from the old shared upload card become **dead** (the per-type Sheet has no category select) — remove
+> `categoryLabel` + `fileLabel`; `uploadHint` replaces the standalone `uploadHeading`.
+
+### 5R.8 — Explicit removals (web-agent must delete, not leave dead)
+
+| What | Where | Action |
+|---|---|---|
+| **ADR warning banner** (`adrMissing` block, `TriangleAlert` + amber `bg-warning-bg`) | `CarrierDocumentsTab.tsx` L266-291 | **Delete** the entire block + the `adrMissing`/`hasAdr` derivation. |
+| **`hasAdrVehicle` prop + derivation** | `page.tsx` L120-127 passes it; `Props.hasAdrVehicle` | **Delete** — no longer consumed. (The vehicle ADR *display* section derives from `vehiclesQ` directly, not a boolean prop.) |
+| **`adr` company category** | `CATEGORIES` array (L56-62), `category` state default `'adr'` (L93-95), `category.adr` label, `adrExistsHint`/`adrExistsToast`/`adrDuplicateBlocked`/409-handling, `adrMissingTitle`/`adrMissingMessage` i18n | **Delete** `adr` from `CATEGORIES` → `['insurance','license','kreptd','other']`; drop the single-ADR duplicate guard entirely; remove those i18n keys from `pl.json` + `en.json`. |
+| **Shared upload card + category `<Select>`** | L293-341 | **Replace** — upload moves into the company-type Sheet footer; the `<Select>` is gone (type implicit). |
+| **Flat company-only `<DataTable>`** | L343-356 | **Replace** with the type-catalog grid; the file table survives *inside* the Sheet. |
+| **`<Badge variant="warning">ADR`** for the ADR display | (new code) | Use `<Badge variant="muted">` for `adrClasses` chips — no warning tone in this tab. |
+
+> **`adrDocReminderToast`** (`vehicles.adrDocReminderToast`, "…pamiętaj, aby dodać dokument ADR przewoźnika…")
+> becomes semantically stale (there is no carrier ADR document to add). Flag for removal to the vehicle-modal
+> owner; out of scope for this tab but note it so it isn't left misleading users.
+
+### 5R.9 — Components / data summary (web-agent)
+
+| Component | New / changed | File |
+|---|---|---|
+| `<DocumentTypeCard>` | **new** (composition only — `bg-card`+`border`+`<Badge>`, `<OpiekunCarrierCard>` hover recipe) | `app/(employee)/…/[login]/CarrierDocumentsTab.tsx` (co-located) or `components/opieka/DocumentTypeCard.tsx` |
+| `<DocumentTypeSheet>` | **new** (`<Sheet side="right">` + in-Sheet `<DataTable>` + conditional upload/delete footer) | co-located in `CarrierDocumentsTab.tsx` |
+| `CarrierDocumentsTab.tsx` | **rewritten** — catalog grid over the 5 groups; drops banner + shared upload + flat table | same path |
+| `page.tsx` | **changed** — remove `hasAdrVehicle` prop pass-down (keep the vehicles/drivers/trailers queries; the tab now consumes their `attachments[]`) | `…/[login]/page.tsx` |
+| Data source | **no new API** — `vehiclesQ`/`driversQ`/`trailersQ` `attachments[]` + `useCarrierAttachments`; downloads via existing per-entity endpoints | — |
+
+**Tokens added/changed: none.** `bg-card` / `border` / `shadow-card` / `bg-brand-50` / `brand/40` / `text-sub` /
+`bg-input` / `<Badge variant="muted">` — all pre-existing.
+
+### 5R.10 — Acceptance checklist (Phase 5-rework)
+
+- [ ] **No warnings anywhere in the tab** — grep confirms no `TriangleAlert`, no `bg-warning`, no `adrMissing*`
+      in `CarrierDocumentsTab.tsx`; every zero-file state is neutral `text-text-sub` / `<EmptyState>` default tone.
+- [ ] **Company-ADR fully gone** — `CATEGORIES` = `['insurance','license','kreptd','other']`; `adrExists*` /
+      `adrMissing*` i18n keys removed from `pl.json` **and** `en.json`; `hasAdrVehicle` prop deleted from `Props`
+      and `page.tsx`.
+- [ ] **5 groups render** in fixed order (company / vehicles / adrVehicles / trailers / drivers) with headers;
+      each file-bearing type is a clickable `<DocumentTypeCard>` opening the `<Sheet>`; «ADR pojazdów» is a
+      **non-clickable** display card with `<Badge variant="muted">` class chips.
+- [ ] **Count lines** use the ICU plural keys («3 pliki · 2 pojazdy»); zero → neutral «Brak plików».
+- [ ] **Sheet file `<DataTable>`** shows the owning-entity column (plate/registration/name), fileName, size,
+      uploadedAt, download; **company types** additionally show delete + the scoped upload footer (no category
+      `<Select>`); **download-only types** show a manage-elsewhere note and no `<FileUpload>`.
+- [ ] **Download** reuses the authenticated-bytes anchor; spinner + `disabled` while fetching; `toast.error` on
+      failure.
+- [ ] **Delete** (company only) uses the existing confirm `<Dialog>`; brand-red confirm; list refetches.
+- [ ] **Loading** = card-shaped skeleton grid (no bare spinner); Sheet table inherits `<DataTable isLoading>`.
+- [ ] **Mobile** — 1-col grid; full-width Sheet; upload footer stacks; ≥44px touch targets; focus ring on cards.
+- [ ] **a11y** — cards are real buttons with `aria-label` (`sheet.openAria`); `<FileText>`/chevron `aria-hidden`;
+      Sheet focus-trap + Esc + focus-return inherited; badge chips carry text (class number), not colour-only.
+- [ ] **Dark mode** — cards on `bg-card`, muted ADR chips, `bg-input` upload dropzone all AA in dark (§8.6).
+- [ ] **Zero new tokens / zero new primitives / zero new API** (§5R.9).
+
+---
+
 ## §12 — Guarantee Watchdog (Porozumienie o gwarancji przebiegu)
 
 > **Scope.** The **Guarantee Watchdog** enforces the porozumienie obligation: a guaranteed vehicle must have a

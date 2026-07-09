@@ -83,9 +83,9 @@ export function useCreateVehicle(
       // refetch — otherwise the "Brak: Pojazd" chip and the "Dokończ
       // onboarding" button linger after the wizard completes.
       qc.invalidateQueries({ queryKey: CARRIERS_KEY });
-      // A vehicle's ADR flag + the carrier's active-vehicle count feed the
-      // opiekun readiness view (adrDocMissing / incompleteFleet). Invalidate
-      // so the per-carrier "needs attention" exclamation stays fresh.
+      // The carrier's active-vehicle count feeds the opiekun readiness view
+      // (incompleteFleet). Invalidate so the per-carrier "needs attention"
+      // exclamation stays fresh.
       qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
       opts?.onSuccess?.(...args);
     },
@@ -103,8 +103,8 @@ export function useUpdateVehicle(
     onSuccess: (...args) => {
       qc.invalidateQueries({ queryKey: VEHICLES_KEY });
       qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
-      // Editing a vehicle can toggle its ADR flag — refresh the opiekun
-      // readiness view so adrDocMissing / the attention exclamation stay fresh.
+      // Editing a vehicle can change its active state — refresh the opiekun
+      // readiness view so the incompleteFleet attention exclamation stays fresh.
       qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
       opts?.onSuccess?.(...args);
     },

@@ -137,8 +137,22 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 | POST `/carriers/:id/reactivate` | `toggleCarrierActive` (on) | admin / opiekun(own) |
 | POST `/carriers/:id/reset-password` | `resetCarrierPassword` / `resetCarrierPasswordByOpiekun` | admin / opiekun(own) |
 | DELETE `/carriers/:id` | `deleteCarrierHard` | **admin only** (hard delete). Phase 3 enforcement: `@Roles('admin')` — opiekun does NOT have a soft-delete path; deactivate via `/carriers/:id/deactivate` is the opiekun-accessible alternative. |
+| GET `/carriers/:id/attachments` | (новое) — company docs (insurance/license/kreptd/other) | admin / opiekun(own) |
+| POST `/carriers/:id/attachments` | (новое) — upload one doc — **`multipart/form-data`** (`file` + `category`). Multiple files per category allowed (carrier-level `adr` removed 2026-07). | admin / opiekun(own) |
+| GET `/carriers/:id/attachments/:attachmentId/download` | (новое) — proxy-стрим файла из MinIO | admin / opiekun(own) |
+| DELETE `/carriers/:id/attachments/:attachmentId` | (новое) — soft-delete + remove object | admin / opiekun(own) |
+| GET `/carriers/:id/documents/overview` | (новое) — read-only aggregate for the opiekun "Dokumenty" tab: `CarrierDocumentsOverviewDto` — every live document tied to the carrier grouped by owning entity (company docs + per-vehicle files + per-trailer XL certs + per-driver ADR certs + ADR-flagged vehicles). Downloads reuse the existing per-entity download routes (the DTO carries the ids). | admin / opiekun(own) |
 
 > Один endpoint, один сервис. Различия admin/opiekun — на уровне `RolesGuard` + `OwnershipGuard`. Дублей `*ByOpiekun` нет.
+>
+> **`GET /carriers/:id/documents/overview`** (opiekun "Dokumenty" tab, read-only). Guarded exactly like the carrier detail/attachments endpoints (`@Roles('admin','opiekun')` + `OpiekunOwnershipGuard` `@OpiekunOwns('id','param','carrierId')` — opiekun sees only carriers where `opiekunId = user.sub`). Response `CarrierDocumentsOverviewDto` (`packages/shared/src/schemas/carriers.ts`):
+> - `carrierId: string`
+> - `carrierDocs: CarrierAttachmentDto[]` — company documents (insurance/license/kreptd/other).
+> - `vehicleDocs` — per category (`contract` | `gps` | `agreement` | `cabotage_de` | `cabotage_de_insurance`, mirroring `VehicleAttachmentCategory` order) → `{ attachmentId, fileName, size, createdAt, vehicle: { id, registration, sideNumber } }[]`. Every category key always present (empty array when none). `agreement` (porozumienie scan) IS included — core guarantee paperwork for the opiekun (see docs/14-design-system.md §5R).
+> - `vehicleAdr: { vehicleId, plate, adrClasses }[]` — vehicles flagged `adr:true` (flag + classes only, **NO file**).
+> - `trailerDocs: { attachmentId, fileName, size, createdAt, trailerId, registration }[]` — `cert_xl` certificates.
+> - `driverDocs: { attachmentId, fileName, size, createdAt, driverId, fullName }[]` — ADR świadectwa.
+>   Only live rows (`deletedAt:null`) surface; nested relation reads are filtered explicitly (soft-delete extension only auto-filters top-level ops). No new download routes — the web layer streams bytes via the existing `GET /{carriers|vehicles|trailers|drivers}/:id/attachments/:attachmentId/download`.
 >
 > ⚠️ `pracownik` **не имеет доступа** ни к одному из этих эндпоинтов — это admin/opiekun-only. Legacy enforcement: `requireAdmin(callerLogin)` в `Code.gs:1318, 1991, 2070, …` (admin-функции) и `_requireOpiekun` для opiekun-вариантов. Pracownik видит только wnioski-вкладку, не Carriers.
 

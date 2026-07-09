@@ -12,6 +12,7 @@ import {
 import type {
   CarrierAttachmentCategory,
   CarrierAttachmentDto,
+  CarrierDocumentsOverviewDto,
   CarrierDto,
   CarrierFilters,
   CarrierWithTemporaryPasswordDto,
@@ -26,6 +27,7 @@ import {
   deleteCarrierAttachment,
   deactivateCarrier,
   getCarrier,
+  getCarrierDocumentsOverview,
   hardDeleteCarrier,
   listCarrierAttachments,
   listCarriers,
@@ -38,6 +40,15 @@ import { OPIEKUN_KEY } from '@/lib/hooks/useOpiekunFleet';
 export const CARRIERS_KEY = ['carriers'] as const;
 /** Query namespace for a carrier's company documents (attachments). */
 export const CARRIER_ATTACHMENTS_KEY = ['carrier-attachments'] as const;
+/**
+ * Query namespace for the opiekun "Dokumenty" tab aggregate
+ * (`GET /carriers/:id/documents/overview`). Keyed by carrierId. Kept separate
+ * from `CARRIER_ATTACHMENTS_KEY` so a company-doc upload/delete can invalidate
+ * BOTH the flat list and the fleet-wide overview.
+ */
+export const CARRIER_DOCUMENTS_OVERVIEW_KEY = [
+  'carrier-documents-overview',
+] as const;
 
 export function useCarriers(filters: CarrierFilters = { limit: 50 }) {
   return useQuery({
@@ -139,6 +150,19 @@ export function useCarrierAttachments(id: string | null | undefined) {
   });
 }
 
+/**
+ * Fleet-wide document overview for the opiekun "Dokumenty" tab — company docs +
+ * per-vehicle / trailer / driver files, grouped by owning entity, in one call.
+ * Enabled only when `id` is set.
+ */
+export function useCarrierDocumentsOverview(id: string | null | undefined) {
+  return useQuery<CarrierDocumentsOverviewDto>({
+    queryKey: [...CARRIER_DOCUMENTS_OVERVIEW_KEY, id],
+    queryFn: () => getCarrierDocumentsOverview(id as string),
+    enabled: Boolean(id),
+  });
+}
+
 export interface UploadCarrierAttachmentVars {
   carrierId: string;
   category: CarrierAttachmentCategory;
@@ -163,8 +187,14 @@ export function useUploadCarrierAttachment(
       qc.invalidateQueries({
         queryKey: [...CARRIER_ATTACHMENTS_KEY, vars.carrierId],
       });
-      // An ADR-category document upload flips the carrier's `adrDocMissing`
-      // readiness flag in the opiekun view — invalidate so the per-carrier
+      // The company-doc set also drives the opiekun "Dokumenty" tab aggregate —
+      // invalidate the fleet-wide overview so a freshly uploaded file shows up
+      // in its type-card count and Sheet list.
+      qc.invalidateQueries({
+        queryKey: [...CARRIER_DOCUMENTS_OVERVIEW_KEY, vars.carrierId],
+      });
+      // The carrier's active-vehicle/trailer/driver count feeds the opiekun
+      // readiness view (incompleteFleet) — invalidate so the per-carrier
       // attention exclamation stays fresh.
       qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
       opts?.onSuccess?.(...args);
@@ -191,9 +221,13 @@ export function useDeleteCarrierAttachment(
       qc.invalidateQueries({
         queryKey: [...CARRIER_ATTACHMENTS_KEY, vars.carrierId],
       });
-      // Deleting an ADR-category document flips the carrier's `adrDocMissing`
-      // readiness flag in the opiekun view — invalidate so the per-carrier
-      // attention exclamation stays fresh.
+      // Keep the opiekun "Dokumenty" tab aggregate in sync after a company-doc
+      // delete (the file must vanish from its type-card count and Sheet list).
+      qc.invalidateQueries({
+        queryKey: [...CARRIER_DOCUMENTS_OVERVIEW_KEY, vars.carrierId],
+      });
+      // The carrier's fleet-count-driven readiness view (incompleteFleet) —
+      // invalidate so the per-carrier attention exclamation stays fresh.
       qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
       opts?.onSuccess?.(...args);
     },

@@ -44,7 +44,7 @@
     "zod": "^3.23.0"
   },
   "prisma": {
-    "seed": "tsx prisma/seed.ts"
+    "seed": "npx tsx prisma/seed.ts"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.0",

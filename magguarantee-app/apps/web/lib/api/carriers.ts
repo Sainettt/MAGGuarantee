@@ -5,6 +5,7 @@
 import type {
   CarrierAttachmentCategory,
   CarrierAttachmentDto,
+  CarrierDocumentsOverviewDto,
   CarrierDto,
   CarrierFilters,
   CarrierWithTemporaryPasswordDto,
@@ -131,5 +132,23 @@ export function deleteCarrierAttachment(
   return apiJson<void>(
     `/carriers/${carrierId}/attachments/${attachmentId}`,
     { method: 'DELETE' },
+  );
+}
+
+// ─── Documents overview (opiekun "Dokumenty" tab) ─────────
+//
+// Read-only aggregate that gathers EVERY document tied to one carrier — its own
+// company docs plus per-vehicle / per-trailer / per-driver files — grouped by
+// owning entity, so the opiekun "Dokumenty" tab renders them in one round trip
+// (soft-delete filtering is centralised server-side). Roles: admin, opiekun-own.
+// Downloads are NOT re-invented — each grouped entry carries the ids the
+// existing per-entity `…/attachments/:id/download` routes need.
+
+export function getCarrierDocumentsOverview(
+  carrierId: string,
+): Promise<CarrierDocumentsOverviewDto> {
+  return apiJson<CarrierDocumentsOverviewDto>(
+    `/carriers/${carrierId}/documents/overview`,
+    { method: 'GET' },
   );
 }

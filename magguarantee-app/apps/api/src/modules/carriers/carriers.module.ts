@@ -6,6 +6,8 @@ import { UsersModule } from '../users/users.module';
 import { CarrierAttachmentsController } from './carrier-attachments.controller';
 import { CarrierAttachmentsRepository } from './carrier-attachments.repository';
 import { CarrierAttachmentsService } from './carrier-attachments.service';
+import { CarrierDocumentsRepository } from './carrier-documents.repository';
+import { CarrierDocumentsService } from './carrier-documents.service';
 import { CarriersController } from './carriers.controller';
 import { CarriersRepository } from './carriers.repository';
 import { CarriersService } from './carriers.service';
@@ -18,6 +20,8 @@ import { CarriersService } from './carriers.service';
     CarriersRepository,
     CarrierAttachmentsService,
     CarrierAttachmentsRepository,
+    CarrierDocumentsService,
+    CarrierDocumentsRepository,
   ],
   exports: [
     CarriersService,
