@@ -61,6 +61,7 @@ import {
   FormDialogTitle,
 } from '@/components/forms/FormDialog';
 import { RevealInset } from '@/components/forms/RevealInset';
+import { ActiveStatusRow } from '@/components/forms/ActiveStatusRow';
 import { MaskedPhoneInput } from '@/components/forms/MaskedPhoneInput';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useCarriers } from '@/lib/hooks/useCarriers';
@@ -272,6 +273,7 @@ export function DriverFormDialog({
   const submitting = createM.isPending || updateM.isPending;
   const errs = form.formState.errors;
   const adrOn = form.watch('adr') === true;
+  const activeOn = form.watch('active') === true;
 
   useEffect(() => {
     if (!adrOn) form.setValue('adrClasses', []);
@@ -611,11 +613,17 @@ export function DriverFormDialog({
               >
                 <Textarea id="driver-notes" rows={3} {...form.register('notes')} />
               </FormField>
-              <label className="flex items-center gap-2 text-sm text-text">
-                <Checkbox {...form.register('active')} />
-                {t('fields.active')}
-              </label>
             </FormSection>
+
+            {/* ── Aktywny — distinguished status row, body bottom (§13.2.4) ── */}
+            <ActiveStatusRow
+              label={t('fields.active')}
+              consequence={tWizard('formActive.driverConsequence')}
+              activeBadgeLabel={tCommon('active')}
+              inactiveBadgeLabel={tCommon('inactive')}
+              checked={activeOn}
+              checkboxProps={form.register('active')}
+            />
           </div>
         </FormDialogBody>
 

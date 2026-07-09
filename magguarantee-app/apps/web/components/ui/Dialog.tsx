@@ -79,6 +79,16 @@ export function DialogContent({
   const previous = useRef<HTMLElement | null>(null);
   const [mounted, setMounted] = useState(false);
 
+  // Funnel `setOpen` through a ref so the focus/scroll/Escape effect below
+  // depends only on `open`. Without this, callers that pass an inline arrow
+  // `onOpenChange={(o) => …}` create a fresh `setOpen` on every parent render —
+  // the effect would tear down and re-run, focus would jump back to the first
+  // focusable element, and the browser would scroll it into view. Fleet form
+  // dialogs re-render on every keystroke (RHF watch + useFormDraft), so this
+  // manifested as focus/scroll yanking mid-typing. Mirrors <Sheet>.
+  const setOpenRef = useRef(setOpen);
+  setOpenRef.current = setOpen;
+
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -93,7 +103,7 @@ export function DialogContent({
     );
     focusable?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') setOpenRef.current(false);
     };
     document.addEventListener('keydown', onKey);
     return () => {
@@ -101,7 +111,7 @@ export function DialogContent({
       document.body.style.overflow = previousOverflow;
       previous.current?.focus();
     };
-  }, [open, setOpen]);
+  }, [open]);
 
   if (!mounted || !open) return null;
 

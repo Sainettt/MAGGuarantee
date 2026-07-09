@@ -6744,11 +6744,53 @@ Umowa GPS *                                             ← FormLabel (required 
 
 **Fuel-card live status rule** (`Karta zablokowana` until BOTH true): `agreement === true` **AND** the porozumienie scan bucket has ≥1 file (existing or new). Compute from `form.watch('agreement')` + porozumienie file bucket length; re-renders live as the operator ticks/uploads. When blocked, show `<Badge variant="danger">Karta zablokowana</Badge>` + a `text-xs text-text-sub` reason line («Wymaga aktywnego porozumienia i wgranego skanu»). When both satisfied → `<Badge variant="success">Karta aktywna</Badge>`.
 
+#### §13.2.4 — `<ActiveStatusRow>` — the distinguished `Aktywny` control (all entity forms)
+
+> **Approved decision (user):** the `active` («Aktywny») flag deactivates the **entire entity** — it is the single most consequential control in the form, yet as a bare inline `<Checkbox>` buried among dozens of equipment/permission checkboxes it reads as just-another-flag (in `VehicleFormDialog` it even sat at the very top of *Dane podstawowe*). Decision: in **all** entity form dialogs it is **lifted out of every `<FormSection>`** and rendered **once, at the very bottom of `<FormDialogBody>`**, as a distinguished bordered status row.
+
+**One pattern, one place.** New tiny presentational component **`components/forms/ActiveStatusRow.tsx`** (parent owns the RHF `register('active')`; the component only renders the row + reads the live checked state for its badge). It is rendered as the **last child of the `space-y-6` stack inside `<FormDialogBody>`**, i.e. **after the final `<FormSection>`** and **not wrapped in a `<FormSection>`** (it is deliberately outside the section rhythm so it visually detaches). Applies to: `VehicleFormDialog`, `TrailerFormDialog`, `DriverFormDialog` (all three), and `CarrierSheet` **edit mode only**.
+
+**Anatomy — full-width bordered row, checkbox + bold label + consequence line + live mirror badge:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ ☑  Aktywny                                        [Aktywny]  │   ← badge mirrors state
+│    Nieaktywny pojazd znika z list wyboru i nie może być …    │   ← consequence subline
+└─────────────────────────────────────────────────────────────┘
+```
+
+| Slot | Tailwind | Notes |
+|---|---|---|
+| **Row wrapper** | `flex items-start gap-3 rounded-lg border border-border border-l-2 border-l-brand/50 bg-input/40 p-3` | **Same shell as `RevealInset` §13.2.1** (left-2px `border-l-brand/50` accent, `bg-input/40` calm fill) — the accent reads as *"important status control"*, brand-toned, **not** an error/warning (active is the normal state; do **not** use `danger`/`warning` token sets on the row). Reusing the RevealInset shell keeps the visual language consistent and adds **zero** new tokens. |
+| **Checkbox** | existing `<Checkbox {...form.register('active')} />` | Sits in its own leading column; `mt-0.5` self-align to the bold label baseline. Wrap checkbox+label region in a `<label className="flex items-start gap-3 …">` so the whole text is a click target (≥44px effective hit area on tablet). |
+| **Label** | `text-sm font-bold text-text` | Bold (heavier than every in-section checkbox label, which are plain `text-sm text-text`) — this weight bump is the primary "this one matters" cue. Copy = existing `<ns>.fields.active` («Aktywny»). |
+| **Consequence subline** | `mt-0.5 text-xs text-text-sub` | One line describing the effect of deactivation. Copy = new `formActive.<entity>Consequence` key (PL/EN below). Sits directly under the label. |
+| **Live mirror badge** | `<Badge variant="success">Aktywny</Badge>` when checked, `<Badge variant="muted">Nieaktywny</Badge>` when unchecked. `ml-auto shrink-0` — pinned to the row's right edge, top-aligned. | Uses `common.active` / `common.inactive`. **`muted` (not `danger`)** for the off state — a deactivated entity is an ordinary, reversible state, not an error. Re-renders live off `form.watch('active')`. |
+
+**Placement & spacing.** As the last item in the `space-y-6` body stack it inherits the `24px` gap above it (same as between two sections), so it sits clearly separated from the final `<FormSection>` — no extra margin needed. It spans the full body width (no `FormGrid`; the row is inherently full-width). Do **not** add a `<FormSection>` heading above it — the bordered row *is* its own affordance.
+
+**Create-mode behaviour.**
+- **Vehicle / Trailer / Driver:** the row **is present** on create; the checkbox defaults **checked** (`getDefaults().active = true`, already the case). New entities are active by default; the operator sees the same distinguished control and may untick it to seed a pre-inactive record.
+- **Carrier:** on **create the row is absent entirely** (`CreateCarrierDto` has no `active`; new carriers are always active) — mirror the current `isEdit &&` guard. On **edit** the row renders, defaulted from `carrier.active`.
+
+**Removed from sections.** Delete the bare `Aktywny` checkbox from wherever it currently lives inside a section: `VehicleFormDialog` *Dane podstawowe* (the `<label>` at ~L553–556 — keep `Certyfikat L` there, remove only `active`), the *Notatki* sections of Trailer/Driver, and the `CarrierSheet` *Przypisanie* section (`isEdit && …` block at ~L860–864). The flag is now rendered **only** by `<ActiveStatusRow>` at the body bottom.
+
+**i18n keys (new — add `formActive.*` block at message root; reuse `common`/`<ns>.fields.active`):**
+
+| Key | PL | EN |
+|---|---|---|
+| `formActive.vehicleConsequence` | «Nieaktywny pojazd znika z list wyboru i nie może być użyty w nowych wyjazdach ani wnioskach.» | "An inactive vehicle disappears from selection lists and can't be used in new departures or claims." |
+| `formActive.trailerConsequence` | «Nieaktywna naczepa znika z list wyboru i nie może być użyta w nowych wyjazdach.» | "An inactive trailer disappears from selection lists and can't be used in new departures." |
+| `formActive.driverConsequence` | «Nieaktywny kierowca znika z list wyboru i nie może być przypisany do nowych wyjazdów.» | "An inactive driver disappears from selection lists and can't be assigned to new departures." |
+| `formActive.carrierConsequence` | «Nieaktywny przewoźnik traci dostęp do panelu, a jego pojazdy i kierowcy znikają z list wyboru.» | "An inactive carrier loses panel access, and its vehicles and drivers disappear from selection lists." |
+
+The label («Aktywny») and badge («Aktywny» / «Nieaktywny») reuse **existing** `common.active` / `common.inactive` and per-namespace `fields.active` — do **not** add duplicate label keys. Only the four `formActive.*Consequence` sublines are new. `<ActiveStatusRow>` takes `label`, `consequence`, and the `register('active')` props as inputs so the same component serves all four entities (the caller passes the right namespace's translations).
+
 ### §13.3 — Pojazd (`VehicleSheet` → `VehicleFormDialog`)
 
 Sections top-to-bottom (each a `<FormSection>`):
 
-1. **Dane podstawowe** — `FormGrid cols={2}`: `Nr rej.` (req), `Nr boczny`, `Typ` (select MEGA/STD/COIL, req), `Planista` (select, req), `Zespół dyspozytorów` (select + live `<TeamMembers>` preview, req), **static `<Badge variant="muted">EURO VI</Badge>`** (the `euro` select is **removed** — see §13.9), `Notatki` (`Textarea`, `md:col-span-2`), `Aktywny` (checkbox), `Certyfikat L` (checkbox — moved here as a plain flag). Carrier picker on create (`md:col-span-2`, top).
+1. **Dane podstawowe** — `FormGrid cols={2}`: `Nr rej.` (req), `Nr boczny`, `Typ` (select MEGA/STD/COIL, req), `Planista` (select, req), `Zespół dyspozytorów` (select + live `<TeamMembers>` preview, req), **static `<Badge variant="muted">EURO VI</Badge>`** (the `euro` select is **removed** — see §13.9), `Notatki` (`Textarea`, `md:col-span-2`), `Certyfikat L` (checkbox — kept here as a plain flag). Carrier picker on create (`md:col-span-2`, top). **`Aktywny` is NOT here** — it moves to `<ActiveStatusRow>` at the body bottom (§13.2.4).
 2. **Kraje specjalne** — `FormGrid cols={3}` of GB / IT / FR checkboxes (keep the per-flag `text-xs text-text-sub` hint sublines). **Validation: min. 2 z 3** → inline `<FormMessage>` under the grid on submit if fewer than two checked.
 3. **Stawki** — `FormGrid cols={4}`: `rateDe` / `rateUe` / `rateExport` / `rateImport` (number, req, `step=0.01 min=0`).
 4. **GPS** — `Numer GPS` (optional input). When filled → reveal a **compact required** `<FileUpload multiple={false} variant="compact">` labelled «Umowa GPS» inside a `RevealInset`. (Empty GPS number → no upload.)
@@ -6758,6 +6800,7 @@ Sections top-to-bottom (each a `<FormSection>`):
 8. **Kabotaż** — two checkboxes: **DE** → `RevealInset` with **TWO** compact required uploads («Zezwolenie kabotażowe» + «Ubezpieczenie kabotażowe», both required); **FR** → checkbox only (no files).
 9. **ADR** — checkbox → `RevealInset`: `<MultiSelect>` klas **1–9**, **min. 1**.
 10. **Dokumenty** — compact `<FileUpload variant="compact">` «Umowa» (`contract` category) — **always required** (on create; edit keeps existing rule).
+11. **`<ActiveStatusRow>`** (§13.2.4) — last child of the body stack, **after** *Dokumenty*, outside any `<FormSection>`. `formActive.vehicleConsequence`. Present on create (default checked).
 
 Removed from the form: `euro` select (→ static badge), any `airSuspension`-style dead flags. GPS is optional now (was unconditionally-required device id) — **confirm with api-agent** (§13.9).
 
@@ -6767,7 +6810,8 @@ Removed from the form: `euro` select (→ static badge), any `airSuspension`-sty
 2. **Dach** — `Podnoszony` (tak/nie), `Odsuwany` (tak/nie) → when tak, reveal (`RevealInset`) `Edscha` (tak/nie). Model these as checkboxes (tak = checked) for consistency with the rest of the form.
 3. **Wyposażenie** — `Kosz paletowy` (checkbox), `Multilock` (checkbox), `Pasy` + liczba, `Maty` + liczba, `Belki zabezpieczające` + liczba. Count inputs reveal inline under their checkbox (keep the existing equipment-cell pattern, restyled to `RevealInset` where a count appears). **All counts min. 3** (inline error under each).
 4. **Certyfikat XL** — checkbox → `RevealInset`: compact **required** `<FileUpload multiple={false} variant="compact" accept={pdf}>` «Certyfikat XL (PDF)».
-5. **Notatki** — `Textarea` (`md:col-span-2`) + `Aktywny` checkbox.
+5. **Notatki** — `Textarea` (`md:col-span-2`). **`Aktywny` is NOT here** — it moves to `<ActiveStatusRow>`.
+6. **`<ActiveStatusRow>`** (§13.2.4) — last child of the body stack, after *Notatki*, outside any `<FormSection>`. `formActive.trailerConsequence`. Present on create (default checked).
 
 Removed: `airSuspension` / zawieszenie pneumatyczne (§13.9).
 
@@ -6777,7 +6821,10 @@ Removed: `airSuspension` / zawieszenie pneumatyczne (§13.9).
 2. **Kontakt** — `Telefon 1` (req), `Telefon 2`, `Email`. **Prefiks telefonu jest NIEZALEŻNY od narodowości** — decouple the phone-prefix control from the `homeCountry`/nationality: each phone keeps its own prefix picker (the existing `<MaskedPhoneInput>` `country` prop is driven by a dedicated per-form phone-prefix selector, **not** by Narodowość). Remove the old "country scopes contact fields" coupling.
 3. **Narodowość + Języki** — `Narodowość` select (**BY RUS UA PL UZB KRG KZ Inne**) + `Języki komunikacji` `<MultiSelect>` (**PL RU EN UA DE Inne**, min. 1).
 4. **ADR** — checkbox → `RevealInset`: `<MultiSelect>` klas **1–9** + compact **required** `<FileUpload multiple={false} variant="compact">` «Świadectwo ADR».
-5. **Notatki** — `Textarea` (`md:col-span-2`) + `Aktywny` checkbox.
+5. **Notatki** — `Textarea` (`md:col-span-2`). **`Aktywny` is NOT here** — it moves to `<ActiveStatusRow>`.
+6. **`<ActiveStatusRow>`** (§13.2.4) — last child of the body stack, after *Notatki*, outside any `<FormSection>`. `formActive.driverConsequence`. Present on create (default checked).
+
+**Carrier note (`CarrierSheet`, edit mode only).** The `Aktywny` checkbox currently in the *Przypisanie* section (`isEdit &&` block) moves to `<ActiveStatusRow>` at the body bottom, `formActive.carrierConsequence`. On **create the row is absent** (no `active` in `CreateCarrierDto`).
 
 ### §13.6 — Acceptance checklist (§13, web-agent)
 
@@ -6793,6 +6840,10 @@ Removed: `airSuspension` / zawieszenie pneumatyczne (§13.9).
 - [ ] Single-file compact collapses to one chip + «Zmień» once a file exists.
 - [ ] Fuel-card badge live-computes `Karta zablokowana` until `agreement && porozumienieScan≥1`, else `Karta aktywna`; reason subline when blocked.
 - [ ] «Brak skanu porozumienia» = amber, **non-blocking**, identical wording in form / table / detail modal.
+- [ ] `<ActiveStatusRow>` (§13.2.4) is the **single** `Aktywny` control in all four forms: rendered **once as the last child of `<FormDialogBody>`'s `space-y-6` stack, outside any `<FormSection>`**; no bare `active` checkbox survives inside any section.
+- [ ] Row uses the RevealInset shell (`border-l-2 border-l-brand/50 bg-input/40 p-3`), bold `text-sm font-bold` label, `text-xs text-text-sub` consequence subline, and a live `ml-auto` mirror badge (`success:Aktywny` / `muted:Nieaktywny`) — **brand accent, no danger/warning tokens**; whole text region is a `<label>` click target.
+- [ ] Create mode: Vehicle/Trailer/Driver show the row **defaulted checked**; **Carrier create omits the row entirely** (present in edit only).
+- [ ] i18n: reuses `common.active`/`common.inactive` + `<ns>.fields.active`; only four new `formActive.*Consequence` sublines added (PL default + EN).
 - [ ] Pojazd: EURO shown as static `<Badge>EURO VI</Badge>` (select gone); Kraje specjalne enforce min. 2 z 3 inline; Odpady/ADR multi-selects enforce min. 1; Kabotaż DE = two required uploads, FR = checkbox only; Umowa always required.
 - [ ] Naczepa: dims + ładowność + boczny prześwit required; Dach→Odsuwany→Edscha reveal chain; counts min. 3; XL cert required PDF; airSuspension gone.
 - [ ] Kierowca: phone prefix independent of Narodowość; Narodowość select + Języki multi-select (min. 1); ADR reveals classes multi-select + required świadectwo.
@@ -6806,6 +6857,7 @@ Removed: `airSuspension` / zawieszenie pneumatyczne (§13.9).
 |---|---|---|
 | `<FormDialog>` + `FormDialogHeader/Body/Footer` | **NEW** shared shell composing `<Dialog>` | `components/forms/FormDialog.tsx` |
 | `<RevealInset>` | **NEW** conditional-reveal inset | `components/forms/RevealInset.tsx` |
+| `<ActiveStatusRow>` | **NEW** distinguished `Aktywny` status row (RevealInset shell + bold label + consequence line + live badge), body-bottom, all four forms (§13.2.4) | `components/forms/ActiveStatusRow.tsx` |
 | `<FileUpload>` | **+`variant`** (`'block'` \| `'compact'`), compact chip layout | `components/ui/FileUpload.tsx` |
 | `<VehicleFormDialog>` / `<TrailerFormDialog>` / `<DriverFormDialog>` | **REPLACE** the three `*Sheet` components (wizard mode preserved — the wizard steps embed these dialogs the same way) | `app/(employee)/employee/{vehicles,trailers,drivers}/` |
 | `<Badge>` | reused (`success` / `danger` / `warning` / `muted`) — no change | `components/ui/Badge.tsx` |
@@ -6820,6 +6872,7 @@ Removed: `airSuspension` / zawieszenie pneumatyczne (§13.9).
 - Section-header emoji (legacy) → dropped (plain `<FormSection>` uppercase label).
 - `euro` `<Select>` with a single meaningful value → static `<Badge>`.
 - Error-only-in-footer for required files → **field-level `aria-invalid` + `<FormMessage>`** (footer summary kept for cross-field).
+- Critical `Aktywny` flag as a bare inline checkbox buried inside a section (Vehicle *Dane podstawowe* top, Trailer/Driver *Notatki*, Carrier *Przypisanie*) → **`<ActiveStatusRow>`** at the body bottom, distinguished (§13.2.4).
 
 ### §13.9 — Backend / data dependencies (route to shared/db/api — NOT design authority)
 

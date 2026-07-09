@@ -40,6 +40,12 @@
     "showPassword": "Show password",
     "hidePassword": "Hide password"
   },
+  "formActive": {
+    "vehicleConsequence": "An inactive vehicle disappears from selection lists and can't be used in new departures or claims.",
+    "trailerConsequence": "An inactive trailer disappears from selection lists and can't be used in new departures.",
+    "driverConsequence": "An inactive driver disappears from selection lists and can't be assigned to new departures.",
+    "carrierConsequence": "An inactive carrier loses panel access, and its vehicles and drivers disappear from selection lists."
+  },
   "confirmDelete": {
     "title": "Permanently delete — {entityLabel}",
     "body": "This action cannot be undone. {entityName} will be permanently removed. Please provide a reason.",
@@ -519,6 +525,7 @@
       "active": "Active"
     },
     "euroBadge": "EURO VI",
+    "fuelCardAdrRequired": "A fuel card requires the ADR flag to be checked",
     "fuelCardStatus": {
       "label": "Card status",
       "active": "Card active",

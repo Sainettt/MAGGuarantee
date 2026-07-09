@@ -57,6 +57,7 @@ import {
   FormDialogTitle,
 } from '@/components/forms/FormDialog';
 import { RevealInset } from '@/components/forms/RevealInset';
+import { ActiveStatusRow } from '@/components/forms/ActiveStatusRow';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useFormDraft } from '@/lib/hooks/useFormDraft';
@@ -271,6 +272,7 @@ export function TrailerFormDialog({
   const beamsOn = form.watch('beams') === true;
   const slidingRoofOn = form.watch('slidingRoof') === true;
   const certXlOn = form.watch('certXl') === true;
+  const activeOn = form.watch('active') === true;
 
   useEffect(() => {
     if (!beltsOn) form.setValue('beltsCount', undefined);
@@ -574,11 +576,17 @@ export function TrailerFormDialog({
               >
                 <Textarea id="trailer-notes" rows={3} {...form.register('notes')} />
               </FormField>
-              <label className="flex items-center gap-2 text-sm text-text">
-                <Checkbox {...form.register('active')} />
-                {t('fields.active')}
-              </label>
             </FormSection>
+
+            {/* ── Aktywny — distinguished status row, body bottom (§13.2.4) ── */}
+            <ActiveStatusRow
+              label={t('fields.active')}
+              consequence={tWizard('formActive.trailerConsequence')}
+              activeBadgeLabel={tCommon('active')}
+              inactiveBadgeLabel={tCommon('inactive')}
+              checked={activeOn}
+              checkboxProps={form.register('active')}
+            />
           </div>
         </FormDialogBody>
 

@@ -1,10 +1,19 @@
 'use client';
 
-// Create / edit drawer for a carrier. Wires the live VIES (NIP) and Biała
-// Lista (account+NIP) checks per docs/14-design-system.md § Field validation
-// badge. Both checks run on-blur; failures degrade to "service unavailable"
-// (warning) so the form never breaks if api-agent's integrations endpoints
-// aren't deployed yet.
+// Create / edit dialog for a carrier — centered <FormDialog> (docs/14 §13.1).
+// Migrated from the legacy right-side Sheet to the shared FormDialog shell so it
+// matches the three fleet dialogs (Vehicle / Trailer / Driver). Sections
+// top-to-bottom: Konto · Firma · Finanse · Zezwolenia · Przypisanie.
+//
+// Wires the live VIES (NIP) and Biała Lista (account+NIP) checks per
+// docs/14-design-system.md § Field validation badge. Both checks run on-blur;
+// failures degrade to "service unavailable" (warning) so the form never breaks
+// if api-agent's integrations endpoints aren't deployed yet.
+//
+// Used BOTH standalone (carriers page) and as wizard step 1
+// (CarrierOnboardingWizard) — all wizard affordances preserved: WizardStepper in
+// the header, skip/step props, footer «Save and continue» / «Exit» (no Skip on
+// step 1), create-vs-edit field split (create omits `active`).
 //
 // Phase-2 contract changes (db-agent migration `phase2_required_fields_…`):
 //   - `phone` is now NOT NULL on the Carrier row; UI marks it required.
@@ -32,21 +41,20 @@ import {
 } from '@magguarantee/shared';
 
 import { Button } from '@/components/ui/Button';
-import { Checkbox } from '@/components/ui/Checkbox';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
-import {
-  Sheet,
-  SheetBody,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/Sheet';
 import { Textarea } from '@/components/ui/Textarea';
 import { WizardStepper } from '@/components/carrier-onboarding/WizardStepper';
+import { ActiveStatusRow } from '@/components/forms/ActiveStatusRow';
 import { FormField, FormGrid, FormSection } from '@/components/forms/Form';
+import {
+  FormDialog,
+  FormDialogBody,
+  FormDialogDescription,
+  FormDialogFooter,
+  FormDialogHeader,
+  FormDialogTitle,
+} from '@/components/forms/FormDialog';
 import {
   FieldValidationBadge,
   type FieldValidationState,
@@ -77,13 +85,14 @@ interface Props {
   carrier: CarrierDto | null;
   onClose: () => void;
   /**
-   * `standalone` (default) — original behaviour: success closes the sheet
+   * `standalone` (default) — original behaviour: success closes the dialog
    * and emits a "saved" toast (plus the legacy 30s temp-password toast).
    *
-   * `wizard` — sheet is part of the chained carrier-onboarding flow. Header
-   * gets a <WizardStepper>; footer swaps to «Save and continue» / «Skip» /
-   * «Exit». On success the parent receives the created carrier via
-   * `onCompleted`; the sheet doesn't toast and doesn't auto-close (the
+   * `wizard` — dialog is part of the chained carrier-onboarding flow. Header
+   * gets a <WizardStepper>; footer swaps to «Save and continue» / «Exit» (no
+   * Skip on step 1 — the rest of the chain has nothing to attach to without
+   * the carrier). On success the parent receives the created carrier via
+   * `onCompleted`; the dialog doesn't toast and doesn't auto-close (the
    * orchestrator advances the step instead). `onExit` fires when the user
    * dismisses the wizard.
    *
@@ -96,7 +105,7 @@ interface Props {
   onExit?: () => void;
   /**
    * Wizard mode only — current step (1..4) for the in-header stepper. The
-   * carrier sheet itself only ever runs at step=1, but the stepper renders
+   * carrier dialog itself only ever runs at step=1, but the stepper renders
    * all four pills so the operator sees the path ahead.
    */
   wizardCurrentStep?: 1 | 2 | 3 | 4;
@@ -133,7 +142,7 @@ const NUMERIC_FIELDS = [
 // Fields that are part of form state but never go to the API.
 const FORM_ONLY_FIELDS = ['_vatCountry', '_vatNumber'] as const;
 
-export function CarrierSheet({
+export function CarrierFormDialog({
   open,
   carrier,
   onClose,
@@ -198,7 +207,7 @@ export function CarrierSheet({
   // `accountEur` field and let the user pick. Cleared on:
   //   - successful selection,
   //   - manual typing into `accountEur` (so the picker doesn't linger),
-  //   - clear-form button, sheet open/close, NIP re-lookup.
+  //   - clear-form button, dialog open/close, NIP re-lookup.
   const [accountChoices, setAccountChoices] = useState<string[]>([]);
 
   const checkNip = async () => {
@@ -307,7 +316,7 @@ export function CarrierSheet({
     }
   };
 
-  // Persist create-mode drafts to sessionStorage; closing the sheet keeps
+  // Persist create-mode drafts to sessionStorage; closing the dialog keeps
   // the user's typing intact. Edit mode skipped — server is source of truth.
   const draft = useFormDraft(form, DRAFT_KEY, { enabled: !isEdit });
 
@@ -329,12 +338,14 @@ export function CarrierSheet({
     form.setValue('vatId', composed ?? '', { shouldValidate: false });
   }, [watchedVatCountry, watchedVatNumber, form]);
 
+  const activeOn = form.watch('active') === true;
+
   useEffect(() => {
     if (!open) return;
     setNipState('idle');
     setAccountState('idle');
     setAccountChoices([]);
-    // Fresh sheet open → no autofill history yet.
+    // Fresh dialog open → no autofill history yet.
     autofillRef.current = { values: {} };
     if (isEdit && carrier) {
       const split = splitVatId(carrier.vatId);
@@ -389,7 +400,7 @@ export function CarrierSheet({
       }
     }
     // `checkNip` is recreated every render — listing it would re-fire this
-    // effect on each render while the sheet is open.
+    // effect on each render while the dialog is open.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, isEdit, carrier, form, draft, defaultOpiekunId, isOpiekunCaller]);
 
@@ -403,8 +414,8 @@ export function CarrierSheet({
       if (isWizard) {
         // Wizard mode: hand the created carrier (+ temp password) to the
         // orchestrator and DON'T toast/close. The orchestrator advances to
-        // step 2 and the <TemporaryPasswordRow> in the SheetHeader renders
-        // the password from then on.
+        // step 2 and the <TemporaryPasswordRow> in the fleet dialog headers
+        // renders the password from then on.
         onCompleted?.(created);
         return;
       }
@@ -465,485 +476,477 @@ export function CarrierSheet({
   };
 
   return (
-    <Sheet open={open} onOpenChange={(o) => !o && handleClose()}>
-      <SheetContent size="wide">
-        <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
-          <SheetHeader>
-            <SheetTitle>
-              {isWizard
-                ? tWizard('wizard.header.title', { n: wizardCurrentStep ?? 1 })
-                : isEdit
-                  ? t('editCarrier')
-                  : t('newCarrier')}
-            </SheetTitle>
-            <SheetDescription>
-              {isEdit && carrier ? carrier.login : null}
-            </SheetDescription>
-            {isWizard && (
-              <WizardStepper
-                currentStep={wizardCurrentStep ?? 1}
-                completedSteps={wizardCompletedSteps ?? []}
-                skippedSteps={wizardSkippedSteps ?? []}
-              />
-            )}
-          </SheetHeader>
+    <FormDialog open={open} onOpenChange={(o) => !o && handleClose()}>
+      <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
+        <FormDialogHeader>
+          <FormDialogTitle>
+            {isWizard
+              ? tWizard('wizard.header.title', { n: wizardCurrentStep ?? 1 })
+              : isEdit
+                ? t('editCarrier')
+                : t('newCarrier')}
+          </FormDialogTitle>
+          <FormDialogDescription>
+            {isEdit && carrier ? carrier.login : null}
+          </FormDialogDescription>
+          {isWizard && (
+            <WizardStepper
+              currentStep={wizardCurrentStep ?? 1}
+              completedSteps={wizardCompletedSteps ?? []}
+              skippedSteps={wizardSkippedSteps ?? []}
+            />
+          )}
+        </FormDialogHeader>
 
-          <SheetBody>
-            <div className="space-y-6">
-              <FormSection title={t('sections.account')}>
-                <FormGrid cols={2}>
-                  <FormField
-                    label={t('fields.login')}
-                    required={!isEdit}
-                    error={errMsg('login')}
-                    htmlFor="carrier-login"
-                  >
-                    <Input
-                      id="carrier-login"
-                      disabled={isEdit}
-                      {...form.register('login')}
-                    />
-                  </FormField>
-                  <FormField
-                    label={t('fields.email')}
-                    required
-                    error={errMsg('email')}
-                    htmlFor="carrier-email"
-                  >
-                    <Input
-                      id="carrier-email"
-                      type="email"
-                      {...form.register('email')}
-                    />
-                  </FormField>
-                  <FormField
-                    label={t('fields.name')}
-                    required
-                    error={errMsg('name')}
-                    htmlFor="carrier-name"
-                  >
-                    <Input
-                      id="carrier-name"
-                      {...form.register('name')}
-                    />
-                  </FormField>
-                  <FormField
-                    label={t('fields.contactPerson')}
-                    required
-                    error={errMsg('contactPerson')}
-                    htmlFor="carrier-contactPerson"
-                  >
-                    <Input
-                      id="carrier-contactPerson"
-                      {...form.register('contactPerson')}
-                    />
-                  </FormField>
-                  <FormField
-                    label={t('fields.phone')}
-                    required
-                    error={errMsg('phone')}
-                    htmlFor="carrier-phone"
-                  >
-                    <Input
-                      id="carrier-phone"
-                      {...form.register('phone')}
-                    />
-                  </FormField>
-                  <FormField
-                    label={t('fields.ordersEmail')}
-                    required
-                    error={errMsg('ordersEmail')}
-                    htmlFor="carrier-ordersEmail"
-                  >
-                    <Input
-                      id="carrier-ordersEmail"
-                      type="email"
-                      {...form.register('ordersEmail')}
-                    />
-                  </FormField>
-                  {!isEdit && (
-                    <FormField
-                      label={t('fields.password')}
-                      required
-                      description="≥10 chars, ≥1 letter, ≥1 digit. Leave empty to auto-generate."
-                      error={errMsg('password')}
-                      htmlFor="carrier-password"
-                    >
-                      <Input
-                        id="carrier-password"
-                        type="text"
-                        autoComplete="new-password"
-                        {...form.register('password')}
-                      />
-                    </FormField>
-                  )}
-                </FormGrid>
-              </FormSection>
-
-              <FormSection title={t('sections.company')}>
-                <FormGrid cols={2}>
-                  <FormField
-                    label={t('fields.nip')}
-                    required
-                    description={t('fields.nipHint')}
-                    error={errMsg('nip')}
-                    htmlFor="carrier-nip"
-                  >
-                    <div className="space-y-1">
-                      <Input
-                        id="carrier-nip"
-                        inputMode="text"
-                        maxLength={20}
-                        autoComplete="off"
-                        {...form.register('nip', {
-                          // Strip whitespace and hyphens so paste-from-Excel
-                          // produces a clean alphanumeric string the API
-                          // accepts (5–20 chars). Polish 10-digit NIP still
-                          // passes; foreign TINs (Italian Codice Fiscale up to
-                          // 16 etc.) also fit.
-                          setValueAs: (v) =>
-                            typeof v === 'string'
-                              ? v.replace(/[\s-]/g, '')
-                              : v,
-                          onBlur: () => {
-                            void checkNip();
-                          },
-                        })}
-                      />
-                      <FieldValidationBadge
-                        state={nipState}
-                        message={nipMsg}
-                      />
-                    </div>
-                  </FormField>
-                  <FormField
-                    label={t('fields.vatId')}
-                    description={t('fields.vatHint')}
-                    error={errMsg('vatId')}
-                    htmlFor="carrier-vatNumber"
-                  >
-                    <div className="flex gap-2">
-                      <Select
-                        id="carrier-vatCountry"
-                        aria-label={t('fields.vatCountry')}
-                        className="max-w-[8rem]"
-                        {...form.register('_vatCountry')}
-                      >
-                        {EU_VAT_COUNTRIES.map((c) => (
-                          <option key={c.code} value={c.code}>
-                            {c.code} — {c.name}
-                          </option>
-                        ))}
-                      </Select>
-                      <Input
-                        id="carrier-vatNumber"
-                        aria-label={t('fields.vatNumber')}
-                        className="flex-1"
-                        inputMode="text"
-                        maxLength={12}
-                        autoComplete="off"
-                        {...form.register('_vatNumber', {
-                          // Strip whitespace + hyphens; uppercase letters so
-                          // EuVatSchema regex (`[A-Z]{2}[A-Za-z0-9]{2,12}`)
-                          // is happy regardless of how the user typed it.
-                          setValueAs: (v) =>
-                            typeof v === 'string'
-                              ? v.replace(/[\s-]/g, '').toUpperCase()
-                              : v,
-                        })}
-                      />
-                    </div>
-                  </FormField>
-                </FormGrid>
+        <FormDialogBody>
+          <div className="space-y-6">
+            <FormSection title={t('sections.account')}>
+              <FormGrid cols={2}>
                 <FormField
-                  label={t('fields.company')}
-                  error={errMsg('company')}
-                  htmlFor="carrier-company"
+                  label={t('fields.login')}
+                  required={!isEdit}
+                  error={errMsg('login')}
+                  htmlFor="carrier-login"
                 >
                   <Input
-                    id="carrier-company"
-                    {...form.register('company')}
+                    id="carrier-login"
+                    disabled={isEdit}
+                    {...form.register('login')}
                   />
                 </FormField>
                 <FormField
-                  label={t('fields.companyAddress')}
+                  label={t('fields.email')}
                   required
-                  error={errMsg('companyAddress')}
-                  htmlFor="carrier-address"
-                >
-                  <Textarea
-                    id="carrier-address"
-                    rows={2}
-                    {...form.register('companyAddress')}
-                  />
-                </FormField>
-              </FormSection>
-
-              <FormSection title={t('sections.finance')}>
-                <FormGrid cols={2}>
-                  <FormField
-                    label={t('fields.accountEur')}
-                    required
-                    error={errMsg('accountEur')}
-                    htmlFor="carrier-accountEur"
-                  >
-                    <div className="space-y-1">
-                      <Input
-                        id="carrier-accountEur"
-                        {...form.register('accountEur', {
-                          onBlur: () => {
-                            void checkAccount();
-                          },
-                          // Manual typing dismisses the MF picker — once
-                          // the user starts editing the account they don't
-                          // want a dropdown nagging them.
-                          onChange: () => {
-                            if (accountChoices.length > 0) {
-                              setAccountChoices([]);
-                            }
-                          },
-                        })}
-                      />
-                      {accountChoices.length > 0 && (
-                        <div className="space-y-1 rounded-[8px] border border-border bg-card p-2">
-                          <p
-                            id="carrier-account-picker-label"
-                            className="text-[12px] text-text-sub"
-                          >
-                            {t('accountSelector.label')}
-                          </p>
-                          <Select
-                            aria-labelledby="carrier-account-picker-label"
-                            defaultValue=""
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              if (!v) return;
-                              form.setValue('accountEur', v, {
-                                shouldDirty: true,
-                                shouldValidate: true,
-                              });
-                              // Track the picker selection as autofill so a
-                              // subsequent NIP change clears it (unless the
-                              // user has further edited the field).
-                              autofillRef.current.values.accountEur = v;
-                              setAccountChoices([]);
-                            }}
-                          >
-                            <option value="" disabled>
-                              {t('accountSelector.placeholder')}
-                            </option>
-                            {accountChoices.map((acc) => (
-                              <option key={acc} value={acc}>
-                                {acc}
-                              </option>
-                            ))}
-                          </Select>
-                        </div>
-                      )}
-                      <FieldValidationBadge
-                        state={accountState}
-                        message={accountMsg}
-                      />
-                    </div>
-                  </FormField>
-                  <FormField
-                    label={t('fields.accountPln')}
-                    error={errMsg('accountPln')}
-                    htmlFor="carrier-accountPln"
-                  >
-                    <Input
-                      id="carrier-accountPln"
-                      {...form.register('accountPln')}
-                    />
-                  </FormField>
-                  <FormField
-                    label={t('fields.paymentTerms')}
-                    error={errMsg('paymentTerms')}
-                    htmlFor="carrier-paymentTerms"
-                  >
-                    <Input
-                      id="carrier-paymentTerms"
-                      type="number"
-                      {...form.register('paymentTerms', {
-                        setValueAs: (v) =>
-                          v === '' || v === null ? undefined : Number(v),
-                      })}
-                    />
-                  </FormField>
-                  <FormField
-                    label={t('fields.insuranceValue')}
-                    required
-                    error={errMsg('insuranceValue')}
-                    htmlFor="carrier-insuranceValue"
-                  >
-                    <Input
-                      id="carrier-insuranceValue"
-                      type="number"
-                      step="0.01"
-                      min={250000}
-                      placeholder={t('fields.insuranceMinHint')}
-                      {...form.register('insuranceValue', {
-                        // Empty / null input → undefined so Zod treats the
-                        // field as missing and surfaces "Required" instead of
-                        // silently coercing to 0.
-                        setValueAs: (v) =>
-                          v === '' || v === null ? undefined : Number(v),
-                      })}
-                    />
-                  </FormField>
-                  <FormField
-                    label={t('fields.insuranceExpiry')}
-                    required
-                    error={errMsg('insuranceExpiry')}
-                    htmlFor="carrier-insuranceExpiry"
-                  >
-                    <Input
-                      id="carrier-insuranceExpiry"
-                      type="date"
-                      {...form.register('insuranceExpiry')}
-                    />
-                  </FormField>
-                  <FormField
-                    label={t('fields.licenseExpiry')}
-                    required
-                    error={errMsg('licenseExpiry')}
-                    htmlFor="carrier-licenseExpiry"
-                  >
-                    <Input
-                      id="carrier-licenseExpiry"
-                      type="date"
-                      {...form.register('licenseExpiry')}
-                    />
-                  </FormField>
-                </FormGrid>
-              </FormSection>
-
-              <FormSection title={t('sections.permits')}>
-                <FormField
-                  label={t('fields.numberOfVehicle')}
-                  error={errMsg('numberOfVehicle')}
-                  htmlFor="carrier-numberOfVehicle"
+                  error={errMsg('email')}
+                  htmlFor="carrier-email"
                 >
                   <Input
-                    id="carrier-numberOfVehicle"
+                    id="carrier-email"
+                    type="email"
+                    {...form.register('email')}
+                  />
+                </FormField>
+                <FormField
+                  label={t('fields.name')}
+                  required
+                  error={errMsg('name')}
+                  htmlFor="carrier-name"
+                >
+                  <Input id="carrier-name" {...form.register('name')} />
+                </FormField>
+                <FormField
+                  label={t('fields.contactPerson')}
+                  required
+                  error={errMsg('contactPerson')}
+                  htmlFor="carrier-contactPerson"
+                >
+                  <Input
+                    id="carrier-contactPerson"
+                    {...form.register('contactPerson')}
+                  />
+                </FormField>
+                <FormField
+                  label={t('fields.phone')}
+                  required
+                  error={errMsg('phone')}
+                  htmlFor="carrier-phone"
+                >
+                  <Input id="carrier-phone" {...form.register('phone')} />
+                </FormField>
+                <FormField
+                  label={t('fields.ordersEmail')}
+                  required
+                  error={errMsg('ordersEmail')}
+                  htmlFor="carrier-ordersEmail"
+                >
+                  <Input
+                    id="carrier-ordersEmail"
+                    type="email"
+                    {...form.register('ordersEmail')}
+                  />
+                </FormField>
+                {!isEdit && (
+                  <FormField
+                    label={t('fields.password')}
+                    required
+                    description="≥10 chars, ≥1 letter, ≥1 digit. Leave empty to auto-generate."
+                    error={errMsg('password')}
+                    htmlFor="carrier-password"
+                  >
+                    <Input
+                      id="carrier-password"
+                      type="text"
+                      autoComplete="new-password"
+                      {...form.register('password')}
+                    />
+                  </FormField>
+                )}
+              </FormGrid>
+            </FormSection>
+
+            <FormSection title={t('sections.company')}>
+              <FormGrid cols={2}>
+                <FormField
+                  label={t('fields.nip')}
+                  required
+                  description={t('fields.nipHint')}
+                  error={errMsg('nip')}
+                  htmlFor="carrier-nip"
+                >
+                  <div className="space-y-1">
+                    <Input
+                      id="carrier-nip"
+                      inputMode="text"
+                      maxLength={20}
+                      autoComplete="off"
+                      {...form.register('nip', {
+                        // Strip whitespace and hyphens so paste-from-Excel
+                        // produces a clean alphanumeric string the API
+                        // accepts (5–20 chars). Polish 10-digit NIP still
+                        // passes; foreign TINs (Italian Codice Fiscale up to
+                        // 16 etc.) also fit.
+                        setValueAs: (v) =>
+                          typeof v === 'string' ? v.replace(/[\s-]/g, '') : v,
+                        onBlur: () => {
+                          void checkNip();
+                        },
+                      })}
+                    />
+                    <FieldValidationBadge state={nipState} message={nipMsg} />
+                  </div>
+                </FormField>
+                <FormField
+                  label={t('fields.vatId')}
+                  description={t('fields.vatHint')}
+                  error={errMsg('vatId')}
+                  htmlFor="carrier-vatNumber"
+                >
+                  <div className="flex gap-2">
+                    <Select
+                      id="carrier-vatCountry"
+                      aria-label={t('fields.vatCountry')}
+                      className="max-w-[8rem]"
+                      {...form.register('_vatCountry')}
+                    >
+                      {EU_VAT_COUNTRIES.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.code} — {c.name}
+                        </option>
+                      ))}
+                    </Select>
+                    <Input
+                      id="carrier-vatNumber"
+                      aria-label={t('fields.vatNumber')}
+                      className="flex-1"
+                      inputMode="text"
+                      maxLength={12}
+                      autoComplete="off"
+                      {...form.register('_vatNumber', {
+                        // Strip whitespace + hyphens; uppercase letters so
+                        // EuVatSchema regex (`[A-Z]{2}[A-Za-z0-9]{2,12}`)
+                        // is happy regardless of how the user typed it.
+                        setValueAs: (v) =>
+                          typeof v === 'string'
+                            ? v.replace(/[\s-]/g, '').toUpperCase()
+                            : v,
+                      })}
+                    />
+                  </div>
+                </FormField>
+              </FormGrid>
+              <FormField
+                label={t('fields.company')}
+                error={errMsg('company')}
+                htmlFor="carrier-company"
+                className="md:col-span-2"
+              >
+                <Input id="carrier-company" {...form.register('company')} />
+              </FormField>
+              <FormField
+                label={t('fields.companyAddress')}
+                required
+                error={errMsg('companyAddress')}
+                htmlFor="carrier-address"
+                className="md:col-span-2"
+              >
+                <Textarea
+                  id="carrier-address"
+                  rows={2}
+                  {...form.register('companyAddress')}
+                />
+              </FormField>
+            </FormSection>
+
+            <FormSection title={t('sections.finance')}>
+              <FormGrid cols={2}>
+                <FormField
+                  label={t('fields.accountEur')}
+                  required
+                  error={errMsg('accountEur')}
+                  htmlFor="carrier-accountEur"
+                >
+                  <div className="space-y-1">
+                    <Input
+                      id="carrier-accountEur"
+                      {...form.register('accountEur', {
+                        onBlur: () => {
+                          void checkAccount();
+                        },
+                        // Manual typing dismisses the MF picker — once
+                        // the user starts editing the account they don't
+                        // want a dropdown nagging them.
+                        onChange: () => {
+                          if (accountChoices.length > 0) {
+                            setAccountChoices([]);
+                          }
+                        },
+                      })}
+                    />
+                    {accountChoices.length > 0 && (
+                      <div className="space-y-1 rounded-[8px] border border-border bg-card p-2">
+                        <p
+                          id="carrier-account-picker-label"
+                          className="text-[12px] text-text-sub"
+                        >
+                          {t('accountSelector.label')}
+                        </p>
+                        <Select
+                          aria-labelledby="carrier-account-picker-label"
+                          defaultValue=""
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (!v) return;
+                            form.setValue('accountEur', v, {
+                              shouldDirty: true,
+                              shouldValidate: true,
+                            });
+                            // Track the picker selection as autofill so a
+                            // subsequent NIP change clears it (unless the
+                            // user has further edited the field).
+                            autofillRef.current.values.accountEur = v;
+                            setAccountChoices([]);
+                          }}
+                        >
+                          <option value="" disabled>
+                            {t('accountSelector.placeholder')}
+                          </option>
+                          {accountChoices.map((acc) => (
+                            <option key={acc} value={acc}>
+                              {acc}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                    )}
+                    <FieldValidationBadge
+                      state={accountState}
+                      message={accountMsg}
+                    />
+                  </div>
+                </FormField>
+                <FormField
+                  label={t('fields.accountPln')}
+                  error={errMsg('accountPln')}
+                  htmlFor="carrier-accountPln"
+                >
+                  <Input
+                    id="carrier-accountPln"
+                    {...form.register('accountPln')}
+                  />
+                </FormField>
+                <FormField
+                  label={t('fields.paymentTerms')}
+                  error={errMsg('paymentTerms')}
+                  htmlFor="carrier-paymentTerms"
+                >
+                  <Input
+                    id="carrier-paymentTerms"
                     type="number"
-                    {...form.register('numberOfVehicle', {
+                    {...form.register('paymentTerms', {
                       setValueAs: (v) =>
                         v === '' || v === null ? undefined : Number(v),
                     })}
                   />
                 </FormField>
-              </FormSection>
-
-              {(!isOpiekunCaller || isEdit) && (
-                <FormSection title={t('sections.assignment')}>
-                  {!isOpiekunCaller && (
-                    <FormField
-                      label={t('fields.opiekun')}
-                      required
-                      error={errMsg('opiekunId')}
-                      htmlFor="carrier-opiekunId"
-                    >
-                      <Select
-                        id="carrier-opiekunId"
-                        {...form.register('opiekunId')}
-                      >
-                        <option value="">—</option>
-                        {(opiekuniQ.data ?? []).map((u) => (
-                          <option key={u.id} value={u.id}>
-                            {u.name ?? u.login}
-                          </option>
-                        ))}
-                      </Select>
-                    </FormField>
-                  )}
-                  {isEdit && (
-                    <label className="flex items-center gap-2 text-sm text-text">
-                      <Checkbox {...form.register('active')} />
-                      {t('fields.active')}
-                    </label>
-                  )}
-                </FormSection>
-              )}
-              {/*
-                Keep the opiekunId in form state (hidden) when the caller is
-                an opiekun — `defaultOpiekunId` (set in the open effect) seeds
-                it with the caller's own id, and the backend re-enforces.
-                Without this hidden field the RHF register call is gone and
-                the form value would never reach the wire payload.
-              */}
-              {isOpiekunCaller && (
-                <input type="hidden" {...form.register('opiekunId')} />
-              )}
-            </div>
-          </SheetBody>
-
-          <SheetFooter>
-            {isWizard ? (
-              <>
-                {/*
-                  Carrier (step 1) has no Skip — without the carrier row the
-                  rest of the chain has nothing to attach to. We still render
-                  Exit so the operator can abandon the flow.
-                */}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onExit?.()}
-                  disabled={submitting}
+                <FormField
+                  label={t('fields.insuranceValue')}
+                  required
+                  error={errMsg('insuranceValue')}
+                  htmlFor="carrier-insuranceValue"
                 >
-                  {tWizard('wizard.action.exit')}
-                </Button>
-                <Button type="submit" size="sm" disabled={submitting}>
-                  {submitting
-                    ? tCommon('saving')
-                    : tWizard('wizard.action.saveAndContinue')}
-                </Button>
-              </>
-            ) : (
-              <>
-                {!isEdit && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      draft.clear();
-                      form.reset({
-                        ...getDefaults(),
-                        opiekunId: defaultOpiekunId as unknown as string,
-                      });
-                      // Also clear any inline integration badges so they don't
-                      // dangle for fields that were just wiped.
-                      setNipState('idle');
-                      setAccountState('idle');
-                      setAccountChoices([]);
-                      autofillRef.current = { values: {} };
-                    }}
-                    disabled={submitting}
+                  <Input
+                    id="carrier-insuranceValue"
+                    type="number"
+                    step="0.01"
+                    min={250000}
+                    placeholder={t('fields.insuranceMinHint')}
+                    {...form.register('insuranceValue', {
+                      // Empty / null input → undefined so Zod treats the
+                      // field as missing and surfaces "Required" instead of
+                      // silently coercing to 0.
+                      setValueAs: (v) =>
+                        v === '' || v === null ? undefined : Number(v),
+                    })}
+                  />
+                </FormField>
+                <FormField
+                  label={t('fields.insuranceExpiry')}
+                  required
+                  error={errMsg('insuranceExpiry')}
+                  htmlFor="carrier-insuranceExpiry"
+                >
+                  <Input
+                    id="carrier-insuranceExpiry"
+                    type="date"
+                    {...form.register('insuranceExpiry')}
+                  />
+                </FormField>
+                <FormField
+                  label={t('fields.licenseExpiry')}
+                  required
+                  error={errMsg('licenseExpiry')}
+                  htmlFor="carrier-licenseExpiry"
+                >
+                  <Input
+                    id="carrier-licenseExpiry"
+                    type="date"
+                    {...form.register('licenseExpiry')}
+                  />
+                </FormField>
+              </FormGrid>
+            </FormSection>
+
+            <FormSection title={t('sections.permits')}>
+              <FormField
+                label={t('fields.numberOfVehicle')}
+                error={errMsg('numberOfVehicle')}
+                htmlFor="carrier-numberOfVehicle"
+              >
+                <Input
+                  id="carrier-numberOfVehicle"
+                  type="number"
+                  {...form.register('numberOfVehicle', {
+                    setValueAs: (v) =>
+                      v === '' || v === null ? undefined : Number(v),
+                  })}
+                />
+              </FormField>
+            </FormSection>
+
+            {!isOpiekunCaller && (
+              <FormSection title={t('sections.assignment')}>
+                <FormField
+                  label={t('fields.opiekun')}
+                  required
+                  error={errMsg('opiekunId')}
+                  htmlFor="carrier-opiekunId"
+                >
+                  <Select
+                    id="carrier-opiekunId"
+                    {...form.register('opiekunId')}
                   >
-                    {tCommon('clear')}
-                  </Button>
-                )}
+                    <option value="">—</option>
+                    {(opiekuniQ.data ?? []).map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name ?? u.login}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+              </FormSection>
+            )}
+            {/*
+              Keep the opiekunId in form state (hidden) when the caller is
+              an opiekun — `defaultOpiekunId` (set in the open effect) seeds
+              it with the caller's own id, and the backend re-enforces.
+              Without this hidden field the RHF register call is gone and
+              the form value would never reach the wire payload.
+            */}
+            {isOpiekunCaller && (
+              <input type="hidden" {...form.register('opiekunId')} />
+            )}
+
+            {/* ── Aktywny — distinguished status row, body bottom (§13.2.4).
+                Edit only: CreateCarrierDto has no `active` (new carriers are
+                always active). ── */}
+            {isEdit && (
+              <ActiveStatusRow
+                label={t('fields.active')}
+                consequence={tWizard('formActive.carrierConsequence')}
+                activeBadgeLabel={tCommon('active')}
+                inactiveBadgeLabel={tCommon('inactive')}
+                checked={activeOn}
+                checkboxProps={form.register('active')}
+              />
+            )}
+          </div>
+        </FormDialogBody>
+
+        <FormDialogFooter>
+          {isWizard ? (
+            <>
+              {/*
+                Carrier (step 1) has no Skip — without the carrier row the
+                rest of the chain has nothing to attach to. We still render
+                Exit so the operator can abandon the flow.
+              */}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => onExit?.()}
+                disabled={submitting}
+              >
+                {tWizard('wizard.action.exit')}
+              </Button>
+              <Button type="submit" size="sm" disabled={submitting}>
+                {submitting
+                  ? tCommon('saving')
+                  : tWizard('wizard.action.saveAndContinue')}
+              </Button>
+            </>
+          ) : (
+            <>
+              {!isEdit && (
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
-                  onClick={onClose}
+                  onClick={() => {
+                    draft.clear();
+                    form.reset({
+                      ...getDefaults(),
+                      opiekunId: defaultOpiekunId as unknown as string,
+                    });
+                    // Also clear any inline integration badges so they don't
+                    // dangle for fields that were just wiped.
+                    setNipState('idle');
+                    setAccountState('idle');
+                    setAccountChoices([]);
+                    autofillRef.current = { values: {} };
+                  }}
                   disabled={submitting}
                 >
-                  {tCommon('cancel')}
+                  {tCommon('clear')}
                 </Button>
-                <Button type="submit" size="sm" disabled={submitting}>
-                  {submitting ? tCommon('saving') : tCommon('save')}
-                </Button>
-              </>
-            )}
-          </SheetFooter>
-        </form>
-      </SheetContent>
-    </Sheet>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={onClose}
+                disabled={submitting}
+              >
+                {tCommon('cancel')}
+              </Button>
+              <Button type="submit" size="sm" disabled={submitting}>
+                {submitting ? tCommon('saving') : tCommon('save')}
+              </Button>
+            </>
+          )}
+        </FormDialogFooter>
+      </form>
+    </FormDialog>
   );
 }
 

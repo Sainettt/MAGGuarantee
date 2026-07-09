@@ -180,6 +180,40 @@ export const vehicleFuelCardRefine = (
   }
 };
 
+/** Shared message for the HARD `fuelCard ⇒ adr` rule — kept in lockstep with
+ *  the service's `CROSS_FIELD_MESSAGES.fuelCardAdr`. */
+const FUEL_CARD_ADR_MESSAGE = 'Karta paliwowa wymaga zaznaczenia ADR';
+
+/**
+ * HARD cross-field rule: `fuelCard=true ⇒ adr=true`. A vehicle carrying a fuel
+ * card MUST also have the ADR flag set — no exceptions, save-blocking (422).
+ * Issued on `path: ['fuelCard']` (the field the operator toggled to trigger it).
+ *
+ * This is the CREATE variant: an absent `adr` is treated as `false` (create
+ * fills the whole object), so `fuelCard=true` with `adr` omitted correctly
+ * fails. On UPDATE the object is partial and this convention does NOT hold — the
+ * update superRefine uses a `!== undefined` guard (mirroring the gb/it/fr rule)
+ * so a partial PATCH `{fuelCard:true}` on a vehicle whose stored `adr=true`
+ * parses cleanly; the authoritative post-patch check lives in the service
+ * (`_crossFieldViolations` over `_effectiveState`), which covers the stored-adr
+ * edge exactly.
+ *
+ * This is UNRELATED to the derived, soft `fuelCardBlocked` badge (porozumienie
+ * scan) — that stays untouched.
+ */
+export const vehicleFuelCardAdrRefine = (
+  d: { fuelCard?: boolean; adr?: boolean },
+  ctx: z.RefinementCtx,
+): void => {
+  if (d.fuelCard === true && d.adr !== true) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: FUEL_CARD_ADR_MESSAGE,
+      path: ['fuelCard'],
+    });
+  }
+};
+
 /** `wasteAllowed=true ⇒ wasteCountries ≥1`; `adr=true ⇒ adrClasses ≥1`. */
 export const vehicleWasteAdrRefine = (
   d: {
@@ -228,6 +262,7 @@ export const CreateVehicleObjectSchema = z
 export const CreateVehicleSchema = CreateVehicleObjectSchema.superRefine(
   (d, ctx) => {
     vehicleFuelCardRefine(d, ctx);
+    vehicleFuelCardAdrRefine(d, ctx);
     vehicleWasteAdrRefine(d, ctx);
     // min 2 of {gb, it, fr} — enforced at create (undefined counts as false).
     if (countUkItFr(d.gb, d.it, d.fr) < 2) {
@@ -316,6 +351,21 @@ export const UpdateVehicleSchema = UpdateVehicleObjectSchema.superRefine(
   (d, ctx) => {
     vehicleFuelCardRefine(d, ctx);
     vehicleWasteAdrRefine(d, ctx);
+    // HARD `fuelCard=true ⇒ adr=true` — on PATCH only checkable when BOTH fields
+    // are present in the payload (mirrors the gb/it/fr `!== undefined` guard
+    // below; the edit form always sends both). A partial PATCH that touches only
+    // `fuelCard` defers to the service's authoritative post-patch effective
+    // state, which sees the stored `adr`. NOTE: this canNOT reuse
+    // `vehicleFuelCardAdrRefine` — that CREATE variant treats absent `adr` as
+    // false and would false-reject a valid `{fuelCard:true}` PATCH on an
+    // already-adr=true vehicle.
+    if (d.fuelCard === true && d.adr === false) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: FUEL_CARD_ADR_MESSAGE,
+        path: ['fuelCard'],
+      });
+    }
     // min 2 of {gb, it, fr} — on PATCH only checkable when all three are
     // present in the payload (the edit form always sends all three); the
     // service asserts the authoritative post-patch effective state.

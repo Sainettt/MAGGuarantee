@@ -537,6 +537,119 @@ describe('VehiclesService', () => {
     ).resolves.toMatchObject({ plateNumber: 'WA0002' });
   });
 
+  // ── Create — HARD fuelCard ⇒ adr cross-field rule ──────────
+  // A fuel card mandates the ADR flag (save-blocking, 422). UNRELATED to the
+  // soft, derived `fuelCardBlocked` badge (porozumienie scan), which is left
+  // untouched. Keep the Zod refine message and the service message aligned:
+  // 'Karta paliwowa wymaga zaznaczenia ADR'.
+
+  it('create with fuelCard=true and adr=false → 422 (karta paliwowa wymaga ADR)', async () => {
+    const { svc } = buildService({
+      carriers: [makeCarrier()],
+      users: makeValidPeople(),
+    });
+    await expect(
+      svc.create(
+        makeAuth('admin', 'a-1'),
+        createDto({
+          fuelCard: true,
+          fuelCardNumber: '1234567890123456',
+          fuelCardExpiry: '2030-01-01',
+          fuelCardPin: '1234',
+          adr: false,
+        }),
+        [makeUpload('contract')],
+      ),
+    ).rejects.toThrow(UnprocessableEntityException);
+  });
+
+  it('create with fuelCard=true and adr=true (with adrClasses) succeeds', async () => {
+    const { svc } = buildService({
+      carriers: [makeCarrier()],
+      users: makeValidPeople(),
+    });
+    await expect(
+      svc.create(
+        makeAuth('admin', 'a-1'),
+        createDto({
+          fuelCard: true,
+          fuelCardNumber: '1234567890123456',
+          fuelCardExpiry: '2030-01-01',
+          fuelCardPin: '1234',
+          adr: true,
+          adrClasses: ['3'],
+        }),
+        [makeUpload('contract')],
+      ),
+      // The create passing (no throw) is the assertion — the in-memory mock
+      // repo echoes a fixed fixture row and doesn't round-trip fuelCard, so we
+      // assert on plateNumber only (mirrors the neighboring create tests).
+    ).resolves.toMatchObject({ plateNumber: 'WA0002' });
+  });
+
+  // ── Update — HARD fuelCard ⇒ adr over the effective post-patch state ──
+
+  it('update setting fuelCard=true on an adr=false vehicle → 422 (adr absent from payload)', async () => {
+    const { svc } = buildService({
+      vehicles: [makeVehicle({ id: 'v-1', fuelCard: false, adr: false })],
+      carriers: [makeCarrier()],
+      users: makeValidPeople(),
+    });
+    await expect(
+      svc.update(
+        'v-1',
+        {
+          fuelCard: true,
+          fuelCardNumber: '1234567890123456',
+          fuelCardExpiry: '2030-01-01',
+          fuelCardPin: '1234',
+        },
+        [],
+      ),
+    ).rejects.toThrow(UnprocessableEntityException);
+  });
+
+  it('update setting adr=false on a fuelCard=true vehicle → 422 (inverse edit, fuelCard absent)', async () => {
+    const { svc } = buildService({
+      vehicles: [
+        makeVehicle({
+          id: 'v-1',
+          fuelCard: true,
+          fuelCardNumber: '1234567890123456',
+          fuelCardExpiry: NOW,
+          fuelCardPin: '1234',
+          adr: true,
+          adrClasses: ['3'],
+        }),
+      ],
+      carriers: [makeCarrier()],
+      users: makeValidPeople(),
+    });
+    await expect(
+      svc.update('v-1', { adr: false, adrClasses: [] }, []),
+    ).rejects.toThrow(UnprocessableEntityException);
+  });
+
+  it('update setting fuelCard=false on an adr=false vehicle → ok (no fuel card, no ADR needed)', async () => {
+    const { svc } = buildService({
+      vehicles: [
+        makeVehicle({
+          id: 'v-1',
+          fuelCard: true,
+          fuelCardNumber: '1234567890123456',
+          fuelCardExpiry: NOW,
+          fuelCardPin: '1234',
+          adr: false,
+        }),
+      ],
+      carriers: [makeCarrier()],
+      users: makeValidPeople(),
+    });
+    await expect(
+      svc.update('v-1', { fuelCard: false }, []),
+    ).resolves.toMatchObject({ id: 'v-1', fuelCard: false });
+  });
+
   // ── Create — required-attachment rule ──────────────────────
 
   // NOTE (2026-06-17, resolved): the `contract` (umowa) attachment is now

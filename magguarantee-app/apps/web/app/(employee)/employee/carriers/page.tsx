@@ -27,7 +27,7 @@ import { useAuth } from '@/lib/hooks/useAuth';
 import { useCarriers, useHardDeleteCarrier } from '@/lib/hooks/useCarriers';
 import { useOpiekuni } from '@/lib/hooks/useLookups';
 
-import { CarrierSheet } from './CarrierSheet';
+import { CarrierFormDialog } from './CarrierFormDialog';
 
 export default function CarriersPage() {
   // The wizard's state lives in a Context so the page, the table cells
@@ -100,7 +100,7 @@ function CarriersPageInner() {
   const openCreate = () => {
     // The "+ Add carrier" button opens the wizard, NOT the standalone create
     // sheet — the wizard guides the operator through vehicle/trailer/driver
-    // right after. The wizard's CarrierSheet handles step 1 internally.
+    // right after. The wizard's CarrierFormDialog handles step 1 internally.
     wizard.start();
   };
   const openEdit = (row: CarrierDto) => {
@@ -364,7 +364,7 @@ function CarriersPageInner() {
         onEdit={editFromDetail}
       />
 
-      <CarrierSheet
+      <CarrierFormDialog
         open={sheetOpen}
         carrier={target}
         onClose={() => setSheetOpen(false)}

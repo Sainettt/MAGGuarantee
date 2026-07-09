@@ -40,6 +40,12 @@
     "showPassword": "Pokaż hasło",
     "hidePassword": "Ukryj hasło"
   },
+  "formActive": {
+    "vehicleConsequence": "Nieaktywny pojazd znika z list wyboru i nie może być użyty w nowych wyjazdach ani wnioskach.",
+    "trailerConsequence": "Nieaktywna naczepa znika z list wyboru i nie może być użyta w nowych wyjazdach.",
+    "driverConsequence": "Nieaktywny kierowca znika z list wyboru i nie może być przypisany do nowych wyjazdów.",
+    "carrierConsequence": "Nieaktywny przewoźnik traci dostęp do panelu, a jego pojazdy i kierowcy znikają z list wyboru."
+  },
   "confirmDelete": {
     "title": "Trwałe usunięcie — {entityLabel}",
     "body": "Tej operacji nie da się cofnąć. {entityName} zostanie trwale usunięty. Podaj powód.",
@@ -519,6 +525,7 @@
       "active": "Aktywny"
     },
     "euroBadge": "EURO VI",
+    "fuelCardAdrRequired": "Karta paliwowa wymaga zaznaczenia ADR",
     "fuelCardStatus": {
       "label": "Status karty",
       "active": "Karta aktywna",

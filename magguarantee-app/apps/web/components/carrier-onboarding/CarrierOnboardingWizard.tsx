@@ -22,7 +22,7 @@
 // useCarrierOnboarding and is also flipped to true as the operator creates
 // new entities through the wizard itself.
 
-import { CarrierSheet } from '@/app/(employee)/employee/carriers/CarrierSheet';
+import { CarrierFormDialog } from '@/app/(employee)/employee/carriers/CarrierFormDialog';
 import { DriverFormDialog } from '@/app/(employee)/employee/drivers/DriverFormDialog';
 import { TrailerFormDialog } from '@/app/(employee)/employee/trailers/TrailerFormDialog';
 import { VehicleFormDialog } from '@/app/(employee)/employee/vehicles/VehicleFormDialog';
@@ -37,7 +37,7 @@ export function CarrierOnboardingWizard() {
   // Step 1 — carrier create. No banner yet (no password); Skip not allowed.
   if (wizard.currentStep === 1) {
     return (
-      <CarrierSheet
+      <CarrierFormDialog
         open
         carrier={null}
         onClose={() => wizard.close()}

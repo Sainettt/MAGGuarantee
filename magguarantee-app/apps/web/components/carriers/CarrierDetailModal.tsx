@@ -7,7 +7,7 @@
 //
 // The generic shell is NOT re-implemented here — this file only does the
 // CarrierDto → props mapping: badge row, the 5 sections, the footer meta line,
-// and forwarding onEdit to the page (which opens CarrierSheet).
+// and forwarding onEdit to the page (which opens CarrierFormDialog).
 //
 // Formatting reuses the shared helpers in lib/format/numbers.ts (formatEur,
 // formatDateTime) and the shared value-formatter helpers in
@@ -36,7 +36,7 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   carrier: CarrierDto | null;
-  /** Forwarded to the generic «Edytuj» action — the page opens CarrierSheet.
+  /** Forwarded to the generic «Edytuj» action — the page opens CarrierFormDialog.
    *  Omit it for read-only consumers: the «Edytuj» button is then not
    *  rendered (§6.6). */
   onEdit?: () => void;
@@ -80,7 +80,7 @@ export function CarrierDetailModal({
       emptyValue()
     );
 
-  // ── 5 sections — mirrors the CarrierSheet FormSection order (§6.10) ──
+  // ── 5 sections — mirrors the CarrierFormDialog FormSection order (§6.10) ──
   const sections: EntityDetailSection[] = [
     {
       title: t('sections.account'),

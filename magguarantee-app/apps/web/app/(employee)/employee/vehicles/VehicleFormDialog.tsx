@@ -67,6 +67,7 @@ import {
   FormDialogTitle,
 } from '@/components/forms/FormDialog';
 import { RevealInset } from '@/components/forms/RevealInset';
+import { ActiveStatusRow } from '@/components/forms/ActiveStatusRow';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useFormDraft } from '@/lib/hooks/useFormDraft';
@@ -331,6 +332,7 @@ export function VehicleFormDialog({
   const wasteOn = form.watch('wasteAllowed') === true;
   const cabotageDeOn = form.watch('cabotageDe') === true;
   const adrOn = form.watch('adr') === true;
+  const activeOn = form.watch('active') === true;
 
   // Clear checkbox-gated multi-selects when their flag turns off so an orphan
   // value never leaks into the payload / trips the refine.
@@ -345,6 +347,15 @@ export function VehicleFormDialog({
   // porozumienie scan (existing or new).
   const agreementScanPresent = bucketHasFiles(fileBuckets.agreement);
   const fuelCardActive = agreementOn && agreementScanPresent;
+
+  // HARD server rule: fuelCard=true ⇒ adr=true (422 «Karta paliwowa wymaga
+  // zaznaczenia ADR», mirrored in the shared `vehicleFuelCardAdrRefine`, which
+  // the zodResolver surfaces on the `fuelCard` field). UX enforcement on top:
+  // when ADR is off the checkbox is disabled so a valid form can't tick it.
+  // But we NEVER silently clear an already-on fuelCard when the operator turns
+  // ADR off — we keep the section visible + show a blocking hint so they know
+  // why Zapisz will fail (their data stays intact).
+  const fuelCardAdrConflict = fuelCardOn && !adrOn;
 
   const dispatchTeamId = form.watch('dispatchTeamId');
   const selectedTeam = useMemo(
@@ -550,10 +561,6 @@ export function VehicleFormDialog({
                   <Checkbox {...form.register('certificateL')} />
                   {t('fields.certificateL')}
                 </label>
-                <label className="flex items-center gap-2 text-text">
-                  <Checkbox {...form.register('active')} />
-                  {t('fields.active')}
-                </label>
               </div>
             </FormSection>
 
@@ -641,12 +648,36 @@ export function VehicleFormDialog({
               )}
             </FormSection>
 
-            {/* ── Karta paliwowa ── */}
+            {/* ── Karta paliwowa ── (HARD: fuelCard ⇒ adr, §13.9) */}
             <FormSection title={t('sections.fuelCard')}>
-              <label className="flex items-center gap-2 text-sm text-text">
-                <Checkbox {...form.register('fuelCard')} />
+              <label
+                className={`flex items-center gap-2 text-sm ${
+                  !adrOn ? 'text-text-sub' : 'text-text'
+                }`}
+              >
+                <Checkbox
+                  {...form.register('fuelCard')}
+                  disabled={!adrOn}
+                  aria-describedby={
+                    !adrOn ? 'vehicle-fuelCard-adr-hint' : undefined
+                  }
+                />
                 {t('fields.fuelCard')}
               </label>
+              {!adrOn && (
+                <p
+                  id="vehicle-fuelCard-adr-hint"
+                  className={`flex items-center gap-1.5 text-xs ${
+                    fuelCardAdrConflict
+                      ? 'text-danger'
+                      : 'text-text-sub'
+                  }`}
+                  role={fuelCardAdrConflict ? 'alert' : undefined}
+                >
+                  <AlertTriangle size={14} aria-hidden />
+                  {t('fuelCardAdrRequired')}
+                </p>
+              )}
               {fuelCardOn && (
                 <RevealInset>
                   <FormGrid cols={2}>
@@ -895,6 +926,16 @@ export function VehicleFormDialog({
                 )}
               </FormItem>
             </FormSection>
+
+            {/* ── Aktywny — distinguished status row, body bottom (§13.2.4) ── */}
+            <ActiveStatusRow
+              label={t('fields.active')}
+              consequence={tWizard('formActive.vehicleConsequence')}
+              activeBadgeLabel={tCommon('active')}
+              inactiveBadgeLabel={tCommon('inactive')}
+              checked={activeOn}
+              checkboxProps={form.register('active')}
+            />
           </div>
         </FormDialogBody>
 

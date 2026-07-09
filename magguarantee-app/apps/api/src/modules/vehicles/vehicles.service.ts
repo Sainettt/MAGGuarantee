@@ -765,6 +765,14 @@ export class VehiclesService {
     if (eff.adr && eff.adrClasses.length < 1) {
       v.push(CROSS_FIELD_MESSAGES.adrClasses);
     }
+    // Rule 6b — HARD: a fuel card requires the ADR flag. Effective-state check
+    // (post-patch), so it fires symmetrically: setting fuelCard=true on an
+    // adr=false vehicle AND setting adr=false on a fuelCard=true vehicle both
+    // 422 here even when the OTHER field is absent from the PATCH payload.
+    // UNRELATED to the soft, derived `fuelCardBlocked` badge (porozumienie).
+    if (eff.fuelCard && !eff.adr) {
+      v.push(CROSS_FIELD_MESSAGES.fuelCardAdr);
+    }
     // Rule 7 — min 2 of {gb, it, fr}.
     const trues = [eff.gb, eff.it, eff.fr].filter((x) => x === true).length;
     if (trues < 2) v.push(CROSS_FIELD_MESSAGES.ukItFr);
@@ -981,6 +989,8 @@ const CROSS_FIELD_MESSAGES = {
     'fuelCardNumber (16 cyfr) wymagany gdy fuelCard=true',
   fuelCardExpiry: 'fuelCardExpiry wymagany gdy fuelCard=true',
   fuelCardPin: 'fuelCardPin (4–6 cyfr) wymagany gdy fuelCard=true',
+  // HARD rule — kept in lockstep with `vehicleFuelCardAdrRefine`'s Zod message.
+  fuelCardAdr: 'Karta paliwowa wymaga zaznaczenia ADR',
   wasteCountries:
     'wasteCountries wymaga min. 1 kraju gdy wasteAllowed=true',
   adrClasses: 'adrClasses wymaga min. 1 klasy gdy adr=true',
