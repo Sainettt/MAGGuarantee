@@ -525,7 +525,7 @@
       "active": "Aktywny"
     },
     "euroBadge": "EURO VI",
-    "fuelCardAdrRequired": "Karta paliwowa wymaga zaznaczenia ADR",
+    "fuelCardAgreementRequired": "Karta paliwowa wymaga zaznaczenia porozumienia",
     "fuelCardStatus": {
       "label": "Status karty",
       "active": "Karta aktywna",

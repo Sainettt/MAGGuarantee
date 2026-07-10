@@ -525,7 +525,7 @@
       "active": "Active"
     },
     "euroBadge": "EURO VI",
-    "fuelCardAdrRequired": "A fuel card requires the ADR flag to be checked",
+    "fuelCardAgreementRequired": "A fuel card requires the porozumienie (agreement) to be checked",
     "fuelCardStatus": {
       "label": "Card status",
       "active": "Card active",

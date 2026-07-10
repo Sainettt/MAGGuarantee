@@ -609,6 +609,7 @@ export class VehiclesService {
         wasteCountries: dto.wasteCountries ?? [],
         adr: dto.adr ?? false,
         adrClasses: dto.adrClasses ?? [],
+        agreement: dto.agreement ?? false,
         gb: dto.gb ?? null,
         it: dto.it ?? null,
         fr: dto.fr ?? null,
@@ -665,6 +666,7 @@ export class VehiclesService {
     wasteCountries: string[];
     adr: boolean;
     adrClasses: string[];
+    agreement: boolean | null;
     gb: boolean | null;
     it: boolean | null;
     fr: boolean | null;
@@ -686,6 +688,9 @@ export class VehiclesService {
       wasteCountries: pick(dto.wasteCountries, existing.wasteCountries),
       adr: pick(dto.adr, existing.adr),
       adrClasses: pick(dto.adrClasses, existing.adrClasses),
+      // `agreement` is `Boolean?` — resolve the post-patch value (NULL/false
+      // both count as "not true" for the hard fuel-card gate below).
+      agreement: pick(dto.agreement, existing.agreement),
       gb: pick(dto.gb, existing.gb),
       it: pick(dto.it, existing.it),
       fr: pick(dto.fr, existing.fr),
@@ -742,6 +747,7 @@ export class VehiclesService {
     wasteCountries: string[];
     adr: boolean;
     adrClasses: string[];
+    agreement: boolean | null;
     gb: boolean | null;
     it: boolean | null;
     fr: boolean | null;
@@ -765,13 +771,16 @@ export class VehiclesService {
     if (eff.adr && eff.adrClasses.length < 1) {
       v.push(CROSS_FIELD_MESSAGES.adrClasses);
     }
-    // Rule 6b — HARD: a fuel card requires the ADR flag. Effective-state check
+    // Rule 6b — HARD: a fuel card requires the porozumienie FLAG (`agreement`,
+    // `Boolean?` — NULL/false both count as not-true). Effective-state check
     // (post-patch), so it fires symmetrically: setting fuelCard=true on an
-    // adr=false vehicle AND setting adr=false on a fuelCard=true vehicle both
-    // 422 here even when the OTHER field is absent from the PATCH payload.
-    // UNRELATED to the soft, derived `fuelCardBlocked` badge (porozumienie).
-    if (eff.fuelCard && !eff.adr) {
-      v.push(CROSS_FIELD_MESSAGES.fuelCardAdr);
+    // agreement≠true vehicle AND setting agreement=false on a fuelCard=true
+    // vehicle both 422 here even when the OTHER field is absent from the PATCH
+    // payload. This is the HARD gate on the FLAG only — UNRELATED to the soft,
+    // derived `fuelCardBlocked` badge (missing porozumienie SCAN), which never
+    // blocks a save.
+    if (eff.fuelCard && eff.agreement !== true) {
+      v.push(CROSS_FIELD_MESSAGES.fuelCardAgreement);
     }
     // Rule 7 — min 2 of {gb, it, fr}.
     const trues = [eff.gb, eff.it, eff.fr].filter((x) => x === true).length;
@@ -989,8 +998,9 @@ const CROSS_FIELD_MESSAGES = {
     'fuelCardNumber (16 cyfr) wymagany gdy fuelCard=true',
   fuelCardExpiry: 'fuelCardExpiry wymagany gdy fuelCard=true',
   fuelCardPin: 'fuelCardPin (4–6 cyfr) wymagany gdy fuelCard=true',
-  // HARD rule — kept in lockstep with `vehicleFuelCardAdrRefine`'s Zod message.
-  fuelCardAdr: 'Karta paliwowa wymaga zaznaczenia ADR',
+  // HARD rule — kept in lockstep with `vehicleFuelCardAgreementRefine`'s Zod
+  // message. Gate is on the porozumienie FLAG only, not the (soft) scan.
+  fuelCardAgreement: 'Karta paliwowa wymaga zaznaczenia porozumienia',
   wasteCountries:
     'wasteCountries wymaga min. 1 kraju gdy wasteAllowed=true',
   adrClasses: 'adrClasses wymaga min. 1 klasy gdy adr=true',

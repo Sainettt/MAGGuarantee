@@ -348,14 +348,20 @@ export function VehicleFormDialog({
   const agreementScanPresent = bucketHasFiles(fileBuckets.agreement);
   const fuelCardActive = agreementOn && agreementScanPresent;
 
-  // HARD server rule: fuelCard=true ⇒ adr=true (422 «Karta paliwowa wymaga
-  // zaznaczenia ADR», mirrored in the shared `vehicleFuelCardAdrRefine`, which
+  // HARD server rule: fuelCard=true ⇒ agreement=true (422 «Karta paliwowa
+  // wymaga zaznaczenia porozumienia», mirrored in the shared Zod refine, which
   // the zodResolver surfaces on the `fuelCard` field). UX enforcement on top:
-  // when ADR is off the checkbox is disabled so a valid form can't tick it.
-  // But we NEVER silently clear an already-on fuelCard when the operator turns
-  // ADR off — we keep the section visible + show a blocking hint so they know
-  // why Zapisz will fail (their data stays intact).
-  const fuelCardAdrConflict = fuelCardOn && !adrOn;
+  // when porozumienie is off the checkbox is disabled so a valid form can't tick
+  // it. But we NEVER silently clear an already-on fuelCard when the operator
+  // turns porozumienie off — we keep the section visible + show a blocking hint
+  // so they know why Zapisz will fail (their data stays intact).
+  //
+  // NOTE: this HARD gate keys off the porozumienie FLAG (`agreement`); it is
+  // distinct from the SOFT `fuelCardActive` badge below, which additionally
+  // requires the porozumienie SCAN. When the flag is off we show the hard-gate
+  // hint; the RevealInset (and its soft badge) don't render because the checkbox
+  // can't be ticked in that state — so the two hints never visually duplicate.
+  const fuelCardAgreementConflict = fuelCardOn && !agreementOn;
 
   const dispatchTeamId = form.watch('dispatchTeamId');
   const selectedTeam = useMemo(
@@ -648,34 +654,34 @@ export function VehicleFormDialog({
               )}
             </FormSection>
 
-            {/* ── Karta paliwowa ── (HARD: fuelCard ⇒ adr, §13.9) */}
+            {/* ── Karta paliwowa ── (HARD: fuelCard ⇒ porozumienie, §13.9) */}
             <FormSection title={t('sections.fuelCard')}>
               <label
                 className={`flex items-center gap-2 text-sm ${
-                  !adrOn ? 'text-text-sub' : 'text-text'
+                  !agreementOn ? 'text-text-sub' : 'text-text'
                 }`}
               >
                 <Checkbox
                   {...form.register('fuelCard')}
-                  disabled={!adrOn}
+                  disabled={!agreementOn}
                   aria-describedby={
-                    !adrOn ? 'vehicle-fuelCard-adr-hint' : undefined
+                    !agreementOn ? 'vehicle-fuelCard-agreement-hint' : undefined
                   }
                 />
                 {t('fields.fuelCard')}
               </label>
-              {!adrOn && (
+              {!agreementOn && (
                 <p
-                  id="vehicle-fuelCard-adr-hint"
+                  id="vehicle-fuelCard-agreement-hint"
                   className={`flex items-center gap-1.5 text-xs ${
-                    fuelCardAdrConflict
+                    fuelCardAgreementConflict
                       ? 'text-danger'
                       : 'text-text-sub'
                   }`}
-                  role={fuelCardAdrConflict ? 'alert' : undefined}
+                  role={fuelCardAgreementConflict ? 'alert' : undefined}
                 >
                   <AlertTriangle size={14} aria-hidden />
-                  {t('fuelCardAdrRequired')}
+                  {t('fuelCardAgreementRequired')}
                 </p>
               )}
               {fuelCardOn && (
