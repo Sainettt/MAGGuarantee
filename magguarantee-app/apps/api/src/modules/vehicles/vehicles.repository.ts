@@ -32,8 +32,10 @@ export interface VehicleRowAttachment {
  * `certificateL`, `euro`, `type` are NOT NULL since phase3_blocks.
  * `certificateL` was collapsed from enum `CertificateL { L1 | L2 | L3 }` to
  * Boolean (TAK/NIE) in 20260515130307_vehicle_certificate_l_to_boolean. The
- * legacy `contract` boolean was dropped 2026-05 — the umowa is now a
- * `VehicleAttachment` (category=contract). `euro` is restricted to `V`/`VI`
+ * legacy `contract` boolean was dropped 2026-05; the scanned-umowa
+ * `VehicleAttachment` category `contract` was dropped 2026-07 (the umowa
+ * concept no longer exists — porozumienie is the only agreement document).
+ * `euro` is restricted to `V`/`VI`
  * (legacy III/IV removed from `enum EuroNorm`). `gpsMobilePhone` is NOT NULL
  * since the 2026-06-17 migration `drop_vehicle_gps_toggle_require_gps_device`
  * — every vehicle is GPS-tracked, so the device id is always present; the

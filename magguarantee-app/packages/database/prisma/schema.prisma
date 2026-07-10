@@ -92,13 +92,18 @@ enum EuroNorm {
 }
 
 // Category of a document/screenshot attached to a Vehicle.
-// `contract` replaces the legacy `Vehicle.contract` boolean — instead of a
-// flag, the actual scanned umowa is stored as one or more attachment rows.
 // `gps` = umowa GPS scan (required by the API when Vehicle.gpsMobilePhone is
 // present). `agreement` = porozumienie scan (SOFT — its absence is a warning,
 // never save-blocking; also gates the derived fuel-card BLOCKED state).
-// `cabotage_de` = kabotaż DE permit; `cabotage_de_insurance` = ubezpieczenie
-// kabotażowe DE (required by the API alongside cabotage_de).
+// `cabotage_de_insurance` = ubezpieczenie kabotażowe DE — the SOLE cabotage
+// document, required by the API when Vehicle.cabotageDe=true. The separate DE
+// cabotage-permit scan (`cabotage_de`) was dropped 2026-07-10; the insurance
+// scan is now the only cabotage document. The Vehicle.cabotageDe/cabotageFr
+// Boolean flags stay.
+// `contract` (Umowa) removed 2026-07-10 — the umowa concept does not exist in
+// this business; porozumienie (`agreement`) is the ONLY vehicle document. See
+// docs/19-known-quirks.md §1 (RESOLVED). Not to be confused with `gps` (umowa
+// GPS), which is a different document and stays.
 // `cabotage_fr` removed 2026-07 — kabotaż FR is now a checkbox-only flag
 // (Vehicle.cabotageFr Boolean), no scan.
 // `adr` removed 2026-05-29 — the ADR certificate is no longer a vehicle
@@ -106,10 +111,8 @@ enum EuroNorm {
 // the ADR cert scan now lives on the Driver (świadectwo ADR) via
 // DriverAttachment.
 enum VehicleAttachmentCategory {
-  contract
   gps
   agreement
-  cabotage_de
   cabotage_de_insurance
 }
 
@@ -466,9 +469,10 @@ model Vehicle {
   // the watchdog anchor for a vehicle that has never returned a delegation
   // (anchorSource=agreement). Date-only. The DB just stores it.
   agreementSince DateTime? @db.Date
-  // Legacy `contract` (Umowa) boolean dropped 2026-05 — the umowa is now
-  // stored as a scanned file via VehicleAttachment rows with
-  // category=contract. See docs/19-known-quirks.md#umowa-vs-porozumienie.
+  // Legacy `contract` (Umowa) boolean dropped 2026-05; the whole umowa concept
+  // was removed 2026-07-10 — the umowa does not exist in this business,
+  // porozumienie (`agreement`) is the only vehicle document. See
+  // docs/19-known-quirks.md#umowa-vs-porozumienie (RESOLVED).
 
   // EUR/km rates — negotiated between MAGTRANS and the carrier AFTER vehicle
   // creation. NULL means "not yet set"; `0` would be ambiguous ("free haulage"
@@ -519,10 +523,10 @@ model Vehicle {
   @@map("vehicles")
 }
 
-// ─── VEHICLE ATTACHMENTS (umowa / cabotage screenshots) ──
-// Files uploaded from the Vehicle create/edit modal — scanned umowa,
-// cabotage permits — stored in MinIO (S3-compatible). The DB row only
-// holds metadata + the object key; the bytes live in the bucket.
+// ─── VEHICLE ATTACHMENTS (gps / porozumienie / cabotage scans) ──
+// Files uploaded from the Vehicle create/edit modal — umowa GPS scan,
+// porozumienie, cabotage permits — stored in MinIO (S3-compatible). The DB
+// row only holds metadata + the object key; the bytes live in the bucket.
 model VehicleAttachment {
   id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   vehicleId String  @db.Uuid

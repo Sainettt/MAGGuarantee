@@ -22,7 +22,7 @@ export interface CategorizedUpload {
 
 /**
  * The shape `FileFieldsInterceptor` produces — a record keyed by the file
- * field name (`contract`, `cabotageDe`, `cabotageFr`).
+ * field name (`gps`, `agreement`, `cabotageDeInsurance`).
  */
 export type MultipartFiles =
   | Record<string, UploadedFile[] | undefined>

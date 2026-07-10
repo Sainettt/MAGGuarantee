@@ -5,15 +5,15 @@
 // uniqueness; plannerId → role=planista; dispatchTeamId → Team (Phase 11 — the
 // legacy single `dispatcherId → role=dyspozytor` FK was replaced by a Team).
 //
-// ── Umowa / cabotage attachments ─────────────────────────
-// The legacy `Vehicle.contract` boolean was dropped (migration 2026-05). The
-// umowa is now a scanned file, stored in MinIO and tracked via
-// `VehicleAttachment` rows. The Vehicle create/edit modal is therefore a
-// `multipart/form-data` endpoint — files arrive as separate parts, not in the
-// JSON body. As a result the conditional "umowa screenshot required" rule
+// ── Attachments (porozumienie / gps / cabotage) ──────────
+// Vehicle documents (porozumienie/agreement scan, umowa GPS, cabotage permits)
+// are scanned files stored in MinIO and tracked via `VehicleAttachment` rows.
+// The Vehicle create/edit modal is therefore a `multipart/form-data` endpoint —
+// files arrive as separate parts, not in the JSON body. As a result the
+// conditional "attachment required" rules (gps-when-device, cabotage pair)
 // CANNOT be expressed in the body Zod schema below (Zod only sees the scalar
-// fields). It is enforced at the service layer instead — see
-// `VehiclesService` and the rule documented under
+// fields). They are enforced at the service layer instead — see
+// `VehiclesService` and the rules documented under
 // docs/13-api-design.md#vehicles. The schemas here validate ONLY the
 // non-file form fields.
 
@@ -104,8 +104,8 @@ const vehicleAttributeFields = {
   gb: z.boolean().optional(),
   it: z.boolean().optional(),
   fr: z.boolean().optional(),
-  /** Porozumienie. The legacy `contract` (Umowa) boolean was dropped — the
-   *  umowa is now a scanned file (VehicleAttachment category=contract). */
+  /** Porozumienie flag. The porozumienie scan (when present) is tracked as a
+   *  `VehicleAttachment` (category=agreement) — SOFT, never save-blocking. */
   agreement: z.boolean().optional(),
   // EUR/km rates are required at vehicle creation — admin must enter all four
   // before the carrier can submit a claim against this truck. Zero is a valid
@@ -645,22 +645,25 @@ export type VehicleKmBoardDto = z.infer<typeof VehicleKmBoardDtoSchema>;
 /**
  * Category of a Vehicle attachment, mirroring the DB
  * `enum VehicleAttachmentCategory`:
- *  - `contract`             — scanned umowa (replaces the legacy `Vehicle.contract`)
  *  - `gps`                  — umowa GPS scan (required when `gpsMobilePhone` is set)
  *  - `agreement`            — porozumienie scan (SOFT — never save-blocking; gates
  *                             the derived fuel-card BLOCKED state)
- *  - `cabotage_de`          — German cabotage permit screenshot
- *  - `cabotage_de_insurance`— German cabotage insurance (ubezpieczenie kabotażowe)
+ *  - `cabotage_de_insurance`— German cabotage insurance (ubezpieczenie kabotażowe),
+ *                             required when `Vehicle.cabotageDe` is set
  *
- * `cabotage_fr` was removed 2026-07 — kabotaż FR is a checkbox-only flag
- * (`Vehicle.cabotageFr`), no scan. `adr` was removed 2026-05-29 — the ADR cert
- * scan moved to the Driver (świadectwo ADR) as a `DriverAttachment`.
+ * `contract` (the legacy scanned "umowa") was removed 2026-07 — the umowa
+ * concept no longer exists; porozumienie (category `agreement`) is the only
+ * vehicle agreement document. `cabotage_fr` was removed 2026-07 — kabotaż FR is
+ * a checkbox-only flag (`Vehicle.cabotageFr`), no scan. `cabotage_de` (the
+ * German cabotage permit screenshot) was removed 2026-07 — kabotaż DE now
+ * requires ONLY the insurance scan (`cabotage_de_insurance`), while
+ * `Vehicle.cabotageDe` stays a boolean flag. `adr` was removed 2026-05-29 —
+ * the ADR cert scan moved to the Driver (świadectwo ADR) as a
+ * `DriverAttachment`.
  */
 export const VehicleAttachmentCategorySchema = z.enum([
-  'contract',
   'gps',
   'agreement',
-  'cabotage_de',
   'cabotage_de_insurance',
 ]);
 export type VehicleAttachmentCategory = z.infer<
@@ -750,7 +753,7 @@ export const VehicleDtoSchema = z.object({
   opiekun: z
     .object({ id: UuidSchema, login: z.string(), name: z.string().nullable() })
     .nullable(),
-  /** Non-deleted umowa/gps/agreement/cabotage attachments for this vehicle. */
+  /** Non-deleted gps/agreement/cabotage attachments for this vehicle. */
   attachments: z.array(VehicleAttachmentDtoSchema),
   /**
    * DERIVED server-side (never stored). `true` when the fuel card is present

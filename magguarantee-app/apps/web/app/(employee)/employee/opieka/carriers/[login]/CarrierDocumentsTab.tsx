@@ -122,10 +122,8 @@ const COMPANY_CATEGORIES: CarrierAttachmentCategory[] = [
 ];
 
 const VEHICLE_CATEGORIES = [
-  'contract',
   'gps',
   'agreement',
-  'cabotage_de',
   'cabotage_de_insurance',
 ] as const;
 
@@ -630,7 +628,7 @@ function DocumentsSkeleton({
 }) {
   const groups: { id: string; cards: number }[] = [
     { id: 'company', cards: 4 },
-    { id: 'vehicles', cards: 5 },
+    { id: 'vehicles', cards: 3 },
     { id: 'trailers', cards: 1 },
     { id: 'drivers', cards: 1 },
   ];
@@ -717,7 +715,7 @@ function buildGroups(
     };
   });
 
-  // Vehicles — one type per category (always all five, even when empty).
+  // Vehicles — one type per category (always all three, even when empty).
   const vehicleTypes: DocType[] = VEHICLE_CATEGORIES.map((cat) => {
     const entries = data.vehicleDocs[cat];
     const files: FileRow[] = entries.map((e) => ({

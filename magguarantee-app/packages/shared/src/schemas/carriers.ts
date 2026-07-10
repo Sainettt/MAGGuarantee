@@ -369,10 +369,8 @@ export type CarrierAttachmentDto = z.infer<typeof CarrierAttachmentDtoSchema>;
  * (docs/14-design-system.md §5R lists "Porozumienie" as a visible type).
  */
 export const CarrierDocVehicleCategorySchema = z.enum([
-  'contract',
   'gps',
   'agreement',
-  'cabotage_de',
   'cabotage_de_insurance',
 ]);
 export type CarrierDocVehicleCategory = z.infer<
@@ -407,10 +405,8 @@ export type CarrierDocVehicleEntry = z.infer<
  * render a stable set of sections.
  */
 export const CarrierDocVehicleDocsSchema = z.object({
-  contract: z.array(CarrierDocVehicleEntrySchema),
   gps: z.array(CarrierDocVehicleEntrySchema),
   agreement: z.array(CarrierDocVehicleEntrySchema),
-  cabotage_de: z.array(CarrierDocVehicleEntrySchema),
   cabotage_de_insurance: z.array(CarrierDocVehicleEntrySchema),
 });
 export type CarrierDocVehicleDocs = z.infer<typeof CarrierDocVehicleDocsSchema>;
@@ -464,7 +460,7 @@ export const CarrierDocumentsOverviewDtoSchema = z.object({
   carrierId: UuidSchema,
   /** The carrier's own company documents (insurance/license/kreptd/other). */
   carrierDocs: z.array(CarrierAttachmentDtoSchema),
-  /** Vehicle files grouped per category (contract/gps/agreement/cabotage_de/…). */
+  /** Vehicle files grouped per category (gps/agreement/cabotage_de_insurance). */
   vehicleDocs: CarrierDocVehicleDocsSchema,
   /** Vehicles declaring ADR (flag + classes) — NO files. */
   vehicleAdr: z.array(CarrierDocVehicleAdrSchema),

@@ -37,8 +37,8 @@ function vehicleRow(
 ): CarrierVehicleAttachmentRow {
   return {
     attachmentId: 'va-1',
-    category: 'contract',
-    fileName: 'umowa.pdf',
+    category: 'agreement',
+    fileName: 'porozumienie.pdf',
     size: 2048,
     createdAt: NOW,
     vehicleId: 'v-1',
@@ -164,10 +164,8 @@ describe('CarrierDocumentsService.overview', () => {
     expect(out.carrierDocs).toEqual([]);
     // Every vehicle-doc category key is always present.
     expect(out.vehicleDocs).toEqual({
-      contract: [],
       gps: [],
       agreement: [],
-      cabotage_de: [],
       cabotage_de_insurance: [],
     });
     expect(out.vehicleAdr).toEqual([]);
@@ -188,11 +186,9 @@ describe('CarrierDocumentsService.overview', () => {
   it('groups vehicle documents by category', async () => {
     const { service } = setup({
       vehicleRows: [
-        vehicleRow({ attachmentId: 'va-c1', category: 'contract' }),
-        vehicleRow({ attachmentId: 'va-c2', category: 'contract', vehicleId: 'v-2' }),
-        vehicleRow({ attachmentId: 'va-g', category: 'gps' }),
+        vehicleRow({ attachmentId: 'va-g1', category: 'gps' }),
+        vehicleRow({ attachmentId: 'va-g2', category: 'gps', vehicleId: 'v-2' }),
         vehicleRow({ attachmentId: 'va-a', category: 'agreement' }),
-        vehicleRow({ attachmentId: 'va-de', category: 'cabotage_de' }),
         vehicleRow({
           attachmentId: 'va-dei',
           category: 'cabotage_de_insurance',
@@ -200,16 +196,12 @@ describe('CarrierDocumentsService.overview', () => {
       ],
     });
     const out = await service.overview(CARRIER_ID);
-    expect(out.vehicleDocs.contract.map((e) => e.attachmentId)).toEqual([
-      'va-c1',
-      'va-c2',
+    expect(out.vehicleDocs.gps.map((e) => e.attachmentId)).toEqual([
+      'va-g1',
+      'va-g2',
     ]);
-    expect(out.vehicleDocs.gps.map((e) => e.attachmentId)).toEqual(['va-g']);
     expect(out.vehicleDocs.agreement.map((e) => e.attachmentId)).toEqual([
       'va-a',
-    ]);
-    expect(out.vehicleDocs.cabotage_de.map((e) => e.attachmentId)).toEqual([
-      'va-de',
     ]);
     expect(
       out.vehicleDocs.cabotage_de_insurance.map((e) => e.attachmentId),
@@ -224,15 +216,15 @@ describe('CarrierDocumentsService.overview', () => {
           vehicleId: 'v-42',
           registration: 'PL4242',
           sideNumber: '42',
-          fileName: 'umowa-42.pdf',
+          fileName: 'porozumienie-42.pdf',
           size: 4242,
         }),
       ],
     });
     const out = await service.overview(CARRIER_ID);
-    expect(out.vehicleDocs.contract[0]).toEqual({
+    expect(out.vehicleDocs.agreement[0]).toEqual({
       attachmentId: 'va-x',
-      fileName: 'umowa-42.pdf',
+      fileName: 'porozumienie-42.pdf',
       size: 4242,
       createdAt: NOW.toISOString(),
       vehicle: { id: 'v-42', registration: 'PL4242', sideNumber: '42' },
@@ -243,10 +235,8 @@ describe('CarrierDocumentsService.overview', () => {
     const { service, spies } = setup();
     await service.overview(CARRIER_ID);
     expect(spies.listVehicleAttachments).toHaveBeenCalledWith(CARRIER_ID, [
-      'contract',
       'gps',
       'agreement',
-      'cabotage_de',
       'cabotage_de_insurance',
     ]);
   });
@@ -323,7 +313,7 @@ describe('CarrierDocumentsService.overview', () => {
     });
     const out = await service.overview(CARRIER_ID);
     expect(out.carrierDocs).toHaveLength(1);
-    expect(out.vehicleDocs.contract).toHaveLength(1);
+    expect(out.vehicleDocs.agreement).toHaveLength(1);
     expect(out.vehicleAdr).toHaveLength(1);
     expect(out.trailerDocs).toHaveLength(1);
     expect(out.driverDocs).toHaveLength(1);

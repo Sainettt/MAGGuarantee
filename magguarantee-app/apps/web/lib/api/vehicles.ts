@@ -1,11 +1,13 @@
 // Typed API wrappers for /api/v1/vehicles/*.
 //
-// `createVehicle` / `updateVehicle` are `multipart/form-data` since the
-// 2026-05 migration: the umowa is a scanned file (VehicleAttachment) rather
-// than the legacy `contract` boolean. Scalar fields go in as text parts the
-// API coerces; files go in as `contract` / `gps` / `agreement` / `cabotageDe`
-// / `cabotageDeInsurance` parts (kabotaż FR is a checkbox-only flag, no scan);
-// PATCH may also carry `removeAttachmentIds` (a JSON-encoded id array).
+// `createVehicle` / `updateVehicle` are `multipart/form-data`. Scalar fields
+// go in as text parts the API coerces; files go in as `gps` / `agreement` /
+// `cabotageDeInsurance` parts (kabotaż FR is a checkbox-only flag, no scan;
+// the standalone "umowa" / `contract` document was removed 2026-07 —
+// porozumienie / `agreement` is the only vehicle agreement doc; the German
+// cabotage permit `cabotageDe` scan was removed 2026-07 — kabotaż DE now
+// requires only the `cabotageDeInsurance` scan); PATCH may also carry
+// `removeAttachmentIds` (a JSON-encoded id array).
 //
 // NOTE: the ADR certificate scan moved to the Driver (2026-05-29) — the
 // vehicle keeps only the `adr` boolean checkbox and no longer uploads a file.
@@ -33,14 +35,10 @@ import { type Paginated, toQuery } from './query';
  * `apps/api/.../vehicle-attachments.constants.ts`).
  */
 export interface VehicleAttachmentUploads {
-  /** Umowa screenshots — multipart field `contract`. */
-  contract?: File[];
   /** Umowa GPS scan — multipart field `gps` (required when GPS number set). */
   gps?: File[];
   /** Porozumienie scan — multipart field `agreement` (SOFT: never blocks save). */
   agreement?: File[];
-  /** DE cabotage permit screenshots — multipart field `cabotageDe`. */
-  cabotageDe?: File[];
   /** DE cabotage insurance — multipart field `cabotageDeInsurance`. */
   cabotageDeInsurance?: File[];
 }
@@ -81,10 +79,8 @@ function toVehicleFormData(
 
   // File parts — one append per file, all under the multipart field name
   // (must match apps/api/.../vehicle-attachments.constants.ts exactly).
-  for (const file of files.contract ?? []) fd.append('contract', file);
   for (const file of files.gps ?? []) fd.append('gps', file);
   for (const file of files.agreement ?? []) fd.append('agreement', file);
-  for (const file of files.cabotageDe ?? []) fd.append('cabotageDe', file);
   for (const file of files.cabotageDeInsurance ?? [])
     fd.append('cabotageDeInsurance', file);
 

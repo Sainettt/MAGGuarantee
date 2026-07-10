@@ -25,10 +25,8 @@ import { CarriersRepository } from './carriers.repository';
  * "Dokumenty" tab gathers EVERY document type.
  */
 const VEHICLE_DOC_CATEGORIES: readonly CarrierDocVehicleCategory[] = [
-  'contract',
   'gps',
   'agreement',
-  'cabotage_de',
   'cabotage_de_insurance',
 ];
 
@@ -103,10 +101,8 @@ export class CarrierDocumentsService {
     rows: CarrierVehicleAttachmentRow[],
   ): CarrierDocVehicleDocs {
     const grouped: CarrierDocVehicleDocs = {
-      contract: [],
       gps: [],
       agreement: [],
-      cabotage_de: [],
       cabotage_de_insurance: [],
     };
     for (const row of rows) {

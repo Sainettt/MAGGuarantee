@@ -2209,7 +2209,7 @@ A controlled primitive that lives inside a `<FormField>` and binds to an array-o
 +-----------------------------------------------------------+
 
 +-----------------------------------------------------------+   <- file row (one per file, uploaded or in-progress)
-| [thumb] umowa-2024.pdf            1.4 MB           [X]     |
+| [thumb] porozumienie-2024.pdf     1.4 MB           [X]     |
 | [====================------]  68%                         |   <- progress bar (only while uploading)
 +-----------------------------------------------------------+
 | [thumb] skan-front.jpg            220 KB           [X]     |
@@ -6008,7 +6008,7 @@ The tab content is a single vertical stack (`space-y-4`) inside the existing `<T
 ```
 <TabsContent value="documents">                       // unchanged wrapper (page.tsx)
   ▸ Section: «Dokumenty firmowe»    → 4 type-cards  (insurance · license · kreptd · other)   [MANAGED]
-  ▸ Section: «Dokumenty pojazdów»   → 5 type-cards  (contract · gps · agreement · cabotage_de · cabotage_de_insurance)
+  ▸ Section: «Dokumenty pojazdów»   → 3 type-cards  (gps · agreement · cabotage_de_insurance)
   ▸ Section: «ADR pojazdów»         → 1 display card (fileless — see 5R.4)
   ▸ Section: «Dokumenty naczep»     → 1 type-card   (cert_xl)
   ▸ Section: «Dokumenty kierowców»  → 1 type-card   (adr — świadectwo ADR kierowcy)
@@ -6140,10 +6140,8 @@ the ADR-banner + company-ADR-category keys (5R.8). Add the following:
 
 | Key | PL | EN |
 |---|---|---|
-| `contract` | "Umowa" | "Contract" |
 | `gps` | "Umowa GPS" | "GPS agreement" |
 | `agreement` | "Porozumienie" | "Guarantee agreement" |
-| `cabotage_de` | "Zezwolenie kabotażowe DE" | "Cabotage permit DE" |
 | `cabotage_de_insurance` | "Ubezpieczenie kabotażowe DE" | "Cabotage insurance DE" |
 | `cert_xl` | "Certyfikat XL" | "XL certificate" |
 | `driverAdr` | "Świadectwo ADR kierowcy" | "Driver ADR certificate" |
@@ -6671,13 +6669,13 @@ A new shared shell **`components/forms/FormDialog.tsx`** that **composes** the e
 
 **Sticky footer + validation-summary behaviour.**
 - Footer order (LTR): `[validation summary — mr-auto]` … `[Wyczyść]` (create only, `variant="outline" size="sm"`) `[Anuluj]` (`variant="ghost" size="sm"`) `[Zapisz]` (`size="sm"`, label → `common.saving` while pending).
-- **Validation summary** = the cross-field / attachment error string (the current `attachmentError` mechanism), rendered `mr-auto text-sm text-danger` with `role="alert"`. Per-field Zod errors stay **inline** under their field (`<FormMessage>`); the footer summary is reserved for *file-required* and *cross-field* rules (e.g. «min. 2 z 3 krajów», «Brak zezwolenia kabotażowego»). On submit-with-errors, keep the existing `onInvalidToast(form.setFocus, …)` — focus the first invalid field.
+- **Validation summary** = the cross-field / attachment error string (the current `attachmentError` mechanism), rendered `mr-auto text-sm text-danger` with `role="alert"`. Per-field Zod errors stay **inline** under their field (`<FormMessage>`); the footer summary is reserved for *file-required* and *cross-field* rules (e.g. «min. 2 z 3 krajów», «Brak ubezpieczenia kabotażowego»). On submit-with-errors, keep the existing `onInvalidToast(form.setFocus, …)` — focus the first invalid field.
 
 **Section header style.** Reuse the existing `<FormSection title>` component verbatim — `h4.text-xs font-bold uppercase tracking-wider text-text-sub border-b border-border pb-2`, section wrapper `space-y-4`, body stack `space-y-6` between sections. No new heading treatment; no emoji (the legacy section emoji are an anti-pattern — drop them).
 
 **2-column grid rules.**
 - Default field layout = `<FormGrid cols={2}>` (existing subgrid-aligned component).
-- **Full-width (`className="md:col-span-2"`) when:** `notes`/`Textarea`, any `<MultiSelect>`, any `<FileUpload>` (block or compact), any checkbox-grid, any conditional `RevealInset`, and any single long field (GPS number, umowa upload).
+- **Full-width (`className="md:col-span-2"`) when:** `notes`/`Textarea`, any `<MultiSelect>`, any `<FileUpload>` (block or compact), any checkbox-grid, any conditional `RevealInset`, and any single long field (GPS number, GPS umowa upload).
 - **`cols={4}`** for the numeric strips: vehicle Stawki (rateDe/Ue/Export/Import) and naczepa Dane podstawowe dimensions.
 - **`cols={3}`** for the checkbox grids (special countries, permissions).
 - Do **not** attempt a masonry / two-column *section* layout — sections stack full-width; the "wide" feeling comes from the 2-col field grids inside a 900px box. (Lower risk than side-by-side sections; matches the existing `FormGrid` subgrid alignment guarantees in §"Grid-form field alignment".)
@@ -6723,7 +6721,7 @@ Umowa GPS *                                             ← FormLabel (required 
 | **Chip row** | `mt-2 flex flex-wrap gap-1.5` | Chips wrap; total footprint for 1–2 files ≈ strip 40px + one 28px chip row ≈ **68px** vs the old block's ~80px dropzone + 56px-per-row list. |
 | **Error chip** | `border-danger/40 bg-danger-bg text-danger` variant of the chip; message via `title`/inline `text-danger` (client-side too-large / wrong-type — same three categories as block). | Stays visible so user dismisses via `×`; never a toast. |
 
-**Single-file compact** (`multiple={false}` — ADR świadectwo, umowa contract, GPS umowa, XL cert, kabotaż scans): once a file exists, the strip is **replaced** by the single chip plus a subtle text-button «Zmień» (`text-xs font-semibold text-brand hover:underline`) that re-opens the picker. Empty → the strip.
+**Single-file compact** (`multiple={false}` — ADR świadectwo, GPS umowa, XL cert, kabotaż scans): once a file exists, the strip is **replaced** by the single chip plus a subtle text-button «Zmień» (`text-xs font-semibold text-brand hover:underline`) that re-opens the picker. Empty → the strip.
 
 **Required-file signalling (compact):**
 - `<FormLabel required>` renders the `*` (existing).
@@ -6797,10 +6795,9 @@ Sections top-to-bottom (each a `<FormSection>`):
 5. **Karta paliwowa** — checkbox → `RevealInset` (`FormGrid cols={2}`): `Numer karty` (16 cyfr, masked/`inputMode=numeric`), `Data ważności` (`type=date`), `PIN`, **+ live status badge §13.2.3**.
 6. **Porozumienie** — checkbox → `RevealInset`: compact `<FileUpload multiple={false} variant="compact">` «Skan porozumienia». **Soft**: no scan = amber warning (§13.2.3), **does not block Zapisz**.
 7. **Odpady** — checkbox → `RevealInset`: `<MultiSelect>` of countries **DE NL AT BE LUX FR GB IT CZ PL**, **min. 1** (inline error).
-8. **Kabotaż** — two checkboxes: **DE** → `RevealInset` with **TWO** compact required uploads («Zezwolenie kabotażowe» + «Ubezpieczenie kabotażowe», both required); **FR** → checkbox only (no files).
+8. **Kabotaż** — two checkboxes: **DE** → `RevealInset` with **ONE** compact required upload («Ubezpieczenie kabotażowe», required); **FR** → checkbox only (no files).
 9. **ADR** — checkbox → `RevealInset`: `<MultiSelect>` klas **1–9**, **min. 1**.
-10. **Dokumenty** — compact `<FileUpload variant="compact">` «Umowa» (`contract` category) — **always required** (on create; edit keeps existing rule).
-11. **`<ActiveStatusRow>`** (§13.2.4) — last child of the body stack, **after** *Dokumenty*, outside any `<FormSection>`. `formActive.vehicleConsequence`. Present on create (default checked).
+10. **`<ActiveStatusRow>`** (§13.2.4) — last child of the body stack, **after** *ADR*, outside any `<FormSection>`. `formActive.vehicleConsequence`. Present on create (default checked).
 
 Removed from the form: `euro` select (→ static badge), any `airSuspension`-style dead flags. GPS is optional now (was unconditionally-required device id) — **confirm with api-agent** (§13.9).
 
@@ -6844,7 +6841,7 @@ Removed: `airSuspension` / zawieszenie pneumatyczne (§13.9).
 - [ ] Row uses the RevealInset shell (`border-l-2 border-l-brand/50 bg-input/40 p-3`), bold `text-sm font-bold` label, `text-xs text-text-sub` consequence subline, and a live `ml-auto` mirror badge (`success:Aktywny` / `muted:Nieaktywny`) — **brand accent, no danger/warning tokens**; whole text region is a `<label>` click target.
 - [ ] Create mode: Vehicle/Trailer/Driver show the row **defaulted checked**; **Carrier create omits the row entirely** (present in edit only).
 - [ ] i18n: reuses `common.active`/`common.inactive` + `<ns>.fields.active`; only four new `formActive.*Consequence` sublines added (PL default + EN).
-- [ ] Pojazd: EURO shown as static `<Badge>EURO VI</Badge>` (select gone); Kraje specjalne enforce min. 2 z 3 inline; Odpady/ADR multi-selects enforce min. 1; Kabotaż DE = two required uploads, FR = checkbox only; Umowa always required.
+- [ ] Pojazd: EURO shown as static `<Badge>EURO VI</Badge>` (select gone); Kraje specjalne enforce min. 2 z 3 inline; Odpady/ADR multi-selects enforce min. 1; Kabotaż DE = one required upload (ubezpieczenie; DE permit scan dropped 2026-07-10), FR = checkbox only.
 - [ ] Naczepa: dims + ładowność + boczny prześwit required; Dach→Odsuwany→Edscha reveal chain; counts min. 3; XL cert required PDF; airSuspension gone.
 - [ ] Kierowca: phone prefix independent of Narodowość; Narodowość select + Języki multi-select (min. 1); ADR reveals classes multi-select + required świadectwo.
 - [ ] Dark mode: all bands / inset / chips / strip legible via existing tokens; no `dark:[style*=…]`, no inline style, no `!important`.
@@ -6878,7 +6875,7 @@ Removed: `airSuspension` / zawieszenie pneumatyczne (§13.9).
 
 These UI changes assume model/enum work owned by other agents. Web-agent must **not** ship the dialogs until the contract exists; orchestrator should route:
 
-- **Vehicle:** drop `euro` from the form payload (default `VI` server-side) or keep column but stop editing; `gpsMobilePhone` → **optional** (was required) + new `contract`-style attachment category «gps» revealed by GPS number; **fuel-card** fields (`fuelCardNumber` 16-digit, `fuelCardExpiry`, `fuelCardPin`) + derived blocked/active status; **porozumienie** scan attachment category (soft, non-blocking); **waste countries** array; **kabotaż DE** second attachment category «cabotage_de_insurance»; special-countries **min-2-of-3** Zod refine; ADR classes array; multi-select **min-1** refines.
+- **Vehicle:** drop `euro` from the form payload (default `VI` server-side) or keep column but stop editing; `gpsMobilePhone` → **optional** (was required) + new attachment category «gps» revealed by GPS number; **fuel-card** fields (`fuelCardNumber` 16-digit, `fuelCardExpiry`, `fuelCardPin`) + derived blocked/active status; **porozumienie** scan attachment category (soft, non-blocking); **waste countries** array; **kabotaż DE** attachment category «cabotage_de_insurance» (sole required upload; DE permit scan dropped 2026-07-10); special-countries **min-2-of-3** Zod refine; ADR classes array; multi-select **min-1** refines.
 - **Trailer:** make `innerLength/Width/Height/capacity` **required**; new `sideClearanceCm` (required); `roofLift` / `roofSlide` / `edscha` booleans (edscha gated on roofSlide); counts (`beltsCount`/`matsCount`/`beamsCount`) **min 3**; new `beams` flag + count; new `paletteBasket` flag; **XL cert** required attachment; **remove `airSuspension`**.
 - **Driver:** `nationality` enum (BY/RUS/UA/PL/UZB/KRG/KZ/OTHER); `languages` array (PL/RU/EN/UA/DE/OTHER, min 1); phone-prefix decoupled from nationality; ADR classes array + required świadectwo attachment.
 - **i18n:** web-agent adds PL(default)+EN keys for all new labels/sections/badges/errors under `vehicles.*` / `trailers.*` / `drivers.*` / `fileUpload.*`.

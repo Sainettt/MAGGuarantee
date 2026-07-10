@@ -148,7 +148,7 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 > **`GET /carriers/:id/documents/overview`** (opiekun "Dokumenty" tab, read-only). Guarded exactly like the carrier detail/attachments endpoints (`@Roles('admin','opiekun')` + `OpiekunOwnershipGuard` `@OpiekunOwns('id','param','carrierId')` — opiekun sees only carriers where `opiekunId = user.sub`). Response `CarrierDocumentsOverviewDto` (`packages/shared/src/schemas/carriers.ts`):
 > - `carrierId: string`
 > - `carrierDocs: CarrierAttachmentDto[]` — company documents (insurance/license/kreptd/other).
-> - `vehicleDocs` — per category (`contract` | `gps` | `agreement` | `cabotage_de` | `cabotage_de_insurance`, mirroring `VehicleAttachmentCategory` order) → `{ attachmentId, fileName, size, createdAt, vehicle: { id, registration, sideNumber } }[]`. Every category key always present (empty array when none). `agreement` (porozumienie scan) IS included — core guarantee paperwork for the opiekun (see docs/14-design-system.md §5R).
+> - `vehicleDocs` — per category (`gps` | `agreement` | `cabotage_de_insurance`, mirroring `VehicleAttachmentCategory` order) → `{ attachmentId, fileName, size, createdAt, vehicle: { id, registration, sideNumber } }[]`. Every category key always present (empty array when none). `agreement` (porozumienie scan) IS included — core guarantee paperwork for the opiekun (see docs/14-design-system.md §5R).
 > - `vehicleAdr: { vehicleId, plate, adrClasses }[]` — vehicles flagged `adr:true` (flag + classes only, **NO file**).
 > - `trailerDocs: { attachmentId, fileName, size, createdAt, trailerId, registration }[]` — `cert_xl` certificates.
 > - `driverDocs: { attachmentId, fileName, size, createdAt, driverId, fullName }[]` — ADR świadectwa.
@@ -170,24 +170,26 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 | POST `/vehicles/:id/reactivate` | (on) | admin / opiekun |
 | DELETE `/vehicles/:id` | `removeVehicle` / `removeVehicleByOpiekun` | admin / opiekun |
 | GET `/vehicles/active?login=...` | `getActiveVehiclesForLogin` (для carrier-login dropdown) | — |
-| GET `/vehicles/:id/attachments` | (новое) — список umowa/cabotage-вложений | admin / opiekun / planista / dyspozytor / przewoznik |
+| GET `/vehicles/:id/attachments` | (новое) — список porozumienie/gps/cabotage-вложений | admin / opiekun / planista / dyspozytor / przewoznik |
 | GET `/vehicles/:id/attachments/:attachmentId/download` | (новое) — proxy-стрим файла из MinIO | admin / opiekun / planista / dyspozytor / przewoznik |
 | DELETE `/vehicles/:id/attachments/:attachmentId` | (новое) — soft-delete вложения | admin / opiekun / przewoznik |
 
-#### Vehicle-modal: umowa / cabotage attachments + multipart contract
+#### Vehicle-modal: porozumienie / gps / cabotage attachments (multipart)
 
-Поля `Vehicle.contract` (Umowa-boolean) больше нет — скан umowa теперь
-файл, хранится в MinIO как строка `VehicleAttachment` (категория `contract`).
-Поэтому `POST /vehicles` и `PATCH /vehicles/:id` принимают
-**`multipart/form-data`**, а не JSON.
+Документы машины (скан porozumienia, umowa GPS, каботажные разрешения) —
+файлы, хранятся в MinIO как строки `VehicleAttachment`. Поэтому `POST
+/vehicles` и `PATCH /vehicles/:id` принимают **`multipart/form-data`**, а не
+JSON. (Категория `contract` — скан «umowa» — удалена 2026-07: концепции umowa
+больше нет; porozumienie (категория `agreement`) — единственный
+документ-соглашение машины.)
 
 **Multipart-поля:**
 
 - **Файловые части — по одному полю на категорию, каждое принимает несколько
   файлов** (`maxCount = 10`):
-  - `contract`    → категория `contract` (скан umowa)
-  - `cabotageDe`  → категория `cabotage_de`
-  - `cabotageFr`  → категория `cabotage_fr`
+  - `gps`                 → категория `gps`
+  - `agreement`           → категория `agreement`
+  - `cabotageDeInsurance` → категория `cabotage_de_insurance`
 - **Скалярные части** — все поля `CreateVehicleSchema` / `UpdateVehicleSchema`
   как текстовые части. Так как multipart передаёт всё строками, сервер
   коэрсит их перед Zod-валидацией:
@@ -205,17 +207,12 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 **Правило обязательных вложений (service-layer, не Zod — файлы приходят
 отдельными частями):**
 
-- ≥ 1 вложение категории `contract` (umowa) **ВСЕГДА обязательно на create**
-  (безусловно — больше не зависит от `gps`/чего-либо; umowa у всех машин);
-- `cabotageDe=true` ⇒ ≥ 1 вложение категории `cabotage_de`;
-- `cabotageFr=true` ⇒ ≥ 1 вложение категории `cabotage_fr`.
+- `cabotageDe=true` ⇒ ≥ 1 вложение категории `cabotage_de_insurance`.
 
 На `POST` правило проверяется **до любых записей** (422, multi-violation
-envelope `{ violations: string[] }`, если отсутствует обязательное вложение —
-как минимум `contract`). На `PATCH` правило применяется к итоговому набору
-вложений после апдейта (существующие не-удалённые + новозагруженные − удалённые),
-но безусловное требование `contract` относится только к моменту создания —
-PATCH не вводит новую блокировку для существующих машин.
+envelope `{ violations: string[] }`, если отсутствует обязательное вложение).
+На `PATCH` правило применяется к итоговому набору вложений после апдейта
+(существующие не-удалённые + новозагруженные − удалённые).
 
 **Create-flow:** проверить правило → создать Vehicle → загрузить файлы в
 MinIO по ключу `vehicles/<vehicleId>/<category>/<randomFileId>.<ext>` →

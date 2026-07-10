@@ -3,7 +3,7 @@
 // Create / edit dialog for a vehicle — centered <FormDialog> (docs/14 §13.1,
 // §13.3). Replaces the legacy right-side VehicleSheet. Sections top-to-bottom:
 // Dane podstawowe · Kraje specjalne · Stawki · GPS · Karta paliwowa ·
-// Porozumienie · Odpady · Kabotaż · ADR · Dokumenty.
+// Porozumienie · Odpady · Kabotaż · ADR.
 //
 // EURO is a static <Badge> «EURO VI» (the single-value select was removed).
 // Conditional sub-blocks use the shared <RevealInset>; every upload is the
@@ -50,7 +50,6 @@ import { EntityAlreadyExistsNotice } from '@/components/carrier-onboarding/Entit
 import { TemporaryPasswordRow } from '@/components/carrier-onboarding/TemporaryPasswordRow';
 import { WizardStepper } from '@/components/carrier-onboarding/WizardStepper';
 import {
-  FormDescription,
   FormField,
   FormGrid,
   FormItem,
@@ -105,38 +104,30 @@ const NUMERIC_FIELDS = [
   'rateImport',
 ] as const;
 
-/** The umowa / gps / porozumienie / cabotage upload slots, keyed by bucket. */
+/** The gps / porozumienie / cabotage upload slots, keyed by bucket. */
 type FileBucketKey =
-  | 'contract'
   | 'gps'
   | 'agreement'
-  | 'cabotageDe'
   | 'cabotageDeInsurance';
 
 const BUCKET_KEYS: FileBucketKey[] = [
-  'contract',
   'gps',
   'agreement',
-  'cabotageDe',
   'cabotageDeInsurance',
 ];
 
 /** Maps a UI bucket key to the server `VehicleAttachmentCategory`. */
 const BUCKET_CATEGORY: Record<FileBucketKey, VehicleAttachmentCategory> = {
-  contract: 'contract',
   gps: 'gps',
   agreement: 'agreement',
-  cabotageDe: 'cabotage_de',
   cabotageDeInsurance: 'cabotage_de_insurance',
 };
 
 type FileBuckets = Record<FileBucketKey, FileUploadItem[]>;
 
 const EMPTY_BUCKETS: FileBuckets = {
-  contract: [],
   gps: [],
   agreement: [],
-  cabotageDe: [],
   cabotageDeInsurance: [],
 };
 
@@ -277,7 +268,7 @@ export function VehicleFormDialog({
 
   const onSubmit = form.handleSubmit(
     (values) => {
-      const missing = missingRequiredAttachments(values, fileBuckets, isEdit);
+      const missing = missingRequiredAttachments(values, fileBuckets);
       if (missing.length > 0) {
         setFileFieldErrors(
           Object.fromEntries(missing.map((k) => [k, true])) as Record<
@@ -833,23 +824,6 @@ export function VehicleFormDialog({
               {cabotageDeOn && (
                 <RevealInset>
                   <FormItem>
-                    <FormLabel htmlFor="vehicle-file-cabotageDe" required>
-                      {tFile('fields.cabotageDe')}
-                    </FormLabel>
-                    <FileUpload
-                      id="vehicle-file-cabotageDe"
-                      variant="compact"
-                      multiple={false}
-                      value={fileBuckets.cabotageDe}
-                      onChange={(items) => setBucket('cabotageDe', items)}
-                      labels={fileLabels}
-                      invalid={fileFieldErrors.cabotageDe}
-                    />
-                    {fileFieldErrors.cabotageDe && (
-                      <FormMessage>{tFile('required.cabotage_de')}</FormMessage>
-                    )}
-                  </FormItem>
-                  <FormItem>
                     <FormLabel htmlFor="vehicle-file-cabotageDeInsurance" required>
                       {tFile('fields.cabotageDeInsurance')}
                     </FormLabel>
@@ -908,29 +882,6 @@ export function VehicleFormDialog({
                   </FormItem>
                 </RevealInset>
               )}
-            </FormSection>
-
-            {/* ── Dokumenty — umowa always required on create ── */}
-            <FormSection title={t('sections.documents')}>
-              <FormItem>
-                <FormLabel htmlFor="vehicle-file-contract" required>
-                  {tFile('fields.contract')}
-                </FormLabel>
-                <FileUpload
-                  id="vehicle-file-contract"
-                  variant="compact"
-                  multiple={false}
-                  value={fileBuckets.contract}
-                  onChange={(items) => setBucket('contract', items)}
-                  labels={fileLabels}
-                  invalid={fileFieldErrors.contract}
-                />
-                {fileFieldErrors.contract ? (
-                  <FormMessage>{tFile('required.contract')}</FormMessage>
-                ) : (
-                  <FormDescription>{tFile('fields.contractHint')}</FormDescription>
-                )}
-              </FormItem>
             </FormSection>
 
             {/* ── Aktywny — distinguished status row, body bottom (§13.2.4) ── */}
@@ -1075,10 +1026,8 @@ function cleanForm(values: FormValues): Record<string, unknown> {
 
 function attachmentsToBuckets(attachments: VehicleAttachmentDto[]): FileBuckets {
   const buckets: FileBuckets = {
-    contract: [],
     gps: [],
     agreement: [],
-    cabotageDe: [],
     cabotageDeInsurance: [],
   };
   for (const att of attachments) {
@@ -1089,10 +1038,8 @@ function attachmentsToBuckets(attachments: VehicleAttachmentDto[]): FileBuckets 
       size: att.size,
       mimeType: att.mimeType,
     };
-    if (att.category === 'contract') buckets.contract.push(item);
-    else if (att.category === 'gps') buckets.gps.push(item);
+    if (att.category === 'gps') buckets.gps.push(item);
     else if (att.category === 'agreement') buckets.agreement.push(item);
-    else if (att.category === 'cabotage_de') buckets.cabotageDe.push(item);
     else if (att.category === 'cabotage_de_insurance')
       buckets.cabotageDeInsurance.push(item);
   }
@@ -1110,10 +1057,8 @@ function pickNew(items: FileUploadItem[]): File[] {
 
 function collectNewFiles(buckets: FileBuckets): VehicleAttachmentUploads {
   return {
-    contract: pickNew(buckets.contract),
     gps: pickNew(buckets.gps),
     agreement: pickNew(buckets.agreement),
-    cabotageDe: pickNew(buckets.cabotageDe),
     cabotageDeInsurance: pickNew(buckets.cabotageDeInsurance),
   };
 }
@@ -1138,24 +1083,20 @@ function bucketHasFiles(items: FileUploadItem[]): boolean {
 
 /**
  * Client-side mirror of the server's required-attachment rule (§13.3):
- *   create              ⇒ contract (umowa)
  *   gpsMobilePhone set  ⇒ gps (umowa GPS)
- *   cabotageDe=true     ⇒ cabotageDe AND cabotageDeInsurance
+ *   cabotageDe=true     ⇒ cabotageDeInsurance (ubezpieczenie kabotażowe)
  * Porozumienie (agreement) is SOFT — never required. Returns the missing
  * bucket keys.
  */
 function missingRequiredAttachments(
   values: FormValues,
   buckets: FileBuckets,
-  isEdit: boolean,
 ): FileBucketKey[] {
   const missing: FileBucketKey[] = [];
-  if (!isEdit && !bucketHasFiles(buckets.contract)) missing.push('contract');
   if ((values.gpsMobilePhone ?? '').trim() && !bucketHasFiles(buckets.gps)) {
     missing.push('gps');
   }
   if (values.cabotageDe === true) {
-    if (!bucketHasFiles(buckets.cabotageDe)) missing.push('cabotageDe');
     if (!bucketHasFiles(buckets.cabotageDeInsurance)) {
       missing.push('cabotageDeInsurance');
     }

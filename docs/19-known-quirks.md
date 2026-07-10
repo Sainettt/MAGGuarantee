@@ -9,18 +9,13 @@
 
 ---
 
-## 1. <a id="umowa-vs-porozumienie"></a>`Vehicle.umowa` vs `Vehicle.porozumienie` ⚠️ AMBIGUOUS
+## 1. <a id="umowa-vs-porozumienie"></a>`Vehicle.umowa` vs `Vehicle.porozumienie` ✅ RESOLVED (2026-07-10)
 
-> **Update 2026-05:** the `contract` (Umowa) boolean has been **removed** from `Vehicle`. The umowa is no longer modeled as a flag — the actual scanned umowa document is stored as `VehicleAttachment` rows with `category=contract` (uploaded from the Vehicle create/edit modal, bytes in MinIO). The `agreement` (Porozumienie) boolean is **unchanged** and stays on `Vehicle`. The interpretation discussion below is kept for historical context; it is moot for `contract` now — a vehicle either has a contract scan on file or it does not.
+> **Resolution (stakeholder, final, 2026-07-10):** the **umowa concept does not exist** in this business. **Porozumienie is the ONLY vehicle document** — it describes the carrier and the vehicles enrolled under the km-guarantee program. The `contract` attachment category was **removed entirely** from `VehicleAttachmentCategory` (migration `20260710090000_drop_vehicle_contract_category`), along with the legacy `contract` (Umowa) boolean that had already been dropped in 2026-05. Porozumienie stays modeled as `Vehicle.agreement` (Boolean) + the `agreement` attachment scan. This retires the (a)/(b) ambiguity below — there is no second relationship to disambiguate.
 
-Historically the schema had both `agreement` (legacy `Porozumienie`) and `contract` (legacy `Umowa`) as independent nullable booleans on `Vehicle`. Two interpretations were plausible from the legacy UI alone (`index.html:1944-1945` — both are `<select>` Tak/Nie/—):
+The historical ambiguity (now moot, kept only as a paper trail): the legacy schema carried both `agreement` (legacy `Porozumienie`) and `contract` (legacy `Umowa`) as independent nullable booleans on `Vehicle` (`index.html:1944-1945` — both `<select>` Tak/Nie/—), and two readings were once plausible — (a) umowa and porozumienie being different concepts that could both be true, or (b) mutually-exclusive contract types. No business logic in `Code.gs` ever differentiated them, and the stakeholder has now confirmed the umowa was never a real, separate thing. Only porozumienie remains.
 
-- **(a) Different concepts:** `umowa` = inclusion in MAGTRANS master fleet contract; `porozumienie` = enrolled in the km-guarantee program. Both can be `true` for the same vehicle.
-- **(b) Mutually exclusive contract types:** a vehicle is on ONE relationship, not both. In which case storing two booleans is data-smell and a single enum `vehicleRelationship: 'umowa' | 'porozumienie' | null` would be cleaner.
-
-Source of truth: `index.html:1944-1945` (form), `index.html:8614, 9725-9726` (display + payload). No business logic in `Code.gs` differentiated them.
-
-**What NOT to do:** do not re-add a `contract` boolean — presence of the umowa is now derived from `VehicleAttachment` rows. Do not add business logic that depends on `agreement` (e.g., "only allow wniosek submission if porozumienie=true") without first confirming the interpretation with the stakeholder.
+**What NOT to do:** do not reintroduce a `contract` / `umowa` flag or attachment category in any form — the concept is gone by explicit stakeholder decision, not deferred. Porozumienie (`Vehicle.agreement` + `agreement` attachment) is the single source of the vehicle-document relationship; do not model a second one.
 
 ---
 

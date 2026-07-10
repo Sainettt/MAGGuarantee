@@ -413,21 +413,15 @@
     "dropzoneAria": "Choose files to upload",
     "removeAria": "Remove file {name}",
     "fields": {
-      "contract": "Contract",
-      "contractHint": "Attach a scan or photo of the contract — required when adding a vehicle.",
       "gps": "GPS contract",
       "agreement": "Agreement scan",
-      "cabotageDe": "Cabotage permit",
       "cabotageDeInsurance": "Cabotage insurance",
-      "cabotageHint": "Attach a scan or photo of the cabotage permit.",
       "certXl": "XL certificate (PDF)",
       "adr": "ADR certificate",
       "adrHint": "Attach a scan or photo of the driver's ADR certificate."
     },
     "required": {
-      "contract": "Contract scan is required when adding a vehicle.",
       "gps": "GPS contract scan required when a GPS number is set.",
-      "cabotage_de": "DE cabotage permit required.",
       "cabotage_de_insurance": "DE cabotage insurance required.",
       "cert_xl": "XL certificate scan (PDF) required.",
       "adr": "ADR certificate scan required when ADR is checked."
@@ -557,7 +551,6 @@
       "waste": "Waste",
       "cabotage": "Cabotage",
       "adr": "ADR",
-      "documents": "Documents",
       "permissions": "Permissions",
       "specialCountries": "Special countries",
       "specialCountriesHint": "Countries the vehicle holds all entry permits for.",
@@ -568,10 +561,8 @@
       "attachments": "Attachments"
     },
     "attachmentCategory": {
-      "contract": "Contract",
       "gps": "GPS contract",
       "agreement": "Agreement",
-      "cabotage_de": "DE cabotage permit",
       "cabotage_de_insurance": "DE cabotage insurance"
     },
     "attachmentOpen": "Open",
@@ -1427,10 +1418,8 @@
         "drivers": "Driver documents"
       },
       "type": {
-        "contract": "Contract",
         "gps": "GPS agreement",
         "agreement": "Guarantee agreement",
-        "cabotage_de": "Cabotage permit DE",
         "cabotage_de_insurance": "Cabotage insurance DE",
         "cert_xl": "XL certificate",
         "driverAdr": "Driver ADR certificate"

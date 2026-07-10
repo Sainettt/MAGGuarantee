@@ -112,10 +112,17 @@ enum VehicleType { MEGA  STD  COIL }
 enum EuroNorm    { V  VI }
 // CertificateL was collapsed to Boolean (TAK/NIE) in 2026-05; see Vehicle.certificateL below.
 
-// Category of a file attached to a Vehicle (umowa scan, cabotage permits).
+// Category of a file attached to a Vehicle (gps / porozumienie / cabotage scans).
+// `contract` (Umowa) removed 2026-07-10 — the umowa concept does not exist in
+// this business; porozumienie (`agreement`) is the only vehicle document. See
+// docs/19-known-quirks.md §1 (RESOLVED). `gps` (umowa GPS) is a different
+// document and stays.
+// `cabotage_de` value dropped 2026-07-10 — the DE cabotage-permit scan is gone;
+// `cabotage_de_insurance` is now the sole cabotage document, required by the API
+// when Vehicle.cabotageDe=true. The Vehicle.cabotageDe/cabotageFr Booleans stay.
 // `adr` value dropped 2026-05-29 — the kept `Vehicle.adr` boolean stays as the
 // permit flag; the ADR certificate scan moved to the Driver (DriverAttachment).
-enum VehicleAttachmentCategory { contract  cabotage_de  cabotage_fr }
+enum VehicleAttachmentCategory { gps  agreement  cabotage_de_insurance }
 
 // Category of a file attached to a Driver — the ADR driver certificate
 // (świadectwo ADR). Single value for now; enum (not literal) to mirror the
@@ -296,8 +303,9 @@ model Vehicle {
   // API sets it on the agreement toggle (false/null→true ⇒ today; true→false ⇒
   // NULL). Watchdog anchor for a vehicle that never returned a delegation.
   agreementSince DateTime? @db.Date
-  // legacy `contract` (Umowa) boolean dropped 2026-05 — the umowa scan is
-  // now stored as VehicleAttachment rows with category=contract.
+  // legacy `contract` (Umowa) boolean dropped 2026-05; the whole umowa concept
+  // removed 2026-07-10 — the umowa does not exist in this business, porozumienie
+  // (`agreement`) is the only vehicle document. See quirk #1 (RESOLVED).
 
   // EUR/km rates — Optional everywhere (NULL = "not yet negotiated")
   rateDe     Decimal? @db.Decimal(6, 4)
@@ -338,10 +346,10 @@ model Vehicle {
   @@map("vehicles")
 }
 
-// ─── VEHICLE ATTACHMENTS (umowa / cabotage screenshots) ──
-// Files uploaded from the Vehicle create/edit modal — scanned umowa,
-// cabotage permits — stored in MinIO (S3-compatible). The DB row holds
-// only metadata + the object key; the bytes live in the bucket.
+// ─── VEHICLE ATTACHMENTS (gps / porozumienie / cabotage scans) ──
+// Files uploaded from the Vehicle create/edit modal — umowa GPS scan,
+// porozumienie, cabotage permits — stored in MinIO (S3-compatible). The DB row
+// holds only metadata + the object key; the bytes live in the bucket.
 model VehicleAttachment {
   id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   vehicleId String  @db.Uuid
@@ -954,7 +962,7 @@ shows whether the verifier overrode the carrier's declared hours.
 | P-R | GPS, KartaPaliwowa, Typ | `gps` dropped 2026-06-17 (every vehicle GPS-tracked); `fuelCard`, `type` |
 | S | Dyspozytor (login) | → FK `dispatchTeamId` → `Team` (✅ Phase 11 реализована: команда вместо одиночного `dispatcherId` — см. [04-data-model.md](04-data-model.md) «Team») |
 | T-W | GB, IT, FR, Porozumienie | `gb`, `it`, `fr`, `agreement` |
-| X | Umowa | dropped 2026-05 — umowa scan stored as `VehicleAttachment` (category=contract) |
+| X | Umowa | removed 2026-07-10 — umowa concept does not exist; porozumienie (`agreement`) is the only vehicle document (see quirk #1 RESOLVED) |
 | Y-AB | StawkaDE, StawkaUE, StawkaEksport, StawkaImport | `rateDe`, `rateUe`, `rateExport`, `rateImport` |
 | AC | Odpady | `wasteAllowed` |
 | AD | OdpadyKraje (CSV) | `wasteCountries[]` |

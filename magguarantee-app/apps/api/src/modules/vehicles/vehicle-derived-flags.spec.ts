@@ -1,7 +1,9 @@
 import { computeVehicleDerivedFlags } from './vehicle-derived-flags';
 
 const agreementScan = [{ category: 'agreement' as const }];
-const contractScan = [{ category: 'contract' as const }];
+// A live attachment that is NOT a porozumienie scan — proves the derived flags
+// key off the `agreement` category specifically, not "any attachment present".
+const nonAgreementScan = [{ category: 'gps' as const }];
 
 describe('computeVehicleDerivedFlags', () => {
   it('no fuel card, no agreement → both flags false', () => {
@@ -29,7 +31,7 @@ describe('computeVehicleDerivedFlags', () => {
       computeVehicleDerivedFlags({
         fuelCard: true,
         agreement: true,
-        attachments: contractScan,
+        attachments: nonAgreementScan,
       }),
     ).toEqual({ fuelCardBlocked: true, agreementScanMissing: true });
   });

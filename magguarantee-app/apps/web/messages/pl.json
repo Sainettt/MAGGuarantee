@@ -413,21 +413,15 @@
     "dropzoneAria": "Wybierz pliki do przesłania",
     "removeAria": "Usuń plik {name}",
     "fields": {
-      "contract": "Umowa",
-      "contractHint": "Załącz skan lub zdjęcie umowy — wymagane przy dodawaniu pojazdu.",
       "gps": "Umowa GPS",
       "agreement": "Skan porozumienia",
-      "cabotageDe": "Zezwolenie kabotażowe",
       "cabotageDeInsurance": "Ubezpieczenie kabotażowe",
-      "cabotageHint": "Załącz skan lub zdjęcie pozwolenia kabotażowego.",
       "certXl": "Certyfikat XL (PDF)",
       "adr": "Świadectwo ADR",
       "adrHint": "Załącz skan lub zdjęcie świadectwa ADR kierowcy."
     },
     "required": {
-      "contract": "Skan umowy jest wymagany przy dodawaniu pojazdu.",
       "gps": "Wymagany skan umowy GPS, gdy podano numer GPS.",
-      "cabotage_de": "Wymagane zezwolenie kabotażowe DE.",
       "cabotage_de_insurance": "Wymagane ubezpieczenie kabotażowe DE.",
       "cert_xl": "Wymagany skan certyfikatu XL (PDF).",
       "adr": "Wymagany skan świadectwa ADR gdy zaznaczono ADR."
@@ -557,7 +551,6 @@
       "waste": "Odpady",
       "cabotage": "Kabotaż",
       "adr": "ADR",
-      "documents": "Dokumenty",
       "permissions": "Pozwolenia",
       "specialCountries": "Kraje specjalne",
       "specialCountriesHint": "Kraje, do których pojazd ma wszystkie pozwolenia na wjazd.",
@@ -568,10 +561,8 @@
       "attachments": "Załączniki"
     },
     "attachmentCategory": {
-      "contract": "Umowa",
       "gps": "Umowa GPS",
       "agreement": "Porozumienie",
-      "cabotage_de": "Zezwolenie kabotażowe DE",
       "cabotage_de_insurance": "Ubezpieczenie kabotażowe DE"
     },
     "attachmentOpen": "Otwórz",
@@ -1427,10 +1418,8 @@
         "drivers": "Dokumenty kierowców"
       },
       "type": {
-        "contract": "Umowa",
         "gps": "Umowa GPS",
         "agreement": "Porozumienie",
-        "cabotage_de": "Zezwolenie kabotażowe DE",
         "cabotage_de_insurance": "Ubezpieczenie kabotażowe DE",
         "cert_xl": "Certyfikat XL",
         "driverAdr": "Świadectwo ADR kierowcy"

@@ -66,9 +66,9 @@ export interface CarrierDriverAttachmentRow {
  * `trailer`) and the carrier link via nested `is:` — those nested reads are NOT
  * auto-filtered, so we add `deletedAt: null` on BOTH the attachment row AND the
  * parent explicitly. Only ACTIVE/live rows surface. The vehicle-doc category
- * set is the full document set the tab shows (contract / gps / agreement /
- * cabotage_de / cabotage_de_insurance) — `agreement` (porozumienie scan) is
- * included as core guarantee paperwork.
+ * set is the full document set the tab shows (gps / agreement /
+ * cabotage_de_insurance) — `agreement` (porozumienie scan) is included as core
+ * guarantee paperwork.
  */
 @Injectable()
 export class CarrierDocumentsRepository {

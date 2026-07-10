@@ -59,25 +59,22 @@ import {
  *   - composite UNIQUE (carrierId, plateNumber) — DB; we translate the
  *     P2002 to 409 Conflict.
  *
- * Required-attachment rule (umowa + cabotage screenshots) — service-layer,
+ * Required-attachment rules (gps + cabotage screenshots) — service-layer,
  * because files arrive as separate multipart parts and cannot be expressed in
  * the body Zod schema:
- *   - `contract` (umowa) ⇒ ≥1 attachment ALWAYS required on create
- *   - `cabotageDe=true`  ⇒ ≥1 `cabotage_de` attachment
- *   - `cabotageFr=true`  ⇒ ≥1 `cabotage_fr` attachment
- * NOTE (2026-06-17, resolved): the `contract` (umowa) requirement is now
- * UNCONDITIONAL on create. It used to be gated on the legacy `gps=true` toggle;
- * when that boolean was dropped the trigger was temporarily removed. Product
- * resolution: every vehicle has an umowa, so the scan is mandatory for all
- * creates regardless of any flag. Cabotage attachments stay conditional.
- * The `adr` boolean stays on the vehicle (permit flag) but no longer requires
- * an attachment — the ADR certificate scan moved to the Driver (świadectwo
- * ADR) as a `DriverAttachment` (2026-05-29).
- * On create the rule (incl. the unconditional `contract`) is checked BEFORE any
- * DB/storage write. On update the rule holds over the post-update set (existing
- * live attachments + newly uploaded − removed); the unconditional `contract`
- * requirement applies only at create-time — update does not re-block existing
- * vehicles.
+ *   - `gpsMobilePhone` set ⇒ ≥1 `gps` attachment (umowa GPS scan)
+ *   - `cabotageDe=true`    ⇒ ≥1 `cabotage_de_insurance` (the DE cabotage permit
+ *     screenshot / category `cabotage_de` was removed 2026-07 — only the
+ *     insurance scan is required now)
+ * The `contract` (scanned umowa) requirement — and the `contract` category
+ * itself — was removed 2026-07: the umowa concept no longer exists, and
+ * porozumienie (category `agreement`, SOFT) is the only vehicle agreement
+ * document. The `adr` boolean stays on the vehicle (permit flag) but no longer
+ * requires an attachment — the ADR certificate scan moved to the Driver
+ * (świadectwo ADR) as a `DriverAttachment` (2026-05-29).
+ * On create the rules are checked BEFORE any DB/storage write. On update they
+ * hold over the post-update set (existing live attachments + newly uploaded −
+ * removed).
  *
  * Role-scoped list filtering happens here because guards can only fire on
  * per-row routes; collection routes need service-side narrowing.
@@ -584,8 +581,8 @@ export class VehiclesService {
 
   /**
    * Create-time rules. Throws a SINGLE 422 collecting every violation:
-   *   - attachments: `contract` (always) + `gps` (when gpsMobilePhone set) +
-   *     `cabotage_de` AND `cabotage_de_insurance` (when cabotageDe=true).
+   *   - attachments: `gps` (when gpsMobilePhone set) + `cabotage_de_insurance`
+   *     (when cabotageDe=true).
    *   - cross-field (rules 4-7): fuel-card completeness, waste countries, adr
    *     classes, min-2-of-{gb,it,fr}.
    */
@@ -596,8 +593,6 @@ export class VehiclesService {
     const present = this._categoriesPresent(uploads);
     const gpsPresent = this._nonEmpty(dto.gpsMobilePhone);
     const required = this._requiredCategories(dto.cabotageDe ?? false, gpsPresent);
-    // Unconditional on create: umowa scan must be present.
-    required.add('contract');
     const violations = [
       ...this._attachmentViolations(required, present),
       ...this._crossFieldViolations({
@@ -622,9 +617,8 @@ export class VehiclesService {
 
   /**
    * Update-time rules over the post-update effective state. The attachment set
-   * is (existing live − removed + newly uploaded). `contract` is NOT re-imposed
-   * on update (editing an existing vehicle never re-blocks on the umowa scan);
-   * `gps` and the cabotage pair ARE re-checked against the effective flags.
+   * is (existing live − removed + newly uploaded). `gps` and the cabotage pair
+   * are re-checked against the effective flags.
    */
   private _assertVehicleRulesOnUpdate(
     existing: VehicleRow,
@@ -707,11 +701,10 @@ export class VehiclesService {
   /**
    * Maps the CONDITIONAL flags to required attachment categories (rules 2, 3):
    *   - gpsPresent ⇒ `gps`
-   *   - cabotageDe ⇒ `cabotage_de` AND `cabotage_de_insurance`
+   *   - cabotageDe ⇒ `cabotage_de_insurance`
    * `agreement` is deliberately NOT required — the porozumienie scan is SOFT
    * (its absence only surfaces the derived `agreementScanMissing`/
-   * `fuelCardBlocked` flags, never blocks a save). `contract` is added directly
-   * by the create path (unconditional at create-time only).
+   * `fuelCardBlocked` flags, never blocks a save).
    */
   private _requiredCategories(
     cabotageDe: boolean,
@@ -720,7 +713,6 @@ export class VehiclesService {
     const required = new Set<VehicleAttachmentCategory>();
     if (gpsPresent) required.add('gps');
     if (cabotageDe) {
-      required.add('cabotage_de');
       required.add('cabotage_de_insurance');
     }
     return required;
@@ -977,17 +969,15 @@ export class VehiclesService {
 /**
  * Polish 422 messages for each missing required-attachment category.
  *
- * `contract` is unconditionally required on create; `gps` is required when a
- * tracker device id is present; the two `cabotage_de*` scans are required
- * together when cabotageDe=true. `agreement` never appears as a required
- * violation (SOFT), but the Record must be total over the enum.
+ * `gps` is required when a tracker device id is present; the
+ * `cabotage_de_insurance` scan is required when cabotageDe=true. `agreement`
+ * never appears as a required violation (SOFT), but the Record must be total
+ * over the enum.
  */
 const REQUIRED_ATTACHMENT_MESSAGES: Record<VehicleAttachmentCategory, string> =
   {
-    contract: 'Wymagany skan umowy (contract) przy tworzeniu pojazdu',
     gps: 'Wymagany skan umowy GPS (gps) gdy podano identyfikator GPS',
     agreement: 'Wymagany skan porozumienia (agreement)',
-    cabotage_de: 'Wymagany skan pozwolenia kabotażowego DE gdy cabotageDe=true',
     cabotage_de_insurance:
       'Wymagany skan ubezpieczenia kabotażowego DE gdy cabotageDe=true',
   };

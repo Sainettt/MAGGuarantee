@@ -77,8 +77,8 @@ import { VehiclesService } from './vehicles.service';
  * the bytes in memory (small files, ≤10 MB) so the service can stream them
  * straight to MinIO.
  *
- * Multipart field names (web MUST mirror exactly): `contract`, `cabotageDe`,
- * `cabotageFr`.
+ * Multipart field names (web MUST mirror exactly): `gps`, `agreement`,
+ * `cabotageDeInsurance`.
  */
 const ATTACHMENT_UPLOAD_FIELDS = ATTACHMENT_FILE_FIELDS.map(({ field }) => ({
   name: field,
