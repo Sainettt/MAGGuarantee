@@ -2807,6 +2807,8 @@ The `<BreakdownTable>` then container-queries itself (§ BreakdownTable Responsi
 
 > **2026-06-26 — canonical vehicle modal: viewers, «Opiekun» row, carrier-self hide.** This `<VehicleDetailModal>` is the **full** vehicle modal shown to **admin / opiekun / przewoźnik / planista** (planista joined this group on 2026-06-26, §6.4.2 — incl. «Stawki»). Two viewer-scoped rules:
 > - **«Opiekun» row (all viewers).** The «Przypisanie / Ludzie» section now carries an **Opiekun** row — the carrier's caretaker `User`, resolved via `vehicle.carrier.opiekun` and surfaced on `VehicleDto.opiekun` (`name ?? login`). It sits alongside Przewoźnik / Planista / Zespół prowadzący. Omitted (em-dash, §6.5) when the carrier has no opiekun.
+> **2026-07-17 — «Stawki» reused on the delegation modal (server-scrubbed).** This vehicle «Stawki» section (icon `<Banknote>`, `vehicles.sections.rates` + `vehicles.fields.rate*`) is now **also reused as a block in the delegation detail modal** (§6.4.1 «Stawki» block), resolved live off the delegation's vehicle. Same dyspozytor exclusion as here, but on the delegation endpoint it is **server-scrubbed** (the four rate fields nulled on the wire for `dyspozytor`), i.e. **stronger** than the §6.4.2 UI-only exclusion that leaves the values on `VehicleDto`. Carrier sees its own vehicle's rates in both places (consistent rule).
+
 > - **Carrier-self hide (przewoźnik viewer only).** When the viewer is the **przewoźnik** looking at their own vehicle, the modal **omits the «Przewoźnik» row**, **drops the carrier-name subtitle fallback** (a carrier need not be told who the carrier is), and — **added 2026-07-07** — **omits the «Numer boczny» row** in «Identyfikacja» (the internal MAGTRANS `sideNumber` designation is our info and must never surface to a carrier; same rule as §12.3.2 status rows, §12.7 episode history `showSideNumber=false`, and the CarrierFleetPanel «Auta» table). The subtitle still shows `brand + model` when present; it just never falls back to the carrier name for this viewer. The przewoźnik still sees **Opiekun + Planista + Zespół prowadzący**.
 
 ### 6.16 Driver field mapping — 3 logical sections
@@ -3649,7 +3651,7 @@ So `DelegationDetailModal.tsx` stays a thin wrapper over `<EntityDetailModal>`; 
 - **Badge row** = the `<StatusBadge status={delegation.status} />` (unchanged).
 - **Subtitle** = **omitted** (`subtitle={undefined}`). The driver moves into the body (see «Driver + vehicle» strip). Per §6.3 the shell drops the subtitle line entirely when none is passed — no empty gutter.
 
-**Body — three blocks, top to bottom:**
+**Body — blocks, top to bottom** *(updated 2026-07-17 — «Stawki» strip inserted between the RouteCard and the driver/vehicle strip; documented order: Trasa → Stawki → Pojazd i kierowca → Historia statusu → Notatki → km-calendar §7.7.9 → ZESPÓŁ PROWADZĄCY §7.9.7)***:**
 
 ```
 ┌─ body (single full-width column — see "span" note) ────────────────────────┐
@@ -3661,6 +3663,11 @@ So `DelegationDetailModal.tsx` stays a thin wrapper over `<EntityDetailModal>`; 
 │  │   zgł.  12.03, 08:00        (duration pill on       plan.  16.03.2025 │  │
 │  │   fakt. 13.03  ◀actual      the connector)          fakt.  18.03.2025 │  │
 │  │   kod: 40-001                                        kod: 00-950      │  │
+│  ╰──────────────────────────────────────────────────────────────────────╯  │
+│                                                                            │
+│  ╭─ STAWKI («Stawki», span:'full', 4-up tile strip — new 2026-07-17) ───╮  │
+│  │   STAWKA DE    STAWKA UE    STAWKA EKSPORT    STAWKA IMPORT           │  │
+│  │   … €          … €          … €               … €   (— for null)      │  │
 │  ╰──────────────────────────────────────────────────────────────────────╯  │
 │                                                                            │
 │  ╭─ Driver + vehicle strip (section B, span:'full', fullWidth row) ─────╮  │
@@ -3698,6 +3705,20 @@ So `DelegationDetailModal.tsx` stays a thin wrapper over `<EntityDetailModal>`; 
 
 **Duration pill** — `inline-flex items-center gap-1 rounded-full border border-border bg-input px-2.5 py-0.5 text-xs font-medium text-text-sub` with the text «{n} dni · plan.». `n` = **whole-day count between `departureAt` and `plannedReturnAt`**, computed date-only: `differenceInCalendarDays(plannedReturnAt, departureAt.slice(0,10))` (drop the time portion of `departureAt`, exactly mirroring the zod cross-field validation at `delegations.ts:113`). Pluralize via the existing PL plural i18n (`1 dzień` / `2–4 dni` / `5+ dni`) — add `delegations.routeCard.durationDays` ICU plural; the `· plan.` suffix marks it as the *planned* span (so it never reads as actual elapsed time). Guard `n >= 0` (the zod schema already forbids `plannedReturnAt < departureAt`); if for any reason the pill would be negative, render «— · plan.».
 
+> **2026-07-17 — «Stawki» block added to the delegation detail modal.** A rates strip joins `DelegationDetailModal` (§6.4.1 / §6.4.1a), positioned **between Block A «Trasa» (`<RouteCard>`) and the «Pojazd i kierowca» driver+vehicle strip (Block B)**. Documented block order becomes: Trasa → **Stawki** → Pojazd i kierowca → Historia statusu → Notatki → km-calendar (§7.7.9) → ZESPÓŁ PROWADZĄCY (§7.9.7). Per the doc's own insertion convention (cf. the km-calendar §7.7.9 and «ZESPÓŁ PROWADZĄCY» §7.9.7 inserts) the existing A/B/C/D block letters are **not** renumbered — «Stawki» is a positional `span:'full'` block referenced by name. It reuses the §6.15 vehicle «Stawki» presentation (icon + i18n) on the delegation surface with the **same dyspozytor exclusion, but server-scrubbed** (see the two-layer rule below and the §6.4.2 cross-reference).
+
+**«Stawki» block (delegation vehicle rates — 2026-07-17).** The four vehicle guarantee rates, resolved **LIVE** off the delegation's vehicle — Stawka DE → `vehicle.rateDe`, Stawka UE → `vehicle.rateUe`, Stawka eksport → `vehicle.rateExport`, Stawka import → `vehicle.rateImport`:
+
+| Aspect | Spec |
+|---|---|
+| **Section** | `span:'full'`, icon `<Banknote>` (identical to the §6.15 / §6.15 «Stawki» section), header reuses `vehicles.sections.rates` → «Stawki». |
+| **Content** | The four rates above, EUR-formatted via `formatEur`; em-dash for `null` (§6.5); `tabular-nums`. |
+| **Presentation** | A single `fullWidth` row (§6.20 escape hatch — the same mechanism the `<RouteCard>` and the km-calendar §7.7.9 use) holding a **4-up tile strip** — `grid grid-cols-2 gap-4 sm:grid-cols-4` (`gap-4` matches the sibling driver+vehicle strip in the same modal). Each tile = the §6.4.1 mini uppercase caption (`text-[11px] uppercase tracking-[0.08em] text-text-sub` — the same strip-label treatment as the route-card sub-labels) over the EUR value (`text-sm font-semibold text-text tabular-nums`). |
+| **i18n** | Reuse `vehicles.sections.rates` (header) + `vehicles.fields.{rateDe,rateUe,rateExport,rateImport}` (captions). **No new keys.** |
+| **Visibility** | Shown to **every** role that opens the delegation modal **except `dyspozytor`** — i.e. admin, planista (rates-visible since 2026-06-26, §6.4.2 / §6.15), przewoźnik (only ever reads own delegations ⇒ own vehicle's rates, consistent with the §6.15 carrier-sees-own-«Stawki» rule), eksport, weryfikator, opiekun. |
+| **Dyspozytor — two-layer** | The **UI omits** the block for `dyspozytor` **and** the **API scrubs** `rateDe`/`rateUe`/`rateExport`/`rateImport` to `null` in the delegation payload (the delegation vehicle mini). This is deliberately **STRONGER** than the §6.4.2 UI-only exclusion precedent on `VehicleDto` (the known "getById is not scoped" IDOR gap): for the delegation endpoint **the wire matches visibility** — dyspozytor never receives the values. |
+| **Empty-state** | Omit the block **entirely** when the delegation has **no resolvable vehicle** OR **all four rates are `null`** (per the §6.4 "empty section omitted" rule). Because the dyspozytor scrub nulls all four, this rule **auto-omits** the block for dyspozytor even if the UI role-gate ever failed — a third safety net. |
+
 **Block B — Driver + vehicle strip.** A single `rounded-xl border border-border/60 bg-card p-5` card split into two halves on `sm+` (`grid grid-cols-1 sm:grid-cols-2 gap-4`), stacked on phones:
 
 - **Driver half:** a small avatar circle (`inline-flex h-9 w-9 items-center justify-center rounded-full bg-input text-text-sub` with a Lucide `<User size={18} />` — **no** photo, no initials needed) + a two-line stack: name `text-sm font-semibold text-text` (`driver.firstName + lastName` ?? `driverNameSnapshot`, em-dash if both null) and phone `text-xs text-text-sub font-mono` (`driverPhoneSnapshot`, em-dash if null). This is where the driver name + phone live now (moved out of the header).
@@ -3726,6 +3747,7 @@ Section header: icon `<ClipboardCheck>` (or keep `<Info>`), label «STATUS I AUD
 **All fields accounted for (no field dropped) — updated for the §6.4.1a redesign.** Mapping of the `DelegationDto` fields to the new layout:
 - Header: `vehicle.plateNumber` (title), `status` (badge).
 - Route card (Block A): `departureAt` (reported) + **`actualDepartureAt` (actual, NEW)**; `departureCountry`, `departurePostalCode`; `plannedReturnAt` (planned) + `actualReturnAt` (actual); `returnCountry`, `returnPostalCode` (+ the derived duration pill).
+- «Stawki» block (2026-07-17): `vehicle.rateDe` / `vehicle.rateUe` / `vehicle.rateExport` / `vehicle.rateImport` (live off the delegation's vehicle; **dyspozytor-scrubbed to `null` server-side** — see the §6.4.1 «Stawki» block spec above).
 - Driver/vehicle strip (Block B): `driver`/`driverNameSnapshot`, `driverPhoneSnapshot`, `vehicle.plateNumber` (echoed in body for the strip), `trailer.plateNumber`.
 - Audit chain (Block C, §6.4.1a): `reportedBy`/`reportedAt`, `readyBy`/`readyAt`, `verifiedBy`/`verifiedAt`.
 - Notatki (Block D): `notes`.
@@ -3736,6 +3758,8 @@ Section header: icon `<ClipboardCheck>` (or keep `<Info>`), label «STATUS I AUD
 ### 6.4.1a Delegation lifecycle presentation — operational timeline + audit chain (redesign 2026-07-07)
 
 > **Why this section exists.** The user's complaint: the lifecycle info in the delegation detail modal is muddled — an operational date (`actualReturnAt`) sat in the same flat `<dl>` as identity/audit stamps; the new `actualDepartureAt` (actual start-of-guarantee, counterpart to `actualReturnAt`) was not surfaced anywhere; and the modal rendered the **eksport** `readyBy/At` stamp under a «Zweryfikowany» label while the **real** weryfikator `verifiedBy/At` stamp was invisible — so "verification" was overloaded and dishonest. This section un-muddles all three cleanly. **Presentation-only, role-neutral** — all fields are already on `DelegationDto`; no schema/API change; no role gains or loses data visibility (this modal is shared read-only across carrier / planista / dyspozytor / eksport / weryfikator — the regrouping is identical for all five).
+
+> **Exception — the «Stawki» block (2026-07-17) is role-scoped.** The route/audit regrouping described in this §6.4.1a stays role-neutral, but the separately-added «Stawki» rates block (inserted between Block A and Block B — full spec in §6.4.1) is **not** neutral: it is hidden from `dyspozytor` **and** its four rate fields are server-scrubbed to `null` on the delegation payload for that role (the delegation-endpoint "wire matches visibility" rule, stronger than the §6.4.2 UI-only `VehicleDto` exclusion). See §6.4.1 «Stawki» block + the §6.4.2 cross-reference.
 
 **The clean split — two concerns, two homes:**
 
@@ -3838,6 +3862,10 @@ These modals open when a row in the planista/dyspozytor fleet tabs (§6.4.3) is 
 - (b) **enrich the slim list-items** with a curated, non-sensitive field set so the panel renders the modal from data it already holds — **chosen.** api-agent widens the three `*ListItemSchema` with the additive fields below. Because these are **additive/optional**, they also flow into the carrier `/fleet/my` payload — which is fine: a carrier owns its own fleet and the added fields are all non-sensitive (no rates). **The field lists below ARE the api contract** — api-agent adds exactly these and nothing more.
 
 **HARD EXCLUSION — dyspozytor only (vehicle rates).** Never include `rateDe` / `rateUe` / `rateExport` / `rateImport` for the **dyspozytor** viewer. Dyspozytor must not see pricing — the vehicle «Stawki» section from §6.15 is **dropped entirely** in the dyspozytor read-only fleet modal (it keeps using the slim `<FleetVehicleDetailModal>` described below).
+
+> **2026-07-17 — delegation modal reuses the rates presentation, but server-scrubbed.** The §6.4.1 delegation detail modal now carries a «Stawki» block (the §6.15 rates presentation, live off the delegation's vehicle) with the **same dyspozytor exclusion** as this rule — but on the **delegation endpoint** the exclusion is **two-layer**: the UI omits the block AND the API scrubs the four rate fields to `null` on the delegation payload. This is **stronger** than the fleet/vehicle rule here: this §6.4.2 exclusion (and the §6.15 one) is **UI-only** and leaves the values on `VehicleDto` (the known "getById is not scoped" gap). For the delegation payload the **wire matches visibility** — dyspozytor never receives the values. The empty-section rule (§6.4) then auto-omits the block once all four are null, a third safety net.
+
+> **Payload-boundary note — `packages/shared/src/schemas/fleet.ts` "HARD EXCLUSION" is unaffected.** The fleet-list "HARD EXCLUSION" comment (rates never on the `/fleet/*` list-item payload) **still stands** — the FLEET payload carries no rates. Its "planista must not see pricing" wording **predates the 2026-06-26 planista change** (planista now sees rates via the full `GET /vehicles/:id` → `VehicleDto`, not via the fleet list-item), so that comment's rationale is stale for planista, but the fleet-payload exclusion itself is correct and unchanged. **Only the DELEGATION payload now carries rates** (dyspozytor-scrubbed, per the note above); the fleet list-item payload does **not**.
 
 > **2026-06-26 — planista now sees rates (reversal of the earlier planista-no-rates rule).** Product decision: the **planista** read-only vehicle modal becomes the **FULL** `<VehicleDetailModal>` — the same modal opiekun/admin/przewoźnik get, **including** the «Stawki» section. Planista is already server-authorized for the full vehicle detail (`GET /vehicles/:id`, scoped server-side to its `plannerId`), so its modal is fetched from the full `VehicleDto` rather than the enriched slim list-item — no curated rate-free field set, no slim-modal wrapper. The §6.4.2 rates exclusion therefore now applies to **dyspozytor only**, not planista. Driver/trailer fleet modals are unchanged for both roles (no rates exist there anyway). The slim `<FleetVehicleDetailModal>` below remains the **dyspozytor** vehicle modal.
 

@@ -62,6 +62,13 @@ function makeRow(overrides: Partial<DelegationRow> = {}): DelegationRow {
       // Porozumienie flag carried on the vehicle mini (claims guarantee gate);
       // transitions tests don't depend on it → `null` baseline.
       agreement: null,
+      // Km-guarantee rates on the mini (Decimal→number). Non-null baseline so
+      // the transitions tests exercise the real values passing through toDto;
+      // the dedicated rates-scrub spec covers the dyspozytor nulling.
+      rateDe: 1.1,
+      rateUe: 1.2,
+      rateExport: 1.3,
+      rateImport: 1.4,
       plannerId: null,
       dispatchTeamId: null,
       dispatchTeam: null,

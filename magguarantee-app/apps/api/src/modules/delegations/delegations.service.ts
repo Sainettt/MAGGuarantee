@@ -198,7 +198,7 @@ export class DelegationsService {
         });
     }
 
-    return this.toDto(row);
+    return this.toDto(row, user);
   }
 
   /**
@@ -335,7 +335,7 @@ export class DelegationsService {
           ? appendCancellationNote(row.notes, dto.reason)
           : row.notes,
       });
-      return this.toDto(updated);
+      return this.toDto(updated, user);
     }
 
     // Ownership: carriers may only cancel their own delegations. Other roles
@@ -364,7 +364,7 @@ export class DelegationsService {
         ? appendCancellationNote(row.notes, dto.reason)
         : row.notes,
     });
-    return this.toDto(updated);
+    return this.toDto(updated, user);
   }
 
   // ── Status transitions (Phase 7 REWORK 2026-06-20 #4) ────
@@ -399,7 +399,7 @@ export class DelegationsService {
     });
     // Notify the carrier the vehicle is ready (forward flip only; fire-and-log).
     if (!dto.rollback) void this._notifyWyjazd('ready', updated);
-    return this.toDto(updated);
+    return this.toDto(updated, user);
   }
 
   /**
@@ -462,7 +462,7 @@ export class DelegationsService {
       );
     }
 
-    return this.toDto(updated);
+    return this.toDto(updated, user);
   }
 
   /**
@@ -556,7 +556,7 @@ export class DelegationsService {
       await this.claimsService.recalcFromDelegation(row.id, actualReturnAt);
     }
 
-    return this.toDto(updated);
+    return this.toDto(updated, user);
   }
 
   /**
@@ -596,7 +596,7 @@ export class DelegationsService {
     const hasNext = rows.length > effective.limit;
     const page = hasNext ? rows.slice(0, effective.limit) : rows;
     return {
-      items: page.map((r) => this.toDto(r)),
+      items: page.map((r) => this.toDto(r, user)),
       nextCursor: hasNext ? (page[page.length - 1]?.id ?? null) : null,
     };
   }
@@ -605,7 +605,7 @@ export class DelegationsService {
     const row = await this.delegations.findById(id);
     if (!row) throw new NotFoundException('Delegacja nie znaleziona');
     await this._assertCanReadOne(user, row);
-    return this.toDto(row);
+    return this.toDto(row, user);
   }
 
   /**
@@ -651,11 +651,22 @@ export class DelegationsService {
 
   // ── Mappers ─────────────────────────────────────────────
 
-  toDto(row: DelegationRow): DelegationDto {
+  /**
+   * Maps a repository row to the wire DTO.
+   *
+   * `viewer` drives the rates scrub on the vehicle mini (see
+   * `_scrubVehicleRates`). It is OPTIONAL so internal/fire-and-forget callers
+   * that have no request user (e.g. a future cron path) can still map a row;
+   * an absent viewer is treated as "not a dyspozytor" → rates pass through.
+   * Every current request-path caller (add / cancel / markReady /
+   * markInTransit / markReturned / list / getOne) has an `AuthUser` in scope
+   * and passes it, so the scrub always runs on the wire.
+   */
+  toDto(row: DelegationRow, viewer?: AuthUser): DelegationDto {
     return {
       id: row.id,
       vehicleId: row.vehicleId,
-      vehicle: row.vehicle,
+      vehicle: this._scrubVehicleRates(row.vehicle, viewer),
       trailerId: row.trailerId,
       trailer: row.trailer,
       driverId: row.driverId,
@@ -692,6 +703,34 @@ export class DelegationsService {
       claimId: row.claimId,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
+    };
+  }
+
+  /**
+   * Role-aware scrub of the vehicle mini's four km-guarantee rates. The rates
+   * are SENSITIVE commercial data: every delegation-reading role sees them
+   * EXCEPT `dyspozytor`, which is excluded per docs/14-design-system.md
+   * §6.4.2 / §6.15 (planista joined the rates-visible group on 2026-06-26).
+   * For a dyspozytor viewer all four are forced to `null` — so the wire
+   * payload matches visibility (deliberately STRONGER than the UI-only
+   * exclusion on `VehicleDto`; no IDOR leak here). All other roles — and the
+   * absent-viewer internal path — pass the values through unchanged; a rate is
+   * already `null` when the vehicle has no negotiated value for that lane.
+   *
+   * Kept as the SINGLE scrub point, invoked from `toDto`, so every producer
+   * (create / cancel / status transitions / list / getOne) is covered.
+   */
+  private _scrubVehicleRates(
+    vehicle: DelegationRow['vehicle'],
+    viewer?: AuthUser,
+  ): DelegationRow['vehicle'] {
+    if (!vehicle || viewer?.role !== 'dyspozytor') return vehicle;
+    return {
+      ...vehicle,
+      rateDe: null,
+      rateUe: null,
+      rateExport: null,
+      rateImport: null,
     };
   }
 

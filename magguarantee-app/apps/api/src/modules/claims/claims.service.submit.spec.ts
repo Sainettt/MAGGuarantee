@@ -69,6 +69,12 @@ function makeDelegation(overrides: Partial<DelegationRow> = {}): DelegationRow {
       // `agreement === true`. Default fixtures are guaranteed so the happy
       // path reaches the normal flow; not-guaranteed cases override this.
       agreement: true,
+      // Km-guarantee rates on the delegation vehicle mini. Claims flow does not
+      // read them, but the shape is required post-«Stawki» widening.
+      rateDe: null,
+      rateUe: null,
+      rateExport: null,
+      rateImport: null,
       plannerId: null,
       dispatchTeamId: null,
       dispatchTeam: null,
@@ -881,6 +887,10 @@ describe('ClaimsService.submit — delegation link', () => {
           id: 'v-1',
           plateNumber: 'WX12345',
           agreement: false,
+          rateDe: null,
+          rateUe: null,
+          rateExport: null,
+          rateImport: null,
           plannerId: null,
           dispatchTeamId: null,
           dispatchTeam: null,
@@ -916,6 +926,10 @@ describe('ClaimsService.submit — delegation link', () => {
           id: 'v-1',
           plateNumber: 'WX12345',
           agreement: null,
+          rateDe: null,
+          rateUe: null,
+          rateExport: null,
+          rateImport: null,
           plannerId: null,
           dispatchTeamId: null,
           dispatchTeam: null,

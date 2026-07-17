@@ -357,20 +357,44 @@ const VehicleMiniSchema = z.object({
    */
   agreement: z.boolean().nullable(),
   /**
+   * The vehicle's four negotiated km-guarantee rates (EUR/km), mirrored LIVE
+   * from `Vehicle.{rateDe,rateUe,rateExport,rateImport}` (Prisma `Decimal?`,
+   * surfaced here as `number | null`). Same four fields the full `VehicleDto`
+   * carries (see `packages/shared/src/schemas/vehicles.ts`). They power the
+   * «Stawki» block in `DelegationDetailModal` (rendered between «Trasa» and
+   * «Pojazd i kierowca»).
+   *
+   * SENSITIVE — commercial data. Unlike `dispatchTeam` / `planner` (pure
+   * identity), rates are scrubbed to `null` SERVER-SIDE for the `dyspozytor`
+   * role (the only delegation-reading role excluded from rates — see
+   * docs/14-design-system.md §6.4.2 / §6.15; planista joined the rates-visible
+   * group on 2026-06-26). Every other role that can read a delegation (admin,
+   * planista, przewoznik, eksport, weryfikator, opiekun) receives the real
+   * values; a carrier only ever reads its OWN delegations → its own vehicle's
+   * rates, consistent with §6.15. This is deliberately STRONGER than the
+   * UI-only exclusion on `VehicleDto` — here the wire payload matches
+   * visibility, so there is no IDOR leak. A field is ALSO `null` when the
+   * vehicle simply has no negotiated rate for that lane.
+   */
+  rateDe: z.number().nullable(),
+  rateUe: z.number().nullable(),
+  rateExport: z.number().nullable(),
+  rateImport: z.number().nullable(),
+  /**
    * Phase 11 Шаг D (additive) — the vehicle's CURRENT dispatch team, resolved
    * LIVE from `Vehicle.dispatchTeam` (NOT a snapshot). Identical shape to the
    * one surfaced by `VehicleDto` / `VehicleListItem` (reuses the shared
-   * `VehicleDispatchTeamSchema`). NON-SENSITIVE (no rates) → safe for every
-   * role that already sees the delegation. `null` when the vehicle is not
-   * assigned to any team. Powers the «ZESPÓŁ PROWADZĄCY» block in
-   * `DelegationDetailModal`.
+   * `VehicleDispatchTeamSchema`). Identity only — NON-SENSITIVE (not a rate),
+   * safe for every role that already sees the delegation. `null` when the
+   * vehicle is not assigned to any team. Powers the «ZESPÓŁ PROWADZĄCY» block
+   * in `DelegationDetailModal`.
    */
   dispatchTeam: VehicleDispatchTeamSchema.nullable(),
   /**
    * The vehicle's CURRENT lead forwarder (`Vehicle.planner`, resolved LIVE —
    * not a snapshot), same UserMini shape as `reportedBy`/`readyBy`. Completes
    * the «ZESPÓŁ PROWADZĄCY» block in `DelegationDetailModal` (planista +
-   * dispatch team + eksport). Identity only (no rates) → NON-SENSITIVE.
+   * dispatch team + eksport). Identity only (not a rate) → NON-SENSITIVE.
    * `null` when the vehicle has no planner assigned.
    */
   planner: UserMiniSchema.nullable(),

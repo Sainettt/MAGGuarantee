@@ -11,6 +11,14 @@
 //             truck + planned-duration pill → return circle. Each end now
 //             carries a reported-vs-actual date pair (§6.4.1a) — the actual
 //             departure/return dates fold in HERE, not in the audit chain.
+//   «Stawki» — vehicle rates strip (span:'full', fullWidth row — §6.4.1,
+//             positional insert 2026-07-17 BETWEEN Block A and Block B; the
+//             existing A/B/C/D letters are NOT re-lettered, it is referenced
+//             by name). A 4-up tile grid of the delegation vehicle's live
+//             km-guarantee rates (Stawka DE/UE/eksport/import). Two-layer
+//             gate: hidden for `dyspozytor` (server ALSO scrubs the four
+//             fields to null) and omitted when the vehicle is absent or all
+//             four rates are null (§6.4 "empty section omitted").
 //   Block B — driver + vehicle strip (span:'full', fullWidth row): driver
 //             name + phone | NR REJ. + Naczepa <plate>.
 //   Block C — «Historia statusu» (§6.4.1a): a vertical 3-step audit STEPPER
@@ -34,6 +42,7 @@
 
 import {
   AlertTriangle,
+  Banknote,
   ClipboardCheck,
   Gauge,
   StickyNote,
@@ -57,7 +66,8 @@ import {
   type EntityDetailSection,
 } from '@/components/ui/EntityDetailModal';
 import { textValue } from '@/components/ui/entity-detail-values';
-import { formatDateTime } from '@/lib/format/numbers';
+import { formatDateTime, formatEur } from '@/lib/format/numbers';
+import { useAuth } from '@/lib/hooks/useAuth';
 
 interface Props {
   open: boolean;
@@ -138,6 +148,49 @@ function DriverVehicleStrip({ delegation }: { delegation: DelegationDto }) {
           </span>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The «Stawki» rates strip (§6.4.1 — positional insert between Block A «Trasa»
+ * and Block B «Pojazd i kierowca», 2026-07-17). A 4-up tile grid of the
+ * delegation vehicle's LIVE km-guarantee rates (Stawka DE/UE/eksport/import),
+ * EUR-formatted with `formatEur` (renders its own em-dash for null). Reuses the
+ * §6.15 vehicle «Stawki» presentation (icon + i18n) on the delegation surface.
+ *
+ * Fields come straight off the shared `DelegationDto.vehicle` mini (which now
+ * carries the four rates) — NO defensive cast. Role/data gating (dyspozytor-omit
+ * + at-least-one-non-null) lives at the call site; this only renders. Fills the
+ * shell's section card (§6.20 pattern) — no own border/padding, same as the
+ * other fullWidth strips.
+ */
+function RatesStrip({
+  vehicle,
+}: {
+  vehicle: NonNullable<DelegationDto['vehicle']>;
+}) {
+  const tField = useTranslations('vehicles.fields');
+
+  const tiles: { label: string; value: number | null }[] = [
+    { label: tField('rateDe'), value: vehicle.rateDe },
+    { label: tField('rateUe'), value: vehicle.rateUe },
+    { label: tField('rateExport'), value: vehicle.rateExport },
+    { label: tField('rateImport'), value: vehicle.rateImport },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      {tiles.map((tile) => (
+        <div key={tile.label} className="flex flex-col gap-1">
+          <span className={STRIP_MINI_LABEL}>{tile.label}</span>
+          {/* Mirrors VehicleDetailModal's `rateValue` helper — formatEur +
+              tabular-nums so values align across the strip. */}
+          <span className="text-sm font-semibold tabular-nums text-text">
+            {formatEur(tile.value)}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -247,10 +300,31 @@ export function DelegationDetailModal({
   const tDetail = useTranslations('entityDetail');
   const tKmCal = useTranslations('delegation.kmCalendar');
   const tTeam = useTranslations('team');
+  const tRates = useTranslations('vehicles.sections');
+  // Viewer role — drives the «Stawki» UI gate (§6.4.1). Called unconditionally
+  // at the top (rules-of-hooks safe), before the null bail below.
+  const { user } = useAuth();
 
   // The modal is only rendered with a target; bail defensively so the hooks
   // above still run unconditionally (rules-of-hooks safe).
   if (!delegation) return null;
+
+  // ── «Stawki» visibility gate (§6.4.1 — two conditions, both required) ────
+  //   1. Viewer role: shown to every delegation-reading role EXCEPT dyspozytor
+  //      (whose rates the server ALSO scrubs to null — this is the 2nd layer).
+  //   2. Data: a resolvable vehicle AND at least one non-null rate (per §6.4
+  //      "empty section omitted" — no all-em-dash block). Read straight off the
+  //      shared mini — no defensive cast (unlike `readVehicleDispatchTeam`,
+  //      which predated its field).
+  const ratesVehicle = delegation.vehicle;
+  const showRates =
+    !!user &&
+    user.role !== 'dyspozytor' &&
+    ratesVehicle != null &&
+    (ratesVehicle.rateDe != null ||
+      ratesVehicle.rateUe != null ||
+      ratesVehicle.rateExport != null ||
+      ratesVehicle.rateImport != null);
 
   // ── Header badge row — status only (matches the list column). No subtitle
   //    (the driver moved into Block B — §6.4.1). ────────────────────────────
@@ -271,6 +345,29 @@ export function DelegationDetailModal({
         },
       ],
     },
+    // «Stawki» — vehicle rates strip (§6.4.1, positional insert 2026-07-17
+    // BETWEEN Block A «Trasa» and Block B «Pojazd i kierowca»; A/B/C/D letters
+    // are NOT re-numbered — referenced by name). A full-span section holding a
+    // single fullWidth 4-up tile strip. Spread-in only when `showRates` (the
+    // dyspozytor-omit + at-least-one-rate gate above), preserving this position
+    // — NOT pushed to the end. `showRates && ratesVehicle` narrows the vehicle
+    // to non-null for <RatesStrip> with no cast.
+    ...(showRates && ratesVehicle
+      ? [
+          {
+            title: tRates('rates'),
+            icon: Banknote,
+            span: 'full',
+            rows: [
+              {
+                label: tRates('rates'),
+                value: <RatesStrip vehicle={ratesVehicle} />,
+                fullWidth: true,
+              },
+            ],
+          } satisfies EntityDetailSection,
+        ]
+      : []),
     // Block B — driver + vehicle strip (fullWidth row in a full-span section).
     {
       title: tSections('vehicleAndDriver'),

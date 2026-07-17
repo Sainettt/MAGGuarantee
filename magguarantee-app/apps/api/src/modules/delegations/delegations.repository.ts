@@ -32,8 +32,14 @@ export interface DelegationRow {
    * Phase 11 Шаг D (additive) — `dispatchTeam` is resolved LIVE from
    * `Vehicle.dispatchTeam` (NOT a snapshot) and IS surfaced on the vehicle
    * mini-reference in the wire DTO. Same shape the VehicleDto/VehicleListItem
-   * already emit (`VehicleDispatchTeamDto`). NON-SENSITIVE (no rates). `null`
-   * when the vehicle is not assigned to any team.
+   * already emit (`VehicleDispatchTeamDto`). Identity only — NON-SENSITIVE.
+   * `null` when the vehicle is not assigned to any team.
+   *
+   * The four km-guarantee rates (`rateDe`/`rateUe`/`rateExport`/`rateImport`,
+   * EUR/km) are ALSO surfaced on the mini to power the modal's «Stawki» block.
+   * Unlike the identity fields these are SENSITIVE — the service scrubs all
+   * four to `null` for the `dyspozytor` role at the DTO boundary
+   * (`DelegationsService.toDto`, see docs/14-design-system.md §6.4.2 / §6.15).
    */
   vehicle: {
     id: string;
@@ -41,6 +47,12 @@ export interface DelegationRow {
     // "Porozumienie" (`Vehicle.agreement`, `Boolean?`) — carried to the claims
     // guarantee gate + the wire VehicleMini. `null`/`false` ⇒ not guaranteed.
     agreement: boolean | null;
+    // Negotiated km-guarantee rates (EUR/km), Decimal→number at the mapper.
+    // SENSITIVE — nulled for `dyspozytor` in `DelegationsService.toDto`.
+    rateDe: number | null;
+    rateUe: number | null;
+    rateExport: number | null;
+    rateImport: number | null;
     plannerId: string | null;
     dispatchTeamId: string | null;
     dispatchTeam: VehicleDispatchTeamDto | null;
@@ -360,8 +372,9 @@ export class DelegationsRepository {
       // `plannerId` / `dispatchTeamId` feed the Phase 6.4/11 `getOne` ownership
       // checks (planista/dyspozytor); they are stripped at the DTO boundary.
       // Phase 11 Шаг D — `dispatchTeam` (live, with its dispatcher roster) IS
-      // surfaced on the vehicle mini. Same select the vehicles repo uses so the
-      // shape stays in lockstep (NON-SENSITIVE: no rates).
+      // surfaced on the vehicle mini. The four km-guarantee rates are selected
+      // too (they feed the modal's «Stawki» block); they are SENSITIVE and get
+      // scrubbed to `null` for `dyspozytor` in `DelegationsService.toDto`.
       vehicle: {
         select: {
           id: true,
@@ -369,6 +382,12 @@ export class DelegationsRepository {
           // "Porozumienie" — drives the claims guarantee gate + the picker's
           // "(bez gwarancji)" marker. NON-SENSITIVE (not a rate).
           agreement: true,
+          // Negotiated km-guarantee rates (EUR/km, Prisma `Decimal?`) → the
+          // «Stawki» block. SENSITIVE — role-scrubbed at the DTO boundary.
+          rateDe: true,
+          rateUe: true,
+          rateExport: true,
+          rateImport: true,
           plannerId: true,
           dispatchTeamId: true,
           dispatchTeam: {
@@ -413,6 +432,12 @@ export class DelegationsRepository {
             id: row.vehicle.id,
             plateNumber: row.vehicle.plateNumber,
             agreement: row.vehicle.agreement,
+            // Decimal→number (same helper the vehicles repo uses). `null`
+            // preserved; scrubbed for `dyspozytor` later in `toDto`.
+            rateDe: decimalToNumber(row.vehicle.rateDe),
+            rateUe: decimalToNumber(row.vehicle.rateUe),
+            rateExport: decimalToNumber(row.vehicle.rateExport),
+            rateImport: decimalToNumber(row.vehicle.rateImport),
             plannerId: row.vehicle.plannerId,
             dispatchTeamId: row.vehicle.dispatchTeamId,
             // Phase 11 Шаг D — live dispatch team, normalised to the shared
@@ -483,6 +508,12 @@ interface DelegationPrismaShape {
     id: string;
     plateNumber: string;
     agreement: boolean | null;
+    // Prisma returns `Decimal` for these (nullable). Typed the same way the
+    // vehicles repo raw shape does so the shared `decimalToNumber` narrows it.
+    rateDe: { toNumber(): number } | number | null;
+    rateUe: { toNumber(): number } | number | null;
+    rateExport: { toNumber(): number } | number | null;
+    rateImport: { toNumber(): number } | number | null;
     plannerId: string | null;
     dispatchTeamId: string | null;
     dispatchTeam?: {
@@ -528,4 +559,19 @@ interface DelegationPrismaShape {
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
+}
+
+// Prisma `Decimal → number | null` normaliser. Byte-identical to the copy in
+// `vehicles.repository.ts` / `trailers.repository.ts` — the codebase keeps one
+// private helper per repository rather than a shared export, so this mirrors
+// that established convention (NOT a divergent variant).
+function decimalToNumber(
+  v: { toNumber(): number } | number | null | undefined,
+): number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'number') return v;
+  if (typeof (v as { toNumber?: () => number }).toNumber === 'function') {
+    return (v as { toNumber(): number }).toNumber();
+  }
+  return null;
 }

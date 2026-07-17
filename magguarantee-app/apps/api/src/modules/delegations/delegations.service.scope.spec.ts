@@ -21,6 +21,12 @@ const TEAM_ID = 'team-1';
 const PLANNER_SUB = 'plan-1';
 const CARRIER_ID = 'carrier-1';
 const CARRIER_USER = 'user-1';
+// Km-guarantee rates baseline for the vehicle mini (EUR/km). Distinct values so
+// a scrub-vs-passthrough assertion can pin each lane.
+const RATE_DE = 1.05;
+const RATE_UE = 1.15;
+const RATE_EXPORT = 1.25;
+const RATE_IMPORT = 1.35;
 
 function auth(
   role: AuthUser['role'],
@@ -52,6 +58,13 @@ function makeRow(overrides: Partial<DelegationRow> = {}): DelegationRow {
       // Guarantee flag (Porozumienie) carried on the vehicle mini since the
       // claims guarantee gate. `null` baseline — scope tests don't depend on it.
       agreement: null,
+      // Km-guarantee rates on the vehicle mini — non-null baseline so the
+      // dedicated rates-scrub suite below can assert both the pass-through
+      // (non-dyspozytor) and the dyspozytor nulling.
+      rateDe: RATE_DE,
+      rateUe: RATE_UE,
+      rateExport: RATE_EXPORT,
+      rateImport: RATE_IMPORT,
       plannerId: PLANNER_SUB,
       dispatchTeamId: TEAM_ID,
       // Phase 11 Шаг D — live dispatch team on the vehicle mini. `null` is the
@@ -308,6 +321,10 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
         id: 'veh-1',
         plateNumber: 'PL123',
         agreement: null,
+        rateDe: RATE_DE,
+        rateUe: RATE_UE,
+        rateExport: RATE_EXPORT,
+        rateImport: RATE_IMPORT,
         plannerId: PLANNER_SUB,
         dispatchTeamId: 'other-team',
         dispatchTeam: null,
@@ -325,6 +342,10 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
         id: 'veh-1',
         plateNumber: 'PL123',
         agreement: null,
+        rateDe: RATE_DE,
+        rateUe: RATE_UE,
+        rateExport: RATE_EXPORT,
+        rateImport: RATE_IMPORT,
         plannerId: 'someone-else',
         dispatchTeamId: TEAM_ID,
         dispatchTeam: null,
@@ -343,6 +364,10 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
         id: 'veh-1',
         plateNumber: 'PL123',
         agreement: null,
+        rateDe: RATE_DE,
+        rateUe: RATE_UE,
+        rateExport: RATE_EXPORT,
+        rateImport: RATE_IMPORT,
         plannerId: 'other-plan',
         dispatchTeamId: TEAM_ID,
         dispatchTeam: null,
@@ -363,6 +388,10 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
         id: 'veh-1',
         plateNumber: 'PL123',
         agreement: null,
+        rateDe: RATE_DE,
+        rateUe: RATE_UE,
+        rateExport: RATE_EXPORT,
+        rateImport: RATE_IMPORT,
         plannerId: PLANNER_SUB,
         dispatchTeamId: 'some-other-team',
         dispatchTeam: null,
@@ -381,6 +410,10 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
         id: 'veh-1',
         plateNumber: 'PL123',
         agreement: null,
+        rateDe: RATE_DE,
+        rateUe: RATE_UE,
+        rateExport: RATE_EXPORT,
+        rateImport: RATE_IMPORT,
         plannerId: PLANNER_SUB,
         dispatchTeamId: TEAM_ID,
         dispatchTeam: null,
@@ -417,6 +450,10 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
           id: 'veh-1',
           plateNumber: 'PL123',
           agreement: null,
+          rateDe: RATE_DE,
+          rateUe: RATE_UE,
+          rateExport: RATE_EXPORT,
+          rateImport: RATE_IMPORT,
           plannerId: 'p-x',
           dispatchTeamId: 'team-x',
           dispatchTeam: null,
@@ -440,6 +477,10 @@ describe('DelegationsService.getOne — vehicle.dispatchTeam (live, additive)', 
         id: 'veh-1',
         plateNumber: 'PL123',
         agreement: null,
+        rateDe: RATE_DE,
+        rateUe: RATE_UE,
+        rateExport: RATE_EXPORT,
+        rateImport: RATE_IMPORT,
         plannerId: 'p-x',
         dispatchTeamId: 'team-99',
         dispatchTeam: {
@@ -480,5 +521,64 @@ describe('DelegationsService.getOne — vehicle.dispatchTeam (live, additive)', 
     const out = await service.getOne(auth('admin', 'admin-1'), 'deleg-1');
     // `makeRow` builds an unassigned vehicle by default.
     expect(out.vehicle?.dispatchTeam).toBeNull();
+  });
+});
+
+// «Stawki» block — the four km-guarantee rates ride the vehicle mini and are
+// SENSITIVE: every delegation-reading role sees them EXCEPT `dyspozytor`, which
+// is scrubbed to `null` SERVER-SIDE (docs/14-design-system.md §6.4.2 / §6.15).
+// The baseline `makeRow` carries non-null rates (RATE_*).
+describe('DelegationsService — vehicle mini rate scrub (§6.4.2 / §6.15)', () => {
+  it('getOne: a non-dyspozytor (eksport, all-access) receives the numeric rates', async () => {
+    const { service } = makeService([makeRow()]);
+    const out = await service.getOne(auth('eksport', 'eksport-1'), 'deleg-1');
+    expect(out.vehicle?.rateDe).toBe(RATE_DE);
+    expect(out.vehicle?.rateUe).toBe(RATE_UE);
+    expect(out.vehicle?.rateExport).toBe(RATE_EXPORT);
+    expect(out.vehicle?.rateImport).toBe(RATE_IMPORT);
+  });
+
+  it('getOne: a planista (rates-visible since 2026-06-26) receives the numeric rates', async () => {
+    // `makeRow` pins `plannerId=PLANNER_SUB` → the planista read-scope passes.
+    const { service } = makeService([makeRow()]);
+    const out = await service.getOne(auth('planista', PLANNER_SUB), 'deleg-1');
+    expect(out.vehicle?.rateDe).toBe(RATE_DE);
+    expect(out.vehicle?.rateImport).toBe(RATE_IMPORT);
+  });
+
+  it('getOne: a dyspozytor gets ALL four rates scrubbed to null (other fields intact)', async () => {
+    // `makeRow` pins `dispatchTeamId=TEAM_ID` → the dyspozytor read-scope passes,
+    // so we reach `toDto` and can observe the scrub (not a 403).
+    const { service } = makeService([makeRow()]);
+    const out = await service.getOne(
+      auth('dyspozytor', DISPATCHER_SUB, TEAM_ID),
+      'deleg-1',
+    );
+    expect(out.vehicle?.rateDe).toBeNull();
+    expect(out.vehicle?.rateUe).toBeNull();
+    expect(out.vehicle?.rateExport).toBeNull();
+    expect(out.vehicle?.rateImport).toBeNull();
+    // Non-rate identity fields are NOT touched by the scrub.
+    expect(out.vehicle?.plateNumber).toBe('PL123');
+    expect(out.vehicle?.agreement).toBeNull();
+  });
+
+  it('list: a non-dyspozytor (eksport) receives the numeric rates on each item', async () => {
+    const { service } = makeService([makeRow()]);
+    const { items } = await service.list(auth('eksport', 'eksport-1'), baseFilters());
+    expect(items[0]!.vehicle?.rateDe).toBe(RATE_DE);
+    expect(items[0]!.vehicle?.rateExport).toBe(RATE_EXPORT);
+  });
+
+  it('list: a dyspozytor gets the rates scrubbed to null on each item', async () => {
+    const { service } = makeService([makeRow()]);
+    const { items } = await service.list(
+      auth('dyspozytor', DISPATCHER_SUB, TEAM_ID),
+      baseFilters(),
+    );
+    expect(items[0]!.vehicle?.rateDe).toBeNull();
+    expect(items[0]!.vehicle?.rateUe).toBeNull();
+    expect(items[0]!.vehicle?.rateExport).toBeNull();
+    expect(items[0]!.vehicle?.rateImport).toBeNull();
   });
 });

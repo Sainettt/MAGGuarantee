@@ -333,6 +333,12 @@ function makeDelegationForPreview(
       id: 'v-1',
       plateNumber: 'WX12345',
       agreement,
+      // Km-guarantee rates on the delegation vehicle mini (unused by preview;
+      // present so the widened `DelegationRow.vehicle` shape type-checks).
+      rateDe: null,
+      rateUe: null,
+      rateExport: null,
+      rateImport: null,
       plannerId: null,
       dispatchTeamId: null,
       dispatchTeam: null,
