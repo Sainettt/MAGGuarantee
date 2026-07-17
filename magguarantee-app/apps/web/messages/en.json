@@ -56,6 +56,9 @@
     "deleting": "Deleting…",
     "deletedToast": "Permanently deleted",
     "errorToast": "Failed to delete",
+    "softTitle": "Delete — {entityLabel}",
+    "softBody": "{entityName} will be removed. It can be restored later.",
+    "softConfirm": "Delete",
     "entityLabel": {
       "carrier": "carrier",
       "vehicle": "vehicle",

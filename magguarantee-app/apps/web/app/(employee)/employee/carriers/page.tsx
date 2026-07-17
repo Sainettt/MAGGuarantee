@@ -23,6 +23,7 @@ import {
 } from '@/components/carrier-onboarding/useCarrierOnboarding';
 import { CarrierDetailModal } from '@/components/carriers/CarrierDetailModal';
 import { OnboardingMissingBadge } from '@/components/carriers/OnboardingMissingBadge';
+import { ApiResponseError } from '@/lib/api/client';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { useCarriers, useHardDeleteCarrier } from '@/lib/hooks/useCarriers';
 import { useOpiekuni } from '@/lib/hooks/useLookups';
@@ -51,10 +52,11 @@ function CarriersPageInner() {
   // backend), so the "filter by opiekun" select is meaningless for them —
   // they would only ever see themselves in the dropdown.
   const isOpiekun = user?.role === 'opiekun';
-  // Phase 5.1 — opiekun has CRUD on their own entities (docs/03-roles.md#opiekun),
-  // which includes the hard-delete-with-powod button. Backend re-verifies
-  // ownership and 403s any foreign id.
-  const canHardDelete = isAdmin || isOpiekun;
+  // Carriers are the exception to the fleet-delete rule: BOTH the soft delete
+  // (`DELETE /carriers/:id`) and the hard delete (`/carriers/:id/hard`) are
+  // admin-only (docs/13-api-design.md). An opiekun's only carrier lifecycle
+  // tool is deactivate, so the delete row-action must not render for them.
+  const canHardDelete = isAdmin;
   const [search, setSearch] = useState('');
   const [opiekunId, setOpiekunId] = useState<string>('');
   const [activeFilter, setActiveFilter] = useState<'' | 'true' | 'false'>('');
@@ -389,7 +391,14 @@ function CarriersPageInner() {
             });
             toast.success(tConfirm('deletedToast'));
           } catch (err) {
-            toast.error(tConfirm('errorToast'));
+            // A 409 means the record still has referencing rows; the backend
+            // sends a human-readable Polish «Nie można trwale usunąć…» in the
+            // problem detail. Surface it verbatim so the operator knows why.
+            if (err instanceof ApiResponseError && err.status === 409) {
+              toast.error(err.message);
+            } else {
+              toast.error(tConfirm('errorToast'));
+            }
             throw err;
           }
         }}

@@ -56,6 +56,9 @@
     "deleting": "Usuwanie…",
     "deletedToast": "Trwale usunięto",
     "errorToast": "Nie udało się usunąć",
+    "softTitle": "Usuń — {entityLabel}",
+    "softBody": "{entityName} zostanie usunięty. Można go później przywrócić.",
+    "softConfirm": "Usuń",
     "entityLabel": {
       "carrier": "przewoźnik",
       "vehicle": "pojazd",

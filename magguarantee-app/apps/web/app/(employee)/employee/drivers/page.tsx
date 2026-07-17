@@ -12,14 +12,20 @@ import { DriverDetailModal } from '@/components/drivers/DriverDetailModal';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDeleteWithReasonDialog } from '@/components/ui/ConfirmDeleteWithReasonDialog';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { RowActionsMenu, type RowAction } from '@/components/ui/RowActionsMenu';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { ApiResponseError } from '@/lib/api/client';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { useCarriers } from '@/lib/hooks/useCarriers';
-import { useDrivers, useHardDeleteDriver } from '@/lib/hooks/useDrivers';
+import {
+  useDeleteDriver,
+  useDrivers,
+  useHardDeleteDriver,
+} from '@/lib/hooks/useDrivers';
 
 import { DriverFormDialog } from './DriverFormDialog';
 
@@ -28,9 +34,15 @@ export default function DriversPage() {
   const tCommon = useTranslations('common');
   const tConfirm = useTranslations('confirmDelete');
   const { user } = useAuth();
-  // Phase 5.1 — admin OR opiekun can hard-delete (opiekun limited to their
-  // own entities; backend re-verifies and 403s any foreign id).
-  const canHardDelete = user?.role === 'admin' || user?.role === 'opiekun';
+  // The delete row-action renders for both admin and opiekun, but they hit
+  // DIFFERENT endpoints (docs/13-api-design.md): admin runs a physical
+  // hard-delete with a mandatory powód (`DELETE /drivers/:id/hard`, admin-only),
+  // opiekun runs a SOFT delete of their own driver (`DELETE /drivers/:id`,
+  // sets `deletedAt`, restorable server-side). Carriers are the exception —
+  // there opiekun gets no delete at all (see carriers/page.tsx).
+  const isAdmin = user?.role === 'admin';
+  const isOpiekun = user?.role === 'opiekun';
+  const canDelete = isAdmin || isOpiekun;
   const [search, setSearch] = useState('');
   const [carrierId, setCarrierId] = useState<string>('');
 
@@ -55,6 +67,7 @@ export default function DriversPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DriverDto | null>(null);
   const hardDeleteM = useHardDeleteDriver();
+  const softDeleteM = useDeleteDriver();
 
   const hasActiveFilters = Boolean(search.length >= 2 || carrierId);
   const clearFilters = () => {
@@ -82,7 +95,9 @@ export default function DriversPage() {
     if (detailTarget) openEdit(detailTarget);
   };
 
-  const openHardDelete = useCallback((row: DriverDto) => {
+  // Opens whichever delete dialog matches the current role (reason dialog for
+  // admin, bare confirm for opiekun) — both share this target/open pair.
+  const openDelete = useCallback((row: DriverDto) => {
     setDeleteTarget(row);
     setDeleteOpen(true);
   }, []);
@@ -137,13 +152,13 @@ export default function DriversPage() {
               onSelect: () => openEdit(row),
             },
           ];
-          if (canHardDelete) {
+          if (canDelete) {
             actions.push({
               key: 'delete',
-              label: tConfirm('confirm'),
+              label: isAdmin ? tConfirm('confirm') : tConfirm('softConfirm'),
               icon: Trash2,
               destructive: true,
-              onSelect: () => openHardDelete(row),
+              onSelect: () => openDelete(row),
             });
           }
           return (
@@ -157,7 +172,7 @@ export default function DriversPage() {
         },
       },
     ],
-    [t, tCommon, tConfirm, canHardDelete, openHardDelete],
+    [t, tCommon, tConfirm, canDelete, isAdmin, openDelete],
   );
 
   return (
@@ -248,30 +263,67 @@ export default function DriversPage() {
         onClose={() => setSheetOpen(false)}
       />
 
-      <ConfirmDeleteWithReasonDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        entityLabel={tConfirm('entityLabel.driver')}
-        entityName={
-          deleteTarget
-            ? `${deleteTarget.firstName} ${deleteTarget.lastName}`
-            : ''
-        }
-        isLoading={hardDeleteM.isPending}
-        onConfirm={async (reason) => {
-          if (!deleteTarget) return;
-          try {
-            await hardDeleteM.mutateAsync({
-              id: deleteTarget.id,
-              body: { reason },
-            });
-            toast.success(tConfirm('deletedToast'));
-          } catch (err) {
-            toast.error(tConfirm('errorToast'));
-            throw err;
+      {/* Admin — physical hard-delete with a mandatory powód. */}
+      {isAdmin && (
+        <ConfirmDeleteWithReasonDialog
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          entityLabel={tConfirm('entityLabel.driver')}
+          entityName={
+            deleteTarget
+              ? `${deleteTarget.firstName} ${deleteTarget.lastName}`
+              : ''
           }
-        }}
-      />
+          isLoading={hardDeleteM.isPending}
+          onConfirm={async (reason) => {
+            if (!deleteTarget) return;
+            try {
+              await hardDeleteM.mutateAsync({
+                id: deleteTarget.id,
+                body: { reason },
+              });
+              toast.success(tConfirm('deletedToast'));
+            } catch (err) {
+              // 409 = record still has referencing rows; the backend sends a
+              // human-readable Polish «Nie można trwale usunąć…». Show it verbatim.
+              if (err instanceof ApiResponseError && err.status === 409) {
+                toast.error(err.message);
+              } else {
+                toast.error(tConfirm('errorToast'));
+              }
+              throw err;
+            }
+          }}
+        />
+      )}
+
+      {/* Opiekun — soft delete (restorable), no powód. */}
+      {isOpiekun && (
+        <ConfirmDialog
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          title={tConfirm('softTitle', {
+            entityLabel: tConfirm('entityLabel.driver'),
+          })}
+          body={tConfirm('softBody', {
+            entityName: deleteTarget
+              ? `${deleteTarget.firstName} ${deleteTarget.lastName}`
+              : '',
+          })}
+          confirmLabel={tConfirm('softConfirm')}
+          cancelLabel={tConfirm('cancel')}
+          onConfirm={async () => {
+            if (!deleteTarget) return;
+            try {
+              await softDeleteM.mutateAsync(deleteTarget.id);
+              toast.success(tConfirm('deletedToast'));
+            } catch (err) {
+              toast.error(tConfirm('errorToast'));
+              throw err;
+            }
+          }}
+        />
+      )}
     </section>
   );
 }
