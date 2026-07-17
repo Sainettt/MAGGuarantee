@@ -21,6 +21,7 @@ import type {
 import { storageKeyExtension } from '../../common/attachments';
 import { AuditContext } from '../../common/audit';
 import {
+  isPrismaForeignKeyViolation,
   isPrismaUniqueViolation,
   uniqueViolationToConflict,
 } from '../../common/errors/prisma-error';
@@ -40,6 +41,12 @@ import {
 } from './drivers.repository';
 
 const MAX_SLUG_SUFFIX = 50;
+
+/**
+ * Machine code for the hard-delete reference-guard 409. Published in
+ * docs/13-api-design.md#drivers — do NOT rename.
+ */
+const DRIVER_HAS_REFERENCES_CODE = 'DRIVER_HAS_REFERENCES';
 
 /**
  * Drivers CRUD service per docs/13-api-design.md#drivers.
@@ -239,16 +246,52 @@ export class DriversService {
    * required (Zod-validated upstream) and lands in
    * `audit_log.metadata.reason` via `AuditContext.setMetadata`.
    *
-   * Attachments are referenced by FK with `ON DELETE CASCADE` so the
-   * DriverAttachment rows go with the driver. The MinIO objects are
-   * intentionally left in place — same policy as the vehicle hard-delete.
+   * `driver_attachments` is `ON DELETE CASCADE`, so those rows go with the
+   * driver (the MinIO objects are intentionally left in place — same policy as
+   * the vehicle hard-delete). But `delegations.driverId` is `ON DELETE
+   * RESTRICT` (since migration 20260518113943): a physical delete of a
+   * referenced driver would fail late with P2003 → 500. We refuse
+   * deterministically with a 409 (`DRIVER_HAS_REFERENCES`) — a pre-flight
+   * `countReferencingRows` guard (incl. soft-deleted delegations) plus a
+   * TOCTOU P2003 catch.
    */
   async hardDelete(id: string, reason: string): Promise<void> {
     const existing = await this.drivers.findById(id);
     if (!existing) throw new NotFoundException('Kierowca nie znaleziony');
+
+    const references = await this.drivers.countReferencingRows(id);
+    if (references > 0) {
+      throw this._referencesConflict();
+    }
+
     AuditContext.setBefore(this.toDto(existing));
     AuditContext.setMetadata({ reason });
-    await this.drivers.hardDelete(id);
+    try {
+      await this.drivers.hardDelete(id);
+    } catch (err) {
+      if (isPrismaForeignKeyViolation(err)) {
+        throw this._referencesConflict();
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Builds the 409 for a hard-delete blocked by referencing rows — 409
+   * `ConflictException` (mirroring `TeamsService`/`TrailerTypesService`) with
+   * the machine code lifted into the RFC-7807 `extensions` bag (the envelope
+   * `ClaimAttachmentsService` uses) so the web reads `body.extensions.code`.
+   * The code (`DRIVER_HAS_REFERENCES`) is published in
+   * docs/13-api-design.md#drivers.
+   */
+  private _referencesConflict(): ConflictException {
+    return new ConflictException({
+      code: DRIVER_HAS_REFERENCES_CODE,
+      message:
+        'Nie można trwale usunąć kierowcy — istnieją powiązane rekordy ' +
+        '(wyjazdy). Trwałe usunięcie jest możliwe tylko dla pustych rekordów.',
+      extensions: { code: DRIVER_HAS_REFERENCES_CODE },
+    });
   }
 
   // ── Attachments ──────────────────────────────────────────

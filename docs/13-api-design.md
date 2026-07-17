@@ -136,7 +136,8 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 | POST `/carriers/:id/deactivate` | `toggleCarrierActive` (off) | admin / opiekun(own) |
 | POST `/carriers/:id/reactivate` | `toggleCarrierActive` (on) | admin / opiekun(own) |
 | POST `/carriers/:id/reset-password` | `resetCarrierPassword` / `resetCarrierPasswordByOpiekun` | admin / opiekun(own) |
-| DELETE `/carriers/:id` | `deleteCarrierHard` | **admin only** (hard delete). Phase 3 enforcement: `@Roles('admin')` — opiekun does NOT have a soft-delete path; deactivate via `/carriers/:id/deactivate` is the opiekun-accessible alternative. |
+| DELETE `/carriers/:id` | `deleteCarrierHard` (legacy name) | **admin only** — на деле **SOFT delete** (`deletedAt`) + ручной soft-каскад: vehicles/drivers/trailers (`deletedAt`+`active=false`) и 1:1 User (блок логина). Opiekun удалять не может — его альтернатива `/carriers/:id/deactivate`. |
+| DELETE `/carriers/:id/hard` | (новое, Phase 4.4) | **admin only**, body `{reason}` → `audit_log.metadata.reason`. **Физическое** удаление carrier + его User (login освобождается). **409 `CARRIER_HAS_REFERENCES`**, если существует хоть одна строка vehicles / drivers / trailers / claims / delegations / guarantee_idle_episodes этого перевозчика — **включая soft-deleted** (FK `ON DELETE RESTRICT`, бизнес-каскадов нет — docs/12 §Soft-delete). Hard-delete только для «пустых» записей, созданных по ошибке. |
 | GET `/carriers/:id/attachments` | (новое) — company docs (insurance/license/kreptd/other) | admin / opiekun(own) |
 | POST `/carriers/:id/attachments` | (новое) — upload one doc — **`multipart/form-data`** (`file` + `category`). Multiple files per category allowed (carrier-level `adr` removed 2026-07). | admin / opiekun(own) |
 | GET `/carriers/:id/attachments/:attachmentId/download` | (новое) — proxy-стрим файла из MinIO | admin / opiekun(own) |
@@ -168,11 +169,12 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 | PATCH `/vehicles/:id` | `updateVehicleDetails` / `updateVehicleDetailsByOpiekun` | admin / opiekun — **`multipart/form-data`** |
 | POST `/vehicles/:id/deactivate` | `toggleVehicleActive` (off) | admin / opiekun |
 | POST `/vehicles/:id/reactivate` | (on) | admin / opiekun |
-| DELETE `/vehicles/:id` | `removeVehicle` / `removeVehicleByOpiekun` | admin / opiekun |
+| DELETE `/vehicles/:id` | `removeVehicle` / `removeVehicleByOpiekun` | admin / opiekun — **soft** (`deletedAt`) |
+| DELETE `/vehicles/:id/hard` | (новое, Phase 4.4) | admin, body `{reason}` → audit. **Физическое** удаление; каскадом уходят только `vehicle_attachments` (метаданные; MinIO-объекты остаются) и `vehicle_daily_km`. **409 `VEHICLE_HAS_REFERENCES`** при любых delegations / guarantee_idle_episodes (FK RESTRICT, включая soft-deleted). `claims.vehicleId` — SET NULL (не блокирует, но на практике wniosek всегда связан с delegation, которая блокирует). |
 | GET `/vehicles/active?login=...` | `getActiveVehiclesForLogin` (для carrier-login dropdown) | — |
 | GET `/vehicles/:id/attachments` | (новое) — список porozumienie/gps/cabotage-вложений | admin / opiekun / planista / dyspozytor / przewoznik |
 | GET `/vehicles/:id/attachments/:attachmentId/download` | (новое) — proxy-стрим файла из MinIO | admin / opiekun / planista / dyspozytor / przewoznik |
-| DELETE `/vehicles/:id/attachments/:attachmentId` | (новое) — soft-delete вложения | admin / opiekun / przewoznik |
+| DELETE `/vehicles/:id/attachments/:attachmentId` | (новое) — soft-delete строки; **MinIO-объект остаётся** (историческое исключение — у drivers/trailers/carriers явный DELETE стирает и объект) | admin / opiekun / przewoznik |
 
 #### Vehicle-modal: porozumienie / gps / cabotage attachments (multipart)
 
@@ -265,7 +267,9 @@ soft-delete'ятся (объект в MinIO остаётся).
 | PATCH `/drivers/:id` | `updateDriver` / `updateDriverByOpiekun` | admin / opiekun |
 | POST `/drivers/:id/deactivate` | `toggleDriverActive` | admin / opiekun |
 | POST `/drivers/:id/reactivate` | | admin / opiekun |
-| DELETE `/drivers/:id` | `removeDriver` / `removeDriverByOpiekun` | admin / opiekun |
+| DELETE `/drivers/:id` | `removeDriver` / `removeDriverByOpiekun` | admin / opiekun — **soft** (`deletedAt`) |
+| DELETE `/drivers/:id/hard` | (новое, Phase 4.4) | admin, body `{reason}` → audit. **Физическое** удаление (каскадом — только `driver_attachments`-метаданные). **409 `DRIVER_HAS_REFERENCES`** при любых delegations (FK RESTRICT, включая soft-deleted). |
+| DELETE `/drivers/:id/attachments/:attachmentId` | (новое) — soft-delete строки + **удаление MinIO-объекта** | admin / opiekun |
 
 ### Trailers — `/api/v1/trailers`
 
@@ -279,7 +283,9 @@ soft-delete'ятся (объект в MinIO остаётся).
 | PATCH `/trailers/:id` | `updateNaczepa` / `updateMyTrailer` / `updateNaczepaByOpiekun` |
 | POST `/trailers/:id/deactivate` | `toggleNaczepaActive` / `toggleMyTrailerActive` |
 | POST `/trailers/:id/reactivate` | |
-| DELETE `/trailers/:id` | `removeNaczepa` / `removeMyTrailer` / `removeNaczepaByOpiekun` |
+| DELETE `/trailers/:id` | `removeNaczepa` / `removeMyTrailer` / `removeNaczepaByOpiekun` — admin/opiekun, **soft** (`deletedAt`) |
+| DELETE `/trailers/:id/hard` | (новое, Phase 4.4) — admin, body `{reason}` → audit. **Физическое** удаление (каскадом — только `trailer_attachments`-метаданные). **409 `TRAILER_HAS_REFERENCES`** при любых delegations (FK RESTRICT, включая soft-deleted). |
+| DELETE `/trailers/:id/attachments/:attachmentId` | (новое) — admin/opiekun, soft-delete строки + **удаление MinIO-объекта** |
 
 ### Trailer types — `/api/v1/trailer-types`
 
@@ -291,6 +297,7 @@ soft-delete'ятся (объект в MinIO остаётся).
 | POST `/trailer-types` | `addNaczepaTyp` |
 | PATCH `/trailer-types/:id` | (новое) |
 | POST `/trailer-types/:id/deactivate` | `toggleNaczepaTypActive` |
+| DELETE `/trailer-types/:id/hard` | (новое) — admin, body `{reason}` → audit. **Физическое** удаление (у TrailerType нет `deletedAt`); **409**, если тип ещё используется прицепами (FK RESTRICT / P2003). |
 
 ### Teams (admin only) — `/api/v1/teams`
 

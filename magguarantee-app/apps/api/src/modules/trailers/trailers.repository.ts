@@ -214,6 +214,24 @@ export class TrailersRepository {
     } as unknown as Prisma.TrailerDeleteManyArgs);
   }
 
+  /**
+   * Counts rows that reference this trailer via an `ON DELETE RESTRICT` FK —
+   * delegations (`Delegation.trailerId`, RESTRICT since migration
+   * 20260518113943). Drives the hard-delete pre-flight guard (409
+   * TRAILER_HAS_REFERENCES).
+   *
+   * CRITICAL: `delegation` is a soft-delete model, so the count MUST use the
+   * `[INCLUDE_SOFT_DELETED]` escape hatch — a soft-deleted delegation is hidden
+   * from the extension's read filter yet still physically blocks the FK
+   * (Postgres ignores `deletedAt`).
+   */
+  async countReferencingRows(id: string): Promise<number> {
+    return this.prisma.tx.delegation.count({
+      where: { trailerId: id },
+      [INCLUDE_SOFT_DELETED]: true,
+    } as unknown as Prisma.DelegationCountArgs);
+  }
+
   // ── helpers ──────────────────────────────────────────────
 
   private includeShape() {

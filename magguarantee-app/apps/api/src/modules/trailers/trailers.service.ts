@@ -21,6 +21,7 @@ import type {
 import { storageKeyExtension } from '../../common/attachments';
 import { AuditContext } from '../../common/audit';
 import {
+  isPrismaForeignKeyViolation,
   isPrismaUniqueViolation,
   uniqueViolationToConflict,
 } from '../../common/errors/prisma-error';
@@ -41,6 +42,12 @@ import {
 
 /** Minimum count required for belts / mats / beams when their flag is true. */
 const MIN_SECURING_COUNT = 3;
+
+/**
+ * Machine code for the hard-delete reference-guard 409. Published in
+ * docs/13-api-design.md#trailers — do NOT rename.
+ */
+const TRAILER_HAS_REFERENCES_CODE = 'TRAILER_HAS_REFERENCES';
 
 /**
  * Trailers CRUD service per docs/13-api-design.md#trailers.
@@ -219,16 +226,53 @@ export class TrailersService {
 
   /**
    * Hard-deletes a trailer row. Phase 4.4 admin-only flow — `reason` required
-   * (Zod-validated upstream) and lands in `audit_log.metadata.reason`. The
-   * TrailerAttachment rows cascade with the trailer; MinIO objects are left in
-   * place (same policy as the vehicle hard-delete).
+   * (Zod-validated upstream) and lands in `audit_log.metadata.reason`.
+   *
+   * `trailer_attachments` is `ON DELETE CASCADE`, so those rows go with the
+   * trailer (MinIO objects left in place — same policy as the vehicle
+   * hard-delete). But `delegations.trailerId` is `ON DELETE RESTRICT` (since
+   * migration 20260518113943): a physical delete of a referenced trailer would
+   * fail late with P2003 → 500. We refuse deterministically with a 409
+   * (`TRAILER_HAS_REFERENCES`) — a pre-flight `countReferencingRows` guard
+   * (incl. soft-deleted delegations) plus a TOCTOU P2003 catch.
    */
   async hardDelete(id: string, reason: string): Promise<void> {
     const existing = await this.trailers.findById(id);
     if (!existing) throw new NotFoundException('Naczepa nie znaleziona');
+
+    const references = await this.trailers.countReferencingRows(id);
+    if (references > 0) {
+      throw this._referencesConflict();
+    }
+
     AuditContext.setBefore(this.toDto(existing));
     AuditContext.setMetadata({ reason });
-    await this.trailers.hardDelete(id);
+    try {
+      await this.trailers.hardDelete(id);
+    } catch (err) {
+      if (isPrismaForeignKeyViolation(err)) {
+        throw this._referencesConflict();
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Builds the 409 for a hard-delete blocked by referencing rows — 409
+   * `ConflictException` (mirroring `TeamsService`/`TrailerTypesService`) with
+   * the machine code lifted into the RFC-7807 `extensions` bag (the envelope
+   * `ClaimAttachmentsService` uses) so the web reads `body.extensions.code`.
+   * The code (`TRAILER_HAS_REFERENCES`) is published in
+   * docs/13-api-design.md#trailers.
+   */
+  private _referencesConflict(): ConflictException {
+    return new ConflictException({
+      code: TRAILER_HAS_REFERENCES_CODE,
+      message:
+        'Nie można trwale usunąć naczepy — istnieją powiązane rekordy ' +
+        '(wyjazdy). Trwałe usunięcie jest możliwe tylko dla pustych rekordów.',
+      extensions: { code: TRAILER_HAS_REFERENCES_CODE },
+    });
   }
 
   // ── Attachments ──────────────────────────────────────────

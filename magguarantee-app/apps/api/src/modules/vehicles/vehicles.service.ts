@@ -23,6 +23,7 @@ import type {
 
 import { AuditContext } from '../../common/audit';
 import {
+  isPrismaForeignKeyViolation,
   isPrismaUniqueViolation,
   uniqueViolationToConflict,
 } from '../../common/errors/prisma-error';
@@ -48,6 +49,12 @@ import {
   type VehicleRow,
   type VehicleRowAttachment,
 } from './vehicles.repository';
+
+/**
+ * Machine code for the hard-delete reference-guard 409. Published in
+ * docs/13-api-design.md#vehicles — do NOT rename.
+ */
+const VEHICLE_HAS_REFERENCES_CODE = 'VEHICLE_HAS_REFERENCES';
 
 /**
  * Vehicle CRUD service per docs/13-api-design.md#vehicles.
@@ -295,16 +302,54 @@ export class VehiclesService {
    * `audit_log.metadata.reason` via `AuditContext.setMetadata`. The pre-
    * mutation snapshot keeps the audit row legible after the row is gone.
    *
-   * Attachments are referenced by FK with `ON DELETE CASCADE` so the
-   * VehicleAttachment rows go with the vehicle. The MinIO objects are
-   * intentionally left in place — same policy as `deleteAttachment`.
+   * `vehicle_attachments` and `vehicle_daily_km` are `ON DELETE CASCADE`, so
+   * they go with the vehicle (the MinIO objects are intentionally left in
+   * place — same policy as `deleteAttachment`). But `delegations.vehicleId`
+   * and `guarantee_idle_episodes.vehicleId` are `ON DELETE RESTRICT`: a
+   * physical delete of a referenced vehicle would fail late with P2003 → 500.
+   * We refuse deterministically with a 409 (`VEHICLE_HAS_REFERENCES`) — both a
+   * pre-flight `countReferencingRows` guard (incl. soft-deleted delegations)
+   * and a TOCTOU P2003 catch. (`claims.vehicleId` is `SET NULL` and does not
+   * block.)
    */
   async hardDelete(id: string, reason: string): Promise<void> {
     const existing = await this.vehicles.findById(id);
     if (!existing) throw new NotFoundException('Pojazd nie znaleziony');
+
+    const references = await this.vehicles.countReferencingRows(id);
+    if (references > 0) {
+      throw this._referencesConflict();
+    }
+
     AuditContext.setBefore(this.toDto(existing));
     AuditContext.setMetadata({ reason });
-    await this.vehicles.hardDelete(id);
+    try {
+      await this.vehicles.hardDelete(id);
+    } catch (err) {
+      if (isPrismaForeignKeyViolation(err)) {
+        throw this._referencesConflict();
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Builds the 409 for a hard-delete blocked by referencing rows — 409
+   * `ConflictException` (mirroring `TeamsService`/`TrailerTypesService`) with
+   * the machine code lifted into the RFC-7807 `extensions` bag (the envelope
+   * `ClaimAttachmentsService` uses) so the web reads `body.extensions.code`.
+   * The code (`VEHICLE_HAS_REFERENCES`) is published in
+   * docs/13-api-design.md#vehicles.
+   */
+  private _referencesConflict(): ConflictException {
+    return new ConflictException({
+      code: VEHICLE_HAS_REFERENCES_CODE,
+      message:
+        'Nie można trwale usunąć pojazdu — istnieją powiązane rekordy ' +
+        '(wyjazdy / epizody gwarancji). Trwałe usunięcie jest możliwe tylko ' +
+        'dla pustych rekordów.',
+      extensions: { code: VEHICLE_HAS_REFERENCES_CODE },
+    });
   }
 
   // ── Attachments ──────────────────────────────────────────

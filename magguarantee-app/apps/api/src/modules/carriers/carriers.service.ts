@@ -17,6 +17,7 @@ import type {
 
 import { AuditContext } from '../../common/audit';
 import {
+  isPrismaForeignKeyViolation,
   isPrismaUniqueViolation,
   uniqueViolationToConflict,
 } from '../../common/errors/prisma-error';
@@ -28,6 +29,12 @@ import {
   CarriersRepository,
   type CarrierRow,
 } from './carriers.repository';
+
+/**
+ * Machine code for the hard-delete reference-guard 409. Published in
+ * docs/13-api-design.md#carriers — do NOT rename.
+ */
+const CARRIER_HAS_REFERENCES_CODE = 'CARRIER_HAS_REFERENCES';
 
 /**
  * Phase 2 carrier service.
@@ -290,16 +297,60 @@ export class CarriersService {
    * flow — `reason` is required (validated by the Zod pipe upstream) and
    * lands in `audit_log.metadata.reason` via `AuditContext.setMetadata`.
    *
-   * Cascade: Vehicle/Driver/Trailer FK is `ON DELETE CASCADE` per the
-   * Prisma schema, so all carrier-owned fleet rows are removed atomically.
-   * The pre-mutation snapshot is captured for the admin audit view.
+   * NOT a cascade: the business FKs pointing at a carrier (vehicles / drivers /
+   * trailers / claims / delegations / guarantee_idle_episodes) are all
+   * `ON DELETE RESTRICT`, so the hard-delete is REFUSED with a 409
+   * (`CARRIER_HAS_REFERENCES`) while ANY referencing row exists — including
+   * soft-deleted ones, which Postgres still counts for the physical FK. This
+   * endpoint exists only to purge an EMPTY carrier created by mistake; a
+   * carrier with fleet/claims must be soft-deleted (`DELETE /carriers/:id`)
+   * instead. The pre-mutation snapshot is captured for the admin audit view.
+   *
+   * The pre-flight `countReferencingRows` guard covers the common case; the
+   * P2003 catch is a TOCTOU belt-and-suspenders (a referencing row could be
+   * inserted between the count and the delete). `carriers.hardDelete` removes
+   * the carrier BEFORE the User, so a P2003 from the carrier delete leaves the
+   * User row untouched.
    */
   async hardDelete(id: string, reason: string): Promise<void> {
     const existing = await this.carriers.findById(id);
     if (!existing) throw new NotFoundException('Przewoźnik nie znaleziony');
+
+    const references = await this.carriers.countReferencingRows(id);
+    if (references > 0) {
+      throw this._referencesConflict();
+    }
+
     AuditContext.setBefore(this.toDto(existing));
     AuditContext.setMetadata({ reason });
-    await this.carriers.hardDelete(id);
+    try {
+      await this.carriers.hardDelete(id);
+    } catch (err) {
+      if (isPrismaForeignKeyViolation(err)) {
+        throw this._referencesConflict();
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Builds the 409 for a hard-delete blocked by referencing rows. Mirrors the
+   * `ConflictException` posture of `TeamsService`/`TrailerTypesService` (409,
+   * Polish message naming the blocking relations) but adds the machine code in
+   * the RFC-7807 `extensions` bag — the same envelope
+   * `ClaimAttachmentsService` uses — so the web reads `body.extensions.code`.
+   * The code (`CARRIER_HAS_REFERENCES`) is published in
+   * docs/13-api-design.md#carriers.
+   */
+  private _referencesConflict(): ConflictException {
+    return new ConflictException({
+      code: CARRIER_HAS_REFERENCES_CODE,
+      message:
+        'Nie można trwale usunąć przewoźnika — istnieją powiązane rekordy ' +
+        '(flota / wnioski / wyjazdy). Trwałe usunięcie jest możliwe tylko dla ' +
+        'pustych rekordów.',
+      extensions: { code: CARRIER_HAS_REFERENCES_CODE },
+    });
   }
 
   /**

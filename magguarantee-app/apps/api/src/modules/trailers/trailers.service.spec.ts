@@ -8,6 +8,8 @@ import {
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import type { CarrierRow } from '../carriers/carriers.repository';
 import { CarriersRepository } from '../carriers/carriers.repository';
+import { PrismaService } from '../prisma/prisma.service';
+import { INCLUDE_SOFT_DELETED } from '../prisma/soft-delete.extension';
 import { StorageService } from '../storage/storage.service';
 import {
   TrailerTypesRepository,
@@ -174,7 +176,46 @@ function makeTrailersRepo(seed: TrailerRow[] = []): TrailersRepository {
       const cur = rows.get(id);
       if (cur) rows.set(id, { ...cur, deletedAt: NOW });
     }),
+    hardDelete: jest.fn(async (id: string) => {
+      rows.delete(id);
+    }),
+    // Default: no referencing delegations — hard-delete is allowed. The
+    // reference-guard tests override this per-case.
+    countReferencingRows: jest.fn(async () => 0),
   } as unknown as TrailersRepository;
+}
+
+/** A fake Prisma P2003 (foreign-key violation) — same shape Prisma throws. */
+function makeP2003(): Error {
+  return Object.assign(new Error('Foreign key constraint failed'), {
+    code: 'P2003',
+  });
+}
+
+/**
+ * Invokes `fn`, asserts it rejected with a `ConflictException`, and returns it
+ * so the caller can inspect the RFC-7807 envelope (`code` + `extensions.code`).
+ */
+async function catchConflict(
+  fn: () => Promise<unknown>,
+): Promise<ConflictException> {
+  try {
+    await fn();
+  } catch (e) {
+    if (e instanceof ConflictException) return e;
+    throw e;
+  }
+  throw new Error('expected ConflictException, but none was thrown');
+}
+
+/** Asserts the 409 body carries the machine code both top-level and in extensions. */
+function expectReferencesCode(err: ConflictException, code: string): void {
+  const body = err.getResponse() as {
+    code?: string;
+    extensions?: { code?: string };
+  };
+  expect(body.code).toBe(code);
+  expect(body.extensions?.code).toBe(code);
 }
 
 function makeCarriersRepo(seed: CarrierRow[] = []): CarriersRepository {
@@ -442,5 +483,73 @@ describe('TrailersService', () => {
         [],
       ),
     ).resolves.toMatchObject({ plateNumber: 'NA0002' });
+  });
+
+  // ── Hard-delete reference guard (409 TRAILER_HAS_REFERENCES) ─
+  // `Delegation.trailerId` is ON DELETE RESTRICT (incl. soft-deleted).
+  // Hard-delete must refuse deterministically with a 409, not a P2003 → 500.
+
+  it('hardDelete with referencing rows → 409 TRAILER_HAS_REFERENCES', async () => {
+    const repo = makeTrailersRepo([makeTrailer({ id: 't-1' })]);
+    (repo.countReferencingRows as jest.Mock).mockResolvedValueOnce(2);
+    const svc = build(repo, makeCarriersRepo(), makeTypesRepo());
+    const err = await catchConflict(() => svc.hardDelete('t-1', 'reason'));
+    expectReferencesCode(err, 'TRAILER_HAS_REFERENCES');
+    expect(repo.hardDelete).not.toHaveBeenCalled();
+  });
+
+  it('hardDelete with ONLY soft-deleted referencing rows → still 409 (count uses INCLUDE_SOFT_DELETED)', async () => {
+    const repo = makeTrailersRepo([makeTrailer({ id: 't-1' })]);
+    (repo.countReferencingRows as jest.Mock).mockResolvedValueOnce(1);
+    const svc = build(repo, makeCarriersRepo(), makeTypesRepo());
+    const err = await catchConflict(() => svc.hardDelete('t-1', 'reason'));
+    expectReferencesCode(err, 'TRAILER_HAS_REFERENCES');
+    expect(repo.hardDelete).not.toHaveBeenCalled();
+  });
+
+  it('hardDelete on an unreferenced trailer succeeds (repo.hardDelete called)', async () => {
+    const repo = makeTrailersRepo([makeTrailer({ id: 't-1' })]);
+    const svc = build(repo, makeCarriersRepo(), makeTypesRepo());
+    await expect(svc.hardDelete('t-1', 'reason')).resolves.toBeUndefined();
+    expect(repo.hardDelete).toHaveBeenCalledWith('t-1');
+  });
+
+  it('hardDelete translates a late repo P2003 into the same 409 (TOCTOU)', async () => {
+    const repo = makeTrailersRepo([makeTrailer({ id: 't-1' })]);
+    (repo.hardDelete as jest.Mock).mockRejectedValueOnce(makeP2003());
+    const svc = build(repo, makeCarriersRepo(), makeTypesRepo());
+    const err = await catchConflict(() => svc.hardDelete('t-1', 'reason'));
+    expectReferencesCode(err, 'TRAILER_HAS_REFERENCES');
+  });
+
+  it('hardDelete on a missing trailer → 404', async () => {
+    const svc = build(makeTrailersRepo(), makeCarriersRepo(), makeTypesRepo());
+    await expect(svc.hardDelete('missing', 'reason')).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+});
+
+// ── Repository-level proof that the reference count passes the escape hatch ──
+// A soft-deleted delegation is hidden from the soft-delete extension's read
+// filter but STILL physically blocks the RESTRICT FK, so the count MUST opt in
+// via `[INCLUDE_SOFT_DELETED]`.
+describe('TrailersRepository.countReferencingRows', () => {
+  it('counts delegations by trailerId and passes INCLUDE_SOFT_DELETED', async () => {
+    const delegationCount = jest.fn(async (_args: unknown) => 5);
+    const prisma = {
+      tx: { delegation: { count: delegationCount } },
+    } as unknown as PrismaService;
+    const repo = new TrailersRepository(prisma);
+
+    const total = await repo.countReferencingRows('t-1');
+
+    expect(total).toBe(5);
+    const arg = delegationCount.mock.calls[0]?.[0] as Record<
+      string | symbol,
+      unknown
+    >;
+    expect(arg.where).toEqual({ trailerId: 't-1' });
+    expect(arg[INCLUDE_SOFT_DELETED]).toBe(true);
   });
 });

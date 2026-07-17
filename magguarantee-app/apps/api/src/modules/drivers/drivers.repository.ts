@@ -206,6 +206,24 @@ export class DriversRepository {
     } as unknown as Prisma.DriverDeleteManyArgs);
   }
 
+  /**
+   * Counts rows that reference this driver via an `ON DELETE RESTRICT` FK —
+   * delegations (`Delegation.driverId`, RESTRICT since migration
+   * 20260518113943). Drives the hard-delete pre-flight guard (409
+   * DRIVER_HAS_REFERENCES).
+   *
+   * CRITICAL: `delegation` is a soft-delete model, so the count MUST use the
+   * `[INCLUDE_SOFT_DELETED]` escape hatch — a soft-deleted delegation is hidden
+   * from the extension's read filter yet still physically blocks the FK
+   * (Postgres ignores `deletedAt`).
+   */
+  async countReferencingRows(id: string): Promise<number> {
+    return this.prisma.tx.delegation.count({
+      where: { driverId: id },
+      [INCLUDE_SOFT_DELETED]: true,
+    } as unknown as Prisma.DelegationCountArgs);
+  }
+
   // ── helpers ──────────────────────────────────────────────
 
   private includeShape() {

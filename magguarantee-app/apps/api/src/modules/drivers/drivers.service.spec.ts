@@ -10,6 +10,8 @@ import type { DriverLanguage } from '@magguarantee/shared';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import type { CarrierRow } from '../carriers/carriers.repository';
 import { CarriersRepository } from '../carriers/carriers.repository';
+import { PrismaService } from '../prisma/prisma.service';
+import { INCLUDE_SOFT_DELETED } from '../prisma/soft-delete.extension';
 import type { CategorizedUpload, UploadedFile } from './attachment-validation';
 import { DriverAttachmentsRepository } from './driver-attachments.repository';
 import {
@@ -200,7 +202,43 @@ function makeDriversRepo(seed: DriverRow[] = []): DriversRepository {
     hardDelete: jest.fn(async (id: string) => {
       rows.delete(id);
     }),
+    // Default: no referencing delegations — hard-delete is allowed. The
+    // reference-guard tests override this per-case.
+    countReferencingRows: jest.fn(async () => 0),
   } as unknown as DriversRepository;
+}
+
+/** A fake Prisma P2003 (foreign-key violation) — same shape Prisma throws. */
+function makeP2003(): Error {
+  return Object.assign(new Error('Foreign key constraint failed'), {
+    code: 'P2003',
+  });
+}
+
+/**
+ * Invokes `fn`, asserts it rejected with a `ConflictException`, and returns it
+ * so the caller can inspect the RFC-7807 envelope (`code` + `extensions.code`).
+ */
+async function catchConflict(
+  fn: () => Promise<unknown>,
+): Promise<ConflictException> {
+  try {
+    await fn();
+  } catch (e) {
+    if (e instanceof ConflictException) return e;
+    throw e;
+  }
+  throw new Error('expected ConflictException, but none was thrown');
+}
+
+/** Asserts the 409 body carries the machine code both top-level and in extensions. */
+function expectReferencesCode(err: ConflictException, code: string): void {
+  const body = err.getResponse() as {
+    code?: string;
+    extensions?: { code?: string };
+  };
+  expect(body.code).toBe(code);
+  expect(body.extensions?.code).toBe(code);
 }
 
 function makeCarriersRepo(seed: CarrierRow[] = []): CarriersRepository {
@@ -462,4 +500,72 @@ describe('DriversService', () => {
   // alongside migration `20260519142043_drop_carrier_onboarding_status`.
   // Onboarding state is derived on read from the live `_count` of active
   // children — see `carriers.service.spec.ts`.
+
+  // ── Hard-delete reference guard (409 DRIVER_HAS_REFERENCES) ──
+  // `Delegation.driverId` is ON DELETE RESTRICT (incl. soft-deleted). Hard-delete
+  // must refuse deterministically with a 409 instead of a bubbling P2003 → 500.
+
+  it('hardDelete with referencing rows → 409 DRIVER_HAS_REFERENCES', async () => {
+    const repo = makeDriversRepo([makeDriver({ id: 'd-1' })]);
+    (repo.countReferencingRows as jest.Mock).mockResolvedValueOnce(3);
+    const svc = buildSvc(repo, makeCarriersRepo());
+    const err = await catchConflict(() => svc.hardDelete('d-1', 'reason'));
+    expectReferencesCode(err, 'DRIVER_HAS_REFERENCES');
+    expect(repo.hardDelete).not.toHaveBeenCalled();
+  });
+
+  it('hardDelete with ONLY soft-deleted referencing rows → still 409 (count uses INCLUDE_SOFT_DELETED)', async () => {
+    const repo = makeDriversRepo([makeDriver({ id: 'd-1' })]);
+    (repo.countReferencingRows as jest.Mock).mockResolvedValueOnce(1);
+    const svc = buildSvc(repo, makeCarriersRepo());
+    const err = await catchConflict(() => svc.hardDelete('d-1', 'reason'));
+    expectReferencesCode(err, 'DRIVER_HAS_REFERENCES');
+    expect(repo.hardDelete).not.toHaveBeenCalled();
+  });
+
+  it('hardDelete on an unreferenced driver succeeds (repo.hardDelete called)', async () => {
+    const repo = makeDriversRepo([makeDriver({ id: 'd-1' })]);
+    const svc = buildSvc(repo, makeCarriersRepo());
+    await expect(svc.hardDelete('d-1', 'reason')).resolves.toBeUndefined();
+    expect(repo.hardDelete).toHaveBeenCalledWith('d-1');
+  });
+
+  it('hardDelete translates a late repo P2003 into the same 409 (TOCTOU)', async () => {
+    const repo = makeDriversRepo([makeDriver({ id: 'd-1' })]);
+    (repo.hardDelete as jest.Mock).mockRejectedValueOnce(makeP2003());
+    const svc = buildSvc(repo, makeCarriersRepo());
+    const err = await catchConflict(() => svc.hardDelete('d-1', 'reason'));
+    expectReferencesCode(err, 'DRIVER_HAS_REFERENCES');
+  });
+
+  it('hardDelete on a missing driver → 404', async () => {
+    const svc = buildSvc(makeDriversRepo(), makeCarriersRepo());
+    await expect(svc.hardDelete('missing', 'reason')).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+});
+
+// ── Repository-level proof that the reference count passes the escape hatch ──
+// A soft-deleted delegation is hidden from the soft-delete extension's read
+// filter but STILL physically blocks the RESTRICT FK, so the count MUST opt in
+// via `[INCLUDE_SOFT_DELETED]`.
+describe('DriversRepository.countReferencingRows', () => {
+  it('counts delegations by driverId and passes INCLUDE_SOFT_DELETED', async () => {
+    const delegationCount = jest.fn(async (_args: unknown) => 4);
+    const prisma = {
+      tx: { delegation: { count: delegationCount } },
+    } as unknown as PrismaService;
+    const repo = new DriversRepository(prisma);
+
+    const total = await repo.countReferencingRows('d-1');
+
+    expect(total).toBe(4);
+    const arg = delegationCount.mock.calls[0]?.[0] as Record<
+      string | symbol,
+      unknown
+    >;
+    expect(arg.where).toEqual({ driverId: 'd-1' });
+    expect(arg[INCLUDE_SOFT_DELETED]).toBe(true);
+  });
 });

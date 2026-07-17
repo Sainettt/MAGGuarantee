@@ -486,10 +486,22 @@ export class CarriersRepository {
    * The soft-delete extension rewrites BOTH `delete` and `deleteMany` into a
    * soft-delete `update`, so each physical removal MUST opt out via the
    * `[INCLUDE_SOFT_DELETED]` escape hatch (else the rows survive as
-   * soft-deleted ghosts). Vehicles / drivers / trailers cascade via the FK's
-   * `ON DELETE CASCADE` — which only fires on a REAL delete; the User row is
-   * removed explicitly so the unique login is freed up for re-use. Runs in the
-   * ambient audit transaction so the audit row + deletes commit (or roll back)
+   * soft-deleted ghosts).
+   *
+   * RESTRICT, not CASCADE: the business FKs pointing at a carrier
+   * (vehicles / drivers / trailers / claims / delegations /
+   * guarantee_idle_episodes) are all `ON DELETE RESTRICT`, so Postgres REFUSES
+   * this delete (P2003) while any referencing row exists — including
+   * soft-deleted ones, which still occupy the physical FK slot. The service
+   * runs a pre-flight `countReferencingRows` guard (409 CARRIER_HAS_REFERENCES)
+   * and also translates a late P2003 to the same 409. Hard-delete therefore
+   * only ever succeeds for an EMPTY carrier (one created by mistake).
+   *
+   * ORDER MATTERS: the carrier row is removed FIRST, then the User. If the
+   * carrier delete throws P2003 the User row is left untouched (the service's
+   * P2003→409 translation can rely on this). The User row is removed
+   * explicitly so the unique login is freed up for re-use. Runs in the ambient
+   * audit transaction so the audit row + deletes commit (or roll back)
    * together.
    */
   async hardDelete(id: string): Promise<void> {
@@ -504,6 +516,52 @@ export class CarriersRepository {
       where: { id: carrier.userId },
       [INCLUDE_SOFT_DELETED]: true,
     } as unknown as Prisma.UserDeleteManyArgs);
+  }
+
+  /**
+   * Counts every row that references this carrier via an `ON DELETE RESTRICT`
+   * FK — vehicles / drivers / trailers / claims / delegations (all soft-delete
+   * models) plus guarantee_idle_episodes (NOT a soft-delete model). Drives the
+   * hard-delete pre-flight guard (409 CARRIER_HAS_REFERENCES).
+   *
+   * CRITICAL: the soft-delete models MUST be counted with the
+   * `[INCLUDE_SOFT_DELETED]` escape hatch. A soft-deleted child is invisible to
+   * the extension's read filter yet STILL physically blocks the FK (Postgres
+   * does not know about `deletedAt`). Without the flag the count under-reports
+   * and the delete would fail late with P2003 → 500. The flag is harmless on
+   * the non-soft `guaranteeIdleEpisode` count (the extension no-ops it), kept
+   * uniform for clarity.
+   */
+  async countReferencingRows(id: string): Promise<number> {
+    const tx = this.prisma.tx;
+    const [vehicles, drivers, trailers, claims, delegations, episodes] =
+      await Promise.all([
+        tx.vehicle.count({
+          where: { carrierId: id },
+          [INCLUDE_SOFT_DELETED]: true,
+        } as unknown as Prisma.VehicleCountArgs),
+        tx.driver.count({
+          where: { carrierId: id },
+          [INCLUDE_SOFT_DELETED]: true,
+        } as unknown as Prisma.DriverCountArgs),
+        tx.trailer.count({
+          where: { carrierId: id },
+          [INCLUDE_SOFT_DELETED]: true,
+        } as unknown as Prisma.TrailerCountArgs),
+        tx.claim.count({
+          where: { carrierId: id },
+          [INCLUDE_SOFT_DELETED]: true,
+        } as unknown as Prisma.ClaimCountArgs),
+        tx.delegation.count({
+          where: { carrierId: id },
+          [INCLUDE_SOFT_DELETED]: true,
+        } as unknown as Prisma.DelegationCountArgs),
+        tx.guaranteeIdleEpisode.count({
+          where: { carrierId: id },
+          [INCLUDE_SOFT_DELETED]: true,
+        } as unknown as Prisma.GuaranteeIdleEpisodeCountArgs),
+      ]);
+    return vehicles + drivers + trailers + claims + delegations + episodes;
   }
 
   // ── helpers ──────────────────────────────────────────────

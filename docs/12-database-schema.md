@@ -1050,17 +1050,29 @@ shows whether the verifier overrode the carrier's declared hours.
 
 | Сущность | Стратегия |
 |---|---|
-| User | soft (чтобы сохранить FK в audit, claims) |
-| Carrier | soft + каскад на vehicles/drivers/trailers (тоже soft) |
-| Vehicle | soft (FK с claims/delegations) |
-| Driver/Trailer | soft |
-| Claim | soft, никогда не удаляем (compliance) |
-| Delegation | soft |
+| User | soft (чтобы сохранить FK в audit, claims). Отдельного hard-эндпоинта НЕТ — физически User удаляется только внутри hard-delete перевозчика (его 1:1 shadow-логин, чтобы освободить login). |
+| Carrier | soft (`DELETE /carriers/:id`, admin) + ручной soft-каскад: vehicles/drivers/trailers получают `deletedAt`+`active=false`, User — `deletedAt` (блок логина). Hard — `DELETE /carriers/:id/hard` (admin, `reason`), только для «пустой» записи — см. политику RESTRICT ниже. |
+| Vehicle | soft (admin/opiekun). Hard — `/vehicles/:id/hard` (admin, `reason`); физически каскадом уходят ТОЛЬКО `vehicle_attachments` (метаданные) и `vehicle_daily_km`. |
+| Driver / Trailer | soft (admin/opiekun). Hard — `/:id/hard` (admin, `reason`); каскадом уходят только их `*_attachments`. |
+| Claim | soft-модель, но delete-путей в API нет вообще — wniosek никогда не удаляется (compliance), жизненный цикл только статусами. |
+| Delegation | soft-модель, delete-путей нет — только статус `anulowany` (cancel); строка живёт вечно. |
+| Team | без `deletedAt` — hard-only `DELETE /teams/:id` (admin), защищён пре-чеком: **409**, пока на команду ссылаются машины/диспетчеры; вывод из эксплуатации = `deactivate`. |
+| TrailerType | без `deletedAt` — hard-only `/trailer-types/:id/hard` (admin, `reason`); P2003→**409**, пока тип используется прицепами. |
+| VehicleDailyKm | hard: `DELETE /vehicles/:id/daily-km` (weryfikator/admin) физически стирает строки-клетки km-доски (идемпотентный `deleteMany`); плюс каскад при hard-delete машины. |
+| ClaimAttachment | без `deletedAt`; физически удаляется только rollback-ом неудачного аплоада (orphan-cleanup) + каскад от Claim (который не удаляется никогда). |
 | GuaranteeIdleEpisode | append-only журнал, `deletedAt` нет; не в allowlist soft-delete-extension → extension его не трогает (закрытие эпизода = `state='resolved'` + `resolvedReason`, не удаление) |
-| RefreshToken | hard (по `expiresAt < now()`) |
+| RefreshToken | рантаймом НЕ удаляется (revoke/rotate = `update`); физически уходит только `ON DELETE CASCADE` при hard-delete User (внутри carrier hard). |
 | AuditLog | append-only, никогда не удаляем |
+| MonthlyLimit / AppConfig / ClaimSequence | справочники/счётчики, delete-путей нет (upsert-only) |
 
-Реализация: глобальный middleware Prisma, который добавляет `WHERE deleted_at IS NULL` ко всем `find*`/`update*`/`delete*` (последний переписывается в `update { deletedAt: now() }`). Включается только для моделей с полем `deletedAt`.
+Реализация: Prisma client extension (`soft-delete.extension.ts`), который добавляет `WHERE deleted_at IS NULL` ко всем `find*`/`count`/`updateMany` и переписывает `delete`/`deleteMany` в `update { deletedAt: now() }`. Включается только для моделей из `SOFT_DELETE_MODELS`. Настоящее физическое удаление — только через symbol-флаг `[INCLUDE_SOFT_DELETED]: true` (escape hatch); такие вызовы выполняются на pre-extension **root-клиенте**, т.е. ВНЕ ambient `@Audit`-транзакции (аудит-строка и физический DELETE не атомарны — осознанный trade-off).
+
+### Политика referential actions: бизнес-каскадов НЕТ, только RESTRICT (2026-07-17)
+
+- Все бизнес-FK стоят `ON DELETE RESTRICT` (дефолт Prisma для required-связей, подтверждено миграциями): `vehicles/drivers/trailers/claims/delegations → carriers`, `delegations → vehicles/drivers/trailers`, `guarantee_idle_episodes → vehicles/carriers`, `carriers → users`. Родителя, на которого ссылается хоть одна строка — **включая soft-deleted** (FK физический, `deletedAt` для Postgres невидим) — БД снести не даст.
+- `ON DELETE CASCADE` разрешён ТОЛЬКО «неотъемлемым» дочерним строкам самой записи: `*_attachments` (метаданные файлов), `vehicle_daily_km`, `claim_attachments`, `refresh_tokens`. Бизнес-сущности (флот, wnioski, wyjazdy, эпизоды) каскадом не удаляются никогда — это сознательная политика, а не упущение.
+- Следствие: admin-эндпоинты `/hard` реально срабатывают только для записей без истории (созданных по ошибке). При наличии ссылок API отвечает **409 Conflict** с machine-кодом `CARRIER_HAS_REFERENCES` / `VEHICLE_HAS_REFERENCES` / `DRIVER_HAS_REFERENCES` / `TRAILER_HAS_REFERENCES` (пре-чек счётчиками с `[INCLUDE_SOFT_DELETED]` + перехват P2003 на случай гонки).
+- Судьба файлов в MinIO: явный `DELETE …/attachments/:id` стирает строку (soft) **и объект** у drivers/trailers/carriers; у vehicles объект сознательно остаётся (историческое исключение по task brief). Hard-delete родителя объекты MinIO не трогает вообще; rollback-пути неудачных аплоадов подчищают и строку, и объект.
 
 ## Миграции
 
