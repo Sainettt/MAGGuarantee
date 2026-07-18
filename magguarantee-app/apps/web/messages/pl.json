@@ -1362,6 +1362,7 @@
       "vehicles": "Auta",
       "drivers": "Kierowcy",
       "trailers": "Naczepy",
+      "delegations": "Wyjazdy",
       "documents": "Dokumenty"
     },
     "vehicles": {
@@ -1397,6 +1398,21 @@
         "plate": "Numer rejestracyjny",
         "type": "Typ",
         "active": "Status"
+      }
+    },
+    "delegations": {
+      "emptyTitle": "Brak wyjazdów",
+      "emptyMessage": "Ten przewoźnik nie zgłosił jeszcze żadnego wyjazdu.",
+      "emptyFiltered": {
+        "title": "Brak wyników",
+        "message": "Brak wyjazdów spełniających wybrane filtry."
+      },
+      "columns": {
+        "vehicle": "Auto",
+        "driver": "Kierowca",
+        "route": "Trasa",
+        "period": "Okres",
+        "status": "Status"
       }
     },
     "documents": {
@@ -1974,6 +1990,33 @@
       "table": {
         "emptyTitle": "Brak wyjazdów",
         "emptyMessage": "W systemie nie zarejestrowano jeszcze żadnych wyjazdów.",
+        "emptyFiltered": {
+          "title": "Brak wyników",
+          "message": "Brak wyjazdów spełniających wybrane filtry."
+        },
+        "columns": {
+          "vehicle": "Auto",
+          "driver": "Kierowca",
+          "route": "Trasa",
+          "period": "Okres",
+          "status": "Status"
+        }
+      }
+    },
+    "opiekun": {
+      "title": "Wyjazdy",
+      "subtitle": "Wszystkie wyjazdy przewoźników, którymi się opiekujesz — podgląd tylko do odczytu",
+      "filters": {
+        "status": "Status",
+        "allStatuses": "Wszystkie statusy",
+        "search": "Szukaj",
+        "searchPlaceholder": "Szukaj przewoźnika / nr rej.…",
+        "dateFrom": "Data od",
+        "dateTo": "Data do"
+      },
+      "table": {
+        "emptyTitle": "Brak wyjazdów",
+        "emptyMessage": "Twoi przewoźnicy nie zgłosili jeszcze żadnego wyjazdu.",
         "emptyFiltered": {
           "title": "Brak wyników",
           "message": "Brak wyjazdów spełniających wybrane filtry."

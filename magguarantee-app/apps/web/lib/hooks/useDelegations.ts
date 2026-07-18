@@ -32,10 +32,25 @@ import { GUARANTEE_KEY } from '@/lib/hooks/useGuarantee';
 
 export const DELEGATIONS_KEY = ['delegations'] as const;
 
-export function useDelegations(filters: DelegationFilters = { limit: 50 }) {
+/**
+ * `GET /delegations` — the shared list. The API scopes server-side by the
+ * caller's role (carrier → own, planista → own plannerId, dyspozytor → own
+ * team, opiekun → supervised carriers, admin → all).
+ *
+ * `options.enabled` exists for the drill-down callers whose `carrierId` is
+ * resolved asynchronously (e.g. the opieka carrier page resolves login →
+ * carrierId from `/fleet/opiekun`). Firing with an undefined `carrierId` would
+ * silently widen the scope to "everything the caller can see" — wrong for a
+ * per-carrier tab — so those callers gate the query until the id is known.
+ */
+export function useDelegations(
+  filters: DelegationFilters = { limit: 50 },
+  options?: { enabled?: boolean },
+) {
   return useQuery({
     queryKey: [...DELEGATIONS_KEY, 'list', filters],
     queryFn: () => listDelegations(filters),
+    enabled: options?.enabled ?? true,
   });
 }
 

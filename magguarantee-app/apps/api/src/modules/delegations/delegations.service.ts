@@ -619,7 +619,11 @@ export class DelegationsService {
    *  - `dyspozytor` → row.vehicle.dispatchTeamId must equal the dyspozytor's
    *    `teamId` (Phase 11 — team scope; a dyspozytor with no team matches
    *    nothing → 403).
-   *  - admin/opiekun/eksport → unrestricted (all-access roles).
+   *  - `opiekun`    → row.carrierId must be one of the carriers this opiekun
+   *    supervises (`Carrier.opiekunId === user.sub`) — docs/03-roles.md#opiekun
+   *    («действовать на перевозчиках с другим `opiekunId` (403)»). Mirrors the
+   *    `carrierOpiekunId` list scope so a by-id read cannot bypass it.
+   *  - admin/eksport → unrestricted (all-access roles).
    *  - any other role never reaches here (controller `@Roles` excludes them,
    *    notably `pracownik` — quirk #13 — and `weryfikator`, dropped in the
    *    Phase 7 rework 2026-06-10 #2).
@@ -644,6 +648,16 @@ export class DelegationsService {
     if (user.role === 'dyspozytor') {
       // Phase 11 — team scope. No team (or vehicle on a different team) → 403.
       if (!user.teamId || row.vehicle?.dispatchTeamId !== user.teamId) {
+        throw new ForbiddenException('Brak uprawnień do tej delegacji');
+      }
+      return;
+    }
+    if (user.role === 'opiekun') {
+      // Carrier scope — the outing's carrier must be one this opiekun
+      // supervises. One indexed id-only query; an opiekun with no carriers
+      // matches nothing → 403 (never "all").
+      const owned = await this.carriers.listIdsForOpiekun(user.sub);
+      if (!owned.includes(row.carrierId)) {
         throw new ForbiddenException('Brak uprawnień do tej delegacji');
       }
     }
@@ -884,14 +898,36 @@ export class DelegationsService {
     // przewoznik branch below.
     const { includeHistory, claimable, ...rest } = filters;
 
-    // All-access, no status floor: admin/opiekun see every delegation in every
-    // status, always (docs/03-roles.md). The `includeHistory` toggle is NOT
-    // consulted here — these roles never get the active-board restriction, so
-    // their lists keep returning `zjechal`/`anulowany` rows unconditionally.
+    // All-access, no status floor: admin sees every delegation in every status,
+    // always (docs/03-roles.md). The `includeHistory` toggle is NOT consulted
+    // here — this role never gets the active-board restriction, so its list
+    // keeps returning `zjechal`/`anulowany` rows unconditionally.
     // `planista` was REMOVED from this branch in Phase 6.4 (it had silently
-    // leaked the full delegation list to planners) and is scoped below.
-    if (user.role === 'admin' || user.role === 'opiekun') {
+    // leaked the full delegation list to planners) and is scoped below;
+    // `opiekun` was removed for the same reason (see its branch below).
+    if (user.role === 'admin') {
       return rest;
+    }
+    if (user.role === 'opiekun') {
+      // Opiekun sees ONLY the delegations of the carriers they supervise
+      // (`Carrier.opiekunId === user.sub`) — docs/03-roles.md#opiekun: «Что НЕ
+      // может: действовать на перевозчиках с другим `opiekunId` (403)». Same
+      // posture the fleet / wnioski / guarantee-compliance surfaces already
+      // take. Like admin, NO status floor: `includeHistory` stays unconsulted
+      // and terminal statuses keep flowing.
+      //
+      // Unlike planista/dyspozytor we do NOT strip a client `carrierId`: the
+      // opiekun legitimately narrows to one of THEIR carriers from the fleet
+      // page. A foreign `carrierId` is rejected 403 up-front (mirrors the
+      // przewoznik branch), and the server-injected `carrierOpiekunId` relation
+      // filter is applied unconditionally as defence-in-depth.
+      if (rest.carrierId) {
+        const owned = await this.carriers.listIdsForOpiekun(user.sub);
+        if (!owned.includes(rest.carrierId)) {
+          throw new ForbiddenException('Brak uprawnień do tego przewoźnika');
+        }
+      }
+      return { ...rest, carrierOpiekunId: user.sub };
     }
     // Eksport (Phase 7) — all-access by carrier/vehicle/owner (no ownership
     // scope), but with an ACTIVE-BOARD status floor by default. This is the

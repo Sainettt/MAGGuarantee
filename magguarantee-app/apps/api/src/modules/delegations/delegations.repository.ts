@@ -162,6 +162,19 @@ export interface DelegationListFilters {
    * exactly; if both are ever set they AND under the same `vehicle` relation.
    */
   plannerId?: string;
+  /**
+   * Opiekun auto-scope — restrict to delegations whose CARRIER is supervised by
+   * this opiekun (`Delegation.carrier.opiekunId === carrierOpiekunId`).
+   * Server-identity driven (never client-supplied); the service sets it from
+   * the JWT `sub` (docs/03-roles.md#opiekun — «Действовать на перевозчиках с
+   * другим `opiekunId` (403)»). Translated to a relation filter
+   * `carrier: { opiekunId }` (the `Carrier.opiekunId` FK index narrows the
+   * join). Mirrors `plannerId` / `dispatchTeamId` exactly, but on the CARRIER
+   * axis instead of the vehicle one, so it composes (ANDs) with a `carrierId`
+   * pin — the opiekun may narrow to one of their own carriers, and a foreign
+   * `carrierId` is already rejected 403 in the service scope branch.
+   */
+  carrierOpiekunId?: string;
   /** ISO datetime — match delegations whose `departureAt` ≥ from. */
   from?: string;
   /** ISO datetime — match delegations whose `departureAt` ≤ to. */
@@ -289,6 +302,12 @@ export class DelegationsRepository {
           : {}),
         ...(filters.plannerId ? { plannerId: filters.plannerId } : {}),
       };
+    }
+    // Opiekun auto-scope — relation filter on the CARRIER (indexed
+    // `Carrier.opiekunId`). Independent axis from the vehicle relation above,
+    // so it ANDs with `carrierId` / `vehicleId` / the planner+team filters.
+    if (filters.carrierOpiekunId) {
+      where.carrier = { opiekunId: filters.carrierOpiekunId };
     }
     if (filters.from || filters.to) {
       const range: Record<string, Date> = {};
