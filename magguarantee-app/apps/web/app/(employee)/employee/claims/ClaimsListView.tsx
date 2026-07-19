@@ -62,6 +62,12 @@ export function ClaimsListView() {
   // modal in `view` without an «Edycja» button. Passed into <ClaimModal> so
   // the modal stays role-agnostic.
   const canEdit = user?.role === 'admin' || user?.role === 'pracownik';
+  // The ROLE itself travels separately: `canEdit` collapses admin and pracownik
+  // into one boolean, but docs/14 §6.5.13/§6.5.14 gate whole sections on which
+  // of the two it is (fact block, «Zapisz weryfikację», kwota zatwierdzona).
+  // Inferring the role back out of `canEdit` is exactly the drift the single
+  // `deriveClaimPermissions` derivation exists to prevent.
+  const role = user?.role;
 
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<ClaimStatus | ''>('');
@@ -250,6 +256,7 @@ export function ClaimsListView() {
         nrZgl={selectedNrZgl}
         initialMode="view"
         canEdit={canEdit}
+        role={role}
         onClose={onModalClose}
       />
     </section>

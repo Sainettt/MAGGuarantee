@@ -4232,6 +4232,246 @@ Documented deviations from the literal §6.5 text, each within brand/token const
 3. **Decyzja inputs are gated behind `edit` mode.** In `view` the decyzja block renders a muted "pick edit to decide" hint instead of the live `<Select>` — a decision is an edit, so it belongs to `edit` mode. The select + conditional fields appear the instant «Edycja» is pressed (no re-mount). This is consistent with §6.5.6's "leaf controls flip static⇄input" rule applied to the decyzja sub-tree. **On enter-edit the select shows the placeholder «wybierz decyzję» (no pre-selected `targetStatus`)** and no conditional fields render until a decision is picked; decision required-field validation fires only on «Zapisz» (see §6.5.5 "No pre-selected decision").
 4. **Acceptance gated by recalc result.** Acceptance options are disabled (and any prior acceptance selection cleared) whenever the live recalc yields `kmDifference <= 0` (guarantee met ⇒ no payout); only rejection options remain, with the hint «Gwarancja wyjeżdżona — wniosek można tylko odrzucić». UI guard only; backend independently hard-rejects acceptance with `422` (see §6.5.5 "Acceptance gate by recalc result").
 
+### 6.5.12 Decyzja block — visual containment (REFINEMENT 2026-07-18 — AUTHORITATIVE)
+
+> **Problem being fixed.** In `ClaimModal.tsx` every body block (`FactPairs`, `DoplataBlock`, `MaksimGateBlock`, `DecisionFields`, `SecondaryPanel`) renders as the same flat `<section>` with a `border-t border-border pt-5` divider and a `text-xs uppercase text-text-sub` header. The result: the verifier cannot see where *reading/verifying data* ends and *committing a decision* begins — «wszystko się zlewa». The decyzja block is the only **irreversible, state-changing** block on the surface and must be visually containerised, not merely divided.
+
+**Decision: the decyzja block becomes a contained panel (`<DecisionPanel>`), not a divided section.** Everything above it stays flat/divided (they are all *reading* steps of one narrative); decyzja is the *commitment* step, so it gets a box.
+
+#### Container recipe (existing tokens only — 0 new tokens)
+
+| Aspect | Value | Rationale |
+|---|---|---|
+| Wrapper | `mt-6 rounded-xl border border-border border-t-[3px] border-t-brand bg-card p-4 sm:p-5 space-y-4` | The **3px brand-red top rule** is the deliberate reuse of the login-card brand anchor (§`<LoginCard>` — 4px brand top border). Brand red = "this is the moment that matters" and is already the app's commit/primary colour. |
+| Divider above | **REMOVED** — the decyzja section must NOT carry `border-t border-border pt-5` | A hairline rule says «same family, next item». A card says «different kind of thing». Keeping both double-signals and reads as a stray line above the box. Separation is carried by `mt-6` + the panel border. |
+| Surface | **`bg-card`** (same as modal body) | Deliberate: the panel contains **editable inputs** (`bg-input`). If the panel itself were `bg-input`/`bg-input/40`, the inputs would lose their surface contrast *and* would collide with the locked-field language (§6.5.13, where `bg-input/40` means «you cannot type here»). Containment is carried by border + radius + padding, not by a fill. |
+| Shadow | **none** | The panel is inside an already-elevated `shadow-modal` dialog; a nested shadow reads as a floating popover. |
+| Radius | `rounded-xl` (12px, the card radius) | Matches the dialog/card family. |
+
+#### Header inside the panel
+
+The decyzja header is **promoted** out of the `text-xs uppercase text-text-sub` section-label class used by the blocks above it — that class is for *field-group labels*, and using it here is exactly why decyzja reads as "just another group".
+
+```
+[⚖ Gavel 16px, text-brand]  Decyzja            ← text-sm font-bold text-text
+Ostatni krok — wybierz, co dzieje się z wnioskiem.  ← text-xs text-text-sub, mt-0.5
+```
+
+- Icon: Lucide **`<Gavel size={16} className="text-brand" />`**, `aria-hidden`, in a `flex items-center gap-2` row with the title. It is the only brand-coloured glyph in the modal body — that exclusivity is the point.
+- Title: `text-sm font-bold text-text` (**not** uppercase, **not** `text-text-sub`). The step-up in weight/colour vs. `DANE WNIOSKU` / `DOPŁATA` is the primary hierarchy signal.
+- Subtitle: `text-xs text-text-sub`, one line, i18n key `employee.claims.modal.unified.decyzjaSubtitle` — PL «Ostatni krok — wybierz, co dzieje się z wnioskiem.» / EN "Final step — choose what happens to this claim."
+- The panel keeps the **same shell in all three render branches** (terminal-state note, view-mode «edit to decide» hint, edit-mode `<DecisionFields>`). Never render the hint bare and the fields boxed — the container must not appear/disappear across `mode`, per §6.5.6's no-jump rule. The existing muted `<p className="rounded-md border border-border bg-input …">` hints move *inside* the panel and drop their own border (`bg-input/40 rounded-md p-3 text-sm text-text-sub`) — a bordered note inside a bordered panel is double-chrome.
+- The gate hints (`gateHint`, `decisionBlockedHint`, `guaranteeMetHint`) stay inside the panel, under the fields, `text-xs text-text-sub`, `role="status"` — unchanged.
+
+#### Footer — «Zapisz weryfikację» vs «Zapisz» disambiguation (locked)
+
+Two save buttons sitting adjacent in the same right-hand cluster with near-identical labels is the second half of the same complaint. Fix, in order of importance:
+
+1. **Physically split the clusters.** `Zapisz weryfikację` moves to the footer's **left slot** (`mr-auto`), away from `[Anuluj] [Zapisz …]` on the right. Footer becomes `flex items-center gap-2` with the verify button carrying `mr-auto`. This mirrors the §6.5.6 footer table (destructive/secondary left, flow-actions right).
+2. **Rename the primary.** When the decyzja panel is present (`isEdit && targets.length > 0`) the submit label is **«Zapisz decyzję»** (key `employee.claims.modal.edit.submitDecision`, EN "Save decision"), not the bare «Zapisz». The bare label stays for any future edit-only variant. A bare «Zapisz» next to «Zapisz weryfikację» is unresolvable without reading intent into a prefix.
+3. **Reason on hover.** Native `title` on the verify button (no `<Tooltip>` component exists — same policy as §(b)): key `employee.claims.modal.edit.verifyButtonHint` — PL «Zapisuje skorygowane dane weryfikacji. Nie podejmuje decyzji.» / EN "Saves the corrected verification data. Does not make a decision."
+4. Icons stay as they are (`<BadgeCheck>` on verify, none on the primary) — the icon on the secondary and none on the primary is already a differentiator; do not add an icon to the primary.
+
+#### Acceptance (§6.5.12)
+
+- [ ] Decyzja renders inside `<DecisionPanel>` — `rounded-xl border border-border border-t-[3px] border-t-brand bg-card p-4 sm:p-5`, `mt-6`, **no** `border-t border-border pt-5` divider on that section.
+- [ ] Panel header = `<Gavel>` (`text-brand`) + `text-sm font-bold text-text` title + `text-xs text-text-sub` subtitle. No uppercase micro-label.
+- [ ] Panel shell identical in terminal-state / view / edit branches; inner hints lose their own border.
+- [ ] Footer: verify button in the left slot (`mr-auto`) with a `title` hint; primary label «Zapisz decyzję» when the decyzja panel is present.
+- [ ] 0 new colour/radius/shadow tokens; dark mode via tokens only (`border-t-brand` = `#ef4444` dark, decorative — no contrast requirement).
+
+### 6.5.13 «This field is locked because…» — the unified lock language (NEW 2026-07-18 — AUTHORITATIVE)
+
+> **Scope.** One pattern for every "you cannot edit this right now" case across the wniosek surface, so three new lock cases do not spawn three styles. **Applies project-wide** to any form field/block that becomes non-editable for a *state or role* reason.
+> **Canon settled:** the locked branch of `amountApproved` (`ClaimModal.tsx` ~:1963-2009) **is** the canon — it already is §(b) "Read-only / computed field pattern" rendered verbatim. The editable branch (~:1942-1962) is not a competing lock style; it is simply the *unlocked* rendering of the same field. There are not two lock styles today and there must never be a third.
+
+#### The two tiers (locked — pick by scope, never mix)
+
+| Tier | When | Treatment | Reason shown |
+|---|---|---|---|
+| **A. Field-level lock** | **One** field is non-editable among editable siblings | §(b) canonical recipe **verbatim**: real `<Input readOnly tabIndex={-1} aria-readonly="true">` (never `disabled`), `bg-input/40 pr-9 font-semibold tabular-nums text-text-sub cursor-not-allowed focus:border-border focus:ring-0`, in-field `<Lock className="… size-3.5 text-text-sub/70">`, `<FormDescription className="flex items-center gap-1"><Lock className="size-3"/>…` | `<FormDescription>` = short reason (always visible) + native `title` = the fuller sentence |
+| **B. Block-level lock** | A **whole section** (≥3 fields) is non-editable | Render the block in its existing **static / `view`** form. Do **not** render N greyed inputs, do **not** stamp N lock icons. | **ONE** `<LockNotice>` immediately above the block |
+
+**Hard rule:** never express a block-level lock as a field-level one. Six locked inputs = six lock glyphs = six times the noise for one reason.
+
+**Hard rule:** an action that is **impossible for this role in this state** is **removed, not disabled** (consistent with the §"Role-gated navigation" rule «что роль не видит — не рендерится»). Its reason is already carried by the block-level `<LockNotice>` for the same state — do not also render a dead disabled button.
+
+#### `<LockNotice>` — new primitive (`components/ui/LockNotice.tsx`)
+
+A quiet informational line. **Posture copied from §7.7.1b's lag-note: a locked field caused by a normal workflow state is NOT an error** — no `<Alert>`, no `bg-warning`/`bg-danger`, no dismiss button, no icon colour.
+
+```
+[🔒 Lock 14px, text-text-sub]  <reason sentence>
+```
+
+| Aspect | Value |
+|---|---|
+| Element | `<p role="note" id={id}>` |
+| Classes | `flex items-start gap-2 rounded-md border border-border bg-input px-3 py-2 text-xs text-text-sub` |
+| Icon | Lucide `<Lock size={14} aria-hidden className="mt-0.5 shrink-0" />` — inherits `text-text-sub`, **never** semantic-coloured |
+| Placement | Directly **above** the locked block, inside the block's `<section>`, before the section header's content or immediately after it (web-agent's call — must be above the first locked field) |
+| a11y | `id` on the notice; the locked block's container carries `aria-describedby={id}` and `aria-disabled="true"` |
+| Contrast | `text-text-sub` on `bg-input` = 4.6:1 light / 6.4:1 dark → AA at 12px ✔ |
+| Props | `{ children: ReactNode; id?: string; className?: string }` — copy is passed in, the component owns no i18n |
+
+#### Reason copy — the non-negotiable rule
+
+**Every lock states its CAUSE, never only its STATE.** Banned: a bare «Pole zablokowane.», «Tylko do odczytu», a grey field with no text at all. Required shape (PL default):
+
+> **«Zablokowane — <przyczyna>.»**  ·  ≤ ~90 chars for the visible line; the `title` may add one clause of detail.
+
+#### The three cases — locked mapping
+
+| # | Case | Tier | i18n key (`employee.claims.modal.locked.*` unless noted) | PL (default) | EN |
+|---|---|---|---|---|---|
+| 1 | `amountApproved` read-only because `amountMaximum != null` — **role-conditional: `pracownik` only** (see §6.5.14) | **A** (field) | `edit.amountApprovedLockedMaksim` (description) | «Zablokowane — jest decyzja Maksima ({amount}).» | "Locked — Maksim's decision exists ({amount})." |
+| | ↳ hover `title` | | `edit.amountApprovedLockedMaksimHint` | «Kwota zatwierdzona wynika z decyzji Maksima. Zmienić ją może wyłącznie administrator.» | "The approved amount follows Maksim's decision. Only an administrator can change it." |
+| 2 | `FactPairs` read-only for `pracownik` when status = `OCZEKUJE_NA_AUTORYZACJE` | **B** (block) | `factsPendingAuthorization` | «Dane weryfikacji są zablokowane — wniosek czeka na autoryzację Maksima. Zmiany może wprowadzić tylko administrator.» | "Verification data is locked — the claim is awaiting Maksim's authorisation. Only an administrator can make changes." |
+| | ↳ same status, role = `admin` (facts still editable) | **B** (notice only, no lock) | `factsPendingAuthorizationAdmin` | «Wniosek czeka na autoryzację Maksima. Jako administrator możesz nadal korygować dane weryfikacji.» | "The claim is awaiting Maksim's authorisation. As an administrator you can still correct the verification data." |
+| 3 | «Zapisz weryfikację» hidden for non-`admin` at `OCZEKUJE_NA_AUTORYZACJE` | **removed, not disabled** | — (no key) | reason already carried by case 2's notice | — |
+
+**Case 1 detail (locked).** The field stays `readOnly`, **not** `disabled` — it remains RHF-registered and part of the submitted payload (§(b): disabled inputs are dropped from some serialisations). The `required` asterisk stays. The existing `amountApprovedFromMaksim` description belongs to the *unlocked* branch and is not reused here. **The full role/status rule and the admin-override case are specified in §6.5.14 — read it before implementing case 1.**
+
+**Case 2 detail (locked).** `pracownik` at `OCZEKUJE_NA_AUTORYZACJE` sees the fact block rendered exactly as `mode === 'view'` (static pair rows, `bg-input/40` declared cells, no inputs) even though the modal is in `edit` — the decyzja panel below stays live. This is the §6.5.6 "leaf controls flip static⇄input" rule applied per-block. The `<LockNotice>` sits above the `DANE WNIOSKU / DANE PO WERYFIKACJI` headers. The `admin` variant renders the notice **without** locking anything (informational — it explains why the surface feels different from the usual verification pass).
+
+#### Anti-patterns (kill on sight)
+
+- ❌ `disabled` on a locked *value* field (use `readOnly` + the §(b) surface). `disabled` stays reserved for **buttons** and for inputs that are inert for a *transient* reason (mutation in flight).
+- ❌ `opacity-50` as a read-only affordance — that is the `disabled` recipe (§Form patterns) and reads as "broken", not "intentionally locked".
+- ❌ A grey field with no reason text anywhere.
+- ❌ More than one lock affordance per logical block (notice **or** per-field lock, never both).
+- ❌ Semantic colour (warning/danger) on a lock caused by a normal workflow state — see §7.7.1a: "locked ≠ error".
+- ❌ Adding a `<Tooltip>` dependency for the reason — native `title` remains the policy.
+
+#### Catalogue additions (§6.5.12 + §6.5.13)
+
+| Component | Kind | File |
+|---|---|---|
+| `<LockNotice>` | new custom primitive (reusable project-wide) | `apps/web/components/ui/LockNotice.tsx` |
+| `<DecisionPanel>` | composition (may stay inline in `ClaimModal.tsx`) | `apps/web/components/claims/ClaimModal.tsx` |
+
+**Tokens: 0 new.** Composes `bg-card`, `bg-input`, `bg-input/40`, `border-border`, `border-t-brand`, `text-brand`, `text-text`, `text-text-sub`, `rounded-xl`, `rounded-md`. No `tailwind.config.ts` / `globals.css` change.
+
+#### Acceptance (§6.5.13)
+
+- [ ] Exactly **one** lock visual language in the modal: §(b) recipe for field-level, `<LockNotice>` for block-level. No third style introduced.
+- [ ] Every locked surface states its **cause** in visible text; no grey-with-no-reason field exists.
+- [ ] `amountApproved` locks (readOnly, not disabled) whenever `amountMaximum != null`, with the case-1 copy; still submitted in the payload.
+- [ ] `FactPairs` for `pracownik` @ `OCZEKUJE_NA_AUTORYZACJE` renders in static `view` form + one `<LockNotice>` above it; `admin` sees the informational variant with editing intact.
+- [ ] «Zapisz weryfikację» is **absent** (not disabled) for non-admin in that status.
+- [ ] `<LockNotice>` is neutral-coloured, `role="note"`, referenced via `aria-describedby` from the locked block; `aria-disabled="true"` on that block.
+- [ ] AA contrast verified in both themes; 0 new tokens.
+
+### 6.5.14 Kwota Maksima vs kwota zatwierdzona — the admin-override case (NEW 2026-07-18 — AUTHORITATIVE)
+
+> **Supersedes** the earlier `postAuthorization`-keyed branch in `DecisionFields` (`ClaimModal.tsx` ~:1942-1962), which made `amountApproved` editable *only* in `OCZEKUJE_NA_AUTORYZACJE`. That status keying is dropped.
+
+#### The rule (locked — no exceptions, no status keying)
+
+```
+amountMaximum != null  AND  role === 'pracownik'   →  amountApproved is LOCKED   (Tier A, §6.5.13)
+amountMaximum != null  AND  role === 'admin'       →  amountApproved is EDITABLE (override allowed)
+amountMaximum == null                              →  existing behaviour unchanged
+```
+
+The lock is keyed on **the existence of Maksim's decision and the user's role — never on `ClaimStatus`.** One predicate, all statuses.
+
+#### The design problem
+
+Once `admin` overrides, two numbers coexist and mean different things:
+
+- **`amountMaximum`** — what Maksim authorised (the decision of record).
+- **`amountApproved`** — what will actually be paid to the carrier.
+
+Today they live in different parts of the surface (`amountMaximum` in the Autoryzacja sub-panel at the very bottom, `amountApproved` in the decyzja panel) with nothing linking them. A divergence is invisible. **Fix: co-locate them at the field that causes the divergence, and make the divergence itself a first-class visual.**
+
+#### `<AmountOverrideRow>` — the reference/override comparison
+
+The insight: this is **the same reconciliation semantic as the fact pairs** (§6.5.3) — a reference value the user did not author, next to the working value they did. So it must speak the **same language**, not invent a new one: muted reference cell + the `bg-warning/10` "this was changed" tint already used by corrected facts and the Historia diff.
+
+Rendered **directly under** the `amountApproved` input (in the `<FormDescription>` slot's position, above/instead of the plain description), in **both** the locked (`pracownik`) and editable (`admin`) branches, whenever `amountMaximum != null`:
+
+**(a) Aligned state — `amountApproved === amountMaximum`** (the normal case; also the pracownik-locked case):
+
+```
+[🔒 Lock 12px]  Decyzja Maksima: 820,00 €        ← text-xs text-text-sub, flex items-center gap-1
+```
+- Classes: `flex items-center gap-1 text-xs text-text-sub`, value `font-semibold tabular-nums`.
+- The `<Lock size-3>` glyph appears **only in the locked (pracownik) branch** — for `admin` the row is pure reference, no lock (same distinction as §6.5.3: lock = "you can't type here", plain muted = "reference context").
+- i18n `employee.claims.modal.edit.maksimAmountRef` — PL «Decyzja Maksima: {amount}» / EN "Maksim's decision: {amount}".
+
+**(b) Divergent state — `amountApproved !== amountMaximum`** (admin has overridden):
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ [⚠ 14px]  Nadpisano decyzję Maksima                        │  ← text-xs font-semibold
+│           820,00 €  →  900,00 €                            │  ← tabular-nums, was → is
+│           Przewoźnik otrzyma kwotę zatwierdzoną.           │  ← text-xs, muted
+└────────────────────────────────────────────────────────────┘
+```
+
+| Aspect | Value |
+|---|---|
+| Wrapper | `mt-1.5 flex items-start gap-2 rounded-md bg-warning/10 px-3 py-2 text-xs text-warning-dark dark:text-warning` — the **same `bg-warning/10` diff token** as §6.5.3 changed-fact emphasis and the Historia diff. **No new token.** |
+| Icon | Lucide `<AlertTriangle size={14} aria-hidden className="mt-0.5 shrink-0" />` |
+| Line 1 | `font-semibold` — key `edit.maksimOverrideTitle`, PL «Nadpisano decyzję Maksima» / EN "Maksim's decision overridden" |
+| Line 2 (the «było → stało») | old value `line-through text-text-sub tabular-nums` · Lucide `<ArrowRight size={12} aria-hidden className="mx-1 inline shrink-0" />` · new value `font-semibold tabular-nums` (inherits the warning text colour). Strike-through on the superseded amount is the unambiguous "this is no longer in force" mark. |
+| Line 3 | `text-text-sub` (drops to muted inside the band) — key `edit.maksimOverrideConsequence`, PL «Przewoźnik otrzyma kwotę zatwierdzoną.» / EN "The carrier will receive the approved amount." — this is the whole point: it says *which of the two numbers wins*. |
+| Live | The band appears/disappears **live as the admin types** (RHF `watch('amountApproved')` vs `claim.amountMaximum`), not on blur, not on submit. The feedback must be attached to the act of typing. |
+| a11y | Wrapper `role="status"` (polite) so SR users hear the divergence appear; not `role="alert"` — it is not an error. |
+| `<Badge>` | Additionally a `<Badge variant="outline" className="text-warning-dark dark:text-warning">Nadpisano</Badge>` next to the **field label** (`Kwota zatwierdzona`), so the divergence is visible even when the decyzja panel is scrolled to its top edge. Same copy as line 1's key, short form `edit.maksimOverrideBadge` = «Nadpisano» / "Overridden". |
+
+**Pracownik sees the divergent band too, read-only.** When an admin has already overridden and a `pracownik` opens the claim, the locked field shows `900,00 €` and the same `(b)` band explains why it differs from Maksim's `820,00 €`. Without it the pracownik sees a locked field whose value contradicts the Autoryzacja panel below — exactly the confusion class this ticket exists to kill.
+
+#### Confirmation at the moment of override — **decision: no dialog** (locked)
+
+**No `<ConfirmDialog>`, no "are you sure" on typing, no blocking modal.** Rationale:
+
+1. The action is **not destructive and not yet committed** — nothing happens until «Zapisz decyzję». A confirm on an uncommitted keystroke is theatre; the user would dismiss it and learn nothing.
+2. A dialog would fire on every keystroke or every blur — the classic pattern that trains users to click through without reading.
+3. `admin` overriding is a **sanctioned power**, not an accident to guard against. The design's job is to make the consequence **continuously visible**, not to interrogate.
+4. The `(b)` band + the label badge already deliver the warning **persistently and at the moment of typing** — strictly more informative than a one-shot dialog, and it survives scrolling away and back.
+
+**What we do instead, at submit:** the existing `comment` field in the ZAAKCEPTOWANO branch gets a **conditional hint** while the divergence is live — key `edit.maksimOverrideCommentHint`, PL «Warto opisać powód nadpisania kwoty Maksima.» / EN "Consider describing the reason for overriding Maksim's amount.", rendered as `<FormDescription>` under the komentarz textarea. **Hint only — it does NOT make `comment` required.** Making it required is a business rule (api-agent/domain decision), not a design call; if the product later wants it mandatory, the hint text becomes the `<FormMessage>` copy and the Zod schema changes.
+
+#### Why the locked/editable split does not break the Tier-A pattern
+
+The §6.5.13 Tier-A recipe is a **rendering of one field in two branches**, and `<AmountOverrideRow>` is rendered in *both* — so the field's below-input slot is structurally identical for both roles. Only two things flip:
+
+| | `pracownik` | `admin` |
+|---|---|---|
+| `<Input>` | §(b) locked recipe (`readOnly`, `bg-input/40`, in-field `<Lock>`, `title`) | normal editable `<Input>` (`bg-input`) |
+| Reason line | `<Lock size-3>` + «Zablokowane — jest decyzja Maksima ({amount}).» | no lock glyph; `<AmountOverrideRow>` state (a) reference line only |
+| Divergence band (b) | rendered when divergent (read-only explanation) | rendered live while divergent |
+| Label badge «Nadpisano» | rendered when divergent | rendered when divergent |
+
+Grid alignment is unaffected — everything grows downward out of the `col-span-2` cell (§Grid-form field alignment requirement 2).
+
+#### i18n keys (PL default + EN) — `employee.claims.modal.edit.*`
+
+| Key | PL | EN |
+|---|---|---|
+| `amountApprovedLockedMaksim` | «Zablokowane — jest decyzja Maksima ({amount}).» | "Locked — Maksim's decision exists ({amount})." |
+| `amountApprovedLockedMaksimHint` (`title`) | «Kwota zatwierdzona wynika z decyzji Maksima. Zmienić ją może wyłącznie administrator.» | "The approved amount follows Maksim's decision. Only an administrator can change it." |
+| `maksimAmountRef` | «Decyzja Maksima: {amount}» | "Maksim's decision: {amount}" |
+| `maksimOverrideTitle` | «Nadpisano decyzję Maksima» | "Maksim's decision overridden" |
+| `maksimOverrideBadge` | «Nadpisano» | "Overridden" |
+| `maksimOverrideConsequence` | «Przewoźnik otrzyma kwotę zatwierdzoną.» | "The carrier will receive the approved amount." |
+| `maksimOverrideCommentHint` | «Warto opisać powód nadpisania kwoty Maksima.» | "Consider describing the reason for overriding Maksim's amount." |
+
+`amountApprovedFromMaksim` (the old post-authorization prefill description) is **retired** — replaced by `maksimAmountRef` + the override band.
+
+#### Acceptance (§6.5.14)
+
+- [ ] `amountApproved` locks on `amountMaximum != null && role === 'pracownik'` — **in every status**; `admin` keeps it editable. No `ClaimStatus` appears in the predicate.
+- [ ] Locked branch = §(b) recipe verbatim with the case-1 reason copy naming Maksim's decision as the cause.
+- [ ] `<AmountOverrideRow>` renders under the field for **both** roles whenever `amountMaximum != null`: aligned → muted reference line; divergent → `bg-warning/10` band with `820,00 € (line-through) → 900,00 €` and the consequence line.
+- [ ] Divergence band updates **live while typing** (`watch`), `role="status"`; `<Badge>Nadpisano</Badge>` on the field label.
+- [ ] Pracownik sees the divergence band read-only when an admin has overridden.
+- [ ] **No confirm dialog** on override; komentarz gets a non-blocking hint while divergent; `comment` does **not** become required.
+- [ ] `amountApprovedFromMaksim` key removed; new keys added to `pl.json` + `en.json`.
+- [ ] 0 new tokens (`bg-warning/10`, `text-warning-dark`, `text-text-sub`, `bg-input/40` all existing); dark mode via tokens only.
+
 ## Phase 7 — Eksport / Weryfikator delegation panels
 
 > ⚠️ **REWORK 2026-06-10 #2 — §7.1 (weryfikator delegation action-UI) is SUPERSEDED.** The weryfikator role no longer works with delegations; it now stamps a **vehicle route-status board** (table of all active vehicles, per-row «W trasie» / «Zjechał» status). The authoritative spec is **§7.5 — Weryfikator vehicle route-status board** (below). The §7.1 in-transit/returned confirm-dialogs, the `actions` column on the *delegations* table, and `<DelegationStatusActionDialog>` are removed from the build — kept below only as history (struck through). **The `eksport` parts (§7.2 nav for eksport, the read-only delegations витрина) are UNCHANGED and remain authoritative.**

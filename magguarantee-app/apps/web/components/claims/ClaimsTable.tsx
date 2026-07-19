@@ -102,20 +102,50 @@ export function ClaimsTable({
           </span>
         ),
       },
+      // Two money columns, not one. «Wnioskowana» is what the claim asks for;
+      // «Zatwierdzona» is what was actually granted — they diverge whenever a
+      // verifier corrects the amount or an admin overrides Maksim's decision
+      // (docs/14 §6.5.14), and collapsing them into a single «Dopłata» column
+      // hid that divergence from the list entirely.
       {
-        id: 'doplata',
-        header: t('columns.doplata'),
+        id: 'amountRequested',
+        header: t('columns.amountRequested'),
         align: 'right',
-        cell: (row) => (
-          <span
-            className={cn(
-              'font-mono font-bold tabular-nums whitespace-nowrap',
-              row.paymentEur > 0 ? 'text-brand' : 'text-text-sub',
-            )}
-          >
-            {formatEur(row.paymentEur)}
-          </span>
-        ),
+        cell: (row) => {
+          // `amountRequested` is NOT NULL on the DTO; `paymentEur` is the
+          // defensive fallback for legacy rows written before the split.
+          const requested = row.amountRequested ?? row.paymentEur;
+          return (
+            <span
+              className={cn(
+                'font-mono font-bold tabular-nums whitespace-nowrap',
+                requested > 0 ? 'text-brand' : 'text-text-sub',
+              )}
+            >
+              {formatEur(requested)}
+            </span>
+          );
+        },
+      },
+      {
+        id: 'amountApproved',
+        header: t('columns.amountApproved'),
+        align: 'right',
+        cell: (row) =>
+          // Null ⇒ no decision yet. An em-dash, NOT «0,00 €» — a zero payout is
+          // a real decision and must not be confused with an undecided claim.
+          row.amountApproved == null ? (
+            <span className="text-text-sub">—</span>
+          ) : (
+            <span
+              className={cn(
+                'font-mono font-bold tabular-nums whitespace-nowrap',
+                row.amountApproved > 0 ? 'text-success-dark dark:text-success' : 'text-text-sub',
+              )}
+            >
+              {formatEur(row.amountApproved)}
+            </span>
+          ),
       },
       {
         id: 'status',
