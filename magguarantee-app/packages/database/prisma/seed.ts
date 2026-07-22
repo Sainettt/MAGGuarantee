@@ -14,6 +14,7 @@ import bcrypt from 'bcryptjs';
 import { PrismaClient, Role } from '../src/generated';
 import {
   MONTHLY_LIMIT_KM_PER_DAY,
+  MONTHLY_LIMIT_KM_PER_SATURDAY,
   MONTHLY_LIMIT_RATE_PER_KM,
   MONTHLY_LIMIT_YEARS,
   seedAppConfig,
@@ -342,7 +343,8 @@ function printBanner(
   console.log(`Seeded Vehicle:     ${vehicleCount} demo vehicle (plate ${DEMO_VEHICLE_PLATE})`);
   console.log(
     `Seeded MonthlyLimit: ${monthlyLimitCount} rows (years ${MONTHLY_LIMIT_YEARS.join(', ')}, ` +
-      `kmPerDay=${MONTHLY_LIMIT_KM_PER_DAY}, ratePerKm=${MONTHLY_LIMIT_RATE_PER_KM})`,
+      `kmPerDay=${MONTHLY_LIMIT_KM_PER_DAY}, ratePerKm=${MONTHLY_LIMIT_RATE_PER_KM}, ` +
+      `kmPerSaturday=${MONTHLY_LIMIT_KM_PER_SATURDAY})`,
   );
   console.log('');
 }

@@ -77,6 +77,7 @@ export function useUpdateLimit() {
             month,
             kmPerDay: body.kmPerDay ?? null,
             ratePerKm: body.ratePerKm ?? null,
+            kmPerSaturday: body.kmPerSaturday ?? null,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           };
@@ -89,6 +90,10 @@ export function useUpdateLimit() {
             body.kmPerDay !== undefined ? body.kmPerDay : current.kmPerDay,
           ratePerKm:
             body.ratePerKm !== undefined ? body.ratePerKm : current.ratePerKm,
+          kmPerSaturday:
+            body.kmPerSaturday !== undefined
+              ? body.kmPerSaturday
+              : current.kmPerSaturday,
           updatedAt: new Date().toISOString(),
         };
         const next = [...rows];

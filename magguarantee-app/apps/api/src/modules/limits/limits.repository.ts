@@ -13,6 +13,8 @@ export interface MonthlyLimitRow {
   month: number;
   kmPerDay: number | null;
   ratePerKm: number | null;
+  /** Guarantee km per qualifying ("odd") Saturday; `null`/`0` ⇒ feature OFF. */
+  kmPerSaturday: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -23,6 +25,8 @@ export interface UpsertMonthlyLimitData {
   /** When `undefined`, the column is left untouched on UPDATE / NULL on INSERT. */
   kmPerDay?: number;
   ratePerKm?: number;
+  /** When `undefined`, the column is left untouched on UPDATE / NULL on INSERT. */
+  kmPerSaturday?: number;
 }
 
 /**
@@ -79,10 +83,12 @@ export class LimitsRepository {
     };
     if (data.kmPerDay !== undefined) create.kmPerDay = data.kmPerDay;
     if (data.ratePerKm !== undefined) create.ratePerKm = data.ratePerKm;
+    if (data.kmPerSaturday !== undefined) create.kmPerSaturday = data.kmPerSaturday;
 
     const update: Record<string, unknown> = {};
     if (data.kmPerDay !== undefined) update.kmPerDay = data.kmPerDay;
     if (data.ratePerKm !== undefined) update.ratePerKm = data.ratePerKm;
+    if (data.kmPerSaturday !== undefined) update.kmPerSaturday = data.kmPerSaturday;
 
     const row = await this.prisma.tx.monthlyLimit.upsert({
       where: { year_month: { year: data.year, month: data.month } },
@@ -100,6 +106,7 @@ export class LimitsRepository {
     month: number;
     kmPerDay: unknown;
     ratePerKm: unknown;
+    kmPerSaturday?: unknown;
     createdAt: Date;
     updatedAt: Date;
   }): MonthlyLimitRow {
@@ -109,6 +116,7 @@ export class LimitsRepository {
       month: row.month,
       kmPerDay: decimalToNumber(row.kmPerDay),
       ratePerKm: decimalToNumber(row.ratePerKm),
+      kmPerSaturday: decimalToNumber(row.kmPerSaturday),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

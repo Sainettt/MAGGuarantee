@@ -448,7 +448,9 @@ DB CHECK enforces `returnCountry` length 2..8 (covers `EL`) and `returnPostalCod
 | Method + Path | GAS |
 |---|---|
 | GET `/limits?year=2026` | `getLimityKm` |
-| PUT `/limits` | (новое) — bulk update от admin (вместо ручного редактирования) |
+| PUT `/limits/:yearMonth` | (новое) — upsert одной строки `(year, month)` от admin (`:yearMonth` = `YYYY-MM`) |
+
+> **Тело `PUT /limits/:yearMonth`** — partial: `{ kmPerDay?, ratePerKm?, kmPerSaturday? }` (все `positive`, coerced); `refine` требует **хотя бы одно** из трёх (`UpdateMonthlyLimitSchema`). `kmPerSaturday` — км за одну зачётную нечётную субботу месяца (оценивается по `ratePerKm`, отдельной EUR-ставки нет; см. [01-overview.md](01-overview.md)). **`GET /limits?year=`** возвращает в каждой строке `kmPerSaturday: number | null` рядом с `kmPerDay`/`ratePerKm` (`MonthlyLimitDto`).
 
 ### Lookups (для dropdown-ов) — `/api/v1/lookups`
 
@@ -671,6 +673,25 @@ type PreviewResponse = {
 // Поле `rawTotalDays` нужно UI-компоненту `<HoursReadout>` (см.
 // docs/14-design-system.md §"Phase 3.1") чтобы показать "240,00 h surowych /
 // 215,50 h zaliczonych".
+//
+// Форма одной месячной строки `MonthBreakdown` (источник — `MonthBreakdownSchema`
+// в `packages/shared/src/schemas/claims.ts`):
+// {
+//   yearMonth: string,          // 'YYYY-MM'
+//   workingDays: number,        // ТОЛЬКО будни (пн–пт), после EU-ban / дробных / korekta godzin
+//   kmPerDay: number,
+//   ratePerKm: number,
+//   saturdaysCounted: number,   // зачтённые нечётные субботы (целое ≥0)
+//   kmPerSaturday: number,      // км за субботу (0 ⇒ субботняя гарантия для месяца выключена)
+//   kmFromSaturdays: number,    // = round(saturdaysCounted × kmPerSaturday)
+//   saturdayDays: string[],     // ISO-даты зачтённых суббот (по возрастанию)
+//   kmInMonth: number,          // ГРАНД-ТОТАЛ = round(workingDays × kmPerDay) + kmFromSaturdays
+//   excludedDays: { date, label }[]  // праздники / EU-ban (выходные НЕ включаются)
+// }
+// Полное число дней месяца = workingDays + saturdaysCounted; Σ kmInMonth === kmGuaranteed.
+// Субботние поля идут с `.default(...)` (0 / []), чтобы старые persisted JSONB-строки
+// без них парсились чисто. Зачётная суббота, попавшая на EU-ban, уходит в `excludedDays`
+// (НЕ в `saturdayDays`) — не оплачивается и не считается днём.
 ```
 
 ### Update claim (verification)

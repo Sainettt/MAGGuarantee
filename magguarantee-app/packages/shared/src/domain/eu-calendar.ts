@@ -84,19 +84,36 @@ export function fmtIsoDateKey(d: Date): string {
  * persisted on the holiday tables above (`'Nowy Rok'`, `'Wielki Piatek (DE/NL)'`,
  * …) so callers can render WHY a particular day was excluded.
  *
- * Excludes any holiday whose date falls on a Saturday or Sunday — matches
- * `Code.gs:5943` and `Code.gs:5959`. Reason: km-calc weekend handling
- * already excludes those days, so listing them as bans is redundant.
+ * By default (`includeSaturdays = false`) any holiday whose date falls on a
+ * Saturday or Sunday is dropped — matches `Code.gs:5943` and `Code.gs:5959`.
+ * Reason: the weekday branch of km-calc already excludes weekends, so listing
+ * them as bans would be redundant for that path.
+ *
+ * The odd-Saturday guarantee feature (see `km-calc.ts`) needs to know which
+ * *Saturday* holidays land inside a period so a qualifying Saturday that falls
+ * on a ban day is NOT paid. Pass `includeSaturdays = true` to keep Saturday
+ * holidays in the map (Sundays are still dropped — they are always skipped by
+ * km-calc regardless). km-calc itself routes weekday vs Saturday lookups, so a
+ * single map carrying Saturday holidays never affects the weekday counting
+ * (that branch is gated on `!isWeekend`).
  */
-export function getEUBanDays(yearFrom: number, yearTo: number): Map<string, string> {
+export function getEUBanDays(
+  yearFrom: number,
+  yearTo: number,
+  includeSaturdays = false,
+): Map<string, string> {
   const bans = new Map<string, string>();
   if (yearFrom > yearTo) return bans;
+
+  // When Saturdays are wanted only Sunday (dow 0) is dropped; otherwise both
+  // weekend days are dropped (legacy default).
+  const isDropped = (dow: number): boolean =>
+    includeSaturdays ? dow === 0 : dow === 0 || dow === 6;
 
   for (let y = yearFrom; y <= yearTo; y++) {
     for (const [month, day, label] of FIXED_BANS) {
       const dd = new Date(y, month - 1, day);
-      const dow = dd.getDay();
-      if (dow !== 0 && dow !== 6) {
+      if (!isDropped(dd.getDay())) {
         bans.set(fmtIsoDateKey(dd), label);
       }
     }
@@ -104,8 +121,7 @@ export function getEUBanDays(yearFrom: number, yearTo: number): Map<string, stri
     for (const [offset, label] of EASTER_RELATIVE_BANS) {
       const dd2 = new Date(easter);
       dd2.setDate(dd2.getDate() + offset);
-      const dow2 = dd2.getDay();
-      if (dow2 !== 0 && dow2 !== 6) {
+      if (!isDropped(dd2.getDay())) {
         bans.set(fmtIsoDateKey(dd2), label);
       }
     }

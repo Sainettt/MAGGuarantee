@@ -2,10 +2,11 @@
 
 // Phase 4.5 — `<LimitsRow>` per docs/14-design-system.md L819.
 //
-// One row per (year × month). Two editable inputs (kmPerDay, ratePerKm)
-// with save-on-blur. Local state buffers the input while the user types so
-// each keystroke doesn't fire a request; on blur we diff against the
-// server value and PUT only if it changed.
+// One row per (year × month). Three editable inputs (kmPerDay, kmPerSaturday,
+// ratePerKm) with save-on-blur. Local state buffers the input while the user
+// types so each keystroke doesn't fire a request; on blur we diff against the
+// server value and PUT only if it changed. `kmPerSaturday` drives the opt-in
+// "odd-Saturday guarantee" (positive ⇒ ON for the month).
 //
 // Cell states (per DS):
 //   - idle    : default border
@@ -61,7 +62,7 @@ function formatNumeric(n: number | null | undefined): string {
 
 interface CellProps {
   initial: number | null;
-  field: 'kmPerDay' | 'ratePerKm';
+  field: 'kmPerDay' | 'ratePerKm' | 'kmPerSaturday';
   step: string;
   ariaLabel: string;
   onCommit: (value: number) => Promise<void>;
@@ -165,6 +166,7 @@ export function LimitsRow({
 }: LimitsRowProps) {
   const kmPerDay = row?.kmPerDay ?? null;
   const ratePerKm = row?.ratePerKm ?? null;
+  const kmPerSaturday = row?.kmPerSaturday ?? null;
   return (
     <tr className="border-b border-border last:border-b-0">
       <td className="px-3 py-2 h-12 align-middle font-semibold text-text">
@@ -177,6 +179,15 @@ export function LimitsRow({
           step="0.01"
           ariaLabel={`kmPerDay ${monthLabel}`}
           onCommit={(v) => onSave(year, month, { kmPerDay: v })}
+        />
+      </td>
+      <td className="px-3 py-2 h-12 align-middle">
+        <EditableCell
+          initial={kmPerSaturday}
+          field="kmPerSaturday"
+          step="0.01"
+          ariaLabel={`kmPerSaturday ${monthLabel}`}
+          onCommit={(v) => onSave(year, month, { kmPerSaturday: v })}
         />
       </td>
       <td className="px-3 py-2 h-12 align-middle">

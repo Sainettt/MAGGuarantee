@@ -127,6 +127,12 @@ export function LimitsView() {
                   scope="col"
                   className="px-3 py-2 text-left text-xs font-bold uppercase tracking-wider text-text-sub border-b border-border"
                 >
+                  {t('columns.kmPerSaturday')}
+                </th>
+                <th
+                  scope="col"
+                  className="px-3 py-2 text-left text-xs font-bold uppercase tracking-wider text-text-sub border-b border-border"
+                >
                   {t('columns.ratePerKm')}
                 </th>
                 <th
@@ -139,8 +145,9 @@ export function LimitsView() {
             </thead>
             <tbody>
               {/* §8.1 D — keep the static month labels live, skeleton only the
-                  value cells (km/day, rate, updatedAt) until the year's limits
-                  hydrate. Preserves the 12-row geometry — no layout jump. */}
+                  value cells (km/day, km/Saturday, rate, updatedAt) until the
+                  year's limits hydrate. Preserves the 12-row geometry — no
+                  layout jump. */}
               {isLoading &&
                 months.map(({ month, label }) => (
                   <tr
@@ -150,7 +157,7 @@ export function LimitsView() {
                     <td className="px-3 py-2 h-12 align-middle text-text font-medium">
                       {label}
                     </td>
-                    {[0, 1, 2].map((i) => (
+                    {[0, 1, 2, 3].map((i) => (
                       <td key={i} className="px-3 py-2 h-12 align-middle">
                         <Skeleton className="h-4 w-24" />
                       </td>

@@ -973,6 +973,7 @@
     "columns": {
       "month": "Miesiąc",
       "kmPerDay": "Km / dzień",
+      "kmPerSaturday": "Km / sobota",
       "ratePerKm": "Stawka € / km",
       "updatedAt": "Zaktualizowano"
     },
@@ -1682,8 +1683,10 @@
         "violationPeriodTooLong": "Okres wniosku nie może przekraczać {maxDays} dni (podano {periodDays} dni).",
         "boundaryHintTimeTo": "Data do ({date}) — {reason}: dzień nie jest liczony, więc godzina do nie wpływa na wyliczenie.",
         "boundaryHintTimeToWeekend": "Data do ({date}) — weekend: dzień nie jest liczony, więc godzina do nie wpływa na wyliczenie.",
+        "boundaryHintTimeToSaturday": "Data do ({date}) — sobota gwarancyjna: cały dzień jest liczony, więc godzina do nie wpływa na wyliczenie.",
         "boundaryHintTimeFrom": "Data od ({date}) — {reason}: dzień nie jest liczony, więc godzina od nie wpływa na wyliczenie.",
-        "boundaryHintTimeFromWeekend": "Data od ({date}) — weekend: dzień nie jest liczony, więc godzina od nie wpływa na wyliczenie."
+        "boundaryHintTimeFromWeekend": "Data od ({date}) — weekend: dzień nie jest liczony, więc godzina od nie wpływa na wyliczenie.",
+        "boundaryHintTimeFromSaturday": "Data od ({date}) — sobota gwarancyjna: cały dzień jest liczony, więc godzina od nie wpływa na wyliczenie."
       },
       "status": {
         "NA_WERYFIKACJI": "Weryfikacja",
@@ -1733,11 +1736,13 @@
       "kmPerDay": "Km/dz.",
       "ratePerKm": "€/km",
       "kmInMonth": "Km/mc",
+      "saturdays": "Soboty",
+      "saturdaysDetail": "{count} × {perSaturday} = {total} km",
       "empty": "Brak danych do podziału",
       "totalKmGuaranteed": "Razem (km gwarant.)",
       "excludedDays": "Dni wyłączone (święta / zakaz UE)",
       "excludedDaysCount": "{count, plural, =0 {brak} one {# dzień} few {# dni} many {# dni} other {# dni}}",
-      "excludedDaysHint": "Soboty i niedziele są zawsze wyłączone — powyżej tylko święta i zakazy ruchu, za które nie liczy się dopłata.",
+      "excludedDaysHint": "Niedziele są zawsze wyłączone; soboty — o ile nie są objęte gwarancją sobotnią. Powyżej tylko święta i zakazy ruchu, za które nie liczy się dopłata.",
       "showDetails": "Pokaż szczegóły",
       "hideDetails": "Ukryj szczegóły",
       "noExclusions": "Brak wyłączonych dni"

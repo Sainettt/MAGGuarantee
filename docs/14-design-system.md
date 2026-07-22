@@ -908,9 +908,16 @@ Audit-log хранится в Postgres (legacy `ensureAuditLogSheet` → Prisma 
 
 ### `<LimitsRow>` (admin → limity, inline-edit)
 
-Reference: legacy `ensureLimitySheet`. Таблица KM-гарантий per (carrier × vehicle × period).
+Таблица KM-гарантий per (**год × месяц**) на `/employee/limits`: селектор года в шапке + 12 строк (по одной на месяц) с gap-fill на фронте — месяцы без строки в БД рендерятся пустыми, первое сохранение делает upsert. **Нет** измерения carrier/vehicle — лимит глобальный на месяц.
 
-**Anatomy:** строка `<DataTable>`, но cell `limit_km` рендерится как `<TextField>` (Phase 2 input, `h-8 w-24 tabular-nums`) **встроенный** в ячейку. На focus — `border-brand`. На blur — save (POST), optimistic update value, при ошибке rollback + `<Toast variant="destructive">`.
+Reference: legacy `ensureLimitySheet` (в легаси модель была per `carrier × vehicle × period`; в новом приложении упрощена до `год × месяц`).
+
+**Anatomy:** строка таблицы с **тремя** редактируемыми ячейками (`<EditableCell>`, `h-9 w-28 tabular-nums`, PL-запятая как десятичный разделитель):
+- **Km/dzień** (`kmPerDay`, `step=0.01`),
+- **Km/sobota** (`kmPerSaturday`, `step=0.01`) — помесячный опт-ин субботней гарантии: `> 0` ⇒ ВКЛ для месяца, пусто/0 ⇒ ВЫКЛ (см. [01-overview.md](01-overview.md)),
+- **rate** (`ratePerKm`, «Stawka € / km», `step=0.0001`).
+
+Порядок колонок: `Miesiąc | Km/dzień | Km/sobota | rate | Zaktualizowano`. Каждая ячейка — save-on-blur (`PUT /limits/:yearMonth`, partial body — шлётся только изменённое поле); при пустом/невалидном вводе значение откатывается к последнему валидному.
 
 **Состояния cell:**
 - `idle` — обычный input.
@@ -918,9 +925,7 @@ Reference: legacy `ensureLimitySheet`. Таблица KM-гарантий per (c
 - `success` (200ms after save) — короткая зелёная полоска под input `bg-success h-0.5`, fade-out.
 - `error` — `border-danger`, value reverted, toast.
 
-**Прочие колонки** — read-only: carrier, vehicle plate, period (MM/YYYY), updatedAt, updatedBy.
-
-**Add-row:** в footer таблицы кнопка `<Button variant="ghost"><Plus /> Dodaj limit</Button>` → открывает `<Sheet>` с RHF-формой (carrier select, vehicle select, period, limit_km).
+**Прочие колонки** — read-only: `Zaktualizowano` (updatedAt). Месяцы года без данных показывают пустые ячейки-инпуты — отдельной «add-row» кнопки нет, сетка всегда 12 строк.
 
 ### `<UsersTable>` (admin → users CRUD)
 
@@ -964,7 +969,7 @@ Reference: legacy `ensureUsersSheet`. Стандартный `<DataTable>` Phase
 - [ ] `<ClaimsTable>` использует `<DataTable>` Phase 2; колонки в порядке таблицы выше; full-row click → modal.
 - [ ] ⚠️ **SUPERSEDED Phase 7.1 (§6.5):** `<ClaimVerificationModal>` теперь = центральная `<Dialog max-w-4xl>` с `mode: 'view' | 'edit'`, **не** `<Sheet>`. Сохраняются: **в секции Autoryzacja НЕТ FileUpload компонента**; live recalc badge debounce 300ms; live dopłata пересчёт при правке фактов. Раскладку (факты → dopłata → decyzja), парные строки и Historia/Autoryzacja читать из §6.5.
 - [ ] `<AuditRow>` имеет `default` и `compact` варианты; deterministic avatar-color hash; expand → JSON-diff `<pre>`.
-- [ ] `<LimitsRow>` — inline TextField в cell, save-on-blur, optimistic update, rollback + toast on error.
+- [ ] `<LimitsRow>` — три inline-ячейки (`kmPerDay` / `kmPerSaturday` / `ratePerKm`), save-on-blur, optimistic update, rollback + toast on error.
 - [ ] `<UsersTable>` — role-badge color map; kebab actions; deactivate ≠ delete.
 - [ ] `lib/nav.config.ts` — pracownik видит ровно `[Dashboard, Wnioski]`, не больше.
 - [ ] **Ноль новых color/radius/shadow tokens** в Tailwind config относительно Phase 2.
@@ -1177,6 +1182,12 @@ Compact read-only table fed by server preview response. Columns:
 | `kmInMonth` | "Km/mc" | "Km/mo" | integer with thousand-sep | `text-right tabular-nums font-semibold` |
 
 Headers were **abbreviated in Phase 3.1** (`Km/dzień`→`Km/dz.`, `Stawka €/km`→`€/km`, `Km w mc`→`Km/mc`, total `…(km gwarantowane)`→`…(km gwarant.)`) so the 5-column table never wraps headers even when squeezed into the narrow employee claim modal. i18n keys unchanged: `carrier.breakdown.*` in `messages/pl.json` + `en.json`.
+
+> **Семантика колонок сместилась (субботняя гарантия).** `workingDays` — **теперь только будни** (пн–пт); `kmInMonth` — **гранд-тотал** = `round(workingDays × kmPerDay) + kmFromSaturdays`. Полное число дней месяца = `workingDays + saturdaysCounted`.
+
+**Субботняя суб-строка (odd-Saturday guarantee).** Под строкой месяца, у которого `saturdaysCounted > 0`, рендерится дополнительная строка **«SOBOTY {n} × {km} = {total} km»** (i18n `carrier.breakdown.saturdays` = «Soboty» + `saturdaysDetail` = `{count} × {perSaturday} = {total} km`) — в **обеих** раскладках (5-колоночная таблица И stacked-cards). При `saturdaysCounted = 0` строка **не** показывается: месяц без субботней гарантии выглядит байт-в-байт как раньше. Подсказка `carrier.breakdown.excludedDaysHint` переформулирована — «Niedziele są zawsze wyłączone; soboty — o ile nie są objęte gwarancją sobotnią. …» (воскресенья исключены всегда; субботы — если не покрыты субботней гарантией). Зачётная суббота, попавшая на EU-ban/праздник, уходит в список excluded-дней (не оплачивается, не считается днём).
+
+**Граничный хинт на форме претензии (`/carrier/claims/new`).** Под полями Godzina od / Godzina do хинт «dzień nie jest liczony, więc godzina … nie wpływa na wyliczenie» получает отдельный вариант для **зачётной субботы**: такой день считается **целиком** (без пропорции по часам), поэтому время всё равно не влияет — но по иной причине, чем для выходного/праздника (те «не считаются вовсе»). `hoursAdjusted` режет только будни.
 
 #### Responsive behavior (canonical — CONTAINER queries, not viewport breakpoints)
 

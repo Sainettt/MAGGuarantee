@@ -35,6 +35,13 @@ export interface KmCalcServiceInput {
  */
 const FALLBACK_KM_PER_DAY = 540;
 const FALLBACK_RATE_PER_KM = 0.5;
+/**
+ * Fallback for the odd-Saturday guarantee. `0` keeps the feature OFF for any
+ * month with no `MonthlyLimit.kmPerSaturday` — Saturdays behave like ordinary
+ * weekends. There is no `AppConfig` override for this today; the value lives on
+ * the `MonthlyLimit` row (admin seeds it per-month).
+ */
+const FALLBACK_KM_PER_SATURDAY = 0;
 
 const APP_CONFIG_KEY_KM_PER_DAY = 'km_dziennie_default';
 const APP_CONFIG_KEY_RATE_PER_KM = 'stawka_eur_default';
@@ -117,6 +124,7 @@ export class KmCalcService {
         month: true,
         kmPerDay: true,
         ratePerKm: true,
+        kmPerSaturday: true,
       },
     });
 
@@ -124,12 +132,17 @@ export class KmCalcService {
     for (const row of rows) {
       const km = decimalToNumber(row.kmPerDay);
       const rate = decimalToNumber(row.ratePerKm);
-      // Skip rows where either value is missing — the engine's fallback
-      // logic will substitute. Mirrors `Code.gs:850-858`.
+      // Skip rows where km OR rate is missing — the engine's fallback logic
+      // will substitute. Mirrors `Code.gs:850-858`. A missing `kmPerSaturday`
+      // must NOT trigger the skip: it is OPT-IN and simply collapses to 0 (the
+      // engine treats that as "feature OFF" for the month).
       if (km === null || rate === null) continue;
+      const sat = decimalToNumber(row.kmPerSaturday);
       out[fmtYearMonth(row.year, row.month)] = {
         kmPerDay: km,
         ratePerKm: rate,
+        // Omit when absent → engine's `resolveMonthLimit` folds undefined → 0.
+        ...(sat !== null ? { kmPerSaturday: sat } : {}),
       };
     }
     return out;
@@ -173,7 +186,9 @@ export class KmCalcService {
         }
       }
     }
-    return { kmPerDay, ratePerKm };
+    // `kmPerSaturday` has no AppConfig override — it is a per-`MonthlyLimit`
+    // opt-in, so the global fallback keeps the feature OFF (0).
+    return { kmPerDay, ratePerKm, kmPerSaturday: FALLBACK_KM_PER_SATURDAY };
   }
 }
 

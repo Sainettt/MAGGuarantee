@@ -29,6 +29,7 @@ function makeRow(overrides: Partial<MonthlyLimitRow> = {}): MonthlyLimitRow {
     month: 5,
     kmPerDay: 220,
     ratePerKm: 0.85,
+    kmPerSaturday: null,
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,
@@ -109,6 +110,7 @@ describe('LimitsService.listForYear', () => {
         month: 1,
         kmPerDay: 200,
         ratePerKm: 0.8,
+        kmPerSaturday: null,
         createdAt: NOW.toISOString(),
         updatedAt: NOW.toISOString(),
       },
@@ -118,6 +120,7 @@ describe('LimitsService.listForYear', () => {
         month: 2,
         kmPerDay: null,
         ratePerKm: 0.9,
+        kmPerSaturday: null,
         createdAt: NOW.toISOString(),
         updatedAt: NOW.toISOString(),
       },
@@ -196,6 +199,7 @@ describe('LimitsService.upsert', () => {
       month: 5,
       kmPerDay: 200,
       ratePerKm: 0.8,
+      kmPerSaturday: null,
     });
     // `ratePerKm` omitted → not written by upsert (Prisma keeps existing value).
     expect(captured.upsert).toEqual({
@@ -204,6 +208,35 @@ describe('LimitsService.upsert', () => {
       kmPerDay: 250,
     });
     expect(result.kmPerDay).toBe(250);
+  });
+
+  it('writes kmPerSaturday through to the repository and DTO', async () => {
+    const captured: { upsert?: UpsertMonthlyLimitData } = {};
+    const repo = makeRepo({
+      existing: null,
+      upsertResult: makeRow({
+        year: 2026,
+        month: 8,
+        kmPerDay: 540,
+        ratePerKm: 0.5,
+        kmPerSaturday: 270,
+      }),
+      captured,
+    });
+    const svc = new LimitsService(repo);
+
+    const { result } = await withAuditContext(() =>
+      svc.upsert('2026-08', { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 270 }),
+    );
+
+    expect(captured.upsert).toEqual({
+      year: 2026,
+      month: 8,
+      kmPerDay: 540,
+      ratePerKm: 0.5,
+      kmPerSaturday: 270,
+    });
+    expect(result.kmPerSaturday).toBe(270);
   });
 
   it('rejects an invalid yearMonth (422)', async () => {

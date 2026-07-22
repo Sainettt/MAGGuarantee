@@ -57,6 +57,7 @@ export class LimitsService {
         month: existing.month,
         kmPerDay: existing.kmPerDay,
         ratePerKm: existing.ratePerKm,
+        kmPerSaturday: existing.kmPerSaturday,
       });
     }
 
@@ -65,6 +66,9 @@ export class LimitsService {
       month: parsed.month,
       ...(dto.kmPerDay !== undefined ? { kmPerDay: dto.kmPerDay } : {}),
       ...(dto.ratePerKm !== undefined ? { ratePerKm: dto.ratePerKm } : {}),
+      ...(dto.kmPerSaturday !== undefined
+        ? { kmPerSaturday: dto.kmPerSaturday }
+        : {}),
     });
     return this._toDto(row);
   }
@@ -105,6 +109,7 @@ export class LimitsService {
       month: row.month,
       kmPerDay: row.kmPerDay,
       ratePerKm: row.ratePerKm,
+      kmPerSaturday: row.kmPerSaturday,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };

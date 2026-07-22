@@ -390,10 +390,32 @@ export type ExcludedDayDto = z.infer<typeof ExcludedDaySchema>;
 
 export const MonthBreakdownSchema = z.object({
   yearMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+  // WEEKDAY days only (Mon–Fri, post EU-ban / fraction / hoursAdjusted).
+  // Total days for the month = `workingDays + saturdaysCounted`.
   workingDays: z.number().nonnegative(),
   kmPerDay: z.number().nonnegative(),
   ratePerKm: z.number().nonnegative(),
+  // Odd-Saturday guarantee fields — `.optional().default(0)` so old persisted
+  // `Claim.breakdown` JSONB rows (written before the feature) parse cleanly and
+  // backfill to 0. New rows always include them. Mirror of `MonthBreakdown` in
+  // `domain/km-calc.ts`.
+  /** Whole qualifying ("odd") Saturdays credited this month (integer, ≥0). */
+  saturdaysCounted: z.number().nonnegative().default(0),
+  /** Guarantee km per qualifying Saturday applied this month (`0` = feature OFF). */
+  kmPerSaturday: z.number().nonnegative().default(0),
+  /** km guaranteed from Saturdays this month (= round(saturdaysCounted * kmPerSaturday)). */
+  kmFromSaturdays: z.number().nonnegative().default(0),
+  // Grand-total km guaranteed for the month = round(workingDays*kmPerDay) + kmFromSaturdays.
   kmInMonth: z.number().nonnegative(),
+  /**
+   * ISO dates of the CREDITED qualifying Saturdays this month (ascending).
+   * Mirror of `MonthBreakdown.saturdayDays` in `domain/km-calc.ts`; symmetric
+   * with `excludedDays` (a qualifying Saturday on a ban is in `excludedDays`,
+   * not here). `.default([])` so old persisted `Claim.breakdown` JSONB rows
+   * (written before the feature) parse cleanly. `IsoDateSchema` — same as
+   * `ExcludedDaySchema.date`.
+   */
+  saturdayDays: z.array(IsoDateSchema).default([]),
   // Optional + default so old persisted `Claim.breakdown` JSONB rows (which
   // pre-date this field) still parse cleanly. New rows always include it.
   excludedDays: z.array(ExcludedDaySchema).default([]),

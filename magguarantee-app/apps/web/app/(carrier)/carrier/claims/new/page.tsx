@@ -430,15 +430,37 @@ export default function NewClaimPage() {
     return map;
   }, [previewQ.data]);
 
+  // Credited ("odd") Saturdays — paid in full by the odd-Saturday guarantee.
+  // The engine surfaces the exact ISO dates in `saturdayDays` (a Saturday that
+  // fell on an EU ban is NOT here — it lands in `excludedDays` instead), so the
+  // client never re-derives the odd/even rule.
+  const creditedSaturdays = useMemo<Set<string>>(() => {
+    const set = new Set<string>();
+    const months = previewQ.data?.breakdown?.breakdown ?? [];
+    for (const m of months) {
+      for (const d of m.saturdayDays ?? []) {
+        set.add(d);
+      }
+    }
+    return set;
+  }, [previewQ.data]);
+
   function boundaryHint(
     iso: string | undefined,
     holidayKey: 'boundaryHintTimeFrom' | 'boundaryHintTimeTo',
+    saturdayKey: 'boundaryHintTimeFromSaturday' | 'boundaryHintTimeToSaturday',
     weekendKey: 'boundaryHintTimeFromWeekend' | 'boundaryHintTimeToWeekend',
   ): string | null {
     if (!iso) return null;
     const label = excludedByDate.get(iso);
     if (label) {
       return tForm(holidayKey, { date: formatDayMonth(iso), reason: label });
+    }
+    // A credited Saturday is a weekend day by `isWeekendIso`, but it IS counted
+    // (paid in full) — so it must be checked BEFORE the generic weekend branch,
+    // whose "day not counted" copy would be wrong for it.
+    if (creditedSaturdays.has(iso)) {
+      return tForm(saturdayKey, { date: formatDayMonth(iso) });
     }
     if (isWeekendIso(iso)) {
       return tForm(weekendKey, { date: formatDayMonth(iso) });
@@ -449,11 +471,13 @@ export default function NewClaimPage() {
   const timeFromHint = boundaryHint(
     derivedDateStart,
     'boundaryHintTimeFrom',
+    'boundaryHintTimeFromSaturday',
     'boundaryHintTimeFromWeekend',
   );
   const timeToHint = boundaryHint(
     derivedDateEnd,
     'boundaryHintTimeTo',
+    'boundaryHintTimeToSaturday',
     'boundaryHintTimeToWeekend',
   );
 

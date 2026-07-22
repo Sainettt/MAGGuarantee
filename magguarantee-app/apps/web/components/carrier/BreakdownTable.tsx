@@ -162,13 +162,20 @@ function TableMonthRow({
   row: MonthBreakdownDto;
   locale: string;
 }) {
+  const t = useTranslations('carrier.breakdown');
   const [open, setOpen] = useState(false);
   // Legacy claims persisted before `excludedDays` was added may lack the field.
   const excluded = row.excludedDays ?? [];
+  // Odd-Saturday guarantee — only surfaced when a qualifying Saturday was
+  // actually credited this month. `workingDays` is weekdays-only, so this line
+  // explains why `kmInMonth` exceeds `workingDays × kmPerDay`.
+  const hasSaturdays = row.saturdaysCounted > 0;
 
   return (
     <>
-      <tr className="border-b border-border last:border-b-0">
+      {/* When a Saturday sub-row follows, drop the month row's bottom border so
+          the note reads as part of the same month block. */}
+      <tr className={hasSaturdays ? '' : 'border-b border-border last:border-b-0'}>
         <td className="px-2 py-2 h-10 align-middle">
           <MonthToggle
             row={row}
@@ -190,6 +197,24 @@ function TableMonthRow({
           {formatInt(row.kmInMonth)}
         </td>
       </tr>
+      {hasSaturdays && (
+        <tr className="border-b border-border last:border-b-0">
+          <td colSpan={5} className="px-2 pb-2 pt-0">
+            <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 pl-[22px] text-xs text-text-sub">
+              <span className="font-semibold uppercase tracking-wide">
+                {t('saturdays')}
+              </span>
+              <span className="tabular-nums">
+                {t('saturdaysDetail', {
+                  count: String(row.saturdaysCounted),
+                  perSaturday: formatInt(row.kmPerSaturday),
+                  total: formatInt(row.kmFromSaturdays),
+                })}
+              </span>
+            </div>
+          </td>
+        </tr>
+      )}
       {excluded.length > 0 && open && (
         <tr className="border-b border-border last:border-b-0 bg-bg/60">
           <td colSpan={5} className="px-3 py-3">
@@ -215,6 +240,7 @@ function CardMonth({
   const t = useTranslations('carrier.breakdown');
   const [open, setOpen] = useState(false);
   const excluded = row.excludedDays ?? [];
+  const hasSaturdays = row.saturdaysCounted > 0;
 
   return (
     <li className="rounded-md border border-border p-3">
@@ -247,6 +273,18 @@ function CardMonth({
             {formatInt(row.kmInMonth)}
           </dd>
         </div>
+        {hasSaturdays && (
+          <div className="col-span-2 flex items-baseline justify-between gap-2 border-t border-border/60 pt-2">
+            <dt className="text-text-sub">{t('saturdays')}</dt>
+            <dd className="tabular-nums text-text">
+              {t('saturdaysDetail', {
+                count: String(row.saturdaysCounted),
+                perSaturday: formatInt(row.kmPerSaturday),
+                total: formatInt(row.kmFromSaturdays),
+              })}
+            </dd>
+          </div>
+        )}
       </dl>
       {excluded.length > 0 && open && (
         <div className="mt-3 border-t border-border pt-3">

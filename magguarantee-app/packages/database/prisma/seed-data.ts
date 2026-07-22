@@ -130,6 +130,11 @@ export const SEED_TRAILER_TYPES: SeedTrailerType[] = [
 
 export const MONTHLY_LIMIT_KM_PER_DAY = '540';
 export const MONTHLY_LIMIT_RATE_PER_KM = '0.5';
+// Guarantee km credited for a single qualifying ("odd") Saturday. Placeholder
+// fake-data value (half of kmPerDay=540) — carries NO business meaning, just
+// makes the feature demoable. NULL would be treated as 0 by km-calc; we seed a
+// non-null value so the odd-Saturday credit shows up out of the box.
+export const MONTHLY_LIMIT_KM_PER_SATURDAY = '270';
 export const MONTHLY_LIMIT_YEARS = [2026, 2027];
 
 // ─── Seed functions ─────────────────────────────────────
@@ -179,6 +184,7 @@ export async function seedMonthlyLimits(prisma: PrismaClient): Promise<number> {
           month,
           kmPerDay: MONTHLY_LIMIT_KM_PER_DAY,
           ratePerKm: MONTHLY_LIMIT_RATE_PER_KM,
+          kmPerSaturday: MONTHLY_LIMIT_KM_PER_SATURDAY,
         },
         // Don't overwrite values on rerun — admin may have tuned them.
         update: {},

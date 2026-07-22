@@ -264,6 +264,8 @@
 | `hoursAdjustedValue` | currently applied korekta godzin — drives km-calc (`korektaDni = hoursAdjustedValue / 24`); верификатор PATCH может править только этот столбец, `origHoursAdjusted` остаётся неизменным |
 | `periodAdjustedByVerifier` | `Boolean @default(false)` — маркер «период (`dateStart/dateEnd`) правил pracownik». Граница авто-пересчёта: если `true`, переход выезда `→ zjechal` НЕ перетирает период. См. §0″ [20](20-phase-7-eksport-weryfikator.md) |
 
+> **`breakdown` (per-month JSON).** Каждая месячная строка несёт: `workingDays` (**теперь только будни**, пн–пт), `kmPerDay`, `ratePerKm`, `kmInMonth`, `excludedDays` и субботние поля субботней гарантии — `saturdaysCounted` (кол-во зачтённых нечётных суббот, целое ≥0), `kmPerSaturday` (км за субботу; `0` ⇒ фича для месяца выключена), `kmFromSaturdays` (= `round(saturdaysCounted × kmPerSaturday)`), `saturdayDays` (ISO-даты зачтённых суббот). Полное число дней месяца = `workingDays + saturdaysCounted`; `kmInMonth` — **гранд-тотал** = `round(workingDays × kmPerDay) + kmFromSaturdays` (Σ `kmInMonth` = `kmGuaranteed`). Зачётные субботы засчитываются как дни (`drivenDays`/`rawTotalDays`) и потому влияют на порог авторизации Максима и средний км/день. Форма — `MonthBreakdownSchema`, см. [13-api-design.md](13-api-design.md).
+
 **Инварианты (data-model contract):**
 - `nrZgl` уникален глобально, генерируется атомарно через `ClaimSequence` (per `YY-MM`).
 - При переходе в `REKLAMACJA` копируются `dateStart/dateEnd/mileage` в `origDateStart/origDateEnd/origMileage` (frozen mirror — см. [19-known-quirks.md](19-known-quirks.md#reklamacja-mirror)).
@@ -310,7 +312,7 @@
 
 ### `MonthlyLimit` — лимиты на месяц
 
-Двумерная таблица (год × месяц). На каждый месяц — `kmPerDay` (дневной лимит км) и `ratePerKm` (ставка EUR/km). Используется в расчёте `calcKmGwarantPerMonth`.
+Двумерная таблица (год × месяц). На каждый месяц — `kmPerDay` (дневной лимит км), `ratePerKm` (ставка EUR/km) и опц. `kmPerSaturday` (км за одну зачётную субботу). Используется в расчёте `calcKmGwarantPerMonth`.
 
 | Поле |
 |---|
@@ -318,8 +320,11 @@
 | `month` (1..12) |
 | `kmPerDay` |
 | `ratePerKm` |
+| `kmPerSaturday` (опц.) |
 
 Если для месяца запись пустая — fallback на `AppConfig.km_dziennie_default` (540) и `AppConfig.stawka_eur_default` (0.5).
+
+`kmPerSaturday` — километры за **одну зачётную нечётную субботу**; оцениваются по существующей месячной ставке `ratePerKm` (отдельной EUR-ставки нет). `NULL`/`0` ⇒ субботняя гарантия для месяца выключена (fallback `0` считается в km-calc-слое, **не** в БД). Опт-ин помесячный — суббота даёт км и день только при `kmPerSaturday > 0`. См. шаг «зачётные нечётные субботы» в [01-overview.md](01-overview.md).
 
 **Инвариант:** unique `(year, month)`.
 

@@ -92,7 +92,12 @@ function makeBreakdown(): KmCalcBreakdown {
         workingDays: 20,
         kmPerDay: 540,
         ratePerKm: 0.5,
+        // Odd-Saturday feature OFF in this fixture (no kmPerSaturday).
+        saturdaysCounted: 0,
+        kmPerSaturday: 0,
+        kmFromSaturdays: 0,
         kmInMonth: 10_800,
+        saturdayDays: [],
         excludedDays: [],
       },
     ],

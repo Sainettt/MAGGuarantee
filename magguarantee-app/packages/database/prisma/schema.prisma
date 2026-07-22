@@ -1057,11 +1057,16 @@ model GuaranteeIdleEpisode {
 // ─── LIMITS (LIMITY KM) ─────────────────────────────────
 
 model MonthlyLimit {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  year      Int
-  month     Int // 1..12
-  kmPerDay  Decimal? @db.Decimal(8, 2)
-  ratePerKm Decimal? @db.Decimal(6, 4)
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  year          Int
+  month         Int // 1..12
+  kmPerDay      Decimal? @db.Decimal(8, 2)
+  ratePerKm     Decimal? @db.Decimal(6, 4)
+  // Guarantee km credited for a single qualifying ("odd") Saturday. NULL is
+  // treated as 0 by km-calc (fallback owned by the api, NOT the DB — the column
+  // just stores the value, no default). Same precision as `kmPerDay`
+  // (Decimal(8,2); km is Decimal, never Float).
+  kmPerSaturday Decimal? @db.Decimal(8, 2)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

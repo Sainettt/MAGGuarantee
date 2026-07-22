@@ -973,6 +973,7 @@
     "columns": {
       "month": "Month",
       "kmPerDay": "Km / day",
+      "kmPerSaturday": "Km / Saturday",
       "ratePerKm": "Rate € / km",
       "updatedAt": "Updated"
     },
@@ -1682,8 +1683,10 @@
         "violationPeriodTooLong": "The claim period cannot exceed {maxDays} days (given: {periodDays} days).",
         "boundaryHintTimeTo": "Date to ({date}) — {reason}: this day is not counted, so the end time does not affect the calculation.",
         "boundaryHintTimeToWeekend": "Date to ({date}) — weekend: this day is not counted, so the end time does not affect the calculation.",
+        "boundaryHintTimeToSaturday": "Date to ({date}) — guaranteed Saturday: the whole day is counted, so the end time does not affect the calculation.",
         "boundaryHintTimeFrom": "Date from ({date}) — {reason}: this day is not counted, so the start time does not affect the calculation.",
-        "boundaryHintTimeFromWeekend": "Date from ({date}) — weekend: this day is not counted, so the start time does not affect the calculation."
+        "boundaryHintTimeFromWeekend": "Date from ({date}) — weekend: this day is not counted, so the start time does not affect the calculation.",
+        "boundaryHintTimeFromSaturday": "Date from ({date}) — guaranteed Saturday: the whole day is counted, so the start time does not affect the calculation."
       },
       "status": {
         "NA_WERYFIKACJI": "Verifying",
@@ -1733,11 +1736,13 @@
       "kmPerDay": "Km/day",
       "ratePerKm": "€/km",
       "kmInMonth": "Km/mo",
+      "saturdays": "Saturdays",
+      "saturdaysDetail": "{count} × {perSaturday} = {total} km",
       "empty": "No data to break down",
       "totalKmGuaranteed": "Total (guaranteed km)",
       "excludedDays": "Excluded days (holidays / EU ban)",
       "excludedDaysCount": "{count, plural, =0 {none} one {# day} other {# days}}",
-      "excludedDaysHint": "Saturdays and Sundays are always excluded — only national holidays and EU truck bans are listed above, since those are why a workday didn't pay out.",
+      "excludedDaysHint": "Sundays are always excluded; Saturdays too, unless covered by the Saturday guarantee. Only national holidays and EU truck bans are listed above, since those are why a workday didn't pay out.",
       "showDetails": "Show details",
       "hideDetails": "Hide details",
       "noExclusions": "No excluded days"

@@ -26,6 +26,13 @@ export const MonthlyLimitDtoSchema = z.object({
   month: z.number().int().min(1).max(12),
   kmPerDay: z.number().nullable(),
   ratePerKm: z.number().nullable(),
+  /**
+   * Guarantee km credited for a single qualifying ("odd" — 1st/3rd/5th)
+   * Saturday of the month. Nullable: `null` (or `0`) turns the odd-Saturday
+   * feature OFF for the month (km-calc then treats Saturdays as ordinary,
+   * fully-excluded weekends). Column is `Decimal(8,2)`, surfaced as `number`.
+   */
+  kmPerSaturday: z.number().nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -61,11 +68,24 @@ export const UpdateMonthlyLimitSchema = z
   .object({
     kmPerDay: z.coerce.number().positive().optional(),
     ratePerKm: z.coerce.number().positive().optional(),
+    /**
+     * Guarantee km per qualifying Saturday. Positive turns the odd-Saturday
+     * feature ON for the month. To turn it OFF admins clear the whole row (or
+     * a future explicit "disable" path) — a `PUT` with a positive value only
+     * ever raises it, matching the positive-only `kmPerDay`/`ratePerKm` inputs.
+     */
+    kmPerSaturday: z.coerce.number().positive().optional(),
   })
-  .refine((v) => v.kmPerDay !== undefined || v.ratePerKm !== undefined, {
-    message:
-      'At least one of `kmPerDay` or `ratePerKm` must be provided.',
-  });
+  .refine(
+    (v) =>
+      v.kmPerDay !== undefined ||
+      v.ratePerKm !== undefined ||
+      v.kmPerSaturday !== undefined,
+    {
+      message:
+        'At least one of `kmPerDay`, `ratePerKm`, or `kmPerSaturday` must be provided.',
+    },
+  );
 export type UpdateMonthlyLimitDto = z.infer<typeof UpdateMonthlyLimitSchema>;
 
 /**

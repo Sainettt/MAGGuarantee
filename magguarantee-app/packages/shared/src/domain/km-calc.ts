@@ -19,15 +19,34 @@ export interface MonthLimit {
   kmPerDay: number;
   /** Rate in EUR per km (e.g. 0.5). */
   ratePerKm: number;
+  /**
+   * Guarantee km credited for a single qualifying ("odd" — 1st/3rd/5th)
+   * Saturday of this calendar month. OPT-IN: when omitted, `<= 0`, or `NaN`,
+   * the feature is OFF for the month and Saturdays behave exactly as before
+   * (fully excluded — no km, no day, no `excludedDays` entry). When `> 0`,
+   * each qualifying Saturday is credited this many km (priced at the SAME
+   * `ratePerKm` as weekdays) and counts as one whole day. Optional so the
+   * pre-existing fixture suite compiles unchanged (undefined ⇒ 0).
+   */
+  kmPerSaturday?: number;
 }
 
 /**
  * One EU heavy-vehicle ban day that fell within the claim period and was
- * dropped from the working-day count. Weekends are intentionally NOT
- * surfaced here — they're universal trucking knowledge and would dominate
- * the list. Only the non-obvious exclusions (national holidays,
- * Easter-relative, country-specific bans) are listed so the carrier can
- * see WHY a particular weekday didn't pay.
+ * dropped from the count. Ordinary weekends are intentionally NOT surfaced
+ * here — they're universal trucking knowledge and would dominate the list.
+ * Only the non-obvious exclusions (national holidays, Easter-relative,
+ * country-specific bans) are listed so the carrier can see WHY a particular
+ * day didn't pay.
+ *
+ * Two kinds of day land here:
+ *  - a WEEKDAY that hit a ban/holiday (the classic case), and
+ *  - a QUALIFYING ("odd") Saturday, when the odd-Saturday feature is ON for
+ *    the month (`kmPerSaturday > 0`), that fell on a ban/holiday — it is not
+ *    paid and not counted as a day, so it is surfaced here with its label.
+ *
+ * Silently-skipped Saturdays (feature OFF, or an even/non-qualifying Saturday)
+ * are NOT surfaced — they behave like ordinary weekends.
  */
 export interface ExcludedDay {
   /** ISO calendar date `YYYY-MM-DD`. */
@@ -45,27 +64,65 @@ export interface ExcludedDay {
 export interface MonthBreakdown {
   /** `YYYY-MM` — sortable. */
   yearMonth: string;
-  /** Working days that fell into this month (after weekend / EU-ban / fraction). */
+  /**
+   * WEEKDAY working days that fell into this month (Mon–Fri, after EU-ban /
+   * fraction / hoursAdjusted). Does NOT include qualifying Saturdays — those
+   * live in `saturdaysCounted`. Total days for the month =
+   * `workingDays + saturdaysCounted`.
+   */
   workingDays: number;
   /** Daily limit applied for this month. */
   kmPerDay: number;
-  /** EUR/km rate applied for this month. */
+  /** EUR/km rate applied for this month (weekdays AND Saturdays share it). */
   ratePerKm: number;
-  /** km guaranteed for this month (= round(workingDays * kmPerDay)). */
+  /**
+   * Number of qualifying ("odd") Saturdays credited in this month. `0` when the
+   * feature is OFF (`kmPerSaturday <= 0`) or none fell in the period. Always a
+   * whole integer — Saturdays are never fractioned by `timeFrom`/`timeTo`.
+   */
+  saturdaysCounted: number;
+  /**
+   * Guarantee km per qualifying Saturday applied for this month (`0` when the
+   * feature is OFF). Surfaced so the caller can render / audit the Saturday math.
+   */
+  kmPerSaturday: number;
+  /** km guaranteed from Saturdays this month (= round(saturdaysCounted * kmPerSaturday)). */
+  kmFromSaturdays: number;
+  /**
+   * Grand-total km guaranteed for this month =
+   * `round(workingDays * kmPerDay) + kmFromSaturdays`. Summing `kmInMonth`
+   * across the breakdown yields `kmGuaranteed`.
+   */
   kmInMonth: number;
-  /** Holiday days from this month that were dropped from the count. */
+  /**
+   * ISO `YYYY-MM-DD` of each CREDITED (paid) qualifying Saturday in this month
+   * — odd ordinal AND `kmPerSaturday > 0` AND NOT on an EU-ban. Ascending
+   * (natural walk order). Symmetric with `excludedDays`: a qualifying Saturday
+   * that landed on a ban is NOT here (it is in `excludedDays`); even /
+   * feature-off Saturdays appear in neither. Invariant:
+   * `saturdayDays.length === saturdaysCounted`. Surfaced so the carrier form
+   * can flag a boundary Saturday as "counted" without re-deriving the ordinal
+   * rule client-side.
+   */
+  saturdayDays: string[];
+  /** Holiday days (weekdays + qualifying Saturdays on a ban) dropped from the count. */
   excludedDays: ExcludedDay[];
 }
 
 export interface KmCalcResult {
-  /** Sum of working days across all months (rounded to 2 decimals). */
+  /**
+   * Sum of counted days across all months (rounded to 2 decimals) =
+   * adjusted weekday days + qualifying Saturdays. `hoursAdjusted` reduces
+   * only the weekday part; Saturdays are whole and untouched by the
+   * correction.
+   */
   totalDays: number;
   /**
-   * Pre-adjustment total working days (sum of monthly raw days before
-   * `hoursAdjusted` is applied). Equals `totalDays` when no adjustment.
-   * Surfaced so the UI can show both "surowych" (raw) and "zaliczonych"
-   * (after correction) hours side-by-side per docs/14-design-system.md
-   * §Phase 3.1 "HoursReadout". Same 2-dp rounding as totalDays.
+   * Pre-adjustment total days (raw weekday days before `hoursAdjusted` +
+   * qualifying Saturdays). Equals `totalDays` when no adjustment. Surfaced so
+   * the UI can show both "surowych" (raw) and "zaliczonych" (after correction)
+   * hours side-by-side per docs/14-design-system.md §Phase 3.1 "HoursReadout".
+   * Same 2-dp rounding as totalDays.
    */
   rawTotalDays: number;
   /** Sum of `kmInMonth` across the breakdown (already rounded). */
@@ -179,13 +236,35 @@ function resolveMonthLimit(
   fallback: MonthLimit,
   year: number,
   monthZeroBased: number,
-): MonthLimit {
+): Required<MonthLimit> {
   const key = fmtYearMonth(year, monthZeroBased);
   const cfg = limits[key];
   return {
     kmPerDay: cfg && Number.isFinite(cfg.kmPerDay) ? cfg.kmPerDay : fallback.kmPerDay,
     ratePerKm: cfg && Number.isFinite(cfg.ratePerKm) ? cfg.ratePerKm : fallback.ratePerKm,
+    // OPT-IN: `kmPerSaturday` falls back through cfg → fallback → 0. A missing
+    // or non-finite value collapses to 0, which turns the feature OFF for the
+    // month (Saturdays behave like ordinary weekends — legacy behavior).
+    kmPerSaturday: resolveKmPerSaturday(cfg?.kmPerSaturday, fallback.kmPerSaturday),
   };
+}
+
+/** cfg → fallback → 0, dropping non-finite / negative values to 0. */
+function resolveKmPerSaturday(
+  cfgValue: number | undefined,
+  fallbackValue: number | undefined,
+): number {
+  if (typeof cfgValue === 'number' && Number.isFinite(cfgValue) && cfgValue > 0) {
+    return cfgValue;
+  }
+  if (
+    typeof fallbackValue === 'number' &&
+    Number.isFinite(fallbackValue) &&
+    fallbackValue > 0
+  ) {
+    return fallbackValue;
+  }
+  return 0;
 }
 
 /**
@@ -221,15 +300,38 @@ function fractionForDay(opts: {
 interface InternalMonthAcc {
   year: number;
   monthZeroBased: number;
+  /** Fractional WEEKDAY days (Mon–Fri). `hoursAdjusted` is applied to this. */
   rawDays: number;
+  /** Whole qualifying ("odd") Saturdays credited this month (integer). */
+  saturdaysCounted: number;
+  /** ISO dates of the credited qualifying Saturdays (ascending walk order). */
+  saturdayDays: string[];
   kmPerDay: number;
   ratePerKm: number;
+  kmPerSaturday: number;
   excludedDays: ExcludedDay[];
 }
 
 /**
+ * `1`-based ordinal of a day-of-month among same-weekday days: the 1st, 2nd,
+ * … Saturday of the month. A Saturday "qualifies" (is credited) when its
+ * ordinal is odd — i.e. the 1st, 3rd, or 5th Saturday. Purely positional
+ * (`floor((dayOfMonth-1)/7)+1`), independent of the claim's start date, and
+ * resets on the calendar-month boundary.
+ */
+function weekdayOrdinalInMonth(dayOfMonth: number): number {
+  return Math.floor((dayOfMonth - 1) / 7) + 1;
+}
+
+/**
  * Walk every day of `[start, end]` (inclusive), accumulating fractional
- * working days into `monthData`, keyed by `YYYY-MM`.
+ * weekday days AND qualifying-Saturday counts into `monthData`, keyed by
+ * `YYYY-MM`.
+ *
+ * `weekdayRawTotal` sums only the Mon–Fri fractions (the `hoursAdjusted`
+ * correction applies to this alone); `saturdayTotal` sums the whole qualifying
+ * Saturdays. The reported raw/adjusted day totals are assembled by the caller
+ * from these two parts.
  */
 function accumulateMonthDays(
   start: ParsedDate,
@@ -239,9 +341,14 @@ function accumulateMonthDays(
   limits: Record<string, MonthLimit>,
   fallback: MonthLimit,
   banDays: Map<string, string>,
-): { monthData: Map<string, InternalMonthAcc>; rawTotalDays: number } {
+): {
+  monthData: Map<string, InternalMonthAcc>;
+  weekdayRawTotal: number;
+  saturdayTotal: number;
+} {
   const monthData = new Map<string, InternalMonthAcc>();
-  let rawTotalDays = 0;
+  let weekdayRawTotal = 0;
+  let saturdayTotal = 0;
 
   // Iterate by day. We mutate a single Date locally — the caller's input
   // is never touched (we re-construct from `start.date`).
@@ -265,31 +372,55 @@ function accumulateMonthDays(
         year: curY,
         monthZeroBased: curM,
         rawDays: 0,
+        saturdaysCounted: 0,
+        saturdayDays: [],
         kmPerDay: ml.kmPerDay,
         ratePerKm: ml.ratePerKm,
+        kmPerSaturday: ml.kmPerSaturday,
         excludedDays: [],
       };
       monthData.set(monthKey, acc);
     }
 
-    const isWeekend = dow === 0 || dow === 6;
     const banLabel = banDays.get(dateKey);
-    // Record holiday exclusions (only when the day isn't ALSO a weekend —
-    // matches the eu-calendar contract which already drops Sat/Sun bans).
-    if (!isWeekend && banLabel !== undefined) {
-      acc.excludedDays.push({ date: dateKey, label: banLabel });
-    }
-    // Skip weekends and EU-ban days (matches Code.gs:896).
-    if (!isWeekend && banLabel === undefined) {
-      const fraction = fractionForDay({ isFirst, isLast, isSingle, hStart, hStop });
-      acc.rawDays += fraction;
-      rawTotalDays += fraction;
+
+    if (dow === 0) {
+      // Sunday — always excluded, silently (legacy behavior, unchanged).
+    } else if (dow === 6) {
+      // Saturday — OPT-IN odd-Saturday guarantee.
+      if (acc.kmPerSaturday > 0) {
+        const ordinal = weekdayOrdinalInMonth(curD);
+        const qualifies = ordinal % 2 === 1;
+        if (qualifies) {
+          if (banLabel !== undefined) {
+            // Qualifying Saturday on a ban/holiday — not paid, not counted;
+            // surfaced so the carrier sees WHY it didn't pay.
+            acc.excludedDays.push({ date: dateKey, label: banLabel });
+          } else {
+            // Whole day — never fractioned by timeFrom/timeTo.
+            acc.saturdaysCounted += 1;
+            acc.saturdayDays.push(dateKey);
+            saturdayTotal += 1;
+          }
+        }
+        // Even/non-qualifying Saturday → skip silently.
+      }
+      // Feature OFF (kmPerSaturday <= 0) → skip silently (legacy behavior).
+    } else {
+      // Weekday (Mon–Fri).
+      if (banLabel !== undefined) {
+        acc.excludedDays.push({ date: dateKey, label: banLabel });
+      } else {
+        const fraction = fractionForDay({ isFirst, isLast, isSingle, hStart, hStop });
+        acc.rawDays += fraction;
+        weekdayRawTotal += fraction;
+      }
     }
 
     cur.setDate(cur.getDate() + 1);
   }
 
-  return { monthData, rawTotalDays };
+  return { monthData, weekdayRawTotal, saturdayTotal };
 }
 
 /**
@@ -357,8 +488,11 @@ export function calcKmGwarantPerMonth(input: KmCalcInput): KmCalcResult {
   const hStart = parseHhMm(input.timeFrom ?? null);
   const hStop = parseHhMm(input.timeTo ?? null);
 
-  const banDays = getEUBanDays(start.year, end.year);
-  const { monthData, rawTotalDays } = accumulateMonthDays(
+  // `includeSaturdays = true`: the map carries Saturday holidays so a
+  // qualifying Saturday landing on a ban isn't paid. Weekday counting is
+  // gated on `!weekend`, so the extra Saturday entries never affect it.
+  const banDays = getEUBanDays(start.year, end.year, true);
+  const { monthData, weekdayRawTotal, saturdayTotal } = accumulateMonthDays(
     start,
     end,
     hStart,
@@ -376,9 +510,12 @@ export function calcKmGwarantPerMonth(input: KmCalcInput): KmCalcResult {
     ),
   );
 
-  const adjustedTotal = applyHoursAdjustment(
+  // `hoursAdjusted` shrinks ONLY the weekday part (Saturdays are whole days,
+  // untouched by the downtime correction). `applyHoursAdjustment` mutates
+  // each acc's weekday `rawDays` in place and returns the adjusted weekday sum.
+  const adjustedWeekdayTotal = applyHoursAdjustment(
     accs,
-    rawTotalDays,
+    weekdayRawTotal,
     input.hoursAdjusted ?? 0,
   );
 
@@ -387,15 +524,23 @@ export function calcKmGwarantPerMonth(input: KmCalcInput): KmCalcResult {
   let weightedRateSum = 0;
   const breakdown: MonthBreakdown[] = accs.map((a) => {
     const days = round2(a.rawDays);
-    const km = Math.round(days * a.kmPerDay);
-    kmGuaranteed += km;
-    weightedRateSum += km * a.ratePerKm;
+    const kmWeekday = Math.round(days * a.kmPerDay);
+    const kmFromSaturdays = Math.round(a.saturdaysCounted * a.kmPerSaturday);
+    const kmInMonth = kmWeekday + kmFromSaturdays;
+    kmGuaranteed += kmInMonth;
+    // Weekdays and Saturdays share the month's `ratePerKm`, so the whole
+    // month's km contributes at one rate — the weighted formula still holds.
+    weightedRateSum += kmInMonth * a.ratePerKm;
     return {
       yearMonth: fmtYearMonth(a.year, a.monthZeroBased),
       workingDays: days,
       kmPerDay: a.kmPerDay,
       ratePerKm: a.ratePerKm,
-      kmInMonth: km,
+      saturdaysCounted: a.saturdaysCounted,
+      kmPerSaturday: a.kmPerSaturday,
+      kmFromSaturdays,
+      kmInMonth,
+      saturdayDays: a.saturdayDays,
       excludedDays: a.excludedDays,
     };
   });
@@ -405,16 +550,15 @@ export function calcKmGwarantPerMonth(input: KmCalcInput): KmCalcResult {
     kmGuaranteed > 0 ? weightedRateSum / kmGuaranteed : input.fallback.ratePerKm;
   const ratePerKmEffective = round3(rawRate);
 
-  // `totalDays` is the post-adjustment sum, rounded to 2 decimals. When
-  // no adjustment was applied this matches `Math.round(rawTotalDays*100)/100`.
-  const totalDays = round2(adjustedTotal);
+  // Reported day totals fold the whole qualifying Saturdays back in on top of
+  // the (adjusted) weekday days. Saturdays are never touched by `hoursAdjusted`.
+  const totalDays = round2(adjustedWeekdayTotal + saturdayTotal);
 
   return {
     totalDays,
-    // Pre-adjustment sum, rounded to 2 dp — matches `totalDays` when
-    // `hoursAdjusted` is 0 (the common case). Surfaced so the carrier /
-    // verifier UI can render `<HoursReadout>` with both values side-by-side.
-    rawTotalDays: round2(rawTotalDays),
+    // Pre-adjustment sum (raw weekday days + Saturdays), rounded to 2 dp —
+    // matches `totalDays` when `hoursAdjusted` is 0 (the common case).
+    rawTotalDays: round2(weekdayRawTotal + saturdayTotal),
     kmGuaranteed,
     ratePerKmEffective,
     breakdown,
