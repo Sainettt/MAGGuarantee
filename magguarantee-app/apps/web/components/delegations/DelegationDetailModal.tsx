@@ -63,6 +63,7 @@ import { RouteCard } from '@/components/delegations/RouteCard';
 import { TeamMembers } from '@/components/teams/TeamMembers';
 import {
   EntityDetailModal,
+  type EntityDetailRow,
   type EntityDetailSection,
 } from '@/components/ui/EntityDetailModal';
 import { textValue } from '@/components/ui/entity-detail-values';
@@ -426,6 +427,17 @@ export function DelegationDetailModal({
           // Bespoke stepper block spans the section, no label gutter (§6.20).
           fullWidth: true,
         },
+        // «Nr zlecenia ze spedu» — the SpedTrans order number captured by
+        // eksport at the załadowany (readyBy) step above. A plain labelled
+        // field, rendered only when present (per §6.4 "empty section omitted").
+        ...(delegation.spedOrderNumber
+          ? [
+              {
+                label: tAudit('spedOrderNumber'),
+                value: textValue(delegation.spedOrderNumber),
+              } satisfies EntityDetailRow,
+            ]
+          : []),
       ],
     },
   ];

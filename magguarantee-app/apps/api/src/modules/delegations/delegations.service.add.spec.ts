@@ -100,6 +100,7 @@ function activeRow(
     readyById: null,
     readyBy: null,
     readyAt: null,
+    spedOrderNumber: null,
     notes: null,
     claimId: null,
     createdAt: new Date('2026-05-19T00:00:00.000Z'),

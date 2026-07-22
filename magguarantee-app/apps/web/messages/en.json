@@ -1832,11 +1832,12 @@
         "readiedBy": "Accepted (export)",
         "readiedCaption": "load accepted",
         "confirmedInTransit": "Confirmed in transit",
+        "spedOrderNumber": "Sped order number",
         "pending": "— pending"
       },
       "status": {
         "zgloszony": "Reported",
-        "gotowy": "Ready",
+        "gotowy": "Loaded",
         "w_trasie": "In transit",
         "zjechal": "Returned",
         "anulowany": "Cancelled"
@@ -1996,7 +1997,7 @@
   "eksport": {
     "delegations": {
       "title": "Trips",
-      "subtitle": "Mark trips as ready once the order has been issued",
+      "subtitle": "Mark trips as loaded once the order has been issued",
       "filters": {
         "status": "Status",
         "allStatuses": "All statuses",
@@ -2019,15 +2020,18 @@
         }
       },
       "actions": {
-        "markReady": "Mark ready",
+        "markReady": "Mark as loaded",
         "rollback": "Roll back to: reported",
-        "advanceTitle": "Mark as ready",
-        "advanceDescription": "Trip {plate} will be marked as ready (load found, order issued).",
+        "advanceTitle": "Mark as loaded",
+        "advanceDescription": "Trip {plate} will be marked as loaded (load found, order issued).",
+        "spedOrderNumberLabel": "Sped order number",
+        "spedOrderNumberPlaceholder": "e.g. SPED-12345",
+        "spedOrderNumberRequired": "Sped order number is required.",
         "rollbackTitle": "Roll back to: reported",
         "rollbackDescription": "Trip {plate} will return to the reported status. Only possible before it sets off.",
         "rollbackConfirm": "Roll back status",
         "cancel": "Cancel",
-        "readyToast": "Marked as ready",
+        "readyToast": "Marked as loaded",
         "rolledBackToast": "Rolled back to: reported",
         "errorToast": "Failed to change the trip status"
       }

@@ -44,7 +44,7 @@ export function InternalDecisionEmail({
     >
       <Section style={sectionStyle}>
         <Field label="Przewoźnik">{carrierName}</Field>
-        <Field label="Pojazd">{vehiclePlate}</Field>
+        <Field label="Ciągnik">{vehiclePlate}</Field>
         <Field label="Okres">
           {periodFrom} → {periodTo}
         </Field>

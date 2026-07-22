@@ -41,10 +41,10 @@
     "hidePassword": "Ukryj hasło"
   },
   "formActive": {
-    "vehicleConsequence": "Nieaktywny pojazd znika z list wyboru i nie może być użyty w nowych wyjazdach ani wnioskach.",
+    "vehicleConsequence": "Nieaktywny ciągnik znika z list wyboru i nie może być użyty w nowych wyjazdach ani wnioskach.",
     "trailerConsequence": "Nieaktywna naczepa znika z list wyboru i nie może być użyta w nowych wyjazdach.",
     "driverConsequence": "Nieaktywny kierowca znika z list wyboru i nie może być przypisany do nowych wyjazdów.",
-    "carrierConsequence": "Nieaktywny przewoźnik traci dostęp do panelu, a jego pojazdy i kierowcy znikają z list wyboru."
+    "carrierConsequence": "Nieaktywny przewoźnik traci dostęp do panelu, a jego ciągniki i kierowcy znikają z list wyboru."
   },
   "confirmDelete": {
     "title": "Trwałe usunięcie — {entityLabel}",
@@ -61,7 +61,7 @@
     "softConfirm": "Usuń",
     "entityLabel": {
       "carrier": "przewoźnik",
-      "vehicle": "pojazd",
+      "vehicle": "ciągnik",
       "driver": "kierowca",
       "trailer": "naczepa",
       "trailerType": "typ naczepy",
@@ -261,7 +261,7 @@
     "claims": "Wnioski",
     "opieka": "Moja opieka",
     "carriers": "Przewoźnicy",
-    "vehicles": "Pojazdy",
+    "vehicles": "Ciągniki",
     "drivers": "Kierowcy",
     "trailers": "Naczepy",
     "trailerTypes": "Typy naczep",
@@ -288,7 +288,7 @@
     },
     "step": {
       "carrier": "Przewoźnik",
-      "vehicle": "Pojazd",
+      "vehicle": "Ciągnik",
       "trailer": "Przyczepa",
       "driver": "Kierowca"
     },
@@ -307,7 +307,7 @@
       "exit": "Wyjdź"
     },
     "entityAlreadyExists": {
-      "vehicle": "Ten przewoźnik ma już pojazd — możesz dodać kolejny lub pominąć krok.",
+      "vehicle": "Ten przewoźnik ma już ciągnik — możesz dodać kolejny lub pominąć krok.",
       "trailer": "Ten przewoźnik ma już naczepę — możesz dodać kolejną lub pominąć krok.",
       "driver": "Ten przewoźnik ma już kierowcę — możesz dodać kolejnego lub pominąć krok."
     }
@@ -329,7 +329,7 @@
   },
   "onboardingMissing": {
     "groupLabel": "Brakujące elementy konfiguracji",
-    "vehicle": "Brak: Pojazd",
+    "vehicle": "Brak: Ciągnik",
     "trailer": "Brak: Naczepa",
     "driver": "Brak: Kierowca"
   },
@@ -377,7 +377,7 @@
       "insuranceMinHint": "Min. 250 000 EUR",
       "insuranceExpiry": "Ważność OCP",
       "licenseExpiry": "Ważność licencji",
-      "numberOfVehicle": "Liczba pojazdów",
+      "numberOfVehicle": "Liczba ciągników",
       "companyAddress": "Adres firmy",
       "opiekun": "Opiekun",
       "active": "Aktywny"
@@ -473,14 +473,14 @@
     "SK": "Słowacja"
   },
   "vehicles": {
-    "title": "Pojazdy",
-    "newVehicle": "Nowy pojazd",
-    "editVehicle": "Edytuj pojazd",
-    "emptyTitle": "Brak pojazdów",
-    "emptyMessage": "Nie dodano jeszcze żadnego pojazdu.",
+    "title": "Ciągniki",
+    "newVehicle": "Nowy ciągnik",
+    "editVehicle": "Edytuj ciągnik",
+    "emptyTitle": "Brak ciągników",
+    "emptyMessage": "Nie dodano jeszcze żadnego ciągnika.",
     "emptyFiltered": {
       "title": "Brak wyników",
-      "message": "Brak pojazdów spełniających wybrane filtry."
+      "message": "Brak ciągników spełniających wybrane filtry."
     },
     "filters": {
       "searchPlaceholder": "Szukaj numeru rejestracyjnego",
@@ -556,7 +556,7 @@
       "adr": "ADR",
       "permissions": "Pozwolenia",
       "specialCountries": "Kraje specjalne",
-      "specialCountriesHint": "Kraje, do których pojazd ma wszystkie pozwolenia na wjazd.",
+      "specialCountriesHint": "Kraje, do których ciągnik ma wszystkie pozwolenia na wjazd.",
       "gbHint": "Wielka Brytania — pozwolenie ECMT (po Brexicie)",
       "itHint": "Włochy — ograniczenia tranzytowe/weekendowe",
       "frHint": "Francja — Loi Macron / SIPSI",
@@ -674,7 +674,7 @@
       "beams": "Belki zabezpieczające",
       "beamsCount": "Liczba belek",
       "liftingRoof": "Dach podnoszony",
-      "slidingRoof": "Dach odsuwany",
+      "slidingRoof": "Dach przesuwany",
       "edscha": "Edscha",
       "palletBox": "Kosz paletowy",
       "certXl": "Certyfikat XL",
@@ -726,7 +726,7 @@
   },
   "teams": {
     "title": "Zespoły prowadzące",
-    "subtitle": "Numerowane zespoły dyspozytorów, do których przypisywane są pojazdy.",
+    "subtitle": "Numerowane zespoły dyspozytorów, do których przypisywane są ciągniki.",
     "newTeam": "Nowy zespół",
     "editTeam": "Edytuj zespół",
     "emptyTitle": "Brak zespołów",
@@ -743,11 +743,11 @@
       "codeHint": "Format N.N.N, np. 1.1.13",
       "name": "Nazwa",
       "dispatchers": "Dyspozytorzy",
-      "dispatchersHint": "Dyspozytorzy widzą pojazdy przypisane do tego zespołu.",
+      "dispatchersHint": "Dyspozytorzy widzą ciągniki przypisane do tego zespołu.",
       "dispatchersPlaceholder": "Wybierz dyspozytorów…",
       "dispatchersEmpty": "Nie znaleziono dyspozytora",
       "dispatchersSelected": "Dyspozytorzy, wybrano {count}",
-      "vehicleCount": "Pojazdy",
+      "vehicleCount": "Ciągniki",
       "active": "Aktywny"
     },
     "actions": {
@@ -839,14 +839,14 @@
       "remaining": "{days, plural, one {# dzień roboczy} few {# dni robocze} many {# dni roboczych} other {# dni roboczych}}"
     },
     "banner": {
-      "title": "Zgłoś wyjazd — {count, plural, one {# pojazd wymaga działania} few {# pojazdy wymagają działania} many {# pojazdów wymaga działania} other {# pojazdów wymaga działania}}",
+      "title": "Zgłoś wyjazd — {count, plural, one {# ciągnik wymaga działania} few {# ciągniki wymagają działania} many {# ciągników wymaga działania} other {# ciągników wymaga działania}}",
       "cta": "Zgłoś wyjazd",
       "deadline": "Termin: {date}",
       "more": "+ {count} więcej",
-      "ariaRow": "Pojazd {plate}, termin {date}, {status}"
+      "ariaRow": "Ciągnik {plate}, termin {date}, {status}"
     },
     "strip": {
-      "title": "{count, plural, one {# pojazd wymaga} few {# pojazdy wymagają} many {# pojazdów wymaga} other {# pojazdów wymaga}} pilnego zgłoszenia wyjazdu",
+      "title": "{count, plural, one {# ciągnik wymaga} few {# ciągniki wymagają} many {# ciągników wymaga} other {# ciągników wymaga}} pilnego zgłoszenia wyjazdu",
       "cta": "Przejdź do Porozumień"
     },
     "tab": {
@@ -854,7 +854,7 @@
     },
     "porozumienie": {
       "title": "Porozumienie o gwarancji",
-      "allClear": "Wszystkie pojazdy w porządku — nic nie wymaga zgłoszenia",
+      "allClear": "Wszystkie ciągniki w porządku — nic nie wymaga zgłoszenia",
       "reportCta": "Zgłoś wyjazd",
       "deadline": "termin: {date}",
       "onRoad": "w trasie",
@@ -873,7 +873,7 @@
         "obligation": "Po każdym zjeździe zgłoś kolejny wyjazd w ciągu 10 polskich dni roboczych.",
         "reminders": "Przypomnienia wysyłamy na 3 dni i 1 dzień przed terminem.",
         "silence": "Aktywny wyjazd zatrzymuje licznik — w trasie nic nie musisz robić.",
-        "restart": "Zjazd pojazdu restartuje licznik od nowa (10 dni roboczych)."
+        "restart": "Zjazd ciągnika restartuje licznik od nowa (10 dni roboczych)."
       }
     },
     "episodes": {
@@ -890,7 +890,7 @@
       "reason": {
         "wyjazd": "Zgłoszono wyjazd",
         "agreement_off": "Gwarancja wyłączona",
-        "vehicle_inactive": "Pojazd nieaktywny"
+        "vehicle_inactive": "Ciągnik nieaktywny"
       }
     },
     "fleet": {
@@ -904,7 +904,7 @@
     },
     "board": {
       "title": "Porozumienia — zgłaszanie wyjazdów",
-      "subtitle": "Pojazdy z gwarancją, które wymagają zgłoszenia wyjazdu",
+      "subtitle": "Ciągniki z gwarancją, które wymagają zgłoszenia wyjazdu",
       "tabCarriers": "Przewoźnicy",
       "tabAgreements": "Porozumienia",
       "tabsAriaLabel": "Widok opieki",
@@ -931,13 +931,13 @@
     },
     "history": {
       "tab": "Porozumienia",
-      "liveHeading": "Pojazdy z gwarancją — stan bieżący",
+      "liveHeading": "Ciągniki z gwarancją — stan bieżący",
       "episodesHeading": "Historia epizodów",
-      "emptyLive": "Brak pojazdów z gwarancją",
+      "emptyLive": "Brak ciągników z gwarancją",
       "emptyEpisodes": "Ten przewoźnik nie miał opóźnień w zgłaszaniu wyjazdów",
-      "showAllVehicles": "Pokaż wszystkie pojazdy",
+      "showAllVehicles": "Pokaż wszystkie ciągniki",
       "columns": {
-        "vehicle": "Pojazd",
+        "vehicle": "Ciągnik",
         "anchor": "Kotwica",
         "deadline": "Termin",
         "state": "Stan",
@@ -956,7 +956,7 @@
       "reason": {
         "wyjazd": "Zgłoszono wyjazd",
         "agreement_off": "Zdjęto gwarancję",
-        "vehicle_inactive": "Pojazd nieaktywny"
+        "vehicle_inactive": "Ciągnik nieaktywny"
       },
       "outcome": {
         "onTime": "w terminie",
@@ -1091,7 +1091,7 @@
       "columns": {
         "nrZgl": "Nr zgłoszenia",
         "carrier": "Przewoźnik",
-        "vehicle": "Pojazd",
+        "vehicle": "Ciągnik",
         "period": "Okres",
         "mileage": "Przebieg",
         "doplata": "Dopłata gwarancyjna",
@@ -1152,13 +1152,13 @@
         },
         "inTransitGate": {
           "bannerTitle": "Wyjazd jeszcze w trasie",
-          "bannerBody": "Powiązany wyjazd nie został jeszcze zakończony — pojazd wciąż jest w trasie. Wniosek można tylko przeglądać. Poczekaj, aż wyjazd zostanie oznaczony jako zjechał — dopiero wtedy wniosek można zweryfikować i podjąć decyzję.",
+          "bannerBody": "Powiązany wyjazd nie został jeszcze zakończony — ciągnik wciąż jest w trasie. Wniosek można tylko przeglądać. Poczekaj, aż wyjazd zostanie oznaczony jako zjechał — dopiero wtedy wniosek można zweryfikować i podjąć decyzję.",
           "actionsBlockedHint": "Akcje są zablokowane, dopóki wyjazd jest w trasie. Poczekaj na zjazd.",
           "blockedToast": "Wyjazd jest jeszcze w trasie — poczekaj na zjazd, aby zweryfikować lub podjąć decyzję."
         },
         "linkedDelegation": {
           "heading": "Powiązany wyjazd",
-          "vehicle": "Auto",
+          "vehicle": "Ciągnik",
           "planned": "Planowany powrót",
           "actual": "Faktyczny zjazd"
         },
@@ -1273,7 +1273,7 @@
       },
       "fields": {
         "carrier": "Przewoźnik",
-        "vehicle": "Pojazd",
+        "vehicle": "Ciągnik",
         "dateStart": "Okres od",
         "dateEnd": "Okres do",
         "timeFrom": "Godzina od",
@@ -1316,7 +1316,7 @@
     "emptyMessage": "Gdy administrator przypisze do Ciebie przewoźników, pojawią się tutaj.",
     "totals": {
       "carriers": "Przewoźnicy",
-      "totalVehicles": "Pojazdy razem",
+      "totalVehicles": "Ciągniki razem",
       "jezdzace": "Jezdżące",
       "stojace": "Stojące",
       "nieaktywne": "Nieaktywne",
@@ -1343,7 +1343,7 @@
     "attention": {
       "title": "Wymaga uwagi",
       "reason": {
-        "incompleteFleet": "Niekompletna flota (brak pojazdu / naczepy / kierowcy)"
+        "incompleteFleet": "Niekompletna flota (brak ciągnika / naczepy / kierowcy)"
       }
     },
     "detail": {
@@ -1360,14 +1360,14 @@
     },
     "tabs": {
       "ariaLabel": "Sekcje przewoźnika",
-      "vehicles": "Auta",
+      "vehicles": "Ciągniki",
       "drivers": "Kierowcy",
       "trailers": "Naczepy",
       "documents": "Dokumenty"
     },
     "vehicles": {
-      "emptyTitle": "Brak pojazdów",
-      "emptyMessage": "Ten przewoźnik nie ma jeszcze dodanych pojazdów.",
+      "emptyTitle": "Brak ciągników",
+      "emptyMessage": "Ten przewoźnik nie ma jeszcze dodanych ciągników.",
       "columns": {
         "plate": "Numer rejestracyjny",
         "side": "Numer boczny",
@@ -1416,8 +1416,8 @@
       },
       "group": {
         "company": "Dokumenty firmowe",
-        "vehicles": "Dokumenty pojazdów",
-        "adrVehicles": "ADR pojazdów",
+        "vehicles": "Dokumenty ciągników",
+        "adrVehicles": "ADR ciągników",
         "trailers": "Dokumenty naczep",
         "drivers": "Dokumenty kierowców"
       },
@@ -1430,25 +1430,25 @@
       },
       "count": {
         "files": "{count, plural, one {# plik} few {# pliki} many {# plików} other {# pliku}}",
-        "vehicles": "{count, plural, one {# pojazd} few {# pojazdy} many {# pojazdów} other {# pojazdu}}",
+        "vehicles": "{count, plural, one {# ciągnik} few {# ciągniki} many {# ciągników} other {# ciągnika}}",
         "trailers": "{count, plural, one {# naczepa} few {# naczepy} many {# naczep} other {# naczepy}}",
         "drivers": "{count, plural, one {# kierowca} few {# kierowców} many {# kierowców} other {# kierowcy}}",
         "summary": "{files} · {entities}",
         "noFiles": "Brak plików",
-        "adrVehiclesCount": "{count, plural, one {# pojazd z ADR} few {# pojazdy z ADR} many {# pojazdów z ADR} other {# pojazdu z ADR}}",
-        "noAdrVehicles": "Brak pojazdów ADR"
+        "adrVehiclesCount": "{count, plural, one {# ciągnik z ADR} few {# ciągniki z ADR} many {# ciągników z ADR} other {# ciągnika z ADR}}",
+        "noAdrVehicles": "Brak ciągników ADR"
       },
       "columns": {
         "fileName": "Nazwa pliku",
         "size": "Rozmiar",
         "uploadedAt": "Data przesłania",
         "actions": "Akcje",
-        "entityVehicle": "Pojazd",
+        "entityVehicle": "Ciągnik",
         "entityTrailer": "Naczepa",
         "entityDriver": "Kierowca"
       },
       "sheet": {
-        "manageInVehicle": "Zarządzaj w oknie pojazdu.",
+        "manageInVehicle": "Zarządzaj w oknie ciągnika.",
         "manageInTrailer": "Zarządzaj w oknie naczepy.",
         "manageInDriver": "Zarządzaj w oknie kierowcy.",
         "uploadHint": "Prześlij dokument dla tej kategorii.",
@@ -1462,18 +1462,18 @@
   },
   "planista": {
     "title": "Panel planisty",
-    "subtitle": "Przegląd planowanej floty — pojazdy, kierowcy i naczepy",
+    "subtitle": "Przegląd planowanej floty — ciągniki, kierowcy i naczepy",
     "readOnlyBanner": "Dane są tylko do podglądu — edytuje administrator.",
     "tabs": {
       "ariaLabel": "Sekcje floty planisty",
-      "vehicles": "Auta",
+      "vehicles": "Ciągniki",
       "drivers": "Kierowcy",
       "trailers": "Naczepy",
       "delegations": "Wyjazdy"
     },
     "vehicles": {
-      "emptyTitle": "Brak aut",
-      "emptyMessage": "Do tego planisty nie przypisano żadnych aut.",
+      "emptyTitle": "Brak ciągników",
+      "emptyMessage": "Do tego planisty nie przypisano żadnych ciągników.",
       "columns": {
         "plate": "Nr rej.",
         "side": "Nr boczny",
@@ -1506,21 +1506,21 @@
       }
     },
     "kpi": {
-      "vehicles": "Auta",
+      "vehicles": "Ciągniki",
       "driving": "Jeżdżą",
       "idle": "Stoją > 7 dni",
       "drivers": "Kierowcy",
       "trailers": "Naczepy"
     },
     "idle": {
-      "title": "Auta stojące dłużej niż 7 dni:",
+      "title": "Ciągniki stojące dłużej niż 7 dni:",
       "daysIdle": "{days, plural, one {# dzień} few {# dni} many {# dni} other {# dni}}"
     },
     "delegations": {
       "emptyTitle": "Brak wyjazdów",
       "emptyMessage": "Brak aktywnych wyjazdów do wyświetlenia.",
       "columns": {
-        "vehicle": "Auto",
+        "vehicle": "Ciągnik",
         "driver": "Kierowca",
         "route": "Trasa",
         "period": "Okres",
@@ -1530,29 +1530,29 @@
   },
   "dyspozytor": {
     "title": "Panel dyspozytora",
-    "subtitle": "Przegląd obsługiwanej floty, wyjazdów i statusu aut",
+    "subtitle": "Przegląd obsługiwanej floty, wyjazdów i statusu ciągników",
     "readOnlyBanner": "Dane są tylko do podglądu — edytuje administrator.",
     "kpi": {
-      "vehicles": "Auta",
+      "vehicles": "Ciągniki",
       "driving": "Jeżdżą",
       "idle": "Stoją > 7 dni",
       "drivers": "Kierowcy",
       "trailers": "Naczepy"
     },
     "idle": {
-      "title": "Auta stojące dłużej niż 7 dni:",
+      "title": "Ciągniki stojące dłużej niż 7 dni:",
       "daysIdle": "{days, plural, one {# dzień} few {# dni} many {# dni} other {# dni}}"
     },
     "tabs": {
       "ariaLabel": "Sekcje floty dyspozytora",
-      "vehicles": "Auta",
+      "vehicles": "Ciągniki",
       "delegations": "Wyjazdy",
       "drivers": "Kierowcy",
       "trailers": "Naczepy"
     },
     "vehicles": {
-      "emptyTitle": "Brak aut",
-      "emptyMessage": "Do tego dyspozytora nie przypisano żadnych aut.",
+      "emptyTitle": "Brak ciągników",
+      "emptyMessage": "Do tego dyspozytora nie przypisano żadnych ciągników.",
       "columns": {
         "plate": "Nr rej.",
         "side": "Nr boczny",
@@ -1570,7 +1570,7 @@
       "emptyTitle": "Brak wyjazdów",
       "emptyMessage": "Brak aktywnych wyjazdów do wyświetlenia.",
       "columns": {
-        "vehicle": "Auto",
+        "vehicle": "Ciągnik",
         "driver": "Kierowca",
         "route": "Trasa",
         "period": "Okres",
@@ -1607,7 +1607,7 @@
     },
     "fleetTabs": {
       "ariaLabel": "Sekcje floty",
-      "vehicles": "Auta",
+      "vehicles": "Ciągniki",
       "drivers": "Kierowcy",
       "trailers": "Naczepy"
     },
@@ -1621,7 +1621,7 @@
       "filterByStatus": "Filtruj po statusie",
       "filterByVehicle": "Filtruj po pojeździe",
       "allStatuses": "Wszystkie statusy",
-      "allVehicles": "Wszystkie pojazdy",
+      "allVehicles": "Wszystkie ciągniki",
       "emptyTitle": "Brak wniosków",
       "emptyMessage": "Złóż pierwszy wniosek o gwarancję kilometrową.",
       "emptyFiltered": {
@@ -1630,7 +1630,7 @@
       },
       "notFoundTitle": "Wniosek nie znaleziony",
       "notFoundMessage": "Sprawdź numer zgłoszenia lub wróć do listy.",
-      "vehicleLabel": "Pojazd",
+      "vehicleLabel": "Ciągnik",
       "kmLabel": "Km",
       "reklamacjaIndicator": "Reklamacja zgłoszona",
       "wniosekAria": "Wniosek {nrZgl}",
@@ -1655,16 +1655,16 @@
         "moneyLabelApproved": "kwota zatwierdzona",
         "moneyLabelCalc": "kalkulacja",
         "wniosekLabel": "Dopłata gwarancyjna",
-        "vehiclePlate": "Pojazd",
+        "vehiclePlate": "Ciągnik",
         "submittedAt": "Data zgłoszenia",
         "decidedAt": "Data decyzji"
       },
       "form": {
-        "sectionVehicleAndDriver": "Pojazd i kierowca",
-        "vehicle": "Pojazd",
+        "sectionVehicleAndDriver": "Ciągnik i kierowca",
+        "vehicle": "Ciągnik",
         "driver": "Kierowca",
         "trailer": "Naczepa",
-        "vehicleReadOnlyPlaceholder": "Najpierw wybierz wyjazd — pojazd, naczepa i kierowca zostaną pobrane z wyjazdu.",
+        "vehicleReadOnlyPlaceholder": "Najpierw wybierz wyjazd — ciągnik, naczepa i kierowca zostaną pobrane z wyjazdu.",
         "sectionPeriod": "Okres",
         "dateStart": "Data od",
         "dateEnd": "Data do",
@@ -1676,7 +1676,7 @@
         "mileageReadOnlyPlaceholder": "— obliczany z wyjazdu",
         "addComment": "Dodaj komentarz",
         "comment": "Komentarz",
-        "violationDateEndInFuture": "Data rozładunku ({date}) jest w przyszłości. Wniosek można złożyć dopiero po zjechaniu auta.",
+        "violationDateEndInFuture": "Data rozładunku ({date}) jest w przyszłości. Wniosek można złożyć dopiero po zjechaniu ciągnika.",
         "violationDateStartInFuture": "Data załadunku ({date}) jest w przyszłości.",
         "violationDateOrder": "Data rozładunku musi być równa lub późniejsza od daty załadunku.",
         "violationDeadline": "Termin na złożenie wniosku minął. Zgodnie z umową masz {maxDays} dni od daty rozładunku (upłynęło {elapsed} dni).",
@@ -1702,7 +1702,7 @@
         "help": "Wniosek można złożyć tylko do zakończonego lub trwającego wyjazdu, który nie ma jeszcze wniosku.",
         "placeholder": "— wybierz wyjazd —",
         "loading": "Wczytywanie wyjazdów…",
-        "empty": "Brak wyjazdów, do których można złożyć wniosek. Wniosek można złożyć po oznaczeniu auta jako „w trasie” lub „zjechał”.",
+        "empty": "Brak wyjazdów, do których można złożyć wniosek. Wniosek można złożyć po oznaczeniu ciągnika jako „w trasie” lub „zjechał”.",
         "selectedStatus": "Status wybranego wyjazdu:",
         "derivedPeriod": "Okres (z wyjazdu)",
         "temporaryPeriodHint": "Okres tymczasowy z planowanego powrotu — zostanie zaktualizowany po zjeździe.",
@@ -1711,9 +1711,9 @@
         "noGuaranteeMarker": "(bez gwarancji)"
       },
       "noGuarantee": {
-        "title": "Ta maszyna nie jest objęta gwarancją",
-        "message": "Nie możesz złożyć wniosku dla tej maszyny. W sprawie objęcia jej gwarancją skontaktuj się ze swoim opiekunem.",
-        "toast": "Ta maszyna nie jest objęta gwarancją — wniosek nie został złożony."
+        "title": "Ten samochód nie jest objęty gwarancją",
+        "message": "Nie możesz złożyć wniosku dla tego samochodu. W sprawie objęcia go gwarancją skontaktuj się ze swoim opiekunem.",
+        "toast": "Ten samochód nie jest objęty gwarancją — wniosek nie został złożony."
       }
     },
     "preview": {
@@ -1778,7 +1778,7 @@
         "message": "Brak wyjazdów o wybranym statusie."
       },
       "columns": {
-        "vehicle": "Pojazd",
+        "vehicle": "Ciągnik",
         "driver": "Kierowca",
         "departure": "Wyjazd",
         "plannedReturn": "Planowany powrót",
@@ -1797,8 +1797,8 @@
       "registeredToast": "Wyjazd zarejestrowany",
       "registerErrorToast": "Nie udało się zapisać wyjazdu",
       "form": {
-        "sectionVehicleAndDriver": "Pojazd i kierowca",
-        "vehicle": "Pojazd",
+        "sectionVehicleAndDriver": "Ciągnik i kierowca",
+        "vehicle": "Ciągnik",
         "driver": "Kierowca",
         "driverPhone": "Telefon kierowcy",
         "trailer": "Naczepa",
@@ -1820,7 +1820,7 @@
         "comment": "Komentarz"
       },
       "sections": {
-        "vehicleAndDriver": "Pojazd i kierowca",
+        "vehicleAndDriver": "Ciągnik i kierowca",
         "departure": "Wyjazd",
         "return": "Powrót",
         "audit": "Historia statusu",
@@ -1832,11 +1832,12 @@
         "readiedBy": "Zaakceptowany (eksport)",
         "readiedCaption": "akceptacja ładunku",
         "confirmedInTransit": "Potwierdzony w trasie",
+        "spedOrderNumber": "Nr zlecenia ze spedu",
         "pending": "— oczekuje"
       },
       "status": {
         "zgloszony": "Zgłoszony",
-        "gotowy": "Gotowy",
+        "gotowy": "Załadowany",
         "w_trasie": "W trasie",
         "zjechal": "Zjechał",
         "anulowany": "Anulowany"
@@ -1863,11 +1864,11 @@
     },
     "fleet": {
       "vehicles": {
-        "title": "Pojazdy",
+        "title": "Ciągniki",
         "contactOpiekun": "Skontaktuj się z opiekunem",
-        "contactOpiekunSubject": "Zmiana danych pojazdu",
-        "emptyTitle": "Brak pojazdów",
-        "emptyMessage": "Skontaktuj się z opiekunem, aby dodać pojazd.",
+        "contactOpiekunSubject": "Zmiana danych ciągnika",
+        "emptyTitle": "Brak ciągników",
+        "emptyMessage": "Skontaktuj się z opiekunem, aby dodać ciągnik.",
         "columns": {
           "plate": "Numer rejestracyjny",
           "side": "Numer boczny",
@@ -1919,18 +1920,18 @@
         }
       },
       "title": "Flota",
-      "subtitle": "Twoje pojazdy, kierowcy i naczepy. Dane są tylko do podglądu — zarządza nimi opiekun.",
+      "subtitle": "Twoje ciągniki, kierowcy i naczepy. Dane są tylko do podglądu — zarządza nimi opiekun.",
       "contactOpiekun": "Skontaktuj się z opiekunem",
       "contactOpiekunSubject": "Zmiana danych floty",
       "kpi": {
-        "vehicles": "Auta",
+        "vehicles": "Ciągniki",
         "driving": "Jeżdżą",
         "idle": "Stoją > 7 dni",
         "drivers": "Kierowcy",
         "trailers": "Naczepy"
       },
       "idle": {
-        "title": "Auta stojące dłużej niż 7 dni:",
+        "title": "Ciągniki stojące dłużej niż 7 dni:",
         "daysIdle": "{days, plural, one {# dzień} few {# dni} many {# dni} other {# dni}}"
       }
     }
@@ -1984,7 +1985,7 @@
           "message": "Brak wyjazdów spełniających wybrane filtry."
         },
         "columns": {
-          "vehicle": "Auto",
+          "vehicle": "Ciągnik",
           "driver": "Kierowca",
           "route": "Trasa",
           "period": "Okres",
@@ -1996,7 +1997,7 @@
   "eksport": {
     "delegations": {
       "title": "Wyjazdy",
-      "subtitle": "Oznacz wyjazdy jako gotowe po wystawieniu zlecenia",
+      "subtitle": "Oznacz wyjazdy jako załadowane po wystawieniu zlecenia",
       "filters": {
         "status": "Status",
         "allStatuses": "Wszystkie statusy",
@@ -2010,7 +2011,7 @@
           "message": "Brak wyjazdów spełniających wybrane filtry."
         },
         "columns": {
-          "vehicle": "Auto",
+          "vehicle": "Ciągnik",
           "carrier": "Przewoźnik",
           "route": "Trasa",
           "period": "Okres",
@@ -2019,15 +2020,18 @@
         }
       },
       "actions": {
-        "markReady": "Oznacz gotowy",
+        "markReady": "Oznacz jako załadowany",
         "rollback": "Cofnij do: zgłoszony",
-        "advanceTitle": "Oznacz jako gotowy",
-        "advanceDescription": "Wyjazd {plate} zostanie oznaczony jako gotowy (ładunek znaleziony, zlecenie wystawione).",
+        "advanceTitle": "Oznacz jako załadowany",
+        "advanceDescription": "Wyjazd {plate} zostanie oznaczony jako załadowany (ładunek znaleziony, zlecenie wystawione).",
+        "spedOrderNumberLabel": "Nr zlecenia ze spedu",
+        "spedOrderNumberPlaceholder": "np. SPED-12345",
+        "spedOrderNumberRequired": "Nr zlecenia ze spedu jest wymagany.",
         "rollbackTitle": "Cofnij do: zgłoszony",
         "rollbackDescription": "Wyjazd {plate} wróci do statusu zgłoszony. Możliwe tylko zanim ruszy w trasę.",
         "rollbackConfirm": "Cofnij status",
         "cancel": "Anuluj",
-        "readyToast": "Oznaczono jako gotowy",
+        "readyToast": "Oznaczono jako załadowany",
         "rolledBackToast": "Cofnięto do: zgłoszony",
         "errorToast": "Nie udało się zmienić statusu wyjazdu"
       }
@@ -2036,12 +2040,12 @@
   "weryfikator": {
     "tabs": {
       "ariaLabel": "Ekrany weryfikatora",
-      "km": "Pojazdy / km",
+      "km": "Ciągniki / km",
       "delegations": "Wyjazdy"
     },
     "delegations": {
       "title": "Wyjazdy",
-      "subtitle": "Oznacz wyjazdy w trasie oraz zjazd auta",
+      "subtitle": "Oznacz wyjazdy w trasie oraz zjazd ciągnika",
       "filters": {
         "status": "Status",
         "allStatuses": "Wszystkie statusy",
@@ -2055,7 +2059,7 @@
           "message": "Brak wyjazdów spełniających wybrane filtry."
         },
         "columns": {
-          "vehicle": "Auto",
+          "vehicle": "Ciągnik",
           "carrier": "Przewoźnik",
           "route": "Trasa",
           "period": "Okres",
@@ -2087,9 +2091,9 @@
     "km": {
       "title": {
         "board": "Tablica km",
-        "report": "Raport km — moje pojazdy"
+        "report": "Raport km — moje ciągniki"
       },
-      "subtitle": "Dzienny przebieg pojazdów — tydzień {week}",
+      "subtitle": "Dzienny przebieg ciągników — tydzień {week}",
       "tiles": {
         "week": "Tydzień",
         "tractors": "Ciągniki",
@@ -2099,7 +2103,7 @@
         "notes": "Notatek"
       },
       "col": {
-        "vehicle": "Pojazd",
+        "vehicle": "Ciągnik",
         "sideShort": "bok {side}",
         "carrier": "Przewoźnik",
         "opiekun": "Opiekun",
@@ -2155,22 +2159,22 @@
         "weekLabel": "Tydzień {week} · {from}–{to}",
         "pickWeek": "Wybierz tydzień"
       },
-      "progress": "{checked} z {total} pojazdów uzupełnionych w tym tygodniu",
+      "progress": "{checked} z {total} ciągników uzupełnionych w tym tygodniu",
       "filter": {
         "inMotionOnly": "Tylko jeżdżące"
       },
       "search": {
-        "placeholder": "Szukaj auta (nr rej. / nr boczny / przewoźnik)",
-        "label": "Szukaj auta",
-        "noResults": "Brak aut pasujących do wyszukiwania"
+        "placeholder": "Szukaj ciągnika (nr rej. / nr boczny / przewoźnik)",
+        "label": "Szukaj ciągnika",
+        "noResults": "Brak ciągników pasujących do wyszukiwania"
       },
       "readOnlyBanner": "Dane są tylko do podglądu — edytuje weryfikator.",
       "lagNote": "Dane aktualne na poprzedni dzień. Dzień bieżący i przyszłe są zablokowane.",
       "lagNoteShort": "Dane aktualne na poprzedni dzień.",
       "empty": {
-        "noVehicles": "Brak aktywnych pojazdów",
-        "noAssigned": "Brak przypisanych pojazdów",
-        "noMotion": "Żaden pojazd nie jeździł w tym tygodniu"
+        "noVehicles": "Brak aktywnych ciągników",
+        "noAssigned": "Brak przypisanych ciągników",
+        "noMotion": "Żaden ciągnik nie jeździł w tym tygodniu"
       },
       "month": {
         "title": "Przebieg km — {plate} · bok {side}",
@@ -2194,17 +2198,17 @@
     }
   },
   "myKm": {
-    "title": "Moje pojazdy — przebieg",
+    "title": "Moje ciągniki — przebieg",
     "tab": "Przebieg",
     "subtitle": {
-      "carrier": "Tygodniowy przebieg Twoich pojazdów — tydzień {week}",
-      "opiekun": "Przebieg pojazdów Twoich przewoźników — tydzień {week}",
-      "planista": "Przebieg planowanych pojazdów — tydzień {week}",
-      "dyspozytor": "Przebieg pojazdów Twojego zespołu — tydzień {week}"
+      "carrier": "Tygodniowy przebieg Twoich ciągników — tydzień {week}",
+      "opiekun": "Przebieg ciągników Twoich przewoźników — tydzień {week}",
+      "planista": "Przebieg planowanych ciągników — tydzień {week}",
+      "dyspozytor": "Przebieg ciągników Twojego zespołu — tydzień {week}"
     },
     "readOnlyBanner": "Dane są tylko do podglądu — przebieg uzupełnia weryfikator.",
     "group": {
-      "summary": "{count, plural, one {# pojazd} few {# pojazdy} many {# pojazdów} other {# pojazdów}} · Σ {sum} km"
+      "summary": "{count, plural, one {# ciągnik} few {# ciągniki} many {# ciągników} other {# ciągników}} · Σ {sum} km"
     },
     "tiles": {
       "carriers": "Przewoźnicy"
@@ -2214,12 +2218,12 @@
     },
     "empty": {
       "noVehicles": {
-        "carrier": "Nie masz jeszcze pojazdów",
-        "scoped": "Brak przypisanych pojazdów"
+        "carrier": "Nie masz jeszcze ciągników",
+        "scoped": "Brak przypisanych ciągników"
       }
     },
     "aria": {
-      "carrierGroup": "Przewoźnik {carrier}: {count} pojazdów"
+      "carrierGroup": "Przewoźnik {carrier}: {count} ciągników"
     }
   },
   "delegation": {
@@ -2232,7 +2236,7 @@
       "idle": "nie jeździ",
       "empty": "—",
       "noData": "Brak danych km dla tego okresu",
-      "aria": "Przebieg pojazdu {plate} w okresie {from}–{to}"
+      "aria": "Przebieg ciągnika {plate} w okresie {from}–{to}"
     }
   },
   "claim": {

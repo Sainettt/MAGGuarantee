@@ -98,6 +98,9 @@ export interface DelegationRow {
   readyById: string | null;
   readyBy: { id: string; login: string; name: string | null } | null;
   readyAt: Date | null;
+  // "Nr zlecenia ze spedu" — SpedTrans order number, set on the forward
+  // `gotowy` flip, cleared on rollback. `null` until readied.
+  spedOrderNumber: string | null;
 
   notes: string | null;
 
@@ -213,6 +216,12 @@ export interface UpdateDelegationData {
   /** Eksport who marked the outing `gotowy` (stamped in markReady). */
   readyById?: string | null;
   readyAt?: Date | null;
+  /**
+   * "Nr zlecenia ze spedu" — SpedTrans order number captured on the forward
+   * `zgloszony → gotowy` flip (`markReady`). Set to the supplied value on the
+   * flip; cleared (`null`) on rollback. Sibling of `readyBy*`.
+   */
+  spedOrderNumber?: string | null;
 }
 
 @Injectable()
@@ -359,6 +368,7 @@ export class DelegationsRepository {
         verifiedAt: data.verifiedAt,
         readyById: data.readyById,
         readyAt: data.readyAt,
+        spedOrderNumber: data.spedOrderNumber,
       },
       include: this.includeShape(),
     });
@@ -492,6 +502,7 @@ export class DelegationsRepository {
       readyById: row.readyById,
       readyBy: row.readyBy ?? null,
       readyAt: row.readyAt,
+      spedOrderNumber: row.spedOrderNumber,
       notes: row.notes,
       claimId: row.claim?.id ?? null,
       createdAt: row.createdAt,
@@ -554,6 +565,7 @@ interface DelegationPrismaShape {
   readyById: string | null;
   readyBy?: { id: string; login: string; name: string | null } | null;
   readyAt: Date | null;
+  spedOrderNumber: string | null;
   notes: string | null;
   claim?: { id: string } | null;
   createdAt: Date;

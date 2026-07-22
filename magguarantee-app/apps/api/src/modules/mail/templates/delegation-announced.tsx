@@ -45,7 +45,7 @@ export function DelegationAnnouncedEmail({
       </Section>
       <Section style={sectionStyle}>
         {!forCarrier ? <Field label="Przewoźnik">{carrierName}</Field> : null}
-        <Field label="Pojazd">{plateNumber}</Field>
+        <Field label="Ciągnik">{plateNumber}</Field>
         <Field label="Kierowca">{driverName}</Field>
         <Field label="Wyjazd">{departure}</Field>
         <Field label="Planowany powrót">{plannedReturn}</Field>

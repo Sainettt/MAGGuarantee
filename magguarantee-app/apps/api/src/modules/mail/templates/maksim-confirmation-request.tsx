@@ -177,7 +177,7 @@ export function MaksimConfirmationRequestEmail(
             <Text style={labelStyle}>Przewoźnik</Text>
             <Text style={valueStyle}>{carrierName}</Text>
 
-            <Text style={labelStyle}>Pojazd</Text>
+            <Text style={labelStyle}>Ciągnik</Text>
             <Text style={valueStyle}>{vehiclePlate}</Text>
 
             <Text style={labelStyle}>Dopłata</Text>

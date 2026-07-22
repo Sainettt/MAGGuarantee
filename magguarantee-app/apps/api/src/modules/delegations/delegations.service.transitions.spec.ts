@@ -16,11 +16,12 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 
-import type {
-  CancelDelegationDto,
-  MarkInTransitDto,
-  MarkReadyDto,
-  MarkReturnedDto,
+import {
+  MarkReadySchema,
+  type CancelDelegationDto,
+  type MarkInTransitDto,
+  type MarkReadyDto,
+  type MarkReturnedDto,
 } from '@magguarantee/shared';
 
 import type { ClaimsService } from '../claims/claims.service';
@@ -100,6 +101,7 @@ function makeRow(overrides: Partial<DelegationRow> = {}): DelegationRow {
     readyById: null,
     readyBy: null,
     readyAt: null,
+    spedOrderNumber: null,
     notes: null,
     claimId: null,
     createdAt: new Date('2026-05-31T08:00:00.000Z'),
@@ -179,13 +181,25 @@ function build(opts: {
 // ─── markReady ───────────────────────────────────────────────
 
 describe('DelegationsService.markReady', () => {
-  const dto: MarkReadyDto = { rollback: false };
+  // Forward flip now carries the mandatory "Nr zlecenia ze spedu".
+  const dto: MarkReadyDto = { rollback: false, spedOrderNumber: 'SPED-123' };
 
   it('flips zgloszony → gotowy', async () => {
     const { service, updateSpy } = build({ row: makeRow({ status: 'zgloszony' }) });
     const out = await service.markReady(auth('eksport'), 'deleg-1', dto);
     expect(out.status).toBe('gotowy');
     expect(updateSpy.mock.calls[0]![1]).toMatchObject({ status: 'gotowy' });
+  });
+
+  it('forward flip persists spedOrderNumber + stamps readyBy/At', async () => {
+    const { service, updateSpy } = build({ row: makeRow({ status: 'zgloszony' }) });
+    const out = await service.markReady(auth('eksport'), 'deleg-1', dto);
+    const patch = updateSpy.mock.calls[0]![1];
+    expect(patch.spedOrderNumber).toBe('SPED-123');
+    expect(patch.readyById).toBe('u-eksport');
+    expect(patch.readyAt).toBeInstanceOf(Date);
+    // …and it round-trips onto the wire DTO.
+    expect(out.spedOrderNumber).toBe('SPED-123');
   });
 
   it('rollback gotowy → zgloszony is allowed (pre-w_trasie)', async () => {
@@ -195,6 +209,20 @@ describe('DelegationsService.markReady', () => {
     });
     expect(out.status).toBe('zgloszony');
     expect(updateSpy.mock.calls[0]![1]).toMatchObject({ status: 'zgloszony' });
+  });
+
+  it('rollback CLEARS spedOrderNumber (fresh number required to re-advance)', async () => {
+    const { service, updateSpy } = build({
+      row: makeRow({ status: 'gotowy', spedOrderNumber: 'SPED-OLD' }),
+    });
+    const out = await service.markReady(auth('eksport'), 'deleg-1', {
+      rollback: true,
+    });
+    const patch = updateSpy.mock.calls[0]![1];
+    expect(patch.spedOrderNumber).toBeNull();
+    // …and it does NOT re-stamp readyBy on the rollback branch.
+    expect(patch.readyById).toBeUndefined();
+    expect(out.spedOrderNumber).toBeNull();
   });
 
   it('rollback after w_trasie is rejected (422) and writes nothing', async () => {
@@ -211,6 +239,47 @@ describe('DelegationsService.markReady', () => {
       service.markReady(auth('eksport'), 'deleg-1', dto),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
     expect(updateSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ─── MarkReadySchema (Zod cross-field: sped order number) ─────
+
+describe('MarkReadySchema — spedOrderNumber requirement', () => {
+  it('rejects a forward flip WITHOUT spedOrderNumber (issue on spedOrderNumber)', () => {
+    const res = MarkReadySchema.safeParse({ rollback: false });
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.error.issues.some((i) => i.path[0] === 'spedOrderNumber')).toBe(
+        true,
+      );
+    }
+  });
+
+  it('rejects a forward flip with a blank spedOrderNumber (trim → empty)', () => {
+    const res = MarkReadySchema.safeParse({
+      rollback: false,
+      spedOrderNumber: '   ',
+    });
+    expect(res.success).toBe(false);
+  });
+
+  it('accepts a forward flip WITH a spedOrderNumber (and trims it)', () => {
+    const res = MarkReadySchema.safeParse({
+      rollback: false,
+      spedOrderNumber: '  SPED-77 ',
+    });
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data.spedOrderNumber).toBe('SPED-77');
+  });
+
+  it('accepts a rollback WITHOUT spedOrderNumber (not required on rollback)', () => {
+    const res = MarkReadySchema.safeParse({ rollback: true });
+    expect(res.success).toBe(true);
+  });
+
+  it('defaults rollback→false and thus still requires spedOrderNumber', () => {
+    const res = MarkReadySchema.safeParse({});
+    expect(res.success).toBe(false);
   });
 });
 

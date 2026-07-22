@@ -954,6 +954,8 @@ model Delegation {
   readyBy   User?     @relation("DelegationReadier", fields: [readyById], references: [id])
   readyAt   DateTime?
 
+  spedOrderNumber String? // Nr zlecenia ze spedu — set on markReady (zgloszony → gotowy)
+
   notes String?
 
   createdAt DateTime  @default(now())

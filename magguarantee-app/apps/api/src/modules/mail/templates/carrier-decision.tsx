@@ -44,7 +44,7 @@ export function CarrierDecisionEmail({
       tone={tone}
     >
       <Section style={sectionStyle}>
-        <Field label="Pojazd">{vehiclePlate}</Field>
+        <Field label="Ciągnik">{vehiclePlate}</Field>
         <Field label="Okres">
           {periodFrom} → {periodTo}
         </Field>

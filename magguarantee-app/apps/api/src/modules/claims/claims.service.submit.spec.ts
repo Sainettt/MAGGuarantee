@@ -110,6 +110,7 @@ function makeDelegation(overrides: Partial<DelegationRow> = {}): DelegationRow {
     readyById: null,
     readyBy: null,
     readyAt: null,
+    spedOrderNumber: null,
     notes: null,
     claimId: null,
     createdAt: new Date('2026-04-30T08:00:00.000Z'),

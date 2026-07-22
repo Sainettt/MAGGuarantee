@@ -74,15 +74,15 @@ export function GuaranteeReminderCarrierEmail({
   return (
     <MailLayout
       title="Przypomnienie: zgłoś wyjazd"
-      preview={`Zgłoś wyjazd — ${rows.length} pojazd(ów)`}
+      preview={`Zgłoś wyjazd — ${rows.length} ciągnik(ów)`}
       tone="warning"
     >
       <Section style={sectionStyle}>
         <Text style={{ margin: '0 0 8px' }}>Witaj {carrierName},</Text>
         <Text style={{ margin: '0 0 12px' }}>
-          Przypominamy, że dla pojazdów objętych porozumieniem (gwarancją)
+          Przypominamy, że dla ciągników objętych porozumieniem (gwarancją)
           należy zgłosić wyjazd w ciągu {deadlineWorkingDays} dni roboczych od
-          ostatniego zjazdu. Poniższe pojazdy zbliżają się do terminu:
+          ostatniego zjazdu. Poniższe ciągniki zbliżają się do terminu:
         </Text>
       </Section>
 

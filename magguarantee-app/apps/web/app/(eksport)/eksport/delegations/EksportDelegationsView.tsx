@@ -74,10 +74,20 @@ export function EksportDelegationsView() {
     },
   });
 
-  const handleConfirm = async (target: DialogTarget) => {
+  const handleConfirm = async (target: DialogTarget, spedOrderNumber?: string) => {
+    // Rollback (`gotowy → zgloszony`) never carries the sped order number — the
+    // server ignores it and clears the stored value. The advance flip requires
+    // it (the dialog validates non-empty before calling here).
+    if (target.variant === 'rollback') {
+      await readyM.mutateAsync({
+        id: target.delegation.id,
+        body: { rollback: true },
+      });
+      return;
+    }
     await readyM.mutateAsync({
       id: target.delegation.id,
-      body: { rollback: target.variant === 'rollback' },
+      body: { rollback: false, spedOrderNumber },
     });
   };
 
@@ -179,7 +189,10 @@ export function EksportDelegationsView() {
               : tActions('rollbackConfirm')
           }
           cancelLabel={tActions('cancel')}
-          onConfirm={() => handleConfirm(dialog)}
+          spedOrderNumberLabel={tActions('spedOrderNumberLabel')}
+          spedOrderNumberPlaceholder={tActions('spedOrderNumberPlaceholder')}
+          spedOrderNumberRequired={tActions('spedOrderNumberRequired')}
+          onConfirm={(spedOrderNumber) => handleConfirm(dialog, spedOrderNumber)}
         />
       )}
     </section>

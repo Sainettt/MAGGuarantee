@@ -730,7 +730,7 @@ export class MailService implements IMailService {
       text: [
         `Nowy wniosek ${props.nrZgl} od ${props.carrierName}.`,
         '',
-        `Pojazd: ${props.vehiclePlate}`,
+        `Ciągnik: ${props.vehiclePlate}`,
         `Okres: ${props.periodFrom} → ${props.periodTo}`,
         ...(props.drivenDays
           ? [`Dni przepracowane: ${props.drivenDays}`]
@@ -807,7 +807,7 @@ export class MailService implements IMailService {
           ? 'Twój wyjazd został zarejestrowany w systemie MAGGuarantee.'
           : `Przewoźnik ${props.carrierName} zgłosił nowy wyjazd.`,
         '',
-        `Pojazd: ${props.plateNumber}`,
+        `Ciągnik: ${props.plateNumber}`,
         `Kierowca: ${props.driverName}`,
         `Wyjazd: ${props.departure}`,
         `Planowany powrót: ${props.plannedReturn}`,
@@ -834,12 +834,12 @@ export class MailService implements IMailService {
   ): Promise<void> {
     await this._send({
       to: email,
-      subject: `Pojazd gotowy: ${props.plateNumber}`,
+      subject: `Ciągnik gotowy: ${props.plateNumber}`,
       html: await render(DelegationReadyEmail(props)),
       text: [
         `Witaj ${props.carrierName},`,
         '',
-        `Pojazd ${props.plateNumber} został oznaczony jako gotowy do wyjazdu.`,
+        `Ciągnik ${props.plateNumber} został oznaczony jako gotowy do wyjazdu.`,
         `Wyjazd: ${props.departure}`,
       ].join('\n'),
       template: 'delegation-ready',
@@ -864,14 +864,14 @@ export class MailService implements IMailService {
   ): Promise<void> {
     await this._send({
       to: email,
-      subject: `Przypomnienie: zgłoś wyjazd — ${props.rows.length} pojazd(ów)`,
+      subject: `Przypomnienie: zgłoś wyjazd — ${props.rows.length} ciągnik(ów)`,
       html: await render(GuaranteeReminderCarrierEmail(props)),
       text: [
         `Witaj ${props.carrierName},`,
         '',
         'Przypominamy o obowiązku zgłoszenia wyjazdu w ciągu ' +
           `${props.deadlineWorkingDays} dni roboczych od ostatniego zjazdu.`,
-        'Pojazdy zbliżające się do terminu:',
+        'Ciągniki zbliżające się do terminu:',
         '',
         ...props.rows.map(
           (r) =>
@@ -967,7 +967,7 @@ export class MailService implements IMailService {
       `Wniosek ${p.nrZgl}: ${p.decisionLabel}`,
       '',
       ...(p.carrierName ? [`Przewoźnik: ${p.carrierName}`] : []),
-      `Pojazd: ${p.vehiclePlate}`,
+      `Ciągnik: ${p.vehiclePlate}`,
       `Okres: ${p.periodFrom} → ${p.periodTo}`,
       ...(p.amount ? [`Kwota: ${p.amount} EUR`] : []),
     ];
@@ -1029,7 +1029,7 @@ export class MailService implements IMailService {
       ``,
       `Nr zgłoszenia: ${props.nrZgl}`,
       `Przewoźnik:    ${props.carrierName}`,
-      `Pojazd:        ${props.vehiclePlate}`,
+      `Ciągnik:       ${props.vehiclePlate}`,
       `Okres:         ${props.periodFrom} → ${props.periodTo}`,
     ];
     if (props.dniWTrasie) {
@@ -1077,7 +1077,7 @@ export class MailService implements IMailService {
       ``,
       `Nr zgłoszenia: ${props.nrZgl}`,
       `Przewoźnik:    ${props.carrierName}`,
-      `Pojazd:        ${props.vehiclePlate}`,
+      `Ciągnik:       ${props.vehiclePlate}`,
       `Dopłata:       ${props.doplata} EUR`,
       `Próg autoryz.: ${props.prog} EUR`,
       `Dni w trasie:  ${props.dniWTrasie}`,

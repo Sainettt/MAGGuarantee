@@ -156,6 +156,15 @@ export type CancelDelegationDto = z.infer<typeof CancelDelegationSchema>;
  *
  * `note` is an optional free-form annotation appended to the outing notes for
  * the audit trail.
+ *
+ * `spedOrderNumber` ("Nr zlecenia ze spedu") is MANDATORY on the FORWARD flip
+ * (`zgloszony → gotowy`): the eksport may only mark an outing `gotowy` once the
+ * SpedTrans zlecenie exists, so the number is required and stored on the
+ * delegation (`Delegation.spedOrderNumber`). On rollback (`rollback: true`) it
+ * is NOT required — the field is ignored and the stored value is cleared
+ * server-side, so re-advancing forces a fresh number. The cross-field rule is
+ * enforced by the `.superRefine` below (a bare `.optional()` on the shape can't
+ * express "required only when `!rollback`").
  */
 export const MarkReadySchema = z
   .object({
@@ -165,8 +174,27 @@ export const MarkReadySchema = z
      */
     rollback: z.boolean().optional().default(false),
     note: emptyStringToUndefined(z.string().max(2_000).optional()),
+    /**
+     * "Nr zlecenia ze spedu" — the SpedTrans order number. REQUIRED on the
+     * forward flip (see `.superRefine`), IGNORED on rollback. Trimmed; 1–64
+     * chars. Optional at the shape level so the rollback path (which omits it)
+     * still validates; the conditional requirement lives in `.superRefine`.
+     */
+    spedOrderNumber: z.string().trim().min(1).max(64).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((val, ctx) => {
+    // Forward flip (`zgloszony → gotowy`) requires the sped order number. On
+    // rollback (`gotowy → zgloszony`) it is not required — the value is cleared
+    // server-side so re-advancing must supply a fresh number.
+    if (!val.rollback && !val.spedOrderNumber) {
+      ctx.addIssue({
+        path: ['spedOrderNumber'],
+        code: z.ZodIssueCode.custom,
+        message: 'Nr zlecenia ze spedu jest wymagany przy oznaczaniu jako gotowy.',
+      });
+    }
+  });
 export type MarkReadyDto = z.infer<typeof MarkReadySchema>;
 
 /**
@@ -468,6 +496,13 @@ export const DelegationDtoSchema = z.object({
   readyById: UuidSchema.nullable(),
   readyBy: UserMiniSchema.nullable(),
   readyAt: IsoDateTimeSchema.nullable(),
+  /**
+   * "Nr zlecenia ze spedu" — the SpedTrans order number captured by the eksport
+   * on the `zgloszony → gotowy` flip (`POST /delegations/:id/ready`). `null`
+   * until the outing is readied; cleared back to `null` on rollback so a
+   * re-advance must supply a fresh number. Sibling of the `readyBy*` fields.
+   */
+  spedOrderNumber: z.string().nullable(),
 
   notes: z.string().nullable(),
 

@@ -66,6 +66,7 @@ function rawRow(rates: {
     readyById: null,
     readyBy: null,
     readyAt: null,
+    spedOrderNumber: null,
     notes: null,
     claim: null,
     createdAt: d,

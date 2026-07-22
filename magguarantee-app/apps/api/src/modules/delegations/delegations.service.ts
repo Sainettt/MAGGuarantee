@@ -393,9 +393,21 @@ export class DelegationsService {
     const updated = await this.delegations.update(row.id, {
       status: target,
       notes: dto.note ? appendNote(row.notes, dto.note) : row.notes,
-      // Stamp the eksport who readied the load — forward flip only. Surfaced in
-      // the modal as the "zweryfikowany" actor (see schema / docs).
-      ...(dto.rollback ? {} : { readyById: user.sub, readyAt: new Date() }),
+      // Stamp the eksport who readied the load + the SpedTrans order number —
+      // forward flip only. `readyBy*` are surfaced in the modal as the
+      // "zweryfikowany" actor; `spedOrderNumber` ("Nr zlecenia ze spedu") is
+      // mandatory on the flip (enforced by `MarkReadySchema.superRefine`). On
+      // ROLLBACK (`gotowy → zgloszony`) we explicitly CLEAR `spedOrderNumber`
+      // (set `null`) so re-advancing forces a fresh number — the legacy code
+      // leaves `readyBy*` untouched on rollback, but the sped number must not
+      // survive a rollback.
+      ...(dto.rollback
+        ? { spedOrderNumber: null }
+        : {
+            readyById: user.sub,
+            readyAt: new Date(),
+            spedOrderNumber: dto.spedOrderNumber,
+          }),
     });
     // Notify the carrier the vehicle is ready (forward flip only; fire-and-log).
     if (!dto.rollback) void this._notifyWyjazd('ready', updated);
@@ -699,6 +711,7 @@ export class DelegationsService {
       readyById: row.readyById,
       readyBy: row.readyBy,
       readyAt: row.readyAt ? row.readyAt.toISOString() : null,
+      spedOrderNumber: row.spedOrderNumber,
       notes: row.notes,
       claimId: row.claimId,
       createdAt: row.createdAt.toISOString(),
@@ -964,7 +977,10 @@ export class DelegationsService {
  */
 const DELEGATION_STATUS_LABEL_PL: Record<DelegationStatus, string> = {
   zgloszony: 'zgłoszony',
-  gotowy: 'gotowy',
+  // Display string only — the enum key `gotowy` is unchanged. Reads as
+  // "załadowany" in user-facing conflict messages (409 «≤1 active trip» /
+  // cancel) to match the new UI label for this status.
+  gotowy: 'załadowany',
   w_trasie: 'w trasie',
   zjechal: 'zjechał',
   anulowany: 'anulowany',
