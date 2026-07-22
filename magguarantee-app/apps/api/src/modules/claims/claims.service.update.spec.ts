@@ -1549,8 +1549,6 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
     // paymentEur, `hoursAdjusted` is verifier-only (PATCH path).
     const out = await svc.submit(makeAuth('przewoznik', 'u-carrier-1'), {
       delegationId: 'deleg-1',
-      timeFrom: '08:00',
-      timeTo: '18:00',
     });
 
     expect(creates).toHaveLength(1);

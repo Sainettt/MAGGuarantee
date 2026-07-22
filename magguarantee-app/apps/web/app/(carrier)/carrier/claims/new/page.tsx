@@ -6,18 +6,18 @@
 // while the preview is loading or returned an error.
 //
 // Phase 7.10 REWORK (2026-06-20 #4, docs/14 §7.10.3): the carrier no longer
-// types the period. They PICK one of their claimable outings
-// (`GET /delegations?claimable=true` → {w_trasie, zjechal} with no linked
+// types the period OR the time window. They PICK one of their claimable outings
+// (`GET /delegations?claimable=true` → only `zjechal` outings with no linked
 // wniosek). The chosen `delegationId` is sent to preview/submit; the PERIOD
-// (`dateStart`/`dateEnd`) + the default `mileage` come BACK from the preview
-// (server-derived) and render read-only / pre-filled. `timeFrom`/`timeTo` stay
-// form fields (`timeFrom` pre-filled from the outing's `departureAt` time).
+// (`dateStart`/`dateEnd`), the TIME WINDOW (`timeFrom`/`timeTo`, wall-clock of
+// the outing's actual departure/return) and the default `mileage` all come BACK
+// from the preview (server-derived) and render READ-ONLY. The carrier's submit
+// body is just `{ delegationId, comment?, attachmentIds? }`.
 //
-// When a `w_trasie` outing is picked the preview returns
-// `delegationWarning='NOT_YET_RETURNED'` → a soft warning banner + an inline
-// soft-confirm checkbox gate (§7.10.3, the recommended option). `zjechal`
-// outings submit straight through; `gotowy`/`zgloszony` never appear in the
-// picker (the api doesn't return them).
+// Step 2 (precise times): `timeFrom`/`timeTo` are no longer carrier inputs — the
+// weryfikator captures them on the `w_trasie`/`zjechal` transitions and the
+// server derives them. Since `claimable` now returns ONLY returned (`zjechal`)
+// outings, the old `w_trasie` "not yet returned" soft-warning is gone.
 
 import { AlertTriangle, ShieldAlert, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
@@ -29,9 +29,7 @@ import {
   canSubmitByDuration,
   checkClaimDates,
   DEFAULTS as SUBMISSION_DEFAULTS,
-  DELEGATION_NOT_YET_RETURNED_WARNING,
   type DateRuleViolation,
-  type ExcludedDayDto,
   type PreviewClaimDto,
   type SubmitClaimDto,
   VEHICLE_NOT_GUARANTEED,
@@ -40,9 +38,7 @@ import {
 import { LivePreviewPanel } from '@/components/carrier/LivePreviewPanel';
 import { StatusBadge } from '@/components/carrier/StatusBadge';
 import { Button } from '@/components/ui/Button';
-import { Checkbox } from '@/components/ui/Checkbox';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import {
@@ -71,26 +67,19 @@ const CLIENT_MAX_PERIOD_DAYS = 90;
 // draft so removed keys cannot resurrect themselves on hydrate and trip Zod
 // `.strict()`. Phase 7.10: `dateStart`/`dateEnd` were REMOVED earlier (period
 // is server-derived from the outing). Phase 7 §0″ finish (2026-06-25):
-// `vehicleId`/`trailerId`/`driverId`/`mileage` were ALSO REMOVED — the carrier
-// no longer enters them, they are derived read-only from the selected outing.
+// `vehicleId`/`trailerId`/`driverId`/`mileage` were ALSO REMOVED. Step 2:
+// `timeFrom`/`timeTo` were REMOVED too — the weryfikator captures the actual
+// departure/return moments and the server derives the wall-clock time window.
 // A stale draft carrying any of those old keys would otherwise resurrect them
 // into the submit body and trip the backend's `.strict()` 400.
-const FORM_ALLOWED_KEYS = [
-  'delegationId',
-  'timeFrom',
-  'timeTo',
-  'comment',
-  'attachmentIds',
-] as const;
+const FORM_ALLOWED_KEYS = ['delegationId', 'comment', 'attachmentIds'] as const;
 
 // The form's editable values — the carrier's ONLY inputs. `delegationId` is
-// REQUIRED; the period, vehicle, trailer, driver and mileage are all
-// server-derived and never live in the form (rendered read-only from the
+// REQUIRED; the period, time window, vehicle, trailer, driver and mileage are
+// all server-derived and never live in the form (rendered read-only from the
 // selected outing / the preview response).
 interface FormValues {
   delegationId: string;
-  timeFrom: string;
-  timeTo: string;
   comment?: string;
   attachmentIds?: string[];
 }
@@ -98,10 +87,6 @@ interface FormValues {
 function getDefaults(): FormValues {
   return {
     delegationId: '',
-    // timeFrom / timeTo are NOT NULL since phase3_blocks. Empty string keeps
-    // the <input type="time"> controlled; the submit gate rejects "".
-    timeFrom: '',
-    timeTo: '',
     comment: undefined,
     attachmentIds: undefined,
   };
@@ -110,9 +95,9 @@ function getDefaults(): FormValues {
 /**
  * Drop unknown keys from a persisted draft before `form.reset(draft)`. Without
  * this filter a returning user's saved draft re-introduces removed keys (e.g.
- * the old `vehicleId`/`trailerId`/`driverId`/`mileage`/`dateStart`/`dateEnd`),
- * Zod `.strict()` rejects the whole form, and the user sees a permanently
- * invalid form with no visible offending field.
+ * the old `vehicleId`/`trailerId`/`driverId`/`mileage`/`dateStart`/`dateEnd`/
+ * `timeFrom`/`timeTo`), Zod `.strict()` rejects the whole form, and the user
+ * sees a permanently invalid form with no visible offending field.
  */
 function sanitizeDraft(draft: Record<string, unknown>): Partial<FormValues> {
   const out: Record<string, unknown> = {};
@@ -132,35 +117,6 @@ function todayBusinessTzIso(): string {
     month: '2-digit',
     day: '2-digit',
   }).format(new Date());
-}
-
-/** `'2026-06-04'` → `'04.06'` for compact inline hints (pl-PL day.month). */
-function formatDayMonth(iso: string): string {
-  const parts = iso.split('-');
-  return `${parts[2]}.${parts[1]}`;
-}
-
-const WEEKDAY_TZ_FMT = new Intl.DateTimeFormat('en-US', {
-  timeZone: 'UTC',
-  weekday: 'short',
-});
-
-/** True if the `YYYY-MM-DD` calendar date falls on Sat/Sun. */
-function isWeekendIso(iso: string): boolean {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  if (!m) return false;
-  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
-  if (Number.isNaN(d.getTime())) return false;
-  const wd = WEEKDAY_TZ_FMT.format(d);
-  return wd === 'Sat' || wd === 'Sun';
-}
-
-/** Extract the `HH:mm` portion from an ISO datetime (local-zone agnostic — the
- *  api stores the carrier's claimed window verbatim, the slice mirrors it). */
-function timeFromIso(iso: string | null | undefined): string {
-  if (!iso) return '';
-  const m = /T(\d{2}:\d{2})/.exec(iso);
-  return m?.[1] ?? '';
 }
 
 export default function NewClaimPage() {
@@ -197,7 +153,7 @@ export default function NewClaimPage() {
 
   const watched = form.watch();
 
-  // The currently-selected outing (drives the picker context + the warning).
+  // The currently-selected outing (drives the picker context).
   const selectedDelegation = useMemo(
     () => delegations.find((d) => d.id === watched.delegationId) ?? null,
     [delegations, watched.delegationId],
@@ -227,26 +183,11 @@ export default function NewClaimPage() {
         : selectedDelegation.driverNameSnapshot)
     : null;
 
-  // ── Prefill timeFrom from the chosen outing ──────────────────────────
-  // Vehicle/trailer/driver are NO LONGER form fields (Phase 7 §0″ finish) — they
-  // render read-only from the selected outing directly. Picking an outing only
-  // seeds `timeFrom` from the outing's `departureAt` time (overridable). Guarded
-  // on the *current* form value so a manual edit is never clobbered.
-  useEffect(() => {
-    if (!selectedDelegation) return;
-    const seedTime = timeFromIso(selectedDelegation.departureAt);
-    if (seedTime && !form.getValues('timeFrom')) {
-      form.setValue('timeFrom', seedTime, { shouldDirty: false });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDelegation?.id]);
-
   // ── Preview body — keyed off delegationId (everything derived server-side) ──
-  // We send ONLY `delegationId` (+ the time window) and OMIT vehicleId/mileage;
-  // the api derives the period, vehicle/trailer/driver and mileage from the
-  // outing and returns `dateStart`/`dateEnd`, `mileage`, `delegationContext`
-  // (+ `delegationWarning` for w_trasie). The carrier cannot override any of
-  // them (Phase 7 §0″ finish).
+  // We send ONLY `delegationId` and OMIT vehicleId/mileage/timeFrom/timeTo; the
+  // api derives the period, TIME WINDOW, vehicle/trailer/driver and mileage from
+  // the outing and returns `dateStart`/`dateEnd`, `timeFrom`/`timeTo`, `mileage`
+  // and `delegationContext`. The carrier cannot override any of them.
   const { previewBody, emptyReason } = useMemo<{
     previewBody: PreviewClaimDto | null;
     emptyReason: 'incomplete' | undefined;
@@ -262,39 +203,22 @@ export default function NewClaimPage() {
     return {
       previewBody: {
         delegationId: watched.delegationId,
-        timeFrom: watched.timeFrom || undefined,
-        timeTo: watched.timeTo || undefined,
         hoursAdjusted: 0,
       },
       emptyReason: undefined,
     };
-  }, [
-    watched.delegationId,
-    watched.timeFrom,
-    watched.timeTo,
-    selectedNotGuaranteed,
-  ]);
+  }, [watched.delegationId, selectedNotGuaranteed]);
 
   const debouncedPreviewBody = useDebouncedValue(previewBody, 400);
   const previewQ = useClaimPreview(debouncedPreviewBody, {
     enabled: !!debouncedPreviewBody,
   });
 
-  // Derived (read-only) period from the preview — the dates we'll submit.
+  // Derived (read-only) period + time window from the preview — what we submit.
   const derivedDateStart = previewQ.data?.dateStart;
   const derivedDateEnd = previewQ.data?.dateEnd;
-
-  // Soft-warning: the chosen outing is still `w_trasie` (not yet `zjechal`).
-  const notYetReturned =
-    previewQ.data?.delegationWarning === DELEGATION_NOT_YET_RETURNED_WARNING;
-
-  // ── Soft-confirm gate (§7.10.3) — inline checkbox. ─────────────────
-  // Must be ticked before submit enables when the outing is `w_trasie`. Reset
-  // whenever the warning is no longer active (different outing / now zjechal).
-  const [acknowledged, setAcknowledged] = useState(false);
-  useEffect(() => {
-    if (!notYetReturned) setAcknowledged(false);
-  }, [notYetReturned, watched.delegationId]);
+  const derivedTimeFrom = previewQ.data?.timeFrom;
+  const derivedTimeTo = previewQ.data?.timeTo;
 
   // ── Read-only mileage from the preview (Phase 7 §0″ finish) ──────────
   // ALWAYS the server-computed `Σ VehicleDailyKm (state=drove)` over the derived
@@ -383,14 +307,12 @@ export default function NewClaimPage() {
   const onSubmit = form.handleSubmit(
     (values) => {
       setViolations([]);
-      // Assemble the SubmitClaimDto (Phase 7 §0″ finish): the backend body is
-      // `.strict()` and accepts ONLY these 5 keys. vehicleId/trailerId/driverId/
-      // mileage are DERIVED server-side from `delegationId` — sending any of
-      // them is a 400. Strip empty optional fields.
+      // Assemble the SubmitClaimDto (Step 2): the backend body is `.strict()`
+      // and accepts ONLY these 3 keys. period / time window / vehicle / trailer
+      // / driver / mileage are ALL DERIVED server-side from `delegationId` —
+      // sending any of them is a 400. Strip empty optional fields.
       const body: Record<string, unknown> = {
         delegationId: values.delegationId,
-        timeFrom: values.timeFrom,
-        timeTo: values.timeTo,
       };
       if (values.comment) body.comment = values.comment;
       if (values.attachmentIds && values.attachmentIds.length > 0) {
@@ -407,79 +329,10 @@ export default function NewClaimPage() {
 
   const errs = form.formState.errors;
 
-  // Explicit required-fields gate (independent of resolver). The carrier's only
-  // required inputs are the outing + the time window; the soft-gate adds the
-  // w_trasie acknowledgement. Vehicle/trailer/driver/mileage are server-derived
-  // and never user-required.
-  const requiredFilled =
-    !!watched.delegationId && !!watched.timeFrom && !!watched.timeTo;
-
-  // Soft-gate: when the outing is w_trasie, the acknowledgement checkbox must
-  // be ticked. zjechal outings submit straight through (no gate).
-  const softGateBlocked = notYetReturned && !acknowledged;
-
-  // ── Boundary-day "time has no effect" hints (Bug 2) ──────────────────
-  const excludedByDate = useMemo<Map<string, string>>(() => {
-    const map = new Map<string, string>();
-    const months = previewQ.data?.breakdown?.breakdown ?? [];
-    for (const m of months) {
-      for (const ex of (m.excludedDays ?? []) as ExcludedDayDto[]) {
-        map.set(ex.date, ex.label);
-      }
-    }
-    return map;
-  }, [previewQ.data]);
-
-  // Credited ("odd") Saturdays — paid in full by the odd-Saturday guarantee.
-  // The engine surfaces the exact ISO dates in `saturdayDays` (a Saturday that
-  // fell on an EU ban is NOT here — it lands in `excludedDays` instead), so the
-  // client never re-derives the odd/even rule.
-  const creditedSaturdays = useMemo<Set<string>>(() => {
-    const set = new Set<string>();
-    const months = previewQ.data?.breakdown?.breakdown ?? [];
-    for (const m of months) {
-      for (const d of m.saturdayDays ?? []) {
-        set.add(d);
-      }
-    }
-    return set;
-  }, [previewQ.data]);
-
-  function boundaryHint(
-    iso: string | undefined,
-    holidayKey: 'boundaryHintTimeFrom' | 'boundaryHintTimeTo',
-    saturdayKey: 'boundaryHintTimeFromSaturday' | 'boundaryHintTimeToSaturday',
-    weekendKey: 'boundaryHintTimeFromWeekend' | 'boundaryHintTimeToWeekend',
-  ): string | null {
-    if (!iso) return null;
-    const label = excludedByDate.get(iso);
-    if (label) {
-      return tForm(holidayKey, { date: formatDayMonth(iso), reason: label });
-    }
-    // A credited Saturday is a weekend day by `isWeekendIso`, but it IS counted
-    // (paid in full) — so it must be checked BEFORE the generic weekend branch,
-    // whose "day not counted" copy would be wrong for it.
-    if (creditedSaturdays.has(iso)) {
-      return tForm(saturdayKey, { date: formatDayMonth(iso) });
-    }
-    if (isWeekendIso(iso)) {
-      return tForm(weekendKey, { date: formatDayMonth(iso) });
-    }
-    return null;
-  }
-
-  const timeFromHint = boundaryHint(
-    derivedDateStart,
-    'boundaryHintTimeFrom',
-    'boundaryHintTimeFromSaturday',
-    'boundaryHintTimeFromWeekend',
-  );
-  const timeToHint = boundaryHint(
-    derivedDateEnd,
-    'boundaryHintTimeTo',
-    'boundaryHintTimeToSaturday',
-    'boundaryHintTimeToWeekend',
-  );
+  // Explicit required-fields gate (independent of resolver). The carrier's ONLY
+  // required input is the outing — everything else (period, time window,
+  // vehicle/trailer/driver, mileage) is server-derived.
+  const requiredFilled = !!watched.delegationId;
 
   const noClaimable =
     !delegationsQ.isLoading && delegations.length === 0;
@@ -583,8 +436,8 @@ export default function NewClaimPage() {
                   </p>
                 )}
 
-                {/* Selected-outing status chip (so the carrier sees zjechał vs
-                    w trasie at a glance). */}
+                {/* Selected-outing status chip (always zjechał now — claimable
+                    returns only returned outings). */}
                 {selectedDelegation && (
                   <div className="flex items-center gap-2 text-sm text-text-sub">
                     <span>{tPicker('selectedStatus')}</span>
@@ -592,35 +445,8 @@ export default function NewClaimPage() {
                   </div>
                 )}
 
-                {/* §7.10.3 — w_trasie warning banner + soft-confirm checkbox. */}
-                {notYetReturned && (
-                  <div className="space-y-2">
-                    <div
-                      role="status"
-                      aria-live="polite"
-                      className="flex items-start gap-2 rounded-md bg-warning-bg dark:bg-warning/15 border border-warning/40 px-3 py-2"
-                    >
-                      <AlertTriangle
-                        size={16}
-                        className="text-warning-dark dark:text-warning shrink-0 mt-0.5"
-                        aria-hidden
-                      />
-                      <p className="text-sm text-warning-dark dark:text-warning">
-                        {tPicker('warningBanner')}
-                      </p>
-                    </div>
-                    <label className="flex items-start gap-2 text-sm text-text cursor-pointer select-none">
-                      <Checkbox
-                        className="mt-0.5"
-                        checked={acknowledged}
-                        onChange={(e) => setAcknowledged(e.target.checked)}
-                      />
-                      <span>{tPicker('warningAck')}</span>
-                    </label>
-                  </div>
-                )}
-
-                {/* Read-only derived period (server-computed from the outing). */}
+                {/* Read-only derived period + time window (server-computed from
+                    the outing's actual departure / return). */}
                 {(derivedDateStart || derivedDateEnd) && (
                   <div className="rounded-md border border-border bg-input/40 px-3 py-2">
                     <p className="text-[11px] font-medium uppercase tracking-wider text-text-sub">
@@ -630,10 +456,15 @@ export default function NewClaimPage() {
                       {formatDateFull(derivedDateStart)} –{' '}
                       {formatDateFull(derivedDateEnd)}
                     </p>
-                    {notYetReturned && (
-                      <p className="mt-1 text-xs text-text-sub">
-                        {tPicker('temporaryPeriodHint')}
-                      </p>
+                    {(derivedTimeFrom || derivedTimeTo) && (
+                      <>
+                        <p className="mt-2 text-[11px] font-medium uppercase tracking-wider text-text-sub">
+                          {tPicker('derivedTimes')}
+                        </p>
+                        <p className="mt-0.5 text-sm text-text tabular-nums">
+                          {derivedTimeFrom ?? '—'} – {derivedTimeTo ?? '—'}
+                        </p>
+                      </>
                     )}
                   </div>
                 )}
@@ -668,60 +499,9 @@ export default function NewClaimPage() {
                 )}
               </FormSection>
 
-              {/* Period is now derived (above). Only the time window stays a
-                  carrier field — `timeFrom` pre-fills from the outing. */}
-              <FormSection title={tForm('sectionPeriod')}>
-                <FormGrid cols={2}>
-                  <div>
-                    <FormField
-                      label={tForm('timeFrom')}
-                      required
-                      error={errs.timeFrom?.message}
-                      htmlFor="claim-timeFrom"
-                    >
-                      <Input
-                        id="claim-timeFrom"
-                        type="time"
-                        className="h-10"
-                        {...form.register('timeFrom')}
-                      />
-                    </FormField>
-                    {timeFromHint && (
-                      <p
-                        role="status"
-                        aria-live="polite"
-                        className="mt-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning-dark dark:text-warning"
-                      >
-                        {timeFromHint}
-                      </p>
-                    )}
-                  </div>
-                  <div>
-                    <FormField
-                      label={tForm('timeTo')}
-                      required
-                      error={errs.timeTo?.message}
-                      htmlFor="claim-timeTo"
-                    >
-                      <Input
-                        id="claim-timeTo"
-                        type="time"
-                        className="h-10"
-                        {...form.register('timeTo')}
-                      />
-                    </FormField>
-                    {timeToHint && (
-                      <p
-                        role="status"
-                        aria-live="polite"
-                        className="mt-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning-dark dark:text-warning"
-                      >
-                        {timeToHint}
-                      </p>
-                    )}
-                  </div>
-                </FormGrid>
-              </FormSection>
+              {/* Period + time window are DERIVED read-only from the outing —
+                  shown in the picker card above (dates + wall-clock hours). The
+                  carrier no longer types a time window (Step 2). */}
 
               {/* Mileage is DERIVED read-only from the preview (the
                   server-computed Σ VehicleDailyKm over the period). The carrier
@@ -775,7 +555,6 @@ export default function NewClaimPage() {
                 onClick={() => {
                   draft.clear();
                   form.reset(getDefaults());
-                  setAcknowledged(false);
                 }}
                 disabled={submitting}
               >
@@ -790,7 +569,6 @@ export default function NewClaimPage() {
                   durationBlocked ||
                   clientBlocked ||
                   !requiredFilled ||
-                  softGateBlocked ||
                   selectedNotGuaranteed
                 }
               >

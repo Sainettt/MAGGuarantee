@@ -20,12 +20,15 @@
 import { useTranslations } from 'next-intl';
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import type {
-  DelegationDto,
-  DelegationFilters,
-  DelegationStatus,
+import {
+  RETURN_BEFORE_DEPARTURE_CODE,
+  RETURN_DATE_FUTURE_CODE,
+  type DelegationDto,
+  type DelegationFilters,
+  type DelegationStatus,
 } from '@magguarantee/shared';
 
+import { ApiResponseError } from '@/lib/api/client';
 import { DelegationsBoardFilters } from '@/components/delegations/DelegationsBoardFilters';
 import { MarkInTransitDialog } from '@/components/delegations/MarkInTransitDialog';
 import { MarkReturnedDialog } from '@/components/delegations/MarkReturnedDialog';
@@ -40,6 +43,16 @@ import {
 type DialogTarget =
   | { kind: 'inTransit'; delegation: DelegationDto }
   | { kind: 'returned'; delegation: DelegationDto };
+
+/** Pull the RFC-7807 `extensions.code` off a 422 problem-details envelope. */
+function extractErrorCode(err: unknown): string | undefined {
+  if (!(err instanceof ApiResponseError) || err.status !== 422) return undefined;
+  const extensions = (err.data as { extensions?: unknown } | undefined)
+    ?.extensions;
+  if (!extensions || typeof extensions !== 'object') return undefined;
+  const code = (extensions as { code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
+}
 
 export function WeryfikatorDelegationsView() {
   const t = useTranslations('weryfikator.delegations');
@@ -69,8 +82,20 @@ export function WeryfikatorDelegationsView() {
 
   const returnedM = useMarkDelegationReturned({
     onSuccess: () => toast.success(tActions('returnedToast')),
-    onError: (err) =>
-      toast.error(err instanceof Error ? err.message : tActions('errorToast')),
+    onError: (err) => {
+      // The dialog's client guards catch these pre-submit; the 422 only lands
+      // here on a clock-skew / stale-data race — surface the specific copy.
+      const code = extractErrorCode(err);
+      if (code === RETURN_DATE_FUTURE_CODE) {
+        toast.error(tActions('returnedFuture'));
+        return;
+      }
+      if (code === RETURN_BEFORE_DEPARTURE_CODE) {
+        toast.error(tActions('returnedBeforeDeparture'));
+        return;
+      }
+      toast.error(err instanceof Error ? err.message : tActions('errorToast'));
+    },
   });
 
   const renderActions = (row: DelegationDto) => {
@@ -170,6 +195,7 @@ export function WeryfikatorDelegationsView() {
           plannedReturnAt={dialog.delegation.plannedReturnAt}
           vehicleId={dialog.delegation.vehicle?.id ?? null}
           departureAt={dialog.delegation.departureAt}
+          actualDepartureAt={dialog.delegation.actualDepartureAt}
           title={tActions('returnedTitle')}
           description={tActions('returnedDescription', { plate })}
           dateLabel={tActions('returnedDateLabel')}
@@ -177,6 +203,7 @@ export function WeryfikatorDelegationsView() {
           cancelLabel={tActions('cancel')}
           requiredMsg={tActions('returnedRequired')}
           futureMsg={tActions('returnedFuture')}
+          beforeDepartureMsg={tActions('returnedBeforeDeparture')}
           incompleteWarning={(count) =>
             tActions('returnedIncompleteKm', { count })
           }

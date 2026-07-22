@@ -11,8 +11,8 @@
 // Cell states (per DS):
 //   - idle    : default border
 //   - saving  : input disabled + small spinner right-of-input
-//   - success : short green underline (200ms after save), then fades out
-//   - error   : restored value + toast (parent handles toast via mutation)
+//   - success : green input border (800ms after save), then fades back to idle
+//   - error   : restored value + red input border + toast (parent handles toast)
 //
 // We deliberately keep the row a pure "presentational" component — it
 // delegates the mutation call back to the parent so the page owns the
@@ -136,8 +136,9 @@ function EditableCell({
         onChange={(e) => setValue(e.target.value)}
         onBlur={() => void handleBlur()}
         className={cn(
-          'h-9 w-28 tabular-nums',
+          'h-9 w-28 tabular-nums transition-colors',
           state === 'error' && 'border-danger focus:border-danger',
+          state === 'success' && 'border-success focus:border-success',
         )}
       />
       {state === 'saving' && (
@@ -145,12 +146,6 @@ function EditableCell({
           aria-hidden
           size={14}
           className="absolute right-2 top-1/2 -translate-y-1/2 animate-spin text-text-sub"
-        />
-      )}
-      {state === 'success' && (
-        <span
-          aria-hidden
-          className="absolute inset-x-0 -bottom-0.5 h-0.5 rounded-full bg-success"
         />
       )}
     </div>

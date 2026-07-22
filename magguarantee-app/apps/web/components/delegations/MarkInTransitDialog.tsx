@@ -1,21 +1,27 @@
 'use client';
 
 // §7.10.2 dialog C — weryfikator's `/in-transit` transition (`gotowy →
-// w_trasie`). The §7.1(b) confirm-with-date shape (mirrors <MarkReturnedDialog>):
-// a single DATE-ONLY field (`actualDepartureAt`, `YYYY-MM-DD`) that records the
-// day the vehicle ACTUALLY started driving — the verifier may set the status
-// days after the fact, so they backdate the real start.
+// w_trasie`). A single DATETIME field (`actualDepartureAt`) that records the
+// exact MOMENT the vehicle actually started driving — the linked wniosek's
+// `dateStart` derives from its DAY and `timeFrom` from its wall-clock `HH:mm`
+// (the carrier no longer types a time window).
 //
-// Behaviour (locked in §7.10.2 dialog C):
-//   - default = TODAY (not the reported `departureAt`): the common case is
-//     «marking it today»; the verifier lowers it only when the truck actually
-//     left earlier.
-//   - `min` = the reported departure DATE (`departureAt`); the field must not
-//     allow an earlier day. `max` = today (no future).
-//   - required (empty → «Podaj datę wyjazdu»); future-date guarded, and a
-//     before-reported-departure guard. The api re-validates (422
-//     DEPARTURE_DATE_FUTURE / DEPARTURE_BEFORE_REPORTED).
-//   - stays OPEN on error so the typed date isn't lost.
+// Behaviour (Step 2 — precise times):
+//   - `<input type="datetime-local">` — the verifier captures the day AND the
+//     time in one control.
+//   - default = the carrier-REPORTED `departureAt` (date + time), NOT today
+//     (Task 4 auto-fill): the punctual case needs zero edits — the derived
+//     `timeFrom` then equals the reported departure time. The verifier adjusts
+//     only when the truck actually left at a different moment.
+//   - `min` = start of the reported departure DAY; `max` = now (no future).
+//   - required (empty → «Podaj datę i godzinę wyjazdu»); future-datetime guarded
+//     and a before-reported-departure-DAY guard (earlier same-day IS allowed,
+//     mirroring the api). The api re-validates (422 DEPARTURE_DATE_FUTURE /
+//     DEPARTURE_BEFORE_REPORTED).
+//   - stays OPEN on error so the typed value isn't lost.
+//
+// The wall-clock is sent VERBATIM (`datetimeLocalToApiIso` appends `:00Z`) —
+// see `lib/format/datetimeLocal.ts` for the tz rationale.
 //
 // Server-side side effect: `actualDepartureAt` becomes the ACTUAL start of the
 // guarantee period, so the api auto-recalcs the linked wniosek. That signal is
@@ -34,24 +40,17 @@ import {
 } from '@/components/ui/Dialog';
 import { FormField } from '@/components/forms/Form';
 import { Input } from '@/components/ui/Input';
-
-const BUSINESS_TZ = 'Europe/Warsaw';
-
-/** `YYYY-MM-DD` of today in the MAGTRANS operating timezone. */
-function todayBusinessTzIso(): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: BUSINESS_TZ,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-}
+import {
+  datetimeLocalToApiIso,
+  isoToDatetimeLocal,
+  nowDatetimeLocal,
+} from '@/lib/format/datetimeLocal';
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   plate: string;
-  /** The outing's reported departure day — the earliest allowed value (`min`). */
+  /** The outing's reported departure — auto-fill default + earliest allowed day. */
   departureAt: string;
   title: string;
   description: string;
@@ -63,8 +62,9 @@ interface Props {
   futureMsg: string;
   beforeDepartureMsg: string;
   /**
-   * Runs the transition with the chosen date. Awaited — dialog closes on
-   * resolve, stays OPEN on reject (parent toasts; the date stays typed).
+   * Runs the transition with the chosen datetime as a full API ISO string
+   * (`YYYY-MM-DDTHH:mm:00Z`). Awaited — dialog closes on resolve, stays OPEN on
+   * reject (parent toasts; the value stays typed).
    */
   onConfirm: (actualDepartureAt: string) => void | Promise<void>;
 }
@@ -84,19 +84,22 @@ export function MarkInTransitDialog({
   beforeDepartureMsg,
   onConfirm,
 }: Props) {
-  const today = useMemo(() => todayBusinessTzIso(), []);
-  // Default = today (NOT the reported departure): the verifier lowers it only
-  // when the truck actually started driving on an earlier day.
-  const departureDay = departureAt.slice(0, 10);
+  const now = useMemo(() => nowDatetimeLocal(), []);
+  // Auto-fill default = the reported departure (date + time), local wall-clock.
+  const departureDefault = useMemo(
+    () => isoToDatetimeLocal(departureAt),
+    [departureAt],
+  );
+  const departureDay = departureDefault.slice(0, 10);
 
-  const [value, setValue] = useState(today);
+  const [value, setValue] = useState(departureDefault);
   const [busy, setBusy] = useState(false);
   const [touched, setTouched] = useState(false);
 
   // Re-seed when a different delegation opens the dialog.
   useEffect(() => {
     if (open) {
-      setValue(today);
+      setValue(departureDefault);
       setTouched(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -104,9 +107,10 @@ export function MarkInTransitDialog({
 
   const error = !value
     ? requiredMsg
-    : value > today
+    : value > now
       ? futureMsg
-      : value < departureDay
+      : // earlier same-day start IS allowed — only a strictly earlier DAY blocks.
+        value.slice(0, 10) < departureDay
         ? beforeDepartureMsg
         : undefined;
   const valid = !error;
@@ -116,10 +120,10 @@ export function MarkInTransitDialog({
     if (!valid) return;
     setBusy(true);
     try {
-      await onConfirm(value);
+      await onConfirm(datetimeLocalToApiIso(value));
       onOpenChange(false);
     } catch {
-      // Stay open so the date isn't re-typed; parent surfaces the error toast.
+      // Stay open so the value isn't re-typed; parent surfaces the error toast.
       // A 422 (DEPARTURE_DATE_FUTURE / DEPARTURE_BEFORE_REPORTED) lands here too.
     } finally {
       setBusy(false);
@@ -142,10 +146,10 @@ export function MarkInTransitDialog({
         >
           <Input
             id="deleg-actualDepartureAt"
-            type="date"
+            type="datetime-local"
             className="h-10"
-            min={departureDay}
-            max={today}
+            min={`${departureDay}T00:00`}
+            max={now}
             autoFocus
             value={value}
             onChange={(e) => setValue(e.target.value)}

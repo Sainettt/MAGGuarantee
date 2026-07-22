@@ -136,10 +136,11 @@ export interface DelegationListFilters {
   statusIn?: DelegationStatus[];
   /**
    * Phase 7 REWORK (2026-06-20 #4) — carrier «claimable wyjazdy» picker. When
-   * `true`, restricts to outings that can back a NEW wniosek: status ∈
-   * {`w_trasie`, `zjechal`} AND no claim linked yet (`claim is null`). Composes
-   * with `carrierId` (the scope branch always pins the carrier). Server-side
-   * only — translated to a `status IN (...) AND claim is null` predicate here.
+   * `true`, restricts to outings that can back a NEW wniosek: status ===
+   * `zjechal` AND no claim linked yet (`claim is null`). `w_trasie` is no longer
+   * claimable — a wniosek can only back a RETURNED outing. Composes with
+   * `carrierId` (the scope branch always pins the carrier). Server-side only —
+   * translated to a `status = 'zjechal' AND claim is null` predicate here.
    */
   claimableOnly?: boolean;
   carrierId?: string;
@@ -289,10 +290,13 @@ export class DelegationsRepository {
     if (filters.status) {
       where.status = filters.status;
     } else if (filters.claimableOnly) {
-      // «Claimable» = active-and-returnable AND not yet claimed. The status
-      // floor is fixed here (not client-supplied) and `claim is null` excludes
-      // outings that already back a wniosek (the `@unique` FK means at most one).
-      where.status = { in: ['w_trasie', 'zjechal'] };
+      // «Claimable» = RETURNED (`zjechal`) AND not yet claimed. A wniosek can only
+      // back a returned outing (its period + times + mileage are only final once
+      // the weryfikator captured the actual departure/return datetimes), so
+      // `w_trasie` is NO LONGER claimable. The status floor is fixed here (not
+      // client-supplied) and `claim is null` excludes outings that already back a
+      // wniosek (the `@unique` FK means at most one).
+      where.status = 'zjechal';
       where.claim = { is: null };
     } else if (filters.statusIn && filters.statusIn.length > 0) {
       where.status = { in: filters.statusIn };

@@ -19,7 +19,6 @@ import type {
   ClaimFilters,
   ClaimListItem,
   ClaimStatus,
-  DelegationWarning,
   KmCalcBreakdown,
   PreviewClaimDto,
   PreviewClaimResponse,
@@ -34,7 +33,6 @@ import {
   canSubmitByDuration,
   cooldownCheck,
   DEFAULTS as CARRIER_SUBMISSION_DEFAULTS,
-  DELEGATION_NOT_YET_RETURNED_WARNING,
   getAuthThreshold,
   isCompensationDue,
   requiresMaksimConfirmation,
@@ -221,14 +219,14 @@ export class ClaimsService {
    * / driver / plate snapshot / mileage from it — the carrier no longer sends
    * any of those). Throws:
    *  - 422 when the outing is missing, belongs to another carrier, or is not yet
-   *    `w_trasie`/`zjechal` (i.e. still `gotowy`/`zgloszony`/`anulowany`),
+   *    `zjechal` (i.e. still `w_trasie`/`gotowy`/`zgloszony`/`anulowany`),
    *  - 409 when a wniosek already exists for the outing (defence-in-depth ahead
    *    of the unique-FK P2002 catch in `submit`).
    *
-   * Returns the outing row plus the derived period boundaries plus a soft
-   * `warning` when the outing is still `w_trasie` (the carrier may proceed;
-   * `dateEnd` then falls back to `plannedReturnAt`, and a later `zjechal`
-   * triggers the auto-recalc).
+   * Returns the outing row plus the derived period boundaries AND the derived
+   * time window (`timeFrom`/`timeTo` = wall-clock `HH:mm` of the outing's
+   * `actualDepartureAt`/`actualReturnAt`). Only `zjechal` outings back a wniosek,
+   * so both actual datetimes are present.
    */
   private async _resolveDelegationContext(
     carrierId: string,
@@ -237,7 +235,8 @@ export class ClaimsService {
     delegation: DelegationRow;
     dateStart: Date;
     dateEnd: Date;
-    warning: DelegationWarning | null;
+    timeFrom: string;
+    timeTo: string;
   }> {
     if (!this.delegations) {
       throw new UnprocessableEntityException(
@@ -285,34 +284,40 @@ export class ClaimsService {
   }
 
   /**
-   * Pure period derivation from an outing row + the status gate. `dateStart =
-   * date(actualDepartureAt ?? departureAt)`, `dateEnd = actualReturnAt ??
-   * plannedReturnAt`. Only {`w_trasie`, `zjechal`} may back a wniosek; `w_trasie`
-   * yields a soft warning (no `actualReturnAt` yet → planned date used). No IO.
+   * Pure period + time derivation from an outing row + the status gate. ONLY a
+   * `zjechal` outing may back a wniosek — its period, times, and mileage are only
+   * final once the weryfikator captured the actual departure/return datetimes
+   * (`w_trasie`/`gotowy`/`zgloszony`/`anulowany` all 422). No IO.
    *
-   * `dateStart` prefers the weryfikator-captured `actualDepartureAt` (the ACTUAL
-   * start of the guarantee period, stamped on `gotowy → w_trasie`) over the
-   * carrier-reported `departureAt`, falling back to the latter when the actual
-   * date is absent (legacy / not yet stamped). This single seam is shared by BOTH
-   * the preview and the submit paths (`_resolveDelegationContext`), so they agree.
+   *   - `dateStart = day(actualDepartureAt)`, `timeFrom = HH:mm(actualDepartureAt)`,
+   *   - `dateEnd   = day(actualReturnAt)`,   `timeTo   = HH:mm(actualReturnAt)`.
+   *
+   * The `?? departureAt` / `?? plannedReturnAt` fallbacks are defensive (a
+   * `zjechal` outing always carries both actual datetimes) — they keep a
+   * malformed legacy row from throwing on `null`. This single seam is shared by
+   * BOTH the preview and the submit paths (`_resolveDelegationContext`), so they
+   * agree. The derived `HH:mm` is the wall-clock of the stored datetime (UTC
+   * `T`-part) — the same slice the web renders from the ISO string.
    */
   private _deriveDelegationPeriod(deleg: DelegationRow): {
     dateStart: Date;
     dateEnd: Date;
-    warning: DelegationWarning | null;
+    timeFrom: string;
+    timeTo: string;
   } {
-    if (deleg.status !== 'w_trasie' && deleg.status !== 'zjechal') {
+    if (deleg.status !== 'zjechal') {
       throw new UnprocessableEntityException(
-        'Wniosek można złożyć tylko dla wyjazdu w trasie lub zjechanego.',
+        'Wniosek można złożyć tylko dla zjechanego wyjazdu.',
       );
     }
-    const dateStart = startOfUtcDay(
-      deleg.actualDepartureAt ?? deleg.departureAt,
-    );
-    const dateEnd = startOfUtcDay(deleg.actualReturnAt ?? deleg.plannedReturnAt);
-    const warning: DelegationWarning | null =
-      deleg.status === 'w_trasie' ? DELEGATION_NOT_YET_RETURNED_WARNING : null;
-    return { dateStart, dateEnd, warning };
+    const departure = deleg.actualDepartureAt ?? deleg.departureAt;
+    const returned = deleg.actualReturnAt ?? deleg.plannedReturnAt;
+    return {
+      dateStart: startOfUtcDay(departure),
+      dateEnd: startOfUtcDay(returned),
+      timeFrom: hhMmFromDate(departure),
+      timeTo: hhMmFromDate(returned),
+    };
   }
 
   /**
@@ -352,22 +357,23 @@ export class ClaimsService {
     // carrier-only path, see @Roles on POST /claims
     const carrier = await this._requireCarrierProfile(user);
 
-    // Phase 7 §0″ finish — EVERYTHING (period, vehicle, trailer, driver,
+    // Phase 7 §0″ finish — EVERYTHING (period, TIMES, vehicle, trailer, driver,
     // mileage) DERIVES from the chosen outing; the carrier sends only
-    // `delegationId` + `timeFrom`/`timeTo` (+ optional comment/attachments).
-    // `_resolveDelegationContext` validates ownership (same carrier), the
-    // status gate ({w_trasie, zjechal}), the not-already-claimed invariant, and
-    // returns the outing row + derived period (`dateStart = date(departureAt)`,
-    // `dateEnd = actualReturnAt ?? plannedReturnAt`). A still-`w_trasie` outing
-    // is NOT blocked — it carries a soft warning; a `gotowy`/`zgloszony` outing
-    // throws 422. The trailer/driver belong to the carrier transitively (they
-    // were chosen by the carrier when the carrier created the outing, and the
-    // outing is owned by the carrier), so no separate ownership check is needed.
+    // `delegationId` (+ optional comment/attachments). `_resolveDelegationContext`
+    // validates ownership (same carrier), the status gate (ONLY `zjechal` — a
+    // wniosek can only back a RETURNED outing), the not-already-claimed invariant,
+    // and returns the outing row + derived period (`dateStart = day(actual
+    // departure)`, `dateEnd = day(actualReturnAt)`) + derived time window
+    // (`timeFrom`/`timeTo` = `HH:mm` of the actual departure/return). A `w_trasie`
+    // / `gotowy` / `zgloszony` outing throws 422. The trailer/driver belong to
+    // the carrier transitively (they were chosen by the carrier when the carrier
+    // created the outing, and the outing is owned by the carrier), so no separate
+    // ownership check is needed.
     const delegationCtx = await this._resolveDelegationContext(
       carrier.id,
       dto.delegationId,
     );
-    const { delegation, dateStart, dateEnd } = delegationCtx;
+    const { delegation, dateStart, dateEnd, timeFrom, timeTo } = delegationCtx;
     const vehicleId = delegation.vehicleId;
     const vehiclePlateSnapshot = await this._resolveVehiclePlate(delegation);
 
@@ -446,14 +452,15 @@ export class ClaimsService {
 
     // ── Tier 2: km-calc dependent rules ───────────────────────
     // Same engine as `previewKmCalc` so live preview and submit produce
-    // identical numbers. timeFrom/timeTo are NOT NULL since phase3_blocks.
-    // `hoursAdjusted` is verifier-only — carriers never send it; submit
-    // always feeds 0 into km-calc and persists 0 on both Decimal columns.
+    // identical numbers. `timeFrom`/`timeTo` are DERIVED from the outing's actual
+    // departure/return datetimes (not carrier-supplied). `hoursAdjusted` is
+    // verifier-only — carriers never send it; submit always feeds 0 into km-calc
+    // and persists 0 on both Decimal columns.
     const calc = await this.kmCalc.calc({
       dateStart: dateStartIso,
       dateEnd: dateEndIso,
-      timeFrom: dto.timeFrom,
-      timeTo: dto.timeTo,
+      timeFrom,
+      timeTo,
       hoursAdjusted: 0,
     });
 
@@ -549,9 +556,10 @@ export class ClaimsService {
           vehiclePlateSnapshot,
           dateStart,
           dateEnd,
-          // Required post-phase3_blocks (NOT NULL).
-          timeFrom: dto.timeFrom,
-          timeTo: dto.timeTo,
+          // Required post-phase3_blocks (NOT NULL) — DERIVED from the outing's
+          // actual departure/return datetimes (not carrier-supplied).
+          timeFrom,
+          timeTo,
           drivenDays: calc.totalDays,
           mileage,
           // `kmPerDay` is NOT NULL post-phase3_blocks — calculated above.
@@ -594,11 +602,12 @@ export class ClaimsService {
           // can compare the carrier's originally-derived dopłata against the
           // verifier's applied amount. Same write-once contract as origMileage.
           origPaymentEur: paymentEur,
-          // Immutable time-window snapshot — same values that go into the
-          // working `timeFrom/timeTo` columns above (`dto.timeFrom/timeTo`).
-          // Write-once at submit; the verifier PATCH never overwrites these.
-          origTimeFrom: dto.timeFrom,
-          origTimeTo: dto.timeTo,
+          // Immutable time-window snapshot — the SAME derived values that go
+          // into the working `timeFrom/timeTo` columns above (the outing's actual
+          // departure/return wall-clock). Write-once at submit; the verifier
+          // PATCH never overwrites these.
+          origTimeFrom: timeFrom,
+          origTimeTo: timeTo,
           // Phase 7 REWORK (2026-06-20 #4) — link the wniosek to the outing.
           // The `@unique` FK guarantees one claim per outing; a second submit
           // for the same outing hits P2002 → translated to a 409 below.
@@ -639,6 +648,14 @@ export class ClaimsService {
   }
 
   // ── Auto-recalc from delegation (Phase 7 REWORK 2026-06-20 #4) ──
+  //
+  // TODO(defensive): both delegation recalc entry points below
+  // (`recalcFromDelegation` / `recalcDepartureFromDelegation`) are now
+  // UNREACHABLE with a linked claim — a wniosek can only be filed on a `zjechal`
+  // outing and `zjechal` is terminal, so no claim can exist while these
+  // `w_trasie`/`zjechal` transitions run (they immediately no-op on the
+  // "no linked wniosek" branch). Kept intact as a low-blast-radius safety net;
+  // do NOT rely on them firing in the current flow.
 
   /**
    * Re-computes the linked wniosek when a delegation transitions to `zjechal`
@@ -1324,6 +1341,11 @@ export class ClaimsService {
    * behaves exactly as before. Pure guard — no IO. Wired as the OUTERMOST gate
    * on `update` (before `CLAIM_NOT_VERIFIED`), on `verifyClaim` (before the
    * recalc + Maksim auto-email), and on `requestAuthorization`.
+   *
+   * TODO(defensive): now effectively unreachable — a wniosek can only be filed
+   * on a `zjechal` outing, so a linked outing is never `w_trasie` in the current
+   * flow. Kept as a low-blast-radius safety net (a re-opened lifecycle would
+   * re-arm it) rather than deleted.
    */
   private _assertDelegationReturned(existing: ClaimRow): void {
     if (
@@ -1810,10 +1832,10 @@ export class ClaimsService {
     const carrier = await this._requireCarrierProfile(user);
 
     // Phase 7 §0″ finish — when the carrier has picked an outing the PERIOD,
-    // VEHICLE, TRAILER, DRIVER, MILEAGE (and the `w_trasie` soft warning) are all
-    // DERIVED from it, mirroring what submit() will compute; the body carries no
-    // vehicle/mileage. When `delegationId` is absent (the existing-claim /
-    // verifier inspection path reaching this method directly), we fall back to a
+    // TIMES, VEHICLE, TRAILER, DRIVER, and MILEAGE are all DERIVED from it (which
+    // must be `zjechal`), mirroring what submit() will compute; the body carries
+    // no vehicle/mileage/times. When `delegationId` is absent (the existing-claim
+    // / verifier inspection path reaching this method directly), we fall back to a
     // caller-supplied `vehicleId` + dates — ownership re-checked defence-in-depth.
     if (dto.delegationId) {
       const ctx = await this._resolveDelegationContext(
@@ -1869,7 +1891,10 @@ export class ClaimsService {
     // is actually consulted; the carrier new-claim `previewKmCalc` path never
     // sets it.
     const allowMileageOverride = user.role !== 'przewoznik';
-    return this._runPreviewCalc(dto, null, allowMileageOverride);
+    // Times come from the persisted claim (the preview body no longer carries
+    // `timeFrom`/`timeTo`); pass the loaded row so the live math keeps the
+    // claim's fractional-boundary window for mileage/date/hours edits.
+    return this._runPreviewCalc(dto, null, allowMileageOverride, claim);
   }
 
   /**
@@ -1879,10 +1904,14 @@ export class ClaimsService {
    * inside `previewKmCalc` so behaviour is byte-identical for the carrier.
    *
    * `ctx` (the delegation-derived context) drives the carrier new-claim path:
-   * the period, the vehicle backing the mileage sum, and the read-only
-   * vehicle/trailer/driver `delegationContext` all come from the outing. When
-   * `ctx` is null, the legacy date-driven path runs off the body's
-   * `dateStart`/`dateEnd` (+ optional `vehicleId` for the mileage sum).
+   * the period, the TIMES, the vehicle backing the mileage sum, and the
+   * read-only vehicle/trailer/driver `delegationContext` all come from the
+   * outing. When `ctx` is null, the existing-claim path runs off the body's
+   * `dateStart`/`dateEnd` (+ optional `vehicleId` for the mileage sum); its
+   * `timeFrom`/`timeTo` come from a VERIFIER-supplied `dto.timeFrom`/`timeTo`
+   * (live-recalc of an unsaved pracownik time edit — gated by
+   * `allowMileageOverride`, the same verifier gate as the mileage override),
+   * falling back to `existingClaim`'s persisted times.
    *
    * `allowMileageOverride` — VERIFIER inspection-path flag. Only honoured on the
    * existing-claim path (`ctx === null`): when a verifier (`pracownik`/`admin`)
@@ -1899,9 +1928,11 @@ export class ClaimsService {
       delegation: DelegationRow;
       dateStart: Date;
       dateEnd: Date;
-      warning: DelegationWarning | null;
+      timeFrom: string;
+      timeTo: string;
     } | null = null,
     allowMileageOverride = false,
+    existingClaim: ClaimRow | null = null,
   ): Promise<PreviewClaimResponse> {
     // Resolve the effective period: derived from the outing when supplied,
     // otherwise the caller-supplied `dateStart`/`dateEnd` (existing-claim path).
@@ -1910,14 +1941,32 @@ export class ClaimsService {
     const dateStartIso = dateStart ? toIsoDateOnly(dateStart) : (dto.dateStart ?? '');
     const dateEndIso = dateEnd ? toIsoDateOnly(dateEnd) : (dto.dateEnd ?? '');
 
+    // Times, three cases:
+    //  • ctx (carrier delegation-derived path): ALWAYS the outing-derived times —
+    //    the carrier never influences them, even if `dto.timeFrom/timeTo` slip in.
+    //  • VERIFIER existing-claim path (`allowMileageOverride` — the SAME gate that
+    //    honours the mileage override, i.e. `pracownik`/`admin`): honour a
+    //    caller-supplied `dto.timeFrom/timeTo` so the ClaimModal live-recalcs an
+    //    UNSAVED time edit, falling back to the persisted claim's times.
+    //  • carrier bare-vehicle path / `przewoznik` reklamacja inspection
+    //    (override NOT allowed): the persisted claim's times (or `null`) — any dto
+    //    times are IGNORED (same "no carrier override" invariant as mileage).
+    const timeFrom = ctx
+      ? ctx.timeFrom
+      : allowMileageOverride
+        ? (dto.timeFrom ?? existingClaim?.timeFrom ?? null)
+        : (existingClaim?.timeFrom ?? null);
+    const timeTo = ctx
+      ? ctx.timeTo
+      : allowMileageOverride
+        ? (dto.timeTo ?? existingClaim?.timeTo ?? null)
+        : (existingClaim?.timeTo ?? null);
+
     const calc = await this.kmCalc.calc({
       dateStart: dateStartIso,
       dateEnd: dateEndIso,
-      // PreviewClaimSchema keeps timeFrom / timeTo optional — the engine
-      // tolerates `null` for the live-preview shortcut where the carrier
-      // hasn't yet typed the times.
-      timeFrom: dto.timeFrom ?? null,
-      timeTo: dto.timeTo ?? null,
+      timeFrom,
+      timeTo,
       hoursAdjusted: dto.hoursAdjusted ?? 0,
     });
 
@@ -1965,14 +2014,14 @@ export class ClaimsService {
         breakdown: calc.breakdown,
       },
       // Surfaced only on the delegation-derived path so the carrier form can
-      // show the read-only period + vehicle/trailer/driver + the `w_trasie`
-      // soft-warning banner.
+      // show the read-only period + time window + vehicle/trailer/driver.
       ...(ctx
         ? {
             dateStart: dateStartIso,
             dateEnd: dateEndIso,
+            timeFrom: ctx.timeFrom,
+            timeTo: ctx.timeTo,
             delegationContext: this._buildDelegationContext(ctx.delegation),
-            ...(ctx.warning ? { delegationWarning: ctx.warning } : {}),
           }
         : {}),
     };
@@ -3267,6 +3316,17 @@ function extractCorrectionFields(
 /** UTC date → `YYYY-MM-DD`. Inverse of `isoDateToMidnightUtc`. */
 function toIsoDateOnly(d: Date): string {
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Wall-clock `HH:mm` of a Date, read from its ISO `T`-part (UTC components) —
+ * the SAME slice the web renders from a delegation's ISO datetime string, so the
+ * carrier's read-only preview and the persisted `Claim.timeFrom`/`timeTo` agree
+ * with what the weryfikator entered. Used to derive the claim time window from
+ * the outing's `actualDepartureAt` / `actualReturnAt` datetimes.
+ */
+function hhMmFromDate(d: Date): string {
+  return d.toISOString().slice(11, 16);
 }
 
 /**

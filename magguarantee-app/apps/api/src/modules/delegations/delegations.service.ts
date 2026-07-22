@@ -16,7 +16,8 @@ import {
   DEPARTURE_DATE_FUTURE_CODE,
   DEPARTURE_IN_PAST_CODE,
   DEPARTURE_PAST_GRACE_MS,
-  startOfBusinessTodayUtc,
+  RETURN_BEFORE_DEPARTURE_CODE,
+  RETURN_DATE_FUTURE_CODE,
   type CancelDelegationDto,
   type DelegationDto,
   type DelegationEligibilityResponse,
@@ -417,20 +418,22 @@ export class DelegationsService {
   /**
    * `POST /delegations/:id/in-transit` — weryfikator|admin. `gotowy → w_trasie`.
    *
-   * `actualDepartureAt` is **date-only** (`YYYY-MM-DD`) — the ACTUAL start of
-   * the guarantee period (the day the vehicle really started driving). It is
-   * required and validated:
-   *   - not in the future (max = business-today, UTC-day granularity),
-   *   - not earlier than the reported `departureAt` (UTC-day: `actualDepartureAt
-   *     >= startOfUtcDay(departureAt)`).
+   * `actualDepartureAt` is a **full datetime** (`YYYY-MM-DDTHH:mm:ssZ`) — the
+   * ACTUAL moment the vehicle started driving. The weryfikator captures the exact
+   * time; the linked wniosek's `dateStart` derives from its DAY and `timeFrom`
+   * from its wall-clock `HH:mm`. It is required and validated:
+   *   - not in the future (`<= now`, datetime granularity),
+   *   - not earlier than the reported `departureAt` DAY (`actualDepartureAt >=
+   *     startOfUtcDay(departureAt)` — an earlier same-day start IS allowed).
    *
    * In ONE `prisma.$transaction` (opened by `@Audit('delegation.markInTransit')`):
    *   1. set `actualDepartureAt` + status + `verifiedBy/At`,
-   *   2. auto-recalc the linked wniosek's `dateStart` (no-op when none / when the
-   *      period was human-adjusted / when the claim is already decided) — because
-   *      moving the actual departure moves the claim period start. Mirrors
-   *      `markReturned`'s `recalcFromDelegation`. NOTE: unlike `markReturned` this
-   *      does NOT bump `Vehicle.lastDroveAt` — that is the return signal.
+   *   2. auto-recalc the linked wniosek's `dateStart` (DEFENSIVE — always a no-op
+   *      in the current flow: a wniosek can only be filed once the outing is
+   *      `zjechal`, and `zjechal` is terminal, so no claim can ever be linked when
+   *      this runs. Kept as a low-blast-radius safety net; mirrors
+   *      `markReturned`'s `recalcFromDelegation`). NOTE: unlike `markReturned`
+   *      this does NOT bump `Vehicle.lastDroveAt` — that is the return signal.
    */
   async markInTransit(
     user: AuthUser,
@@ -442,10 +445,11 @@ export class DelegationsService {
 
     assertLegalDelegationTransition(row.status, 'w_trasie');
 
-    // `actualDepartureAt` is date-only (`YYYY-MM-DD`) — parse to UTC midnight to
-    // match the `plannedReturnAt` / `@db.Date` round-trip (same as markReturned).
-    const actualDepartureAt = isoDateOnlyToMidnightUtc(dto.actualDepartureAt);
-    if (!actualDepartureAt) {
+    // `actualDepartureAt` is a FULL datetime — store it verbatim (NO midnight
+    // normalisation) so the linked wniosek's `timeFrom` can derive from its
+    // wall-clock `HH:mm`.
+    const actualDepartureAt = new Date(dto.actualDepartureAt);
+    if (Number.isNaN(actualDepartureAt.getTime())) {
       throw new UnprocessableEntityException('Nieprawidłowa data wyjazdu');
     }
     this._assertActualDepartureValid(actualDepartureAt, row.departureAt);
@@ -463,10 +467,12 @@ export class DelegationsService {
     });
 
     // Auto-recalc the linked wniosek in the SAME transaction — the actual
-    // departure is the claim period START, so a change moves `dateStart`. No-op
-    // when no claim is linked, when the claim is already decided, or when a human
-    // adjusted the period (the gate lives inside `recalcDepartureFromDelegation`).
-    // Deliberately does NOT bump `Vehicle.lastDroveAt` (return-flow only).
+    // departure is the claim period START, so a change would move `dateStart`.
+    // TODO(defensive): now ALWAYS a no-op — a wniosek can only be filed on a
+    // `zjechal` outing, and `zjechal` is terminal, so no claim can be linked when
+    // this transition runs. Kept as a low-blast-radius safety net (the gate lives
+    // inside `recalcDepartureFromDelegation`). Deliberately does NOT bump
+    // `Vehicle.lastDroveAt` (return-flow only).
     if (this.claimsService) {
       await this.claimsService.recalcDepartureFromDelegation(
         row.id,
@@ -478,29 +484,29 @@ export class DelegationsService {
   }
 
   /**
-   * Validates the weryfikator-supplied `actualDepartureAt` (already parsed to UTC
-   * midnight) against the two business rules, throwing a 422 with a stable
-   * machine-readable `code` in the `extensions` envelope (same shape as the
-   * `DEPARTURE_IN_PAST` / guarantee gates):
-   *   1. NOT in the future — max is business-today at UTC-day granularity
-   *      (mirrors the claims future-date check). Code `DEPARTURE_DATE_FUTURE`.
-   *   2. NOT earlier than the carrier-reported `departureAt` day
+   * Validates the weryfikator-supplied `actualDepartureAt` (a FULL datetime)
+   * against the two business rules, throwing a 422 with a stable machine-readable
+   * `code` in the `extensions` envelope (same shape as the `DEPARTURE_IN_PAST` /
+   * guarantee gates):
+   *   1. NOT in the future — `actualDepartureAt <= now` at DATETIME granularity
+   *      (the field now carries a time). Code `DEPARTURE_DATE_FUTURE`.
+   *   2. NOT earlier than the carrier-reported `departureAt` DAY
    *      (`actualDepartureAt >= startOfUtcDay(departureAt)`). Hard constraint —
-   *      the actual start of driving cannot predate the reported departure day.
-   *      Code `DEPARTURE_BEFORE_REPORTED`.
+   *      the actual start of driving cannot predate the reported departure day,
+   *      but an earlier same-day start (e.g. left at 05:00 vs a reported 08:00)
+   *      IS allowed. Code `DEPARTURE_BEFORE_REPORTED`.
    */
   private _assertActualDepartureValid(
     actualDepartureAt: Date,
     departureAt: Date,
   ): void {
-    const today = startOfBusinessTodayUtc();
-    if (actualDepartureAt.getTime() > today.getTime()) {
+    if (actualDepartureAt.getTime() > Date.now()) {
       throw new UnprocessableEntityException({
         message: 'Data faktycznego wyjazdu nie może być w przyszłości.',
         extensions: { code: DEPARTURE_DATE_FUTURE_CODE },
       });
     }
-    // Compare at UTC-day granularity — `departureAt` carries a time-of-day, so
+    // Lower bound is DAY-granular — `departureAt` carries a time-of-day, so
     // truncate it to its calendar day; a same-day actual departure is allowed.
     const reportedDay = startOfUtcDay(departureAt);
     if (actualDepartureAt.getTime() < reportedDay.getTime()) {
@@ -515,12 +521,16 @@ export class DelegationsService {
   /**
    * `POST /delegations/:id/returned` — weryfikator|admin. `w_trasie → zjechal`.
    *
-   * `actualReturnAt` is **date-only**. In ONE `prisma.$transaction`:
+   * `actualReturnAt` is a **full datetime** (the weryfikator captures the exact
+   * moment of return; the linked wniosek's `timeTo` derives from its wall-clock
+   * `HH:mm`). Validated: `<= now` and `>= actualDepartureAt` (you cannot return
+   * before you left). In ONE `prisma.$transaction`:
    *   1. set `actualReturnAt` + `verifiedBy/At` + status,
    *   2. advance `Vehicle.lastDroveAt = max(lastDroveAt, actualReturnAt)`
    *      (never moved backwards by an out-of-order edit),
-   *   3. auto-recalc the linked wniosek (no-op when none / when the period was
-   *      human-adjusted / when the claim is already decided) — see
+   *   3. auto-recalc the linked wniosek (DEFENSIVE no-op — see the note on the
+   *      recalc call: a claim can only be filed once the outing is already
+   *      `zjechal`, so none can be linked at this transition) — see
    *      `ClaimsService.recalcFromDelegation`.
    */
   async markReturned(
@@ -533,12 +543,20 @@ export class DelegationsService {
 
     assertLegalDelegationTransition(row.status, 'zjechal');
 
-    // `actualReturnAt` is date-only (`YYYY-MM-DD`) — parse to UTC midnight to
-    // match the `plannedReturnAt` / `@db.Date` round-trip.
-    const actualReturnAt = isoDateOnlyToMidnightUtc(dto.actualReturnAt);
-    if (!actualReturnAt) {
+    // `actualReturnAt` is a FULL datetime — store it verbatim (NO midnight
+    // normalisation) so the linked wniosek's `timeTo` can derive from its
+    // wall-clock `HH:mm`.
+    const actualReturnAt = new Date(dto.actualReturnAt);
+    if (Number.isNaN(actualReturnAt.getTime())) {
       throw new UnprocessableEntityException('Nieprawidłowa data zjazdu');
     }
+    // Bound the return moment: not in the future, and not before the actual
+    // departure (fall back to the reported `departureAt` when no actual departure
+    // was captured — legacy / defensive).
+    this._assertActualReturnValid(
+      actualReturnAt,
+      row.actualDepartureAt ?? row.departureAt,
+    );
 
     // All writes below enrol in the SAME transaction. `POST /:id/returned`
     // carries `@Audit('delegation.markReturned')`, so the `AuditInterceptor`
@@ -561,14 +579,46 @@ export class DelegationsService {
       await this.vehicles.update(row.vehicleId, { lastDroveAt: actualReturnAt });
     }
 
-    // Auto-recalc the linked wniosek in the SAME transaction. No-op when no
-    // claim is linked, when the claim is already decided, or when a human
-    // adjusted the period (the gate lives inside `recalcFromDelegation`).
+    // Auto-recalc the linked wniosek in the SAME transaction.
+    // TODO(defensive): now ALWAYS a no-op — a wniosek can only be filed on a
+    // `zjechal` outing, so at the moment this `w_trasie → zjechal` transition
+    // runs no claim can yet be linked. Kept as a low-blast-radius safety net (the
+    // gate lives inside `recalcFromDelegation`).
     if (this.claimsService) {
       await this.claimsService.recalcFromDelegation(row.id, actualReturnAt);
     }
 
     return this.toDto(updated, user);
+  }
+
+  /**
+   * Validates the weryfikator-supplied `actualReturnAt` (a FULL datetime) against
+   * the two business rules, throwing a 422 with a stable machine-readable `code`
+   * in the `extensions` envelope (mirrors `_assertActualDepartureValid`):
+   *   1. NOT in the future — `actualReturnAt <= now`. Code `RETURN_DATE_FUTURE`.
+   *   2. NOT before the departure — `actualReturnAt >= departureFloor` at DATETIME
+   *      granularity (the vehicle cannot return before it left). `departureFloor`
+   *      is the outing's `actualDepartureAt`, falling back to the reported
+   *      `departureAt` when no actual departure was captured. Code
+   *      `RETURN_BEFORE_DEPARTURE`.
+   */
+  private _assertActualReturnValid(
+    actualReturnAt: Date,
+    departureFloor: Date,
+  ): void {
+    if (actualReturnAt.getTime() > Date.now()) {
+      throw new UnprocessableEntityException({
+        message: 'Data faktycznego zjazdu nie może być w przyszłości.',
+        extensions: { code: RETURN_DATE_FUTURE_CODE },
+      });
+    }
+    if (actualReturnAt.getTime() < departureFloor.getTime()) {
+      throw new UnprocessableEntityException({
+        message:
+          'Data faktycznego zjazdu nie może być wcześniejsza niż data wyjazdu.',
+        extensions: { code: RETURN_BEFORE_DEPARTURE_CODE },
+      });
+    }
   }
 
   /**
@@ -967,9 +1017,10 @@ export class DelegationsService {
       if (rest.carrierId && rest.carrierId !== carrier.id) {
         throw new ForbiddenException('Brak uprawnień do tego przewoźnika');
       }
-      // Phase 7 REWORK (2026-06-20 #4) — «claimable wyjazdy» picker: outings in
-      // {`w_trasie`, `zjechal`} with no claim yet. The repo applies the fixed
-      // status floor + `claim is null` predicate; the carrier pin still wins.
+      // Phase 7 REWORK (2026-06-20 #4) — «claimable wyjazdy» picker: `zjechal`
+      // outings with no claim yet (a wniosek can only back a RETURNED outing —
+      // `w_trasie` is no longer claimable). The repo applies the fixed status
+      // floor + `claim is null` predicate; the carrier pin still wins.
       return {
         ...rest,
         carrierId: carrier.id,
@@ -1047,21 +1098,10 @@ function appendNote(existing: string | null, note: string): string {
 }
 
 /**
- * Parse a date-only `YYYY-MM-DD` to UTC midnight (matches the `@db.Date`
- * round-trip Prisma performs for `plannedReturnAt` / `actualReturnAt`).
- * Returns `null` on malformed input.
- */
-function isoDateOnlyToMidnightUtc(iso: string): Date | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  if (!m) return null;
-  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
-}
-
-/**
  * Truncate any `Date` to UTC midnight of its calendar day. Used by
- * `_assertActualDepartureValid` to compare the (date-only) `actualDepartureAt`
- * against the reported `departureAt` (which carries a time) at UTC-day
- * granularity. Mirrors the identically-named helper in `claims.service.ts`.
+ * `_assertActualDepartureValid` to compare the (datetime) `actualDepartureAt`
+ * against the reported `departureAt` at UTC-DAY granularity for the lower bound.
+ * Mirrors the identically-named helper in `claims.service.ts`.
  */
 function startOfUtcDay(d: Date): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));

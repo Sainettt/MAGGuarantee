@@ -311,6 +311,22 @@ describe('DelegationsService.markInTransit', () => {
     expect(out.actualDepartureAt).toBe('2026-06-03T00:00:00.000Z');
   });
 
+  it('stores the FULL actualDepartureAt datetime verbatim (no midnight normalisation)', async () => {
+    // The weryfikator now captures the exact moment — the wall-clock time must
+    // survive (the linked wniosek derives `timeFrom` from it).
+    const { service, updateSpy } = build({ row: makeRow({ status: 'gotowy' }) });
+    const out = await service.markInTransit(auth('weryfikator'), 'deleg-1', {
+      actualDepartureAt: '2026-06-03T14:20:00.000Z',
+    });
+    expect(out.status).toBe('w_trasie');
+    const patch = updateSpy.mock.calls[0]![1];
+    expect((patch.actualDepartureAt as Date).toISOString()).toBe(
+      '2026-06-03T14:20:00.000Z',
+    );
+    // …and it round-trips onto the wire DTO with the time preserved.
+    expect(out.actualDepartureAt).toBe('2026-06-03T14:20:00.000Z');
+  });
+
   it('an actual-departure on the reported departure DAY is allowed (>= boundary)', async () => {
     // departureAt is 2026-06-01T08:00Z; a same-DAY actual departure (00:00Z)
     // must pass the not-before-departureAt gate (UTC-day granularity).
@@ -404,6 +420,64 @@ describe('DelegationsService.markReturned', () => {
       '2026-06-07T00:00:00.000Z',
     );
     expect(patch.verifiedById).toBe('u-weryfikator');
+  });
+
+  it('stores the FULL actualReturnAt datetime verbatim (no midnight normalisation)', async () => {
+    // The weryfikator captures the exact return moment — the wall-clock time
+    // must survive (the linked wniosek derives `timeTo` from it).
+    const { service, updateSpy } = build({ row: makeRow({ status: 'w_trasie' }) });
+    const out = await service.markReturned(auth('weryfikator'), 'deleg-1', {
+      actualReturnAt: '2026-06-07T16:45:00.000Z',
+    });
+    const patch = updateSpy.mock.calls[0]![1];
+    expect((patch.actualReturnAt as Date).toISOString()).toBe(
+      '2026-06-07T16:45:00.000Z',
+    );
+    expect(out.actualReturnAt).toBe('2026-06-07T16:45:00.000Z');
+  });
+
+  it('rejects a FUTURE actualReturnAt (422 RETURN_DATE_FUTURE) — writes nothing', async () => {
+    const { service, updateSpy, recalcSpy } = build({
+      row: makeRow({ status: 'w_trasie' }),
+    });
+    let thrown: unknown;
+    try {
+      await service.markReturned(auth('weryfikator'), 'deleg-1', {
+        actualReturnAt: '2999-01-01T00:00:00.000Z',
+      });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(UnprocessableEntityException);
+    expect((thrown as UnprocessableEntityException).getResponse()).toMatchObject(
+      { extensions: { code: 'RETURN_DATE_FUTURE' } },
+    );
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(recalcSpy).not.toHaveBeenCalled();
+  });
+
+  it('rejects an actualReturnAt BEFORE the actual departure (422 RETURN_BEFORE_DEPARTURE) — writes nothing', async () => {
+    // Outing left 2026-06-05T10:00; a return at 08:00 the same day is impossible.
+    const { service, updateSpy, recalcSpy } = build({
+      row: makeRow({
+        status: 'w_trasie',
+        actualDepartureAt: new Date('2026-06-05T10:00:00.000Z'),
+      }),
+    });
+    let thrown: unknown;
+    try {
+      await service.markReturned(auth('weryfikator'), 'deleg-1', {
+        actualReturnAt: '2026-06-05T08:00:00.000Z',
+      });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(UnprocessableEntityException);
+    expect((thrown as UnprocessableEntityException).getResponse()).toMatchObject(
+      { extensions: { code: 'RETURN_BEFORE_DEPARTURE' } },
+    );
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(recalcSpy).not.toHaveBeenCalled();
   });
 
   it('advances lastDroveAt to actualReturnAt when it is newer', async () => {

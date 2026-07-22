@@ -135,8 +135,14 @@ function datesWellOrdered(v: {
  *   always persists `0` in both `origHoursAdjusted` and `hoursAdjustedValue`.
  * - `plannerId`/`opiekunId` are derived server-side from the vehicle's planner
  *   and the carrier's opiekun — clients do not send them.
- * - `timeFrom` / `timeTo` are NOT NULL on the underlying column since
- *   phase3_blocks; the carrier MUST supply them.
+ * - `timeFrom` / `timeTo` are **NOT** in the carrier submit body — they are
+ *   DERIVED server-side from the outing's actual times: `timeFrom` is the
+ *   wall-clock `HH:mm` of `Delegation.actualDepartureAt` and `timeTo` of
+ *   `Delegation.actualReturnAt` (the weryfikator captures both as full
+ *   datetimes on the `w_trasie` / `zjechal` transitions). The carrier no longer
+ *   supplies a time window; `pracownik` may still override it at verification
+ *   (`VerifyClaimSchema` / `UpdateClaimCorrectionFields`). Both columns stay
+ *   NOT NULL — submit always writes the derived values.
  * - `orderNumber` / `orderDate` are intentionally NOT in the submit DTO —
  *   they are MAGTRANS-internal and assigned by the verifier when transitioning
  *   to ZAAKCEPTOWANO. Carrier-side submit always persists NULL.
@@ -145,25 +151,19 @@ export const SubmitClaimSchema = z
   .object({
     /**
      * Phase 7 REWORK (2026-06-20 #4, docs/20 §0″) — REQUIRED for new wnioski
-     * (app-level). The carrier picks one of their own outings in
-     * {`w_trasie`, `zjechal`} that has no claim yet (see
-     * `GET /delegations?claimable=true`). The PERIOD, VEHICLE, TRAILER, DRIVER,
-     * and MILEAGE are all DERIVED server-side from the chosen outing — the
-     * carrier no longer sends `dateStart`/`dateEnd`/`vehicleId`/`trailerId`/
-     * `driverId`/`mileage`. The DB FK is `@unique`, so a second wniosek on the
-     * same outing 409s.
+     * (app-level). The carrier picks one of their own `zjechal` outings that has
+     * no claim yet (see `GET /delegations?claimable=true`). The PERIOD, TIMES,
+     * VEHICLE, TRAILER, DRIVER, and MILEAGE are all DERIVED server-side from the
+     * chosen (returned) outing — the carrier no longer sends `dateStart`/
+     * `dateEnd`/`timeFrom`/`timeTo`/`vehicleId`/`trailerId`/`driverId`/`mileage`.
+     * The DB FK is `@unique`, so a second wniosek on the same outing 409s.
      */
     delegationId: UuidSchema,
 
-    /**
-     * REQUIRED — Claim.timeFrom is NOT NULL since phase3_blocks. The carrier
-     * still supplies the time window (the web form pre-fills `timeFrom` from the
-     * outing's `departureAt` time); `pracownik` verifies the exact `timeTo`
-     * later. km-calc needs both for fractional boundary days.
-     */
-    timeFrom: HhMmSchema,
-    /** REQUIRED — Claim.timeTo is NOT NULL since phase3_blocks. */
-    timeTo: HhMmSchema,
+    // `timeFrom` / `timeTo` are NO LONGER carrier-supplied — they are DERIVED
+    // server-side from the outing's `actualDepartureAt` / `actualReturnAt`
+    // wall-clock (see the schema doc above). The carrier submit body is now just
+    // the outing reference + optional comment/attachments.
 
     comment: emptyStringToUndefined(z.string().max(2_000).optional()),
 
@@ -220,9 +220,9 @@ export type VerifyClaimDto = z.infer<typeof VerifyClaimSchema>;
  * Two callers, two shapes:
  *  - `POST /claims/preview` (carrier new-claim form) — sends `delegationId` and
  *    OMITS `dateStart`/`dateEnd`/`vehicleId`/`mileage`; the api DERIVES the
- *    period + vehicle/trailer/driver + mileage from the outing so the FE can
- *    render them read-only before submit (Phase 7 §0″ finish), and surfaces a
- *    `delegationWarning` when the outing is still `w_trasie`.
+ *    period + times + vehicle/trailer/driver + mileage from the outing so the FE
+ *    can render them read-only before submit (Phase 7 §0″ finish). The outing
+ *    must already be `zjechal` (a wniosek can only back a returned outing).
  *  - `POST /claims/:nrZgl/preview` (reklamacja / verifier inspection of an
  *    existing claim) — sends the caller-supplied `dateStart`/`dateEnd` (and an
  *    optional `vehicleId`) to drive the live math; the existing claim already
@@ -238,10 +238,12 @@ export const PreviewClaimSchema = z
      * Phase 7 REWORK (2026-06-20 #4, docs/20 §0″) — OPTIONAL on preview. When
      * the carrier has picked an outing, the form sends `delegationId` and OMITS
      * `dateStart`/`dateEnd`/`vehicleId`/`mileage`; the api derives the PERIOD,
-     * VEHICLE, TRAILER, DRIVER, and MILEAGE from the outing (and surfaces a
-     * `delegationWarning` when the outing is still `w_trasie`). When absent, the
+     * TIMES, VEHICLE, TRAILER, DRIVER, and MILEAGE from the outing (which must be
+     * `zjechal`) — any body `timeFrom`/`timeTo` here are IGNORED. When absent, the
      * caller-supplied `dateStart`/`dateEnd` (+ optional `vehicleId`) drive the
-     * live preview (the existing-claim / verifier inspection path).
+     * live preview (the existing-claim / verifier inspection path); a verifier may
+     * additionally supply `timeFrom`/`timeTo` to live-recalc an unsaved time edit,
+     * else the persisted claim's times are used.
      */
     delegationId: emptyStringToUndefined(UuidSchema.optional()),
     /**
@@ -257,6 +259,22 @@ export const PreviewClaimSchema = z
      */
     dateStart: emptyStringToUndefined(IsoDateSchema.optional()),
     dateEnd: emptyStringToUndefined(IsoDateSchema.optional()),
+    /**
+     * VERIFIER inspection-path override — only honoured on
+     * `POST /claims/:nrZgl/preview` when the caller is a verifier role
+     * (`pracownik` / `admin`). When present it drives the live km-calc so the
+     * ClaimModal's dopłata / HoursReadout track a pracownik's UNSAVED time edit
+     * before the PATCH commits (mirrors the sibling `mileage` override — same
+     * `allowMileageOverride` gate). When omitted, the api falls back to the
+     * persisted claim's `timeFrom`/`timeTo`.
+     *
+     * The CARRIER new-claim path (`delegationId` present) ALWAYS IGNORES these —
+     * the times are DERIVED from the outing's `actualDepartureAt`/`actualReturnAt`
+     * (the carrier never influences the time window, not even in preview). A
+     * `przewoznik` reklamacja inspection likewise has them ignored. Kept optional
+     * so both callers share one wire shape. NOT part of `SubmitClaimSchema` — on
+     * submit the times are always outing-derived. Empty string → undefined.
+     */
     timeFrom: emptyStringToUndefined(HhMmSchema.optional()),
     timeTo: emptyStringToUndefined(HhMmSchema.optional()),
     /**
@@ -451,22 +469,6 @@ export const KmCalcBreakdownSchema = z
   }));
 export type KmCalcBreakdown = z.infer<typeof KmCalcBreakdownSchema>;
 
-// ─── Delegation warning code (soft, Phase 7 REWORK 2026-06-20 #4) ──
-
-/**
- * Soft-warning code surfaced when a carrier previews/submits a wniosek against
- * an outing that is still `w_trasie` (not yet `zjechal`). The submit is NOT
- * blocked — the carrier may proceed (period falls back to `plannedReturnAt`,
- * and a later `zjechal` triggers the auto-recalc). The web carrier form renders
- * a confirmation banner from this code. Submitting from `gotowy` / `zgloszony`
- * is a hard 422, NOT this soft flag.
- */
-export const DELEGATION_NOT_YET_RETURNED_WARNING = 'NOT_YET_RETURNED' as const;
-export const DelegationWarningSchema = z.enum([
-  DELEGATION_NOT_YET_RETURNED_WARNING,
-]);
-export type DelegationWarning = z.infer<typeof DelegationWarningSchema>;
-
 // ─── Preview response ────────────────────────────────────
 
 /**
@@ -513,11 +515,15 @@ export const PreviewClaimResponseSchema = z.object({
   dateStart: IsoDateSchema.optional(),
   dateEnd: IsoDateSchema.optional(),
   /**
-   * Soft warning — present (= `NOT_YET_RETURNED`) when the previewed outing is
-   * still `w_trasie`. The carrier may still proceed; the web renders a confirm
-   * banner. Absent on a `zjechal` outing or the legacy date-driven preview.
+   * Derived time window (`HH:mm`) when the preview was computed from a
+   * `delegationId` — the wall-clock `HH:mm` of the outing's `actualDepartureAt`
+   * / `actualReturnAt` (falling back to `departureAt` / `plannedReturnAt`). The
+   * carrier form renders these READ-ONLY alongside the derived period (the
+   * carrier no longer types a time window). Absent on the existing-claim /
+   * verifier date-driven preview.
    */
-  delegationWarning: DelegationWarningSchema.optional(),
+  timeFrom: HhMmSchema.optional(),
+  timeTo: HhMmSchema.optional(),
   /**
    * Read-only vehicle/trailer/driver derived from the chosen outing (Phase 7
    * §0″ finish). Present only on the delegation-derived path so the carrier

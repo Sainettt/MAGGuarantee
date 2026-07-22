@@ -201,18 +201,18 @@ export type MarkReadyDto = z.infer<typeof MarkReadySchema>;
  * POST /delegations/:id/in-transit — weryfikator (or admin) marks an outing
  * `gotowy → w_trasie`.
  *
- * `actualDepartureAt` is **date-only** (`YYYY-MM-DD`) — the exact day the
- * vehicle actually started driving (the same shape as `plannedReturnAt` /
- * `MarkReturnedSchema.actualReturnAt`). It becomes the ACTUAL start of the
- * guarantee period: the linked wniosek's `dateStart` derives from it, so the
- * service validates it (not in the future, not before the reported
- * `departureAt`) and auto-recalculates any linked wniosek — mirroring the
- * `returned` flow. `note` is an optional free-form annotation; the service
- * stamps `verifiedBy/At`.
+ * `actualDepartureAt` is a **full ISO datetime** (`YYYY-MM-DDTHH:mm:ssZ`) — the
+ * exact MOMENT the vehicle actually started driving. The weryfikator captures
+ * both the day AND the time on this transition: the linked wniosek's `dateStart`
+ * derives from the DAY, and its `timeFrom` from the wall-clock `HH:mm` (the
+ * carrier no longer types a time window). The service validates it — not in the
+ * future (`<= now`, datetime granularity), not before the reported `departureAt`
+ * DAY (`>= startOfUtcDay(departureAt)`, so an earlier same-day start is allowed).
+ * `note` is an optional free-form annotation; the service stamps `verifiedBy/At`.
  */
 export const MarkInTransitSchema = z
   .object({
-    actualDepartureAt: IsoDateSchema,
+    actualDepartureAt: IsoDateTimeSchema,
     note: emptyStringToUndefined(z.string().max(2_000).optional()),
   })
   .strict();
@@ -220,15 +220,18 @@ export type MarkInTransitDto = z.infer<typeof MarkInTransitSchema>;
 
 /**
  * POST /delegations/:id/returned — weryfikator (or admin) marks an outing
- * `w_trasie → zjechal`. `actualReturnAt` is **date-only** (`YYYY-MM-DD`) — the
- * exact return DAY (the same shape as `plannedReturnAt`); the time-of-return
- * (`Claim.timeTo`) is the pracownik's zone, not the weryfikator's. The service
+ * `w_trasie → zjechal`. `actualReturnAt` is a **full ISO datetime**
+ * (`YYYY-MM-DDTHH:mm:ssZ`) — the exact MOMENT the vehicle returned. The
+ * weryfikator captures both the day AND the time: the linked wniosek's `dateEnd`
+ * derives from the DAY and its `timeTo` from the wall-clock `HH:mm`. The service
+ * validates it — not in the future (`<= now`) and not before the actual
+ * departure (`>= actualDepartureAt`; you cannot return before you left) — then
  * writes it into `Delegation.actualReturnAt`, advances `Vehicle.lastDroveAt`,
  * and auto-recalculates any linked wniosek — all in one transaction.
  */
 export const MarkReturnedSchema = z
   .object({
-    actualReturnAt: IsoDateSchema,
+    actualReturnAt: IsoDateTimeSchema,
     note: emptyStringToUndefined(z.string().max(2_000).optional()),
   })
   .strict();
@@ -262,10 +265,10 @@ export const DEPARTURE_IN_PAST_CODE = 'DEPARTURE_IN_PAST' as const;
  * Stable, machine-readable code surfaced in the `extensions.code` field of the
  * 422 problem-details envelope when the weryfikator marks an outing `w_trasie`
  * (`POST /delegations/:id/in-transit`) with an `actualDepartureAt` that is in
- * the FUTURE (max = business-today, UTC-day granularity — mirrors the claims
- * future-date check). `actualDepartureAt` is the actual start of the guarantee
- * period, so a future start is nonsensical. Distinct from
- * `DEPARTURE_BEFORE_REPORTED_CODE` (the not-before-`departureAt` check).
+ * the FUTURE (`> now`, full DATETIME granularity now that the field carries a
+ * time). `actualDepartureAt` is the actual start of the guarantee period, so a
+ * future start is nonsensical. Distinct from `DEPARTURE_BEFORE_REPORTED_CODE`
+ * (the not-before-`departureAt` check).
  */
 export const DEPARTURE_DATE_FUTURE_CODE = 'DEPARTURE_DATE_FUTURE' as const;
 
@@ -273,13 +276,36 @@ export const DEPARTURE_DATE_FUTURE_CODE = 'DEPARTURE_DATE_FUTURE' as const;
  * Stable, machine-readable code surfaced in the `extensions.code` field of the
  * 422 problem-details envelope when the weryfikator marks an outing `w_trasie`
  * (`POST /delegations/:id/in-transit`) with an `actualDepartureAt` EARLIER than
- * the carrier-reported `departureAt` (compared at UTC-day granularity —
- * `actualDepartureAt >= startOfUtcDay(departureAt)`). A hard constraint: the
- * actual start of driving cannot predate the reported departure day. Distinct
- * from `DEPARTURE_DATE_FUTURE_CODE` (the not-in-the-future check).
+ * the carrier-reported `departureAt` DAY (compared at UTC-day granularity —
+ * `actualDepartureAt >= startOfUtcDay(departureAt)`, so an earlier same-day
+ * start IS allowed). A hard constraint: the actual start of driving cannot
+ * predate the reported departure day. Distinct from `DEPARTURE_DATE_FUTURE_CODE`
+ * (the not-in-the-future check).
  */
 export const DEPARTURE_BEFORE_REPORTED_CODE =
   'DEPARTURE_BEFORE_REPORTED' as const;
+
+/**
+ * Stable, machine-readable code surfaced in the `extensions.code` field of the
+ * 422 problem-details envelope when the weryfikator marks an outing `zjechal`
+ * (`POST /delegations/:id/returned`) with an `actualReturnAt` that is in the
+ * FUTURE (`> now`, full DATETIME granularity). A vehicle cannot have returned at
+ * a moment that has not happened yet. Sibling of `DEPARTURE_DATE_FUTURE_CODE` on
+ * the return side.
+ */
+export const RETURN_DATE_FUTURE_CODE = 'RETURN_DATE_FUTURE' as const;
+
+/**
+ * Stable, machine-readable code surfaced in the `extensions.code` field of the
+ * 422 problem-details envelope when the weryfikator marks an outing `zjechal`
+ * (`POST /delegations/:id/returned`) with an `actualReturnAt` EARLIER than the
+ * outing's `actualDepartureAt` (full DATETIME granularity — you cannot return
+ * before you left). Falls back to the reported `departureAt` when no actual
+ * departure was captured (legacy). Sibling of `DEPARTURE_BEFORE_REPORTED_CODE`
+ * on the return side.
+ */
+export const RETURN_BEFORE_DEPARTURE_CODE =
+  'RETURN_BEFORE_DEPARTURE' as const;
 
 /**
  * Stable, machine-readable code surfaced in the `extensions.code` field of the
@@ -350,10 +376,13 @@ export const DelegationFiltersSchema = z
     /**
      * Phase 7 REWORK (2026-06-20 #4) — carrier «claimable wyjazdy» picker. When
      * `true`, narrows the carrier's list to outings that can back a NEW wniosek:
-     * status ∈ {`w_trasie`, `zjechal`} AND no claim linked yet. The carrier
-     * `claims/new` form fetches `GET /delegations?claimable=true` to populate
-     * the wyjazd selector. Coerced from the query string. A no-op for non-carrier
-     * roles (the scope branch only honours it for `przewoznik`).
+     * status === `zjechal` AND no claim linked yet. A wniosek can only be filed
+     * for a RETURNED outing (its period + times + mileage are only final once the
+     * weryfikator has captured the actual departure/return datetimes), so
+     * `w_trasie` outings are NO LONGER claimable. The carrier `claims/new` form
+     * fetches `GET /delegations?claimable=true` to populate the wyjazd selector.
+     * Coerced from the query string. A no-op for non-carrier roles (the scope
+     * branch only honours it for `przewoznik`).
      */
     claimable: z.coerce.boolean().optional(),
     cursor: UuidSchema.optional(),
@@ -475,13 +504,20 @@ export const DelegationDtoSchema = z.object({
 
   status: DelegationStatusSchema,
   /**
-   * Actual start of the guarantee period — the day the vehicle really started
-   * driving, captured by the weryfikator on the `gotowy → w_trasie` transition
-   * (`POST /delegations/:id/in-transit`). Date-only stored as UTC midnight
-   * (same convention as `actualReturnAt`); `null` until the outing goes
-   * `w_trasie`. The linked wniosek's `dateStart` derives from it.
+   * Actual start of the guarantee period — the exact MOMENT the vehicle really
+   * started driving, captured by the weryfikator (as a full datetime) on the
+   * `gotowy → w_trasie` transition (`POST /delegations/:id/in-transit`). `null`
+   * until the outing goes `w_trasie`. The linked wniosek's `dateStart` derives
+   * from its DAY and `timeFrom` from its wall-clock `HH:mm`.
    */
   actualDepartureAt: IsoDateTimeSchema.nullable(),
+  /**
+   * Actual moment the vehicle returned — captured by the weryfikator (as a full
+   * datetime) on the `w_trasie → zjechal` transition
+   * (`POST /delegations/:id/returned`). `null` until the outing goes `zjechal`.
+   * The linked wniosek's `dateEnd` derives from its DAY and `timeTo` from its
+   * wall-clock `HH:mm`.
+   */
   actualReturnAt: IsoDateTimeSchema.nullable(),
 
   reportedById: UuidSchema.nullable(),

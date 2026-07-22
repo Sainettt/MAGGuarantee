@@ -95,12 +95,16 @@ function makeDelegation(overrides: Partial<DelegationRow> = {}): DelegationRow {
     returnCountry: 'PL',
     returnPostalCode: '00-001',
     status: 'zjechal',
-    // Default: no weryfikator-captured actual departure → `dateStart` falls back
-    // to `departureAt` (2026-05-01), preserving the legacy `[2026-05-01,
+    // Default: no weryfikator-captured actual departure → `dateStart` (and the
+    // derived `timeFrom`) fall back to `departureAt` (2026-05-01T06:30 → day
+    // 2026-05-01, `timeFrom` "06:30"), preserving the legacy `[2026-05-01,
     // 2026-05-10]` period the submit suite relies on. Tests exercising the
     // `actualDepartureAt` override set it explicitly.
     actualDepartureAt: null,
-    actualReturnAt: new Date('2026-05-10T00:00:00.000Z'),
+    // Full return datetime — `dateEnd` derives from its DAY (2026-05-10) and the
+    // claim's `timeTo` from its wall-clock ("16:45"). The weryfikator now
+    // captures the return TIME, not just the day.
+    actualReturnAt: new Date('2026-05-10T16:45:00.000Z'),
     reportedById: null,
     reportedBy: null,
     reportedAt: new Date('2026-04-30T08:00:00.000Z'),
@@ -419,8 +423,6 @@ describe('ClaimsService.submit — carrier submission gates', () => {
 
     const dto: SubmitClaimDto = {
       delegationId: 'deleg-1',
-      timeFrom: '08:00',
-      timeTo: '18:00',
     };
 
     let caught: unknown;
@@ -442,8 +444,6 @@ describe('ClaimsService.submit — carrier submission gates', () => {
 
     const dto: SubmitClaimDto = {
       delegationId: 'deleg-1',
-      timeFrom: '08:00',
-      timeTo: '18:00',
     };
 
     let caught: unknown;
@@ -466,8 +466,6 @@ describe('ClaimsService.submit — carrier submission gates', () => {
 
     const dto: SubmitClaimDto = {
       delegationId: 'deleg-1',
-      timeFrom: '08:00',
-      timeTo: '18:00',
     };
 
     const out = await svc.submit(makeAuth('przewoznik'), dto);
@@ -482,12 +480,15 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     // columns to 0 regardless of what the carrier could theoretically type.
     expect(repoFake.creates[0]!.data.origHoursAdjusted).toBe(0);
     expect(repoFake.creates[0]!.data.hoursAdjustedValue).toBe(0);
-    // Immutable carrier time-window snapshot — mirrors the same values that
-    // go into the working `timeFrom/timeTo` columns at submit.
-    expect(repoFake.creates[0]!.data.origTimeFrom).toBe(dto.timeFrom);
-    expect(repoFake.creates[0]!.data.origTimeTo).toBe(dto.timeTo);
-    expect(repoFake.creates[0]!.data.origTimeFrom).toBe('08:00');
-    expect(repoFake.creates[0]!.data.origTimeTo).toBe('18:00');
+    // Time window is DERIVED from the outing's actual datetimes (the carrier no
+    // longer supplies it): `timeFrom` = HH:mm(actualDepartureAt ?? departureAt) =
+    // "06:30" (fallback to departureAt 06:30, actualDepartureAt null in the
+    // fixture); `timeTo` = HH:mm(actualReturnAt 16:45) = "16:45". The working and
+    // the immutable `orig*` columns carry the same derived values.
+    expect(repoFake.creates[0]!.data.timeFrom).toBe('06:30');
+    expect(repoFake.creates[0]!.data.timeTo).toBe('16:45');
+    expect(repoFake.creates[0]!.data.origTimeFrom).toBe('06:30');
+    expect(repoFake.creates[0]!.data.origTimeTo).toBe('16:45');
     // amountRequested is derived from km-calc paymentEur — not from the body.
     // paymentEur = (kmGuaranteed - mileage) * ratePerKmEffective
     //            = (10_800 - 8_000) * 0.5 = 1_400.
@@ -520,8 +521,6 @@ describe('ClaimsService.submit — carrier submission gates', () => {
 
     const dto: SubmitClaimDto = {
       delegationId: 'deleg-1',
-      timeFrom: '08:00',
-      timeTo: '18:00',
       // The default km-calc mock yields `totalDays: 10` (>= threshold 10),
       // so the tier-1 duration gate passes and the cooldown is the ONLY
       // blocker the submit reaches. Mileage is the daily-km sum (default 8_000).
@@ -558,8 +557,6 @@ describe('ClaimsService.submit — carrier submission gates', () => {
 
     const dto: SubmitClaimDto = {
       delegationId: 'deleg-1',
-      timeFrom: '08:00',
-      timeTo: '18:00',
     };
 
     const out = await svc.submit(makeAuth('przewoznik'), dto);
@@ -607,8 +604,6 @@ describe('ClaimsService.submit — carrier submission gates', () => {
 
       const dto: SubmitClaimDto = {
         delegationId: 'deleg-1',
-        timeFrom: '08:00',
-        timeTo: '18:00',
       };
 
       const out = await svc.submit(makeAuth('przewoznik'), dto);
@@ -632,8 +627,6 @@ describe('ClaimsService.submit — carrier submission gates', () => {
 
     const dto: SubmitClaimDto = {
       delegationId: 'deleg-1',
-      timeFrom: '08:00',
-      timeTo: '18:00',
     };
 
     const out = await svc.submit(makeAuth('przewoznik'), dto);
@@ -657,8 +650,6 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     // from the daily-km sum over the period of the OUTING's vehicle.
     const dto: SubmitClaimDto = {
       delegationId: 'deleg-1',
-      timeFrom: '08:00',
-      timeTo: '18:00',
     };
 
     const out = await svc.submit(makeAuth('przewoznik'), dto);
@@ -686,8 +677,6 @@ describe('ClaimsService.submit — carrier submission gates', () => {
 
     const dto: SubmitClaimDto = {
       delegationId: 'deleg-1',
-      timeFrom: '08:00',
-      timeTo: '18:00',
     };
 
     let caught: unknown;
@@ -710,8 +699,6 @@ describe('ClaimsService.submit — carrier submission gates', () => {
 
     const dto: SubmitClaimDto = {
       delegationId: 'deleg-1',
-      timeFrom: '08:00',
-      timeTo: '18:00',
     };
 
     await svc.submit(makeAuth('przewoznik'), dto);
@@ -735,8 +722,6 @@ describe('ClaimsService.submit — delegation link', () => {
 
   const dto: SubmitClaimDto = {
     delegationId: 'deleg-1',
-    timeFrom: '08:00',
-    timeTo: '18:00',
   };
 
   it('derives the period from the outing (dateStart=departureDay, dateEnd=actualReturnAt) and links delegationId', async () => {
@@ -776,7 +761,37 @@ describe('ClaimsService.submit — delegation link', () => {
     expect(data.dateEnd.toISOString()).toBe('2026-05-10T00:00:00.000Z');
   });
 
-  it('uses plannedReturnAt as dateEnd when the outing is still w_trasie (no actualReturnAt)', async () => {
+  it('derives the claim time window (HH:mm) from the outing actual departure/return datetimes', async () => {
+    // The carrier no longer supplies a time window — `timeFrom` is the wall-clock
+    // of the actual departure, `timeTo` of the actual return.
+    const repoFake = makeRepo(null);
+    const delegations = makeDelegationsRepo(
+      makeDelegation({
+        actualDepartureAt: new Date('2026-05-01T07:15:00.000Z'),
+        actualReturnAt: new Date('2026-05-10T19:40:00.000Z'),
+      }),
+    );
+    const svc = makeService(
+      repoFake,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      delegations,
+    );
+    await svc.submit(makeAuth('przewoznik'), dto);
+    const data = repoFake.creates[0]!.data;
+    expect(data.timeFrom).toBe('07:15');
+    expect(data.timeTo).toBe('19:40');
+    // …and the immutable carrier snapshot carries the same derived values.
+    expect(data.origTimeFrom).toBe('07:15');
+    expect(data.origTimeTo).toBe('19:40');
+  });
+
+  it('rejects an outing still w_trasie (only a zjechal outing may back a wniosek) — 422, no write', async () => {
+    // A wniosek can only be filed for a RETURNED outing — its period, times, and
+    // mileage are only final once the weryfikator captured the actual
+    // departure/return datetimes. A `w_trasie` outing is now a hard 422.
     const repoFake = makeRepo(null);
     const delegations = makeDelegationsRepo(
       makeDelegation({ status: 'w_trasie', actualReturnAt: null }),
@@ -789,14 +804,13 @@ describe('ClaimsService.submit — delegation link', () => {
       undefined,
       delegations,
     );
-    await svc.submit(makeAuth('przewoznik'), dto);
-    // plannedReturnAt 2026-05-09 backs dateEnd when no actual return yet.
-    expect(repoFake.creates[0]!.data.dateEnd.toISOString()).toBe(
-      '2026-05-09T00:00:00.000Z',
+    await expect(svc.submit(makeAuth('przewoznik'), dto)).rejects.toBeInstanceOf(
+      UnprocessableEntityException,
     );
+    expect(repoFake.creates).toHaveLength(0);
   });
 
-  it('rejects an outing in gotowy (not yet w_trasie/zjechal) — 422, no write', async () => {
+  it('rejects an outing in gotowy (not yet zjechal) — 422, no write', async () => {
     const repoFake = makeRepo(null);
     const delegations = makeDelegationsRepo(makeDelegation({ status: 'gotowy' }));
     const svc = makeService(
