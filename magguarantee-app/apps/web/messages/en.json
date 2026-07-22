@@ -1094,7 +1094,8 @@
         "vehicle": "Vehicle",
         "period": "Period",
         "mileage": "Mileage",
-        "doplata": "Guarantee payout",
+        "amountRequested": "Requested",
+        "amountApproved": "Approved",
         "status": "Status",
         "updatedAt": "Updated"
       },
@@ -1123,6 +1124,7 @@
           "hoursAdjusted": "Hours adjustment — stoppage",
           "doplataSection": "Guarantee payout",
           "decyzjaSection": "Decision",
+          "decyzjaSubtitle": "Final step — choose what happens to this claim.",
           "secondaryHistory": "History",
           "secondaryAuthorization": "Authorization",
           "decisionRequired": "Pick a decision to save the claim.",
@@ -1190,7 +1192,13 @@
           "amountApproved": "Amount approved (EUR)",
           "amountApprovedAuto": "calculated automatically",
           "amountApprovedLocked": "Locked field — calculated automatically from the preview",
-          "amountApprovedFromMaksim": "Prefilled with Maksim's amount — adjust it to the amount approved in the reply.",
+          "amountApprovedLockedMaksim": "Locked — Maksim's decision exists ({amount}).",
+          "amountApprovedLockedMaksimHint": "The approved amount follows Maksim's decision. Only an administrator can change it.",
+          "maksimAmountRef": "Maksim's decision: <v>{amount}</v>",
+          "maksimOverrideTitle": "Maksim's decision overridden",
+          "maksimOverrideBadge": "Overridden",
+          "maksimOverrideConsequence": "The carrier will receive the approved amount.",
+          "maksimOverrideCommentHint": "Consider describing the reason for overriding Maksim's amount.",
           "amountMaximum": "Maximum amount (EUR)",
           "doplata": "Guarantee payout",
           "margin": "Margin",
@@ -1200,15 +1208,22 @@
           "commentReklamacja": "Decision rationale",
           "reklamacjaAmount": "Approved reclamation amount (EUR)",
           "submit": "Confirm",
+          "submitDecision": "Save decision",
           "submitting": "Saving…",
           "savedToast": "Saved",
           "errorToast": "Failed to save",
           "verifyButton": "Save verification",
+          "verifyButtonHint": "Saves the corrected verification data. Does not make a decision.",
+          "verifyAdminOnlyToast": "The claim is awaiting Maksim's authorisation — only an administrator can save the verification.",
           "verifiedToast": "Verification saved",
           "verifyRequiredHint": "Save the verification to take a decision",
           "verifyDirtyHint": "You have unsaved corrections — save the verification",
           "boardSumHint": "Per mileage board: {km} km",
           "boardSumApply": "Apply"
+        },
+        "locked": {
+          "factsPendingAuthorization": "Verification data is locked — the claim is awaiting Maksim's authorisation. Only an administrator can make changes.",
+          "factsPendingAuthorizationAdmin": "The claim is awaiting Maksim's authorisation. As an administrator you can still correct the verification data."
         },
         "history": {
           "empty": "No edit history.",
@@ -1363,6 +1378,7 @@
       "vehicles": "Vehicles",
       "drivers": "Drivers",
       "trailers": "Trailers",
+      "delegations": "Trips",
       "documents": "Documents"
     },
     "vehicles": {
@@ -1398,6 +1414,21 @@
         "plate": "Plate number",
         "type": "Type",
         "active": "Status"
+      }
+    },
+    "delegations": {
+      "emptyTitle": "No trips",
+      "emptyMessage": "This carrier has not reported any trips yet.",
+      "emptyFiltered": {
+        "title": "No results",
+        "message": "No trips match the selected filters."
+      },
+      "columns": {
+        "vehicle": "Vehicle",
+        "driver": "Driver",
+        "route": "Route",
+        "period": "Period",
+        "status": "Status"
       }
     },
     "documents": {
@@ -1980,6 +2011,33 @@
       "table": {
         "emptyTitle": "No trips",
         "emptyMessage": "No trips have been recorded in the system yet.",
+        "emptyFiltered": {
+          "title": "No results",
+          "message": "No trips match the selected filters."
+        },
+        "columns": {
+          "vehicle": "Vehicle",
+          "driver": "Driver",
+          "route": "Route",
+          "period": "Period",
+          "status": "Status"
+        }
+      }
+    },
+    "opiekun": {
+      "title": "Trips",
+      "subtitle": "All trips of the carriers you supervise — read-only view",
+      "filters": {
+        "status": "Status",
+        "allStatuses": "All statuses",
+        "search": "Search",
+        "searchPlaceholder": "Search carrier / plate…",
+        "dateFrom": "Date from",
+        "dateTo": "Date to"
+      },
+      "table": {
+        "emptyTitle": "No trips",
+        "emptyMessage": "The carriers you supervise have not reported any trips yet.",
         "emptyFiltered": {
           "title": "No results",
           "message": "No trips match the selected filters."

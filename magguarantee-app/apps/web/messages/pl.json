@@ -1094,7 +1094,8 @@
         "vehicle": "Ciągnik",
         "period": "Okres",
         "mileage": "Przebieg",
-        "doplata": "Dopłata gwarancyjna",
+        "amountRequested": "Wnioskowana",
+        "amountApproved": "Zatwierdzona",
         "status": "Status",
         "updatedAt": "Zmiana"
       },
@@ -1123,6 +1124,7 @@
           "hoursAdjusted": "Korekta godzin — postój / przestój",
           "doplataSection": "Dopłata gwarancyjna",
           "decyzjaSection": "Decyzja",
+          "decyzjaSubtitle": "Ostatni krok — wybierz, co dzieje się z wnioskiem.",
           "secondaryHistory": "Historia",
           "secondaryAuthorization": "Autoryzacja",
           "decisionRequired": "Wybierz decyzję, aby zapisać wniosek.",
@@ -1190,7 +1192,13 @@
           "amountApproved": "Kwota zatwierdzona (EUR)",
           "amountApprovedAuto": "wyliczana automatycznie",
           "amountApprovedLocked": "Pole zablokowane — wyliczane automatycznie z podglądu",
-          "amountApprovedFromMaksim": "Wstępnie wypełnione kwotą Maksima — skoryguj do kwoty zatwierdzonej w odpowiedzi.",
+          "amountApprovedLockedMaksim": "Zablokowane — jest decyzja Maksima ({amount}).",
+          "amountApprovedLockedMaksimHint": "Kwota zatwierdzona wynika z decyzji Maksima. Zmienić ją może wyłącznie administrator.",
+          "maksimAmountRef": "Decyzja Maksima: <v>{amount}</v>",
+          "maksimOverrideTitle": "Nadpisano decyzję Maksima",
+          "maksimOverrideBadge": "Nadpisano",
+          "maksimOverrideConsequence": "Przewoźnik otrzyma kwotę zatwierdzoną.",
+          "maksimOverrideCommentHint": "Warto opisać powód nadpisania kwoty Maksima.",
           "amountMaximum": "Kwota maksymalna (EUR)",
           "doplata": "Dopłata gwarancyjna",
           "margin": "Marża",
@@ -1200,15 +1208,22 @@
           "commentReklamacja": "Uzasadnienie decyzji",
           "reklamacjaAmount": "Kwota reklamacji zatwierdzona (EUR)",
           "submit": "Zatwierdź",
+          "submitDecision": "Zapisz decyzję",
           "submitting": "Zapisywanie…",
           "savedToast": "Zapisano",
           "errorToast": "Nie udało się zapisać",
           "verifyButton": "Zapisz weryfikację",
+          "verifyButtonHint": "Zapisuje skorygowane dane weryfikacji. Nie podejmuje decyzji.",
+          "verifyAdminOnlyToast": "Wniosek oczekuje na autoryzację Maksima — weryfikację może zapisać tylko administrator.",
           "verifiedToast": "Zapisano weryfikację",
           "verifyRequiredHint": "Zapisz weryfikację, aby podjąć decyzję",
           "verifyDirtyHint": "Masz niezapisane korekty — zapisz weryfikację",
           "boardSumHint": "Wg tablicy przebiegów: {km} km",
           "boardSumApply": "Zastosuj"
+        },
+        "locked": {
+          "factsPendingAuthorization": "Dane weryfikacji są zablokowane — wniosek czeka na autoryzację Maksima. Zmiany może wprowadzić tylko administrator.",
+          "factsPendingAuthorizationAdmin": "Wniosek czeka na autoryzację Maksima. Jako administrator możesz nadal korygować dane weryfikacji."
         },
         "history": {
           "empty": "Brak historii zmian.",
@@ -1363,6 +1378,7 @@
       "vehicles": "Ciągniki",
       "drivers": "Kierowcy",
       "trailers": "Naczepy",
+      "delegations": "Wyjazdy",
       "documents": "Dokumenty"
     },
     "vehicles": {
@@ -1398,6 +1414,21 @@
         "plate": "Numer rejestracyjny",
         "type": "Typ",
         "active": "Status"
+      }
+    },
+    "delegations": {
+      "emptyTitle": "Brak wyjazdów",
+      "emptyMessage": "Ten przewoźnik nie zgłosił jeszcze żadnego wyjazdu.",
+      "emptyFiltered": {
+        "title": "Brak wyników",
+        "message": "Brak wyjazdów spełniających wybrane filtry."
+      },
+      "columns": {
+        "vehicle": "Auto",
+        "driver": "Kierowca",
+        "route": "Trasa",
+        "period": "Okres",
+        "status": "Status"
       }
     },
     "documents": {
@@ -1986,6 +2017,33 @@
         },
         "columns": {
           "vehicle": "Ciągnik",
+          "driver": "Kierowca",
+          "route": "Trasa",
+          "period": "Okres",
+          "status": "Status"
+        }
+      }
+    },
+    "opiekun": {
+      "title": "Wyjazdy",
+      "subtitle": "Wszystkie wyjazdy przewoźników, którymi się opiekujesz — podgląd tylko do odczytu",
+      "filters": {
+        "status": "Status",
+        "allStatuses": "Wszystkie statusy",
+        "search": "Szukaj",
+        "searchPlaceholder": "Szukaj przewoźnika / nr rej.…",
+        "dateFrom": "Data od",
+        "dateTo": "Data do"
+      },
+      "table": {
+        "emptyTitle": "Brak wyjazdów",
+        "emptyMessage": "Twoi przewoźnicy nie zgłosili jeszcze żadnego wyjazdu.",
+        "emptyFiltered": {
+          "title": "Brak wyników",
+          "message": "Brak wyjazdów spełniających wybrane filtry."
+        },
+        "columns": {
+          "vehicle": "Auto",
           "driver": "Kierowca",
           "route": "Trasa",
           "period": "Okres",

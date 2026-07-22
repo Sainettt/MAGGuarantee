@@ -34,8 +34,9 @@ export interface NavLink {
  * Employee-panel navigation. Layout filters by role before render.
  *
  *   `pracownik` sees exactly: Dashboard + Wnioski.
- *   `opiekun`   sees: Moja opieka + Carriers / Vehicles / Drivers / Trailers
- *               (the four CRUDs are ownership-scoped by the API — Phase 5.1).
+ *   `opiekun`   sees: Moja opieka + Przebieg + Wyjazdy + Carriers / Vehicles /
+ *               Drivers / Trailers (all ownership-scoped by the API — Phase 5.1;
+ *               Wyjazdy is read-only oversight).
  *   `admin`     sees the full list (Dashboard + Wnioski + Opieka + 10 admin items).
  *
  * Other roles (planista, dyspozytor, eksport, weryfikator) get their own
@@ -75,6 +76,19 @@ export const EMPLOYEE_NAV: readonly NavLink[] = [
     labelKey: 'myKm.tab',
     iconName: 'Gauge',
     roles: ['opiekun', 'admin'],
+  },
+  // Opiekun — read-only «Wyjazdy» across every supervised carrier. Lives at
+  // `/employee/opieka/delegations`, NOT `/employee/delegations`: that path is
+  // admin-only (see `ADMIN_ONLY_EMPLOYEE_PREFIXES`). Admin is intentionally
+  // absent here — they already have the unscoped `delegations` entry below, and
+  // two «Wyjazdy» rows in one sidebar would be noise. pracownik must never see
+  // delegacje (docs/19-known-quirks.md #13).
+  {
+    key: 'opieka-delegations',
+    href: '/employee/opieka/delegations',
+    labelKey: 'nav.delegations',
+    iconName: 'MapPin',
+    roles: ['opiekun'],
   },
   // Admin + opiekun — Phase 5.1 opened these four to opiekun (API auto-scopes
   // the list endpoints to the caller's ownership and 403s any cross-tenant

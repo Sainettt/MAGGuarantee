@@ -34,6 +34,7 @@ import type {
   VehicleDto,
 } from '@magguarantee/shared';
 
+import { DelegationsTable } from '@/components/delegations/DelegationsTable';
 import { DriverDetailModal } from '@/components/drivers/DriverDetailModal';
 import { PermitCell } from '@/components/fleet/PermitCell';
 import { TrailerDetailModal } from '@/components/trailers/TrailerDetailModal';
@@ -51,6 +52,7 @@ import { listDrivers } from '@/lib/api/drivers';
 import { listTrailers } from '@/lib/api/trailers';
 import { listVehicles } from '@/lib/api/vehicles';
 import { useCarrier } from '@/lib/hooks/useCarriers';
+import { useDelegations } from '@/lib/hooks/useDelegations';
 import { DRIVERS_KEY } from '@/lib/hooks/useDrivers';
 import { useOpiekunFleet } from '@/lib/hooks/useOpiekunFleet';
 import { TRAILERS_KEY } from '@/lib/hooks/useTrailers';
@@ -62,12 +64,20 @@ export default function OpiekaCarrierDetailPage() {
   const t = useTranslations('opieka');
   const tCommon = useTranslations('common');
   const tHistory = useTranslations('guarantee.history');
+  const tA11y = useTranslations('fleet.a11y');
 
   // Honour `?tab=porozumienia` (set by the board deep-link) as the initial
   // tab; else default to «Auta». Uncontrolled afterwards.
   const searchParams = useSearchParams();
   const tabParam = searchParams.get('tab');
-  const VALID_TABS = ['vehicles', 'drivers', 'trailers', 'documents', 'porozumienia'];
+  const VALID_TABS = [
+    'vehicles',
+    'drivers',
+    'trailers',
+    'delegations',
+    'documents',
+    'porozumienia',
+  ];
   const defaultTab = VALID_TABS.includes(tabParam ?? '')
     ? (tabParam as string)
     : 'vehicles';
@@ -114,6 +124,11 @@ export default function OpiekaCarrierDetailPage() {
     queryFn: () => listTrailers({ carrierId, limit: 100 }),
     enabled,
   });
+  // «Wyjazdy» — same `enabled` gate as above: firing before `carrierId`
+  // resolves would return every delegation the opiekun can see, not this
+  // carrier's. Read-only — the shared <DelegationsTable> owns the row-click →
+  // <DelegationDetailModal> (§6.4.1) and has no mutation controls.
+  const delegationsQ = useDelegations({ carrierId, limit: 100 }, { enabled });
 
   const carrier: CarrierDto | undefined = carrierQ.data;
 
@@ -204,6 +219,9 @@ export default function OpiekaCarrierDetailPage() {
             <TabsTrigger value="vehicles">{t('tabs.vehicles')}</TabsTrigger>
             <TabsTrigger value="drivers">{t('tabs.drivers')}</TabsTrigger>
             <TabsTrigger value="trailers">{t('tabs.trailers')}</TabsTrigger>
+            <TabsTrigger value="delegations">
+              {t('tabs.delegations')}
+            </TabsTrigger>
             <TabsTrigger value="documents">{t('tabs.documents')}</TabsTrigger>
             <TabsTrigger value="porozumienia">{tHistory('tab')}</TabsTrigger>
           </TabsList>
@@ -229,6 +247,19 @@ export default function OpiekaCarrierDetailPage() {
               rows={trailersQ.data?.items ?? []}
               isLoading={trailersQ.isLoading}
               onRowClick={setTrailerDetail}
+            />
+          </TabsContent>
+
+          <TabsContent value="delegations">
+            <DelegationsTable
+              rows={delegationsQ.data?.items ?? []}
+              isLoading={delegationsQ.isLoading}
+              namespace="opieka.delegations"
+              rowAriaLabel={(r) =>
+                tA11y('showDelegationDetails', {
+                  name: r.vehicle?.plateNumber ?? '—',
+                })
+              }
             />
           </TabsContent>
 

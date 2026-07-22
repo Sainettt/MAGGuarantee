@@ -91,6 +91,16 @@ const DEFAULT_MAX_PERIOD_DAYS = 90;
 const DEFAULT_MAX_AVG_KM_PER_DAY = 2000;
 
 /**
+ * Statuses in which the «Zapisz weryfikację» checkpoint may be saved.
+ * `OCZEKUJE_NA_AUTORYZACJE` is admin-only — narrowed by
+ * `_assertMayVerifyInStatus`, NOT by this list.
+ */
+const VERIFIABLE_CLAIM_STATUSES: readonly ClaimStatus[] = [
+  'NA_WERYFIKACJI',
+  'OCZEKUJE_NA_AUTORYZACJE',
+];
+
+/**
  * Wire shape of the multi-violation 422 envelope. The `ProblemDetailsFilter`
  * forwards the `violations` array to the client unchanged; the carrier UI
  * renders it as a list above the form. Submit / reklamacja both use this.
@@ -1039,8 +1049,12 @@ export class ClaimsService {
    * until verified). Steps:
    *
    *   1. Load the claim (404 if missing).
-   *   2. Require `status === NA_WERYFIKACJI` (422 otherwise) — a checkpoint only
-   *      makes sense in the verification window.
+   *   2. Require a verifiable status (422 otherwise): `NA_WERYFIKACJI` for
+   *      admin + pracownik alike, plus `OCZEKUJE_NA_AUTORYZACJE` for `admin`
+   *      ONLY (422 `CLAIM_VERIFY_ADMIN_ONLY` for pracownik there). The role
+   *      split lives HERE, not on `@Roles`, because it is status-dependent —
+   *      the documented pattern (docs/15-auth-strategy.md §Roles: coarse gate on
+   *      the controller, fine-grained scope in the service).
    *   3. Re-run km-calc when the body carries a math-affecting correction (the
    *      SAME `_recalcClaim` the decision PATCH uses; an EMPTY body → recalc is
    *      `null` ⇒ "confirmed as-is", no math churn).
@@ -1064,13 +1078,13 @@ export class ClaimsService {
       throw new NotFoundException('Wniosek nie znaleziony');
     }
 
-    // A checkpoint is only valid in the verification window. Any other status
-    // is a 422 with a friendly Polish message (mirrors the sibling guards).
-    if (existing.status !== 'NA_WERYFIKACJI') {
-      throw new UnprocessableEntityException(
-        'Weryfikację można zapisać tylko dla wniosku w statusie „Na weryfikacji".',
-      );
-    }
+    // A checkpoint is valid in the verification window, and — for `admin` ONLY
+    // — in the pending-authorization window (an admin may still fix the numbers
+    // on a wniosek that already went out to Maksim). Two DISTINCT 422s: the
+    // status refusal and the role refusal are different causes and the web must
+    // tell them apart (the role one carries a machine code).
+    this._assertVerifiableStatus(existing);
+    this._assertMayVerifyInStatus(user, existing);
 
     // In-transit gate: a verification checkpoint on a wniosek whose linked
     // outing is still `w_trasie` is blocked (period/mileage not yet final). This
@@ -1100,15 +1114,37 @@ export class ClaimsService {
     // math re-ran, otherwise the values already on the row). Mutates `patch`
     // and returns whether the auto-email should be dispatched (fire-and-log,
     // OUTSIDE the tx) after commit.
+    //
+    // SCOPED TO `NA_WERYFIKACJI` on purpose. There are two INDEPENDENT
+    // authorization mechanisms and the admin re-verify path must not cross them:
+    //   - MANUAL: `request-authorization` → status OCZEKUJE_NA_AUTORYZACJE +
+    //     email with the verifier's opis sprawy. Maksim is already in that
+    //     thread; his reply is recorded via PUT /authorization-amount.
+    //   - THRESHOLD: `maksimGateRequired`, armed here, enforced by
+    //     `_assertMaksimGateCleared` — which itself only fires on the
+    //     `NA_WERYFIKACJI → decision` edge.
+    // Running the threshold gate in OCZEKUJE_NA_AUTORYZACJE would therefore
+    // block NOTHING (no guard reads it in that status) while causing two real
+    // harms: (a) the amount-aware dedup deliberately re-notifies on a changed
+    // dopłata, so an admin correction would drop a SECOND, contextless Maksim
+    // email on top of the manual authorization request he is already answering;
+    // (b) a correction landing under threshold would take the `!overThreshold`
+    // branch and NULL `maksimGateClearedAt`/`ById` — destroying the clearance
+    // stamp left by an earlier screenshot upload on a claim that has already
+    // moved past that gate. Leaving the gate columns untouched here keeps the
+    // manual mechanism the single active one in the pending window.
     const finalPaymentEur = recalc ? recalc.paymentEur : existing.paymentEur;
     const finalDrivenDays = recalc ? recalc.drivenDays : existing.drivenDays;
-    const shouldNotifyMaksim = this._applyMaksimGate(
-      patch,
-      existing,
-      finalPaymentEur,
-      finalDrivenDays,
-      now,
-    );
+    const shouldNotifyMaksim =
+      existing.status === 'NA_WERYFIKACJI'
+        ? this._applyMaksimGate(
+            patch,
+            existing,
+            finalPaymentEur,
+            finalDrivenDays,
+            now,
+          )
+        : false;
 
     AuditContext.setBefore(this._snapshotForAudit(existing));
 
@@ -1132,6 +1168,59 @@ export class ClaimsService {
     }
 
     return this.toDto(updated);
+  }
+
+  /**
+   * Status gate for the verification checkpoint. A checkpoint only makes sense
+   * while the wniosek is still actionable by a verifier:
+   *
+   *   - `NA_WERYFIKACJI`           — the normal verification window.
+   *   - `OCZEKUJE_NA_AUTORYZACJE`  — the pending-authorization window; the
+   *     numbers can still need a fix while Maksim's reply is awaited. Role is
+   *     narrowed separately by `_assertMayVerifyInStatus` (admin only).
+   *
+   * Any other status (decided / reklamacja) → 422 with a friendly Polish
+   * message, no machine code (unchanged from before). Pure guard — no IO.
+   */
+  private _assertVerifiableStatus(existing: ClaimRow): void {
+    if (!VERIFIABLE_CLAIM_STATUSES.includes(existing.status)) {
+      throw new UnprocessableEntityException(
+        'Weryfikację można zapisać tylko dla wniosku w statusie „Na weryfikacji" lub „Oczekuje na autoryzację".',
+      );
+    }
+  }
+
+  /**
+   * Role gate for the verification checkpoint, STATUS-DEPENDENT — which is why
+   * it lives in the service and not on `@Roles('admin','pracownik')` (the
+   * controller decorator stays the coarse gate per docs/15-auth-strategy.md
+   * §Roles; docs/03-roles.md gives admin the superset of pracownik).
+   *
+   * `NA_WERYFIKACJI` is open to admin + pracownik alike (unchanged).
+   * `OCZEKUJE_NA_AUTORYZACJE` is admin-ONLY: the wniosek already left the
+   * verifier's desk and is awaiting Maksim, so only an admin may reach back in.
+   *
+   * Enforced HERE (server-side) rather than by merely hiding the button, so it
+   * cannot be bypassed by calling the endpoint directly. Throws 422 with the
+   * DISTINCT `CLAIM_VERIFY_ADMIN_ONLY` code — the refusal reason differs from
+   * the status refusal above and the web must render them differently. Pure
+   * guard — no IO.
+   */
+  private _assertMayVerifyInStatus(user: AuthUser, existing: ClaimRow): void {
+    if (existing.status !== 'OCZEKUJE_NA_AUTORYZACJE') return;
+    if (user.role === 'admin') return;
+
+    throw new UnprocessableEntityException({
+      code: 'CLAIM_VERIFY_ADMIN_ONLY',
+      message:
+        'Wniosek oczekuje na autoryzację — weryfikację może zapisać tylko administrator.',
+      // Surface the machine code under `extensions` so the global
+      // `ProblemDetailsFilter` lifts it into the RFC-7807 body (a top-level
+      // `code` alone is dropped). Mirrors the CLAIM_AUTHORIZATION_REQUIRED /
+      // CLAIM_DELEGATION_IN_TRANSIT pattern; the top-level `code`/`message` are
+      // kept for the in-process unit tests that read `getResponse().code`.
+      extensions: { code: 'CLAIM_VERIFY_ADMIN_ONLY' },
+    });
   }
 
   /**

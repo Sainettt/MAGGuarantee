@@ -21,6 +21,9 @@ const TEAM_ID = 'team-1';
 const PLANNER_SUB = 'plan-1';
 const CARRIER_ID = 'carrier-1';
 const CARRIER_USER = 'user-1';
+const OPIEKUN_SUB = 'op-1';
+// Carrier NOT supervised by OPIEKUN_SUB — used for the opiekun 403 lanes.
+const FOREIGN_CARRIER_ID = 'carrier-foreign';
 // Km-guarantee rates baseline for the vehicle mini (EUR/km). Distinct values so
 // a scrub-vs-passthrough assertion can pin each lane.
 const RATE_DE = 1.05;
@@ -114,7 +117,15 @@ function makeRow(overrides: Partial<DelegationRow> = {}): DelegationRow {
  * it received (so the dispatcher-scope assertions can inspect them) and returns
  * a fixed page.
  */
-function makeService(returned: DelegationRow[] = [makeRow()]) {
+function makeService(
+  returned: DelegationRow[] = [makeRow()],
+  /**
+   * Carriers supervised by the opiekun caller — backs the
+   * `CarriersRepository.listIdsForOpiekun` fake the opiekun scope branch
+   * consults (list: only when a `carrierId` is pinned; getOne: always).
+   */
+  ownedCarrierIds: string[] = [CARRIER_ID],
+) {
   const listSpy = jest.fn(async (_filters: DelegationListFilters) => returned);
   const findByIdSpy = jest.fn(async (_id: string) => returned[0] ?? null);
   const delegations = {
@@ -122,8 +133,12 @@ function makeService(returned: DelegationRow[] = [makeRow()]) {
     findById: findByIdSpy,
   } as unknown as DelegationsRepository;
 
+  const listIdsForOpiekunSpy = jest.fn(
+    async (_opiekunId: string) => ownedCarrierIds,
+  );
   const carriers = {
     list: jest.fn(async () => [{ id: CARRIER_ID, userId: CARRIER_USER }]),
+    listIdsForOpiekun: listIdsForOpiekunSpy,
   } as unknown as CarriersRepository;
 
   const service = new DelegationsService(
@@ -135,7 +150,7 @@ function makeService(returned: DelegationRow[] = [makeRow()]) {
     {} as unknown as CarrierReadinessService,
     {} as unknown as ChatNotifierService,
   );
-  return { service, listSpy, findByIdSpy };
+  return { service, listSpy, findByIdSpy, listIdsForOpiekunSpy };
 }
 
 describe('DelegationsService.list — dyspozytor auto-scope (Phase 11 — team)', () => {
@@ -249,6 +264,77 @@ describe('DelegationsService.list — planista auto-scope (Phase 6.4)', () => {
   });
 });
 
+// docs/03-roles.md#opiekun — «Что НЕ может: действовать на перевозчиках с
+// другим `opiekunId` (403)». The opiekun «Wszystkie wyjazdy» page hits
+// `GET /delegations` with NO `carrierId`, so the scope MUST come from the
+// server identity, not the query.
+describe('DelegationsService.list — opiekun carrier scope', () => {
+  it('scopes to carrierOpiekunId=user.sub (relation filter), NOT the all-access branch', async () => {
+    const { service, listSpy } = makeService();
+    await service.list(auth('opiekun', OPIEKUN_SUB), baseFilters());
+    expect(listSpy).toHaveBeenCalledTimes(1);
+    const passed = listSpy.mock.calls[0]![0] as DelegationListFilters;
+    expect(passed.carrierOpiekunId).toBe(OPIEKUN_SUB);
+    // Different axis — opiekun must not pick up the vehicle-side scopes.
+    expect(passed.plannerId).toBeUndefined();
+    expect(passed.dispatchTeamId).toBeUndefined();
+  });
+
+  it('no carrierId pinned → no ownership lookup needed (relation filter carries the scope)', async () => {
+    const { service, listIdsForOpiekunSpy } = makeService();
+    await service.list(auth('opiekun', OPIEKUN_SUB), baseFilters());
+    expect(listIdsForOpiekunSpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps a carrierId pin for one of THEIR OWN carriers (narrowing is allowed)', async () => {
+    const { service, listSpy } = makeService();
+    await service.list(
+      auth('opiekun', OPIEKUN_SUB),
+      baseFilters({ carrierId: CARRIER_ID }),
+    );
+    const passed = listSpy.mock.calls[0]![0] as DelegationListFilters;
+    expect(passed.carrierId).toBe(CARRIER_ID);
+    // The server scope is applied ANYWAY (defence-in-depth).
+    expect(passed.carrierOpiekunId).toBe(OPIEKUN_SUB);
+  });
+
+  it("is 403 on a FOREIGN carrierId (another opiekun's carrier)", async () => {
+    const { service, listSpy } = makeService();
+    await expect(
+      service.list(
+        auth('opiekun', OPIEKUN_SUB),
+        baseFilters({ carrierId: FOREIGN_CARRIER_ID }),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(listSpy).not.toHaveBeenCalled();
+  });
+
+  it('an opiekun with NO carriers gets an empty scope, never "all"', async () => {
+    const { service, listSpy } = makeService([], []);
+    const out = await service.list(auth('opiekun', OPIEKUN_SUB), baseFilters());
+    const passed = listSpy.mock.calls[0]![0] as DelegationListFilters;
+    // The relation filter still pins the opiekun id → matches nothing.
+    expect(passed.carrierOpiekunId).toBe(OPIEKUN_SUB);
+    expect(out.items).toEqual([]);
+  });
+
+  it('never gets a status floor and preserves non-scope filters', async () => {
+    const { service, listSpy } = makeService();
+    await service.list(
+      auth('opiekun', OPIEKUN_SUB),
+      baseFilters({ status: 'zjechal', from: '2026-05-01T00:00:00.000Z', limit: 25 }),
+    );
+    const passed = listSpy.mock.calls[0]![0] as DelegationListFilters;
+    expect(passed).toMatchObject({
+      carrierOpiekunId: OPIEKUN_SUB,
+      status: 'zjechal',
+      from: '2026-05-01T00:00:00.000Z',
+      limit: 25,
+    });
+    expect(passed.statusIn).toBeUndefined();
+  });
+});
+
 describe('DelegationsService.list — other roles unchanged', () => {
   it('admin keeps full access (no dispatcher/planner scope injected)', async () => {
     const { service, listSpy } = makeService();
@@ -262,20 +348,18 @@ describe('DelegationsService.list — other roles unchanged', () => {
     expect(passed.carrierId).toBe('any-carrier');
   });
 
-  it.each(['opiekun', 'eksport'] as const)(
-    'all-access role=%s keeps full access (no planner scope injected)',
-    async (role) => {
-      const { service, listSpy } = makeService();
-      await service.list(
-        auth(role, `${role}-1`),
-        baseFilters({ carrierId: 'any-carrier' }),
-      );
-      const passed = listSpy.mock.calls[0]![0] as DelegationListFilters;
-      expect(passed.plannerId).toBeUndefined();
-      expect(passed.dispatchTeamId).toBeUndefined();
-      expect(passed.carrierId).toBe('any-carrier');
-    },
-  );
+  it('eksport keeps full access (no ownership scope injected)', async () => {
+    const { service, listSpy } = makeService();
+    await service.list(
+      auth('eksport', 'eksport-1'),
+      baseFilters({ carrierId: 'any-carrier' }),
+    );
+    const passed = listSpy.mock.calls[0]![0] as DelegationListFilters;
+    expect(passed.plannerId).toBeUndefined();
+    expect(passed.dispatchTeamId).toBeUndefined();
+    expect(passed.carrierOpiekunId).toBeUndefined();
+    expect(passed.carrierId).toBe('any-carrier');
+  });
 
   it('weryfikator sees the ACTIVE board (REWORK 2026-06-20 #4 — back on delegations, like eksport)', async () => {
     const { service, listSpy } = makeService();
@@ -442,7 +526,30 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it.each(['admin', 'opiekun', 'eksport'] as const)(
+  it('opiekun may read a delegation of a carrier they supervise', async () => {
+    const row = makeRow({ carrierId: CARRIER_ID });
+    const { service } = makeService([row], [CARRIER_ID]);
+    const out = await service.getOne(auth('opiekun', OPIEKUN_SUB), 'deleg-1');
+    expect(out.id).toBe('deleg-1');
+  });
+
+  it("opiekun is 403 on another opiekun's carrier delegation", async () => {
+    const row = makeRow({ carrierId: FOREIGN_CARRIER_ID });
+    const { service } = makeService([row], [CARRIER_ID]);
+    await expect(
+      service.getOne(auth('opiekun', OPIEKUN_SUB), 'deleg-1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('opiekun with NO carriers is 403 on any delegation (never "all")', async () => {
+    const row = makeRow({ carrierId: CARRIER_ID });
+    const { service } = makeService([row], []);
+    await expect(
+      service.getOne(auth('opiekun', OPIEKUN_SUB), 'deleg-1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it.each(['admin', 'eksport'] as const)(
     'all-access role=%s may read any delegation by id',
     async (role) => {
       const row = makeRow({

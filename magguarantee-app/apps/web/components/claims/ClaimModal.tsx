@@ -31,8 +31,10 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
+  ArrowRight,
   BadgeCheck,
   Download,
+  Gavel,
   Loader2,
   Lock,
   Pencil,
@@ -68,6 +70,7 @@ import {
   type KmCalcBreakdown,
   type PreviewClaimDto,
   type RequestAuthorizationDto,
+  type Role,
   type SetAuthorizationAmountDto,
   type UpdateClaimDto,
   type VerifyClaimDto,
@@ -79,10 +82,16 @@ import { AutoRecalcBadge } from '@/components/claims/AutoRecalcBadge';
 import { HoursReadout } from '@/components/claims/HoursReadout';
 import { RecalcBadge } from '@/components/claims/RecalcBadge';
 import {
+  deriveClaimPermissions,
+  type ClaimModalMode,
+  type ClaimPermissions,
+} from '@/components/claims/claim-permissions';
+import {
   decisionTargetsFor,
   type ClaimDecisionTarget,
 } from '@/components/claims/claim-transitions';
 import { FormDescription, FormField, FormGrid } from '@/components/forms/Form';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/Dialog';
 import {
@@ -91,6 +100,7 @@ import {
   type FileUploadLabels,
 } from '@/components/ui/FileUpload';
 import { Input } from '@/components/ui/Input';
+import { LockNotice } from '@/components/ui/LockNotice';
 import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
@@ -133,7 +143,7 @@ interface FormValues {
   reklamacjaAmount: number | undefined;
 }
 
-export type ClaimModalMode = 'view' | 'edit';
+export type { ClaimModalMode };
 
 interface ClaimModalProps {
   open: boolean;
@@ -143,6 +153,12 @@ interface ClaimModalProps {
   /** Whether the «Edycja» affordance is shown (admin / pracownik only). For
    *  read-only roles the modal stays in `view` with no edit button. */
   canEdit?: boolean;
+  /**
+   * The viewer's role. Passed EXPLICITLY (never inferred from `canEdit`, which
+   * collapses admin and pracownik into one boolean) because §6.5.13/§6.5.14
+   * gate whole sections on admin-vs-pracownik — see `deriveClaimPermissions`.
+   */
+  role?: Role;
   onClose: () => void;
 }
 
@@ -166,7 +182,9 @@ function buildPreviewBody(
       ? Number(v.hoursAdjusted)
       : 0;
   const mileageOverride =
-    v.mileage !== undefined && Number.isFinite(v.mileage) && Number(v.mileage) >= 0
+    v.mileage !== undefined &&
+    Number.isFinite(v.mileage) &&
+    Number(v.mileage) >= 0
       ? Number(v.mileage)
       : undefined;
   return {
@@ -196,7 +214,10 @@ const updateClaimResolver: Resolver<FormValues> = async (values) => {
       } as FieldErrors<FormValues>,
     };
   }
-  const cleaned = cleanUpdatePayload(values);
+  // Validation runs against the payload shape WITH corrections — the resolver
+  // has no access to the permission object and every correction field is
+  // optional in the schema, so including them is the strictly safer check.
+  const cleaned = cleanUpdatePayload(values, true);
   const result = UpdateClaimSchema.safeParse(cleaned);
   if (result.success) {
     return { values, errors: {} };
@@ -214,8 +235,19 @@ const updateClaimResolver: Resolver<FormValues> = async (values) => {
   };
 };
 
-/** Drop empty / undefined values so Zod's `.strict()` doesn't choke. */
-function cleanUpdatePayload(values: FormValues): UpdateClaimDto {
+/**
+ * Drop empty / undefined values so Zod's `.strict()` doesn't choke.
+ *
+ * `includeCorrections` comes from `ClaimPermissions.payloadIncludesCorrections`
+ * — the SAME flag that decides whether the fact block renders inputs. When the
+ * fact block is read-only (pracownik @ OCZEKUJE_NA_AUTORYZACJE, §6.5.13 case 2)
+ * the 6 correction fields are stripped, so the decision PATCH can never carry a
+ * field the user was not allowed to touch.
+ */
+function cleanUpdatePayload(
+  values: FormValues,
+  includeCorrections: boolean,
+): UpdateClaimDto {
   const out: Record<string, unknown> = { targetStatus: values.targetStatus };
   const include = (k: string, v: unknown) => {
     if (v === '' || v === undefined || v === null) return;
@@ -223,6 +255,7 @@ function cleanUpdatePayload(values: FormValues): UpdateClaimDto {
     out[k] = v;
   };
   if (
+    includeCorrections &&
     values.targetStatus !== 'ODRZUCONO' &&
     values.targetStatus !== 'REKLAMACJA_ODRZUCONO'
   ) {
@@ -330,6 +363,7 @@ export function ClaimModal({
   nrZgl,
   initialMode = 'view',
   canEdit = false,
+  role,
   onClose,
 }: ClaimModalProps) {
   const t = useTranslations('employee.claims.modal');
@@ -348,6 +382,7 @@ export function ClaimModal({
             claim={claim}
             initialMode={initialMode}
             canEdit={canEdit}
+            role={role}
             onClose={onClose}
           />
         )}
@@ -386,10 +421,17 @@ interface ModalBodyProps {
   claim: ClaimDto;
   initialMode: ClaimModalMode;
   canEdit: boolean;
+  role: Role | undefined;
   onClose: () => void;
 }
 
-function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
+function ModalBody({
+  claim,
+  initialMode,
+  canEdit,
+  role,
+  onClose,
+}: ModalBodyProps) {
   const t = useTranslations('employee.claims.modal');
   const tStatus = useTranslations('employee.claims.modal.targetStatus');
   const tUnified = useTranslations('employee.claims.modal.unified');
@@ -398,18 +440,31 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
 
   const qc = useQueryClient();
 
-  const targets = useMemo(() => decisionTargetsFor(claim.status), [claim.status]);
-
-  // ── Post-authorization accept (product decision) ──
-  // When a claim reached the verifier THROUGH Maksim's e-mail authorization
-  // flow (status OCZEKUJE_NA_AUTORYZACJE), an accept lets the verifier ENTER
-  // the amount Maksim actually approved instead of locking to the live-computed
-  // dopłata. For a direct accept from NA_WERYFIKACJI the field stays locked.
-  const postAuthorization = claim.status === 'OCZEKUJE_NA_AUTORYZACJE';
+  const targets = useMemo(
+    () => decisionTargetsFor(claim.status),
+    [claim.status],
+  );
 
   // ── In-place morph state. Non-editing roles are pinned to `view`. ──
   const [mode, setMode] = useState<ClaimModalMode>(
     canEdit ? initialMode : 'view',
+  );
+
+  // ── THE permission object (§6.5.12–§6.5.14) ──
+  // Single derivation from (status, role, mode). Every section below reads from
+  // `perms` — fact-block editability, the verify button, the amountApproved
+  // branch, and the submit payload shape. Do NOT reintroduce ad-hoc
+  // `status === …` / `role === …` checks at the call sites; they are what let
+  // the gates drift out of sync with the rendered fields in the first place.
+  const perms: ClaimPermissions = useMemo(
+    () =>
+      deriveClaimPermissions({
+        status: claim.status,
+        role,
+        mode,
+        amountMaximum: claim.amountMaximum,
+      }),
+    [claim.status, claim.amountMaximum, role, mode],
   );
   const editButtonRef = useRef<HTMLButtonElement | null>(null);
   const firstInputRef = useRef<HTMLInputElement | null>(null);
@@ -479,8 +534,7 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
 
   // The dopłata shown in the locked field: the live previewed value when
   // available, else the persisted server value.
-  const liveDoplata =
-    previewQ.data?.paymentEur ?? claim.paymentEur;
+  const liveDoplata = previewQ.data?.paymentEur ?? claim.paymentEur;
 
   // ── Próg autoryzacji — SOFT INFORMATIONAL hint (docs/01, getAuthThreshold) ──
   // Tracks the live recalc: dni jezdne come from the previewed breakdown when
@@ -493,8 +547,7 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
     previewQ.data?.breakdown?.totalDays ?? claim.drivenDays;
   const prog = getAuthThreshold(liveDrivenDays);
   const exceedsProg = liveDoplata > prog;
-  const showExceedsHint =
-    exceedsProg && claim.status === 'NA_WERYFIKACJI';
+  const showExceedsHint = exceedsProg && claim.status === 'NA_WERYFIKACJI';
 
   // ── Live hours readout source (§6.5.4 / Phase 3.1) ──
   // The edit-mode HoursReadout must reflect the verifier's CURRENT working
@@ -545,39 +598,56 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
   // Auto-populate `amountApproved` to the live dopłata for ZAAKCEPTOWANO
   // until the verifier overrides it. (decision-scoped — only fires when the
   // accept branch is selected.)
-  // SKIPPED for the post-authorization accept (OCZEKUJE_NA_AUTORYZACJE): there
-  // the field is editable and prefilled with kwota Maksima (getDefaults), so
-  // re-syncing it to the live dopłata would clobber that prefill.
+  // SKIPPED once Maksim has a decision of record: from that point his amount —
+  // not the live dopłata — is the value the field carries (§6.5.14). Keyed on
+  // `hasMaksimDecision`, NOT on ClaimStatus.
   useEffect(() => {
-    if (postAuthorization) return;
+    if (perms.hasMaksimDecision) return;
     if (targetStatus !== 'ZAAKCEPTOWANO') return;
     if (form.formState.dirtyFields.amountApproved) return;
     if (typeof liveDoplata === 'number') {
       form.setValue('amountApproved', liveDoplata, { shouldDirty: false });
     }
-  }, [postAuthorization, targetStatus, liveDoplata, form]);
+  }, [perms.hasMaksimDecision, targetStatus, liveDoplata, form]);
 
-  // Complementary branch for the post-authorization accept: re-seed the
-  // editable `amountApproved` from kwota Maksima whenever it lands.
-  // Same-session Zapisz→accept is the PRIMARY flow: the verifier saves Maksim's
+  // Complementary branch: seed / re-seed `amountApproved` from kwota Maksima.
+  //
+  // Same-session save→accept is the PRIMARY flow: the verifier saves Maksim's
   // amount via the pending mini-form, its mutation invalidates the claim detail,
   // and the refetched `claim.amountMaximum` flows in here — but `key={claim.id}`
   // is stable so `ModalBody` never re-mounts and the mount-time `getDefaults`
-  // prefill can't pick it up. This effect closes that gap. The dirty check runs
-  // BEFORE setValue (mirroring the sibling effect) so a verifier's manual edit
-  // to kwota zatwierdzona always wins over a later re-save of Maksim's amount.
+  // prefill can't pick it up.
+  //
+  // The three branches, in order (the ORDER is the point):
+  //   1. `amountMaximum` CHANGED during this session → always re-seed, even over
+  //      a dirty field. A bare `dirtyFields` guard would leave a STALE amount
+  //      sitting in a field the pracownik cannot edit — the exact failure this
+  //      re-seed exists to prevent.
+  //   2. A persisted `claim.amountApproved` exists → leave it alone. An admin
+  //      may have deliberately overridden Maksim (§6.5.14); clobbering it back
+  //      to `amountMaximum` would erase the override and hide the divergence
+  //      band from the pracownik.
+  //   3. Otherwise seed, respecting an in-session manual edit.
+  const prevMaximumRef = useRef<number | null | undefined>(undefined);
   useEffect(() => {
-    if (!postAuthorization) return;
-    if (form.formState.dirtyFields.amountApproved) return;
-    if (claim.amountMaximum != null) {
-      form.setValue('amountApproved', claim.amountMaximum, {
-        shouldDirty: false,
-      });
+    const max = claim.amountMaximum;
+    const prev = prevMaximumRef.current;
+    const changedThisSession = prev !== undefined && prev !== max;
+    prevMaximumRef.current = max;
+
+    if (max == null) return;
+    if (changedThisSession) {
+      form.setValue('amountApproved', max, { shouldDirty: false });
+      return;
     }
-  }, [postAuthorization, claim.amountMaximum, form]);
+    if (claim.amountApproved != null) return;
+    if (form.formState.dirtyFields.amountApproved) return;
+    form.setValue('amountApproved', max, { shouldDirty: false });
+  }, [claim.amountMaximum, claim.amountApproved, form]);
 
   const tMaksim = useTranslations('employee.claims.modal.maksimGate');
   const tInTransit = useTranslations('employee.claims.modal.inTransitGate');
+  const tLocked = useTranslations('employee.claims.modal.locked');
 
   // ── Linked-outing in-transit gate (in-transit-verifier-gate feature) ──
   // When the wniosek is filed against an outing that is still `w_trasie`, the
@@ -656,7 +726,11 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
 
   const onSubmit: SubmitHandler<FormValues> = (values) => {
     if (!values.targetStatus) return;
-    const payload = cleanUpdatePayload(values);
+    // Corrections ride along ONLY when the fact block was actually editable.
+    const payload = cleanUpdatePayload(
+      values,
+      perms.payloadIncludesCorrections,
+    );
     updateM.mutate({ nrZgl: claim.nrZgl, body: payload });
   };
 
@@ -665,7 +739,12 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
   // take a decision or request Maksim authorization (server gate:
   // 422 CLAIM_NOT_VERIFIED). This mirrors that gate in the UI so the verifier
   // can't select a decision until they save the checkpoint.
-  const needsVerification = claim.status === 'NA_WERYFIKACJI';
+  // NOTE: this is the CHECKPOINT gate only — «must be verified before deciding».
+  // Whether the «Zapisz weryfikację» BUTTON exists is a different question
+  // (`perms.showVerifyButton`), because admin may re-save the checkpoint at
+  // OCZEKUJE_NA_AUTORYZACJE where the decision is not checkpoint-gated. Fusing
+  // the two into one `needsVerification` boolean was the original bug.
+  const needsVerification = perms.requiresVerifiedCheckpoint;
   const isVerified = claim.verifiedAt != null;
   const dirtyFields = form.formState.dirtyFields as Partial<
     Record<keyof FormValues, boolean>
@@ -705,6 +784,24 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
       form.reset(form.getValues());
     },
     onError: (err) => {
+      // ROLE refusal — distinct from the STATUS refusal below. The server
+      // 422s with the machine code `CLAIM_VERIFY_ADMIN_ONLY` when a pracownik
+      // saves a checkpoint at OCZEKUJE_NA_AUTORYZACJE. Reachable only from a
+      // STALE modal (the claim moved into that status after open), since
+      // `perms.showVerifyButton` removes the button otherwise — so refetch the
+      // detail, which re-derives `perms` and takes the button away.
+      // The status refusal carries NO machine code and falls through to the
+      // generic 4xx branch, which surfaces the server's own message.
+      if (
+        err instanceof ApiResponseError &&
+        problemCode(err) === 'CLAIM_VERIFY_ADMIN_ONLY'
+      ) {
+        qc.invalidateQueries({
+          queryKey: [...CLAIMS_KEY, 'detail', claim.nrZgl],
+        });
+        toast.error(tEdit('verifyAdminOnlyToast'));
+        return;
+      }
       // Stale-modal safety net (mirrors updateM.onError): the outing flipped to
       // `w_trasie` after open → the server 422s the verify with
       // `CLAIM_DELEGATION_IN_TRANSIT`. Refetch the claim detail so
@@ -737,14 +834,17 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
   // sum) over the dates. Lets the pracownik pull in daily-km rows the
   // weryfikator added after submit. Distinct body ⇒ distinct query key ⇒ no
   // collision with the main recalc preview above.
+  // Scoped to `perms.factsEditable` (not the raw status) — the hint exists to
+  // feed the km INPUT, so it belongs wherever that input is actually editable,
+  // which now includes admin @ OCZEKUJE_NA_AUTORYZACJE.
   const boardSumBody = useMemo<PreviewClaimDto | null>(() => {
-    if (!needsVerification) return null;
+    if (!perms.factsEditable) return null;
     if (debouncedPreviewBody === null) return null;
     // Drop `mileage` so the server falls back to Σ VehicleDailyKm (board sum).
     const rest: PreviewClaimDto = { ...debouncedPreviewBody };
     delete rest.mileage;
     return rest;
-  }, [needsVerification, debouncedPreviewBody]);
+  }, [perms.factsEditable, debouncedPreviewBody]);
 
   const boardSumQ = useClaimPreviewExisting(claim.nrZgl, boardSumBody, {
     enabled: boardSumBody !== null,
@@ -855,18 +955,22 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
             to them. */}
         {inTransitGated && <InTransitGateBlock />}
 
-        {/* ① Fact pairs */}
+        {/* ① Fact pairs — `editable` (NOT `mode`) drives the static⇄input flip,
+            so a pracownik in `edit` still gets the read-only rendering while the
+            wniosek awaits Maksim (§6.5.13 case 2, Tier B). */}
         <FactPairs
           claim={claim}
           form={form}
-          mode={mode}
+          editable={perms.factsEditable}
+          lockNotice={perms.factsNotice}
           firstInputRef={firstInputRef}
           livePreviewBreakdown={livePreviewBreakdown}
           previewNotYetLoaded={previewNotYetLoaded}
           errMsg={errMsg}
           tUnified={tUnified}
           tEdit={tEdit}
-          showBoardSum={needsVerification}
+          tLocked={tLocked}
+          showBoardSum={perms.factsEditable}
           boardSum={boardSum}
         />
 
@@ -891,20 +995,20 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
             <MaksimGateBlock claim={claim} active={maksimGateActive} />
           )}
 
-        {/* ③ Decyzja — at the very bottom */}
-        <section className="space-y-4">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-text-sub">
-            {tUnified('decyzjaSection')}
-          </h3>
-
+        {/* ③ Decyzja — the CONTAINED commitment panel (§6.5.12). Everything
+            above is a flat divided "reading" step; this is the irreversible
+            one, so it gets a box (brand-red top rule) instead of a hairline
+            divider. The shell is identical across all three branches — it must
+            not appear/disappear across `mode`. */}
+        <DecisionPanel tUnified={tUnified}>
           {targets.length === 0 ? (
-            <p className="rounded-md border border-border bg-input p-3 text-sm text-text-sub">
+            <p className="rounded-md bg-input/40 p-3 text-sm text-text-sub">
               {tUnified('terminalState')}
             </p>
           ) : !isEdit ? (
             // In view mode the decyzja inputs are hidden — the verifier
             // morphs to edit to make a decision.
-            <p className="rounded-md border border-border bg-input/40 p-3 text-sm text-text-sub">
+            <p className="rounded-md bg-input/40 p-3 text-sm text-text-sub">
               {tUnified('decisionRequired')}
             </p>
           ) : (
@@ -913,7 +1017,8 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
                 form={form}
                 targets={availableTargets}
                 targetStatus={targetStatus}
-                postAuthorization={postAuthorization}
+                amountApprovedMode={perms.amountApprovedMode}
+                amountMaximum={claim.amountMaximum}
                 decisionGated={decisionGated}
                 errMsg={errMsg}
                 tEdit={tEdit}
@@ -941,7 +1046,7 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
               )}
             </>
           )}
-        </section>
+        </DecisionPanel>
 
         {/* ④ Secondary sub-panel — Historia / Autoryzacja (§6.5.7).
             Explicit user request: render ONLY in edit mode — view mode shows
@@ -967,22 +1072,19 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
       <footer className="shrink-0 flex items-center justify-end gap-2 border-t border-border px-6 py-3 sm:px-8">
         {isEdit ? (
           <>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={cancelEdit}
-              disabled={updateM.isPending}
-            >
-              {tCommon('cancel')}
-            </Button>
-            {/* «Zapisz weryfikację» — verifier-checkpoint stamp. Only for
-                NA_WERYFIKACJI in edit mode. Saving unlocks the decyzja gate. */}
-            {needsVerification && (
+            {/* «Zapisz weryfikację» — verifier-checkpoint stamp. Sits in the
+                footer's LEFT slot (`mr-auto`, §6.5.12): two save buttons in one
+                right-hand cluster with near-identical labels are unreadable.
+                REMOVED (not disabled) when the role cannot verify in this
+                status — its reason is already carried by the fact block's
+                <LockNotice> (§6.5.13 hard rule). */}
+            {perms.showVerifyButton && (
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
+                className="mr-auto"
+                title={tEdit('verifyButtonHint')}
                 onClick={handleVerifyClick}
                 disabled={
                   verifyM.isPending ||
@@ -1003,12 +1105,25 @@ function ModalBody({ claim, initialMode, canEdit, onClose }: ModalBodyProps) {
                 )}
               </Button>
             )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={cancelEdit}
+              disabled={updateM.isPending}
+            >
+              {tCommon('cancel')}
+            </Button>
             <Button type="submit" size="sm" disabled={submitDisabled}>
               {updateM.isPending ? (
                 <>
                   <Loader2 size={14} className="animate-spin" aria-hidden />
                   {tEdit('submitting')}
                 </>
+              ) : targets.length > 0 ? (
+                // §6.5.12: a bare «Zapisz» next to «Zapisz weryfikację» is
+                // unresolvable — name what this button actually commits.
+                tEdit('submitDecision')
               ) : (
                 tEdit('submit')
               )}
@@ -1077,7 +1192,9 @@ function LinkedDelegationRow({ claim }: { claim: ClaimDto }) {
             title={
               recalcState === 'applied'
                 ? tRecalc('appliedTooltip', {
-                    origDateEnd: formatDateFull(claim.origDateEnd ?? claim.dateEnd),
+                    origDateEnd: formatDateFull(
+                      claim.origDateEnd ?? claim.dateEnd,
+                    ),
                     actualReturnAt: formatDateFull(actual),
                   })
                 : tRecalc('skippedTooltip', {
@@ -1090,24 +1207,24 @@ function LinkedDelegationRow({ claim }: { claim: ClaimDto }) {
       </div>
 
       <dl className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-3 text-sm">
-          <div className="flex items-baseline justify-between gap-2 sm:flex-col sm:items-start sm:justify-start">
-            <dt className="text-[11px] font-medium uppercase tracking-wider text-text-sub">
-              {t('vehicle')}
-            </dt>
-            <dd className="font-mono font-semibold text-text">{plate}</dd>
-          </div>
-          <div className="flex items-baseline justify-between gap-2 sm:flex-col sm:items-start sm:justify-start">
-            <dt className="text-[11px] font-medium uppercase tracking-wider text-text-sub">
-              {t('planned')}
-            </dt>
-            <dd className="text-text tabular-nums">{formatDateFull(planned)}</dd>
-          </div>
-          <div className="flex items-baseline justify-between gap-2 sm:flex-col sm:items-start sm:justify-start">
-            <dt className="text-[11px] font-medium uppercase tracking-wider text-text-sub">
-              {t('actual')}
-            </dt>
-            <dd className="text-text tabular-nums">{formatDateFull(actual)}</dd>
-          </div>
+        <div className="flex items-baseline justify-between gap-2 sm:flex-col sm:items-start sm:justify-start">
+          <dt className="text-[11px] font-medium uppercase tracking-wider text-text-sub">
+            {t('vehicle')}
+          </dt>
+          <dd className="font-mono font-semibold text-text">{plate}</dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-2 sm:flex-col sm:items-start sm:justify-start">
+          <dt className="text-[11px] font-medium uppercase tracking-wider text-text-sub">
+            {t('planned')}
+          </dt>
+          <dd className="text-text tabular-nums">{formatDateFull(planned)}</dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-2 sm:flex-col sm:items-start sm:justify-start">
+          <dt className="text-[11px] font-medium uppercase tracking-wider text-text-sub">
+            {t('actual')}
+          </dt>
+          <dd className="text-text tabular-nums">{formatDateFull(actual)}</dd>
+        </div>
       </dl>
     </section>
   );
@@ -1118,7 +1235,14 @@ function LinkedDelegationRow({ claim }: { claim: ClaimDto }) {
 interface FactPairsProps {
   claim: ClaimDto;
   form: UseFormReturn<FormValues>;
-  mode: ClaimModalMode;
+  /**
+   * Leaf controls render as inputs. NOT the same as `mode === 'edit'` — a
+   * pracownik at OCZEKUJE_NA_AUTORYZACJE is in `edit` (the decyzja panel below
+   * is live) while THIS block stays static (§6.5.13 Tier B).
+   */
+  editable: boolean;
+  /** Which block-level lock notice to render above the block, if any. */
+  lockNotice: ClaimPermissions['factsNotice'];
   firstInputRef: React.RefObject<HTMLInputElement | null>;
   /** Live km-calc breakdown from `previewQ.data` — recomputed from the
    *  verifier's CURRENT working times. `null` until the first preview lands. */
@@ -1129,7 +1253,8 @@ interface FactPairsProps {
   errMsg: (key: string) => string | undefined;
   tUnified: ReturnType<typeof useTranslations<'employee.claims.modal.unified'>>;
   tEdit: ReturnType<typeof useTranslations<'employee.claims.modal.edit'>>;
-  /** Show the board-sum hint under the km input (NA_WERYFIKACJI edit only). */
+  tLocked: ReturnType<typeof useTranslations<'employee.claims.modal.locked'>>;
+  /** Show the board-sum hint under the km input (editable fact block only). */
   showBoardSum: boolean;
   /** Server-computed Σ VehicleDailyKm over the current dates — `undefined`
    *  until the board-sum preview query resolves. */
@@ -1139,17 +1264,23 @@ interface FactPairsProps {
 function FactPairs({
   claim,
   form,
-  mode,
+  editable,
+  lockNotice,
   firstInputRef,
   livePreviewBreakdown,
   previewNotYetLoaded,
   errMsg,
   tUnified,
   tEdit,
+  tLocked,
   showBoardSum,
   boardSum,
 }: FactPairsProps) {
-  const isEdit = mode === 'edit';
+  const isEdit = editable;
+  const noticeId = useId();
+  // Only the `locked` variant actually disables anything; `adminInfo` is a pure
+  // explainer ("you CAN still edit"), so it must not claim aria-disabled.
+  const isLocked = lockNotice === 'locked';
 
   // Declared (carrier) sources — fall back to the live value for legacy
   // claims where the orig* snapshot is null (§6.5.3).
@@ -1163,167 +1294,190 @@ function FactPairs({
 
   return (
     <section className="space-y-3">
-      {/* Two-column section headers — verifier column only labelled in edit. */}
+      {/* §6.5.13 Tier B — ONE block-level notice above the headers, never N
+          greyed inputs with N lock glyphs. The `adminInfo` variant explains why
+          the surface feels different WITHOUT locking anything. */}
+      {lockNotice && (
+        <LockNotice id={noticeId}>
+          {tLocked(
+            lockNotice === 'locked'
+              ? 'factsPendingAuthorization'
+              : 'factsPendingAuthorizationAdmin',
+          )}
+        </LockNotice>
+      )}
+
+      {/* The locked BLOCK. `role="group"` (not the outer <section>, whose
+          implicit `region` role does not support `aria-disabled`) carries the
+          state + the pointer to the one <LockNotice> that explains it. */}
       <div
-        className={cn(
-          'grid gap-x-4',
-          isEdit ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1',
-        )}
+        role="group"
+        aria-describedby={lockNotice ? noticeId : undefined}
+        aria-disabled={isLocked || undefined}
+        className="space-y-3"
       >
-        <h3 className="text-xs font-bold uppercase tracking-wider text-text-sub">
-          {tUnified('declaredHeader')}
-        </h3>
-        {isEdit && (
-          <div className="hidden md:block">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-text-sub">
-              {tUnified('verifiedHeader')}
-            </h3>
-            <p className="text-xs text-text-sub font-normal normal-case tracking-normal">
-              {tUnified('verifiedHint')}
-            </p>
-          </div>
-        )}
-      </div>
+        {/* Two-column section headers — verifier column only labelled in edit. */}
+        <div
+          className={cn(
+            'grid gap-x-4',
+            isEdit ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1',
+          )}
+        >
+          <h3 className="text-xs font-bold uppercase tracking-wider text-text-sub">
+            {tUnified('declaredHeader')}
+          </h3>
+          {isEdit && (
+            <div className="hidden md:block">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-text-sub">
+                {tUnified('verifiedHeader')}
+              </h3>
+              <p className="text-xs text-text-sub font-normal normal-case tracking-normal">
+                {tUnified('verifiedHint')}
+              </p>
+            </div>
+          )}
+        </div>
 
-      <div className="space-y-3">
-        {/* 1 — dateStart */}
-        <FactPairRow
-          label={tUnified('dateStart')}
-          isEdit={isEdit}
-          declaredCaption={tUnified('declaredCaption')}
-          declaredText={formatDateFull(declared.dateStart)}
-          verifierDisplay={formatDateFull(claim.dateStart)}
-          input={(() => {
-            // Merge RHF's `ref` with `firstInputRef` so enter-edit focus
-            // lands here without overwriting register's own ref.
-            const { ref: rhfRef, ...rest } = form.register('dateStart');
-            return (
+        <div className="space-y-3">
+          {/* 1 — dateStart */}
+          <FactPairRow
+            label={tUnified('dateStart')}
+            isEdit={isEdit}
+            declaredCaption={tUnified('declaredCaption')}
+            declaredText={formatDateFull(declared.dateStart)}
+            verifierDisplay={formatDateFull(claim.dateStart)}
+            input={(() => {
+              // Merge RHF's `ref` with `firstInputRef` so enter-edit focus
+              // lands here without overwriting register's own ref.
+              const { ref: rhfRef, ...rest } = form.register('dateStart');
+              return (
+                <Input
+                  ref={(el) => {
+                    rhfRef(el);
+                    firstInputRef.current = el;
+                  }}
+                  type="date"
+                  aria-label={`${tUnified('verifiedHeader')} — ${tUnified('dateStart')}`}
+                  {...rest}
+                />
+              );
+            })()}
+            error={errMsg('dateStart')}
+          />
+
+          {/* 2 — dateEnd */}
+          <FactPairRow
+            label={tUnified('dateEnd')}
+            isEdit={isEdit}
+            declaredCaption={tUnified('declaredCaption')}
+            declaredText={formatDateFull(declared.dateEnd)}
+            verifierDisplay={formatDateFull(claim.dateEnd)}
+            input={
               <Input
-                ref={(el) => {
-                  rhfRef(el);
-                  firstInputRef.current = el;
-                }}
                 type="date"
-                aria-label={`${tUnified('verifiedHeader')} — ${tUnified('dateStart')}`}
-                {...rest}
+                aria-label={`${tUnified('verifiedHeader')} — ${tUnified('dateEnd')}`}
+                {...form.register('dateEnd')}
               />
-            );
-          })()}
-          error={errMsg('dateStart')}
-        />
+            }
+            error={errMsg('dateEnd')}
+          />
 
-        {/* 2 — dateEnd */}
-        <FactPairRow
-          label={tUnified('dateEnd')}
-          isEdit={isEdit}
-          declaredCaption={tUnified('declaredCaption')}
-          declaredText={formatDateFull(declared.dateEnd)}
-          verifierDisplay={formatDateFull(claim.dateEnd)}
-          input={
-            <Input
-              type="date"
-              aria-label={`${tUnified('verifiedHeader')} — ${tUnified('dateEnd')}`}
-              {...form.register('dateEnd')}
-            />
-          }
-          error={errMsg('dateEnd')}
-        />
+          {/* 3 — timeFrom (declared from origTimeFrom, NOT the live field) */}
+          <FactPairRow
+            label={tUnified('timeFrom')}
+            isEdit={isEdit}
+            declaredCaption={tUnified('declaredCaption')}
+            declaredText={declared.timeFrom}
+            verifierDisplay={claim.timeFrom}
+            input={
+              <Input
+                type="time"
+                aria-label={`${tUnified('verifiedHeader')} — ${tUnified('timeFrom')}`}
+                {...form.register('timeFrom')}
+              />
+            }
+            error={errMsg('timeFrom')}
+          />
 
-        {/* 3 — timeFrom (declared from origTimeFrom, NOT the live field) */}
-        <FactPairRow
-          label={tUnified('timeFrom')}
-          isEdit={isEdit}
-          declaredCaption={tUnified('declaredCaption')}
-          declaredText={declared.timeFrom}
-          verifierDisplay={claim.timeFrom}
-          input={
-            <Input
-              type="time"
-              aria-label={`${tUnified('verifiedHeader')} — ${tUnified('timeFrom')}`}
-              {...form.register('timeFrom')}
-            />
-          }
-          error={errMsg('timeFrom')}
-        />
+          {/* 4 — timeTo (declared from origTimeTo, NOT the live field) */}
+          <FactPairRow
+            label={tUnified('timeTo')}
+            isEdit={isEdit}
+            declaredCaption={tUnified('declaredCaption')}
+            declaredText={declared.timeTo}
+            verifierDisplay={claim.timeTo}
+            input={
+              <Input
+                type="time"
+                aria-label={`${tUnified('verifiedHeader')} — ${tUnified('timeTo')}`}
+                {...form.register('timeTo')}
+              />
+            }
+            error={errMsg('timeTo')}
+          />
 
-        {/* 4 — timeTo (declared from origTimeTo, NOT the live field) */}
-        <FactPairRow
-          label={tUnified('timeTo')}
-          isEdit={isEdit}
-          declaredCaption={tUnified('declaredCaption')}
-          declaredText={declared.timeTo}
-          verifierDisplay={claim.timeTo}
-          input={
-            <Input
-              type="time"
-              aria-label={`${tUnified('verifiedHeader')} — ${tUnified('timeTo')}`}
-              {...form.register('timeTo')}
-            />
-          }
-          error={errMsg('timeTo')}
-        />
+          {/* 5 — mileage */}
+          <FactPairRow
+            label={tUnified('mileage')}
+            isEdit={isEdit}
+            declaredCaption={tUnified('declaredCaption')}
+            declaredText={`${Math.round(declared.mileage).toLocaleString('pl-PL')} km`}
+            declaredNumeric
+            verifierDisplay={`${Math.round(claim.mileage).toLocaleString('pl-PL')} km`}
+            input={
+              <Input
+                type="number"
+                step="1"
+                min={0}
+                aria-label={`${tUnified('verifiedHeader')} — ${tUnified('mileage')}`}
+                {...form.register('mileage', {
+                  setValueAs: (v) =>
+                    v === '' || v === null ? undefined : Number(v),
+                })}
+              />
+            }
+            error={errMsg('mileage')}
+            extra={
+              // Board-sum hint — Σ VehicleDailyKm from the server (board sum) over
+              // the current dates. Lets the pracownik pull in daily-km rows the
+              // weryfikator added after submit. Only in NA_WERYFIKACJI edit, and
+              // only once the query has data.
+              showBoardSum && boardSum !== undefined ? (
+                <div className="flex flex-wrap items-center gap-2 text-xs text-text-sub">
+                  <span className="tabular-nums">
+                    {tEdit('boardSumHint', {
+                      km: Math.round(boardSum).toLocaleString('pl-PL'),
+                    })}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-[12px] font-semibold"
+                    onClick={() =>
+                      form.setValue('mileage', Math.round(boardSum), {
+                        shouldDirty: true,
+                      })
+                    }
+                  >
+                    {tEdit('boardSumApply')}
+                  </Button>
+                </div>
+              ) : undefined
+            }
+          />
 
-        {/* 5 — mileage */}
-        <FactPairRow
-          label={tUnified('mileage')}
-          isEdit={isEdit}
-          declaredCaption={tUnified('declaredCaption')}
-          declaredText={`${Math.round(declared.mileage).toLocaleString('pl-PL')} km`}
-          declaredNumeric
-          verifierDisplay={`${Math.round(claim.mileage).toLocaleString('pl-PL')} km`}
-          input={
-            <Input
-              type="number"
-              step="1"
-              min={0}
-              aria-label={`${tUnified('verifiedHeader')} — ${tUnified('mileage')}`}
-              {...form.register('mileage', {
-                setValueAs: (v) =>
-                  v === '' || v === null ? undefined : Number(v),
-              })}
-            />
-          }
-          error={errMsg('mileage')}
-          extra={
-            // Board-sum hint — Σ VehicleDailyKm from the server (board sum) over
-            // the current dates. Lets the pracownik pull in daily-km rows the
-            // weryfikator added after submit. Only in NA_WERYFIKACJI edit, and
-            // only once the query has data.
-            showBoardSum && boardSum !== undefined ? (
-              <div className="flex flex-wrap items-center gap-2 text-xs text-text-sub">
-                <span className="tabular-nums">
-                  {tEdit('boardSumHint', {
-                    km: Math.round(boardSum).toLocaleString('pl-PL'),
-                  })}
-                </span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-7 px-2 text-[12px] font-semibold"
-                  onClick={() =>
-                    form.setValue('mileage', Math.round(boardSum), {
-                      shouldDirty: true,
-                    })
-                  }
-                >
-                  {tEdit('boardSumApply')}
-                </Button>
-              </div>
-            ) : undefined
-          }
-        />
-
-        {/* 6 — hoursAdjusted — INPUT ONLY (no declared cell, never `0`). */}
-        <HoursAdjustedFact
-          claim={claim}
-          form={form}
-          mode={mode}
-          livePreviewBreakdown={livePreviewBreakdown}
-          previewNotYetLoaded={previewNotYetLoaded}
-          errMsg={errMsg}
-          tUnified={tUnified}
-        />
+          {/* 6 — hoursAdjusted — INPUT ONLY (no declared cell, never `0`). */}
+          <HoursAdjustedFact
+            claim={claim}
+            form={form}
+            editable={editable}
+            livePreviewBreakdown={livePreviewBreakdown}
+            previewNotYetLoaded={previewNotYetLoaded}
+            errMsg={errMsg}
+            tUnified={tUnified}
+          />
+        </div>
       </div>
     </section>
   );
@@ -1417,7 +1571,7 @@ function FactPairRow({
 function HoursAdjustedFact({
   claim,
   form,
-  mode,
+  editable,
   livePreviewBreakdown,
   previewNotYetLoaded,
   errMsg,
@@ -1425,13 +1579,14 @@ function HoursAdjustedFact({
 }: {
   claim: ClaimDto;
   form: UseFormReturn<FormValues>;
-  mode: ClaimModalMode;
+  /** Mirrors `FactPairs.editable` — see the note there on why not `mode`. */
+  editable: boolean;
   livePreviewBreakdown: KmCalcBreakdown | null;
   previewNotYetLoaded: boolean;
   errMsg: (key: string) => string | undefined;
   tUnified: ReturnType<typeof useTranslations<'employee.claims.modal.unified'>>;
 }) {
-  const isEdit = mode === 'edit';
+  const isEdit = editable;
   const error = errMsg('hoursAdjusted');
 
   if (!isEdit) {
@@ -1471,8 +1626,7 @@ function HoursAdjustedFact({
           min={0}
           aria-label={tUnified('hoursAdjusted')}
           {...form.register('hoursAdjusted', {
-            setValueAs: (v) =>
-              v === '' || v === null ? undefined : Number(v),
+            setValueAs: (v) => (v === '' || v === null ? undefined : Number(v)),
           })}
         />
         <div className="mt-1">
@@ -1851,13 +2005,142 @@ function MaksimGateBlock({
   );
 }
 
+// ── ③ Decision panel — the contained commitment step (§6.5.12) ──────
+//
+// Everything above the decyzja is a flat `border-t` divided section: those are
+// all READING steps of one narrative. The decyzja is the single irreversible,
+// state-changing block, so it is CONTAINERISED rather than merely divided —
+// «a hairline rule says "same family, next item"; a card says "different kind
+// of thing"». The 3px brand-red top rule reuses the <LoginCard> brand anchor:
+// brand red = "this is the moment that matters".
+//
+// Surface stays `bg-card` (NOT `bg-input`) deliberately: the panel holds
+// editable inputs, which would lose their surface contrast against a filled
+// panel AND collide with the `bg-input/40` locked-field language (§6.5.13).
+// Containment is carried by border + radius + padding, not by a fill. No
+// shadow — the panel is already inside a `shadow-modal` dialog.
+//
+// The shell renders IDENTICALLY in all three branches (terminal note, view-mode
+// hint, edit-mode fields) — the container must never appear/disappear across
+// `mode` (§6.5.6 no-jump rule).
+
+function DecisionPanel({
+  tUnified,
+  children,
+}: {
+  tUnified: ReturnType<typeof useTranslations<'employee.claims.modal.unified'>>;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="mt-6 space-y-4 rounded-xl border border-border border-t-[3px] border-t-brand bg-card p-4 sm:p-5">
+      <div>
+        {/* Promoted OUT of the `text-xs uppercase text-text-sub` section-label
+            class used above — that class is for field-group labels, and using
+            it here is exactly why decyzja read as "just another group". */}
+        <div className="flex items-center gap-2">
+          <Gavel size={16} aria-hidden className="shrink-0 text-brand" />
+          <h3 className="text-sm font-bold text-text">
+            {tUnified('decyzjaSection')}
+          </h3>
+        </div>
+        <p className="mt-0.5 text-xs text-text-sub">
+          {tUnified('decyzjaSubtitle')}
+        </p>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+// ── <AmountOverrideRow> — kwota Maksima vs kwota zatwierdzona (§6.5.14) ──
+//
+// Same reconciliation semantic as the fact pairs (§6.5.3): a reference value
+// the user did not author, next to the working value they did. So it speaks the
+// SAME language — muted reference line when aligned, the `bg-warning/10`
+// "this was changed" tint when divergent. No new tokens.
+//
+// Rendered under `amountApproved` for BOTH roles whenever Maksim has decided:
+// the pracownik needs the divergence explained just as much as the admin who
+// caused it — otherwise they see a locked field contradicting the Autoryzacja
+// panel below, which is the confusion this exists to kill.
+
+/** 2dp comparison — float noise must not fake a divergence. */
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function amountsDiverge(
+  amountMaximum: number,
+  amountApproved: number | undefined,
+): boolean {
+  if (amountApproved === undefined || !Number.isFinite(amountApproved)) {
+    return false;
+  }
+  return round2(amountApproved) !== round2(amountMaximum);
+}
+
+function AmountOverrideRow({
+  amountMaximum,
+  amountApproved,
+  tEdit,
+}: {
+  amountMaximum: number;
+  /** Live RHF value — the band must react to TYPING, not to blur or submit. */
+  amountApproved: number | undefined;
+  tEdit: ReturnType<typeof useTranslations<'employee.claims.modal.edit'>>;
+}) {
+  const diverged = amountsDiverge(amountMaximum, amountApproved);
+
+  // (a) Aligned — plain muted reference context (no lock glyph: the caller only
+  // renders this branch for the UNLOCKED field, where the row is pure
+  // reference). Muted-with-no-lock = "context"; lock = "you can't type here".
+  if (!diverged) {
+    return (
+      <p className="flex items-center gap-1 text-xs text-text-sub">
+        {tEdit.rich('maksimAmountRef', {
+          amount: formatEur(amountMaximum),
+          v: (chunks) => (
+            <span className="font-semibold tabular-nums">{chunks}</span>
+          ),
+        })}
+      </p>
+    );
+  }
+
+  // (b) Divergent — the admin has overridden. Says WHICH number wins.
+  return (
+    <div
+      role="status"
+      className="mt-1.5 flex items-start gap-2 rounded-md bg-warning/10 px-3 py-2 text-xs text-warning-dark dark:text-warning"
+    >
+      <AlertTriangle size={14} aria-hidden className="mt-0.5 shrink-0" />
+      <div className="min-w-0">
+        <p className="font-semibold">{tEdit('maksimOverrideTitle')}</p>
+        <p className="mt-0.5">
+          <span className="tabular-nums text-text-sub line-through">
+            {formatEur(amountMaximum)}
+          </span>
+          <ArrowRight aria-hidden className="mx-1 inline size-3 shrink-0" />
+          <span className="font-semibold tabular-nums">
+            {formatEur(amountApproved ?? 0)}
+          </span>
+        </p>
+        <p className="mt-0.5 text-text-sub">
+          {tEdit('maksimOverrideConsequence')}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── ③ Decision fields ───────────────────────────────────────────────
 
 function DecisionFields({
   form,
   targets,
   targetStatus,
-  postAuthorization,
+  amountApprovedMode,
+  amountMaximum,
   decisionGated,
   errMsg,
   tEdit,
@@ -1866,10 +2149,10 @@ function DecisionFields({
   form: UseFormReturn<FormValues>;
   targets: ClaimDecisionTarget[];
   targetStatus: FormValues['targetStatus'];
-  /** True when this claim came through Maksim's authorization flow
-   *  (status OCZEKUJE_NA_AUTORYZACJE) — the kwota zatwierdzona becomes an
-   *  editable input prefilled with kwota Maksima instead of a locked field. */
-  postAuthorization: boolean;
+  /** §6.5.14 — see `ClaimPermissions.amountApprovedMode`. NEVER status-keyed. */
+  amountApprovedMode: ClaimPermissions['amountApprovedMode'];
+  /** Maksim's decision of record, for the reference / override row. */
+  amountMaximum: number | null;
   /** True when the verifier-checkpoint gate is active (NA_WERYFIKACJI and not
    *  yet verified / has unsaved corrections) — disables the decyzja select. */
   decisionGated: boolean;
@@ -1879,6 +2162,13 @@ function DecisionFields({
     typeof useTranslations<'employee.claims.modal.targetStatus'>
   >;
 }) {
+  // Watched, not read on blur/submit — §6.5.14 requires the override feedback
+  // to be attached to the act of TYPING.
+  const watchedAmountApproved = form.watch('amountApproved');
+  const overridden =
+    amountMaximum != null &&
+    amountsDiverge(amountMaximum, watchedAmountApproved);
+
   return (
     <div className="space-y-4">
       <FormField
@@ -1933,39 +2223,48 @@ function DecisionFields({
             />
           </FormField>
           <FormField
-            label={tEdit('amountApproved')}
+            label={
+              <span className="inline-flex items-center gap-2">
+                {tEdit('amountApproved')}
+                {/* Divergence stays visible even when the panel is scrolled to
+                    its top edge and the band below is off-screen (§6.5.14). */}
+                {overridden && (
+                  <Badge
+                    variant="warning"
+                    className="font-bold uppercase tracking-wide"
+                  >
+                    {tEdit('maksimOverrideBadge')}
+                  </Badge>
+                )}
+              </span>
+            }
             required
             error={errMsg('amountApproved')}
             htmlFor="claim-amountApproved"
             className="col-span-2"
           >
-            {postAuthorization ? (
-              // Post-authorization accept (OCZEKUJE_NA_AUTORYZACJE): the field
-              // is EDITABLE and prefilled with kwota Maksima (getDefaults). The
-              // verifier enters the amount Maksim approved by e-mail; that
-              // user-typed value flows through the PATCH `amountApproved` and
-              // is NOT overwritten by the live-dopłata effect (gated off above).
-              <>
-                <Input
-                  id="claim-amountApproved"
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  {...form.register('amountApproved', {
-                    setValueAs: (v) =>
-                      v === '' || v === null ? undefined : Number(v),
-                  })}
-                />
-                <FormDescription>
-                  {tEdit('amountApprovedFromMaksim')}
-                </FormDescription>
-              </>
+            {amountApprovedMode === 'editable' ? (
+              // Admin override (§6.5.14): Maksim decided, but an admin may set
+              // the amount the carrier will actually be paid. The typed value
+              // flows through the PATCH and is NOT overwritten by the
+              // live-dopłata effect (gated off on `hasMaksimDecision`).
+              <Input
+                id="claim-amountApproved"
+                type="number"
+                step="0.01"
+                min={0}
+                {...form.register('amountApproved', {
+                  setValueAs: (v) =>
+                    v === '' || v === null ? undefined : Number(v),
+                })}
+              />
             ) : (
               <>
-                {/* Same locked/computed field as the dopłata block (§6.5.5) —
-                    bound to the live-computed value; verifier does NOT type
-                    into it. `readOnly` (not `disabled`) keeps it
-                    RHF-registered + submitted. */}
+                {/* §6.5.13 Tier A recipe — VERBATIM, and the only field-level
+                    lock style in the modal. `readOnly` (never `disabled`) keeps
+                    the field RHF-registered and part of the submitted payload.
+                    Two causes share this one rendering; only the reason copy
+                    differs (`computed` vs `lockedMaksim`). */}
                 <div className="relative">
                   <Input
                     id="claim-amountApproved"
@@ -1975,7 +2274,11 @@ function DecisionFields({
                     readOnly
                     tabIndex={-1}
                     aria-readonly="true"
-                    title={tEdit('amountApprovedLocked')}
+                    title={
+                      amountApprovedMode === 'lockedMaksim'
+                        ? tEdit('amountApprovedLockedMaksimHint')
+                        : tEdit('amountApprovedLocked')
+                    }
                     className="bg-input/40 pr-9 font-semibold tabular-nums text-text-sub cursor-not-allowed focus:border-border focus:ring-0"
                     {...form.register('amountApproved', {
                       setValueAs: (v) =>
@@ -1989,16 +2292,43 @@ function DecisionFields({
                 </div>
                 <FormDescription className="flex items-center gap-1">
                   <Lock aria-hidden className="size-3 shrink-0" />
-                  {tEdit('amountApprovedAuto')}
+                  {amountApprovedMode === 'lockedMaksim' &&
+                  amountMaximum != null
+                    ? tEdit('amountApprovedLockedMaksim', {
+                        amount: formatEur(amountMaximum),
+                      })
+                    : tEdit('amountApprovedAuto')}
                 </FormDescription>
               </>
             )}
+            {/* Structurally identical below-input slot for BOTH roles; the
+                DIVERGENCE band (b) renders for both — a pracownik needs the
+                override explained just as much as the admin who caused it.
+                Only the ALIGNED reference line (a) is role-conditional: the
+                locked branch's reason line already names Maksim's amount
+                («Zablokowane — jest decyzja Maksima (820,00 €)»), so repeating
+                it as a reference row would print the same number twice for one
+                fact. §6.5.14's role table treats the two as alternatives. */}
+            {amountMaximum != null &&
+              (amountApprovedMode !== 'lockedMaksim' || overridden) && (
+                <AmountOverrideRow
+                  amountMaximum={amountMaximum}
+                  amountApproved={watchedAmountApproved}
+                  tEdit={tEdit}
+                />
+              )}
           </FormField>
           <FormField
             label={tEdit('comment')}
             error={errMsg('comment')}
             htmlFor="claim-comment-accept"
             className="col-span-2"
+            // NON-BLOCKING hint while the override is live (§6.5.14): «no
+            // confirm dialog» is the locked decision, and making `comment`
+            // required is a business rule, not a design call. Hint only.
+            description={
+              overridden ? tEdit('maksimOverrideCommentHint') : undefined
+            }
           >
             <Textarea
               id="claim-comment-accept"
@@ -2690,11 +3020,11 @@ function getDefaults(claim: ClaimDto): FormValues {
     // request-authorization path, so paymentEur is a defensive fallback only.
     amountApproved:
       claim.status === 'OCZEKUJE_NA_AUTORYZACJE'
-        ? claim.amountApproved ??
+        ? (claim.amountApproved ??
           claim.amountMaximum ??
           claim.paymentEur ??
-          undefined
-        : claim.amountApproved ?? claim.paymentEur ?? undefined,
+          undefined)
+        : (claim.amountApproved ?? claim.paymentEur ?? undefined),
     amountMaximum: claim.amountMaximum ?? undefined,
     comment: claim.comment ?? '',
     margin: claim.margin ?? undefined,

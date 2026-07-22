@@ -180,6 +180,12 @@ services:
         # Baked into the client bundle. Must match the URL the browser
         # uses to reach the API (NOT the in-cluster docker hostname).
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL required in .env}
+        # Past-departure bypass for the carrier "nowy wyjazd" form (UAT only:
+        # lets the demo build a backdated flow instead of waiting real days).
+        # Defaults to `false` so an .env without the key keeps prod semantics.
+        # Must be kept in sync with the api-side `ALLOW_PAST_DEPARTURE` — the
+        # two flags are independent, and only the api one is authoritative.
+        NEXT_PUBLIC_ALLOW_PAST_DEPARTURE: ${NEXT_PUBLIC_ALLOW_PAST_DEPARTURE:-false}
     container_name: magguarantee-web
     restart: unless-stopped
     env_file: .env
