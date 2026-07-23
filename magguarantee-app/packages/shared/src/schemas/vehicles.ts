@@ -63,6 +63,31 @@ export type WasteCountry = z.infer<typeof WasteCountrySchema>;
 
 const VehicleTypeSchema = z.enum(['MEGA', 'STD', 'COIL']);
 
+/**
+ * Delegation-driven vehicle lifecycle status — the READ-TIME classification of
+ * a LIVE vehicle (there is no stored status column). Zod mirror of the pure
+ * `VehicleLifecycleStatus` union in `@magguarantee/shared`'s
+ * `domain/vehicle-status.ts` (keep the two in lockstep):
+ *
+ *   - `wylaczona`    — `Vehicle.active=false` (manual deactivation, clock off).
+ *   - `aktywna`      — active AND a non-terminal delegation
+ *                      (zgloszony/gotowy/w_trasie) exists.
+ *   - `stojaca`      — active, no active delegation, idle 0–14 calendar days.
+ *   - `nieaktywna`   — …idle 15–28 calendar days.
+ *   - `do_usuniecia` — …idle ≥29 calendar days (overdue for removal review).
+ *
+ * Days are CALENDAR days (Europe/Warsaw) from the anchor
+ * `max(actualReturnAt over zjechał) ?? Vehicle.createdAt`. Reused by both the
+ * full `VehicleDto` and the slim fleet list items (per-row badge).
+ */
+export const VehicleLifecycleStatusSchema = z.enum([
+  'wylaczona',
+  'aktywna',
+  'stojaca',
+  'nieaktywna',
+  'do_usuniecia',
+]);
+
 const vehicleAttributeFields = {
   plannerId: UuidSchema,
   /**
@@ -723,6 +748,18 @@ export const VehicleDtoSchema = z.object({
   gpsMobilePhone: z.string().nullable(),
   sideNumber: z.string().nullable(),
   lastDroveAt: IsoDateTimeSchema.nullable(),
+  /**
+   * DERIVED server-side (never stored) — the delegation-driven lifecycle
+   * status computed at read time from `active` + active-delegation existence +
+   * the idle anchor. See {@link VehicleLifecycleStatusSchema}.
+   */
+  lifecycleStatus: VehicleLifecycleStatusSchema,
+  /**
+   * DERIVED — calendar days (Europe/Warsaw) since the idle anchor
+   * (`max(actualReturnAt over zjechał) ?? createdAt`). `null` when no idle clock
+   * runs (status `wylaczona` or `aktywna`).
+   */
+  daysSinceReturn: z.number().int().nullable(),
   plannerId: UuidSchema.nullable(),
   planner: z
     .object({

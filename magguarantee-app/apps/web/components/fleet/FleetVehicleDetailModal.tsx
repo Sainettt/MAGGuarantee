@@ -24,6 +24,7 @@ import { useTranslations } from 'next-intl';
 import type { ReactNode } from 'react';
 import type { VehicleListItem } from '@magguarantee/shared';
 
+import { VehicleStatusBadge } from '@/components/carrier/VehicleStatusBadge';
 import { TeamFieldValue } from '@/components/teams/TeamFieldValue';
 import { Badge } from '@/components/ui/Badge';
 import {
@@ -61,10 +62,13 @@ export function FleetVehicleDetailModal({
   const no = tCommon('no');
   const bool = (v: boolean | null | undefined) => boolValue(v, yes, no);
 
-  const badges: ReactNode = vehicle.active ? (
-    <Badge variant="success">{tCommon('active')}</Badge>
-  ) : (
-    <Badge variant="muted">{tCommon('inactive')}</Badge>
+  // Header badge — the delegation-driven lifecycle status (§6.3.6); replaces
+  // the retired active/inactive flag (`active=false` surfaces as «Wyłączona»).
+  const badges: ReactNode = (
+    <VehicleStatusBadge
+      status={vehicle.lifecycleStatus}
+      daysSinceReturn={vehicle.daysSinceReturn}
+    />
   );
 
   const sections: EntityDetailSection[] = [

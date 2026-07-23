@@ -34,6 +34,7 @@ import type {
   VehicleDto,
 } from '@magguarantee/shared';
 
+import { VehicleStatusBadge } from '@/components/carrier/VehicleStatusBadge';
 import { DelegationsTable } from '@/components/delegations/DelegationsTable';
 import { DriverDetailModal } from '@/components/drivers/DriverDetailModal';
 import { PermitCell } from '@/components/fleet/PermitCell';
@@ -339,7 +340,6 @@ interface VehiclesTableProps {
 
 function VehiclesTable({ rows, isLoading, onRowClick }: VehiclesTableProps) {
   const t = useTranslations('opieka.vehicles');
-  const tCommon = useTranslations('common');
 
   const columns = useMemo<DataTableColumn<VehicleDto>[]>(
     () => [
@@ -404,18 +404,20 @@ function VehiclesTable({ rows, isLoading, onRowClick }: VehiclesTableProps) {
         ),
       },
       {
-        id: 'active',
+        // Vehicle-status rework §6.3.6 — delegation-driven lifecycle badge
+        // (retires the active/inactive flag; `active=false` → «Wyłączona»).
+        id: 'status',
         header: t('columns.active'),
         width: 'tight',
-        cell: (row) =>
-          row.active ? (
-            <Badge variant="success">{tCommon('active')}</Badge>
-          ) : (
-            <Badge variant="muted">{tCommon('inactive')}</Badge>
-          ),
+        cell: (row) => (
+          <VehicleStatusBadge
+            status={row.lifecycleStatus}
+            daysSinceReturn={row.daysSinceReturn}
+          />
+        ),
       },
     ],
-    [t, tCommon],
+    [t],
   );
 
   return (

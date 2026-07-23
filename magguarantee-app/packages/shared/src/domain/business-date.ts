@@ -19,24 +19,51 @@
 export const BUSINESS_TZ = 'Europe/Warsaw';
 
 /**
- * Today's calendar date as `YYYY-MM-DD` in {@link BUSINESS_TZ}.
+ * The Warsaw calendar date of an arbitrary instant `d`, as `YYYY-MM-DD` in
+ * {@link BUSINESS_TZ}.
  *
  * Uses the `en-CA` locale, which formats dates as `YYYY-MM-DD` (ISO-8601
  * calendar-date order), so the parts join back into a directly-comparable
- * ISO date string. The optional `now` argument exists only for deterministic
- * tests — production callers pass nothing.
+ * ISO date string. This is the general form: pass any `Date` (an event
+ * timestamp, a `createdAt` instant, …) and get the Warsaw calendar day it
+ * falls on — the time-of-day and UTC offset are folded away.
  */
-export function businessTodayIso(now: Date = new Date()): string {
+export function businessDateIso(d: Date = new Date()): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: BUSINESS_TZ,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).formatToParts(now);
+  }).formatToParts(d);
   const y = parts.find((p) => p.type === 'year')!.value;
   const m = parts.find((p) => p.type === 'month')!.value;
-  const d = parts.find((p) => p.type === 'day')!.value;
-  return `${y}-${m}-${d}`;
+  const day = parts.find((p) => p.type === 'day')!.value;
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Today's calendar date as `YYYY-MM-DD` in {@link BUSINESS_TZ}.
+ *
+ * Thin alias of {@link businessDateIso} for the common "now" case. The optional
+ * `now` argument exists only for deterministic tests — production callers pass
+ * nothing.
+ */
+export function businessTodayIso(now: Date = new Date()): string {
+  return businessDateIso(now);
+}
+
+/**
+ * The Warsaw calendar date of `d` encoded as UTC midnight of that date.
+ *
+ * Generalises {@link startOfBusinessTodayUtc} to any instant: reduce a full
+ * timestamp (or a date-only UTC-midnight value, which maps to itself) to the
+ * canonical UTC-midnight anchor of the Warsaw day it belongs to. Two values
+ * reduced this way can be diffed for clean whole-calendar-day semantics
+ * regardless of their original time-of-day / offset (see
+ * {@link calendarDaysBetween}).
+ */
+export function startOfBusinessDayUtc(d: Date = new Date()): Date {
+  return isoToMidnightUtc(businessDateIso(d));
 }
 
 /**
@@ -51,7 +78,26 @@ export function businessTodayIso(now: Date = new Date()): string {
  * is `>`.
  */
 export function startOfBusinessTodayUtc(now: Date = new Date()): Date {
-  return isoToMidnightUtc(businessTodayIso(now));
+  return startOfBusinessDayUtc(now);
+}
+
+/** One calendar day in milliseconds — both operands below are UTC midnight. */
+const CALENDAR_DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Whole calendar days between two instants, measured in {@link BUSINESS_TZ}.
+ *
+ * Both `from` and `to` are first reduced to the UTC-midnight anchor of their
+ * Warsaw calendar day ({@link startOfBusinessDayUtc}), so the result is an
+ * EXACT signed integer number of days — never a fraction, and never off-by-one
+ * from a DST transition (the anchors are UTC midnights, outside any offset
+ * change). `to > from` ⇒ positive; same Warsaw day ⇒ `0`; `to` before `from`
+ * ⇒ negative. Time-of-day on either operand is irrelevant.
+ */
+export function calendarDaysBetween(from: Date, to: Date): number {
+  const a = startOfBusinessDayUtc(from).getTime();
+  const b = startOfBusinessDayUtc(to).getTime();
+  return Math.round((b - a) / CALENDAR_DAY_MS);
 }
 
 /**

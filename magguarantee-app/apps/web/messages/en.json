@@ -1331,11 +1331,7 @@
     "emptyMessage": "Once an administrator assigns carriers to you, they will appear here.",
     "totals": {
       "carriers": "Carriers",
-      "totalVehicles": "Total vehicles",
-      "jezdzace": "Driving",
-      "stojace": "Standing",
-      "nieaktywne": "Inactive",
-      "potencjalne": "Potential"
+      "vehicles": "Vehicles"
     },
     "table": {
       "firma": "Company",
@@ -1350,10 +1346,10 @@
       "openDetailAria": "Open details for carrier {firma}"
     },
     "card": {
-      "jezdzace": "Driving",
-      "stojace": "Standing",
-      "nieaktywne": "Inactive",
-      "potencjalne": "Potential"
+      "aktywne": "Active",
+      "stojace": "Parked",
+      "nieaktywne": "Long idle",
+      "doUsuniecia": "To remove"
     },
     "attention": {
       "title": "Requires attention",
@@ -1537,15 +1533,13 @@
       }
     },
     "kpi": {
-      "vehicles": "Vehicles",
-      "driving": "Driving",
-      "idle": "Idle > 7 days",
-      "drivers": "Drivers",
-      "trailers": "Trailers"
+      "vehicles": "Vehicles"
     },
-    "idle": {
-      "title": "Vehicles idle for more than 7 days:",
-      "daysIdle": "{days, plural, one {# day} other {# days}}"
+    "resources": "{drivers, plural, one {# driver} other {# drivers}} · {trailers, plural, one {# trailer} other {# trailers}}",
+    "needsAttention": {
+      "removeTitle": "Vehicles to remove (idle ≥ 29 days):",
+      "longIdleTitle": "Long-idle vehicles (15–28 days):",
+      "days": "{days, plural, one {# day} other {# days}}"
     },
     "delegations": {
       "emptyTitle": "No trips",
@@ -1564,15 +1558,13 @@
     "subtitle": "Overview of the operated fleet, trips and vehicle status",
     "readOnlyBanner": "Data is read-only — managed by an administrator.",
     "kpi": {
-      "vehicles": "Vehicles",
-      "driving": "Driving",
-      "idle": "Idle > 7 days",
-      "drivers": "Drivers",
-      "trailers": "Trailers"
+      "vehicles": "Vehicles"
     },
-    "idle": {
-      "title": "Vehicles idle for more than 7 days:",
-      "daysIdle": "{days, plural, one {# day} other {# days}}"
+    "resources": "{drivers, plural, one {# driver} other {# drivers}} · {trailers, plural, one {# trailer} other {# trailers}}",
+    "needsAttention": {
+      "removeTitle": "Vehicles to remove (idle ≥ 29 days):",
+      "longIdleTitle": "Long-idle vehicles (15–28 days):",
+      "days": "{days, plural, one {# day} other {# days}}"
     },
     "tabs": {
       "ariaLabel": "Dispatcher fleet sections",
@@ -1947,16 +1939,42 @@
       "contactOpiekun": "Contact account manager",
       "contactOpiekunSubject": "Fleet data change",
       "kpi": {
-        "vehicles": "Vehicles",
-        "driving": "Driving",
-        "idle": "Idle > 7 days",
-        "drivers": "Drivers",
-        "trailers": "Trailers"
+        "vehicles": "Vehicles"
       },
-      "idle": {
-        "title": "Vehicles idle for more than 7 days:",
-        "daysIdle": "{days, plural, one {# day} other {# days}}"
+      "resources": "{drivers, plural, one {# driver} other {# drivers}} · {trailers, plural, one {# trailer} other {# trailers}}",
+      "needsAttention": {
+        "removeTitle": "Vehicles to remove (idle ≥ 29 days):",
+        "longIdleTitle": "Long-idle vehicles (15–28 days):",
+        "days": "{days, plural, one {# day} other {# days}}"
       }
+    }
+  },
+  "vehicleStatus": {
+    "daysCount": "{days, plural, one {# day} other {# days}}",
+    "aktywna": {
+      "badge": "Active",
+      "tile": "Active",
+      "tooltip": "Has an active delegation"
+    },
+    "stojaca": {
+      "badge": "Parked",
+      "tile": "Parked",
+      "tooltip": "Returned ≤ 14 days ago"
+    },
+    "nieaktywna": {
+      "badge": "Long idle",
+      "tile": "Long idle",
+      "tooltip": "Idle 15–28 days"
+    },
+    "do_usuniecia": {
+      "badge": "To remove",
+      "tile": "To remove",
+      "tooltip": "Idle ≥ 29 days — retire"
+    },
+    "wylaczona": {
+      "badge": "Disabled",
+      "tile": "Disabled",
+      "tooltip": "Manually disabled by an administrator"
     }
   },
   "fleet": {

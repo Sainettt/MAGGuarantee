@@ -425,31 +425,27 @@ export class VehiclesRepository {
   }
 
   /**
-   * Counts rows that reference this vehicle via an `ON DELETE RESTRICT` FK —
-   * delegations (soft-delete model) plus guarantee_idle_episodes (NOT a
-   * soft-delete model). Drives the hard-delete pre-flight guard (409
-   * VEHICLE_HAS_REFERENCES). `Claim.vehicleId` is `ON DELETE SET NULL` (does
-   * not block) so it is deliberately excluded.
+   * Looks up a SOFT-DELETED tombstone for a `(carrierId, plateNumber)` pair —
+   * drives the anti-abuse create guard (409 `VEHICLE_PLATE_SOFT_DELETED`). A
+   * carrier could otherwise delete a vehicle and re-add it under the same plate
+   * to reset its idle clock.
    *
-   * CRITICAL: `delegation` MUST be counted with the `[INCLUDE_SOFT_DELETED]`
-   * escape hatch — a soft-deleted delegation is hidden from the extension's
-   * read filter yet still physically blocks the FK (Postgres ignores
-   * `deletedAt`). The flag is harmless on the non-soft `guaranteeIdleEpisode`
-   * count, kept uniform for clarity.
+   * CRITICAL: the soft-delete extension auto-filters `deletedAt: null` on reads,
+   * so a tombstone is INVISIBLE to a normal `findFirst`. We opt into the
+   * `[INCLUDE_SOFT_DELETED]` escape hatch AND filter `deletedAt: { not: null }`
+   * so this returns ONLY tombstones (never a live row — the live duplicate keeps
+   * its own unique-index "już istnieje" 409). Returns the bare id or `null`.
    */
-  async countReferencingRows(id: string): Promise<number> {
-    const tx = this.prisma.tx;
-    const [delegations, episodes] = await Promise.all([
-      tx.delegation.count({
-        where: { vehicleId: id },
-        [INCLUDE_SOFT_DELETED]: true,
-      } as unknown as Prisma.DelegationCountArgs),
-      tx.guaranteeIdleEpisode.count({
-        where: { vehicleId: id },
-        [INCLUDE_SOFT_DELETED]: true,
-      } as unknown as Prisma.GuaranteeIdleEpisodeCountArgs),
-    ]);
-    return delegations + episodes;
+  async findSoftDeletedByCarrierAndPlate(
+    carrierId: string,
+    plateNumber: string,
+  ): Promise<{ id: string } | null> {
+    const row = await this.prisma.tx.vehicle.findFirst({
+      where: { carrierId, plateNumber, deletedAt: { not: null } },
+      select: { id: true },
+      [INCLUDE_SOFT_DELETED]: true,
+    } as unknown as Prisma.VehicleFindFirstArgs);
+    return row ? { id: (row as { id: string }).id } : null;
   }
 
   // ── helpers ──────────────────────────────────────────────

@@ -173,6 +173,36 @@ export const envSchema = z.object({
       .min(1)
       .transform((arr) => Array.from(new Set(arr)).sort((a, b) => b - a)),
   ),
+
+  // ── Vehicle-removal alert (vehicle-status rework, Step B) ──
+  // Daily cron (07:20 Europe/Warsaw, staggered after the watchdog's 07:10) that
+  // emails ALL active admins the list of LIVE vehicles whose derived lifecycle
+  // status is `do_usuniecia` (idle ≥29 calendar days — the threshold itself is a
+  // SHARED constant, NOT env). Re-sends every N days until the vehicle leaves
+  // that bucket.
+  //
+  // VEHICLE_REMOVAL_ALERT_ENABLED — kill-switch. Same explicit-coercion pattern
+  // as `GUARANTEE_WATCHDOG_ENABLED`: a bare `z.coerce.boolean()` maps the literal
+  // "false" to `true`, so we preprocess by hand — only "true"/"1" mean enabled;
+  // "", "false", "0", or absent fall through to the `.default(true)`.
+  VEHICLE_REMOVAL_ALERT_ENABLED: z.preprocess((v) => {
+    if (typeof v === 'boolean') return v;
+    if (typeof v === 'string') {
+      const s = v.trim().toLowerCase();
+      if (s === '') return undefined; // fall through to default(true)
+      return s === 'true' || s === '1';
+    }
+    return undefined;
+  }, z.boolean().default(true)),
+
+  // Calendar days between repeated admin digests for a still-`do_usuniecia`
+  // vehicle. Default 3 (email all admins every 3 days).
+  VEHICLE_REMOVAL_ALERT_REPEAT_DAYS: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(90)
+    .default(3),
 }).superRefine((env, ctx) => {
   // Gmail secrets are required only when the Gmail provider is selected — keeps
   // dev/staging `.env` (Mailhog) clean while still failing fast at boot in prod

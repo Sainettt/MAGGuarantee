@@ -170,11 +170,30 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 | POST `/vehicles/:id/deactivate` | `toggleVehicleActive` (off) | admin / opiekun |
 | POST `/vehicles/:id/reactivate` | (on) | admin / opiekun |
 | DELETE `/vehicles/:id` | `removeVehicle` / `removeVehicleByOpiekun` | admin / opiekun — **soft** (`deletedAt`) |
-| DELETE `/vehicles/:id/hard` | (новое, Phase 4.4) | admin, body `{reason}` → audit. **Физическое** удаление; каскадом уходят только `vehicle_attachments` (метаданные; MinIO-объекты остаются) и `vehicle_daily_km`. **409 `VEHICLE_HAS_REFERENCES`** при любых delegations / guarantee_idle_episodes (FK RESTRICT, включая soft-deleted). `claims.vehicleId` — SET NULL (не блокирует, но на практике wniosek всегда связан с delegation, которая блокирует). |
 | GET `/vehicles/active?login=...` | `getActiveVehiclesForLogin` (для carrier-login dropdown) | — |
 | GET `/vehicles/:id/attachments` | (новое) — список porozumienie/gps/cabotage-вложений | admin / opiekun / planista / dyspozytor / przewoznik |
 | GET `/vehicles/:id/attachments/:attachmentId/download` | (новое) — proxy-стрим файла из MinIO | admin / opiekun / planista / dyspozytor / przewoznik |
 | DELETE `/vehicles/:id/attachments/:attachmentId` | (новое) — soft-delete строки; **MinIO-объект остаётся** (историческое исключение — у drivers/trailers/carriers явный DELETE стирает и объект) | admin / opiekun / przewoznik |
+
+> **Удаление пойзда = только soft (vehicle-status rework, Step B).** Прежний
+> физический hard-delete (`DELETE /vehicles/:id/hard`, admin-only, body
+> `{reason}`, 409 `VEHICLE_HAS_REFERENCES`) **удалён**. Админское удаление теперь
+> ведёт себя как обычный soft-delete всех остальных ролей (`DELETE /vehicles/:id`,
+> ставит `deletedAt`, сигнатура без `reason` — actor+action уже в audit): строка и
+> номер остаются в базе — их требует будущее правило «нельзя добавить тот же номер
+> в течение 3 месяцев после админского удаления».
+>
+> **Анти-абьюз: пере-создание пойзда с plate soft-deleted-строки (`POST
+> /vehicles`).** Пере-создание пойзда с той же парой `(carrierId, plateNumber)`,
+> что и у **soft-deleted** (tombstone) строки, блокируется явным **409
+> `VEHICLE_PLATE_SOFT_DELETED`** (машинный `code` и в top-level, и в `extensions`
+> bag RFC-7807; PL-сообщение объясняет, что номер принадлежит ранее удалённому
+> пойзду). Это защита от delete→recreate ради сброса «часов простоя»
+> (idle-clock). **ACTIVE** дубликат по-прежнему получает generic 409 «już
+> istnieje» из unique-индекса — unchanged. Уникальный индекс `(carrierId,
+> plateNumber)` НЕ ослаблен; будущее правило «3 месяца» смягчит именно этот
+> 409 (позволит re-add после 3 месяцев с воскрешением tombstone для сохранения
+> idle-anchor), сейчас — жёсткая блокировка.
 
 #### Vehicle-modal: porozumienie / gps / cabotage attachments (multipart)
 
@@ -399,6 +418,20 @@ DB CHECK enforces `returnCountry` length 2..8 (covers `EL`) and `returnPostalCod
 | GET `/fleet/dyspozytor` | `getDyspozytorFleet` |
 | GET `/fleet/eksport` | `getEksportData` |
 | GET `/fleet/weryfikator` | `getWeryfikatorData` |
+
+**Vehicle lifecycle status (delegation-driven).** Статус LIVE-машины считается **на чтении** (нет колонки-статуса) через `computeVehicleLifecycleStatus` (`@magguarantee/shared`, `domain/vehicle-status.ts`). Порядок short-circuit:
+
+1. `wylaczona` — `Vehicle.active=false` (ручная деактивация; ортогональна idle-часам, из них исключена).
+2. `aktywna` — `active=true` И есть нетерминальный wyjazd (`status ∈ {zgloszony, gotowy, w_trasie}`). `vehicle_daily_km` больше **не** участвует.
+3. иначе `daysSinceReturn = max(0, calendarDaysBetween(anchor, today))`, где `anchor = max(actualReturnAt по zjechał, non-deleted) ?? Vehicle.createdAt`; дни **календарные** (Europe/Warsaw). Бакеты: `stojaca` 0–14, `nieaktywna` 15–28, `do_usuniecia` ≥29.
+
+Полный `VehicleDto` **и** slim `VehicleListItem` несут `lifecycleStatus: 'wylaczona'|'aktywna'|'stojaca'|'nieaktywna'|'do_usuniecia'` + `daysSinceReturn: number | null` (`null` для `wylaczona`/`aktywna`). Считаются сервисом одним батч-запросом delegation-статусов на страницу (без N+1); `GET /vehicles/:id` — один lookup.
+
+**`GET /fleet/opiekun` — `OpiekunCarrierVehicleStats`** (заменяет легаси 7-дневную `lastDroveAt`-классификацию `jezdzace/stojace`):
+`{ aktywne, stojace, nieaktywne, doUsuniecia, wylaczone, potencjalne, total }`, где `potencjalne = max(0, Carrier.numberOfVehicle ?? 0 − total)` (KREPTD-запас), а `total = aktywne + stojace + nieaktywne + doUsuniecia + wylaczone`. `totals.vehicles` — та же форма, просуммированная по всем перевозчикам.
+
+**`GET /fleet/dyspozytor` + `/fleet/planista` — `DyspozytorFleetStats`** (та же классификация; заменяет `autaJezdzace/autaStojace7dni`):
+`{ liczbaAut, aktywne, stojace, nieaktywne, doUsuniecia, wylaczone, liczbaKierowcow, liczbaNaczep }`. Инвариант: `aktywne + stojace + nieaktywne + doUsuniecia + wylaczone === liczbaAut`. Список `stojaceList` (`DyspozytorStojacyItem`) переориентирован на «нужно внимание» — машины в `nieaktywna` ИЛИ `do_usuniecia`: `{ plateNumber, carrierLogin, status, daysSinceReturn, plannerName }`.
 
 ### Guarantee Watchdog — `/api/v1/guarantee-compliance` + `/guarantee-episodes`
 

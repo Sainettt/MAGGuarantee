@@ -1331,11 +1331,7 @@
     "emptyMessage": "Gdy administrator przypisze do Ciebie przewoźników, pojawią się tutaj.",
     "totals": {
       "carriers": "Przewoźnicy",
-      "totalVehicles": "Ciągniki razem",
-      "jezdzace": "Jezdżące",
-      "stojace": "Stojące",
-      "nieaktywne": "Nieaktywne",
-      "potencjalne": "Potencjalne"
+      "vehicles": "Ciągniki"
     },
     "table": {
       "firma": "Firma",
@@ -1350,10 +1346,10 @@
       "openDetailAria": "Otwórz szczegóły przewoźnika {firma}"
     },
     "card": {
-      "jezdzace": "Jeżdżące",
-      "stojace": "Stojące",
-      "nieaktywne": "Nieaktywne",
-      "potencjalne": "Potencjalne"
+      "aktywne": "Aktyw.",
+      "stojace": "Stoj.",
+      "nieaktywne": "Dł. stoj.",
+      "doUsuniecia": "Do usun."
     },
     "attention": {
       "title": "Wymaga uwagi",
@@ -1537,15 +1533,13 @@
       }
     },
     "kpi": {
-      "vehicles": "Ciągniki",
-      "driving": "Jeżdżą",
-      "idle": "Stoją > 7 dni",
-      "drivers": "Kierowcy",
-      "trailers": "Naczepy"
+      "vehicles": "Ciągniki"
     },
-    "idle": {
-      "title": "Ciągniki stojące dłużej niż 7 dni:",
-      "daysIdle": "{days, plural, one {# dzień} few {# dni} many {# dni} other {# dni}}"
+    "resources": "{drivers, plural, one {# kierowca} few {# kierowcy} many {# kierowców} other {# kierowców}} · {trailers, plural, one {# naczepa} few {# naczepy} many {# naczep} other {# naczep}}",
+    "needsAttention": {
+      "removeTitle": "Ciągniki do usunięcia (stoją ≥ 29 dni):",
+      "longIdleTitle": "Długo stojące ciągniki (15–28 dni):",
+      "days": "{days, plural, one {# dzień} few {# dni} many {# dni} other {# dni}}"
     },
     "delegations": {
       "emptyTitle": "Brak wyjazdów",
@@ -1564,15 +1558,13 @@
     "subtitle": "Przegląd obsługiwanej floty, wyjazdów i statusu ciągników",
     "readOnlyBanner": "Dane są tylko do podglądu — edytuje administrator.",
     "kpi": {
-      "vehicles": "Ciągniki",
-      "driving": "Jeżdżą",
-      "idle": "Stoją > 7 dni",
-      "drivers": "Kierowcy",
-      "trailers": "Naczepy"
+      "vehicles": "Ciągniki"
     },
-    "idle": {
-      "title": "Ciągniki stojące dłużej niż 7 dni:",
-      "daysIdle": "{days, plural, one {# dzień} few {# dni} many {# dni} other {# dni}}"
+    "resources": "{drivers, plural, one {# kierowca} few {# kierowcy} many {# kierowców} other {# kierowców}} · {trailers, plural, one {# naczepa} few {# naczepy} many {# naczep} other {# naczep}}",
+    "needsAttention": {
+      "removeTitle": "Ciągniki do usunięcia (stoją ≥ 29 dni):",
+      "longIdleTitle": "Długo stojące ciągniki (15–28 dni):",
+      "days": "{days, plural, one {# dzień} few {# dni} many {# dni} other {# dni}}"
     },
     "tabs": {
       "ariaLabel": "Sekcje floty dyspozytora",
@@ -1947,16 +1939,42 @@
       "contactOpiekun": "Skontaktuj się z opiekunem",
       "contactOpiekunSubject": "Zmiana danych floty",
       "kpi": {
-        "vehicles": "Ciągniki",
-        "driving": "Jeżdżą",
-        "idle": "Stoją > 7 dni",
-        "drivers": "Kierowcy",
-        "trailers": "Naczepy"
+        "vehicles": "Ciągniki"
       },
-      "idle": {
-        "title": "Ciągniki stojące dłużej niż 7 dni:",
-        "daysIdle": "{days, plural, one {# dzień} few {# dni} many {# dni} other {# dni}}"
+      "resources": "{drivers, plural, one {# kierowca} few {# kierowcy} many {# kierowców} other {# kierowców}} · {trailers, plural, one {# naczepa} few {# naczepy} many {# naczep} other {# naczep}}",
+      "needsAttention": {
+        "removeTitle": "Ciągniki do usunięcia (stoją ≥ 29 dni):",
+        "longIdleTitle": "Długo stojące ciągniki (15–28 dni):",
+        "days": "{days, plural, one {# dzień} few {# dni} many {# dni} other {# dni}}"
       }
+    }
+  },
+  "vehicleStatus": {
+    "daysCount": "{days, plural, one {# dzień} few {# dni} many {# dni} other {# dni}}",
+    "aktywna": {
+      "badge": "Aktywna",
+      "tile": "Aktywne",
+      "tooltip": "Ma aktywną delegację"
+    },
+    "stojaca": {
+      "badge": "Stojąca",
+      "tile": "Stojące",
+      "tooltip": "Wróciła ≤ 14 dni temu"
+    },
+    "nieaktywna": {
+      "badge": "Długo stojąca",
+      "tile": "Długo stojące",
+      "tooltip": "Stoi 15–28 dni"
+    },
+    "do_usuniecia": {
+      "badge": "Do usunięcia",
+      "tile": "Do usunięcia",
+      "tooltip": "Stoi ≥ 29 dni — do wycofania"
+    },
+    "wylaczona": {
+      "badge": "Wyłączona",
+      "tile": "Wyłączone",
+      "tooltip": "Wyłączona ręcznie przez administratora"
     }
   },
   "fleet": {

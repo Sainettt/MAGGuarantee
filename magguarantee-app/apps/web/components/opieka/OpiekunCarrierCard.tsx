@@ -18,13 +18,14 @@ import { Badge } from '@/components/ui/Badge';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { cn } from '@/lib/utils';
 
-type Tone = 'success' | 'warning' | 'danger' | 'info';
+type Tone = 'success' | 'warning' | 'danger' | 'info' | 'neutral';
 
 const TONE_TEXT: Record<Tone, string> = {
   success: 'text-success',
   warning: 'text-warning',
   danger: 'text-danger',
   info: 'text-info',
+  neutral: 'text-text-sub',
 };
 
 interface StatCellProps {
@@ -127,27 +128,30 @@ export default function OpiekunCarrierCard({
       {/* Divider. */}
       <div className="border-t border-border" />
 
-      {/* Vehicle bucket stat-row — 4 buckets, equal cells. */}
+      {/* Vehicle idle-clock stat-row — the 4 delegation-driven states (§6.3.6).
+          `stojaca` is NEUTRAL (calm), not amber; the amber slot moves to
+          `nieaktywna` («Długo stojąca»). `wylaczona` is orthogonal and not
+          shown on the card (surfaced only in the drill-down table badge). */}
       <dl className="grid grid-cols-4 gap-2">
         <StatCell
-          value={carrier.vehicles.jezdzace}
-          label={t('card.jezdzace')}
+          value={carrier.vehicles.aktywne}
+          label={t('card.aktywne')}
           tone="success"
         />
         <StatCell
           value={carrier.vehicles.stojace}
           label={t('card.stojace')}
-          tone="warning"
+          tone="neutral"
         />
         <StatCell
           value={carrier.vehicles.nieaktywne}
           label={t('card.nieaktywne')}
-          tone="danger"
+          tone="warning"
         />
         <StatCell
-          value={carrier.vehicles.potencjalne}
-          label={t('card.potencjalne')}
-          tone="info"
+          value={carrier.vehicles.doUsuniecia}
+          label={t('card.doUsuniecia')}
+          tone="danger"
         />
       </dl>
     </Link>

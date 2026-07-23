@@ -35,6 +35,7 @@ import { TeamsModule } from './modules/teams/teams.module';
 import { TrailerTypesModule } from './modules/trailer-types/trailer-types.module';
 import { TrailersModule } from './modules/trailers/trailers.module';
 import { UsersModule } from './modules/users/users.module';
+import { VehicleRemovalAlertModule } from './modules/vehicle-removal-alert/vehicle-removal-alert.module';
 import { VehiclesModule } from './modules/vehicles/vehicles.module';
 import { VerificationSlaModule } from './modules/verification-sla/verification-sla.module';
 
@@ -119,6 +120,8 @@ import { VerificationSlaModule } from './modules/verification-sla/verification-s
     VerificationSlaModule,
     // Guarantee Watchdog — wyjazd-reminder cron + compliance board (plan §5).
     GuaranteeWatchdogModule,
+    // Vehicle-status rework Step B — 29-day «do usunięcia» admin-alert cron.
+    VehicleRemovalAlertModule,
     HealthModule,
   ],
   providers: [

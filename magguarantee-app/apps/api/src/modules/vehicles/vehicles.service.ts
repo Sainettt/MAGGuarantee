@@ -21,9 +21,18 @@ import type {
   VehicleFilters,
 } from '@magguarantee/shared';
 
+import {
+  VehicleDelegationStatusRepository,
+  type VehicleDelegationStatus,
+} from './vehicle-delegation-status.repository';
+import {
+  EMPTY_DELEGATION_STATUS,
+  computeVehicleLifecycle,
+  type VehicleLifecycleInfo,
+} from './vehicle-lifecycle';
+
 import { AuditContext } from '../../common/audit';
 import {
-  isPrismaForeignKeyViolation,
   isPrismaUniqueViolation,
   uniqueViolationToConflict,
 } from '../../common/errors/prisma-error';
@@ -51,10 +60,13 @@ import {
 } from './vehicles.repository';
 
 /**
- * Machine code for the hard-delete reference-guard 409. Published in
- * docs/13-api-design.md#vehicles — do NOT rename.
+ * Machine code for the same-plate soft-delete recreate block (anti-abuse).
+ * Published in docs/13-api-design.md#vehicles — do NOT rename. A carrier must
+ * not be able to delete+recreate a vehicle to reset its idle clock, so a
+ * soft-deleted tombstone for `(carrierId, plateNumber)` blocks the recreate
+ * with a distinct, self-explanatory 409.
  */
-const VEHICLE_HAS_REFERENCES_CODE = 'VEHICLE_HAS_REFERENCES';
+const VEHICLE_PLATE_SOFT_DELETED_CODE = 'VEHICLE_PLATE_SOFT_DELETED';
 
 /**
  * Vehicle CRUD service per docs/13-api-design.md#vehicles.
@@ -101,6 +113,13 @@ export class VehiclesService {
     // idle episode). `@Optional()` so the positional service-test fakes keep
     // compiling; the hook no-ops when absent.
     @Optional() private readonly guaranteeWatchdog?: GuaranteeWatchdogService,
+    // Batched delegation-status lookup for the read-time lifecycle status
+    // (`lifecycleStatus`/`daysSinceReturn` on the DTO). `@Optional()` so the
+    // positional service-test fakes keep compiling; `toDto` falls back to the
+    // no-delegation classification when it is absent (the derived status still
+    // resolves from `active` + `createdAt`).
+    @Optional()
+    private readonly delegationStatus?: VehicleDelegationStatusRepository,
   ) {}
 
   async list(
@@ -111,8 +130,11 @@ export class VehiclesService {
     const rows = await this.vehicles.list(effective);
     const hasNext = rows.length > effective.limit;
     const page = hasNext ? rows.slice(0, effective.limit) : rows;
+    // ONE batched delegation-status lookup for the whole page (no N+1) → the
+    // per-row lifecycle status.
+    const lifecycle = await this._lifecycleBatch(page);
     return {
-      items: page.map((r) => this.toDto(r)),
+      items: page.map((r) => this.toDto(r, lifecycle.get(r.id))),
       nextCursor: hasNext ? (page[page.length - 1]?.id ?? null) : null,
     };
   }
@@ -120,7 +142,9 @@ export class VehiclesService {
   async getById(id: string): Promise<VehicleDto> {
     const row = await this.vehicles.findById(id);
     if (!row) throw new NotFoundException('Pojazd nie znaleziony');
-    return this.toDto(row);
+    // Single vehicle → one delegation lookup for the lifecycle status.
+    const ds = await this._delegationStatusOf(id);
+    return this.toDto(row, this._lifecycleFor(row, ds));
   }
 
   /**
@@ -140,6 +164,20 @@ export class VehiclesService {
     if (dto.plannerId) await this._assertRole(dto.plannerId, 'planista');
     if (dto.dispatchTeamId) await this._assertTeamActive(dto.dispatchTeamId);
 
+    // Anti-abuse: block recreating a vehicle with the same
+    // `(carrierId, plateNumber)` as a SOFT-DELETED tombstone. The plain unique
+    // index would already 409 with a generic "już istnieje", but that hides the
+    // real reason — the plate belongs to a previously-removed vehicle and a
+    // delete+recreate must not silently reset the idle clock. We surface a
+    // DISTINCT, self-explanatory 409 instead.
+    //
+    // FUTURE: the coming "no re-add for 3 months after ADMIN deletion" rule will
+    // RELAX this — a tombstone older than 3 months becomes re-addable, and the
+    // recreate should RESURRECT the tombstone (restore `deletedAt=null`) rather
+    // than insert a fresh row, so the idle anchor (`createdAt` / last zjechał) is
+    // preserved. Do NOT implement that here, and do NOT relax the unique index.
+    await this._assertNoSoftDeletedTombstone(dto.carrierId, dto.plateNumber);
+
     // Required-attachment + cross-field rules — checked BEFORE any write so a
     // missing screenshot / bad field combo fails clean with 422 (no orphans).
     this._assertVehicleRulesOnCreate(dto, uploads);
@@ -157,7 +195,11 @@ export class VehiclesService {
     // Onboarding state is derived on read from the live child-count snapshot
     // (see `CarriersService.toDto`) — creating a vehicle no longer needs a
     // side-effect to mutate any carrier-level flag.
-    return this.toDto(persisted);
+    //
+    // A freshly created vehicle cannot yet have any delegation (the FK points at
+    // the row we just inserted), so its lifecycle is the no-delegation case —
+    // no lookup needed.
+    return this.toDto(persisted, this._lifecycleFor(persisted, EMPTY_DELEGATION_STATUS));
   }
 
   /**
@@ -173,10 +215,15 @@ export class VehiclesService {
   ): Promise<VehicleDto> {
     const existing = await this.vehicles.findById(id);
     if (!existing) throw new NotFoundException('Pojazd nie znaleziony');
+    // ONE delegation-status lookup, reused for both the before-image and the
+    // response: a vehicle update touches neither delegations nor `createdAt`, so
+    // the delegation state is identical pre/post. (`active` may still flip, so
+    // the two lifecycle results are computed per-row against this shared state.)
+    const ds = await this._delegationStatusOf(id);
     // Capture the pre-mutation row for the audit interceptor — the trimmer
     // narrows this down to the keys present in `after` (= response body)
     // before the audit row lands.
-    AuditContext.setBefore(this.toDto(existing));
+    AuditContext.setBefore(this.toDto(existing, this._lifecycleFor(existing, ds)));
     if (dto.plannerId !== undefined && dto.plannerId !== null) {
       await this._assertRole(dto.plannerId, 'planista');
     }
@@ -246,7 +293,8 @@ export class VehiclesService {
     }
 
     const fresh = await this.vehicles.findById(id);
-    return this.toDto(fresh ?? row);
+    const finalRow = fresh ?? row;
+    return this.toDto(finalRow, this._lifecycleFor(finalRow, ds));
   }
 
   /**
@@ -273,9 +321,11 @@ export class VehiclesService {
     if (!existing.active) {
       throw new ConflictException('Pojazd jest już nieaktywny');
     }
-    AuditContext.setBefore(this.toDto(existing));
+    const ds = await this._delegationStatusOf(id);
+    AuditContext.setBefore(this.toDto(existing, this._lifecycleFor(existing, ds)));
     const row = await this.vehicles.setActive(id, false);
-    return this.toDto(row);
+    // active→false ⇒ status collapses to `wylaczona` (short-circuits the clock).
+    return this.toDto(row, this._lifecycleFor(row, ds));
   }
 
   async reactivate(id: string): Promise<VehicleDto> {
@@ -284,71 +334,55 @@ export class VehiclesService {
     if (existing.active) {
       throw new ConflictException('Pojazd jest już aktywny');
     }
-    AuditContext.setBefore(this.toDto(existing));
+    const ds = await this._delegationStatusOf(id);
+    AuditContext.setBefore(this.toDto(existing, this._lifecycleFor(existing, ds)));
     const row = await this.vehicles.setActive(id, true);
-    return this.toDto(row);
+    return this.toDto(row, this._lifecycleFor(row, ds));
   }
 
   async softDelete(id: string): Promise<void> {
     const existing = await this.vehicles.findById(id);
     if (!existing) throw new NotFoundException('Pojazd nie znaleziony');
-    AuditContext.setBefore(this.toDto(existing));
+    const ds = await this._delegationStatusOf(id);
+    AuditContext.setBefore(this.toDto(existing, this._lifecycleFor(existing, ds)));
     await this.vehicles.softDelete(id);
   }
 
   /**
-   * Hard-deletes a vehicle row. Phase 4.4 admin-only flow — `reason` is
-   * required (Zod-validated upstream) and lands in
-   * `audit_log.metadata.reason` via `AuditContext.setMetadata`. The pre-
-   * mutation snapshot keeps the audit row legible after the row is gone.
-   *
-   * `vehicle_attachments` and `vehicle_daily_km` are `ON DELETE CASCADE`, so
-   * they go with the vehicle (the MinIO objects are intentionally left in
-   * place — same policy as `deleteAttachment`). But `delegations.vehicleId`
-   * and `guarantee_idle_episodes.vehicleId` are `ON DELETE RESTRICT`: a
-   * physical delete of a referenced vehicle would fail late with P2003 → 500.
-   * We refuse deterministically with a 409 (`VEHICLE_HAS_REFERENCES`) — both a
-   * pre-flight `countReferencingRows` guard (incl. soft-deleted delegations)
-   * and a TOCTOU P2003 catch. (`claims.vehicleId` is `SET NULL` and does not
-   * block.)
+   * Anti-abuse guard for `create`: refuses a recreate whose
+   * `(carrierId, plateNumber)` matches a SOFT-DELETED tombstone. A carrier could
+   * otherwise delete a vehicle and re-add it under the same plate to zero the
+   * idle clock — this makes the block EXPLICIT (a distinct machine code) instead
+   * of the generic unique-index "już istnieje". An ACTIVE duplicate is NOT
+   * handled here — it keeps its existing "już istnieje" 409 from the unique
+   * index (see `_persistVehicle`).
    */
-  async hardDelete(id: string, reason: string): Promise<void> {
-    const existing = await this.vehicles.findById(id);
-    if (!existing) throw new NotFoundException('Pojazd nie znaleziony');
-
-    const references = await this.vehicles.countReferencingRows(id);
-    if (references > 0) {
-      throw this._referencesConflict();
-    }
-
-    AuditContext.setBefore(this.toDto(existing));
-    AuditContext.setMetadata({ reason });
-    try {
-      await this.vehicles.hardDelete(id);
-    } catch (err) {
-      if (isPrismaForeignKeyViolation(err)) {
-        throw this._referencesConflict();
-      }
-      throw err;
-    }
+  private async _assertNoSoftDeletedTombstone(
+    carrierId: string,
+    plateNumber: string,
+  ): Promise<void> {
+    const tombstone = await this.vehicles.findSoftDeletedByCarrierAndPlate(
+      carrierId,
+      plateNumber,
+    );
+    if (tombstone) throw this._plateSoftDeletedConflict();
   }
 
   /**
-   * Builds the 409 for a hard-delete blocked by referencing rows — 409
-   * `ConflictException` (mirroring `TeamsService`/`TrailerTypesService`) with
-   * the machine code lifted into the RFC-7807 `extensions` bag (the envelope
-   * `ClaimAttachmentsService` uses) so the web reads `body.extensions.code`.
-   * The code (`VEHICLE_HAS_REFERENCES`) is published in
-   * docs/13-api-design.md#vehicles.
+   * Builds the 409 for a same-plate recreate of a soft-deleted vehicle — a
+   * `ConflictException` (mirroring `TeamsService`/`TrailerTypesService`) with the
+   * machine code lifted into the RFC-7807 `extensions` bag (the envelope the web
+   * reads via `body.extensions.code`). The code (`VEHICLE_PLATE_SOFT_DELETED`)
+   * is published in docs/13-api-design.md#vehicles.
    */
-  private _referencesConflict(): ConflictException {
+  private _plateSoftDeletedConflict(): ConflictException {
     return new ConflictException({
-      code: VEHICLE_HAS_REFERENCES_CODE,
+      code: VEHICLE_PLATE_SOFT_DELETED_CODE,
       message:
-        'Nie można trwale usunąć pojazdu — istnieją powiązane rekordy ' +
-        '(wyjazdy / epizody gwarancji). Trwałe usunięcie jest możliwe tylko ' +
-        'dla pustych rekordów.',
-      extensions: { code: VEHICLE_HAS_REFERENCES_CODE },
+        'Ten numer rejestracyjny należy do wcześniej usuniętego pojazdu tego ' +
+        'przewoźnika i nie może zostać utworzony ponownie. Skontaktuj się z ' +
+        'administratorem, jeśli pojazd ma wrócić do eksploatacji.',
+      extensions: { code: VEHICLE_PLATE_SOFT_DELETED_CODE },
     });
   }
 
@@ -962,9 +996,58 @@ export class VehiclesService {
     }
   }
 
+  // ── Lifecycle status resolution ──────────────────────────
+
+  /**
+   * Batched delegation-status → per-vehicle lifecycle info for a page of rows.
+   * ONE query for the whole page (no N+1). When the delegation repo isn't wired
+   * (unit-test fakes) every row degrades to the no-delegation classification.
+   */
+  private async _lifecycleBatch(
+    rows: VehicleRow[],
+  ): Promise<Map<string, VehicleLifecycleInfo>> {
+    const today = startOfBusinessTodayUtc();
+    const out = new Map<string, VehicleLifecycleInfo>();
+    if (rows.length === 0) return out;
+    const statuses = this.delegationStatus
+      ? await this.delegationStatus.getByVehicleIds(rows.map((r) => r.id))
+      : new Map<string, VehicleDelegationStatus>();
+    for (const r of rows) {
+      const ds = statuses.get(r.id) ?? EMPTY_DELEGATION_STATUS;
+      out.set(r.id, computeVehicleLifecycle(r, ds, today));
+    }
+    return out;
+  }
+
+  /** Resolves the delegation state for a single vehicle (fallback: empty). */
+  private async _delegationStatusOf(
+    vehicleId: string,
+  ): Promise<VehicleDelegationStatus> {
+    if (!this.delegationStatus) return EMPTY_DELEGATION_STATUS;
+    const map = await this.delegationStatus.getByVehicleIds([vehicleId]);
+    return map.get(vehicleId) ?? EMPTY_DELEGATION_STATUS;
+  }
+
+  /** Computes lifecycle info for one row against a resolved delegation state. */
+  private _lifecycleFor(
+    row: VehicleRow,
+    ds: VehicleDelegationStatus,
+  ): VehicleLifecycleInfo {
+    return computeVehicleLifecycle(row, ds, startOfBusinessTodayUtc());
+  }
+
   // ── DTO mapping ──────────────────────────────────────────
 
-  toDto(row: VehicleRow): VehicleDto {
+  /**
+   * Maps a vehicle row to its DTO. `lifecycle` carries the DERIVED
+   * `lifecycleStatus`/`daysSinceReturn`; callers that have resolved the
+   * delegation state pass it in. When omitted (before-image snapshots, tests
+   * without the delegation repo) it falls back to the no-delegation
+   * classification — the status still resolves from `active` + `createdAt`.
+   */
+  toDto(row: VehicleRow, lifecycle?: VehicleLifecycleInfo): VehicleDto {
+    const lc =
+      lifecycle ?? this._lifecycleFor(row, EMPTY_DELEGATION_STATUS);
     return {
       id: row.id,
       carrierId: row.carrierId,
@@ -997,6 +1080,8 @@ export class VehiclesService {
       gpsMobilePhone: row.gpsMobilePhone,
       sideNumber: row.sideNumber,
       lastDroveAt: row.lastDroveAt ? row.lastDroveAt.toISOString() : null,
+      lifecycleStatus: lc.status,
+      daysSinceReturn: lc.daysSinceReturn,
       plannerId: row.plannerId,
       planner: row.planner,
       dispatchTeamId: row.dispatchTeamId,

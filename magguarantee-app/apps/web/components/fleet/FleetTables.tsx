@@ -28,6 +28,7 @@ import type {
   VehicleListItem,
 } from '@magguarantee/shared';
 
+import { VehicleStatusBadge } from '@/components/carrier/VehicleStatusBadge';
 import { PermitCell } from '@/components/fleet/PermitCell';
 import { Badge } from '@/components/ui/Badge';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
@@ -138,10 +139,18 @@ export function FleetVehiclesTable({
         ),
       },
       {
-        id: 'active',
+        // Vehicle-status rework §6.3.6 — the STATUS column now carries the
+        // delegation-driven lifecycle badge (the old `active ? Aktywne :
+        // Nieaktywne` flag is retired; `active=false` surfaces as «Wyłączona»).
+        id: 'status',
         header: t('columns.active'),
         width: 'tight',
-        cell: (row) => <ActiveBadge active={row.active} />,
+        cell: (row) => (
+          <VehicleStatusBadge
+            status={row.lifecycleStatus}
+            daysSinceReturn={row.daysSinceReturn}
+          />
+        ),
       },
     ],
     [t],

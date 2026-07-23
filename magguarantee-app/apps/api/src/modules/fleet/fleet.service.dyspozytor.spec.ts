@@ -6,16 +6,39 @@ import { CarriersRepository } from '../carriers/carriers.repository';
 import { DriversRepository, type DriverRow } from '../drivers/drivers.repository';
 import { TrailersRepository, type TrailerRow } from '../trailers/trailers.repository';
 import {
+  VehicleDelegationStatusRepository,
+  type VehicleDelegationStatus,
+} from '../vehicles/vehicle-delegation-status.repository';
+import {
   VehiclesRepository,
   type VehicleListFilters,
   type VehicleRow,
 } from '../vehicles/vehicles.repository';
 import { FleetService } from './fleet.service';
 
-// Anchor "now" — vehicles classified jezdzace / stojace use the 7-day window
-// past lastDroveAt measured from this timestamp (shared DRIVING_RECENCY_DAYS).
+// Anchor "now" — the delegation-driven lifecycle classifier measures CALENDAR
+// days (Europe/Warsaw) from the idle anchor to this Warsaw "today"
+// (2026-05-27). Vehicles are placed into buckets via a controlled
+// delegation-status stub (`hasActiveDelegation` / `lastReturnAt`).
 const NOW = new Date('2026-05-27T12:00:00.000Z');
-const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** `YYYY-MM-DD` → UTC-midnight Date (date-only convention for `lastReturnAt`). */
+function U(s: string): Date {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(Date.UTC(y as number, (m as number) - 1, d as number));
+}
+
+/** Empty dyspozytor/planista KPI strip (new delegation-driven shape). */
+const ZERO_STATS = {
+  liczbaAut: 0,
+  aktywne: 0,
+  stojace: 0,
+  nieaktywne: 0,
+  doUsuniecia: 0,
+  wylaczone: 0,
+  liczbaKierowcow: 0,
+  liczbaNaczep: 0,
+};
 
 function makeAuth(
   role: AuthUser['role'],
@@ -195,10 +218,34 @@ function noop<T>(): T {
   return {} as unknown as T;
 }
 
+/**
+ * Delegation-status stub — returns `{ hasActiveDelegation, lastReturnAt }` per
+ * vehicle id from a per-id config (default: no active delegation, never
+ * returned). Drives the delegation-driven lifecycle classification.
+ */
+function stubDelegationStatusRepo(
+  config: Record<string, Partial<VehicleDelegationStatus>> = {},
+): VehicleDelegationStatusRepository {
+  return {
+    getByVehicleIds: jest.fn(async (ids: string[]) => {
+      const map = new Map<string, VehicleDelegationStatus>();
+      for (const id of ids) {
+        const c = config[id];
+        map.set(id, {
+          hasActiveDelegation: c?.hasActiveDelegation ?? false,
+          lastReturnAt: c?.lastReturnAt ?? null,
+        });
+      }
+      return map;
+    }),
+  } as unknown as VehicleDelegationStatusRepository;
+}
+
 function newSvc(opts: {
   vehicles: VehicleRow[];
   drivers?: DriverRow[];
   trailers?: TrailerRow[];
+  delegation?: Record<string, Partial<VehicleDelegationStatus>>;
   capturedVehicles?: { value?: VehicleListFilters };
   capturedDrivers?: { value?: { carrierIds?: string[] } };
 }) {
@@ -208,6 +255,7 @@ function newSvc(opts: {
     stubDriversRepo(opts.drivers ?? [], opts.capturedDrivers),
     stubTrailersRepo(opts.trailers ?? []),
     noop<CarrierReadinessService>(),
+    stubDelegationStatusRepo(opts.delegation ?? {}),
   );
 }
 
@@ -288,15 +336,7 @@ describe('FleetService.getDyspozytorFleet — dispatchTeamId scoping (Phase 11)'
     expect(out.drivers).toEqual([]);
     expect(out.trailers).toEqual([]);
     expect(out.stojaceList).toEqual([]);
-    expect(out.stats).toEqual({
-      liczbaAut: 0,
-      autaAktywne: 0,
-      autaJezdzace: 0,
-      autaStojace7dni: 0,
-      autaNieaktywne: 0,
-      liczbaKierowcow: 0,
-      liczbaNaczep: 0,
-    });
+    expect(out.stats).toEqual(ZERO_STATS);
     // Early return — no vehicle query was issued.
     expect(captured.value).toBeUndefined();
   });
@@ -315,132 +355,151 @@ describe('FleetService.getDyspozytorFleet — dispatchTeamId scoping (Phase 11)'
     expect(out.drivers).toEqual([]);
     expect(out.trailers).toEqual([]);
     expect(out.stojaceList).toEqual([]);
-    expect(out.stats).toEqual({
-      liczbaAut: 0,
-      autaAktywne: 0,
-      autaJezdzace: 0,
-      autaStojace7dni: 0,
-      autaNieaktywne: 0,
-      liczbaKierowcow: 0,
-      liczbaNaczep: 0,
-    });
+    expect(out.stats).toEqual(ZERO_STATS);
   });
 });
 
-describe('FleetService.getDyspozytorFleet — stats buckets', () => {
-  it('classifies every bucket with the 7-day cutoff and the no-lastDroveAt rule', async () => {
+describe('FleetService.getDyspozytorFleet — stats buckets (delegation-driven)', () => {
+  it('classifies every lifecycle bucket (aktywne/stojace/nieaktywne/doUsuniecia/wylaczone)', async () => {
     const svc = newSvc({
       vehicles: [
-        // jezdzace: active + recent
-        makeVehicle({ id: 'v-r1', active: true, lastDroveAt: new Date(NOW.getTime() - 1 * DAY_MS) }),
-        // jezdzace: active + null lastDroveAt (no data → driving)
-        makeVehicle({ id: 'v-r2', active: true, lastDroveAt: null }),
-        // stojace: active + 10 days idle
-        makeVehicle({ id: 'v-s1', active: true, lastDroveAt: new Date(NOW.getTime() - 10 * DAY_MS) }),
-        // nieaktywne (idle date irrelevant — inactive short-circuits first)
-        makeVehicle({ id: 'v-n1', active: false, lastDroveAt: new Date(NOW.getTime() - 30 * DAY_MS) }),
+        // aktywne: active + active delegation
+        makeVehicle({ id: 'v-a1', active: true }),
+        // stojace: active, no delegation, returned 10 days ago
+        makeVehicle({ id: 'v-s1', active: true }),
+        // nieaktywne: active, no delegation, returned 20 days ago
+        makeVehicle({ id: 'v-i1', active: true }),
+        // doUsuniecia: active, no delegation, returned 40 days ago
+        makeVehicle({ id: 'v-d1', active: true }),
+        // wylaczone: manually deactivated (delegation state irrelevant)
+        makeVehicle({ id: 'v-w1', active: false }),
       ],
+      delegation: {
+        'v-a1': { hasActiveDelegation: true },
+        'v-s1': { lastReturnAt: U('2026-05-17') }, // 10 days
+        'v-i1': { lastReturnAt: U('2026-05-07') }, // 20 days
+        'v-d1': { lastReturnAt: U('2026-04-17') }, // 40 days
+      },
       drivers: [makeDriver({ id: 'd-1' }), makeDriver({ id: 'd-2' })],
       trailers: [makeTrailer({ id: 't-1' })],
     });
     const out = await svc.getDyspozytorFleet(makeAuth('dyspozytor', 'dys-self'));
     expect(out.stats).toEqual({
-      liczbaAut: 4,
-      autaAktywne: 3,
-      autaJezdzace: 2,
-      autaStojace7dni: 1,
-      autaNieaktywne: 1,
+      liczbaAut: 5,
+      aktywne: 1,
+      stojace: 1,
+      nieaktywne: 1,
+      doUsuniecia: 1,
+      wylaczone: 1,
       liczbaKierowcow: 2,
       liczbaNaczep: 1,
     });
-    // Legacy invariants.
-    expect(out.stats.autaJezdzace + out.stats.autaStojace7dni).toBe(
-      out.stats.autaAktywne,
-    );
-    expect(out.stats.autaAktywne + out.stats.autaNieaktywne).toBe(
-      out.stats.liczbaAut,
-    );
+    // Invariant: the five lifecycle buckets partition liczbaAut.
+    expect(
+      out.stats.aktywne +
+        out.stats.stojace +
+        out.stats.nieaktywne +
+        out.stats.doUsuniecia +
+        out.stats.wylaczone,
+    ).toBe(out.stats.liczbaAut);
   });
 
-  it('treats a lastDroveAt exactly at the 7-day boundary as jezdzace (strict > 7d → stojace)', async () => {
-    const boundary = new Date(NOW.getTime() - 7 * DAY_MS);
+  it('the 14→15-day boundary flips stojace→nieaktywne', async () => {
     const svc = newSvc({
-      vehicles: [makeVehicle({ id: 'v-edge', active: true, lastDroveAt: boundary })],
+      vehicles: [
+        makeVehicle({ id: 'v-14', active: true }),
+        makeVehicle({ id: 'v-15', active: true }),
+      ],
+      delegation: {
+        'v-14': { lastReturnAt: U('2026-05-13') }, // exactly 14 days → stojace
+        'v-15': { lastReturnAt: U('2026-05-12') }, // 15 days → nieaktywne
+      },
     });
     const out = await svc.getDyspozytorFleet(makeAuth('dyspozytor', 'dys-self'));
-    expect(out.stats.autaJezdzace).toBe(1);
-    expect(out.stats.autaStojace7dni).toBe(0);
+    expect(out.stats.stojace).toBe(1);
+    expect(out.stats.nieaktywne).toBe(1);
+    expect(out.stats.doUsuniecia).toBe(0);
+  });
+
+  it('an active vehicle with an active delegation is aktywne, never in stojaceList', async () => {
+    const svc = newSvc({
+      vehicles: [makeVehicle({ id: 'v-busy', active: true })],
+      delegation: { 'v-busy': { hasActiveDelegation: true } },
+    });
+    const out = await svc.getDyspozytorFleet(makeAuth('dyspozytor', 'dys-self'));
+    expect(out.stats.aktywne).toBe(1);
+    expect(out.stats.stojace).toBe(0);
     expect(out.stojaceList).toEqual([]);
   });
 
-  it('a vehicle with no lastDroveAt is jezdzace and never appears in stojaceList', async () => {
+  it('never-returned vehicle anchors on createdAt (do_usuniecia when created long ago)', async () => {
     const svc = newSvc({
-      vehicles: [makeVehicle({ id: 'v-nodata', active: true, lastDroveAt: null })],
+      // Default fixture createdAt = 2026-01-01 → ~146 days before NOW.
+      vehicles: [makeVehicle({ id: 'v-new', active: true })],
     });
     const out = await svc.getDyspozytorFleet(makeAuth('dyspozytor', 'dys-self'));
-    expect(out.stats.autaJezdzace).toBe(1);
-    expect(out.stats.autaStojace7dni).toBe(0);
-    expect(out.stojaceList).toEqual([]);
+    expect(out.stats.doUsuniecia).toBe(1);
+    expect(out.stats.stojace).toBe(0);
   });
 });
 
 describe('FleetService.getDyspozytorFleet — stojaceList shape', () => {
-  it('builds one stojące row per idle>7d vehicle with the documented field names', async () => {
-    const lastDrove = new Date(NOW.getTime() - 10 * DAY_MS);
+  it('surfaces nieaktywna/do_usuniecia vehicles with status + daysSinceReturn', async () => {
     const svc = newSvc({
       vehicles: [
         makeVehicle({
-          id: 'v-s1',
+          id: 'v-i1',
           active: true,
           plateNumber: 'PL-IDLE',
-          lastDroveAt: lastDrove,
           carrier: { id: 'c-1', login: 'pwz-idle', name: 'Pwz Idle' },
           planner: { id: 'plan-1', login: 'plan', name: 'Anna Planista' },
         }),
       ],
+      delegation: { 'v-i1': { lastReturnAt: U('2026-05-07') } }, // 20 days
     });
     const out = await svc.getDyspozytorFleet(makeAuth('dyspozytor', 'dys-self'));
     expect(out.stojaceList).toEqual([
       {
         plateNumber: 'PL-IDLE',
         carrierLogin: 'pwz-idle',
-        lastDroveAt: lastDrove.toISOString(),
-        daysIdle: 10,
+        status: 'nieaktywna',
+        daysSinceReturn: 20,
         plannerName: 'Anna Planista',
       },
     ]);
   });
 
-  it('plannerName is null when no planner relation is loaded', async () => {
+  it('plannerName is null when no planner relation is loaded; do_usuniecia surfaces', async () => {
     const svc = newSvc({
       vehicles: [
         makeVehicle({
-          id: 'v-s2',
+          id: 'v-d2',
           active: true,
-          lastDroveAt: new Date(NOW.getTime() - 14 * DAY_MS),
           plannerId: null,
           planner: null,
         }),
       ],
+      delegation: { 'v-d2': { lastReturnAt: U('2026-04-17') } }, // 40 days
     });
     const out = await svc.getDyspozytorFleet(makeAuth('dyspozytor', 'dys-self'));
     expect(out.stojaceList[0]?.plannerName).toBeNull();
-    expect(out.stojaceList[0]?.daysIdle).toBe(14);
+    expect(out.stojaceList[0]?.status).toBe('do_usuniecia');
+    expect(out.stojaceList[0]?.daysSinceReturn).toBe(40);
   });
 
-  it('inactive vehicles never surface in stojaceList even if long idle', async () => {
+  it('stojace (0–14d) and wylaczone vehicles never surface in stojaceList', async () => {
     const svc = newSvc({
       vehicles: [
-        makeVehicle({
-          id: 'v-dead',
-          active: false,
-          lastDroveAt: new Date(NOW.getTime() - 100 * DAY_MS),
-        }),
+        makeVehicle({ id: 'v-ok', active: true }),
+        makeVehicle({ id: 'v-off', active: false }),
       ],
+      delegation: {
+        'v-ok': { lastReturnAt: U('2026-05-20') }, // 7 days → stojace
+      },
     });
     const out = await svc.getDyspozytorFleet(makeAuth('dyspozytor', 'dys-self'));
     expect(out.stojaceList).toEqual([]);
-    expect(out.stats.autaNieaktywne).toBe(1);
-    expect(out.stats.autaStojace7dni).toBe(0);
+    expect(out.stats.stojace).toBe(1);
+    expect(out.stats.wylaczone).toBe(1);
   });
 });

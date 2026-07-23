@@ -20,13 +20,12 @@
 // never an edit surface. The panel owns the per-modal open + target state.
 
 import {
-  AlertTriangle,
-  Car,
-  Container,
+  CircleParking,
   Gauge,
   PauseCircle,
+  Trash2,
   Truck,
-  User,
+  Users,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
@@ -115,11 +114,24 @@ export function FleetPanel({
   fullVehicleDetail = false,
 }: Props) {
   const t = useTranslations(namespace);
+  const tVehStatus = useTranslations('vehicleStatus');
   const tMyKm = useTranslations('myKm');
   const tA11y = useTranslations('fleet.a11y');
 
   const stats = data?.stats;
   const idle = data?.stojaceList ?? [];
+
+  // §6.3.6 — the AUTA tile is the ENABLED fleet (the four idle-clock buckets
+  // partition it); `wylaczona` vehicles are excluded from these counts.
+  const autaTotal = stats
+    ? stats.aktywne + stats.stojace + stats.nieaktywne + stats.doUsuniecia
+    : 0;
+
+  // Two-tier needs-attention watchlist (§6.3.6): «Do usunięcia» (≥29 dni,
+  // danger) is the genuine act-now set; «Długo stojące» (15–28 dni, warning)
+  // is the softer watchlist. Both come off the single needs-attention list.
+  const removeList = idle.filter((v) => v.status === 'do_usuniecia');
+  const longIdleList = idle.filter((v) => v.status === 'nieaktywna');
 
   // ── Per-modal open + target state (read-only VIEW surfaces) ───────────
   // The delegations VIEW modal lives inside <DelegationsTable> now; the panel
@@ -156,63 +168,99 @@ export function FleetPanel({
 
       <ReadOnlyBanner message={readOnlyBanner} />
 
-      {/* KPI strip — five tiles. Bucket→tone per DS §6.3.3 (no purple): totals
-          neutral, JEŻDŻĄ green, STOJĄ>7DNI orange, KIEROWCY blue. Always
-          rendered so the layout doesn't jump between loading states. */}
+      {/* Inert resource sub-line — kierowcy / naczepy moved OUT of the hero KPI
+          strip (§6.3.6); the strip is now a focused 5-state vehicle ramp. */}
+      {stats ? (
+        <p className="-mt-4 mb-6 flex items-center gap-1.5 text-xs text-text-sub">
+          <Users size={13} aria-hidden="true" />
+          {t('resources', {
+            drivers: stats.liczbaKierowcow,
+            trailers: stats.liczbaNaczep,
+          })}
+        </p>
+      ) : null}
+
+      {/* KPI strip — the delegation-driven 5-state vehicle ramp (§6.3.6). Two
+          neutral tiles by design (AUTA total + STOJĄCE calm); only the problem
+          states pop — DŁUGO STOJĄCE amber, DO USUNIĘCIA red, AKTYWNE green
+          (capacity). Always rendered so the layout doesn't jump. */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
         <KpiCard
           label={t('kpi.vehicles')}
-          value={stats?.liczbaAut ?? 0}
+          value={autaTotal}
           tone="neutral"
           icon={Truck}
           loading={isLoading}
         />
         <KpiCard
-          label={t('kpi.driving')}
-          value={stats?.autaJezdzace ?? 0}
+          label={tVehStatus('aktywna.tile')}
+          value={stats?.aktywne ?? 0}
           tone="green"
-          icon={Car}
+          icon={Truck}
           loading={isLoading}
         />
         <KpiCard
-          label={t('kpi.idle')}
-          value={stats?.autaStojace7dni ?? 0}
+          label={tVehStatus('stojaca.tile')}
+          value={stats?.stojace ?? 0}
+          tone="neutral"
+          icon={CircleParking}
+          loading={isLoading}
+        />
+        <KpiCard
+          label={tVehStatus('nieaktywna.tile')}
+          value={stats?.nieaktywne ?? 0}
           tone="orange"
           icon={PauseCircle}
           loading={isLoading}
         />
         <KpiCard
-          label={t('kpi.drivers')}
-          value={stats?.liczbaKierowcow ?? 0}
-          tone="blue"
-          icon={User}
-          loading={isLoading}
-        />
-        <KpiCard
-          label={t('kpi.trailers')}
-          value={stats?.liczbaNaczep ?? 0}
-          tone="neutral"
-          icon={Container}
+          label={tVehStatus('do_usuniecia.tile')}
+          value={stats?.doUsuniecia ?? 0}
+          tone="red"
+          icon={Trash2}
           loading={isLoading}
         />
       </div>
 
-      {/* "Stojące > 7 dni" warning sub-list — only when count > 0. DS §6.3.3:
-          warning-toned panel (bg-warning/10 + border-warning/40), inert chips,
-          meaning carried by icon + "X dni" text (not colour alone). */}
-      {idle.length > 0 && (
-        <div className="mb-6 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3">
-          <p className="flex items-center gap-1.5 text-sm font-semibold text-warning">
-            <AlertTriangle size={15} aria-hidden="true" />
-            {t('idle.title')}
+      {/* «Do usunięcia» highlight (§6.3.6) — the removal-eligible set (≥29 dni).
+          Danger-toned (border-danger/40 + bg-danger/10 + Trash2), inert chips;
+          meaning carried by icon + "X dni" text, not colour alone. */}
+      {removeList.length > 0 && (
+        <div className="mb-6 rounded-lg border border-danger/40 bg-danger/10 px-4 py-3">
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-danger">
+            <Trash2 size={15} aria-hidden="true" />
+            {t('needsAttention.removeTitle')}
           </p>
           <ul className="mt-2 flex flex-wrap gap-1.5">
-            {idle.map((v) => (
+            {removeList.map((v) => (
+              <li key={v.plateNumber}>
+                <span className="inline-flex items-center gap-1 rounded-sm border border-danger/40 bg-card px-2 py-0.5 text-xs font-medium text-text">
+                  <span className="font-mono">{v.plateNumber}</span>
+                  <span className="text-text-sub">
+                    · {t('needsAttention.days', { days: v.daysSinceReturn })}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* «Długo stojące» secondary watchlist (§6.3.6) — 15–28 dni, warning-toned
+          (border-warning/40 + bg-warning/10 + PauseCircle). */}
+      {longIdleList.length > 0 && (
+        <div className="mb-6 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3">
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-warning">
+            <PauseCircle size={15} aria-hidden="true" />
+            {t('needsAttention.longIdleTitle')}
+          </p>
+          <ul className="mt-2 flex flex-wrap gap-1.5">
+            {longIdleList.map((v) => (
               <li key={v.plateNumber}>
                 <span className="inline-flex items-center gap-1 rounded-sm border border-warning/40 bg-card px-2 py-0.5 text-xs font-medium text-text">
                   <span className="font-mono">{v.plateNumber}</span>
                   <span className="text-text-sub">
-                    · {t('idle.daysIdle', { days: v.daysIdle })}
+                    · {t('needsAttention.days', { days: v.daysSinceReturn })}
                   </span>
                 </span>
               </li>

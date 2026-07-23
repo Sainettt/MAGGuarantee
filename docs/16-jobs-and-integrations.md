@@ -38,6 +38,7 @@
 | Refresh-token cleanup | — (новое) | ежедневно | BullMQ scheduled job |
 | Verification-SLA digest | — (новое, docs/21) | ежедневно 07:00 | `@Cron` в API-процессе |
 | **Guarantee Watchdog** | — (новое, план 2026-07-07) | ежедневно **07:10** Europe/Warsaw | `@Cron` в API-процессе (стаггер после verification-sla) |
+| **Vehicle-removal alert** | — (новое, vehicle-status rework Step B) | ежедневно **07:20** Europe/Warsaw | `@Cron` в API-процессе (стаггер после Guarantee Watchdog) |
 
 > Внутренний per-claim чат не реализуем (см. [17-migration-roadmap.md#что-мы-не-делаем](17-migration-roadmap.md)) — `_cleanupOldChatMessages` из `Code.gs` пропускаем. **Это НЕ про** исходящую Google Chat нотификацию о выездах — та новая фича, см. [Google Chat notifications](#google-chat-notifications).
 
@@ -150,6 +151,31 @@ export class DailyRemindersProcessor extends WorkerHost {
 | `GUARANTEE_REMINDER_OFFSETS` | `"3,1"` | CSV офсетов напоминаний (раб. дни до дедлайна); парсится + де-дуп + сортируется |
 
 Аудит: крон в `AuditLog` не пишет — таблица `GuaranteeIdleEpisode` сама журнал (append-only, закрытие = переход в `resolved`, никогда не delete).
+
+### Vehicle-removal alert
+
+> 🆕 vehicle-status rework Step B. Крон **`@Cron('20 7 * * *', { timeZone: 'Europe/Warsaw' })`** в API-процессе (`apps/api/src/modules/vehicle-removal-alert/`) — стаггер **после** Guarantee Watchdog (07:10). Каждое утро шлёт **всем активным admin** дайджест LIVE-машин, чей derived-статус жизненного цикла = `do_usuniecia` (простой ≥29 календарных дней — порог берётся из shared-константы `VEHICLE_NIEAKTYWNA_MAX_DAYS + 1`, **не** из env). Kill-switch `VEHICLE_REMOVAL_ALERT_ENABLED=false` → выход с лог-строкой. Идемпотентен: повторный запуск внутри repeat-окна ничего не шлёт (дедуп по колонкам `Vehicle`).
+
+**Что делает крон (по каждой LIVE-машине в scope):**
+
+1. Скоуп: `Vehicle.active = true`, `deletedAt IS NULL`, перевозчик жив (`carrier.deletedAt IS NULL`). Delegation-статус (active-выезд + последний `zjechal`-возврат) резолвится батчем через `VehicleDelegationStatusRepository.getByVehicleIds` (без N+1) — тот же источник, что кормит fleet-агрегаты.
+2. `computeVehicleLifecycleStatus()` (shared) с `today = startOfBusinessTodayUtc()`. `do_usuniecia` = `daysSinceReturn ≥ 29` (anchor = последний `actualReturnAt` `zjechal` ?? `Vehicle.createdAt`).
+3. **Партиция:**
+   - **DUE** = статус `do_usuniecia` И (`adminRemovalNotifiedAt` = null ИЛИ `calendarDaysBetween(adminRemovalNotifiedAt, today) >= repeatDays`).
+   - **RELAPSED** = статус ≠ `do_usuniecia` И `adminRemovalNotifiedAt` != null → сбрасываем `adminRemovalNotifiedAt = null` (счётчик `adminRemovalNotifyCount` НЕ трогаем — это монотонный lifetime-счётчик).
+4. Если DUE непусто: резолвим всех активных admin (`UsersRepository.listByRole('admin')`), шлём **по одному дайджесту на admin** со списком всех DUE-машин (plate, sideNumber, carrier, `daysSinceReturn`, anchor-дата). Per-admin try/catch — один плохой адрес не роняет прогон. **После** фан-аута (и только если ≥1 admin-enqueue удался) для каждой DUE-машины ставим `adminRemovalNotifiedAt = now` и `adminRemovalNotifyCount += 1` (stamp-after-enqueue, один раз за прогон — как watchdog).
+5. Лог-строка сводки: `checked / due / relapsedCleared / adminsMailed`.
+
+**Получатели:** **все активные `admin`** (`User.role='admin'`, `active=true`) — персональный `User.email`, не группа. Отправка через `MailService.enqueueVehicleRemovalAdmin` (`_enqueueOr` → очередь `email-send` с sync-фолбэком; `MailJobsRegistry`/diagnostics подхватываются автоматически). Шаблон `vehicle-removal-admin.tsx` (#19).
+
+**Env (`env.schema.ts`, паттерн `ALLOW_PAST_DEPARTURE` / `GUARANTEE_WATCHDOG_ENABLED`):**
+
+| Ключ | Дефолт | Назначение |
+|---|---|---|
+| `VEHICLE_REMOVAL_ALERT_ENABLED` | `true` | Kill-switch на выкатку (только `false`/`0` выключает) |
+| `VEHICLE_REMOVAL_ALERT_REPEAT_DAYS` | `3` | Календарных дней между повторными дайджестами для всё ещё `do_usuniecia` машины |
+
+Порог ≥29 дней **не** в env — берётся из shared-константы `VEHICLE_NIEAKTYWNA_MAX_DAYS`. Аудит: крон в `AuditLog` не пишет — работает на ROOT prisma-клиенте (как watchdog-репозиторий); дедуп-состояние живёт в колонках `Vehicle.adminRemovalNotifiedAt` / `Vehicle.adminRemovalNotifyCount`.
 
 ### Email очередь
 
@@ -357,6 +383,7 @@ const html = await render(<CarrierDecisionEmail claim={claim} decision="ZAAKCEPT
 | `authorization-request.tsx` | `sendAuthorizationRequest` | Когда нужна авторизация суммы |
 | `guarantee-reminder-carrier.tsx` (#17) | (новое, Guarantee Watchdog) | Крон 07:10 — напоминание перевозчику D-3/D-1 (одно письмо, список машин); CTA «Zgłoś wyjazd» → `/carrier/delegations/new` |
 | `guarantee-opiekun-digest.tsx` (#18) | (новое, Guarantee Watchdog) | Крон 07:10 — дайджест опекуну: секция «zbliżające się terminy» (D-3/D-1) + секция «naruszenia» (эпизоды, впервые ставшие `violated` сегодня). Персональный `User.email`, **не** группа |
+| `vehicle-removal-admin.tsx` (#19) | (новое, vehicle-status rework Step B) | Крон 07:20 — дайджест **всем активным admin**: список LIVE-машин со статусом `do_usuniecia` (idle ≥29 календарных дней). Персональный `User.email`. Тема `Pojazdy do usunięcia — {n}` |
 
 > **Guarantee Watchdog — получатели:** перевозчик резолвится как `carrier-submitted` / `delegation-announced` — **login-user email** (`Carrier.user.email` через `User.id = Carrier.userId`), **не** `ordersEmail`. Опекун — персональный `User.email` (`Carrier.opiekunId → User`). При нарушении перевозчику письма **нет** (решение заказчика) — нарушение только в дайджесте опекуна (#18). Отправка через `MailService.enqueueGuarantee*` (`_enqueueOr` → очередь `email-send` с sync-фолбэком, `MailJobsRegistry`/diagnostics подхватываются автоматически).
 

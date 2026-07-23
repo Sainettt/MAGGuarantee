@@ -10,7 +10,6 @@ import {
 } from '@tanstack/react-query';
 import type {
   CreateVehicleDto,
-  DeleteWithReasonDto,
   UpdateVehicleDto,
   VehicleAttachmentDto,
   VehicleDto,
@@ -22,7 +21,6 @@ import {
   deactivateVehicle,
   deleteVehicle,
   getVehicle,
-  hardDeleteVehicle,
   listVehicleAttachments,
   listVehicles,
   reactivateVehicle,
@@ -168,18 +166,6 @@ export function useDeleteVehicle() {
   });
 }
 
-/** Hard-delete — admin only. See useHardDeleteCarrier doc. */
-export function useHardDeleteVehicle() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, body }: { id: string; body: DeleteWithReasonDto }) =>
-      hardDeleteVehicle(id, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: VEHICLES_KEY });
-      qc.invalidateQueries({ queryKey: MY_FLEET_KEY });
-      qc.invalidateQueries({ queryKey: CARRIERS_KEY });
-      // Active-vehicle count + ADR flag feed the opiekun readiness view.
-      qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
-    },
-  });
-}
+// NOTE: the admin vehicle hard-delete (`DELETE /vehicles/:id/hard`) was RETIRED
+// (Vehicle-status rework) — admin now soft-deletes via `useDeleteVehicle` like
+// everyone else. The former `useHardDeleteVehicle` hook was removed.

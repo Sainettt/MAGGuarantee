@@ -140,6 +140,12 @@
 - `dispatchTeamId` — ссылка на активную `Team`; все её `dispatchers` (role=dyspozytor) считаются ведущими авто.
 - **CHECK `vehicle_gps_device_when_gps_on`** — если `gps=true`, то `gpsMobilePhone` обязан быть not-null. Это часть data-model contract, не имплементационная деталь.
 
+**Операционный статус — производный (не хранится):** статус авто вычисляется на read-стороне из выездов + `createdAt`, отдельной колонки статуса НЕТ.
+- `aktywna` — есть НЕ-терминальный `Delegation` (`status ∈ {zgloszony, gotowy, w_trasie}`).
+- Иначе якорь = `max(Delegation.actualReturnAt по zjechal, не soft-deleted) ?? Vehicle.createdAt`; `daysSinceReturn` = **календарные** дни от якоря до сегодня: `stojąca` 0–14, `nieaktywna` 15–28, `do_usunięcia` ≥29.
+- Ежедневный cron шлёт всем активным админам письмо про каждое авто `≥29` дней (по ВСЕМ авто, не только гарантийным), повтор раз в 3 календарных дня; дедуп через `Vehicle.adminRemovalNotifiedAt` / `adminRemovalNotifyCount` (см. [12-database-schema.md](12-database-schema.md)). Сама формула статуса и cron — в api-слое.
+- Ручной `active=false` = `wyłączona` — **ортогонален** этой шкале (админ выключил авто вручную; не путать с производной idle-эскалацией).
+
 ### `Team` — команда диспетчеров
 
 > ✅ **РЕАЛИЗОВАНО (Phase 11, 2026-06-17)** — модель `Team` в схеме, `Vehicle.dispatchTeamId` заменил одиночный `dispatcherId` (миграция `20260617120000_phase11_team_dispatch`), admin ведёт CRUD команд в UI (см. [17-migration-roadmap.md](17-migration-roadmap.md) Шаг D — фаза закрыта).

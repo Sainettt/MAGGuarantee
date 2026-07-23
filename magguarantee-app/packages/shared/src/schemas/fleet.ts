@@ -9,10 +9,12 @@
 // calls into one).
 //
 // `/fleet/opiekun` returns per-carrier fleet aggregates for the opiekun
-// dashboard — carrier identity + vehicle classification buckets (jezdzace /
-// stojace / nieaktywne / potencjalne) mirroring `Code.gs:2733-2820`
-// (`getOpiekunFleet`). Admin callers see every carrier, opiekun callers see
-// only carriers where `Carrier.opiekunId === user.sub`.
+// dashboard — carrier identity + the delegation-driven vehicle lifecycle
+// buckets (aktywne / stojace / nieaktywne / doUsuniecia / wylaczone +
+// potencjalne). Admin callers see every carrier, opiekun callers see only
+// carriers where `Carrier.opiekunId === user.sub`. The legacy 7-day
+// `lastDroveAt` classification was replaced by the calendar-day, delegation-
+// anchored model (`computeVehicleLifecycleStatus` in `@magguarantee/shared`).
 //
 // Slim list shapes are reused by other endpoints when only a "picker" view
 // is needed; the full per-domain DTOs live in `vehicles.ts` / `drivers.ts`
@@ -23,7 +25,11 @@ import { z } from 'zod';
 import { AdrClassSchema, IsoDateSchema, IsoDateTimeSchema, UuidSchema } from './common';
 import { DriverLanguageSchema, DriverNationalitySchema } from './drivers';
 import { VehicleDispatchTeamSchema } from './teams';
-import { EuroNormSchema, WasteCountrySchema } from './vehicles';
+import {
+  EuroNormSchema,
+  VehicleLifecycleStatusSchema,
+  WasteCountrySchema,
+} from './vehicles';
 
 // ─── Slim list-item shapes ───────────────────────────────
 
@@ -76,6 +82,18 @@ export const VehicleListItemSchema = z.object({
   agreementScanMissing: z.boolean(),
   /** Display-only (quirk #11). ISO datetime; null when never reported. */
   lastDroveAt: IsoDateTimeSchema.nullable(),
+  /**
+   * DERIVED — the delegation-driven lifecycle status (per-row fleet badge).
+   * Computed server-side from `active` + active-delegation existence + the idle
+   * anchor `max(actualReturnAt over zjechał) ?? createdAt`. Same value/semantics
+   * as the full `VehicleDto.lifecycleStatus`.
+   */
+  lifecycleStatus: VehicleLifecycleStatusSchema,
+  /**
+   * DERIVED — calendar days (Europe/Warsaw) since the idle anchor. `null` when
+   * no idle clock runs (status `wylaczona` or `aktywna`).
+   */
+  daysSinceReturn: z.number().int().nullable(),
   notes: z.string().nullable(),
   /**
    * Phase 11 — the dispatch Team with its dispatcher roster (additive,
@@ -184,26 +202,35 @@ export const OpiekunFleetQuerySchema = z.object({}).strict();
 export type OpiekunFleetQuery = z.infer<typeof OpiekunFleetQuerySchema>;
 
 /**
- * Per-carrier vehicle classification — mirrors the four buckets from
- * `Code.gs:2825-2865` (`statyJezdzace`, `statyStojace7d`, `statyNieaktywne`,
- * `potencjalneAuta`).
+ * Per-carrier vehicle classification — the delegation-driven lifecycle model
+ * (Vehicle-status rework, Step A). Each LIVE vehicle is classified at read time
+ * via `computeVehicleLifecycleStatus` (`@magguarantee/shared`) and counted into
+ * exactly one of the five status buckets:
  *
- *  - `jezdzace`   — `Vehicle.active=true` AND (no `lastDroveAt` OR
- *                   `lastDroveAt` within the last 7 days). Mirrors the
- *                   legacy "no data = assume driving" default.
- *  - `stojace`    — `Vehicle.active=true` AND `lastDroveAt` is older than
- *                   7 days.
- *  - `nieaktywne` — `Vehicle.active=false`.
+ *  - `aktywne`     — active AND a non-terminal delegation (zgloszony/gotowy/
+ *                    w_trasie) exists (the truck is working now).
+ *  - `stojace`     — active, no active delegation, idle 0–14 CALENDAR days
+ *                    (Europe/Warsaw) since the anchor
+ *                    `max(actualReturnAt over zjechał) ?? Vehicle.createdAt`.
+ *  - `nieaktywne`  — …idle 15–28 calendar days.
+ *  - `doUsuniecia` — …idle ≥29 calendar days (overdue for removal review).
+ *  - `wylaczone`   — `Vehicle.active=false` (manually deactivated; orthogonal
+ *                    to the idle clock).
  *  - `potencjalne` — `max(0, Carrier.numberOfVehicle ?? 0 − total)`. KREPTD
  *                    headroom; "potential" trucks the carrier could add
- *                    under their license.
- *  - `total`      — sum of jezdzace+stojace+nieaktywne (vehicles registered
- *                   in the system; equivalent to `vehicles.length` in legacy).
+ *                    under their license (NOT a lifecycle bucket).
+ *  - `total`       — `aktywne + stojace + nieaktywne + doUsuniecia + wylaczone`
+ *                    (every registered, non-soft-deleted vehicle row).
+ *
+ * REPLACES the legacy 7-day `lastDroveAt` classification (jezdzace/stojace7d)
+ * entirely — `vehicle_daily_km` no longer drives this aggregate.
  */
 export const OpiekunCarrierVehicleStatsSchema = z.object({
-  jezdzace: z.number().int().nonnegative(),
+  aktywne: z.number().int().nonnegative(),
   stojace: z.number().int().nonnegative(),
   nieaktywne: z.number().int().nonnegative(),
+  doUsuniecia: z.number().int().nonnegative(),
+  wylaczone: z.number().int().nonnegative(),
   potencjalne: z.number().int().nonnegative(),
   total: z.number().int().nonnegative(),
 });
@@ -314,52 +341,60 @@ export type OpiekunFleetResponse = z.infer<typeof OpiekunFleetResponseSchema>;
 // ─── GET /fleet/dyspozytor ───────────────────────────────
 
 /**
- * Dyspozytor KPI strip counters — maps 1:1 to the legacy `stats` object in
- * `Code.gs:3758-3764` (`getDyspozytorFleet` return). Key names are kept
- * verbatim so the dyspozytor panel's KPI strip reads them directly.
+ * Dyspozytor/planista KPI strip counters — the delegation-driven lifecycle
+ * model (Vehicle-status rework, Step A). Each LIVE vehicle in scope is
+ * classified via `computeVehicleLifecycleStatus` (`@magguarantee/shared`) and
+ * counted into exactly one status bucket. REPLACES the legacy 7-day
+ * `lastDroveAt` split (`autaJezdzace`/`autaStojace7dni`) — `vehicle_daily_km` no
+ * longer drives these counters.
  *
- *  - `liczbaAut`        — total vehicles assigned to this dyspozytor's TEAM
- *                         (`Vehicle.dispatchTeamId === user.teamId`; Phase 11).
- *                         A dyspozytor with NO team sees an empty fleet.
- *  - `autaAktywne`      — `Vehicle.active=true`.
- *  - `autaJezdzace`     — active AND (no `lastDroveAt` OR within last 7 days);
- *                         mirrors the legacy "no data = assume driving" default.
- *  - `autaStojace7dni`  — active AND `lastDroveAt` older than 7 days.
- *  - `autaNieaktywne`   — `Vehicle.active=false`.
- *  - `liczbaKierowcow`  — drivers of the dyspozytor's carriers.
- *  - `liczbaNaczep`     — trailers of the dyspozytor's carriers.
+ *  - `liczbaAut`       — total vehicles assigned to this dyspozytor's TEAM
+ *                        (`Vehicle.dispatchTeamId === user.teamId`; Phase 11) /
+ *                        this planista's `plannerId`. A dyspozytor with NO team
+ *                        sees an empty fleet.
+ *  - `aktywne`         — active AND a non-terminal delegation (zgloszony/gotowy/
+ *                        w_trasie) exists.
+ *  - `stojace`         — active, no active delegation, idle 0–14 calendar days.
+ *  - `nieaktywne`      — …idle 15–28 calendar days.
+ *  - `doUsuniecia`     — …idle ≥29 calendar days.
+ *  - `wylaczone`       — `Vehicle.active=false` (manually deactivated).
+ *  - `liczbaKierowcow` — drivers of the in-scope carriers.
+ *  - `liczbaNaczep`    — trailers of the in-scope carriers.
  *
- * Note `autaJezdzace + autaStojace7dni === autaAktywne`, and
- * `autaAktywne + autaNieaktywne === liczbaAut` (legacy invariant).
+ * Invariant: `aktywne + stojace + nieaktywne + doUsuniecia + wylaczone ===
+ * liczbaAut`.
  */
 export const DyspozytorFleetStatsSchema = z.object({
   liczbaAut: z.number().int().nonnegative(),
-  autaAktywne: z.number().int().nonnegative(),
-  autaJezdzace: z.number().int().nonnegative(),
-  autaStojace7dni: z.number().int().nonnegative(),
-  autaNieaktywne: z.number().int().nonnegative(),
+  aktywne: z.number().int().nonnegative(),
+  stojace: z.number().int().nonnegative(),
+  nieaktywne: z.number().int().nonnegative(),
+  doUsuniecia: z.number().int().nonnegative(),
+  wylaczone: z.number().int().nonnegative(),
   liczbaKierowcow: z.number().int().nonnegative(),
   liczbaNaczep: z.number().int().nonnegative(),
 });
 export type DyspozytorFleetStats = z.infer<typeof DyspozytorFleetStatsSchema>;
 
 /**
- * One "auto stojące > 7 dni" highlight row in the dyspozytor panel — the
- * idle-vehicle list the dyspozytor needs to chase. Mirrors the per-vehicle
- * push in `Code.gs:3744`.
+ * One "needs attention" highlight row in the dyspozytor/planista panel — the
+ * vehicles the operator should chase under the delegation-driven model: those
+ * in `nieaktywna` OR `do_usuniecia` (idle ≥15 calendar days). REPURPOSED from
+ * the legacy "stojące > 7 dni" list.
  *
- * Field naming follows `VehicleListItemSchema` for continuity: `plateNumber`
- * (legacy `nrRej`) and `lastDroveAt` (legacy `ostatnioJezdzilo`). `daysIdle`
- * is the legacy `dniBezJazdy` floor-division of the gap since `lastDroveAt`;
- * `lastDroveAt` is nullable to cover vehicles that never reported a drive yet
- * still surfaced here. `carrierLogin` / `plannerName` map to the legacy
- * `przewoznikLogin` / `planista` columns.
+ *  - `plateNumber` — vehicle registration.
+ *  - `carrierLogin` — owning carrier's login.
+ *  - `status` — `nieaktywna` | `do_usuniecia` (the reason it surfaced).
+ *  - `daysSinceReturn` — CALENDAR days since the idle anchor
+ *    (`max(actualReturnAt over zjechał) ?? createdAt`); the value the panel
+ *    sorts/annotates by (replaces the legacy `daysIdle`).
+ *  - `plannerName` — the vehicle's planner display name, or `null`.
  */
 export const DyspozytorStojacyItemSchema = z.object({
   plateNumber: z.string(),
   carrierLogin: z.string(),
-  lastDroveAt: z.string().nullable(),
-  daysIdle: z.number().int(),
+  status: VehicleLifecycleStatusSchema,
+  daysSinceReturn: z.number().int().nonnegative(),
   plannerName: z.string().nullable(),
 });
 export type DyspozytorStojacyItem = z.infer<typeof DyspozytorStojacyItemSchema>;

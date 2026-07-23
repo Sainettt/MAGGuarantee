@@ -10,9 +10,9 @@ import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import type { VehicleDto } from '@magguarantee/shared';
 
+import { VehicleStatusBadge } from '@/components/carrier/VehicleStatusBadge';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { ConfirmDeleteWithReasonDialog } from '@/components/ui/ConfirmDeleteWithReasonDialog';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { RowActionsMenu, type RowAction } from '@/components/ui/RowActionsMenu';
@@ -20,14 +20,9 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { VehicleDetailModal } from '@/components/vehicles/VehicleDetailModal';
-import { ApiResponseError } from '@/lib/api/client';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { useCarriers } from '@/lib/hooks/useCarriers';
-import {
-  useDeleteVehicle,
-  useHardDeleteVehicle,
-  useVehicles,
-} from '@/lib/hooks/useVehicles';
+import { useDeleteVehicle, useVehicles } from '@/lib/hooks/useVehicles';
 
 import { VehicleFormDialog } from './VehicleFormDialog';
 
@@ -39,12 +34,11 @@ export default function VehiclesPage() {
   const tCommon = useTranslations('common');
   const tConfirm = useTranslations('confirmDelete');
   const { user } = useAuth();
-  // The delete row-action renders for both admin and opiekun, but they hit
-  // DIFFERENT endpoints (docs/13-api-design.md): admin runs a physical
-  // hard-delete with a mandatory powód (`DELETE /vehicles/:id/hard`, admin-only),
-  // opiekun runs a SOFT delete of their own vehicle (`DELETE /vehicles/:id`,
-  // sets `deletedAt`, restorable server-side). Carriers are the exception —
-  // there opiekun gets no delete at all (see carriers/page.tsx).
+  // The delete row-action renders for both admin and opiekun, and since the
+  // vehicle hard-delete endpoint was RETIRED (Vehicle-status rework), BOTH now
+  // run the same SOFT delete (`DELETE /vehicles/:id`, sets `deletedAt`,
+  // restorable server-side). Carriers are the exception — they get no delete at
+  // all (backend-locked out of fleet mutations).
   const isAdmin = user?.role === 'admin';
   const isOpiekun = user?.role === 'opiekun';
   const canDelete = isAdmin || isOpiekun;
@@ -71,7 +65,6 @@ export default function VehiclesPage() {
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<VehicleDto | null>(null);
-  const hardDeleteM = useHardDeleteVehicle();
   const softDeleteM = useDeleteVehicle();
 
   const hasActiveFilters = Boolean(search.length >= 2 || carrierId);
@@ -162,14 +155,16 @@ export default function VehiclesPage() {
         cell: (row) => row.type ?? '—',
       },
       {
-        id: 'active',
+        // Vehicle-status rework §6.3.6 — delegation-driven lifecycle badge
+        // (retires the active/inactive flag; `active=false` → «Wyłączona»).
+        id: 'status',
         header: t('fields.active'),
-        cell: (row) =>
-          row.active ? (
-            <Badge variant="success">{tCommon('active')}</Badge>
-          ) : (
-            <Badge variant="muted">{tCommon('inactive')}</Badge>
-          ),
+        cell: (row) => (
+          <VehicleStatusBadge
+            status={row.lifecycleStatus}
+            daysSinceReturn={row.daysSinceReturn}
+          />
+        ),
       },
       {
         id: 'actions',
@@ -188,7 +183,7 @@ export default function VehiclesPage() {
           if (canDelete) {
             actions.push({
               key: 'delete',
-              label: isAdmin ? tConfirm('confirm') : tConfirm('softConfirm'),
+              label: tConfirm('softConfirm'),
               icon: Trash2,
               destructive: true,
               onSelect: () => openDelete(row),
@@ -205,7 +200,7 @@ export default function VehiclesPage() {
         },
       },
     ],
-    [t, tCommon, tConfirm, canDelete, isAdmin, openDelete],
+    [t, tCommon, tConfirm, canDelete, openDelete],
   );
 
   return (
@@ -296,38 +291,11 @@ export default function VehiclesPage() {
         onClose={() => setSheetOpen(false)}
       />
 
-      {/* Admin — physical hard-delete with a mandatory powód. */}
-      {isAdmin && (
-        <ConfirmDeleteWithReasonDialog
-          open={deleteOpen}
-          onOpenChange={setDeleteOpen}
-          entityLabel={tConfirm('entityLabel.vehicle')}
-          entityName={deleteTarget?.plateNumber ?? ''}
-          isLoading={hardDeleteM.isPending}
-          onConfirm={async (reason) => {
-            if (!deleteTarget) return;
-            try {
-              await hardDeleteM.mutateAsync({
-                id: deleteTarget.id,
-                body: { reason },
-              });
-              toast.success(tConfirm('deletedToast'));
-            } catch (err) {
-              // 409 = record still has referencing rows; the backend sends a
-              // human-readable Polish «Nie można trwale usunąć…». Show it verbatim.
-              if (err instanceof ApiResponseError && err.status === 409) {
-                toast.error(err.message);
-              } else {
-                toast.error(tConfirm('errorToast'));
-              }
-              throw err;
-            }
-          }}
-        />
-      )}
-
-      {/* Opiekun — soft delete (restorable), no powód. */}
-      {isOpiekun && (
+      {/* Admin + opiekun — soft delete (restorable), no powód. The vehicle
+          hard-delete endpoint was retired (Vehicle-status rework), so admin no
+          longer runs a physical delete; the copy promises a restorable removal,
+          not a permanent one. */}
+      {canDelete && (
         <ConfirmDialog
           open={deleteOpen}
           onOpenChange={setDeleteOpen}

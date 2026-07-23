@@ -1,5 +1,7 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 
+import { startOfBusinessTodayUtc } from '@magguarantee/shared';
+
 import type {
   DriverListItem,
   DyspozytorFleetResponse,
@@ -27,20 +29,18 @@ import {
 } from '../carriers/carriers.repository';
 import { DriversRepository, type DriverRow } from '../drivers/drivers.repository';
 import { TrailersRepository, type TrailerRow } from '../trailers/trailers.repository';
+import { VehicleDelegationStatusRepository } from '../vehicles/vehicle-delegation-status.repository';
 import { computeVehicleDerivedFlags } from '../vehicles/vehicle-derived-flags';
+import {
+  EMPTY_DELEGATION_STATUS,
+  computeVehicleLifecycle,
+  type VehicleLifecycleInfo,
+} from '../vehicles/vehicle-lifecycle';
 import {
   NO_TEAM_SENTINEL,
   VehiclesRepository,
   type VehicleRow,
 } from '../vehicles/vehicles.repository';
-
-/**
- * "Driving" cut-off — `Code.gs:2827` uses a constant 7-day window past
- * `lastDroveAt` to separate `jezdzace` from `stojace`. Kept here as a named
- * constant so the test fixtures can reference it directly.
- */
-const DRIVING_RECENCY_DAYS = 7;
-const DRIVING_RECENCY_MS = DRIVING_RECENCY_DAYS * 24 * 60 * 60 * 1000;
 
 /**
  * Phase 3 — Fleet aggregates service.
@@ -58,6 +58,10 @@ export class FleetService {
     private readonly drivers: DriversRepository,
     private readonly trailers: TrailersRepository,
     private readonly readiness: CarrierReadinessService,
+    // Batched delegation-status lookup — drives the delegation-driven vehicle
+    // lifecycle classification (`computeVehicleLifecycle`) across every fleet
+    // panel. Shared with the vehicles module (exported from `VehiclesModule`).
+    private readonly delegationStatus: VehicleDelegationStatusRepository,
   ) {}
 
   async getMyFleet(
@@ -85,8 +89,9 @@ export class FleetService {
       this.trailers.list({ carrierId: mine.id, active: activeFilter, limit: 200 }),
     ]);
 
+    const lifecycle = await this._lifecycleBatch(vehicleRows);
     return {
-      vehicles: vehicleRows.map(toVehicleListItem),
+      vehicles: vehicleRows.map((v) => toVehicleListItem(v, lifecycle.get(v.id))),
       drivers: driverRows.map(toDriverListItem),
       trailers: trailerRows.map(toTrailerListItem),
     };
@@ -96,10 +101,11 @@ export class FleetService {
    * Phase 5 — per-carrier fleet aggregate for the opiekun dashboard.
    *
    * Mirrors `Code.gs:2733-2820` (`getOpiekunFleet`) but reduced to the
-   * payload the new dashboard actually consumes: identity + the four-bucket
-   * vehicle classification (`jezdzace`, `stojace`, `nieaktywne`,
-   * `potencjalne`). Drivers / trailers / per-vehicle list endpoints already
-   * exist as dedicated routes, so we don't duplicate them here.
+   * payload the new dashboard actually consumes: identity + the delegation-
+   * driven vehicle lifecycle buckets (`aktywne`, `stojace`, `nieaktywne`,
+   * `doUsuniecia`, `wylaczone`, `potencjalne`). Drivers / trailers / per-vehicle
+   * list endpoints already exist as dedicated routes, so we don't duplicate
+   * them here.
    *
    * Role gating:
    *  - admin    → no scope filter (every non-soft-deleted carrier).
@@ -120,9 +126,11 @@ export class FleetService {
       user.role === 'opiekun' ? { opiekunId: user.sub } : {},
     );
     const readinessById = this._computeReadinessBatch(rows);
-    const now = Date.now();
+    // ONE batched delegation-status lookup across every vehicle of every carrier
+    // in scope → the per-vehicle lifecycle status (no N+1).
+    const lifecycle = await this._lifecycleBatch(rows.flatMap((r) => r.vehicles));
     const carriers = rows.map((r) =>
-      this._mapCarrierStats(r, now, readinessById.get(r.id)),
+      this._mapCarrierStats(r, lifecycle, readinessById.get(r.id)),
     );
     return {
       carriers,
@@ -163,10 +171,10 @@ export class FleetService {
 
   private _mapCarrierStats(
     row: OpiekunAggregateCarrierRow,
-    nowMs: number,
+    lifecycle: Map<string, VehicleLifecycleInfo>,
     readiness: CarrierReadiness | undefined,
   ): OpiekunCarrierStats {
-    const vehicles = this._classifyVehicles(row, nowMs);
+    const vehicles = this._classifyVehicles(row, lifecycle);
     return {
       carrierId: row.id,
       login: row.login,
@@ -186,64 +194,111 @@ export class FleetService {
   }
 
   /**
-   * Four-bucket classification per `Code.gs:2825-2865`:
-   *   - `nieaktywne`  — `Vehicle.active=false`
-   *   - `jezdzace`    — `active=true` AND (no `lastDroveAt` OR within 7d)
-   *   - `stojace`     — `active=true` AND `lastDroveAt` older than 7d
-   *   - `potencjalne` — `max(0, numberOfVehicle ?? 0 − total)`. KREPTD
-   *                     headroom; reflects the legacy "potencjalne auta z
-   *                     KREPTD" calculation at line 2865.
-   *   - `total`       — `jezdzace + stojace + nieaktywne`.
+   * Delegation-driven lifecycle classification (Vehicle-status rework). Each
+   * LIVE vehicle of the carrier is bucketed by its `computeVehicleLifecycle`
+   * status (resolved via the batched `lifecycle` map):
+   *   - `aktywne`     — active AND a non-terminal delegation exists.
+   *   - `stojace`     — active, no active delegation, idle 0–14 calendar days.
+   *   - `nieaktywne`  — …idle 15–28 calendar days.
+   *   - `doUsuniecia` — …idle ≥29 calendar days.
+   *   - `wylaczone`   — `Vehicle.active=false` (manual deactivation).
+   *   - `potencjalne` — `max(0, numberOfVehicle ?? 0 − total)` (KREPTD
+   *                     headroom; unchanged).
+   *   - `total`       — sum of the five lifecycle buckets (every registered,
+   *                     non-soft-deleted vehicle).
    */
   private _classifyVehicles(
     row: OpiekunAggregateCarrierRow,
-    nowMs: number,
+    lifecycle: Map<string, VehicleLifecycleInfo>,
   ): OpiekunCarrierVehicleStats {
-    let jezdzace = 0;
+    let aktywne = 0;
     let stojace = 0;
     let nieaktywne = 0;
+    let doUsuniecia = 0;
+    let wylaczone = 0;
     for (const v of row.vehicles) {
-      if (!v.active) {
-        nieaktywne += 1;
-        continue;
-      }
-      // No data → assume driving (mirrors legacy default at line 2839).
-      if (!v.lastDroveAt) {
-        jezdzace += 1;
-        continue;
-      }
-      const diffMs = nowMs - v.lastDroveAt.getTime();
-      if (Number.isFinite(diffMs) && diffMs > DRIVING_RECENCY_MS) {
-        stojace += 1;
-      } else {
-        jezdzace += 1;
+      // The vehicle id is always present in the batch (the lookup keys every
+      // requested id); the `?? stojaca` is a defensive default that never fires.
+      const status = lifecycle.get(v.id)?.status ?? 'stojaca';
+      switch (status) {
+        case 'aktywna':
+          aktywne += 1;
+          break;
+        case 'nieaktywna':
+          nieaktywne += 1;
+          break;
+        case 'do_usuniecia':
+          doUsuniecia += 1;
+          break;
+        case 'wylaczona':
+          wylaczone += 1;
+          break;
+        case 'stojaca':
+        default:
+          stojace += 1;
+          break;
       }
     }
-    const total = jezdzace + stojace + nieaktywne;
+    const total = aktywne + stojace + nieaktywne + doUsuniecia + wylaczone;
     const kreptd = row.numberOfVehicle ?? 0;
     const potencjalne = Math.max(0, kreptd - total);
-    return { jezdzace, stojace, nieaktywne, potencjalne, total };
+    return {
+      aktywne,
+      stojace,
+      nieaktywne,
+      doUsuniecia,
+      wylaczone,
+      potencjalne,
+      total,
+    };
   }
 
   private _buildTotals(rows: OpiekunCarrierStats[]) {
     const zero: OpiekunCarrierVehicleStats = {
-      jezdzace: 0,
+      aktywne: 0,
       stojace: 0,
       nieaktywne: 0,
+      doUsuniecia: 0,
+      wylaczone: 0,
       potencjalne: 0,
       total: 0,
     };
     const vehicles = rows.reduce<OpiekunCarrierVehicleStats>(
       (acc, r) => ({
-        jezdzace: acc.jezdzace + r.vehicles.jezdzace,
+        aktywne: acc.aktywne + r.vehicles.aktywne,
         stojace: acc.stojace + r.vehicles.stojace,
         nieaktywne: acc.nieaktywne + r.vehicles.nieaktywne,
+        doUsuniecia: acc.doUsuniecia + r.vehicles.doUsuniecia,
+        wylaczone: acc.wylaczone + r.vehicles.wylaczone,
         potencjalne: acc.potencjalne + r.vehicles.potencjalne,
         total: acc.total + r.vehicles.total,
       }),
       zero,
     );
     return { liczbaPrzewoznikow: rows.length, vehicles };
+  }
+
+  /**
+   * Batched delegation-status → per-vehicle lifecycle info for any set of
+   * vehicle-like rows (full `VehicleRow` from `vehicles.list` OR the slim
+   * `{ id, active, createdAt }` shape from the opiekun aggregate). ONE query for
+   * the whole set — the single seam every fleet panel routes through so the
+   * classification never drifts between them.
+   */
+  private async _lifecycleBatch(
+    rows: Array<{ id: string; active: boolean; createdAt: Date }>,
+  ): Promise<Map<string, VehicleLifecycleInfo>> {
+    const today = startOfBusinessTodayUtc();
+    const out = new Map<string, VehicleLifecycleInfo>();
+    if (rows.length === 0) return out;
+    const statuses = await this.delegationStatus.getByVehicleIds(
+      rows.map((r) => r.id),
+    );
+    for (const r of rows) {
+      const ds = statuses.get(r.id) ?? EMPTY_DELEGATION_STATUS;
+      out.set(r.id, computeVehicleLifecycle(r, ds, today));
+    }
+    return out;
   }
 
   // ── Phase 6.1 — Planista read-only fleet ─────────────────
@@ -263,11 +318,11 @@ export class FleetService {
    * Read-only by contract — the planista mutates nothing (docs/03-roles.md
    * #planista). The slim list shapes match `getMyFleet` / `getOpiekunFleet`.
    *
-   * Phase 6.4 — the planista panel now also surfaces a KPI strip + an
-   * idle-vehicle highlight list, computed over the plannerId-scoped fleet with
-   * the SAME `_buildDispatcherStats` helper the dyspozytor uses (identical
-   * 7-day classification / `DRIVING_RECENCY_DAYS` cut-off), so the two panels
-   * stay byte-identical. `stats`/`stojaceList` reuse the dyspozytor shapes.
+   * Phase 6.4 — the planista panel now also surfaces a KPI strip + a
+   * needs-attention highlight list, computed over the plannerId-scoped fleet
+   * with the SAME `_buildDispatcherStats` helper the dyspozytor uses (identical
+   * delegation-driven lifecycle classification), so the two panels stay
+   * byte-identical. `stats`/`stojaceList` reuse the dyspozytor shapes.
    */
   async getPlanistaFleet(user: AuthUser): Promise<PlanistaFleetResponse> {
     this._assertRole(user, 'planista', 'Brak uprawnień (wymaga konta planisty)');
@@ -280,14 +335,15 @@ export class FleetService {
     const { drivers, trailers } = await this._loadCarrierDriversTrailers(
       carrierIds,
     );
+    const lifecycle = await this._lifecycleBatch(vehicleRows);
     const { stats, stojaceList } = this._buildDispatcherStats(
       vehicleRows,
       drivers.length,
       trailers.length,
-      Date.now(),
+      lifecycle,
     );
     return {
-      vehicles: vehicleRows.map(toVehicleListItem),
+      vehicles: vehicleRows.map((v) => toVehicleListItem(v, lifecycle.get(v.id))),
       drivers,
       trailers,
       stats,
@@ -306,11 +362,12 @@ export class FleetService {
    *     with NO team gets an EMPTY fleet (sentinel → early return below), never
    *     "all" — explicit per the locked decision.
    *  2. Distinct `carrierIds` → drivers + trailers (read-only).
-   *  3. `stats` from the SAME 7-day classification opiekun uses
-   *     (`_buildDispatcherStats` reuses the shared `DRIVING_RECENCY_DAYS`
-   *     cut-off so "stojące" stays identical across opiekun + dyspozytor +
-   *     legacy).
-   *  4. `stojaceList` — one row per active vehicle idle > 7 days.
+   *  3. `stats` from the SAME delegation-driven lifecycle classification the
+   *     opiekun dashboard uses (`_buildDispatcherStats` +
+   *     `computeVehicleLifecycle`), so the buckets stay identical across
+   *     opiekun + dyspozytor + planista.
+   *  4. `stojaceList` — one row per vehicle needing attention (`nieaktywna` OR
+   *     `do_usuniecia`).
    */
   async getDyspozytorFleet(user: AuthUser): Promise<DyspozytorFleetResponse> {
     this._assertRole(
@@ -333,15 +390,15 @@ export class FleetService {
     const { drivers, trailers } = await this._loadCarrierDriversTrailers(
       carrierIds,
     );
-    const nowMs = Date.now();
+    const lifecycle = await this._lifecycleBatch(vehicleRows);
     const { stats, stojaceList } = this._buildDispatcherStats(
       vehicleRows,
       drivers.length,
       trailers.length,
-      nowMs,
+      lifecycle,
     );
     return {
-      vehicles: vehicleRows.map(toVehicleListItem),
+      vehicles: vehicleRows.map((v) => toVehicleListItem(v, lifecycle.get(v.id))),
       drivers,
       trailers,
       stats,
@@ -390,63 +447,74 @@ export class FleetService {
   }
 
   /**
-   * Dyspozytor KPI stats + idle-vehicle list. Bucket rules (legacy
-   * `Code.gs:3729-3766`):
-   *   - `autaNieaktywne` — `active=false`.
-   *   - `autaAktywne`    — `active=true`.
-   *   - `autaJezdzace`   — active AND (no `lastDroveAt` OR within 7 days).
-   *   - `autaStojace7dni`— active AND `lastDroveAt` older than 7 days.
-   * Invariants: `jezdzace + stojace7dni === aktywne`,
-   * `aktywne + nieaktywne === liczbaAut`.
+   * Dyspozytor/planista KPI stats + "needs attention" list, delegation-driven
+   * lifecycle model. Each vehicle is bucketed by its precomputed
+   * `computeVehicleLifecycle` status (from `lifecycle`):
+   *   - `wylaczone`   — `Vehicle.active=false`.
+   *   - `aktywne`     — active AND a non-terminal delegation exists.
+   *   - `stojace`     — active, no active delegation, idle 0–14 calendar days.
+   *   - `nieaktywne`  — …idle 15–28 calendar days.
+   *   - `doUsuniecia` — …idle ≥29 calendar days.
+   * Invariant: `aktywne + stojace + nieaktywne + doUsuniecia + wylaczone ===
+   * liczbaAut`.
    *
-   * Each idle vehicle also lands in `stojaceList` with `daysIdle` =
-   * floor(days since `lastDroveAt`). `plannerName` comes from the loaded
-   * planner relation (else null); `carrierLogin` from the carrier relation.
+   * `stojaceList` (repurposed) collects the vehicles that need attention —
+   * those in `nieaktywna` OR `do_usuniecia` — each with its `daysSinceReturn`
+   * and `status`. `plannerName` comes from the loaded planner relation (else
+   * null); `carrierLogin` from the carrier relation.
    */
   private _buildDispatcherStats(
     vehicles: VehicleRow[],
     driverCount: number,
     trailerCount: number,
-    nowMs: number,
+    lifecycle: Map<string, VehicleLifecycleInfo>,
   ): { stats: DyspozytorFleetStats; stojaceList: DyspozytorStojacyItem[] } {
-    let autaAktywne = 0;
-    let autaJezdzace = 0;
-    let autaStojace7dni = 0;
-    let autaNieaktywne = 0;
+    let aktywne = 0;
+    let stojace = 0;
+    let nieaktywne = 0;
+    let doUsuniecia = 0;
+    let wylaczone = 0;
     const stojaceList: DyspozytorStojacyItem[] = [];
 
     for (const v of vehicles) {
-      if (!v.active) {
-        autaNieaktywne += 1;
-        continue;
-      }
-      autaAktywne += 1;
-      // No data → assume driving (legacy default at `Code.gs:3736`).
-      if (!v.lastDroveAt) {
-        autaJezdzace += 1;
-        continue;
-      }
-      const diffMs = nowMs - v.lastDroveAt.getTime();
-      if (Number.isFinite(diffMs) && diffMs > DRIVING_RECENCY_MS) {
-        autaStojace7dni += 1;
-        stojaceList.push({
-          plateNumber: v.plateNumber,
-          carrierLogin: v.carrier?.login ?? '',
-          lastDroveAt: v.lastDroveAt.toISOString(),
-          daysIdle: Math.floor(diffMs / (24 * 60 * 60 * 1000)),
-          plannerName: v.planner?.name ?? null,
-        });
-      } else {
-        autaJezdzace += 1;
+      // Always present (the batch keys every requested id); defensive default.
+      const info = lifecycle.get(v.id) ?? {
+        status: 'stojaca' as const,
+        daysSinceReturn: 0,
+      };
+      switch (info.status) {
+        case 'aktywna':
+          aktywne += 1;
+          break;
+        case 'wylaczona':
+          wylaczone += 1;
+          break;
+        case 'nieaktywna':
+        case 'do_usuniecia':
+          if (info.status === 'nieaktywna') nieaktywne += 1;
+          else doUsuniecia += 1;
+          stojaceList.push({
+            plateNumber: v.plateNumber,
+            carrierLogin: v.carrier?.login ?? '',
+            status: info.status,
+            daysSinceReturn: info.daysSinceReturn ?? 0,
+            plannerName: v.planner?.name ?? null,
+          });
+          break;
+        case 'stojaca':
+        default:
+          stojace += 1;
+          break;
       }
     }
 
     const stats: DyspozytorFleetStats = {
       liczbaAut: vehicles.length,
-      autaAktywne,
-      autaJezdzace,
-      autaStojace7dni,
-      autaNieaktywne,
+      aktywne,
+      stojace,
+      nieaktywne,
+      doUsuniecia,
+      wylaczone,
       liczbaKierowcow: driverCount,
       liczbaNaczep: trailerCount,
     };
@@ -463,19 +531,23 @@ export class FleetService {
       vehicles: [],
       drivers: [],
       trailers: [],
-      stats: {
-        liczbaAut: 0,
-        autaAktywne: 0,
-        autaJezdzace: 0,
-        autaStojace7dni: 0,
-        autaNieaktywne: 0,
-        liczbaKierowcow: 0,
-        liczbaNaczep: 0,
-      },
+      stats: EMPTY_DISPATCHER_STATS,
       stojaceList: [],
     };
   }
 }
+
+/** Zeroed dyspozytor/planista KPI strip (empty fleet). */
+const EMPTY_DISPATCHER_STATS: DyspozytorFleetStats = {
+  liczbaAut: 0,
+  aktywne: 0,
+  stojace: 0,
+  nieaktywne: 0,
+  doUsuniecia: 0,
+  wylaczone: 0,
+  liczbaKierowcow: 0,
+  liczbaNaczep: 0,
+};
 
 function toDateString(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -494,8 +566,18 @@ function distinctCarrierIds(vehicles: VehicleRow[]): string[] {
  * fields — pricing must not reach planista/dyspozytor. `gpsMobilePhone` keeps
  * its exact (misnamed) name (tracker device ID — quirk #2). `lastDroveAt` is
  * serialised to an ISO datetime (display-only — quirk #11).
+ *
+ * `lifecycle` carries the DERIVED `lifecycleStatus`/`daysSinceReturn` per-row
+ * badge (computed by the caller's `_lifecycleBatch`). When omitted (defensive)
+ * it falls back to the no-delegation classification from `active` + `createdAt`.
  */
-function toVehicleListItem(v: VehicleRow): VehicleListItem {
+function toVehicleListItem(
+  v: VehicleRow,
+  lifecycle?: VehicleLifecycleInfo,
+): VehicleListItem {
+  const lc =
+    lifecycle ??
+    computeVehicleLifecycle(v, EMPTY_DELEGATION_STATUS, startOfBusinessTodayUtc());
   return {
     id: v.id,
     plateNumber: v.plateNumber,
@@ -519,6 +601,8 @@ function toVehicleListItem(v: VehicleRow): VehicleListItem {
     // Derived flags via the SHARED helper (same source as VehiclesService.toDto).
     ...computeVehicleDerivedFlags(v),
     lastDroveAt: v.lastDroveAt ? v.lastDroveAt.toISOString() : null,
+    lifecycleStatus: lc.status,
+    daysSinceReturn: lc.daysSinceReturn,
     notes: v.notes,
     // Phase 11 — dispatch Team with roster (additive, non-sensitive — no rates).
     dispatchTeam: v.dispatchTeam,

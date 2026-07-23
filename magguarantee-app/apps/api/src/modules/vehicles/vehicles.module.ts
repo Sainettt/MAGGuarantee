@@ -8,6 +8,7 @@ import { UsersModule } from '../users/users.module';
 import { VehicleAttachmentsRepository } from './vehicle-attachments.repository';
 import { VehicleDailyKmRepository } from './vehicle-daily-km.repository';
 import { VehicleDailyKmService } from './vehicle-daily-km.service';
+import { VehicleDelegationStatusRepository } from './vehicle-delegation-status.repository';
 import { VehiclesController } from './vehicles.controller';
 import { VehiclesRepository } from './vehicles.repository';
 import { VehiclesService } from './vehicles.service';
@@ -29,7 +30,13 @@ import { VehiclesService } from './vehicles.service';
     VehicleAttachmentsRepository,
     VehicleDailyKmService,
     VehicleDailyKmRepository,
+    VehicleDelegationStatusRepository,
   ],
-  exports: [VehiclesService, VehiclesRepository, VehicleDailyKmRepository],
+  exports: [
+    VehiclesService,
+    VehiclesRepository,
+    VehicleDailyKmRepository,
+    VehicleDelegationStatusRepository,
+  ],
 })
 export class VehiclesModule {}

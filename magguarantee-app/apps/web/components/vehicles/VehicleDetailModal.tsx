@@ -32,6 +32,7 @@ import { useMemo, type ReactNode } from 'react';
 import type { VehicleAttachmentDto, VehicleDto } from '@magguarantee/shared';
 import { toast } from 'sonner';
 
+import { VehicleStatusBadge } from '@/components/carrier/VehicleStatusBadge';
 import { TeamFieldValue } from '@/components/teams/TeamFieldValue';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -95,11 +96,14 @@ export function VehicleDetailModal({
   const no = tCommon('no');
   const bool = (v: boolean | null | undefined) => boolValue(v, yes, no);
 
-  // ── Header badge row — only the status badge (no onboarding chips) ──
-  const badges: ReactNode = vehicle.active ? (
-    <Badge variant="success">{tCommon('active')}</Badge>
-  ) : (
-    <Badge variant="muted">{tCommon('inactive')}</Badge>
+  // ── Header badge row — the delegation-driven lifecycle status (§6.3.6),
+  //    replacing the retired active/inactive flag (`active=false` surfaces as
+  //    «Wyłączona»). No onboarding chips. ──
+  const badges: ReactNode = (
+    <VehicleStatusBadge
+      status={vehicle.lifecycleStatus}
+      daysSinceReturn={vehicle.daysSinceReturn}
+    />
   );
 
   // ── Subtitle — carrier name (or login). Dropped when `hideCarrier` (a

@@ -506,6 +506,27 @@ model Vehicle {
   // VehicleDailyKm drove-row (Phase 7 #3). Never edited by hand.
   lastDroveAt    DateTime?
 
+  // ── Admin-removal alert (delegation-driven idle escalation) ──────────────
+  // Operational status is DERIVED at read time from delegations, NOT stored:
+  //   aktywna  = has a non-terminal delegation (zgloszony/gotowy/w_trasie);
+  //   otherwise anchor = max(Delegation.actualReturnAt over zjechal, non-deleted)
+  //   ?? createdAt, and daysSinceReturn (CALENDAR days from anchor to today)
+  //   buckets into stojąca 0–14 / nieaktywna 15–28 / do_usunięcia ≥29.
+  // These two columns are the ONLY persisted state for that flow — they dedup
+  // the daily "≥29 days, please remove this vehicle" email sent to all active
+  // admins (for ALL vehicles, not only guaranteed ones).
+  //
+  // Timestamp of the LAST removal email sent for this vehicle. NULL = never
+  // notified / reset. Cron sends when daysSinceReturn >= 29 AND
+  // (adminRemovalNotifiedAt IS NULL OR now - adminRemovalNotifiedAt >= 3 days),
+  // then stamps this = now. Cleared back to NULL once the vehicle leaves the
+  // ≥29 state (a new delegation, etc.), so a later relapse re-triggers cleanly.
+  adminRemovalNotifiedAt  DateTime?
+  // Running total of removal emails ever sent for this vehicle
+  // (observability / audit). Incremented each time the cron sends; NOT reset
+  // when adminRemovalNotifiedAt is cleared — it is a lifetime counter.
+  adminRemovalNotifyCount Int       @default(0)
+
   delegations       Delegation[]
   claims            Claim[]
   attachments       VehicleAttachment[]

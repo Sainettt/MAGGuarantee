@@ -8,13 +8,44 @@ import {
 } from '../carriers/carriers.repository';
 import { DriversRepository } from '../drivers/drivers.repository';
 import { TrailersRepository } from '../trailers/trailers.repository';
+import {
+  VehicleDelegationStatusRepository,
+  type VehicleDelegationStatus,
+} from '../vehicles/vehicle-delegation-status.repository';
 import { VehiclesRepository } from '../vehicles/vehicles.repository';
 import { FleetService } from './fleet.service';
 
-// Anchor "now" — vehicles classified as `jezdzace` / `stojace` use the
-// 7-day window past `lastDroveAt` measured from this timestamp.
+// Anchor "now" — the delegation-driven lifecycle classifier counts CALENDAR
+// days (Europe/Warsaw) from the idle anchor to this Warsaw "today"
+// (2026-05-27). Buckets are driven by a controlled delegation-status stub and
+// per-vehicle `createdAt` (fallback anchor for a never-returned truck).
 const NOW = new Date('2026-05-27T12:00:00.000Z');
-const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** `YYYY-MM-DD` → UTC-midnight Date (date-only convention for `lastReturnAt`). */
+function U(s: string): Date {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(Date.UTC(y as number, (m as number) - 1, d as number));
+}
+
+/** Zeroed per-carrier vehicle stats (new delegation-driven shape). */
+const ZERO_VEHICLE_STATS = {
+  aktywne: 0,
+  stojace: 0,
+  nieaktywne: 0,
+  doUsuniecia: 0,
+  wylaczone: 0,
+  potencjalne: 0,
+  total: 0,
+};
+
+/** One aggregate-row vehicle entry. `createdAt` defaults far in the past. */
+function veh(
+  id: string,
+  active: boolean,
+  createdAt: Date = U('2026-01-01'),
+): { id: string; active: boolean; createdAt: Date } {
+  return { id, active, createdAt };
+}
 
 function makeAuth(role: AuthUser['role'], sub = 'op-self'): AuthUser {
   return {
@@ -91,9 +122,33 @@ function noopTrailersRepo(): TrailersRepository {
   return {} as unknown as TrailersRepository;
 }
 
+/**
+ * Delegation-status stub — returns `{ hasActiveDelegation, lastReturnAt }` per
+ * vehicle id from a per-id config (default: no active delegation, never
+ * returned → anchors on `createdAt`).
+ */
+function stubDelegationStatusRepo(
+  config: Record<string, Partial<VehicleDelegationStatus>> = {},
+): VehicleDelegationStatusRepository {
+  return {
+    getByVehicleIds: jest.fn(async (ids: string[]) => {
+      const map = new Map<string, VehicleDelegationStatus>();
+      for (const id of ids) {
+        const c = config[id];
+        map.set(id, {
+          hasActiveDelegation: c?.hasActiveDelegation ?? false,
+          lastReturnAt: c?.lastReturnAt ?? null,
+        });
+      }
+      return map;
+    }),
+  } as unknown as VehicleDelegationStatusRepository;
+}
+
 function newSvc(
   seed: OpiekunAggregateCarrierRow[] = [],
   captured?: { value?: { opiekunId?: string } },
+  delegation: Record<string, Partial<VehicleDelegationStatus>> = {},
 ) {
   const carriersRepo = makeCarriersRepo(seed, captured);
   const vehiclesRepo = noopVehiclesRepo();
@@ -107,6 +162,7 @@ function newSvc(
     noopDriversRepo(),
     noopTrailersRepo(),
     readiness,
+    stubDelegationStatusRepo(delegation),
   );
 }
 
@@ -166,81 +222,89 @@ describe('FleetService.getOpiekunFleet — role gating', () => {
     expect(out.carriers).toEqual([]);
     expect(out.totals).toEqual({
       liczbaPrzewoznikow: 0,
-      vehicles: {
-        jezdzace: 0,
-        stojace: 0,
-        nieaktywne: 0,
-        potencjalne: 0,
-        total: 0,
-      },
+      vehicles: ZERO_VEHICLE_STATS,
     });
   });
 });
 
-describe('FleetService.getOpiekunFleet — vehicle classification', () => {
-  it('classifies every bucket correctly and total = sum', async () => {
+describe('FleetService.getOpiekunFleet — vehicle classification (delegation-driven)', () => {
+  it('classifies every lifecycle bucket correctly and total = sum', async () => {
     const row = ownedBy('op-self', {
       id: 'c-mix',
       numberOfVehicle: 10,
       vehicles: [
-        // jezdzace: active + recent (1 day ago)
-        { id: 'v-r1', active: true, lastDroveAt: new Date(NOW.getTime() - 1 * DAY_MS) },
-        // jezdzace: active + null lastDroveAt (legacy "no data = driving")
-        { id: 'v-r2', active: true, lastDroveAt: null },
-        // stojace: active but 10 days idle
-        { id: 'v-s1', active: true, lastDroveAt: new Date(NOW.getTime() - 10 * DAY_MS) },
-        // stojace: active but a year idle
-        { id: 'v-s2', active: true, lastDroveAt: new Date(NOW.getTime() - 365 * DAY_MS) },
-        // nieaktywne
-        { id: 'v-n1', active: false, lastDroveAt: new Date(NOW.getTime() - 1 * DAY_MS) },
+        veh('v-a1', true), // aktywne (active delegation)
+        veh('v-s1', true), // stojace (returned 10 days ago)
+        veh('v-i1', true), // nieaktywne (returned 20 days ago)
+        veh('v-d1', true), // do_usuniecia (returned 40 days ago)
+        veh('v-w1', false), // wylaczone
       ],
     });
-    const svc = newSvc([row]);
+    const svc = newSvc([row], undefined, {
+      'v-a1': { hasActiveDelegation: true },
+      'v-s1': { lastReturnAt: U('2026-05-17') }, // 10 days
+      'v-i1': { lastReturnAt: U('2026-05-07') }, // 20 days
+      'v-d1': { lastReturnAt: U('2026-04-17') }, // 40 days
+    });
     const out = await svc.getOpiekunFleet(makeAuth('opiekun', 'op-self'));
     const c = out.carriers[0];
     expect(c).toBeDefined();
     expect(c?.vehicles).toEqual({
-      jezdzace: 2,
-      stojace: 2,
+      aktywne: 1,
+      stojace: 1,
       nieaktywne: 1,
+      doUsuniecia: 1,
+      wylaczone: 1,
       // potencjalne = max(0, 10 KREPTD - 5 total) = 5
       potencjalne: 5,
       total: 5,
     });
-    // The total bucket must equal the sum of jezdzace+stojace+nieaktywne.
+    // total must equal the sum of the five lifecycle buckets.
     if (c) {
       expect(c.vehicles.total).toBe(
-        c.vehicles.jezdzace + c.vehicles.stojace + c.vehicles.nieaktywne,
+        c.vehicles.aktywne +
+          c.vehicles.stojace +
+          c.vehicles.nieaktywne +
+          c.vehicles.doUsuniecia +
+          c.vehicles.wylaczone,
       );
     }
   });
 
-  it('treats a lastDroveAt exactly at the 7-day boundary as jezdzace (legacy: strict > 7d → stojace)', async () => {
-    const boundary = new Date(NOW.getTime() - 7 * DAY_MS);
+  it('the 14→15-day boundary flips stojace→nieaktywne', async () => {
     const row = ownedBy('op-self', {
-      vehicles: [
-        { id: 'v-edge', active: true, lastDroveAt: boundary },
-      ],
+      vehicles: [veh('v-14', true), veh('v-15', true)],
+    });
+    const svc = newSvc([row], undefined, {
+      'v-14': { lastReturnAt: U('2026-05-13') }, // 14 days → stojace
+      'v-15': { lastReturnAt: U('2026-05-12') }, // 15 days → nieaktywne
+    });
+    const out = await svc.getOpiekunFleet(makeAuth('opiekun', 'op-self'));
+    expect(out.carriers[0]?.vehicles).toMatchObject({
+      stojace: 1,
+      nieaktywne: 1,
+      doUsuniecia: 0,
+    });
+  });
+
+  it('a never-returned active vehicle anchors on createdAt (recent → stojace)', async () => {
+    const row = ownedBy('op-self', {
+      vehicles: [veh('v-new', true, U('2026-05-20'))], // created 7 days ago
     });
     const svc = newSvc([row]);
     const out = await svc.getOpiekunFleet(makeAuth('opiekun', 'op-self'));
-    expect(out.carriers[0]?.vehicles).toEqual({
-      jezdzace: 1,
-      stojace: 0,
-      nieaktywne: 0,
-      potencjalne: 0,
-      total: 1,
-    });
+    expect(out.carriers[0]?.vehicles.stojace).toBe(1);
+    expect(out.carriers[0]?.vehicles.doUsuniecia).toBe(0);
   });
 
   it('clamps potencjalne at 0 when the carrier registered more vehicles than KREPTD entries', async () => {
     const row = ownedBy('op-self', {
       numberOfVehicle: 2,
       vehicles: [
-        { id: 'v-1', active: true, lastDroveAt: null },
-        { id: 'v-2', active: true, lastDroveAt: null },
-        { id: 'v-3', active: true, lastDroveAt: null },
-        { id: 'v-4', active: false, lastDroveAt: null },
+        veh('v-1', true, U('2026-05-25')),
+        veh('v-2', true, U('2026-05-25')),
+        veh('v-3', true, U('2026-05-25')),
+        veh('v-4', false),
       ],
     });
     const svc = newSvc([row]);
@@ -252,9 +316,7 @@ describe('FleetService.getOpiekunFleet — vehicle classification', () => {
   it('treats missing KREPTD (numberOfVehicle=null) as 0 potencjalne', async () => {
     const row = ownedBy('op-self', {
       numberOfVehicle: null,
-      vehicles: [
-        { id: 'v-1', active: true, lastDroveAt: null },
-      ],
+      vehicles: [veh('v-1', true, U('2026-05-25'))],
     });
     const svc = newSvc([row]);
     const out = await svc.getOpiekunFleet(makeAuth('opiekun', 'op-self'));
@@ -266,25 +328,25 @@ describe('FleetService.getOpiekunFleet — vehicle classification', () => {
       id: 'c-a',
       numberOfVehicle: 3,
       vehicles: [
-        { id: 'v-a1', active: true, lastDroveAt: null }, // jezdzace
-        { id: 'v-a2', active: false, lastDroveAt: null }, // nieaktywne
+        veh('v-a1', true, U('2026-05-25')), // stojace (created 2 days ago)
+        veh('v-a2', false), // wylaczone
       ],
     });
     const b = ownedBy('op-self', {
       id: 'c-b',
       numberOfVehicle: 5,
-      vehicles: [
-        { id: 'v-b1', active: true, lastDroveAt: new Date(NOW.getTime() - 30 * DAY_MS) }, // stojace
-      ],
+      vehicles: [veh('v-b1', true)], // do_usuniecia (created 2026-01-01)
     });
     const svc = newSvc([a, b]);
     const out = await svc.getOpiekunFleet(makeAuth('opiekun', 'op-self'));
     expect(out.totals).toEqual({
       liczbaPrzewoznikow: 2,
       vehicles: {
-        jezdzace: 1,
+        aktywne: 0,
         stojace: 1,
-        nieaktywne: 1,
+        nieaktywne: 0,
+        doUsuniecia: 1,
+        wylaczone: 1,
         // a: max(0, 3-2)=1; b: max(0, 5-1)=4 ⇒ 5
         potencjalne: 5,
         total: 3,
@@ -314,9 +376,11 @@ describe('FleetService.getOpiekunFleet — vehicle classification', () => {
       aktywny: false,
       liczbaWypisow: 4,
       vehicles: {
-        jezdzace: 0,
+        aktywne: 0,
         stojace: 0,
         nieaktywne: 0,
+        doUsuniecia: 0,
+        wylaczone: 0,
         potencjalne: 4,
         total: 0,
       },
@@ -336,7 +400,7 @@ describe('FleetService.getOpiekunFleet — attentionReasons (carrier readiness)'
   ): OpiekunAggregateCarrierRow {
     return ownedBy('op-self', {
       counts: { vehicles: 2, drivers: 1, trailers: 1 },
-      vehicles: [{ id: 'v', active: true, lastDroveAt: null }],
+      vehicles: [veh('v', true)],
       ...overrides,
     });
   }

@@ -18,15 +18,15 @@
 // computed CLIENT-SIDE — no API change, no new endpoint.
 
 import {
-  AlertTriangle,
-  Car,
+  CircleParking,
   Container,
   Mail,
   PauseCircle,
   SearchX,
+  Trash2,
   Truck,
   UserRound,
-  User,
+  Users,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useSearchParams } from 'next/navigation';
@@ -39,6 +39,7 @@ import type {
 } from '@magguarantee/shared';
 
 import { GuaranteeCountdownBadge } from '@/components/carrier/GuaranteeCountdownBadge';
+import { VehicleStatusBadge } from '@/components/carrier/VehicleStatusBadge';
 import { DriverDetailModal } from '@/components/drivers/DriverDetailModal';
 import { PermitCell } from '@/components/fleet/PermitCell';
 import { TrailerDetailModal } from '@/components/trailers/TrailerDetailModal';
@@ -58,9 +59,6 @@ import { useTrailers } from '@/lib/hooks/useTrailers';
 import { useTrailerTypes } from '@/lib/hooks/useTrailerTypes';
 import { useVehicles } from '@/lib/hooks/useVehicles';
 
-/** 7 days in milliseconds — the single «stojące > 7 dni» cutoff. */
-const IDLE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
-
 /** Valid in-page tab ids; also the values honoured via `?tab=`. */
 type FleetTab = 'vehicles' | 'drivers' | 'trailers';
 const TAB_VALUES: readonly FleetTab[] = ['vehicles', 'drivers', 'trailers'];
@@ -68,7 +66,7 @@ const TAB_VALUES: readonly FleetTab[] = ['vehicles', 'drivers', 'trailers'];
 export function CarrierFleetPanel() {
   const t = useTranslations('carrier.fleet');
   const tKpi = useTranslations('carrier.fleet.kpi');
-  const tIdle = useTranslations('carrier.fleet.idle');
+  const tVehStatus = useTranslations('vehicleStatus');
   const tTabs = useTranslations('carrier.fleetTabs');
   const tVehicles = useTranslations('carrier.fleet.vehicles');
   const tVehCols = useTranslations('carrier.fleet.vehicles.columns');
@@ -120,30 +118,48 @@ export function CarrierFleetPanel() {
     [trailersAllQ.data],
   );
 
-  // ── KPI buckets (client-computed). «stojące > 7 dni» rule mirrors planista
-  //    / Code.gs: a vehicle with NO lastDroveAt is assumed to be driving. A
-  //    single cutoff is computed once. Only ACTIVE vehicles can be idle. ─────
+  // ── KPI buckets (client-computed) — the delegation-driven 5-state ramp
+  //    (§6.3.6). Each vehicle already carries a server-computed
+  //    `lifecycleStatus` + `daysSinceReturn`, so the carrier strip counts by
+  //    status (no `lastDroveAt` arithmetic). AUTA = the ENABLED fleet (the four
+  //    idle-clock buckets); `wylaczona` is excluded. The needs-attention set is
+  //    split into «Do usunięcia» (≥29 dni) + «Długo stojące» (15–28 dni). ─────
   const kpi = useMemo(() => {
-    const cutoff = Date.now() - IDLE_THRESHOLD_MS;
-    let driving = 0;
-    let idle = 0;
-    const idleList: { plateNumber: string; daysIdle: number }[] = [];
+    let aktywne = 0;
+    let stojace = 0;
+    let nieaktywne = 0;
+    let doUsuniecia = 0;
+    const removeList: { plateNumber: string; days: number }[] = [];
+    const longIdleList: { plateNumber: string; days: number }[] = [];
     for (const v of vehicles) {
-      if (!v.active) continue;
-      const last = v.lastDroveAt ? new Date(v.lastDroveAt).getTime() : null;
-      if (last !== null && last < cutoff) {
-        idle += 1;
-        idleList.push({
-          plateNumber: v.plateNumber,
-          daysIdle: Math.floor((Date.now() - last) / (24 * 60 * 60 * 1000)),
-        });
-      } else {
-        // No lastDroveAt OR within 7 days ⇒ assumed driving.
-        driving += 1;
+      switch (v.lifecycleStatus) {
+        case 'aktywna':
+          aktywne += 1;
+          break;
+        case 'stojaca':
+          stojace += 1;
+          break;
+        case 'nieaktywna':
+          nieaktywne += 1;
+          longIdleList.push({
+            plateNumber: v.plateNumber,
+            days: v.daysSinceReturn ?? 0,
+          });
+          break;
+        case 'do_usuniecia':
+          doUsuniecia += 1;
+          removeList.push({
+            plateNumber: v.plateNumber,
+            days: v.daysSinceReturn ?? 0,
+          });
+          break;
+        // `wylaczona` — excluded from the enabled counts + idle clock.
       }
     }
-    idleList.sort((a, b) => b.daysIdle - a.daysIdle);
-    return { driving, idle, idleList };
+    removeList.sort((a, b) => b.days - a.days);
+    longIdleList.sort((a, b) => b.days - a.days);
+    const total = aktywne + stojace + nieaktywne + doUsuniecia;
+    return { total, aktywne, stojace, nieaktywne, doUsuniecia, removeList, longIdleList };
   }, [vehicles]);
 
   // ── Per-tab filter controls (preserve the legacy per-entity search/filter) ─
@@ -253,14 +269,18 @@ export function CarrierFleetPanel() {
         ),
       },
       {
-        id: 'active',
+        // Vehicle-status rework §6.3.6 — delegation-driven lifecycle badge
+        // (the old active/inactive flag is retired; `active=false` surfaces as
+        // «Wyłączona»). Numer boczny stays hidden — the badge exposes no
+        // internal designation.
+        id: 'status',
         header: tVehCols('status'),
-        cell: (row) =>
-          row.active ? (
-            <Badge variant="success">{tCommon('active')}</Badge>
-          ) : (
-            <Badge variant="muted">{tCommon('inactive')}</Badge>
-          ),
+        cell: (row) => (
+          <VehicleStatusBadge
+            status={row.lifecycleStatus}
+            daysSinceReturn={row.daysSinceReturn}
+          />
+        ),
       },
       {
         // Phase 12 — GWARANCJA watchdog cell (§12.3). Right-most, grouped with
@@ -283,7 +303,7 @@ export function CarrierFleetPanel() {
         },
       },
     ],
-    [tVehCols, tVeh, tCommon, tGuarantee, guaranteeByVehicle],
+    [tVehCols, tVeh, tGuarantee, guaranteeByVehicle],
   );
 
   const driverColumns = useMemo<DataTableColumn<DriverDto>[]>(
@@ -372,62 +392,92 @@ export function CarrierFleetPanel() {
         </a>
       </div>
 
-      {/* KPI strip — five tiles. Tones per DS §6.3.3: totals neutral, JEŻDŻĄ
-          green, STOJĄ>7DNI orange, KIEROWCY blue. Always rendered so the layout
-          doesn't jump between loading states. */}
+      {/* Inert resource sub-line — kierowcy / naczepy moved OUT of the hero KPI
+          strip (§6.3.6); the strip is now a focused 5-state vehicle ramp. */}
+      <p className="mb-4 flex items-center gap-1.5 text-xs text-text-sub">
+        <Users size={13} aria-hidden />
+        {t('resources', { drivers: drivers.length, trailers: trailers.length })}
+      </p>
+
+      {/* KPI strip — the delegation-driven 5-state vehicle ramp (§6.3.6), 100%
+          client-computed from the full VehicleDto payload the carrier holds.
+          Two neutral tiles (AUTA total + STOJĄCE calm); only problem states pop
+          — DŁUGO STOJĄCE amber, DO USUNIĘCIA red, AKTYWNE green. */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
         <KpiCard
           label={tKpi('vehicles')}
-          value={vehicles.length}
+          value={kpi.total}
           tone="neutral"
           icon={Truck}
           loading={vehiclesQ.isLoading}
         />
         <KpiCard
-          label={tKpi('driving')}
-          value={kpi.driving}
+          label={tVehStatus('aktywna.tile')}
+          value={kpi.aktywne}
           tone="green"
-          icon={Car}
+          icon={Truck}
           loading={vehiclesQ.isLoading}
         />
         <KpiCard
-          label={tKpi('idle')}
-          value={kpi.idle}
+          label={tVehStatus('stojaca.tile')}
+          value={kpi.stojace}
+          tone="neutral"
+          icon={CircleParking}
+          loading={vehiclesQ.isLoading}
+        />
+        <KpiCard
+          label={tVehStatus('nieaktywna.tile')}
+          value={kpi.nieaktywne}
           tone="orange"
           icon={PauseCircle}
           loading={vehiclesQ.isLoading}
         />
         <KpiCard
-          label={tKpi('drivers')}
-          value={drivers.length}
-          tone="blue"
-          icon={User}
-          loading={driversAllQ.isLoading}
-        />
-        <KpiCard
-          label={tKpi('trailers')}
-          value={trailers.length}
-          tone="neutral"
-          icon={Container}
-          loading={trailersAllQ.isLoading}
+          label={tVehStatus('do_usuniecia.tile')}
+          value={kpi.doUsuniecia}
+          tone="red"
+          icon={Trash2}
+          loading={vehiclesQ.isLoading}
         />
       </div>
 
-      {/* «Stojące > 7 dni» warning sub-list — only when count > 0 (DS §6.3.3:
-          warning-toned panel, inert chips, meaning carried by icon + «X dni»). */}
-      {kpi.idleList.length > 0 && (
-        <div className="mb-6 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3">
-          <p className="flex items-center gap-1.5 text-sm font-semibold text-warning">
-            <AlertTriangle size={15} aria-hidden />
-            {tIdle('title')}
+      {/* «Do usunięcia» highlight (§6.3.6) — removal-eligible set (≥29 dni),
+          danger-toned; inert chips, meaning carried by icon + «X dni» text. */}
+      {kpi.removeList.length > 0 && (
+        <div className="mb-6 rounded-lg border border-danger/40 bg-danger/10 px-4 py-3">
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-danger">
+            <Trash2 size={15} aria-hidden />
+            {t('needsAttention.removeTitle')}
           </p>
           <ul className="mt-2 flex flex-wrap gap-1.5">
-            {kpi.idleList.map((v) => (
+            {kpi.removeList.map((v) => (
+              <li key={v.plateNumber}>
+                <span className="inline-flex items-center gap-1 rounded-sm border border-danger/40 bg-card px-2 py-0.5 text-xs font-medium text-text">
+                  <span className="font-mono">{v.plateNumber}</span>
+                  <span className="text-text-sub">
+                    · {t('needsAttention.days', { days: v.days })}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* «Długo stojące» secondary watchlist (§6.3.6) — 15–28 dni, warning. */}
+      {kpi.longIdleList.length > 0 && (
+        <div className="mb-6 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3">
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-warning">
+            <PauseCircle size={15} aria-hidden />
+            {t('needsAttention.longIdleTitle')}
+          </p>
+          <ul className="mt-2 flex flex-wrap gap-1.5">
+            {kpi.longIdleList.map((v) => (
               <li key={v.plateNumber}>
                 <span className="inline-flex items-center gap-1 rounded-sm border border-warning/40 bg-card px-2 py-0.5 text-xs font-medium text-text">
                   <span className="font-mono">{v.plateNumber}</span>
                   <span className="text-text-sub">
-                    · {tIdle('daysIdle', { days: v.daysIdle })}
+                    · {t('needsAttention.days', { days: v.days })}
                   </span>
                 </span>
               </li>

@@ -18,6 +18,7 @@ import type { DelegationAnnouncedProps } from './templates/delegation-announced'
 import type { DelegationReadyProps } from './templates/delegation-ready';
 import type { GuaranteeReminderCarrierProps } from './templates/guarantee-reminder-carrier';
 import type { GuaranteeOpiekunDigestProps } from './templates/guarantee-opiekun-digest';
+import type { VehicleRemovalAdminProps } from './templates/vehicle-removal-admin';
 
 /** BullMQ job name within the `email-send` queue. */
 export const EMAIL_SEND_JOB = 'send' as const;
@@ -123,6 +124,13 @@ export interface GuaranteeOpiekunDigestEmailJob {
   props: GuaranteeOpiekunDigestProps;
 }
 
+/** Vehicle-removal admin digest (vehicle-status rework, Step B — 29-day cron). */
+export interface VehicleRemovalAdminEmailJob {
+  template: 'vehicle-removal-admin';
+  email: string;
+  props: VehicleRemovalAdminProps;
+}
+
 /** Discriminated union of all `email-send` job payloads. */
 export type EmailSendJobData =
   | TwoFactorCodeEmailJob
@@ -139,4 +147,5 @@ export type EmailSendJobData =
   | DelegationAnnouncedEmailJob
   | DelegationReadyEmailJob
   | GuaranteeReminderCarrierEmailJob
-  | GuaranteeOpiekunDigestEmailJob;
+  | GuaranteeOpiekunDigestEmailJob
+  | VehicleRemovalAdminEmailJob;

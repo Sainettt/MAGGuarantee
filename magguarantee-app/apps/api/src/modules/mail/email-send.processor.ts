@@ -76,6 +76,9 @@ export class EmailSendProcessor extends WorkerHost {
       case 'guarantee-opiekun-digest':
         await this.mail.sendGuaranteeOpiekunDigest(data.email, data.props);
         return;
+      case 'vehicle-removal-admin':
+        await this.mail.sendVehicleRemovalAdmin(data.email, data.props);
+        return;
       default: {
         // Exhaustiveness guard — a new template variant must add a case above
         // (TS flags this assignment if `EmailSendJobData` gains a member).

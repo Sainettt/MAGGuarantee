@@ -23,7 +23,6 @@ import type { z } from 'zod';
 import {
   CreateVehicleSchema,
   DeleteVehicleDailyKmQuerySchema,
-  DeleteWithReasonSchema,
   KmBoardQuerySchema,
   SetVehicleDailyKmSchema,
   UpdateVehicleSchema,
@@ -32,7 +31,6 @@ import {
   VehicleFiltersSchema,
   type CreateVehicleDto,
   type DeleteVehicleDailyKmQuery,
-  type DeleteWithReasonDto,
   type KmBoardQuery,
   type SetVehicleDailyKmDto,
   type UpdateVehicleDto,
@@ -288,27 +286,11 @@ export class VehiclesController {
     await this.vehicles.softDelete(id);
   }
 
-  /**
-   * Hard-delete (admin-only) per Phase 4.4. Mounted as a sibling of the
-   * soft-delete endpoint; opiekun keeps soft-delete only by design (Phase
-   * 4.4 roadmap line 327: "Hard-delete з обов'язковим `powod`"). `reason`
-   * required, persisted to `audit_log.metadata.reason`.
-   */
-  @Delete(':id/hard')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @Roles('admin')
-  @Audit({
-    action: 'hardDeleteVehicle',
-    targetType: 'Vehicle',
-    targetKey: (req) => req.params?.id,
-  })
-  async hardDelete(
-    @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
-    @Body(new ZodValidationPipe(DeleteWithReasonSchema))
-    body: DeleteWithReasonDto,
-  ): Promise<void> {
-    await this.vehicles.hardDelete(id, body.reason);
-  }
+  // Vehicle hard-delete (`DELETE /vehicles/:id/hard`) was RETIRED in the
+  // vehicle-status rework (Step B): admin deletion is now a plain soft-delete
+  // (`DELETE /vehicles/:id` above), keeping the row + plate on record so the
+  // future "no re-add for 3 months" rule has an anchor. See
+  // docs/13-api-design.md#vehicles.
 
   // ── Attachments ──────────────────────────────────────────
 

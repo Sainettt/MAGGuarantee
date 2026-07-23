@@ -27,7 +27,6 @@ import { LimitsController } from '../../modules/limits/limits.controller';
 import { TrailerTypesController } from '../../modules/trailer-types/trailer-types.controller';
 import { TrailersController } from '../../modules/trailers/trailers.controller';
 import { UsersController } from '../../modules/users/users.controller';
-import { VehiclesController } from '../../modules/vehicles/vehicles.controller';
 import { AuditContext } from './audit-context';
 import {
   readAuditConfig,
@@ -145,13 +144,6 @@ describe('audit coverage — decorator presence on critical mutating endpoints',
       method: 'hardDelete',
       action: 'hardDeleteCarrier',
       targetType: 'Carrier',
-    },
-    {
-      name: 'DELETE /vehicles/:id/hard',
-      controller: VehiclesController,
-      method: 'hardDelete',
-      action: 'hardDeleteVehicle',
-      targetType: 'Vehicle',
     },
     {
       name: 'DELETE /drivers/:id/hard',
@@ -390,13 +382,6 @@ describe('audit coverage — interceptor writes a row end-to-end', () => {
       action: 'hardDeleteCarrier',
       targetType: 'Carrier',
       beforeSnapshot: { id: 'c-1', login: 'pwz1', name: 'Some Carrier' },
-    },
-    {
-      name: 'vehicles',
-      controller: VehiclesController,
-      action: 'hardDeleteVehicle',
-      targetType: 'Vehicle',
-      beforeSnapshot: { id: 'v-1', plateNumber: 'WX-12345' },
     },
     {
       name: 'drivers',

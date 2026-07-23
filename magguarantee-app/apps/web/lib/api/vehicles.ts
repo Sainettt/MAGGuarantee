@@ -14,7 +14,6 @@
 
 import type {
   CreateVehicleDto,
-  DeleteWithReasonDto,
   KmBoardQuery,
   SetVehicleDailyKmDto,
   UpdateVehicleDto,
@@ -132,13 +131,9 @@ export function deleteVehicle(id: string): Promise<void> {
   return apiJson<void>(`/vehicles/${id}`, { method: 'DELETE' });
 }
 
-/** Hard-delete — see hardDeleteCarrier doc. */
-export function hardDeleteVehicle(
-  id: string,
-  body: DeleteWithReasonDto,
-): Promise<void> {
-  return apiJson<void>(`/vehicles/${id}/hard`, { method: 'DELETE', json: body });
-}
+// NOTE: the admin vehicle hard-delete (`DELETE /vehicles/:id/hard`) was RETIRED
+// (Vehicle-status rework) — admin now soft-deletes via `deleteVehicle` like
+// everyone else. No `hardDeleteVehicle` wrapper exists any more.
 
 // ─── Attachments ─────────────────────────────────────────
 

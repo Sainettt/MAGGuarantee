@@ -1078,6 +1078,8 @@ Header is the standard `<AppHeader>` (logo + role badge "Przewoźnik" + `<Langua
 
 **Visual reference = the planista panel (§6.3).** Do not re-derive layout — reuse the §6.3.1 canonical role-panel composition (full-width 4.4 container strip `mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-8`, page heading, then KPI strip, then in-page `<Tabs>` over read-only `<DataTable>`s). The only carrier-specific deltas are the KPI buckets (5 tiles, below) and the enriched «Auta» columns.
 
+> ⚠️ **The JEŻDŻĄ / STOJĄ >7 DNI tiles below are SUPERSEDED by §6.3.6** (delegation-driven, 5-state ramp). The carrier fleet KPI strip now uses the same 5 status tiles as §6.3.6 (AUTA / AKTYWNE / STOJĄCE / DŁUGO STOJĄCE / DO USUNIĘCIA), still 100% client-computed from the full `VehicleDto` payload the carrier already holds (each vehicle now carries a computed `status`). Drivers/trailers move to the info-banner sub-line per §6.3.6. The table below is historical reference.
+
 **KPI strip — 5 tiles, client-computed.** Same `<KpiCard>` strip pattern and the same bucket→tone vocabulary as the planista/dyspozytor strip (§6.3.3 / §6.4 — KpiCard 4.3 tones). The carrier already holds its **full** `VehicleDto` / `DriverDto` / `TrailerDto` payload from `/fleet/my`, so **all five values are computed CLIENT-SIDE** — **no API change, no new endpoint**. Responsive grid `grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6`.
 
 | Tile | Tile label (PL) | Source (client-computed) | `tone` |
@@ -1140,7 +1142,19 @@ Existing `<Badge>` (`apps/web/components/ui/Badge.tsx`) is **sufficient**. Add a
 
 > ⚠️ **`gotowy` (5th status) added — REWORK 2026-06-20 #4 (see §7.10).** Full tone rationale for the 5-status lifecycle is locked in **§7.10.1**; the row above is the canonical const-map. `gotowy = warning` (amber) sits between `zgloszony` (info) and `w_trasie` (success) — " load found, zlecenie made, awaiting departure" — a transient holding state that reads as "needs the next operator step", consistent with `warning` carrying "attention/transient" elsewhere (it is NOT an error). Do not invent a new variant for it.
 
-No new variants — `Badge` covers all. `<StatusBadge>` lives in `components/carrier/StatusBadge.tsx` and is also reused in employee panel later.
+**Vehicle operational status (delegation-driven, 5 states)** — a sibling wrapper `<VehicleStatusBadge>` maps the five `VehicleStatusKey` values to `<Badge>` compositions. **Full authoritative spec (labels PL+EN, tones, tooltips, icons, collision-resolution, KPI tone map) is §6.3.6.** Quick reference:
+
+| `VehicleStatusKey` | Tone | Badge classes | Icon (12px) | Label PL |
+|---|---|---|---|---|
+| `aktywna` | success | `bg-success/15 text-success border-success/30` | `<Truck />` | "Aktywna" |
+| `stojaca` | neutral (slate) | `bg-input text-text-sub border-border` | `<CircleParking />` | "Stojąca" |
+| `nieaktywna` | warning | `bg-warning/15 text-warning border-warning/30` | `<PauseCircle />` | "Długo stojąca" |
+| `do_usuniecia` | danger | `bg-danger/15 text-danger border-danger/30` | `<Trash2 />` | "Do usunięcia" |
+| `wylaczona` | muted / off | `bg-transparent text-text-sub border-dashed border-border` | `<PowerOff />` | "Wyłączona" |
+
+`stojaca` (solid slate) and `wylaczona` (dashed hollow) are the two grey states — differentiated by fill + border-style + icon, never hue alone (§6.3.6).
+
+No new variants — `Badge` covers all. `<StatusBadge>` lives in `components/carrier/StatusBadge.tsx` and is also reused in employee panel later; `<VehicleStatusBadge>` is its sibling.
 
 ### `<ClaimCard>` — list item on `/carrier/claims`
 
@@ -3087,6 +3101,8 @@ A single carrier card. **The whole card is a `<Link href="/employee/opieka/carri
 
 ### 5.2.3 Vehicle bucket stat-row — color mapping
 
+> ⚠️ **SUPERSEDED by §6.3.6 (2026-07-23).** The `jezdzace / stojace / nieaktywne / potencjalne` km-buckets below are replaced by the four delegation-driven idle-clock states (`aktywna / stojaca / nieaktywna / do_usuniecia`). See §6.3.6 → "opiekun card stat-row" for the new cell/label/tone table. Key change: `stojaca` is now **neutral** (`text-text-sub`), not amber. The table below is retained as historical reference only.
+
 The 4 buckets reuse the **existing semantic palette**, mirroring the KPI tones already used in the strip above so the colour story is consistent vertically on the page.
 
 | Bucket | Meaning | Tone | Token (text) | Reference KPI tile |
@@ -3565,6 +3581,8 @@ Columns are a sensible read-only subset of the existing `VehicleDto` / `DriverDt
 
 (5 tiles → `lg:grid-cols-5`; 2-up on phones, 3-up on small tablets. If the API also returns a "naczepy total" you want as a 6th tile, switch to `lg:grid-cols-6` exactly like the opieka strip — keep the breakpoint family identical.)
 
+> ⚠️ **The bucket table below is km/`lastDroveAt`-driven and is SUPERSEDED by §6.3.6** (delegation-driven, five states). Use §6.3.6 for the current KPI strip, tones, labels and icons. The table is kept only as the historical reference for what changed.
+
 Bucket → tile tone mapping. This **reuses the 4.3 KpiCard tone vocabulary** and the 5.2.3 bucket→tone story so the colour reading is consistent with the opieka surfaces:
 
 | Stats bucket | Tile label (PL) | `tone` | Accent token (resolved by KpiCard) | Lucide icon |
@@ -3614,6 +3632,96 @@ Bucket → tile tone mapping. This **reuses the 4.3 KpiCard tone vocabulary** an
 ```
 
 Notes: `bg-warning/10` + `border-warning/40` are token-with-opacity, **not** new tokens. Each chip is `bg-card` (a white chip on the soft warning panel reads as a token, consistent with the §5 MultiSelect chip pattern). Chips are **inert** (read-only — no remove `<X>`, no click). The whole block is conditional on `idle.length > 0`; when zero, render nothing (the STOJĄ >7 DNI KPI tile already shows `0`). Colour is not the only signal — the leading `<AlertTriangle>` icon + the explicit "X dni" text carry the meaning for colour-blind users.
+
+> ⚠️ **SUPERSEDED by §6.3.6 (2026-07-23 — DELEGATION-driven vehicle status).** The `jezdzace / stojace > 7 dni / nieaktywne` buckets in 6.3.3 above and the `stojące > 7 dni` amber sub-list are **km/`lastDroveAt`-driven** and are **removed**. The new operational status is computed from **delegations**, not mileage, and has **five** states. The KPI-strip tile set, tones, labels and StatusBadge mapping are all redefined in **§6.3.6** — read it as the authoritative replacement for the 6.3.3 bucket table. The idle sub-list pattern (warning-toned inert chips) MAY be reused verbatim, but keyed on the new `do_usuniecia` state (see §6.3.6).
+
+### 6.3.6 Vehicle operational status — DELEGATION-driven (AUTHORITATIVE, 2026-07-23)
+
+> **Supersedes** the km/`lastDroveAt` buckets everywhere: dyspozytor/planista KPI strip (§6.3.3), opiekun card stat-row (§5.2.3), carrier fleet KPI strip (§Carrier fleet panel), and the standalone `Aktywne / Nieaktywne` active-flag STATUS badge in every fleet `<DataTable>` (§6.3.2, §6.3.3, Carrier «Auta» table). **Kill the old vocabulary** (`jeżdżące`, `stojące > 7 dni`, and the `active=false → "Nieaktywne"` badge). One computed status field per live vehicle, five values, resolved at read time by the API.
+
+#### The five status keys (fixed by the API — labels map to these keys 1:1; keys are never renamed)
+
+| Key (API, immutable) | Meaning (read-time) | Idle clock |
+|---|---|---|
+| `aktywna` | Has a **non-terminal delegation** (`zgłoszony` / `gotowy` / `w_trasie`) — "in play". | — (working) |
+| `stojaca` | **No** active delegation; **0–14** calendar days since it returned (`actualReturnAt` of last `zjechał`, else `createdAt`). Normal turnaround, no concern. | 0–14 d |
+| `nieaktywna` | **15–28** calendar days since return. Idle long enough to watch. | 15–28 d |
+| `do_usuniecia` | **≥ 29** calendar days since return. Removal-eligible; system e-mails all admins every 3 days to retire it. | ≥ 29 d |
+| `wylaczona` | **Manually deactivated** (`Vehicle.active = false`). Admin/opiekun-set, **orthogonal** — excluded from the idle clock; overrides whatever the clock would say. | off the clock |
+
+#### Labels — PL (default) + EN
+
+Per-row **StatusBadge** uses the singular status-name (matches the feminine API keys 1:1); count **KPI tiles** use the neuter-plural collective (agrees with «auta»). Both are documented so i18n carries the two forms.
+
+| Key | Badge PL (singular) | Badge EN | KPI tile PL (plural) | KPI tile EN | i18n key stem |
+|---|---|---|---|---|---|
+| `aktywna` | **Aktywna** | **Active** | AKTYWNE | Active | `vehicleStatus.aktywna` |
+| `stojaca` | **Stojąca** | **Parked** | STOJĄCE | Parked | `vehicleStatus.stojaca` |
+| `nieaktywna` | **Długo stojąca** | **Long idle** | DŁUGO STOJĄCE | Long idle | `vehicleStatus.nieaktywna` |
+| `do_usuniecia` | **Do usunięcia** | **To remove** | DO USUNIĘCIA | To remove | `vehicleStatus.do_usuniecia` |
+| `wylaczona` | **Wyłączona** | **Disabled** | WYŁĄCZONE | Disabled | `vehicleStatus.wylaczona` |
+
+i18n key stem = `vehicleStatus.<key>.badge` (singular) + `vehicleStatus.<key>.tile` (plural) + `vehicleStatus.<key>.tooltip` (see below). Same stem for `messages/pl.json` + `en.json`.
+
+**Naming-collision resolution (deliberate, non-negotiable):**
+- **`stojaca` ≠ old `stojące`.** The old `stojące` was an *amber warning* ("idle > 7 days by mileage") — it is **removed**. The new `stojaca` (0–14 days since return) is **NEUTRAL / calm** and rendered in a **slate** tone, never amber. The amber-warning semantics of the old word migrate to the **visibly different** word **«Długo stojąca»** (`nieaktywna`), so any user who remembers "amber = idle too long" still finds that meaning — just under a new, clearly-escalated label — and the neutral «Stojąca» cannot be mistaken for a warning because it is grey, not amber.
+- **`nieaktywna` label is NOT «Nieaktywna».** The old `active=false` state used the badge «Nieaktywne»; that word is **retired as a status label** to avoid resurrecting the "switched-off" meaning. The 15–28-day idle state is labelled **«Długo stojąca / Long idle»** (a clear escalation of «Stojąca»), and the manual off-switch (`active=false`) is now **«Wyłączona / Disabled»** (`wylaczona`). No visible label reuses a word with a changed meaning.
+- **Severity ramp reads word-first, not colour-first:** «Aktywna» (working) → «Stojąca» (just parked) → «Długo stojąca» (parked too long) → «Do usunięcia» (retire it) → «Wyłączona» (switched off, off-ramp). The «Stojąca → Długo stojąca» pair encodes the escalation lexically; colour only reinforces it.
+
+#### StatusBadge — tone / token / icon map (`<VehicleStatusBadge>`)
+
+New thin wrapper `<VehicleStatusBadge status={VehicleStatusKey}>` — sibling of the existing claim/delegation `<StatusBadge>` (§`<StatusBadge>`), composing the **same** `<Badge>` primitive and the **same** anatomy: `inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-xs font-medium whitespace-nowrap`. **Zero new palette tokens** — every class below is an existing semantic token (or an existing token at reduced opacity), matching the claim status-map recipe (`bg-*/15 text-* border-*/30`).
+
+| Key | Tone name | Badge classes (light+dark auto via semantic tokens) | Lucide icon (12px) | Meaning-without-colour cue |
+|---|---|---|---|---|
+| `aktywna` | success (green) | `bg-success/15 text-success border-success/30` | `<Truck />` | truck (on the road) + green |
+| `stojaca` | **neutral (slate)** | `bg-input text-text-sub border-border` (solid soft chip) | `<CircleParking />` | parking icon (calmly parked) |
+| `nieaktywna` | warning (amber) | `bg-warning/15 text-warning border-warning/30` | `<PauseCircle />` | pause icon (stalled) + amber |
+| `do_usuniecia` | danger (red) | `bg-danger/15 text-danger border-danger/30` | `<Trash2 />` | trash icon (retire) + red |
+| `wylaczona` | **muted / off** | `bg-transparent text-text-sub border-dashed border-border` (hollow, dashed) | `<PowerOff />` | power-off icon + **dashed hollow** border |
+
+- **Two grey states, three differentiation channels.** `stojaca` (neutral) and `wylaczona` (muted) are both grey-family per the requested ramp, so they are separated on **three** channels that never rely on hue: (1) **fill** — `stojaca` is a *solid* `bg-input` chip, `wylaczona` is *transparent*; (2) **border** — `stojaca` is *solid* `border-border`, `wylaczona` is *dashed*; (3) **icon** — `CircleParking` vs `PowerOff`. The dashed hollow "switched-off" chip reads unmistakably as manual deactivation, distinct from the solid "parked-and-resting" chip.
+- **Tooltip (all five)** — `vehicleStatus.<key>.tooltip`, carries the exact day window so the meaning is explicit for SR / colour-blind users, e.g. `stojaca` → «Wróciła ≤ 14 dni temu» / "Returned ≤ 14 days ago"; `nieaktywna` → «Stoi 15–28 dni» / "Idle 15–28 days"; `do_usuniecia` → «Stoi ≥ 29 dni — do wycofania» / "Idle ≥ 29 days — retire"; `aktywna` → «Ma aktywną delegację» / "Has an active delegation"; `wylaczona` → «Wyłączona ręcznie przez administratora» / "Manually disabled by an administrator". Each badge is `<span role="img" aria-label={tooltip}>` (icon + text + accessible name), so colour is never the sole carrier of meaning (DS a11y rule).
+- **Placement:** replaces the `STATUS` column badge in every fleet `<DataTable>` (planista §6.3.2, dyspozytor §6.3.3, carrier «Auta», opiekun drill-down, admin vehicles), the km-board row status, and the vehicle detail modal header. The old `active ? "Aktywne" : "Nieaktywne"` badge is **deleted** — `active=false` now surfaces as `wylaczona`.
+
+#### KPI-strip tile set + tone map (dyspozytor / planista / carrier / opiekun fleet panels)
+
+Replaces the old strip (`liczbaAut / jeżdżące / stojące>7dni / kierowcy / naczepy`). The **hero strip is the five-state vehicle ramp**; drivers/trailers are inert resource counts and move to the read-only info-banner sub-line (as the legacy dyspozytor banner already does: «Obsługujesz 7 aut … 4 kierowców, 3 naczep»). Composed entirely of the existing `<KpiCard>` — **no new card component, no `tone="purple"`** (§6.3.3 deviation stands).
+
+**Primary strip — 5 tiles** (`grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6`):
+
+| Tile | Label PL | Label EN | Count source | `KpiCard tone` | Accent token | Lucide icon |
+|---|---|---|---|---|---|---|
+| Total (enabled) | AUTA | Vehicles | `aktywne + stojące + nieaktywne + doUsuniecia` | `neutral` | `text-text-sub` | `Truck` |
+| Active | AKTYWNE | Active | `aktywna` count | `green` | `text-success` | `Truck` |
+| Parked | STOJĄCE | Parked | `stojaca` count | `neutral` | `text-text-sub` | `CircleParking` |
+| Long idle | DŁUGO STOJĄCE | Long idle | `nieaktywna` count | `orange` | `text-warning` | `PauseCircle` |
+| To remove | DO USUNIĘCIA | To remove | `do_usuniecia` count | `red` | `text-danger` | `Trash2` |
+
+- **The four idle-clock buckets partition the *enabled* fleet** (`active=true`): `aktywne + stojące + nieaktywne + doUsuniecia = AUTA (total)`. This clean sum is intentional — the strip reads as a whole split into parts. `wylaczona` vehicles are **excluded** from the clock and from these four counts.
+- **Two neutral tiles by design.** `AUTA` (total) and `STOJĄCE` (calm) are both `neutral`; only the *problem* states pop — `DŁUGO STOJĄCE` amber, `DO USUNIĘCIA` red, `AKTYWNE` green (capacity). A dispatcher scans for problems and capacity, not for totals (same rationale as the §6.3.3 no-purple deviation).
+- **`wylaczona` tile — optional 6th, muted.** For surfaces that manage the off-switch (admin / opiekun), append a 6th `neutral`-toned tile `WYŁĄCZONE / Disabled` (`wylaczona` count, icon `PowerOff`) and switch the grid to `lg:grid-cols-6` (same breakpoint family). On the dyspozytor/planista/carrier read-only strips it is **omitted** (they don't act on it); the count still appears in the banner sub-line if needed.
+- **Drivers / trailers** (`KIEROWCY / NACZEPY`) — **not** in the hero strip. Render as an inert count line inside the read-only info banner: «… obsługujesz **{k}** kierowców · **{n}** naczep» (EN: "… **{k}** drivers · **{n}** trailers"). If a team insists on tiles, append them AFTER the 5 status tiles as `blue` (KIEROWCY, `text-info`, `User`) + `neutral` (NACZEPY, `text-text-sub`, `Container`) and use `lg:grid-cols-7` — but the recommended layout keeps the strip a focused 5-state ramp.
+
+**`do_usuniecia` highlight sub-list** — reuse the §6.3.3 warning-toned inert-chip block verbatim, **re-keyed to `do_usuniecia`** (the removal-eligible set), between the strip and the `<Tabs>`, conditional on count > 0. Copy: «Auta do usunięcia (stoją ≥ 29 dni):» + chips `{plate} · {days} dni`. Use `border-danger/40 bg-danger/10` + leading `<Trash2 size={15} className="text-danger" />` (token-with-opacity, no new token) instead of the amber warning tone — this is the genuine "act now" set. (An optional secondary amber block for `nieaktywna` may reuse the original `border-warning/40 bg-warning/10` treatment if the panel wants a two-tier watchlist.)
+
+#### opiekun card stat-row (§5.2.3) — new mapping
+
+The opiekun `<OpiekunCarrierCard>` stat-row (§5.2.4) switches from the 4 km-buckets to the **4 idle-clock states** (drop `potencjalne`; `wylaczona` is not shown on the opiekun card — it is orthogonal and rare, surfaced only in the drill-down table badge):
+
+| Cell | Key | Label PL (short) | Tone | Token |
+|---|---|---|---|---|
+| 1 | `aktywna` | Aktyw. | success | `text-success` |
+| 2 | `stojaca` | Stoj. | **neutral** | `text-text-sub` |
+| 3 | `nieaktywna` | Dł. stoj. | warning | `text-warning` |
+| 4 | `do_usuniecia` | Do usun. | danger | `text-danger` |
+
+Note the cell-2 tone change: `stojaca` is now **neutral `text-text-sub`** (calm), not amber — the amber slot moves to cell 3 (`nieaktywna`). This keeps the card's vertical colour story aligned with the KPI strip above it (§5.2.3 principle).
+
+#### Migration summary for web + api agents
+
+- **api-agent:** the fleet stats payload changes from `{ liczbaAut, jezdzace, stojace, nieaktywne }` to `{ total, aktywna, stojaca, nieaktywna, do_usuniecia, wylaczona }` (drivers/trailers counts stay). Per-vehicle DTO gains a computed `status: VehicleStatusKey`. Enum lives in `packages/shared` as `VEHICLE_STATUS = ['aktywna','stojaca','nieaktywna','do_usuniecia','wylaczona'] as const`.
+- **web-agent:** add `<VehicleStatusBadge>` (map above) beside the existing `<StatusBadge>`; retire the `Aktywne/Nieaktywne` active-flag badge from all fleet tables; rewire the KPI strips (§6.3.3, carrier fleet, opiekun) and the opiekun stat-row to the tables above; add `vehicleStatus.*` i18n keys (badge + tile + tooltip, PL+EN). **Zero new palette tokens, zero `tailwind.config` / `globals.css` changes** (a thin `neutral` Badge treatment composes `bg-input`/`text-text-sub`/`border-border`; `wylaczona` composes `border-dashed`/`bg-transparent`).
 
 ### 6.3.4 Components / shared changes summary (Phase 6.3)
 

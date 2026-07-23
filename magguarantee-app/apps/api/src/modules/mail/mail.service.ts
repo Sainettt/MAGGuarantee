@@ -65,6 +65,10 @@ import {
   type GuaranteeOpiekunDigestProps,
 } from './templates/guarantee-opiekun-digest';
 import {
+  VehicleRemovalAdminEmail,
+  type VehicleRemovalAdminProps,
+} from './templates/vehicle-removal-admin';
+import {
   MAIL_PROVIDER_TOKEN,
   type MailProvider,
 } from './providers/mail-provider.interface';
@@ -948,6 +952,44 @@ export class MailService implements IMailService {
     return this._enqueueOr(
       { template: 'guarantee-opiekun-digest', email, props },
       () => this.sendGuaranteeOpiekunDigest(email, props),
+    );
+  }
+
+  // vehicle-removal-admin (29-day «do usunięcia» digest) ────
+  async sendVehicleRemovalAdmin(
+    email: string,
+    props: VehicleRemovalAdminProps,
+  ): Promise<void> {
+    await this._send({
+      to: email,
+      subject: `Pojazdy do usunięcia — ${props.rows.length}`,
+      html: await render(VehicleRemovalAdminEmail(props)),
+      text: [
+        `Witaj ${props.adminName},`,
+        '',
+        `Pojazdy nieaktywne co najmniej ${props.thresholdDays} dni ` +
+          `(status „do usunięcia”) na dzień ${props.dateLabel}:`,
+        '',
+        ...props.rows.map(
+          (r) =>
+            `  - ${r.plateNumber}${r.sideNumber ? ` (${r.sideNumber})` : ''}` +
+            ` — ${r.carrierName} · od ${r.anchorLabel}` +
+            ` · ${r.daysSinceReturn} dni bez wyjazdu`,
+        ),
+      ].join('\n'),
+      template: 'vehicle-removal-admin',
+      logMsg: 'vehicle removal admin digest email sent',
+      logExtra: { vehicles: props.rows.length },
+    });
+  }
+
+  enqueueVehicleRemovalAdmin(
+    email: string,
+    props: VehicleRemovalAdminProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'vehicle-removal-admin', email, props },
+      () => this.sendVehicleRemovalAdmin(email, props),
     );
   }
 

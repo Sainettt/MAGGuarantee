@@ -21,7 +21,14 @@
 // `/employee/opieka/carriers/[login]` for a per-entity (vehicles / drivers /
 // trailers) read-only inspection view.
 
-import { Building2, Car, CircleSlash2, HeartHandshake, Plus, Truck } from 'lucide-react';
+import {
+  Building2,
+  CircleParking,
+  HeartHandshake,
+  PauseCircle,
+  Trash2,
+  Truck,
+} from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
 import { KpiCard } from '@/components/dashboard/KpiCard';
@@ -34,10 +41,18 @@ import { useOpiekunFleet } from '@/lib/hooks/useOpiekunFleet';
 
 export default function OpiekaPage() {
   const t = useTranslations('opieka');
+  const tVehStatus = useTranslations('vehicleStatus');
   const { data, isLoading } = useOpiekunFleet();
 
   const carriers = data?.carriers ?? [];
   const totals = data?.totals;
+
+  // §6.3.6 — the AUTA tile is the ENABLED fleet (the four idle-clock buckets);
+  // `wylaczone` is excluded, matching the dyspozytor/carrier strips.
+  const v = totals?.vehicles;
+  const autaEnabled = v
+    ? v.aktywne + v.stojace + v.nieaktywne + v.doUsuniecia
+    : 0;
 
   return (
     <section className="px-4 sm:px-6 lg:px-10 xl:px-12 py-8">
@@ -52,9 +67,11 @@ export default function OpiekaPage() {
           (watchdog board). Route-backed so both tabs are deep-linkable. */}
       <OpiekaTabsNav />
 
-      {/* Totals strip — six KPI tiles. Always rendered so the layout doesn't
-          jump between loading / loaded states; values fall back to 0 while
-          fetching and the cards show their own skeleton. */}
+      {/* Totals strip — Przewoźnicy + the delegation-driven 5-state vehicle ramp
+          (§6.3.6): AUTA (enabled) · AKTYWNE · STOJĄCE · DŁUGO STOJĄCE · DO
+          USUNIĘCIA. `potencjalne` is dropped; `wylaczone` is omitted here to
+          keep the 6-tile grid (the Przewoźnicy tile occupies the 6th slot).
+          Always rendered so the layout doesn't jump between loading states. */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
         <KpiCard
           label={t('totals.carriers')}
@@ -64,38 +81,38 @@ export default function OpiekaPage() {
           loading={isLoading}
         />
         <KpiCard
-          label={t('totals.totalVehicles')}
-          value={totals?.vehicles.total ?? 0}
+          label={t('totals.vehicles')}
+          value={autaEnabled}
           tone="neutral"
           icon={Truck}
           loading={isLoading}
         />
         <KpiCard
-          label={t('totals.jezdzace')}
-          value={totals?.vehicles.jezdzace ?? 0}
+          label={tVehStatus('aktywna.tile')}
+          value={v?.aktywne ?? 0}
           tone="green"
-          icon={Car}
+          icon={Truck}
           loading={isLoading}
         />
         <KpiCard
-          label={t('totals.stojace')}
-          value={totals?.vehicles.stojace ?? 0}
+          label={tVehStatus('stojaca.tile')}
+          value={v?.stojace ?? 0}
+          tone="neutral"
+          icon={CircleParking}
+          loading={isLoading}
+        />
+        <KpiCard
+          label={tVehStatus('nieaktywna.tile')}
+          value={v?.nieaktywne ?? 0}
           tone="orange"
-          icon={Car}
+          icon={PauseCircle}
           loading={isLoading}
         />
         <KpiCard
-          label={t('totals.nieaktywne')}
-          value={totals?.vehicles.nieaktywne ?? 0}
+          label={tVehStatus('do_usuniecia.tile')}
+          value={v?.doUsuniecia ?? 0}
           tone="red"
-          icon={CircleSlash2}
-          loading={isLoading}
-        />
-        <KpiCard
-          label={t('totals.potencjalne')}
-          value={totals?.vehicles.potencjalne ?? 0}
-          tone="blue"
-          icon={Plus}
+          icon={Trash2}
           loading={isLoading}
         />
       </div>

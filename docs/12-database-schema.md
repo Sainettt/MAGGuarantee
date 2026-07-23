@@ -329,6 +329,21 @@ model Vehicle {
   // Auto-updated by delegation→zjechal — never expose as a manual UI field
   lastDroveAt        DateTime?
 
+  // Admin-removal alert dedup (delegation-driven idle escalation). Operational
+  // status (aktywna / stojąca / nieaktywna / do_usunięcia) is DERIVED at read
+  // time from delegations + createdAt — NO status column. A daily cron mails all
+  // active admins about every vehicle at daysSinceReturn≥29 (ALL vehicles, not
+  // only guaranteed), repeating every 3 calendar days. These two columns are the
+  // only persisted state for that flow:
+  //   adminRemovalNotifiedAt  — timestamp of the LAST removal email; NULL = never
+  //     notified / reset. Cron sends when daysSinceReturn≥29 AND (NULL OR
+  //     now−value≥3d), stamps it =now, and CLEARS it to NULL once the vehicle
+  //     leaves the ≥29 state (new delegation, etc.) so a relapse re-triggers.
+  //   adminRemovalNotifyCount — lifetime count of removal emails sent
+  //     (observability); incremented per send, NOT reset on clear.
+  adminRemovalNotifiedAt  DateTime?
+  adminRemovalNotifyCount Int      @default(0)
+
   delegations       Delegation[]
   claims            Claim[]
   attachments       VehicleAttachment[]

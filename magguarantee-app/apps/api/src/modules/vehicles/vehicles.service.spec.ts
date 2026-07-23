@@ -13,6 +13,7 @@ import { INCLUDE_SOFT_DELETED } from '../prisma/soft-delete.extension';
 import { TeamsRepository, type TeamRow } from '../teams/teams.repository';
 import { UsersRepository, type UserRow } from '../users/users.repository';
 import type { CategorizedUpload } from './attachment-validation';
+import { VehicleDelegationStatusRepository } from './vehicle-delegation-status.repository';
 import {
   VehicleAttachmentsRepository,
   type VehicleAttachmentRow,
@@ -233,17 +234,10 @@ function makeVehiclesRepo(seed: VehicleRow[] = []): VehiclesRepository {
     hardDelete: jest.fn(async (id: string) => {
       rows.delete(id);
     }),
-    // Default: no referencing delegations / guarantee episodes — hard-delete
-    // is allowed. Reference-guard tests override this per-case.
-    countReferencingRows: jest.fn(async () => 0),
+    // Default: no soft-deleted tombstone for the (carrierId, plateNumber) —
+    // create is allowed. The anti-abuse test overrides this per-case.
+    findSoftDeletedByCarrierAndPlate: jest.fn(async () => null),
   } as unknown as VehiclesRepository;
-}
-
-/** A fake Prisma P2003 (foreign-key violation) — same shape Prisma throws. */
-function makeP2003(): Error {
-  return Object.assign(new Error('Foreign key constraint failed'), {
-    code: 'P2003',
-  });
 }
 
 /**
@@ -1144,116 +1138,178 @@ describe('VehiclesService', () => {
     await expect(svc.deactivate('v-1')).rejects.toThrow(ConflictException);
   });
 
-  // ── Hard-delete reference guard (409 VEHICLE_HAS_REFERENCES) ─
-  // The FK from delegations / guarantee_idle_episodes to vehicle is ON DELETE
-  // RESTRICT (incl. soft-deleted rows). Hard-delete must refuse deterministically
-  // with a 409 instead of letting a P2003 bubble up as a 500.
+  // ── Anti-abuse: same-plate recreate of a soft-deleted vehicle (409) ─
+  // A carrier could delete a vehicle and re-add it under the same plate to reset
+  // the idle clock. `create` looks up any SOFT-DELETED tombstone for the
+  // (carrierId, plateNumber) FIRST and refuses with a DISTINCT machine code
+  // (VEHICLE_PLATE_SOFT_DELETED) — self-explanatory, unlike the generic
+  // unique-index "już istnieje" an ACTIVE duplicate gets.
 
-  it('hardDelete with referencing rows → 409 VEHICLE_HAS_REFERENCES', async () => {
-    const repo = makeVehiclesRepo([makeVehicle({ id: 'v-1' })]);
-    (repo.countReferencingRows as jest.Mock).mockResolvedValueOnce(2);
+  it('create with a soft-deleted tombstone for the same plate → 409 VEHICLE_PLATE_SOFT_DELETED', async () => {
+    const repo = makeVehiclesRepo([]);
+    (repo.findSoftDeletedByCarrierAndPlate as jest.Mock).mockResolvedValueOnce({
+      id: 'v-dead',
+    });
     const svc = new VehiclesService(
       repo,
+      makeUsersRepo(makeValidPeople()),
+      makeCarriersRepo([makeCarrier()]),
+      makeAttachmentsRepo([]),
+      makeStorage(),
+      makeTeamsRepo(),
+    );
+    const err = await catchConflict(() =>
+      svc.create(makeAuth('admin', 'a-1'), createDto({ plateNumber: 'WA0002' }), []),
+    );
+    expectReferencesCode(err, 'VEHICLE_PLATE_SOFT_DELETED');
+    // The tombstone guard fires BEFORE any insert.
+    expect(repo.create).not.toHaveBeenCalled();
+    expect(repo.findSoftDeletedByCarrierAndPlate).toHaveBeenCalledWith(
+      'c-1',
+      'WA0002',
+    );
+  });
+
+  it('create succeeds when no tombstone exists (default guard returns null)', async () => {
+    const { svc } = buildService({
+      carriers: [makeCarrier()],
+      users: makeValidPeople(),
+    });
+    await expect(
+      svc.create(makeAuth('admin', 'a-1'), createDto(), []),
+    ).resolves.toMatchObject({ plateNumber: 'WA0002' });
+  });
+
+  // ── Lifecycle status on the DTO (delegation-driven) ────────
+  // `toDto` surfaces the DERIVED `lifecycleStatus`/`daysSinceReturn` from a
+  // batched delegation-status lookup (`VehicleDelegationStatusRepository`).
+
+  function stubDelegationStatusRepo(
+    config: Record<
+      string,
+      { hasActiveDelegation?: boolean; lastReturnAt?: Date | null }
+    > = {},
+  ): VehicleDelegationStatusRepository {
+    return {
+      getByVehicleIds: jest.fn(async (ids: string[]) => {
+        const map = new Map<
+          string,
+          { hasActiveDelegation: boolean; lastReturnAt: Date | null }
+        >();
+        for (const id of ids) {
+          const c = config[id];
+          map.set(id, {
+            hasActiveDelegation: c?.hasActiveDelegation ?? false,
+            lastReturnAt: c?.lastReturnAt ?? null,
+          });
+        }
+        return map;
+      }),
+    } as unknown as VehicleDelegationStatusRepository;
+  }
+
+  function buildServiceWithLifecycle(
+    vehicles: VehicleRow[],
+    delegation: Record<
+      string,
+      { hasActiveDelegation?: boolean; lastReturnAt?: Date | null }
+    >,
+  ): VehiclesService {
+    return new VehiclesService(
+      makeVehiclesRepo(vehicles),
       makeUsersRepo(),
       makeCarriersRepo(),
       makeAttachmentsRepo([]),
       makeStorage(),
       makeTeamsRepo(),
+      undefined, // guaranteeWatchdog (optional)
+      stubDelegationStatusRepo(delegation),
     );
-    const err = await catchConflict(() => svc.hardDelete('v-1', 'reason'));
-    expectReferencesCode(err, 'VEHICLE_HAS_REFERENCES');
-    // The pre-flight guard fires BEFORE any physical delete.
-    expect(repo.hardDelete).not.toHaveBeenCalled();
+  }
+
+  it('getById surfaces lifecycleStatus=aktywna (active delegation → daysSinceReturn null)', async () => {
+    const svc = buildServiceWithLifecycle([makeVehicle({ id: 'v-1', active: true })], {
+      'v-1': { hasActiveDelegation: true },
+    });
+    const dto = await svc.getById('v-1');
+    expect(dto.lifecycleStatus).toBe('aktywna');
+    expect(dto.daysSinceReturn).toBeNull();
   });
 
-  it('hardDelete with ONLY soft-deleted referencing rows → still 409 (count uses INCLUDE_SOFT_DELETED)', async () => {
-    // The repo counts a soft-deleted-only delegation via the escape hatch (see
-    // the VehiclesRepository.countReferencingRows repo-level test below); the
-    // service sees a positive count and refuses.
-    const repo = makeVehiclesRepo([makeVehicle({ id: 'v-1' })]);
-    (repo.countReferencingRows as jest.Mock).mockResolvedValueOnce(1);
+  it('getById surfaces lifecycleStatus=wylaczona for a deactivated vehicle', async () => {
+    const svc = buildServiceWithLifecycle(
+      [makeVehicle({ id: 'v-1', active: false })],
+      {},
+    );
+    const dto = await svc.getById('v-1');
+    expect(dto.lifecycleStatus).toBe('wylaczona');
+    expect(dto.daysSinceReturn).toBeNull();
+  });
+
+  it('list batches the delegation lookup once for the whole page', async () => {
+    const repo = stubDelegationStatusRepo({
+      'v-1': { hasActiveDelegation: true },
+    });
     const svc = new VehiclesService(
-      repo,
+      makeVehiclesRepo([
+        makeVehicle({ id: 'v-1', carrierId: 'c-mine', active: true }),
+        makeVehicle({ id: 'v-2', carrierId: 'c-mine', active: false }),
+      ]),
       makeUsersRepo(),
-      makeCarriersRepo(),
+      makeCarriersRepo([makeCarrier({ id: 'c-mine', userId: 'u-self' })]),
       makeAttachmentsRepo([]),
       makeStorage(),
       makeTeamsRepo(),
-    );
-    const err = await catchConflict(() => svc.hardDelete('v-1', 'reason'));
-    expectReferencesCode(err, 'VEHICLE_HAS_REFERENCES');
-    expect(repo.hardDelete).not.toHaveBeenCalled();
-  });
-
-  it('hardDelete on an unreferenced vehicle succeeds (repo.hardDelete called)', async () => {
-    const repo = makeVehiclesRepo([makeVehicle({ id: 'v-1' })]);
-    const svc = new VehiclesService(
+      undefined,
       repo,
-      makeUsersRepo(),
-      makeCarriersRepo(),
-      makeAttachmentsRepo([]),
-      makeStorage(),
-      makeTeamsRepo(),
     );
-    await expect(svc.hardDelete('v-1', 'reason')).resolves.toBeUndefined();
-    expect(repo.hardDelete).toHaveBeenCalledWith('v-1');
-  });
-
-  it('hardDelete translates a late repo P2003 into the same 409 (TOCTOU)', async () => {
-    const repo = makeVehiclesRepo([makeVehicle({ id: 'v-1' })]);
-    // Pre-flight count is clean (0) but the delete races a fresh delegation.
-    (repo.hardDelete as jest.Mock).mockRejectedValueOnce(makeP2003());
-    const svc = new VehiclesService(
-      repo,
-      makeUsersRepo(),
-      makeCarriersRepo(),
-      makeAttachmentsRepo([]),
-      makeStorage(),
-      makeTeamsRepo(),
-    );
-    const err = await catchConflict(() => svc.hardDelete('v-1', 'reason'));
-    expectReferencesCode(err, 'VEHICLE_HAS_REFERENCES');
-  });
-
-  it('hardDelete on a missing vehicle → 404', async () => {
-    const { svc } = buildService({});
-    await expect(svc.hardDelete('missing', 'reason')).rejects.toThrow(
-      NotFoundException,
-    );
+    const out = await svc.list(makeAuth('przewoznik', 'u-self'), { limit: 50 });
+    const byId = new Map(out.items.map((v) => [v.id, v.lifecycleStatus]));
+    expect(byId.get('v-1')).toBe('aktywna');
+    expect(byId.get('v-2')).toBe('wylaczona');
+    // ONE batched call for the page (no N+1).
+    expect(repo.getByVehicleIds).toHaveBeenCalledTimes(1);
   });
 });
 
-// ── Repository-level proof that the reference count passes the escape hatch ──
-// A soft-deleted child is hidden from the soft-delete extension's read filter
-// but STILL physically blocks the RESTRICT FK, so the count MUST opt in via
-// `[INCLUDE_SOFT_DELETED]`. This test drives the real repository over a fake
-// Prisma delegate surface and asserts the flag lands on every count call.
-describe('VehiclesRepository.countReferencingRows', () => {
-  it('counts delegations + guarantee episodes and passes INCLUDE_SOFT_DELETED to every count', async () => {
-    const delegationCount = jest.fn(async (_args: unknown) => 1);
-    const episodeCount = jest.fn(async (_args: unknown) => 2);
+// ── Repository-level proof: the tombstone lookup uses the escape hatch ──
+// A soft-deleted vehicle is hidden from the soft-delete extension's read
+// filter, so the anti-abuse lookup MUST opt in via `[INCLUDE_SOFT_DELETED]`
+// AND filter `deletedAt: { not: null }` so it returns ONLY tombstones. This
+// test drives the real repository over a fake Prisma delegate surface and
+// asserts the flag + filter land on the query.
+describe('VehiclesRepository.findSoftDeletedByCarrierAndPlate', () => {
+  it('queries deletedAt-not-null with INCLUDE_SOFT_DELETED and returns the id', async () => {
+    const findFirst = jest.fn(async (_args: unknown) => ({ id: 'v-dead' }));
     const prisma = {
-      tx: {
-        delegation: { count: delegationCount },
-        guaranteeIdleEpisode: { count: episodeCount },
-      },
+      tx: { vehicle: { findFirst } },
     } as unknown as PrismaService;
     const repo = new VehiclesRepository(prisma);
 
-    const total = await repo.countReferencingRows('v-1');
+    const out = await repo.findSoftDeletedByCarrierAndPlate('c-1', 'WA0001');
 
-    expect(total).toBe(3);
-    const delArg = delegationCount.mock.calls[0]?.[0] as Record<
+    expect(out).toEqual({ id: 'v-dead' });
+    const arg = findFirst.mock.calls[0]?.[0] as Record<
       string | symbol,
       unknown
     >;
-    expect(delArg.where).toEqual({ vehicleId: 'v-1' });
-    expect(delArg[INCLUDE_SOFT_DELETED]).toBe(true);
-    const epArg = episodeCount.mock.calls[0]?.[0] as Record<
-      string | symbol,
-      unknown
-    >;
-    expect(epArg.where).toEqual({ vehicleId: 'v-1' });
-    expect(epArg[INCLUDE_SOFT_DELETED]).toBe(true);
+    expect(arg.where).toEqual({
+      carrierId: 'c-1',
+      plateNumber: 'WA0001',
+      deletedAt: { not: null },
+    });
+    expect(arg[INCLUDE_SOFT_DELETED]).toBe(true);
+  });
+
+  it('returns null when no tombstone exists', async () => {
+    const findFirst = jest.fn(async (_args: unknown) => null);
+    const prisma = {
+      tx: { vehicle: { findFirst } },
+    } as unknown as PrismaService;
+    const repo = new VehiclesRepository(prisma);
+
+    await expect(
+      repo.findSoftDeletedByCarrierAndPlate('c-1', 'WA0001'),
+    ).resolves.toBeNull();
   });
 });

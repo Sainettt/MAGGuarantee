@@ -74,8 +74,11 @@ export interface CarrierRow {
  * Slim per-carrier row returned by `listForOpiekunAggregate` — used by the
  * Phase 5 `/fleet/opiekun` and `/opiekun/carriers` services. Avoids the
  * expensive opiekun-join + flatten path of the main CarrierRow shape; we
- * only need identity + per-vehicle `active`/`lastDroveAt` for the four-
- * bucket classification and the three active-child counts.
+ * only need identity + per-vehicle `id`/`active`/`createdAt` for the
+ * delegation-driven lifecycle classification and the three active-child
+ * counts. (`id` + `createdAt` feed the batched delegation-status lookup and
+ * the idle-clock fallback anchor; the old `lastDroveAt` km-recency signal is
+ * no longer used.)
  */
 export interface OpiekunAggregateCarrierRow {
   id: string;
@@ -89,7 +92,7 @@ export interface OpiekunAggregateCarrierRow {
   vehicles: Array<{
     id: string;
     active: boolean;
-    lastDroveAt: Date | null;
+    createdAt: Date;
   }>;
   counts: {
     vehicles: number;
@@ -222,11 +225,11 @@ export class CarriersRepository {
 
   /**
    * Slim row shape for the Phase 5 opiekun fleet aggregate. Includes the
-   * minimal per-vehicle fields needed for the four-bucket classification
-   * (`active`, `lastDroveAt`) plus the live `_count` of active children for
-   * the lighter `/opiekun/carriers` surface. Soft-deleted rows are excluded
-   * by the Prisma soft-delete extension on both the parent Carrier and the
-   * nested Vehicle includes.
+   * minimal per-vehicle fields needed for the delegation-driven lifecycle
+   * classification (`id`, `active`, `createdAt`) plus the live `_count` of
+   * active children for the lighter `/opiekun/carriers` surface. Soft-deleted
+   * rows are excluded by the Prisma soft-delete extension on both the parent
+   * Carrier and the nested Vehicle includes.
    */
   async listForOpiekunAggregate(filters: {
     opiekunId?: string;
@@ -246,9 +249,9 @@ export class CarriersRepository {
           // into the opiekun jezdzące/stojące classification (the sibling
           // `_count.vehicles` already filters, so the two would disagree).
           // NOT scoped to `active: true` — the classifier also buckets
-          // inactive vehicles as `nieaktywne`.
+          // deactivated vehicles (as `wylaczone`).
           where: { deletedAt: null },
-          select: { id: true, active: true, lastDroveAt: true },
+          select: { id: true, active: true, createdAt: true },
         },
         _count: {
           select: {
@@ -271,7 +274,7 @@ export class CarriersRepository {
       vehicles: r.vehicles.map((v) => ({
         id: v.id,
         active: v.active,
-        lastDroveAt: v.lastDroveAt,
+        createdAt: v.createdAt,
       })),
       counts: {
         vehicles: r._count.vehicles,

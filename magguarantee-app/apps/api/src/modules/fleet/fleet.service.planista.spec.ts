@@ -6,11 +6,33 @@ import { CarriersRepository } from '../carriers/carriers.repository';
 import { DriversRepository, type DriverRow } from '../drivers/drivers.repository';
 import { TrailersRepository, type TrailerRow } from '../trailers/trailers.repository';
 import {
+  VehicleDelegationStatusRepository,
+  type VehicleDelegationStatus,
+} from '../vehicles/vehicle-delegation-status.repository';
+import {
   VehiclesRepository,
   type VehicleListFilters,
   type VehicleRow,
 } from '../vehicles/vehicles.repository';
 import { FleetService } from './fleet.service';
+
+/** `YYYY-MM-DD` → UTC-midnight Date (date-only convention for `lastReturnAt`). */
+function U(s: string): Date {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(Date.UTC(y as number, (m as number) - 1, d as number));
+}
+
+/** Empty dyspozytor/planista KPI strip (new delegation-driven shape). */
+const ZERO_STATS = {
+  liczbaAut: 0,
+  aktywne: 0,
+  stojace: 0,
+  nieaktywne: 0,
+  doUsuniecia: 0,
+  wylaczone: 0,
+  liczbaKierowcow: 0,
+  liczbaNaczep: 0,
+};
 
 // ─── Fixture builders ────────────────────────────────────
 
@@ -186,10 +208,33 @@ function noop<T>(): T {
   return {} as unknown as T;
 }
 
+/**
+ * Delegation-status stub — `{ hasActiveDelegation, lastReturnAt }` per vehicle
+ * id from a per-id config (default: no active delegation, never returned).
+ */
+function stubDelegationStatusRepo(
+  config: Record<string, Partial<VehicleDelegationStatus>> = {},
+): VehicleDelegationStatusRepository {
+  return {
+    getByVehicleIds: jest.fn(async (ids: string[]) => {
+      const map = new Map<string, VehicleDelegationStatus>();
+      for (const id of ids) {
+        const c = config[id];
+        map.set(id, {
+          hasActiveDelegation: c?.hasActiveDelegation ?? false,
+          lastReturnAt: c?.lastReturnAt ?? null,
+        });
+      }
+      return map;
+    }),
+  } as unknown as VehicleDelegationStatusRepository;
+}
+
 function newSvc(opts: {
   vehicles: VehicleRow[];
   drivers?: DriverRow[];
   trailers?: TrailerRow[];
+  delegation?: Record<string, Partial<VehicleDelegationStatus>>;
   capturedVehicles?: { value?: VehicleListFilters };
   capturedDrivers?: { value?: { carrierIds?: string[] } };
   capturedTrailers?: { value?: { carrierIds?: string[] } };
@@ -200,6 +245,7 @@ function newSvc(opts: {
     stubDriversRepo(opts.drivers ?? [], opts.capturedDrivers),
     stubTrailersRepo(opts.trailers ?? [], opts.capturedTrailers),
     noop<CarrierReadinessService>(),
+    stubDelegationStatusRepo(opts.delegation ?? {}),
   );
 }
 
@@ -226,15 +272,7 @@ describe('FleetService.getPlanistaFleet — role gating', () => {
       vehicles: [],
       drivers: [],
       trailers: [],
-      stats: {
-        liczbaAut: 0,
-        autaAktywne: 0,
-        autaJezdzace: 0,
-        autaStojace7dni: 0,
-        autaNieaktywne: 0,
-        liczbaKierowcow: 0,
-        liczbaNaczep: 0,
-      },
+      stats: ZERO_STATS,
       stojaceList: [],
     });
   });
@@ -314,15 +352,7 @@ describe('FleetService.getPlanistaFleet — plannerId scoping', () => {
       vehicles: [],
       drivers: [],
       trailers: [],
-      stats: {
-        liczbaAut: 0,
-        autaAktywne: 0,
-        autaJezdzace: 0,
-        autaStojace7dni: 0,
-        autaNieaktywne: 0,
-        liczbaKierowcow: 0,
-        liczbaNaczep: 0,
-      },
+      stats: ZERO_STATS,
       stojaceList: [],
     });
     // No vehicles → no carrier union → drivers/trailers repos never queried.
@@ -373,6 +403,9 @@ describe('FleetService.getPlanistaFleet — plannerId scoping', () => {
           rateImport: 1.4,
         }),
       ],
+      // An active delegation → lifecycleStatus 'aktywna' (deterministic — no
+      // dependence on the wall clock, this test runs without fake timers).
+      delegation: { 'v-1': { hasActiveDelegation: true } },
     });
     const out = await svc.getPlanistaFleet(makeAuth('planista', 'plan-self'));
     expect(out.vehicles[0]).toEqual({
@@ -400,6 +433,9 @@ describe('FleetService.getPlanistaFleet — plannerId scoping', () => {
       fuelCardBlocked: true,
       agreementScanMissing: true,
       lastDroveAt: '2026-05-20T10:00:00.000Z',
+      // Delegation-driven lifecycle badge (active delegation → aktywna).
+      lifecycleStatus: 'aktywna',
+      daysSinceReturn: null,
       notes: 'serwis co 30 tys.',
       dispatchTeam: {
         id: 'team-1',
@@ -420,7 +456,6 @@ describe('FleetService.getPlanistaFleet — plannerId scoping', () => {
 
 describe('FleetService.getPlanistaFleet — stats + stojaceList parity with dyspozytor (Phase 6.4)', () => {
   const NOW = new Date('2026-05-27T12:00:00.000Z');
-  const DAY_MS = 24 * 60 * 60 * 1000;
 
   beforeAll(() => {
     jest.useFakeTimers();
@@ -430,56 +465,63 @@ describe('FleetService.getPlanistaFleet — stats + stojaceList parity with dysp
     jest.useRealTimers();
   });
 
-  it('computes the SAME 7-day classification + stojaceList the dyspozytor uses', async () => {
+  it('computes the SAME delegation-driven classification + stojaceList the dyspozytor uses', async () => {
     const svc = newSvc({
       vehicles: [
-        // jezdzace: active + recent
-        makeVehicle({ id: 'v-r1', plannerId: 'plan-self', carrierId: 'c-1', active: true, lastDroveAt: new Date(NOW.getTime() - 1 * DAY_MS) }),
-        // jezdzace: active + null lastDroveAt (no data → driving)
-        makeVehicle({ id: 'v-r2', plannerId: 'plan-self', carrierId: 'c-1', active: true, lastDroveAt: null }),
-        // stojace: active + 10 days idle
+        // aktywne: active + active delegation
+        makeVehicle({ id: 'v-a1', plannerId: 'plan-self', carrierId: 'c-1', active: true }),
+        // stojace: active, no delegation, returned 7 days ago
+        makeVehicle({ id: 'v-s0', plannerId: 'plan-self', carrierId: 'c-1', active: true }),
+        // nieaktywne: active, returned 20 days ago
         makeVehicle({
-          id: 'v-s1',
+          id: 'v-i1',
           plannerId: 'plan-self',
           carrierId: 'c-1',
           active: true,
           plateNumber: 'PL-IDLE',
-          lastDroveAt: new Date(NOW.getTime() - 10 * DAY_MS),
           carrier: { id: 'c-1', login: 'pwz-idle', name: 'Pwz Idle' },
           planner: { id: 'plan-self', login: 'plan', name: 'Anna Planista' },
         }),
-        // nieaktywne
-        makeVehicle({ id: 'v-n1', plannerId: 'plan-self', carrierId: 'c-1', active: false, lastDroveAt: new Date(NOW.getTime() - 30 * DAY_MS) }),
+        // wylaczone
+        makeVehicle({ id: 'v-w1', plannerId: 'plan-self', carrierId: 'c-1', active: false }),
         // belongs to another planner → excluded from the scoped set entirely
-        makeVehicle({ id: 'v-other', plannerId: 'plan-other', carrierId: 'c-2', active: true, lastDroveAt: new Date(NOW.getTime() - 90 * DAY_MS) }),
+        makeVehicle({ id: 'v-other', plannerId: 'plan-other', carrierId: 'c-2', active: true }),
       ],
+      delegation: {
+        'v-a1': { hasActiveDelegation: true },
+        'v-s0': { lastReturnAt: U('2026-05-20') }, // 7 days → stojace
+        'v-i1': { lastReturnAt: U('2026-05-07') }, // 20 days → nieaktywne
+      },
       drivers: [makeDriver({ id: 'd-1', carrierId: 'c-1' }), makeDriver({ id: 'd-2', carrierId: 'c-1' })],
       trailers: [makeTrailer({ id: 't-1', carrierId: 'c-1' })],
     });
     const out = await svc.getPlanistaFleet(makeAuth('planista', 'plan-self'));
     expect(out.stats).toEqual({
       liczbaAut: 4,
-      autaAktywne: 3,
-      autaJezdzace: 2,
-      autaStojace7dni: 1,
-      autaNieaktywne: 1,
+      aktywne: 1,
+      stojace: 1,
+      nieaktywne: 1,
+      doUsuniecia: 0,
+      wylaczone: 1,
       liczbaKierowcow: 2,
       liczbaNaczep: 1,
     });
-    // Legacy invariants hold (identical to dyspozytor).
-    expect(out.stats.autaJezdzace + out.stats.autaStojace7dni).toBe(
-      out.stats.autaAktywne,
-    );
-    expect(out.stats.autaAktywne + out.stats.autaNieaktywne).toBe(
-      out.stats.liczbaAut,
-    );
-    // stojaceList: one row per active idle>7d vehicle, identical field names.
+    // Invariant holds (identical to dyspozytor): five buckets partition liczbaAut.
+    expect(
+      out.stats.aktywne +
+        out.stats.stojace +
+        out.stats.nieaktywne +
+        out.stats.doUsuniecia +
+        out.stats.wylaczone,
+    ).toBe(out.stats.liczbaAut);
+    // stojaceList: one row per needs-attention vehicle (nieaktywna/do_usuniecia),
+    // identical field names to the dyspozytor panel.
     expect(out.stojaceList).toEqual([
       {
         plateNumber: 'PL-IDLE',
         carrierLogin: 'pwz-idle',
-        lastDroveAt: new Date(NOW.getTime() - 10 * DAY_MS).toISOString(),
-        daysIdle: 10,
+        status: 'nieaktywna',
+        daysSinceReturn: 20,
         plannerName: 'Anna Planista',
       },
     ]);
