@@ -32,6 +32,7 @@ import { ChevronDown } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
   formatDaysPl,
+  type BoundaryDayDto,
   type KmCalcBreakdown,
   type MonthBreakdownDto,
 } from '@magguarantee/shared';
@@ -109,6 +110,90 @@ function ExcludedDays({ excluded, locale }: ExcludedDaysProps) {
       </ul>
       <p className="mt-2 text-xs text-text-sub">{t('excludedDaysHint')}</p>
     </>
+  );
+}
+
+// ── Boundary-day credited fractions (period first / last day) ────────
+// A labeled footer strip showing HOW MUCH of the period's first and last
+// calendar day was actually credited. `fraction` (0..1, already 2-dp from the
+// engine) is rendered with the same `formatDaysPl` used by the `workingDays`
+// column, so "0,75 dnia" here lines up with the day-counts above. Rendered
+// ONCE at the block root so it appears identically under both the stacked-card
+// and the wide-table variant.
+//   • single-day period → engine reports the same date+fraction on both
+//     boundaries, so we collapse to one line.
+//   • fraction 0 → that boundary day wasn't counted (Sunday / EU-ban / a
+//     non-qualifying Saturday); shown muted with an explicit "not counted".
+//   • both null → legacy claim / empty range → the whole strip is omitted.
+
+interface BoundaryDaysProps {
+  firstDay: KmCalcBreakdown['firstDay'];
+  lastDay: KmCalcBreakdown['lastDay'];
+  locale: string;
+}
+
+function BoundaryLine({
+  label,
+  day,
+  locale,
+}: {
+  label: string;
+  day: BoundaryDayDto;
+  locale: string;
+}) {
+  const t = useTranslations('carrier.breakdown');
+  const excluded = day.fraction === 0;
+  const value = formatDaysPl(day.fraction);
+  return (
+    <li className="flex items-baseline justify-between gap-3">
+      <span className="shrink-0 text-text-sub">{label}</span>
+      <span className="flex min-w-0 items-baseline justify-end gap-2 text-right">
+        <span className="tabular-nums text-text-sub">
+          {formatExcludedDate(day.date, locale)}
+        </span>
+        <span
+          className={cn(
+            'whitespace-nowrap tabular-nums',
+            excluded ? 'text-text-sub' : 'font-semibold text-text',
+          )}
+        >
+          {excluded
+            ? t('boundaryExcluded', { value })
+            : t('boundaryCounted', { value })}
+        </span>
+      </span>
+    </li>
+  );
+}
+
+function BoundaryDays({ firstDay, lastDay, locale }: BoundaryDaysProps) {
+  const t = useTranslations('carrier.breakdown');
+  if (!firstDay && !lastDay) return null;
+
+  const single =
+    firstDay != null && lastDay != null && firstDay.date === lastDay.date;
+
+  return (
+    <div className="border-t border-border px-3 py-3">
+      <div className="mb-2 text-xs font-bold uppercase tracking-wider text-text-sub">
+        {t('boundaryTitle')}
+      </div>
+      <ul className="space-y-1.5 text-sm">
+        {single ? (
+          <BoundaryLine label={t('boundarySingle')} day={firstDay!} locale={locale} />
+        ) : (
+          <>
+            {firstDay && (
+              <BoundaryLine label={t('boundaryFirst')} day={firstDay} locale={locale} />
+            )}
+            {lastDay && (
+              <BoundaryLine label={t('boundaryLast')} day={lastDay} locale={locale} />
+            )}
+          </>
+        )}
+      </ul>
+      <p className="mt-2 text-xs text-text-sub">{t('boundaryHint')}</p>
+    </div>
   );
 }
 
@@ -404,6 +489,16 @@ export function BreakdownTable({ breakdown, className }: BreakdownTableProps) {
           )}
         </table>
       </div>
+
+      {/* Boundary-day fractions — one strip below both variants (rendered only
+          when there are month rows and the engine surfaced the boundaries). */}
+      {rows.length > 0 && (
+        <BoundaryDays
+          firstDay={breakdown.firstDay}
+          lastDay={breakdown.lastDay}
+          locale={locale}
+        />
+      )}
     </div>
   );
 }

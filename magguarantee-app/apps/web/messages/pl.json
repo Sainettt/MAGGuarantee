@@ -1761,7 +1761,14 @@
       "excludedDaysHint": "Niedziele są zawsze wyłączone; soboty — o ile nie są objęte gwarancją sobotnią. Powyżej tylko święta i zakazy ruchu, za które nie liczy się dopłata.",
       "showDetails": "Pokaż szczegóły",
       "hideDetails": "Ukryj szczegóły",
-      "noExclusions": "Brak wyłączonych dni"
+      "noExclusions": "Brak wyłączonych dni",
+      "boundaryTitle": "Pierwszy / ostatni dzień okresu",
+      "boundaryFirst": "Pierwszy dzień",
+      "boundaryLast": "Ostatni dzień",
+      "boundarySingle": "Dzień okresu",
+      "boundaryCounted": "{value} dnia",
+      "boundaryExcluded": "{value} dnia · nie zaliczony",
+      "boundaryHint": "Dni graniczne liczone są proporcjonalnie do godzin wyjazdu i powrotu."
     },
     "reklamacja": {
       "sheetTitle": "Złóż reklamację",
@@ -2094,7 +2101,7 @@
         "advanceTitle": "Oznacz jako załadowany",
         "advanceDescription": "Wyjazd {plate} zostanie oznaczony jako załadowany (ładunek znaleziony, zlecenie wystawione).",
         "spedOrderNumberLabel": "Nr zlecenia ze spedu",
-        "spedOrderNumberPlaceholder": "np. SPED-12345",
+        "spedOrderNumberPlaceholder": "np. ZL12345/01/26",
         "spedOrderNumberRequired": "Nr zlecenia ze spedu jest wymagany.",
         "rollbackTitle": "Cofnij do: zgłoszony",
         "rollbackDescription": "Wyjazd {plate} wróci do statusu zgłoszony. Możliwe tylko zanim ruszy w trasę.",

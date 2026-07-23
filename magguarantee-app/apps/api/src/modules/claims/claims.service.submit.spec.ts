@@ -295,6 +295,10 @@ function makeKmCalc(result?: Partial<KmCalcResult>): KmCalcService {
       kmGuaranteed: 10_800,
       ratePerKmEffective: 0.5,
       breakdown: [],
+      // Boundary-day credited fractions surfaced by the engine — a Mar 9
+      // (Mon) → Mar 13 (Fri) style window with a 06:00 start / 12:00 stop.
+      firstDay: { date: '2026-03-09', fraction: 0.75 },
+      lastDay: { date: '2026-03-13', fraction: 0.5 },
       ...result,
     })),
   } as unknown as KmCalcService;
@@ -500,6 +504,17 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     expect(repoFake.creates[0]!.data.origPaymentEur).toBe(
       repoFake.creates[0]!.data.paymentEur,
     );
+    // The engine's boundary-day credited fractions are threaded onto the
+    // persisted `Claim.breakdown` JSONB so the web "Miesiąc" block can render
+    // "ile z pierwszego / ostatniego dnia zaliczono" from the stored claim.
+    expect(repoFake.creates[0]!.data.breakdown.firstDay).toEqual({
+      date: '2026-03-09',
+      fraction: 0.75,
+    });
+    expect(repoFake.creates[0]!.data.breakdown.lastDay).toEqual({
+      date: '2026-03-13',
+      fraction: 0.5,
+    });
   });
 
   // ── cooldown gate (cooldownCheck) ────────────────────────

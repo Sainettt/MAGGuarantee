@@ -62,6 +62,8 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
       kmGuaranteed: 10_800,
       ratePerKmEffective: 0.5,
       breakdown: [],
+      firstDay: null,
+      lastDay: null,
     },
     status: 'NA_WERYFIKACJI',
     statusChangedAt: null,
@@ -148,6 +150,8 @@ function build(opts: {
     kmGuaranteed: 12_000,
     ratePerKmEffective: 0.5,
     breakdown: [],
+    firstDay: null,
+    lastDay: null,
     ...opts.kmResult,
   }));
   const kmCalc = { calc: kmCalcSpy } as unknown as KmCalcService;

@@ -522,6 +522,11 @@ export class ClaimsService {
       kmGuaranteed: calc.kmGuaranteed,
       ratePerKmEffective: calc.ratePerKmEffective,
       breakdown: calc.breakdown,
+      // Credited fraction of the period's first/last calendar day (RAW, pre
+      // `hoursAdjusted`) — surfaced so the "Miesiąc" block can show exactly how
+      // much of each boundary day was counted without re-deriving the walk.
+      firstDay: calc.firstDay,
+      lastDay: calc.lastDay,
     };
 
     // `dateStart` / `dateEnd` were already parsed to UTC midnight at the top
@@ -789,6 +794,11 @@ export class ClaimsService {
       kmGuaranteed: calc.kmGuaranteed,
       ratePerKmEffective: calc.ratePerKmEffective,
       breakdown: calc.breakdown,
+      // Credited fraction of the period's first/last calendar day (RAW, pre
+      // `hoursAdjusted`) — surfaced so the "Miesiąc" block can show exactly how
+      // much of each boundary day was counted without re-deriving the walk.
+      firstDay: calc.firstDay,
+      lastDay: calc.lastDay,
     };
 
     const recalcPatch: UpdateClaimData = {
@@ -935,6 +945,11 @@ export class ClaimsService {
       kmGuaranteed: calc.kmGuaranteed,
       ratePerKmEffective: calc.ratePerKmEffective,
       breakdown: calc.breakdown,
+      // Credited fraction of the period's first/last calendar day (RAW, pre
+      // `hoursAdjusted`) — surfaced so the "Miesiąc" block can show exactly how
+      // much of each boundary day was counted without re-deriving the walk.
+      firstDay: calc.firstDay,
+      lastDay: calc.lastDay,
     };
 
     const recalcPatch: UpdateClaimData = {
@@ -2012,6 +2027,11 @@ export class ClaimsService {
         kmGuaranteed: calc.kmGuaranteed,
         ratePerKmEffective: calc.ratePerKmEffective,
         breakdown: calc.breakdown,
+        // Credited fraction of the boundary days (RAW, pre `hoursAdjusted`) so
+        // the carrier new-claim / verifier live preview can render "ile z
+        // pierwszego / ostatniego dnia zaliczono" without re-deriving the walk.
+        firstDay: calc.firstDay,
+        lastDay: calc.lastDay,
       },
       // Surfaced only on the delegation-derived path so the carrier form can
       // show the read-only period + time window + vehicle/trailer/driver.
@@ -2423,6 +2443,11 @@ export class ClaimsService {
       kmGuaranteed: calc.kmGuaranteed,
       ratePerKmEffective: calc.ratePerKmEffective,
       breakdown: calc.breakdown,
+      // Credited fraction of the period's first/last calendar day (RAW, pre
+      // `hoursAdjusted`) — surfaced so the "Miesiąc" block can show exactly how
+      // much of each boundary day was counted without re-deriving the walk.
+      firstDay: calc.firstDay,
+      lastDay: calc.lastDay,
     };
 
     return {

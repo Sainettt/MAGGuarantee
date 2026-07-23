@@ -441,6 +441,21 @@ export const MonthBreakdownSchema = z.object({
 export type MonthBreakdownDto = z.infer<typeof MonthBreakdownSchema>;
 
 /**
+ * The claim period's boundary calendar day + the fraction of it actually
+ * credited (0..1, 2-dp). Mirror of `KmCalcResult.firstDay` / `.lastDay` in
+ * `domain/km-calc.ts`. `0` when the boundary day was excluded (Sunday /
+ * EU-ban weekday / non-qualifying or feature-off Saturday); `1` for a counted
+ * whole day or a counted qualifying Saturday; the time-based fraction for a
+ * counted weekday. This is the RAW credited fraction, BEFORE the month-level
+ * `hoursAdjusted` distribution.
+ */
+export const BoundaryDaySchema = z.object({
+  date: IsoDateSchema,
+  fraction: z.number(),
+});
+export type BoundaryDayDto = z.infer<typeof BoundaryDaySchema>;
+
+/**
  * Wire shape for the full km-calc envelope (persisted JSONB on
  * `Claim.breakdown`, returned by `/preview` and `/claims/:nrZgl`).
  *
@@ -450,6 +465,15 @@ export type MonthBreakdownDto = z.infer<typeof MonthBreakdownSchema>;
  * rows written before this field existed do NOT carry the key — the
  * trailing `.transform()` backfills `rawTotalDays = totalDays` so the UI
  * cleanly collapses to a single-value readout (the "no adjustment" path).
+ *
+ * `firstDay` / `lastDay` carry the credited fraction of the period's boundary
+ * calendar days so the "Miesiąc" breakdown block can show exactly how much of
+ * the first / last day was counted without re-deriving the calendar walk
+ * client-side. `.nullable().optional()` (default `null`) so legacy persisted
+ * `Claim.breakdown` rows written before this field existed still parse — new
+ * rows always include them, and a valid range always reports a non-null object
+ * (an excluded boundary day reports `fraction: 0`, not `null`; `null` is
+ * reserved for the invalid/empty-range engine path).
  *
  * Zod 3 cannot reference sibling fields from inside `.default(...)` (the
  * default callback receives no args), so the missing-field fallback has to
@@ -462,6 +486,8 @@ export const KmCalcBreakdownSchema = z
     kmGuaranteed: z.number().nonnegative(),
     ratePerKmEffective: z.number().nonnegative(),
     breakdown: z.array(MonthBreakdownSchema),
+    firstDay: BoundaryDaySchema.nullable().optional().default(null),
+    lastDay: BoundaryDaySchema.nullable().optional().default(null),
   })
   .transform((v) => ({
     ...v,

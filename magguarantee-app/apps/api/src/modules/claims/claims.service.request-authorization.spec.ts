@@ -101,6 +101,8 @@ function makeBreakdown(): KmCalcBreakdown {
         excludedDays: [],
       },
     ],
+    firstDay: null,
+    lastDay: null,
   };
 }
 

@@ -93,6 +93,8 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
       kmGuaranteed: 10_800,
       ratePerKmEffective: 0.5,
       breakdown: [],
+      firstDay: null,
+      lastDay: null,
     },
     status: 'NA_WERYFIKACJI',
     statusChangedAt: new Date('2026-04-21T08:00:00.000Z'),
@@ -241,6 +243,8 @@ function makeKmCalcService(): {
     kmGuaranteed: 10_800,
     ratePerKmEffective: 0.5,
     breakdown: [],
+    firstDay: { date: '2026-04-01', fraction: 0.67 },
+    lastDay: { date: '2026-04-20', fraction: 0.75 },
   };
   const svc = {
     calc: jest.fn(async (input: unknown) => {
@@ -419,6 +423,10 @@ describe('ClaimsService.previewForExisting — multi-role gate', () => {
     expect(out.paymentEur).toBe(1_400);
     expect(out.ratePerKmEffective).toBe(0.5);
     expect(out.breakdown.totalDays).toBe(20);
+    // The preview must surface the engine's boundary-day credited fractions so
+    // the web "Miesiąc" block can render "ile z pierwszego / ostatniego dnia".
+    expect(out.breakdown.firstDay).toEqual({ date: '2026-04-01', fraction: 0.67 });
+    expect(out.breakdown.lastDay).toEqual({ date: '2026-04-20', fraction: 0.75 });
 
     expect(km.calls).toHaveLength(1);
     // Critical: the admin path MUST NOT consult the carriers repo at all.

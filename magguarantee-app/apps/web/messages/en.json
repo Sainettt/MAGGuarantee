@@ -1761,7 +1761,14 @@
       "excludedDaysHint": "Sundays are always excluded; Saturdays too, unless covered by the Saturday guarantee. Only national holidays and EU truck bans are listed above, since those are why a workday didn't pay out.",
       "showDetails": "Show details",
       "hideDetails": "Hide details",
-      "noExclusions": "No excluded days"
+      "noExclusions": "No excluded days",
+      "boundaryTitle": "First / last day of the period",
+      "boundaryFirst": "First day",
+      "boundaryLast": "Last day",
+      "boundarySingle": "Single day",
+      "boundaryCounted": "{value} days",
+      "boundaryExcluded": "{value} days · not counted",
+      "boundaryHint": "Boundary days are credited in proportion to the departure and arrival times."
     },
     "reklamacja": {
       "sheetTitle": "Submit reclamation",
@@ -2094,7 +2101,7 @@
         "advanceTitle": "Mark as loaded",
         "advanceDescription": "Trip {plate} will be marked as loaded (load found, order issued).",
         "spedOrderNumberLabel": "Sped order number",
-        "spedOrderNumberPlaceholder": "e.g. SPED-12345",
+        "spedOrderNumberPlaceholder": "e.g. ZL12345/01/26",
         "spedOrderNumberRequired": "Sped order number is required.",
         "rollbackTitle": "Roll back to: reported",
         "rollbackDescription": "Trip {plate} will return to the reported status. Only possible before it sets off.",

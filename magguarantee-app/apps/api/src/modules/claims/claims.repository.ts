@@ -901,6 +901,12 @@ function decimalToNumber(
  * NOT carry the key — backfill it from `totalDays` so the `<HoursReadout>`
  * UI collapses to a single value rather than rendering `undefined`.
  *
+ * Same story for `firstDay` / `lastDay` (the credited boundary-day fractions):
+ * rows written before those fields existed lack the keys, so backfill them to
+ * `null` — the same fallback `KmCalcBreakdownSchema.default(null)` would apply
+ * via Zod. `null` here means "unknown for a legacy row", distinct from a valid
+ * computed `{ date, fraction: 0 }` (an excluded boundary day on a fresh calc).
+ *
  * The DB read path bypasses Zod parsing (we trust our own writes), so the
  * `.transform()` defined on `KmCalcBreakdownSchema` does NOT run here. Hence
  * the explicit hydration call.
@@ -918,5 +924,8 @@ function hydrateBreakdown(raw: unknown): KmCalcBreakdown | null {
   return {
     ...(obj as KmCalcBreakdown),
     rawTotalDays,
+    // Legacy rows predate the boundary-day fields — default to null.
+    firstDay: obj.firstDay ?? null,
+    lastDay: obj.lastDay ?? null,
   };
 }

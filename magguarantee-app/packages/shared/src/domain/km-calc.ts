@@ -131,6 +131,21 @@ export interface KmCalcResult {
   ratePerKmEffective: number;
   /** Per-month rows, sorted by `yearMonth`. */
   breakdown: MonthBreakdown[];
+  /**
+   * The claim period's first calendar day + the fraction of it actually credited
+   * (0..1, 2-dp). 0 when that day was excluded (Sunday / EU-ban weekday /
+   * non-qualifying or feature-off Saturday); 1 for a counted whole day or a
+   * counted qualifying Saturday; the time-based fraction for a counted weekday.
+   * This is the RAW credited fraction BEFORE the proportional `hoursAdjusted`
+   * correction (that correction is a month-level downtime distribution, not a
+   * per-day edit). `null` only when the date range is invalid/empty.
+   */
+  firstDay: { date: string; fraction: number } | null;
+  /**
+   * Symmetric: the period's last calendar day. For a single-day period,
+   * `firstDay` and `lastDay` carry the SAME date + fraction.
+   */
+  lastDay: { date: string; fraction: number } | null;
 }
 
 export interface KmCalcInput {
@@ -345,10 +360,19 @@ function accumulateMonthDays(
   monthData: Map<string, InternalMonthAcc>;
   weekdayRawTotal: number;
   saturdayTotal: number;
+  firstDay: { date: string; fraction: number } | null;
+  lastDay: { date: string; fraction: number } | null;
 } {
   const monthData = new Map<string, InternalMonthAcc>();
   let weekdayRawTotal = 0;
   let saturdayTotal = 0;
+  // Credited fraction of the period's boundary days, captured DURING the walk
+  // so the number matches the calendar decision exactly (Sunday/ban → 0,
+  // counted weekday → its time fraction, counted qualifying Saturday → 1).
+  // These are the RAW credited fractions — `hoursAdjusted` (applied later) is a
+  // month-level distribution and never rewrites an individual day.
+  let firstDay: { date: string; fraction: number } | null = null;
+  let lastDay: { date: string; fraction: number } | null = null;
 
   // Iterate by day. We mutate a single Date locally — the caller's input
   // is never touched (we re-construct from `start.date`).
@@ -384,6 +408,12 @@ function accumulateMonthDays(
 
     const banLabel = banDays.get(dateKey);
 
+    // The exact km-credit weight the walk adds for THIS day. Stays 0 for every
+    // excluded branch (Sunday / ban / non-qualifying or feature-off Saturday),
+    // becomes the time fraction for a counted weekday, and 1 for a counted
+    // qualifying Saturday. Surfaced for the boundary days below.
+    let credited = 0;
+
     if (dow === 0) {
       // Sunday — always excluded, silently (legacy behavior, unchanged).
     } else if (dow === 6) {
@@ -401,6 +431,7 @@ function accumulateMonthDays(
             acc.saturdaysCounted += 1;
             acc.saturdayDays.push(dateKey);
             saturdayTotal += 1;
+            credited = 1;
           }
         }
         // Even/non-qualifying Saturday → skip silently.
@@ -414,13 +445,19 @@ function accumulateMonthDays(
         const fraction = fractionForDay({ isFirst, isLast, isSingle, hStart, hStop });
         acc.rawDays += fraction;
         weekdayRawTotal += fraction;
+        credited = fraction;
       }
     }
+
+    // Capture the credited fraction of the boundary days. For a single-day
+    // period `isFirst` and `isLast` both hold, so both carry the same value.
+    if (isFirst) firstDay = { date: dateKey, fraction: round2(credited) };
+    if (isLast) lastDay = { date: dateKey, fraction: round2(credited) };
 
     cur.setDate(cur.getDate() + 1);
   }
 
-  return { monthData, weekdayRawTotal, saturdayTotal };
+  return { monthData, weekdayRawTotal, saturdayTotal, firstDay, lastDay };
 }
 
 /**
@@ -482,6 +519,9 @@ export function calcKmGwarantPerMonth(input: KmCalcInput): KmCalcResult {
       kmGuaranteed: 0,
       ratePerKmEffective: round3(input.fallback.ratePerKm),
       breakdown: [],
+      // Invalid/empty range → no boundary days to report.
+      firstDay: null,
+      lastDay: null,
     };
   }
 
@@ -492,15 +532,16 @@ export function calcKmGwarantPerMonth(input: KmCalcInput): KmCalcResult {
   // qualifying Saturday landing on a ban isn't paid. Weekday counting is
   // gated on `!weekend`, so the extra Saturday entries never affect it.
   const banDays = getEUBanDays(start.year, end.year, true);
-  const { monthData, weekdayRawTotal, saturdayTotal } = accumulateMonthDays(
-    start,
-    end,
-    hStart,
-    hStop,
-    input.limits,
-    input.fallback,
-    banDays,
-  );
+  const { monthData, weekdayRawTotal, saturdayTotal, firstDay, lastDay } =
+    accumulateMonthDays(
+      start,
+      end,
+      hStart,
+      hStop,
+      input.limits,
+      input.fallback,
+      banDays,
+    );
 
   // Sort accs by yearMonth before applying the share-based adjustment so
   // the output breakdown is deterministic.
@@ -562,5 +603,10 @@ export function calcKmGwarantPerMonth(input: KmCalcInput): KmCalcResult {
     kmGuaranteed,
     ratePerKmEffective,
     breakdown,
+    // Boundary-day credited fractions captured during the walk (RAW, pre
+    // `hoursAdjusted`). Non-null for any valid range (a boundary day that was
+    // excluded reports `fraction: 0`).
+    firstDay,
+    lastDay,
   };
 }

@@ -89,6 +89,8 @@ function makeBreakdown(): KmCalcBreakdown {
         excludedDays: [],
       },
     ],
+    firstDay: null,
+    lastDay: null,
   };
 }
 
@@ -270,6 +272,8 @@ function makeKmCalcService(
         kmGuaranteed: 10_800,
         ratePerKmEffective: 0.5,
         breakdown: makeBreakdown().breakdown,
+        firstDay: null,
+        lastDay: null,
         ...result,
       };
     }),

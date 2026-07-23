@@ -818,3 +818,130 @@ describe('calcKmGwarantPerMonth — odd-Saturday guarantee', () => {
     expect(r.kmGuaranteed).toBe(11162); // 10622 + 540
   });
 });
+
+// ─── Boundary-day credited fractions (firstDay / lastDay) ────────
+//
+// The engine surfaces, for the period's first and last calendar day, the
+// RAW credited fraction (0..1, 2-dp) BEFORE the month-level `hoursAdjusted`
+// distribution. `0` when that day was excluded (Sunday / EU-ban weekday /
+// non-qualifying or feature-off Saturday); `1` for a counted whole day or a
+// counted qualifying Saturday; the time fraction for a counted weekday. These
+// drive the carrier "Miesiąc" preview block; capturing them in the engine (not
+// re-deriving downstream) is the same drift fix applied to the Saturday hint.
+describe('calcKmGwarantPerMonth — boundary-day credited fractions', () => {
+  it('multi-day with timeFrom 06:00 / timeTo 12:00 → firstDay 0.75, lastDay 0.5', () => {
+    // Mar 9 (Mon, first, starts 06:00 → (24-6)/24 = 0.75) … Mar 13 (Fri, last,
+    // stops 12:00 → 12/24 = 0.5). Distinct dates on the two boundaries.
+    const r = run({
+      dateStart: '2026-03-09',
+      dateEnd: '2026-03-13',
+      timeFrom: '06:00',
+      timeTo: '12:00',
+    });
+    expect(r.firstDay).toEqual({ date: '2026-03-09', fraction: 0.75 });
+    expect(r.lastDay).toEqual({ date: '2026-03-13', fraction: 0.5 });
+  });
+
+  it('single-day with timeFrom/timeTo → firstDay === lastDay, fraction = window/24', () => {
+    // Mar 10 (Tue), 08:00–16:00 → 8/24 = 0.3333 → round2 0.33. Both boundaries
+    // are the SAME calendar day, so firstDay and lastDay carry identical values.
+    const r = run({
+      dateStart: '2026-03-10',
+      dateEnd: '2026-03-10',
+      timeFrom: '08:00',
+      timeTo: '16:00',
+    });
+    expect(r.firstDay).toEqual({ date: '2026-03-10', fraction: 0.33 });
+    expect(r.lastDay).toEqual(r.firstDay);
+  });
+
+  it('no times → both boundary weekdays credited whole (fraction 1)', () => {
+    const r = run({ dateStart: '2026-03-09', dateEnd: '2026-03-13' });
+    expect(r.firstDay).toEqual({ date: '2026-03-09', fraction: 1 });
+    expect(r.lastDay).toEqual({ date: '2026-03-13', fraction: 1 });
+  });
+
+  it('single-day counted weekday, no times → firstDay === lastDay, fraction 1', () => {
+    const r = run({ dateStart: '2026-03-10', dateEnd: '2026-03-10' });
+    expect(r.firstDay).toEqual({ date: '2026-03-10', fraction: 1 });
+    expect(r.lastDay).toEqual({ date: '2026-03-10', fraction: 1 });
+  });
+
+  it('first day on a Sunday → firstDay.fraction 0 (excluded, NOT null)', () => {
+    // Mar 8 2026 is a Sunday. It is excluded (credited 0) but still surfaced as
+    // the boundary day with fraction 0 — `null` is reserved for invalid ranges.
+    const r = run({ dateStart: '2026-03-08', dateEnd: '2026-03-12' });
+    expect(r.firstDay).toEqual({ date: '2026-03-08', fraction: 0 });
+    // Last day (Thu Mar 12) is a counted whole weekday.
+    expect(r.lastDay).toEqual({ date: '2026-03-12', fraction: 1 });
+  });
+
+  it('last day on a Sunday → lastDay.fraction 0', () => {
+    // Mar 8 2026 (Sun) as the closing boundary.
+    const r = run({ dateStart: '2026-03-04', dateEnd: '2026-03-08' });
+    expect(r.firstDay).toEqual({ date: '2026-03-04', fraction: 1 });
+    expect(r.lastDay).toEqual({ date: '2026-03-08', fraction: 0 });
+  });
+
+  it('first day on an EU-ban holiday (1 Jan Nowy Rok) → firstDay.fraction 0', () => {
+    // Jan 1 2026 is a Thursday AND Nowy Rok — a banned weekday, credited 0.
+    const r = run({ dateStart: '2026-01-01', dateEnd: '2026-01-09' });
+    expect(r.firstDay).toEqual({ date: '2026-01-01', fraction: 0 });
+    expect(r.lastDay).toEqual({ date: '2026-01-09', fraction: 1 });
+  });
+
+  it('last day on an EU-ban holiday (1 May Swieto Pracy) → lastDay.fraction 0', () => {
+    // May 1 2026 is a Friday AND Swieto Pracy — banned weekday, credited 0.
+    const r = run({ dateStart: '2026-04-27', dateEnd: '2026-05-01' });
+    expect(r.firstDay).toEqual({ date: '2026-04-27', fraction: 1 });
+    expect(r.lastDay).toEqual({ date: '2026-05-01', fraction: 0 });
+  });
+
+  it('counted qualifying Saturday boundary → fraction 1 (whole, NOT fractioned by time)', () => {
+    // Feb 7 2026 (Sat, ordinal 1 → qualifies) opens the period; even with a
+    // 12:00 start the Saturday is credited as a WHOLE day (1), never fractioned.
+    const r = run({
+      dateStart: '2026-02-07',
+      dateEnd: '2026-02-09',
+      timeFrom: '12:00',
+      limits: LIMITS_2026_SAT,
+    });
+    expect(r.firstDay).toEqual({ date: '2026-02-07', fraction: 1 });
+    // Feb 9 (Mon) closes the period as a counted whole weekday.
+    expect(r.lastDay).toEqual({ date: '2026-02-09', fraction: 1 });
+  });
+
+  it('feature-off Saturday boundary → fraction 0 (legacy behavior)', () => {
+    // Mar 7 2026 (Sat) opens the period with the odd-Saturday feature OFF
+    // (LIMITS_2026 has no kmPerSaturday) → the Saturday is credited 0.
+    const r = run({ dateStart: '2026-03-07', dateEnd: '2026-03-11' });
+    expect(r.firstDay).toEqual({ date: '2026-03-07', fraction: 0 });
+    expect(r.lastDay).toEqual({ date: '2026-03-11', fraction: 1 });
+  });
+
+  it('firstDay/lastDay report the RAW pre-hoursAdjusted fraction', () => {
+    // Mar 2 (Mon) → Mar 13 (Fri), 8h downtime correction. `hoursAdjusted` is a
+    // month-level day distribution and must NOT rewrite a per-day fraction, so
+    // both boundary weekdays still report their raw credited 1.
+    const r = run({
+      dateStart: '2026-03-02',
+      dateEnd: '2026-03-13',
+      hoursAdjusted: 8,
+    });
+    // The month total was shaved (see the hoursAdjusted suite) …
+    expect(r.totalDays).toBe(9.67);
+    // … but the boundary days keep their RAW pre-adjustment fraction.
+    expect(r.firstDay).toEqual({ date: '2026-03-02', fraction: 1 });
+    expect(r.lastDay).toEqual({ date: '2026-03-13', fraction: 1 });
+  });
+
+  it('invalid / inverted range → both firstDay and lastDay are null', () => {
+    const inverted = run({ dateStart: '2026-03-15', dateEnd: '2026-03-10' });
+    expect(inverted.firstDay).toBeNull();
+    expect(inverted.lastDay).toBeNull();
+
+    const badIso = run({ dateStart: 'not-a-date', dateEnd: '2026-03-15' });
+    expect(badIso.firstDay).toBeNull();
+    expect(badIso.lastDay).toBeNull();
+  });
+});

@@ -111,6 +111,8 @@ function makeBreakdown(): KmCalcBreakdown {
         excludedDays: [],
       },
     ],
+    firstDay: null,
+    lastDay: null,
   };
 }
 
@@ -326,6 +328,8 @@ function makeKmCalcService(
         kmGuaranteed: 10_800,
         ratePerKmEffective: 0.5,
         breakdown: makeBreakdown().breakdown,
+        firstDay: null,
+        lastDay: null,
         ...result,
       };
     }),
@@ -1462,6 +1466,8 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
         kmGuaranteed: 10_800,
         ratePerKmEffective: 0.5,
         breakdown: [],
+        firstDay: null,
+        lastDay: null,
       })),
     } as unknown as KmCalcService;
     const nrZgl = {
