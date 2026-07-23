@@ -58,6 +58,7 @@
     "errorToast": "Failed to delete",
     "softTitle": "Delete — {entityLabel}",
     "softBody": "{entityName} will be removed. It can be restored later.",
+    "vehicleSoftBody": "{entityName} will be removed. The same plate number can no longer be added to the system again.",
     "softConfirm": "Delete",
     "entityLabel": {
       "carrier": "carrier",

@@ -58,6 +58,7 @@
     "errorToast": "Nie udało się usunąć",
     "softTitle": "Usuń — {entityLabel}",
     "softBody": "{entityName} zostanie usunięty. Można go później przywrócić.",
+    "vehicleSoftBody": "{entityName} zostanie usunięty. Tego samego numeru rejestracyjnego nie będzie już można dodać ponownie do systemu.",
     "softConfirm": "Usuń",
     "entityLabel": {
       "carrier": "przewoźnik",

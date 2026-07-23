@@ -67,6 +67,7 @@ import {
 } from '@/components/forms/FormDialog';
 import { RevealInset } from '@/components/forms/RevealInset';
 import { ActiveStatusRow } from '@/components/forms/ActiveStatusRow';
+import { ApiResponseError } from '@/lib/api/client';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useFormDraft } from '@/lib/hooks/useFormDraft';
@@ -255,6 +256,15 @@ export function VehicleFormDialog({
     const violations = extractViolations(err);
     if (violations.length > 0) {
       setAttachmentError(violations.join(' · '));
+      return;
+    }
+    // 409 conflicts carry a user-facing RFC-7807 message (`detail`) that names
+    // the real reason — a duplicate plate, or a plate that belongs to a
+    // previously-removed vehicle and cannot be recreated
+    // (`VEHICLE_PLATE_SOFT_DELETED`). Surface it inline instead of the opaque
+    // generic toast so the operator sees WHY the save failed.
+    if (err instanceof ApiResponseError && err.status === 409 && err.message) {
+      setAttachmentError(err.message);
       return;
     }
     toast.error(tCommon('errorGeneric'));

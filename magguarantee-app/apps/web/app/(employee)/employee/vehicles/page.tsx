@@ -291,10 +291,13 @@ export default function VehiclesPage() {
         onClose={() => setSheetOpen(false)}
       />
 
-      {/* Admin + opiekun — soft delete (restorable), no powód. The vehicle
-          hard-delete endpoint was retired (Vehicle-status rework), so admin no
-          longer runs a physical delete; the copy promises a restorable removal,
-          not a permanent one. */}
+      {/* Admin + opiekun — soft delete, no powód. The vehicle hard-delete
+          endpoint was retired (Vehicle-status rework); admin no longer runs a
+          physical delete. The copy does NOT promise re-adding: a soft-deleted
+          plate is blocked from recreation (409 VEHICLE_PLATE_SOFT_DELETED), so
+          the same registration number cannot be added to the system again —
+          hence the vehicle-specific `vehicleSoftBody` (not the shared
+          `softBody`, which drivers/trailers/carriers keep). */}
       {canDelete && (
         <ConfirmDialog
           open={deleteOpen}
@@ -302,7 +305,7 @@ export default function VehiclesPage() {
           title={tConfirm('softTitle', {
             entityLabel: tConfirm('entityLabel.vehicle'),
           })}
-          body={tConfirm('softBody', {
+          body={tConfirm('vehicleSoftBody', {
             entityName: deleteTarget?.plateNumber ?? '',
           })}
           confirmLabel={tConfirm('softConfirm')}
