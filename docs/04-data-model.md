@@ -243,7 +243,7 @@
 | `vehiclePlateSnapshot` | snapshot номера на случай удаления авто |
 | `delegationId` | FK → Delegation, **unique** (один wniosek на выезд). Nullable в БД (легаси), обязателен для новых. Период (`dateStart=departureAt`, `dateEnd=actualReturnAt ?? plannedReturnAt`) и `mileage` берутся из выезда — см. §0″ в [20](20-phase-7-eksport-weryfikator.md) |
 | `dateStart`, `dateEnd` | период гарантии (производный от выезда; pracownik может править) |
-| `timeFrom`, `timeTo` | часы (для дробных дней) |
+| `timeFrom`, `timeTo` | часы (`HH:MM`, для дробных дней) — **server-derived на submit** из точных времён выезда: `timeFrom = HH:mm(actualDepartureAt)`, `timeTo = HH:mm(actualReturnAt)`. Перевозчик их НЕ вводит; `pracownik` может переопределить при верификации (снапшот исходных — в `origTimeFrom`/`origTimeTo`) |
 | `mileage` | фактический пробег км — предзаполняется из `Σ VehicleDailyKm` (state=drove) за период; `pracownik` правит |
 | `kmGuaranteed` | расчётный гарантированный км |
 | `kmDifference` | gwarant − mileage |
@@ -261,6 +261,7 @@
 | `reklamacjaSubmitted`, `reklamacjaText`, `reklamacjaResponse`, `reklamacjaAmount` | |
 | `statusBeforeReklamacja` | предыдущий статус до перехода в `REKLAMACJA` (для rollback) |
 | `origDateStart`, `origDateEnd`, `origMileage`, `origHoursAdjusted` | immutable carrier snapshots (set-once at submit; `submitReklamacja` re-stamps с fallback `?? текущее значение`) |
+| `origTimeFrom`, `origTimeTo` | immutable snapshot деривированных часов (`HH:MM`) на submit; `pracownik`-PATCH их не трогает (правит рабочие `timeFrom`/`timeTo`) |
 | `hoursAdjustedValue` | currently applied korekta godzin — drives km-calc (`korektaDni = hoursAdjustedValue / 24`); верификатор PATCH может править только этот столбец, `origHoursAdjusted` остаётся неизменным |
 | `periodAdjustedByVerifier` | `Boolean @default(false)` — маркер «период (`dateStart/dateEnd`) правил pracownik». Граница авто-пересчёта: если `true`, переход выезда `→ zjechal` НЕ перетирает период. См. §0″ [20](20-phase-7-eksport-weryfikator.md) |
 
@@ -293,8 +294,9 @@
 | `carrierId` | FK → Carrier |
 | `driverNameSnapshot`, `driverPhoneSnapshot` | snapshot контактов на момент выезда |
 | `departureAt`, `departureCountry`, `departurePostalCode` | старт |
-| `plannedReturnAt` (date-only, `@db.Date`), `returnCountry`, `returnPostalCode` | план возврата — заполняется на этапе `zgloszony` (продуктовое решение 2026-05) |
-| `actualReturnAt` (timestamp) | факт возврата, выставляется только при переходе в `zjechal` |
+| `plannedReturnAt` (date-only, `@db.Date`), `returnCountry`, `returnPostalCode` | план возврата — заполняется на этапе `zgloszony` (продуктовое решение 2026-05). Остаётся date-only: перевозчик время съезда не заявляет |
+| `actualDepartureAt` (timestamp) | **точный datetime выезда** — задаётся weryfikator'ом при переходе `gotowy → w_trasie` (дата + время). Из него деривируется `Claim.timeFrom` |
+| `actualReturnAt` (timestamp) | **точный datetime съезда** — задаётся weryfikator'ом при переходе `w_trasie → zjechal` (дата + время). Из него деривируется `Claim.timeTo`. Тип БД без изменений; раньше вводилась только дата, теперь — дата + время |
 | `status` | `zgloszony` → `gotowy` → `w_trasie` → `zjechal` / `anulowany`. **Операционный** (REWORK 2026-06-20): eksport ставит `gotowy`, weryfikator — `w_trasie`/`zjechal`. См. §0″ в [20](20-phase-7-eksport-weryfikator.md) |
 | `reportedById` | FK → User (кто зарегистрировал) |
 | `verifiedById` | FK → User (верификатор, изменивший статус) |

@@ -922,7 +922,7 @@ Reference: legacy `ensureLimitySheet` (в легаси модель была per
 **Состояния cell:**
 - `idle` — обычный input.
 - `saving` — спиннер 12px справа от input, input disabled.
-- `success` (200ms after save) — короткая зелёная полоска под input `bg-success h-0.5`, fade-out.
+- `success` (кратко после save) — **зелёная рамка инпута** `border-success focus:border-success`, fade-out.
 - `error` — `border-danger`, value reverted, toast.
 
 **Прочие колонки** — read-only: `Zaktualizowano` (updatedAt). Месяцы года без данных показывают пустые ячейки-инпуты — отдельной «add-row» кнопки нет, сетка всегда 12 строк.
@@ -1187,7 +1187,7 @@ Headers were **abbreviated in Phase 3.1** (`Km/dzień`→`Km/dz.`, `Stawka €/k
 
 **Субботняя суб-строка (odd-Saturday guarantee).** Под строкой месяца, у которого `saturdaysCounted > 0`, рендерится дополнительная строка **«SOBOTY {n} × {km} = {total} km»** (i18n `carrier.breakdown.saturdays` = «Soboty» + `saturdaysDetail` = `{count} × {perSaturday} = {total} km`) — в **обеих** раскладках (5-колоночная таблица И stacked-cards). При `saturdaysCounted = 0` строка **не** показывается: месяц без субботней гарантии выглядит байт-в-байт как раньше. Подсказка `carrier.breakdown.excludedDaysHint` переформулирована — «Niedziele są zawsze wyłączone; soboty — o ile nie są objęte gwarancją sobotnią. …» (воскресенья исключены всегда; субботы — если не покрыты субботней гарантией). Зачётная суббота, попавшая на EU-ban/праздник, уходит в список excluded-дней (не оплачивается, не считается днём).
 
-**Граничный хинт на форме претензии (`/carrier/claims/new`).** Под полями Godzina od / Godzina do хинт «dzień nie jest liczony, więc godzina … nie wpływa na wyliczenie» получает отдельный вариант для **зачётной субботы**: такой день считается **целиком** (без пропорции по часам), поэтому время всё равно не влияет — но по иной причине, чем для выходного/праздника (те «не считаются вовсе»). `hoursAdjusted` режет только будни.
+> ⚠️ **УДАЛЕНО (§0‴, 2026-07-08):** граничный хинт про время на форме претензии (под бывшими полями Godzina od / Godzina do, включая субботний вариант) — **убран**: форма `/carrier/claims/new` больше не содержит полей ввода времени (часы деривируются из выезда и показываются read-only «Godziny (z wyjazdu)»). Подсказка `excludedDaysHint` в таблице разбивки (выше) — это **другое**, остаётся.
 
 #### Responsive behavior (canonical — CONTAINER queries, not viewport breakpoints)
 
@@ -5503,11 +5503,16 @@ PL+EN key parity holds (existing i18n-parity check covers this).
 
 ## 7.10 Delegation operational statuses RETURN (eksport + weryfikator) + wniosek↔wyjazd link (REWORK 2026-06-20 #4 — AUTHORITATIVE)
 
-> **Scope.** The delegation lifecycle is operational again. Two roles drive it: **`eksport`** (flips `zgloszony→gotowy` + rollback) and **`weryfikator`** (flips `gotowy→w_trasie` and `w_trasie→zjechal` with an actual-return date). The carrier picks a delegation when submitting a wniosek (`Claim.delegationId` FK), and a late `zjechal` auto-recalculates the linked wniosek. This section specifies the **four UI artefacts** uiux owns: (1) the **5-status** `<StatusBadge>` tone-map, (2) the **status-change confirm dialogs**, (3) the **carrier `w_trasie` warning banner**, (4) the **auto-recalc badge** in the pracownik `ClaimModal`.
+> **Scope.** The delegation lifecycle is operational again. Two roles drive it: **`eksport`** (flips `zgloszony→gotowy` + rollback) and **`weryfikator`** (flips `gotowy→w_trasie` and `w_trasie→zjechal` recording the actual departure/return **datetime** — §0‴). The carrier picks a (`zjechal`) delegation when submitting a wniosek (`Claim.delegationId` FK), and a late `zjechal` auto-recalculates the linked wniosek. This section specifies the **four UI artefacts** uiux owns: (1) the **5-status** `<StatusBadge>` tone-map, (2) the **status-change confirm dialogs** (C/D now `datetime-local`), (3) the **carrier claims/new derived read-only fields** (§0‴ — the former `w_trasie` warning banner is removed), (4) the **auto-recalc badge** in the pracownik `ClaimModal`.
 >
 > **Spec source (source of truth):** [`20-phase-7-eksport-weryfikator.md` §0″ — REWORK 2026-06-20 #4](20-phase-7-eksport-weryfikator.md). The km-board (§7.7) stays; weryfikator gains a **second** screen (delegation statuses) alongside the km-board — two tabs.
 >
 > **HARD: no new tokens** (project no-new-token policy). Everything composes existing semantics (`info` / `warning` / `success` / `muted` / `danger`), the existing `-bg` surfaces + `dark:bg-*/10..15` opacity variants, the §7.5 confirm-dialog pattern, the §1195 carrier warning-banner recipe, and the §6.5.4 `<RecalcBadge>` precedent. **Zero** `tailwind.config.ts` / `globals.css` changes.
+>
+> ⚠️ **UPDATE (2026-07-08, §0‴ — точные времена).** Since this section was written the weryfikator dialogs became **datetime** and wniosek-submission tightened to `zjechal`-only. Net changes (annotated inline below):
+> - **`<MarkInTransitDialog>`** now carries a `datetime-local` field → `POST /delegations/:id/in-transit` `{ actualDepartureAt }` (was a plain confirm). Auto-fill = the carrier-declared `departureAt`.
+> - **`<MarkReturnedDialog>`** field is now `datetime-local` (date **+ time**) → `{ actualReturnAt }` (was date-only). Auto-fill = `plannedReturnAt` date + a default time. New guards: future (`RETURN_DATE_FUTURE`) and `actualReturnAt >= actualDepartureAt` (`RETURN_BEFORE_DEPARTURE`).
+> - **Carrier form (§7.10.3):** the `w_trasie` **warning banner + soft-confirm gate are REMOVED** — submission is allowed **only from `zjechal`**. The carrier no longer inputs a time window; `timeFrom`/`timeTo` are **derived** from the delegation's actual times and shown read-only («Godziny (z wyjazdu)»). The submit body drops `timeFrom`/`timeTo`.
 
 ### 7.10.1 `<StatusBadge>` — the 5-status delegation tone-map (LOCKED)
 
@@ -5534,52 +5539,43 @@ All dialogs reuse the **§7.1 confirm-`<Dialog>` pattern** (centered `<Dialog>`,
 |---|---|---|---|---|---|---|
 | **A** | eksport \| admin | `zgloszony` | «Oznacz jako gotowy» | plain confirm, no input. Desc: «Wyjazd {plate} zostanie oznaczony jako *gotowy* (ładunek znaleziony, zlecenie wystawione).» | «Oznacz gotowy» | `POST /delegations/:id/ready` |
 | **B** | eksport \| admin | `gotowy` | «Cofnij do: zgłoszony» | plain confirm, no input. Desc: «Wyjazd {plate} wróci do statusu *zgłoszony*. Możliwe tylko zanim ruszy w trasę.» | «Cofnij status» | `POST /delegations/:id/ready` (rollback; api toggles `gotowy→zgloszony`) |
-| **C** | weryfikator \| admin | `gotowy` | «Oznacz jako w trasie» | plain confirm, no input. Desc: «Wyjazd {plate} zostanie oznaczony jako *w trasie*.» | «Oznacz w trasie» | `POST /delegations/:id/in-transit` |
-| **D** | weryfikator \| admin | `w_trasie` | «Oznacz jako zjechał» | **one date-only field** — `<FormField label="Data zjazdu" required>` wrapping `<Input type="date" className="h-10" autoFocus>` bound to `actualReturnAt`, **pre-filled with `plannedReturnAt`**. Desc: «Podaj faktyczną datę zjazdu dla wyjazdu {plate}.» | «Oznacz zjechał» | `POST /delegations/:id/returned` `{ actualReturnAt }` |
+| **C** | weryfikator \| admin | `gotowy` | «Oznacz jako w trasie» | **one datetime field (§0‴)** — `<FormField label="Data i godzina wyjazdu" required>` wrapping `<Input type="datetime-local" className="h-10" autoFocus>` bound to `actualDepartureAt`, **pre-filled with the carrier-declared `departureAt`** (date + time). Desc: «Podaj faktyczny moment wyjazdu dla wyjazdu {plate}.» | «Oznacz w trasie» | `POST /delegations/:id/in-transit` `{ actualDepartureAt }` |
+| **D** | weryfikator \| admin | `w_trasie` | «Oznacz jako zjechał» | **one datetime field (§0‴)** — `<FormField label="Data i godzina zjazdu" required>` wrapping `<Input type="datetime-local" className="h-10" autoFocus>` bound to `actualReturnAt`, **pre-filled with `plannedReturnAt` (date) + a default time**. Desc: «Podaj faktyczny moment zjazdu dla wyjazdu {plate}.» | «Oznacz zjechał» | `POST /delegations/:id/returned` `{ actualReturnAt }` |
 
-**Dialog A/B/C — plain confirm (no input).** Direct `<Dialog>` use; footer = ghost «Anuluj» (dismiss; this is NOT the business-cancel action — delegation-cancel stays carrier/admin-only and is not on these boards) + brand-red primary. Success → close, table refetch, toast («Oznaczono jako gotowy» / «Cofnięto do: zgłoszony» / «Oznaczono jako w trasie»).
+**Dialog A/B — plain confirm (no input).** Direct `<Dialog>` use; footer = ghost «Anuluj» (dismiss; this is NOT the business-cancel action — delegation-cancel stays carrier/admin-only and is not on these boards) + brand-red primary. Success → close, table refetch, toast («Oznaczono jako gotowy» / «Cofnięto do: zgłoszony»). **C и D теперь несут datetime-input** (§0‴, см. ниже) — не plain confirm.
 
 **Dialog B is a guarded rollback.** The «Cofnij do: zgłoszony» action is offered **only** on `gotowy` rows and **only** while the delegation is not yet `w_trasie` (the api enforces this; the UI simply doesn't render the action once the row advances). On the eksport board this is the row's secondary affordance (a `<Button size="sm" variant="ghost">` sitting after the primary «Oznacz gotowy» disappears, i.e. a `gotowy` row shows the rollback as its single action). Do not render a rollback on `w_trasie`/`zjechal`/`anulowany`.
 
-**Dialog D — confirm + date input (the §7.1(b) `ConfirmWithDateDialog` shape).** RHF + Zod, `mode:'onChange'`, submit disabled until valid, dialog stays open on error so the date isn't re-typed. Differences vs the legacy §7.1 returned-dialog (locked here):
-- **`actualReturnAt` is pre-filled with `plannedReturnAt`** (the planned return is the best default; the verifier overrides only if the truck came back on a different day). If `plannedReturnAt` is somehow absent, default to today.
-- **Date-only** (`YYYY-MM-DD`, DB `@db.Date`) — `<Input type="date">`, never `datetime-local`. Time of return is the pracownik's zone (`timeTo` on the claim), never entered here.
-- Required (empty → inline «Podaj datę zjazdu»). Suggested guards (not hard DS rules, api re-validates): reject a **future** date («Data zjazdu nie może być w przyszłości»); a lower-bound `actualReturnAt >= departureAt` sanity check if `departureAt` is in scope.
-- Success → close, refetch, toast «Oznaczono jako zjechał». **Side-effects are invisible to this dialog** (`vehicle.lastDroveAt` bump + linked-wniosek auto-recalc happen server-side); if the linked claim was recalculated the operator is not interrupted — the signal surfaces later on the pracownik `ClaimModal` (§7.10.4), per the "audit + UI flag, no email" decision.
+**Dialogs C & D — confirm + datetime input (§0‴; the §7.1(b) `ConfirmWithDateDialog` shape, now datetime).** RHF + Zod, `mode:'onChange'`, submit disabled until valid, dialog stays open on error so the value isn't re-typed. Both use `<Input type="datetime-local">` — the weryfikator records the **exact moment** (date + time), NOT just a date. C binds `actualDepartureAt`, D binds `actualReturnAt`:
+- **C `actualDepartureAt`** is pre-filled with the carrier-declared `departureAt` (date + time). Guards (api re-validates): `>= start-of-day(departureAt)` and `<= now` — future rejected (`DEPARTURE_DATE_FUTURE`, now datetime-granular).
+- **D `actualReturnAt`** is pre-filled with `plannedReturnAt` (date) + a default time; the verifier adjusts if the truck came back at a different moment. If `plannedReturnAt` is somehow absent, default to today. Guards: reject a **future** datetime (`RETURN_DATE_FUTURE`, «Data zjazdu nie może być w przyszłości») and enforce `actualReturnAt >= actualDepartureAt` (`RETURN_BEFORE_DEPARTURE`).
+- Required (empty → inline «Podaj datę i godzinę»). `Claim.timeFrom`/`timeTo` are later **derived** from these actual times (the carrier no longer enters a time window).
+- Success → close, refetch, toast («Oznaczono jako w trasie» / «Oznaczono jako zjechał»). **Side-effects are invisible to the D dialog** (`vehicle.lastDroveAt` bump + linked-wniosek auto-recalc happen server-side); if the linked claim was recalculated the operator is not interrupted — the signal surfaces later on the pracownik `ClaimModal` (§7.10.4), per the "audit + UI flag, no email" decision.
 
 **Board placement (both roles).** Each delegation table gets a trailing `actions` cell. **At most one primary action per row** (strict state machine): `zgloszony`→A (eksport) ; `gotowy`→C (weryfikator) **or** B-rollback (eksport) depending on whose board ; `w_trasie`→D (weryfikator) ; `zjechal`/`anulowany`→ `—`. The weryfikator's two screens (km-board + delegation statuses) are **two `<Tabs>`** inside `RoleShell` — reintroduce the Phase 6.3 in-page `<Tabs>` bar now that the role has a second destination (this overrides the §7.5 "single screen, no tabs" note for weryfikator). Eksport stays a single screen (no tabs).
 
-### 7.10.3 Carrier `w_trasie` warning banner (`/carrier/claims/new` — delegation picker)
+### 7.10.3 Carrier `/carrier/claims/new` — read-only derived fields (delegation picker)
 
-When the carrier submits a wniosek by **picking their delegation** (selector replaces the old manual period entry), the chosen delegation may still be `w_trasie` (not yet `zjechal`). Submitting from `w_trasie` is **allowed but soft-warned**; from `gotowy`/`zgloszony` it is **blocked** (those options aren't offered / are disabled in the picker).
+> ⚠️ **§0‴ (2026-07-08):** the former `w_trasie` **warning banner + soft-confirm gate are REMOVED** — a wniosek can be submitted **only** for a `zjechal` delegation. The carrier no longer inputs a time window; `timeFrom`/`timeTo` are derived from the delegation's actual times and shown read-only («Godziny (z wyjazdu)»).
 
-**Everything derives from the wyjazd (Phase 7 §0″ finish — 2026-06-25, AUTHORITATIVE).** The carrier's ONLY inputs on this form are: the **wyjazd**, the **time window** (`timeFrom` pre-filled from the delegation's `departureAt` / `timeTo`), an optional **comment**, and optional **attachments**. The four fields the carrier used to type — **vehicle, trailer, driver, mileage** — are now shown **pre-filled and READ-ONLY**, derived from the selected wyjazd (joining the period, which was already derived read-only). They mirror the §7.10.3 derived-period card's visual treatment (`rounded-md border border-border bg-input/40 px-3 py-2`, uppercase micro-label, value `text-sm text-text`), via a shared `ReadOnlyField` helper:
+When the carrier submits a wniosek by **picking their delegation** (selector replaces the old manual period entry), only `zjechal` outings without a claim are offered (`GET /delegations?claimable=true`); `gotowy`/`w_trasie`/`zgloszony` are not selectable.
+
+**Everything derives from the wyjazd (Phase 7 §0‴, AUTHORITATIVE).** The carrier's ONLY inputs on this form are: the **wyjazd**, an optional **comment**, and optional **attachments**. Everything else — **period, time window, vehicle, trailer, driver, mileage** — is shown **pre-filled and READ-ONLY**, derived from the selected wyjazd. They mirror the derived-period card's visual treatment (`rounded-md border border-border bg-input/40 px-3 py-2`, uppercase micro-label, value `text-sm text-text`), via a shared `ReadOnlyField` helper:
 
 | Read-only field | Data source | Empty/placeholder state |
 |---|---|---|
+| Godziny (z wyjazdu) | **preview response** `timeFrom`/`timeTo` (`HH:mm`, derived from the delegation's `actualDepartureAt`/`actualReturnAt`) | muted «— z wyjazdu» until the preview returns |
 | Vehicle plate | `selectedDelegation.vehicle.plateNumber` | before a wyjazd is picked, the whole vehicle/trailer/driver block shows one muted placeholder card («Najpierw wybierz wyjazd — pojazd, naczepa i kierowca zostaną pobrane z wyjazdu») |
 | Trailer plate | `selectedDelegation.trailer.plateNumber` | (same block placeholder) |
 | Driver name | `selectedDelegation.driver` (`firstName lastName`), falling back to `selectedDelegation.driverNameSnapshot` | (same block placeholder) |
 | Mileage (km) | **preview response** `mileage` — the server-authoritative `Σ VehicleDailyKm (state=drove)` over the derived period; updates on the same trigger as the derived period | muted `«— obliczany z wyjazdu»` until the preview returns |
 
-The submit body is the backend's `.strict()` shape — **only** `delegationId`, `timeFrom`, `timeTo`, `comment?`, `attachmentIds?` (+ the soft-confirm ack gate for `w_trasie`). The vehicle/trailer/driver/mileage are **never** sent — the api derives them from `delegationId`; sending any of them is a 400. The required-fields submit gate is just `delegationId` + `timeFrom` + `timeTo` (+ the ack when `w_trasie`). The mileage is **never carrier-editable** — there is no override input.
+The submit body is the backend's `.strict()` shape — **only** `delegationId`, `comment?`, `attachmentIds?`. `timeFrom`/`timeTo` are **no longer sent** (derived server-side from the delegation's actual times); vehicle/trailer/driver/mileage are never sent either — the api derives them from `delegationId`; sending any of them is a 400. The required-fields submit gate is just `delegationId`. The mileage and the time window are **never carrier-editable** — there is no override input.
 
-**Banner — reuse the §"Reklamacja sheet" warning-banner recipe verbatim** (the existing `bg-warning-bg` informational band), no new token:
-
-| Element | Tailwind |
-|---|---|
-| Wrapper | `flex items-start gap-2 rounded-md bg-warning-bg dark:bg-warning/15 border border-warning/40 px-3 py-2 mb-4` |
-| Icon | `<AlertTriangle size={16} className="text-warning-dark dark:text-warning shrink-0 mt-0.5" />` |
-| Text | `text-sm text-warning-dark dark:text-warning` — «Wyjazd jeszcze nie ma statusu „Zjechał" — czy na pewno chcesz złożyć wniosek?» (EN: "The delegation is not yet marked 'Returned' — are you sure you want to submit the claim?") |
-| Visibility | rendered **only** when the selected delegation's status is `w_trasie`; disappears for `zjechal`. |
-| a11y | `role="status" aria-live="polite"` (informational, must NOT steal focus — same rule as the temp-password banner §1630). |
-
-**Confirmation gate (soft).** Because the warning is *soft* (the backend accepts a `w_trasie` submission), the submit must be **explicitly confirmed once** so the carrier can't fat-finger past it:
-- Either (preferred) a `<Checkbox>` directly under the banner — «Rozumiem, że wyjazd nie jest jeszcze zakończony» — that must be ticked before the «Złóż wniosek» button enables; *or*
-- a confirm `<Dialog>` on submit (same §7.1 plain-confirm shape, title «Wyjazd nie jest zakończony», body repeating the warning copy, primary «Złóż mimo to»).
-- Web-agent's call which; the checkbox keeps the flow inline (one fewer modal) and is the recommendation. For a `zjechal` delegation **no banner, no gate** — straight submit. The banner copy + key live under `carrier.claims.wyjazdPicker.warning*`.
-
-When `dateEnd` is derived from `plannedReturnAt` (because the delegation is `w_trasie`), surface a quiet inline note next to the prefilled period — `text-xs text-text-sub` «Okres tymczasowy z planowanego powrotu — zostanie zaktualizowany po zjeździe» — so the carrier understands the date may shift when the auto-recalc fires later. Not a warning band; a plain muted hint.
+> ⚠️ **REMOVED (§0‴, 2026-07-08): `w_trasie` warning banner + soft-confirm gate + "tymczasowy okres" hint.** Since submission is now allowed **only from `zjechal`**, the whole soft-warning apparatus is gone:
+> - The `bg-warning-bg` banner («Wyjazd jeszcze nie ma statusu „Zjechał" …») and its `carrier.claims.wyjazdPicker.warning*` copy — deleted (a `w_trasie` outing is never selectable, so there is nothing to warn about).
+> - The soft-confirm `<Checkbox>` / confirm-`<Dialog>` ack gate — deleted; a `zjechal` submission is straight-through.
+> - The muted «Okres tymczasowy z planowanego powrotu…» period note — obsolete: the period always derives from the actual (`actualReturnAt`) times, never from `plannedReturnAt`, so it never shifts post-submit.
 
 ### 7.10.4 Auto-recalc badge in the pracownik `ClaimModal` (§6.5)
 
@@ -5600,11 +5596,11 @@ Rationale for tones: this mirrors the established **`success` = applied/positive
 |---|---|---|
 | `<StatusBadge>` `DelegationStatus` const-map += `gotowy` (`warning`); 5-status map per §7.10.1 | `@magguarantee/shared` (status const-map) + `components/carrier/StatusBadge.tsx` | web-agent |
 | New `<MarkReadyDialog>` (plain confirm, advance + rollback variants) | `apps/web/components/delegations/` | web-agent |
-| New `<MarkInTransitDialog>` (plain confirm) | `apps/web/components/delegations/` | web-agent |
-| New `<MarkReturnedDialog>` (confirm + date-only, pre-filled `plannedReturnAt`) | `apps/web/components/delegations/` | web-agent |
+| New `<MarkInTransitDialog>` (confirm + `datetime-local` `actualDepartureAt`, pre-filled `departureAt`) | `apps/web/components/delegations/` | web-agent |
+| New `<MarkReturnedDialog>` (confirm + `datetime-local` `actualReturnAt`, pre-filled `plannedReturnAt` + default time) | `apps/web/components/delegations/` | web-agent |
 | Eksport delegations board (`actions` col: A advance + B rollback) | `app/(eksport)/eksport/delegations/page.tsx`; default board filter `{zgloszony, gotowy, w_trasie}` + history toggle | web-agent |
 | Weryfikator gains **2nd screen** (delegation statuses) → reintroduce Phase 6.3 in-page `<Tabs>` (km-board ‖ wyjazdy); wyjazdy board `actions`: C + D | `app/(weryfikator)/…` | web-agent |
-| Carrier delegation-picker `w_trasie` warning banner + soft-confirm gate + muted "tymczasowy okres" hint | `app/(carrier)/carrier/claims/new/…` | web-agent |
+| Carrier delegation-picker: read-only derived «Godziny (z wyjazdu)» + period/vehicle/trailer/driver/mileage (§0‴ — `w_trasie` warning banner + soft-confirm gate + "tymczasowy okres" hint REMOVED; submit only from `zjechal`) | `app/(carrier)/carrier/claims/new/…` | web-agent |
 | Auto-recalc historical badge (applied `success` / skipped `warning`) in §6.5 linked-delegation row | `components/.../ClaimVerificationModal` (the §6.5 surface) | web-agent |
 | i18n: `eksport.delegations.*`, `weryfikator.delegations.*`, `carrier.claims.wyjazdPicker.*` (incl. `warning*`), `claim.autoRecalc.{applied,skipped}` | `messages/pl.json` / `en.json` | web-agent |
 | **0** changes to `tailwind.config.ts` / `globals.css`; **0** new colour/badge variants | — | — |
@@ -5613,9 +5609,9 @@ Rationale for tones: this mirrors the established **`success` = applied/positive
 
 - [ ] **5-status tone-map.** `zgloszony`→`info`, **`gotowy`→`warning`**, `w_trasie`→`success`, `zjechal`→`muted`, `anulowany`→`danger`; label always present (a11y, not colour-alone); const-map in shared; no new variant.
 - [ ] **eksport dialogs.** `zgloszony`→«Oznacz gotowy» (plain confirm → `/ready`); `gotowy`→«Cofnij do: zgłoszony» (rollback, only pre-`w_trasie`); brand-red primary; ghost «Anuluj» = dismiss only.
-- [ ] **weryfikator dialogs.** `gotowy`→«Oznacz w trasie» (plain confirm → `/in-transit`); `w_trasie`→«Oznacz zjechał» (confirm + **date-only** `actualReturnAt`, **pre-filled `plannedReturnAt`**, future-date guard, dialog stays open on error → `/returned`).
+- [ ] **weryfikator dialogs (§0‴).** `gotowy`→«Oznacz w trasie» (confirm + **`datetime-local`** `actualDepartureAt`, **pre-filled `departureAt`**, future guard `DEPARTURE_DATE_FUTURE` → `/in-transit`); `w_trasie`→«Oznacz zjechał» (confirm + **`datetime-local`** `actualReturnAt`, **pre-filled `plannedReturnAt` + default time**, guards `RETURN_DATE_FUTURE` / `RETURN_BEFORE_DEPARTURE`, dialog stays open on error → `/returned`).
 - [ ] **weryfikator two tabs.** km-board (§7.7) ‖ delegation statuses, Phase 6.3 in-page `<Tabs>`; eksport stays single screen.
-- [ ] **Carrier warning banner.** Shown only on `w_trasie` selection; copy «Wyjazd jeszcze nie ma statusu „Zjechał" — czy na pewno chcesz złożyć wniosek?»; `bg-warning-bg` recipe; soft-confirm gate (checkbox or confirm dialog) required before submit; `gotowy`/`zgloszony` not submittable; muted "tymczasowy okres" hint when period derived from `plannedReturnAt`.
+- [ ] **Carrier form derived read-only (§0‴).** Only `zjechal` outings selectable; «Godziny (z wyjazdu)» + period/vehicle/trailer/driver/mileage render read-only from the preview; submit body = `{ delegationId, comment?, attachmentIds? }`. **No** `w_trasie` warning banner, **no** soft-confirm gate, **no** "tymczasowy okres" hint (all removed).
 - [ ] **Auto-recalc badge.** §6.5 linked-delegation row shows `success` «Przeliczono wg faktycznej daty zjazdu» (applied) or `warning` «Wymaga uwagi…» (skipped); mutually exclusive; static (distinct from §6.5.4 live recalc badge); never `danger`.
 - [ ] **Token policy + dark-mode.** Zero `tailwind.config.ts`/`globals.css` changes; all surfaces legible in dark via `dark:bg-*/10..15` / `dark:text-*` variants; confirm dialogs `bg-card`, date input `bg-input`, brand-red primaries.
 

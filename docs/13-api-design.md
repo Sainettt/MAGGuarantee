@@ -342,12 +342,12 @@ soft-delete'ятся (объект в MinIO остаётся).
 
 | Method + Path | GAS |
 |---|---|
-| GET `/delegations` | Единый endpoint, фильтрация по роли. `eksport`/`weryfikator`: active-board `{zgloszony, gotowy, w_trasie}` + `?includeHistory=true`. carrier→свои, planista→свой `plannerId`, dyspozytor→своя team. (REWORK 2026-06-20: `weryfikator` снова видит выезды — §0″.) |
+| GET `/delegations` | Единый endpoint, фильтрация по роли. `eksport`/`weryfikator`: active-board `{zgloszony, gotowy, w_trasie}` + `?includeHistory=true`. carrier→свои, planista→свой `plannerId`, dyspozytor→своя team. `?claimable=true` (carrier outing-picker) → **только `zjechal`** без привязанного wniosek (§0‴: `w_trasie` больше НЕ claimable). (REWORK 2026-06-20: `weryfikator` снова видит выезды — §0″.) |
 | GET `/delegations/:id` | (lookup) — incl. `weryfikator` |
 | POST `/delegations` | `addDelegacja` (carrier → `zgloszony`) |
 | POST `/delegations/:id/ready` | **NEW** — `eksport \| admin`: `zgloszony→gotowy` (+ откат `gotowy→zgloszony`, пока не `w_trasie`). Audit `delegation.markReady`. |
-| POST `/delegations/:id/in-transit` | **NEW** — `weryfikator \| admin`: `gotowy→w_trasie`. Audit `delegation.markInTransit`. |
-| POST `/delegations/:id/returned` | **NEW** — `weryfikator \| admin`: `w_trasie→zjechal`, body `{ actualReturnAt: date }`. Txn: `vehicle.lastDroveAt = max(...)` + авто-пересчёт связанного wniosek (границы — §0″). Audit `delegation.markReturned`. |
+| POST `/delegations/:id/in-transit` | **NEW** — `weryfikator \| admin`: `gotowy→w_trasie`, body `{ actualDepartureAt }` (**ISO datetime**, required; границы `>= start-of-day(departureAt)`, `<= now`; 422 `DEPARTURE_DATE_FUTURE` — datetime-granулярный). weryfikator фиксирует точный момент выезда. Audit `delegation.markInTransit`. |
+| POST `/delegations/:id/returned` | **NEW** — `weryfikator \| admin`: `w_trasie→zjechal`, body `{ actualReturnAt }` (**ISO datetime**, required; 422 `RETURN_DATE_FUTURE` (`> now`), `RETURN_BEFORE_DEPARTURE` (`< actualDepartureAt`)). Txn: `vehicle.lastDroveAt = max(...)` + авто-пересчёт связанного wniosek (границы — §0″). Audit `delegation.markReturned`. |
 | POST `/delegations/:id/cancel` | carrier (свои `zgloszony`) **+ admin (любой активный)** → `anulowany`. |
 
 > **Side-effect (Google Chat):** контракт `POST /delegations` не меняется. После
@@ -355,7 +355,9 @@ soft-delete'ятся (объект в MinIO остаётся).
 > space (очередь `chat-notify-wyjazd`, off the request path — никогда не ломает и
 > не задерживает ответ). См. [16-jobs-and-integrations.md#google-chat-notifications](16-jobs-and-integrations.md#google-chat-notifications).
 
-> ✅ **REWORK 2026-06-20 (#4):** статусы выезда снова операционные — `in-transit`/`returned` восстановлены (у `weryfikator`) + новый `ready` (`eksport` → `gotowy`). `weryfikator` ведёт **И** km-доску машин (ниже), **И** статусы выездов (отдельное окно). `Claim.delegationId` введён — `POST /claims`/`/claims/preview` принимают `delegationId`, период и `mileage` берутся из выезда (гейт статуса `{w_trasie, zjechal}`; из `w_trasie` — soft-warning). Полная спека: [`20-phase-7-eksport-weryfikator.md` §0″](20-phase-7-eksport-weryfikator.md). (Прежнее «удалено 2026-06-10 #2 / мёртвый груз» — отменено.)
+> ✅ **REWORK 2026-06-20 (#4):** статусы выезда снова операционные — `in-transit`/`returned` восстановлены (у `weryfikator`) + новый `ready` (`eksport` → `gotowy`). `weryfikator` ведёт **И** km-доску машин (ниже), **И** статусы выездов (отдельное окно). `Claim.delegationId` введён — `POST /claims`/`/claims/preview` принимают `delegationId`, период и `mileage` берутся из выезда. Полная спека: [`20-phase-7-eksport-weryfikator.md` §0″](20-phase-7-eksport-weryfikator.md). (Прежнее «удалено 2026-06-10 #2 / мёртвый груз» — отменено.)
+>
+> ✅ **UPDATE 2026-07-08 (§0‴):** переходы несут **полный datetime** — `in-transit` `{ actualDepartureAt }`, `returned` `{ actualReturnAt }` (weryfikator фиксирует точные времена). `Claim.timeFrom`/`timeTo` **деривируются** из них (перевозчик не вводит; `pracownik` может править). Гейт подачи wniosek — **только `zjechal`** (soft-warning `DELEGATION_NOT_YET_RETURNED` и `delegationWarning` удалены). См. [`20-phase-7` §0‴](20-phase-7-eksport-weryfikator.md).
 
 ### Vehicle daily-km (weryfikator) — `/api/v1/vehicles`
 
@@ -533,12 +535,12 @@ type UserDto = {
 ### Submit claim
 
 ```ts
-// POST /claims — Phase 7 §0″ finish: carrier sends ONLY the outing +
-// time-window. Everything else is server-derived from the linked delegation.
+// POST /claims — Phase 7 §0‴ finish: carrier sends ONLY the outing.
+// timeFrom/timeTo are NO LONGER in the body — they are server-derived from the
+// delegation's actual departure/return times. Everything else is likewise
+// derived from the linked delegation.
 type SubmitClaimRequest = {
-  delegationId: string;    // chosen outing (w_trasie | zjechal, no claim yet)
-  timeFrom: string;        // HH:MM
-  timeTo: string;          // HH:MM
+  delegationId: string;    // chosen outing (MUST be `zjechal` — see status gate)
   comment?: string;
   attachmentIds?: string[]; // pre-uploaded attachment UUIDs (max 20)
 };
@@ -547,13 +549,22 @@ type SubmitClaimRequest = {
 //     / driverId; `vehiclePlateSnapshot` from Delegation.vehicle.plateNumber.
 //     (Claim persists only vehicleId + vehiclePlateSnapshot; trailer/driver are
 //     carried by the linked Delegation, not duplicated onto Claim.)
-//   • dateStart = date(departureAt), dateEnd = actualReturnAt ?? plannedReturnAt.
+//   • dateStart = date(actualDepartureAt), dateEnd = date(actualReturnAt).
+//   • timeFrom = HH:mm(actualDepartureAt), timeTo = HH:mm(actualReturnAt);
+//     both snapshotted into origTimeFrom / origTimeTo. The carrier does NOT
+//     input them; a VERIFIER (`pracownik`) MAY override timeFrom/timeTo via
+//     PATCH (double-check against a weryfikator mistake).
 //   • mileage = Σ VehicleDailyKm.km (state=drove) over [dateStart, dateEnd] of
 //     the delegation's vehicle. NO carrier override (was optional pre-§0″).
 //   • amountRequested = km-calc paymentEur (rounded 2dp).
 //   • hoursAdjusted — verifier-only (PATCH); submit always persists 0.
 // OWNERSHIP: @CarrierOwns('delegationId','body','delegationId') — the outing
 // must belong to the authenticated carrier (delegation.carrierId === carrier).
+// STATUS GATE (§0‴): the outing MUST be in status `zjechal` (both actual
+// departure & return datetimes fixed by the weryfikator) — submit AND preview
+// reject any non-`zjechal` outing. The former `w_trasie` submission with the
+// soft-warning `DELEGATION_NOT_YET_RETURNED` is REMOVED. `GET /delegations`
+// outing-picker feed for the carrier returns only `zjechal` outings.
 // GUARANTEE: a wniosek may only be filed for a vehicle under guarantee
 // (`Vehicle.agreement === true`; `false`/`null` ⇒ not guaranteed), else 422
 // `VEHICLE_NOT_GUARANTEED` (single-code `extensions.code` envelope) — gate lives
@@ -617,25 +628,27 @@ type ClaimDto = {
 
 // POST /claims/preview (new-claim form) and POST /claims/:nrZgl/preview
 // (reklamacja / verifier inspection). Two callers, two shapes:
-//   • new-claim: { delegationId, timeFrom?, timeTo?, hoursAdjusted? } — the
-//     api derives period + vehicle/trailer/driver + mileage from the outing.
+//   • new-claim (delegation path): { delegationId, hoursAdjusted? } — the api
+//     derives period + times + vehicle/trailer/driver + mileage from the outing.
+//     timeFrom/timeTo may be sent but are IGNORED here (derived from the outing).
 //   • existing/verifier: { vehicleId?, dateStart?, dateEnd?, timeFrom?, timeTo?,
 //     hoursAdjusted?, mileage? } — caller-supplied dates drive the math; the
 //     existing claim already carries vehicle/trailer/driver context.
 // On the CARRIER paths (delegationId present, or a `przewoznik` reklamacja
-// inspection) `mileage` is IGNORED — mileage is always the daily-km sum
-// (Phase 7 §0″ finish, "no carrier override"). A VERIFIER (`pracownik`/`admin`)
-// on `POST /claims/:nrZgl/preview` MAY send `mileage` to override the sum so the
-// ClaimModal's live dopłata / RecalcBadge / accept-gate / auto-populated
-// `amountApproved` track a km edit before PATCH commits — mirrors the PATCH
-// correction field `UpdateClaimCorrectionFields.mileage`.
+// inspection) `mileage` AND `timeFrom`/`timeTo` are IGNORED — mileage is always
+// the daily-km sum (Phase 7 §0″ finish, "no carrier override"), the time-window
+// is always derived from the delegation's actual departure/return. A VERIFIER
+// (`pracownik`/`admin`) on `POST /claims/:nrZgl/preview` MAY send `mileage` (and
+// `timeFrom`/`timeTo`) to override so the ClaimModal's live dopłata / RecalcBadge
+// / accept-gate / auto-populated `amountApproved` track an un-saved edit before
+// PATCH commits — mirrors the PATCH correction fields `UpdateClaimCorrectionFields.*`.
 type PreviewRequest = {
   delegationId?: string;   // new-claim path → derive everything from the outing
   vehicleId?: string;      // existing/verifier path → vehicle for the km sum
   dateStart?: string;      // existing/verifier path (omit on the delegation path)
   dateEnd?: string;
-  timeFrom?: string;       // HH:MM
-  timeTo?: string;
+  timeFrom?: string;       // HH:MM — verifier path only (IGNORED on delegation path)
+  timeTo?: string;         // HH:MM — verifier path only (IGNORED on delegation path)
   hoursAdjusted?: number;  // verifier inspection only; default 0
   mileage?: number;        // VERIFIER inspection override only (see note above)
 };
@@ -647,10 +660,11 @@ type PreviewResponse = {
   ratePerKmEffective: number;
   breakdown: KmCalcBreakdown;
   // Present ONLY on the delegation-derived (new-claim) path, so the carrier
-  // form can render the read-only period + vehicle/trailer/driver:
+  // form can render the read-only period + time-window + vehicle/trailer/driver:
   dateStart?: string;         // derived from the outing
   dateEnd?: string;           // derived from the outing
-  delegationWarning?: 'NOT_YET_RETURNED'; // soft warn when outing still w_trasie
+  timeFrom?: string;          // HH:mm — derived from actualDepartureAt (read-only)
+  timeTo?: string;            // HH:mm — derived from actualReturnAt (read-only)
   delegationContext?: {       // read-only vehicle/trailer/driver from the outing
     vehicleId: string; vehiclePlate: string;
     trailerId: string; trailerPlate: string | null;

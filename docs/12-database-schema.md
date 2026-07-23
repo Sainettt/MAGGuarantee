@@ -497,8 +497,8 @@ model Claim {
   // period — all STRICT
   dateStart DateTime @db.Timestamp(0)
   dateEnd   DateTime @db.Timestamp(0)
-  timeFrom  String                                  // STRICT (was nullable pre-Phase 3)
-  timeTo    String                                  // STRICT
+  timeFrom  String                                  // STRICT — server-derived on submit (HH:mm of Delegation.actualDepartureAt); verifier PATCH may override
+  timeTo    String                                  // STRICT — server-derived on submit (HH:mm of Delegation.actualReturnAt); verifier PATCH may override
 
   // calculation — all STRICT (carrier supplies inputs at submit, server computes derived)
   drivenDays         Decimal @db.Decimal(6, 2)
@@ -561,9 +561,10 @@ model Claim {
   // the authorization-email «Korekty weryfikatora» diff (orig dopłata vs
   // applied amountRequested).
   origPaymentEur         Decimal?     @db.Decimal(12, 2)
-  // GodzinaOd/GodzinaDo — immutable carrier-submission snapshots (HH:MM legacy
-  // string). Mirror timeFrom/timeTo, written once at submit, verifier PATCH
-  // never mutates. See "Korekta godzin — orig vs applied" / orig-snapshot note.
+  // GodzinaOd/GodzinaDo — immutable submit snapshots (HH:MM legacy string) of
+  // the derived time-window (timeFrom/timeTo = HH:mm of the delegation's actual
+  // departure/return; carrier no longer submits hours). Written once at submit,
+  // verifier PATCH never mutates. See "Korekta godzin — orig vs applied" note.
   origTimeFrom           String?
   origTimeTo             String?
 
@@ -634,8 +635,8 @@ model Delegation {
   returnPostalCode String
 
   status            DelegationStatus @default(zgloszony)               // REWORK 2026-06-20: eksport→gotowy, weryfikator→w_trasie/zjechal
-  actualDepartureAt DateTime?                                          // date-only, set on markInTransit (w_trasie) — verifier's actual departure date
-  actualReturnAt    DateTime?                                          // date-only, set on markReturned (zjechal) → also bumps Vehicle.lastDroveAt
+  actualDepartureAt DateTime?                                          // full datetime (date + time), set on markInTransit (w_trasie) — verifier's exact departure moment; Claim.timeFrom derived from it
+  actualReturnAt    DateTime?                                          // full datetime (date + time), set on markReturned (zjechal) → also bumps Vehicle.lastDroveAt; Claim.timeTo derived from it
 
   // REWORK 2026-06-20 (#4) — wniosek↔wyjazd link (one claim per delegation).
   claim Claim?
@@ -825,15 +826,18 @@ km-calc (`korektaDni = hoursAdjustedValue / 24`). Both are `Decimal(5,2)?` —
 explicitly entered zero downtime". For new submits the api layer always
 populates both columns.
 
-The same orig-vs-working split applies to the declared time window.
+The same orig-vs-working split applies to the time window.
 `Claim.origTimeFrom`/`Claim.origTimeTo` are immutable `String?` snapshots
-(HH:MM legacy strings) of what the carrier submitted; they are written once at
-submit and the verifier (pracownik) PATCH never mutates them — identical
-semantics to `origDateStart`/`origDateEnd`/`origMileage`. The editable working
-values live in `timeFrom`/`timeTo` (both strict `NOT NULL`), which the verifier
-PATCH may overwrite. `NULL` on the orig columns means "no snapshot" (legacy/unset
-rows). These columns power the History tab + audit-trail diff detection that
-shows whether the verifier overrode the carrier's declared hours.
+(HH:MM legacy strings) of the time-window as derived at submit (`timeFrom` =
+`HH:mm(actualDepartureAt)`, `timeTo` = `HH:mm(actualReturnAt)` — the carrier no
+longer inputs hours); they are written once at submit and the verifier
+(pracownik) PATCH never mutates them — identical semantics to
+`origDateStart`/`origDateEnd`/`origMileage`. The editable working values live in
+`timeFrom`/`timeTo` (both strict `NOT NULL`), which the verifier PATCH may
+overwrite (double-check against a weryfikator mistake). `NULL` on the orig
+columns means "no snapshot" (legacy/unset rows). These columns power the History
+tab + audit-trail diff detection that shows whether the verifier overrode the
+derived hours.
 
 ## Required-field classification (per the three-layer pattern)
 
@@ -889,8 +893,8 @@ shows whether the verifier overrode the carrier's declared hours.
 |---|---|---|
 | `vehicleId`, `carrierId`, `trailerId`, `driverId`, `departureAt`, `departureCountry`, `departurePostalCode` | Strict everywhere | `trailerId`/`driverId` made NOT NULL in 2026-05 (a delegation without trailer or driver doesn't model a real haul). |
 | `plannedReturnAt`, `returnCountry`, `returnPostalCode` | Strict everywhere | NOT NULL since `20260518113943_delegation_required_fields_and_date_only`; `plannedReturnAt` is `@db.Date` (no time). DB length CHECKs on country (2..8) + postal (≤16); format validation in shared Zod. |
-| `actualDepartureAt` | DB nullable | Departure-side analogue of `actualReturnAt`. Set by the `markInTransit` transition on `w_trasie` (verifier's actual departure date). API layer enforces presence when `status='w_trasie'`; no DB CHECK because the column flips together with `status` inside a single service transaction (see "Invariants for api-agent"). |
-| `actualReturnAt` | DB nullable | Set by `markReturned` transition on `zjechal`. API layer enforces presence when `status='zjechal'`; no DB CHECK because the column flips together with `status` inside a single service transaction (see "Invariants for api-agent"). |
+| `actualDepartureAt` | DB nullable | Departure-side analogue of `actualReturnAt`. Set by the `markInTransit` transition on `w_trasie` — verifier's **exact departure datetime** (date + time, not date-only); `Claim.timeFrom` is derived from it. API layer enforces presence when `status='w_trasie'`; no DB CHECK because the column flips together with `status` inside a single service transaction (see "Invariants for api-agent"). |
+| `actualReturnAt` | DB nullable | Set by `markReturned` transition on `zjechal` — verifier's **exact return datetime** (date + time, not date-only); `Claim.timeTo` is derived from it. API layer enforces presence when `status='zjechal'`; no DB CHECK because the column flips together with `status` inside a single service transaction (see "Invariants for api-agent"). |
 | `notes`, snapshots | Optional everywhere | |
 
 ### User

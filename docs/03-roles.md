@@ -150,6 +150,7 @@
 |---|---|
 | Видеть **все** заявления с фильтром по статусу/перевозчику | `getAllClaims` → `GET /claims` |
 | Верифицировать заявление (изменить статус, пересчитать km/доплату, добавить komentarz) | `updateClaimFull` → `PATCH /claims/:nrZgl` |
+| Поправить деривированные часы заявления (`timeFrom`/`timeTo` — подставлены из точных времён выезда) — двойная проверка на случай ошибки weryfikatora; live re-calc | `updateClaimFull` → `PATCH /claims/:nrZgl` |
 | Применить korekta godzin (вычесть простой/сервис из dni jezdne) | `updateClaimFull` (поле `korektaGodzin`) |
 | Указать `nrZlecenia` (номер заказа) при акцепте | `updateClaimFull` (поле `nrZlecenia`) |
 | Запросить авторизацию у Maksima (когда `doplata > getAuthThreshold(dniJezdne)`) — отправляет email + помечает статус `OCZEKUJE NA AUTORYZACJĘ` | `sendAuthorizationRequest` → `POST /claims/:nrZgl/request-authorization` |
@@ -214,16 +215,22 @@
 
 Видит делегации, относящиеся к экспортным операциям (фильтр по типу). Read-only.
 
-### `weryfikator` — дневной километраж машин
+### `weryfikator` — дневной километраж машин + статусы выездов
 
-> ⚠️ **REWORK (2026-06-12):** weryfikator больше НЕ управляет статусом выездов (статус выезда — «мёртвый груз»). Его процесс — ежедневный км-лист. См. [20-phase-7-eksport-weryfikator.md](20-phase-7-eksport-weryfikator.md) §0′.
+> ⚠️ **REWORK (2026-06-12, §0′):** у weryfikatora ДВА окна — ежедневный км-лист (источник пробега) **и** управление статусами выездов (переходы `gotowy→w_trasie` и `w_trasie→zjechał`). На этих переходах weryfikator фиксирует **точные datetime** выезда/съезда (`actualDepartureAt` / `actualReturnAt`), из которых деривируются часы wniosek. См. [20-phase-7-eksport-weryfikator.md](20-phase-7-eksport-weryfikator.md) §0′.
 
-Главный экран — **недельная km-доска** (`/weryfikator/km`): все активные машины; по каждой за день проставляет либо `drove` + км, либо `idle` («стоит»); нет отметки = «не проверено». Это **источник истины для пробега в `Claim`** (`Σ VehicleDailyKm`).
+Первый экран — **недельная km-доска** (`/weryfikator/km`): все активные машины; по каждой за день проставляет либо `drove` + км, либо `idle` («стоит»); нет отметки = «не проверено». Это **источник истины для пробега в `Claim`** (`Σ VehicleDailyKm`).
 
 - `PUT /vehicles/:id/daily-km` — upsert отметки за день (km/state/notes); при `drove` обновляет `Vehicle.lastDroveAt`.
 - `GET /vehicles/:id/daily-km` — история по машине.
 - Производный статус машины (`w ruchu` / `nie jeździ` / `nieznany`) — в шапке доски.
-- **НЕ** делает: cancel выездов (carrier-only) и смену статуса делегаций (мёртвый груз).
+
+Второй экран — **статусы выездов** (`/weryfikator/delegations`):
+
+- `POST /delegations/:id/in-transit` — переход `gotowy→w_trasie`; задаёт **точный datetime выезда** `actualDepartureAt` (обязателен; дата + время).
+- `POST /delegations/:id/returned` — переход `w_trasie→zjechał`; задаёт **точный datetime съезда** `actualReturnAt` (обязателен; дата + время); в той же транзакции `Vehicle.lastDroveAt` + авто-пересчёт связанного wniosek.
+- Точные времена выезда/съезда → из них деривируются `timeFrom`/`timeTo` в wniosek (перевозчик их не вводит; `pracownik` может поправить при верификации).
+- **НЕ** делает: cancel выездов — это зона перевозчика (свой `zgloszony`) и админа.
 
 ---
 
@@ -249,7 +256,8 @@
 | Видеть своих водителей/прицепов/авто (read-only) | — | — | — | — | — | ✅ | — | — |
 | CRUD прицепов (все) + типов прицепов | ✅ | **—** | — | — | — | — | — | — |
 | Зарегистрировать выезд | — | — | — | — | — | ✅ | — | — |
-| Изменить статус выезда (⚠️ мёртвый груз; только cancel) | ✅ | — | — | — | — | ✅ (свой, `anulowany`) | — | — |
+| Менять статус выезда (`in-transit`/`returned`, с точными datetime выезда/съезда) | ✅ | — | — | — | — | — | — | ✅ |
+| Anulować выезд | ✅ (любой активный) | — | — | — | — | ✅ (свой, `zgloszony`) | — | — |
 | Проставлять дневной км машин | ✅ | — | — | — | — | — | — | ✅ |
 | Видеть km-рапорт (read-only) | ✅ | — | — | ✅ (свои) | ✅ (своя команда) | — | ✅ | ✅ |
 | Видеть выезды | ✅ | — | — | — | ✅ (свои) | ✅ (свои) | ✅ | ✅ |
