@@ -25,13 +25,18 @@ enum Role {
   weryfikator
 }
 
+// The manual request-authorization flow and the parallel "kwota Maksima"
+// concept were retired 2026-07-24 (migration remove_manual_authorization_flow).
+// `OCZEKUJE_NA_AUTORYZACJE` stays — it is now set AUTOMATICALLY by the api when a
+// verified claim trips the Maksim gate (over-threshold dopłata). The old
+// `AUTORYZACJA_KWOTA_MAKSIMA` value was unreachable (no code ever set it) and was
+// removed together with the amountMaximum column.
 enum ClaimStatus {
-  NA_WERYFIKACJI            @map("NA WERYFIKACJI")
+  NA_WERYFIKACJI          @map("NA WERYFIKACJI")
   ZAAKCEPTOWANO
   ODRZUCONO
   REKLAMACJA
-  OCZEKUJE_NA_AUTORYZACJE   @map("OCZEKUJE NA AUTORYZACJĘ")
-  AUTORYZACJA_KWOTA_MAKSIMA @map("AUTORYZACJA — KWOTA MAKSIMA")
+  OCZEKUJE_NA_AUTORYZACJE @map("OCZEKUJE NA AUTORYZACJĘ")
 }
 
 // REWORK 2026-06-20 (#4, docs/20 §0″) — delegation statuses are operational
@@ -801,18 +806,15 @@ model Claim {
   orderNumber String?
   orderDate   DateTime? @db.Date
 
-  // authorization
-  authorizationRequired    Boolean   @default(false) // large-amount flag
-  authorizationDescription String?
-  authorizationToken       String?
-  authorizationDecidedAt   DateTime?
-
-  // Maksim authorization gate (separate from the OCZEKUJE_NA_AUTORYZACJE manual
-  // flow above — do NOT conflate with `authorizationRequired`). When a verifier
-  // saves a verification and the compensation exceeds the threshold on a verified
-  // claim, the accept/reject decision is BLOCKED until the verifier uploads a
-  // screenshot of Maksim's out-of-band confirmation (a ClaimAttachment with
-  // category=AUTORYZACJA_MAKSIMA). `maksimGateRequired` — the gate is active.
+  // Maksim authorization gate. When a verifier saves a verification and the
+  // compensation exceeds the threshold on a verified claim, the accept/reject
+  // decision is BLOCKED until the verifier uploads a screenshot of Maksim's
+  // out-of-band confirmation (a ClaimAttachment with category=AUTORYZACJA_MAKSIMA),
+  // and the api moves the claim into status OCZEKUJE_NA_AUTORYZACJE. This AUTO
+  // gate is the sole authorization path now — the former MANUAL
+  // request-authorization flow (authorization*/margin/amountMaximum columns +
+  // the AUTORYZACJA_KWOTA_MAKSIMA status) was removed 2026-07-24 (migration
+  // remove_manual_authorization_flow). `maksimGateRequired` — the gate is active.
   // `maksimGateNotifiedAt` — dedup flag: when the auto-email to Maksim was sent.
   // `maksimGateClearedAt` — when the confirmation screenshot lifted the gate.
   // `maksimGateClearedBy` mirrors the `verifiedBy` pattern (optional named FK,
@@ -833,8 +835,6 @@ model Claim {
   /// derived server-side from calc.paymentEur; carrier form no longer collects it
   amountRequested Decimal  @default(0) @db.Decimal(12, 2) // KwotaWnioskowana
   amountApproved  Decimal? @db.Decimal(12, 2) // ZatwKwota
-  margin          Decimal? @db.Decimal(12, 2)
-  amountMaximum   Decimal? @db.Decimal(12, 2)
 
   // reklamacja (mirror for rollback)
   reklamacjaSubmitted    Boolean      @default(false)
@@ -863,8 +863,7 @@ model Claim {
   origTimeTo             String?
 
   // attachments
-  authScreenshotUrl String? // S3 URL
-  attachments       ClaimAttachment[]
+  attachments ClaimAttachment[]
 
   // REWORK 2026-06-20 (#4, docs/20 §0″) — wniosek↔wyjazd link. One claim per
   // delegation (@unique). Nullable in DB (legacy/migration); required for new

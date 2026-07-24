@@ -10,11 +10,14 @@ import {
 } from './claim-state-machine';
 
 describe('claim-state-machine', () => {
-  // The 9 documented legal edges (kept literal so the test is self-documenting).
+  // The 10 documented legal edges (kept literal so the test is self-documenting).
   const LEGAL: LegalTransition[] = [
     { from: 'NA_WERYFIKACJI', to: 'OCZEKUJE_NA_AUTORYZACJE' },
     { from: 'NA_WERYFIKACJI', to: 'ZAAKCEPTOWANO' },
     { from: 'NA_WERYFIKACJI', to: 'ODRZUCONO' },
+    // Automatic rollback at the verification checkpoint when a re-verify drops
+    // the dopłata back under threshold (PATCH never targets this edge).
+    { from: 'OCZEKUJE_NA_AUTORYZACJE', to: 'NA_WERYFIKACJI' },
     { from: 'OCZEKUJE_NA_AUTORYZACJE', to: 'ZAAKCEPTOWANO' },
     { from: 'OCZEKUJE_NA_AUTORYZACJE', to: 'ODRZUCONO' },
     { from: 'ZAAKCEPTOWANO', to: 'REKLAMACJA' },
@@ -42,14 +45,9 @@ describe('claim-state-machine', () => {
     // Going from a decided claim straight to a different decision.
     { from: 'ZAAKCEPTOWANO', to: 'ODRZUCONO' },
     { from: 'ODRZUCONO', to: 'ZAAKCEPTOWANO' },
-    // Authorization-pending cannot un-pend itself.
-    { from: 'OCZEKUJE_NA_AUTORYZACJE', to: 'NA_WERYFIKACJI' },
     // Reklamacja cannot rebound back to its own input states.
     { from: 'REKLAMACJA', to: 'NA_WERYFIKACJI' },
     { from: 'REKLAMACJA', to: 'OCZEKUJE_NA_AUTORYZACJE' },
-    // Maksima override is a frozen sink — no outbound transitions.
-    { from: 'AUTORYZACJA_KWOTA_MAKSIMA', to: 'ZAAKCEPTOWANO' },
-    { from: 'AUTORYZACJA_KWOTA_MAKSIMA', to: 'ODRZUCONO' },
   ];
 
   it.each(ILLEGAL)('illegal: $from → $to', ({ from, to }) => {
@@ -65,8 +63,10 @@ describe('claim-state-machine', () => {
     );
   });
 
-  it('legalTargets is empty for AUTORYZACJA_KWOTA_MAKSIMA', () => {
-    expect(legalTargets('AUTORYZACJA_KWOTA_MAKSIMA')).toEqual([]);
+  it('legalTargets matches the matrix for OCZEKUJE_NA_AUTORYZACJE (incl. auto-rollback)', () => {
+    expect(legalTargets('OCZEKUJE_NA_AUTORYZACJE').sort()).toEqual(
+      ['NA_WERYFIKACJI', 'ZAAKCEPTOWANO', 'ODRZUCONO'].sort(),
+    );
   });
 
   it('error message names the offending transition (Polish)', () => {

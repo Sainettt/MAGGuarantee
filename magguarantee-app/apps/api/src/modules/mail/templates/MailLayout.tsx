@@ -86,7 +86,7 @@ export function MailLayout({
   );
 }
 
-/** Label-over-value field row, matching the authorization-request layout. */
+/** Label-over-value field row, matching the maksim-confirmation-request layout. */
 export function Field({
   label,
   children,
@@ -102,7 +102,7 @@ export function Field({
   );
 }
 
-/** Centered CTA button + copyable link, matching authorization-request. */
+/** Centered CTA button + copyable link, matching maksim-confirmation-request. */
 export function Cta({
   href,
   label,

@@ -7,7 +7,6 @@ import {
   Param,
   Patch,
   Post,
-  Put,
   Query,
   Req,
   UseGuards,
@@ -19,8 +18,6 @@ import {
   ClaimDtoSchema,
   ClaimFiltersSchema,
   PreviewClaimSchema,
-  RequestAuthorizationSchema,
-  SetAuthorizationAmountSchema,
   SubmitClaimSchema,
   SubmitReklamacjaSchema,
   UpdateClaimSchema,
@@ -30,8 +27,6 @@ import {
   type ClaimListItem,
   type PreviewClaimDto,
   type PreviewClaimResponse,
-  type RequestAuthorizationDto,
-  type SetAuthorizationAmountDto,
   type SubmitClaimDto,
   type SubmitReklamacjaDto,
   type UpdateClaimDto,
@@ -69,12 +64,15 @@ const RL_PREVIEW = {
  *  - POST /claims/:nrZgl/preview (scoped to existing — reklamacja edit)
  *  - POST /claims/:nrZgl/reklamacja (carrier disputes a decided claim)
  *
- * Phase 4 — sub-slice 4.1 (this commit):
- *  - PATCH /claims/:nrZgl (verification + decision, admin/pracownik only)
+ * Phase 4:
+ *  - PATCH /claims/:nrZgl (decision, admin/pracownik only)
+ *  - PATCH /claims/:nrZgl/verification («Zapisz weryfikację» checkpoint; the
+ *    over-threshold dopłata auto-moves the claim into OCZEKUJE_NA_AUTORYZACJE)
  *
- * Phase 4 — later sub-slices:
- *  - POST /claims/:nrZgl/request-authorization (sub-slice 4.2)
- *  - Auth-screenshot upload — REMOVED from scope (user decision).
+ * The Maksim confirmation screenshot lives in claim-attachments
+ * (`AUTORYZACJA_MAKSIMA`), lifting the over-threshold decision gate — the
+ * over-threshold verification auto-moves the claim into OCZEKUJE_NA_AUTORYZACJE
+ * (no manual flow).
  */
 @Controller('claims')
 @UseGuards(RolesGuard, CarrierOwnershipGuard)
@@ -258,73 +256,6 @@ export class ClaimsController {
     @Body(new ZodValidationPipe(VerifyClaimSchema)) dto: VerifyClaimDto,
   ): Promise<ClaimDto> {
     return this.claims.verifyClaim(user, nrZgl, dto);
-  }
-
-  // ── Request authorization (Phase 4.2) ───────────────────
-
-  /**
-   * `POST /claims/:nrZgl/request-authorization` per
-   * docs/13-api-design.md#claims (line 274).
-   *
-   * Admin / pracownik flags a verified claim as needing Maksim sign-off
-   * before being booked as accepted. The service:
-   *  - transitions the claim into `OCZEKUJE_NA_AUTORYZACJE`,
-   *  - mints a fresh `authorizationToken`,
-   *  - persists `Claim.amountMaximum = kwotaMaksima`,
-   *  - dispatches an email to `MAKSIM_EMAIL` (Mailhog in dev).
-   *
-   * Audit row commits in the same `prisma.$transaction` as the row update
-   * via the global `AuditInterceptor` (see `@Audit(...)` below). Email send
-   * is fire-and-log outside the transaction — same policy as submit /
-   * reklamacja / verification.
-   */
-  @Post(':nrZgl/request-authorization')
-  @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'pracownik')
-  @Audit({
-    action: 'claim.requestAuthorization',
-    targetType: 'Claim',
-    targetKey: (req) => req.params?.nrZgl,
-  })
-  async requestAuthorization(
-    @CurrentUser() user: AuthUser,
-    @Param('nrZgl') nrZgl: string,
-    @Body(new ZodValidationPipe(RequestAuthorizationSchema))
-    dto: RequestAuthorizationDto,
-  ): Promise<ClaimDto> {
-    return this.claims.requestAuthorization(user, nrZgl, dto);
-  }
-
-  /**
-   * `PUT /claims/:nrZgl/authorization-amount` — Phase 4.2 (kwota-Maksima
-   * follow-up) per docs/13-api-design.md#claims.
-   *
-   * Records the amount Maksim assigned in his EMAIL REPLY, once
-   * `request-authorization` has already moved the claim into
-   * `OCZEKUJE_NA_AUTORYZACJE`. The service:
-   *  - requires the claim to be pending authorization (422 otherwise),
-   *  - persists `Claim.amountMaximum = kwotaMaksima`,
-   *  - sends NO email (pure amount record).
-   *
-   * May be called again to CORRECT the value (Maksim revised his reply). The
-   * audit row commits in the same `prisma.$transaction` as the mutation via
-   * the global `AuditInterceptor` (see `@Audit(...)` below).
-   */
-  @Put(':nrZgl/authorization-amount')
-  @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'pracownik')
-  @Audit({
-    action: 'claim.setAuthorizationAmount',
-    targetType: 'Claim',
-    targetKey: (req) => req.params?.nrZgl,
-  })
-  async setAuthorizationAmount(
-    @CurrentUser() user: AuthUser,
-    @Param('nrZgl') nrZgl: string,
-    @Body(new ZodValidationPipe(SetAuthorizationAmountSchema))
-    dto: SetAuthorizationAmountDto,
-  ): Promise<ClaimDto> {
-    return this.claims.setAuthorizationAmount(user, nrZgl, dto);
   }
 
   // ── Reklamacja ──────────────────────────────────────────

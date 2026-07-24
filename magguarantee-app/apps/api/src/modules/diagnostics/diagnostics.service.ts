@@ -95,8 +95,7 @@ export class DiagnosticsService {
       statusCounts.ZAAKCEPTOWANO +
       statusCounts.ODRZUCONO +
       statusCounts.REKLAMACJA +
-      statusCounts.OCZEKUJE_NA_AUTORYZACJE +
-      statusCounts.AUTORYZACJA_KWOTA_MAKSIMA;
+      statusCounts.OCZEKUJE_NA_AUTORYZACJE;
 
     return {
       kpi: {
@@ -104,11 +103,9 @@ export class DiagnosticsService {
         naWeryfikacji: statusCounts.NA_WERYFIKACJI,
         zaakceptowano: statusCounts.ZAAKCEPTOWANO,
         odrzucono: statusCounts.ODRZUCONO,
-        // Sum both authorisation buckets so the dashboard surfaces a single
-        // "waiting on Maksim" tile per the design system spec.
-        oczekujeNaAutoryzacje:
-          statusCounts.OCZEKUJE_NA_AUTORYZACJE +
-          statusCounts.AUTORYZACJA_KWOTA_MAKSIMA,
+        // "Waiting on Maksim" — the over-threshold claims auto-moved into
+        // OCZEKUJE_NA_AUTORYZACJE at verification.
+        oczekujeNaAutoryzacje: statusCounts.OCZEKUJE_NA_AUTORYZACJE,
       },
       overdue,
       dueSoon,

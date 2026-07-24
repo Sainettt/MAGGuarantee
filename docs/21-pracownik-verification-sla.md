@@ -44,7 +44,7 @@ deadline        = addPolishWorkingDays(anchorDate, 7)
 - **Логика:** раз в день сканирует `NA_WERYFIKACJI`, бакетит util'ой; если есть `dueSoon`+`overdue` → шлёт **ОДНО** письмо со списком. **Stateless** — никакого флага «уже уведомили», никакой записи в БД.
 - **Пусто → письма нет** (без «all clear»).
 - **Получатели:** все активные пользователи с ролью `pracownik` (общая очередь, назначения claim'а нет). v1 — **только pracownik** (не admin). `Promise.allSettled` по адресам; per-send `record()` в mail-registry.
-- **Шаблон:** новый `mail/templates/verification-digest.tsx` + метод `MailService.sendVerificationDigest`, по образцу `authorization-request.tsx` (бренд `#dc2626`, plain-text fallback).
+- **Шаблон:** новый `mail/templates/verification-digest.tsx` + метод `MailService.sendVerificationDigest`, по образцу `maksim-confirmation-request.tsx` (бренд `#dc2626`, plain-text fallback).
 - **Caveat (в комментарий кода, TODO, не делать сейчас):** один инстанс API — ок; при горизонтальном масштабировании `@Cron` выстрелит на каждом инстансе → нужен Redis-lock (`RedisService` уже есть).
 
 ## 6. Что НЕ делаем
@@ -59,6 +59,6 @@ deadline        = addPolishWorkingDays(anchorDate, 7)
 
 ## 8. Ссылки
 - Дашборд/диагностика: `apps/api/src/modules/diagnostics/`, `apps/web/app/(employee)/employee/dashboard/`
-- Email: `apps/api/src/modules/mail/` (`mail.service.ts`, `templates/authorization-request.tsx`)
+- Email: `apps/api/src/modules/mail/` (`mail.service.ts`, `templates/verification-digest.tsx`)
 - Календарь: `packages/shared/src/domain/eu-calendar.ts` (`calcEaster` reuse), `km-calc.ts` (образец фикстур)
 - Jobs/email конвенции: [`16-jobs-and-integrations.md`](16-jobs-and-integrations.md)

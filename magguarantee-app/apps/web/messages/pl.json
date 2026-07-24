@@ -1127,15 +1127,14 @@
           "decyzjaSection": "Decyzja",
           "decyzjaSubtitle": "Ostatni krok — wybierz, co dzieje się z wnioskiem.",
           "secondaryHistory": "Historia",
-          "secondaryAuthorization": "Autoryzacja",
           "decisionRequired": "Wybierz decyzję, aby zapisać wniosek.",
           "terminalState": "Wniosek jest w stanie końcowym — brak dostępnych decyzji.",
           "guaranteeMetHint": "Gwarancja wyjeżdżona — wniosek można tylko odrzucić.",
-          "progExceededHint": "Dopłata przekroczy próg autoryzacji ({prog} przy {days, plural, one {# dniu} few {# dniach} many {# dniach} other {# dnia}} w trasie) — po zapisaniu weryfikacji wniosek będzie wymagać autoryzacji Maksima.",
+          "progExceededHint": "Dopłata przekroczy próg autoryzacji ({prog} przy {days, plural, one {# dniu} few {# dniach} many {# dniach} other {# dnia}} w trasie) — po zapisaniu weryfikacji wniosek automatycznie przejdzie w stan „Czeka na autoryzację”.",
           "verifiedBadge": "Zweryfikowano {date} przez {name}"
         },
         "maksimGate": {
-          "bannerTitle": "Wymagana autoryzacja Maksima",
+          "bannerTitle": "Czeka na autoryzację",
           "bannerBody": "Wniosek przekracza próg autoryzacji — wysłano prośbę o potwierdzenie do Maksima. Wgraj zrzut ekranu potwierdzenia, aby odblokować decyzję.",
           "notifiedAt": "Powiadomiono Maksima: {date}",
           "notifiedPending": "Powiadomienie do Maksima jest wysyłane…",
@@ -1150,7 +1149,7 @@
           "openConfirmation": "Otwórz potwierdzenie",
           "downloading": "Pobieranie…",
           "downloadError": "Nie udało się pobrać potwierdzenia",
-          "decisionBlockedHint": "Decyzja jest zablokowana do czasu wgrania potwierdzenia autoryzacji Maksima.",
+          "decisionBlockedHint": "Najpierw wgraj potwierdzenie autoryzacji Maksima.",
           "decisionBlockedToast": "Wgraj potwierdzenie autoryzacji od Maksima, aby podjąć decyzję."
         },
         "inTransitGate": {
@@ -1167,8 +1166,7 @@
         },
         "tabs": {
           "edit": "Edytuj",
-          "history": "Historia",
-          "authorization": "Autoryzacja"
+          "history": "Historia"
         },
         "recalc": {
           "loading": "Przeliczam…",
@@ -1193,17 +1191,7 @@
           "amountApproved": "Kwota zatwierdzona (EUR)",
           "amountApprovedAuto": "wyliczana automatycznie",
           "amountApprovedLocked": "Pole zablokowane — wyliczane automatycznie z podglądu",
-          "amountApprovedLockedMaksim": "Zablokowane — jest decyzja Maksima ({amount}).",
-          "amountApprovedLockedMaksimHint": "Kwota zatwierdzona wynika z decyzji Maksima. Zmienić ją może wyłącznie administrator.",
-          "maksimAmountRef": "Decyzja Maksima: <v>{amount}</v>",
-          "maksimOverrideTitle": "Nadpisano decyzję Maksima",
-          "maksimOverrideBadge": "Nadpisano",
-          "maksimOverrideConsequence": "Przewoźnik otrzyma kwotę zatwierdzoną.",
-          "maksimOverrideCommentHint": "Warto opisać powód nadpisania kwoty Maksima.",
-          "amountMaximum": "Kwota maksymalna (EUR)",
           "doplata": "Dopłata gwarancyjna",
-          "margin": "Marża",
-          "authorizationDescription": "Opis autoryzacji",
           "comment": "Komentarz",
           "commentRejected": "Powód odrzucenia",
           "commentReklamacja": "Uzasadnienie decyzji",
@@ -1239,89 +1227,12 @@
           "reklamacjaText": "Treść reklamacji",
           "reklamacjaResponse": "Odpowiedź na reklamację"
         },
-        "auth": {
-          "notRequired": "Wniosek nie wymaga autoryzacji Maksima.",
-          "requestTitle": "Wymagaj autoryzacji",
-          "requestHelp": "Przekierowuje wniosek do autoryzacji przez Maksima. Wniosek otrzyma status „Oczekuje na autoryzację”.",
-          "margin": "Marża (EUR)",
-          "description": "Opis dla Maksima",
-          "submitRequest": "Wyślij do autoryzacji",
-          "submitting": "Wysyłanie…",
-          "savedToast": "Wniosek wysłany do autoryzacji",
-          "pendingTitle": "Wniosek oczekuje autoryzacji",
-          "pendingDescription": "Opis przekazany Maksimowi",
-          "amountMaximumLabel": "Kwota Maksima (EUR)",
-          "amountMaximumHelp": "Kwota z odpowiedzi Maksima na e-mail. Prefiltruje kwotę zatwierdzoną przy akceptacji. Można zapisać ponownie, aby ją poprawić.",
-          "amountMaximumSave": "Zapisz",
-          "amountMaximumSaved": "Kwota Maksima zapisana",
-          "kwotaMaksimaLabel": "Kwota Maksima (EUR)",
-          "kwotaMaksimaHelp": "Zostanie ustalona po odpowiedzi Maksima — kwotę wpiszesz po przejściu wniosku do statusu „Oczekuje na autoryzację”.",
-          "commentLabel": "Komentarz",
-          "commentPlaceholder": "Powód wniosku o autoryzację…",
-          "requestButton": "Wymaga autoryzacji",
-          "emailSent": "Email wysłany do Maksima",
-          "alreadyPending": "Wniosek już oczekuje na autoryzację Maksima.",
-          "progLine": "Próg autoryzacji dla tego wniosku: {prog}."
-        },
         "targetStatus": {
           "ZAAKCEPTOWANO": "Zaakceptuj",
           "ODRZUCONO": "Odrzuć",
-          "OCZEKUJE_NA_AUTORYZACJE": "Wymaga autoryzacji",
           "REKLAMACJA_ZAAKCEPTOWANO": "Zaakceptuj reklamację",
           "REKLAMACJA_ODRZUCONO": "Odrzuć reklamację"
         }
-      }
-    },
-    "claimDetail": {
-      "loadingTitle": "Ładowanie wniosku…",
-      "errorTitle": "Nie udało się wczytać wniosku",
-      "errorMessage": "Spróbuj ponownie lub zamknij okno.",
-      "retry": "Spróbuj ponownie",
-      "sections": {
-        "basics": "Podstawowe dane",
-        "calc": "Wyliczenia (km-calc)",
-        "breakdown": "Podział na miesiące",
-        "decision": "Decyzja",
-        "authorization": "Autoryzacja",
-        "reklamacjaHistory": "Historia reklamacji",
-        "attachments": "Załączniki",
-        "comment": "Komentarz"
-      },
-      "fields": {
-        "carrier": "Przewoźnik",
-        "vehicle": "Ciągnik",
-        "dateStart": "Okres od",
-        "dateEnd": "Okres do",
-        "timeFrom": "Godzina od",
-        "timeTo": "Godzina do",
-        "drivenDays": "Dni jazdy",
-        "mileage": "Przebieg",
-        "kmPerDay": "Km/dzień",
-        "kmGuaranteed": "Km gwarantowane",
-        "kmDifference": "Różnica km",
-        "ratePerKmEffective": "Stawka €/km",
-        "paymentEur": "Dopłata gwarancyjna",
-        "decidedBy": "Decyzję podjął",
-        "statusChangedAt": "Data decyzji",
-        "orderNumber": "Numer zlecenia",
-        "orderDate": "Data zlecenia",
-        "amountRequested": "Kwota wnioskowana",
-        "amountApproved": "Kwota zatwierdzona",
-        "amountMaximum": "Kwota maksymalna",
-        "margin": "Marża",
-        "authorizationDescription": "Opis autoryzacji",
-        "authorizationDecidedAt": "Data decyzji autoryzacji",
-        "statusBeforeReklamacja": "Status przed reklamacją",
-        "reklamacjaText": "Treść reklamacji",
-        "reklamacjaResponse": "Odpowiedź na reklamację",
-        "reklamacjaAmount": "Kwota reklamacji",
-        "origDateStart": "Okres od (pierwotny / aktualny)",
-        "origDateEnd": "Okres do (pierwotny / aktualny)",
-        "origMileage": "Przebieg (pierwotny / aktualny)",
-        "origHoursAdjusted": "Korekta godzin (pierwotna / aktualna)"
-      },
-      "attachments": {
-        "open": "Otwórz załącznik"
       }
     }
   },
@@ -1711,8 +1622,7 @@
         "ZAAKCEPTOWANO": "Zaakceptowano",
         "ODRZUCONO": "Odrzucono",
         "REKLAMACJA": "Reklamacja",
-        "OCZEKUJE_NA_AUTORYZACJE": "Czeka na autoryzację",
-        "AUTORYZACJA_KWOTA_MAKSIMA": "Autoryzacja — kwota maks."
+        "OCZEKUJE_NA_AUTORYZACJE": "Czeka na autoryzację"
       },
       "wyjazdPicker": {
         "section": "Wyjazd",

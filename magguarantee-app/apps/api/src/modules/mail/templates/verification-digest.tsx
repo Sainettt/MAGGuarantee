@@ -7,7 +7,7 @@
  * caller builds a matching plain-text fallback so non-HTML clients (and
  * Mailhog's text pane) stay usable.
  *
- * Modeled structurally on `authorization-request.tsx` — same brand color
+ * Modeled structurally on `maksim-confirmation-request.tsx` — same brand color
  * (#dc2626 from docs/14-design-system.md §"MAGTRANS RED"), no images, no
  * remote assets. Lists `overdue` rows first (red) then `dueSoon` (amber),
  * each with nrZgl, carrier, plate, and the working-days-left label.

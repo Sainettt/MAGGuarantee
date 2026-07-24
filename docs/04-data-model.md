@@ -256,13 +256,13 @@
 | `paymentEur` | сумма доплаты |
 | `ratePerKmEffective` | взвешенная EUR/km по месяцам |
 | `breakdown` | JSON помесячного расчёта |
-| `status` | `NA_WERYFIKACJI` / `ZAAKCEPTOWANO` / `ODRZUCONO` / `REKLAMACJA` / `OCZEKUJE_NA_AUTORYZACJE` / `AUTORYZACJA_KWOTA_MAKSIMA` |
+| `status` | `NA_WERYFIKACJI` / `ZAAKCEPTOWANO` / `ODRZUCONO` / `REKLAMACJA` / `OCZEKUJE_NA_AUTORYZACJE` |
 | `decidedById` | FK → User (кто верифицировал) |
 | `comment`, `orderNumber`, `orderDate` | мета |
-| **Авторизация** (для крупных сумм; пороги по `getAuthThreshold(drivenDays)` — см. [19-known-quirks.md](19-known-quirks.md)): | |
-| `authorizationRequired`, `authorizationDescription`, `authorizationToken`, `authorizationDecidedAt` | |
-| `amountRequested`, `amountApproved`, `margin`, `amountMaximum` (KwotaMaksima — manual override от Maksim) | |
-| `authScreenshotUrl` | URL screenshot-а в file-storage (audit trail Maksim'овой email-decision) |
+| **Авторизация — автоматический Maksim-gate** (для крупных сумм; порог `getAuthThreshold(drivenDays)` — см. [19-known-quirks.md](19-known-quirks.md#getAuthThreshold)): | |
+| `maksimGateRequired`, `maksimGateNotifiedAt`, `maksimGateNotifiedAmount` | гейт armed при `paymentEur > próg` на zapisie weryfikacji → **авто-переход** в `OCZEKUJE_NA_AUTORYZACJE` + email Maksim'у (dedup по сумме) |
+| `maksimGateClearedAt`, `maksimGateClearedById` | снятие гейта загрузкой скриншота подтверждения (`ClaimAttachment` категории `AUTORYZACJA_MAKSIMA`) — разблокирует решение |
+| `amountRequested`, `amountApproved` | запрошенная сумма (зеркало `paymentEur`) и сумма, утверждённая при акцепте |
 | **Рекламация** (зеркало для отката): | |
 | `reklamacjaSubmitted`, `reklamacjaText`, `reklamacjaResponse`, `reklamacjaAmount` | |
 | `statusBeforeReklamacja` | предыдущий статус до перехода в `REKLAMACJA` (для rollback) |
@@ -278,13 +278,14 @@
 - При переходе в `REKLAMACJA` копируются `dateStart/dateEnd/mileage` в `origDateStart/origDateEnd/origMileage` (frozen mirror — см. [19-known-quirks.md](19-known-quirks.md#reklamacja-mirror)).
 - `status` всегда из enum (валидируется на API-уровне).
 - `vehicleId` может стать NULL если авто удалено — тогда показываем `vehiclePlateSnapshot`.
-- **State machine** — Claim status переходы ограничены 9 легальными ребрами. Источник истины — `apps/api/src/modules/claims/claim-state-machine.ts`. Сводка:
-  - `NA_WERYFIKACJI → OCZEKUJE_NA_AUTORYZACJE | ZAAKCEPTOWANO | ODRZUCONO`
-  - `OCZEKUJE_NA_AUTORYZACJE → ZAAKCEPTOWANO | ODRZUCONO`
+- **State machine** — Claim status переходы ограничены 10 легальными ребрами. Источник истины — `apps/api/src/modules/claims/claim-state-machine.ts`. Сводка:
+  - `NA_WERYFIKACJI → OCZEKUJE_NA_AUTORYZACJE` — **только автоматически** (zapis weryfikacji при `paymentEur > próg`; PATCH этот статус не таргетит)
+  - `NA_WERYFIKACJI → ZAAKCEPTOWANO | ODRZUCONO`
+  - `OCZEKUJE_NA_AUTORYZACJE → NA_WERYFIKACJI` — **только автоматически** (правка увела сумму под порог; гейт чистится)
+  - `OCZEKUJE_NA_AUTORYZACJE → ZAAKCEPTOWANO | ODRZUCONO` (решение; разблокируется скриншотом подтверждения)
   - `ZAAKCEPTOWANO → REKLAMACJA` (carrier-инициированная — отдельный endpoint, не PATCH)
   - `ODRZUCONO → REKLAMACJA` (то же)
   - `REKLAMACJA → ZAAKCEPTOWANO | ODRZUCONO` (verifier-сторона)
-  - `AUTORYZACJA_KWOTA_MAKSIMA` — terminal-like, исходящих переходов нет на верификаторской стороне (legacy frozen state).
   - Любая иная пара (from, to) — 422 `Niedozwolone przejście statusu wniosku`.
 - **CHECK `claim_accepted_payment_complete`** — при `status='ZAAKCEPTOWANO'` поля `orderNumber` (не пустое), `orderDate`, `amountApproved` обязаны быть заполнены. Часть data-model contract, не имплементация.
 
@@ -344,8 +345,6 @@ Key-value хранилище для всех бизнес-параметров, 
 |---|---|---|
 | `stawka_eur_default` | `0.5` | EUR/km, fallback (если для (year, month) нет `MonthlyLimit.ratePerKm`) |
 | `km_dziennie_default` | `540` | km/день, fallback (если для (year, month) нет `MonthlyLimit.kmPerDay`) |
-| `auth_threshold_low` | `1000` | EUR — порог авторизации (low) |
-| `auth_threshold_high` | `5000` | EUR — порог авторизации (high) |
 | `min_days_to_submit` | `10` | минимум дней до подачи |
 | `login_code_ttl` | `600` | секунд — время жизни 2FA-кода |
 | `login_max_attempts` | `5` | максимум попыток ввода кода |

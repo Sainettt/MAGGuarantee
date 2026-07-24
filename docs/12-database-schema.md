@@ -65,13 +65,16 @@ enum Role {
   weryfikator
 }
 
+// `OCZEKUJE_NA_AUTORYZACJE` is now set AUTOMATICALLY by the api when a verified
+// claim trips the Maksim gate (over-threshold dopłata). The manual
+// request-authorization flow and the `AUTORYZACJA_KWOTA_MAKSIMA` value were
+// removed 2026-07-24 (migration remove_manual_authorization_flow).
 enum ClaimStatus {
-  NA_WERYFIKACJI            @map("NA WERYFIKACJI")
+  NA_WERYFIKACJI          @map("NA WERYFIKACJI")
   ZAAKCEPTOWANO
   ODRZUCONO
   REKLAMACJA
-  OCZEKUJE_NA_AUTORYZACJE   @map("OCZEKUJE NA AUTORYZACJĘ")
-  AUTORYZACJA_KWOTA_MAKSIMA @map("AUTORYZACJA — KWOTA MAKSIMA")
+  OCZEKUJE_NA_AUTORYZACJE @map("OCZEKUJE NA AUTORYZACJĘ")
 }
 
 // REWORK 2026-06-20 (#4, docs/20 §0″) — statuses operational again:
@@ -547,15 +550,12 @@ model Claim {
   orderNumber String?
   orderDate   DateTime? @db.Date
 
-  authorizationRequired    Boolean   @default(false)
-  authorizationDescription String?
-  authorizationToken       String?
-  authorizationDecidedAt   DateTime?
+  // Maksim gate (auto). maksimGate* fields + ClaimAttachmentCategory.AUTORYZACJA_MAKSIMA
+  // are the sole authorization path — the manual authorization*/margin/amountMaximum
+  // fields were removed 2026-07-24 (migration remove_manual_authorization_flow).
 
   amountRequested Decimal  @db.Decimal(12, 2)       // STRICT — carrier supplies at submit
   amountApproved  Decimal? @db.Decimal(12, 2)       // status-conditional via CHECK
-  margin          Decimal? @db.Decimal(12, 2)
-  amountMaximum   Decimal? @db.Decimal(12, 2)       // KwotaMaksima (Maksim override)
 
   // reklamacja "frozen mirror" — see docs/19-known-quirks.md (#reklamacja-mirror)
   reklamacjaSubmitted    Boolean      @default(false)
@@ -583,8 +583,7 @@ model Claim {
   origTimeFrom           String?
   origTimeTo             String?
 
-  authScreenshotUrl String?
-  attachments       ClaimAttachment[]
+  attachments ClaimAttachment[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -899,8 +898,7 @@ derived hours.
 | `drivenDays`, `mileage`, `kmPerDay`, `kmGuaranteed`, `kmDifference`, `paymentEur`, `ratePerKmEffective` | Strict everywhere | Derived by server at submit |
 | `amountRequested` | Strict everywhere | Carrier always supplies at submit |
 | `orderNumber`, `orderDate`, `amountApproved` | DB nullable + CHECK `claim_accepted_payment_complete` | Required when `status='ZAAKCEPTOWANO'` |
-| `amountMaximum` | Optional (set in Maksim override path) | See quirks #5 |
-| `decidedById`, `comment`, `breakdown`, `authScreenshotUrl`, reklamacja mirror fields | Optional everywhere | |
+| `decidedById`, `comment`, `breakdown`, reklamacja mirror fields | Optional everywhere | |
 
 ### Delegation
 
@@ -946,10 +944,7 @@ derived hours.
 | P | NrZlecenia | `orderNumber` | String |
 | Q | DataZlecenia | `orderDate` | Date |
 | Y | Opiekun (имя) | → derived из carrier.opiekun | — |
-| AE | Autoryzacja | `authorizationRequired` | Boolean |
-| AF | OpisAutoryzacji | `authorizationDescription` | String |
-| AG | TokenAutoryzacji | `authorizationToken` | String |
-| AH | DataAutoryzacji | `authorizationDecidedAt` | DateTime |
+| AE-AH | Autoryzacja/OpisAutoryzacji/TokenAutoryzacji/DataAutoryzacji | removed 2026-07-24 — manual authorization flow retired (migration `remove_manual_authorization_flow`); not carried over. The auto Maksim gate → status `OCZEKUJE_NA_AUTORYZACJE` replaces it. |
 | AI | DataZmianyStatusu | `statusChangedAt` | DateTime |
 | AJ | KwotaWnioskowana | `amountRequested` | Decimal |
 | AK | ReklamacjaZlozona | `reklamacjaSubmitted` | Boolean |
@@ -961,10 +956,10 @@ derived hours.
 | AQ | StatusPrzedReklamacja | `statusBeforeReklamacja` | enum |
 | AR | OrigData | `origDateStart`/`origDateEnd` | Timestamp (расщепляем) |
 | AT | OrigPrzebieg | `origMileage` | Decimal |
-| AW | Marża | `margin` | Decimal |
-| AX | KwotaMaksima | `amountMaximum` | Decimal |
+| AW | Marża | removed 2026-07-24 — `margin` dropped with the manual authorization flow (migration `remove_manual_authorization_flow`); not carried over. |
+| AX | KwotaMaksima | removed 2026-07-24 — `amountMaximum` (kwota Maksima) dropped; the whole concept is retired (migration `remove_manual_authorization_flow`). |
 
-Дополнительно в Claim, не имеющего колонки в Sheets: `breakdown` (JSON, помесячный расчёт), `ratePerKmEffective`, `decidedById`, `authScreenshotUrl`, `verifiedAt`/`verifiedById` (checkpoint «Zapisz weryfikację»), `origPaymentEur` (immutable submit-time payment snapshot).
+Дополнительно в Claim, не имеющего колонки в Sheets: `breakdown` (JSON, помесячный расчёт), `ratePerKmEffective`, `decidedById`, `verifiedAt`/`verifiedById` (checkpoint «Zapisz weryfikację»), `origPaymentEur` (immutable submit-time payment snapshot), maksimGate* (auto Maksim-gate state).
 
 ### AUTA → Vehicle
 
@@ -1173,8 +1168,8 @@ async function main() {
   const cfg: [string, string][] = [
     ['stawka_eur_default', '0.5'],
     ['km_dziennie_default', '540'],
-    ['auth_threshold_low', '1000'],
-    ['auth_threshold_high', '5000'],
+    // auth_threshold_low/high removed 2026-07-24 — the over-threshold gate is
+    // hardcoded in shared getAuthThreshold; the config keys were never read.
     ['min_days_to_submit', '10'],
     ['login_code_ttl', '600'],
     ['login_max_attempts', '5'],

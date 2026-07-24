@@ -44,17 +44,10 @@ export const APP_CONFIG_ENTRIES: AppConfigEntry[] = [
     value: '300',
     description: '2FA lockout duration after max attempts (5 min).',
   },
-  // Phase 2 — claim authorization thresholds & submission window
-  {
-    key: 'auth_threshold_low',
-    value: '1000',
-    description: 'EUR — low authorization threshold (claims at/above this require authorization workflow).',
-  },
-  {
-    key: 'auth_threshold_high',
-    value: '5000',
-    description: 'EUR — high authorization threshold (claims at/above this require AUTORYZACJA — KWOTA MAKSIMA).',
-  },
+  // Phase 2 — claim submission window.
+  // NOTE: the old `auth_threshold_low` / `auth_threshold_high` config keys were
+  // removed 2026-07-24 together with the manual authorization flow. No code read
+  // them — the live over-threshold gate is hardcoded in shared `getAuthThreshold`.
   {
     key: 'min_days_to_submit',
     value: '10',

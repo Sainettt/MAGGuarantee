@@ -4,9 +4,9 @@
 //   - happy path (applied): NA_WERYFIKACJI + periodAdjustedByVerifier=false →
 //     dateEnd shifts to actualReturnAt, mileage re-prefilled (no carrier
 //     override), km-calc re-run, numbers persisted, `claim.autoRecalc` audited.
-//   - skip by status (FROZEN OCZEKUJE_NA_AUTORYZACJE — pracownik already sent a
-//     concrete amount to Maksim for authorization, 2026-06-22 boundary) →
-//     `autoRecalcSkipped`.
+//   - skip by status (FROZEN OCZEKUJE_NA_AUTORYZACJE — the claim crossed the auth
+//     threshold at verification and the system already emailed Maksim the
+//     concrete dopłata, so it must not shift) → `autoRecalcSkipped`.
 //   - skip by status (decided ZAAKCEPTOWANO) → no write, `autoRecalcSkipped`.
 //   - skip by periodAdjustedByVerifier=true → no write, `autoRecalcSkipped`.
 //   - no-op when no claim is linked.
@@ -77,14 +77,8 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     comment: null,
     orderNumber: null,
     orderDate: null,
-    authorizationRequired: false,
-    authorizationDescription: null,
-    authorizationToken: null,
-    authorizationDecidedAt: null,
     amountRequested: 1_400,
     amountApproved: null,
-    margin: null,
-    amountMaximum: null,
     reklamacjaSubmitted: false,
     reklamacjaText: null,
     reklamacjaResponse: null,
@@ -99,7 +93,6 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     origTimeTo: '18:00',
     origHoursAdjusted: 0,
     hoursAdjustedValue: 0,
-    authScreenshotUrl: null,
     maksimGateRequired: false,
     maksimGateNotifiedAt: null,
     maksimGateNotifiedAmount: null,

@@ -20,8 +20,6 @@ import type {
   ClaimFilters,
   PreviewClaimDto,
   PreviewClaimResponse,
-  RequestAuthorizationDto,
-  SetAuthorizationAmountDto,
   SubmitClaimDto,
   SubmitReklamacjaDto,
   UpdateClaimDto,
@@ -33,8 +31,6 @@ import {
   listClaims,
   previewExistingClaim,
   previewNewClaim,
-  requestAuthorization,
-  setAuthorizationAmount,
   submitClaim,
   submitReklamacja,
   updateClaim,
@@ -172,75 +168,17 @@ export function useUpdateClaim(
 }
 
 /**
- * `POST /claims/:nrZgl/request-authorization` — Phase 4.2 Maksim handshake.
- *
- * Admin / pracownik flags a claim as needing Maksim sign-off before being
- * booked as accepted. The mutation invalidates the claim detail, list and
- * preview caches on success so the open modal reflects the new
- * `OCZEKUJE_NA_AUTORYZACJE` status + the persisted `amountMaximum` without
- * a manual refetch.
- *
- * The `nrZgl` is bound at hook-call time so the call site stays terse —
- * `mutateAsync(body)` rather than `mutateAsync({ nrZgl, body })`.
- */
-export function useRequestAuthorization(
-  nrZgl: string,
-  opts?: UseMutationOptions<ClaimDto, Error, RequestAuthorizationDto>,
-) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: RequestAuthorizationDto) =>
-      requestAuthorization(nrZgl, body),
-    ...opts,
-    onSuccess: (...args) => {
-      // Detail + list both surface the new status; preview cache is keyed
-      // on the body so a stale preview against the old claim row would
-      // misrepresent the badge after the request lands.
-      qc.invalidateQueries({ queryKey: [...CLAIMS_KEY, 'detail', nrZgl] });
-      qc.invalidateQueries({ queryKey: CLAIMS_KEY });
-      qc.invalidateQueries({ queryKey: [...CLAIMS_KEY, 'preview', nrZgl] });
-      opts?.onSuccess?.(...args);
-    },
-  });
-}
-
-/**
- * `PUT /claims/:nrZgl/authorization-amount` — Phase 4.2 (kwota-Maksima
- * follow-up).
- *
- * Records Maksim's replied amount into `Claim.amountMaximum` while the claim
- * sits in `OCZEKUJE_NA_AUTORYZACJE`. Invalidates the claim detail (so the open
- * modal re-renders with the saved value) and the list. Repeatable — re-saving
- * overwrites the amount. Mirrors `useRequestAuthorization`: `nrZgl` is bound at
- * hook-call time so the call site stays terse — `mutate(body)`.
- */
-export function useSetAuthorizationAmount(
-  nrZgl: string,
-  opts?: UseMutationOptions<ClaimDto, Error, SetAuthorizationAmountDto>,
-) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: SetAuthorizationAmountDto) =>
-      setAuthorizationAmount(nrZgl, body),
-    ...opts,
-    onSuccess: (...args) => {
-      qc.invalidateQueries({ queryKey: [...CLAIMS_KEY, 'detail', nrZgl] });
-      qc.invalidateQueries({ queryKey: CLAIMS_KEY });
-      opts?.onSuccess?.(...args);
-    },
-  });
-}
-
-/**
  * `PATCH /claims/:nrZgl/verification` — verifier's checkpoint (verifier-
  * checkpoint feature).
  *
  * Admin / pracownik confirms a claim in `NA_WERYFIKACJI` (with optional
  * corrections). Invalidates the claim detail (so the open modal re-renders with
  * the fresh `verifiedAt`/`verifiedBy` stamp + any recalced amounts) and the
- * list. Repeatable — re-saving overwrites the previous checkpoint. Mirrors
- * `useSetAuthorizationAmount`: `nrZgl` is bound at hook-call time so the call
- * site stays terse — `mutate(body)`.
+ * list. Repeatable — re-saving overwrites the previous checkpoint. Saving with
+ * the dopłata over Maksim's threshold auto-routes the claim into
+ * `OCZEKUJE_NA_AUTORYZACJE` server-side; the refetched detail carries the new
+ * status. `nrZgl` is bound at hook-call time so the call site stays terse —
+ * `mutate(body)`.
  */
 export function useVerifyClaim(
   nrZgl: string,

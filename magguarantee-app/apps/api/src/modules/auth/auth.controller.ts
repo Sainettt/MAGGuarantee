@@ -248,7 +248,7 @@ export class AuthController {
   // ── Helpers ──────────────────────────────────────────
 
   // SameSite=Lax, NOT Strict: notification emails deep-link into the app
-  // (authorization-request, carrier-decision, daily-reminder CTAs — see
+  // (maksim-confirmation-request, carrier-decision, daily-reminder CTAs — see
   // apps/api/src/modules/mail/templates/). A click from a mail client is a
   // cross-site top-level navigation; Strict would omit BOTH cookies and bounce
   // a live session to /login. Lax keeps CSRF safety: browsers don't attach

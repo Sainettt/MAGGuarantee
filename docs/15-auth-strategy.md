@@ -44,7 +44,7 @@
 ## Решение по cookie vs header
 
 **Используем оба:**
-- **Web (Next.js):** HttpOnly cookies. Защищены от XSS (нельзя прочитать из JS), CSRF mitigated через `SameSite=Lax` + double-submit token на mutating endpoints. Lax, а не Strict: почтовые уведомления (authorization-request, carrier-decision, daily-reminder и т.д.) диплинкуют в приложение — клик из почтового клиента это cross-site top-level навигация, и Strict не отправил бы ни одной куки → живую сессию выкидывало бы на /login. CSRF-защита сохраняется: Lax-куки не едут на cross-site POST/XHR, а все мутирующие endpoint-ы — POST/PATCH/DELETE.
+- **Web (Next.js):** HttpOnly cookies. Защищены от XSS (нельзя прочитать из JS), CSRF mitigated через `SameSite=Lax` + double-submit token на mutating endpoints. Lax, а не Strict: почтовые уведомления (maksim-confirmation-request, carrier-decision, daily-reminder и т.д.) диплинкуют в приложение — клик из почтового клиента это cross-site top-level навигация, и Strict не отправил бы ни одной куки → живую сессию выкидывало бы на /login. CSRF-защита сохраняется: Lax-куки не едут на cross-site POST/XHR, а все мутирующие endpoint-ы — POST/PATCH/DELETE.
 - **Внешние интеграции / mobile (если когда-нибудь):** `Authorization: Bearer`.
 
 API одинаково принимает оба варианта (custom passport extractor).

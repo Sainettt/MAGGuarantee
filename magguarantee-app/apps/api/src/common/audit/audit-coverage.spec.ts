@@ -97,20 +97,6 @@ describe('audit coverage — decorator presence on critical mutating endpoints',
       targetType: 'Claim',
     },
     {
-      name: 'POST /claims/:nrZgl/request-authorization',
-      controller: ClaimsController,
-      method: 'requestAuthorization',
-      action: 'claim.requestAuthorization',
-      targetType: 'Claim',
-    },
-    {
-      name: 'PUT /claims/:nrZgl/authorization-amount',
-      controller: ClaimsController,
-      method: 'setAuthorizationAmount',
-      action: 'claim.setAuthorizationAmount',
-      targetType: 'Claim',
-    },
-    {
       name: 'PUT /limits/:yearMonth',
       controller: LimitsController,
       method: 'upsert',
@@ -245,53 +231,6 @@ describe('audit coverage — interceptor writes a row end-to-end', () => {
       verifiedAt: '2026-05-15T10:00:00.000Z',
     });
     // Checkpoint must commit atomically (ambient transaction).
-    expect(out.txOpens).toBe(1);
-    expect(out.committed).toBe(true);
-  });
-
-  it('POST /claims/:nrZgl/request-authorization → claim.requestAuthorization row', async () => {
-    const out = await runAuditedHandler({
-      controller: ClaimsController,
-      method: 'requestAuthorization',
-      req: req({
-        user: PRACOWNIK,
-        params: { nrZgl: 'ZGL-2026-04-0042' },
-        url: '/api/v1/claims/ZGL-2026-04-0042/request-authorization',
-      }),
-      result: { nrZgl: 'ZGL-2026-04-0042', status: 'OCZEKUJE_NA_AUTORYZACJE' },
-      duringHandler: () =>
-        AuditContext.setBefore({ status: 'NA_WERYFIKACJI' }),
-    });
-
-    expect(out.entries).toHaveLength(1);
-    expect(out.entry!.action).toBe('claim.requestAuthorization');
-    expect(out.entry!.targetType).toBe('Claim');
-    expect(out.entry!.targetKey).toBe('ZGL-2026-04-0042');
-    expect(out.entry!.before).toEqual({ status: 'NA_WERYFIKACJI' });
-    expect(out.txOpens).toBe(1);
-    expect(out.committed).toBe(true);
-  });
-
-  it('PUT /claims/:nrZgl/authorization-amount → claim.setAuthorizationAmount row', async () => {
-    const out = await runAuditedHandler({
-      controller: ClaimsController,
-      method: 'setAuthorizationAmount',
-      req: req({
-        user: PRACOWNIK,
-        params: { nrZgl: 'ZGL-2026-04-0042' },
-        method: 'PUT',
-        url: '/api/v1/claims/ZGL-2026-04-0042/authorization-amount',
-      }),
-      result: { nrZgl: 'ZGL-2026-04-0042', amountMaximum: 1_550.5 },
-      duringHandler: () =>
-        AuditContext.setBefore({ amountMaximum: null }),
-    });
-
-    expect(out.entries).toHaveLength(1);
-    expect(out.entry!.action).toBe('claim.setAuthorizationAmount');
-    expect(out.entry!.targetType).toBe('Claim');
-    expect(out.entry!.targetKey).toBe('ZGL-2026-04-0042');
-    expect(out.entry!.before).toEqual({ amountMaximum: null });
     expect(out.txOpens).toBe(1);
     expect(out.committed).toBe(true);
   });

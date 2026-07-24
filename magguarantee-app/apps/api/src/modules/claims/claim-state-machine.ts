@@ -17,10 +17,15 @@
 //   - the verifier-facing path (`REKLAMACJA → ZAAKCEPTOWANO`,
 //     `REKLAMACJA → ODRZUCONO`) lives in PATCH and IS in the matrix below.
 //
-// "Frozen" terminal states do not appear as a `from`:
-//   `AUTORYZACJA_KWOTA_MAKSIMA` is post-Maksim and only flows to ZAAKCEPTOWANO
-//   via the same accept path (modeled here as `OCZEKUJE_NA_AUTORYZACJE → *`
-//   covers it for the schema; service-level decide() narrows further).
+// The two edges in/out of `OCZEKUJE_NA_AUTORYZACJE` are AUTOMATIC (driven by
+// `ClaimsService.verifyClaim` at the verification checkpoint when the dopłata
+// crosses `getAuthThreshold(...)`), NOT PATCH targets:
+//   - `NA_WERYFIKACJI → OCZEKUJE_NA_AUTORYZACJE`  — armed over threshold,
+//   - `OCZEKUJE_NA_AUTORYZACJE → NA_WERYFIKACJI`  — auto-rollback when an admin
+//     re-verify drops the amount back under threshold.
+// The PATCH decision surface only accepts the decision targets (ZAAKCEPTOWANO /
+// ODRZUCONO / REKLAMACJA_*); both `NA_WERYFIKACJI` and `OCZEKUJE_NA_AUTORYZACJE`
+// are legal predecessors of the decisions.
 
 import { UnprocessableEntityException } from '@nestjs/common';
 
@@ -34,6 +39,9 @@ export type LegalTransition =
   | { from: 'NA_WERYFIKACJI'; to: 'OCZEKUJE_NA_AUTORYZACJE' }
   | { from: 'NA_WERYFIKACJI'; to: 'ZAAKCEPTOWANO' }
   | { from: 'NA_WERYFIKACJI'; to: 'ODRZUCONO' }
+  // Automatic rollback at the verification checkpoint when a re-verify drops the
+  // dopłata back under threshold; PATCH never accepts this target.
+  | { from: 'OCZEKUJE_NA_AUTORYZACJE'; to: 'NA_WERYFIKACJI' }
   | { from: 'OCZEKUJE_NA_AUTORYZACJE'; to: 'ZAAKCEPTOWANO' }
   | { from: 'OCZEKUJE_NA_AUTORYZACJE'; to: 'ODRZUCONO' }
   | { from: 'ZAAKCEPTOWANO'; to: 'REKLAMACJA' }
@@ -53,13 +61,15 @@ const TRANSITION_TABLE: Readonly<Record<ClaimStatus, ReadonlySet<ClaimStatus>>> 
       'ODRZUCONO',
     ]),
     OCZEKUJE_NA_AUTORYZACJE: new Set<ClaimStatus>([
+      // Automatic rollback when a re-verify drops the amount back under
+      // threshold; PATCH never accepts this target (verify-driven only).
+      'NA_WERYFIKACJI',
       'ZAAKCEPTOWANO',
       'ODRZUCONO',
     ]),
     ZAAKCEPTOWANO: new Set<ClaimStatus>(['REKLAMACJA']),
     ODRZUCONO: new Set<ClaimStatus>(['REKLAMACJA']),
     REKLAMACJA: new Set<ClaimStatus>(['ZAAKCEPTOWANO', 'ODRZUCONO']),
-    AUTORYZACJA_KWOTA_MAKSIMA: new Set<ClaimStatus>(),
   };
 
 /** Pure predicate — true iff the (from, to) edge exists in the matrix. */

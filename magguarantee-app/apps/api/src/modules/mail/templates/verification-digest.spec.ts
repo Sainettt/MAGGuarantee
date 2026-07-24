@@ -4,9 +4,9 @@
 // labels («po terminie» for overdue, «{n} dni robocze» for dueSoon).
 //
 // We render via `react-dom/server.renderToStaticMarkup` directly rather than
-// `@react-email/render` for the same reason as `authorization-request.spec.ts`
-// (the async dynamic import the latter uses doesn't resolve cleanly under
-// ts-jest CommonJS). Production uses the async `render` helper in MailService.
+// `@react-email/render` (the async dynamic import the latter uses doesn't
+// resolve cleanly under ts-jest CommonJS). Production uses the async `render`
+// helper in MailService.
 
 import { renderToStaticMarkup } from 'react-dom/server';
 

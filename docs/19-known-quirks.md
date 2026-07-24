@@ -67,19 +67,13 @@ Same pattern for accounts:
 
 ---
 
-## 5. <a id="kwotaMaksima"></a>`kwotaMaksima` (Maksim authorization override)
+## 5. <a id="kwotaMaksima"></a>`kwotaMaksima` (Maksim authorization override) — **REMOVED 2026-07-24**
 
-When a claim's `paymentEur` exceeds `getAuthThreshold(drivenDays)` (see #6 below), the wniosek transitions to `OCZEKUJE_NA_AUTORYZACJE` instead of being acceptable directly. Pracownik then runs an **out-of-band manual decision flow**:
+The manual authorization flow this quirk documented (pracownik calls `POST /request-authorization`, Maksim replies, pracownik records a structured `kwotaMaksima` that overrides the payout) **no longer exists in the product**. Removed together with the `Claim.amountMaximum` / `margin` / `authorization*` / `authScreenshotUrl` columns, the `AUTORYZACJA_KWOTA_MAKSIMA` status and the `authorization-request.tsx` email. The legacy behavior remains visible only in `Code.gs:4899, 5042, 5154, 5263-5265, 5977, 6010-6109` (reference, do not port).
 
-1. Pracownik calls `POST /claims/:nrZgl/request-authorization` — server emails Maksim Siankevich (the admin authorized to approve large payouts) using legacy `sendAuthorizationRequest` (`Code.gs:6010`). Status persists as `OCZEKUJE_NA_AUTORYZACJE`.
-2. Maksim replies offline (email reply, Slack, phone — system-agnostic).
-3. Pracownik uploads a screenshot of Maksim's authorization via `POST /claims/:nrZgl/auth-screenshot` (legacy `uploadAuthScreenshot`, `Code.gs:5977`). Stored as `authScreenshotUrl` — audit trail only, not parsed.
-4. Pracownik manually enters `kwotaMaksima` in the modal. This **overrides** the calculated `paymentEur`.
-5. Status transitions to `ZAAKCEPTOWANO`. Legacy code (`Code.gs:5263-5265`) writes `kwotaMaksima` into `doplata` (legacy column) — in the new schema both `amountApproved` and `amountMaximum` exist. Verify which one is canonical by reading current `ClaimsService.decide` (Phase 4) — both fields exist on the model. ⚠️ Pre-Phase-4 this is unimplemented; the data-model has space for either resolution.
+What replaced it — the **automatic Maksim gate**: on zapis weryfikacji with final `paymentEur > getAuthThreshold(drivenDays)` (see #6) the wniosek transitions to `OCZEKUJE_NA_AUTORYZACJE` automatically, Maksim receives a confirmation email (amount-aware dedup via `maksimGateNotifiedAmount`), and the accept/reject decision is blocked (422 `CLAIM_AUTHORIZATION_REQUIRED`) until pracownik uploads a screenshot of his reply (`POST /claims/:nrZgl/authorization-confirmation`, stored as a `ClaimAttachment` of category `AUTORYZACJA_MAKSIMA`). A correction dropping the amount to/under the threshold auto-rolls the claim back to `NA_WERYFIKACJI`. Re-verify while in `OCZEKUJE_NA_AUTORYZACJE` is admin-only; auto-recalc is frozen there. The approved amount is recorded only as `amountApproved` at accept time — there is no separate override field.
 
-Source of truth: `Code.gs:4899, 5042, 5154, 5263-5265, 5977, 6010-6109`; current types: `Claim.amountMaximum` + `Claim.amountApproved` in `schema.prisma`.
-
-**What NOT to do:** do not try to automate Maksim's decision. Do not parse the screenshot. Do not make `amountMaximum` and `amountApproved` mutually-exclusive — they coexist (one is the override input, the other the recorded approval).
+**What NOT to do:** do not resurrect a manual "send to authorization" action or a structured `kwotaMaksima` field — the screenshot IS the confirmation record. Do not parse the screenshot. Do not automate Maksim's decision.
 
 ---
 
@@ -97,7 +91,7 @@ function getAuthThreshold(dniJezdne) {
 }
 ```
 
-Read: longer trips justify larger payouts before triggering Maksim's manual review.
+Read: longer trips justify larger payouts before triggering Maksim's review. Crossing the threshold at zapis weryfikacji **automatically** moves the wniosek to `OCZEKUJE_NA_AUTORYZACJE` (see #5 for the current flow — there is no manual trigger).
 
 | `drivenDays` | Threshold (EUR) |
 |---|---|
@@ -240,7 +234,7 @@ The role identifier in DB and JWT is `pracownik`. **Every user-facing label** in
 | EN UI label (when added) | "Claims caretaker" |
 | Legacy comment (`Code.gs:944`) | "Pracownik = widzi wszystko, rozlicza wnioski, BEZ ustawień" |
 
-Carrier-facing semantics: this person is the carrier's claims caretaker — they verify and accept wnioski, request authorization, deal with reklamacje. They do NOT manage the carrier or fleet (that's `opiekun`, a separate role with overlapping label nicknames).
+Carrier-facing semantics: this person is the carrier's claims caretaker — they verify and accept wnioski, handle the automatic authorization gate (screenshot upload), deal with reklamacje. They do NOT manage the carrier or fleet (that's `opiekun`, a separate role with overlapping label nicknames).
 
 Source of truth: `docs/03-roles.md#pracownik`; legacy: `index.html:573` (button text "🏢 Panel Opiekuna wniosków").
 
@@ -288,7 +282,7 @@ Read the relevant section before:
 | Vehicle CRUD / forms | #1, #2, #3, #11 |
 | Carrier onboarding / VIES / Biała Lista | #4 |
 | Claim verification / decision PATCH | #5, #6, #9 |
-| Authorization request / Maksim flow | #5, #6 |
+| Maksim authorization gate (automatic) | #5, #6 |
 | `calcKmGwarantPerMonth` port | #7, #8 |
 | Auth + login + session | #10, #12 |
 | Delegations module | #11, #13 |

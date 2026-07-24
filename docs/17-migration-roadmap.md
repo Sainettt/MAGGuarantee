@@ -257,6 +257,7 @@
   - [x] web: TanStack `useRequestAuthorization(nrZgl)` хук. UI Autoryzacja-таба переписан под Phase 4.2 (RHF + `zodResolver(RequestAuthorizationSchema)`, кнопка «Wymaga autoryzacji» с email-toast, при статусе уже `OCZEKUJE_NA_AUTORYZACJE` — read-only summary с info-banner).
   - [x] web: `decisionTargetsFor('NA_WERYFIKACJI')` в `claim-transitions.ts` больше не включает `OCZEKUJE_NA_AUTORYZACJE` — единственный путь в этот статус теперь через Autoryzacja-таб с email. Старый legacy PATCH-вариант в backend `UpdateClaimToAuthorizationPending` остаётся в schema для API-обратной совместимости, но из UI исключён.
   - [x] tests: 9 unit на `ClaimsService.requestAuthorization()` (happy path, illegal transition, missing claim, audit before-capture, mail-failure isolation, optional-comment) + 2 на PATCH `amountMaximum` + 6 на email-шаблон.
+  - [x] **REWORK 2026-07-24 — ручной флоу авторизации выпилен целиком.** Удалены: `POST /request-authorization`, `PUT /authorization-amount`, ветка `UpdateClaimToAuthorizationPending`, письмо `authorization-request.tsx`, колонки `authorization*` / `margin` / `amountMaximum` / `authScreenshotUrl`, статус `AUTORYZACJA_KWOTA_MAKSIMA`, seed-ключи `auth_threshold_*`. Единственный путь в `OCZEKUJE_NA_AUTORYZACJE` — **автоматический Maksim-gate** при zapisie weryfikacji (`paymentEur > getAuthThreshold`); скриншот-clear и решение из OCZEKUJE сохранены; правка под порог авто-откатывает в `NA_WERYFIKACJI` (новое ребро state machine); re-verify в OCZEKUJE остаётся admin-only.
   - ❌ ~~Screenshot upload~~ — выпилено (2026-05-13).
 
 - [x] **4.3 Dashboard** (≈3 дня) — **DONE** (2026-05-26)
@@ -297,7 +298,7 @@
 - **Status-фильтр в claims list — single-select** (так позволяет `ClaimFiltersSchema` в `packages/shared`). Multi-select требует правки schema.
 - **`bg-input` зафиксирован как single surface token** (решено 2026-05-25 в Phase 4.4 uiux-аудите). `bg-bg-soft` deprecated. Policy в `docs/14-design-system.md` Surface-token policy section.
 - **`opiekun` тоже впущен в `/employee` shell** с пустым nav-ом (роль идёт через `lib/roles.ts:ROLE_LANDING.opiekun = '/employee'`). Не блокер для Phase 4, чинится естественно в Фазе 5 при добавлении opiekun-вкладки.
-- **Save kwotaMaksima без смены статуса не делается.** Решено 2026-05-25: kwotaMaksima меняется только внутри `UpdateClaimToAccepted` ветки `UpdateClaimSchema` (т.е. в момент акцепта). По бизнес-flow «потолок» — атрибут одобрения, не отдельная сущность. Никаких dedicated `PATCH /claims/:nrZgl/amount-maximum`.
+- **Save kwotaMaksima без смены статуса не делается.** Решено 2026-05-25: kwotaMaksima меняется только внутри `UpdateClaimToAccepted` ветки `UpdateClaimSchema` (т.е. в момент акцепта). По бизнес-flow «потолок» — атрибут одобрения, не отдельная сущность. Никаких dedicated `PATCH /claims/:nrZgl/amount-maximum`. **UPD 2026-07-24: концепция kwotaMaksima выпилена целиком** (вместе с ручным request-authorization флоу) — поле `amountMaximum` удалено из схемы, подтверждение Максима фиксируется только скриншотом.
 - **Stale generated Prisma client** — recurring проблема при schema-изменениях. После любого редактирования `schema.prisma` нужно `npm run build -w @magguarantee/database` (не только `prisma generate` — он обновляет только `src/generated/`, а api читает из `dist/generated/`). Side-quest для будущего: chain `prisma generate` в `npm run build -w api` через prebuild-script.
 
 ### Backend
@@ -309,7 +310,7 @@
    - ✅ `_handleReklamacjaTransition()`
    - ✅ `_applyDecisionEmails()`
 2. ✅ `PATCH /claims/:nrZgl` — только admin/pracownik, с `RolesGuard`.
-3. ✅ `ClaimsService.requestAuthorization()` + `POST /claims/:nrZgl/request-authorization` — admin/pracownik, UUID v4 authorizationToken, email Maksim-у через Mailhog с React Email template. **Sub-slice 4.2 DONE.**
+3. ❌ ~~`ClaimsService.requestAuthorization()` + `POST /claims/:nrZgl/request-authorization`~~ — был реализован в 4.2, **выпилен 2026-07-24** (rework: в `OCZEKUJE_NA_AUTORYZACJE` только автоматический Maksim-gate при zapisie weryfikacji).
 4. ❌ ~~`S3Module`: загрузка scrennshot-ов авторизации.~~ **Выпилено** из scope (решение от 2026-05-13).
 5. ❌ ~~`POST /claims/:nrZgl/auth-screenshot` (multipart).~~ **Выпилено.**
 6. ✅ Endpoint `/diagnostics/dashboard` (Sub-slice 4.3 DONE) — KPI counts, top carriers по выплатам, recent activity, urgent NA_WERYFIKACJI > 3d, rolling-12-month series, reklamacje count.
@@ -328,7 +329,7 @@
    - ✅ Все поля редактируемы (discriminated по `targetStatus`).
    - ✅ Live recalculation на каждое изменение (debounced 300ms → `/preview`).
    - ✅ История рекламации в табе «Historia» (если есть `origData`).
-   - ✅ Таб «Autoryzacja» — Phase 4.2 wiring: RHF + `RequestAuthorizationSchema`, кнопка «Wymaga autoryzacji» дёргает `POST /claims/:nrZgl/request-authorization` → email Maksim-у через Mailhog. При статусе уже `OCZEKUJE_NA_AUTORYZACJE` — read-only summary. `decisionTargetsFor('NA_WERYFIKACJI')` в Edit-табе больше не предлагает этот статус (единственный путь — Autoryzacja-таб).
+   - ❌ ~~Таб «Autoryzacja» (Phase 4.2 wiring: кнопка «Wymaga autoryzacji» → `POST /request-authorization`)~~ — **выпилен 2026-07-24**: вкладка удалена, единственная поверхность авторизации — `MaksimGateBlock` (авто-гейт); `decisionTargetsFor` не знает `OCZEKUJE_NA_AUTORYZACJE` вовсе.
    - ❌ ~~Upload screenshot для авторизации.~~ **Выпилено.**
 5. ✅ **[admin only]** `app/(employee)/employee/(admin)/carriers/...` — Sub-slice 4.4 DONE: layout strip, hard-delete с `reason` через `<ConfirmDeleteWithReasonDialog>`, h-10 polish.
 6. ✅ **[admin only]** `app/(employee)/employee/(admin)/vehicles/`, `drivers/`, `trailers/`, `trailer-types/` — Sub-slice 4.4 DONE (тот же набор фиксов).
@@ -633,7 +634,7 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
 ### Шаги
 
 1. **Gmail API setup** (см. [16-jobs-and-integrations.md](16-jobs-and-integrations.md#email-через-gmail-api)).
-2. **Все email-шаблоны** в React Email (`account-created`, `password-reset`, `login-code`, `carrier-decision`, `internal-decision`, `carrier-submitted`, `daily-reminder`, `weekly-report`, `authorization-request`).
+2. **Все email-шаблоны** в React Email (`account-created`, `password-reset`, `login-code`, `carrier-decision`, `internal-decision`, `carrier-submitted`, `daily-reminder`, `weekly-report`, `maksim-confirmation-request`).
 3. **BullMQ queues:** `email-send`, `daily-reminders`, `weekly-report`, `token-cleanup`.
 4. **S3 для screenshots** — в Фазе 4 уже подключено, здесь — финализация retention policy.
 5. **Google OAuth** для внутренних — опционально, в конце.

@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import {
   BadRequestException,
   ConflictException,
@@ -22,8 +20,6 @@ import type {
   KmCalcBreakdown,
   PreviewClaimDto,
   PreviewClaimResponse,
-  RequestAuthorizationDto,
-  SetAuthorizationAmountDto,
   SubmitClaimDto,
   SubmitReklamacjaDto,
   UpdateClaimDto,
@@ -172,11 +168,12 @@ export class ClaimsService {
     private readonly nrZgl: NrZglService,
     private readonly prisma: PrismaService,
     private readonly auditWriter: AuditWriter,
-    // Phase 4.2 — mail handshake (kwota-Maksima request). `MailService` is
-    // an optional ctor arg so the existing 9-arg test fakes keep compiling;
-    // production wiring always passes the real provider via NestJS DI. When
-    // null/undefined, `_dispatchAuthorizationEmail` logs-and-skips instead
-    // of throwing — same fire-and-log policy as the other notifications.
+    // Mail dispatch (Maksim over-threshold confirmation request + decision
+    // emails). `MailService` is an optional ctor arg so the existing 9-arg test
+    // fakes keep compiling; production wiring always passes the real provider
+    // via NestJS DI. When null/undefined, `_dispatchMaksimConfirmationEmail`
+    // logs-and-skips instead of throwing — same fire-and-log policy as the
+    // other notifications.
     private readonly mailService?: MailService,
     private readonly configService?: ConfigService<Env, true>,
     // Phase 7 REWORK (#3) — claim mileage pre-fill source. Optional ctor arg so
@@ -672,9 +669,10 @@ export class ClaimsService {
    * Hard gate — applies ONLY when:
    *   - a claim is linked to the outing (else no-op), AND
    *   - `claim.status === NA_WERYFIKACJI` (the only mutable verification window —
-   *     `OCZEKUJE_NA_AUTORYZACJE` is FROZEN: pracownik already sent a concrete
-   *     amount to Maksim for authorization, so the number must not shift under
-   *     authorization; decided statuses are likewise immutable), AND
+   *     `OCZEKUJE_NA_AUTORYZACJE` is FROZEN: the claim crossed the auth threshold
+   *     and the system already emailed Maksim the concrete dopłata, so the number
+   *     must not shift while it awaits his confirmation; decided statuses are
+   *     likewise immutable), AND
    *   - `claim.periodAdjustedByVerifier === false` (a human-corrected period is
    *     never silently overwritten).
    *
@@ -738,8 +736,9 @@ export class ClaimsService {
   /** Human-readable skip reason for the `autoRecalcSkipped` audit row. */
   private _skipReason(claim: ClaimRow): string {
     if (claim.periodAdjustedByVerifier) return 'period_adjusted_by_verifier';
-    // FROZEN under authorization: pracownik already sent a concrete amount to
-    // Maksim, so the number must not shift while it is being authorized.
+    // FROZEN under authorization: the claim crossed the auth threshold at
+    // verification and the system already emailed Maksim the concrete dopłata,
+    // so the number must not shift while it awaits his confirmation.
     if (claim.status === 'OCZEKUJE_NA_AUTORYZACJE') return 'sent_for_authorization';
     return 'claim_already_decided';
   }
@@ -1022,24 +1021,24 @@ export class ClaimsService {
     // The `before` snapshot is stashed into the ambient `AuditContext` so
     // the interceptor's writer picks it up — no manual log() call here.
     const existing = await this._validateClaimUpdate(nrZgl, dto);
-    // In-transit gate (OUTERMOST): no decision (accept / reject / OCZEKUJE_*
-    // request) may be taken while the linked outing is still `w_trasie` — the
-    // period/mileage isn't final until `zjechal`. Runs BEFORE the verification
-    // gate so a still-driving claim reports "in transit", not "not verified".
-    // No-op when there is no linked outing or it already returned. 422
-    // CLAIM_DELEGATION_IN_TRANSIT.
+    // In-transit gate (OUTERMOST): no decision (accept / reject) may be taken
+    // while the linked outing is still `w_trasie` — the period/mileage isn't
+    // final until `zjechal`. Runs BEFORE the verification gate so a still-driving
+    // claim reports "in transit", not "not verified". No-op when there is no
+    // linked outing or it already returned. 422 CLAIM_DELEGATION_IN_TRANSIT.
     this._assertDelegationReturned(existing);
-    // Verification gate: a decision (akceptacja / odmowa / OCZEKUJE_* request)
-    // FROM `NA_WERYFIKACJI` is blocked until the pracownik has saved the
-    // verification checkpoint (`verifiedAt` stamped). Transitions FROM
-    // `OCZEKUJE_NA_AUTORYZACJE` and `REKLAMACJA` are NOT gated (the claim was
-    // already verified before it left NA_WERYFIKACJI). 422 CLAIM_NOT_VERIFIED.
+    // Verification gate: a decision (akceptacja / odmowa) FROM `NA_WERYFIKACJI`
+    // is blocked until the pracownik has saved the verification checkpoint
+    // (`verifiedAt` stamped). Transitions FROM `OCZEKUJE_NA_AUTORYZACJE` and
+    // `REKLAMACJA` are NOT gated (the claim was already verified before it left
+    // NA_WERYFIKACJI). 422 CLAIM_NOT_VERIFIED.
     this._assertVerifiedIfNaWeryfikacji(existing);
-    // Maksim authorization gate: an over-threshold verified claim can only be
-    // accepted OR rejected once the confirmation screenshot has cleared the
-    // gate. Independent of and STRICTER than CLAIM_NOT_VERIFIED. 422
-    // CLAIM_AUTHORIZATION_REQUIRED. Only the NA_WERYFIKACJI decision edge is
-    // gated — request-authorization (OCZEKUJE) and reklamacja paths are not.
+    // Maksim authorization gate: an over-threshold verified claim (now sitting in
+    // `OCZEKUJE_NA_AUTORYZACJE`) can only be accepted OR rejected once the
+    // confirmation screenshot has cleared the gate. Independent of and STRICTER
+    // than CLAIM_NOT_VERIFIED. 422 CLAIM_AUTHORIZATION_REQUIRED. Gated on the
+    // decision edge out of either verification-window status; reklamacja paths
+    // are not.
     this._assertMaksimGateCleared(existing, dto);
     const recalc = await this._recalcClaim(existing, dto);
     // Authoritative accept-guard (Fix 3): a claim may only be ACCEPTED when the
@@ -1076,9 +1075,8 @@ export class ClaimsService {
    *
    * The verifier persists their corrections to a `NA_WERYFIKACJI` claim BEFORE
    * making any decision. Stamps `verifiedAt`/`verifiedById`, which UNGATES the
-   * decision transitions (akceptacja / odmowa) and the kwota-Maksima
-   * authorization request FROM `NA_WERYFIKACJI` (all 422 `CLAIM_NOT_VERIFIED`
-   * until verified). Steps:
+   * decision transitions (akceptacja / odmowa) FROM `NA_WERYFIKACJI` (422
+   * `CLAIM_NOT_VERIFIED` until verified). Steps:
    *
    *   1. Load the claim (404 if missing).
    *   2. Require a verifiable status (422 otherwise): `NA_WERYFIKACJI` for
@@ -1090,15 +1088,24 @@ export class ClaimsService {
    *   3. Re-run km-calc when the body carries a math-affecting correction (the
    *      SAME `_recalcClaim` the decision PATCH uses; an EMPTY body → recalc is
    *      `null` ⇒ "confirmed as-is", no math churn).
-   *   4. Persist: the corrections (via the SHARED `_applyCorrectionsToPatch`, so
+   *   4. Arm / clear the Maksim authorization gate from the FINAL numbers, and
+   *      AUTO-TRANSITION the status accordingly (this is the ONLY authorization
+   *      mechanism — there is no manual request flow):
+   *        - over threshold + `NA_WERYFIKACJI` → move to `OCZEKUJE_NA_AUTORYZACJE`,
+   *        - under threshold + `OCZEKUJE_NA_AUTORYZACJE` → roll back to
+   *          `NA_WERYFIKACJI`,
+   *        - idempotent re-save over threshold in `OCZEKUJE_NA_AUTORYZACJE` →
+   *          status unchanged (re-notify only on an amount-aware dedup miss).
+   *   5. Persist: the corrections (via the SHARED `_applyCorrectionsToPatch`, so
    *      the field-by-field rules match the decision PATCH exactly) + the recalc
-   *      outputs (when math ran) + the `verifiedAt`/`verifiedById` stamp, inside
-   *      the ambient `AuditContext` transaction (setBefore + updateWithin —
-   *      mirror of `update` / `requestAuthorization`).
+   *      outputs (when math ran) + the `verifiedAt`/`verifiedById` stamp + any
+   *      status change, inside the ambient `AuditContext` transaction (setBefore
+   *      + updateWithin — mirror of `update`).
    *
    * Repeatable: a second call overwrites the stamp + corrections (re-verify).
-   * No email — this is a pure internal checkpoint. Does NOT change status (the
-   * state machine is untouched; verification is a flag, not a status).
+   * MAY change status (the threshold auto-transition above); `decidedById` is NOT
+   * touched (this is verification, not a decision). The Maksim confirmation email
+   * fires fire-and-log (amount-deduped) when the gate (re)arms.
    */
   async verifyClaim(
     user: AuthUser,
@@ -1142,41 +1149,49 @@ export class ClaimsService {
     const corrections = extractCorrectionFields(dto);
     this._applyCorrectionsToPatch(patch, corrections, recalc, existing);
 
-    // Maksim gate arming — decide from the FINAL numbers (recalc output when the
-    // math re-ran, otherwise the values already on the row). Mutates `patch`
-    // and returns whether the auto-email should be dispatched (fire-and-log,
-    // OUTSIDE the tx) after commit.
+    // Maksim authorization gate — arm / clear from the FINAL numbers (recalc
+    // output when the math re-ran, otherwise the values already on the row).
+    // `_applyMaksimGate` mutates `patch` and returns whether the auto-email
+    // should be dispatched (fire-and-log, OUTSIDE the tx) after commit.
     //
-    // SCOPED TO `NA_WERYFIKACJI` on purpose. There are two INDEPENDENT
-    // authorization mechanisms and the admin re-verify path must not cross them:
-    //   - MANUAL: `request-authorization` → status OCZEKUJE_NA_AUTORYZACJE +
-    //     email with the verifier's opis sprawy. Maksim is already in that
-    //     thread; his reply is recorded via PUT /authorization-amount.
-    //   - THRESHOLD: `maksimGateRequired`, armed here, enforced by
-    //     `_assertMaksimGateCleared` — which itself only fires on the
-    //     `NA_WERYFIKACJI → decision` edge.
-    // Running the threshold gate in OCZEKUJE_NA_AUTORYZACJE would therefore
-    // block NOTHING (no guard reads it in that status) while causing two real
-    // harms: (a) the amount-aware dedup deliberately re-notifies on a changed
-    // dopłata, so an admin correction would drop a SECOND, contextless Maksim
-    // email on top of the manual authorization request he is already answering;
-    // (b) a correction landing under threshold would take the `!overThreshold`
-    // branch and NULL `maksimGateClearedAt`/`ById` — destroying the clearance
-    // stamp left by an earlier screenshot upload on a claim that has already
-    // moved past that gate. Leaving the gate columns untouched here keeps the
-    // manual mechanism the single active one in the pending window.
+    // Runs in BOTH verifiable statuses. This is the ONLY authorization mechanism
+    // (the manual request flow was removed), so an admin re-verify while the
+    // claim sits in `OCZEKUJE_NA_AUTORYZACJE` must re-evaluate the gate too:
+    // re-notify on a moved over-threshold amount (amount-aware dedup), or clear
+    // the gate and roll the status back to `NA_WERYFIKACJI` when a correction
+    // drops the dopłata under threshold. Both harms the old scoping guarded
+    // against are now DESIRED: (a) an admin amount edit re-notifies Maksim of the
+    // NEW dopłata, and (b) dropping under threshold correctly clears the
+    // clearance because the status rolls back in the same patch.
     const finalPaymentEur = recalc ? recalc.paymentEur : existing.paymentEur;
     const finalDrivenDays = recalc ? recalc.drivenDays : existing.drivenDays;
-    const shouldNotifyMaksim =
-      existing.status === 'NA_WERYFIKACJI'
-        ? this._applyMaksimGate(
-            patch,
-            existing,
-            finalPaymentEur,
-            finalDrivenDays,
-            now,
-          )
-        : false;
+    const overThreshold = requiresMaksimConfirmation({
+      paymentEur: finalPaymentEur,
+      drivenDays: finalDrivenDays,
+    });
+    const shouldNotifyMaksim = this._applyMaksimGate(
+      patch,
+      existing,
+      finalPaymentEur,
+      finalDrivenDays,
+      now,
+    );
+
+    // Threshold-driven status auto-transition. The state machine carries both
+    // edges in/out of `OCZEKUJE_NA_AUTORYZACJE`; PATCH never targets that status
+    // — only this checkpoint moves in and out of it. An idempotent re-save over
+    // threshold while already in `OCZEKUJE_NA_AUTORYZACJE` leaves the status
+    // untouched (only the amount-aware dedup decides on re-notify). `decidedById`
+    // is deliberately NOT set — this is verification, not a decision.
+    if (overThreshold && existing.status === 'NA_WERYFIKACJI') {
+      assertLegalTransition(existing.status, 'OCZEKUJE_NA_AUTORYZACJE');
+      patch.status = 'OCZEKUJE_NA_AUTORYZACJE';
+      patch.statusChangedAt = now;
+    } else if (!overThreshold && existing.status === 'OCZEKUJE_NA_AUTORYZACJE') {
+      assertLegalTransition(existing.status, 'NA_WERYFIKACJI');
+      patch.status = 'NA_WERYFIKACJI';
+      patch.statusChangedAt = now;
+    }
 
     AuditContext.setBefore(this._snapshotForAudit(existing));
 
@@ -1186,9 +1201,9 @@ export class ClaimsService {
     const updated = await this.claims.updateWithin(txLike, existing.id, patch);
 
     // Maksim notification — outside the transaction (fire-and-log), only on the
-    // first over-threshold save (dedup via the just-stamped notifiedAt). Mirrors
-    // the `_dispatchAuthorizationEmail` fire-and-log policy: a mail failure must
-    // not roll back the verification stamp.
+    // first over-threshold save or a moved amount (amount-aware dedup via the
+    // just-stamped notifiedAt/notifiedAmount). A mail failure must not roll back
+    // the verification stamp or the status auto-transition.
     if (shouldNotifyMaksim) {
       void this._dispatchMaksimConfirmationEmail(updated).catch((err) => {
         this.logger.error({
@@ -1326,12 +1341,13 @@ export class ClaimsService {
   }
 
   /**
-   * Verification gate. Throws 422 `CLAIM_NOT_VERIFIED` when a decision /
-   * authorization request is attempted on a `NA_WERYFIKACJI` claim that has not
-   * yet been verified (no `verifiedAt` stamp). No-op for any other status — a
-   * claim in `OCZEKUJE_NA_AUTORYZACJE` / `REKLAMACJA` was already verified
-   * before it left NA_WERYFIKACJI, so those transitions are NOT gated. Pure
-   * decision helper — no IO.
+   * Verification gate. Throws 422 `CLAIM_NOT_VERIFIED` when a decision is
+   * attempted on a `NA_WERYFIKACJI` claim that has not yet been verified (no
+   * `verifiedAt` stamp). No-op for any other status — a claim in
+   * `OCZEKUJE_NA_AUTORYZACJE` / `REKLAMACJA` was already verified before it left
+   * NA_WERYFIKACJI (indeed `OCZEKUJE_NA_AUTORYZACJE` is reached ONLY via a
+   * successful verification), so those transitions are NOT gated. Pure decision
+   * helper — no IO.
    */
   private _assertVerifiedIfNaWeryfikacji(existing: ClaimRow): void {
     if (existing.status === 'NA_WERYFIKACJI' && !existing.verifiedAt) {
@@ -1343,19 +1359,19 @@ export class ClaimsService {
   }
 
   /**
-   * In-transit gate. HARD-blocks every verifier-side ACTION (verify /
-   * request-authorization / decision) on a wniosek whose LINKED outing is still
-   * `w_trasie` — the auto is on the road, so the period/mileage the verifier
-   * would act on is not yet final (the `zjechal` transition triggers the
-   * auto-recalc). Viewing (GET) stays open; the block lives only on the mutating
-   * paths. Throws 422 `CLAIM_DELEGATION_IN_TRANSIT`.
+   * In-transit gate. HARD-blocks every verifier-side ACTION (verify / decision)
+   * on a wniosek whose LINKED outing is still `w_trasie` — the auto is on the
+   * road, so the period/mileage the verifier would act on is not yet final (the
+   * `zjechal` transition triggers the auto-recalc). Viewing (GET) stays open; the
+   * block lives only on the mutating paths. Throws 422
+   * `CLAIM_DELEGATION_IN_TRANSIT`.
    *
    * Passes through silently when there is NO linked outing
    * (`delegationId === null`) or the outing has already returned
    * (`delegationStatus !== 'w_trasie'`, i.e. `zjechal` etc.) — the flow then
    * behaves exactly as before. Pure guard — no IO. Wired as the OUTERMOST gate
-   * on `update` (before `CLAIM_NOT_VERIFIED`), on `verifyClaim` (before the
-   * recalc + Maksim auto-email), and on `requestAuthorization`.
+   * on `update` (before `CLAIM_NOT_VERIFIED`) and on `verifyClaim` (before the
+   * recalc + Maksim auto-email + status auto-transition).
    *
    * TODO(defensive): now effectively unreachable — a wniosek can only be filed
    * on a `zjechal` outing, so a linked outing is never `w_trasie` in the current
@@ -1385,29 +1401,34 @@ export class ClaimsService {
 
   /**
    * Maksim authorization gate. HARD-blocks the accept/reject decision on an
-   * over-threshold `NA_WERYFIKACJI` claim until the confirmation screenshot has
-   * cleared the gate. Throws 422 `CLAIM_AUTHORIZATION_REQUIRED` (a NEW stable
-   * code, distinct from and stricter than `CLAIM_NOT_VERIFIED`) when the gate is
-   * armed (`maksimGateRequired`) and not yet cleared (`maksimGateClearedAt ==
-   * null`). Blocks BOTH `ZAAKCEPTOWANO` and `ODRZUCONO` — no decision either way
-   * until Maksim confirmed.
+   * over-threshold claim until the confirmation screenshot has cleared the gate.
+   * Throws 422 `CLAIM_AUTHORIZATION_REQUIRED` (a stable code, distinct from and
+   * stricter than `CLAIM_NOT_VERIFIED`) when the gate is armed
+   * (`maksimGateRequired`) and not yet cleared (`maksimGateClearedAt == null`).
+   * Blocks BOTH `ZAAKCEPTOWANO` and `ODRZUCONO` — no decision either way until
+   * Maksim confirmed.
    *
-   * Scope: ONLY the `NA_WERYFIKACJI → decision` edge. The manual
-   * `request-authorization` (OCZEKUJE_NA_AUTORYZACJE) request and any reklamacja
-   * resolution (`REKLAMACJA_*`) are NOT gated here — the gate lives on the
-   * verification checkpoint, and those paths do not re-enter it. Pure decision
-   * helper — no IO.
+   * Scope: the decision edge out of EITHER verification-window status
+   * (`NA_WERYFIKACJI` or `OCZEKUJE_NA_AUTORYZACJE`). An over-threshold claim now
+   * sits in `OCZEKUJE_NA_AUTORYZACJE` (auto-moved at verification), so decisions
+   * out of it are gated too. Any reklamacja resolution (`REKLAMACJA_*`) is NOT
+   * gated here — the gate lives on the verification checkpoint, and that path
+   * does not re-enter it. Pure decision helper — no IO.
    */
   private _assertMaksimGateCleared(
     existing: ClaimRow,
     dto: UpdateClaimDto,
   ): void {
-    // Gate only the fresh accept/reject decision out of NA_WERYFIKACJI. The
-    // synthetic REKLAMACJA_* literals and OCZEKUJE_NA_AUTORYZACJE are excluded.
+    // Gate the fresh accept/reject decision out of the verification window
+    // (`NA_WERYFIKACJI` or `OCZEKUJE_NA_AUTORYZACJE`). The synthetic REKLAMACJA_*
+    // literals are excluded.
     const isDecision =
       dto.targetStatus === 'ZAAKCEPTOWANO' ||
       dto.targetStatus === 'ODRZUCONO';
-    if (existing.status !== 'NA_WERYFIKACJI' || !isDecision) return;
+    const inVerificationWindow =
+      existing.status === 'NA_WERYFIKACJI' ||
+      existing.status === 'OCZEKUJE_NA_AUTORYZACJE';
+    if (!inVerificationWindow || !isDecision) return;
 
     if (existing.maksimGateRequired && existing.maksimGateClearedAt === null) {
       throw new UnprocessableEntityException({
@@ -1449,233 +1470,12 @@ export class ClaimsService {
     patch.maksimGateClearedById = null;
   }
 
-  // ── Request authorization (Phase 4.2) ───────────────────
-
   /**
-   * `POST /claims/:nrZgl/request-authorization` — Phase 4.2.
-   *
-   * Admin / pracownik flags a verified claim as requiring Maksim's sign-off
-   * before being moved to ZAAKCEPTOWANO. Steps:
-   *
-   *   1. Load the claim (404 if missing).
-   *   2. Assert the transition is legal via the state machine (422 otherwise).
-   *      The legal predecessor today is `NA_WERYFIKACJI` — the matrix in
-   *      `claim-state-machine.ts` is the single source of truth and may grow
-   *      additional inbound edges later (e.g. `REKLAMACJA → OCZEKUJE_*`).
-   *   3. Mint a fresh `authorizationToken` (UUID v4) — used by Maksim's
-   *      future approve-link click-through. Token is per-request; if the
-   *      verifier re-requests authorization on a claim that already had one,
-   *      we mint a new token and the old one stops being valid.
-   *   4. Update the claim atomically inside the ambient `AuditContext` tx:
-   *        - status            = OCZEKUJE_NA_AUTORYZACJE
-   *        - authorizationToken= <new uuid>
-   *        - authorizationRequired = true
-   *        - authorizationDescription = comment (required, non-empty)
-   *        - statusChangedAt   = now
-   *        - decidedById       = caller (so the audit trail knows who flagged)
-   *      `amountMaximum` is DELIBERATELY NOT touched here — the request carries
-   *      no amount (Maksim hasn't replied yet). It stays whatever it was
-   *      (normally null) and is recorded LATER via `setAuthorizationAmount`
-   *      (`PUT /claims/:nrZgl/authorization-amount`) once Maksim's reply lands.
-   *      A `before` snapshot is pushed into the ambient context for the
-   *      `AuditInterceptor` to commit alongside the row.
-   *   5. Fire the Maksim email outside the transaction (fire-and-log; never
-   *      block the response on SMTP). Same notification policy as submit /
-   *      reklamacja / verification — a 500 from Mailhog must not roll back
-   *      the state transition.
-   */
-  async requestAuthorization(
-    user: AuthUser,
-    nrZgl: string,
-    dto: RequestAuthorizationDto,
-  ): Promise<ClaimDto> {
-    const existing = await this.claims.findByNrZgl(nrZgl);
-    if (!existing) {
-      throw new NotFoundException('Wniosek nie znaleziony');
-    }
-
-    // State-machine validation — single source of truth. Throws 422 with the
-    // friendly Polish message on any illegal transition (e.g. when the claim
-    // is already pending authorization, or has been decided).
-    assertLegalTransition(existing.status, 'OCZEKUJE_NA_AUTORYZACJE');
-
-    // In-transit gate: the authorization handshake is likewise blocked while the
-    // linked outing is still `w_trasie` (period/mileage not yet final). No-op
-    // when there is no linked outing or it already returned. 422
-    // CLAIM_DELEGATION_IN_TRANSIT.
-    this._assertDelegationReturned(existing);
-
-    // Verification gate: the only legal predecessor is `NA_WERYFIKACJI`, so the
-    // request-authorization handshake is likewise blocked until the pracownik
-    // saved the verification checkpoint. 422 CLAIM_NOT_VERIFIED.
-    this._assertVerifiedIfNaWeryfikacji(existing);
-
-    const now = new Date();
-    const token = randomUUID();
-    // `comment` is REQUIRED at the schema level (RequestAuthorizationSchema),
-    // so the DTO always carries a trimmed non-empty string here.
-    const description = dto.comment;
-
-    const patch: UpdateClaimData = {
-      status: 'OCZEKUJE_NA_AUTORYZACJE',
-      statusChangedAt: now,
-      decidedById: user.sub,
-      authorizationRequired: true,
-      authorizationDescription: description,
-      authorizationToken: token,
-      // `amountMaximum` is intentionally OMITTED — the request carries no
-      // amount (Maksim hasn't decided yet). Recorded later via
-      // `setAuthorizationAmount` once his reply lands.
-    };
-
-    AuditContext.setBefore(this._snapshotForAudit(existing));
-
-    // Run on the ambient tx (opened by the `AuditInterceptor` via the
-    // `@Audit('claim.requestAuthorization')` on the controller). Both the
-    // claim update + audit-row insert commit atomically; if either throws,
-    // the whole thing rolls back and no email is sent (see post-update void).
-    const txLike = this.prisma.tx as unknown as TransactionLike;
-    const updated = await this.claims.updateWithin(txLike, existing.id, patch);
-
-    // Email dispatch — outside the transaction. Mirrors submit / reklamacja.
-    void this._dispatchAuthorizationEmail(updated, dto).catch((err) => {
-      this.logger.error({
-        msg: 'claims.requestAuthorization.notify_failed',
-        nrZgl: updated.nrZgl,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
-
-    return this.toDto(updated);
-  }
-
-  /**
-   * `PUT /claims/:nrZgl/authorization-amount` — Phase 4.2 (kwota-Maksima
-   * follow-up). Records the amount Maksim assigned in his EMAIL REPLY, once
-   * `request-authorization` has already put the claim into
-   * `OCZEKUJE_NA_AUTORYZACJE`. Steps:
-   *
-   *   1. Load the claim (404 if missing).
-   *   2. Require `status === OCZEKUJE_NA_AUTORYZACJE` (422 otherwise) — the
-   *      amount only makes sense while the claim is pending Maksim's sign-off.
-   *   3. Patch `amountMaximum = kwotaMaksima` atomically inside the ambient
-   *      `AuditContext` tx (mirrors `requestAuthorization`'s `setBefore` +
-   *      `updateWithin` shape). No status change, no token, NO email.
-   *
-   * Idempotent by design: it may be called again to CORRECT the value (Maksim
-   * revised his reply) — each call overwrites `amountMaximum` and writes a
-   * fresh before/after audit diff.
-   */
-  async setAuthorizationAmount(
-    user: AuthUser,
-    nrZgl: string,
-    dto: SetAuthorizationAmountDto,
-  ): Promise<ClaimDto> {
-    const existing = await this.claims.findByNrZgl(nrZgl);
-    if (!existing) {
-      throw new NotFoundException('Wniosek nie znaleziony');
-    }
-
-    // Guard, not a state transition: the amount is only recordable while the
-    // claim is pending authorization. Any other status is a 422 with a
-    // friendly Polish message (mirrors the state-machine error shape).
-    if (existing.status !== 'OCZEKUJE_NA_AUTORYZACJE') {
-      throw new UnprocessableEntityException(
-        'Kwotę Maksima można zapisać tylko dla wniosku oczekującego na autoryzację.',
-      );
-    }
-
-    const patch: UpdateClaimData = {
-      amountMaximum: dto.kwotaMaksima,
-    };
-
-    AuditContext.setBefore(this._snapshotForAudit(existing));
-
-    // Run on the ambient tx (opened by the `AuditInterceptor` via
-    // `@Audit('claim.setAuthorizationAmount')` on the controller). The row
-    // update + audit-row insert commit atomically.
-    const txLike = this.prisma.tx as unknown as TransactionLike;
-    const updated = await this.claims.updateWithin(txLike, existing.id, patch);
-
-    return this.toDto(updated);
-  }
-
-  /**
-   * Builds the props for the React-Email template and ships it via the
-   * MailService. Pulls the carrier display name from the underlying User row,
-   * formats EUR amounts to two decimals, and constructs the deeplink against
-   * `APP_URL` (the env value that points at the web front-end).
-   *
-   * The MAGTRANS recipient (`MAKSIM_EMAIL`) is read from validated env — default
-   * is the production director address; dev/staging override it so test clicks
-   * don't email the real director. Phase 9 may move it to AppConfig.
-   */
-  private async _dispatchAuthorizationEmail(
-    row: ClaimRow,
-    dto: RequestAuthorizationDto,
-  ): Promise<void> {
-    if (!this.mailService) {
-      // Construction without a MailService instance is only valid in unit
-      // tests; production wiring always injects one. Log + return so callers
-      // see the gap without crashing.
-      this.logger.warn({
-        msg: 'claims.requestAuthorization.no_mail_service',
-        nrZgl: row.nrZgl,
-      });
-      return;
-    }
-    const appUrl =
-      this.configService?.get('APP_URL', { infer: true }) ??
-      'http://localhost:3000';
-    // configService is optional in unit-test construction — keep the default
-    // fallback (same as the validated env default) so tests without a stub
-    // still resolve a valid recipient.
-    const maksimEmail =
-      this.configService?.get('MAKSIM_EMAIL', { infer: true }) ??
-      'maksim.siankevich@magtrans.eu';
-    const carrierName = await this._resolveCarrierDisplayName(row.carrierId);
-    const periodFrom = row.dateStart.toISOString().slice(0, 10);
-    const periodTo = row.dateEnd.toISOString().slice(0, 10);
-    const doplata = row.amountRequested.toFixed(2);
-    // SOFT authorization-threshold hint (`Code.gs:5967`) — informational
-    // context in the email only, never enforced on accept. Pre-formatted like
-    // the sibling amounts so the template stays pure.
-    const prog = getAuthThreshold(row.drivenDays).toFixed(2);
-    const dniWTrasie = row.drivenDays.toFixed(2);
-    const deeplink = `${appUrl.replace(/\/$/, '')}/employee/claims/${encodeURIComponent(row.nrZgl)}`;
-
-    // «Korekty weryfikatora» diff — orig carrier data vs the currently-applied
-    // (verified) data. Only rows that actually changed are included; when the
-    // verifier confirmed the claim as-is the array is empty and the template
-    // omits the section entirely.
-    const korekty = this._buildAuthorizationKorekty(row);
-
-    // No `kwotaMaksima` — the request email no longer carries an amount
-    // (Maksim decides it in his reply). Matches legacy `Code.gs:6010
-    // sendAuthorizationRequest`, which also sent no amount in the request.
-    await this.mailService.enqueueAuthorizationRequest(maksimEmail, {
-      nrZgl: row.nrZgl,
-      carrierName,
-      vehiclePlate: row.vehiclePlateSnapshot,
-      periodFrom,
-      periodTo,
-      doplata,
-      prog,
-      dniWTrasie,
-      comment: dto.comment,
-      deeplink,
-      // Pass the diff ONLY when non-empty so the template renders the section
-      // solely when there really were verifier corrections.
-      ...(korekty.length > 0 ? { korekty } : {}),
-    });
-  }
-
-  /**
-   * Ships the Maksim over-threshold CONFIRMATION-REQUEST email (the ADDITIVE
-   * gate on `NA_WERYFIKACJI`, distinct from the manual `request-authorization`
-   * flow — a SEPARATE template so the two never collide). Fired fire-and-log
-   * from `verifyClaim` outside the tx, guarded by the `maksimGateNotifiedAt`
-   * dedup, so a mail failure never rolls back the verification stamp.
+   * Ships the Maksim over-threshold CONFIRMATION-REQUEST email — the ONLY
+   * authorization notification (there is no manual request flow). Fired
+   * fire-and-log from `verifyClaim` outside the tx, guarded by the amount-aware
+   * `maksimGateNotifiedAt`/`maksimGateNotifiedAmount` dedup, so a mail failure
+   * never rolls back the verification stamp or the status auto-transition.
    *
    * Content rows (brief §2.6): Dopłata / Próg / Dni w trasie / Okno godzin,
    * Odjazd (zgłoszony `departureAt` → faktyczny `actualDepartureAt`), Zjazd
@@ -1737,9 +1537,10 @@ export class ClaimsService {
   }
 
   /**
-   * Builds the «Korekty weryfikatora» diff for the authorization email — the
-   * carrier's original submit data (`orig*` snapshots) vs the currently-applied
-   * (verified) values on the row. Emits ONE preformatted `{label, from, to}`
+   * Builds the «Korekty weryfikatora» diff for the Maksim confirmation email —
+   * the carrier's original submit data (`orig*` snapshots) vs the
+   * currently-applied (verified) values on the row. Emits ONE preformatted
+   * `{label, from, to}`
    * row per field the verifier actually changed; a field whose `orig*` snapshot
    * is `null` (legacy row) or equals the current value is skipped. When nothing
    * changed the array is empty and the caller omits the section entirely.
@@ -1821,8 +1622,8 @@ export class ClaimsService {
 
   /**
    * Resolves the carrier's display name (user.name with login fallback) for
-   * the authorization-request email. Falls back to the carrier ID slice if
-   * the FK chain is broken — defensive only; should never happen in practice.
+   * the Maksim confirmation email. Falls back to the carrier ID slice if the FK
+   * chain is broken — defensive only; should never happen in practice.
    */
   private async _resolveCarrierDisplayName(carrierId: string): Promise<string> {
     // Root client, not the ambient tx — see `_collectClaimRecipients`: this is
@@ -2228,16 +2029,8 @@ export class ClaimsService {
       comment: row.comment,
       orderNumber: row.orderNumber,
       orderDate: row.orderDate ? toDateString(row.orderDate) : null,
-      authorizationRequired: row.authorizationRequired,
-      authorizationDescription: row.authorizationDescription,
-      authorizationToken: row.authorizationToken,
-      authorizationDecidedAt: row.authorizationDecidedAt
-        ? row.authorizationDecidedAt.toISOString()
-        : null,
       amountRequested: row.amountRequested,
       amountApproved: row.amountApproved,
-      margin: row.margin,
-      amountMaximum: row.amountMaximum,
       reklamacjaSubmitted: row.reklamacjaSubmitted,
       reklamacjaText: row.reklamacjaText,
       reklamacjaResponse: row.reklamacjaResponse,
@@ -2261,7 +2054,6 @@ export class ClaimsService {
       // carrier explicitly entered zero.
       origHoursAdjusted: row.origHoursAdjusted,
       hoursAdjustedValue: row.hoursAdjustedValue,
-      authScreenshotUrl: row.authScreenshotUrl,
       // Maksim authorization gate — surfaced so the web renders the block /
       // "wgraj potwierdzenie" CTA without re-deriving from paymentEur.
       maksimGateRequired: row.maksimGateRequired,
@@ -2320,7 +2112,6 @@ export class ClaimsService {
       paymentEur: row.paymentEur,
       amountRequested: row.amountRequested,
       amountApproved: row.amountApproved,
-      authorizationRequired: row.authorizationRequired,
       reklamacjaSubmitted: row.reklamacjaSubmitted,
       createdAt: row.createdAt.toISOString(),
     };
@@ -2614,18 +2405,10 @@ export class ClaimsService {
 
     // Decision payload per discriminator branch.
     switch (dto.targetStatus) {
-      case 'OCZEKUJE_NA_AUTORYZACJE':
-        patch.margin = dto.margin;
-        patch.authorizationRequired = true;
-        patch.authorizationDescription = dto.authorizationDescription;
-        break;
       case 'ZAAKCEPTOWANO':
         patch.orderNumber = dto.orderNumber;
         patch.orderDate = isoDateToMidnightUtc(dto.orderDate);
         patch.amountApproved = dto.amountApproved;
-        if (dto.amountMaximum !== undefined) {
-          patch.amountMaximum = dto.amountMaximum;
-        }
         if (dto.comment !== undefined) patch.comment = dto.comment ?? null;
         break;
       case 'ODRZUCONO':
@@ -2916,10 +2699,6 @@ export class ClaimsService {
         : null,
       amountRequested: row.amountRequested,
       amountApproved: row.amountApproved,
-      amountMaximum: row.amountMaximum,
-      margin: row.margin,
-      authorizationRequired: row.authorizationRequired,
-      authorizationDescription: row.authorizationDescription,
       reklamacjaSubmitted: row.reklamacjaSubmitted,
       reklamacjaText: row.reklamacjaText,
       reklamacjaResponse: row.reklamacjaResponse,

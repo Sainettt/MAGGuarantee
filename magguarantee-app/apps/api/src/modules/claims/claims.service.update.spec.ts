@@ -150,14 +150,8 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     comment: null,
     orderNumber: null,
     orderDate: null,
-    authorizationRequired: false,
-    authorizationDescription: null,
-    authorizationToken: null,
-    authorizationDecidedAt: null,
     amountRequested: 1_500,
     amountApproved: null,
-    margin: null,
-    amountMaximum: null,
     reklamacjaSubmitted: false,
     reklamacjaText: null,
     reklamacjaResponse: null,
@@ -174,7 +168,6 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     // to assert the new submit/PATCH semantics.
     origHoursAdjusted: 0,
     hoursAdjustedValue: 0,
-    authScreenshotUrl: null,
     maksimGateRequired: false,
     maksimGateNotifiedAt: null,
     maksimGateNotifiedAmount: null,
@@ -240,9 +233,6 @@ function makeClaimsRepo(seed: ClaimRow[] = []): ClaimsRepoFake {
           ...(data.amountApproved !== undefined
             ? { amountApproved: data.amountApproved }
             : {}),
-          ...(data.amountMaximum !== undefined
-            ? { amountMaximum: data.amountMaximum }
-            : {}),
           ...(data.kmGuaranteed !== undefined
             ? { kmGuaranteed: data.kmGuaranteed }
             : {}),
@@ -295,13 +285,6 @@ function makeClaimsRepo(seed: ClaimRow[] = []): ClaimsRepoFake {
             : {}),
           ...(data.hoursAdjustedValue !== undefined
             ? { hoursAdjustedValue: data.hoursAdjustedValue }
-            : {}),
-          ...(data.margin !== undefined ? { margin: data.margin } : {}),
-          ...(data.authorizationRequired !== undefined
-            ? { authorizationRequired: data.authorizationRequired }
-            : {}),
-          ...(data.authorizationDescription !== undefined
-            ? { authorizationDescription: data.authorizationDescription }
             : {}),
         };
         rows.set(next.nrZgl, next);
@@ -630,31 +613,6 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
     ).toBeUndefined();
   });
 
-  it('6. NA_WERYFIKACJI → OCZEKUJE_NA_AUTORYZACJE persists margin + authorizationDescription', async () => {
-    const seeded = makeClaim();
-    const repoFake = makeClaimsRepo([seeded]);
-    const km = makeKmCalcService();
-    const audit = makeAuditWriter();
-    const prisma = makePrismaService();
-    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
-
-    const dto: UpdateClaimDto = {
-      targetStatus: 'OCZEKUJE_NA_AUTORYZACJE',
-      margin: -300,
-      authorizationDescription: 'Strata 300 EUR — wymaga zgody Maksima.',
-    };
-
-    await svc.update(makeAuth('admin'), seeded.nrZgl, dto);
-
-    const updated = repoFake.rows.get(seeded.nrZgl)!;
-    expect(updated.status).toBe('OCZEKUJE_NA_AUTORYZACJE');
-    expect(updated.authorizationRequired).toBe(true);
-    expect(updated.authorizationDescription).toBe(
-      'Strata 300 EUR — wymaga zgody Maksima.',
-    );
-    expect(updated.margin).toBe(-300);
-  });
-
   it('7. REKLAMACJA → ZAAKCEPTOWANO via REKLAMACJA_ZAAKCEPTOWANO translates synthetic literal', async () => {
     const seeded = makeClaim({
       status: 'REKLAMACJA',
@@ -782,10 +740,12 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
     expect(repoFake.updateWithinCalls).toHaveLength(1);
   });
 
-  it('G4. OCZEKUJE_NA_AUTORYZACJE → ZAAKCEPTOWANO is NOT gated even without verifiedAt', async () => {
+  it('G4. OCZEKUJE_NA_AUTORYZACJE → ZAAKCEPTOWANO is NOT verification-gated even without verifiedAt', async () => {
     // A claim pending authorization was already verified before leaving
-    // NA_WERYFIKACJI; the gate only applies to NA_WERYFIKACJI. Seed with no
-    // stamp to prove the status short-circuit (not the stamp) drives the pass.
+    // NA_WERYFIKACJI; the CLAIM_NOT_VERIFIED gate only applies to
+    // NA_WERYFIKACJI. Seed with no stamp to prove the status short-circuit (not
+    // the stamp) drives the pass. maksimGateRequired stays false (default), so
+    // the Maksim gate does not fire either.
     const seeded = makeClaim({
       status: 'OCZEKUJE_NA_AUTORYZACJE',
       verifiedAt: null,
@@ -835,13 +795,15 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
 
   // ── Maksim authorization gate (CLAIM_AUTHORIZATION_REQUIRED) ───
   //
-  // A decision FROM `NA_WERYFIKACJI` on an over-threshold VERIFIED claim is
-  // HARD-blocked until the confirmation screenshot cleared the gate. Stricter
-  // than CLAIM_NOT_VERIFIED. Blocks BOTH accept and reject. OCZEKUJE / REKLAMACJA
-  // paths are NOT gated here.
+  // A decision on an over-threshold VERIFIED claim (now sitting in
+  // `OCZEKUJE_NA_AUTORYZACJE`, auto-moved there at verification) is HARD-blocked
+  // until the confirmation screenshot cleared the gate. Stricter than
+  // CLAIM_NOT_VERIFIED. Blocks BOTH accept and reject. Gated on the decision edge
+  // out of either verification-window status; REKLAMACJA paths are NOT gated.
 
-  it('M1. verified NA_WERYFIKACJI → ZAAKCEPTOWANO with armed+uncleared gate throws 422 CLAIM_AUTHORIZATION_REQUIRED + no writes', async () => {
+  it('M1. OCZEKUJE_NA_AUTORYZACJE → ZAAKCEPTOWANO with armed+uncleared gate throws 422 CLAIM_AUTHORIZATION_REQUIRED + no writes', async () => {
     const seeded = makeClaim({
+      status: 'OCZEKUJE_NA_AUTORYZACJE',
       maksimGateRequired: true,
       maksimGateClearedAt: null,
     });
@@ -878,6 +840,7 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
 
   it('M2. armed+uncleared gate ALSO blocks ODRZUCONO (both decisions blocked)', async () => {
     const seeded = makeClaim({
+      status: 'OCZEKUJE_NA_AUTORYZACJE',
       maksimGateRequired: true,
       maksimGateClearedAt: null,
     });
@@ -906,8 +869,9 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
     expect(repoFake.updateWithinCalls).toHaveLength(0);
   });
 
-  it('M3. armed gate that has been CLEARED passes the decision', async () => {
+  it('M3. armed gate that has been CLEARED passes the decision (out of OCZEKUJE)', async () => {
     const seeded = makeClaim({
+      status: 'OCZEKUJE_NA_AUTORYZACJE',
       maksimGateRequired: true,
       maksimGateClearedAt: new Date('2026-04-21T10:00:00.000Z'),
       maksimGateClearedById: 'u-maksim-clearer',

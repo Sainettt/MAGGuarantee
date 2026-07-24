@@ -10,10 +10,6 @@ import {
 } from './email-send.job';
 import { MailJobsRegistry, type MailJobPayload } from './mail-jobs.registry';
 import {
-  AuthorizationRequestEmail,
-  type AuthorizationRequestProps,
-} from './templates/authorization-request';
-import {
   MaksimConfirmationRequestEmail,
   type MaksimConfirmationRequestProps,
 } from './templates/maksim-confirmation-request';
@@ -82,7 +78,8 @@ const PASSWORD_RESET_TTL_MINUTES = 10;
  * `sendAccountCreated`, `sendPasswordReset`, etc. are added as follow-up
  * phases need them (per docs/16-jobs-and-integrations.md#email-шаблоны).
  *
- * Phase 4.2 adds `sendAuthorizationRequest` — Maksim kwota-Maksima handshake.
+ * The Maksim over-threshold confirmation-request email is the ONLY
+ * authorization notification (`sendMaksimConfirmationRequest`).
  *
  * Phase 9 swap: replace `SmtpProvider` with `GmailApiProvider` and inject the
  * latter from MailModule. The MailService itself does not change.
@@ -117,14 +114,9 @@ export interface IMailService {
     code: string,
     ttlMinutes: number,
   ): Promise<void>;
-  sendAuthorizationRequest(
-    email: string,
-    props: AuthorizationRequestProps,
-  ): Promise<void>;
   /**
-   * Maksim over-threshold confirmation-request email (ADDITIVE gate on
-   * `NA_WERYFIKACJI`). Separate from `sendAuthorizationRequest` (the manual
-   * kwota-Maksima flow). Auto-fired once per verification cycle from
+   * Maksim over-threshold confirmation-request email — the ONLY authorization
+   * notification. Auto-fired once per verification cycle (amount-deduped) from
    * `ClaimsService.verifyClaim` when the dopłata exceeds the threshold.
    */
   sendMaksimConfirmationRequest(
@@ -285,75 +277,11 @@ export class MailService implements IMailService {
   }
 
   /**
-   * Phase 4.2 — kwota-Maksima authorization-request email.
-   *
-   * Wraps the React-Email template into HTML + plain-text fallback and ships
-   * both through the SMTP provider (Mailhog in dev, Gmail API in Phase 9).
-   * Subject mirrors the legacy GAS `sendAuthorizationRequest` (Code.gs:5500-ish)
-   * — "Wniosek o autoryzację: <nrZgl>" — so Maksim's inbox filters survive
-   * the migration.
-   */
-  async sendAuthorizationRequest(
-    email: string,
-    props: AuthorizationRequestProps,
-  ): Promise<void> {
-    const subject = `Wniosek o autoryzację: ${props.nrZgl}`;
-    const html = await render(AuthorizationRequestEmail(props));
-    const text = this.buildAuthorizationRequestText(props);
-    // Thread every email about one nrZgl into a single Gmail conversation
-    // (no-op under SMTP/Mailhog). Mirrors legacy `_sendThreadedEmail`.
-    const threadKey = `wniosek-${props.nrZgl}`;
-    const payload: MailJobPayload = {
-      to: email,
-      subject,
-      template: 'authorization-request',
-      // Persisting `nrZgl` lets the resend endpoint look the row back up
-      // when a future variant of this template depends on dynamic data.
-      // The diagnostics-list response redacts everything outside the
-      // `{to, subject, template}` triple — see `DiagnosticsService.getMails`.
-      data: { nrZgl: props.nrZgl },
-    };
-
-    try {
-      const thread = (await this.threading?.resolve(threadKey)) ?? {};
-      const result = await this.provider.send({
-        to: email,
-        subject,
-        text,
-        html,
-        gmailThreadId: thread.gmailThreadId,
-        inReplyToMessageId: thread.inReplyToMessageId,
-      });
-      await this.threading?.record(threadKey, result);
-      this.logger.log({
-        msg: 'authorization request sent',
-        nrZgl: props.nrZgl,
-        toMasked: this.maskEmail(email),
-      });
-      await this.mailJobs?.record({ payload, state: 'completed' });
-    } catch (err) {
-      this.logger.error({
-        msg: 'authorization request send failed',
-        nrZgl: props.nrZgl,
-        toMasked: this.maskEmail(email),
-        error: err instanceof Error ? err.message : String(err),
-      });
-      await this.mailJobs?.record({
-        payload,
-        state: 'failed',
-        failedReason: err instanceof Error ? err.message : String(err),
-      });
-      throw err;
-    }
-  }
-
-  /**
-   * Maksim over-threshold confirmation-request email (ADDITIVE gate). Renders
+   * Maksim over-threshold confirmation-request email. Renders
    * the dedicated `MaksimConfirmationRequestEmail` template to HTML + a
    * plain-text fallback and ships both via the provider. Threads into the same
    * `wniosek-<nrZgl>` Gmail conversation as the other claim emails (no-op under
-   * Mailhog). Subject is distinct from the manual authorization-request so
-   * Maksim's inbox filters can tell them apart.
+   * Mailhog).
    */
   async sendMaksimConfirmationRequest(
     email: string,
@@ -775,17 +703,6 @@ export class MailService implements IMailService {
     );
   }
 
-  // authorization-request (enqueue variant of the existing sync method) ──
-  enqueueAuthorizationRequest(
-    email: string,
-    props: AuthorizationRequestProps,
-  ): Promise<void> {
-    return this._enqueueOr(
-      { template: 'authorization-request', email, props },
-      () => this.sendAuthorizationRequest(email, props),
-    );
-  }
-
   // verification-digest (enqueue variant of the existing sync method) ─────
   enqueueVerificationDigest(
     email: string,
@@ -1057,45 +974,6 @@ export class MailService implements IMailService {
       });
       throw err;
     }
-  }
-
-  /**
-   * Plain-text fallback for the authorization-request email. Mirrors the
-   * structure of the HTML template so non-HTML clients see the same data.
-   */
-  private buildAuthorizationRequestText(
-    props: AuthorizationRequestProps,
-  ): string {
-    const lines = [
-      `MAGGuarantee — wniosek o autoryzację`,
-      ``,
-      `Nr zgłoszenia: ${props.nrZgl}`,
-      `Przewoźnik:    ${props.carrierName}`,
-      `Ciągnik:       ${props.vehiclePlate}`,
-      `Okres:         ${props.periodFrom} → ${props.periodTo}`,
-    ];
-    if (props.dniWTrasie) {
-      lines.push(`Dni w trasie:  ${props.dniWTrasie}`);
-    }
-    lines.push(
-      `Dopłata:       ${props.doplata} EUR`,
-      `Próg autoryz.: ${props.prog} EUR`,
-    );
-    if (props.comment) {
-      lines.push('', `Komentarz weryfikatora:`, props.comment);
-    }
-    if (props.korekty && props.korekty.length > 0) {
-      lines.push(
-        '',
-        'Korekty weryfikatora:',
-        'Weryfikator poprawił dane wprowadzone przez przewoźnika:',
-      );
-      for (const k of props.korekty) {
-        lines.push(`  ${k.label}: ${k.from} → ${k.to}`);
-      }
-    }
-    lines.push('', `Otwórz w MAGGuarantee: ${props.deeplink}`);
-    return lines.join('\n');
   }
 
   /**

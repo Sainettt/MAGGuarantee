@@ -8,7 +8,7 @@
 > - `email-send` — асинхронная отправка email. Через неё идут **все**
 >   транзакционные письма (2FA, password-reset, account-created/-deactivated/
 >   -reactivated, carrier-decision, internal-decision, carrier-submitted,
->   authorization-request, verification-digest) — каждый отправитель имеет
+>   maksim-confirmation-request, verification-digest) — каждый отправитель имеет
 >   `enqueueX`-вариант с sync-фолбэком, когда очередь недоступна (юнит-тесты).
 >   Провайдер выбирается по env `MAIL_PROVIDER`: `smtp` → Mailhog (dev/staging),
 >   `gmail` → `GmailApiProvider` с RFC-threading (prod). См.
@@ -380,7 +380,7 @@ const html = await render(<CarrierDecisionEmail claim={claim} decision="ZAAKCEPT
 | `carrier-submitted.tsx` | `submitNewClaim` notif | После submit перевозчиком |
 | `daily-reminder.tsx` | `sendDailyReminders` | Ежедневно для зависших |
 | `weekly-report.tsx` | `sendWeeklyReport` | Понедельник |
-| `authorization-request.tsx` | `sendAuthorizationRequest` | Когда нужна авторизация суммы |
+| `maksim-confirmation-request.tsx` | `sendMaksimConfirmationRequest` | Авто-гейт: `doplata > próg` при zapisie weryfikacji (wniosek авто-переходит в `OCZEKUJE_NA_AUTORYZACJE`) |
 | `guarantee-reminder-carrier.tsx` (#17) | (новое, Guarantee Watchdog) | Крон 07:10 — напоминание перевозчику D-3/D-1 (одно письмо, список машин); CTA «Zgłoś wyjazd» → `/carrier/delegations/new` |
 | `guarantee-opiekun-digest.tsx` (#18) | (новое, Guarantee Watchdog) | Крон 07:10 — дайджест опекуну: секция «zbliżające się terminy» (D-3/D-1) + секция «naruszenia» (эпизоды, впервые ставшие `violated` сегодня). Персональный `User.email`, **не** группа |
 | `vehicle-removal-admin.tsx` (#19) | (новое, vehicle-status rework Step B) | Крон 07:20 — дайджест **всем активным admin**: список LIVE-машин со статусом `do_usuniecia` (idle ≥29 календарных дней). Персональный `User.email`. Тема `Pojazdy do usunięcia — {n}` |

@@ -37,7 +37,7 @@ export type MailJobState = 'completed' | 'failed' | 'unknown';
 export interface MailJobPayload {
   to: string;
   subject: string;
-  /** Free-form template tag (`2fa-code`, `authorization-request`, ...). */
+  /** Free-form template tag (`2fa-code`, `maksim-confirmation-request`, ...). */
   template: string | null;
   /**
    * Stub for future template-data persistence. Currently unused on the

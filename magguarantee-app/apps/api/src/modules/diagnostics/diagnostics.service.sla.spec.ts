@@ -76,7 +76,6 @@ function makeService(opts: FakeRepoOpts = {}): DiagnosticsService {
       ODRZUCONO: 0,
       REKLAMACJA: 0,
       OCZEKUJE_NA_AUTORYZACJE: 0,
-      AUTORYZACJA_KWOTA_MAKSIMA: 0,
     })),
     findNaWeryfikacjiForSla: jest.fn(
       async () => opts.slaCandidates ?? [],

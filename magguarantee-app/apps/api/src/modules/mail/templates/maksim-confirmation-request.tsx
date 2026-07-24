@@ -1,12 +1,11 @@
 /**
  * Maksim over-threshold CONFIRMATION-REQUEST email template.
  *
- * The ADDITIVE authorization gate: when a verifier saves a verification and the
- * dopłata STRICTLY exceeds `getAuthThreshold(drivenDays)`, Maksim is asked to
- * confirm out-of-band; the verifier then uploads a screenshot of his reply to
- * lift the decision block. This is a SEPARATE template from
- * `authorization-request.tsx` (the manual `OCZEKUJE_NA_AUTORYZACJE` kwota flow),
- * so the two never collide.
+ * The ONLY authorization notification: when a verifier saves a verification and
+ * the dopłata STRICTLY exceeds `getAuthThreshold(drivenDays)`, the claim is
+ * auto-moved into `OCZEKUJE_NA_AUTORYZACJE` and Maksim is asked to confirm
+ * out-of-band; the verifier then uploads a screenshot of his reply to lift the
+ * decision block.
  *
  * Rendered to HTML via `@react-email/render` in
  * `MailService.sendMaksimConfirmationRequest()`; a plain-text fallback is built

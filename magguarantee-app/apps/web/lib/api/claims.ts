@@ -11,8 +11,6 @@ import type {
   ClaimListItem,
   PreviewClaimDto,
   PreviewClaimResponse,
-  RequestAuthorizationDto,
-  SetAuthorizationAmountDto,
   SubmitClaimDto,
   SubmitReklamacjaDto,
   UpdateClaimDto,
@@ -112,56 +110,6 @@ export function updateClaim(
 }
 
 /**
- * `POST /claims/:nrZgl/request-authorization` — Phase 4.2.
- *
- * Admin / pracownik flags a verified claim as needing Maksim sign-off
- * before being booked as accepted. Server-side:
- *  - transitions the claim into `OCZEKUJE_NA_AUTORYZACJE`,
- *  - mints a fresh `authorizationToken`,
- *  - dispatches an email to Maksim (Mailhog in dev).
- *
- * Body is `RequestAuthorizationSchema` — `comment` ONLY (trimmed, 1..2000
- * chars), the "opis sprawy" shown to Maksim and persisted into
- * `Claim.authorizationDescription`. The request DOES NOT carry an amount:
- * Maksim hasn't decided anything at request time. His replied amount is
- * recorded LATER via `PUT /claims/:nrZgl/authorization-amount`. Returns the
- * updated `ClaimDto` so the modal can refetch and reflect the new status
- * without a second round-trip.
- */
-export function requestAuthorization(
-  nrZgl: string,
-  body: RequestAuthorizationDto,
-): Promise<ClaimDto> {
-  return apiJson<ClaimDto>(
-    `/claims/${encodeURIComponent(nrZgl)}/request-authorization`,
-    { method: 'POST', json: body },
-  );
-}
-
-/**
- * `PUT /claims/:nrZgl/authorization-amount` — Phase 4.2 (kwota-Maksima
- * follow-up).
- *
- * Records the amount Maksim assigned in his EMAIL REPLY, after the fact.
- * Called by admin / pracownik while the claim sits in
- * `OCZEKUJE_NA_AUTORYZACJE`; maps verbatim to `Claim.amountMaximum`. Body is
- * `SetAuthorizationAmountSchema` — `kwotaMaksima` (EUR, positive, multiple of
- * 0.01). Repeatable: re-calling overwrites the value (Maksim revised his
- * reply). No email — a pure amount record. Returns the updated `ClaimDto` so
- * the open modal refreshes with the saved amount; 422 (Polish message) if the
- * claim is no longer pending authorization.
- */
-export function setAuthorizationAmount(
-  nrZgl: string,
-  body: SetAuthorizationAmountDto,
-): Promise<ClaimDto> {
-  return apiJson<ClaimDto>(
-    `/claims/${encodeURIComponent(nrZgl)}/authorization-amount`,
-    { method: 'PUT', json: body },
-  );
-}
-
-/**
  * `PATCH /claims/:nrZgl/verification` — verifier's checkpoint (verifier-
  * checkpoint feature). Admin / pracownik confirms a claim in status
  * `NA_WERYFIKACJI` — WITH optional corrections
@@ -169,11 +117,13 @@ export function setAuthorizationAmount(
  * optional; an EMPTY body means "confirm as-is"). Stamps
  * `verifiedAt`/`verifiedById` and re-runs km-calc only when the math-relevant
  * fields are touched. Repeatable — re-calling overwrites the previous stamp +
- * corrections. Decision PATCHes and request-authorization FROM `NA_WERYFIKACJI`
- * are gated (422 `CLAIM_NOT_VERIFIED`) until this checkpoint runs. Returns the
- * updated `ClaimDto` so the open modal reflects `verifiedAt`/`verifiedBy`
- * without a manual refetch. 422 (Polish message) if the claim is no longer in
- * `NA_WERYFIKACJI`.
+ * corrections. Decision PATCHes FROM `NA_WERYFIKACJI` are gated (422
+ * `CLAIM_NOT_VERIFIED`) until this checkpoint runs. Saving the verification
+ * with the dopłata over Maksim's threshold is what auto-routes the claim into
+ * `OCZEKUJE_NA_AUTORYZACJE` (server-side) — there is no manual authorization
+ * request. Returns the updated `ClaimDto` so the open modal reflects
+ * `verifiedAt`/`verifiedBy` without a manual refetch. 422 (Polish message) if
+ * the claim is no longer in `NA_WERYFIKACJI`.
  */
 export function verifyClaim(
   nrZgl: string,

@@ -153,9 +153,8 @@
 | Поправить деривированные часы заявления (`timeFrom`/`timeTo` — подставлены из точных времён выезда) — двойная проверка на случай ошибки weryfikatora; live re-calc | `updateClaimFull` → `PATCH /claims/:nrZgl` |
 | Применить korekta godzin (вычесть простой/сервис из dni jezdne) | `updateClaimFull` (поле `korektaGodzin`) |
 | Указать `nrZlecenia` (номер заказа) при акцепте | `updateClaimFull` (поле `nrZlecenia`) |
-| Запросить авторизацию у Maksima (когда `doplata > getAuthThreshold(dniJezdne)`) — отправляет email + помечает статус `OCZEKUJE NA AUTORYZACJĘ` | `sendAuthorizationRequest` → `POST /claims/:nrZgl/request-authorization` |
-| Загрузить screenshot ответа Maksima (после внесистемного email-потока) | `uploadAuthScreenshot` → `POST /claims/:nrZgl/auth-screenshot` |
-| Ввести вручную `kwotaMaksima` (override calculated `doplata` после авторизации) | `updateClaimFull` (поле `kwotaMaksima`) |
+| Авто-гейт авторизации (ручного запроса нет): при zapisie weryfikacji с `doplata > getAuthThreshold(dniJezdne)` wniosek **автоматически** переходит в `OCZEKUJE NA AUTORYZACJĘ` + email Maksim'у | `sendAuthorizationRequest` → авто внутри `PATCH /claims/:nrZgl/verification` |
+| Загрузить screenshot подтверждения Maksima (после внесистемного email-потока; разблокирует решение) | `uploadAuthScreenshot` → `POST /claims/:nrZgl/authorization-confirmation` |
 | Обработать reklamację (zaakceptować частично с `reklamacjaZatwKwota` или odrzucić) | `updateClaimFull` (флаг `reklamacjaZlozona` + поля reklamacji) |
 | Видеть dashboard со статистикой по всем wnioskom | `getDashboardStats` → `GET /claims/dashboard` |
 | Видеть eksport-делегации (read-only) | `getDelegacjeForEksport` → `GET /delegations` (filter eksport) |

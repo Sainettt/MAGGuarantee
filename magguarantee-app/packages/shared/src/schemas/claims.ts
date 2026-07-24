@@ -31,7 +31,6 @@ export const ClaimStatusSchema = z.enum([
   'ODRZUCONO',
   'REKLAMACJA',
   'OCZEKUJE_NA_AUTORYZACJE',
-  'AUTORYZACJA_KWOTA_MAKSIMA',
 ]);
 export type ClaimStatus = z.infer<typeof ClaimStatusSchema>;
 
@@ -181,10 +180,18 @@ export type SubmitClaimDto = z.infer<typeof SubmitClaimSchema>;
  *
  * Product decision (final): a `pracownik` (or `admin`) persists their
  * corrections to a claim in status `NA_WERYFIKACJI` via this checkpoint BEFORE
- * making any decision. The decision transitions (akceptacja / odmowa) and the
- * kwota-Maksima authorization request FROM `NA_WERYFIKACJI` are then GATED
- * (422 `CLAIM_NOT_VERIFIED`) until the claim carries a `verifiedAt` stamp.
- * Transitions FROM `OCZEKUJE_NA_AUTORYZACJE` and `REKLAMACJA` are NOT gated.
+ * making any decision. The decision transitions (akceptacja / odmowa) FROM
+ * `NA_WERYFIKACJI` are then GATED (422 `CLAIM_NOT_VERIFIED`) until the claim
+ * carries a `verifiedAt` stamp. Transitions FROM `OCZEKUJE_NA_AUTORYZACJE` and
+ * `REKLAMACJA` are NOT gated.
+ *
+ * AUTOMATIC status transition (the ONLY authorization mechanism — the manual
+ * OCZEKUJE_NA_AUTORYZACJE request flow was removed): when the FINAL dopłata
+ * STRICTLY exceeds `getAuthThreshold(drivenDays)` the service auto-moves a
+ * `NA_WERYFIKACJI` claim into `OCZEKUJE_NA_AUTORYZACJE` (and sends the Maksim
+ * confirmation email, amount-deduped); an admin re-verify in
+ * `OCZEKUJE_NA_AUTORYZACJE` that drops the amount back under threshold
+ * auto-rolls the status back to `NA_WERYFIKACJI`.
  *
  * Body — the SAME optional correction fields as the verifier PATCH's
  * `UpdateClaimCorrectionFields` (dates / times / mileage / hoursAdjusted). An
@@ -305,68 +312,6 @@ export const PreviewClaimSchema = z
     path: ['dateEnd'],
   });
 export type PreviewClaimDto = z.infer<typeof PreviewClaimSchema>;
-
-// ─── Request authorization (kwota-Maksima e-mail handshake) ──
-
-/**
- * POST /claims/:nrZgl/request-authorization — Phase 4.2.
- *
- * Triggered by admin / pracownik when a verified claim's payout amount
- * exceeds the wniosek's `amountRequested` and needs Maksim's sign-off
- * before being booked as accepted. Transitions the claim into
- * `OCZEKUJE_NA_AUTORYZACJE`, stamps a fresh `authorizationToken` (UUID v4),
- * and dispatches an email to Maksim with the deeplink + summary (Mailhog in
- * dev, Gmail in Phase 9).
- *
- * Product decision (final): the request DOES NOT carry an amount. Maksim
- * hasn't decided anything at request time, so entering a "kwota Maksima"
- * up-front is semantically wrong (legacy `Code.gs:6010 sendAuthorizationRequest`
- * also sent no amount). `Claim.amountMaximum` is recorded LATER — after
- * Maksim replies — via `PUT /claims/:nrZgl/authorization-amount`
- * (`SetAuthorizationAmountSchema`), while the claim sits in
- * `OCZEKUJE_NA_AUTORYZACJE`.
- *
- * Fields:
- *  - `comment` — REQUIRED rationale ("opis sprawy") shown in the email body
- *    to Maksim and persisted into `Claim.authorizationDescription`. Trimmed,
- *    non-empty, max 2 000 chars. `RequestAuthorizationDto.comment` is `string`
- *    (never `undefined`) — the caller MUST provide a description.
- *
- * The PATCH /claims/:nrZgl path also accepts an optional `amountMaximum`
- * field for the accepted-status branch. The PATCH variant is for *direct
- * override during acceptance*; the dedicated `authorization-amount` endpoint
- * is for *recording Maksim's replied amount* while pending. This endpoint is
- * for *requesting* the handshake — three callers, three paths.
- */
-export const RequestAuthorizationSchema = z
-  .object({
-    comment: z.string().trim().min(1).max(2_000),
-  })
-  .strict();
-export type RequestAuthorizationDto = z.infer<typeof RequestAuthorizationSchema>;
-
-/**
- * PUT /claims/:nrZgl/authorization-amount — Phase 4.2 (kwota-Maksima follow-up).
- *
- * Records the amount Maksim assigned in his EMAIL REPLY. Called by admin /
- * pracownik AFTER `request-authorization` has fired the request email, while
- * the claim sits in `OCZEKUJE_NA_AUTORYZACJE`. Maps verbatim to
- * `Claim.amountMaximum` (Decimal(12,2)) — hence the positive / `multipleOf(0.01)`
- * constraint so the column round-trips cleanly. Allowed ONLY while the claim
- * is pending authorization; may be called again to CORRECT the value (Maksim
- * revised his reply). No email — this is a pure amount record.
- *
- * NOTE: `amountMaximum` no longer means "requested amount"; it now means the
- * "kwota przyznana/wskazana przez Maksima" recorded from his reply.
- */
-export const SetAuthorizationAmountSchema = z
-  .object({
-    kwotaMaksima: z.number().positive().multipleOf(0.01).max(9_999_999),
-  })
-  .strict();
-export type SetAuthorizationAmountDto = z.infer<
-  typeof SetAuthorizationAmountSchema
->;
 
 // ─── Reklamacja ──────────────────────────────────────────
 
@@ -687,17 +632,10 @@ export const ClaimDtoSchema = z.object({
   orderNumber: z.string().nullable(),
   orderDate: IsoDateSchema.nullable(),
 
-  authorizationRequired: z.boolean(),
-  authorizationDescription: z.string().nullable(),
-  authorizationToken: z.string().nullable(),
-  authorizationDecidedAt: IsoDateTimeSchema.nullable(),
-
   // amountRequested is NOT NULL in DB since phase3_blocks_audit_revert
   // (carrier always supplies it at submit).
   amountRequested: z.number(),
   amountApproved: z.number().nullable(),
-  margin: z.number().nullable(),
-  amountMaximum: z.number().nullable(),
 
   reklamacjaSubmitted: z.boolean(),
   reklamacjaText: z.string().nullable(),
@@ -739,17 +677,13 @@ export const ClaimDtoSchema = z.object({
    */
   hoursAdjustedValue: z.number().nullable(),
 
-  authScreenshotUrl: z.string().nullable(),
-
   /**
-   * Maksim authorization gate (ADDITIVE gate on `NA_WERYFIKACJI`, independent
-   * of the manual `OCZEKUJE_NA_AUTORYZACJE` / `authorizationRequired` flow).
-   *
-   * When a verifier saves a verification and the compensation STRICTLY exceeds
-   * `getAuthThreshold(drivenDays)`, the accept/reject decision is HARD-BLOCKED
-   * (422 `CLAIM_AUTHORIZATION_REQUIRED`) until the verifier uploads a screenshot
-   * of Maksim's out-of-band confirmation (a `ClaimAttachment` with
-   * `category=AUTORYZACJA_MAKSIMA`).
+   * Maksim authorization gate. When a verifier saves a verification and the
+   * compensation STRICTLY exceeds `getAuthThreshold(drivenDays)`, the service
+   * auto-moves the claim into `OCZEKUJE_NA_AUTORYZACJE` and the accept/reject
+   * decision is HARD-BLOCKED (422 `CLAIM_AUTHORIZATION_REQUIRED`) until the
+   * verifier uploads a screenshot of Maksim's out-of-band confirmation (a
+   * `ClaimAttachment` with `category=AUTORYZACJA_MAKSIMA`).
    *
    *  - `maksimGateRequired`   — the gate is active for this claim.
    *  - `maksimGateNotifiedAt` — when the auto-email to Maksim was sent (dedup;
@@ -789,8 +723,8 @@ export const ClaimDtoSchema = z.object({
    * ClaimModal can render the read-only "w trasie" banner and the FE in-transit
    * gate keys off the SAME field the API gates on. `null` when there is no
    * linked outing (legacy / pre-rework rows). When `'w_trasie'` the verifier-side
-   * actions (verify / request-authorization / accept / reject) are HARD-blocked
-   * server-side with 422 `CLAIM_DELEGATION_IN_TRANSIT`; a `'zjechal'` outing (or
+   * actions (verify / accept / reject) are HARD-blocked server-side with 422
+   * `CLAIM_DELEGATION_IN_TRANSIT`; a `'zjechal'` outing (or
    * a null status) passes through. Reuses `DelegationStatusSchema` so the wire
    * enum stays in lockstep with the Delegation DTO.
    */
@@ -840,7 +774,6 @@ export const ClaimListItemSchema = z.object({
   paymentEur: z.number(),
   amountRequested: z.number(),
   amountApproved: z.number().nullable(),
-  authorizationRequired: z.boolean(),
   reklamacjaSubmitted: z.boolean(),
   createdAt: IsoDateTimeSchema,
 });
@@ -848,18 +781,20 @@ export type ClaimListItem = z.infer<typeof ClaimListItemSchema>;
 
 // ─── Update claim — discriminated union by `targetStatus` ──
 //
-// The endpoint `PATCH /claims/:nrZgl` ships in Phase 4. The schema is
-// defined here so the contract is locked early and the future Service-level
-// type is wired through `ClaimsService.decide` (which currently throws
-// NotImplemented).
+// `PATCH /claims/:nrZgl` — the verifier's DECISION endpoint. Each variant
+// carries the fields required for that single transition. Legal transitions
+// follow docs/04-data-model.md. Notice that `REKLAMACJA → *` is reachable only
+// by the verifier — the carrier files a reklamacja via the dedicated
+// POST /claims/:nrZgl/reklamacja.
 //
-// Each variant carries the fields required for that single transition.
-// Legal transitions follow docs/04-data-model.md and Code.gs:5180-5345.
-// Notice that `REKLAMACJA → *` is reachable only by the verifier — the
-// carrier files a reklamacja via the dedicated POST /claims/:nrZgl/reklamacja.
+// NOTE: `OCZEKUJE_NA_AUTORYZACJE` is NOT a PATCH target. The claim enters (and
+// leaves) `OCZEKUJE_NA_AUTORYZACJE` AUTOMATICALLY at verification time when the
+// dopłata crosses `getAuthThreshold(...)` (see `VerifyClaimSchema`) — there is
+// no manual authorization request. PATCH only accepts
+// the decision targets below (both `NA_WERYFIKACJI` and `OCZEKUJE_NA_AUTORYZACJE`
+// are legal predecessors of `ZAAKCEPTOWANO` / `ODRZUCONO`).
 
 const UpdateClaimAmountSchema = z.number().nonnegative().max(9_999_999);
-const UpdateClaimMarginSchema = z.number().min(-9_999_999).max(9_999_999);
 const UpdateClaimCommentSchema = z.string().min(1).max(4_000);
 
 /** Common optional corrections — verifier can tweak the carrier's submission. */
@@ -872,16 +807,6 @@ const UpdateClaimCorrectionFields = {
   hoursAdjusted: HoursAdjustedSchema.optional(),
 } as const;
 
-/** NA_WERYFIKACJI → OCZEKUJE_NA_AUTORYZACJĘ — large-amount path. */
-const UpdateClaimToAuthorizationPending = z
-  .object({
-    targetStatus: z.literal('OCZEKUJE_NA_AUTORYZACJE'),
-    margin: UpdateClaimMarginSchema,
-    authorizationDescription: z.string().min(1).max(4_000),
-    ...UpdateClaimCorrectionFields,
-  })
-  .strict();
-
 /** NA_WERYFIKACJI → ZAAKCEPTOWANO  /  OCZEKUJE_NA_AUTORYZACJE → ZAAKCEPTOWANO. */
 const UpdateClaimToAccepted = z
   .object({
@@ -892,9 +817,6 @@ const UpdateClaimToAccepted = z
     orderDate: IsoDateSchema,
     /** REQUIRED — needed by the CHECK constraint at DB level. */
     amountApproved: UpdateClaimAmountSchema,
-    /** Maksim authorization override — optional, only relevant after OCZEKUJE_*. */
-    // Phase 4.2: kwotaMaksima override — admin/pracownik tylko, mapuje na Claim.amountMaximum.
-    amountMaximum: UpdateClaimAmountSchema.optional(),
     comment: emptyStringToUndefined(z.string().max(4_000).optional()),
     ...UpdateClaimCorrectionFields,
   })
@@ -937,7 +859,6 @@ const UpdateClaimReklamacjaRejected = z
  * mirror to `statusBeforeReklamacja`) before persisting.
  */
 export const UpdateClaimSchema = z.discriminatedUnion('targetStatus', [
-  UpdateClaimToAuthorizationPending,
   UpdateClaimToAccepted,
   UpdateClaimToRejected,
   UpdateClaimReklamacjaAccepted,

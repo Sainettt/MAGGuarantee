@@ -17,21 +17,26 @@
 // Body order (locked by §6.5.2, top→bottom):
 //   ① DANE WNIOSKU / DANE PO WERYFIKACJI — 6 fact pairs (§6.5.3)
 //   ② DOPŁATA — locked/computed, live recalc INDEPENDENT of decyzja (§6.5.4)
+//   ②b MAKSIM-GATE — automatic over-threshold authorization block (§6.5.7),
+//      rendered only while the claim sits in `OCZEKUJE_NA_AUTORYZACJE`.
 //   ③ DECYZJA — targetStatus select + conditional fields (§6.5.5), at bottom
-//   ④ Secondary Historia/Autoryzacja sub-panel (§6.5.7) — Tabs if both apply,
-//      single section if one, omitted if neither.
+//   ④ Secondary Historia sub-panel (§6.5.7) — single section, omitted if empty.
+//
+// Authorization is ENTIRELY automatic (этап 4/5.1): the backend routes a claim
+// into `OCZEKUJE_NA_AUTORYZACJE` when the dopłata exceeds Maksim's threshold at
+// verification-save time, and rolls it back to `NA_WERYFIKACJI` if a later edit
+// drops under the threshold. There is NO manual «request authorization» / «kwota
+// Maksima» flow — the only authorization surface is `MaksimGateBlock` (upload
+// Maksim's confirmation screenshot to unblock the decision).
 //
 // The form contract is unchanged from Phase 4: `UpdateClaimSchema`
 // discriminated union, the custom `updateClaimResolver` + `cleanUpdatePayload`
 // (strips sibling-variant keys so the strict union validates), `useUpdateClaim`,
-// `useClaimPreviewExisting`, `useRequestAuthorization`. Only the surface and
-// the layout order change.
+// `useClaimPreviewExisting`. Only the surface and the layout order change.
 
-import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
-  ArrowRight,
   BadgeCheck,
   Download,
   Gavel,
@@ -61,17 +66,13 @@ import {
 } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
-  RequestAuthorizationSchema,
-  SetAuthorizationAmountSchema,
   UpdateClaimSchema,
   getAuthThreshold,
   isCompensationDue,
   type ClaimDto,
   type KmCalcBreakdown,
   type PreviewClaimDto,
-  type RequestAuthorizationDto,
   type Role,
-  type SetAuthorizationAmountDto,
   type UpdateClaimDto,
   type VerifyClaimDto,
 } from '@magguarantee/shared';
@@ -91,7 +92,6 @@ import {
   type ClaimDecisionTarget,
 } from '@/components/claims/claim-transitions';
 import { FormDescription, FormField, FormGrid } from '@/components/forms/Form';
-import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/Dialog';
 import {
@@ -103,7 +103,6 @@ import { Input } from '@/components/ui/Input';
 import { LockNotice } from '@/components/ui/LockNotice';
 import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { Textarea } from '@/components/ui/Textarea';
 import { downloadAuthorizationConfirmation } from '@/lib/api/claims';
 import { ApiResponseError } from '@/lib/api/client';
@@ -112,8 +111,6 @@ import {
   CLAIMS_KEY,
   useClaim,
   useClaimPreviewExisting,
-  useRequestAuthorization,
-  useSetAuthorizationAmount,
   useUpdateClaim,
   useUploadAuthorizationConfirmation,
   useVerifyClaim,
@@ -136,10 +133,7 @@ interface FormValues {
   orderNumber: string;
   orderDate: string;
   amountApproved: number | undefined;
-  amountMaximum: number | undefined;
   comment: string;
-  margin: number | undefined;
-  authorizationDescription: string;
   reklamacjaAmount: number | undefined;
 }
 
@@ -271,15 +265,10 @@ function cleanUpdatePayload(
       include('orderNumber', values.orderNumber);
       include('orderDate', values.orderDate);
       include('amountApproved', values.amountApproved);
-      include('amountMaximum', values.amountMaximum);
       include('comment', values.comment);
       break;
     case 'ODRZUCONO':
       include('comment', values.comment);
-      break;
-    case 'OCZEKUJE_NA_AUTORYZACJE':
-      include('margin', values.margin);
-      include('authorizationDescription', values.authorizationDescription);
       break;
     case 'REKLAMACJA_ZAAKCEPTOWANO':
       include('comment', values.comment);
@@ -462,9 +451,8 @@ function ModalBody({
         status: claim.status,
         role,
         mode,
-        amountMaximum: claim.amountMaximum,
       }),
-    [claim.status, claim.amountMaximum, role, mode],
+    [claim.status, role, mode],
   );
   const editButtonRef = useRef<HTMLButtonElement | null>(null);
   const firstInputRef = useRef<HTMLInputElement | null>(null);
@@ -596,54 +584,17 @@ function ModalBody({
   }, [metGuarantee, recalcState, targetStatus, form]);
 
   // Auto-populate `amountApproved` to the live dopłata for ZAAKCEPTOWANO
-  // until the verifier overrides it. (decision-scoped — only fires when the
-  // accept branch is selected.)
-  // SKIPPED once Maksim has a decision of record: from that point his amount —
-  // not the live dopłata — is the value the field carries (§6.5.14). Keyed on
-  // `hasMaksimDecision`, NOT on ClaimStatus.
+  // (decision-scoped — only fires when the accept branch is selected). The
+  // field is always the locked/computed value (§6.5.4 / §6.5.14 REMOVED — no
+  // «kwota Maksima» override any more), so this is the single source that keeps
+  // it in sync with the recalc.
   useEffect(() => {
-    if (perms.hasMaksimDecision) return;
     if (targetStatus !== 'ZAAKCEPTOWANO') return;
     if (form.formState.dirtyFields.amountApproved) return;
     if (typeof liveDoplata === 'number') {
       form.setValue('amountApproved', liveDoplata, { shouldDirty: false });
     }
-  }, [perms.hasMaksimDecision, targetStatus, liveDoplata, form]);
-
-  // Complementary branch: seed / re-seed `amountApproved` from kwota Maksima.
-  //
-  // Same-session save→accept is the PRIMARY flow: the verifier saves Maksim's
-  // amount via the pending mini-form, its mutation invalidates the claim detail,
-  // and the refetched `claim.amountMaximum` flows in here — but `key={claim.id}`
-  // is stable so `ModalBody` never re-mounts and the mount-time `getDefaults`
-  // prefill can't pick it up.
-  //
-  // The three branches, in order (the ORDER is the point):
-  //   1. `amountMaximum` CHANGED during this session → always re-seed, even over
-  //      a dirty field. A bare `dirtyFields` guard would leave a STALE amount
-  //      sitting in a field the pracownik cannot edit — the exact failure this
-  //      re-seed exists to prevent.
-  //   2. A persisted `claim.amountApproved` exists → leave it alone. An admin
-  //      may have deliberately overridden Maksim (§6.5.14); clobbering it back
-  //      to `amountMaximum` would erase the override and hide the divergence
-  //      band from the pracownik.
-  //   3. Otherwise seed, respecting an in-session manual edit.
-  const prevMaximumRef = useRef<number | null | undefined>(undefined);
-  useEffect(() => {
-    const max = claim.amountMaximum;
-    const prev = prevMaximumRef.current;
-    const changedThisSession = prev !== undefined && prev !== max;
-    prevMaximumRef.current = max;
-
-    if (max == null) return;
-    if (changedThisSession) {
-      form.setValue('amountApproved', max, { shouldDirty: false });
-      return;
-    }
-    if (claim.amountApproved != null) return;
-    if (form.formState.dirtyFields.amountApproved) return;
-    form.setValue('amountApproved', max, { shouldDirty: false });
-  }, [claim.amountMaximum, claim.amountApproved, form]);
+  }, [targetStatus, liveDoplata, form]);
 
   const tMaksim = useTranslations('employee.claims.modal.maksimGate');
   const tInTransit = useTranslations('employee.claims.modal.inTransitGate');
@@ -652,8 +603,8 @@ function ModalBody({
   // ── Linked-outing in-transit gate (in-transit-verifier-gate feature) ──
   // When the wniosek is filed against an outing that is still `w_trasie`, the
   // pracownik may VIEW the claim but EVERY mutating action is hard-blocked:
-  // verify («Zapisz weryfikację»), request-authorization, AND the accept/reject
-  // decision. The server independently enforces this with 422
+  // verify («Zapisz weryfikację») AND the accept/reject decision. The server
+  // independently enforces this with 422
   // `CLAIM_DELEGATION_IN_TRANSIT`; this derives the SAME gate from the DTO's
   // embedded `delegationStatus` so the UI disables the actions and shows a
   // read-only banner up front. A `'zjechal'` outing (or no linked outing) passes
@@ -880,14 +831,9 @@ function ModalBody({
   const isEdit = mode === 'edit';
 
   // ── Secondary sub-panel applicability (§6.5.7) ──
+  // Historia only — the manual Autoryzacja sub-panel is gone (authorization is
+  // now the automatic Maksim-gate rendered as its own block above Decyzja).
   const hasHistory = claimHasHistory(claim);
-  // Autoryzacja is actionable while the claim can still be routed for /
-  // already awaits Maksim sign-off. (See report Deviations — the spec's
-  // "doplata > threshold" gate is not exposed to the client; we keep the
-  // Phase 4 status-based applicability.)
-  const hasAuthorization =
-    claim.status === 'NA_WERYFIKACJI' ||
-    claim.status === 'OCZEKUJE_NA_AUTORYZACJE';
 
   return (
     <form
@@ -949,10 +895,9 @@ function ModalBody({
 
         {/* In-transit gate banner — read-only explainer shown whenever the
             linked outing is still `w_trasie`. Rendered in BOTH view and edit
-            mode (the actions it explains — verify / request-authorization /
-            decision — are disabled in both). Sits at the top of the actions
-            region so the reason every mutating control is disabled is adjacent
-            to them. */}
+            mode (the actions it explains — verify / decision — are disabled in
+            both). Sits at the top of the actions region so the reason every
+            mutating control is disabled is adjacent to them. */}
         {inTransitGated && <InTransitGateBlock />}
 
         {/* ① Fact pairs — `editable` (NOT `mode`) drives the static⇄input flip,
@@ -988,12 +933,14 @@ function ModalBody({
         {/* ②b Maksim authorization gate — POST-verification hard block. The
             banner (armed) or the confirmed affordance (cleared) sits directly
             above Decyzja so the reason the accept/reject buttons are disabled is
-            adjacent to them. Rendered in edit mode only (view mode has no
-            decision controls to gate) and only once the gate is armed/cleared. */}
-        {isEdit &&
-          (claim.maksimGateRequired || claim.maksimGateClearedAt != null) && (
-            <MaksimGateBlock claim={claim} active={maksimGateActive} />
-          )}
+            adjacent to them. The claim reaches `OCZEKUJE_NA_AUTORYZACJE` only
+            automatically (over-threshold dopłata at verification-save time), so
+            the status is the primary render gate; the block itself picks the
+            armed vs cleared state from `maksimGateClearedAt`. Edit mode only —
+            view mode has no decision controls to gate. */}
+        {isEdit && claim.status === 'OCZEKUJE_NA_AUTORYZACJE' && (
+          <MaksimGateBlock claim={claim} active={maksimGateActive} />
+        )}
 
         {/* ③ Decyzja — the CONTAINED commitment panel (§6.5.12). Everything
             above is a flat divided "reading" step; this is the irreversible
@@ -1017,8 +964,6 @@ function ModalBody({
                 form={form}
                 targets={availableTargets}
                 targetStatus={targetStatus}
-                amountApprovedMode={perms.amountApprovedMode}
-                amountMaximum={claim.amountMaximum}
                 decisionGated={decisionGated}
                 errMsg={errMsg}
                 tEdit={tEdit}
@@ -1048,24 +993,9 @@ function ModalBody({
           )}
         </DecisionPanel>
 
-        {/* ④ Secondary sub-panel — Historia / Autoryzacja (§6.5.7).
-            Explicit user request: render ONLY in edit mode — view mode shows
-            no bottom tabs. */}
-        {isEdit && (
-          <SecondaryPanel
-            claim={claim}
-            hasHistory={hasHistory}
-            hasAuthorization={hasAuthorization}
-            prog={prog}
-            // The request-authorization (OCZEKUJE_NA_AUTORYZACJE) path is gated
-            // ONLY by the verifier checkpoint — the api does NOT re-apply the
-            // Maksim over-threshold gate there (that lives on the decision
-            // edge). So pass `verifyGated`, not the combined `decisionGated`.
-            authGated={verifyGated}
-            authGateHint={gateHint}
-            onClose={onClose}
-          />
-        )}
+        {/* ④ Secondary sub-panel — Historia only (§6.5.7). Render ONLY in edit
+            mode — view mode shows no bottom section. */}
+        {isEdit && <SecondaryPanel claim={claim} hasHistory={hasHistory} />}
       </div>
 
       {/* ── Footer (non-scrolling) ── */}
@@ -1772,8 +1702,8 @@ function DoplataBlock({
 // Read-only explainer (in-transit-verifier-gate feature). Rendered whenever the
 // wniosek's linked outing is still `w_trasie` (`inTransitGated`). Purely
 // informational — it carries NO action affordance; its whole job is to explain
-// why the verify / request-authorization / accept / reject controls are all
-// disabled. Mirrors MaksimGateBlock's ACTIVE (danger) visual language: same
+// why the verify / accept / reject controls are all disabled. Mirrors
+// MaksimGateBlock's ACTIVE (danger) visual language: same
 // rounded danger surface, same leading icon + title/body layout — just no
 // uploader. When the outing later flips to `zjechal`, `inTransitGated` goes
 // false, this block unmounts, and the actions re-enable.
@@ -2052,95 +1982,12 @@ function DecisionPanel({
   );
 }
 
-// ── <AmountOverrideRow> — kwota Maksima vs kwota zatwierdzona (§6.5.14) ──
-//
-// Same reconciliation semantic as the fact pairs (§6.5.3): a reference value
-// the user did not author, next to the working value they did. So it speaks the
-// SAME language — muted reference line when aligned, the `bg-warning/10`
-// "this was changed" tint when divergent. No new tokens.
-//
-// Rendered under `amountApproved` for BOTH roles whenever Maksim has decided:
-// the pracownik needs the divergence explained just as much as the admin who
-// caused it — otherwise they see a locked field contradicting the Autoryzacja
-// panel below, which is the confusion this exists to kill.
-
-/** 2dp comparison — float noise must not fake a divergence. */
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
-
-function amountsDiverge(
-  amountMaximum: number,
-  amountApproved: number | undefined,
-): boolean {
-  if (amountApproved === undefined || !Number.isFinite(amountApproved)) {
-    return false;
-  }
-  return round2(amountApproved) !== round2(amountMaximum);
-}
-
-function AmountOverrideRow({
-  amountMaximum,
-  amountApproved,
-  tEdit,
-}: {
-  amountMaximum: number;
-  /** Live RHF value — the band must react to TYPING, not to blur or submit. */
-  amountApproved: number | undefined;
-  tEdit: ReturnType<typeof useTranslations<'employee.claims.modal.edit'>>;
-}) {
-  const diverged = amountsDiverge(amountMaximum, amountApproved);
-
-  // (a) Aligned — plain muted reference context (no lock glyph: the caller only
-  // renders this branch for the UNLOCKED field, where the row is pure
-  // reference). Muted-with-no-lock = "context"; lock = "you can't type here".
-  if (!diverged) {
-    return (
-      <p className="flex items-center gap-1 text-xs text-text-sub">
-        {tEdit.rich('maksimAmountRef', {
-          amount: formatEur(amountMaximum),
-          v: (chunks) => (
-            <span className="font-semibold tabular-nums">{chunks}</span>
-          ),
-        })}
-      </p>
-    );
-  }
-
-  // (b) Divergent — the admin has overridden. Says WHICH number wins.
-  return (
-    <div
-      role="status"
-      className="mt-1.5 flex items-start gap-2 rounded-md bg-warning/10 px-3 py-2 text-xs text-warning-dark dark:text-warning"
-    >
-      <AlertTriangle size={14} aria-hidden className="mt-0.5 shrink-0" />
-      <div className="min-w-0">
-        <p className="font-semibold">{tEdit('maksimOverrideTitle')}</p>
-        <p className="mt-0.5">
-          <span className="tabular-nums text-text-sub line-through">
-            {formatEur(amountMaximum)}
-          </span>
-          <ArrowRight aria-hidden className="mx-1 inline size-3 shrink-0" />
-          <span className="font-semibold tabular-nums">
-            {formatEur(amountApproved ?? 0)}
-          </span>
-        </p>
-        <p className="mt-0.5 text-text-sub">
-          {tEdit('maksimOverrideConsequence')}
-        </p>
-      </div>
-    </div>
-  );
-}
-
 // ── ③ Decision fields ───────────────────────────────────────────────
 
 function DecisionFields({
   form,
   targets,
   targetStatus,
-  amountApprovedMode,
-  amountMaximum,
   decisionGated,
   errMsg,
   tEdit,
@@ -2149,10 +1996,6 @@ function DecisionFields({
   form: UseFormReturn<FormValues>;
   targets: ClaimDecisionTarget[];
   targetStatus: FormValues['targetStatus'];
-  /** §6.5.14 — see `ClaimPermissions.amountApprovedMode`. NEVER status-keyed. */
-  amountApprovedMode: ClaimPermissions['amountApprovedMode'];
-  /** Maksim's decision of record, for the reference / override row. */
-  amountMaximum: number | null;
   /** True when the verifier-checkpoint gate is active (NA_WERYFIKACJI and not
    *  yet verified / has unsaved corrections) — disables the decyzja select. */
   decisionGated: boolean;
@@ -2162,13 +2005,6 @@ function DecisionFields({
     typeof useTranslations<'employee.claims.modal.targetStatus'>
   >;
 }) {
-  // Watched, not read on blur/submit — §6.5.14 requires the override feedback
-  // to be attached to the act of TYPING.
-  const watchedAmountApproved = form.watch('amountApproved');
-  const overridden =
-    amountMaximum != null &&
-    amountsDiverge(amountMaximum, watchedAmountApproved);
-
   return (
     <div className="space-y-4">
       <FormField
@@ -2223,112 +2059,48 @@ function DecisionFields({
             />
           </FormField>
           <FormField
-            label={
-              <span className="inline-flex items-center gap-2">
-                {tEdit('amountApproved')}
-                {/* Divergence stays visible even when the panel is scrolled to
-                    its top edge and the band below is off-screen (§6.5.14). */}
-                {overridden && (
-                  <Badge
-                    variant="warning"
-                    className="font-bold uppercase tracking-wide"
-                  >
-                    {tEdit('maksimOverrideBadge')}
-                  </Badge>
-                )}
-              </span>
-            }
+            label={tEdit('amountApproved')}
             required
             error={errMsg('amountApproved')}
             htmlFor="claim-amountApproved"
             className="col-span-2"
           >
-            {amountApprovedMode === 'editable' ? (
-              // Admin override (§6.5.14): Maksim decided, but an admin may set
-              // the amount the carrier will actually be paid. The typed value
-              // flows through the PATCH and is NOT overwritten by the
-              // live-dopłata effect (gated off on `hasMaksimDecision`).
+            {/* §6.5.13 Tier A recipe — VERBATIM, the only field-level lock style
+                in the modal. `readOnly` (never `disabled`) keeps the field
+                RHF-registered and part of the submitted payload. Since этап 5.1
+                (§6.5.14 REMOVED) there is no «kwota Maksima» override branch —
+                the approved amount is ALWAYS the server-computed locked value. */}
+            <div className="relative">
               <Input
                 id="claim-amountApproved"
                 type="number"
                 step="0.01"
                 min={0}
+                readOnly
+                tabIndex={-1}
+                aria-readonly="true"
+                title={tEdit('amountApprovedLocked')}
+                className="bg-input/40 pr-9 font-semibold tabular-nums text-text-sub cursor-not-allowed focus:border-border focus:ring-0"
                 {...form.register('amountApproved', {
                   setValueAs: (v) =>
                     v === '' || v === null ? undefined : Number(v),
                 })}
               />
-            ) : (
-              <>
-                {/* §6.5.13 Tier A recipe — VERBATIM, and the only field-level
-                    lock style in the modal. `readOnly` (never `disabled`) keeps
-                    the field RHF-registered and part of the submitted payload.
-                    Two causes share this one rendering; only the reason copy
-                    differs (`computed` vs `lockedMaksim`). */}
-                <div className="relative">
-                  <Input
-                    id="claim-amountApproved"
-                    type="number"
-                    step="0.01"
-                    min={0}
-                    readOnly
-                    tabIndex={-1}
-                    aria-readonly="true"
-                    title={
-                      amountApprovedMode === 'lockedMaksim'
-                        ? tEdit('amountApprovedLockedMaksimHint')
-                        : tEdit('amountApprovedLocked')
-                    }
-                    className="bg-input/40 pr-9 font-semibold tabular-nums text-text-sub cursor-not-allowed focus:border-border focus:ring-0"
-                    {...form.register('amountApproved', {
-                      setValueAs: (v) =>
-                        v === '' || v === null ? undefined : Number(v),
-                    })}
-                  />
-                  <Lock
-                    aria-hidden
-                    className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-text-sub/70"
-                  />
-                </div>
-                <FormDescription className="flex items-center gap-1">
-                  <Lock aria-hidden className="size-3 shrink-0" />
-                  {amountApprovedMode === 'lockedMaksim' &&
-                  amountMaximum != null
-                    ? tEdit('amountApprovedLockedMaksim', {
-                        amount: formatEur(amountMaximum),
-                      })
-                    : tEdit('amountApprovedAuto')}
-                </FormDescription>
-              </>
-            )}
-            {/* Structurally identical below-input slot for BOTH roles; the
-                DIVERGENCE band (b) renders for both — a pracownik needs the
-                override explained just as much as the admin who caused it.
-                Only the ALIGNED reference line (a) is role-conditional: the
-                locked branch's reason line already names Maksim's amount
-                («Zablokowane — jest decyzja Maksima (820,00 €)»), so repeating
-                it as a reference row would print the same number twice for one
-                fact. §6.5.14's role table treats the two as alternatives. */}
-            {amountMaximum != null &&
-              (amountApprovedMode !== 'lockedMaksim' || overridden) && (
-                <AmountOverrideRow
-                  amountMaximum={amountMaximum}
-                  amountApproved={watchedAmountApproved}
-                  tEdit={tEdit}
-                />
-              )}
+              <Lock
+                aria-hidden
+                className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-text-sub/70"
+              />
+            </div>
+            <FormDescription className="flex items-center gap-1">
+              <Lock aria-hidden className="size-3 shrink-0" />
+              {tEdit('amountApprovedAuto')}
+            </FormDescription>
           </FormField>
           <FormField
             label={tEdit('comment')}
             error={errMsg('comment')}
             htmlFor="claim-comment-accept"
             className="col-span-2"
-            // NON-BLOCKING hint while the override is live (§6.5.14): «no
-            // confirm dialog» is the locked decision, and making `comment`
-            // required is a business rule, not a design call. Hint only.
-            description={
-              overridden ? tEdit('maksimOverrideCommentHint') : undefined
-            }
           >
             <Textarea
               id="claim-comment-accept"
@@ -2352,39 +2124,6 @@ function DecisionFields({
             {...form.register('comment')}
           />
         </FormField>
-      )}
-
-      {targetStatus === 'OCZEKUJE_NA_AUTORYZACJE' && (
-        <div className="space-y-3">
-          <FormField
-            label={tEdit('margin')}
-            required
-            error={errMsg('margin')}
-            htmlFor="claim-margin"
-          >
-            <Input
-              id="claim-margin"
-              type="number"
-              step="0.01"
-              {...form.register('margin', {
-                setValueAs: (v) =>
-                  v === '' || v === null ? undefined : Number(v),
-              })}
-            />
-          </FormField>
-          <FormField
-            label={tEdit('authorizationDescription')}
-            required
-            error={errMsg('authorizationDescription')}
-            htmlFor="claim-authDesc"
-          >
-            <Textarea
-              id="claim-authDesc"
-              rows={5}
-              {...form.register('authorizationDescription')}
-            />
-          </FormField>
-        </div>
       )}
 
       {targetStatus === 'REKLAMACJA_ZAAKCEPTOWANO' && (
@@ -2439,83 +2178,30 @@ function DecisionFields({
   );
 }
 
-// ── ④ Secondary sub-panel (Historia / Autoryzacja, §6.5.7) ──────────
+// ── ④ Secondary sub-panel (Historia, §6.5.7) ────────────────────────
+//
+// Authorization is no longer a manual sub-panel — it is the automatic Maksim-
+// gate block rendered above Decyzja. So this collapses to a single «Historia»
+// section, shown only when the claim actually carries history; otherwise the
+// whole block is omitted (no Tabs chrome).
 
 function SecondaryPanel({
   claim,
   hasHistory,
-  hasAuthorization,
-  prog,
-  authGated,
-  authGateHint,
-  onClose,
 }: {
   claim: ClaimDto;
   hasHistory: boolean;
-  hasAuthorization: boolean;
-  /** Live authorization threshold (EUR), surfaced in the request form. */
-  prog: number;
-  /** Mirror of the decyzja gate — blocks the request-authorization send while
-   *  the verifier-checkpoint hasn't been saved. */
-  authGated: boolean;
-  authGateHint: string;
-  onClose: () => void;
 }) {
   const t = useTranslations('employee.claims.modal.unified');
 
-  if (!hasHistory && !hasAuthorization) return null;
+  if (!hasHistory) return null;
 
-  // Only one applies → single labelled section, no Tabs chrome.
-  if (hasHistory && !hasAuthorization) {
-    return (
-      <section className="border-t border-border pt-5 space-y-3">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-text-sub">
-          {t('secondaryHistory')}
-        </h3>
-        <HistorySection claim={claim} />
-      </section>
-    );
-  }
-  if (hasAuthorization && !hasHistory) {
-    return (
-      <section className="border-t border-border pt-5 space-y-3">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-text-sub">
-          {t('secondaryAuthorization')}
-        </h3>
-        <AuthorizationSection
-          claim={claim}
-          prog={prog}
-          authGated={authGated}
-          authGateHint={authGateHint}
-          onClose={onClose}
-        />
-      </section>
-    );
-  }
-
-  // Both apply → secondary Tabs.
   return (
-    <section className="border-t border-border pt-5">
-      <Tabs defaultValue="history" className="flex flex-col gap-4">
-        <TabsList>
-          <TabsTrigger value="history">{t('secondaryHistory')}</TabsTrigger>
-          <TabsTrigger value="authorization">
-            {t('secondaryAuthorization')}
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="history">
-          <HistorySection claim={claim} />
-        </TabsContent>
-        <TabsContent value="authorization">
-          <AuthorizationSection
-            claim={claim}
-            prog={prog}
-            authGated={authGated}
-            authGateHint={authGateHint}
-            onClose={onClose}
-          />
-        </TabsContent>
-      </Tabs>
+    <section className="border-t border-border pt-5 space-y-3">
+      <h3 className="text-xs font-bold uppercase tracking-wider text-text-sub">
+        {t('secondaryHistory')}
+      </h3>
+      <HistorySection claim={claim} />
     </section>
   );
 }
@@ -2654,349 +2340,6 @@ function DiffRow({
   );
 }
 
-// ── Autoryzacja section ─────────────────────────────────────────────
-
-interface AuthFormValues {
-  comment: string;
-}
-
-const AUTH_COMMENT_MAX = 2_000;
-
-function AuthorizationSection({
-  claim,
-  prog,
-  authGated,
-  authGateHint,
-  onClose,
-}: {
-  claim: ClaimDto;
-  /** Live authorization threshold (EUR) surfaced in the request form. */
-  prog: number;
-  /** Mirror of the decyzja gate — blocks the request-authorization send. */
-  authGated: boolean;
-  authGateHint: string;
-  onClose: () => void;
-}) {
-  const t = useTranslations('employee.claims.modal.auth');
-  const tCommon = useTranslations('common');
-
-  // Already pending — read-only summary + editable kwota-Maksima mini-form.
-  if (claim.status === 'OCZEKUJE_NA_AUTORYZACJE') {
-    return (
-      <div className="space-y-4">
-        <div className="rounded-md border border-border bg-input p-3 space-y-1">
-          <h4 className="text-xs font-bold uppercase tracking-wider text-text-sub">
-            {t('pendingTitle')}
-          </h4>
-          <p className="text-xs text-text-sub">{t('alreadyPending')}</p>
-          {claim.authorizationDescription && (
-            <>
-              <p className="text-xs text-text-sub pt-2">
-                {t('pendingDescription')}
-              </p>
-              <p className="whitespace-pre-wrap text-sm text-text">
-                {claim.authorizationDescription}
-              </p>
-            </>
-          )}
-        </div>
-
-        {/* Kwota Maksima — recorded AFTER Maksim replies by email. Editable
-            mini-form: PUT /authorization-amount; re-saving overwrites the
-            value (Maksim revised his reply). */}
-        <SetAuthorizationAmountForm claim={claim} t={t} tCommon={tCommon} />
-      </div>
-    );
-  }
-
-  // Pre-decision (NA_WERYFIKACJI) — request-authorization form (NO FileUpload).
-  return (
-    <RequestAuthorizationForm
-      claim={claim}
-      prog={prog}
-      authGated={authGated}
-      authGateHint={authGateHint}
-      onClose={onClose}
-      t={t}
-      tCommon={tCommon}
-    />
-  );
-}
-
-// ── Kwota-Maksima mini-form (pending, OCZEKUJE_NA_AUTORYZACJE) ───────
-//
-// Records the amount Maksim assigned in his email reply into
-// `Claim.amountMaximum` via `PUT /claims/:nrZgl/authorization-amount`. Lives
-// INSIDE the parent <form> (the main edit-submit wrapper), so — like the
-// request-authorization form — the «Zapisz» control is a type="button" that
-// drives the mutation through RHF's handleSubmit; a nested <form> would be
-// invalid HTML.
-
-interface SetAmountFormValues {
-  kwotaMaksima: number | undefined;
-}
-
-function SetAuthorizationAmountForm({
-  claim,
-  t,
-  tCommon,
-}: {
-  claim: ClaimDto;
-  t: ReturnType<typeof useTranslations<'employee.claims.modal.auth'>>;
-  tCommon: ReturnType<typeof useTranslations<'common'>>;
-}) {
-  const form = useForm<SetAmountFormValues>({
-    resolver: zodResolver(
-      SetAuthorizationAmountSchema,
-    ) as Resolver<SetAmountFormValues>,
-    defaultValues: {
-      kwotaMaksima: claim.amountMaximum ?? undefined,
-    },
-  });
-
-  const setAmountM = useSetAuthorizationAmount(claim.nrZgl, {
-    onSuccess: () => {
-      toast.success(t('amountMaximumSaved'));
-    },
-    onError: (err) => {
-      const msg =
-        err instanceof ApiResponseError && err.status >= 400 && err.status < 500
-          ? err.message
-          : tCommon('errorGeneric');
-      toast.error(msg);
-    },
-  });
-
-  const errs = form.formState.errors as Record<
-    string,
-    { message?: string } | undefined
-  >;
-  const errMsg = (key: string): string | undefined => errs[key]?.message;
-
-  const onValid: SubmitHandler<SetAmountFormValues> = (values) => {
-    if (values.kwotaMaksima == null || !Number.isFinite(values.kwotaMaksima)) {
-      return;
-    }
-    const body: SetAuthorizationAmountDto = {
-      kwotaMaksima: Number(values.kwotaMaksima),
-    };
-    void setAmountM.mutateAsync(body).catch(() => {
-      // Error surfaced via onError — swallow to avoid unhandled rejection.
-    });
-  };
-
-  const handleSaveClick = () => {
-    void form.handleSubmit(onValid)();
-  };
-
-  const fieldId = useId();
-  const submitDisabled = setAmountM.isPending;
-
-  return (
-    <div className="space-y-3">
-      <FormField
-        label={t('amountMaximumLabel')}
-        description={t('amountMaximumHelp')}
-        error={errMsg('kwotaMaksima')}
-        htmlFor={`${fieldId}-kwotaMaksima`}
-      >
-        <div className="flex items-start gap-2">
-          <Input
-            id={`${fieldId}-kwotaMaksima`}
-            type="number"
-            step="0.01"
-            min={0.01}
-            inputMode="decimal"
-            className="flex-1"
-            {...form.register('kwotaMaksima', {
-              setValueAs: (v) =>
-                v === '' || v === null ? undefined : Number(v),
-            })}
-          />
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={handleSaveClick}
-            disabled={submitDisabled}
-          >
-            {setAmountM.isPending ? (
-              <>
-                <Loader2 size={14} className="animate-spin" aria-hidden />
-                {t('submitting')}
-              </>
-            ) : (
-              t('amountMaximumSave')
-            )}
-          </Button>
-        </div>
-      </FormField>
-    </div>
-  );
-}
-
-function RequestAuthorizationForm({
-  claim,
-  prog,
-  authGated,
-  authGateHint,
-  onClose,
-  t,
-  tCommon,
-}: {
-  claim: ClaimDto;
-  /** Live authorization threshold (EUR) for this claim's driven-days band. */
-  prog: number;
-  /** Mirror of the decyzja gate — blocks the send button + shows the hint. */
-  authGated: boolean;
-  authGateHint: string;
-  onClose: () => void;
-  t: ReturnType<typeof useTranslations<'employee.claims.modal.auth'>>;
-  tCommon: ReturnType<typeof useTranslations<'common'>>;
-}) {
-  const form = useForm<AuthFormValues>({
-    resolver: zodResolver(
-      RequestAuthorizationSchema,
-    ) as Resolver<AuthFormValues>,
-    defaultValues: {
-      comment: '',
-    },
-  });
-
-  const requestM = useRequestAuthorization(claim.nrZgl, {
-    onSuccess: () => {
-      toast.success(t('emailSent'));
-      onClose();
-    },
-    onError: (err) => {
-      const msg =
-        err instanceof ApiResponseError && err.status >= 400 && err.status < 500
-          ? err.message
-          : tCommon('errorGeneric');
-      toast.error(msg);
-    },
-  });
-
-  const errs = form.formState.errors as Record<
-    string,
-    { message?: string } | undefined
-  >;
-  const errMsg = (key: string): string | undefined => errs[key]?.message;
-
-  // The parent surface already renders a <form> wrapper for the main edit
-  // submit — nested <form>s are invalid HTML. We render the
-  // request-authorization fields inside a plain <div> and trigger the
-  // mutation from a type="button" handler via RHF's handleSubmit.
-  const onValid: SubmitHandler<AuthFormValues> = (values) => {
-    // zodResolver returns the TRANSFORMED values, so by the time `onValid`
-    // runs `values.comment` is already a non-empty, trimmed string — the
-    // schema's `.trim().min(1)` blocks empty comments BEFORE this callback and
-    // surfaces the (localized) required error at the FormField. No `|| undefined`
-    // dance: `RequestAuthorizationDto.comment` is a required `string`. The
-    // request carries the comment ONLY — no amount (Maksim hasn't decided yet).
-    const body: RequestAuthorizationDto = {
-      comment: values.comment,
-    };
-    void requestM.mutateAsync(body).catch(() => {
-      // Error surfaced via onError — swallow to avoid unhandled rejection.
-    });
-  };
-
-  const handleRequestClick = () => {
-    void form.handleSubmit(onValid)();
-  };
-
-  const commentValue = form.watch('comment') ?? '';
-  const commentLen = commentValue.length;
-  const fieldId = useId();
-
-  // The button is disabled while the request is in flight OR while the
-  // verifier-checkpoint gate is active (mirrors the server's CLAIM_NOT_VERIFIED
-  // gate). An empty comment otherwise surfaces the (localized) required error
-  // on click rather than silently disabling submit.
-  const submitDisabled = requestM.isPending || authGated;
-
-  return (
-    <div className="space-y-4">
-      <div className="rounded-md border border-border bg-input p-3 space-y-1">
-        <h4 className="text-xs font-bold uppercase tracking-wider text-text-sub">
-          {t('requestTitle')}
-        </h4>
-        <p className="text-xs text-text-sub">{t('requestHelp')}</p>
-        {/* Always-visible informational threshold line (soft hint, no gate). */}
-        <p className="text-xs text-text-sub tabular-nums">
-          {t('progLine', { prog: formatEur(prog) })}
-        </p>
-      </div>
-
-      {/* Kwota Maksima — LOCKED placeholder («—»). At request time no amount
-          exists (Maksim hasn't replied yet); the actual value is recorded
-          afterwards via the pending-state mini-form. Purely visual continuity —
-          nothing here is submitted. Same locked-field recipe as the dopłata
-          block (§6.5.4): muted surface, muted text, <Lock> affordance. */}
-      <FormField
-        label={t('kwotaMaksimaLabel')}
-        description={t('kwotaMaksimaHelp')}
-      >
-        <div className="relative">
-          <div
-            className="flex h-10 w-full items-center rounded-[10px] border border-border bg-input/40 px-3.5 pr-9 text-[14px] font-semibold tabular-nums text-text-sub"
-            aria-readonly="true"
-            title={t('kwotaMaksimaHelp')}
-          >
-            —
-          </div>
-          <Lock
-            aria-hidden
-            className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-text-sub/70"
-          />
-        </div>
-      </FormField>
-
-      <FormField
-        label={t('commentLabel')}
-        required
-        error={errMsg('comment')}
-        htmlFor={`${fieldId}-comment`}
-      >
-        <Textarea
-          id={`${fieldId}-comment`}
-          rows={4}
-          maxLength={AUTH_COMMENT_MAX}
-          placeholder={t('commentPlaceholder')}
-          {...form.register('comment')}
-        />
-        <p className="text-xs text-text-sub text-right tabular-nums">
-          {commentLen} / {AUTH_COMMENT_MAX}
-        </p>
-      </FormField>
-
-      <div className="flex flex-wrap items-center justify-end gap-3">
-        {authGated && (
-          <p className="text-xs text-text-sub" role="status">
-            {authGateHint}
-          </p>
-        )}
-        <Button
-          type="button"
-          size="sm"
-          onClick={handleRequestClick}
-          disabled={submitDisabled}
-        >
-          {requestM.isPending ? (
-            <>
-              <Loader2 size={14} className="animate-spin" aria-hidden />
-              {t('submitting')}
-            </>
-          ) : (
-            t('requestButton')
-          )}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 // ── Helpers ─────────────────────────────────────────────────────────
 
 function getDefaults(claim: ClaimDto): FormValues {
@@ -3014,21 +2357,11 @@ function getDefaults(claim: ClaimDto): FormValues {
     hoursAdjusted: claim.hoursAdjustedValue ?? 0,
     orderNumber: claim.orderNumber ?? '',
     orderDate: claim.orderDate ?? '',
-    // Post-authorization accept (OCZEKUJE_NA_AUTORYZACJE) prefills the editable
-    // kwota zatwierdzona with kwota Maksima so the verifier only tweaks it to
-    // what Maksim approved by e-mail; amountMaximum is always set on the
-    // request-authorization path, so paymentEur is a defensive fallback only.
-    amountApproved:
-      claim.status === 'OCZEKUJE_NA_AUTORYZACJE'
-        ? (claim.amountApproved ??
-          claim.amountMaximum ??
-          claim.paymentEur ??
-          undefined)
-        : (claim.amountApproved ?? claim.paymentEur ?? undefined),
-    amountMaximum: claim.amountMaximum ?? undefined,
+    // Kwota zatwierdzona — always the server-computed value (§6.5.14 REMOVED, no
+    // «kwota Maksima» override). The ZAAKCEPTOWANO effect keeps it in sync with
+    // the live dopłata; `paymentEur` is the prefill / fallback.
+    amountApproved: claim.amountApproved ?? claim.paymentEur ?? undefined,
     comment: claim.comment ?? '',
-    margin: claim.margin ?? undefined,
-    authorizationDescription: claim.authorizationDescription ?? '',
     reklamacjaAmount: claim.reklamacjaAmount ?? undefined,
   };
 }

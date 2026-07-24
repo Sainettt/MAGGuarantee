@@ -47,7 +47,6 @@ const ALL_STATUSES: ClaimStatus[] = [
   'ODRZUCONO',
   'REKLAMACJA',
   'OCZEKUJE_NA_AUTORYZACJE',
-  'AUTORYZACJA_KWOTA_MAKSIMA',
 ];
 
 export function ClaimsListView() {

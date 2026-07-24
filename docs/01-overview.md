@@ -42,7 +42,9 @@
 Сотрудник (admin/pracownik) открывает заявление
   → корректирует данные
   → live re-calc (kmGwarant, doplata)
-  → решение: ZAAKCEPTOWANO / ODRZUCONO / OCZEKUJE_NA_AUTORYZACJĘ
+  → zapis weryfikacji (checkpoint); если doplata > próg —
+    АВТО-переход в OCZEKUJE_NA_AUTORYZACJĘ + email Maksim'у
+  → решение: ZAAKCEPTOWANO / ODRZUCONO
   → email перевозчику с цветным header (по статусу)
   → email внутренним сотрудникам
 ```
@@ -105,7 +107,7 @@ doplata   = roznica × ratePerKmEffective
 
 ### Авторизация крупной суммы
 
-Если расчётная `paymentEur > getAuthThreshold(drivenDays)` — заявление переходит в `OCZEKUJE_NA_AUTORYZACJE` и требует ручного решения админа Maksim'а (out-of-band email-flow + загрузка screenshot-а ответа). Threshold — step-функция от количества дней в трассе:
+Если при zapisie weryfikacji финальная `paymentEur > getAuthThreshold(drivenDays)` — заявление **автоматически** переходит в `OCZEKUJE_NA_AUTORYZACJE` («Czeka na autoryzację»), Maksim'у уходит письмо-подтверждение (dedup по сумме), а решение блокируется (422 `CLAIM_AUTHORIZATION_REQUIRED`) до загрузки screenshot-а его ответа. Ручной отправки на авторизацию не существует; правка, уводящая сумму под порог, автоматически возвращает заявление в `NA_WERYFIKACJI`. Threshold — step-функция от количества дней в трассе:
 
 | `drivenDays` | Threshold (EUR) |
 |---|---|
@@ -114,7 +116,7 @@ doplata   = roznica × ratePerKmEffective
 | 16..30 | 500 |
 | 10..15 | 300 |
 
-Подробности процесса (override `kwotaMaksima`, screenshot upload, audit trail) — см. [19-known-quirks.md](19-known-quirks.md#kwotaMaksima) и [19-known-quirks.md](19-known-quirks.md#getAuthThreshold). Эти константы пока зашиты в коде; backlog — вынести в `AppConfig` или новую таблицу.
+Подробности процесса (screenshot upload, audit trail) — см. [19-known-quirks.md](19-known-quirks.md#getAuthThreshold). Эти константы пока зашиты в коде; backlog — вынести в `AppConfig` или новую таблицу.
 
 ## Объём предметной области
 

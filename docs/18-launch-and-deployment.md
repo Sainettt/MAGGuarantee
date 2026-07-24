@@ -800,8 +800,6 @@ docker compose run --rm \
 3. **App config**:
    - `stawka_eur_default = 0.5`
    - `km_dziennie_default = 540`
-   - `auth_threshold_low = 1000`
-   - `auth_threshold_high = 5000`
    - `min_days_to_submit = 10`
    - `login_code_ttl = 600`
    - `login_max_attempts = 5`

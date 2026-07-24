@@ -11,7 +11,6 @@ import type { AccountReactivatedProps } from './templates/account-reactivated';
 import type { CarrierDecisionProps } from './templates/carrier-decision';
 import type { InternalDecisionProps } from './templates/internal-decision';
 import type { CarrierSubmittedProps } from './templates/carrier-submitted';
-import type { AuthorizationRequestProps } from './templates/authorization-request';
 import type { MaksimConfirmationRequestProps } from './templates/maksim-confirmation-request';
 import type { VerificationDigestProps } from './templates/verification-digest';
 import type { DelegationAnnouncedProps } from './templates/delegation-announced';
@@ -75,16 +74,10 @@ export interface CarrierSubmittedEmailJob {
   props: CarrierSubmittedProps;
 }
 
-export interface AuthorizationRequestEmailJob {
-  template: 'authorization-request';
-  email: string;
-  props: AuthorizationRequestProps;
-}
-
 /**
- * Maksim over-threshold confirmation-request email (ADDITIVE gate on
- * `NA_WERYFIKACJI`). Distinct from `authorization-request` (the manual
- * `OCZEKUJE_NA_AUTORYZACJE` kwota flow).
+ * Maksim over-threshold confirmation-request email — the ONLY authorization
+ * notification (auto-fired at verification when the dopłata crosses the
+ * threshold, moving the claim into `OCZEKUJE_NA_AUTORYZACJE`).
  */
 export interface MaksimConfirmationRequestEmailJob {
   template: 'maksim-confirmation-request';
@@ -141,7 +134,6 @@ export type EmailSendJobData =
   | CarrierDecisionEmailJob
   | InternalDecisionEmailJob
   | CarrierSubmittedEmailJob
-  | AuthorizationRequestEmailJob
   | MaksimConfirmationRequestEmailJob
   | VerificationDigestEmailJob
   | DelegationAnnouncedEmailJob

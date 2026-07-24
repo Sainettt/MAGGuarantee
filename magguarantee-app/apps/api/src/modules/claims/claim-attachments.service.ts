@@ -21,20 +21,21 @@ import { ClaimsRepository, type ClaimRow } from './claims.repository';
 import { ClaimsService } from './claims.service';
 
 /**
- * Maksim-authorization confirmation-screenshot management (the ADDITIVE gate on
- * `NA_WERYFIKACJI`, docs/13-api-design.md#claims + brief §2.5).
+ * Maksim-authorization confirmation-screenshot management (the over-threshold
+ * decision gate, docs/13-api-design.md#claims).
  *
  * The verifier uploads a screenshot of Maksim's out-of-band confirmation to
  * lift the over-threshold decision block. Upload validates the file (MIME /
  * size), puts the bytes to MinIO, inserts a `ClaimAttachment` tagged
  * `AUTORYZACJA_MAKSIMA`, AND stamps the claim's gate-clear fields
- * (`maksimGateClearedAt` / `maksimGateClearedById`) — co-located with the claim
- * write per the brief. On a DB failure after the object lands the object is
- * removed (orphan cleanup), mirroring the carrier-attachments pattern.
+ * (`maksimGateClearedAt` / `maksimGateClearedById`). On a DB failure after the
+ * object lands the object is removed (orphan cleanup), mirroring the
+ * carrier-attachments pattern.
  *
- * Guard: the claim must be `NA_WERYFIKACJI`, `maksimGateRequired === true`, and
- * `verifiedAt != null` (else 422) — you can only confirm a verified,
- * over-threshold claim whose gate is actually armed.
+ * Guard: the claim must be `OCZEKUJE_NA_AUTORYZACJE` (the status an
+ * over-threshold claim is auto-moved into at verification),
+ * `maksimGateRequired === true`, and `verifiedAt != null` (else 422) — you can
+ * only confirm a verified, over-threshold claim whose gate is actually armed.
  */
 @Injectable()
 export class ClaimAttachmentsService {
@@ -80,8 +81,9 @@ export class ClaimAttachmentsService {
       attachmentId = row.id;
 
       // Co-located gate-clear stamp on the claim itself. `maksimGateRequired`
-      // stays `true` (the decision was over threshold) — the presence of
-      // `maksimGateClearedAt` is what unblocks the decision guard.
+      // stays `true` and the status stays `OCZEKUJE_NA_AUTORYZACJE` (the
+      // decision was over threshold) — the presence of `maksimGateClearedAt` is
+      // what unblocks the decision guard.
       const updated = await this.claims.update(claim.id, {
         maksimGateClearedAt: new Date(),
         maksimGateClearedById: user.sub,
@@ -124,14 +126,15 @@ export class ClaimAttachmentsService {
 
   /**
    * Loads the claim and asserts it is in the state where a confirmation upload
-   * is valid: `NA_WERYFIKACJI`, gate armed, and verified. 404 when missing,
-   * 422 otherwise.
+   * is valid: `OCZEKUJE_NA_AUTORYZACJE` (the status an over-threshold claim is
+   * auto-moved into at verification), gate armed, and verified. 404 when
+   * missing, 422 otherwise.
    */
   private async _loadGatedClaim(nrZgl: string): Promise<ClaimRow> {
     const claim = await this.claims.findByNrZgl(nrZgl);
     if (!claim) throw new NotFoundException('Wniosek nie znaleziony');
     if (
-      claim.status !== 'NA_WERYFIKACJI' ||
+      claim.status !== 'OCZEKUJE_NA_AUTORYZACJE' ||
       !claim.maksimGateRequired ||
       claim.verifiedAt === null
     ) {

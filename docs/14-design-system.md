@@ -882,13 +882,14 @@ Reference: `modal-status-p1.png` + `modal-status-p2.png`.
 |---|---|---|
 | `Edit` | всегда | форма верификации: KM gwar/real (read-only), stawka €/km (input), doplata (calculated, read-only). **Live recalc badge** справа от doplata — `<Badge variant="outline" className="animate-pulse">Przeliczam…</Badge>` во время debounce, потом `<Badge variant="outline" className="text-success">Aktualne</Badge>`. Под формой — `notatka` textarea. |
 | `Historia` | `claim.origData != null` (т.е. была reklamacja или re-submit) | side-by-side diff: «Pierwotnie» / «Aktualnie», два столбца, изменённые поля подсвечены `bg-warning/10`. Read-only. |
-| `Autoryzacja` | `claim.doplata > LIMIT_OR_THRESHOLD` (бизнес-правило) | две секции: (1) кнопка «Wymaga autoryzacji» — `<Button variant="default">` с `<Mail />` icon, отправляет email Maksima + переводит claim в `OCZEKUJE_NA_AUTORYZACJE`, после клика disabled + label «Wysłano (yyyy-mm-dd hh:mm)». (2) поле `kwotaMaksima` — `<Input type="number">` с label «Kwota zatwierdzona przez Maksima (EUR)», ручной ввод после получения email-ответа; на blur — сохранение. **Никакого file-upload, никаких screenshot-ов.** |
 
-Tabs typography: `text-sm font-medium`, active — `border-b-2 border-brand text-brand`, остальные — `text-text-sub hover:text-text`.
+> ⚠️ **Ручной таб «Autoryzacja» удалён (этап 5.1).** Ручного флоу авторизации (кнопка «Wymaga autoryzacji», поле `kwotaMaksima`, ручной перевод в `OCZEKUJE_NA_AUTORYZACJE`) больше нет. Осталась ТОЛЬКО секондари-панель «Historia». Авторизация теперь полностью автоматическая (Maksim-gate) и живёт в **основном** потоке модалки через `MaksimGateBlock` — см. §6.5.7. Секондари-табов больше нет: одиночная «Historia» рендерится как обычная секция (без `<Tabs>`-хрома).
+
+Tabs typography (для секондари-«Historia», если когда-либо будет соседний таб): `text-sm font-medium`, active — `border-b-2 border-brand text-brand`, остальные — `text-text-sub hover:text-text`.
 
 **Footer (`<SheetFooter>`, sticky):**
 - Slot слева: destructive ghost `<Button variant="ghost" className="text-danger">Odrzuć</Button>` (только если статус != ODRZUCONO/ZAAKCEPTOWANO).
-- Slot справа: `<Button variant="ghost">Anuluj</Button>` + primary `<Button>Zaakceptuj</Button>` (label меняется: «Zapisz» во вкладке Autoryzacja, «Zaakceptuj» в Edit).
+- Slot справа: `<Button variant="ghost">Anuluj</Button>` + primary `<Button>Zaakceptuj</Button>` (label меняется по выбранной decyzja: «Zaakceptuj» / «Odrzuć» / «Zapisz»).
 
 **Состояния:** `loading` (открыт модал, fetch claim) — skeleton header + tabs grey; `saving` — primary-button spinner, форма disabled; `error` — `<Alert variant="destructive">` сверху body, форма остаётся редактируемой.
 
@@ -967,7 +968,7 @@ Reference: legacy `ensureUsersSheet`. Стандартный `<DataTable>` Phase
 - [ ] `<KpiCard>` принимает `{ label, value, delta?, icon? }`; имеет `loading` / `empty` варианты.
 - [ ] Dashboard layout = top KPI row (4 col) + main + `<DashboardSidebar>` (right, 380px, stack секций); каждая секция fetch-ит данные независимо (TanStack Query).
 - [ ] `<ClaimsTable>` использует `<DataTable>` Phase 2; колонки в порядке таблицы выше; full-row click → modal.
-- [ ] ⚠️ **SUPERSEDED Phase 7.1 (§6.5):** `<ClaimVerificationModal>` теперь = центральная `<Dialog max-w-4xl>` с `mode: 'view' | 'edit'`, **не** `<Sheet>`. Сохраняются: **в секции Autoryzacja НЕТ FileUpload компонента**; live recalc badge debounce 300ms; live dopłata пересчёт при правке фактов. Раскладку (факты → dopłata → decyzja), парные строки и Historia/Autoryzacja читать из §6.5.
+- [ ] ⚠️ **SUPERSEDED Phase 7.1 (§6.5):** `<ClaimVerificationModal>` теперь = центральная `<Dialog max-w-4xl>` с `mode: 'view' | 'edit'`, **не** `<Sheet>`. Сохраняются: live recalc badge debounce 300ms; live dopłata пересчёт при правке фактов; авторизация автоматическая через `MaksimGateBlock` в основном потоке (ручного таба «Autoryzacja» нет — этап 5.1). Раскладку (факты → dopłata → decyzja), парные строки, секондари-«Historia» и Maksim-gate читать из §6.5.
 - [ ] `<AuditRow>` имеет `default` и `compact` варианты; deterministic avatar-color hash; expand → JSON-diff `<pre>`.
 - [ ] `<LimitsRow>` — три inline-ячейки (`kmPerDay` / `kmPerSaturday` / `ratePerKm`), save-on-blur, optimistic update, rollback + toast on error.
 - [ ] `<UsersTable>` — role-badge color map; kebab actions; deactivate ≠ delete.
@@ -1130,7 +1131,6 @@ Existing `<Badge>` (`apps/web/components/ui/Badge.tsx`) is **sufficient**. Add a
 | `ODRZUCONO` | `danger` | "Odrzucono" | `<XCircle />` |
 | `REKLAMACJA` | `warning` | "Reklamacja" | `<AlertTriangle />` |
 | `OCZEKUJE_NA_AUTORYZACJE` | `info` | "Czeka na autoryzację" | `<Clock />` |
-| `AUTORYZACJA_KWOTA_MAKSIMA` | `warning` | "Autoryzacja — kwota maks." | `<AlertTriangle />` |
 
 | `DelegationStatus` value | Badge variant | Label (PL) | Icon (Lucide, 12px, optional) |
 |---|---|---|---|
@@ -1474,7 +1474,7 @@ The lower «Szczegóły» card is the `<dl class="grid grid-cols-1 sm:grid-cols-
 
 - **Decided set = `{ZAAKCEPTOWANO, ODRZUCONO}`** — exactly the set the page already uses for `canSubmitReklamacja` (lines 93–94). **Single source of truth:** the row's visibility predicate is the same `status === 'ZAAKCEPTOWANO' || status === 'ODRZUCONO'` test, **plus** `statusChangedAt != null` (defensive, mirrors line 95).
 - **`REKLAMACJA_ZAAKCEPTOWANO` / `REKLAMACJA_ODRZUCONO` are NOT separate statuses** — they do not exist in the `ClaimStatus` enum (`docs/12-database-schema.md` lines 68–75). A reklamacja outcome is written back into the same `ZAAKCEPTOWANO` / `ODRZUCONO` value, and `statusChangedAt` is bumped to the reklamacja-decision moment. So the row automatically shows the **latest** decision date (initial decision, or reklamacja re-decision if one happened) with no extra branching. The reklamacja *content* stays in rows 7–8 as today.
-- `REKLAMACJA` (the in-progress re-opened state), `NA_WERYFIKACJI`, `OCZEKUJE_NA_AUTORYZACJE`, `AUTORYZACJA_KWOTA_MAKSIMA` are **non-decided** → row is **omitted entirely** (no `—` placeholder), consistent with the existing conditional rows (`orderNumber` / `orderDate` / `comment` render only when present).
+- `REKLAMACJA` (the in-progress re-opened state), `NA_WERYFIKACJI`, `OCZEKUJE_NA_AUTORYZACJE` are **non-decided** → row is **omitted entirely** (no `—` placeholder), consistent with the existing conditional rows (`orderNumber` / `orderDate` / `comment` render only when present).
 
 **Neutral label decision (`Data decyzji`).** Single neutral label for both outcomes — **not** split `Data akceptacji` / `Data odrzucenia`. Rationale: the outcome (accept vs reject) is already unambiguously communicated by `<StatusBadge>` in the header and by `amountApproved` in the `<dl>`; a separate outcome-coded date label would be redundant and would force two i18n keys + a branch for zero information gain. A neutral "when was this decided" reads cleanly regardless of outcome and stays correct after a reklamacja flips the result.
 
@@ -4150,13 +4150,16 @@ The body is a single vertical stack. Same order in `view` and `edit` — only th
 │  ② DOPŁATA  (locked / computed field, live)                      │  ← §6.5.4  — ABOVE decision
 │        <RecalcBadge> + amountApproved (read-only, server-comp.)  │
 │  ─────────────────────────────────────────────────────────────  │
+│  ②b MaksimGateBlock  (ONLY when status = OCZEKUJE_NA_AUTORYZ.)   │  ← §6.5.7  — auto Maksim-gate
+│        danger-banner «Czeka na autoryzację» + upload screenshotu │
+│        / cleared-state (download) — blocks decyzja until cleared │
+│  ─────────────────────────────────────────────────────────────  │
 │  ③ DECYZJA  (targetStatus select + conditional fields)           │  ← §6.5.5  — at the very bottom
 │        ZAAKCEPTOWANO → orderNumber / orderDate / amountApproved   │
 │        ODRZUCONO      → komentarz                                 │
-│        OCZEKUJE_NA_AUTORYZACJE → margin / authDesc                │
 │        reklamacja-variants                                        │
 │  ─────────────────────────────────────────────────────────────  │
-│  ④ Secondary sections: HISTORIA (diff) · AUTORYZACJA  (§6.5.7)   │
+│  ④ Secondary section: HISTORIA (diff)  (§6.5.7)                  │
 ├─ <DialogFooter> (non-scrolling) ─────────────────────────────────┤
 │  [Odrzuć (ghost danger)]        [Anuluj]  [Edycja → / Zapisz]    │  ← §6.5.6
 └──────────────────────────────────────────────────────────────────┘
@@ -4232,8 +4235,9 @@ A single full-width block between the fact pairs and the decyzja block. This is 
 |---|---|
 | `ZAAKCEPTOWANO` | `orderNumber` (Nr zlecenia, text) · `orderDate` (Data zlecenia, date) · `amountApproved` (Kwota zatwierdzona — **the same locked/computed field as §6.5.4**; do not render a second editable copy — bind the decision's amount to the live-computed value). |
 | `ODRZUCONO` | `komentarz` (Powód odrzucenia, textarea, required). |
-| `OCZEKUJE_NA_AUTORYZACJE` | `margin` (Marża, number) · `authDesc` (Opis dla autoryzacji, textarea). Hands off to the Autoryzacja section (§6.5.7). |
 | reklamacja-variants | per existing claim-status rules (`<ReklamacjaSheet>` copy not re-spec'd here — the verification surface only *triggers* the variant; the conditional fields follow the same RHF pattern). |
+
+> **`OCZEKUJE_NA_AUTORYZACJE` is NOT a selectable `targetStatus`.** The manual «Wyślij do autoryzacji» decision (with its `margin` / `authDesc` fields) is **removed** (этап 5.1). `OCZEKUJE_NA_AUTORYZACJE` is now reached **automatically** by the backend when the saved verification's dopłata exceeds `getAuthThreshold`; the decyzja `<Select>` therefore offers only `ZAAKCEPTOWANO` / `ODRZUCONO` (+ reklamacja-branches). While a claim is in `OCZEKUJE_NA_AUTORYZACJE`, the decision is *blocked* until the verifier uploads Maksim's confirmation screenshot in `MaksimGateBlock` (§6.5.7) — it is a gate around the same two decisions, never a third target.
 
 - Use `<FormGrid cols={2}>` for the ZAAKCEPTOWANO grid (orderNumber/orderDate side-by-side; `amountApproved` is a `col-span-2` full-width locked field). Mirrors the existing Phase 4 ClaimVerificationModal ZAAKCEPTOWANO grid.
 - The conditional block mounts/unmounts on `targetStatus` change with no layout jump above it (facts + dopłata stay fixed; only this bottom block reflows).
@@ -4270,25 +4274,39 @@ The whole point: view→edit must **not** swap containers or re-mount the form.
 | Mode | Left slot | Right slot |
 |---|---|---|
 | `view` | — (or `Odrzuć` ghost-danger if the role/status permits a one-click reject, mirroring Phase 4) | `<Button variant="ghost">Zamknij</Button>` · `<Button>Edycja</Button>` (primary; enters `edit`) |
-| `edit` | `<Button variant="ghost" className="text-danger">Odrzuć</Button>` (only if status ≠ ODRZUCONO/ZAAKCEPTOWANO) | `<Button variant="ghost">Anuluj</Button>` (back to `view`, discard unsaved edits) · `<Button>Zapisz</Button>` (label = «Zaakceptuj»/«Zapisz»/«Wyślij do autoryzacji» depending on `targetStatus`, mirroring Phase 4 footer logic) |
+| `edit` | `<Button variant="ghost" className="text-danger">Odrzuć</Button>` (only if status ≠ ODRZUCONO/ZAAKCEPTOWANO) | `<Button variant="ghost">Anuluj</Button>` (back to `view`, discard unsaved edits) · `<Button>Zapisz</Button>` (label = «Zaakceptuj»/«Odrzuć»/«Zapisz decyzję» depending on `targetStatus`, mirroring Phase 4 footer logic — no «Wyślij do autoryzacji»: authorization is automatic, §6.5.7) |
 
 - `Anuluj` in `edit` returns to `view` and resets the RHF form to the last-saved values (`form.reset(serverValues)`) — it does NOT close the Dialog. Closing the Dialog (✕ / Escape / Zamknij) is a separate action available in both modes.
 - `Zapisz` states: `saving` → primary-button spinner, all inputs disabled; `error` → `<Alert variant="destructive">` at the top of the body, form stays editable (mirrors Phase 4 `<ClaimVerificationModal>` states).
 
-### 6.5.7 Historia & Autoryzacja inside the single Dialog
+### 6.5.7 Historia (secondary) & the automatic Maksim-gate (`MaksimGateBlock`)
 
-The Phase 4 design used three tabs (Edit / Historia / Autoryzacja). In the unified centered surface the primary flow (facts → dopłata → decyzja) is **not** a tab — it is always the main scroll body. Historia and Autoryzacja are **secondary** and must not compete with the main narrative.
+> **REWORK 2026-07-24 (этап 5.1).** The manual authorization flow is **gone**. There is no «Wymaga autoryzacji» button, no manual `kwotaMaksima` input, no `Autoryzacja` tab, and no user-selectable `OCZEKUJE_NA_AUTORYZACJE` target. Authorization is now **fully automatic** (backend Maksim-gate) and its only UI surface is the **`MaksimGateBlock`** in the *main* flow. The secondary sub-panel is reduced to **Historia only**.
 
-**Decision: secondary tabs scoped to a sub-region, NOT top-level tabs over the whole modal.** Rationale: top-level tabs would hide the facts/dopłata/decyzja flow behind a tab and re-introduce a "where did my form go" mode-switch — the opposite of the unification goal. Instead:
+#### Historia — single secondary section (no tabs)
 
-- The **main flow (facts → dopłata → decyzja) is always visible** as the modal body. It is never behind a tab.
-- **Historia** and **Autoryzacja** live in a **secondary tabbed sub-panel below the decyzja block** (still inside the same scrolling `<DialogBody>`), using shadcn `<Tabs>` with exactly the tabs that apply:
-  - `Historia` tab — rendered only when `claim.origData != null`. Side-by-side diff «Pierwotnie» / «Aktualnie», changed fields tinted `bg-warning/10` (same token as §6.5.3 changed-emphasis). Read-only. (This is the legacy diff content from the Phase 4 Historia tab, unchanged — only its *placement* moves from a top-level tab to this secondary sub-panel.)
-  - `Autoryzacja` tab — rendered only when the business threshold applies (`claim.doplata > LIMIT_OR_THRESHOLD`). Two sub-sections: (1) «Wymaga autoryzacji» button (`<Mail>` icon → emails Maksim, sets `OCZEKUJE_NA_AUTORYZACJE`, then disabled + «Wysłano (yyyy-mm-dd hh:mm)»); (2) `kwotaMaksima` `<Input type="number">` «Kwota zatwierdzona przez Maksima (EUR)», manual entry, save-on-blur. **Still NO FileUpload, NO screenshots** (carried over from the Phase 4 locked rule — see acceptance checklist).
-- If **neither** secondary tab applies (no origData, below threshold — the common case for a clean first-time verification) the entire secondary sub-panel is **omitted** — the modal ends at the decyzja block + footer. No empty tab bar.
-- If **only one** applies, render it as a single labelled section (no `<Tabs>` chrome for one item — a `<Tabs>` with one tab is visual noise; just a `<Separator>` + section title).
+- The **main flow (facts → dopłata → [MaksimGateBlock] → decyzja) is always visible** as the modal body; nothing is hidden behind a tab.
+- **Historia** is the *only* secondary content, rendered as a single labelled section (a `<Separator>` + section title, **no `<Tabs>` chrome** — a tab-strip for one item is noise) **below the decyzja panel**, still inside the same scrolling `<DialogBody>`, and **only when `claim.origData != null`** (there was a reklamacja / re-submit). Side-by-side diff «Pierwotnie» / «Aktualnie», changed fields tinted `bg-warning/10` (same token as §6.5.3 changed-emphasis). Read-only.
+- If `origData == null` the secondary section is **omitted entirely** — the modal ends at the decyzja panel + footer.
 
-> This keeps Historia/Autoryzacja discoverable and in-context (same surface, no new modal/Sheet) while guaranteeing the verifier's primary task — reconcile facts, read dopłata, decide — is never hidden behind a tab. Diff and authorization are *supporting evidence*, placed after the decision inputs, exactly where a verifier reaches for them ("let me double-check the history / kick off authorization") rather than before.
+#### `MaksimGateBlock` — the automatic authorization surface (main flow)
+
+`MaksimGateBlock` is the **existing** central block that sits between the DOPŁATA block (§6.5.4) and the DECYZJA panel (§6.5.5), rendered **only when `status === 'OCZEKUJE_NA_AUTORYZACJE'`**. It is not a tab and not a secondary section — it is a first-class step of the main narrative, because when it is present it *gates the decision*.
+
+**How the claim enters this state (context, backend-owned).** On «Zapisz weryfikację», if the recomputed dopłata **exceeds `getAuthThreshold`**, the backend **automatically** flips the claim to `OCZEKUJE_NA_AUTORYZACJE` and emails Maksim a confirmation request (dedup by amount). The verifier does **not** trigger this; there is no button. The reverse auto-rollback is also backend-owned: an **admin-only** edit in `OCZEKUJE_NA_AUTORYZACJE` that pushes dopłata back **under** the threshold returns the claim to `NA_WERYFIKACJI` and the block disappears.
+
+**States of the block:**
+
+| State | When | Treatment |
+|---|---|---|
+| **Pending (danger banner)** | `OCZEKUJE_NA_AUTORYZACJE`, no confirmation screenshot yet | `<Alert variant="destructive">`-styled banner «Czeka na autoryzację» + short body: Maksim was emailed, upload his reply to proceed. Below it a `<FileUpload>` (single image/PDF) — the *only* control in the block. |
+| **Cleared (uploaded)** | screenshot uploaded | Banner drops its danger tone → neutral confirmed line + a `<FileDownload>`/link to the uploaded screenshot (view/replace). The decyzja panel below is now **unblocked**. |
+
+**Decision blocked until cleared.** While the block is in *pending* state, the decyzja `<Select>` / save-decision action is **disabled**, with a hint under the decyzja select — `progExceededHint` / `decisionBlockedHint` — «Najpierw wgraj potwierdzenie autoryzacji Maksima.» (`text-xs text-text-sub`, `role="status"`). Once the screenshot is uploaded, the hint clears and `ZAAKCEPTOWANO` / `ODRZUCONO` become selectable again. The status stays `OCZEKUJE_NA_AUTORYZACJE` until the verifier actually saves a decision.
+
+**Facts are locked in `OCZEKUJE_NA_AUTORYZACJE`.** For `pracownik`, the `FactPairs` block renders in its static `view` form with a single `<LockNotice>` above it (Tier-B lock, §6.5.13 case 2, key `locked.factsPendingAuthorization`) — only an **admin** may correct the verification data in this state (admin sees the informational `locked.factsPendingAuthorizationAdmin` notice, editing intact). «Zapisz weryfikację» is **removed** (not disabled) for non-admin here (§6.5.13 case 3), and any admin edit that drops dopłata under the threshold triggers the auto-rollback above. This is the existing `factsNotice` locked/adminInfo pattern — `MaksimGateBlock` is the central block of the surface while this state is active.
+
+> The whole authorization flow is now: *auto-enter `OCZEKUJE` on save-over-threshold → `MaksimGateBlock` danger banner → verifier uploads Maksim's screenshot → decyzja unblocks → verifier decides*. No manual button, no manual amount entry, one surface in the main flow. Diff (Historia) stays a passive secondary section after the decision inputs.
 
 ### 6.5.8 Tokens
 
@@ -4313,12 +4331,12 @@ The Phase 4 design used three tabs (Edit / Historia / Autoryzacja). In the unifi
 |---|---|
 | `<ClaimVerificationModal>` container `<Sheet side="right" w-[720px]>` → **`<Dialog max-w-4xl>`** with `mode: 'view' \| 'edit'` state | `apps/web/components/claims/ClaimVerificationModal.tsx` |
 | Merge read-only `ClaimDetailModal` content INTO the same Dialog (`view` mode) — delete the separate detail-modal handoff for claims (the §6.0 detail→edit handoff no longer applies to this surface) | `apps/web/components/claims/*` + `ClaimsTable` row-click wiring |
-| Reorder body: fact pairs → **dopłata (above)** → decyzja (bottom) → secondary Historia/Autoryzacja sub-panel | same |
+| Reorder body: fact pairs → **dopłata (above)** → `MaksimGateBlock` (only @ `OCZEKUJE_NA_AUTORYZACJE`) → decyzja (bottom) → secondary Historia section | same |
 | 6 fact pairs with muted-declared (`bg-input/40` + `text-text-sub`, **no lock icon**) + verifier input; `<FormGrid cols={2}>` alignment | same |
 | `timeFrom`/`timeTo` declared cells bind to **`origTimeFrom`/`origTimeTo`**, not live values | same |
 | `hoursAdjusted` renders **input only** (no declared cell; never render `0` as declared) | same |
 | dopłata = locked/computed field, live recalc (debounce 300ms) **independent of `targetStatus`**, `<RecalcBadge>` | same |
-| Historia/Autoryzacja → secondary `<Tabs>` sub-panel below decyzja; omitted entirely if neither applies; single section (no tabs) if only one applies; **still no FileUpload in Autoryzacja** | same |
+| Historia → single secondary section (no `<Tabs>`) below decyzja, only when `origData != null`, else omitted; manual Autoryzacja tab **deleted** — authorization is the automatic `MaksimGateBlock` in the main flow (danger banner + screenshot `<FileUpload>` + cleared/download state), rendered only @ `OCZEKUJE_NA_AUTORYZACJE` | same |
 | Footer per mode: `view` → [Zamknij][Edycja]; `edit` → [Odrzuć][Anuluj][Zapisz] | same |
 | In-place morph: no re-mount, RHF stays mounted, `form.reset` on Anuluj-from-edit, focus to first input on enter-edit | same |
 | **API:** surface `origTimeFrom` / `origTimeTo` on the claim DTO (additive, optional, mirrors `origDateStart`/`origMileage`) | `packages/shared` claim schema + `claims.service` serializer (api-agent) |
@@ -4328,13 +4346,13 @@ The Phase 4 design used three tabs (Edit / Historia / Autoryzacja). In the unifi
 
 - [ ] Verification surface is **one centered `<Dialog max-w-4xl>`**, not a Sheet, not two modals.
 - [ ] Row-click opens `view` (read-only); «Edycja» enters `edit` **in place** — no re-mount, no container swap, no slide animation, RHF values preserved.
-- [ ] Body order top→bottom: fact pairs → dopłata (locked/computed, live) → decyzja (select + conditional fields) → optional Historia/Autoryzacja sub-panel.
+- [ ] Body order top→bottom: fact pairs → dopłata (locked/computed, live) → `MaksimGateBlock` (only @ `OCZEKUJE_NA_AUTORYZACJE`) → decyzja (select + conditional fields) → optional Historia section.
 - [ ] 6 fact pairs; declared cells muted `bg-input/40` + `text-text-sub` **without** lock icon; `timeFrom`/`timeTo` declared from `origTimeFrom`/`origTimeTo`; `hoursAdjusted` has input only (no declared cell, never `0`).
 - [ ] `hoursAdjusted` row in **`view`** is rendered **only when `hoursAdjustedValue > 0`**; omitted entirely (no empty/`—`/`0` row) when there is no stoppage / claim not verified. In `edit` the input is always present.
 - [ ] On entering `edit`, `targetStatus` is **not pre-selected** (placeholder «wybierz decyzję»); decision conditional fields do **not** render until a decision is chosen; decision required-field validation fires **only on «Zapisz»**; focus lands on `dateStart`, not the decyzja block.
 - [ ] Acceptance gate: when live recalc shows `kmDifference <= 0` (guarantee met), `ZAAKCEPTOWANO` / `REKLAMACJA_ZAAKCEPTOWANO` are disabled; a prior acceptance selection is cleared if an edit pushes recalc into "guarantee met"; hint «Gwarancja wyjeżdżona — wniosek można tylko odrzucić» shown; backend still hard-rejects acceptance (`422`).
 - [ ] dopłata recomputes live (300ms debounce) on any fact change, **independent of selected `targetStatus`**; `<RecalcBadge>` Przeliczam…→Aktualne.
-- [ ] Historia tab only when `origData != null`; Autoryzacja only above threshold; **no FileUpload in Autoryzacja**; both omitted when neither applies; single labelled section (no `<Tabs>`) when only one applies.
+- [ ] Historia = single secondary section (no `<Tabs>`) only when `origData != null`, else omitted. No manual Autoryzacja tab. Authorization = automatic `MaksimGateBlock` @ `OCZEKUJE_NA_AUTORYZACJE` only: danger banner «Czeka na autoryzację» + screenshot `<FileUpload>` → cleared/download state; decyzja disabled with hint until the screenshot is uploaded.
 - [ ] Footer differs by mode; Anuluj-from-edit returns to `view` + `form.reset`, does not close; ✕/Escape/Zamknij closes.
 - [ ] Focus moves to first verifier input on enter-edit, back to «Edycja» trigger on leave-edit; focus-trap covers both modes.
 - [ ] Works in dark mode via tokens only — no `[style*=]` hacks. `bg-input/40` legible on `#1f1f1f`; `text-brand` (`#ef4444` dark) dopłata number passes AA.
@@ -4346,7 +4364,7 @@ Implementation lands as **one new component `apps/web/components/claims/ClaimMod
 
 Documented deviations from the literal §6.5 text, each within brand/token constraints:
 
-1. **Autoryzacja applicability gate.** §6.5.7 keys the Autoryzacja secondary tab on a business threshold (`claim.doplata > LIMIT_OR_THRESHOLD`). That limit constant is **not exposed to the client** (no DTO field / config endpoint surfaces it). To preserve functional identity with the Phase 4 flow, the Autoryzacja section is gated on **claim status** instead: shown when `status ∈ { NA_WERYFIKACJI (request-authorization form), OCZEKUJE_NA_AUTORYZACJE (read-only pending summary) }`, omitted otherwise. If a numeric threshold is later surfaced on the DTO, swap this predicate. **No FileUpload / screenshots** (the locked rule is preserved).
+1. **Maksim-gate applicability (automatic, этап 5.1).** There is no client-side threshold check and no manual authorization surface. The `MaksimGateBlock` is gated purely on **claim status**: rendered when `status === 'OCZEKUJE_NA_AUTORYZACJE'`, omitted otherwise. The backend owns the threshold (`getAuthThreshold`): it auto-enters the status on save-over-threshold and auto-rolls back to `NA_WERYFIKACJI` on an admin edit that drops under it. The block **does** carry a screenshot `<FileUpload>` (Maksim's confirmation) — this is the one FileUpload on the surface; there is no other manual authorization control (no «Wymaga autoryzacji» button, no manual `kwotaMaksima` input).
 2. **dopłata locked field is a static computed display, not an RHF-registered input.** §6.5.4 says "render verbatim the `amountApproved` recipe with `readOnly` RHF registration". The standalone dopłata block (above decyzja) is the *live preview consequence* and is never submitted on its own, so it renders as a static muted value (`bg-input/40` + `<Lock>` + `<FormDescription>` "wyliczana automatycznie") rather than a registered `<input readOnly>`. The **RHF-registered** locked `amountApproved` field still exists inside the ZAAKCEPTOWANO decision branch (§6.5.5), bound to the same live-computed value — so the submitted payload is unchanged.
 3. **Decyzja inputs are gated behind `edit` mode.** In `view` the decyzja block renders a muted "pick edit to decide" hint instead of the live `<Select>` — a decision is an edit, so it belongs to `edit` mode. The select + conditional fields appear the instant «Edycja» is pressed (no re-mount). This is consistent with §6.5.6's "leaf controls flip static⇄input" rule applied to the decyzja sub-tree. **On enter-edit the select shows the placeholder «wybierz decyzję» (no pre-selected `targetStatus`)** and no conditional fields render until a decision is picked; decision required-field validation fires only on «Zapisz» (see §6.5.5 "No pre-selected decision").
 4. **Acceptance gated by recalc result.** Acceptance options are disabled (and any prior acceptance selection cleared) whenever the live recalc yields `kmDifference <= 0` (guarantee met ⇒ no payout); only rejection options remain, with the hint «Gwarancja wyjeżdżona — wniosek można tylko odrzucić». UI guard only; backend independently hard-rejects acceptance with `422` (see §6.5.5 "Acceptance gate by recalc result").
@@ -4402,7 +4420,7 @@ Two save buttons sitting adjacent in the same right-hand cluster with near-ident
 ### 6.5.13 «This field is locked because…» — the unified lock language (NEW 2026-07-18 — AUTHORITATIVE)
 
 > **Scope.** One pattern for every "you cannot edit this right now" case across the wniosek surface, so three new lock cases do not spawn three styles. **Applies project-wide** to any form field/block that becomes non-editable for a *state or role* reason.
-> **Canon settled:** the locked branch of `amountApproved` (`ClaimModal.tsx` ~:1963-2009) **is** the canon — it already is §(b) "Read-only / computed field pattern" rendered verbatim. The editable branch (~:1942-1962) is not a competing lock style; it is simply the *unlocked* rendering of the same field. There are not two lock styles today and there must never be a third.
+> **Canon settled:** the locked/computed rendering of `amountApproved` in `ClaimModal.tsx` **is** the canon — it already is §(b) "Read-only / computed field pattern" rendered verbatim. (The former admin-override *editable* branch of `amountApproved` — the «kwota Maksima» override — is **removed**, этап 5.1; `amountApproved` is now always the server-computed locked/computed field, never manually edited.) There are not two lock styles today and there must never be a third.
 
 #### The two tiers (locked — pick by scope, never mix)
 
@@ -4439,19 +4457,17 @@ A quiet informational line. **Posture copied from §7.7.1b's lag-note: a locked 
 
 > **«Zablokowane — <przyczyna>.»**  ·  ≤ ~90 chars for the visible line; the `title` may add one clause of detail.
 
-#### The three cases — locked mapping
+#### The two cases — locked mapping
+
+> **Note (этап 5.1).** The former **case 1** (`amountApproved` locked because `amountMaximum != null` — the manual «kwota Maksima» override) is **removed**: the whole «kwota Maksima» concept is gone (field `amountMaximum` deleted from the DB, keys `amountApprovedLockedMaksim*` / `maksimAmountRef` / `maksimOverride*` retired). Only the two workflow-state locks below remain.
 
 | # | Case | Tier | i18n key (`employee.claims.modal.locked.*` unless noted) | PL (default) | EN |
 |---|---|---|---|---|---|
-| 1 | `amountApproved` read-only because `amountMaximum != null` — **role-conditional: `pracownik` only** (see §6.5.14) | **A** (field) | `edit.amountApprovedLockedMaksim` (description) | «Zablokowane — jest decyzja Maksima ({amount}).» | "Locked — Maksim's decision exists ({amount})." |
-| | ↳ hover `title` | | `edit.amountApprovedLockedMaksimHint` | «Kwota zatwierdzona wynika z decyzji Maksima. Zmienić ją może wyłącznie administrator.» | "The approved amount follows Maksim's decision. Only an administrator can change it." |
-| 2 | `FactPairs` read-only for `pracownik` when status = `OCZEKUJE_NA_AUTORYZACJE` | **B** (block) | `factsPendingAuthorization` | «Dane weryfikacji są zablokowane — wniosek czeka na autoryzację Maksima. Zmiany może wprowadzić tylko administrator.» | "Verification data is locked — the claim is awaiting Maksim's authorisation. Only an administrator can make changes." |
+| 1 | `FactPairs` read-only for `pracownik` when status = `OCZEKUJE_NA_AUTORYZACJE` | **B** (block) | `factsPendingAuthorization` | «Dane weryfikacji są zablokowane — wniosek czeka na autoryzację Maksima. Zmiany może wprowadzić tylko administrator.» | "Verification data is locked — the claim is awaiting Maksim's authorisation. Only an administrator can make changes." |
 | | ↳ same status, role = `admin` (facts still editable) | **B** (notice only, no lock) | `factsPendingAuthorizationAdmin` | «Wniosek czeka na autoryzację Maksima. Jako administrator możesz nadal korygować dane weryfikacji.» | "The claim is awaiting Maksim's authorisation. As an administrator you can still correct the verification data." |
-| 3 | «Zapisz weryfikację» hidden for non-`admin` at `OCZEKUJE_NA_AUTORYZACJE` | **removed, not disabled** | — (no key) | reason already carried by case 2's notice | — |
+| 2 | «Zapisz weryfikację» hidden for non-`admin` at `OCZEKUJE_NA_AUTORYZACJE` | **removed, not disabled** | — (no key) | reason already carried by case 1's notice | — |
 
-**Case 1 detail (locked).** The field stays `readOnly`, **not** `disabled` — it remains RHF-registered and part of the submitted payload (§(b): disabled inputs are dropped from some serialisations). The `required` asterisk stays. The existing `amountApprovedFromMaksim` description belongs to the *unlocked* branch and is not reused here. **The full role/status rule and the admin-override case are specified in §6.5.14 — read it before implementing case 1.**
-
-**Case 2 detail (locked).** `pracownik` at `OCZEKUJE_NA_AUTORYZACJE` sees the fact block rendered exactly as `mode === 'view'` (static pair rows, `bg-input/40` declared cells, no inputs) even though the modal is in `edit` — the decyzja panel below stays live. This is the §6.5.6 "leaf controls flip static⇄input" rule applied per-block. The `<LockNotice>` sits above the `DANE WNIOSKU / DANE PO WERYFIKACJI` headers. The `admin` variant renders the notice **without** locking anything (informational — it explains why the surface feels different from the usual verification pass).
+**Case 1 detail (locked).** `pracownik` at `OCZEKUJE_NA_AUTORYZACJE` sees the fact block rendered exactly as `mode === 'view'` (static pair rows, `bg-input/40` declared cells, no inputs) even though the modal is in `edit` — the decyzja panel below stays live. This is the §6.5.6 "leaf controls flip static⇄input" rule applied per-block. The `<LockNotice>` sits above the `DANE WNIOSKU / DANE PO WERYFIKACJI` headers. The `admin` variant renders the notice **without** locking anything (informational — it explains why the surface feels different from the usual verification pass). An admin edit that drops dopłata under `getAuthThreshold` triggers the backend auto-rollback to `NA_WERYFIKACJI` (§6.5.7).
 
 #### Anti-patterns (kill on sight)
 
@@ -4475,121 +4491,18 @@ A quiet informational line. **Posture copied from §7.7.1b's lag-note: a locked 
 
 - [ ] Exactly **one** lock visual language in the modal: §(b) recipe for field-level, `<LockNotice>` for block-level. No third style introduced.
 - [ ] Every locked surface states its **cause** in visible text; no grey-with-no-reason field exists.
-- [ ] `amountApproved` locks (readOnly, not disabled) whenever `amountMaximum != null`, with the case-1 copy; still submitted in the payload.
 - [ ] `FactPairs` for `pracownik` @ `OCZEKUJE_NA_AUTORYZACJE` renders in static `view` form + one `<LockNotice>` above it; `admin` sees the informational variant with editing intact.
 - [ ] «Zapisz weryfikację» is **absent** (not disabled) for non-admin in that status.
 - [ ] `<LockNotice>` is neutral-coloured, `role="note"`, referenced via `aria-describedby` from the locked block; `aria-disabled="true"` on that block.
 - [ ] AA contrast verified in both themes; 0 new tokens.
 
-### 6.5.14 Kwota Maksima vs kwota zatwierdzona — the admin-override case (NEW 2026-07-18 — AUTHORITATIVE)
+### 6.5.14 Kwota Maksima vs kwota zatwierdzona — REMOVED (этап 5.1)
 
-> **Supersedes** the earlier `postAuthorization`-keyed branch in `DecisionFields` (`ClaimModal.tsx` ~:1942-1962), which made `amountApproved` editable *only* in `OCZEKUJE_NA_AUTORYZACJE`. That status keying is dropped.
-
-#### The rule (locked — no exceptions, no status keying)
-
-```
-amountMaximum != null  AND  role === 'pracownik'   →  amountApproved is LOCKED   (Tier A, §6.5.13)
-amountMaximum != null  AND  role === 'admin'       →  amountApproved is EDITABLE (override allowed)
-amountMaximum == null                              →  existing behaviour unchanged
-```
-
-The lock is keyed on **the existence of Maksim's decision and the user's role — never on `ClaimStatus`.** One predicate, all statuses.
-
-#### The design problem
-
-Once `admin` overrides, two numbers coexist and mean different things:
-
-- **`amountMaximum`** — what Maksim authorised (the decision of record).
-- **`amountApproved`** — what will actually be paid to the carrier.
-
-Today they live in different parts of the surface (`amountMaximum` in the Autoryzacja sub-panel at the very bottom, `amountApproved` in the decyzja panel) with nothing linking them. A divergence is invisible. **Fix: co-locate them at the field that causes the divergence, and make the divergence itself a first-class visual.**
-
-#### `<AmountOverrideRow>` — the reference/override comparison
-
-The insight: this is **the same reconciliation semantic as the fact pairs** (§6.5.3) — a reference value the user did not author, next to the working value they did. So it must speak the **same language**, not invent a new one: muted reference cell + the `bg-warning/10` "this was changed" tint already used by corrected facts and the Historia diff.
-
-Rendered **directly under** the `amountApproved` input (in the `<FormDescription>` slot's position, above/instead of the plain description), in **both** the locked (`pracownik`) and editable (`admin`) branches, whenever `amountMaximum != null`:
-
-**(a) Aligned state — `amountApproved === amountMaximum`** (the normal case; also the pracownik-locked case):
-
-```
-[🔒 Lock 12px]  Decyzja Maksima: 820,00 €        ← text-xs text-text-sub, flex items-center gap-1
-```
-- Classes: `flex items-center gap-1 text-xs text-text-sub`, value `font-semibold tabular-nums`.
-- The `<Lock size-3>` glyph appears **only in the locked (pracownik) branch** — for `admin` the row is pure reference, no lock (same distinction as §6.5.3: lock = "you can't type here", plain muted = "reference context").
-- i18n `employee.claims.modal.edit.maksimAmountRef` — PL «Decyzja Maksima: {amount}» / EN "Maksim's decision: {amount}".
-
-**(b) Divergent state — `amountApproved !== amountMaximum`** (admin has overridden):
-
-```
-┌────────────────────────────────────────────────────────────┐
-│ [⚠ 14px]  Nadpisano decyzję Maksima                        │  ← text-xs font-semibold
-│           820,00 €  →  900,00 €                            │  ← tabular-nums, was → is
-│           Przewoźnik otrzyma kwotę zatwierdzoną.           │  ← text-xs, muted
-└────────────────────────────────────────────────────────────┘
-```
-
-| Aspect | Value |
-|---|---|
-| Wrapper | `mt-1.5 flex items-start gap-2 rounded-md bg-warning/10 px-3 py-2 text-xs text-warning-dark dark:text-warning` — the **same `bg-warning/10` diff token** as §6.5.3 changed-fact emphasis and the Historia diff. **No new token.** |
-| Icon | Lucide `<AlertTriangle size={14} aria-hidden className="mt-0.5 shrink-0" />` |
-| Line 1 | `font-semibold` — key `edit.maksimOverrideTitle`, PL «Nadpisano decyzję Maksima» / EN "Maksim's decision overridden" |
-| Line 2 (the «było → stało») | old value `line-through text-text-sub tabular-nums` · Lucide `<ArrowRight size={12} aria-hidden className="mx-1 inline shrink-0" />` · new value `font-semibold tabular-nums` (inherits the warning text colour). Strike-through on the superseded amount is the unambiguous "this is no longer in force" mark. |
-| Line 3 | `text-text-sub` (drops to muted inside the band) — key `edit.maksimOverrideConsequence`, PL «Przewoźnik otrzyma kwotę zatwierdzoną.» / EN "The carrier will receive the approved amount." — this is the whole point: it says *which of the two numbers wins*. |
-| Live | The band appears/disappears **live as the admin types** (RHF `watch('amountApproved')` vs `claim.amountMaximum`), not on blur, not on submit. The feedback must be attached to the act of typing. |
-| a11y | Wrapper `role="status"` (polite) so SR users hear the divergence appear; not `role="alert"` — it is not an error. |
-| `<Badge>` | Additionally a `<Badge variant="outline" className="text-warning-dark dark:text-warning">Nadpisano</Badge>` next to the **field label** (`Kwota zatwierdzona`), so the divergence is visible even when the decyzja panel is scrolled to its top edge. Same copy as line 1's key, short form `edit.maksimOverrideBadge` = «Nadpisano» / "Overridden". |
-
-**Pracownik sees the divergent band too, read-only.** When an admin has already overridden and a `pracownik` opens the claim, the locked field shows `900,00 €` and the same `(b)` band explains why it differs from Maksim's `820,00 €`. Without it the pracownik sees a locked field whose value contradicts the Autoryzacja panel below — exactly the confusion class this ticket exists to kill.
-
-#### Confirmation at the moment of override — **decision: no dialog** (locked)
-
-**No `<ConfirmDialog>`, no "are you sure" on typing, no blocking modal.** Rationale:
-
-1. The action is **not destructive and not yet committed** — nothing happens until «Zapisz decyzję». A confirm on an uncommitted keystroke is theatre; the user would dismiss it and learn nothing.
-2. A dialog would fire on every keystroke or every blur — the classic pattern that trains users to click through without reading.
-3. `admin` overriding is a **sanctioned power**, not an accident to guard against. The design's job is to make the consequence **continuously visible**, not to interrogate.
-4. The `(b)` band + the label badge already deliver the warning **persistently and at the moment of typing** — strictly more informative than a one-shot dialog, and it survives scrolling away and back.
-
-**What we do instead, at submit:** the existing `comment` field in the ZAAKCEPTOWANO branch gets a **conditional hint** while the divergence is live — key `edit.maksimOverrideCommentHint`, PL «Warto opisać powód nadpisania kwoty Maksima.» / EN "Consider describing the reason for overriding Maksim's amount.", rendered as `<FormDescription>` under the komentarz textarea. **Hint only — it does NOT make `comment` required.** Making it required is a business rule (api-agent/domain decision), not a design call; if the product later wants it mandatory, the hint text becomes the `<FormMessage>` copy and the Zod schema changes.
-
-#### Why the locked/editable split does not break the Tier-A pattern
-
-The §6.5.13 Tier-A recipe is a **rendering of one field in two branches**, and `<AmountOverrideRow>` is rendered in *both* — so the field's below-input slot is structurally identical for both roles. Only two things flip:
-
-| | `pracownik` | `admin` |
-|---|---|---|
-| `<Input>` | §(b) locked recipe (`readOnly`, `bg-input/40`, in-field `<Lock>`, `title`) | normal editable `<Input>` (`bg-input`) |
-| Reason line | `<Lock size-3>` + «Zablokowane — jest decyzja Maksima ({amount}).» | no lock glyph; `<AmountOverrideRow>` state (a) reference line only |
-| Divergence band (b) | rendered when divergent (read-only explanation) | rendered live while divergent |
-| Label badge «Nadpisano» | rendered when divergent | rendered when divergent |
-
-Grid alignment is unaffected — everything grows downward out of the `col-span-2` cell (§Grid-form field alignment requirement 2).
-
-#### i18n keys (PL default + EN) — `employee.claims.modal.edit.*`
-
-| Key | PL | EN |
-|---|---|---|
-| `amountApprovedLockedMaksim` | «Zablokowane — jest decyzja Maksima ({amount}).» | "Locked — Maksim's decision exists ({amount})." |
-| `amountApprovedLockedMaksimHint` (`title`) | «Kwota zatwierdzona wynika z decyzji Maksima. Zmienić ją może wyłącznie administrator.» | "The approved amount follows Maksim's decision. Only an administrator can change it." |
-| `maksimAmountRef` | «Decyzja Maksima: {amount}» | "Maksim's decision: {amount}" |
-| `maksimOverrideTitle` | «Nadpisano decyzję Maksima» | "Maksim's decision overridden" |
-| `maksimOverrideBadge` | «Nadpisano» | "Overridden" |
-| `maksimOverrideConsequence` | «Przewoźnik otrzyma kwotę zatwierdzoną.» | "The carrier will receive the approved amount." |
-| `maksimOverrideCommentHint` | «Warto opisać powód nadpisania kwoty Maksima.» | "Consider describing the reason for overriding Maksim's amount." |
-
-`amountApprovedFromMaksim` (the old post-authorization prefill description) is **retired** — replaced by `maksimAmountRef` + the override band.
-
-#### Acceptance (§6.5.14)
-
-- [ ] `amountApproved` locks on `amountMaximum != null && role === 'pracownik'` — **in every status**; `admin` keeps it editable. No `ClaimStatus` appears in the predicate.
-- [ ] Locked branch = §(b) recipe verbatim with the case-1 reason copy naming Maksim's decision as the cause.
-- [ ] `<AmountOverrideRow>` renders under the field for **both** roles whenever `amountMaximum != null`: aligned → muted reference line; divergent → `bg-warning/10` band with `820,00 € (line-through) → 900,00 €` and the consequence line.
-- [ ] Divergence band updates **live while typing** (`watch`), `role="status"`; `<Badge>Nadpisano</Badge>` on the field label.
-- [ ] Pracownik sees the divergence band read-only when an admin has overridden.
-- [ ] **No confirm dialog** on override; komentarz gets a non-blocking hint while divergent; `comment` does **not** become required.
-- [ ] `amountApprovedFromMaksim` key removed; new keys added to `pl.json` + `en.json`.
-- [ ] 0 new tokens (`bg-warning/10`, `text-warning-dark`, `text-text-sub`, `bg-input/40` all existing); dark mode via tokens only.
+> ❌ **This entire section is removed.** The «kwota Maksima» concept — a manually-entered `amountMaximum` acting as a reference/override against `amountApproved`, the `pracownik`-locked / `admin`-editable split keyed on `amountMaximum != null`, the `<AmountOverrideRow>` comparison component, and the «Nadpisano decyzję Maksima» divergence band — no longer exists. The DB field `amountMaximum` is deleted; there is no second amount to reconcile against.
+>
+> **Retired with it (removed from `pl.json` / `en.json` — web-agent):** `employee.claims.modal.edit.amountMaximum`, `edit.margin`, `edit.amountApprovedLockedMaksim`, `edit.amountApprovedLockedMaksimHint`, `edit.maksimAmountRef`, `edit.maksimOverrideTitle`, `edit.maksimOverrideBadge`, `edit.maksimOverrideConsequence`, `edit.maksimOverrideCommentHint`, `edit.amountApprovedFromMaksim`, plus the `targetStatus.OCZEKUJE_NA_AUTORYZACJE` decision option and the `unified.secondaryAuthorization` / `auth.*` (manual Autoryzacja tab) keys. Component `<AmountOverrideRow>` is deleted.
+>
+> **What replaces it:** nothing on the pracownik side — `amountApproved` is simply the server-computed approved amount (locked/computed field per §6.5.4 / §(b)), with no competing «kwota Maksima» number. Authorization over the threshold is now the **automatic Maksim-gate** (`MaksimGateBlock`, §6.5.7), whose only stored artefact is the confirmation-screenshot upload — not a manually keyed amount.
 
 ## Phase 7 — Eksport / Weryfikator delegation panels
 
@@ -4832,7 +4745,7 @@ This **supersedes** the «Urgent / Required notes» row in the §`<DashboardSide
 
 #### 7.6.3 Digest email accent (confirmation)
 
-The daily verification-digest email (`mail/templates/verification-digest.tsx`, §5 of the spec) **keeps the brand accent `#dc2626`** — same as `authorization-request.tsx`. Email clients have poor/no support for CSS custom properties and `dark:` variants, so the digest uses **inline brand-red `#dc2626`** for the header bar / heading accent and plain-text fallback, exactly per the existing mail-template convention. Inside the body, the two buckets may be visually separated (e.g. an «Po terminie» group heading in `#dc2626` and a «Zbliża się termin» group in an amber `#f97316` heading), but the **primary brand accent stays `#dc2626`** — no per-email theme tokens, no new colours. This is a hard-coded inline-style context (email), which is the one place inline styles are correct and expected.
+The daily verification-digest email (`mail/templates/verification-digest.tsx`, §5 of the spec) **keeps the brand accent `#dc2626`** — same as `maksim-confirmation-request.tsx`. Email clients have poor/no support for CSS custom properties and `dark:` variants, so the digest uses **inline brand-red `#dc2626`** for the header bar / heading accent and plain-text fallback, exactly per the existing mail-template convention. Inside the body, the two buckets may be visually separated (e.g. an «Po terminie» group heading in `#dc2626` and a «Zbliża się termin» group in an amber `#f97316` heading), but the **primary brand accent stays `#dc2626`** — no per-email theme tokens, no new colours. This is a hard-coded inline-style context (email), which is the one place inline styles are correct and expected.
 
 #### 7.6.4 Components / tokens / acceptance (Phase 7.6)
 

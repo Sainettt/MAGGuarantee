@@ -38,7 +38,6 @@ const CLAIM_META: Record<ClaimStatus, StatusMeta> = {
   ODRZUCONO: { variant: 'danger', icon: XCircle },
   REKLAMACJA: { variant: 'warning', icon: AlertTriangle },
   OCZEKUJE_NA_AUTORYZACJE: { variant: 'info', icon: Clock },
-  AUTORYZACJA_KWOTA_MAKSIMA: { variant: 'warning', icon: AlertTriangle },
 };
 
 // §7.10.1 — the LOCKED 5-status delegation tone-map. `gotowy` (NEW) is the

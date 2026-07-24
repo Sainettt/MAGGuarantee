@@ -126,14 +126,8 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     comment: null,
     orderNumber: null,
     orderDate: null,
-    authorizationRequired: false,
-    authorizationDescription: null,
-    authorizationToken: null,
-    authorizationDecidedAt: null,
     amountRequested: 1_400,
     amountApproved: null,
-    margin: null,
-    amountMaximum: null,
     reklamacjaSubmitted: false,
     reklamacjaText: null,
     reklamacjaResponse: null,
@@ -147,7 +141,6 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     origTimeTo: '18:00',
     origHoursAdjusted: 0,
     hoursAdjustedValue: 0,
-    authScreenshotUrl: null,
     maksimGateRequired: false,
     maksimGateNotifiedAt: null,
     maksimGateNotifiedAmount: null,
@@ -190,6 +183,10 @@ function makeClaimsRepo(seed: ClaimRow[] = []): ClaimsRepoFake {
         // Merge the patch onto the seeded row so the returned DTO reflects it.
         const next: ClaimRow = {
           ...existing,
+          ...(data.status !== undefined ? { status: data.status } : {}),
+          ...(data.statusChangedAt !== undefined
+            ? { statusChangedAt: data.statusChangedAt }
+            : {}),
           ...(data.verifiedAt !== undefined
             ? { verifiedAt: data.verifiedAt }
             : {}),
@@ -366,8 +363,10 @@ describe('ClaimsService.verifyClaim — verification checkpoint', () => {
     jest.useRealTimers();
   });
 
-  it('1. empty body stamps verifiedAt/ById WITHOUT running km-calc (confirmed as-is)', async () => {
-    const seeded = makeClaim();
+  it('1. empty body stamps verifiedAt/ById WITHOUT running km-calc (confirmed as-is, under threshold → status unchanged)', async () => {
+    // Under-threshold dopłata (300 < 500 for 20 days) → no auto-transition, so
+    // the status genuinely stays NA_WERYFIKACJI.
+    const seeded = makeClaim({ paymentEur: 300, amountRequested: 300 });
     const repoFake = makeClaimsRepo([seeded]);
     const km = makeKmCalcService();
     const prisma = makePrismaService();
@@ -387,7 +386,7 @@ describe('ClaimsService.verifyClaim — verification checkpoint', () => {
     expect(patch.kmGuaranteed).toBeUndefined();
     expect(patch.paymentEur).toBeUndefined();
     expect(patch.amountRequested).toBeUndefined();
-    // Status is a flag, not a transition — unchanged.
+    // Under threshold → no status transition.
     expect(patch.status).toBeUndefined();
     expect(out.status).toBe('NA_WERYFIKACJI');
     expect(out.verifiedAt).toBe(NOW.toISOString());
@@ -604,7 +603,7 @@ describe('ClaimsService.verifyClaim — Maksim authorization gate arming', () =>
     jest.useRealTimers();
   });
 
-  it('7. OVER threshold (empty body) arms the gate + sends the Maksim email exactly once', async () => {
+  it('7. OVER threshold (empty body) arms the gate + moves status to OCZEKUJE + sends the Maksim email exactly once', async () => {
     // Default claim: paymentEur 1_400, drivenDays 20 → threshold 500. 1400 > 500.
     const seeded = makeClaim();
     const repoFake = makeClaimsRepo([seeded]);
@@ -621,6 +620,11 @@ describe('ClaimsService.verifyClaim — Maksim authorization gate arming', () =>
     expect(patch.maksimGateNotifiedAt).toEqual(NOW);
     // Amount-aware dedup: the first notification stamps the final dopłata.
     expect(patch.maksimGateNotifiedAmount).toBe(1_400);
+    // NEW: the over-threshold arm auto-moves the claim into the pending status.
+    expect(patch.status).toBe('OCZEKUJE_NA_AUTORYZACJE');
+    expect(patch.statusChangedAt).toEqual(NOW);
+    // decidedById is NOT set — this is verification, not a decision.
+    expect(patch.decidedById).toBeUndefined();
     // Email enqueued exactly once with the recipient + core content rows.
     expect(mail.enqueueMaksimConfirmationRequest).toHaveBeenCalledTimes(1);
     const [email, props] =
@@ -629,9 +633,10 @@ describe('ClaimsService.verifyClaim — Maksim authorization gate arming', () =>
     expect(props.nrZgl).toBe(seeded.nrZgl);
     expect(props.doplata).toBe('1400.00');
     expect(props.prog).toBe('500.00');
-    // DTO surfaces the gate for the web.
+    // DTO surfaces the gate + new status for the web.
     expect(out.maksimGateRequired).toBe(true);
     expect(out.maksimGateNotifiedAt).toBe(NOW.toISOString());
+    expect(out.status).toBe('OCZEKUJE_NA_AUTORYZACJE');
   });
 
   it('8. re-save when ALREADY notified at the SAME amount does NOT resend (amount-aware dedup)', async () => {
@@ -897,23 +902,27 @@ describe('ClaimsService.verifyClaim — status × role matrix', () => {
     jest.useRealTimers();
   });
 
-  /** A claim that already went out to Maksim via `request-authorization`. */
+  /**
+   * A claim auto-moved into `OCZEKUJE_NA_AUTORYZACJE` at verification because the
+   * dopłata crossed the auth threshold (the gate is armed + Maksim was notified).
+   */
   function makePendingClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     return makeClaim({
       status: 'OCZEKUJE_NA_AUTORYZACJE' as ClaimStatus,
-      authorizationRequired: true,
-      authorizationDescription: 'Prośba o autoryzację kwoty',
-      authorizationToken: 'tok-1',
       // It was verified before it left NA_WERYFIKACJI (that edge is gated).
       verifiedAt: new Date('2026-05-14T10:00:00.000Z'),
       verifiedById: 'u-first',
+      maksimGateRequired: true,
+      maksimGateNotifiedAt: new Date('2026-05-14T10:00:00.000Z'),
+      maksimGateNotifiedAmount: 1_400,
       ...overrides,
     });
   }
 
-  // ── cell 1/4: pracownik × NA_WERYFIKACJI → allowed (unchanged) ──
-  it('13. pracownik × NA_WERYFIKACJI → allowed (unchanged)', async () => {
-    const seeded = makeClaim();
+  // ── cell 1/4: pracownik × NA_WERYFIKACJI → allowed (under threshold) ──
+  it('13. pracownik × NA_WERYFIKACJI → allowed (under threshold → status unchanged)', async () => {
+    // Under-threshold dopłata → no auto-transition, status stays NA_WERYFIKACJI.
+    const seeded = makeClaim({ paymentEur: 300, amountRequested: 300 });
     const repoFake = makeClaimsRepo([seeded]);
     const km = makeKmCalcService();
     const prisma = makePrismaService();
@@ -925,13 +934,15 @@ describe('ClaimsService.verifyClaim — status × role matrix', () => {
     expect(repoFake.updateWithinCalls).toHaveLength(1);
     expect(out.verifiedAt).toBe(NOW.toISOString());
     expect(out.verifiedById).toBe('u-actor');
-    // Status untouched — verification is a flag, not a status.
+    // Under threshold → status untouched.
     expect(out.status).toBe('NA_WERYFIKACJI');
+    // No Maksim email for an under-threshold verify.
+    expect(mail.enqueueMaksimConfirmationRequest).not.toHaveBeenCalled();
   });
 
-  // ── cell 2/4: admin × NA_WERYFIKACJI → allowed (unchanged) ──
-  it('14. admin × NA_WERYFIKACJI → allowed (unchanged)', async () => {
-    const seeded = makeClaim();
+  // ── cell 2/4: admin × NA_WERYFIKACJI → allowed (under threshold) ──
+  it('14. admin × NA_WERYFIKACJI → allowed (under threshold → status unchanged)', async () => {
+    const seeded = makeClaim({ paymentEur: 300, amountRequested: 300 });
     const repoFake = makeClaimsRepo([seeded]);
     const km = makeKmCalcService();
     const prisma = makePrismaService();
@@ -950,8 +961,8 @@ describe('ClaimsService.verifyClaim — status × role matrix', () => {
     expect(out.status).toBe('NA_WERYFIKACJI');
   });
 
-  // ── cell 3/4: admin × OCZEKUJE_NA_AUTORYZACJE → NEWLY allowed ──
-  it('15. admin × OCZEKUJE_NA_AUTORYZACJE → allowed, re-stamps verification, status untouched', async () => {
+  // ── cell 3/4: admin × OCZEKUJE_NA_AUTORYZACJE → allowed ──
+  it('15. admin × OCZEKUJE_NA_AUTORYZACJE → allowed, re-stamps verification, status stays pending (still over threshold)', async () => {
     const seeded = makePendingClaim();
     const repoFake = makeClaimsRepo([seeded]);
     const km = makeKmCalcService();
@@ -959,6 +970,7 @@ describe('ClaimsService.verifyClaim — status × role matrix', () => {
     const mail = makeMailFake();
     const { svc } = makeService(repoFake, km.svc, prisma, mail, makeConfigFake());
 
+    // mileage 7_000 → kmGuaranteed 10_800 − 7_000 = 3_800 → payment 1_900 > 500.
     const out = await svc.verifyClaim(
       makeAuth('admin', 'u-admin'),
       seeded.nrZgl,
@@ -969,18 +981,13 @@ describe('ClaimsService.verifyClaim — status × role matrix', () => {
     expect(patch.verifiedAt).toEqual(NOW);
     expect(patch.verifiedById).toBe('u-admin');
     expect(patch.mileage).toBe(7_000);
-    // The checkpoint NEVER nulls the stamp — it always writes a fresh one, so
-    // the "pending status carrying an invalid verification" state that
-    // `_assertVerifiedIfNaWeryfikacji` / `_assertMaksimGateCleared` would not
-    // catch is unreachable from this path.
+    // The checkpoint NEVER nulls the stamp — it always writes a fresh one.
     expect(patch.verifiedAt).not.toBeNull();
-    // The manual-authorization contract is untouched: no status change, and the
-    // request's token/description/flag are not rewritten by the checkpoint.
+    // Still over threshold in the pending window → status is NOT changed
+    // (idempotent), and no decision is recorded.
     expect(out.status).toBe('OCZEKUJE_NA_AUTORYZACJE');
-    expect(patch).not.toHaveProperty('status');
-    expect(patch).not.toHaveProperty('authorizationRequired');
-    expect(patch).not.toHaveProperty('authorizationToken');
-    expect(patch).not.toHaveProperty('authorizationDescription');
+    expect(patch.status).toBeUndefined();
+    expect(patch.decidedById).toBeUndefined();
   });
 
   // ── cell 4/4: pracownik × OCZEKUJE_NA_AUTORYZACJE → 422, admin-only ──
@@ -1051,18 +1058,17 @@ describe('ClaimsService.verifyClaim — status × role matrix', () => {
   });
 });
 
-// ─── Maksim threshold gate on the NEW admin path ─────────────
+// ─── Threshold-driven status auto-transition (the ONLY authorization path) ───
 //
-// The MANUAL authorization (request-authorization → status + email) and the
-// THRESHOLD gate (`maksimGateRequired`, never changes status) are INDEPENDENT
-// mechanisms. `_assertMaksimGateCleared` only fires on the
-// `NA_WERYFIKACJI → decision` edge, so arming the threshold gate in
-// OCZEKUJE_NA_AUTORYZACJE would block nothing while (a) re-notifying Maksim on
-// a changed amount — a second, contextless email on top of the manual request
-// he is already answering — and (b) nulling a prior clearance stamp on the
-// under-threshold branch. So the gate is SCOPED OUT of the pending window.
+// There is no manual authorization request. The over-threshold Maksim gate is
+// the SOLE authorization mechanism, and it AUTO-MOVES the claim
+// between `NA_WERYFIKACJI` and `OCZEKUJE_NA_AUTORYZACJE` at the verification
+// checkpoint. `_assertMaksimGateCleared` gates decisions out of BOTH statuses,
+// so the gate must be evaluated in BOTH: an admin re-verify in the pending
+// window re-notifies on a moved amount, and rolls the status back when a
+// correction drops the dopłata under threshold.
 
-describe('ClaimsService.verifyClaim — Maksim gate is scoped out of OCZEKUJE_NA_AUTORYZACJE', () => {
+describe('ClaimsService.verifyClaim — threshold status auto-transition', () => {
   beforeAll(() => {
     jest.useFakeTimers().setSystemTime(NOW);
   });
@@ -1070,21 +1076,22 @@ describe('ClaimsService.verifyClaim — Maksim gate is scoped out of OCZEKUJE_NA
     jest.useRealTimers();
   });
 
-  it('18. admin re-verify with a CHANGED over-threshold amount does NOT re-notify Maksim in the pending window', async () => {
-    // Over threshold (1400 > 500) and previously notified at a DIFFERENT amount
-    // — in NA_WERYFIKACJI this exact row re-notifies (see test 11).
+  it('18. admin re-verify in OCZEKUJE with a CHANGED over-threshold amount re-notifies + nulls clearance, status stays pending', async () => {
+    // Pending, previously notified at 1400 and Maksim already confirmed. A new
+    // mileage correction moves the over-threshold amount to 900 (still > 500) →
+    // re-notify, null the clearance, but the status stays OCZEKUJE (idempotent).
     const seeded = makeClaim({
       status: 'OCZEKUJE_NA_AUTORYZACJE' as ClaimStatus,
-      authorizationRequired: true,
       verifiedAt: new Date('2026-05-14T10:00:00.000Z'),
       verifiedById: 'u-first',
       maksimGateRequired: true,
       maksimGateNotifiedAt: new Date('2026-05-14T10:00:00.000Z'),
-      maksimGateNotifiedAmount: 900,
+      maksimGateNotifiedAmount: 1_400,
       maksimGateClearedAt: new Date('2026-05-14T11:00:00.000Z'),
-      maksimGateClearedById: 'u-first',
+      maksimGateClearedById: 'u-clearer',
     });
     const repoFake = makeClaimsRepo([seeded]);
+    // kmGuaranteed 10_800, rate 0.5, mileage 9_000 → kmDiff 1_800 → payment 900.
     const km = makeKmCalcService();
     const prisma = makePrismaService();
     const mail = makeMailFake();
@@ -1093,38 +1100,35 @@ describe('ClaimsService.verifyClaim — Maksim gate is scoped out of OCZEKUJE_NA
     const out = await svc.verifyClaim(
       makeAuth('admin', 'u-admin'),
       seeded.nrZgl,
-      {},
+      { mileage: 9_000 },
     );
     await flushMicrotasks();
 
     const patch = repoFake.updateWithinCalls[0]!.data;
-    // No second email on top of the manual authorization request.
-    expect(mail.enqueueMaksimConfirmationRequest).not.toHaveBeenCalled();
-    // Every gate column is left untouched by the patch...
-    expect(patch).not.toHaveProperty('maksimGateRequired');
-    expect(patch).not.toHaveProperty('maksimGateNotifiedAt');
-    expect(patch).not.toHaveProperty('maksimGateNotifiedAmount');
-    expect(patch).not.toHaveProperty('maksimGateClearedAt');
-    expect(patch).not.toHaveProperty('maksimGateClearedById');
-    // ...so the earlier clearance stamp survives the admin re-verify.
-    expect(out.maksimGateClearedAt).toBe(
-      new Date('2026-05-14T11:00:00.000Z').toISOString(),
-    );
-    // The verification stamp still lands.
+    // The moved amount re-notifies Maksim and re-stamps the dedup.
+    expect(mail.enqueueMaksimConfirmationRequest).toHaveBeenCalledTimes(1);
+    expect(patch.maksimGateRequired).toBe(true);
+    expect(patch.maksimGateNotifiedAt).toEqual(NOW);
+    expect(patch.maksimGateNotifiedAmount).toBe(900);
+    // The prior clearance is invalidated — Maksim must re-confirm the new amount.
+    expect(patch.maksimGateClearedAt).toBeNull();
+    expect(patch.maksimGateClearedById).toBeNull();
+    // Still over threshold → status is NOT changed (idempotent re-save).
+    expect(patch.status).toBeUndefined();
+    expect(out.status).toBe('OCZEKUJE_NA_AUTORYZACJE');
     expect(patch.verifiedAt).toEqual(NOW);
   });
 
-  it('19. an UNDER-threshold admin correction in the pending window does NOT wipe the gate/clearance', async () => {
+  it('19. admin re-verify in OCZEKUJE that drops UNDER threshold rolls status back to NA_WERYFIKACJI + clears the whole gate', async () => {
     const seeded = makeClaim({
       status: 'OCZEKUJE_NA_AUTORYZACJE' as ClaimStatus,
-      authorizationRequired: true,
       verifiedAt: new Date('2026-05-14T10:00:00.000Z'),
       verifiedById: 'u-first',
       maksimGateRequired: true,
       maksimGateNotifiedAt: new Date('2026-05-14T10:00:00.000Z'),
       maksimGateNotifiedAmount: 1_400,
       maksimGateClearedAt: new Date('2026-05-14T11:00:00.000Z'),
-      maksimGateClearedById: 'u-first',
+      maksimGateClearedById: 'u-clearer',
     });
     const repoFake = makeClaimsRepo([seeded]);
     // Recalc lands the dopłata under the threshold (kmGuaranteed ≈ mileage).
@@ -1141,28 +1145,35 @@ describe('ClaimsService.verifyClaim — Maksim gate is scoped out of OCZEKUJE_NA
     await flushMicrotasks();
 
     const patch = repoFake.updateWithinCalls[0]!.data;
-    // The math DID re-run (the correction is honoured)...
+    // The math re-ran and the correction is honoured.
     expect(km.calls).toHaveLength(1);
-    expect(patch.paymentEur).toBeDefined();
-    // ...but the `!overThreshold` branch never ran, so the clearance survives.
-    expect(patch).not.toHaveProperty('maksimGateRequired');
-    expect(patch).not.toHaveProperty('maksimGateClearedAt');
-    expect(out.maksimGateClearedAt).toBe(
-      new Date('2026-05-14T11:00:00.000Z').toISOString(),
-    );
+    // Under threshold → the whole gate clears...
+    expect(patch.maksimGateRequired).toBe(false);
+    expect(patch.maksimGateNotifiedAt).toBeNull();
+    expect(patch.maksimGateNotifiedAmount).toBeNull();
+    expect(patch.maksimGateClearedAt).toBeNull();
+    expect(patch.maksimGateClearedById).toBeNull();
+    // ...and the status auto-rolls back to NA_WERYFIKACJI.
+    expect(patch.status).toBe('NA_WERYFIKACJI');
+    expect(patch.statusChangedAt).toEqual(NOW);
+    expect(patch.decidedById).toBeUndefined();
+    expect(out.status).toBe('NA_WERYFIKACJI');
+    expect(out.maksimGateRequired).toBe(false);
+    // No email for an under-threshold save.
     expect(mail.enqueueMaksimConfirmationRequest).not.toHaveBeenCalled();
   });
 
-  it('20. the SAME row in NA_WERYFIKACJI still arms + re-notifies (control — no regression)', async () => {
+  it('20. idempotent re-save at the SAME over-threshold amount in OCZEKUJE → no email, no status change, clearance preserved', async () => {
     const seeded = makeClaim({
-      status: 'NA_WERYFIKACJI',
+      status: 'OCZEKUJE_NA_AUTORYZACJE' as ClaimStatus,
       verifiedAt: new Date('2026-05-14T10:00:00.000Z'),
       verifiedById: 'u-first',
       maksimGateRequired: true,
       maksimGateNotifiedAt: new Date('2026-05-14T10:00:00.000Z'),
-      maksimGateNotifiedAmount: 900,
+      // Empty-body re-save resolves to the default paymentEur 1400 = last notified.
+      maksimGateNotifiedAmount: 1_400,
       maksimGateClearedAt: new Date('2026-05-14T11:00:00.000Z'),
-      maksimGateClearedById: 'u-first',
+      maksimGateClearedById: 'u-clearer',
     });
     const repoFake = makeClaimsRepo([seeded]);
     const km = makeKmCalcService();
@@ -1170,12 +1181,28 @@ describe('ClaimsService.verifyClaim — Maksim gate is scoped out of OCZEKUJE_NA
     const mail = makeMailFake();
     const { svc } = makeService(repoFake, km.svc, prisma, mail, makeConfigFake());
 
-    await svc.verifyClaim(makeAuth('admin', 'u-admin'), seeded.nrZgl, {});
+    const out = await svc.verifyClaim(
+      makeAuth('admin', 'u-admin'),
+      seeded.nrZgl,
+      {},
+    );
     await flushMicrotasks();
 
     const patch = repoFake.updateWithinCalls[0]!.data;
-    expect(mail.enqueueMaksimConfirmationRequest).toHaveBeenCalledTimes(1);
-    expect(patch.maksimGateNotifiedAmount).toBe(1_400);
-    expect(patch.maksimGateClearedAt).toBeNull();
+    // Amount unchanged → dedup holds, no re-send.
+    expect(mail.enqueueMaksimConfirmationRequest).not.toHaveBeenCalled();
+    // Gate columns untouched (undefined ⇒ column keeps its prior value)...
+    expect(patch.maksimGateNotifiedAt).toBeUndefined();
+    expect(patch.maksimGateNotifiedAmount).toBeUndefined();
+    expect(patch.maksimGateClearedAt).toBeUndefined();
+    expect(patch.maksimGateClearedById).toBeUndefined();
+    // ...and the prior clearance survives.
+    expect(out.maksimGateClearedAt).toBe(
+      new Date('2026-05-14T11:00:00.000Z').toISOString(),
+    );
+    // Still over threshold in the pending window → status unchanged.
+    expect(patch.status).toBeUndefined();
+    expect(out.status).toBe('OCZEKUJE_NA_AUTORYZACJE');
+    expect(patch.verifiedAt).toEqual(NOW);
   });
 });

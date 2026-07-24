@@ -66,16 +66,9 @@ export interface ClaimRow {
   orderNumber: string | null;
   orderDate: Date | null;
 
-  authorizationRequired: boolean;
-  authorizationDescription: string | null;
-  authorizationToken: string | null;
-  authorizationDecidedAt: Date | null;
-
   // amountRequested is NOT NULL since phase3_blocks_audit_revert.
   amountRequested: number;
   amountApproved: number | null;
-  margin: number | null;
-  amountMaximum: number | null;
 
   reklamacjaSubmitted: boolean;
   reklamacjaText: string | null;
@@ -99,11 +92,9 @@ export interface ClaimRow {
   /** Currently applied hours-adjustment — verifier PATCH mutates only this. */
   hoursAdjustedValue: number | null;
 
-  authScreenshotUrl: string | null;
-
   /**
-   * Maksim authorization gate (ADDITIVE gate on `NA_WERYFIKACJI`). Armed by
-   * `verifyClaim` when the final dopłata STRICTLY exceeds
+   * Maksim authorization gate. Armed by `verifyClaim` when the final dopłata
+   * STRICTLY exceeds
    * `getAuthThreshold(drivenDays)`; blocks the accept/reject decision until the
    * confirmation screenshot lands. All four reset in lockstep with `verifiedAt`
    * via `_resetVerificationState` whenever the verification is invalidated.
@@ -162,9 +153,9 @@ export interface ClaimRow {
    * embedded so the verifier-side in-transit gate (`_assertDelegationReturned`)
    * and the pracownik ClaimModal read it without a second `GET /delegations/:id`
    * (role-gated). `null` when there is no linked outing. The service blocks
-   * `verify` / `requestAuthorization` / `update` (accept/reject) while this is
-   * `'w_trasie'` (422 `CLAIM_DELEGATION_IN_TRANSIT`); a `'zjechal'` outing (or a
-   * claim with no `delegationId`) passes through.
+   * `verify` / `update` (accept/reject) while this is `'w_trasie'` (422
+   * `CLAIM_DELEGATION_IN_TRANSIT`); a `'zjechal'` outing (or a claim with no
+   * `delegationId`) passes through.
    */
   delegationStatus: DelegationStatus | null;
   /**
@@ -354,28 +345,12 @@ export interface UpdateClaimData {
   orderNumber?: string | null;
   orderDate?: Date | null;
   amountApproved?: number | null;
-  amountMaximum?: number | null;
-  margin?: number | null;
   /**
    * Phase 7 REWORK (2026-06-20 #4) — re-derived on the delegation auto-recalc
    * (mirrors `paymentEur`, same derivation as submit). Never written by the
    * verifier PATCH (which leaves it untouched).
    */
   amountRequested?: number;
-
-  // ── authorization request (Phase 4 — set when targeting OCZEKUJE_*) ──
-  authorizationRequired?: boolean;
-  authorizationDescription?: string | null;
-  /**
-   * Maksim-handshake token (UUID v4). Minted by
-   * `ClaimsService.requestAuthorization` on every fresh request — a future
-   * Maksim-approve endpoint will validate clicks against this value. The
-   * column is nullable in the schema; passing `null` here clears it.
-   *
-   * Phase 4.2 — currently written ONLY by the request-authorization path;
-   * the verifier PATCH flow leaves it `undefined` (untouched).
-   */
-  authorizationToken?: string | null;
 }
 
 /**
@@ -616,12 +591,7 @@ export class ClaimsRepository {
     set('orderNumber');
     set('orderDate');
     set('amountApproved');
-    set('amountMaximum');
-    set('margin');
     set('amountRequested');
-    set('authorizationRequired');
-    set('authorizationDescription');
-    set('authorizationToken');
     if (data.breakdown !== undefined) {
       payload.breakdown = data.breakdown as unknown as object;
     }
@@ -710,14 +680,8 @@ export class ClaimsRepository {
       comment: row.comment,
       orderNumber: row.orderNumber,
       orderDate: row.orderDate,
-      authorizationRequired: row.authorizationRequired,
-      authorizationDescription: row.authorizationDescription,
-      authorizationToken: row.authorizationToken,
-      authorizationDecidedAt: row.authorizationDecidedAt,
       amountRequested: decimalToNumber(row.amountRequested) ?? 0,
       amountApproved: decimalToNumber(row.amountApproved),
-      margin: decimalToNumber(row.margin),
-      amountMaximum: decimalToNumber(row.amountMaximum),
       reklamacjaSubmitted: row.reklamacjaSubmitted,
       reklamacjaText: row.reklamacjaText,
       reklamacjaResponse: row.reklamacjaResponse,
@@ -737,7 +701,6 @@ export class ClaimsRepository {
       // `decimalToNumber` preserves null and round-trips the numeric scale.
       origHoursAdjusted: decimalToNumber(row.origHoursAdjusted),
       hoursAdjustedValue: decimalToNumber(row.hoursAdjustedValue),
-      authScreenshotUrl: row.authScreenshotUrl,
       maksimGateRequired: row.maksimGateRequired,
       maksimGateNotifiedAt: row.maksimGateNotifiedAt,
       // Amount-aware dedup stamp — same Decimal(12,2) → number round-trip as
@@ -806,14 +769,8 @@ interface ClaimPrismaShape {
   comment: string | null;
   orderNumber: string | null;
   orderDate: Date | null;
-  authorizationRequired: boolean;
-  authorizationDescription: string | null;
-  authorizationToken: string | null;
-  authorizationDecidedAt: Date | null;
   amountRequested: { toNumber(): number } | number | null;
   amountApproved: { toNumber(): number } | number | null;
-  margin: { toNumber(): number } | number | null;
-  amountMaximum: { toNumber(): number } | number | null;
   reklamacjaSubmitted: boolean;
   reklamacjaText: string | null;
   reklamacjaResponse: string | null;
@@ -827,7 +784,6 @@ interface ClaimPrismaShape {
   origTimeTo: string | null;
   origHoursAdjusted: { toNumber(): number } | number | null;
   hoursAdjustedValue: { toNumber(): number } | number | null;
-  authScreenshotUrl: string | null;
   maksimGateRequired: boolean;
   maksimGateNotifiedAt: Date | null;
   maksimGateNotifiedAmount: { toNumber(): number } | number | null;

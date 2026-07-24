@@ -3,9 +3,9 @@
  *
  * Extracted so the template fleet (account-*, login-code, carrier-decision,
  * internal-decision, carrier-submitted, daily-reminder, weekly-report) stays
- * DRY and visually consistent. The three pre-Phase-9 templates
- * (authorization-request, verification-digest, password-reset) inline their
- * own copies and are intentionally left untouched.
+ * DRY and visually consistent. The two pre-Phase-9 templates
+ * (verification-digest, password-reset) inline their own copies and are
+ * intentionally left untouched.
  *
  * Brand color (#dc2626) from docs/14-design-system.md §"MAGTRANS RED".
  * No images / no remote assets — keeps Outlook + Gmail rendering predictable.

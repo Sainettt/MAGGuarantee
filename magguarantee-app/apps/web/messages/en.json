@@ -1127,15 +1127,14 @@
           "decyzjaSection": "Decision",
           "decyzjaSubtitle": "Final step — choose what happens to this claim.",
           "secondaryHistory": "History",
-          "secondaryAuthorization": "Authorization",
           "decisionRequired": "Pick a decision to save the claim.",
           "terminalState": "The claim is in a terminal state — no decisions available.",
           "guaranteeMetHint": "Guarantee met — the claim can only be rejected.",
-          "progExceededHint": "Payout will exceed the authorization threshold ({prog} for {days, plural, one {# day} other {# days}} on the road) — once you save the verification the claim will require Maksim's authorization.",
+          "progExceededHint": "Payout will exceed the authorization threshold ({prog} for {days, plural, one {# day} other {# days}} on the road) — once you save the verification the claim will automatically move to \"Awaiting authorization\".",
           "verifiedBadge": "Verified {date} by {name}"
         },
         "maksimGate": {
-          "bannerTitle": "Maksim authorization required",
+          "bannerTitle": "Awaiting authorization",
           "bannerBody": "The claim exceeds the authorization threshold — a confirmation request was sent to Maksim. Upload the confirmation screenshot to unblock the decision.",
           "notifiedAt": "Maksim notified: {date}",
           "notifiedPending": "The notification to Maksim is being sent…",
@@ -1150,7 +1149,7 @@
           "openConfirmation": "Open confirmation",
           "downloading": "Downloading…",
           "downloadError": "Could not download the confirmation",
-          "decisionBlockedHint": "The decision is blocked until Maksim's authorization confirmation is uploaded.",
+          "decisionBlockedHint": "First upload Maksim's authorization confirmation.",
           "decisionBlockedToast": "Upload Maksim's authorization confirmation to take a decision."
         },
         "inTransitGate": {
@@ -1167,8 +1166,7 @@
         },
         "tabs": {
           "edit": "Edit",
-          "history": "History",
-          "authorization": "Authorization"
+          "history": "History"
         },
         "recalc": {
           "loading": "Recalculating…",
@@ -1193,17 +1191,7 @@
           "amountApproved": "Amount approved (EUR)",
           "amountApprovedAuto": "calculated automatically",
           "amountApprovedLocked": "Locked field — calculated automatically from the preview",
-          "amountApprovedLockedMaksim": "Locked — Maksim's decision exists ({amount}).",
-          "amountApprovedLockedMaksimHint": "The approved amount follows Maksim's decision. Only an administrator can change it.",
-          "maksimAmountRef": "Maksim's decision: <v>{amount}</v>",
-          "maksimOverrideTitle": "Maksim's decision overridden",
-          "maksimOverrideBadge": "Overridden",
-          "maksimOverrideConsequence": "The carrier will receive the approved amount.",
-          "maksimOverrideCommentHint": "Consider describing the reason for overriding Maksim's amount.",
-          "amountMaximum": "Maximum amount (EUR)",
           "doplata": "Guarantee payout",
-          "margin": "Margin",
-          "authorizationDescription": "Authorization description",
           "comment": "Comment",
           "commentRejected": "Rejection reason",
           "commentReklamacja": "Decision rationale",
@@ -1239,89 +1227,12 @@
           "reklamacjaText": "Reclamation text",
           "reklamacjaResponse": "Reclamation response"
         },
-        "auth": {
-          "notRequired": "This claim does not require Maksim's authorization.",
-          "requestTitle": "Request authorization",
-          "requestHelp": "Sends the claim to Maksim for authorization. The claim will move to status \"Awaiting authorization\".",
-          "margin": "Margin (EUR)",
-          "description": "Description for Maksim",
-          "submitRequest": "Send for authorization",
-          "submitting": "Sending…",
-          "savedToast": "Claim sent for authorization",
-          "pendingTitle": "Claim awaiting authorization",
-          "pendingDescription": "Description sent to Maksim",
-          "amountMaximumLabel": "Maksim amount (EUR)",
-          "amountMaximumHelp": "The amount from Maksim's email reply. Prefills the approved amount at acceptance. Save again to correct it.",
-          "amountMaximumSave": "Save",
-          "amountMaximumSaved": "Maksim amount saved",
-          "kwotaMaksimaLabel": "Maksim amount (EUR)",
-          "kwotaMaksimaHelp": "Will be set after Maksim replies — you'll enter it once the claim moves to \"Awaiting authorization\".",
-          "commentLabel": "Comment",
-          "commentPlaceholder": "Reason for authorization request…",
-          "requestButton": "Require authorization",
-          "emailSent": "Email sent to Maksim",
-          "alreadyPending": "Claim is already awaiting Maksim's authorization.",
-          "progLine": "Authorization threshold for this claim: {prog}."
-        },
         "targetStatus": {
           "ZAAKCEPTOWANO": "Accept",
           "ODRZUCONO": "Reject",
-          "OCZEKUJE_NA_AUTORYZACJE": "Request authorization",
           "REKLAMACJA_ZAAKCEPTOWANO": "Accept reclamation",
           "REKLAMACJA_ODRZUCONO": "Reject reclamation"
         }
-      }
-    },
-    "claimDetail": {
-      "loadingTitle": "Loading claim…",
-      "errorTitle": "Could not load the claim",
-      "errorMessage": "Please try again or close the window.",
-      "retry": "Try again",
-      "sections": {
-        "basics": "Basic data",
-        "calc": "Calculations (km-calc)",
-        "breakdown": "Monthly breakdown",
-        "decision": "Decision",
-        "authorization": "Authorization",
-        "reklamacjaHistory": "Reclamation history",
-        "attachments": "Attachments",
-        "comment": "Comment"
-      },
-      "fields": {
-        "carrier": "Carrier",
-        "vehicle": "Vehicle",
-        "dateStart": "Period from",
-        "dateEnd": "Period to",
-        "timeFrom": "Time from",
-        "timeTo": "Time to",
-        "drivenDays": "Driven days",
-        "mileage": "Mileage",
-        "kmPerDay": "Km/day",
-        "kmGuaranteed": "Guaranteed km",
-        "kmDifference": "Km difference",
-        "ratePerKmEffective": "Rate €/km",
-        "paymentEur": "Guarantee payout",
-        "decidedBy": "Decided by",
-        "statusChangedAt": "Decision date",
-        "orderNumber": "Order number",
-        "orderDate": "Order date",
-        "amountRequested": "Amount requested",
-        "amountApproved": "Amount approved",
-        "amountMaximum": "Maximum amount",
-        "margin": "Margin",
-        "authorizationDescription": "Authorization description",
-        "authorizationDecidedAt": "Authorization decided at",
-        "statusBeforeReklamacja": "Status before reclamation",
-        "reklamacjaText": "Reclamation text",
-        "reklamacjaResponse": "Reclamation response",
-        "reklamacjaAmount": "Reclamation amount",
-        "origDateStart": "Period from (original / current)",
-        "origDateEnd": "Period to (original / current)",
-        "origMileage": "Mileage (original / current)",
-        "origHoursAdjusted": "Hours adjustment (original / current)"
-      },
-      "attachments": {
-        "open": "Open attachment"
       }
     }
   },
@@ -1711,8 +1622,7 @@
         "ZAAKCEPTOWANO": "Accepted",
         "ODRZUCONO": "Rejected",
         "REKLAMACJA": "Reclamation",
-        "OCZEKUJE_NA_AUTORYZACJE": "Awaiting authorization",
-        "AUTORYZACJA_KWOTA_MAKSIMA": "Authorization — max amount"
+        "OCZEKUJE_NA_AUTORYZACJE": "Awaiting authorization"
       },
       "wyjazdPicker": {
         "section": "Trip",
