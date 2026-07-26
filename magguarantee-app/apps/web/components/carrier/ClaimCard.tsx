@@ -11,6 +11,11 @@ import Link from 'next/link';
 import type { ClaimListItem } from '@magguarantee/shared';
 
 import { StatusBadge } from '@/components/carrier/StatusBadge';
+import {
+  headlineAmount,
+  MONEY_TONE_TEXT,
+  moneyTone,
+} from '@/lib/claims/money';
 import { cn } from '@/lib/utils';
 
 function formatDate(iso: string): string {
@@ -49,8 +54,8 @@ export function ClaimCard({ claim }: ClaimCardProps) {
   // the requested amount instead of the granted one whenever the verifier
   // corrected it. The label under the value says which of the two it is, so
   // the number is never ambiguous.
-  const decided = claim.amountApproved != null;
-  const amount = decided ? claim.amountApproved : claim.paymentEur;
+  const { value: amount, kind } = headlineAmount(claim);
+  const tone = moneyTone(claim.status);
 
   return (
     <Link
@@ -69,14 +74,14 @@ export function ClaimCard({ claim }: ClaimCardProps) {
           <span
             className={cn(
               'text-xl font-extrabold tabular-nums whitespace-nowrap',
-              decided ? 'text-brand' : 'text-text',
+              MONEY_TONE_TEXT[tone],
             )}
           >
             {formatEur(amount)}{' '}
             <span className="text-sm font-bold text-text-sub">EUR</span>
           </span>
           <span className="mt-1 text-[10px] font-bold uppercase tracking-wider text-text-sub">
-            {decided
+            {kind === 'approved'
               ? t('detail.moneyLabelApproved')
               : t('detail.moneyLabelCalc')}
           </span>

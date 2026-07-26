@@ -150,7 +150,6 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     comment: null,
     orderNumber: null,
     orderDate: null,
-    amountRequested: 1_500,
     amountApproved: null,
     reklamacjaSubmitted: false,
     reklamacjaText: null,
@@ -241,9 +240,6 @@ function makeClaimsRepo(seed: ClaimRow[] = []): ClaimsRepoFake {
             : {}),
           ...(data.paymentEur !== undefined
             ? { paymentEur: data.paymentEur }
-            : {}),
-          ...(data.amountRequested !== undefined
-            ? { amountRequested: data.amountRequested }
             : {}),
           ...(data.drivenDays !== undefined
             ? { drivenDays: data.drivenDays }
@@ -513,10 +509,10 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
     const updated = repoFake.rows.get(seeded.nrZgl)!;
     expect(updated.kmGuaranteed).toBe(seeded.kmGuaranteed);
     expect(updated.paymentEur).toBe(seeded.paymentEur);
-    // No recalc ⇒ `amountRequested` is NOT mirrored (the mirror is gated on the
-    // `if (recalc)` block); the seeded value survives untouched.
-    expect(updated.amountRequested).toBe(seeded.amountRequested);
-    expect(repoFake.updateWithinCalls[0]!.data.amountRequested).toBeUndefined();
+    // No recalc ⇒ no km-calc column is written at all (the whole block is gated
+    // on `if (recalc)`); the seeded values survive untouched.
+    expect(repoFake.updateWithinCalls[0]!.data.paymentEur).toBeUndefined();
+    expect(repoFake.updateWithinCalls[0]!.data.kmGuaranteed).toBeUndefined();
   });
 
   it('5. ZAAKCEPTOWANO with corrected mileage triggers km-calc recalc', async () => {
@@ -550,13 +546,11 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
     // kmDifference = 9_720 - 8_500 = 1_220 → paymentEur = 1_220 * 0.5 = 610
     expect(updated.paymentEur).toBe(610);
     expect(updated.mileage).toBe(8_500);
-    // INVARIANT (Fix): whenever the math re-runs, `amountRequested` mirrors the
-    // recalculated `paymentEur` — same derivation as submit / delegation
-    // auto-recalc. Seeded value was 1_500; after the verifier km edit both the
-    // patch and the persisted row must read 610, so the stale amount never
-    // leaks into the kwota-Maksima email or the reklamacja amount cap.
-    expect(updated.amountRequested).toBe(610);
-    expect(repoFake.updateWithinCalls[0]!.data.amountRequested).toBe(610);
+    // INVARIANT: whenever the math re-runs, the recalculated `paymentEur` is
+    // persisted, so a stale amount never leaks into the kwota-Maksima email or
+    // the reklamacja amount cap. (Before 2026-07-26 this also had to be mirrored
+    // into a second `amountRequested` column; that column is gone.)
+    expect(repoFake.updateWithinCalls[0]!.data.paymentEur).toBe(610);
   });
 
   it('5b. correcting dateStart/dateEnd sets periodAdjustedByVerifier=true (auto-recalc boundary)', async () => {
@@ -1392,7 +1386,6 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
             comment: data.comment,
             orderNumber: data.orderNumber,
             orderDate: data.orderDate,
-            amountRequested: data.amountRequested,
             origHoursAdjusted: data.origHoursAdjusted,
             hoursAdjustedValue: data.hoursAdjustedValue,
             origDateStart: data.origDateStart,
@@ -1514,8 +1507,8 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
     // The fixed clock (NOW = 2026-05-15) puts the claim period safely in the
     // past — well within the 7-day "max days after unloading" window from
     // 2026-05-14, so the date-range gates pass.
-    // NB: `amountRequested` / `hoursAdjusted` are NOT carrier-submit fields
-    // anymore — `amountRequested` is derived server-side from km-calc
+    // NB: the requested amount / `hoursAdjusted` are NOT carrier-submit fields
+    // anymore — the amount is derived server-side from km-calc
     // paymentEur, `hoursAdjusted` is verifier-only (PATCH path).
     const out = await svc.submit(makeAuth('przewoznik', 'u-carrier-1'), {
       delegationId: 'deleg-1',
@@ -1588,12 +1581,17 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
     } as unknown as AuditWriter;
 
     // ── (a) snapshot already present — `??` short-circuits.
+    // ODRZUCONO, not ZAAKCEPTOWANO: the amount cap is
+    // `requested − paid` with `paid = paymentEur` only when accepted, and since
+    // the `amountRequested` mirror column was dropped `requested` IS
+    // `paymentEur` — so an accepted claim caps at 0 and the 50 EUR below would
+    // be rejected for a reason this test does not care about. Rejected claims
+    // have `paid = 0`, so the cap is the full 1_400.
     const claimA = makeClaim({
-      status: 'ZAAKCEPTOWANO',
+      status: 'ODRZUCONO',
       statusChangedAt: NOW, // 0h passed, well inside the 48h window
       reklamacjaSubmitted: false,
       paymentEur: 1_400,
-      amountRequested: 1_500,
       origHoursAdjusted: 5.5, // carrier's immutable snapshot
       hoursAdjustedValue: 8, // verifier later corrected to 8
     });
@@ -1620,11 +1618,10 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
 
     // ── (b) snapshot missing — fall through to `hoursAdjustedValue`.
     const claimB = makeClaim({
-      status: 'ZAAKCEPTOWANO',
+      status: 'ODRZUCONO', // same cap reasoning as claimA above
       statusChangedAt: NOW,
       reklamacjaSubmitted: false,
       paymentEur: 1_400,
-      amountRequested: 1_500,
       origHoursAdjusted: null, // legacy / fix-up state
       hoursAdjustedValue: 3,
     });

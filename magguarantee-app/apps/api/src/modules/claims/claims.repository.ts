@@ -66,8 +66,6 @@ export interface ClaimRow {
   orderNumber: string | null;
   orderDate: Date | null;
 
-  // amountRequested is NOT NULL since phase3_blocks_audit_revert.
-  amountRequested: number;
   amountApproved: number | null;
 
   reklamacjaSubmitted: boolean;
@@ -215,7 +213,6 @@ export interface CreateClaimData {
   /** Nullable per Revert #1 — only set on transition to ZAAKCEPTOWANO. */
   orderNumber: string | null;
   orderDate: Date | null;
-  amountRequested: number;
   /**
    * Hours-adjustment values are written EQUAL at submit. `origHoursAdjusted`
    * is the immutable carrier snapshot; `hoursAdjustedValue` is the value
@@ -345,12 +342,6 @@ export interface UpdateClaimData {
   orderNumber?: string | null;
   orderDate?: Date | null;
   amountApproved?: number | null;
-  /**
-   * Phase 7 REWORK (2026-06-20 #4) — re-derived on the delegation auto-recalc
-   * (mirrors `paymentEur`, same derivation as submit). Never written by the
-   * verifier PATCH (which leaves it untouched).
-   */
-  amountRequested?: number;
 }
 
 /**
@@ -487,7 +478,6 @@ export class ClaimsRepository {
         comment: data.comment,
         orderNumber: data.orderNumber,
         orderDate: data.orderDate,
-        amountRequested: data.amountRequested,
         // Both columns receive the same numeric value at submit (Prisma coerces
         // `number` → `Decimal(5,2)`). `origHoursAdjusted` will not be touched
         // again; `hoursAdjustedValue` is what the verifier may later override.
@@ -591,7 +581,6 @@ export class ClaimsRepository {
     set('orderNumber');
     set('orderDate');
     set('amountApproved');
-    set('amountRequested');
     if (data.breakdown !== undefined) {
       payload.breakdown = data.breakdown as unknown as object;
     }
@@ -680,7 +669,6 @@ export class ClaimsRepository {
       comment: row.comment,
       orderNumber: row.orderNumber,
       orderDate: row.orderDate,
-      amountRequested: decimalToNumber(row.amountRequested) ?? 0,
       amountApproved: decimalToNumber(row.amountApproved),
       reklamacjaSubmitted: row.reklamacjaSubmitted,
       reklamacjaText: row.reklamacjaText,
@@ -769,7 +757,6 @@ interface ClaimPrismaShape {
   comment: string | null;
   orderNumber: string | null;
   orderDate: Date | null;
-  amountRequested: { toNumber(): number } | number | null;
   amountApproved: { toNumber(): number } | number | null;
   reklamacjaSubmitted: boolean;
   reklamacjaText: string | null;

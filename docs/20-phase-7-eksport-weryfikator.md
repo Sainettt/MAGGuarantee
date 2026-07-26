@@ -53,7 +53,7 @@
 
 Перевозчик подал на `w_trasie` (`dateEnd = plannedReturnAt`), позже weryfikator ставит `zjechal` с другим `actualReturnAt`. `returned()` в той же транзакции пере-считывает связанный wniosek — **с жёсткими границами**:
 - **Применяем ТОЛЬКО если** `claim.status === NA_WERYFIKACJI` (свежий, в очереди на верификацию) **И** период не правил человек (`periodAdjustedByVerifier = false`). ⚠️ `OCZEKUJE_NA_AUTORYZACJE` **ЗАМОРОЖЕН** (pracownik уже отправил конкретную сумму Maksimу — нельзя двигать число под авторизацией; уточнено 2026-06-22). Любое решающее действие pracownik (отправка на авторизацию / решение / правка периода) → числа заморожены.
-- **Меняем:** `dateEnd = actualReturnAt` → `mileage` пере-предзаполняем `Σ VehicleDailyKm` за новый период (если нет ручного override) → km-calc заново (`kmGuaranteed/kmDifference/paymentEur/amountRequested/breakdown`). **`timeTo` НЕ трогаем** (зона pracownik). `origDateEnd/origMileage` снапшоты **сохраняем**.
+- **Меняем:** `dateEnd = actualReturnAt` → `mileage` пере-предзаполняем `Σ VehicleDailyKm` за новый период (если нет ручного override) → km-calc заново (`kmGuaranteed/kmDifference/paymentEur/breakdown`). **`timeTo` НЕ трогаем** (зона pracownik). `origDateEnd/origMileage` снапшоты **сохраняем**.
 - **НЕ применяем** (решён ИЛИ правлен человеком): период не трогаем, флаг + audit `claim.autoRecalcSkipped`; UI-бейдж «требует внимания: фактическая дата съезда отличается».
 - Аудит: всегда `delegation.markReturned`; при пересчёте — `claim.autoRecalc` (before/after). **Без email** (только аудит + флаг в UI).
 

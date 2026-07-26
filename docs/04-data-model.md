@@ -262,7 +262,7 @@
 | **Авторизация — автоматический Maksim-gate** (для крупных сумм; порог `getAuthThreshold(drivenDays)` — см. [19-known-quirks.md](19-known-quirks.md#getAuthThreshold)): | |
 | `maksimGateRequired`, `maksimGateNotifiedAt`, `maksimGateNotifiedAmount` | гейт armed при `paymentEur > próg` на zapisie weryfikacji → **авто-переход** в `OCZEKUJE_NA_AUTORYZACJE` + email Maksim'у (dedup по сумме) |
 | `maksimGateClearedAt`, `maksimGateClearedById` | снятие гейта загрузкой скриншота подтверждения (`ClaimAttachment` категории `AUTORYZACJA_MAKSIMA`) — разблокирует решение |
-| `amountRequested`, `amountApproved` | запрошенная сумма (зеркало `paymentEur`) и сумма, утверждённая при акцепте |
+| `origPaymentEur`, `paymentEur`, `amountApproved` | **цепочка из трёх сумм, читается только вместе:** `origPaymentEur` — что перевозчик запросил изначально (заморожено при submit, `null` у строк до миграции — показывать прочерк, НЕ подставлять текущее); `paymentEur` — km-calc ПОСЛЕ корректировок верификатора (переписывается каждой правкой и авто-пересчётом выезда); `amountApproved` — что реально платим (пишется только при переходе в `ZAAKCEPTOWANO`). Поле `amountRequested` удалено 2026-07-26 (`drop_claim_amount_requested`) — оно было побайтовым зеркалом `paymentEur`, но подписывалось в UI как «Wnioskowana» и выдавало пост-верификационную сумму за запрос перевозчика |
 | **Рекламация** (зеркало для отката): | |
 | `reklamacjaSubmitted`, `reklamacjaText`, `reklamacjaResponse`, `reklamacjaAmount` | |
 | `statusBeforeReklamacja` | предыдущий статус до перехода в `REKLAMACJA` (для rollback) |

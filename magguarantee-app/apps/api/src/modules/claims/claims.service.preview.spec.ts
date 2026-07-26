@@ -106,7 +106,6 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     comment: null,
     orderNumber: null,
     orderDate: null,
-    amountRequested: 1_500,
     amountApproved: null,
     reklamacjaSubmitted: false,
     reklamacjaText: null,

@@ -2,7 +2,7 @@
 //
 // The pracownik persists corrections BEFORE any decision; the checkpoint stamps
 // `verifiedAt`/`verifiedById` and (when the body carries a math-affecting
-// correction) re-runs km-calc + mirrors `amountRequested`. An EMPTY body is
+// correction) re-runs km-calc. An EMPTY body is
 // legal — "confirmed as-is" (stamp only, no recalc). Status is NOT changed
 // (verification is a flag, not a status). Repeatable (re-verify overwrites).
 //
@@ -126,7 +126,6 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     comment: null,
     orderNumber: null,
     orderDate: null,
-    amountRequested: 1_400,
     amountApproved: null,
     reklamacjaSubmitted: false,
     reklamacjaText: null,
@@ -218,9 +217,6 @@ function makeClaimsRepo(seed: ClaimRow[] = []): ClaimsRepoFake {
             : {}),
           ...(data.ratePerKmEffective !== undefined
             ? { ratePerKmEffective: data.ratePerKmEffective }
-            : {}),
-          ...(data.amountRequested !== undefined
-            ? { amountRequested: data.amountRequested }
             : {}),
           ...(data.breakdown !== undefined
             ? { breakdown: data.breakdown }
@@ -366,7 +362,7 @@ describe('ClaimsService.verifyClaim — verification checkpoint', () => {
   it('1. empty body stamps verifiedAt/ById WITHOUT running km-calc (confirmed as-is, under threshold → status unchanged)', async () => {
     // Under-threshold dopłata (300 < 500 for 20 days) → no auto-transition, so
     // the status genuinely stays NA_WERYFIKACJI.
-    const seeded = makeClaim({ paymentEur: 300, amountRequested: 300 });
+    const seeded = makeClaim({ paymentEur: 300 });
     const repoFake = makeClaimsRepo([seeded]);
     const km = makeKmCalcService();
     const prisma = makePrismaService();
@@ -385,7 +381,6 @@ describe('ClaimsService.verifyClaim — verification checkpoint', () => {
     // No calc columns touched.
     expect(patch.kmGuaranteed).toBeUndefined();
     expect(patch.paymentEur).toBeUndefined();
-    expect(patch.amountRequested).toBeUndefined();
     // Under threshold → no status transition.
     expect(patch.status).toBeUndefined();
     expect(out.status).toBe('NA_WERYFIKACJI');
@@ -393,7 +388,7 @@ describe('ClaimsService.verifyClaim — verification checkpoint', () => {
     expect(out.verifiedById).toBe('u-actor');
   });
 
-  it('2. corrections trigger recalc + amountRequested mirror + verified stamp', async () => {
+  it('2. corrections trigger recalc + verified stamp', async () => {
     const seeded = makeClaim();
     const repoFake = makeClaimsRepo([seeded]);
     // Recalc returns different numbers so we can prove the engine ran.
@@ -417,13 +412,10 @@ describe('ClaimsService.verifyClaim — verification checkpoint', () => {
     // kmDifference = 9_720 - 8_500 = 1_220 → paymentEur = 1_220 * 0.5 = 610.
     expect(patch.kmDifference).toBe(1_220);
     expect(patch.paymentEur).toBe(610);
-    // amountRequested mirrors the recalculated paymentEur.
-    expect(patch.amountRequested).toBe(610);
     expect(patch.verifiedAt).toEqual(NOW);
     expect(patch.verifiedById).toBe('u-actor');
     expect(out.mileage).toBe(8_500);
     expect(out.paymentEur).toBe(610);
-    expect(out.amountRequested).toBe(610);
   });
 
   it('2b. date edit sets periodAdjustedByVerifier=true + autoRecalcState=none', async () => {
@@ -922,7 +914,7 @@ describe('ClaimsService.verifyClaim — status × role matrix', () => {
   // ── cell 1/4: pracownik × NA_WERYFIKACJI → allowed (under threshold) ──
   it('13. pracownik × NA_WERYFIKACJI → allowed (under threshold → status unchanged)', async () => {
     // Under-threshold dopłata → no auto-transition, status stays NA_WERYFIKACJI.
-    const seeded = makeClaim({ paymentEur: 300, amountRequested: 300 });
+    const seeded = makeClaim({ paymentEur: 300 });
     const repoFake = makeClaimsRepo([seeded]);
     const km = makeKmCalcService();
     const prisma = makePrismaService();
@@ -942,7 +934,7 @@ describe('ClaimsService.verifyClaim — status × role matrix', () => {
 
   // ── cell 2/4: admin × NA_WERYFIKACJI → allowed (under threshold) ──
   it('14. admin × NA_WERYFIKACJI → allowed (under threshold → status unchanged)', async () => {
-    const seeded = makeClaim({ paymentEur: 300, amountRequested: 300 });
+    const seeded = makeClaim({ paymentEur: 300 });
     const repoFake = makeClaimsRepo([seeded]);
     const km = makeKmCalcService();
     const prisma = makePrismaService();

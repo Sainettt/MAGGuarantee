@@ -86,11 +86,21 @@ export function ReklamacjaSheet({ open, claim, onClose }: Props) {
     return () => clearInterval(id);
   }, [deadline]);
 
+  // Mirrors the SERVER cap in `ClaimsService.submitReklamacja` exactly —
+  // `kwotaWnioskowana − kwotaWyplacona`, where the paid part counts only for an
+  // accepted claim. Previously this used `amountRequested − amountApproved`,
+  // which was a different formula from the server's and so could promise the
+  // carrier a ceiling the API then refused. `amountRequested` is gone (it only
+  // ever mirrored `paymentEur`); reading `paymentEur` here keeps client and
+  // server on one expression.
+  //
+  // Consequence, same as server-side: an accepted claim yields 0 → `null` → no
+  // hint is rendered at all. See the KNOWN LIMITATION note on the service.
   const maxAmount = useMemo(() => {
     if (!claim) return null;
-    const requested = claim.amountRequested ?? 0;
-    const approved = claim.amountApproved ?? 0;
-    const diff = requested - approved;
+    const requested = claim.paymentEur ?? 0;
+    const paid = claim.status === 'ZAAKCEPTOWANO' ? (claim.paymentEur ?? 0) : 0;
+    const diff = requested - paid;
     return diff > 0 ? diff : null;
   }, [claim]);
 

@@ -554,7 +554,10 @@ model Claim {
   // are the sole authorization path — the manual authorization*/margin/amountMaximum
   // fields were removed 2026-07-24 (migration remove_manual_authorization_flow).
 
-  amountRequested Decimal  @db.Decimal(12, 2)       // STRICT — carrier supplies at submit
+  // amountRequested REMOVED 2026-07-26 (migration drop_claim_amount_requested) —
+  // it mirrored paymentEur on every write path, so it carried no information.
+  // The requested amount is origPaymentEur (below); the post-verification figure
+  // is paymentEur.
   amountApproved  Decimal? @db.Decimal(12, 2)       // status-conditional via CHECK
 
   // reklamacja "frozen mirror" — see docs/19-known-quirks.md (#reklamacja-mirror)
@@ -573,8 +576,9 @@ model Claim {
   // Immutable submit-time payment snapshot (migration
   // 20260706120000_claim_verification_checkpoint). Write-once alongside the
   // other orig* fields; never mutated by the verifier PATCH / checkpoint. Feeds
-  // the authorization-email «Korekty weryfikatora» diff (orig dopłata vs
-  // applied amountRequested).
+  // the authorization-email «Korekty weryfikatora» diff (orig dopłata vs the
+  // currently-applied paymentEur), the pracownik «Wnioskowana» column and the
+  // carrier's «Wnioskowano» line.
   origPaymentEur         Decimal?     @db.Decimal(12, 2)
   // GodzinaOd/GodzinaDo — immutable submit snapshots (HH:MM legacy string) of
   // the derived time-window (timeFrom/timeTo = HH:mm of the delegation's actual
@@ -896,7 +900,6 @@ derived hours.
 |---|---|---|
 | `nrZgl`, `carrierId`, `vehiclePlateSnapshot`, `dateStart`, `dateEnd`, `timeFrom`, `timeTo` | Strict everywhere | |
 | `drivenDays`, `mileage`, `kmPerDay`, `kmGuaranteed`, `kmDifference`, `paymentEur`, `ratePerKmEffective` | Strict everywhere | Derived by server at submit |
-| `amountRequested` | Strict everywhere | Carrier always supplies at submit |
 | `orderNumber`, `orderDate`, `amountApproved` | DB nullable + CHECK `claim_accepted_payment_complete` | Required when `status='ZAAKCEPTOWANO'` |
 | `decidedById`, `comment`, `breakdown`, reklamacja mirror fields | Optional everywhere | |
 
@@ -946,7 +949,7 @@ derived hours.
 | Y | Opiekun (имя) | → derived из carrier.opiekun | — |
 | AE-AH | Autoryzacja/OpisAutoryzacji/TokenAutoryzacji/DataAutoryzacji | removed 2026-07-24 — manual authorization flow retired (migration `remove_manual_authorization_flow`); not carried over. The auto Maksim gate → status `OCZEKUJE_NA_AUTORYZACJE` replaces it. |
 | AI | DataZmianyStatusu | `statusChangedAt` | DateTime |
-| AJ | KwotaWnioskowana | `amountRequested` | Decimal |
+| AJ | KwotaWnioskowana | — | dropped 2026-07-26 (`drop_claim_amount_requested`). In GAS this was a MANUAL carrier entry independent of Doplata; we removed the manual override, which made the column an exact mirror of `paymentEur`. The requested amount now lives in `origPaymentEur`. |
 | AK | ReklamacjaZlozona | `reklamacjaSubmitted` | Boolean |
 | AL | ReklamacjaTresc | `reklamacjaText` | String |
 | AM | OdpMagtrans | `reklamacjaResponse` | String |
@@ -1103,6 +1106,7 @@ derived hours.
 | `20260504123808_phase2_required_fields_carrier_driver_trailer` | Подтягивает базовые контакты и ID-поля до NOT NULL после стабилизации UI. |
 | `20260506205557_phase3_indexes` | Hot-path индексы: `claims(carrierId, deletedAt)` и `delegations(carrierId, deletedAt, status)` для carrier-panel списков, проходящих через soft-delete middleware. |
 | `20260507191424_phase3_blocks` | Strict-everywhere перевод: NOT NULL на базовый профиль `Carrier` (contactPerson/ordersEmail/accountEur/companyAddress/...), расчётные поля `Claim` (timeFrom/timeTo/drivenDays/mileage/...), driver email/license/bank, vehicle certificateL/euro/type/rates, departure-fields на delegations. **Добавляет CHECK constraints:** `claim_accepted_payment_complete` (orderNumber+orderDate+amountApproved при ZAAKCEPTOWANO) и `vehicle_gps_device_when_gps_on` (gpsMobilePhone при gps=true). |
+| `20260726120000_drop_claim_amount_requested` | Дропает `claims.amountRequested` — зеркало `paymentEur` на всех путях записи (submit / авто-пересчёт выезда / PATCH верификатора). Ни один CHECK на него не ссылался, так что это чистый `DROP COLUMN`. Данные не теряются: значение каждой строки воспроизводится как `paymentEur` той же строки. Запрошенную сумму отдаёт `origPaymentEur`. |
 | `20260507195536_phase3_blocks_audit_revert` | Откатывает несколько слишком-агрессивных NOT NULL-ов из предыдущей миграции (insurance/license carrier, plannedReturn delegation, email/license/bank driver, rates vehicle, password user) — поля возвращаются в DB-nullable, обязательность остаётся на API+UI. **Закрепляет** `amountRequested` как DB NOT NULL и **добавляет** CHECK `delegation_returned_complete` (actualReturnAt+returnCountry+returnPostalCode при `zjechal`). |
 | `20260507223021_move_company_to_carrier` | Переносит поле `company` (Firma) с `users` на `carriers`. Денормализация-наследие GAS-миграции; внутренние сотрудники MAGTRANS никогда company не имели. ADD column → BACKFILL через carrier↔user 1:1 → DROP source — порядок безопасен на непустой БД. |
 | `20260508115947_carrier_nip_vat_required` | NOT NULL на `carriers.nip` и `carriers.vatId`. Налоговые ID требуются на момент создания: PL-перевозчики дают 10-значный NIP, иностранные — локальный TIN; `vatId` — EU VAT с префиксом страны. (Позже частично откатано: см. `20260515112821_carrier_vat_id_optional` — `vatId` снова nullable.) |

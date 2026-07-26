@@ -106,6 +106,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Textarea } from '@/components/ui/Textarea';
 import { downloadAuthorizationConfirmation } from '@/lib/api/claims';
 import { ApiResponseError } from '@/lib/api/client';
+import { verifierMovedAmount } from '@/lib/claims/money';
 import { formatDateFull, formatEur } from '@/lib/format/numbers';
 import {
   CLAIMS_KEY,
@@ -2212,6 +2213,7 @@ function claimHasHistory(claim: ClaimDto): boolean {
     claim.origDateStart !== null ||
     claim.origDateEnd !== null ||
     claim.origMileage !== null ||
+    verifierMovedAmount(claim) ||
     (claim.origHoursAdjusted !== null &&
       claim.origHoursAdjusted !== claim.hoursAdjustedValue) ||
     claim.decidedById !== null
@@ -2227,6 +2229,10 @@ function HistorySection({ claim }: { claim: ClaimDto }) {
     claim.origDateStart !== null ||
     claim.origDateEnd !== null ||
     claim.origMileage !== null ||
+    // Money moved — the single most important thing the verifier can change,
+    // and until now the ONLY correction this block did not surface (the
+    // authorization email to Maksim has carried this diff all along).
+    verifierMovedAmount(claim) ||
     (claim.origHoursAdjusted !== null &&
       claim.origHoursAdjusted !== claim.hoursAdjustedValue);
 
@@ -2284,6 +2290,18 @@ function HistorySection({ claim }: { claim: ClaimDto }) {
                   current={`${claim.hoursAdjustedValue ?? 0} h`}
                 />
               )}
+            {/* Dopłata — rendered only when it actually moved, so the row does
+                not print the same number twice on the common case. `current` is
+                `paymentEur`, NOT `amountApproved`: this block is about what the
+                VERIFIER changed, and the approved amount is the separate
+                decision recorded above. */}
+            {verifierMovedAmount(claim) && (
+              <DiffRow
+                label={t('origPaymentEur')}
+                orig={`${formatEur(claim.origPaymentEur)} €`}
+                current={`${formatEur(claim.paymentEur)} €`}
+              />
+            )}
           </div>
         </section>
       )}
