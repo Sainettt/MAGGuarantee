@@ -11,6 +11,7 @@ import Link from 'next/link';
 import type { ClaimListItem } from '@magguarantee/shared';
 
 import { StatusBadge } from '@/components/carrier/StatusBadge';
+import { cn } from '@/lib/utils';
 
 function formatDate(iso: string): string {
   // Wire dates are ISO; trim to dd.mm.yyyy. We deliberately don't pull
@@ -40,6 +41,17 @@ export interface ClaimCardProps {
 
 export function ClaimCard({ claim }: ClaimCardProps) {
   const t = useTranslations('carrier.claims');
+
+  // Money hero — same rule as the detail page (§3.1B): once the verifier has
+  // decided the claim, `amountApproved` is the ONLY truthful number. Before
+  // that it is null and we show the km-calc `paymentEur` (what is being asked
+  // for). Rendering `paymentEur` unconditionally made an accepted card display
+  // the requested amount instead of the granted one whenever the verifier
+  // corrected it. The label under the value says which of the two it is, so
+  // the number is never ambiguous.
+  const decided = claim.amountApproved != null;
+  const amount = decided ? claim.amountApproved : claim.paymentEur;
+
   return (
     <Link
       href={`/carrier/claims/${encodeURIComponent(claim.nrZgl)}`}
@@ -53,9 +65,21 @@ export function ClaimCard({ claim }: ClaimCardProps) {
           </span>
           <StatusBadge status={claim.status} />
         </div>
-        <span className="text-xl font-extrabold text-text tabular-nums whitespace-nowrap">
-          {formatEur(claim.paymentEur)}{' '}
-          <span className="text-sm font-bold text-text-sub">EUR</span>
+        <span className="flex flex-col items-end leading-none">
+          <span
+            className={cn(
+              'text-xl font-extrabold tabular-nums whitespace-nowrap',
+              decided ? 'text-brand' : 'text-text',
+            )}
+          >
+            {formatEur(amount)}{' '}
+            <span className="text-sm font-bold text-text-sub">EUR</span>
+          </span>
+          <span className="mt-1 text-[10px] font-bold uppercase tracking-wider text-text-sub">
+            {decided
+              ? t('detail.moneyLabelApproved')
+              : t('detail.moneyLabelCalc')}
+          </span>
         </span>
       </div>
 
