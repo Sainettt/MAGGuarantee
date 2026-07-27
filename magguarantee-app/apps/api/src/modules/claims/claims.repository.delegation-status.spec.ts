@@ -48,7 +48,6 @@ function makeRawRow(
     comment: null,
     orderNumber: null,
     orderDate: null,
-    amountRequested: 1_400,
     amountApproved: null,
     reklamacjaSubmitted: false,
     reklamacjaText: null,

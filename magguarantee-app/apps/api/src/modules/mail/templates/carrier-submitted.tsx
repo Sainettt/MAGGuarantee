@@ -34,9 +34,11 @@ export interface CarrierSubmittedProps {
   kmShortfall?: string;
   /** Worked days in the period (round(hours/24, 2)). */
   drivenDays?: string;
-  /** Amount requested by the carrier in EUR, pre-formatted (two decimals). */
-  amountRequested?: string;
-  /** System-calculated compensation in EUR, pre-formatted (two decimals). */
+  /**
+   * The km-calc compensation in EUR, pre-formatted (two decimals). At submit
+   * time this IS the requested amount — there is no separate carrier-entered
+   * figure (the old `amountRequested` prop was the same number twice).
+   */
   paymentEur?: string;
   /** Claim detail URL — present ONLY for staff who may open the wniosek. */
   deeplink?: string;
@@ -52,12 +54,10 @@ export function CarrierSubmittedEmail({
   kmGuaranteed,
   kmShortfall,
   drivenDays,
-  amountRequested,
   paymentEur,
   deeplink,
 }: CarrierSubmittedProps): React.ReactElement {
   const hasKm = Boolean(kmGuaranteed || kmDriven || kmShortfall);
-  const headline = amountRequested ?? paymentEur;
   return (
     <MailLayout
       preview={`Nowy wniosek ${nrZgl} od ${carrierName}`}
@@ -97,14 +97,8 @@ export function CarrierSubmittedEmail({
         </DataSection>
       ) : null}
 
-      {headline ? (
-        <AmountPanel label="Kwota wnioskowana" value={`${headline} EUR`} />
-      ) : null}
-
-      {amountRequested && paymentEur ? (
-        <DataSection heading="Rozliczenie">
-          <FieldRow label="Wyliczona rekompensata" value={`${paymentEur} EUR`} />
-        </DataSection>
+      {paymentEur ? (
+        <AmountPanel label="Kwota wnioskowana" value={`${paymentEur} EUR`} />
       ) : null}
     </MailLayout>
   );

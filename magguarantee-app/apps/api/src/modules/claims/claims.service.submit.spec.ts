@@ -191,7 +191,6 @@ function makeClaimRow(data: CreateClaimData): ClaimRow {
     comment: data.comment,
     orderNumber: data.orderNumber,
     orderDate: data.orderDate,
-    amountRequested: data.amountRequested,
     amountApproved: null,
     reklamacjaSubmitted: false,
     reklamacjaText: null,
@@ -486,10 +485,10 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     expect(repoFake.creates[0]!.data.timeTo).toBe('16:45');
     expect(repoFake.creates[0]!.data.origTimeFrom).toBe('06:30');
     expect(repoFake.creates[0]!.data.origTimeTo).toBe('16:45');
-    // amountRequested is derived from km-calc paymentEur — not from the body.
+    // The requested amount is derived from km-calc — not from the body.
     // paymentEur = (kmGuaranteed - mileage) * ratePerKmEffective
     //            = (10_800 - 8_000) * 0.5 = 1_400.
-    expect(repoFake.creates[0]!.data.amountRequested).toBe(1_400);
+    expect(repoFake.creates[0]!.data.paymentEur).toBe(1_400);
     // Immutable submit-time payment snapshot — captured EQUAL to the derived
     // paymentEur so the authorization-email «Korekty weryfikatora» diff and the
     // History tab can compare against the verifier's later applied amount.

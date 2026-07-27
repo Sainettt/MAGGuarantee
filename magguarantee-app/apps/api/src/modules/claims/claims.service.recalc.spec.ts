@@ -77,7 +77,6 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     comment: null,
     orderNumber: null,
     orderDate: null,
-    amountRequested: 1_400,
     amountApproved: null,
     reklamacjaSubmitted: false,
     reklamacjaText: null,
@@ -203,11 +202,10 @@ describe('ClaimsService.recalcFromDelegation', () => {
     expect(kmCalcSpy).toHaveBeenCalledTimes(1);
     expect(sumSpy).toHaveBeenCalledTimes(1);
     // numbers recomputed: kmDifference = 12_000 - 9_000 = 3_000;
-    // paymentEur = 3_000 * 0.5 = 1_500; amountRequested mirrors paymentEur.
+    // paymentEur = 3_000 * 0.5 = 1_500.
     expect(patch.kmGuaranteed).toBe(12_000);
     expect(patch.kmDifference).toBe(3_000);
     expect(patch.paymentEur).toBe(1_500);
-    expect(patch.amountRequested).toBe(1_500);
     // timeFrom/timeTo NOT touched.
     expect(patch.timeFrom).toBeUndefined();
     expect(patch.timeTo).toBeUndefined();
@@ -403,11 +401,10 @@ describe('ClaimsService.recalcDepartureFromDelegation', () => {
     expect(kmCalcSpy).toHaveBeenCalledTimes(1);
     expect(sumSpy).toHaveBeenCalledTimes(1);
     // numbers recomputed: kmDifference = 12_000 - 9_000 = 3_000;
-    // paymentEur = 3_000 * 0.5 = 1_500; amountRequested mirrors paymentEur.
+    // paymentEur = 3_000 * 0.5 = 1_500.
     expect(patch.kmGuaranteed).toBe(12_000);
     expect(patch.kmDifference).toBe(3_000);
     expect(patch.paymentEur).toBe(1_500);
-    expect(patch.amountRequested).toBe(1_500);
     // timeFrom/timeTo NOT touched.
     expect(patch.timeFrom).toBeUndefined();
     expect(patch.timeTo).toBeUndefined();

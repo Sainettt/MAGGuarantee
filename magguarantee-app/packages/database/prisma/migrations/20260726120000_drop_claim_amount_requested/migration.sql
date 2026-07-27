@@ -1,0 +1,25 @@
+-- ─── Drop the redundant Claim.amountRequested column ───────
+--
+-- `amountRequested` never held anything `paymentEur` did not already hold:
+--
+--   * submit           → amountRequested = paymentEur  (claims.service submit)
+--   * delegation recalc→ amountRequested = paymentEur  (both zjechal paths)
+--   * verifier PATCH   → amountRequested = paymentEur  (_applyCorrectionsToPatch)
+--
+-- so the invariant `amountRequested === paymentEur` held for every row the app
+-- has ever written. Keeping it around was actively harmful: the pracownik table
+-- labelled it «Wnioskowana», which read as "what the carrier asked for" when it
+-- was really the POST-verification figure. The genuinely-requested amount is
+-- `origPaymentEur` (immutable submit-time snapshot), and that is what the UI
+-- now shows.
+--
+-- No CHECK constraint references this column — `claim_accepted_payment_complete`
+-- (recreated in remove_manual_authorization_flow) only reads `orderNumber`,
+-- `orderDate` and `amountApproved` — so a plain DROP COLUMN is sufficient; no
+-- constraint drop/recreate dance is needed.
+--
+-- Destructive and irreversible, but lossless in practice: every value in the
+-- column is reproducible as the sibling `paymentEur` of the same row.
+
+-- AlterTable
+ALTER TABLE "claims" DROP COLUMN "amountRequested";

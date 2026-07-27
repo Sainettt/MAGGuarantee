@@ -156,7 +156,6 @@ describeIfDb('phase3_blocks CHECK constraints', () => {
           kmDifference: 2800,
           paymentEur: 1400,
           ratePerKmEffective: 0.5,
-          amountRequested: 1400,
           status: 'ZAAKCEPTOWANO',
           // The CHECK demands orderNumber, orderDate, amountApproved.
           orderNumber: null,
@@ -205,7 +204,6 @@ describeIfDb('phase3_blocks CHECK constraints', () => {
         kmDifference: 2800,
         paymentEur: 1400,
         ratePerKmEffective: 0.5,
-        amountRequested: 1400,
         // NA_WERYFIKACJI is the carrier-submit default — NULL fields ok.
         status: 'NA_WERYFIKACJI',
         orderNumber: null,

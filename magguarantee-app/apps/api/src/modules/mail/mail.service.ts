@@ -676,11 +676,8 @@ export class MailService implements IMailService {
         ...(props.kmShortfall
           ? [`Niedobór kilometrów: ${props.kmShortfall} km`]
           : []),
-        ...(props.amountRequested
-          ? [`Kwota wnioskowana: ${props.amountRequested} EUR`]
-          : []),
         ...(props.paymentEur
-          ? [`Wyliczona rekompensata: ${props.paymentEur} EUR`]
+          ? [`Kwota wnioskowana: ${props.paymentEur} EUR`]
           : []),
         '',
         'Wniosek oczekuje na weryfikację.',

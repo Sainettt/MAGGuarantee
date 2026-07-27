@@ -104,10 +104,11 @@ function datesWellOrdered(v: {
 
 // ─── Submit (carrier creates a wniosek) ──────────────────
 
-// NOTE: `amountRequested` and `hoursAdjusted` are server/verifier-managed and
-// are NOT part of the carrier submit body — `amountRequested` is derived from
-// km-calc payment server-side, `hoursAdjusted` lives only on the verifier
-// `UpdateClaimCorrectionFields` patch below.
+// NOTE: money and `hoursAdjusted` are server/verifier-managed and are NOT part
+// of the carrier submit body — the requested amount is derived from km-calc
+// server-side (`paymentEur`, snapshotted once into `origPaymentEur`),
+// `hoursAdjusted` lives only on the verifier `UpdateClaimCorrectionFields`
+// patch below.
 /**
  * POST /claims — body shape per docs/13-api-design.md§"Submit claim" and the
  * "everything derives from the wyjazd" principle in docs/20 §0″.
@@ -126,9 +127,10 @@ function datesWellOrdered(v: {
  *   ALWAYS `Σ VehicleDailyKm.km (state=drove)` over the derived period for the
  *   delegation's vehicle. There is no carrier override; `pracownik` revises it
  *   at verification.
- * - `amountRequested` is **NOT** in the carrier submit body — the service
- *   derives it from the km-calc `paymentEur` (rounded to 2 dp). Legacy GAS
- *   allowed a manual override; we don't.
+ * - The requested amount is **NOT** in the carrier submit body — the service
+ *   derives it from the km-calc `paymentEur` (rounded to 2 dp) and freezes that
+ *   figure into `origPaymentEur`. Legacy GAS allowed a manual override; we
+ *   don't.
  * - `hoursAdjusted` is **NOT** in the carrier submit body — it is a
  *   verifier-only correction field on `UpdateClaimCorrectionFields`. Submit
  *   always persists `0` in both `origHoursAdjusted` and `hoursAdjustedValue`.
@@ -632,9 +634,16 @@ export const ClaimDtoSchema = z.object({
   orderNumber: z.string().nullable(),
   orderDate: IsoDateSchema.nullable(),
 
-  // amountRequested is NOT NULL in DB since phase3_blocks_audit_revert
-  // (carrier always supplies it at submit).
-  amountRequested: z.number(),
+  /**
+   * The three money fields form one chain and must always be read together:
+   *   `origPaymentEur` — what the carrier originally asked for (frozen at
+   *                      submit, see below);
+   *   `paymentEur`     — the km-calc AFTER the verifier's corrections;
+   *   `amountApproved` — what MAGTRANS actually pays (only once ZAAKCEPTOWANO).
+   * The old `amountRequested` field was removed with the 2026-07-26 column drop
+   * — it was a byte-for-byte mirror of `paymentEur`, and surfacing it as
+   * «Wnioskowana» misrepresented the post-verification figure as the request.
+   */
   amountApproved: z.number().nullable(),
 
   reklamacjaSubmitted: z.boolean(),
@@ -772,7 +781,16 @@ export const ClaimListItemSchema = z.object({
   kmGuaranteed: z.number(),
   kmDifference: z.number(),
   paymentEur: z.number(),
-  amountRequested: z.number(),
+  /**
+   * Immutable submit-time payment snapshot — the ONLY field that answers "how
+   * much did the carrier actually ask for", since `paymentEur` is rewritten by
+   * every verifier correction / delegation recalc. Carried on the list item so
+   * the pracownik table's «Wnioskowana» column tells the truth without a
+   * per-row detail fetch. `null` for rows created before the column existed
+   * (`20260706120000_claim_verification_checkpoint` did not backfill) — render
+   * an em-dash there, never a silent fallback to the current figure.
+   */
+  origPaymentEur: z.number().nullable(),
   amountApproved: z.number().nullable(),
   reklamacjaSubmitted: z.boolean(),
   createdAt: IsoDateTimeSchema,

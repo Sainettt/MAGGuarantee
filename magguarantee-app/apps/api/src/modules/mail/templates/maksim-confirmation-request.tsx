@@ -29,7 +29,7 @@ export interface MaksimConfirmationRequestProps {
   carrierName: string;
   /** Plate number snapshot from the claim. */
   vehiclePlate: string;
-  /** Dopłata (EUR) — `amountRequested` pre-formatted to two decimals. */
+  /** Dopłata (EUR) — the current `paymentEur`, pre-formatted to two decimals. */
   doplata: string;
   /** Próg autoryzacji (EUR) — `getAuthThreshold(drivenDays)`, two decimals. */
   prog: string;

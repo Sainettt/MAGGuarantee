@@ -581,11 +581,6 @@ export class ClaimsService {
           // invariant when status flips.
           orderNumber: null,
           orderDate: null,
-          // amountRequested derived from km-calc payment, not user input —
-          // legacy GAS allowed manual override, we don't. `paymentEur` is
-          // already `round2(...)` 2-dp rounded (or 0) so it fits Decimal(12,2)
-          // cleanly without further coercion.
-          amountRequested: paymentEur,
           // Hours-adjustment is verifier-only: carriers cannot send it on
           // submit, so both Decimal columns are seeded to 0. The verifier
           // PATCH path may later mutate `hoursAdjustedValue` alone — see
@@ -679,7 +674,7 @@ export class ClaimsService {
    * When applied: `dateEnd = actualReturnAt` → re-prefill `mileage` via the SAME
    * `_resolveMileage` (only when the carrier didn't override at submit, detected
    * via `origMileage`) → re-run km-calc via the SAME `KmCalcService` → update
-   * `kmGuaranteed/kmDifference/paymentEur/amountRequested/breakdown/
+   * `kmGuaranteed/kmDifference/paymentEur/breakdown/
    * ratePerKmEffective/drivenDays/kmPerDay`. `timeFrom/timeTo` and the `orig*`
    * snapshots are NOT touched. Audit: `claim.autoRecalc` (before/after). No email.
    *
@@ -810,8 +805,6 @@ export class ClaimsService {
       kmDifference,
       paymentEur,
       ratePerKmEffective: calc.ratePerKmEffective,
-      // amountRequested mirrors paymentEur (same derivation as submit).
-      amountRequested: paymentEur,
       breakdown,
       // Stamp the explicit result so the frontend reads «przeliczono» directly.
       autoRecalcState: 'applied',
@@ -961,8 +954,6 @@ export class ClaimsService {
       kmDifference,
       paymentEur,
       ratePerKmEffective: calc.ratePerKmEffective,
-      // amountRequested mirrors paymentEur (same derivation as submit).
-      amountRequested: paymentEur,
       breakdown,
       autoRecalcState: 'applied',
       // `timeFrom/timeTo` and the `orig*` snapshots are intentionally NOT touched.
@@ -1145,7 +1136,7 @@ export class ClaimsService {
     };
     // Corrections + recalc outputs — SAME field-by-field logic as the decision
     // PATCH (periodAdjustedByVerifier + autoRecalcState:'none' on date edits;
-    // hoursAdjustedValue-only on hours edits; amountRequested mirror on recalc).
+    // km-calc outputs rewritten on recalc).
     const corrections = extractCorrectionFields(dto);
     this._applyCorrectionsToPatch(patch, corrections, recalc, existing);
 
@@ -1508,9 +1499,10 @@ export class ClaimsService {
       nrZgl: row.nrZgl,
       carrierName,
       vehiclePlate: row.vehiclePlateSnapshot,
-      // Amounts pre-formatted here so the template stays pure. `amountRequested`
-      // mirrors `paymentEur` (the km-calc output) per the submit invariant.
-      doplata: row.amountRequested.toFixed(2),
+      // Amounts pre-formatted here so the template stays pure. `paymentEur` is
+      // the CURRENT km-calc output — i.e. post-correction, which is exactly the
+      // figure Maksim is being asked to authorize.
+      doplata: row.paymentEur.toFixed(2),
       prog: getAuthThreshold(row.drivenDays).toFixed(2),
       dniWTrasie: row.drivenDays.toFixed(2),
       // «Okno godzin» — the existing time window (no new "hours" field).
@@ -1551,7 +1543,7 @@ export class ClaimsService {
    *  - Godziny    — origTimeFrom/origTimeTo vs timeFrom/timeTo (HH:mm range),
    *  - Przebieg   — origMileage vs mileage ('X km'),
    *  - Korekta godzin — origHoursAdjusted vs hoursAdjustedValue ('X h'),
-   *  - Dopłata    — origPaymentEur vs amountRequested (EUR, 2dp).
+   *  - Dopłata    — origPaymentEur vs paymentEur (EUR, 2dp).
    *
    * Pure projection — no IO. Kept out of the template so the JSX stays pure.
    */
@@ -1605,15 +1597,15 @@ export class ClaimsService {
       });
     }
 
-    // Dopłata — orig submit-time payment vs currently-applied amountRequested.
+    // Dopłata — orig submit-time payment vs the currently-applied km-calc.
     if (
       row.origPaymentEur !== null &&
-      round2(row.origPaymentEur) !== round2(row.amountRequested)
+      round2(row.origPaymentEur) !== round2(row.paymentEur)
     ) {
       korekty.push({
         label: 'Dopłata',
         from: `${row.origPaymentEur.toFixed(2)} EUR`,
-        to: `${row.amountRequested.toFixed(2)} EUR`,
+        to: `${row.paymentEur.toFixed(2)} EUR`,
       });
     }
 
@@ -1923,7 +1915,20 @@ export class ClaimsService {
     // Amount cap: `kwotaReklamacji ≤ kwotaWnioskowana − kwotaWyplacona`.
     // `kwotaWyplacona` = `paymentEur` if accepted, else 0. Mirrors
     // `Code.gs:6826-6832`. We allow ε=1 EUR rounding tolerance per legacy.
-    const requested = claim.amountRequested ?? 0;
+    // `paymentEur` is byte-identical to what the dropped `amountRequested`
+    // column always held, so this cap is UNCHANGED by the drop.
+    //
+    // KNOWN LIMITATION (pre-existing, deliberately preserved here): in legacy
+    // GAS `kwotaWnioskowana` (col 36) was a MANUAL carrier entry independent of
+    // `doplata` (col 13), so the two genuinely differed and the cap was
+    // meaningful. We removed the manual override, which makes requested ==
+    // paid for every ZAAKCEPTOWANO row — i.e. the cap is identically 0 and no
+    // monetary reklamacja passes on an accepted claim (rejected claims are
+    // unaffected: paid = 0). Restoring the legacy intent under the new model
+    // means `origPaymentEur − amountApproved` ("what I asked for minus what you
+    // actually paid"), but that widens the cap and is a business decision, not
+    // a refactor — left for a deliberate change.
+    const requested = claim.paymentEur ?? 0;
     const paid =
       claim.status === 'ZAAKCEPTOWANO' ? (claim.paymentEur ?? 0) : 0;
     const maxAmount = requested - paid;
@@ -2029,7 +2034,6 @@ export class ClaimsService {
       comment: row.comment,
       orderNumber: row.orderNumber,
       orderDate: row.orderDate ? toDateString(row.orderDate) : null,
-      amountRequested: row.amountRequested,
       amountApproved: row.amountApproved,
       reklamacjaSubmitted: row.reklamacjaSubmitted,
       reklamacjaText: row.reklamacjaText,
@@ -2110,7 +2114,10 @@ export class ClaimsService {
       kmGuaranteed: row.kmGuaranteed,
       kmDifference: row.kmDifference,
       paymentEur: row.paymentEur,
-      amountRequested: row.amountRequested,
+      // The immutable submit-time figure — the ONLY honest answer to "how much
+      // did the carrier ask for", since `paymentEur` above is rewritten by every
+      // verifier correction and delegation recalc.
+      origPaymentEur: row.origPaymentEur,
       amountApproved: row.amountApproved,
       reklamacjaSubmitted: row.reklamacjaSubmitted,
       createdAt: row.createdAt.toISOString(),
@@ -2315,10 +2322,9 @@ export class ClaimsService {
    *    flag and `autoRecalcState` are left untouched,
    *  - a `hoursAdjusted` correction writes ONLY `hoursAdjustedValue` (the
    *    immutable carrier snapshot `origHoursAdjusted` is never touched),
-   *  - when the math re-ran (`recalc != null`) the km-calc outputs are written
-   *    and `amountRequested` is re-mirrored to `paymentEur` (the submit-time
-   *    invariant), so a stale amount never leaks into the kwota-Maksima email or
-   *    the reklamacja amount cap.
+   *  - when the math re-ran (`recalc != null`) the km-calc outputs are written,
+   *    so a stale `paymentEur` never leaks into the kwota-Maksima email or the
+   *    reklamacja amount cap.
    *
    * Pure mutation — no IO, no throws.
    */
@@ -2372,8 +2378,6 @@ export class ClaimsService {
       patch.paymentEur = recalc.paymentEur;
       patch.ratePerKmEffective = recalc.ratePerKmEffective;
       patch.breakdown = recalc.breakdown;
-      // Restore the submit-time invariant `amountRequested === paymentEur`.
-      patch.amountRequested = recalc.paymentEur;
     }
   }
 
@@ -2697,7 +2701,6 @@ export class ClaimsService {
       orderDate: row.orderDate
         ? row.orderDate.toISOString().slice(0, 10)
         : null,
-      amountRequested: row.amountRequested,
       amountApproved: row.amountApproved,
       reklamacjaSubmitted: row.reklamacjaSubmitted,
       reklamacjaText: row.reklamacjaText,
@@ -2887,7 +2890,6 @@ export class ClaimsService {
       kmGuaranteed: row.kmGuaranteed.toFixed(0),
       kmShortfall: row.kmDifference.toFixed(0),
       drivenDays: row.drivenDays.toFixed(2),
-      amountRequested: row.amountRequested.toFixed(2),
       paymentEur: row.paymentEur.toFixed(2),
     };
     const employeeDeeplink = `${appUrl}/employee/claims/${nz}`;
@@ -3065,8 +3067,7 @@ interface ExtractedCorrections extends CorrectionCarrier {
 /**
  * km-calc outputs re-derived when a verifier touches a math-affecting field —
  * the return shape shared by `_recalcClaim` (decision PATCH) and the
- * verification checkpoint. Persisted verbatim onto the claim row (plus the
- * `amountRequested` mirror derived from `paymentEur`).
+ * verification checkpoint. Persisted verbatim onto the claim row.
  */
 interface RecalcOutputs {
   drivenDays: number;

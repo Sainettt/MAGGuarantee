@@ -826,15 +826,22 @@ model Claim {
   // re-verify moved the amount and Maksim must be re-notified. NULL when the gate
   // was never armed/notified or was reset. Must be nulled in lockstep wherever the
   // rest of the maksimGate* fields reset. Same precision as paymentEur /
-  // amountRequested / origPaymentEur (Decimal @db.Decimal(12, 2); money is Decimal).
+  // origPaymentEur (Decimal @db.Decimal(12, 2); money is Decimal).
   maksimGateNotifiedAmount Decimal?  @db.Decimal(12, 2)
   maksimGateClearedAt      DateTime?
   maksimGateClearedById    String?   @db.Uuid
   maksimGateClearedBy      User?     @relation("ClaimMaksimGateClearedBy", fields: [maksimGateClearedById], references: [id])
 
-  /// derived server-side from calc.paymentEur; carrier form no longer collects it
-  amountRequested Decimal  @default(0) @db.Decimal(12, 2) // KwotaWnioskowana
-  amountApproved  Decimal? @db.Decimal(12, 2) // ZatwKwota
+  /// ZatwKwota — what MAGTRANS actually pays out. Written only on the
+  /// transition to ZAAKCEPTOWANO (guarded by `claim_accepted_payment_complete`).
+  /// The other two money fields it must be read against are `origPaymentEur`
+  /// (what the carrier originally asked for) and `paymentEur` (the km-calc
+  /// after the verifier's corrections). The former `amountRequested` column was
+  /// dropped 2026-07-26 — it was a pure mirror of `paymentEur` (both submit and
+  /// every recalc path wrote them from the same expression), so it carried no
+  /// information while making the UI label «Wnioskowana» read as the carrier's
+  /// request when it was really the post-verification figure.
+  amountApproved Decimal? @db.Decimal(12, 2)
 
   // reklamacja (mirror for rollback)
   reklamacjaSubmitted    Boolean      @default(false)

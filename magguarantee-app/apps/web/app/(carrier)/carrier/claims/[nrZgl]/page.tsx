@@ -18,7 +18,14 @@ import { HoursReadout } from '@/components/claims/HoursReadout';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
+import {
+  headlineAmount,
+  MONEY_TONE_TEXT,
+  moneyTone,
+  verifierMovedAmount,
+} from '@/lib/claims/money';
 import { useClaim } from '@/lib/hooks/useClaims';
+import { cn } from '@/lib/utils';
 
 const REKLAMACJA_WINDOW_MS = 48 * 60 * 60 * 1000;
 
@@ -97,6 +104,9 @@ export default function ClaimDetailPage() {
     return ageMs <= REKLAMACJA_WINDOW_MS;
   })();
 
+  const headline = headlineAmount(claim);
+  const origMoved = verifierMovedAmount(claim);
+
   return (
     <section className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-4">
@@ -115,27 +125,23 @@ export default function ClaimDetailPage() {
             switch when the verifier flips the claim to ZAAKCEPTOWANO (see
             docs/14 §3.1B "no layout shift on status flip"). */}
         <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-6 items-start">
-          {/* LEFT — money hero */}
+          {/* LEFT — money hero. Tone comes from the STATUS (green = granted,
+              red = refused, neutral = undecided), never from the size of the
+              number; see `lib/claims/money.ts`. */}
           <div className="flex flex-col gap-0.5">
-            {claim.amountApproved != null ? (
-              <>
-                <div className="text-4xl md:text-5xl font-extrabold tabular-nums text-brand leading-none">
-                  {formatEur(claim.amountApproved)} €
-                </div>
-                <div className="text-xs font-bold uppercase tracking-wider text-text-sub mt-1">
-                  {tDetail('moneyLabelApproved')}
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="text-4xl md:text-5xl font-extrabold tabular-nums text-text-sub leading-none">
-                  {formatEur(claim.paymentEur)} €
-                </div>
-                <div className="text-xs font-bold uppercase tracking-wider text-text-sub mt-1">
-                  {tDetail('moneyLabelCalc')}
-                </div>
-              </>
-            )}
+            <div
+              className={cn(
+                'text-4xl md:text-5xl font-extrabold tabular-nums leading-none',
+                MONEY_TONE_TEXT[moneyTone(claim.status)],
+              )}
+            >
+              {formatEur(headline.value)} €
+            </div>
+            <div className="text-xs font-bold uppercase tracking-wider text-text-sub mt-1">
+              {headline.kind === 'approved'
+                ? tDetail('moneyLabelApproved')
+                : tDetail('moneyLabelCalc')}
+            </div>
           </div>
 
           {/* RIGHT — meta block. Stays as a single column on mobile (below
@@ -147,8 +153,30 @@ export default function ClaimDetailPage() {
               </span>
               <StatusBadge status={claim.status} />
             </div>
+            {/* The money chain. «Wnioskowano» is the frozen submit-time figure
+                and appears ONLY when the verifier actually moved it — on the
+                vast majority of wnioski the two are equal and printing both
+                would be noise. Legacy rows have no snapshot at all, and
+                `verifierMovedAmount` returns false for them rather than
+                inventing one. */}
+            {origMoved && (
+              <div className="text-sm text-text-sub tabular-nums">
+                {tDetail('moneyRequested')}:{' '}
+                <b className="font-semibold text-text line-through decoration-text-sub/50">
+                  {formatEur(claim.origPaymentEur)} €
+                </b>
+              </div>
+            )}
             <div className="text-sm text-text-sub tabular-nums">
-              {tDetail('wniosekLabel')}:{' '}
+              {/* «Wnioskowano» is claimed for this number ONLY when we can
+                  prove it — i.e. the snapshot exists and matches. On a legacy
+                  row (`origPaymentEur === null`) we do not know what was
+                  originally asked, so the neutral «Po weryfikacji» is used: it
+                  is true of `paymentEur` unconditionally. */}
+              {claim.origPaymentEur != null && !origMoved
+                ? tDetail('moneyRequested')
+                : tDetail('moneyAfterVerification')}
+              :{' '}
               <b className="font-semibold text-text">
                 {formatEur(claim.paymentEur)} €
               </b>
@@ -235,10 +263,25 @@ export default function ClaimDetailPage() {
                 </dd>
               </div>
             )}
+          {/* The full chain, spelled out. Unlike the header (which hides the
+              original when it did not move), this block always states what was
+              asked for — `formatEur` renders an em-dash for the legacy rows
+              that have no snapshot, which is the honest answer: we genuinely
+              do not know what those carriers originally asked for. */}
+          <div>
+            <dt className="text-text-sub">{tDetail('amountRequested')}</dt>
+            <dd className="mt-0.5 tabular-nums font-semibold text-text">
+              {claim.origPaymentEur != null
+                ? `${formatEur(claim.origPaymentEur)} €`
+                : '—'}
+            </dd>
+          </div>
           <div>
             <dt className="text-text-sub">{tDetail('amountApproved')}</dt>
             <dd className="mt-0.5 tabular-nums font-semibold text-text">
-              {formatEur(claim.amountApproved)} €
+              {claim.amountApproved != null
+                ? `${formatEur(claim.amountApproved)} €`
+                : '—'}
             </dd>
           </div>
           {claim.orderNumber && (

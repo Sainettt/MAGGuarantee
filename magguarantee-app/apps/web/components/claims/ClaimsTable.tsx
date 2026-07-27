@@ -7,8 +7,10 @@
 // Behavioral notes:
 //   - Full-row click opens the verification modal (the page owns the
 //     selection state; the table is presentational).
-//   - The doplata cell uses red text when > 0 (mirror of legacy
-//     `KOLORY.zaakceptowano` semantics adapted to DS tokens).
+//   - Money cells are toned by STATUS via `lib/claims/money.ts` — green for a
+//     granted amount, red for a refused claim, neutral for a pending one. The
+//     old rule (brand red whenever the amount was > 0) is gone: it painted an
+//     accepted wniosek in exactly the same alarm colour as a rejected one.
 //   - Tooltips are native `title` attributes — when shadcn Tooltip lands
 //     site-wide we can swap, but for v1 native is enough and a11y-safe.
 
@@ -21,6 +23,7 @@ import { StatusBadge } from '@/components/carrier/StatusBadge';
 import { Button } from '@/components/ui/Button';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { MONEY_TONE_TEXT, moneyTone } from '@/lib/claims/money';
 import {
   formatDateShort,
   formatEur,
@@ -102,30 +105,29 @@ export function ClaimsTable({
           </span>
         ),
       },
-      // Two money columns, not one. «Wnioskowana» is what the claim asks for;
-      // «Zatwierdzona» is what was actually granted — they diverge whenever a
-      // verifier corrects the amount or an admin overrides Maksim's decision
-      // (docs/14 §6.5.14), and collapsing them into a single «Dopłata» column
-      // hid that divergence from the list entirely.
+      // Two money columns, not one. «Wnioskowana» is what the carrier asked
+      // for; «Zatwierdzona» is what was actually granted — they diverge
+      // whenever a verifier corrects the amount, and collapsing them into a
+      // single «Dopłata» column hid that divergence from the list entirely.
       {
         id: 'amountRequested',
         header: t('columns.amountRequested'),
         align: 'right',
-        cell: (row) => {
-          // `amountRequested` is NOT NULL on the DTO; `paymentEur` is the
-          // defensive fallback for legacy rows written before the split.
-          const requested = row.amountRequested ?? row.paymentEur;
-          return (
-            <span
-              className={cn(
-                'font-mono font-bold tabular-nums whitespace-nowrap',
-                requested > 0 ? 'text-brand' : 'text-text-sub',
-              )}
-            >
-              {formatEur(requested)}
+        cell: (row) =>
+          // `origPaymentEur` — the FROZEN submit-time figure. This column used
+          // to read `amountRequested`, which every recalc rewrote to the
+          // current `paymentEur`, so the header said "wnioskowana" while the
+          // cell showed the post-verification number. Legacy rows have no
+          // snapshot: em-dash, never a fallback to the current figure (that is
+          // exactly the lie we just removed). Neutral tone — a request carries
+          // no verdict, and red here would read as "rejected".
+          row.origPaymentEur == null ? (
+            <span className="text-text-sub">—</span>
+          ) : (
+            <span className="font-mono font-bold tabular-nums whitespace-nowrap text-text">
+              {formatEur(row.origPaymentEur)}
             </span>
-          );
-        },
+          ),
       },
       {
         id: 'amountApproved',
@@ -140,7 +142,9 @@ export function ClaimsTable({
             <span
               className={cn(
                 'font-mono font-bold tabular-nums whitespace-nowrap',
-                row.amountApproved > 0 ? 'text-success-dark dark:text-success' : 'text-text-sub',
+                // Status-driven, shared with the carrier views: green =
+                // granted, red = refused. Never keyed off the amount itself.
+                MONEY_TONE_TEXT[moneyTone(row.status)],
               )}
             >
               {formatEur(row.amountApproved)}
