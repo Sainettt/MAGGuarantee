@@ -49,6 +49,17 @@ export const envSchema = z.object({
   MAIL_SMTP_HOST: z.string().default('localhost'),
   MAIL_SMTP_PORT: z.coerce.number().int().positive().default(1025),
   MAIL_FROM: z.string().default('no-reply@magtrans.eu'),
+  // Optional hosted logo for the transactional-email header (docs/22-email-design.md).
+  // When set, templates render it as a 170px-wide <img alt="MAGTRANS">; when
+  // blank (dev/Mailhog, tests) the header falls back to a self-contained text
+  // wordmark so no remote asset is fetched. Recommended prod value:
+  // https://www.magtrans.eu/img/logo.png. Blank ("") is coerced to undefined so
+  // "blank in dev" == "absent". The mail templates read this directly from
+  // process.env (a pure presentation constant), so validation here is advisory.
+  MAIL_LOGO_URL: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z.string().url().optional(),
+  ),
   // Recipient of the Maksim over-threshold confirmation-request email
   // (auto-sent at verification when the dopłata crosses the auth threshold).
   // Default = the production director address; override on dev/staging stands so

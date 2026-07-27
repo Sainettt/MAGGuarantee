@@ -7,14 +7,13 @@
  * (`VEHICLE_REMOVAL_ALERT_REPEAT_DAYS`) until the vehicle leaves the
  * `do_usuniecia` bucket (a new wyjazd / deactivation / removal).
  *
- * Recipient resolves to the admin's PERSONAL `User.email`. Modeled on the
- * Phase-9 `MailLayout` chrome (mirror of `guarantee-opiekun-digest.tsx`).
+ * Recipient resolves to the admin's PERSONAL `User.email`. Design:
+ * docs/22-email-design.md.
  */
-import { Section, Text } from '@react-email/components';
 import * as React from 'react';
 
-import { colors, labelStyle, sectionStyle } from './_theme';
-import { MailLayout } from './MailLayout';
+import { colors, eyebrowStyle, fontFamily } from './_theme';
+import { Block, MailLayout, Paragraph } from './MailLayout';
 
 /** One overdue-for-removal vehicle row. */
 export interface VehicleRemovalAdminRow {
@@ -40,16 +39,15 @@ export interface VehicleRemovalAdminProps {
   rows: VehicleRemovalAdminRow[];
 }
 
-const cell: React.CSSProperties = {
+const rowStyle: React.CSSProperties = {
+  margin: '0 0 6px 0',
+  fontFamily,
   fontSize: 14,
+  lineHeight: '20px',
   color: colors.ink,
-  padding: '4px 12px 4px 0',
-  lineHeight: 1.4,
 };
 
 function daysLabel(n: number): string {
-  // Values are always ≥ the removal threshold (≥29), so the "dni" plural is
-  // correct; keep the `1 dzień` guard for defensiveness.
   return n === 1 ? '1 dzień' : `${n} dni`;
 }
 
@@ -61,40 +59,37 @@ export function VehicleRemovalAdminEmail({
 }: VehicleRemovalAdminProps): React.ReactElement {
   return (
     <MailLayout
-      title="Pojazdy do usunięcia"
       preview={`Pojazdy do usunięcia — ${dateLabel} (${rows.length})`}
-      tone="danger"
+      overline="Flota"
+      title="Pojazdy do usunięcia"
+      badge={{ tone: 'danger', label: `${rows.length} do przeglądu` }}
     >
-      <Section style={sectionStyle}>
-        <Text style={{ margin: '0 0 8px' }}>Witaj {adminName},</Text>
-        <Text style={{ margin: '0 0 4px' }}>
-          Poniższe pojazdy są nieaktywne co najmniej {thresholdDays} dni
-          kalendarzowych (status „do usunięcia”) na dzień {dateLabel}. Zweryfikuj,
-          czy powinny zostać usunięte z systemu.
-        </Text>
-      </Section>
+      <Paragraph>Witaj {adminName},</Paragraph>
+      <Paragraph>
+        Poniższe pojazdy są nieaktywne co najmniej {thresholdDays} dni
+        kalendarzowych (status „do usunięcia”) na dzień {dateLabel}. Zweryfikuj,
+        czy powinny zostać usunięte z systemu.
+      </Paragraph>
 
-      <Section style={sectionStyle}>
-        <Text
-          style={{ ...labelStyle, color: colors.danger, margin: '0 0 4px' }}
-        >
+      <Block>
+        <p style={{ ...eyebrowStyle, color: colors.brand, margin: '4px 0 10px 0' }}>
           Pojazdy do usunięcia ({rows.length})
-        </Text>
+        </p>
         {rows.map((r) => (
-          <Text key={r.plateNumber} style={cell}>
-            <span style={{ fontWeight: 600 }}>{r.plateNumber}</span>
+          <p key={r.plateNumber} style={rowStyle}>
+            <span style={{ fontWeight: 'bold' }}>{r.plateNumber}</span>
             {r.sideNumber ? ` (${r.sideNumber})` : ''}
             {' — '}
             {r.carrierName}
             {' · od '}
             {r.anchorLabel}
             {' · '}
-            <span style={{ color: colors.danger, fontWeight: 600 }}>
+            <span style={{ color: colors.brand, fontWeight: 'bold' }}>
               {daysLabel(r.daysSinceReturn)} bez wyjazdu
             </span>
-          </Text>
+          </p>
         ))}
-      </Section>
+      </Block>
     </MailLayout>
   );
 }

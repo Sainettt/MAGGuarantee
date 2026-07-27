@@ -1,13 +1,11 @@
 /**
- * Phase 9 — weekly summary report. GAS analog: `sendWeeklyReport`. Template
- * only in this slice; the Monday cron job that feeds it is a separate cron
- * TODO (docs/16-jobs-and-integrations.md).
+ * Weekly summary report. GAS analog: `sendWeeklyReport`. Template only in this
+ * slice; the Monday cron job that feeds it is a separate cron TODO
+ * (docs/16-jobs-and-integrations.md). Design: docs/22-email-design.md.
  */
-import { Column, Row, Section, Text } from '@react-email/components';
 import * as React from 'react';
 
-import { colors, labelStyle, sectionStyle } from './_theme';
-import { Cta, MailLayout } from './MailLayout';
+import { DataSection, FieldRow, MailLayout } from './MailLayout';
 
 export interface WeeklyReportRow {
   label: string;
@@ -29,30 +27,17 @@ export function WeeklyReportEmail({
 }: WeeklyReportProps): React.ReactElement {
   return (
     <MailLayout
-      title="Raport tygodniowy"
       preview={`Raport tygodniowy: ${weekLabel}`}
+      overline="Raport"
+      title="Raport tygodniowy"
+      badge={{ tone: 'neutral', label: weekLabel }}
+      cta={{ href: deeplink, label: 'Otwórz panel' }}
     >
-      <Section style={sectionStyle}>
-        <Text style={{ ...labelStyle, margin: '0 0 12px' }}>{weekLabel}</Text>
+      <DataSection heading="Podsumowanie">
         {rows.map((r) => (
-          <Row key={r.label} style={{ marginBottom: 8 }}>
-            <Column style={{ color: colors.inkMuted, fontSize: 14 }}>
-              {r.label}
-            </Column>
-            <Column
-              style={{
-                textAlign: 'right',
-                fontWeight: 700,
-                fontSize: 15,
-                color: colors.ink,
-              }}
-            >
-              {r.value}
-            </Column>
-          </Row>
+          <FieldRow key={r.label} label={r.label} value={r.value} />
         ))}
-      </Section>
-      <Cta href={deeplink} label="Otwórz panel" />
+      </DataSection>
     </MailLayout>
   );
 }

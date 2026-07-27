@@ -44,7 +44,7 @@ deadline        = addPolishWorkingDays(anchorDate, 7)
 - **Логика:** раз в день сканирует `NA_WERYFIKACJI`, бакетит util'ой; если есть `dueSoon`+`overdue` → шлёт **ОДНО** письмо со списком. **Stateless** — никакого флага «уже уведомили», никакой записи в БД.
 - **Пусто → письма нет** (без «all clear»).
 - **Получатели:** все активные пользователи с ролью `pracownik` (общая очередь, назначения claim'а нет). v1 — **только pracownik** (не admin). `Promise.allSettled` по адресам; per-send `record()` в mail-registry.
-- **Шаблон:** новый `mail/templates/verification-digest.tsx` + метод `MailService.sendVerificationDigest`, по образцу `maksim-confirmation-request.tsx` (бренд `#dc2626`, plain-text fallback).
+- **Шаблон:** `mail/templates/verification-digest.tsx` + метод `MailService.sendVerificationDigest`, plain-text fallback. Визуал — общая email-дизайн-система ([22-email-design.md](22-email-design.md), бренд `#E02020`, не `#dc2626`).
 - **Caveat (в комментарий кода, TODO, не делать сейчас):** один инстанс API — ок; при горизонтальном масштабировании `@Cron` выстрелит на каждом инстансе → нужен Redis-lock (`RedisService` уже есть).
 
 ## 6. Что НЕ делаем

@@ -48,6 +48,7 @@
 | 18 | [18-launch-and-deployment.md](18-launch-and-deployment.md) | Launch: prod-окружение, CI/CD, seed, мониторинг |
 | 19 | [19-known-quirks.md](19-known-quirks.md) | **Known quirks** — load-bearing reference: legacy quirks, business rules, foot-guns. Read BEFORE implementing claims-flow / vehicle-CRUD / delegations / authorization. |
 | 20 | [20-phase-7-eksport-weryfikator.md](20-phase-7-eksport-weryfikator.md) | **Phase 7 импл-спека** — роли `eksport` + `weryfikator` (статус выездов, `lastDroveAt`). Scope частично неясен → делаем как в легаси. |
+| 22 | [22-email-design.md](22-email-design.md) | **Email design system** — единый table-based шаблон транзакционных писем (палитра `#E02020`, блоки, статус-бейджи, `MAIL_LOGO_URL`). |
 
 ## Быстрая навигация по ролям
 
@@ -81,6 +82,10 @@
 
 ### Если ты делаешь auth
 1. [15-auth-strategy.md](15-auth-strategy.md) — JWT + 2FA + Guards.
+
+### Если ты делаешь email-шаблоны
+1. [22-email-design.md](22-email-design.md) — единый шаблон, токены, блоки, статус-бейджи.
+2. Код: `magguarantee-app/apps/api/src/modules/mail/templates/` (`_theme.ts` + `MailLayout.tsx` + шаблоны).
 
 ### Если ты готовишь launch
 1. [18-launch-and-deployment.md](18-launch-and-deployment.md) — prod чек-лист.

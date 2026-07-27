@@ -1,13 +1,18 @@
 /**
- * Phase 9 — daily reminder for claims stuck awaiting verification. GAS analog:
+ * Daily reminder for claims stuck awaiting verification. GAS analog:
  * `sendDailyReminders`. Template only in this slice; the BullMQ scheduled job
  * that feeds it is a separate cron TODO (docs/16-jobs-and-integrations.md).
+ *
+ * Design: docs/22-email-design.md.
  */
-import { Hr, Section, Text } from '@react-email/components';
 import * as React from 'react';
 
-import { colors, hrStyle, labelStyle, sectionStyle } from './_theme';
-import { Cta, MailLayout } from './MailLayout';
+import {
+  DataSection,
+  FieldRow,
+  MailLayout,
+  Paragraph,
+} from './MailLayout';
 
 export interface DailyReminderItem {
   nrZgl: string;
@@ -27,36 +32,33 @@ export function DailyReminderEmail({
 }: DailyReminderProps): React.ReactElement {
   return (
     <MailLayout
-      title="Wnioski oczekujące na weryfikację"
       preview={`${items.length} wniosków czeka na weryfikację`}
-      tone="warning"
+      overline="Przypomnienie"
+      title="Wnioski oczekujące na weryfikację"
+      badge={
+        items.length > 0
+          ? { tone: 'warning', label: `${items.length} oczekuje` }
+          : undefined
+      }
+      cta={{ href: deeplink, label: 'Otwórz panel weryfikacji' }}
     >
-      <Section style={sectionStyle}>
-        <Text style={{ margin: '0 0 12px' }}>
-          Poniższe wnioski oczekują na weryfikację dłużej niż zakładany termin:
-        </Text>
-      </Section>
-      {items.map((it, i) => (
-        <React.Fragment key={it.nrZgl}>
-          {i > 0 ? <Hr style={hrStyle} /> : null}
-          <Section style={sectionStyle}>
-            <Text style={{ fontWeight: 600, margin: '0 0 2px' }}>
-              {it.nrZgl}
-            </Text>
-            <Text style={{ ...labelStyle, margin: 0 }}>
-              {it.vehiclePlate} · oczekuje {it.daysWaiting} dni
-            </Text>
-          </Section>
-        </React.Fragment>
-      ))}
-      {items.length === 0 ? (
-        <Section style={sectionStyle}>
-          <Text style={{ color: colors.inkMuted, margin: 0 }}>
-            Brak zaległych wniosków.
-          </Text>
-        </Section>
-      ) : null}
-      <Cta href={deeplink} label="Otwórz panel weryfikacji" tone="warning" />
+      <Paragraph>
+        Poniższe wnioski oczekują na weryfikację dłużej niż zakładany termin:
+      </Paragraph>
+
+      {items.length > 0 ? (
+        <DataSection heading="Oczekujące wnioski">
+          {items.map((it) => (
+            <FieldRow
+              key={it.nrZgl}
+              label={it.nrZgl}
+              value={`${it.vehiclePlate} · oczekuje ${it.daysWaiting} dni`}
+            />
+          ))}
+        </DataSection>
+      ) : (
+        <Paragraph>Brak zaległych wniosków.</Paragraph>
+      )}
     </MailLayout>
   );
 }

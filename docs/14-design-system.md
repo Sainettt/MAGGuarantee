@@ -324,6 +324,10 @@ npm exec -w web -- shadcn@latest add button input label dialog \
 - Favicon: создать ico/svg на основе логотипа.
 - Заголовок страницы: «MAGGuarantee» (как в текущем `<title>`).
 - В footer / about — ссылка на `https://www.magtrans.eu`.
+- **Email — отдельная дизайн-система:** транзакционные письма НЕ используют
+  веб-токены. Своя палитра (красный `#E02020`), table-based вёрстка на инлайн-стилях,
+  логотип-в-шапке через env `MAIL_LOGO_URL` (иначе текстовый вордмарк). Полная
+  спецификация — [22-email-design.md](22-email-design.md).
 
 ## Иконки
 
@@ -4745,6 +4749,13 @@ This **supersedes** the «Urgent / Required notes» row in the §`<DashboardSide
 
 #### 7.6.3 Digest email accent (confirmation)
 
+> **SUPERSEDED 2026-07-27 → [22-email-design.md](22-email-design.md).** The whole
+> transactional-email fleet now shares one table-based template. The digest's
+> brand red is **`#E02020`** (email palette, distinct from the web `#dc2626`); the
+> header is a neutral logo/wordmark strip (no red top-bar), and the two buckets
+> stay «Po terminie» (brand red) / «Zbliża się termin» (amber `#8A5A16`). The
+> paragraph below is kept for history — treat docs/22 as authoritative.
+
 The daily verification-digest email (`mail/templates/verification-digest.tsx`, §5 of the spec) **keeps the brand accent `#dc2626`** — same as `maksim-confirmation-request.tsx`. Email clients have poor/no support for CSS custom properties and `dark:` variants, so the digest uses **inline brand-red `#dc2626`** for the header bar / heading accent and plain-text fallback, exactly per the existing mail-template convention. Inside the body, the two buckets may be visually separated (e.g. an «Po terminie» group heading in `#dc2626` and a «Zbliża się termin» group in an amber `#f97316` heading), but the **primary brand accent stays `#dc2626`** — no per-email theme tokens, no new colours. This is a hard-coded inline-style context (email), which is the one place inline styles are correct and expected.
 
 #### 7.6.4 Components / tokens / acceptance (Phase 7.6)
@@ -4756,14 +4767,14 @@ The daily verification-digest email (`mail/templates/verification-digest.tsx`, �
 | All-clear card (both buckets empty) | dashboard sidebar | Neutral `<Card>` + `text-success` check + muted text. |
 | Replace old `urgent` sidebar section | `app/(employee)/employee/dashboard/` | Wire the two new sections from `DashboardDto.overdue[]` / `dueSoon[]`. |
 | i18n `dashboard.sla.{overdueTitle,dueSoonTitle,allClear,countdown.*(ICU plural)}` | `messages/pl.json` / `en.json` | — |
-| Digest email keeps inline `#dc2626` brand accent | `mail/templates/verification-digest.tsx` | api-agent; §7.6.3. No DS token (email is inline-style by design). |
+| Digest email inline brand accent (now `#E02020`, see [22-email-design.md](22-email-design.md)) | `mail/templates/verification-digest.tsx` | api-agent; email uses its own table-based design system, no web DS token. |
 | **0** changes to `tailwind.config.ts` / `globals.css`; **0** new colour/badge variants | — | `danger`/`warning` semantics + `-bg` surfaces already exist. |
 
 Acceptance (Phase 7.6):
 - [ ] **Two-level severity, existing tokens.** `overdue` → `danger` (red, brand-aligned), `dueSoon` → `warning` (amber); applied to group header, per-row left-border + tinted surface, and countdown badge; **no new tokens / badge variants**.
 - [ ] **Order.** `overdue` section sits above `dueSoon` in `<DashboardSidebar>`; empty buckets are omitted; both-empty collapses to one calm `text-success` «all-clear» card (no red/amber empty shells).
 - [ ] **A11y.** Urgency never colour-alone (worded countdown badge + header icon/title); rows keyboard-activatable (`role=button`, Enter/Space, `focus-visible:ring-{danger,warning}`); AA contrast on `/15` badges both themes.
-- [ ] **Digest email.** Brand accent stays inline `#dc2626`; empty → no email (§5); no per-email theme tokens.
+- [ ] **Digest email.** Uses the shared email design system ([22-email-design.md](22-email-design.md), brand `#E02020`); empty → no email (§5); no web DS tokens.
 - [ ] **Token policy + dark-mode.** Zero `tailwind.config.ts`/`globals.css` changes; all surfaces legible in dark via `dark:bg-{danger,warning}/10..15` variants.
 
 ---

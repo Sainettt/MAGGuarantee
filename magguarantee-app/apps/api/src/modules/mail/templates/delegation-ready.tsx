@@ -1,12 +1,11 @@
 /**
- * Phase 9 follow-up — "vehicle ready" notification. Sent to the carrier when an
- * eksport marks the outing `gotowy` (`DelegationsService.markReady`).
+ * "Vehicle ready" notification. Sent to the carrier when an eksport marks the
+ * outing `gotowy` (`DelegationsService.markReady`). Design:
+ * docs/22-email-design.md.
  */
-import { Section, Text } from '@react-email/components';
 import * as React from 'react';
 
-import { sectionStyle } from './_theme';
-import { Field, MailLayout } from './MailLayout';
+import { DataSection, FieldRow, MailLayout, Paragraph } from './MailLayout';
 
 export interface DelegationReadyProps {
   carrierName: string;
@@ -22,19 +21,21 @@ export function DelegationReadyEmail({
 }: DelegationReadyProps): React.ReactElement {
   return (
     <MailLayout
-      title="Ciągnik gotowy do wyjazdu"
       preview={`Ciągnik ${plateNumber} jest gotowy`}
-      tone="success"
+      overline="Wyjazd"
+      title="Ciągnik gotowy do wyjazdu"
+      badge={{ tone: 'success', label: 'Gotowy' }}
     >
-      <Section style={sectionStyle}>
-        <Text style={{ margin: '0 0 12px' }}>Witaj {carrierName},</Text>
-        <Text style={{ margin: '0 0 12px' }}>
-          Ciągnik <strong>{plateNumber}</strong> został oznaczony jako gotowy do
-          wyjazdu.
-        </Text>
-        <Field label="Ciągnik">{plateNumber}</Field>
-        <Field label="Wyjazd">{departure}</Field>
-      </Section>
+      <Paragraph>Witaj {carrierName},</Paragraph>
+      <Paragraph>
+        Ciągnik <strong>{plateNumber}</strong> został oznaczony jako gotowy do
+        wyjazdu.
+      </Paragraph>
+
+      <DataSection heading="Wyjazd">
+        <FieldRow label="Ciągnik" value={plateNumber} />
+        <FieldRow label="Wyjazd" value={departure} />
+      </DataSection>
     </MailLayout>
   );
 }

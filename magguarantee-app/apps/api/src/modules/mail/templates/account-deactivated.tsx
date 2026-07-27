@@ -1,12 +1,10 @@
 /**
- * Phase 9 — account-deactivated notification. GAS analog:
- * `sendAccountDeactivatedEmail`. Informs the user their access is suspended.
+ * Account-deactivated notification. GAS analog: `sendAccountDeactivatedEmail`.
+ * Informs the user their access is suspended. Design: docs/22-email-design.md.
  */
-import { Section, Text } from '@react-email/components';
 import * as React from 'react';
 
-import { sectionStyle } from './_theme';
-import { Field, MailLayout } from './MailLayout';
+import { DataSection, FieldRow, MailLayout, Paragraph } from './MailLayout';
 
 export interface AccountDeactivatedProps {
   name: string;
@@ -19,21 +17,22 @@ export function AccountDeactivatedEmail({
 }: AccountDeactivatedProps): React.ReactElement {
   return (
     <MailLayout
-      title="Konto dezaktywowane"
       preview="Twoje konto w MAGGuarantee zostało dezaktywowane"
-      tone="danger"
+      overline="Twoje konto"
+      title="Konto dezaktywowane"
+      badge={{ tone: 'danger', label: 'Dezaktywowane' }}
     >
-      <Section style={sectionStyle}>
-        <Text style={{ margin: '0 0 12px' }}>Szanowny Użytkowniku {name},</Text>
-        <Text style={{ margin: '0 0 12px' }}>
-          Informujemy, że Twoje konto w systemie MAGGuarantee zostało
-          dezaktywowane. Dostęp do systemu został zablokowany.
-        </Text>
-        <Field label="Login">{loginName}</Field>
-        <Text style={{ margin: 0 }}>
-          W sprawach formalnych prosimy o kontakt z administratorem.
-        </Text>
-      </Section>
+      <Paragraph>Szanowny Użytkowniku {name},</Paragraph>
+      <Paragraph>
+        Informujemy, że Twoje konto w systemie MAGGuarantee zostało dezaktywowane.
+        Dostęp do systemu został zablokowany.
+      </Paragraph>
+
+      <DataSection heading="Konto">
+        <FieldRow label="Login" value={loginName} />
+      </DataSection>
+
+      <Paragraph>W sprawach formalnych prosimy o kontakt z administratorem.</Paragraph>
     </MailLayout>
   );
 }

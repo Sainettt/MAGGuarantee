@@ -7,13 +7,12 @@
  *     was null, i.e. this is the first digest to report the breach).
  *
  * Recipient resolves to the opiekun's PERSONAL User.email (not the DAF-OW@
- * group). Modeled on the Phase-9 `MailLayout` chrome.
+ * group). Design: docs/22-email-design.md.
  */
-import { Section, Text } from '@react-email/components';
 import * as React from 'react';
 
-import { colors, labelStyle, sectionStyle } from './_theme';
-import { MailLayout } from './MailLayout';
+import { colors, eyebrowStyle, fontFamily } from './_theme';
+import { Block, MailLayout, Paragraph } from './MailLayout';
 
 /** One vehicle row within a carrier group. */
 export interface GuaranteeOpiekunVehicleRow {
@@ -44,11 +43,14 @@ export interface GuaranteeOpiekunDigestProps {
   violations: GuaranteeOpiekunCarrierGroup[];
 }
 
-const cell: React.CSSProperties = {
+const AMBER = '#8A5A16';
+
+const rowStyle: React.CSSProperties = {
+  margin: '0 0 6px 0',
+  fontFamily,
   fontSize: 14,
+  lineHeight: '20px',
   color: colors.ink,
-  padding: '4px 12px 4px 0',
-  lineHeight: 1.4,
 };
 
 function daysLabel(n: number): string {
@@ -67,29 +69,31 @@ function CarrierGroup({
 }): React.ReactElement {
   return (
     <>
-      <Text
+      <p
         style={{
+          margin: '14px 0 6px 0',
+          fontFamily,
           fontSize: 15,
-          fontWeight: 700,
-          margin: '12px 0 4px',
+          lineHeight: '20px',
+          fontWeight: 'bold',
           color: colors.ink,
         }}
       >
         {group.carrierName}
-      </Text>
+      </p>
       {group.rows.map((r) => (
-        <Text key={r.plateNumber} style={cell}>
-          <span style={{ fontWeight: 600 }}>{r.plateNumber}</span>
+        <p key={r.plateNumber} style={rowStyle}>
+          <span style={{ fontWeight: 'bold' }}>{r.plateNumber}</span>
           {' — '}
           {r.anchorLabel}
           {r.anchorSource === 'agreement' ? ' (objęcie gwarancją)' : ' (zjazd)'}
           {' → termin '}
           {r.deadlineLabel}
           {' · '}
-          <span style={{ color: accent, fontWeight: 600 }}>
+          <span style={{ color: accent, fontWeight: 'bold' }}>
             {daysLabel(r.daysLeft)}
           </span>
-        </Text>
+        </p>
       ))}
     </>
   );
@@ -103,43 +107,41 @@ export function GuaranteeOpiekunDigestEmail({
 }: GuaranteeOpiekunDigestProps): React.ReactElement {
   return (
     <MailLayout
-      title="Gwarancje: przypomnienia i naruszenia"
       preview={`Gwarancje — ${dateLabel}`}
-      tone="brand"
+      overline="Gwarancje"
+      title="Przypomnienia i naruszenia"
     >
-      <Section style={sectionStyle}>
-        <Text style={{ margin: '0 0 8px' }}>Witaj {opiekunName},</Text>
-        <Text style={{ margin: '0 0 4px' }}>
-          Poniżej podsumowanie obowiązku zgłaszania wyjazdów dla Twoich
-          przewoźników na dzień {dateLabel}.
-        </Text>
-      </Section>
+      <Paragraph>Witaj {opiekunName},</Paragraph>
+      <Paragraph>
+        Poniżej podsumowanie obowiązku zgłaszania wyjazdów dla Twoich
+        przewoźników na dzień {dateLabel}.
+      </Paragraph>
 
-      <Section style={sectionStyle}>
-        <Text style={{ ...labelStyle, color: colors.warning, margin: '0 0 4px' }}>
+      <Block>
+        <p style={{ ...eyebrowStyle, color: AMBER, margin: '4px 0 4px 0' }}>
           Zbliżające się terminy
-        </Text>
+        </p>
         {dueSoon.length > 0 ? (
           dueSoon.map((g) => (
-            <CarrierGroup key={g.carrierName} group={g} accent={colors.warning} />
+            <CarrierGroup key={g.carrierName} group={g} accent={AMBER} />
           ))
         ) : (
-          <Text style={{ ...cell, color: colors.inkMuted }}>Brak.</Text>
+          <p style={{ ...rowStyle, color: colors.text }}>Brak.</p>
         )}
-      </Section>
+      </Block>
 
-      <Section style={sectionStyle}>
-        <Text style={{ ...labelStyle, color: colors.danger, margin: '0 0 4px' }}>
+      <Block>
+        <p style={{ ...eyebrowStyle, color: colors.brand, margin: '4px 0 4px 0' }}>
           Naruszenia (zarejestrowane dziś)
-        </Text>
+        </p>
         {violations.length > 0 ? (
           violations.map((g) => (
-            <CarrierGroup key={g.carrierName} group={g} accent={colors.danger} />
+            <CarrierGroup key={g.carrierName} group={g} accent={colors.brand} />
           ))
         ) : (
-          <Text style={{ ...cell, color: colors.inkMuted }}>Brak.</Text>
+          <p style={{ ...rowStyle, color: colors.text }}>Brak.</p>
         )}
-      </Section>
+      </Block>
     </MailLayout>
   );
 }

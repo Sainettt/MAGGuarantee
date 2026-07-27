@@ -1,12 +1,10 @@
 /**
- * Phase 9 — account-reactivated notification. GAS analog:
- * `sendAccountReactivatedEmail`. Informs the user access is restored.
+ * Account-reactivated notification. GAS analog: `sendAccountReactivatedEmail`.
+ * Informs the user access is restored. Design: docs/22-email-design.md.
  */
-import { Section, Text } from '@react-email/components';
 import * as React from 'react';
 
-import { sectionStyle } from './_theme';
-import { Cta, Field, MailLayout } from './MailLayout';
+import { DataSection, FieldRow, MailLayout, Paragraph } from './MailLayout';
 
 export interface AccountReactivatedProps {
   name: string;
@@ -21,19 +19,21 @@ export function AccountReactivatedEmail({
 }: AccountReactivatedProps): React.ReactElement {
   return (
     <MailLayout
-      title="Konto reaktywowane"
       preview="Twoje konto w MAGGuarantee jest znów aktywne"
-      tone="success"
+      overline="Twoje konto"
+      title="Konto reaktywowane"
+      badge={{ tone: 'success', label: 'Aktywne' }}
+      cta={{ href: loginUrl, label: 'Zaloguj się' }}
     >
-      <Section style={sectionStyle}>
-        <Text style={{ margin: '0 0 12px' }}>Witaj {name},</Text>
-        <Text style={{ margin: '0 0 12px' }}>
-          Twoje konto w systemie MAGGuarantee zostało ponownie aktywowane.
-          Możesz znów się zalogować.
-        </Text>
-        <Field label="Login">{loginName}</Field>
-      </Section>
-      <Cta href={loginUrl} label="Zaloguj się" tone="success" />
+      <Paragraph>Witaj {name},</Paragraph>
+      <Paragraph>
+        Twoje konto w systemie MAGGuarantee zostało ponownie aktywowane. Możesz
+        znów się zalogować.
+      </Paragraph>
+
+      <DataSection heading="Konto">
+        <FieldRow label="Login" value={loginName} />
+      </DataSection>
     </MailLayout>
   );
 }

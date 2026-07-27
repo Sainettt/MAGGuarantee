@@ -6,16 +6,13 @@
  * email per carrier per day, listing every vehicle due today. Carriers get NO
  * violation mail — only reminders (client decision, plan §9.2).
  *
- * Intro states the obligation (report a wyjazd within N Polish WORKING days of
- * the last return). Table columns: Nr rej. | Ostatni zjazd / Objęcie gwarancją |
- * Termin | Pozostało dni roboczych. CTA "Zgłoś wyjazd" deeplinks to the carrier
- * delegation form. Modeled on the Phase-9 `MailLayout` chrome.
+ * Design: docs/22-email-design.md. Columns: Nr rej. | Ostatni zjazd / Objęcie
+ * gwarancją | Termin | Pozostało dni roboczych. CTA "Zgłoś wyjazd".
  */
-import { Section, Text } from '@react-email/components';
 import * as React from 'react';
 
-import { colors, labelStyle, sectionStyle } from './_theme';
-import { Cta, MailLayout } from './MailLayout';
+import { colors, eyebrowStyle, fontFamily } from './_theme';
+import { Block, MailLayout, Paragraph } from './MailLayout';
 
 /** One vehicle row in the carrier reminder. */
 export interface GuaranteeReminderCarrierRow {
@@ -43,23 +40,26 @@ export interface GuaranteeReminderCarrierProps {
   deeplink: string;
 }
 
+const AMBER = '#8A5A16';
+
 const cellHead: React.CSSProperties = {
-  ...labelStyle,
-  padding: '0 12px 6px 0',
+  ...eyebrowStyle,
+  padding: '0 12px 8px 0',
   textAlign: 'left',
 };
 
 const cell: React.CSSProperties = {
+  fontFamily,
   fontSize: 14,
+  lineHeight: '20px',
   color: colors.ink,
-  padding: '6px 12px 6px 0',
+  padding: '8px 12px 8px 0',
   borderTop: `1px solid ${colors.border}`,
   verticalAlign: 'top',
 };
 
 /** Polish plural for "dni roboczych" — cardinal-safe for the small counts here. */
 function workingDaysLeftLabel(n: number): string {
-  // 1 → "1 dzień roboczy", 2–4 → "N dni robocze", else → "N dni roboczych".
   if (n === 1) return '1 dzień roboczy';
   if (n >= 2 && n <= 4) return `${n} dni robocze`;
   return `${n} dni roboczych`;
@@ -73,24 +73,26 @@ export function GuaranteeReminderCarrierEmail({
 }: GuaranteeReminderCarrierProps): React.ReactElement {
   return (
     <MailLayout
-      title="Przypomnienie: zgłoś wyjazd"
       preview={`Zgłoś wyjazd — ${rows.length} ciągnik(ów)`}
-      tone="warning"
+      overline="Przypomnienie"
+      title="Zgłoś wyjazd"
+      badge={{ tone: 'warning', label: 'Zbliża się termin' }}
+      cta={{ href: deeplink, label: 'Zgłoś wyjazd' }}
     >
-      <Section style={sectionStyle}>
-        <Text style={{ margin: '0 0 8px' }}>Witaj {carrierName},</Text>
-        <Text style={{ margin: '0 0 12px' }}>
-          Przypominamy, że dla ciągników objętych porozumieniem (gwarancją)
-          należy zgłosić wyjazd w ciągu {deadlineWorkingDays} dni roboczych od
-          ostatniego zjazdu. Poniższe ciągniki zbliżają się do terminu:
-        </Text>
-      </Section>
+      <Paragraph>Witaj {carrierName},</Paragraph>
+      <Paragraph>
+        Przypominamy, że dla ciągników objętych porozumieniem (gwarancją) należy
+        zgłosić wyjazd w ciągu {deadlineWorkingDays} dni roboczych od ostatniego
+        zjazdu. Poniższe ciągniki zbliżają się do terminu:
+      </Paragraph>
 
-      <Section style={sectionStyle}>
+      <Block>
         <table
           role="presentation"
           cellPadding={0}
           cellSpacing={0}
+          border={0}
+          width="100%"
           style={{ width: '100%', borderCollapse: 'collapse' }}
         >
           <thead>
@@ -104,26 +106,24 @@ export function GuaranteeReminderCarrierEmail({
           <tbody>
             {rows.map((r) => (
               <tr key={r.plateNumber}>
-                <td style={{ ...cell, fontWeight: 700 }}>{r.plateNumber}</td>
+                <td style={{ ...cell, fontWeight: 'bold' }}>{r.plateNumber}</td>
                 <td style={cell}>
                   {r.anchorLabel}
-                  <span style={{ color: colors.inkMuted }}>
+                  <span style={{ color: colors.text }}>
                     {r.anchorSource === 'agreement'
                       ? ' (objęcie gwarancją)'
                       : ' (zjazd)'}
                   </span>
                 </td>
                 <td style={cell}>{r.deadlineLabel}</td>
-                <td style={{ ...cell, color: colors.warning, fontWeight: 600 }}>
+                <td style={{ ...cell, color: AMBER, fontWeight: 'bold' }}>
                   {workingDaysLeftLabel(r.daysLeft)}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-      </Section>
-
-      <Cta href={deeplink} label="Zgłoś wyjazd" tone="brand" />
+      </Block>
     </MailLayout>
   );
 }

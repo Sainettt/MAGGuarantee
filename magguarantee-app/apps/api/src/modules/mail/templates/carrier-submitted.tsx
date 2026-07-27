@@ -1,17 +1,24 @@
 /**
- * Phase 9 — "new claim submitted" notification. GAS analog: the `submitNewClaim`
+ * "New claim submitted" notification. GAS analog: the `submitNewClaim`
  * notification. Sent to the carrier (as a receipt, no open button) and to
  * internal staff when a carrier submits a new wniosek; lands in the same Gmail
  * thread as later decision emails (threadKey `wniosek-{nrZgl}`).
  *
  * The "open wniosek" button (`deeplink`) is rendered ONLY when supplied — the
  * caller passes it for admin/pracownik recipients only.
+ *
+ * Design: docs/22-email-design.md (overline → nrZgl → "Oczekuje na weryfikację"
+ * badge → data sections → amount panel).
  */
-import { Section, Text } from '@react-email/components';
 import * as React from 'react';
 
-import { sectionStyle } from './_theme';
-import { Cta, Field, MailLayout } from './MailLayout';
+import { colors } from './_theme';
+import {
+  AmountPanel,
+  DataSection,
+  FieldRow,
+  MailLayout,
+} from './MailLayout';
 
 export interface CarrierSubmittedProps {
   nrZgl: string;
@@ -49,47 +56,56 @@ export function CarrierSubmittedEmail({
   paymentEur,
   deeplink,
 }: CarrierSubmittedProps): React.ReactElement {
+  const hasKm = Boolean(kmGuaranteed || kmDriven || kmShortfall);
+  const headline = amountRequested ?? paymentEur;
   return (
     <MailLayout
-      title={`Nowy wniosek: ${nrZgl}`}
       preview={`Nowy wniosek ${nrZgl} od ${carrierName}`}
+      overline="Nowy wniosek o gwarancję"
+      title={nrZgl}
+      badge={{ tone: 'warning', label: 'Oczekuje na weryfikację' }}
+      cta={deeplink ? { href: deeplink, label: 'Otwórz wniosek' } : undefined}
+      note="Wniosek oczekuje na weryfikację. Po decyzji otrzymasz kolejną wiadomość."
     >
-      <Section style={sectionStyle}>
-        <Field label="Przewoźnik">{carrierName}</Field>
-        <Field label="Ciągnik">{vehiclePlate}</Field>
-        <Field label="Okres">
-          {periodFrom} → {periodTo}
-        </Field>
+      <DataSection heading="Przewoźnik">
+        <FieldRow label="Firma" value={carrierName} />
+        <FieldRow label="Ciągnik" value={vehiclePlate} />
+      </DataSection>
+
+      <DataSection heading="Okres rozliczeniowy">
+        <FieldRow label="Zakres dat" value={`${periodFrom} – ${periodTo}`} />
         {drivenDays ? (
-          <Field label="Dni przepracowane">{drivenDays}</Field>
+          <FieldRow label="Dni przepracowane" value={drivenDays} />
         ) : null}
-      </Section>
+      </DataSection>
 
-      <Section style={sectionStyle}>
-        {kmGuaranteed ? (
-          <Field label="Kilometry gwarantowane">{kmGuaranteed} km</Field>
-        ) : null}
-        {kmDriven ? (
-          <Field label="Kilometry przejechane">{kmDriven} km</Field>
-        ) : null}
-        {kmShortfall ? (
-          <Field label="Niedobór kilometrów">{kmShortfall} km</Field>
-        ) : null}
-      </Section>
+      {hasKm ? (
+        <DataSection heading="Kilometry">
+          {kmGuaranteed ? (
+            <FieldRow label="Gwarantowane" value={`${kmGuaranteed} km`} />
+          ) : null}
+          {kmDriven ? (
+            <FieldRow label="Przejechane" value={`${kmDriven} km`} />
+          ) : null}
+          {kmShortfall ? (
+            <FieldRow
+              label="Niedobór"
+              value={`${kmShortfall} km`}
+              valueColor={colors.brand}
+            />
+          ) : null}
+        </DataSection>
+      ) : null}
 
-      <Section style={sectionStyle}>
-        {amountRequested ? (
-          <Field label="Kwota wnioskowana">{amountRequested} EUR</Field>
-        ) : null}
-        {paymentEur ? (
-          <Field label="Wyliczona rekompensata">{paymentEur} EUR</Field>
-        ) : null}
-        <Text style={{ margin: '4px 0 0' }}>
-          Wniosek oczekuje na weryfikację.
-        </Text>
-      </Section>
+      {headline ? (
+        <AmountPanel label="Kwota wnioskowana" value={`${headline} EUR`} />
+      ) : null}
 
-      {deeplink ? <Cta href={deeplink} label="Otwórz wniosek" /> : null}
+      {amountRequested && paymentEur ? (
+        <DataSection heading="Rozliczenie">
+          <FieldRow label="Wyliczona rekompensata" value={`${paymentEur} EUR`} />
+        </DataSection>
+      ) : null}
     </MailLayout>
   );
 }

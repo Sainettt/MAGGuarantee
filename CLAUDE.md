@@ -22,6 +22,7 @@
 | Prisma schema | [`docs/12-database-schema.md`](docs/12-database-schema.md) |
 | REST API endpoints | [`docs/13-api-design.md`](docs/13-api-design.md) |
 | Design system (tokens, Tailwind, components) | [`docs/14-design-system.md`](docs/14-design-system.md) |
+| Email design system (transactional mail templates) | [`docs/22-email-design.md`](docs/22-email-design.md) |
 | Auth (JWT, 2FA, guards) | [`docs/15-auth-strategy.md`](docs/15-auth-strategy.md) |
 | Cron, email, integrations | [`docs/16-jobs-and-integrations.md`](docs/16-jobs-and-integrations.md) |
 | Phased development plan | [`docs/17-migration-roadmap.md`](docs/17-migration-roadmap.md) |

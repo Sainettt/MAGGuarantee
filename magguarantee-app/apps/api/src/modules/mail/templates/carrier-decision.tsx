@@ -1,20 +1,26 @@
 /**
- * Phase 9 — verification outcome email to the CARRIER. GAS analog:
- * `buildCarrierEmail`. The header tone is driven by the decision (accepted →
- * green, rejected → red, etc.) per the legacy `CONFIG.KOLORY` colour mapping.
+ * Verification outcome email to the CARRIER. GAS analog: `buildCarrierEmail`.
+ * The status badge is driven by the decision (accepted → green, rejected → red)
+ * per the legacy `CONFIG.KOLORY` colour mapping — now expressed as a status
+ * pill instead of a tinted header (docs/22-email-design.md §5).
  */
-import { Section, Text } from '@react-email/components';
 import * as React from 'react';
 
-import { amountStyle, labelStyle, sectionStyle, toneColor, type Tone } from './_theme';
-import { Cta, Field, MailLayout } from './MailLayout';
+import { criticalColor, eyebrowStyle, paragraphStyle, type Tone } from './_theme';
+import {
+  AmountPanel,
+  Block,
+  DataSection,
+  FieldRow,
+  MailLayout,
+} from './MailLayout';
 
 export interface CarrierDecisionProps {
   /** Numer zgłoszenia, e.g. `GWA/001/05/26`. */
   nrZgl: string;
   /** Human label of the decision, e.g. `ZAAKCEPTOWANO`. */
   decisionLabel: string;
-  /** Header / amount accent colour for the decision. */
+  /** Status accent for the decision (success = accepted, danger = rejected). */
   tone: Tone;
   vehiclePlate: string;
   periodFrom: string;
@@ -39,33 +45,27 @@ export function CarrierDecisionEmail({
 }: CarrierDecisionProps): React.ReactElement {
   return (
     <MailLayout
-      title={`Wniosek ${nrZgl}: ${decisionLabel}`}
       preview={`${nrZgl} — ${decisionLabel}`}
-      tone={tone}
+      overline="Decyzja w sprawie wniosku"
+      title={nrZgl}
+      badge={{ tone, label: decisionLabel }}
+      cta={{ href: deeplink, label: 'Otwórz wniosek' }}
     >
-      <Section style={sectionStyle}>
-        <Field label="Ciągnik">{vehiclePlate}</Field>
-        <Field label="Okres">
-          {periodFrom} → {periodTo}
-        </Field>
-        {amount ? (
-          <>
-            <Text style={labelStyle}>Kwota</Text>
-            <Text style={{ ...amountStyle, color: toneColor(tone) }}>
-              {amount} EUR
-            </Text>
-          </>
-        ) : null}
-        {comment ? (
-          <>
-            <Text style={{ ...labelStyle, marginTop: 16 }}>Komentarz</Text>
-            <Text style={{ whiteSpace: 'pre-line', margin: '0 0 8px' }}>
-              {comment}
-            </Text>
-          </>
-        ) : null}
-      </Section>
-      <Cta href={deeplink} label="Otwórz wniosek" tone={tone} />
+      <DataSection heading="Wniosek">
+        <FieldRow label="Ciągnik" value={vehiclePlate} />
+        <FieldRow label="Okres" value={`${periodFrom} – ${periodTo}`} />
+      </DataSection>
+
+      {amount ? (
+        <AmountPanel label="Kwota" value={`${amount} EUR`} valueColor={criticalColor(tone)} />
+      ) : null}
+
+      {comment ? (
+        <Block>
+          <p style={{ ...eyebrowStyle, margin: '18px 0 8px 0' }}>Komentarz</p>
+          <p style={{ ...paragraphStyle, whiteSpace: 'pre-line' }}>{comment}</p>
+        </Block>
+      ) : null}
     </MailLayout>
   );
 }

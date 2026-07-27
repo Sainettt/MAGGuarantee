@@ -1,15 +1,14 @@
 /**
- * Phase 9 follow-up — "new wyjazd announced" notification. Sent when a carrier
- * registers a delegation (`DelegationsService.add`): to the carrier as a
- * confirmation receipt, and to their opiekun as an internal heads-up.
+ * "New wyjazd announced" notification. Sent when a carrier registers a
+ * delegation (`DelegationsService.add`): to the carrier as a confirmation
+ * receipt, and to their opiekun as an internal heads-up.
  *
  * `forCarrier` toggles the intro line; the wyjazd details below are identical.
+ * Design: docs/22-email-design.md.
  */
-import { Section, Text } from '@react-email/components';
 import * as React from 'react';
 
-import { sectionStyle } from './_theme';
-import { Field, MailLayout } from './MailLayout';
+import { DataSection, FieldRow, MailLayout, Paragraph } from './MailLayout';
 
 export interface DelegationAnnouncedProps {
   /** Carrier confirmation (true) vs internal opiekun heads-up (false). */
@@ -33,23 +32,23 @@ export function DelegationAnnouncedEmail({
 }: DelegationAnnouncedProps): React.ReactElement {
   return (
     <MailLayout
-      title="Nowy wyjazd zgłoszony"
       preview={`Wyjazd ${plateNumber} — ${departure}`}
+      overline="Wyjazd"
+      title="Nowy wyjazd zgłoszony"
     >
-      <Section style={sectionStyle}>
-        <Text style={{ margin: '0 0 12px' }}>
-          {forCarrier
-            ? 'Twój wyjazd został zarejestrowany w systemie MAGGuarantee.'
-            : `Przewoźnik ${carrierName} zgłosił nowy wyjazd.`}
-        </Text>
-      </Section>
-      <Section style={sectionStyle}>
-        {!forCarrier ? <Field label="Przewoźnik">{carrierName}</Field> : null}
-        <Field label="Ciągnik">{plateNumber}</Field>
-        <Field label="Kierowca">{driverName}</Field>
-        <Field label="Wyjazd">{departure}</Field>
-        <Field label="Planowany powrót">{plannedReturn}</Field>
-      </Section>
+      <Paragraph>
+        {forCarrier
+          ? 'Twój wyjazd został zarejestrowany w systemie MAGGuarantee.'
+          : `Przewoźnik ${carrierName} zgłosił nowy wyjazd.`}
+      </Paragraph>
+
+      <DataSection heading="Szczegóły wyjazdu">
+        {!forCarrier ? <FieldRow label="Przewoźnik" value={carrierName} /> : null}
+        <FieldRow label="Ciągnik" value={plateNumber} />
+        <FieldRow label="Kierowca" value={driverName} />
+        <FieldRow label="Wyjazd" value={departure} />
+        <FieldRow label="Planowany powrót" value={plannedReturn} />
+      </DataSection>
     </MailLayout>
   );
 }

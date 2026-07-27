@@ -1,14 +1,18 @@
 /**
- * Phase 9 — verification outcome email to INTERNAL staff (planiści, opiekun,
- * lider, wnioski@). GAS analog: `sendInternalDecisionEmail`. Same data as the
- * carrier email plus the carrier name, since internal recipients handle many
- * carriers.
+ * Verification outcome email to INTERNAL staff (planiści, opiekun, lider,
+ * wnioski@). GAS analog: `sendInternalDecisionEmail`. Same data as the carrier
+ * email plus the carrier name, since internal recipients handle many carriers.
  */
-import { Section, Text } from '@react-email/components';
 import * as React from 'react';
 
-import { amountStyle, labelStyle, sectionStyle, toneColor, type Tone } from './_theme';
-import { Cta, Field, MailLayout } from './MailLayout';
+import { criticalColor, eyebrowStyle, paragraphStyle, type Tone } from './_theme';
+import {
+  AmountPanel,
+  Block,
+  DataSection,
+  FieldRow,
+  MailLayout,
+} from './MailLayout';
 
 export interface InternalDecisionProps {
   nrZgl: string;
@@ -38,34 +42,28 @@ export function InternalDecisionEmail({
 }: InternalDecisionProps): React.ReactElement {
   return (
     <MailLayout
-      title={`Wniosek ${nrZgl}: ${decisionLabel}`}
       preview={`${nrZgl} — ${decisionLabel} (${carrierName})`}
-      tone={tone}
+      overline="Decyzja w sprawie wniosku"
+      title={nrZgl}
+      badge={{ tone, label: decisionLabel }}
+      cta={{ href: deeplink, label: 'Otwórz w MAGGuarantee' }}
     >
-      <Section style={sectionStyle}>
-        <Field label="Przewoźnik">{carrierName}</Field>
-        <Field label="Ciągnik">{vehiclePlate}</Field>
-        <Field label="Okres">
-          {periodFrom} → {periodTo}
-        </Field>
-        {amount ? (
-          <>
-            <Text style={labelStyle}>Kwota</Text>
-            <Text style={{ ...amountStyle, color: toneColor(tone) }}>
-              {amount} EUR
-            </Text>
-          </>
-        ) : null}
-        {comment ? (
-          <>
-            <Text style={{ ...labelStyle, marginTop: 16 }}>Komentarz</Text>
-            <Text style={{ whiteSpace: 'pre-line', margin: '0 0 8px' }}>
-              {comment}
-            </Text>
-          </>
-        ) : null}
-      </Section>
-      <Cta href={deeplink} label="Otwórz w MAGGuarantee" tone={tone} />
+      <DataSection heading="Wniosek">
+        <FieldRow label="Przewoźnik" value={carrierName} />
+        <FieldRow label="Ciągnik" value={vehiclePlate} />
+        <FieldRow label="Okres" value={`${periodFrom} – ${periodTo}`} />
+      </DataSection>
+
+      {amount ? (
+        <AmountPanel label="Kwota" value={`${amount} EUR`} valueColor={criticalColor(tone)} />
+      ) : null}
+
+      {comment ? (
+        <Block>
+          <p style={{ ...eyebrowStyle, margin: '18px 0 8px 0' }}>Komentarz</p>
+          <p style={{ ...paragraphStyle, whiteSpace: 'pre-line' }}>{comment}</p>
+        </Block>
+      ) : null}
     </MailLayout>
   );
 }

@@ -87,9 +87,12 @@ describe('VerificationDigestEmail', () => {
     expect(html).toContain(FIXTURE.deeplink);
   });
 
-  it('uses MAGTRANS RED brand color', () => {
+  it('uses the email brand red (#E02020)', () => {
     const html = renderHtml(FIXTURE);
-    expect(html.toLowerCase()).toContain('#dc2626');
+    // The email design system (docs/22-email-design.md §1) uses #E02020 — a
+    // distinct red from the web app's #dc2626. Rendered inline styles lower-case
+    // hex, so match case-insensitively.
+    expect(html.toLowerCase()).toContain('#e02020');
   });
 
   it('omits the overdue group cleanly when there are no overdue claims', () => {
