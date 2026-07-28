@@ -9,7 +9,6 @@ import {
 } from '../carriers/carrier-readiness.service';
 import { CarriersRepository } from '../carriers/carriers.repository';
 import { DriversRepository } from '../drivers/drivers.repository';
-import { ChatNotifierService } from '../integrations/chat/chat-notifier.service';
 import { TrailersRepository } from '../trailers/trailers.repository';
 import { VehiclesRepository } from '../vehicles/vehicles.repository';
 import { DelegationsRepository } from './delegations.repository';
@@ -134,10 +133,6 @@ function makeService(readiness: CarrierReadiness) {
     forCarrier: jest.fn(async () => readiness),
   } as unknown as CarrierReadinessService;
 
-  const chat = {
-    notifyWyjazd: jest.fn(async () => undefined),
-  } as unknown as ChatNotifierService;
-
   const service = new DelegationsService(
     delegations,
     carriers,
@@ -145,9 +140,8 @@ function makeService(readiness: CarrierReadiness) {
     drivers,
     trailers,
     readinessSvc,
-    chat,
   );
-  return { service, createSpy, readinessSvc, chat };
+  return { service, createSpy, readinessSvc };
 }
 
 async function expectCarrierNotReady(promise: Promise<unknown>) {

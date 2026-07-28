@@ -12,7 +12,6 @@ import {
 } from '../carriers/carrier-readiness.service';
 import { CarriersRepository } from '../carriers/carriers.repository';
 import { DriversRepository } from '../drivers/drivers.repository';
-import { ChatNotifierService } from '../integrations/chat/chat-notifier.service';
 import { TrailersRepository } from '../trailers/trailers.repository';
 import { VehiclesRepository } from '../vehicles/vehicles.repository';
 import {
@@ -186,10 +185,6 @@ function makeService(conflict: DelegationRow | null) {
     forCarrier: jest.fn(async () => readyState()),
   } as unknown as CarrierReadinessService;
 
-  const chat = {
-    notifyWyjazd: jest.fn(async () => undefined),
-  } as unknown as ChatNotifierService;
-
   const service = new DelegationsService(
     delegations,
     carriers,
@@ -197,7 +192,6 @@ function makeService(conflict: DelegationRow | null) {
     drivers,
     trailers,
     readinessSvc,
-    chat,
   );
   return { service, createSpy, findActiveSpy };
 }

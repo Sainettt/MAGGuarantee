@@ -11,7 +11,6 @@ import {
 } from '../carriers/carrier-readiness.service';
 import { CarriersRepository } from '../carriers/carriers.repository';
 import { DriversRepository } from '../drivers/drivers.repository';
-import { ChatNotifierService } from '../integrations/chat/chat-notifier.service';
 import { TrailersRepository } from '../trailers/trailers.repository';
 import { VehiclesRepository } from '../vehicles/vehicles.repository';
 import {
@@ -73,8 +72,8 @@ function readyState(): CarrierReadiness {
  * minimal fake reading `ALLOW_PAST_DEPARTURE`.
  *
  * Constructor order (positional): delegations, carriers, vehicles, drivers,
- * trailers, readiness, chat, claimsService?, mailService?, prisma?,
- * configService? — so slots 8/9/10 are `undefined`, config goes in slot 11.
+ * trailers, readiness, claimsService?, mailService?, prisma?, configService?
+ * — so slots 7/8/9 are `undefined`, config goes in slot 10.
  */
 function makeService(withConfig: ConfigService<Env, true> | undefined) {
   const createSpy = jest.fn(async (data: Record<string, unknown>) => ({
@@ -145,10 +144,6 @@ function makeService(withConfig: ConfigService<Env, true> | undefined) {
     forCarrier: jest.fn(async () => readyState()),
   } as unknown as CarrierReadinessService;
 
-  const chat = {
-    notifyWyjazd: jest.fn(async () => undefined),
-  } as unknown as ChatNotifierService;
-
   const service = new DelegationsService(
     delegations,
     carriers,
@@ -156,11 +151,10 @@ function makeService(withConfig: ConfigService<Env, true> | undefined) {
     drivers,
     trailers,
     readinessSvc,
-    chat,
-    undefined, // claimsService (slot 8)
-    undefined, // mailService (slot 9)
-    undefined, // prisma (slot 10)
-    withConfig, // configService (slot 11)
+    undefined, // claimsService (slot 7)
+    undefined, // mailService (slot 8)
+    undefined, // prisma (slot 9)
+    withConfig, // configService (slot 10)
   );
   return { service, createSpy };
 }

@@ -488,7 +488,6 @@ export function DelegationDetailModal({
 
   // Block E — «ZESPÓŁ PROWADZĄCY» (§7.9.7). A `span:'full'` block AFTER the
   // km-calendar, so the reading order ends with "who is steering this trip".
-  // The header deliberately mirrors the Google Chat trip-notification heading.
   //
   // Shows the CURRENT `Vehicle.dispatchTeam` (live, not a snapshot). Omitted
   // entirely when there is no resolvable vehicle (per §6.4 "empty section
@@ -522,7 +521,7 @@ export function DelegationDetailModal({
         },
         // Planista (lead forwarder) — resolved LIVE off the delegation's
         // vehicle (`Vehicle.planner`), so every role sees the FULL crew here:
-        // planista + dispatch team + eksport (mirrors the gchat ZESPÓŁ line).
+        // planista + dispatch team + eksport.
         {
           label: tTeam('planista'),
           value: textValue(

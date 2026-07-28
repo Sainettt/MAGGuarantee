@@ -29,7 +29,6 @@ import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import type { CarrierReadinessService } from '../carriers/carrier-readiness.service';
 import type { CarriersRepository } from '../carriers/carriers.repository';
 import type { DriversRepository } from '../drivers/drivers.repository';
-import type { ChatNotifierService } from '../integrations/chat/chat-notifier.service';
 import type { TrailersRepository } from '../trailers/trailers.repository';
 import type { VehiclesRepository } from '../vehicles/vehicles.repository';
 import {
@@ -165,7 +164,6 @@ function build(opts: {
     {} as unknown as DriversRepository,
     {} as unknown as TrailersRepository,
     {} as unknown as CarrierReadinessService,
-    {} as unknown as ChatNotifierService,
     claimsService,
   );
   return {

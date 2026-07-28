@@ -40,7 +40,6 @@ import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CarriersRepository } from '../carriers/carriers.repository';
 import { DriversRepository } from '../drivers/drivers.repository';
-import { ChatNotifierService } from '../integrations/chat/chat-notifier.service';
 import { TrailersRepository } from '../trailers/trailers.repository';
 import {
   NO_TEAM_SENTINEL,
@@ -89,7 +88,6 @@ export class DelegationsService {
     private readonly drivers: DriversRepository,
     private readonly trailers: TrailersRepository,
     private readonly readiness: CarrierReadinessService,
-    private readonly chat: ChatNotifierService,
     // Phase 7 REWORK (2026-06-20 #4) — the `returned()` transition calls the
     // claims auto-recalc inside the `@Audit`-opened ambient transaction.
     // `@Optional()` + `forwardRef` so the circular DelegationsModule↔ClaimsModule
@@ -162,31 +160,15 @@ export class DelegationsService {
       reportedById: user.sub,
     });
 
-    // Side-effect: post the wyjazd to the standing Google Chat space. This is
-    // a fire-and-forget enqueue — the actual webhook POST happens off the
-    // request path in the `chat-notify-wyjazd` processor. It must NEVER break
-    // or delay `add()`, so any failure here is swallowed (warn-only). The
-    // notifier itself also catches internally; the try/catch is belt-and-
-    // suspenders per docs/16-jobs-and-integrations.md#google-chat-notifications.
-    try {
-      await this.chat.notifyWyjazd(row.id);
-    } catch (err) {
-      this.logger.warn({
-        msg: 'chat wyjazd notification enqueue failed (non-fatal)',
-        delegationId: row.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
     // New-wyjazd email — carrier (confirmation) + opiekun (heads-up).
     // Fire-and-log, off the request path; never breaks add().
     void this._notifyWyjazd('announced', row);
 
     // Guarantee Watchdog resolve-hook — a reported wyjazd closes the vehicle's
     // open idle episode (instant banner-clear, not waiting for the cron). The
-    // hook itself catches everything; the belt-and-suspenders try/catch mirrors
-    // the chat notifier so a hook failure NEVER breaks add(). No-op when the
-    // service isn't wired (unit tests).
+    // hook itself catches everything; the belt-and-suspenders `.catch()` keeps
+    // a hook failure from ever breaking add(). No-op when the service isn't
+    // wired (unit tests).
     if (this.guaranteeWatchdog) {
       void this.guaranteeWatchdog
         .onDelegationCreated(row.vehicleId, row.id)

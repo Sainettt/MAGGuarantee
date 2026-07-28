@@ -4,7 +4,6 @@ import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { CarrierReadinessService } from '../carriers/carrier-readiness.service';
 import { CarriersRepository } from '../carriers/carriers.repository';
 import { DriversRepository } from '../drivers/drivers.repository';
-import { ChatNotifierService } from '../integrations/chat/chat-notifier.service';
 import { TrailersRepository } from '../trailers/trailers.repository';
 import { VehiclesRepository } from '../vehicles/vehicles.repository';
 import {
@@ -59,7 +58,6 @@ function makeService() {
     {} as unknown as DriversRepository,
     {} as unknown as TrailersRepository,
     {} as unknown as CarrierReadinessService,
-    {} as unknown as ChatNotifierService,
   );
   return { service, listSpy };
 }

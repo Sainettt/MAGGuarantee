@@ -86,7 +86,7 @@ import { VerificationSlaModule } from './modules/verification-sla/verification-s
     // Scheduled jobs (docs/21 §5 — verification-SLA daily digest is the first).
     ScheduleModule.forRoot(),
     // BullMQ root (in-process workers). Global — must be imported before the
-    // feature modules that `BullModule.registerQueue(...)` (Mail / Chat).
+    // feature modules that `BullModule.registerQueue(...)` (Mail).
     // docs/16-jobs-and-integrations.md#структура-bullmq.
     JobsModule,
     PrismaModule,

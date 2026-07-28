@@ -1,0 +1,249 @@
+# MAGGuarantee — PRODUCTION stack.
+#
+# Build context for api/web is `../magguarantee-app` (relative to this file).
+# Env source of truth is `infra/.env`, built from `.env.prod.example`. Compose
+# auto-loads it (same directory) both for `${...}` interpolation here AND for
+# the `env_file:` directive on api — no `--env-file` flag needed.
+#
+# Deploy on the VPS:
+#
+#   cd /opt/magguarantee/src
+#   git pull
+#   docker compose -f infra/docker-compose.prod.yml build
+#   docker compose -f infra/docker-compose.prod.yml run --rm -T api \
+#     node_modules/.bin/prisma migrate deploy --schema=prisma/schema.prisma < /dev/null
+#   docker compose -f infra/docker-compose.prod.yml up -d
+#
+# Migrations run BEFORE `up -d` and AFTER `build` — the image bakes
+# prisma/migrations in at build time, so migrating against a stale image
+# silently reports "nothing to apply" (incident 2026-05-14).
+#
+# One-time first deploy only, after the migrations:
+#   docker compose -f infra/docker-compose.prod.yml run --rm -T \
+#     -e SEED_ADMIN_PASSWORD='...' api node_modules/.bin/tsx prisma/seed.prod.ts < /dev/null
+#
+# Required pre-step (one-time per VPS):
+#   docker network create proxy-net
+#
+# ── How this differs from docker-compose.staging.yml ─────────────────────────
+#   1. No mailhog — production sends through the Gmail API.
+#   2. api/web publish NO host ports; Caddy reaches them over `proxy-net`.
+#   3. web gets an explicit `environment:` instead of `env_file: .env`, so DB
+#      credentials, JWT secrets and the Gmail refresh token never enter the web
+#      container. It reads exactly three keys (verified against the source).
+#   4. Postgres runs with tuned memory settings (see the note on the service).
+#   5. Data paths come from the `.env` and must be absolute.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: magguarantee-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: magguarantee
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required in .env}
+      POSTGRES_DB: magguarantee
+    volumes:
+      - ${POSTGRES_DATA:?POSTGRES_DATA required in .env — use an absolute path}:/var/lib/postgresql/data
+    # Loopback only: reachable from the VPS host, invisible to the internet
+    # (ufw blocks 5432 anyway). GUI clients connect through an SSH tunnel:
+    #   ssh -L 5433:127.0.0.1:5432 deploy@vps
+    ports:
+      - '127.0.0.1:5432:5432'
+    # Sized for a 4 GB VPS carrying 15-20 concurrent users. If the box is
+    # bigger, raise `shared_buffers` to ~25% of RAM and `effective_cache_size`
+    # to ~75%; the rest can stay as-is. Do NOT copy the 2GB/4GB figures from
+    # docs/18 onto a small box — Postgres will fail to start.
+    #   4 GB  → 256MB / 1GB    (below)
+    #   8 GB  → 2GB   / 6GB
+    #   16 GB → 4GB   / 12GB
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c work_mem=8MB
+      -c maintenance_work_mem=128MB
+      -c max_connections=50
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U magguarantee']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+    logging:
+      driver: json-file
+      options:
+        max-size: '50m'
+        max-file: '3'
+
+  redis:
+    image: redis:7-alpine
+    container_name: magguarantee-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+    volumes:
+      - ${REDIS_DATA:?REDIS_DATA required in .env — use an absolute path}:/data
+    # Not published on the host. Debug from the VPS with:
+    #   docker compose -f infra/docker-compose.prod.yml exec redis redis-cli
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+    logging:
+      driver: json-file
+      options:
+        max-size: '20m'
+        max-file: '3'
+
+  # Self-hosted object storage for attachment uploads (driver ID scans,
+  # porozumienia, authorization screenshots). These are retained documents:
+  # MINIO_DATA must be covered by the backup job alongside Postgres — the
+  # pg_dump script does NOT touch it.
+  #
+  # To move to external S3 (Cloudflare R2 / Hetzner) instead: repoint the S3_*
+  # keys in .env, then delete this service, `minio-init`, MINIO_DATA, and the
+  # `minio-init` entry in api's `depends_on`.
+  minio:
+    image: minio/minio:latest
+    container_name: magguarantee-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      # Baked into the data directory on FIRST init — changing them later
+      # against an existing directory breaks auth.
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?S3_ACCESS_KEY required in .env}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?S3_SECRET_KEY required in .env}
+    volumes:
+      - ${MINIO_DATA:?MINIO_DATA required in .env — use an absolute path}:/data
+    # Loopback only — the API reaches MinIO over `internal`. These ports exist
+    # for SSH-tunnel admin (console on 9001).
+    ports:
+      - '127.0.0.1:9000:9000'
+      - '127.0.0.1:9001:9001'
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+    logging:
+      driver: json-file
+      options:
+        max-size: '20m'
+        max-file: '3'
+
+  # One-shot: waits for MinIO, creates the bucket if missing, exits 0. `api`
+  # waits for a successful completion so uploads never hit a missing bucket.
+  minio-init:
+    image: minio/mc:latest
+    container_name: magguarantee-minio-init
+    restart: 'no'
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${S3_ACCESS_KEY} ${S3_SECRET_KEY} &&
+      mc mb --ignore-existing local/${S3_BUCKET:-magguarantee} &&
+      echo 'MinIO bucket ${S3_BUCKET:-magguarantee} ready';
+      "
+    networks:
+      - internal
+    logging:
+      driver: json-file
+      options:
+        max-size: '5m'
+        max-file: '2'
+
+  api:
+    # Built on the VPS, same as staging. Note that `build` here also compiles
+    # the web image below — on a small box the Next.js build is the memory
+    # hotspot, so make sure there is swap.
+    #
+    # To switch to prebuilt images from GHCR later (atomic rollback by tag
+    # swap), replace the `build:` block with:
+    #   image: ghcr.io/${GHCR_OWNER}/magguarantee-api:${API_TAG}
+    build:
+      context: ../magguarantee-app
+      dockerfile: apps/api/Dockerfile
+    container_name: magguarantee-api
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+    # No published ports — Caddy reaches api over `proxy-net` by container name
+    # (`reverse_proxy magguarantee-api:3001`). To debug through an SSH tunnel,
+    # add `ports: ['127.0.0.1:3001:3001']` TEMPORARILY and remove it after.
+    networks:
+      - internal
+      - proxy-net
+    # Healthcheck is defined in apps/api/Dockerfile and inherited here.
+    logging:
+      driver: json-file
+      options:
+        max-size: '100m'
+        max-file: '5'
+
+  web:
+    build:
+      context: ../magguarantee-app
+      dockerfile: apps/web/Dockerfile
+      args:
+        # NEXT_PUBLIC_* are baked into the CLIENT bundle at BUILD time. Changing
+        # either of these in .env requires `docker compose build web` — a
+        # restart alone keeps the stale value.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL required in .env}
+        # Production rule is "backdated wyjazdy forbidden". Defaults to false so
+        # an .env missing the key keeps prod semantics.
+        NEXT_PUBLIC_ALLOW_PAST_DEPARTURE: ${NEXT_PUBLIC_ALLOW_PAST_DEPARTURE:-false}
+    container_name: magguarantee-web
+    restart: unless-stopped
+    # Deliberately NOT `env_file: .env` — that would hand the web container the
+    # database URL, both JWT secrets, the S3 credentials and the Gmail refresh
+    # token, none of which it uses. The three keys below are everything the web
+    # source actually reads.
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      HOSTNAME: '0.0.0.0'
+      # Server-side base for Route Handlers / Server Components running inside
+      # this container — resolved on the docker network, not the public URL.
+      API_URL: ${API_URL:-http://magguarantee-api:3001}
+      # Also passed at runtime so server-rendered code sees the same value the
+      # client bundle was built with.
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+      NEXT_PUBLIC_ALLOW_PAST_DEPARTURE: ${NEXT_PUBLIC_ALLOW_PAST_DEPARTURE:-false}
+    depends_on:
+      - api
+    # No published ports — Caddy reaches web over `proxy-net`
+    # (`reverse_proxy magguarantee-web:3000`).
+    networks:
+      - proxy-net
+    # Healthcheck is defined in apps/web/Dockerfile and inherited here.
+    logging:
+      driver: json-file
+      options:
+        max-size: '50m'
+        max-file: '3'
+
+networks:
+  internal:
+    driver: bridge
+  # Shared with Caddy and every other app on the VPS. Created once:
+  #   docker network create proxy-net
+  proxy-net:
+    external: true
