@@ -1,9 +1,25 @@
 name: CI / CD
 
+# Push и PR только ПРОВЕРЯЮТ код — ничего никуда не выкатывается.
+# Деплой запускается вручную: Actions → CI / CD → Run workflow → выбрать target.
+#
+# Так сделано после инцидента 2026-07-28: раньше `deploy-staging` срабатывала на
+# каждый push в main и накатывала staging-компоуз (с mailhog и проброшенными
+# портами) поверх стека, который к тому моменту уже был поднят прод-компоузом.
+# Автодеплой хорош, пока сервер один и назначение у него одно.
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Куда выкатывать'
+        type: choice
+        options:
+          - staging
+          - prod
+        required: true
 
 jobs:
   build:
@@ -25,87 +41,99 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run build
+      # DATABASE_URL здесь намеренно НЕ задаётся: apps/api/test/check-constraints.spec.ts
+      # сам скипается без него, и джоба остаётся чисто юнит-тестовой.
       - run: npm test
 
   # ───────────────────────────────────────────────────────────────────────────
-  # CD — deploy to staging VPS on every push to main (after `build` is green).
-  # Pull requests do NOT deploy: `if: github.ref == 'refs/heads/main'` skips
-  # this job for PR runs.
+  # CD — ручной выкат в выбранное окружение.
+  #
+  # Хост, ключ и compose-файл берутся из GitHub Environment с именем `staging`
+  # или `prod` (Settings → Environments). Один и тот же код деплоя, разные
+  # настройки — перепутать окружения невозможно, потому что имя приходит из
+  # выпадающего списка при запуске.
   # ───────────────────────────────────────────────────────────────────────────
-  deploy-staging:
+  deploy:
     needs: build
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
-    # Serialize deploys: if two pushes land back-to-back, the second waits
-    # for the first to finish rather than racing it. `cancel-in-progress:
-    # false` is intentional — a half-finished deploy is worse than a delayed
-    # one.
+    # Даёт доступ к секретам/переменным именно этого окружения. Сюда же можно
+    # позже повесить required reviewers на `prod`, чтобы выкат требовал апрува.
+    environment: ${{ inputs.target }}
+
+    # Два выката в одно окружение не идут параллельно. `cancel-in-progress:
+    # false` намеренно — недоделанный деплой хуже отложенного.
     concurrency:
-      group: deploy-staging
+      group: deploy-${{ inputs.target }}
       cancel-in-progress: false
 
     steps:
+      - name: Проверить, что окружение настроено
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          COMPOSE_FILE: ${{ vars.COMPOSE_FILE }}
+        run: |
+          [ -n "$HOST" ] || { echo "::error::secret DEPLOY_HOST не задан в environment '${{ inputs.target }}'"; exit 1; }
+          [ -n "$COMPOSE_FILE" ] || { echo "::error::variable COMPOSE_FILE не задана в environment '${{ inputs.target }}'"; exit 1; }
+          echo "target=${{ inputs.target }}  compose=$COMPOSE_FILE"
+
       - name: Load SSH key into the runner's agent
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
       - name: Pre-trust the VPS host key
-        # Without this, `ssh` asks "Are you sure you want to continue
-        # connecting?" on first contact and hangs in non-interactive CI.
-        # ssh-keyscan grabs the host's public key fingerprint over the
-        # network and writes it to ~/.ssh/known_hosts up-front.
+        # Без этого ssh спросит "Are you sure you want to continue connecting?"
+        # и повиснет в неинтерактивном CI.
         run: |
           mkdir -p ~/.ssh
           ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Deploy to staging
-        # `<<'EOF'` (single-quoted heredoc) prevents GitHub Actions from
-        # interpolating ${...} locally — every command below runs verbatim
-        # on the VPS. `set -euo pipefail` is bash strict mode: any failure
-        # aborts the script instead of silently moving on.
+      - name: Deploy
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          COMPOSE_FILE: ${{ vars.COMPOSE_FILE }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/magguarantee/src' }}
+        # Значения прокидываются как переменные окружения ПЕРЕД `bash -s`, а сам
+        # скрипт идёт через `<<'EOF'` (в кавычках) — GitHub Actions ничего в нём
+        # не подставляет, всё выполняется на сервере как написано.
         run: |
-          ssh deploy@${{ secrets.DEPLOY_HOST }} bash -s <<'EOF'
+          ssh "deploy@$HOST" \
+            "COMPOSE_FILE='$COMPOSE_FILE' DEPLOY_PATH='$DEPLOY_PATH' bash -s" <<'EOF'
             set -euo pipefail
 
-            cd /opt/magguarantee/src
+            cd "$DEPLOY_PATH"
 
-            echo "→ Pulling latest main"
+            echo "→ Забираем свежий main"
             git pull origin main
 
-            # Build BEFORE migrate. The Dockerfile bakes prisma/migrations into
-            # the image at build time, so a fresh image is required for
-            # `migrate deploy` to see the new migration files. Previously
-            # migrate ran against the *previous* image (which only had the
-            # old set of migrations) and silently reported "nothing to apply"
-            # — the actual schema change never landed on staging, the api was
-            # then rebuilt with a new Prisma client, and the column-mismatch
-            # exploded at the first claim query. See incident 2026-05-14.
-            echo "→ Building images (so new migrations are baked in)"
-            docker compose -f infra/docker-compose.staging.yml build
+            # Собираем ДО миграций. Dockerfile вшивает prisma/migrations в образ
+            # на этапе сборки, поэтому `migrate deploy` на старом образе видит
+            # только старый набор миграций и молча рапортует "nothing to apply".
+            # Схема при этом не меняется, api пересобирается с новым клиентом, и
+            # всё взрывается на первом же запросе. Инцидент 2026-05-14.
+            echo "→ Сборка образов ($COMPOSE_FILE)"
+            docker compose -f "$COMPOSE_FILE" build
 
-            echo "→ Applying Prisma migrations from the freshly-built image"
-            # -T disables pseudo-TTY, `< /dev/null` cuts the container's stdin
-            # off from the calling shell's stdin. Without either, `docker
-            # compose run` attaches stdin to the prisma container, which then
-            # drains the rest of this heredoc — silently truncating every
-            # command below. The script exits 0 (prisma succeeded), the GHA
-            # job goes green, and the actual deploy never happens.
-            docker compose -f infra/docker-compose.staging.yml \
+            echo "→ Миграции из свежесобранного образа"
+            # -T отключает псевдо-TTY, `< /dev/null` отрезает stdin контейнера от
+            # stdin этого скрипта. Без любого из двух prisma высасывает остаток
+            # heredoc — команды ниже просто исчезают, джоба зеленеет, деплоя нет.
+            docker compose -f "$COMPOSE_FILE" \
               run --rm -T api node_modules/.bin/prisma migrate deploy \
                 --schema=prisma/schema.prisma < /dev/null
 
-            echo "→ Starting the stack (no rebuild — already built above)"
-            docker compose -f infra/docker-compose.staging.yml up -d
+            echo "→ Поднимаем стек"
+            docker compose -f "$COMPOSE_FILE" up -d
 
-            echo "→ Waiting 10s for api to settle, then smoke-checking /health"
+            echo "→ Ждём 10с и дёргаем /health"
             sleep 10
-            docker compose -f infra/docker-compose.staging.yml exec -T api \
+            docker compose -f "$COMPOSE_FILE" exec -T api \
               wget -qO- http://localhost:3001/health > /dev/null
 
-            echo "→ Pruning unused images (older than 30 days)"
+            echo "→ Чистим образы старше 30 дней"
             docker image prune -af --filter "until=720h" > /dev/null
 
-            echo "✓ Deploy succeeded"
+            echo "✓ Деплой прошёл"
           EOF
