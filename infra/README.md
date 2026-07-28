@@ -183,12 +183,81 @@ ssh -L 8025:localhost:8025 deploy@vps
 # then open http://localhost:8025 locally
 ```
 
+## Бэкапы
+
+Два артефакта, оба обязательны. Дамп Postgres без архива MinIO — неполный
+бэкап: вложения (сканы прав, porozumienia, скриншоты авторизации) лежат в
+MinIO, и восстановленная без них база ссылается на несуществующие объекты.
+
+| Файл | Назначение |
+|---|---|
+| `scripts/magguarantee-backup` | `pg_dump` + tar MinIO, проверка gzip, ротация, offsite, heartbeat |
+| `scripts/magguarantee-restore-test` | заливка дампа в одноразовый контейнер + счётчики строк |
+| `systemd/magguarantee-backup.{service,timer}` | ежедневный запуск в 03:30 от юзера `deploy` |
+
+Скрипты запускаются **прямо из чекаута**, поэтому `git pull` их обновляет —
+второй копии в `/usr/local/bin`, которая разъезжается с исходником, нет.
+
+### Установка
+
+```bash
+sudo cp /opt/magguarantee/src/infra/systemd/magguarantee-backup.* /etc/systemd/system/
+```
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl enable --now magguarantee-backup.timer
+```
+
+Прогнать один раз вручную и посмотреть результат:
+
+```bash
+sudo systemctl start magguarantee-backup.service && journalctl -u magguarantee-backup.service -n 40 --no-pager
+```
+
+Сразу после этого — **обязательно** тест восстановления. Бэкап, который ни разу
+не восстанавливали, бэкапом не является:
+
+```bash
+/opt/magguarantee/src/infra/scripts/magguarantee-restore-test
+```
+
+### Настройка (опционально)
+
+Всё конфигурируется переменными окружения через `/opt/magguarantee/backup.conf`
+(юнит подхватывает его через `EnvironmentFile=-`, отсутствие файла не ошибка):
+
+```ini
+MAGG_RCLONE_REMOTE=r2:magguarantee-backups-prod
+MAGG_KEEP_DAYS=7
+MAGG_HEARTBEAT_URL=https://status.magtrans.eu/api/push/xxxxx
+```
+
+- **`MAGG_RCLONE_REMOTE`** — пока пуст, бэкапы лежат на том же диске, что и
+  данные, то есть от смерти диска не спасают. Скрипт пишет об этом WARNING на
+  каждом запуске. Настраивается через `rclone config`.
+- **`MAGG_HEARTBEAT_URL`** — пингуется только при полном успехе. Это то, что
+  ловит «бэкап тихо перестал запускаться три недели назад» — сам по себе скрипт
+  такое обнаружить не может.
+
+### Проверка, что таймер жив
+
+```bash
+systemctl list-timers magguarantee-backup.timer
+```
+
 ## What's NOT here (yet)
 
-- **CI/CD workflow** — first iterations are manual. A `.github/workflows/deploy-staging.yml`
-  that SSH'es to the VPS and runs the three update commands above can be
-  added once the manual flow is validated.
-- **Database backups** — for production. Staging Postgres can be wiped and
-  reseeded; backups are added at prod-launch (see `docs/18-launch-and-deployment.md`).
+- **Прод-джоба в CI.** `.github/workflows/ci.yml` содержит только
+  `deploy-staging` (на каждый push в main). Для прода нужна отдельная джоба с
+  ручным триггером (`workflow_dispatch` или тег) и своими секретами
+  `PROD_DEPLOY_SSH_KEY` / `PROD_DEPLOY_HOST`.
+  Причём сейчас и staging-джоба не проходит: `npm test` подхватывает
+  `apps/api/test/check-constraints.spec.ts`, которому нужен живой Postgres, а
+  сервиса postgres в workflow нет. Чинится добавлением сервиса в CI либо
+  выносом `test/` в отдельный скрипт.
+- **Offsite для бэкапов.** Скрипты готовы, но `MAGG_RCLONE_REMOTE` пуст — пока
+  копии лежат на том же диске, что и данные.
+- **Rollback-скрипт.** Сборка идёт на сервере, поэтому отката подменой тега нет;
+  появится вместе с переходом на ghcr.
 - **Bull Board / Uptime Kuma** — observability tooling, not required for
   initial staging.

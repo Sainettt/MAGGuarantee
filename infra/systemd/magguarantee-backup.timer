@@ -1,0 +1,23 @@
+# MAGGuarantee — daily backup schedule.
+#
+#   sudo systemctl enable --now magguarantee-backup.timer
+#   systemctl list-timers magguarantee-backup.timer     # next / last run
+
+[Unit]
+Description=Daily MAGGuarantee backup
+
+[Timer]
+# 03:30 server time — well after the 16:00 end of the operator's working day and
+# well before the 07:10 / 07:20 application crons.
+OnCalendar=*-*-* 03:30:00
+
+# Spread the start so the backup never collides with whatever else the host
+# runs on a round number.
+RandomizedDelaySec=15m
+
+# If the VPS was off or rebooting at 03:30, run as soon as it comes back rather
+# than silently skipping the night.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

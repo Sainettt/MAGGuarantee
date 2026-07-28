@@ -174,7 +174,7 @@ Mailhog уходит. Заводим:
 
 #### В.4 Бэкапы Postgres
 
-Скрипт `/usr/local/bin/magguarantee-pgbackup` + systemd-таймер. Делает `pg_dump` через `docker exec`, gzip'ует, отправляет в `magguarantee-backups-prod` через `rclone`. Полный пример скрипта — в этом же документе ниже, раздел [Backup-стратегия](#backup-стратегия).
+✅ **Реализовано.** `infra/scripts/magguarantee-backup` + systemd-таймер (`infra/systemd/`). Делает `pg_dump` через `docker exec` **и** tar каталога MinIO, проверяет целостность, ротирует локально, опционально отправляет в `magguarantee-backups-prod` через `rclone`. Тест восстановления — `infra/scripts/magguarantee-restore-test`. Подробности — раздел [Backup-стратегия](#backup-стратегия), установка — [`infra/README.md`](../infra/README.md#бэкапы).
 
 **Без этого нельзя запускать прод.** Single VPS = один диск, диск умрёт → потеряешь данные. Тест восстановления — раз в квартал минимум.
 
@@ -786,16 +786,25 @@ docker compose run --rm api node node_modules/.bin/prisma migrate deploy
 После применения миграций, **один раз при первом деплое**:
 
 ```bash
-docker compose run --rm \
-  -e SEED_ADMIN_LOGIN=admin \
-  -e SEED_ADMIN_EMAIL=admin@magtrans.eu \
+docker compose -f infra/docker-compose.prod.yml run --rm -T \
   -e SEED_ADMIN_PASSWORD=<initial-from-1password> \
-  api npm run db:seed -w @magguarantee/database
+  api node_modules/.bin/tsx prisma/seed.prod.ts < /dev/null
 ```
+
+> ⚠️ **Не `npm run db:seed`.** Во-первых, `db:seed` запускает `prisma/seed.ts` —
+> это ДЕВ-сид с фейковыми пользователями, на проде его гонять нельзя. Во-вторых,
+> в прод-образе `/app/package.json` — это манифест api, workspaces там нет, так
+> что `-w @magguarantee/database` всё равно не разрешится. Запускать надо
+> `prisma/seed.prod.ts` напрямую через `tsx` (он остаётся в образе после
+> `npm prune --omit=dev`, так как лежит в `dependencies` пакета database).
+>
+> `SEED_ADMIN_LOGIN` / `SEED_ADMIN_EMAIL` **не читаются** — логин (`admin`) и
+> email захардкожены в `seed.prod.ts`. Отдавая систему заказчику, поменяй их в
+> коде или вынеси в env.
 
 Создаёт:
 
-1. **14 типов прицепов** (`Firanka`, `Plandeka`, …) — это бизнес-справочник, не «тестовые данные».
+1. **6 типов прицепов** (`STD`, `P-MEGA`, `MEGA`, `IZO`, `CHŁO`, `COIL`) — это бизнес-справочник, не «тестовые данные».
 2. **Лимиты км/ставки** — заполнить актуальными значениями MagTrans на текущий и следующий год.
 3. **App config**:
    - `stawka_eur_default = 0.5`
@@ -923,65 +932,61 @@ Single-VPS — один диск. Без offsite-бэкапов потеря д�
 | Docker images | по тегам sha | 30 дней | ghcr.io |
 | Secrets (`.env`) | при изменении | offline (1Password) | вне VPS |
 
-### Скрипт бэкапа Postgres
+### Скрипты бэкапа — реализованы
 
-`/usr/local/bin/magguarantee-pgbackup`:
+Живут в репозитории и запускаются прямо из чекаута, поэтому `git pull` их
+обновляет (второй копии в `/usr/local/bin`, которая разъезжается с исходником,
+нет):
+
+| Файл | Что делает |
+|---|---|
+| [`infra/scripts/magguarantee-backup`](../infra/scripts/magguarantee-backup) | `pg_dump` + tar каталога MinIO, проверка целостности, ротация, опциональный offsite через `rclone`, опциональный heartbeat |
+| [`infra/scripts/magguarantee-restore-test`](../infra/scripts/magguarantee-restore-test) | заливает дамп в одноразовый контейнер Postgres и печатает счётчики строк |
+| [`infra/systemd/magguarantee-backup.service`](../infra/systemd/magguarantee-backup.service) / [`.timer`](../infra/systemd/magguarantee-backup.timer) | ежедневный запуск в 03:30 от юзера `deploy` |
+
+Установка и настройка — [`infra/README.md`](../infra/README.md#бэкапы).
+
+> ⚠️ **`docker exec` без `-t`.** Псевдо-TTY делает трансляцию LF→CRLF и тихо
+> портит gzip-поток: файл нормального размера, `gzip -t` падает только при
+> восстановлении. Раньше в этом документе стоял пример с `-t` — он был
+> неправильным, в скрипте флага нет.
+
+> ⚠️ **Одного `pg_dump` мало.** Вложения (сканы прав, porozumienia, скриншоты
+> авторизации) лежат в MinIO, и база, восстановленная без них, ссылается на
+> несуществующие объекты. Скрипт архивирует оба источника.
+
+Запуск через systemd-таймер на хосте (надёжнее cron — есть отчёты, retry, а `Persistent=true` догоняет запуск, пропущенный из-за ребута):
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-TS=$(date +%Y-%m-%d-%H%M)
-DUMP=/opt/magguarantee/backups/pg-$TS.sql.gz
-mkdir -p /opt/magguarantee/backups
-
-# дамп через docker exec — Postgres внутри контейнера
-docker exec -t magguarantee-postgres pg_dump -U magguarantee magguarantee | gzip > "$DUMP"
-
-# offsite (rclone настроен на S3)
-rclone copy "$DUMP" r2:magguarantee-backups-prod/postgres/
-
-# локальная ротация — держим 7 дней на хосте (S3 хранит дольше)
-find /opt/magguarantee/backups -name 'pg-*.sql.gz' -mtime +7 -delete
+sudo cp /opt/magguarantee/src/infra/systemd/magguarantee-backup.* /etc/systemd/system/
 ```
 
-Запуск через systemd-таймер на хосте (надёжнее cron — есть отчёты, retry):
-
-```ini
-# /etc/systemd/system/magguarantee-pgbackup.service
-[Unit]
-Description=MAGGuarantee Postgres backup
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/magguarantee-pgbackup
-User=deploy
-StandardOutput=journal
-StandardError=journal
-
-# /etc/systemd/system/magguarantee-pgbackup.timer
-[Unit]
-Description=Daily MAGGuarantee Postgres backup
-
-[Timer]
-OnCalendar=daily
-Persistent=true
-RandomizedDelaySec=15m
-
-[Install]
-WantedBy=timers.target
+```bash
+sudo systemctl daemon-reload && sudo systemctl enable --now magguarantee-backup.timer
 ```
 
 > systemd используется только для **бэкапов хоста**, само приложение через docker compose. Это один из немногих случаев, где systemd на VPS остаётся полезным.
 
 ### Тест восстановления — обязательно
 
-Бэкапы шрёдингера: пока не восстановил, ты не знаешь, рабочие они или нет. Минимум **раз в квартал**:
+Бэкапы шрёдингера: пока не восстановил, ты не знаешь, рабочие они или нет.
+Прогнать **сразу после настройки** и дальше **раз в квартал**:
 
-1. Скачать последний дамп с S3.
-2. Поднять временный контейнер: `docker run --rm -d --name pg-restore-test -e POSTGRES_PASSWORD=test postgres:16-alpine`.
-3. Восстановить: `gunzip -c pg-XXX.sql.gz | docker exec -i pg-restore-test psql -U postgres`.
-4. Прогнать smoke-проверки (`SELECT count(*) FROM users; SELECT count(*) FROM claims;`).
-5. `docker rm -f pg-restore-test`.
+```bash
+/opt/magguarantee/src/infra/scripts/magguarantee-restore-test
+```
+
+Скрипт берёт свежий дамп (или переданный аргументом), проверяет gzip, поднимает
+одноразовый контейнер Postgres, заливает дамп с `ON_ERROR_STOP=1` и печатает
+счётчики строк — число применённых миграций, users, carriers, vehicles,
+delegations, claims, справочники. Живой стек не трогается: свой контейнер, без
+портов, без общих томов, удаление по `trap EXIT` в любом случае.
+
+MinIO-архив скрипт не проверяет — его достаточно посмотреть глазами:
+
+```bash
+tar tzf /opt/magguarantee/backups/minio-<ts>.tar.gz | head -20
+```
 
 ## Disaster recovery
 

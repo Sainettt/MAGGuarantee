@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+#
+# MAGGuarantee — nightly backup: Postgres dump + MinIO object archive.
+#
+# Runs on the VPS as the `deploy` user (member of the `docker` group — no sudo
+# needed anywhere in here). Driven by magguarantee-backup.timer; safe to run by
+# hand at any time.
+#
+#   /opt/magguarantee/src/infra/scripts/magguarantee-backup
+#
+# Both artefacts matter. The Postgres dump alone is NOT a complete backup: the
+# attachments (driver ID scans, porozumienia, authorization screenshots) live in
+# MinIO, and a database restored without them has rows pointing at objects that
+# no longer exist.
+#
+# Everything is overridable by environment variable so the script can be pointed
+# at a staging stack or a different layout without editing it.
+
+set -euo pipefail
+
+STACK_DIR="${MAGG_STACK_DIR:-/opt/magguarantee}"
+BACKUP_DIR="${MAGG_BACKUP_DIR:-$STACK_DIR/backups}"
+MINIO_DATA_DIR="${MAGG_MINIO_DATA:-$STACK_DIR/data/minio}"
+PG_CONTAINER="${MAGG_PG_CONTAINER:-magguarantee-postgres}"
+DB_USER="${MAGG_DB_USER:-magguarantee}"
+DB_NAME="${MAGG_DB_NAME:-magguarantee}"
+
+# Local retention. Offsite storage keeps things longer; the VPS only holds a
+# short window so the disk cannot fill up.
+KEEP_DAYS="${MAGG_KEEP_DAYS:-7}"
+
+# Offsite target, e.g. "r2:magguarantee-backups-prod". Empty = skip the upload
+# (the script still succeeds, and says so). Configure with `rclone config`.
+RCLONE_REMOTE="${MAGG_RCLONE_REMOTE:-}"
+
+# Optional heartbeat pinged only on full success — e.g. an Uptime Kuma push
+# monitor. This is what catches "the backup quietly stopped running three weeks
+# ago", which no amount of scripting inside this file can detect on its own.
+HEARTBEAT_URL="${MAGG_HEARTBEAT_URL:-}"
+
+# A dump smaller than this almost certainly means pg_dump failed halfway or the
+# database is empty. Better to fail loudly than to rotate a good backup out and
+# keep a useless one.
+MIN_DUMP_BYTES="${MAGG_MIN_DUMP_BYTES:-10240}"
+
+TS="$(date +%Y-%m-%d-%H%M)"
+PG_FILE="$BACKUP_DIR/pg-$TS.sql.gz"
+MINIO_FILE="$BACKUP_DIR/minio-$TS.tar.gz"
+
+log() { printf '%s  %s\n' "$(date +'%Y-%m-%d %H:%M:%S')" "$*"; }
+die() { log "ERROR: $*" >&2; exit 1; }
+
+mkdir -p "$BACKUP_DIR"
+
+# ── Preflight ───────────────────────────────────────────────────────────────
+docker inspect -f '{{.State.Running}}' "$PG_CONTAINER" 2>/dev/null | grep -qx true \
+  || die "container $PG_CONTAINER is not running — nothing to back up"
+
+[ -d "$MINIO_DATA_DIR" ] || die "MinIO data directory $MINIO_DATA_DIR does not exist"
+
+# ── Postgres ────────────────────────────────────────────────────────────────
+# NO `-t` on docker exec. A pseudo-TTY performs LF→CRLF translation, which
+# silently corrupts the gzip stream — the backup looks fine until the day you
+# try to restore it. `set -o pipefail` makes a pg_dump failure fail the pipe.
+#
+# `--no-owner --no-acl` lets the dump be restored by any role, which is what
+# makes magguarantee-restore-test able to load it into a throwaway container.
+log "dumping database $DB_NAME from $PG_CONTAINER"
+docker exec "$PG_CONTAINER" \
+  pg_dump -U "$DB_USER" --no-owner --no-acl "$DB_NAME" \
+  | gzip -9 > "$PG_FILE"
+
+gzip -t "$PG_FILE" || die "gzip integrity check failed for $PG_FILE"
+
+PG_BYTES="$(stat -c %s "$PG_FILE")"
+[ "$PG_BYTES" -ge "$MIN_DUMP_BYTES" ] \
+  || die "dump is only ${PG_BYTES}B (< ${MIN_DUMP_BYTES}B) — treating as failed"
+log "postgres dump ok: $PG_FILE (${PG_BYTES} bytes)"
+
+# ── MinIO ───────────────────────────────────────────────────────────────────
+# The data directory is owned by root (Docker created it), so `deploy` cannot
+# read all of it directly. Instead of sudo, archive from inside a throwaway
+# container that mounts the directory read-only, then hand the resulting file
+# back to the calling user so rotation below can delete it later.
+#
+# Caveat: this is a filesystem-level copy of a running MinIO. Each object is a
+# separate file, so a torn archive can at worst miss an object uploaded during
+# the run — acceptable for a nightly job at this scale.
+log "archiving MinIO objects from $MINIO_DATA_DIR"
+docker run --rm \
+  -v "$MINIO_DATA_DIR":/data:ro \
+  -v "$BACKUP_DIR":/backup \
+  alpine:3 \
+  sh -c "tar czf /backup/$(basename "$MINIO_FILE") -C /data . \
+         && chown $(id -u):$(id -g) /backup/$(basename "$MINIO_FILE")"
+
+gzip -t "$MINIO_FILE" || die "gzip integrity check failed for $MINIO_FILE"
+log "minio archive ok: $MINIO_FILE ($(stat -c %s "$MINIO_FILE") bytes)"
+
+# ── Offsite ─────────────────────────────────────────────────────────────────
+# A backup that only exists on the same disk as the data is not a backup. Until
+# this is configured, the script says so on every run instead of staying quiet.
+if [ -n "$RCLONE_REMOTE" ]; then
+  command -v rclone >/dev/null || die "MAGG_RCLONE_REMOTE is set but rclone is not installed"
+  log "uploading to $RCLONE_REMOTE"
+  rclone copy "$PG_FILE"    "$RCLONE_REMOTE/postgres/"
+  rclone copy "$MINIO_FILE" "$RCLONE_REMOTE/minio/"
+  log "offsite upload ok"
+else
+  log "WARNING: MAGG_RCLONE_REMOTE is empty — backups stay on this VPS only"
+fi
+
+# ── Local rotation ──────────────────────────────────────────────────────────
+log "pruning local backups older than ${KEEP_DAYS} days"
+find "$BACKUP_DIR" -maxdepth 1 -name 'pg-*.sql.gz'    -mtime "+$KEEP_DAYS" -delete
+find "$BACKUP_DIR" -maxdepth 1 -name 'minio-*.tar.gz' -mtime "+$KEEP_DAYS" -delete
+
+# ── Heartbeat ───────────────────────────────────────────────────────────────
+if [ -n "$HEARTBEAT_URL" ]; then
+  curl -fsS -m 10 "$HEARTBEAT_URL" >/dev/null && log "heartbeat sent" \
+    || log "WARNING: heartbeat ping failed (backup itself succeeded)"
+fi
+
+date +%s > "$BACKUP_DIR/.last-success"
+log "backup complete"

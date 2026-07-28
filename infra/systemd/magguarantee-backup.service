@@ -1,0 +1,46 @@
+# MAGGuarantee — nightly backup (Postgres dump + MinIO archive).
+#
+# Install on the VPS:
+#   sudo cp /opt/magguarantee/src/infra/systemd/magguarantee-backup.* /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now magguarantee-backup.timer
+#
+# The unit runs the script straight out of the git checkout, so `git pull`
+# updates it — no second copy in /usr/local/bin to drift out of sync.
+#
+# Run once by hand to verify:      sudo systemctl start magguarantee-backup.service
+# Read the result:                 journalctl -u magguarantee-backup.service -n 50
+
+[Unit]
+Description=MAGGuarantee backup (Postgres + MinIO)
+# Docker must be up — otherwise the script exits immediately on the preflight.
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+
+# `deploy` is in the `docker` group; the script needs no root at all (the MinIO
+# archive is taken from inside a container precisely to avoid sudo).
+User=deploy
+Group=deploy
+
+# Optional overrides — offsite target, retention, heartbeat URL. The leading `-`
+# means "carry on if the file does not exist", so the unit works before it is
+# created. Example contents:
+#   MAGG_RCLONE_REMOTE=r2:magguarantee-backups-prod
+#   MAGG_KEEP_DAYS=7
+#   MAGG_HEARTBEAT_URL=https://status.magtrans.eu/api/push/xxxxx
+EnvironmentFile=-/opt/magguarantee/backup.conf
+
+ExecStart=/opt/magguarantee/src/infra/scripts/magguarantee-backup
+
+# A dump of a small database plus a tar of the object store finishes in well
+# under a minute; anything past 30 min is a hang, not slow progress.
+TimeoutStartSec=30min
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

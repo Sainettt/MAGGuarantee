@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+#
+# MAGGuarantee — restore drill.
+#
+# Loads a Postgres dump into a THROWAWAY container, counts rows in the tables
+# that matter, and destroys the container. Touches nothing in the live stack —
+# no ports published, no shared volume, distinct container name.
+#
+#   /opt/magguarantee/src/infra/scripts/magguarantee-restore-test            # newest dump
+#   /opt/magguarantee/src/infra/scripts/magguarantee-restore-test <file.gz>  # a specific one
+#
+# Run this at least quarterly, and once right after setting the backup up. An
+# untested backup is a guess: the failure modes that matter (a truncated dump, a
+# TTY-corrupted gzip stream, a dump of the wrong database) all produce a file of
+# perfectly plausible size that only reveals itself on restore.
+
+set -euo pipefail
+
+STACK_DIR="${MAGG_STACK_DIR:-/opt/magguarantee}"
+BACKUP_DIR="${MAGG_BACKUP_DIR:-$STACK_DIR/backups}"
+PG_IMAGE="${MAGG_PG_IMAGE:-postgres:16-alpine}"
+TEST_CONTAINER="magguarantee-restore-test"
+DB_USER=magguarantee
+DB_NAME=magguarantee
+
+log() { printf '%s  %s\n' "$(date +'%Y-%m-%d %H:%M:%S')" "$*"; }
+die() { log "ERROR: $*" >&2; exit 1; }
+
+DUMP="${1:-}"
+if [ -z "$DUMP" ]; then
+  DUMP="$(ls -1t "$BACKUP_DIR"/pg-*.sql.gz 2>/dev/null | head -1 || true)"
+  [ -n "$DUMP" ] || die "no pg-*.sql.gz found in $BACKUP_DIR"
+fi
+[ -f "$DUMP" ] || die "dump not found: $DUMP"
+
+log "testing $DUMP ($(stat -c %s "$DUMP") bytes)"
+gzip -t "$DUMP" || die "gzip integrity check failed — this backup is unusable"
+
+cleanup() { docker rm -f "$TEST_CONTAINER" >/dev/null 2>&1 || true; }
+trap cleanup EXIT
+cleanup
+
+log "starting throwaway $PG_IMAGE"
+docker run -d --name "$TEST_CONTAINER" \
+  -e POSTGRES_USER="$DB_USER" \
+  -e POSTGRES_PASSWORD=restore-test \
+  -e POSTGRES_DB="$DB_NAME" \
+  "$PG_IMAGE" >/dev/null
+
+for i in $(seq 1 30); do
+  if docker exec "$TEST_CONTAINER" pg_isready -U "$DB_USER" >/dev/null 2>&1; then break; fi
+  [ "$i" -eq 30 ] && die "throwaway postgres did not become ready in 30s"
+  sleep 1
+done
+
+log "restoring"
+# `-i` (stdin) but never `-t` — same TTY-corruption rule as the backup side.
+# ON_ERROR_STOP makes psql exit non-zero on the first failing statement instead
+# of plodding through and reporting success on a half-loaded database.
+gunzip -c "$DUMP" \
+  | docker exec -i "$TEST_CONTAINER" \
+      psql -v ON_ERROR_STOP=1 -q -U "$DB_USER" -d "$DB_NAME" >/dev/null
+
+log "row counts:"
+docker exec "$TEST_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" -At -c "
+  SELECT 'migrations applied: ' || count(*) FROM _prisma_migrations WHERE finished_at IS NOT NULL
+  UNION ALL SELECT 'users:        ' || count(*) FROM users
+  UNION ALL SELECT 'carriers:     ' || count(*) FROM carriers
+  UNION ALL SELECT 'vehicles:     ' || count(*) FROM vehicles
+  UNION ALL SELECT 'delegations:  ' || count(*) FROM delegations
+  UNION ALL SELECT 'claims:       ' || count(*) FROM claims
+  UNION ALL SELECT 'app config:   ' || count(*) FROM app_config
+  UNION ALL SELECT 'trailer types:' || count(*) FROM trailer_types
+  UNION ALL SELECT 'monthly limits: ' || count(*) FROM monthly_limits;
+" | sed 's/^/  /'
+
+log "restore drill PASSED — dump is loadable"
+log "NOTE: this only proves the Postgres side. The MinIO archive from the same"
+log "      night must be spot-checked separately:  tar tzf minio-<ts>.tar.gz | head"
