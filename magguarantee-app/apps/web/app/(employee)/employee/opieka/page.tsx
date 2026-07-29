@@ -38,6 +38,7 @@ import OpiekunCarrierCard, {
 } from '@/components/opieka/OpiekunCarrierCard';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useOpiekunFleet } from '@/lib/hooks/useOpiekunFleet';
+import { vehiclesListHref } from '@/lib/vehicles-filter';
 
 export default function OpiekaPage() {
   const t = useTranslations('opieka');
@@ -71,7 +72,14 @@ export default function OpiekaPage() {
           (§6.3.6): AUTA (enabled) · AKTYWNE · STOJĄCE · DŁUGO STOJĄCE · DO
           USUNIĘCIA. `potencjalne` is dropped; `wylaczone` is omitted here to
           keep the 6-tile grid (the Przewoźnicy tile occupies the 6th slot).
-          Always rendered so the layout doesn't jump between loading states. */}
+          Always rendered so the layout doesn't jump between loading states.
+
+          §15 — every tile is a DRILL-DOWN link. The two totals open the plain
+          lists (the counts are totals, not a filter the list can express); each
+          status tile opens the vehicles list pre-filtered to that bucket via
+          `?status=`, where the API applies the SAME classification that produced
+          the count here — tile and list can't disagree. Both targets are
+          ownership-scoped server-side, so an opiekun lands on their own set. */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
         <KpiCard
           label={t('totals.carriers')}
@@ -79,6 +87,10 @@ export default function OpiekaPage() {
           tone="purple"
           icon={Building2}
           loading={isLoading}
+          href="/employee/carriers"
+          ariaLabel={t('totals.openCarriersAria', {
+            count: totals?.liczbaPrzewoznikow ?? 0,
+          })}
         />
         <KpiCard
           label={t('totals.vehicles')}
@@ -86,6 +98,8 @@ export default function OpiekaPage() {
           tone="neutral"
           icon={Truck}
           loading={isLoading}
+          href={vehiclesListHref({})}
+          ariaLabel={t('totals.openVehiclesAria', { count: autaEnabled })}
         />
         <KpiCard
           label={tVehStatus('aktywna.tile')}
@@ -93,6 +107,11 @@ export default function OpiekaPage() {
           tone="green"
           icon={Truck}
           loading={isLoading}
+          href={vehiclesListHref({ status: 'aktywna' })}
+          ariaLabel={t('totals.openStatusAria', {
+            label: tVehStatus('aktywna.tile'),
+            count: v?.aktywne ?? 0,
+          })}
         />
         <KpiCard
           label={tVehStatus('stojaca.tile')}
@@ -100,6 +119,11 @@ export default function OpiekaPage() {
           tone="neutral"
           icon={CircleParking}
           loading={isLoading}
+          href={vehiclesListHref({ status: 'stojaca' })}
+          ariaLabel={t('totals.openStatusAria', {
+            label: tVehStatus('stojaca.tile'),
+            count: v?.stojace ?? 0,
+          })}
         />
         <KpiCard
           label={tVehStatus('nieaktywna.tile')}
@@ -107,6 +131,11 @@ export default function OpiekaPage() {
           tone="orange"
           icon={PauseCircle}
           loading={isLoading}
+          href={vehiclesListHref({ status: 'nieaktywna' })}
+          ariaLabel={t('totals.openStatusAria', {
+            label: tVehStatus('nieaktywna.tile'),
+            count: v?.nieaktywne ?? 0,
+          })}
         />
         <KpiCard
           label={tVehStatus('do_usuniecia.tile')}
@@ -114,6 +143,11 @@ export default function OpiekaPage() {
           tone="red"
           icon={Trash2}
           loading={isLoading}
+          href={vehiclesListHref({ status: 'do_usuniecia' })}
+          ariaLabel={t('totals.openStatusAria', {
+            label: tVehStatus('do_usuniecia.tile'),
+            count: v?.doUsuniecia ?? 0,
+          })}
         />
       </div>
 

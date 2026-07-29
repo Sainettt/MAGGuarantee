@@ -38,7 +38,8 @@
     "nextPage": "Następna strona",
     "clearFilters": "Wyczyść filtry",
     "showPassword": "Pokaż hasło",
-    "hidePassword": "Ukryj hasło"
+    "hidePassword": "Ukryj hasło",
+    "refreshHint": "Kliknij, aby odświeżyć dane"
   },
   "formActive": {
     "vehicleConsequence": "Nieaktywny ciągnik znika z list wyboru i nie może być użyty w nowych wyjazdach ani wnioskach.",
@@ -487,7 +488,9 @@
       "searchPlaceholder": "Szukaj numeru rejestracyjnego",
       "carrier": "Przewoźnik",
       "carrierLabel": "Filtruj po przewoźniku",
-      "allCarriers": "Wszyscy przewoźnicy"
+      "allCarriers": "Wszyscy przewoźnicy",
+      "statusLabel": "Filtruj po statusie",
+      "allStatuses": "Wszystkie statusy"
     },
     "fields": {
       "carrier": "Przewoźnik",
@@ -1244,7 +1247,10 @@
     "emptyMessage": "Gdy administrator przypisze do Ciebie przewoźników, pojawią się tutaj.",
     "totals": {
       "carriers": "Przewoźnicy",
-      "vehicles": "Ciągniki"
+      "vehicles": "Ciągniki",
+      "openCarriersAria": "Przewoźnicy: {count} — otwórz listę przewoźników",
+      "openVehiclesAria": "Ciągniki: {count} — otwórz listę ciągników",
+      "openStatusAria": "{label}: {count} — otwórz listę ciągników z tym statusem"
     },
     "table": {
       "firma": "Firma",
@@ -1262,7 +1268,8 @@
       "aktywne": "Aktyw.",
       "stojace": "Stoj.",
       "nieaktywne": "Dł. stoj.",
-      "doUsuniecia": "Do usun."
+      "doUsuniecia": "Do usun.",
+      "statAria": "{label}: {count} — otwórz ciągniki przewoźnika {firma} z tym statusem"
     },
     "attention": {
       "title": "Wymaga uwagi",
@@ -1902,6 +1909,14 @@
     "a11y": {
       "showDetails": "Pokaż szczegóły: {name}",
       "showDelegationDetails": "Pokaż szczegóły wyjazdu: {name}"
+    },
+    "statusFilter": {
+      "label": "Filtr statusu:",
+      "count": "Pokazano: {count}",
+      "toggleAria": "{label}: {count} — pokaż tylko te ciągniki",
+      "showAllAria": "Wszystkie ciągniki: {count} — wyczyść filtr statusu",
+      "emptyTitle": "Brak ciągników w tym statusie",
+      "emptyMessage": "Żaden ciągnik nie ma wybranego statusu. Wyczyść filtr lub wybierz inny kafelek."
     },
     "vehicle": {
       "sections": {

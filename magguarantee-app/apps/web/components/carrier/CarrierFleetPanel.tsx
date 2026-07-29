@@ -36,12 +36,14 @@ import type {
   GuaranteeComplianceItem,
   TrailerDto,
   VehicleDto,
+  VehicleLifecycleStatus,
 } from '@magguarantee/shared';
 
 import { GuaranteeCountdownBadge } from '@/components/carrier/GuaranteeCountdownBadge';
 import { VehicleStatusBadge } from '@/components/carrier/VehicleStatusBadge';
 import { DriverDetailModal } from '@/components/drivers/DriverDetailModal';
 import { PermitCell } from '@/components/fleet/PermitCell';
+import { VehicleStatusFilterBar } from '@/components/fleet/VehicleStatusFilterBar';
 import { TrailerDetailModal } from '@/components/trailers/TrailerDetailModal';
 import { KpiCard } from '@/components/dashboard/KpiCard';
 import { Badge } from '@/components/ui/Badge';
@@ -79,13 +81,28 @@ export function CarrierFleetPanel() {
   const tGuarantee = useTranslations('guarantee.fleet');
   const tVeh = useTranslations('vehicles');
 
+  const tFilter = useTranslations('fleet.statusFilter');
+
   // Honour `?tab=drivers|trailers` (set by the redirecting old sub-routes), else
-  // default to «Auta». Uncontrolled afterwards — the user can switch freely.
+  // default to «Auta». Controlled from here on: a KPI-tile filter (§15) pulls
+  // the user back onto «Auta» so the click always has a visible effect.
   const searchParams = useSearchParams();
   const tabParam = searchParams.get('tab');
-  const defaultTab: FleetTab = TAB_VALUES.includes(tabParam as FleetTab)
-    ? (tabParam as FleetTab)
-    : 'vehicles';
+  const [tab, setTab] = useState<FleetTab>(
+    TAB_VALUES.includes(tabParam as FleetTab)
+      ? (tabParam as FleetTab)
+      : 'vehicles',
+  );
+
+  // ── KPI-tile drill-down (§15) — in-page filter over the «Auta» table. The
+  //    carrier has no admin vehicles route to link out to, so the tile toggles;
+  //    pressing the applied tile again clears it. ─────────────────────────────
+  const [statusFilter, setStatusFilter] =
+    useState<VehicleLifecycleStatus | null>(null);
+  const toggleStatus = (status: VehicleLifecycleStatus) => {
+    setStatusFilter((prev) => (prev === status ? null : status));
+    setTab('vehicles');
+  };
 
   // ── Fleet payloads — carrier-scoped server-side. High limit so the KPI
   //    counts + tables are complete (the KPI strip cannot paginate). ────────
@@ -161,6 +178,14 @@ export function CarrierFleetPanel() {
     const total = aktywne + stojace + nieaktywne + doUsuniecia;
     return { total, aktywne, stojace, nieaktywne, doUsuniecia, removeList, longIdleList };
   }, [vehicles]);
+
+  const shownVehicles = useMemo(
+    () =>
+      statusFilter
+        ? vehicles.filter((v) => v.lifecycleStatus === statusFilter)
+        : vehicles,
+    [vehicles, statusFilter],
+  );
 
   // ── Per-tab filter controls (preserve the legacy per-entity search/filter) ─
   const [driverSearch, setDriverSearch] = useState('');
@@ -404,12 +429,19 @@ export function CarrierFleetPanel() {
           Two neutral tiles (AUTA total + STOJĄCE calm); only problem states pop
           — DŁUGO STOJĄCE amber, DO USUNIĘCIA red, AKTYWNE green. */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+        {/* AUTA doubles as the reset tile (§15). */}
         <KpiCard
           label={tKpi('vehicles')}
           value={kpi.total}
           tone="neutral"
           icon={Truck}
           loading={vehiclesQ.isLoading}
+          onClick={() => {
+            setStatusFilter(null);
+            setTab('vehicles');
+          }}
+          selected={statusFilter === null}
+          ariaLabel={tFilter('showAllAria', { count: kpi.total })}
         />
         <KpiCard
           label={tVehStatus('aktywna.tile')}
@@ -417,6 +449,12 @@ export function CarrierFleetPanel() {
           tone="green"
           icon={Truck}
           loading={vehiclesQ.isLoading}
+          onClick={() => toggleStatus('aktywna')}
+          selected={statusFilter === 'aktywna'}
+          ariaLabel={tFilter('toggleAria', {
+            label: tVehStatus('aktywna.tile'),
+            count: kpi.aktywne,
+          })}
         />
         <KpiCard
           label={tVehStatus('stojaca.tile')}
@@ -424,6 +462,12 @@ export function CarrierFleetPanel() {
           tone="neutral"
           icon={CircleParking}
           loading={vehiclesQ.isLoading}
+          onClick={() => toggleStatus('stojaca')}
+          selected={statusFilter === 'stojaca'}
+          ariaLabel={tFilter('toggleAria', {
+            label: tVehStatus('stojaca.tile'),
+            count: kpi.stojace,
+          })}
         />
         <KpiCard
           label={tVehStatus('nieaktywna.tile')}
@@ -431,6 +475,12 @@ export function CarrierFleetPanel() {
           tone="orange"
           icon={PauseCircle}
           loading={vehiclesQ.isLoading}
+          onClick={() => toggleStatus('nieaktywna')}
+          selected={statusFilter === 'nieaktywna'}
+          ariaLabel={tFilter('toggleAria', {
+            label: tVehStatus('nieaktywna.tile'),
+            count: kpi.nieaktywne,
+          })}
         />
         <KpiCard
           label={tVehStatus('do_usuniecia.tile')}
@@ -438,6 +488,12 @@ export function CarrierFleetPanel() {
           tone="red"
           icon={Trash2}
           loading={vehiclesQ.isLoading}
+          onClick={() => toggleStatus('do_usuniecia')}
+          selected={statusFilter === 'do_usuniecia'}
+          ariaLabel={tFilter('toggleAria', {
+            label: tVehStatus('do_usuniecia.tile'),
+            count: kpi.doUsuniecia,
+          })}
         />
       </div>
 
@@ -486,7 +542,11 @@ export function CarrierFleetPanel() {
         </div>
       )}
 
-      <Tabs defaultValue={defaultTab} className="w-full">
+      <Tabs
+        value={tab}
+        onValueChange={(v) => setTab(v as FleetTab)}
+        className="w-full"
+      >
         <TabsList aria-label={tTabs('ariaLabel')} className="mb-4">
           <TabsTrigger value="vehicles">{tTabs('vehicles')}</TabsTrigger>
           <TabsTrigger value="drivers">{tTabs('drivers')}</TabsTrigger>
@@ -495,18 +555,33 @@ export function CarrierFleetPanel() {
 
         {/* ── Auta ──────────────────────────────────────────────────────── */}
         <TabsContent value="vehicles">
+          {statusFilter && (
+            <VehicleStatusFilterBar
+              status={statusFilter}
+              count={shownVehicles.length}
+              onClear={() => setStatusFilter(null)}
+            />
+          )}
           <DataTable
-            rows={vehicles}
+            rows={shownVehicles}
             columns={vehicleColumns}
             rowKey={(r) => r.id}
             onRowClick={setVehicleTarget}
             rowAriaLabel={(r) => tA11y('showDetails', { name: r.plateNumber })}
             isLoading={vehiclesQ.isLoading}
+            hasActiveFilters={statusFilter !== null}
             empty={
               <EmptyState
                 icon={Truck}
                 title={tVehicles('emptyTitle')}
                 message={tVehicles('emptyMessage')}
+              />
+            }
+            emptyFiltered={
+              <EmptyState
+                icon={SearchX}
+                title={tFilter('emptyTitle')}
+                message={tFilter('emptyMessage')}
               />
             }
           />

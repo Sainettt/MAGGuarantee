@@ -14,8 +14,16 @@
 // `loading` state shows a `<Skeleton>` over the value; `empty` (value == 0)
 // keeps the layout stable — the brief asks for an empty-state placeholder
 // at the page level rather than per-card.
+//
+// docs/14 §15 — a tile may also be a DRILL-DOWN affordance. Two interactive
+// modes, mutually exclusive, both keeping the exact same anatomy:
+//   - `href`     → renders as a `<Link>` (navigate to the pre-filtered list),
+//   - `onClick`  → renders as a `<button aria-pressed={selected}>` (toggle an
+//                  in-page filter, for panels that have no separate list route).
+// Without either it stays the inert `<div>` it has always been.
 
 import type { LucideIcon } from 'lucide-react';
+import Link from 'next/link';
 
 import { Skeleton } from '@/components/ui/Skeleton';
 import { cn } from '@/lib/utils';
@@ -43,6 +51,22 @@ const TONE_ICON: Record<KpiTone, string> = {
   neutral: 'text-text-sub',
 };
 
+/** Base chrome — identical for the inert and the interactive tile. */
+const SHELL =
+  'relative flex flex-col gap-1 p-4 rounded-xl border border-border bg-card shadow-card';
+
+/**
+ * Interactive affordance — the same recipe `<OpiekunCarrierCard>` uses for its
+ * clickable card, so a clickable tile and a clickable card feel like one family.
+ */
+const INTERACTIVE =
+  'w-full text-left cursor-pointer transition-[background-color,border-color,box-shadow] duration-150 ' +
+  'hover:border-brand/40 hover:bg-brand-50/30 dark:hover:bg-brand/5 ' +
+  'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand/40 focus-visible:border-brand/60';
+
+/** Toggled-on state for the `onClick` (in-page filter) mode. */
+const SELECTED = 'border-brand/60 bg-brand-50/40 dark:bg-brand/10';
+
 export interface KpiCardProps {
   label: string;
   /** Pre-formatted value. Pass `'—'` for an explicitly-empty tile. */
@@ -50,6 +74,20 @@ export interface KpiCardProps {
   tone?: KpiTone;
   icon?: LucideIcon;
   loading?: boolean;
+  /** Drill-down target — renders the tile as a `<Link>`. */
+  href?: string;
+  /**
+   * In-page filter toggle — renders the tile as a `<button>`. Ignored when
+   * `href` is set (a tile is either a link or a toggle, never both).
+   */
+  onClick?: () => void;
+  /** `onClick` mode only — marks the tile as the currently applied filter. */
+  selected?: boolean;
+  /**
+   * Accessible name for the interactive tile. Without it the tile is announced
+   * as "label value", which reads fine but doesn't say what activating it does.
+   */
+  ariaLabel?: string;
 }
 
 export function KpiCard({
@@ -58,13 +96,13 @@ export function KpiCard({
   tone = 'neutral',
   icon: Icon,
   loading,
+  href,
+  onClick,
+  selected,
+  ariaLabel,
 }: KpiCardProps) {
-  return (
-    <div
-      className={cn(
-        'relative flex flex-col gap-1 p-4 rounded-xl border border-border bg-card shadow-card',
-      )}
-    >
+  const body = (
+    <>
       <span className="text-xs font-bold uppercase tracking-normal text-text-sub line-clamp-2 min-h-[2rem] leading-4 pr-8">
         {label}
       </span>
@@ -94,6 +132,30 @@ export function KpiCard({
           )}
         />
       )}
-    </div>
+    </>
   );
+
+  if (href) {
+    return (
+      <Link href={href} aria-label={ariaLabel} className={cn(SHELL, INTERACTIVE)}>
+        {body}
+      </Link>
+    );
+  }
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={selected}
+        aria-label={ariaLabel}
+        className={cn(SHELL, INTERACTIVE, selected && SELECTED)}
+      >
+        {body}
+      </button>
+    );
+  }
+
+  return <div className={SHELL}>{body}</div>;
 }

@@ -23,19 +23,21 @@ import {
   CircleParking,
   Gauge,
   PauseCircle,
+  SearchX,
   Trash2,
   Truck,
   Users,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type {
   DelegationDto,
   DriverListItem,
   DyspozytorFleetStats,
   DyspozytorStojacyItem,
   TrailerListItem,
+  VehicleLifecycleStatus,
   VehicleListItem,
 } from '@magguarantee/shared';
 
@@ -51,6 +53,8 @@ import { FleetTrailerDetailModal } from '@/components/fleet/FleetTrailerDetailMo
 import { FleetVehicleDetailModal } from '@/components/fleet/FleetVehicleDetailModal';
 import { PlanistaVehicleDetailModal } from '@/components/fleet/PlanistaVehicleDetailModal';
 import { ReadOnlyBanner } from '@/components/fleet/ReadOnlyBanner';
+import { VehicleStatusFilterBar } from '@/components/fleet/VehicleStatusFilterBar';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 
 /** The fleet payload the panel reads — shared by planista + dyspozytor. */
@@ -117,6 +121,7 @@ export function FleetPanel({
   const tVehStatus = useTranslations('vehicleStatus');
   const tMyKm = useTranslations('myKm');
   const tA11y = useTranslations('fleet.a11y');
+  const tFilter = useTranslations('fleet.statusFilter');
 
   const stats = data?.stats;
   const idle = data?.stojaceList ?? [];
@@ -132,6 +137,30 @@ export function FleetPanel({
   // is the softer watchlist. Both come off the single needs-attention list.
   const removeList = idle.filter((v) => v.status === 'do_usuniecia');
   const longIdleList = idle.filter((v) => v.status === 'nieaktywna');
+
+  // ── KPI-tile drill-down (§15) ─────────────────────────────────────────
+  // These roles have no vehicles LIST route to navigate to (the panel IS their
+  // fleet surface), so a tile toggles an in-page filter over the «Auta» tab
+  // instead of linking out. Clicking the applied tile again clears it. The
+  // filter also pulls the user onto the «Auta» tab, so the effect of the click
+  // is always visible — hence the controlled <Tabs>.
+  const [statusFilter, setStatusFilter] =
+    useState<VehicleLifecycleStatus | null>(null);
+  const [tab, setTab] = useState('vehicles');
+
+  const toggleStatus = (status: VehicleLifecycleStatus) => {
+    setStatusFilter((prev) => (prev === status ? null : status));
+    setTab('vehicles');
+  };
+
+  const vehicles = useMemo(() => data?.vehicles ?? [], [data?.vehicles]);
+  const shownVehicles = useMemo(
+    () =>
+      statusFilter
+        ? vehicles.filter((v) => v.lifecycleStatus === statusFilter)
+        : vehicles,
+    [vehicles, statusFilter],
+  );
 
   // ── Per-modal open + target state (read-only VIEW surfaces) ───────────
   // The delegations VIEW modal lives inside <DelegationsTable> now; the panel
@@ -185,12 +214,20 @@ export function FleetPanel({
           states pop — DŁUGO STOJĄCE amber, DO USUNIĘCIA red, AKTYWNE green
           (capacity). Always rendered so the layout doesn't jump. */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+        {/* AUTA is the reset: pressed while nothing is filtered, and clicking it
+            drops any applied bucket. */}
         <KpiCard
           label={t('kpi.vehicles')}
           value={autaTotal}
           tone="neutral"
           icon={Truck}
           loading={isLoading}
+          onClick={() => {
+            setStatusFilter(null);
+            setTab('vehicles');
+          }}
+          selected={statusFilter === null}
+          ariaLabel={tFilter('showAllAria', { count: autaTotal })}
         />
         <KpiCard
           label={tVehStatus('aktywna.tile')}
@@ -198,6 +235,12 @@ export function FleetPanel({
           tone="green"
           icon={Truck}
           loading={isLoading}
+          onClick={() => toggleStatus('aktywna')}
+          selected={statusFilter === 'aktywna'}
+          ariaLabel={tFilter('toggleAria', {
+            label: tVehStatus('aktywna.tile'),
+            count: stats?.aktywne ?? 0,
+          })}
         />
         <KpiCard
           label={tVehStatus('stojaca.tile')}
@@ -205,6 +248,12 @@ export function FleetPanel({
           tone="neutral"
           icon={CircleParking}
           loading={isLoading}
+          onClick={() => toggleStatus('stojaca')}
+          selected={statusFilter === 'stojaca'}
+          ariaLabel={tFilter('toggleAria', {
+            label: tVehStatus('stojaca.tile'),
+            count: stats?.stojace ?? 0,
+          })}
         />
         <KpiCard
           label={tVehStatus('nieaktywna.tile')}
@@ -212,6 +261,12 @@ export function FleetPanel({
           tone="orange"
           icon={PauseCircle}
           loading={isLoading}
+          onClick={() => toggleStatus('nieaktywna')}
+          selected={statusFilter === 'nieaktywna'}
+          ariaLabel={tFilter('toggleAria', {
+            label: tVehStatus('nieaktywna.tile'),
+            count: stats?.nieaktywne ?? 0,
+          })}
         />
         <KpiCard
           label={tVehStatus('do_usuniecia.tile')}
@@ -219,6 +274,12 @@ export function FleetPanel({
           tone="red"
           icon={Trash2}
           loading={isLoading}
+          onClick={() => toggleStatus('do_usuniecia')}
+          selected={statusFilter === 'do_usuniecia'}
+          ariaLabel={tFilter('toggleAria', {
+            label: tVehStatus('do_usuniecia.tile'),
+            count: stats?.doUsuniecia ?? 0,
+          })}
         />
       </div>
 
@@ -269,7 +330,7 @@ export function FleetPanel({
         </div>
       )}
 
-      <Tabs defaultValue="vehicles" className="w-full">
+      <Tabs value={tab} onValueChange={setTab} className="w-full">
         <TabsList aria-label={t('tabs.ariaLabel')} className="mb-4">
           <TabsTrigger value="vehicles">{t('tabs.vehicles')}</TabsTrigger>
           <TabsTrigger value="delegations">{t('tabs.delegations')}</TabsTrigger>
@@ -278,12 +339,27 @@ export function FleetPanel({
         </TabsList>
 
         <TabsContent value="vehicles">
+          {statusFilter && (
+            <VehicleStatusFilterBar
+              status={statusFilter}
+              count={shownVehicles.length}
+              onClear={() => setStatusFilter(null)}
+            />
+          )}
           <FleetVehiclesTable
-            rows={data?.vehicles ?? []}
+            rows={shownVehicles}
             isLoading={isLoading}
             namespace={`${namespace}.vehicles`}
             onRowClick={setVehicleTarget}
             rowAriaLabel={(v) => tA11y('showDetails', { name: v.plateNumber })}
+            hasActiveFilters={statusFilter !== null}
+            emptyFiltered={
+              <EmptyState
+                icon={SearchX}
+                title={tFilter('emptyTitle')}
+                message={tFilter('emptyMessage')}
+              />
+            }
           />
         </TabsContent>
 

@@ -1,22 +1,35 @@
 // Phase 5.2 — card-grid redesign for the «Moja Opieka» carrier list.
 //
 // Replaces the 8-column DataTable row with a fluid card that survives narrow
-// sidebar / tablet widths without horizontal scroll. The whole card is the
-// click target (a single `<Link>` from `next/link`) — no inner action button.
+// sidebar / tablet widths without horizontal scroll.
 //
 // Anatomy / colour tokens / hover & focus rules match docs/14-design-system.md
 // § Phase 5.2 — no new design tokens introduced. Reuses the existing semantic
 // palette (`text-success` / `text-warning` / `text-danger` / `text-info`) so
 // the colour story mirrors the KPI strip above on the same page.
+//
+// §15 — the card now has TWO click targets, so it can no longer be one big
+// `<Link>` (nesting anchors is invalid HTML). Instead the card is a plain
+// container carrying the hover/`group` chrome, with:
+//   - a STRETCHED link (`absolute inset-0`) covering the whole card → the
+//     carrier drill-down, exactly the old whole-card behaviour, and
+//   - four stat links stacked above it (`relative z-10`) → the vehicles list
+//     filtered to THIS carrier + that lifecycle bucket.
+// The focus ring lives on the stretched link itself, so keyboard focus still
+// outlines the whole card.
 
 import { TriangleAlert } from 'lucide-react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import type { OpiekunCarrierStats } from '@magguarantee/shared';
+import type {
+  OpiekunCarrierStats,
+  VehicleLifecycleStatus,
+} from '@magguarantee/shared';
 
 import { Badge } from '@/components/ui/Badge';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { cn } from '@/lib/utils';
+import { vehiclesListHref } from '@/lib/vehicles-filter';
 
 type Tone = 'success' | 'warning' | 'danger' | 'info' | 'neutral';
 
@@ -32,11 +45,27 @@ interface StatCellProps {
   value: number;
   label: string;
   tone: Tone;
+  /** Drill-down target — the vehicles list filtered to this carrier + bucket. */
+  href: string;
+  /** Spells out what the number means and where the link goes. */
+  ariaLabel: string;
 }
 
-function StatCell({ value, label, tone }: StatCellProps) {
+function StatCell({ value, label, tone, href, ariaLabel }: StatCellProps) {
   return (
-    <div className="flex flex-col items-start gap-0.5 min-w-0">
+    <Link
+      href={href}
+      aria-label={ariaLabel}
+      className={cn(
+        // `relative z-10` lifts the cell above the card's stretched link so the
+        // narrower target wins the click. Padding stays INSIDE the grid track
+        // (the row itself is pulled out by `-mx-1`) so neighbouring hit areas
+        // touch but never overlap.
+        'relative z-10 flex flex-col items-start gap-0.5 min-w-0 rounded-md px-1 py-1',
+        'transition-colors hover:bg-input',
+        'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand/40',
+      )}
+    >
       <span
         className={cn(
           'text-2xl font-extrabold tabular-nums leading-none',
@@ -48,7 +77,7 @@ function StatCell({ value, label, tone }: StatCellProps) {
       <span className="text-[11px] font-medium uppercase tracking-wide text-text-sub truncate w-full">
         {label}
       </span>
-    </div>
+    </Link>
   );
 }
 
@@ -61,6 +90,7 @@ export default function OpiekunCarrierCard({
 }: OpiekunCarrierCardProps) {
   const t = useTranslations('opieka');
   const tCommon = useTranslations('common');
+  const tVehStatus = useTranslations('vehicleStatus');
 
   const displayName = carrier.firma ?? carrier.nazwa ?? carrier.login;
   const isInactive = carrier.aktywny === false;
@@ -75,26 +105,35 @@ export default function OpiekunCarrierCard({
     .join(' · ');
 
   return (
-    <Link
-      href={`/employee/opieka/carriers/${encodeURIComponent(carrier.login)}`}
-      aria-label={t('table.openDetailAria', { firma: displayName })}
+    <div
       data-inactive={isInactive || undefined}
       className={cn(
-        'group flex flex-col gap-3 p-4 sm:p-5',
+        'group relative flex flex-col gap-3 p-4 sm:p-5',
         'bg-card border border-border rounded-lg',
         'transition-[background-color,border-color,box-shadow] duration-150',
+        // `:hover` on the container also fires while the pointer is over an
+        // inner stat link — the whole card lighting up is the intent.
         'hover:shadow-card hover:border-brand/40 hover:bg-brand-50/30 dark:hover:bg-brand/5',
-        'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand/40 focus-visible:border-brand/60',
         'data-[inactive=true]:opacity-70',
       )}
     >
+      {/* Stretched whole-card link — the carrier drill-down (unchanged target).
+          It sits BELOW the stat links (`z-0`), so they take precedence. */}
+      <Link
+        href={`/employee/opieka/carriers/${encodeURIComponent(carrier.login)}`}
+        aria-label={t('table.openDetailAria', { firma: displayName })}
+        className={cn(
+          'absolute inset-0 z-0 rounded-lg',
+          'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand/40',
+        )}
+      />
       {/* Headline row — firma + active badge. */}
       <div className="flex items-start justify-between gap-3 min-w-0">
         <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-          <h3
-            className="font-semibold text-text text-[15px] leading-tight truncate"
-            title={displayName}
-          >
+          {/* No `title` here: the stretched link paints above static content,
+              so a native tooltip on the heading would never fire. The full name
+              stays reachable as the link's accessible name + the drill-down. */}
+          <h3 className="font-semibold text-text text-[15px] leading-tight truncate">
             {displayName}
           </h3>
           <span className="text-xs text-text-sub font-mono truncate">
@@ -104,7 +143,10 @@ export default function OpiekunCarrierCard({
         <div className="flex flex-none items-center gap-2">
           {needsAttention && (
             <span
-              className="inline-flex items-center text-warning-dark dark:text-warning"
+              // Lifted above the stretched link so its reason tooltip still
+              // fires — a 16px informational marker, small enough that the card
+              // stays clickable everywhere it matters.
+              className="relative z-10 inline-flex items-center text-warning-dark dark:text-warning"
               title={`${t('attention.title')}: ${reasonText}`}
               aria-label={`${t('attention.title')}: ${reasonText}`}
             >
@@ -132,31 +174,46 @@ export default function OpiekunCarrierCard({
           `stojaca` is NEUTRAL (calm), not amber; the amber slot moves to
           `nieaktywna` («Długo stojąca»). `wylaczona` is orthogonal and not
           shown on the card (surfaced only in the drill-down table badge). */}
-      <dl className="grid grid-cols-4 gap-2">
-        <StatCell
-          value={carrier.vehicles.aktywne}
-          label={t('card.aktywne')}
-          tone="success"
-        />
-        <StatCell
-          value={carrier.vehicles.stojace}
-          label={t('card.stojace')}
-          tone="neutral"
-        />
-        <StatCell
-          value={carrier.vehicles.nieaktywne}
-          label={t('card.nieaktywne')}
-          tone="warning"
-        />
-        <StatCell
-          value={carrier.vehicles.doUsuniecia}
-          label={t('card.doUsuniecia')}
-          tone="danger"
-        />
-      </dl>
-    </Link>
+      <div className="grid grid-cols-4 gap-2 -mx-1">
+        {STATS.map(({ status, key, tone }) => {
+          const value = carrier.vehicles[key];
+          const label = t(`card.${key}`);
+          return (
+            <StatCell
+              key={status}
+              value={value}
+              label={label}
+              tone={tone}
+              href={vehiclesListHref({ status, carrierId: carrier.carrierId })}
+              ariaLabel={t('card.statAria', {
+                label: tVehStatus(`${status}.tile`),
+                count: value,
+                firma: displayName,
+              })}
+            />
+          );
+        })}
+      </div>
+    </div>
   );
 }
+
+/**
+ * The four idle-clock buckets shown on the card, in ramp order. `key` indexes
+ * the aggregate counts (and doubles as the `opieka.card.*` label key); `status`
+ * is the canonical lifecycle value the vehicles list filters on. `wylaczona` is
+ * orthogonal and stays off the card (§6.3.6).
+ */
+const STATS: readonly {
+  status: VehicleLifecycleStatus;
+  key: 'aktywne' | 'stojace' | 'nieaktywne' | 'doUsuniecia';
+  tone: Tone;
+}[] = [
+  { status: 'aktywna', key: 'aktywne', tone: 'success' },
+  { status: 'stojaca', key: 'stojace', tone: 'neutral' },
+  { status: 'nieaktywna', key: 'nieaktywne', tone: 'warning' },
+  { status: 'do_usuniecia', key: 'doUsuniecia', tone: 'danger' },
+];
 
 /**
  * Card-shaped skeleton used while `useOpiekunFleet` is loading. Six instances

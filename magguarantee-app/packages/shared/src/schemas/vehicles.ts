@@ -427,6 +427,19 @@ export const VehicleFiltersSchema = z
     /** Phase 11 — filter by dispatch Team (replaces `dispatcherId`). */
     dispatchTeamId: UuidSchema.optional(),
     active: z.coerce.boolean().optional(),
+    /**
+     * Vehicle-status rework — narrow to ONE lifecycle bucket (the KPI-tile
+     * drill-down: «Aktywne» / «Stojące» / «Długo stojące» / «Do usunięcia» /
+     * «Wyłączone» link into the list pre-filtered).
+     *
+     * NOT a stored column: `wylaczona` maps straight onto `active=false`, but
+     * the four idle-clock states are DERIVED at read time from the delegation
+     * state + the idle anchor (see {@link VehicleLifecycleStatusSchema}), so the
+     * service classifies the scoped set in memory before paging. Combining it
+     * with a contradictory `active` (e.g. `active=true` + `wylaczona`) is a
+     * legal query that simply matches nothing.
+     */
+    lifecycleStatus: VehicleLifecycleStatusSchema.optional(),
     q: z.string().min(1).max(64).optional(),
     cursor: UuidSchema.optional(),
     limit: z.coerce.number().int().min(1).max(200).default(50),

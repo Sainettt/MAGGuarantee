@@ -269,6 +269,26 @@ soft-delete'ятся (объект в MinIO остаётся).
   additive-расширены тем же `dispatchTeam` (non-sensitive — без ставок, без нового
   эндпоинта).
 
+**Фильтр по статусу жизненного цикла (`?lifecycleStatus=`, 2026-07-29).**
+`GET /vehicles` принимает `lifecycleStatus ∈ {aktywna, stojaca, nieaktywna,
+do_usuniecia, wylaczona}` — drill-down из KPI-кафелей «Moja opieka»
+(docs/14 §15). Композируется со всеми существующими фильтрами (`carrierId`,
+`plannerId`, `dispatchTeamId`, `q`, `active`, `cursor`, `limit`) и **не отменяет
+role-scope**.
+
+Статус — **не колонка**: `wylaczona` ≡ `active=false` (обычный SQL-путь,
+cursor-пагинация без изменений), остальные четыре — read-time классификация по
+делегациям + idle-якорю. Для них сервис сканирует уже role-scoped `active=true`
+набор (кап **500** строк — та же посадка, что у fleet-агрегатов), классифицирует
+через **тот же** батчевый delegation-lookup, что считает KPI-кафели (кафель и
+список не могут разойтись), и пагинирует в памяти; `cursor` сохраняет смысл
+(последний id предыдущей страницы) и резолвится по отфильтрованной
+последовательности, неизвестный cursor → с начала.
+
+Противоречивая комбинация (`active=true` + `lifecycleStatus=wylaczona` и
+наоборот) — валидный запрос, который просто ничего не матчит: ответ
+`{ items: [], nextCursor: null }` без запроса в БД.
+
 **Scope диспетчера (Phase 11).** `GET /vehicles` (list), `GET /vehicles/km-report`,
 `GET /fleet/dyspozytor`, `GET /delegations`, GPS — для роли `dyspozytor`
 скопируются по **команде** (`Vehicle.dispatchTeamId === AuthUser.teamId`), а не

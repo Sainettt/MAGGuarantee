@@ -29,6 +29,7 @@ import {
   History,
   LayoutDashboard,
   MapPin,
+  RefreshCw,
   Settings2,
   Truck,
   UserCog,
@@ -47,6 +48,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/Sheet';
+import { useActiveNavRefresh } from '@/lib/hooks/useActiveNavRefresh';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { useOpiekunFleet } from '@/lib/hooks/useOpiekunFleet';
 import { cn } from '@/lib/utils';
@@ -94,6 +96,7 @@ export function EmployeeSidebar({
   const t = useTranslations();
   const pathname = usePathname();
   const { user } = useAuth();
+  const { isRefreshing, onActiveNavClick } = useActiveNavRefresh();
 
   // «Moja opieka» attention count — only meaningful for opiekuni (the nav
   // entry maps to *their* assigned carriers). Admins also see the opieka
@@ -125,8 +128,11 @@ export function EmployeeSidebar({
   const renderList = (onNavigate?: () => void) => (
     <ul className="flex flex-col gap-0.5 p-2">
       {items.map((link) => {
-        const Icon = ICONS[link.iconName] ?? FileText;
         const active = link.key === activeKey;
+        // Клик по активному пункту = рефреш данных страницы (docs/14 §14) —
+        // на время рефетча иконка пункта подменяется крутящимся <RefreshCw>.
+        const spinning = active && isRefreshing;
+        const Icon = spinning ? RefreshCw : (ICONS[link.iconName] ?? FileText);
         const pillCount =
           link.key === OPIEKA_NAV_KEY && attentionCount > 0
             ? attentionCount
@@ -136,7 +142,12 @@ export function EmployeeSidebar({
             <Link
               href={link.href}
               aria-current={active ? 'page' : undefined}
-              onClick={onNavigate}
+              title={active ? t('common.refreshHint') : undefined}
+              aria-busy={spinning || undefined}
+              onClick={(e) => {
+                if (active) onActiveNavClick(e);
+                onNavigate?.();
+              }}
               className={cn(
                 'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-semibold',
                 'transition-colors',
@@ -146,7 +157,11 @@ export function EmployeeSidebar({
                   : 'text-text-sub hover:bg-input hover:text-text',
               )}
             >
-              <Icon size={16} aria-hidden />
+              <Icon
+                size={16}
+                aria-hidden
+                className={cn(spinning && 'animate-spin')}
+              />
               <span className="truncate">{t(link.labelKey)}</span>
               {pillCount > 0 && (
                 <span

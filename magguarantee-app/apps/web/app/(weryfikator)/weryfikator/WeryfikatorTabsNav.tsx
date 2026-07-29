@@ -12,12 +12,13 @@
 // chrome. It mirrors the <Tabs>/<TabsList> styling (`role="tab"`, brand
 // underline on the active tab, arrow-key roving) for a11y parity.
 
-import { Gauge, MapPin } from 'lucide-react';
+import { Gauge, MapPin, RefreshCw } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useRef } from 'react';
 
+import { useActiveNavRefresh } from '@/lib/hooks/useActiveNavRefresh';
 import { cn } from '@/lib/utils';
 
 const TABS = [
@@ -27,8 +28,12 @@ const TABS = [
 
 export function WeryfikatorTabsNav() {
   const t = useTranslations('weryfikator.tabs');
+  const tCommon = useTranslations('common');
   const pathname = usePathname();
   const refs = useRef<(HTMLAnchorElement | null)[]>([]);
+
+  // Повторный клик по активной вкладке = рефреш её данных (docs/14 §14).
+  const { isRefreshing, onActiveNavClick } = useActiveNavRefresh();
 
   const activeIndex = TABS.findIndex((tab) => pathname.startsWith(tab.href));
 
@@ -40,8 +45,9 @@ export function WeryfikatorTabsNav() {
         className="flex items-center gap-1 border-b border-border"
       >
         {TABS.map((tab, idx) => {
-          const Icon = tab.icon;
           const selected = idx === activeIndex;
+          const spinning = selected && isRefreshing;
+          const Icon = spinning ? RefreshCw : tab.icon;
           return (
             <Link
               key={tab.key}
@@ -49,6 +55,9 @@ export function WeryfikatorTabsNav() {
               role="tab"
               aria-selected={selected}
               tabIndex={selected ? 0 : -1}
+              title={selected ? tCommon('refreshHint') : undefined}
+              aria-busy={spinning || undefined}
+              onClick={selected ? onActiveNavClick : undefined}
               ref={(el) => {
                 refs.current[idx] = el;
               }}
@@ -73,7 +82,11 @@ export function WeryfikatorTabsNav() {
                   : 'border-transparent text-text-sub hover:text-text',
               )}
             >
-              <Icon size={15} aria-hidden="true" />
+              <Icon
+                size={15}
+                aria-hidden="true"
+                className={cn(spinning && 'animate-spin')}
+              />
               {t(tab.key)}
             </Link>
           );

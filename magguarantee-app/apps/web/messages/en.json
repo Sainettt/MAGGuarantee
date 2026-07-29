@@ -38,7 +38,8 @@
     "nextPage": "Next page",
     "clearFilters": "Clear filters",
     "showPassword": "Show password",
-    "hidePassword": "Hide password"
+    "hidePassword": "Hide password",
+    "refreshHint": "Click to refresh data"
   },
   "formActive": {
     "vehicleConsequence": "An inactive vehicle disappears from selection lists and can't be used in new departures or claims.",
@@ -487,7 +488,9 @@
       "searchPlaceholder": "Search by plate number",
       "carrier": "Carrier",
       "carrierLabel": "Filter by carrier",
-      "allCarriers": "All carriers"
+      "allCarriers": "All carriers",
+      "statusLabel": "Filter by status",
+      "allStatuses": "All statuses"
     },
     "fields": {
       "carrier": "Carrier",
@@ -1244,7 +1247,10 @@
     "emptyMessage": "Once an administrator assigns carriers to you, they will appear here.",
     "totals": {
       "carriers": "Carriers",
-      "vehicles": "Vehicles"
+      "vehicles": "Vehicles",
+      "openCarriersAria": "Carriers: {count} — open the carrier list",
+      "openVehiclesAria": "Vehicles: {count} — open the vehicle list",
+      "openStatusAria": "{label}: {count} — open the vehicle list with this status"
     },
     "table": {
       "firma": "Company",
@@ -1262,7 +1268,8 @@
       "aktywne": "Active",
       "stojace": "Parked",
       "nieaktywne": "Long idle",
-      "doUsuniecia": "To remove"
+      "doUsuniecia": "To remove",
+      "statAria": "{label}: {count} — open {firma}'s vehicles with this status"
     },
     "attention": {
       "title": "Requires attention",
@@ -1899,6 +1906,14 @@
     }
   },
   "fleet": {
+    "statusFilter": {
+      "label": "Status filter:",
+      "count": "Showing: {count}",
+      "toggleAria": "{label}: {count} — show only these vehicles",
+      "showAllAria": "All vehicles: {count} — clear the status filter",
+      "emptyTitle": "No vehicles with this status",
+      "emptyMessage": "No vehicle currently has the selected status. Clear the filter or pick another tile."
+    },
     "a11y": {
       "showDetails": "Show details: {name}",
       "showDelegationDetails": "Show trip details: {name}"

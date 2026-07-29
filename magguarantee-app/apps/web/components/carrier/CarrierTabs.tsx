@@ -5,10 +5,12 @@
 // project voice rules). `Flota` matches `/carrier/fleet/*` so the sub-tabs
 // inside fleet keep the parent active.
 
+import { RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
+import { useActiveNavRefresh } from '@/lib/hooks/useActiveNavRefresh';
 import { useMyGuaranteeCompliance } from '@/lib/hooks/useGuarantee';
 import { cn } from '@/lib/utils';
 
@@ -69,7 +71,11 @@ export function CarrierTabs() {
   const pathname = usePathname();
   const t = useTranslations('carrier.tabs');
   const tMyKm = useTranslations('myKm');
+  const tCommon = useTranslations('common');
   const tGuarantee = useTranslations('guarantee.tab');
+
+  // Повторный клик по активной вкладке = рефреш её данных (docs/14 §14).
+  const { isRefreshing, onActiveNavClick } = useActiveNavRefresh();
 
   // Attention badge on «Porozumienie» — owed vehicles (violated + dueSoon) from
   // the SAME cached `/me` query the strip + cards read (`GUARANTEE_KEY`), so a
@@ -134,6 +140,9 @@ export function CarrierTabs() {
                   ? tGuarantee('badgeAria', { count: owedCount })
                   : undefined
               }
+              title={active ? tCommon('refreshHint') : undefined}
+              aria-busy={(active && isRefreshing) || undefined}
+              onClick={active ? onActiveNavClick : undefined}
               className={cn(
                 'inline-flex items-center gap-2 px-4 py-3 text-sm font-semibold whitespace-nowrap',
                 'border-b-2 -mb-px transition-colors',
@@ -143,7 +152,11 @@ export function CarrierTabs() {
                   : 'text-text-sub border-transparent hover:text-text',
               )}
             >
-              <span aria-hidden>{tab.emoji}</span>
+              {active && isRefreshing ? (
+                <RefreshCw size={14} className="animate-spin" aria-hidden />
+              ) : (
+                <span aria-hidden>{tab.emoji}</span>
+              )}
               {tab.labelKey === 'km' ? tMyKm('tab') : t(tab.labelKey)}
               {withBadge ? (
                 <span

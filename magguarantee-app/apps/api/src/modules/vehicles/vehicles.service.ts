@@ -19,6 +19,7 @@ import type {
   VehicleAttachmentDto,
   VehicleDto,
   VehicleFilters,
+  VehicleLifecycleStatus,
 } from '@magguarantee/shared';
 
 import {
@@ -68,6 +69,21 @@ import {
  */
 const VEHICLE_PLATE_SOFT_DELETED_CODE = 'VEHICLE_PLATE_SOFT_DELETED';
 
+/** Canonical `list()` response — one cursor-paginated page of vehicle DTOs. */
+interface VehiclePage {
+  items: VehicleDto[];
+  nextCursor: string | null;
+}
+
+/**
+ * Role-scoped repository filters: `VehicleFilters` after `_scopeFilters`, minus
+ * the derived `lifecycleStatus` — the repository has no such column, so `list()`
+ * peels it off and resolves it itself before delegating down.
+ */
+type ScopedVehicleFilters = Omit<VehicleFilters, 'lifecycleStatus'> & {
+  carrierIds?: string[];
+};
+
 /**
  * Vehicle CRUD service per docs/13-api-design.md#vehicles.
  *
@@ -102,6 +118,13 @@ const VEHICLE_PLATE_SOFT_DELETED_CODE = 'VEHICLE_PLATE_SOFT_DELETED';
 export class VehiclesService {
   private readonly logger = new Logger(VehiclesService.name);
 
+  /**
+   * Row cap for the derived-status list path (`_listByIdleStatus`). Matches the
+   * fleet aggregates' `limit: 500` full-scan posture — a fleet larger than this
+   * gets its tail truncated rather than a slow query.
+   */
+  private static readonly LIFECYCLE_FILTER_SCAN_CAP = 500;
+
   constructor(
     private readonly vehicles: VehiclesRepository,
     private readonly users: UsersRepository,
@@ -125,14 +148,81 @@ export class VehiclesService {
   async list(
     user: AuthUser,
     filters: VehicleFilters,
-  ): Promise<{ items: VehicleDto[]; nextCursor: string | null }> {
+  ): Promise<VehiclePage> {
     const effective = await this._scopeFilters(user, filters);
-    const rows = await this.vehicles.list(effective);
-    const hasNext = rows.length > effective.limit;
-    const page = hasNext ? rows.slice(0, effective.limit) : rows;
+    const { lifecycleStatus, ...scoped } = effective;
+    if (!lifecycleStatus) return this._listPage(scoped);
+
+    // A lifecycle filter always implies an `active` value: `wylaczona` IS
+    // `active=false`, every other bucket requires `active=true` (the classifier
+    // short-circuits on the manual switch). A caller asking for the opposite
+    // `active` can match nothing — answer with the canonical empty page instead
+    // of firing a query that provably returns 0 rows.
+    const requiredActive = lifecycleStatus !== 'wylaczona';
+    if (typeof scoped.active === 'boolean' && scoped.active !== requiredActive) {
+      return { items: [], nextCursor: null };
+    }
+
+    // `wylaczona` is a STORED column — plain SQL path, cursor pagination and
+    // the single-page delegation lookup stay exactly as they are.
+    if (!requiredActive) {
+      return this._listPage({ ...scoped, active: false });
+    }
+
+    return this._listByIdleStatus({ ...scoped, active: true }, lifecycleStatus);
+  }
+
+  /** The plain SQL list path — everything the repository can filter itself. */
+  private async _listPage(filters: ScopedVehicleFilters): Promise<VehiclePage> {
+    const rows = await this.vehicles.list(filters);
+    const hasNext = rows.length > filters.limit;
+    const page = hasNext ? rows.slice(0, filters.limit) : rows;
     // ONE batched delegation-status lookup for the whole page (no N+1) → the
     // per-row lifecycle status.
     const lifecycle = await this._lifecycleBatch(page);
+    return {
+      items: page.map((r) => this.toDto(r, lifecycle.get(r.id))),
+      nextCursor: hasNext ? (page[page.length - 1]?.id ?? null) : null,
+    };
+  }
+
+  /**
+   * List path for the four DERIVED idle buckets (`stojaca` / `nieaktywna` /
+   * `do_usuniecia` / `aktywna`). There is no status column to put in the
+   * `WHERE`, so we scan the already role-scoped ACTIVE set (capped at
+   * {@link LIFECYCLE_FILTER_SCAN_CAP}), classify it through the SAME batched
+   * delegation lookup the fleet aggregates use — so a KPI tile and this list
+   * can never disagree — and then page in memory.
+   *
+   * The scan mirrors the established fleet-aggregate posture (`vehicles.list`
+   * with `limit: 200…500` + in-memory classification); it is ONE extra
+   * `findMany` over an FK-indexed, `active=true`-narrowed set plus the two
+   * grouped delegation reads. Beyond the cap the tail is dropped — same
+   * truncation the aggregates already accept.
+   *
+   * `cursor` keeps its meaning (the last id of the previous page) but is
+   * resolved against the FILTERED sequence; an unknown cursor restarts from the
+   * top rather than 404-ing.
+   */
+  private async _listByIdleStatus(
+    filters: ScopedVehicleFilters,
+    status: VehicleLifecycleStatus,
+  ): Promise<VehiclePage> {
+    const scan = await this.vehicles.list({
+      ...filters,
+      cursor: undefined,
+      limit: VehiclesService.LIFECYCLE_FILTER_SCAN_CAP,
+    });
+    const lifecycle = await this._lifecycleBatch(scan);
+    const matching = scan.filter(
+      (r) => lifecycle.get(r.id)?.status === status,
+    );
+    const start = filters.cursor
+      ? matching.findIndex((r) => r.id === filters.cursor) + 1
+      : 0;
+    const rest = matching.slice(start);
+    const hasNext = rest.length > filters.limit;
+    const page = rest.slice(0, filters.limit);
     return {
       items: page.map((r) => this.toDto(r, lifecycle.get(r.id))),
       nextCursor: hasNext ? (page[page.length - 1]?.id ?? null) : null,

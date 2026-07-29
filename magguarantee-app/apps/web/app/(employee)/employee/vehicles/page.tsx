@@ -3,9 +3,18 @@
 // Admin CRUD — vehicles. The list table only shows the most useful 6 columns
 // (per the Phase 2 spec — don't gold-plate). The full 36-field edit happens
 // in the sheet.
+//
+// docs/14 §15 — this list is the drill-down target of the «Moja opieka» KPI
+// tiles, so its two deep-linkable filters (lifecycle status + carrier) live in
+// the URL (`?status=` / `?carrier=`), not in component state: a tile link, the
+// `<Select>`s and the back button then all describe the same view. `search`
+// stays local — keystrokes must not write history. Both URL filters are applied
+// SERVER-side (`GET /vehicles?lifecycleStatus=&carrierId=`), so the row set
+// matches the tile count instead of being a slice of the first page.
 
 import { Pencil, Plus, SearchX, Truck, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import type { VehicleDto } from '@magguarantee/shared';
@@ -23,6 +32,12 @@ import { VehicleDetailModal } from '@/components/vehicles/VehicleDetailModal';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useDeleteVehicle, useVehicles } from '@/lib/hooks/useVehicles';
+import {
+  VEHICLE_CARRIER_PARAM,
+  VEHICLE_STATUS_OPTIONS,
+  VEHICLE_STATUS_PARAM,
+  parseVehicleStatusParam,
+} from '@/lib/vehicles-filter';
 
 import { VehicleFormDialog } from './VehicleFormDialog';
 
@@ -33,6 +48,7 @@ export default function VehiclesPage() {
   const t = useTranslations('vehicles');
   const tCommon = useTranslations('common');
   const tConfirm = useTranslations('confirmDelete');
+  const tVehStatus = useTranslations('vehicleStatus');
   const { user } = useAuth();
   // The delete row-action renders for both admin and opiekun, and since the
   // vehicle hard-delete endpoint was RETIRED (Vehicle-status rework), BOTH now
@@ -43,12 +59,35 @@ export default function VehiclesPage() {
   const isOpiekun = user?.role === 'opiekun';
   const canDelete = isAdmin || isOpiekun;
   const [search, setSearch] = useState('');
-  const [carrierId, setCarrierId] = useState<string>('');
+
+  // ── URL-backed filters (§15) ────────────────────────────────────────────
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const status = parseVehicleStatusParam(searchParams.get(VEHICLE_STATUS_PARAM));
+  const carrierId = searchParams.get(VEHICLE_CARRIER_PARAM) ?? '';
+
+  /** Writes one filter param (empty → removed). `replace`, not `push`: flipping
+   *  a filter is a refinement of the current view, not a new destination — the
+   *  back button should leave the list, not walk back through every filter. */
+  const setFilterParam = useCallback(
+    (key: string, value: string) => {
+      const next = new URLSearchParams(searchParams.toString());
+      if (value) next.set(key, value);
+      else next.delete(key);
+      const qs = next.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
 
   const { data, isLoading } = useVehicles({
     q: search.length >= 2 ? search : undefined,
     carrierId: carrierId || undefined,
-    limit: 50,
+    lifecycleStatus: status ?? undefined,
+    // 200 (the schema max), not 50: a status-filtered view has to hold every
+    // vehicle the KPI tile counted, and the table has no pagination control.
+    limit: 200,
   });
 
   const carriersQ = useCarriers({ limit: 200 });
@@ -67,11 +106,13 @@ export default function VehiclesPage() {
   const [deleteTarget, setDeleteTarget] = useState<VehicleDto | null>(null);
   const softDeleteM = useDeleteVehicle();
 
-  const hasActiveFilters = Boolean(search.length >= 2 || carrierId);
-  const clearFilters = () => {
+  const hasActiveFilters = Boolean(search.length >= 2 || carrierId || status);
+  const clearFilters = useCallback(() => {
     setSearch('');
-    setCarrierId('');
-  };
+    // One navigation for both params — two `setFilterParam` calls in a row
+    // would race on the same (stale) `searchParams` snapshot.
+    router.replace(pathname, { scroll: false });
+  }, [pathname, router]);
 
   const openCreate = () => {
     setTarget(null);
@@ -226,7 +267,7 @@ export default function VehiclesPage() {
         <Select
           className="sm:max-w-xs"
           value={carrierId}
-          onChange={(e) => setCarrierId(e.target.value)}
+          onChange={(e) => setFilterParam(VEHICLE_CARRIER_PARAM, e.target.value)}
           aria-label={t('filters.carrierLabel')}
         >
           <option value="">{t('filters.allCarriers')}</option>
@@ -234,6 +275,22 @@ export default function VehiclesPage() {
             <option key={c.id} value={c.id}>
               {c.login}
               {c.name ? ` — ${c.name}` : ''}
+            </option>
+          ))}
+        </Select>
+        {/* §15 — lifecycle-status filter. Lists all FIVE buckets, including
+            «Wyłączone», which has no KPI tile but is a legitimate thing to look
+            up once the filter exists. */}
+        <Select
+          className="sm:max-w-xs"
+          value={status ?? ''}
+          onChange={(e) => setFilterParam(VEHICLE_STATUS_PARAM, e.target.value)}
+          aria-label={t('filters.statusLabel')}
+        >
+          <option value="">{t('filters.allStatuses')}</option>
+          {VEHICLE_STATUS_OPTIONS.map((s) => (
+            <option key={s} value={s}>
+              {tVehStatus(`${s}.tile`)}
             </option>
           ))}
         </Select>

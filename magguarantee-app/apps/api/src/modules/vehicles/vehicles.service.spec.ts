@@ -169,10 +169,14 @@ function makeVehiclesRepo(seed: VehicleRow[] = []): VehiclesRepository {
     list: jest.fn(
       async (filters: {
         limit: number;
+        active?: boolean;
         carrierId?: string;
         carrierIds?: string[];
       }) => {
         let arr = [...rows.values()];
+        if (typeof filters.active === 'boolean') {
+          arr = arr.filter((r) => r.active === filters.active);
+        }
         if (filters.carrierId) {
           arr = arr.filter((r) => r.carrierId === filters.carrierId);
         } else if (filters.carrierIds) {
@@ -1269,6 +1273,132 @@ describe('VehiclesService', () => {
     expect(byId.get('v-2')).toBe('wylaczona');
     // ONE batched call for the page (no N+1).
     expect(repo.getByVehicleIds).toHaveBeenCalledTimes(1);
+  });
+
+  // ── `?lifecycleStatus=` — the KPI-tile drill-down filter ────────────────
+  //
+  // `wylaczona` rides the STORED `active` column (plain SQL path); the four
+  // idle buckets are derived at read time, so the service scans the scoped
+  // active set, classifies it, and pages in memory. Anchors are expressed as
+  // offsets from the REAL clock (the classifier reads
+  // `startOfBusinessTodayUtc()`), never absolute dates, so the fixtures can't
+  // rot as the calendar moves.
+  const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000);
+
+  function buildLifecycleFleet(): VehiclesService {
+    return buildServiceWithLifecycle(
+      [
+        makeVehicle({ id: 'v-out', plateNumber: 'WA1000' }),
+        makeVehicle({
+          id: 'v-parked',
+          plateNumber: 'WA1001',
+          createdAt: daysAgo(3),
+        }),
+        makeVehicle({
+          id: 'v-long',
+          plateNumber: 'WA1002',
+          createdAt: daysAgo(20),
+        }),
+        makeVehicle({
+          id: 'v-gone',
+          plateNumber: 'WA1003',
+          createdAt: daysAgo(40),
+        }),
+        makeVehicle({ id: 'v-off', plateNumber: 'WA1004', active: false }),
+      ],
+      { 'v-out': { hasActiveDelegation: true } },
+    );
+  }
+
+  it.each([
+    ['aktywna', 'v-out'],
+    ['stojaca', 'v-parked'],
+    ['nieaktywna', 'v-long'],
+    ['do_usuniecia', 'v-gone'],
+    ['wylaczona', 'v-off'],
+  ] as const)(
+    'lifecycleStatus=%s narrows the list to exactly that bucket',
+    async (lifecycleStatus, expectedId) => {
+      const out = await buildLifecycleFleet().list(makeAuth('admin'), {
+        limit: 50,
+        lifecycleStatus,
+      });
+      expect(out.items.map((v) => v.id)).toEqual([expectedId]);
+      expect(out.items[0]?.lifecycleStatus).toBe(lifecycleStatus);
+    },
+  );
+
+  it('lifecycleStatus=wylaczona narrows in SQL (active=false), no scan', async () => {
+    const repo = makeVehiclesRepo([
+      makeVehicle({ id: 'v-on', active: true }),
+      makeVehicle({ id: 'v-off', plateNumber: 'WA1004', active: false }),
+    ]);
+    const svc = new VehiclesService(
+      repo,
+      makeUsersRepo(),
+      makeCarriersRepo(),
+      makeAttachmentsRepo([]),
+      makeStorage(),
+      makeTeamsRepo(),
+      undefined,
+      stubDelegationStatusRepo({}),
+    );
+    const out = await svc.list(makeAuth('admin'), {
+      limit: 50,
+      lifecycleStatus: 'wylaczona',
+    });
+    expect(out.items.map((v) => v.id)).toEqual(['v-off']);
+    expect(repo.list).toHaveBeenCalledWith(
+      expect.objectContaining({ active: false, limit: 50 }),
+    );
+  });
+
+  it('a contradictory active + lifecycleStatus matches nothing, without a query', async () => {
+    const repo = makeVehiclesRepo([makeVehicle({ id: 'v-off', active: false })]);
+    const svc = new VehiclesService(
+      repo,
+      makeUsersRepo(),
+      makeCarriersRepo(),
+      makeAttachmentsRepo([]),
+      makeStorage(),
+      makeTeamsRepo(),
+      undefined,
+      stubDelegationStatusRepo({}),
+    );
+    const out = await svc.list(makeAuth('admin'), {
+      limit: 50,
+      active: true,
+      lifecycleStatus: 'wylaczona',
+    });
+    expect(out).toEqual({ items: [], nextCursor: null });
+    expect(repo.list).not.toHaveBeenCalled();
+  });
+
+  it('pages the derived filter in memory (limit + cursor over the filtered set)', async () => {
+    const svc = buildServiceWithLifecycle(
+      [1, 2, 3].map((n) =>
+        makeVehicle({
+          id: `v-${n}`,
+          plateNumber: `WA200${n}`,
+          createdAt: daysAgo(40),
+        }),
+      ),
+      {},
+    );
+    const first = await svc.list(makeAuth('admin'), {
+      limit: 2,
+      lifecycleStatus: 'do_usuniecia',
+    });
+    expect(first.items.map((v) => v.id)).toEqual(['v-1', 'v-2']);
+    expect(first.nextCursor).toBe('v-2');
+
+    const second = await svc.list(makeAuth('admin'), {
+      limit: 2,
+      lifecycleStatus: 'do_usuniecia',
+      cursor: first.nextCursor as string,
+    });
+    expect(second.items.map((v) => v.id)).toEqual(['v-3']);
+    expect(second.nextCursor).toBeNull();
   });
 });
 

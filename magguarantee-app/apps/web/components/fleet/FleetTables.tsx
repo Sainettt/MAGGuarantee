@@ -21,7 +21,7 @@
 // the rate/pricing columns stay excluded for planista/dyspozytor.
 
 import { useTranslations } from 'next-intl';
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import type {
   DriverListItem,
   TrailerListItem,
@@ -63,6 +63,14 @@ interface FleetTableProps<T> {
   onRowClick?: (row: T) => void;
   /** Optional accessible per-row label for the activatable `<tr>` (§6.4.3). */
   rowAriaLabel?: (row: T) => string;
+  /**
+   * §15 — drives the §8.2 data-vs-filtered empty split. The panels filter their
+   * rows client-side (KPI-tile status filter), so an empty result must read as
+   * «nothing matches this filter», never as «no fleet yet».
+   */
+  hasActiveFilters?: boolean;
+  /** §8.2 filtered-empty node, rendered instead of `empty` when filters are on. */
+  emptyFiltered?: ReactNode;
 }
 
 // ─── Auta ────────────────────────────────────────────────
@@ -73,6 +81,8 @@ export function FleetVehiclesTable({
   namespace,
   onRowClick,
   rowAriaLabel,
+  hasActiveFilters,
+  emptyFiltered,
 }: FleetTableProps<VehicleListItem>) {
   const t = useTranslations(namespace);
 
@@ -164,6 +174,8 @@ export function FleetVehiclesTable({
       onRowClick={onRowClick}
       rowAriaLabel={rowAriaLabel}
       isLoading={isLoading}
+      hasActiveFilters={hasActiveFilters}
+      emptyFiltered={emptyFiltered}
       empty={
         <EmptyState
           icon={Car}

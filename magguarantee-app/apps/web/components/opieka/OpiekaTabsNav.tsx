@@ -11,10 +11,12 @@
 // Rendered identically for opiekun and admin — both reach the same routes and
 // the API scopes what each sees. No role branching here.
 
+import { RefreshCw } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+import { useActiveNavRefresh } from '@/lib/hooks/useActiveNavRefresh';
 import { cn } from '@/lib/utils';
 
 const TABS = [
@@ -24,7 +26,11 @@ const TABS = [
 
 export function OpiekaTabsNav() {
   const t = useTranslations('guarantee.board');
+  const tCommon = useTranslations('common');
   const pathname = usePathname();
+
+  // Повторный клик по активной вкладке = рефреш её данных (docs/14 §14).
+  const { isRefreshing, onActiveNavClick } = useActiveNavRefresh();
 
   return (
     <nav
@@ -43,14 +49,20 @@ export function OpiekaTabsNav() {
             key={tab.key}
             href={tab.href}
             aria-current={active ? 'page' : undefined}
+            title={active ? tCommon('refreshHint') : undefined}
+            aria-busy={(active && isRefreshing) || undefined}
+            onClick={active ? onActiveNavClick : undefined}
             className={cn(
-              'px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px',
+              'inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px',
               'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand/40 rounded-sm',
               active
                 ? 'border-brand text-brand'
                 : 'border-transparent text-text-sub hover:text-text',
             )}
           >
+            {active && isRefreshing ? (
+              <RefreshCw size={14} className="animate-spin" aria-hidden />
+            ) : null}
             {t(tab.key)}
           </Link>
         );
