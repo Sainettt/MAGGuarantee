@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+#
+# MAGGuarantee — откат КОДА на указанный коммит.
+#
+#   /opt/magguarantee/src/infra/scripts/magguarantee-rollback <git-sha>
+#
+# Образы собираются на сервере, поэтому откат = переключиться на старый коммит и
+# пересобрать. Это 5-10 минут, а не секунды. Когда перейдём на ghcr, откат
+# станет подменой тега.
+#
+# ЧТО ЭТОТ СКРИПТ НЕ ДЕЛАЕТ — и не должен:
+#
+#   • не откатывает миграции. У Prisma нет `down`, схема двигается только
+#     вперёд. Испортила миграция схему — пишется НОВАЯ миграция, которая чинит.
+#   • не запускает `migrate deploy`. Откат кода не должен трогать базу.
+#   • не трогает данные. Для этого magguarantee-restore-db.
+#
+# ВАЖНО про совместимость: откат кода безопасен только если миграции,
+# применённые после целевого коммита, обратно совместимы. Добавили nullable
+# колонку — старый код её просто не заметит, всё хорошо. Удалили колонку —
+# старый Prisma-клиент будет её выбирать, и упадёт на первом же запросе. В таком
+# случае откат не поможет, чинить надо вперёд.
+
+set -euo pipefail
+
+STACK_DIR="${MAGG_STACK_DIR:-/opt/magguarantee}"
+SRC_DIR="${MAGG_SRC_DIR:-$STACK_DIR/src}"
+COMPOSE_FILE="${MAGG_COMPOSE_FILE:-infra/docker-compose.prod.yml}"
+
+log() { printf '%s  %s\n' "$(date +'%Y-%m-%d %H:%M:%S')" "$*"; }
+die() { log "ОШИБКА: $*" >&2; exit 1; }
+
+SHA="${1:-}"
+[ -n "$SHA" ] || die "использование: magguarantee-rollback <git-sha>
+Посмотреть историю:  cd $SRC_DIR && git log --oneline -20"
+
+cd "$SRC_DIR"
+
+log "забираем историю с origin"
+git fetch origin --quiet
+
+git cat-file -e "${SHA}^{commit}" 2>/dev/null || die "коммит $SHA не найден"
+
+CURRENT="$(git rev-parse --short HEAD)"
+TARGET="$(git rev-parse --short "$SHA")"
+
+echo
+echo "  сейчас:  $CURRENT  $(git log -1 --format=%s HEAD)"
+echo "  откат на: $TARGET  $(git log -1 --format=%s "$SHA")"
+echo
+echo "  Коммиты, которые будут откачены:"
+git log --oneline "${TARGET}..${CURRENT}" 2>/dev/null | sed 's/^/    /' || true
+echo
+echo "  Миграции НЕ откатываются. Если среди этих коммитов есть удаление колонки"
+echo "  или другое несовместимое изменение схемы — откат не поможет."
+echo
+
+read -r -p "Продолжить? (введите yes): " ANSWER
+[ "$ANSWER" = "yes" ] || { log "отменено"; exit 0; }
+
+log "переключаемся на $TARGET"
+git checkout --quiet "$TARGET"
+
+log "пересборка (5-10 минут)"
+docker compose -f "$COMPOSE_FILE" build
+
+log "перезапуск"
+docker compose -f "$COMPOSE_FILE" up -d
+
+log "ждём 10с и проверяем /health"
+sleep 10
+docker compose -f "$COMPOSE_FILE" exec -T api \
+  wget -qO- http://localhost:3001/health >/dev/null \
+  || die "api не отвечает на /health — смотри: docker compose -f $COMPOSE_FILE logs api"
+
+echo
+log "откат на $TARGET выполнен"
+log "репозиторий в состоянии detached HEAD"
+log "вернуться на актуальный код:  cd $SRC_DIR && git checkout main && git pull"

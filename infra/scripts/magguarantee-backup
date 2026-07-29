@@ -29,9 +29,16 @@ DB_NAME="${MAGG_DB_NAME:-magguarantee}"
 # short window so the disk cannot fill up.
 KEEP_DAYS="${MAGG_KEEP_DAYS:-7}"
 
-# Offsite target, e.g. "r2:magguarantee-backups-prod". Empty = skip the upload
-# (the script still succeeds, and says so). Configure with `rclone config`.
+# Offsite target, e.g. "gdrive:magguarantee-backups" or "r2:magguarantee-backups-prod".
+# Empty = skip the upload (the script still succeeds, and says so). Configure
+# with `rclone config` — see infra/README.md.
 RCLONE_REMOTE="${MAGG_RCLONE_REMOTE:-}"
+
+# How long copies live in the offsite storage. Object stores like R2 can do this
+# with a lifecycle rule, but Google Drive has nothing of the sort — without this
+# the folder grows forever and eventually eats the Workspace quota. 0 disables
+# remote pruning entirely (use when the storage side already handles retention).
+REMOTE_KEEP_DAYS="${MAGG_REMOTE_KEEP_DAYS:-30}"
 
 # Optional heartbeat pinged only on full success — e.g. an Uptime Kuma push
 # monitor. This is what catches "the backup quietly stopped running three weeks
@@ -102,10 +109,21 @@ log "minio archive ok: $MINIO_FILE ($(stat -c %s "$MINIO_FILE") bytes)"
 # this is configured, the script says so on every run instead of staying quiet.
 if [ -n "$RCLONE_REMOTE" ]; then
   command -v rclone >/dev/null || die "MAGG_RCLONE_REMOTE is set but rclone is not installed"
+
   log "uploading to $RCLONE_REMOTE"
   rclone copy "$PG_FILE"    "$RCLONE_REMOTE/postgres/"
   rclone copy "$MINIO_FILE" "$RCLONE_REMOTE/minio/"
   log "offsite upload ok"
+
+  # Remote rotation. `--min-age` is relative to the file's modification time, so
+  # this only ever removes copies older than the window — never the one that was
+  # just uploaded. Runs AFTER the upload on purpose: if the upload failed the
+  # script has already exited, and nothing gets deleted on a bad night.
+  if [ "$REMOTE_KEEP_DAYS" -gt 0 ]; then
+    log "pruning offsite copies older than ${REMOTE_KEEP_DAYS} days"
+    rclone delete --min-age "${REMOTE_KEEP_DAYS}d" "$RCLONE_REMOTE/postgres/"
+    rclone delete --min-age "${REMOTE_KEEP_DAYS}d" "$RCLONE_REMOTE/minio/"
+  fi
 else
   log "WARNING: MAGG_RCLONE_REMOTE is empty — backups stay on this VPS only"
 fi

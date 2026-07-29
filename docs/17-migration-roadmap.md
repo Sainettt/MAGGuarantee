@@ -669,7 +669,7 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
 - ✅ Docker compose стек (postgres + redis + mailhog + api + web) в `infra/docker-compose.staging.yml`.
 - ✅ Multi-stage Dockerfiles для api/web (`apps/{api,web}/Dockerfile`) — build-on-server, без registry. Достаточно для одного разраба; при росте команды переключимся на ghcr.io.
 - ✅ ENV-шаблон `infra/.env.staging.example` + правильные права на `/opt/magguarantee/.env`.
-- ✅ Postgres exposed только на VPS-loopback для databasus / DBeaver через SSH-туннель.
+- ✅ Postgres exposed только на VPS-loopback для GUI-клиента (DBeaver / pgAdmin / TablePlus) через SSH-туннель.
 - ✅ Deploy Key (read-only SSH-ключ от GitHub) для `git pull` на VPS.
 - ✅ GitHub Actions secrets: `DEPLOY_SSH_KEY`, `DEPLOY_HOST`.
 - ✅ Seed (admin + 7 тестовых юзеров других ролей + 14 типов прицепов + app_config) выполнен.
@@ -681,7 +681,7 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
 1. VPS поднят (Hetzner CX32 или эквивалент), bootstrap-скрипт `infra/setup.sh` отрабатывает: установка Docker + Compose, `ufw`, `fail2ban`, `chronyd`, `rclone`, создание `proxy-net` external network. S3-bucket (Cloudflare R2 / Hetzner Object Storage) создан.
 2. **Shared Caddy** запущен в `/opt/caddy/` (auto-HTTPS via Let's Encrypt, роутит несколько приложений на VPS по доменам).
 3. CI/CD pipeline готов: GitHub Actions билдит multi-stage Docker images для api и web, пушит в `ghcr.io`, по ssh обновляет `.env` на VPS и делает `docker compose pull && up -d --no-deps api web`. Миграции `prisma migrate deploy` запускаются ДО подмены контейнеров. См. [18-launch-and-deployment.md#cicd](18-launch-and-deployment.md#cicd).
-4. **Prod docker-compose стек** в `/opt/magguarantee/`: postgres + redis + api + web. Bind mounts для данных (`./data/postgres`, `./data/redis`). Postgres exposed только на `127.0.0.1:5432` для databasus через SSH-туннель.
+4. **Prod docker-compose стек** в `/opt/magguarantee/`: postgres + redis + api + web. Bind mounts для данных (`./data/postgres`, `./data/redis`). Postgres exposed только на `127.0.0.1:5432` для GUI-клиента через SSH-туннель.
 5. Все ENV переменные заполнены в `/opt/magguarantee/.env` (`chmod 0600`). Файл НЕ в репозитории, оригинал в 1Password.
 6. Запуск seed: 14 типов прицепов + monthly_limits + app_config + первый admin (`docker compose run --rm api npm run db:seed`).
 7. Smoke-тесты против prod зелёные.

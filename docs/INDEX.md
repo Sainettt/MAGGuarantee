@@ -49,6 +49,7 @@
 | 19 | [19-known-quirks.md](19-known-quirks.md) | **Known quirks** — load-bearing reference: legacy quirks, business rules, foot-guns. Read BEFORE implementing claims-flow / vehicle-CRUD / delegations / authorization. |
 | 20 | [20-phase-7-eksport-weryfikator.md](20-phase-7-eksport-weryfikator.md) | **Phase 7 импл-спека** — роли `eksport` + `weryfikator` (статус выездов, `lastDroveAt`). Scope частично неясен → делаем как в легаси. |
 | 22 | [22-email-design.md](22-email-design.md) | **Email design system** — единый table-based шаблон транзакционных писем (палитра `#E02020`, блоки, статус-бейджи, `MAIL_LOGO_URL`). |
+| 23 | [23-prod-deployment-runbook.md](23-prod-deployment-runbook.md) | **Runbook выката в прод** — пошагово с нуля: домен, GCP, bootstrap VPS, Caddy, `.env`, миграции, сид, бэкапы, CI/CD, приёмка. Проверен репетицией 2026-07-29. |
 
 ## Быстрая навигация по ролям
 

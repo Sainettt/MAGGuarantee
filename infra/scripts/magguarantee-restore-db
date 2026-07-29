@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+#
+# MAGGuarantee — восстановление БАЗЫ из бэкапа. Разрушающая операция.
+#
+#   /opt/magguarantee/src/infra/scripts/magguarantee-restore-db                # свежий дамп
+#   /opt/magguarantee/src/infra/scripts/magguarantee-restore-db <файл.sql.gz>  # конкретный
+#
+# ── Почему нельзя просто залить дамп поверх ──────────────────────────────────
+#
+# Дамп сделан обычным `pg_dump` без `--clean`, то есть внутри только CREATE и
+# COPY, никаких DROP. Залитый в базу, где таблицы уже есть, он споткнётся на
+# первом же `CREATE TABLE` с «relation already exists», а то, что успеет
+# пролезть, смешается со старыми строками. Восстанавливать нужно в ПУСТУЮ базу.
+#
+# ── Почему переименование, а не DROP ─────────────────────────────────────────
+#
+# Скрипт не удаляет старую базу, а переименовывает её в
+# `magguarantee_broken_<дата>`. Восстановление обычно делают в панике и по
+# неполной информации; возможность посмотреть, что было ДО, стоит занятого
+# места. Удалить потом — одна команда, она напечатана в конце.
+#
+# ── Вложения ─────────────────────────────────────────────────────────────────
+#
+# Скрипт трогает только Postgres. Файлы в MinIO — отдельный архив, и откатывать
+# их надо ВМЕСТЕ с базой, архивом того же вечера. Иначе строки будут ссылаться
+# на файлы, которых ещё нет (или наоборот). Процедура — docs/23, раздел
+# «Откат данных».
+
+set -euo pipefail
+
+STACK_DIR="${MAGG_STACK_DIR:-/opt/magguarantee}"
+SRC_DIR="${MAGG_SRC_DIR:-$STACK_DIR/src}"
+BACKUP_DIR="${MAGG_BACKUP_DIR:-$STACK_DIR/backups}"
+COMPOSE_FILE="${MAGG_COMPOSE_FILE:-infra/docker-compose.prod.yml}"
+PG_CONTAINER="${MAGG_PG_CONTAINER:-magguarantee-postgres}"
+DB_USER="${MAGG_DB_USER:-magguarantee}"
+DB_NAME="${MAGG_DB_NAME:-magguarantee}"
+
+log() { printf '%s  %s\n' "$(date +'%Y-%m-%d %H:%M:%S')" "$*"; }
+die() { log "ОШИБКА: $*" >&2; exit 1; }
+
+psql_admin() { docker exec -i "$PG_CONTAINER" psql -v ON_ERROR_STOP=1 -q -U "$DB_USER" -d postgres "$@"; }
+
+DUMP="${1:-}"
+if [ -z "$DUMP" ]; then
+  DUMP="$(ls -1t "$BACKUP_DIR"/pg-*.sql.gz 2>/dev/null | head -1 || true)"
+  [ -n "$DUMP" ] || die "в $BACKUP_DIR нет файлов pg-*.sql.gz"
+fi
+[ -f "$DUMP" ] || die "файл не найден: $DUMP"
+
+log "проверяем целостность архива"
+gzip -t "$DUMP" || die "битый gzip — этот бэкап непригоден, возьми предыдущий"
+
+docker inspect -f '{{.State.Running}}' "$PG_CONTAINER" 2>/dev/null | grep -qx true \
+  || die "контейнер $PG_CONTAINER не запущен"
+
+STAMP="$(date +%Y%m%d_%H%M)"
+OLD_DB="${DB_NAME}_broken_${STAMP}"
+
+echo
+echo "  Восстановление базы «$DB_NAME»"
+echo "  Из файла:      $DUMP"
+echo "  Дата архива:   $(date -r "$DUMP" +'%Y-%m-%d %H:%M')"
+echo "  Текущая база:  будет переименована в $OLD_DB (не удалена)"
+echo
+echo "  ВСЁ, что попало в базу ПОСЛЕ этого архива, пропадёт."
+echo "  Не забудь про вложения MinIO — их надо откатывать тем же вечером."
+echo
+
+read -r -p "Введите имя базы для подтверждения ($DB_NAME): " ANSWER
+[ "$ANSWER" = "$DB_NAME" ] || { log "отменено"; exit 0; }
+
+log "останавливаем api и web, чтобы никто не писал"
+cd "$SRC_DIR"
+docker compose -f "$COMPOSE_FILE" stop api web
+
+log "отключаем оставшиеся сессии"
+psql_admin -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+               WHERE datname = '$DB_NAME' AND pid <> pg_backend_pid();" >/dev/null
+
+log "переименовываем текущую базу в $OLD_DB"
+psql_admin -c "ALTER DATABASE \"$DB_NAME\" RENAME TO \"$OLD_DB\";"
+
+log "создаём пустую $DB_NAME"
+psql_admin -c "CREATE DATABASE \"$DB_NAME\" OWNER \"$DB_USER\";"
+
+log "заливаем дамп"
+# ON_ERROR_STOP — чтобы упасть на первой же ошибке, а не отрапортовать успех о
+# наполовину восстановленной базе.
+gunzip -c "$DUMP" \
+  | docker exec -i "$PG_CONTAINER" psql -v ON_ERROR_STOP=1 -q -U "$DB_USER" -d "$DB_NAME" >/dev/null \
+  || die "заливка не удалась. Старая база цела под именем $OLD_DB — вернуть:
+  docker exec -i $PG_CONTAINER psql -U $DB_USER -d postgres -c 'DROP DATABASE \"$DB_NAME\";'
+  docker exec -i $PG_CONTAINER psql -U $DB_USER -d postgres -c 'ALTER DATABASE \"$OLD_DB\" RENAME TO \"$DB_NAME\";'"
+
+log "что получилось:"
+docker exec -i "$PG_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" -At -c "
+  SELECT 'миграций: ' || count(*) FROM _prisma_migrations WHERE finished_at IS NOT NULL
+  UNION ALL SELECT 'users:       ' || count(*) FROM users
+  UNION ALL SELECT 'carriers:    ' || count(*) FROM carriers
+  UNION ALL SELECT 'vehicles:    ' || count(*) FROM vehicles
+  UNION ALL SELECT 'delegations: ' || count(*) FROM delegations
+  UNION ALL SELECT 'claims:      ' || count(*) FROM claims;
+" | sed 's/^/  /'
+
+log "поднимаем api и web"
+docker compose -f "$COMPOSE_FILE" up -d api web
+
+sleep 10
+docker compose -f "$COMPOSE_FILE" exec -T api \
+  wget -qO- http://localhost:3001/health >/dev/null \
+  || die "api не отвечает — смотри: docker compose -f $COMPOSE_FILE logs api"
+
+echo
+log "восстановление завершено"
+log "старая база сохранена как $OLD_DB — когда убедишься, что всё хорошо, удали:"
+log "  docker exec -i $PG_CONTAINER psql -U $DB_USER -d postgres -c 'DROP DATABASE \"$OLD_DB\";'"

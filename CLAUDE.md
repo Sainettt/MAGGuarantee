@@ -27,6 +27,7 @@
 | Cron, email, integrations | [`docs/16-jobs-and-integrations.md`](docs/16-jobs-and-integrations.md) |
 | Phased development plan | [`docs/17-migration-roadmap.md`](docs/17-migration-roadmap.md) |
 | Production launch checklist | [`docs/18-launch-and-deployment.md`](docs/18-launch-and-deployment.md) |
+| Prod deployment runbook (пошагово) | [`docs/23-prod-deployment-runbook.md`](docs/23-prod-deployment-runbook.md) |
 | Full doc index | [`docs/INDEX.md`](docs/INDEX.md) |
 | Legacy UI screenshots | `docs/screenshots/` |
 

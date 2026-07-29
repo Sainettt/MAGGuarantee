@@ -192,8 +192,13 @@ MinIO, и восстановленная без них база ссылаетс
 | Файл | Назначение |
 |---|---|
 | `scripts/magguarantee-backup` | `pg_dump` + tar MinIO, проверка gzip, ротация, offsite, heartbeat |
-| `scripts/magguarantee-restore-test` | заливка дампа в одноразовый контейнер + счётчики строк |
+| `scripts/magguarantee-restore-test` | **безопасно**: заливка дампа в одноразовый контейнер + счётчики строк |
+| `scripts/magguarantee-restore-db` | **разрушающе**: восстановление боевой базы из дампа (старая переименовывается, не удаляется) |
+| `scripts/magguarantee-rollback` | откат кода на указанный git-коммит с пересборкой |
 | `systemd/magguarantee-backup.{service,timer}` | ежедневный запуск в 03:30 от юзера `deploy` |
+
+Процедуры отката (код / миграции / данные / вложения) расписаны в
+[docs/23-prod-deployment-runbook.md](../docs/23-prod-deployment-runbook.md#откат).
 
 Скрипты запускаются **прямо из чекаута**, поэтому `git pull` их обновляет —
 второй копии в `/usr/local/bin`, которая разъезжается с исходником, нет.
@@ -234,10 +239,64 @@ MAGG_HEARTBEAT_URL=https://status.magtrans.eu/api/push/xxxxx
 
 - **`MAGG_RCLONE_REMOTE`** — пока пуст, бэкапы лежат на том же диске, что и
   данные, то есть от смерти диска не спасают. Скрипт пишет об этом WARNING на
-  каждом запуске. Настраивается через `rclone config`.
+  каждом запуске. Настройка — следующий раздел.
+- **`MAGG_REMOTE_KEEP_DAYS`** — сколько дней копии живут в облаке (по умолчанию
+  30). У S3-хранилищ это можно повесить на lifecycle-правило, а у Google Drive
+  ничего подобного нет — без ротации папка растёт вечно. `0` отключает.
 - **`MAGG_HEARTBEAT_URL`** — пингуется только при полном успехе. Это то, что
   ловит «бэкап тихо перестал запускаться три недели назад» — сам по себе скрипт
   такое обнаружить не может.
+
+### Offsite в Google Drive
+
+Карта не нужна, хватает обычного Workspace-аккаунта.
+
+**1. Поставить rclone на VPS:**
+
+```bash
+sudo apt update && sudo apt install -y rclone
+```
+
+**2. Запустить мастер настройки:**
+
+```bash
+rclone config
+```
+
+Ответы: `n` (new remote) → имя `gdrive` → тип `drive` → `client_id` и
+`client_secret` оставить пустыми (Enter) → scope `1` (полный доступ) →
+`root_folder_id` и `service_account_file` пустыми → `n` на «Edit advanced
+config» → **`n` на «Use auto config?»**.
+
+Последний пункт — ключевой. На сервере нет браузера, поэтому rclone печатает
+команду вида `rclone authorize "drive" "..."`. Её нужно выполнить **на своей
+машине** (rclone там тоже должен стоять), залогиниться в Google, разрешить
+доступ — и вставить обратно в терминал сервера напечатанный токен.
+
+Дальше: `n` на «Configure this as a Shared Drive?» (если бэкапы идут на личный
+диск), `y` для подтверждения, `q` для выхода.
+
+**3. Указать скрипту адрес:**
+
+```bash
+echo 'MAGG_RCLONE_REMOTE=gdrive:magguarantee-backups' | sudo tee -a /opt/magguarantee/backup.conf
+```
+
+Папку `magguarantee-backups` создавать заранее не нужно — rclone сделает её сам
+при первой загрузке.
+
+**4. Проверить:**
+
+```bash
+sudo systemctl start magguarantee-backup.service && journalctl -u magguarantee-backup.service -n 25 --no-pager
+```
+
+Вместо `WARNING: MAGG_RCLONE_REMOTE is empty` должны появиться `uploading to
+gdrive:...` и `offsite upload ok`. Посмотреть, что реально долетело:
+
+```bash
+rclone ls gdrive:magguarantee-backups
+```
 
 ### Проверка, что таймер жив
 

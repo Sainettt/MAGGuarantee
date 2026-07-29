@@ -49,7 +49,7 @@
    │ postgres │    │  redis   │
    └──────────┘    └──────────┘
         │
-        │ ports: 127.0.0.1:5432 (только хост, для databasus через SSH-туннель)
+        │ ports: 127.0.0.1:5432 (только хост, для GUI-клиента через SSH-туннель)
 ```
 
 Постгрес и Redis — **не доступны из других приложений на VPS** (они в `magguarantee-net`, а не в `proxy-net`). Доступ к Postgres извне — только через SSH-туннель: `ssh -L 5433:127.0.0.1:5432 deploy@vps`.
@@ -89,7 +89,7 @@ Prod-VPS — это **другая физическая машина**, не т�
 | Базовая структура compose | `infra/docker-compose.staging.yml` → копируем в `docker-compose.prod.yml`, правим что нужно (см. ниже) |
 | Bootstrap-процедура VPS (Docker, ufw, fail2ban, chrony, unattended-upgrades, deploy-юзер, proxy-net network) | См. `Documentation/Deployment Guide/01 - Первая настройка VPS.md` в Obsidian — те же шаги повторить на новом VPS |
 | Shared Caddy паттерн в `/opt/caddy/` | Структура одинаковая, меняется только Caddyfile (см. Б.2) |
-| Postgres-loopback exposure для databasus / DBeaver через SSH-туннель | Аналогично staging |
+| Postgres-loopback exposure для GUI-клиента (DBeaver и т.п.) через SSH-туннель | Аналогично staging |
 
 ### Б. Меняется (правки в существующих файлах)
 
@@ -310,7 +310,7 @@ Mailhog уходит. Заводим:
 
 - [ ] **Postgres 16** (контейнер):
   - Bind mount `/opt/magguarantee/data/postgres` → `/var/lib/postgresql/data` — бэкапы привычным `pg_dump`.
-  - `127.0.0.1:5432` exposed только на loopback хоста (для databasus через SSH-туннель).
+  - `127.0.0.1:5432` exposed только на loopback хоста (для GUI-клиента через SSH-туннель).
   - Тюнинг через CLI-флаги в command (`shared_buffers=2GB` и т.д.).
   - Healthcheck `pg_isready`.
 - [ ] **Redis 7** (контейнер):
@@ -596,7 +596,7 @@ services:
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
     ports:
-      - "127.0.0.1:5432:5432"   # databasus через SSH-туннель
+      - "127.0.0.1:5432:5432"   # GUI-клиент через SSH-туннель
     networks:
       - magguarantee-net
     healthcheck:
@@ -1048,15 +1048,22 @@ docker compose up -d api web
 - **Bootstrap-скрипт** (`infra/setup.sh` или Ansible playbook) должен быть актуален — каждый раз когда меняем что-то на VPS вручную, обновляем скрипт.
 - **Тест DR** — раз в полгода поднять VPS с нуля по скрипту, восстановить дамп, убедиться что всё работает.
 
-## Подключение databasus и ad-hoc admin доступ
+## Подключение GUI-клиента и ad-hoc admin доступ
 
-Postgres exposed только на `127.0.0.1:5432` хоста. Снаружи закрыт через `ufw`. Для подключения локальной тулы (databasus, DBeaver и т.п.) — **SSH-туннель**:
+> **Уточнение (2026-07-28).** Раньше в этом разделе фигурировал «databasus» как
+> GUI-клиент — это ошибка. [Databasus](https://databasus.com/) (бывший
+> Postgresus) — инструмент **бэкапов** с веб-интерфейсом, а не клиент для
+> просмотра таблиц. Для ad-hoc доступа нужен обычный GUI-клиент: DBeaver,
+> pgAdmin, TablePlus. Databasus как возможная замена/дополнение нашему
+> скрипту бэкапов — см. [Backup-стратегия](#backup-стратегия).
+
+Postgres exposed только на `127.0.0.1:5432` хоста. Снаружи закрыт через `ufw`. Для подключения локального GUI-клиента (DBeaver, pgAdmin, TablePlus) — **SSH-туннель**:
 
 ```bash
 # с локального ноута
 ssh -L 5433:127.0.0.1:5432 deploy@vps.magtrans.eu
 
-# в databasus (или другом GUI-клиенте) подключение:
+# в GUI-клиенте подключение:
 #   host: localhost
 #   port: 5433
 #   user: magguarantee
