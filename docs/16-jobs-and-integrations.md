@@ -14,9 +14,12 @@
 >   `gmail` → `GmailApiProvider` с RFC-threading (prod). См.
 >   [Email через Gmail API](#email-через-gmail-api).
 >
-> Cron-процессоры (`daily-reminders`, `weekly-report`, `token-cleanup`) пока
-> **не подняты** — их React Email шаблоны (`daily-reminder.tsx`,
-> `weekly-report.tsx`) уже есть, сами repeatable jobs — отдельный TODO.
+> Все крон-задачи живут не в BullMQ, а как `@Cron` внутри API-процесса (см.
+> таблицу ниже) — планировочная потребность у них одинаковая, а `@Cron`-путь уже
+> обкатан четырьмя джобами. Само письмо при этом всё равно уходит через очередь
+> `email-send`. Из исходного списка repeatable-джобов остался неподнятым только
+> `token-cleanup`; `daily-reminders` **отменён** (2026-07-30, дублировал
+> verification-SLA дайджест — шаблон `daily-reminder.tsx` удалён).
 >
 > Connection: общий `REDIS_URL` (выделенное BullMQ-подключение с
 > `maxRetriesPerRequest: null` — блокирующие команды BullMQ этого требуют; нельзя
@@ -29,11 +32,11 @@
 
 | GAS-trigger | GAS функция | Частота | Куда |
 |---|---|---|---|
-| Daily reminders | `sendDailyReminders` (`Code.gs:6987`) | ежедневно 08:00 | BullMQ scheduled job |
-| Weekly report | `sendWeeklyReport` (`Code.gs:7056`) | пн 09:00 | BullMQ scheduled job |
+| ~~Daily reminders~~ | ~~`sendDailyReminders` (`Code.gs:6987`)~~ | — | ❌ **ОТМЕНЁН 2026-07-30** — легаси-джоба слала pracownik+admin счётчик «N wniosków NA WERYFIKACJI»; это ровно то, что делает (умнее, с SLA-бакетами) Verification-SLA дайджест строкой ниже. Шаблон `daily-reminder.tsx` удалён |
+| **Weekly report** | `sendWeeklyReport` (`Code.gs:7056`) | **пн 09:00** Europe/Warsaw | ✅ `@Cron` в API-процессе (`modules/weekly-report/`) — окно = прошлая полная варшавская неделя пн 00:00 → пн 00:00, получатели = все активные `admin` |
 | onEdit | `onEditTrigger` (`Code.gs:6977`) | реал-тайм при правке Sheet | **Не нужен** (нет Sheets) |
 | onOpen | `onOpen` (`Code.gs:6950`) | при открытии Sheet | **Не нужен** |
-| Refresh-token cleanup | — (новое) | ежедневно | BullMQ scheduled job |
+| Refresh-token cleanup | — (новое) | ежедневно | 🚧 не поднят — единственный оставшийся TODO из исходного списка |
 | Verification-SLA digest | — (новое, docs/21) | ежедневно 07:00 | `@Cron` в API-процессе |
 | **Guarantee Watchdog** | — (новое, план 2026-07-07) | ежедневно **07:10** Europe/Warsaw | `@Cron` в API-процессе (стаггер после verification-sla) |
 | **Vehicle-removal alert** | — (новое, vehicle-status rework Step B) | ежедневно **07:20** Europe/Warsaw | `@Cron` в API-процессе (стаггер после Guarantee Watchdog) |
@@ -368,16 +371,17 @@ const html = await render(<CarrierDecisionEmail claim={claim} decision="ZAAKCEPT
 
 | Шаблон | GAS-аналог | Когда |
 |---|---|---|
-| `account-created.tsx` | `sendAccountCreatedEmail` | Создание user-а |
-| `password-reset.tsx` | `sendPasswordResetEmail` | Reset |
-| `account-deactivated.tsx` | `sendAccountDeactivatedEmail` | Deactivate |
-| `account-reactivated.tsx` | `sendAccountReactivatedEmail` | Reactivate |
+| `account-created.tsx` | `sendAccountCreatedEmail` | Создание user-а **и перевозчика** (`POST /users`, `POST /carriers`). Логин + временный пароль. Адрес — `User.email` (login-ящик), **не** `Carrier.ordersEmail` |
+| `password-reset.tsx` | `sendPasswordResetEmail` | Self-service: 6-значный код из `/login/forgot` |
+| `account-password-reset.tsx` | — (новое, 2026-07-30) | Админ сбросил пароль: `POST /users/:id/reset-password` **и** `POST /carriers/:id/reset-password`. **Один шаблон на обе аудитории** (решение заказчика) |
+| `account-deactivated.tsx` | `sendAccountDeactivatedEmail` | Deactivate — **только внутренние роли**. Перевозчику при деактивации письмо НЕ уходит (решение заказчика 2026-07-30) |
+| `account-reactivated.tsx` | `sendAccountReactivatedEmail` | Reactivate — внутренние роли и перевозчики |
 | `login-code.tsx` | (новое, шаблон 2FA) | Каждый login |
 | `carrier-decision.tsx` | `buildCarrierEmail` | После verify wniosku |
 | `internal-decision.tsx` | `sendInternalDecisionEmail` | После verify wniosku → planiści, opiekun, lider, wnioski@ |
 | `carrier-submitted.tsx` | `submitNewClaim` notif | После submit перевозчиком |
-| `daily-reminder.tsx` | `sendDailyReminders` | Ежедневно для зависших |
-| `weekly-report.tsx` | `sendWeeklyReport` | Понедельник |
+| ~~`daily-reminder.tsx`~~ | ~~`sendDailyReminders`~~ | ❌ **удалён 2026-07-30** — дублировал `verification-digest.tsx` |
+| `weekly-report.tsx` | `sendWeeklyReport` | Крон пн 09:00 — сводка прошлой недели всем активным `admin`: суммарная дoплата за неделю (панель) + «W tym tygodniu» (złożone/zaakceptowane/odrzucone) + «Stan bieżący» (na weryfikacji / czeka na autoryzację / reklamacje). Шлётся даже при нулях |
 | `maksim-confirmation-request.tsx` | `sendMaksimConfirmationRequest` | Авто-гейт: `doplata > próg` при zapisie weryfikacji (wniosek авто-переходит в `OCZEKUJE_NA_AUTORYZACJE`) |
 | `guarantee-reminder-carrier.tsx` (#17) | (новое, Guarantee Watchdog) | Крон 07:10 — напоминание перевозчику D-3/D-1 (одно письмо, список машин); CTA «Zgłoś wyjazd» → `/carrier/delegations/new` |
 | `guarantee-opiekun-digest.tsx` (#18) | (новое, Guarantee Watchdog) | Крон 07:10 — дайджест опекуну: секция «zbliżające się terminy» (D-3/D-1) + секция «naruszenia» (эпизоды, впервые ставшие `violated` сегодня). Персональный `User.email`, **не** группа |

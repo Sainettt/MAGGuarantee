@@ -549,8 +549,8 @@ DB CHECK enforces `returnCountry` length 2..8 (covers `EL`) and `returnPostalCod
 
 | Method + Path | Назначение |
 |---|---|
-| GET `/health` | Liveness (always 200 если процесс жив) |
-| GET `/ready` | Readiness (db + redis ping) |
+| GET `/health` | Liveness (always 200 если процесс жив). Тело: `{status, uptime, timestamp}` |
+| GET `/ready` | Readiness (Postgres `SELECT 1` + Redis `PING`, параллельно). **200** `{status:'ok', checks:{db,redis}, timestamp}`, **503** с тем же телом и `status:'degraded'`, если хоть одна зависимость не ответила. Оба чека всегда в теле — видно, что именно упало. `@Public()`, без audit |
 
 ## Ключевые DTO
 

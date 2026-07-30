@@ -233,7 +233,13 @@
     "confirmPasswordLabel": "Repeat password",
     "submit": "Save and continue",
     "logout": "Log out",
-    "successToast": "Password set."
+    "successToast": "Password set.",
+    "menuItem": "Change password",
+    "dialogTitle": "Change password",
+    "dialogDescription": "Set a new password for your account. You will stay signed in.",
+    "dialogSubmit": "Change password",
+    "dialogSuccessToast": "Password changed.",
+    "dialogErrorToast": "Could not change the password. Please try again."
   },
   "passwordPolicy": {
     "label": "Password requirements",
@@ -396,7 +402,20 @@
       "placeholder": "Choose EUR account"
     },
     "paymentTermsValue": "{n} days",
-    "tempPasswordToast": "Temporary password: {password}"
+    "tempPasswordToast": "Temporary password: {password}",
+    "resetPassword": {
+      "action": "Reset password",
+      "confirmTitle": "Reset the carrier password?",
+      "confirmDescription": "Carrier: {carrier}",
+      "confirmNote": "The current password stops working. A new temporary password is emailed to the carrier login address and shown here once.",
+      "confirmAction": "Reset password",
+      "resultTitle": "Password reset",
+      "resultDescription": "Save or hand over the password now — it will not be shown again. The carrier sets their own on first sign-in.",
+      "loginLabel": "Login",
+      "passwordLabel": "Temporary password",
+      "copyAria": "Copy temporary password",
+      "errorToast": "Could not reset the password."
+    }
   },
   "entityDetail": {
     "edit": "Edit",

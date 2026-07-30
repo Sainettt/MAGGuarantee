@@ -577,8 +577,8 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
   гоняет продакшн `AuditInterceptor` end-to-end) + `audit-coverage.spec.ts` (22 spot-check
   теста на claims-update/request-authorization/limits-PUT/user-CRUD/hard-deletes ×5).
   Endpoint-sweep по `13-api-design.md`: всё in-scope реализовано; `GET /ready`
-  (readiness-probe) отложен в Phase 9. Сьют: **721 pass / 4 pre-existing fail** (нужен
-  live Postgres).
+  (readiness-probe) отложен в Phase 9 — ✅ закрыт там 2026-07-30. Сьют: **721 pass /
+  4 pre-existing fail** (нужен live Postgres).
 - ✅ **Design system (uiux-agent).** Добавлена секция §8.0–§8.10 в
   [`14-design-system.md`](14-design-system.md): 5 screen-архетипов, skeleton/empty-state/
   toast/keyboard-контракт, a11y-чек-лист (7 «key screens»), dark-mode матрица + per-screen
@@ -598,7 +598,7 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
 1. ✅ Audit log читалка: `GET /audit?targetType=...&targetKey=...&userId=...&from=...&to=...` (Phase 4.5, сверено).
 2. ✅ Пагинация audit (cursor-based) — Phase 4.5, сверено.
 3. ✅ Spot-check: критичные mutating endpoints фактически пишут audit (22 теста; найден+исправлен claims-verification регресс).
-4. ✅ Финализация остальных endpoints из [13-api-design.md](13-api-design.md) — всё in-scope реализовано; `GET /ready` → Phase 9.
+4. ✅ Финализация остальных endpoints из [13-api-design.md](13-api-design.md) — всё in-scope реализовано; `GET /ready` был отложен в Phase 9 и там ✅ закрыт (2026-07-30).
 
 ### Frontend
 
@@ -626,26 +626,35 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
 **Цель:** все integrations работают как в проде. Это не отдельная phase в timeline-е — задачи распределяются по предыдущим фазам, но выделены отдельно для трекинга.
 
 > **BullMQ поднят рано (in-process):** очередь `email-send` работает внутри
-> API-процесса (2FA login-code email и уведомления о выездах). Вторая очередь
+> API-процесса и через неё идут **все** транзакционные письма (у каждого
+> отправителя есть `enqueueX`-вариант с sync-фолбэком). Вторая очередь
 > `chat-notify-wyjazd` (Google Chat) была здесь же, но **выпилена 2026-07-28**
-> вместе со всей интеграцией. Остальные очереди/шаблоны (`daily-reminders`,
-> `weekly-report`, `token-cleanup`, миграция остальных mail-вызовов, Gmail API)
-> отложены до полного Phase 9. Deps: `@nestjs/bullmq@10.2.3`, `bullmq@5.78.0`.
+> вместе со всей интеграцией. Deps: `@nestjs/bullmq@10.2.3`, `bullmq@5.78.0`.
+>
+> **Крон — не BullMQ, а `@Cron` в API-процессе.** Четыре джобы (verification-sla
+> 07:00, guarantee-watchdog 07:10, vehicle-removal-alert 07:20, weekly-report
+> пн 09:00) живут как `@Cron`; письма из них всё равно уходят через очередь.
+> Осознанное отклонение от исходной BullMQ-схемы в docs/16 — потребность в
+> планировщике одинаковая, а `@Cron`-путь уже обкатан. Известное ограничение
+> (у всех четырёх): при горизонтальном масштабировании N реплик = N писем,
+> нужен Redis-lock по варшавской дате.
 
 ### Шаги
 
-1. **Gmail API setup** (см. [16-jobs-and-integrations.md](16-jobs-and-integrations.md#email-через-gmail-api)).
-2. **Все email-шаблоны** в React Email (`account-created`, `password-reset`, `login-code`, `carrier-decision`, `internal-decision`, `carrier-submitted`, `daily-reminder`, `weekly-report`, `maksim-confirmation-request`).
-3. **BullMQ queues:** `email-send`, `daily-reminders`, `weekly-report`, `token-cleanup`.
-4. **S3 для screenshots** — в Фазе 4 уже подключено, здесь — финализация retention policy.
-5. **Google OAuth** для внутренних — опционально, в конце.
-6. **Uptime Kuma** на VPS — пинг `/health` и `/ready`, алерты в email/Telegram.
-7. **Bull Board UI** на `/admin/queues` (admin only) для мониторинга.
+1. ✅ **Gmail API setup** — `GmailApiProvider` + RFC-threading + `npm run gmail:token`; выбор через `MAIL_PROVIDER=smtp|gmail`. Остались только внешние действия заказчика (GCP-проект фирмы, ящик `wnioski@`) — см. [23-prod-deployment-runbook.md](23-prod-deployment-runbook.md) Фаза 1.
+2. ✅ **Все email-шаблоны** в React Email — 19 штук, все на едином дизайне ([22-email-design.md](22-email-design.md)). Полный список — [16-jobs-and-integrations.md](16-jobs-and-integrations.md#email-шаблоны-полный-список).
+3. ✅ **Account-lifecycle письма закрыты для перевозчиков** (2026-07-30): `POST /carriers` шлёт `account-created` с временным паролем на `User.email` (не на `Carrier.ordersEmail`), reset-пароля у перевозчика и у внутренних ролей шлёт **общий** `account-password-reset`, реактивация — `account-reactivated`. Деактивация перевозчику **не** шлётся (решение заказчика) — асимметрия с внутренними ролями намеренная. Раньше пароль перевозчика писался в лог и передавался руками.
+4. 🟡 **BullMQ queues:** `email-send` ✅; `daily-reminders` ❌ **отменён** (дублировал verification-SLA дайджест — шаблон удалён 2026-07-30); `weekly-report` ✅ (как `@Cron`, не repeatable job); `token-cleanup` 🚧 — единственная незакрытая джоба.
+5. ✅ **S3** — `StorageService` (MinIO/S3-совместимый) + вложения claim-ов и машин. Retention policy — не формализована.
+6. ❌ **Google OAuth** для внутренних — опционально, не делали.
+7. ✅ **`GET /ready`** (2026-07-30) — readiness-проба: Postgres `SELECT 1` + Redis `PING`, 200 / 503 с диагностическим телом. Было отложено из Phase 8.
+8. 🚧 **Uptime Kuma** на VPS — пинг `/health` и `/ready`, алерты. Делается при выкате прода.
+9. ❌ **Bull Board UI** на `/admin/queues` — не делали; очередь пока наблюдается через `/diagnostics/mails`.
 
 ### Deliverables
-- Все email уходят через Gmail API.
-- Все cron работают (можно проверить через `/admin/queues`).
-- Screenshots сохраняются в S3 и видны через pre-signed URL.
+- 🚧 Все email уходят через Gmail API — код готов, ждёт GCP-креды заказчика.
+- 🟡 Крон работает (5 джоб на `@Cron`); наблюдаемость — через `/diagnostics/mails`, не Bull Board.
+- ✅ Файлы сохраняются в S3/MinIO и отдаются через download-proxy.
 
 ### Зависимости
 - Фаза 1 (для 2FA email).

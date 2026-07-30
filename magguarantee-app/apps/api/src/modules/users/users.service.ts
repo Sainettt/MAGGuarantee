@@ -246,7 +246,6 @@ export class UsersService {
     });
     // A reset invalidates the victim's existing sessions.
     const revoked = await this.refreshTokens.revokeAllForUser(id);
-    // TODO: replace with email send when the admin-reset email ships (Phase 9).
     this.logger.log({
       msg: 'admin password reset issued; sessions revoked',
       userId: id,
@@ -254,6 +253,19 @@ export class UsersService {
       mode: mode.mode,
       revokedSessions: revoked,
     });
+    // Same template as the carrier reset — one `account-password-reset` for
+    // both audiences (decision 2026-07-30). Sent for `custom` mode too: the
+    // user's old password stopped working either way.
+    this.notifyAccount(
+      () =>
+        this.mailService!.enqueueAccountPasswordReset(updated.email, {
+          name: updated.name || updated.login,
+          loginName: updated.login,
+          temporaryPassword: plain,
+          loginUrl: this.loginUrl(),
+        }),
+      'password reset',
+    );
     return { ...this.toDto(updated), temporaryPassword: plain };
   }
 

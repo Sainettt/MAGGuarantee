@@ -233,7 +233,13 @@
     "confirmPasswordLabel": "Powtórz hasło",
     "submit": "Zapisz i kontynuuj",
     "logout": "Wyloguj się",
-    "successToast": "Hasło zostało ustawione."
+    "successToast": "Hasło zostało ustawione.",
+    "menuItem": "Zmień hasło",
+    "dialogTitle": "Zmiana hasła",
+    "dialogDescription": "Ustaw nowe hasło do swojego konta. Pozostaniesz zalogowany.",
+    "dialogSubmit": "Zmień hasło",
+    "dialogSuccessToast": "Hasło zostało zmienione.",
+    "dialogErrorToast": "Nie udało się zmienić hasła. Spróbuj ponownie."
   },
   "passwordPolicy": {
     "label": "Wymagania dla hasła",
@@ -396,7 +402,20 @@
       "placeholder": "Wybierz konto EUR"
     },
     "paymentTermsValue": "{n} dni",
-    "tempPasswordToast": "Hasło tymczasowe: {password}"
+    "tempPasswordToast": "Hasło tymczasowe: {password}",
+    "resetPassword": {
+      "action": "Resetuj hasło",
+      "confirmTitle": "Zresetować hasło przewoźnika?",
+      "confirmDescription": "Przewoźnik: {carrier}",
+      "confirmNote": "Dotychczasowe hasło przestanie działać. Nowe hasło tymczasowe zostanie wysłane e-mailem na adres logowania przewoźnika i pokazane tutaj jeden raz.",
+      "confirmAction": "Resetuj hasło",
+      "resultTitle": "Hasło zresetowane",
+      "resultDescription": "Zapisz lub przekaż hasło teraz — nie zobaczysz go ponownie. Przy pierwszym logowaniu przewoźnik ustawi własne.",
+      "loginLabel": "Login",
+      "passwordLabel": "Hasło tymczasowe",
+      "copyAria": "Kopiuj hasło tymczasowe",
+      "errorToast": "Nie udało się zresetować hasła."
+    }
   },
   "entityDetail": {
     "edit": "Edytuj",

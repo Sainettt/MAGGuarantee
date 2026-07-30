@@ -49,6 +49,21 @@ export function updateCarrier(
   });
 }
 
+/**
+ * Admin/opiekun password reset for a carrier. Unlike the internal-user reset
+ * there is no generate/custom choice — the API always generates (no body), so
+ * the caller only confirms. Returns the fresh one-time password ONCE; the
+ * carrier also receives it by email (`account-password-reset`).
+ */
+export function resetCarrierPassword(
+  id: string,
+): Promise<CarrierWithTemporaryPasswordDto> {
+  return apiJson<CarrierWithTemporaryPasswordDto>(
+    `/carriers/${id}/reset-password`,
+    { method: 'POST' },
+  );
+}
+
 export function deactivateCarrier(id: string): Promise<CarrierDto> {
   return apiJson<CarrierDto>(`/carriers/${id}/deactivate`, { method: 'POST' });
 }

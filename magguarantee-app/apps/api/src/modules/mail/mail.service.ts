@@ -33,6 +33,14 @@ import {
   type AccountReactivatedProps,
 } from './templates/account-reactivated';
 import {
+  AccountPasswordResetEmail,
+  type AccountPasswordResetProps,
+} from './templates/account-password-reset';
+import {
+  WeeklyReportEmail,
+  type WeeklyReportProps,
+} from './templates/weekly-report';
+import {
   CarrierDecisionEmail,
   type CarrierDecisionProps,
 } from './templates/carrier-decision';
@@ -574,6 +582,93 @@ export class MailService implements IMailService {
     return this._enqueueOr(
       { template: 'account-reactivated', email, props },
       () => this.sendAccountReactivated(email, props),
+    );
+  }
+
+  // account-password-reset ─────────────────────────────────
+  /**
+   * Admin-issued password reset — ONE template for both audiences (internal
+   * users and carriers), per the 2026-07-30 decision. Distinct from
+   * `sendPasswordReset`, which carries the self-service 6-digit code.
+   */
+  async sendAccountPasswordReset(
+    email: string,
+    props: AccountPasswordResetProps,
+  ): Promise<void> {
+    await this._send({
+      to: email,
+      subject: 'Hasło zresetowane — MAGGuarantee',
+      html: await render(AccountPasswordResetEmail(props)),
+      text: [
+        `Witaj ${props.name},`,
+        '',
+        'Administrator zresetował hasło do Twojego konta w systemie',
+        'MAGGuarantee. Dotychczasowe hasło przestało działać.',
+        `Login: ${props.loginName}`,
+        `Hasło tymczasowe: ${props.temporaryPassword}`,
+        '',
+        'Przy pierwszym logowaniu system poprosi o ustawienie nowego hasła.',
+        'Nie udostępniaj tego hasła nikomu.',
+        '',
+        `Zaloguj się: ${props.loginUrl}`,
+      ].join('\n'),
+      template: 'account-password-reset',
+      logMsg: 'account password reset email sent',
+    });
+  }
+
+  enqueueAccountPasswordReset(
+    email: string,
+    props: AccountPasswordResetProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'account-password-reset', email, props },
+      () => this.sendAccountPasswordReset(email, props),
+    );
+  }
+
+  // weekly-report ──────────────────────────────────────────
+  /**
+   * Monday summary for admins (GAS analog `sendWeeklyReport`). Fed by the
+   * cron in `modules/weekly-report/`, which invokes this once per recipient
+   * inside a `Promise.allSettled` — same dispatch shape as the verification
+   * digest, so one bad mailbox never blocks the rest.
+   */
+  async sendWeeklyReport(
+    email: string,
+    props: WeeklyReportProps,
+  ): Promise<void> {
+    await this._send({
+      to: email,
+      subject: `Raport tygodniowy ${props.weekLabel} — ${props.payoutTotal}`,
+      html: await render(WeeklyReportEmail(props)),
+      text: [
+        `Raport tygodniowy — ${props.weekLabel}`,
+        '',
+        `Suma dopłat (zaakceptowane w tym tygodniu): ${props.payoutTotal}`,
+        '',
+        'W tym tygodniu:',
+        ...props.rows.map((r) => `  ${r.label}: ${r.value}`),
+        '',
+        'Stan bieżący:',
+        ...props.backlogRows.map((r) => `  ${r.label}: ${r.value}`),
+        '',
+        `Panel: ${props.deeplink}`,
+        '',
+        'Wiadomość wewnętrzna — nie przesyłaj przewoźnikom.',
+      ].join('\n'),
+      template: 'weekly-report',
+      logMsg: 'weekly report email sent',
+      logExtra: { weekLabel: props.weekLabel },
+    });
+  }
+
+  enqueueWeeklyReport(
+    email: string,
+    props: WeeklyReportProps,
+  ): Promise<void> {
+    return this._enqueueOr({ template: 'weekly-report', email, props }, () =>
+      this.sendWeeklyReport(email, props),
     );
   }
 

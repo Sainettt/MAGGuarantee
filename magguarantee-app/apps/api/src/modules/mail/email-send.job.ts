@@ -8,6 +8,8 @@
 import type { AccountCreatedProps } from './templates/account-created';
 import type { AccountDeactivatedProps } from './templates/account-deactivated';
 import type { AccountReactivatedProps } from './templates/account-reactivated';
+import type { AccountPasswordResetProps } from './templates/account-password-reset';
+import type { WeeklyReportProps } from './templates/weekly-report';
 import type { CarrierDecisionProps } from './templates/carrier-decision';
 import type { InternalDecisionProps } from './templates/internal-decision';
 import type { CarrierSubmittedProps } from './templates/carrier-submitted';
@@ -54,6 +56,23 @@ export interface AccountReactivatedEmailJob {
   template: 'account-reactivated';
   email: string;
   props: AccountReactivatedProps;
+}
+
+/**
+ * Admin-issued password reset. Shared by internal users and carriers — one
+ * template, one job type (decision 2026-07-30).
+ */
+export interface AccountPasswordResetEmailJob {
+  template: 'account-password-reset';
+  email: string;
+  props: AccountPasswordResetProps;
+}
+
+/** Monday summary report for admins. */
+export interface WeeklyReportEmailJob {
+  template: 'weekly-report';
+  email: string;
+  props: WeeklyReportProps;
 }
 
 export interface CarrierDecisionEmailJob {
@@ -131,6 +150,8 @@ export type EmailSendJobData =
   | AccountCreatedEmailJob
   | AccountDeactivatedEmailJob
   | AccountReactivatedEmailJob
+  | AccountPasswordResetEmailJob
+  | WeeklyReportEmailJob
   | CarrierDecisionEmailJob
   | InternalDecisionEmailJob
   | CarrierSubmittedEmailJob

@@ -38,6 +38,7 @@ import { UsersModule } from './modules/users/users.module';
 import { VehicleRemovalAlertModule } from './modules/vehicle-removal-alert/vehicle-removal-alert.module';
 import { VehiclesModule } from './modules/vehicles/vehicles.module';
 import { VerificationSlaModule } from './modules/verification-sla/verification-sla.module';
+import { WeeklyReportModule } from './modules/weekly-report/weekly-report.module';
 
 @Module({
   imports: [
@@ -122,6 +123,8 @@ import { VerificationSlaModule } from './modules/verification-sla/verification-s
     GuaranteeWatchdogModule,
     // Vehicle-status rework Step B — 29-day «do usunięcia» admin-alert cron.
     VehicleRemovalAlertModule,
+    // Phase 9 — Monday admin summary cron (GAS analog `sendWeeklyReport`).
+    WeeklyReportModule,
     HealthModule,
   ],
   providers: [

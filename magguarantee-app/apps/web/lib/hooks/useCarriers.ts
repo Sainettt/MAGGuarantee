@@ -32,6 +32,7 @@ import {
   listCarrierAttachments,
   listCarriers,
   reactivateCarrier,
+  resetCarrierPassword,
   updateCarrier,
   uploadCarrierAttachment,
 } from '@/lib/api/carriers';
@@ -98,6 +99,20 @@ export function useUpdateCarrier(
       qc.invalidateQueries({ queryKey: CARRIERS_KEY });
       opts?.onSuccess?.(...args);
     },
+  });
+}
+
+/**
+ * Admin/opiekun carrier password reset. No cache invalidation: the reset
+ * changes no field the list renders — the caller shows the returned one-time
+ * password in a result dialog instead.
+ */
+export function useResetCarrierPassword(
+  opts?: UseMutationOptions<CarrierWithTemporaryPasswordDto, Error, string>,
+) {
+  return useMutation({
+    mutationFn: resetCarrierPassword,
+    ...opts,
   });
 }
 

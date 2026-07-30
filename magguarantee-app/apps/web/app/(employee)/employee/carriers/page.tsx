@@ -2,7 +2,15 @@
 
 // Admin CRUD — carriers.
 
-import { Building2, Pencil, PlayCircle, Plus, SearchX, Trash2 } from 'lucide-react';
+import {
+  Building2,
+  KeyRound,
+  Pencil,
+  PlayCircle,
+  Plus,
+  SearchX,
+  Trash2,
+} from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
@@ -22,6 +30,7 @@ import {
   useCarrierOnboarding,
 } from '@/components/carrier-onboarding/useCarrierOnboarding';
 import { CarrierDetailModal } from '@/components/carriers/CarrierDetailModal';
+import { CarrierResetPasswordDialogs } from '@/components/carriers/CarrierResetPasswordDialogs';
 import { OnboardingMissingBadge } from '@/components/carriers/OnboardingMissingBadge';
 import { ApiResponseError } from '@/lib/api/client';
 import { useAuth } from '@/lib/hooks/useAuth';
@@ -46,6 +55,7 @@ function CarriersPageInner() {
   const tWizard = useTranslations();
   const tCommon = useTranslations('common');
   const tConfirm = useTranslations('confirmDelete');
+  const tReset = useTranslations('carriers.resetPassword');
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   // Opiekun's list endpoint is auto-scoped to their own carriers (Phase 5.1
@@ -98,6 +108,14 @@ function CarriersPageInner() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<CarrierDto | null>(null);
   const hardDeleteM = useHardDeleteCarrier();
+
+  // Password reset (2026-07-30). Available to admin AND opiekun — the endpoint
+  // allows both and enforces ownership server-side (`@OpiekunOwns`), and the
+  // opiekun's list is already scoped to their own carriers.
+  const [resetTarget, setResetTarget] = useState<CarrierDto | null>(null);
+  const openResetPassword = useCallback((row: CarrierDto) => {
+    setResetTarget(row);
+  }, []);
 
   const openCreate = () => {
     // The "+ Add carrier" button opens the wizard, NOT the standalone create
@@ -238,6 +256,12 @@ function CarriersPageInner() {
             icon: Pencil,
             onSelect: () => openEdit(row),
           });
+          actions.push({
+            key: 'reset-password',
+            label: tReset('action'),
+            icon: KeyRound,
+            onSelect: () => openResetPassword(row),
+          });
           if (canHardDelete) {
             actions.push({
               key: 'delete',
@@ -258,7 +282,17 @@ function CarriersPageInner() {
         },
       },
     ],
-    [t, tCommon, tConfirm, tWizard, resumeOnboarding, canHardDelete, openHardDelete],
+    [
+      t,
+      tCommon,
+      tConfirm,
+      tReset,
+      tWizard,
+      resumeOnboarding,
+      canHardDelete,
+      openHardDelete,
+      openResetPassword,
+    ],
   );
 
   return (
@@ -370,6 +404,11 @@ function CarriersPageInner() {
         open={sheetOpen}
         carrier={target}
         onClose={() => setSheetOpen(false)}
+      />
+
+      <CarrierResetPasswordDialogs
+        target={resetTarget}
+        onClose={() => setResetTarget(null)}
       />
 
       <ConfirmDeleteWithReasonDialog

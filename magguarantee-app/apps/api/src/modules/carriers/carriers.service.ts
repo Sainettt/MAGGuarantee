@@ -4,8 +4,10 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 import type {
   CarrierDto,
@@ -22,8 +24,10 @@ import {
   uniqueViolationToConflict,
 } from '../../common/errors/prisma-error';
 import { generateRandomPassword } from '../../common/utils/random-password';
+import type { Env } from '../../config/env.schema';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { PasswordService } from '../auth/password.service';
+import { MailService } from '../mail/mail.service';
 import { UsersRepository } from '../users/users.repository';
 import {
   CarriersRepository,
@@ -58,7 +62,40 @@ export class CarriersService {
     private readonly carriers: CarriersRepository,
     private readonly users: UsersRepository,
     private readonly passwords: PasswordService,
+    // Optional so the existing 3-arg unit tests keep constructing the service
+    // without a mail stub — same convention as `UsersService`.
+    @Optional() private readonly mailService?: MailService,
+    @Optional() private readonly configService?: ConfigService<Env, true>,
   ) {}
+
+  // ── Account lifecycle mail ───────────────────────────────
+
+  /** Sign-in URL for account lifecycle emails (APP_URL root). */
+  private loginUrl(): string {
+    const appUrl =
+      this.configService?.get('APP_URL', { infer: true }) ??
+      'http://localhost:3000';
+    return appUrl.replace(/\/$/, '');
+  }
+
+  /**
+   * Fire-and-log account-lifecycle email — mirrors `UsersService.notifyAccount`.
+   * Never throws into the caller: the DB mutation already committed, so a mail
+   * hiccup must not fail the admin's action. No-op when MailService is absent
+   * (unit tests).
+   *
+   * Carriers get the SAME lifecycle mails as internal users except
+   * `account-deactivated` — deliberately not sent (decision 2026-07-30).
+   */
+  private notifyAccount(send: () => Promise<void>, context: string): void {
+    if (!this.mailService) return;
+    void send().catch((err) => {
+      this.logger.warn({
+        msg: `carrier account ${context} email failed`,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
 
   // ── List + read ──────────────────────────────────────────
 
@@ -138,13 +175,27 @@ export class CarriersService {
     }
 
     if (!dto.password) {
-      // TODO: replace with email send when MailService.sendAccountCreated is implemented (Phase 9).
       this.logger.log({
-        msg: 'carrier created with generated password (Phase 2 stub)',
+        msg: 'carrier created with generated password',
         carrierId: row.id,
         login: row.login,
       });
     }
+
+    // Credentials go to `User.email` (the login mailbox), NOT
+    // `Carrier.ordersEmail` — the latter is the operational address for
+    // zlecenia and may be a shared/company inbox (decision 2026-07-30).
+    // Sent for admin-set passwords too, matching `UsersService.create`.
+    this.notifyAccount(
+      () =>
+        this.mailService!.enqueueAccountCreated(row.email, {
+          name: row.name || row.login,
+          loginName: row.login,
+          temporaryPassword: plain,
+          loginUrl: this.loginUrl(),
+        }),
+      'created',
+    );
 
     return { ...this.toDto(row), temporaryPassword: plain };
   }
@@ -264,6 +315,15 @@ export class CarriersService {
     }
     AuditContext.setBefore(this.toDto(existing));
     const row = await this.carriers.setActive(id, true);
+    this.notifyAccount(
+      () =>
+        this.mailService!.enqueueAccountReactivated(row.email, {
+          name: row.name || row.login,
+          loginName: row.login,
+          loginUrl: this.loginUrl(),
+        }),
+      'reactivated',
+    );
     return this.toDto(row);
   }
 
@@ -274,12 +334,21 @@ export class CarriersService {
     const plain = generateRandomPassword();
     const passwordHash = await this.passwords.hash(plain);
     const row = await this.carriers.update(id, { passwordHash });
-    // TODO: replace with email send when MailService.sendAccountReset is implemented (Phase 9).
     this.logger.log({
-      msg: 'carrier password reset (Phase 2 stub — email pending)',
+      msg: 'carrier password reset',
       carrierId: id,
       login: row.login,
     });
+    this.notifyAccount(
+      () =>
+        this.mailService!.enqueueAccountPasswordReset(row.email, {
+          name: row.name || row.login,
+          loginName: row.login,
+          temporaryPassword: plain,
+          loginUrl: this.loginUrl(),
+        }),
+      'password reset',
+    );
     return { ...this.toDto(row), temporaryPassword: plain };
   }
 

@@ -46,6 +46,12 @@ export class EmailSendProcessor extends WorkerHost {
       case 'account-reactivated':
         await this.mail.sendAccountReactivated(data.email, data.props);
         return;
+      case 'account-password-reset':
+        await this.mail.sendAccountPasswordReset(data.email, data.props);
+        return;
+      case 'weekly-report':
+        await this.mail.sendWeeklyReport(data.email, data.props);
+        return;
       case 'carrier-decision':
         await this.mail.sendCarrierDecision(data.email, data.props);
         return;

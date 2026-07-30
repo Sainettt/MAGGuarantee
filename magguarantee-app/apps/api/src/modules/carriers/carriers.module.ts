@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { MailModule } from '../mail/mail.module';
 import { PasswordModule } from '../password/password.module';
 import { StorageModule } from '../storage/storage.module';
 import { UsersModule } from '../users/users.module';
@@ -13,7 +14,7 @@ import { CarriersRepository } from './carriers.repository';
 import { CarriersService } from './carriers.service';
 
 @Module({
-  imports: [PasswordModule, UsersModule, StorageModule],
+  imports: [PasswordModule, UsersModule, StorageModule, MailModule],
   controllers: [CarriersController, CarrierAttachmentsController],
   providers: [
     CarriersService,
