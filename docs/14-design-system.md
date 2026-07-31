@@ -4173,6 +4173,34 @@ The body is a single vertical stack. Same order in `view` and `edit` — only th
 
 ### 6.5.3 The 6 fact pairs (the heart of edit mode)
 
+> ⚠️ **UPDATE 2026-07-30 (docs/20 §0⁗) — the pairs became TRIPLETS for facts 1–5.**
+> Now that the carrier declares the period / times / mileage itself, the muted
+> "declared" cell finally carries a genuinely independent figure, and the
+> `pracownik` needs the weryfikator's own numbers beside it to do the actual
+> reconciliation. Row layout in edit mode:
+>
+> `[ Deklaracja przewoźnika (muted) | Dane weryfikatora (muted) | Weryfikacja (input) ]`
+> — `md:grid-cols-3`, collapsing to stacked below `md` as before.
+>
+> | Fact | Weryfikator source |
+> |---|---|
+> | `dateStart` | `claim.delegationActualDepartureAt` (date part) |
+> | `dateEnd` | `claim.delegationActualReturnAt` (date part) |
+> | `timeFrom` | `HH:mm` of `delegationActualDepartureAt` |
+> | `timeTo` | `HH:mm` of `delegationActualReturnAt` |
+> | `mileage` | `claim.verifierMileage` — Σ km-board over the actual window (verifier-only, detail-only) |
+>
+> **Divergence is INFORMATION, not an error.** The two sides come from different
+> external systems and routinely disagree — a differing weryfikator cell is
+> tinted `border-warning/40 bg-warning/10` + `font-semibold`, with **no** icon,
+> **no** `role="alert"` and **no** effect on validity. An equal cell renders in
+> the plain muted treatment.
+>
+> **The column disappears entirely** (row falls back to the 2-column layout,
+> header included) when the outing carries no actual datetimes / no board data —
+> never render an empty third cell. `hoursAdjusted` (fact 6) is untouched: still
+> input-only. View mode is untouched: still the single checked value.
+
 Six facts, each a **pair**: carrier-declared value (read-only, muted) and the verifier's checked value (`pracownik` input).
 
 | # | Field | i18n label (PL) | Input type | Declared value source |
@@ -5588,6 +5616,31 @@ All dialogs reuse the **§7.1 confirm-`<Dialog>` pattern** (centered `<Dialog>`,
 **Board placement (both roles).** Each delegation table gets a trailing `actions` cell. **At most one primary action per row** (strict state machine): `zgloszony`→A (eksport) ; `gotowy`→C (weryfikator) **or** B-rollback (eksport) depending on whose board ; `w_trasie`→D (weryfikator) ; `zjechal`/`anulowany`→ `—`. The weryfikator's two screens (km-board + delegation statuses) are **two `<Tabs>`** inside `RoleShell` — reintroduce the Phase 6.3 in-page `<Tabs>` bar now that the role has a second destination (this overrides the §7.5 "single screen, no tabs" note for weryfikator). Eksport stays a single screen (no tabs).
 
 ### 7.10.3 Carrier `/carrier/claims/new` — read-only derived fields (delegation picker)
+
+> ⛔ **SUPERSEDED in part — РАЗВОРОТ 2026-07-30 (docs/20 §0⁗).** The carrier
+> DECLARES the facts again: **period, time window and mileage are editable
+> inputs**, no longer read-only derived fields. What survives from this section:
+> the delegation picker itself, the `zjechal`-only feed, the guarantee block
+> screen, and the read-only **vehicle / trailer / driver** trio (those really are
+> derived). The read-only period card, the «Godziny (z wyjazdu)» block and the
+> read-only mileage row are **gone**.
+>
+> **New form shape** — three sections on the left column:
+> 1. **Wyjazd** — the picker (unchanged) + selected-status chip.
+> 2. **Okres** — `dateStart` / `dateEnd` (`type="date"`) + `timeFrom` / `timeTo`
+>    (`type="time"`), 2-col `<FormGrid>`, all required. `dateStart` carries
+>    `min={delegation.departureAt.slice(0,10)}` and a description line («Nie
+>    wcześniej niż zgłoszona data wyjazdu ({date})») mirroring the api's 422
+>    `CLAIM_DATE_BEFORE_DEPARTURE`. `dateEnd` gets `min={dateStart}`; both carry
+>    `max={today}`.
+> 3. **Wartości** — `mileage` (`type="number"`, `min=1`), required.
+>
+> **Deliberately absent (customer decision):** no prefill from the outing and
+> **no** "differs from the km board" hint. The carrier is paid on SpedTrans
+> mileage; nudging it toward the weryfikator's number would be nudging it toward
+> a figure the business does not pay on. The client mirrors the tier-1 date rules
+> (order / future / span) but **not** the deadline rule — that one is measured
+> server-side from `actualReturnAt`, which this form has no business showing.
 
 > ⚠️ **§0‴ (2026-07-08):** the former `w_trasie` **warning banner + soft-confirm gate are REMOVED** — a wniosek can be submitted **only** for a `zjechal` delegation. The carrier no longer inputs a time window; `timeFrom`/`timeTo` are derived from the delegation's actual times and shown read-only («Godziny (z wyjazdu)»).
 

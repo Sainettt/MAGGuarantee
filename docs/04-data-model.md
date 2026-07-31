@@ -247,10 +247,10 @@
 | `carrierId` | FK → Carrier (кто подал) |
 | `vehicleId` | FK → Vehicle (на какое авто) |
 | `vehiclePlateSnapshot` | snapshot номера на случай удаления авто |
-| `delegationId` | FK → Delegation, **unique** (один wniosek на выезд). Nullable в БД (легаси), обязателен для новых. Период (`dateStart=departureAt`, `dateEnd=actualReturnAt ?? plannedReturnAt`) и `mileage` берутся из выезда — см. §0″ в [20](20-phase-7-eksport-weryfikator.md) |
-| `dateStart`, `dateEnd` | период гарантии (производный от выезда; pracownik может править) |
-| `timeFrom`, `timeTo` | часы (`HH:MM`, для дробных дней) — **server-derived на submit** из точных времён выезда: `timeFrom = HH:mm(actualDepartureAt)`, `timeTo = HH:mm(actualReturnAt)`. Перевозчик их НЕ вводит; `pracownik` может переопределить при верификации (снапшот исходных — в `origTimeFrom`/`origTimeTo`) |
-| `mileage` | фактический пробег км — предзаполняется из `Σ VehicleDailyKm` (state=drove) за период; `pracownik` правит |
+| `delegationId` | FK → Delegation, **unique** (один wniosek на выезд). Nullable в БД (легаси), обязателен для новых. Выезд даёт машину/прицеп/водителя + два якоря правил (пол по `departureAt`, дедлайн от `actualReturnAt`); период, часы и пробег заявляет перевозчик — см. §0⁗ в [20](20-phase-7-eksport-weryfikator.md) |
+| `dateStart`, `dateEnd` | период гарантии — **заявляет перевозчик** (разворот 2026-07-30); `dateStart` не раньше заявленной даты выезда, `dateEnd` не ограничена; pracownik правит при верификации |
+| `timeFrom`, `timeTo` | часы (`HH:MM`, для дробных дней) — **вводит перевозчик** (обязательны, разворот 2026-07-30); `pracownik` может переопределить при верификации (снапшот заявленного — в `origTimeFrom`/`origTimeTo`) |
+| `mileage` | фактический пробег км — **вводит перевозчик** (свободный, по данным SpedTrans; разворот 2026-07-30). `Σ VehicleDailyKm` больше не источник, а эталон для сверки в модалке pracownika; `pracownik` правит |
 | `kmGuaranteed` | расчётный гарантированный км |
 | `kmDifference` | gwarant − mileage |
 | `paymentEur` | сумма доплаты |
@@ -317,6 +317,8 @@
 - DB CHECK на длину: `returnCountry` 2..8 символов (covers `EL`), `returnPostalCode` ≤ 16. Формат-валидация (per-country regex) — на Zod-уровне через `EU_POSTAL_CODES` (см. `packages/shared/src/constants/eu-postal-codes.ts`).
 - **≤1 активный выезд на машину** — у машины может быть максимум один НЕ-терминальный выезд (`status ∈ {zgloszony, gotowy, w_trasie}`). Enforced на уровне api при создании (`DelegationsService.add` → 409 Conflict, если машина уже на/ожидает рейс); терминальные (`zjechal`/`anulowany`) и soft-deleted строки не блокируют. Проверка только на create — далее инвариант держится по индукции (DB unique-constraint нет, это service-level guard).
 
+> ⚠️ **ЧАСТИЧНО ОТМЕНЕНО РАЗВОРОТОМ 2026-07-30 (§0⁗):** связь `Claim.delegationId` остаётся, но период и `mileage` **из выезда больше не берутся** — их заявляет перевозчик; авто-пересчёт при позднем `zjechal` мёртв (подача возможна только из `zjechal`). Ниже — историческая формулировка.
+>
 > ✅ **ВВЕДЕНО ОБРАТНО (REWORK 2026-06-20 #4, §0″ [20](20-phase-7-eksport-weryfikator.md)):** связь `Claim.delegationId` (FK, **unique**) вводится. Перевозчик подаёт wniosek на конкретный выезд (`w_trasie`/`zjechal`), период берётся из выезда, `mileage` = `Σ VehicleDailyKm` за период. При позднем `zjechal` с другой датой — авто-пересчёт периода wniosek **только в `NA_WERYFIKACJI`** (untouched); после любого решающего действия pracownik (отправка на авторизацию / решение / правка периода) — заморожен (границы — см. §0″). Это разворачивает «нет FK» (2026-06-12) и возвращает идею memory `wniosek-wyjazd-linked` (2026-06-11) в коде. `mileage` по-прежнему = `Σ VehicleDailyKm` (предзаполнение + override). Approval-workflow Аркадиуша — отдельный Phase 11, не в этом слайсе.
 
 ### `MonthlyLimit` — лимиты на месяц

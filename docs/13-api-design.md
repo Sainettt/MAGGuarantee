@@ -586,30 +586,40 @@ type UserDto = {
 ### Submit claim
 
 ```ts
-// POST /claims — Phase 7 §0‴ finish: carrier sends ONLY the outing.
-// timeFrom/timeTo are NO LONGER in the body — they are server-derived from the
-// delegation's actual departure/return times. Everything else is likewise
-// derived from the linked delegation.
+// POST /claims — ⚠️ РАЗВОРОТ 2026-07-30 (docs/20 §0⁗): перевозчик снова САМ
+// заявляет период, часы и пробег. Деривация из выезда/km-доски отменена —
+// деньги платятся по пробегу SpedTrans, а данные weryfikatora приходят из
+// другой системы и никогда не совпадают. Weryfikator не тронут: его цифры
+// стали ЭТАЛОНОМ для сверки, а не источником.
 type SubmitClaimRequest = {
   delegationId: string;    // chosen outing (MUST be `zjechal` — see status gate)
+  dateStart: string;       // 'YYYY-MM-DD' — floor: >= day(delegation.departureAt)
+  dateEnd: string;         // 'YYYY-MM-DD' — НЕ ограничена фактическим возвратом
+  timeFrom: string;        // 'HH:mm' — обязательно (колонка NOT NULL)
+  timeTo: string;          // 'HH:mm' — обязательно
+  mileage: number;         // свободный; единственные санитары — >0 и km/дн cap
   comment?: string;
   attachmentIds?: string[]; // pre-uploaded attachment UUIDs (max 20)
 };
+// Все пять заявленных значений дополнительно пишутся в orig*-снимки
+// (origDateStart/origDateEnd/origTimeFrom/origTimeTo/origMileage) — write-once,
+// PATCH их не трогает. Именно они дают в ClaimModal колонку «Deklaracja
+// przewoźnika» рядом с «Dane weryfikatora».
+//
 // SERVER-DERIVED from the delegation (NOT in the body):
 //   • vehicleId / trailerId / driverId — from Delegation.vehicleId / trailerId
 //     / driverId; `vehiclePlateSnapshot` from Delegation.vehicle.plateNumber.
 //     (Claim persists only vehicleId + vehiclePlateSnapshot; trailer/driver are
 //     carried by the linked Delegation, not duplicated onto Claim.)
-//   • dateStart = date(actualDepartureAt), dateEnd = date(actualReturnAt).
-//   • timeFrom = HH:mm(actualDepartureAt), timeTo = HH:mm(actualReturnAt);
-//     both snapshotted into origTimeFrom / origTimeTo. The carrier does NOT
-//     input them; a VERIFIER (`pracownik`) MAY override timeFrom/timeTo via
-//     PATCH (double-check against a weryfikator mistake).
-//   • mileage = Σ VehicleDailyKm.km (state=drove) over [dateStart, dateEnd] of
-//     the delegation's vehicle. NO carrier override (was optional pre-§0″).
 //   • Запрошенная сумма = km-calc paymentEur (rounded 2dp), замораживается в
 //     origPaymentEur. Отдельного carrier-поля нет (amountRequested дропнут).
 //   • hoursAdjusted — verifier-only (PATCH); submit always persists 0.
+// DEPARTURE FLOOR: dateStart < day(delegation.departureAt) ⇒ 422
+// `CLAIM_DATE_BEFORE_DEPARTURE` (single-code envelope + `extensions.minDateStart`).
+// Нельзя выехать раньше, чем сам заявил при zgłoszeniu; позже — можно.
+// DEADLINE: правило `max_days_after_unloading` считается от
+// `delegation.actualReturnAt` (факт weryfikatora), а НЕ от введённого dateEnd —
+// иначе опоздавший вписал бы дату посвежее и прошёл бы мимо срока.
 // OWNERSHIP: @CarrierOwns('delegationId','body','delegationId') — the outing
 // must belong to the authenticated carrier (delegation.carrierId === carrier).
 // STATUS GATE (§0‴): the outing MUST be in status `zjechal` (both actual
@@ -680,32 +690,36 @@ type ClaimDto = {
 
 // POST /claims/preview (new-claim form) and POST /claims/:nrZgl/preview
 // (reklamacja / verifier inspection). Two callers, two shapes:
-//   • new-claim (delegation path): { delegationId, hoursAdjusted? } — the api
-//     derives period + times + vehicle/trailer/driver + mileage from the outing.
-//     timeFrom/timeTo may be sent but are IGNORED here (derived from the outing).
+//   • new-claim (delegation path): { delegationId, dateStart, dateEnd, timeFrom,
+//     timeTo, mileage, hoursAdjusted? } — ⚠️ РАЗВОРОТ 2026-07-30: превью считает
+//     ровно то, что перевозчик ввёл (иначе панель и submit разошлись бы).
+//     `delegationId` здесь нужен, чтобы прогнать те же гейты, что и submit
+//     (ownership / `zjechal` / уже-заявлен / гарантия) до того, как перевозчик
+//     дозаполнит форму. Vehicle/trailer/driver по-прежнему деривируются.
 //   • existing/verifier: { vehicleId?, dateStart?, dateEnd?, timeFrom?, timeTo?,
 //     hoursAdjusted?, mileage? } — caller-supplied dates drive the math; the
 //     existing claim already carries vehicle/trailer/driver context.
-// On the CARRIER paths (delegationId present, or a `przewoznik` reklamacja
-// inspection) `mileage` AND `timeFrom`/`timeTo` are IGNORED — mileage is always
-// the daily-km sum (Phase 7 §0″ finish, "no carrier override"), the time-window
-// is always derived from the delegation's actual departure/return. A VERIFIER
+// На пути `przewoznik`-инспекции СУЩЕСТВУЮЩЕГО wniosku (без `delegationId`)
+// `mileage`/`timeFrom`/`timeTo` по-прежнему IGNORED — показываются
+// сохранённые значения заявления (менять их — это reklamacja). A VERIFIER
 // (`pracownik`/`admin`) on `POST /claims/:nrZgl/preview` MAY send `mileage` (and
 // `timeFrom`/`timeTo`) to override so the ClaimModal's live dopłata / RecalcBadge
 // / accept-gate / auto-populated `amountApproved` track an un-saved edit before
 // PATCH commits — mirrors the PATCH correction fields `UpdateClaimCorrectionFields.*`.
 type PreviewRequest = {
-  delegationId?: string;   // new-claim path → derive everything from the outing
+  delegationId?: string;   // new-claim path → gates + vehicle/trailer/driver
   vehicleId?: string;      // existing/verifier path → vehicle for the km sum
-  dateStart?: string;      // existing/verifier path (omit on the delegation path)
+  dateStart?: string;      // required on the new-claim path (carrier-declared)
   dateEnd?: string;
-  timeFrom?: string;       // HH:MM — verifier path only (IGNORED on delegation path)
-  timeTo?: string;         // HH:MM — verifier path only (IGNORED on delegation path)
+  timeFrom?: string;       // HH:MM — carrier-declared (new-claim) / verifier edit
+  timeTo?: string;         // HH:MM — carrier-declared (new-claim) / verifier edit
   hoursAdjusted?: number;  // verifier inspection only; default 0
   mileage?: number;        // VERIFIER inspection override only (see note above)
 };
 type PreviewResponse = {
-  mileage: number;            // Σ VehicleDailyKm.km (state=drove) over the period
+  mileage: number;            // что было учтено в расчёте: заявленный перевозчиком
+                              // пробег (new-claim), правка верификатора или
+                              // сохранённый пробег заявления
   kmGuaranteed: number;
   kmDifference: number;
   paymentEur: number;

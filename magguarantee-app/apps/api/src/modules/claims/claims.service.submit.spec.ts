@@ -51,12 +51,16 @@ import type {
 import type { NrZglService } from './nr-zgl.service';
 
 /**
- * Phase 7 §0″ finish — the submit period AND vehicle/trailer/driver/mileage are
- * all DERIVED from the chosen outing. A `zjechal` delegation in the past
- * (`departureAt=2026-05-01`, `actualReturnAt=2026-05-10`) reproduces the legacy
- * `[2026-05-01, 2026-05-10]` period every test relied on. `carrierId`/
- * `vehicleId` match the owned fixtures; the `vehicle`/`trailer`/`driver`
- * relations + driver snapshot back the read-only context the service derives.
+ * REWORK 2026-07-30 — the carrier DECLARES the period, the time window and the
+ * mileage again; the outing supplies the vehicle/trailer/driver identity plus
+ * two anchors: `departureAt` (floor for the declared `dateStart`) and
+ * `actualReturnAt` (the submission-deadline anchor).
+ *
+ * The fixture keeps `departureAt=2026-05-01T06:30`, `actualReturnAt=2026-05-10`
+ * so `submitDto()` can declare the same `[2026-05-01, 2026-05-10]` period every
+ * test in this suite already relied on. `carrierId`/`vehicleId` match the owned
+ * fixtures; the `vehicle`/`trailer`/`driver` relations + driver snapshot back
+ * the read-only context the service still derives.
  */
 function makeDelegation(overrides: Partial<DelegationRow> = {}): DelegationRow {
   return {
@@ -130,6 +134,24 @@ function makeDelegationsRepo(
   return {
     findById: jest.fn(async (_id: string) => deleg),
   } as unknown as DelegationsRepository;
+}
+
+/**
+ * The carrier-declared body (REWORK 2026-07-30). Defaults reproduce the period,
+ * the time window and the mileage the suite used to get for free when they were
+ * derived from the outing / the daily-km board — so every pre-existing
+ * assertion about km-calc inputs and persisted values still holds.
+ */
+function submitDto(overrides: Partial<SubmitClaimDto> = {}): SubmitClaimDto {
+  return {
+    delegationId: 'deleg-1',
+    dateStart: '2026-05-01',
+    dateEnd: '2026-05-10',
+    timeFrom: '06:30',
+    timeTo: '16:45',
+    mileage: 8_000,
+    ...overrides,
+  };
 }
 
 // ─── Fixtures ────────────────────────────────────────────────
@@ -417,9 +439,7 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     const repoFake = makeRepo(null);
     const svc = makeService(repoFake, undefined, undefined, makeKmCalc({ totalDays: 0 }));
 
-    const dto: SubmitClaimDto = {
-      delegationId: 'deleg-1',
-    };
+    const dto: SubmitClaimDto = submitDto();
 
     let caught: unknown;
     try {
@@ -438,9 +458,7 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     const repoFake = makeRepo(null);
     const svc = makeService(repoFake, undefined, undefined, makeKmCalc({ totalDays: 9.99 }));
 
-    const dto: SubmitClaimDto = {
-      delegationId: 'deleg-1',
-    };
+    const dto: SubmitClaimDto = submitDto();
 
     let caught: unknown;
     try {
@@ -460,9 +478,7 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     const repoFake = makeRepo(null);
     const svc = makeService(repoFake, undefined, undefined, makeKmCalc({ totalDays: 10 }));
 
-    const dto: SubmitClaimDto = {
-      delegationId: 'deleg-1',
-    };
+    const dto: SubmitClaimDto = submitDto();
 
     const out = await svc.submit(makeAuth('przewoznik'), dto);
 
@@ -526,12 +542,10 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     });
     const svc = makeService(repoFake);
 
-    const dto: SubmitClaimDto = {
-      delegationId: 'deleg-1',
-      // The default km-calc mock yields `totalDays: 10` (>= threshold 10),
-      // so the tier-1 duration gate passes and the cooldown is the ONLY
-      // blocker the submit reaches. Mileage is the daily-km sum (default 8_000).
-    };
+    // The default km-calc mock yields `totalDays: 10` (>= threshold 10), so the
+    // tier-1 duration gate passes and the cooldown is the ONLY blocker the
+    // submit reaches.
+    const dto: SubmitClaimDto = submitDto();
 
     let caught: unknown;
     try {
@@ -562,9 +576,7 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     });
     const svc = makeService(repoFake);
 
-    const dto: SubmitClaimDto = {
-      delegationId: 'deleg-1',
-    };
+    const dto: SubmitClaimDto = submitDto();
 
     const out = await svc.submit(makeAuth('przewoznik'), dto);
 
@@ -591,8 +603,8 @@ describe('ClaimsService.submit — carrier submission gates', () => {
 
     try {
       const repoFake = makeRepo(null);
-      // The period is derived from the outing: departure 2026-05-22, actual
-      // return 2026-05-26 (= today in Warsaw, "tomorrow" in UTC).
+      // The outing only sets the anchors now: declared departure 2026-05-22
+      // (floor) and actual return 2026-05-26 (deadline anchor).
       const delegations = makeDelegationsRepo(
         makeDelegation({
           departureAt: new Date('2026-05-22T06:30:00.000Z'),
@@ -609,9 +621,12 @@ describe('ClaimsService.submit — carrier submission gates', () => {
         delegations,
       );
 
-      const dto: SubmitClaimDto = {
-        delegationId: 'deleg-1',
-      };
+      // The carrier declares the boundary date itself — that is the value the
+      // future-date gate must evaluate against Warsaw-today.
+      const dto: SubmitClaimDto = submitDto({
+        dateStart: '2026-05-22',
+        dateEnd: '2026-05-26',
+      });
 
       const out = await svc.submit(makeAuth('przewoznik'), dto);
 
@@ -632,9 +647,7 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     const repoFake = makeRepo(null);
     const svc = makeService(repoFake);
 
-    const dto: SubmitClaimDto = {
-      delegationId: 'deleg-1',
-    };
+    const dto: SubmitClaimDto = submitDto();
 
     const out = await svc.submit(makeAuth('przewoznik'), dto);
 
@@ -646,45 +659,37 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     expect(repoFake.findLastCalls).toEqual([{ vehicleId: 'v-1' }]);
   });
 
-  // ── mileage pre-fill from VehicleDailyKm (Phase 7 REWORK #3) ──
+  // ── carrier-declared mileage (REWORK 2026-07-30) ──────────
 
-  it('7. mileage is ALWAYS Σ VehicleDailyKm.km (state=drove) over the derived [from, to] of the outing vehicle', async () => {
+  it('7. mileage is the CARRIER-DECLARED value; the daily-km board is not consulted', async () => {
     const repoFake = makeRepo(null);
-    const { repo: dailyKm, sumSpy } = makeDailyKmRepo(8_000);
+    // Board sum deliberately DIFFERENT from the declared mileage: the two come
+    // from different external systems and never agree — that divergence is the
+    // whole reason the carrier declares its own number now.
+    const { repo: dailyKm, sumSpy } = makeDailyKmRepo(6_123);
     const svc = makeService(repoFake, undefined, undefined, undefined, dailyKm);
 
-    // Phase 7 §0″ finish — the carrier never sends `mileage`; it is derived
-    // from the daily-km sum over the period of the OUTING's vehicle.
-    const dto: SubmitClaimDto = {
-      delegationId: 'deleg-1',
-    };
+    const dto: SubmitClaimDto = submitDto({ mileage: 8_000 });
 
     const out = await svc.submit(makeAuth('przewoznik'), dto);
 
     expect(out.nrZgl).toBe('GWA/100/05/26');
     expect(repoFake.creates).toHaveLength(1);
-    // The persisted mileage equals the daily-km sum, not a body value.
+    // Persisted verbatim, both in the working column and the carrier snapshot.
     expect(repoFake.creates[0]!.data.mileage).toBe(8_000);
     expect(repoFake.creates[0]!.data.origMileage).toBe(8_000);
-    // The sum query uses [dateStart, dateEnd + 1 day) (inclusive end) for the
-    // OUTING's vehicleId (`v-1`), over the derived period [2026-05-01, 2026-05-10].
-    expect(sumSpy).toHaveBeenCalledTimes(1);
-    const [vehicleId, from, toExclusive] = sumSpy.mock.calls[0]!;
-    expect(vehicleId).toBe('v-1');
-    expect((from as Date).toISOString()).toBe('2026-05-01T00:00:00.000Z');
-    expect((toExclusive as Date).toISOString()).toBe('2026-05-11T00:00:00.000Z');
+    // The board is the weryfikator's reference for `pracownik`, NOT an input to
+    // submit — submit must not even read it.
+    expect(sumSpy).not.toHaveBeenCalled();
   });
 
-  it('8. a daily-km sum of 0 over the period → 422 (mileage must be > 0)', async () => {
-    // There is no carrier override anymore. If the daily-km data sums to 0 the
-    // claim is correctly rejected by the tier-1 `mileage > 0` gate.
+  it('8. a declared mileage of 0 → 422 (mileage must be > 0)', async () => {
+    // The one sanity rule left on the carrier's number (plus the km/day cap in
+    // tier 2). Everything else is the `pracownik` verification step's job.
     const repoFake = makeRepo(null);
-    const { repo: dailyKm } = makeDailyKmRepo(0);
-    const svc = makeService(repoFake, undefined, undefined, undefined, dailyKm);
+    const svc = makeService(repoFake);
 
-    const dto: SubmitClaimDto = {
-      delegationId: 'deleg-1',
-    };
+    const dto: SubmitClaimDto = submitDto({ mileage: 0 });
 
     let caught: unknown;
     try {
@@ -704,9 +709,7 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     const repoFake = makeRepo(null);
     const svc = makeService(repoFake);
 
-    const dto: SubmitClaimDto = {
-      delegationId: 'deleg-1',
-    };
+    const dto: SubmitClaimDto = submitDto();
 
     await svc.submit(makeAuth('przewoznik'), dto);
     expect(repoFake.creates).toHaveLength(1);
@@ -717,7 +720,7 @@ describe('ClaimsService.submit — carrier submission gates', () => {
   });
 });
 
-// ─── delegation link + period derivation (Phase 7 REWORK #4) ──
+// ─── delegation link + carrier-declared facts (REWORK 2026-07-30) ──
 
 describe('ClaimsService.submit — delegation link', () => {
   beforeAll(() => {
@@ -727,26 +730,24 @@ describe('ClaimsService.submit — delegation link', () => {
     jest.useRealTimers();
   });
 
-  const dto: SubmitClaimDto = {
-    delegationId: 'deleg-1',
-  };
+  const dto: SubmitClaimDto = submitDto();
 
-  it('derives the period from the outing (dateStart=departureDay, dateEnd=actualReturnAt) and links delegationId', async () => {
+  it('persists the CARRIER-DECLARED period verbatim and links delegationId', async () => {
     const repoFake = makeRepo(null);
     const svc = makeService(repoFake);
     await svc.submit(makeAuth('przewoznik'), dto);
     expect(repoFake.creates).toHaveLength(1);
     const data = repoFake.creates[0]!.data;
-    // departureAt 2026-05-01T06:30 → date 2026-05-01; actualReturnAt 2026-05-10.
     expect(data.dateStart.toISOString()).toBe('2026-05-01T00:00:00.000Z');
     expect(data.dateEnd.toISOString()).toBe('2026-05-10T00:00:00.000Z');
     expect(data.delegationId).toBe('deleg-1');
   });
 
-  it('derives dateStart from actualDepartureAt when the weryfikator captured one (overrides departureAt)', async () => {
+  it('ignores the weryfikator actual departure — the declared dateStart wins', async () => {
     const repoFake = makeRepo(null);
-    // Weryfikator captured a later actual start (2026-05-03) than the reported
-    // departure day (2026-05-01) → the guarantee period starts on the actual day.
+    // Weryfikator recorded a later actual start (2026-05-03) than the carrier
+    // declares (2026-05-01). The two systems disagree by design; the claim
+    // records the CARRIER's figure and `pracownik` reconciles them later.
     const delegations = makeDelegationsRepo(
       makeDelegation({
         actualDepartureAt: new Date('2026-05-03T00:00:00.000Z'),
@@ -762,16 +763,13 @@ describe('ClaimsService.submit — delegation link', () => {
     );
     await svc.submit(makeAuth('przewoznik'), dto);
     const data = repoFake.creates[0]!.data;
-    // dateStart follows actualDepartureAt (2026-05-03), NOT departureAt.
-    expect(data.dateStart.toISOString()).toBe('2026-05-03T00:00:00.000Z');
-    // dateEnd unaffected (still actualReturnAt 2026-05-10).
+    expect(data.dateStart.toISOString()).toBe('2026-05-01T00:00:00.000Z');
     expect(data.dateEnd.toISOString()).toBe('2026-05-10T00:00:00.000Z');
   });
 
-  it('derives the claim time window (HH:mm) from the outing actual departure/return datetimes', async () => {
-    // The carrier no longer supplies a time window — `timeFrom` is the wall-clock
-    // of the actual departure, `timeTo` of the actual return.
+  it('persists the carrier-declared time window into both the working and the snapshot columns', async () => {
     const repoFake = makeRepo(null);
+    // The outing's actual datetimes say something else entirely — irrelevant.
     const delegations = makeDelegationsRepo(
       makeDelegation({
         actualDepartureAt: new Date('2026-05-01T07:15:00.000Z'),
@@ -786,13 +784,125 @@ describe('ClaimsService.submit — delegation link', () => {
       undefined,
       delegations,
     );
-    await svc.submit(makeAuth('przewoznik'), dto);
+    await svc.submit(
+      makeAuth('przewoznik'),
+      submitDto({ timeFrom: '05:00', timeTo: '21:30' }),
+    );
     const data = repoFake.creates[0]!.data;
-    expect(data.timeFrom).toBe('07:15');
-    expect(data.timeTo).toBe('19:40');
-    // …and the immutable carrier snapshot carries the same derived values.
-    expect(data.origTimeFrom).toBe('07:15');
-    expect(data.origTimeTo).toBe('19:40');
+    expect(data.timeFrom).toBe('05:00');
+    expect(data.timeTo).toBe('21:30');
+    // The immutable snapshot is what makes the ClaimModal's «deklaracja vs
+    // weryfikacja» pair meaningful — it must capture the SAME declared values.
+    expect(data.origTimeFrom).toBe('05:00');
+    expect(data.origTimeTo).toBe('21:30');
+  });
+
+  // ── departure floor (REWORK 2026-07-30) ──────────────────
+
+  it('rejects a dateStart EARLIER than the declared departure — 422 CLAIM_DATE_BEFORE_DEPARTURE', async () => {
+    const repoFake = makeRepo(null);
+    const svc = makeService(repoFake);
+
+    // Outing declares departureAt 2026-05-01; the carrier claims it loaded on
+    // 2026-04-30 — impossible, nobody leaves before they said they would.
+    let caught: unknown;
+    try {
+      await svc.submit(
+        makeAuth('przewoznik'),
+        submitDto({ dateStart: '2026-04-30' }),
+      );
+    } catch (e) {
+      caught = e;
+    }
+    const v = readViolation(caught);
+    expect(v).not.toBeNull();
+    expect(v!.extensions?.code).toBe('CLAIM_DATE_BEFORE_DEPARTURE');
+    // The floor is echoed so the form can pin the date input's `min`.
+    expect(v!.extensions?.minDateStart).toBe('2026-05-01');
+    expect(repoFake.creates).toHaveLength(0);
+  });
+
+  it('accepts a dateStart LATER than the declared departure (delays are legitimate)', async () => {
+    const repoFake = makeRepo(null);
+    const svc = makeService(repoFake);
+
+    await svc.submit(
+      makeAuth('przewoznik'),
+      submitDto({ dateStart: '2026-05-04' }),
+    );
+    expect(repoFake.creates).toHaveLength(1);
+    expect(repoFake.creates[0]!.data.dateStart.toISOString()).toBe(
+      '2026-05-04T00:00:00.000Z',
+    );
+  });
+
+  it('accepts a dateStart EQUAL to the declared departure day (boundary inclusive)', async () => {
+    const repoFake = makeRepo(null);
+    const svc = makeService(repoFake);
+
+    await svc.submit(
+      makeAuth('przewoznik'),
+      submitDto({ dateStart: '2026-05-01' }),
+    );
+    expect(repoFake.creates).toHaveLength(1);
+  });
+
+  // ── deadline anchor (REWORK 2026-07-30) ──────────────────
+
+  it('measures the submission deadline from actualReturnAt, NOT from the declared dateEnd', async () => {
+    // The regression this pins: with the deadline anchored on the carrier-typed
+    // `dateEnd`, anyone past the window would simply type a fresher unloading
+    // date and walk through. The truck actually returned 2026-04-20 — 25 days
+    // before NOW (2026-05-15), far past the 7-day window — while the carrier
+    // declares a comfortable 2026-05-10. It must still be rejected.
+    const repoFake = makeRepo(null);
+    const delegations = makeDelegationsRepo(
+      makeDelegation({
+        departureAt: new Date('2026-04-10T06:30:00.000Z'),
+        actualReturnAt: new Date('2026-04-20T16:45:00.000Z'),
+      }),
+    );
+    const svc = makeService(
+      repoFake,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      delegations,
+    );
+
+    let caught: unknown;
+    try {
+      await svc.submit(
+        makeAuth('przewoznik'),
+        submitDto({ dateStart: '2026-04-10', dateEnd: '2026-05-10' }),
+      );
+    } catch (e) {
+      caught = e;
+    }
+    const v = readViolation(caught);
+    expect(v).not.toBeNull();
+    expect(
+      v!.violations.some((m) => /Termin na złożenie wniosku minął/.test(m)),
+    ).toBe(true);
+    expect(repoFake.creates).toHaveLength(0);
+  });
+
+  it('accepts a declared dateEnd LATER than the actual return (customer decision: not blocked)', async () => {
+    // A truck can come back days after the weryfikator's recorded return, and
+    // the carrier may legitimately claim through that date. No gate here — the
+    // `pracownik` verification step owns this judgement.
+    const repoFake = makeRepo(null);
+    const svc = makeService(repoFake);
+
+    await svc.submit(
+      makeAuth('przewoznik'),
+      submitDto({ dateEnd: '2026-05-14' }),
+    );
+    expect(repoFake.creates).toHaveLength(1);
+    expect(repoFake.creates[0]!.data.dateEnd.toISOString()).toBe(
+      '2026-05-14T00:00:00.000Z',
+    );
   });
 
   it('rejects an outing still w_trasie (only a zjechal outing may back a wniosek) — 422, no write', async () => {

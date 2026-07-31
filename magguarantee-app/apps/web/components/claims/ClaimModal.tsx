@@ -1223,6 +1223,26 @@ function FactPairs({
     mileage: claim.origMileage ?? claim.mileage,
   };
 
+  // Weryfikator sources (REWORK 2026-07-30) — the actual departure/return the
+  // weryfikator recorded on the outing plus the daily-km board sum over that
+  // window. `undefined` per field ⇒ that column is dropped from the row (no
+  // linked outing, an outing without both actual datetimes, or no board data).
+  //
+  // Since the carrier now declares its own figures and the two systems draw on
+  // different sources, this side-by-side IS the verification task: the
+  // pracownik sees at a glance where the declaration and the recorded trip
+  // disagree, and decides.
+  const weryfikator = {
+    dateStart: claim.delegationActualDepartureAt ?? undefined,
+    dateEnd: claim.delegationActualReturnAt ?? undefined,
+    timeFrom: hhMmFromIso(claim.delegationActualDepartureAt),
+    timeTo: hhMmFromIso(claim.delegationActualReturnAt),
+    mileage: claim.verifierMileage ?? undefined,
+  };
+  const showWeryfikatorColumn = Object.values(weryfikator).some(
+    (v) => v !== undefined,
+  );
+
   return (
     <section className="space-y-3">
       {/* §6.5.13 Tier B — ONE block-level notice above the headers, never N
@@ -1247,16 +1267,32 @@ function FactPairs({
         aria-disabled={isLocked || undefined}
         className="space-y-3"
       >
-        {/* Two-column section headers — verifier column only labelled in edit. */}
+        {/* Section headers — two columns, or three once the weryfikator's own
+            figures are available (REWORK 2026-07-30). Verifier column is only
+            labelled in edit mode. */}
         <div
           className={cn(
             'grid gap-x-4',
-            isEdit ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1',
+            isEdit
+              ? showWeryfikatorColumn
+                ? 'grid-cols-1 md:grid-cols-3'
+                : 'grid-cols-1 md:grid-cols-2'
+              : 'grid-cols-1',
           )}
         >
           <h3 className="text-xs font-bold uppercase tracking-wider text-text-sub">
             {tUnified('declaredHeader')}
           </h3>
+          {isEdit && showWeryfikatorColumn && (
+            <div className="hidden md:block">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-text-sub">
+                {tUnified('weryfikatorHeader')}
+              </h3>
+              <p className="text-xs text-text-sub font-normal normal-case tracking-normal">
+                {tUnified('weryfikatorHint')}
+              </p>
+            </div>
+          )}
           {isEdit && (
             <div className="hidden md:block">
               <h3 className="text-xs font-bold uppercase tracking-wider text-text-sub">
@@ -1276,6 +1312,10 @@ function FactPairs({
             isEdit={isEdit}
             declaredCaption={tUnified('declaredCaption')}
             declaredText={formatDateFull(declared.dateStart)}
+            weryfikatorText={
+              weryfikator.dateStart ? formatDateFull(weryfikator.dateStart) : undefined
+            }
+            weryfikatorCaption={tUnified('weryfikatorCaption')}
             verifierDisplay={formatDateFull(claim.dateStart)}
             input={(() => {
               // Merge RHF's `ref` with `firstInputRef` so enter-edit focus
@@ -1302,6 +1342,10 @@ function FactPairs({
             isEdit={isEdit}
             declaredCaption={tUnified('declaredCaption')}
             declaredText={formatDateFull(declared.dateEnd)}
+            weryfikatorText={
+              weryfikator.dateEnd ? formatDateFull(weryfikator.dateEnd) : undefined
+            }
+            weryfikatorCaption={tUnified('weryfikatorCaption')}
             verifierDisplay={formatDateFull(claim.dateEnd)}
             input={
               <Input
@@ -1319,6 +1363,8 @@ function FactPairs({
             isEdit={isEdit}
             declaredCaption={tUnified('declaredCaption')}
             declaredText={declared.timeFrom}
+            weryfikatorText={weryfikator.timeFrom}
+            weryfikatorCaption={tUnified('weryfikatorCaption')}
             verifierDisplay={claim.timeFrom}
             input={
               <Input
@@ -1336,6 +1382,8 @@ function FactPairs({
             isEdit={isEdit}
             declaredCaption={tUnified('declaredCaption')}
             declaredText={declared.timeTo}
+            weryfikatorText={weryfikator.timeTo}
+            weryfikatorCaption={tUnified('weryfikatorCaption')}
             verifierDisplay={claim.timeTo}
             input={
               <Input
@@ -1353,6 +1401,12 @@ function FactPairs({
             isEdit={isEdit}
             declaredCaption={tUnified('declaredCaption')}
             declaredText={`${Math.round(declared.mileage).toLocaleString('pl-PL')} km`}
+            weryfikatorText={
+              weryfikator.mileage !== undefined
+                ? `${Math.round(weryfikator.mileage).toLocaleString('pl-PL')} km`
+                : undefined
+            }
+            weryfikatorCaption={tUnified('weryfikatorCaption')}
             declaredNumeric
             verifierDisplay={`${Math.round(claim.mileage).toLocaleString('pl-PL')} km`}
             input={
@@ -1426,6 +1480,8 @@ function FactPairRow({
   declaredCaption,
   declaredText,
   declaredNumeric = false,
+  weryfikatorText,
+  weryfikatorCaption,
   verifierDisplay,
   input,
   error,
@@ -1436,12 +1492,26 @@ function FactPairRow({
   declaredCaption: string;
   declaredText: string;
   declaredNumeric?: boolean;
+  /**
+   * The weryfikator's own figure for this fact (REWORK 2026-07-30). `undefined`
+   * ⇒ the column is not rendered at all (no linked outing / no board data), so
+   * the row silently falls back to the historical two-column layout.
+   *
+   * The two systems disagree by design — the carrier is paid on SpedTrans
+   * mileage while these come from elsewhere — so a difference is INFORMATION,
+   * not an error: it is highlighted, never flagged as invalid.
+   */
+  weryfikatorText?: string;
+  weryfikatorCaption: string;
   verifierDisplay: string;
   input: React.ReactNode;
   error?: string;
   /** Optional slot rendered under the verifier input (edit mode only). */
   extra?: React.ReactNode;
 }) {
+  const hasWeryfikator = weryfikatorText !== undefined;
+  const differs = hasWeryfikator && weryfikatorText !== declaredText;
+
   if (!isEdit) {
     // View mode — single static row (the saved checked value).
     return (
@@ -1458,9 +1528,14 @@ function FactPairRow({
     );
   }
 
-  // Edit mode — declared (muted) + verifier input pair.
+  // Edit mode — declared (muted) [+ weryfikator (muted)] + verifier input.
   return (
-    <div className="grid grid-cols-1 gap-x-4 gap-y-1.5 md:grid-cols-2">
+    <div
+      className={cn(
+        'grid grid-cols-1 gap-x-4 gap-y-1.5',
+        hasWeryfikator ? 'md:grid-cols-3' : 'md:grid-cols-2',
+      )}
+    >
       {/* Declared (muted, read-only — reference, no lock icon) */}
       <div className="flex flex-col gap-1">
         <span className="text-[11px] font-medium uppercase tracking-wider text-text-sub">
@@ -1477,6 +1552,29 @@ function FactPairRow({
           {declaredText}
         </div>
       </div>
+      {/* Weryfikator's own figure — reference only, never an input. A value
+          that differs from the declaration is what the pracownik is here to
+          look at, so it is tinted (warning tone, no icon, no error role). */}
+      {hasWeryfikator && (
+        <div className="flex flex-col gap-1">
+          <span className="text-[11px] font-medium uppercase tracking-wider text-text-sub md:invisible md:select-none">
+            {label}
+          </span>
+          <div
+            className={cn(
+              'flex h-10 w-full items-center rounded-[10px] border px-3.5 text-[14px]',
+              declaredNumeric && 'tabular-nums',
+              differs
+                ? 'border-warning/40 bg-warning/10 font-semibold text-warning-dark dark:text-warning'
+                : 'border-border bg-input/40 text-text-sub',
+            )}
+            aria-readonly="true"
+            title={weryfikatorCaption}
+          >
+            {weryfikatorText}
+          </div>
+        </div>
+      )}
       {/* Verifier input */}
       <div className="flex flex-col gap-1">
         <span className="text-[11px] font-medium uppercase tracking-wider text-text-sub md:invisible md:select-none">
@@ -2359,6 +2457,16 @@ function DiffRow({
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Wall-clock `HH:mm` of an ISO datetime, read straight off the `T`-part — the
+ * SAME slice the api uses when it stores a claim's time window, so a
+ * weryfikator figure and a carrier declaration are always compared in the same
+ * clock. `null`/`undefined` in ⇒ `undefined` out (column dropped).
+ */
+function hhMmFromIso(iso: string | null | undefined): string | undefined {
+  return iso ? iso.slice(11, 16) : undefined;
+}
 
 function getDefaults(claim: ClaimDto): FormValues {
   return {

@@ -1153,7 +1153,10 @@
           "terminalState": "The claim is in a terminal state — no decisions available.",
           "guaranteeMetHint": "Guarantee met — the claim can only be rejected.",
           "progExceededHint": "Payout will exceed the authorization threshold ({prog} for {days, plural, one {# day} other {# days}} on the road) — once you save the verification the claim will automatically move to \"Awaiting authorization\".",
-          "verifiedBadge": "Verified {date} by {name}"
+          "verifiedBadge": "Verified {date} by {name}",
+          "weryfikatorHeader": "Verifier data",
+          "weryfikatorHint": "From the outing and the km board — for comparison.",
+          "weryfikatorCaption": "Figures recorded by the weryfikator"
         },
         "maksimGate": {
           "bannerTitle": "Awaiting authorization",
@@ -1636,15 +1639,16 @@
         "timeTo": "Time to",
         "sectionValues": "Values",
         "mileage": "Mileage (km)",
-        "mileageReadOnlyHint": "Computed from the trip's daily km — read-only.",
-        "mileageReadOnlyPlaceholder": "— computed from the trip",
         "addComment": "Add comment",
         "comment": "Comment",
         "violationDateEndInFuture": "Unload date ({date}) is in the future. The claim can be submitted only after the vehicle is back.",
         "violationDateStartInFuture": "Load date ({date}) is in the future.",
         "violationDateOrder": "Unload date must be on or after the load date.",
         "violationDeadline": "Submission deadline has passed. Per the contract you have {maxDays} days after the unload date (already elapsed: {elapsed} days).",
-        "violationPeriodTooLong": "The claim period cannot exceed {maxDays} days (given: {periodDays} days)."
+        "violationPeriodTooLong": "The claim period cannot exceed {maxDays} days (given: {periodDays} days).",
+        "dateStartHint": "Not earlier than the reported departure date ({date}).",
+        "mileageHint": "Mileage as recorded in SpedTrans.",
+        "violationDateStartBeforeDeparture": "The loading date cannot be earlier than the reported departure date ({date})."
       },
       "status": {
         "NA_WERYFIKACJI": "Verifying",
@@ -1661,8 +1665,6 @@
         "loading": "Loading trips…",
         "empty": "No trips available to file a claim against. A claim can be filed once a vehicle is marked “returned”.",
         "selectedStatus": "Selected trip status:",
-        "derivedPeriod": "Period (from the trip)",
-        "derivedTimes": "Hours (from the trip)",
         "noGuaranteeMarker": "(no guarantee)"
       },
       "noGuarantee": {

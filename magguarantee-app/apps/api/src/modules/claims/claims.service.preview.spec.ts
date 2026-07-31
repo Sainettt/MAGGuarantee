@@ -646,9 +646,10 @@ describe('ClaimsService.previewForExisting — verifier mileage override', () =>
     expect(dailyKm.sumDroveKm).not.toHaveBeenCalled();
   });
 
-  it('przewoznik supplying mileage → override IGNORED, daily-km sum used', async () => {
-    // The carrier reklamacja-inspection path must NOT be able to override
-    // mileage — the "no carrier override" invariant from Phase 7 §0″ stands.
+  it('przewoznik supplying mileage → override IGNORED, the claim\'s own mileage used', async () => {
+    // A carrier inspecting a SUBMITTED claim cannot re-price it by sending a
+    // different mileage: the figure it declared at submit is what the preview
+    // shows. (Changing the number is what a reklamacja is for.)
     const carrier = makeCarrier();
     const seeded = makeClaim({ carrierId: carrier.id });
     const claimsRepo = makeClaimsRepo([seeded]);
@@ -670,13 +671,14 @@ describe('ClaimsService.previewForExisting — verifier mileage override', () =>
       OVERRIDE_DTO,
     );
 
-    // Override dropped — mileage is the daily-km sum (8_000), NOT 5_000.
+    // Override dropped — mileage is the claim's persisted 8_000, NOT 5_000.
     expect(out.mileage).toBe(8_000);
     // kmDifference = 10_800 - 8_000 = 2_800 → paymentEur = 1_400.
     expect(out.kmDifference).toBe(2_800);
     expect(out.paymentEur).toBe(1_400);
-    // The sum WAS consulted (the override was ignored).
-    expect(dailyKm.sumDroveKm).toHaveBeenCalledTimes(1);
+    // The daily-km board is the weryfikator's reference, never a claim's
+    // mileage source (REWORK 2026-07-30) — it must not be read here.
+    expect(dailyKm.sumDroveKm).not.toHaveBeenCalled();
   });
 });
 
@@ -757,7 +759,7 @@ describe('ClaimsService.previewForExisting — verifier time override (live-reca
   });
 });
 
-describe('ClaimsService.previewKmCalc — delegation path ignores caller times', () => {
+describe('ClaimsService.previewKmCalc — carrier path prices the declared facts', () => {
   beforeAll(() => {
     jest.useFakeTimers().setSystemTime(NOW);
   });
@@ -765,7 +767,9 @@ describe('ClaimsService.previewKmCalc — delegation path ignores caller times',
     jest.useRealTimers();
   });
 
-  it('carrier smuggling timeFrom/timeTo into the delegation body → ignored, outing-derived times win (response + km-calc)', async () => {
+  it('prices the carrier-declared time window (response + km-calc), not the outing actuals', async () => {
+    // REWORK 2026-07-30 — the live preview must show what submit will persist,
+    // and submit persists what the carrier typed.
     const carrier = makeCarrier();
     const km = makeKmCalcService();
     const svc = makeService(
@@ -779,42 +783,31 @@ describe('ClaimsService.previewKmCalc — delegation path ignores caller times',
     const dto: PreviewClaimDto = {
       delegationId: 'deleg-1',
       hoursAdjusted: 0,
-      // Smuggled — must be dropped on the delegation-derived path.
+      dateStart: '2026-04-01',
+      dateEnd: '2026-04-20',
+      // The outing's actuals say 06:30 / 14:30 — the carrier says otherwise.
       timeFrom: '23:00',
       timeTo: '23:59',
+      mileage: 8_000,
     };
     const out = await svc.previewKmCalc(
       makeAuth('przewoznik', carrier.userId),
       dto,
     );
-    // Response surfaces the outing-derived window (06:30 fallback / 14:30 actual
-    // return), NOT the smuggled values.
-    expect(out.timeFrom).toBe('06:30');
-    expect(out.timeTo).toBe('14:30');
-    // …and km-calc was fed the derived times, not the smuggled ones.
+    expect(out.timeFrom).toBe('23:00');
+    expect(out.timeTo).toBe('23:59');
     const input = km.calls[0]!.input as { timeFrom: string; timeTo: string };
-    expect(input.timeFrom).toBe('06:30');
-    expect(input.timeTo).toBe('14:30');
-  });
-});
-
-describe('ClaimsService.previewKmCalc — delegation-derived path ignores mileage', () => {
-  beforeAll(() => {
-    jest.useFakeTimers().setSystemTime(NOW);
-  });
-  afterAll(() => {
-    jest.useRealTimers();
+    expect(input.timeFrom).toBe('23:00');
+    expect(input.timeTo).toBe('23:59');
   });
 
-  it('carrier new-claim preview with a body `mileage` → override ignored, outing sum used', async () => {
-    // Even if a `mileage` slips into the delegation-derived body, the api must
-    // ALWAYS compute the daily-km sum for the outing's vehicle (`ctx != null` ⇒
-    // override never consulted). Guards against a carrier smuggling a mileage in.
+  it('prices the carrier-declared mileage; the daily-km board is not consulted', async () => {
     const carrier = makeCarrier();
     const claimsRepo = makeClaimsRepo([]);
     const carriersRepo = makeCarriersRepo([carrier]);
     const vehiclesRepo = makeVehiclesRepo([]);
     const km = makeKmCalcService();
+    // Board says 8_000 — deliberately different from what the carrier declares.
     const dailyKm = makeDailyKmRepo(8_000);
     const delegations = makeDelegationsRepo(makeDelegationForPreview(true));
     const svc = makeService(
@@ -829,8 +822,11 @@ describe('ClaimsService.previewKmCalc — delegation-derived path ignores mileag
     const dto: PreviewClaimDto = {
       delegationId: 'deleg-1',
       hoursAdjusted: 0,
-      // Smuggled override — must be dropped on the delegation-derived path.
-      mileage: 1,
+      dateStart: '2026-04-01',
+      dateEnd: '2026-04-20',
+      timeFrom: '06:30',
+      timeTo: '14:30',
+      mileage: 5_000,
     };
 
     const out = await svc.previewKmCalc(
@@ -838,10 +834,10 @@ describe('ClaimsService.previewKmCalc — delegation-derived path ignores mileag
       dto,
     );
 
-    // Mileage is the outing's daily-km sum (8_000), NOT the smuggled `1`.
-    expect(out.mileage).toBe(8_000);
-    expect(out.paymentEur).toBe(1_400);
-    expect(dailyKm.sumDroveKm).toHaveBeenCalledTimes(1);
+    // kmDifference = 10_800 - 5_000 = 5_800 → paymentEur = 2_900.
+    expect(out.mileage).toBe(5_000);
+    expect(out.paymentEur).toBe(2_900);
+    expect(dailyKm.sumDroveKm).not.toHaveBeenCalled();
   });
 });
 
@@ -853,11 +849,16 @@ describe('ClaimsService.previewKmCalc — guarantee gate (delegation-derived pat
     jest.useRealTimers();
   });
 
-  // The carrier new-claim preview sends `delegationId` (no vehicleId/dates) and
-  // hits `_resolveDelegationContext`, where the guarantee gate fires.
+  // The carrier new-claim preview sends `delegationId` + its own declared facts
+  // and hits `_resolveDelegationContext`, where the guarantee gate fires.
   const DELEGATION_PREVIEW_DTO: PreviewClaimDto = {
     delegationId: 'deleg-1',
     hoursAdjusted: 0,
+    dateStart: '2026-05-01',
+    dateEnd: '2026-05-10',
+    timeFrom: '06:30',
+    timeTo: '14:30',
+    mileage: 8_000,
   };
 
   // Reads the single-code 422 envelope thrown by the guarantee gate.
@@ -935,12 +936,11 @@ describe('ClaimsService.previewKmCalc — guarantee gate (delegation-derived pat
     expect(out.paymentEur).toBe(1_400);
   });
 
-  it('surfaces the read-only period + DERIVED time window from the outing', async () => {
-    // Carrier no longer types times — the delegation-derived preview returns the
-    // read-only `dateStart`/`dateEnd` AND `timeFrom`/`timeTo` (HH:mm of the
-    // outing's actual departure/return). Fixture: departureAt 06:30 (fallback,
-    // actualDepartureAt null) → timeFrom "06:30"; actualReturnAt 2026-05-10T14:30
-    // → dateEnd 2026-05-10, timeTo "14:30".
+  it('echoes back the priced period + time window and the derived vehicle context', async () => {
+    // REWORK 2026-07-30 — the period/time window in the response are now an
+    // ECHO of what the carrier sent (so the form can assert it is showing
+    // numbers for the values it typed). The vehicle/trailer/driver block is the
+    // part that is still genuinely derived from the outing.
     const { svc } = makeGateService(true);
     const out = await svc.previewKmCalc(
       makeAuth('przewoznik', makeCarrier().userId),

@@ -123,10 +123,6 @@ function datesWellOrdered(v: {
  *   outing (`Delegation.vehicleId` / `trailerId` / `driverId`, all NOT NULL).
  *   `vehiclePlateSnapshot` comes from `Delegation.vehicle.plateNumber`; the
  *   driver snapshots from the delegation's snapshot columns / driver relation.
- * - `mileage` (legacy `przebieg`) is **NOT** in the carrier submit body — it is
- *   ALWAYS `Σ VehicleDailyKm.km (state=drove)` over the derived period for the
- *   delegation's vehicle. There is no carrier override; `pracownik` revises it
- *   at verification.
  * - The requested amount is **NOT** in the carrier submit body — the service
  *   derives it from the km-calc `paymentEur` (rounded to 2 dp) and freezes that
  *   figure into `origPaymentEur`. Legacy GAS allowed a manual override; we
@@ -136,17 +132,40 @@ function datesWellOrdered(v: {
  *   always persists `0` in both `origHoursAdjusted` and `hoursAdjustedValue`.
  * - `plannerId`/`opiekunId` are derived server-side from the vehicle's planner
  *   and the carrier's opiekun — clients do not send them.
- * - `timeFrom` / `timeTo` are **NOT** in the carrier submit body — they are
- *   DERIVED server-side from the outing's actual times: `timeFrom` is the
- *   wall-clock `HH:mm` of `Delegation.actualDepartureAt` and `timeTo` of
- *   `Delegation.actualReturnAt` (the weryfikator captures both as full
- *   datetimes on the `w_trasie` / `zjechal` transitions). The carrier no longer
- *   supplies a time window; `pracownik` may still override it at verification
- *   (`VerifyClaimSchema` / `UpdateClaimCorrectionFields`). Both columns stay
- *   NOT NULL — submit always writes the derived values.
  * - `orderNumber` / `orderDate` are intentionally NOT in the submit DTO —
  *   they are MAGTRANS-internal and assigned by the verifier when transitioning
  *   to ZAAKCEPTOWANO. Carrier-side submit always persists NULL.
+ *
+ * ⚠️ REWORK 2026-07-30 — the carrier declares the FACTS again.
+ * ---------------------------------------------------------------------------
+ * Customer decision: `dateStart` / `dateEnd` / `timeFrom` / `timeTo` /
+ * `mileage` are back in the carrier body. They are NO LONGER derived from the
+ * outing's `actualDepartureAt` / `actualReturnAt` / the weryfikator's daily-km
+ * board. Rationale: the money follows the mileage recorded in SpedTrans, while
+ * the weryfikator's per-day km come from a different external system — the two
+ * sets never agree, so the carrier states its own claim and `pracownik`
+ * reconciles.
+ *
+ * What this does NOT change:
+ *  - the outing link (`delegationId`) stays REQUIRED and `@unique`;
+ *  - only a `zjechal` outing may back a wniosek;
+ *  - the weryfikator keeps recording the actual departure/return datetimes and
+ *    the daily-km board — those are now the REFERENCE `pracownik` compares
+ *    against (rendered side-by-side in the ClaimModal), not the source.
+ *
+ * Server-side rules the schema cannot express (see `ClaimsService.submit`):
+ *  - `dateStart >= day(Delegation.departureAt)` — the carrier may not claim a
+ *    departure EARLIER than the one it declared when reporting the outing
+ *    (422 `CLAIM_DATE_BEFORE_DEPARTURE`);
+ *  - the submission deadline (`max_days_after_unload`) is measured from
+ *    `Delegation.actualReturnAt` (the weryfikator's fact), NOT from the
+ *    carrier-typed `dateEnd` — otherwise a late carrier would simply type a
+ *    fresher date and walk past the deadline.
+ *
+ * Deliberately NOT constrained (customer decision): `dateEnd` may fall before
+ * or after the actual return (a truck can come back a day early or four days
+ * late), and `mileage` is free-form — no soft warning, no prefill. Catching a
+ * bad number is exactly what the `pracownik` verification step is for.
  */
 export const SubmitClaimSchema = z
   .object({
@@ -161,17 +180,33 @@ export const SubmitClaimSchema = z
      */
     delegationId: UuidSchema,
 
-    // `timeFrom` / `timeTo` are NO LONGER carrier-supplied — they are DERIVED
-    // server-side from the outing's `actualDepartureAt` / `actualReturnAt`
-    // wall-clock (see the schema doc above). The carrier submit body is now just
-    // the outing reference + optional comment/attachments.
+    /**
+     * Carrier-declared loading date (REWORK 2026-07-30). Floor-checked
+     * server-side against the outing's declared `departureAt`.
+     */
+    dateStart: IsoDateSchema,
+    /**
+     * Carrier-declared unloading date. Free relative to the outing's actual
+     * return — earlier and later are both legitimate.
+     */
+    dateEnd: IsoDateSchema,
+    /** Carrier-declared departure time. REQUIRED — the column is NOT NULL. */
+    timeFrom: HhMmSchema,
+    /** Carrier-declared return time. REQUIRED — the column is NOT NULL. */
+    timeTo: HhMmSchema,
+    /** Carrier-declared mileage for the period. Free-form; verifier revises. */
+    mileage: MileageSchema,
 
     comment: emptyStringToUndefined(z.string().max(2_000).optional()),
 
     /** Optional pre-uploaded attachment IDs (auth screenshot, photos, etc.). */
     attachmentIds: z.array(UuidSchema).max(20).optional(),
   })
-  .strict();
+  .strict()
+  .refine(datesWellOrdered, {
+    message: 'dateStart must be on or before dateEnd',
+    path: ['dateEnd'],
+  });
 export type SubmitClaimDto = z.infer<typeof SubmitClaimSchema>;
 
 // ─── Verify (pracownik verification checkpoint) ──────────
@@ -244,15 +279,15 @@ export type VerifyClaimDto = z.infer<typeof VerifyClaimSchema>;
 export const PreviewClaimSchema = z
   .object({
     /**
-     * Phase 7 REWORK (2026-06-20 #4, docs/20 §0″) — OPTIONAL on preview. When
-     * the carrier has picked an outing, the form sends `delegationId` and OMITS
-     * `dateStart`/`dateEnd`/`vehicleId`/`mileage`; the api derives the PERIOD,
-     * TIMES, VEHICLE, TRAILER, DRIVER, and MILEAGE from the outing (which must be
-     * `zjechal`) — any body `timeFrom`/`timeTo` here are IGNORED. When absent, the
-     * caller-supplied `dateStart`/`dateEnd` (+ optional `vehicleId`) drive the
-     * live preview (the existing-claim / verifier inspection path); a verifier may
-     * additionally supply `timeFrom`/`timeTo` to live-recalc an unsaved time edit,
-     * else the persisted claim's times are used.
+     * OPTIONAL on preview. Present on the carrier new-claim path — it identifies
+     * the outing so the api can run the SAME gates submit will (ownership,
+     * `zjechal`, not-already-claimed, guarantee, departure floor) and the caller
+     * learns about a blocker before typing the rest of the form.
+     *
+     * ⚠️ REWORK 2026-07-30: the outing no longer SUPPLIES the period, times or
+     * mileage — the carrier types those and sends them alongside `delegationId`
+     * (they are required on submit). Absent `delegationId` = the existing-claim
+     * / verifier inspection path, unchanged.
      */
     delegationId: emptyStringToUndefined(UuidSchema.optional()),
     /**
@@ -262,9 +297,10 @@ export const PreviewClaimSchema = z
      */
     vehicleId: emptyStringToUndefined(UuidSchema.optional()),
     /**
-     * OPTIONAL — required only when `delegationId` is absent (the api derives
-     * the period from the outing otherwise). The cross-field guard below still
-     * orders them when both are present.
+     * The period to price. Carrier-typed on the new-claim path (REWORK
+     * 2026-07-30), claim-persisted-or-verifier-edited on the inspection path.
+     * Optional so a half-filled form can still ping the endpoint; the api
+     * answers with a violation instead of a price when they are missing.
      */
     dateStart: emptyStringToUndefined(IsoDateSchema.optional()),
     dateEnd: emptyStringToUndefined(IsoDateSchema.optional()),
@@ -277,12 +313,11 @@ export const PreviewClaimSchema = z
      * `allowMileageOverride` gate). When omitted, the api falls back to the
      * persisted claim's `timeFrom`/`timeTo`.
      *
-     * The CARRIER new-claim path (`delegationId` present) ALWAYS IGNORES these —
-     * the times are DERIVED from the outing's `actualDepartureAt`/`actualReturnAt`
-     * (the carrier never influences the time window, not even in preview). A
-     * `przewoznik` reklamacja inspection likewise has them ignored. Kept optional
-     * so both callers share one wire shape. NOT part of `SubmitClaimSchema` — on
-     * submit the times are always outing-derived. Empty string → undefined.
+     * ⚠️ REWORK 2026-07-30: the CARRIER new-claim path now sends these too —
+     * the time window is carrier-declared again, so the live preview must price
+     * what the carrier typed. Only the `przewoznik` reklamacja-inspection path
+     * (existing claim, no `delegationId`) still falls back to the persisted
+     * times. Empty string → undefined.
      */
     timeFrom: emptyStringToUndefined(HhMmSchema.optional()),
     timeTo: emptyStringToUndefined(HhMmSchema.optional()),
@@ -295,13 +330,12 @@ export const PreviewClaimSchema = z
      * track a km edit before the PATCH commits — mirroring what the PATCH recalc
      * will persist (`UpdateClaimCorrectionFields.mileage`).
      *
-     * The CARRIER new-claim path (`delegationId` present, or `przewoznik`
-     * reklamacja inspection) IGNORES this field: mileage there is ALWAYS the
-     * daily-km sum — the "no carrier override" invariant from Phase 7 §0″ stands.
-     * The api enforces the gate (`allowMileageOverride` off the caller's role);
-     * the schema keeps it optional so both callers share one wire shape. Empty
-     * string → undefined (form-friendly) via the same preprocessor the sibling
-     * fields use — a cleared numeric input never reaches `.nonnegative()`.
+     * ⚠️ REWORK 2026-07-30: the CARRIER new-claim path (`delegationId` present)
+     * now sends its OWN mileage — the daily-km board is no longer the source,
+     * only the verifier's reference. The `przewoznik` reklamacja-inspection path
+     * (existing claim) still ignores it. Empty string → undefined (form-friendly)
+     * via the same preprocessor the sibling fields use — a cleared numeric input
+     * never reaches `.nonnegative()`.
      */
     mileage: emptyStringToUndefined(MileageSchema.optional()),
     hoursAdjusted: HoursAdjustedSchema.optional().default(0),
@@ -727,6 +761,29 @@ export const ClaimDtoSchema = z.object({
    */
   delegationPlannedReturnAt: IsoDateSchema.nullable(),
   delegationActualReturnAt: IsoDateTimeSchema.nullable(),
+  /**
+   * The outing's DECLARED departure (what the carrier reported when it
+   * registered the outing) and the weryfikator's RECORDED actual departure.
+   *
+   * Added by the REWORK 2026-07-30: now that the carrier declares the claim's
+   * period/times itself, `pracownik` needs the weryfikator's figures next to
+   * the carrier's to see where the two disagree — that comparison IS the
+   * verification job. `delegationDepartureAt` doubles as the floor the api
+   * enforces on `dateStart` (422 `CLAIM_DATE_BEFORE_DEPARTURE`).
+   */
+  delegationDepartureAt: IsoDateTimeSchema.nullable(),
+  delegationActualDepartureAt: IsoDateTimeSchema.nullable(),
+  /**
+   * Σ `VehicleDailyKm.km (state=drove)` over the weryfikator's actual window
+   * for this claim's vehicle — the km-board figure to compare the carrier's
+   * declared `mileage` against.
+   *
+   * VERIFIER-ONLY and DETAIL-ONLY: populated by `GET /claims/:nrZgl` for
+   * `pracownik` / `admin`, `null` for a carrier (the two systems disagree by
+   * design — showing the carrier a second number would only invite argument)
+   * and `null` in list responses (it costs a query per row).
+   */
+  verifierMileage: z.number().nullable(),
   /**
    * The linked outing's lifecycle status, EMBEDDED on the claim so the pracownik
    * ClaimModal can render the read-only "w trasie" banner and the FE in-transit

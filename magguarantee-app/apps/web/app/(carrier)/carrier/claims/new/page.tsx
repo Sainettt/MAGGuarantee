@@ -5,19 +5,28 @@
 // any field change and fired against POST /claims/preview. Submit is disabled
 // while the preview is loading or returned an error.
 //
-// Phase 7.10 REWORK (2026-06-20 #4, docs/14 §7.10.3): the carrier no longer
-// types the period OR the time window. They PICK one of their claimable outings
-// (`GET /delegations?claimable=true` → only `zjechal` outings with no linked
-// wniosek). The chosen `delegationId` is sent to preview/submit; the PERIOD
-// (`dateStart`/`dateEnd`), the TIME WINDOW (`timeFrom`/`timeTo`, wall-clock of
-// the outing's actual departure/return) and the default `mileage` all come BACK
-// from the preview (server-derived) and render READ-ONLY. The carrier's submit
-// body is just `{ delegationId, comment?, attachmentIds? }`.
+// The carrier PICKS one of its claimable outings (`GET /delegations?claimable=
+// true` → only `zjechal` outings with no linked wniosek) AND DECLARES the facts
+// of the trip: period, time window and mileage.
 //
-// Step 2 (precise times): `timeFrom`/`timeTo` are no longer carrier inputs — the
-// weryfikator captures them on the `w_trasie`/`zjechal` transitions and the
-// server derives them. Since `claimable` now returns ONLY returned (`zjechal`)
-// outings, the old `w_trasie` "not yet returned" soft-warning is gone.
+// ⚠️ REWORK 2026-07-30 — the declared facts came back. Between 2026-06-20 and
+// this rework the period/times/mileage were derived server-side (from the
+// outing's actual datetimes and the weryfikator's daily-km board) and rendered
+// read-only here. Customer decision reversed that: the money follows the
+// mileage in SpedTrans while the weryfikator's per-day km come from a different
+// external system, so the two never agree. The carrier states its own figures,
+// `pracownik` reconciles them at verification against the weryfikator's — which
+// the ClaimModal now shows side-by-side.
+//
+// What the outing still decides: the vehicle / trailer / driver (rendered
+// read-only below) and the FLOOR for `dateStart` — the declared loading date
+// may not precede the departure the carrier itself reported when registering
+// the outing (the `min` attribute below mirrors the api's 422
+// `CLAIM_DATE_BEFORE_DEPARTURE`).
+//
+// Deliberately absent (customer decision): no prefill from the outing, no
+// "your mileage differs from the board" hint. Both would nudge the carrier
+// toward a number the business does not pay on.
 
 import { AlertTriangle, ShieldAlert, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
@@ -39,6 +48,7 @@ import { LivePreviewPanel } from '@/components/carrier/LivePreviewPanel';
 import { StatusBadge } from '@/components/carrier/StatusBadge';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import {
@@ -50,7 +60,7 @@ import {
   FormSection,
 } from '@/components/forms/Form';
 import { ApiResponseError } from '@/lib/api/client';
-import { formatDateFull, formatKm } from '@/lib/format/numbers';
+import { formatDateFull } from '@/lib/format/numbers';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useClaimPreview, useSubmitClaim } from '@/lib/hooks/useClaims';
 import { useClaimableDelegations } from '@/lib/hooks/useDelegations';
@@ -64,22 +74,34 @@ const CLIENT_MAX_DAYS_AFTER_UNLOAD = 7;
 const CLIENT_MAX_PERIOD_DAYS = 90;
 
 // Keys allowed in the carrier submit form. Used to filter the sessionStorage
-// draft so removed keys cannot resurrect themselves on hydrate and trip Zod
-// `.strict()`. Phase 7.10: `dateStart`/`dateEnd` were REMOVED earlier (period
-// is server-derived from the outing). Phase 7 §0″ finish (2026-06-25):
-// `vehicleId`/`trailerId`/`driverId`/`mileage` were ALSO REMOVED. Step 2:
-// `timeFrom`/`timeTo` were REMOVED too — the weryfikator captures the actual
-// departure/return moments and the server derives the wall-clock time window.
-// A stale draft carrying any of those old keys would otherwise resurrect them
-// into the submit body and trip the backend's `.strict()` 400.
-const FORM_ALLOWED_KEYS = ['delegationId', 'comment', 'attachmentIds'] as const;
+// draft so keys that are not part of the current body cannot resurrect
+// themselves on hydrate and trip the backend's Zod `.strict()`.
+//
+// REWORK 2026-07-30 re-ADDED `dateStart`/`dateEnd`/`timeFrom`/`timeTo`/
+// `mileage`. `vehicleId`/`trailerId`/`driverId` stay OUT — those really are
+// derived from the outing.
+const FORM_ALLOWED_KEYS = [
+  'delegationId',
+  'dateStart',
+  'dateEnd',
+  'timeFrom',
+  'timeTo',
+  'mileage',
+  'comment',
+  'attachmentIds',
+] as const;
 
-// The form's editable values — the carrier's ONLY inputs. `delegationId` is
-// REQUIRED; the period, time window, vehicle, trailer, driver and mileage are
-// all server-derived and never live in the form (rendered read-only from the
-// selected outing / the preview response).
+// The form's editable values. All of `delegationId` + the five declared facts
+// are REQUIRED; vehicle / trailer / driver stay server-derived from the outing
+// and are rendered read-only.
 interface FormValues {
   delegationId: string;
+  dateStart: string;
+  dateEnd: string;
+  timeFrom: string;
+  timeTo: string;
+  /** Kept as a string — a number input yields `''` when cleared. */
+  mileage: string;
   comment?: string;
   attachmentIds?: string[];
 }
@@ -87,6 +109,12 @@ interface FormValues {
 function getDefaults(): FormValues {
   return {
     delegationId: '',
+    // Deliberately blank: no prefill from the outing (customer decision).
+    dateStart: '',
+    dateEnd: '',
+    timeFrom: '',
+    timeTo: '',
+    mileage: '',
     comment: undefined,
     attachmentIds: undefined,
   };
@@ -94,10 +122,10 @@ function getDefaults(): FormValues {
 
 /**
  * Drop unknown keys from a persisted draft before `form.reset(draft)`. Without
- * this filter a returning user's saved draft re-introduces removed keys (e.g.
- * the old `vehicleId`/`trailerId`/`driverId`/`mileage`/`dateStart`/`dateEnd`/
- * `timeFrom`/`timeTo`), Zod `.strict()` rejects the whole form, and the user
- * sees a permanently invalid form with no visible offending field.
+ * this filter a returning user's saved draft re-introduces keys the body no
+ * longer accepts (e.g. `vehicleId`/`trailerId`/`driverId`), Zod `.strict()`
+ * rejects the whole form, and the user sees a permanently invalid form with no
+ * visible offending field.
  */
 function sanitizeDraft(draft: Record<string, unknown>): Partial<FormValues> {
   const out: Record<string, unknown> = {};
@@ -183,16 +211,18 @@ export default function NewClaimPage() {
         : selectedDelegation.driverNameSnapshot)
     : null;
 
-  // ── Preview body — keyed off delegationId (everything derived server-side) ──
-  // We send ONLY `delegationId` and OMIT vehicleId/mileage/timeFrom/timeTo; the
-  // api derives the period, TIME WINDOW, vehicle/trailer/driver and mileage from
-  // the outing and returns `dateStart`/`dateEnd`, `timeFrom`/`timeTo`, `mileage`
-  // and `delegationContext`. The carrier cannot override any of them.
+  // ── Preview body — the outing + the facts the carrier has typed so far ──
+  // The api prices exactly what we send here, so the live panel and the eventual
+  // submit agree by construction. Fired only once the period is complete —
+  // there is nothing to price without both dates.
+  const mileageNumber = Number(watched.mileage);
+  const hasMileage =
+    watched.mileage.trim() !== '' && Number.isFinite(mileageNumber);
   const { previewBody, emptyReason } = useMemo<{
     previewBody: PreviewClaimDto | null;
     emptyReason: 'incomplete' | undefined;
   }>(() => {
-    if (!watched.delegationId) {
+    if (!watched.delegationId || !watched.dateStart || !watched.dateEnd) {
       return { previewBody: null, emptyReason: 'incomplete' };
     }
     // Non-guaranteed selection → never fire the preview (it would only earn a
@@ -203,30 +233,39 @@ export default function NewClaimPage() {
     return {
       previewBody: {
         delegationId: watched.delegationId,
+        dateStart: watched.dateStart,
+        dateEnd: watched.dateEnd,
+        ...(watched.timeFrom ? { timeFrom: watched.timeFrom } : {}),
+        ...(watched.timeTo ? { timeTo: watched.timeTo } : {}),
+        ...(hasMileage ? { mileage: mileageNumber } : {}),
         hoursAdjusted: 0,
       },
       emptyReason: undefined,
     };
-  }, [watched.delegationId, selectedNotGuaranteed]);
+  }, [
+    watched.delegationId,
+    watched.dateStart,
+    watched.dateEnd,
+    watched.timeFrom,
+    watched.timeTo,
+    hasMileage,
+    mileageNumber,
+    selectedNotGuaranteed,
+  ]);
 
   const debouncedPreviewBody = useDebouncedValue(previewBody, 400);
   const previewQ = useClaimPreview(debouncedPreviewBody, {
     enabled: !!debouncedPreviewBody,
   });
 
-  // Derived (read-only) period + time window from the preview — what we submit.
-  const derivedDateStart = previewQ.data?.dateStart;
-  const derivedDateEnd = previewQ.data?.dateEnd;
-  const derivedTimeFrom = previewQ.data?.timeFrom;
-  const derivedTimeTo = previewQ.data?.timeTo;
-
-  // ── Read-only mileage from the preview (Phase 7 §0″ finish) ──────────
-  // ALWAYS the server-computed `Σ VehicleDailyKm (state=drove)` over the derived
-  // period — the carrier can never edit it. Display-only; rendered read-only in
-  // the values section. `undefined` until the preview returns (muted placeholder).
-  const previewMileage = previewQ.data?.mileage;
-  const hasPreviewMileage =
-    typeof previewMileage === 'number' && !Number.isNaN(previewMileage);
+  // Floor for the declared loading date — the departure the carrier reported
+  // when registering the outing. Mirrors the api's `CLAIM_DATE_BEFORE_DEPARTURE`
+  // gate so the browser blocks it before the round-trip.
+  const minDateStart = selectedDelegation
+    ? selectedDelegation.departureAt.slice(0, 10)
+    : undefined;
+  const dateStartBelowFloor =
+    !!minDateStart && !!watched.dateStart && watched.dateStart < minDateStart;
 
   // ── Duration gate (mirror of api-side `canSubmitByDuration`) ──────────
   const previewTotalDays = previewQ.data?.breakdown?.totalDays;
@@ -241,26 +280,29 @@ export default function NewClaimPage() {
   const durationMessage =
     durationGate && !durationGate.ok ? durationGate.message : null;
 
-  // ── Client-side tier-1 date rules — run against the DERIVED period. ──
-  // The carrier no longer types dates, but the same tier-1 violations (period
-  // span / 7-day deadline / future) still apply to the server-derived period;
-  // surface them inline so the carrier sees them before submit. Only runs once
-  // the preview returns the derived dates.
+  // ── Client-side tier-1 date rules — run against the TYPED period. ──
+  // Mirrors the api's tier-1 pipeline (order / future / span) so the carrier
+  // sees the problem while typing instead of on submit. NB the deadline rule is
+  // deliberately NOT mirrored client-side: the api measures it from the
+  // weryfikator's `actualReturnAt`, which this form has no business showing.
   const dateViolations = useMemo<DateRuleViolation[]>(() => {
-    if (!derivedDateStart || !derivedDateEnd) return [];
+    if (!watched.dateStart || !watched.dateEnd) return [];
     return checkClaimDates({
-      dateStart: derivedDateStart,
-      dateEnd: derivedDateEnd,
+      dateStart: watched.dateStart,
+      dateEnd: watched.dateEnd,
       today: todayBusinessTzIso(),
       maxPeriodDays: CLIENT_MAX_PERIOD_DAYS,
       maxDaysAfterUnload: CLIENT_MAX_DAYS_AFTER_UNLOAD,
-    });
-  }, [derivedDateStart, derivedDateEnd]);
+    }).filter((v) => v.code !== 'deadline_passed');
+  }, [watched.dateStart, watched.dateEnd]);
 
-  const clientViolations = useMemo<string[]>(
-    () => dateViolations.map((v) => tForm(v.key, v.params)),
-    [dateViolations, tForm],
-  );
+  const clientViolations = useMemo<string[]>(() => {
+    const out = dateViolations.map((v) => tForm(v.key, v.params));
+    if (dateStartBelowFloor && minDateStart) {
+      out.push(tForm('violationDateStartBeforeDeparture', { date: minDateStart }));
+    }
+    return out;
+  }, [dateViolations, dateStartBelowFloor, minDateStart, tForm]);
   const clientBlocked = clientViolations.length > 0;
 
   const [violations, setViolations] = useState<string[]>([]);
@@ -307,12 +349,17 @@ export default function NewClaimPage() {
   const onSubmit = form.handleSubmit(
     (values) => {
       setViolations([]);
-      // Assemble the SubmitClaimDto (Step 2): the backend body is `.strict()`
-      // and accepts ONLY these 3 keys. period / time window / vehicle / trailer
-      // / driver / mileage are ALL DERIVED server-side from `delegationId` —
-      // sending any of them is a 400. Strip empty optional fields.
+      // Assemble the SubmitClaimDto. The backend body is `.strict()`: the six
+      // required keys below plus the two optional ones, nothing else — vehicle /
+      // trailer / driver are still derived from `delegationId` and sending them
+      // is a 400. Strip empty optional fields.
       const body: Record<string, unknown> = {
         delegationId: values.delegationId,
+        dateStart: values.dateStart,
+        dateEnd: values.dateEnd,
+        timeFrom: values.timeFrom,
+        timeTo: values.timeTo,
+        mileage: Number(values.mileage),
       };
       if (values.comment) body.comment = values.comment;
       if (values.attachmentIds && values.attachmentIds.length > 0) {
@@ -329,10 +376,16 @@ export default function NewClaimPage() {
 
   const errs = form.formState.errors;
 
-  // Explicit required-fields gate (independent of resolver). The carrier's ONLY
-  // required input is the outing — everything else (period, time window,
-  // vehicle/trailer/driver, mileage) is server-derived.
-  const requiredFilled = !!watched.delegationId;
+  // Explicit required-fields gate (independent of resolver): the outing plus
+  // every declared fact. Vehicle/trailer/driver remain server-derived.
+  const requiredFilled =
+    !!watched.delegationId &&
+    !!watched.dateStart &&
+    !!watched.dateEnd &&
+    !!watched.timeFrom &&
+    !!watched.timeTo &&
+    hasMileage &&
+    mileageNumber > 0;
 
   const noClaimable =
     !delegationsQ.isLoading && delegations.length === 0;
@@ -445,29 +498,74 @@ export default function NewClaimPage() {
                   </div>
                 )}
 
-                {/* Read-only derived period + time window (server-computed from
-                    the outing's actual departure / return). */}
-                {(derivedDateStart || derivedDateEnd) && (
-                  <div className="rounded-md border border-border bg-input/40 px-3 py-2">
-                    <p className="text-[11px] font-medium uppercase tracking-wider text-text-sub">
-                      {tPicker('derivedPeriod')}
-                    </p>
-                    <p className="mt-0.5 text-sm text-text tabular-nums">
-                      {formatDateFull(derivedDateStart)} –{' '}
-                      {formatDateFull(derivedDateEnd)}
-                    </p>
-                    {(derivedTimeFrom || derivedTimeTo) && (
-                      <>
-                        <p className="mt-2 text-[11px] font-medium uppercase tracking-wider text-text-sub">
-                          {tPicker('derivedTimes')}
-                        </p>
-                        <p className="mt-0.5 text-sm text-text tabular-nums">
-                          {derivedTimeFrom ?? '—'} – {derivedTimeTo ?? '—'}
-                        </p>
-                      </>
-                    )}
-                  </div>
-                )}
+              </FormSection>
+
+              {/* ② Declared period + time window (REWORK 2026-07-30). The
+                  loading date is floored at the outing's reported departure;
+                  everything else is free — a truck can return early or late. */}
+              <FormSection title={tForm('sectionPeriod')}>
+                <FormGrid cols={2}>
+                  <FormField
+                    label={tForm('dateStart')}
+                    required
+                    description={
+                      minDateStart
+                        ? tForm('dateStartHint', { date: minDateStart })
+                        : undefined
+                    }
+                    error={errs.dateStart?.message}
+                    htmlFor="claim-dateStart"
+                  >
+                    <Input
+                      id="claim-dateStart"
+                      type="date"
+                      min={minDateStart}
+                      max={todayBusinessTzIso()}
+                      {...form.register('dateStart')}
+                    />
+                  </FormField>
+
+                  <FormField
+                    label={tForm('dateEnd')}
+                    required
+                    error={errs.dateEnd?.message}
+                    htmlFor="claim-dateEnd"
+                  >
+                    <Input
+                      id="claim-dateEnd"
+                      type="date"
+                      min={watched.dateStart || minDateStart}
+                      max={todayBusinessTzIso()}
+                      {...form.register('dateEnd')}
+                    />
+                  </FormField>
+
+                  <FormField
+                    label={tForm('timeFrom')}
+                    required
+                    error={errs.timeFrom?.message}
+                    htmlFor="claim-timeFrom"
+                  >
+                    <Input
+                      id="claim-timeFrom"
+                      type="time"
+                      {...form.register('timeFrom')}
+                    />
+                  </FormField>
+
+                  <FormField
+                    label={tForm('timeTo')}
+                    required
+                    error={errs.timeTo?.message}
+                    htmlFor="claim-timeTo"
+                  >
+                    <Input
+                      id="claim-timeTo"
+                      type="time"
+                      {...form.register('timeTo')}
+                    />
+                  </FormField>
+                </FormGrid>
               </FormSection>
 
               {/* Vehicle / trailer / driver are DERIVED read-only from the
@@ -499,21 +597,27 @@ export default function NewClaimPage() {
                 )}
               </FormSection>
 
-              {/* Period + time window are DERIVED read-only from the outing —
-                  shown in the picker card above (dates + wall-clock hours). The
-                  carrier no longer types a time window (Step 2). */}
-
-              {/* Mileage is DERIVED read-only from the preview (the
-                  server-computed Σ VehicleDailyKm over the period). The carrier
-                  can never edit it — it updates whenever the preview re-runs. */}
+              {/* ③ Declared mileage (REWORK 2026-07-30). Free-form: the figure
+                  the carrier is paid on comes from SpedTrans, not from the
+                  weryfikator's board, so no hint and no prefill here. */}
               <FormSection title={tForm('sectionValues')}>
                 <FormGrid cols={2}>
-                  <ReadOnlyField
+                  <FormField
                     label={tForm('mileage')}
-                    value={hasPreviewMileage ? formatKm(previewMileage) : null}
-                    placeholder={tForm('mileageReadOnlyPlaceholder')}
-                    description={tForm('mileageReadOnlyHint')}
-                  />
+                    required
+                    description={tForm('mileageHint')}
+                    error={errs.mileage?.message}
+                    htmlFor="claim-mileage"
+                  >
+                    <Input
+                      id="claim-mileage"
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      step={1}
+                      {...form.register('mileage')}
+                    />
+                  </FormField>
                 </FormGrid>
               </FormSection>
 

@@ -322,6 +322,20 @@ export const RETURN_BEFORE_DEPARTURE_CODE =
 export const VEHICLE_NOT_GUARANTEED = 'VEHICLE_NOT_GUARANTEED' as const;
 
 /**
+ * 422 code — the carrier declared a loading date EARLIER than the departure it
+ * reported when it registered the outing (REWORK 2026-07-30, when the carrier
+ * took the period/times/mileage back into its own hands).
+ *
+ * The floor is the DECLARED `Delegation.departureAt`, not the weryfikator's
+ * `actualDepartureAt`: the carrier may legitimately have left later than
+ * planned, and the weryfikator's figure comes from a different external system
+ * — but nobody can have left before they said they would. Same single-code
+ * envelope shape as `VEHICLE_NOT_GUARANTEED`; the web form additionally sets
+ * the date input's `min` so this rarely reaches the api.
+ */
+export const CLAIM_DATE_BEFORE_DEPARTURE = 'CLAIM_DATE_BEFORE_DEPARTURE' as const;
+
+/**
  * Grace window (milliseconds) for the past-departure rule. A `departureAt` up to
  * this far before "now" is still accepted, so a carrier who picks the current
  * moment and submits a little later (form fill-in time) is not rejected. The

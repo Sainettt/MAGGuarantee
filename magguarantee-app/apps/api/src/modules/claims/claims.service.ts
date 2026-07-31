@@ -27,6 +27,7 @@ import type {
 } from '@magguarantee/shared';
 import {
   canSubmitByDuration,
+  CLAIM_DATE_BEFORE_DEPARTURE,
   cooldownCheck,
   DEFAULTS as CARRIER_SUBMISSION_DEFAULTS,
   getAuthThreshold,
@@ -110,6 +111,20 @@ interface ViolationsPayload {
   message: string;
   violations: string[];
   extensions?: Record<string, unknown>;
+}
+
+/**
+ * What the linked outing contributes to a wniosek after the REWORK 2026-07-30:
+ * the row itself (vehicle / trailer / driver snapshots), the FLOOR for the
+ * carrier-declared loading date, and the DEADLINE anchor. It no longer carries
+ * a period or a time window — the carrier declares those.
+ */
+interface DelegationContext {
+  delegation: DelegationRow;
+  /** Day of the DECLARED `departureAt` — floor for the carrier's `dateStart`. */
+  declaredDepartureDay: Date;
+  /** Day of the weryfikator's `actualReturnAt` — anchor for the deadline rule. */
+  actualReturnDay: Date;
 }
 
 function violationsException(
@@ -228,13 +243,7 @@ export class ClaimsService {
   private async _resolveDelegationContext(
     carrierId: string,
     delegationId: string,
-  ): Promise<{
-    delegation: DelegationRow;
-    dateStart: Date;
-    dateEnd: Date;
-    timeFrom: string;
-    timeTo: string;
-  }> {
+  ): Promise<DelegationContext> {
     if (!this.delegations) {
       throw new UnprocessableEntityException(
         'Wybór wyjazdu jest wymagany dla nowego wniosku.',
@@ -252,8 +261,7 @@ export class ClaimsService {
     // `false` AND `null`/missing both count as NOT guaranteed → 422 with the
     // single stable `extensions.code` envelope (NOT the `violations[]` shape).
     await this._assertVehicleGuaranteed(deleg);
-    const period = this._deriveDelegationPeriod(deleg);
-    return { delegation: deleg, ...period };
+    return { delegation: deleg, ...this._delegationFacts(deleg) };
   }
 
   /**
@@ -281,39 +289,40 @@ export class ClaimsService {
   }
 
   /**
-   * Pure period + time derivation from an outing row + the status gate. ONLY a
-   * `zjechal` outing may back a wniosek — its period, times, and mileage are only
-   * final once the weryfikator captured the actual departure/return datetimes
-   * (`w_trasie`/`gotowy`/`zgloszony`/`anulowany` all 422). No IO.
+   * The outing's status gate + the two FACTS the claim rules are measured
+   * against. Pure, no IO.
    *
-   *   - `dateStart = day(actualDepartureAt)`, `timeFrom = HH:mm(actualDepartureAt)`,
-   *   - `dateEnd   = day(actualReturnAt)`,   `timeTo   = HH:mm(actualReturnAt)`.
+   * ⚠️ REWORK 2026-07-30 — this used to DERIVE the claim's period and times
+   * from the outing. It no longer does: the carrier declares those itself (see
+   * `SubmitClaimSchema`). What the outing still decides:
+   *
+   *   - the STATUS gate — only `zjechal` may back a wniosek (unchanged: the
+   *     trip must be over before money is claimed for it);
+   *   - `declaredDepartureDay` — the day the carrier said it would leave, i.e.
+   *     the FLOOR for the carrier-declared `dateStart`;
+   *   - `actualReturnDay` — the weryfikator's recorded return, i.e. the anchor
+   *     for the submission DEADLINE. Deliberately NOT the carrier's `dateEnd`:
+   *     that one is carrier-typed, so anchoring the deadline on it would let a
+   *     late carrier type a fresher date and walk past the cut-off.
    *
    * The `?? departureAt` / `?? plannedReturnAt` fallbacks are defensive (a
    * `zjechal` outing always carries both actual datetimes) — they keep a
-   * malformed legacy row from throwing on `null`. This single seam is shared by
-   * BOTH the preview and the submit paths (`_resolveDelegationContext`), so they
-   * agree. The derived `HH:mm` is the wall-clock of the stored datetime (UTC
-   * `T`-part) — the same slice the web renders from the ISO string.
+   * malformed legacy row from throwing on `null`.
    */
-  private _deriveDelegationPeriod(deleg: DelegationRow): {
-    dateStart: Date;
-    dateEnd: Date;
-    timeFrom: string;
-    timeTo: string;
+  private _delegationFacts(deleg: DelegationRow): {
+    declaredDepartureDay: Date;
+    actualReturnDay: Date;
   } {
     if (deleg.status !== 'zjechal') {
       throw new UnprocessableEntityException(
         'Wniosek można złożyć tylko dla zjechanego wyjazdu.',
       );
     }
-    const departure = deleg.actualDepartureAt ?? deleg.departureAt;
-    const returned = deleg.actualReturnAt ?? deleg.plannedReturnAt;
     return {
-      dateStart: startOfUtcDay(departure),
-      dateEnd: startOfUtcDay(returned),
-      timeFrom: hhMmFromDate(departure),
-      timeTo: hhMmFromDate(returned),
+      declaredDepartureDay: startOfUtcDay(deleg.departureAt),
+      actualReturnDay: startOfUtcDay(
+        deleg.actualReturnAt ?? deleg.plannedReturnAt,
+      ),
     };
   }
 
@@ -354,14 +363,13 @@ export class ClaimsService {
     // carrier-only path, see @Roles on POST /claims
     const carrier = await this._requireCarrierProfile(user);
 
-    // Phase 7 §0″ finish — EVERYTHING (period, TIMES, vehicle, trailer, driver,
-    // mileage) DERIVES from the chosen outing; the carrier sends only
-    // `delegationId` (+ optional comment/attachments). `_resolveDelegationContext`
-    // validates ownership (same carrier), the status gate (ONLY `zjechal` — a
-    // wniosek can only back a RETURNED outing), the not-already-claimed invariant,
-    // and returns the outing row + derived period (`dateStart = day(actual
-    // departure)`, `dateEnd = day(actualReturnAt)`) + derived time window
-    // (`timeFrom`/`timeTo` = `HH:mm` of the actual departure/return). A `w_trasie`
+    // REWORK 2026-07-30 — the outing supplies the IDENTITY (vehicle, trailer,
+    // driver, plate snapshot) and the two rule anchors; the carrier declares the
+    // FACTS (period, time window, mileage). `_resolveDelegationContext` validates
+    // ownership (same carrier), the status gate (ONLY `zjechal` — a wniosek can
+    // only back a RETURNED outing), the not-already-claimed invariant and the
+    // guarantee gate, then returns the outing row + `declaredDepartureDay`
+    // (floor for `dateStart`) + `actualReturnDay` (deadline anchor). A `w_trasie`
     // / `gotowy` / `zgloszony` outing throws 422. The trailer/driver belong to
     // the carrier transitively (they were chosen by the carrier when the carrier
     // created the outing, and the outing is owned by the carrier), so no separate
@@ -370,19 +378,39 @@ export class ClaimsService {
       carrier.id,
       dto.delegationId,
     );
-    const { delegation, dateStart, dateEnd, timeFrom, timeTo } = delegationCtx;
+    const { delegation, declaredDepartureDay, actualReturnDay } = delegationCtx;
     const vehicleId = delegation.vehicleId;
     const vehiclePlateSnapshot = await this._resolveVehiclePlate(delegation);
 
     const config = await this._loadSubmitConfig();
     const today = startOfBusinessTodayUtc();
-    const dateStartIso = toIsoDateOnly(dateStart);
-    const dateEndIso = toIsoDateOnly(dateEnd);
 
-    // Mileage is ALWAYS `Σ VehicleDailyKm.km (state=drove)` over [dateStart,
-    // dateEnd] for the delegation's vehicle (Phase 7 §0″ finish — no carrier
-    // override). All downstream checks + the persisted row use this value.
-    const mileage = await this._resolveMileage(vehicleId, dateStart, dateEnd);
+    // REWORK 2026-07-30 — the FACTS come from the carrier again. The outing
+    // still supplies the vehicle/trailer/driver identity and the two anchors
+    // (`declaredDepartureDay`, `actualReturnDay`), but the period, the time
+    // window and the mileage are all declared here.
+    const dateStart = isoDateToMidnightUtc(dto.dateStart)!;
+    const dateEnd = isoDateToMidnightUtc(dto.dateEnd)!;
+    const dateStartIso = dto.dateStart;
+    const dateEndIso = dto.dateEnd;
+    const timeFrom = dto.timeFrom;
+    const timeTo = dto.timeTo;
+    const mileage = dto.mileage;
+
+    // Departure floor — the carrier may claim a LATER loading date than the one
+    // it reported when registering the outing (delays happen), never an earlier
+    // one. Thrown on its own, ahead of the tier-1 aggregation, so the machine
+    // code stays unambiguous and the web form can attach it to the field.
+    if (dateStart.getTime() < declaredDepartureDay.getTime()) {
+      const floorIso = toIsoDateOnly(declaredDepartureDay);
+      throw violationsException(
+        [
+          `Data załadunku (${dateStartIso}) jest wcześniejsza niż zgłoszona ` +
+            `data wyjazdu (${floorIso}).`,
+        ],
+        { code: CLAIM_DATE_BEFORE_DEPARTURE, minDateStart: floorIso },
+      );
+    }
 
     // ── Tier 1: pre-calc business rules ───────────────────────
     // Collect everything we can check WITHOUT running km-calc. If the user
@@ -419,7 +447,11 @@ export class ClaimsService {
           `(podano ${periodDays} dni).`,
       );
     }
-    const daysAfterUnload = daysBetween(dateEnd, today);
+    // Deadline is measured from the weryfikator's ACTUAL return, not from the
+    // carrier-typed `dateEnd` (REWORK 2026-07-30). Anchoring it on a field the
+    // carrier controls would make the rule self-defeating: whoever missed the
+    // window would just type a fresher unloading date.
+    const daysAfterUnload = daysBetween(actualReturnDay, today);
     if (daysAfterUnload > config.maxDaysAfter) {
       tier1.push(
         `Termin na złożenie wniosku minął. Zgodnie z umową masz ` +
@@ -449,10 +481,9 @@ export class ClaimsService {
 
     // ── Tier 2: km-calc dependent rules ───────────────────────
     // Same engine as `previewKmCalc` so live preview and submit produce
-    // identical numbers. `timeFrom`/`timeTo` are DERIVED from the outing's actual
-    // departure/return datetimes (not carrier-supplied). `hoursAdjusted` is
-    // verifier-only — carriers never send it; submit always feeds 0 into km-calc
-    // and persists 0 on both Decimal columns.
+    // identical numbers — both now price the carrier-declared period + times.
+    // `hoursAdjusted` is verifier-only — carriers never send it; submit always
+    // feeds 0 into km-calc and persists 0 on both Decimal columns.
     const calc = await this.kmCalc.calc({
       dateStart: dateStartIso,
       dateEnd: dateEndIso,
@@ -558,8 +589,8 @@ export class ClaimsService {
           vehiclePlateSnapshot,
           dateStart,
           dateEnd,
-          // Required post-phase3_blocks (NOT NULL) — DERIVED from the outing's
-          // actual departure/return datetimes (not carrier-supplied).
+          // Required post-phase3_blocks (NOT NULL) — carrier-declared again
+          // since the REWORK 2026-07-30.
           timeFrom,
           timeTo,
           drivenDays: calc.totalDays,
@@ -599,10 +630,11 @@ export class ClaimsService {
           // can compare the carrier's originally-derived dopłata against the
           // verifier's applied amount. Same write-once contract as origMileage.
           origPaymentEur: paymentEur,
-          // Immutable time-window snapshot — the SAME derived values that go
-          // into the working `timeFrom/timeTo` columns above (the outing's actual
-          // departure/return wall-clock). Write-once at submit; the verifier
-          // PATCH never overwrites these.
+          // Immutable time-window snapshot — the SAME values that go into the
+          // working `timeFrom/timeTo` columns above. Write-once at submit; the
+          // verifier PATCH never overwrites these, which is what makes the
+          // ClaimModal's «deklaracja vs weryfikacja» pair meaningful now that
+          // the carrier types its own window.
           origTimeFrom: timeFrom,
           origTimeTo: timeTo,
           // Phase 7 REWORK (2026-06-20 #4) — link the wniosek to the outing.
@@ -1639,12 +1671,14 @@ export class ClaimsService {
     // carrier-only path, see @Roles on POST /claims/preview
     const carrier = await this._requireCarrierProfile(user);
 
-    // Phase 7 §0″ finish — when the carrier has picked an outing the PERIOD,
-    // TIMES, VEHICLE, TRAILER, DRIVER, and MILEAGE are all DERIVED from it (which
-    // must be `zjechal`), mirroring what submit() will compute; the body carries
-    // no vehicle/mileage/times. When `delegationId` is absent (the existing-claim
-    // / verifier inspection path reaching this method directly), we fall back to a
-    // caller-supplied `vehicleId` + dates — ownership re-checked defence-in-depth.
+    // REWORK 2026-07-30 — when the carrier has picked an outing we still run
+    // the SAME gates submit will (ownership, `zjechal`, not-already-claimed,
+    // guarantee), so a blocker surfaces before the carrier finishes typing; the
+    // numbers priced are the carrier's own period/times/mileage. VEHICLE,
+    // TRAILER and DRIVER stay derived from the outing. When `delegationId` is
+    // absent (the existing-claim / verifier inspection path reaching this method
+    // directly), we fall back to a caller-supplied `vehicleId` + dates —
+    // ownership re-checked defence-in-depth.
     if (dto.delegationId) {
       const ctx = await this._resolveDelegationContext(
         carrier.id,
@@ -1732,40 +1766,34 @@ export class ClaimsService {
    */
   private async _runPreviewCalc(
     dto: PreviewClaimDto,
-    ctx: {
-      delegation: DelegationRow;
-      dateStart: Date;
-      dateEnd: Date;
-      timeFrom: string;
-      timeTo: string;
-    } | null = null,
+    ctx: DelegationContext | null = null,
     allowMileageOverride = false,
     existingClaim: ClaimRow | null = null,
   ): Promise<PreviewClaimResponse> {
-    // Resolve the effective period: derived from the outing when supplied,
-    // otherwise the caller-supplied `dateStart`/`dateEnd` (existing-claim path).
-    const dateStart = ctx ? ctx.dateStart : isoDateToMidnightUtc(dto.dateStart ?? '');
-    const dateEnd = ctx ? ctx.dateEnd : isoDateToMidnightUtc(dto.dateEnd ?? '');
+    // Period is ALWAYS caller-supplied now (REWORK 2026-07-30): the carrier
+    // types it on the new-claim path, the verifier edits it on the inspection
+    // path. A half-filled form yields nulls and prices to zero — no throw.
+    const dateStart = isoDateToMidnightUtc(dto.dateStart ?? '');
+    const dateEnd = isoDateToMidnightUtc(dto.dateEnd ?? '');
     const dateStartIso = dateStart ? toIsoDateOnly(dateStart) : (dto.dateStart ?? '');
     const dateEndIso = dateEnd ? toIsoDateOnly(dateEnd) : (dto.dateEnd ?? '');
 
     // Times, three cases:
-    //  • ctx (carrier delegation-derived path): ALWAYS the outing-derived times —
-    //    the carrier never influences them, even if `dto.timeFrom/timeTo` slip in.
+    //  • ctx (carrier new-claim path): the times the carrier just typed. They
+    //    are what submit will persist, so the live preview must price them.
     //  • VERIFIER existing-claim path (`allowMileageOverride` — the SAME gate that
     //    honours the mileage override, i.e. `pracownik`/`admin`): honour a
     //    caller-supplied `dto.timeFrom/timeTo` so the ClaimModal live-recalcs an
     //    UNSAVED time edit, falling back to the persisted claim's times.
-    //  • carrier bare-vehicle path / `przewoznik` reklamacja inspection
-    //    (override NOT allowed): the persisted claim's times (or `null`) — any dto
-    //    times are IGNORED (same "no carrier override" invariant as mileage).
+    //  • `przewoznik` reklamacja inspection (override NOT allowed): the persisted
+    //    claim's times — a decided claim's facts are not re-typed here.
     const timeFrom = ctx
-      ? ctx.timeFrom
+      ? (dto.timeFrom ?? null)
       : allowMileageOverride
         ? (dto.timeFrom ?? existingClaim?.timeFrom ?? null)
         : (existingClaim?.timeFrom ?? null);
     const timeTo = ctx
-      ? ctx.timeTo
+      ? (dto.timeTo ?? null)
       : allowMileageOverride
         ? (dto.timeTo ?? existingClaim?.timeTo ?? null)
         : (existingClaim?.timeTo ?? null);
@@ -1778,26 +1806,26 @@ export class ClaimsService {
       hoursAdjusted: dto.hoursAdjusted ?? 0,
     });
 
-    // Mileage resolution, two paths:
-    //  • Delegation-derived (new-claim) path OR carrier reklamacja inspection:
-    //    ALWAYS `Σ VehicleDailyKm.km (state=drove)` over the period for the
-    //    relevant vehicle (Phase 7 §0″ finish — no carrier override). The
-    //    vehicle comes from the outing on the new-claim path, or from the
-    //    caller-supplied `vehicleId` on the existing-claim path. With no vehicle
-    //    and no valid period, mileage is 0 (the carrier hasn't picked an outing).
-    //  • VERIFIER inspection path (existing claim, `ctx === null`,
-    //    `allowMileageOverride`): a verifier-supplied `dto.mileage` REPLACES the
-    //    sum, so the live preview tracks a km edit before the PATCH commits —
-    //    mirroring `_recalcClaim` (which honours `dto.mileage` on PATCH). The
-    //    override is confined to `ctx === null` so the delegation-derived path
-    //    (and any carrier) never leaks a manual mileage into the math.
-    const vehicleId = ctx ? ctx.delegation.vehicleId : dto.vehicleId;
-    const canOverride = !ctx && allowMileageOverride && dto.mileage !== undefined;
-    const mileage = canOverride
-      ? (dto.mileage as number)
-      : dateStart && dateEnd && vehicleId
-        ? await this._resolveMileage(vehicleId, dateStart, dateEnd)
-        : 0;
+    // Mileage resolution (REWORK 2026-07-30 — the daily-km board is no longer
+    // the source of a claim's mileage, only the verifier's reference):
+    //  • carrier new-claim path (`ctx`): the mileage the carrier just typed —
+    //    exactly what submit will persist. Absent mid-form ⇒ 0.
+    //  • VERIFIER inspection path (`allowMileageOverride`): a supplied
+    //    `dto.mileage` REPLACES the persisted one so the ClaimModal tracks a km
+    //    edit before the PATCH commits — mirroring `_recalcClaim`.
+    //  • any other existing-claim read (`przewoznik` reklamacja inspection):
+    //    the claim's own persisted mileage.
+    //  • bare-vehicle path (no ctx, no claim — legacy/diagnostic): fall back to
+    //    the daily-km sum, the only number available there.
+    const mileage = ctx
+      ? (dto.mileage ?? 0)
+      : allowMileageOverride && dto.mileage !== undefined
+        ? dto.mileage
+        : existingClaim
+          ? existingClaim.mileage
+          : dateStart && dateEnd && dto.vehicleId
+            ? await this._resolveMileage(dto.vehicleId, dateStart, dateEnd)
+            : 0;
 
     const kmDifference = calc.kmGuaranteed - mileage;
     const paymentEur =
@@ -1826,14 +1854,17 @@ export class ClaimsService {
         firstDay: calc.firstDay,
         lastDay: calc.lastDay,
       },
-      // Surfaced only on the delegation-derived path so the carrier form can
-      // show the read-only period + time window + vehicle/trailer/driver.
+      // Echoed only on the carrier new-claim path. The period/time window are
+      // now the carrier's own input (REWORK 2026-07-30) — echoing them keeps the
+      // response self-describing (what was priced) and lets the form assert it
+      // is showing numbers for the values it sent. The vehicle/trailer/driver
+      // block still comes from the outing: that part IS derived.
       ...(ctx
         ? {
             dateStart: dateStartIso,
             dateEnd: dateEndIso,
-            timeFrom: ctx.timeFrom,
-            timeTo: ctx.timeTo,
+            ...(timeFrom ? { timeFrom } : {}),
+            ...(timeTo ? { timeTo } : {}),
             delegationContext: this._buildDelegationContext(ctx.delegation),
           }
         : {}),
@@ -1982,7 +2013,37 @@ export class ClaimsService {
         throw new ForbiddenException('Brak uprawnień do tego wniosku');
       }
     }
-    return this.toDto(row);
+    const dto = this.toDto(row);
+    return {
+      ...dto,
+      verifierMileage: await this._resolveVerifierMileage(user, row),
+    };
+  }
+
+  /**
+   * Σ daily-km over the WERYFIKATOR's actual window — the reference figure the
+   * ClaimModal shows beside the carrier's declared mileage (REWORK 2026-07-30).
+   *
+   * Deliberately narrow:
+   *  - verifier roles only (a carrier must not be handed the other system's
+   *    number — the two disagree by design and it is not what it is paid on);
+   *  - detail only (one aggregate per opened claim, never per list row);
+   *  - `null` unless the outing carries BOTH actual datetimes, so a partial
+   *    window never produces a misleading half-sum.
+   */
+  private async _resolveVerifierMileage(
+    user: AuthUser,
+    row: ClaimRow,
+  ): Promise<number | null> {
+    if (user.role === 'przewoznik') return null;
+    const from = row.delegationActualDepartureAt;
+    const to = row.delegationActualReturnAt;
+    if (!from || !to || !row.vehicleId) return null;
+    return this._resolveMileage(
+      row.vehicleId,
+      startOfUtcDay(from),
+      startOfUtcDay(to),
+    );
   }
 
   async list(
@@ -2086,6 +2147,18 @@ export class ClaimsService {
       delegationActualReturnAt: row.delegationActualReturnAt
         ? row.delegationActualReturnAt.toISOString()
         : null,
+      // Departure side of the same pair (REWORK 2026-07-30) — the declared
+      // departure is the floor the api enforces on the carrier's `dateStart`;
+      // the actual one is the weryfikator's figure the ClaimModal shows beside
+      // the carrier's declaration.
+      delegationDepartureAt: row.delegationDepartureAt
+        ? row.delegationDepartureAt.toISOString()
+        : null,
+      delegationActualDepartureAt: row.delegationActualDepartureAt
+        ? row.delegationActualDepartureAt.toISOString()
+        : null,
+      // Verifier-only, detail-only — `getOne` fills it in for verifier roles.
+      verifierMileage: null,
       // Linked-outing lifecycle status — surfaced so the pracownik ClaimModal
       // renders the read-only "w trasie" banner and the FE in-transit gate keys
       // off the SAME field the API gates on. `null` when no linked outing.
@@ -3121,17 +3194,6 @@ function extractCorrectionFields(
 /** UTC date → `YYYY-MM-DD`. Inverse of `isoDateToMidnightUtc`. */
 function toIsoDateOnly(d: Date): string {
   return d.toISOString().slice(0, 10);
-}
-
-/**
- * Wall-clock `HH:mm` of a Date, read from its ISO `T`-part (UTC components) —
- * the SAME slice the web renders from a delegation's ISO datetime string, so the
- * carrier's read-only preview and the persisted `Claim.timeFrom`/`timeTo` agree
- * with what the weryfikator entered. Used to derive the claim time window from
- * the outing's `actualDepartureAt` / `actualReturnAt` datetimes.
- */
-function hhMmFromDate(d: Date): string {
-  return d.toISOString().slice(11, 16);
 }
 
 /**

@@ -1153,7 +1153,10 @@
           "terminalState": "Wniosek jest w stanie końcowym — brak dostępnych decyzji.",
           "guaranteeMetHint": "Gwarancja wyjeżdżona — wniosek można tylko odrzucić.",
           "progExceededHint": "Dopłata przekroczy próg autoryzacji ({prog} przy {days, plural, one {# dniu} few {# dniach} many {# dniach} other {# dnia}} w trasie) — po zapisaniu weryfikacji wniosek automatycznie przejdzie w stan „Czeka na autoryzację”.",
-          "verifiedBadge": "Zweryfikowano {date} przez {name}"
+          "verifiedBadge": "Zweryfikowano {date} przez {name}",
+          "weryfikatorHeader": "Dane weryfikatora",
+          "weryfikatorHint": "Z wyjazdu i tablicy km — do porównania.",
+          "weryfikatorCaption": "Dane zarejestrowane przez weryfikatora"
         },
         "maksimGate": {
           "bannerTitle": "Czeka na autoryzację",
@@ -1636,15 +1639,16 @@
         "timeTo": "Godzina do",
         "sectionValues": "Wartości",
         "mileage": "Przebieg (km)",
-        "mileageReadOnlyHint": "Wyliczony z dziennych km wyjazdu — pole tylko do odczytu.",
-        "mileageReadOnlyPlaceholder": "— obliczany z wyjazdu",
         "addComment": "Dodaj komentarz",
         "comment": "Komentarz",
         "violationDateEndInFuture": "Data rozładunku ({date}) jest w przyszłości. Wniosek można złożyć dopiero po zjechaniu ciągnika.",
         "violationDateStartInFuture": "Data załadunku ({date}) jest w przyszłości.",
         "violationDateOrder": "Data rozładunku musi być równa lub późniejsza od daty załadunku.",
         "violationDeadline": "Termin na złożenie wniosku minął. Zgodnie z umową masz {maxDays} dni od daty rozładunku (upłynęło {elapsed} dni).",
-        "violationPeriodTooLong": "Okres wniosku nie może przekraczać {maxDays} dni (podano {periodDays} dni)."
+        "violationPeriodTooLong": "Okres wniosku nie może przekraczać {maxDays} dni (podano {periodDays} dni).",
+        "dateStartHint": "Nie wcześniej niż zgłoszona data wyjazdu ({date}).",
+        "mileageHint": "Przebieg zgodnie z SpedTrans.",
+        "violationDateStartBeforeDeparture": "Data załadunku nie może być wcześniejsza niż zgłoszona data wyjazdu ({date})."
       },
       "status": {
         "NA_WERYFIKACJI": "Weryfikacja",
@@ -1661,8 +1665,6 @@
         "loading": "Wczytywanie wyjazdów…",
         "empty": "Brak wyjazdów, do których można złożyć wniosek. Wniosek można złożyć po oznaczeniu ciągnika jako „zjechał”.",
         "selectedStatus": "Status wybranego wyjazdu:",
-        "derivedPeriod": "Okres (z wyjazdu)",
-        "derivedTimes": "Godziny (z wyjazdu)",
         "noGuaranteeMarker": "(bez gwarancji)"
       },
       "noGuarantee": {
