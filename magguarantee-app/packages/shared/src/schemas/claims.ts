@@ -55,6 +55,24 @@ export type ClaimStatus = z.infer<typeof ClaimStatusSchema>;
 export const ClaimAutoRecalcStateSchema = z.enum(['none', 'applied', 'skipped']);
 export type ClaimAutoRecalcState = z.infer<typeof ClaimAutoRecalcStateSchema>;
 
+/**
+ * Mirror of the Prisma `ReklamacjaResolution` enum (migration
+ * `20260731120000_add_reklamacja_resolution_fields`) — the OUTCOME of a
+ * reklamacja decision. Same mirroring convention as `ClaimStatusSchema`: the
+ * shared package is Zod-only and cannot import `@magguarantee/database`.
+ *
+ * Deliberately NOT a `ClaimStatus` value: the decision rolls `status` BACK to
+ * `statusBeforeReklamacja` for BOTH outcomes (an uznana reklamacja on a rejected
+ * wniosek leaves the wniosek rejected — only the reklamacja is paid), so the
+ * outcome needs its own column. `null` means "no reklamacja was ever filed" OR
+ * "filed and still pending"; the two are told apart by
+ * `status === 'REKLAMACJA'` (pending) / `reklamacjaSubmitted`.
+ *
+ * NEVER derive the outcome from the resulting `status`.
+ */
+export const ReklamacjaResolutionSchema = z.enum(['UZNANA', 'ODRZUCONA']);
+export type ReklamacjaResolution = z.infer<typeof ReklamacjaResolutionSchema>;
+
 // ─── Field primitives ────────────────────────────────────
 
 /** `HH:mm` — 00:00 .. 23:59. Empty string ⇒ undefined for form inputs. */
@@ -352,16 +370,58 @@ export type PreviewClaimDto = z.infer<typeof PreviewClaimSchema>;
 // ─── Reklamacja ──────────────────────────────────────────
 
 /**
- * POST /claims/:nrZgl/reklamacja — a carrier disputes a decided claim.
- * `kwotaReklamacji` is the new amount the carrier is now asking for.
+ * POST /claims/:nrZgl/reklamacja — a carrier disputes a DECIDED wniosek.
+ *
+ * REWORK 2026-07-31 — the reklamacja is amount + reason ONLY: the carrier no
+ * longer amends any claim data (no period / times / mileage). `kwotaReklamacji`
+ * is the UNPAID REMAINDER the carrier is now asking for and must satisfy
+ * `0 < kwota <= maxAmount`, where `maxAmount` comes from
+ * `resolveReklamacjaCap()` in `domain/reklamacja-rules.ts` (the api enforces the
+ * ceiling — a schema cannot see the claim row).
+ *
+ * `.positive()` (not `.nonnegative()`): a 0 € reklamacja asks for nothing, so it
+ * is a malformed request (400), not a business rule violation. The upper sanity
+ * bound stays to keep a typo from hitting a Postgres numeric overflow.
  */
 export const SubmitReklamacjaSchema = z
   .object({
     tresc: z.string().min(1).max(4_000),
-    kwotaReklamacji: z.number().nonnegative().max(9_999_999),
+    kwotaReklamacji: z.number().positive().max(9_999_999),
   })
   .strict();
 export type SubmitReklamacjaDto = z.infer<typeof SubmitReklamacjaSchema>;
+
+// ─── Reklamacja — stable machine codes (422 / 409 `extensions.code`) ──
+//
+// Same convention as `VEHICLE_NOT_GUARANTEED` / `CLAIM_DATE_BEFORE_DEPARTURE` in
+// `schemas/delegations.ts`: the api throws them inside the single-code
+// `extensions` envelope, the web pattern-matches to pick the localized copy.
+
+/** 409 — one reklamacja per wniosek, ever (`reklamacjaSubmitted` already set). */
+export const REKLAMACJA_ALREADY_SUBMITTED =
+  'REKLAMACJA_ALREADY_SUBMITTED' as const;
+
+/** 422 — the wniosek is not decided yet (`ZAAKCEPTOWANO`/`ODRZUCONO` only). */
+export const REKLAMACJA_CLAIM_NOT_DECIDED =
+  'REKLAMACJA_CLAIM_NOT_DECIDED' as const;
+
+/** 422 — more than `REKLAMACJA_WINDOW_HOURS` (48 h) since the decision. */
+export const REKLAMACJA_WINDOW_EXPIRED = 'REKLAMACJA_WINDOW_EXPIRED' as const;
+
+/** 422 — the payout already covers the amount originally requested. */
+export const REKLAMACJA_NO_DELTA = 'REKLAMACJA_NO_DELTA' as const;
+
+/** 422 — `kwotaReklamacji` exceeds `maxAmount` (strict, cent precision). */
+export const REKLAMACJA_AMOUNT_EXCEEDS_CAP =
+  'REKLAMACJA_AMOUNT_EXCEEDS_CAP' as const;
+
+/**
+ * 422 — a `REKLAMACJA_*` PATCH target was used on a claim that is NOT sitting in
+ * `REKLAMACJA` (no pending reklamacja to decide). Without this guard the
+ * synthetic accept would be indistinguishable from a fresh accept out of
+ * `NA_WERYFIKACJI` (a legal edge) and would slip past the decision gates.
+ */
+export const REKLAMACJA_NOT_PENDING = 'REKLAMACJA_NOT_PENDING' as const;
 
 // ─── km-calc breakdown row (mirror of MonthBreakdown in domain/km-calc) ──
 
@@ -680,10 +740,35 @@ export const ClaimDtoSchema = z.object({
    */
   amountApproved: z.number().nullable(),
 
+  /**
+   * Reklamacja block (REWORK 2026-07-31). One reklamacja per wniosek, ever:
+   *
+   *  - `reklamacjaSubmitted`   — one-shot flag, never reset.
+   *  - `reklamacjaText`        — the carrier's justification (`tresc`).
+   *  - `reklamacjaAmount`      — the kwota the carrier asked for; on an UZNANA
+   *    outcome this EXACT figure is what gets paid (staff no longer set one).
+   *  - `reklamacjaResponse`    — MAGTRANS' answer; REQUIRED on `ODRZUCONA`.
+   *  - `reklamacjaResolution`  — the OUTCOME. `null` = never filed OR still
+   *    pending; pending ⇔ `status === 'REKLAMACJA'`. **Never** derive the outcome
+   *    from `status`: the decision rolls `status` back to
+   *    `statusBeforeReklamacja` for BOTH outcomes.
+   *  - `reklamacjaOrderNumber` — «Nr zlecenia» the uznana reklamacja is paid
+   *    under. Independent of the wniosek's own `orderNumber` (which the
+   *    reklamacja never touches); non-empty whenever resolution is `UZNANA`
+   *    (DB CHECK `claim_reklamacja_resolution_complete`).
+   *  - `reklamacjaSubmittedAt` — when the carrier filed. Cannot be derived from
+   *    `statusChangedAt`: the decision re-stamps that on the status rollback.
+   *  - `reklamacjaDecidedAt`   — when pracownik/admin decided. `null` on a
+   *    pending reklamacja AND on backfilled pre-rework rows ("unknown").
+   */
   reklamacjaSubmitted: z.boolean(),
   reklamacjaText: z.string().nullable(),
   reklamacjaResponse: z.string().nullable(),
   reklamacjaAmount: z.number().nullable(),
+  reklamacjaResolution: ReklamacjaResolutionSchema.nullable(),
+  reklamacjaOrderNumber: z.string().nullable(),
+  reklamacjaSubmittedAt: IsoDateTimeSchema.nullable(),
+  reklamacjaDecidedAt: IsoDateTimeSchema.nullable(),
   statusBeforeReklamacja: ClaimStatusSchema.nullable(),
   origDateStart: IsoDateTimeSchema.nullable(),
   origDateEnd: IsoDateTimeSchema.nullable(),
@@ -850,6 +935,14 @@ export const ClaimListItemSchema = z.object({
   origPaymentEur: z.number().nullable(),
   amountApproved: z.number().nullable(),
   reklamacjaSubmitted: z.boolean(),
+  /**
+   * Reklamacja OUTCOME, carried on the list item so the employee `<ClaimsTable>`
+   * can render the secondary `<ReklamacjaResolutionChip>` under the status cell
+   * (docs/14 §6.5.15) without a per-row detail fetch. `null` = never filed OR
+   * still pending — the chip reads it together with `reklamacjaSubmitted`
+   * (`submitted && resolution === null` ⇒ «Reklamacja w toku»).
+   */
+  reklamacjaResolution: ReklamacjaResolutionSchema.nullable(),
   createdAt: IsoDateTimeSchema,
 });
 export type ClaimListItem = z.infer<typeof ClaimListItemSchema>;
@@ -906,32 +999,62 @@ const UpdateClaimToRejected = z
   })
   .strict();
 
-/** REKLAMACJA → ZAAKCEPTOWANO — verifier accepts the dispute. */
+/**
+ * REKLAMACJA → UZNANA — pracownik/admin accepts the dispute.
+ *
+ * REWORK 2026-07-31:
+ *  - the paid amount is EXACTLY the carrier's `reklamacjaAmount` (frozen at
+ *    submit, already capped by `origPaymentEur − alreadyPaid`), so the staff no
+ *    longer sends an amount — `reklamacjaAmount` was REMOVED from this branch;
+ *  - `reklamacjaOrderNumber` («Nr zlecenia» the dopłata is paid under) is
+ *    REQUIRED — the UI prefills it from `claim.orderNumber` but it is an
+ *    INDEPENDENT field and the wniosek's own `orderNumber` is never touched
+ *    (DB CHECK `claim_reklamacja_resolution_complete` mirrors this);
+ *  - the correction fields were REMOVED — a reklamacja no longer amends carrier
+ *    data (no period / times / mileage / hoursAdjusted), so km-calc never re-runs
+ *    on this branch and the amounts stay frozen;
+ *  - `comment` is now OPTIONAL (it lands in `reklamacjaResponse`): an acceptance
+ *    speaks for itself, a rejection must justify itself.
+ *
+ * The resulting `status` is NOT `ZAAKCEPTOWANO`: the service rolls it back to
+ * `statusBeforeReklamacja` and records the outcome in `reklamacjaResolution`.
+ */
 const UpdateClaimReklamacjaAccepted = z
   .object({
     targetStatus: z.literal('REKLAMACJA_ZAAKCEPTOWANO'),
-    /** REQUIRED — verifier reasoning recorded in the audit log. */
-    comment: UpdateClaimCommentSchema,
-    /** REQUIRED — `zatwKwota` value the verifier approved. */
-    reklamacjaAmount: UpdateClaimAmountSchema,
-    ...UpdateClaimCorrectionFields,
+    /** REQUIRED — «Nr zlecenia» under which the dopłata is paid. */
+    reklamacjaOrderNumber: z.string().min(1).max(64),
+    /** OPTIONAL — staff note, stored in `reklamacjaResponse`. */
+    comment: emptyStringToUndefined(z.string().max(4_000).optional()),
   })
   .strict();
 
-/** REKLAMACJA → ODRZUCONO — verifier rejects the dispute. */
+/**
+ * REKLAMACJA → ODRZUCONA — pracownik/admin rejects the dispute.
+ *
+ * `comment` stays REQUIRED: it is the rejection JUSTIFICATION and is persisted
+ * to `reklamacjaResponse` (docs/04-data-model.md — the api-layer mirror of the
+ * `UZNANA ⇒ reklamacjaOrderNumber` DB CHECK). No corrections, no amount.
+ */
 const UpdateClaimReklamacjaRejected = z
   .object({
     targetStatus: z.literal('REKLAMACJA_ODRZUCONO'),
-    /** REQUIRED — rejection reason. */
+    /** REQUIRED — rejection reason → `reklamacjaResponse`. */
     comment: UpdateClaimCommentSchema,
   })
   .strict();
 
 /**
  * PATCH /claims/:nrZgl — discriminated by `targetStatus`. The synthetic
- * `REKLAMACJA_ZAAKCEPTOWANO` / `REKLAMACJA_ODRZUCONO` literals are wire-only
- * — the service translates them to `ZAAKCEPTOWANO` / `ODRZUCONO` (with a
- * mirror to `statusBeforeReklamacja`) before persisting.
+ * `REKLAMACJA_ZAAKCEPTOWANO` / `REKLAMACJA_ODRZUCONO` literals are wire-only.
+ *
+ * REWORK 2026-07-31 — they no longer translate to a FIXED `ZAAKCEPTOWANO` /
+ * `ODRZUCONO`. Both outcomes roll `status` back to `statusBeforeReklamacja`
+ * (defensive fallback when that column is somehow NULL:
+ * `amountApproved != null ? 'ZAAKCEPTOWANO' : 'ODRZUCONO'`); the outcome itself
+ * lives in `reklamacjaResolution` (`UZNANA` / `ODRZUCONA`). A `REKLAMACJA_*`
+ * target on a claim not sitting in `REKLAMACJA` is refused with 422
+ * `REKLAMACJA_NOT_PENDING`.
  */
 export const UpdateClaimSchema = z.discriminatedUnion('targetStatus', [
   UpdateClaimToAccepted,

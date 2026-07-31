@@ -73,6 +73,18 @@ import {
   type VehicleRemovalAdminProps,
 } from './templates/vehicle-removal-admin';
 import {
+  ReklamacjaInternalSubmittedEmail,
+  type ReklamacjaInternalSubmittedProps,
+} from './templates/reklamacja-internal-submitted';
+import {
+  ReklamacjaCarrierSubmittedEmail,
+  type ReklamacjaCarrierSubmittedProps,
+} from './templates/reklamacja-carrier-submitted';
+import {
+  ReklamacjaCarrierDecisionEmail,
+  type ReklamacjaCarrierDecisionProps,
+} from './templates/reklamacja-carrier-decision';
+import {
   MAIL_PROVIDER_TOKEN,
   type MailProvider,
 } from './providers/mail-provider.interface';
@@ -792,6 +804,136 @@ export class MailService implements IMailService {
     return this._enqueueOr(
       { template: 'carrier-submitted', email, props },
       () => this.sendClaimSubmitted(email, props),
+    );
+  }
+
+  // reklamacja-internal-submitted (staff heads-up) ─────────
+  /**
+   * A carrier filed a reklamacja → every active `admin` + `pracownik`.
+   * Threads into the claim's `wniosek-<nrZgl>` Gmail conversation so the whole
+   * history of one wniosek stays in a single thread (no-op under SMTP).
+   */
+  async sendReklamacjaInternalSubmitted(
+    email: string,
+    props: ReklamacjaInternalSubmittedProps,
+  ): Promise<void> {
+    await this._send({
+      to: email,
+      subject: `Reklamacja: ${props.nrZgl} — ${props.kwota} EUR`,
+      html: await render(ReklamacjaInternalSubmittedEmail(props)),
+      text: [
+        `Reklamacja do wniosku ${props.nrZgl}.`,
+        '',
+        `Przewoźnik: ${props.carrierName}`,
+        `Ciągnik: ${props.vehiclePlate}`,
+        `Kwota wnioskowana: ${props.wnioskowana} EUR`,
+        `Kwota wypłacona: ${props.wyplacona} EUR`,
+        `Maksimum reklamacji: ${props.maksimum} EUR`,
+        `Kwota reklamacji: ${props.kwota} EUR`,
+        ...(props.tresc ? ['', 'Treść reklamacji:', props.tresc] : []),
+        '',
+        `Otwórz: ${props.deeplink}`,
+      ].join('\n'),
+      template: 'reklamacja-internal-submitted',
+      data: { nrZgl: props.nrZgl },
+      threadKey: `wniosek-${props.nrZgl}`,
+      logMsg: 'reklamacja internal email sent',
+      logExtra: { nrZgl: props.nrZgl },
+    });
+  }
+
+  enqueueReklamacjaInternalSubmitted(
+    email: string,
+    props: ReklamacjaInternalSubmittedProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'reklamacja-internal-submitted', email, props },
+      () => this.sendReklamacjaInternalSubmitted(email, props),
+    );
+  }
+
+  // reklamacja-carrier-submitted (carrier receipt) ──────────
+  async sendReklamacjaCarrierSubmitted(
+    email: string,
+    props: ReklamacjaCarrierSubmittedProps,
+  ): Promise<void> {
+    await this._send({
+      to: email,
+      subject: `Reklamacja złożona: ${props.nrZgl}`,
+      html: await render(ReklamacjaCarrierSubmittedEmail(props)),
+      text: [
+        `Potwierdzamy przyjęcie reklamacji do wniosku ${props.nrZgl}.`,
+        '',
+        `Kwota reklamacji: ${props.kwota} EUR`,
+        ...(props.tresc ? ['', 'Treść reklamacji:', props.tresc] : []),
+        '',
+        'Otrzymasz od nas wiadomość z decyzją, gdy reklamacja zostanie rozpatrzona.',
+        '',
+        `Otwórz wniosek: ${props.deeplink}`,
+      ].join('\n'),
+      template: 'reklamacja-carrier-submitted',
+      data: { nrZgl: props.nrZgl },
+      threadKey: `wniosek-${props.nrZgl}`,
+      logMsg: 'reklamacja carrier receipt email sent',
+      logExtra: { nrZgl: props.nrZgl },
+    });
+  }
+
+  enqueueReklamacjaCarrierSubmitted(
+    email: string,
+    props: ReklamacjaCarrierSubmittedProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'reklamacja-carrier-submitted', email, props },
+      () => this.sendReklamacjaCarrierSubmitted(email, props),
+    );
+  }
+
+  // reklamacja-carrier-decision (UZNANA / ODRZUCONA) ────────
+  /**
+   * The reklamacja outcome. Subject + body branch on `props.resolution` — NEVER
+   * on the claim status, which rolls back to the original wniosek verdict when a
+   * reklamacja is decided (REWORK 2026-07-31).
+   */
+  async sendReklamacjaCarrierDecision(
+    email: string,
+    props: ReklamacjaCarrierDecisionProps,
+  ): Promise<void> {
+    const accepted = props.resolution === 'UZNANA';
+    const label = accepted ? 'reklamacja uznana' : 'reklamacja odrzucona';
+    await this._send({
+      to: email,
+      subject: `Wniosek ${props.nrZgl}: ${label}`,
+      html: await render(ReklamacjaCarrierDecisionEmail(props)),
+      text: [
+        `Wniosek ${props.nrZgl}: ${label}.`,
+        '',
+        `Ciągnik: ${props.vehiclePlate}`,
+        ...(accepted ? [`Kwota do wypłaty: ${props.kwota} EUR`] : []),
+        ...(accepted && props.orderNumber
+          ? [`Nr zlecenia: ${props.orderNumber}`]
+          : []),
+        ...(props.response
+          ? ['', accepted ? 'Komentarz:' : 'Uzasadnienie:', props.response]
+          : []),
+        '',
+        `Otwórz wniosek: ${props.deeplink}`,
+      ].join('\n'),
+      template: 'reklamacja-carrier-decision',
+      data: { nrZgl: props.nrZgl, resolution: props.resolution },
+      threadKey: `wniosek-${props.nrZgl}`,
+      logMsg: 'reklamacja decision email sent',
+      logExtra: { nrZgl: props.nrZgl, resolution: props.resolution },
+    });
+  }
+
+  enqueueReklamacjaCarrierDecision(
+    email: string,
+    props: ReklamacjaCarrierDecisionProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'reklamacja-carrier-decision', email, props },
+      () => this.sendReklamacjaCarrierDecision(email, props),
     );
   }
 

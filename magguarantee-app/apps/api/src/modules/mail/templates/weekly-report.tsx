@@ -29,7 +29,12 @@ export interface WeeklyReportRow {
 export interface WeeklyReportProps {
   /** Human label for the reporting window, e.g. `20–26.07.2026`. */
   weekLabel: string;
-  /** What happened during the window (submitted / accepted / rejected). */
+  /**
+   * What happened during the window: submitted / accepted / rejected +
+   * «Uznane reklamacje» (count · Σ kwota — money owed ON TOP of the payout panel,
+   * which sums freshly-accepted wnioski only). Rendered generically as
+   * label/value pairs, so the cron owns the row list.
+   */
   rows: WeeklyReportRow[];
   /** What is open right now, regardless of when it arrived. */
   backlogRows: WeeklyReportRow[];

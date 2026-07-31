@@ -166,22 +166,30 @@ Source of truth: `Code.gs:5908-5965`.
 
 ---
 
-## 9. <a id="reklamacja-mirror"></a>Reklamacja "frozen mirror" for rollback
+## 9. <a id="reklamacja-mirror"></a>Reklamacja "frozen mirror" + explicit outcome
 
-When a carrier files a complaint (reklamacja) on an already-decided wniosek (status was `ZAAKCEPTOWANO` or `ODRZUCONO`), the system preserves the **original** values of the disputed fields BEFORE the verifier reviews:
+> ⚠️ **Updated 2026-07-31** (migration `20260731120000_add_reklamacja_resolution_fields`). The reklamacja no longer amends any claim data, and its outcome is an explicit column. The mirror stays — as a historical record and, crucially, as the **status rollback anchor**, which the decision path now actually reads.
+
+When a carrier files a reklamacja on an already-decided wniosek (status was `ZAAKCEPTOWANO` or `ODRZUCONO`), the system snapshots:
 
 - `origDateStart` ← `dateStart`
 - `origDateEnd` ← `dateEnd`
 - `origMileage` ← `mileage`
+- `origHoursAdjusted` ← `hoursAdjustedValue`
 - `statusBeforeReklamacja` ← `status`
 
-So that if the verifier ultimately **rejects** the reklamacja (transition `REKLAMACJA → ODRZUCONO`), the system can roll back the carrier's amended values to the originals without losing audit-quality data.
+**What changed.** The carrier no longer submits amended values at all (the reklamacja body is `{tresc, kwotaReklamacji}` only), so the `orig*` fields are no longer "the values to roll back to" — they are an audit-quality historical record of the original submission. `statusBeforeReklamacja`, by contrast, became **load-bearing**: on BOTH outcomes the decision sets `status = statusBeforeReklamacja` (defensive fallback when it is somehow NULL: `amountApproved != null ? 'ZAAKCEPTOWANO' : 'ODRZUCONO'`).
 
-Reverse: if the verifier accepts (transition `REKLAMACJA → ZAAKCEPTOWANO`), the orig-fields are kept for audit but no longer authoritative.
+**The outcome is NOT the status.** `reklamacjaResolution` (`UZNANA` / `ODRZUCONA`) is the only place the verdict lives. `NULL` means "never filed" OR "filed and still pending" — the two are told apart by `status === 'REKLAMACJA'` (pending) and `reklamacjaSubmitted`. `reklamacjaDecidedAt` is `NULL` on rows backfilled by the migration ("unknown"), not "pending".
 
-Source of truth: `schema.prisma` (Claim model — orig* fields, statusBeforeReklamacja); legacy `Code.gs` reklamacja-handler logic.
+Source of truth: `schema.prisma` (Claim model — `orig*`, `statusBeforeReklamacja`, `reklamacja*`); business rules in [01-overview.md §5](01-overview.md) and [13-api-design.md](13-api-design.md#update-claim-verification); eligibility/ceiling in `packages/shared/src/domain/reklamacja-rules.ts`.
 
-**What NOT to do:** do not lose the orig fields when implementing the reklamacja form. Do not let the carrier blank/edit them — they're system-managed snapshots. Do not skip the snapshot-on-submit step assuming "we have the audit log" — the audit log stores `before/after` JSON of the whole row, but business logic that needs to roll back specific fields needs them on the row itself.
+**What NOT to do:**
+
+- Do not derive the reklamacja outcome from the resulting `status` — after a decision it reads as the ORIGINAL wniosek verdict (that is the whole point of variant A). This also means the generic wniosek-decision emails must not fire on a reklamacja decision (`reklamacja-carrier-decision` does).
+- Do not touch `amountApproved` / `orderNumber` / `orderDate` / `paymentEur` / claim-level `decidedById` when resolving a reklamacja. An uznana reklamacja is paid under its own `reklamacjaOrderNumber`; the pre-rework code flipped the status to `ZAAKCEPTOWANO` on the `ODRZUCONO → REKLAMACJA → accept` path and thereby violated DB CHECK `claim_accepted_payment_complete`.
+- Do not lose the `orig*` fields, and do not let the carrier blank/edit them — they're system-managed snapshots. Do not skip the snapshot-on-submit step assuming "we have the audit log": the audit log stores whole-row `before/after` JSON, but logic keyed on a specific column needs it on the row itself (`statusBeforeReklamacja` is exactly that case).
+- Do not re-derive the reklamacja ceiling anywhere. `ReklamacjaSheet.tsx` and `ClaimsService.submitReklamacja` each hand-inlined it and drifted (the api carried a `+1 €` tolerance the web did not); both now call `getReklamacjaEligibility`.
 
 ---
 

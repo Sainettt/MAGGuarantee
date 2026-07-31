@@ -8,7 +8,9 @@
 > - `email-send` — асинхронная отправка email. Через неё идут **все**
 >   транзакционные письма (2FA, password-reset, account-created/-deactivated/
 >   -reactivated, carrier-decision, internal-decision, carrier-submitted,
->   maksim-confirmation-request, verification-digest) — каждый отправитель имеет
+>   maksim-confirmation-request, verification-digest,
+>   reklamacja-internal-submitted, reklamacja-carrier-submitted,
+>   reklamacja-carrier-decision) — каждый отправитель имеет
 >   `enqueueX`-вариант с sync-фолбэком, когда очередь недоступна (юнит-тесты).
 >   Провайдер выбирается по env `MAIL_PROVIDER`: `smtp` → Mailhog (dev/staging),
 >   `gmail` → `GmailApiProvider` с RFC-threading (prod). См.
@@ -381,7 +383,10 @@ const html = await render(<CarrierDecisionEmail claim={claim} decision="ZAAKCEPT
 | `internal-decision.tsx` | `sendInternalDecisionEmail` | После verify wniosku → planiści, opiekun, lider, wnioski@ |
 | `carrier-submitted.tsx` | `submitNewClaim` notif | После submit перевозчиком |
 | ~~`daily-reminder.tsx`~~ | ~~`sendDailyReminders`~~ | ❌ **удалён 2026-07-30** — дублировал `verification-digest.tsx` |
-| `weekly-report.tsx` | `sendWeeklyReport` | Крон пн 09:00 — сводка прошлой недели всем активным `admin`: суммарная дoплата за неделю (панель) + «W tym tygodniu» (złożone/zaakceptowane/odrzucone) + «Stan bieżący» (na weryfikacji / czeka na autoryzację / reklamacje). Шлётся даже при нулях |
+| `weekly-report.tsx` | `sendWeeklyReport` | Крон пн 09:00 — сводка прошлой недели всем активным `admin`: суммарная дoплата за неделю (панель) + «W tym tygodniu» (złożone/zaakceptowane/odrzucone + **«Uznane reklamacje»** — count · Σ `reklamacjaAmount` по `reklamacjaResolution='UZNANA'` и `reklamacjaDecidedAt` внутри недели) + «Stan bieżący» (na weryfikacji / czeka na autoryzację / reklamacje — backlog по `status='REKLAMACJA'`, без изменений). Шлётся даже при нулях. ⚠️ Счётчики «zaakceptowane»/«odrzucone» и Σ dopłat **исключают** строки, у которых рекламация была решена внутри окна: решение рекламации перештампывает `statusChangedAt` (из того же инстанса `Date`, что и `reklamacjaDecidedAt`), иначе старое решение засчиталось бы как свежее |
+| `reklamacja-internal-submitted.tsx` | — (новое, 2026-07-31) | Перевозчик подал рекламацию → **все активные `admin` + `pracownik`** (`role in [admin,pracownik], active, deletedAt: null`). Содержимое: nrZgl, перевозчик, ciągnik, kwota reklamacji + контекст (wnioskowana `origPaymentEur` / wypłacona `amountApproved` / maksimum), treść, deeplink `/employee/claims?nrZgl=…`. Threading `wniosek-<nrZgl>`. (Прежняя реализация уведомляла только **первого** найденного админа — баг, исправлен) |
+| `reklamacja-carrier-submitted.tsx` | — (новое, 2026-07-31) | Подтверждение перевозчику, что рекламация к wniosku принята: kwota, эхо treści, «otrzymasz odpowiedź». Требование заказчика. Threading `wniosek-<nrZgl>` |
+| `reklamacja-carrier-decision.tsx` | — (новое, 2026-07-31) | Решение по рекламации → перевозчику. `UZNANA` → success-тон, kwota + `reklamacjaOrderNumber` («Nr zlecenia»), опц. комментарий; `ODRZUCONA` → danger-тон + обоснование (`reklamacjaResponse`). Ветвится по `reklamacjaResolution`, **никогда** по статусу (тот при решении рекламации откатывается к исходному вердикту wniosku). Generic `carrier-decision`/`internal-decision` на этом пути **не** отправляются. Threading `wniosek-<nrZgl>` |
 | `maksim-confirmation-request.tsx` | `sendMaksimConfirmationRequest` | Авто-гейт: `doplata > próg` при zapisie weryfikacji (wniosek авто-переходит в `OCZEKUJE_NA_AUTORYZACJE`) |
 | `guarantee-reminder-carrier.tsx` (#17) | (новое, Guarantee Watchdog) | Крон 07:10 — напоминание перевозчику D-3/D-1 (одно письмо, список машин); CTA «Zgłoś wyjazd» → `/carrier/delegations/new` |
 | `guarantee-opiekun-digest.tsx` (#18) | (новое, Guarantee Watchdog) | Крон 07:10 — дайджест опекуну: секция «zbliżające się terminy» (D-3/D-1) + секция «naruszenia» (эпизоды, впервые ставшие `violated` сегодня). Персональный `User.email`, **не** группа |

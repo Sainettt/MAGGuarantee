@@ -11,6 +11,7 @@ import Link from 'next/link';
 import type { ClaimListItem } from '@magguarantee/shared';
 
 import { StatusBadge } from '@/components/carrier/StatusBadge';
+import { ReklamacjaResolutionChip } from '@/components/claims/ReklamacjaResolutionChip';
 import {
   headlineAmount,
   MONEY_TONE_TEXT,
@@ -113,12 +114,23 @@ export function ClaimCard({ claim }: ClaimCardProps) {
         )}
       </div>
 
-      {claim.reklamacjaSubmitted && (
-        <div className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-warning-bg text-warning-dark dark:bg-warning/15 dark:text-warning px-2 py-1 text-xs font-bold">
-          <AlertTriangle size={12} aria-hidden />
-          {t('reklamacjaIndicator')}
-        </div>
-      )}
+      {/* Reklamacja slot (UPDATE 2026-07-31) — driven by `reklamacjaResolution`,
+          not by `reklamacjaSubmitted` alone. Pending keeps the warning-indicator
+          recipe verbatim; a DECIDED reklamacja shows the resolution chip in the
+          same slot, same size, same 12px icon. Otherwise a claim decided weeks
+          ago would keep advertising a complaint that is already closed. */}
+      {claim.reklamacjaSubmitted &&
+        (claim.reklamacjaResolution === null ? (
+          <div className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-warning-bg text-warning-dark dark:bg-warning/15 dark:text-warning px-2 py-1 text-xs font-bold">
+            <AlertTriangle size={12} aria-hidden />
+            {t('reklamacjaIndicator')}
+          </div>
+        ) : (
+          <ReklamacjaResolutionChip
+            resolution={claim.reklamacjaResolution}
+            className="mt-3 py-1"
+          />
+        ))}
     </Link>
   );
 }

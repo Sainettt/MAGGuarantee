@@ -7,6 +7,7 @@ import type {
   ClaimStatus,
   DelegationStatus,
   KmCalcBreakdown,
+  ReklamacjaResolution,
 } from '@magguarantee/shared';
 
 import { PrismaService } from '../prisma/prisma.service';
@@ -72,6 +73,27 @@ export interface ClaimRow {
   reklamacjaText: string | null;
   reklamacjaResponse: string | null;
   reklamacjaAmount: number | null;
+  /**
+   * Reklamacja decision columns (REWORK 2026-07-31, migration
+   * `20260731120000_add_reklamacja_resolution_fields`).
+   *
+   *  - `reklamacjaResolution`  — the OUTCOME. `null` = never filed OR pending
+   *    (pending ⇔ `status === 'REKLAMACJA'`). The decision rolls `status` back to
+   *    `statusBeforeReklamacja` for BOTH outcomes, so the outcome CANNOT be
+   *    derived from `status`.
+   *  - `reklamacjaOrderNumber` — «Nr zlecenia» an UZNANA reklamacja is paid
+   *    under; independent of the wniosek's own `orderNumber` (never touched).
+   *  - `reklamacjaSubmittedAt` — when the carrier filed (`statusChangedAt` is
+   *    re-stamped by the decision, so it cannot stand in).
+   *  - `reklamacjaDecidedAt` / `reklamacjaDecidedById` — when / by whom the
+   *    reklamacja was decided. Distinct from the claim-level
+   *    `decidedById`, which keeps the ORIGINAL wniosek decision actor.
+   */
+  reklamacjaResolution: ReklamacjaResolution | null;
+  reklamacjaOrderNumber: string | null;
+  reklamacjaSubmittedAt: Date | null;
+  reklamacjaDecidedAt: Date | null;
+  reklamacjaDecidedById: string | null;
   statusBeforeReklamacja: ClaimStatus | null;
   origDateStart: Date | null;
   origDateEnd: Date | null;
@@ -247,6 +269,26 @@ export interface UpdateClaimData {
   reklamacjaText?: string | null;
   reklamacjaAmount?: number | null;
   reklamacjaResponse?: string | null;
+  /** Carrier's filing timestamp — written once by `submitReklamacja`. */
+  reklamacjaSubmittedAt?: Date | null;
+
+  // ── staff-side reklamacja decision (REWORK 2026-07-31) ──
+  /**
+   * `UZNANA` / `ODRZUCONA`. Written ONLY by the `REKLAMACJA_*` PATCH branches,
+   * together with `status = statusBeforeReklamacja` — the outcome never leaks
+   * into the claim status. `UZNANA` requires a non-empty
+   * `reklamacjaOrderNumber` (DB CHECK `claim_reklamacja_resolution_complete`).
+   */
+  reklamacjaResolution?: ReklamacjaResolution | null;
+  reklamacjaOrderNumber?: string | null;
+  /**
+   * Written from the SAME `Date` instance as `statusChangedAt` on a reklamacja
+   * decision — the weekly report relies on that exact equality to tell a
+   * status-rollback apart from a fresh decision (see
+   * `WeeklyReportRepository.windowStats`).
+   */
+  reklamacjaDecidedAt?: Date | null;
+  reklamacjaDecidedById?: string | null;
 
   // ── status & workflow (Phase 4 verification) ──
   status?: ClaimStatus;
@@ -548,6 +590,11 @@ export class ClaimsRepository {
     set('reklamacjaText');
     set('reklamacjaAmount');
     set('reklamacjaResponse');
+    set('reklamacjaSubmittedAt');
+    set('reklamacjaResolution');
+    set('reklamacjaOrderNumber');
+    set('reklamacjaDecidedAt');
+    set('reklamacjaDecidedById');
     set('status');
     set('statusChangedAt');
     set('statusBeforeReklamacja');
@@ -674,6 +721,14 @@ export class ClaimsRepository {
       reklamacjaText: row.reklamacjaText,
       reklamacjaResponse: row.reklamacjaResponse,
       reklamacjaAmount: decimalToNumber(row.reklamacjaAmount),
+      // Reklamacja decision columns — plain scalars, forwarded verbatim.
+      // `?? null` is a defensive sentinel for the soft-delete extension's
+      // widened inferred type (mirrors `autoRecalcState` below).
+      reklamacjaResolution: row.reklamacjaResolution ?? null,
+      reklamacjaOrderNumber: row.reklamacjaOrderNumber ?? null,
+      reklamacjaSubmittedAt: row.reklamacjaSubmittedAt ?? null,
+      reklamacjaDecidedAt: row.reklamacjaDecidedAt ?? null,
+      reklamacjaDecidedById: row.reklamacjaDecidedById ?? null,
       statusBeforeReklamacja: row.statusBeforeReklamacja,
       origDateStart: row.origDateStart,
       origDateEnd: row.origDateEnd,
@@ -762,6 +817,11 @@ interface ClaimPrismaShape {
   reklamacjaText: string | null;
   reklamacjaResponse: string | null;
   reklamacjaAmount: { toNumber(): number } | number | null;
+  reklamacjaResolution?: ReklamacjaResolution | null;
+  reklamacjaOrderNumber?: string | null;
+  reklamacjaSubmittedAt?: Date | null;
+  reklamacjaDecidedAt?: Date | null;
+  reklamacjaDecidedById?: string | null;
   statusBeforeReklamacja: ClaimStatus | null;
   origDateStart: Date | null;
   origDateEnd: Date | null;

@@ -77,6 +77,16 @@ enum ClaimStatus {
   OCZEKUJE_NA_AUTORYZACJE @map("OCZEKUJE NA AUTORYZACJĘ")
 }
 
+// REWORK 2026-07-31 (migration add_reklamacja_resolution_fields) — outcome of
+// the reklamacja decision. Deliberately NOT a ClaimStatus value: the decision
+// rolls `status` BACK to `statusBeforeReklamacja` for BOTH outcomes, so the
+// outcome needs its own column. NULL = no reklamacja filed OR still pending
+// (pending ⇔ status = REKLAMACJA).
+enum ReklamacjaResolution {
+  UZNANA
+  ODRZUCONA
+}
+
 // REWORK 2026-06-20 (#4, docs/20 §0″) — statuses operational again:
 // carrier→zgloszony, eksport→gotowy, weryfikator→w_trasie→zjechal.
 enum DelegationStatus {
@@ -561,10 +571,30 @@ model Claim {
   amountApproved  Decimal? @db.Decimal(12, 2)       // status-conditional via CHECK
 
   // reklamacja "frozen mirror" — see docs/19-known-quirks.md (#reklamacja-mirror)
+  //
+  // REWORK 2026-07-31 (migration add_reklamacja_resolution_fields) — the OUTCOME
+  // of the reklamacja is now explicit (`reklamacjaResolution`), because the
+  // decision rolls `status` back to `statusBeforeReklamacja` for BOTH outcomes
+  // and therefore cannot encode the outcome itself. One reklamacja per claim
+  // (one-shot `reklamacjaSubmitted`), filed on a DECIDED wniosek within 48h of
+  // `statusChangedAt`, capped at `origPaymentEur - (amountApproved if
+  // ZAAKCEPTOWANO else 0)`. The wniosek's own payout trio (`amountApproved`,
+  // `orderNumber`, `orderDate`) is NEVER touched by the reklamacja — an accepted
+  // one is paid out under `reklamacjaOrderNumber`.
   reklamacjaSubmitted    Boolean      @default(false)
   reklamacjaText         String?
-  reklamacjaResponse     String?
+  reklamacjaResponse     String?                          // required (app layer) when resolution=ODRZUCONA
   reklamacjaAmount       Decimal?     @db.Decimal(12, 2)
+  // «Nr zlecenia» of an UZNANA reklamacja — written ONLY on acceptance.
+  // Independent from `orderNumber` (UI prefills from it, values may differ).
+  // status-conditional: CHECK claim_reklamacja_resolution_complete forces
+  // non-empty when reklamacjaResolution=UZNANA.
+  reklamacjaOrderNumber  String?
+  reklamacjaResolution   ReklamacjaResolution?            // NULL = none filed, or pending
+  reklamacjaSubmittedAt  DateTime?                        // when the carrier filed (statusChangedAt is re-stamped by the decision)
+  reklamacjaDecidedAt    DateTime?                        // when pracownik/admin decided
+  reklamacjaDecidedById  String?      @db.Uuid            // mirrors `verifiedBy` (optional FK, no index)
+  reklamacjaDecidedBy    User?        @relation("ClaimReklamacjaDecidedBy", fields: [reklamacjaDecidedById], references: [id])
   // KorektaGodzin — split into immutable carrier snapshot + verifier-mutable
   // applied value. See "Korekta godzin — orig vs applied" below.
   origHoursAdjusted      Decimal?     @db.Decimal(5, 2)
@@ -900,8 +930,10 @@ derived hours.
 |---|---|---|
 | `nrZgl`, `carrierId`, `vehiclePlateSnapshot`, `dateStart`, `dateEnd`, `timeFrom`, `timeTo` | Strict everywhere | |
 | `drivenDays`, `mileage`, `kmPerDay`, `kmGuaranteed`, `kmDifference`, `paymentEur`, `ratePerKmEffective` | Strict everywhere | Derived by server at submit |
-| `orderNumber`, `orderDate`, `amountApproved` | DB nullable + CHECK `claim_accepted_payment_complete` | Required when `status='ZAAKCEPTOWANO'` |
-| `decidedById`, `comment`, `breakdown`, reklamacja mirror fields | Optional everywhere | |
+| `orderNumber`, `orderDate`, `amountApproved` | DB nullable + CHECK `claim_accepted_payment_complete` | Required when `status='ZAAKCEPTOWANO'`. Untouched by the reklamacja flow, so an UZNANA reklamacja can never break this CHECK |
+| `reklamacjaOrderNumber` | DB nullable + CHECK `claim_reklamacja_resolution_complete` | Required (non-empty) when `reklamacjaResolution='UZNANA'` |
+| `reklamacjaResponse` | Optional (DB nullable) | Required when `reklamacjaResolution='ODRZUCONA'` — api-layer only (mirror rule of the CHECK above; not expressible without over-constraining free-form answers on pending/accepted reklamacje) |
+| `decidedById`, `comment`, `breakdown`, reklamacja mirror fields, `reklamacjaResolution`/`SubmittedAt`/`DecidedAt`/`DecidedById` | Optional everywhere | |
 
 ### Delegation
 
@@ -962,7 +994,7 @@ derived hours.
 | AW | Marża | removed 2026-07-24 — `margin` dropped with the manual authorization flow (migration `remove_manual_authorization_flow`); not carried over. |
 | AX | KwotaMaksima | removed 2026-07-24 — `amountMaximum` (kwota Maksima) dropped; the whole concept is retired (migration `remove_manual_authorization_flow`). |
 
-Дополнительно в Claim, не имеющего колонки в Sheets: `breakdown` (JSON, помесячный расчёт), `ratePerKmEffective`, `decidedById`, `verifiedAt`/`verifiedById` (checkpoint «Zapisz weryfikację»), `origPaymentEur` (immutable submit-time payment snapshot), maksimGate* (auto Maksim-gate state).
+Дополнительно в Claim, не имеющего колонки в Sheets: `breakdown` (JSON, помесячный расчёт), `ratePerKmEffective`, `decidedById`, `verifiedAt`/`verifiedById` (checkpoint «Zapisz weryfikację»), `origPaymentEur` (immutable submit-time payment snapshot), maksimGate* (auto Maksim-gate state), `reklamacjaResolution`/`reklamacjaOrderNumber`/`reklamacjaSubmittedAt`/`reklamacjaDecidedAt`/`reklamacjaDecidedById` (rework 2026-07-31 — исход рекламации и его аудит; в Sheets исход подменялся самим статусом).
 
 ### AUTA → Vehicle
 
@@ -1127,6 +1159,7 @@ derived hours.
 | `20260615120000_drop_vehicle_trailer_brand_model_year` | Деструктивный `DROP COLUMN` (user-confirmed full removal — UI + API + DB). Удаляет `vehicles.brand`, `vehicles.model`, `vehicles.year`, `trailers.brand`, `trailers.model`, `trailers.year` — описательные характеристики авто/прицепа, выпиленные из продукта. БД greenfield (пустая + seed-only), поэтому plain DROP COLUMN корректен — без backfill, без down-миграции. Соседние поля (`notes`, размеры/оборудование прицепа) не затронуты. |
 | `20260617130000_drop_vehicle_gps_toggle_require_gps_device` | GPS-номер делается обязательным у каждого авто. Forward-only. Порядок: DROP CHECK `vehicle_gps_device_when_gps_on` (добавлен в `20260507191424_phase3_blocks`) → DROP COLUMN `vehicles.gps` (legacy «есть GPS» toggle) → defensive backfill `UPDATE … SET gpsMobilePhone='UNKNOWN' WHERE … IS NULL` (no-op на пустой БД; страхует stale dev-строки из старого `gps=false` пути) → `vehicles.gpsMobilePhone` SET NOT NULL. Продуктовое решение 2026-06-17: каждое авто в km-гарантийной программе GPS-tracked, поэтому boolean-toggle избыточен, а device id присутствует всегда. CHECK дропается ДО колонки `gps`, на которую он ссылается; Zod (`gpsMobilePhone` required, non-empty) не даёт плейсхолдеру пережить round-trip через API. |
 | `20260707130000_guarantee_watchdog` | Guarantee Watchdog (план 2026-07-07). Аддитивная миграция. Новые enum-ы `GuaranteeEpisodeState {warning, violated, resolved}`, `GuaranteeAnchorSource {zjechal, agreement}`, `GuaranteeResolveReason {wyjazd, agreement_off, vehicle_inactive}`. Новая таблица **`guarantee_idle_episodes`** — журнал «плохих» гарантийных циклов машины (FK на `vehicles` и `carriers` `ON DELETE RESTRICT`; nullable FK `resolvedByDelegationId` на `delegations` `ON DELETE SET NULL`; **без `deletedAt`** — append-only журнал, soft-delete-extension его игнорирует; индексы `(carrierId, state)`, `(vehicleId, state)`). Hand-added SQL: **partial unique** `GuaranteeIdleEpisode_open_vehicle_key` `ON ("vehicleId") WHERE "state" <> 'resolved'` — не выразимо в Prisma DSL, держит инвариант «≤1 открытый эпизод на машину». Новая колонка **`vehicles.agreementSince DATE`** (дата включения гарантии; API ведёт её на toggle agreement). **Бэкфилл:** `UPDATE vehicles SET agreementSince = CURRENT_DATE WHERE agreement = true AND agreementSince IS NULL` — rollout-grace: уже-гарантийные машины получают свежее 10-раб.-дневное окно с дня деплоя. Hand-authored (БД недоступна для интерактивного `migrate dev` в среде агента) — SQL идентичен `migrate diff` (проверено `migrate status` = «up to date»), применена через `prisma migrate deploy`. |
+| `20260731120000_add_reklamacja_resolution_fields` | Reworked «reklamacje». Аддитивная миграция: новый enum `ReklamacjaResolution {UZNANA, ODRZUCONA}` + 5 nullable колонок на `claims` — `reklamacjaOrderNumber TEXT` («nr zlecenia» уznanej рекламации, отдельный от `orderNumber`), `reklamacjaResolution` (исход; NULL = нет рекламации или pending), `reklamacjaSubmittedAt`/`reklamacjaDecidedAt TIMESTAMP(3)`, `reklamacjaDecidedById UUID` (FK → `users(id)` `ON DELETE SET NULL ON UPDATE CASCADE`, без индекса — зеркало `claims_verifiedById_fkey`). **Best-effort бэкфилл** строк, поданных по старой семантике (прод с 2026-07-29): pending (`status='REKLAMACJA'`) получают `reklamacjaSubmittedAt = statusChangedAt`; решённые (`status IN ('ZAAKCEPTOWANO','ODRZUCONO')`) — `reklamacjaResolution` из статуса (`ZAAKCEPTOWANO→UZNANA`, иначе `ODRZUCONA`) + для UZNANA `reklamacjaOrderNumber = orderNumber` (`COALESCE(NULLIF(...,''),'BRAK')`); `reklamacjaDecidedAt`/`ById` остаются NULL (моменты не записывались — NULL = «неизвестно»). **Добавляет CHECK** `claim_reklamacja_resolution_complete` (`reklamacjaResolution IS DISTINCT FROM 'UZNANA' OR reklamacjaOrderNumber` не пустой) — ПОСЛЕ бэкфилла, иначе бэкфилленные UZNANA-строки его не пройдут. `claim_accepted_payment_complete` НЕ трогается: рекламация никогда не пишет `amountApproved`/`orderNumber`/`orderDate`. Hand-authored (БД недоступна в среде агента), применится через `prisma migrate deploy`. |
 | `20260722083212_monthly_limit_km_per_saturday` | Odd-Saturday guarantee. Аддитивная миграция: `ALTER TABLE monthly_limits ADD COLUMN kmPerSaturday DECIMAL(8,2)` (nullable, без `@default` — существующие строки бэкфилятся в `NULL`, без потери данных). Семантика: км за одну зачётную нечётную (1-ю/3-ю/5-ю) субботу месяца, оцениваются по `ratePerKm`; `NULL`/`0` ⇒ `0` в km-calc (fallback владеет api — km-calc.service / limits, **НЕ** БД). Та же точность, что у `kmPerDay` (`DECIMAL(8,2)`; km — Decimal, не Float). |
 
 Production deploy: `prisma migrate deploy` в CI/CD пайплайне (без `--create-only`).

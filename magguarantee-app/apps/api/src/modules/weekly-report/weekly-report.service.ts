@@ -72,6 +72,14 @@ export class WeeklyReportService {
       { label: 'Złożone wnioski', value: String(window.submitted) },
       { label: 'Zaakceptowane', value: String(window.accepted) },
       { label: 'Odrzucone', value: String(window.rejected) },
+      // Uznane reklamacje are money owed ON TOP of the payout panel above (which
+      // only sums freshly-accepted wnioski), so the count carries its own sum
+      // inline. Keyed on `reklamacjaDecidedAt` ∈ window + resolution=UZNANA — see
+      // the coupling note in `WeeklyReportRepository.windowStats`.
+      {
+        label: 'Uznane reklamacje',
+        value: `${window.reklamacjeUznane} · ${window.reklamacjeUznaneEur.toFixed(2)} EUR`,
+      },
     ];
     const backlogRows: WeeklyReportRow[] = [
       { label: 'Na weryfikacji', value: String(backlog.naWeryfikacji) },
@@ -105,6 +113,8 @@ export class WeeklyReportService {
       accepted: window.accepted,
       rejected: window.rejected,
       payoutEur: window.payoutEur,
+      reklamacjeUznane: window.reklamacjeUznane,
+      reklamacjeUznaneEur: window.reklamacjeUznaneEur,
     });
   }
 

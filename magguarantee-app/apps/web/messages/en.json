@@ -1148,6 +1148,7 @@
           "doplataSection": "Guarantee payout",
           "decyzjaSection": "Decision",
           "decyzjaSubtitle": "Final step — choose what happens to this claim.",
+          "decyzjaSubtitleReklamacja": "Final step — decide whether the reclamation is upheld.",
           "secondaryHistory": "History",
           "decisionRequired": "Pick a decision to save the claim.",
           "terminalState": "The claim is in a terminal state — no decisions available.",
@@ -1219,8 +1220,13 @@
           "doplata": "Guarantee payout",
           "comment": "Comment",
           "commentRejected": "Rejection reason",
-          "commentReklamacja": "Decision rationale",
-          "reklamacjaAmount": "Approved reclamation amount (EUR)",
+          "reklamacjaOrderNumber": "Order number",
+          "reklamacjaOrderNumberHint": "It can be a corrected number of the previous order or an entirely new one — enter the order number the reclamation amount will be paid against.",
+          "reklamacjaPayoutAmount": "Amount to pay (from the reclamation)",
+          "reklamacjaCommentPlaceholder": "Optional note about the decision",
+          "reklamacjaResponse": "Reason for rejecting the reclamation",
+          "reklamacjaResponsePlaceholder": "Explain to the carrier why the reclamation was not upheld",
+          "reklamacjaStatusReturnHint": "After saving, the claim returns to the \"{status}\" status — the reclamation outcome is shown separately.",
           "submit": "Confirm",
           "submitDecision": "Save decision",
           "submitting": "Saving…",
@@ -1239,6 +1245,19 @@
           "factsPendingAuthorization": "Verification data is locked — the claim is awaiting Maksim's authorisation. Only an administrator can make changes.",
           "factsPendingAuthorizationAdmin": "The claim is awaiting Maksim's authorisation. As an administrator you can still correct the verification data."
         },
+        "reklamacja": {
+          "title": "Reclamation",
+          "amount": "Reclamation amount",
+          "maxAtSubmit": "Maximum (requested − paid)",
+          "maxAtSubmitValue": "{max} = {requested} − {paid}",
+          "maxAtSubmitRejectedClause": "(claim rejected)",
+          "submittedAt": "Filed",
+          "text": "Reclamation text",
+          "orderNumber": "Order number",
+          "decidedAt": "Decided",
+          "response": "Response",
+          "alreadyResolved": "This reclamation has already been decided."
+        },
         "history": {
           "empty": "No edit history.",
           "origData": "Original data (before reclamation)",
@@ -1250,13 +1269,18 @@
           "current": "Current",
           "decidedBy": "Decided by: {actor}",
           "decidedAt": "Decided on: {date}",
+          "reklamacjaRecord": "Reclamation record",
+          "reklamacjaAmount": "Reclamation amount",
+          "reklamacjaOrderNumber": "Order number (reclamation)",
+          "reklamacjaSubmittedAt": "Reclamation filed",
+          "reklamacjaDecidedAt": "Reclamation decided",
           "reklamacjaText": "Reclamation text",
           "reklamacjaResponse": "Reclamation response"
         },
         "targetStatus": {
           "ZAAKCEPTOWANO": "Accept",
           "ODRZUCONO": "Reject",
-          "REKLAMACJA_ZAAKCEPTOWANO": "Accept reclamation",
+          "REKLAMACJA_ZAAKCEPTOWANO": "Uphold reclamation",
           "REKLAMACJA_ODRZUCONO": "Reject reclamation"
         }
       }
@@ -1613,18 +1637,31 @@
         "details": "Details",
         "amountRequested": "Amount requested",
         "amountApproved": "Amount approved",
+        "totalPaid": "Total paid",
         "orderNumber": "Order number",
         "orderDate": "Order date",
         "comment": "Comment",
-        "reklamacjaText": "Reclamation text",
-        "reklamacjaResponse": "Reclamation response",
         "moneyLabelApproved": "amount approved",
         "moneyLabelCalc": "calculation",
+        "moneyLabelTotalPaid": "total paid",
+        "totalBreakdown": "including decision: {approved} € · reclamation: {reklamacja} €",
         "moneyRequested": "Requested",
         "moneyAfterVerification": "After verification",
         "vehiclePlate": "Vehicle",
         "submittedAt": "Submitted",
-        "decidedAt": "Decision date"
+        "decidedAt": "Decision date",
+        "reklamacjaOutcome": {
+          "title": "Reclamation",
+          "bannerPending": "The reclamation has been filed and is awaiting a decision.",
+          "bannerUznana": "Reclamation upheld — {amount} € will be paid.",
+          "bannerOdrzucona": "Reclamation rejected.",
+          "amount": "Reclamation amount",
+          "submittedAt": "Filed on",
+          "text": "Reclamation text",
+          "orderNumber": "Order number",
+          "decidedAt": "Decided on",
+          "response": "MAGTRANS response"
+        }
       },
       "form": {
         "sectionVehicleAndDriver": "Vehicle and driver",
@@ -1716,14 +1753,29 @@
       "sheetSubtitle": "Claim {nrZgl}",
       "expiredTitle": "Reclamation window expired",
       "expiredMessage": "Reclamation can be submitted within 48 hours of the decision.",
+      "alreadyTitle": "Reclamation already filed",
+      "alreadyMessage": "A reclamation for this claim has already been filed.",
+      "noDeltaTitleSheet": "Nothing left to reclaim",
+      "notDecidedTitle": "This claim has not been decided yet",
+      "notDecidedMessage": "A reclamation can only be filed once the claim has been decided.",
       "fieldText": "Reclamation text",
-      "fieldTextHint": "Describe the reclamation reason — between 20 and 2000 characters.",
+      "fieldTextHint": "Describe the reason for the reclamation — up to 4000 characters.",
       "fieldAmount": "Reclamation amount (EUR)",
-      "fieldAmountMaxHint": "Maximum: {amount} €",
+      "maxHint": "Maximum: {max} € — amount requested ({requested} €) minus amount paid ({paid} €).",
+      "maxHintRejected": "Maximum: {max} € — the entire amount requested (the claim was rejected, nothing was paid).",
+      "deadlinePassed": "The reclamation window has closed (48 hours from the decision).",
+      "noDelta": "A reclamation is not possible — the amount paid covers the entire amount requested.",
+      "noDeltaZero": "A reclamation is not possible — this claim contained no amount to pay out.",
+      "noDeltaTitle": "A reclamation concerns the unpaid remainder; this claim has none (requested {requested} €, paid {paid} €).",
       "submit": "Send reclamation",
       "submitting": "Sending…",
       "submittedToast": "Reclamation sent",
       "submitErrorToast": "Failed to send reclamation",
+      "errorAlreadySubmitted": "A reclamation for this claim has already been filed.",
+      "errorNotDecided": "This claim has not been decided yet — a reclamation can be filed after the decision.",
+      "errorWindowExpired": "The reclamation window has closed (48 hours from the decision).",
+      "errorNoDelta": "A reclamation is not possible — the amount paid covers the entire amount requested.",
+      "errorExceedsCap": "The reclamation amount cannot exceed {max} €.",
       "countdownExpired": "Reclamation window expired",
       "countdownRemainingLabel": "Remaining:"
     },
@@ -2266,6 +2318,13 @@
     }
   },
   "claim": {
+    "reklamacja": {
+      "resolution": {
+        "pending": "Reclamation pending",
+        "uznana": "Reclamation upheld",
+        "odrzucona": "Reclamation rejected"
+      }
+    },
     "autoRecalc": {
       "applied": "Recalculated to actual return date",
       "skipped": "Needs attention: actual return date differs from the claim period",

@@ -31,6 +31,10 @@ function makeWindowStats(
     accepted: 7,
     rejected: 2,
     payoutEur: 4321.5,
+    // Uznane reklamacje — the block added with the reklamacja rework
+    // (2026-07-31): count + Σ kwota decided inside the reported week.
+    reklamacjeUznane: 3,
+    reklamacjeUznaneEur: 275.25,
     ...overrides,
   };
 }
@@ -141,7 +145,15 @@ describe('WeeklyReportService', () => {
     ];
     expect(to).toBe('a@magtrans.eu');
     expect(props.weekLabel).toBe('20.07–26.07.2026');
-    expect(props.rows.map((r) => r.value)).toEqual(['12', '7', '2']);
+    // 4th row = «Uznane reklamacje»: count · Σ kwota (money owed on top of the
+    // payout panel, which sums freshly-accepted wnioski only).
+    expect(props.rows.map((r) => r.value)).toEqual([
+      '12',
+      '7',
+      '2',
+      '3 · 275.25 EUR',
+    ]);
+    expect(props.rows[3]!.label).toBe('Uznane reklamacje');
     expect(props.backlogRows.map((r) => r.value)).toEqual(['5', '1', '0']);
     // Bare amount + currency, matching the decision-email convention.
     expect(props.payoutTotal).toBe('4321.50 EUR');
@@ -164,6 +176,8 @@ describe('WeeklyReportService', () => {
         accepted: 0,
         rejected: 0,
         payoutEur: 0,
+        reklamacjeUznane: 0,
+        reklamacjeUznaneEur: 0,
       }),
       backlog: makeBacklog({
         naWeryfikacji: 0,
@@ -176,9 +190,15 @@ describe('WeeklyReportService', () => {
     expect(enqueueWeeklyReport).toHaveBeenCalledTimes(1);
     const [, props] = enqueueWeeklyReport.mock.calls[0] as [
       string,
-      { payoutTotal: string },
+      { payoutTotal: string; rows: { label: string; value: string }[] },
     ];
     expect(props.payoutTotal).toBe('0.00 EUR');
+    // The reklamacja line is rendered even at zero — same "a silent report is a
+    // broken report" reasoning as the rest of the numbers.
+    expect(props.rows[3]).toEqual({
+      label: 'Uznane reklamacje',
+      value: '0 · 0.00 EUR',
+    });
   });
 
   it('skips (and warns) when there is no active admin', async () => {

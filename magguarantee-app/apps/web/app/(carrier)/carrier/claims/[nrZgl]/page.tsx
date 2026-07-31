@@ -1,17 +1,28 @@
 'use client';
 
 // Phase 3 — claim detail (carrier view). Read-only, with a "Złóż reklamację"
-// CTA gated by the same window the server enforces:
-//   status ∈ {ZAAKCEPTOWANO, ODRZUCONO} AND !reklamacjaSubmitted AND
-//   now() − statusChangedAt ≤ 48h.
+// CTA gated by the SHARED eligibility predicate (`getReklamacjaEligibility` in
+// `@magguarantee/shared`, the very helper the api enforces):
+//   decided ∧ !reklamacjaSubmitted ∧ maxAmount > 0 ∧ within 48h of the decision.
+//
+// REWORK 2026-07-31 (docs/14 §"Reklamacja sheet" + §"…outcome block"):
+//   - the CTA slot holds the button OR a muted dead-end line OR nothing — never
+//     a disabled button (§6.5.13);
+//   - a decided reklamacja is invisible in the status (the wniosek rolls back to
+//     `statusBeforeReklamacja`), so the outcome lives in <ReklamacjaOutcome>;
+//   - the money hero gains a third state, «wypłacono łącznie», for an uznana
+//     reklamacja — `amountApproved` alone is then the WRONG number (and is
+//     `null` outright when the wniosek itself was rejected).
 
-import { ArrowLeft, ArrowRight, MessageSquareWarning } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Clock, Info, MessageSquareWarning } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
+import { getReklamacjaEligibility } from '@magguarantee/shared';
 
 import { BreakdownTable } from '@/components/carrier/BreakdownTable';
+import { ReklamacjaOutcome } from '@/components/carrier/ReklamacjaOutcome';
 import { ReklamacjaSheet } from '@/components/carrier/ReklamacjaSheet';
 import { StatusBadge } from '@/components/carrier/StatusBadge';
 import { HoursReadout } from '@/components/claims/HoursReadout';
@@ -26,8 +37,6 @@ import {
 } from '@/lib/claims/money';
 import { useClaim } from '@/lib/hooks/useClaims';
 import { cn } from '@/lib/utils';
-
-const REKLAMACJA_WINDOW_MS = 48 * 60 * 60 * 1000;
 
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
@@ -61,6 +70,7 @@ function formatEur(n: number | null): string {
 export default function ClaimDetailPage() {
   const t = useTranslations('carrier.claims');
   const tDetail = useTranslations('carrier.claims.detail');
+  const tReklamacja = useTranslations('carrier.reklamacja');
   const params = useParams<{ nrZgl: string }>();
   const nrZgl = decodeURIComponent(params.nrZgl);
   const { data: claim, isLoading } = useClaim(nrZgl);
@@ -94,18 +104,80 @@ export default function ClaimDetailPage() {
     );
   }
 
-  // Reklamacja gating — mirror the server check exactly.
-  const canSubmitReklamacja = (() => {
-    if (claim.reklamacjaSubmitted) return false;
-    if (claim.status !== 'ZAAKCEPTOWANO' && claim.status !== 'ODRZUCONO')
-      return false;
-    if (!claim.statusChangedAt) return false;
-    const ageMs = Date.now() - new Date(claim.statusChangedAt).getTime();
-    return ageMs <= REKLAMACJA_WINDOW_MS;
-  })();
+  // Reklamacja gating — THE shared predicate (never a local re-derivation; the
+  // two copies that used to exist had already drifted apart).
+  const eligibility = getReklamacjaEligibility(
+    {
+      status: claim.status,
+      origPaymentEur: claim.origPaymentEur,
+      paymentEur: claim.paymentEur,
+      amountApproved: claim.amountApproved,
+      reklamacjaSubmitted: claim.reklamacjaSubmitted,
+      statusChangedAt: claim.statusChangedAt,
+    },
+    new Date(),
+  );
+  const requestedForHint = claim.origPaymentEur ?? claim.paymentEur;
 
-  const headline = headlineAmount(claim);
   const origMoved = verifierMovedAmount(claim);
+
+  // ── Money hero — three states, ONE typographic slot (no layout shift) ──
+  // «Wypłacono łącznie» wins whenever the reklamacja was uznana: either part of
+  // the sum may be 0/null (a rejected wniosek with an uznana reklamacja pays
+  // ONLY the reklamacja).
+  const headline = headlineAmount(claim);
+  const totalPaid =
+    claim.reklamacjaResolution === 'UZNANA'
+      ? (claim.amountApproved ?? 0) + (claim.reklamacjaAmount ?? 0)
+      : null;
+  const heroValue = totalPaid ?? headline.value;
+  const heroLabel =
+    totalPaid != null
+      ? tDetail('moneyLabelTotalPaid')
+      : headline.kind === 'approved'
+        ? tDetail('moneyLabelApproved')
+        : tDetail('moneyLabelCalc');
+  // Money tone stays STATUS-driven (`lib/claims/money.ts`) — except for the
+  // total, which is money actually granted, so it takes the granted tone even
+  // when the wniosek's own status is «Odrzucono».
+  const heroTone =
+    totalPaid != null
+      ? MONEY_TONE_TEXT.approved
+      : MONEY_TONE_TEXT[moneyTone(claim.status)];
+
+  // ── The CTA slot (button | muted dead-end line | nothing) ──
+  // Same slot for all states so the card's bottom edge never reflows. An
+  // already-filed reklamacja renders NOTHING here — the outcome block is the
+  // explanation.
+  const reklamacjaSlot = eligibility.canFile ? (
+    <Button type="button" size="sm" onClick={() => setSheetOpen(true)}>
+      <MessageSquareWarning size={14} />
+      {tDetail('submitReklamacja')}
+    </Button>
+  ) : eligibility.blockedReason === 'WINDOW_EXPIRED' ? (
+    <p className="inline-flex items-center gap-1.5 text-xs text-text-sub">
+      <Clock size={12} aria-hidden />
+      {tReklamacja('deadlinePassed')}
+    </p>
+  ) : eligibility.blockedReason === 'NO_DELTA' ? (
+    <p
+      className="inline-flex items-center gap-1.5 text-xs text-text-sub"
+      title={tReklamacja('noDeltaTitle', {
+        requested: formatEur(requestedForHint),
+        // Derived from the shared ceiling so the printed pair always explains
+        // the verdict (a rejected wniosek counts as «paid 0» by definition,
+        // whatever a stale `amountApproved` says).
+        paid: formatEur(requestedForHint - eligibility.maxAmount),
+      })}
+    >
+      <Info size={12} aria-hidden />
+      {/* Two copies: «paid covers the whole request» reads absurdly when
+          nothing was ever requested (guarantee met ⇒ origPaymentEur = 0). */}
+      {requestedForHint > 0
+        ? tReklamacja('noDelta')
+        : tReklamacja('noDeltaZero')}
+    </p>
+  ) : null;
 
   return (
     <section className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-8">
@@ -132,16 +204,24 @@ export default function ClaimDetailPage() {
             <div
               className={cn(
                 'text-4xl md:text-5xl font-extrabold tabular-nums leading-none',
-                MONEY_TONE_TEXT[moneyTone(claim.status)],
+                heroTone,
               )}
             >
-              {formatEur(headline.value)} €
+              {formatEur(heroValue)} €
             </div>
             <div className="text-xs font-bold uppercase tracking-wider text-text-sub mt-1">
-              {headline.kind === 'approved'
-                ? tDetail('moneyLabelApproved')
-                : tDetail('moneyLabelCalc')}
+              {heroLabel}
             </div>
+            {/* Addends of the total — so «wypłacono łącznie» is never an
+                unexplained number. */}
+            {totalPaid != null && (
+              <div className="text-xs text-text-sub tabular-nums">
+                {tDetail('totalBreakdown', {
+                  approved: formatEur(claim.amountApproved ?? 0),
+                  reklamacja: formatEur(claim.reklamacjaAmount ?? 0),
+                })}
+              </div>
+            )}
           </div>
 
           {/* RIGHT — meta block. Stays as a single column on mobile (below
@@ -221,16 +301,9 @@ export default function ClaimDetailPage() {
           </div>
         </div>
 
-        {canSubmitReklamacja && (
+        {reklamacjaSlot && (
           <div className="mt-6 flex items-center justify-end">
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => setSheetOpen(true)}
-            >
-              <MessageSquareWarning size={14} />
-              {tDetail('submitReklamacja')}
-            </Button>
+            {reklamacjaSlot}
           </div>
         )}
       </div>
@@ -244,7 +317,13 @@ export default function ClaimDetailPage() {
         </div>
       )}
 
-      <div className="bg-card rounded-lg border border-border p-6">
+      <div
+        className={cn(
+          'bg-card rounded-lg border border-border p-6',
+          // The outcome card follows this one — keep them apart.
+          claim.reklamacjaSubmitted && 'mb-6',
+        )}
+      >
         <h2 className="text-sm font-bold uppercase tracking-wider text-text-sub mb-4">
           {tDetail('details')}
         </h2>
@@ -284,6 +363,17 @@ export default function ClaimDetailPage() {
                 : '—'}
             </dd>
           </div>
+          {/* Row 3b — the sum, deliberately AFTER its two addends so the money
+              rows read as arithmetic top-to-bottom. Not tinted: the tone is
+              carried by the outcome block's chip + banner below. */}
+          {totalPaid != null && (
+            <div>
+              <dt className="text-text-sub">{tDetail('totalPaid')}</dt>
+              <dd className="mt-0.5 tabular-nums font-semibold text-text">
+                {`${formatEur(totalPaid)} €`}
+              </dd>
+            </div>
+          )}
           {claim.orderNumber && (
             <div>
               <dt className="text-text-sub">{tDetail('orderNumber')}</dt>
@@ -306,24 +396,14 @@ export default function ClaimDetailPage() {
               </dd>
             </div>
           )}
-          {claim.reklamacjaSubmitted && claim.reklamacjaText && (
-            <div className="sm:col-span-2">
-              <dt className="text-text-sub">{tDetail('reklamacjaText')}</dt>
-              <dd className="mt-0.5 text-text whitespace-pre-wrap">
-                {claim.reklamacjaText}
-              </dd>
-            </div>
-          )}
-          {claim.reklamacjaResponse && (
-            <div className="sm:col-span-2">
-              <dt className="text-text-sub">{tDetail('reklamacjaResponse')}</dt>
-              <dd className="mt-0.5 text-text whitespace-pre-wrap">
-                {claim.reklamacjaResponse}
-              </dd>
-            </div>
-          )}
+          {/* Former rows 7–8 (reklamacja text / response) REMOVED 2026-07-31 —
+              they live in <ReklamacjaOutcome> below, once. */}
         </dl>
       </div>
+
+      {/* Reklamacja outcome — the ONLY place the outcome is visible (the status
+          badge above says nothing about it by design). */}
+      <ReklamacjaOutcome claim={claim} />
 
       <ReklamacjaSheet
         open={sheetOpen}

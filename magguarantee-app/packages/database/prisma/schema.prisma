@@ -39,6 +39,18 @@ enum ClaimStatus {
   OCZEKUJE_NA_AUTORYZACJE @map("OCZEKUJE NA AUTORYZACJĘ")
 }
 
+// REWORK 2026-07-31 — outcome of the reklamacja decision (pracownik/admin).
+// Deliberately NOT part of `ClaimStatus`: on the decision the claim status goes
+// BACK to `statusBeforeReklamacja` for BOTH outcomes (an accepted reklamacja on
+// a rejected wniosek does not turn that wniosek into ZAAKCEPTOWANO), so the
+// outcome needs its own column. NULL on `claims.reklamacjaResolution` means
+// "no reklamacja was ever filed" OR "filed, still pending" — the two are told
+// apart by `status == REKLAMACJA` (pending) / `reklamacjaSubmitted`.
+enum ReklamacjaResolution {
+  UZNANA
+  ODRZUCONA
+}
+
 // REWORK 2026-06-20 (#4, docs/20 §0″) — delegation statuses are operational
 // again: carrier→zgloszony, eksport→gotowy, weryfikator→w_trasie→zjechal.
 // Strict chain order zgloszony→gotowy→w_trasie→zjechal (admin can force).
@@ -287,6 +299,7 @@ model User {
   authoredClaims             Claim[]             @relation("ClaimDecidedBy")
   verifiedClaims             Claim[]             @relation("ClaimVerifiedBy")
   maksimGateClearedClaims    Claim[]             @relation("ClaimMaksimGateClearedBy")
+  reklamacjaDecidedClaims    Claim[]             @relation("ClaimReklamacjaDecidedBy")
   uploadedVehicleAttachments VehicleAttachment[]
   uploadedDriverAttachments  DriverAttachment[]
   uploadedCarrierAttachments CarrierAttachment[]
@@ -844,22 +857,55 @@ model Claim {
   amountApproved Decimal? @db.Decimal(12, 2)
 
   // reklamacja (mirror for rollback)
-  reklamacjaSubmitted    Boolean      @default(false)
+  //
+  // REWORK 2026-07-31 — one reklamacja per claim, filed by the carrier on a
+  // DECIDED wniosek (ZAAKCEPTOWANO/ODRZUCONO) within 48h of `statusChangedAt`,
+  // for at most `origPaymentEur - (amountApproved if ZAAKCEPTOWANO else 0)`.
+  // `reklamacjaSubmitted` is the one-shot flag (never reset). Pracownik/admin
+  // then decide UZNANA / ODRZUCONA; the decision moves `status` BACK to
+  // `statusBeforeReklamacja` in both cases and records the outcome in
+  // `reklamacjaResolution`. The wniosek's own payout fields (`amountApproved`,
+  // `orderNumber`, `orderDate`) are NEVER touched by the reklamacja — an UZNANA
+  // reklamacja is paid out under `reklamacjaOrderNumber` instead.
+  reklamacjaSubmitted    Boolean               @default(false)
   reklamacjaText         String?
-  reklamacjaResponse     String? // OdpMagtrans
-  reklamacjaAmount       Decimal?     @db.Decimal(12, 2)
+  /// OdpMagtrans — MAGTRANS' answer to the carrier. REQUIRED (app layer) as the
+  /// justification when the reklamacja is decided ODRZUCONA; free-form otherwise.
+  reklamacjaResponse     String?
+  reklamacjaAmount       Decimal?              @db.Decimal(12, 2)
+  /// «Nr zlecenia» under which an UZNANA reklamacja is paid out. Written ONLY on
+  /// an accepted (UZNANA) reklamacja decision. Independent from the wniosek's own
+  /// `orderNumber`: the UI prefills from it, but the two may legitimately differ —
+  /// MAGTRANS usually amends the existing zlecenie, but sometimes issues a new
+  /// one. Enforced non-empty for UZNANA by CHECK
+  /// `claim_reklamacja_resolution_complete`.
+  reklamacjaOrderNumber  String?
+  /// Outcome of the reklamacja decision. NULL = no reklamacja filed, or filed and
+  /// still pending (pending ⇔ `status == REKLAMACJA`). Intentionally separate from
+  /// `status`, which rolls back to `statusBeforeReklamacja` for BOTH outcomes.
+  reklamacjaResolution   ReklamacjaResolution?
+  /// When the carrier filed the reklamacja. Cannot be derived from
+  /// `statusChangedAt` — that column is re-stamped by the decision (status rolls
+  /// back to `statusBeforeReklamacja`), which would lose the submit moment.
+  reklamacjaSubmittedAt  DateTime?
+  /// When pracownik/admin decided the reklamacja (UZNANA or ODRZUCONA).
+  reklamacjaDecidedAt    DateTime?
+  /// Who decided the reklamacja. Mirrors the `verifiedBy` / `maksimGateClearedBy`
+  /// pattern above (optional named FK, ON DELETE SET NULL, no index).
+  reklamacjaDecidedById  String?               @db.Uuid
+  reklamacjaDecidedBy    User?                 @relation("ClaimReklamacjaDecidedBy", fields: [reklamacjaDecidedById], references: [id])
   /// Immutable snapshot of the value the carrier submitted. Set once at submit
   /// and never modified after — used by History tab + audit trail to detect
   /// if the verifier overrode the carrier's claimed downtime.
-  origHoursAdjusted      Decimal?     @db.Decimal(5, 2)
+  origHoursAdjusted      Decimal?              @db.Decimal(5, 2)
   /// Currently applied downtime correction in hours. Submit writes this equal
   /// to origHoursAdjusted; verifier PATCH mutates only this column. Drives
   /// km-calc (korektaDni = hoursAdjustedValue / 24).
-  hoursAdjustedValue     Decimal?     @db.Decimal(5, 2)
+  hoursAdjustedValue     Decimal?              @db.Decimal(5, 2)
   statusBeforeReklamacja ClaimStatus?
   origDateStart          DateTime?
   origDateEnd            DateTime?
-  origMileage            Decimal?     @db.Decimal(10, 2)
+  origMileage            Decimal?              @db.Decimal(10, 2)
   /// Immutable snapshot of timeFrom (HH:MM, legacy string) as the carrier
   /// submitted it. Set once at submit; verifier (pracownik) PATCH never mutates
   /// it. Working/editable value lives in `timeFrom`.

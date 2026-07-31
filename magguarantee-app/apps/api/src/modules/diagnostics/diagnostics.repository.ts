@@ -98,9 +98,11 @@ export class DiagnosticsRepository {
    * be expressed as a SQL predicate.
    *
    * The anchor is `statusChangedAt ?? createdAt` — `statusChangedAt` is
-   * re-stamped on every status transition (incl. a REKLAMACJA bounce back to
-   * verification), so the clock restarts correctly; the `createdAt` fallback
-   * covers rare rows where `statusChangedAt` was never set.
+   * re-stamped on every status transition (e.g. the `OCZEKUJE_NA_AUTORYZACJE →
+   * NA_WERYFIKACJI` rollback when a re-verify drops the dopłata under threshold),
+   * so the clock restarts correctly; the `createdAt` fallback covers rare rows
+   * where `statusChangedAt` was never set. A reklamacja decision also re-stamps
+   * it, but returns the claim to a DECIDED status, so it never re-enters this set.
    */
   async findNaWeryfikacjiForSla(): Promise<DashboardSlaCandidateRow[]> {
     const rows = await this.prisma.tx.claim.findMany({

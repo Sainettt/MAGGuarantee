@@ -304,6 +304,8 @@ npm exec -w web -- shadcn@latest add button input label dialog \
 | `<CopyableValue>` | `.copyable` + `#copyToast` | NIP, IBAN — клик чтобы скопировать |
 | `<DashboardSidebar>` | `#dashSidebar` + `.ds-item` (`index.html:467-486`) | Левый sidebar в dashboard |
 | `<ThemeToggle>` | `.theme-toggle` (`index.html:272-276`) | В app-header |
+| `<ReklamacjaResolutionChip>` | — (нет в legacy: статус больше не несёт исход рекламации) | Wynik reklamacji `UZNANA`/`ODRZUCONA`/pending — carrier detail, `<ClaimCard>`, employee `<ClaimsTable>`, `ClaimModal`. Тонкая обёртка над `<Badge>`, см. «Reklamacja — carrier claim-detail outcome block» + §6.5.15 |
+| `<ReklamacjaOutcome>` | — | Карточка исхода рекламации на carrier claim detail (`ReklamacjaOutcome.tsx`) |
 
 ## Скриншоты компонент-критичных мест
 
@@ -861,10 +863,12 @@ Reference: `employee-claims-list.png`. Переиспользует `<DataTable>
 | Period | `MM/YYYY` | filter (year+month dropdown) |
 | Km gwar. / Km real. | `tabular-nums` две числа, real в `text-text-sub` если < gwar | — |
 | Doplata | `tabular-nums font-semibold` + `€` suffix; красный текст если > 0 | sortable |
-| Status | `<StatusBadge>` | filter (multi-select по enum) |
+| Status | `<StatusBadge>` **+ (2026-07-31) `<ReklamacjaResolutionChip>` как вторичный чип второй строкой, когда `reklamacjaSubmitted`** | filter (multi-select по enum) |
 | Aktor (last edit) | initials avatar `h-6 w-6` + tooltip с pełnym именем | — |
 | Data zmiany | relative (`2 godz. temu`) + tooltip с ISO | sortable, default desc |
 | Akcje | row-hover-only kebab `<MoreHorizontal />` | — |
+
+> **Reklamacja в списке (2026-07-31).** Статус больше **не** несёт исход рекламации (после решения wniosek возвращается в `statusBeforeReklamacja`), поэтому единственный способ увидеть исход в списке — вторичный `<ReklamacjaResolutionChip>` в ячейке статуса: `flex flex-col items-start gap-1` (бейдж статуса сверху, чип рекламации под ним, `text-[11px]`). Никогда не подменяй им `<StatusBadge>` и не добавляй «(reklamacja)» к подписи статуса. Спека: §6.5.15 C.
 
 **Row interaction:** click anywhere on row → opens `<ClaimVerificationModal>` (не правый kebab — full-row click для productivity). Kebab — только для destructive (delete draft) / secondary actions (duplicate, export PDF).
 
@@ -1185,6 +1189,8 @@ Replaces legacy `.claim-card` (`index.html:419-426`). Layout (mobile-first singl
 | Meta row | `grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-text-sub` with `<span class="font-semibold text-text">value</span>` for values |
 | Reklamacja indicator (conditional) | `mt-3 inline-flex items-center gap-1.5 rounded-md bg-warning-bg text-warning-dark dark:bg-warning/15 dark:text-warning px-2 py-1 text-xs font-bold` + `<AlertTriangle size={12} />` |
 
+> **UPDATE 2026-07-31.** The indicator slot is now driven by `reklamacjaResolution`, not by `reklamacjaSubmitted` alone: pending (`NULL`) keeps the recipe above **verbatim** («Reklamacja zgłoszona»), while a decided reklamacja renders `<ReklamacjaResolutionChip>` in the same slot (`success` «Reklamacja uznana» / `danger` «Reklamacja odrzucona»). Same position, same size, same 12px icon — only the tone and the word change. Otherwise a claim decided weeks ago would keep advertising a complaint that is already closed. Full spec: «Reklamacja — carrier claim-detail outcome block».
+
 Click → navigate to claim detail (`/carrier/claims/[id]`). Empty list → `<EmptyState>` with `<FileText />` icon and CTA "Złóż wniosek" linking to `/carrier/claims/new`.
 
 ### `<BreakdownTable>` — preview table on new-claim form
@@ -1264,14 +1270,43 @@ Right-hand panel on `/carrier/claims/new` (or below form on mobile). Layout:
 
 ### Reklamacja sheet
 
-Triggered from claim detail page when status is `ODRZUCONO` and within 48h of decision. shadcn `<Sheet side="right">`, `w-[480px]` (Phase 2 standard).
+> ⚠️ **REWORK 2026-07-31 — AUTHORITATIVE.** The old one-line trigger — ~~«Triggered from claim detail page when status is `ODRZUCONO` and within 48h of decision»~~ — was **stale and incomplete**: it omitted `ZAAKCEPTOWANO` (an accepted-but-underpaid claim is the *main* reklamacja case), the one-per-claim rule, and the amount ceiling. The eligibility table below is the single source of truth. **The form itself (2 fields) and the 48h `<CountdownBanner>` are unchanged** — only the trigger conditions, the ceiling's field binding, and a third dead-end state are added.
+
+Sheet: shadcn `<Sheet side="right">`, `w-[480px]` (Phase 2 standard), opened from the «Zgłoś reklamację» CTA on the carrier claim detail page (§B header, bottom-right).
+
+#### Eligibility — `canSubmitReklamacja` (ALL four conditions must hold)
+
+| # | Condition | Field(s) | Rationale |
+|---|---|---|---|
+| 1 | Claim is **decided** — `status ∈ {ZAAKCEPTOWANO, ODRZUCONO}` | `claim.status` | Nothing to complain about before a decision exists. `NA_WERYFIKACJI` / `OCZEKUJE_NA_AUTORYZACJE` / `REKLAMACJA` are all non-eligible. |
+| 2 | **No reklamacja yet** — `reklamacjaSubmitted === false` | `claim.reklamacjaSubmitted` | **One reklamacja per claim, ever.** There is no second round, and no re-open after a decided reklamacja. |
+| 3 | **There is a delta** — `maxAmount > 0` | `origPaymentEur`, `amountApproved` | A reklamacja is a request for the *unpaid remainder*. If nothing is unpaid, there is nothing to ask for (see dead-end state ③). |
+| 4 | **Within 48h** — `now < statusChangedAt + 48h` | `claim.statusChangedAt` | Existing rule, unchanged. Server clock is authoritative. |
+
+**`maxAmount` (the ceiling) — «wnioskowana minus wypłacona»:**
+
+```
+maxAmount = origPaymentEur − (status === 'ZAAKCEPTOWANO' ? (amountApproved ?? 0) : 0)
+```
+
+- `origPaymentEur` = **kwota wnioskowana** — the immutable submit-time dopłata snapshot (§12-database-schema). Never use the live `paymentEur` (the verifier may have moved it).
+- `amountApproved` = **kwota wypłacona**. Subtracted **only** for `ZAAKCEPTOWANO`; for `ODRZUCONO` nothing was paid, so `maxAmount === origPaymentEur` and the carrier may claim the whole requested amount.
+- Client renders the number; **server recomputes and re-validates it** on submit (`422` on breach). Never trust a client-side ceiling.
+
+#### Form fields (unchanged)
 
 | Field | Type | Validation |
 |---|---|---|
 | `tresc` | `<Textarea>` rows=6, label "Treść reklamacji" | required, 20–2000 chars |
-| `kwotaReklamacji` | `<Input type="number" step="0.01">`, label "Kwota reklamacji (EUR)", suffix "€" | required, > 0, ≤ `kwotaWnioskowana − kwotaWyplacona` (max value rendered as `<FormDescription>`: "Maksymalnie: 1 234,56 €") |
+| `kwotaReklamacji` | `<Input type="number" step="0.01">`, label "Kwota reklamacji (EUR)", suffix "€" | required, > 0, ≤ `maxAmount` (rendered as `<FormDescription>`: «Maksymalnie: 1 234,56 €») |
 
-**48-hour countdown indicator** — sticky banner at top of the sheet body:
+**Ceiling helper copy (PL, `carrier.reklamacja.maxHint`)** — one line under the amount field, `text-xs text-text-sub`, always visible while the sheet is open:
+
+> «Maksymalnie: **{max} €** — kwota wnioskowana ({requested} €) minus wypłacona ({paid} €).»
+
+For `ODRZUCONO` the parenthetical collapses to a single clause (`carrier.reklamacja.maxHintRejected`): «Maksymalnie: **{max} €** — cała kwota wnioskowana (wniosek został odrzucony, nic nie wypłacono).» Two keys, no branching inside one interpolated string.
+
+**48-hour countdown indicator** — sticky banner at top of the sheet body (`<CountdownBanner>`, unchanged):
 
 | Element | Tailwind |
 |---|---|
@@ -1280,9 +1315,107 @@ Triggered from claim detail page when status is `ODRZUCONO` and within 48h of de
 | Text | `text-sm text-warning-dark dark:text-warning` — "Pozostało: **23h 14min**" (bold the duration) |
 | Tick | re-render every 60s (no second-by-second — burns cycles, not informative) |
 | When < 1h remaining | swap wrapper to `bg-danger-bg text-danger-dark dark:bg-danger/15 dark:text-danger` and apply `animate-blink-red` to the icon only |
-| When expired (server source of truth) | sheet shows `<EmptyState>` "Termin reklamacji upłynął" with disabled form |
 
-Footer: standard `<SheetFooter>` — `<Button variant="ghost">Anuluj</Button>` + `<Button>Wyślij reklamację</Button>`. Submit is server-validated (server re-checks 48h window — never trust client clock).
+Footer: standard `<SheetFooter>` — `<Button variant="ghost">Anuluj</Button>` + `<Button>Wyślij reklamację</Button>`. Submit is server-validated (server re-checks the 48h window, the one-per-claim flag **and** the ceiling — never trust client clock or client arithmetic).
+
+#### The three dead-end states (why no reklamacja is possible)
+
+All three follow the **§6.5.13 hard rule: an impossible action is *removed*, not disabled.** The CTA is not rendered; the *reason* is carried by a quiet line on the detail page — never by a greyed button, never by a toast after a click.
+
+| # | State | Predicate | Detail-page treatment | Sheet treatment (if reached by deep-link / stale tab) |
+|---|---|---|---|---|
+| ① | **Termin upłynął** | decided + `!reklamacjaSubmitted` + `maxAmount > 0` + past 48h | Muted line where the CTA sat: `text-xs text-text-sub` + `<Clock size={12} />` — «Termin reklamacji upłynął (48 godzin od decyzji).» | `<EmptyState>` «Termin reklamacji upłynął» + form omitted (existing spec, retained) |
+| ② | **Już zgłoszona** | `reklamacjaSubmitted === true` | No CTA. The reklamacja itself is shown by the outcome block (next section) — pending / UZNANA / ODRZUCONA. No extra explanatory line: the block *is* the explanation. | `<EmptyState>` «Reklamacja do tego wniosku została już złożona.» |
+| ③ | **Brak różnicy** (NEW) | decided + `!reklamacjaSubmitted` + `maxAmount <= 0` | Muted line where the CTA sat, `text-xs text-text-sub` + `<Info size={12} />` — see copy below. | `<EmptyState>` «Brak kwoty do reklamacji» + form omitted |
+
+**State ③ copy (PL, `carrier.reklamacja.noDelta`)** — the visible one-liner on the detail page:
+
+> «Reklamacja nie jest możliwa — wypłacona kwota pokrywa całą kwotę wnioskowaną.»
+
+`title` (native, one extra clause, `carrier.reklamacja.noDeltaTitle`): «Reklamacja dotyczy niewypłaconej różnicy; w tym wniosku różnicy nie ma (wnioskowano {requested} €, wypłacono {paid} €).»
+
+- `maxAmount <= 0` covers **both** `= 0` (paid exactly what was requested) and `< 0` (paid *more* than requested, e.g. after a verifier correction upward). **One state, one copy** — do not invent a separate "overpaid" message; the carrier's question is only «why can't I file?», and «wypłacona kwota pokrywa całą wnioskowaną» answers it truthfully in both cases.
+- Placement: the same `mt-6 flex items-center justify-end` slot the CTA occupies, so the header's bottom edge does not reflow between eligible / non-eligible claims.
+- Tone is **neutral** (`text-text-sub`), never `warning`/`danger`: nothing went wrong — the carrier was paid in full. Same posture as `<LockNotice>` (§6.5.13): "a state is not an error".
+- **Degenerate sub-case — nothing was ever requested** (`origPaymentEur` is `0` or `null`, e.g. the guarantee was met): then `maxAmount <= 0` for a *rejected* claim too, where «wypłacona kwota pokrywa wnioskowaną» would read absurdly. Use a second key `carrier.reklamacja.noDeltaZero`: «Reklamacja nie jest możliwa — wniosek nie zawierał kwoty do wypłaty.» Same slot, same neutral tone, same removed-CTA rule. Two keys total for state ③ — pick by `origPaymentEur > 0`.
+
+### Reklamacja — carrier claim-detail outcome block (NEW 2026-07-31 — AUTHORITATIVE)
+
+> **The problem this solves.** After the rework, a decided reklamacja **no longer lives in the claim status**: the claim returns to `statusBeforeReklamacja` (i.e. back to `ZAAKCEPTOWANO` / `ODRZUCONO`), so `<StatusBadge>` looks exactly as it did before the reklamacja was ever filed. The outcome is carried **only** by data (`reklamacjaResolution ∈ {UZNANA, ODRZUCONA}`, `NULL` = pending). Therefore the UI **must** communicate the outcome through a dedicated block + chip, and **must not** try to read it out of the status badge.
+
+**Component:** `<ReklamacjaOutcome>` — `apps/web/components/carrier/ReklamacjaOutcome.tsx`. Rendered **only when `claim.reklamacjaSubmitted === true`**, as a standalone card **below** the «Szczegóły» `<dl>` card and **above** the (optional) Historia/diff section. Own card so it never competes with the header hero and never gets lost among 8 `<dl>` rows.
+
+| Slot | Tailwind |
+|---|---|
+| Card root | `bg-card rounded-lg border border-border p-5 mb-6` — the standard content card (same as «Szczegóły»); **the tone lives in the inner state banner, not in the card fill** (a fully tinted card at this size shouts louder than the money hero). |
+| Section title row | `flex items-center justify-between gap-3 mb-4` → title «Reklamacja» `text-sm font-bold text-text` + `<ReklamacjaResolutionChip>` on the right |
+| State banner (one, tone by resolution) | `flex items-start gap-2 rounded-md px-3 py-2 text-sm` + tone classes from the table below |
+| Value grid | `<dl class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm mt-4">` — same row primitive as «Szczegóły» (`dt` = `text-xs uppercase tracking-wider text-text-sub`, `dd` = `text-text`, money `tabular-nums font-semibold`) |
+| Long text rows (`reklamacjaText`, `reklamacjaResponse`) | `sm:col-span-2`, value `whitespace-pre-wrap` |
+
+#### The three states
+
+| `reklamacjaResolution` | Chip | Banner tone | Banner copy (PL) | Icon |
+|---|---|---|---|---|
+| `NULL` (pending) | `<Badge variant="warning">Reklamacja w toku</Badge>` | `bg-warning-bg text-warning-dark dark:bg-warning/15 dark:text-warning` | «Reklamacja została zgłoszona i czeka na rozpatrzenie.» | `<AlertTriangle size={16} />` |
+| `UZNANA` | `<Badge variant="success">Reklamacja uznana</Badge>` | `bg-success-bg text-success-dark dark:bg-success/15 dark:text-success` | «Reklamacja uznana — kwota **{kwota} €** zostanie wypłacona.» | `<CheckCircle2 size={16} />` |
+| `ODRZUCONA` | `<Badge variant="danger">Reklamacja odrzucona</Badge>` | `bg-danger-bg text-danger-dark dark:bg-danger/15 dark:text-danger` | «Reklamacja odrzucona.» (the *reason* is a `<dl>` row, not the banner — a 500-char reason inside a tinted banner is unreadable) | `<XCircle size={16} />` |
+
+- The **pending** state reuses the existing warning-indicator recipe verbatim (§`<ClaimCard>` reklamacja indicator, line ~1186) — same tokens, same `<AlertTriangle>`, so «reklamacja w toku» reads identically on the list card and on the detail page. Do not fork it.
+- `<ReklamacjaResolutionChip>` is a **thin `<Badge>` wrapper**, not a new primitive: `resolution → {variant, label, icon}` map, exactly like `<StatusBadge>`. Lives in `apps/web/components/claims/ReklamacjaResolutionChip.tsx` and is imported by **both** panels (same cross-panel precedent as `<StatusBadge>`, which lives in `components/carrier/`). **0 new tokens.**
+- **Never render the chip as if it were a claim status** — it sits inside the reklamacja block (and, on the employee `<ClaimsTable>`, as a secondary chip *under* the status cell), never in the `<StatusBadge>` slot. Two chips in one slot would read as two statuses.
+
+#### `<dl>` rows inside the block (final order)
+
+| # | Row | Label PL | Source | Condition |
+|---|---|---|---|---|
+| 1 | Kwota reklamacji | «Kwota reklamacji» | `reklamacjaAmount` | always |
+| 2 | Data zgłoszenia reklamacji | «Data zgłoszenia» | `reklamacjaSubmittedAt` | always (fallback: omit if null) |
+| 3 | Treść | «Treść reklamacji» | `reklamacjaText` | always, `sm:col-span-2` |
+| 4 | Nr zlecenia (reklamacji) | «Nr zlecenia» | `reklamacjaOrderNumber` | only when `UZNANA` **and** non-empty |
+| 5 | Data rozpatrzenia | «Data rozpatrzenia» | `reklamacjaDecidedAt` | only when `reklamacjaResolution != null` |
+| 6 | Odpowiedź / powód | «Odpowiedź MAGTRANS» | `reklamacjaResponse` | only when non-empty, `sm:col-span-2` |
+
+- Dates render **date-only** via the page's `formatDate` helper — consistent with every other date on this screen (§B.1 "Date-only, not datetime").
+- **Row 4 may legitimately be absent even for `UZNANA`** — the staff-side «Nr zlecenia» prefill can start empty (a rejected claim has no `orderNumber`), and the field is only *required at decision time*, so a historical/edge record may carry `NULL`. Omit the row; never render `—`.
+- **`reklamacjaText` / `reklamacjaResponse` are REMOVED from the «Szczegóły» `<dl>`** (former rows 7–8, §B.1). They now live here, once. Two copies of the same paragraph on one page is the exact duplication this block exists to end.
+
+#### «Wypłacono łącznie» — the total after an uznana reklamacja
+
+Total paid = `(amountApproved ?? 0) + (reklamacjaAmount ?? 0)`, and **either part may be 0/null** (a rejected claim with an uznana reklamacja pays *only* `reklamacjaAmount`). Two surfaces, one number:
+
+**1. Header hero — a third state (locked).** §B's hero has two states (approved / calc). Add a third, in the **same typographic slot** (`text-4xl md:text-5xl font-extrabold tabular-nums leading-none`) so there is zero layout shift:
+
+| Hero state | Condition | Value | Colour | Label (PL) |
+|---|---|---|---|---|
+| **Wypłacono łącznie** | `reklamacjaResolution === 'UZNANA'` | `(amountApproved ?? 0) + reklamacjaAmount` | `text-brand` | «wypłacono łącznie» |
+| Kwota zatwierdzona | `amountApproved != null` (no uznana reklamacja) | `amountApproved` | `text-brand` | «kwota zatwierdzona» (existing) |
+| Kalkulacja | otherwise | `paymentEur` | `text-text-sub` | «kalkulacja» (existing) |
+
+Under the hero label, when the total state is active, one extra muted breakdown line (`text-xs text-text-sub tabular-nums`, key `carrier.claims.detail.totalBreakdown`):
+
+> «w tym decyzja: {approved} € · reklamacja: {reklamacja} €»
+
+Rationale: the hero's job (§B) is «the money MAGTRANS owes you». After an uznana reklamacja, `amountApproved` alone is **wrong** as that number — and for a rejected-claim-with-uznana-reklamacja it is `null`, which would drop the hero into the muted «kalkulacja» state and tell the carrier they were paid nothing. The brand-red scarcity rule is respected: still exactly one brand-red number per screen.
+
+**2. «Szczegóły» `<dl>` — one new row**, inserted **immediately after** row 3 «Kwota zatwierdzona» (i.e. it becomes row 3b, ahead of `Nr zlecenia`), rendered **only** when `reklamacjaResolution === 'UZNANA'`:
+
+| Label PL | Label EN | Value | `dd` classes |
+|---|---|---|---|
+| «Wypłacono łącznie» | "Total paid" | `(amountApproved ?? 0) + reklamacjaAmount` | `font-semibold tabular-nums text-text` |
+
+It sits **after** its two addends so the money rows read as an arithmetic sum top-to-bottom (`Kwota zatwierdzona` → `Wypłacono łącznie`), with the reklamacja addend restated in the outcome block below. Do **not** put the total first; a sum before its parts reads as a contradiction. Do **not** tint it green — the tone is already carried by the outcome block's chip and banner.
+
+#### Catalogue additions (carrier side)
+
+| Component | Kind | File |
+|---|---|---|
+| `<ReklamacjaOutcome>` | new composition (`Card` + `Badge` + `<dl>` rows) | `apps/web/components/carrier/ReklamacjaOutcome.tsx` |
+| `<ReklamacjaResolutionChip>` | thin `<Badge>` wrapper (shared carrier + employee) | `apps/web/components/claims/ReklamacjaResolutionChip.tsx` |
+
+**Tokens: 0 new.** Composes `bg-card`, `border-border`, `bg-success-bg`/`text-success-dark`, `bg-danger-bg`/`text-danger-dark`, `bg-warning-bg`/`text-warning-dark` (+ their `dark:` `/15` variants), `text-brand`, `text-text`, `text-text-sub`. No `globals.css` / Tailwind-config change (Phase 4.4 policy).
+
+**DTO fields this section depends on** (additive, **api/db-agent owned — not a design decision**): `reklamacjaResolution`, `reklamacjaOrderNumber`, `reklamacjaSubmittedAt`, `reklamacjaDecidedAt`, plus `origPaymentEur` (already on the wire) for the ceiling. The web layer must treat every one of them as nullable.
 
 ### Notes for web-agent
 
@@ -1429,7 +1562,23 @@ When `amountApproved === null` (status `NA_WERYFIKACJI`, `OCZEKUJE_NA_AUTORYZACJ
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
-The number itself stays the same physical size in both states; **only the label and color change** to communicate "this is provisional". This avoids layout shift when the verifier flips the claim to `ZAAKCEPTOWANO` — the value just snaps from muted to emphasised.
+When `reklamacjaResolution === 'UZNANA'` (third hero state, added 2026-07-31 — see «Reklamacja — carrier claim-detail outcome block»):
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                                                                            │
+│   2 545,00 €                                  WNI/2026/0042  [StatusBadge] │
+│   wypłacono łącznie                           Wniosek: 2 545,00 €          │
+│   w tym decyzja: 2 145,00 € · reklamacja: 400,00 €                         │
+│                                               01.04.2026 → 30.04.2026      │
+│ ──────────────────────────────────────────────────────────────────────────  │
+│   Pojazd: WA12345    Przebieg: 12 340 km    Km gwarantowane: 11 800 km     │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+Note that `[StatusBadge]` still reads «Zaakceptowano» / «Odrzucono» here — the claim status returned to `statusBeforeReklamacja`. The reklamacja outcome is **never** inferred from the badge; it is the `<ReklamacjaOutcome>` block + `<ReklamacjaResolutionChip>` further down the page.
+
+The number itself stays the same physical size in all three states; **only the label and color change** to communicate "this is provisional". This avoids layout shift when the verifier flips the claim to `ZAAKCEPTOWANO` — the value just snaps from muted to emphasised.
 
 #### Layout primitives
 
@@ -1449,9 +1598,9 @@ The number itself stays the same physical size in both states; **only the label 
 | `HoursReadout` | see § A | Compact, single line. |
 | Divider | `border-t border-border my-4` | Separates money/meta block from the vehicle factual row. |
 | **Vehicle row (bottom)** | `flex flex-wrap items-center gap-x-6 gap-y-2 text-sm` | Each item: `<span class="text-text-sub">Pojazd:</span> <b class="font-semibold text-text font-mono">WA12345</b>`. |
-| Reklamacja CTA | unchanged (`mt-6 flex items-center justify-end`) | Behavior locked — only visual position adjusts if the divider already sits above it; keep button intact. |
+| Reklamacja CTA **slot** | `mt-6 flex items-center justify-end` | The slot holds **either** the «Zgłoś reklamację» `<Button>` (all four eligibility conditions met) **or** one of the muted dead-end lines (`text-xs text-text-sub` + 12px icon), **or** nothing (`reklamacjaSubmitted` — the outcome block carries it). Same slot ⇒ no reflow of the card's bottom edge across states. Full predicate table: «Reklamacja sheet» → *Eligibility* + *The three dead-end states*. |
 
-> **Locked behavior.** `<StatusBadge>`, the back-link (`← Wróć do listy`), and the reklamacja CTA keep their existing handlers, props, and visibility rules. Only their **layout placement** changes per the diagram above.
+> **Locked behavior.** `<StatusBadge>` and the back-link (`← Wróć do listy`) keep their existing handlers, props, and visibility rules; only their **layout placement** changes per the diagram above. The reklamacja CTA's **visibility rule is superseded 2026-07-31** — it is now the 4-condition `canSubmitReklamacja` predicate (decided ∧ `!reklamacjaSubmitted` ∧ `maxAmount > 0` ∧ within 48h); its placement is unchanged. A non-eligible claim renders **no disabled button** (§6.5.13 hard rule).
 
 > **Submission-date placement (decided — superseded 2026-06-16).** ~~`Data zgłoszenia` lives in the right meta-block.~~ **Reversed by user.** Both lifecycle dates — `Data zgłoszenia` (`claim.createdAt`) **and** the new `Data decyzji` (`claim.statusChangedAt`) — now live in the **lower «Szczegóły» `<dl>`**, not in the header meta-block. The header meta-block carries only the *period* temporal cluster (period range + `HoursReadout`); `nrZgl`, `Wniosek`, `StatusBadge`. See **§ B.1 «Szczegóły» date rows** below for the full spec (labels, keys, order, conditional rule). No API/DB change — both fields are already on the wire.
 
@@ -1466,18 +1615,22 @@ The lower «Szczegóły» card is the `<dl class="grid grid-cols-1 sm:grid-cols-
 | 1 | **Data zgłoszenia** | `carrier.claims.detail.submittedAt` (reused) | `Data zgłoszenia` | `Submitted` | **always** (`createdAt` never null) | `formatDate(claim.createdAt)` — date-only, pl-PL `dd.MM.yyyy` |
 | 2 | **Data decyzji** | `carrier.claims.detail.decidedAt` (**new**) | `Data decyzji` | `Decision date` | **only** when `status ∈ {ZAAKCEPTOWANO, ODRZUCONO}` **and** `statusChangedAt != null` | `formatDate(claim.statusChangedAt)` — date-only, same helper |
 | 3 | Kwota zatwierdzona | `amountApproved` (existing) | — | — | always (current behavior) | unchanged |
+| 3b | **Wypłacono łącznie** (**new 2026-07-31**) | `carrier.claims.detail.totalPaid` (**new**) | `Wypłacono łącznie` | `Total paid` | **only** when `reklamacjaResolution === 'UZNANA'` | `(amountApproved ?? 0) + reklamacjaAmount`, `font-semibold tabular-nums` — see «Reklamacja — carrier claim-detail outcome block» |
 | 4 | Nr zlecenia | `orderNumber` (existing) | — | — | only if `claim.orderNumber` | unchanged |
 | 5 | Data zlecenia | `orderDate` (existing) | — | — | only if `claim.orderDate` | unchanged |
 | 6 | Komentarz | `comment` (existing) | — | — | only if `claim.comment` (`sm:col-span-2`) | unchanged |
-| 7 | reklamacja text | `reklamacjaText` (existing) | — | — | unchanged (`sm:col-span-2`) | unchanged |
-| 8 | reklamacja response | `reklamacjaResponse` (existing) | — | — | unchanged (`sm:col-span-2`) | unchanged |
+| ~~7~~ | ~~reklamacja text~~ | ~~`reklamacjaText`~~ | — | — | **REMOVED 2026-07-31** | moved into `<ReklamacjaOutcome>` |
+| ~~8~~ | ~~reklamacja response~~ | ~~`reklamacjaResponse`~~ | — | — | **REMOVED 2026-07-31** | moved into `<ReklamacjaOutcome>` |
 
 **Ordering rationale.** Both lifecycle dates go **first** in the `<dl>`, ahead of the money/order business facts. Reading order becomes a clean chronological-then-financial narrative: *"submitted on X → decided on Y → here is the approved amount, order ref, comment, reklamacja"*. The two dates are the same data class and read best adjacent (`Data zgłoszenia` immediately above `Data decyzji`); placing `Data decyzji` right under `Data zgłoszenia` lets the carrier compute turnaround at a glance. Both rows are single-column items (`<div>` inside the 2-col grid) — on `sm+` they sit side-by-side in the first grid row, which reinforces the "submitted ↔ decided" pairing; on mobile they stack.
 
 **Conditional-show rule for `Data decyzji` (locked).** Render the row **only** for *decided* statuses:
 
-- **Decided set = `{ZAAKCEPTOWANO, ODRZUCONO}`** — exactly the set the page already uses for `canSubmitReklamacja` (lines 93–94). **Single source of truth:** the row's visibility predicate is the same `status === 'ZAAKCEPTOWANO' || status === 'ODRZUCONO'` test, **plus** `statusChangedAt != null` (defensive, mirrors line 95).
-- **`REKLAMACJA_ZAAKCEPTOWANO` / `REKLAMACJA_ODRZUCONO` are NOT separate statuses** — they do not exist in the `ClaimStatus` enum (`docs/12-database-schema.md` lines 68–75). A reklamacja outcome is written back into the same `ZAAKCEPTOWANO` / `ODRZUCONO` value, and `statusChangedAt` is bumped to the reklamacja-decision moment. So the row automatically shows the **latest** decision date (initial decision, or reklamacja re-decision if one happened) with no extra branching. The reklamacja *content* stays in rows 7–8 as today.
+- **Decided set = `{ZAAKCEPTOWANO, ODRZUCONO}`** — the **first** of the four `canSubmitReklamacja` conditions, not the whole predicate. **Corrected 2026-07-31:** `canSubmitReklamacja` is *decided-status* **∧** `!reklamacjaSubmitted` **∧** `maxAmount > 0` **∧** *within 48h of `statusChangedAt`* (full table in «Reklamacja sheet» → *Eligibility*; `maxAmount = origPaymentEur − (ZAAKCEPTOWANO ? amountApproved ?? 0 : 0)`). The earlier wording — which described the decided-set as being «exactly the set the page uses for `canSubmitReklamacja`» — was wrong: the two share only their first term.
+  - **`Data decyzji`'s own predicate stays the narrow one**: `status ∈ {ZAAKCEPTOWANO, ODRZUCONO}` **∧** `statusChangedAt != null`. It deliberately does **not** inherit the reklamacja window / flag / ceiling terms — a decision date is a fact about the decision, not about the right to complain. Do **not** refactor the two into one shared boolean; that coupling is exactly what produced the stale claim above.
+- **`REKLAMACJA_ZAAKCEPTOWANO` / `REKLAMACJA_ODRZUCONO` are NOT statuses** — they are *synthetic wire-only* `targetStatus` literals on `PATCH /claims/:nrZgl` (`docs/13-api-design.md`), absent from the `ClaimStatus` enum. **After a reklamacja decision the claim returns to `statusBeforeReklamacja`** (i.e. back to the very `ZAAKCEPTOWANO` / `ODRZUCONO` it held before) — for **both** outcomes. So `Data decyzji` keeps rendering with no extra branching.
+  - ⚠️ **Consequence for the UI (locked):** the claim status therefore carries **no information about the reklamacja outcome**. The outcome is `reklamacjaResolution ∈ {UZNANA, ODRZUCONA}` (`NULL` = pending), surfaced exclusively by `<ReklamacjaOutcome>` + `<ReklamacjaResolutionChip>`. Never infer it from `<StatusBadge>`, and never infer it from `amountApproved` being null/non-null.
+  - Whether `statusChangedAt` is bumped by the reklamacja decision is **backend-owned and irrelevant here**: the reklamacja's own dates are `reklamacjaSubmittedAt` / `reklamacjaDecidedAt`, rendered inside the outcome block. `Data decyzji` binds to `statusChangedAt` and needs no reklamacja awareness.
 - `REKLAMACJA` (the in-progress re-opened state), `NA_WERYFIKACJI`, `OCZEKUJE_NA_AUTORYZACJE` are **non-decided** → row is **omitted entirely** (no `—` placeholder), consistent with the existing conditional rows (`orderNumber` / `orderDate` / `comment` render only when present).
 
 **Neutral label decision (`Data decyzji`).** Single neutral label for both outcomes — **not** split `Data akceptacji` / `Data odrzucenia`. Rationale: the outcome (accept vs reject) is already unambiguously communicated by `<StatusBadge>` in the header and by `amountApproved` in the `<dl>`; a separate outcome-coded date label would be redundant and would force two i18n keys + a branch for zero information gain. A neutral "when was this decided" reads cleanly regardless of outcome and stays correct after a reklamacja flips the result.
@@ -4158,10 +4311,14 @@ The body is a single vertical stack. Same order in `view` and `edit` — only th
 │        danger-banner «Czeka na autoryzację» + upload screenshotu │
 │        / cleared-state (download) — blocks decyzja until cleared │
 │  ─────────────────────────────────────────────────────────────  │
+│  ②c REKLAMACJA  (ONLY when claim.reklamacjaSubmitted)            │  ← §6.5.15 — read-only submission
+│        kwota · maksimum wtedy · treść · data + resolution chip   │
+│  ─────────────────────────────────────────────────────────────  │
 │  ③ DECYZJA  (targetStatus select + conditional fields)           │  ← §6.5.5  — at the very bottom
 │        ZAAKCEPTOWANO → orderNumber / orderDate / amountApproved   │
 │        ODRZUCONO      → komentarz                                 │
-│        reklamacja-variants                                        │
+│        REKLAMACJA_ZAAKCEPTOWANO → nr zlecenia + kwota (RO) + kom. │  ← §6.5.15
+│        REKLAMACJA_ODRZUCONO     → powód (required)                │
 │  ─────────────────────────────────────────────────────────────  │
 │  ④ Secondary section: HISTORIA (diff)  (§6.5.7)                  │
 ├─ <DialogFooter> (non-scrolling) ─────────────────────────────────┤
@@ -4267,7 +4424,7 @@ A single full-width block between the fact pairs and the decyzja block. This is 
 |---|---|
 | `ZAAKCEPTOWANO` | `orderNumber` (Nr zlecenia, text) · `orderDate` (Data zlecenia, date) · `amountApproved` (Kwota zatwierdzona — **the same locked/computed field as §6.5.4**; do not render a second editable copy — bind the decision's amount to the live-computed value). |
 | `ODRZUCONO` | `komentarz` (Powód odrzucenia, textarea, required). |
-| reklamacja-variants | per existing claim-status rules (`<ReklamacjaSheet>` copy not re-spec'd here — the verification surface only *triggers* the variant; the conditional fields follow the same RHF pattern). |
+| `REKLAMACJA_ZAAKCEPTOWANO` / `REKLAMACJA_ODRZUCONO` | **Fully spec'd in §6.5.15** (REWORK 2026-07-31). Offered **only** when `status === 'REKLAMACJA'`, and then they are the **only** two options. Accept branch = `reklamacjaOrderNumber` (required, prefilled from `claim.orderNumber`) + the carrier's kwota **read-only** + optional comment — **there is no amount input**. Reject branch = required reason textarea → `reklamacjaResponse`. |
 
 > **`OCZEKUJE_NA_AUTORYZACJE` is NOT a selectable `targetStatus`.** The manual «Wyślij do autoryzacji» decision (with its `margin` / `authDesc` fields) is **removed** (этап 5.1). `OCZEKUJE_NA_AUTORYZACJE` is now reached **automatically** by the backend when the saved verification's dopłata exceeds `getAuthThreshold`; the decyzja `<Select>` therefore offers only `ZAAKCEPTOWANO` / `ODRZUCONO` (+ reklamacja-branches). While a claim is in `OCZEKUJE_NA_AUTORYZACJE`, the decision is *blocked* until the verifier uploads Maksim's confirmation screenshot in `MaksimGateBlock` (§6.5.7) — it is a gate around the same two decisions, never a third target.
 
@@ -4382,7 +4539,7 @@ The whole point: view→edit must **not** swap containers or re-mount the form.
 - [ ] 6 fact pairs; declared cells muted `bg-input/40` + `text-text-sub` **without** lock icon; `timeFrom`/`timeTo` declared from `origTimeFrom`/`origTimeTo`; `hoursAdjusted` has input only (no declared cell, never `0`).
 - [ ] `hoursAdjusted` row in **`view`** is rendered **only when `hoursAdjustedValue > 0`**; omitted entirely (no empty/`—`/`0` row) when there is no stoppage / claim not verified. In `edit` the input is always present.
 - [ ] On entering `edit`, `targetStatus` is **not pre-selected** (placeholder «wybierz decyzję»); decision conditional fields do **not** render until a decision is chosen; decision required-field validation fires **only on «Zapisz»**; focus lands on `dateStart`, not the decyzja block.
-- [ ] Acceptance gate: when live recalc shows `kmDifference <= 0` (guarantee met), `ZAAKCEPTOWANO` / `REKLAMACJA_ZAAKCEPTOWANO` are disabled; a prior acceptance selection is cleared if an edit pushes recalc into "guarantee met"; hint «Gwarancja wyjeżdżona — wniosek można tylko odrzucić» shown; backend still hard-rejects acceptance (`422`).
+- [ ] Acceptance gate: when live recalc shows `kmDifference <= 0` (guarantee met), `ZAAKCEPTOWANO` / `REKLAMACJA_ZAAKCEPTOWANO` are disabled; a prior acceptance selection is cleared if an edit pushes recalc into "guarantee met"; hint «Gwarancja wyjeżdżona — wniosek można tylko odrzucić» shown; backend still hard-rejects acceptance (`422`). ⚠️ The `REKLAMACJA_ZAAKCEPTOWANO` half of this gate is **flagged for review** — see §6.5.15 D (an uznana reklamacja pays the carrier's kwota, not a recalculated dopłata). Unchanged until the owner decides.
 - [ ] dopłata recomputes live (300ms debounce) on any fact change, **independent of selected `targetStatus`**; `<RecalcBadge>` Przeliczam…→Aktualne.
 - [ ] Historia = single secondary section (no `<Tabs>`) only when `origData != null`, else omitted. No manual Autoryzacja tab. Authorization = automatic `MaksimGateBlock` @ `OCZEKUJE_NA_AUTORYZACJE` only: danger banner «Czeka na autoryzację» + screenshot `<FileUpload>` → cleared/download state; decyzja disabled with hint until the screenshot is uploaded.
 - [ ] Footer differs by mode; Anuluj-from-edit returns to `view` + `form.reset`, does not close; ✕/Escape/Zamknij closes.
@@ -4535,6 +4692,126 @@ A quiet informational line. **Posture copied from §7.7.1b's lag-note: a locked 
 > **Retired with it (removed from `pl.json` / `en.json` — web-agent):** `employee.claims.modal.edit.amountMaximum`, `edit.margin`, `edit.amountApprovedLockedMaksim`, `edit.amountApprovedLockedMaksimHint`, `edit.maksimAmountRef`, `edit.maksimOverrideTitle`, `edit.maksimOverrideBadge`, `edit.maksimOverrideConsequence`, `edit.maksimOverrideCommentHint`, `edit.amountApprovedFromMaksim`, plus the `targetStatus.OCZEKUJE_NA_AUTORYZACJE` decision option and the `unified.secondaryAuthorization` / `auth.*` (manual Autoryzacja tab) keys. Component `<AmountOverrideRow>` is deleted.
 >
 > **What replaces it:** nothing on the pracownik side — `amountApproved` is simply the server-computed approved amount (locked/computed field per §6.5.4 / §(b)), with no competing «kwota Maksima» number. Authorization over the threshold is now the **automatic Maksim-gate** (`MaksimGateBlock`, §6.5.7), whose only stored artefact is the confirmation-screenshot upload — not a manually keyed amount.
+
+### 6.5.15 Reklamacja in the staff `ClaimModal` (NEW 2026-07-31 — AUTHORITATIVE)
+
+> **Scope.** The `pracownik` / `admin` side of the reworked reklamacja, inside the existing unified surface `apps/web/components/claims/ClaimModal.tsx`. Carrier-side surfaces (the submit sheet, the eligibility predicate, the detail-page outcome block, the «Wypłacono łącznie» total) are spec'd in Phase 3 → «Reklamacja sheet» + «Reklamacja — carrier claim-detail outcome block». **Read both; they share the same field names and the same resolution vocabulary.**
+>
+> **The one thing that changed hardest:** the pracownik **no longer types an amount** when accepting a reklamacja. The paid amount **is** the carrier's requested kwota, byte-for-byte. The old editable `reklamacjaAmount` input in the accept branch is **deleted**; the kwota is shown read-only instead.
+
+#### A. `<ReklamacjaBlock>` — read-only submission block (②c in the §6.5.2 stack)
+
+**Visibility:** `claim.reklamacjaSubmitted === true`. Independent of `status`, of `mode`, and of the resolution — a decided reklamacja stays visible forever (the claim status no longer records it, so this block is the *only* staff-side trace besides Historia).
+
+**Placement (locked):** a flat `<section>` in the `<DialogBody>` stack **between** `MaksimGateBlock` (§6.5.7) and the `<DecisionPanel>` (§6.5.12) — i.e. the last thing the verifier reads before deciding. It keeps the standard block chrome used by every non-decision section (`border-t border-border pt-5` + `text-xs font-bold uppercase tracking-wider text-text-sub` header «REKLAMACJA»), **not** the boxed `<DecisionPanel>` treatment: it is a *reading* step, and the box is reserved for the commitment step.
+
+Rationale for the position: facts → dopłata → *what the carrier is disputing* → decision. Putting it above the facts would make the modal open on a complaint; putting it below the decision panel would hide the input to the decision beneath the decision itself.
+
+**Header row:** `flex items-center justify-between gap-3` → the uppercase micro-label on the left, `<ReklamacjaResolutionChip>` on the right (pending / UZNANA / ODRZUCONA — same component and same tones as the carrier side; see the carrier outcome-block table).
+
+**Fields (read-only, `<dl>` `grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm`; label `text-[11px] uppercase tracking-wider text-text-sub`, value `text-text`):**
+
+| # | Row | Label PL | Value | Notes |
+|---|---|---|---|---|
+| 1 | **Kwota reklamacji** | «Kwota reklamacji» | `reklamacjaAmount` | `font-semibold tabular-nums`. **This is the amount that will be paid on UZNANA** — nothing recomputes it. |
+| 2 | **Maksimum w chwili zgłoszenia** | «Maksimum (wnioskowana − wypłacona)» | `origPaymentEur − (amountApproved ?? 0)` rendered as `{max} € = {requested} € − {paid} €` | The reviewer's sanity check: was the ask within the ceiling? `tabular-nums`, `text-text-sub`. **Derived for display only** — computed from fields already on the DTO, never re-validated client-side. If `amountApproved == null` (claim was rejected) render `{max} € = {requested} € − 0,00 €` and append the muted clause «(wniosek odrzucony)». |
+| 3 | **Data zgłoszenia** | «Zgłoszono» | `reklamacjaSubmittedAt` | date-only via the modal's existing formatter, consistent with the other modal dates. |
+| 4 | **Treść** | «Treść reklamacji» | `reklamacjaText` | `sm:col-span-2`, `whitespace-pre-wrap`, on `bg-input/40 rounded-md p-3` — the muted read-only surface (§6.5.3), so a long carrier paragraph reads as quoted reference material, not as an input. |
+| 5 | **Nr zlecenia (reklamacji)** | «Nr zlecenia» | `reklamacjaOrderNumber` | only after a **UZNANA** decision, `font-mono`. Omit when null (never `—`). |
+| 6 | **Data rozpatrzenia** | «Rozpatrzono» | `reklamacjaDecidedAt` | only when `reklamacjaResolution != null`. |
+| 7 | **Odpowiedź / powód** | «Odpowiedź» | `reklamacjaResponse` | only when non-empty, `sm:col-span-2`, same muted quoted surface as row 4. |
+
+Rows 5–7 are the **post-decision** half: before the decision the block is rows 1–4 + the pending chip; after it, rows 1–7 + the resolution chip. **No banner, no tint on the section** — the chip carries the tone. (The tinted state-banner treatment belongs to the carrier's detail page, whose reader needs the emotional readout; the staff modal is a work surface.)
+
+#### B. Decision UX when `status === 'REKLAMACJA'`
+
+Everything happens inside the existing `<DecisionPanel>` (§6.5.12) — same box, same `<Gavel>` header, same footer logic. Only the `targetStatus` option set and its conditional fields change.
+
+**Option set (locked):**
+
+| `claim.status` | `targetStatus` options offered |
+|---|---|
+| `NA_WERYFIKACJI`, `OCZEKUJE_NA_AUTORYZACJE` | `ZAAKCEPTOWANO` · `ODRZUCONO` (existing) |
+| **`REKLAMACJA`** | **`REKLAMACJA_ZAAKCEPTOWANO` · `REKLAMACJA_ODRZUCONO` — and nothing else.** The plain accept/reject options are **removed from the list** (not disabled): the claim's own decision is already made and is not being re-taken; only the reklamacja is being decided. |
+
+Option labels (PL, `employee.claims.modal.edit.targetStatus.*`): «Uznaj reklamację» / «Odrzuć reklamację». Verb-first, because the select is an action chooser, not a status display — matching the existing accept/reject wording pattern.
+
+**Accept branch — `REKLAMACJA_ZAAKCEPTOWANO`** (`<FormGrid cols={2}>`):
+
+| Field | Control | Rules |
+|---|---|---|
+| `reklamacjaOrderNumber` | `<FormField label="Nr zlecenia" required>` + `<Input>` (`font-mono`) | **Required.** Prefilled from `claim.orderNumber` **when present**; the field is **fully editable** and **may legitimately start empty** (a rejected claim has no `orderNumber`). Prefill is a convenience, never a lock — do **not** render it as read-only, do **not** re-prefill after the user has typed (seed once on entering `edit`). |
+| Kwota reklamacji | **read-only value, not an input** | Renders the §(b) locked/computed recipe **without** the `<Lock>` icon → the muted declared-value treatment of §6.5.3 (`bg-input/40`, `text-text-sub`, `font-semibold tabular-nums`, `readOnly tabIndex={-1} aria-readonly="true"`). Label «Kwota do wypłaty (z reklamacji)». Value = `claim.reklamacjaAmount`, verbatim. |
+| `comment` | `<FormField label="Komentarz">` + `<Textarea rows={3}>` | **Optional.** Placeholder «Opcjonalna notatka do decyzji». `sm:col-span-2`. |
+
+**Helper text under `reklamacjaOrderNumber`** (`<FormDescription>`, `employee.claims.modal.edit.reklamacjaOrderNumberHint`):
+
+> «Może to być poprawiony numer poprzedniego zlecenia albo całkiem nowe zlecenie — wpisz numer, na który zostanie wypłacona kwota reklamacji.»
+
+**Why the kwota is not an input (locked, and the field is *gone*, not disabled).** The paid amount is defined by the carrier's request, which was already validated against the ceiling at submit time. An editable staff amount would (a) invent a second, unvalidated number, (b) re-open the ceiling question in a surface with no ceiling context, and (c) contradict the block above it. Per §6.5.13's hard rule an impossible action is **removed** — so there is no greyed «Kwota reklamacji» input in the accept branch. The read-only echo stays *because* the verifier is about to authorise that exact figure and must see it inside the commitment box, not only in the section above.
+
+**Reject branch — `REKLAMACJA_ODRZUCONO`:**
+
+| Field | Control | Rules |
+|---|---|---|
+| `reklamacjaResponse` | `<FormField label="Powód odrzucenia reklamacji" required>` + `<Textarea rows={4}>` | **Required**, min 10 chars (same posture as the existing `ODRZUCONO` → `komentarz`). Placeholder «Wyjaśnij przewoźnikowi, dlaczego reklamacja nie została uznana». `sm:col-span-2`. |
+
+The carrier reads this verbatim in `<ReklamacjaOutcome>` row 6 — copy the "written for the carrier, not for the file" posture from the existing rejection-reason field. **There is no order-number and no amount in this branch.**
+
+**Panel subtitle when `status === 'REKLAMACJA'`** (replaces the generic §6.5.12 subtitle, key `…unified.decyzjaSubtitleReklamacja`):
+
+> «Ostatni krok — zdecyduj, czy reklamacja zostanie uznana.»
+
+**Footer.** Unchanged mechanics (§6.5.12): primary label «Zapisz decyzję», verify button keeps the left slot. No new button.
+
+**Status-after-decision — a `<LockNotice>`-toned informational line, not a warning** (`text-xs text-text-sub`, `role="status"`, under the fields, key `…edit.reklamacjaStatusReturnHint`):
+
+> «Po zapisaniu wniosek wróci do statusu **{status}** — wynik reklamacji będzie widoczny jako osobna informacja.»
+
+`{status}` = the PL label of `statusBeforeReklamacja` via `<StatusBadge>`'s label map. This exists because the verifier would otherwise read the status snapping back to «Odrzucono» as their decision having been lost. Neutral tone — nothing is wrong (§7.7.1a "a state is not an error").
+
+#### C. After the decision — where the outcome lives
+
+| Surface | Treatment |
+|---|---|
+| `<ReklamacjaBlock>` (§A) | Chip flips warning → `success` (UZNANA) / `danger` (ODRZUCONA); rows 5–7 appear. This is the primary staff-side readout. |
+| `<StatusBadge>` in the modal header | Shows `statusBeforeReklamacja` again. **Carries no reklamacja meaning** — do not append «(reklamacja)» to the badge label, do not add a badge variant. |
+| `<DecisionPanel>` | Falls back to its **terminal-state** branch (the existing muted note inside the same panel shell — never an empty or missing box, §6.5.12). Note copy: «Reklamacja została już rozpatrzona.» |
+| Employee `<ClaimsTable>` | `<ReklamacjaResolutionChip>` as a **secondary** chip under the status cell (or trailing it), never replacing `<StatusBadge>`. This is the only way a reklamacja outcome is visible in a list, so it must be there. |
+| **Historia** (§6.5.7) | See below. |
+
+**Historia extension (§6.5.7).** The diff section already renders `reklamacjaText` / `reklamacjaResponse`. Extend the same read-only diff/record list with **`reklamacjaAmount`, `reklamacjaOrderNumber`, `reklamacjaSubmittedAt`, `reklamacjaDecidedAt`** — same rows, same `bg-warning/10` changed-emphasis, same «Pierwotnie / Aktualnie» columns, and the same "render only when non-empty" rule. No new layout. Historia's visibility trigger (`claim.origData != null`) is unchanged.
+
+> **Do not duplicate.** `<ReklamacjaBlock>` (§A) is the *current state*; Historia is the *frozen pre-reklamacja mirror* (`origData`, see `docs/19-known-quirks.md` #reklamacja-mirror). Same field names, different questions — «what is being claimed now» vs «what did the claim look like before». Both may show `reklamacjaAmount`; that is not duplication, it is the diff.
+
+#### D. Open question flagged for the owner (do NOT change unilaterally)
+
+⚠️ **The §6.5.5 acceptance gate currently disables `REKLAMACJA_ZAAKCEPTOWANO` when the live recalc yields `kmDifference <= 0`.** With the rework, an uznana reklamacja pays `reklamacjaAmount` (the carrier's figure) and **not** a recalculated dopłata — so the "guarantee met ⇒ nothing to pay" rationale no longer transfers to the reklamacja branch, and a legitimate reklamacja on a *rejected* claim could be blocked by it. **Left as-is in this doc** (it is a business rule, not a design decision) — routed to the owner / api-agent. Design position, if asked: keep the gate for `ZAAKCEPTOWANO`, drop it for `REKLAMACJA_ZAAKCEPTOWANO`.
+
+#### E. Catalogue, tokens, i18n
+
+| Component | Kind | File |
+|---|---|---|
+| `<ReklamacjaBlock>` | new composition (may stay inline in `ClaimModal.tsx`, like `<DecisionPanel>`) | `apps/web/components/claims/ClaimModal.tsx` |
+| `<ReklamacjaResolutionChip>` | thin `<Badge>` wrapper, shared with the carrier panel | `apps/web/components/claims/ReklamacjaResolutionChip.tsx` |
+| ~~editable `reklamacjaAmount` input~~ | **DELETED** from the accept branch | — |
+
+**Tokens: 0 new.** Composes `bg-input/40`, `bg-card`, `border-border`, `border-t-brand`, `text-text`, `text-text-sub`, `text-brand`, `success`/`danger`/`warning` badge variants, `rounded-md`/`rounded-xl`. No `globals.css` / Tailwind-config change (Phase 4.4 policy).
+
+**New i18n keys (PL default; EN mirrored later):** `employee.claims.modal.reklamacja.{title,amount,maxAtSubmit,submittedAt,text,orderNumber,decidedAt,response,resolution.{pending,uznana,odrzucona},alreadyResolved}`, `employee.claims.modal.edit.{targetStatus.REKLAMACJA_ZAAKCEPTOWANO,targetStatus.REKLAMACJA_ODRZUCONO,reklamacjaOrderNumber,reklamacjaOrderNumberHint,reklamacjaPayoutAmount,reklamacjaResponse,reklamacjaResponsePlaceholder,reklamacjaStatusReturnHint}`, `employee.claims.modal.unified.decyzjaSubtitleReklamacja`. **Retired:** any `edit.reklamacjaAmount*` key belonging to the deleted amount input.
+
+#### F. Acceptance checklist (§6.5.15)
+
+- [ ] `<ReklamacjaBlock>` renders whenever `reklamacjaSubmitted`, between `MaksimGateBlock` and `<DecisionPanel>`, with flat section chrome (no box) + resolution chip in its header.
+- [ ] Block shows kwota, the «wnioskowana − wypłacona» maximum with both addends, submittedAt and treść; treść/odpowiedź on the muted `bg-input/40` quoted surface.
+- [ ] At `status === 'REKLAMACJA'` the `targetStatus` select offers **exactly** `REKLAMACJA_ZAAKCEPTOWANO` / `REKLAMACJA_ODRZUCONO`; plain accept/reject are **absent**, not disabled.
+- [ ] Accept branch: `reklamacjaOrderNumber` required + prefilled-once from `claim.orderNumber` (may start empty) + helper text about amended/new zlecenie; **no amount input anywhere**; carrier kwota shown read-only (`bg-input/40`, no `<Lock>`); comment optional.
+- [ ] Reject branch: required reason textarea → `reklamacjaResponse`; no order number, no amount.
+- [ ] «Status will return to X» hint rendered neutral (`text-text-sub`, `role="status"`), never warning/danger tinted.
+- [ ] After the decision: chip flips success/danger, rows 5–7 appear, `<DecisionPanel>` shows its terminal note in the **same box**, `<StatusBadge>` unchanged and un-annotated.
+- [ ] Historia additionally lists `reklamacjaAmount` / `reklamacjaOrderNumber` / `reklamacjaSubmittedAt` / `reklamacjaDecidedAt` when present.
+- [ ] `<ReklamacjaResolutionChip>` appears in the employee claims list as a **secondary** chip, never in the `<StatusBadge>` slot.
+- [ ] 0 new colour/radius/shadow/font tokens; dark mode via tokens only; AA contrast checked on all three chip tones.
 
 ## Phase 7 — Eksport / Weryfikator delegation panels
 

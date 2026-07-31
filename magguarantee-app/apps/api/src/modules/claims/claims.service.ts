@@ -20,6 +20,7 @@ import type {
   KmCalcBreakdown,
   PreviewClaimDto,
   PreviewClaimResponse,
+  ReklamacjaEligibility,
   SubmitClaimDto,
   SubmitReklamacjaDto,
   UpdateClaimDto,
@@ -31,7 +32,16 @@ import {
   cooldownCheck,
   DEFAULTS as CARRIER_SUBMISSION_DEFAULTS,
   getAuthThreshold,
+  getReklamacjaEligibility,
   isCompensationDue,
+  isWithinReklamacjaCap,
+  REKLAMACJA_ALREADY_SUBMITTED,
+  REKLAMACJA_AMOUNT_EXCEEDS_CAP,
+  REKLAMACJA_CLAIM_NOT_DECIDED,
+  REKLAMACJA_NO_DELTA,
+  REKLAMACJA_NOT_PENDING,
+  REKLAMACJA_WINDOW_EXPIRED,
+  REKLAMACJA_WINDOW_HOURS,
   requiresMaksimConfirmation,
   startOfBusinessTodayUtc,
   VEHICLE_NOT_GUARANTEED,
@@ -1043,7 +1053,13 @@ export class ClaimsService {
     //
     // The `before` snapshot is stashed into the ambient `AuditContext` so
     // the interceptor's writer picks it up — no manual log() call here.
-    const existing = await this._validateClaimUpdate(nrZgl, dto);
+    // `_validateClaimUpdate` also RESOLVES the effective target status: the
+    // synthetic `REKLAMACJA_*` literals no longer map to a fixed
+    // ZAAKCEPTOWANO/ODRZUCONO — they roll the status BACK to
+    // `statusBeforeReklamacja` (REWORK 2026-07-31). Every downstream helper
+    // consumes that single resolved value instead of re-deriving it.
+    const { existing, target } = await this._validateClaimUpdate(nrZgl, dto);
+    const isReklamacjaDecision = isReklamacjaTarget(dto.targetStatus);
     // In-transit gate (OUTERMOST): no decision (accept / reject) may be taken
     // while the linked outing is still `w_trasie` — the period/mileage isn't
     // final until `zjechal`. Runs BEFORE the verification gate so a still-driving
@@ -1063,14 +1079,25 @@ export class ClaimsService {
     // decision edge out of either verification-window status; reklamacja paths
     // are not.
     this._assertMaksimGateCleared(existing, dto);
-    const recalc = await this._recalcClaim(existing, dto);
+    // km-calc NEVER re-runs on a reklamacja branch: the amounts are FROZEN (the
+    // uznana reklamacja pays exactly the carrier's `reklamacjaAmount`, capped at
+    // submit) and those branches carry no correction fields at all since the
+    // REWORK 2026-07-31. The explicit skip is belt-and-braces so a future schema
+    // change cannot silently reintroduce a recalc here.
+    const recalc = isReklamacjaDecision
+      ? null
+      : await this._recalcClaim(existing, dto);
     // Authoritative accept-guard (Fix 3): a claim may only be ACCEPTED when the
     // (re)calculated km-difference shows an under-run, i.e. compensation is
     // actually due. This is the server-side mirror of the carrier-UI gate so a
     // forged/stale PATCH can't move a "guarantee met" claim into a paid state.
+    // Reklamacja resolutions are EXEMPT (see the helper's docblock).
     this._assertCompensationDueForAccept(existing, dto, recalc);
-    const patch = this._buildUpdatePatch(existing, dto, recalc, user);
-    const reklamacjaSnapshot = this._handleReklamacjaTransition(existing, dto);
+    const patch = this._buildUpdatePatch(existing, dto, recalc, user, target);
+    const reklamacjaSnapshot = this._handleReklamacjaTransition(
+      existing,
+      target,
+    );
     const data: UpdateClaimData = { ...patch, ...reklamacjaSnapshot };
 
     AuditContext.setBefore(this._snapshotForAudit(existing));
@@ -1079,7 +1106,14 @@ export class ClaimsService {
     const updated = await this.claims.updateWithin(txLike, existing.id, data);
 
     // Email notifications — outside the transaction. Mirrors submit/reklamacja.
-    void this._applyDecisionEmails(updated).catch((err) => {
+    // A reklamacja resolution gets its OWN carrier-only email: the generic
+    // decision mails key off `row.status`, which after the rollback still reads
+    // ZAAKCEPTOWANO/ODRZUCONO and would announce the ORIGINAL wniosek decision
+    // all over again (to the carrier AND all internal recipients).
+    const notify = isReklamacjaDecision
+      ? this._applyReklamacjaDecisionEmail(updated)
+      : this._applyDecisionEmails(updated);
+    void notify.catch((err) => {
       this.logger.error({
         msg: 'claims.update.notify_failed',
         nrZgl: updated.nrZgl,
@@ -1898,6 +1932,32 @@ export class ClaimsService {
 
   // ── Reklamacja ──────────────────────────────────────────
 
+  /**
+   * `POST /claims/:nrZgl/reklamacja` — the carrier disputes a DECIDED wniosek
+   * (docs/13-api-design.md#claims, docs/01-overview.md §5).
+   *
+   * REWORK 2026-07-31 — the reklamacja is AMOUNT + REASON only (no data
+   * amendment). Gate order, first failure wins:
+   *
+   *   1. 404 — no such wniosek;
+   *   2. 403 — not the carrier's own wniosek;
+   *   3. 409 `REKLAMACJA_ALREADY_SUBMITTED` — one reklamacja per wniosek, ever;
+   *   4. 422 `REKLAMACJA_CLAIM_NOT_DECIDED` — status ∉ {ZAAKCEPTOWANO, ODRZUCONO};
+   *   5. 422 `REKLAMACJA_WINDOW_EXPIRED`   — past 48 h from `statusChangedAt`;
+   *   6. 422 `REKLAMACJA_NO_DELTA`         — nothing left unpaid to claim;
+   *   7. 422 `REKLAMACJA_AMOUNT_EXCEEDS_CAP` — kwota > cap (STRICT, cents).
+   *
+   * Steps 3-6 are decided by `getReklamacjaEligibility` from
+   * `@magguarantee/shared` — the SAME predicate the carrier UI evaluates, so the
+   * sheet never offers a ceiling the api then refuses (that drift is exactly what
+   * this rework removes; the ceiling formula now lives ONLY in
+   * `domain/reklamacja-rules.ts`).
+   *
+   * Persistence runs on the AMBIENT `@Audit('submitReklamacja')` transaction
+   * (`setBefore` + `updateWithin(prisma.tx)`) so the row write and the audit row
+   * commit atomically — mirror of `update()`. Emails are fire-and-forget AFTER
+   * the tx commits.
+   */
   async submitReklamacja(
     user: AuthUser,
     nrZgl: string,
@@ -1911,71 +1971,35 @@ export class ClaimsService {
       throw new ForbiddenException('Brak uprawnień do tego wniosku');
     }
 
-    // Idempotency — re-submitting yields a clean error rather than a 500.
-    // Mirrors `Code.gs:6814-6817`.
-    if (claim.reklamacjaSubmitted) {
-      throw new ConflictException(
-        'Reklamacja została już złożona dla tego wniosku.',
-      );
-    }
+    // ONE `Date` instance for both `statusChangedAt` and `reklamacjaSubmittedAt`
+    // — and the same clock the eligibility window is measured against.
+    const now = new Date();
+    const eligibility = getReklamacjaEligibility(
+      {
+        status: claim.status,
+        origPaymentEur: claim.origPaymentEur,
+        paymentEur: claim.paymentEur,
+        amountApproved: claim.amountApproved,
+        reklamacjaSubmitted: claim.reklamacjaSubmitted,
+        statusChangedAt: claim.statusChangedAt,
+      },
+      now,
+    );
+    this._assertReklamacjaEligible(claim, eligibility);
+    this._assertReklamacjaWithinCap(dto.kwotaReklamacji, eligibility.maxAmount);
 
-    // Status gate: only decided claims (ZAAKCEPTOWANO / ODRZUCONO) can be
-    // disputed. `Code.gs:6829` reads the current row status; we enforce
-    // explicitly here for clarity.
-    if (
-      claim.status !== 'ZAAKCEPTOWANO' &&
-      claim.status !== 'ODRZUCONO'
-    ) {
-      throw new UnprocessableEntityException(
-        'Reklamację można złożyć tylko dla wniosku zaakceptowanego lub odrzuconego.',
-      );
-    }
-
-    // 48h window from `statusChangedAt`. Mirrors `Code.gs:6836-6845`.
-    if (claim.statusChangedAt) {
-      const hoursPassed =
-        (Date.now() - claim.statusChangedAt.getTime()) / 3_600_000;
-      if (hoursPassed > 48) {
-        throw new UnprocessableEntityException(
-          'Czas na złożenie reklamacji minął. Reklamację można złożyć ' +
-            'maksymalnie 48 godzin od rozpatrzenia wniosku.',
-        );
-      }
-    }
-
-    // Amount cap: `kwotaReklamacji ≤ kwotaWnioskowana − kwotaWyplacona`.
-    // `kwotaWyplacona` = `paymentEur` if accepted, else 0. Mirrors
-    // `Code.gs:6826-6832`. We allow ε=1 EUR rounding tolerance per legacy.
-    // `paymentEur` is byte-identical to what the dropped `amountRequested`
-    // column always held, so this cap is UNCHANGED by the drop.
-    //
-    // KNOWN LIMITATION (pre-existing, deliberately preserved here): in legacy
-    // GAS `kwotaWnioskowana` (col 36) was a MANUAL carrier entry independent of
-    // `doplata` (col 13), so the two genuinely differed and the cap was
-    // meaningful. We removed the manual override, which makes requested ==
-    // paid for every ZAAKCEPTOWANO row — i.e. the cap is identically 0 and no
-    // monetary reklamacja passes on an accepted claim (rejected claims are
-    // unaffected: paid = 0). Restoring the legacy intent under the new model
-    // means `origPaymentEur − amountApproved` ("what I asked for minus what you
-    // actually paid"), but that widens the cap and is a business decision, not
-    // a refactor — left for a deliberate change.
-    const requested = claim.paymentEur ?? 0;
-    const paid =
-      claim.status === 'ZAAKCEPTOWANO' ? (claim.paymentEur ?? 0) : 0;
-    const maxAmount = requested - paid;
-    if (dto.kwotaReklamacji > maxAmount + 1) {
-      throw new UnprocessableEntityException(
-        `Kwota reklamacji (${dto.kwotaReklamacji} €) przekracza maksimum (` +
-          `${Math.round(maxAmount)} €).`,
-      );
-    }
-
-    const updated = await this.claims.update(claim.id, {
+    AuditContext.setBefore(this._snapshotForAudit(claim));
+    const txLike = this.prisma.tx as unknown as TransactionLike;
+    const updated = await this.claims.updateWithin(txLike, claim.id, {
       reklamacjaSubmitted: true,
       reklamacjaText: dto.tresc,
       reklamacjaAmount: dto.kwotaReklamacji,
+      // Carrier's filing stamp. Deliberately NOT derivable from
+      // `statusChangedAt`: the decision re-stamps that when it rolls the status
+      // back to `statusBeforeReklamacja`.
+      reklamacjaSubmittedAt: now,
       status: 'REKLAMACJA',
-      statusChangedAt: new Date(),
+      statusChangedAt: now,
       statusBeforeReklamacja: claim.status,
       // Parity with the other `orig*` fields: `submitReklamacja` re-snapshots
       // the carrier's "second submit" inputs with a `?? current` fallback so a
@@ -1991,15 +2015,116 @@ export class ClaimsService {
       origHoursAdjusted: claim.origHoursAdjusted ?? claim.hoursAdjustedValue,
     });
 
-    void this._notifyReklamacja(updated).catch((err) => {
-      this.logger.error({
-        msg: 'claims.reklamacja.notify_failed',
-        nrZgl: updated.nrZgl,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
+    void this._notifyReklamacjaSubmitted(updated, eligibility.maxAmount).catch(
+      (err) => {
+        this.logger.error({
+          msg: 'claims.reklamacja.notify_failed',
+          nrZgl: updated.nrZgl,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      },
+    );
 
     return this.toDto(updated);
+  }
+
+  /**
+   * Translates a blocked `getReklamacjaEligibility` verdict into the documented
+   * HTTP error (docs/13-api-design.md — `POST /claims/:nrZgl/reklamacja`). Every
+   * throw carries the stable machine code BOTH top-level (for the in-process
+   * unit tests reading `getResponse().code`) and under `extensions` (the only
+   * place the global `ProblemDetailsFilter` forwards to the wire, which is what
+   * the web keys on) — the established `_assertDelegationReturned` shape.
+   *
+   * ONE service-side refinement over the shared precedence: a claim that already
+   * carries a reklamacja reports the 409 one-shot conflict even when its status
+   * is not a decided one (i.e. the reklamacja is still PENDING in `REKLAMACJA`,
+   * where the shared helper reports `NOT_DECIDED`). «Already submitted» is the
+   * actionable truth for a carrier double-submitting from two tabs; the UI never
+   * reaches this path because it hides the CTA on `reklamacjaSubmitted`.
+   *
+   * Pure guard — no IO.
+   */
+  private _assertReklamacjaEligible(
+    claim: ClaimRow,
+    eligibility: ReklamacjaEligibility,
+  ): void {
+    if (eligibility.canFile) return;
+
+    if (
+      eligibility.blockedReason === 'ALREADY_SUBMITTED' ||
+      claim.reklamacjaSubmitted
+    ) {
+      throw new ConflictException({
+        code: REKLAMACJA_ALREADY_SUBMITTED,
+        message: 'Reklamacja została już złożona dla tego wniosku.',
+        extensions: { code: REKLAMACJA_ALREADY_SUBMITTED },
+      });
+    }
+
+    switch (eligibility.blockedReason) {
+      case 'NOT_DECIDED':
+        throw new UnprocessableEntityException({
+          code: REKLAMACJA_CLAIM_NOT_DECIDED,
+          message:
+            'Reklamację można złożyć tylko dla wniosku zaakceptowanego lub odrzuconego.',
+          extensions: { code: REKLAMACJA_CLAIM_NOT_DECIDED },
+        });
+      case 'WINDOW_EXPIRED':
+        throw new UnprocessableEntityException({
+          code: REKLAMACJA_WINDOW_EXPIRED,
+          message:
+            'Czas na złożenie reklamacji minął. Reklamację można złożyć ' +
+            `maksymalnie ${REKLAMACJA_WINDOW_HOURS} godzin od rozpatrzenia wniosku.`,
+          extensions: {
+            code: REKLAMACJA_WINDOW_EXPIRED,
+            ...(eligibility.deadlineAt
+              ? { deadlineAt: eligibility.deadlineAt.toISOString() }
+              : {}),
+          },
+        });
+      case 'NO_DELTA':
+        throw new UnprocessableEntityException({
+          code: REKLAMACJA_NO_DELTA,
+          message:
+            'Brak kwoty do reklamacji — wypłacona kwota odpowiada kwocie wnioskowanej.',
+          extensions: { code: REKLAMACJA_NO_DELTA },
+        });
+      default:
+        // Defensive: `canFile === false` always carries a reason. Never reached.
+        throw new UnprocessableEntityException({
+          code: REKLAMACJA_CLAIM_NOT_DECIDED,
+          message: 'Reklamacji nie można złożyć dla tego wniosku.',
+          extensions: { code: REKLAMACJA_CLAIM_NOT_DECIDED },
+        });
+    }
+  }
+
+  /**
+   * Ceiling gate — STRICT at cent precision (the legacy `+1 €` tolerance is
+   * gone). The comparison itself lives in `@magguarantee/shared`
+   * (`isWithinReklamacjaCap`) so the api and the carrier form agree to the cent.
+   * Positivity is Zod's job (`SubmitReklamacjaSchema.kwotaReklamacji > 0`).
+   *
+   * The 422 carries the ceiling in the message AND, machine-readably, in
+   * `extensions.maxAmount` so the form can re-render its hint without parsing
+   * Polish prose. Pure guard — no IO.
+   */
+  private _assertReklamacjaWithinCap(
+    kwota: number,
+    maxAmount: number,
+  ): void {
+    if (isWithinReklamacjaCap(kwota, maxAmount)) return;
+    throw new UnprocessableEntityException({
+      code: REKLAMACJA_AMOUNT_EXCEEDS_CAP,
+      message:
+        `Kwota reklamacji (${kwota.toFixed(2)} €) przekracza maksimum ` +
+        `(${maxAmount.toFixed(2)} €).`,
+      extensions: {
+        code: REKLAMACJA_AMOUNT_EXCEEDS_CAP,
+        maxAmount: round2(maxAmount),
+      },
+    });
   }
 
   // ── Read ────────────────────────────────────────────────
@@ -2100,6 +2225,18 @@ export class ClaimsService {
       reklamacjaText: row.reklamacjaText,
       reklamacjaResponse: row.reklamacjaResponse,
       reklamacjaAmount: row.reklamacjaAmount,
+      // Reklamacja OUTCOME + its audit stamps. `reklamacjaResolution === null`
+      // means "never filed" OR "pending" — the web disambiguates with
+      // `reklamacjaSubmitted` / `status === 'REKLAMACJA'`, never by guessing from
+      // the (rolled-back) status.
+      reklamacjaResolution: row.reklamacjaResolution,
+      reklamacjaOrderNumber: row.reklamacjaOrderNumber,
+      reklamacjaSubmittedAt: row.reklamacjaSubmittedAt
+        ? row.reklamacjaSubmittedAt.toISOString()
+        : null,
+      reklamacjaDecidedAt: row.reklamacjaDecidedAt
+        ? row.reklamacjaDecidedAt.toISOString()
+        : null,
       statusBeforeReklamacja: row.statusBeforeReklamacja,
       origDateStart: row.origDateStart
         ? row.origDateStart.toISOString()
@@ -2193,6 +2330,9 @@ export class ClaimsService {
       origPaymentEur: row.origPaymentEur,
       amountApproved: row.amountApproved,
       reklamacjaSubmitted: row.reklamacjaSubmitted,
+      // Outcome chip on the employee table (docs/14 §6.5.15) — `null` +
+      // `reklamacjaSubmitted` ⇒ «Reklamacja w toku».
+      reklamacjaResolution: row.reklamacjaResolution,
       createdAt: row.createdAt.toISOString(),
     };
   }
@@ -2202,22 +2342,36 @@ export class ClaimsService {
   // ── update() helpers (Phase 4) ──────────────────────────
 
   /**
-   * Loads the claim, normalises the wire-only synthetic literals, validates
-   * the transition + per-target required fields, and returns the existing
-   * row. Throws 404 on missing claim, 422 on illegal transition (via state
-   * machine), 400 on cross-field invariant violation (missing required
-   * fields per docs/01-overview.md#weryfikacja-wniosku).
+   * Loads the claim, RESOLVES the wire-only synthetic literals into the
+   * effective `ClaimStatus`, validates the transition + per-target required
+   * fields, and returns both. Throws 404 on missing claim, 422 on illegal
+   * transition (via state machine) / on a `REKLAMACJA_*` target without a pending
+   * reklamacja, 400 on cross-field invariant violation (missing required fields
+   * per docs/01-overview.md#weryfikacja-wniosku).
+   *
+   * Order matters:
+   *   1. 404 — the claim must exist;
+   *   2. 422 `REKLAMACJA_NOT_PENDING` — a `REKLAMACJA_*` target on a claim that
+   *      is NOT in `REKLAMACJA`. This MUST precede the state-machine check:
+   *      `NA_WERYFIKACJI → ZAAKCEPTOWANO` is a legal edge, so without this guard
+   *      a synthetic reklamacja-accept on a fresh claim would sail through as a
+   *      fresh accept — while skipping the recalc, the compensation-due guard and
+   *      the Maksim gate (all exempt on reklamacja branches) and writing a bogus
+   *      `reklamacjaResolution`;
+   *   3. state machine on the RESOLVED target;
+   *   4. per-branch required fields.
    */
   private async _validateClaimUpdate(
     nrZgl: string,
     dto: UpdateClaimDto,
-  ): Promise<ClaimRow> {
+  ): Promise<{ existing: ClaimRow; target: ClaimStatus }> {
     const existing = await this.claims.findByNrZgl(nrZgl);
     if (!existing) {
       throw new NotFoundException('Wniosek nie znaleziony');
     }
 
-    const targetStatus = translateSyntheticStatus(dto.targetStatus);
+    this._assertReklamacjaPending(existing, dto);
+    const targetStatus = resolveUpdateTarget(dto.targetStatus, existing);
 
     // State-machine check first — gives the verifier a friendly Polish 422
     // before we run any cross-field validation.
@@ -2251,19 +2405,46 @@ export class ClaimsService {
       }
     }
 
-    // Reklamacja-accept needs a verifier-approved amount. Reklamacja-reject
-    // needs only the rejection comment (already required by Zod schema).
+    // Reklamacja-accept needs the «Nr zlecenia» the dopłata is paid under (DB
+    // CHECK `claim_reklamacja_resolution_complete` enforces the same invariant;
+    // the amount is NOT sent anymore — it is the carrier's frozen
+    // `reklamacjaAmount`). Reklamacja-reject needs only the rejection comment
+    // (already required by the Zod schema). Re-checked here so the service stays
+    // correct when called from tests / non-HTTP paths that bypass the pipe.
     if (
       dto.targetStatus === 'REKLAMACJA_ZAAKCEPTOWANO' &&
-      (dto.reklamacjaAmount === undefined || dto.reklamacjaAmount === null)
+      (!dto.reklamacjaOrderNumber || dto.reklamacjaOrderNumber.trim() === '')
     ) {
       throw new BadRequestException({
         code: 'INVALID_STATUS_TRANSITION',
-        message: 'Kwota reklamacji jest wymagana przy akceptacji reklamacji.',
+        message:
+          'Numer zlecenia jest wymagany przy uznaniu reklamacji.',
       });
     }
 
-    return existing;
+    return { existing, target: targetStatus };
+  }
+
+  /**
+   * Guards the synthetic `REKLAMACJA_*` PATCH targets: they are only meaningful
+   * while a reklamacja is PENDING, i.e. `status === 'REKLAMACJA'` (a pending
+   * reklamacja is defined by the STATUS, not by `reklamacjaResolution IS NULL` —
+   * NULL also means "never filed"). No-op for the plain decision targets.
+   *
+   * 422 `REKLAMACJA_NOT_PENDING`, machine code both top-level and under
+   * `extensions` (the `_assertDelegationReturned` shape). Pure guard — no IO.
+   */
+  private _assertReklamacjaPending(
+    existing: ClaimRow,
+    dto: UpdateClaimDto,
+  ): void {
+    if (!isReklamacjaTarget(dto.targetStatus)) return;
+    if (existing.status === 'REKLAMACJA') return;
+    throw new UnprocessableEntityException({
+      code: REKLAMACJA_NOT_PENDING,
+      message: 'Ten wniosek nie ma reklamacji oczekującej na rozpatrzenie.',
+      extensions: { code: REKLAMACJA_NOT_PENDING },
+    });
   }
 
   /**
@@ -2342,13 +2523,18 @@ export class ClaimsService {
    * the UI hides/disables the accept action, but a forged or stale PATCH must
    * not be able to flip such a claim to a paid state.
    *
-   * Target states that count as ACCEPT:
-   *   - `ZAAKCEPTOWANO` (fresh claim accepted by the verifier).
-   *   - `REKLAMACJA_ZAAKCEPTOWANO` (verifier accepts a reklamacja; the service
-   *     translates this synthetic wire literal back to `ZAAKCEPTOWANO`, see
-   *     docs/13-api-design.md#update-claim-verification).
-   * `ODRZUCONO` / `REKLAMACJA_ODRZUCONO` (and any other transition) are NOT
-   * gated — a "no under-run" claim can always be rejected.
+   * Scope: the FRESH accept (`targetStatus === 'ZAAKCEPTOWANO'`) ONLY.
+   *
+   * `REKLAMACJA_ZAAKCEPTOWANO` is EXEMPT (REWORK 2026-07-31, docs/14 §6.5.15 D):
+   * an uznana reklamacja pays the carrier's FIXED `reklamacjaAmount` — set at
+   * submit and already capped by `origPaymentEur − alreadyPaid` — which is
+   * independent of the km-calc. A wniosek REJECTED precisely because the calc
+   * showed no under-run (`kmDifference <= 0`) can still legitimately have its
+   * reklamacja uznana, and the km-calc numbers are frozen on that branch anyway
+   * (no recalc runs). Gating it would make the outcome unreachable.
+   *
+   * `ODRZUCONO` / `REKLAMACJA_ODRZUCONO` (and any other transition) are likewise
+   * NOT gated — a "no under-run" claim can always be rejected.
    *
    * km-difference source: the RECALCULATED value when the verifier touched a
    * math-affecting field (dates / times / mileage / hoursAdjusted), otherwise
@@ -2362,10 +2548,7 @@ export class ClaimsService {
     dto: UpdateClaimDto,
     recalc: { kmDifference: number } | null,
   ): void {
-    const isAccept =
-      dto.targetStatus === 'ZAAKCEPTOWANO' ||
-      dto.targetStatus === 'REKLAMACJA_ZAAKCEPTOWANO';
-    if (!isAccept) return;
+    if (dto.targetStatus !== 'ZAAKCEPTOWANO') return;
 
     // Recalc ran ⇒ use its fresh kmDifference (post-verifier-edits); otherwise
     // the math is untouched and the persisted row value is authoritative.
@@ -2455,24 +2638,37 @@ export class ClaimsService {
   }
 
   /**
-   * Composes the actual `UpdateClaimData` patch from the validated DTO and
-   * the optional recalc output. Pure function — no IO, no throws. Tested
-   * indirectly via the update() spec.
+   * Composes the actual `UpdateClaimData` patch from the validated DTO, the
+   * RESOLVED target status and the optional recalc output. Pure function — no IO,
+   * no throws. Tested indirectly via the update() spec.
+   *
+   * `target` is supplied by the caller (resolved in `_validateClaimUpdate`) — the
+   * reklamacja branches resolve it to `statusBeforeReklamacja`, so this method
+   * must not re-derive it.
    */
   private _buildUpdatePatch(
     existing: ClaimRow,
     dto: UpdateClaimDto,
     recalc: RecalcOutputs | null,
     user: AuthUser,
+    target: ClaimStatus,
   ): UpdateClaimData {
     const patch: UpdateClaimData = {};
-    const target = translateSyntheticStatus(dto.targetStatus);
+    // ⚠️ ONE `Date` instance for the whole patch. On a reklamacja decision
+    // `statusChangedAt` and `reklamacjaDecidedAt` MUST be byte-identical — the
+    // weekly report tells a reklamacja-driven status rollback apart from a fresh
+    // decision by that exact equality (see
+    // `WeeklyReportRepository.windowStats`).
     const now = new Date();
 
     // Status & workflow.
     patch.status = target;
     patch.statusChangedAt = now;
-    patch.decidedById = user.sub;
+    // `decidedById` records who decided the WNIOSEK. A reklamacja decision must
+    // NOT overwrite it — that actor goes to `reklamacjaDecidedById` below, so the
+    // original decision stays attributable (and the ClaimModal keeps showing the
+    // right person next to the wniosek decision).
+    if (!isReklamacjaTarget(dto.targetStatus)) patch.decidedById = user.sub;
 
     // Correction fields + recalc outputs — the SAME logic the verification
     // checkpoint (`verifyClaim`) applies. Extracted into `_applyCorrectionsToPatch`
@@ -2491,15 +2687,34 @@ export class ClaimsService {
       case 'ODRZUCONO':
         patch.comment = dto.comment;
         break;
+      // ── Reklamacja resolutions (REWORK 2026-07-31) ──────────
+      // BOTH outcomes roll `status` back to `statusBeforeReklamacja` (already in
+      // `target`); the outcome itself lives ONLY in `reklamacjaResolution`.
+      // Deliberately NOT touched here: `amountApproved`, `orderNumber`,
+      // `orderDate`, `paymentEur`, `comment` and `decidedById` — the wniosek's own
+      // decision and payout stay exactly as they were, which is also what keeps
+      // the DB CHECK `claim_accepted_payment_complete` trivially satisfied on the
+      // `ODRZUCONO → REKLAMACJA → uznana` path (the pre-rework code violated it
+      // there by flipping the status to ZAAKCEPTOWANO without a payout).
       case 'REKLAMACJA_ZAAKCEPTOWANO':
-        patch.reklamacjaResponse = dto.comment;
-        patch.reklamacjaAmount = dto.reklamacjaAmount;
-        // Verifier accepted reklamacja → row's effective status becomes
-        // ZAAKCEPTOWANO. `statusBeforeReklamacja` was already set when the
-        // claim entered REKLAMACJA via submitReklamacja(); we leave it alone.
+        patch.reklamacjaResolution = 'UZNANA';
+        // «Nr zlecenia» the dopłata is paid under. Independent of the wniosek's
+        // own `orderNumber` (the UI merely prefills from it).
+        patch.reklamacjaOrderNumber = dto.reklamacjaOrderNumber;
+        patch.reklamacjaDecidedAt = now;
+        patch.reklamacjaDecidedById = user.sub;
+        // Optional staff note. The PAID amount is the carrier's frozen
+        // `reklamacjaAmount` — staff no longer set one.
+        if (dto.comment !== undefined) {
+          patch.reklamacjaResponse = dto.comment ?? null;
+        }
         break;
       case 'REKLAMACJA_ODRZUCONO':
+        patch.reklamacjaResolution = 'ODRZUCONA';
+        // Required by the schema — this IS the rejection justification.
         patch.reklamacjaResponse = dto.comment;
+        patch.reklamacjaDecidedAt = now;
+        patch.reklamacjaDecidedById = user.sub;
         break;
       default: {
         const exhaustive: never = dto;
@@ -2533,10 +2748,8 @@ export class ClaimsService {
    */
   private _handleReklamacjaTransition(
     existing: ClaimRow,
-    dto: UpdateClaimDto,
+    target: ClaimStatus,
   ): Partial<UpdateClaimData> {
-    const target = translateSyntheticStatus(dto.targetStatus);
-
     // Defensive: verifier-side PATCH currently has NO edge into REKLAMACJA
     // (state-machine forbids it). Should the matrix grow such an edge, this
     // is the spot to snapshot origData* like `submitReklamacja` does.
@@ -2775,10 +2988,21 @@ export class ClaimsService {
         ? row.orderDate.toISOString().slice(0, 10)
         : null,
       amountApproved: row.amountApproved,
+      // Reklamacja — the WHOLE block, so the History diff shows the carrier's
+      // filing (text / kwota / submittedAt / status snapshot) and the staff
+      // resolution (UZNANA|ODRZUCONA / nr zlecenia / response / who + when) as
+      // two legible steps. `reklamacjaResolution` is the ONLY place the outcome
+      // lives — the status rolls back, so the diff of `status` alone would read
+      // as "nothing happened".
       reklamacjaSubmitted: row.reklamacjaSubmitted,
       reklamacjaText: row.reklamacjaText,
       reklamacjaResponse: row.reklamacjaResponse,
       reklamacjaAmount: row.reklamacjaAmount,
+      reklamacjaResolution: row.reklamacjaResolution,
+      reklamacjaOrderNumber: row.reklamacjaOrderNumber,
+      reklamacjaSubmittedAt: row.reklamacjaSubmittedAt?.toISOString() ?? null,
+      reklamacjaDecidedAt: row.reklamacjaDecidedAt?.toISOString() ?? null,
+      reklamacjaDecidedById: row.reklamacjaDecidedById,
       statusBeforeReklamacja: row.statusBeforeReklamacja,
       // Phase 7 REWORK (2026-06-20 #4) — capture the outing link + period-guard
       // flag so the delegation auto-recalc before/after diff shows the period
@@ -2994,41 +3218,172 @@ export class ClaimsService {
     });
   }
 
-  private async _notifyReklamacja(row: ClaimRow): Promise<void> {
-    const recipients = await this._collectReklamacjaRecipients(row);
-    if (recipients.length === 0) {
+  /**
+   * Reklamacja FILED — two emails (docs/16-jobs-and-integrations.md §Email-шаблоны):
+   *
+   *  - `reklamacja-internal-submitted` → EVERY active `admin` + `pracownik` (the
+   *    staff who can actually act on it). Recipients come from
+   *    `_collectClaimRecipients().openerEmails`, which is exactly that query
+   *    (`role in [admin,pracownik] AND active AND deletedAt: null`), already
+   *    email-validated and lower-cased. The old `_collectReklamacjaRecipients`
+   *    took only the FIRST admin (`findFirst`) — a plain bug: on a team of three
+   *    admins two never learned about the reklamacja.
+   *  - `reklamacja-carrier-submitted` → the carrier, as a receipt.
+   *
+   * `maxAmount` is the ceiling the eligibility helper computed for this claim —
+   * passed through so the internal email can show «wnioskowana / wypłacona /
+   * maksimum» without the template re-deriving the formula.
+   *
+   * Fire-and-forget AFTER the audit tx committed, so every read goes through
+   * `this.prisma.client` (root), never `prisma.tx` — see
+   * `_collectClaimRecipients`.
+   */
+  private async _notifyReklamacjaSubmitted(
+    row: ClaimRow,
+    maxAmount: number,
+  ): Promise<void> {
+    if (!this.mailService) {
+      this.logger.warn({
+        msg: 'claims.reklamacja.no_mail_service',
+        nrZgl: row.nrZgl,
+      });
+      return;
+    }
+    const targets = await this._collectClaimRecipients(row);
+    const internal = [...targets.openerEmails];
+    if (!targets.carrierEmail && internal.length === 0) {
       this.logger.warn({
         msg: 'claims.reklamacja.no_recipients',
         nrZgl: row.nrZgl,
       });
       return;
     }
+
+    const appUrl = this._appUrl();
+    const carrierName = await this._resolveCarrierDisplayName(row.carrierId);
+    const nz = encodeURIComponent(row.nrZgl);
+    const kwota = (row.reklamacjaAmount ?? 0).toFixed(2);
+    const tresc = row.reklamacjaText ?? '';
+    const warn = (msg: string) => (err: unknown) =>
+      this.logger.warn({
+        msg,
+        nrZgl: row.nrZgl,
+        error: err instanceof Error ? err.message : String(err),
+      });
+
+    for (const email of internal) {
+      void this.mailService
+        .enqueueReklamacjaInternalSubmitted(email, {
+          nrZgl: row.nrZgl,
+          carrierName,
+          vehiclePlate: row.vehiclePlateSnapshot,
+          kwota,
+          // Context for the decision: what was asked, what was paid, what is
+          // still claimable. `origPaymentEur` is the ONLY honest "requested"
+          // figure (`paymentEur` is rewritten by every verifier correction).
+          wnioskowana: (row.origPaymentEur ?? row.paymentEur).toFixed(2),
+          wyplacona:
+            row.statusBeforeReklamacja === 'ZAAKCEPTOWANO'
+              ? (row.amountApproved ?? 0).toFixed(2)
+              : '0.00',
+          maksimum: maxAmount.toFixed(2),
+          tresc,
+          // Employee list deeplink — same `?nrZgl=` pattern the other internal
+          // claim mails use to open the ClaimModal on arrival.
+          deeplink: `${appUrl}/employee/claims?nrZgl=${nz}`,
+        })
+        .catch(warn('reklamacja internal enqueue failed'));
+    }
+
+    if (targets.carrierEmail) {
+      void this.mailService
+        .enqueueReklamacjaCarrierSubmitted(targets.carrierEmail, {
+          nrZgl: row.nrZgl,
+          kwota,
+          tresc,
+          deeplink: `${appUrl}/carrier/claims/${nz}`,
+        })
+        .catch(warn('reklamacja carrier receipt enqueue failed'));
+    }
+
     this.logger.log({
       msg: 'claims.reklamacja.notify',
       nrZgl: row.nrZgl,
-      recipients: recipients.map((r) => maskEmail(r)),
+      carrier: targets.carrierEmail ? maskEmail(targets.carrierEmail) : null,
+      internal: internal.map((r) => maskEmail(r)),
     });
   }
 
-  private async _collectReklamacjaRecipients(
-    row: ClaimRow,
-  ): Promise<string[]> {
-    const set = new Set<string>();
-    // Root client, not the ambient tx — fire-and-forget post-commit read
-    // (see `_collectClaimRecipients`).
-    const admin = await this.prisma.client.user.findFirst({
-      where: { role: 'admin', active: true, deletedAt: null },
-      select: { email: true },
-    });
-    if (admin?.email) set.add(admin.email.toLowerCase());
+  /**
+   * Reklamacja DECIDED — one email, to the carrier only
+   * (`reklamacja-carrier-decision`). Internal staff took the decision, so they
+   * are deliberately not re-notified (mirrors the reklamacja UI: the outcome is
+   * visible on the claim the moment it is saved).
+   *
+   * The tone/content branch on `row.reklamacjaResolution`, NEVER on `row.status`
+   * — the status rolled back to the ORIGINAL wniosek verdict and says nothing
+   * about the reklamacja. When the resolution is somehow absent we log and skip
+   * rather than sending a mail that cannot state an outcome.
+   */
+  private async _applyReklamacjaDecisionEmail(row: ClaimRow): Promise<void> {
+    if (!row.reklamacjaResolution) {
+      this.logger.warn({
+        msg: 'claims.reklamacja.decision_without_resolution',
+        nrZgl: row.nrZgl,
+      });
+      return;
+    }
+    if (!this.mailService) {
+      this.logger.warn({
+        msg: 'claims.reklamacja.no_mail_service',
+        nrZgl: row.nrZgl,
+      });
+      return;
+    }
+    const targets = await this._collectClaimRecipients(row);
+    if (!targets.carrierEmail) {
+      this.logger.warn({
+        msg: 'claims.reklamacja.decision_no_carrier_email',
+        nrZgl: row.nrZgl,
+      });
+      return;
+    }
 
-    const carrier = await this.prisma.client.carrier.findFirst({
-      where: { id: row.carrierId },
-      select: { user: { select: { email: true } } },
-    });
-    if (carrier?.user.email) set.add(carrier.user.email.toLowerCase());
+    const appUrl = this._appUrl();
+    const nz = encodeURIComponent(row.nrZgl);
+    await this.mailService
+      .enqueueReklamacjaCarrierDecision(targets.carrierEmail, {
+        nrZgl: row.nrZgl,
+        resolution: row.reklamacjaResolution,
+        vehiclePlate: row.vehiclePlateSnapshot,
+        // Paid figure on UZNANA = the carrier's own frozen kwota.
+        kwota: (row.reklamacjaAmount ?? 0).toFixed(2),
+        orderNumber: row.reklamacjaOrderNumber ?? undefined,
+        response: row.reklamacjaResponse ?? undefined,
+        deeplink: `${appUrl}/carrier/claims/${nz}`,
+      })
+      .catch((err) => {
+        this.logger.warn({
+          msg: 'reklamacja decision enqueue failed',
+          nrZgl: row.nrZgl,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
 
-    return [...set].filter(isValidEmail);
+    this.logger.log({
+      msg: 'claims.reklamacja.decision_notify',
+      nrZgl: row.nrZgl,
+      resolution: row.reklamacjaResolution,
+      carrier: maskEmail(targets.carrierEmail),
+    });
+  }
+
+  /** Configured public app URL without a trailing slash (deeplink base). */
+  private _appUrl(): string {
+    return (
+      this.configService?.get('APP_URL', { infer: true }) ??
+      'http://localhost:3000'
+    ).replace(/\/$/, '');
   }
 }
 
@@ -3095,23 +3450,44 @@ function maskEmail(email: string): string {
   return `${local.slice(0, 2)}***${domain}`;
 }
 
-/**
- * Map a wire-only `targetStatus` literal back to its underlying `ClaimStatus`.
- * Synthetic `REKLAMACJA_ZAAKCEPTOWANO` / `REKLAMACJA_ODRZUCONO` collapse to
- * `ZAAKCEPTOWANO` / `ODRZUCONO` respectively. Real `ClaimStatus` literals
- * pass through unchanged. Pure function.
- */
-function translateSyntheticStatus(
+/** True for the two wire-only reklamacja-resolution literals. */
+function isReklamacjaTarget(
   target: UpdateClaimDto['targetStatus'],
+): target is 'REKLAMACJA_ZAAKCEPTOWANO' | 'REKLAMACJA_ODRZUCONO' {
+  return (
+    target === 'REKLAMACJA_ZAAKCEPTOWANO' ||
+    target === 'REKLAMACJA_ODRZUCONO'
+  );
+}
+
+/**
+ * Resolve a wire `targetStatus` into the `ClaimStatus` to persist.
+ *
+ * REWORK 2026-07-31 (variant A) — the synthetic `REKLAMACJA_*` literals no
+ * longer collapse to a FIXED `ZAAKCEPTOWANO` / `ODRZUCONO`. BOTH outcomes return
+ * the claim to `statusBeforeReklamacja` (stamped by `submitReklamacja`), because
+ * the reklamacja disputes the wniosek's MONEY, not its verdict: an uznana
+ * reklamacja on a rejected wniosek leaves the wniosek rejected and pays the
+ * reklamacja under its own `reklamacjaOrderNumber`. The verdict of the
+ * reklamacja itself lives in `reklamacjaResolution` — never inferred from the
+ * resulting status.
+ *
+ * Defensive fallback when `statusBeforeReklamacja` is somehow NULL (hand-patched
+ * / pre-rework row): infer from the payout — `amountApproved != null` means the
+ * wniosek had been accepted, otherwise it was rejected. Both fallbacks are legal
+ * edges out of `REKLAMACJA`, so `assertLegalTransition` still passes.
+ *
+ * Real `ClaimStatus` literals pass through unchanged. Pure function.
+ */
+function resolveUpdateTarget(
+  target: UpdateClaimDto['targetStatus'],
+  existing: ClaimRow,
 ): ClaimStatus {
-  switch (target) {
-    case 'REKLAMACJA_ZAAKCEPTOWANO':
-      return 'ZAAKCEPTOWANO';
-    case 'REKLAMACJA_ODRZUCONO':
-      return 'ODRZUCONO';
-    default:
-      return target;
-  }
+  if (!isReklamacjaTarget(target)) return target;
+  return (
+    existing.statusBeforeReklamacja ??
+    (existing.amountApproved !== null ? 'ZAAKCEPTOWANO' : 'ODRZUCONO')
+  );
 }
 
 /**

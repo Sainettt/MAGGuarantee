@@ -990,3 +990,16 @@ describe('calcKmGwarantPerMonth', () => {
 - Self-service «История моих заявлений» с графиками для перевозчика.
 
 Эти задачи можно оценивать отдельно — они уже не критичны для launch.
+
+---
+
+## Доработка (2026-07-31) — Reklamacje rework
+
+Финальная реализация рекламаций по спеке заказчика (детали: `docs/01` §5, `docs/13` §Claims, `docs/14` §"Reklamacja sheet"/§6.5.15, `docs/12`/`docs/04` — новые колонки):
+
+- **Cap**: `kwota ≤ origPaymentEur − (amountApproved при ZAAKCEPTOWANO, иначе 0)`, строго (легаси-допуск ±1 € удалён); `maxAmount ≤ 0` ⇒ подача запрещена. Формула живёт ТОЛЬКО в `packages/shared/src/domain/reklamacja-rules.ts` (`getReklamacjaEligibility`) — api и web потребляют её оттуда. Окно 48ч от `statusChangedAt` подтверждено заказчиком и сохранено.
+- **Вариант A статус-семантики**: решение по рекламации возвращает `status` в `statusBeforeReklamacja` (оба исхода); исход — в новой колонке `reklamacjaResolution` (`UZNANA`/`ODRZUCONA`) + `reklamacjaOrderNumber` (обязателен при UZNANA, DB CHECK), `reklamacjaSubmittedAt/DecidedAt/DecidedById`. Payout-поля wniosku (`amountApproved`/`orderNumber`/`orderDate`/`decidedById`) рекламацией **не трогаются**; «wypłacono łącznie» = `amountApproved + uznana reklamacjaAmount`. Миграция `20260731120000_add_reklamacja_resolution_fields` (+ backfill старых строк).
+- **Гейты/коды**: machine-codes `REKLAMACJA_*` (409 ALREADY_SUBMITTED; 422 CLAIM_NOT_DECIDED / WINDOW_EXPIRED / NO_DELTA / AMOUNT_EXCEEDS_CAP / NOT_PENDING); ветки рекламаций исключены из `CLAIM_NOT_VERIFIED`, Maksim-гейта и compensation-due-гейта; km-recalc на них заморожен.
+- **Письма (3)**: `reklamacja-internal-submitted` (все active admin+pracownik), `reklamacja-carrier-submitted` (подтверждение перевозчику), `reklamacja-carrier-decision`; threadKey `wniosek-{nrZgl}`. Weekly-report: новая строка «Uznane reklamacje» (по `reklamacjaDecidedAt`) + исключение возвратов статуса из decided-in-week.
+- **Web**: `ReklamacjaSheet` на shared-хелпере (3 dead-end-состояния), `<ReklamacjaOutcome>` на carrier-детали, `<ReklamacjaResolutionChip>` (carrier+employee), decision-UX staff-модалки — nr zlecenia (prefill из `orderNumber`) вместо ввода суммы.
+- **Follow-up**: старые письма `internal-decision`/`maksim-confirmation-request` линкуют на несуществующий роут `/employee/claims/{nrZgl}` (рабочая форма — `?nrZgl=`); вне scope этой доработки.

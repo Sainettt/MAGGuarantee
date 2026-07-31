@@ -69,7 +69,9 @@ import {
   UpdateClaimSchema,
   getAuthThreshold,
   isCompensationDue,
+  resolveReklamacjaCap,
   type ClaimDto,
+  type ClaimStatus,
   type KmCalcBreakdown,
   type PreviewClaimDto,
   type Role,
@@ -82,6 +84,7 @@ import { StatusBadge } from '@/components/carrier/StatusBadge';
 import { AutoRecalcBadge } from '@/components/claims/AutoRecalcBadge';
 import { HoursReadout } from '@/components/claims/HoursReadout';
 import { RecalcBadge } from '@/components/claims/RecalcBadge';
+import { ReklamacjaResolutionChip } from '@/components/claims/ReklamacjaResolutionChip';
 import {
   deriveClaimPermissions,
   type ClaimModalMode,
@@ -135,7 +138,14 @@ interface FormValues {
   orderDate: string;
   amountApproved: number | undefined;
   comment: string;
-  reklamacjaAmount: number | undefined;
+  /**
+   * REKLAMACJA_ZAAKCEPTOWANO only — «Nr zlecenia» the uznana reklamacja is paid
+   * under. An INDEPENDENT field: the wniosek's own `orderNumber` is never
+   * touched (it only seeds this one). REWORK 2026-07-31 replaced the old
+   * editable `reklamacjaAmount` — the paid amount IS the carrier's kwota and the
+   * accept branch of `UpdateClaimSchema` is `.strict()` without it.
+   */
+  reklamacjaOrderNumber: string;
 }
 
 export type { ClaimModalMode };
@@ -249,11 +259,11 @@ function cleanUpdatePayload(
     if (typeof v === 'number' && !Number.isFinite(v)) return;
     out[k] = v;
   };
-  if (
-    includeCorrections &&
-    values.targetStatus !== 'ODRZUCONO' &&
-    values.targetStatus !== 'REKLAMACJA_ODRZUCONO'
-  ) {
+  // ZAAKCEPTOWANO is the ONLY branch of the strict union that still accepts the
+  // 6 correction fields. Since the 2026-07-31 rework a reklamacja decision never
+  // amends carrier data (no period / times / mileage / hoursAdjusted — km-calc
+  // does not re-run, the amounts stay frozen), so sending them there is a 400.
+  if (includeCorrections && values.targetStatus === 'ZAAKCEPTOWANO') {
     include('dateStart', values.dateStart);
     include('dateEnd', values.dateEnd);
     include('timeFrom', values.timeFrom);
@@ -272,10 +282,13 @@ function cleanUpdatePayload(
       include('comment', values.comment);
       break;
     case 'REKLAMACJA_ZAAKCEPTOWANO':
+      // `{ reklamacjaOrderNumber (required), comment? }` — and nothing else.
+      // The paid amount is `claim.reklamacjaAmount`, server-side, verbatim.
+      include('reklamacjaOrderNumber', values.reklamacjaOrderNumber);
       include('comment', values.comment);
-      include('reklamacjaAmount', values.reklamacjaAmount);
       break;
     case 'REKLAMACJA_ODRZUCONO':
+      // `{ comment (required) }` → persisted as `reklamacjaResponse`.
       include('comment', values.comment);
       break;
   }
@@ -426,6 +439,7 @@ function ModalBody({
   const tStatus = useTranslations('employee.claims.modal.targetStatus');
   const tUnified = useTranslations('employee.claims.modal.unified');
   const tEdit = useTranslations('employee.claims.modal.edit');
+  const tReklamacja = useTranslations('employee.claims.modal.reklamacja');
   const tCommon = useTranslations('common');
 
   const qc = useQueryClient();
@@ -434,6 +448,9 @@ function ModalBody({
     () => decisionTargetsFor(claim.status),
     [claim.status],
   );
+
+  /** The claim sits in an open reklamacja — the decision decides the DISPUTE. */
+  const isReklamacja = claim.status === 'REKLAMACJA';
 
   // ── In-place morph state. Non-editing roles are pinned to `view`. ──
   const [mode, setMode] = useState<ClaimModalMode>(
@@ -553,18 +570,23 @@ function ModalBody({
 
   // ── Acceptance gate by recalc result (§6.5.5 / §6.5.10) ──
   // When the live recalc shows the guarantee was met (kmDifference <= 0 →
-  // no payout due) acceptance is impossible: drop the accept targets from
-  // the select, leaving only the rejection options. UI guard only — the
-  // backend independently hard-rejects acceptance with 422.
+  // no payout due) acceptance is impossible: drop `ZAAKCEPTOWANO` from the
+  // select, leaving only the rejection option. UI guard only — the backend
+  // independently hard-rejects acceptance with 422.
+  //
+  // REWORK 2026-07-31 (§6.5.15 D) — the gate does NOT extend to
+  // `REKLAMACJA_ZAAKCEPTOWANO`. An uznana reklamacja pays the carrier's own
+  // `reklamacjaAmount` (frozen at submit and already capped there), NOT a
+  // recalculated dopłata, so "guarantee met ⇒ nothing to pay" simply does not
+  // transfer: the whole point of a reklamacja on a REJECTED wniosek is that
+  // km-calc said no and the carrier disputes it. Coupling the two blocked every
+  // such reklamacja from ever being upheld.
   const liveKmDiff = previewQ.data?.kmDifference ?? claim.kmDifference;
   const metGuarantee = !isCompensationDue(liveKmDiff);
   const availableTargets = useMemo(
     () =>
       metGuarantee
-        ? targets.filter(
-            (target) =>
-              target === 'ODRZUCONO' || target === 'REKLAMACJA_ODRZUCONO',
-          )
+        ? targets.filter((target) => target !== 'ZAAKCEPTOWANO')
         : targets,
     [metGuarantee, targets],
   );
@@ -573,13 +595,11 @@ function ModalBody({
   // "guarantee met". Guarded on the value of `targetStatus` (read via the
   // watch above) and `metGuarantee` only — `form.setValue` is stable, so no
   // loop. Skipped while a recalc is in flight to avoid flicker.
+  // Reklamacja targets are deliberately NOT cleared here (see above).
   useEffect(() => {
     if (!metGuarantee) return;
     if (recalcState === 'loading') return;
-    if (
-      targetStatus === 'ZAAKCEPTOWANO' ||
-      targetStatus === 'REKLAMACJA_ZAAKCEPTOWANO'
-    ) {
+    if (targetStatus === 'ZAAKCEPTOWANO') {
       form.setValue('targetStatus', '');
     }
   }, [metGuarantee, recalcState, targetStatus, form]);
@@ -943,15 +963,33 @@ function ModalBody({
           <MaksimGateBlock claim={claim} active={maksimGateActive} />
         )}
 
+        {/* ②c Reklamacja — read-only submission block (§6.5.15 A). Visible
+            whenever a reklamacja was ever filed, independent of status and of
+            mode: the claim status no longer records the outcome, so this block is
+            the only staff-side trace besides Historia. Position is locked —
+            facts → dopłata → what the carrier disputes → decision. */}
+        {claim.reklamacjaSubmitted && <ReklamacjaBlock claim={claim} />}
+
         {/* ③ Decyzja — the CONTAINED commitment panel (§6.5.12). Everything
             above is a flat divided "reading" step; this is the irreversible
             one, so it gets a box (brand-red top rule) instead of a hairline
             divider. The shell is identical across all three branches — it must
             not appear/disappear across `mode`. */}
-        <DecisionPanel tUnified={tUnified}>
+        <DecisionPanel
+          tUnified={tUnified}
+          subtitle={
+            isReklamacja
+              ? tUnified('decyzjaSubtitleReklamacja')
+              : tUnified('decyzjaSubtitle')
+          }
+        >
           {targets.length === 0 ? (
             <p className="rounded-md bg-input/40 p-3 text-sm text-text-sub">
-              {tUnified('terminalState')}
+              {/* A decided reklamacja is terminal too — say WHICH terminal
+                  state this is, since the status badge above cannot. */}
+              {claim.reklamacjaResolution != null
+                ? tReklamacja('alreadyResolved')
+                : tUnified('terminalState')}
             </p>
           ) : !isEdit ? (
             // In view mode the decyzja inputs are hidden — the verifier
@@ -962,6 +1000,7 @@ function ModalBody({
           ) : (
             <>
               <DecisionFields
+                claim={claim}
                 form={form}
                 targets={availableTargets}
                 targetStatus={targetStatus}
@@ -984,8 +1023,10 @@ function ModalBody({
                 </p>
               ) : null}
               {/* Acceptance gate hint — shown while recalc reports the
-                  guarantee was met (no payout due ⇒ accept removed). */}
-              {metGuarantee && (
+                  guarantee was met (no payout due ⇒ `ZAAKCEPTOWANO` removed).
+                  Suppressed at REKLAMACJA: the gate does not apply there, so the
+                  hint would claim a restriction that is not in force. */}
+              {metGuarantee && !isReklamacja && (
                 <p className="text-xs text-text-sub">
                   {tUnified('guaranteeMetHint')}
                 </p>
@@ -2034,6 +2075,158 @@ function MaksimGateBlock({
   );
 }
 
+// ── ②c Reklamacja block — read-only submission record (§6.5.15 A) ───
+//
+// Rendered whenever `claim.reklamacjaSubmitted` — independent of status, of mode
+// and of the resolution. A decided reklamacja stays visible forever because the
+// claim status no longer records it (both outcomes roll the wniosek back to
+// `statusBeforeReklamacja`), making this the only staff-side trace besides
+// Historia.
+//
+// Flat section chrome (`border-t` + micro-label), NOT the boxed <DecisionPanel>
+// treatment: this is a READING step, and the box is reserved for the commitment.
+// No banner, no section tint — the chip carries the tone (a work surface, not the
+// carrier's emotional readout).
+
+/**
+ * The status the reklamacja ceiling must be computed against.
+ *
+ * While the dispute is open the claim's own status is `REKLAMACJA`, which the
+ * shared cap helper would read as "nothing was paid" — overstating the ceiling
+ * for a wniosek that WAS accepted. `statusBeforeReklamacja` is the frozen
+ * pre-reklamacja verdict, i.e. exactly the status the api evaluated at submit
+ * time. The `amountApproved`-based fallback mirrors the shared/api defensive
+ * fallback for rows whose column is somehow NULL.
+ */
+function reklamacjaCapStatus(claim: ClaimDto): ClaimStatus {
+  if (claim.status !== 'REKLAMACJA') return claim.status;
+  return (
+    claim.statusBeforeReklamacja ??
+    (claim.amountApproved != null ? 'ZAAKCEPTOWANO' : 'ODRZUCONO')
+  );
+}
+
+function ReklamacjaBlock({ claim }: { claim: ClaimDto }) {
+  const t = useTranslations('employee.claims.modal.reklamacja');
+
+  const capStatus = reklamacjaCapStatus(claim);
+  const requested = claim.origPaymentEur ?? claim.paymentEur;
+  // THE ceiling formula lives in `@magguarantee/shared` (the api calls the same
+  // function) — display-only here, never re-validated client-side.
+  const maxAtSubmit = resolveReklamacjaCap({
+    status: capStatus,
+    origPaymentEur: claim.origPaymentEur,
+    paymentEur: claim.paymentEur,
+    amountApproved: claim.amountApproved,
+  });
+  // Derived by subtraction so the printed arithmetic always adds up, whichever
+  // branch the shared helper took.
+  const paid = requested - maxAtSubmit;
+  const decided = claim.reklamacjaResolution != null;
+
+  return (
+    <section className="space-y-3 border-t border-border pt-5">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-text-sub">
+          {t('title')}
+        </h3>
+        <ReklamacjaResolutionChip resolution={claim.reklamacjaResolution} />
+      </div>
+
+      <dl className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
+        {/* 1 — the kwota that WILL be paid on UZNANA. Nothing recomputes it. */}
+        <div>
+          <dt className="text-[11px] uppercase tracking-wider text-text-sub">
+            {t('amount')}
+          </dt>
+          <dd className="mt-0.5 font-semibold tabular-nums text-text">
+            {formatEur(claim.reklamacjaAmount)}
+          </dd>
+        </div>
+
+        {/* 2 — the reviewer's sanity check: was the ask within the ceiling? */}
+        <div>
+          <dt className="text-[11px] uppercase tracking-wider text-text-sub">
+            {t('maxAtSubmit')}
+          </dt>
+          <dd className="mt-0.5 tabular-nums text-text-sub">
+            {t('maxAtSubmitValue', {
+              max: formatEur(maxAtSubmit),
+              requested: formatEur(requested),
+              paid: formatEur(paid),
+            })}
+            {capStatus === 'ODRZUCONO' && (
+              <span className="ml-1 text-text-sub">
+                {t('maxAtSubmitRejectedClause')}
+              </span>
+            )}
+          </dd>
+        </div>
+
+        {/* 3 — zgłoszono */}
+        {claim.reklamacjaSubmittedAt && (
+          <div>
+            <dt className="text-[11px] uppercase tracking-wider text-text-sub">
+              {t('submittedAt')}
+            </dt>
+            <dd className="mt-0.5 tabular-nums text-text">
+              {formatDateFull(claim.reklamacjaSubmittedAt)}
+            </dd>
+          </div>
+        )}
+
+        {/* 4 — treść, on the muted read-only surface (§6.5.3) so a long carrier
+            paragraph reads as quoted reference material, not as an input. */}
+        {claim.reklamacjaText && (
+          <div className="sm:col-span-2">
+            <dt className="text-[11px] uppercase tracking-wider text-text-sub">
+              {t('text')}
+            </dt>
+            <dd className="mt-1 whitespace-pre-wrap rounded-md bg-input/40 p-3 text-text">
+              {claim.reklamacjaText}
+            </dd>
+          </div>
+        )}
+
+        {/* 5–7 — the POST-decision half. Omitted (never «—») until they exist. */}
+        {claim.reklamacjaResolution === 'UZNANA' &&
+          claim.reklamacjaOrderNumber && (
+            <div>
+              <dt className="text-[11px] uppercase tracking-wider text-text-sub">
+                {t('orderNumber')}
+              </dt>
+              <dd className="mt-0.5 font-mono text-text">
+                {claim.reklamacjaOrderNumber}
+              </dd>
+            </div>
+          )}
+
+        {decided && claim.reklamacjaDecidedAt && (
+          <div>
+            <dt className="text-[11px] uppercase tracking-wider text-text-sub">
+              {t('decidedAt')}
+            </dt>
+            <dd className="mt-0.5 tabular-nums text-text">
+              {formatDateFull(claim.reklamacjaDecidedAt)}
+            </dd>
+          </div>
+        )}
+
+        {claim.reklamacjaResponse && (
+          <div className="sm:col-span-2">
+            <dt className="text-[11px] uppercase tracking-wider text-text-sub">
+              {t('response')}
+            </dt>
+            <dd className="mt-1 whitespace-pre-wrap rounded-md bg-input/40 p-3 text-text">
+              {claim.reklamacjaResponse}
+            </dd>
+          </div>
+        )}
+      </dl>
+    </section>
+  );
+}
+
 // ── ③ Decision panel — the contained commitment step (§6.5.12) ──────
 //
 // Everything above the decyzja is a flat `border-t` divided section: those are
@@ -2055,9 +2248,13 @@ function MaksimGateBlock({
 
 function DecisionPanel({
   tUnified,
+  subtitle,
   children,
 }: {
   tUnified: ReturnType<typeof useTranslations<'employee.claims.modal.unified'>>;
+  /** Panel subtitle — swapped for the reklamacja copy at `status === REKLAMACJA`
+   *  (§6.5.15 B), so the verifier reads what they are actually deciding. */
+  subtitle: string;
   children: React.ReactNode;
 }) {
   return (
@@ -2072,9 +2269,7 @@ function DecisionPanel({
             {tUnified('decyzjaSection')}
           </h3>
         </div>
-        <p className="mt-0.5 text-xs text-text-sub">
-          {tUnified('decyzjaSubtitle')}
-        </p>
+        <p className="mt-0.5 text-xs text-text-sub">{subtitle}</p>
       </div>
       {children}
     </section>
@@ -2084,6 +2279,7 @@ function DecisionPanel({
 // ── ③ Decision fields ───────────────────────────────────────────────
 
 function DecisionFields({
+  claim,
   form,
   targets,
   targetStatus,
@@ -2092,6 +2288,9 @@ function DecisionFields({
   tEdit,
   tStatus,
 }: {
+  /** Needed by the reklamacja branches: the carrier's kwota (read-only echo) and
+   *  the status the wniosek will roll back to. */
+  claim: ClaimDto;
   form: UseFormReturn<FormValues>;
   targets: ClaimDecisionTarget[];
   targetStatus: FormValues['targetStatus'];
@@ -2104,6 +2303,20 @@ function DecisionFields({
     typeof useTranslations<'employee.claims.modal.targetStatus'>
   >;
 }) {
+  // <StatusBadge>'s own label map — reused so the «status will return to X»
+  // hint names the status exactly as the badge will render it.
+  const tClaimStatus = useTranslations('carrier.claims.status');
+
+  // The status the wniosek returns to after EITHER reklamacja outcome (both roll
+  // back to `statusBeforeReklamacja`). The `amountApproved` fallback mirrors the
+  // shared/api defensive fallback for rows whose column is somehow NULL.
+  const returnStatus: ClaimStatus =
+    claim.statusBeforeReklamacja ??
+    (claim.amountApproved != null ? 'ZAAKCEPTOWANO' : 'ODRZUCONO');
+  const isReklamacjaTarget =
+    targetStatus === 'REKLAMACJA_ZAAKCEPTOWANO' ||
+    targetStatus === 'REKLAMACJA_ODRZUCONO';
+
   return (
     <div className="space-y-4">
       <FormField
@@ -2225,53 +2438,92 @@ function DecisionFields({
         </FormField>
       )}
 
+      {/* ── Uznaj reklamację (§6.5.15 B) ──
+          The pracownik no longer types an amount: the paid figure IS the
+          carrier's `reklamacjaAmount`, already validated against the ceiling at
+          submit time. Per §6.5.13 the impossible input is REMOVED, not greyed —
+          what stays is a read-only echo, because the verifier is authorising
+          exactly that figure and must see it inside the commitment box. */}
       {targetStatus === 'REKLAMACJA_ZAAKCEPTOWANO' && (
-        <div className="space-y-3">
+        <FormGrid cols={2}>
           <FormField
-            label={tEdit('reklamacjaAmount')}
+            label={tEdit('reklamacjaOrderNumber')}
             required
-            error={errMsg('reklamacjaAmount')}
-            htmlFor="claim-reklamacjaAmount"
+            error={errMsg('reklamacjaOrderNumber')}
+            htmlFor="claim-reklamacjaOrderNumber"
+            description={tEdit('reklamacjaOrderNumberHint')}
           >
+            {/* Prefilled ONCE from `claim.orderNumber` (see `getDefaults`) —
+                fully editable, and legitimately empty on a rejected wniosek that
+                never had one. Never re-prefilled after the user types. */}
             <Input
-              id="claim-reklamacjaAmount"
-              type="number"
-              step="0.01"
-              min={0}
-              {...form.register('reklamacjaAmount', {
-                setValueAs: (v) =>
-                  v === '' || v === null ? undefined : Number(v),
-              })}
+              id="claim-reklamacjaOrderNumber"
+              className="font-mono"
+              {...form.register('reklamacjaOrderNumber')}
             />
           </FormField>
           <FormField
-            label={tEdit('commentReklamacja')}
-            required
+            label={tEdit('reklamacjaPayoutAmount')}
+            htmlFor="claim-reklamacjaPayoutAmount"
+          >
+            {/* Muted declared-value treatment (§6.5.3) — NO <Lock> glyph: this
+                is not a locked input, it is a value being quoted. Deliberately
+                NOT RHF-registered: the amount is never part of the payload. A
+                real <input readOnly> (not a styled <div>) so the <FormField>
+                label associates with it and screen readers announce both. */}
+            <Input
+              id="claim-reklamacjaPayoutAmount"
+              readOnly
+              tabIndex={-1}
+              aria-readonly="true"
+              value={formatEur(claim.reklamacjaAmount)}
+              className="bg-input/40 font-semibold tabular-nums text-text-sub cursor-not-allowed focus:border-border focus:ring-0"
+            />
+          </FormField>
+          <FormField
+            label={tEdit('comment')}
             error={errMsg('comment')}
             htmlFor="claim-comment-rek-accept"
+            className="col-span-2"
           >
             <Textarea
               id="claim-comment-rek-accept"
-              rows={4}
+              rows={3}
+              placeholder={tEdit('reklamacjaCommentPlaceholder')}
               {...form.register('comment')}
             />
           </FormField>
-        </div>
+        </FormGrid>
       )}
 
+      {/* ── Odrzuć reklamację ── required reason → `reklamacjaResponse`, read
+          VERBATIM by the carrier in <ReklamacjaOutcome>. No order number, no
+          amount. The wire field is `comment`, hence the `comment` error path. */}
       {targetStatus === 'REKLAMACJA_ODRZUCONO' && (
         <FormField
-          label={tEdit('commentReklamacja')}
+          label={tEdit('reklamacjaResponse')}
           required
           error={errMsg('comment')}
           htmlFor="claim-comment-rek-reject"
         >
           <Textarea
             id="claim-comment-rek-reject"
-            rows={5}
+            rows={4}
+            placeholder={tEdit('reklamacjaResponsePlaceholder')}
             {...form.register('comment')}
           />
         </FormField>
+      )}
+
+      {/* Status-after-decision — INFORMATIONAL, never a warning (§7.7.1a "a
+          state is not an error"). Without it the verifier reads the status
+          snapping back to «Odrzucono» as their decision having been lost. */}
+      {isReklamacjaTarget && (
+        <p className="text-xs text-text-sub" role="status">
+          {tEdit('reklamacjaStatusReturnHint', {
+            status: tClaimStatus(returnStatus),
+          })}
+        </p>
       )}
     </div>
   );
@@ -2305,7 +2557,7 @@ function SecondaryPanel({
   );
 }
 
-/** True when the claim carries an orig* snapshot or a recorded decision. */
+/** True when the claim carries an orig* snapshot, a reklamacja, or a decision. */
 function claimHasHistory(claim: ClaimDto): boolean {
   return (
     claim.origDateStart !== null ||
@@ -2314,6 +2566,7 @@ function claimHasHistory(claim: ClaimDto): boolean {
     verifierMovedAmount(claim) ||
     (claim.origHoursAdjusted !== null &&
       claim.origHoursAdjusted !== claim.hoursAdjustedValue) ||
+    claim.reklamacjaSubmitted ||
     claim.decidedById !== null
   );
 }
@@ -2404,6 +2657,45 @@ function HistorySection({ claim }: { claim: ClaimDto }) {
         </section>
       )}
 
+      {/* Reklamacja record (§6.5.15 C) — the four scalar facts of the dispute,
+          each rendered only when present. Read-only, no diff emphasis: nothing
+          here was ever corrected, so a «Pierwotnie / Aktualnie» pair would be
+          two copies of one value. */}
+      {claim.reklamacjaSubmitted && (
+        <section className="space-y-2">
+          <h4 className="text-xs font-bold uppercase tracking-wider text-text-sub">
+            {t('reklamacjaRecord')}
+          </h4>
+          <div className="grid grid-cols-2 gap-3">
+            {claim.reklamacjaAmount != null && (
+              <RecordRow
+                label={t('reklamacjaAmount')}
+                value={formatEur(claim.reklamacjaAmount)}
+              />
+            )}
+            {claim.reklamacjaOrderNumber && (
+              <RecordRow
+                label={t('reklamacjaOrderNumber')}
+                value={claim.reklamacjaOrderNumber}
+                mono
+              />
+            )}
+            {claim.reklamacjaSubmittedAt && (
+              <RecordRow
+                label={t('reklamacjaSubmittedAt')}
+                value={formatDateFull(claim.reklamacjaSubmittedAt)}
+              />
+            )}
+            {claim.reklamacjaDecidedAt && (
+              <RecordRow
+                label={t('reklamacjaDecidedAt')}
+                value={formatDateFull(claim.reklamacjaDecidedAt)}
+              />
+            )}
+          </div>
+        </section>
+      )}
+
       {claim.reklamacjaText && (
         <section className="space-y-1">
           <h4 className="text-xs font-bold uppercase tracking-wider text-text-sub">
@@ -2425,6 +2717,26 @@ function HistorySection({ claim }: { claim: ClaimDto }) {
           </p>
         </section>
       )}
+    </div>
+  );
+}
+
+/** A single-value record row — the DiffRow typography without the diff. */
+function RecordRow({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="text-sm space-y-0.5">
+      <p className="text-xs font-medium text-text-sub">{label}</p>
+      <p className={cn('text-text', mono ? 'font-mono' : 'tabular-nums')}>
+        {value}
+      </p>
     </div>
   );
 }
@@ -2487,8 +2799,14 @@ function getDefaults(claim: ClaimDto): FormValues {
     // «kwota Maksima» override). The ZAAKCEPTOWANO effect keeps it in sync with
     // the live dopłata; `paymentEur` is the prefill / fallback.
     amountApproved: claim.amountApproved ?? claim.paymentEur ?? undefined,
-    comment: claim.comment ?? '',
-    reklamacjaAmount: claim.reklamacjaAmount ?? undefined,
+    // On a REKLAMACJA the `comment` field feeds `reklamacjaResponse`, NOT the
+    // wniosek's own comment — prefilling it with the old decision comment would
+    // silently republish that text to the carrier as the reklamacja answer.
+    comment: claim.status === 'REKLAMACJA' ? '' : (claim.comment ?? ''),
+    // Seeded ONCE (mount / «Anuluj» re-baseline) from the wniosek's own order
+    // number, per §6.5.15 B: a convenience prefill, never a lock, and
+    // legitimately empty when the wniosek was rejected.
+    reklamacjaOrderNumber: claim.orderNumber ?? '',
   };
 }
 

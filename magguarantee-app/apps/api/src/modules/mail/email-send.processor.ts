@@ -64,6 +64,15 @@ export class EmailSendProcessor extends WorkerHost {
       case 'maksim-confirmation-request':
         await this.mail.sendMaksimConfirmationRequest(data.email, data.props);
         return;
+      case 'reklamacja-internal-submitted':
+        await this.mail.sendReklamacjaInternalSubmitted(data.email, data.props);
+        return;
+      case 'reklamacja-carrier-submitted':
+        await this.mail.sendReklamacjaCarrierSubmitted(data.email, data.props);
+        return;
+      case 'reklamacja-carrier-decision':
+        await this.mail.sendReklamacjaCarrierDecision(data.email, data.props);
+        return;
       case 'verification-digest':
         await this.mail.sendVerificationDigest(data.email, data.props);
         return;

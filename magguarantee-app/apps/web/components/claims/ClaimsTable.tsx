@@ -20,6 +20,7 @@ import { useMemo } from 'react';
 import type { ClaimListItem } from '@magguarantee/shared';
 
 import { StatusBadge } from '@/components/carrier/StatusBadge';
+import { ReklamacjaResolutionChip } from '@/components/claims/ReklamacjaResolutionChip';
 import { Button } from '@/components/ui/Button';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -154,13 +155,24 @@ export function ClaimsTable({
       {
         id: 'status',
         header: t('columns.status'),
+        // Two stacked chips, never one: since 2026-07-31 the status carries NO
+        // reklamacja information (a decided reklamacja rolls the wniosek back to
+        // `statusBeforeReklamacja`), so the secondary resolution chip under the
+        // badge is the only way an outcome is visible in a list. It never
+        // replaces <StatusBadge> and never annotates its label (§6.5.15 C).
         cell: (row) => (
           <span
             onClick={(e) => e.stopPropagation()}
             role="presentation"
-            className="inline-flex"
+            className="flex flex-col items-start gap-1"
           >
             <StatusBadge status={row.status} />
+            {row.reklamacjaSubmitted && (
+              <ReklamacjaResolutionChip
+                resolution={row.reklamacjaResolution}
+                className="text-[11px]"
+              />
+            )}
           </span>
         ),
       },

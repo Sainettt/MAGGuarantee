@@ -1148,6 +1148,7 @@
           "doplataSection": "Dopłata gwarancyjna",
           "decyzjaSection": "Decyzja",
           "decyzjaSubtitle": "Ostatni krok — wybierz, co dzieje się z wnioskiem.",
+          "decyzjaSubtitleReklamacja": "Ostatni krok — zdecyduj, czy reklamacja zostanie uznana.",
           "secondaryHistory": "Historia",
           "decisionRequired": "Wybierz decyzję, aby zapisać wniosek.",
           "terminalState": "Wniosek jest w stanie końcowym — brak dostępnych decyzji.",
@@ -1219,8 +1220,13 @@
           "doplata": "Dopłata gwarancyjna",
           "comment": "Komentarz",
           "commentRejected": "Powód odrzucenia",
-          "commentReklamacja": "Uzasadnienie decyzji",
-          "reklamacjaAmount": "Kwota reklamacji zatwierdzona (EUR)",
+          "reklamacjaOrderNumber": "Nr zlecenia",
+          "reklamacjaOrderNumberHint": "Może to być poprawiony numer poprzedniego zlecenia albo całkiem nowe zlecenie — wpisz numer, na który zostanie wypłacona kwota reklamacji.",
+          "reklamacjaPayoutAmount": "Kwota do wypłaty (z reklamacji)",
+          "reklamacjaCommentPlaceholder": "Opcjonalna notatka do decyzji",
+          "reklamacjaResponse": "Powód odrzucenia reklamacji",
+          "reklamacjaResponsePlaceholder": "Wyjaśnij przewoźnikowi, dlaczego reklamacja nie została uznana",
+          "reklamacjaStatusReturnHint": "Po zapisaniu wniosek wróci do statusu „{status}” — wynik reklamacji będzie widoczny jako osobna informacja.",
           "submit": "Zatwierdź",
           "submitDecision": "Zapisz decyzję",
           "submitting": "Zapisywanie…",
@@ -1239,6 +1245,19 @@
           "factsPendingAuthorization": "Dane weryfikacji są zablokowane — wniosek czeka na autoryzację Maksima. Zmiany może wprowadzić tylko administrator.",
           "factsPendingAuthorizationAdmin": "Wniosek czeka na autoryzację Maksima. Jako administrator możesz nadal korygować dane weryfikacji."
         },
+        "reklamacja": {
+          "title": "Reklamacja",
+          "amount": "Kwota reklamacji",
+          "maxAtSubmit": "Maksimum (wnioskowana − wypłacona)",
+          "maxAtSubmitValue": "{max} = {requested} − {paid}",
+          "maxAtSubmitRejectedClause": "(wniosek odrzucony)",
+          "submittedAt": "Zgłoszono",
+          "text": "Treść reklamacji",
+          "orderNumber": "Nr zlecenia",
+          "decidedAt": "Rozpatrzono",
+          "response": "Odpowiedź",
+          "alreadyResolved": "Reklamacja została już rozpatrzona."
+        },
         "history": {
           "empty": "Brak historii zmian.",
           "origData": "Pierwotne dane (przed reklamacją)",
@@ -1250,13 +1269,18 @@
           "current": "Aktualne",
           "decidedBy": "Decyzja: {actor}",
           "decidedAt": "Data decyzji: {date}",
+          "reklamacjaRecord": "Dane reklamacji",
+          "reklamacjaAmount": "Kwota reklamacji",
+          "reklamacjaOrderNumber": "Nr zlecenia (reklamacja)",
+          "reklamacjaSubmittedAt": "Zgłoszono reklamację",
+          "reklamacjaDecidedAt": "Rozpatrzono reklamację",
           "reklamacjaText": "Treść reklamacji",
           "reklamacjaResponse": "Odpowiedź na reklamację"
         },
         "targetStatus": {
           "ZAAKCEPTOWANO": "Zaakceptuj",
           "ODRZUCONO": "Odrzuć",
-          "REKLAMACJA_ZAAKCEPTOWANO": "Zaakceptuj reklamację",
+          "REKLAMACJA_ZAAKCEPTOWANO": "Uznaj reklamację",
           "REKLAMACJA_ODRZUCONO": "Odrzuć reklamację"
         }
       }
@@ -1613,18 +1637,31 @@
         "details": "Szczegóły",
         "amountRequested": "Kwota wnioskowana",
         "amountApproved": "Kwota zatwierdzona",
+        "totalPaid": "Wypłacono łącznie",
         "orderNumber": "Numer zlecenia",
         "orderDate": "Data zlecenia",
         "comment": "Komentarz",
-        "reklamacjaText": "Treść reklamacji",
-        "reklamacjaResponse": "Odpowiedź na reklamację",
         "moneyLabelApproved": "kwota zatwierdzona",
         "moneyLabelCalc": "kalkulacja",
+        "moneyLabelTotalPaid": "wypłacono łącznie",
+        "totalBreakdown": "w tym decyzja: {approved} € · reklamacja: {reklamacja} €",
         "moneyRequested": "Wnioskowano",
         "moneyAfterVerification": "Po weryfikacji",
         "vehiclePlate": "Ciągnik",
         "submittedAt": "Data zgłoszenia",
-        "decidedAt": "Data decyzji"
+        "decidedAt": "Data decyzji",
+        "reklamacjaOutcome": {
+          "title": "Reklamacja",
+          "bannerPending": "Reklamacja została zgłoszona i czeka na rozpatrzenie.",
+          "bannerUznana": "Reklamacja uznana — kwota {amount} € zostanie wypłacona.",
+          "bannerOdrzucona": "Reklamacja odrzucona.",
+          "amount": "Kwota reklamacji",
+          "submittedAt": "Data zgłoszenia",
+          "text": "Treść reklamacji",
+          "orderNumber": "Nr zlecenia",
+          "decidedAt": "Data rozpatrzenia",
+          "response": "Odpowiedź MAGTRANS"
+        }
       },
       "form": {
         "sectionVehicleAndDriver": "Ciągnik i kierowca",
@@ -1716,14 +1753,29 @@
       "sheetSubtitle": "Wniosek {nrZgl}",
       "expiredTitle": "Termin reklamacji upłynął",
       "expiredMessage": "Reklamacja może być zgłoszona w ciągu 48 godzin od decyzji.",
+      "alreadyTitle": "Reklamacja już złożona",
+      "alreadyMessage": "Reklamacja do tego wniosku została już złożona.",
+      "noDeltaTitleSheet": "Brak kwoty do reklamacji",
+      "notDecidedTitle": "Wniosek nie został jeszcze rozpatrzony",
+      "notDecidedMessage": "Reklamację można złożyć dopiero po decyzji w sprawie wniosku.",
       "fieldText": "Treść reklamacji",
-      "fieldTextHint": "Opisz powód reklamacji — od 20 do 2000 znaków.",
+      "fieldTextHint": "Opisz powód reklamacji — maksymalnie 4000 znaków.",
       "fieldAmount": "Kwota reklamacji (EUR)",
-      "fieldAmountMaxHint": "Maksymalnie: {amount} €",
+      "maxHint": "Maksymalnie: {max} € — kwota wnioskowana ({requested} €) minus wypłacona ({paid} €).",
+      "maxHintRejected": "Maksymalnie: {max} € — cała kwota wnioskowana (wniosek został odrzucony, nic nie wypłacono).",
+      "deadlinePassed": "Termin reklamacji upłynął (48 godzin od decyzji).",
+      "noDelta": "Reklamacja nie jest możliwa — wypłacona kwota pokrywa całą kwotę wnioskowaną.",
+      "noDeltaZero": "Reklamacja nie jest możliwa — wniosek nie zawierał kwoty do wypłaty.",
+      "noDeltaTitle": "Reklamacja dotyczy niewypłaconej różnicy; w tym wniosku różnicy nie ma (wnioskowano {requested} €, wypłacono {paid} €).",
       "submit": "Wyślij reklamację",
       "submitting": "Wysyłanie…",
       "submittedToast": "Reklamacja wysłana",
       "submitErrorToast": "Nie udało się wysłać reklamacji",
+      "errorAlreadySubmitted": "Reklamacja do tego wniosku została już złożona.",
+      "errorNotDecided": "Wniosek nie został jeszcze rozpatrzony — reklamację można złożyć po decyzji.",
+      "errorWindowExpired": "Termin reklamacji upłynął (48 godzin od decyzji).",
+      "errorNoDelta": "Reklamacja nie jest możliwa — wypłacona kwota pokrywa całą kwotę wnioskowaną.",
+      "errorExceedsCap": "Kwota reklamacji nie może przekroczyć {max} €.",
       "countdownExpired": "Termin reklamacji upłynął",
       "countdownRemainingLabel": "Pozostało:"
     },
@@ -2266,6 +2318,13 @@
     }
   },
   "claim": {
+    "reklamacja": {
+      "resolution": {
+        "pending": "Reklamacja w toku",
+        "uznana": "Reklamacja uznana",
+        "odrzucona": "Reklamacja odrzucona"
+      }
+    },
     "autoRecalc": {
       "applied": "Przeliczono wg faktycznej daty zjazdu",
       "skipped": "Wymaga uwagi: faktyczna data zjazdu różni się od okresu wniosku",

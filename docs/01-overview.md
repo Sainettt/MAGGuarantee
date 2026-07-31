@@ -90,7 +90,24 @@
 
 ### 5. Рекламация
 
-Перевозчик может оспорить уже верифицированное заявление. Создаётся «зеркало» оригинальных данных (`origDateStart`, `origDateEnd`, `origMileage`, `statusBeforeReklamacja`), статус становится `REKLAMACJA`. Сотрудник пересматривает, может откатить или утвердить новую сумму.
+> ⚠️ Переработано 2026-07-31 (решения заказчика). Рекламация — это **спор о деньгах**, а не повторная подача заявления: правятся только сумма и обоснование, никакие данные wniosku перевозчик не переписывает.
+
+**Подача (перевозчик, `POST /claims/:nrZgl/reklamacja`).** Одна рекламация на wniosek **навсегда** (флаг `reklamacjaSubmitted` никогда не сбрасывается), только на **рассмотренный** wniosek (`ZAAKCEPTOWANO`/`ODRZUCONO`), в течение **48 часов** от `statusChangedAt`. Тело — только `tresc` (обязательное обоснование) и `kwotaReklamacji`, где `0 < kwota ≤ maxAmount`:
+
+```
+maxAmount = (origPaymentEur ?? paymentEur) − (status === 'ZAAKCEPTOWANO' ? (amountApproved ?? 0) : 0)
+```
+
+То есть «сколько просил минус сколько реально заплатили» — непокрытый остаток. Сравнения — с точностью до цента, строго (легаси-допуска `+1 €` больше нет). Если `maxAmount ≤ 0` (выплата покрыла всю запрошенную сумму) — подача заблокирована. Формула живёт в **одном** месте — `packages/shared/src/domain/reklamacja-rules.ts` (`getReklamacjaEligibility`), её зовут и api, и web-форма.
+
+При подаче: `status = REKLAMACJA`, `statusBeforeReklamacja = status` (куда потом вернёмся), `reklamacjaSubmittedAt = now`, плюс «зеркало» оригинальных данных (`origDateStart`, `origDateEnd`, `origMileage`, `origHoursAdjusted`) — исторический слепок, см. [19-known-quirks.md](19-known-quirks.md#reklamacja-mirror). Письма: всем активным `admin` + `pracownik` (`reklamacja-internal-submitted`) и подтверждение перевозчику (`reklamacja-carrier-submitted`).
+
+**Решение (`pracownik`/`admin`, `PATCH /claims/:nrZgl` с `targetStatus: REKLAMACJA_ZAAKCEPTOWANO | REKLAMACJA_ODRZUCONO`).**
+
+- **UZNANA** — требует `reklamacjaOrderNumber` («Nr zlecenia», под которым платится dopłata; независим от `orderNumber` самого wniosku). Выплачивается **ровно** carrier-ская `reklamacjaAmount` — сотрудник сумму не назначает. `comment` опционален → `reklamacjaResponse`.
+- **ODRZUCONA** — требует `comment` (обоснование отказа) → `reklamacjaResponse`.
+- При **обоих** исходах `status` **возвращается** в `statusBeforeReklamacja`: решение по самому wniosku не переигрывается, отдельно платится (или не платится) рекламация. Исход хранится **только** в `reklamacjaResolution` (`UZNANA`/`ODRZUCONA`) — из статуса его выводить нельзя. Плюс `reklamacjaDecidedAt` / `reklamacjaDecidedById`.
+- Решение **никогда** не трогает `amountApproved`, `orderNumber`, `orderDate`, `paymentEur` и claim-level `decidedById`; km-calc не пересчитывается (суммы заморожены). Порог Maksima и чекпоинт верификации на этот путь не распространяются. Письмо перевозчику — `reklamacja-carrier-decision` (тон по исходу).
 
 ## Ключевые формулы (бизнес-правила)
 

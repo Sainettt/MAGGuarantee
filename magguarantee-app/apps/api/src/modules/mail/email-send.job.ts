@@ -14,6 +14,9 @@ import type { CarrierDecisionProps } from './templates/carrier-decision';
 import type { InternalDecisionProps } from './templates/internal-decision';
 import type { CarrierSubmittedProps } from './templates/carrier-submitted';
 import type { MaksimConfirmationRequestProps } from './templates/maksim-confirmation-request';
+import type { ReklamacjaInternalSubmittedProps } from './templates/reklamacja-internal-submitted';
+import type { ReklamacjaCarrierSubmittedProps } from './templates/reklamacja-carrier-submitted';
+import type { ReklamacjaCarrierDecisionProps } from './templates/reklamacja-carrier-decision';
 import type { VerificationDigestProps } from './templates/verification-digest';
 import type { DelegationAnnouncedProps } from './templates/delegation-announced';
 import type { DelegationReadyProps } from './templates/delegation-ready';
@@ -104,6 +107,33 @@ export interface MaksimConfirmationRequestEmailJob {
   props: MaksimConfirmationRequestProps;
 }
 
+/**
+ * Reklamacja FILED → every active `admin` + `pracownik` (REWORK 2026-07-31).
+ */
+export interface ReklamacjaInternalSubmittedEmailJob {
+  template: 'reklamacja-internal-submitted';
+  email: string;
+  props: ReklamacjaInternalSubmittedProps;
+}
+
+/** Reklamacja FILED → receipt to the carrier. */
+export interface ReklamacjaCarrierSubmittedEmailJob {
+  template: 'reklamacja-carrier-submitted';
+  email: string;
+  props: ReklamacjaCarrierSubmittedProps;
+}
+
+/**
+ * Reklamacja DECIDED (`UZNANA` / `ODRZUCONA`) → the carrier. Separate from
+ * `carrier-decision` because the claim status rolls back on a reklamacja
+ * decision, so the generic template would re-announce the wniosek verdict.
+ */
+export interface ReklamacjaCarrierDecisionEmailJob {
+  template: 'reklamacja-carrier-decision';
+  email: string;
+  props: ReklamacjaCarrierDecisionProps;
+}
+
 export interface VerificationDigestEmailJob {
   template: 'verification-digest';
   email: string;
@@ -156,6 +186,9 @@ export type EmailSendJobData =
   | InternalDecisionEmailJob
   | CarrierSubmittedEmailJob
   | MaksimConfirmationRequestEmailJob
+  | ReklamacjaInternalSubmittedEmailJob
+  | ReklamacjaCarrierSubmittedEmailJob
+  | ReklamacjaCarrierDecisionEmailJob
   | VerificationDigestEmailJob
   | DelegationAnnouncedEmailJob
   | DelegationReadyEmailJob

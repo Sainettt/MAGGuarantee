@@ -82,6 +82,12 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     reklamacjaText: null,
     reklamacjaResponse: null,
     reklamacjaAmount: null,
+    // Reklamacja decision columns (REWORK 2026-07-31) — default "no reklamacja".
+    reklamacjaResolution: null,
+    reklamacjaOrderNumber: null,
+    reklamacjaSubmittedAt: null,
+    reklamacjaDecidedAt: null,
+    reklamacjaDecidedById: null,
     statusBeforeReklamacja: null,
     origDateStart: new Date('2026-05-01T00:00:00.000Z'),
     origDateEnd: new Date('2026-05-09T00:00:00.000Z'),

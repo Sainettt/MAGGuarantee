@@ -126,6 +126,9 @@ overline темы. Никаких градиентов и цветных «ша�
 | `carrier-decision` | Decyzja w sprawie wniosku | tone решения (`success`/`danger`) | AmountPanel (kwota, если accept) | Otwórz wniosek |
 | `internal-decision` | Decyzja w sprawie wniosku | tone решения | AmountPanel | Otwórz w MAGGuarantee |
 | `maksim-confirmation-request` | Potwierdzenie autoryzacji | `warning` Oczekuje na autoryzację | AmountPanel (dopłata, red) | Otwórz w MAGGuarantee |
+| `reklamacja-internal-submitted` | Reklamacja | `warning` Reklamacja do rozpatrzenia | AmountPanel (kwota reklamacji, red) | Otwórz w MAGGuarantee |
+| `reklamacja-carrier-submitted` | Reklamacja | `warning` Reklamacja w toku | AmountPanel (kwota reklamacji, red) | Otwórz wniosek |
+| `reklamacja-carrier-decision` | Decyzja w sprawie reklamacji | по `reklamacjaResolution`: `success` Reklamacja uznana / `danger` Reklamacja odrzucona | AmountPanel (kwota do wypłaty — **только** при `UZNANA`) | Otwórz wniosek |
 | `verification-digest` | Dzienny przegląd | `warning` (счётчик) | — (списки) | Otwórz panel weryfikacji |
 | ~~`daily-reminder`~~ | — | — | — | ❌ удалён 2026-07-30 (дублировал `verification-digest`) |
 | `guarantee-reminder-carrier` | Przypomnienie | `warning` Zbliża się termin | — (таблица) | Zgłoś wyjazd |

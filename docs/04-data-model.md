@@ -264,8 +264,13 @@
 | `maksimGateClearedAt`, `maksimGateClearedById` | снятие гейта загрузкой скриншота подтверждения (`ClaimAttachment` категории `AUTORYZACJA_MAKSIMA`) — разблокирует решение |
 | `origPaymentEur`, `paymentEur`, `amountApproved` | **цепочка из трёх сумм, читается только вместе:** `origPaymentEur` — что перевозчик запросил изначально (заморожено при submit, `null` у строк до миграции — показывать прочерк, НЕ подставлять текущее); `paymentEur` — km-calc ПОСЛЕ корректировок верификатора (переписывается каждой правкой и авто-пересчётом выезда); `amountApproved` — что реально платим (пишется только при переходе в `ZAAKCEPTOWANO`). Поле `amountRequested` удалено 2026-07-26 (`drop_claim_amount_requested`) — оно было побайтовым зеркалом `paymentEur`, но подписывалось в UI как «Wnioskowana» и выдавало пост-верификационную сумму за запрос перевозчика |
 | **Рекламация** (зеркало для отката): | |
-| `reklamacjaSubmitted`, `reklamacjaText`, `reklamacjaResponse`, `reklamacjaAmount` | |
-| `statusBeforeReklamacja` | предыдущий статус до перехода в `REKLAMACJA` (для rollback) |
+| `reklamacjaSubmitted`, `reklamacjaText`, `reklamacjaAmount` | одна рекламация на wniosek (`reklamacjaSubmitted` — one-shot флаг, не сбрасывается); подаётся только на **решённый** wniosek (`ZAAKCEPTOWANO`/`ODRZUCONO`) в течение 48ч от `statusChangedAt`; `reklamacjaAmount` ≤ `origPaymentEur − (amountApproved если ZAAKCEPTOWANO, иначе 0)` |
+| `reklamacjaResponse` | ответ MAGTRANS перевозчику; **обязателен как обоснование** при исходе `ODRZUCONA` |
+| `reklamacjaResolution` | **исход решения pracownika/admina** — `UZNANA` / `ODRZUCONA` (enum `ReklamacjaResolution`, миграция `20260731120000_add_reklamacja_resolution_fields`). `NULL` = рекламации не было **или** она ещё в работе (pending ⇔ `status = REKLAMACJA`). Намеренно **не** значение `ClaimStatus`: статус при решении откатывается к `statusBeforeReklamacja` при **любом** исходе, поэтому исход нуждается в собственной колонке |
+| `reklamacjaOrderNumber` | «Nr zlecenia», по которому выплачивается **уznana** рекламация. Пишется только при `UZNANA`. Независим от `orderNumber` wniosku: UI префиллит из него, но значения могут расходиться (юридически MAGTRANS обычно правит старое zlecenie, иногда выпускает новое). DB CHECK `claim_reklamacja_resolution_complete` требует непустое значение при `UZNANA` |
+| `reklamacjaSubmittedAt`, `reklamacjaDecidedAt`, `reklamacjaDecidedById` | аудит рекламации: когда подал перевозчик / когда и кто решил (FK → User, `ON DELETE SET NULL`). `reklamacjaSubmittedAt` нельзя вывести из `statusChangedAt` — решение его перештампывает при откате статуса |
+| `statusBeforeReklamacja` | предыдущий статус до перехода в `REKLAMACJA`; **именно он** определяет, куда вернётся `status` при решении рекламации (для rollback) |
+| ⚠️ `amountApproved`, `orderNumber`, `orderDate` | **никогда** не изменяются рекламацией — выплата wniosku и выплата рекламации живут раздельно (поэтому CHECK `claim_accepted_payment_complete` остаётся валидным при любом исходе рекламации) |
 | `origDateStart`, `origDateEnd`, `origMileage`, `origHoursAdjusted` | immutable carrier snapshots (set-once at submit; `submitReklamacja` re-stamps с fallback `?? текущее значение`) |
 | `origTimeFrom`, `origTimeTo` | immutable snapshot деривированных часов (`HH:MM`) на submit; `pracownik`-PATCH их не трогает (правит рабочие `timeFrom`/`timeTo`) |
 | `hoursAdjustedValue` | currently applied korekta godzin — drives km-calc (`korektaDni = hoursAdjustedValue / 24`); верификатор PATCH может править только этот столбец, `origHoursAdjusted` остаётся неизменным |
@@ -285,9 +290,10 @@
   - `OCZEKUJE_NA_AUTORYZACJE → ZAAKCEPTOWANO | ODRZUCONO` (решение; разблокируется скриншотом подтверждения)
   - `ZAAKCEPTOWANO → REKLAMACJA` (carrier-инициированная — отдельный endpoint, не PATCH)
   - `ODRZUCONO → REKLAMACJA` (то же)
-  - `REKLAMACJA → ZAAKCEPTOWANO | ODRZUCONO` (verifier-сторона)
+  - `REKLAMACJA → ZAAKCEPTOWANO | ODRZUCONO` — **решение рекламации (pracownik/admin). Оба ребра остаются легальными, но исход решения их НЕ выбирает:** статус возвращается к `statusBeforeReklamacja` при **любом** исходе (рекламация на отклонённом wniosku, признанная `UZNANA`, возвращает его в `ODRZUCONO`, а не в `ZAAKCEPTOWANO`). Какое ребро будет пройдено — диктует `statusBeforeReklamacja`; сам исход пишется в `reklamacjaResolution` (`UZNANA` требует `reklamacjaOrderNumber`, `ODRZUCONA` — `reklamacjaResponse`)
   - Любая иная пара (from, to) — 422 `Niedozwolone przejście statusu wniosku`.
 - **CHECK `claim_accepted_payment_complete`** — при `status='ZAAKCEPTOWANO'` поля `orderNumber` (не пустое), `orderDate`, `amountApproved` обязаны быть заполнены. Часть data-model contract, не имплементация.
+- **CHECK `claim_reklamacja_resolution_complete`** — при `reklamacjaResolution='UZNANA'` поле `reklamacjaOrderNumber` обязано быть непустым. Зеркальное правило (`ODRZUCONA` ⇒ непустой `reklamacjaResponse`) держит api-слой, не БД.
 
 ### `Delegation` — выезд (рейс)
 

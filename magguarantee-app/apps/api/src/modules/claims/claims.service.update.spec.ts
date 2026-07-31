@@ -34,11 +34,15 @@ import {
   AuditContext,
   type AuditContextStore,
 } from '../../common/audit/audit-context';
+import type { ConfigService } from '@nestjs/config';
+
+import type { Env } from '../../config/env.schema';
 import type { AuditWriter } from '../audit/audit.service';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import type { CarriersRepository } from '../carriers/carriers.repository';
 import type { DriversRepository } from '../drivers/drivers.repository';
 import type { KmCalcService } from '../km-calc/km-calc.service';
+import type { MailService } from '../mail/mail.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { TrailersRepository } from '../trailers/trailers.repository';
 import type { VehiclesRepository } from '../vehicles/vehicles.repository';
@@ -155,6 +159,12 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     reklamacjaText: null,
     reklamacjaResponse: null,
     reklamacjaAmount: null,
+    // Reklamacja decision columns (REWORK 2026-07-31) — default "no reklamacja".
+    reklamacjaResolution: null,
+    reklamacjaOrderNumber: null,
+    reklamacjaSubmittedAt: null,
+    reklamacjaDecidedAt: null,
+    reklamacjaDecidedById: null,
     statusBeforeReklamacja: null,
     origDateStart: new Date('2026-04-01T00:00:00.000Z'),
     origDateEnd: new Date('2026-04-20T00:00:00.000Z'),
@@ -264,6 +274,29 @@ function makeClaimsRepo(seed: ClaimRow[] = []): ClaimsRepoFake {
           ...(data.reklamacjaAmount !== undefined
             ? { reklamacjaAmount: data.reklamacjaAmount }
             : {}),
+          ...(data.reklamacjaSubmitted !== undefined
+            ? { reklamacjaSubmitted: data.reklamacjaSubmitted }
+            : {}),
+          ...(data.reklamacjaText !== undefined
+            ? { reklamacjaText: data.reklamacjaText }
+            : {}),
+          ...(data.reklamacjaSubmittedAt !== undefined
+            ? { reklamacjaSubmittedAt: data.reklamacjaSubmittedAt }
+            : {}),
+          // Reklamacja decision columns (REWORK 2026-07-31) — the outcome and its
+          // audit stamps, mirrored so the DTO assertions see them.
+          ...(data.reklamacjaResolution !== undefined
+            ? { reklamacjaResolution: data.reklamacjaResolution }
+            : {}),
+          ...(data.reklamacjaOrderNumber !== undefined
+            ? { reklamacjaOrderNumber: data.reklamacjaOrderNumber }
+            : {}),
+          ...(data.reklamacjaDecidedAt !== undefined
+            ? { reklamacjaDecidedAt: data.reklamacjaDecidedAt }
+            : {}),
+          ...(data.reklamacjaDecidedById !== undefined
+            ? { reklamacjaDecidedById: data.reklamacjaDecidedById }
+            : {}),
           ...(data.statusBeforeReklamacja !== undefined
             ? { statusBeforeReklamacja: data.statusBeforeReklamacja }
             : {}),
@@ -368,6 +401,96 @@ function makePrismaService(): PrismaService {
     $transaction: <T>(cb: (tx: unknown) => Promise<T>): Promise<T> =>
       cb(client),
   } as unknown as PrismaService;
+}
+
+/**
+ * Prisma fake whose carrier lookup actually resolves an address, so the
+ * fire-and-forget notification path (`_collectClaimRecipients` →
+ * `_resolveCarrierDisplayName`) has something to send to. The single
+ * `carrier.findFirst` mock answers BOTH call sites (one selects `user.email`, the
+ * other `user.login`/`name`), which is why the fixture carries all three.
+ */
+function makeNotifyingPrismaService(): PrismaService {
+  const client = {
+    user: { findFirst: jest.fn(async () => null), findMany: jest.fn(async () => []) },
+    carrier: {
+      findFirst: jest.fn(async () => ({
+        user: {
+          email: 'carrier@example.com',
+          login: 'pwz1',
+          name: 'Pwz One',
+        },
+        opiekun: null,
+      })),
+    },
+    vehicle: { findFirst: jest.fn(async () => null) },
+    appConfig: { findMany: jest.fn(async () => []) },
+    claim: { update: jest.fn(), findFirst: jest.fn() },
+    claimSequence: { upsert: jest.fn() },
+  };
+  return {
+    client,
+    get tx() {
+      return client;
+    },
+    $transaction: <T>(cb: (tx: unknown) => Promise<T>): Promise<T> =>
+      cb(client),
+  } as unknown as PrismaService;
+}
+
+/** MailService spy exposing just the enqueue methods the decision paths use. */
+function makeMailServiceSpy(): {
+  service: MailService;
+  reklamacjaDecision: jest.Mock;
+  carrierDecision: jest.Mock;
+  internalDecision: jest.Mock;
+} {
+  const reklamacjaDecision = jest.fn(async () => undefined);
+  const carrierDecision = jest.fn(async () => undefined);
+  const internalDecision = jest.fn(async () => undefined);
+  const service = {
+    enqueueReklamacjaCarrierDecision: reklamacjaDecision,
+    enqueueCarrierDecision: carrierDecision,
+    enqueueInternalDecision: internalDecision,
+  } as unknown as MailService;
+  return { service, reklamacjaDecision, carrierDecision, internalDecision };
+}
+
+/** Let the post-commit fire-and-forget email continuation run to completion. */
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 25; i += 1) {
+    await Promise.resolve();
+  }
+}
+
+function makeServiceWithMail(
+  repoFake: ClaimsRepoFake,
+  km: KmCalcService,
+  audit: AuditWriter,
+  prisma: PrismaService,
+  mail: MailService,
+): ClaimsService {
+  const noop = {} as unknown;
+  const config = {
+    // Key-aware: only APP_URL resolves. `GMAIL_FROM` must stay undefined or the
+    // generic path would gain a phantom internal recipient.
+    get: jest.fn((key: string) =>
+      key === 'APP_URL' ? 'http://localhost:3000' : undefined,
+    ),
+  } as unknown as ConfigService<Env, true>;
+  return new ClaimsService(
+    repoFake.repo,
+    noop as CarriersRepository,
+    noop as VehiclesRepository,
+    noop as DriversRepository,
+    noop as TrailersRepository,
+    km,
+    noop as NrZglService,
+    prisma,
+    audit,
+    mail,
+    config,
+  );
 }
 
 function makeService(
@@ -607,7 +730,7 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
     ).toBeUndefined();
   });
 
-  it('7. REKLAMACJA → ZAAKCEPTOWANO via REKLAMACJA_ZAAKCEPTOWANO translates synthetic literal', async () => {
+  it('7. REKLAMACJA_ZAAKCEPTOWANO returns the status to statusBeforeReklamacja and records UZNANA', async () => {
     const seeded = makeClaim({
       status: 'REKLAMACJA',
       statusBeforeReklamacja: 'ODRZUCONO',
@@ -623,19 +746,21 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
 
     const dto: UpdateClaimDto = {
       targetStatus: 'REKLAMACJA_ZAAKCEPTOWANO',
-      comment: 'Akceptacja reklamacji — kwota 450 EUR.',
-      reklamacjaAmount: 450,
+      reklamacjaOrderNumber: 'ZL-REK-77',
+      comment: 'Uznanie reklamacji.',
     };
 
     await svc.update(makeAuth('pracownik'), seeded.nrZgl, dto);
 
     const updated = repoFake.rows.get(seeded.nrZgl)!;
-    // DB enum stays clean — synthetic literal collapses to ZAAKCEPTOWANO.
-    expect(updated.status).toBe('ZAAKCEPTOWANO');
-    expect(updated.reklamacjaResponse).toBe(
-      'Akceptacja reklamacji — kwota 450 EUR.',
-    );
-    expect(updated.reklamacjaAmount).toBe(450);
+    // Variant A — the wniosek verdict is untouched: the status goes BACK.
+    expect(updated.status).toBe('ODRZUCONO');
+    // The outcome lives ONLY here (never inferred from `status`).
+    expect(updated.reklamacjaResolution).toBe('UZNANA');
+    expect(updated.reklamacjaOrderNumber).toBe('ZL-REK-77');
+    expect(updated.reklamacjaResponse).toBe('Uznanie reklamacji.');
+    // The paid amount is the carrier's own frozen kwota — staff send none.
+    expect(updated.reklamacjaAmount).toBe(500);
     // Orig snapshot left as-is (historical record per docs/01-overview.md).
     expect(updated.statusBeforeReklamacja).toBe('ODRZUCONO');
   });
@@ -762,7 +887,7 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
     expect(repoFake.updateWithinCalls).toHaveLength(1);
   });
 
-  it('G5. REKLAMACJA → ZAAKCEPTOWANO is NOT gated', async () => {
+  it('G5. a reklamacja resolution is NOT verification-gated (and returns the status)', async () => {
     const seeded = makeClaim({
       status: 'REKLAMACJA',
       statusBeforeReklamacja: 'ODRZUCONO',
@@ -779,11 +904,14 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
 
     const out = await svc.update(makeAuth('pracownik'), seeded.nrZgl, {
       targetStatus: 'REKLAMACJA_ZAAKCEPTOWANO',
-      comment: 'Akceptacja reklamacji.',
-      reklamacjaAmount: 450,
+      reklamacjaOrderNumber: 'ZL-REK-1',
+      comment: 'Uznanie reklamacji.',
     });
 
-    expect(out.status).toBe('ZAAKCEPTOWANO');
+    // Variant A — the status goes BACK to statusBeforeReklamacja; the outcome
+    // lives in `reklamacjaResolution`.
+    expect(out.status).toBe('ODRZUCONO');
+    expect(out.reklamacjaResolution).toBe('UZNANA');
     expect(repoFake.updateWithinCalls).toHaveLength(1);
   });
 
@@ -1045,38 +1173,37 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
     expect(repoFake.updateWithinCalls).toHaveLength(0);
   });
 
-  it('13c. REKLAMACJA_ZAAKCEPTOWANO when recalc shows kmDifference <= 0 → 422', async () => {
+  it('13c. REKLAMACJA_ZAAKCEPTOWANO is EXEMPT from the compensation-due guard (kmDifference <= 0 still passes)', async () => {
+    // docs/14 §6.5.15 D — an uznana reklamacja pays the carrier's FIXED
+    // `reklamacjaAmount` (capped at submit), which is independent of the
+    // km-calc. A wniosek rejected precisely because the calc showed no under-run
+    // is exactly the case where a reklamacja is legitimate, so gating it would
+    // make the outcome unreachable.
     const seeded = makeClaim({
       status: 'REKLAMACJA',
       statusBeforeReklamacja: 'ODRZUCONO',
       reklamacjaSubmitted: true,
       reklamacjaAmount: 500,
+      // Guarantee was met → no compensation due by the calc.
+      kmDifference: 0,
+      paymentEur: 0,
     });
     const repoFake = makeClaimsRepo([seeded]);
-    // Recalc shows the guarantee was met (kmGuaranteed == mileage ⇒ 0).
-    const km = makeKmCalcService({
-      totalDays: 20,
-      rawTotalDays: 20,
-      kmGuaranteed: 8_000,
-      ratePerKmEffective: 0.5,
-    });
+    const km = makeKmCalcService();
     const audit = makeAuditWriter();
     const prisma = makePrismaService();
     const svc = makeService(repoFake, km.svc, audit.writer, prisma);
 
-    const dto: UpdateClaimDto = {
+    const out = await svc.update(makeAuth('pracownik'), seeded.nrZgl, {
       targetStatus: 'REKLAMACJA_ZAAKCEPTOWANO',
-      comment: 'Akceptacja reklamacji.',
-      reklamacjaAmount: 450,
-      mileage: 8_000, // equals guarantee → kmDifference = 0
-    };
+      reklamacjaOrderNumber: 'ZL-REK-13c',
+    });
 
-    await expect(
-      svc.update(makeAuth('pracownik'), seeded.nrZgl, dto),
-    ).rejects.toThrow(UnprocessableEntityException);
-
-    expect(repoFake.updateWithinCalls).toHaveLength(0);
-    expect(repoFake.rows.get(seeded.nrZgl)!.status).toBe('REKLAMACJA');
+    expect(out.reklamacjaResolution).toBe('UZNANA');
+    expect(out.status).toBe('ODRZUCONO');
+    expect(repoFake.updateWithinCalls).toHaveLength(1);
+    // Amounts are FROZEN on a reklamacja branch — km-calc must not have run.
+    expect(km.calls).toHaveLength(0);
   });
 
   it('13d. ZAAKCEPTOWANO when recalc shows kmDifference > 0 → ok (compensation due)', async () => {
@@ -1305,6 +1432,274 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
 
     expect(out.status).toBe('ODRZUCONO');
     expect(repoFake.updateWithinCalls).toHaveLength(1);
+  });
+
+  // ── reklamacja resolutions (REWORK 2026-07-31, variant A) ──
+  //
+  // Pins the four load-bearing decisions of the rework:
+  //  (a) a `REKLAMACJA_*` target is refused unless a reklamacja is PENDING
+  //      (`status === 'REKLAMACJA'`) — otherwise the synthetic accept would slip
+  //      through the legal `NA_WERYFIKACJI → ZAAKCEPTOWANO` edge as a fresh
+  //      accept, while skipping every decision gate;
+  //  (b) BOTH outcomes return `status` to `statusBeforeReklamacja` — the outcome
+  //      lives ONLY in `reklamacjaResolution`;
+  //  (c) the wniosek's own decision + payout columns are NEVER touched (this is
+  //      also what keeps DB CHECK `claim_accepted_payment_complete` satisfied on
+  //      the `ODRZUCONO → REKLAMACJA → uznana` path);
+  //  (d) `statusChangedAt === reklamacjaDecidedAt` to the instant — the weekly
+  //      report relies on that equality to exclude rollbacks from "freshly
+  //      decided".
+
+  function seedPendingReklamacja(
+    statusBefore: ClaimStatus,
+    overrides: Partial<ClaimRow> = {},
+  ): ClaimRow {
+    return makeClaim({
+      status: 'REKLAMACJA',
+      statusBeforeReklamacja: statusBefore,
+      reklamacjaSubmitted: true,
+      reklamacjaText: 'Za mało wypłacono.',
+      reklamacjaAmount: 250,
+      reklamacjaSubmittedAt: new Date('2026-05-14T08:00:00.000Z'),
+      // A previously ACCEPTED wniosek carries its payout; a rejected one does not.
+      ...(statusBefore === 'ZAAKCEPTOWANO'
+        ? {
+            amountApproved: 1_150,
+            orderNumber: 'ZL-ORIG',
+            orderDate: new Date('2026-04-30T00:00:00.000Z'),
+            decidedById: 'u-original-decider',
+          }
+        : { decidedById: 'u-original-decider' }),
+      ...overrides,
+    });
+  }
+
+  it('R1. REKLAMACJA_ZAAKCEPTOWANO on a NA_WERYFIKACJI claim → 422 REKLAMACJA_NOT_PENDING + no writes', async () => {
+    const seeded = makeClaim(); // NA_WERYFIKACJI, no reklamacja
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    let caught: unknown;
+    try {
+      await svc.update(makeAuth('pracownik'), seeded.nrZgl, {
+        targetStatus: 'REKLAMACJA_ZAAKCEPTOWANO',
+        reklamacjaOrderNumber: 'ZL-REK-1',
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(UnprocessableEntityException);
+    const body = (caught as UnprocessableEntityException).getResponse() as {
+      code?: string;
+      extensions?: { code?: string };
+    };
+    expect(body.code).toBe('REKLAMACJA_NOT_PENDING');
+    expect(body.extensions?.code).toBe('REKLAMACJA_NOT_PENDING');
+    // Would otherwise have been a legal NA_WERYFIKACJI → ZAAKCEPTOWANO edge.
+    expect(repoFake.updateWithinCalls).toHaveLength(0);
+    expect(repoFake.rows.get(seeded.nrZgl)!.status).toBe('NA_WERYFIKACJI');
+  });
+
+  it('R2. REKLAMACJA_ODRZUCONO on a decided claim → 422 REKLAMACJA_NOT_PENDING', async () => {
+    const seeded = makeClaim({ status: 'ZAAKCEPTOWANO', amountApproved: 1_400 });
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    await expect(
+      svc.update(makeAuth('pracownik'), seeded.nrZgl, {
+        targetStatus: 'REKLAMACJA_ODRZUCONO',
+        comment: 'Nie uznajemy.',
+      }),
+    ).rejects.toThrow(UnprocessableEntityException);
+    expect(repoFake.updateWithinCalls).toHaveLength(0);
+  });
+
+  it('R3. uznana from statusBefore=ZAAKCEPTOWANO — status returns, wniosek payout untouched', async () => {
+    const seeded = seedPendingReklamacja('ZAAKCEPTOWANO');
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const { store } = await withAuditContext(() =>
+      svc.update(makeAuth('pracownik', 'u-rek-decider'), seeded.nrZgl, {
+        targetStatus: 'REKLAMACJA_ZAAKCEPTOWANO',
+        reklamacjaOrderNumber: 'ZL-REK-3',
+        comment: 'Uznajemy różnicę.',
+      }),
+    );
+
+    expect(repoFake.updateWithinCalls).toHaveLength(1);
+    const patch = repoFake.updateWithinCalls[0]!.data;
+    expect(patch.status).toBe('ZAAKCEPTOWANO');
+    expect(patch.reklamacjaResolution).toBe('UZNANA');
+    expect(patch.reklamacjaOrderNumber).toBe('ZL-REK-3');
+    expect(patch.reklamacjaResponse).toBe('Uznajemy różnicę.');
+    expect(patch.reklamacjaDecidedById).toBe('u-rek-decider');
+    // (c) the wniosek's own decision + payout are NOT in the patch at all.
+    expect(patch.decidedById).toBeUndefined();
+    expect(patch.amountApproved).toBeUndefined();
+    expect(patch.orderNumber).toBeUndefined();
+    expect(patch.orderDate).toBeUndefined();
+    expect(patch.paymentEur).toBeUndefined();
+    expect(patch.reklamacjaAmount).toBeUndefined();
+    // (d) both stamps are the SAME instant.
+    expect(patch.reklamacjaDecidedAt).toBeInstanceOf(Date);
+    expect((patch.reklamacjaDecidedAt as Date).getTime()).toBe(
+      (patch.statusChangedAt as Date).getTime(),
+    );
+    // No recalc on a reklamacja branch.
+    expect(km.calls).toHaveLength(0);
+    // The audit `before` snapshot carries the whole reklamacja block.
+    const before = store.before as Record<string, unknown>;
+    expect(before.reklamacjaResolution).toBeNull();
+    expect(before.reklamacjaAmount).toBe(250);
+    expect(before.statusBeforeReklamacja).toBe('ZAAKCEPTOWANO');
+    // Row state after: the original decider survives.
+    const updated = repoFake.rows.get(seeded.nrZgl)!;
+    expect(updated.decidedById).toBe('u-original-decider');
+    expect(updated.amountApproved).toBe(1_150);
+    expect(updated.orderNumber).toBe('ZL-ORIG');
+  });
+
+  it('R4. uznana from statusBefore=ODRZUCONO — status returns to ODRZUCONO (outcome only in resolution)', async () => {
+    const seeded = seedPendingReklamacja('ODRZUCONO');
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const out = await svc.update(makeAuth('pracownik'), seeded.nrZgl, {
+      targetStatus: 'REKLAMACJA_ZAAKCEPTOWANO',
+      reklamacjaOrderNumber: 'ZL-REK-4',
+    });
+
+    // The wniosek stays REJECTED — only the reklamacja is paid, under its own
+    // nr zlecenia. This is the path that used to violate DB CHECK
+    // `claim_accepted_payment_complete` (ZAAKCEPTOWANO without a payout).
+    expect(out.status).toBe('ODRZUCONO');
+    expect(out.reklamacjaResolution).toBe('UZNANA');
+    expect(out.amountApproved).toBeNull();
+    expect(out.orderNumber).toBeNull();
+    // Optional comment omitted ⇒ `reklamacjaResponse` not written.
+    expect(
+      repoFake.updateWithinCalls[0]!.data.reklamacjaResponse,
+    ).toBeUndefined();
+  });
+
+  it('R5. odrzucona — resolution + reason persisted, status returns', async () => {
+    const seeded = seedPendingReklamacja('ZAAKCEPTOWANO');
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const out = await svc.update(
+      makeAuth('pracownik', 'u-rek-decider'),
+      seeded.nrZgl,
+      {
+        targetStatus: 'REKLAMACJA_ODRZUCONO',
+        comment: 'Kwota wypłacona zgodna z umową.',
+      },
+    );
+
+    expect(out.status).toBe('ZAAKCEPTOWANO');
+    expect(out.reklamacjaResolution).toBe('ODRZUCONA');
+    const patch = repoFake.updateWithinCalls[0]!.data;
+    expect(patch.reklamacjaResponse).toBe('Kwota wypłacona zgodna z umową.');
+    expect(patch.reklamacjaOrderNumber).toBeUndefined();
+    expect(patch.reklamacjaDecidedById).toBe('u-rek-decider');
+    expect((patch.reklamacjaDecidedAt as Date).getTime()).toBe(
+      (patch.statusChangedAt as Date).getTime(),
+    );
+    expect(patch.decidedById).toBeUndefined();
+    expect(km.calls).toHaveLength(0);
+  });
+
+  it('R6. defensive fallback — statusBeforeReklamacja NULL infers from amountApproved', async () => {
+    // Hand-patched / pre-rework row: no snapshot, but a payout exists ⇒ the
+    // wniosek had been accepted.
+    const seeded = seedPendingReklamacja('ZAAKCEPTOWANO', {
+      statusBeforeReklamacja: null,
+    });
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const prisma = makePrismaService();
+    const svc = makeService(repoFake, km.svc, audit.writer, prisma);
+
+    const accepted = await svc.update(makeAuth('pracownik'), seeded.nrZgl, {
+      targetStatus: 'REKLAMACJA_ZAAKCEPTOWANO',
+      reklamacjaOrderNumber: 'ZL-REK-6',
+    });
+    expect(accepted.status).toBe('ZAAKCEPTOWANO');
+
+    // No payout ⇒ the wniosek had been rejected.
+    const seededNoPayout = seedPendingReklamacja('ODRZUCONO', {
+      nrZgl: 'GWA/002/04/26',
+      id: 'claim-id-2',
+      statusBeforeReklamacja: null,
+      amountApproved: null,
+    });
+    const repoFake2 = makeClaimsRepo([seededNoPayout]);
+    const svc2 = makeService(
+      repoFake2,
+      makeKmCalcService().svc,
+      makeAuditWriter().writer,
+      makePrismaService(),
+    );
+    const rejected = await svc2.update(
+      makeAuth('pracownik'),
+      seededNoPayout.nrZgl,
+      { targetStatus: 'REKLAMACJA_ODRZUCONO', comment: 'Bez podstaw.' },
+    );
+    expect(rejected.status).toBe('ODRZUCONO');
+    expect(rejected.reklamacjaResolution).toBe('ODRZUCONA');
+  });
+
+  it('R7. a reklamacja decision sends the reklamacja mail, NOT the generic decision mails', async () => {
+    const seeded = seedPendingReklamacja('ODRZUCONO');
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const audit = makeAuditWriter();
+    const mail = makeMailServiceSpy();
+    const svc = makeServiceWithMail(
+      repoFake,
+      km.svc,
+      audit.writer,
+      // Needs a carrier address for the outgoing reklamacja mail.
+      makeNotifyingPrismaService(),
+      mail.service,
+    );
+
+    await svc.update(makeAuth('pracownik'), seeded.nrZgl, {
+      targetStatus: 'REKLAMACJA_ZAAKCEPTOWANO',
+      reklamacjaOrderNumber: 'ZL-REK-7',
+    });
+    // The notification is a fire-and-forget continuation — let it settle.
+    await flushMicrotasks();
+
+    expect(mail.reklamacjaDecision).toHaveBeenCalledTimes(1);
+    const [to, props] = mail.reklamacjaDecision.mock.calls[0] as [
+      string,
+      { resolution: string; orderNumber?: string; kwota: string },
+    ];
+    expect(to).toBe('carrier@example.com');
+    expect(props.resolution).toBe('UZNANA');
+    expect(props.orderNumber).toBe('ZL-REK-7');
+    expect(props.kwota).toBe('250.00');
+    // The generic wniosek-decision mails would re-announce the ORIGINAL verdict.
+    expect(mail.carrierDecision).not.toHaveBeenCalled();
+    expect(mail.internalDecision).not.toHaveBeenCalled();
   });
 
   it('T6. no linked outing (delegationId null) → decision passes (gate no-op)', async () => {
@@ -1543,13 +1938,18 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
     }
     const updates: UpdateCall[] = [];
 
+    // REWORK 2026-07-31 — `submitReklamacja` now persists through
+    // `updateWithin(prisma.tx, …)` so the row write joins the ambient
+    // `@Audit('submitReklamacja')` transaction (it used to use the root client,
+    // which left the audit row and the mutation able to diverge).
     function makeRepo(seed: ClaimRow): ClaimsRepository {
       return {
         findByNrZgl: jest.fn(async (nrZgl: string) =>
           nrZgl === seed.nrZgl ? seed : null,
         ),
-        update: jest.fn(
+        updateWithin: jest.fn(
           async (
+            _tx: unknown,
             id: string,
             data: import('./claims.repository').UpdateClaimData,
           ): Promise<ClaimRow> => {
@@ -1587,11 +1987,10 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
 
     // ── (a) snapshot already present — `??` short-circuits.
     // ODRZUCONO, not ZAAKCEPTOWANO: the amount cap is
-    // `requested − paid` with `paid = paymentEur` only when accepted, and since
-    // the `amountRequested` mirror column was dropped `requested` IS
-    // `paymentEur` — so an accepted claim caps at 0 and the 50 EUR below would
-    // be rejected for a reason this test does not care about. Rejected claims
-    // have `paid = 0`, so the cap is the full 1_400.
+    // `origPaymentEur − paid`, with `paid = amountApproved` only when accepted.
+    // A rejected wniosek paid nothing, so the cap is the full 1_400 and the
+    // 50 EUR below clears it for reasons this test does not care about. (The cap
+    // matrix itself lives in `claims.service.reklamacja.spec.ts`.)
     const claimA = makeClaim({
       status: 'ODRZUCONO',
       statusChangedAt: NOW, // 0h passed, well inside the 48h window
