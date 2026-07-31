@@ -847,12 +847,19 @@ export class MailService implements IMailService {
   ): Promise<void> {
     await this._send({
       to: email,
-      subject: `Ciągnik gotowy: ${props.plateNumber}`,
+      // The order number leads the subject: it is what the carrier searches
+      // their inbox by when they call about a load.
+      subject: `Zlecenie ${props.spedOrderNumber} — ciągnik ${props.plateNumber}`,
       html: await render(DelegationReadyEmail(props)),
       text: [
         `Witaj ${props.carrierName},`,
         '',
-        `Ciągnik ${props.plateNumber} został oznaczony jako gotowy do wyjazdu.`,
+        `Znaleźliśmy ładunek dla ciągnika ${props.plateNumber} i wystawiliśmy`,
+        'zlecenie w SpedTrans.',
+        '',
+        `Nr zlecenia ze spedu: ${props.spedOrderNumber}`,
+        '',
+        'W systemie wyjazd ma teraz status „Załadowany".',
         `Wyjazd: ${props.departure}`,
       ].join('\n'),
       template: 'delegation-ready',

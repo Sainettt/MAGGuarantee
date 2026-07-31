@@ -253,6 +253,10 @@ export class DelegationsService {
             carrierName,
             plateNumber,
             departure,
+            // Mandatory on the forward flip (`MarkReadySchema.superRefine`), so
+            // it is always present here — this notifier only runs on
+            // `!dto.rollback`. The fallback is pure defence against a legacy row.
+            spedOrderNumber: row.spedOrderNumber ?? '—',
           })
           .catch(warn);
       }

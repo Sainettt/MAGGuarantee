@@ -127,12 +127,12 @@ overline темы. Никаких градиентов и цветных «ша�
 | `internal-decision` | Decyzja w sprawie wniosku | tone решения | AmountPanel | Otwórz w MAGGuarantee |
 | `maksim-confirmation-request` | Potwierdzenie autoryzacji | `warning` Oczekuje na autoryzację | AmountPanel (dopłata, red) | Otwórz w MAGGuarantee |
 | `verification-digest` | Dzienny przegląd | `warning` (счётчик) | — (списки) | Otwórz panel weryfikacji |
-| `daily-reminder` | Przypomnienie | `warning` (счётчик) | — | Otwórz panel weryfikacji |
+| ~~`daily-reminder`~~ | — | — | — | ❌ удалён 2026-07-30 (дублировал `verification-digest`) |
 | `guarantee-reminder-carrier` | Przypomnienie | `warning` Zbliża się termin | — (таблица) | Zgłoś wyjazd |
 | `guarantee-opiekun-digest` | Gwarancje | — | — (группы) | — |
 | `vehicle-removal-admin` | Flota | `danger` (счётчик) | — (список) | — |
 | `delegation-announced` | Wyjazd | — | — | — |
-| `delegation-ready` | Wyjazd | `success` Gotowy | — | — |
+| `delegation-ready` | Wyjazd | `success` **Załadowany** | CodePanel `light` (nr zlecenia ze spedu) | — |
 | `weekly-report` | Raport | `neutral` (период) | — (строки) | Otwórz panel |
 | `account-created` | Twoje konto | — | CodePanel `light` (пароль) | Zaloguj się |
 | `account-deactivated` | Twoje konto | `danger` Dezaktywowane | — | — |
