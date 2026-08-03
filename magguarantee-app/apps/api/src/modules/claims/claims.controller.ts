@@ -81,17 +81,13 @@ export class ClaimsController {
 
   // ── List & detail ───────────────────────────────────────
 
+  // Claims are visible ONLY to admin/pracownik (all), opiekun (their carriers,
+  // scoped in the service) and przewoznik (own). planista / dyspozytor /
+  // eksport / weryfikator have NO claims access per docs/03-roles.md (the
+  // access matrix): they were previously listed here but the service never
+  // scoped them, leaking every carrier's payout figures.
   @Get()
-  @Roles(
-    'admin',
-    'pracownik',
-    'opiekun',
-    'planista',
-    'dyspozytor',
-    'przewoznik',
-    'eksport',
-    'weryfikator',
-  )
+  @Roles('admin', 'pracownik', 'opiekun', 'przewoznik')
   async list(
     @CurrentUser() user: AuthUser,
     @Query(new ZodValidationPipe(ClaimFiltersSchema)) query: ClaimFilters,
@@ -122,16 +118,7 @@ export class ClaimsController {
   }
 
   @Get(':nrZgl')
-  @Roles(
-    'admin',
-    'pracownik',
-    'opiekun',
-    'planista',
-    'dyspozytor',
-    'przewoznik',
-    'eksport',
-    'weryfikator',
-  )
+  @Roles('admin', 'pracownik', 'opiekun', 'przewoznik')
   @CarrierOwns('nrZgl', 'param', 'claimNrZgl')
   async getOne(
     @CurrentUser() user: AuthUser,

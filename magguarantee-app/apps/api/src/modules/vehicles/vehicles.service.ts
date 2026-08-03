@@ -149,6 +149,21 @@ export class VehiclesService {
     user: AuthUser,
     filters: VehicleFilters,
   ): Promise<VehiclePage> {
+    const page = await this._listResolved(user, filters);
+    // Role-scrub every row on the wire: dyspozytor never sees the four km rates,
+    // and only admin/opiekun/przewoznik see the fuel-card number + PIN. Applied
+    // ONCE here so both list paths (`_listPage` / `_listByIdleStatus`) are
+    // covered without threading the viewer through each private method.
+    return {
+      items: page.items.map((v) => this._scrubForViewer(v, user)),
+      nextCursor: page.nextCursor,
+    };
+  }
+
+  private async _listResolved(
+    user: AuthUser,
+    filters: VehicleFilters,
+  ): Promise<VehiclePage> {
     const effective = await this._scopeFilters(user, filters);
     const { lifecycleStatus, ...scoped } = effective;
     if (!lifecycleStatus) return this._listPage(scoped);
@@ -229,12 +244,13 @@ export class VehiclesService {
     };
   }
 
-  async getById(id: string): Promise<VehicleDto> {
+  async getById(user: AuthUser, id: string): Promise<VehicleDto> {
     const row = await this.vehicles.findById(id);
     if (!row) throw new NotFoundException('Pojazd nie znaleziony');
+    this._assertVehicleReadable(user, row);
     // Single vehicle → one delegation lookup for the lifecycle status.
     const ds = await this._delegationStatusOf(id);
-    return this.toDto(row, this._lifecycleFor(row, ds));
+    return this._scrubForViewer(this.toDto(row, this._lifecycleFor(row, ds)), user);
   }
 
   /**
@@ -1016,6 +1032,65 @@ export class VehiclesService {
       return { ...filters, carrierId: mine.id };
     }
     throw new ForbiddenException('Brak uprawnień');
+  }
+
+  /**
+   * Read-ownership gate for a SINGLE vehicle (getById). The route's ownership
+   * guards already scope opiekun (OpiekunOwnershipGuard) and przewoznik
+   * (CarrierOwnershipGuard); this closes the gap for planista/dyspozytor, which
+   * NO guard covers — without it any planista/dyspozytor could read any vehicle
+   * by UUID (IDOR). Kept exhaustive (all reader roles) as defence-in-depth so
+   * the check still holds if a guard is ever dropped from the route.
+   */
+  private _assertVehicleReadable(user: AuthUser, row: VehicleRow): void {
+    switch (user.role) {
+      case 'admin':
+        return;
+      // opiekun / przewoznik ownership is enforced by the route guards
+      // (OpiekunOwnershipGuard / CarrierOwnershipGuard) BEFORE the service runs.
+      case 'opiekun':
+      case 'przewoznik':
+        return;
+      case 'planista':
+        if (row.plannerId !== user.sub) {
+          throw new ForbiddenException('Brak uprawnień do tego pojazdu');
+        }
+        return;
+      case 'dyspozytor':
+        // Phase 11 — only vehicles on the dyspozytor's OWN team. No team → 403.
+        if (!user.teamId || row.dispatchTeamId !== user.teamId) {
+          throw new ForbiddenException('Brak uprawnień do tego pojazdu');
+        }
+        return;
+      default:
+        throw new ForbiddenException('Brak uprawnień do tego pojazdu');
+    }
+  }
+
+  /**
+   * Role-aware scrub of sensitive vehicle fields on the read wire:
+   *  - fuel-card NUMBER + PIN → only admin / opiekun / przewoznik (the operator
+   *    who actually fuels the truck). Everyone else gets `null`.
+   *  - the four km rates → hidden for `dyspozytor` (mirrors the delegation-modal
+   *    server scrub, docs/14 §6.4.2); admin/opiekun/przewoznik/planista keep them.
+   * The DTO fields are all nullable, so nulling them is type-safe.
+   */
+  private _scrubForViewer(dto: VehicleDto, user: AuthUser): VehicleDto {
+    const canSeeFuelCard =
+      user.role === 'admin' ||
+      user.role === 'opiekun' ||
+      user.role === 'przewoznik';
+    const canSeeRates = canSeeFuelCard || user.role === 'planista';
+    if (canSeeFuelCard && canSeeRates) return dto;
+    return {
+      ...dto,
+      ...(canSeeFuelCard
+        ? {}
+        : { fuelCardNumber: null, fuelCardPin: null }),
+      ...(canSeeRates
+        ? {}
+        : { rateDe: null, rateUe: null, rateExport: null, rateImport: null }),
+    };
   }
 
   private async _assertCarrierAccessibleForWrite(

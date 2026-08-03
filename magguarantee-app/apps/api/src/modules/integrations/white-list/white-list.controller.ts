@@ -11,6 +11,7 @@ import {
 } from '@magguarantee/shared';
 
 import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe';
+import { Roles } from '../../auth/decorators/roles.decorator';
 import { WhiteListService } from './white-list.service';
 
 // Per docs/13-api-design.md#rate-limiting: 10 / min / IP for `/integrations/whitelist`.
@@ -23,9 +24,11 @@ const RL = { limit: process.env.NODE_ENV === 'test' ? 1_000 : 10, ttl: 60_000 };
  *   - `GET /api/v1/integrations/whitelist/search?nip=...`
  *       Auto-fill carrier company data (name, address, accounts) by NIP.
  *
- * Same auth/rate-limit policy as VIES — any authenticated user.
+ * Same auth policy as VIES — admin/opiekun only (carrier-onboarding tools),
+ * enforced by the global RolesGuard via this class-level `@Roles`.
  */
 @Controller('integrations/whitelist')
+@Roles('admin', 'opiekun')
 export class WhiteListController {
   constructor(private readonly whiteList: WhiteListService) {}
 

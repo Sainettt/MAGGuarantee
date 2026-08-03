@@ -66,6 +66,15 @@ export const DEFAULT_MAX_ATTEMPTS = 5;
 export const DEFAULT_LOCKOUT_SECONDS = 300;
 export const RESEND_COOLDOWN_SECONDS = 60;
 
+// ── Login brute-force lockout (docs/15-auth-strategy.md#brute-force) ──
+// After this many CONSECUTIVE failed password attempts, the account is locked
+// for `LOGIN_LOCKOUT_MS`. The counter is per-USER (bumped only for real logins,
+// never unknown ones — anti-enumeration) and reset to 0 on any successful 2FA
+// verification. Distinct from the 2FA-code lockout above (that one is keyed by
+// sessionToken in Redis; this one is the user row's `lockedUntil`).
+export const LOGIN_MAX_FAILED_ATTEMPTS = 10;
+export const LOGIN_LOCKOUT_MS = 15 * 60_000;
+
 // ── AppConfig keys ───────────────────────────────────────
 export const APP_CONFIG_KEY = {
   passwordRequired: 'password_required',

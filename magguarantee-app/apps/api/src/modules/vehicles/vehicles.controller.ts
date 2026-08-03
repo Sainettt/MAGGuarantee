@@ -167,9 +167,10 @@ export class VehiclesController {
   @OpiekunOwns('id', 'param', 'vehicleId')
   @CarrierOwns('id', 'param', 'vehicleId')
   async getById(
+    @CurrentUser() user: AuthUser,
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
   ): Promise<VehicleDto> {
-    return this.vehicles.getById(id);
+    return this.vehicles.getById(user, id);
   }
 
   @Post()
@@ -327,11 +328,14 @@ export class VehiclesController {
     object.body.pipe(res);
   }
 
+  // Carrier fleet is READ-ONLY (docs/03-roles.md#przewoznik): przewoznik must
+  // NOT delete vehicle attachments (compliance scans — porozumienie / GPS /
+  // cabotage — that gate readiness). admin/opiekun only. CarrierOwns is dropped
+  // with the role; OpiekunOwns still scopes opiekun to their carriers.
   @Delete(':id/attachments/:attachmentId')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Roles('admin', 'opiekun', 'przewoznik')
+  @Roles('admin', 'opiekun')
   @OpiekunOwns('id', 'param', 'vehicleId')
-  @CarrierOwns('id', 'param', 'vehicleId')
   @Audit({
     action: 'deleteVehicleAttachment',
     targetType: 'VehicleAttachment',

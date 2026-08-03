@@ -36,17 +36,24 @@ import { LookupsService } from './lookups.service';
 export class LookupsController {
   constructor(private readonly lookups: LookupsService) {}
 
+  // People-pickers back the admin/opiekun vehicle & carrier forms only. They
+  // surface internal-staff PII (id / login / name), so they are gated to
+  // admin/opiekun — previously any authenticated user (incl. a carrier
+  // subcontractor) could enumerate the entire MAGTRANS staff roster.
   @Get('dyspozytor')
+  @Roles('admin', 'opiekun')
   dyspozytor(): Promise<LookupUserListDto> {
     return this.lookups.dyspozytor();
   }
 
   @Get('planisci')
+  @Roles('admin', 'opiekun')
   planisci(): Promise<LookupUserListDto> {
     return this.lookups.planisci();
   }
 
   @Get('opiekuni')
+  @Roles('admin', 'opiekun')
   opiekuni(): Promise<LookupUserListDto> {
     return this.lookups.opiekuni();
   }
@@ -58,6 +65,7 @@ export class LookupsController {
    * any authenticated user (team composition is non-sensitive — no rates).
    */
   @Get('teams')
+  @Roles('admin', 'opiekun')
   teams(): Promise<LookupTeamListDto> {
     return this.lookups.teamsList();
   }

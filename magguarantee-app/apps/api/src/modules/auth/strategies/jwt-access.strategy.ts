@@ -53,6 +53,19 @@ export class JwtAccessStrategy extends PassportStrategy(Strategy, 'jwt') {
     if (!user.email) {
       throw new UnauthorizedException('User has no email on file');
     }
+    // Password-change cutoff: reject any access token minted BEFORE the user's
+    // last password change (reset / forced change / admin reset). Refresh
+    // tokens are already revoked on those flows, but a still-valid access token
+    // (≤15 min) would otherwise outlive the password it was issued under. `iat`
+    // is in seconds; compare at second granularity so the FRESH pair minted by
+    // `changePassword` right after stamping `passwordChangedAt` is never
+    // rejected by a sub-second skew.
+    if (payload.iat !== undefined && user.passwordChangedAt) {
+      const changedAtSec = Math.floor(user.passwordChangedAt.getTime() / 1000);
+      if (changedAtSec > payload.iat) {
+        throw new UnauthorizedException('Token invalidated by password change');
+      }
+    }
     return {
       sub: user.id,
       login: user.login,

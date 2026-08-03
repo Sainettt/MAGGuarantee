@@ -1130,7 +1130,9 @@ describe('VehiclesService', () => {
 
   it('getById 404 for missing vehicle', async () => {
     const { svc } = buildService({});
-    await expect(svc.getById('missing')).rejects.toThrow(NotFoundException);
+    await expect(svc.getById(makeAuth('admin'), 'missing')).rejects.toThrow(
+      NotFoundException,
+    );
   });
 
   it('deactivate flips active=false and rejects double-deactivate', async () => {
@@ -1235,7 +1237,7 @@ describe('VehiclesService', () => {
     const svc = buildServiceWithLifecycle([makeVehicle({ id: 'v-1', active: true })], {
       'v-1': { hasActiveDelegation: true },
     });
-    const dto = await svc.getById('v-1');
+    const dto = await svc.getById(makeAuth('admin'), 'v-1');
     expect(dto.lifecycleStatus).toBe('aktywna');
     expect(dto.daysSinceReturn).toBeNull();
   });
@@ -1245,7 +1247,7 @@ describe('VehiclesService', () => {
       [makeVehicle({ id: 'v-1', active: false })],
       {},
     );
-    const dto = await svc.getById('v-1');
+    const dto = await svc.getById(makeAuth('admin'), 'v-1');
     expect(dto.lifecycleStatus).toBe('wylaczona');
     expect(dto.daysSinceReturn).toBeNull();
   });

@@ -10,7 +10,11 @@ import { JwtService } from '@nestjs/jwt';
 import type { UserDto } from '@magguarantee/shared';
 
 import type { Env } from '../../config/env.schema';
-import { REFRESH_ROTATION_GRACE_MS } from './auth.constants';
+import {
+  LOGIN_LOCKOUT_MS,
+  LOGIN_MAX_FAILED_ATTEMPTS,
+  REFRESH_ROTATION_GRACE_MS,
+} from './auth.constants';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
@@ -481,9 +485,25 @@ export class AuthService {
     );
     if (!ok) {
       // Bump failed-attempts counter only for real users — never for unknown
-      // logins (per docs/15-auth-strategy.md#account-enumeration).
+      // logins (per docs/15-auth-strategy.md#account-enumeration). Once the
+      // counter crosses the threshold, lock the account for LOGIN_LOCKOUT_MS so
+      // an online password brute-force is stopped even if it rotates IPs (the
+      // per-IP rate-limit alone does not). The counter resets on the next
+      // successful 2FA verify (`resetFailedAttempts`).
       try {
-        await this.users.incrementFailedAttempts(user.id);
+        const attempts = await this.users.incrementFailedAttempts(user.id);
+        if (attempts >= LOGIN_MAX_FAILED_ATTEMPTS) {
+          await this.users.lockUntil(
+            user.id,
+            new Date(Date.now() + LOGIN_LOCKOUT_MS),
+          );
+          this.logger.warn({
+            msg: 'account locked after too many failed logins',
+            userId: user.id,
+            attempts,
+            lockoutMs: LOGIN_LOCKOUT_MS,
+          });
+        }
       } catch (err) {
         this.logger.warn({
           msg: 'failed to bump failedAttempts',

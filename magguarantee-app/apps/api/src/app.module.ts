@@ -11,6 +11,7 @@ import { validateEnv } from './config/env.schema';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
+import { RolesGuard } from './modules/auth/guards/roles.guard';
 import { CarriersModule } from './modules/carriers/carriers.module';
 import { ClaimsModule } from './modules/claims/claims.module';
 import { DelegationsModule } from './modules/delegations/delegations.module';
@@ -130,6 +131,13 @@ import { WeeklyReportModule } from './modules/weekly-report/weekly-report.module
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // Global role gate. Runs AFTER JwtAuthGuard (so `req.user` is populated).
+    // A no-op on routes without `@Roles(...)` (the guard returns true when no
+    // metadata is present), so it only ADDS enforcement where a handler
+    // declares `@Roles` but its controller forgot `@UseGuards(RolesGuard)` —
+    // closing the "silent open endpoint" gap. Controllers may keep their own
+    // `@UseGuards(RolesGuard)` (idempotent).
+    { provide: APP_GUARD, useClass: RolesGuard },
   ],
 })
 export class AppModule {}

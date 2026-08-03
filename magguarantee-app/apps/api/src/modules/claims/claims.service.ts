@@ -67,6 +67,7 @@ import { VehiclesRepository } from '../vehicles/vehicles.repository';
 import { assertLegalTransition } from './claim-state-machine';
 import {
   ClaimsRepository,
+  type ClaimListFilters,
   type ClaimRow,
   type TransactionLike,
   type UpdateClaimData,
@@ -2132,17 +2133,42 @@ export class ClaimsService {
   async getOne(user: AuthUser, nrZgl: string): Promise<ClaimDto> {
     const row = await this.claims.findByNrZgl(nrZgl);
     if (!row) throw new NotFoundException('Wniosek nie znaleziony');
-    if (user.role === 'przewoznik') {
-      const carrier = await this._requireCarrierProfile(user);
-      if (row.carrierId !== carrier.id) {
-        throw new ForbiddenException('Brak uprawnień do tego wniosku');
-      }
-    }
+    await this._assertClaimReadable(user, row);
     const dto = this.toDto(row);
     return {
       ...dto,
       verifierMileage: await this._resolveVerifierMileage(user, row),
     };
+  }
+
+  /**
+   * Read-ownership gate for a single wniosek. admin/pracownik → any; opiekun →
+   * only their supervised carriers; przewoznik → only own. Every other role is
+   * rejected (they are also excluded at the `@Roles` level, so this is
+   * defence-in-depth). The `@CarrierOwns` guard already covers przewoznik at
+   * the route, but opiekun has NO guard on the claims controller — so its
+   * ownership check MUST live here.
+   */
+  private async _assertClaimReadable(
+    user: AuthUser,
+    row: ClaimRow,
+  ): Promise<void> {
+    if (user.role === 'admin' || user.role === 'pracownik') return;
+    if (user.role === 'opiekun') {
+      const owned = await this.carriers.listIdsForOpiekun(user.sub);
+      if (!owned.includes(row.carrierId)) {
+        throw new ForbiddenException('Brak uprawnień do tego wniosku');
+      }
+      return;
+    }
+    if (user.role === 'przewoznik') {
+      const carrier = await this._requireCarrierProfile(user);
+      if (row.carrierId !== carrier.id) {
+        throw new ForbiddenException('Brak uprawnień do tego wniosku');
+      }
+      return;
+    }
+    throw new ForbiddenException('Brak uprawnień do tego wniosku');
   }
 
   /**
@@ -3115,19 +3141,24 @@ export class ClaimsService {
   private async _scopeListFilters(
     user: AuthUser,
     filters: ClaimFilters,
-  ): Promise<ClaimFilters> {
-    if (
-      user.role === 'admin' ||
-      user.role === 'pracownik' ||
-      user.role === 'opiekun' ||
-      user.role === 'planista' ||
-      user.role === 'dyspozytor' ||
-      user.role === 'eksport' ||
-      user.role === 'weryfikator'
-    ) {
-      // Phase 3 scope is carrier-driven; admin / employee filtering by
-      // opiekun / planner happens in Phase 4 (ListController surface).
+  ): Promise<ClaimListFilters> {
+    // Full, unscoped access — the only two roles that see every carrier's
+    // wnioski (docs/03-roles.md access matrix).
+    if (user.role === 'admin' || user.role === 'pracownik') {
       return filters;
+    }
+    if (user.role === 'opiekun') {
+      // Opiekun sees ONLY wnioski of the carriers they supervise
+      // (docs/03-roles.md#opiekun). A client-supplied `carrierId` must be one
+      // of theirs (else 403); the server-injected `carrierOpiekunId` relation
+      // filter is applied unconditionally as defence-in-depth.
+      if (filters.carrierId) {
+        const owned = await this.carriers.listIdsForOpiekun(user.sub);
+        if (!owned.includes(filters.carrierId)) {
+          throw new ForbiddenException('Brak uprawnień do tego przewoźnika');
+        }
+      }
+      return { ...filters, carrierOpiekunId: user.sub };
     }
     if (user.role === 'przewoznik') {
       const carrier = await this._requireCarrierProfile(user);
@@ -3136,6 +3167,7 @@ export class ClaimsService {
       }
       return { ...filters, carrierId: carrier.id };
     }
+    // planista / dyspozytor / eksport / weryfikator — no claims access.
     throw new ForbiddenException('Brak uprawnień');
   }
 
