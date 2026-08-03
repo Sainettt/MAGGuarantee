@@ -38,6 +38,7 @@ export * from './fleet';
 export * from './guarantee-watchdog';
 // Phase 5 — opiekun-scoped surface (carriers sidebar).
 export * from './opiekun';
+export * from './alerts';
 // Phase 4.5 — admin ops (limits / audit / diagnostics).
 export * from './limits';
 export * from './audit';

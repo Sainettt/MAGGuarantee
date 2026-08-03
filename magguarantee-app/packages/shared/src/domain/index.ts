@@ -14,3 +14,4 @@ export * from './auth-threshold';
 export * from './maksim-confirmation';
 export * from './guarantee-watchdog';
 export * from './vehicle-status';
+export * from './document-alerts';

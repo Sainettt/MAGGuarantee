@@ -21,6 +21,7 @@
 
 import {
   Activity,
+  BellRing,
   Building2,
   Container,
   FileText,
@@ -49,12 +50,16 @@ import {
   SheetTitle,
 } from '@/components/ui/Sheet';
 import { useActiveNavRefresh } from '@/lib/hooks/useActiveNavRefresh';
+import { useAlerts } from '@/lib/hooks/useAlerts';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { useOpiekunFleet } from '@/lib/hooks/useOpiekunFleet';
 import { cn } from '@/lib/utils';
 
 /** Nav key of the «Moja opieka» entry — the one that carries the count pill. */
 const OPIEKA_NAV_KEY = 'opieka';
+
+/** Nav key of the «Alerty» entry — carries a red expiring-docs count pill. */
+const ALERTS_NAV_KEY = 'alerts';
 
 /** Plain-JSON shape passed from the server-component layout. */
 export interface NavItem {
@@ -80,6 +85,7 @@ const ICONS: Record<string, LucideIcon> = {
   HeartHandshake,
   MapPin,
   Users2,
+  BellRing,
 };
 
 interface EmployeeSidebarProps {
@@ -114,6 +120,16 @@ export function EmployeeSidebar({
       ).length ?? 0)
     : 0;
 
+  // «Alerty» pill — count of documents already invalid OR expiring today
+  // (expired + critical); the softer warning/upcoming buckets don't earn a nav
+  // badge. Gated (and cache-shared) with the alerts page: admin + opiekun only.
+  const showsAlerts = items.some((l) => l.key === ALERTS_NAV_KEY);
+  const canSeeAlerts = user?.role === 'admin' || user?.role === 'opiekun';
+  const alertsQ = useAlerts({ enabled: showsAlerts && canSeeAlerts });
+  const alertsCount = alertsQ.data
+    ? alertsQ.data.meta.totals.expired + alertsQ.data.meta.totals.critical
+    : 0;
+
   // Compute one active key per render — the entry whose href is the
   // longest prefix of the current pathname.
   const activeKey = items.reduce<string | null>((best, link) => {
@@ -133,10 +149,14 @@ export function EmployeeSidebar({
         // на время рефетча иконка пункта подменяется крутящимся <RefreshCw>.
         const spinning = active && isRefreshing;
         const Icon = spinning ? RefreshCw : (ICONS[link.iconName] ?? FileText);
-        const pillCount =
+        // Per-entry count pill: «Moja opieka» → amber attention tally;
+        // «Alerty» → red expired/expiring-today tally. At most one applies.
+        const pill =
           link.key === OPIEKA_NAV_KEY && attentionCount > 0
-            ? attentionCount
-            : 0;
+            ? { count: attentionCount, tone: 'bg-warning', label: t('nav.opiekaAttentionBadge', { count: attentionCount }) }
+            : link.key === ALERTS_NAV_KEY && alertsCount > 0
+              ? { count: alertsCount, tone: 'bg-danger', label: t('nav.alertsBadge', { count: alertsCount }) }
+              : null;
         return (
           <li key={link.key}>
             <Link
@@ -163,19 +183,18 @@ export function EmployeeSidebar({
                 className={cn(spinning && 'animate-spin')}
               />
               <span className="truncate">{t(link.labelKey)}</span>
-              {pillCount > 0 && (
+              {pill && (
                 <span
                   className={cn(
                     'ml-auto inline-flex min-w-[1.25rem] items-center justify-center',
                     'rounded-full px-1.5 py-0.5 text-[11px] font-bold leading-none tabular-nums',
-                    'bg-warning text-white',
+                    pill.tone,
+                    'text-white',
                   )}
-                  aria-label={t('nav.opiekaAttentionBadge', {
-                    count: pillCount,
-                  })}
-                  title={t('nav.opiekaAttentionBadge', { count: pillCount })}
+                  aria-label={pill.label}
+                  title={pill.label}
                 >
-                  {pillCount}
+                  {pill.count}
                 </span>
               )}
             </Link>

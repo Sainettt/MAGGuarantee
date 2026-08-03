@@ -5,6 +5,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 
+import { AlertsModule } from './modules/alerts/alerts.module';
 import { AuditModule } from './common/audit/audit.module';
 import { AuditWriterModule } from './modules/audit/audit.module';
 import { validateEnv } from './config/env.schema';
@@ -122,6 +123,8 @@ import { WeeklyReportModule } from './modules/weekly-report/weekly-report.module
     VerificationSlaModule,
     // Guarantee Watchdog — wyjazd-reminder cron + compliance board (plan §5).
     GuaranteeWatchdogModule,
+    // Phase 5.2 — document-expiry alerts (in-app, admin + opiekun).
+    AlertsModule,
     // Vehicle-status rework Step B — 29-day «do usunięcia» admin-alert cron.
     VehicleRemovalAlertModule,
     // Phase 9 — Monday admin summary cron (GAS analog `sendWeeklyReport`).

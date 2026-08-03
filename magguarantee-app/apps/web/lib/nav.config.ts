@@ -66,6 +66,16 @@ export const EMPLOYEE_NAV: readonly NavLink[] = [
     iconName: 'HeartHandshake',
     roles: ['opiekun', 'admin'],
   },
+  // Opiekun + admin — Phase 5.2 «Alerty»: expiring/expired documents (OCP
+  // insurance, transport licence, fuel card, driving licence). In-app only.
+  // Carries a red count pill (expired + expires-today) — the "visible" notice.
+  {
+    key: 'alerts',
+    href: '/employee/alerts',
+    labelKey: 'nav.alerts',
+    iconName: 'BellRing',
+    roles: ['opiekun', 'admin'],
+  },
   // Opiekun + admin — Phase 7.8 «Moje pojazdy — przebieg» (docs/14 §7.8): the
   // read-only multi-carrier weekly km tab scoped to the carriers the opiekun
   // supervises. Label reuses the `myKm.tab` key. NOT admin-only (lives outside

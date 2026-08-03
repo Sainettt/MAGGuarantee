@@ -282,7 +282,9 @@
     "openMenu": "Otwórz menu",
     "closeMenu": "Zamknij menu",
     "sectionLabel": "Sekcje panelu",
-    "opiekaAttentionBadge": "{count, plural, one {# przewoźnik wymaga uwagi} few {# przewoźników wymaga uwagi} many {# przewoźników wymaga uwagi} other {# przewoźników wymaga uwagi}}"
+    "opiekaAttentionBadge": "{count, plural, one {# przewoźnik wymaga uwagi} few {# przewoźników wymaga uwagi} many {# przewoźników wymaga uwagi} other {# przewoźników wymaga uwagi}}",
+    "alerts": "Alerty",
+    "alertsBadge": "{count, plural, one {# dokument wymaga uwagi} few {# dokumenty wymagają uwagi} many {# dokumentów wymaga uwagi} other {# dokumentów wymaga uwagi}}"
   },
   "forbidden": {
     "title": "Brak dostępu",
@@ -2330,6 +2332,41 @@
       "skipped": "Wymaga uwagi: faktyczna data zjazdu różni się od okresu wniosku",
       "appliedTooltip": "Okres zaktualizowany z {origDateEnd} na {actualReturnAt}.",
       "skippedTooltip": "Wyjazd zjechał {actualReturnAt}, okres wniosku: {dateEnd}. Pominięto auto-przeliczenie."
+    }
+  },
+  "alerts": {
+    "title": "Alerty",
+    "subtitle": "Dokumenty wygasające w ciągu {days} dni lub już przeterminowane.",
+    "kpi": {
+      "expired": "Przeterminowane",
+      "today": "Wygasają dziś",
+      "warning": "Za ≤3 dni",
+      "upcoming": "Za ≤7 dni"
+    },
+    "category": {
+      "carrier": "Przewoźnicy",
+      "vehicle": "Pojazdy",
+      "driver": "Kierowcy"
+    },
+    "docType": {
+      "carrier_insurance": "Ubezpieczenie OCP",
+      "carrier_license": "Licencja transportowa",
+      "vehicle_fuel_card": "Karta paliwowa",
+      "driver_license": "Prawo jazdy"
+    },
+    "countdown": {
+      "expired": "{days, plural, one {przeterminowany o # dzień} few {przeterminowany o # dni} many {przeterminowany o # dni} other {przeterminowany o # dni}}",
+      "today": "Wygasa dziś",
+      "upcoming": "{days, plural, one {za # dzień} few {za # dni} many {za # dni} other {za # dni}}"
+    },
+    "expiresOn": "wygasa {date}",
+    "empty": {
+      "title": "Wszystkie dokumenty aktualne",
+      "message": "Żaden dokument nie wygasa w najbliższym czasie."
+    },
+    "error": {
+      "title": "Nie udało się wczytać alertów",
+      "message": "Spróbuj odświeżyć stronę."
     }
   }
 }

@@ -282,7 +282,9 @@
     "openMenu": "Open menu",
     "closeMenu": "Close menu",
     "sectionLabel": "Panel sections",
-    "opiekaAttentionBadge": "{count, plural, one {# carrier requires attention} other {# carriers require attention}}"
+    "opiekaAttentionBadge": "{count, plural, one {# carrier requires attention} other {# carriers require attention}}",
+    "alerts": "Alerts",
+    "alertsBadge": "{count, plural, one {# document needs attention} other {# documents need attention}}"
   },
   "forbidden": {
     "title": "Access denied",
@@ -2330,6 +2332,41 @@
       "skipped": "Needs attention: actual return date differs from the claim period",
       "appliedTooltip": "Period updated from {origDateEnd} to {actualReturnAt}.",
       "skippedTooltip": "Trip returned {actualReturnAt}, claim period: {dateEnd}. Auto-recalculation skipped."
+    }
+  },
+  "alerts": {
+    "title": "Alerts",
+    "subtitle": "Documents expiring within {days} days or already expired.",
+    "kpi": {
+      "expired": "Expired",
+      "today": "Expiring today",
+      "warning": "≤3 days",
+      "upcoming": "≤7 days"
+    },
+    "category": {
+      "carrier": "Carriers",
+      "vehicle": "Vehicles",
+      "driver": "Drivers"
+    },
+    "docType": {
+      "carrier_insurance": "OCP insurance",
+      "carrier_license": "Transport licence",
+      "vehicle_fuel_card": "Fuel card",
+      "driver_license": "Driving licence"
+    },
+    "countdown": {
+      "expired": "{days, plural, one {expired # day ago} other {expired # days ago}}",
+      "today": "Expires today",
+      "upcoming": "{days, plural, one {in # day} other {in # days}}"
+    },
+    "expiresOn": "expires {date}",
+    "empty": {
+      "title": "All documents up to date",
+      "message": "No document is expiring soon."
+    },
+    "error": {
+      "title": "Couldn't load alerts",
+      "message": "Try refreshing the page."
     }
   }
 }
