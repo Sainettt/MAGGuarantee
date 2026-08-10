@@ -10,7 +10,7 @@ import type { Env } from '../../config/env.schema';
  * Phase 9 stood up early: the API process hosts BOTH the producers and the
  * processors (no separate worker container). `BullModule.forRootAsync` opens
  * the shared connection used by every queue + worker registered downstream
- * via `BullModule.registerQueue(...)` (the mail feature module).
+ * via `BullModule.registerQueue(...)` (mail / chat feature modules).
  *
  * Connection: derived from the existing `REDIS_URL` env var (same instance the
  * 2FA / mail-jobs-registry already use). A DEDICATED BullMQ connection is used
@@ -35,8 +35,8 @@ import type { Env } from '../../config/env.schema';
           // REQUIRED by BullMQ's blocking commands — see note above.
           maxRetriesPerRequest: null,
         },
-        // Conservative shared defaults; per-job overrides win (a producer may
-        // set its own attempts/backoff/jobId).
+        // Conservative shared defaults; per-job overrides win (the chat
+        // producer sets its own attempts/backoff/jobId).
         defaultJobOptions: {
           removeOnComplete: { age: 3600 * 24 * 7, count: 1000 },
           removeOnFail: false,

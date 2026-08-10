@@ -958,9 +958,7 @@ export class MailService implements IMailService {
       subject: `Nowy wyjazd: ${props.plateNumber}`,
       html: await render(DelegationAnnouncedEmail(props)),
       text: [
-        props.forCarrier
-          ? 'Twój wyjazd został zarejestrowany w systemie MAGGuarantee.'
-          : `Przewoźnik ${props.carrierName} zgłosił nowy wyjazd.`,
+        'Twój wyjazd został zarejestrowany w systemie MAGGuarantee.',
         '',
         `Ciągnik: ${props.plateNumber}`,
         `Kierowca: ${props.driverName}`,

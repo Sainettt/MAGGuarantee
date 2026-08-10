@@ -627,9 +627,9 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
 
 > **BullMQ поднят рано (in-process):** очередь `email-send` работает внутри
 > API-процесса и через неё идут **все** транзакционные письма (у каждого
-> отправителя есть `enqueueX`-вариант с sync-фолбэком). Вторая очередь
-> `chat-notify-wyjazd` (Google Chat) была здесь же, но **выпилена 2026-07-28**
-> вместе со всей интеграцией. Deps: `@nestjs/bullmq@10.2.3`, `bullmq@5.78.0`.
+> отправителя есть `enqueueX`-вариант с sync-фолбэком). Вторая очередь —
+> `chat-notify-wyjazd` (Google Chat нотификация о выездах): выпиливалась
+> 2026-07-28, **возвращена 2026-08-07**. Deps: `@nestjs/bullmq@10.2.3`, `bullmq@5.78.0`.
 >
 > **Крон — не BullMQ, а `@Cron` в API-процессе.** Четыре джобы (verification-sla
 > 07:00, guarantee-watchdog 07:10, vehicle-removal-alert 07:20, weekly-report
@@ -726,14 +726,14 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
 > - **Шаг A (блок прошлых дат)** — ✅ реализовано (гейт в `DelegationsService.add()`, грань now−10 мин, обход env-флагами `ALLOW_PAST_DEPARTURE` / `NEXT_PUBLIC_ALLOW_PAST_DEPARTURE`).
 > - **Шаг B (связка wniosek ↔ wyjazd)** — ✅ реализовано в Phase 7 §0″ (`Claim.delegationId` `@unique`, carrier выбирает выезд, период/пробег производные, авто-пересчёт при позднем `zjechal`).
 > - **Шаг C (approval workflow)** — ✅ закрыт как есть: отдельного статуса **`zaakceptowany` НЕ будет — нынешний `gotowy` и есть акцепт** (`POST /delegations/:id/ready`, `eksport|admin`, флип после zlecenia в SpedTrans, откат до `w_trasie`). **Роли Аркадиуша НЕ будет** — каждый ставит статус под свою ответственность, авторство фиксируется на выезде (`readyBy/readyAt`, `verifiedBy/At`) + audit-log. Автоимпорт из SpedTrans не делается.
-> - **Шаг D (`Team`)** — ✅ реализовано 2026-06-17 (модель `Team`, `Vehicle.dispatchTeamId`, admin CRUD). Изначальный драйвер — получатели gchat-нотификации; та **выпилена 2026-07-28**, `Team` остаётся ради доступа диспетчеров к своим авто и блока «ZESPÓŁ PROWADZĄCY» в модалке выезда.
+> - **Шаг D (`Team`)** — ✅ реализовано 2026-06-17 (модель `Team`, `Vehicle.dispatchTeamId`, admin CRUD, gchat-получатели через команду; gchat выпиливался 2026-07-28 и возвращён 2026-08-07). `Team` также даёт доступ диспетчеров к своим авто и питает блок «ZESPÓŁ PROWADZĄCY» в модалке выезда.
 >
 > Всё ниже — историческая спека, оставлена как контекст; актуальное состояние — этот баннер.
 
 > ⛔ **БОЛЬШАЯ ПЕРЕОЦЕНКА (2026-06-12)** — фаза сильно урезана после выяснения реального процесса:
 > - **Шаг B (`Claim.delegationId` hard-link) — ОТМЕНЁН.** Связи claim↔delegation в коде нет; `Claim.mileage` = `Σ VehicleDailyKm` (по машине+периоду). См. [20-phase-7-eksport-weryfikator.md](20-phase-7-eksport-weryfikator.md) §0′.
 > - **Шаг C (approval workflow выездов) — ОТМЕНЁН.** Статус выезда — «мёртвый груз», его никто не верифицирует; роль одобряющего не нужна (секция «Роль одобряющего» ниже устарела).
-> - **Шаг D (`Team`) — ОСТАЁТСЯ**, но только: доступ диспетчеров к авто (gchat-уведомление, второй изначальный драйвер, выпилено 2026-07-28). Без верификации.
+> - **Шаг D (`Team`) — ОСТАЁТСЯ**, но только: gchat-уведомление о выездах + доступ диспетчеров к авто. Без верификации.
 > - Дневной км-лист (`VehicleDailyKm`) вынесен в **Phase 7** и делается сейчас.
 >
 > Ниже — исходная спека фазы, оставлена как контекст; читать сквозь призму этого баннера.
@@ -813,7 +813,7 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
   - `Vehicle.dispatchTeamId` (FK → Team) **заменяет** `Vehicle.dispatcherId`. Forward-only деструктивная миграция (реальных данных нет — пустая БД + seed, боли нет). `Vehicle.plannerId` (ведущий спедитор) без изменений.
   - Смену (zmiana) **НЕ** храним — меняется еженедельно, достаточно имён.
 - **Доступ:** диспетчер видит авто, где `vehicle.dispatchTeamId = его teamId` (**оба** сменщика). Эндпоинты dyspozytor-панели — фильтр по team вместо single dispatcher.
-- ~~**Уведомление о выезде (`chat-notify-wyjazd`)**~~ — интеграция с Google Chat выпилена 2026-07-28 вместе с очередью, модулем и env-ключом. Состав «ZESPÓŁ PROWADZĄCY» (planista + все диспетчеры команды, без `weryfikator`) переехал в модалку выезда — см. [14-design-system.md](14-design-system.md) §7.9.7.
+- **Уведомление о выезде (`chat-notify-wyjazd`):** получатели = `team.dispatchers` (все) + `vehicle.planner` (один) + `carrier.opiekun`. Из строки `ZESPÓŁ PROWADZĄCY` убран `weryfikator`. Интеграция выпиливалась 2026-07-28 и **возвращена 2026-08-07** (тогда же удалено письмо опекуну о выезде — внутренняя аудитория читает Chat). Тот же состав рендерится в модалке выезда — см. [14-design-system.md](14-design-system.md) §7.9.7. Детали: [16-jobs-and-integrations.md](16-jobs-and-integrations.md).
 - **Админ-UI:** CRUD команд (код + состав диспетчеров).
 - **Форма машины (UI):** вместо «выбрать 1 диспетчера» — выбор **команды** (dropdown) + превью её состава (список имён); пустая команда подсвечивается («Brak dyspozytorów w zespole»). `planner` (ведущий спедитор) выбирается как раньше.
 - **Не-goal:** спедиторы **НЕ** через команду — в уведомление летит один ведущий спедитор = `Vehicle.plannerId`. Team только для диспетчеров.
@@ -850,7 +850,7 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
 | Новая модель `Team` | `code` unique, `name?`, `active`, `dispatchers User[]`, `vehicles Vehicle[]` — admin CRUD (замена ручного Excel/DAF) |
 | `User` поля | + `teamId` (FK → Team, nullable; для dyspozytor) |
 | `Vehicle` поля | `dispatchTeamId` (FK → Team) **заменяет** `dispatcherId` (forward-only миграция; `plannerId` без изменений) |
-| ~~`chat-notify-wyjazd` получатели~~ | выпилено 2026-07-28 вместе с интеграцией; состав «ZESPÓŁ PROWADZĄCY» (без `weryfikator`) остался в модалке выезда |
+| `chat-notify-wyjazd` получатели | `team.dispatchers[]` + `Vehicle.planner` + `Carrier.opiekun`; `weryfikator` убран из `ZESPÓŁ PROWADZĄCY`. Тот же состав — в модалке выезда |
 | Vehicle form UI | выбор команды + превью её состава (имена) вместо single dispatcher; пустая команда подсвечивается |
 
 ### Что НЕ делается в этой фазе

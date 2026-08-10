@@ -134,7 +134,7 @@ overline темы. Никаких градиентов и цветных «ша�
 | `guarantee-reminder-carrier` | Przypomnienie | `warning` Zbliża się termin | — (таблица) | Zgłoś wyjazd |
 | `guarantee-opiekun-digest` | Gwarancje | — | — (группы) | — |
 | `vehicle-removal-admin` | Flota | `danger` (счётчик) | — (список) | — |
-| `delegation-announced` | Wyjazd | — | — | — |
+| `delegation-announced` | Wyjazd | — | — | — (только перевозчику — подтверждение zgłoszenia; внутренние узнают о выезде из Google Chat) |
 | `delegation-ready` | Wyjazd | `success` **Załadowany** | CodePanel `light` (nr zlecenia ze spedu) | — |
 | `weekly-report` | Raport | `neutral` (период) | — (строки) | Otwórz panel |
 | `account-created` | Twoje konto | — | CodePanel `light` (пароль) | Zaloguj się |

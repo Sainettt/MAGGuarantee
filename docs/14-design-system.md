@@ -4017,7 +4017,7 @@ Section header: icon `<ClipboardCheck>` (or keep `<Info>`), label «STATUS I AUD
 > **Block D — «ZESPÓŁ PROWADZĄCY» (Phase 11, §7.9.7).** A further `span:'full'` `fullWidth` block **below**
 > «STATUS I AUDYT» (and below the §7.7.9 km-calendar if present), header «ZESPÓŁ PROWADZĄCY» (`<Users>`),
 > rendering `<TeamMembers variant="list" size="md">` from the **current** `Vehicle.dispatchTeam` (live by
-> `vehicleId`, **not** a delegation-time snapshot).
+> `vehicleId`, **not** a delegation-time snapshot). Label mirrors the Google Chat trip-notification heading.
 > Omitted when no vehicle; amber «Brak zespołu prowadzącego» when the vehicle has no team. Full spec: §7.9.7.
 
 **All fields accounted for (no field dropped) — updated for the §6.4.1a redesign.** Mapping of the `DelegationDto` fields to the new layout:
@@ -5766,9 +5766,8 @@ A **new body block** in the §6.4.1 delegation detail modal, rendered as a `span
 the «STATUS I AUDYT» section** (and below the §7.7.9 km-calendar if present), so the reading order ends with
 "who is steering this trip".
 
-- **Section header** = «ZESPÓŁ PROWADZĄCY» (icon `<Users size={15}/>`). The wording originally mirrored the
-  Google Chat trip-notification heading; that integration was removed 2026-07-28, but the label stays — it is
-  the phrasing MAGTRANS staff already read as "who is steering this trip".
+- **Section header** = «ZESPÓŁ PROWADZĄCY» (icon `<Users size={15}/>`). The label **deliberately mirrors the
+  heading of the Google Chat trip-notification** so the modal and the gchat message read as the same artefact.
 - **Body** = a single `<TeamMembers variant="list" size="md">` fed the **current** `Vehicle.dispatchTeam` of the
   delegation's assigned vehicle (resolved live by `vehicleId` — **not** a snapshot captured at delegation time;
   if the truck is reassigned to a new team, this block reflects the new team).
@@ -5832,7 +5831,7 @@ PL+EN key parity holds (existing i18n-parity check covers this).
 - [ ] **Name weight + null collapse.** `team.name` is `text-text` (co-equal with the code), and disappears with **no residual gap** when null.
 - [ ] **Empty team.** Amber `border-warning/40 bg-warning/10 text-warning` box + `<AlertTriangle>` + bold «Brak dyspozytorów w zespole»; stays full-contrast even on a dimmed inactive card.
 - [ ] **Inactive.** `muted` «Nieaktywny» badge + `opacity-70` dim on the wrapper; co-occurs with the (exempt) amber box when also empty.
-- [ ] **Delegation modal block.** «ZESPÓŁ PROWADZĄCY» shows **current** `Vehicle.dispatchTeam` (not snapshot), omitted when no vehicle, «Brak zespołu prowadzącego» when vehicle has no team.
+- [ ] **Delegation modal block.** «ZESPÓŁ PROWADZĄCY» mirrors the gchat header, shows **current** `Vehicle.dispatchTeam` (not snapshot), omitted when no vehicle, «Brak zespołu prowadzącego» when vehicle has no team.
 - [ ] **Code chip.** `font-mono tabular-nums` `1.1.13` (3 segments); `showCode` only dedups a duplicate and **never** hides identity (name stands in; if name null, chip renders anyway).
 - [ ] **No new tokens.** Only existing palette/radius/type/spacing; no `tailwind.config.ts`/`globals.css` change.
 - [ ] **a11y.** Member list real `<ul>`/`role=list`; avatars `aria-hidden`; warning carried by text not colour; `team.*` keys PL+EN parity.

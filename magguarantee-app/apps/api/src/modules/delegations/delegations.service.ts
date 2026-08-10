@@ -40,6 +40,7 @@ import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CarriersRepository } from '../carriers/carriers.repository';
 import { DriversRepository } from '../drivers/drivers.repository';
+import { ChatNotifierService } from '../integrations/chat/chat-notifier.service';
 import { TrailersRepository } from '../trailers/trailers.repository';
 import {
   NO_TEAM_SENTINEL,
@@ -107,6 +108,11 @@ export class DelegationsService {
     // positional service-test fakes (which omit trailing args) keep compiling;
     // the hook no-ops when the service is absent.
     @Optional() private readonly guaranteeWatchdog?: GuaranteeWatchdogService,
+    // Google Chat wyjazd notification (restored 2026-08-07). Declared LAST and
+    // `@Optional()` — unlike the pre-2026-07-28 wiring, where it sat in the
+    // middle of the positional list and every service-test fake had to carry a
+    // stub for it. Absent in unit tests ⇒ the hook no-ops.
+    @Optional() private readonly chat?: ChatNotifierService,
   ) {}
 
   // ── Submit ──────────────────────────────────────────────
@@ -160,7 +166,28 @@ export class DelegationsService {
       reportedById: user.sub,
     });
 
-    // New-wyjazd email — carrier (confirmation) + opiekun (heads-up).
+    // Side-effect: post the wyjazd to the standing Google Chat space — the
+    // INTERNAL heads-up (planista / dyspozytorzy / opiekun read that space).
+    // Fire-and-forget enqueue: the webhook POST happens off the request path in
+    // the `chat-notify-wyjazd` processor. It must NEVER break or delay `add()`,
+    // so any failure here is swallowed (warn-only). The notifier itself also
+    // catches internally; this try/catch is belt-and-suspenders per
+    // docs/16-jobs-and-integrations.md#google-chat-notifications.
+    if (this.chat) {
+      try {
+        await this.chat.notifyWyjazd(row.id);
+      } catch (err) {
+        this.logger.warn({
+          msg: 'chat wyjazd notification enqueue failed (non-fatal)',
+          delegationId: row.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    // New-wyjazd email — carrier confirmation ONLY. The opiekun heads-up moved
+    // back to Google Chat (2026-08-07); the internal audience is no longer
+    // mailed on `zgloszenie`.
     // Fire-and-log, off the request path; never breaks add().
     void this._notifyWyjazd('announced', row);
 
@@ -185,8 +212,12 @@ export class DelegationsService {
   }
 
   /**
-   * Outgoing wyjazd email. `announced` → carrier + opiekun; `ready` → carrier
-   * only. Fire-and-log: a mail hiccup must never break a status transition.
+   * Outgoing wyjazd email — the CARRIER-facing one in both flavours
+   * (`announced` = registration receipt, `ready` = load found / SpedTrans
+   * order). The internal audience is NOT mailed here: the wyjazd heads-up for
+   * planista / dyspozytorzy / opiekun is the Google Chat post fired from
+   * `add()` (restored 2026-08-07, docs/16-jobs-and-integrations.md).
+   * Fire-and-log: a mail hiccup must never break a status transition.
    * Reads emails via `this.prisma.client` (root client) since this runs in a
    * fire-and-forget continuation, possibly after an ambient `@Audit` tx
    * committed. No-op when MailService / Prisma are not wired (unit tests).
@@ -201,7 +232,6 @@ export class DelegationsService {
         where: { id: row.carrierId },
         select: {
           user: { select: { email: true, name: true, login: true } },
-          opiekun: { select: { email: true } },
         },
       });
       const carrierEmail = carrier?.user.email ?? null;
@@ -222,28 +252,15 @@ export class DelegationsService {
         });
 
       if (kind === 'announced') {
-        const plannedReturn = this._fmtPlannedReturn(row);
+        // Carrier receipt only. The opiekun copy was dropped 2026-08-07 —
+        // the internal heads-up is the Google Chat post again.
         if (carrierEmail) {
           void this.mailService
             .enqueueDelegationAnnounced(carrierEmail, {
-              forCarrier: true,
-              carrierName,
               plateNumber,
               driverName,
               departure,
-              plannedReturn,
-            })
-            .catch(warn);
-        }
-        if (carrier?.opiekun?.email) {
-          void this.mailService
-            .enqueueDelegationAnnounced(carrier.opiekun.email, {
-              forCarrier: false,
-              carrierName,
-              plateNumber,
-              driverName,
-              departure,
-              plannedReturn,
+              plannedReturn: this._fmtPlannedReturn(row),
             })
             .catch(warn);
         }

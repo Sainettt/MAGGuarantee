@@ -389,11 +389,14 @@ cursor-пагинация без изменений), остальные чет�
 | POST `/delegations/:id/returned` | **NEW** — `weryfikator \| admin`: `w_trasie→zjechal`, body `{ actualReturnAt }` (**ISO datetime**, required; 422 `RETURN_DATE_FUTURE` (`> now`), `RETURN_BEFORE_DEPARTURE` (`< actualDepartureAt`)). Txn: `vehicle.lastDroveAt = max(...)` + авто-пересчёт связанного wniosek (границы — §0″). Audit `delegation.markReturned`. |
 | POST `/delegations/:id/cancel` | carrier (свои `zgloszony`) **+ admin (любой активный)** → `anulowany`. |
 
-> **Side-effect (email):** контракт `POST /delegations` не меняется. После
-> создания выезда `add()` асинхронно шлёт письмо перевозчику (подтверждение) и
-> опекуну (heads-up) через очередь `email-send` — off the request path, никогда
-> не ломает и не задерживает ответ. Google Chat нотификация, жившая здесь
-> раньше, **выпилена 2026-07-28** (см. [16-jobs-and-integrations.md](16-jobs-and-integrations.md)).
+> **Side-effect (Google Chat + email):** контракт `POST /delegations` не
+> меняется. После создания выезда `add()` асинхронно (1) постит 6-строчную
+> нотификацию в Google Chat space — очередь `chat-notify-wyjazd`, это
+> **внутренний** heads-up для planisty / dyspozytorów / opiekuna — и (2) шлёт
+> **перевозчику** письмо-подтверждение через очередь `email-send`. Оба — off the
+> request path, никогда не ломают и не задерживают ответ. Письма опекуну о
+> выезде больше нет (2026-08-07). См.
+> [16-jobs-and-integrations.md#google-chat-notifications](16-jobs-and-integrations.md#google-chat-notifications).
 
 > ✅ **REWORK 2026-06-20 (#4):** статусы выезда снова операционные — `in-transit`/`returned` восстановлены (у `weryfikator`) + новый `ready` (`eksport` → `gotowy`). `weryfikator` ведёт **И** km-доску машин (ниже), **И** статусы выездов (отдельное окно). `Claim.delegationId` введён — `POST /claims`/`/claims/preview` принимают `delegationId`, период и `mileage` берутся из выезда. Полная спека: [`20-phase-7-eksport-weryfikator.md` §0″](20-phase-7-eksport-weryfikator.md). (Прежнее «удалено 2026-06-10 #2 / мёртвый груз» — отменено.)
 >

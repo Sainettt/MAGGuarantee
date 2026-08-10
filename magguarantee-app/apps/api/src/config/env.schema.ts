@@ -17,6 +17,19 @@ export const envSchema = z.object({
   REDIS_URL: z.string().url(),
   WEB_URL: z.string().url().default('http://localhost:3000'),
 
+  // ── Google Chat wyjazd-notification webhook ───────────
+  // Incoming-webhook URL of the standing "wyjazdy" Chat space. When UNSET
+  // the chat processor no-ops silently (completes the job, logs a skip) so
+  // dev / test / Mailhog environments don't fail. Follows the optional-secret
+  // pattern of the GPS vendor keys — empty in dev, populated in prod.
+  // See docs/16-jobs-and-integrations.md#google-chat-notifications.
+  // `.env.example` ships an empty value — coerce "" → undefined so the
+  // optional URL validator treats "blank in dev" the same as "absent".
+  GOOGLE_CHAT_WYJAZD_WEBHOOK_URL: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z.string().url().optional(),
+  ),
+
   // ── JWT ────────────────────────────────────────────────
   // Two DISTINCT secrets per docs/15-auth-strategy.md#access-vs-refresh.
   JWT_ACCESS_SECRET: z.string().min(32),

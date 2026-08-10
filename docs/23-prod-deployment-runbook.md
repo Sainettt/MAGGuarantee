@@ -233,6 +233,7 @@ openssl rand -hex 24      # S3_SECRET_KEY
 | `MAIL_PROVIDER` | `gmail` |
 | `GMAIL_OAUTH_*`, `GMAIL_FROM` | из Фазы 1.3 |
 | `MAKSIM_EMAIL` | 🆕 **боевой адрес директора** |
+| `GOOGLE_CHAT_WYJAZD_WEBHOOK_URL` | 🆕 incoming-webhook боевого Chat-space «wyjazdy». Берётся в самом space: **Apps & integrations → Webhooks → Add webhooks** (нужен Google Workspace). Пусто ⇒ уведомлений о выездах внутри компании не будет (api при этом стартует нормально) |
 | `ALLOW_PAST_DEPARTURE`, `NEXT_PUBLIC_ALLOW_PAST_DEPARTURE` | оба `false` |
 | `POSTGRES_DATA`, `REDIS_DATA`, `MINIO_DATA` | абсолютные пути `/opt/magguarantee/data/*` |
 

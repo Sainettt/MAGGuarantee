@@ -89,7 +89,7 @@ import { WeeklyReportModule } from './modules/weekly-report/weekly-report.module
     // Scheduled jobs (docs/21 §5 — verification-SLA daily digest is the first).
     ScheduleModule.forRoot(),
     // BullMQ root (in-process workers). Global — must be imported before the
-    // feature modules that `BullModule.registerQueue(...)` (Mail).
+    // feature modules that `BullModule.registerQueue(...)` (Mail / Chat).
     // docs/16-jobs-and-integrations.md#структура-bullmq.
     JobsModule,
     PrismaModule,

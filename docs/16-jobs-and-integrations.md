@@ -15,6 +15,8 @@
 >   Провайдер выбирается по env `MAIL_PROVIDER`: `smtp` → Mailhog (dev/staging),
 >   `gmail` → `GmailApiProvider` с RFC-threading (prod). См.
 >   [Email через Gmail API](#email-через-gmail-api).
+> - `chat-notify-wyjazd` — нотификация в Google Chat при регистрации выезда
+>   (см. [Google Chat notifications](#google-chat-notifications)).
 >
 > Все крон-задачи живут не в BullMQ, а как `@Cron` внутри API-процесса (см.
 > таблицу ниже) — планировочная потребность у них одинаковая, а `@Cron`-путь уже
@@ -43,7 +45,7 @@
 | **Guarantee Watchdog** | — (новое, план 2026-07-07) | ежедневно **07:10** Europe/Warsaw | `@Cron` в API-процессе (стаггер после verification-sla) |
 | **Vehicle-removal alert** | — (новое, vehicle-status rework Step B) | ежедневно **07:20** Europe/Warsaw | `@Cron` в API-процессе (стаггер после Guarantee Watchdog) |
 
-> Внутренний per-claim чат не реализуем (см. [17-migration-roadmap.md#что-мы-не-делаем](17-migration-roadmap.md)) — `_cleanupOldChatMessages` из `Code.gs` пропускаем. Исходящая Google Chat нотификация о выездах какое-то время существовала, но **выпилена 2026-07-28** — см. [Google Chat notifications — УДАЛЕНО](#google-chat-notifications--удалено-2026-07-28).
+> Внутренний per-claim чат не реализуем (см. [17-migration-roadmap.md#что-мы-не-делаем](17-migration-roadmap.md)) — `_cleanupOldChatMessages` из `Code.gs` пропускаем. **Это НЕ про** исходящую Google Chat нотификацию о выездах — та живая (выпиливалась 2026-07-28, возвращена 2026-08-07), см. [Google Chat notifications](#google-chat-notifications).
 
 ### Структура BullMQ
 
@@ -391,6 +393,8 @@ const html = await render(<CarrierDecisionEmail claim={claim} decision="ZAAKCEPT
 | `guarantee-reminder-carrier.tsx` (#17) | (новое, Guarantee Watchdog) | Крон 07:10 — напоминание перевозчику D-3/D-1 (одно письмо, список машин); CTA «Zgłoś wyjazd» → `/carrier/delegations/new` |
 | `guarantee-opiekun-digest.tsx` (#18) | (новое, Guarantee Watchdog) | Крон 07:10 — дайджест опекуну: секция «zbliżające się terminy» (D-3/D-1) + секция «naruszenia» (эпизоды, впервые ставшие `violated` сегодня). Персональный `User.email`, **не** группа |
 | `vehicle-removal-admin.tsx` (#19) | (новое, vehicle-status rework Step B) | Крон 07:20 — дайджест **всем активным admin**: список LIVE-машин со статусом `do_usuniecia` (idle ≥29 календарных дней). Персональный `User.email`. Тема `Pojazdy do usunięcia — {n}` |
+| `delegation-announced.tsx` | — (новое) | Перевозчик зарегистрировал выезд (`POST /delegations`) → **только перевозчику**, подтверждение-квитанция (ciągnik, kierowca, wyjazd, planowany powrót). Адрес — login-ящик `Carrier.user.email`. **Внутренней копии нет**: opiekun-письмо удалено 2026-08-07, внутреннее уведомление ушло в [Google Chat](#google-chat-notifications). Пропсов `forCarrier` / `carrierName` больше нет — аудитория одна |
+| `delegation-ready.tsx` | — (новое) | `eksport \| admin` перевёл выезд в `gotowy` (`POST /delegations/:id/ready`, не rollback) → перевозчику: нашли ładunek, выставили zlecenie. Тема `Zlecenie {spedOrderNumber} — ciągnik {plate}` |
 
 > **Guarantee Watchdog — получатели:** перевозчик резолвится как `carrier-submitted` / `delegation-announced` — **login-user email** (`Carrier.user.email` через `User.id = Carrier.userId`), **не** `ordersEmail`. Опекун — персональный `User.email` (`Carrier.opiekunId → User`). При нарушении перевозчику письма **нет** (решение заказчика) — нарушение только в дайджесте опекуна (#18). Отправка через `MailService.enqueueGuarantee*` (`_enqueueOr` → очередь `email-send` с sync-фолбэком, `MailJobsRegistry`/diagnostics подхватываются автоматически).
 
@@ -669,21 +673,100 @@ GPS_CACHE_TTL_SEC=300            # 5 минут — больше TTL polling-а,
 5. Подкрутить TTL кэша / polling-интервал по факту нагрузки.
 6. (Опционально) сохранять позиции в долгоиграющую таблицу `vehicle_gps_log` для history-фич.
 
-## Google Chat notifications — УДАЛЕНО (2026-07-28)
+## Google Chat notifications
 
-> Исходящая нотификация о выезде в Google Chat space **выпилена целиком** по
-> решению заказчика — интеграция больше не нужна. Удалено: модуль
-> `apps/api/src/modules/integrations/chat/`, очередь `chat-notify-wyjazd`,
-> хук в `DelegationsService.add()`, env-ключ `GOOGLE_CHAT_WYJAZD_WEBHOOK_URL`.
-> Prisma-моделей у интеграции не было — миграция не потребовалась.
->
-> Сущность `Team` (`Vehicle.dispatchTeamId`) **остаётся**: она вводилась в
-> Phase 11 ради получателей этой нотификации, но продолжает использоваться для
-> доступа диспетчеров к своим авто и для блока «ZESPÓŁ PROWADZĄCY» в модалке
-> выезда.
->
-> Уведомление о новом выезде **сохранено** — оно идёт письмом перевозчику и
-> опекуну через очередь `email-send`, а не через Chat.
+> **Не путать с «no chat».** Правило «чат не реализуем» относится к ЛЕГАСИ
+> per-claim internal chat внутри приложения (`_cleanupOldChatMessages` и т.п.).
+> Здесь речь про **исходящую** нотификацию в внешний Google Chat space через
+> incoming webhook — это интеграция, а не возврат внутреннего чата.
+
+> 🔁 **История:** интеграция была выпилена 2026-07-28 и **восстановлена
+> 2026-08-07** по решению заказчика — внутреннее уведомление о выезде снова
+> идёт в Chat, а не письмами. Заодно **удалено письмо опекуну** о новом выезде:
+> внутренняя аудитория (planista / dyspozytorzy / opiekun) читает Chat-space.
+> Перевозчик по-прежнему получает **письмо-подтверждение** (`delegation-announced`,
+> единственный получатель шаблона).
+
+Когда перевозчик регистрирует выезд (`POST /delegations` → `DelegationsService.add`,
+статус `zgloszony`), система постит **сообщение из ровно 6 строк** в постоянный
+Google Chat space через incoming-webhook. Триггер — немедленно при создании
+выезда, без approval-gate. Другие переходы выезда (`gotowy`, `w_trasie`,
+`zjechal`, `anulowany`) в Chat **не постятся**. Доставка — через очередь
+`chat-notify-wyjazd` (in-process worker), POST уходит **off the request path** —
+нотификация **никогда не ломает и не задерживает** `add()` (enqueue обёрнут в
+try/catch, warn-only).
+
+### Контракт сообщения (6 строк, TZ Europe/Warsaw)
+
+```
+ZESTAW: <plateNumber> / <trailerPlate> / <sideNumber?> / <gpsMobilePhone?>
+KIEROWCA: <driverName> / <driverPhone>
+WYJAZD: <departureAt DD/MM/YYYY HH:MM> / <departureCountry> / <departurePostalCode>
+ZJAZD: <plannedReturnAt DD/MM/YYYY> / <returnCountry> / <returnPostalCode>
+ZESPÓŁ PROWADZĄCY: <planista> / <все диспетчеры команды авто>
+OPIEKUN: <opiekun>
+```
+
+- `departureAt` — с временем (`HH:MM`); `plannedReturnAt` — только дата.
+- **ZESTAW** — `Vehicle.plateNumber` / `Delegation.trailer.plateNumber` /
+  `Vehicle.sideNumber` / `Vehicle.gpsMobilePhone`. `plateNumber` и `trailerPlate`
+  всегда присутствуют. `sideNumber` и `gpsMobilePhone` nullable → сегмент
+  **опускается** если `null`/пусто (без пустого слота, без `//`) — то же
+  правило, что и для строки `ZESPÓŁ`.
+- **KIEROWCA** — `<имя> / <телефон>`. Имя = `Delegation.driverNameSnapshot` с
+  фолбэком на `driver.firstName + ' ' + driver.lastName`; телефон =
+  `Delegation.driverPhoneSnapshot` с фолбэком на `driver.phone` (резолвится в
+  `chat-context.builder.ts`). Водитель всегда есть (`Delegation.driverId` NOT
+  NULL) → em-dash-фолбэка нет.
+- Источники команды:
+  - planista = `Vehicle.planner.name` (один ведущий спедитор), диспетчеры =
+    **все** `Vehicle.dispatchTeam.dispatchers[].name` (обычно 2 по сменам, число
+    не фиксировано). Любое имя может быть `null`/пустым → **опускается** из
+    строки `ZESPÓŁ`, без пустого слота и без `//`.
+  - opiekun = `Carrier.opiekun.name` (опекун перевозчика выезда). `null` → `—`.
+  - `ZESPÓŁ PROWADZĄCY:` склеивает присутствующие имена через ` / `.
+
+> **Phase 11 — `weryfikator` убран из получателей.** Реального человека-`weryfikator`
+> в MAGTRANS нет; выезд ведёт **второй диспетчер**. Строка `ZESPÓŁ PROWADZĄCY`
+> теперь `planista / <все диспетчеры команды авто>` — legacy-слот `weryfikator`
+> (единственный активный `User` с ролью `weryfikator`) **удалён**. Источники:
+> planista = `Vehicle.planner.name`, диспетчеры = `Vehicle.dispatchTeam.dispatchers[].name`.
+> См. [04-data-model.md](04-data-model.md) (сущность `Team`) и
+> [17-migration-roadmap.md](17-migration-roadmap.md) Phase 11.
+
+### Конфигурация
+
+- Webhook URL — env `GOOGLE_CHAT_WYJAZD_WEBHOOK_URL` (**optional**). Прецедент
+  optional-секрета — GPS vendor keys.
+- **URL не задан → процессор no-op silently** (job завершается успешно, пишется
+  log-skip) — чтобы dev / test / Mailhog не падали. В `.env.example` значение
+  пустое.
+- Где взять URL: в самом Chat-space → **Apps & integrations → Webhooks → Add
+  webhooks** → задать имя → скопировать URL. Нужен аккаунт Google Workspace
+  (в личном Gmail-чате webhooks недоступны). URL — bearer-секрет: кто им владеет,
+  тот может постить в space; в git не коммитим.
+
+### Доставка и надёжность
+
+- Очередь `chat-notify-wyjazd`, job name `wyjazd`.
+- **Dedup:** стабильный `jobId: 'chat-wyjazd-' + delegationId` — повторный
+  enqueue для того же выезда не плодит дубль.
+- **`delay: 5000`** на enqueue — `add()` работает внутри `@Audit()`-транзакции,
+  и воркер, дёрнувшись через пару мс, читал бы через другое соединение ещё не
+  закоммиченную строку → «delegation not found, skipping» (job завершался бы
+  успешно, уведомление молча терялось). Транзакция коммитится за доли секунды,
+  5 s с запасом.
+- Retry: `attempts: 5`, `backoff: exponential, delay 2000`. Сам POST —
+  10s timeout + 2-3 ретрая на 5xx/network (`postToChatWebhook`, POST-вариант
+  GET-only `fetchJsonWithRetry`). 4xx — вердикт вебхука, fail fast без ретраев.
+  На исчерпании ретраев процессор **бросает** — BullMQ применяет свою
+  attempt/backoff-политику.
+
+### Future (Tier-2)
+
+@mentions конкретных людей (planista/dyspozytor/opiekun) в Chat-сообщении —
+требует Google Chat user IDs (не email/name). Выносим за рамки текущей итерации;
+сейчас постим plain-text имена.
 
 ## Секреты и конфиги
 
@@ -797,7 +880,7 @@ export class AppModule {}
 
 ## Что НЕ делаем
 
-- Внутренний per-claim чат — выпиливается полностью (см. [17-migration-roadmap.md#что-мы-не-делаем](17-migration-roadmap.md)). Исходящая Google Chat нотификация о выездах тоже выпилена — 2026-07-28, см. [Google Chat notifications — УДАЛЕНО](#google-chat-notifications--удалено-2026-07-28).
+- Внутренний per-claim чат — выпиливается полностью (см. [17-migration-roadmap.md#что-мы-не-делаем](17-migration-roadmap.md)). Это про легаси-чат внутри приложения, а **не** про исходящую Google Chat нотификацию о выездах ([Google Chat notifications](#google-chat-notifications)) — та реализована.
 - Долгая сессия для интеграций (VIES, Biała Lista) — все запросы синхронны, в крайнем случае job очереди.
 - Push-нотификации в браузер — пока не запрошено.
 - Real-time updates через WebSockets — нет необходимости (нет чата, верификация — индивидуальная).
