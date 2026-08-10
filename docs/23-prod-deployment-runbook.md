@@ -330,17 +330,52 @@ sudo systemctl start magguarantee-backup.service && journalctl -u magguarantee-b
 
 ## Фаза 7. CI/CD
 
-### 7.1 Ключ для GitHub Actions
+Деплой выполняет **self-hosted раннер, стоящий на самом сервере**. Он держит
+исходящее HTTPS-соединение с GitHub и забирает задачи из очереди — входящих
+портов не нужно вообще. Схема выбрана 2026-08-10, когда выяснилось, что боевая
+машина стоит за корпоративным NAT и проброс 22 наружу невозможен. Прежний
+вариант (облачный раннер + `ssh deploy@$HOST`) удалён из `ci.yml`.
 
-На своей машине:
+### 7.1 Раннер на сервере
+
+GitHub → репозиторий → **Settings → Actions → Runners → New self-hosted runner
+→ Linux / x64**. Страница выдаст команды скачивания с актуальной версией и
+одноразовый registration-токен (живёт час).
+
+Скачивание и распаковку выполнить **от `deploy`** дословно со страницы, а вот
+`config.sh` запустить со своими флагами, не интерактивно:
 
 ```bash
-ssh-keygen -t ed25519 -C "github-actions-prod" -f ~/.ssh/magg_deploy_prod -N ""
+./config.sh --url https://github.com/Sainettt/MAGGuarantee --token <ТОКЕН_ИЗ_UI> --name magg-prod --labels prod --unattended --replace
+```
+
+⚠️ Не отвечать на вопросы вручную. Первым `config.sh` спрашивает **runner
+group**, а не имя раннера; группы — фича organization/enterprise, у
+репозиторного раннера доступна только `Default`, и любой другой ответ валит
+регистрацию с «Could not find any self-hosted runner group».
+
+`--labels` обязан совпадать с именем GitHub Environment (`prod` / `staging`) —
+по нему workflow находит нужную машину.
+
+```bash
+sudo ./svc.sh install deploy
 ```
 
 ```bash
-ssh-copy-id -i ~/.ssh/magg_deploy_prod.pub deploy@app.magtrans.eu
+sudo ./svc.sh start && sudo ./svc.sh status
 ```
+
+Аргумент `deploy` — от кого работать. Без него раннер поедет от root, и всё
+содержимое workflow тоже. `deploy` при этом обязан быть в группе `docker`
+(сделано в 2.3), иначе сборка образов не пройдёт.
+
+Юнит создаётся с `enable`, после ребута поднимается сам. Проверка:
+
+```bash
+systemctl is-active actions.runner.Sainettt-MAGGuarantee.magg-prod
+```
+
+Готово, когда в Settings → Actions → Runners раннер в статусе **Idle**.
 
 ### 7.2 Environment в GitHub
 
@@ -348,20 +383,64 @@ Settings → Environments → изменить существующий `prod`:
 
 | Тип | Имя | Значение |
 |---|---|---|
-| Secret | `DEPLOY_HOST` | боевой хост |
-| Secret | `DEPLOY_SSH_KEY` | содержимое `~/.ssh/magg_deploy_prod` целиком |
 | Variable | `COMPOSE_FILE` | `infra/docker-compose.prod.yml` |
+| Variable | `DEPLOY_PATH` | `/opt/magguarantee/src` (можно не задавать — это дефолт) |
 
-Старый OVH-стенд, если остаётся жить, переезжает в environment `staging` со
-своим ключом и `infra/docker-compose.staging.yml`.
+Секреты `DEPLOY_HOST` и `DEPLOY_SSH_KEY` больше не используются — если остались
+от ssh-схемы, удалить.
 
-Опционально: на `prod` включить **required reviewers** — тогда выкат ждёт
-подтверждения в интерфейсе GitHub.
+Deploy key репозитория (Фаза 3.1) **остаётся** — им ходит `git pull` внутри
+выката.
 
-### 7.3 Проверка
+Старый OVH-стенд, если остаётся жить, получает свой раннер с меткой `staging` и
+environment `staging` с `infra/docker-compose.staging.yml`.
+
+Настоятельно: на `prod` включить **required reviewers**. Self-hosted раннер
+выполняет содержимое workflow от `deploy`, а `deploy` в группе `docker` — то
+есть право пушить в `main` равно праву выполнить что угодно на боевом сервере.
+Апрув на выкат — единственный барьер в этой цепочке.
+
+### 7.3 Требования к исходящему трафику
+
+Единственное, что нужно раннеру от сети — **исходящий** доступ. За корпоративным
+фильтром проверить заранее:
+
+- по 443: `github.com`, `api.github.com`, `*.actions.githubusercontent.com`,
+  `codeload.github.com`, `objects.githubusercontent.com`
+- по 22: `github.com` — для `git pull`
+
+```bash
+ssh -T git@github.com
+```
+
+Если исходящий 22 режут, GitHub держит SSH на 443 — лечится одной строкой у
+`deploy`:
+
+```bash
+printf 'Host github.com\n  Hostname ssh.github.com\n  Port 443\n' >> /home/deploy/.ssh/config
+```
+
+### 7.4 Проверка
 
 Actions → CI / CD → Run workflow → `prod`. Первый шаг напечатает выбранное
-окружение и compose-файл; при неверных переменных упадёт, не трогая сервер.
+окружение, compose-файл и путь; при неверных переменных упадёт, не трогая
+сервер.
+
+Job висит в очереди с *Waiting for a runner* — не совпала метка раннера с именем
+environment.
+
+### 7.5 Снос раннера
+
+Порядок обратный, просто удалить каталог недостаточно — в репе останется висеть
+мёртвый offline-раннер:
+
+```bash
+sudo ./svc.sh stop && sudo ./svc.sh uninstall
+```
+
+```bash
+./config.sh remove --token <новый токен со страницы Runners>
+```
 
 ---
 
