@@ -29,7 +29,7 @@ Group=deploy
 # means "carry on if the file does not exist", so the unit works before it is
 # created. Example contents:
 #   MAGG_RCLONE_REMOTE=r2:magguarantee-backups-prod
-#   MAGG_KEEP_DAYS=7
+#   MAGG_KEEP_DAYS=3
 #   MAGG_HEARTBEAT_URL=https://status.magtrans.eu/api/push/xxxxx
 EnvironmentFile=-/opt/magguarantee/backup.conf
 
