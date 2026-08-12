@@ -302,10 +302,19 @@ export class MailService implements IMailService {
    * plain-text fallback and ships both via the provider. Threads into the same
    * `wniosek-<nrZgl>` Gmail conversation as the other claim emails (no-op under
    * Mailhog).
+   *
+   * The ONLY template that carries a `Reply-To`. Every other email leaves it
+   * unset and therefore replies to the unattended no-reply group, which bounces
+   * them. Here Maksim's reply is load-bearing — a pracownik screenshots it and
+   * uploads it as `AUTORYZACJA_MAKSIMA` to clear the gate — so `replyTo` points
+   * at that pracownik's own mailbox (resolved by the caller from
+   * `Claim.verifiedById`). When it cannot be resolved the header is omitted and
+   * the reply bounces: a bounce Maksim can see beats a reply nobody reads.
    */
   async sendMaksimConfirmationRequest(
     email: string,
     props: MaksimConfirmationRequestProps,
+    replyTo?: string | null,
   ): Promise<void> {
     const subject = `Potwierdzenie autoryzacji: ${props.nrZgl}`;
     const html = await render(MaksimConfirmationRequestEmail(props));
@@ -317,6 +326,7 @@ export class MailService implements IMailService {
       text,
       template: 'maksim-confirmation-request',
       data: { nrZgl: props.nrZgl },
+      ...(replyTo ? { replyTo } : {}),
       threadKey: `wniosek-${props.nrZgl}`,
       logMsg: 'maksim confirmation request sent',
       logExtra: { nrZgl: props.nrZgl },
@@ -326,10 +336,16 @@ export class MailService implements IMailService {
   enqueueMaksimConfirmationRequest(
     email: string,
     props: MaksimConfirmationRequestProps,
+    replyTo?: string | null,
   ): Promise<void> {
     return this._enqueueOr(
-      { template: 'maksim-confirmation-request', email, props },
-      () => this.sendMaksimConfirmationRequest(email, props),
+      {
+        template: 'maksim-confirmation-request',
+        email,
+        props,
+        ...(replyTo ? { replyTo } : {}),
+      },
+      () => this.sendMaksimConfirmationRequest(email, props, replyTo),
     );
   }
 
@@ -431,6 +447,8 @@ export class MailService implements IMailService {
     text: string;
     template: string;
     data?: Record<string, unknown>;
+    /** See `SendMailArgs.replyTo` — set by `maksim-confirmation-request` only. */
+    replyTo?: string | null;
     threadKey?: string;
     logMsg: string;
     logExtra?: Record<string, unknown>;
@@ -448,8 +466,17 @@ export class MailService implements IMailService {
       const result = await this.provider.send({
         to: opts.to,
         subject: opts.subject,
-        text: opts.text,
+        // Plain-text mirror of the HTML footer's reply policy, appended from
+        // this single choke point rather than in all ~20 text builders. Keyed
+        // on `replyTo` for the same reason the layout keys its footer on
+        // `replyExpected`: a Reply-To IS the statement that replies are wanted.
+        text: `${opts.text}\n\n—\n${
+          opts.replyTo
+            ? 'Odpowiedz na tę wiadomość — odpowiedź trafi bezpośrednio do pracownika prowadzącego ten wniosek.'
+            : 'Nie odpowiadaj na tę wiadomość — skrzynka nie jest obsługiwana. Wszystko załatwisz w systemie MAGGuarantee.'
+        }`,
         html: opts.html,
+        ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
         gmailThreadId: thread.gmailThreadId,
         inReplyToMessageId: thread.inReplyToMessageId,
       });

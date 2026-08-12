@@ -1541,6 +1541,15 @@ export class ClaimsService {
    * «Korekty weryfikatora» diff. Date-only fields are rendered as dates (not
    * datetime — avoids a phantom "02:00" from the timezone offset). Deeplink to
    * the employee claim page; recipient `MAKSIM_EMAIL`.
+   *
+   * This is the ONE email in the system that sets `Reply-To` — at the pracownik
+   * who armed the gate (`row.verifiedById`). Rationale: `GMAIL_FROM` is an
+   * unattended no-reply group that rejects inbound post, yet Maksim's reply is
+   * load-bearing (a pracownik screenshots it and uploads it as
+   * `AUTORYZACJA_MAKSIMA` to unblock the decision). Pointing the reply at the
+   * verifier keeps that one exchange person-to-person instead of dropping it
+   * into a mailbox nobody reads. Unresolvable verifier ⇒ no header, and the
+   * reply bounces visibly rather than vanishing.
    */
   private async _dispatchMaksimConfirmationEmail(row: ClaimRow): Promise<void> {
     if (!this.mailService) {
@@ -1558,41 +1567,70 @@ export class ClaimsService {
       'maksim.siankevich@magtrans.eu';
     const carrierName = await this._resolveCarrierDisplayName(row.carrierId);
     const deeplink = `${appUrl.replace(/\/$/, '')}/employee/claims/${encodeURIComponent(row.nrZgl)}`;
+    const replyTo = await this._resolveVerifierReplyTo(row.verifiedById);
 
     // Reuse the same diff builder as the manual authorization email.
     const korekty = this._buildAuthorizationKorekty(row);
 
-    await this.mailService.enqueueMaksimConfirmationRequest(maksimEmail, {
-      nrZgl: row.nrZgl,
-      carrierName,
-      vehiclePlate: row.vehiclePlateSnapshot,
-      // Amounts pre-formatted here so the template stays pure. `paymentEur` is
-      // the CURRENT km-calc output — i.e. post-correction, which is exactly the
-      // figure Maksim is being asked to authorize.
-      doplata: row.paymentEur.toFixed(2),
-      prog: getAuthThreshold(row.drivenDays).toFixed(2),
-      dniWTrasie: row.drivenDays.toFixed(2),
-      // «Okno godzin» — the existing time window (no new "hours" field).
-      godzinyFrom: row.timeFrom,
-      godzinyTo: row.timeTo,
-      // Odjazd: zgłoszony (date) → faktyczny (date). Rendered as dates so a
-      // date-only `plannedReturnAt` / a `@db.Date` never shows "02:00".
-      odjazdPlan: row.delegationDepartureAt
-        ? toDateString(row.delegationDepartureAt)
-        : null,
-      odjazdFakt: row.delegationActualDepartureAt
-        ? toDateString(row.delegationActualDepartureAt)
-        : null,
-      // Zjazd: planowany → faktyczny.
-      zjazdPlan: row.delegationPlannedReturnAt
-        ? toDateString(row.delegationPlannedReturnAt)
-        : null,
-      zjazdFakt: row.delegationActualReturnAt
-        ? toDateString(row.delegationActualReturnAt)
-        : null,
-      deeplink,
-      ...(korekty.length > 0 ? { korekty } : {}),
+    await this.mailService.enqueueMaksimConfirmationRequest(
+      maksimEmail,
+      {
+        nrZgl: row.nrZgl,
+        carrierName,
+        vehiclePlate: row.vehiclePlateSnapshot,
+        // Amounts pre-formatted here so the template stays pure. `paymentEur`
+        // is the CURRENT km-calc output — i.e. post-correction, which is
+        // exactly the figure Maksim is being asked to authorize.
+        doplata: row.paymentEur.toFixed(2),
+        prog: getAuthThreshold(row.drivenDays).toFixed(2),
+        dniWTrasie: row.drivenDays.toFixed(2),
+        // «Okno godzin» — the existing time window (no new "hours" field).
+        godzinyFrom: row.timeFrom,
+        godzinyTo: row.timeTo,
+        // Odjazd: zgłoszony (date) → faktyczny (date). Rendered as dates so a
+        // date-only `plannedReturnAt` / a `@db.Date` never shows "02:00".
+        odjazdPlan: row.delegationDepartureAt
+          ? toDateString(row.delegationDepartureAt)
+          : null,
+        odjazdFakt: row.delegationActualDepartureAt
+          ? toDateString(row.delegationActualDepartureAt)
+          : null,
+        // Zjazd: planowany → faktyczny.
+        zjazdPlan: row.delegationPlannedReturnAt
+          ? toDateString(row.delegationPlannedReturnAt)
+          : null,
+        zjazdFakt: row.delegationActualReturnAt
+          ? toDateString(row.delegationActualReturnAt)
+          : null,
+        deeplink,
+        ...(korekty.length > 0 ? { korekty } : {}),
+      },
+      replyTo,
+    );
+  }
+
+  /**
+   * Resolves the `Reply-To` for the Maksim confirmation email: the mailbox of
+   * the pracownik whose «Zapisz weryfikację» armed the gate. Returns `null` on
+   * a missing / inactive / soft-deleted verifier (and on a null `verifiedById`,
+   * which the gate makes impossible but the type allows) — the caller then
+   * omits the header and Maksim's reply bounces off the no-reply group, which
+   * is loud and therefore recoverable.
+   *
+   * Root client, not the ambient tx — same reason as
+   * `_resolveCarrierDisplayName`: this runs fire-and-forget after commit.
+   */
+  private async _resolveVerifierReplyTo(
+    verifiedById: string | null,
+  ): Promise<string | null> {
+    if (!verifiedById) return null;
+    const user = await this.prisma.client.user.findFirst({
+      where: { id: verifiedById, active: true, deletedAt: null },
+      select: { email: true },
     });
+    return user?.email && isValidEmail(user.email)
+      ? user.email.toLowerCase()
+      : null;
   }
 
   /**

@@ -158,8 +158,9 @@ Mailhog уходит. Заводим:
 - Google Cloud Project + Gmail API enabled.
 - OAuth consent screen **Internal** + **Publish**, scope `gmail.send`.
 - OAuth client ID (Web app) → `client_id` + `client_secret`.
-- Технический ящик `wnioski@magtrans.eu` через Workspace Admin (нужны admin-права на домен) — от его имени получаем refresh token (`npm run gmail:token`).
-- `GMAIL_OAUTH_CLIENT_ID`, `GMAIL_OAUTH_CLIENT_SECRET`, `GMAIL_OAUTH_REFRESH_TOKEN`, `GMAIL_FROM` в `.env`.
+- Refresh token от **личного ящика руководителя** (`npm run gmail:token`) — отдельный технический пользователь Workspace НЕ заводится.
+- Google Group `no-reply@magtrans.eu`, подтверждённая как send-as этого ящика; в группе состоит только владелец токена (Owner, доставка «Без писем»), публикация закрыта для всех, кроме менеджеров. Канал односторонний — см. [16 §Односторонний канал](16-jobs-and-integrations.md#односторонний-канал--no-reply-google-group).
+- `GMAIL_OAUTH_CLIENT_ID`, `GMAIL_OAUTH_CLIENT_SECRET`, `GMAIL_OAUTH_REFRESH_TOKEN`, `GMAIL_FROM` (= адрес группы) в `.env`.
 
 Альтернатива (если Google слишком долго) — Brevo / Resend / SendGrid с обычным SMTP. Менее «нативно» (нет threading через In-Reply-To из коробки), но работает за 15 минут.
 
@@ -334,7 +335,8 @@ Mailhog уходит. Заводим:
 - [ ] Включён Gmail API.
 - [ ] OAuth consent screen: User type **Internal**, scope `https://www.googleapis.com/auth/gmail.send`, статус **Publish** (иначе refresh token протухает за 7 дней).
 - [ ] Создан OAuth client ID (**Web application**) с redirect `http://localhost:53682/oauth2callback`; получены `client_id` + `client_secret`.
-- [ ] Технический email `wnioski@magtrans.eu` создан; от его имени получен refresh token (`npm run gmail:token`).
+- [ ] Refresh token получен от личного ящика руководителя (`npm run gmail:token`).
+- [ ] Группа `no-reply@magtrans.eu` создана, подтверждена как send-as этого ящика; публикация только для менеджеров, архив включён, в составе — один владелец токена с доставкой «Без писем».
 - [ ] (Опц.) Google OAuth credentials для SSO внутренних сотрудников.
 
 > Gmail API и все внешние интеграции (VIES, Biała Lista, info-car.pl, S3) — это **исходящий** HTTPS-трафик из api-контейнера. Caddy в этом не участвует, ничего настраивать не нужно. Контейнер выходит в интернет через Docker bridge → host → NAT.
@@ -367,7 +369,7 @@ Mailhog уходит. Заводим:
   GMAIL_OAUTH_CLIENT_ID=...
   GMAIL_OAUTH_CLIENT_SECRET=...
   GMAIL_OAUTH_REFRESH_TOKEN=...
-  GMAIL_FROM=wnioski@magtrans.eu
+  GMAIL_FROM=no-reply@magtrans.eu
 
   # S3 (Cloudflare R2 или Hetzner Object Storage)
   S3_ENDPOINT=https://...

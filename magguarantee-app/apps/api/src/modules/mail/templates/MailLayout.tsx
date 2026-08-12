@@ -7,7 +7,9 @@
  *   TitleBlock  — red overline → H1 (doc number / title) → optional status badge.
  *   children    — data sections / amount panels / paragraphs (block-level <tr>s).
  *   Cta + Note  — one red button + one line of explanation (both optional).
- *   Footer      — company line + "wygenerowana automatycznie" on a grey strip.
+ *   Footer      — company line, "wygenerowana automatycznie", and the reply
+ *                 policy (no-reply by default; `replyExpected` flips it) on a
+ *                 grey strip.
  *
  * We render the shell (doctype, <head>, preheader) with @react-email primitives
  * and hand-write every table inside so the markup is byte-faithful to the
@@ -59,6 +61,13 @@ export interface MailLayoutProps {
   cta?: { href: string; label: string };
   /** One line under the CTA (or standalone) explaining what happens next. */
   note?: React.ReactNode;
+  /**
+   * Set ONLY by `maksim-confirmation-request`, the one email whose reply is
+   * part of the flow (it carries a `Reply-To` at the pracownik who armed the
+   * gate). Everywhere else the default stands: the sending address is an
+   * unattended no-reply group, and the footer says so.
+   */
+  replyExpected?: boolean;
   /** Data sections / panels / paragraphs — each a block-level <tr>. */
   children: React.ReactNode;
 }
@@ -70,6 +79,7 @@ export function MailLayout({
   badge,
   cta,
   note,
+  replyExpected = false,
   children,
 }: MailLayoutProps): React.ReactElement {
   return (
@@ -112,7 +122,7 @@ export function MailLayout({
                     {children}
                     {cta ? <Cta href={cta.href} label={cta.label} /> : null}
                     {note ? <Note>{note}</Note> : null}
-                    <Footer />
+                    <Footer replyExpected={replyExpected} />
                   </tbody>
                 </table>
               </td>
@@ -516,7 +526,7 @@ export function Note({ children }: { children: React.ReactNode }): React.ReactEl
 
 // ── Footer ──────────────────────────────────────────────────────────────────
 
-function Footer(): React.ReactElement {
+function Footer({ replyExpected }: { replyExpected: boolean }): React.ReactElement {
   return (
     <tr>
       <td
@@ -528,9 +538,20 @@ function Footer(): React.ReactElement {
         }}
       >
         <p style={{ ...footerStyle, margin: '0 0 4px 0' }}>{FOOTER_COMPANY}</p>
-        <p style={footerStyle}>
+        <p style={{ ...footerStyle, margin: '0 0 4px 0' }}>
           Wiadomość wygenerowana automatycznie przez system MAGGuarantee. Jeśli nie
           spodziewałeś się tej wiadomości, zignoruj ją.
+        </p>
+        {/*
+          The sending address is an unattended no-reply group that rejects
+          inbound mail — a reply bounces. Say so, so nobody writes into the void
+          expecting an answer; every action lives in the app instead. The one
+          email that DOES want a reply flips this and points at its Reply-To.
+        */}
+        <p style={{ ...footerStyle, fontWeight: 600 }}>
+          {replyExpected
+            ? 'Odpowiedz na tę wiadomość — odpowiedź trafi bezpośrednio do pracownika prowadzącego ten wniosek.'
+            : 'Nie odpowiadaj na tę wiadomość — skrzynka nie jest obsługiwana. Wszystko załatwisz w systemie MAGGuarantee.'}
         </p>
       </td>
     </tr>

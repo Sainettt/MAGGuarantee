@@ -105,6 +105,13 @@ export interface MaksimConfirmationRequestEmailJob {
   template: 'maksim-confirmation-request';
   email: string;
   props: MaksimConfirmationRequestProps;
+  /**
+   * Mailbox of the pracownik who armed the gate (`Claim.verifiedById`) — the
+   * only `Reply-To` in the whole system, because only here is the reply part of
+   * the flow. Absent when the verifier could not be resolved. See
+   * `MailService.sendMaksimConfirmationRequest`.
+   */
+  replyTo?: string;
 }
 
 /**

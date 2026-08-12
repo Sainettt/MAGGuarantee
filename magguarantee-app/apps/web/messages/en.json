@@ -1036,6 +1036,23 @@
       "dateFrom": "Date from",
       "dateTo": "Date to"
     },
+    "targetTypes": {
+      "Claim": "Claim",
+      "Delegation": "Trip",
+      "Carrier": "Carrier",
+      "CarrierAttachment": "Carrier attachment",
+      "User": "User",
+      "Team": "Leading team",
+      "Vehicle": "Vehicle",
+      "VehicleAttachment": "Vehicle attachment",
+      "Trailer": "Trailer",
+      "TrailerAttachment": "Trailer attachment",
+      "TrailerType": "Trailer type",
+      "Driver": "Driver",
+      "DriverAttachment": "Driver attachment",
+      "MonthlyLimit": "Monthly limit",
+      "MailJob": "Email message"
+    },
     "columns": {
       "createdAt": "When",
       "actor": "User",

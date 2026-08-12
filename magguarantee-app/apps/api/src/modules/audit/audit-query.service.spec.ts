@@ -117,6 +117,38 @@ describe('AuditQueryService.list — filter forwarding', () => {
     );
   });
 
+  it('widens date-only bounds: `from` → 00:00:00.000Z, `to` → 23:59:59.999Z', async () => {
+    const capture: { filters?: AuditListFilters } = {};
+    const svc = new AuditQueryService(
+      makeRepo({ rows: [makeRow()], capture }),
+    );
+
+    // `<input type="date">` sends bare `YYYY-MM-DD`. Without widening `to`,
+    // the range would be `[00:00, 00:00]` and a single-day filter (from = to)
+    // could never match anything.
+    await svc.list({ from: '2026-05-15', to: '2026-05-15', limit: 50 });
+
+    expect(capture.filters?.from?.toISOString()).toBe(
+      '2026-05-15T00:00:00.000Z',
+    );
+    expect(capture.filters?.to?.toISOString()).toBe(
+      '2026-05-15T23:59:59.999Z',
+    );
+  });
+
+  it('leaves an explicit datetime bound untouched', async () => {
+    const capture: { filters?: AuditListFilters } = {};
+    const svc = new AuditQueryService(
+      makeRepo({ rows: [makeRow()], capture }),
+    );
+
+    await svc.list({ to: '2026-05-15T09:30:00.000Z', limit: 50 });
+
+    expect(capture.filters?.to?.toISOString()).toBe(
+      '2026-05-15T09:30:00.000Z',
+    );
+  });
+
   it('rejects an unparseable `from` value with 400', async () => {
     const svc = new AuditQueryService(makeRepo({}));
     await expect(
