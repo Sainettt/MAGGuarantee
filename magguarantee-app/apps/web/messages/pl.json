@@ -620,7 +620,7 @@
       "phone": "Telefon",
       "phone2": "Telefon (drugi)",
       "email": "E-mail",
-      "idDocumentNumber": "Nr dokumentu tożsamości",
+      "idDocumentNumber": "Nr prawa jazdy",
       "licenseExpiry": "Ważność prawa jazdy",
       "nationality": "Narodowość",
       "languages": "Języki komunikacji",
@@ -1367,7 +1367,7 @@
       "columns": {
         "name": "Imię i nazwisko",
         "phone": "Telefon",
-        "idDocument": "Nr dokumentu tożsamości",
+        "idDocument": "Nr prawa jazdy",
         "active": "Status"
       }
     },
@@ -1914,7 +1914,7 @@
         "columns": {
           "name": "Imię i nazwisko",
           "phone": "Telefon",
-          "idDocument": "Nr dokumentu tożsamości",
+          "idDocument": "Nr prawa jazdy",
           "status": "Status"
         }
       },

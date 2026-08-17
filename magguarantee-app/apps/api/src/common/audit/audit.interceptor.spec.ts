@@ -316,7 +316,7 @@ describe('AuditInterceptor (pre-Phase-4.4 ambient-tx variant)', () => {
     expect(logs[0]?.targetKey).toBeUndefined();
   });
 
-  it('reads ip from x-forwarded-for when present', async () => {
+  it('ignores a hand-written X-Forwarded-For and records req.ip', async () => {
     const { writer, logs } = makeAudit();
     const fp = makePrisma();
     const config: AuditConfig = { action: 'ping' };
@@ -327,15 +327,35 @@ describe('AuditInterceptor (pre-Phase-4.4 ambient-tx variant)', () => {
     );
     const ctx = makeCtx({
       user: { sub: 'u', role: 'admin' },
+      // Leftmost entry is whatever the sender chose to put there. An earlier
+      // implementation read exactly this value, so a `curl -H 'X-Forwarded-For:
+      // 203.0.113.5'` landed a forged address in the audit log. Express derives
+      // req.ip from the socket peer walking back TRUST_PROXY_HOPS hops, so the
+      // forgery must lose. See common/utils/client-ip.ts.
       headers: { 'x-forwarded-for': '203.0.113.5, 10.0.0.1' },
-      ip: '127.0.0.1',
+      ip: '198.51.100.9',
     });
     await lastValueFrom(interceptor.intercept(ctx, makeNext(of({}))));
-    // Actor's ipAddress reflects the X-Forwarded-For first hop.
-    expect(logs[0]?.actor).toMatchObject({ ipAddress: '203.0.113.5' });
+    expect(logs[0]?.actor).toMatchObject({ ipAddress: '198.51.100.9' });
   });
 
-  it('falls back to req.ip when no x-forwarded-for', async () => {
+  it('omits ipAddress from the actor when the request has no address', async () => {
+    const { writer, logs } = makeAudit();
+    const fp = makePrisma();
+    const config: AuditConfig = { action: 'ping' };
+    const interceptor = new AuditInterceptor(
+      makeReflector(config),
+      writer,
+      fp.prisma,
+    );
+    const ctx = makeCtx({ user: { sub: 'u', role: 'admin' }, headers: {} });
+    await lastValueFrom(interceptor.intercept(ctx, makeNext(of({}))));
+    // `_resolveActor` drops the key entirely rather than sending null; the
+    // writer maps an absent ipAddress to a NULL column.
+    expect(logs[0]?.actor).not.toHaveProperty('ipAddress');
+  });
+
+  it('records req.ip when no proxy headers are present', async () => {
     const { writer, logs } = makeAudit();
     const fp = makePrisma();
     const config: AuditConfig = { action: 'ping' };

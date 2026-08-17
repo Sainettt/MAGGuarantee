@@ -44,7 +44,7 @@ export interface AuditContextStore {
   tx?: Prisma.TransactionClient;
   /** Identity of the actor that triggered the request. */
   actor: AuditActor;
-  /** Client IP — already extracted from `x-forwarded-for` / `req.ip`. */
+  /** Client IP — already resolved via `common/utils/client-ip.ts` (`req.ip`). */
   ipAddress: string | null;
   /**
    * Optional pre-mutation snapshot the service captures right before its

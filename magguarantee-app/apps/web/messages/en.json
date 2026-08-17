@@ -620,7 +620,7 @@
       "phone": "Phone",
       "phone2": "Phone (secondary)",
       "email": "E-mail",
-      "idDocumentNumber": "Identity document number",
+      "idDocumentNumber": "Driver's license number",
       "licenseExpiry": "License expiry",
       "nationality": "Nationality",
       "languages": "Spoken languages",
@@ -1367,7 +1367,7 @@
       "columns": {
         "name": "Full name",
         "phone": "Phone",
-        "idDocument": "Identity document number",
+        "idDocument": "Driver's license number",
         "active": "Status"
       }
     },
@@ -1914,7 +1914,7 @@
         "columns": {
           "name": "Full name",
           "phone": "Phone",
-          "idDocument": "Identity document number",
+          "idDocument": "Driver's license number",
           "status": "Status"
         }
       },

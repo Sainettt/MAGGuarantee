@@ -17,6 +17,27 @@ export const envSchema = z.object({
   REDIS_URL: z.string().url(),
   WEB_URL: z.string().url().default('http://localhost:3000'),
 
+  // ── Reverse-proxy hop count ────────────────────────────
+  // Express `trust proxy`. Says how many proxies sit between the client and
+  // this process, which decides WHICH entry of `X-Forwarded-For` becomes
+  // `req.ip` — and therefore the address written to the audit log and used as
+  // the ThrottlerGuard bucket key.
+  //
+  //   1 = dev / staging: Caddy is the only proxy.
+  //   2 = production: the box sits behind the MAGTRANS corporate nginx, so the
+  //       chain is browser → nginx → Caddy → api.
+  //
+  // Set too LOW and every request is attributed to the nearest proxy: one
+  // shared rate-limit bucket for all users and a useless audit trail. Set too
+  // HIGH and a client can forge its own address by sending an X-Forwarded-For
+  // header of its own, because the hop it injects is counted as trusted. Keep
+  // it exactly equal to the real number of hops.
+  //
+  // Correctness also assumes each proxy in the chain OVERWRITES the header
+  // rather than appending to a client-supplied one — see the nginx vhost
+  // requirements in docs/23-prod-deployment-runbook.md#33-caddy.
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(1),
+
   // ── Google Chat wyjazd-notification webhook ───────────
   // Incoming-webhook URL of the standing "wyjazdy" Chat space. When UNSET
   // the chat processor no-ops silently (completes the job, logs a skip) so

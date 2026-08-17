@@ -132,7 +132,7 @@ api.magtrans.eu {
 
 Прод-`.env` создаётся в `/opt/magguarantee/.env` (chmod 0600) **с нуля**, секреты **не копируются со staging**. Конкретно:
 
-- `POSTGRES_PASSWORD` — новый через `openssl rand -base64 32`
+- `POSTGRES_PASSWORD` — новый через `openssl rand -hex 32` (**только hex**: base64 даёт `/` и `+`, они ломают разбор `DATABASE_URL` — Prisma падает с `P1013: invalid port number`)
 - `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` — два новых через `openssl rand -base64 48`
 - `WEB_URL=https://app.magtrans.eu`
 - `NEXT_PUBLIC_API_URL=https://api.magtrans.eu`

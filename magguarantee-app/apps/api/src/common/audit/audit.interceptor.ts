@@ -16,6 +16,7 @@ import type {
   AuditEntryInput,
 } from '../../modules/audit/audit.types';
 import { PrismaService } from '../../modules/prisma/prisma.service';
+import { clientIp } from '../utils/client-ip';
 import { AuditContext } from './audit-context';
 import { AUDIT_METADATA_KEY } from './audit.constants';
 import type { AuditableRequest, AuditConfig } from './audit.decorator';
@@ -238,12 +239,7 @@ export class AuditInterceptor implements NestInterceptor {
   }
 
   private _extractIp(req: AuditableRequest): string | null {
-    const xff = req.headers?.['x-forwarded-for'];
-    const xffStr = Array.isArray(xff) ? xff[0] : xff;
-    if (typeof xffStr === 'string' && xffStr.length > 0) {
-      return xffStr.split(',')[0]?.trim() || null;
-    }
-    return typeof req.ip === 'string' && req.ip.length > 0 ? req.ip : null;
+    return clientIp(req) ?? null;
   }
 
   private _extractUserAgent(req: AuditableRequest): string | null {

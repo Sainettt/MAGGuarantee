@@ -19,10 +19,16 @@ services:
     image: caddy:2-alpine
     container_name: caddy
     restart: unless-stopped
+    # PROD (Caddyfile.prod, behind the corporate nginx): only :80 is used —
+    # nginx terminates TLS and forwards over HTTP, so :443 never receives a
+    # connection and HTTP/3 is dead weight (nginx does not speak h3 upstream).
+    # Harmless to leave mapped; ufw is what actually restricts access, and it
+    # should open :80 to the nginx address only. See
+    # docs/23-prod-deployment-runbook.md §2.2.
     ports:
       - '80:80'
       - '443:443'
-      - '443:443/udp' # HTTP/3 (QUIC)
+      - '443:443/udp' # HTTP/3 (QUIC) — staging only
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./data:/data        # TLS certificates from Let's Encrypt

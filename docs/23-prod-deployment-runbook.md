@@ -12,7 +12,7 @@
 | Что | Зачем | Статус |
 |---|---|---|
 | VPS (4 vCPU / 8 GB / Ubuntu 24.04) | сам сервер | 🆕 нет |
-| Домен + доступ к DNS | HTTPS, ссылки в письмах | 🆕 нет |
+| Vhost `mymag.magtrans.eu` на корпоративном nginx | HTTPS, ссылки в письмах | 🆕 нет |
 | Google Cloud проект **фирмы** | отправка почты через Gmail API | 🆕 нет |
 | Ящик `wnioski@magtrans.eu` в Workspace | от его имени уходят письма | 🆕 нет |
 | Google-аккаунт для бэкапов | offsite-копии через rclone | ✅ есть |
@@ -25,24 +25,51 @@ DNS-распространение занимают время, а без них
 
 ## Фаза 1. Внешние сервисы (до сервера)
 
-### 1.1 Домен и DNS
+### 1.1 Публикация домена (через корпоративный nginx)
 
-Одна A-запись на IP будущего VPS:
+Прод-сервер стоит **внутри сети MAGTRANS**, а не в интернете. Публичный `:443`
+занят корпоративным nginx, который уже отдаёт `magtrans.eu`, `eod`, `logikladen`
+как имённые vhost'ы. Пробросить `:443` на наш сервер нельзя — он один. Поэтому
+`mymag.magtrans.eu` заводится **ещё одним vhost'ом на том же nginx**, а нам он
+проксирует трафик внутрь:
 
 ```
-app.magtrans.eu   →  <IP прод-VPS>
+браузер ──HTTPS──> nginx MAGTRANS ──HTTP──> наш сервер (Caddy) ──> api / web
 ```
 
-Одного домена достаточно: web и api живут на одном origin, Caddy разводит их по
-пути (`/api/*` → api, остальное → web). Так уже работает на стенде, куки и CORS
-проверены в этой конфигурации.
+Плюс схемы: снаружи обычный `:443` без порта в адресе, сертификат выпускает и
+продлевает nginx — на нашей стороне ACME не нужен вообще.
 
-TTL поставить `300` на время запуска, потом поднять до `3600`.
+Что запросить у сетевого администратора (Jakub Klepacz):
 
-> Если очень хочется `app.` + `api.` раздельными поддоменами — так тоже можно
-> (общий родительский домен, куки остаются same-site), но эта схема ни разу не
-> прогонялась. Тогда обязательно проверить руками логин **и** обновление токена
-> до того, как пускать людей.
+1. Vhost `mymag.magtrans.eu` → внутренний IP прод-сервера, порт **80** (HTTP).
+   TLS терминирует nginx; шифровать внутренний участок повторно незачем.
+2. **На каком внешнем порту** будет доступен vhost. Если не `443`, порт придётся
+   вписать в три URL-переменные (§4) — и сделать это **до** сборки web-образа.
+3. IP, **с которого** nginx приходит к нам, — для `trusted_proxies` (§3.3) и
+   файрвола (§2.2).
+4. Обязательные директивы в vhost'е, без них приложение поедет:
+
+```nginx
+client_max_body_size 25M;                       # сканы и фото; дефолт 1M мало
+proxy_set_header Host              $host;
+proxy_set_header X-Forwarded-For   $remote_addr; # НЕ $proxy_add_x_forwarded_for
+proxy_set_header X-Forwarded-Proto https;
+proxy_read_timeout 120s;                         # экспорт отчётов
+```
+
+> `X-Forwarded-For $remote_addr` — не придирка. `$proxy_add_x_forwarded_for`
+> **дописывает** к заголовку, присланному клиентом, то есть кто угодно может
+> подставить себе чужой IP в наш audit-log и обойти rate-limit. Перезапись
+> закрывает это и делает `TRUST_PROXY_HOPS=2` корректным (§4).
+
+DNS-запись `mymag.magtrans.eu` заводит MAGTRANS в своей зоне, на публичный IP
+компании. Отдельная A-запись на наш сервер не нужна и не должна существовать.
+
+> Раздельные `app.` + `api.` поддомены в этой схеме тоже возможны, но это два
+> vhost'а вместо одного и CORS вместо single-origin. Не усложняем: web и api
+> живут на одном origin, Caddy разводит их по пути (`/api/*` → api, остальное →
+> web). Так уже работает на стенде, куки проверены именно в этой конфигурации.
 
 ### 1.2 Google Cloud проект фирмы
 
@@ -93,8 +120,16 @@ apt update && apt upgrade -y && apt install -y ufw fail2ban chrony rclone unatte
 ```
 
 ```bash
-ufw allow 22 && ufw allow 80 && ufw allow 443 && ufw --force enable
+ufw allow 22 && ufw allow from <IP_NGINX> to any port 80 && ufw --force enable
 ```
+
+🆕 Сервер внутри корпоративной сети, поэтому `:80` открывается **только для
+nginx'а**, а не для всех — иначе к приложению можно ходить напрямую в обход
+vhost'а, и тогда `X-Forwarded-For` подставляет сам клиент. Публичный `:443`
+здесь не слушается вообще: TLS терминирует nginx (§1.1).
+
+Пока IP не известен, поставить `ufw allow 80` и сузить сразу после первого
+успешного запроса — адрес виден в логах Caddy или в `tcpdump` (§3.3).
 
 `chrony` обязателен — на кривом времени ломаются JWT и audit-лог.
 
@@ -155,39 +190,49 @@ git clone git@github.com:Sainettt/MAGGuarantee.git /opt/magguarantee/src
 cp -r /opt/magguarantee/src/infra/caddy/* /opt/caddy/
 ```
 
-🆕 В `/opt/caddy/Caddyfile` заменить хост стенда на боевой домен и подставить
-свой email для Let's Encrypt:
+🆕 Прод берёт **не** `Caddyfile` (это конфиг стенда — публичный, со своим
+Let's Encrypt), а `Caddyfile.prod`, рассчитанный на работу за корпоративным
+nginx:
 
-```caddy
-{
-    email admin@magtrans.eu
-}
-
-app.magtrans.eu {
-    @api path /api/*
-    handle @api {
-        reverse_proxy magguarantee-api:3001
-    }
-    handle {
-        reverse_proxy magguarantee-web:3000
-    }
-    encode gzip zstd
-    header {
-        Strict-Transport-Security "max-age=31536000; includeSubDomains"
-        X-Content-Type-Options "nosniff"
-        X-Frame-Options "DENY"
-        Referrer-Policy "strict-origin-when-cross-origin"
-        -Server
-    }
-}
+```bash
+cp /opt/caddy/Caddyfile.prod /opt/caddy/Caddyfile
 ```
 
 ```bash
 cd /opt/caddy && docker compose up -d
 ```
 
-Сертификат выпускается сам за 10–30 секунд, но только если A-запись уже
-резолвится на этот IP. Проверить: `docker compose logs -f caddy`.
+Что важно понимать про этот конфиг:
+
+- **Автоматического HTTPS нет и быть не может.** Let's Encrypt валидирует домен
+  только через публичные `:80` / `:443`, а оба держит nginx — до нас проверка не
+  дойдёт никогда. Сертификат для `mymag.magtrans.eu` выпускает и продлевает
+  MAGTRANS. Адрес сайта в конфиге поэтому `http://` — это выключает
+  автоматический TLS целиком. Менять обратно на `https://` нельзя: Caddy уйдёт
+  выпускать сертификат, не сможет и перестанет отвечать.
+- **`trusted_proxies` обязателен.** По умолчанию Caddy перезаписывает входящий
+  `X-Forwarded-For` своим значением, затирая настоящий IP клиента, который
+  проставил nginx. В `Caddyfile.prod` блок оставлен закомментированным с
+  `TODO` — раскомментировать, вписав адрес nginx'а.
+
+🆕 Узнать этот адрес: спросить у сетевого администратора либо снять с провода на
+самом сервере —
+
+```bash
+sudo tcpdump -n -i any 'tcp port 80 and tcp[tcpflags] & tcp-syn != 0'
+```
+
+и один раз открыть `https://mymag.magtrans.eu`. Source IP пакета SYN — искомое
+значение. Дальше вписать его в `trusted_proxies`, сузить `ufw` (§2.2) и
+перечитать конфиг без простоя:
+
+```bash
+docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+```
+
+> До того как `trusted_proxies` проставлен, приложение работает, но в audit-логе
+> и rate-limiter'е у всех запросов будет IP nginx'а. Не блокирует запуск —
+> блокирует сдачу: общий rate-limit на всех пользователей.
 
 ---
 
@@ -228,7 +273,8 @@ openssl rand -hex 24      # S3_SECRET_KEY
 
 | Ключ | Значение |
 |---|---|
-| `WEB_URL`, `APP_URL`, `NEXT_PUBLIC_API_URL` | `https://app.magtrans.eu` |
+| `WEB_URL`, `APP_URL`, `NEXT_PUBLIC_API_URL` | `https://mymag.magtrans.eu` — адрес, как его видит **браузер** (vhost на nginx). Если MAGTRANS опубликует не на `443`, порт входит сюда: `https://mymag.magtrans.eu:8443` |
+| `TRUST_PROXY_HOPS` | `2` — nginx + Caddy. На стенде `1`. Разбор последствий ошибки — §1.1 и `config/env.schema.ts` |
 | `API_URL` | `http://magguarantee-api:3001` — **не менять**, это адрес внутри Docker |
 | `MAIL_PROVIDER` | `gmail` |
 | `GMAIL_OAUTH_*`, `GMAIL_FROM` | из Фазы 1.3 |
@@ -448,8 +494,12 @@ sudo ./svc.sh stop && sudo ./svc.sh uninstall
 
 Идти сверху вниз, каждый пункт руками:
 
-- [ ] `https://app.magtrans.eu/health` → 200, `/ready` → 200
-- [ ] Сертификат валиден, HTTP редиректит на HTTPS
+- [ ] `https://mymag.magtrans.eu/health` → 200, `/ready` → 200
+- [ ] Сертификат валиден (выпущен nginx'ом MAGTRANS), HTTP редиректит на HTTPS
+- [ ] В `Caddyfile` раскомментирован `trusted_proxies` с реальным IP nginx'а
+- [ ] В логе api при логине с чужой машины виден **её** IP, а не адрес nginx'а —
+      проверка, что `TRUST_PROXY_HOPS` и `trusted_proxies` сошлись
+- [ ] `ufw status` — `:80` открыт только для IP nginx'а
 - [ ] `docker ps` — пять контейнеров, mailhog отсутствует, у api и web нет проброшенных портов
 - [ ] Монтирования ведут в `/opt/magguarantee/data/*`:
       `docker inspect -f '{{range .Mounts}}{{.Source}} {{end}}' magguarantee-postgres magguarantee-minio`
@@ -483,8 +533,13 @@ sudo ./svc.sh stop && sudo ./svc.sh uninstall
 Мониторинг на том же сервере, что и приложение, не сообщит о смерти этого
 сервера: умрут оба. Поэтому сначала внешний сервис — UptimeRobot или Better
 Stack, бесплатные тарифы, карта не нужна. Один монитор на
-`https://app.magtrans.eu/health`, уведомления на почту. Пять минут, закрывает
+`https://mymag.magtrans.eu/health`, уведомления на почту. Пять минут, закрывает
 главный риск.
+
+> Внешний монитор видит цепочку целиком — nginx и наш сервер. Это плюс: падение
+> корпоративного nginx для пользователя неотличимо от падения приложения, и
+> знать о нём тоже надо. Минус — по алерту не понять, чья половина легла;
+> смотреть в `docker ps` на нашем сервере.
 
 ### Uptime Kuma — детали и heartbeat
 
@@ -505,13 +560,22 @@ networks:
     external: true
 ```
 
-Блок в `/opt/caddy/Caddyfile` (плюс A-запись `status.magtrans.eu`):
+🆕 Публичного `status.magtrans.eu` не делаем: это потребовало бы ещё одного
+vhost'а на корпоративном nginx ради внутренней панели. Kuma остаётся доступной
+только изнутри — блок в `/opt/caddy/Caddyfile`, слушающий на нестандартном порту
+без домена:
 
 ```caddy
-status.magtrans.eu {
+:8080 {
     reverse_proxy uptime-kuma:3001
 }
 ```
+
+Порт открыть в `ufw` для админской подсети либо не открывать вовсе и ходить
+через SSH-туннель: `ssh -L 8080:localhost:8080 deploy@<сервер>`.
+
+> Если панель всё-таки нужна снаружи — попросить у MAGTRANS второй vhost по той
+> же схеме, что и основной (§1.1). Тогда Kuma закрыть логином, она умеет.
 
 ```bash
 cd /opt/uptime-kuma && docker compose up -d
@@ -521,16 +585,16 @@ cd /opt/uptime-kuma && docker compose up -d
 
 | Тип | Цель | Что ловит |
 |---|---|---|
-| HTTP | `https://app.magtrans.eu/health` | api жив |
-| HTTP | `https://app.magtrans.eu/ready` | база и Redis доступны |
-| HTTP | `https://app.magtrans.eu/` | web отдаёт страницы |
+| HTTP | `https://mymag.magtrans.eu/health` | api жив |
+| HTTP | `https://mymag.magtrans.eu/ready` | база и Redis доступны |
+| HTTP | `https://mymag.magtrans.eu/` | web отдаёт страницы |
 | Push | heartbeat, интервал 36 часов | **бэкап перестал ходить** |
 
 Push-монитор работает наоборот: Kuma ждёт, что к нему постучатся. Его URL идёт
 в `backup.conf`:
 
 ```bash
-echo 'MAGG_HEARTBEAT_URL=https://status.magtrans.eu/api/push/xxxxx' | sudo tee -a /opt/magguarantee/backup.conf
+echo 'MAGG_HEARTBEAT_URL=http://localhost:8080/api/push/xxxxx' | sudo tee -a /opt/magguarantee/backup.conf
 ```
 
 Скрипт дёргает его только при полном успехе. Не пришёл стук за 36 часов —

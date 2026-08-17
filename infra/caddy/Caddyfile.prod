@@ -1,0 +1,66 @@
+# Caddy config for the MAGGuarantee PRODUCTION server.
+#
+# Unlike staging (see ./Caddyfile), this box is NOT on the public internet. It
+# sits inside the MAGTRANS network behind the corporate nginx, which already
+# owns :443 and serves magtrans.eu, eod, logikladen and friends as name-based
+# vhosts. `mymag.magtrans.eu` is one more vhost there, proxied to this server.
+#
+#     browser ──HTTPS──> corporate nginx ──HTTP──> Caddy ──> api / web
+#
+# Two consequences, both deliberate:
+#
+#  1. NO automatic HTTPS here. ACME validates over the PUBLIC :80 / :443 only,
+#     and neither reaches this box — nginx holds them. The public certificate
+#     for mymag.magtrans.eu is issued and renewed by nginx, not by us. The site
+#     address below is therefore `http://`, which turns Caddy's automatic HTTPS
+#     off entirely. Do not "fix" it back to https:// — the cert request will
+#     fail and the site will stop answering.
+#
+#  2. `trusted_proxies` is mandatory (see the block below). Without it Caddy
+#     overwrites the X-Forwarded-For that nginx set, the API sees nginx's
+#     address as the client IP, and both the audit trail and per-client rate
+#     limiting quietly break.
+#
+# On the server this file is installed as /opt/caddy/Caddyfile.
+# Reload without downtime after edits:
+#   docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+
+# ⚠️ TODO(prod): uncomment and set the LAN address nginx connects FROM, then
+# reload. Until this is in place `req.ip` in the API is nginx, not the user.
+#
+# Ask Jakub for the address, or read it off the wire on this server:
+#   sudo tcpdump -n -i any 'tcp port 80 and tcp[tcpflags] & tcp-syn != 0'
+# then load https://mymag.magtrans.eu once — the source IP of the SYN is it.
+#
+# {
+#     servers {
+#         trusted_proxies static 10.0.0.0/32
+#     }
+# }
+
+http://mymag.magtrans.eu {
+    # /api/* → API container. The full path (including /api/v1/...) is
+    # preserved — Nest already mounts its routes under /api/v1, so Caddy
+    # doesn't need to rewrite anything.
+    @api path /api/*
+    handle @api {
+        reverse_proxy magguarantee-api:3001
+    }
+
+    # Everything else → web container.
+    handle {
+        reverse_proxy magguarantee-web:3000
+    }
+
+    encode gzip zstd
+
+    header {
+        # Emitted over plain HTTP here, but the browser receives it over the
+        # TLS leg that nginx terminates, so it is honoured normally.
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+}

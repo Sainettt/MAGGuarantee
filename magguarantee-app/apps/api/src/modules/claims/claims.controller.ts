@@ -39,6 +39,7 @@ import {
   CarrierOwns,
 } from '../../common/guards';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
+import { clientIp } from '../../common/utils/client-ip';
 import { CurrentUser, type AuthUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -209,7 +210,7 @@ export class ClaimsController {
     @Body(new ZodValidationPipe(UpdateClaimSchema)) dto: UpdateClaimDto,
     @Req() req: Request,
   ): Promise<ClaimDto> {
-    const ip = extractRequestIp(req);
+    const ip = clientIp(req);
     return this.claims.update(user, nrZgl, dto, ip);
   }
 
@@ -266,22 +267,3 @@ export class ClaimsController {
   }
 }
 
-/**
- * Best-effort client IP extraction. Prefers `x-forwarded-for` (first hop,
- * trimmed) when the API sits behind Caddy / nginx; falls back to Express'
- * `req.ip`. Returns `undefined` when neither is set — `AuditWriter` accepts
- * an absent ipAddress so the field stays NULL in that case.
- *
- * Mirror of `_extractIp` in `apps/api/src/common/audit/audit.interceptor.ts`
- * — kept inline rather than extracted to keep the controller's import
- * surface minimal.
- */
-function extractRequestIp(req: Request): string | undefined {
-  const xff = req.headers['x-forwarded-for'];
-  const xffStr = Array.isArray(xff) ? xff[0] : xff;
-  if (typeof xffStr === 'string' && xffStr.length > 0) {
-    const first = xffStr.split(',')[0]?.trim();
-    if (first) return first;
-  }
-  return typeof req.ip === 'string' && req.ip.length > 0 ? req.ip : undefined;
-}

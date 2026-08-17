@@ -51,6 +51,7 @@ import {
 
 import { Audit } from '../../common/audit';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
+import { clientIp } from '../../common/utils/client-ip';
 import {
   AuthService,
   type AccessOnlyToken,
@@ -311,13 +312,19 @@ export class AuthController {
     ipAddress?: string;
     userAgent?: string;
   } {
-    const xff = req.headers['x-forwarded-for'];
-    const xffStr = Array.isArray(xff) ? xff[0] : xff;
-    const ipAddress =
-      (xffStr ?? '').split(',')[0]?.trim() || req.ip || undefined;
     const ua = req.headers['user-agent'];
     return {
-      ipAddress: ipAddress || undefined,
+      // See common/utils/client-ip.ts for why this must NOT parse
+      // X-Forwarded-For by hand.
+      //
+      // Note this endpoint has an extra hop: /auth/refresh is called
+      // server-side by the web container, which forwards the original
+      // X-Forwarded-For (apps/web/middleware.ts). The socket peer is then the
+      // web container rather than Caddy, and the hop count still works out to
+      // TRUST_PROXY_HOPS — but only because `API_URL` points straight at the
+      // api container. Route that call through Caddy and a third hop appears,
+      // making req.ip resolve to nginx.
+      ipAddress: clientIp(req),
       userAgent: typeof ua === 'string' ? ua : undefined,
     };
   }

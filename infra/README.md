@@ -11,7 +11,8 @@ infra/
 ├── .env.staging.example          ← template; copy to .env and fill in secrets
 ├── caddy/
 │   ├── docker-compose.yml        ← shared reverse-proxy stack
-│   └── Caddyfile                 ← TLS + routing config
+│   ├── Caddyfile                 ← STAGING: public, own Let's Encrypt cert
+│   └── Caddyfile.prod            ← PROD: behind the corporate nginx, no ACME
 └── README.md                     ← this file
 ```
 
@@ -90,7 +91,8 @@ survives `git pull` but NOT `rm -rf src` — back it up alongside
 
 Generate real secrets and set production URLs:
 
-- `POSTGRES_PASSWORD` — `openssl rand -base64 32`
+- `POSTGRES_PASSWORD` — `openssl rand -hex 32` (**hex only** — base64 emits `/`
+  and `+`, which break the `DATABASE_URL` parse with `P1013: invalid port number`)
 - `DATABASE_URL` — paste the same password where `REPLACE_WITH_POSTGRES_PASSWORD` is
 - `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` — two different `openssl rand -base64 48`
 - `POSTGRES_DATA=/opt/magguarantee/data/postgres`
@@ -111,9 +113,15 @@ Caddy will start requesting a Let's Encrypt certificate for
 Watch logs: `docker compose logs -f caddy`. First request takes 10–30s.
 
 NOTE: web AND api share this single domain via path-based routing inside
-Caddy (`/api/*` → api container, everything else → web). When a real
-domain is registered (e.g. `*.magtrans.eu`), split the Caddyfile back
-into two `domain.com { ... }` blocks for cleaner URLs.
+Caddy (`/api/*` → api container, everything else → web). Production keeps
+the same single-origin shape — see `caddy/Caddyfile.prod`.
+
+The above applies to STAGING only. The production server sits inside the
+MAGTRANS network behind the corporate nginx, which owns the public `:443`
+and holds the certificate for `mymag.magtrans.eu`. There, Caddy runs with
+automatic HTTPS switched OFF (an `http://` site address) and needs
+`trusted_proxies` set to the nginx address, or the real client IP is lost.
+Full procedure: `docs/23-prod-deployment-runbook.md` §1.1 and §3.3.
 
 **4. Bring up the app stack:**
 
