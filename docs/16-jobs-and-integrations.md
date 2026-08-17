@@ -221,8 +221,62 @@ await this.emailQueue.add('send', {
 
 В новом стеке:
 - **Gmail API** даёт прямой контроль над `In-Reply-To` / `References` headers, что и есть RFC-стандарт thread.
-- Отправка идёт от **одного** Workspace-ящика через **OAuth 2.0** (long-lived refresh token); `From` = `GMAIL_FROM` (сам ящик или его alias). **Не** Domain-Wide Delegation — выбран least-privilege (утёкший токен шлёт как один ящик, а не как весь домен).
+- Отправка идёт от **одного** Workspace-ящика через **OAuth 2.0** (long-lived refresh token); `From` = `GMAIL_FROM` — в проде это **no-reply Google Group**, зарегистрированная как send-as этого ящика (см. [Односторонний канал](#односторонний-канал--no-reply-google-group)). **Не** Domain-Wide Delegation — выбран least-privilege (утёкший токен шлёт как один ящик, а не как весь домен).
 - Можно использовать Nodemailer + Gmail API transport, либо `googleapis` SDK напрямую.
+
+### Односторонний канал — no-reply Google Group
+
+> 🆕 Решение 2026-08-12. Заменяет исходный план «отдельный технический ящик
+> `wnioski@magtrans.eu` в Workspace».
+
+**Что решаем.** Токен принадлежит личному ящику руководителя — заводить ради
+рассылки отдельного платного пользователя Workspace не хотим, а alias складывал
+бы всю входящую почту к нему же в инбокс. Плюс по бизнесу переписка по почте
+**не предусмотрена**: каждое письмо — уведомление с кнопкой в приложение, все
+действия происходят в системе.
+
+**Как устроено.**
+
+| Слой | Решение |
+|---|---|
+| Транспорт | OAuth-токен **личного ящика руководителя** (он же владелец refresh-токена) |
+| `From` | Google Group `no-reply@magtrans.eu`, подтверждённая как send-as этого ящика |
+| Входящая почта | Группа **не принимает** посты извне → ответ отбивается bounce'ом сразу отправителю |
+| Состав группы | **только владелец токена**, роль Owner, доставка «Без писем». Членство нужно исключительно для верификации send-as; персональные уведомления сотрудники получают на свой `User.email`, читать группу некому и незачем |
+| Архив | Группа получает копию `carrier-submitted` / `internal-decision` / `reklamacja-internal-submitted` — `GMAIL_FROM` подмешивается в `internalEmails` (`claims.service._collectClaimRecipients`). Это read-only журнал в веб-интерфейсе группы, а не рабочий ящик |
+
+**Настройка группы (Google Groups):** «Кто может публиковать» = только
+владельцы/менеджеры (иначе ответы молча копятся в архиве, который никто не
+читает — хуже отбойника); история переписки (архив) **включена** — через неё же
+владелец читает код подтверждения send-as; модерация сообщений выключена.
+
+**Поддержка в коде:**
+
+- `GmailApiProvider` / `SmtpProvider` шлют заголовок `Auto-Submitted: auto-generated`
+  (RFC 3834) — гасит чужие автоответчики и out-of-office, которые иначе долбились
+  бы в группу.
+- Футер `MailLayout` печатает «Nie odpowiadaj na tę wiadomość — skrzynka nie jest
+  obsługiwana»; plain-text-двойник этой строки добавляется в единой точке
+  `MailService._send`.
+
+#### Единственное исключение — `Reply-To` у письма Максиму
+
+`maksim-confirmation-request` — **единственное** письмо, ответ на которое является
+частью процесса: Максим подтверждает доплату письмом, pracownik грузит скриншот
+его ответа как `AUTORYZACJA_MAKSIMA`, и только это снимает гейт (docs/03 §pracownik).
+Если бы этот ответ ушёл в no-reply-группу, wniosek завис бы навсегда.
+
+Поэтому именно на этом шаблоне (и только на нём) выставляется
+`Reply-To` = личный ящик того pracownik, чьё «Zapisz weryfikację» взвело гейт
+(`Claim.verifiedById`, резолвится в `claims.service._resolveVerifierReplyTo`
+через **root**-клиент — вызов идёт после коммита ambient-транзакции). Ответ
+Максима летит человеку напрямую, группа остаётся стерильной.
+
+- Верификатор не резолвится (деактивирован / удалён) ⇒ заголовок **не ставится**,
+  и ответ отбивается bounce'ом. Громкий сбой лучше тихо потерянного письма.
+- Тот же признак переключает футер: `MailLayout replyExpected` печатает
+  «Odpowiedz na tę wiadomość…», а `_send` подставляет тот же текст в plain-text.
+  Правило одно: **есть `Reply-To` ⇒ ответа ждут**.
 
 ### Setup (OAuth 2.0)
 
@@ -242,8 +296,14 @@ await this.emailQueue.add('send', {
    `GMAIL_OAUTH_CLIENT_ID=… GMAIL_OAUTH_CLIENT_SECRET=… npm run gmail:token` →
    залогиниться **как ящик-отправитель** → «Allow» → скопировать
    `GMAIL_OAUTH_REFRESH_TOKEN` в `.env`.
-4. Env: `GMAIL_OAUTH_CLIENT_ID` / `GMAIL_OAUTH_CLIENT_SECRET` /
-   `GMAIL_OAUTH_REFRESH_TOKEN` / `GMAIL_FROM`. Провайдер строит
+4. Создать группу `no-reply@magtrans.eu` и **подтвердить её как send-as**
+   ящика-отправителя: владелец ящика вступает в группу → Gmail → Настройки →
+   Аккаунты → «Отправлять письма как» → адрес группы → код подтверждения
+   приходит **на группу** (читается в архиве или по доставке) → подтвердить →
+   после этого выставить себе в группе доставку «Без писем». Без верифицированного
+   send-as Gmail молча перепишет `From` на адрес ящика.
+5. Env: `GMAIL_OAUTH_CLIENT_ID` / `GMAIL_OAUTH_CLIENT_SECRET` /
+   `GMAIL_OAUTH_REFRESH_TOKEN` / `GMAIL_FROM` (= адрес группы). Провайдер строит
    `google.auth.OAuth2` + `setCredentials({ refresh_token })` и шлёт через Gmail API.
 
 ```ts

@@ -81,7 +81,15 @@ overline темы. Никаких градиентов и цветных «ша�
    временный пароль). Варианты `ink` / `brand` / `light`.
 6. **Действие** (`Cta`) — одна красная кнопка (`<td bgcolor>` + `display:block`
    ссылка, **не картинка**) + одна строка пояснения (`Note`).
-7. **Футер** (`Footer`) — компания/адрес + «wygenerowana automatycznie».
+7. **Футер** (`Footer`) — компания/адрес, «wygenerowana automatycznie» и **политика
+   ответа**. По умолчанию — «Nie odpowiadaj na tę wiadomość — skrzynka nie jest
+   obsługiwana»: `From` = no-reply Google Group, входящее она не принимает
+   ([16 §Односторонний канал](16-jobs-and-integrations.md#односторонний-канал--no-reply-google-group)).
+   Проп `replyExpected` переключает строку на «Odpowiedz na tę wiadomość…» —
+   его выставляет **только** `maksim-confirmation-request`, единственное письмо
+   с заголовком `Reply-To`. Правило: **есть `Reply-To` ⇒ ответа ждут**. Ту же
+   строку добавляет к plain-text-версии `MailService._send` (одна точка на все
+   шаблоны).
 
 ## 5. Статусы (бейджи)
 
@@ -125,7 +133,7 @@ overline темы. Никаких градиентов и цветных «ша�
 | `carrier-submitted` | Nowy wniosek o gwarancję | `warning` Oczekuje na weryfikację | AmountPanel (kwota) | Otwórz wniosek (только staff) |
 | `carrier-decision` | Decyzja w sprawie wniosku | tone решения (`success`/`danger`) | AmountPanel (kwota, если accept) | Otwórz wniosek |
 | `internal-decision` | Decyzja w sprawie wniosku | tone решения | AmountPanel | Otwórz w MAGGuarantee |
-| `maksim-confirmation-request` | Potwierdzenie autoryzacji | `warning` Oczekuje na autoryzację | AmountPanel (dopłata, red) | Otwórz w MAGGuarantee |
+| `maksim-confirmation-request` | Potwierdzenie autoryzacji | `warning` Oczekuje na autoryzację | AmountPanel (dopłata, red) | Otwórz w MAGGuarantee + `replyExpected` (единственный) |
 | `reklamacja-internal-submitted` | Reklamacja | `warning` Reklamacja do rozpatrzenia | AmountPanel (kwota reklamacji, red) | Otwórz w MAGGuarantee |
 | `reklamacja-carrier-submitted` | Reklamacja | `warning` Reklamacja w toku | AmountPanel (kwota reklamacji, red) | Otwórz wniosek |
 | `reklamacja-carrier-decision` | Decyzja w sprawie reklamacji | по `reklamacjaResolution`: `success` Reklamacja uznana / `danger` Reklamacja odrzucona | AmountPanel (kwota do wypłaty — **только** при `UZNANA`) | Otwórz wniosek |

@@ -1036,6 +1036,23 @@
       "dateFrom": "Data od",
       "dateTo": "Data do"
     },
+    "targetTypes": {
+      "Claim": "Wniosek",
+      "Delegation": "Wyjazd",
+      "Carrier": "Przewoźnik",
+      "CarrierAttachment": "Załącznik przewoźnika",
+      "User": "Użytkownik",
+      "Team": "Zespół prowadzący",
+      "Vehicle": "Ciągnik",
+      "VehicleAttachment": "Załącznik ciągnika",
+      "Trailer": "Naczepa",
+      "TrailerAttachment": "Załącznik naczepy",
+      "TrailerType": "Typ naczepy",
+      "Driver": "Kierowca",
+      "DriverAttachment": "Załącznik kierowcy",
+      "MonthlyLimit": "Limit miesięczny",
+      "MailJob": "Wiadomość e-mail"
+    },
     "columns": {
       "createdAt": "Czas",
       "actor": "Użytkownik",

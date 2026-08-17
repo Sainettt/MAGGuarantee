@@ -34,6 +34,7 @@ export interface AuditListFilters {
   targetType?: string;
   targetKey?: string;
   userId?: string;
+  /** Case-insensitive substring of `action`, not an exact action name. */
   action?: string;
   from?: Date;
   to?: Date;
@@ -61,7 +62,13 @@ export class AuditQueryRepository {
     if (filters.targetType) where.targetType = filters.targetType;
     if (filters.targetKey) where.targetKey = filters.targetKey;
     if (filters.userId) where.userId = filters.userId;
-    if (filters.action) where.action = filters.action;
+    // `action` is the admin filter bar's free-text box — substring match,
+    // case-insensitive, same convention as the `q` search on the other
+    // listings. Exact equality would make the filter unusable: nobody types
+    // `delegation.markReturned` in full to find it.
+    if (filters.action) {
+      where.action = { contains: filters.action, mode: 'insensitive' };
+    }
     if (filters.from || filters.to) {
       const range: Record<string, Date> = {};
       if (filters.from) range.gte = filters.from;

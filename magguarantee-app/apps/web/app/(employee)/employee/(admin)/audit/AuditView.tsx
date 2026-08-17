@@ -11,6 +11,7 @@
 import { ScrollText, SearchX } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useMemo, useState } from 'react';
+import { AUDIT_TARGET_TYPES } from '@magguarantee/shared';
 import type {
   AuditFilters,
   AuditLogDto,
@@ -34,22 +35,12 @@ import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
 import { formatDateTime } from '@/lib/format/numbers';
 import { relativeTimeKey } from '@/lib/format/relative-time';
 
-// Known target types — surfaced by Phase 4.5 backend tagging conventions.
-// Keep as a static list so the dropdown is stable even when the table is
-// empty (an autocomplete-style dropdown for target types would be overkill).
-const TARGET_TYPES = [
-  'claim',
-  'user',
-  'carrier',
-  'vehicle',
-  'driver',
-  'trailer',
-  'trailerType',
-  'delegation',
-  'limits',
-  'diagnostics',
-  'auth',
-] as const;
+// Target-type options come from `AUDIT_TARGET_TYPES` in the shared package —
+// the same list the backend's `@Audit({ targetType })` tags are drawn from.
+// Do NOT re-declare them here: the filter matches `target_type` with exact,
+// case-sensitive equality, so a local lowercase copy silently matches nothing.
+// Static (not derived from the visible rows) so the dropdown stays stable even
+// when the current page is empty.
 
 export function AuditView() {
   const t = useTranslations('audit');
@@ -65,6 +56,19 @@ export function AuditView() {
   const [cursorStack, setCursorStack] = useState<string[]>([]);
 
   const debouncedAction = useDebouncedValue(actionFilter, 300);
+
+  // Localized dropdown labels, sorted by the label the admin actually reads.
+  // A type without a translation falls back to its raw PascalCase name so a
+  // newly tagged entity still shows up (and still filters) before the message
+  // files catch up.
+  const targetTypeOptions = useMemo(
+    () =>
+      AUDIT_TARGET_TYPES.map((value) => {
+        const key = `targetTypes.${value}`;
+        return { value, label: t.has(key) ? t(key) : value };
+      }).sort((a, b) => a.label.localeCompare(b.label)),
+    [t],
+  );
 
   const filters: Partial<AuditFilters> = useMemo(
     () => ({
@@ -213,9 +217,9 @@ export function AuditView() {
           aria-label={t('filters.targetType')}
         >
           <option value="">{t('filters.allTargetTypes')}</option>
-          {TARGET_TYPES.map((tt) => (
-            <option key={tt} value={tt}>
-              {tt}
+          {targetTypeOptions.map((tt) => (
+            <option key={tt.value} value={tt.value}>
+              {tt.label}
             </option>
           ))}
         </Select>

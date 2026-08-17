@@ -44,9 +44,13 @@ export class SmtpProvider implements MailProvider, OnModuleDestroy {
       from: this.fromAddress,
       to: args.to,
       cc: args.cc,
+      ...(args.replyTo ? { replyTo: args.replyTo } : {}),
       subject: args.subject,
       text: args.text,
       html: args.html,
+      // Mirror of the Gmail path (RFC 3834) — kept here too so what Mailhog
+      // shows in dev matches the production headers byte for byte.
+      headers: { 'Auto-Submitted': 'auto-generated' },
     });
     // Surface the Message-ID nodemailer generated, but no thread id — SMTP
     // does not thread. Callers persist this only on the Gmail path.

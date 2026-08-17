@@ -27,8 +27,8 @@ export class AuditQueryService {
   constructor(private readonly repo: AuditQueryRepository) {}
 
   async list(filters: AuditFilters): Promise<AuditLogListDto> {
-    const from = this._parseDate(filters.from, 'from');
-    const to = this._parseDate(filters.to, 'to');
+    const from = this._parseDate(filters.from, 'from', 'start');
+    const to = this._parseDate(filters.to, 'to', 'end');
     const cursor = filters.cursor
       ? this._decodeCursor(filters.cursor)
       : undefined;
@@ -62,18 +62,34 @@ export class AuditQueryService {
 
   /**
    * Parse a `from` / `to` filter into a `Date`. Accepts either a plain ISO
-   * date (`YYYY-MM-DD` → start of day UTC) or a full ISO datetime. Returns
-   * `undefined` when the input is empty. Throws `BadRequestException` for
-   * unparseable values so the global filter surfaces a 400 with the field
-   * name.
+   * date (`YYYY-MM-DD`) or a full ISO datetime. Returns `undefined` when the
+   * input is empty. Throws `BadRequestException` for unparseable values so the
+   * global filter surfaces a 400 with the field name.
+   *
+   * `edge` widens a **date-only** input to the matching end of that day:
+   * `start` → `T00:00:00.000Z`, `end` → `T23:59:59.999Z`. The admin filter bar
+   * sends `<input type="date">` values, and the range is applied as
+   * `createdAt >= from AND createdAt <= to` — without the widening, picking
+   * "do: 2026-05-15" would cut the day off at midnight and `from = to = today`
+   * would always return an empty page.
+   *
+   * Full datetimes pass through untouched — the caller already stated the
+   * exact instant it wants.
    */
-  private _parseDate(value: string | undefined, field: string): Date | undefined {
+  private _parseDate(
+    value: string | undefined,
+    field: string,
+    edge: 'start' | 'end',
+  ): Date | undefined {
     if (value === undefined) return undefined;
     const trimmed = value.trim();
     if (trimmed.length === 0) return undefined;
-    // Date-only inputs map to midnight UTC of that day. Full ISO datetimes
-    // pass through unchanged. JS Date constructor handles both shapes.
-    const date = new Date(trimmed);
+    const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(trimmed);
+    const date = new Date(
+      isDateOnly
+        ? `${trimmed}T${edge === 'end' ? '23:59:59.999' : '00:00:00.000'}Z`
+        : trimmed,
+    );
     if (Number.isNaN(date.getTime())) {
       throw new BadRequestException(
         `Invalid date for filter \`${field}\`: ${value}`,

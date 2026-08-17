@@ -21,6 +21,17 @@ export interface SendMailArgs {
   text: string;
   html?: string;
 
+  /**
+   * Overrides where the recipient's «Reply» button points. Omitted on every
+   * template but one: the outgoing address (`GMAIL_FROM`) is an unattended
+   * no-reply Google Group, so a reply to `From` bounces by design. The lone
+   * exception is `maksim-confirmation-request`, whose confirmation reply IS
+   * part of the flow (a pracownik screenshots it as `AUTORYZACJA_MAKSIMA`) —
+   * there we point it at the pracownik who armed the gate, so the reply lands
+   * in a mailbox someone actually reads. See docs/16 §"Односторонний канал".
+   */
+  replyTo?: string | null;
+
   // ── Threading (Gmail only — SMTP ignores these) ──────────
   /** Gmail thread id of a prior message in the same conversation, if known. */
   gmailThreadId?: string | null;

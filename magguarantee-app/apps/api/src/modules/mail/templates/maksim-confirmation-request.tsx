@@ -95,6 +95,11 @@ export function MaksimConfirmationRequestEmail(
       badge={{ tone: 'warning', label: 'Oczekuje na autoryzację' }}
       cta={{ href: deeplink, label: 'Otwórz w MAGGuarantee' }}
       note="Dopłata przekracza próg autoryzacji — decyzja zostanie odblokowana po wgraniu potwierdzenia Twojej zgody."
+      // The ONE email in the fleet whose reply is load-bearing: the pracownik
+      // screenshots Maksim's answer and uploads it as `AUTORYZACJA_MAKSIMA`.
+      // Flips the footer off the default no-reply notice; the matching
+      // `Reply-To` header is set in `claims.service._dispatchMaksimConfirmationEmail`.
+      replyExpected
     >
       <DataSection heading="Wniosek">
         <FieldRow label="Przewoźnik" value={carrierName} />

@@ -637,6 +637,49 @@ describe('ClaimsService.verifyClaim — Maksim authorization gate arming', () =>
     expect(out.status).toBe('OCZEKUJE_NA_AUTORYZACJE');
   });
 
+  it('7b. Reply-To = the verifying pracownik, so Maksim\'s answer lands in a read mailbox (not the no-reply group)', async () => {
+    const seeded = makeClaim();
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const prisma = makePrismaService();
+    // The verifier lookup in `_resolveVerifierReplyTo` — active, not deleted.
+    (
+      prisma.client.user.findFirst as unknown as jest.Mock
+    ).mockResolvedValueOnce({ email: 'Anna.Kowalska@magtrans.eu' });
+    const mail = makeMailFake();
+    const { svc } = makeService(repoFake, km.svc, prisma, mail, makeConfigFake());
+
+    await svc.verifyClaim(makeAuth('pracownik', 'u-anna'), seeded.nrZgl, {});
+    await flushMicrotasks();
+
+    // Looked up by the just-stamped verifiedById, gated on active/alive.
+    expect(prisma.client.user.findFirst).toHaveBeenCalledWith({
+      where: { id: 'u-anna', active: true, deletedAt: null },
+      select: { email: true },
+    });
+    // Third arg is the Reply-To — lowercased, like every other address we ship.
+    const [, , replyTo] = mail.enqueueMaksimConfirmationRequest.mock.calls[0]!;
+    expect(replyTo).toBe('anna.kowalska@magtrans.eu');
+  });
+
+  it('7c. unresolvable verifier ⇒ NO Reply-To (reply bounces off the no-reply group instead of vanishing)', async () => {
+    const seeded = makeClaim();
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    // Default prisma fake resolves the user lookup to null (deactivated /
+    // deleted verifier), which must not block the email itself.
+    const prisma = makePrismaService();
+    const mail = makeMailFake();
+    const { svc } = makeService(repoFake, km.svc, prisma, mail, makeConfigFake());
+
+    await svc.verifyClaim(makeAuth('pracownik'), seeded.nrZgl, {});
+    await flushMicrotasks();
+
+    expect(mail.enqueueMaksimConfirmationRequest).toHaveBeenCalledTimes(1);
+    const [, , replyTo] = mail.enqueueMaksimConfirmationRequest.mock.calls[0]!;
+    expect(replyTo).toBeNull();
+  });
+
   it('8. re-save when ALREADY notified at the SAME amount does NOT resend (amount-aware dedup)', async () => {
     const seeded = makeClaim({
       verifiedAt: new Date('2026-05-14T10:00:00.000Z'),

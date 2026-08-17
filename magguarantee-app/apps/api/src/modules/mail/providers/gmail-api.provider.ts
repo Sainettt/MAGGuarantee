@@ -24,10 +24,15 @@ import type {
  * glued into a single Gmail thread — preserving the legacy `_sendThreadedEmail`
  * behaviour (Code.gs:5788).
  *
- * From = `GMAIL_FROM`, which may be the OAuth mailbox itself or one of its
- * aliases (a valid send-as of that mailbox). No Domain-Wide Delegation — the
- * refresh token IS the sending identity; scope `gmail.send` is granted at
- * consent, so it is not passed here.
+ * From = `GMAIL_FROM` — in production a no-reply **Google Group** registered as
+ * a verified send-as of the OAuth mailbox (it may equally be the mailbox itself
+ * or a plain alias). No Domain-Wide Delegation — the refresh token IS the
+ * sending identity; scope `gmail.send` is granted at consent, so it is not
+ * passed here.
+ *
+ * The channel is deliberately ONE-WAY: the group accepts no inbound post, so a
+ * reply to `From` bounces straight back at the sender. `Auto-Submitted` and the
+ * lone `Reply-To` exception below both exist to make that honest.
  *
  * Only instantiated when `MAIL_PROVIDER=gmail`; the env superRefine validates
  * the OAuth secrets + `GMAIL_FROM` are present before constructing it.
@@ -93,8 +98,17 @@ export class GmailApiProvider implements MailProvider {
       `From: ${this.from}`,
       `To: ${to.join(', ')}`,
       p.cc?.length ? `Cc: ${p.cc.join(', ')}` : '',
+      // Only ever set for the Maksim confirmation request — everything else
+      // replies to `From`, i.e. the unattended no-reply group. See SendMailArgs.
+      p.replyTo ? `Reply-To: ${this.sanitizeHeader(p.replyTo)}` : '',
       `Subject: ${this.encodeHeaderValue(this.sanitizeHeader(p.subject))}`,
       `Message-ID: ${p.messageId}`,
+      // Marks the whole channel as machine-generated so the recipient's
+      // vacation responder / out-of-office does NOT fire back at the no-reply
+      // group (RFC 3834). Every email we send is a notification, never a
+      // human-authored message — including the Maksim one, which merely
+      // *invites* a reply rather than being part of a conversation.
+      'Auto-Submitted: auto-generated',
       'MIME-Version: 1.0',
     ].filter((l) => l !== '');
     if (p.inReplyToMessageId) {
