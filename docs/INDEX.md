@@ -50,6 +50,7 @@
 | 20 | [20-phase-7-eksport-weryfikator.md](20-phase-7-eksport-weryfikator.md) | **Phase 7 импл-спека** — роли `eksport` + `weryfikator` (статус выездов, `lastDroveAt`). Scope частично неясен → делаем как в легаси. |
 | 22 | [22-email-design.md](22-email-design.md) | **Email design system** — единый table-based шаблон транзакционных писем (палитра `#E02020`, блоки, статус-бейджи, `MAIL_LOGO_URL`). |
 | 23 | [23-prod-deployment-runbook.md](23-prod-deployment-runbook.md) | **Runbook выката в прод** — пошагово с нуля: домен, GCP, bootstrap VPS, Caddy, `.env`, миграции, сид, бэкапы, CI/CD, приёмка. Проверен репетицией 2026-07-29. |
+| 24 | [24-sso-magspace-and-permissions-plan.md](24-sso-magspace-and-permissions-plan.md) | **План (ревизия 2, 2026-09-04):** Google SSO для сотрудников, MAGSpace как справочник (stanowisko → роль через admin-маппинг, JIT-provisioning, pull-reconcile), admin только локально, слой permissions поверх ролей. Контракт для MAGSpace в §A0, оставшиеся уточнения в §8. |
 
 ## Быстрая навигация по ролям
 
