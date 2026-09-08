@@ -1,8 +1,7 @@
 # 24. План: Google SSO + MAGSpace как справочник сотрудников + слой permissions
 
-> **Статус: согласованный черновик, ревизия 2 от 2026-09-04.** Ответы на первый
-> круг вопросов учтены (§7). Осталось 3 уточнения по данным MAGSpace (§8),
-> они не блокируют старт трека B и этапов A1/A3.
+> **Статус: согласован, ревизия 3 от 2026-09-04.** Оба круга вопросов закрыты
+> (§7, §8). Открытых развилок нет — план готов к исполнению, старт по команде.
 >
 > Контекст авторизации сегодня — [15-auth-strategy.md](15-auth-strategy.md),
 > матрица ролей — [03-roles.md](03-roles.md).
@@ -77,8 +76,8 @@
 | Что | Требование |
 |---|---|
 | `Employee.email` | Обязательное, уникальное, хранится в нижнем регистре. В форме приёма **предзаполняется** по паттерну `imię.nazwisko@magtrans.eu` из полей имя/фамилия (с транслитерацией диакритики: ł→l, ż→z, ó→o …), человек может **поправить перед сохранением** (тёзки, двойные фамилии). После этого поле — просто данные, парсинга нет. |
-| `Stanowisko` | Справочник с **стабильным кодом** (`code`, slug вида `spedytor`, `dyspozytor_zmiana`), не свободный текст. Название можно переименовывать, код — нет. Смена кода = новая запись. |
-| `Employee.stanowisko` | Ссылка на справочник. Одно на сотрудника (❓ §8 в.1 — если бывает несколько, контракт отдаёт массив, а маппинг берёт первую сопоставленную роль по приоритету). |
+| `Stanowisko` | **Фиксированный перечень** в коде MAGSpace (enum): `HANDLOWIEC`, `PLANISTA`, `LIDER_HANDEL`, … Наружу отдаётся `code` = значение enum (UPPER_SNAKE, пробелы → `_`) и `name` для отображения («Lider handel»). Код стабилен навсегда; новая должность = новое значение enum + деплой MAGSpace. Одноимённость с ролью MAGGuarantee (`PLANISTA` ↔ `planista`) **ничего не значит** — маппинг всегда явный. |
+| `Employee.stanowisko` | Ровно **одно** на сотрудника, совмещений нет (§8 в.1). Исключения, если появятся, решаются per-user правами на функции (трек B5), а не вторым stanowisko. |
 | `Employee.active` | Вычисляется из трудоустройства: `employedTo IS NULL OR employedTo > today`. Увольнение = `active=false`, **не удаление строки**. |
 
 #### A0.2 Аутентификация между сервисами
@@ -102,12 +101,13 @@ GET /internal/v1/employees/lookup?email=jan.kowalski@magtrans.eu
 
 GET /internal/v1/employees
     Все сотрудники, активные И неактивные (reconcile различает «уволен» и «удалён»).
-    Без пагинации — штат ≤ нескольких сотен (❓ §8 в.3). При росте добавить cursor.
+    Без пагинации — штат ≈ 100 (§8 в.3); один ответ ~30–50 KB. Cursor не нужен.
     200 { items: EmployeeDto[], generatedAt: ISO-8601 }
 
 GET /internal/v1/stanowiska
-    Справочник для выпадающего списка в admin-UI маппинга.
-    200 { items: [{ code: string, name: string, active: boolean }] }
+    Перечень должностей для выпадающего списка в admin-UI маппинга.
+    Отдаётся из enum MAGSpace (не из БД), поэтому всегда полный.
+    200 { items: [{ code: string, name: string }] }
 
 GET /internal/v1/health
     200 { ok: true }   ← для диагностики MAGGuarantee (/diagnostics)
@@ -120,7 +120,7 @@ type EmployeeDto = {
   firstName: string;
   lastName: string;
   active: boolean;
-  stanowisko: { code: string; name: string } | null;
+  stanowisko: { code: string; name: string } | null;   // ровно одно; null = ещё не назначено
   employedFrom: string;       // YYYY-MM-DD
   employedTo: string | null;  // YYYY-MM-DD
   updatedAt: string;          // ISO-8601
@@ -397,13 +397,17 @@ export function hasAnyPermission(role: Role, ps: readonly Permission[]): boolean
 Удалить `@Roles`/`RolesGuard`, обновить [15](15-auth-strategy.md) §Roles & Guards
 и [03](03-roles.md) (добавить колонку «permission» в матрицу).
 
-### B5 (опционально, позже). Per-user overrides
+### B5 (позже, под первый реальный случай). Per-user overrides
+
+Это и есть запланированный механизм для исключений «сотруднику на должности X
+нужна ещё одна функция» (§8 в.1) — вместо второго stanowiska в MAGSpace.
 
 Поля `User.extraPermissions Permission[]` / `deniedPermissions Permission[]`;
-`effectivePermissions = ROLE_PERMISSIONS[role] ∪ extra − denied`. Делать
-**только под конкретный запрос** — и помнить, что capability без scope
-бессмысленна: дать `planista` право `claims.verify` нельзя, у него нет ветки
-в `_scopeFilters` для wnioski.
+`effectivePermissions = ROLE_PERMISSIONS[role] ∪ extra − denied`. Правит admin
+в `UserSheet` (для managed-пользователей это единственные редактируемые поля
+прав, reconcile их не трогает). Делать **под первый конкретный запрос** — и
+помнить, что capability без scope бессмысленна: дать `planista` право
+`claims.verify` нельзя, у него нет ветки в `_scopeFilters` для wnioski.
 
 ---
 
@@ -468,12 +472,12 @@ export function hasAnyPermission(role: Role, ps: readonly Permission[]): boolean
 | 8 | Webhooks из MAGSpace | Пока ничего не отправляет | Решение №9: pull-only, reconcile каждые 15 мин, webhook → A7 позже |
 | 9 | Трек B | Делать | После A, отдельными PR |
 
-## 8. Оставшиеся уточнения
+## 8. Ответы на второй круг (2026-09-04)
 
-Не блокируют A1, A3 и весь трек B. Влияют на форму `EmployeeDto` и таблицу маппинга.
+| # | Вопрос | Ответ | Что зафиксировано |
+|---|---|---|---|
+| 1 | Несколько stanowisk у одного сотрудника? | Нет, ровно одно; исключений не предвидится, а если появятся — выдавать доступ на функции | `EmployeeDto.stanowisko` — одиночный объект; исключения → B5 |
+| 2 | Stanowiska — справочник или текст? | Фиксированный перечень: `HANDLOWIEC`, `PLANISTA`, `LIDER HANDEL`, … | `code` = значение enum в UPPER_SNAKE, `/stanowiska` отдаётся из enum |
+| 3 | Число сотрудников | Около 100 | `GET /employees` без пагинации |
 
-| # | Вопрос | Вариант по умолчанию |
-|---|---|---|
-| 1 | Может ли у сотрудника быть **несколько stanowisk** одновременно (совмещение)? | Одно. Если несколько — `stanowiska: [...]`, маппинг выбирает по приоритету ролей (admin-настраиваемый порядок не делаем, берём фиксированный: opiekun > pracownik > weryfikator > eksport > planista > dyspozytor). |
-| 2 | Stanowiska в MAGSpace сейчас — **справочник с кодами** или свободный текст в карточке сотрудника? | Нужен справочник со стабильным `code`; если сейчас текст — добавить в A0. |
-| 3 | Сколько примерно сотрудников будет в MAGSpace (порядок: десятки / сотни)? | Сотни максимум → `GET /employees` без пагинации. |
+Открытых вопросов не осталось.
