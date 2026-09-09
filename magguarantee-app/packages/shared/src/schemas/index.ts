@@ -14,6 +14,7 @@
 //   ./claims.ts        — Phase 3 — claims (wnioski) submit/preview/reklamacja
 //   ./delegations.ts   — Phase 3 — delegations submit/cancel
 //   ./fleet.ts         — Phase 3 — fleet aggregates (GET /fleet/my)
+//   ./sso.ts           — Google SSO stanowisko → role mapping (docs/24)
 //
 // Convention: per-file we export the request schema, the response schema,
 // and inferred types alongside (DTOs). Both api and web import from
@@ -34,6 +35,8 @@ export * from './integrations';
 export * from './claims';
 export * from './delegations';
 export * from './fleet';
+// Google SSO — admin mapping of MAGSpace stanowiska onto MAGGuarantee roles.
+export * from './sso';
 // Guarantee Watchdog — compliance board + episode archive (plan §5).
 export * from './guarantee-watchdog';
 // Phase 5 — opiekun-scoped surface (carriers sidebar).

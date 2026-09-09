@@ -2,7 +2,7 @@
 
 > Текущий GAS-флоу: login + password → 6-значный код в email → user-объект в JS-памяти. После перезагрузки страницы — заново. Никаких сессий. Пароли в plaintext.
 >
-> Цель: те же два шага (login → 2FA-код), но с JWT-сессиями, bcrypt-хешами и опциональным Google OAuth для внутренних сотрудников.
+> Цель: те же два шага (login → 2FA-код), но с JWT-сессиями, bcrypt-хешами и Google SSO для внутренних сотрудников (роль — из справочника MAGSpace, см. §«Google SSO + MAGSpace»).
 
 ## Общий flow (логин)
 
@@ -174,25 +174,113 @@ async verify(sessionToken: string, code: string) {
 
 Это решение принимается перед launch. По умолчанию — оставляем пароли + 2FA, но с возможностью отключить пароли через `app_config.password_required = false`.
 
-## Google OAuth (опц.)
+## Google SSO + MAGSpace (реализовано)
 
-Для внутренних сотрудников MagTrans (admin, pracownik, opiekun, planista, dyspozytor, eksport, weryfikator) — все имеют корпоративный Google email. Можно разрешить SSO:
+> Полный план и обоснования решений — [24-sso-magspace-and-permissions-plan.md](24-sso-magspace-and-permissions-plan.md).
+> Контракт справочника со стороны MAGSpace — `MAGSpace/docs/07-directory-api.md`.
+
+Сотрудники MAGTRANS входят кнопкой «Zaloguj przez Google». Разделение
+ответственности: **Google отвечает «кто это», MAGSpace — «работает ли у нас и на
+какой должности», MAGGuarantee — «какая это роль»**.
 
 ```
-GET /auth/google
-  → redirect к Google OAuth (passport-google-oauth20)
-  → callback /auth/google/callback
-  → найти user в БД по email
-  → если есть и role не 'przewoznik' → выдать JWT (без 2FA, т.к. Google уже проверил)
-  → если нет → 403
+Сотрудник ──► Google Identity Services (в браузере) ──► id_token
+                 │
+                 ▼
+          POST /auth/google  { idToken }
+                 │
+          verifyIdToken: подпись, aud, iss, exp, email_verified, hd
+                 │
+                 ▼
+          есть локальный User с managedBy='local'?  ──да──► вход с локальной ролью
+                 │ нет                                       (MAGSpace НЕ опрашивается)
+                 ▼
+          MAGSpace /internal/v1/employees/lookup?email=…
+                 │
+          stanowisko ──► StanowiskoRoleMapping ──► роль
+                 │
+                 ▼
+          User создан/обновлён ──► issuePair() ──► те же cookies, что после 2FA
 ```
 
-Это **дополнительный** flow, не замена основного. Перевозчики (przewoznik) идут через `/auth/login` + 2FA.
+Ответ `POST /auth/google` **побайтово совпадает** с `POST /auth/verify-code`
+(`{ user }` + cookies `mt_access`/`mt_refresh`) — фронт переиспользует весь
+пост-логин путь. Кода 2FA нет: Google уже подтвердил владение аккаунтом и
+применил свой второй фактор.
 
-Конфигурация:
-- `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` — из Google Cloud Console.
-- `hd=magtrans.eu` параметр — ограничивает domain.
-- Scope: только `email profile` (не нужен calendar / drive).
+### Что проверяется в `id_token`
+
+`apps/api/src/modules/auth/google/google-id-token.service.ts`. Все отказы
+схлопываются в один 403 `SSO_DOMAIN_NOT_ALLOWED` — снаружи это одно условие
+«ваш Google-аккаунт нам не подходит», а различать «протух» и «чужой aud» полезно
+только тому, кто щупает эндпоинт. Настоящая причина уходит в лог.
+
+| Проверка | Почему обязательна |
+|---|---|
+| `aud === GOOGLE_OAUTH_CLIENT_ID` | без неё пройдёт токен, выписанный для ЛЮБОГО другого Google-клиента — подпись всё равно Google-овская |
+| `iss` = Google | защита от смены поведения библиотеки |
+| `exp` | стандартная проверка (делает библиотека) |
+| `email_verified === true` | админ Workspace может завести аккаунт с неподтверждённым адресом |
+| `hd === SSO_ALLOWED_HD` | **ключевая.** `email`, оканчивающийся на `@magtrans.eu`, — не эквивалент: `hd` утверждает Workspace, а адрес — нет. Отсутствие `hd` = потребительский аккаунт → отказ |
+
+### Роли и `managedBy`
+
+| Поле `User` | Смысл |
+|---|---|
+| `authProvider` | `local` / `google` — как аккаунт входит |
+| `managedBy` | `local` — ролью и активностью управляем здесь; `magspace` — их синхронизирует справочник |
+| `googleSub` | стабильный ключ привязки; email в Workspace можно переименовать, `sub` — нет |
+| `magspaceEmployeeId` | `Employee.id` из MAGSpace, **cuid**, не UUID |
+| `directorySyncedAt` | когда справочник последний раз обновлял строку |
+| `roleOverride` | роль, выданная админом вручную; reconcile её не трогает |
+
+**Роль `admin` — только локальная**, из stanowiska не выводится никогда
+(и это дополнительно закреплено CHECK-констрейнтами
+`user_role_override_not_privileged` / `stanowisko_role_mapping_role_not_privileged`).
+Локальные пользователи входят через Google, не обращаясь к MAGSpace вообще —
+это break-glass путь на случай, когда справочник лежит.
+
+**Перевозчики (`przewoznik`) Google-входом не пользуются** — 403
+`SSO_NOT_FOR_CARRIER`. Проверка `hd` их и так отсекает; явный отказ нужен на
+случай тестового `@magtrans.eu` у перевозчика.
+
+**Парольный вход остаётся у всех.** Google-пользователь создаётся с
+`passwordHash = null`; пароль он может завести через «Zapomniałem hasła».
+`PasswordService.compareConstantTime` уже корректно отказывает при пустом хеше,
+без утечки по времени.
+
+### Коды отказов
+
+Все — в `extensions.code` конверта RFC 7807 (та же конвенция, что у
+`CARRIER_NOT_READY_CODE`), константы в `packages/shared/src/schemas/auth.ts`.
+Фронт разбирает `err.data.extensions.code`, человекочитаемый `detail` — не контракт.
+
+| HTTP | Код | Когда |
+|---|---|---|
+| 403 | `SSO_DOMAIN_NOT_ALLOWED` | токен не прошёл проверки выше |
+| 403 | `SSO_NOT_EMPLOYEE` | MAGSpace не знает такого адреса |
+| 403 | `SSO_INACTIVE` | сотрудник уволен |
+| 403 | `SSO_NO_ROLE` | stanowisko без маппинга и без `roleOverride` |
+| 403 | `SSO_NOT_FOR_CARRIER` | роль `przewoznik` |
+| 503 | `SSO_DIRECTORY_UNAVAILABLE` | MAGSpace не ответил, а локальной записи нет |
+| 503 | `SSO_NOT_CONFIGURED` | в этом окружении не задан client id / токен |
+
+**MAGSpace недоступен ≠ «не сотрудник».** Существующего активного
+managed-пользователя пускаем по последней синхронизированной роли (с warn в лог);
+отказываем только тому, о ком у нас нет записи. Насколько устаревшей может быть
+эта роль — ограничивает reconcile.
+
+### Конфигурация
+
+- `GOOGLE_OAUTH_CLIENT_ID` — OAuth-клиент типа *Web application*, consent screen
+  **Internal**. То же значение, что `NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID` в сборке
+  веба: это то, с чем сверяется `aud`. Публичное значение, **client secret не
+  нужен** — браузерный GIS-flow не обменивает authorization code.
+- `SSO_ALLOWED_HD` (default `magtrans.eu`).
+- `MAGSPACE_API_URL`, `MAGSPACE_INTERNAL_TOKEN` — см.
+  [16-jobs-and-integrations.md](16-jobs-and-integrations.md).
+- Пусто = фича выключена целиком: кнопки на `/login` нет, cron не планируется,
+  пароль + 2FA работают как раньше.
 
 ## Roles & Guards
 
@@ -478,7 +566,9 @@ async function fetchWithRefresh(url: string, opts: RequestInit) {
 
 - **Magic link** (login через одноразовую ссылку): можно добавить позже, но не на старте.
 - **WebAuthn / Passkeys**: future improvement.
-- **OAuth для перевозчиков**: они не на корпоративных Google-ах, нет смысла.
+- **OAuth для перевозчиков**: они не на корпоративных Google-ах, нет смысла — `POST /auth/google` для роли `przewoznik` отвечает 403 `SSO_NOT_FOR_CARRIER`.
+- **Redirect-flow Google** (`/auth/google/callback`, passport-google-oauth20): реализован front-side id_token-flow, callback-роута нет. Redirect остаётся запасным вариантом, если появятся жалобы на Safari ITP / блокировщики.
+- **Свой IdP / Keycloak / OIDC-провайдер из MAGSpace**: MAGSpace — справочник сотрудников, не провайдер идентичности.
 - **MFA через TOTP/SMS**: текущий 2FA email достаточен. SMS дорогой, TOTP требует app — не для всех перевозчиков подходит.
 - **Single sign-out** (revoke во всех приложениях): мы одно приложение, не актуально.
 

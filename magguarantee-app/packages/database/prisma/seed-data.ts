@@ -2,15 +2,16 @@
 // production one-shot bootstrap (prisma/seed.prod.ts).
 //
 // This module holds ONLY the reference-data the two seeds have in common:
-// AppConfig keys, the TrailerType catalog, and the MonthlyLimit placeholders.
+// AppConfig keys, the TrailerType catalog, the MonthlyLimit placeholders and
+// the stanowisko → role mapping the Google SSO reads.
 // It deliberately does NOT instantiate a PrismaClient — each seed entrypoint
 // owns its own client and passes it into these functions, so a single run never
 // opens two clients.
 //
-// All three functions are idempotent: they upsert on a unique business field
-// (config-key / trailer-type-name / (year, month)).
+// All four functions are idempotent: they upsert on a unique business field
+// (config-key / trailer-type-name / (year, month) / stanowisko-code).
 
-import { PrismaClient } from '../src/generated';
+import { PrismaClient, Role } from '../src/generated';
 
 // ─── App config ─────────────────────────────────────────
 
@@ -130,6 +131,50 @@ export const MONTHLY_LIMIT_RATE_PER_KM = '0.5';
 export const MONTHLY_LIMIT_KM_PER_SATURDAY = '270';
 export const MONTHLY_LIMIT_YEARS = [2026, 2027];
 
+// ─── stanowisko → rola (Google SSO, docs/24 §4) ─────────
+
+export type SeedStanowiskoRole = {
+  code: string;
+  name: string;
+  role: Role;
+};
+
+/**
+ * Seed content of `StanowiskoRoleMapping` — 6 of the 17 stanowiska MAGSpace
+ * publishes. Only positions whose access is unambiguous are mapped; an admin
+ * edits the rest through `/employee/sso`.
+ *
+ * The eleven codes deliberately left out fall into two groups:
+ *
+ *   - **Manual approval** — `HANDEL_SPEDYTOR`, `HANDEL_LIDER`,
+ *     `HANDEL_KIEROWNIK`, `CONTROLLING`. These hold people with different needs
+ *     under one job title (CONTROLLING is two people, one `weryfikator` and one
+ *     `pracownik`; a couple of `eksport` users sit among the HANDEL planners).
+ *     `pracownik`, `weryfikator` and `eksport` gate wniosek verification and
+ *     money, so they are never granted by job title — an admin grants them per
+ *     person via `User.roleOverride`.
+ *   - **No access** — `KAM`, `KAM_KIEROWNIK`, `KIEROWNIK_ODDZIALU`, `IT`,
+ *     `WINDYKACJA`, `ASYSTENT`, `REKRUTER`. The last five need either nothing
+ *     or a local `admin` account, and `admin` is never derived from a
+ *     stanowisko (docs/24 decision #4).
+ *
+ * A missing row means the sign-in fails with `SSO_NO_ROLE` and the admins are
+ * e-mailed — fail-closed by design, not an oversight.
+ *
+ * `name` is a snapshot of the Polish label MAGSpace serves so the admin table
+ * still reads sensibly while the directory is unreachable; the live value wins
+ * whenever `/internal/v1/stanowiska` answers.
+ */
+export const SEED_STANOWISKO_ROLES: SeedStanowiskoRole[] = [
+  { code: 'DYSPOZYTOR', name: 'Dyspozytor', role: Role.dyspozytor },
+  { code: 'DYSPOZYTOR_KIEROWNIK', name: 'Dyspozytor kierownik', role: Role.dyspozytor },
+  { code: 'PLANISTA', name: 'Planista', role: Role.planista },
+  { code: 'PLANISTA_LIDER', name: 'Planista lider', role: Role.planista },
+  { code: 'PLANISTA_MLODSZY', name: 'Planista młodszy', role: Role.planista },
+  // The only source of the `opiekun` role.
+  { code: 'DAF', name: 'DAF', role: Role.opiekun },
+];
+
 // ─── Seed functions ─────────────────────────────────────
 // Each takes the caller-owned PrismaClient so a single seed run uses one client.
 
@@ -186,4 +231,18 @@ export async function seedMonthlyLimits(prisma: PrismaClient): Promise<number> {
     }
   }
   return count;
+}
+
+export async function seedStanowiskoRoles(prisma: PrismaClient): Promise<number> {
+  for (const m of SEED_STANOWISKO_ROLES) {
+    await prisma.stanowiskoRoleMapping.upsert({
+      where: { stanowiskoCode: m.code },
+      create: { stanowiskoCode: m.code, stanowiskoName: m.name, role: m.role },
+      // Don't overwrite the role on rerun — an admin may have re-pointed it
+      // through /employee/sso, and the seed must not silently undo that. The
+      // display name is refreshed because it is only a cache of MAGSpace's.
+      update: { stanowiskoName: m.name },
+    });
+  }
+  return SEED_STANOWISKO_ROLES.length;
 }

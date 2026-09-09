@@ -76,7 +76,16 @@ export async function fetchWithRefresh(
   init: RequestInit = {},
 ): Promise<Response> {
   let res = await rawFetch(path, init);
-  if (res.status !== 401 || path.includes('/auth/refresh') || path.includes('/auth/login') || path.includes('/auth/verify-code')) {
+  // Unauthenticated endpoints: a 401 from them is the ANSWER, not an expired
+  // session, so refreshing and retrying would only add a round-trip and muddy
+  // the error the caller sees.
+  if (
+    res.status !== 401 ||
+    path.includes('/auth/refresh') ||
+    path.includes('/auth/login') ||
+    path.includes('/auth/verify-code') ||
+    path.includes('/auth/google')
+  ) {
     return res;
   }
   const refreshed = await refreshOnce();

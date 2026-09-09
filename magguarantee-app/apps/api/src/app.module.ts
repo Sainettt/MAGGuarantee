@@ -11,6 +11,7 @@ import { AuditWriterModule } from './modules/audit/audit.module';
 import { validateEnv } from './config/env.schema';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { DirectoryModule } from './modules/directory/directory.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/guards/roles.guard';
 import { CarriersModule } from './modules/carriers/carriers.module';
@@ -99,6 +100,10 @@ import { WeeklyReportModule } from './modules/weekly-report/weekly-report.module
     AuditWriterModule,
     PasswordModule,
     UsersModule,
+    // Google SSO — MAGSpace employee directory + the stanowisko → role admin
+    // screen. Imported by AuthModule too; listed here so the feature is visible
+    // in the app's module inventory alongside every other one.
+    DirectoryModule,
     AuthModule,
     CarriersModule,
     VehiclesModule,

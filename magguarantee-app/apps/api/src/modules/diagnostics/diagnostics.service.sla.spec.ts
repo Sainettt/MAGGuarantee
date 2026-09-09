@@ -89,7 +89,16 @@ function makeService(opts: FakeRepoOpts = {}): DiagnosticsService {
   const mailJobs = {} as never;
   const mail = {} as never;
   const redis = {} as never;
-  return new DiagnosticsService(repo as never, mailJobs, mail, redis);
+  const magspace = {} as never;
+  const directoryState = {} as never;
+  return new DiagnosticsService(
+    repo as never,
+    mailJobs,
+    mail,
+    redis,
+    magspace,
+    directoryState,
+  );
 }
 
 describe('DiagnosticsService.getDashboard — verification-SLA buckets', () => {

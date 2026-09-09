@@ -81,6 +81,9 @@ export const ADMIN_ONLY_EMPLOYEE_PREFIXES: readonly string[] = [
   // guard too, but middleware needs the same allow-list so direct-URL
   // navigation by non-admins is bounced at the edge.
   '/employee/users',
+  // Google SSO — the stanowisko → role mapping (docs/24 §A5). Handing out
+  // roles is as privileged as user CRUD, so it lives behind the same gate.
+  '/employee/sso',
   '/employee/limits',
   '/employee/audit',
   '/employee/diagnostics',

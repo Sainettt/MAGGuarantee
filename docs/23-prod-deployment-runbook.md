@@ -84,6 +84,27 @@ DNS-запись `mymag.magtrans.eu` заводит MAGTRANS в своей зо�
    `http://localhost:53682/oauth2callback`. Записать client_id и client_secret.
 5. Определить ящик-отправитель — это **личный ящик руководителя**. Отдельный
    технический пользователь Workspace не заводится.
+6. **Для Google SSO сотрудников (docs/24)** — ещё один OAuth client ID, тоже
+   типа **Web application**, в том же проекте. Это отдельный клиент, не тот, что
+   в п. 4: у почтового клиента redirect URI на localhost, а этому нужны
+   **Authorized JavaScript origins** и никаких redirect URI вообще (браузерный
+   GIS-flow не обменивает authorization code, поэтому **client secret не нужен**
+   и в `.env` не кладётся).
+
+   Origins — каждый хост, с которого отдаётся приложение:
+   ```
+   https://mymag.magtrans.eu
+   http://localhost:3000          # локальная разработка
+   ```
+   Записать client_id → в `.env` он идёт СРАЗУ В ДВА ключа:
+   `GOOGLE_OAUTH_CLIENT_ID` (api сверяет с ним `aud`) и
+   `NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID` (запекается в бандл на сборке).
+
+   Consent screen тот же — **Internal**; это и ограничивает вход доменом
+   организации, но `hd` всё равно проверяется на бэкенде (`SSO_ALLOWED_HD`).
+
+   Пропустить этот пункт можно: пустые ключи = кнопки Google на `/login` нет,
+   вход по паролю + 2FA работает как раньше.
 
 ### 1.3 Refresh token для почты
 
@@ -178,10 +199,19 @@ mkdir -p /opt/{caddy,magguarantee/{data,backups}} && chown -R deploy:deploy /opt
 
 ```bash
 docker network create proxy-net
+docker network create magtrans-internal
 ```
 
 `proxy-net` — общая сеть, через которую Caddy видит контейнеры приложения.
-Создаётся один раз на сервер.
+
+`magtrans-internal` — общая сеть **с MAGSpace**, по ней `magguarantee-api`
+читает справочник сотрудников на `http://magspace-api:3001/internal/v1`
+(docs/24). Специально НЕ `proxy-net`: та существует для Caddy, а маршруты
+`/internal/*` наружу не публикуются. MAGSpace входит в неё из своего
+compose-оверлея; CI её не создаёт, поэтому если забыть — деплой упадёт с
+`network magtrans-internal declared as external, but could not be found`.
+
+Обе создаются один раз на сервер.
 
 Дальше всё выполняется **от пользователя `deploy`**, не от root.
 
@@ -308,6 +338,10 @@ openssl rand -hex 24      # S3_SECRET_KEY
 | `MAKSIM_EMAIL` | 🆕 **боевой адрес директора** |
 | `GOOGLE_CHAT_WYJAZD_WEBHOOK_URL` | 🆕 incoming-webhook боевого Chat-space «wyjazdy». Берётся в самом space: **Apps & integrations → Webhooks → Add webhooks** (нужен Google Workspace). Пусто ⇒ уведомлений о выездах внутри компании не будет (api при этом стартует нормально) |
 | `ALLOW_PAST_DEPARTURE`, `NEXT_PUBLIC_ALLOW_PAST_DEPARTURE` | оба `false` |
+| `GOOGLE_OAUTH_CLIENT_ID`, `NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID` | 🆕 **одинаковое значение** — client_id из Фазы 1.2 п. 6. Пусто ⇒ Google-вход выключен, пароль + 2FA работают. Второй ключ — build-arg: после его изменения нужен `docker compose build web`, рестарт не поможет |
+| `MAGSPACE_INTERNAL_TOKEN` | 🆕 тот же токен, что в `/opt/magspace/.env`. ≥32 символов, `openssl rand -base64 48`. Пусто ⇒ справочник выключен: reconcile не планируется, Google-вход отвечает 503 |
+| `MAGSPACE_API_URL` | 🆕 `http://magspace-api:3001` — **не менять**, адрес внутри сети `magtrans-internal` |
+| `DIRECTORY_RECONCILE_MODE` | 🆕 `enforce`. На первые дни можно поставить `report` — тогда крон только шлёт админам «что бы я сделал», никого не отключая |
 | `POSTGRES_DATA`, `REDIS_DATA`, `MINIO_DATA` | абсолютные пути `/opt/magguarantee/data/*` |
 
 ⚠️ Про пути: guard в compose ловит отсутствие ключа, но относительный путь
@@ -537,6 +571,28 @@ sudo ./svc.sh stop && sudo ./svc.sh uninstall
 - [ ] Загрузка вложения появляется в `/opt/magguarantee/data/minio/magguarantee`
 - [ ] Выезд задним числом **отклоняется** (422) — на стенде этот запрет был выключен
 - [ ] `docker compose logs api | head -50` — ошибок на старте нет
+
+**Google SSO** (пропустить целиком, если ключи оставлены пустыми):
+
+- [ ] Справочник виден из сети:
+      `docker run --rm --network magtrans-internal curlimages/curl -s -H "Authorization: Bearer $TOKEN" http://magspace-api:3001/internal/v1/health`
+      → `{"ok":true}`
+- [ ] `/employee/diagnostics` → вкладка «Baza danych»: пилюля MAGSpace зелёная
+- [ ] `/employee/sso` под админом: видны **17 stanowisk**, из них 6 сопоставлены
+      (`DYSPOZYTOR*`, `PLANISTA*`, `DAF`) — это то, что положил сид
+- [ ] Кнопка «Zaloguj przez Google» есть на `/login`. **Если её нет** — образ веба
+      собран без `NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID`; нужен `build web`, не рестарт
+- [ ] Вход сотрудником с сопоставленным stanowiskiem проходит и ведёт на лендинг
+      его роли; в `/employee/users` строка помечена «MAGSpace», `role`/`active`
+      заблокированы
+- [ ] Вход **личным** `@gmail.com` → «Zaloguj się kontem @magtrans.eu»
+- [ ] Вход админом через Google проходит по **локальной** роли (в логах нет
+      обращения к MAGSpace) — это break-glass путь
+- [ ] Сотрудник с `CONTROLLING` / `HANDEL_*` получает «stanowisko bez dostępu»,
+      админам приходит письмо с его именем, строка видна в «Ostatnie odrzucone
+      logowania». Повторная попытка в течение суток письмо не дублирует
+- [ ] Через `DIRECTORY_RECONCILE_INTERVAL_MIN` в логах появляется
+      `directory reconcile finished`, а на `/employee/sso` — время синхронизации
 
 ---
 

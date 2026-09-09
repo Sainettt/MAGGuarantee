@@ -48,6 +48,13 @@ ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ARG NEXT_PUBLIC_ALLOW_PAST_DEPARTURE=false
 ENV NEXT_PUBLIC_ALLOW_PAST_DEPARTURE=$NEXT_PUBLIC_ALLOW_PAST_DEPARTURE
 
+# Google sign-in (docs/24). Empty default on purpose: an image built without a
+# client id simply does not render the Google button, and the password form is
+# untouched. Changing this in `.env` requires a REBUILD, not a restart — a
+# stale value survives `docker compose up -d`.
+ARG NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID=
+ENV NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID=$NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID
+
 RUN npm run build -w @magguarantee/shared && \
     npm run build -w web
 

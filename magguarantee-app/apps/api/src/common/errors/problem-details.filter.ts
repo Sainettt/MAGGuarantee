@@ -78,6 +78,8 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       423: 'Locked',
       429: 'Too Many Requests',
       500: 'Internal Server Error',
+      // Google SSO returns 503 when MAGSpace cannot be consulted (docs/24 №14).
+      503: 'Service Unavailable',
     };
     return titles[status] ?? 'Error';
   }
@@ -93,6 +95,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       423: '/problems/locked',
       429: '/problems/rate-limit',
       500: '/problems/internal',
+      503: '/problems/unavailable',
     };
     return slugs[status] ?? '/problems/error';
   }

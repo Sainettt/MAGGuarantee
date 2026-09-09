@@ -72,6 +72,8 @@ export const AUDIT_TARGET_TYPES = [
   'DriverAttachment',
   'MonthlyLimit',
   'MailJob',
+  // Google SSO — the stanowisko → role table an admin edits (docs/24).
+  'StanowiskoRoleMapping',
 ] as const;
 export type AuditTargetType = (typeof AUDIT_TARGET_TYPES)[number];
 

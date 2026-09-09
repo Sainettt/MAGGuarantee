@@ -11,6 +11,7 @@
 import { z } from 'zod';
 
 import {
+  AssignableRoleSchema,
   IsoDateTimeSchema,
   RoleSchema,
   UuidSchema,
@@ -103,6 +104,26 @@ export const UpdateUserSchema = z
     // coerces to undefined (= "leave alone"), not null (= "wipe").
     liderEmail: emptyStringToUndefined(EmailSchema.nullable().optional()),
     active: z.boolean().optional(),
+    /**
+     * Hand the account over to (or take it back from) the MAGSpace directory.
+     *
+     * `magspace` means the reconcile owns `role` and `active` from now on and
+     * revokes access when the person is terminated there; `local` means this
+     * app owns them and the directory never touches the row. Admins stay
+     * `local` — that is the break-glass path.
+     */
+    managedBy: z.enum(['local', 'magspace']).optional(),
+    /**
+     * Role granted BY HAND, for stanowiska the mapping deliberately leaves
+     * unmapped (docs/24 §4). Setting it is how an admin approves one of the
+     * mixed-position employees; `null` clears it and hands the role decision
+     * back to the stanowisko mapping.
+     *
+     * This is the ONLY access field editable on a `managedBy = magspace` user:
+     * `role` and `active` are re-synced on every login and every reconcile
+     * run, so editing them here would be silently reverted.
+     */
+    roleOverride: AssignableRoleSchema.nullable().optional(),
   })
   .strict();
 export type UpdateUserDto = z.infer<typeof UpdateUserSchema>;
@@ -138,6 +159,15 @@ export const UserDtoSchema = z.object({
    */
   mustChangePassword: z.boolean(),
   lastLoginAt: IsoDateTimeSchema.nullable(),
+  // ── Google SSO / MAGSpace (docs/24) ──────────────────
+  /** `local` = managed here; `magspace` = role + active owned by the directory. */
+  managedBy: z.enum(['local', 'magspace']),
+  /** `google` once the account has signed in with Google at least once. */
+  authProvider: z.enum(['local', 'google']),
+  /** Hand-granted role that overrides the stanowisko mapping; null = mapped. */
+  roleOverride: AssignableRoleSchema.nullable(),
+  /** Last time the directory refreshed this row. Null for local accounts. */
+  directorySyncedAt: IsoDateTimeSchema.nullable(),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
 });

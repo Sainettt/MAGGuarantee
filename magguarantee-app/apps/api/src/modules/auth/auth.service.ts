@@ -1,13 +1,22 @@
 import { createHash, randomUUID } from 'node:crypto';
 
 import {
+  ForbiddenException,
   Injectable,
   Logger,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import type { UserDto } from '@magguarantee/shared';
+import {
+  SSO_DIRECTORY_UNAVAILABLE,
+  SSO_INACTIVE,
+  SSO_NOT_EMPLOYEE,
+  SSO_NOT_FOR_CARRIER,
+  SSO_NO_ROLE,
+  type UserDto,
+} from '@magguarantee/shared';
 
 import type { Env } from '../../config/env.schema';
 import {
@@ -16,6 +25,8 @@ import {
   REFRESH_ROTATION_GRACE_MS,
 } from './auth.constants';
 import { MailService } from '../mail/mail.service';
+import { DirectoryService } from '../directory/directory.service';
+import { GoogleIdTokenService } from './google/google-id-token.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import type { UserRow } from '../users/users.repository';
@@ -65,6 +76,7 @@ class RefreshReuseError extends Error {}
  * Responsibilities:
  *  - login: validate creds → issue 2FA code (or decoy on failure)
  *  - verifyCode: consume code → mint JWT pair + persist refresh hash
+ *  - loginWithGoogle: verify id_token → resolve against MAGSpace → mint pair
  *  - resendCode: throttled second code email
  *  - refresh: rotate token; revoke-all on reuse
  *  - logout: revoke a single refresh token row
@@ -89,6 +101,8 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly prisma: PrismaService,
     private readonly config: ConfigService<Env, true>,
+    private readonly googleIdToken: GoogleIdTokenService,
+    private readonly directory: DirectoryService,
   ) {}
 
   // ── Step 1: login ────────────────────────────────────
@@ -144,6 +158,138 @@ export class AuthService {
     await this.users.updateLastLogin(user.id, new Date());
 
     const tokens = await this.issuePair(user, ctx);
+    return { user: this.toUserDto(user), tokens };
+  }
+
+  // ── Google SSO (docs/24 трек A) ──────────────────────
+
+  /**
+   * Signs an employee in with a Google `id_token`.
+   *
+   * Ends in exactly the same place as `verifyCode`: cookies set, `UserDto`
+   * returned. No 2FA code is sent — Google already proved the account belongs
+   * to this person and Workspace applied its own second factor (decision #6).
+   *
+   * The order of the checks below is the whole design, so it is worth being
+   * explicit about why each one is where it is:
+   *
+   *   1. **Carriers first.** A carrier who happens to hold a `@magtrans.eu`
+   *      address must be told to use their password, not silently handed an
+   *      employee session.
+   *   2. **Locally-managed users skip MAGSpace entirely.** Admins are the
+   *      break-glass path: they must be able to sign in while the directory is
+   *      down, and their role must never be derivable from a stanowisko.
+   *   3. **Directory unreachable ≠ not an employee.** An existing active
+   *      managed user is let in on their last synced role; only someone we have
+   *      no record of is turned away. The reconcile bounds how stale that role
+   *      can be.
+   *   4. **Anything the directory refuses deprovisions an existing account.**
+   *      Terminated, unknown, or holding a stanowisko with no mapping — all
+   *      three mean "no access from now on", and leaving the account live until
+   *      the next cron run would be a strictly worse answer than revoking it
+   *      here, where we already know.
+   */
+  async loginWithGoogle(
+    idToken: string,
+    ctx: { ipAddress?: string; userAgent?: string },
+  ): Promise<{ user: UserDto; tokens: TokenPair }> {
+    const identity = await this.googleIdToken.verifyIdToken(idToken);
+
+    // `sub` is the durable key; e-mail only bootstraps the very first link.
+    const local =
+      (await this.users.findByGoogleSub(identity.sub)) ??
+      (await this.users.findByEmail(identity.email));
+
+    if (local?.role === 'przewoznik') {
+      throw new ForbiddenException({
+        message: 'Przewoźnicy logują się loginem i hasłem.',
+        extensions: { code: SSO_NOT_FOR_CARRIER },
+      });
+    }
+
+    // ── Locally-managed accounts (admins and anyone an admin took back) ──
+    if (local && local.managedBy === 'local') {
+      if (!local.active || local.deletedAt) {
+        throw new UnauthorizedException('Account is no longer active');
+      }
+      const linked = local.googleSub
+        ? local
+        : await this.directory.linkGoogleAccount(local, identity.sub);
+      return this._finishGoogleLogin(linked, ctx);
+    }
+
+    // ── Directory-managed accounts ──────────────────────
+    const lookup = await this.directory.resolveEmployee(identity.email);
+
+    if (lookup.kind === 'unavailable') {
+      if (local && local.active && !local.deletedAt) {
+        this.logger.warn({
+          msg: 'MAGSpace unavailable — admitting an existing managed user on the cached role',
+          userId: local.id,
+          role: local.role,
+        });
+        return this._finishGoogleLogin(local, ctx);
+      }
+      throw new ServiceUnavailableException({
+        message: 'MAGSpace chwilowo niedostępny. Spróbuj za chwilę lub zaloguj się hasłem.',
+        extensions: { code: SSO_DIRECTORY_UNAVAILABLE },
+      });
+    }
+
+    if (lookup.kind === 'not_found') {
+      if (local) await this.directory.deprovision(local, 'not_found');
+      throw new ForbiddenException({
+        message: 'Nie znaleziono Cię w MAGSpace. Skontaktuj się z przełożonym.',
+        extensions: { code: SSO_NOT_EMPLOYEE },
+      });
+    }
+
+    const employee = lookup.employee;
+    if (!employee.active) {
+      if (local) await this.directory.deprovision(local, 'inactive');
+      throw new ForbiddenException({
+        message: 'Twoje konto pracownika jest nieaktywne.',
+        extensions: { code: SSO_INACTIVE },
+      });
+    }
+
+    // An admin-granted role bypasses the mapping — that is what it is for.
+    const mappedRole = await this.directory.roleFor(employee.stanowisko);
+    const role = local?.roleOverride ?? mappedRole;
+    if (!role) {
+      // Not an error condition so much as an onboarding step for the mixed
+      // stanowiska: tell the admins who is waiting, then refuse (docs/24 §4).
+      await this.directory.notifyAccessRequested(employee);
+      if (local) await this.directory.deprovision(local, 'unmapped');
+      throw new ForbiddenException({
+        message:
+          'Twoje stanowisko nie ma jeszcze dostępu do MAGGuarantee. Administrator został powiadomiony.',
+        extensions: { code: SSO_NO_ROLE },
+      });
+    }
+
+    const user = await this.directory.provisionOrSync({
+      existing: local,
+      employee,
+      role,
+      googleSub: identity.sub,
+    });
+    return this._finishGoogleLogin(user, ctx);
+  }
+
+  /**
+   * Shared tail of every successful Google sign-in. Mirrors `verifyCode`:
+   * clearing `failedAttempts` matters because a lockout earned on the password
+   * form would otherwise outlive a perfectly good Google login.
+   */
+  private async _finishGoogleLogin(
+    user: UserRow,
+    ctx: { ipAddress?: string; userAgent?: string },
+  ): Promise<{ user: UserDto; tokens: TokenPair }> {
+    await this.users.resetFailedAttempts(user.id);
+    await this.users.updateLastLogin(user.id, new Date());
+    const tokens = await this.issuePair(user, ctx);
+    this.logger.log({ msg: 'google login', userId: user.id, role: user.role });
     return { user: this.toUserDto(user), tokens };
   }
 

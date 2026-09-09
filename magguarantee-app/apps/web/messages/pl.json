@@ -99,7 +99,17 @@
       "liderEmail": "E-mail lidera",
       "liderEmailHint": "Tylko dla roli planista — adres przełożonego.",
       "active": "Aktywny",
-      "createdAt": "Utworzono"
+      "createdAt": "Utworzono",
+      "managedBy": "Zarządzanie",
+      "managedByHint": "MAGSpace — rola i aktywność są synchronizowane ze zwolnieniami i zmianami stanowisk. Lokalne — zarządzasz kontem tutaj (tak działają konta administratorów).",
+      "local": "Lokalne",
+      "magspace": "MAGSpace",
+      "managedHint": "Zarządzane w MAGSpace — zmiana zostałaby nadpisana przy następnej synchronizacji.",
+      "roleOverride": "Rola przyznana ręcznie",
+      "roleOverrideHint": "Dla stanowisk bez mapowania (np. Controlling, Handel). Ustawiona rola nie zostanie zmieniona przez synchronizację, ale konto nadal wyłączy się w dniu zwolnienia.",
+      "roleOverrideNone": "Brak — rola ze stanowiska",
+      "roleOverrideShort": "ręcznie",
+      "roleOverrideHintShort": "Rola przyznana ręcznie przez administratora"
     },
     "actions": {
       "resetPassword": "Zresetuj hasło…",
@@ -189,7 +199,18 @@
     "submitting": "Logowanie...",
     "forgotPassword": "Nie pamiętam hasła",
     "errorWrong": "Nieprawidłowy login lub hasło",
-    "errorNetwork": "Brak połączenia. Spróbuj ponownie."
+    "errorNetwork": "Brak połączenia. Spróbuj ponownie.",
+    "sso": {
+      "divider": "lub zaloguj się hasłem",
+      "errorDomain": "Zaloguj się kontem @magtrans.eu.",
+      "errorNotEmployee": "Nie znaleziono Cię w MAGSpace. Skontaktuj się z przełożonym.",
+      "errorInactive": "Twoje konto pracownika jest nieaktywne.",
+      "errorNoRole": "Twoje stanowisko nie ma jeszcze dostępu do MAGGuarantee. Administrator został powiadomiony.",
+      "errorCarrier": "Przewoźnicy logują się loginem i hasłem.",
+      "errorUnavailable": "MAGSpace chwilowo niedostępny. Spróbuj za chwilę lub zaloguj się hasłem.",
+      "errorScript": "Nie udało się załadować logowania Google. Zaloguj się hasłem.",
+      "errorNetwork": "Logowanie przez Google nie powiodło się. Spróbuj ponownie lub zaloguj się hasłem."
+    }
   },
   "verify": {
     "title": "MAGGuarantee",
@@ -277,6 +298,7 @@
     "delegations": "Wyjazdy",
     "limits": "Limity",
     "users": "Użytkownicy",
+    "sso": "Logowanie Google",
     "audit": "Audyt",
     "diagnostics": "Diagnostyka",
     "openMenu": "Otwórz menu",
@@ -1106,6 +1128,11 @@
     "db": {
       "postgres": "PostgreSQL",
       "redis": "Redis",
+      "magspace": "MAGSpace",
+      "magspaceNotConfigured": "nie skonfigurowano",
+      "magspaceDown": "niedostępny",
+      "magspaceNeverSynced": "brak synchronizacji",
+      "magspaceLastSync": "sync {at}",
       "tablesTitle": "Rozmiar tabel",
       "tableName": "Nazwa",
       "tableSize": "Rozmiar",
@@ -2384,6 +2411,34 @@
     "error": {
       "title": "Nie udało się wczytać alertów",
       "message": "Spróbuj odświeżyć stronę."
+    }
+  },
+  "sso": {
+    "title": "Logowanie Google",
+    "subtitle": "Stanowisko z MAGSpace decyduje o roli w MAGGuarantee. Stanowiska bez przypisanej roli nie dają dostępu — pracownikom na takich stanowiskach rolę przyznaje się ręcznie w Użytkownikach.",
+    "noAccess": "Brak dostępu",
+    "mapped": "Przypisane",
+    "unmapped": "Bez roli",
+    "unknownToMagspace": "Brak w MAGSpace",
+    "magspaceOk": "MAGSpace dostępny",
+    "magspaceDown": "MAGSpace niedostępny",
+    "magspaceDownHint": "Nie udało się pobrać listy stanowisk z MAGSpace — poniżej widać wyłącznie zapisane mapowania, lista może być niepełna.",
+    "lastSync": "Ostatnia synchronizacja: {at}",
+    "neverSynced": "Brak synchronizacji",
+    "emptyTitle": "Brak stanowisk",
+    "emptyMessage": "MAGSpace nie zwrócił żadnych stanowisk.",
+    "fields": {
+      "stanowisko": "Stanowisko",
+      "role": "Rola",
+      "state": "Status",
+      "updatedAt": "Zmieniono"
+    },
+    "denials": {
+      "title": "Odrzucone logowania",
+      "subtitle": "Pracownicy, którzy próbowali się zalogować, a ich stanowisko nie ma przypisanej roli. Aby przyznać dostęp, załóż konto w Użytkownikach i ustaw rolę przyznaną ręcznie.",
+      "emptyTitle": "Brak odrzuconych logowań",
+      "emptyMessage": "Nikt nie czeka na przyznanie roli.",
+      "noStanowisko": "brak stanowiska"
     }
   }
 }

@@ -1,10 +1,22 @@
 # 24. План: Google SSO + MAGSpace как справочник сотрудников + слой permissions
 
-> **Статус: согласован, ревизия 3 от 2026-09-04.** Оба круга вопросов закрыты
-> (§7, §8). Открытых развилок нет — план готов к исполнению, старт по команде.
+> **Статус: трек A РЕАЛИЗОВАН (2026-09-09). Трек B — не начат.**
 >
-> Контекст авторизации сегодня — [15-auth-strategy.md](15-auth-strategy.md),
-> матрица ролей — [03-roles.md](03-roles.md).
+> Сторона MAGSpace закрыта их коммитом `33094eb` (2026-09-08): контракт §A0
+> реализован целиком, см. `MAGSpace/docs/07-directory-api.md`. Этапы A1–A6
+> выполнены; расхождения с текстом ниже перечислены в §9 — читать её раньше,
+> чем сам план, потому что в шести местах реализация отличается от того, что
+> здесь написано, и отличается намеренно.
+>
+> Что теперь описывает поведение системы: [15-auth-strategy.md](15-auth-strategy.md)
+> §«Google SSO + MAGSpace» (flow, коды отказов), [03-roles.md](03-roles.md)
+> §«Откуда берётся роль», [16-jobs-and-integrations.md](16-jobs-and-integrations.md)
+> §«MAGSpace directory reconcile», [13-api-design.md](13-api-design.md),
+> [12-database-schema.md](12-database-schema.md),
+> [23-prod-deployment-runbook.md](23-prod-deployment-runbook.md) §1.2/§2.4/§4/§8.
+>
+> Этот документ остаётся **записью решений и их обоснований** — он не
+> переписывался под факт реализации.
 
 ## 0. Зачем
 
@@ -481,3 +493,66 @@ export function hasAnyPermission(role: Role, ps: readonly Permission[]): boolean
 | 3 | Число сотрудников | Около 100 | `GET /employees` без пагинации |
 
 Открытых вопросов не осталось.
+
+---
+
+## 9. Что изменилось при реализации (2026-09-09)
+
+Шесть расхождений с текстом выше. Пять — уступки конвенциям кодовой базы,
+одно — следствие бизнес-правки маппинга.
+
+| # | В плане | Сделано | Почему |
+|---|---|---|---|
+| 1 | коды `SSO_*` «в `schemas/auth.ts`» | Константы там же, но на провод уходят в **`extensions.code`** конверта RFC 7807 | В конверте нет поля `code`. `extensions` — существующая конвенция для машинных кодов (`CARRIER_NOT_READY_CODE` и ещё ~20); фронт читает `err.data.extensions.code` |
+| 2 | audit `user.deprovisioned_by_directory`, `directory.reconcile_aborted` | `system.deprovisionUserFromDirectory`, `system.abortDirectoryReconcile`, `system.syncUserFromDirectory`, `system.denyDirectoryAccess`; на пути логина — `googleLogin`, `linkGoogleAccount`, `provisionUserFromDirectory`, `syncUserFromDirectory` | `AuditWriter` **бросает Error**, если `actor:'system'` и action не начинается с `system.`. Имена — verb-noun camelCase по конвенции `audit.types.ts` |
+| 3 | `@Cron` + `DIRECTORY_RECONCILE_INTERVAL_MIN` | `SchedulerRegistry.addInterval` в `onModuleInit` | Выражение `@Cron` фиксируется при декорировании и не может прийти из env |
+| 4 | login = `localPart(email)` «как `Driver.loginSlug`» | Свой аллокатор в `DirectoryService` + `UsersRepository.existsLogin` | Аллокатор драйверов ходит в `prisma.driver` — переиспользуется паттерн, не код |
+| 5 | — | Исправлен тип `UserRow.passwordHash: string` → `string \| null` | Колонка nullable с миграции `20260507195536`, но тип врал; Google-пользователь с `passwordHash = null` молча его нарушал |
+| 6 | «stanowisko без маппинга = нет доступа», письмо **один раз на stanowisko** | Письмо **на каждого человека** (дедуп 24 ч по паре employee+stanowisko) + новое поле `User.roleOverride` | См. §10 |
+
+Дополнительно, сверх плана: два CHECK-констрейнта
+(`user_role_override_not_privileged`, `stanowisko_role_mapping_role_not_privileged`)
+— ни одна из двух дорог к роли не может выдать `admin` или `przewoznik` даже
+в обход Zod; и код `SSO_NOT_CONFIGURED` (503) для окружения без GCP-клиента,
+чтобы не выдавать «смени Google-аккаунт» там, где виноват сервер.
+
+## 10. Маппинг stanowisko → роль (решено 2026-09-09)
+
+Реальные 17 кодов MAGSpace — не `HANDLOWIEC`/`LIDER_HANDEL` из §A0.1, а
+upper-snake бывшего справочника działów. Решение по каждому:
+
+| Stanowisko | Роль | |
+|---|---|---|
+| `DYSPOZYTOR`, `DYSPOZYTOR_KIEROWNIK` | `dyspozytor` | в сиде |
+| `PLANISTA`, `PLANISTA_LIDER`, `PLANISTA_MLODSZY` | `planista` | в сиде |
+| `DAF` | `opiekun` | в сиде; единственный источник роли `opiekun` |
+| `HANDEL_SPEDYTOR`, `HANDEL_LIDER`, `HANDEL_KIEROWNIK`, `CONTROLLING` | **ручной апрув** | без записи |
+| `KAM`, `KAM_KIEROWNIK`, `KIEROWNIK_ODDZIALU`, `IT`, `WINDYKACJA`, `ASYSTENT`, `REKRUTER` | brak dostępu | без записи |
+
+**`pracownik`, `weryfikator` и `eksport` маппингом не выдаются вообще.** Внутри
+одной должности эти люди сидят вперемешку: в `CONTROLLING` двое — один
+`weryfikator`, другой `pracownik`; среди `HANDEL_*` пара человек с `eksport`.
+Роли слишком чувствительные (верификация wniosków, деньги), чтобы выводить их
+из названия должности.
+
+Отсюда и правка №6: отсутствие маппинга перестало быть аварией и стало
+**штатным путём онбординга** для четырёх должностей. Значит, решение
+принимается по человеку, а не по должности:
+
+1. Сотрудник жмёт «Zaloguj przez Google» → 403 `SSO_NO_ROLE`; админам уходит
+   письмо **с его именем, адресом и stanowiskiem** (дедуп 24 ч), событие
+   ложится в audit и видно на `/employee/sso`.
+2. Админ заводит человека обычным `POST /users` с нужной ролью, в `UserSheet`
+   ставит `managedBy = magspace` и `roleOverride = <роль>`.
+3. Следующий вход через Google совпадает по email, привязывает `googleSub` и
+   `magspaceEmployeeId` — дальше человек живёт под справочником: уволили →
+   доступ погас.
+
+`roleOverride` обязателен именно потому, что без него reconcile отключал бы
+этих людей **каждый прогон** («их stanowisko не сопоставлено»). Альтернатива
+«перевести в `managedBy=local`» отброшена: она снимает ровно то
+авто-отключение при увольнении, ради которого всё и делалось.
+
+В select на `/employee/sso` при этом оставлены все 6 назначаемых ролей, а не
+три: «pracownik/weryfikator/eksport не выдаём маппингом» — сегодняшняя
+политика, а не инвариант системы.

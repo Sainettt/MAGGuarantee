@@ -8,6 +8,7 @@
 
 import { z } from 'zod';
 
+import { AssignableRoleSchema } from './common';
 import { PasswordSchema } from './users';
 
 // ─── Roles ────────────────────────────────────────────────
@@ -169,3 +170,104 @@ export const RefreshResponse = z.object({
   user: UserDto,
 });
 export type RefreshResponse = z.infer<typeof RefreshResponse>;
+
+// ─── Google SSO (docs/24, трек A) ─────────────────────────
+
+/**
+ * POST /auth/google — the whole client-side flow in one field.
+ *
+ * Google Identity Services runs entirely in the browser and hands us a signed
+ * `id_token`; the api only verifies the signature and the claims, so there is
+ * no redirect, no `state` and no callback route (docs/24 decision #5). A JWS is
+ * three dot-separated base64url segments and the compact form has no other
+ * shape, hence the regex — it rejects an obviously-wrong body before the
+ * `google-auth-library` call, which is a network round-trip on a cold JWKS
+ * cache. The 4096 cap is generous: a Workspace token is ~1 KB.
+ */
+export const GoogleLoginRequest = z.object({
+  idToken: z
+    .string()
+    .min(1)
+    .max(4096)
+    .regex(/^[\w-]+\.[\w-]+\.[\w-]+$/, 'Not a compact JWS'),
+});
+export type GoogleLoginRequest = z.infer<typeof GoogleLoginRequest>;
+
+/**
+ * Deliberately identical to {@link VerifyCodeResponse}: a Google sign-in ends
+ * in exactly the same place as a completed 2FA — cookies set, user echoed — so
+ * the web client can share the post-login path.
+ */
+export const GoogleLoginResponse = z.object({
+  user: UserDto,
+});
+export type GoogleLoginResponse = z.infer<typeof GoogleLoginResponse>;
+
+/**
+ * Machine-readable reasons a Google sign-in was refused, carried in the RFC
+ * 7807 envelope as `extensions.code` (the convention used by
+ * `CARRIER_NOT_READY_CODE` and friends). The web reads them from
+ * `err.data.extensions.code` and picks a localised message — the human text in
+ * `detail` is a fallback, never parsed.
+ *
+ * All of these are terminal for the Google path; the password form stays
+ * available in every case.
+ */
+
+/** Not a `@magtrans.eu` Workspace account (missing or foreign `hd` claim). */
+export const SSO_DOMAIN_NOT_ALLOWED = 'SSO_DOMAIN_NOT_ALLOWED' as const;
+/** The address is not on any employee card in MAGSpace. */
+export const SSO_NOT_EMPLOYEE = 'SSO_NOT_EMPLOYEE' as const;
+/** Found in MAGSpace, but the employment has ended. */
+export const SSO_INACTIVE = 'SSO_INACTIVE' as const;
+/**
+ * The stanowisko has no row in the mapping table and the user has no
+ * `roleOverride`. Fail-closed *and* the normal onboarding path for the
+ * deliberately-unmapped positions — the admins get an e-mail naming the person
+ * so they can grant a role by hand (docs/24 §4).
+ */
+export const SSO_NO_ROLE = 'SSO_NO_ROLE' as const;
+/** Carriers are not employees; they sign in with login + password + 2FA. */
+export const SSO_NOT_FOR_CARRIER = 'SSO_NOT_FOR_CARRIER' as const;
+/**
+ * MAGSpace did not answer. Existing active managed users are still let in on
+ * their last synced role; this code is only ever returned for someone we have
+ * no local record of.
+ */
+export const SSO_DIRECTORY_UNAVAILABLE = 'SSO_DIRECTORY_UNAVAILABLE' as const;
+/**
+ * This deployment has no Google client id (or no MAGSpace token) configured, so
+ * the Google path is off entirely. Expected in dev/test, a misconfiguration
+ * anywhere else — the web hides the button when the id is absent, so seeing
+ * this means the api and the bundle disagree.
+ */
+export const SSO_NOT_CONFIGURED = 'SSO_NOT_CONFIGURED' as const;
+
+export const SSO_ERROR_CODES = [
+  SSO_DOMAIN_NOT_ALLOWED,
+  SSO_NOT_EMPLOYEE,
+  SSO_INACTIVE,
+  SSO_NO_ROLE,
+  SSO_NOT_FOR_CARRIER,
+  SSO_DIRECTORY_UNAVAILABLE,
+  SSO_NOT_CONFIGURED,
+] as const;
+export type SsoErrorCode = (typeof SSO_ERROR_CODES)[number];
+
+/**
+ * `PATCH /users/:id` tried to change `role` or `active` on a user the directory
+ * owns. Those two fields are re-synced on every login and every reconcile run,
+ * so a local edit would be silently reverted — better a 422 than a lie. The
+ * admin's options are to flip `managedBy` back to `local`, or to set
+ * `roleOverride`, which the reconcile respects.
+ */
+export const USER_MANAGED_BY_MAGSPACE = 'USER_MANAGED_BY_MAGSPACE' as const;
+
+/**
+ * Roles a stanowisko may map to, and the only values `User.roleOverride`
+ * accepts. Defined in `./common` alongside `RoleSchema` so `./users` can use it
+ * without importing this file (which would close an import cycle); re-exported
+ * here because the SSO code reaches for it next to the other auth contracts.
+ */
+export const AssignableRole = AssignableRoleSchema;
+export type AssignableRole = z.infer<typeof AssignableRole>;

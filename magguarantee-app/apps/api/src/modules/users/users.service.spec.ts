@@ -25,6 +25,13 @@ function makeRow(overrides: Partial<UserRow> = {}): UserRow {
     failedAttempts: 0,
     lockedUntil: null,
     lastLoginAt: null,
+    // SSO defaults — a hand-created, locally managed account (docs/24).
+    authProvider: 'local',
+    managedBy: 'local',
+    googleSub: null,
+    magspaceEmployeeId: null,
+    directorySyncedAt: null,
+    roleOverride: null,
     createdAt: now,
     updatedAt: now,
     deletedAt: null,
@@ -277,6 +284,89 @@ describe('UsersService', () => {
         role: 'przewoznik' as unknown as 'admin',
       }),
     ).rejects.toThrow();
+  });
+
+  // ── MAGSpace-managed accounts (docs/24 §A2) ─────────────
+
+  describe('directory-managed users', () => {
+    const managed = (over: Partial<UserRow> = {}): UserRow =>
+      makeRow({
+        id: 'u-mag',
+        login: 'jan.kowalski',
+        email: 'jan.kowalski@magtrans.eu',
+        role: 'planista',
+        managedBy: 'magspace',
+        authProvider: 'google',
+        magspaceEmployeeId: 'emp-1',
+        ...over,
+      });
+
+    it('refuses a role change — the directory would revert it anyway', async () => {
+      const { svc } = makeService([managed()]);
+
+      await expect(svc.update('u-mag', { role: 'opiekun' })).rejects.toMatchObject({
+        response: { extensions: { code: 'USER_MANAGED_BY_MAGSPACE', fields: ['role'] } },
+      });
+    });
+
+    it('refuses an active change', async () => {
+      const { svc } = makeService([managed()]);
+
+      await expect(svc.update('u-mag', { active: false })).rejects.toMatchObject({
+        response: { extensions: { code: 'USER_MANAGED_BY_MAGSPACE' } },
+      });
+    });
+
+    it('accepts a no-op patch that merely restates the current values', async () => {
+      // The admin form submits every field; only an actual CHANGE is refused.
+      const { svc } = makeService([managed()]);
+
+      await expect(
+        svc.update('u-mag', { role: 'planista', active: true, name: 'Jan K.' }),
+      ).resolves.toMatchObject({ name: 'Jan K.' });
+    });
+
+    it('allows setting roleOverride — that is the way to grant a role by hand', async () => {
+      const { svc } = makeService([managed()]);
+
+      const out = await svc.update('u-mag', { roleOverride: 'weryfikator' });
+
+      expect(out.roleOverride).toBe('weryfikator');
+    });
+
+    it('allows taking the account back into local management, role change included', async () => {
+      // Switching to `local` in the same patch is the documented escape hatch,
+      // so the role edit that accompanies it must go through.
+      const { svc } = makeService([managed()]);
+
+      const out = await svc.update('u-mag', { managedBy: 'local', role: 'opiekun' });
+
+      expect(out.managedBy).toBe('local');
+      expect(out.role).toBe('opiekun');
+    });
+
+    it('leaves locally-managed users completely unaffected', async () => {
+      const { svc } = makeService([makeRow({ id: 'u-loc', managedBy: 'local' })]);
+
+      await expect(svc.update('u-loc', { role: 'opiekun', active: false })).resolves.toMatchObject({
+        role: 'opiekun',
+        active: false,
+      });
+    });
+
+    it('toDto surfaces the directory fields', () => {
+      const { svc } = makeService();
+      const dto = svc.toDto(
+        managed({
+          roleOverride: 'weryfikator',
+          directorySyncedAt: new Date('2026-09-01T10:00:00.000Z'),
+        }),
+      );
+      expect(dto.managedBy).toBe('magspace');
+      expect(dto.authProvider).toBe('google');
+      expect(dto.roleOverride).toBe('weryfikator');
+      expect(dto.directorySyncedAt).toBe('2026-09-01T10:00:00.000Z');
+    });
   });
 
   it('toDto serializes timestamps as ISO and surfaces mustChangePassword', () => {

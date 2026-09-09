@@ -73,6 +73,14 @@ import {
   type VehicleRemovalAdminProps,
 } from './templates/vehicle-removal-admin';
 import {
+  SsoAccessRequestedEmail,
+  type SsoAccessRequestedProps,
+} from './templates/sso-access-requested';
+import {
+  DirectoryReconcileReportEmail,
+  type DirectoryReconcileReportProps,
+} from './templates/directory-reconcile-report';
+import {
   ReklamacjaInternalSubmittedEmail,
   type ReklamacjaInternalSubmittedProps,
 } from './templates/reklamacja-internal-submitted';
@@ -1173,6 +1181,116 @@ export class MailService implements IMailService {
     return this._enqueueOr(
       { template: 'vehicle-removal-admin', email, props },
       () => this.sendVehicleRemovalAdmin(email, props),
+    );
+  }
+
+  // sso-access-requested (employee signed in, has no role yet) ────
+  async sendSsoAccessRequested(
+    email: string,
+    props: SsoAccessRequestedProps,
+  ): Promise<void> {
+    const stanowisko = props.stanowiskoName
+      ? `${props.stanowiskoName}${props.stanowiskoCode ? ` (${props.stanowiskoCode})` : ''}`
+      : 'brak stanowiska w MAGSpace';
+    await this._send({
+      to: email,
+      subject: `Pracownik czeka na rolę — ${props.employeeName}`,
+      html: await render(SsoAccessRequestedEmail(props)),
+      text: [
+        `Witaj ${props.adminName},`,
+        '',
+        `${props.employeeName} (${props.employeeEmail}) próbował(a) zalogować się`,
+        `przez Google ${props.attemptedAtLabel}. Stanowisko: ${stanowisko}.`,
+        '',
+        'To stanowisko nie ma przypisanej roli w MAGGuarantee, więc logowanie',
+        'zostało odrzucone. Przyznaj rolę ręcznie w panelu użytkowników:',
+        props.usersUrl,
+      ].join('\n'),
+      template: 'sso-access-requested',
+      logMsg: 'sso access requested email sent',
+      // The address is a person's identifier — the stanowisko is enough context.
+      logExtra: { stanowiskoCode: props.stanowiskoCode },
+    });
+  }
+
+  enqueueSsoAccessRequested(
+    email: string,
+    props: SsoAccessRequestedProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'sso-access-requested', email, props },
+      () => this.sendSsoAccessRequested(email, props),
+    );
+  }
+
+  // directory-reconcile-report (MAGSpace sync outcome) ────
+  async sendDirectoryReconcileReport(
+    email: string,
+    props: DirectoryReconcileReportProps,
+  ): Promise<void> {
+    const subject = props.aborted
+      ? 'Synchronizacja z MAGSpace przerwana'
+      : props.mode === 'report'
+        ? 'Synchronizacja z MAGSpace — podgląd zmian'
+        : 'Synchronizacja z MAGSpace — raport';
+    await this._send({
+      to: email,
+      subject,
+      html: await render(DirectoryReconcileReportEmail(props)),
+      text: [
+        `Witaj ${props.adminName},`,
+        '',
+        props.aborted
+          ? `Przebieg z ${props.runAtLabel} PRZERWANY — chciał wyłączyć ` +
+            `${props.abortDetail?.wouldDisable ?? 0} z ` +
+            `${props.abortDetail?.managedTotal ?? 0} kont. Żadnych zmian nie wprowadzono.`
+          : `Przebieg z ${props.runAtLabel} (${props.mode}).`,
+        '',
+        ...(props.deprovisioned.length > 0
+          ? [
+              `Wyłączone konta (${props.deprovisioned.length}):`,
+              ...props.deprovisioned.map(
+                (r) => `  - ${r.name ?? r.login} (${r.login}) — ${r.reasonLabel}`,
+              ),
+              '',
+            ]
+          : []),
+        ...(props.roleChanges.length > 0
+          ? [
+              `Zmiany ról (${props.roleChanges.length}):`,
+              ...props.roleChanges.map(
+                (r) => `  - ${r.name ?? r.login} (${r.login}): ${r.fromRole} -> ${r.toRole}`,
+              ),
+              '',
+            ]
+          : []),
+        ...(props.localNotices.length > 0
+          ? [
+              `Konta lokalne wymagające uwagi (${props.localNotices.length}):`,
+              ...props.localNotices.map(
+                (r) => `  - ${r.name ?? r.login} (${r.login}) — rola ${r.role}`,
+              ),
+            ]
+          : []),
+      ].join('\n'),
+      template: 'directory-reconcile-report',
+      logMsg: 'directory reconcile report email sent',
+      logExtra: {
+        mode: props.mode,
+        aborted: props.aborted,
+        deprovisioned: props.deprovisioned.length,
+        roleChanges: props.roleChanges.length,
+      },
+    });
+  }
+
+  enqueueDirectoryReconcileReport(
+    email: string,
+    props: DirectoryReconcileReportProps,
+  ): Promise<void> {
+    return this._enqueueOr(
+      { template: 'directory-reconcile-report', email, props },
+      () => this.sendDirectoryReconcileReport(email, props),
     );
   }
 

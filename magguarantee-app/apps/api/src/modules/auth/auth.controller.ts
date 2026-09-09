@@ -21,6 +21,9 @@ import type { Request, Response } from 'express';
 const TEST_BYPASS = process.env.NODE_ENV === 'test';
 const RL = {
   login: { limit: TEST_BYPASS ? 1_000 : 5, ttl: 60_000 },
+  // Same budget as the password form: a Google sign-in is one round-trip, and
+  // a stricter limit would punish someone bouncing off SSO_NO_ROLE.
+  google: { limit: TEST_BYPASS ? 1_000 : 5, ttl: 60_000 },
   verify: { limit: TEST_BYPASS ? 1_000 : 10, ttl: 60_000 },
   resend: { limit: TEST_BYPASS ? 1_000 : 2, ttl: 60_000 },
   // Password-management public endpoints (docs/13-api-design.md#rate-limiting,
@@ -37,6 +40,8 @@ import {
   ChangePasswordRequest,
   ForgotPasswordRequest,
   ForgotPasswordResponse,
+  GoogleLoginRequest,
+  GoogleLoginResponse,
   LoginRequest,
   LoginResponse,
   ResendCodeRequest,
@@ -104,6 +109,45 @@ export class AuthController {
     const { user, tokens } = await this.auth.verifyCode(
       body.sessionToken,
       body.code,
+      this.requestContext(req),
+    );
+    this.setAuthCookies(res, tokens);
+    return { user };
+  }
+
+  // ── POST /auth/google ────────────────────────────────
+
+  /**
+   * Google sign-in for MAGTRANS employees (docs/24 трек A).
+   *
+   * Deliberately shaped exactly like `/auth/verify-code`: same cookies, same
+   * `{ user }` body, same `@Public()` + throttle treatment. That is what lets
+   * the web client reuse its entire post-login path — downstream, the two are
+   * the same event.
+   *
+   * `@Audit` is not optional here: `audit-coverage.spec.ts` fails a mutating
+   * endpoint without it, and an account being created or re-pointed by a
+   * sign-in is exactly what an audit log is for. Recording the request body is
+   * safe — the scrubber redacts any key matching /token/i, which `idToken` does.
+   */
+  @Public()
+  @Post('google')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: RL.google })
+  @Audit({
+    action: 'googleLogin',
+    targetType: 'User',
+    targetKey: (_req, result) =>
+      (result as { user?: { login?: string } }).user?.login,
+  })
+  async google(
+    @Body(new ZodValidationPipe(GoogleLoginRequest))
+    body: GoogleLoginRequest,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<GoogleLoginResponse> {
+    const { user, tokens } = await this.auth.loginWithGoogle(
+      body.idToken,
       this.requestContext(req),
     );
     this.setAuthCookies(res, tokens);

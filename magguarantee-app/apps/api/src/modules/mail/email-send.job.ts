@@ -22,6 +22,8 @@ import type { DelegationAnnouncedProps } from './templates/delegation-announced'
 import type { DelegationReadyProps } from './templates/delegation-ready';
 import type { GuaranteeReminderCarrierProps } from './templates/guarantee-reminder-carrier';
 import type { GuaranteeOpiekunDigestProps } from './templates/guarantee-opiekun-digest';
+import type { DirectoryReconcileReportProps } from './templates/directory-reconcile-report';
+import type { SsoAccessRequestedProps } from './templates/sso-access-requested';
 import type { VehicleRemovalAdminProps } from './templates/vehicle-removal-admin';
 
 /** BullMQ job name within the `email-send` queue. */
@@ -180,6 +182,22 @@ export interface VehicleRemovalAdminEmailJob {
   props: VehicleRemovalAdminProps;
 }
 
+/**
+ * "This employee has no role yet" notice to one admin (Google SSO, docs/24 §4).
+ */
+export interface SsoAccessRequestedEmailJob {
+  template: 'sso-access-requested';
+  email: string;
+  props: SsoAccessRequestedProps;
+}
+
+/** Directory reconcile outcome for one admin (Google SSO, docs/24 §A4). */
+export interface DirectoryReconcileReportEmailJob {
+  template: 'directory-reconcile-report';
+  email: string;
+  props: DirectoryReconcileReportProps;
+}
+
 /** Discriminated union of all `email-send` job payloads. */
 export type EmailSendJobData =
   | TwoFactorCodeEmailJob
@@ -201,4 +219,6 @@ export type EmailSendJobData =
   | DelegationReadyEmailJob
   | GuaranteeReminderCarrierEmailJob
   | GuaranteeOpiekunDigestEmailJob
-  | VehicleRemovalAdminEmailJob;
+  | VehicleRemovalAdminEmailJob
+  | SsoAccessRequestedEmailJob
+  | DirectoryReconcileReportEmailJob;

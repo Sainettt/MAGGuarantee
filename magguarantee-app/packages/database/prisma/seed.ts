@@ -19,6 +19,7 @@ import {
   MONTHLY_LIMIT_YEARS,
   seedAppConfig,
   seedMonthlyLimits,
+  seedStanowiskoRoles,
   seedTrailerTypes,
 } from './seed-data';
 
@@ -323,6 +324,7 @@ function printBanner(
   teamCount: number,
   vehicleCount: number,
   monthlyLimitCount: number,
+  stanowiskoRoleCount: number,
 ): void {
   const longestLogin = SEED_USERS.reduce((max, u) => Math.max(max, u.login.length), 0);
   const longestEmail = SEED_USERS.reduce((max, u) => Math.max(max, u.email.length), 0);
@@ -346,6 +348,10 @@ function printBanner(
       `kmPerDay=${MONTHLY_LIMIT_KM_PER_DAY}, ratePerKm=${MONTHLY_LIMIT_RATE_PER_KM}, ` +
       `kmPerSaturday=${MONTHLY_LIMIT_KM_PER_SATURDAY})`,
   );
+  console.log(
+    `Seeded StanowiskoRoleMapping: ${stanowiskoRoleCount} rows ` +
+      '(pozostałe stanowiska bez mapowania — admin uzupełnia w /employee/sso)',
+  );
   console.log('');
 }
 
@@ -359,7 +365,16 @@ async function main(): Promise<void> {
   const teamCount = await seedTeams();
   const vehicleCount = await seedDemoFleet();
   const monthlyLimitCount = await seedMonthlyLimits(prisma);
-  printBanner(userCount, configCount, trailerTypeCount, teamCount, vehicleCount, monthlyLimitCount);
+  const stanowiskoRoleCount = await seedStanowiskoRoles(prisma);
+  printBanner(
+    userCount,
+    configCount,
+    trailerTypeCount,
+    teamCount,
+    vehicleCount,
+    monthlyLimitCount,
+    stanowiskoRoleCount,
+  );
 }
 
 main()

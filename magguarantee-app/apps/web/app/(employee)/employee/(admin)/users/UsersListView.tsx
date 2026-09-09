@@ -221,9 +221,17 @@ export function UsersListView() {
         header: t('fields.role'),
         width: 'tight',
         cell: (row) => (
-          <Badge variant={ROLE_VARIANT[row.role]}>
-            {tRoles(row.role)}
-          </Badge>
+          <div className="flex items-center gap-1.5">
+            <Badge variant={ROLE_VARIANT[row.role]}>{tRoles(row.role)}</Badge>
+            {/* A hand-granted role is worth flagging: it is the one thing the
+                directory will NOT re-derive, so an admin looking for "why does
+                this person have this role" needs to see it here. */}
+            {row.roleOverride !== null && (
+              <span title={t('fields.roleOverrideHintShort')}>
+                <Badge variant="info">{t('fields.roleOverrideShort')}</Badge>
+              </span>
+            )}
+          </div>
         ),
       },
       {
@@ -235,6 +243,24 @@ export function UsersListView() {
             <Badge variant="success">{tCommon('active')}</Badge>
           ) : (
             <Badge variant="muted">{tCommon('inactive')}</Badge>
+          ),
+      },
+      {
+        id: 'managedBy',
+        header: t('fields.managedBy'),
+        width: 'tight',
+        cell: (row) =>
+          row.managedBy === 'magspace' ? (
+            <div className="flex flex-col gap-0.5">
+              <Badge variant="info">{t('fields.magspace')}</Badge>
+              <span className="text-[11px] text-text-sub tabular-nums">
+                {row.directorySyncedAt
+                  ? formatDateShort(row.directorySyncedAt)
+                  : '—'}
+              </span>
+            </div>
+          ) : (
+            <Badge variant="muted">{t('fields.local')}</Badge>
           ),
       },
       {

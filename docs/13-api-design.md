@@ -10,7 +10,7 @@
 
 ### Аутентификация
 
-- Все endpoints (кроме `/auth/login`, `/auth/verify-code`, `/auth/refresh`, `/health`) защищены `JwtAuthGuard`.
+- Все endpoints (кроме `/auth/login`, `/auth/verify-code`, `/auth/google`, `/auth/refresh`, `/health`) защищены `JwtAuthGuard`.
 - JWT передаётся в `Authorization: Bearer <access_token>` или в HttpOnly cookie `mt_access` (для web).
 - `RolesGuard` дополнительно проверяет роль через `@Roles(...)`. Помни: `pracownik` — это узкая роль («Opiekun wniosków»), допущенная только к claims-эндпоинтам и dashboard. Никогда не комбинируй `@Roles('admin', 'pracownik')` для CRUD по carriers/vehicles/drivers/trailers — там должно быть `@Roles('admin', 'opiekun')`.
 - `OwnershipGuard` для opiekun-эндпоинтов: проверяет, что `carrierId` в pathparam принадлежит текущему opiekun.
@@ -95,6 +95,10 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 
 ### Auth — `/api/v1/auth`
 
+> Redirect-flow Google (`GET /auth/google` + `/auth/google/callback`) из ранних
+> черновиков **не реализован**: вход построен на front-side id_token, поэтому
+> callback-роута нет. Подробности — [15-auth-strategy.md](15-auth-strategy.md).
+
 | Method + Path | GAS-аналог | Назначение |
 |---|---|---|
 | POST `/auth/login` | `sendLoginCode` (`Code.gs:1003`) | Принимает `{login, password}`. Если ok → `{ codeSent: true, maskedEmail: 'ma***@magtrans.eu', sessionToken }` (sessionToken — короткоживущий, нужен для verify) |
@@ -107,8 +111,7 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 | POST `/auth/reset-password` | — (новое) | `{sessionToken, code, newPassword}` → 204. Верифицирует код, хеширует, ставит `passwordChangedAt`, чистит `mustChangePassword`, **отзывает все refresh-токены**. Без авто-логина. Rate 10/min. |
 | POST `/auth/resend-reset-code` | — (новое) | `{sessionToken}`. Cooldown как `resend-code`. Rate 2/min. |
 | POST `/auth/change-password` | — (новое, authenticated) | `{newPassword}` — forced/voluntary смена. Чистит `mustChangePassword`, ставит `passwordChangedAt`, выдаёт свежую пару токенов (claim сброшен), **отзывает прочие сессии**. |
-| GET `/auth/google` | — (опц.) | Redirect на Google OAuth |
-| GET `/auth/google/callback` | — (опц.) | Колбэк OAuth, выдаёт JWT |
+| POST `/auth/google` | — (новое, `@Public`) | Google SSO для сотрудников (docs/24). Принимает `{ idToken }` — подписанный `id_token` от Google Identity Services, полученный в браузере. Верифицирует подпись/`aud`/`iss`/`exp`/`email_verified`/`hd`, резолвит сотрудника в MAGSpace, выводит роль из stanowiska и заводит/синхронизирует `User`. Ответ **идентичен** `/auth/verify-code`: `{ user }` + cookies. Кода 2FA нет. Отказы — 403/503 с `extensions.code` из набора `SSO_*`. Rate 5/min/IP. |
 
 > **JWT-claim `mustChangePassword`.** Access-токен несёт флаг — web-middleware декодирует `mt_access` и гейтит навигацию на `/login/change-password`, пока флаг стоит. Снимается после `change-password` (свежая пара токенов).
 
@@ -541,6 +544,17 @@ DB CHECK enforces `returnCountry` length 2..8 (covers `EL`) and `returnPostalCod
 |---|---|
 | GET `/audit?targetType=...&targetKey=...` | (нет — лист открывается напрямую сейчас) |
 
+### SSO — `/api/v1/sso` (admin only)
+
+Управление тем, какая должность из MAGSpace даёт какую роль здесь (docs/24 §A5).
+
+| Method + Path | Назначение |
+|---|---|
+| GET `/sso/stanowisko-roles` | `{ items, magspaceOk, lastReconcileAt }`. `items` — **полное объединение**: каждое stanowisko, которое отдаёт MAGSpace (в т.ч. несопоставленные, `role: null`), плюс сохранённые строки, чьих кодов MAGSpace больше не знает (`knownToMagspace: false`). При недоступном MAGSpace отдаёт только сохранённые строки и `magspaceOk: false` — прятать текущий маппинг во время аварии было бы ровно наоборот. |
+| PUT `/sso/stanowisko-roles/:code` | `{ role }` → upsert. Идемпотентно: код — это идентичность. `role` из 6 назначаемых (без `admin`/`przewoznik`); код должен быть UPPER_SNAKE. |
+| DELETE `/sso/stanowisko-roles/:code` | 204. Убирает маппинг — держатели теряют доступ на следующем входе или прогоне reconcile. 404, если строки не было. |
+| GET `/sso/access-denials` | Последние отказы `SSO_NO_ROLE` — читаются из audit-лога (`system.denyDirectoryAccess`), отдельной таблицы заявок нет. |
+
 ### Diagnostics (admin only) — `/api/v1/diagnostics`
 
 | Method + Path | GAS |
@@ -549,7 +563,7 @@ DB CHECK enforces `returnCountry` length 2..8 (covers `EL`) and `returnPostalCod
 | POST `/diagnostics/mails/resend/:nrZgl` | `ponowWyslijEmail` |
 | GET `/diagnostics/claims` | `DIAGNOSTYKA_WNIOSKÓW` |
 | GET `/diagnostics/dashboard` | `getDashboardStats` |
-| GET `/diagnostics/db` | (новое) — health-check Prisma + сводка по таблицам |
+| GET `/diagnostics/db` | (новое) — health-check Prisma + сводка по таблицам + строка MAGSpace (`configured` / `ok` / `latencyMs` / `lastReconcileAt`) |
 
 ### Health / Ready — без префикса `/api/v1`
 
@@ -840,7 +854,7 @@ Source of truth — Zod-схемы в `packages/shared`. Никакого OpenAP
 
 | Endpoint | Лимит |
 |---|---|
-| `/auth/login`, `/auth/verify-code` | 5 / минуту / IP |
+| `/auth/login`, `/auth/verify-code`, `/auth/google` | 5 / минуту / IP |
 | `/auth/resend-code` | 3 / 5 минут / sessionToken |
 | `/integrations/vies/*` | 10 / минуту / IP (внешний API лимиты) |
 | `/integrations/whitelist`, `/integrations/whitelist/search` | 10 / минуту / IP |

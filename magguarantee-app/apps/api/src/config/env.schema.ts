@@ -116,6 +116,74 @@ export const envSchema = z.object({
     (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
     z.string().optional(),
   ),
+  // ── Google SSO + MAGSpace directory (docs/24, трек A) ──
+  // Employees sign in with Google; MAGSpace answers "is this an active employee
+  // and on which stanowisko"; a mapping table here turns that into a role.
+  //
+  // GOOGLE_OAUTH_CLIENT_ID is the *Web application* client from the company GCP
+  // project — the SAME id the browser bundle is built with
+  // (NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID), because it is what the `aud` claim of
+  // the incoming id_token must equal. It is a public value, not a secret; there
+  // is deliberately no client SECRET here, since the front-side GIS flow never
+  // exchanges an authorization code (docs/24 decision #5).
+  //
+  // Blank == absent (same `z.preprocess` idiom as the optional keys above), and
+  // absent means the Google path is simply off: `POST /auth/google` answers 503
+  // and everything else — password + 2FA — keeps working. That is what makes a
+  // dev or test environment able to boot without any GCP setup.
+  GOOGLE_OAUTH_CLIENT_ID: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z.string().optional(),
+  ),
+  // Workspace domain the `hd` claim must equal. Checking it is NOT optional
+  // security theatre: without `hd` any personal @gmail.com whose address
+  // happens to match an employee's would verify successfully.
+  SSO_ALLOWED_HD: z.string().min(1).default('magtrans.eu'),
+
+  // Base URL of the MAGSpace directory API, reached over the shared docker
+  // network `magtrans-internal` — never through Caddy, the `/internal/*` routes
+  // are not published. The path prefix (`/internal/v1`) is added by the client,
+  // so this is host + port only.
+  MAGSPACE_API_URL: z.string().url().default('http://magspace-api:3001'),
+  // Bearer token for that API — the same value as in MAGSpace's own `.env`.
+  // MAGSpace accepts a comma-separated list so a rotation is add-new → switch
+  // here → remove-old; we only ever present one. Blank == absent == the
+  // directory is not configured, which degrades exactly like a missing
+  // GOOGLE_OAUTH_CLIENT_ID above.
+  MAGSPACE_INTERNAL_TOKEN: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z.string().min(32).optional(),
+  ),
+
+  // Reconcile job — pulls the full roster and re-syncs every magspace-managed
+  // user. `enforce` applies the changes; `report` only e-mails the admins what
+  // it WOULD do, which is the debugging mode. Default is enforce: production is
+  // not live yet, so there is no legacy roster to babysit (docs/24 decision #13).
+  DIRECTORY_RECONCILE_MODE: z.enum(['enforce', 'report']).default('enforce'),
+  // Minutes between runs. This is the worst-case delay between "fired in
+  // MAGSpace" and "cannot open MAGGuarantee"; the check at sign-in is always
+  // live. Cannot be a @Cron expression — those are fixed at decoration time —
+  // so the service registers a dynamic interval instead.
+  DIRECTORY_RECONCILE_INTERVAL_MIN: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(1440)
+    .default(15),
+  // Kill-switch, same explicit-coercion pattern as GUARANTEE_WATCHDOG_ENABLED:
+  // only "true"/"1" mean enabled, an empty/absent value falls through to the
+  // default (on). Turning it off freezes the roster — sign-in still syncs the
+  // person who signs in, but nobody gets deprovisioned in the background.
+  DIRECTORY_RECONCILE_ENABLED: z.preprocess((v) => {
+    if (typeof v === 'boolean') return v;
+    if (typeof v === 'string') {
+      const s = v.trim().toLowerCase();
+      if (s === '') return undefined; // fall through to default(true)
+      return s === 'true' || s === '1';
+    }
+    return undefined;
+  }, z.boolean().default(true)),
+
   // ── App URL (used for deeplinks in transactional emails) ──
   // Same value as WEB_URL today; kept as a separate key so we can later
   // point email links at a different host (e.g. a public mirror) without

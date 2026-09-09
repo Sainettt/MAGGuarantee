@@ -50,7 +50,7 @@
 | 20 | [20-phase-7-eksport-weryfikator.md](20-phase-7-eksport-weryfikator.md) | **Phase 7 импл-спека** — роли `eksport` + `weryfikator` (статус выездов, `lastDroveAt`). Scope частично неясен → делаем как в легаси. |
 | 22 | [22-email-design.md](22-email-design.md) | **Email design system** — единый table-based шаблон транзакционных писем (палитра `#E02020`, блоки, статус-бейджи, `MAIL_LOGO_URL`). |
 | 23 | [23-prod-deployment-runbook.md](23-prod-deployment-runbook.md) | **Runbook выката в прод** — пошагово с нуля: домен, GCP, bootstrap VPS, Caddy, `.env`, миграции, сид, бэкапы, CI/CD, приёмка. Проверен репетицией 2026-07-29. |
-| 24 | [24-sso-magspace-and-permissions-plan.md](24-sso-magspace-and-permissions-plan.md) | **План (согласован, ревизия 3, 2026-09-04):** Google SSO для сотрудников, MAGSpace как справочник (одно stanowisko из фиксированного enum → роль через admin-маппинг, JIT-provisioning, pull-reconcile каждые 15 мин), admin только локально, пароль остаётся запасным, слой permissions поверх ролей. Контракт для MAGSpace в §A0. Не начат. |
+| 24 | [24-sso-magspace-and-permissions-plan.md](24-sso-magspace-and-permissions-plan.md) | **Трек A реализован (2026-09-09).** Google SSO для сотрудников, MAGSpace как справочник (одно stanowisko → роль через admin-маппинг, JIT-provisioning, pull-reconcile), admin только локально, пароль остаётся запасным. §9 — шесть расхождений реализации с планом, §10 — итоговый маппинг 17 должностей и почему `pracownik`/`weryfikator`/`eksport` выдаются вручную. Трек B (слой permissions) — не начат. |
 
 ## Быстрая навигация по ролям
 
@@ -83,7 +83,9 @@
 3. Скриншоты `docs/screenshots/` (если сделаны).
 
 ### Если ты делаешь auth
-1. [15-auth-strategy.md](15-auth-strategy.md) — JWT + 2FA + Guards.
+1. [15-auth-strategy.md](15-auth-strategy.md) — JWT + 2FA + Guards + Google SSO.
+2. [24-sso-magspace-and-permissions-plan.md](24-sso-magspace-and-permissions-plan.md) §9–§10 — почему SSO устроен именно так и как маппятся должности.
+3. Контракт справочника со стороны MAGSpace — `MAGSpace/docs/07-directory-api.md`.
 
 ### Если ты делаешь email-шаблоны
 1. [22-email-design.md](22-email-design.md) — единый шаблон, токены, блоки, статус-бейджи.

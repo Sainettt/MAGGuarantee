@@ -179,6 +179,13 @@ export const EMPLOYEE_NAV: readonly NavLink[] = [
     roles: ['admin'],
   },
   {
+    key: 'sso',
+    href: '/employee/sso',
+    labelKey: 'nav.sso',
+    iconName: 'KeyRound',
+    roles: ['admin'],
+  },
+  {
     key: 'audit',
     href: '/employee/audit',
     labelKey: 'nav.audit',

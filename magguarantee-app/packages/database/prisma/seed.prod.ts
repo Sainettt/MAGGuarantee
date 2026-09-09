@@ -1,8 +1,9 @@
 // Production bootstrap — run ONCE manually via `npm run seed:prod`.
 //
 // Seeds ONLY the reference data a fresh production database needs to boot
-// (AppConfig keys, TrailerType catalog, MonthlyLimit placeholders) plus the
-// first admin account. NO fake users, NO demo carrier/vehicle/teams.
+// (AppConfig keys, TrailerType catalog, MonthlyLimit placeholders, the
+// stanowisko → role mapping the Google SSO reads) plus the first admin account.
+// NO fake users, NO demo carrier/vehicle/teams.
 //
 // Idempotent: every write is an upsert, so an accidental re-run is a no-op. In
 // particular the admin upsert uses `update: {}` — re-running never resets the
@@ -17,6 +18,7 @@ import { PrismaClient, Role } from '../src/generated';
 import {
   seedAppConfig,
   seedMonthlyLimits,
+  seedStanowiskoRoles,
   seedTrailerTypes,
 } from './seed-data';
 
@@ -39,6 +41,9 @@ async function seedFirstAdmin(prismaClient: PrismaClient): Promise<string> {
       passwordHash,
       active: true,
       mustChangePassword: true,
+      // Explicit, though it is also the column default: the break-glass admin
+      // must stay out of the directory reconcile's reach (docs/24 decision #4).
+      managedBy: 'local',
     },
     // Never overwrite an existing admin — don't reset the password or re-flip
     // mustChangePassword on a re-run.
@@ -51,6 +56,7 @@ async function main(): Promise<void> {
   const configCount = await seedAppConfig(prisma);
   const trailerTypeCount = await seedTrailerTypes(prisma);
   const monthlyLimitCount = await seedMonthlyLimits(prisma);
+  const stanowiskoRoleCount = await seedStanowiskoRoles(prisma);
   const adminEmail = await seedFirstAdmin(prisma);
 
   console.log('');
@@ -58,6 +64,7 @@ async function main(): Promise<void> {
   console.log(`Seeded AppConfig:    ${configCount} keys`);
   console.log(`Seeded TrailerType:  ${trailerTypeCount} entries`);
   console.log(`Seeded MonthlyLimit: ${monthlyLimitCount} rows`);
+  console.log(`Seeded stanowiska:   ${stanowiskoRoleCount} role mappings`);
   console.log(`Seeded admin:        ${adminEmail} (password change forced on first login)`);
   console.log('');
 }

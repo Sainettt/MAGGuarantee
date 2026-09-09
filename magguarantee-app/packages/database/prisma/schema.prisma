@@ -25,6 +25,25 @@ enum Role {
   weryfikator
 }
 
+// ─── SSO / MAGSpace (docs/24, трек A) ───────────────────
+
+// How the account authenticates. `google` accounts are provisioned on first
+// successful Google sign-in and keep `passwordHash = null` until the owner sets
+// one through the ordinary "Zapomniałem hasła" flow.
+enum AuthProvider {
+  local
+  google
+}
+
+// Who owns the account's role and active flag. `magspace` rows are driven by
+// the employee directory (JIT provisioning at login + reconcile every N min);
+// their `role`/`active` are read-only in the admin UI. `local` rows — including
+// every admin — are managed here and never touched by the reconcile.
+enum UserManagedBy {
+  local
+  magspace
+}
+
 // The manual request-authorization flow and the parallel "kwota Maksima"
 // concept were retired 2026-07-24 (migration remove_manual_authorization_flow).
 // `OCZEKUJE_NA_AUTORYZACJE` stays — it is now set AUTOMATICALLY by the api when a
@@ -269,6 +288,28 @@ model User {
   lockedUntil        DateTime?
   lastLoginAt        DateTime?
 
+  // ── SSO / MAGSpace (docs/24 трек A) ──────────────────────
+  // How this account signs in. `local` covers everyone created through
+  // `POST /users`; `google` is set when the account is provisioned from the
+  // directory on first Google sign-in.
+  authProvider       AuthProvider  @default(local)
+  // Who owns `role` and `active`. `magspace` rows are synced from the employee
+  // directory; the admin UI renders those two fields read-only. Admin accounts
+  // are always `local` — the role `admin` is never derived from a stanowisko.
+  managedBy          UserManagedBy @default(local)
+  // Google `sub` — stable across a Workspace e-mail rename, which `email` is
+  // not. First link happens by e-mail, every later login matches on this.
+  googleSub          String?       @unique
+  // MAGSpace `Employee.id`. A cuid, NOT a uuid — do not add `@db.Uuid`.
+  magspaceEmployeeId String?       @unique
+  directorySyncedAt  DateTime?
+  // Role granted BY HAND by an admin, for stanowiska the mapping deliberately
+  // leaves unmapped (HANDEL_*, CONTROLLING — see docs/24 §4). When set, the
+  // reconcile neither changes the role nor deprovisions for "stanowisko has no
+  // mapping"; it still syncs `active`/`name` and still revokes access when the
+  // person is terminated in MAGSpace. NULL = role comes from the mapping.
+  roleOverride       Role?
+
   // role-specific fields (NULL for other roles)
   // planista — per-role tech debt; same denormalization pattern as the
   // ex-`User.company` field (already moved to Carrier). Likely future cleanup:
@@ -315,7 +356,35 @@ model User {
   @@index([role])
   @@index([deletedAt])
   @@index([teamId])
+  // The directory reconcile scans every magspace-managed row each run.
+  @@index([managedBy])
   @@map("users")
+}
+
+// stanowisko (MAGSpace) → rola (MAGGuarantee). Maintained by an admin through
+// `/employee/sso`; MAGSpace itself stores no MAGGuarantee roles (docs/24 §1.3).
+//
+// A stanowisko with NO row here means "no access": the sign-in fails with
+// `SSO_NO_ROLE` and the admins get an e-mail. That is the normal onboarding path
+// for the mixed stanowiska (HANDEL_*, CONTROLLING) whose members need a role
+// picked per person — see `User.roleOverride` and docs/24 §4.
+model StanowiskoRoleMapping {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  // Value of the MAGSpace `Stanowisko` enum (UPPER_SNAKE). Stable forever by
+  // contract — a renamed position is a new code, never a redefined one.
+  stanowiskoCode String @unique
+  // Display name as MAGSpace served it, snapshotted so the admin table still
+  // reads sensibly when the directory is unreachable.
+  stanowiskoName String
+  // Never `admin` or `przewoznik` — enforced in the Zod schema, not the DB,
+  // because Prisma enums cannot be narrowed per column.
+  role           Role
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("stanowisko_role_mappings")
 }
 
 // ─── CARRIERS (UZYTKOWNICY extension fields) ────────────

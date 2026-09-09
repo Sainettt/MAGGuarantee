@@ -166,6 +166,8 @@ services:
     networks:
       - internal
       - proxy-net
+      # Google SSO — the MAGSpace employee directory (docs/24 §A6).
+      - magtrans-internal
     logging:
       driver: json-file
       options:
@@ -186,6 +188,11 @@ services:
         # Must be kept in sync with the api-side `ALLOW_PAST_DEPARTURE` — the
         # two flags are independent, and only the api one is authoritative.
         NEXT_PUBLIC_ALLOW_PAST_DEPARTURE: ${NEXT_PUBLIC_ALLOW_PAST_DEPARTURE:-false}
+        # Google sign-in client id (docs/24 §A6). Baked into the CLIENT bundle at
+        # BUILD time — changing it in .env requires `docker compose build web`,
+        # a restart keeps the stale value. Empty = the Google button is not
+        # rendered at all and only the password form is shown.
+        NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID:-}
     container_name: magguarantee-web
     restart: unless-stopped
     env_file: .env
@@ -211,4 +218,13 @@ networks:
   internal:
     driver: bridge
   proxy-net:
+    external: true
+  # Shared with the MAGSpace stack — this is how `magguarantee-api` reaches the
+  # employee directory at `http://magspace-api:3001/internal/v1` (docs/24 §A6).
+  # Deliberately NOT `proxy-net`: that one exists for Caddy, and the directory
+  # API is never published. Created once per VPS, by hand:
+  #   docker network create magtrans-internal
+  # MAGSpace joins it from its own staging overlay.
+  magtrans-internal:
+    name: ${INTERNAL_NETWORK:-magtrans-internal}
     external: true

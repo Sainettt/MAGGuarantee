@@ -950,8 +950,19 @@ derived hours.
 | Поле | Слой защиты | Notes |
 |---|---|---|
 | `login`, `email`, `role` | Strict everywhere | DB NOT NULL + UNIQUE on login/email |
-| `passwordHash` | Optional (DB nullable) | Allows future email-only auth flow |
+| `passwordHash` | Optional (DB nullable) | Allows email-only auth. **Google-provisioned users genuinely have `null` here** until they set one through «Zapomniałem hasła» (docs/24) |
 | `liderEmail` | Optional everywhere; per-role tech debt — see docs/19-known-quirks.md (#liderEmail) |  |
+| `authProvider`, `managedBy` | DB NOT NULL + default `local` | Google SSO (docs/24). `managedBy='magspace'` ⇒ `role`/`active` принадлежат справочнику; `PATCH /users/:id` на них отвечает 422 `USER_MANAGED_BY_MAGSPACE` |
+| `googleSub`, `magspaceEmployeeId` | Optional, UNIQUE | Ключи привязки. `magspaceEmployeeId` — **cuid**, не UUID: без `@db.Uuid` |
+| `roleOverride` | Optional; CHECK `user_role_override_not_privileged` | Роль, выданная админом вручную для stanowisk без маппинга. Заполнено ⇒ reconcile не меняет роль и не отключает за «нет маппинга», но при увольнении доступ всё равно гасит |
+
+### StanowiskoRoleMapping
+
+| Поле | Слой защиты | Notes |
+|---|---|---|
+| `stanowiskoCode` | Strict + UNIQUE | Значение enum `Stanowisko` из MAGSpace (UPPER_SNAKE). Код стабилен навсегда по контракту |
+| `stanowiskoName` | Strict | Снапшот польского названия — кэш на случай, когда MAGSpace недоступен; живое значение выигрывает |
+| `role` | Strict; CHECK `stanowisko_role_mapping_role_not_privileged` | Никогда `admin` / `przewoznik`. Отсутствие строки = нет доступа (fail-closed) |
 
 ## Соответствие колонок Sheets → поля Prisma
 
@@ -1139,6 +1150,7 @@ derived hours.
 | `20260506205557_phase3_indexes` | Hot-path индексы: `claims(carrierId, deletedAt)` и `delegations(carrierId, deletedAt, status)` для carrier-panel списков, проходящих через soft-delete middleware. |
 | `20260507191424_phase3_blocks` | Strict-everywhere перевод: NOT NULL на базовый профиль `Carrier` (contactPerson/ordersEmail/accountEur/companyAddress/...), расчётные поля `Claim` (timeFrom/timeTo/drivenDays/mileage/...), driver email/license/bank, vehicle certificateL/euro/type/rates, departure-fields на delegations. **Добавляет CHECK constraints:** `claim_accepted_payment_complete` (orderNumber+orderDate+amountApproved при ZAAKCEPTOWANO) и `vehicle_gps_device_when_gps_on` (gpsMobilePhone при gps=true). |
 | `20260726120000_drop_claim_amount_requested` | Дропает `claims.amountRequested` — зеркало `paymentEur` на всех путях записи (submit / авто-пересчёт выезда / PATCH верификатора). Ни один CHECK на него не ссылался, так что это чистый `DROP COLUMN`. Данные не теряются: значение каждой строки воспроизводится как `paymentEur` той же строки. Запрошенную сумму отдаёт `origPaymentEur`. |
+| `20260909120000_sso_google_and_magspace` | Google SSO + MAGSpace как справочник сотрудников (docs/24 трек A). Enum-ы `AuthProvider` / `UserManagedBy`; на `users` — `authProvider`, `managedBy`, `googleSub` (UNIQUE), `magspaceEmployeeId` (UNIQUE, **TEXT: cuid, не UUID**), `directorySyncedAt`, `roleOverride`; индекс `users_managedBy_idx` (reconcile перебирает managed-строки каждый прогон); новая таблица `stanowisko_role_mappings`. **Два CHECK-констрейнта:** `user_role_override_not_privileged` и `stanowisko_role_mapping_role_not_privileged` — ни одна из двух дорог к роли не может выдать `admin` или `przewoznik`. Полностью аддитивная и forward-only: существующие строки получают `managedBy='local'` из DEFAULT, что и требуется — они все заведены руками. |
 | `20260507195536_phase3_blocks_audit_revert` | Откатывает несколько слишком-агрессивных NOT NULL-ов из предыдущей миграции (insurance/license carrier, plannedReturn delegation, email/license/bank driver, rates vehicle, password user) — поля возвращаются в DB-nullable, обязательность остаётся на API+UI. **Закрепляет** `amountRequested` как DB NOT NULL и **добавляет** CHECK `delegation_returned_complete` (actualReturnAt+returnCountry+returnPostalCode при `zjechal`). |
 | `20260507223021_move_company_to_carrier` | Переносит поле `company` (Firma) с `users` на `carriers`. Денормализация-наследие GAS-миграции; внутренние сотрудники MAGTRANS никогда company не имели. ADD column → BACKFILL через carrier↔user 1:1 → DROP source — порядок безопасен на непустой БД. |
 | `20260508115947_carrier_nip_vat_required` | NOT NULL на `carriers.nip` и `carriers.vatId`. Налоговые ID требуются на момент создания: PL-перевозчики дают 10-значный NIP, иностранные — локальный TIN; `vatId` — EU VAT с префиксом страны. (Позже частично откатано: см. `20260515112821_carrier_vat_id_optional` — `vatId` снова nullable.) |

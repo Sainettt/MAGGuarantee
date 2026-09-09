@@ -8,13 +8,14 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-import type {
-  CreateUserDto,
-  ResetPasswordModeDto,
-  UpdateUserDto,
-  UserDtoFull,
-  UserFilters,
-  UserWithTemporaryPasswordDto,
+import {
+  USER_MANAGED_BY_MAGSPACE,
+  type CreateUserDto,
+  type ResetPasswordModeDto,
+  type UpdateUserDto,
+  type UserDtoFull,
+  type UserFilters,
+  type UserWithTemporaryPasswordDto,
 } from '@magguarantee/shared';
 
 import type { Env } from '../../config/env.schema';
@@ -164,6 +165,29 @@ export class UsersService {
         'Nie można zmienić roli na przewoźnika tym endpointem',
       );
     }
+    // A directory-managed account has its `role` and `active` re-synced on
+    // every sign-in and every reconcile run, so accepting an edit here would be
+    // a lie: the value would be reverted within minutes and nobody would know
+    // why. Refuse instead, and name the two ways out — hand the account back to
+    // local management, or grant the role through `roleOverride`, which the
+    // reconcile respects (docs/24 §4).
+    //
+    // Deliberately allowed on a managed account: `managedBy` itself (that IS
+    // the way out), `roleOverride`, and the cosmetic `name` / `email` /
+    // `liderEmail` fields, which the next sync will simply overwrite.
+    if (existing.managedBy === 'magspace') {
+      const blocked: string[] = [];
+      if (dto.role !== undefined && dto.role !== existing.role) blocked.push('role');
+      if (dto.active !== undefined && dto.active !== existing.active) blocked.push('active');
+      if (blocked.length > 0 && dto.managedBy !== 'local') {
+        throw new UnprocessableEntityException({
+          message:
+            'Rola i aktywność tego użytkownika są zarządzane w MAGSpace. ' +
+            'Ustaw „rolę przyznaną ręcznie” albo przełącz konto na zarządzanie lokalne.',
+          extensions: { code: USER_MANAGED_BY_MAGSPACE, fields: blocked },
+        });
+      }
+    }
     try {
       const updated = await this.repo.update(id, {
         // `email` is NOT NULL post-phase3_blocks — patch with the value
@@ -173,6 +197,10 @@ export class UsersService {
         ...(dto.role !== undefined ? { role: dto.role } : {}),
         ...(dto.liderEmail !== undefined ? { liderEmail: dto.liderEmail } : {}),
         ...(dto.active !== undefined ? { active: dto.active } : {}),
+        ...(dto.managedBy !== undefined ? { managedBy: dto.managedBy } : {}),
+        // Clearing the override hands the role decision back to the stanowisko
+        // mapping; the change takes effect on the next sign-in or reconcile.
+        ...(dto.roleOverride !== undefined ? { roleOverride: dto.roleOverride } : {}),
       });
       return this.toDto(updated);
     } catch (err) {
@@ -288,6 +316,12 @@ export class UsersService {
       liderEmail: row.liderEmail,
       mustChangePassword: row.mustChangePassword,
       lastLoginAt: row.lastLoginAt ? row.lastLoginAt.toISOString() : null,
+      managedBy: row.managedBy,
+      authProvider: row.authProvider,
+      roleOverride: row.roleOverride,
+      directorySyncedAt: row.directorySyncedAt
+        ? row.directorySyncedAt.toISOString()
+        : null,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
@@ -301,6 +335,16 @@ export class UsersService {
 
   findById(id: string): Promise<UserRow | null> {
     return this.repo.findById(id);
+  }
+
+  /** Google SSO: first link matches on e-mail (docs/24 decision #10). */
+  findByEmail(email: string): Promise<UserRow | null> {
+    return this.repo.findByEmail(email);
+  }
+
+  /** Google SSO: every subsequent sign-in matches on the stable `sub`. */
+  findByGoogleSub(googleSub: string): Promise<UserRow | null> {
+    return this.repo.findByGoogleSub(googleSub);
   }
 
   incrementFailedAttempts(id: string): Promise<number> {

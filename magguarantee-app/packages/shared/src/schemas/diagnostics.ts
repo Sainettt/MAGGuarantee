@@ -7,7 +7,7 @@
 
 import { z } from 'zod';
 
-import { UuidSchema } from './common';
+import { IsoDateTimeSchema, UuidSchema } from './common';
 
 // ─── Dashboard ───────────────────────────────────────────────
 
@@ -181,6 +181,21 @@ export const DiagnosticsDbHealthSchema = z.object({
   redis: z.object({
     ok: z.boolean(),
     latencyMs: z.number().nonnegative(),
+  }),
+  /**
+   * MAGSpace — the employee directory behind the Google SSO (docs/24).
+   *
+   * `configured: false` means this deployment has no directory token, so the
+   * Google path is off and `ok` is meaningless; the UI should say "not
+   * configured" rather than "down". `lastReconcileAt` answers the question an
+   * admin actually has during an incident: how stale can the roles be right
+   * now?
+   */
+  magspace: z.object({
+    configured: z.boolean(),
+    ok: z.boolean(),
+    latencyMs: z.number().nonnegative(),
+    lastReconcileAt: IsoDateTimeSchema.nullable(),
   }),
 });
 export type DiagnosticsDbHealthDto = z.infer<

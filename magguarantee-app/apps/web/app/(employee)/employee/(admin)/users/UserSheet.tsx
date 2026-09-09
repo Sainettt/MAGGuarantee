@@ -14,6 +14,7 @@ import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
+  AssignableRole,
   CreateUserSchema,
   UpdateUserSchema,
   type CreateUserDto,
@@ -64,6 +65,10 @@ interface UserFormValues {
   password?: string;
   liderEmail?: string;
   active: boolean;
+  // ── MAGSpace directory (docs/24) — edit only ───────────
+  managedBy: 'local' | 'magspace';
+  /** `''` = no override, i.e. the stanowisko mapping decides the role. */
+  roleOverride: '' | AssignableRole;
 }
 
 const EMPTY_DEFAULTS: UserFormValues = {
@@ -74,6 +79,10 @@ const EMPTY_DEFAULTS: UserFormValues = {
   password: '',
   liderEmail: '',
   active: true,
+  // A hand-created account is always locally managed; an admin can hand it to
+  // the directory afterwards.
+  managedBy: 'local',
+  roleOverride: '',
 };
 
 interface Props {
@@ -116,6 +125,8 @@ export function UserSheet({ open, user, onClose }: Props) {
         password: '',
         liderEmail: user.liderEmail ?? '',
         active: user.active,
+        managedBy: user.managedBy,
+        roleOverride: user.roleOverride ?? '',
       });
     } else {
       form.reset(EMPTY_DEFAULTS);
@@ -162,6 +173,14 @@ export function UserSheet({ open, user, onClose }: Props) {
         const { login: _l, password: _p, ...rest } = cleaned;
         void _l;
         void _p;
+        // `roleOverride` is the one field where the empty string is MEANINGFUL:
+        // it means "clear the hand-granted role and let the stanowisko mapping
+        // decide again". The generic cleaner above drops empty strings, so it
+        // has to be restored explicitly — otherwise an override could be set
+        // but never removed.
+        if (values.roleOverride === '' && user.roleOverride !== null) {
+          rest.roleOverride = null;
+        }
         updateM.mutate({ id: user.id, body: rest as UpdateUserDto });
       } else {
         // Create slice — drop the form-only `active` if absent; the API
@@ -183,6 +202,17 @@ export function UserSheet({ open, user, onClose }: Props) {
   // the field is meaningless for the others (per docs/03-roles.md#planista).
   const watchedRole = form.watch('role');
   const showLiderEmail = watchedRole === 'planista';
+
+  // A directory-managed account has `role` and `active` re-synced on every
+  // sign-in and every reconcile run, so the api refuses to change them here
+  // (422 USER_MANAGED_BY_MAGSPACE). Disabling the inputs makes that visible
+  // BEFORE the admin types into a field whose value would be reverted.
+  //
+  // `watch` rather than `user.managedBy`: flipping the toggle to `local`
+  // unlocks both fields in the same edit, which is the documented way to take
+  // an account back (docs/24 §A2).
+  const watchedManagedBy = form.watch('managedBy');
+  const isDirectoryManaged = isEdit && watchedManagedBy === 'magspace';
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
@@ -239,10 +269,17 @@ export function UserSheet({ open, user, onClose }: Props) {
               <FormField
                 label={t('fields.role')}
                 required
+                description={
+                  isDirectoryManaged ? t('fields.managedHint') : undefined
+                }
                 error={errMsg('role')}
                 htmlFor="user-role"
               >
-                <Select id="user-role" {...form.register('role')}>
+                <Select
+                  id="user-role"
+                  disabled={isDirectoryManaged}
+                  {...form.register('role')}
+                >
                   {SELECTABLE_ROLES.map((r) => (
                     <option key={r} value={r}>
                       {tRoles(r)}
@@ -284,9 +321,48 @@ export function UserSheet({ open, user, onClose }: Props) {
               )}
 
               <label className="flex items-center gap-2 text-sm text-text">
-                <Checkbox {...form.register('active')} />
+                <Checkbox
+                  disabled={isDirectoryManaged}
+                  {...form.register('active')}
+                />
                 {t('fields.active')}
               </label>
+
+              {isEdit && (
+                <>
+                  <FormField
+                    label={t('fields.managedBy')}
+                    description={t('fields.managedByHint')}
+                    htmlFor="user-managedBy"
+                  >
+                    <Select id="user-managedBy" {...form.register('managedBy')}>
+                      <option value="local">{t('fields.local')}</option>
+                      <option value="magspace">{t('fields.magspace')}</option>
+                    </Select>
+                  </FormField>
+
+                  {/* The only access field editable on a managed account — and
+                      the way an admin approves someone whose stanowisko is
+                      deliberately unmapped (docs/24 §4). */}
+                  <FormField
+                    label={t('fields.roleOverride')}
+                    description={t('fields.roleOverrideHint')}
+                    htmlFor="user-roleOverride"
+                  >
+                    <Select
+                      id="user-roleOverride"
+                      {...form.register('roleOverride')}
+                    >
+                      <option value="">{t('fields.roleOverrideNone')}</option>
+                      {AssignableRole.options.map((r) => (
+                        <option key={r} value={r}>
+                          {tRoles(r)}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                </>
+              )}
             </div>
           </SheetBody>
 

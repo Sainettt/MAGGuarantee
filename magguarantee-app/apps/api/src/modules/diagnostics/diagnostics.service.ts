@@ -22,6 +22,8 @@ import type { DashboardSlaCandidateRow } from './diagnostics.repository';
 
 import { MailJobsRegistry, type MailJobRecord } from '../mail/mail-jobs.registry';
 import { MailService } from '../mail/mail.service';
+import { DirectoryState } from '../directory/directory-state';
+import { MagspaceClient } from '../directory/magspace.client';
 import { RedisService } from '../redis/redis.service';
 import { DiagnosticsRepository } from './diagnostics.repository';
 
@@ -58,6 +60,8 @@ export class DiagnosticsService {
     private readonly mailJobs: MailJobsRegistry,
     private readonly mail: MailService,
     private readonly redis: RedisService,
+    private readonly magspace: MagspaceClient,
+    private readonly directoryState: DirectoryState,
   ) {}
 
   // ── Dashboard ───────────────────────────────────────────
@@ -219,11 +223,12 @@ export class DiagnosticsService {
   // ── DB health ───────────────────────────────────────────
 
   async getDbHealth(): Promise<DiagnosticsDbHealthDto> {
-    const [pg, redis] = await Promise.all([
+    const [pg, redis, magspace] = await Promise.all([
       this._probePostgres(),
       this._probeRedis(),
+      this._probeMagspace(),
     ]);
-    return { postgres: pg, redis };
+    return { postgres: pg, redis, magspace };
   }
 
   // ── Internals ───────────────────────────────────────────
@@ -271,6 +276,27 @@ export class DiagnosticsService {
       });
       return { ok: false, latencyMs: Date.now() - start, tables: [] };
     }
+  }
+
+  /**
+   * MAGSpace liveness + how fresh the directory-driven roles are.
+   *
+   * `/internal/v1/health` needs the bearer token like every other route there,
+   * so this doubles as a check that our token is still the right one — a
+   * rotation applied on one side only shows up here as `ok: false` rather than
+   * as a wave of failed sign-ins.
+   */
+  private async _probeMagspace(): Promise<DiagnosticsDbHealthDto['magspace']> {
+    const lastReconcile = await this.directoryState.lastReconcileAt().catch(() => null);
+    const lastReconcileAt = lastReconcile ? lastReconcile.toISOString() : null;
+
+    if (!this.magspace.isConfigured) {
+      // Not an outage: this deployment simply does not use the directory.
+      return { configured: false, ok: false, latencyMs: 0, lastReconcileAt };
+    }
+    const start = Date.now();
+    const ok = await this.magspace.health();
+    return { configured: true, ok, latencyMs: Date.now() - start, lastReconcileAt };
   }
 
   private async _probeRedis(): Promise<DiagnosticsDbHealthDto['redis']> {

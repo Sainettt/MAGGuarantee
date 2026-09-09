@@ -24,13 +24,14 @@
 #
 # Required pre-step (one-time per VPS):
 #   docker network create proxy-net
+#   docker network create magtrans-internal   # Google SSO ↔ MAGSpace (docs/24)
 #
 # ── How this differs from docker-compose.staging.yml ─────────────────────────
 #   1. No mailhog — production sends through the Gmail API.
 #   2. api/web publish NO host ports; Caddy reaches them over `proxy-net`.
 #   3. web gets an explicit `environment:` instead of `env_file: .env`, so DB
 #      credentials, JWT secrets and the Gmail refresh token never enter the web
-#      container. It reads exactly three keys (verified against the source).
+#      container. It reads exactly four keys (verified against the source).
 #   4. Postgres runs with tuned memory settings (see the note on the service).
 #   5. Data paths come from the `.env` and must be absolute.
 
@@ -191,6 +192,8 @@ services:
     networks:
       - internal
       - proxy-net
+      # Google SSO — the MAGSpace employee directory (docs/24 §A6).
+      - magtrans-internal
     # Healthcheck is defined in apps/api/Dockerfile and inherited here.
     logging:
       driver: json-file
@@ -210,6 +213,11 @@ services:
         # Production rule is "backdated wyjazdy forbidden". Defaults to false so
         # an .env missing the key keeps prod semantics.
         NEXT_PUBLIC_ALLOW_PAST_DEPARTURE: ${NEXT_PUBLIC_ALLOW_PAST_DEPARTURE:-false}
+        # Google sign-in client id (docs/24 §A6). Baked into the CLIENT bundle at
+        # BUILD time — changing it in .env requires `docker compose build web`,
+        # a restart keeps the stale value. Empty = the Google button is not
+        # rendered at all and only the password form is shown.
+        NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID:-}
     container_name: magguarantee-web
     restart: unless-stopped
     # Deliberately NOT `env_file: .env` — that would hand the web container the
@@ -227,6 +235,9 @@ services:
       # client bundle was built with.
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
       NEXT_PUBLIC_ALLOW_PAST_DEPARTURE: ${NEXT_PUBLIC_ALLOW_PAST_DEPARTURE:-false}
+      # Server-rendered code must see the same client id the bundle was built
+      # with, or a server/client mismatch shows up as a hydration warning.
+      NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID:-}
     depends_on:
       - api
     # No published ports — Caddy reaches web over `proxy-net`
@@ -246,4 +257,13 @@ networks:
   # Shared with Caddy and every other app on the VPS. Created once:
   #   docker network create proxy-net
   proxy-net:
+    external: true
+  # Shared with the MAGSpace stack — this is how `magguarantee-api` reaches the
+  # employee directory at `http://magspace-api:3001/internal/v1` (docs/24 §A6).
+  # Deliberately NOT `proxy-net`: that one exists for Caddy, and the directory
+  # API is never published. Created once per VPS, by hand:
+  #   docker network create magtrans-internal
+  # MAGSpace joins it from its own staging overlay.
+  magtrans-internal:
+    name: ${INTERNAL_NETWORK:-magtrans-internal}
     external: true

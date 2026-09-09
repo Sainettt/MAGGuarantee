@@ -99,7 +99,17 @@
       "liderEmail": "Leader e-mail",
       "liderEmailHint": "Only for the planista role — supervisor's address.",
       "active": "Active",
-      "createdAt": "Created"
+      "createdAt": "Created",
+      "managedBy": "Managed by",
+      "managedByHint": "MAGSpace — role and active flag follow terminations and position changes. Local — you manage the account here (this is how admin accounts work).",
+      "local": "Local",
+      "magspace": "MAGSpace",
+      "managedHint": "Managed in MAGSpace — a change here would be overwritten by the next sync.",
+      "roleOverride": "Hand-granted role",
+      "roleOverrideHint": "For positions with no mapping (e.g. Controlling, Handel). The sync will not change this role, but the account still switches off on the termination date.",
+      "roleOverrideNone": "None — role from the position",
+      "roleOverrideShort": "by hand",
+      "roleOverrideHintShort": "Role granted by hand by an administrator"
     },
     "actions": {
       "resetPassword": "Reset password…",
@@ -189,7 +199,18 @@
     "submitting": "Signing in...",
     "forgotPassword": "Forgot password",
     "errorWrong": "Invalid login or password",
-    "errorNetwork": "No connection. Please try again."
+    "errorNetwork": "No connection. Please try again.",
+    "sso": {
+      "divider": "or sign in with a password",
+      "errorDomain": "Sign in with your @magtrans.eu account.",
+      "errorNotEmployee": "We could not find you in MAGSpace. Contact your manager.",
+      "errorInactive": "Your employee account is inactive.",
+      "errorNoRole": "Your position does not have access to MAGGuarantee yet. An administrator has been notified.",
+      "errorCarrier": "Carriers sign in with a login and password.",
+      "errorUnavailable": "MAGSpace is temporarily unavailable. Try again shortly or sign in with a password.",
+      "errorScript": "Google sign-in could not be loaded. Please sign in with a password.",
+      "errorNetwork": "Google sign-in failed. Try again or sign in with a password."
+    }
   },
   "verify": {
     "title": "MAGGuarantee",
@@ -277,6 +298,7 @@
     "delegations": "Trips",
     "limits": "Limits",
     "users": "Users",
+    "sso": "Google sign-in",
     "audit": "Audit log",
     "diagnostics": "Diagnostics",
     "openMenu": "Open menu",
@@ -1106,6 +1128,11 @@
     "db": {
       "postgres": "PostgreSQL",
       "redis": "Redis",
+      "magspace": "MAGSpace",
+      "magspaceNotConfigured": "not configured",
+      "magspaceDown": "unavailable",
+      "magspaceNeverSynced": "never synced",
+      "magspaceLastSync": "synced {at}",
       "tablesTitle": "Table sizes",
       "tableName": "Name",
       "tableSize": "Size",
@@ -2384,6 +2411,34 @@
     "error": {
       "title": "Couldn't load alerts",
       "message": "Try refreshing the page."
+    }
+  },
+  "sso": {
+    "title": "Google sign-in",
+    "subtitle": "A stanowisko from MAGSpace decides the MAGGuarantee role. Positions with no role grant no access — employees in those positions are approved by hand in Users.",
+    "noAccess": "No access",
+    "mapped": "Mapped",
+    "unmapped": "No role",
+    "unknownToMagspace": "Not in MAGSpace",
+    "magspaceOk": "MAGSpace reachable",
+    "magspaceDown": "MAGSpace unavailable",
+    "magspaceDownHint": "The list of positions could not be loaded from MAGSpace — only saved mappings are shown below, so the list may be incomplete.",
+    "lastSync": "Last sync: {at}",
+    "neverSynced": "Never synced",
+    "emptyTitle": "No positions",
+    "emptyMessage": "MAGSpace returned no positions.",
+    "fields": {
+      "stanowisko": "Position",
+      "role": "Role",
+      "state": "Status",
+      "updatedAt": "Updated"
+    },
+    "denials": {
+      "title": "Refused sign-ins",
+      "subtitle": "Employees who tried to sign in while their position had no role. To grant access, create the account in Users and set a hand-granted role.",
+      "emptyTitle": "No refused sign-ins",
+      "emptyMessage": "Nobody is waiting for a role.",
+      "noStanowisko": "no position"
     }
   }
 }

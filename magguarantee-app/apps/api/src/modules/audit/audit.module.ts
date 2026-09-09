@@ -36,8 +36,9 @@ import { AuditWriter } from './audit.service';
   controllers: [AuditQueryController],
   providers: [AuditWriter, AuditQueryService, AuditQueryRepository],
   // `AuditWriter` stays exported (the `AuditInterceptor` injects it across
-  // module boundaries). The read-side classes are internal — no exports
-  // needed because the controller is the only consumer.
-  exports: [AuditWriter],
+  // module boundaries). `AuditQueryRepository` is exported too: the SSO admin
+  // screen lists refused Google sign-ins straight out of the audit log rather
+  // than keeping a parallel table of access requests.
+  exports: [AuditWriter, AuditQueryRepository],
 })
 export class AuditWriterModule {}

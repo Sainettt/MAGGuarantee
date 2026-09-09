@@ -3,7 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 
 import type { Env } from '../../config/env.schema';
+import { DirectoryService } from '../directory/directory.service';
 import { MailService } from '../mail/mail.service';
+import { GoogleIdTokenService } from './google/google-id-token.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import type { UserRow } from '../users/users.repository';
@@ -31,6 +33,13 @@ function makeUser(overrides: Partial<UserRow> = {}): UserRow {
     failedAttempts: 0,
     lockedUntil: null,
     lastLoginAt: null,
+    // SSO defaults — a hand-created, locally managed account (docs/24).
+    authProvider: 'local',
+    managedBy: 'local',
+    googleSub: null,
+    magspaceEmployeeId: null,
+    directorySyncedAt: null,
+    roleOverride: null,
     createdAt: NOW,
     updatedAt: NOW,
     deletedAt: null,
@@ -143,6 +152,9 @@ function makeHarness(seed: UserRow | null = makeUser()): Harness {
     jwt,
     prisma,
     config,
+    // Google SSO collaborators — neither path under test touches them.
+    {} as unknown as GoogleIdTokenService,
+    {} as unknown as DirectoryService,
   );
 
   return { svc, users, passwordReset, refreshTokens, mail, passwords };

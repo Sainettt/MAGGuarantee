@@ -5,6 +5,12 @@
 // read, then routes to `/login/verify`. Errors map to the LoginError
 // variants (wrong / network) — the API's free-form `message` is never
 // shown directly per docs/13-api-design.md.
+//
+// Above the form sits the Google button (docs/24 §A3). The password path stays
+// for everyone: carriers have no Workspace account at all, and employees need a
+// way in when Google or MAGSpace is down. The SSO errors ARE shown verbatim,
+// unlike the password ones — they are a fixed set of localised strings picked
+// from `extensions.code`, not free-form text from the api.
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { LoginRequest as LoginRequestSchema } from '@magguarantee/shared';
@@ -23,6 +29,7 @@ import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
 import { ApiResponseError } from '@/lib/api/client';
 import { login } from '@/lib/api/auth';
+import { GoogleSignInButton } from './GoogleSignInButton';
 import { LOGIN_SESSION_KEY, type LoginSessionState } from './session-storage';
 
 export function LoginForm() {
@@ -35,6 +42,10 @@ export function LoginForm() {
   const next = searchParams.get('next');
   const [errVariant, setErrVariant] = useState<LoginErrorVariant>('idle');
   const [showPassword, setShowPassword] = useState(false);
+  // Kept separate from `errVariant`: an SSO refusal carries its own localised
+  // sentence, while the password errors are one of two fixed variants.
+  const [ssoError, setSsoError] = useState<string | null>(null);
+  const [ssoBusy, setSsoBusy] = useState(false);
 
   const {
     register,
@@ -47,6 +58,7 @@ export function LoginForm() {
 
   const onSubmit = handleSubmit(async (values) => {
     setErrVariant('idle');
+    setSsoError(null);
     try {
       const res = await login(values);
       const state: LoginSessionState = {
@@ -69,15 +81,28 @@ export function LoginForm() {
     }
   });
 
+  // An SSO refusal wins the single error slot: it is the more specific answer,
+  // and it is the one the user just triggered.
   const errMessage =
-    errVariant === 'wrong'
+    ssoError ??
+    (errVariant === 'wrong'
       ? t('errorWrong')
       : errVariant === 'network'
         ? t('errorNetwork')
-        : undefined;
+        : undefined);
+  const errVariantShown: LoginErrorVariant = ssoError ? 'network' : errVariant;
 
   return (
     <LoginCard title={t('title')} subtitle={t('subtitle')}>
+      <GoogleSignInButton
+        next={next}
+        onError={(message) => {
+          setSsoError(message);
+          if (message) setErrVariant('idle');
+        }}
+        onBusyChange={setSsoBusy}
+      />
+
       <form onSubmit={onSubmit} noValidate className="space-y-4">
         <div>
           <Label htmlFor="login">{t('loginLabel')}</Label>
@@ -122,7 +147,7 @@ export function LoginForm() {
           type="submit"
           size="lg"
           className="w-full"
-          disabled={isSubmitting}
+          disabled={isSubmitting || ssoBusy}
         >
           {isSubmitting ? t('submitting') : t('submit')}
         </Button>
@@ -137,7 +162,7 @@ export function LoginForm() {
         </div>
       </form>
 
-      <LoginError variant={errVariant} message={errMessage} />
+      <LoginError variant={errVariantShown} message={errMessage} />
     </LoginCard>
   );
 }

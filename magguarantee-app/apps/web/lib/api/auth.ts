@@ -5,6 +5,7 @@ import type {
   ChangePasswordRequest,
   ForgotPasswordRequest,
   ForgotPasswordResponse,
+  GoogleLoginResponse,
   LoginRequest,
   LoginResponse,
   ResendCodeRequest,
@@ -37,6 +38,18 @@ export function resendCode(
   return apiJson<ResendCodeResponse>('/auth/resend-code', {
     method: 'POST',
     json: body,
+  });
+}
+
+/**
+ * Google sign-in (docs/24 трек A). Ends where `verifyCode` ends — cookies set,
+ * user echoed — so callers share the same post-login path. No 2FA step: Google
+ * already applied Workspace's own second factor.
+ */
+export function loginWithGoogle(idToken: string): Promise<GoogleLoginResponse> {
+  return apiJson<GoogleLoginResponse>('/auth/google', {
+    method: 'POST',
+    json: { idToken },
   });
 }
 

@@ -5,6 +5,10 @@
 //   - 3 attempts on 5xx / network failure with exponential backoff (1 s, 2 s).
 //   - 4xx responses propagate without retry — they're the upstream's verdict.
 //
+// Both knobs are overridable per call: the MAGSpace directory client uses a 3 s
+// timeout and `attempts: 1` on the sign-in path (a login must fail fast, not
+// hold the user for 3 retries), plus an `Authorization` header.
+//
 // We intentionally don't reach for axios / undici / got — global `fetch` (Node
 // 20) is sufficient and the dep budget for Phase 2 is tight.
 
@@ -20,6 +24,14 @@ export interface FetchWithRetryOptions {
   timeoutMs?: number;
   /** Identifier baked into the log lines so failures are grep-able. */
   tag?: string;
+  /**
+   * Extra request headers, merged over the default `Accept: application/json`.
+   *
+   * Added for the MAGSpace employee directory (docs/24 §A0.2), which is
+   * server-to-server and needs `Authorization: Bearer …`. Never logged — the
+   * failure paths below log the status and the url, never the headers.
+   */
+  headers?: Record<string, string>;
 }
 
 /**
@@ -38,13 +50,14 @@ export async function fetchJsonWithRetry(
   const attempts = options.attempts ?? DEFAULT_ATTEMPTS;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const tag = options.tag ?? 'integration';
+  const headers = { Accept: 'application/json', ...options.headers };
 
   let lastError: unknown = null;
   for (let i = 0; i < attempts; i++) {
     try {
       const res = await fetch(url, {
         signal: AbortSignal.timeout(timeoutMs),
-        headers: { Accept: 'application/json' },
+        headers,
       });
       if (res.ok) {
         return (await res.json()) as unknown;

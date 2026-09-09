@@ -2,14 +2,21 @@
 
 // Phase 4.5 — `/diagnostics` DB tab.
 //
-// Two status pills (postgres + redis) with latency in ms, and a table of
-// table sizes (Postgres only) sorted desc. We don't render redis "keys"
-// here — the backend response doesn't surface them in the current contract.
+// Three status pills (postgres, redis, MAGSpace) with latency in ms, and a
+// table of table sizes (Postgres only) sorted desc. We don't render redis
+// "keys" here — the backend response doesn't surface them in the current
+// contract.
+//
+// The MAGSpace pill is the SSO's health line (docs/24 §A4). It has a third
+// state the other two do not: "not configured", meaning this deployment has no
+// directory token and the Google path is simply off. Showing that as a red
+// "down" would send an admin chasing an outage that isn't happening.
 
 import { Database } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
 import { Skeleton } from '@/components/ui/Skeleton';
+import { formatDateTime } from '@/lib/format/numbers';
 import { useDiagnosticsDb } from '@/lib/hooks/useDiagnostics';
 import { cn } from '@/lib/utils';
 
@@ -25,28 +32,34 @@ function StatusPill({
   label,
   ok,
   latencyMs,
+  /** Renders grey instead of red/green — the service is switched off, not broken. */
+  muted = false,
+  /** Replaces the latency readout (e.g. "not configured", last sync time). */
+  detail,
 }: {
   label: string;
   ok: boolean;
   latencyMs: number;
+  muted?: boolean;
+  detail?: string;
 }) {
   return (
     <div
       className={cn(
         'flex items-center gap-3 rounded-xl border bg-card shadow-card px-4 py-3',
-        ok ? 'border-border' : 'border-danger/40 dark:border-danger/30',
+        ok || muted ? 'border-border' : 'border-danger/40 dark:border-danger/30',
       )}
     >
       <span
         aria-hidden
         className={cn(
           'inline-block h-2.5 w-2.5 rounded-full',
-          ok ? 'bg-success' : 'bg-danger',
+          muted ? 'bg-text-sub/40' : ok ? 'bg-success' : 'bg-danger',
         )}
       />
       <span className="font-semibold text-text">{label}</span>
       <span className="ml-auto text-xs text-text-sub tabular-nums">
-        {latencyMs.toFixed(1)} ms
+        {detail ?? `${latencyMs.toFixed(1)} ms`}
       </span>
     </div>
   );
@@ -59,7 +72,8 @@ export function DbHealthSection() {
   if (isLoading || !data) {
     return (
       <div className="space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Skeleton className="h-14 w-full" />
           <Skeleton className="h-14 w-full" />
           <Skeleton className="h-14 w-full" />
         </div>
@@ -72,9 +86,20 @@ export function DbHealthSection() {
     (a, b) => b.sizeBytes - a.sizeBytes,
   );
 
+  const magspace = data.magspace;
+  // What an admin actually needs during an incident: how stale the
+  // directory-driven roles can currently be.
+  const magspaceDetail = !magspace.configured
+    ? t('magspaceNotConfigured')
+    : magspace.ok
+      ? magspace.lastReconcileAt
+        ? t('magspaceLastSync', { at: formatDateTime(magspace.lastReconcileAt) })
+        : t('magspaceNeverSynced')
+      : t('magspaceDown');
+
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatusPill
           label={t('postgres')}
           ok={data.postgres.ok}
@@ -84,6 +109,13 @@ export function DbHealthSection() {
           label={t('redis')}
           ok={data.redis.ok}
           latencyMs={data.redis.latencyMs}
+        />
+        <StatusPill
+          label={t('magspace')}
+          ok={magspace.ok}
+          latencyMs={magspace.latencyMs}
+          muted={!magspace.configured}
+          detail={magspaceDetail}
         />
       </div>
 

@@ -126,6 +126,24 @@ export const RoleSchema = z.enum([
 ]);
 export type RoleSchema = z.infer<typeof RoleSchema>;
 
+/**
+ * The roles that may be handed out automatically — everything except `admin`
+ * and `przewoznik`.
+ *
+ * `admin` is deliberately local-only: the Google SSO derives a role from the
+ * employee's stanowisko, and management must not be able to grant full access
+ * by editing a job title in MAGSpace (docs/24 decision #4). `przewoznik` is not
+ * an employee role at all — carriers are created through `POST /carriers`.
+ *
+ * Mirrored by two database CHECK constraints
+ * (`stanowisko_role_mapping_role_not_privileged`,
+ * `user_role_override_not_privileged`), so this is the same rule spelled in
+ * three places on purpose: Zod for the message, the constraint for the
+ * guarantee.
+ */
+export const AssignableRoleSchema = RoleSchema.exclude(['admin', 'przewoznik']);
+export type AssignableRoleSchema = z.infer<typeof AssignableRoleSchema>;
+
 // ─── Pagination & list query primitives ───────────────────
 
 /**

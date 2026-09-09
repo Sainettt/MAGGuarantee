@@ -64,6 +64,13 @@ function makeAdmin(overrides: Partial<UserRow> = {}): UserRow {
     failedAttempts: 0,
     lockedUntil: null,
     lastLoginAt: null,
+    // SSO defaults — a hand-created, locally managed account (docs/24).
+    authProvider: 'local',
+    managedBy: 'local',
+    googleSub: null,
+    magspaceEmployeeId: null,
+    directorySyncedAt: null,
+    roleOverride: null,
     createdAt: NOW,
     updatedAt: NOW,
     deletedAt: null,
