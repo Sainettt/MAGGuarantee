@@ -10,12 +10,31 @@
 // filter background activity out of their dashboards. Provisioning happens on
 // behalf of the person signing in, so it is attributed to them; a refusal or a
 // deprovisioning has no authenticated actor and is therefore `system.`-tagged.
+// The admin grant is the exception that proves the rule: it has a real actor,
+// so it is audited by the `@Audit` interceptor on the route, not from here.
 
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-import type { AssignableRole, Role } from '@magguarantee/shared';
+import {
+  SSO_DIRECTORY_UNAVAILABLE,
+  SSO_GRANT_ACCOUNT_CONFLICT,
+  SSO_GRANT_EMPLOYEE_INACTIVE,
+  SSO_GRANT_NOT_EMPLOYEE,
+  type AssignableRole,
+  type Role,
+  type SsoAccessGrantOutcome,
+  type SsoGrantConflictReason,
+} from '@magguarantee/shared';
 
+import { AuditContext } from '../../common/audit';
+import { isPrismaUniqueViolation } from '../../common/errors/prisma-error';
 import type { Env } from '../../config/env.schema';
 import { AuditWriter } from '../audit/audit.service';
 import { RefreshTokenRepository } from '../auth/refresh-token.repository';
@@ -44,6 +63,12 @@ export type DeprovisionReason =
   | 'reconcile_not_found'
   | 'reconcile_inactive'
   | 'reconcile_unmapped';
+
+/** What an admin grant did, and to which row. */
+export interface AccessGrant {
+  user: UserRow;
+  outcome: SsoAccessGrantOutcome;
+}
 
 /**
  * How long one (employee, stanowisko) pair stays quiet after the admins have
@@ -128,7 +153,7 @@ export class DirectoryService {
   }): Promise<UserRow> {
     const { existing, employee, googleSub } = args;
     const now = new Date();
-    const name = `${employee.firstName} ${employee.lastName}`.trim() || null;
+    const name = displayName(employee);
 
     if (!existing) {
       const login = await this.allocateLogin(employee.email);
@@ -138,6 +163,7 @@ export class DirectoryService {
         name,
         role: args.role,
         googleSub,
+        authProvider: 'google',
         magspaceEmployeeId: employee.id,
         directorySyncedAt: now,
       });
@@ -175,6 +201,9 @@ export class DirectoryService {
       role: effectiveRole,
       active: true,
       managedBy: 'magspace',
+      // `google` = has signed in with Google at least once — true from here on,
+      // including for accounts an admin created or granted ahead of time.
+      authProvider: 'google',
       googleSub,
       magspaceEmployeeId: employee.id,
       directorySyncedAt: now,
@@ -200,9 +229,10 @@ export class DirectoryService {
   /**
    * Links a Google account to an existing local user on first sign-in. Used for
    * the `managedBy = 'local'` path (admins), which never consults MAGSpace.
+   * Stamps `authProvider = 'google'` for the same reason `provisionOrSync` does.
    */
   async linkGoogleAccount(user: UserRow, googleSub: string): Promise<UserRow> {
-    const updated = await this.users.update(user.id, { googleSub });
+    const updated = await this.users.update(user.id, { googleSub, authProvider: 'google' });
     await this.audit.log({
       action: 'linkGoogleAccount',
       targetType: 'User',
@@ -243,6 +273,133 @@ export class DirectoryService {
       reason,
       revokedTokens: revoked,
     });
+  }
+
+  // ── Admin grant (docs/24 §10) ──────────────────────────
+
+  /**
+   * «Nadaj dostęp»: gives a named employee a hand-picked role in one step —
+   * the answer to an `SSO_NO_ROLE` refusal for the deliberately-unmapped
+   * stanowiska.
+   *
+   * Always writes `roleOverride`, even when the stanowisko has meanwhile been
+   * mapped: the admin chose this role for this person, and that choice must
+   * survive a later re-mapping of the position. `role` and `active` are written
+   * directly as well — the reconcile never applies an override to `role` and
+   * never reactivates anyone, so without this the account would sit disabled
+   * (or on its old role) until the person's next sign-in.
+   *
+   * Audited by the route's `@Audit` interceptor (actor = the admin); this only
+   * contributes the `before` snapshot and the business metadata.
+   */
+  async grantAccess(email: string, role: AssignableRole): Promise<AccessGrant> {
+    const employee = await this._requireGrantableEmployee(email);
+    // Keyed on MAGSpace's own spelling of the address: that is what a new row
+    // would store, so that is what the UNIQUE index would collide on.
+    const existing = await this.users.findByEmailIncludingDeleted(employee.email);
+    const grant = existing
+      ? await this._regrantExisting(existing, role)
+      : await this._createGranted(employee, role);
+
+    const stanowiskoCode = employee.stanowisko?.code ?? null;
+    AuditContext.setMetadata({
+      outcome: grant.outcome,
+      stanowiskoCode,
+      magspaceEmployeeId: employee.id,
+    });
+    this.logger.log({
+      msg: 'directory access granted by admin',
+      userId: grant.user.id,
+      role,
+      outcome: grant.outcome,
+      stanowiskoCode,
+    });
+    return grant;
+  }
+
+  /** MAGSpace must positively confirm a current employee — anything else refuses. */
+  private async _requireGrantableEmployee(email: string): Promise<MagspaceEmployee> {
+    const lookup = await this.resolveEmployee(email);
+    if (lookup.kind === 'unavailable') {
+      throw new ServiceUnavailableException({
+        message: 'MAGSpace chwilowo niedostępny — nie można potwierdzić pracownika. Spróbuj za chwilę.',
+        extensions: { code: SSO_DIRECTORY_UNAVAILABLE },
+      });
+    }
+    if (lookup.kind === 'not_found') {
+      throw new UnprocessableEntityException({
+        message: 'W MAGSpace nie ma pracownika z tym adresem e-mail.',
+        extensions: { code: SSO_GRANT_NOT_EMPLOYEE },
+      });
+    }
+    if (!lookup.employee.active) {
+      throw new UnprocessableEntityException({
+        message: 'Ten pracownik jest nieaktywny w MAGSpace — dostępu nie można nadać.',
+        extensions: { code: SSO_GRANT_EMPLOYEE_INACTIVE },
+      });
+    }
+    return lookup.employee;
+  }
+
+  /**
+   * No account yet: create a passwordless, directory-managed one. `before`
+   * stays unset — there was nothing before, and the audit column is NULL.
+   */
+  private async _createGranted(
+    employee: MagspaceEmployee,
+    role: AssignableRole,
+  ): Promise<AccessGrant> {
+    const login = await this.allocateLogin(employee.email);
+    try {
+      const user = await this.users.createFromDirectory({
+        login,
+        email: employee.email,
+        name: displayName(employee),
+        role,
+        roleOverride: role,
+        // Not `google` yet: the person has not signed in. The first Google
+        // sign-in links `googleSub` by e-mail and flips this.
+        authProvider: 'local',
+        magspaceEmployeeId: employee.id,
+        directorySyncedAt: new Date(),
+      });
+      return { user, outcome: 'created' };
+    } catch (err) {
+      // Lost a race: a concurrent grant / first sign-in took the login slug, or
+      // another row already carries this MAGSpace id under a different e-mail.
+      if (isPrismaUniqueViolation(err)) {
+        throw grantConflict(
+          'unique',
+          'Nie udało się założyć konta — login lub powiązanie z MAGSpace jest już zajęte. Odśwież listę użytkowników i spróbuj ponownie.',
+        );
+      }
+      throw err;
+    }
+  }
+
+  /** Existing directory-managed account: set the role by hand and (re)activate. */
+  private async _regrantExisting(
+    existing: UserRow,
+    role: AssignableRole,
+  ): Promise<AccessGrant> {
+    assertDirectoryMayTakeOver(existing);
+    // Nested under `user` so it survives the interceptor trimming `before` to
+    // the key-set of the response (`{ user, outcome }`).
+    AuditContext.setBefore({
+      user: {
+        role: existing.role,
+        active: existing.active,
+        managedBy: existing.managedBy,
+        roleOverride: existing.roleOverride,
+      },
+    });
+    const user = await this.users.update(existing.id, {
+      role,
+      roleOverride: role,
+      active: true,
+      directorySyncedAt: new Date(),
+    });
+    return { user, outcome: existing.active ? 'updated' : 'reactivated' };
   }
 
   // ── Refusals ───────────────────────────────────────────
@@ -304,7 +461,8 @@ export class DirectoryService {
         stanowiskoName: employee.stanowisko?.name ?? null,
         stanowiskoCode,
         attemptedAtLabel: formatWarsawTimestamp(new Date()),
-        usersUrl: `${appUrl}/employee/users`,
+        // The refusal is listed there with a one-step «Nadaj dostęp».
+        ssoUrl: `${appUrl}/employee/sso`,
       };
       // Per-admin, so one bad address cannot swallow the rest.
       await Promise.allSettled(
@@ -347,6 +505,44 @@ export class DirectoryService {
     // an admin creating the account by hand is the right escape hatch.
     throw new Error(`Could not allocate a free login for "${email}"`);
   }
+}
+
+/**
+ * The grant only ever takes over a directory-managed, live, non-privileged
+ * account. Everything else belongs to someone else's decision and is refused
+ * with a reason the web can localise.
+ */
+function assertDirectoryMayTakeOver(existing: UserRow): void {
+  if (existing.deletedAt) {
+    throw grantConflict(
+      'deleted',
+      'Konto z tym adresem e-mail zostało wcześniej usunięte i nadal blokuje ten adres — nowego konta nie można założyć.',
+    );
+  }
+  if (existing.role === 'admin' || existing.role === 'przewoznik') {
+    throw grantConflict(
+      'privileged',
+      'To konto ma rolę administratora lub przewoźnika — dostępu przez MAGSpace nie można mu nadać.',
+    );
+  }
+  if (existing.managedBy === 'local') {
+    throw grantConflict(
+      'local',
+      'Konto istnieje i jest zarządzane lokalnie — edytuj je w Użytkownikach.',
+    );
+  }
+}
+
+function grantConflict(reason: SsoGrantConflictReason, message: string): ConflictException {
+  return new ConflictException({
+    message,
+    extensions: { code: SSO_GRANT_ACCOUNT_CONFLICT, reason },
+  });
+}
+
+/** "First Last", or null when MAGSpace has neither. */
+function displayName(employee: MagspaceEmployee): string | null {
+  return `${employee.firstName} ${employee.lastName}`.trim() || null;
 }
 
 /**

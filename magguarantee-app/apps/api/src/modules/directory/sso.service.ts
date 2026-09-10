@@ -1,22 +1,48 @@
-// Admin-facing side of the SSO feature: the stanowisko → role table and the
-// list of sign-ins it has refused (docs/24 §A2/§A5).
+// Admin-facing side of the SSO feature: the stanowisko → role table, the list
+// of sign-ins it has refused, and the one-step grant that answers a refusal
+// (docs/24 §A2/§A5/§10).
 
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 
 import type {
   AssignableRole,
+  GrantSsoAccessDto,
   SsoAccessDenialDto,
+  SsoAccessGrantResultDto,
   StanowiskoRoleDto,
   StanowiskoRoleListDto,
 } from '@magguarantee/shared';
 
-import { AuditQueryRepository } from '../audit/audit-query.repository';
+import { AuditQueryRepository, type AuditLogRow } from '../audit/audit-query.repository';
+import { UsersRepository } from '../users/users.repository';
+import { UsersService } from '../users/users.service';
+import { DirectoryService } from './directory.service';
 import { DirectoryState } from './directory-state';
 import { MagspaceClient } from './magspace.client';
 import { StanowiskoRoleMappingRepository } from './stanowisko-role-mapping.repository';
 
-/** How many refused sign-ins the admin screen shows. */
+/** How many refused sign-ins (distinct people) the admin screen shows. */
 const DENIAL_PAGE_SIZE = 20;
+
+/**
+ * How many raw refusal events are scanned to fill that page. One person
+ * retrying the button all morning writes one row per attempt, so a page of 20
+ * people needs a much wider window of events. 200 keeps it one cheap indexed
+ * query while making "20 retries crowd out everyone else" implausible.
+ */
+const DENIAL_SCAN_WINDOW = 200;
+
+/**
+ * Substring of the refusal's audit action (`system.denyDirectoryAccess`).
+ * `AuditQueryRepository.list` matches `action` as a case-insensitive
+ * substring, which is exactly the admin filter-bar semantics it was built for.
+ */
+const DENIAL_AUDIT_ACTION = 'denyDirectoryAccess';
+
+/** Placeholder for a refusal row that somehow carries no address. */
+const UNKNOWN_EMAIL = '—';
+
+type DenialCore = Pick<SsoAccessDenialDto, 'email' | 'stanowiskoCode' | 'at'>;
 
 @Injectable()
 export class SsoService {
@@ -27,6 +53,9 @@ export class SsoService {
     private readonly magspace: MagspaceClient,
     private readonly state: DirectoryState,
     private readonly auditQuery: AuditQueryRepository,
+    private readonly directory: DirectoryService,
+    private readonly users: UsersService,
+    private readonly userRows: UsersRepository,
   ) {}
 
   /**
@@ -144,21 +173,65 @@ export class SsoService {
   }
 
   /**
+   * «Nadaj dostęp» — the decision lives in `DirectoryService.grantAccess`,
+   * next to the sign-in provisioning it must agree with; this only shapes the
+   * answer for the wire.
+   */
+  async grantAccess(dto: GrantSsoAccessDto): Promise<SsoAccessGrantResultDto> {
+    const { user, outcome } = await this.directory.grantAccess(dto.email, dto.role);
+    return { user: this.users.toDto(user), outcome };
+  }
+
+  /**
    * Recent sign-ins refused for want of a role, read straight from the audit
    * log. There is no requests table on purpose: a refusal is an event, and the
    * audit log already stores events with the right retention and access rules.
+   *
+   * One row per person (latest refusal wins), each tagged with whether that
+   * person has an active account today — so the screen reads as a queue of
+   * decisions still to make, not a log of button presses.
    */
   async listRecentDenials(): Promise<SsoAccessDenialDto[]> {
     const rows = await this.auditQuery.list({
-      action: 'denyDirectoryAccess',
-      limit: DENIAL_PAGE_SIZE,
+      action: DENIAL_AUDIT_ACTION,
+      limit: DENIAL_SCAN_WINDOW,
     });
-    return rows.slice(0, DENIAL_PAGE_SIZE).map((r) => ({
-      email: r.targetKey ?? '—',
+    const latest = latestPerEmail(rows.slice(0, DENIAL_SCAN_WINDOW)).slice(
+      0,
+      DENIAL_PAGE_SIZE,
+    );
+
+    const addresses = latest.map((d) => d.email).filter((e) => e !== UNKNOWN_EMAIL);
+    const accounts = await this.userRows.findActiveByEmails(addresses);
+    const userIdByEmail = new Map(accounts.map((u) => [u.email.toLowerCase(), u.id]));
+
+    return latest.map((d) => {
+      const userId = userIdByEmail.get(d.email.toLowerCase()) ?? null;
+      return { ...d, status: userId ? 'granted' : 'pending', userId };
+    });
+  }
+}
+
+/**
+ * Collapses repeated refusals of one address into the newest. Relies on the
+ * repository's `createdAt DESC` order: the first row seen per address is its
+ * latest. Addresses compare case-insensitively.
+ */
+function latestPerEmail(rows: readonly AuditLogRow[]): DenialCore[] {
+  const seen = new Set<string>();
+  const out: DenialCore[] = [];
+  for (const r of rows) {
+    const email = r.targetKey ?? UNKNOWN_EMAIL;
+    const key = email.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      email,
       stanowiskoCode: readStanowiskoCode(r.metadata),
       at: r.createdAt.toISOString(),
-    }));
+    });
   }
+  return out;
 }
 
 function readStanowiskoCode(metadata: unknown): string | null {

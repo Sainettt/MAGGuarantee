@@ -188,6 +188,14 @@ export class UsersService {
         });
       }
     }
+    // Hand-back: once the account is `local`, `role` is owned here and nothing
+    // consults `roleOverride` any more. Leaving it set would be a trap — it
+    // silently wins again the day someone flips the account back to
+    // `magspace`, resurrecting a decision nobody remembers making. So the
+    // hand-back clears it, and wins over any `roleOverride` in the same body;
+    // the current `role` stays as it is (docs/24 §9).
+    const handingBack = existing.managedBy === 'magspace' && dto.managedBy === 'local';
+    const roleOverride = handingBack ? null : dto.roleOverride;
     try {
       const updated = await this.repo.update(id, {
         // `email` is NOT NULL post-phase3_blocks — patch with the value
@@ -200,7 +208,7 @@ export class UsersService {
         ...(dto.managedBy !== undefined ? { managedBy: dto.managedBy } : {}),
         // Clearing the override hands the role decision back to the stanowisko
         // mapping; the change takes effect on the next sign-in or reconcile.
-        ...(dto.roleOverride !== undefined ? { roleOverride: dto.roleOverride } : {}),
+        ...(roleOverride !== undefined ? { roleOverride } : {}),
       });
       return this.toDto(updated);
     } catch (err) {

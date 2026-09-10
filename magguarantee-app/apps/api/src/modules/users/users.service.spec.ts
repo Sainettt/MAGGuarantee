@@ -345,6 +345,46 @@ describe('UsersService', () => {
       expect(out.role).toBe('opiekun');
     });
 
+    it('handing the account back to local clears roleOverride and keeps the role', async () => {
+      // Once local, nothing consults the override; leaving it would let it win
+      // again the day someone flips the account back to `magspace`.
+      const { svc, repo } = makeService([
+        managed({ role: 'weryfikator', roleOverride: 'weryfikator' }),
+      ]);
+
+      const out = await svc.update('u-mag', { managedBy: 'local' });
+
+      expect(out.managedBy).toBe('local');
+      expect(out.roleOverride).toBeNull();
+      expect(out.role).toBe('weryfikator');
+      expect(repo.update).toHaveBeenCalledWith(
+        'u-mag',
+        expect.objectContaining({ managedBy: 'local', roleOverride: null }),
+      );
+    });
+
+    it('the hand-back wins over a roleOverride sent in the same body', async () => {
+      const { svc } = makeService([managed({ roleOverride: 'weryfikator' })]);
+
+      const out = await svc.update('u-mag', { managedBy: 'local', roleOverride: 'eksport' });
+
+      expect(out.roleOverride).toBeNull();
+    });
+
+    it('leaves roleOverride alone when managedBy does not actually flip', async () => {
+      // `managedBy: 'local'` restated on an already-local row is not a hand-back.
+      const { svc, repo } = makeService([
+        makeRow({ id: 'u-loc', managedBy: 'local', role: 'pracownik' }),
+      ]);
+
+      await svc.update('u-loc', { managedBy: 'local', name: 'Nowa Nazwa' });
+
+      expect(repo.update).toHaveBeenCalledWith(
+        'u-loc',
+        expect.not.objectContaining({ roleOverride: expect.anything() }),
+      );
+    });
+
     it('leaves locally-managed users completely unaffected', async () => {
       const { svc } = makeService([makeRow({ id: 'u-loc', managedBy: 'local' })]);
 

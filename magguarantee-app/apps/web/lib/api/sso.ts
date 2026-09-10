@@ -3,7 +3,9 @@
 
 import type {
   AssignableRole,
+  GrantSsoAccessDto,
   SsoAccessDenialListDto,
+  SsoAccessGrantResultDto,
   StanowiskoRoleDto,
   StanowiskoRoleListDto,
 } from '@magguarantee/shared';
@@ -43,5 +45,19 @@ export function deleteStanowiskoRole(code: string): Promise<void> {
 export function listSsoAccessDenials(): Promise<SsoAccessDenialListDto> {
   return apiJson<SsoAccessDenialListDto>('/sso/access-denials', {
     method: 'GET',
+  });
+}
+
+/**
+ * One-step «Nadaj dostęp» (docs/24 §10): creates, reactivates or updates a
+ * MAGSpace-managed account whose hand-granted role is `role`. 409/422/503 carry
+ * a Polish `detail` meant for the toast.
+ */
+export function grantSsoAccess(
+  body: GrantSsoAccessDto,
+): Promise<SsoAccessGrantResultDto> {
+  return apiJson<SsoAccessGrantResultDto>('/sso/access-grants', {
+    method: 'POST',
+    json: body,
   });
 }

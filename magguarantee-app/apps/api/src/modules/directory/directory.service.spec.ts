@@ -1,7 +1,9 @@
-// Provisioning rules for directory-managed accounts (docs/24 §A2/§4).
+// Provisioning rules for directory-managed accounts (docs/24 §A2/§4/§10).
 
+import { HttpException, HttpStatus } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 
+import { AuditContext, type AuditContextStore } from '../../common/audit';
 import type { Env } from '../../config/env.schema';
 import type { AuditWriter } from '../audit/audit.service';
 import type { RefreshTokenRepository } from '../auth/refresh-token.repository';
@@ -73,6 +75,7 @@ function makeHarness(opts: { existingLogins?: string[] } = {}) {
     update: jest.fn(async (id: string, data: Partial<UserRow>) =>
       makeUser({ id, ...data }),
     ),
+    findByEmailIncludingDeleted: jest.fn(async (): Promise<UserRow | null> => null),
     listByRole: jest.fn(async () => [makeUser({ id: 'a-1', login: 'admin', role: 'admin', email: 'admin@magtrans.eu' })]),
   } as unknown as jest.Mocked<UsersRepository>;
 
@@ -194,7 +197,13 @@ describe('DirectoryService.provisionOrSync', () => {
         name: 'Jan Kowalski',
         role: 'planista',
         magspaceEmployeeId: 'emp-1',
+        // JIT path unchanged: linked to Google from birth, no hand-granted role.
+        googleSub: 'google-sub-1',
+        authProvider: 'google',
       }),
+    );
+    expect(h.users.createFromDirectory).toHaveBeenCalledWith(
+      expect.not.objectContaining({ roleOverride: expect.anything() }),
     );
     expect(h.audit.log).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'provisionUserFromDirectory' }),
@@ -252,6 +261,27 @@ describe('DirectoryService.provisionOrSync', () => {
     expect(updated.active).toBe(true);
   });
 
+  it('stamps authProvider=google on the first Google sign-in of a pre-created account', async () => {
+    // An account an admin created (by hand or through «Nadaj dostęp») starts
+    // as `local` with no googleSub; signing in with Google is what makes it
+    // `google` — the DTO documents the field as "signed in with Google once".
+    const h = makeHarness();
+    const existing = makeUser({ authProvider: 'local', googleSub: null, roleOverride: 'weryfikator', role: 'weryfikator' });
+
+    const updated = await h.svc.provisionOrSync({
+      existing,
+      employee: makeEmployee(),
+      role: 'weryfikator',
+      googleSub: 'google-sub-1',
+    });
+
+    expect(h.users.update).toHaveBeenCalledWith(
+      existing.id,
+      expect.objectContaining({ authProvider: 'google', googleSub: 'google-sub-1' }),
+    );
+    expect(updated.authProvider).toBe('google');
+  });
+
   it('writes no audit row when nothing actually changed', async () => {
     const h = makeHarness();
 
@@ -263,6 +293,31 @@ describe('DirectoryService.provisionOrSync', () => {
     });
 
     expect(h.audit.log).not.toHaveBeenCalled();
+  });
+});
+
+describe('DirectoryService.linkGoogleAccount', () => {
+  it('stores the sub and stamps authProvider=google', async () => {
+    const h = makeHarness();
+    const admin = makeUser({
+      id: 'a-1',
+      login: 'admin',
+      role: 'admin',
+      managedBy: 'local',
+      authProvider: 'local',
+      googleSub: null,
+    });
+
+    const linked = await h.svc.linkGoogleAccount(admin, 'google-sub-9');
+
+    expect(h.users.update).toHaveBeenCalledWith('a-1', {
+      googleSub: 'google-sub-9',
+      authProvider: 'google',
+    });
+    expect(linked.authProvider).toBe('google');
+    expect(h.audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'linkGoogleAccount', targetKey: 'admin' }),
+    );
   });
 });
 
@@ -300,7 +355,7 @@ describe('DirectoryService.deprovision', () => {
 });
 
 describe('DirectoryService.notifyAccessRequested', () => {
-  it('audits the refusal and mails every admin', async () => {
+  it('audits the refusal and mails every admin a link to the SSO screen', async () => {
     const h = makeHarness();
 
     await h.svc.notifyAccessRequested(
@@ -315,8 +370,9 @@ describe('DirectoryService.notifyAccessRequested', () => {
       expect.objectContaining({
         employeeEmail: 'jan.kowalski@magtrans.eu',
         stanowiskoCode: 'CONTROLLING',
-        // APP_URL carries a trailing slash in some .env files.
-        usersUrl: 'https://mymag.magtrans.eu/employee/users',
+        // The one-step «Nadaj dostęp» lives there. APP_URL carries a trailing
+        // slash in some .env files.
+        ssoUrl: 'https://mymag.magtrans.eu/employee/sso',
       }),
     );
   });
@@ -339,5 +395,251 @@ describe('DirectoryService.notifyAccessRequested', () => {
     (h.mail.enqueueSsoAccessRequested as jest.Mock).mockRejectedValue(new Error('smtp down'));
 
     await expect(h.svc.notifyAccessRequested(makeEmployee())).resolves.toBeUndefined();
+  });
+});
+
+// ── «Nadaj dostęp» (docs/24 §10) ─────────────────────────
+
+describe('DirectoryService.grantAccess', () => {
+  const CONTROLLING = makeEmployee({ stanowisko: { code: 'CONTROLLING', name: 'Controlling' } });
+
+  /** Runs the grant inside an audit context, the way the interceptor does. */
+  async function grant(h: ReturnType<typeof makeHarness>, role: 'weryfikator' | 'eksport' = 'weryfikator') {
+    const store: AuditContextStore = {
+      actor: { userId: 'admin-1', userRole: 'admin' } as AuditContextStore['actor'],
+      ipAddress: null,
+    };
+    const result = await AuditContext.run(store, () =>
+      h.svc.grantAccess('jan.kowalski@magtrans.eu', role),
+    );
+    return { result, store };
+  }
+
+  /** Captures the rejection so status + extensions can be asserted together. */
+  async function refusal(p: Promise<unknown>): Promise<{ status: number; body: Record<string, unknown> }> {
+    try {
+      await p;
+    } catch (err) {
+      expect(err).toBeInstanceOf(HttpException);
+      const e = err as HttpException;
+      return { status: e.getStatus(), body: e.getResponse() as Record<string, unknown> };
+    }
+    throw new Error('expected the grant to be refused');
+  }
+
+  it('creates a directory-managed account with the hand-picked role', async () => {
+    const h = makeHarness();
+    h.magspace.lookupByEmail.mockResolvedValue(CONTROLLING);
+
+    const { result, store } = await grant(h);
+
+    expect(result.outcome).toBe('created');
+    expect(h.users.createFromDirectory).toHaveBeenCalledWith(
+      expect.objectContaining({
+        login: 'jan.kowalski',
+        email: 'jan.kowalski@magtrans.eu',
+        name: 'Jan Kowalski',
+        role: 'weryfikator',
+        roleOverride: 'weryfikator',
+        // Not signed in with Google yet — that flips it later.
+        authProvider: 'local',
+        magspaceEmployeeId: 'emp-1',
+        directorySyncedAt: expect.any(Date),
+      }),
+    );
+    // No googleSub: the first sign-in links it by e-mail.
+    expect(h.users.createFromDirectory).toHaveBeenCalledWith(
+      expect.not.objectContaining({ googleSub: expect.anything() }),
+    );
+    expect(store.before).toBeUndefined();
+    expect(store.metadata).toEqual({
+      outcome: 'created',
+      stanowiskoCode: 'CONTROLLING',
+      magspaceEmployeeId: 'emp-1',
+    });
+    // The interceptor writes the one row, attributed to the admin — the
+    // service must not add a second, self-attributed one.
+    expect(h.audit.log).not.toHaveBeenCalled();
+  });
+
+  it('looks the account up by MAGSpace’s spelling of the address, including deleted rows', async () => {
+    const h = makeHarness();
+    h.magspace.lookupByEmail.mockResolvedValue(makeEmployee({ email: 'jan.kowalski@magtrans.eu' }));
+
+    await grant(h);
+
+    expect(h.users.findByEmailIncludingDeleted).toHaveBeenCalledWith('jan.kowalski@magtrans.eu');
+  });
+
+  it('updates an active directory-managed account: role + override, before snapshot', async () => {
+    const h = makeHarness();
+    h.magspace.lookupByEmail.mockResolvedValue(CONTROLLING);
+    h.users.findByEmailIncludingDeleted.mockResolvedValue(makeUser({ role: 'planista' }));
+
+    const { result, store } = await grant(h);
+
+    expect(result.outcome).toBe('updated');
+    expect(h.users.update).toHaveBeenCalledWith('u-1', {
+      role: 'weryfikator',
+      roleOverride: 'weryfikator',
+      active: true,
+      directorySyncedAt: expect.any(Date),
+    });
+    expect(h.users.createFromDirectory).not.toHaveBeenCalled();
+    expect(store.before).toEqual({
+      user: { role: 'planista', active: true, managedBy: 'magspace', roleOverride: null },
+    });
+    expect(store.metadata).toMatchObject({ outcome: 'updated' });
+  });
+
+  it('reactivates an inactive directory-managed account — the reconcile never would', async () => {
+    const h = makeHarness();
+    h.magspace.lookupByEmail.mockResolvedValue(CONTROLLING);
+    h.users.findByEmailIncludingDeleted.mockResolvedValue(
+      makeUser({ active: false, role: 'pracownik', roleOverride: 'pracownik' }),
+    );
+
+    const { result, store } = await grant(h, 'eksport');
+
+    expect(result.outcome).toBe('reactivated');
+    expect(result.user.active).toBe(true);
+    expect(result.user.role).toBe('eksport');
+    expect(result.user.roleOverride).toBe('eksport');
+    expect(store.before).toEqual({
+      user: { role: 'pracownik', active: false, managedBy: 'magspace', roleOverride: 'pracownik' },
+    });
+    expect(store.metadata).toMatchObject({ outcome: 'reactivated' });
+  });
+
+  it('sets the override even when the stanowisko has meanwhile been mapped', async () => {
+    // The admin chose this role for this person; a later mapping of the
+    // position must not silently decide for them.
+    const h = makeHarness();
+    h.magspace.lookupByEmail.mockResolvedValue(makeEmployee()); // PLANISTA
+    (h.mappings.findByCode as jest.Mock).mockResolvedValue({
+      id: 'm-1',
+      stanowiskoCode: 'PLANISTA',
+      stanowiskoName: 'Planista',
+      role: 'planista',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const { result } = await grant(h, 'eksport');
+
+    expect(result.user.roleOverride).toBe('eksport');
+    expect(h.mappings.findByCode).not.toHaveBeenCalled();
+  });
+
+  it('503 SSO_DIRECTORY_UNAVAILABLE when MAGSpace cannot be asked', async () => {
+    const h = makeHarness();
+    h.magspace.lookupByEmail.mockRejectedValue(new DirectoryUnavailableError('down'));
+
+    const r = await refusal(grant(h));
+
+    expect(r.status).toBe(HttpStatus.SERVICE_UNAVAILABLE);
+    expect(r.body).toMatchObject({ extensions: { code: 'SSO_DIRECTORY_UNAVAILABLE' } });
+    expect(h.users.findByEmailIncludingDeleted).not.toHaveBeenCalled();
+  });
+
+  it('422 SSO_GRANT_NOT_EMPLOYEE when MAGSpace has no such address', async () => {
+    const h = makeHarness();
+    h.magspace.lookupByEmail.mockRejectedValue(new EmployeeNotFoundError());
+
+    const r = await refusal(grant(h));
+
+    expect(r.status).toBe(HttpStatus.UNPROCESSABLE_ENTITY);
+    expect(r.body).toMatchObject({ extensions: { code: 'SSO_GRANT_NOT_EMPLOYEE' } });
+  });
+
+  it('422 SSO_GRANT_EMPLOYEE_INACTIVE for someone whose employment has ended', async () => {
+    const h = makeHarness();
+    h.magspace.lookupByEmail.mockResolvedValue(makeEmployee({ active: false }));
+
+    const r = await refusal(grant(h));
+
+    expect(r.status).toBe(HttpStatus.UNPROCESSABLE_ENTITY);
+    expect(r.body).toMatchObject({ extensions: { code: 'SSO_GRANT_EMPLOYEE_INACTIVE' } });
+    expect(h.users.createFromDirectory).not.toHaveBeenCalled();
+  });
+
+  it('409 (reason local) for a locally-managed account — edit it in Użytkownicy', async () => {
+    const h = makeHarness();
+    h.magspace.lookupByEmail.mockResolvedValue(CONTROLLING);
+    h.users.findByEmailIncludingDeleted.mockResolvedValue(
+      makeUser({ managedBy: 'local', role: 'pracownik', authProvider: 'local' }),
+    );
+
+    const r = await refusal(grant(h));
+
+    expect(r.status).toBe(HttpStatus.CONFLICT);
+    expect(r.body).toMatchObject({
+      message: 'Konto istnieje i jest zarządzane lokalnie — edytuj je w Użytkownikach.',
+      extensions: { code: 'SSO_GRANT_ACCOUNT_CONFLICT', reason: 'local' },
+    });
+    expect(h.users.update).not.toHaveBeenCalled();
+  });
+
+  it.each(['admin', 'przewoznik'] as const)(
+    '409 (reason privileged) for an existing %s account',
+    async (role) => {
+      const h = makeHarness();
+      h.magspace.lookupByEmail.mockResolvedValue(CONTROLLING);
+      // Even a (mis)configured directory-managed privileged row is refused.
+      h.users.findByEmailIncludingDeleted.mockResolvedValue(
+        makeUser({ role, managedBy: role === 'admin' ? 'local' : 'magspace' }),
+      );
+
+      const r = await refusal(grant(h));
+
+      expect(r.status).toBe(HttpStatus.CONFLICT);
+      expect(r.body).toMatchObject({
+        extensions: { code: 'SSO_GRANT_ACCOUNT_CONFLICT', reason: 'privileged' },
+      });
+      expect(h.users.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it('409 (reason deleted) when a soft-deleted row still holds the address', async () => {
+    // `email` is UNIQUE including deleted rows: a create would fail, and
+    // resurrecting the deleted row silently is not this screen's call.
+    const h = makeHarness();
+    h.magspace.lookupByEmail.mockResolvedValue(CONTROLLING);
+    h.users.findByEmailIncludingDeleted.mockResolvedValue(
+      makeUser({ deletedAt: new Date('2026-08-01T00:00:00.000Z') }),
+    );
+
+    const r = await refusal(grant(h));
+
+    expect(r.status).toBe(HttpStatus.CONFLICT);
+    expect(r.body).toMatchObject({
+      extensions: { code: 'SSO_GRANT_ACCOUNT_CONFLICT', reason: 'deleted' },
+    });
+    expect(h.users.update).not.toHaveBeenCalled();
+    expect(h.users.createFromDirectory).not.toHaveBeenCalled();
+  });
+
+  it('409 (reason unique) when the create loses a race on a UNIQUE column', async () => {
+    const h = makeHarness();
+    h.magspace.lookupByEmail.mockResolvedValue(CONTROLLING);
+    h.users.createFromDirectory.mockRejectedValue(
+      Object.assign(new Error('P2002'), { code: 'P2002', meta: { target: ['magspace_employee_id'] } }),
+    );
+
+    const r = await refusal(grant(h));
+
+    expect(r.status).toBe(HttpStatus.CONFLICT);
+    expect(r.body).toMatchObject({
+      extensions: { code: 'SSO_GRANT_ACCOUNT_CONFLICT', reason: 'unique' },
+    });
+  });
+
+  it('rethrows an unexpected persistence failure untouched', async () => {
+    const h = makeHarness();
+    h.magspace.lookupByEmail.mockResolvedValue(CONTROLLING);
+    const boom = new Error('connection reset');
+    h.users.createFromDirectory.mockRejectedValue(boom);
+
+    await expect(grant(h)).rejects.toBe(boom);
   });
 });

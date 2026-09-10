@@ -31,8 +31,11 @@ export interface SsoAccessRequestedProps {
   stanowiskoCode: string | null;
   /** Formatted attempt time (dd.MM.yyyy HH:mm). */
   attemptedAtLabel: string;
-  /** Deep link to the users admin screen. */
-  usersUrl: string;
+  /**
+   * Deep link to the SSO admin screen (`/employee/sso`), where the refused
+   * sign-in is listed with a one-step «Nadaj dostęp» action.
+   */
+  ssoUrl: string;
 }
 
 export function SsoAccessRequestedEmail({
@@ -42,7 +45,7 @@ export function SsoAccessRequestedEmail({
   stanowiskoName,
   stanowiskoCode,
   attemptedAtLabel,
-  usersUrl,
+  ssoUrl,
 }: SsoAccessRequestedProps): React.ReactElement {
   const stanowiskoLabel = stanowiskoName
     ? `${stanowiskoName}${stanowiskoCode ? ` (${stanowiskoCode})` : ''}`
@@ -70,13 +73,14 @@ export function SsoAccessRequestedEmail({
       </DataSection>
 
       <Paragraph>
-        Aby przyznać dostęp, załóż konto tej osobie w „Użytkownicy”, wybierz
-        rolę, a następnie ustaw zarządzanie przez MAGSpace i rolę przyznaną
-        ręcznie. Po tej zmianie logowanie przez Google zadziała, a konto zostanie
-        automatycznie wyłączone w dniu zwolnienia pracownika.
+        Aby przyznać dostęp, otwórz ekran „Logowanie Google”, kliknij „Nadaj
+        dostęp” przy tej osobie i wybierz rolę. Konto zostanie założone (albo
+        przywrócone) i będzie zarządzane przez MAGSpace — logowanie przez Google
+        zadziała od razu, a konto zostanie automatycznie wyłączone w dniu
+        zwolnienia pracownika.
       </Paragraph>
 
-      <Cta href={usersUrl} label="Otwórz użytkowników" />
+      <Cta href={ssoUrl} label="Nadaj dostęp" />
       <Note>
         Jeżeli całe to stanowisko powinno dostawać tę samą rolę, dodaj je zamiast
         tego do mapowania „Stanowisko → Rola”. Ten e-mail nie powtórzy się dla

@@ -263,6 +263,45 @@ export type SsoErrorCode = (typeof SSO_ERROR_CODES)[number];
  */
 export const USER_MANAGED_BY_MAGSPACE = 'USER_MANAGED_BY_MAGSPACE' as const;
 
+// ─── POST /sso/access-grants refusals (docs/24 §10) ───────
+//
+// Kept apart from `SSO_ERROR_CODES` on purpose: those describe why a person's
+// own sign-in was refused, these describe why an ADMIN's grant was refused.
+// Different screen, different wording. A MAGSpace outage on this route reuses
+// `SSO_DIRECTORY_UNAVAILABLE` (503) — same fact, same code.
+
+/** 422 — MAGSpace answered 404: no employee card with that address. */
+export const SSO_GRANT_NOT_EMPLOYEE = 'SSO_GRANT_NOT_EMPLOYEE' as const;
+/** 422 — the employee exists in MAGSpace but the employment has ended. */
+export const SSO_GRANT_EMPLOYEE_INACTIVE = 'SSO_GRANT_EMPLOYEE_INACTIVE' as const;
+/**
+ * 409 — an account with that e-mail exists and must not be taken over by the
+ * directory from this screen: it is `admin`/`przewoznik`, it is managed
+ * locally, or it is soft-deleted (the e-mail index covers deleted rows, so a
+ * new account cannot be created next to it). `extensions.reason` says which —
+ * see {@link SsoGrantConflictReason}.
+ */
+export const SSO_GRANT_ACCOUNT_CONFLICT = 'SSO_GRANT_ACCOUNT_CONFLICT' as const;
+
+export const SSO_GRANT_ERROR_CODES = [
+  SSO_GRANT_NOT_EMPLOYEE,
+  SSO_GRANT_EMPLOYEE_INACTIVE,
+  SSO_GRANT_ACCOUNT_CONFLICT,
+] as const;
+export type SsoGrantErrorCode = (typeof SSO_GRANT_ERROR_CODES)[number];
+
+/**
+ * `extensions.reason` on a 409 `SSO_GRANT_ACCOUNT_CONFLICT`:
+ *  - `privileged` — the holder is `admin` or `przewoznik`;
+ *  - `local`      — `managedBy = 'local'`, edit it under Użytkownicy instead;
+ *  - `deleted`    — a soft-deleted row still owns the e-mail, so no new
+ *                   account can be created next to it;
+ *  - `unique`     — lost a race on a UNIQUE column (login / MAGSpace id held
+ *                   by another row); refresh and retry.
+ */
+export const SsoGrantConflictReason = z.enum(['privileged', 'local', 'deleted', 'unique']);
+export type SsoGrantConflictReason = z.infer<typeof SsoGrantConflictReason>;
+
 /**
  * Roles a stanowisko may map to, and the only values `User.roleOverride`
  * accepts. Defined in `./common` alongside `RoleSchema` so `./users` can use it

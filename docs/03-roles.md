@@ -18,8 +18,9 @@
   `CONTROLLING` двое: один `weryfikator`, другой `pracownik`; среди `HANDEL_*`
   пара человек с `eksport`), а роли слишком чувствительные — верификация
   wniosków и деньги. Таким сотрудникам admin выдаёт роль **вручную**, полем
-  `User.roleOverride`; reconcile её не перезаписывает, но доступ при увольнении
-  всё равно гасит.
+  `User.roleOverride` — одним шагом, кнопкой «Nadaj dostęp» у отклонённого
+  входа на `/employee/sso` (`POST /sso/access-grants`); reconcile её не
+  перезаписывает, но доступ при увольнении всё равно гасит.
 - Автоматически из stanowiska выводятся только `dyspozytor` (`DYSPOZYTOR*`),
   `planista` (`PLANISTA*`) и `opiekun` (`DAF`). Остальные 11 из 17 кодов
   MAGSpace доступа не дают — попытка входа даёт 403 `SSO_NO_ROLE` и письмо

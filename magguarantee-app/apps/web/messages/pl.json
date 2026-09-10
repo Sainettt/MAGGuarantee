@@ -2415,7 +2415,7 @@
   },
   "sso": {
     "title": "Logowanie Google",
-    "subtitle": "Stanowisko z MAGSpace decyduje o roli w MAGGuarantee. Stanowiska bez przypisanej roli nie dają dostępu — pracownikom na takich stanowiskach rolę przyznaje się ręcznie w Użytkownikach.",
+    "subtitle": "Stanowisko z MAGSpace decyduje o roli w MAGGuarantee. Stanowiska bez przypisanej roli nie dają dostępu — pracownikom na takich stanowiskach rolę nadaje się ręcznie, z listy odrzuconych logowań poniżej.",
     "noAccess": "Brak dostępu",
     "mapped": "Przypisane",
     "unmapped": "Bez roli",
@@ -2435,10 +2435,22 @@
     },
     "denials": {
       "title": "Odrzucone logowania",
-      "subtitle": "Pracownicy, którzy próbowali się zalogować, a ich stanowisko nie ma przypisanej roli. Aby przyznać dostęp, załóż konto w Użytkownikach i ustaw rolę przyznaną ręcznie.",
+      "subtitle": "Pracownicy, którzy próbowali się zalogować, a ich stanowisko nie ma przypisanej roli. „Nadaj dostęp” od razu zakłada konto zarządzane przez MAGSpace — zwolnienie tam odbierze dostęp tutaj.",
       "emptyTitle": "Brak odrzuconych logowań",
       "emptyMessage": "Nikt nie czeka na przyznanie roli.",
-      "noStanowisko": "brak stanowiska"
+      "noStanowisko": "brak stanowiska",
+      "grant": "Nadaj dostęp",
+      "granted": "Dostęp nadany",
+      "grantTitle": "Nadaj dostęp",
+      "grantDescription": "{email} · {stanowisko}",
+      "grantRole": "Rola w MAGGuarantee",
+      "grantRolePlaceholder": "Wybierz rolę…",
+      "grantNote": "Konto będzie zarządzane przez MAGSpace: imię i nazwisko pobierzemy stamtąd, a zwolnienie w MAGSpace odbierze dostęp. Pracownik loguje się przez Google — hasło nie jest potrzebne.",
+      "grantAction": "Nadaj dostęp",
+      "createdToast": "Dostęp nadany: {login} ({role})",
+      "reactivatedToast": "Konto {login} przywrócone z rolą {role}",
+      "updatedToast": "Rola konta {login} zmieniona na {role}",
+      "errorToast": "Nie udało się nadać dostępu."
     }
   }
 }

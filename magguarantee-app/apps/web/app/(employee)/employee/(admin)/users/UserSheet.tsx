@@ -13,6 +13,7 @@ import { useTranslations } from 'next-intl';
 import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
+import { z } from 'zod';
 import {
   AssignableRole,
   CreateUserSchema,
@@ -85,6 +86,17 @@ const EMPTY_DEFAULTS: UserFormValues = {
   roleOverride: '',
 };
 
+/**
+ * Edit-form resolver. The form keeps "no hand-granted role" as `''` (a <select>
+ * cannot hold `null`), but `UpdateUserSchema.roleOverride` only accepts a role
+ * or `null` — validating the raw form values against it rejected `''` and
+ * blocked EVERY edit of a user without an override. The API contract stays
+ * strict; only the form accepts `''`, and `onSubmit` maps it to `null`.
+ */
+const EditFormSchema = UpdateUserSchema.extend({
+  roleOverride: AssignableRole.or(z.literal('')).nullable().optional(),
+}).passthrough();
+
 interface Props {
   open: boolean;
   user: UserDtoFull | null;
@@ -105,9 +117,7 @@ export function UserSheet({ open, user, onClose }: Props) {
       // RHF needs a single resolver — we map the slice ourselves in onSubmit,
       // so just use CreateUserSchema.passthrough() to cover all fields the
       // form carries (Zod will yell about login on edit otherwise).
-      isEdit
-        ? UpdateUserSchema.passthrough()
-        : CreateUserSchema.passthrough(),
+      isEdit ? EditFormSchema : CreateUserSchema.passthrough(),
     ) as never,
     defaultValues: EMPTY_DEFAULTS,
   });
@@ -173,12 +183,18 @@ export function UserSheet({ open, user, onClose }: Props) {
         const { login: _l, password: _p, ...rest } = cleaned;
         void _l;
         void _p;
-        // `roleOverride` is the one field where the empty string is MEANINGFUL:
-        // it means "clear the hand-granted role and let the stanowisko mapping
-        // decide again". The generic cleaner above drops empty strings, so it
-        // has to be restored explicitly — otherwise an override could be set
-        // but never removed.
-        if (values.roleOverride === '' && user.roleOverride !== null) {
+        if (values.managedBy === 'local') {
+          // A hand-granted role only means something to the directory. When
+          // the account is (or goes back to being) locally managed it is not
+          // sent at all — the api clears it on the magspace → local switch, so
+          // a stale override cannot resurface on a later hand-back.
+          delete rest.roleOverride;
+        } else if (values.roleOverride === '' && user.roleOverride !== null) {
+          // `roleOverride` is the one field where the empty string is
+          // MEANINGFUL: "clear the hand-granted role and let the stanowisko
+          // mapping decide again". The generic cleaner above drops empty
+          // strings, so it has to be restored explicitly — otherwise an
+          // override could be set but never removed.
           rest.roleOverride = null;
         }
         updateM.mutate({ id: user.id, body: rest as UpdateUserDto });
@@ -340,6 +356,7 @@ export function UserSheet({ open, user, onClose }: Props) {
                   <FormField
                     label={t('fields.managedBy')}
                     description={t('fields.managedByHint')}
+                    error={errMsg('managedBy')}
                     htmlFor="user-managedBy"
                   >
                     <Select id="user-managedBy" {...form.register('managedBy')}>
@@ -350,24 +367,28 @@ export function UserSheet({ open, user, onClose }: Props) {
 
                   {/* The only access field editable on a managed account — and
                       the way an admin approves someone whose stanowisko is
-                      deliberately unmapped (docs/24 §4). */}
-                  <FormField
-                    label={t('fields.roleOverride')}
-                    description={t('fields.roleOverrideHint')}
-                    htmlFor="user-roleOverride"
-                  >
-                    <Select
-                      id="user-roleOverride"
-                      {...form.register('roleOverride')}
+                      deliberately unmapped (docs/24 §4). Meaningless on a
+                      local account, so it is shown only for `magspace`. */}
+                  {isDirectoryManaged && (
+                    <FormField
+                      label={t('fields.roleOverride')}
+                      description={t('fields.roleOverrideHint')}
+                      error={errMsg('roleOverride')}
+                      htmlFor="user-roleOverride"
                     >
-                      <option value="">{t('fields.roleOverrideNone')}</option>
-                      {AssignableRole.options.map((r) => (
-                        <option key={r} value={r}>
-                          {tRoles(r)}
-                        </option>
-                      ))}
-                    </Select>
-                  </FormField>
+                      <Select
+                        id="user-roleOverride"
+                        {...form.register('roleOverride')}
+                      >
+                        <option value="">{t('fields.roleOverrideNone')}</option>
+                        {AssignableRole.options.map((r) => (
+                          <option key={r} value={r}>
+                            {tRoles(r)}
+                          </option>
+                        ))}
+                      </Select>
+                    </FormField>
+                  )}
                 </>
               )}
             </div>

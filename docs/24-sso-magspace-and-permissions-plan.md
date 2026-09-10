@@ -498,8 +498,9 @@ export function hasAnyPermission(role: Role, ps: readonly Permission[]): boolean
 
 ## 9. Что изменилось при реализации (2026-09-09)
 
-Шесть расхождений с текстом выше. Пять — уступки конвенциям кодовой базы,
-одно — следствие бизнес-правки маппинга.
+Строки 1–6 — расхождения с текстом выше: пять уступок конвенциям кодовой
+базы и одно следствие бизнес-правки маппинга. Строки 7–9 — доработки
+2026-09-10 (follow-up трека A).
 
 | # | В плане | Сделано | Почему |
 |---|---|---|---|
@@ -509,6 +510,9 @@ export function hasAnyPermission(role: Role, ps: readonly Permission[]): boolean
 | 4 | login = `localPart(email)` «как `Driver.loginSlug`» | Свой аллокатор в `DirectoryService` + `UsersRepository.existsLogin` | Аллокатор драйверов ходит в `prisma.driver` — переиспользуется паттерн, не код |
 | 5 | — | Исправлен тип `UserRow.passwordHash: string` → `string \| null` | Колонка nullable с миграции `20260507195536`, но тип врал; Google-пользователь с `passwordHash = null` молча его нарушал |
 | 6 | «stanowisko без маппинга = нет доступа», письмо **один раз на stanowisko** | Письмо **на каждого человека** (дедуп 24 ч по паре employee+stanowisko) + новое поле `User.roleOverride` | См. §10 |
+| 7 | `authProvider = google` у Google-пользователей | (2026-09-10) Ставится **при каждом успешном входе через Google** — и в `provisionOrSync` (ветка существующего юзера), и в `linkGoogleAccount`; раньше только при JIT-создании. Учётка, заведённая админом заранее (`POST /users` или «Nadaj dostęp»), остаётся `local` до первого входа | DTO документирует поле как «входил через Google хотя бы раз»; заранее заведённые и привязанные потом учётки навсегда оставались `local` |
+| 8 | — | (2026-09-10) `PATCH /users/:id` с переходом `managedBy: magspace → local` **обнуляет `roleOverride`** (побеждает значение в том же теле), `role` не трогает | После перехода override никто не читает, но при обратном переключении в `magspace` он молча снова побеждал бы маппинг — решение, которое никто не помнит |
+| 9 | Онбординг ручных stanowisk в два шага (`POST /users` + правка в `UserSheet`) | (2026-09-10) Один шаг — `POST /sso/access-grants` («Nadaj dostęp» на `/employee/sso`); двухшаговый путь остаётся запасным. `GET /sso/access-denials` схлопывает повторы по адресу и отдаёт `status`/`userId` | См. §10 |
 
 Дополнительно, сверх плана: два CHECK-констрейнта
 (`user_role_override_not_privileged`, `stanowisko_role_mapping_role_not_privileged`)
@@ -542,11 +546,21 @@ upper-snake бывшего справочника działów. Решение по
 1. Сотрудник жмёт «Zaloguj przez Google» → 403 `SSO_NO_ROLE`; админам уходит
    письмо **с его именем, адресом и stanowiskiem** (дедуп 24 ч), событие
    ложится в audit и видно на `/employee/sso`.
-2. Админ заводит человека обычным `POST /users` с нужной ролью, в `UserSheet`
-   ставит `managedBy = magspace` и `roleOverride = <роль>`.
-3. Следующий вход через Google совпадает по email, привязывает `googleSub` и
-   `magspaceEmployeeId` — дальше человек живёт под справочником: уволили →
-   доступ погас.
+2. Админ на `/employee/sso` жмёт **«Nadaj dostęp»** у этого человека и
+   выбирает роль → `POST /sso/access-grants` (с 2026-09-10). API сверяет адрес с
+   MAGSpace и **одним шагом** заводит учётку `managedBy = magspace` с
+   `role = roleOverride = <роль>`, без пароля — или, если `magspace`-учётка уже
+   есть, ставит ей роль/override и реактивирует. `local`-учётку, `admin` /
+   `przewoznik` и soft-deleted владельца адреса этот экран не трогает (409) —
+   их правят в Użytkownikach.
+3. Следующий вход через Google совпадает по email, привязывает `googleSub` (и
+   ставит `authProvider = google`) — дальше человек живёт под справочником:
+   уволили → доступ погас.
+
+**Запасной путь** (экран недоступен или нужен ручной контроль): обычный
+`POST /users` с нужной ролью, затем в `UserSheet` — `managedBy = magspace` и
+`roleOverride = <роль>`. Результат тот же, но в два шага и с временным паролем,
+который человеку не нужен.
 
 `roleOverride` обязателен именно потому, что без него reconcile отключал бы
 этих людей **каждый прогон** («их stanowisko не сопоставлено»). Альтернатива

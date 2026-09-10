@@ -1,4 +1,5 @@
-// Admin CRUD for the stanowisko → role mapping (docs/24 §A2).
+// Admin surface of the Google SSO (docs/24 §A2/§A5/§10): the stanowisko → role
+// mapping, the refused-sign-in queue, and the one-step grant that answers it.
 //
 // Admin-only, like every other screen that hands out access. After track B this
 // becomes `@RequirePermission('sso.manage')`; the role check is the same thing
@@ -12,15 +13,19 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Post,
   Put,
   UseGuards,
 } from '@nestjs/common';
 
 import {
+  GrantSsoAccessSchema,
   SetStanowiskoRoleSchema,
   StanowiskoCodeSchema,
+  type GrantSsoAccessDto,
   type SetStanowiskoRoleDto,
   type SsoAccessDenialListDto,
+  type SsoAccessGrantResultDto,
   type StanowiskoRoleDto,
   type StanowiskoRoleListDto,
 } from '@magguarantee/shared';
@@ -77,5 +82,32 @@ export class SsoController {
   @Get('access-denials')
   async denials(): Promise<SsoAccessDenialListDto> {
     return { items: await this.sso.listRecentDenials() };
+  }
+
+  /**
+   * «Nadaj dostęp»: create, reactivate or update a directory-managed account
+   * with a hand-picked role, in one step.
+   *
+   * 200 rather than 201 — the answer is a decision about a person, and
+   * whether a row was inserted is reported in `outcome`.
+   *
+   * `manualTransaction: true` is load-bearing: the handler calls MAGSpace, and
+   * the interceptor's interactive transaction must not be held open across that
+   * network round-trip (docs/13 «Audit на уровне API»). The audit row is still
+   * written by the interceptor, attributed to the admin, with the `before`
+   * snapshot and `metadata` the directory service stashes.
+   */
+  @Post('access-grants')
+  @HttpCode(HttpStatus.OK)
+  @Audit({
+    action: 'grantSsoAccess',
+    targetType: 'User',
+    targetKey: (_req, result) => (result as SsoAccessGrantResultDto | undefined)?.user.login,
+    manualTransaction: true,
+  })
+  async grant(
+    @Body(new ZodValidationPipe(GrantSsoAccessSchema)) body: GrantSsoAccessDto,
+  ): Promise<SsoAccessGrantResultDto> {
+    return this.sso.grantAccess(body);
   }
 }

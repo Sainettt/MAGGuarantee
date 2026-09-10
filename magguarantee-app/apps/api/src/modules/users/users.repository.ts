@@ -231,9 +231,22 @@ export class UsersRepository {
     email: string;
     name: string | null;
     role: UserRow['role'];
-    googleSub: string;
     magspaceEmployeeId: string;
     directorySyncedAt: Date;
+    /**
+     * Set on the JIT path (the person just proved their Google identity).
+     * Omitted when an admin grants access ahead of the first sign-in — that
+     * sign-in links it, matching on e-mail (docs/24 decision #10).
+     */
+    googleSub?: string | null;
+    /**
+     * Defaults to `google`, the JIT path. An admin grant passes `local`:
+     * `google` means "has signed in with Google at least once", which is not
+     * yet true; the first sign-in flips it (`DirectoryService.provisionOrSync`).
+     */
+    authProvider?: UserRow['authProvider'];
+    /** Admin grant only — the role chosen by hand. Null on the JIT path. */
+    roleOverride?: UserRow['roleOverride'];
   }): Promise<UserRow> {
     const row = await this.prisma.user.create({
       data: {
@@ -243,14 +256,50 @@ export class UsersRepository {
         role: data.role,
         passwordHash: null,
         active: true,
-        authProvider: 'google',
+        authProvider: data.authProvider ?? 'google',
         managedBy: 'magspace',
-        googleSub: data.googleSub,
+        googleSub: data.googleSub ?? null,
         magspaceEmployeeId: data.magspaceEmployeeId,
         directorySyncedAt: data.directorySyncedAt,
+        roleOverride: data.roleOverride ?? null,
       },
     });
     return row as unknown as UserRow;
+  }
+
+  /**
+   * Every row holding this e-mail, soft-deleted ones included, compared
+   * case-insensitively. Used by the admin grant (`POST /sso/access-grants`):
+   * `email` is UNIQUE regardless of `deletedAt`, so a deleted holder blocks a
+   * new account just as surely as a live one, and a mixed-case legacy row
+   * must not end up with a lower-case twin.
+   *
+   * Returns the live row when there is one, otherwise the first deleted one.
+   */
+  async findByEmailIncludingDeleted(email: string): Promise<UserRow | null> {
+    const rows = (await this.prisma.user.findMany({
+      where: { email: { equals: email, mode: 'insensitive' } },
+      orderBy: { createdAt: 'asc' },
+      [INCLUDE_SOFT_DELETED]: true,
+    } as unknown as Prisma.UserFindManyArgs)) as unknown as UserRow[];
+    return rows.find((r) => r.deletedAt === null) ?? rows[0] ?? null;
+  }
+
+  /**
+   * Active, non-deleted accounts for a batch of addresses, matched
+   * case-insensitively — the "has this refused person been let in since?"
+   * probe behind `GET /sso/access-denials`. Soft-deleted rows are excluded by
+   * the extension. The caller bounds the batch (one screen's worth).
+   */
+  async findActiveByEmails(emails: readonly string[]): Promise<UserRow[]> {
+    if (emails.length === 0) return [];
+    const rows = await this.prisma.user.findMany({
+      where: {
+        active: true,
+        OR: emails.map((email) => ({ email: { equals: email, mode: 'insensitive' as const } })),
+      },
+    });
+    return rows as unknown as UserRow[];
   }
 
   /**

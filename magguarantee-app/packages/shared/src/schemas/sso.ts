@@ -7,6 +7,7 @@
 import { z } from 'zod';
 
 import { AssignableRole } from './auth';
+import { UserDtoSchema } from './users';
 
 /**
  * One row of the mapping table: a stanowisko as MAGSpace knows it, plus the
@@ -68,14 +69,29 @@ export const StanowiskoCodeSchema = z
   .regex(/^[A-Z][A-Z0-9_]*$/, 'Expected an UPPER_SNAKE stanowisko code');
 
 /**
+ * Whether a refused person has since been let in. `granted` = an active,
+ * non-deleted account exists for that e-mail today, however it got there
+ * (one-step grant, the manual create+edit path, or a mapping added later).
+ */
+export const SsoAccessDenialStatus = z.enum(['pending', 'granted']);
+export type SsoAccessDenialStatus = z.infer<typeof SsoAccessDenialStatus>;
+
+/**
  * One refused Google sign-in, for the "waiting for a role" list on the admin
  * screen. Sourced from the audit log (`system.denyDirectoryAccess`) — there is
  * no separate requests table, because a refusal is an event, not state.
+ *
+ * One row per person: repeated refusals of the same address collapse into the
+ * latest one (`at`), so the list reads as a queue, not a log.
  */
 export const SsoAccessDenialDtoSchema = z.object({
   email: z.string(),
   stanowiskoCode: z.string().nullable(),
+  /** Latest refusal for this address, ISO-8601. */
   at: z.string().datetime(),
+  status: SsoAccessDenialStatus,
+  /** Id of the active account for this e-mail when `status = 'granted'`, else null. */
+  userId: z.string().uuid().nullable(),
 });
 export type SsoAccessDenialDto = z.infer<typeof SsoAccessDenialDtoSchema>;
 
@@ -83,3 +99,39 @@ export const SsoAccessDenialListDtoSchema = z.object({
   items: z.array(SsoAccessDenialDtoSchema),
 });
 export type SsoAccessDenialListDto = z.infer<typeof SsoAccessDenialListDtoSchema>;
+
+// ─── POST /sso/access-grants — one-step «Nadaj dostęp» ────
+
+/**
+ * An admin grants a named employee a role by hand (docs/24 §10). The api looks
+ * the address up in MAGSpace, then creates, reactivates or updates a
+ * directory-managed account with `roleOverride = role`, so the reconcile keeps
+ * the role but still revokes access the day the person leaves.
+ *
+ * `role` excludes `admin`/`przewoznik` for the same reason `roleOverride` does
+ * (CHECK `user_role_override_not_privileged`). The e-mail is normalised the way
+ * MAGSpace normalises its own lookup key.
+ */
+export const GrantSsoAccessSchema = z
+  .object({
+    email: z.string().trim().toLowerCase().email().max(160),
+    role: AssignableRole,
+  })
+  .strict();
+export type GrantSsoAccessDto = z.infer<typeof GrantSsoAccessSchema>;
+
+/**
+ * What the grant did:
+ *  - `created`     — no account existed; one was made (no password, signs in
+ *                    with Google; `authProvider` stays `local` until then);
+ *  - `reactivated` — a directory-managed account existed but was inactive;
+ *  - `updated`     — a directory-managed active account got the new role.
+ */
+export const SsoAccessGrantOutcome = z.enum(['created', 'reactivated', 'updated']);
+export type SsoAccessGrantOutcome = z.infer<typeof SsoAccessGrantOutcome>;
+
+export const SsoAccessGrantResultDtoSchema = z.object({
+  user: UserDtoSchema,
+  outcome: SsoAccessGrantOutcome,
+});
+export type SsoAccessGrantResultDto = z.infer<typeof SsoAccessGrantResultDtoSchema>;

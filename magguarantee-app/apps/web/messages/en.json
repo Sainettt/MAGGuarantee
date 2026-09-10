@@ -2415,7 +2415,7 @@
   },
   "sso": {
     "title": "Google sign-in",
-    "subtitle": "A stanowisko from MAGSpace decides the MAGGuarantee role. Positions with no role grant no access — employees in those positions are approved by hand in Users.",
+    "subtitle": "A stanowisko from MAGSpace decides the MAGGuarantee role. Positions with no role grant no access — employees in those positions are granted a role by hand, from the refused sign-ins list below.",
     "noAccess": "No access",
     "mapped": "Mapped",
     "unmapped": "No role",
@@ -2435,10 +2435,22 @@
     },
     "denials": {
       "title": "Refused sign-ins",
-      "subtitle": "Employees who tried to sign in while their position had no role. To grant access, create the account in Users and set a hand-granted role.",
+      "subtitle": "Employees who tried to sign in while their position had no role. “Grant access” creates the account right away, managed by MAGSpace — a termination there revokes access here.",
       "emptyTitle": "No refused sign-ins",
       "emptyMessage": "Nobody is waiting for a role.",
-      "noStanowisko": "no position"
+      "noStanowisko": "no position",
+      "grant": "Grant access",
+      "granted": "Access granted",
+      "grantTitle": "Grant access",
+      "grantDescription": "{email} · {stanowisko}",
+      "grantRole": "Role in MAGGuarantee",
+      "grantRolePlaceholder": "Choose a role…",
+      "grantNote": "The account will be managed by MAGSpace: the name comes from there, and a termination in MAGSpace revokes access. The employee signs in with Google — no password needed.",
+      "grantAction": "Grant access",
+      "createdToast": "Access granted: {login} ({role})",
+      "reactivatedToast": "Account {login} restored with role {role}",
+      "updatedToast": "Role of {login} changed to {role}",
+      "errorToast": "Could not grant access."
     }
   }
 }

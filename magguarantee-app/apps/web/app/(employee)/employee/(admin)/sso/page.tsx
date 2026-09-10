@@ -9,20 +9,26 @@
 //   2. **"Who is waiting for me?"** — recent refused sign-ins. Four positions
 //      (HANDEL_*, CONTROLLING) are deliberately left unmapped because the
 //      people holding them need different roles; those employees are approved
-//      one at a time in Użytkownicy, and this list is how an admin sees them
-//      without relying on the notification e-mail arriving.
+//      one at a time right from this list («Nadaj dostęp», one step — see
+//      GrantAccessDialog), which is also how an admin sees them without
+//      relying on the notification e-mail arriving.
 //
 // The table degrades rather than fails when MAGSpace is unreachable: saved rows
 // are still shown, with a banner saying the list may be incomplete. Hiding the
 // current mapping during an outage would be exactly backwards.
 
-import { AlertTriangle, KeyRound, ShieldQuestion } from 'lucide-react';
+import { AlertTriangle, KeyRound, ShieldQuestion, UserPlus } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { AssignableRole, type StanowiskoRoleDto } from '@magguarantee/shared';
+import {
+  AssignableRole,
+  type SsoAccessDenialDto,
+  type StanowiskoRoleDto,
+} from '@magguarantee/shared';
 
 import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Select } from '@/components/ui/Select';
@@ -33,6 +39,8 @@ import {
   useSsoAccessDenials,
   useStanowiskoRoles,
 } from '@/lib/hooks/useSso';
+
+import { GrantAccessDialog } from './GrantAccessDialog';
 
 /** Sentinel for the "no access" option — an empty <option> value. */
 const NO_ROLE = '';
@@ -46,6 +54,9 @@ export default function SsoPage() {
   const { data: denials } = useSsoAccessDenials();
   const setM = useSetStanowiskoRole();
   const deleteM = useDeleteStanowiskoRole();
+  const [grantTarget, setGrantTarget] = useState<SsoAccessDenialDto | null>(
+    null,
+  );
 
   const busy = setM.isPending || deleteM.isPending;
 
@@ -205,8 +216,10 @@ export default function SsoPage() {
         ) : (
           <ul className="rounded-xl border border-border bg-card shadow-card divide-y divide-border">
             {denialRows.map((d) => (
+              // One row per person — the api collapses repeated refusals of
+              // the same address into the latest one.
               <li
-                key={`${d.email}-${d.at}`}
+                key={d.email}
                 className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 px-4 py-3 text-sm"
               >
                 <span className="font-semibold text-text">{d.email}</span>
@@ -216,11 +229,29 @@ export default function SsoPage() {
                 <span className="sm:ml-auto text-xs text-text-sub tabular-nums">
                   {formatDateTime(d.at)}
                 </span>
+                {d.status === 'granted' ? (
+                  <Badge variant="success">{t('denials.granted')}</Badge>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setGrantTarget(d)}
+                  >
+                    <UserPlus size={14} aria-hidden />
+                    {t('denials.grant')}
+                  </Button>
+                )}
               </li>
             ))}
           </ul>
         )}
       </section>
+
+      <GrantAccessDialog
+        target={grantTarget}
+        onClose={() => setGrantTarget(null)}
+      />
     </section>
   );
 }
