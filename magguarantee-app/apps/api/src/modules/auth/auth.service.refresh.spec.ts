@@ -4,6 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 
 import type { Env } from '../../config/env.schema';
 import { REFRESH_ROTATION_GRACE_MS } from './auth.constants';
+import type { AuditWriter } from '../audit/audit.service';
 import { DirectoryService } from '../directory/directory.service';
 import { MailService } from '../mail/mail.service';
 import { GoogleIdTokenService } from './google/google-id-token.service';
@@ -173,6 +174,7 @@ function makeHarness(
     // Google SSO collaborators — neither path under test touches them.
     {} as unknown as GoogleIdTokenService,
     {} as unknown as DirectoryService,
+    {} as unknown as AuditWriter,
   );
 
   return { svc, users, refreshTokens, prismaTx };

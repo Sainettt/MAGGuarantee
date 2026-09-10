@@ -111,7 +111,7 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 | POST `/auth/reset-password` | — (новое) | `{sessionToken, code, newPassword}` → 204. Верифицирует код, хеширует, ставит `passwordChangedAt`, чистит `mustChangePassword`, **отзывает все refresh-токены**. Без авто-логина. Rate 10/min. |
 | POST `/auth/resend-reset-code` | — (новое) | `{sessionToken}`. Cooldown как `resend-code`. Rate 2/min. |
 | POST `/auth/change-password` | — (новое, authenticated) | `{newPassword}` — forced/voluntary смена. Чистит `mustChangePassword`, ставит `passwordChangedAt`, выдаёт свежую пару токенов (claim сброшен), **отзывает прочие сессии**. |
-| POST `/auth/google` | — (новое, `@Public`) | Google SSO для сотрудников (docs/24). Принимает `{ idToken }` — подписанный `id_token` от Google Identity Services, полученный в браузере. Верифицирует подпись/`aud`/`iss`/`exp`/`email_verified`/`hd`, резолвит сотрудника в MAGSpace, выводит роль из stanowiska и заводит/синхронизирует `User`. Ответ **идентичен** `/auth/verify-code`: `{ user }` + cookies. Кода 2FA нет. Отказы — 403/503 с `extensions.code` из набора `SSO_*`. Rate 5/min/IP. |
+| POST `/auth/google` | — (новое, `@Public`) | Google SSO для сотрудников (docs/24). Принимает `{ idToken }` — подписанный `id_token` от Google Identity Services, полученный в браузере. Верифицирует подпись/`aud`/`iss`/`exp`/`email_verified`/`hd`, резолвит сотрудника в MAGSpace, выводит роль из stanowiska и заводит/синхронизирует `User`. Ответ **идентичен** `/auth/verify-code`: `{ user }` + cookies. Кода 2FA нет. Отказы — 403/503 с `extensions.code` из набора `SSO_*`. Rate 5/min/IP. Audit: строку `googleLogin` (актор — вошедший пользователь, `metadata.via` = `local` / `directory` / `directory_unavailable`) пишет сервис, **не** `@Audit` — см. [Audit на уровне API](#audit-на-уровне-api). |
 
 > **JWT-claim `mustChangePassword`.** Access-токен несёт флаг — web-middleware декодирует `mt_access` и гейтит навигацию на `/login/change-password`, пока флаг стоит. Снимается после `change-password` (свежая пара токенов).
 
@@ -870,6 +870,8 @@ Source of truth — Zod-схемы в `packages/shared`. Никакого OpenAP
 ## Audit на уровне API
 
 Все mutating endpoints автоматически логируются через `AuditInterceptor`. Сервис вызывает `@Audit('createCarrier', { targetKey: result.id })` или `@AuditTarget(req => req.params.id)` декоратор. Запись в `audit_log` идёт в той же транзакции, что и main change (через Prisma `$transaction`).
+
+**Исключение — `@Public` auth-роуты: на них `@Audit` запрещён.** Интерцептор берёт актора из `req.user`, а у публичного роута его нет — он откатывается на `actor: 'system'`, и `AuditWriter` отклоняет любое действие без префикса `system.` → голый 500 после того, как хендлер уже всё сделал (так было с `/auth/google` до 2026-09-10). Плюс ambient-транзакция интерцептора откатывала `system.*`-строки, записанные перед 403. Страж — `apps/api/src/modules/auth/auth.controller.audit.spec.ts`. `/auth/google` пишет `googleLogin` / `linkGoogleAccount` / `provisionUserFromDirectory` / `syncUserFromDirectory` / `system.deprovisionUserFromDirectory` / `system.denyDirectoryAccess` явно из `AuthService` / `DirectoryService`, отдельными записями на root-клиенте — не атомарно с изменением `User`.
 
 ## Связь с GAS (legacy)
 

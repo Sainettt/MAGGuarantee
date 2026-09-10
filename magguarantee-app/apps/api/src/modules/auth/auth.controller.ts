@@ -125,21 +125,20 @@ export class AuthController {
    * the web client reuse its entire post-login path — downstream, the two are
    * the same event.
    *
-   * `@Audit` is not optional here: `audit-coverage.spec.ts` fails a mutating
-   * endpoint without it, and an account being created or re-pointed by a
-   * sign-in is exactly what an audit log is for. Recording the request body is
-   * safe — the scrubber redacts any key matching /token/i, which `idToken` does.
+   * No `@Audit()` here, like every other public auth route — and it must stay
+   * that way (`auth.controller.audit.spec.ts`). The interceptor attributes the
+   * row to `req.user`; a public route has none, so it falls back to
+   * `actor: 'system'`, which `AuditWriter` refuses for a non-`system.` action:
+   * every successful sign-in ended in a 500. Its ambient transaction also
+   * rolled back the `system.*` refusal rows (deprovision, access denied)
+   * whenever the handler then threw a 403. `AuthService` and
+   * `DirectoryService` write their rows themselves, on the root client,
+   * attributed to the person who signed in.
    */
   @Public()
   @Post('google')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: RL.google })
-  @Audit({
-    action: 'googleLogin',
-    targetType: 'User',
-    targetKey: (_req, result) =>
-      (result as { user?: { login?: string } }).user?.login,
-  })
   async google(
     @Body(new ZodValidationPipe(GoogleLoginRequest))
     body: GoogleLoginRequest,

@@ -45,6 +45,10 @@ export class ProblemDetailsFilter implements ExceptionFilter {
         method: req.method,
         error:
           exception instanceof Error ? exception.message : String(exception),
+        // The wire body carries no `detail` for a non-HttpException (nothing
+        // internal leaks to the client), so this line is the only record of
+        // where the error came from — without the stack it is a mystery.
+        stack: exception instanceof Error ? exception.stack : undefined,
       });
     }
 

@@ -9,6 +9,7 @@ import type { ConfigService } from '@nestjs/config';
 import type { JwtService } from '@nestjs/jwt';
 
 import type { Env } from '../../config/env.schema';
+import type { AuditWriter } from '../audit/audit.service';
 import type { DirectoryService } from '../directory/directory.service';
 import type { MagspaceEmployee } from '../directory/magspace.client';
 import type { MailService } from '../mail/mail.service';
@@ -97,6 +98,10 @@ function makeHarness(opts: {
     verifyIdToken: jest.fn(async () => IDENTITY),
   } as unknown as jest.Mocked<GoogleIdTokenService>;
 
+  const audit = {
+    log: jest.fn(async () => undefined),
+  } as unknown as jest.Mocked<AuditWriter>;
+
   const prisma = {
     $transaction: jest.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
       fn({
@@ -138,9 +143,10 @@ function makeHarness(opts: {
     config,
     googleIdToken,
     directory,
+    audit,
   );
 
-  return { svc, users, directory, googleIdToken };
+  return { svc, users, directory, googleIdToken, audit, prisma };
 }
 
 describe('AuthService.loginWithGoogle', () => {
@@ -327,5 +333,101 @@ describe('AuthService.loginWithGoogle', () => {
       ForbiddenException,
     );
     expect(h.directory.resolveEmployee).not.toHaveBeenCalled();
+  });
+});
+
+describe('AuthService.loginWithGoogle — googleLogin audit row', () => {
+  // `POST /auth/google` is @Public, so the controller cannot audit it: the
+  // interceptor has no req.user, falls back to actor 'system', and AuditWriter
+  // refuses 'googleLogin' for that actor — every successful sign-in was an
+  // empty-bodied 500 (2026-09-10). The service writes the row instead,
+  // attributed to the person who signed in.
+  const CTX = { ipAddress: '10.0.0.7', userAgent: 'jest' };
+
+  it('attributes a directory sign-in to the provisioned user', async () => {
+    const h = makeHarness();
+    h.directory.resolveEmployee.mockResolvedValue({
+      kind: 'found',
+      employee: makeEmployee(),
+    });
+    h.directory.roleFor.mockResolvedValue('planista');
+    h.directory.provisionOrSync.mockResolvedValue(makeUser());
+
+    await h.svc.loginWithGoogle('a.b.c', CTX);
+
+    expect(h.audit.log).toHaveBeenCalledTimes(1);
+    expect(h.audit.log).toHaveBeenCalledWith({
+      action: 'googleLogin',
+      targetType: 'User',
+      targetKey: 'jan.kowalski',
+      metadata: { via: 'directory', userAgent: 'jest' },
+      actor: { userId: 'u-1', userRole: 'planista', ipAddress: '10.0.0.7' },
+    });
+  });
+
+  it('marks a break-glass admin sign-in as local', async () => {
+    const admin = makeUser({
+      id: 'u-admin',
+      login: 'admin',
+      role: 'admin',
+      managedBy: 'local',
+    });
+    const h = makeHarness({ bySub: admin });
+
+    await h.svc.loginWithGoogle('a.b.c', CTX);
+
+    expect(h.audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetKey: 'admin',
+        metadata: expect.objectContaining({ via: 'local' }),
+        actor: { userId: 'u-admin', userRole: 'admin', ipAddress: '10.0.0.7' },
+      }),
+    );
+  });
+
+  it('marks an admission on the cached role while MAGSpace is down', async () => {
+    const h = makeHarness({ bySub: makeUser() });
+    h.directory.resolveEmployee.mockResolvedValue({ kind: 'unavailable' });
+
+    await h.svc.loginWithGoogle('a.b.c', CTX);
+
+    expect(h.audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ via: 'directory_unavailable' }),
+      }),
+    );
+  });
+
+  it('leaves ipAddress off the actor when the request carried none', async () => {
+    const h = makeHarness({ bySub: makeUser({ managedBy: 'local' }) });
+
+    await h.svc.loginWithGoogle('a.b.c', {});
+
+    expect(h.audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: { userId: 'u-1', userRole: 'planista' },
+        metadata: { via: 'local', userAgent: null },
+      }),
+    );
+  });
+
+  it('writes no googleLogin row for a refused sign-in', async () => {
+    const h = makeHarness();
+    h.directory.resolveEmployee.mockResolvedValue({ kind: 'not_found' });
+
+    await expect(h.svc.loginWithGoogle('a.b.c', CTX)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(h.audit.log).not.toHaveBeenCalled();
+  });
+
+  it('mints no session when the audit write fails', async () => {
+    // Losing the session beats an unaudited one — same stance as AuditWriter.
+    const h = makeHarness({ bySub: makeUser({ managedBy: 'local' }) });
+    h.audit.log.mockRejectedValue(new Error('db down'));
+
+    await expect(h.svc.loginWithGoogle('a.b.c', CTX)).rejects.toThrow('db down');
+    expect(h.prisma.$transaction).not.toHaveBeenCalled();
+    expect(h.users.updateLastLogin).not.toHaveBeenCalled();
   });
 });

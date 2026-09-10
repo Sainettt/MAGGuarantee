@@ -15,6 +15,7 @@ import {
   SSO_NOT_EMPLOYEE,
   SSO_NOT_FOR_CARRIER,
   SSO_NO_ROLE,
+  type Role,
   type UserDto,
 } from '@magguarantee/shared';
 
@@ -24,6 +25,7 @@ import {
   LOGIN_MAX_FAILED_ATTEMPTS,
   REFRESH_ROTATION_GRACE_MS,
 } from './auth.constants';
+import { AuditWriter } from '../audit/audit.service';
 import { MailService } from '../mail/mail.service';
 import { DirectoryService } from '../directory/directory.service';
 import { GoogleIdTokenService } from './google/google-id-token.service';
@@ -71,6 +73,14 @@ interface IssueOptions {
 class RefreshReuseError extends Error {}
 
 /**
+ * Which branch of `loginWithGoogle` admitted the user. Recorded on the
+ * `googleLogin` audit row so an operator can tell a break-glass admin sign-in
+ * (`local`) and an admission on a cached role while MAGSpace was down
+ * (`directory_unavailable`) apart from the normal path.
+ */
+type GoogleLoginPath = 'local' | 'directory' | 'directory_unavailable';
+
+/**
  * Phase 1 auth orchestrator.
  *
  * Responsibilities:
@@ -103,6 +113,7 @@ export class AuthService {
     private readonly config: ConfigService<Env, true>,
     private readonly googleIdToken: GoogleIdTokenService,
     private readonly directory: DirectoryService,
+    private readonly audit: AuditWriter,
   ) {}
 
   // ── Step 1: login ────────────────────────────────────
@@ -215,7 +226,7 @@ export class AuthService {
       const linked = local.googleSub
         ? local
         : await this.directory.linkGoogleAccount(local, identity.sub);
-      return this._finishGoogleLogin(linked, ctx);
+      return this._finishGoogleLogin(linked, ctx, 'local');
     }
 
     // ── Directory-managed accounts ──────────────────────
@@ -228,7 +239,7 @@ export class AuthService {
           userId: local.id,
           role: local.role,
         });
-        return this._finishGoogleLogin(local, ctx);
+        return this._finishGoogleLogin(local, ctx, 'directory_unavailable');
       }
       throw new ServiceUnavailableException({
         message: 'MAGSpace chwilowo niedostępny. Spróbuj za chwilę lub zaloguj się hasłem.',
@@ -274,22 +285,42 @@ export class AuthService {
       role,
       googleSub: identity.sub,
     });
-    return this._finishGoogleLogin(user, ctx);
+    return this._finishGoogleLogin(user, ctx, 'directory');
   }
 
   /**
    * Shared tail of every successful Google sign-in. Mirrors `verifyCode`:
    * clearing `failedAttempts` matters because a lockout earned on the password
    * form would otherwise outlive a perfectly good Google login.
+   *
+   * The `googleLogin` audit row is written here and not by an `@Audit()` on the
+   * controller: the route is `@Public()`, so the interceptor has no `req.user`
+   * to attribute it to and falls back to `actor: 'system'` — which
+   * `AuditWriter` refuses for a non-`system.` action, turning every successful
+   * sign-in into a 500. Only this method knows who signed in. It runs before
+   * the tokens are minted, so a failed audit write costs the session rather
+   * than leaving an unaudited one.
    */
   private async _finishGoogleLogin(
     user: UserRow,
     ctx: { ipAddress?: string; userAgent?: string },
+    via: GoogleLoginPath,
   ): Promise<{ user: UserDto; tokens: TokenPair }> {
+    await this.audit.log({
+      action: 'googleLogin',
+      targetType: 'User',
+      targetKey: user.login,
+      metadata: { via, userAgent: ctx.userAgent ?? null },
+      actor: {
+        userId: user.id,
+        userRole: user.role as Role,
+        ...(ctx.ipAddress ? { ipAddress: ctx.ipAddress } : {}),
+      },
+    });
     await this.users.resetFailedAttempts(user.id);
     await this.users.updateLastLogin(user.id, new Date());
     const tokens = await this.issuePair(user, ctx);
-    this.logger.log({ msg: 'google login', userId: user.id, role: user.role });
+    this.logger.log({ msg: 'google login', userId: user.id, role: user.role, via });
     return { user: this.toUserDto(user), tokens };
   }
 
