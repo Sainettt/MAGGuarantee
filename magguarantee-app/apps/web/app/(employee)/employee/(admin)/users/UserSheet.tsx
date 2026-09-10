@@ -183,9 +183,16 @@ export function UserSheet({ open, user, onClose }: Props) {
         }
         updateM.mutate({ id: user.id, body: rest as UpdateUserDto });
       } else {
-        // Create slice — drop the form-only `active` if absent; the API
-        // defaults to true on create anyway.
-        createM.mutate(cleaned as CreateUserDto);
+        // Create slice — drop the edit-only directory fields. They live in
+        // EMPTY_DEFAULTS (so `reset` has a value for them) even though their
+        // inputs are not rendered on create, and `managedBy: 'local'` is not
+        // empty, so the cleaner above keeps it. `CreateUserSchema` is
+        // `.strict()` and would 400 on it. A hand-created account is `local`
+        // by the column default anyway.
+        const { managedBy: _m, roleOverride: _r, ...createBody } = cleaned;
+        void _m;
+        void _r;
+        createM.mutate(createBody as CreateUserDto);
       }
     },
     onInvalidToast(form.setFocus, tCommon('validationFailedToast')),
