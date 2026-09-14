@@ -31,8 +31,16 @@ export interface ReadinessResponse {
  * A live container with a dead Postgres passes `/health` and fails every real
  * request; that gap is what this endpoint closes. Consumers (docs/16
  * §Мониторинг, docs/18):
- *  - Uptime Kuma pings it once a minute and alerts on a non-200;
- *  - the post-deploy smoke test curls it before declaring a release good;
+ *  - an external uptime monitor (Uptime Kuma, docs/23) can ping it and alert
+ *    on a non-200;
+ *  - after every deploy the CI job (`.github/workflows/ci.yml`, deploy step)
+ *    requests `/health` and `/ready` through Caddy (not from inside the
+ *    container) and fails the release unless each answers exactly 200 with a
+ *    JSON body within 120 s (a 503 right after `up -d` is retried). It goes
+ *    through the proxy on purpose: Caddy
+ *    must route these two un-prefixed paths to the api (`@api_health` in
+ *    `infra/caddy/Caddyfile*`) — otherwise they fall through to the web app,
+ *    whose middleware answers 307 → /login and looks like a false green;
  *  - a compose/orchestrator healthcheck can gate traffic on it.
  *
  * Contract: **200** when both dependencies answer, **503** when either does

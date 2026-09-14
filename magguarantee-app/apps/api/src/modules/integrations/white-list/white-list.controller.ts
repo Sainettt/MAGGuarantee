@@ -1,12 +1,12 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 
 import {
-  WhiteListQuerySchema,
-  WhiteListSearchQuerySchema,
-  type WhiteListQuery,
+  WhiteListCheckBodySchema,
+  WhiteListSearchBodySchema,
+  type WhiteListCheckBody,
   type WhiteListResponse,
-  type WhiteListSearchQuery,
+  type WhiteListSearchBody,
   type WhiteListSearchResponse,
 } from '@magguarantee/shared';
 
@@ -19,10 +19,16 @@ const RL = { limit: process.env.NODE_ENV === 'test' ? 1_000 : 10, ttl: 60_000 };
 
 /**
  * Biała Lista MF endpoints — see docs/13-api-design.md#external-integrations:
- *   - `GET /api/v1/integrations/whitelist?nip=...&account=...`
+ *   - `POST /api/v1/integrations/whitelist/check`   body `{ nip, account }`
  *       Confirm a bank account is bound to a NIP in the MF white-list.
- *   - `GET /api/v1/integrations/whitelist/search?nip=...`
+ *   - `POST /api/v1/integrations/whitelist/search`  body `{ nip }`
  *       Auto-fill carrier company data (name, address, accounts) by NIP.
+ *
+ * Both are read-only lookups. They are POST only so the NIP and the bank
+ * account travel in the body instead of the query string, which is written to
+ * access/proxy logs and browser history (2026-09-14 logging audit, item 2).
+ * Hence `200`, not the POST-default `201`, and deliberately no `@Audit` —
+ * nothing is mutated.
  *
  * Same auth policy as VIES — admin/opiekun only (carrier-onboarding tools),
  * enforced by the global RolesGuard via this class-level `@Roles`.
@@ -32,20 +38,23 @@ const RL = { limit: process.env.NODE_ENV === 'test' ? 1_000 : 10, ttl: 60_000 };
 export class WhiteListController {
   constructor(private readonly whiteList: WhiteListService) {}
 
-  @Get()
+  @Post('check')
+  @HttpCode(HttpStatus.OK)
   @Throttle({ default: RL })
   async check(
-    @Query(new ZodValidationPipe(WhiteListQuerySchema)) query: WhiteListQuery,
+    @Body(new ZodValidationPipe(WhiteListCheckBodySchema))
+    body: WhiteListCheckBody,
   ): Promise<WhiteListResponse> {
-    return this.whiteList.checkAccount(query.nip, query.account);
+    return this.whiteList.checkAccount(body.nip, body.account);
   }
 
-  @Get('search')
+  @Post('search')
+  @HttpCode(HttpStatus.OK)
   @Throttle({ default: RL })
   async search(
-    @Query(new ZodValidationPipe(WhiteListSearchQuerySchema))
-    query: WhiteListSearchQuery,
+    @Body(new ZodValidationPipe(WhiteListSearchBodySchema))
+    body: WhiteListSearchBody,
   ): Promise<WhiteListSearchResponse> {
-    return this.whiteList.searchByNip(query.nip);
+    return this.whiteList.searchByNip(body.nip);
   }
 }

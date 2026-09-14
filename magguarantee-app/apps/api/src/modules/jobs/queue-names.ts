@@ -3,13 +3,16 @@
  * `BullModule.registerQueue(...)` calls so the queue identifiers are never
  * stringly-typed at the call site (no-magic-strings rule).
  *
- * Phase 9 (early / in-process) — two queues are live today:
- *   - `email-send`         — async transactional email (2FA login code only
- *                            for now; the rest of the mail call-sites stay
- *                            synchronous until the full Phase 9 migration).
+ * Two queues are live, both with in-process workers in the API container:
+ *   - `email-send`         — EVERY transactional email (22 templates, see
+ *                            `mail/email-send.job.ts`). Secrets (2FA / reset
+ *                            codes, temporary passwords) travel sealed with
+ *                            AES-256-GCM, never in plaintext.
  *   - `chat-notify-wyjazd` — Google Chat wyjazd-registration notification.
- *                            Removed 2026-07-28, RESTORED 2026-08-07 (the
- *                            wyjazd heads-up goes to the Chat space again).
+ *                            Removed 2026-07-28, RESTORED 2026-08-07.
+ *
+ * Retention of finished jobs: `jobs/job-retention.ts`. Permanent failures are
+ * logged, alerted (`common/ops-alert`) and, for mail, written to `email_logs`.
  *
  * See docs/16-jobs-and-integrations.md#background-jobs-cron--bullmq.
  */

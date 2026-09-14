@@ -36,6 +36,7 @@ import {
 } from '@/lib/api/teams';
 import { MY_FLEET_KEY } from '@/lib/hooks/useMyFleet';
 import { VEHICLES_KEY } from '@/lib/hooks/useVehicles';
+import type { MutationMetaOptions } from '@/lib/query/globalErrors';
 
 export const TEAMS_KEY = ['teams'] as const;
 export const TEAM_LOOKUPS_KEY = ['lookups', 'teams'] as const;
@@ -99,26 +100,29 @@ export function useUpdateTeam(
   });
 }
 
-export function useDeactivateTeam() {
+export function useDeactivateTeam(opts?: MutationMetaOptions) {
   const invalidate = useTeamInvalidator();
   return useMutation({
+    meta: opts?.meta,
     mutationFn: deactivateTeam,
     onSuccess: invalidate,
   });
 }
 
-export function useReactivateTeam() {
+export function useReactivateTeam(opts?: MutationMetaOptions) {
   const invalidate = useTeamInvalidator();
   return useMutation({
+    meta: opts?.meta,
     mutationFn: reactivateTeam,
     onSuccess: invalidate,
   });
 }
 
 /** Hard-delete — admin only; guarded server-side (409 if referenced). */
-export function useHardDeleteTeam() {
+export function useHardDeleteTeam(opts?: MutationMetaOptions) {
   const invalidate = useTeamInvalidator();
   return useMutation({
+    meta: opts?.meta,
     mutationFn: ({ id, body }: { id: string; body: DeleteWithReasonDto }) =>
       hardDeleteTeam(id, body),
     onSuccess: invalidate,

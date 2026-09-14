@@ -1,0 +1,33 @@
+# MAGGuarantee — ops alert settings. Install on the VPS as
+# /opt/magguarantee/alert.conf (NOT inside the git checkout):
+#
+#   sudo install -m 0600 -o root -g root \
+#     /opt/magguarantee/src/infra/scripts/alert.conf.example /opt/magguarantee/alert.conf
+#   sudo nano /opt/magguarantee/alert.conf
+#
+# Read by magguarantee-alert@.service through `EnvironmentFile=` — systemd
+# (root) reads it before dropping to the `deploy` user, so root:root 0600 is
+# enough and keeps the webhook token away from everyone else on the box.
+#
+# systemd EnvironmentFile syntax: KEY=value, one per line, no `export`, no
+# ${VAR} expansion. Quotes are optional. Changes apply to the next alert — no
+# daemon-reload needed.
+#
+# Test after editing (posts the current tail of the backup journal):
+#   sudo systemctl start magguarantee-alert@magguarantee-backup.service.service
+#   journalctl -u 'magguarantee-alert@*' -n 20 --no-pager
+
+# Google Chat incoming-webhook URL of the ops space (Chat space → Apps &
+# integrations → Webhooks → Add webhook). A bearer secret: anyone holding it
+# can post to the space. Use a DIFFERENT space than the "wyjazdy" one
+# (GOOGLE_CHAT_WYJAZD_WEBHOOK_URL) — ops failures are not for dispatchers.
+#
+# Empty → the alert unit logs a WARNING to the journal and sends nothing.
+OPS_ALERT_WEBHOOK_URL=
+
+# How many journal lines of the failed unit go into the message (default 20).
+#OPS_ALERT_JOURNAL_LINES=20
+
+# Byte cap on that excerpt; the end is kept (default 3000 — a Chat text message
+# tops out around 4000 characters).
+#OPS_ALERT_MAX_LOG_BYTES=3000

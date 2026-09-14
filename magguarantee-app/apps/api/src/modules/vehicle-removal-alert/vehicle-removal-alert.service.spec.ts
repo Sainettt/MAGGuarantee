@@ -7,8 +7,19 @@
 //   - a relapsed (now `stojaca`) stamped vehicle → stamp cleared, no mail;
 //   - an empty due set → no admin mail;
 //   - the kill-switch short-circuits the whole run;
-//   - one admin per digest; a total mail failure does NOT stamp (retry next run).
+//   - one admin per digest (one atomic batch); a failed dispatch reverts the
+//     claimed stamps, and so does the compensation handler when every queued
+//     copy fails permanently (2026-08-14 logging audit, item 6);
+//   - a crash of the run is caught, logged and alerted (item 20).
 
+import { Logger } from '@nestjs/common';
+
+import type { OpsAlertService } from '../../common/ops-alert/ops-alert.service';
+import type { MailCompensation } from '../mail/email-send.job';
+import type {
+  MailCompensationHandler,
+  MailCompensationRegistry,
+} from '../mail/mail-compensation.registry';
 import type { VehicleDelegationStatus } from '../vehicles/vehicle-delegation-status.repository';
 import type { VehicleDelegationStatusRepository } from '../vehicles/vehicle-delegation-status.repository';
 import type { MailService } from '../mail/mail.service';
@@ -84,9 +95,12 @@ interface Harness {
     findLiveVehicles: jest.Mock;
     stampNotified: jest.Mock;
     clearNotified: jest.Mock;
+    revertNotifiedIfUnchanged: jest.Mock;
   };
-  mail: { enqueueVehicleRemovalAdmin: jest.Mock };
+  mail: { enqueueVehicleRemovalAdminBatch: jest.Mock };
   users: { listByRole: jest.Mock };
+  alertSend: jest.Mock;
+  handlers: Map<string, MailCompensationHandler>;
 }
 
 function makeHarness(opts: {
@@ -96,12 +110,18 @@ function makeHarness(opts: {
   admins?: UserRow[];
   enabled?: boolean;
   repeatDays?: number;
-  mailImpl?: () => Promise<void>;
+  mailImpl?: () => Promise<number>;
 } = {}): Harness {
   const findLiveVehicles = jest.fn(async () => opts.vehicles ?? []);
   const stampNotified = jest.fn(async () => undefined);
   const clearNotified = jest.fn(async () => undefined);
-  const repo = { findLiveVehicles, stampNotified, clearNotified };
+  const revertNotifiedIfUnchanged = jest.fn(async () => true);
+  const repo = {
+    findLiveVehicles,
+    stampNotified,
+    clearNotified,
+    revertNotifiedIfUnchanged,
+  };
 
   const getByVehicleIds = jest.fn(async (ids: string[]) => {
     const map = new Map<string, VehicleDelegationStatus>();
@@ -118,10 +138,11 @@ function makeHarness(opts: {
   const listByRole = jest.fn(async () => opts.admins ?? [makeAdmin()]);
   const users = { listByRole };
 
-  const enqueueVehicleRemovalAdmin = jest.fn(
-    opts.mailImpl ?? (async () => undefined),
+  const enqueueVehicleRemovalAdminBatch = jest.fn(
+    opts.mailImpl ??
+      (async (recipients: unknown[]) => recipients.length),
   );
-  const mail = { enqueueVehicleRemovalAdmin };
+  const mail = { enqueueVehicleRemovalAdminBatch };
 
   const config = {
     get: jest.fn((key: string) => {
@@ -136,19 +157,40 @@ function makeHarness(opts: {
     }),
   } as never;
 
+  const handlers = new Map<string, MailCompensationHandler>();
+  const compensations = {
+    register: jest.fn((kind: string, handler: MailCompensationHandler) => {
+      handlers.set(kind, handler);
+    }),
+  } as unknown as MailCompensationRegistry;
+  const alertSend = jest.fn(async () => 'log-only');
+  const alerts = { send: alertSend } as unknown as OpsAlertService;
+
   const service = new VehicleRemovalAlertService(
     repo as unknown as VehicleRemovalAlertRepository,
     delegationStatus as unknown as VehicleDelegationStatusRepository,
     users as unknown as UsersRepository,
     mail as unknown as MailService,
     config,
+    compensations,
+    alerts,
   );
-  return { service, repo, mail, users };
+  service.onModuleInit();
+  return { service, repo, mail, users, alertSend, handlers };
 }
 
 beforeEach(() => {
   vehSeq = 0;
 });
+
+type BatchCall = [
+  { email: string; props: { rows: { plateNumber: string; daysSinceReturn: number }[] } }[],
+  { compensation: MailCompensation },
+];
+
+function batchCall(h: Harness, i = 0): BatchCall {
+  return h.mail.enqueueVehicleRemovalAdminBatch.mock.calls[i] as unknown as BatchCall;
+}
 
 describe('VehicleRemovalAlertService.runDaily — due / dedup / stamp', () => {
   it('do_usuniecia vehicle with null stamp → mailed + stamped', async () => {
@@ -160,16 +202,15 @@ describe('VehicleRemovalAlertService.runDaily — due / dedup / stamp', () => {
 
     await h.service.runDaily(NOW);
 
-    expect(h.mail.enqueueVehicleRemovalAdmin).toHaveBeenCalledTimes(1);
-    const [email, props] = h.mail.enqueueVehicleRemovalAdmin.mock.calls[0] as [
-      string,
-      { rows: { plateNumber: string; daysSinceReturn: number }[] },
-    ];
-    expect(email).toBe('admin1@magtrans.eu');
-    expect(props.rows).toHaveLength(1);
-    expect(props.rows[0]?.daysSinceReturn).toBe(35);
-    // Stamped after the successful enqueue (adminRemovalNotifyCount++ in repo).
+    expect(h.mail.enqueueVehicleRemovalAdminBatch).toHaveBeenCalledTimes(1);
+    const [recipients] = batchCall(h);
+    expect(recipients).toHaveLength(1);
+    expect(recipients[0]?.email).toBe('admin1@magtrans.eu');
+    expect(recipients[0]?.props.rows).toHaveLength(1);
+    expect(recipients[0]?.props.rows[0]?.daysSinceReturn).toBe(35);
+    // Claimed (adminRemovalNotifyCount++ in repo); nothing reverted.
     expect(h.repo.stampNotified).toHaveBeenCalledWith('veh-1', NOW);
+    expect(h.repo.revertNotifiedIfUnchanged).not.toHaveBeenCalled();
   });
 
   it('vehicle stamped 2 days ago is NOT re-mailed (inside repeat window)', async () => {
@@ -181,7 +222,7 @@ describe('VehicleRemovalAlertService.runDaily — due / dedup / stamp', () => {
 
     await h.service.runDaily(NOW);
 
-    expect(h.mail.enqueueVehicleRemovalAdmin).not.toHaveBeenCalled();
+    expect(h.mail.enqueueVehicleRemovalAdminBatch).not.toHaveBeenCalled();
     expect(h.repo.stampNotified).not.toHaveBeenCalled();
     // Still `do_usuniecia` → not a relapse, no clear.
     expect(h.repo.clearNotified).not.toHaveBeenCalled();
@@ -196,7 +237,7 @@ describe('VehicleRemovalAlertService.runDaily — due / dedup / stamp', () => {
 
     await h.service.runDaily(NOW);
 
-    expect(h.mail.enqueueVehicleRemovalAdmin).toHaveBeenCalledTimes(1);
+    expect(h.mail.enqueueVehicleRemovalAdminBatch).toHaveBeenCalledTimes(1);
     expect(h.repo.stampNotified).toHaveBeenCalledWith('veh-1', NOW);
   });
 
@@ -211,7 +252,7 @@ describe('VehicleRemovalAlertService.runDaily — due / dedup / stamp', () => {
     await h.service.runDaily(NOW);
 
     expect(h.repo.clearNotified).toHaveBeenCalledWith('veh-1');
-    expect(h.mail.enqueueVehicleRemovalAdmin).not.toHaveBeenCalled();
+    expect(h.mail.enqueueVehicleRemovalAdminBatch).not.toHaveBeenCalled();
     expect(h.repo.stampNotified).not.toHaveBeenCalled();
   });
 
@@ -226,13 +267,17 @@ describe('VehicleRemovalAlertService.runDaily — due / dedup / stamp', () => {
     await h.service.runDaily(NOW);
 
     expect(h.users.listByRole).not.toHaveBeenCalled();
-    expect(h.mail.enqueueVehicleRemovalAdmin).not.toHaveBeenCalled();
+    expect(h.mail.enqueueVehicleRemovalAdminBatch).not.toHaveBeenCalled();
     expect(h.repo.clearNotified).not.toHaveBeenCalled();
   });
 });
 
 describe('VehicleRemovalAlertService.runDaily — fan-out & resilience', () => {
-  it('one digest per active admin listing all due vehicles', async () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('one digest per active admin listing all due vehicles, as one batch', async () => {
     const h = makeHarness({
       vehicles: [
         makeVehicle({ id: 'veh-1' }),
@@ -250,11 +295,10 @@ describe('VehicleRemovalAlertService.runDaily — fan-out & resilience', () => {
 
     await h.service.runDaily(NOW);
 
-    expect(h.mail.enqueueVehicleRemovalAdmin).toHaveBeenCalledTimes(2);
-    for (const call of h.mail.enqueueVehicleRemovalAdmin.mock.calls) {
-      const props = call[1] as { rows: unknown[] };
-      expect(props.rows).toHaveLength(2);
-    }
+    expect(h.mail.enqueueVehicleRemovalAdminBatch).toHaveBeenCalledTimes(1);
+    const [recipients] = batchCall(h);
+    expect(recipients.map((r) => r.email)).toEqual(['a1@magtrans.eu', 'a2@magtrans.eu']);
+    for (const r of recipients) expect(r.props.rows).toHaveLength(2);
     // Each due vehicle stamped once.
     expect(h.repo.stampNotified).toHaveBeenCalledTimes(2);
   });
@@ -268,21 +312,25 @@ describe('VehicleRemovalAlertService.runDaily — fan-out & resilience', () => {
     await h.service.runDaily(NOW);
 
     expect(h.repo.findLiveVehicles).not.toHaveBeenCalled();
-    expect(h.mail.enqueueVehicleRemovalAdmin).not.toHaveBeenCalled();
+    expect(h.mail.enqueueVehicleRemovalAdminBatch).not.toHaveBeenCalled();
   });
 
-  it('a total mail failure does NOT stamp (retry next run)', async () => {
+  it('a failed dispatch reverts the claimed stamps (retry next run)', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const previous = daysAgo(4);
     const h = makeHarness({
-      vehicles: [makeVehicle({ id: 'veh-1' })],
+      vehicles: [makeVehicle({ id: 'veh-1', adminRemovalNotifiedAt: previous })],
       delegation: { 'veh-1': { hasActiveDelegation: false, lastReturnAt: daysAgo(35) } },
       mailImpl: async () => {
-        throw new Error('550 mailbox unavailable');
+        throw new Error('Queue is closed');
       },
     });
 
     await expect(h.service.runDaily(NOW)).resolves.toBeUndefined();
-    // No admin enqueued successfully → nothing stamped.
-    expect(h.repo.stampNotified).not.toHaveBeenCalled();
+
+    expect(h.repo.stampNotified).toHaveBeenCalledWith('veh-1', NOW);
+    // Compare-and-swap back to the previous anchor.
+    expect(h.repo.revertNotifiedIfUnchanged).toHaveBeenCalledWith('veh-1', NOW, previous);
   });
 
   it('an active delegation keeps the vehicle off the due list (aktywna)', async () => {
@@ -293,6 +341,85 @@ describe('VehicleRemovalAlertService.runDaily — fan-out & resilience', () => {
 
     await h.service.runDaily(NOW);
 
-    expect(h.mail.enqueueVehicleRemovalAdmin).not.toHaveBeenCalled();
+    expect(h.mail.enqueueVehicleRemovalAdminBatch).not.toHaveBeenCalled();
+  });
+});
+
+describe('VehicleRemovalAlertService — stamp semantics on permanent mail failure (logging audit item 6)', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('the batch carries a revert compensation with every vehicle and its previous anchor', async () => {
+    const previous = daysAgo(3);
+    const h = makeHarness({
+      vehicles: [
+        makeVehicle({ id: 'veh-1', adminRemovalNotifiedAt: null }),
+        makeVehicle({ id: 'veh-2', adminRemovalNotifiedAt: previous }),
+      ],
+      delegation: {
+        'veh-1': { hasActiveDelegation: false, lastReturnAt: daysAgo(35) },
+        'veh-2': { hasActiveDelegation: false, lastReturnAt: daysAgo(40) },
+      },
+    });
+
+    await h.service.runDaily(NOW);
+
+    const [, opts] = batchCall(h);
+    expect(opts.compensation).toEqual({
+      kind: 'vehicle-removal-alert.revert-notify-stamps',
+      payload: {
+        stampedAt: NOW.toISOString(),
+        vehicles: [
+          { id: 'veh-1', previousNotifiedAt: null },
+          { id: 'veh-2', previousNotifiedAt: previous.toISOString() },
+        ],
+      },
+    });
+  });
+
+  it('the registered handler reverts the stamps from the payload', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const previous = daysAgo(3);
+    const h = makeHarness({});
+    const handler = h.handlers.get('vehicle-removal-alert.revert-notify-stamps');
+    expect(handler).toBeDefined();
+
+    await handler!({
+      stampedAt: NOW.toISOString(),
+      vehicles: [
+        { id: 'veh-1', previousNotifiedAt: null },
+        { id: 'veh-2', previousNotifiedAt: previous.toISOString() },
+      ],
+    });
+
+    expect(h.repo.revertNotifiedIfUnchanged).toHaveBeenCalledWith('veh-1', NOW, null);
+    expect(h.repo.revertNotifiedIfUnchanged).toHaveBeenCalledWith('veh-2', NOW, previous);
+  });
+
+  it('a malformed payload reverts nothing and does not throw', async () => {
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const h = makeHarness({});
+    const handler = h.handlers.get('vehicle-removal-alert.revert-notify-stamps')!;
+
+    await expect(handler({ vehicles: 'nope' })).resolves.toBeUndefined();
+    expect(h.repo.revertNotifiedIfUnchanged).not.toHaveBeenCalled();
+  });
+
+  it('a crash in the scope query is caught, logged and alerted', async () => {
+    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const h = makeHarness({});
+    h.repo.findLiveVehicles.mockRejectedValueOnce(new Error('db down'));
+
+    await expect(h.service.runDaily(NOW)).resolves.toBeUndefined();
+
+    expect(error.mock.calls[0]?.[0]).toMatchObject({
+      msg: 'cron job failed',
+      job: 'vehicle-removal-alert',
+      errorMessage: 'db down',
+    });
+    expect(h.alertSend).toHaveBeenCalledWith(
+      expect.objectContaining({ key: 'cron-failed:vehicle-removal-alert' }),
+    );
   });
 });

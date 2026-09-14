@@ -60,6 +60,7 @@ import { useMyGuaranteeCompliance } from '@/lib/hooks/useGuarantee';
 import { useTrailers } from '@/lib/hooks/useTrailers';
 import { useTrailerTypes } from '@/lib/hooks/useTrailerTypes';
 import { useVehicles } from '@/lib/hooks/useVehicles';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 
 /** Valid in-page tab ids; also the values honoured via `?tab=`. */
 type FleetTab = 'vehicles' | 'drivers' | 'trailers';
@@ -569,6 +570,7 @@ export function CarrierFleetPanel() {
             onRowClick={setVehicleTarget}
             rowAriaLabel={(r) => tA11y('showDetails', { name: r.plateNumber })}
             isLoading={vehiclesQ.isLoading}
+            {...queryErrorProps(vehiclesQ)}
             hasActiveFilters={statusFilter !== null}
             empty={
               <EmptyState
@@ -607,6 +609,7 @@ export function CarrierFleetPanel() {
               tA11y('showDetails', { name: `${r.firstName} ${r.lastName}` })
             }
             isLoading={driversAllQ.isLoading}
+            {...queryErrorProps(driversAllQ)}
             hasActiveFilters={driverQ.length >= 2}
             empty={
               <EmptyState
@@ -667,6 +670,7 @@ export function CarrierFleetPanel() {
             onRowClick={setTrailerTarget}
             rowAriaLabel={(r) => tA11y('showDetails', { name: r.plateNumber })}
             isLoading={trailersAllQ.isLoading}
+            {...queryErrorProps(trailersAllQ)}
             hasActiveFilters={Boolean(trailerQ.length >= 2 || trailerTypeId)}
             empty={
               <EmptyState

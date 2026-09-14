@@ -108,10 +108,21 @@ export class CarrierAttachmentsService {
   async download(
     carrierId: string,
     attachmentId: string,
-  ): Promise<{ object: StorageObject; fileName: string; mimeType: string }> {
+  ): Promise<{
+    object: StorageObject;
+    fileName: string;
+    mimeType: string;
+    category: CarrierAttachmentCategory;
+  }> {
     const att = await this._loadAttachmentOf(carrierId, attachmentId);
     const object = await this.storage.getObject(att.storageKey);
-    return { object, fileName: att.fileName, mimeType: att.mimeType };
+    return {
+      object,
+      fileName: att.fileName,
+      mimeType: att.mimeType,
+      // For the controller's download log line (ids + category, no filename).
+      category: att.category,
+    };
   }
 
   /**
@@ -149,12 +160,24 @@ export class CarrierAttachmentsService {
     try {
       await this.storage.delete(key);
     } catch (e) {
-      this.logger.error(
-        { err: e, key },
-        'Failed to remove carrier attachment storage object',
-      );
+      this.logger.error({
+        msg: 'failed to remove carrier attachment storage object',
+        key,
+        err: errorForLog(e),
+      });
     }
   }
+}
+
+/**
+ * Error fields for a structured log line. Nest's `Logger` takes ONE object
+ * (`{ msg, ... }`); the pino-style `(obj, 'msg')` signature does not fit it
+ * (2026-08-14 logging audit, item 21).
+ */
+function errorForLog(e: unknown): { name: string; message: string; stack?: string } {
+  return e instanceof Error
+    ? { name: e.name, message: e.message, stack: e.stack }
+    : { name: 'NonError', message: String(e) };
 }
 
 /** Maps a repo row to the public DTO (no storageKey). */

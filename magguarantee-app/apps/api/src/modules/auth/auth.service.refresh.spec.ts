@@ -1,4 +1,4 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 
@@ -77,6 +77,7 @@ interface Harness {
     Pick<RefreshTokenRepository, 'findByHash' | 'findById' | 'revokeAllForUser'>
   >;
   prismaTx: jest.Mock;
+  audit: jest.Mocked<Pick<AuditWriter, 'log'>>;
 }
 
 function makeHarness(
@@ -161,6 +162,10 @@ function makeHarness(
     },
   } as unknown as ConfigService<Env, true>;
 
+  const audit = {
+    log: jest.fn(async () => undefined),
+  } as unknown as Harness['audit'];
+
   const svc = new AuthService(
     users as unknown as UsersService,
     passwords,
@@ -174,10 +179,10 @@ function makeHarness(
     // Google SSO collaborators — neither path under test touches them.
     {} as unknown as GoogleIdTokenService,
     {} as unknown as DirectoryService,
-    {} as unknown as AuditWriter,
+    audit as unknown as AuditWriter,
   );
 
-  return { svc, users, refreshTokens, prismaTx };
+  return { svc, users, refreshTokens, prismaTx, audit };
 }
 
 describe('AuthService — refresh (rotation race vs theft)', () => {
@@ -434,6 +439,22 @@ describe('AuthService — refresh (rotation race vs theft)', () => {
     expect(h.prismaTx).not.toHaveBeenCalled();
   });
 
+  it('no audit row on a rotation or a benign-race heal — those are not security events', async () => {
+    const rotate = makeHarness({ storedRow: makeRow({ revokedAt: null }) });
+    await rotate.svc.refresh('u-1', 'raw-refresh-jwt', {});
+    expect(rotate.audit.log).not.toHaveBeenCalled();
+
+    const heal = makeHarness({
+      storedRow: makeRow({
+        revokedAt: new Date(NOW.getTime() - 5_000),
+        replacedById: 'rt-new',
+      }),
+      chainRows: { 'rt-new': makeRow({ id: 'rt-new' }) },
+    });
+    await heal.svc.refresh('u-1', 'raw-refresh-jwt', {});
+    expect(heal.audit.log).not.toHaveBeenCalled();
+  });
+
   it('inactive account on a live token → 401, no rotation', async () => {
     const h = makeHarness({
       user: makeUser({ active: false }),
@@ -443,5 +464,122 @@ describe('AuthService — refresh (rotation race vs theft)', () => {
       h.svc.refresh('u-1', 'raw-refresh-jwt', {}),
     ).rejects.toThrow('Account is no longer active');
     expect(h.prismaTx).not.toHaveBeenCalled();
+  });
+});
+
+describe('AuthService — refresh-token reuse audit trail', () => {
+  const CTX = { ipAddress: '203.0.113.5', userAgent: 'replay-ua' };
+
+  let warn: jest.SpyInstance;
+  let info: jest.SpyInstance;
+  let debug: jest.SpyInstance;
+  let error: jest.SpyInstance;
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(NOW);
+    warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    info = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    debug = jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
+    error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
+
+  const replayed = () =>
+    makeRow({
+      revokedAt: new Date(NOW.getTime() - REFRESH_ROTATION_GRACE_MS - 1),
+      replacedById: 'rt-new',
+    });
+
+  it('writes detectRefreshTokenReuse attributed to the token owner, with IP and UA', async () => {
+    const h = makeHarness({ storedRow: replayed() });
+
+    await expect(h.svc.refresh('u-1', 'raw-refresh-jwt', CTX)).rejects.toThrow(
+      'Token reuse detected — all sessions revoked',
+    );
+
+    expect(h.audit.log).toHaveBeenCalledTimes(1);
+    expect(h.audit.log).toHaveBeenCalledWith({
+      action: 'detectRefreshTokenReuse',
+      targetType: 'User',
+      targetKey: 'jan.kowalski',
+      metadata: {
+        tokenId: 'rt-old',
+        revokedAgeMs: REFRESH_ROTATION_GRACE_MS + 1,
+        rotated: true,
+        sessionsRevoked: 2,
+        userAgent: 'replay-ua',
+      },
+      actor: { userId: 'u-1', userRole: 'opiekun', ipAddress: '203.0.113.5' },
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        msg: 'refresh-token reuse detected, revoked all sessions',
+        userId: 'u-1',
+        sessionsRevoked: 2,
+        ipAddress: '203.0.113.5',
+        userAgent: 'replay-ua',
+      }),
+    );
+    // The raw refresh token is never logged or audited.
+    expect(JSON.stringify([warn.mock.calls, h.audit.log.mock.calls])).not.toContain(
+      'raw-refresh-jwt',
+    );
+  });
+
+  it('marks a replay of a logged-out (never rotated) token as rotated: false', async () => {
+    const h = makeHarness({
+      storedRow: makeRow({
+        revokedAt: new Date(NOW.getTime() - 1_000),
+        replacedById: null,
+      }),
+    });
+
+    await expect(h.svc.refresh('u-1', 'raw-refresh-jwt', CTX)).rejects.toThrow(
+      UnauthorizedException,
+    );
+    expect(h.audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ rotated: false }),
+      }),
+    );
+  });
+
+  it('a failed audit write neither blocks the revocation nor changes the 401', async () => {
+    const h = makeHarness({ storedRow: replayed() });
+    h.audit.log.mockRejectedValue(new Error('db down'));
+
+    await expect(h.svc.refresh('u-1', 'raw-refresh-jwt', CTX)).rejects.toThrow(
+      'Token reuse detected — all sessions revoked',
+    );
+    expect(h.refreshTokens.revokeAllForUser).toHaveBeenCalledWith('u-1');
+    expect(error).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'detectRefreshTokenReuse' }),
+    );
+  });
+
+  it('logs the benign-race heal at INFO (was DEBUG) with the caller IP', async () => {
+    const h = makeHarness({
+      storedRow: makeRow({
+        revokedAt: new Date(NOW.getTime() - 5_000),
+        replacedById: 'rt-new',
+      }),
+      chainRows: { 'rt-new': makeRow({ id: 'rt-new' }) },
+    });
+
+    await h.svc.refresh('u-1', 'raw-refresh-jwt', CTX);
+
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'u-1',
+        replacedById: 'rt-new',
+        ipAddress: '203.0.113.5',
+      }),
+    );
+    expect(debug).not.toHaveBeenCalled();
   });
 });

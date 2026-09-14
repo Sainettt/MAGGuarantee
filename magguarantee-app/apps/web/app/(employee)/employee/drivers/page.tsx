@@ -26,6 +26,8 @@ import {
   useDrivers,
   useHardDeleteDriver,
 } from '@/lib/hooks/useDrivers';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
+import { SUPPRESS_GLOBAL_ERROR } from '@/lib/query/globalErrors';
 
 import { DriverFormDialog } from './DriverFormDialog';
 
@@ -46,11 +48,12 @@ export default function DriversPage() {
   const [search, setSearch] = useState('');
   const [carrierId, setCarrierId] = useState<string>('');
 
-  const { data, isLoading } = useDrivers({
+  const listQ = useDrivers({
     q: search.length >= 2 ? search : undefined,
     carrierId: carrierId || undefined,
     limit: 50,
   });
+  const { data, isLoading } = listQ;
 
   const carriersQ = useCarriers({ limit: 200 });
 
@@ -66,8 +69,8 @@ export default function DriversPage() {
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DriverDto | null>(null);
-  const hardDeleteM = useHardDeleteDriver();
-  const softDeleteM = useDeleteDriver();
+  const hardDeleteM = useHardDeleteDriver({ meta: SUPPRESS_GLOBAL_ERROR });
+  const softDeleteM = useDeleteDriver({ meta: SUPPRESS_GLOBAL_ERROR });
 
   const hasActiveFilters = Boolean(search.length >= 2 || carrierId);
   const clearFilters = () => {
@@ -217,6 +220,7 @@ export default function DriversPage() {
         rowKey={(r) => r.id}
         onRowClick={openDetail}
         isLoading={isLoading}
+        {...queryErrorProps(listQ)}
         hasActiveFilters={hasActiveFilters}
         empty={
           <EmptyState

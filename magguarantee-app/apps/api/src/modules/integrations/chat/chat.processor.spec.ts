@@ -1,13 +1,18 @@
 // Unit tests for the in-process chat-notify-wyjazd worker.
 //  - no-op (no POST) when the webhook URL is unset.
 //  - POSTs the 6-line message when the URL is set (mocked fetch).
-//  - throws on POST failure so BullMQ retries.
+//  - exactly ONE POST per attempt — retries belong to BullMQ, not chat.http.
+//  - 5xx / 429 / network → retryable error; other 4xx → UnrecoverableError.
 //  - completes silently when the delegation context is gone.
+//  - `failed` listener: WARN while retrying, ERROR + ops alert when final.
 
-import type { Job } from 'bullmq';
+import { Logger } from '@nestjs/common';
+import type { Job, Queue } from 'bullmq';
 
+import type { OpsAlertService } from '../../../common/ops-alert/ops-alert.service';
 import type { ChatConfig } from './chat.config';
 import type { BuildResult, ChatContextBuilder } from './chat-context.builder';
+import { ChatWebhookError } from './chat.http';
 import { ChatProcessor } from './chat.processor';
 import type { ChatWyjazdJobData } from './chat-notifier.service';
 import type { WyjazdMessageContext } from './chat-message';
@@ -47,15 +52,27 @@ function makeProcessor(opts: {
   } as unknown as ChatConfig;
   const buildFn = jest.fn(async () => opts.build);
   const builder = { build: buildFn } as unknown as ChatContextBuilder;
-  const processor = new ChatProcessor(config, builder);
-  return { processor, buildFn };
+  const send = jest.fn(async () => 'log-only' as const);
+  const alerts = { send } as unknown as OpsAlertService;
+  const queue = { on: jest.fn() } as unknown as Queue<ChatWyjazdJobData>;
+  const processor = new ChatProcessor(config, builder, alerts, queue);
+  return { processor, buildFn, send, queue };
 }
 
-function job(delegationId = 'del-1'): Job<ChatWyjazdJobData> {
-  return { data: { delegationId } } as unknown as Job<ChatWyjazdJobData>;
+function job(
+  delegationId = 'del-1',
+  state: { attemptsMade?: number; attempts?: number } = {},
+): Job<ChatWyjazdJobData> {
+  return {
+    id: '42',
+    name: 'wyjazd',
+    data: { delegationId },
+    attemptsMade: state.attemptsMade ?? 0,
+    opts: { attempts: state.attempts ?? 5 },
+  } as unknown as Job<ChatWyjazdJobData>;
 }
 
-describe('ChatProcessor', () => {
+describe('ChatProcessor.process', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
@@ -98,8 +115,8 @@ describe('ChatProcessor', () => {
     expect(lines[5]).toBe('OPIEKUN: Damian Opiekun');
   });
 
-  it('throws when the webhook returns a 5xx (BullMQ will retry)', async () => {
-    jest
+  it('a 5xx makes exactly ONE POST and throws a retryable error (BullMQ retries)', async () => {
+    const fetchSpy = jest
       .spyOn(global, 'fetch')
       .mockResolvedValue(new Response(null, { status: 503 }));
     const { processor } = makeProcessor({
@@ -108,14 +125,51 @@ describe('ChatProcessor', () => {
       build: fullCtx(),
     });
 
-    // 3 internal attempts each 503 → exhausted → throws. Use fake timers so
-    // the exponential backoff sleeps don't slow the test.
-    jest.useFakeTimers();
-    const promise = processor.process(job());
-    const assertion = expect(promise).rejects.toThrow();
-    await jest.runAllTimersAsync();
-    await assertion;
-    jest.useRealTimers();
+    const err: unknown = await processor.process(job()).catch((e: unknown) => e);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(err).toBeInstanceOf(ChatWebhookError);
+    expect((err as ChatWebhookError).retryable).toBe(true);
+    expect((err as ChatWebhookError).status).toBe(503);
+    // The webhook key must never end up in the error.
+    expect((err as Error).message).not.toContain('key=');
+  });
+
+  it('a 429 is retryable, a network failure is retryable, both with one POST', async () => {
+    const fetchSpy = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(new Response(null, { status: 429 }))
+      .mockRejectedValueOnce(new TypeError('fetch failed'));
+    const { processor } = makeProcessor({
+      enabled: true,
+      webhookUrl: WEBHOOK_URL,
+      build: fullCtx(),
+    });
+
+    const first: unknown = await processor.process(job()).catch((e: unknown) => e);
+    const second: unknown = await processor.process(job()).catch((e: unknown) => e);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect((first as ChatWebhookError).retryable).toBe(true);
+    expect((second as ChatWebhookError).retryable).toBe(true);
+    expect((second as ChatWebhookError).status).toBeNull();
+  });
+
+  it('a 404 (revoked webhook) fails the job as UnrecoverableError — no retries', async () => {
+    jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(new Response('<html>not found</html>', { status: 404 }));
+    const { processor } = makeProcessor({
+      enabled: true,
+      webhookUrl: WEBHOOK_URL,
+      build: fullCtx(),
+    });
+
+    const err: unknown = await processor.process(job()).catch((e: unknown) => e);
+
+    expect((err as Error).name).toBe('UnrecoverableError');
+    // The upstream body is not repeated.
+    expect((err as Error).message).not.toContain('not found');
   });
 
   it('completes silently (no fetch) when the delegation context is gone', async () => {
@@ -128,5 +182,66 @@ describe('ChatProcessor', () => {
 
     await expect(processor.process(job())).resolves.toBeUndefined();
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('ChatProcessor worker events', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('non-final failure → one WARN line, no alert', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const { processor, send } = makeProcessor({ enabled: true, webhookUrl: WEBHOOK_URL, build: null });
+
+    await processor.onFailed(
+      job('del-7', { attemptsMade: 2, attempts: 5 }),
+      new ChatWebhookError('Chat webhook returned HTTP 503', 503, true),
+    );
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toMatchObject({
+      jobId: '42',
+      attemptsMade: 2,
+      maxAttempts: 5,
+      final: false,
+      delegationId: 'del-7',
+      status: 503,
+    });
+    expect(error).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('final failure (attempts exhausted) → ERROR line + ops alert', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const { processor, send } = makeProcessor({ enabled: true, webhookUrl: WEBHOOK_URL, build: null });
+
+    await processor.onFailed(
+      job('del-7', { attemptsMade: 5, attempts: 5 }),
+      new ChatWebhookError('Chat webhook returned HTTP 503', 503, true),
+    );
+
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]).toBeDefined();
+  });
+
+  it('UnrecoverableError on the first attempt is final', async () => {
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const { processor, send } = makeProcessor({ enabled: true, webhookUrl: WEBHOOK_URL, build: null });
+    const unrecoverable = new Error('Chat webhook returned HTTP 404');
+    unrecoverable.name = 'UnrecoverableError';
+
+    await processor.onFailed(job('del-7', { attemptsMade: 1, attempts: 5 }), unrecoverable);
+
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('attaches a queue error listener on init', () => {
+    const { processor, queue } = makeProcessor({ enabled: false, build: null });
+    processor.onModuleInit();
+    expect((queue.on as jest.Mock).mock.calls[0]?.[0]).toBe('error');
   });
 });

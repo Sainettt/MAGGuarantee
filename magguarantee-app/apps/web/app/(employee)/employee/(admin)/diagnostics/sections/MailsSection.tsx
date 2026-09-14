@@ -29,6 +29,7 @@ import {
   useDiagnosticsMails,
   useResendMail,
 } from '@/lib/hooks/useDiagnostics';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 
 type State = DiagnosticsMailJob['state'];
 
@@ -44,7 +45,8 @@ const STATE_VARIANT: Record<State, 'success' | 'danger' | 'info' | 'warning' | '
 export function MailsSection() {
   const t = useTranslations('diagnostics.mails');
   const tCommon = useTranslations('common');
-  const { data, isLoading } = useDiagnosticsMails();
+  const listQ = useDiagnosticsMails();
+  const { data, isLoading } = listQ;
 
   const [confirm, setConfirm] = useState<DiagnosticsMailJob | null>(null);
   const resendM = useResendMail({
@@ -143,6 +145,7 @@ export function MailsSection() {
         columns={columns}
         rowKey={(r) => r.id}
         isLoading={isLoading}
+        {...queryErrorProps(listQ)}
         empty={
           <EmptyState
             icon={Mail}

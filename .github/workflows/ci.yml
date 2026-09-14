@@ -65,8 +65,14 @@ jobs:
       - self-hosted
       - ${{ inputs.target }}
 
-    # Даёт доступ к секретам/переменным именно этого окружения. Сюда же можно
-    # позже повесить required reviewers на `prod`, чтобы выкат требовал апрува.
+    # Даёт доступ к секретам/переменным именно этого окружения.
+    #
+    # ⚠️ Апрув выката в прод из репозитория НЕ настраивается: required reviewers
+    # задаются только в GitHub → Settings → Environments → prod → Deployment
+    # protection rules → Required reviewers (там же — запрет self-review). Пока
+    # это не сделано, прод выкатывает любой, у кого есть write-доступ и кнопка
+    # Run workflow. Для приватного репозитория доступность правил зависит от
+    # тарифа GitHub — проверить в настройках.
     environment: ${{ inputs.target }}
 
     # Два выката в одно окружение не идут параллельно. `cancel-in-progress:
@@ -76,8 +82,21 @@ jobs:
       cancel-in-progress: false
 
     env:
+      TARGET: ${{ inputs.target }}
       COMPOSE_FILE: ${{ vars.COMPOSE_FILE }}
       DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/magguarantee/src' }}
+      # Адрес сайта РОВНО как метка сайта в Caddyfile этого окружения (схема +
+      # хост): prod — `http://mymag.magtrans.eu` (Caddyfile.prod, TLS держит
+      # nginx), staging — `https://vps-29a0acba.vps.ovh.net` (Caddyfile). Внешняя
+      # проверка ниже шлёт запрос на 127.0.0.1 этого же сервера с этим Host/SNI,
+      # т.е. через настоящий Caddy, мимо DNS и корпоративного nginx.
+      # Переопределяется variable SITE_URL в environment.
+      SITE_URL: ${{ vars.SITE_URL || (inputs.target == 'prod' && 'http://mymag.magtrans.eu' || 'https://vps-29a0acba.vps.ovh.net') }}
+      # Журнал выкатов на хосте; пусто → <родитель DEPLOY_PATH>/deploy-history.log
+      # (= /opt/magguarantee/deploy-history.log). Тот же файл пишет
+      # infra/scripts/magguarantee-rollback.
+      DEPLOY_HISTORY: ${{ vars.DEPLOY_HISTORY }}
+      DEPLOY_ACTOR: ${{ github.triggering_actor }}
 
     # actions/checkout здесь намеренно НЕТ: раннер работает в своём `_work`, а
     # рабочая копия живёт в DEPLOY_PATH и обновляется через `git pull` ниже.
@@ -85,9 +104,13 @@ jobs:
     steps:
       - name: Проверить, что окружение настроено
         run: |
-          [ -n "$COMPOSE_FILE" ] || { echo "::error::variable COMPOSE_FILE не задана в environment '${{ inputs.target }}'"; exit 1; }
+          [ -n "$COMPOSE_FILE" ] || { echo "::error::variable COMPOSE_FILE не задана в environment '$TARGET'"; exit 1; }
           [ -d "$DEPLOY_PATH" ] || { echo "::error::каталога $DEPLOY_PATH нет на этом раннере"; exit 1; }
-          echo "target=${{ inputs.target }}  compose=$COMPOSE_FILE  path=$DEPLOY_PATH"
+          command -v curl >/dev/null || { echo "::error::на раннере нет curl — нужен для внешней проверки /health"; exit 1; }
+          HISTORY="${DEPLOY_HISTORY:-$(dirname "$DEPLOY_PATH")/deploy-history.log}"
+          # Проверяем ДО git pull: без записи в журнал выкат не начинается.
+          touch "$HISTORY" || { echo "::error::журнал выкатов $HISTORY недоступен на запись пользователю $(id -un)"; exit 1; }
+          echo "target=$TARGET  compose=$COMPOSE_FILE  path=$DEPLOY_PATH  site=$SITE_URL  history=$HISTORY"
 
       - name: Deploy
         run: |
@@ -95,8 +118,45 @@ jobs:
 
           cd "$DEPLOY_PATH"
 
+          # ── Журнал выкатов ─────────────────────────────────────────────────
+          # Одна строка на событие (TSV): время UTC, event, status
+          # (started|ok|failed), target, sha (что выкатываем), prev (что
+          # стояло), run (id/attempt + ссылка), actor. Что сейчас крутится на
+          # сервере — sha последней строки со status=ok:
+          #   tail -n 20 /opt/magguarantee/deploy-history.log
+          HISTORY="${DEPLOY_HISTORY:-$(dirname "$DEPLOY_PATH")/deploy-history.log}"
+          RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          PREV_SHA="$(git rev-parse HEAD)"
+          DEPLOYED_SHA=""
+          record() {
+            printf '%s\tevent=deploy\tstatus=%s\ttarget=%s\tcompose=%s\tsha=%s\tprev=%s\trun=%s/%s\tactor=%s\turl=%s\n' \
+              "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$TARGET" "$COMPOSE_FILE" \
+              "${DEPLOYED_SHA:-none}" "$PREV_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+              "$DEPLOY_ACTOR" "$RUN_URL" >> "$HISTORY"
+          }
+          # Любой выход с ошибкой после этой строки оставляет `failed`: рабочая
+          # копия уже может стоять на новом коммите, а контейнеры — на старом.
+          trap 'rc=$?; [ "$rc" -eq 0 ] || record failed || true' EXIT
+
           echo "→ Забираем свежий main"
           git pull origin main
+
+          DEPLOYED_SHA="$(git rev-parse HEAD)"
+          echo "→ Выкатываем $DEPLOYED_SHA  ($(git log -1 --format='%h %s' HEAD))"
+          echo "  было:       $PREV_SHA"
+          if [ "$DEPLOYED_SHA" != "$GITHUB_SHA" ]; then
+            # Деплой всегда тянет origin/main, а build-джоба проверяла коммит, с
+            # которого запущен workflow. Расхождение — не ошибка (main мог уйти
+            # вперёд), но в журнале должно быть видно.
+            echo "::warning::выкачен origin/main $DEPLOYED_SHA, а build-джоба проверяла $GITHUB_SHA"
+          fi
+          record started
+          {
+            echo "### Deploy \`$TARGET\`"
+            echo "- sha: \`$DEPLOYED_SHA\`"
+            echo "- prev: \`$PREV_SHA\`"
+            echo "- actor: $DEPLOY_ACTOR"
+          } >> "$GITHUB_STEP_SUMMARY"
 
           # Собираем ДО миграций. Dockerfile вшивает prisma/migrations в образ
           # на этапе сборки, поэтому `migrate deploy` на старом образе видит
@@ -117,12 +177,57 @@ jobs:
           echo "→ Поднимаем стек"
           docker compose -f "$COMPOSE_FILE" up -d
 
-          echo "→ Ждём 10с и дёргаем /health"
+          echo "→ Ждём 10с и дёргаем /health изнутри контейнера api"
           sleep 10
           docker compose -f "$COMPOSE_FILE" exec -T api \
             wget -qO- http://localhost:3001/health > /dev/null
 
+          # ── Внешняя проверка: браузерный путь через Caddy ──────────────────
+          # Проверка изнутри контейнера не видит маршрутизацию Caddy: до фикса
+          # /health уходил в web, middleware отвечал 307 → /login, и любой
+          # внешний монитор «зеленел», не дойдя до api. Поэтому здесь:
+          #   • запрос идёт на 127.0.0.1 этого сервера с Host/SNI из SITE_URL
+          #     (--resolve) — через опубликованный порт Caddy;
+          #   • НЕ `curl -f`: -f падает только на >=400, а 307 считает успехом.
+          #     Редиректы не следуются (без -L, --max-redirs 0 для явности),
+          #     требуется ровно 200 и Content-Type application/json;
+          #   • /ready = база + Redis, после `up -d` может отдавать 503 пару
+          #     секунд — отсюда повтор до 120 с.
+          SITE_URL="${SITE_URL%/}"
+          scheme="${SITE_URL%%://*}"
+          hostport="${SITE_URL#*://}"; hostport="${hostport%%/*}"
+          host="${hostport%%:*}"
+          if [ "$hostport" != "$host" ]; then port="${hostport##*:}";
+          elif [ "$scheme" = https ]; then port=443; else port=80; fi
+          body="$(mktemp)"; errf="$(mktemp)"
+          check_via_caddy() {
+            local path="$1" deadline=$((SECONDS + 120)) result code ctype
+            while :; do
+              result="$(curl -sS --max-redirs 0 -m 10 \
+                --resolve "$host:$port:127.0.0.1" \
+                -o "$body" -w '%{http_code} %{content_type}' \
+                "$SITE_URL$path" 2>"$errf")" || true
+              code="${result%% *}"; ctype="${result#* }"
+              if [ "$code" = 200 ] && [[ "$ctype" == application/json* ]]; then
+                echo "  ✓ $SITE_URL$path → 200 $ctype  $(head -c 200 "$body")"
+                return 0
+              fi
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "::error::$SITE_URL$path через Caddy: ожидали 200 application/json, получили «$result» $(head -c 300 "$errf")"
+                head -c 500 "$body"; echo
+                return 1
+              fi
+              sleep 5
+            done
+          }
+          echo "→ Внешняя проверка через Caddy ($SITE_URL → 127.0.0.1:$port)"
+          check_via_caddy /health
+          check_via_caddy /ready
+          rm -f "$body" "$errf"
+
           echo "→ Чистим образы старше 30 дней"
           docker image prune -af --filter "until=720h" > /dev/null
 
-          echo "✓ Деплой прошёл"
+          record ok
+          echo "- status: ok" >> "$GITHUB_STEP_SUMMARY"
+          echo "✓ Деплой прошёл: $DEPLOYED_SHA (журнал: $HISTORY)"

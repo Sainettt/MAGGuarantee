@@ -50,6 +50,7 @@ import {
   DialogTitle,
 } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ErrorState } from '@/components/ui/ErrorState';
 import {
   FileUpload,
   type FileUploadItem,
@@ -76,6 +77,7 @@ import {
   useDeleteCarrierAttachment,
   useUploadCarrierAttachment,
 } from '@/lib/hooks/useCarriers';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 
 // ─── Model ────────────────────────────────────────────────
 //
@@ -157,6 +159,15 @@ export function CarrierDocumentsTab({ carrierId }: Props) {
     () => allTypes.find((ty) => ty.key === openTypeKey) ?? null,
     [allTypes, openTypeKey],
   );
+
+  // A failed overview must not spin the skeleton forever.
+  if (!groups && overviewQ.isError) {
+    return (
+      <div className="rounded-xl border border-border bg-card shadow-card">
+        <ErrorState {...queryErrorProps(overviewQ)} />
+      </div>
+    );
+  }
 
   if (overviewQ.isLoading || !groups) {
     return <DocumentsSkeleton t={t} />;

@@ -32,8 +32,9 @@ import { Button } from '@/components/ui/Button';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { formatDateShort } from '@/lib/format/numbers';
+import type { QueryErrorProps } from '@/lib/query/queryErrorProps';
 
-interface Props {
+interface Props extends Partial<QueryErrorProps> {
   /** The delegation rows for the current page / scope. */
   rows: DelegationDto[];
   /** Loading flag for the backing query. */
@@ -65,6 +66,7 @@ export function DelegationsTable({
   rowAriaLabel,
   hasActiveFilters,
   onClearFilters,
+  ...errorProps
 }: Props) {
   const t = useTranslations(namespace);
   const tCommon = useTranslations('common');
@@ -137,6 +139,7 @@ export function DelegationsTable({
         onRowClick={setTarget}
         rowAriaLabel={rowAriaLabel}
         isLoading={isLoading}
+        {...errorProps}
         hasActiveFilters={hasActiveFilters}
         empty={
           <EmptyState

@@ -19,9 +19,16 @@
 // `PATCH /claims/:nrZgl` — see git history / the Phase 8 report.)
 //
 // No live DB: Prisma `$transaction` + `AuditWriter` are faked by the harness.
+//
+// Complement: `audit-coverage.inverse.spec.ts` scans EVERY registered route and
+// fails on any POST/PUT/PATCH/DELETE without `@Audit()` that is not in its
+// reasoned allowlist. This file checks the decorator's CONTENT on the critical
+// routes; that one checks that no route is forgotten.
 
 import { CarriersController } from '../../modules/carriers/carriers.controller';
 import { ClaimsController } from '../../modules/claims/claims.controller';
+import { DelegationsController } from '../../modules/delegations/delegations.controller';
+import { MARK_READY_AUDIT_ACTIONS } from '../../modules/delegations/delegations.service';
 import { DriversController } from '../../modules/drivers/drivers.controller';
 import { LimitsController } from '../../modules/limits/limits.controller';
 import { TrailerTypesController } from '../../modules/trailer-types/trailer-types.controller';
@@ -304,6 +311,63 @@ describe('audit coverage — interceptor writes a row end-to-end', () => {
     expect(out.entry!.targetType).toBe('User');
     expect(out.entry!.targetKey).toBe('user-uuid-9');
     expect(out.committed).toBe(true);
+  });
+
+  // ─── one route, two intents: runtime action override ───
+  // `POST /delegations/:id/ready` is the `zgloszony → gotowy` flip by default
+  // and the `gotowy → zgloszony` rollback with `rollback: true`. The service
+  // renames the row via `AuditContext.setAction` (2026-08-14 audit, item 22).
+
+  const EKSPORT: HarnessRequest['user'] = {
+    sub: 'eks-1',
+    login: 'eks',
+    email: 'eks@magtrans.eu',
+    name: 'Eksport',
+    role: 'eksport',
+    mustChangePassword: false,
+  };
+  const readyReq = req({
+    user: EKSPORT,
+    params: { id: 'deleg-uuid-1' },
+    url: '/api/v1/delegations/deleg-uuid-1/ready',
+  });
+
+  it('POST /delegations/:id/ready (rollback) → delegation.rollbackReady row, diff gotowy → zgloszony', async () => {
+    const out = await runAuditedHandler({
+      controller: DelegationsController,
+      method: 'markReady',
+      req: readyReq,
+      result: { id: 'deleg-uuid-1', status: 'zgloszony', spedOrderNumber: null },
+      // Mirrors `DelegationsService._auditMarkReady` on the rollback branch.
+      duringHandler: () => {
+        AuditContext.setAction(MARK_READY_AUDIT_ACTIONS.rollback);
+        AuditContext.setBefore({ status: 'gotowy', spedOrderNumber: 'SPED-1' });
+      },
+    });
+
+    expect(out.entries).toHaveLength(1);
+    expect(out.entry!.action).toBe('delegation.rollbackReady');
+    expect(out.entry!.targetType).toBe('Delegation');
+    expect(out.entry!.targetKey).toBe('deleg-uuid-1');
+    expect(out.entry!.before).toEqual({ status: 'gotowy', spedOrderNumber: 'SPED-1' });
+    expect(out.entry!.after).toMatchObject({ status: 'zgloszony', spedOrderNumber: null });
+    expect(out.committed).toBe(true);
+  });
+
+  it('POST /delegations/:id/ready (flip) → decorator default delegation.markReady', async () => {
+    const out = await runAuditedHandler({
+      controller: DelegationsController,
+      method: 'markReady',
+      req: readyReq,
+      result: { id: 'deleg-uuid-1', status: 'gotowy', spedOrderNumber: 'SPED-2' },
+      duringHandler: () =>
+        AuditContext.setBefore({ status: 'zgloszony', spedOrderNumber: null }),
+    });
+
+    expect(out.entries).toHaveLength(1);
+    expect(out.entry!.action).toBe(MARK_READY_AUDIT_ACTIONS.ready);
+    expect(out.entry!.action).toBe('delegation.markReady');
+    expect(out.entry!.before).toEqual({ status: 'zgloszony', spedOrderNumber: null });
   });
 
   // ─── hard-deletes: before snapshot + reason metadata ───

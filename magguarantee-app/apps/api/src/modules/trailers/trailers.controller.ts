@@ -5,17 +5,19 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Logger,
   Param,
   Patch,
   Post,
   Query,
+  Req,
   Res,
   UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { memoryStorage } from 'multer';
 import type { z } from 'zod';
 
@@ -41,6 +43,7 @@ import {
   OpiekunOwns,
 } from '../../common/guards';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
+import { clientIp } from '../../common/utils/client-ip';
 import {
   CurrentUser,
   type AuthUser,
@@ -80,6 +83,8 @@ const MULTIPART_OPTIONS = {
 @Controller('trailers')
 @UseGuards(RolesGuard, OpiekunOwnershipGuard, CarrierOwnershipGuard)
 export class TrailersController {
+  private readonly logger = new Logger(TrailersController.name);
+
   constructor(private readonly trailers: TrailersService) {}
 
   @Get()
@@ -242,13 +247,27 @@ export class TrailersController {
   @OpiekunOwns('id', 'param', 'trailerId')
   @CarrierOwns('id', 'param', 'trailerId')
   async downloadAttachment(
+    @CurrentUser() user: AuthUser,
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
     @Param('attachmentId', new ZodValidationPipe(UuidSchema))
     attachmentId: string,
+    @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
-    const { object, fileName, mimeType } =
+    const { object, fileName, mimeType, category } =
       await this.trailers.downloadAttachment(id, attachmentId);
+    // Access trail for trailer documents (not an audit row). Ids + category
+    // only, never the original filename.
+    this.logger.log({
+      msg: 'attachment downloaded',
+      entity: 'Trailer',
+      entityId: id,
+      attachmentId,
+      category,
+      userId: user.sub,
+      role: user.role,
+      ip: clientIp(req) ?? null,
+    });
     res.setHeader('Content-Type', object.contentType ?? mimeType);
     res.setHeader(
       'Content-Disposition',

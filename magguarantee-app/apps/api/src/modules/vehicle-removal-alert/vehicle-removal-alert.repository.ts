@@ -25,6 +25,14 @@ export interface RemovalAlertVehicleRow {
   };
 }
 
+function updatedCount(res: unknown): number {
+  if (res && typeof res === 'object' && 'count' in res) {
+    const count = (res as { count: unknown }).count;
+    if (typeof count === 'number') return count;
+  }
+  return 0;
+}
+
 /**
  * Read/write repository for the vehicle-removal alert cron. Owns every Prisma
  * call for the module (service never touches Prisma directly). Runs off the
@@ -94,6 +102,32 @@ export class VehicleRemovalAlertRepository {
         adminRemovalNotifyCount: { increment: 1 },
       },
     });
+  }
+
+  /**
+   * Undoes one `stampNotified(vehicleId, stampedAt)` whose digest never reached
+   * any admin: restores the previous anchor and takes the count back by one.
+   * Compare-and-swap on `adminRemovalNotifiedAt = stampedAt`, so a stamp a
+   * later run wrote is never reverted, and reverting the same stamp twice is a
+   * no-op the second time. Returns whether the row was reverted.
+   */
+  async revertNotifiedIfUnchanged(
+    vehicleId: string,
+    stampedAt: Date,
+    previousNotifiedAt: Date | null,
+  ): Promise<boolean> {
+    const res: unknown = await this.prisma.client.vehicle.updateMany({
+      where: {
+        id: vehicleId,
+        adminRemovalNotifiedAt: stampedAt,
+        adminRemovalNotifyCount: { gt: 0 },
+      },
+      data: {
+        adminRemovalNotifiedAt: previousNotifiedAt,
+        adminRemovalNotifyCount: { decrement: 1 },
+      },
+    });
+    return updatedCount(res) > 0;
   }
 
   /**

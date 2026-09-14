@@ -4,8 +4,12 @@ import { ConfigService } from '@nestjs/config';
 
 import type { Env } from '../../config/env.schema';
 import { QUEUE_EMAIL_SEND } from '../jobs/queue-names';
+import { EmailLogRepository } from './email-log.repository';
 import { EmailSendProcessor } from './email-send.processor';
+import { MailCompensationRegistry } from './mail-compensation.registry';
+import { MailJobOutcomeRecorder } from './mail-job-outcome.recorder';
 import { MailJobsRegistry } from './mail-jobs.registry';
+import { MailSecretCipher } from './mail-secret-cipher';
 import { MailService } from './mail.service';
 import { MailThreadingService } from './mail-threading.service';
 import { MAIL_PROVIDER_TOKEN } from './providers/mail-provider.interface';
@@ -17,15 +21,20 @@ import { GmailApiProvider } from './providers/gmail-api.provider';
  * Phase 4.5 wiring: add `MailJobsRegistry` — Redis-backed job log so
  *   `/api/v1/diagnostics/mails` has rows to show. RedisService is globally
  *   provided via `RedisModule`.
- * Phase 9 (early): stand up the `email-send` BullMQ queue + in-process
- *   `EmailSendProcessor`. The 2FA login-code and password-reset emails route
- *   through it (`enqueue2faCode` / `enqueuePasswordReset`).
- * Phase 9 (full): provider is now selected by the `MAIL_PROVIDER` env var via
+ * Phase 9: the `email-send` BullMQ queue + in-process `EmailSendProcessor`
+ *   carry every transactional email. Provider selected by `MAIL_PROVIDER` via
  *   `MAIL_PROVIDER_TOKEN` — `smtp` → Mailhog (dev/staging, default), `gmail`
- *   → `GmailApiProvider` (production, RFC threading). `MailService` depends on
- *   the token, never on a concrete class. `MailThreadingService` persists the
- *   thread ids and is a no-op under SMTP. See
+ *   → `GmailApiProvider` (production, RFC threading). `MailThreadingService`
+ *   persists the thread ids and is a no-op under SMTP. See
  *   docs/16-jobs-and-integrations.md §"Email через Gmail API".
+ * 2026-08-14 logging audit (items 5 / 6 / 11 / 23):
+ *   - `MailSecretCipher` seals codes / temporary passwords in job data;
+ *   - `MailJobOutcomeRecorder` + `EmailLogRepository` write one `email_logs`
+ *     row per final outcome and alert on permanent failures;
+ *   - `MailCompensationRegistry` lets producers (watchdog, vehicle-removal
+ *     alert) release "notified" stamps when their mail never went out.
+ *   `EmailLogRepository` is exported for the retention prune in the
+ *   token-cleanup cron; `OpsAlertService` comes from the global OpsAlertModule.
  */
 @Module({
   imports: [BullModule.registerQueue({ name: QUEUE_EMAIL_SEND })],
@@ -36,6 +45,10 @@ import { GmailApiProvider } from './providers/gmail-api.provider';
     // transporter on shutdown) and is the default impl behind the token.
     SmtpProvider,
     MailJobsRegistry,
+    MailSecretCipher,
+    EmailLogRepository,
+    MailCompensationRegistry,
+    MailJobOutcomeRecorder,
     EmailSendProcessor,
     {
       provide: MAIL_PROVIDER_TOKEN,
@@ -49,6 +62,11 @@ import { GmailApiProvider } from './providers/gmail-api.provider';
           : smtp,
     },
   ],
-  exports: [MailService, MailJobsRegistry],
+  exports: [
+    MailService,
+    MailJobsRegistry,
+    MailCompensationRegistry,
+    EmailLogRepository,
+  ],
 })
 export class MailModule {}

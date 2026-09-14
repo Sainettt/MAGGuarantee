@@ -18,10 +18,12 @@ import { useTranslations } from 'next-intl';
 import { FleetPanel } from '@/components/fleet/FleetPanel';
 import { useDelegations } from '@/lib/hooks/useDelegations';
 import { useDyspozytorFleet } from '@/lib/hooks/useDyspozytorFleet';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 
 export default function DyspozytorPanelPage() {
   const t = useTranslations('dyspozytor');
-  const { data, isLoading } = useDyspozytorFleet();
+  const fleetQ = useDyspozytorFleet();
+  const { data, isLoading } = fleetQ;
   // No params — the API auto-scopes delegations to the dispatcher's vehicles.
   const delegationsQ = useDelegations({ limit: 50 });
 
@@ -35,6 +37,8 @@ export default function DyspozytorPanelPage() {
       isLoading={isLoading}
       delegations={delegationsQ.data?.items ?? []}
       delegationsLoading={delegationsQ.isLoading}
+      fleetError={queryErrorProps(fleetQ)}
+      delegationsError={queryErrorProps(delegationsQ)}
       myKmHref="/dyspozytor/moje-pojazdy"
     />
   );

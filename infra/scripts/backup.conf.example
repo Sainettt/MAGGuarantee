@@ -1,0 +1,60 @@
+# MAGGuarantee — backup settings. Install on the VPS as
+# /opt/magguarantee/backup.conf (NOT inside the git checkout):
+#
+#   [ -e /opt/magguarantee/backup.conf ] || sudo install -m 0600 -o root -g root \
+#     /opt/magguarantee/src/infra/scripts/backup.conf.example /opt/magguarantee/backup.conf
+#   sudo nano /opt/magguarantee/backup.conf
+#
+# Read by magguarantee-backup.service through `EnvironmentFile=-` (the `-`: a
+# missing file is fine, the script defaults apply). systemd reads it as root, so
+# root:root 0600 works and hides the heartbeat token.
+#
+# This lists EVERY variable magguarantee-backup reads. The values shown are the
+# script's own defaults — the script (infra/scripts/magguarantee-backup) is the
+# single source of truth; uncomment a line only to change it.
+#
+# systemd EnvironmentFile syntax: KEY=value, one per line, no `export`, no
+# ${VAR} expansion (so write full paths, not $MAGG_STACK_DIR/...).
+#
+# Failure alerts are NOT configured here — see alert.conf.example
+# (/opt/magguarantee/alert.conf, OnFailure= → magguarantee-alert@.service).
+
+# ── Offsite ──────────────────────────────────────────────────────────────────
+# rclone remote + path, e.g. gdrive:magguarantee-backups-prod or
+# r2:magguarantee-backups-prod. Empty → copies stay on this VPS only (same disk
+# as the data) and every run logs a WARNING. Set up with `rclone config` as the
+# `deploy` user — infra/README.md «Offsite в Google Drive».
+MAGG_RCLONE_REMOTE=
+
+# ── Retention ────────────────────────────────────────────────────────────────
+# Days a dump / MinIO archive is kept on the VPS disk (default 7).
+#MAGG_KEEP_DAYS=7
+
+# Days copies are kept in the offsite remote (default 30). 0 = never prune
+# remotely (only when the storage has its own lifecycle rule — Google Drive
+# does not).
+#MAGG_REMOTE_KEEP_DAYS=30
+
+# ── Heartbeat ────────────────────────────────────────────────────────────────
+# Pinged ONLY after a fully successful run — a push monitor (Uptime Kuma "Push",
+# Healthchecks.io, Better Stack heartbeat) alarms when it stops arriving. This
+# is what catches "the timer silently stopped firing", which OnFailure= cannot:
+# a unit that never starts never fails. Empty → no ping.
+#
+# Must be reachable FROM THE HOST, not from a container: Uptime Kuma running on
+# `proxy-net` without a published port is NOT at http://localhost:<port> — publish
+# a loopback port for it (e.g. `127.0.0.1:3002:3001` on the kuma container, then
+# http://127.0.0.1:3002/api/push/<token>) or use an external service.
+#MAGG_HEARTBEAT_URL=https://<monitor-host>/api/push/<token>
+
+# ── Layout (change only for a non-standard install) ──────────────────────────
+#MAGG_STACK_DIR=/opt/magguarantee
+#MAGG_BACKUP_DIR=/opt/magguarantee/backups
+#MAGG_MINIO_DATA=/opt/magguarantee/data/minio
+#MAGG_PG_CONTAINER=magguarantee-postgres
+#MAGG_DB_USER=magguarantee
+#MAGG_DB_NAME=magguarantee
+
+# A dump smaller than this many bytes fails the run instead of rotating a good
+# backup out (default 10240).
+#MAGG_MIN_DUMP_BYTES=10240

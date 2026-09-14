@@ -27,6 +27,7 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
 import { useDelegations } from '@/lib/hooks/useDelegations';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 
 const STATUSES: readonly DelegationStatus[] = [
   'zgloszony',
@@ -69,7 +70,8 @@ export function OpiekunDelegationsView() {
     [status, debouncedQ, from, to, cursor],
   );
 
-  const { data, isLoading } = useDelegations(filters);
+  const delegationsQ = useDelegations(filters);
+  const { data, isLoading } = delegationsQ;
 
   const resetCursor = () => {
     setCursor(undefined);
@@ -165,6 +167,7 @@ export function OpiekunDelegationsView() {
       <DelegationsTable
         rows={data?.items ?? []}
         isLoading={isLoading}
+        {...queryErrorProps(delegationsQ)}
         namespace="delegations.opiekun.table"
         hasActiveFilters={hasActiveFilters}
         onClearFilters={clearFilters}

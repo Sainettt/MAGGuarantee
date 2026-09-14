@@ -5,17 +5,19 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Logger,
   Param,
   Patch,
   Post,
   Query,
+  Req,
   Res,
   UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { memoryStorage } from 'multer';
 import type { z } from 'zod';
 
@@ -41,6 +43,7 @@ import {
   OpiekunOwns,
 } from '../../common/guards';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
+import { clientIp } from '../../common/utils/client-ip';
 import {
   CurrentUser,
   type AuthUser,
@@ -82,6 +85,8 @@ const MULTIPART_OPTIONS = {
 @Controller('drivers')
 @UseGuards(RolesGuard, OpiekunOwnershipGuard, CarrierOwnershipGuard)
 export class DriversController {
+  private readonly logger = new Logger(DriversController.name);
+
   constructor(private readonly drivers: DriversService) {}
 
   @Get()
@@ -247,13 +252,28 @@ export class DriversController {
   @OpiekunOwns('id', 'param', 'driverId')
   @CarrierOwns('id', 'param', 'driverId')
   async downloadAttachment(
+    @CurrentUser() user: AuthUser,
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
     @Param('attachmentId', new ZodValidationPipe(UuidSchema))
     attachmentId: string,
+    @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
-    const { object, fileName, mimeType } =
+    const { object, fileName, mimeType, category } =
       await this.drivers.downloadAttachment(id, attachmentId);
+    // Access trail for driver scans (ADR certificate — personal data). Not an
+    // audit row. Ids + category only, never the original filename (often the
+    // driver's name).
+    this.logger.log({
+      msg: 'attachment downloaded',
+      entity: 'Driver',
+      entityId: id,
+      attachmentId,
+      category,
+      userId: user.sub,
+      role: user.role,
+      ip: clientIp(req) ?? null,
+    });
     res.setHeader('Content-Type', object.contentType ?? mimeType);
     res.setHeader(
       'Content-Disposition',

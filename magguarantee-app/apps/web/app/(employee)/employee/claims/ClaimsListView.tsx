@@ -39,6 +39,7 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { useClaims } from '@/lib/hooks/useClaims';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
 
 const ALL_STATUSES: ClaimStatus[] = [
@@ -89,7 +90,8 @@ export function ClaimsListView() {
     [debouncedSearch, status, dateFrom, dateTo, cursor],
   );
 
-  const { data, isLoading } = useClaims(filters);
+  const claimsQ = useClaims(filters);
+  const { data, isLoading } = claimsQ;
 
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedNrZgl, setSelectedNrZgl] = useState<string | null>(null);
@@ -231,6 +233,7 @@ export function ClaimsListView() {
       <ClaimsTable
         rows={data?.items ?? []}
         isLoading={isLoading}
+        {...queryErrorProps(claimsQ)}
         onRowClick={openRow}
         hasActiveFilters={hasActiveFilters}
         onClearFilters={clearFilters}

@@ -1,6 +1,12 @@
-import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  Logger,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
+import { z } from 'zod';
 
 import {
   GuaranteeAnchorSource as PrismaAnchorSource,
@@ -23,6 +29,11 @@ import {
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import type { Env } from '../../config/env.schema';
 import { isPrismaUniqueViolation } from '../../common/errors/prisma-error';
+import { runGuardedCron } from '../../common/ops-alert/guarded-cron';
+import { OpsAlertService } from '../../common/ops-alert/ops-alert.service';
+import { describeError } from '../../common/ops-alert/redact';
+import type { MailCompensation } from '../mail/email-send.job';
+import { MailCompensationRegistry } from '../mail/mail-compensation.registry';
 import { MailService } from '../mail/mail.service';
 import type {
   GuaranteeReminderCarrierProps,
@@ -33,19 +44,59 @@ import type {
   GuaranteeOpiekunVehicleRow,
 } from '../mail/templates/guarantee-opiekun-digest';
 import {
+  EPISODE_STAMP_FIELDS,
   GuaranteeWatchdogRepository,
+  type EpisodeStampField,
   type GuaranteeEpisodeListRow,
   type GuaranteeEpisodeRow,
+  type UpdateGuaranteeEpisodeData,
   type WatchdogVehicleScopeRow,
 } from './guarantee-watchdog.repository';
 
 /** Cron: 07:10 Europe/Warsaw — staggered after verification-sla (07:00). */
 const WATCHDOG_CRON = '10 7 * * *';
 const WATCHDOG_TIMEZONE = 'Europe/Warsaw';
+const WATCHDOG_JOB_NAME = 'guarantee-watchdog';
+
+/** `MailCompensation.kind` releasing episode stamps of an undelivered mail. */
+export const STAMP_RELEASE_KIND = 'guarantee-watchdog.release-episode-stamps';
+
+/** The stamps one mail claims on one episode. */
+interface EpisodeStampClaim {
+  id: string;
+  fields: EpisodeStampField[];
+}
+
+/** Compensation payload, validated when it comes back from Redis. */
+const StampReleasePayloadSchema = z.object({
+  stampedAt: z.string().datetime(),
+  episodes: z.array(
+    z.object({
+      id: z.string().min(1),
+      fields: z.array(z.enum(EPISODE_STAMP_FIELDS)),
+    }),
+  ),
+});
+
+type CarrierGroup = Map<string, { name: string; rows: VehicleTrigger[] }>;
+
+interface OpiekunBucket {
+  dueSoon: CarrierGroup;
+  violations: CarrierGroup;
+}
+
+function pushToCarrierGroup(group: CarrierGroup, t: VehicleTrigger): void {
+  const g = group.get(t.scope.carrier.id) ?? {
+    name: t.scope.carrier.name,
+    rows: [],
+  };
+  g.rows.push(t);
+  group.set(t.scope.carrier.id, g);
+}
 
 /**
  * The trigger a per-vehicle pass produced, if any. Drives which mail a carrier /
- * opiekun receives and which flags to stamp after a successful enqueue.
+ * opiekun receives and which flags it claims.
  */
 interface VehicleTrigger {
   scope: WatchdogVehicleScopeRow;
@@ -71,29 +122,56 @@ interface VehicleTrigger {
  *
  * STATEFUL — unlike `verification-sla` (deliberately stateless), the watchdog
  * MUST dedup emails and durably fix violations (plan §2). Idempotent: a second
- * run the same day sends nothing (the sent-flags already stamped).
+ * run the same day sends nothing (the sent-flags already stamped). Since the
+ * 2026-08-14 logging audit a sent-flag means "delivered or still in the
+ * queue": a mail that fails permanently releases its flags (see
+ * `_claimAndEnqueue`), so the next run retries.
  *
  * TODO(scale): the cron runs in-process (like verification-sla); N replicas
  * would each fire it. The per-episode sent-flags mostly dedup, but before
  * scaling out gate the body behind a Redis lock keyed on the Warsaw date.
  */
 @Injectable()
-export class GuaranteeWatchdogService {
+export class GuaranteeWatchdogService implements OnModuleInit {
   private readonly logger = new Logger(GuaranteeWatchdogService.name);
 
   constructor(
     private readonly repo: GuaranteeWatchdogRepository,
     private readonly mail: MailService,
     private readonly config: ConfigService<Env, true>,
+    private readonly compensations: MailCompensationRegistry,
+    private readonly alerts: OpsAlertService,
   ) {}
+
+  /**
+   * Registers the stamp-release handler with the email processor. See
+   * `_claimAndEnqueue` for the stamp semantics it completes.
+   */
+  onModuleInit(): void {
+    this.compensations.register(STAMP_RELEASE_KIND, (payload) =>
+      this._releaseStampsFromPayload(payload),
+    );
+  }
 
   // ── Cron ─────────────────────────────────────────────────
 
+  /**
+   * Cron entry point. The body runs inside `runGuardedCron` (2026-08-14
+   * logging audit, item 20): a crash of the scope query or the fan-out is one
+   * structured ERROR line + ops alert, never an unhandled rejection.
+   */
   @Cron(WATCHDOG_CRON, {
-    name: 'guarantee-watchdog',
+    name: WATCHDOG_JOB_NAME,
     timeZone: WATCHDOG_TIMEZONE,
   })
   async runDaily(now: Date = new Date()): Promise<void> {
+    await runGuardedCron(
+      { job: WATCHDOG_JOB_NAME, logger: this.logger, alerts: this.alerts },
+      () => this._runDaily(now),
+    );
+  }
+
+  private async _runDaily(now: Date): Promise<void> {
     if (!this.config.get('GUARANTEE_WATCHDOG_ENABLED', { infer: true })) {
       this.logger.log({ msg: 'guarantee watchdog disabled, skipping' });
       return;
@@ -105,22 +183,23 @@ export class GuaranteeWatchdogService {
 
     const triggers: VehicleTrigger[] = [];
     let resolvedCount = 0;
+    let vehicleErrors = 0;
 
     for (const v of scope) {
-      const result = this._compute(v, today);
-      const open = openEpisodes.get(v.vehicleId);
-
-      if (result.status === 'counting' || result.status === 'violated') {
-        const trigger = await this._processCounting(v, result, open, now);
-        if (trigger) triggers.push(trigger);
-        continue;
-      }
-
-      // ok_active / inactive → close any open episode (fallback for cases the
-      // add()-hook / toggle-hook missed).
-      if (open) {
-        await this._resolveOpen(open, result, now);
-        resolvedCount += 1;
+      // Per-vehicle isolation: one vehicle's DB error (a lock timeout, a
+      // constraint surprise) must not cost every other vehicle its reminder.
+      try {
+        const outcome = await this._processVehicle(v, openEpisodes, today, now);
+        if (outcome === 'resolved') resolvedCount += 1;
+        else if (outcome) triggers.push(outcome);
+      } catch (err) {
+        vehicleErrors += 1;
+        this.logger.error({
+          msg: 'guarantee watchdog: vehicle pass failed, continuing with the rest',
+          vehicleId: v.vehicleId,
+          carrierId: v.carrier.id,
+          ...describeError(err),
+        });
       }
     }
 
@@ -138,7 +217,42 @@ export class GuaranteeWatchdogService {
       violated,
       resolved: resolvedCount,
       mailsSent,
+      vehicleErrors,
     });
+    if (vehicleErrors > 0) {
+      await this.alerts.send({
+        key: `cron-partial:${WATCHDOG_JOB_NAME}`,
+        severity: 'warning',
+        title: 'Guarantee watchdog finished with per-vehicle errors',
+        fields: { job: WATCHDOG_JOB_NAME, checked: scope.length, vehicleErrors },
+      });
+    }
+  }
+
+  /**
+   * One vehicle of the daily pass: a trigger for the fan-out, `'resolved'`
+   * when a stale open episode was closed, or `null` when nothing applies.
+   */
+  private async _processVehicle(
+    v: WatchdogVehicleScopeRow,
+    openEpisodes: Map<string, GuaranteeEpisodeRow>,
+    today: Date,
+    now: Date,
+  ): Promise<VehicleTrigger | 'resolved' | null> {
+    const result = this._compute(v, today);
+    const open = openEpisodes.get(v.vehicleId);
+
+    if (result.status === 'counting' || result.status === 'violated') {
+      return this._processCounting(v, result, open, now);
+    }
+
+    // ok_active / inactive → close any open episode (fallback for cases the
+    // add()-hook / toggle-hook missed).
+    if (open) {
+      await this._resolveOpen(open, result, now);
+      return 'resolved';
+    }
+    return null;
   }
 
   /**
@@ -282,9 +396,9 @@ export class GuaranteeWatchdogService {
   }
 
   /**
-   * Group triggers into ONE carrier reminder + ONE opiekun digest per recipient,
-   * enqueue, and stamp the dedup flags only after a SUCCESSFUL enqueue. Per-mail
-   * try/catch so one failing address never aborts the run.
+   * Group triggers into ONE carrier reminder + ONE opiekun digest per recipient
+   * and dispatch them. Per-mail isolation so one failing recipient never aborts
+   * the run. Stamp semantics: see `_claimAndEnqueue`.
    */
   private async _fanOut(
     triggers: VehicleTrigger[],
@@ -329,26 +443,31 @@ export class GuaranteeWatchdogService {
 
     let sent = 0;
     const deadlineWorkingDays = this._deadlineWorkingDays();
-    for (const bucket of byCarrier.values()) {
+    for (const [carrierId, bucket] of byCarrier) {
       const email = await this._resolveCarrierEmail(bucket.userId);
-      if (!email) continue;
-      const rows: GuaranteeReminderCarrierRow[] = bucket.rows.map((t) =>
-        this._toCarrierRow(t),
-      );
+      if (!email) {
+        // Not stamped → the reminder is retried by the next daily run.
+        this.logger.warn({
+          msg: 'guarantee watchdog: carrier has no deliverable e-mail, reminder not sent',
+          carrierId,
+          vehicles: bucket.rows.length,
+        });
+        continue;
+      }
       const props: GuaranteeReminderCarrierProps = {
         carrierName: bucket.name,
         deadlineWorkingDays,
-        rows,
+        rows: bucket.rows.map((t) => this._toCarrierRow(t)),
         deeplink,
       };
-      try {
-        await this.mail.enqueueGuaranteeReminderCarrier(email, props);
-        // Stamp the reminder flags only after a successful enqueue.
-        for (const t of bucket.rows) await this._stampReminder(t, now);
-        sent += 1;
-      } catch (err) {
-        this._warnMail('carrier reminder', err, { carrier: bucket.name });
-      }
+      const delivered = await this._claimAndEnqueue(
+        bucket.rows.map((t) => this._reminderClaim(t)),
+        now,
+        (compensation) =>
+          this.mail.enqueueGuaranteeReminderCarrier(email, props, { compensation }),
+        { kind: 'carrier reminder', carrierId },
+      );
+      if (delivered) sent += 1;
     }
     return sent;
   }
@@ -359,76 +478,82 @@ export class GuaranteeWatchdogService {
     dateLabel: string,
     now: Date,
   ): Promise<number> {
-    // opiekunId → { dueSoon: carrier→rows, violations: carrier→rows }.
-    const byOpiekun = new Map<
-      string,
-      {
-        dueSoon: Map<string, { name: string; rows: VehicleTrigger[] }>;
-        violations: Map<string, { name: string; rows: VehicleTrigger[] }>;
-      }
-    >();
-    const violationTriggers: VehicleTrigger[] = [];
+    const { byOpiekun, unassignedViolations } = this._groupByOpiekun(triggers);
+    this._warnUnassignedViolations(unassignedViolations);
 
+    let sent = 0;
+    for (const [opiekunId, bucket] of byOpiekun) {
+      const dueSoon = this._toGroups(bucket.dueSoon);
+      const violations = this._toGroups(bucket.violations);
+      if (dueSoon.length === 0 && violations.length === 0) continue;
+      const recipient = await this._resolveOpiekun(opiekunId);
+      if (!recipient) {
+        // Not stamped → reported by the first run after the opiekun is fixed.
+        this.logger.warn({
+          msg: 'guarantee watchdog: opiekun has no deliverable e-mail, digest not sent',
+          opiekunId,
+          dueSoonCarriers: dueSoon.length,
+          violationCarriers: violations.length,
+        });
+        continue;
+      }
+      const violationRows = [...bucket.violations.values()].flatMap((g) => g.rows);
+      const delivered = await this._claimAndEnqueue(
+        violationRows.map((t) => this._violationClaim(t)),
+        now,
+        (compensation) =>
+          this.mail.enqueueGuaranteeOpiekunDigest(
+            recipient.email,
+            { opiekunName: recipient.name, dateLabel, dueSoon, violations },
+            { compensation },
+          ),
+        { kind: 'opiekun digest', opiekunId },
+      );
+      if (delivered) sent += 1;
+    }
+    return sent;
+  }
+
+  /** opiekunId → { dueSoon: carrier→rows, violations: carrier→rows }. */
+  private _groupByOpiekun(triggers: VehicleTrigger[]): {
+    byOpiekun: Map<string, OpiekunBucket>;
+    unassignedViolations: VehicleTrigger[];
+  } {
+    const byOpiekun = new Map<string, OpiekunBucket>();
+    const unassignedViolations: VehicleTrigger[] = [];
     for (const t of triggers) {
       const opiekunId = t.scope.carrier.opiekunId;
-      if (!opiekunId) continue;
+      if (!opiekunId) {
+        if (t.newViolation) unassignedViolations.push(t);
+        continue;
+      }
       const bucket = byOpiekun.get(opiekunId) ?? {
         dueSoon: new Map(),
         violations: new Map(),
       };
-      const carrierKey = t.scope.carrier.id;
-      const carrierName = t.scope.carrier.name;
-      if (t.reminderKind !== null) {
-        const g = bucket.dueSoon.get(carrierKey) ?? {
-          name: carrierName,
-          rows: [],
-        };
-        g.rows.push(t);
-        bucket.dueSoon.set(carrierKey, g);
-      }
-      if (t.newViolation) {
-        const g = bucket.violations.get(carrierKey) ?? {
-          name: carrierName,
-          rows: [],
-        };
-        g.rows.push(t);
-        bucket.violations.set(carrierKey, g);
-        violationTriggers.push(t);
-      }
+      if (t.reminderKind !== null) pushToCarrierGroup(bucket.dueSoon, t);
+      if (t.newViolation) pushToCarrierGroup(bucket.violations, t);
       byOpiekun.set(opiekunId, bucket);
     }
+    return { byOpiekun, unassignedViolations };
+  }
 
-    let sent = 0;
-    for (const [opiekunId, bucket] of byOpiekun) {
-      const recipient = await this._resolveOpiekun(opiekunId);
-      if (!recipient) continue;
-      const dueSoon = this._toGroups(bucket.dueSoon);
-      const violations = this._toGroups(bucket.violations);
-      if (dueSoon.length === 0 && violations.length === 0) continue;
-      try {
-        await this.mail.enqueueGuaranteeOpiekunDigest(recipient.email, {
-          opiekunName: recipient.name,
-          dateLabel,
-          dueSoon,
-          violations,
-        });
-        // Stamp violationSentAt only after a successful enqueue.
-        for (const g of bucket.violations.values()) {
-          for (const t of g.rows) await this._stampViolationSent(t, now);
-        }
-        sent += 1;
-      } catch (err) {
-        this._warnMail('opiekun digest', err, { opiekunId });
-      }
-    }
-
-    // A newly-violated vehicle whose carrier has NO opiekun still needs its
-    // violationSentAt stamped once, else the digest would keep re-flagging it.
-    for (const t of violationTriggers) {
-      if (!t.scope.carrier.opiekunId) await this._stampViolationSent(t, now);
-    }
-
-    return sent;
+  /**
+   * A newly-violated vehicle whose carrier has NO opiekun has nobody to report
+   * to. Semantics (2026-08-14 logging audit, item 6): `violationSentAt` means
+   * "the violation was reported to an opiekun", so it is NOT stamped — the old
+   * code stamped it silently. The violation itself is durable regardless
+   * (episode `state = violated`, `violatedAt`, visible on the admin compliance
+   * board); once an opiekun is assigned, the next run puts it in their digest.
+   * Until then every run says so here, once per run, as a data-quality WARN.
+   */
+  private _warnUnassignedViolations(triggers: VehicleTrigger[]): void {
+    if (triggers.length === 0) return;
+    this.logger.warn({
+      msg: 'guarantee watchdog: violations on carriers without an opiekun — nobody notified, violationSentAt left unset',
+      carrierIds: [...new Set(triggers.map((t) => t.scope.carrier.id))],
+      vehicleIds: triggers.map((t) => t.scope.vehicleId),
+    });
   }
 
   private _toGroups(
@@ -456,24 +581,127 @@ export class GuaranteeWatchdogService {
     };
   }
 
-  private async _stampReminder(t: VehicleTrigger, now: Date): Promise<void> {
+  // ── Stamp claim / release ────────────────────────────────
+
+  /** Which reminder stamps this trigger claims. */
+  private _reminderClaim(t: VehicleTrigger): EpisodeStampClaim {
     if (t.reminderKind === 'd1') {
-      // D-1 also backfills a (suppressed) late D-3 so it never fires afterward.
-      await this.repo.updateEpisode(t.episode.id, {
-        reminder1SentAt: now,
-        reminder3SentAt: t.episode.reminder3SentAt ?? now,
-      });
-    } else if (t.reminderKind === 'd3') {
-      await this.repo.updateEpisode(t.episode.id, { reminder3SentAt: now });
+      // D-1 also backfills a (suppressed) late D-3 so it never fires afterward —
+      // only when D-3 is still unset, so a release never wipes a real D-3.
+      return {
+        id: t.episode.id,
+        fields:
+          t.episode.reminder3SentAt === null
+            ? ['reminder1SentAt', 'reminder3SentAt']
+            : ['reminder1SentAt'],
+      };
+    }
+    return {
+      id: t.episode.id,
+      fields: t.reminderKind === 'd3' ? ['reminder3SentAt'] : [],
+    };
+  }
+
+  private _violationClaim(t: VehicleTrigger): EpisodeStampClaim {
+    return {
+      id: t.episode.id,
+      fields: t.episode.violationSentAt === null ? ['violationSentAt'] : [],
+    };
+  }
+
+  /**
+   * Stamp semantics (2026-08-14 logging audit, item 6) — CLAIM, ENQUEUE,
+   * RELEASE ON FAILURE:
+   *
+   *  1. claim: write the dedup stamps (`= now`) BEFORE enqueueing, so a second
+   *     run can never double-send while the mail is still in the queue;
+   *  2. enqueue the mail carrying a `MailCompensation` that names exactly the
+   *     stamps claimed and the claimed value;
+   *  3. release: if the claim or the enqueue throws, the stamps are cleared
+   *     right here; if the mail later fails PERMANENTLY in the queue, the email
+   *     processor calls `_releaseStampsFromPayload`. Either way the next daily
+   *     run sees NULL and retries.
+   *
+   * Releases are compare-and-clear (only while the column still holds the
+   * claimed instant), so a release can never erase a stamp a later successful
+   * run wrote. A stamp therefore means "delivered or still being delivered",
+   * never "attempted once". Returns whether the mail was enqueued.
+   */
+  private async _claimAndEnqueue(
+    claims: EpisodeStampClaim[],
+    now: Date,
+    enqueue: (compensation: MailCompensation) => Promise<void>,
+    logCtx: { kind: string } & Record<string, unknown>,
+  ): Promise<boolean> {
+    const effective = claims.filter((c) => c.fields.length > 0);
+    const compensation: MailCompensation = {
+      kind: STAMP_RELEASE_KIND,
+      payload: { stampedAt: now.toISOString(), episodes: effective },
+    };
+    try {
+      await this._applyClaims(effective, now);
+      await enqueue(compensation);
+      return true;
+    } catch (err) {
+      const { kind, ...extra } = logCtx;
+      this._warnMail(kind, err, extra);
+      await this._releaseClaims(effective, now);
+      return false;
     }
   }
 
-  private async _stampViolationSent(
-    t: VehicleTrigger,
+  private async _applyClaims(
+    claims: EpisodeStampClaim[],
     now: Date,
   ): Promise<void> {
-    if (t.episode.violationSentAt !== null) return;
-    await this.repo.updateEpisode(t.episode.id, { violationSentAt: now });
+    for (const c of claims) {
+      const patch: UpdateGuaranteeEpisodeData = {};
+      for (const f of c.fields) patch[f] = now;
+      await this.repo.updateEpisode(c.id, patch);
+    }
+  }
+
+  /** Best-effort compare-and-clear of every claimed stamp. Never throws. */
+  private async _releaseClaims(
+    claims: EpisodeStampClaim[],
+    stampedAt: Date,
+  ): Promise<number> {
+    let cleared = 0;
+    for (const c of claims) {
+      for (const f of c.fields) {
+        try {
+          if (await this.repo.clearEpisodeStampIfUnchanged(c.id, f, stampedAt)) {
+            cleared += 1;
+          }
+        } catch (err) {
+          this.logger.error({
+            msg: 'guarantee watchdog: could not release a stamp — mail may be skipped next run',
+            episodeId: c.id,
+            field: f,
+            ...describeError(err),
+          });
+        }
+      }
+    }
+    return cleared;
+  }
+
+  /** Compensation handler: the queued mail failed permanently. */
+  private async _releaseStampsFromPayload(payload: unknown): Promise<void> {
+    const parsed = StampReleasePayloadSchema.safeParse(payload);
+    if (!parsed.success) {
+      this.logger.error({
+        msg: 'guarantee watchdog: malformed stamp-release payload, nothing released',
+      });
+      return;
+    }
+    const stampedAt = new Date(parsed.data.stampedAt);
+    const cleared = await this._releaseClaims(parsed.data.episodes, stampedAt);
+    this.logger.warn({
+      msg: 'guarantee watchdog: mail failed permanently — stamps released for the next run',
+      episodeIds: parsed.data.episodes.map((e) => e.id),
+      cleared,
+    });
   }
 
   // ── Hooks (called from other services) ───────────────────
@@ -816,9 +1044,9 @@ export class GuaranteeWatchdogService {
     extra: Record<string, unknown>,
   ): void {
     this.logger.warn({
-      msg: `guarantee watchdog ${kind} enqueue failed`,
+      msg: `guarantee watchdog ${kind} could not be dispatched — stamps released`,
       ...extra,
-      error: err instanceof Error ? err.message : String(err),
+      ...describeError(err),
     });
   }
 }

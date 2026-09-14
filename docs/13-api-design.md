@@ -387,7 +387,7 @@ cursor-пагинация без изменений), остальные чет�
 | GET `/delegations` | Единый endpoint, фильтрация по роли. `eksport`/`weryfikator`: active-board `{zgloszony, gotowy, w_trasie}` + `?includeHistory=true`. carrier→свои, planista→свой `plannerId`, dyspozytor→своя team. `?claimable=true` (carrier outing-picker) → **только `zjechal`** без привязанного wniosek (§0‴: `w_trasie` больше НЕ claimable). (REWORK 2026-06-20: `weryfikator` снова видит выезды — §0″.) |
 | GET `/delegations/:id` | (lookup) — incl. `weryfikator` |
 | POST `/delegations` | `addDelegacja` (carrier → `zgloszony`) |
-| POST `/delegations/:id/ready` | **NEW** — `eksport \| admin`: `zgloszony→gotowy` (+ откат `gotowy→zgloszony`, пока не `w_trasie`). Audit `delegation.markReady`. |
+| POST `/delegations/:id/ready` | **NEW** — `eksport \| admin`: `zgloszony→gotowy` (+ откат `gotowy→zgloszony` флагом `rollback: true`, пока не `w_trasie`). Audit `delegation.markReady`, при откате — `delegation.rollbackReady` (имя подменяется в сервисе через `AuditContext.setAction`); оба пишут `before = { status, spedOrderNumber, readyById, readyAt }`. |
 | POST `/delegations/:id/in-transit` | **NEW** — `weryfikator \| admin`: `gotowy→w_trasie`, body `{ actualDepartureAt }` (**ISO datetime**, required; границы `>= start-of-day(departureAt)`, `<= now`; 422 `DEPARTURE_DATE_FUTURE` — datetime-granулярный). weryfikator фиксирует точный момент выезда. Audit `delegation.markInTransit`. |
 | POST `/delegations/:id/returned` | **NEW** — `weryfikator \| admin`: `w_trasie→zjechal`, body `{ actualReturnAt }` (**ISO datetime**, required; 422 `RETURN_DATE_FUTURE` (`> now`), `RETURN_BEFORE_DEPARTURE` (`< actualDepartureAt`)). Txn: `vehicle.lastDroveAt = max(...)` + авто-пересчёт связанного wniosek (границы — §0″). Audit `delegation.markReturned`. |
 | POST `/delegations/:id/cancel` | carrier (свои `zgloszony`) **+ admin (любой активный)** → `anulowany`. |
@@ -528,13 +528,15 @@ DB CHECK enforces `returnCountry` length 2..8 (covers `EL`) and `returnPostalCod
 
 | Method + Path | GAS | Внешний API |
 |---|---|---|
-| GET `/integrations/vies/:country/:vat` | `viesLookup` | VIES |
-| GET `/integrations/whitelist?nip=...&account=...` | `whiteListCheckAccount` | Biała Lista — проверка пары NIP + счёт |
-| GET `/integrations/whitelist/search?nip=...` | `whiteListSearchByNip` | Biała Lista — auto-fill компании по NIP (`{ found: false }` для не-польских NIP, не ошибка) |
+| POST `/integrations/vies/check` | `viesLookup` | VIES. Body `{ country, vat }` (`ViesCheckBodySchema`, strict) |
+| POST `/integrations/whitelist/check` | `whiteListCheckAccount` | Biała Lista — проверка пары NIP + счёт. Body `{ nip, account }` (`WhiteListCheckBodySchema`, strict) |
+| POST `/integrations/whitelist/search` | `whiteListSearchByNip` | Biała Lista — auto-fill компании по NIP (`{ found: false }` для не-польских NIP, не ошибка). Body `{ nip }` (`WhiteListSearchBodySchema`, strict) |
 | GET `/integrations/inspection?vin=...` | `inspectionCheckLink` | info-car.pl URL builder |
 | GET `/integrations/gps/positions` | — (новое) | GPS tracker (TBD — см. [16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api](16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api)) |
 | GET `/integrations/gps/positions/:vehicleId` | — | GPS tracker (TBD) |
 | GET `/integrations/gps/trips/:vehicleId?from=...&to=...` | — | GPS tracker (Phase 11+) |
+
+> **VIES и Biała Lista — POST, хотя это чтение (2026-09-14).** До этого NIP, номер счёта и VAT-номер шли в query/path и оседали в access-логах API и Caddy и в `audit_log.metadata.route` (аудит логирования, п.2). Роли `admin` + `opiekun`, 10/мин, ответ `200`, без `@Audit` — в allowlist inverse audit-coverage спека как read-only. Ошибка апстрима клиенту уходит без тела внешнего сервиса: общее сообщение + `extensions.code` = `INTEGRATION_UPSTREAM_REJECTED` (4xx, статус апстрима сохраняется, 404 = «не найдено») или `INTEGRATION_UPSTREAM_UNAVAILABLE` (5xx / сеть).
 
 > **GPS endpoints** в Phase 2 поднимаются как скелетон с mock-провайдером — реальные вызовы добавляются после получения credentials от MAGTRANS. Контракт ответа стабилен: `{ position, stale: boolean, lastFetchedAt }` для одиночного, `{ items, stale, lastFetchedAt }` для списка. Mock-провайдер возвращает детерминированные позиции от `plateNumber`, чтобы UI можно было разрабатывать параллельно. Ownership-фильтрация: carrier видит свои авто, opiekun — своих карьеров, planista/dyspozytor — закреплённых, admin — все. Если `Vehicle.gps = false` — 404.
 
@@ -855,14 +857,16 @@ Source of truth — Zod-схемы в `packages/shared`. Никакого OpenAP
 
 | Endpoint | Лимит |
 |---|---|
-| `/auth/login`, `/auth/verify-code`, `/auth/google` | 5 / минуту / IP |
-| `/auth/resend-code` | 3 / 5 минут / sessionToken |
-| `/integrations/vies/*` | 10 / минуту / IP (внешний API лимиты) |
-| `/integrations/whitelist`, `/integrations/whitelist/search` | 10 / минуту / IP |
+| `/auth/login`, `/auth/google`, `/auth/forgot-password` | 5 / минуту / IP |
+| `/auth/verify-code`, `/auth/reset-password` | 10 / минуту / IP |
+| `/auth/resend-code`, `/auth/resend-reset-code` | 2 / минуту / IP + cooldown 60 с на сессию (Redis) |
+| `/auth/refresh` | 60 / минуту / IP (одна загрузка страницы может дать несколько параллельных refresh; офис за одним NAT делит бакет) |
+| `/integrations/vies/check` | 10 / минуту / IP (внешний API лимиты) |
+| `/integrations/whitelist/check`, `/integrations/whitelist/search` | 10 / минуту / IP |
 | `/claims/*/preview` | 30 / минуту / user |
 | Остальные | 100 / минуту / user |
 
-Реализация: `@nestjs/throttler` (`@Throttle()` декоратор + `ThrottlerGuard`).
+Реализация: `@nestjs/throttler` (`@Throttle()` декоратор + `ThrottlerGuard`). Ключ — `req.ip`, поэтому в проде лимиты работают на реального клиента только при заданном `UPSTREAM_PROXY_CIDRS` в Caddy (иначе все пользователи = IP корпоративного nginx, см. docs/23). Каждый ответ 429 пишется WARN-строкой (`request rate-limited`: метод, шаблон роута, `userId`, IP). Страж: `auth.controller.throttle.spec.ts` требует `@Throttle` на каждом публичном auth-роуте.
 
 ## Idempotency
 
@@ -874,7 +878,27 @@ Source of truth — Zod-схемы в `packages/shared`. Никакого OpenAP
 
 **Исключение — `@Public` auth-роуты: на них `@Audit` запрещён.** Интерцептор берёт актора из `req.user`, а у публичного роута его нет — он откатывается на `actor: 'system'`, и `AuditWriter` отклоняет любое действие без префикса `system.` → голый 500 после того, как хендлер уже всё сделал (так было с `/auth/google` до 2026-09-10). Плюс ambient-транзакция интерцептора откатывала `system.*`-строки, записанные перед 403. Страж — `apps/api/src/modules/auth/auth.controller.audit.spec.ts`. `/auth/google` пишет `googleLogin` / `linkGoogleAccount` / `provisionUserFromDirectory` / `syncUserFromDirectory` / `system.deprovisionUserFromDirectory` / `system.denyDirectoryAccess` явно из `AuthService` / `DirectoryService`, отдельными записями на root-клиенте — не атомарно с изменением `User`.
 
-**Роуты, которые ходят в MAGSpace, — только `@Audit({ ..., manualTransaction: true })`** (сейчас `POST /sso/access-grants`). Интерактивная транзакция интерцептора не должна висеть на сетевом запросе: держит коннект пула и упирается в 5-секундный таймаут. Строку по-прежнему пишет интерцептор (актор — вошедший admin), `before` / `metadata` кладёт сервис через `AuditContext`; запись идёт на root-клиенте после успешного ответа. Страж — `apps/api/src/modules/directory/sso.controller.audit.spec.ts` (`txOpens === 0`).
+**Роуты, которые ходят в MAGSpace, — только `@Audit({ ..., manualTransaction: true })`** (из MAGSpace-роутов — `POST /sso/access-grants`). Интерактивная транзакция интерцептора не должна висеть на сетевом запросе: держит коннект пула и упирается в 5-секундный таймаут. Строку по-прежнему пишет интерцептор (актор — вошедший admin), `before` / `metadata` кладёт сервис через `AuditContext`; запись идёт на root-клиенте после успешного ответа. Страж — `apps/api/src/modules/directory/sso.controller.audit.spec.ts` (`txOpens === 0`).
+
+**`manualTransaction` — принятый риск (зафиксирован 2026-09-14).** Всего 10 роутов пишут audit-строку **не атомарно** с мутацией: хендлер сам управляет транзакцией (или держит сетевой вызов, который нельзя пускать внутрь транзакции), интерцептор пишет строку после успешного ответа.
+
+| Роут | Почему не в общей транзакции |
+|---|---|
+| POST `/vehicles`, PATCH `/vehicles/:id` | multipart + загрузка в S3/MinIO |
+| POST `/drivers`, PATCH `/drivers/:id` | то же |
+| POST `/trailers`, PATCH `/trailers/:id` | то же |
+| POST `/carriers/:id/attachments` | загрузка в S3 |
+| POST `/claims/:nrZgl/authorization-confirmation` | загрузка скриншота Maksima в S3 |
+| POST `/claims` | подача wniosku: собственная транзакция + вложения |
+| POST `/sso/access-grants` | запрос в MAGSpace |
+
+Что это значит: если процесс упадёт между коммитом мутации и записью аудита, мутация останется без audit-строки; если упадёт сама запись аудита — клиент получит 500 при уже применённой мутации. Outbox-паттерн для этих роутов — возможное улучшение, пока не делается. Список проверяется inverse audit-coverage спеком (`common/audit`): каждый мутирующий роут обязан нести `@Audit` или стоять в явном allowlist с причиной.
+
+**Inverse audit-coverage (с 2026-09-14).** `apps/api/src/common/audit/audit-coverage.inverse.spec.ts` находит все контроллеры тем же сканером, что и Nest при старте (без поднятия провайдеров), и падает, если POST/PUT/PATCH/DELETE-роут не несёт `@Audit` и не стоит в allowlist. Устаревшая запись allowlist (роут исчез, стал не мутирующим или получил `@Audit`) тоже валит спек; `@Public` + `@Audit` запрещены глобально. Allowlist сейчас: 8 публичных auth-роутов (аудит из сервиса или изменений в БД нет), `POST /auth/logout` (аудит из сервиса после отзыва сессии), `POST /claims/preview`, `POST /claims/:nrZgl/preview` (read-only расчёт), три POST-lookup'а VIES / Biała Lista и `POST /integrations/gps/refresh` (только Redis-кэш). Новый мутирующий роут без решения по аудиту CI не пройдёт.
+
+**Динамическое имя действия.** Если один роут выражает два бизнес-намерения (пример — `/delegations/:id/ready` с `rollback: true`), сервис вызывает `AuditContext.setAction('…')`; интерцептор берёт его вместо имени из декоратора.
+
+**Авто-пересчёт wniosku** (`claim.autoRecalc` / `claim.autoRecalcSkipped`) атрибутируется оператору, двинувшему выезд; без живого актора (крон, очередь) пишется `system.claim.autoRecalc` / `system.claim.autoRecalcSkipped`.
 
 ## Связь с GAS (legacy)
 

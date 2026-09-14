@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Select } from '@/components/ui/Select';
 import { useCancelDelegation, useDelegations } from '@/lib/hooks/useDelegations';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return '—';
@@ -60,10 +61,11 @@ export default function CarrierDelegationsPage() {
   const tStatus = useTranslations('carrier.delegations.status');
   const tCommon = useTranslations('common');
   const [status, setStatus] = useState<DelegationStatus | ''>('');
-  const { data, isLoading } = useDelegations({
+  const delegationsQ = useDelegations({
     status: status || undefined,
     limit: 50,
   });
+  const { data, isLoading } = delegationsQ;
 
   const cancelM = useCancelDelegation({
     onSuccess: () => toast.success(t('cancelledToast')),
@@ -179,6 +181,7 @@ export default function CarrierDelegationsPage() {
         rowKey={(r) => r.id}
         onRowClick={openDetail}
         isLoading={isLoading}
+        {...queryErrorProps(delegationsQ)}
         hasActiveFilters={Boolean(status)}
         empty={
           <EmptyState

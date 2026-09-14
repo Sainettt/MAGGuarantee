@@ -16,7 +16,7 @@
 | Google Cloud проект **фирмы** | отправка почты через Gmail API | 🆕 нет |
 | Личный ящик руководителя в Workspace | его OAuth-токеном отправляются письма | ✅ есть |
 | Google Group `no-reply@magtrans.eu` | адрес в `From`, односторонний канал | 🆕 нет |
-| Google-аккаунт для бэкапов | offsite-копии через rclone | ✅ есть |
+| Google-аккаунт для бэкапов | offsite-копии через rclone | ✅ аккаунт есть, rclone владелец проекта уже настраивал; на новом прод-сервере повторить §6.1 |
 | Реальные ставки/лимиты MAGTRANS | сид заливает заглушки 540 / 0.5 / 270 | ⚠️ уточнить |
 
 Порядок важен: **GCP и домен заводятся первыми**, потому что consent screen и
@@ -177,7 +177,16 @@ vhost'а, и тогда `X-Forwarded-For` подставляет сам клие
 здесь не слушается вообще: TLS терминирует nginx (§1.1).
 
 Пока IP не известен, поставить `ufw allow 80` и сузить сразу после первого
-успешного запроса — адрес виден в логах Caddy или в `tcpdump` (§3.3).
+успешного запроса — адрес виден в access-логе Caddy (`docker compose logs caddy`,
+поле `remote_ip`) или в `tcpdump` (§3.3).
+
+⚠️ **ufw не фильтрует порты, опубликованные Docker'ом.** Caddy публикует `80:80`
+через Docker, и такой трафик идёт через цепочку `FORWARD` в обход правил ufw в
+`INPUT`. Правило выше само по себе **не закрывает** `:80` от остальной сети.
+Ограничение источника делается в цепочке `DOCKER-USER` через
+`/etc/ufw/after.rules` — готовый блок и проверка в
+[`infra/README.md` §«Docker и ufw»](../infra/README.md). Без него любой хост
+корпоративной сети ходит на приложение мимо nginx.
 
 `chrony` обязателен — на кривом времени ломаются JWT и audit-лог.
 
@@ -244,8 +253,10 @@ git clone git@github.com:Sainettt/MAGGuarantee.git /opt/magguarantee/src
 ### 3.3 Caddy
 
 ```bash
-cp -r /opt/magguarantee/src/infra/caddy/* /opt/caddy/
+cp -r /opt/magguarantee/src/infra/caddy/* /opt/caddy/ && cp /opt/magguarantee/src/infra/caddy/.env.example /opt/caddy/.env
 ```
+
+`*` не копирует dotfile'ы, поэтому `.env` — отдельной командой.
 
 🆕 Прод берёт **не** `Caddyfile` (это конфиг стенда — публичный, со своим
 Let's Encrypt), а `Caddyfile.prod`, рассчитанный на работу за корпоративным
@@ -269,8 +280,20 @@ cd /opt/caddy && docker compose up -d
   выпускать сертификат, не сможет и перестанет отвечать.
 - **`trusted_proxies` обязателен.** По умолчанию Caddy перезаписывает входящий
   `X-Forwarded-For` своим значением, затирая настоящий IP клиента, который
-  проставил nginx. В `Caddyfile.prod` блок оставлен закомментированным с
-  `TODO` — раскомментировать, вписав адрес nginx'а.
+  проставил nginx. В `Caddyfile.prod` он уже включён и берёт адрес из переменной
+  `UPSTREAM_PROXY_CIDRS` в `/opt/caddy/.env`. Дефолт `127.0.0.1/32` не доверяет
+  никому — безопасно, но все пользователи будут с IP nginx'а. `0.0.0.0/0` не
+  ставить никогда: это возвращает подделку IP любым клиентом.
+- **Hop-математика.** nginx дописывает клиента в `X-Forwarded-For`, доверенный
+  Caddy дописывает nginx → api видит `…, <клиент>, <nginx>` от Caddy. Поэтому в
+  `infra/.env` `TRUST_PROXY_HOPS=2` (на стенде, где Caddy — край, `1`). nginx
+  обязан отправлять `X-Forwarded-For` (§1.1).
+- **`/health` и `/ready` уходят в api**, а не в web (до 2026-09-14 они попадали
+  в web и редиректили на `/login` — внешний монитор был «зелёным» при мёртвом
+  api).
+- **Access-лог** — JSON в stdout контейнера (`docker compose logs caddy`), поле
+  `client_ip` — реальный клиент. Query string и Referer вырезаются, пробы
+  `/health` / `/ready` не логируются. Нужен Caddy ≥ 2.8.
 
 🆕 Узнать этот адрес: спросить у сетевого администратора либо снять с провода на
 самом сервере —
@@ -280,16 +303,36 @@ sudo tcpdump -n -i any 'tcp port 80 and tcp[tcpflags] & tcp-syn != 0'
 ```
 
 и один раз открыть `https://mymag.magtrans.eu`. Source IP пакета SYN — искомое
-значение. Дальше вписать его в `trusted_proxies`, сузить `ufw` (§2.2) и
-перечитать конфиг без простоя:
+значение. Дальше вписать его в `/opt/caddy/.env` как
+`UPSTREAM_PROXY_CIDRS=<IP_NGINX>/32`, закрыть `:80` для остальных (§2.2,
+`DOCKER-USER`) и пересоздать контейнер — переменные окружения `caddy reload` не
+перечитывает:
 
 ```bash
-docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+cd /opt/caddy && docker compose up -d
 ```
 
-> До того как `trusted_proxies` проставлен, приложение работает, но в audit-логе
-> и rate-limiter'е у всех запросов будет IP nginx'а. Не блокирует запуск —
-> блокирует сдачу: общий rate-limit на всех пользователей.
+Проверка: открыть сайт со своей машины — в последней строке
+`docker compose logs caddy` поле `client_ip` должно быть **вашим** адресом.
+
+⚠️ **IP nginx'а может смениться** (на 2026-09-14 он не известен и не
+зафиксирован). Поэтому у сетевого администратора просить **подсеть**, из которой
+ходят reverse-proxy MAGTRANS, и вписывать CIDR (`10.x.y.0/24`), а не один адрес.
+Последствия смены адреса без правки конфига разные:
+
+- `UPSTREAM_PROXY_CIDRS` устарел → сайт **работает**, но у всех пользователей
+  снова IP nginx'а: общий rate-limit, неверный IP в audit. Заметно по
+  `client_ip` в логе Caddy и по пачке 429.
+- правило `DOCKER-USER` с одним IP устарело → **сайт недоступен** (DROP всего
+  трафика от нового адреса). Поэтому в `DOCKER-USER` — только CIDR подсети, а
+  если подсеть неизвестна, правило пока не ставить и компенсировать тем, что
+  сервер во внутренней сети за NAT.
+
+> До того как `UPSTREAM_PROXY_CIDRS` задан, приложение работает, но в audit-логе,
+> security-WARN'ах auth и rate-limiter'е у всех запросов будет IP nginx'а. Не
+> блокирует запуск — блокирует сдачу: общий rate-limit на всех пользователей
+> (5 логинов в минуту на всю фирму, 60 refresh в минуту — выкидывание на
+> `/login` при нагрузке).
 
 ---
 
@@ -376,6 +419,10 @@ docker compose -f infra/docker-compose.prod.yml run --rm -T -e SEED_ADMIN_PASSWO
 Сид напечатает счётчики: 10 ключей AppConfig, 6 типов прицепов, 24 строки
 лимитов, 1 админ. Это **одноразовый** шаг — при следующих деплоях не повторять.
 
+`SEED_ADMIN_PASSWORD` обязателен (с 2026-09-14 захардкоженного запасного пароля
+нет): без него сид останавливается до записи в БД. Нужен и при повторном
+запуске, хотя существующего админа сид не трогает.
+
 ```bash
 docker compose -f infra/docker-compose.prod.yml up -d
 ```
@@ -406,13 +453,40 @@ rclone lsd gdrive:
 🆕 Папка отдельная от стенда, иначе архивы двух серверов смешаются:
 
 ```bash
-printf 'MAGG_RCLONE_REMOTE=gdrive:magguarantee-backups-prod\nMAGG_KEEP_DAYS=7\nMAGG_REMOTE_KEEP_DAYS=30\n' | sudo tee /opt/magguarantee/backup.conf
+sudo cp /opt/magguarantee/src/infra/scripts/backup.conf.example /opt/magguarantee/backup.conf && sudo chmod 0600 /opt/magguarantee/backup.conf
 ```
+
+В файле раскомментировать и заполнить `MAGG_RCLONE_REMOTE=gdrive:magguarantee-backups-prod`.
+Срок хранения — дефолты скрипта: **7 дней локально, 30 дней offsite** (единственный
+источник — `infra/scripts/magguarantee-backup`; GFS-ярусы из docs/18 не
+реализованы). Без `MAGG_RCLONE_REMOTE` копии лежат на том же диске, что и база.
+
+### 6.2a Алерты о падениях
+
+Юнит бэкапа при ошибке запускает `magguarantee-alert@.service` (`OnFailure=`),
+который шлёт в Google Chat имя хоста, юнит и последние 20 строк журнала.
+
+```bash
+sudo cp /opt/magguarantee/src/infra/scripts/alert.conf.example /opt/magguarantee/alert.conf && sudo chmod 0600 /opt/magguarantee/alert.conf
+```
+
+Вписать `OPS_ALERT_WEBHOOK_URL` — incoming webhook отдельного ops-спейса в
+Google Chat. Пустой URL = алерт только пишет warning в журнал.
+
+🆕 На 2026-09-14 отдельного ops-спейса **нет** — URL оставлен пустым и в
+`alert.conf`, и в `infra/.env`. Все алерты (провал бэкапа, окончательно
+недоставленные письма, падения кронов, Redis) тогда видны **только** в
+`journalctl` и `docker compose logs api` — сами по себе никого не разбудят.
+Завести спейс и webhook — пять минут; после этого вписать URL в оба файла,
+`docker compose up -d api` и проверить тестовым алертом ниже. Юнит работает
+от `deploy` с группой `systemd-journal` — она должна существовать на хосте.
+Тот же URL указывается в `infra/.env` для api (провалы писем и chat-уведомлений
+после всех ретраев).
 
 ### 6.3 Таймер
 
 ```bash
-sudo cp /opt/magguarantee/src/infra/systemd/magguarantee-backup.* /etc/systemd/system/
+sudo cp /opt/magguarantee/src/infra/systemd/magguarantee-* /etc/systemd/system/
 ```
 
 ```bash
@@ -432,6 +506,12 @@ sudo systemctl start magguarantee-backup.service && journalctl -u magguarantee-b
 ```
 
 Бэкап, который ни разу не восстанавливали, бэкапом не является.
+
+Проверка алерта (в Chat должно прийти сообщение):
+
+```bash
+sudo systemctl start magguarantee-alert@magguarantee-backup.service.service
+```
 
 ---
 
@@ -492,6 +572,14 @@ Settings → Environments → изменить существующий `prod`:
 |---|---|---|
 | Variable | `COMPOSE_FILE` | `infra/docker-compose.prod.yml` |
 | Variable | `DEPLOY_PATH` | `/opt/magguarantee/src` (можно не задавать — это дефолт) |
+| Variable | `SITE_URL` | метка сайта из Caddyfile, по ней CI проверяет `/health` и `/ready` через Caddy; дефолт `http://mymag.magtrans.eu` |
+| Variable | `DEPLOY_HISTORY` | дефолт `/opt/magguarantee/deploy-history.log` |
+
+Каждый выкат дописывает строку `started` / `ok` / `failed` с SHA, предыдущим SHA,
+номером run'а и автором в `deploy-history.log`; `magguarantee-rollback` пишет туда
+же. Файл должен быть доступен на запись пользователю `deploy`, иначе выкат
+остановится ещё до `git pull`. После `up -d` CI проверяет `/health` и `/ready`
+**через Caddy** (200 + JSON, без следования редиректам, до 120 с).
 
 Секреты `DEPLOY_HOST` и `DEPLOY_SSH_KEY` больше не используются — если остались
 от ssh-схемы, удалить.
@@ -555,12 +643,14 @@ sudo ./svc.sh stop && sudo ./svc.sh uninstall
 
 Идти сверху вниз, каждый пункт руками:
 
-- [ ] `https://mymag.magtrans.eu/health` → 200, `/ready` → 200
+- [ ] `curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' --max-redirs 0 https://mymag.magtrans.eu/health` → `200 application/json…`, то же для `/ready`. Редирект 307 = запрос ушёл в web, а не в api
 - [ ] Сертификат валиден (выпущен nginx'ом MAGTRANS), HTTP редиректит на HTTPS
-- [ ] В `Caddyfile` раскомментирован `trusted_proxies` с реальным IP nginx'а
+- [ ] В `/opt/caddy/.env` задан `UPSTREAM_PROXY_CIDRS` с реальным IP nginx'а, контейнер пересоздан
 - [ ] В логе api при логине с чужой машины виден **её** IP, а не адрес nginx'а —
       проверка, что `TRUST_PROXY_HOPS` и `trusted_proxies` сошлись
-- [ ] `ufw status` — `:80` открыт только для IP nginx'а
+- [ ] `sudo iptables -S DOCKER-USER` — DROP для `:80` от всех, кроме nginx; с другой машины сети `curl -m 5 http://<IP_сервера>/health` падает по таймауту
+- [ ] `sudo systemctl start magguarantee-alert@magguarantee-backup.service.service` — сообщение пришло в Chat
+- [ ] `tail -3 /opt/magguarantee/deploy-history.log` — последний выкат `ok` с правильным SHA
 - [ ] `docker ps` — пять контейнеров, mailhog отсутствует, у api и web нет проброшенных портов
 - [ ] Монтирования ведут в `/opt/magguarantee/data/*`:
       `docker inspect -f '{{range .Mounts}}{{.Source}} {{end}}' magguarantee-postgres magguarantee-minio`
@@ -619,6 +709,11 @@ Stack, бесплатные тарифы, карта не нужна. Один �
 `https://mymag.magtrans.eu/health`, уведомления на почту. Пять минут, закрывает
 главный риск.
 
+⚠️ Монитор настроить **не следовать редиректам** и ждать именно 200 (в идеале —
+кусок JSON-ответа). Если `/health` когда-нибудь снова уйдёт в web, тот ответит
+307 на `/login`, а монитор со следованием редиректов получит 200 от страницы
+логина и будет «зелёным» при мёртвом api.
+
 > Внешний монитор видит цепочку целиком — nginx и наш сервер. Это плюс: падение
 > корпоративного nginx для пользователя неотличимо от падения приложения, и
 > знать о нём тоже надо. Минус — по алерту не понять, чья половина легла;
@@ -636,26 +731,18 @@ services:
     restart: unless-stopped
     volumes:
       - ./data:/app/data
-    networks:
-      - proxy-net
-networks:
-  proxy-net:
-    external: true
+    ports:
+      - '127.0.0.1:3001:3001'
 ```
 
 🆕 Публичного `status.magtrans.eu` не делаем: это потребовало бы ещё одного
-vhost'а на корпоративном nginx ради внутренней панели. Kuma остаётся доступной
-только изнутри — блок в `/opt/caddy/Caddyfile`, слушающий на нестандартном порту
-без домена:
+vhost'а на корпоративном nginx ради внутренней панели. Kuma публикуется **только
+на loopback** хоста: к ней стучится heartbeat бэкапа (он работает на хосте, не в
+container-сети), а панель открывается через SSH-туннель:
+`ssh -L 3001:127.0.0.1:3001 deploy@<сервер>`.
 
-```caddy
-:8080 {
-    reverse_proxy uptime-kuma:3001
-}
-```
-
-Порт открыть в `ufw` для админской подсети либо не открывать вовсе и ходить
-через SSH-туннель: `ssh -L 8080:localhost:8080 deploy@<сервер>`.
+> Прежний вариант с блоком `:8080` в Caddyfile не работает: Caddy-compose
+> публикует только 80/443, и `http://localhost:8080` с хоста недоступен.
 
 > Если панель всё-таки нужна снаружи — попросить у MAGTRANS второй vhost по той
 > же схеме, что и основной (§1.1). Тогда Kuma закрыть логином, она умеет.
@@ -677,12 +764,13 @@ Push-монитор работает наоборот: Kuma ждёт, что к 
 в `backup.conf`:
 
 ```bash
-echo 'MAGG_HEARTBEAT_URL=http://localhost:8080/api/push/xxxxx' | sudo tee -a /opt/magguarantee/backup.conf
+echo 'MAGG_HEARTBEAT_URL=http://127.0.0.1:3001/api/push/xxxxx' | sudo tee -a /opt/magguarantee/backup.conf
 ```
 
 Скрипт дёргает его только при полном успехе. Не пришёл стук за 36 часов —
-приходит тревога. Это единственный способ узнать, что бэкапы тихо перестали
-делаться: сами по себе они об этом не сообщат.
+приходит тревога. Heartbeat и `OnFailure`-алерт (§6.2a) дополняют друг друга:
+алерт ловит «запустился и упал», heartbeat — «таймер вообще перестал
+запускаться».
 
 Уведомления настраиваются в Kuma (Settings → Notifications) — email, Telegram,
 Discord.

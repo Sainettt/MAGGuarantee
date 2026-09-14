@@ -30,6 +30,7 @@ import {
 import { CARRIERS_KEY } from '@/lib/hooks/useCarriers';
 import { MY_FLEET_KEY } from '@/lib/hooks/useMyFleet';
 import { OPIEKUN_KEY } from '@/lib/hooks/useOpiekunFleet';
+import type { MutationMetaOptions } from '@/lib/query/globalErrors';
 
 export const TRAILERS_KEY = ['trailers'] as const;
 
@@ -134,9 +135,10 @@ export function useReactivateTrailer() {
   });
 }
 
-export function useDeleteTrailer() {
+export function useDeleteTrailer(opts?: MutationMetaOptions) {
   const qc = useQueryClient();
   return useMutation({
+    meta: opts?.meta,
     mutationFn: deleteTrailer,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: TRAILERS_KEY });
@@ -149,9 +151,10 @@ export function useDeleteTrailer() {
 }
 
 /** Hard-delete — admin only. See useHardDeleteCarrier doc. */
-export function useHardDeleteTrailer() {
+export function useHardDeleteTrailer(opts?: MutationMetaOptions) {
   const qc = useQueryClient();
   return useMutation({
+    meta: opts?.meta,
     mutationFn: ({ id, body }: { id: string; body: DeleteWithReasonDto }) =>
       hardDeleteTrailer(id, body),
     onSuccess: () => {

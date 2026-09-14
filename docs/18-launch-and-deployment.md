@@ -2,7 +2,18 @@
 
 > Так как `Code.gs` + `index.html` никогда не были в проде и содержат фейковые данные, **миграция данных не нужна**. Новое приложение запускается с пустой БД + seed + первый admin. Этот документ описывает что нужно для перехода в prod.
 
-## Текущее состояние (2026-05-12)
+## Текущее состояние (2026-09-14)
+
+> **Пошаговая истина — [23-prod-deployment-runbook.md](23-prod-deployment-runbook.md).** Этот документ концептуальный и местами описывает исходный план, который потом поменялся. Что устарело ниже:
+>
+> - **Топология.** TLS терминирует **корпоративный nginx MAGTRANS** (vhost `mymag.magtrans.eu`), наш Caddy работает за ним по HTTP без ACME и доверяет nginx через `UPSTREAM_PROXY_CIDRS`. Доменов `app.` / `api.` / `status.magtrans.eu` нет: один домен, `/api/*` → api, `/health` и `/ready` → api, остальное → web.
+> - **CI/CD.** Не push-деплой по SSH, а `workflow_dispatch` на self-hosted runner прямо на сервере (метки `staging` / `prod`), сборка на сервере, без ghcr.io. Каждый выкат пишет SHA в `/opt/magguarantee/deploy-history.log`.
+> - **Мониторинг.** Сначала внешний монитор на `/health` (без следования редиректам), Uptime Kuma — только на loopback хоста, без публичного домена. Ops-алерты: `OnFailure=` systemd-юнитов → Google Chat (`magguarantee-alert@.service`); провалы писем и chat-уведомлений api шлёт туда же.
+> - **Бэкапы.** Реализован один ярус: ежедневный `pg_dump` + архив MinIO, 7 дней локально и 30 дней offsite в Google Drive через rclone. GFS (недели/месяцы), снапшоты хостера и S3-versioning из таблицы «Backup-стратегия» **не реализованы**.
+> - **Логи.** json-file с ротацией и `compress` на всех контейнерах; Caddy пишет JSON access-лог; Postgres логирует подключения и запросы > 1 с (без значений параметров). Агрегации (Loki) нет.
+>
+> Ниже — исторический срез от 2026-05-12.
+
 
 - **Staging — ✅ работает.** Развёрнут на OVH VPS `vps-29a0acba.vps.ovh.net`. Полный стек (postgres + redis + mailhog + api + web + shared Caddy) поднят. CI/CD через `.github/workflows/ci.yml`: push в `main` автоматически билдит и деплоит через SSH. Seed применён, логин-флоу работает end-to-end. Postgres exposed только на loopback VPS — внешний доступ через SSH-туннель.
 - **Prod — ⏳ не развёрнут.** Будет запущен на **отдельном VPS** (не на том же что staging). Шаги для перехода — см. раздел [Переход staging → prod](#переход-staging--prod) ниже.
@@ -147,9 +158,7 @@ api.magtrans.eu {
 
 - Купить домен (если не куплен). Cloudflare Registrar / Namecheap — ~$10/год.
 - A-записи в DNS:
-  - `app.magtrans.eu` → IP прод-VPS
-  - `api.magtrans.eu` → IP прод-VPS
-  - `status.magtrans.eu` → IP прод-VPS (для Uptime Kuma)
+  - ⛔ *Устарело:* `app.` / `api.` / `status.magtrans.eu` не заводятся. Факт — один vhost `mymag.magtrans.eu` на корпоративном nginx MAGTRANS (docs/23 §1.1).
 - TTL — `300` пока обкатываем, потом `3600`.
 
 #### В.2 Email — Gmail API (Phase 9)
@@ -181,7 +190,7 @@ Mailhog уходит. Заводим:
 
 #### В.5 Мониторинг — Uptime Kuma
 
-Отдельный compose-стек в `/opt/uptime-kuma/`, в сети `proxy-net`. Caddy роутит `status.magtrans.eu` → этот контейнер. Мониторит `https://api.magtrans.eu/health`, `https://app.magtrans.eu/`. Алерты в email/Telegram.
+⛔ *Устарело.* Факт (docs/23 §«Мониторинг»): внешний монитор на `https://mymag.magtrans.eu/health` без следования редиректам; Kuma — отдельный стек, опубликован только на `127.0.0.1:3001`, панель через SSH-туннель, Push-монитор для heartbeat бэкапа. Публичного `status.magtrans.eu` нет.
 
 #### В.6 Rollback-скрипт
 
@@ -396,18 +405,16 @@ Mailhog уходит. Заводим:
 
 ### Домены и DNS
 
-- [ ] `app.magtrans.eu` → IP VPS (A-запись).
-- [ ] `api.magtrans.eu` → IP VPS (A-запись).
-- [ ] `status.magtrans.eu` → IP VPS (A-запись, для Uptime Kuma).
-- [ ] DNS-провайдер на выбор (Cloudflare бесплатно).
+- [ ] Vhost `mymag.magtrans.eu` на корпоративном nginx MAGTRANS, проксирующий на `:80` сервера и передающий `X-Forwarded-For` (docs/23 §1.1).
+- [ ] IP nginx известен и вписан в `/opt/caddy/.env` → `UPSTREAM_PROXY_CIDRS`; `:80` закрыт для остальных через `DOCKER-USER` (ufw Docker-порты не фильтрует).
 
 ### Мониторинг
 
-- [ ] **Uptime Kuma** — отдельный compose-стек в `/opt/uptime-kuma/`, в `proxy-net`. Caddy роутит `status.magtrans.eu` → этот контейнер.
-  - Мониторит `https://api.magtrans.eu/health`, `/ready`, `https://app.magtrans.eu/`.
-  - Алерты: email + (опц.) Telegram/Discord webhook.
+- [ ] **Внешний монитор** (UptimeRobot / Better Stack) на `https://mymag.magtrans.eu/health`, **не следовать редиректам**, ждать 200.
+- [ ] **Uptime Kuma** — отдельный compose-стек в `/opt/uptime-kuma/`, порт только `127.0.0.1:3001`; мониторы `/health`, `/ready`, `/` и Push-heartbeat бэкапа (docs/23).
+- [ ] **Ops-алерты** — `alert.conf` с `OPS_ALERT_WEBHOOK_URL`, юниты `magguarantee-alert@.service` установлены, тестовый алерт дошёл; тот же URL в `infra/.env` для api.
 - [ ] **Логи** через Pino → stdout контейнера → `docker logs magguarantee-api` / `docker logs magguarantee-web`.
-  - В `docker-compose.yml`: `logging: driver: "json-file" options: max-size: "100m" max-file: "3"` — иначе лог-файлы могут забить диск.
+  - В compose уже стоит `json-file` с `max-size`, `max-file` и `compress: 'true'` на всех сервисах.
   - При желании — `loki` + `grafana` отдельным compose-стеком, но это уже надстройка.
 - [ ] **Метрики хоста** — `htop` или `netdata` (опц., Netdata одной командой ставится).
 - [ ] **Disk-space мониторинг** — Uptime Kuma «Push»-monitor + cron на VPS, шлющий heartbeat если `df` < 80%.
@@ -925,11 +932,11 @@ Single-VPS — один диск. Без offsite-бэкапов потеря д�
 
 | Что | Частота | Retention | Где |
 |---|---|---|---|
-| Postgres dump | ежедневно | 7 дней | offsite S3 (R2 / Hetzner Object Storage) |
-| Postgres dump | еженедельно | 4 недели | offsite S3 |
-| Postgres dump | ежемесячно | 12 месяцев | offsite S3 |
-| VPS-снимок (Hetzner snapshot) | ежедневно | 7 дней | у хостера |
-| S3 (screenshots) | versioning | 5 лет | сам S3 (offsite by design) |
+| Postgres dump + архив MinIO | ежедневно | 7 дней локально / 30 дней offsite | `/opt/magguarantee/backups` + Google Drive через rclone — ✅ **реализовано** (дефолты `infra/scripts/magguarantee-backup`) |
+| Postgres dump | еженедельно | 4 недели | ⏳ план, не реализовано |
+| Postgres dump | ежемесячно | 12 месяцев | ⏳ план, не реализовано |
+| VPS-снимок хостера | ежедневно | 7 дней | ⏳ зависит от хостера прод-сервера MAGTRANS |
+| Вложения (MinIO) | в ежедневном архиве | как dump | ✅ входит в ежедневный бэкап; versioning не настроен |
 | Application code | unlimited | через git | GitHub |
 | Docker images | по тегам sha | 30 дней | ghcr.io |
 | Secrets (`.env`) | при изменении | offline (1Password) | вне VPS |

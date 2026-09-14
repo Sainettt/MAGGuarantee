@@ -33,7 +33,11 @@
 #      credentials, JWT secrets and the Gmail refresh token never enter the web
 #      container. It reads exactly four keys (verified against the source).
 #   4. Postgres runs with tuned memory settings (see the note on the service).
-#   5. Data paths come from the `.env` and must be absolute.
+#   5. Data paths come from the `.env` and must be absolute (staging now
+#      requires them explicitly too).
+#
+# Shared with staging: Redis `noeviction` (BullMQ), Postgres connection +
+# slow-statement logging, json-file logs rotated AND compressed on every service.
 
 services:
   postgres:
@@ -58,6 +62,18 @@ services:
     #   4 GB  → 256MB / 1GB    (below)
     #   8 GB  → 2GB   / 6GB
     #   16 GB → 4GB   / 12GB
+    #
+    # Logging (→ `docker compose logs postgres`, rotated below):
+    #   log_connections / log_disconnections — who connected from where and for
+    #     how long; the only trace of a direct DB session (SSH tunnel, psql)
+    #     that bypasses the api and its audit log. Expect a connection /
+    #     disconnection pair with host=[local] per pg_isready healthcheck
+    #     (every 10s) — noise, a few MB/day, well inside the rotation.
+    #   log_min_duration_statement=1000 — statements slower than 1s, with text.
+    #   log_parameter_max_length=0 — …but WITHOUT bind parameter values: Prisma
+    #     sends every value as a parameter, and a slow query on carriers/users
+    #     would otherwise print NIPs, bank accounts, emails and password hashes
+    #     into the container log.
     command: >
       postgres
       -c shared_buffers=256MB
@@ -65,6 +81,10 @@ services:
       -c work_mem=8MB
       -c maintenance_work_mem=128MB
       -c max_connections=50
+      -c log_connections=on
+      -c log_disconnections=on
+      -c log_min_duration_statement=1000
+      -c log_parameter_max_length=0
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U magguarantee']
       interval: 10s
@@ -77,15 +97,23 @@ services:
       options:
         max-size: '50m'
         max-file: '3'
+        compress: 'true'
 
   redis:
     image: redis:7-alpine
     container_name: magguarantee-redis
     restart: unless-stopped
+    # `noeviction` is REQUIRED by BullMQ (the email-send and chat-notify-wyjazd
+    # queues live here): under memory pressure an LRU policy silently deletes
+    # queue keys — jobs vanish, locks disappear, workers stall — and the same
+    # keyspace holds 2FA/reset codes, which would expire early. With noeviction
+    # a full Redis refuses writes with an OOM error instead: loud, visible in
+    # the api log, nothing lost. 256mb is far above this app's footprint; if it
+    # is ever hit, look for piled-up completed/failed jobs, don't switch back.
     command: >
       redis-server
       --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
+      --maxmemory-policy noeviction
       --appendonly yes
     volumes:
       - ${REDIS_DATA:?REDIS_DATA required in .env — use an absolute path}:/data
@@ -103,6 +131,7 @@ services:
       options:
         max-size: '20m'
         max-file: '3'
+        compress: 'true'
 
   # Self-hosted object storage for attachment uploads (driver ID scans,
   # porozumienia, authorization screenshots). These are retained documents:
@@ -141,6 +170,7 @@ services:
       options:
         max-size: '20m'
         max-file: '3'
+        compress: 'true'
 
   # One-shot: waits for MinIO, creates the bucket if missing, exits 0. `api`
   # waits for a successful completion so uploads never hit a missing bucket.
@@ -164,6 +194,7 @@ services:
       options:
         max-size: '5m'
         max-file: '2'
+        compress: 'true'
 
   api:
     # Built on the VPS, same as staging. Note that `build` here also compiles
@@ -200,6 +231,7 @@ services:
       options:
         max-size: '100m'
         max-file: '5'
+        compress: 'true'
 
   web:
     build:
@@ -250,6 +282,7 @@ services:
       options:
         max-size: '50m'
         max-file: '3'
+        compress: 'true'
 
 networks:
   internal:

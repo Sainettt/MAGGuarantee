@@ -27,6 +27,7 @@ import type {
 
 import { Checkbox } from '@/components/ui/Checkbox';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { Input } from '@/components/ui/Input';
 import { KmHeaderTiles } from '@/components/km/KmHeaderTiles';
 import {
@@ -42,6 +43,7 @@ import {
   useVehicleKmBoard,
   useVehicleKmReport,
 } from '@/lib/hooks/useVehicleKm';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 import {
   formatDayMonthYear,
   isoWeekLabel,
@@ -314,7 +316,12 @@ export function KmBoardScreen({
         </div>
       </div>
 
-      {filteredEmpty ? (
+      {activeQ.isError && !data ? (
+        // Load failure is not «no vehicles» — show it as an error with retry.
+        <div className="rounded-xl border border-border bg-card shadow-card">
+          <ErrorState {...queryErrorProps(activeQ)} />
+        </div>
+      ) : filteredEmpty ? (
         <div className="rounded-xl border border-border bg-card p-6 shadow-card">
           <EmptyState icon={Gauge} message={filteredEmptyMessage} />
         </div>

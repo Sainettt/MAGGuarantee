@@ -34,6 +34,12 @@ const RL = {
   forgot: { limit: TEST_BYPASS ? 1_000 : 5, ttl: 60_000 },
   reset: { limit: TEST_BYPASS ? 1_000 : 10, ttl: 60_000 },
   resendReset: { limit: TEST_BYPASS ? 1_000 : 2, ttl: 60_000 },
+  //   /auth/refresh — 60 / min / IP. Tighter than the 100/min default, but
+  //   deliberately not login-tight: the web middleware turns ANY non-2xx from
+  //   refresh — a 429 included — into a redirect to /login, one navigation can
+  //   fire several refreshes at once (document + RSC + prefetch, sibling
+  //   tabs), and a whole office behind one NAT shares the bucket.
+  refresh: { limit: TEST_BYPASS ? 1_000 : 60, ttl: 60_000 },
 } as const;
 
 import {
@@ -62,6 +68,7 @@ import {
   type AccessOnlyToken,
   type TokenPair,
 } from './auth.service';
+import type { AuthRequestContext } from './auth-security-log';
 import {
   COOKIE_ACCESS,
   COOKIE_REFRESH,
@@ -90,8 +97,11 @@ export class AuthController {
   async login(
     @Body(new ZodValidationPipe(LoginRequest))
     body: LoginRequest,
+    @Req() req: Request,
   ): Promise<LoginResponse> {
-    return this.auth.login(body.login, body.password);
+    // The context only feeds the refused-attempt log and the lockout audit row;
+    // the response stays identical for every failure (anti-enumeration).
+    return this.auth.login(body.login, body.password, this.requestContext(req));
   }
 
   // ── POST /auth/verify-code ───────────────────────────
@@ -162,8 +172,9 @@ export class AuthController {
   async resend(
     @Body(new ZodValidationPipe(ResendCodeRequest))
     body: ResendCodeRequest,
+    @Req() req: Request,
   ): Promise<ResendCodeResponse> {
-    return this.auth.resendCode(body.sessionToken);
+    return this.auth.resendCode(body.sessionToken, this.requestContext(req));
   }
 
   // ── POST /auth/forgot-password ───────────────────────
@@ -189,13 +200,16 @@ export class AuthController {
   async resetPassword(
     @Body(new ZodValidationPipe(ResetPasswordRequest))
     body: ResetPasswordRequest,
+    @Req() req: Request,
   ): Promise<void> {
     // Does NOT auto-login — the user returns to /login. All refresh tokens for
-    // the user are revoked inside the service.
+    // the user are revoked inside the service, which also writes the
+    // `resetPassword` audit row (public route — no @Audit, see `google`).
     await this.auth.resetPassword(
       body.sessionToken,
       body.code,
       body.newPassword,
+      this.requestContext(req),
     );
   }
 
@@ -208,8 +222,12 @@ export class AuthController {
   async resendResetCode(
     @Body(new ZodValidationPipe(ResendResetCodeRequest))
     body: ResendResetCodeRequest,
+    @Req() req: Request,
   ): Promise<ResendCodeResponse> {
-    return this.auth.resendResetCode(body.sessionToken);
+    return this.auth.resendResetCode(
+      body.sessionToken,
+      this.requestContext(req),
+    );
   }
 
   // ── POST /auth/change-password (authenticated) ───────
@@ -247,6 +265,7 @@ export class AuthController {
   @UseGuards(JwtRefreshGuard)
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: RL.refresh })
   async refresh(
     @Req() req: Request & { user: RefreshRequestData },
     @Res({ passthrough: true }) res: Response,
@@ -262,6 +281,8 @@ export class AuthController {
 
   // ── POST /auth/logout ────────────────────────────────
 
+  // No @Audit: the service audits (best-effort, after revoking) so a failed
+  // audit write can never keep the session alive or the cookies set.
   @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
   async logout(
@@ -271,7 +292,7 @@ export class AuthController {
     const cookies = (req as Request & { cookies?: Record<string, string> })
       .cookies;
     const raw = cookies?.[COOKIE_REFRESH];
-    await this.auth.logout(raw);
+    await this.auth.logout(raw, this.requestContext(req));
     this.clearAuthCookies(res);
   }
 
@@ -351,10 +372,7 @@ export class AuthController {
     });
   }
 
-  private requestContext(req: Request): {
-    ipAddress?: string;
-    userAgent?: string;
-  } {
+  private requestContext(req: Request): AuthRequestContext {
     const ua = req.headers['user-agent'];
     return {
       // See common/utils/client-ip.ts for why this must NOT parse

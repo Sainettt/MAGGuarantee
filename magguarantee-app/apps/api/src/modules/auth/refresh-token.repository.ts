@@ -71,6 +71,37 @@ export class RefreshTokenRepository {
   }
 
   /**
+   * Hard-deletes refresh tokens nobody can use any more (token-cleanup cron,
+   * 2026-08-14 logging audit, item 14):
+   *  - expired before `cutoff`, or
+   *  - revoked before `cutoff` AND already expired.
+   *
+   * The `expiresAt < now` guard on the revoked branch protects reuse detection:
+   * a revoked token that has not yet expired is still a theft tripwire
+   * (presenting it revokes the whole family), so it must survive until it could
+   * no longer be replayed anyway. With the default 30-day refresh TTL the guard
+   * never bites; it only matters for a longer `JWT_REFRESH_TTL`.
+   *
+   * `refresh_tokens` is not a soft-delete model, so this is a real DELETE. The
+   * self-referencing `replacedById` FK is ON DELETE SET NULL. Returns the count.
+   */
+  async deleteStale(cutoff: Date, now: Date): Promise<number> {
+    const res: unknown = await this.prisma.refreshToken.deleteMany({
+      where: {
+        OR: [
+          { expiresAt: { lt: cutoff } },
+          { revokedAt: { lt: cutoff }, expiresAt: { lt: now } },
+        ],
+      },
+    });
+    if (res && typeof res === 'object' && 'count' in res) {
+      const count = (res as { count: unknown }).count;
+      if (typeof count === 'number') return count;
+    }
+    return 0;
+  }
+
+  /**
    * Revokes every active refresh token for a user EXCEPT one (by id). Used by
    * change-password, which mints a fresh pair for the current session and must
    * keep that one alive while killing all others.

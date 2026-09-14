@@ -20,7 +20,9 @@
 
 import type { KmCalcResult } from '@magguarantee/shared';
 
-import type { AuditWriter } from '../audit/audit.service';
+import { AuditContext } from '../../common/audit/audit-context';
+import { AuditWriter } from '../audit/audit.service';
+import type { AuditActor } from '../audit/audit.types';
 import type { CarriersRepository } from '../carriers/carriers.repository';
 import type { DriversRepository } from '../drivers/drivers.repository';
 import type { KmCalcService } from '../km-calc/km-calc.service';
@@ -122,15 +124,28 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
 interface Built {
   service: ClaimsService;
   updateSpy: jest.Mock;
-  auditLogs: { action: string }[];
+  auditLogs: { action: string; userId: string | null }[];
   kmCalcSpy: jest.Mock;
   sumSpy: jest.Mock;
 }
+
+/** The weryfikator whose `markReturned` / `markInTransit` triggered the recalc. */
+const OPERATOR: AuditActor = {
+  userId: 'u-weryfikator',
+  userRole: 'weryfikator',
+  ipAddress: '10.0.0.9',
+};
 
 function build(opts: {
   claim: ClaimRow | null;
   kmResult?: Partial<KmCalcResult>;
   droveSum?: number;
+  /**
+   * `operator` (default): the recalc runs inside the audited HTTP request of
+   * the outing transition — its production caller. `none`: no ambient
+   * `AuditContext` at all (a non-HTTP caller).
+   */
+  caller?: 'operator' | 'none';
 }): Built {
   const updateSpy = jest.fn(async (id: string, data: UpdateClaimData) => ({
     ...(opts.claim as ClaimRow),
@@ -159,14 +174,27 @@ function build(opts: {
     sumDroveKm: sumSpy,
   } as unknown as VehicleDailyKmRepository;
 
-  const auditLogs: { action: string }[] = [];
-  const auditWriter = {
-    log: jest.fn(async (e: { action: string }) => {
-      auditLogs.push({ action: e.action });
-    }),
-  } as unknown as AuditWriter;
+  // The REAL AuditWriter over a fake Prisma client, so its `system.`-prefix
+  // rule for a system actor is enforced here too (2026-08-14 audit, item 17).
+  const auditLogs: { action: string; userId: string | null }[] = [];
+  const auditPrisma = {
+    client: {
+      auditLog: {
+        create: jest.fn(
+          async (args: { data: { action: string; userId: string | null } }) => {
+            auditLogs.push({
+              action: args.data.action,
+              userId: args.data.userId,
+            });
+            return {};
+          },
+        ),
+      },
+    },
+  } as unknown as PrismaService;
+  const auditWriter = new AuditWriter(auditPrisma);
 
-  const service = new ClaimsService(
+  const raw = new ClaimsService(
     claims,
     {} as CarriersRepository,
     {} as VehiclesRepository,
@@ -180,7 +208,25 @@ function build(opts: {
     undefined,
     dailyKm,
   );
+  const service =
+    opts.caller === 'none' ? raw : asOperatorRequest(raw, OPERATOR);
   return { service, updateSpy, auditLogs, kmCalcSpy, sumSpy };
+}
+
+/**
+ * Runs the two recalc entry points inside an `AuditContext` carrying `actor`,
+ * the way the `@Audit`-decorated outing transitions call them. The store has
+ * no `tx`, so the writer falls back to the (fake) root client.
+ */
+function asOperatorRequest(raw: ClaimsService, actor: AuditActor): ClaimsService {
+  const inRequest = <T>(fn: () => Promise<T>): Promise<T> =>
+    AuditContext.run({ actor, ipAddress: null }, fn);
+  const wrapped = Object.create(raw) as ClaimsService;
+  wrapped.recalcFromDelegation = (id: string, at: Date) =>
+    inRequest(() => raw.recalcFromDelegation(id, at));
+  wrapped.recalcDepartureFromDelegation = (id: string, at: Date) =>
+    inRequest(() => raw.recalcDepartureFromDelegation(id, at));
+  return wrapped;
 }
 
 describe('ClaimsService.recalcFromDelegation', () => {
@@ -499,5 +545,72 @@ describe('ClaimsService.recalcDepartureFromDelegation', () => {
     await service.recalcDepartureFromDelegation('deleg-1', ACTUAL_DEP);
     expect(updateSpy).not.toHaveBeenCalled();
     expect(auditLogs).toHaveLength(0);
+  });
+});
+
+// Item 17 of the 2026-08-14 logging audit: the recalc used `actor ?? 'system'`
+// with the bare `claim.*` action — which `AuditWriter` refuses for a system
+// actor, so a recalc outside an audited request threw. Both entry points, both
+// outcomes, both caller kinds.
+describe('ClaimsService auto-recalc — audit actor attribution', () => {
+  const RETURN_AT = new Date('2026-05-12T00:00:00.000Z');
+  const DEPART_AT = new Date('2026-05-03T00:00:00.000Z');
+
+  const cases: Array<{
+    name: string;
+    claim: () => ClaimRow;
+    run: (s: ClaimsService) => Promise<void>;
+    action: string;
+  }> = [
+    {
+      name: 'return side, applied',
+      claim: () => makeClaim(),
+      run: (s) => s.recalcFromDelegation('deleg-1', RETURN_AT),
+      action: 'claim.autoRecalc',
+    },
+    {
+      name: 'return side, skipped',
+      claim: () => makeClaim({ status: 'ZAAKCEPTOWANO' }),
+      run: (s) => s.recalcFromDelegation('deleg-1', RETURN_AT),
+      action: 'claim.autoRecalcSkipped',
+    },
+    {
+      name: 'departure side, applied',
+      claim: () => makeClaim(),
+      run: (s) => s.recalcDepartureFromDelegation('deleg-1', DEPART_AT),
+      action: 'claim.autoRecalc',
+    },
+    {
+      name: 'departure side, skipped',
+      claim: () => makeClaim({ periodAdjustedByVerifier: true }),
+      run: (s) => s.recalcDepartureFromDelegation('deleg-1', DEPART_AT),
+      action: 'claim.autoRecalcSkipped',
+    },
+  ];
+
+  it.each(cases)(
+    '$name: inside the operator request → $action attributed to the operator',
+    async ({ claim, run, action }) => {
+      const { service, auditLogs } = build({ claim: claim(), caller: 'operator' });
+      await run(service);
+      expect(auditLogs).toEqual([{ action, userId: 'u-weryfikator' }]);
+    },
+  );
+
+  it.each(cases)(
+    '$name: with no actor in scope → system.$action by system (no throw)',
+    async ({ claim, run, action }) => {
+      const { service, auditLogs } = build({ claim: claim(), caller: 'none' });
+      await expect(run(service)).resolves.toBeUndefined();
+      expect(auditLogs).toEqual([{ action: `system.${action}`, userId: null }]);
+    },
+  );
+
+  it('an ambient context whose actor is already `system` also gets the prefix', async () => {
+    const { service: raw, auditLogs } = build({ claim: makeClaim(), caller: 'none' });
+    await AuditContext.run({ actor: 'system', ipAddress: null }, () =>
+      raw.recalcFromDelegation('deleg-1', RETURN_AT),
+    );
+    expect(auditLogs).toEqual([{ action: 'system.claim.autoRecalc', userId: null }]);
   });
 });

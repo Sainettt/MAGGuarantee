@@ -24,6 +24,10 @@ import {
   type MarkReturnedDto,
 } from '@magguarantee/shared';
 
+import {
+  AuditContext,
+  type AuditContextStore,
+} from '../../common/audit/audit-context';
 import type { ClaimsService } from '../claims/claims.service';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import type { CarrierReadinessService } from '../carriers/carrier-readiness.service';
@@ -35,7 +39,10 @@ import {
   DelegationsRepository,
   type DelegationRow,
 } from './delegations.repository';
-import { DelegationsService } from './delegations.service';
+import {
+  DelegationsService,
+  MARK_READY_AUDIT_ACTIONS,
+} from './delegations.service';
 
 const VEHICLE_ID = 'veh-1';
 const CARRIER_ID = 'carrier-1';
@@ -237,6 +244,75 @@ describe('DelegationsService.markReady', () => {
       service.markReady(auth('eksport'), 'deleg-1', dto),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
     expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  // ── audit contribution (2026-08-14 logging audit, item 22) ──
+  // The interceptor's store is simulated with `AuditContext.run`; the
+  // decorator→interceptor half is covered in `audit-coverage.spec.ts`.
+
+  async function inAuditContext(
+    fn: () => Promise<unknown>,
+  ): Promise<AuditContextStore> {
+    const store: AuditContextStore = {
+      actor: { userId: 'u-eksport', userRole: 'eksport' },
+      ipAddress: null,
+    };
+    await AuditContext.run(store, async () => {
+      await fn();
+    });
+    return store;
+  }
+
+  it('rollback renames the audit row to delegation.rollbackReady + before = gotowy', async () => {
+    const readyAt = new Date('2026-06-01T06:00:00.000Z');
+    const { service } = build({
+      row: makeRow({
+        status: 'gotowy',
+        spedOrderNumber: 'SPED-OLD',
+        readyById: 'u-eksport',
+        readyAt,
+      }),
+    });
+    const store = await inAuditContext(() =>
+      service.markReady(auth('eksport'), 'deleg-1', { rollback: true }),
+    );
+    expect(store.action).toBe(MARK_READY_AUDIT_ACTIONS.rollback);
+    expect(store.action).toBe('delegation.rollbackReady');
+    expect(store.before).toEqual({
+      status: 'gotowy',
+      spedOrderNumber: 'SPED-OLD',
+      readyById: 'u-eksport',
+      readyAt: readyAt.toISOString(),
+    });
+  });
+
+  it('forward flip keeps the decorator action (no override) + before = zgloszony', async () => {
+    const { service } = build({ row: makeRow({ status: 'zgloszony' }) });
+    const store = await inAuditContext(() =>
+      service.markReady(auth('eksport'), 'deleg-1', dto),
+    );
+    expect(store.action).toBeUndefined();
+    expect(store.before).toEqual({
+      status: 'zgloszony',
+      spedOrderNumber: null,
+      readyById: null,
+      readyAt: null,
+    });
+  });
+
+  it('an illegal rollback leaves the audit context untouched (no row is written anyway)', async () => {
+    const { service } = build({ row: makeRow({ status: 'w_trasie' }) });
+    const store: AuditContextStore = {
+      actor: { userId: 'u-eksport', userRole: 'eksport' },
+      ipAddress: null,
+    };
+    await expect(
+      AuditContext.run(store, () =>
+        service.markReady(auth('eksport'), 'deleg-1', { rollback: true }),
+      ),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(store.action).toBeUndefined();
+    expect(store.before).toBeUndefined();
   });
 });
 

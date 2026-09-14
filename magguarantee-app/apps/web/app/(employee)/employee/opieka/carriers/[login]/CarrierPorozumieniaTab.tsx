@@ -37,6 +37,7 @@ import {
   useGuaranteeCompliance,
   useGuaranteeEpisodes,
 } from '@/lib/hooks/useGuarantee';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 
 interface Props {
   carrierId: string;
@@ -262,6 +263,7 @@ export function CarrierPorozumieniaTab({ carrierId }: Props) {
           columns={liveColumns}
           rowKey={(r) => r.vehicleId}
           isLoading={complianceQ.isLoading}
+          {...queryErrorProps(complianceQ)}
           empty={<EmptyState icon={Truck} title={t('emptyLive')} />}
         />
       </div>
@@ -276,6 +278,7 @@ export function CarrierPorozumieniaTab({ carrierId }: Props) {
           columns={episodeColumns}
           rowKey={(r) => r.id}
           isLoading={episodesQ.isLoading}
+          {...queryErrorProps(episodesQ)}
           empty={
             <EmptyState
               icon={CheckCircle2}

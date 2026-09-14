@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+#
+# MAGGuarantee — ops alert: "unit X failed on host Y" + journal tail, posted to a
+# Google Chat space through an incoming webhook.
+#
+# Not run on its own schedule. systemd starts it through the template unit
+# magguarantee-alert@.service whenever a unit carrying
+#   OnFailure=magguarantee-alert@%n.service
+# enters the failed state (today: magguarantee-backup.service). Test by hand:
+#
+#   sudo systemctl start magguarantee-alert@magguarantee-backup.service.service
+#
+# Configuration (EnvironmentFile of the alert unit): /opt/magguarantee/alert.conf
+# — template in infra/scripts/alert.conf.example.
+#
+#   OPS_ALERT_WEBHOOK_URL    Chat incoming-webhook URL. Unset/empty → prints a
+#                            WARNING and exits 0 (nothing sent).
+#   OPS_ALERT_JOURNAL_LINES  journal lines to include (default 20)
+#   OPS_ALERT_MAX_LOG_BYTES  cap on the journal excerpt (default 3000; the Chat
+#                            text message limit is ~4000 characters)
+#
+# Deliberately dependency-free (bash, journalctl, curl, coreutils, sed): the moment
+# you need an alert is the moment something on the box is broken.
+
+set -euo pipefail
+
+UNIT="${1:-}"
+WEBHOOK_URL="${OPS_ALERT_WEBHOOK_URL:-}"
+LINES="${OPS_ALERT_JOURNAL_LINES:-20}"
+MAX_LOG_BYTES="${OPS_ALERT_MAX_LOG_BYTES:-3000}"
+
+# journald timestamps every line itself, so plain stderr is enough.
+log() { printf '%s\n' "$*" >&2; }
+
+[ -n "$UNIT" ] || { log "usage: magguarantee-alert <failed-unit-name>"; exit 2; }
+
+if [ -z "$WEBHOOK_URL" ]; then
+  log "WARNING: OPS_ALERT_WEBHOOK_URL is not set — alert for $UNIT NOT sent (configure /opt/magguarantee/alert.conf)"
+  exit 0
+fi
+
+command -v curl >/dev/null || { log "ERROR: curl is not installed — alert for $UNIT NOT sent"; exit 1; }
+
+HOST="$(hostname -f 2>/dev/null || hostname)"
+NOW="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+
+# systemd >= 251 tells OnFailure= handlers how the monitored unit ended. Older
+# systemd leaves these unset and the line is simply omitted.
+RESULT=""
+if [ -n "${MONITOR_SERVICE_RESULT:-}" ]; then
+  RESULT="${MONITOR_SERVICE_RESULT}${MONITOR_EXIT_CODE:+, ${MONITOR_EXIT_CODE}}${MONITOR_EXIT_STATUS:+=${MONITOR_EXIT_STATUS}}"
+fi
+
+# stderr folded in: if the alert user cannot read the journal, the permission
+# message itself ends up in the alert, which is still more useful than nothing.
+JOURNAL="$(journalctl -u "$UNIT" -n "$LINES" --no-pager -o short-iso 2>&1 || true)"
+
+# Keep the END of the excerpt (that is where the error is). A byte cut can split
+# a multibyte UTF-8 character (Polish/Russian log text) and Chat rejects invalid
+# UTF-8, so when truncating, the first — partial — line is dropped whole. Then
+# strip control bytes (ANSI colours, NULs); they never occur inside a UTF-8
+# multibyte sequence, so byte-wise tr is safe.
+if [ "$(printf '%s' "$JOURNAL" | wc -c)" -gt "$MAX_LOG_BYTES" ]; then
+  JOURNAL="$(printf '%s' "$JOURNAL" | tail -c "$MAX_LOG_BYTES" | sed 1d)"
+  JOURNAL="(…truncated)
+$JOURNAL"
+fi
+JOURNAL="$(printf '%s' "$JOURNAL" | tr -d '\000-\010\013\014\016-\037\177')"
+# A ``` inside the excerpt would close the Chat code block early.
+FENCE='```'
+NOFENCE="'''"
+JOURNAL="${JOURNAL//"$FENCE"/$NOFENCE}"
+
+TEXT="*[MAGGuarantee] systemd unit FAILED*
+Host: \`$HOST\`
+Unit: \`$UNIT\`"
+[ -z "$RESULT" ] || TEXT="$TEXT
+Result: \`$RESULT\`"
+TEXT="$TEXT
+Time: $NOW
+Last $LINES journal lines:
+\`\`\`
+${JOURNAL:-(journal is empty)}
+\`\`\`
+Full log: \`journalctl -u $UNIT -n 200 --no-pager\`"
+
+json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\t'/\\t}"
+  s="${s//$'\r'/}"
+  s="${s//$'\n'/\\n}"
+  printf '%s' "$s"
+}
+
+PAYLOAD="{\"text\":\"$(json_escape "$TEXT")\"}"
+
+# The webhook URL carries the space key + token — a bearer secret. It goes to
+# curl through a config on a file descriptor, not argv, so it never shows up in
+# `ps` output for other users on the box.
+if curl -sS -m 15 --retry 3 --retry-delay 5 --fail \
+     -H 'Content-Type: application/json; charset=UTF-8' \
+     --data-binary @- \
+     -K <(printf 'url = "%s"\n' "$WEBHOOK_URL") \
+     -o /dev/null <<<"$PAYLOAD"; then
+  log "alert for $UNIT posted to Google Chat"
+else
+  log "ERROR: posting the alert for $UNIT to Google Chat failed"
+  exit 1
+fi

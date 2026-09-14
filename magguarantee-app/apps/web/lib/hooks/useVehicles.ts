@@ -30,6 +30,7 @@ import {
 import { CARRIERS_KEY } from '@/lib/hooks/useCarriers';
 import { MY_FLEET_KEY } from '@/lib/hooks/useMyFleet';
 import { OPIEKUN_KEY } from '@/lib/hooks/useOpiekunFleet';
+import type { MutationMetaOptions } from '@/lib/query/globalErrors';
 
 export const VEHICLES_KEY = ['vehicles'] as const;
 
@@ -152,9 +153,10 @@ export function useReactivateVehicle() {
   });
 }
 
-export function useDeleteVehicle() {
+export function useDeleteVehicle(opts?: MutationMetaOptions) {
   const qc = useQueryClient();
   return useMutation({
+    meta: opts?.meta,
     mutationFn: deleteVehicle,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: VEHICLES_KEY });

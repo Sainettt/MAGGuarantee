@@ -15,9 +15,11 @@
 import { Database } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
+import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { formatDateTime } from '@/lib/format/numbers';
 import { useDiagnosticsDb } from '@/lib/hooks/useDiagnostics';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 import { cn } from '@/lib/utils';
 
 /** Pretty-print byte sizes as KiB/MiB/GiB. */
@@ -67,7 +69,18 @@ function StatusPill({
 
 export function DbHealthSection() {
   const t = useTranslations('diagnostics.db');
-  const { data, isLoading } = useDiagnosticsDb();
+  const dbHealthQ = useDiagnosticsDb();
+  const { data, isLoading } = dbHealthQ;
+
+  // Without this branch a failed probe spun the skeleton forever — on the one
+  // screen an admin opens precisely when something is down.
+  if (!data && dbHealthQ.isError) {
+    return (
+      <div className="rounded-xl border border-border bg-card shadow-card">
+        <ErrorState {...queryErrorProps(dbHealthQ)} />
+      </div>
+    );
+  }
 
   if (isLoading || !data) {
     return (

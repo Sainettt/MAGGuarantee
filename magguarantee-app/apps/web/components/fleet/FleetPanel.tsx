@@ -56,6 +56,7 @@ import { ReadOnlyBanner } from '@/components/fleet/ReadOnlyBanner';
 import { VehicleStatusFilterBar } from '@/components/fleet/VehicleStatusFilterBar';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
+import type { QueryErrorProps } from '@/lib/query/queryErrorProps';
 
 /** The fleet payload the panel reads — shared by planista + dyspozytor. */
 interface FleetData {
@@ -87,6 +88,10 @@ interface Props {
   delegations: DelegationDto[];
   /** Delegations query loading flag. */
   delegationsLoading: boolean;
+  /** Fleet query failure state — rendered in the Auta/Kierowcy/Naczepy tables. */
+  fleetError?: QueryErrorProps;
+  /** Delegations query failure state — rendered in the Wyjazdy table. */
+  delegationsError?: QueryErrorProps;
   /**
    * Optional «Moje pojazdy — przebieg» link target — the §7.8 multi-carrier
    * read-only km tab (the more-presentable, grouped, full-fleet sibling of the
@@ -114,6 +119,8 @@ export function FleetPanel({
   isLoading,
   delegations,
   delegationsLoading,
+  fleetError,
+  delegationsError,
   myKmHref,
   fullVehicleDetail = false,
 }: Props) {
@@ -349,6 +356,7 @@ export function FleetPanel({
           <FleetVehiclesTable
             rows={shownVehicles}
             isLoading={isLoading}
+            {...fleetError}
             namespace={`${namespace}.vehicles`}
             onRowClick={setVehicleTarget}
             rowAriaLabel={(v) => tA11y('showDetails', { name: v.plateNumber })}
@@ -367,6 +375,7 @@ export function FleetPanel({
           <DelegationsTable
             rows={delegations}
             isLoading={delegationsLoading}
+            {...delegationsError}
             namespace={`${namespace}.delegations`}
             rowAriaLabel={(r) =>
               tA11y('showDelegationDetails', {
@@ -380,6 +389,7 @@ export function FleetPanel({
           <FleetDriversTable
             rows={data?.drivers ?? []}
             isLoading={isLoading}
+            {...fleetError}
             namespace={`${namespace}.drivers`}
             onRowClick={setDriverTarget}
             rowAriaLabel={(d) =>
@@ -392,6 +402,7 @@ export function FleetPanel({
           <FleetTrailersTable
             rows={data?.trailers ?? []}
             isLoading={isLoading}
+            {...fleetError}
             namespace={`${namespace}.trailers`}
             onRowClick={setTrailerTarget}
             rowAriaLabel={(tr) =>

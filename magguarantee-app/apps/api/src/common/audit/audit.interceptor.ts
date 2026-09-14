@@ -16,6 +16,7 @@ import type {
   AuditEntryInput,
 } from '../../modules/audit/audit.types';
 import { PrismaService } from '../../modules/prisma/prisma.service';
+import { routeForLog, type RoutableRequest } from '../logging/request-path';
 import { clientIp } from '../utils/client-ip';
 import { AuditContext } from './audit-context';
 import { AUDIT_METADATA_KEY } from './audit.constants';
@@ -138,7 +139,7 @@ export class AuditInterceptor implements NestInterceptor {
 
   private async _writeAuditRow(args: {
     config: AuditConfig;
-    req: AuditableRequest;
+    req: AuditableRequest & RoutableRequest;
     result: unknown;
     actor: AuditActor;
     ipAddress: string | null;
@@ -171,13 +172,18 @@ export class AuditInterceptor implements NestInterceptor {
     const ambientMeta = AuditContext.current()?.metadata;
     const metadata: Record<string, unknown> = {
       method: req.method,
-      route: req.url,
+      // Route template (`/api/v1/claims/:nrZgl`), never the raw URL — a query
+      // string can carry personal data and the concrete id is already in
+      // `targetKey` (2026-09-14 logging audit, item 2).
+      route: routeForLog(req),
       userAgent,
       ...(ambientMeta ?? {}),
     };
 
     const entry: AuditEntryInput = {
-      action: config.action,
+      // A service may rename the row for a route with two body-selected
+      // intents (`AuditContext.setAction`); otherwise the decorator's action.
+      action: AuditContext.current()?.action ?? config.action,
       targetType: config.targetType,
       targetKey: targetKey,
       // `before` is opt-in: services that diff stash a pre-mutation snapshot

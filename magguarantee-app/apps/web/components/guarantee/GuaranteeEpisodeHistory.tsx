@@ -20,11 +20,13 @@ import type { GuaranteeEpisodeDto } from '@magguarantee/shared';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { formatDateFull } from '@/lib/format/numbers';
+import type { QueryErrorProps } from '@/lib/query/queryErrorProps';
 import { cn } from '@/lib/utils';
 
-interface GuaranteeEpisodeHistoryProps {
+interface GuaranteeEpisodeHistoryProps extends Partial<QueryErrorProps> {
   items: GuaranteeEpisodeDto[];
   isLoading: boolean;
   /** True while a «Załaduj więcej» page is in flight. */
@@ -60,6 +62,7 @@ export function GuaranteeEpisodeHistory({
   showReminders = false,
   showSideNumber = false,
   className,
+  ...errorProps
 }: GuaranteeEpisodeHistoryProps) {
   const t = useTranslations('guarantee.episodes');
   const tAnchor = useTranslations('guarantee.porozumienie');
@@ -72,6 +75,11 @@ export function GuaranteeEpisodeHistory({
         ))}
       </div>
     );
+  }
+
+  // Load failure ≠ «no violations» (a green check would be a false all-clear).
+  if (errorProps.isError && items.length === 0) {
+    return <ErrorState {...errorProps} className={className} />;
   }
 
   if (items.length === 0) {

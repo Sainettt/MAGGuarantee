@@ -4,11 +4,11 @@
 // about Google's signature verification, and hitting the real JWKS endpoint
 // would make the suite depend on the network.
 
-import { ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
+import { ForbiddenException, Logger, ServiceUnavailableException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 
 import type { Env } from '../../../config/env.schema';
-import { GoogleIdTokenService } from './google-id-token.service';
+import { GoogleIdTokenService, libraryErrorSummary } from './google-id-token.service';
 
 const verifyIdToken = jest.fn();
 
@@ -164,5 +164,59 @@ describe('GoogleIdTokenService', () => {
     await expect(svc.verifyIdToken('a.b.c')).rejects.toMatchObject({
       response: { extensions: { code: 'SSO_DOMAIN_NOT_ALLOWED' } },
     });
+  });
+});
+
+describe('GoogleIdTokenService — rejection log', () => {
+  const CTX = { ipAddress: '192.0.2.77', userAgent: 'jest-ua' };
+  let warn: jest.SpyInstance;
+
+  beforeEach(() => {
+    verifyIdToken.mockReset();
+    warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('records who was turned away and from where', async () => {
+    resolveWith(payload({ hd: 'someone-else.eu' }));
+    const svc = new GoogleIdTokenService(makeConfig());
+
+    await expect(svc.verifyIdToken('a.b.c', CTX)).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'googleLoginRefused',
+        reason: 'id_token_rejected',
+        ipAddress: CTX.ipAddress,
+        userAgent: CTX.userAgent,
+      }),
+    );
+  });
+
+  it('strips the decoded payload google-auth-library appends to its messages', async () => {
+    // Verbatim shape of the library's expiry error: the whole payload, e-mail
+    // and name included, after ": ".
+    verifyIdToken.mockRejectedValue(
+      new Error(
+        'Token used too late, 1757840000 > 1757836700: {"email":"jan.kowalski@magtrans.eu","name":"Jan Kowalski"}',
+      ),
+    );
+    const svc = new GoogleIdTokenService(makeConfig());
+
+    await expect(svc.verifyIdToken('a.b.c', CTX)).rejects.toBeInstanceOf(ForbiddenException);
+
+    const logged = JSON.stringify(warn.mock.calls);
+    expect(logged).toContain('Token used too late, 1757840000 > 1757836700');
+    expect(logged).not.toContain('jan.kowalski');
+    expect(logged).not.toContain('Jan Kowalski');
+  });
+
+  it('libraryErrorSummary keeps messages without evidence intact and drops raw tokens', () => {
+    expect(libraryErrorSummary('Wrong recipient, payload audience != requiredAudience')).toBe(
+      'Wrong recipient, payload audience != requiredAudience',
+    );
+    expect(libraryErrorSummary('Invalid token signature: eyJhbGciOi.eyJzdWIi.sig')).toBe(
+      'Invalid token signature',
+    );
   });
 });

@@ -1,4 +1,4 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 
@@ -15,6 +15,10 @@ import { PasswordResetService } from './password-reset.service';
 import { PasswordService } from './password.service';
 import { RefreshTokenRepository } from './refresh-token.repository';
 import { TwoFactorService } from './two-factor.service';
+import {
+  VerificationCodeLockoutException,
+  VerificationCodeOrphanedException,
+} from './verification-code.errors';
 
 const NOW = new Date('2026-06-16T10:00:00.000Z');
 
@@ -59,6 +63,7 @@ interface Harness {
   >;
   mail: jest.Mocked<Pick<MailService, 'enqueuePasswordReset' | 'enqueue2faCode'>>;
   passwords: jest.Mocked<Pick<PasswordService, 'hash'>>;
+  audit: jest.Mocked<Pick<AuditWriter, 'log'>>;
 }
 
 function makeHarness(seed: UserRow | null = makeUser()): Harness {
@@ -112,6 +117,10 @@ function makeHarness(seed: UserRow | null = makeUser()): Harness {
     signAsync: jest.fn(async () => 'signed.jwt.token'),
   } as unknown as JwtService;
 
+  const audit = {
+    log: jest.fn(async () => undefined),
+  } as unknown as Harness['audit'];
+
   const prisma = {
     // changePassword's issuePair calls prisma.$transaction; emulate it by
     // running the callback against a tx whose refreshToken.create returns an id.
@@ -156,10 +165,10 @@ function makeHarness(seed: UserRow | null = makeUser()): Harness {
     // Google SSO collaborators — neither path under test touches them.
     {} as unknown as GoogleIdTokenService,
     {} as unknown as DirectoryService,
-    {} as unknown as AuditWriter,
+    audit as unknown as AuditWriter,
   );
 
-  return { svc, users, passwordReset, refreshTokens, mail, passwords };
+  return { svc, users, passwordReset, refreshTokens, mail, passwords, audit };
 }
 
 describe('AuthService — forgot password (anti-enumeration)', () => {
@@ -231,6 +240,125 @@ describe('AuthService — reset password (confirm)', () => {
       h.svc.resetPassword('s'.repeat(64), '123456', 'NewPass1234'),
     ).rejects.toThrow(UnauthorizedException);
     expect(h.users.applyPasswordChange).not.toHaveBeenCalled();
+    expect(h.audit.log).not.toHaveBeenCalled();
+  });
+});
+
+describe('AuthService — reset password audit trail', () => {
+  // POST /auth/reset-password is @Public: an @Audit() there would 500 (no
+  // req.user → actor 'system' → AuditWriter refuses), so the service audits.
+  const CTX = { ipAddress: '10.0.0.9', userAgent: 'jest-ua' };
+
+  let warn: jest.SpyInstance;
+  beforeEach(() => {
+    warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('writes one resetPassword row attributed to the user, before the change', async () => {
+    const h = makeHarness(makeUser());
+    const order: string[] = [];
+    h.audit.log.mockImplementation(async () => {
+      order.push('audit');
+    });
+    h.users.applyPasswordChange.mockImplementation(async () => {
+      order.push('apply');
+    });
+
+    await h.svc.resetPassword('s'.repeat(64), '123456', 'NewPass1234', CTX);
+
+    expect(h.audit.log).toHaveBeenCalledTimes(1);
+    expect(h.audit.log).toHaveBeenCalledWith({
+      action: 'resetPassword',
+      targetType: 'User',
+      targetKey: 'jan.kowalski',
+      metadata: { via: 'forgotPassword', userAgent: 'jest-ua' },
+      actor: { userId: 'u-1', userRole: 'opiekun', ipAddress: '10.0.0.9' },
+    });
+    expect(order).toEqual(['audit', 'apply']);
+    // The new password never reaches the audit row.
+    expect(JSON.stringify(h.audit.log.mock.calls)).not.toContain('NewPass1234');
+  });
+
+  it('a failed audit write costs the reset: no password change, no revoke', async () => {
+    const h = makeHarness(makeUser());
+    h.audit.log.mockRejectedValue(new Error('db down'));
+
+    await expect(
+      h.svc.resetPassword('s'.repeat(64), '123456', 'NewPass1234', CTX),
+    ).rejects.toThrow('db down');
+    expect(h.users.applyPasswordChange).not.toHaveBeenCalled();
+    expect(h.refreshTokens.revokeAllForUser).not.toHaveBeenCalled();
+  });
+
+  it('a wrong code writes no audit row', async () => {
+    const h = makeHarness(makeUser());
+    h.passwordReset.verifyCode.mockRejectedValueOnce(
+      new UnauthorizedException('Invalid code'),
+    );
+
+    await expect(
+      h.svc.resetPassword('s'.repeat(64), '000000', 'NewPass1234', CTX),
+    ).rejects.toThrow(UnauthorizedException);
+    expect(h.audit.log).not.toHaveBeenCalled();
+  });
+
+  it('a reset-code lockout writes lockPasswordResetSession and rethrows the same 423', async () => {
+    const h = makeHarness(makeUser());
+    const lockout = new VerificationCodeLockoutException('u-1', 5, 300);
+    h.passwordReset.verifyCode.mockRejectedValueOnce(lockout);
+
+    await expect(
+      h.svc.resetPassword('s'.repeat(64), '000000', 'NewPass1234', CTX),
+    ).rejects.toBe(lockout);
+    expect(lockout.getStatus()).toBe(423);
+    expect(h.audit.log).toHaveBeenCalledWith({
+      action: 'lockPasswordResetSession',
+      targetType: 'User',
+      targetKey: 'jan.kowalski',
+      metadata: { attempts: 5, lockedForSec: 300, userAgent: 'jest-ua' },
+      actor: { userId: 'u-1', userRole: 'opiekun', ipAddress: '10.0.0.9' },
+    });
+    expect(h.users.applyPasswordChange).not.toHaveBeenCalled();
+  });
+
+  it('a matched code without a session is recorded as a system event', async () => {
+    const h = makeHarness(makeUser());
+    const orphan = new VerificationCodeOrphanedException('missing');
+    h.passwordReset.verifyCode.mockRejectedValueOnce(orphan);
+
+    await expect(
+      h.svc.resetPassword('s'.repeat(64), '123456', 'NewPass1234', CTX),
+    ).rejects.toBe(orphan);
+    expect(h.audit.log).toHaveBeenCalledWith({
+      action: 'system.rejectOrphanedVerificationCode',
+      metadata: {
+        flow: 'passwordReset',
+        sessionState: 'missing',
+        ipAddress: '10.0.0.9',
+        userAgent: 'jest-ua',
+      },
+      actor: 'system',
+    });
+  });
+
+  it('an account deactivated before the confirm is logged at WARN, not audited', async () => {
+    const h = makeHarness(makeUser({ active: false }));
+
+    await expect(
+      h.svc.resetPassword('s'.repeat(64), '123456', 'NewPass1234', CTX),
+    ).rejects.toThrow(UnauthorizedException);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'passwordResetRefused',
+        reason: 'account_inactive',
+        userId: 'u-1',
+        ipAddress: '10.0.0.9',
+      }),
+    );
+    expect(h.audit.log).not.toHaveBeenCalled();
   });
 });
 

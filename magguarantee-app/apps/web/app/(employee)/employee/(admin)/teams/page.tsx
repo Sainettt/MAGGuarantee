@@ -40,6 +40,8 @@ import {
   useReactivateTeam,
   useTeams,
 } from '@/lib/hooks/useTeams';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
+import { SUPPRESS_GLOBAL_ERROR } from '@/lib/query/globalErrors';
 
 import { TeamSheet } from './TeamSheet';
 
@@ -49,21 +51,22 @@ export default function TeamsPage() {
   const tConfirm = useTranslations('confirmDelete');
   const [search, setSearch] = useState('');
 
-  const { data, isLoading } = useTeams({
+  const listQ = useTeams({
     q: search.length >= 2 ? search : undefined,
   });
+  const { data, isLoading } = listQ;
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [target, setTarget] = useState<TeamDto | null>(null);
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TeamDto | null>(null);
-  const hardDeleteM = useHardDeleteTeam();
+  const hardDeleteM = useHardDeleteTeam({ meta: SUPPRESS_GLOBAL_ERROR });
 
   const [toggleOpen, setToggleOpen] = useState(false);
   const [toggleTarget, setToggleTarget] = useState<TeamDto | null>(null);
-  const deactivateM = useDeactivateTeam();
-  const reactivateM = useReactivateTeam();
+  const deactivateM = useDeactivateTeam({ meta: SUPPRESS_GLOBAL_ERROR });
+  const reactivateM = useReactivateTeam({ meta: SUPPRESS_GLOBAL_ERROR });
 
   const hasActiveFilters = search.length >= 2;
   const clearFilters = () => setSearch('');
@@ -220,6 +223,7 @@ export default function TeamsPage() {
         rowKey={(r) => r.id}
         onRowClick={openEdit}
         isLoading={isLoading}
+        {...queryErrorProps(listQ)}
         hasActiveFilters={hasActiveFilters}
         empty={
           <EmptyState

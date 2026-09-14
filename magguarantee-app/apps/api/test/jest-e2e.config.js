@@ -6,9 +6,10 @@ module.exports = {
   testEnvironment: 'node',
   rootDir: '..',
   testRegex: 'test/.*\\.e2e-spec\\.ts$',
-  moduleFileExtensions: ['ts', 'js', 'json'],
+  // `tsx` — mail templates are React Email components imported by AppModule.
+  moduleFileExtensions: ['ts', 'tsx', 'js', 'json'],
   transform: {
-    '^.+\\.ts$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.json' }],
+    '^.+\\.tsx?$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.json' }],
   },
   testTimeout: 30_000,
 };

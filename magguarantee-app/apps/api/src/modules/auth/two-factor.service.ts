@@ -13,6 +13,11 @@ const HTTP_LOCKED = 423;
 
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { logAuthFailure, type AuthRequestContext } from './auth-security-log';
+import {
+  VerificationCodeLockoutException,
+  VerificationCodeOrphanedException,
+} from './verification-code.errors';
 import {
   APP_CONFIG_KEY,
   DEFAULT_CODE_TTL_SECONDS,
@@ -102,11 +107,19 @@ export class TwoFactorService {
    *  - 423 LOCKED (`Too many attempts`) when the wrong code was the
    *    `maxAttempts`-th in a row.
    */
-  async verifyCode(sessionToken: string, code: string): Promise<string> {
+  async verifyCode(
+    sessionToken: string,
+    code: string,
+    ctx: AuthRequestContext = {},
+  ): Promise<string> {
     const settings = await this.loadSettings();
 
     if (await this.redis.exists(REDIS_KEY.lockout(sessionToken))) {
       const lockedForSec = await this.redis.ttl(REDIS_KEY.lockout(sessionToken));
+      // The session was burned at lockout, so its owner is no longer readable.
+      logAuthFailure(this.logger, 'twoFactorCodeRejected', 'session_locked', ctx, {
+        lockedForSec: Math.max(0, lockedForSec),
+      });
       throw new HttpException(
         {
           statusCode: HTTP_LOCKED,
@@ -119,56 +132,92 @@ export class TwoFactorService {
 
     const stored = await this.redis.get(REDIS_KEY.code(sessionToken));
     if (!stored) {
+      const owner = await this.redis.get(REDIS_KEY.session(sessionToken));
+      // A decoy here means the password step already failed and the caller is
+      // carrying on anyway — worth telling apart from a slow human.
+      logAuthFailure(this.logger, 'twoFactorCodeRejected', 'code_expired', ctx, {
+        userId: owner && owner !== 'decoy' ? owner : null,
+        decoySession: owner === 'decoy',
+      });
       throw new UnauthorizedException('Code expired');
     }
 
     if (stored !== code) {
-      const attempts = await this.redis.incr(REDIS_KEY.attempts(sessionToken));
-      // Keep the attempts counter aligned with the code TTL — once the code
-      // expires, attempts reset naturally.
-      await this.redis.expire(
-        REDIS_KEY.attempts(sessionToken),
-        settings.codeTtlSeconds,
-      );
-
-      if (attempts >= settings.maxAttempts) {
-        await this.redis.setex(
-          REDIS_KEY.lockout(sessionToken),
-          settings.lockoutSeconds,
-          '1',
-        );
-        // Burn the code — the user must restart the login flow.
-        await this.redis.del(
-          REDIS_KEY.code(sessionToken),
-          REDIS_KEY.attempts(sessionToken),
-          REDIS_KEY.session(sessionToken),
-        );
-        throw new HttpException(
-          {
-            statusCode: HTTP_LOCKED,
-            message: 'Too many attempts',
-            lockedForSec: settings.lockoutSeconds,
-          },
-          HTTP_LOCKED,
-        );
-      }
-      const attemptsLeft = settings.maxAttempts - attempts;
-      throw new UnauthorizedException({
-        statusCode: HttpStatus.UNAUTHORIZED,
-        message: 'Invalid code',
-        attemptsLeft,
-      });
+      await this.rejectWrongCode(sessionToken, settings, ctx);
     }
 
     const userId = await this.redis.get(REDIS_KEY.session(sessionToken));
     if (!userId || userId === 'decoy') {
       // Should be impossible — code matched but session is missing/decoy.
-      // Treat as theft suspicion: clean up and reject.
+      // Treat as theft suspicion: clean up and reject. AuthService audits it.
       await this.consumeSession(sessionToken);
-      throw new UnauthorizedException('Code expired');
+      const sessionState = userId === 'decoy' ? 'decoy' : 'missing';
+      logAuthFailure(
+        this.logger,
+        'twoFactorCodeRejected',
+        'code_matched_without_session',
+        ctx,
+        { sessionState },
+      );
+      throw new VerificationCodeOrphanedException(sessionState);
     }
     await this.consumeSession(sessionToken);
     return userId;
+  }
+
+  /**
+   * Wrong-code branch of `verifyCode`: bump the counter, lock the session on
+   * the `maxAttempts`-th miss, and always throw.
+   */
+  private async rejectWrongCode(
+    sessionToken: string,
+    settings: TwoFactorSettings,
+    ctx: AuthRequestContext,
+  ): Promise<never> {
+    const attempts = await this.redis.incr(REDIS_KEY.attempts(sessionToken));
+    // Keep the attempts counter aligned with the code TTL — once the code
+    // expires, attempts reset naturally.
+    await this.redis.expire(
+      REDIS_KEY.attempts(sessionToken),
+      settings.codeTtlSeconds,
+    );
+    const owner = await this.redis.get(REDIS_KEY.session(sessionToken));
+    const userId = owner && owner !== 'decoy' ? owner : null;
+
+    if (attempts >= settings.maxAttempts) {
+      await this.redis.setex(
+        REDIS_KEY.lockout(sessionToken),
+        settings.lockoutSeconds,
+        '1',
+      );
+      // Burn the code — the user must restart the login flow.
+      await this.redis.del(
+        REDIS_KEY.code(sessionToken),
+        REDIS_KEY.attempts(sessionToken),
+        REDIS_KEY.session(sessionToken),
+      );
+      logAuthFailure(this.logger, 'twoFactorCodeRejected', 'too_many_attempts', ctx, {
+        userId,
+        attempts,
+        lockedForSec: settings.lockoutSeconds,
+      });
+      throw new VerificationCodeLockoutException(
+        userId,
+        attempts,
+        settings.lockoutSeconds,
+      );
+    }
+    const attemptsLeft = settings.maxAttempts - attempts;
+    logAuthFailure(this.logger, 'twoFactorCodeRejected', 'wrong_code', ctx, {
+      userId,
+      attempts,
+      attemptsLeft,
+    });
+    throw new UnauthorizedException({
+      statusCode: HttpStatus.UNAUTHORIZED,
+      message: 'Invalid code',
+      attemptsLeft,
+    });
   }
 
   /**
@@ -185,9 +234,15 @@ export class TwoFactorService {
    * Generates a fresh code under an existing sessionToken and applies the
    * 60s resend cooldown. Returns null if the session no longer exists.
    */
-  async resend(sessionToken: string): Promise<{ code: string; cooldownSec: number } | null> {
+  async resend(
+    sessionToken: string,
+    ctx: AuthRequestContext = {},
+  ): Promise<{ code: string; cooldownSec: number } | null> {
     if (await this.redis.exists(REDIS_KEY.resend(sessionToken))) {
       const cooldownSec = await this.redis.ttl(REDIS_KEY.resend(sessionToken));
+      logAuthFailure(this.logger, 'twoFactorResendRefused', 'cooldown_active', ctx, {
+        cooldownSec: Math.max(0, cooldownSec),
+      });
       throw new HttpException(
         {
           statusCode: HttpStatus.TOO_MANY_REQUESTS,

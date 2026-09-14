@@ -45,6 +45,7 @@ import {
   useResetUserPassword,
   useUsers,
 } from '@/lib/hooks/useUsers';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 
 import { UserSheet } from './UserSheet';
 
@@ -89,13 +90,14 @@ export function UsersListView() {
   const [role, setRole] = useState<Role | ''>('');
   const [activeFilter, setActiveFilter] = useState<'' | 'true' | 'false'>('');
 
-  const { data, isLoading } = useUsers({
+  const listQ = useUsers({
     // The UserFiltersSchema doesn't support `q`, so we filter client-side.
     role: (role || undefined) as Role | undefined,
     active:
       activeFilter === '' ? undefined : activeFilter === 'true',
     limit: 200,
   });
+  const { data, isLoading } = listQ;
 
   // Client-side substring filter — list endpoint doesn't expose `q` per the
   // current schema, but 200 rows is comfortable to filter in-memory.
@@ -367,6 +369,7 @@ export function UsersListView() {
         rowKey={(r) => r.id}
         onRowClick={openEdit}
         isLoading={isLoading}
+        {...queryErrorProps(listQ)}
         hasActiveFilters={hasActiveFilters}
         empty={
           <EmptyState

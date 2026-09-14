@@ -2452,5 +2452,55 @@
       "updatedToast": "Rola konta {login} zmieniona na {role}",
       "errorToast": "Nie udało się nadać dostępu."
     }
+  },
+  "errors": {
+    "boundary": {
+      "title": "Nie udało się wyświetlić tej strony",
+      "message": "Wystąpił nieoczekiwany błąd albo serwis jest chwilowo niedostępny. Spróbuj ponownie za chwilę.",
+      "retry": "Spróbuj ponownie",
+      "home": "Przejdź do strony głównej",
+      "reference": "Identyfikator błędu: {digest}"
+    },
+    "load": {
+      "network": {
+        "title": "Brak połączenia z serwerem",
+        "message": "Nie udało się pobrać danych. Sprawdź połączenie z internetem i spróbuj ponownie."
+      },
+      "server": {
+        "title": "Serwis chwilowo niedostępny",
+        "message": "Nie udało się pobrać danych. Spróbuj ponownie za chwilę."
+      },
+      "forbidden": {
+        "title": "Brak dostępu",
+        "message": "Nie masz uprawnień do wyświetlenia tych danych."
+      },
+      "generic": {
+        "title": "Nie udało się załadować danych",
+        "message": "Wystąpił błąd podczas pobierania danych. Spróbuj ponownie."
+      },
+      "stale": "Nie udało się odświeżyć danych — widoczne informacje mogą być nieaktualne.",
+      "retry": "Spróbuj ponownie",
+      "retrying": "Ponawianie…"
+    },
+    "toast": {
+      "query": {
+        "network": "Brak połączenia z serwerem — nie udało się pobrać danych.",
+        "server": "Serwis chwilowo niedostępny — nie udało się pobrać danych.",
+        "forbidden": "Brak uprawnień do części danych.",
+        "rateLimited": "Zbyt wiele zapytań. Odczekaj chwilę i spróbuj ponownie.",
+        "generic": "Nie udało się pobrać danych."
+      },
+      "mutation": {
+        "network": "Brak połączenia z serwerem — zmiany nie zostały zapisane.",
+        "server": "Serwis chwilowo niedostępny — zmiany nie zostały zapisane.",
+        "forbidden": "Brak uprawnień do wykonania tej operacji.",
+        "rateLimited": "Zbyt wiele zapytań. Odczekaj chwilę i spróbuj ponownie.",
+        "generic": "Nie udało się wykonać operacji."
+      }
+    },
+    "session": {
+      "title": "Nie udało się zweryfikować sesji",
+      "message": "Serwis logowania jest chwilowo niedostępny — Twoja sesja nie została zakończona. Spróbuj ponownie za chwilę."
+    }
   }
 }

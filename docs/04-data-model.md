@@ -378,6 +378,30 @@ Append-only журнал всех критических операций.
 
 **Инвариант:** запись в audit пишется в той же транзакции, что и сам change. Если main change откатывается — audit тоже.
 
+**Append-only гарантирован базой данных (2026-09-14).** Триггер на `audit_log` отклоняет любые `DELETE`, `TRUNCATE` и `UPDATE`. Единственное исключение — когда пользователь физически удаляется (hard-delete), его записи остаются, а `userId` обнуляется (FK `ON DELETE SET NULL`); `userRole` и остальные поля сохраняют контекст «кто это был». Обнулить `userId` у ещё существующего (в т.ч. soft-deleted) пользователя нельзя. Лазейки-флага для приложения нет: осознанная чистка — только отдельной ревьюируемой миграцией. Это защита от **багов и скомпрометированных запросов приложения**, а не от владельца БД/суперпользователя (тот может отключить триггер). Детали — [12-database-schema.md §«AuditLog — append-only на уровне БД»](12-database-schema.md#auditlog--append-only-на-уровне-бд-2026-09-14).
+
+### `EmailLog` — журнал доставки писем
+
+Одна запись на каждое письмо из очереди `email-send` по его **финальному** исходу: `sent` (провайдер принял) или `failed` (все ретраи исчерпаны). Промежуточные попытки записей не дают — их число в `attempts`. Отвечает на вопрос «ушло ли письмо X адресату Y по wniosku Z, а если нет — почему».
+
+| Поле | Назначение |
+|---|---|
+| `template` | ключ шаблона (`2fa-code`, `carrier-decision`, …) |
+| `jobId` | id задачи BullMQ (опц.) |
+| `recipients` | список адресов получателей |
+| `subject` | тема (опц.) |
+| `status` | `sent` / `failed` |
+| `attempts` | сколько попыток сделано, включая финальную |
+| `errorName` / `errorMessage` | класс и короткий очищенный текст ошибки (для `failed`) |
+| `providerMessageId` | id сообщения у провайдера (Gmail / SMTP) |
+| `targetType` / `targetKey` | бизнес-объект, как в `AuditLog` (`Claim` + `nrZgl`, …) |
+| `triggeredBy` | FK → User, чьё действие вызвало письмо; пусто для cron/системных |
+| `createdAt` / `sentAt` | когда записано / когда провайдер принял |
+
+**Никогда не хранит** тело письма, данные шаблона, 2FA/reset-коды, временные пароли, токены — только метаданные доставки. `errorMessage` очищает writer (api).
+
+**Инварианты:** `status = sent` ⇒ `sentAt` заполнен; `attempts >= 0` (DB CHECK). Строки не редактируются (write-once), soft-delete нет; api удаляет записи старше `EMAIL_LOG_RETENTION_DAYS` (по умолчанию 180 дней). При hard-delete пользователя `triggeredBy` обнуляется.
+
 ### `RefreshToken` — JWT-сессии
 
 Для rotation refresh-токенов. Подробности в [15-auth-strategy.md](15-auth-strategy.md).
@@ -399,6 +423,7 @@ Append-only журнал всех критических операций.
 | `Driver` 1:N `Delegation` | водитель обязателен |
 | `Trailer` N:1 `TrailerType` | тип из справочника |
 | `User` 1:N `AuditLog` | действия |
+| `User` 1:N `EmailLog` (via triggeredById) | письма, вызванные действием пользователя |
 
 ## Ключевые инварианты
 
@@ -422,6 +447,8 @@ Append-only журнал всех критических операций.
 | Vehicle gps=true ⇒ gpsMobilePhone | DB CHECK `vehicle_gps_device_when_gps_on` |
 | `Vehicle.lastDroveAt` выставляется системой при `VehicleDailyKm` drove-дне (`max`) | сервис, не UI |
 | Audit пишется для всех mutating ops | interceptor |
+| `AuditLog` append-only (нет UPDATE/DELETE/TRUNCATE, кроме FK SET NULL `userId` при hard-delete User) | DB trigger `audit_log_append_only_guard` |
+| `EmailLog` status=sent ⇒ sentAt; attempts ≥ 0 | DB CHECK `email_log_sent_has_sent_at`, `email_log_attempts_non_negative` |
 
 > **CHECK constraints как часть data-model contract.** Это не имплементационная деталь и не оптимизация — это бизнес-правила, которые должны держаться независимо от того, какой код пишет в БД. См. [12-database-schema.md#миграции](12-database-schema.md#миграции) для точного SQL и [19-known-quirks.md](19-known-quirks.md) для нюансов.
 
@@ -431,7 +458,8 @@ Append-only журнал всех критических операций.
 |---|---|
 | User, Carrier, Vehicle, Driver, Trailer, Claim, Delegation | soft (`deletedAt: timestamp?`) |
 | RefreshToken | hard (по `expiresAt`) |
-| AuditLog | append-only, не удаляется |
+| AuditLog | append-only, не удаляется — закреплено триггером в БД |
+| EmailLog | write-once; hard-delete только retention-очисткой api (старше `EMAIL_LOG_RETENTION_DAYS`, дефолт 180) |
 
 ## Cascade при удалении Carrier
 

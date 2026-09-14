@@ -16,29 +16,90 @@
 #     off entirely. Do not "fix" it back to https:// — the cert request will
 #     fail and the site will stop answering.
 #
-#  2. `trusted_proxies` is mandatory (see the block below). Without it Caddy
-#     overwrites the X-Forwarded-For that nginx set, the API sees nginx's
+#  2. `trusted_proxies` is mandatory (see the global block below). Without it
+#     Caddy overwrites the X-Forwarded-For that nginx set, the API sees nginx's
 #     address as the client IP, and both the audit trail and per-client rate
 #     limiting quietly break.
 #
 # On the server this file is installed as /opt/caddy/Caddyfile.
-# Reload without downtime after edits:
+# Reload without downtime after edits to THIS FILE:
 #   docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+# A change to /opt/caddy/.env (UPSTREAM_PROXY_CIDRS) is NOT picked up by a
+# reload — the variable lives in the container environment, so recreate it:
+#   cd /opt/caddy && docker compose up -d
 
-# ⚠️ TODO(prod): uncomment and set the LAN address nginx connects FROM, then
-# reload. Until this is in place `req.ip` in the API is nginx, not the user.
-#
-# Ask Jakub for the address, or read it off the wire on this server:
-#   sudo tcpdump -n -i any 'tcp port 80 and tcp[tcpflags] & tcp-syn != 0'
-# then load https://mymag.magtrans.eu once — the source IP of the SYN is it.
-#
-# {
-#     servers {
-#         trusted_proxies static 10.0.0.0/32
-#     }
-# }
+{
+    servers {
+        # ── Who may speak for the client ────────────────────────────────────
+        # UPSTREAM_PROXY_CIDRS = the LAN address(es) the corporate nginx
+        # connects FROM, space-separated CIDRs, e.g. `10.20.30.40/32`. Set it in
+        # /opt/caddy/.env (template: ./.env.example); docker-compose.yml passes
+        # it into the container.
+        #
+        # The fallback 127.0.0.1/32 trusts nothing that can ever reach this
+        # container from outside — i.e. the pre-fix behaviour (client IP ==
+        # nginx) instead of a spoofing hole. NEVER widen this to 0.0.0.0/0 or
+        # `private_ranges`: every host that can reach :80 could then forge its
+        # own X-Forwarded-For and land any IP in the audit log.
+        #
+        # Find the address: ask Jakub, or read it off the wire on this server:
+        #   sudo tcpdump -n -i any 'tcp port 80 and tcp[tcpflags] & tcp-syn != 0'
+        # then load https://mymag.magtrans.eu once — the source IP of the SYN.
+        #
+        # Hop math (why the api keeps TRUST_PROXY_HOPS=2): with nginx trusted,
+        # Caddy APPENDS nginx's address to the incoming header, so the api
+        # receives `X-Forwarded-For: [client-forged…,] <client>, <nginx>` over a
+        # socket whose peer is Caddy. Express walks right-to-left from the
+        # socket: hop 1 = Caddy, hop 2 = nginx, next entry = the real client.
+        # Untrusted (the old state) Caddy REPLACES the header with `<nginx>`,
+        # which is exactly the "req.ip == nginx for everyone" bug.
+        trusted_proxies static {$UPSTREAM_PROXY_CIDRS:127.0.0.1/32}
+
+        # `client_ip` in the access log (below). Strict mode walks the header
+        # right-to-left and stops at the first untrusted entry, so a value a
+        # user typed into X-Forwarded-For never becomes the logged client —
+        # required whenever nginx APPENDS (`$proxy_add_x_forwarded_for`), and
+        # harmless if it overwrites (`$remote_addr`).
+        client_ip_headers X-Forwarded-For
+        trusted_proxies_strict
+    }
+}
 
 http://mymag.magtrans.eu {
+    # ── Access log ──────────────────────────────────────────────────────────
+    # JSON to stdout → `docker logs caddy` (json-file driver, rotated and
+    # compressed in docker-compose.yml). Request BODIES are never logged by
+    # Caddy; Cookie / Authorization / Set-Cookie headers are redacted by
+    # default (the `log_credentials` server option is deliberately NOT set).
+    #
+    # The filter drops the whole query string and the Referer: some GET
+    # endpoints carry a NIP and a bank account number in the query
+    # (/api/v1/integrations/whitelist?nip=&account=), and a Referer repeats
+    # the previous page's query. Path-only is enough to correlate with the api
+    # log, which has the request id.
+    log {
+        output stdout
+        format filter {
+            wrap json
+            fields {
+                request>uri regexp [?].* ?REDACTED
+                request>headers>Referer delete
+            }
+        }
+    }
+
+    # ── Health probes → API ─────────────────────────────────────────────────
+    # The api excludes /health and /ready from its /api/v1 prefix (main.ts), so
+    # without this block they fall through to web, whose auth middleware
+    # answers 307 → /login — a "green" check that never touched the api.
+    # Must stay BEFORE the web catch-all. Not access-logged: an uptime monitor
+    # polls these every minute and the monitor itself records failures.
+    @api_health path /health /ready
+    handle @api_health {
+        log_skip
+        reverse_proxy magguarantee-api:3001
+    }
+
     # /api/* → API container. The full path (including /api/v1/...) is
     # preserved — Nest already mounts its routes under /api/v1, so Caddy
     # doesn't need to rewrite anything.

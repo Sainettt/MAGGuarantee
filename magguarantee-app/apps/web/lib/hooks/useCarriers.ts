@@ -37,6 +37,7 @@ import {
   uploadCarrierAttachment,
 } from '@/lib/api/carriers';
 import { OPIEKUN_KEY } from '@/lib/hooks/useOpiekunFleet';
+import type { MutationMetaOptions } from '@/lib/query/globalErrors';
 
 export const CARRIERS_KEY = ['carriers'] as const;
 /** Query namespace for a carrier's company documents (attachments). */
@@ -145,9 +146,10 @@ export function useDeleteCarrier() {
  * confirm-dialog to pass `{ id, body: { reason } }` after the user has
  * filled in the reason textarea.
  */
-export function useHardDeleteCarrier() {
+export function useHardDeleteCarrier(opts?: MutationMetaOptions) {
   const qc = useQueryClient();
   return useMutation({
+    meta: opts?.meta,
     mutationFn: ({ id, body }: { id: string; body: DeleteWithReasonDto }) =>
       hardDeleteCarrier(id, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: CARRIERS_KEY }),

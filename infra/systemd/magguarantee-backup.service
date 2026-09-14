@@ -1,12 +1,14 @@
 # MAGGuarantee — nightly backup (Postgres dump + MinIO archive).
 #
-# Install on the VPS:
-#   sudo cp /opt/magguarantee/src/infra/systemd/magguarantee-backup.* /etc/systemd/system/
+# Install on the VPS (together with the timer and the alert template):
+#   sudo cp /opt/magguarantee/src/infra/systemd/magguarantee-* /etc/systemd/system/
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now magguarantee-backup.timer
 #
 # The unit runs the script straight out of the git checkout, so `git pull`
-# updates it — no second copy in /usr/local/bin to drift out of sync.
+# updates it — no second copy in /usr/local/bin to drift out of sync. The unit
+# FILE itself is a copy: after a pull that changes it, repeat the `cp` +
+# `daemon-reload`.
 #
 # Run once by hand to verify:      sudo systemctl start magguarantee-backup.service
 # Read the result:                 journalctl -u magguarantee-backup.service -n 50
@@ -16,6 +18,13 @@ Description=MAGGuarantee backup (Postgres + MinIO)
 # Docker must be up — otherwise the script exits immediately on the preflight.
 Requires=docker.service
 After=docker.service
+
+# Any failure (non-zero exit, 30-min timeout, missing script) posts the unit
+# name + journal tail to the ops Google Chat space. Configured in
+# /opt/magguarantee/alert.conf — see magguarantee-alert@.service.
+# A backup that silently stops being SCHEDULED never fails; that case is
+# covered by MAGG_HEARTBEAT_URL, not by this line.
+OnFailure=magguarantee-alert@%n.service
 
 [Service]
 Type=oneshot
@@ -27,10 +36,9 @@ Group=deploy
 
 # Optional overrides — offsite target, retention, heartbeat URL. The leading `-`
 # means "carry on if the file does not exist", so the unit works before it is
-# created. Example contents:
-#   MAGG_RCLONE_REMOTE=r2:magguarantee-backups-prod
-#   MAGG_KEEP_DAYS=3
-#   MAGG_HEARTBEAT_URL=https://status.magtrans.eu/api/push/xxxxx
+# created. Every supported variable, with the script's defaults (local 7 days,
+# offsite 30 days), is listed in infra/scripts/backup.conf.example — the script
+# itself is the single source of truth for those defaults.
 EnvironmentFile=-/opt/magguarantee/backup.conf
 
 ExecStart=/opt/magguarantee/src/infra/scripts/magguarantee-backup

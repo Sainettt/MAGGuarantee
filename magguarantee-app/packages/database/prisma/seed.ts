@@ -330,7 +330,9 @@ function printBanner(
   const longestEmail = SEED_USERS.reduce((max, u) => Math.max(max, u.email.length), 0);
 
   console.log('');
-  console.log(`Seeded ${userCount} users (password for all: ${DEV_PASSWORD}):`);
+  // Never echo the password itself — seed output ends up in CI / container
+  // logs. The shared dev password lives in DEV_PASSWORD at the top of this file.
+  console.log(`Seeded ${userCount} users (shared dev password — see DEV_PASSWORD in prisma/seed.ts):`);
   for (const u of SEED_USERS) {
     const login = u.login.padEnd(longestLogin, ' ');
     const email = `(${u.email})`.padEnd(longestEmail + 2, ' ');

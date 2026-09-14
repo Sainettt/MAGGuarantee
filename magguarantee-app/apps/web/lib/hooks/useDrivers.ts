@@ -30,6 +30,7 @@ import {
 import { CARRIERS_KEY } from '@/lib/hooks/useCarriers';
 import { MY_FLEET_KEY } from '@/lib/hooks/useMyFleet';
 import { OPIEKUN_KEY } from '@/lib/hooks/useOpiekunFleet';
+import type { MutationMetaOptions } from '@/lib/query/globalErrors';
 
 export const DRIVERS_KEY = ['drivers'] as const;
 
@@ -134,9 +135,10 @@ export function useReactivateDriver() {
   });
 }
 
-export function useDeleteDriver() {
+export function useDeleteDriver(opts?: MutationMetaOptions) {
   const qc = useQueryClient();
   return useMutation({
+    meta: opts?.meta,
     mutationFn: deleteDriver,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: DRIVERS_KEY });
@@ -149,9 +151,10 @@ export function useDeleteDriver() {
 }
 
 /** Hard-delete — admin only. See useHardDeleteCarrier doc. */
-export function useHardDeleteDriver() {
+export function useHardDeleteDriver(opts?: MutationMetaOptions) {
   const qc = useQueryClient();
   return useMutation({
+    meta: opts?.meta,
     mutationFn: ({ id, body }: { id: string; body: DeleteWithReasonDto }) =>
       hardDeleteDriver(id, body),
     onSuccess: () => {

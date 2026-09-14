@@ -8,6 +8,19 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 
+import { routeForLog } from '../logging/request-path';
+import { clientIp } from '../utils/client-ip';
+
+/** The authenticated principal, when `JwtAuthGuard` accepted a token. */
+type FilterRequest = Request & { user?: { sub?: string } };
+
+/** 4xx statuses worth a WARN line, with their log message. */
+const WARN_STATUSES: ReadonlyMap<number, string> = new Map([
+  [401, 'request unauthorized'],
+  [403, 'request forbidden'],
+  [429, 'request rate-limited'],
+]);
+
 /**
  * Global RFC 7807 problem-details filter.
  *
@@ -28,7 +41,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
     const res = ctx.getResponse<Response>();
-    const req = ctx.getRequest<Request>();
+    const req = ctx.getRequest<FilterRequest>();
 
     const status = this._statusFor(exception);
     const title = this._titleFor(status);
@@ -38,19 +51,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     const extensions = this._extensionsFor(exception);
     const type = this._typeFor(status);
 
-    if (status >= 500) {
-      this.logger.error({
-        msg: 'unhandled exception',
-        path: req.url,
-        method: req.method,
-        error:
-          exception instanceof Error ? exception.message : String(exception),
-        // The wire body carries no `detail` for a non-HttpException (nothing
-        // internal leaks to the client), so this line is the only record of
-        // where the error came from — without the stack it is a mystery.
-        stack: exception instanceof Error ? exception.stack : undefined,
-      });
-    }
+    this._log(status, exception, req);
 
     res.status(status).json({
       type,
@@ -65,6 +66,47 @@ export class ProblemDetailsFilter implements ExceptionFilter {
   }
 
   // ── helpers ──────────────────────────────────────────────
+
+  /**
+   * Log policy (2026-09-14 logging audit, items 4 + 10) — volume stays low:
+   *
+   *  - ≥500 → ERROR with message + stack. The wire body carries no `detail`
+   *    for a non-HttpException (nothing internal leaks to the client), so this
+   *    line is the only record of where the error came from.
+   *  - 401 / 403 / 429 → WARN. Access denials and rate-limit hits are the
+   *    security signal (credential stuffing, a role probing admin routes, a
+   *    stolen token being replayed) and were previously invisible.
+   *  - any other 4xx → not logged. 400/404/409/422 are the API doing its job;
+   *    they would drown the signal.
+   *
+   * Every line carries who (userId when a JWT was accepted), from where
+   * (client IP via `clientIp`, which honours TRUST_PROXY_HOPS) and which
+   * endpoint (route template, never the query string). Never request or
+   * response bodies, and never the exception message for 4xx — messages
+   * can echo user input.
+   */
+  private _log(status: number, exception: unknown, req: FilterRequest): void {
+    const context = {
+      method: req.method,
+      route: routeForLog(req),
+      userId: req.user?.sub,
+      ip: clientIp(req),
+    };
+    if (status >= 500) {
+      this.logger.error({
+        msg: 'unhandled exception',
+        status,
+        ...context,
+        error:
+          exception instanceof Error ? exception.message : String(exception),
+        stack: exception instanceof Error ? exception.stack : undefined,
+      });
+      return;
+    }
+    if (WARN_STATUSES.has(status)) {
+      this.logger.warn({ msg: WARN_STATUSES.get(status), status, ...context });
+    }
+  }
 
   private _statusFor(exception: unknown): number {
     if (exception instanceof HttpException) return exception.getStatus();

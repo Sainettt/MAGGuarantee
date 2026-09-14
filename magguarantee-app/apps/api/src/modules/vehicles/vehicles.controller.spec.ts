@@ -1,7 +1,13 @@
 import 'reflect-metadata';
 
-import { ExecutionContext, ForbiddenException } from '@nestjs/common';
+import {
+  ExecutionContext,
+  ForbiddenException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import type { Request, Response } from 'express';
 
 import type { Role } from '@magguarantee/shared';
 
@@ -12,7 +18,9 @@ import {
 import { ROLES_METADATA_KEY } from '../auth/auth.constants';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import type { VehicleDailyKmService } from './vehicle-daily-km.service';
 import { VehiclesController } from './vehicles.controller';
+import type { VehiclesService } from './vehicles.service';
 
 /**
  * Authorization unit tests for `VehiclesController`.
@@ -372,5 +380,72 @@ describe('VehiclesController — authorization', () => {
         );
       },
     );
+  });
+});
+
+// ─── download access log (2026-08-14 logging audit, item 22) ───
+
+describe('VehiclesController.downloadAttachment — access log', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  function controllerWith(downloadAttachment: jest.Mock): VehiclesController {
+    return new VehiclesController(
+      { downloadAttachment } as unknown as VehiclesService,
+      {} as unknown as VehicleDailyKmService,
+    );
+  }
+
+  it('logs ids + category + requester (no filename) and streams the file', async () => {
+    const log = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    const pipe = jest.fn();
+    const download = jest.fn(async () => ({
+      object: { body: { pipe }, contentType: 'application/pdf', contentLength: 3 },
+      fileName: 'porozumienie Kowalski.pdf',
+      mimeType: 'application/pdf',
+      category: 'agreement',
+    }));
+    const res = { setHeader: jest.fn() } as unknown as Response;
+    const planista: AuthUser = { ...carrierUser, sub: 'u-plan', role: 'planista' };
+
+    await controllerWith(download).downloadAttachment(
+      planista,
+      'veh-1',
+      'att-1',
+      { ip: '203.0.113.9' } as Request,
+      res,
+    );
+
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0]![0]).toEqual({
+      msg: 'attachment downloaded',
+      entity: 'Vehicle',
+      entityId: 'veh-1',
+      attachmentId: 'att-1',
+      category: 'agreement',
+      userId: 'u-plan',
+      role: 'planista',
+      ip: '203.0.113.9',
+    });
+    expect(JSON.stringify(log.mock.calls)).not.toContain('Kowalski');
+    expect(pipe).toHaveBeenCalledWith(res);
+  });
+
+  it('does not log when the download is refused', async () => {
+    const log = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    const download = jest.fn(async () => {
+      throw new NotFoundException('Załącznik nie znaleziony');
+    });
+    const res = { setHeader: jest.fn() } as unknown as Response;
+
+    await expect(
+      controllerWith(download).downloadAttachment(
+        carrierUser,
+        'veh-1',
+        'att-x',
+        {} as Request,
+        res,
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(log).not.toHaveBeenCalled();
   });
 });

@@ -12,8 +12,10 @@ import { useTranslations } from 'next-intl';
 import type { DiagnosticsClaimsHealthRow } from '@magguarantee/shared';
 
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useDiagnosticsClaims } from '@/lib/hooks/useDiagnostics';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 import { cn } from '@/lib/utils';
 
 function HealthCard({ row }: { row: DiagnosticsClaimsHealthRow }) {
@@ -60,7 +62,8 @@ function HealthCard({ row }: { row: DiagnosticsClaimsHealthRow }) {
 
 export function ClaimsHealthSection() {
   const t = useTranslations('diagnostics.claims');
-  const { data, isLoading } = useDiagnosticsClaims();
+  const claimsHealthQ = useDiagnosticsClaims();
+  const { data, isLoading } = claimsHealthQ;
 
   if (isLoading) {
     return (
@@ -68,6 +71,14 @@ export function ClaimsHealthSection() {
         {Array.from({ length: 6 }).map((_, i) => (
           <Skeleton key={i} className="h-32 w-full" />
         ))}
+      </div>
+    );
+  }
+
+  if (!data && claimsHealthQ.isError) {
+    return (
+      <div className="rounded-xl border border-border bg-card shadow-card">
+        <ErrorState {...queryErrorProps(claimsHealthQ)} />
       </div>
     );
   }

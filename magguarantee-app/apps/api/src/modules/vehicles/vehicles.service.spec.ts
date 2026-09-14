@@ -1,6 +1,7 @@
 import {
   ConflictException,
   ForbiddenException,
+  Logger,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -857,6 +858,50 @@ describe('VehiclesService', () => {
     // first upload's object cleaned up, vehicle row removed.
     expect(storage.delete).toHaveBeenCalledTimes(1);
     expect(vehiclesRepo.hardDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs failed rollback steps as single structured objects (no pino-style second arg)', async () => {
+    // 2026-08-14 logging audit, item 21.
+    const error = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    const storage = makeStorage();
+    (storage.delete as jest.Mock).mockRejectedValueOnce(new Error('minio down'));
+    const vehiclesRepo = makeVehiclesRepo([]);
+    (vehiclesRepo.hardDelete as jest.Mock).mockRejectedValueOnce('fk blocked');
+    const attachmentsRepo = makeAttachmentsRepo([]);
+    (attachmentsRepo.create as jest.Mock).mockRejectedValueOnce(
+      new Error('db down'),
+    );
+    const svc = new VehiclesService(
+      vehiclesRepo,
+      makeUsersRepo(makeValidPeople()),
+      makeCarriersRepo([makeCarrier()]),
+      attachmentsRepo,
+      storage,
+      makeTeamsRepo(),
+    );
+    await expect(
+      svc.create(
+        makeAuth('admin', 'a-1'),
+        createDto({ cabotageDe: true }),
+        [makeUpload('cabotage_de_insurance')],
+      ),
+    ).rejects.toThrow('db down');
+
+    expect(error.mock.calls.map((c) => c.length)).toEqual([1, 1]);
+    expect(error.mock.calls[0]![0]).toEqual({
+      msg: 'rollback: failed to remove vehicle attachment storage object',
+      key: expect.stringMatching(/^vehicles\//),
+      err: { name: 'Error', message: 'minio down', stack: expect.any(String) },
+    });
+    // A non-Error rejection is still serialised, never dropped.
+    expect(error.mock.calls[1]![0]).toEqual({
+      msg: 'rollback: failed to remove vehicle row',
+      vehicleId: expect.any(String),
+      err: { name: 'NonError', message: 'fk blocked' },
+    });
+    error.mockRestore();
   });
 
   // ── File-type / size validation (collectAndValidateUploads) ──

@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/Dialog';
 import { useResetCarrierPassword } from '@/lib/hooks/useCarriers';
 import { useCopyToClipboard } from '@/lib/hooks/useCopyToClipboard';
+import { SUPPRESS_GLOBAL_ERROR } from '@/lib/query/globalErrors';
 
 interface CarrierResetPasswordDialogsProps {
   /** Row the operator picked, or null when no reset is in progress. */
@@ -50,7 +51,7 @@ export function CarrierResetPasswordDialogs({
     null,
   );
   const { copy, copied } = useCopyToClipboard();
-  const resetM = useResetCarrierPassword();
+  const resetM = useResetCarrierPassword({ meta: SUPPRESS_GLOBAL_ERROR });
 
   const onConfirm = async () => {
     if (!target) return;

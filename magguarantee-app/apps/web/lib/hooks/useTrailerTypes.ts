@@ -26,6 +26,7 @@ import {
   listTrailerTypes,
   updateTrailerType,
 } from '@/lib/api/trailerTypes';
+import type { MutationMetaOptions } from '@/lib/query/globalErrors';
 
 export const TRAILER_TYPES_KEY = ['trailer-types'] as const;
 
@@ -85,9 +86,10 @@ export function useDeactivateTrailerType() {
 }
 
 /** Hard-delete — admin only. See useHardDeleteCarrier doc. */
-export function useHardDeleteTrailerType() {
+export function useHardDeleteTrailerType(opts?: MutationMetaOptions) {
   const qc = useQueryClient();
   return useMutation({
+    meta: opts?.meta,
     mutationFn: ({ id, body }: { id: string; body: DeleteWithReasonDto }) =>
       hardDeleteTrailerType(id, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: TRAILER_TYPES_KEY }),

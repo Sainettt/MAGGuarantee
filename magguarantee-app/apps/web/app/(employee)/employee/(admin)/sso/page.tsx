@@ -39,6 +39,8 @@ import {
   useSsoAccessDenials,
   useStanowiskoRoles,
 } from '@/lib/hooks/useSso';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
+import { SUPPRESS_GLOBAL_ERROR } from '@/lib/query/globalErrors';
 
 import { GrantAccessDialog } from './GrantAccessDialog';
 
@@ -50,10 +52,11 @@ export default function SsoPage() {
   const tCommon = useTranslations('common');
   const tRoles = useTranslations('roles');
 
-  const { data, isLoading } = useStanowiskoRoles();
+  const listQ = useStanowiskoRoles();
+  const { data, isLoading } = listQ;
   const { data: denials } = useSsoAccessDenials();
-  const setM = useSetStanowiskoRole();
-  const deleteM = useDeleteStanowiskoRole();
+  const setM = useSetStanowiskoRole({ meta: SUPPRESS_GLOBAL_ERROR });
+  const deleteM = useDeleteStanowiskoRole({ meta: SUPPRESS_GLOBAL_ERROR });
   const [grantTarget, setGrantTarget] = useState<SsoAccessDenialDto | null>(
     null,
   );
@@ -190,6 +193,7 @@ export default function SsoPage() {
         columns={columns}
         rowKey={(r) => r.code}
         isLoading={isLoading}
+        {...queryErrorProps(listQ)}
         empty={
           <EmptyState
             icon={KeyRound}

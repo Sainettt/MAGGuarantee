@@ -304,6 +304,44 @@ export const envSchema = z.object({
     .min(1)
     .max(90)
     .default(3),
+
+  // ── Token cleanup (2026-08-14 logging audit, items 11 + 14) ──
+  // Daily cron (03:30 Europe/Warsaw) that hard-deletes refresh tokens expired or
+  // revoked more than 30 days ago and prunes `email_logs` rows older than
+  // EMAIL_LOG_RETENTION_DAYS. Each step writes a `system.*` audit row.
+  //
+  // TOKEN_CLEANUP_ENABLED — kill-switch, same explicit-coercion pattern as
+  // `GUARANTEE_WATCHDOG_ENABLED`: only "true"/"1" enable; "false"/"0" disable;
+  // ""/absent fall through to the `.default(true)`.
+  TOKEN_CLEANUP_ENABLED: z.preprocess((v) => {
+    if (typeof v === 'boolean') return v;
+    if (typeof v === 'string') {
+      const s = v.trim().toLowerCase();
+      if (s === '') return undefined; // fall through to default(true)
+      return s === 'true' || s === '1';
+    }
+    return undefined;
+  }, z.boolean().default(true)),
+
+  // Days an `email_logs` delivery row is kept before the cleanup cron deletes
+  // it. Default 180 (half a year of "did the carrier get the decision mail?").
+  EMAIL_LOG_RETENTION_DAYS: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(3650)
+    .default(180),
+
+  // ── Ops alerts (2026-08-14 logging audit, item 6) ─────
+  // Google Chat incoming-webhook URL of the OPS space (NOT the wyjazdy space).
+  // Receives final BullMQ job failures, cron crashes and Redis/queue connection
+  // errors, rate-limited to one message per alert key per 10 minutes. UNSET →
+  // alerts are log-only. The URL embeds the webhook key — it is a secret and is
+  // never logged. Blank is coerced to undefined like the other optional URLs.
+  OPS_ALERT_WEBHOOK_URL: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z.string().url().optional(),
+  ),
 }).superRefine((env, ctx) => {
   // Gmail secrets are required only when the Gmail provider is selected — keeps
   // dev/staging `.env` (Mailhog) clean while still failing fast at boot in prod

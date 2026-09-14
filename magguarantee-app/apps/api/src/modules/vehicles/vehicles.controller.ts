@@ -5,18 +5,20 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Logger,
   Param,
   Patch,
   Post,
   Put,
   Query,
+  Req,
   Res,
   UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { memoryStorage } from 'multer';
 import type { z } from 'zod';
 
@@ -50,6 +52,7 @@ import {
   OpiekunOwns,
 } from '../../common/guards';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
+import { clientIp } from '../../common/utils/client-ip';
 import {
   CurrentUser,
   type AuthUser,
@@ -101,6 +104,8 @@ const MULTIPART_OPTIONS = {
 @Controller('vehicles')
 @UseGuards(RolesGuard, OpiekunOwnershipGuard, CarrierOwnershipGuard)
 export class VehiclesController {
+  private readonly logger = new Logger(VehiclesController.name);
+
   constructor(
     private readonly vehicles: VehiclesService,
     private readonly dailyKm: VehicleDailyKmService,
@@ -310,13 +315,27 @@ export class VehiclesController {
   @OpiekunOwns('id', 'param', 'vehicleId')
   @CarrierOwns('id', 'param', 'vehicleId')
   async downloadAttachment(
+    @CurrentUser() user: AuthUser,
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
     @Param('attachmentId', new ZodValidationPipe(UuidSchema))
     attachmentId: string,
+    @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
-    const { object, fileName, mimeType } =
+    const { object, fileName, mimeType, category } =
       await this.vehicles.downloadAttachment(id, attachmentId);
+    // Access trail for vehicle documents (not an audit row). Ids + category
+    // only, never the original filename.
+    this.logger.log({
+      msg: 'attachment downloaded',
+      entity: 'Vehicle',
+      entityId: id,
+      attachmentId,
+      category,
+      userId: user.sub,
+      role: user.role,
+      ip: clientIp(req) ?? null,
+    });
     res.setHeader('Content-Type', object.contentType ?? mimeType);
     res.setHeader(
       'Content-Disposition',

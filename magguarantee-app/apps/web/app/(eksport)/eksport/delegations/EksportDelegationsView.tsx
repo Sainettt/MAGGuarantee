@@ -35,6 +35,7 @@ import {
 import { OperationalDelegationsTable } from '@/components/delegations/OperationalDelegationsTable';
 import { Button } from '@/components/ui/Button';
 import { useDelegations, useMarkDelegationReady } from '@/lib/hooks/useDelegations';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 
 interface DialogTarget {
   delegation: DelegationDto;
@@ -60,7 +61,8 @@ export function EksportDelegationsView() {
     [status, includeHistory],
   );
 
-  const { data, isLoading } = useDelegations(filters);
+  const delegationsQ = useDelegations(filters);
+  const { data, isLoading } = delegationsQ;
 
   const readyM = useMarkDelegationReady({
     onSuccess: (_data, vars) => {
@@ -151,6 +153,7 @@ export function EksportDelegationsView() {
       <OperationalDelegationsTable
         rows={data?.items ?? []}
         isLoading={isLoading}
+        {...queryErrorProps(delegationsQ)}
         namespace="eksport.delegations.table"
         hasActiveFilters={Boolean(status || includeHistory)}
         onClearFilters={() => {

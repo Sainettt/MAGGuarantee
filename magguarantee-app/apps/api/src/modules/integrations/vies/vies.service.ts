@@ -16,7 +16,8 @@ const CACHE_TTL_SEC = 24 * 60 * 60; // 24h per docs/16#vies-проверка-vat
  *     and before hashing into the cache key (`vies:{COUNTRY}:{VAT}`).
  *   - Positive responses cached 24h. The upstream rate-limits aggressively;
  *     we don't want to revisit unchanged VAT registrations.
- *   - 4xx propagate (VIES uses 400 for malformed VAT — the user sees that).
+ *   - 4xx propagate as the same status (VIES uses 400 for malformed VAT) with
+ *     a generic message + `extensions.code` — never the upstream body.
  *   - Network failures / 5xx exhaust 3 retries then 503 to the caller.
  */
 @Injectable()
@@ -32,7 +33,8 @@ export class ViesService {
 
     const cached = await this._readCache(key);
     if (cached) {
-      this.logger.debug({ msg: 'VIES cache hit', country: c, vat: v });
+      // VAT number deliberately not logged (2026-09-14 logging audit, item 2).
+      this.logger.debug({ msg: 'VIES cache hit', country: c });
       return cached;
     }
 
@@ -67,7 +69,8 @@ export class ViesService {
       // Corrupt cache value — treat as miss, log so we notice.
       this.logger.warn({
         msg: 'VIES cache parse failure — refetching',
-        key,
+        // The key embeds the VAT number — log only its kind.
+        cache: 'vies',
         error: err instanceof Error ? err.message : String(err),
       });
       return null;

@@ -1,14 +1,21 @@
 import 'reflect-metadata';
 import { INestApplication } from '@nestjs/common';
+import { getQueueToken } from '@nestjs/bullmq';
 import { Test } from '@nestjs/testing';
+import type { Queue } from 'bullmq';
 import cookieParser from 'cookie-parser';
 import IORedis, { Redis } from 'ioredis';
 import request from 'supertest';
 
 import { AppModule } from '../src/app.module';
+import { REFRESH_ROTATION_GRACE_MS } from '../src/modules/auth/auth.constants';
+import { QUEUE_EMAIL_SEND } from '../src/modules/jobs/queue-names';
 import { prisma } from '@magguarantee/database';
 
+// Mailhog serves reads on /api/v2 but has NO v2 delete route —
+// `DELETE /api/v2/messages` is a 404. Wiping the inbox is v1 only.
 const MAILHOG_API = 'http://localhost:8025/api/v2';
+const MAILHOG_DELETE_ALL = 'http://localhost:8025/api/v1/messages';
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
 
 interface MailhogMessage {
@@ -17,12 +24,24 @@ interface MailhogMessage {
   To: { Mailbox: string; Domain: string }[];
 }
 
+/**
+ * Empties the Mailhog inbox and fails loudly if that did not happen.
+ *
+ * `fetchLatestCodeFor` takes the newest message addressed to a user, and the
+ * 2FA mail is delivered asynchronously (BullMQ), so it lands a few hundred ms
+ * AFTER /auth/login returns. A leftover message from an earlier run is already
+ * in the inbox at that moment and would be picked instead, which makes the
+ * test send a stale code (401 "Invalid code"). The wipe must therefore be real.
+ */
 async function clearMailhog(): Promise<void> {
-  // Mailhog wipe — best-effort. Ignore network errors so tests still proceed.
-  try {
-    await fetch(`${MAILHOG_API}/messages`, { method: 'DELETE' });
-  } catch {
-    // ignore
+  const res = await fetch(MAILHOG_DELETE_ALL, { method: 'DELETE' });
+  if (!res.ok) {
+    throw new Error(`Mailhog wipe failed: DELETE ${MAILHOG_DELETE_ALL} → ${res.status}`);
+  }
+  const check = await fetch(`${MAILHOG_API}/messages?limit=1`);
+  const json = (await check.json()) as { total: number };
+  if (json.total !== 0) {
+    throw new Error(`Mailhog wipe failed: ${json.total} message(s) still in the inbox`);
   }
 }
 
@@ -78,6 +97,15 @@ describe('Auth (e2e)', () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
+    // Drop email jobs left waiting / in retry backoff by an earlier run (e.g.
+    // one killed mid-flight, or one whose renders failed and were rescheduled).
+    // The worker only starts in `app.init()`; without this it would deliver
+    // those stale 2FA mails in the middle of this run, and the newest message
+    // for a user could again carry a code from a dead session.
+    const emailQueue = moduleRef.get<Queue>(getQueueToken(QUEUE_EMAIL_SEND), {
+      strict: false,
+    });
+    await emailQueue.drain(true);
     app = moduleRef.createNestApplication();
     app.use(cookieParser());
     app.setGlobalPrefix('api/v1', { exclude: ['health', 'ready'] });
@@ -236,12 +264,41 @@ describe('Auth (e2e)', () => {
     const oldRefresh = cookies.get('mt_refresh') as string;
 
     // Legitimate first refresh — old token now revoked.
-    await request(server)
+    const rotated = await request(server)
       .post('/api/v1/auth/refresh')
       .set('Cookie', `mt_refresh=${oldRefresh}`)
       .expect(200);
+    const rotatedRefresh = parseCookies(
+      rotated.headers['set-cookie'] as unknown as string[],
+    ).get('mt_refresh');
+    expect(rotatedRefresh).toBeTruthy();
 
-    // Replay — same (revoked) token: 401 + all user tokens revoked.
+    // Replay INSIDE the grace window is the documented benign concurrent-
+    // rotation race (docs/15-auth-strategy.md#rotation, step 5): 200 with an
+    // access-only token, no second rotation, no refresh cookie, nothing revoked.
+    const healed = await request(server)
+      .post('/api/v1/auth/refresh')
+      .set('Cookie', `mt_refresh=${oldRefresh}`)
+      .expect(200);
+    const healedCookies = parseCookies(
+      healed.headers['set-cookie'] as unknown as string[],
+    );
+    expect(healedCookies.get('mt_access')).toBeTruthy();
+    expect(healedCookies.has('mt_refresh')).toBe(false);
+    const liveAfterHeal = await prisma.refreshToken.count({
+      where: { user: { login: 'pracownik1' }, revokedAt: null },
+    });
+    expect(liveAfterHeal).toBe(1);
+
+    // Move the rotation out of the grace window instead of sleeping 30 s: the
+    // same replay is now genuine theft.
+    const revokedRows = await prisma.refreshToken.updateMany({
+      where: { user: { login: 'pracownik1' }, revokedAt: { not: null } },
+      data: { revokedAt: new Date(Date.now() - REFRESH_ROTATION_GRACE_MS - 1_000) },
+    });
+    expect(revokedRows.count).toBe(1);
+
+    // Replay — same (revoked) token outside the window: 401 + all user tokens revoked.
     await request(server)
       .post('/api/v1/auth/refresh')
       .set('Cookie', `mt_refresh=${oldRefresh}`)

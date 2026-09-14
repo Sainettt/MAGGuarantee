@@ -34,7 +34,8 @@ export class WhiteListService {
 
     const cached = await this._readCache(key);
     if (cached) {
-      this.logger.debug({ msg: 'WhiteList cache hit', nip });
+      // NIP / account deliberately not logged (2026-09-14 logging audit, item 2).
+      this.logger.debug({ msg: 'WhiteList cache hit' });
       return cached;
     }
 
@@ -76,7 +77,7 @@ export class WhiteListService {
 
     const cached = await this._readSearchCache(key);
     if (cached) {
-      this.logger.debug({ msg: 'WhiteList search cache hit', nip });
+      this.logger.debug({ msg: 'WhiteList search cache hit' });
       return cached;
     }
 
@@ -137,7 +138,8 @@ export class WhiteListService {
     } catch (err) {
       this.logger.warn({
         msg: 'WhiteList cache parse failure — refetching',
-        key,
+        // The key embeds NIP + account — log only its kind.
+        cache: 'whitelist',
         error: err instanceof Error ? err.message : String(err),
       });
       return null;
@@ -165,7 +167,7 @@ export class WhiteListService {
     } catch (err) {
       this.logger.warn({
         msg: 'WhiteList search cache parse failure — refetching',
-        key,
+        cache: 'whitelist-search',
         error: err instanceof Error ? err.message : String(err),
       });
       return null;

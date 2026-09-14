@@ -18,8 +18,10 @@ import type { UpdateMonthlyLimitDto } from '@magguarantee/shared';
 
 import { LimitsRow } from '@/components/limits/LimitsRow';
 import { Button } from '@/components/ui/Button';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useLimits, useUpdateLimit } from '@/lib/hooks/useLimits';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 
 const CURRENT_YEAR = new Date().getFullYear();
 const MIN_YEAR = 2020;
@@ -31,7 +33,8 @@ export function LimitsView() {
   const tMonths = useTranslations('limits.months');
 
   const [year, setYear] = useState(CURRENT_YEAR);
-  const { data, isLoading } = useLimits(year);
+  const limitsQ = useLimits(year);
+  const { data, isLoading } = limitsQ;
 
   const updateM = useUpdateLimit();
 
@@ -164,7 +167,17 @@ export function LimitsView() {
                     ))}
                   </tr>
                 ))}
+              {/* Load failure: never render the editable rows — empty cells
+                  would invite overwriting limits that DO exist server-side. */}
+              {!isLoading && limitsQ.isError && !data && (
+                <tr>
+                  <td colSpan={5} className="px-3 py-0">
+                    <ErrorState {...queryErrorProps(limitsQ)} />
+                  </td>
+                </tr>
+              )}
               {!isLoading &&
+                !(limitsQ.isError && !data) &&
                 months.map(({ month, label }) => (
                   <LimitsRow
                     key={month}

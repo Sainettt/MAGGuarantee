@@ -17,11 +17,13 @@ import { ClaimCard } from '@/components/carrier/ClaimCard';
 import { GuaranteeReminderBanner } from '@/components/carrier/GuaranteeReminderBanner';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useClaims } from '@/lib/hooks/useClaims';
 import { useMyFleet } from '@/lib/hooks/useMyFleet';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 
 export default function CarrierClaimsListPage() {
   const t = useTranslations('carrier.claims');
@@ -31,12 +33,15 @@ export default function CarrierClaimsListPage() {
   const [status, setStatus] = useState<ClaimStatus | ''>('');
   const [vehicleId, setVehicleId] = useState<string>('');
 
-  const { data, isLoading } = useClaims({
+  const claimsQ = useClaims({
     q: search.length >= 2 ? search : undefined,
     status: status || undefined,
     vehicleId: vehicleId || undefined,
     limit: 50,
   });
+  const { data, isLoading } = claimsQ;
+  // Load failure is its own state — never the "no claims yet" empty.
+  const showError = !isLoading && claimsQ.isError && !data;
 
   // Include deactivated vehicles in the filter dropdown — old claims may
   // still reference a vehicle that was sold / deactivated afterwards.
@@ -116,7 +121,13 @@ export default function CarrierClaimsListPage() {
         </div>
       )}
 
-      {!isLoading && items.length === 0 && hasActiveFilters && (
+      {showError && (
+        <div className="bg-card rounded-lg border border-border">
+          <ErrorState {...queryErrorProps(claimsQ)} />
+        </div>
+      )}
+
+      {!isLoading && !showError && items.length === 0 && hasActiveFilters && (
         <div className="bg-card rounded-lg border border-border">
           <EmptyState
             icon={SearchX}
@@ -136,7 +147,7 @@ export default function CarrierClaimsListPage() {
         </div>
       )}
 
-      {!isLoading && items.length === 0 && !hasActiveFilters && (
+      {!isLoading && !showError && items.length === 0 && !hasActiveFilters && (
         <div className="bg-card rounded-lg border border-border">
           <EmptyState
             icon={FileText}
@@ -156,6 +167,13 @@ export default function CarrierClaimsListPage() {
 
       {!isLoading && items.length > 0 && (
         <div>
+          {claimsQ.isError && (
+            <ErrorState
+              variant="banner"
+              className="mb-3"
+              {...queryErrorProps(claimsQ)}
+            />
+          )}
           {items.map((claim) => (
             <ClaimCard key={claim.id} claim={claim} />
           ))}

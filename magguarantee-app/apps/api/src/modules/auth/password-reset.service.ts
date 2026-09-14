@@ -10,6 +10,11 @@ import {
 
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { logAuthFailure, type AuthRequestContext } from './auth-security-log';
+import {
+  VerificationCodeLockoutException,
+  VerificationCodeOrphanedException,
+} from './verification-code.errors';
 import {
   APP_CONFIG_KEY,
   DEFAULT_CODE_TTL_SECONDS,
@@ -105,13 +110,20 @@ export class PasswordResetService {
    *  - 401 (`Invalid code`, attemptsLeft) on a wrong code below max attempts.
    *  - 423 LOCKED (`Too many attempts`) on the max-th wrong code.
    */
-  async verifyCode(sessionToken: string, code: string): Promise<string> {
+  async verifyCode(
+    sessionToken: string,
+    code: string,
+    ctx: AuthRequestContext = {},
+  ): Promise<string> {
     const settings = await this.loadSettings();
 
     if (await this.redis.exists(PWRESET_REDIS_KEY.lockout(sessionToken))) {
       const lockedForSec = await this.redis.ttl(
         PWRESET_REDIS_KEY.lockout(sessionToken),
       );
+      logAuthFailure(this.logger, 'passwordResetCodeRejected', 'session_locked', ctx, {
+        lockedForSec: Math.max(0, lockedForSec),
+      });
       throw new HttpException(
         {
           statusCode: HTTP_LOCKED,
@@ -124,44 +136,18 @@ export class PasswordResetService {
 
     const stored = await this.redis.get(PWRESET_REDIS_KEY.code(sessionToken));
     if (!stored) {
+      const owner = await this.redis.get(
+        PWRESET_REDIS_KEY.session(sessionToken),
+      );
+      logAuthFailure(this.logger, 'passwordResetCodeRejected', 'code_expired', ctx, {
+        userId: owner && owner !== 'decoy' ? owner : null,
+        decoySession: owner === 'decoy',
+      });
       throw new UnauthorizedException('Code expired');
     }
 
     if (stored !== code) {
-      const attempts = await this.redis.incr(
-        PWRESET_REDIS_KEY.attempts(sessionToken),
-      );
-      await this.redis.expire(
-        PWRESET_REDIS_KEY.attempts(sessionToken),
-        settings.codeTtlSeconds,
-      );
-
-      if (attempts >= settings.maxAttempts) {
-        await this.redis.setex(
-          PWRESET_REDIS_KEY.lockout(sessionToken),
-          settings.lockoutSeconds,
-          '1',
-        );
-        await this.redis.del(
-          PWRESET_REDIS_KEY.code(sessionToken),
-          PWRESET_REDIS_KEY.attempts(sessionToken),
-          PWRESET_REDIS_KEY.session(sessionToken),
-        );
-        throw new HttpException(
-          {
-            statusCode: HTTP_LOCKED,
-            message: 'Too many attempts',
-            lockedForSec: settings.lockoutSeconds,
-          },
-          HTTP_LOCKED,
-        );
-      }
-      const attemptsLeft = settings.maxAttempts - attempts;
-      throw new UnauthorizedException({
-        statusCode: HttpStatus.UNAUTHORIZED,
-        message: 'Invalid code',
-        attemptsLeft,
-      });
+      await this.rejectWrongCode(sessionToken, settings, ctx);
     }
 
     const userId = await this.redis.get(
@@ -169,11 +155,74 @@ export class PasswordResetService {
     );
     if (!userId || userId === 'decoy') {
       // Code matched but session is missing/decoy — should be impossible.
+      // AuthService audits it.
       await this.consumeSession(sessionToken);
-      throw new UnauthorizedException('Code expired');
+      const sessionState = userId === 'decoy' ? 'decoy' : 'missing';
+      logAuthFailure(
+        this.logger,
+        'passwordResetCodeRejected',
+        'code_matched_without_session',
+        ctx,
+        { sessionState },
+      );
+      throw new VerificationCodeOrphanedException(sessionState);
     }
     await this.consumeSession(sessionToken);
     return userId;
+  }
+
+  /**
+   * Wrong-code branch of `verifyCode` — mirrors `TwoFactorService`: bump the
+   * counter, lock on the `maxAttempts`-th miss, always throw.
+   */
+  private async rejectWrongCode(
+    sessionToken: string,
+    settings: PasswordResetSettings,
+    ctx: AuthRequestContext,
+  ): Promise<never> {
+    const attempts = await this.redis.incr(
+      PWRESET_REDIS_KEY.attempts(sessionToken),
+    );
+    await this.redis.expire(
+      PWRESET_REDIS_KEY.attempts(sessionToken),
+      settings.codeTtlSeconds,
+    );
+    const owner = await this.redis.get(PWRESET_REDIS_KEY.session(sessionToken));
+    const userId = owner && owner !== 'decoy' ? owner : null;
+
+    if (attempts >= settings.maxAttempts) {
+      await this.redis.setex(
+        PWRESET_REDIS_KEY.lockout(sessionToken),
+        settings.lockoutSeconds,
+        '1',
+      );
+      await this.redis.del(
+        PWRESET_REDIS_KEY.code(sessionToken),
+        PWRESET_REDIS_KEY.attempts(sessionToken),
+        PWRESET_REDIS_KEY.session(sessionToken),
+      );
+      logAuthFailure(this.logger, 'passwordResetCodeRejected', 'too_many_attempts', ctx, {
+        userId,
+        attempts,
+        lockedForSec: settings.lockoutSeconds,
+      });
+      throw new VerificationCodeLockoutException(
+        userId,
+        attempts,
+        settings.lockoutSeconds,
+      );
+    }
+    const attemptsLeft = settings.maxAttempts - attempts;
+    logAuthFailure(this.logger, 'passwordResetCodeRejected', 'wrong_code', ctx, {
+      userId,
+      attempts,
+      attemptsLeft,
+    });
+    throw new UnauthorizedException({
+      statusCode: HttpStatus.UNAUTHORIZED,
+      message: 'Invalid code',
+      attemptsLeft,
+    });
   }
 
   /**
@@ -183,11 +232,15 @@ export class PasswordResetService {
    */
   async resend(
     sessionToken: string,
+    ctx: AuthRequestContext = {},
   ): Promise<{ code: string; cooldownSec: number } | null> {
     if (await this.redis.exists(PWRESET_REDIS_KEY.resend(sessionToken))) {
       const cooldownSec = await this.redis.ttl(
         PWRESET_REDIS_KEY.resend(sessionToken),
       );
+      logAuthFailure(this.logger, 'passwordResetResendRefused', 'cooldown_active', ctx, {
+        cooldownSec: Math.max(0, cooldownSec),
+      });
       throw new HttpException(
         {
           statusCode: HttpStatus.TOO_MANY_REQUESTS,

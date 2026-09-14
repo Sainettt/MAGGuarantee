@@ -28,6 +28,7 @@ import { StatusBadge } from '@/components/carrier/StatusBadge';
 import { HoursReadout } from '@/components/claims/HoursReadout';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import {
   headlineAmount,
@@ -35,7 +36,9 @@ import {
   moneyTone,
   verifierMovedAmount,
 } from '@/lib/claims/money';
+import { classifyApiError } from '@/lib/api/errors';
 import { useClaim } from '@/lib/hooks/useClaims';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 import { cn } from '@/lib/utils';
 
 function formatDate(iso: string | null): string {
@@ -73,7 +76,8 @@ export default function ClaimDetailPage() {
   const tReklamacja = useTranslations('carrier.reklamacja');
   const params = useParams<{ nrZgl: string }>();
   const nrZgl = decodeURIComponent(params.nrZgl);
-  const { data: claim, isLoading } = useClaim(nrZgl);
+  const claimQ = useClaim(nrZgl);
+  const { data: claim, isLoading } = claimQ;
   const [sheetOpen, setSheetOpen] = useState(false);
 
   if (isLoading) {
@@ -81,6 +85,17 @@ export default function ClaimDetailPage() {
       <section className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-8">
         <Skeleton className="h-8 w-48 mb-4" />
         <Skeleton className="h-32 w-full" />
+      </section>
+    );
+  }
+
+  // A failed load (network / 5xx / 403) is NOT "not found" — only a 404 is.
+  if (!claim && claimQ.isError && classifyApiError(claimQ.error) !== 'notFound') {
+    return (
+      <section className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-8">
+        <div className="bg-card rounded-lg border border-border">
+          <ErrorState {...queryErrorProps(claimQ)} />
+        </div>
       </section>
     );
   }

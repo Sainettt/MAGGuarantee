@@ -32,6 +32,7 @@ import type { GuaranteeComplianceItem } from '@magguarantee/shared';
 import { GuaranteeEpisodeHistory } from '@/components/guarantee/GuaranteeEpisodeHistory';
 import { GuaranteeStatusRow } from '@/components/guarantee/GuaranteeStatusRow';
 import { Badge } from '@/components/ui/Badge';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import {
   compareByUrgency,
@@ -42,6 +43,7 @@ import {
   useMyGuaranteeCompliance,
   useMyGuaranteeEpisodes,
 } from '@/lib/hooks/useGuarantee';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 import { cn } from '@/lib/utils';
 
 const GROUP_ORDER: readonly GuaranteeCardGroup[] = [
@@ -108,6 +110,11 @@ export default function CarrierPorozumieniePage() {
         <div className="space-y-4">
           <GroupSkeleton />
           <GroupSkeleton />
+        </div>
+      ) : complianceQ.isError && !complianceQ.data ? (
+        // Never fall through to the calm all-clear line on a failed load.
+        <div className="rounded-xl border border-border bg-card shadow-card">
+          <ErrorState {...queryErrorProps(complianceQ)} />
         </div>
       ) : (
         <div className="space-y-4">
@@ -191,6 +198,7 @@ export default function CarrierPorozumieniePage() {
         <GuaranteeEpisodeHistory
           items={episodes}
           isLoading={episodesQ.isLoading}
+          {...queryErrorProps(episodesQ)}
           isFetchingMore={episodesQ.isFetchingNextPage}
           hasMore={Boolean(episodesQ.hasNextPage)}
           onLoadMore={() => episodesQ.fetchNextPage()}

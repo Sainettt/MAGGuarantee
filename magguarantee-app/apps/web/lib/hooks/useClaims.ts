@@ -37,6 +37,7 @@ import {
   uploadAuthorizationConfirmation,
   verifyClaim,
 } from '@/lib/api/claims';
+import { SUPPRESS_GLOBAL_ERROR } from '@/lib/query/globalErrors';
 
 export const CLAIMS_KEY = ['claims'] as const;
 
@@ -76,6 +77,9 @@ export function useClaimPreview(
     enabled,
     // Don't retry on 422 — invalid input is the user's problem to fix.
     retry: false,
+    // 422s are expected while the form is mid-edit; LivePreviewPanel renders
+    // its own error state, so no global toast.
+    meta: SUPPRESS_GLOBAL_ERROR,
     // Keep the prior preview visible while new keystrokes settle.
     placeholderData: (prev) => prev,
     staleTime: 60_000,
@@ -139,6 +143,8 @@ export function useClaimPreviewExisting(
     queryFn: () => previewExistingClaim(nrZgl as string, body as PreviewClaimDto),
     enabled,
     retry: false,
+    // Mid-edit 422s are expected; the recalc badge owns the error UX.
+    meta: SUPPRESS_GLOBAL_ERROR,
     placeholderData: (prev) => prev,
     staleTime: 60_000,
   });

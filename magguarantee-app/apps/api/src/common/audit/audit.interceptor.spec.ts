@@ -531,6 +531,51 @@ describe('AuditInterceptor (pre-Phase-4.4 ambient-tx variant)', () => {
     expect(logs[0]!.after).toBeUndefined();
   });
 
+  it('records the route template, never the query string', async () => {
+    const { writer, logs } = makeAudit();
+    const fp = makePrisma();
+    const interceptor = new AuditInterceptor(
+      makeReflector({ action: 'updateCarrier', targetType: 'Carrier' }),
+      writer,
+      fp.prisma,
+    );
+
+    // Matched route: the template wins over the concrete URL.
+    await lastValueFrom(
+      interceptor.intercept(
+        makeCtx({
+          user: { sub: 'admin-1', role: 'admin' },
+          method: 'PATCH',
+          url: '/api/v1/carriers/c-1?nip=1234567890',
+          baseUrl: '',
+          route: { path: '/api/v1/carriers/:id' },
+          headers: {},
+        }),
+        makeNext(of({ id: 'c-1' })),
+      ),
+    );
+    // No route info: the concrete path, query string stripped.
+    await lastValueFrom(
+      interceptor.intercept(
+        makeCtx({
+          user: { sub: 'admin-1', role: 'admin' },
+          method: 'PATCH',
+          url: '/api/v1/carriers/c-1?account=12345678901234567890123456',
+          headers: {},
+        }),
+        makeNext(of({ id: 'c-1' })),
+      ),
+    );
+
+    expect(logs.map((l) => l.metadata?.route)).toEqual([
+      '/api/v1/carriers/:id',
+      '/api/v1/carriers/c-1',
+    ]);
+    expect(JSON.stringify(logs.map((l) => l.metadata))).not.toMatch(
+      /1234567890/,
+    );
+  });
+
   it('merges service-side metadata onto routing metadata', async () => {
     const { writer, logs } = makeAudit();
     const fp = makePrisma();

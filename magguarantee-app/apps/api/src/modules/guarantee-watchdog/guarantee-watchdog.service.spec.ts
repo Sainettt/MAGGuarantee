@@ -7,18 +7,29 @@
 //   - auto-resolve reasons (wyjazd / vehicle_inactive);
 //   - the add()-hook resolves an open episode and never throws;
 //   - opiekun scoping (foreign carrier invisible on the board);
-//   - enabled=false short-circuit.
+//   - enabled=false short-circuit;
+//   - stamp claim/release on mail failure + the compensation handler, the
+//     no-opiekun violation semantics (2026-08-14 logging audit, item 6);
+//   - per-vehicle isolation and the guarded cron body (item 20).
 //
 // Working-day anchors are derived the SAME way as the SLA spec — from the
 // shared `addPolishWorkingDays` / `isPolishWorkingDay` engine — so the fixtures
 // stay in lockstep with `computeGuaranteeWatchdog`.
+
+import { Logger } from '@nestjs/common';
 
 import {
   addPolishWorkingDays,
   isPolishWorkingDay,
 } from '@magguarantee/shared';
 
+import type { OpsAlertService } from '../../common/ops-alert/ops-alert.service';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
+import type { MailCompensation } from '../mail/email-send.job';
+import type {
+  MailCompensationHandler,
+  MailCompensationRegistry,
+} from '../mail/mail-compensation.registry';
 import type { MailService } from '../mail/mail.service';
 import {
   GuaranteeWatchdogService,
@@ -118,6 +129,7 @@ interface Harness {
     findLatestEpisodeForAnchor: jest.Mock;
     createEpisode: jest.Mock;
     updateEpisode: jest.Mock;
+    clearEpisodeStampIfUnchanged: jest.Mock;
     listEpisodes: jest.Mock;
     findUserEmail: jest.Mock;
     findOpiekunRecipient: jest.Mock;
@@ -128,6 +140,9 @@ interface Harness {
   };
   /** In-memory store keyed by episode id, updated by createEpisode/updateEpisode. */
   store: Map<string, GuaranteeEpisodeRow>;
+  alertSend: jest.Mock;
+  /** Compensation handlers registered via onModuleInit, by kind. */
+  handlers: Map<string, MailCompensationHandler>;
 }
 
 function makeHarness(opts: {
@@ -176,6 +191,17 @@ function makeHarness(opts: {
       return merged;
     },
   );
+  const clearEpisodeStampIfUnchanged = jest.fn(
+    async (id: string, field: keyof GuaranteeEpisodeRow, stampedAt: Date) => {
+      const row = store.get(id);
+      const current = row?.[field];
+      if (!row || !(current instanceof Date) || current.getTime() !== stampedAt.getTime()) {
+        return false;
+      }
+      store.set(id, { ...row, [field]: null });
+      return true;
+    },
+  );
   const listEpisodes = jest.fn(async () => []);
   const findUserEmail = jest.fn(async () =>
     opts.carrierEmail === undefined ? 'carrier@example.com' : opts.carrierEmail,
@@ -193,6 +219,7 @@ function makeHarness(opts: {
     findLatestEpisodeForAnchor,
     createEpisode,
     updateEpisode,
+    clearEpisodeStampIfUnchanged,
     listEpisodes,
     findUserEmail,
     findOpiekunRecipient,
@@ -224,12 +251,24 @@ function makeHarness(opts: {
     }),
   } as never;
 
+  const handlers = new Map<string, MailCompensationHandler>();
+  const compensations = {
+    register: jest.fn((kind: string, handler: MailCompensationHandler) => {
+      handlers.set(kind, handler);
+    }),
+  } as unknown as MailCompensationRegistry;
+  const alertSend = jest.fn(async () => 'log-only');
+  const alerts = { send: alertSend } as unknown as OpsAlertService;
+
   const service = new GuaranteeWatchdogService(
     repo as unknown as GuaranteeWatchdogRepository,
     mail as unknown as MailService,
     config,
+    compensations,
+    alerts,
   );
-  return { service, repo, mail, store };
+  service.onModuleInit();
+  return { service, repo, mail, store, alertSend, handlers };
 }
 
 beforeEach(() => {
@@ -494,6 +533,198 @@ describe('GuaranteeWatchdogService.runDaily — resilience & config', () => {
       { deeplink: string },
     ];
     expect(props.deeplink).toBe('http://localhost:3000/carrier/delegations/new');
+  });
+});
+
+describe('GuaranteeWatchdogService — stamp semantics on mail failure (logging audit item 6)', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  type EnqueueCall = [string, unknown, { compensation: MailCompensation }];
+
+  it('an enqueue failure releases the claimed stamps (compare-and-clear) so the next run retries', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const h = makeHarness({
+      scope: [makeScopeRow({ vehicleId: 'veh-1', lastReturnAt: anchorForDaysLeft(1) })],
+      reminderSendImpl: async () => {
+        throw new Error('Queue is closed');
+      },
+    });
+
+    await h.service.runDaily(NOW);
+
+    const ep = [...h.store.values()][0]!;
+    // D-1 claimed reminder1 + the backfilled reminder3; both released.
+    expect(ep.reminder1SentAt).toBeNull();
+    expect(ep.reminder3SentAt).toBeNull();
+    expect(h.repo.clearEpisodeStampIfUnchanged).toHaveBeenCalledWith(
+      ep.id,
+      'reminder1SentAt',
+      NOW,
+    );
+  });
+
+  it('the enqueued reminder carries a compensation naming exactly the claimed stamps', async () => {
+    const h = makeHarness({
+      scope: [makeScopeRow({ vehicleId: 'veh-1', lastReturnAt: anchorForDaysLeft(1) })],
+    });
+
+    await h.service.runDaily(NOW);
+
+    const [, , opts] = h.mail.enqueueGuaranteeReminderCarrier.mock
+      .calls[0] as unknown as EnqueueCall;
+    const ep = [...h.store.values()][0]!;
+    expect(opts.compensation).toEqual({
+      kind: 'guarantee-watchdog.release-episode-stamps',
+      payload: {
+        stampedAt: NOW.toISOString(),
+        episodes: [{ id: ep.id, fields: ['reminder1SentAt', 'reminder3SentAt'] }],
+      },
+    });
+    // Claimed before enqueue → stamped while the mail is in the queue.
+    expect(ep.reminder1SentAt).toEqual(NOW);
+  });
+
+  it('a permanent queue failure (compensation handler) clears the stamps; the next run re-sends', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const h = makeHarness({
+      scope: [makeScopeRow({ vehicleId: 'veh-1', lastReturnAt: anchorForDaysLeft(3) })],
+    });
+    await h.service.runDaily(NOW);
+    const [, , opts] = h.mail.enqueueGuaranteeReminderCarrier.mock
+      .calls[0] as unknown as EnqueueCall;
+
+    const handler = h.handlers.get(opts.compensation.kind);
+    expect(handler).toBeDefined();
+    await handler!(opts.compensation.payload);
+
+    const ep = [...h.store.values()][0]!;
+    expect(ep.reminder3SentAt).toBeNull();
+
+    h.mail.enqueueGuaranteeReminderCarrier.mockClear();
+    await h.service.runDaily(NOW);
+    expect(h.mail.enqueueGuaranteeReminderCarrier).toHaveBeenCalledTimes(1);
+  });
+
+  it('a late release never erases a stamp written by a later successful run', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const h = makeHarness({
+      scope: [makeScopeRow({ vehicleId: 'veh-1', lastReturnAt: anchorForDaysLeft(3) })],
+    });
+    await h.service.runDaily(NOW);
+    const [, , opts] = h.mail.enqueueGuaranteeReminderCarrier.mock
+      .calls[0] as unknown as EnqueueCall;
+
+    // A later run re-stamped the episode with a different instant.
+    const ep = [...h.store.values()][0]!;
+    const later = new Date(NOW.getTime() + 60_000);
+    h.store.set(ep.id, { ...ep, reminder3SentAt: later });
+
+    await h.handlers.get(opts.compensation.kind)!(opts.compensation.payload);
+
+    expect(h.store.get(ep.id)?.reminder3SentAt).toEqual(later);
+  });
+
+  it('a malformed compensation payload releases nothing and does not throw', async () => {
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const h = makeHarness({});
+    const handler = h.handlers.get('guarantee-watchdog.release-episode-stamps')!;
+
+    await expect(handler({ stampedAt: 'yesterday' })).resolves.toBeUndefined();
+    expect(h.repo.clearEpisodeStampIfUnchanged).not.toHaveBeenCalled();
+  });
+
+  it('opiekun digest compensation covers violationSentAt only', async () => {
+    const h = makeHarness({
+      scope: [makeScopeRow({ vehicleId: 'veh-1', lastReturnAt: anchorForDaysLeft(-2) })],
+    });
+
+    await h.service.runDaily(NOW);
+
+    const [, , opts] = h.mail.enqueueGuaranteeOpiekunDigest.mock
+      .calls[0] as unknown as EnqueueCall;
+    const ep = [...h.store.values()][0]!;
+    expect(opts.compensation.payload).toEqual({
+      stampedAt: NOW.toISOString(),
+      episodes: [{ id: ep.id, fields: ['violationSentAt'] }],
+    });
+  });
+
+  it('violation on a carrier WITHOUT an opiekun: no mail, NOT stamped, WARN emitted', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const h = makeHarness({
+      scope: [
+        makeScopeRow({
+          vehicleId: 'veh-1',
+          lastReturnAt: anchorForDaysLeft(-2),
+          carrier: { id: 'car-9', name: 'Orphan', opiekunId: null, userId: 'u9' },
+        }),
+      ],
+    });
+
+    await h.service.runDaily(NOW);
+
+    expect(h.mail.enqueueGuaranteeOpiekunDigest).not.toHaveBeenCalled();
+    const ep = [...h.store.values()][0]!;
+    expect(ep.state).toBe('violated'); // the violation itself is recorded
+    expect(ep.violationSentAt).toBeNull(); // …but not marked as reported
+    expect(
+      warn.mock.calls.some((c) =>
+        String((c[0] as { msg?: unknown }).msg).includes('without an opiekun'),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe('GuaranteeWatchdogService — cron robustness (logging audit item 20)', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('one vehicle failing does not abort the others; the run alerts a partial failure', async () => {
+    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const h = makeHarness({
+      scope: [
+        makeScopeRow({ vehicleId: 'veh-bad', lastReturnAt: anchorForDaysLeft(3) }),
+        makeScopeRow({
+          vehicleId: 'veh-good',
+          lastReturnAt: anchorForDaysLeft(3),
+          carrier: { id: 'car-2', name: 'Good', opiekunId: 'op-1', userId: 'u2' },
+        }),
+      ],
+    });
+    h.repo.findLatestEpisodeForAnchor.mockRejectedValueOnce(new Error('lock timeout'));
+
+    await expect(h.service.runDaily(NOW)).resolves.toBeUndefined();
+
+    expect(error.mock.calls[0]?.[0]).toMatchObject({ vehicleId: 'veh-bad', errorMessage: 'lock timeout' });
+    expect(h.mail.enqueueGuaranteeReminderCarrier).toHaveBeenCalledTimes(1);
+    const [, props] = h.mail.enqueueGuaranteeReminderCarrier.mock.calls[0] as unknown as [
+      string,
+      { carrierName: string },
+    ];
+    expect(props.carrierName).toBe('Good');
+    expect(h.alertSend).toHaveBeenCalledWith(
+      expect.objectContaining({ key: 'cron-partial:guarantee-watchdog' }),
+    );
+  });
+
+  it('a scope-query crash is caught: structured ERROR + ops alert, never rejects', async () => {
+    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const h = makeHarness({});
+    h.repo.findGuaranteedVehiclesInScope.mockRejectedValueOnce(new Error('db down'));
+
+    await expect(h.service.runDaily(NOW)).resolves.toBeUndefined();
+
+    expect(error.mock.calls[0]?.[0]).toMatchObject({
+      msg: 'cron job failed',
+      job: 'guarantee-watchdog',
+      errorMessage: 'db down',
+    });
+    expect(h.alertSend).toHaveBeenCalledWith(
+      expect.objectContaining({ key: 'cron-failed:guarantee-watchdog' }),
+    );
   });
 });
 

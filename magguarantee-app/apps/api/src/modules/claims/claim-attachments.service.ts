@@ -7,7 +7,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 
-import type { ClaimDto } from '@magguarantee/shared';
+import type { ClaimAttachmentCategory, ClaimDto } from '@magguarantee/shared';
 
 import {
   assertUploadAllowed,
@@ -107,7 +107,11 @@ export class ClaimAttachmentsService {
   async download(
     nrZgl: string,
     attachmentId: string,
-  ): Promise<{ object: StorageObject; mimeType: string }> {
+  ): Promise<{
+    object: StorageObject;
+    mimeType: string;
+    category: ClaimAttachmentCategory;
+  }> {
     const claim = await this.claims.findByNrZgl(nrZgl);
     if (!claim) throw new NotFoundException('Wniosek nie znaleziony');
     const att = await this.attachments.findById(attachmentId);
@@ -119,7 +123,12 @@ export class ClaimAttachmentsService {
       throw new NotFoundException('Załącznik nie znaleziony');
     }
     const object = await this.storage.getObject(att.url);
-    return { object, mimeType: att.mimeType ?? 'application/octet-stream' };
+    return {
+      object,
+      mimeType: att.mimeType ?? 'application/octet-stream',
+      // For the controller's download log line.
+      category: att.category,
+    };
   }
 
   // ── internals ────────────────────────────────────────────
@@ -156,10 +165,11 @@ export class ClaimAttachmentsService {
     try {
       await this.storage.delete(key);
     } catch (e) {
-      this.logger.error(
-        { err: e, key },
-        'Failed to remove claim authorization attachment storage object',
-      );
+      this.logger.error({
+        msg: 'failed to remove claim authorization attachment storage object',
+        key,
+        err: errorForLog(e),
+      });
     }
   }
 
@@ -168,10 +178,22 @@ export class ClaimAttachmentsService {
     try {
       await this.attachments.hardDelete(id);
     } catch (e) {
-      this.logger.error(
-        { err: e, id },
-        'Failed to remove orphan claim authorization attachment row',
-      );
+      this.logger.error({
+        msg: 'failed to remove orphan claim authorization attachment row',
+        attachmentId: id,
+        err: errorForLog(e),
+      });
     }
   }
+}
+
+/**
+ * Error fields for a structured log line. Nest's `Logger` takes ONE object
+ * (`{ msg, ... }`); the pino-style `(obj, 'msg')` signature does not fit it
+ * (2026-08-14 logging audit, item 21).
+ */
+function errorForLog(e: unknown): { name: string; message: string; stack?: string } {
+  return e instanceof Error
+    ? { name: e.name, message: e.message, stack: e.stack }
+    : { name: 'NonError', message: String(e) };
 }

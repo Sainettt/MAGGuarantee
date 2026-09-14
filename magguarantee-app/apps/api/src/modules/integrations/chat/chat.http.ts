@@ -1,105 +1,74 @@
-// POST variant of the shared integration fetch helper.
+// Single POST to a Google Chat incoming webhook.
 //
-// The existing `modules/integrations/http-fetch.ts#fetchJsonWithRetry` is
-// GET-only (no body, `Accept: application/json`). Google Chat incoming
-// webhooks need a JSON POST, so this mirrors that helper's retry/backoff
-// shape WITHOUT touching the original:
-//   - 10 s timeout per attempt (AbortSignal.timeout).
-//   - retry on 5xx / network failure with exponential backoff (1 s, 2 s).
-//   - 4xx responses are the webhook's verdict — fail fast, no retry.
+// 2026-08-14 logging audit, item 23: this helper used to retry 3× internally
+// (1 s, 2 s backoff) INSIDE each of BullMQ's 5 attempts — up to 15 POSTs and 15
+// warn lines for one notification. Retrying is now BullMQ's job alone
+// (`attempts: 5`, exponential from 2 s, see ChatNotifierService); this function
+// makes exactly one request per attempt and reports the outcome as a typed
+// error. It does not log: the processor's `failed` listener writes the one
+// line per attempt, with job id and attempt number.
 //
-// On exhausted retries (or a 4xx) it throws an `Error` so the BullMQ
-// processor can let the job fail and BullMQ apply its own attempt/backoff
-// policy on top.
+// Never logged or thrown: the URL (it embeds the webhook key) and the response
+// body (the webhook's error page is not ours to repeat).
 
-import { Logger } from '@nestjs/common';
+import { describeError } from '../../../common/ops-alert/redact';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
-const DEFAULT_ATTEMPTS = 3;
 
-const log = new Logger('ChatWebhook');
+/** HTTP statuses that are worth another attempt despite being 4xx. */
+const RETRYABLE_4XX = new Set([408, 429]);
 
 export interface PostToChatOptions {
-  attempts?: number;
   timeoutMs?: number;
 }
 
 /**
- * POST `{ text }` as JSON to a Google Chat incoming webhook.
- *
- * Resolves on a 2xx. Throws on 4xx (fast, no retry) or after exhausting the
- * 5xx/network retries — the caller (chat processor) lets the BullMQ job fail
- * so it is retried per the queue's own policy.
+ * The webhook call failed. `retryable === false` means another attempt cannot
+ * help (revoked / malformed webhook: 4xx other than 408/429) — the processor
+ * turns that into an `UnrecoverableError`.
+ */
+export class ChatWebhookError extends Error {
+  constructor(
+    message: string,
+    /** Upstream HTTP status, or `null` when there was no response. */
+    readonly status: number | null,
+    readonly retryable: boolean,
+  ) {
+    super(message);
+    this.name = 'ChatWebhookError';
+  }
+}
+
+/**
+ * POST `{ text }` as JSON. Resolves on 2xx; throws `ChatWebhookError` otherwise
+ * (non-2xx status, network failure or the 10 s timeout).
  */
 export async function postToChatWebhook(
   url: string,
   text: string,
   options: PostToChatOptions = {},
 ): Promise<void> {
-  const attempts = options.attempts ?? DEFAULT_ATTEMPTS;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const body = JSON.stringify({ text });
-
-  let lastError: unknown = null;
-  for (let i = 0; i < attempts; i++) {
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        signal: AbortSignal.timeout(timeoutMs),
-        headers: { 'Content-Type': 'application/json' },
-        body,
-      });
-      if (res.ok) {
-        return;
-      }
-      // 4xx — the webhook rejected the request (bad URL, revoked, malformed).
-      // Retrying won't help; fail fast.
-      if (res.status >= 400 && res.status < 500) {
-        const detail = await safeReadText(res);
-        log.warn({ msg: 'chat webhook 4xx', status: res.status });
-        throw new Error(
-          `Chat webhook returned ${res.status}${detail ? `: ${detail}` : ''}`,
-        );
-      }
-      // 5xx — transient; record and retry unless out of attempts.
-      lastError = new Error(`Chat webhook returned ${res.status}`);
-      log.warn({
-        msg: 'chat webhook 5xx, will retry',
-        status: res.status,
-        attempt: i + 1,
-        attemptsLeft: attempts - i - 1,
-      });
-    } catch (err) {
-      // A thrown 4xx Error above must bubble straight out (it carries the
-      // "returned 4" prefix); only network/timeout errors are retried.
-      if (err instanceof Error && /Chat webhook returned 4/.test(err.message)) {
-        throw err;
-      }
-      lastError = err;
-      log.warn({
-        msg: 'chat webhook network/timeout, will retry',
-        attempt: i + 1,
-        attemptsLeft: attempts - i - 1,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-    if (i < attempts - 1) {
-      await sleep(1000 * 2 ** i);
-    }
-  }
-  throw lastError instanceof Error
-    ? lastError
-    : new Error(`Chat webhook unavailable after ${attempts} attempts`);
-}
-
-async function safeReadText(res: Response): Promise<string> {
+  let res: Response;
   try {
-    return await res.text();
-  } catch {
-    return '';
+    res = await fetch(url, {
+      method: 'POST',
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+  } catch (err) {
+    // Name only (`TimeoutError`, `TypeError: fetch failed`) — an undici
+    // message can include the target URL, which embeds the webhook key.
+    const { errorName } = describeError(err);
+    throw new ChatWebhookError(`Chat webhook unreachable (${errorName})`, null, true);
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  res.body?.cancel().catch(() => undefined);
+  if (res.ok) return;
+  const retryable = res.status >= 500 || RETRYABLE_4XX.has(res.status);
+  throw new ChatWebhookError(
+    `Chat webhook returned HTTP ${res.status}`,
+    res.status,
+    retryable,
+  );
 }

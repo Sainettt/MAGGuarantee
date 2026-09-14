@@ -19,6 +19,11 @@
 #
 # Required pre-step (one-time, both VPS and local):
 #   docker network create proxy-net
+#
+# POSTGRES_DATA / REDIS_DATA / MINIO_DATA have NO defaults — compose refuses to
+# start until .env sets them. VPS: absolute /opt/magguarantee/data/*. Local
+# smoke test: any explicit path, e.g. ./data/postgres (resolves to infra/data/,
+# gitignored) — a conscious choice rather than a silent fallback.
 
 services:
   postgres:
@@ -30,12 +35,25 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required in .env}
       POSTGRES_DB: magguarantee
     volumes:
-      - ${POSTGRES_DATA:-./data/postgres}:/var/lib/postgresql/data
+      # No default on purpose (all three data paths): a silent `./data/...`
+      # fallback put live data inside the git checkout, where the backup job
+      # does not look and `git clean -xfd` deletes it. Set it in .env — see
+      # .env.staging.example.
+      - ${POSTGRES_DATA:?POSTGRES_DATA required in .env — use an absolute path}:/var/lib/postgresql/data
     # Bind to loopback only — Postgres is reachable from the VPS host via
     # 127.0.0.1:5432, but NOT from the public internet (ufw blocks 5432).
     # GUI clients (DBeaver, databasus, psql) connect through an SSH tunnel.
     ports:
       - '127.0.0.1:5432:5432'
+    # Same logging flags as prod — see the note in docker-compose.prod.yml
+    # (connections for direct-DB forensics; slow statements WITHOUT parameter
+    # values, which would otherwise leak NIPs / emails / hashes into the log).
+    command: >
+      postgres
+      -c log_connections=on
+      -c log_disconnections=on
+      -c log_min_duration_statement=1000
+      -c log_parameter_max_length=0
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U magguarantee']
       interval: 10s
@@ -48,18 +66,22 @@ services:
       options:
         max-size: '50m'
         max-file: '3'
+        compress: 'true'
 
   redis:
     image: redis:7-alpine
     container_name: magguarantee-redis
     restart: unless-stopped
+    # `noeviction` is REQUIRED by BullMQ — an LRU policy silently deletes queue
+    # keys under memory pressure (lost jobs, stalled workers). With noeviction a
+    # full Redis fails writes loudly instead. See docker-compose.prod.yml.
     command: >
       redis-server
       --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
+      --maxmemory-policy noeviction
       --appendonly yes
     volumes:
-      - ${REDIS_DATA:-./data/redis}:/data
+      - ${REDIS_DATA:?REDIS_DATA required in .env — use an absolute path}:/data
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
@@ -72,6 +94,7 @@ services:
       options:
         max-size: '20m'
         max-file: '3'
+        compress: 'true'
 
   # Mailhog catches all outgoing email. Web UI bound to 127.0.0.1 only — on
   # the VPS reach it via SSH tunnel:  ssh -L 8025:localhost:8025 magguarantee-staging
@@ -88,6 +111,7 @@ services:
       options:
         max-size: '10m'
         max-file: '2'
+        compress: 'true'
 
   # S3-compatible object storage — vehicle umowa / cabotage screenshot
   # uploads (VehicleAttachment). For real production this can be swapped for
@@ -102,7 +126,7 @@ services:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY:?S3_ACCESS_KEY required in .env}
       MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?S3_SECRET_KEY required in .env}
     volumes:
-      - ${MINIO_DATA:-./data/minio}:/data
+      - ${MINIO_DATA:?MINIO_DATA required in .env — use an absolute path}:/data
     # Loopback-only — the API reaches MinIO over the `internal` network; the
     # host ports are just for SSH-tunnel admin (console on 9001).
     ports:
@@ -120,6 +144,7 @@ services:
       options:
         max-size: '20m'
         max-file: '3'
+        compress: 'true'
 
   # One-shot: waits for MinIO, creates the `magguarantee` bucket if missing,
   # then exits 0. `api` waits for this so uploads never hit a missing bucket.
@@ -143,6 +168,7 @@ services:
       options:
         max-size: '5m'
         max-file: '2'
+        compress: 'true'
 
   api:
     build:
@@ -173,6 +199,7 @@ services:
       options:
         max-size: '100m'
         max-file: '5'
+        compress: 'true'
 
   web:
     build:
@@ -213,6 +240,7 @@ services:
       options:
         max-size: '50m'
         max-file: '3'
+        compress: 'true'
 
 networks:
   internal:

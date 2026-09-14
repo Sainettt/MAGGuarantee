@@ -34,6 +34,7 @@ import { Badge } from '@/components/ui/Badge';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { formatDateFull } from '@/lib/format/numbers';
+import type { QueryErrorProps } from '@/lib/query/queryErrorProps';
 import { Car, Truck, User } from 'lucide-react';
 
 function ActiveBadge({ active }: { active: boolean }) {
@@ -45,7 +46,7 @@ function ActiveBadge({ active }: { active: boolean }) {
   );
 }
 
-interface FleetTableProps<T> {
+interface FleetTableProps<T> extends Partial<QueryErrorProps> {
   rows: T[];
   isLoading: boolean;
   /**
@@ -83,6 +84,7 @@ export function FleetVehiclesTable({
   rowAriaLabel,
   hasActiveFilters,
   emptyFiltered,
+  ...errorProps
 }: FleetTableProps<VehicleListItem>) {
   const t = useTranslations(namespace);
 
@@ -174,6 +176,7 @@ export function FleetVehiclesTable({
       onRowClick={onRowClick}
       rowAriaLabel={rowAriaLabel}
       isLoading={isLoading}
+      {...errorProps}
       hasActiveFilters={hasActiveFilters}
       emptyFiltered={emptyFiltered}
       empty={
@@ -195,6 +198,7 @@ export function FleetDriversTable({
   namespace,
   onRowClick,
   rowAriaLabel,
+  ...errorProps
 }: FleetTableProps<DriverListItem>) {
   const t = useTranslations(namespace);
 
@@ -232,6 +236,7 @@ export function FleetDriversTable({
       onRowClick={onRowClick}
       rowAriaLabel={rowAriaLabel}
       isLoading={isLoading}
+      {...errorProps}
       empty={
         <EmptyState
           icon={User}
@@ -251,6 +256,7 @@ export function FleetTrailersTable({
   namespace,
   onRowClick,
   rowAriaLabel,
+  ...errorProps
 }: FleetTableProps<TrailerListItem>) {
   const t = useTranslations(namespace);
 
@@ -286,6 +292,7 @@ export function FleetTrailersTable({
       onRowClick={onRowClick}
       rowAriaLabel={rowAriaLabel}
       isLoading={isLoading}
+      {...errorProps}
       empty={
         <EmptyState
           icon={Truck}

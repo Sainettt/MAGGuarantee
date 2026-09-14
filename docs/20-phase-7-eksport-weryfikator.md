@@ -90,7 +90,7 @@
 
 ### Backend (api-agent)
 - Новый `delegation-state-machine.ts` (по образцу `claim-state-machine.ts`).
-- `POST /delegations/:id/ready` — `eksport|admin`, `zgloszony→gotowy` (+ откат `gotowy→zgloszony`, пока не `w_trasie`). `@Audit('delegation.markReady')`.
+- `POST /delegations/:id/ready` — `eksport|admin`, `zgloszony→gotowy` (+ откат `gotowy→zgloszony` флагом `rollback: true`, пока не `w_trasie`). `@Audit('delegation.markReady')`; откат пишется как `delegation.rollbackReady` (2026-09-14, `AuditContext.setAction`).
 - `POST /delegations/:id/in-transit` — `weryfikator|admin`, `gotowy→w_trasie`, `verifiedBy/At`. `@Audit('delegation.markInTransit')`. ⚠️ **§0‴: body `{ actualDepartureAt }` (полный datetime, required); 422 `DEPARTURE_DATE_FUTURE`.**
 - `POST /delegations/:id/returned` — `weryfikator|admin`, `w_trasie→zjechal`, body `{ actualReturnAt: date }`, транзакция (lastDroveAt + авто-пересчёт). `@Audit('delegation.markReturned')`. ⚠️ **§0‴: `actualReturnAt` — полный datetime (не date); 422 `RETURN_DATE_FUTURE` / `RETURN_BEFORE_DEPARTURE`.**
 - `POST /delegations/:id/cancel` — добавить `admin` (любой активный); carrier без изменений (свой `zgloszony`).

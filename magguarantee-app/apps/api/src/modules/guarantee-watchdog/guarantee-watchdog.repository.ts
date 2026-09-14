@@ -87,6 +87,29 @@ export interface CreateGuaranteeEpisodeData {
   violatedAt?: Date | null;
 }
 
+/** The per-episode "mail sent" dedup stamps. */
+export const EPISODE_STAMP_FIELDS = [
+  'reminder3SentAt',
+  'reminder1SentAt',
+  'violationSentAt',
+] as const;
+export type EpisodeStampField = (typeof EPISODE_STAMP_FIELDS)[number];
+
+/** `{ <field>: value }` with a literal key, so Prisma's input types accept it. */
+function stampPatch(
+  field: EpisodeStampField,
+  value: Date | null,
+): Pick<UpdateGuaranteeEpisodeData, EpisodeStampField> {
+  switch (field) {
+    case 'reminder3SentAt':
+      return { reminder3SentAt: value };
+    case 'reminder1SentAt':
+      return { reminder1SentAt: value };
+    case 'violationSentAt':
+      return { violationSentAt: value };
+  }
+}
+
 /** Partial patch for an existing episode row (escalation / flags / resolve). */
 export interface UpdateGuaranteeEpisodeData {
   state?: PrismaEpisodeState;
@@ -273,6 +296,25 @@ export class GuaranteeWatchdogRepository {
       data,
     });
     return this._flatten(row);
+  }
+
+  /**
+   * Compare-and-clear of one "mail sent" stamp: sets `field` back to NULL only
+   * while it still holds `stampedAt` — the value this run claimed. A stamp a
+   * LATER run wrote (after a successful re-send) is left alone. Returns whether
+   * a row was cleared. Used to release a claim when the reminder / digest mail
+   * could not be enqueued or failed permanently in the queue.
+   */
+  async clearEpisodeStampIfUnchanged(
+    id: string,
+    field: EpisodeStampField,
+    stampedAt: Date,
+  ): Promise<boolean> {
+    const res = await this.prisma.client.guaranteeIdleEpisode.updateMany({
+      where: { id, ...stampPatch(field, stampedAt) },
+      data: stampPatch(field, null),
+    });
+    return res.count > 0;
   }
 
   /**

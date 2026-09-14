@@ -17,6 +17,7 @@
 import type { CSSProperties, ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
 
 export interface DataTableColumn<T> {
@@ -98,6 +99,21 @@ export interface DataTableProps<T> {
    * a full table; pass a smaller count for compact embedded tables). Default 8.
    */
   skeletonRows?: number;
+  /**
+   * Load-failure state (TanStack `query.isError`). Distinct from `empty`: with
+   * no rows the body renders `<ErrorState>` (never the "no data yet" empty);
+   * with rows still on screen (a failed background refetch) a compact banner
+   * row flags them as possibly stale above the data.
+   */
+  isError?: boolean;
+  /** The failure itself (`query.error`) — picks network / 5xx / 403 copy. */
+  error?: unknown;
+  /** «Spróbuj ponownie» handler, e.g. `() => void query.refetch()`. */
+  onRetry?: () => void;
+  /** Spinner on the retry button while the refetch runs (`query.isFetching`). */
+  isRetrying?: boolean;
+  /** Custom node replacing the default `<ErrorState>` block (no-rows case). */
+  errorState?: ReactNode;
   className?: string;
 }
 
@@ -170,8 +186,15 @@ export function DataTable<T>({
   hasActiveFilters,
   isLoading,
   skeletonRows = 8,
+  isError = false,
+  error,
+  onRetry,
+  isRetrying,
+  errorState,
   className,
 }: DataTableProps<T>) {
+  const showErrorBlock = !isLoading && isError && rows.length === 0;
+  const showStaleBanner = !isLoading && isError && rows.length > 0;
   return (
     <div
       className={cn(
@@ -209,7 +232,32 @@ export function DataTable<T>({
                   rowIndex={i}
                 />
               ))}
-            {!isLoading && rows.length === 0 && (
+            {showErrorBlock && (
+              <tr>
+                <td colSpan={columns.length} className="px-3 py-0">
+                  {errorState ?? (
+                    <ErrorState
+                      error={error}
+                      onRetry={onRetry}
+                      isRetrying={isRetrying}
+                    />
+                  )}
+                </td>
+              </tr>
+            )}
+            {showStaleBanner && (
+              <tr>
+                <td colSpan={columns.length} className="px-3 py-2">
+                  <ErrorState
+                    variant="banner"
+                    error={error}
+                    onRetry={onRetry}
+                    isRetrying={isRetrying}
+                  />
+                </td>
+              </tr>
+            )}
+            {!isLoading && !isError && rows.length === 0 && (
               <tr>
                 <td colSpan={columns.length} className="px-3 py-0">
                   {(hasActiveFilters && emptyFiltered ? emptyFiltered : empty) ?? (

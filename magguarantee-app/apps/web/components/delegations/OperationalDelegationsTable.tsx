@@ -21,8 +21,9 @@ import { Button } from '@/components/ui/Button';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { formatDateShort } from '@/lib/format/numbers';
+import type { QueryErrorProps } from '@/lib/query/queryErrorProps';
 
-interface Props {
+interface Props extends Partial<QueryErrorProps> {
   rows: DelegationDto[];
   isLoading: boolean;
   /**
@@ -49,6 +50,7 @@ export function OperationalDelegationsTable({
   hasActiveFilters,
   onClearFilters,
   renderActions,
+  ...errorProps
 }: Props) {
   const t = useTranslations(namespace);
   const tCommon = useTranslations('common');
@@ -139,6 +141,7 @@ export function OperationalDelegationsTable({
         onRowClick={setTarget}
         rowAriaLabel={rowAriaLabel}
         isLoading={isLoading}
+        {...errorProps}
         hasActiveFilters={hasActiveFilters}
         empty={
           <EmptyState

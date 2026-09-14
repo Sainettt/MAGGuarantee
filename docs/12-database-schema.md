@@ -195,6 +195,7 @@ model User {
   uploadedCarrierAttachments CarrierAttachment[]
   notedDailyKm               VehicleDailyKm[]        @relation("DailyKmNotedBy")
   auditEntries       AuditLog[]
+  triggeredEmailLogs EmailLog[]     @relation("EmailLogTriggeredBy")  // email_logs.triggeredById (ON DELETE SET NULL)
   refreshTokens      RefreshToken[]
 
   createdAt DateTime  @default(now())
@@ -804,10 +805,14 @@ model MonthlyLimit {
   @@map("monthly_limits")
 }
 
+// Append-only НА УРОВНЕ БД: plpgsql-триггер (миграция
+// 20260914120000_audit_log_append_only_trigger) RAISE-ит на DELETE / TRUNCATE /
+// UPDATE; единственный пропускаемый UPDATE — FK-действие ON DELETE SET NULL
+// при hard-delete пользователя. См. §«AuditLog — append-only на уровне БД».
 model AuditLog {
   id         String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId     String? @db.Uuid
-  user       User?   @relation(fields: [userId], references: [id])
+  user       User?   @relation(fields: [userId], references: [id])  // ON DELETE SET NULL (дефолт Prisma для optional)
   userRole   Role?
   action     String
   targetType String?
@@ -859,6 +864,44 @@ model ClaimSequence {
   lastNumber Int      @default(0)
   updatedAt  DateTime @updatedAt
   @@map("claim_sequences")
+}
+
+// ─── EMAIL LOG (журнал доставки очереди email-send) ─────
+// Одна строка на email-JOB по ФИНАЛЬНОМУ исходу: `sent` при успехе, `failed`
+// когда ретраи BullMQ исчерпаны (промежуточные попытки строк не дают). Пишет
+// api email-processor; write-once — без updatedAt и soft-delete. api чистит
+// строки старше EMAIL_LOG_RETENTION_DAYS (дефолт 180) обычным hard DELETE.
+// НИКОГДА не добавлять колонки для тела письма, props шаблона, 2FA/reset-кодов,
+// временных паролей, токенов. errorMessage короткий и уже очищенный writer-ом.
+enum EmailLogStatus {
+  sent
+  failed
+}
+
+model EmailLog {
+  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  template          String                // ключ шаблона EmailSendJob, напр. '2fa-code'
+  jobId             String?               // BullMQ job id
+  recipients        String[]              // адреса (to + cc + bcc)
+  subject           String?
+  status            EmailLogStatus
+  attempts          Int                   // всего попыток, включая финальную; CHECK >= 0
+  errorName         String?               // класс ошибки, напр. 'GaxiosError'
+  errorMessage      String?               // коротко, scrubbed writer-ом
+  providerMessageId String?               // Gmail message id / SMTP Message-ID
+  targetType        String?               // как в AuditLog: 'Claim', ...
+  targetKey         String?               // nrZgl, plateNumber, ...
+  triggeredById     String?        @db.Uuid  // чьё действие поставило письмо; NULL = cron/system
+  triggeredBy       User?          @relation("EmailLogTriggeredBy", fields: [triggeredById], references: [id], onDelete: SetNull)
+  createdAt         DateTime       @default(now())
+  sentAt            DateTime?             // CHECK: status='sent' ⇒ sentAt IS NOT NULL
+  @@index([createdAt])
+  @@index([targetType, targetKey])
+  @@index([status])
+  @@map("email_logs")
+  // + CHECK (raw SQL в миграции add_email_logs):
+  //   email_log_attempts_non_negative  CHECK ("attempts" >= 0)
+  //   email_log_sent_has_sent_at       CHECK ("status" <> 'sent' OR "sentAt" IS NOT NULL)
 }
 ```
 
@@ -1109,6 +1152,9 @@ derived hours.
 | Watchdog per-машина (ensure-эпизод, история) | `guarantee_idle_episodes(vehicleId, state)` |
 | «≤1 открытый эпизод на машину» (write-инвариант) | PARTIAL UNIQUE `guarantee_idle_episodes(vehicleId) WHERE state <> 'resolved'` |
 | Audit по target | `audit_log(targetType, targetKey)` |
+| Журнал писем: лента + retention-prune (`createdAt < now − EMAIL_LOG_RETENTION_DAYS`) | `email_logs(createdAt)` |
+| Письма по бизнес-объекту (напр. все письма по wniosku) | `email_logs(targetType, targetKey)` |
+| Фильтр «только провалы» | `email_logs(status)` |
 
 ## Soft-delete vs hard-delete
 
@@ -1126,7 +1172,8 @@ derived hours.
 | ClaimAttachment | без `deletedAt`; физически удаляется только rollback-ом неудачного аплоада (orphan-cleanup) + каскад от Claim (который не удаляется никогда). |
 | GuaranteeIdleEpisode | append-only журнал, `deletedAt` нет; не в allowlist soft-delete-extension → extension его не трогает (закрытие эпизода = `state='resolved'` + `resolvedReason`, не удаление) |
 | RefreshToken | рантаймом НЕ удаляется (revoke/rotate = `update`); физически уходит только `ON DELETE CASCADE` при hard-delete User (внутри carrier hard). |
-| AuditLog | append-only, никогда не удаляем |
+| AuditLog | append-only, никогда не удаляем — **закреплено триггером в БД** (DELETE/TRUNCATE/UPDATE → RAISE), см. §«AuditLog — append-only на уровне БД» |
+| EmailLog | write-once журнал доставки, `deletedAt` нет; hard DELETE только retention-prune api (строки старше `EMAIL_LOG_RETENTION_DAYS`, дефолт 180); триггер audit_log на него не распространяется |
 | MonthlyLimit / AppConfig / ClaimSequence | справочники/счётчики, delete-путей нет (upsert-only) |
 
 Реализация: Prisma client extension (`soft-delete.extension.ts`), который добавляет `WHERE deleted_at IS NULL` ко всем `find*`/`count`/`updateMany` и переписывает `delete`/`deleteMany` в `update { deletedAt: now() }`. Включается только для моделей из `SOFT_DELETE_MODELS`. Настоящее физическое удаление — только через symbol-флаг `[INCLUDE_SOFT_DELETED]: true` (escape hatch); такие вызовы выполняются на pre-extension **root-клиенте**, т.е. ВНЕ ambient `@Audit`-транзакции (аудит-строка и физический DELETE не атомарны — осознанный trade-off).
@@ -1137,6 +1184,26 @@ derived hours.
 - `ON DELETE CASCADE` разрешён ТОЛЬКО «неотъемлемым» дочерним строкам самой записи: `*_attachments` (метаданные файлов), `vehicle_daily_km`, `claim_attachments`, `refresh_tokens`. Бизнес-сущности (флот, wnioski, wyjazdy, эпизоды) каскадом не удаляются никогда — это сознательная политика, а не упущение.
 - Следствие: admin-эндпоинты `/hard` реально срабатывают только для записей без истории (созданных по ошибке). При наличии ссылок API отвечает **409 Conflict** с machine-кодом `CARRIER_HAS_REFERENCES` / `VEHICLE_HAS_REFERENCES` / `DRIVER_HAS_REFERENCES` / `TRAILER_HAS_REFERENCES` (пре-чек счётчиками с `[INCLUDE_SOFT_DELETED]` + перехват P2003 на случай гонки).
 - Судьба файлов в MinIO: явный `DELETE …/attachments/:id` стирает строку (soft) **и объект** у drivers/trailers/carriers; у vehicles объект сознательно остаётся (историческое исключение по task brief). Hard-delete родителя объекты MinIO не трогает вообще; rollback-пути неудачных аплоадов подчищают и строку, и объект.
+
+### AuditLog — append-only на уровне БД (2026-09-14)
+
+Миграция `20260914120000_audit_log_append_only_trigger`. Раньше «append-only» держалось только на конвенции (api вызывает лишь `auditLog.create`). Теперь функция `audit_log_append_only_guard()` + два триггера:
+
+| Операция | Триггер | Поведение |
+|---|---|---|
+| `DELETE` | `audit_log_append_only_row` (BEFORE, FOR EACH ROW) | всегда `RAISE` |
+| `TRUNCATE` (в т.ч. каскадом от `TRUNCATE "users" CASCADE`) | `audit_log_append_only_truncate` (BEFORE, FOR EACH STATEMENT) | всегда `RAISE` |
+| `UPDATE` | `audit_log_append_only_row` | `RAISE`, кроме одного случая ниже |
+
+**Единственный разрешённый UPDATE** — FK-действие `audit_log_userId_fkey ON DELETE SET NULL` при hard-delete пользователя (сейчас это только shadow-логин внутри hard-delete перевозчика). Пропускается, только если одновременно: `OLD.userId IS NOT NULL`, `NEW.userId IS NULL`; все прочие колонки не изменились (сравнение `to_jsonb(row) - 'userId'` — колонки, добавленные позже, покрываются автоматически); пользователя `OLD.userId` в `users` уже нет (FK-действие — AFTER-триггер на `users`, удалённая строка к этому моменту невидима). Следствия: прямой `UPDATE audit_log SET "userId" = NULL` для существующего (в т.ч. soft-deleted) пользователя отклоняется; `ON UPDATE CASCADE` по `users.id` тоже отклоняется (uuid-id никогда не переписываются — и перепривязка аудита к другому id как раз то, от чего защищаемся).
+
+Ошибка: SQLSTATE `P0001`, сообщение начинается с `AUDIT_LOG_APPEND_ONLY:`. В Prisma приходит как неизвестная ошибка запроса → api отдаст 500 (так и должно быть: это баг, а не пользовательская ситуация).
+
+**Escape hatch в зоне досягаемости приложения НЕТ — сознательно.** Флаг сессии (`SET LOCAL magguarantee.allow_audit_purge = 'on'`) может выставить любая роль, т.е. ровно тот код, от которого триггер защищает. На 2026-09-14 ни seed, ни тесты, ни api не удаляют/не транкейтят `audit_log`, так что флаг не нужен. Сброс dev-БД — `prisma migrate reset` (DROP SCHEMA не зажигает DML-триггеры). Осознанная чистка (будущая retention-политика, RODO-запрос) — отдельная ревьюируемая миграция или owner-сессия, одной транзакцией: `ALTER TABLE "audit_log" DISABLE TRIGGER "audit_log_append_only_row"` → чистка → `ENABLE TRIGGER` (для TRUNCATE — `audit_log_append_only_truncate`).
+
+**Модель угроз.** Триггер защищает от багов приложения и от скомпрометированных/инъектированных DML-запросов через приложение. Он **НЕ защищает от владельца таблицы / суперпользователя**: тот может `DISABLE`/`DROP TRIGGER` или `SET session_replication_role = replica`. Сейчас api подключается под `POSTGRES_USER` из compose, а в официальном образе это суперпользователь — отдельная non-owner runtime-роль (с `REVOKE UPDATE, DELETE, TRUNCATE ON audit_log`) остаётся infra-задачей. Против враждебного владельца БД защищают только offsite-бэкапы.
+
+Prisma-диффер триггеры/функции не интроспектирует — drift на `migrate dev` они не дают; в `schema.prisma` отражены только комментарием над `model AuditLog`.
 
 ## Миграции
 
@@ -1173,6 +1240,8 @@ derived hours.
 | `20260707130000_guarantee_watchdog` | Guarantee Watchdog (план 2026-07-07). Аддитивная миграция. Новые enum-ы `GuaranteeEpisodeState {warning, violated, resolved}`, `GuaranteeAnchorSource {zjechal, agreement}`, `GuaranteeResolveReason {wyjazd, agreement_off, vehicle_inactive}`. Новая таблица **`guarantee_idle_episodes`** — журнал «плохих» гарантийных циклов машины (FK на `vehicles` и `carriers` `ON DELETE RESTRICT`; nullable FK `resolvedByDelegationId` на `delegations` `ON DELETE SET NULL`; **без `deletedAt`** — append-only журнал, soft-delete-extension его игнорирует; индексы `(carrierId, state)`, `(vehicleId, state)`). Hand-added SQL: **partial unique** `GuaranteeIdleEpisode_open_vehicle_key` `ON ("vehicleId") WHERE "state" <> 'resolved'` — не выразимо в Prisma DSL, держит инвариант «≤1 открытый эпизод на машину». Новая колонка **`vehicles.agreementSince DATE`** (дата включения гарантии; API ведёт её на toggle agreement). **Бэкфилл:** `UPDATE vehicles SET agreementSince = CURRENT_DATE WHERE agreement = true AND agreementSince IS NULL` — rollout-grace: уже-гарантийные машины получают свежее 10-раб.-дневное окно с дня деплоя. Hand-authored (БД недоступна для интерактивного `migrate dev` в среде агента) — SQL идентичен `migrate diff` (проверено `migrate status` = «up to date»), применена через `prisma migrate deploy`. |
 | `20260731120000_add_reklamacja_resolution_fields` | Reworked «reklamacje». Аддитивная миграция: новый enum `ReklamacjaResolution {UZNANA, ODRZUCONA}` + 5 nullable колонок на `claims` — `reklamacjaOrderNumber TEXT` («nr zlecenia» уznanej рекламации, отдельный от `orderNumber`), `reklamacjaResolution` (исход; NULL = нет рекламации или pending), `reklamacjaSubmittedAt`/`reklamacjaDecidedAt TIMESTAMP(3)`, `reklamacjaDecidedById UUID` (FK → `users(id)` `ON DELETE SET NULL ON UPDATE CASCADE`, без индекса — зеркало `claims_verifiedById_fkey`). **Best-effort бэкфилл** строк, поданных по старой семантике (прод с 2026-07-29): pending (`status='REKLAMACJA'`) получают `reklamacjaSubmittedAt = statusChangedAt`; решённые (`status IN ('ZAAKCEPTOWANO','ODRZUCONO')`) — `reklamacjaResolution` из статуса (`ZAAKCEPTOWANO→UZNANA`, иначе `ODRZUCONA`) + для UZNANA `reklamacjaOrderNumber = orderNumber` (`COALESCE(NULLIF(...,''),'BRAK')`); `reklamacjaDecidedAt`/`ById` остаются NULL (моменты не записывались — NULL = «неизвестно»). **Добавляет CHECK** `claim_reklamacja_resolution_complete` (`reklamacjaResolution IS DISTINCT FROM 'UZNANA' OR reklamacjaOrderNumber` не пустой) — ПОСЛЕ бэкфилла, иначе бэкфилленные UZNANA-строки его не пройдут. `claim_accepted_payment_complete` НЕ трогается: рекламация никогда не пишет `amountApproved`/`orderNumber`/`orderDate`. Hand-authored (БД недоступна в среде агента), применится через `prisma migrate deploy`. |
 | `20260722083212_monthly_limit_km_per_saturday` | Odd-Saturday guarantee. Аддитивная миграция: `ALTER TABLE monthly_limits ADD COLUMN kmPerSaturday DECIMAL(8,2)` (nullable, без `@default` — существующие строки бэкфилятся в `NULL`, без потери данных). Семантика: км за одну зачётную нечётную (1-ю/3-ю/5-ю) субботу месяца, оцениваются по `ratePerKm`; `NULL`/`0` ⇒ `0` в km-calc (fallback владеет api — km-calc.service / limits, **НЕ** БД). Та же точность, что у `kmPerDay` (`DECIMAL(8,2)`; km — Decimal, не Float). |
+| `20260914120000_audit_log_append_only_trigger` | Аудит логирования 2026-08-14, п.7. Hand-authored SQL, без изменений данных: функция `audit_log_append_only_guard()` (plpgsql) + триггеры `audit_log_append_only_row` (BEFORE UPDATE OR DELETE, FOR EACH ROW) и `audit_log_append_only_truncate` (BEFORE TRUNCATE, FOR EACH STATEMENT). RAISE на всё, кроме FK-действия `ON DELETE SET NULL` по `userId` после hard-delete пользователя. Семантика, escape hatch и модель угроз — §«AuditLog — append-only на уровне БД». |
+| `20260914120100_add_email_logs` | Аудит логирования 2026-08-14, п.11. Аддитивная: enum `EmailLogStatus {sent, failed}` + таблица **`email_logs`** (журнал финальных исходов email-job; FK `triggeredById → users(id)` `ON DELETE SET NULL ON UPDATE CASCADE`; индексы `createdAt`, `(targetType, targetKey)`, `status`). Hand-added **CHECK** `email_log_attempts_non_negative` (`attempts >= 0`) и `email_log_sent_has_sent_at` (`status <> 'sent' OR sentAt IS NOT NULL`). Колонок для тела письма / кодов / паролей нет и не будет. Строки пишет api email-processor, чистит retention-prune по `EMAIL_LOG_RETENTION_DAYS` (дефолт 180). |
 
 Production deploy: `prisma migrate deploy` в CI/CD пайплайне (без `--create-only`).
 
@@ -1182,6 +1251,13 @@ Production deploy: `prisma migrate deploy` в CI/CD пайплайне (без `
 
 - 14 типов прицепов (Firanka, Plandeka, Chłodnia, … — это бизнес-справочник, не тестовые данные).
 - 1 admin-пользователь (credentials в env).
+
+**Пароли и seed (2026-09-14, аудит логирования п.25):**
+
+- `prisma/seed.ts` (dev) — общий dev-пароль всех демо-пользователей лежит в константе `DEV_PASSWORD` в самом файле; в вывод seed он **не печатается** (вывод попадает в CI/container-логи) — печатаются только созданные логины/e-mail/роли.
+- `prisma/seed.prod.ts` — пароль первого админа берётся **только** из `SEED_ADMIN_PASSWORD`; хардкоженного fallback-а нет. Если переменная не задана или пустая — скрипт падает с понятной ошибкой **до любой записи в БД**. На повторном запуске существующий админ не трогается (`update: {}`), но переменную всё равно нужно передать.
+
+Snippet ниже — исходный эскиз структуры; актуальный код — `prisma/seed.ts` / `prisma/seed-data.ts` / `prisma/seed.prod.ts`.
 - Дефолтные `app_config` (lockout-ttl, code-ttl, max-attempts, ставки-fallback).
 - Лимиты на текущий и следующий год (заглушки на 540 km/0.5 EUR — admin отредактирует через UI).
 
@@ -1206,7 +1282,8 @@ async function main() {
     create: {
       login: 'admin',
       email: process.env.SEED_ADMIN_EMAIL ?? 'admin@magtrans.eu',
-      passwordHash: await bcrypt.hash(process.env.SEED_ADMIN_PASSWORD ?? 'changeme', 12),
+      // no fallback — seed.prod.ts throws before any write when the env var is missing
+      passwordHash: await bcrypt.hash(requireEnv('SEED_ADMIN_PASSWORD'), 12),
       role: 'admin',
       name: 'Administrator',
     },

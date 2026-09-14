@@ -125,6 +125,11 @@ export class MagspaceClient {
    * itself, but we normalise here too so the value we later store on the User
    * row matches the one it matched on.
    *
+   * The address has to travel in the query string — that is MAGSpace's
+   * contract (MAGSpace/docs/07-directory-api.md). It stays out of OUR logs
+   * because neither `fetchJsonWithRetry` nor `_get` ever logs the URL; a
+   * "not an employee" 404 shows up only as tag + host + status.
+   *
    * @throws EmployeeNotFoundError on 404.
    * @throws DirectoryUnavailableError on anything else.
    */
@@ -208,11 +213,14 @@ export class MagspaceClient {
       // employee"), everything else — 401 (bad token), 5xx, timeout — means the
       // directory cannot be consulted right now.
       if (opts.notFoundIsEmpty && statusOf(err) === 404) return NOT_FOUND;
+      // Tag + status + error class only. Never the URL (`lookup?email=…` carries
+      // the employee's address) and never `err.message`, which for non-helper
+      // errors can embed request details (2026-09-14 logging audit, item 2).
       this.logger.warn({
         msg: 'magspace request failed',
         tag,
         status: statusOf(err),
-        error: err instanceof Error ? err.message : String(err),
+        error: err instanceof Error ? err.name : typeof err,
       });
       throw new DirectoryUnavailableError(`MAGSpace ${tag} failed`, err);
     }

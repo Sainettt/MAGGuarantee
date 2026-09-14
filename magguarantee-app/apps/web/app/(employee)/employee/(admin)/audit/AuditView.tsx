@@ -31,6 +31,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { useAudit } from '@/lib/hooks/useAudit';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
 import { formatDateTime } from '@/lib/format/numbers';
 import { relativeTimeKey } from '@/lib/format/relative-time';
@@ -86,7 +87,8 @@ export function AuditView() {
     [targetType, user, debouncedAction, from, to, cursor],
   );
 
-  const { data, isLoading } = useAudit(filters);
+  const listQ = useAudit(filters);
+  const { data, isLoading } = listQ;
 
   const hasActiveFilters = Boolean(
     targetType || user || from || to || debouncedAction.trim().length >= 2,
@@ -272,6 +274,7 @@ export function AuditView() {
         rowKey={(r) => r.id}
         onRowClick={openRow}
         isLoading={isLoading}
+        {...queryErrorProps(listQ)}
         hasActiveFilters={hasActiveFilters}
         empty={
           <EmptyState

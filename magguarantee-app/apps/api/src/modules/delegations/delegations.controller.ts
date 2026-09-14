@@ -40,7 +40,10 @@ import {
 } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { DelegationsService } from './delegations.service';
+import {
+  DelegationsService,
+  MARK_READY_AUDIT_ACTIONS,
+} from './delegations.service';
 
 /**
  * Delegations REST surface per docs/13-api-design.md#delegations.
@@ -164,12 +167,16 @@ export class DelegationsController {
    * `POST /delegations/:id/ready` — eksport|admin. `zgloszony → gotowy` (clean
    * flip after a SpedTrans zlecenie) + rollback `gotowy → zgloszony` (pre-
    * `w_trasie`, via `rollback: true`). The state machine 422s an illegal edge.
+   *
+   * Audit: `delegation.markReady` for the flip; the service renames the row to
+   * `delegation.rollbackReady` on the rollback branch (`AuditContext.setAction`)
+   * and stashes the pre-transition status / sped number as `before`.
    */
   @Post(':id/ready')
   @HttpCode(HttpStatus.OK)
   @Roles('eksport', 'admin')
   @Audit({
-    action: 'delegation.markReady',
+    action: MARK_READY_AUDIT_ACTIONS.ready,
     targetType: 'Delegation',
     targetKey: (req) => req.params?.id,
   })

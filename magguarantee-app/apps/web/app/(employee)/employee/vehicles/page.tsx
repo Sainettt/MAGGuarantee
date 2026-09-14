@@ -32,12 +32,14 @@ import { VehicleDetailModal } from '@/components/vehicles/VehicleDetailModal';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useDeleteVehicle, useVehicles } from '@/lib/hooks/useVehicles';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 import {
   VEHICLE_CARRIER_PARAM,
   VEHICLE_STATUS_OPTIONS,
   VEHICLE_STATUS_PARAM,
   parseVehicleStatusParam,
 } from '@/lib/vehicles-filter';
+import { SUPPRESS_GLOBAL_ERROR } from '@/lib/query/globalErrors';
 
 import { VehicleFormDialog } from './VehicleFormDialog';
 
@@ -81,7 +83,7 @@ export default function VehiclesPage() {
     [pathname, router, searchParams],
   );
 
-  const { data, isLoading } = useVehicles({
+  const listQ = useVehicles({
     q: search.length >= 2 ? search : undefined,
     carrierId: carrierId || undefined,
     lifecycleStatus: status ?? undefined,
@@ -89,6 +91,7 @@ export default function VehiclesPage() {
     // vehicle the KPI tile counted, and the table has no pagination control.
     limit: 200,
   });
+  const { data, isLoading } = listQ;
 
   const carriersQ = useCarriers({ limit: 200 });
 
@@ -104,7 +107,7 @@ export default function VehiclesPage() {
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<VehicleDto | null>(null);
-  const softDeleteM = useDeleteVehicle();
+  const softDeleteM = useDeleteVehicle({ meta: SUPPRESS_GLOBAL_ERROR });
 
   const hasActiveFilters = Boolean(search.length >= 2 || carrierId || status);
   const clearFilters = useCallback(() => {
@@ -302,6 +305,7 @@ export default function VehiclesPage() {
         rowKey={(r) => r.id}
         onRowClick={openDetail}
         isLoading={isLoading}
+        {...queryErrorProps(listQ)}
         hasActiveFilters={hasActiveFilters}
         empty={
           <EmptyState

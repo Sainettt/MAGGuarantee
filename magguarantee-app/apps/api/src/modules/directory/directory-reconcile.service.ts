@@ -25,6 +25,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
 
+import { describeError } from '../../common/ops-alert/redact';
 import type { Env } from '../../config/env.schema';
 import { AuditWriter } from '../audit/audit.service';
 import { MailService } from '../mail/mail.service';
@@ -123,7 +124,7 @@ export class DirectoryReconcileService implements OnModuleInit, OnModuleDestroy 
       void this.run().catch((err: unknown) => {
         this.logger.error({
           msg: 'directory reconcile threw',
-          error: err instanceof Error ? err.message : String(err),
+          ...describeError(err),
         });
       });
     }, minutes * 60_000);
@@ -370,7 +371,7 @@ export class DirectoryReconcileService implements OnModuleInit, OnModuleDestroy 
     };
 
     // Per-admin, so one bad address cannot swallow the rest of the report.
-    await Promise.allSettled(
+    const results = await Promise.allSettled(
       admins.map((admin) =>
         this.mail.enqueueDirectoryReconcileReport(admin.email, {
           ...base,
@@ -378,6 +379,29 @@ export class DirectoryReconcileService implements OnModuleInit, OnModuleDestroy 
         }),
       ),
     );
+    this._logRejectedReports(results, admins, aborted ? 'aborted-run' : 'run');
+  }
+
+  /**
+   * One WARN per admin whose report could not be enqueued, keyed by user id
+   * (no address in the log) — 2026-08-14 logging audit, item 11. Previously
+   * the `allSettled` outcome was discarded, so a report nobody received left
+   * no trace at all.
+   */
+  private _logRejectedReports(
+    results: PromiseSettledResult<void>[],
+    admins: UserRow[],
+    report: 'run' | 'aborted-run' | 'outage',
+  ): void {
+    results.forEach((result, i) => {
+      if (result.status !== 'rejected') return;
+      this.logger.warn({
+        msg: 'directory reconcile report: enqueue rejected for admin',
+        report,
+        adminId: admins[i]?.id,
+        ...describeError(result.reason),
+      });
+    });
   }
 
   /**
@@ -399,7 +423,7 @@ export class DirectoryReconcileService implements OnModuleInit, OnModuleDestroy 
 
     const admins = await this.users.listByRole('admin');
     if (admins.length > 0) {
-      await Promise.allSettled(
+      const results = await Promise.allSettled(
         admins.map((admin) =>
           this.mail.enqueueDirectoryReconcileReport(admin.email, {
             adminName: admin.name ?? admin.login,
@@ -413,6 +437,12 @@ export class DirectoryReconcileService implements OnModuleInit, OnModuleDestroy 
           }),
         ),
       );
+      this._logRejectedReports(results, admins, 'outage');
+    } else {
+      this.logger.warn({
+        msg: 'directory reconcile: MAGSpace outage alert has no active admin to go to',
+        downForMinutes: Math.round(downForMs / 60_000),
+      });
     }
     await this.state.markFailureAlerted();
     await this.audit.log({

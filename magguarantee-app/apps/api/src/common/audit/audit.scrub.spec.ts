@@ -16,7 +16,7 @@ describe('scrubForAudit', () => {
       password: 'plaintext',
       passwordHash: '$2b$...',
       tokenHash: 'abc',
-      code: '123456',
+      resetCode: '123456',
       authorization: 'Bearer ...',
       sessionToken: 'aaaaaaaaaa',
       secret: 'shh',
@@ -27,11 +27,114 @@ describe('scrubForAudit', () => {
     expect(out.password).toBe(AUDIT_REDACTED);
     expect(out.passwordHash).toBe(AUDIT_REDACTED);
     expect(out.tokenHash).toBe(AUDIT_REDACTED);
-    expect(out.code).toBe(AUDIT_REDACTED);
+    expect(out.resetCode).toBe(AUDIT_REDACTED);
     expect(out.authorization).toBe(AUDIT_REDACTED);
     expect(out.sessionToken).toBe(AUDIT_REDACTED);
     expect(out.secret).toBe(AUDIT_REDACTED);
     expect(out.ok).toBe(true);
+  });
+
+  describe('key rules (2026-09-14 audit item 16)', () => {
+    it.each([
+      // secret codes: camelCase / snake / kebab / acronym variants
+      'resetCode',
+      'otpCode',
+      'verificationCode',
+      'verifyCode',
+      'loginCode',
+      'twoFactorCode',
+      'recoveryCodes',
+      'reset_code',
+      'sms-code',
+      'TOTPCode',
+      // one-time passwords / MFA / PINs
+      'otp',
+      'OTP',
+      'totpSeed',
+      'mfaSecret',
+      'mfaEnrollment',
+      'pin',
+      'PIN',
+      'fuelCardPin',
+      'fuel_card_pin',
+      'cardCvv',
+      // keys & credentials
+      'apiKey',
+      'api_key',
+      'X-API-KEY',
+      'privateKey',
+      'secretAccessKey',
+      'accessKeyId',
+      'credentials',
+      'googleCredential',
+      'cookie',
+      'setCookie',
+      // pre-existing substring words keep working
+      'newPassword',
+      'temporaryPassword',
+      'refreshToken',
+      'idToken',
+      'clientSecret',
+      'Authorization',
+    ])('redacts %s', (key) => {
+      const out = scrubForAudit({ [key]: 'value' }) as Record<string, unknown>;
+      expect(out[key]).toBe(AUDIT_REDACTED);
+    });
+
+    it.each([
+      // bare `code` is a business identifier in every audited payload
+      'code',
+      // business `…Code` fields that flow through audit rows today
+      'postalCode',
+      'departurePostalCode',
+      'returnPostalCode',
+      'countryCode',
+      'trailerTypeCode',
+      'shortCode',
+      'stanowiskoCode',
+      'statusCode',
+      'httpStatusCode',
+      'currencyCode',
+      'teamCode',
+      // words that merely CONTAIN a sensitive substring
+      'shipping',
+      'mapping',
+      'typing',
+      'pinned',
+      'storageKey',
+      'targetKey',
+      'threadKey',
+      'authProvider',
+      'nip',
+      'plateNumber',
+      'accountNumbers',
+    ])('preserves %s', (key) => {
+      const out = scrubForAudit({ [key]: 'value' }) as Record<string, unknown>;
+      expect(out[key]).toBe('value');
+    });
+
+    it('keeps team / stanowisko codes readable in realistic audit payloads', () => {
+      const team = {
+        id: 't-1',
+        code: '1.1.13',
+        name: 'Zespół A',
+        dispatchers: [{ id: 'd-1', name: 'Jan', login: 'jan' }],
+      };
+      const vehicle = {
+        id: 'v-1',
+        plateNumber: 'WGM1234',
+        fuelCardPin: '4321',
+        dispatchTeam: { id: 't-1', code: '1.1.13' },
+      };
+      const mapping = { code: 'PLANISTA', name: 'Planista', role: 'planista' };
+
+      expect(scrubForAudit(team)).toEqual(team);
+      expect(scrubForAudit(mapping)).toEqual(mapping);
+      expect(scrubForAudit(vehicle)).toEqual({
+        ...vehicle,
+        fuelCardPin: AUDIT_REDACTED,
+      });
+    });
   });
 
   it('matches keys case-insensitively', () => {

@@ -11,6 +11,12 @@
 #
 # When a real domain is registered (e.g. *.magtrans.eu), split this back into
 # two `domain.com { ... }` blocks for cleaner URLs.
+#
+# Client IP: Caddy IS the edge here — browsers connect to it directly — so
+# there is deliberately NO `trusted_proxies`. Caddy discards any
+# X-Forwarded-For a client sends and sets it to the real peer address, and the
+# api resolves it with TRUST_PROXY_HOPS=1. Adding `trusted_proxies` on this box
+# would let anyone on the internet forge their audit-log IP.
 
 {
     # Email used by Let's Encrypt for expiry notifications.
@@ -18,6 +24,34 @@
 }
 
 vps-29a0acba.vps.ovh.net {
+    # ── Access log ──────────────────────────────────────────────────────────
+    # JSON to stdout → `docker logs caddy` (json-file driver, rotated and
+    # compressed in docker-compose.yml). No request bodies; Cookie /
+    # Authorization headers are redacted by Caddy by default. The query string
+    # and Referer are dropped because some GETs carry NIP / bank account
+    # numbers in the query — same filter as Caddyfile.prod.
+    log {
+        output stdout
+        format filter {
+            wrap json
+            fields {
+                request>uri regexp [?].* ?REDACTED
+                request>headers>Referer delete
+            }
+        }
+    }
+
+    # ── Health probes → API ─────────────────────────────────────────────────
+    # /health and /ready are un-prefixed api routes (main.ts). Without this
+    # block they fall through to web, whose middleware answers 307 → /login:
+    # a false-green check. Must stay BEFORE the web catch-all. Not logged —
+    # monitor noise.
+    @api_health path /health /ready
+    handle @api_health {
+        log_skip
+        reverse_proxy magguarantee-api:3001
+    }
+
     # /api/* → API container. The full path (including /api/v1/...) is
     # preserved — Nest already mounts its routes under /api/v1, so Caddy
     # doesn't need to rewrite anything.

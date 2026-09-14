@@ -20,9 +20,10 @@ import { RedisService } from '../redis/redis.service';
  * the admin UI only renders metadata, and re-sending uses MailService's
  * own template constructors.
  *
- * When BullMQ lands (Phase 9), `MailService` swaps to `queue.add(...)` and
- * this registry becomes a no-op (or is replaced by a `getJobs(...)` proxy).
- * The contract on the controller side does not change.
+ * BullMQ landed (Phase 9): rows are written by `MailService._dispatch` from
+ * inside the `email-send` worker, one row per job (see `record`). The durable
+ * per-email delivery record is the `email_logs` table; this ring buffer stays
+ * the short-lived diagnostics view behind the resend button.
  */
 
 const LIST_KEY = 'mail:jobs:list';
@@ -64,17 +65,26 @@ export class MailJobsRegistry {
   constructor(private readonly redis: RedisService) {}
 
   /**
-   * Record a send attempt. Always inserts a fresh job id even on retry —
-   * BullMQ semantics would attach attempts to the same job, but for the
-   * audit surface we want each send (success or failure) as a distinct row.
+   * Record a send attempt.
+   *
+   * With an `id` (a queued job — `job-<bullmqJobId>`) the row is UPSERTED:
+   * every attempt of the same job overwrites one record with the current state
+   * and the real `attemptsMade`, and the id moves to the head of the list
+   * (LREM + LPUSH, so it is never listed twice). Without an `id` (sync fallback,
+   * admin resend) a fresh random id is used, as before. (2026-08-14 logging
+   * audit, item 23 — the old behaviour wrote one row per attempt, each with
+   * `attemptsMade: 1`.)
+   *
+   * `failedReason` must already be scrubbed by the caller (`describeError`).
    */
   async record(args: {
+    id?: string;
     payload: MailJobPayload;
     state: MailJobState;
     failedReason?: string;
     attemptsMade?: number;
   }): Promise<MailJobRecord> {
-    const id = randomUUID();
+    const id = args.id ?? randomUUID();
     const record: MailJobRecord = {
       id,
       state: args.state,
@@ -90,6 +100,7 @@ export class MailJobsRegistry {
         JOB_TTL_SEC,
         JSON.stringify(record),
       );
+      if (args.id) await client.lrem(LIST_KEY, 0, id);
       await client.lpush(LIST_KEY, id);
       await client.ltrim(LIST_KEY, 0, LIST_CAP - 1);
     } catch (err) {

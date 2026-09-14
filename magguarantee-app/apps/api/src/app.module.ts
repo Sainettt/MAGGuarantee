@@ -7,6 +7,8 @@ import { LoggerModule } from 'nestjs-pino';
 
 import { AlertsModule } from './modules/alerts/alerts.module';
 import { AuditModule } from './common/audit/audit.module';
+import { OpsAlertModule } from './common/ops-alert/ops-alert.module';
+import { buildHttpLoggerOptions } from './common/logging/http-logger.options';
 import { AuditWriterModule } from './modules/audit/audit.module';
 import { validateEnv } from './config/env.schema';
 import { HealthModule } from './health/health.module';
@@ -35,6 +37,7 @@ import { PasswordModule } from './modules/password/password.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
 import { RedisModule } from './modules/redis/redis.module';
 import { TeamsModule } from './modules/teams/teams.module';
+import { TokenCleanupModule } from './modules/token-cleanup/token-cleanup.module';
 import { TrailerTypesModule } from './modules/trailer-types/trailer-types.module';
 import { TrailersModule } from './modules/trailers/trailers.module';
 import { UsersModule } from './modules/users/users.module';
@@ -49,34 +52,11 @@ import { WeeklyReportModule } from './modules/weekly-report/weekly-report.module
       isGlobal: true,
       validate: validateEnv,
     }),
+    // Request serializer (method + path without query string, masked), route
+    // template on the completion line, nested secret redaction — PII policy
+    // per docs/16-jobs-and-integrations.md#логирование. See the options file.
     LoggerModule.forRoot({
-      pinoHttp: {
-        level: process.env.LOG_LEVEL ?? 'info',
-        transport:
-          process.env.NODE_ENV !== 'production'
-            ? { target: 'pino-pretty' }
-            : undefined,
-        // PII redaction per docs/16-jobs-and-integrations.md#логирование.
-        redact: {
-          paths: [
-            'req.headers.authorization',
-            'req.headers.cookie',
-            'res.headers["set-cookie"]',
-            'req.body.password',
-            'req.body.code',
-            'req.body.sessionToken',
-            '*.password',
-            '*.passwordHash',
-            '*.refreshToken',
-            '*.accessToken',
-            '*.code',
-          ],
-          censor: '***',
-        },
-        autoLogging: {
-          ignore: (req) => req.url === '/health' || req.url === '/ready',
-        },
-      },
+      pinoHttp: buildHttpLoggerOptions(),
     }),
     // Default rate limit: 100 req/min/IP (overridable via @Throttle).
     // In NODE_ENV=test we crank the cap up so the e2e suite can issue the
@@ -89,6 +69,9 @@ import { WeeklyReportModule } from './modules/weekly-report/weekly-report.module
     ]),
     // Scheduled jobs (docs/21 §5 — verification-SLA daily digest is the first).
     ScheduleModule.forRoot(),
+    // Ops alerts (Google Chat webhook / log-only) — global, injected by crons,
+    // BullMQ processors and RedisService. Before them so it resolves first.
+    OpsAlertModule,
     // BullMQ root (in-process workers). Global — must be imported before the
     // feature modules that `BullModule.registerQueue(...)` (Mail / Chat).
     // docs/16-jobs-and-integrations.md#структура-bullmq.
@@ -134,6 +117,8 @@ import { WeeklyReportModule } from './modules/weekly-report/weekly-report.module
     VehicleRemovalAlertModule,
     // Phase 9 — Monday admin summary cron (GAS analog `sendWeeklyReport`).
     WeeklyReportModule,
+    // Nightly refresh-token reaper + email_logs retention prune (03:30).
+    TokenCleanupModule,
     HealthModule,
   ],
   providers: [

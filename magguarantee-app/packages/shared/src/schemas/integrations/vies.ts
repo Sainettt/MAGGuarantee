@@ -1,8 +1,12 @@
 // VIES VAT lookup contract.
 //
-// Wire surface for `GET /api/v1/integrations/vies/:country/:vat` per
-// docs/13-api-design.md#external-integrations and the upstream REST API
-// at https://ec.europa.eu/taxation_customs/vies/rest-api.
+// Wire surface for `POST /api/v1/integrations/vies/check` (body
+// `{ country, vat }`) per docs/13-api-design.md#external-integrations and the
+// upstream REST API at https://ec.europa.eu/taxation_customs/vies/rest-api.
+//
+// The VAT number used to travel in the URL path (`GET /vies/:country/:vat`),
+// which put it in every access/proxy log line. Since the 2026-09-14 logging
+// audit (item 2) it travels in the request body; the lookup stays read-only.
 //
 // We expose a *stable subset* of the upstream payload — countryCode, vatNumber,
 // valid, name, address, requestDate. Extra upstream fields are passed through
@@ -21,7 +25,7 @@ import { z } from 'zod';
 import { IsoDateSchema, IsoDateTimeSchema } from '../common';
 
 /**
- * Country code path-param for the VIES lookup. Two-letter ISO 3166-1 alpha-2,
+ * Country code field of the VIES lookup body. Two-letter ISO 3166-1 alpha-2,
  * uppercase. Upstream rejects mismatched casing; we normalize on the way in.
  */
 export const ViesCountrySchema = z
@@ -30,13 +34,23 @@ export const ViesCountrySchema = z
 export type ViesCountry = z.infer<typeof ViesCountrySchema>;
 
 /**
- * VAT number path-param. VIES accepts digits only (sometimes with internal
- * letters for IE/NL), 8–12 chars typical. We allow 4–14 to be permissive.
+ * VAT number field of the VIES lookup body. VIES accepts digits only
+ * (sometimes with internal letters for IE/NL), 8–12 chars typical. We allow
+ * 4–14 to be permissive.
  */
 export const ViesVatSchema = z
   .string()
   .regex(/^[A-Za-z0-9]{4,14}$/, 'VAT must be 4–14 alphanumeric characters');
 export type ViesVat = z.infer<typeof ViesVatSchema>;
+
+/** Request body for `POST /integrations/vies/check`. */
+export const ViesCheckBodySchema = z
+  .object({
+    country: ViesCountrySchema,
+    vat: ViesVatSchema,
+  })
+  .strict();
+export type ViesCheckBody = z.infer<typeof ViesCheckBodySchema>;
 
 /**
  * Stable response DTO. `cachedAt` is non-null for cache hits and indicates

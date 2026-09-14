@@ -7,24 +7,44 @@
 # Bring up once per VPS (after `docker network create proxy-net`):
 #
 #   cd /opt/caddy
+#   cp .env.example .env        # PROD: set UPSTREAM_PROXY_CIDRS (see there)
 #   docker compose up -d
 #
-# Caddy reads Caddyfile from this directory. Reload after changes without
-# downtime:
+# Caddy reads Caddyfile from this directory. Reload after changes to the
+# Caddyfile without downtime:
 #
 #   docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+#
+# A change to `.env` needs a container recreate instead — `caddy reload`
+# re-reads the Caddyfile but not the container environment:
+#
+#   docker compose up -d
+#
+# Access logs (JSON, one line per request) are on the container's stdout:
+#
+#   docker compose logs -f caddy
 
 services:
   caddy:
     image: caddy:2-alpine
     container_name: caddy
     restart: unless-stopped
+    environment:
+      # PROD only (Caddyfile.prod → `trusted_proxies`): the address(es) the
+      # corporate nginx connects from, space-separated CIDRs. Comes from
+      # /opt/caddy/.env, which compose auto-loads from this directory. The
+      # default trusts nothing reachable from outside the container. Ignored by
+      # the staging Caddyfile, where Caddy is the edge and trusts no one.
+      UPSTREAM_PROXY_CIDRS: ${UPSTREAM_PROXY_CIDRS:-127.0.0.1/32}
     # PROD (Caddyfile.prod, behind the corporate nginx): only :80 is used —
     # nginx terminates TLS and forwards over HTTP, so :443 never receives a
     # connection and HTTP/3 is dead weight (nginx does not speak h3 upstream).
-    # Harmless to leave mapped; ufw is what actually restricts access, and it
-    # should open :80 to the nginx address only. See
-    # docs/23-prod-deployment-runbook.md §2.2.
+    #
+    # ⚠️ Docker-published ports BYPASS ufw: Docker's DNAT rules run before
+    # ufw's INPUT chain, so `ufw allow from <nginx> to any port 80` does NOT
+    # restrict these ports. Restrict them in the DOCKER-USER chain instead —
+    # see infra/README.md «Docker и ufw» and docs/23-prod-deployment-runbook.md
+    # §2.2.
     ports:
       - '80:80'
       - '443:443'
@@ -40,6 +60,7 @@ services:
       options:
         max-size: '50m'
         max-file: '3'
+        compress: 'true'
 
 networks:
   proxy-net:

@@ -33,6 +33,7 @@ import { Select } from '@/components/ui/Select';
 import { DelegationsTable } from '@/components/delegations/DelegationsTable';
 import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
 import { useDelegations } from '@/lib/hooks/useDelegations';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 
 const STATUSES: readonly DelegationStatus[] = [
   'zgloszony',
@@ -78,7 +79,8 @@ export function DelegationsView() {
     [status, debouncedQ, from, to, cursor],
   );
 
-  const { data, isLoading } = useDelegations(filters);
+  const delegationsQ = useDelegations(filters);
+  const { data, isLoading } = delegationsQ;
 
   const resetCursor = () => {
     setCursor(undefined);
@@ -174,6 +176,7 @@ export function DelegationsView() {
       <DelegationsTable
         rows={data?.items ?? []}
         isLoading={isLoading}
+        {...queryErrorProps(delegationsQ)}
         namespace="delegations.admin.table"
         hasActiveFilters={hasActiveFilters}
         onClearFilters={clearFilters}

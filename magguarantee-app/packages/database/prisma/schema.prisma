@@ -347,6 +347,7 @@ model User {
   uploadedTrailerAttachments TrailerAttachment[]
   notedDailyKm               VehicleDailyKm[]    @relation("DailyKmNotedBy")
   auditEntries               AuditLog[]
+  triggeredEmailLogs         EmailLog[]          @relation("EmailLogTriggeredBy")
   refreshTokens              RefreshToken[]
 
   createdAt DateTime  @default(now())
@@ -1221,6 +1222,14 @@ model MonthlyLimit {
 
 // ─── AUDIT LOG ──────────────────────────────────────────
 
+// Append-only AT THE DATABASE LEVEL (migration audit_log_append_only_trigger):
+// a plpgsql trigger RAISEs on DELETE, TRUNCATE and UPDATE. The one UPDATE it
+// lets through is the FK action `ON DELETE SET NULL` on a user hard-delete —
+// `userId` non-null → NULL, every other column unchanged, and the referenced
+// user row already gone. There is NO session-flag escape hatch on purpose; a
+// deliberate purge is a reviewed migration / owner session (docs/12
+// §"AuditLog — append-only на уровне БД"). Guards against app bugs and injected
+// DML, NOT against the DB owner / superuser (who can drop the trigger).
 model AuditLog {
   id         String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId     String? @db.Uuid
@@ -1308,4 +1317,57 @@ model EmailThread {
   updatedAt DateTime @updatedAt
 
   @@map("email_threads")
+}
+
+// ─── EMAIL LOG (delivery journal of the email-send queue) ──
+// One row per email JOB on its FINAL outcome — written by the api email
+// processor after the last attempt: `sent` on success, `failed` once BullMQ
+// retries are exhausted (intermediate retries do NOT produce rows). Write-once:
+// no updatedAt, no soft-delete. The api prunes rows older than
+// EMAIL_LOG_RETENTION_DAYS (default 180) — plain hard DELETE, this table is NOT
+// covered by the audit_log trigger.
+//
+// NEVER add columns for the message body, template props, 2FA / reset codes,
+// temporary passwords or tokens. `errorMessage` is short and scrubbed by the
+// writer (api), not by the DB.
+enum EmailLogStatus {
+  sent
+  failed
+}
+
+model EmailLog {
+  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  // EmailSendJob template key, e.g. '2fa-code' (see api email-send.job.ts).
+  template          String
+  // BullMQ job id (null when the send did not go through the queue).
+  jobId             String?
+  // Envelope recipient addresses (to + cc + bcc).
+  recipients        String[]
+  subject           String?
+  status            EmailLogStatus
+  // Total attempts made, including the final one. CHECK >= 0 (raw SQL).
+  attempts          Int
+  // Error class name (e.g. 'GaxiosError') and a short, scrubbed message.
+  errorName         String?
+  errorMessage      String?
+  // Gmail API message id / SMTP Message-ID returned by the provider.
+  providerMessageId String?
+  // Business target, same convention as AuditLog: 'Claim' + nrZgl, ...
+  targetType        String?
+  targetKey         String?
+  // User whose action queued the email; NULL for cron/system sends.
+  triggeredById     String?        @db.Uuid
+  triggeredBy       User?          @relation("EmailLogTriggeredBy", fields: [triggeredById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now())
+  // Provider acceptance time. CHECK: status='sent' ⇒ sentAt IS NOT NULL.
+  sentAt    DateTime?
+  // + CHECK constraints (raw SQL in migration add_email_logs):
+  //   email_log_attempts_non_negative  CHECK ("attempts" >= 0)
+  //   email_log_sent_has_sent_at       CHECK ("status" <> 'sent' OR "sentAt" IS NOT NULL)
+
+  @@index([createdAt])
+  @@index([targetType, targetKey])
+  @@index([status])
+  @@map("email_logs")
 }

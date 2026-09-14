@@ -27,6 +27,8 @@ import {
   useHardDeleteTrailer,
   useTrailers,
 } from '@/lib/hooks/useTrailers';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
+import { SUPPRESS_GLOBAL_ERROR } from '@/lib/query/globalErrors';
 
 import { TrailerFormDialog } from './TrailerFormDialog';
 
@@ -48,12 +50,13 @@ export default function TrailersPage() {
   const [carrierId, setCarrierId] = useState<string>('');
   const [trailerTypeId, setTrailerTypeId] = useState<string>('');
 
-  const { data, isLoading } = useTrailers({
+  const listQ = useTrailers({
     q: search.length >= 2 ? search : undefined,
     carrierId: carrierId || undefined,
     trailerTypeId: trailerTypeId || undefined,
     limit: 50,
   });
+  const { data, isLoading } = listQ;
 
   const carriersQ = useCarriers({ limit: 200 });
   const typesQ = useTrailerTypes({ active: true });
@@ -70,8 +73,8 @@ export default function TrailersPage() {
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TrailerDto | null>(null);
-  const hardDeleteM = useHardDeleteTrailer();
-  const softDeleteM = useDeleteTrailer();
+  const hardDeleteM = useHardDeleteTrailer({ meta: SUPPRESS_GLOBAL_ERROR });
+  const softDeleteM = useDeleteTrailer({ meta: SUPPRESS_GLOBAL_ERROR });
 
   const hasActiveFilters = Boolean(
     search.length >= 2 || carrierId || trailerTypeId,
@@ -234,6 +237,7 @@ export default function TrailersPage() {
         rowKey={(r) => r.id}
         onRowClick={openDetail}
         isLoading={isLoading}
+        {...queryErrorProps(listQ)}
         hasActiveFilters={hasActiveFilters}
         empty={
           <EmptyState

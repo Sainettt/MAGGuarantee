@@ -292,10 +292,21 @@ export class TrailersService {
   async downloadAttachment(
     trailerId: string,
     attachmentId: string,
-  ): Promise<{ object: StorageObject; fileName: string; mimeType: string }> {
+  ): Promise<{
+    object: StorageObject;
+    fileName: string;
+    mimeType: string;
+    category: TrailerAttachmentCategory;
+  }> {
     const att = await this._loadAttachmentOf(trailerId, attachmentId);
     const object = await this.storage.getObject(att.storageKey);
-    return { object, fileName: att.fileName, mimeType: att.mimeType };
+    return {
+      object,
+      fileName: att.fileName,
+      mimeType: att.mimeType,
+      // For the controller's download log line (ids + category, no filename).
+      category: att.category,
+    };
   }
 
   /** Soft-deletes an attachment row and removes the MinIO object. */
@@ -381,10 +392,11 @@ export class TrailersService {
         try {
           await this.trailers.hardDelete(trailer.id);
         } catch (e) {
-          this.logger.error(
-            { err: e, trailerId: trailer.id },
-            'Rollback: failed to remove trailer row',
-          );
+          this.logger.error({
+            msg: 'rollback: failed to remove trailer row',
+            trailerId: trailer.id,
+            err: errorForLog(e),
+          });
         }
       }
       throw err;
@@ -403,20 +415,22 @@ export class TrailersService {
       try {
         await this.attachments.hardDelete(id);
       } catch (e) {
-        this.logger.error(
-          { err: e, attachmentId: id },
-          'Rollback: failed to remove attachment row',
-        );
+        this.logger.error({
+          msg: 'rollback: failed to remove trailer attachment row',
+          attachmentId: id,
+          err: errorForLog(e),
+        });
       }
     }
     for (const key of uploadedKeys) {
       try {
         await this.storage.delete(key);
       } catch (e) {
-        this.logger.error(
-          { err: e, key },
-          'Rollback: failed to remove storage object',
-        );
+        this.logger.error({
+          msg: 'rollback: failed to remove trailer attachment storage object',
+          key,
+          err: errorForLog(e),
+        });
       }
     }
   }
@@ -426,10 +440,11 @@ export class TrailersService {
     try {
       await this.storage.delete(key);
     } catch (e) {
-      this.logger.error(
-        { err: e, key },
-        'Failed to remove trailer attachment storage object',
-      );
+      this.logger.error({
+        msg: 'failed to remove trailer attachment storage object',
+        key,
+        err: errorForLog(e),
+      });
     }
   }
 
@@ -698,6 +713,17 @@ function attachmentRowToDto(row: TrailerAttachmentRow): TrailerAttachmentDto {
     uploadedById: row.uploadedById,
     createdAt: row.createdAt.toISOString(),
   };
+}
+
+/**
+ * Error fields for a structured log line. Nest's `Logger` takes ONE object
+ * (`{ msg, ... }`); the pino-style `(obj, 'msg')` signature does not fit it
+ * (2026-08-14 logging audit, item 21).
+ */
+function errorForLog(e: unknown): { name: string; message: string; stack?: string } {
+  return e instanceof Error
+    ? { name: e.name, message: e.message, stack: e.stack }
+    : { name: 'NonError', message: String(e) };
 }
 
 /** Maps an included trailer-row attachment to the public DTO (no storageKey). */

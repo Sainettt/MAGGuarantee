@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
 
 import type { Env } from '../../config/env.schema';
+import { JOB_REMOVE_ON_COMPLETE, JOB_REMOVE_ON_FAIL } from './job-retention';
 
 /**
  * Root BullMQ wiring (in-process workers).
@@ -17,6 +18,14 @@ import type { Env } from '../../config/env.schema';
  * (`maxRetriesPerRequest: null`) — BullMQ blocks on `BRPOPLPUSH`, which ioredis
  * forbids on a connection with a finite `maxRetriesPerRequest`, so we must NOT
  * reuse `RedisService.client` (that one keeps `maxRetriesPerRequest: 3`).
+ *
+ * Connection errors: with `connection` given as OPTIONS (not an ioredis
+ * instance) every Queue and Worker opens its own client and re-emits that
+ * client's errors as its own `error` event. The listeners live next to the
+ * queue they belong to — each `@Processor` attaches a rate-limited
+ * `ConnectionErrorReporter` to its worker (`@OnWorkerEvent('error')`) and to
+ * its queue (`onModuleInit`). An unlistened `error` would otherwise surface as
+ * an uncaught exception / unstructured stderr.
  *
  * `@Global()` so feature modules can `BullModule.registerQueue(...)` without
  * re-importing the root config.
@@ -35,11 +44,12 @@ import type { Env } from '../../config/env.schema';
           // REQUIRED by BullMQ's blocking commands — see note above.
           maxRetriesPerRequest: null,
         },
-        // Conservative shared defaults; per-job overrides win (the chat
-        // producer sets its own attempts/backoff/jobId).
+        // Shared retention defaults; per-job overrides win (the chat producer
+        // sets its own attempts/backoff/jobId and inherits these). Failed jobs
+        // are no longer kept forever — see job-retention.ts.
         defaultJobOptions: {
-          removeOnComplete: { age: 3600 * 24 * 7, count: 1000 },
-          removeOnFail: false,
+          removeOnComplete: JOB_REMOVE_ON_COMPLETE,
+          removeOnFail: JOB_REMOVE_ON_FAIL,
         },
       }),
     }),

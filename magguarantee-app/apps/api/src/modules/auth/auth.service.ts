@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import {
   ForbiddenException,
+  type HttpException,
   Injectable,
   Logger,
   ServiceUnavailableException,
@@ -26,6 +27,16 @@ import {
   REFRESH_ROTATION_GRACE_MS,
 } from './auth.constants';
 import { AuditWriter } from '../audit/audit.service';
+import type { AuditActor, AuditEntryInput } from '../audit/audit.types';
+import {
+  logAuthFailure,
+  loginFingerprint,
+  type AuthRequestContext,
+} from './auth-security-log';
+import {
+  VerificationCodeLockoutException,
+  VerificationCodeOrphanedException,
+} from './verification-code.errors';
 import { MailService } from '../mail/mail.service';
 import { DirectoryService } from '../directory/directory.service';
 import { GoogleIdTokenService } from './google/google-id-token.service';
@@ -81,6 +92,25 @@ class RefreshReuseError extends Error {}
 type GoogleLoginPath = 'local' | 'directory' | 'directory_unavailable';
 
 /**
+ * Outcome of the password check. The reason never reaches the client — every
+ * failure gets the same decoy response — it only feeds the WARN log line.
+ */
+type CredentialCheck =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: 'unknown_login' | 'account_inactive' | 'account_locked' | 'wrong_password';
+    };
+
+/** Which code flow a verification-code audit event belongs to. */
+type CodeFlow = 'twoFactor' | 'passwordReset';
+
+const CODE_LOCKOUT_ACTION: Record<CodeFlow, string> = {
+  twoFactor: 'lockTwoFactorSession',
+  passwordReset: 'lockPasswordResetSession',
+};
+
+/**
  * Phase 1 auth orchestrator.
  *
  * Responsibilities:
@@ -121,23 +151,28 @@ export class AuthService {
   async login(
     login: string,
     password: string,
+    ctx: AuthRequestContext = {},
   ): Promise<{ sessionToken: string; maskedEmail: string }> {
     const user = await this.users.findByLogin(login);
-    const credsOk = await this.validateCredentials(user, password);
+    const check = await this.validateCredentials(user, password, ctx);
 
-    if (!credsOk) {
+    // `user` is re-narrowed here because the compiler doesn't track that
+    // through the helper; an active account without an e-mail cannot receive
+    // a code, so it takes the decoy path too.
+    if (!check.ok || !user || !user.email) {
       // Account-enumeration safety: same shape on unknown login or wrong
-      // password. Issue a decoy sessionToken with no code in Redis.
+      // password. The log line is the only place the reason goes.
+      logAuthFailure(
+        this.logger,
+        'loginRefused',
+        check.ok ? 'account_without_email' : check.reason,
+        ctx,
+        user ? { userId: user.id } : { loginFingerprint: loginFingerprint(login) },
+      );
+      // Issue a decoy sessionToken with no code in Redis.
       const decoy = await this.twoFactor.issueDecoyToken();
       // Use a stable mask shape that does not depend on whether the user
       // exists. We always derive from the submitted login (not the email).
-      return { sessionToken: decoy, maskedEmail: this.synthesizeMask(login) };
-    }
-
-    // From here we know `user` is a valid, active record with email.
-    // The compiler doesn't track that through the helper, so re-narrow.
-    if (!user || !user.email) {
-      const decoy = await this.twoFactor.issueDecoyToken();
       return { sessionToken: decoy, maskedEmail: this.synthesizeMask(login) };
     }
 
@@ -155,20 +190,40 @@ export class AuthService {
 
   // ── Step 2: verify code ──────────────────────────────
 
+  /**
+   * The `passwordLogin` audit row is written here for the same reason as
+   * `googleLogin` (see `_finishGoogleLogin`): the route is `@Public()`, so
+   * only the service knows who signed in. Written before the tokens are
+   * minted — a failed audit write costs the session, never the trail.
+   */
   async verifyCode(
     sessionToken: string,
     code: string,
-    ctx: { ipAddress?: string; userAgent?: string },
+    ctx: AuthRequestContext,
   ): Promise<{ user: UserDto; tokens: TokenPair }> {
-    const userId = await this.twoFactor.verifyCode(sessionToken, code);
+    const userId = await this._withCodeAudit('twoFactor', ctx, () =>
+      this.twoFactor.verifyCode(sessionToken, code, ctx),
+    );
     const user = await this.users.findById(userId);
     if (!user || !user.active || user.deletedAt || !user.email) {
+      // Deactivated between the password step and the code step.
+      logAuthFailure(this.logger, 'loginRefused', 'account_inactive_at_verify', ctx, {
+        userId,
+      });
       throw new UnauthorizedException('Account is no longer active');
     }
+    await this.audit.log({
+      action: 'passwordLogin',
+      targetType: 'User',
+      targetKey: user.login,
+      metadata: { userAgent: ctx.userAgent ?? null },
+      actor: this._actorFor(user, ctx),
+    });
     await this.users.resetFailedAttempts(user.id);
     await this.users.updateLastLogin(user.id, new Date());
 
     const tokens = await this.issuePair(user, ctx);
+    this.logger.log({ msg: 'password login', userId: user.id, role: user.role });
     return { user: this.toUserDto(user), tokens };
   }
 
@@ -202,9 +257,9 @@ export class AuthService {
    */
   async loginWithGoogle(
     idToken: string,
-    ctx: { ipAddress?: string; userAgent?: string },
+    ctx: AuthRequestContext,
   ): Promise<{ user: UserDto; tokens: TokenPair }> {
-    const identity = await this.googleIdToken.verifyIdToken(idToken);
+    const identity = await this.googleIdToken.verifyIdToken(idToken, ctx);
 
     // `sub` is the durable key; e-mail only bootstraps the very first link.
     const local =
@@ -212,16 +267,26 @@ export class AuthService {
       (await this.users.findByEmail(identity.email));
 
     if (local?.role === 'przewoznik') {
-      throw new ForbiddenException({
-        message: 'Przewoźnicy logują się loginem i hasłem.',
-        extensions: { code: SSO_NOT_FOR_CARRIER },
-      });
+      this._refuseGoogleLogin(
+        'carrier_account',
+        ctx,
+        local.id,
+        new ForbiddenException({
+          message: 'Przewoźnicy logują się loginem i hasłem.',
+          extensions: { code: SSO_NOT_FOR_CARRIER },
+        }),
+      );
     }
 
     // ── Locally-managed accounts (admins and anyone an admin took back) ──
     if (local && local.managedBy === 'local') {
       if (!local.active || local.deletedAt) {
-        throw new UnauthorizedException('Account is no longer active');
+        this._refuseGoogleLogin(
+          'account_inactive',
+          ctx,
+          local.id,
+          new UnauthorizedException('Account is no longer active'),
+        );
       }
       const linked = local.googleSub
         ? local
@@ -241,27 +306,42 @@ export class AuthService {
         });
         return this._finishGoogleLogin(local, ctx, 'directory_unavailable');
       }
-      throw new ServiceUnavailableException({
-        message: 'MAGSpace chwilowo niedostępny. Spróbuj za chwilę lub zaloguj się hasłem.',
-        extensions: { code: SSO_DIRECTORY_UNAVAILABLE },
-      });
+      this._refuseGoogleLogin(
+        'directory_unavailable',
+        ctx,
+        local?.id ?? null,
+        new ServiceUnavailableException({
+          message: 'MAGSpace chwilowo niedostępny. Spróbuj za chwilę lub zaloguj się hasłem.',
+          extensions: { code: SSO_DIRECTORY_UNAVAILABLE },
+        }),
+      );
     }
 
     if (lookup.kind === 'not_found') {
       if (local) await this.directory.deprovision(local, 'not_found');
-      throw new ForbiddenException({
-        message: 'Nie znaleziono Cię w MAGSpace. Skontaktuj się z przełożonym.',
-        extensions: { code: SSO_NOT_EMPLOYEE },
-      });
+      this._refuseGoogleLogin(
+        'not_in_directory',
+        ctx,
+        local?.id ?? null,
+        new ForbiddenException({
+          message: 'Nie znaleziono Cię w MAGSpace. Skontaktuj się z przełożonym.',
+          extensions: { code: SSO_NOT_EMPLOYEE },
+        }),
+      );
     }
 
     const employee = lookup.employee;
     if (!employee.active) {
       if (local) await this.directory.deprovision(local, 'inactive');
-      throw new ForbiddenException({
-        message: 'Twoje konto pracownika jest nieaktywne.',
-        extensions: { code: SSO_INACTIVE },
-      });
+      this._refuseGoogleLogin(
+        'employee_inactive',
+        ctx,
+        local?.id ?? null,
+        new ForbiddenException({
+          message: 'Twoje konto pracownika jest nieaktywne.',
+          extensions: { code: SSO_INACTIVE },
+        }),
+      );
     }
 
     // An admin-granted role bypasses the mapping — that is what it is for.
@@ -272,11 +352,16 @@ export class AuthService {
       // stanowiska: tell the admins who is waiting, then refuse (docs/24 §4).
       await this.directory.notifyAccessRequested(employee);
       if (local) await this.directory.deprovision(local, 'unmapped');
-      throw new ForbiddenException({
-        message:
-          'Twoje stanowisko nie ma jeszcze dostępu do MAGGuarantee. Administrator został powiadomiony.',
-        extensions: { code: SSO_NO_ROLE },
-      });
+      this._refuseGoogleLogin(
+        'no_role_for_stanowisko',
+        ctx,
+        local?.id ?? null,
+        new ForbiddenException({
+          message:
+            'Twoje stanowisko nie ma jeszcze dostępu do MAGGuarantee. Administrator został powiadomiony.',
+          extensions: { code: SSO_NO_ROLE },
+        }),
+      );
     }
 
     const user = await this.directory.provisionOrSync({
@@ -303,7 +388,7 @@ export class AuthService {
    */
   private async _finishGoogleLogin(
     user: UserRow,
-    ctx: { ipAddress?: string; userAgent?: string },
+    ctx: AuthRequestContext,
     via: GoogleLoginPath,
   ): Promise<{ user: UserDto; tokens: TokenPair }> {
     await this.audit.log({
@@ -311,11 +396,7 @@ export class AuthService {
       targetType: 'User',
       targetKey: user.login,
       metadata: { via, userAgent: ctx.userAgent ?? null },
-      actor: {
-        userId: user.id,
-        userRole: user.role as Role,
-        ...(ctx.ipAddress ? { ipAddress: ctx.ipAddress } : {}),
-      },
+      actor: this._actorFor(user, ctx),
     });
     await this.users.resetFailedAttempts(user.id);
     await this.users.updateLastLogin(user.id, new Date());
@@ -328,6 +409,7 @@ export class AuthService {
 
   async resendCode(
     sessionToken: string,
+    ctx: AuthRequestContext = {},
   ): Promise<{ ok: true; cooldownSec: number }> {
     const userId = await this.twoFactor.peekUserId(sessionToken);
     if (!userId) {
@@ -336,7 +418,7 @@ export class AuthService {
       // setting Redis state for a phantom session.
       return { ok: true, cooldownSec: 60 };
     }
-    const result = await this.twoFactor.resend(sessionToken);
+    const result = await this.twoFactor.resend(sessionToken, ctx);
     if (!result) {
       // Concurrent expiry between peek and resend — same opaque response.
       return { ok: true, cooldownSec: 60 };
@@ -379,25 +461,44 @@ export class AuthService {
    * `passwordChangedAt`, clears `mustChangePassword`, and revokes ALL refresh
    * tokens for the user (kills every old session). Does NOT auto-login — the
    * user returns to /login.
+   *
+   * The `resetPassword` audit row is written from here (public route, see
+   * `verifyCode`), right before the change: a failed audit write costs the
+   * reset — the user asks for a new code — rather than leaving it unaudited.
    */
   async resetPassword(
     sessionToken: string,
     code: string,
     newPassword: string,
+    ctx: AuthRequestContext = {},
   ): Promise<void> {
-    const userId = await this.passwordReset.verifyCode(sessionToken, code);
+    const userId = await this._withCodeAudit('passwordReset', ctx, () =>
+      this.passwordReset.verifyCode(sessionToken, code, ctx),
+    );
     const user = await this.users.findById(userId);
     if (!user || !user.active || user.deletedAt) {
+      logAuthFailure(this.logger, 'passwordResetRefused', 'account_inactive', ctx, {
+        userId,
+      });
       throw new UnauthorizedException('Account is no longer active');
     }
     const passwordHash = await this.passwords.hash(newPassword);
+    await this.audit.log({
+      action: 'resetPassword',
+      targetType: 'User',
+      targetKey: user.login,
+      metadata: { via: 'forgotPassword', userAgent: ctx.userAgent ?? null },
+      actor: this._actorFor(user, ctx),
+    });
     await this.users.applyPasswordChange(user.id, passwordHash, {
       mustChangePassword: false,
     });
-    await this.revokeAllForUser(user.id);
+    const sessionsRevoked = await this.revokeAllForUser(user.id);
     this.logger.log({
       msg: 'password reset confirmed; all sessions revoked',
       userId: user.id,
+      sessionsRevoked,
+      ipAddress: ctx.ipAddress ?? null,
     });
   }
 
@@ -408,12 +509,13 @@ export class AuthService {
    */
   async resendResetCode(
     sessionToken: string,
+    ctx: AuthRequestContext = {},
   ): Promise<{ ok: true; cooldownSec: number }> {
     const userId = await this.passwordReset.peekUserId(sessionToken);
     if (!userId) {
       return { ok: true, cooldownSec: 60 };
     }
-    const result = await this.passwordReset.resend(sessionToken);
+    const result = await this.passwordReset.resend(sessionToken, ctx);
     if (!result) {
       return { ok: true, cooldownSec: 60 };
     }
@@ -437,7 +539,7 @@ export class AuthService {
   async changePassword(
     userId: string,
     newPassword: string,
-    ctx: { ipAddress?: string; userAgent?: string },
+    ctx: AuthRequestContext,
   ): Promise<{ user: UserDto; tokens: TokenPair }> {
     const user = await this.users.findById(userId);
     if (!user || !user.active || user.deletedAt || !user.email) {
@@ -469,7 +571,7 @@ export class AuthService {
   async refresh(
     userId: string,
     rawRefreshToken: string,
-    ctx: { ipAddress?: string; userAgent?: string },
+    ctx: AuthRequestContext,
   ): Promise<{ user: UserDto; tokens: TokenPair | AccessOnlyToken }> {
     const tokenHash = this.sha256(rawRefreshToken);
     const stored = await this.refreshTokens.findByHash(tokenHash);
@@ -498,12 +600,16 @@ export class AuthService {
         // /login. Mint an access-only token bound to the winner's session.
         const healed = await this.healRotationRace(userId, stored.replacedById);
         if (healed) {
-          this.logger.debug({
+          // INFO, not DEBUG: this branch hands out an access token for a
+          // revoked refresh token, which is exactly what a replay inside the
+          // grace window also looks like — it must be visible in prod logs.
+          this.logger.log({
             msg: 'refresh-token already rotated (benign concurrent race) — healed with access-only token',
             userId,
             tokenId: stored.id,
             replacedById: stored.replacedById,
             revokedAgeMs,
+            ipAddress: ctx.ipAddress ?? null,
           });
           return healed;
         }
@@ -513,12 +619,7 @@ export class AuthService {
       }
 
       // Genuine theft — revoke ALL active tokens for this user.
-      await this.revokeAllForUser(userId);
-      this.logger.warn({
-        msg: 'refresh-token reuse detected, revoked all sessions',
-        userId,
-        tokenId: stored.id,
-      });
+      await this._handleRefreshReuse(stored, revokedAgeMs, ctx);
       throw new UnauthorizedException('Token reuse detected — all sessions revoked');
     }
     if (stored.expiresAt.getTime() < Date.now()) {
@@ -552,10 +653,11 @@ export class AuthService {
           reRead?.replacedById ?? null,
         );
         if (healed) {
-          this.logger.debug({
+          this.logger.log({
             msg: 'refresh-token rotated concurrently (claim lost the race) — healed with access-only token',
             userId,
             tokenId: stored.id,
+            ipAddress: ctx.ipAddress ?? null,
           });
           return healed;
         }
@@ -615,12 +717,28 @@ export class AuthService {
 
   // ── Logout ───────────────────────────────────────────
 
-  async logout(rawRefreshToken: string | undefined): Promise<void> {
+  /**
+   * Revokes the session first and audits second, best-effort: a logout that
+   * 500s on a failed audit write would leave the very session the user is
+   * trying to end alive, and the cookies uncleared. Nothing is audited when
+   * there was no live session to end.
+   */
+  async logout(
+    rawRefreshToken: string | undefined,
+    ctx: AuthRequestContext = {},
+  ): Promise<void> {
     if (!rawRefreshToken) return;
     const tokenHash = this.sha256(rawRefreshToken);
     const stored = await this.refreshTokens.findByHash(tokenHash);
     if (!stored || stored.revokedAt) return;
     await this.refreshTokens.revokeById(stored.id);
+    await this._auditForUserId(stored.userId, (user) => ({
+      action: 'logout',
+      targetType: 'User',
+      targetKey: user.login,
+      metadata: { tokenId: stored.id, userAgent: ctx.userAgent ?? null },
+      actor: this._actorFor(user, ctx),
+    }));
   }
 
   // ── Public helpers used by controllers ───────────────
@@ -641,55 +759,216 @@ export class AuthService {
   private async validateCredentials(
     user: UserRow | null,
     password: string,
-  ): Promise<boolean> {
+    ctx: AuthRequestContext,
+  ): Promise<CredentialCheck> {
     if (!user) {
       // Constant-time miss — runs bcrypt against the dummy hash.
       await this.passwords.compareConstantTime(password, null);
-      return false;
+      return { ok: false, reason: 'unknown_login' };
     }
     if (!user.active || user.deletedAt) {
       // Same constant-time penalty so timing doesn't differ.
       await this.passwords.compareConstantTime(password, user.passwordHash);
-      return false;
+      return { ok: false, reason: 'account_inactive' };
     }
     if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
       await this.passwords.compareConstantTime(password, user.passwordHash);
-      return false;
+      return { ok: false, reason: 'account_locked' };
     }
     const ok = await this.passwords.compareConstantTime(
       password,
       user.passwordHash,
     );
-    if (!ok) {
-      // Bump failed-attempts counter only for real users — never for unknown
-      // logins (per docs/15-auth-strategy.md#account-enumeration). Once the
-      // counter crosses the threshold, lock the account for LOGIN_LOCKOUT_MS so
-      // an online password brute-force is stopped even if it rotates IPs (the
-      // per-IP rate-limit alone does not). The counter resets on the next
-      // successful 2FA verify (`resetFailedAttempts`).
-      try {
-        const attempts = await this.users.incrementFailedAttempts(user.id);
-        if (attempts >= LOGIN_MAX_FAILED_ATTEMPTS) {
-          await this.users.lockUntil(
-            user.id,
-            new Date(Date.now() + LOGIN_LOCKOUT_MS),
-          );
-          this.logger.warn({
-            msg: 'account locked after too many failed logins',
-            userId: user.id,
-            attempts,
-            lockoutMs: LOGIN_LOCKOUT_MS,
-          });
-        }
-      } catch (err) {
-        this.logger.warn({
-          msg: 'failed to bump failedAttempts',
-          userId: user.id,
-          error: err instanceof Error ? err.message : String(err),
+    if (ok) return { ok: true };
+    await this.recordFailedPassword(user, ctx);
+    return { ok: false, reason: 'wrong_password' };
+  }
+
+  /**
+   * Bump failed-attempts counter only for real users — never for unknown
+   * logins (per docs/15-auth-strategy.md#account-enumeration). Once the
+   * counter crosses the threshold, lock the account for LOGIN_LOCKOUT_MS so
+   * an online password brute-force is stopped even if it rotates IPs (the
+   * per-IP rate-limit alone does not). The counter resets on the next
+   * successful 2FA verify (`resetFailedAttempts`).
+   *
+   * Never throws: the login response must look the same for every failure,
+   * so neither a failed counter write nor a failed audit write may turn this
+   * one attempt into a 500 that reveals the account exists.
+   */
+  private async recordFailedPassword(
+    user: UserRow,
+    ctx: AuthRequestContext,
+  ): Promise<void> {
+    let attempts: number;
+    const lockedUntil = new Date(Date.now() + LOGIN_LOCKOUT_MS);
+    try {
+      attempts = await this.users.incrementFailedAttempts(user.id);
+      if (attempts < LOGIN_MAX_FAILED_ATTEMPTS) return;
+      await this.users.lockUntil(user.id, lockedUntil);
+    } catch (err) {
+      this.logger.warn({
+        msg: 'failed to bump failedAttempts',
+        userId: user.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+    this.logger.warn({
+      msg: 'account locked after too many failed logins',
+      userId: user.id,
+      attempts,
+      lockoutMs: LOGIN_LOCKOUT_MS,
+      ipAddress: ctx.ipAddress ?? null,
+    });
+    await this._auditBestEffort({
+      action: 'lockAccount',
+      targetType: 'User',
+      targetKey: user.login,
+      metadata: {
+        reason: 'failedLoginAttempts',
+        attempts,
+        lockedUntil: lockedUntil.toISOString(),
+        userAgent: ctx.userAgent ?? null,
+      },
+      actor: this._actorFor(user, ctx),
+    });
+  }
+
+  // ── Security audit helpers ───────────────────────────
+  //
+  // Every row below is written on the root client (these routes are public or
+  // un-@Audit-ed, so there is no ambient transaction) and attributed to the
+  // affected user — `AuditWriter` accepts `actor: 'system'` only for
+  // `system.`-prefixed actions, and the one event with no identifiable user
+  // (`system.rejectOrphanedVerificationCode`) uses exactly that.
+
+  /** The affected user as audit actor, with the caller's IP when known. */
+  private _actorFor(user: UserRow, ctx: AuthRequestContext): AuditActor {
+    return {
+      userId: user.id,
+      userRole: user.role as Role,
+      ...(ctx.ipAddress ? { ipAddress: ctx.ipAddress } : {}),
+    };
+  }
+
+  /**
+   * For events whose security effect has already happened (a lock set, a
+   * session family revoked) and whose response is fixed: a failed audit write
+   * is logged at ERROR, never allowed to change the response.
+   */
+  private async _auditBestEffort(input: AuditEntryInput): Promise<void> {
+    try {
+      await this.audit.log(input);
+    } catch (err) {
+      this.logger.error({
+        msg: 'security audit row could not be written',
+        action: input.action,
+        userId: input.actor === 'system' ? null : input.actor.userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  /** `_auditBestEffort` for events that only carry a user id. */
+  private async _auditForUserId(
+    userId: string,
+    build: (user: UserRow) => AuditEntryInput,
+  ): Promise<void> {
+    const user = await this.users.findById(userId);
+    if (!user) {
+      this.logger.warn({
+        msg: 'security audit row skipped: user not found',
+        userId,
+      });
+      return;
+    }
+    await this._auditBestEffort(build(user));
+  }
+
+  /**
+   * Runs a verification-code check and records the two failures that are
+   * audit events rather than refused attempts, then rethrows the original
+   * exception untouched (the wire response does not change).
+   */
+  private async _withCodeAudit(
+    flow: CodeFlow,
+    ctx: AuthRequestContext,
+    verify: () => Promise<string>,
+  ): Promise<string> {
+    try {
+      return await verify();
+    } catch (err) {
+      if (err instanceof VerificationCodeLockoutException && err.userId) {
+        const { attempts, lockedForSec } = err;
+        await this._auditForUserId(err.userId, (user) => ({
+          action: CODE_LOCKOUT_ACTION[flow],
+          targetType: 'User',
+          targetKey: user.login,
+          metadata: { attempts, lockedForSec, userAgent: ctx.userAgent ?? null },
+          actor: this._actorFor(user, ctx),
+        }));
+      } else if (err instanceof VerificationCodeOrphanedException) {
+        // No user to attribute it to — the session holding the id is gone.
+        await this._auditBestEffort({
+          action: 'system.rejectOrphanedVerificationCode',
+          metadata: {
+            flow,
+            sessionState: err.sessionState,
+            ipAddress: ctx.ipAddress ?? null,
+            userAgent: ctx.userAgent ?? null,
+          },
+          actor: 'system',
         });
       }
+      throw err;
     }
-    return ok;
+  }
+
+  /**
+   * Genuine refresh-token replay: kill the whole session family, then record
+   * it. Revocation comes first — it must happen even if the audit write fails.
+   */
+  private async _handleRefreshReuse(
+    stored: RefreshTokenRow,
+    revokedAgeMs: number,
+    ctx: AuthRequestContext,
+  ): Promise<void> {
+    const sessionsRevoked = await this.revokeAllForUser(stored.userId);
+    this.logger.warn({
+      msg: 'refresh-token reuse detected, revoked all sessions',
+      userId: stored.userId,
+      tokenId: stored.id,
+      revokedAgeMs,
+      sessionsRevoked,
+      ipAddress: ctx.ipAddress ?? null,
+      userAgent: ctx.userAgent ?? null,
+    });
+    await this._auditForUserId(stored.userId, (user) => ({
+      action: 'detectRefreshTokenReuse',
+      targetType: 'User',
+      targetKey: user.login,
+      metadata: {
+        tokenId: stored.id,
+        revokedAgeMs,
+        // false ⇒ the token was ended by logout / reset / admin, not rotated.
+        rotated: stored.replacedById != null,
+        sessionsRevoked,
+        userAgent: ctx.userAgent ?? null,
+      },
+      actor: this._actorFor(user, ctx),
+    }));
+  }
+
+  /** Logs a refused Google sign-in and throws the prepared response. */
+  private _refuseGoogleLogin(
+    reason: string,
+    ctx: AuthRequestContext,
+    userId: string | null,
+    error: HttpException,
+  ): never {
+    logAuthFailure(this.logger, 'googleLoginRefused', reason, ctx, { userId });
+    throw error;
   }
 
   /**
@@ -789,8 +1068,9 @@ export class AuthService {
     };
   }
 
-  private async revokeAllForUser(userId: string): Promise<void> {
-    await this.refreshTokens.revokeAllForUser(userId);
+  /** Returns how many live sessions were revoked. */
+  private async revokeAllForUser(userId: string): Promise<number> {
+    return this.refreshTokens.revokeAllForUser(userId);
   }
 
   private sha256(s: string): string {

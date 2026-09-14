@@ -41,12 +41,29 @@ import { OAuth2Client, type TokenPayload } from 'google-auth-library';
 import { SSO_DOMAIN_NOT_ALLOWED, SSO_NOT_CONFIGURED } from '@magguarantee/shared';
 
 import type { Env } from '../../../config/env.schema';
+import { logAuthFailure, type AuthRequestContext } from '../auth-security-log';
 
 /** Both spellings Google uses for the `iss` claim. */
 const GOOGLE_ISSUERS = new Set([
   'accounts.google.com',
   'https://accounts.google.com',
 ]);
+
+/** Cap on the library message we keep; the useful part is the first clause. */
+const LIBRARY_ERROR_LOG_MAX = 160;
+
+/**
+ * `google-auth-library` appends the evidence to its messages after `": "` —
+ * the whole decoded payload on "Token used too late" (e-mail, name, sub), the
+ * raw JWT on "Invalid token signature". Keep only the clause before it.
+ */
+export function libraryErrorSummary(message: string): string {
+  const cut = message.indexOf(': ');
+  return (cut === -1 ? message : message.slice(0, cut)).slice(
+    0,
+    LIBRARY_ERROR_LOG_MAX,
+  );
+}
 
 /** The identity we extracted from a token that passed every check. */
 export interface GoogleIdentity {
@@ -95,8 +112,13 @@ export class GoogleIdTokenService {
    * @throws ForbiddenException (`SSO_DOMAIN_NOT_ALLOWED`) for every other
    *         failure — bad signature, wrong audience, expired, unverified or
    *         non-Workspace account.
+   *
+   * `ctx` only feeds the rejection log line (who was turned away, from where).
    */
-  async verifyIdToken(idToken: string): Promise<GoogleIdentity> {
+  async verifyIdToken(
+    idToken: string,
+    ctx: AuthRequestContext = {},
+  ): Promise<GoogleIdentity> {
     if (!this.clientId) {
       throw new ServiceUnavailableException({
         message: 'Logowanie przez Google nie jest skonfigurowane.',
@@ -113,16 +135,20 @@ export class GoogleIdTokenService {
       payload = ticket.getPayload();
     } catch (err) {
       // Signature, `aud`, `exp`, malformed token — all land here.
-      this._reject('token verification failed', err);
+      this._reject(ctx, 'token verification failed', err);
     }
 
-    if (!payload) this._reject('token carried no payload');
-    if (!GOOGLE_ISSUERS.has(payload.iss)) this._reject(`unexpected iss "${payload.iss}"`);
-    if (payload.email_verified !== true) this._reject('email_verified is not true');
-    if (!payload.email) this._reject('token carried no email');
+    if (!payload) this._reject(ctx, 'token carried no payload');
+    if (!GOOGLE_ISSUERS.has(payload.iss)) {
+      this._reject(ctx, `unexpected iss "${payload.iss}"`);
+    }
+    if (payload.email_verified !== true) {
+      this._reject(ctx, 'email_verified is not true');
+    }
+    if (!payload.email) this._reject(ctx, 'token carried no email');
     // The domain gate. `hd` is absent on consumer accounts — that IS the signal.
     if (payload.hd !== this.allowedHd) {
-      this._reject(`hd "${payload.hd ?? '<none>'}" is not "${this.allowedHd}"`);
+      this._reject(ctx, `hd "${payload.hd ?? '<none>'}" is not "${this.allowedHd}"`);
     }
 
     return {
@@ -136,12 +162,15 @@ export class GoogleIdTokenService {
    * Logs the real reason and throws the single opaque 403. Returns `never` so
    * TypeScript narrows at every call site.
    */
-  private _reject(reason: string, err?: unknown): never {
-    this.logger.warn({
-      msg: 'google id_token rejected',
-      reason,
-      // The address is a person's identifier; the reason is enough for triage.
-      error: err instanceof Error ? err.message : undefined,
+  private _reject(
+    ctx: AuthRequestContext,
+    reason: string,
+    err?: unknown,
+  ): never {
+    // The address is a person's identifier; the reason is enough for triage.
+    logAuthFailure(this.logger, 'googleLoginRefused', 'id_token_rejected', ctx, {
+      detail: reason,
+      error: err instanceof Error ? libraryErrorSummary(err.message) : undefined,
     });
     throw new ForbiddenException({
       message: 'Zaloguj się kontem @magtrans.eu.',

@@ -9,6 +9,7 @@ import {
 import {
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -25,6 +26,9 @@ export interface StorageObject {
   contentLength: number | null;
 }
 
+/** Which storage call failed — part of every failure log line. */
+type StorageOperation = 'put' | 'get' | 'delete';
+
 /**
  * Generic S3-compatible object storage facade (MinIO in dev, per
  * docs/16-jobs-and-integrations.md#файловое-хранилище--s3).
@@ -35,9 +39,16 @@ export interface StorageObject {
  * claims module reuses the same `put`/`getObject`/`delete` surface for auth
  * screenshots — we do NOT bake the docs/16 `uploadAuthScreenshot` signature
  * in here.
+ *
+ * Failures (2026-09-14 logging audit, item 10): every transport failure is
+ * logged here with the full SDK error detail BEFORE it is rethrown as a 500 —
+ * the client only ever sees the error class name, and callers typically run a
+ * compensating rollback that would otherwise be the only visible trace. The
+ * original SDK error rides along as the exception's `cause`.
  */
 @Injectable()
 export class StorageService {
+  private readonly logger = new Logger(StorageService.name);
   private readonly s3: S3Client;
   private readonly bucket: string;
 
@@ -72,8 +83,11 @@ export class StorageService {
         }),
       );
     } catch (err) {
-      throw new InternalServerErrorException(
-        `Nie udało się zapisać pliku w magazynie (${describeError(err)})`,
+      throw this._failure(
+        'put',
+        key,
+        err,
+        'Nie udało się zapisać pliku w magazynie',
       );
     }
   }
@@ -94,11 +108,21 @@ export class StorageService {
       if (isNotFound(err)) {
         throw new NotFoundException('Plik nie istnieje w magazynie');
       }
-      throw new InternalServerErrorException(
-        `Nie udało się odczytać pliku z magazynu (${describeError(err)})`,
+      throw this._failure(
+        'get',
+        key,
+        err,
+        'Nie udało się odczytać pliku z magazynu',
       );
     }
     if (!res.Body || !(res.Body instanceof Readable)) {
+      this.logger.error({
+        msg: 'storage get returned an unexpected body type',
+        operation: 'get',
+        bucket: this.bucket,
+        key,
+        bodyType: res.Body === undefined ? 'undefined' : typeof res.Body,
+      });
       throw new InternalServerErrorException(
         'Magazyn zwrócił nieoczekiwany format odpowiedzi',
       );
@@ -122,10 +146,38 @@ export class StorageService {
         new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
       );
     } catch (err) {
-      throw new InternalServerErrorException(
-        `Nie udało się usunąć pliku z magazynu (${describeError(err)})`,
+      throw this._failure(
+        'delete',
+        key,
+        err,
+        'Nie udało się usunąć pliku z magazynu',
       );
     }
+  }
+
+  // ── internals ──────────────────────────────────────────
+
+  /**
+   * Log the SDK failure in full and build the 500 to rethrow. Object keys are
+   * `<entity>/<uuid>/<category>/<uuid>.<ext>` — ids only, safe to log.
+   */
+  private _failure(
+    operation: StorageOperation,
+    key: string,
+    err: unknown,
+    message: string,
+  ): InternalServerErrorException {
+    this.logger.error({
+      msg: `storage ${operation} failed`,
+      operation,
+      bucket: this.bucket,
+      key,
+      ...describeSdkError(err),
+    });
+    return new InternalServerErrorException(
+      `${message} (${describeError(err)})`,
+      { cause: err },
+    );
   }
 }
 
@@ -144,8 +196,48 @@ function isNotFound(err: unknown): boolean {
   );
 }
 
-/** Extracts a short, log-safe description from an unknown SDK error. */
+/**
+ * Short, client-safe description of an unknown SDK error (the class name only)
+ * for the exception message. The full error travels as `cause` and is logged
+ * via {@link describeSdkError}.
+ */
 function describeError(err: unknown): string {
   if (err instanceof Error) return err.name;
   return 'unknown';
+}
+
+/**
+ * Log fields for an AWS SDK v3 service/transport error: class name, message,
+ * the S3 error `Code`, HTTP status and the request ids S3/MinIO support needs
+ * to trace the call. Credentials never appear on these errors.
+ */
+export function describeSdkError(err: unknown): Record<string, unknown> {
+  if (typeof err !== 'object' || err === null) {
+    return { error: String(err) };
+  }
+  const e = err as {
+    name?: unknown;
+    message?: unknown;
+    Code?: unknown;
+    code?: unknown;
+    $fault?: unknown;
+    $metadata?: {
+      httpStatusCode?: unknown;
+      requestId?: unknown;
+      extendedRequestId?: unknown;
+      attempts?: unknown;
+    };
+    stack?: unknown;
+  };
+  return {
+    error: e.name,
+    errorMessage: e.message,
+    s3Code: e.Code ?? e.code,
+    fault: e.$fault,
+    httpStatusCode: e.$metadata?.httpStatusCode,
+    requestId: e.$metadata?.requestId,
+    extendedRequestId: e.$metadata?.extendedRequestId,
+    attempts: e.$metadata?.attempts,
+    stack: e.stack,
+  };
 }

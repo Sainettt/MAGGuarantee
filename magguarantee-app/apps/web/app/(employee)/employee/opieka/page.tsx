@@ -37,13 +37,16 @@ import OpiekunCarrierCard, {
   OpiekunCarrierCardSkeleton,
 } from '@/components/opieka/OpiekunCarrierCard';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { useOpiekunFleet } from '@/lib/hooks/useOpiekunFleet';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 import { vehiclesListHref } from '@/lib/vehicles-filter';
 
 export default function OpiekaPage() {
   const t = useTranslations('opieka');
   const tVehStatus = useTranslations('vehicleStatus');
-  const { data, isLoading } = useOpiekunFleet();
+  const fleetQ = useOpiekunFleet();
+  const { data, isLoading } = fleetQ;
 
   const carriers = data?.carriers ?? [];
   const totals = data?.totals;
@@ -159,6 +162,10 @@ export default function OpiekaPage() {
           {Array.from({ length: 6 }).map((_, i) => (
             <OpiekunCarrierCardSkeleton key={i} />
           ))}
+        </div>
+      ) : fleetQ.isError && !data ? (
+        <div className="rounded-xl border border-border bg-card shadow-card">
+          <ErrorState {...queryErrorProps(fleetQ)} />
         </div>
       ) : carriers.length === 0 ? (
         <EmptyState

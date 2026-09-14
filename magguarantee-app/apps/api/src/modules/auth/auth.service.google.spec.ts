@@ -4,7 +4,12 @@
 // get wrong in either direction — let the wrong person in, or lock the right
 // one out during an outage — so each one gets a test that names the policy.
 
-import { ForbiddenException, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Logger,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { JwtService } from '@nestjs/jwt';
 
@@ -429,5 +434,70 @@ describe('AuthService.loginWithGoogle — googleLogin audit row', () => {
     await expect(h.svc.loginWithGoogle('a.b.c', CTX)).rejects.toThrow('db down');
     expect(h.prisma.$transaction).not.toHaveBeenCalled();
     expect(h.users.updateLastLogin).not.toHaveBeenCalled();
+  });
+});
+
+describe('AuthService.loginWithGoogle — refused sign-ins are logged', () => {
+  const CTX = { ipAddress: '10.0.0.8', userAgent: 'jest' };
+  let warn: jest.SpyInstance;
+
+  beforeEach(() => {
+    warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('passes the request context to the id_token check', async () => {
+    const h = makeHarness({ bySub: makeUser({ managedBy: 'local' }) });
+
+    await h.svc.loginWithGoogle('a.b.c', CTX);
+
+    expect(h.googleIdToken.verifyIdToken).toHaveBeenCalledWith('a.b.c', CTX);
+  });
+
+  it.each([
+    [
+      'carrier_account',
+      { local: makeUser({ role: 'przewoznik', managedBy: 'local' }) },
+      undefined,
+      'u-1',
+    ],
+    ['account_inactive', { bySub: makeUser({ managedBy: 'local', active: false }) }, undefined, 'u-1'],
+    ['directory_unavailable', {}, { kind: 'unavailable' }, null],
+    ['not_in_directory', { bySub: makeUser() }, { kind: 'not_found' }, 'u-1'],
+    [
+      'employee_inactive',
+      {},
+      { kind: 'found', employee: makeEmployee({ active: false }) },
+      null,
+    ],
+  ])('%s → one WARN with IP/UA, no audit row', async (reason, locals, lookup, userId) => {
+    const h = makeHarness(locals);
+    if (lookup) h.directory.resolveEmployee.mockResolvedValue(lookup as never);
+
+    await expect(h.svc.loginWithGoogle('a.b.c', CTX)).rejects.toBeDefined();
+
+    expect(warn).toHaveBeenCalledWith({
+      msg: 'auth: googleLoginRefused',
+      event: 'googleLoginRefused',
+      reason,
+      ipAddress: CTX.ipAddress,
+      userAgent: CTX.userAgent,
+      userId,
+    });
+    expect(h.audit.log).not.toHaveBeenCalled();
+    // The person's address stays out of the log line.
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(IDENTITY.email);
+  });
+
+  it('no_role_for_stanowisko → WARN after notifying the admins', async () => {
+    const h = makeHarness();
+    h.directory.resolveEmployee.mockResolvedValue({ kind: 'found', employee: makeEmployee() });
+    h.directory.roleFor.mockResolvedValue(null);
+
+    await expect(h.svc.loginWithGoogle('a.b.c', CTX)).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'no_role_for_stanowisko', userId: null }),
+    );
   });
 });

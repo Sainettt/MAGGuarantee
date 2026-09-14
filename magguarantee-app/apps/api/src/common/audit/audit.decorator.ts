@@ -15,6 +15,13 @@ export interface AuditConfig {
    * Stable identifier for the action: `createCarrier`, `updateClaim`,
    * `cancelDelegation`, ... — the docs treat this as a free-form string
    * but the convention is camelCase verb-noun.
+   *
+   * This is the DEFAULT name. When one route carries two intents picked by the
+   * request body, the service renames the row at runtime with
+   * `AuditContext.setAction(...)` once it knows which branch ran — e.g.
+   * `POST /delegations/:id/ready` writes `delegation.markReady` for the flip
+   * and `delegation.rollbackReady` for `rollback: true`. Keep this default
+   * set to the primary intent so a forgotten override still leaves a row.
    */
   action: string;
 
@@ -86,6 +93,10 @@ export interface AuditableRequest {
 
 /**
  * Marks a controller method (or whole controller) as audit-tracked.
+ *
+ * Every POST/PUT/PATCH/DELETE route must carry this decorator or be listed,
+ * with a reason, in the allowlist of `audit-coverage.inverse.spec.ts`
+ * (@Public auth routes audited from the service, read-only POST lookups, ...).
  *
  * Usage:
  *   ```ts

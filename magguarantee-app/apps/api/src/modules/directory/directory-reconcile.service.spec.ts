@@ -5,6 +5,7 @@
 // silently disabling the people an admin approved by hand. Both get tests that
 // say so.
 
+import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { SchedulerRegistry } from '@nestjs/schedule';
 
@@ -413,6 +414,60 @@ describe('DirectoryReconcileService.run', () => {
 
     expect(h.state.clearFailure).toHaveBeenCalled();
     expect(h.state.markReconcileRun).toHaveBeenCalledWith(NOW);
+  });
+
+  // ── report dispatch visibility (logging audit item 11) ─────
+
+  it('logs the reason for every admin whose report could not be enqueued', async () => {
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const h = makeHarness({
+      managed: [user({ id: 'u-9', login: 'gone' })],
+      roster: [],
+      // An empty roster with managed users aborts → the admins get a report.
+    });
+    h.mail.enqueueDirectoryReconcileReport.mockRejectedValueOnce(
+      new Error('Queue is closed'),
+    );
+
+    await h.svc.run(NOW);
+
+    const rejected = warn.mock.calls
+      .map((c) => c[0] as Record<string, unknown>)
+      .filter((l) => l.msg === 'directory reconcile report: enqueue rejected for admin');
+    expect(rejected).toEqual([
+      expect.objectContaining({
+        report: 'aborted-run',
+        adminId: 'a-1',
+        errorName: 'Error',
+        errorMessage: 'Queue is closed',
+      }),
+    ]);
+    // The admin is identified by id — no address in the log line.
+    expect(JSON.stringify(rejected)).not.toContain('admin@magtrans.eu');
+    warn.mockRestore();
+  });
+
+  it('logs rejected outage alerts too', async () => {
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const threeHoursAgo = new Date(NOW.getTime() - 3 * 60 * 60 * 1000);
+    const h = makeHarness({ rosterFails: true, failureSince: threeHoursAgo });
+    h.mail.enqueueDirectoryReconcileReport.mockRejectedValueOnce(new Error('boom'));
+
+    await h.svc.run(NOW);
+
+    expect(
+      warn.mock.calls.some(
+        (c) =>
+          (c[0] as Record<string, unknown>).msg ===
+            'directory reconcile report: enqueue rejected for admin' &&
+          (c[0] as Record<string, unknown>).report === 'outage',
+      ),
+    ).toBe(true);
+    warn.mockRestore();
   });
 });
 

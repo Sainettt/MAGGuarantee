@@ -5,15 +5,17 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Logger,
   Param,
   Post,
+  Req,
   Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { memoryStorage } from 'multer';
 
 import {
@@ -27,6 +29,7 @@ import { type UploadedFile as AttachmentFile } from '../../common/attachments';
 import { Audit } from '../../common/audit';
 import { OpiekunOwns, OpiekunOwnershipGuard } from '../../common/guards';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
+import { clientIp } from '../../common/utils/client-ip';
 import {
   CurrentUser,
   type AuthUser,
@@ -57,6 +60,8 @@ const MULTIPART_OPTIONS = {
 @Controller('carriers/:id/attachments')
 @UseGuards(RolesGuard, OpiekunOwnershipGuard)
 export class CarrierAttachmentsController {
+  private readonly logger = new Logger(CarrierAttachmentsController.name);
+
   constructor(private readonly attachments: CarrierAttachmentsService) {}
 
   @Post()
@@ -98,15 +103,27 @@ export class CarrierAttachmentsController {
   @Roles('admin', 'opiekun')
   @OpiekunOwns('id', 'param', 'carrierId')
   async download(
+    @CurrentUser() user: AuthUser,
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
     @Param('attachmentId', new ZodValidationPipe(UuidSchema))
     attachmentId: string,
+    @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
-    const { object, fileName, mimeType } = await this.attachments.download(
-      id,
+    const { object, fileName, mimeType, category } =
+      await this.attachments.download(id, attachmentId);
+    // Access trail for carrier documents (not an audit row — reads are not
+    // audited). Ids + category only: the original filename can carry PII.
+    this.logger.log({
+      msg: 'attachment downloaded',
+      entity: 'Carrier',
+      entityId: id,
       attachmentId,
-    );
+      category,
+      userId: user.sub,
+      role: user.role,
+      ip: clientIp(req) ?? null,
+    });
     res.setHeader('Content-Type', object.contentType ?? mimeType);
     res.setHeader(
       'Content-Disposition',

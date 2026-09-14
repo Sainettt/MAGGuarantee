@@ -36,6 +36,8 @@ import { ApiResponseError } from '@/lib/api/client';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { useCarriers, useHardDeleteCarrier } from '@/lib/hooks/useCarriers';
 import { useOpiekuni } from '@/lib/hooks/useLookups';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
+import { SUPPRESS_GLOBAL_ERROR } from '@/lib/query/globalErrors';
 
 import { CarrierFormDialog } from './CarrierFormDialog';
 
@@ -77,7 +79,7 @@ function CarriersPageInner() {
     '' | 'true' | 'false'
   >('');
 
-  const { data, isLoading } = useCarriers({
+  const listQ = useCarriers({
     q: search.length >= 2 ? search : undefined,
     opiekunId: opiekunId || undefined,
     active: activeFilter === '' ? undefined : activeFilter === 'true',
@@ -85,6 +87,7 @@ function CarriersPageInner() {
       onboardingFilter === '' ? undefined : onboardingFilter === 'true',
     limit: 50,
   });
+  const { data, isLoading } = listQ;
 
   const opiekuniQ = useOpiekuni();
 
@@ -107,7 +110,7 @@ function CarriersPageInner() {
   // page level so the same dialog handles every row.
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<CarrierDto | null>(null);
-  const hardDeleteM = useHardDeleteCarrier();
+  const hardDeleteM = useHardDeleteCarrier({ meta: SUPPRESS_GLOBAL_ERROR });
 
   // Password reset (2026-07-30). Available to admin AND opiekun — the endpoint
   // allows both and enforces ownership server-side (`@OpiekunOwns`), and the
@@ -360,6 +363,7 @@ function CarriersPageInner() {
         rowKey={(r) => r.id}
         onRowClick={openDetail}
         isLoading={isLoading}
+        {...queryErrorProps(listQ)}
         hasActiveFilters={hasActiveFilters}
         empty={
           <EmptyState

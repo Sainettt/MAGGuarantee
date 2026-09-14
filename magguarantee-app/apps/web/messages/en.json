@@ -2452,5 +2452,55 @@
       "updatedToast": "Role of {login} changed to {role}",
       "errorToast": "Could not grant access."
     }
+  },
+  "errors": {
+    "boundary": {
+      "title": "This page could not be displayed",
+      "message": "An unexpected error occurred or the service is temporarily unavailable. Please try again in a moment.",
+      "retry": "Try again",
+      "home": "Go to the home page",
+      "reference": "Error reference: {digest}"
+    },
+    "load": {
+      "network": {
+        "title": "Cannot reach the server",
+        "message": "The data could not be loaded. Check your internet connection and try again."
+      },
+      "server": {
+        "title": "Service temporarily unavailable",
+        "message": "The data could not be loaded. Please try again in a moment."
+      },
+      "forbidden": {
+        "title": "Access denied",
+        "message": "You do not have permission to view this data."
+      },
+      "generic": {
+        "title": "Could not load data",
+        "message": "Something went wrong while loading the data. Please try again."
+      },
+      "stale": "Could not refresh the data — what you see may be out of date.",
+      "retry": "Try again",
+      "retrying": "Retrying…"
+    },
+    "toast": {
+      "query": {
+        "network": "Cannot reach the server — data could not be loaded.",
+        "server": "Service temporarily unavailable — data could not be loaded.",
+        "forbidden": "You do not have permission to view some of this data.",
+        "rateLimited": "Too many requests. Wait a moment and try again.",
+        "generic": "Could not load data."
+      },
+      "mutation": {
+        "network": "Cannot reach the server — your changes were not saved.",
+        "server": "Service temporarily unavailable — your changes were not saved.",
+        "forbidden": "You do not have permission to perform this action.",
+        "rateLimited": "Too many requests. Wait a moment and try again.",
+        "generic": "The operation could not be completed."
+      }
+    },
+    "session": {
+      "title": "Could not verify your session",
+      "message": "The sign-in service is temporarily unavailable — you have not been signed out. Please try again in a moment."
+    }
   }
 }

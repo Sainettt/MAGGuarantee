@@ -1,9 +1,13 @@
-import { HttpException, UnauthorizedException } from '@nestjs/common';
+import { HttpException, Logger, UnauthorizedException } from '@nestjs/common';
 
 import { PasswordResetService } from './password-reset.service';
 import { PWRESET_REDIS_KEY } from './auth.constants';
 import type { RedisService } from '../redis/redis.service';
 import type { PrismaService } from '../prisma/prisma.service';
+import {
+  VerificationCodeLockoutException,
+  VerificationCodeOrphanedException,
+} from './verification-code.errors';
 
 /**
  * In-memory Redis stand-in (mirrors the one in two-factor.service.spec.ts) —
@@ -182,5 +186,72 @@ describe('PasswordResetService', () => {
     const { svc } = makeService();
     const decoy = await svc.issueDecoyToken();
     expect(await svc.resend(decoy)).toBeNull();
+  });
+});
+
+describe('PasswordResetService — audit hand-off and refused-attempt logs', () => {
+  const CTX = { ipAddress: '192.0.2.45', userAgent: 'jest-ua' };
+  let warn: jest.SpyInstance;
+
+  beforeEach(() => {
+    warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('the lockout throws a typed 423 carrying the session owner, wire body unchanged', async () => {
+    const { svc } = makeService();
+    const { sessionToken } = await svc.issueCode('user-1');
+    for (let i = 1; i < 5; i++) {
+      await svc.verifyCode(sessionToken, '000000', CTX).catch(() => undefined);
+    }
+
+    const err = await svc.verifyCode(sessionToken, '000000', CTX).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(VerificationCodeLockoutException);
+    expect((err as VerificationCodeLockoutException).userId).toBe('user-1');
+    expect((err as VerificationCodeLockoutException).getResponse()).toEqual({
+      statusCode: 423,
+      message: 'Too many attempts',
+      lockedForSec: 300,
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'passwordResetCodeRejected',
+        reason: 'too_many_attempts',
+        userId: 'user-1',
+        ipAddress: CTX.ipAddress,
+      }),
+    );
+  });
+
+  it('a matched code with no session throws the orphaned variant', async () => {
+    const { svc, redis } = makeService();
+    const { sessionToken, code } = await svc.issueCode('user-1');
+    await redis.del(PWRESET_REDIS_KEY.session(sessionToken));
+
+    await expect(svc.verifyCode(sessionToken, code, CTX)).rejects.toBeInstanceOf(
+      VerificationCodeOrphanedException,
+    );
+  });
+
+  it('a wrong reset code is logged without the code or the session token', async () => {
+    const { svc } = makeService();
+    const { sessionToken, code } = await svc.issueCode('user-1');
+
+    await expect(svc.verifyCode(sessionToken, '000000', CTX)).rejects.toThrow(
+      UnauthorizedException,
+    );
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'passwordResetCodeRejected',
+        reason: 'wrong_code',
+        userId: 'user-1',
+        attemptsLeft: 4,
+      }),
+    );
+    const logged = JSON.stringify(warn.mock.calls);
+    expect(logged).not.toContain(sessionToken);
+    expect(logged).not.toContain(code);
   });
 });

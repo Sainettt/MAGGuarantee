@@ -43,6 +43,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { VehicleDetailModal } from '@/components/vehicles/VehicleDetailModal';
@@ -58,6 +59,10 @@ import { DRIVERS_KEY } from '@/lib/hooks/useDrivers';
 import { useOpiekunFleet } from '@/lib/hooks/useOpiekunFleet';
 import { TRAILERS_KEY } from '@/lib/hooks/useTrailers';
 import { VEHICLES_KEY } from '@/lib/hooks/useVehicles';
+import {
+  queryErrorProps,
+  type QueryErrorProps,
+} from '@/lib/query/queryErrorProps';
 
 export default function OpiekaCarrierDetailPage() {
   const params = useParams<{ login: string }>();
@@ -162,6 +167,10 @@ export default function OpiekaCarrierDetailPage() {
       <header className="mb-6">
         {fleetQ.isLoading ? (
           <Skeleton className="h-9 w-72" />
+        ) : fleetQ.isError && !fleetQ.data ? (
+          <div className="rounded-xl border border-border bg-card shadow-card">
+            <ErrorState {...queryErrorProps(fleetQ)} />
+          </div>
         ) : !carrierStub ? (
           <EmptyState
             title={t('detail.notFoundTitle')}
@@ -231,6 +240,7 @@ export default function OpiekaCarrierDetailPage() {
             <VehiclesTable
               rows={vehiclesQ.data?.items ?? []}
               isLoading={vehiclesQ.isLoading}
+              {...queryErrorProps(vehiclesQ)}
               onRowClick={setVehicleDetail}
             />
           </TabsContent>
@@ -239,6 +249,7 @@ export default function OpiekaCarrierDetailPage() {
             <DriversTable
               rows={driversQ.data?.items ?? []}
               isLoading={driversQ.isLoading}
+              {...queryErrorProps(driversQ)}
               onRowClick={setDriverDetail}
             />
           </TabsContent>
@@ -247,6 +258,7 @@ export default function OpiekaCarrierDetailPage() {
             <TrailersTable
               rows={trailersQ.data?.items ?? []}
               isLoading={trailersQ.isLoading}
+              {...queryErrorProps(trailersQ)}
               onRowClick={setTrailerDetail}
             />
           </TabsContent>
@@ -255,6 +267,7 @@ export default function OpiekaCarrierDetailPage() {
             <DelegationsTable
               rows={delegationsQ.data?.items ?? []}
               isLoading={delegationsQ.isLoading}
+              {...queryErrorProps(delegationsQ)}
               namespace="opieka.delegations"
               rowAriaLabel={(r) =>
                 tA11y('showDelegationDetails', {
@@ -332,13 +345,18 @@ export default function OpiekaCarrierDetailPage() {
 // DataTable primitive with a curated read-only column set — same row height,
 // same hover state, same a11y guarantees.
 
-interface VehiclesTableProps {
+interface VehiclesTableProps extends Partial<QueryErrorProps> {
   rows: VehicleDto[];
   isLoading: boolean;
   onRowClick?: (row: VehicleDto) => void;
 }
 
-function VehiclesTable({ rows, isLoading, onRowClick }: VehiclesTableProps) {
+function VehiclesTable({
+  rows,
+  isLoading,
+  onRowClick,
+  ...errorProps
+}: VehiclesTableProps) {
   const t = useTranslations('opieka.vehicles');
 
   const columns = useMemo<DataTableColumn<VehicleDto>[]>(
@@ -428,6 +446,7 @@ function VehiclesTable({ rows, isLoading, onRowClick }: VehiclesTableProps) {
       onRowClick={onRowClick}
       rowAriaLabel={(r) => r.plateNumber}
       isLoading={isLoading}
+      {...errorProps}
       empty={
         <EmptyState title={t('emptyTitle')} message={t('emptyMessage')} />
       }
@@ -435,13 +454,18 @@ function VehiclesTable({ rows, isLoading, onRowClick }: VehiclesTableProps) {
   );
 }
 
-interface DriversTableProps {
+interface DriversTableProps extends Partial<QueryErrorProps> {
   rows: DriverDto[];
   isLoading: boolean;
   onRowClick?: (row: DriverDto) => void;
 }
 
-function DriversTable({ rows, isLoading, onRowClick }: DriversTableProps) {
+function DriversTable({
+  rows,
+  isLoading,
+  onRowClick,
+  ...errorProps
+}: DriversTableProps) {
   const t = useTranslations('opieka.drivers');
   const tCommon = useTranslations('common');
 
@@ -489,6 +513,7 @@ function DriversTable({ rows, isLoading, onRowClick }: DriversTableProps) {
       onRowClick={onRowClick}
       rowAriaLabel={(r) => `${r.firstName} ${r.lastName}`}
       isLoading={isLoading}
+      {...errorProps}
       empty={
         <EmptyState title={t('emptyTitle')} message={t('emptyMessage')} />
       }
@@ -496,13 +521,18 @@ function DriversTable({ rows, isLoading, onRowClick }: DriversTableProps) {
   );
 }
 
-interface TrailersTableProps {
+interface TrailersTableProps extends Partial<QueryErrorProps> {
   rows: TrailerDto[];
   isLoading: boolean;
   onRowClick?: (row: TrailerDto) => void;
 }
 
-function TrailersTable({ rows, isLoading, onRowClick }: TrailersTableProps) {
+function TrailersTable({
+  rows,
+  isLoading,
+  onRowClick,
+  ...errorProps
+}: TrailersTableProps) {
   const t = useTranslations('opieka.trailers');
   const tCommon = useTranslations('common');
 
@@ -546,6 +576,7 @@ function TrailersTable({ rows, isLoading, onRowClick }: TrailersTableProps) {
       onRowClick={onRowClick}
       rowAriaLabel={(r) => r.plateNumber}
       isLoading={isLoading}
+      {...errorProps}
       empty={
         <EmptyState title={t('emptyTitle')} message={t('emptyMessage')} />
       }

@@ -31,6 +31,7 @@ import {
 
 import { ConfigService } from '@nestjs/config';
 
+import { AuditContext } from '../../common/audit/audit-context';
 import type { Env } from '../../config/env.schema';
 import { ClaimsService } from '../claims/claims.service';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
@@ -64,6 +65,19 @@ import {
 // Phase 7 REWORK (2026-06-20 #4) — `gotowy` joined the active board (it is the
 // eksport-owned step between `zgloszony` and `w_trasie`).
 const ACTIVE_DELEGATION_STATUSES = ['zgloszony', 'gotowy', 'w_trasie'] as const;
+
+/**
+ * Audit actions of `POST /delegations/:id/ready`. One route, two intents picked
+ * by `rollback` in the body: the controller's `@Audit` carries `markReady` (the
+ * primary intent) and `markReady()` renames the row to `rollbackReady` via
+ * `AuditContext.setAction` when it takes the `gotowy → zgloszony` branch, so
+ * the audit trail can tell a rollback from a flip (2026-08-14 logging audit,
+ * item 22).
+ */
+export const MARK_READY_AUDIT_ACTIONS = {
+  ready: 'delegation.markReady',
+  rollback: 'delegation.rollbackReady',
+} as const;
 
 /**
  * Delegations service.
@@ -393,6 +407,7 @@ export class DelegationsService {
 
     const target: DelegationStatus = dto.rollback ? 'zgloszony' : 'gotowy';
     assertLegalDelegationTransition(row.status, target);
+    this._auditMarkReady(row, dto);
 
     const updated = await this.delegations.update(row.id, {
       status: target,
@@ -416,6 +431,25 @@ export class DelegationsService {
     // Notify the carrier the vehicle is ready (forward flip only; fire-and-log).
     if (!dto.rollback) void this._notifyWyjazd('ready', updated);
     return this.toDto(updated, user);
+  }
+
+  /**
+   * Audit contribution of `markReady`, called after the edge is validated and
+   * before the write: names the row by the branch taken (`rollbackReady` vs
+   * the decorator's default `markReady`) and stashes the pre-mutation values
+   * of the fields the transition touches, so the row's diff reads
+   * `gotowy → zgloszony` (+ the cleared sped number). The interceptor trims
+   * `before` to the keys present in the response DTO. No-op outside an audited
+   * request (`AuditContext` contract).
+   */
+  private _auditMarkReady(row: DelegationRow, dto: MarkReadyDto): void {
+    if (dto.rollback) AuditContext.setAction(MARK_READY_AUDIT_ACTIONS.rollback);
+    AuditContext.setBefore({
+      status: row.status,
+      spedOrderNumber: row.spedOrderNumber,
+      readyById: row.readyById,
+      readyAt: row.readyAt ? row.readyAt.toISOString() : null,
+    });
   }
 
   /**

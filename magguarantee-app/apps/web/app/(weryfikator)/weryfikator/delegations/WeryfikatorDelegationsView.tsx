@@ -39,6 +39,7 @@ import {
   useMarkDelegationInTransit,
   useMarkDelegationReturned,
 } from '@/lib/hooks/useDelegations';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 
 type DialogTarget =
   | { kind: 'inTransit'; delegation: DelegationDto }
@@ -72,7 +73,8 @@ export function WeryfikatorDelegationsView() {
     [status, includeHistory],
   );
 
-  const { data, isLoading } = useDelegations(filters);
+  const delegationsQ = useDelegations(filters);
+  const { data, isLoading } = delegationsQ;
 
   const inTransitM = useMarkDelegationInTransit({
     onSuccess: () => toast.success(tActions('inTransitToast')),
@@ -146,6 +148,7 @@ export function WeryfikatorDelegationsView() {
       <OperationalDelegationsTable
         rows={data?.items ?? []}
         isLoading={isLoading}
+        {...queryErrorProps(delegationsQ)}
         namespace="weryfikator.delegations.table"
         hasActiveFilters={Boolean(status || includeHistory)}
         onClearFilters={() => {

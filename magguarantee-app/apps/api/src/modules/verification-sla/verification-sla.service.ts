@@ -4,6 +4,9 @@ import { Cron } from '@nestjs/schedule';
 
 import { bucketForAnchor } from '@magguarantee/shared';
 
+import { runGuardedCron } from '../../common/ops-alert/guarded-cron';
+import { OpsAlertService } from '../../common/ops-alert/ops-alert.service';
+import { describeError, maskEmail } from '../../common/ops-alert/redact';
 import type { Env } from '../../config/env.schema';
 import { MailService } from '../mail/mail.service';
 import type { VerificationDigestRow } from '../mail/templates/verification-digest';
@@ -15,6 +18,7 @@ import {
 /** Cron expression: every day at 07:00 Europe/Warsaw (docs/21 §5). */
 const DIGEST_CRON = '0 7 * * *';
 const DIGEST_TIMEZONE = 'Europe/Warsaw';
+const DIGEST_JOB_NAME = 'verification-sla-digest';
 
 /**
  * Daily verification-SLA digest — the system's first scheduled job
@@ -41,13 +45,26 @@ export class VerificationSlaService {
     private readonly repo: VerificationSlaRepository,
     private readonly mail: MailService,
     private readonly config: ConfigService<Env, true>,
+    private readonly alerts: OpsAlertService,
   ) {}
 
+  /**
+   * Cron entry point. The body runs inside `runGuardedCron`: an exception
+   * becomes one structured ERROR line (job, duration, error) + an ops alert
+   * instead of an unstructured `@nestjs/schedule` log, and never rejects.
+   */
   @Cron(DIGEST_CRON, {
-    name: 'verification-sla-digest',
+    name: DIGEST_JOB_NAME,
     timeZone: DIGEST_TIMEZONE,
   })
   async runDailyDigest(now: Date = new Date()): Promise<void> {
+    await runGuardedCron(
+      { job: DIGEST_JOB_NAME, logger: this.logger, alerts: this.alerts },
+      () => this._runDailyDigest(now),
+    );
+  }
+
+  private async _runDailyDigest(now: Date): Promise<void> {
     const candidates = await this.repo.findNaWeryfikacjiForSla();
     const { overdue, dueSoon } = this._bucket(candidates, now);
 
@@ -105,11 +122,11 @@ export class VerificationSlaService {
   }
 
   /**
-   * Sends one digest per recipient. `Promise.allSettled` so a single failing
-   * address (bounced mailbox, SMTP hiccup) never blocks the rest — each send
-   * already `record()`s its own row in the mail registry inside
-   * `MailService.sendVerificationDigest`. Failures are logged, not rethrown:
-   * the cron tick should not crash on a partial delivery.
+   * Enqueues one digest per recipient. `Promise.allSettled` so a single
+   * failing enqueue never blocks the rest. Each rejection is logged with its
+   * reason and the MASKED recipient (2026-08-14 logging audit, item 11);
+   * delivery failures after the enqueue are the email processor's to report.
+   * Nothing is rethrown: the cron tick should not crash on a partial dispatch.
    */
   private async _dispatch(
     recipients: { email: string }[],
@@ -127,6 +144,14 @@ export class VerificationSlaService {
       ),
     );
 
+    results.forEach((result, i) => {
+      if (result.status !== 'rejected') return;
+      this.logger.warn({
+        msg: 'verification digest: enqueue rejected for recipient',
+        toMasked: maskEmail(recipients[i]?.email ?? ''),
+        ...describeError(result.reason),
+      });
+    });
     const failed = results.filter((r) => r.status === 'rejected').length;
     this.logger.log({
       msg: 'verification digest dispatched',

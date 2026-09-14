@@ -50,6 +50,7 @@ import {
 import { AuditContext } from '../../common/audit/audit-context';
 import type { Env } from '../../config/env.schema';
 import { AuditWriter } from '../audit/audit.service';
+import type { AuditActor } from '../audit/audit.types';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import {
   DelegationsRepository,
@@ -95,6 +96,20 @@ const APP_CONFIG_VEHICLE_COOLDOWN_DAYS = 'carrier_vehicle_cooldown_days';
 const DEFAULT_MAX_DAYS_AFTER_UNLOAD = 7;
 const DEFAULT_MAX_PERIOD_DAYS = 90;
 const DEFAULT_MAX_AVG_KM_PER_DAY = 2000;
+
+/**
+ * Audit actions of the delegation-driven auto-recalc. Written by the operator
+ * whose outing transition triggered it; with no operator in scope (a caller
+ * outside an audited HTTP request — a job, a script) the row is attributed to
+ * `system` and the action gets the `system.` prefix `AuditWriter` requires for
+ * that actor (2026-08-14 logging audit, item 17). See `_recalcAuditIdentity`.
+ */
+const RECALC_AUDIT_ACTIONS = {
+  applied: 'claim.autoRecalc',
+  skipped: 'claim.autoRecalcSkipped',
+} as const;
+type RecalcAuditAction =
+  (typeof RECALC_AUDIT_ACTIONS)[keyof typeof RECALC_AUDIT_ACTIONS];
 
 /**
  * Statuses in which the «Zapisz weryfikację» checkpoint may be saved.
@@ -754,10 +769,9 @@ export class ClaimsService {
       // Audit row is written regardless (the recalc trigger fired); the
       // `before`/`after` snapshot reflects whether the state column moved.
       await this.auditWriter.log({
-        action: 'claim.autoRecalcSkipped',
+        ...this._recalcAuditIdentity(RECALC_AUDIT_ACTIONS.skipped),
         targetType: 'Claim',
         targetKey: claim.nrZgl,
-        actor: AuditContext.current()?.actor ?? 'system',
         before: {
           reason: this._skipReason(claim),
           status: claim.status,
@@ -769,6 +783,24 @@ export class ClaimsService {
     }
 
     await this._applyDelegationRecalc(claim, actualReturnAt);
+  }
+
+  /**
+   * `action` + `actor` for an auto-recalc audit row. Inside an audited request
+   * (`markReturned` / `markInTransit`) the operator who moved the outing is the
+   * actor and the action is unchanged. Outside one there is no person to
+   * attribute it to: the row goes to `system` under `system.<action>` — the
+   * old `?? 'system'` fallback kept the bare action, which `AuditWriter`
+   * rejects for a system actor, so the recalc (and its transaction) would
+   * have thrown.
+   */
+  private _recalcAuditIdentity(action: RecalcAuditAction): {
+    action: string;
+    actor: AuditActor;
+  } {
+    const actor = AuditContext.current()?.actor;
+    if (actor && actor !== 'system') return { action, actor };
+    return { action: `system.${action}`, actor: 'system' };
   }
 
   /** Human-readable skip reason for the `autoRecalcSkipped` audit row. */
@@ -862,10 +894,9 @@ export class ClaimsService {
     const updated = await this.claims.update(claim.id, recalcPatch);
 
     await this.auditWriter.log({
-      action: 'claim.autoRecalc',
+      ...this._recalcAuditIdentity(RECALC_AUDIT_ACTIONS.applied),
       targetType: 'Claim',
       targetKey: claim.nrZgl,
-      actor: AuditContext.current()?.actor ?? 'system',
       before,
       after: this._snapshotForAudit(updated),
     });
@@ -915,10 +946,9 @@ export class ClaimsService {
         await this.claims.update(claim.id, { autoRecalcState: 'skipped' });
       }
       await this.auditWriter.log({
-        action: 'claim.autoRecalcSkipped',
+        ...this._recalcAuditIdentity(RECALC_AUDIT_ACTIONS.skipped),
         targetType: 'Claim',
         targetKey: claim.nrZgl,
-        actor: AuditContext.current()?.actor ?? 'system',
         before: {
           reason: this._skipReason(claim),
           status: claim.status,
@@ -1009,10 +1039,9 @@ export class ClaimsService {
     const updated = await this.claims.update(claim.id, recalcPatch);
 
     await this.auditWriter.log({
-      action: 'claim.autoRecalc',
+      ...this._recalcAuditIdentity(RECALC_AUDIT_ACTIONS.applied),
       targetType: 'Claim',
       targetKey: claim.nrZgl,
-      actor: AuditContext.current()?.actor ?? 'system',
       before,
       after: this._snapshotForAudit(updated),
     });

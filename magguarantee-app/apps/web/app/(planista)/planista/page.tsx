@@ -23,10 +23,12 @@ import { useTranslations } from 'next-intl';
 import { FleetPanel } from '@/components/fleet/FleetPanel';
 import { useDelegations } from '@/lib/hooks/useDelegations';
 import { usePlanistaFleet } from '@/lib/hooks/usePlanistaFleet';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 
 export default function PlanistaPanelPage() {
   const t = useTranslations('planista');
-  const { data, isLoading } = usePlanistaFleet();
+  const fleetQ = usePlanistaFleet();
+  const { data, isLoading } = fleetQ;
   // No params — the API auto-scopes delegations to the planista's vehicles
   // (by plannerId), exactly like the dyspozytor panel.
   const delegationsQ = useDelegations({ limit: 50 });
@@ -41,6 +43,8 @@ export default function PlanistaPanelPage() {
       isLoading={isLoading}
       delegations={delegationsQ.data?.items ?? []}
       delegationsLoading={delegationsQ.isLoading}
+      fleetError={queryErrorProps(fleetQ)}
+      delegationsError={queryErrorProps(delegationsQ)}
       myKmHref="/planista/moje-pojazdy"
       fullVehicleDetail
     />

@@ -67,6 +67,16 @@ export interface AuditContextStore {
    * (path params, result id) — `metadata` is for business data.
    */
   metadata?: Record<string, unknown>;
+  /**
+   * Optional runtime override of the decorator's static `@Audit({ action })`,
+   * set via `AuditContext.setAction(...)`. For one route that carries two
+   * distinct business intents selected by the request body — e.g.
+   * `POST /delegations/:id/ready` is the `zgloszony → gotowy` flip by default
+   * and the `gotowy → zgloszony` rollback with `rollback: true`. Only the
+   * service knows which branch ran, so it names the row. `undefined` → the
+   * interceptor keeps `config.action` (every other route, unchanged).
+   */
+  action?: string;
 }
 
 const storage = new AsyncLocalStorage<AuditContextStore>();
@@ -88,6 +98,9 @@ const storage = new AsyncLocalStorage<AuditContextStore>();
  *    collision). No-op outside any `run(...)` — same defensive contract as
  *    `setBefore`. The interceptor merges this onto its own routing metadata
  *    on commit.
+ *  - `setAction(name)` — override the decorator's static action for this
+ *    request (two body-selected intents behind one route). No-op outside any
+ *    `run(...)`.
  */
 export const AuditContext = {
   current: (): AuditContextStore | undefined => storage.getStore(),
@@ -101,5 +114,16 @@ export const AuditContext = {
     const s = storage.getStore();
     if (!s) return;
     s.metadata = { ...(s.metadata ?? {}), ...meta };
+  },
+  /**
+   * Rename the audit row the interceptor is about to write (see
+   * `AuditContextStore.action`). Last call wins. No-op outside any `run(...)`
+   * — same defensive contract as `setBefore`. Keep the same naming convention
+   * as the decorator's action (a `system.` prefix is still required when the
+   * actor is `system`; `AuditWriter` enforces that on the final name).
+   */
+  setAction: (action: string): void => {
+    const s = storage.getStore();
+    if (s) s.action = action;
   },
 };

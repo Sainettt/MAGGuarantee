@@ -22,6 +22,8 @@ import {
   useHardDeleteTrailerType,
   useTrailerTypes,
 } from '@/lib/hooks/useTrailerTypes';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
+import { SUPPRESS_GLOBAL_ERROR } from '@/lib/query/globalErrors';
 
 import { TrailerTypeSheet } from './TrailerTypeSheet';
 
@@ -33,16 +35,17 @@ export default function TrailerTypesPage() {
   const isAdmin = user?.role === 'admin';
   const [search, setSearch] = useState('');
 
-  const { data, isLoading } = useTrailerTypes({
+  const listQ = useTrailerTypes({
     q: search.length >= 2 ? search : undefined,
   });
+  const { data, isLoading } = listQ;
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [target, setTarget] = useState<TrailerTypeDto | null>(null);
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TrailerTypeDto | null>(null);
-  const hardDeleteM = useHardDeleteTrailerType();
+  const hardDeleteM = useHardDeleteTrailerType({ meta: SUPPRESS_GLOBAL_ERROR });
 
   const hasActiveFilters = search.length >= 2;
   const clearFilters = () => setSearch('');
@@ -161,6 +164,7 @@ export default function TrailerTypesPage() {
         rowKey={(r) => r.id}
         onRowClick={openEdit}
         isLoading={isLoading}
+        {...queryErrorProps(listQ)}
         hasActiveFilters={hasActiveFilters}
         empty={
           <EmptyState

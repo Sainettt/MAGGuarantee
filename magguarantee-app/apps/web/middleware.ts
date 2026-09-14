@@ -30,18 +30,64 @@
 // i18n note: locale is resolved server-side in `i18n/request.ts` from the
 // `mt_lang` cookie / `Accept-Language` header. We don't run next-intl's
 // middleware because we don't use URL-prefixed locales.
+//
+// Observability: every non-happy auth branch (refresh unreachable / rejected /
+// no access cookie returned, unreadable role, role-mismatch redirect) emits ONE
+// structured JSON line via `logAuthEvent`. Lines carry the pathname, statuses
+// and error NAMES only — never cookies, tokens, query strings or user ids.
+//
+// API unreachable ≠ logout: when the refresh call fails at the NETWORK level
+// (API container down / restarting) the session may be perfectly valid, so we
+// do NOT redirect to /login. The request passes through flagged with
+// `AUTH_UNAVAILABLE_HEADER`; the route-group layout's `requireRoleAccess()`
+// then throws `AuthServiceUnavailableError` and `app/error.tsx` renders
+// "service unavailable" + retry. A REJECTED refresh (non-2xx) still redirects
+// to /login exactly as before — see the race-heal note in that branch.
 
 import { NextResponse, type NextRequest } from 'next/server';
 import type { Role } from '@magguarantee/shared';
 
+import {
+  ACCESS_COOKIE,
+  AUTH_UNAVAILABLE_HEADER,
+  REFRESH_COOKIE,
+} from './lib/auth/constants';
 import {
   isAllowedForRole,
   isGatedPath,
   landingFor,
 } from './lib/roles';
 
-const ACCESS_COOKIE = 'mt_access';
-const REFRESH_COOKIE = 'mt_refresh';
+type AuthLogLevel = 'info' | 'warn';
+
+/** One structured line per auth event (edge runtime → stdout of the web container). */
+function logAuthEvent(
+  level: AuthLogLevel,
+  event: string,
+  req: NextRequest,
+  fields: Record<string, string | number | boolean | undefined> = {},
+): void {
+  const line = JSON.stringify({
+    level,
+    scope: 'web.middleware',
+    event,
+    // Pathname only: query strings can carry reset codes / `next=` targets.
+    path: req.nextUrl.pathname,
+    ...fields,
+  });
+  if (level === 'warn') console.warn(line);
+  else console.info(line);
+}
+
+function errorName(err: unknown): string {
+  if (err instanceof Error) {
+    // Node/undici wraps the real reason (ECONNREFUSED, ENOTFOUND…) in `cause`.
+    const cause = err.cause as { code?: unknown } | undefined;
+    const code = typeof cause?.code === 'string' ? `:${cause.code}` : '';
+    return `${err.name}${code}`;
+  }
+  return typeof err;
+}
 
 // Server-side API base. Middleware runs server-side, so non-public env vars
 // are available here. Same precedence as `lib/auth/server.ts`.
@@ -185,11 +231,19 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   // OR a role-mismatch redirect) so the rotated tokens aren't lost.
   let refreshedSetCookies: string[] = [];
 
+  // True when `/auth/refresh` could not be reached at all (network error).
+  let refreshUnreachable = false;
+
   const needRefresh = !access || isAccessExpired(access);
   if (needRefresh) {
     // No refresh token → nothing to refresh with; behave exactly like the
     // legacy "no access" branch.
     if (!refresh) {
+      // Plain anonymous traffic (no cookies at all) is not worth a log line;
+      // an expired access token WITHOUT its refresh partner is.
+      if (access) {
+        logAuthEvent('info', 'auth.session.expired_without_refresh', req);
+      }
       return loginRedirect(req);
     }
 
@@ -216,6 +270,15 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
         // account deactivated). Benign concurrent-rotation losers are healed
         // server-side with an access-only 200 (see AuthService.refresh), so a
         // non-ok here is NOT a race artifact. Redirect to login; do not retry.
+        // 401/403 is the expected "session over" answer; anything else (429,
+        // 5xx) is an API-side problem worth a warning.
+        const expected = apiRes.status === 401 || apiRes.status === 403;
+        logAuthEvent(
+          expected ? 'info' : 'warn',
+          'auth.refresh.rejected',
+          req,
+          { status: apiRes.status },
+        );
         return loginRedirect(req);
       }
 
@@ -227,20 +290,54 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
       if (!newAccess) {
         // Refresh succeeded but didn't return a new access cookie — we can't
         // proceed with stale/absent access. Safest is to bounce to login.
+        logAuthEvent('warn', 'auth.refresh.no_access_cookie', req, {
+          status: apiRes.status,
+          setCookieCount: refreshedSetCookies.length,
+        });
         return loginRedirect(req);
       }
 
       // (a) use the fresh token for role-gating below.
       access = newAccess;
-    } catch {
-      // Network / thrown error → treat as failed refresh.
-      return loginRedirect(req);
+    } catch (err) {
+      // Network-level failure: no HTTP answer at all (API down / restarting /
+      // DNS). We learned NOTHING about the session, so this must not look like
+      // a logout. Fall through with the flag set: a still-present (expired)
+      // access token keeps the role gating below working, and the layout's
+      // `/auth/me` check turns the outage into the "service unavailable"
+      // boundary instead of a /login bounce.
+      logAuthEvent('warn', 'auth.refresh.network_error', req, {
+        error: errorName(err),
+        hadAccessCookie: Boolean(access),
+      });
+      refreshUnreachable = true;
     }
   }
 
-  // After a (possible) refresh `access` is guaranteed to be set if we reached
-  // here. TS doesn't know that, so guard explicitly.
+  // Forward the request with rewritten headers when needed: rotated cookies
+  // after a refresh, the auth-unavailable flag after an unreachable refresh,
+  // and ALWAYS without a client-supplied copy of that flag.
+  const needsHeaderRewrite =
+    refreshedSetCookies.length > 0 ||
+    refreshUnreachable ||
+    req.headers.has(AUTH_UNAVAILABLE_HEADER);
+
+  const buildRequestHeaders = (): Headers => {
+    const h = new Headers(req.headers);
+    h.delete(AUTH_UNAVAILABLE_HEADER);
+    if (refreshUnreachable) h.set(AUTH_UNAVAILABLE_HEADER, '1');
+    return h;
+  };
+
+  // After a (possible) refresh `access` is set unless there was no access
+  // cookie AND the refresh could not run.
   if (!access) {
+    if (refreshUnreachable) {
+      // No token to read a role from — skip edge gating; the route-group
+      // layout's server check (`requireRoleAccess`) sees the flag and throws
+      // before any page renders.
+      return NextResponse.next({ request: { headers: buildRequestHeaders() } });
+    }
     return loginRedirect(req);
   }
 
@@ -249,11 +346,14 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   // → `/auth/me`) read the fresh access token, and append the API's raw
   // Set-Cookie strings verbatim so the browser persists the rotated pair.
   const makeResponse = (): NextResponse => {
-    if (refreshedSetCookies.length === 0) {
+    if (!needsHeaderRewrite) {
       return NextResponse.next();
     }
+    if (refreshedSetCookies.length === 0) {
+      return NextResponse.next({ request: { headers: buildRequestHeaders() } });
+    }
 
-    const newRequestHeaders = new Headers(req.headers);
+    const newRequestHeaders = buildRequestHeaders();
     // Rebuild the `cookie` header with the rotated mt_access / mt_refresh
     // name=value pairs while preserving every other cookie unchanged.
     const updated = new Map<string, string>();
@@ -315,6 +415,9 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   // bounce to /login — safer to under-permission than to assume a default.
   const role = readRoleFromJwt(access);
   if (!role) {
+    logAuthEvent('warn', 'auth.role.unreadable', req, {
+      refreshed: refreshedSetCookies.length > 0,
+    });
     const url = req.nextUrl.clone();
     url.pathname = '/login';
     url.search = '';
@@ -326,8 +429,13 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   // pass through — Next will render its 404 inside the matched layout, and
   // since the user has SOME valid role, their landing is one click away.
   if (isGatedPath(pathname) && !isAllowedForRole(pathname, role)) {
+    const target = landingFor(role);
+    logAuthEvent('info', 'auth.role.mismatch_redirect', req, {
+      role,
+      target,
+    });
     const url = req.nextUrl.clone();
-    url.pathname = landingFor(role);
+    url.pathname = target;
     url.search = '';
     return withRefreshedCookies(NextResponse.redirect(url));
   }

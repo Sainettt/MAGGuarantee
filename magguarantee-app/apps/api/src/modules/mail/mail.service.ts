@@ -1,14 +1,23 @@
+import { randomUUID } from 'node:crypto';
+
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { render } from '@react-email/render';
-import type { Queue } from 'bullmq';
+import type { JobsOptions, Queue } from 'bullmq';
 
+import { describeError, maskEmail } from '../../common/ops-alert/redact';
+import { JOB_REMOVE_ON_COMPLETE, JOB_REMOVE_ON_FAIL } from '../jobs/job-retention';
 import { QUEUE_EMAIL_SEND } from '../jobs/queue-names';
 import {
   EMAIL_SEND_JOB,
   type EmailSendJobData,
+  type MailCompensation,
+  type MailJobMeta,
+  type SecretEmailJob,
 } from './email-send.job';
+import { mailAttemptStorage } from './mail-attempt-context';
 import { MailJobsRegistry, type MailJobPayload } from './mail-jobs.registry';
+import { MailSecretCipher } from './mail-secret-cipher';
 import {
   MaksimConfirmationRequestEmail,
   type MaksimConfirmationRequestProps,
@@ -102,15 +111,36 @@ import { MailThreadingService } from './mail-threading.service';
 const PASSWORD_RESET_TTL_MINUTES = 10;
 
 /**
- * Phase 1 outgoing-mail surface. Only `send2faCode` is implemented now;
- * `sendAccountCreated`, `sendPasswordReset`, etc. are added as follow-up
- * phases need them (per docs/16-jobs-and-integrations.md#email-шаблоны).
+ * Producer-side options of every `email-send` job. Retention per
+ * `jobs/job-retention.ts` — failed jobs are no longer kept forever.
+ */
+export const EMAIL_SEND_JOB_OPTIONS: JobsOptions = {
+  attempts: 5,
+  backoff: { type: 'exponential', delay: 5000 },
+  removeOnComplete: JOB_REMOVE_ON_COMPLETE,
+  removeOnFail: JOB_REMOVE_ON_FAIL,
+};
+
+/**
+ * Optional delivery-log / compensation context for any `enqueueX` call. All
+ * fields optional, so existing call sites are unaffected.
+ */
+export interface MailEnqueueOptions {
+  /** Initiating user → `email_logs.triggeredById`. */
+  triggeredById?: string | null;
+  /** Overrides the target derived from the template props. */
+  target?: { type: string; key: string };
+  /** Undo action run if the mail fails permanently (see `MailCompensation`). */
+  compensation?: MailCompensation;
+}
+
+/**
+ * Outgoing-mail surface. Every transactional email has a synchronous `sendX`
+ * (renders + ships via the env-selected provider) and an `enqueueX` that puts
+ * it on the `email-send` queue (docs/16-jobs-and-integrations.md#email-очередь).
  *
  * The Maksim over-threshold confirmation-request email is the ONLY
  * authorization notification (`sendMaksimConfirmationRequest`).
- *
- * Phase 9 swap: replace `SmtpProvider` with `GmailApiProvider` and inject the
- * latter from MailModule. The MailService itself does not change.
  */
 export interface IMailService {
   send2faCode(email: string, code: string): Promise<void>;
@@ -167,11 +197,12 @@ export interface IMailService {
 export class MailService implements IMailService {
   private readonly logger = new Logger(MailService.name);
 
-  // `mailJobs` and `emailQueue` are optional so the existing 1-arg constructor
-  // in unit tests (and any future seed scripts) keeps compiling — production
-  // wiring passes them through DI. When `mailJobs` is null, send paths skip the
-  // registry write; when `emailQueue` is null, `enqueue2faCode` falls back to a
-  // synchronous send so the code is never dropped.
+  // Everything after `provider` is optional so a bare construction (unit tests,
+  // scripts) keeps working — production wiring passes them through DI. When
+  // `mailJobs` is absent, send paths skip the registry write; when `emailQueue`
+  // is absent, every `enqueueX` falls back to a synchronous send so the mail is
+  // never dropped. Secret-bearing templates additionally require `cipher`: with
+  // no cipher they ALSO send synchronously — a secret is never queued in clear.
   constructor(
     @Inject(MAIL_PROVIDER_TOKEN) private readonly provider: MailProvider,
     @Optional() private readonly mailJobs?: MailJobsRegistry,
@@ -181,89 +212,57 @@ export class MailService implements IMailService {
     // Threading is a Gmail-only concern; absent in unit tests and a no-op
     // under SMTP/Mailhog (see MailThreadingService).
     @Optional() private readonly threading?: MailThreadingService,
+    @Optional() private readonly cipher?: MailSecretCipher,
   ) {}
 
   /**
-   * Phase 9 (early) — enqueue the 2FA login-code email. The in-process
-   * `EmailSendProcessor` dequeues and calls `send2faCode` (the SMTP path +
-   * `MailJobsRegistry` record, unchanged). If the queue is not wired (unit
-   * tests / scripts), fall back to a direct synchronous send.
+   * Enqueue the 2FA login-code email. The code travels sealed (AES-256-GCM,
+   * `MailSecretCipher`); the in-process `EmailSendProcessor` opens it and calls
+   * `send2faCode`. Without a queue/cipher: direct synchronous send.
    */
-  async enqueue2faCode(email: string, code: string): Promise<void> {
-    if (!this.emailQueue) {
-      await this.send2faCode(email, code);
-      return;
-    }
-    await this.emailQueue.add(
-      EMAIL_SEND_JOB,
-      { template: '2fa-code', email, code },
-      {
-        attempts: 5,
-        backoff: { type: 'exponential', delay: 5000 },
-        removeOnComplete: { age: 3600 * 24 * 7 },
-        removeOnFail: false,
-      },
+  async enqueue2faCode(
+    email: string,
+    code: string,
+    opts?: MailEnqueueOptions,
+  ): Promise<void> {
+    await this._enqueueSecretOr(
+      '2fa-code',
+      { code },
+      (secret) => ({ template: '2fa-code', email, secret }),
+      () => this.send2faCode(email, code),
+      opts,
     );
   }
 
   async send2faCode(email: string, code: string): Promise<void> {
-    const subject = 'Kod weryfikacyjny — MAGGuarantee';
-    const text = this.buildText(code);
-    const html = await render(LoginCodeEmail({ code }));
-    const payload: MailJobPayload = {
+    // The code is NEVER logged (docs/15-auth-strategy.md#чек-лист-безопасности)
+    // — `_dispatch` logs only the masked destination.
+    await this._dispatch({
       to: email,
-      subject,
+      subject: 'Kod weryfikacyjny — MAGGuarantee',
+      text: this.buildText(code),
+      html: await render(LoginCodeEmail({ code })),
       template: '2fa-code',
-    };
-
-    try {
-      await this.provider.send({ to: email, subject, text, html });
-      // We deliberately do NOT log the code (per
-      // docs/15-auth-strategy.md#чек-лист-безопасности — secrets must not be
-      // logged). We log only the destination + a stable correlation cue.
-      this.logger.log({
-        msg: '2fa code sent',
-        toMasked: this.maskEmail(email),
-      });
-      await this.mailJobs?.record({ payload, state: 'completed' });
-    } catch (err) {
-      this.logger.error({
-        msg: '2fa code send failed',
-        toMasked: this.maskEmail(email),
-        error: err instanceof Error ? err.message : String(err),
-      });
-      await this.mailJobs?.record({
-        payload,
-        state: 'failed',
-        failedReason: err instanceof Error ? err.message : String(err),
-      });
-      throw err;
-    }
+      logMsg: '2fa code sent',
+    });
   }
 
   /**
-   * Enqueue the forgot-password reset-code email. The in-process
-   * `EmailSendProcessor` dequeues and calls `sendPasswordReset`. Falls back to
-   * a direct synchronous send when the queue is not wired (unit tests).
+   * Enqueue the forgot-password reset-code email (code sealed, see
+   * `enqueue2faCode`). The processor calls `sendPasswordReset`.
    */
   async enqueuePasswordReset(
     email: string,
     code: string,
     ttlMinutes: number = PASSWORD_RESET_TTL_MINUTES,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
-    if (!this.emailQueue) {
-      await this.sendPasswordReset(email, code, ttlMinutes);
-      return;
-    }
-    await this.emailQueue.add(
-      EMAIL_SEND_JOB,
-      { template: 'password-reset', email, code, ttlMinutes },
-      {
-        attempts: 5,
-        backoff: { type: 'exponential', delay: 5000 },
-        removeOnComplete: { age: 3600 * 24 * 7 },
-        removeOnFail: false,
-      },
+    await this._enqueueSecretOr(
+      'password-reset',
+      { code },
+      (secret) => ({ template: 'password-reset', email, secret, ttlMinutes }),
+      () => this.sendPasswordReset(email, code, ttlMinutes),
+      opts,
     );
   }
 
@@ -272,36 +271,15 @@ export class MailService implements IMailService {
     code: string,
     ttlMinutes: number = PASSWORD_RESET_TTL_MINUTES,
   ): Promise<void> {
-    const subject = 'Reset hasła — MAGGuarantee';
-    const html = await render(PasswordResetEmail({ code, ttlMinutes }));
-    const text = this.buildPasswordResetText(code, ttlMinutes);
-    const payload: MailJobPayload = {
+    // Never log the code (docs/15-auth-strategy.md#чек-лист-безопасности).
+    await this._dispatch({
       to: email,
-      subject,
+      subject: 'Reset hasła — MAGGuarantee',
+      text: this.buildPasswordResetText(code, ttlMinutes),
+      html: await render(PasswordResetEmail({ code, ttlMinutes })),
       template: 'password-reset',
-    };
-
-    try {
-      await this.provider.send({ to: email, subject, text, html });
-      // Never log the code (docs/15-auth-strategy.md#чек-лист-безопасности).
-      this.logger.log({
-        msg: 'password reset code sent',
-        toMasked: this.maskEmail(email),
-      });
-      await this.mailJobs?.record({ payload, state: 'completed' });
-    } catch (err) {
-      this.logger.error({
-        msg: 'password reset code send failed',
-        toMasked: this.maskEmail(email),
-        error: err instanceof Error ? err.message : String(err),
-      });
-      await this.mailJobs?.record({
-        payload,
-        state: 'failed',
-        failedReason: err instanceof Error ? err.message : String(err),
-      });
-      throw err;
-    }
+      logMsg: 'password reset code sent',
+    });
   }
 
   /**
@@ -345,6 +323,7 @@ export class MailService implements IMailService {
     email: string,
     props: MaksimConfirmationRequestProps,
     replyTo?: string | null,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
     return this._enqueueOr(
       {
@@ -354,6 +333,7 @@ export class MailService implements IMailService {
         ...(replyTo ? { replyTo } : {}),
       },
       () => this.sendMaksimConfirmationRequest(email, props, replyTo),
+      opts,
     );
   }
 
@@ -361,52 +341,30 @@ export class MailService implements IMailService {
    * Verification-SLA daily digest (docs/21 §5).
    *
    * Renders the React-Email digest to HTML + a plain-text fallback and ships
-   * both via the SMTP provider. The caller (cron service) invokes this once
-   * per ACTIVE pracownik recipient inside a `Promise.allSettled`, so a single
-   * bad address never blocks the rest — each send `record()`s its own
-   * `completed` / `failed` row in the mail registry. The subject carries the
-   * total at-risk count for inbox-scannability.
+   * both via the provider. The caller (cron service) enqueues one per ACTIVE
+   * pracownik recipient inside a `Promise.allSettled`, so a single bad address
+   * never blocks the rest. The subject carries the total at-risk count for
+   * inbox-scannability.
    */
   async sendVerificationDigest(
     email: string,
     props: VerificationDigestProps,
   ): Promise<void> {
-    const total = props.overdue.length + props.dueSoon.length;
-    const subject = `Weryfikacja zgłoszeń — ${total} wymaga uwagi`;
-    const html = await render(VerificationDigestEmail(props));
-    const text = this.buildVerificationDigestText(props);
-    const payload: MailJobPayload = {
-      to: email,
-      subject,
-      template: 'verification-digest',
-      data: {
-        overdueCount: props.overdue.length,
-        dueSoonCount: props.dueSoon.length,
-      },
+    const counts = {
+      overdueCount: props.overdue.length,
+      dueSoonCount: props.dueSoon.length,
     };
-
-    try {
-      await this.provider.send({ to: email, subject, text, html });
-      this.logger.log({
-        msg: 'verification digest sent',
-        toMasked: this.maskEmail(email),
-        overdueCount: props.overdue.length,
-        dueSoonCount: props.dueSoon.length,
-      });
-      await this.mailJobs?.record({ payload, state: 'completed' });
-    } catch (err) {
-      this.logger.error({
-        msg: 'verification digest send failed',
-        toMasked: this.maskEmail(email),
-        error: err instanceof Error ? err.message : String(err),
-      });
-      await this.mailJobs?.record({
-        payload,
-        state: 'failed',
-        failedReason: err instanceof Error ? err.message : String(err),
-      });
-      throw err;
-    }
+    const total = counts.overdueCount + counts.dueSoonCount;
+    await this._dispatch({
+      to: email,
+      subject: `Weryfikacja zgłoszeń — ${total} wymaga uwagi`,
+      text: this.buildVerificationDigestText(props),
+      html: await render(VerificationDigestEmail(props)),
+      template: 'verification-digest',
+      data: counts,
+      logMsg: 'verification digest sent',
+      logExtra: counts,
+    });
   }
 
   /**
@@ -444,29 +402,51 @@ export class MailService implements IMailService {
   // ── Phase 9 templated emails (account lifecycle + claim notifications) ──
 
   /**
-   * Shared send path: renders nothing (callers pass html/text), threads when a
-   * `threadKey` is given (no-op under SMTP), records to the diagnostics
-   * registry, and re-throws on failure so the queue (or caller) can retry.
+   * Shared send path for the templated emails: `_dispatch` plus the plain-text
+   * reply-policy footer. Appended from this single choke point rather than in
+   * all ~20 text builders. Keyed on `replyTo` for the same reason the layout
+   * keys its footer on `replyExpected`: a Reply-To IS the statement that
+   * replies are wanted. (The 2FA / reset-code / SLA-digest mails predate the
+   * footer and go through `_dispatch` directly, unchanged.)
    */
-  private async _send(opts: {
-    to: string;
-    subject: string;
-    html: string;
-    text: string;
-    template: string;
-    data?: Record<string, unknown>;
-    /** See `SendMailArgs.replyTo` — set by `maksim-confirmation-request` only. */
-    replyTo?: string | null;
-    threadKey?: string;
-    logMsg: string;
-    logExtra?: Record<string, unknown>;
-  }): Promise<void> {
+  private async _send(opts: DispatchArgs): Promise<void> {
+    await this._dispatch({
+      ...opts,
+      text: `${opts.text}\n\n—\n${
+        opts.replyTo
+          ? 'Odpowiedz na tę wiadomość — odpowiedź trafi bezpośrednio do pracownika prowadzącego ten wniosek.'
+          : 'Nie odpowiadaj na tę wiadomość — skrzynka nie jest obsługiwana. Wszystko załatwisz w systemie MAGGuarantee.'
+      }`,
+    });
+  }
+
+  /**
+   * THE provider call. Threads when a `threadKey` is given (no-op under SMTP),
+   * records to the diagnostics registry and re-throws on failure so the queue
+   * (or the caller) can retry.
+   *
+   * Inside an `email-send` job (`mailAttemptStorage` has a store) — 2026-08-14
+   * logging audit, item 23:
+   *  - the registry keeps ONE row per job (`job-<jobId>`), updated per attempt
+   *    with the real `attemptsMade`, instead of a new random row per attempt;
+   *  - a failed attempt is NOT logged here: the processor's `failed` listener
+   *    writes the single per-attempt line (with job id, attempt, final/retry),
+   *    which also covers failures before this point (render, secret);
+   *  - subject + provider message id are reported back for `email_logs`.
+   * Outside a job (sync fallback) it logs the failure itself, as before.
+   */
+  private async _dispatch(opts: DispatchArgs): Promise<void> {
+    const attempt = mailAttemptStorage.getStore();
+    if (attempt) attempt.subject = opts.subject;
     const payload: MailJobPayload = {
       to: opts.to,
       subject: opts.subject,
       template: opts.template,
       ...(opts.data ? { data: opts.data } : {}),
     };
+    const registryRef = attempt
+      ? { id: `job-${attempt.jobId}`, attemptsMade: attempt.attempt }
+      : {};
     try {
       const thread = opts.threadKey
         ? ((await this.threading?.resolve(opts.threadKey)) ?? {})
@@ -474,61 +454,139 @@ export class MailService implements IMailService {
       const result = await this.provider.send({
         to: opts.to,
         subject: opts.subject,
-        // Plain-text mirror of the HTML footer's reply policy, appended from
-        // this single choke point rather than in all ~20 text builders. Keyed
-        // on `replyTo` for the same reason the layout keys its footer on
-        // `replyExpected`: a Reply-To IS the statement that replies are wanted.
-        text: `${opts.text}\n\n—\n${
-          opts.replyTo
-            ? 'Odpowiedz na tę wiadomość — odpowiedź trafi bezpośrednio do pracownika prowadzącego ten wniosek.'
-            : 'Nie odpowiadaj na tę wiadomość — skrzynka nie jest obsługiwana. Wszystko załatwisz w systemie MAGGuarantee.'
-        }`,
+        text: opts.text,
         html: opts.html,
         ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
-        gmailThreadId: thread.gmailThreadId,
-        inReplyToMessageId: thread.inReplyToMessageId,
+        ...(opts.threadKey
+          ? {
+              gmailThreadId: thread.gmailThreadId,
+              inReplyToMessageId: thread.inReplyToMessageId,
+            }
+          : {}),
       });
+      if (attempt) attempt.providerMessageId = result.messageId ?? null;
       if (opts.threadKey) await this.threading?.record(opts.threadKey, result);
       this.logger.log({
         msg: opts.logMsg,
-        toMasked: this.maskEmail(opts.to),
+        toMasked: maskEmail(opts.to),
+        ...(attempt ? { jobId: attempt.jobId, attempt: attempt.attempt } : {}),
         ...(opts.logExtra ?? {}),
       });
-      await this.mailJobs?.record({ payload, state: 'completed' });
+      await this.mailJobs?.record({ ...registryRef, payload, state: 'completed' });
     } catch (err) {
-      this.logger.error({
-        msg: `${opts.logMsg} failed`,
-        toMasked: this.maskEmail(opts.to),
-        error: err instanceof Error ? err.message : String(err),
-      });
+      const { errorName, errorMessage } = describeError(err);
+      if (!attempt) {
+        this.logger.error({
+          msg: `${opts.logMsg} failed`,
+          template: opts.template,
+          toMasked: maskEmail(opts.to),
+          errorName,
+          errorMessage,
+        });
+      }
       await this.mailJobs?.record({
+        ...registryRef,
         payload,
         state: 'failed',
-        failedReason: err instanceof Error ? err.message : String(err),
+        failedReason: errorMessage,
       });
       throw err;
     }
   }
 
   /**
-   * Enqueue helper mirroring `enqueue2faCode`: pushes onto the `email-send`
-   * queue, falling back to a synchronous send when the queue is unavailable
-   * (unit tests / scripts) so the email is never dropped.
+   * Pushes a job onto the `email-send` queue, falling back to a synchronous
+   * send when the queue is unavailable (unit tests / scripts) so the email is
+   * never dropped.
    */
   private async _enqueueOr(
     job: EmailSendJobData,
     fallback: () => Promise<void>,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
     if (!this.emailQueue) {
       await fallback();
       return;
     }
-    await this.emailQueue.add(EMAIL_SEND_JOB, job, {
-      attempts: 5,
-      backoff: { type: 'exponential', delay: 5000 },
-      removeOnComplete: { age: 3600 * 24 * 7 },
-      removeOnFail: false,
-    });
+    await this.emailQueue.add(
+      EMAIL_SEND_JOB,
+      withMeta(job, opts),
+      EMAIL_SEND_JOB_OPTIONS,
+    );
+  }
+
+  /**
+   * `_enqueueOr` for templates that carry a secret. The secret is sealed into
+   * the job; if either the queue or the cipher is missing the mail is sent
+   * synchronously instead — the plaintext never reaches Redis.
+   */
+  private async _enqueueSecretOr<T extends SecretEmailJob>(
+    template: T['template'],
+    secret: Record<string, string>,
+    build: (sealed: T['secret']) => T,
+    fallback: () => Promise<void>,
+    opts?: MailEnqueueOptions,
+  ): Promise<void> {
+    if (!this.emailQueue || !this.cipher) {
+      await fallback();
+      return;
+    }
+    const job = build(this.cipher.seal(template, secret));
+    await this.emailQueue.add(
+      EMAIL_SEND_JOB,
+      withMeta(job, opts),
+      EMAIL_SEND_JOB_OPTIONS,
+    );
+  }
+
+  /**
+   * Enqueues several jobs that share ONE producer stamp as an atomic batch
+   * (`Queue.addBulk` is a single MULTI — all jobs land or none do). When
+   * `opts.compensation` is given every job carries it with
+   * `batch = { id, size }`, so the undo runs only if ALL of them fail
+   * permanently. Returns the number of jobs enqueued (or mails sent, in the
+   * sync fallback); throws when nothing could be dispatched.
+   */
+  private async _enqueueBatchOr(
+    items: { job: EmailSendJobData; fallback: () => Promise<void> }[],
+    opts?: MailEnqueueOptions,
+  ): Promise<number> {
+    if (items.length === 0) return 0;
+    if (!this.emailQueue) return this._sendBatchSync(items);
+    const batchOpts: MailEnqueueOptions | undefined = opts?.compensation
+      ? {
+          ...opts,
+          compensation: {
+            ...opts.compensation,
+            batch: { id: randomUUID(), size: items.length },
+          },
+        }
+      : opts;
+    await this.emailQueue.addBulk(
+      items.map(({ job }) => ({
+        name: EMAIL_SEND_JOB,
+        data: withMeta(job, batchOpts),
+        opts: EMAIL_SEND_JOB_OPTIONS,
+      })),
+    );
+    return items.length;
+  }
+
+  /** Sync fallback of `_enqueueBatchOr`: ≥1 delivered = success. */
+  private async _sendBatchSync(
+    items: { fallback: () => Promise<void> }[],
+  ): Promise<number> {
+    const results = await Promise.allSettled(items.map((i) => i.fallback()));
+    const sent = results.filter((r) => r.status === 'fulfilled').length;
+    if (sent === 0) {
+      const first = results.find(
+        (r): r is PromiseRejectedResult => r.status === 'rejected',
+      );
+      throw first?.reason instanceof Error
+        ? first.reason
+        : new Error('mail batch: no message could be sent');
+    }
+    return sent;
   }
 
   // account-created ────────────────────────────────────────
@@ -557,13 +615,24 @@ export class MailService implements IMailService {
     });
   }
 
+  /** The temporary password travels sealed (see `enqueue2faCode`). */
   enqueueAccountCreated(
     email: string,
     props: AccountCreatedProps,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
-    return this._enqueueOr(
-      { template: 'account-created', email, props },
+    const { temporaryPassword, ...publicProps } = props;
+    return this._enqueueSecretOr(
+      'account-created',
+      { temporaryPassword },
+      (secret) => ({
+        template: 'account-created',
+        email,
+        props: publicProps,
+        secret,
+      }),
       () => this.sendAccountCreated(email, props),
+      opts,
     );
   }
 
@@ -593,10 +662,12 @@ export class MailService implements IMailService {
   enqueueAccountDeactivated(
     email: string,
     props: AccountDeactivatedProps,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
     return this._enqueueOr(
       { template: 'account-deactivated', email, props },
       () => this.sendAccountDeactivated(email, props),
+      opts,
     );
   }
 
@@ -625,10 +696,12 @@ export class MailService implements IMailService {
   enqueueAccountReactivated(
     email: string,
     props: AccountReactivatedProps,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
     return this._enqueueOr(
       { template: 'account-reactivated', email, props },
       () => this.sendAccountReactivated(email, props),
+      opts,
     );
   }
 
@@ -664,13 +737,24 @@ export class MailService implements IMailService {
     });
   }
 
+  /** The temporary password travels sealed (see `enqueue2faCode`). */
   enqueueAccountPasswordReset(
     email: string,
     props: AccountPasswordResetProps,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
-    return this._enqueueOr(
-      { template: 'account-password-reset', email, props },
+    const { temporaryPassword, ...publicProps } = props;
+    return this._enqueueSecretOr(
+      'account-password-reset',
+      { temporaryPassword },
+      (secret) => ({
+        template: 'account-password-reset',
+        email,
+        props: publicProps,
+        secret,
+      }),
       () => this.sendAccountPasswordReset(email, props),
+      opts,
     );
   }
 
@@ -713,9 +797,12 @@ export class MailService implements IMailService {
   enqueueWeeklyReport(
     email: string,
     props: WeeklyReportProps,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
-    return this._enqueueOr({ template: 'weekly-report', email, props }, () =>
-      this.sendWeeklyReport(email, props),
+    return this._enqueueOr(
+      { template: 'weekly-report', email, props },
+      () => this.sendWeeklyReport(email, props),
+      opts,
     );
   }
 
@@ -748,10 +835,12 @@ export class MailService implements IMailService {
   enqueueCarrierDecision(
     email: string,
     props: CarrierDecisionProps,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
     return this._enqueueOr(
       { template: 'carrier-decision', email, props },
       () => this.sendCarrierDecision(email, props),
+      opts,
     );
   }
 
@@ -785,10 +874,12 @@ export class MailService implements IMailService {
   enqueueInternalDecision(
     email: string,
     props: InternalDecisionProps,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
     return this._enqueueOr(
       { template: 'internal-decision', email, props },
       () => this.sendInternalDecision(email, props),
+      opts,
     );
   }
 
@@ -835,10 +926,12 @@ export class MailService implements IMailService {
   enqueueClaimSubmitted(
     email: string,
     props: CarrierSubmittedProps,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
     return this._enqueueOr(
       { template: 'carrier-submitted', email, props },
       () => this.sendClaimSubmitted(email, props),
+      opts,
     );
   }
 
@@ -880,10 +973,12 @@ export class MailService implements IMailService {
   enqueueReklamacjaInternalSubmitted(
     email: string,
     props: ReklamacjaInternalSubmittedProps,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
     return this._enqueueOr(
       { template: 'reklamacja-internal-submitted', email, props },
       () => this.sendReklamacjaInternalSubmitted(email, props),
+      opts,
     );
   }
 
@@ -917,10 +1012,12 @@ export class MailService implements IMailService {
   enqueueReklamacjaCarrierSubmitted(
     email: string,
     props: ReklamacjaCarrierSubmittedProps,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
     return this._enqueueOr(
       { template: 'reklamacja-carrier-submitted', email, props },
       () => this.sendReklamacjaCarrierSubmitted(email, props),
+      opts,
     );
   }
 
@@ -965,10 +1062,12 @@ export class MailService implements IMailService {
   enqueueReklamacjaCarrierDecision(
     email: string,
     props: ReklamacjaCarrierDecisionProps,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
     return this._enqueueOr(
       { template: 'reklamacja-carrier-decision', email, props },
       () => this.sendReklamacjaCarrierDecision(email, props),
+      opts,
     );
   }
 
@@ -976,10 +1075,12 @@ export class MailService implements IMailService {
   enqueueVerificationDigest(
     email: string,
     props: VerificationDigestProps,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
     return this._enqueueOr(
       { template: 'verification-digest', email, props },
       () => this.sendVerificationDigest(email, props),
+      opts,
     );
   }
 
@@ -1008,10 +1109,12 @@ export class MailService implements IMailService {
   enqueueDelegationAnnounced(
     email: string,
     props: DelegationAnnouncedProps,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
     return this._enqueueOr(
       { template: 'delegation-announced', email, props },
       () => this.sendDelegationAnnounced(email, props),
+      opts,
     );
   }
 
@@ -1045,10 +1148,12 @@ export class MailService implements IMailService {
   enqueueDelegationReady(
     email: string,
     props: DelegationReadyProps,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
     return this._enqueueOr(
       { template: 'delegation-ready', email, props },
       () => this.sendDelegationReady(email, props),
+      opts,
     );
   }
 
@@ -1086,10 +1191,12 @@ export class MailService implements IMailService {
   enqueueGuaranteeReminderCarrier(
     email: string,
     props: GuaranteeReminderCarrierProps,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
     return this._enqueueOr(
       { template: 'guarantee-reminder-carrier', email, props },
       () => this.sendGuaranteeReminderCarrier(email, props),
+      opts,
     );
   }
 
@@ -1139,10 +1246,12 @@ export class MailService implements IMailService {
   enqueueGuaranteeOpiekunDigest(
     email: string,
     props: GuaranteeOpiekunDigestProps,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
     return this._enqueueOr(
       { template: 'guarantee-opiekun-digest', email, props },
       () => this.sendGuaranteeOpiekunDigest(email, props),
+      opts,
     );
   }
 
@@ -1177,10 +1286,31 @@ export class MailService implements IMailService {
   enqueueVehicleRemovalAdmin(
     email: string,
     props: VehicleRemovalAdminProps,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
     return this._enqueueOr(
       { template: 'vehicle-removal-admin', email, props },
       () => this.sendVehicleRemovalAdmin(email, props),
+      opts,
+    );
+  }
+
+  /**
+   * The whole admin fan-out of one vehicle-removal run as ONE atomic batch
+   * (`_enqueueBatchOr`). The cron's per-vehicle stamp means "at least one admin
+   * got the digest", so `opts.compensation` is released only when every admin
+   * copy has failed permanently. Returns how many digests were dispatched.
+   */
+  enqueueVehicleRemovalAdminBatch(
+    recipients: { email: string; props: VehicleRemovalAdminProps }[],
+    opts?: MailEnqueueOptions,
+  ): Promise<number> {
+    return this._enqueueBatchOr(
+      recipients.map(({ email, props }) => ({
+        job: { template: 'vehicle-removal-admin', email, props },
+        fallback: () => this.sendVehicleRemovalAdmin(email, props),
+      })),
+      opts,
     );
   }
 
@@ -1217,10 +1347,12 @@ export class MailService implements IMailService {
   enqueueSsoAccessRequested(
     email: string,
     props: SsoAccessRequestedProps,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
     return this._enqueueOr(
       { template: 'sso-access-requested', email, props },
       () => this.sendSsoAccessRequested(email, props),
+      opts,
     );
   }
 
@@ -1288,10 +1420,12 @@ export class MailService implements IMailService {
   enqueueDirectoryReconcileReport(
     email: string,
     props: DirectoryReconcileReportProps,
+    opts?: MailEnqueueOptions,
   ): Promise<void> {
     return this._enqueueOr(
       { template: 'directory-reconcile-report', email, props },
       () => this.sendDirectoryReconcileReport(email, props),
+      opts,
     );
   }
 
@@ -1355,7 +1489,7 @@ export class MailService implements IMailService {
       await this.mailJobs?.record({
         payload,
         state: 'failed',
-        failedReason: err instanceof Error ? err.message : String(err),
+        failedReason: describeError(err).errorMessage,
       });
       throw err;
     }
@@ -1425,13 +1559,35 @@ export class MailService implements IMailService {
       'Jeśli to nie Ty próbujesz się zalogować, zignoruj tę wiadomość.',
     ].join('\n');
   }
+}
 
-  private maskEmail(email: string): string {
-    const at = email.indexOf('@');
-    if (at <= 0) return '***';
-    const local = email.slice(0, at);
-    const domain = email.slice(at);
-    if (local.length <= 2) return `${local[0] ?? ''}***${domain}`;
-    return `${local.slice(0, 2)}***${domain}`;
-  }
+/** Arguments of the single provider-call path (`_dispatch` / `_send`). */
+interface DispatchArgs {
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+  template: string;
+  data?: Record<string, unknown>;
+  /** See `SendMailArgs.replyTo` — set by `maksim-confirmation-request` only. */
+  replyTo?: string | null;
+  threadKey?: string;
+  logMsg: string;
+  logExtra?: Record<string, unknown>;
+}
+
+/** Attaches the delivery-log / compensation meta to a job payload. */
+function withMeta<T extends EmailSendJobData>(
+  job: T,
+  opts: MailEnqueueOptions | undefined,
+): T {
+  if (!opts) return job;
+  const meta: MailJobMeta = {
+    ...(opts.triggeredById ? { triggeredById: opts.triggeredById } : {}),
+    ...(opts.target
+      ? { targetType: opts.target.type, targetKey: opts.target.key }
+      : {}),
+    ...(opts.compensation ? { compensation: opts.compensation } : {}),
+  };
+  return Object.keys(meta).length > 0 ? { ...job, meta } : job;
 }

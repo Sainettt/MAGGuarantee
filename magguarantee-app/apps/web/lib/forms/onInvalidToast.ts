@@ -15,18 +15,45 @@
 import type { FieldErrors, FieldValues, UseFormSetFocus } from 'react-hook-form';
 import { toast } from 'sonner';
 
+/**
+ * Dotted paths of the failing fields (`address.city`, `files.0`), walked
+ * without reading `ref` / `message` so no field VALUE can leak into the log.
+ * Exported for tests.
+ */
+export function collectErrorPaths(errors: unknown, prefix = ''): string[] {
+  if (typeof errors !== 'object' || errors === null) return [];
+  const paths: string[] = [];
+  for (const [key, entry] of Object.entries(errors)) {
+    if (key === 'ref' || key === 'message' || key === 'type' || key === 'types') {
+      continue;
+    }
+    if (typeof entry !== 'object' || entry === null) continue;
+    const path = prefix ? `${prefix}.${key}` : key;
+    // A leaf FieldError carries `type`; nested objects/arrays recurse.
+    if ('type' in entry) {
+      paths.push(path);
+    } else {
+      const nested = collectErrorPaths(entry, path);
+      if (nested.length > 0) paths.push(...nested);
+      else paths.push(path);
+    }
+  }
+  return paths;
+}
+
 export function onInvalidToast<T extends FieldValues>(
   setFocus: UseFormSetFocus<T>,
   message: string,
 ): (errors: FieldErrors<T>) => void {
   return (errors) => {
-    // Surface every failing field+reason to the console so developers can
-    // diagnose which schema rule rejected the submission. Cheap, harmless,
-    // and the alternative (silent reject + only the first field focused) is
-    // a frequent source of "I filled everything but it won't save" reports.
-    if (typeof window !== 'undefined') {
-      // eslint-disable-next-line no-console
-      console.warn('[form] validation failed', errors);
+    // Dev-only diagnostics: list the failing field NAMES so developers can see
+    // which schema rule rejected the submission. Never log the `errors` object
+    // itself — each entry holds a `ref` to the DOM input (and thus the value
+    // the user typed: NIP, IBAN, names…), and never log in production.
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn('[form] validation failed', {
+        fields: collectErrorPaths(errors),
+      });
     }
     toast.error(message);
     // First key in `errors` is the first failing field per RHF's iteration

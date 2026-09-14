@@ -4,6 +4,9 @@ import { Cron } from '@nestjs/schedule';
 
 import { BUSINESS_TZ, businessDateIso } from '@magguarantee/shared';
 
+import { runGuardedCron } from '../../common/ops-alert/guarded-cron';
+import { OpsAlertService } from '../../common/ops-alert/ops-alert.service';
+import { describeError, maskEmail } from '../../common/ops-alert/redact';
 import type { Env } from '../../config/env.schema';
 import { MailService } from '../mail/mail.service';
 import type { WeeklyReportRow } from '../mail/templates/weekly-report';
@@ -12,6 +15,7 @@ import { WeeklyReportRepository } from './weekly-report.repository';
 /** Cron: Monday 09:00 Europe/Warsaw (docs/16 — GAS trigger ran Mondays too). */
 const WEEKLY_REPORT_CRON = '0 9 * * 1';
 const WEEKLY_REPORT_TIMEZONE = BUSINESS_TZ;
+const WEEKLY_REPORT_JOB_NAME = 'weekly-report';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -44,13 +48,22 @@ export class WeeklyReportService {
     private readonly repo: WeeklyReportRepository,
     private readonly mail: MailService,
     private readonly config: ConfigService<Env, true>,
+    private readonly alerts: OpsAlertService,
   ) {}
 
+  /** Cron entry point — body guarded by `runGuardedCron` (never rejects). */
   @Cron(WEEKLY_REPORT_CRON, {
-    name: 'weekly-report',
+    name: WEEKLY_REPORT_JOB_NAME,
     timeZone: WEEKLY_REPORT_TIMEZONE,
   })
   async runWeeklyReport(now: Date = new Date()): Promise<void> {
+    await runGuardedCron(
+      { job: WEEKLY_REPORT_JOB_NAME, logger: this.logger, alerts: this.alerts },
+      () => this._runWeeklyReport(now),
+    );
+  }
+
+  private async _runWeeklyReport(now: Date): Promise<void> {
     const { start, end } = weekWindow(now);
 
     const recipients = await this.repo.findActiveAdminRecipients();
@@ -102,6 +115,15 @@ export class WeeklyReportService {
     const results = await Promise.allSettled(
       recipients.map((r) => this.mail.enqueueWeeklyReport(r.email, props)),
     );
+    // Per-recipient reason, masked address (2026-08-14 logging audit, item 11).
+    results.forEach((result, i) => {
+      if (result.status !== 'rejected') return;
+      this.logger.warn({
+        msg: 'weekly report: enqueue rejected for recipient',
+        toMasked: maskEmail(recipients[i]?.email ?? ''),
+        ...describeError(result.reason),
+      });
+    });
     const failed = results.filter((r) => r.status === 'rejected').length;
 
     this.logger.log({

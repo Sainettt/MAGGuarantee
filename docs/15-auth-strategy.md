@@ -108,8 +108,8 @@ type JwtPayload = {
 | Длина | 6 цифр (`000000-999999`, leading zeros ok) | `crypto.randomInt(0, 1_000_000).toString().padStart(6, '0')` |
 | TTL | 600 сек (10 мин) | Redis SETEX |
 | Max attempts | 5 | Redis counter, key `2fa:attempts:{sessionToken}` |
-| Lockout | 5 мин (или forever?) | После 5-й — Redis SETEX 300, ключ `2fa:lockout:{sessionToken}` |
-| Resend | После 30 сек, 3 раза в 5 минут | Redis counter |
+| Lockout | 5 мин | После 5-й — Redis SETEX 300, ключ `2fa:lockout:{sessionToken}` (`DEFAULT_LOCKOUT_SECONDS`) |
+| Resend | Cooldown 60 сек на сессию (`RESEND_COOLDOWN_SECONDS`, Redis) + 2 / мин / IP (throttler) | Resend сбрасывает счётчик попыток, но **не продлевает** жизнь сессии: TTL сессии фиксирован и ограничивает перебор |
 
 ```ts
 // two-factor.service.ts
@@ -416,7 +416,41 @@ function RoleSwitcher() {
 ## Logout
 
 - `POST /auth/logout`: revoke refresh-токен (`revokedAt = now()`), очистка cookies.
-- При компрометации (например GET /auth/sessions показывает странный IP) → endpoint `/auth/revoke-all` для отзыва всех refresh-ов user-а.
+- ⏳ Не реализовано: `GET /auth/sessions` (список сессий с IP/UA) и `/auth/revoke-all`. Сейчас отзыв всей семьи токенов делается только автоматически — при детекте повторного использования refresh-токена.
+
+## Audit и события безопасности (2026-09-14)
+
+Закрыт п.4 аудита логирования: раньше из всего auth-цикла в `audit_log` попадал только `change-password`, а неудачный вход не оставлял следов нигде.
+
+**Правило:** на `@Public`-роутах `@Audit` запрещён (см. [13-api-design.md](13-api-design.md) §«Audit на уровне API»). Все строки ниже пишет `AuthService` на root-клиенте, актор — затронутый пользователь, IP — `req.ip`, user agent — в `metadata`.
+
+**Успех и security-события → `audit_log`:**
+
+| Action | Когда | Если запись аудита упала |
+|---|---|---|
+| `passwordLogin` | `verify-code` успешен, до выпуска токенов (пара к `googleLogin`) | запрос падает, сессия не выдаётся |
+| `resetPassword` (`metadata.via = 'forgotPassword'`) | self-service сброс пароля, до смены | сброс падает, пользователь запрашивает новый код |
+| `logout` | только если была живая сессия | ERROR в лог, сессия всё равно закрыта |
+| `detectRefreshTokenReuse` | повторное использование отозванного refresh; отозвана вся семья (`tokenId`, `revokedAgeMs`, `rotated`, `sessionsRevoked`) | ERROR в лог, 401 остаётся |
+| `lockAccount` | 10-й неверный пароль (`LOGIN_MAX_FAILED_ATTEMPTS`), блок 15 мин | ERROR в лог |
+| `lockTwoFactorSession` / `lockPasswordResetSession` | 5-я неверная попытка кода; один раз на блокировку | ERROR в лог, 423 остаётся |
+| `system.rejectOrphanedVerificationCode` | код совпал, а сессии нет (подозрение на кражу; пользователь не определяется) | ERROR в лог |
+
+**Неудачные попытки → только WARN-лог**, чтобы брутфорс не раздувал `audit_log`. Формат строки `{ msg, event, reason, ipAddress, userAgent (≤256), …ids }`, логин и email сырыми не пишутся (для неизвестного логина — `loginFingerprint`, префикс sha256):
+
+| `event` | `reason` |
+|---|---|
+| `loginRefused` | `unknown_login`, `wrong_password`, `account_inactive`, `account_locked`, `account_without_email`, `account_inactive_at_verify` |
+| `twoFactorCodeRejected` / `passwordResetCodeRejected` | `wrong_code`, `too_many_attempts`, `session_locked`, `code_expired`, `code_matched_without_session` |
+| `twoFactorResendRefused` / `passwordResetResendRefused` | `cooldown_active` |
+| `passwordResetRefused` | `account_inactive` |
+| `googleLoginRefused` | `id_token_rejected`, `carrier_account`, `account_inactive`, `directory_unavailable`, `not_in_directory`, `employee_inactive`, `no_role_for_stanowisko` |
+
+Ответы и тайминги (анти-энумерация) не изменились. «Benign race heal» у refresh поднят с `debug` до `info`. Ошибки `google-auth-library` логируются урезанными (`libraryErrorSummary`) — их полный текст содержит декодированный id_token с email.
+
+**Вне auth-модуля:** фильтр ошибок пишет WARN на каждый 401 / 403 / 429 (метод, шаблон роута, `userId`, IP) — это единственный след IDOR-разведки и перебора ролей.
+
+**Важно для прода:** IP во всех этих записях и ключ троттлинга корректны, только когда в Caddy задан `UPSTREAM_PROXY_CIDRS` (docs/23). Без него у всех пользователей IP корпоративного nginx — и один общий бакет лимитов.
 
 ## Защита endpoints
 
@@ -424,7 +458,7 @@ function RoleSwitcher() {
 |---|---|---|
 | `POST /auth/login` | — | rate-limit 5/min/IP |
 | `POST /auth/verify-code` | sessionToken | rate-limit |
-| `POST /auth/refresh` | refresh-cookie | — |
+| `POST /auth/refresh` | refresh-cookie | rate-limit 60/min/IP |
 | `GET /auth/me` | access | — |
 | `POST /auth/logout` | access | — |
 | `GET /carriers` | access | role: admin / opiekun(own) — НЕ pracownik |

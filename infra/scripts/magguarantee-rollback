@@ -27,8 +27,23 @@ STACK_DIR="${MAGG_STACK_DIR:-/opt/magguarantee}"
 SRC_DIR="${MAGG_SRC_DIR:-$STACK_DIR/src}"
 COMPOSE_FILE="${MAGG_COMPOSE_FILE:-infra/docker-compose.prod.yml}"
 
+# Журнал выкатов — тот же файл, в который пишет CI-деплой (.github/workflows/ci.yml).
+# Одна строка на событие: время UTC, event, status, sha, prev, кто. Текущий код
+# на сервере = sha последней строки со status=ok:
+#   tail -n 20 /opt/magguarantee/deploy-history.log
+HISTORY="${MAGG_DEPLOY_HISTORY:-$STACK_DIR/deploy-history.log}"
+
 log() { printf '%s  %s\n' "$(date +'%Y-%m-%d %H:%M:%S')" "$*"; }
 die() { log "ОШИБКА: $*" >&2; exit 1; }
+
+# record <status> — дописать строку в журнал выкатов. Ошибка записи не должна
+# ронять уже идущий откат, поэтому только предупреждение.
+record() {
+  printf '%s\tevent=rollback\tstatus=%s\tcompose=%s\tsha=%s\tprev=%s\tactor=%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$COMPOSE_FILE" "$TARGET_FULL" "$CURRENT_FULL" \
+    "${SUDO_USER:-${USER:-$(id -un)}}" >> "$HISTORY" \
+    || log "ВНИМАНИЕ: не удалось записать в $HISTORY"
+}
 
 SHA="${1:-}"
 [ -n "$SHA" ] || die "использование: magguarantee-rollback <git-sha>
@@ -43,6 +58,11 @@ git cat-file -e "${SHA}^{commit}" 2>/dev/null || die "коммит $SHA не н�
 
 CURRENT="$(git rev-parse --short HEAD)"
 TARGET="$(git rev-parse --short "$SHA")"
+CURRENT_FULL="$(git rev-parse HEAD)"
+TARGET_FULL="$(git rev-parse "${SHA}^{commit}")"
+
+# Проверить до вопроса «Продолжить?», а не посреди отката.
+touch "$HISTORY" 2>/dev/null || die "журнал выкатов $HISTORY недоступен на запись"
 
 echo
 echo "  сейчас:  $CURRENT  $(git log -1 --format=%s HEAD)"
@@ -57,6 +77,12 @@ echo
 
 read -r -p "Продолжить? (введите yes): " ANSWER
 [ "$ANSWER" = "yes" ] || { log "отменено"; exit 0; }
+
+# С этого момента любой выход без `status=ok` оставляет в журнале `failed`:
+# рабочая копия уже может стоять на целевом коммите, а контейнеры — нет.
+DONE=0
+trap '[ "$DONE" -eq 1 ] || record failed' EXIT
+record started
 
 log "переключаемся на $TARGET"
 git checkout --quiet "$TARGET"
@@ -73,7 +99,10 @@ docker compose -f "$COMPOSE_FILE" exec -T api \
   wget -qO- http://localhost:3001/health >/dev/null \
   || die "api не отвечает на /health — смотри: docker compose -f $COMPOSE_FILE logs api"
 
+DONE=1
+record ok
+
 echo
-log "откат на $TARGET выполнен"
+log "откат на $TARGET выполнен (записано в $HISTORY)"
 log "репозиторий в состоянии detached HEAD"
 log "вернуться на актуальный код:  cd $SRC_DIR && git checkout main && git pull"

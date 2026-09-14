@@ -3,15 +3,17 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Logger,
   Param,
   Post,
+  Req,
   Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { memoryStorage } from 'multer';
 
 import { UuidSchema, type ClaimDto } from '@magguarantee/shared';
@@ -22,6 +24,7 @@ import {
 } from '../../common/attachments';
 import { Audit } from '../../common/audit';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
+import { clientIp } from '../../common/utils/client-ip';
 import {
   CurrentUser,
   type AuthUser,
@@ -49,6 +52,8 @@ const MULTIPART_OPTIONS = {
 @Controller('claims/:nrZgl/authorization-confirmation')
 @UseGuards(RolesGuard)
 export class ClaimAttachmentsController {
+  private readonly logger = new Logger(ClaimAttachmentsController.name);
+
   constructor(private readonly attachments: ClaimAttachmentsService) {}
 
   @Post()
@@ -75,15 +80,28 @@ export class ClaimAttachmentsController {
   @Get(':attachmentId/download')
   @Roles('admin', 'pracownik')
   async download(
+    @CurrentUser() user: AuthUser,
     @Param('nrZgl') nrZgl: string,
     @Param('attachmentId', new ZodValidationPipe(UuidSchema))
     attachmentId: string,
+    @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
-    const { object, mimeType } = await this.attachments.download(
+    const { object, mimeType, category } = await this.attachments.download(
       nrZgl,
       attachmentId,
     );
+    // Access trail for the Maksim confirmation screenshot (not an audit row).
+    this.logger.log({
+      msg: 'attachment downloaded',
+      entity: 'Claim',
+      nrZgl,
+      attachmentId,
+      category,
+      userId: user.sub,
+      role: user.role,
+      ip: clientIp(req) ?? null,
+    });
     res.setHeader('Content-Type', object.contentType ?? mimeType);
     res.setHeader(
       'Content-Disposition',

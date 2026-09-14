@@ -24,11 +24,14 @@ import { DashboardCharts } from '@/components/dashboard/DashboardCharts';
 import { DashboardSidebar } from '@/components/dashboard/DashboardSidebar';
 import { KpiCard } from '@/components/dashboard/KpiCard';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { useDashboard } from '@/lib/hooks/useDashboard';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 
 export function DashboardView() {
   const t = useTranslations('dashboard');
-  const { data, isLoading, isError } = useDashboard();
+  const dashboardQ = useDashboard();
+  const { data, isLoading, isError } = dashboardQ;
 
   const kpi = data?.kpi ?? {
     total: 0,
@@ -90,7 +93,11 @@ export function DashboardView() {
       {/* Main + sidebar */}
       <div className="flex flex-col lg:flex-row gap-6">
         <div className="flex-1 min-w-0 space-y-4">
-          {isEmpty ? (
+          {isError && !data ? (
+            <div className="rounded-xl border border-border bg-card shadow-card">
+              <ErrorState {...queryErrorProps(dashboardQ)} />
+            </div>
+          ) : isEmpty ? (
             <div className="rounded-xl border border-border bg-card shadow-card">
               <EmptyState
                 icon={Inbox}

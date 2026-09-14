@@ -1,0 +1,53 @@
+# MAGGuarantee — ops alert for a failed systemd unit (template).
+#
+# Never enabled or started on a schedule. A unit opts in with
+#   OnFailure=magguarantee-alert@%n.service
+# and systemd starts `magguarantee-alert@<that-unit's-full-name>.service` when it
+# enters the failed state; %i below is that name (e.g. magguarantee-backup.service).
+# There is no [Install] section on purpose.
+#
+# Install on the VPS (the same `cp` as the backup units):
+#   sudo cp /opt/magguarantee/src/infra/systemd/magguarantee-* /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo install -m 0600 -o root -g root \
+#     /opt/magguarantee/src/infra/scripts/alert.conf.example /opt/magguarantee/alert.conf
+#   sudo nano /opt/magguarantee/alert.conf        # OPS_ALERT_WEBHOOK_URL=...
+#
+# Test (sends a real message with the backup journal tail):
+#   sudo systemctl start magguarantee-alert@magguarantee-backup.service.service
+#   journalctl -u 'magguarantee-alert@*' -n 20 --no-pager
+#
+# Check the wiring of a monitored unit:
+#   systemctl show -p OnFailure magguarantee-backup.service
+
+[Unit]
+Description=MAGGuarantee ops alert: %i failed
+# Deliberately NO OnFailure= here — a failing alert must not alert about itself
+# in a loop. A failed alert shows up in `systemctl --failed` and the journal.
+
+[Service]
+Type=oneshot
+
+# The script needs no root: curl + reading the journal. `systemd-journal`
+# membership is what lets a non-root user run `journalctl -u <unit>` on the
+# system journal.
+User=deploy
+Group=deploy
+SupplementaryGroups=systemd-journal
+
+# OPS_ALERT_WEBHOOK_URL (+ optional OPS_ALERT_JOURNAL_LINES / _MAX_LOG_BYTES).
+# Missing file or empty URL → the script logs a WARNING and exits 0.
+EnvironmentFile=-/opt/magguarantee/alert.conf
+
+# Through /bin/bash explicitly, so the alert still fires even if the checkout
+# lost the script's executable bit — the one path that must not depend on it.
+ExecStart=/bin/bash /opt/magguarantee/src/infra/scripts/magguarantee-alert %i
+
+# curl: 15 s per attempt × up to 4 attempts + retry delays.
+TimeoutStartSec=2min
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+StandardOutput=journal
+StandardError=journal

@@ -35,6 +35,7 @@ import {
 import { Select } from '@/components/ui/Select';
 import { ApiResponseError } from '@/lib/api/client';
 import { useGrantSsoAccess } from '@/lib/hooks/useSso';
+import { SUPPRESS_GLOBAL_ERROR } from '@/lib/query/globalErrors';
 
 /** Static keys rather than a template string, so next-intl can type-check them. */
 const OUTCOME_TOAST = {
@@ -55,7 +56,7 @@ export function GrantAccessDialog({ target, onClose }: GrantAccessDialogProps) {
   const tCommon = useTranslations('common');
   const tRoles = useTranslations('roles');
   const [role, setRole] = useState<AssignableRole | ''>('');
-  const grantM = useGrantSsoAccess();
+  const grantM = useGrantSsoAccess({ meta: SUPPRESS_GLOBAL_ERROR });
 
   // A fresh choice for every person — the role picked for the previous row
   // must not carry over to the next one.

@@ -77,7 +77,9 @@
 
 ---
 
-## Фаза 1 — Auth: login + 2FA + JWT (≈ 1 неделя)
+## Фаза 1 — Auth: login + 2FA + JWT (≈ 1 неделя) ✅ ЗАВЕРШЕНА (2026-04-30)
+
+> Чек-лист ниже — исходный план, пункты по ходу не отмечались. Актуальное поведение auth (включая Google SSO 2026-09-09 и audit/security-события 2026-09-14) — [15-auth-strategy.md](15-auth-strategy.md).
 
 **Цель:** любая роль может войти в приложение через login + 6-значный код в email. Получает JWT. Видит «Hello, {name}» с правильной ролью.
 
@@ -129,7 +131,9 @@
 
 ---
 
-## Фаза 2 — Core entities: Users, Carriers, Vehicles, Drivers, Trailers (≈ 2 недели)
+## Фаза 2 — Core entities: Users, Carriers, Vehicles, Drivers, Trailers (≈ 2 недели) ✅ ЗАВЕРШЕНА (2026-05-04)
+
+> Чек-лист ниже — исходный план. GPS остаётся mock-провайдером (реального API-доступа нет). Актуальные контракты — [13-api-design.md](13-api-design.md).
 
 **Цель:** в БД лежат все справочные сущности. Есть полный CRUD через API с правильными ролями. Frontend пока минимальный — просто списки таблицами для admin (для UAT).
 
@@ -169,7 +173,9 @@
 
 ---
 
-## Фаза 3 — Przewoznik (carrier) panel (≈ 2 недели)
+## Фаза 3 — Przewoznik (carrier) panel (≈ 2 недели) ✅ ЗАВЕРШЕНА (2026-05-07)
+
+> Чек-лист ниже — исходный план. С тех пор wniosek привязан к выезду (`Claim.delegationId`, doc 20 §0″): период и пробег перевозчик не вводит.
 
 **Цель:** перевозчик может полностью пользоваться приложением — подавать wnioski, видеть свои, просматривать свою флоту (авто/водители/прицепы — read-only), регистрировать выезды.
 
@@ -220,7 +226,7 @@
 
 ---
 
-## Фаза 4 — Pracownik + Admin panel (≈ 3 недели)
+## Фаза 4 — Pracownik + Admin panel (≈ 3 недели) ✅ ЗАВЕРШЕНА (2026-05-26)
 
 **Цель:** обе роли получают доступ к Employee panel — с разным scope-ом, **не путать**:
 
@@ -514,9 +520,11 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
 
 ---
 
-## Фаза 7 — Eksport, Weryfikator (≈ 1 неделя)
+## Фаза 7 — Eksport, Weryfikator (≈ 1 неделя) ✅ ЗАВЕРШЕНА (2026-06-22)
 
 > 📄 Детальная импл-спека + открытые вопросы по scope: [`20-phase-7-eksport-weryfikator.md`](20-phase-7-eksport-weryfikator.md).
+>
+> ⚠️ Текст ниже — исходный план. Реализация прошла несколько rework-ов (doc 20 §0′, §0″): weryfikator — недельная km-доска (`VehicleDailyKm`) плюс переходы `gotowy→w_trasie→zjechal` с точными datetime; eksport ставит `gotowy` (= акцепт выезда); cancel — у перевозчика (свой `zgloszony`) и admin (любой активный), **не** у weryfikatora. Актуальное — doc 20 §0″ и [03-roles.md](03-roles.md).
 
 **Цель:** ekspert экспорта и верификатор делегаций имеют свои панели.
 
@@ -646,7 +654,7 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
 3. ✅ **Account-lifecycle письма закрыты для перевозчиков** (2026-07-30): `POST /carriers` шлёт `account-created` с временным паролем на `User.email` (не на `Carrier.ordersEmail`), reset-пароля у перевозчика и у внутренних ролей шлёт **общий** `account-password-reset`, реактивация — `account-reactivated`. Деактивация перевозчику **не** шлётся (решение заказчика) — асимметрия с внутренними ролями намеренная. Раньше пароль перевозчика писался в лог и передавался руками.
 4. 🟡 **BullMQ queues:** `email-send` ✅; `daily-reminders` ❌ **отменён** (дублировал verification-SLA дайджест — шаблон удалён 2026-07-30); `weekly-report` ✅ (как `@Cron`, не repeatable job); `token-cleanup` 🚧 — единственная незакрытая джоба.
 5. ✅ **S3** — `StorageService` (MinIO/S3-совместимый) + вложения claim-ов и машин. Retention policy — не формализована.
-6. ❌ **Google OAuth** для внутренних — опционально, не делали.
+6. ✅ **Google OAuth** для внутренних — сделан как Google SSO + MAGSpace-справочник (трек A, 2026-09-09): id_token-flow, роль из stanowiska, reconcile раз в 15 мин. См. [24-sso-magspace-and-permissions-plan.md](24-sso-magspace-and-permissions-plan.md), [15-auth-strategy.md](15-auth-strategy.md). Слой permissions (трек B) — план в [25-permissions-layer-plan.md](25-permissions-layer-plan.md).
 7. ✅ **`GET /ready`** (2026-07-30) — readiness-проба: Postgres `SELECT 1` + Redis `PING`, 200 / 503 с диагностическим телом. Было отложено из Phase 8.
 8. 🚧 **Uptime Kuma** на VPS — пинг `/health` и `/ready`, алерты. Делается при выкате прода.
 9. ❌ **Bull Board UI** на `/admin/queues` — не делали; очередь пока наблюдается через `/diagnostics/mails`.
@@ -662,7 +670,13 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
 
 ---
 
-## Фаза 10 — Launch (≈ 0.5–1 неделя)
+## Фаза 10 — Launch (≈ 0.5–1 неделя) ⏳ НЕ ЗАПУЩЕН (на 2026-09-14)
+
+> **Статус на 2026-09-14.** Прод не выкачен. Код и процедура готовы: runbook [23-prod-deployment-runbook.md](23-prod-deployment-runbook.md) проверен репетицией 2026-07-28/29. Топология изменилась относительно исходного плана: TLS терминирует **корпоративный nginx MAGTRANS**, наш Caddy работает за ним по HTTP без ACME (коммит `3d70636`); деплой — `workflow_dispatch` на self-hosted runner (`staging` / `prod`), без SSH и без ghcr.io.
+>
+> Блокеры внешние, со стороны заказчика: прод-VPS; vhost `mymag.magtrans.eu` на nginx и IP nginx (для `UPSTREAM_PROXY_CIDRS`); GCP-проект фирмы для Gmail API; Google Group `no-reply@`; реальные ставки и лимиты вместо заглушек сида.
+>
+> Разделы ниже («staging уже работает», «Краткие шаги», «Rollback») — история до перехода на nginx и runner; актуальная последовательность — только docs/23.
 
 **Цель:** новое приложение запущено в проде, готово принимать первых реальных пользователей. Так как мигрировать нечего, это простой production deployment.
 

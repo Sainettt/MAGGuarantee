@@ -97,6 +97,22 @@ describe('AuditContext', () => {
     ).not.toThrow();
   });
 
+  it('setAction() overrides the action on the active store (last call wins)', async () => {
+    const store = makeStore();
+    await AuditContext.run(store, async () => {
+      expect(AuditContext.current()?.action).toBeUndefined();
+      AuditContext.setAction('delegation.markReady');
+      AuditContext.setAction('delegation.rollbackReady');
+      expect(AuditContext.current()?.action).toBe('delegation.rollbackReady');
+    });
+    expect(store.action).toBe('delegation.rollbackReady');
+  });
+
+  it('setAction() is a silent no-op outside any run()', () => {
+    expect(() => AuditContext.setAction('orphan')).not.toThrow();
+    expect(AuditContext.current()).toBeUndefined();
+  });
+
   it('concurrent run()s do not leak stores into each other', async () => {
     // Two simultaneous async chains, each with its own store. Each must see
     // only its own — that's the ALS contract we rely on.

@@ -5,8 +5,10 @@
 // `weekWindow`) and the dispatch behaviour (one mail per active admin, sends
 // even on a zero week, one bad address never blocks the rest).
 
+import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 
+import type { OpsAlertService } from '../../common/ops-alert/ops-alert.service';
 import type { MailService } from '../mail/mail.service';
 import type {
   WeeklyBacklogStats,
@@ -71,6 +73,7 @@ function makeService(args: Parameters<typeof makeRepo>[0] = {}): {
   svc: WeeklyReportService;
   enqueueWeeklyReport: jest.Mock;
   windowStats: jest.Mock;
+  alertSend: jest.Mock;
 } {
   const { repo, windowStats } = makeRepo(args);
   const enqueueWeeklyReport = jest.fn(async () => undefined);
@@ -78,8 +81,10 @@ function makeService(args: Parameters<typeof makeRepo>[0] = {}): {
   const config = {
     get: jest.fn(() => 'https://app.magtrans.eu/'),
   } as unknown as ConfigService;
-  const svc = new WeeklyReportService(repo, mail, config as never);
-  return { svc, enqueueWeeklyReport, windowStats };
+  const alertSend = jest.fn(async () => 'log-only');
+  const alerts = { send: alertSend } as unknown as OpsAlertService;
+  const svc = new WeeklyReportService(repo, mail, config as never, alerts);
+  return { svc, enqueueWeeklyReport, windowStats, alertSend };
 }
 
 describe('weekWindow', () => {
@@ -218,5 +223,52 @@ describe('WeeklyReportService', () => {
 
     await expect(svc.runWeeklyReport(MONDAY_0900)).resolves.toBeUndefined();
     expect(enqueueWeeklyReport).toHaveBeenCalledTimes(2);
+  });
+
+  it('logs the rejection reason per recipient with a masked address', async () => {
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const { svc, enqueueWeeklyReport } = makeService({
+      recipients: [
+        { email: 'bad.admin@magtrans.eu', name: 'Bad' },
+        { email: 'good@magtrans.eu', name: 'Good' },
+      ],
+    });
+    enqueueWeeklyReport.mockRejectedValueOnce(new Error('bounced'));
+
+    await svc.runWeeklyReport(MONDAY_0900);
+
+    const rejected = warn.mock.calls
+      .map((c) => c[0] as Record<string, unknown>)
+      .filter((l) => l.msg === 'weekly report: enqueue rejected for recipient');
+    expect(rejected).toEqual([
+      expect.objectContaining({
+        toMasked: 'ba***@magtrans.eu',
+        errorName: 'Error',
+        errorMessage: 'bounced',
+      }),
+    ]);
+    warn.mockRestore();
+  });
+
+  it('a stats query crash is caught, logged as a cron failure and alerted', async () => {
+    const error = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    const { svc, windowStats, alertSend } = makeService();
+    windowStats.mockRejectedValueOnce(new Error('statement timeout'));
+
+    await expect(svc.runWeeklyReport(MONDAY_0900)).resolves.toBeUndefined();
+
+    expect(error.mock.calls[0]?.[0]).toMatchObject({
+      msg: 'cron job failed',
+      job: 'weekly-report',
+      errorMessage: 'statement timeout',
+    });
+    expect(alertSend).toHaveBeenCalledWith(
+      expect.objectContaining({ key: 'cron-failed:weekly-report' }),
+    );
+    error.mockRestore();
   });
 });

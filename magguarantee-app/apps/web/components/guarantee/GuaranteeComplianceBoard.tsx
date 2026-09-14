@@ -34,6 +34,7 @@ import { KpiCard } from '@/components/dashboard/KpiCard';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -41,6 +42,7 @@ import { formatDateFull } from '@/lib/format/numbers';
 import { compareByUrgency, watchdogSeverity } from '@/lib/guarantee';
 import { useGuaranteeCompliance } from '@/lib/hooks/useGuarantee';
 import { useOpiekunFleet } from '@/lib/hooks/useOpiekunFleet';
+import { queryErrorProps } from '@/lib/query/queryErrorProps';
 import { cn } from '@/lib/utils';
 
 /** Filter-select state values (`''` = all). */
@@ -49,7 +51,8 @@ type StateFilter = '' | 'violated' | 'dueSoon' | 'watched';
 export function GuaranteeComplianceBoard() {
   const t = useTranslations('guarantee.board');
   const tCommon = useTranslations('common');
-  const { data, isLoading } = useGuaranteeCompliance();
+  const boardQ = useGuaranteeCompliance();
+  const { data, isLoading } = boardQ;
 
   // login lookup (carrierId → login) for the drill-down deep-link. Shares the
   // opiekun-fleet cache; when cold it fetches once. A missing login falls back
@@ -179,6 +182,11 @@ export function GuaranteeComplianceBoard() {
         <div className="space-y-4">
           <BoardSectionSkeleton />
           <BoardSectionSkeleton />
+        </div>
+      ) : boardQ.isError && !data ? (
+        // A failed load must never read as the calm «all clear» card below.
+        <div className="rounded-xl border border-border bg-card shadow-card">
+          <ErrorState {...queryErrorProps(boardQ)} />
         </div>
       ) : !hasAnyOwed && !hasActiveFilters ? (
         // Nothing owed across every in-scope carrier → one calm all-clear card.

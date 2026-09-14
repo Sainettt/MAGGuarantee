@@ -4,6 +4,12 @@
  * Phase 9 (full): the queue carries every transactional email. The payload is
  * a discriminated union keyed on `template`; the in-process `EmailSendProcessor`
  * dispatches each to the matching synchronous `MailService.sendX` method.
+ *
+ * Secrets never travel in plaintext (2026-08-14 logging audit, item 5): the
+ * 2FA code, the reset code and admin-issued temporary passwords are carried in
+ * `secret`, an AES-256-GCM envelope sealed by `MailSecretCipher` and opened by
+ * the processor right before rendering. The matching `props` type omits the
+ * secret field so it cannot be enqueued in the clear by accident.
  */
 import type { AccountCreatedProps } from './templates/account-created';
 import type { AccountDeactivatedProps } from './templates/account-deactivated';
@@ -29,72 +35,117 @@ import type { VehicleRemovalAdminProps } from './templates/vehicle-removal-admin
 /** BullMQ job name within the `email-send` queue. */
 export const EMAIL_SEND_JOB = 'send' as const;
 
-/** 2FA login-code email payload. */
-export interface TwoFactorCodeEmailJob {
-  template: '2fa-code';
-  email: string;
-  code: string;
+/**
+ * AES-256-GCM envelope (see `MailSecretCipher`). All fields base64url. The
+ * template name is bound in as associated data, so an envelope cannot be
+ * replayed into another template's job.
+ */
+export interface SealedSecret {
+  v: 1;
+  iv: string;
+  tag: string;
+  ct: string;
 }
 
-/** Forgot-password reset-code email payload. */
-export interface PasswordResetEmailJob {
-  template: 'password-reset';
+/**
+ * Undo action for state a producer committed BEFORE the mail was delivered
+ * (e.g. the watchdog's "reminder sent" stamps). Runs from the processor's
+ * final-failure handler through `MailCompensationRegistry`, so the next cron
+ * run retries instead of believing the mail went out.
+ *
+ * `batch` groups jobs that share ONE stamp (the vehicle-removal digest goes to
+ * every admin, the stamp means "at least one admin got it"): the compensation
+ * runs only once all `size` jobs of the batch have failed permanently.
+ */
+export interface MailCompensation {
+  /** Handler key registered by the producing module. */
+  kind: string;
+  /** JSON-safe payload; the handler validates it. Never secrets. */
+  payload: Record<string, unknown>;
+  batch?: { id: string; size: number };
+}
+
+/** Delivery-log context carried alongside the payload; never rendered. */
+export interface MailJobMeta {
+  /** User whose action queued the mail → `email_logs.triggeredById`. */
+  triggeredById?: string;
+  /** Overrides the target derived from the template props. */
+  targetType?: string;
+  targetKey?: string;
+  compensation?: MailCompensation;
+}
+
+/** Fields shared by every job variant. */
+interface EmailJobBase {
   email: string;
-  code: string;
+  meta?: MailJobMeta;
+}
+
+/** Processor return value (BullMQ `returnvalue`) — feeds the `sent` log row. */
+export interface EmailSendJobResult {
+  subject: string | null;
+  providerMessageId: string | null;
+}
+
+/** 2FA login-code email payload. Secret: `{ code }`. */
+export interface TwoFactorCodeEmailJob extends EmailJobBase {
+  template: '2fa-code';
+  secret: SealedSecret;
+}
+
+/** Forgot-password reset-code email payload. Secret: `{ code }`. */
+export interface PasswordResetEmailJob extends EmailJobBase {
+  template: 'password-reset';
+  secret: SealedSecret;
   /** Code validity in minutes (mirrors the Redis TTL). */
   ttlMinutes: number;
 }
 
-export interface AccountCreatedEmailJob {
+/** Secret: `{ temporaryPassword }`. */
+export interface AccountCreatedEmailJob extends EmailJobBase {
   template: 'account-created';
-  email: string;
-  props: AccountCreatedProps;
+  props: Omit<AccountCreatedProps, 'temporaryPassword'>;
+  secret: SealedSecret;
 }
 
-export interface AccountDeactivatedEmailJob {
+export interface AccountDeactivatedEmailJob extends EmailJobBase {
   template: 'account-deactivated';
-  email: string;
   props: AccountDeactivatedProps;
 }
 
-export interface AccountReactivatedEmailJob {
+export interface AccountReactivatedEmailJob extends EmailJobBase {
   template: 'account-reactivated';
-  email: string;
   props: AccountReactivatedProps;
 }
 
 /**
  * Admin-issued password reset. Shared by internal users and carriers — one
- * template, one job type (decision 2026-07-30).
+ * template, one job type (decision 2026-07-30). Secret: `{ temporaryPassword }`.
  */
-export interface AccountPasswordResetEmailJob {
+export interface AccountPasswordResetEmailJob extends EmailJobBase {
   template: 'account-password-reset';
-  email: string;
-  props: AccountPasswordResetProps;
+  props: Omit<AccountPasswordResetProps, 'temporaryPassword'>;
+  secret: SealedSecret;
 }
 
 /** Monday summary report for admins. */
-export interface WeeklyReportEmailJob {
+export interface WeeklyReportEmailJob extends EmailJobBase {
   template: 'weekly-report';
-  email: string;
   props: WeeklyReportProps;
 }
 
-export interface CarrierDecisionEmailJob {
+export interface CarrierDecisionEmailJob extends EmailJobBase {
   template: 'carrier-decision';
-  email: string;
   props: CarrierDecisionProps;
 }
 
-export interface InternalDecisionEmailJob {
+export interface InternalDecisionEmailJob extends EmailJobBase {
   template: 'internal-decision';
-  email: string;
   props: InternalDecisionProps;
 }
 
-export interface CarrierSubmittedEmailJob {
+export interface CarrierSubmittedEmailJob extends EmailJobBase {
   template: 'carrier-submitted';
-  email: string;
   props: CarrierSubmittedProps;
 }
 
@@ -103,9 +154,8 @@ export interface CarrierSubmittedEmailJob {
  * notification (auto-fired at verification when the dopłata crosses the
  * threshold, moving the claim into `OCZEKUJE_NA_AUTORYZACJE`).
  */
-export interface MaksimConfirmationRequestEmailJob {
+export interface MaksimConfirmationRequestEmailJob extends EmailJobBase {
   template: 'maksim-confirmation-request';
-  email: string;
   props: MaksimConfirmationRequestProps;
   /**
    * Mailbox of the pracownik who armed the gate (`Claim.verifiedById`) — the
@@ -119,16 +169,14 @@ export interface MaksimConfirmationRequestEmailJob {
 /**
  * Reklamacja FILED → every active `admin` + `pracownik` (REWORK 2026-07-31).
  */
-export interface ReklamacjaInternalSubmittedEmailJob {
+export interface ReklamacjaInternalSubmittedEmailJob extends EmailJobBase {
   template: 'reklamacja-internal-submitted';
-  email: string;
   props: ReklamacjaInternalSubmittedProps;
 }
 
 /** Reklamacja FILED → receipt to the carrier. */
-export interface ReklamacjaCarrierSubmittedEmailJob {
+export interface ReklamacjaCarrierSubmittedEmailJob extends EmailJobBase {
   template: 'reklamacja-carrier-submitted';
-  email: string;
   props: ReklamacjaCarrierSubmittedProps;
 }
 
@@ -137,64 +185,55 @@ export interface ReklamacjaCarrierSubmittedEmailJob {
  * `carrier-decision` because the claim status rolls back on a reklamacja
  * decision, so the generic template would re-announce the wniosek verdict.
  */
-export interface ReklamacjaCarrierDecisionEmailJob {
+export interface ReklamacjaCarrierDecisionEmailJob extends EmailJobBase {
   template: 'reklamacja-carrier-decision';
-  email: string;
   props: ReklamacjaCarrierDecisionProps;
 }
 
-export interface VerificationDigestEmailJob {
+export interface VerificationDigestEmailJob extends EmailJobBase {
   template: 'verification-digest';
-  email: string;
   props: VerificationDigestProps;
 }
 
-export interface DelegationAnnouncedEmailJob {
+export interface DelegationAnnouncedEmailJob extends EmailJobBase {
   template: 'delegation-announced';
-  email: string;
   props: DelegationAnnouncedProps;
 }
 
-export interface DelegationReadyEmailJob {
+export interface DelegationReadyEmailJob extends EmailJobBase {
   template: 'delegation-ready';
-  email: string;
   props: DelegationReadyProps;
 }
 
 /** Guarantee Watchdog #17 — carrier wyjazd reminder (plan §6). */
-export interface GuaranteeReminderCarrierEmailJob {
+export interface GuaranteeReminderCarrierEmailJob extends EmailJobBase {
   template: 'guarantee-reminder-carrier';
-  email: string;
   props: GuaranteeReminderCarrierProps;
 }
 
 /** Guarantee Watchdog #18 — opiekun daily digest (plan §6). */
-export interface GuaranteeOpiekunDigestEmailJob {
+export interface GuaranteeOpiekunDigestEmailJob extends EmailJobBase {
   template: 'guarantee-opiekun-digest';
-  email: string;
   props: GuaranteeOpiekunDigestProps;
 }
 
 /** Vehicle-removal admin digest (vehicle-status rework, Step B — 29-day cron). */
-export interface VehicleRemovalAdminEmailJob {
+export interface VehicleRemovalAdminEmailJob extends EmailJobBase {
   template: 'vehicle-removal-admin';
-  email: string;
   props: VehicleRemovalAdminProps;
 }
 
 /**
  * "This employee has no role yet" notice to one admin (Google SSO, docs/24 §4).
  */
-export interface SsoAccessRequestedEmailJob {
+export interface SsoAccessRequestedEmailJob extends EmailJobBase {
   template: 'sso-access-requested';
-  email: string;
   props: SsoAccessRequestedProps;
 }
 
 /** Directory reconcile outcome for one admin (Google SSO, docs/24 §A4). */
-export interface DirectoryReconcileReportEmailJob {
+export interface DirectoryReconcileReportEmailJob extends EmailJobBase {
   template: 'directory-reconcile-report';
-  email: string;
   props: DirectoryReconcileReportProps;
 }
 
@@ -222,3 +261,6 @@ export type EmailSendJobData =
   | VehicleRemovalAdminEmailJob
   | SsoAccessRequestedEmailJob
   | DirectoryReconcileReportEmailJob;
+
+/** Template keys whose jobs carry a sealed secret. */
+export type SecretEmailJob = Extract<EmailSendJobData, { secret: SealedSecret }>;

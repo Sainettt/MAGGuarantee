@@ -4,12 +4,15 @@
 // at-risk claims exist, sends nothing when none, and that a single failing
 // recipient address does not abort the rest (Promise.allSettled).
 
+import { Logger } from '@nestjs/common';
+
 import {
   addPolishWorkingDays,
   isPolishWorkingDay,
   SLA_WORKING_DAYS,
 } from '@magguarantee/shared';
 
+import type { OpsAlertService } from '../../common/ops-alert/ops-alert.service';
 import type { MailService } from '../mail/mail.service';
 import type {
   DigestRecipientRow,
@@ -63,6 +66,7 @@ interface Harness {
   sendVerificationDigest: jest.Mock;
   findCandidates: jest.Mock;
   findRecipients: jest.Mock;
+  alertSend: jest.Mock;
 }
 
 function makeHarness(opts: {
@@ -98,8 +102,17 @@ function makeHarness(opts: {
     ),
   } as never;
 
-  const service = new VerificationSlaService(repo, mail, config);
-  return { service, sendVerificationDigest, findCandidates, findRecipients };
+  const alertSend = jest.fn(async () => 'log-only');
+  const alerts = { send: alertSend } as unknown as OpsAlertService;
+
+  const service = new VerificationSlaService(repo, mail, config, alerts);
+  return {
+    service,
+    sendVerificationDigest,
+    findCandidates,
+    findRecipients,
+    alertSend,
+  };
 }
 
 describe('VerificationSlaService.runDailyDigest', () => {
@@ -262,5 +275,66 @@ describe('VerificationSlaService.runDailyDigest', () => {
     ];
     expect(props.overdue[0]?.carrierName).toBe('—');
     expect(props.overdue[0]?.vehiclePlate).toBe('—');
+  });
+});
+
+describe('VerificationSlaService — failure visibility (logging audit items 11 / 20)', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('logs each rejected recipient with a masked address and the reason', async () => {
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const h = makeHarness({
+      candidates: [makeCandidate({ anchorDate: anchorForLeft(-1) })],
+      recipients: [
+        { email: 'good@magtrans.eu', name: 'Good' },
+        { email: 'bartek.bad@magtrans.eu', name: 'Bad' },
+      ],
+      sendImpl: async (email: string) => {
+        if (email.startsWith('bartek')) {
+          throw new Error('Redis connection lost for bartek.bad@magtrans.eu');
+        }
+      },
+    });
+
+    await h.service.runDailyDigest(NOW);
+
+    const rejected = warn.mock.calls
+      .map((c) => c[0] as Record<string, unknown>)
+      .filter((l) => l.msg === 'verification digest: enqueue rejected for recipient');
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]).toMatchObject({
+      toMasked: 'ba***@magtrans.eu',
+      errorName: 'Error',
+    });
+    // Neither the log field nor the scrubbed message carries the full address.
+    expect(JSON.stringify(rejected[0])).not.toContain('bartek.bad@');
+  });
+
+  it('a repository crash is caught: structured ERROR + ops alert, never rejects', async () => {
+    const error = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    const h = makeHarness({});
+    h.findCandidates.mockRejectedValueOnce(new Error('connection terminated'));
+
+    await expect(h.service.runDailyDigest(NOW)).resolves.toBeUndefined();
+
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error.mock.calls[0]?.[0]).toMatchObject({
+      msg: 'cron job failed',
+      job: 'verification-sla-digest',
+      errorName: 'Error',
+      errorMessage: 'connection terminated',
+    });
+    expect((error.mock.calls[0]?.[0] as { durationMs: unknown }).durationMs).toEqual(
+      expect.any(Number),
+    );
+    expect(h.alertSend).toHaveBeenCalledWith(
+      expect.objectContaining({ key: 'cron-failed:verification-sla-digest' }),
+    );
   });
 });

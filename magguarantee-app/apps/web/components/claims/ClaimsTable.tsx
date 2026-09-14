@@ -31,9 +31,10 @@ import {
   formatKmCompact,
 } from '@/lib/format/numbers';
 import { relativeTimeKey } from '@/lib/format/relative-time';
+import type { QueryErrorProps } from '@/lib/query/queryErrorProps';
 import { cn } from '@/lib/utils';
 
-export interface ClaimsTableProps {
+export interface ClaimsTableProps extends Partial<QueryErrorProps> {
   rows: ClaimListItem[];
   isLoading?: boolean;
   onRowClick: (row: ClaimListItem) => void;
@@ -49,6 +50,7 @@ export function ClaimsTable({
   onRowClick,
   hasActiveFilters,
   onClearFilters,
+  ...errorProps
 }: ClaimsTableProps) {
   const t = useTranslations('employee.claims');
   const tCommon = useTranslations('common');
@@ -202,6 +204,7 @@ export function ClaimsTable({
       rowKey={(r) => r.id}
       onRowClick={onRowClick}
       isLoading={isLoading}
+      {...errorProps}
       hasActiveFilters={hasActiveFilters}
       empty={
         <EmptyState

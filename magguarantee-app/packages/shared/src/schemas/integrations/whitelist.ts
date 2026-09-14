@@ -1,8 +1,14 @@
 // Biała Lista MF (Polish white-list) contract.
 //
-// Wire surface for `GET /api/v1/integrations/whitelist?nip=...&account=...`
-// per docs/13-api-design.md#external-integrations and the upstream REST API
-// at https://wl-api.mf.gov.pl/api/check.
+// Wire surface for `POST /api/v1/integrations/whitelist/check` (body
+// `{ nip, account }`) per docs/13-api-design.md#external-integrations and the
+// upstream REST API at https://wl-api.mf.gov.pl/api/check.
+//
+// Why POST with a body rather than GET with a query string (2026-09-14
+// logging audit, item 2): a NIP and a bank-account number are personal /
+// financial data. Query strings end up in access logs, proxy logs, browser
+// history and the `Referer` header; a request body does not. The lookup is
+// still read-only — POST here is about transport, not semantics.
 //
 // Upstream returns a wrapper `{ result: { accountAssigned, ... }, requestId }`.
 // We flatten the useful subset onto a stable DTO and keep `requestId` so
@@ -32,16 +38,16 @@ export const PolishBankAccountSchema = z
 export type PolishBankAccount = z.infer<typeof PolishBankAccountSchema>;
 
 /**
- * Query params: nip and account (digits only). Both required.
- * `nip` may be sent with whitespace from forms — strip on receipt.
+ * Request body for `POST /integrations/whitelist/check`: nip and account
+ * (digits only). Both required.
  */
-export const WhiteListQuerySchema = z
+export const WhiteListCheckBodySchema = z
   .object({
     nip: NipSchema,
     account: PolishBankAccountSchema,
   })
   .strict();
-export type WhiteListQuery = z.infer<typeof WhiteListQuerySchema>;
+export type WhiteListCheckBody = z.infer<typeof WhiteListCheckBodySchema>;
 
 /**
  * Stable response DTO. Notable fields:
@@ -63,8 +69,8 @@ export type WhiteListResponse = z.infer<typeof WhiteListResponseSchema>;
 
 // ─── Search-by-NIP ────────────────────────────────────────
 //
-// Wire surface for `GET /api/v1/integrations/whitelist/search?nip=...`
-// per docs/13-api-design.md#external-integrations and the upstream REST
+// Wire surface for `POST /api/v1/integrations/whitelist/search` (body
+// `{ nip }`) per docs/13-api-design.md#external-integrations and the upstream REST
 // API at https://wl-api.mf.gov.pl/api/search/nip/{NIP}.
 //
 // Use-case: auto-fill of carrier company data (name, address, account
@@ -74,7 +80,7 @@ export type WhiteListResponse = z.infer<typeof WhiteListResponseSchema>;
 // error, the caller is expected to fall back to manual entry.
 
 /**
- * Query params for `/whitelist/search`. We deliberately reuse the same
+ * Request body for `POST /whitelist/search`. We deliberately reuse the same
  * NIP shape as `TaxIdSchema` would in the carriers DTO — the upstream
  * only knows about Polish NIPs but we don't pre-validate strictly here;
  * any non-conformant value just yields `{ found: false }`.
@@ -83,12 +89,12 @@ export type WhiteListResponse = z.infer<typeof WhiteListResponseSchema>;
  * raw input without trimming the country prefix first. The strict
  * 10-digit format check is left to the upstream registry.
  */
-export const WhiteListSearchQuerySchema = z
+export const WhiteListSearchBodySchema = z
   .object({
     nip: z.string().min(5).max(20),
   })
   .strict();
-export type WhiteListSearchQuery = z.infer<typeof WhiteListSearchQuerySchema>;
+export type WhiteListSearchBody = z.infer<typeof WhiteListSearchBodySchema>;
 
 /**
  * Stable response DTO for `/whitelist/search`.

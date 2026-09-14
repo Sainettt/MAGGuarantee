@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { Logger, NotFoundException } from '@nestjs/common';
 
 import type { CarrierAttachmentCategory } from '@magguarantee/shared';
 
@@ -181,5 +181,28 @@ describe('CarrierAttachmentsService.upload', () => {
     expect(storage.put).toHaveBeenCalledTimes(1);
     // Compensating delete of the just-uploaded object.
     expect(storage.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed compensating delete is logged as ONE structured object and the original error still surfaces', async () => {
+    // 2026-08-14 logging audit, item 21: no pino-style `(obj, 'msg')` call.
+    const error = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    const { service, attachments, storage } = setup();
+    attachments.create.mockRejectedValueOnce(new Error('db down'));
+    storage.delete.mockRejectedValueOnce(new Error('minio down'));
+
+    await expect(
+      service.upload(makeUser(), CARRIER_ID, 'insurance', makeFile()),
+    ).rejects.toThrow('db down');
+
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error.mock.calls[0]).toHaveLength(1);
+    expect(error.mock.calls[0]![0]).toEqual({
+      msg: 'failed to remove carrier attachment storage object',
+      key: expect.stringMatching(/^carriers\//),
+      err: { name: 'Error', message: 'minio down', stack: expect.any(String) },
+    });
+    error.mockRestore();
   });
 });

@@ -312,10 +312,21 @@ export class DriversService {
   async downloadAttachment(
     driverId: string,
     attachmentId: string,
-  ): Promise<{ object: StorageObject; fileName: string; mimeType: string }> {
+  ): Promise<{
+    object: StorageObject;
+    fileName: string;
+    mimeType: string;
+    category: DriverAttachmentCategory;
+  }> {
     const att = await this._loadAttachmentOf(driverId, attachmentId);
     const object = await this.storage.getObject(att.storageKey);
-    return { object, fileName: att.fileName, mimeType: att.mimeType };
+    return {
+      object,
+      fileName: att.fileName,
+      mimeType: att.mimeType,
+      // For the controller's download log line (ids + category, no filename).
+      category: att.category,
+    };
   }
 
   /**
@@ -427,10 +438,11 @@ export class DriversService {
         try {
           await this.drivers.hardDelete(driver.id);
         } catch (e) {
-          this.logger.error(
-            { err: e, driverId: driver.id },
-            'Rollback: failed to remove driver row',
-          );
+          this.logger.error({
+            msg: 'rollback: failed to remove driver row',
+            driverId: driver.id,
+            err: errorForLog(e),
+          });
         }
       }
       throw err;
@@ -449,20 +461,22 @@ export class DriversService {
       try {
         await this.attachments.hardDelete(id);
       } catch (e) {
-        this.logger.error(
-          { err: e, attachmentId: id },
-          'Rollback: failed to remove attachment row',
-        );
+        this.logger.error({
+          msg: 'rollback: failed to remove driver attachment row',
+          attachmentId: id,
+          err: errorForLog(e),
+        });
       }
     }
     for (const key of uploadedKeys) {
       try {
         await this.storage.delete(key);
       } catch (e) {
-        this.logger.error(
-          { err: e, key },
-          'Rollback: failed to remove storage object',
-        );
+        this.logger.error({
+          msg: 'rollback: failed to remove driver attachment storage object',
+          key,
+          err: errorForLog(e),
+        });
       }
     }
   }
@@ -472,10 +486,11 @@ export class DriversService {
     try {
       await this.storage.delete(key);
     } catch (e) {
-      this.logger.error(
-        { err: e, key },
-        'Failed to remove driver attachment storage object',
-      );
+      this.logger.error({
+        msg: 'failed to remove driver attachment storage object',
+        key,
+        err: errorForLog(e),
+      });
     }
   }
 
@@ -712,6 +727,17 @@ function attachmentRowToDto(row: DriverAttachmentRow): DriverAttachmentDto {
     uploadedById: row.uploadedById,
     createdAt: row.createdAt.toISOString(),
   };
+}
+
+/**
+ * Error fields for a structured log line. Nest's `Logger` takes ONE object
+ * (`{ msg, ... }`); the pino-style `(obj, 'msg')` signature does not fit it
+ * (2026-08-14 logging audit, item 21).
+ */
+function errorForLog(e: unknown): { name: string; message: string; stack?: string } {
+  return e instanceof Error
+    ? { name: e.name, message: e.message, stack: e.stack }
+    : { name: 'NonError', message: String(e) };
 }
 
 /** Maps an included driver-row attachment to the public DTO (no storageKey). */

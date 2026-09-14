@@ -20,15 +20,37 @@
 >
 > Все крон-задачи живут не в BullMQ, а как `@Cron` внутри API-процесса (см.
 > таблицу ниже) — планировочная потребность у них одинаковая, а `@Cron`-путь уже
-> обкатан четырьмя джобами. Само письмо при этом всё равно уходит через очередь
-> `email-send`. Из исходного списка repeatable-джобов остался неподнятым только
-> `token-cleanup`; `daily-reminders` **отменён** (2026-07-30, дублировал
-> verification-SLA дайджест — шаблон `daily-reminder.tsx` удалён).
+> обкатан. Само письмо при этом всё равно уходит через очередь `email-send`.
+> С 2026-09-14 из исходного списка поднят и `token-cleanup`; `daily-reminders`
+> **отменён** (2026-07-30, дублировал verification-SLA дайджест — шаблон
+> `daily-reminder.tsx` удалён).
 >
 > Connection: общий `REDIS_URL` (выделенное BullMQ-подключение с
 > `maxRetriesPerRequest: null` — блокирующие команды BullMQ этого требуют; нельзя
-> переиспользовать `RedisService.client`). Остальные очереди/процессоры из таблицы
-> ниже — TODO полного Phase 9.
+> переиспользовать `RedisService.client`). Redis в compose — `maxmemory-policy
+> noeviction` (BullMQ под `allkeys-lru` молча теряет ключи очередей).
+>
+> **Надёжность и наблюдаемость — см. [Надёжность фоновых задач](#надёжность-фоновых-задач-и-ops-алерты-2026-09-14).**
+> Разделы «Структура BullMQ», «Bootstrap», «Пример processor» ниже — исходный
+> план с repeatable-джобами; так реализовано не было.
+
+### Сводка: что реально крутится (2026-09-14)
+
+| Джоба | Расписание (Europe/Warsaw) | Механизм | Gate |
+|---|---|---|---|
+| `verification-sla-digest` | ежедневно 07:00 | `@Cron` | — |
+| `guarantee-watchdog` | ежедневно 07:10 | `@Cron` | `GUARANTEE_WATCHDOG_ENABLED` |
+| `vehicle-removal-alert` | ежедневно 07:20 | `@Cron` | `VEHICLE_REMOVAL_ALERT_ENABLED` |
+| `weekly-report` | пн 09:00 | `@Cron` | — |
+| `token-cleanup` | ежедневно 03:30 | `@Cron` | `TOKEN_CLEANUP_ENABLED` (дефолт вкл) |
+| `directory-reconcile` | каждые `DIRECTORY_RECONCILE_INTERVAL_MIN` мин | `SchedulerRegistry.addInterval` | `DIRECTORY_RECONCILE_ENABLED` + токен MAGSpace |
+
+| Очередь | Что несёт | Попытки | Retention |
+|---|---|---|---|
+| `email-send` | все 22 шаблона писем | 5, exponential от 5 с | completed 7 дн / 1000, failed 14 дн / 500 |
+| `chat-notify-wyjazd` | уведомление о выезде в Google Chat | 5, exponential от 2 с, delay 5 с | те же дефолты модуля |
+
+Оба воркера — in-process в API. У verification-sla и weekly-report kill-switch нет.
 
 ## Background jobs (cron) — BullMQ
 
@@ -40,7 +62,7 @@
 | **Weekly report** | `sendWeeklyReport` (`Code.gs:7056`) | **пн 09:00** Europe/Warsaw | ✅ `@Cron` в API-процессе (`modules/weekly-report/`) — окно = прошлая полная варшавская неделя пн 00:00 → пн 00:00, получатели = все активные `admin` |
 | onEdit | `onEditTrigger` (`Code.gs:6977`) | реал-тайм при правке Sheet | **Не нужен** (нет Sheets) |
 | onOpen | `onOpen` (`Code.gs:6950`) | при открытии Sheet | **Не нужен** |
-| Refresh-token cleanup | — (новое) | ежедневно | 🚧 не поднят — единственный оставшийся TODO из исходного списка |
+| Refresh-token cleanup | — (новое) | ежедневно **03:30** | ✅ `@Cron` в API-процессе (`modules/token-cleanup/`, 2026-09-14) — см. [Token cleanup](#token-cleanup) |
 | Verification-SLA digest | — (новое, docs/21) | ежедневно 07:00 | `@Cron` в API-процессе |
 | **Guarantee Watchdog** | — (новое, план 2026-07-07) | ежедневно **07:10** Europe/Warsaw | `@Cron` в API-процессе (стаггер после verification-sla) |
 | **Vehicle-removal alert** | — (новое, vehicle-status rework Step B) | ежедневно **07:20** Europe/Warsaw | `@Cron` в API-процессе (стаггер после Guarantee Watchdog) |
@@ -133,13 +155,13 @@ export class DailyRemindersProcessor extends WorkerHost {
 1. Скоуп: `Vehicle.agreement = true` (NULL = false), машина активна (`active`, `deletedAt` null), перевозчик жив. Одна и та же scope-выборка кормит **и** крон, **и** board-эндпоинты (single source of truth в сервисе).
 2. `computeGuaranteeWatchdog()` (shared) → `{ status, anchorAt, anchorSource, deadlineAt, daysLeft }`. Anchor = `date(actualReturnAt)` последнего `zjechal` ?? `Vehicle.agreementSince`. Дедлайн = `addPolishWorkingDays(anchor, 10)`.
 3. **Триггеры (порядок важен; catch-up = одно самое актуальное письмо):**
-   - `daysLeft < 0` → эпизод `violated` (создать/эскалировать, `violatedAt` один раз); секция «наруszenia» в дайджесте опекуна (`violationSentAt` после успешного enqueue). **Перевозчику при нарушении письма нет.**
+   - `daysLeft < 0` → эпизод `violated` (создать/эскалировать, `violatedAt` один раз); секция «наруszenia» в дайджесте опекуна (`violationSentAt` — claim → enqueue → release, см. п.6). **Перевозчику при нарушении письма нет.** Перевозчик **без опекуна**: `violationSentAt` не ставится, прогон пишет один WARN со списком таких перевозчиков и машин (нарушение в эпизоде всё равно фиксируется).
    - `0 ≤ daysLeft ≤ 1 && reminder1SentAt null` → D-1 (при отметке заодно backfill `reminder3SentAt`, гасит поздний D-3).
    - `2 ≤ daysLeft ≤ 3 && reminder3SentAt null` → D-3.
    - `daysLeft > 3` (counting) → строки эпизода **нет** (журнал фиксирует только «плохие» циклы).
 4. **Ensure-эпизод:** при первом триггере создаётся строка; при реоткрытии после `anulowany` (тот же `anchorAt`) sent-флаги копируются из последнего эпизода того же якоря — не резендим. Partial-unique «один открытый эпизод на машину» — гонка ловится через unique_violation → update существующей открытой строки.
 5. **Auto-resolve** открытого эпизода: `ok_active` → `wyjazd`; agreement off / вне scope → `agreement_off`; машина/перевозчик мертвы → `vehicle_inactive` (fallback для того, что не поймали хуки).
-6. **Fan-out (после per-vehicle прохода):** группировка → **одно письмо на перевозчика** в день (все его due-машины) + **один дайджест на опекуна** (`carrier.opiekunId`; секции «zbliżające się terminy» + «наруszenia»). Sent-флаги ставятся **только** после успешного enqueue; per-mail try/catch; лог-строка сводки (`checked/due3/due1/violated/resolved/mailsSent`).
+6. **Fan-out (после per-vehicle прохода):** группировка → **одно письмо на перевозчика** в день (все его due-машины) + **один дайджест на опекуна** (`carrier.opiekunId`; секции «zbliżające się terminy» + «наруszenia»). Sent-флаги (с 2026-09-14): **claim → enqueue → release**. Флаг ставится до enqueue, job несёт undo-payload; упал enqueue — флаг снимается сразу, job окончательно провалился (все 5 попыток) — флаг снимает email-процессор, и следующий утренний прогон пошлёт письмо снова. Release снимает флаг, только если там всё ещё заявленное значение (не затирает более поздний успешный прогон). Раньше флаг ставился после enqueue, и недоставленное D-3/D-1 навсегда считалось отправленным. Каждая машина обрабатывается изолированно: ошибка БД по одной машине — ERROR + ops-алерт, прогон идёт дальше. Лог-строка сводки (`checked/due3/due1/violated/resolved/mailsSent`). Перевозчик или опекун без email — WARN, а не молчаливый пропуск.
 
 **Хуки (мгновенная реакция, не ждать крона):**
 
@@ -168,7 +190,7 @@ export class DailyRemindersProcessor extends WorkerHost {
 3. **Партиция:**
    - **DUE** = статус `do_usuniecia` И (`adminRemovalNotifiedAt` = null ИЛИ `calendarDaysBetween(adminRemovalNotifiedAt, today) >= repeatDays`).
    - **RELAPSED** = статус ≠ `do_usuniecia` И `adminRemovalNotifiedAt` != null → сбрасываем `adminRemovalNotifiedAt = null` (счётчик `adminRemovalNotifyCount` НЕ трогаем — это монотонный lifetime-счётчик).
-4. Если DUE непусто: резолвим всех активных admin (`UsersRepository.listByRole('admin')`), шлём **по одному дайджесту на admin** со списком всех DUE-машин (plate, sideNumber, carrier, `daysSinceReturn`, anchor-дата). Per-admin try/catch — один плохой адрес не роняет прогон. **После** фан-аута (и только если ≥1 admin-enqueue удался) для каждой DUE-машины ставим `adminRemovalNotifiedAt = now` и `adminRemovalNotifyCount += 1` (stamp-after-enqueue, один раз за прогон — как watchdog).
+4. Если DUE непусто: резолвим всех активных admin (`UsersRepository.listByRole('admin')`), шлём **по одному дайджесту на admin** со списком всех DUE-машин (plate, sideNumber, carrier, `daysSinceReturn`, anchor-дата). Per-admin try/catch — один плохой адрес не роняет прогон. Все admin-копии ставятся в очередь одним атомарным батчем (`enqueueVehicleRemovalAdminBatch`). Штамп `adminRemovalNotifiedAt = now`, `adminRemovalNotifyCount += 1` — по той же схеме claim → enqueue → release, что и watchdog: откат (прежняя дата, счётчик − 1) выполняется, только когда **все** копии окончательно провалились.
 5. Лог-строка сводки: `checked / due / relapsedCleared / adminsMailed`.
 
 **Получатели:** **все активные `admin`** (`User.role='admin'`, `active=true`) — персональный `User.email`, не группа. Отправка через `MailService.enqueueVehicleRemovalAdmin` (`_enqueueOr` → очередь `email-send` с sync-фолбэком; `MailJobsRegistry`/diagnostics подхватываются автоматически). Шаблон `vehicle-removal-admin.tsx` (#19).
@@ -181,6 +203,38 @@ export class DailyRemindersProcessor extends WorkerHost {
 | `VEHICLE_REMOVAL_ALERT_REPEAT_DAYS` | `3` | Календарных дней между повторными дайджестами для всё ещё `do_usuniecia` машины |
 
 Порог ≥29 дней **не** в env — берётся из shared-константы `VEHICLE_NIEAKTYWNA_MAX_DAYS`. Аудит: крон в `AuditLog` не пишет — работает на ROOT prisma-клиенте (как watchdog-репозиторий); дедуп-состояние живёт в колонках `Vehicle.adminRemovalNotifiedAt` / `Vehicle.adminRemovalNotifyCount`.
+
+### Token cleanup
+
+> 2026-09-14. **`@Cron('30 3 * * *', { timeZone: 'Europe/Warsaw' })`**, `apps/api/src/modules/token-cleanup/`. Kill-switch `TOKEN_CLEANUP_ENABLED` (дефолт вкл, выключает только `false`/`0`).
+
+- Удаляет `refresh_tokens`, истёкшие более 30 дней назад, либо отозванные более 30 дней назад **и** уже истёкшие (второе условие сохраняет theft-detection, если `JWT_REFRESH_TTL` когда-нибудь станет больше 30 дней). Строки несут IP и user agent — это заодно ограничение срока хранения PII.
+- Чистит `email_logs` старше `EMAIL_LOG_RETENTION_DAYS` (дефолт 180).
+- Пишет `system.cleanupExpiredTokens` и `system.pruneEmailLogs` в `audit_log` со счётчиками — даже когда удалять нечего.
+
+### Надёжность фоновых задач и ops-алерты (2026-09-14)
+
+Закрыты пп. 5, 6, 11, 20, 23, 24 аудита логирования.
+
+**Секреты в job'ах.** 2FA-код, reset-код и временный пароль не лежат в Redis открытым текстом: `MailSecretCipher` запечатывает их AES-256-GCM в `secret: { v, iv, tag, ct }`. Ключ — HKDF-SHA256 от `JWT_REFRESH_SECRET` с отдельными salt/label, имя шаблона входит в AAD (конверт нельзя переложить в чужой job). Процессор открывает конверт перед отправкой и не логирует; битый конверт → `UnrecoverableError`. Если очереди нет — письмо уходит синхронно, открытый текст в Redis не попадает.
+
+> ⚠️ **При первом деплое:** job'ы, поставленные в старом формате, окончательно упадут — пользователь запросит код заново. Старые failed-job'ы с открытыми кодами (раньше `removeOnFail: false`) надо один раз вычистить (`queue.clean(0, 0, 'failed')` или redis-cli) и переписать AOF. Ротация `JWT_REFRESH_SECRET` так же ломает ещё не отправленные письма с секретами.
+
+**Провалы видны.** `@OnWorkerEvent('failed')` в обоих процессорах: одна строка на попытку с `jobId` и номером попытки (WARN пока есть ретраи, ERROR на финальной). Финальный провал → ops-алерт. Worker/queue `error` и ошибки подключения ioredis логируются (не чаще раза в минуту) и алертятся. `chat.http` делает один POST на попытку — ретраи только BullMQ (4xx кроме 408/429 не ретраятся). Неизвестный шаблон письма теперь валит job с алертом, а не отбрасывается молча. `MailJobsRegistry` (для `/diagnostics/mails`) хранит одну строку на job (`job-<id>`) с реальным числом попыток.
+
+**Кроны.** Тела всех кронов обёрнуты в guard: необработанная ошибка → структурный ERROR (имя джобы, длительность) + ops-алерт, а не проглоченный `@nestjs/schedule` throw. Дайджесты (verification-sla, weekly-report, directory-reconcile) логируют причину по каждому отклонённому получателю (маскированный адрес или id).
+
+**Ops-алерты — `OpsAlertService`** (`common/ops-alert/`). `send({ key, severity, title, fields })` никогда не бросает; один POST в Google Chat incoming webhook `OPS_ALERT_WEBHOOK_URL`, таймаут 5 с, не больше одного сообщения на `key` за 10 минут (следующее несёт «+N suppressed»). URL не логируется. Пустой URL = только лог. Это **отдельный ops-спейс**, не спейс уведомлений о выездах. Тот же URL используют systemd-юниты (`magguarantee-alert@.service`, docs/23 §6.2a).
+
+**EmailLog — журнал доставки** (таблица `email_logs`, docs/12). Одна строка на job, пишется только по финальному исходу: `template`, `jobId`, `recipients`, `subject`, `status` (`sent`/`failed`), `attempts`, `errorName` и отскрабленное сообщение (≤ 500 символов), `providerMessageId`, `sentAt`, `targetType`/`targetKey` (nrZgl wniosku, login пользователя или номер машины — из props или через опциональный `opts` у `enqueueX`), `triggeredById`. Тело письма, коды и пароли не хранятся. Письма, ушедшие синхронно или через resend из diagnostics, строку не пишут. Срок хранения — `EMAIL_LOG_RETENTION_DAYS`.
+
+**Env:**
+
+| Ключ | Дефолт | Назначение |
+|---|---|---|
+| `OPS_ALERT_WEBHOOK_URL` | пусто | Google Chat webhook ops-спейса; пусто = алерты только в лог |
+| `TOKEN_CLEANUP_ENABLED` | `true` | Kill-switch token-cleanup |
+| `EMAIL_LOG_RETENTION_DAYS` | `180` | Срок хранения `email_logs` |
 
 ### MAGSpace directory reconcile
 
@@ -292,7 +346,7 @@ Caddy, а его Next-middleware отдаёт 404 на `/api/internal/*`). Ко�
 В целевом состоянии все исходящие email идут через очередь, не sync. Преимущество:
 - Если Gmail rate-limit (250/день free, выше для workspace) — retry.
 - Если отправка медленная — не блокируем HTTP-ответ пользователю.
-- Видим в bull-board UI кто что отправляет, ошибки, retry.
+- Видим, кто что отправляет и что упало: `/diagnostics/mails` (Redis-реестр) + таблица `email_logs` + ops-алерт на финальный провал. Bull Board **не** установлен.
 
 ```ts
 // в любом сервисе:
@@ -305,10 +359,12 @@ await this.emailQueue.add('send', {
 }, {
   attempts: 5,
   backoff: { type: 'exponential', delay: 5000 },
-  removeOnComplete: { age: 3600 * 24 * 7 },
-  removeOnFail: false,
+  removeOnComplete: { age: 3600 * 24 * 7, count: 1000 },
+  removeOnFail: { age: 3600 * 24 * 14, count: 500 },
 });
 ```
+
+Секреты (коды, временные пароли) в `data` не кладутся открытым текстом — только в конверте `secret` (см. [Надёжность фоновых задач](#надёжность-фоновых-задач-и-ops-алерты-2026-09-14)).
 
 ## Email через Gmail API
 
@@ -639,7 +695,9 @@ export class ViesService {
 
 Два эндпоинта, оба маунтятся в `modules/integrations/white-list/`.
 
-#### `GET /api/v1/integrations/whitelist?nip=&account=` — `checkAccount`
+#### `POST /api/v1/integrations/whitelist/check` — `checkAccount`
+
+Body `{ nip, account }`. POST, а не GET, чтобы NIP и номер счёта не оседали в URL (access-логи, `audit_log.metadata.route`). Логи сервиса и http-fetch не содержат NIP, счёт и ключ кеша; ошибка апстрима клиенту — без тела МФ (`INTEGRATION_UPSTREAM_REJECTED` / `_UNAVAILABLE`).
 
 ```ts
 // modules/integrations/white-list/white-list.service.ts
@@ -651,7 +709,9 @@ async checkAccount(nip: string, account: string): Promise<WhiteListResult> {
 
 Кешируем на 1 час (key: `whitelist:{NIP}:{ACCOUNT}`) — вайт-листы могут обновляться. Дата в ключе не нужна: TTL=1ч не пересекает границы суток.
 
-#### `GET /api/v1/integrations/whitelist/search?nip=` — `searchByNip`
+#### `POST /api/v1/integrations/whitelist/search` — `searchByNip`
+
+Body `{ nip }`.
 
 Auto-fill данных польской компании по NIP для формы создания/редактирования карьера. UI вызывает этот эндпоинт после ввода NIP и предзаполняет название, адрес и список банковских счетов из реестра MF — карьеру остаётся только подтвердить или скорректировать поля.
 
@@ -914,10 +974,11 @@ OPIEKUN: <opiekun>
   успешно, уведомление молча терялось). Транзакция коммитится за доли секунды,
   5 s с запасом.
 - Retry: `attempts: 5`, `backoff: exponential, delay 2000`. Сам POST —
-  10s timeout + 2-3 ретрая на 5xx/network (`postToChatWebhook`, POST-вариант
-  GET-only `fetchJsonWithRetry`). 4xx — вердикт вебхука, fail fast без ретраев.
-  На исчерпании ретраев процессор **бросает** — BullMQ применяет свою
-  attempt/backoff-политику.
+  10s timeout, **один запрос на попытку** (с 2026-09-14 внутренних ретраев в
+  `chat.http` нет — раньше было до 15 POST и 15 WARN на одно уведомление).
+  4xx кроме 408/429 — вердикт вебхука, fail fast. Процессор бросает — BullMQ
+  применяет attempt/backoff; финальный провал логируется ERROR и уходит
+  ops-алертом.
 
 ### Future (Tier-2)
 
@@ -996,8 +1057,20 @@ Atomic — без advisory lock. Точная семантика increment га�
 
 ## Логирование
 
+> **Актуально на 2026-09-14** (аудит логирования пп. 2, 10, 16, 21, 22). Сниппет ниже — исходный план; реальная конфигурация — `apps/api/src/common/logging/http-logger.options.ts`.
+>
+> - **Запрос в логе:** `{ id, method, url, ip, headers }`, где `url` без query string, а сегменты пути, похожие на PII (email, числа от 9 цифр, EU VAT, длинные токены), заменены плейсхолдерами; `ip` — `req.ip` через `clientIp`; из заголовков только user-agent, content-type, content-length. `query` и `params` не логируются. Строка `request completed` несёт `route` — шаблон роута.
+> - **Redact:** 25 имён секретных ключей на верхнем уровне и на двух уровнях вложенности (`resetCode`, `otpCode`, `apiKey`, `temporaryPassword`…); голый `code` маскируется только во вложенных объектах (на верхнем уровне это код ошибки вроде `P2002`).
+> - **Audit scrub** (`audit.constants.ts`): substring password/token/secret/authorization/cookie/credential/apikey/privatekey/accesskey; целым словом otp/totp/mfa/2fa/pin/cvv; `…Code` с префиксом — скрабится, кроме бизнес-allowlist (postal, country, type, stanowisko, team, status, currency…). `fuelCardPin` в audit — `***`.
+> - **Фильтр ошибок:** ≥ 500 — ERROR со стеком, методом, шаблоном роута, `userId`, IP; 401 / 403 / 429 — WARN без тел; прочие 4xx не логируются.
+> - **Внешние HTTP (`http-fetch`):** только tag, host, статус; URL и тело апстрима не логируются и не уходят клиенту.
+> - **Storage:** каждый сбой S3/MinIO — ERROR с операцией, bucket, key, name/message/`Code`/HTTP-статусом/requestId; оригинал в `cause`.
+> - **Конвенция ошибок в логе:** `logger.error({ msg, …ids, err: { name, message, stack } })` — не pino-сигнатура `(obj, msg)`.
+> - **Скачивание вложений:** INFO `attachment downloaded` `{ entity, entityId | nrZgl, attachmentId, category, userId, role, ip }` — без имён файлов, только после успешного чтения из storage.
+> - **Auth:** security-события — [15-auth-strategy.md](15-auth-strategy.md) §«Audit и события безопасности».
+
 - **Pino** (структурный JSON).
-- В prod — отправка в Logtail / Better Stack / S3.
+- В prod — отправка в Logtail / Better Stack / S3 (не сделано; логи — json-file с ротацией и `compress`).
 - PII redaction: заголовки `Authorization`, `cookie`, поля `password`, `code`.
 
 ```ts
@@ -1030,7 +1103,8 @@ export class AppModule {}
 
 ## Мониторинг
 
-- **Health-чек**: `/health` (liveness), `/ready` (DB + Redis ping). Uptime Kuma на том же VPS пингует оба endpoint-а раз в минуту, шлёт алерты в email/Telegram при падении.
+- **Health-чек**: `/health` (liveness), `/ready` (DB + Redis ping). Caddy роутит оба в api (до 2026-09-14 они уходили в web и редиректили на `/login`). Внешний монитор + Uptime Kuma — docs/23 §«Мониторинг»; мониторы не должны следовать редиректам.
+- **Ops-алерты**: `OpsAlertService` (провалы job'ов, крашы кронов, Redis) и systemd `OnFailure=` → Google Chat, `OPS_ALERT_WEBHOOK_URL`.
 - **Логи**: Pino → stdout контейнера → Docker json-file driver. `docker logs -f magguarantee-api` для tail, ротация по `max-size`/`max-file` в `docker-compose.yml` (см. [18-launch-and-deployment.md](18-launch-and-deployment.md)) — иначе лог-файлы могут забить диск.
 - **Ошибки**: ловятся через Pino-логи (level=error). Отдельного error-tracking SaaS не подключаем — для масштаба 15–20 одновременных пользователей хватает грепа по journal.
 - **Metrics** (опц., если понадобится): Prometheus через `@willsoto/nestjs-prometheus` + локальная Grafana на том же VPS.
