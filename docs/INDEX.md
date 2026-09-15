@@ -53,6 +53,8 @@
 | 23 | [23-prod-deployment-runbook.md](23-prod-deployment-runbook.md) | **Runbook выката в прод** — пошагово с нуля: домен, GCP, bootstrap VPS, Caddy, `.env`, миграции, сид, бэкапы, CI/CD, приёмка. Проверен репетицией 2026-07-29. |
 | 24 | [24-sso-magspace-and-permissions-plan.md](24-sso-magspace-and-permissions-plan.md) | **Трек A реализован (2026-09-09).** Google SSO для сотрудников, MAGSpace как справочник (одно stanowisko → роль через admin-маппинг, JIT-provisioning, pull-reconcile), admin только локально, пароль остаётся запасным. §9 — шесть расхождений реализации с планом, §10 — итоговый маппинг 17 должностей и почему `pracownik`/`weryfikator`/`eksport` выдаются вручную. Трек B (слой permissions) — не начат, план в doc 25. |
 | 25 | [25-permissions-layer-plan.md](25-permissions-layer-plan.md) | **План трека B — слой permissions.** Инвентаризация авторизации (139 эндпоинтов, 19 наборов ролей, capability-проверки в сервисах, web), каталог из 38 прав, тест эквивалентности против снапшота, этапы B1–B5 (≈ 5–5.5 дня) + B6 точечные права пользователю (добавление и отзыв, под первый запрос). |
+| 26 | [26-preprod-on-staging.md](26-preprod-on-staging.md) | **Pre-prod на staging (2026-09-15).** Пока prod-сервера нет, OVH-staging работает как боевой: инвентаризация, решения, чистый старт на прод-компоузе, `.env`, GitHub, бэкапы, приёмка; перенос базы и MinIO на prod (C-00…C-13) и зачистка. |
+| 27 | [27-preprod-parity-ledger.md](27-preprod-parity-ledger.md) | **Журнал паритета staging ↔ prod** — живой: что сделано (только подтверждённое), что повторить на prod, `.env`/GitHub/внешние сервисы. Ведёт `preprod-parity-agent`. Секретов не содержит. |
 
 ## Быстрая навигация по ролям
 

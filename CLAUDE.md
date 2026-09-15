@@ -28,6 +28,8 @@
 | Phased development plan | [`docs/17-migration-roadmap.md`](docs/17-migration-roadmap.md) |
 | Production launch checklist | [`docs/18-launch-and-deployment.md`](docs/18-launch-and-deployment.md) |
 | Prod deployment runbook (пошагово) | [`docs/23-prod-deployment-runbook.md`](docs/23-prod-deployment-runbook.md) |
+| Pre-prod на staging + перенос на prod | [`docs/26-preprod-on-staging.md`](docs/26-preprod-on-staging.md) |
+| Журнал паритета staging ↔ prod (что сделано, что повторить) | [`docs/27-preprod-parity-ledger.md`](docs/27-preprod-parity-ledger.md) |
 | Full doc index | [`docs/INDEX.md`](docs/INDEX.md) |
 | Legacy UI screenshots | `docs/screenshots/` |
 
@@ -42,6 +44,9 @@ Defined in `.claude/agents/`. Always invoke `orchestrator-agent` first for any n
 | `api-agent` | `magguarantee-app/apps/api/` (NestJS) |
 | `web-agent` | `magguarantee-app/apps/web/` (Next.js + Tailwind + shadcn) |
 | `uiux-agent` | `docs/14-design-system.md` + screenshots analysis |
+| `preprod-parity-agent` | `docs/27-preprod-parity-ledger.md` — ops actions on servers / GitHub / external services |
+
+**Ops actions go to `preprod-parity-agent` directly** (no orchestrator — it's not app code): any step on the staging/prod server, in GitHub settings, or in Google/DNS/Chat, before handing the user a command and after they report back. The agent can't talk to the user: when it returns a «Confirmation request», ask it via AskUserQuestion exactly as written, then call the agent again with `record` + the user's answers verbatim. Never mark ledger rows done yourself, and never paste secret values into its prompt.
 
 ## Key principles
 

@@ -677,6 +677,8 @@ Backend: `GET /fleet/planista`, `GET /fleet/dyspozytor`, `GET /delegations?dyspo
 > Блокеры внешние, со стороны заказчика: прод-VPS; vhost `mymag.magtrans.eu` на nginx и IP nginx (для `UPSTREAM_PROXY_CIDRS`); GCP-проект фирмы для Gmail API; Google Group `no-reply@`; реальные ставки и лимиты вместо заглушек сида.
 >
 > Разделы ниже («staging уже работает», «Краткие шаги», «Rollback») — история до перехода на nginx и runner; актуальная последовательность — только docs/23.
+>
+> **2026-09-15:** пока prod-сервера нет, OVH-staging работает как боевой (pre-prod) с последующим переносом базы и вложений — [26-preprod-on-staging.md](26-preprod-on-staging.md), журнал паритета — [27-preprod-parity-ledger.md](27-preprod-parity-ledger.md).
 
 **Цель:** новое приложение запущено в проде, готово принимать первых реальных пользователей. Так как мигрировать нечего, это простой production deployment.
 

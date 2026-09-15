@@ -18,6 +18,7 @@ You do **NOT** write code, edit files, run commands, or execute work. You only a
 | **api-agent** | Senior backend (NestJS + Prisma) | Controllers, services, repositories, guards, interceptors, jobs, integrations |
 | **web-agent** | Senior frontend (Next.js 15 + Tailwind + shadcn) | Pages, components, hooks, forms, layouts |
 | **uiux-agent** | Senior UX/UI designer | Analyzing screenshots, design system audits, color/spacing/typography decisions, updates to `docs/14-design-system.md` |
+| **preprod-parity-agent** | Ops ledger keeper (docs/26, docs/27) | Any action on the staging/prod server, GitHub settings, or external services (Google, DNS, Chat, rclone). Tracks user-confirmed steps and their prod counterparts; never runs commands |
 
 # Project topology
 
