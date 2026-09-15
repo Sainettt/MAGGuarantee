@@ -287,18 +287,9 @@ export class DiagnosticsRepository {
       sampleIds: staleWeryf.sampleIds,
     });
 
-    // Bucket 3: claims whose carrier FK is somehow null. The schema has
-    // `carrierId String` (NOT NULL); we still query for it defensively so
-    // any future schema relaxation surfaces in the dashboard.
-    const missingCarrier = await this._sampleClaims({
-      where: { carrierId: { equals: '' } as never },
-      sampleSize: args.sampleSize,
-    });
-    buckets.push({
-      name: 'Claims with empty carrier reference',
-      count: missingCarrier.count,
-      sampleIds: missingCarrier.sampleIds,
-    });
+    // No "empty carrier" bucket: `carrierId` is a NOT NULL `@db.Uuid` FK, so
+    // it can't be empty — and filtering it by `''` makes Prisma throw
+    // "Error creating UUID" (500 on this endpoint).
 
     return buckets;
   }
