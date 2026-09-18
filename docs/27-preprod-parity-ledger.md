@@ -33,11 +33,11 @@
 |---|---|---|---|---|---|
 | D-01 | Compose-файл pre-prod | `infra/docker-compose.prod.yml` | ✅ | 2026-09-18 | «Да, все три» (D-01/02/04) |
 | D-02 | Данные: чистый старт / сохранить часть UAT | чистый старт: UAT → бэкап PP-04 + `data.uat-*` (PP-09) | ✅ | 2026-09-18 | «Да, все три» (D-01/02/04) |
-| D-03 | Почта: GCP фирмы / личный проект / SMTP-релей | Gmail API, OAuth-клиент в GCP-проекте фирмы, refresh token ящика руководителя, `From` = группа `no-reply@` (send-as). Значения — из prod-`.env` (Q-06). Работа send-as проверяется в PP-15 | ✅ | 2026-09-18 | «Да, всё в GCP-проекте фирмы» |
+| D-03 | Почта: GCP фирмы / личный проект / SMTP-релей | Gmail API, OAuth-клиент в GCP-проекте фирмы, refresh token ящика руководителя, `From` = группа `no-reply@` (send-as). Значения — из prod-`.env` (Q-06). Работа send-as проверяется в PP-15 | ⚠️ | 2026-09-18 | «Да, всё в GCP-проекте фирмы» → уточнено (Q-15): «Мой старый клиент + токен шефа» — почтовый OAuth-клиент `871b726a` в GCP-проекте **на аккаунте пользователя** (не фирмы), токен ящика руководителя, одна тройка на обоих серверах. Риск/долг: почта зависит от личного аккаунта — перенести клиент в проект фирмы и перевыпустить токен до ухода/смены аккаунта |
 | D-04 | S3-ключи MinIO на prod | те же на обоих; источник — **prod-`.env`** (Q-06), pre-prod берёт их оттуда. Prod-MinIO, возможно, уже инициализирован ими — проверить (Q-09) | ✅ | 2026-09-18 | «Да, все три» (D-01/02/04) |
 | D-05 | Как prod-MAGSpace получит те же `Employee.id` | рекомендовано: перенос MAGSpace тем же окном | ❓ | | |
 | D-06 | Судьба `<домен-preprod>` после переноса | рекомендовано: 302 → prod, потом 301 или освободить | ❓ | | |
-| D-07 | Подтверждение выкатов на pre-prod | рекомендовано: Required reviewers на `staging` | ❓ | | |
+| D-07 | Подтверждение выкатов на pre-prod | без Required reviewers на `staging` — выкат без подтверждения (на prod reviewers включить — docs/23 §7.2) | ✅ | 2026-09-18 | «Нет, выкатывать без подтверждения» |
 
 ---
 
@@ -86,8 +86,8 @@
 | PP-12 | Caddyfile сервер = репо, `/health` через домен | ✅ | 2026-09-18 | `caddy validate` → `Valid configuration` (warn: не отформатирован, строка 14); compose из репо → `Container caddy Started`; `https://mymag.sainet.pl/health` → `200 application/json; charset=utf-8`; `https://magspace.sainet.pl` → `307` (редирект на логин, «до» не замерялся). Бэкап `Caddyfile.bak-*` выводом не показан. Схема (Q-12): критерий — «фрагмент `infra/caddy/sites/magguarantee.caddy` = репо, серверный Caddyfile его импортирует», а не весь файл; включает X-03. Предусловие: репо-правка (фрагмент + volume в `infra/caddy/docker-compose.yml`) в `main` до PP-11 — выполнено, `e3612ce` (2026-09-18) | иначе: `Caddyfile.prod` целиком либо prod-фрагмент + `import` — по Q-13; в обоих случаях `UPSTREAM_PROXY_CIDRS` + `DOCKER-USER` (docs/23 §2.2, §3.3) | ⬜ |
 | PP-13 | Environment `staging`: `COMPOSE_FILE`, `SITE_URL`, reviewers | ⬜ | | | иначе: Environment `prod` (docs/23 §7.2) | ⬜ |
 | PP-14 | Пробный выкат через Actions | ⬜ | | | повторить: Run workflow → `prod` | ⬜ |
-| PP-15 | Почта: код, `From`, ссылка | ⬜ | | | повторить: логин на prod | ⬜ |
-| PP-16 | SSO origins | ⬜ | | | иначе: добавить `https://mymag.magtrans.eu` | ⬜ |
+| PP-15 | Почта: код, `From`, ссылка | ⚠️ провален | 2026-09-18 | «код не приходит»: лог api — `email-send` 2fa-code 5/5 попыток, `unauthorized_client` → X-08 | повторить: логин на prod | ⬜ |
+| PP-16 | SSO origins | ⚠️ провален | 2026-09-18 | «вот такая ошибка вылетает людям»: Google `Błąd 400: origin_mismatch` на `/login` → X-09 | иначе: добавить `https://mymag.magtrans.eu` | ⬜ |
 | PP-17 | Chat webhook wyjazdy | ⬜ | | | повторить: те же URL в prod-`.env`, тест | ⬜ |
 | PP-18 | MAGSpace доступен, чьи данные | ⬜ | | | иначе: MAGSpace на prod с теми же `Employee.id` (D-05) | ⬜ |
 | PP-19 | Бэкап-юниты, `backup.conf`, `alert.conf` | ⬜ | | | иначе: папка `gdrive:magguarantee-backups-prod` (docs/23 §6) | ⬜ |
@@ -111,17 +111,17 @@
 | `WEB_URL`, `APP_URL`, `NEXT_PUBLIC_API_URL` | `https://<домен-preprod>` | `https://mymag.magtrans.eu` | ≠ | ⬜ | ⬜ |
 | `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` | свежие | свои свежие | ≠ | ⬜ | ⬜ |
 | `JWT_*_TTL`, `BCRYPT_ROUNDS` | дефолт | дефолт | = | ⬜ | ⬜ |
-| `MAIL_PROVIDER`, `GMAIL_OAUTH_*` | копия из prod-`.env` (D-03: GCP фирмы) | уже в prod-`.env` | = | ⬜ | ⬜ |
+| `MAIL_PROVIDER`, `GMAIL_OAUTH_*` | клиент `871b726a` (проект на аккаунте пользователя) + токен руководителя (Q-15) | **заменить** клиент/secret в prod-`.env` на `871b726a` (X-08) | = | ⏳ фикс X-08 | ⬜ |
 | `GMAIL_FROM`, `MAIL_FROM`, `MAIL_LOGO_URL` | шаблон | шаблон | = | ⬜ | ⬜ |
 | `MAKSIM_EMAIL` | боевой | боевой | = | ⬜ | ⬜ |
 | `GOOGLE_CHAT_WYJAZD_WEBHOOK_URL` | боевой space, копия из prod-`.env` | тот же | = | ⬜ | ⬜ |
-| `OPS_ALERT_WEBHOOK_URL` | ops-space, копия из prod-`.env` | тот же | = | ⬜ | ⬜ |
+| `OPS_ALERT_WEBHOOK_URL` | ops-space, копия из prod-`.env` | тот же | = | ❌ пуст (лог api «OPS_ALERT_WEBHOOK_URL unset», 2026-09-18) | ❓ есть ли в prod-`.env` |
 | `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET` | дефолт | дефолт | = | ⬜ | ⬜ |
 | `S3_ACCESS_KEY`, `S3_SECRET_KEY` | копия из prod-`.env` (D-04, Q-06) | **источник**: prod-`.env`; prod-MinIO должен быть инициализирован именно ими (Q-09) | = | ⬜ | ⬜ |
 | `GPS_*` | mock | mock | = | ⬜ | ⬜ |
 | `ALLOW_PAST_DEPARTURE`, `NEXT_PUBLIC_ALLOW_PAST_DEPARTURE` | `false` | `false` | = | ⬜ | ⬜ |
 | Кроны (`*_ENABLED` и др.) | не заданы (дефолты) | не заданы | = | ⬜ | ⬜ |
-| `GOOGLE_OAUTH_CLIENT_ID`, `NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID` | SSO-клиент, копия из prod-`.env` | тот же клиент | = | ⬜ | ⬜ |
+| `GOOGLE_OAUTH_CLIENT_ID`, `NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID` | SSO-клиент **staging-GCP-проекта** (оба ключа одинаковые, web пересобрать) — X-09 | по Q-16 | ❓ | ⏳ X-09 | ⬜ |
 | `SSO_ALLOWED_HD` | `magtrans.eu` | `magtrans.eu` | = | ⬜ | ⬜ |
 | `MAGSPACE_API_URL` | `http://magspace-api:3001` | то же | = | ⬜ | ⬜ |
 | `MAGSPACE_INTERNAL_TOKEN` | токен MAGSpace этого сервера | токен prod-MAGSpace | ≠ | ⬜ | ⬜ |
@@ -135,14 +135,14 @@
 |---|---|---|---|---|---|
 | Environment + `COMPOSE_FILE` | `staging` → `infra/docker-compose.prod.yml` | `prod` → `infra/docker-compose.prod.yml` | = файл | ⬜ | ⬜ |
 | `SITE_URL` | `https://<домен-preprod>` | `http://mymag.magtrans.eu` | ≠ | ⬜ | ⬜ |
-| Required reviewers | по D-07 | включить | = | ⬜ | ⬜ |
+| Required reviewers | нет (D-07) | включить | ≠ | ➖ D-07 2026-09-18 | ⬜ |
 | Self-hosted runner | метка `staging` (`magg-staging`) | метка `prod` (`magg-prod`) | ≠ | ✅ PP-02 2026-09-18, скриншот | ✅ PP-02 2026-09-18, скриншот (Idle) |
 | Deploy key | свой | свой | ≠ | ✅ 2026-09-18: `git pull` работает (CI #224); отдельные deploy keys, со слов, не заводились | ⬜ проверить в инвентаризации prod |
 | DNS / vhost | A-запись на OVH | vhost на nginx MAGTRANS | ≠ | ⏳ `mymag.sainet.pl` работает; `mymag.magtrans.com.pl` резолвится в IP пула OVH (вероятно, парковка), домен ещё регистрируется (X-04) | ⬜ |
 | TLS | Let's Encrypt в Caddy | nginx MAGTRANS | ≠ | ❓ | ⬜ |
 | Gmail: GCP-проект, OAuth-клиент, refresh token | по D-03 | тот же | = | ❓ | ⬜ |
 | Google Group `no-reply@` + send-as | по D-03 | та же | = | ❓ | ⬜ |
-| SSO-клиент: JS origins | `https://mymag.sainet.pl` + `https://mymag.magtrans.com.pl` (X-04); consent screen Internal | `https://mymag.magtrans.eu` | ≠ | ✅ 2026-09-18: «Internal, оба домена уже добавлены» | ⬜ |
+| SSO-клиент: JS origins | `https://mymag.sainet.pl` + `https://mymag.magtrans.com.pl` (X-04); consent screen Internal | `https://mymag.magtrans.eu` | ≠ | ❌ 2026-09-18: ответ «Internal, оба домена уже добавлены» для текущего клиента (`GOOGLE_OAUTH_CLIENT_ID` из prod-`.env`) **не подтвердился** — `Błąd 400: origin_mismatch` (X-09); вероятно, origins добавлены в старый UAT-клиент | ⬜ |
 | Chat space «wyjazdy» webhook | боевой | тот же | = | ❓ | ⬜ |
 | Chat ops-space webhook | заведён? | тот же | = | ❓ | ⬜ |
 | rclone remote + папка | `gdrive:magguarantee-backups-preprod` (remote `gdrive:` есть, текущая папка — ❓) | `gdrive:magguarantee-backups-prod` | ≠ | ❓ | ⬜ |
@@ -185,6 +185,8 @@
 | X-05 | 2026-09-18 | 🌐 Google Chat · 🖥 `.env` | Pre-prod шлёт уведомления о выездах в **тестовый** Chat-space; пользователь сам переключит на рабочий | ⬜ со слов: «google chat пока юзаю тест чат, потом свичну сам на рабочий» | иначе: на prod сразу рабочий space в prod-`.env`; переключение на pre-prod — строкой в §4 | ⬜ |
 | X-06 | 2026-09-18 | 🐙 Environment `prod` | 2 старых secrets в Environment `prod` (со слов — «старые еще когда не было ранера»); кандидаты на удаление, без решения ничего не делать | ❓ решение не принято | иначе: это и есть prod — решить удалить/оставить на PP-13 для prod | ⬜ |
 | X-07 | 2026-09-18 | 💬 чат · 🖥 bash history | Пароль сид-админа (`SEED_ADMIN_PASSWORD`, PP-11) засвечен в чате вместе со строкой команды; сайт уже публично отвечает (старый блок Caddy проксирует на новые контейнеры). Нужно: войти админом и сменить пароль (сид форсит смену), удалить строку из bash history на сервере | ➖ утечки не было, 2026-09-18: «я просто подставил фейк пароль, он там другой» — в чате был подставной пароль, настоящий в чат не попадал | не нужно: на prod свой сид-пароль (docs/23 Фаза 5); передавать его мимо чата | ➖ |
+| X-08 | 2026-09-18 | 🖥 `.env` · 🌐 GCP | Gmail API отвечает `unauthorized_client` (2FA-код не уходит). Вероятно, `GMAIL_OAUTH_REFRESH_TOKEN` выписан не тем OAuth-клиентом, что `GMAIL_OAUTH_CLIENT_ID`/`_SECRET` из prod-`.env` (или в `CLIENT_ID` попал SSO-клиент). Диагностика 2026-09-18 (sha256-префиксы, без значений): в `.env` `GMAIL_OAUTH_CLIENT_ID`/`_SECRET` новые (`2376f4b8`/`9a9a2c64`, из prod-`.env`), а `GMAIL_OAUTH_REFRESH_TOKEN` = как в UAT (`98a1bf1f`). Уточнение пользователя: «я вчера взял его токен, и вставил его в env» — это **токен руководителя**, уже стоявший в UAT. Тест refresh-grant: клиент из `.env` (`2376f4b8`) + токен → `unauthorized_client`; клиент из `.env.uat` (`871b726a`, GCP-проект на аккаунте пользователя) + токен → `scope gmail.send`. Итог: токен руководителя выписан клиентом `871b726a`. Фикс pre-prod (выдан главным агентом): `GMAIL_OAUTH_CLIENT_ID`/`_SECRET` из `.env.uat` в `.env`, тест, `up -d api`, повторить вход. Выбор пары для обоих серверов — Q-15 | ⏳ ждёт фикса | иначе: в prod-`.env` заменить `GMAIL_OAUTH_CLIENT_ID`/`_SECRET` на пару `871b726a` (как pre-prod, Q-15), токен руководителя тот же; тест refresh-grant + тестовое письмо до C-00 | ⬜ |
+| X-09 | 2026-09-18 | 🌐 GCP · 🖥 `.env` | Google SSO: `Błąd 400: origin_mismatch` для сотрудников на `mymag.sainet.pl`. В `.env` SSO-клиент из prod-`.env` (sha-префикс `88ce6f60`), в UAT был другой (`bf7104be`); origins, по-видимому, добавлены в старый. Фикс (предложен главным агентом): в GCP у клиента с ID из `.env` добавить origins `https://mymag.sainet.pl` и `https://mymag.magtrans.com.pl` (без пересборки). Альтернатива — вернуть старый клиент: `NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID` build-time → пересборка web. Обновление 2026-09-18, пользователь: «у меня есть 2 gcp проекта, один под прод второй под стейджинг … я поменял 2 енвы на те же что были под стейджинг, теперь вот опять не заработал только уже логин». ⚠️ `GOOGLE_OAUTH_CLIENT_ID` уже заменён на SSO-клиент staging-проекта, но web собран в PP-11 с prod-клиентом (`NEXT_PUBLIC_*` вшит) → рассинхрон. Фикс (выдан главным агентом): оба ключа = SSO-клиент staging-проекта, `build web`, `up -d api web`. Итог: pre-prod целиком на staging-GCP-проекте (Gmail + SSO) | ⏳ ждёт результата | иначе: SSO-клиент для prod — Q-16; в нём origin `https://mymag.magtrans.eu`; `NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID` = `GOOGLE_OAUTH_CLIENT_ID` до сборки web; проверить вход Google до C-00 | ⬜ |
 | X-03 | решено 2026-09-18, не выполнено | 🖥 `/opt/caddy/Caddyfile` | Убрать маршрут `/tg/*` → `bilets-tracker:8080` из сайта `mymag.sainet.pl`. Реализуется тем, что репо-фрагмент `infra/caddy/sites/magguarantee.caddy` (Q-12) не содержит `/tg/*`; серверный блок заменяется `import` в PP-12 — отдельной правки нет. Процедура — Doc gaps (docs/26 PP-12) | ✅ 2026-09-18 PP-12: блок `mymag.sainet.pl` заменён на `import`, во фрагменте `/tg/*` нет (решение: «Можно убрать уже сейчас») | не нужно: в `Caddyfile.prod` этого маршрута нет и не будет | ➖ |
 
 ---
@@ -206,6 +208,8 @@
 | Q-11 | В `deploy-history.log` нет ни одной строки `status=ok` (или файла нет) — выкаты через Actions на staging не проходили? Влияет на PP-14 и F-04 | ✅ 2026-09-18: «Последний cicd падает из за caddy»; CI #224 (f3d982d) deploy ❌ — `https://vps-29a0acba.vps.ovh.net/health` → `000`, TLS alert: `SITE_URL` не задан (дефолт), и в серверном Caddyfile нет health-probe. Чинится PP-12 + PP-13. Побочно: деплой-джоб до проверки поднимает стек staging-компоузом → после ре-рана UAT-стек, вероятно, снова запущен на f3d982d (выводом не подтверждено) |
 | Q-12 | Общий `/opt/caddy/Caddyfile` (X-01): как совместить с правилом «серверный конфиг = репо»? Предложение (для docs/26 PP-12): в репо только блок сайта MAGGuarantee, серверный файл его импортирует; блоки `magspace.sainet.pl` и `/tg/*` живут в своих репо/файлах. Также: `/tg/*` → `bilets-tracker` висит **на домене MAGGuarantee** — что это и нужно ли на prod | ✅ 2026-09-18. `/tg/*`: «Можно убрать уже сейчас» → X-03. Структура: «Фрагмент в репо + import на сервере (рекомендую)» — в репо `infra/caddy/sites/magguarantee.caddy` (сайт `mymag.sainet.pl`, health-probe, без `/tg/*`), в caddy-compose volume каталога `sites` в контейнер, серверный `/opt/caddy/Caddyfile` делает `import` вместо своего блока; MAGSpace — своим фрагментом. Репо-правка должна попасть в `main` **до PP-11**. Как на prod — Q-13 |
 | Q-14 | X-04: пускать первых перевозчиков (PP-23) только на `mymag.magtrans.com.pl`, чтобы ссылки в письмах и адрес для перевозчиков не менялись? D-06 теперь про два старых домена (`mymag.sainet.pl`, `mymag.magtrans.com.pl`) | ✅ 2026-09-18: «Да, только на новом домене» → PP-23 не выдаётся, пока X-04 не выполнен (новый домен в `.env`, Caddy, `SITE_URL`, SSO, `/health` 200); подготовка до PP-14 — на `mymag.sainet.pl`, если A-записи ещё нет. D-06 — открыт |
+| Q-15 | X-08 / D-03: какая тройка Gmail на обоих серверах? (A) клиент `871b726a` (GCP-проект на аккаунте пользователя) + его secret + токен руководителя — работает сейчас, но почта зависит от личного проекта; (B) руководитель перевыпускает токен через клиент `2376f4b8` (`npm run gmail:token`, docs/23 §1.3), новая тройка — на оба сервера | ✅ 2026-09-18: «Мой старый клиент + токен шефа» → (A). Долг: клиент в личном проекте (D-03) |
+| Q-16 | GCP на prod (со слов 2026-09-18: два проекта — «prod» и «staging»; pre-prod теперь целиком на staging-проекте). SSO на prod — клиент prod-проекта (свой, origin `mymag.magtrans.eu`) или тот же staging-клиент? Gmail — Q-15 выбрал (A) «старый клиент + токен шефа» на обоих; подтвердить или перевыпустить токен через prod-проект. Решение — до C-00 | ❓ |
 | Q-13 | На prod: тот же подход (фрагмент + `import`, если prod-Caddy общий с MAGSpace) или `Caddyfile.prod` целиком, как в docs/23 §2.2? | ✅ 2026-09-18: «Да» — по факту инвентаризации prod: Caddy общий с MAGSpace → prod-фрагмент в репо + `import` + volume `sites`; Caddy только наш → `Caddyfile.prod` целиком (docs/23 §2.2). Какой случай — определит PP-01 на 🏢 |
 
 ---
@@ -236,3 +240,10 @@
 | 2026-09-18 | `record`: PP-11 ⏳ (нет SHA/`git status`); X-07 (пароль сид-админа засвечен); выдан PP-12 |
 | 2026-09-18 | `record`: X-07 ➖ — в чате был подставной пароль, утечки не было |
 | 2026-09-18 | `record`: PP-11 ✅ (`e3612ce`); PP-12 ✅ (`/health` 200); X-01, X-03 ✅; F-03, F-05, F-06 обновлены; выданы PP-13, PP-14 |
+| 2026-09-18 | `record`: D-07 ✅ (без reviewers на `staging`); `.gitignore` для `.env.uat-*`/`.env.new` — коммит главного агента `7bafa2d`, `git status` на сервере проверить после PP-14 |
+| 2026-09-18 | `adhoc`: PP-15 ⚠️ провален (`unauthorized_client`) → X-08; §4 `OPS_ALERT_WEBHOOK_URL` пуст на pre-prod |
+| 2026-09-18 | `record` X-08: диагноз — refresh token UAT (личный) при клиенте из prod-`.env`; ждёт фикса |
+| 2026-09-18 | `record` X-08: уточнено — токен руководителя выписан клиентом `871b726a` (проект на аккаунте пользователя); D-03 → ⚠️; Q-15 (пара A/B) |
+| 2026-09-18 | `record`: Q-15 ✅ (A — клиент `871b726a` + токен руководителя на обоих серверах); D-03 уточнён, долг «личный GCP-проект»; X-08 prod — заменить клиент в prod-`.env` |
+| 2026-09-18 | `adhoc`: X-09 (SSO `origin_mismatch`); PP-16 ⚠️; §5 SSO origins pre-prod ✅ → ❌ (прошлый ответ относился к другому клиенту) |
+| 2026-09-18 | `record` X-09: два GCP-проекта (prod/staging); pre-prod переводится на staging-проект целиком, нужна пересборка web (`NEXT_PUBLIC_*`); Q-16 (GCP на prod) |
