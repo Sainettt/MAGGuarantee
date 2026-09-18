@@ -40,6 +40,9 @@ magguarantee-app/packages/database/src/generated/
 .env.production.local
 !.env.example
 !.env.staging.example
+# server-side copies made by docs/26 PP-06 (old .env backup, draft of the new one)
+.env.uat-*
+.env.new
 
 # ─── Docker volumes (local compose runs) ────────────────
 infra/data/
