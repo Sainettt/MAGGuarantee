@@ -16,7 +16,8 @@ infra/
 ├── caddy/                        ← shared reverse proxy, installed as /opt/caddy
 │   ├── docker-compose.yml        ← Caddy container (ports, env, log rotation)
 │   ├── .env.example              ← → /opt/caddy/.env (UPSTREAM_PROXY_CIDRS)
-│   ├── Caddyfile                 ← STAGING: public, own Let's Encrypt cert
+│   ├── Caddyfile                 ← STAGING: template of the shared /opt/caddy/Caddyfile (global + import)
+│   ├── sites/magguarantee.caddy  ← STAGING: our site block, mounted from the checkout, own Let's Encrypt cert
 │   └── Caddyfile.prod            ← PROD: behind the corporate nginx, no ACME
 ├── scripts/                      ← run straight from the checkout on the server
 │   ├── magguarantee-backup       ← pg_dump + MinIO tar, rotation, offsite, heartbeat
@@ -122,8 +123,8 @@ Generate real secrets and set production URLs:
 - `POSTGRES_DATA=/opt/magguarantee/data/postgres`, `REDIS_DATA=/opt/magguarantee/data/redis`,
   `MINIO_DATA=/opt/magguarantee/data/minio` — already the template values;
   **must stay absolute** (compose refuses to start without them)
-- `WEB_URL=https://vps-29a0acba.vps.ovh.net`
-- `NEXT_PUBLIC_API_URL=https://vps-29a0acba.vps.ovh.net`
+- `WEB_URL=https://mymag.sainet.pl`
+- `NEXT_PUBLIC_API_URL=https://mymag.sainet.pl`
 
 **3. Bring up Caddy (one-time per VPS):**
 
@@ -135,7 +136,14 @@ docker compose pull && docker compose up -d
 ```
 
 Caddy will start requesting a Let's Encrypt certificate for
-`vps-29a0acba.vps.ovh.net` (DNS already points there — managed by OVH).
+`mymag.sainet.pl` (A record → this VPS).
+
+The staging Caddy is shared with other projects (MAGSpace), so
+`/opt/caddy/Caddyfile` is maintained on the server; the MAGGuarantee site is
+NOT copied into it but imported from the checkout
+(`import /etc/caddy/sites/magguarantee.caddy`, volume in `docker-compose.yml`).
+Edit `caddy/sites/magguarantee.caddy` in git; after a `git pull` that touches
+it run `docker exec caddy caddy reload --config /etc/caddy/Caddyfile`.
 Watch logs: `docker compose logs -f caddy`. First request takes 10–30s.
 
 NOTE: web AND api share this single domain via path-based routing inside
@@ -170,11 +178,11 @@ docker compose -f infra/docker-compose.staging.yml \
 **6. Smoke test:**
 
 ```bash
-curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' https://vps-29a0acba.vps.ovh.net/health
+curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' https://mymag.sainet.pl/health
 # → 200 application/json; charset=utf-8
-curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' https://vps-29a0acba.vps.ovh.net/ready
+curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' https://mymag.sainet.pl/ready
 # → 200 application/json; charset=utf-8   (503 = Postgres or Redis unreachable)
-curl -fsS https://vps-29a0acba.vps.ovh.net/health
+curl -fsS https://mymag.sainet.pl/health
 # → {"status":"ok","uptime":…,"timestamp":…}
 ```
 
@@ -185,7 +193,7 @@ routed it to the api) counts as success and prints nothing. Anything other than
 external uptime monitors: configure them to expect 200 and not to follow
 redirects.
 
-Visit `https://vps-29a0acba.vps.ovh.net/login` in a browser.
+Visit `https://mymag.sainet.pl/login` in a browser.
 
 ## Updating (every subsequent deploy)
 
@@ -331,7 +339,7 @@ GitHub Environment (`staging` / `prod`) → Variables:
 |---|---|---|
 | `COMPOSE_FILE` | да | `infra/docker-compose.prod.yml` / `infra/docker-compose.staging.yml` |
 | `DEPLOY_PATH` | нет | по умолчанию `/opt/magguarantee/src` |
-| `SITE_URL` | нет | метка сайта из Caddyfile; по умолчанию prod `http://mymag.magtrans.eu`, staging `https://vps-29a0acba.vps.ovh.net` |
+| `SITE_URL` | нет | метка сайта из Caddyfile; по умолчанию prod `http://mymag.magtrans.eu`, staging `https://mymag.sainet.pl` |
 | `DEPLOY_HISTORY` | нет | по умолчанию `<родитель DEPLOY_PATH>/deploy-history.log` |
 
 Шаги: `git pull origin main` → запись в журнал → `build` → `migrate deploy` →

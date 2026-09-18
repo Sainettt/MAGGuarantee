@@ -31,10 +31,10 @@
 
 | ID | Вопрос | Решение | Статус | Дата | Подтверждение |
 |---|---|---|---|---|---|
-| D-01 | Compose-файл pre-prod | рекомендовано: `docker-compose.prod.yml` | ❓ | | |
-| D-02 | Данные: чистый старт / сохранить часть UAT | рекомендовано: чистый старт | ❓ | | |
-| D-03 | Почта: GCP фирмы / личный проект / SMTP-релей | рекомендовано: GCP фирмы | ❓ | | |
-| D-04 | S3-ключи MinIO на prod | рекомендовано: те же, что pre-prod | ❓ | | |
+| D-01 | Compose-файл pre-prod | `infra/docker-compose.prod.yml` | ✅ | 2026-09-18 | «Да, все три» (D-01/02/04) |
+| D-02 | Данные: чистый старт / сохранить часть UAT | чистый старт: UAT → бэкап PP-04 + `data.uat-*` (PP-09) | ✅ | 2026-09-18 | «Да, все три» (D-01/02/04) |
+| D-03 | Почта: GCP фирмы / личный проект / SMTP-релей | Gmail API, OAuth-клиент в GCP-проекте фирмы, refresh token ящика руководителя, `From` = группа `no-reply@` (send-as). Значения — из prod-`.env` (Q-06). Работа send-as проверяется в PP-15 | ✅ | 2026-09-18 | «Да, всё в GCP-проекте фирмы» |
+| D-04 | S3-ключи MinIO на prod | те же на обоих; источник — **prod-`.env`** (Q-06), pre-prod берёт их оттуда. Prod-MinIO, возможно, уже инициализирован ими — проверить (Q-09) | ✅ | 2026-09-18 | «Да, все три» (D-01/02/04) |
 | D-05 | Как prod-MAGSpace получит те же `Employee.id` | рекомендовано: перенос MAGSpace тем же окном | ❓ | | |
 | D-06 | Судьба `<домен-preprod>` после переноса | рекомендовано: 302 → prod, потом 301 или освободить | ❓ | | |
 | D-07 | Подтверждение выкатов на pre-prod | рекомендовано: Required reviewers на `staging` | ❓ | | |
@@ -47,24 +47,24 @@
 
 | ID | Параметр | pre-prod (staging) | prod | Источник, дата |
 |---|---|---|---|---|
-| F-01 | Хост | ❓ в репо — OVH `vps-29a0acba.vps.ovh.net` | внутренний IP `172.22.104.110`, сеть MAGTRANS | prod — переписка 2026-09-15 |
-| F-02 | Домен | ❓ по логу api — `mymag.sainet.pl` | `mymag.magtrans.eu` | лог api 2026-09-15 |
-| F-03 | Запущенный compose-файл | ❓ | ❓ | |
-| F-04 | SHA последнего `status=ok` | ❓ | ❓ | |
-| F-05 | `git status` на сервере чистый | ❓ | ❓ | |
-| F-06 | `/opt/caddy/Caddyfile` = репо | ❓ | ❓ (`Caddyfile.prod`) | |
-| F-07 | Версия Caddy ≥ 2.8 | ❓ | ❓ | |
-| F-08 | RAM / CPU / диск | ❓ | ❓ | |
-| F-09 | Пути данных | ❓ | ❓ | |
-| F-10 | ufw | ❓ | ❓ (цель: 22 + 80 от nginx) | |
-| F-11 | Сети `proxy-net`, `magtrans-internal` | ❓ | ❓ | |
-| F-12 | MAGSpace на хосте, чьи данные | ❓ reconcile видит roster 101 (лог 2026-09-15) | ❓ | лог api 2026-09-15 |
-| F-13 | Self-hosted runner, метка | ❓ | ❓ | |
-| F-14 | Таймер бэкапа / rclone remote | ❓ | ❓ | |
-| F-15 | Объём данных (users / carriers / claims) | ❓ | — | |
+| F-01 | Хост | `vps-29a0acba` (OVH) | внутренний IP `172.22.104.110`, сеть MAGTRANS | pre-prod — PP-01 2026-09-18; prod — переписка 2026-09-15 |
+| F-02 | Домен | `mymag.sainet.pl` (`WEB_URL`/`APP_URL`/`NEXT_PUBLIC_API_URL` и блок сайта в `/opt/caddy/Caddyfile`) | `mymag.magtrans.eu` | PP-01 2026-09-18 |
+| F-03 | Запущенный compose-файл | `infra/docker-compose.staging.yml` (label `magguarantee-api`). Запущен **только** `magguarantee-postgres` (Up 3 days); api, web, redis, minio, mailhog в `docker ps` нет (Q-10) | ❓ | PP-01 2026-09-18 |
+| F-04 | SHA последнего `status=ok` | строк `status=ok` нет (grep пуст, Q-11); HEAD чекаута `1a03312` | ❓ | PP-01 2026-09-18 |
+| F-05 | `git status` на сервере чистый | **нет**: `?? cat` — неотслеживаемый файл в чекауте (X-02) | ❓ | PP-01 2026-09-18 |
+| F-06 | `/opt/caddy/Caddyfile` = репо | **нет**: общий файл нескольких приложений — сайт `mymag.sainet.pl` (в репо `vps-29a0acba.vps.ovh.net`), в нём маршрут `/tg/*` → `bilets-tracker:8080`, отдельный сайт `magspace.sainet.pl`; **нет** блока health-probe `/health`,`/ready` → api. `/opt/caddy/docker-compose.yml` ≠ репо: нет `UPSTREAM_PROXY_CIDRS`, нет `compress` у логов (X-01) | ❓ (`Caddyfile.prod`) | PP-01 2026-09-18 |
+| F-07 | Версия Caddy ≥ 2.8 | да, `v2.11.4` | ❓ | PP-01 2026-09-18 |
+| F-08 | RAM / CPU / диск | 7.6 GiB RAM, swap 0, 4 CPU, `/` 72G (свободно 46G) | ❓ | PP-01 2026-09-18 |
+| F-09 | Пути данных | `/opt/magguarantee/data/{postgres,redis,minio}` | ❓ | PP-01 2026-09-18 |
+| F-10 | ufw | active: 22, 80, 443/tcp от всех (v4+v6) | ❓ (цель: 22 + 80 от nginx) | PP-01 2026-09-18 |
+| F-11 | Сети `proxy-net`, `magtrans-internal` | обе есть | ❓ | PP-01 2026-09-18 |
+| F-12 | MAGSpace на хосте, чьи данные | `magspace-web`, `magspace-api` (healthy), `magspace-postgres` запущены; reconcile видит roster 101 (лог 2026-09-15); чьи данные — ❓ (PP-18) | ❓ | PP-01 2026-09-18 |
+| F-13 | Self-hosted runner, метка | `magg-staging` (self-hosted, Linux, X64, `staging`), Idle (+ `Sainettt-MAGSpace.magspace-staging`) | `magg-prod` (self-hosted, Linux, X64, `prod`), Idle | PP-01, PP-02 (скриншот Runners) 2026-09-18 |
+| F-14 | Таймер бэкапа / rclone remote | `magguarantee-backup.timer` есть, ночные прогоны 2026-09-17 03:42 и 2026-09-18 03:38 успешны; offsite-папка сейчас `gdrive:magguarantee-backups` (не `-preprod` — сменить в PP-19) | ❓ | PP-01, PP-04 2026-09-18 |
+| F-15 | Объём данных (users / carriers / claims) | users 11, carriers 1, delegations 6, claims 3 | — | PP-01 2026-09-18 |
 | F-16 | Внутренний IP nginx MAGTRANS | не нужно (Caddy — край) | ❓ запрошен у админов | |
 | F-17 | GCP-проект клиентов почты и SSO | ❓ | ❓ | |
-| F-18 | Environment vars в GitHub | ❓ | ❓ | |
+| F-18 | Environment vars в GitHub | `staging`: 1 variable (со слов — `COMPOSE_FILE` → staging-compose), 0 secrets, `SITE_URL` не задан (CI #224 проверял дефолт `vps-29a0acba.vps.ovh.net`); reviewers не видно | `prod`: 1 variable (со слов — `COMPOSE_FILE` → prod-compose), 2 старых secrets (X-06) | PP-02 (скриншоты, CI #224) 2026-09-18 |
 
 ---
 
@@ -72,18 +72,18 @@
 
 | ID | Шаг (docs/26) | pre-prod | Дата | Подтверждение / доказательство | Как на prod | prod |
 |---|---|---|---|---|---|---|
-| PP-01 | Инвентаризация сервера | ⬜ | | | повторить: те же команды на prod перед C-00 → F-* | ⬜ |
-| PP-02 | Инвентаризация GitHub и внешних сервисов | ⬜ | | | повторить: Environment `prod`, раннер `prod` | ⬜ |
-| PP-03 | Решения D-01…D-07 | ⬜ | | | не нужно: решения общие для обоих серверов | ➖ |
-| PP-04 | Финальный бэкап UAT | ⬜ | | | не нужно: на prod нет UAT-данных | ➖ |
-| PP-05 | Выписать справочники для ручного переноса | ⬜ | | | не нужно: справочники переедут с дампом | ➖ |
-| PP-06 | `infra/.env.new` из прод-шаблона | ⬜ | | | иначе: docs/23 Фаза 4, значения по §4 ниже | ⬜ |
+| PP-01 | Инвентаризация сервера | ✅ | 2026-09-18 | Вывод всех 10 блоков получен, F-01…F-15 заполнены. Отличия зафиксированы: `?? cat` (X-02, удалён), `status=ok` нет (Q-11), стек остановлен намеренно (Q-10), Caddyfile ≠ репо (X-01) | повторить: те же команды на prod перед C-00 → F-* | ⬜ |
+| PP-02 | Инвентаризация GitHub и внешних сервисов | ✅ | 2026-09-18 | Закрыт: deploy keys — «их вроде не должно быть», `git pull` на сервере работает (CI #224 прошёл pull/build/up); DNS `mymag.magtrans.com.pl` — «уже что то резолвит показывает ip из пула ovh … домен еще регестрируется» → ведётся в X-04. Ранее: | «у меня для staging и для прода уже стоят раннеры … Последний cicd падает из за caddy. GCP все окей уже дописал, google chat пока юзаю тест чат» + скриншоты: F-13, F-18, CI #224 (deploy ❌ на внешней `/health`, Q-11). GCP: «Internal, оба домена уже добавлены». Не получено: deploy keys, DNS | повторить: Environment `prod`, раннер `prod` | ⬜ |
+| PP-03 | Решения D-01…D-07 | ⏳ | 2026-09-18 | D-01…D-04 приняты (см. раздел 1); D-05…D-07 открыты | не нужно: решения общие для обоих серверов | ➖ |
+| PP-04 | Финальный бэкап UAT | ✅ | 2026-09-18 | Ручной прогон 13:46: `pg-2026-09-18-1346.sql.gz` (46170 B), `minio-2026-09-18-1346.tar.gz` (7892868 B), `offsite upload ok` → `gdrive:magguarantee-backups`, `backup complete`. Локально хранится 7 дней, offsite — 30 | не нужно: на prod нет UAT-данных | ➖ |
+| PP-05 | Выписать справочники для ручного переноса | ✅ | 2026-09-18 | «Нет, всё тестовое — выписывать нечего» | не нужно: справочники переедут с дампом | ➖ |
+| PP-06 | `infra/.env.new` из прод-шаблона | ⚠️ | 2026-09-18 | «окей .env.new сделан, консоль ничего не показала» (пре-флайт `config --quiet` пустой). Отклонение по Q-06: общие ключи (S3, `GMAIL_OAUTH_*`, SSO-клиент, webhooks) берутся из prod-`.env`, а не генерируются | иначе: prod-`.env` уже есть на сервере — сверить с docs/23 Фаза 4 и §4 ниже, общие ключи не менять | ⬜ |
 | PP-07 | Секреты в 1Password | ⬜ | | | повторить: свои секреты prod; S3-ключи те же (D-04) | ⬜ |
 | PP-08 | Остановить UAT-стек | ⬜ | | | не нужно: на prod стек поднимается с нуля | ➖ |
 | PP-09 | Отложить каталоги данных | ⬜ | | | не нужно: на prod каталоги новые | ➖ |
 | PP-10 | Подложить новый `.env` | ⬜ | | | иначе: docs/23 Фаза 4 | ⬜ |
 | PP-11 | Сборка → миграции → сид → запуск | ⬜ | | | иначе: docs/23 Фаза 5 (сид можно — C-06 заменит базу) | ⬜ |
-| PP-12 | Caddyfile сервер = репо, `/health` через домен | ⬜ | | | иначе: `Caddyfile.prod` + `UPSTREAM_PROXY_CIDRS` + `DOCKER-USER` (docs/23 §2.2, §3.3) | ⬜ |
+| PP-12 | Caddyfile сервер = репо, `/health` через домен | ⬜ | | План (Q-12, 2026-09-18) ⚠️ иначе, чем в docs/26: критерий — «фрагмент `infra/caddy/sites/magguarantee.caddy` = репо, серверный Caddyfile его импортирует», а не весь файл; включает X-03. Предусловие: репо-правка (фрагмент + volume в `infra/caddy/docker-compose.yml`) в `main` до PP-11 | иначе: `Caddyfile.prod` целиком либо prod-фрагмент + `import` — по Q-13; в обоих случаях `UPSTREAM_PROXY_CIDRS` + `DOCKER-USER` (docs/23 §2.2, §3.3) | ⬜ |
 | PP-13 | Environment `staging`: `COMPOSE_FILE`, `SITE_URL`, reviewers | ⬜ | | | иначе: Environment `prod` (docs/23 §7.2) | ⬜ |
 | PP-14 | Пробный выкат через Actions | ⬜ | | | повторить: Run workflow → `prod` | ⬜ |
 | PP-15 | Почта: код, `From`, ссылка | ⬜ | | | повторить: логин на prod | ⬜ |
@@ -111,21 +111,21 @@
 | `WEB_URL`, `APP_URL`, `NEXT_PUBLIC_API_URL` | `https://<домен-preprod>` | `https://mymag.magtrans.eu` | ≠ | ⬜ | ⬜ |
 | `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` | свежие | свои свежие | ≠ | ⬜ | ⬜ |
 | `JWT_*_TTL`, `BCRYPT_ROUNDS` | дефолт | дефолт | = | ⬜ | ⬜ |
-| `MAIL_PROVIDER`, `GMAIL_OAUTH_*` | по D-03 | те же | = | ⬜ | ⬜ |
+| `MAIL_PROVIDER`, `GMAIL_OAUTH_*` | копия из prod-`.env` (D-03: GCP фирмы) | уже в prod-`.env` | = | ⬜ | ⬜ |
 | `GMAIL_FROM`, `MAIL_FROM`, `MAIL_LOGO_URL` | шаблон | шаблон | = | ⬜ | ⬜ |
 | `MAKSIM_EMAIL` | боевой | боевой | = | ⬜ | ⬜ |
-| `GOOGLE_CHAT_WYJAZD_WEBHOOK_URL` | боевой space | тот же | = | ⬜ | ⬜ |
-| `OPS_ALERT_WEBHOOK_URL` | ops-space | тот же | = | ⬜ | ⬜ |
+| `GOOGLE_CHAT_WYJAZD_WEBHOOK_URL` | боевой space, копия из prod-`.env` | тот же | = | ⬜ | ⬜ |
+| `OPS_ALERT_WEBHOOK_URL` | ops-space, копия из prod-`.env` | тот же | = | ⬜ | ⬜ |
 | `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET` | дефолт | дефолт | = | ⬜ | ⬜ |
-| `S3_ACCESS_KEY`, `S3_SECRET_KEY` | свежие (PP-06) | **те же** (D-04) | = | ⬜ | ⬜ |
+| `S3_ACCESS_KEY`, `S3_SECRET_KEY` | копия из prod-`.env` (D-04, Q-06) | **источник**: prod-`.env`; prod-MinIO должен быть инициализирован именно ими (Q-09) | = | ⬜ | ⬜ |
 | `GPS_*` | mock | mock | = | ⬜ | ⬜ |
 | `ALLOW_PAST_DEPARTURE`, `NEXT_PUBLIC_ALLOW_PAST_DEPARTURE` | `false` | `false` | = | ⬜ | ⬜ |
 | Кроны (`*_ENABLED` и др.) | не заданы (дефолты) | не заданы | = | ⬜ | ⬜ |
-| `GOOGLE_OAUTH_CLIENT_ID`, `NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID` | SSO-клиент | тот же клиент | = | ⬜ | ⬜ |
+| `GOOGLE_OAUTH_CLIENT_ID`, `NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID` | SSO-клиент, копия из prod-`.env` | тот же клиент | = | ⬜ | ⬜ |
 | `SSO_ALLOWED_HD` | `magtrans.eu` | `magtrans.eu` | = | ⬜ | ⬜ |
 | `MAGSPACE_API_URL` | `http://magspace-api:3001` | то же | = | ⬜ | ⬜ |
 | `MAGSPACE_INTERNAL_TOKEN` | токен MAGSpace этого сервера | токен prod-MAGSpace | ≠ | ⬜ | ⬜ |
-| `DIRECTORY_RECONCILE_MODE` | `enforce` | `report` первые дни → `enforce` | ≠ временно | ⬜ | ⬜ |
+| `DIRECTORY_RECONCILE_MODE` | `report` до PP-18 (чьи данные в MAGSpace), затем `enforce` — отличие от docs/26 | `report` первые дни → `enforce` | ≠ временно | ⬜ | ⬜ |
 
 ---
 
@@ -136,16 +136,16 @@
 | Environment + `COMPOSE_FILE` | `staging` → `infra/docker-compose.prod.yml` | `prod` → `infra/docker-compose.prod.yml` | = файл | ⬜ | ⬜ |
 | `SITE_URL` | `https://<домен-preprod>` | `http://mymag.magtrans.eu` | ≠ | ⬜ | ⬜ |
 | Required reviewers | по D-07 | включить | = | ⬜ | ⬜ |
-| Self-hosted runner | метка `staging` | метка `prod` | ≠ | ❓ | ⬜ |
-| Deploy key | свой | свой | ≠ | ❓ | ⬜ |
-| DNS / vhost | A-запись на OVH | vhost на nginx MAGTRANS | ≠ | ❓ | ⬜ |
+| Self-hosted runner | метка `staging` (`magg-staging`) | метка `prod` (`magg-prod`) | ≠ | ✅ PP-02 2026-09-18, скриншот | ✅ PP-02 2026-09-18, скриншот (Idle) |
+| Deploy key | свой | свой | ≠ | ✅ 2026-09-18: `git pull` работает (CI #224); отдельные deploy keys, со слов, не заводились | ⬜ проверить в инвентаризации prod |
+| DNS / vhost | A-запись на OVH | vhost на nginx MAGTRANS | ≠ | ⏳ `mymag.sainet.pl` работает; `mymag.magtrans.com.pl` резолвится в IP пула OVH (вероятно, парковка), домен ещё регистрируется (X-04) | ⬜ |
 | TLS | Let's Encrypt в Caddy | nginx MAGTRANS | ≠ | ❓ | ⬜ |
 | Gmail: GCP-проект, OAuth-клиент, refresh token | по D-03 | тот же | = | ❓ | ⬜ |
 | Google Group `no-reply@` + send-as | по D-03 | та же | = | ❓ | ⬜ |
-| SSO-клиент: JS origins | `https://<домен-preprod>` | `https://mymag.magtrans.eu` | ≠ | ❓ | ⬜ |
+| SSO-клиент: JS origins | `https://mymag.sainet.pl` + `https://mymag.magtrans.com.pl` (X-04); consent screen Internal | `https://mymag.magtrans.eu` | ≠ | ✅ 2026-09-18: «Internal, оба домена уже добавлены» | ⬜ |
 | Chat space «wyjazdy» webhook | боевой | тот же | = | ❓ | ⬜ |
 | Chat ops-space webhook | заведён? | тот же | = | ❓ | ⬜ |
-| rclone remote + папка | `gdrive:magguarantee-backups-preprod` | `gdrive:magguarantee-backups-prod` | ≠ | ❓ | ⬜ |
+| rclone remote + папка | `gdrive:magguarantee-backups-preprod` (remote `gdrive:` есть, текущая папка — ❓) | `gdrive:magguarantee-backups-prod` | ≠ | ❓ | ⬜ |
 | Uptime-монитор | `<домен-preprod>/health` | `mymag.magtrans.eu/health` | ≠ | ⬜ | ⬜ |
 | 1Password: `.env`, S3-ключи, пароль админа, deploy key | pre-prod записи | prod записи | ≠ (S3 =) | ⬜ | ⬜ |
 | Запрос админам MAGTRANS: A-запись, vhost, IP nginx | — | текст для руководителя подготовлен 2026-09-15 | — | — | ❓ отправлен? |
@@ -179,7 +179,12 @@
 
 | ID | Дата | Где | Что сделано | Подтверждение | Как на prod | prod |
 |---|---|---|---|---|---|---|
-| — | | | | | | |
+| X-01 | обнаружено 2026-09-18 (PP-01) | 🖥 `/opt/caddy` | Серверный Caddy правили мимо git: `Caddyfile` — общий для нескольких приложений (сайт `mymag.sainet.pl` + маршрут `/tg/*` → `bilets-tracker:8080` внутри него, сайт `magspace.sainet.pl`), нет health-probe-блока из репо; `docker-compose.yml` без `UPSTREAM_PROXY_CIDRS`. Копировать репо-файл поверх нельзя — снесёт MAGSpace и bilets-tracker. Как привести к репо — Q-12 | ⏳ факт из вывода PP-01; `/tg/*` → решено убрать (X-03); решение Q-12 (2026-09-18): фрагмент в репо + `import` на сервере, приводится к репо в PP-12 (volume `sites` → пересоздание контейнера caddy, секунды простоя и для `magspace.sainet.pl`) | иначе: prod — если Caddy общий с MAGSpace, prod-фрагмент + `import` + volume `sites`; если только наш — `Caddyfile.prod` целиком (docs/23 §2.2). Решение Q-13 ✅, случай — по инвентаризации prod | ⬜ |
+| X-02 | обнаружено 2026-09-18 (PP-01) | 🖥 `/opt/magguarantee/src` | Неотслеживаемый файл `cat` в чекауте (вероятно, ошибочный `>` при выводе). Содержимое неизвестно, может содержать `.env` → если так, считать секреты засвеченными в файле на диске, не в чате. Удаление — после ✅ PP-04 (правило destructive gate) | ⚠️ 2026-09-18: «cat файл удалил это мусор». Удалён до PP-04 (в обход destructive gate), вывод проверки не прислан; секретов в чате не было. `git status` после удаления выводом не подтверждён — проверить первой командой PP-11 | не нужно: артефакт staging-чекаута; на prod `git status` проверяется в инвентаризации (PP-01 на 🏢) | ➖ |
+| X-04 | заявлено 2026-09-18, не выполнено | 🌐 DNS · 🖥 `.env`, Caddy · 🐙 `SITE_URL` · 🌐 SSO | Домен pre-prod меняется с `mymag.sainet.pl` на `mymag.magtrans.com.pl` (домен `magtrans.com.pl` регистрируется, A-записи ещё нет). Затронет: `WEB_URL`/`APP_URL`/`NEXT_PUBLIC_API_URL` (последний — build-time → пересборка web), CORS (= `WEB_URL`), фрагмент `infra/caddy/sites/magguarantee.caddy`, `SITE_URL` Environment `staging`, SSO JS origins, uptime-монитор, D-06, C-10. Если A-запись есть до PP-06 — строить сразу на новом домене. Первые перевозчики (PP-23) — только на финальном домене (Q-14) | ⬜ со слов: «сейчас регестрируется домен magtrans.com.pl, будет a-dns mymag.magtrans.com.pl вместо моего личного mymag.sainet.pl» | не нужно: prod-домен `mymag.magtrans.eu` не меняется; но D-06/C-10 — редирект с обоих pre-prod-доменов | ➖ |
+| X-05 | 2026-09-18 | 🌐 Google Chat · 🖥 `.env` | Pre-prod шлёт уведомления о выездах в **тестовый** Chat-space; пользователь сам переключит на рабочий | ⬜ со слов: «google chat пока юзаю тест чат, потом свичну сам на рабочий» | иначе: на prod сразу рабочий space в prod-`.env`; переключение на pre-prod — строкой в §4 | ⬜ |
+| X-06 | 2026-09-18 | 🐙 Environment `prod` | 2 старых secrets в Environment `prod` (со слов — «старые еще когда не было ранера»); кандидаты на удаление, без решения ничего не делать | ❓ решение не принято | иначе: это и есть prod — решить удалить/оставить на PP-13 для prod | ⬜ |
+| X-03 | решено 2026-09-18, не выполнено | 🖥 `/opt/caddy/Caddyfile` | Убрать маршрут `/tg/*` → `bilets-tracker:8080` из сайта `mymag.sainet.pl`. Реализуется тем, что репо-фрагмент `infra/caddy/sites/magguarantee.caddy` (Q-12) не содержит `/tg/*`; серверный блок заменяется `import` в PP-12 — отдельной правки нет. Процедура — Doc gaps (docs/26 PP-12) | ⬜ решение: «Можно убрать уже сейчас» (2026-09-18) | не нужно: в `Caddyfile.prod` этого маршрута нет и не будет | ➖ |
 
 ---
 
@@ -187,10 +192,20 @@
 
 | ID | Вопрос | Статус |
 |---|---|---|
-| Q-01 | Домен staging: в репо (`Caddyfile`, дефолт `SITE_URL` в `ci.yml`) — `vps-29a0acba.vps.ovh.net`, по логу api — `mymag.sainet.pl`. Какой реальный и что правили на сервере мимо git | ❓ |
+| Q-01 | Домен staging: в репо (`Caddyfile`, дефолт `SITE_URL` в `ci.yml`) — `vps-29a0acba.vps.ovh.net`, по логу api — `mymag.sainet.pl`. Какой реальный и что правили на сервере мимо git | ✅ 2026-09-18 (PP-01): реальный `mymag.sainet.pl` (F-02); правки мимо git — X-01 |
 | Q-02 | Доступны ли Required reviewers на тарифе GitHub для приватного репо | ❓ |
 | Q-03 | Как попасть на prod-сервер по SSH, чтобы положить файлы в C-04 | ❓ |
 | Q-04 | Когда и как переносится MAGSpace (D-05) | ❓ |
+| Q-05 | Откуда «ключи с прода» | ✅ 2026-09-18: prod-`.env` на prod-сервере — «prod сервер есть, там и приложение есть, просто порты не прокинуты на него, он не рабочий, а env там есть» |
+| Q-06 | Какие ключи брать из prod-`.env` | ✅ 2026-09-18, «Только общие по дизайну (рекомендую)»: S3, `GMAIL_OAUTH_*`, SSO-клиент, webhooks — из prod-`.env`; `POSTGRES_PASSWORD`/`DATABASE_URL`, `JWT_*` — новые; `WEB_URL`/`APP_URL`/`NEXT_PUBLIC_API_URL`, `TRUST_PROXY_HOPS=1`, `MAGSPACE_INTERNAL_TOKEN` — свои для pre-prod. Отражено в PP-06 и §4 |
+| Q-07 | «Группа под alias», «токен от шефа» | ✅ 2026-09-18: «Да, всё в GCP-проекте фирмы» → D-03. Что send-as реально работает, покажет только PP-15 |
+| Q-08 | Со слов пользователя (2026-09-18), на prod-сервере уже развёрнуто приложение и есть `.env`, порты не проброшены; «деплой на прод с другими ключами, все что нужно было автогенерить … на проде отличается от staging». Выводом не подтверждено: F-03…F-18 (prod) и prod-колонки §4/§5 остаются ❓/⬜ до инвентаризации prod (PP-01 на 🏢). Кто и по какой процедуре его ставил (docs/23? с какого SHA? есть ли данные/сид?) | ❓ |
+| Q-09 | D-04: запускался ли MinIO на prod с текущими `S3_*` из prod-`.env`, и не менялись ли ключи после первого запуска | ✅ 2026-09-18: «деплой на прод с другими ключами … ключи не менялись ни на staging ни на проде» → prod-MinIO инициализирован текущими prod-`S3_*`; pre-prod берёт их же (D-04). Со слов, выводом не проверено — перепроверить при инвентаризации prod |
+| Q-10 | Почему на staging из стека MAGGuarantee работает только postgres (api/web/redis/minio/mailhog не в `docker ps`), это остановлено намеренно? Для PP-04 не мешает: скрипт бэкапа требует только работающий postgres и каталог MinIO | ✅ 2026-09-18: «Да, останавливал сам». PP-08 всё равно выполняется (`down` уберёт остановленные контейнеры и сеть) |
+| Q-11 | В `deploy-history.log` нет ни одной строки `status=ok` (или файла нет) — выкаты через Actions на staging не проходили? Влияет на PP-14 и F-04 | ✅ 2026-09-18: «Последний cicd падает из за caddy»; CI #224 (f3d982d) deploy ❌ — `https://vps-29a0acba.vps.ovh.net/health` → `000`, TLS alert: `SITE_URL` не задан (дефолт), и в серверном Caddyfile нет health-probe. Чинится PP-12 + PP-13. Побочно: деплой-джоб до проверки поднимает стек staging-компоузом → после ре-рана UAT-стек, вероятно, снова запущен на f3d982d (выводом не подтверждено) |
+| Q-12 | Общий `/opt/caddy/Caddyfile` (X-01): как совместить с правилом «серверный конфиг = репо»? Предложение (для docs/26 PP-12): в репо только блок сайта MAGGuarantee, серверный файл его импортирует; блоки `magspace.sainet.pl` и `/tg/*` живут в своих репо/файлах. Также: `/tg/*` → `bilets-tracker` висит **на домене MAGGuarantee** — что это и нужно ли на prod | ✅ 2026-09-18. `/tg/*`: «Можно убрать уже сейчас» → X-03. Структура: «Фрагмент в репо + import на сервере (рекомендую)» — в репо `infra/caddy/sites/magguarantee.caddy` (сайт `mymag.sainet.pl`, health-probe, без `/tg/*`), в caddy-compose volume каталога `sites` в контейнер, серверный `/opt/caddy/Caddyfile` делает `import` вместо своего блока; MAGSpace — своим фрагментом. Репо-правка должна попасть в `main` **до PP-11**. Как на prod — Q-13 |
+| Q-14 | X-04: пускать первых перевозчиков (PP-23) только на `mymag.magtrans.com.pl`, чтобы ссылки в письмах и адрес для перевозчиков не менялись? D-06 теперь про два старых домена (`mymag.sainet.pl`, `mymag.magtrans.com.pl`) | ✅ 2026-09-18: «Да, только на новом домене» → PP-23 не выдаётся, пока X-04 не выполнен (новый домен в `.env`, Caddy, `SITE_URL`, SSO, `/health` 200); подготовка до PP-14 — на `mymag.sainet.pl`, если A-записи ещё нет. D-06 — открыт |
+| Q-13 | На prod: тот же подход (фрагмент + `import`, если prod-Caddy общий с MAGSpace) или `Caddyfile.prod` целиком, как в docs/23 §2.2? | ✅ 2026-09-18: «Да» — по факту инвентаризации prod: Caddy общий с MAGSpace → prod-фрагмент в репо + `import` + volume `sites`; Caddy только наш → `Caddyfile.prod` целиком (docs/23 §2.2). Какой случай — определит PP-01 на 🏢 |
 
 ---
 
@@ -199,3 +214,17 @@
 | Дата | Что |
 |---|---|
 | 2026-09-15 | Журнал создан, шаги по docs/26 заведены, всё в ⬜ / ❓ |
+| 2026-09-18 | `next`: пользователь предлагает взять секреты «с прода» вместо свежих (отклонение от PP-06) — заведены Q-05…Q-07, решения D-01…D-04 запрошены, статусы шагов не менялись |
+| 2026-09-18 | `record`: D-01…D-04 ✅; Q-05…Q-07 закрыты; PP-03 ⏳; PP-06 и §4 — план ⚠️ (общие ключи из prod-`.env`); заведены Q-08 (prod-сервер с приложением — со слов пользователя), Q-09 (инициализация prod-MinIO) |
+| 2026-09-18 | `record` PP-01: вывод получен → F-01…F-15 (pre-prod); PP-01 ⏳ (X-02); Q-01, Q-09 закрыты; заведены X-01 (общий Caddyfile), X-02 (файл `cat`), Q-10…Q-12 |
+| 2026-09-18 | `record`: Q-10 закрыт (стек остановлен намеренно); X-02 — ждём вывод read-only проверки; `/tg/*` решено убрать → X-03 (вместе с правкой Caddy в PP-12); Q-12 частично |
+| 2026-09-18 | `record`: Q-12 ✅ (фрагмент в репо + `import`); PP-12, X-01, X-03 — план обновлён; заведён Q-13 (схема Caddy на prod); предусловие «репо-правка Caddy в `main` до PP-11» |
+| 2026-09-18 | `record`: Q-13 ✅ («Да»: схема Caddy на prod — по инвентаризации prod); X-01 «Как на prod» уточнён |
+| 2026-09-18 | `record`: X-02 ⚠️ (файл `cat` удалён пользователем до PP-04, «мусор»); PP-01 ✅ |
+| 2026-09-18 | `adhoc`: X-04 (смена домена pre-prod на `mymag.magtrans.com.pl`, не выполнено), Q-14 |
+| 2026-09-18 | `record`: Q-14 ✅ — PP-23 только после X-04 |
+| 2026-09-18 | `record` PP-02: ⏳ (нет deploy keys, GCP-деталей, DNS); F-13, F-18 из скриншотов; раздел 5 runner ✅/✅; Q-11 ✅ (CI падает на `/health`); X-05 (тестовый Chat), X-06 (старые secrets `prod`) |
+| 2026-09-18 | `record`: SSO origins pre-prod ✅ (оба домена, consent Internal); PP-02 ⏳ — остались deploy keys, DNS |
+| 2026-09-18 | `record`: PP-04 ✅ (pg/minio-2026-09-18-1346); PP-02 ✅; F-14, раздел 5 (deploy key, DNS) обновлены |
+| 2026-09-18 | `record`: PP-05 ✅ (выписывать нечего); выдан PP-06; §4 `DIRECTORY_RECONCILE_MODE` — `report` до PP-18 |
+| 2026-09-18 | `record`: PP-06 ⚠️ (сделан, пре-флайт пустой; общие ключи из prod-`.env` по Q-06); выдан PP-07 |

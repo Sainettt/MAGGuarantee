@@ -1,0 +1,73 @@
+# MAGGuarantee site block for the shared STAGING / pre-prod Caddy.
+#
+# Not a full Caddyfile: the server's /opt/caddy/Caddyfile (global options +
+# other projects' sites, e.g. magspace.sainet.pl) pulls it in with
+#
+#   import /etc/caddy/sites/magguarantee.caddy
+#
+# infra/caddy/docker-compose.yml mounts this directory from the app checkout
+# (/opt/magguarantee/src/infra/caddy/sites → /etc/caddy/sites), so the server
+# always runs the repo version of this block. After a `git pull` that changes
+# it: `docker exec caddy caddy reload --config /etc/caddy/Caddyfile`.
+#
+# web AND api share one origin via path-based routing — the api's cookies are
+# same-origin, so SameSite=Strict + Secure stay on.
+#
+# Client IP: Caddy IS the edge here — browsers connect to it directly — so
+# there is deliberately NO `trusted_proxies`. Caddy discards any
+# X-Forwarded-For a client sends and sets it to the real peer address, and the
+# api resolves it with TRUST_PROXY_HOPS=1. Adding `trusted_proxies` on this box
+# would let anyone on the internet forge their audit-log IP.
+
+mymag.sainet.pl {
+    # ── Access log ──────────────────────────────────────────────────────────
+    # JSON to stdout → `docker logs caddy` (json-file driver, rotated and
+    # compressed in docker-compose.yml). No request bodies; Cookie /
+    # Authorization headers are redacted by Caddy by default. The query string
+    # and Referer are dropped because some GETs carry NIP / bank account
+    # numbers in the query — same filter as Caddyfile.prod.
+    log {
+        output stdout
+        format filter {
+            wrap json
+            fields {
+                request>uri regexp [?].* ?REDACTED
+                request>headers>Referer delete
+            }
+        }
+    }
+
+    # ── Health probes → API ─────────────────────────────────────────────────
+    # /health and /ready are un-prefixed api routes (main.ts). Without this
+    # block they fall through to web, whose middleware answers 307 → /login:
+    # a false-green check. Must stay BEFORE the web catch-all. Not logged —
+    # monitor noise.
+    @api_health path /health /ready
+    handle @api_health {
+        log_skip
+        reverse_proxy magguarantee-api:3001
+    }
+
+    # /api/* → API container. The full path (including /api/v1/...) is
+    # preserved — Nest already mounts its routes under /api/v1, so Caddy
+    # doesn't need to rewrite anything.
+    @api path /api/*
+    handle @api {
+        reverse_proxy magguarantee-api:3001
+    }
+
+    # Everything else → web container.
+    handle {
+        reverse_proxy magguarantee-web:3000
+    }
+
+    encode gzip zstd
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+}

@@ -51,6 +51,11 @@ services:
       - '443:443/udp' # HTTP/3 (QUIC) — staging only
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # MAGGuarantee site block(s), read straight from the app checkout so the
+      # server runs the repo version (Caddyfile → `import`). A directory, not a
+      # file: `git pull` replaces files with new inodes, which a single-file
+      # bind mount would not see. Reload Caddy after a pull that changes them.
+      - /opt/magguarantee/src/infra/caddy/sites:/etc/caddy/sites:ro
       - ./data:/data        # TLS certificates from Let's Encrypt
       - ./config:/config
     networks:

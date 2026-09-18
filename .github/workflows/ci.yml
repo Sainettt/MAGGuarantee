@@ -87,11 +87,11 @@ jobs:
       DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/magguarantee/src' }}
       # Адрес сайта РОВНО как метка сайта в Caddyfile этого окружения (схема +
       # хост): prod — `http://mymag.magtrans.eu` (Caddyfile.prod, TLS держит
-      # nginx), staging — `https://vps-29a0acba.vps.ovh.net` (Caddyfile). Внешняя
+      # nginx), staging — `https://mymag.sainet.pl` (caddy/sites/magguarantee.caddy). Внешняя
       # проверка ниже шлёт запрос на 127.0.0.1 этого же сервера с этим Host/SNI,
       # т.е. через настоящий Caddy, мимо DNS и корпоративного nginx.
       # Переопределяется variable SITE_URL в environment.
-      SITE_URL: ${{ vars.SITE_URL || (inputs.target == 'prod' && 'http://mymag.magtrans.eu' || 'https://vps-29a0acba.vps.ovh.net') }}
+      SITE_URL: ${{ vars.SITE_URL || (inputs.target == 'prod' && 'http://mymag.magtrans.eu' || 'https://mymag.sainet.pl') }}
       # Журнал выкатов на хосте; пусто → <родитель DEPLOY_PATH>/deploy-history.log
       # (= /opt/magguarantee/deploy-history.log). Тот же файл пишет
       # infra/scripts/magguarantee-rollback.

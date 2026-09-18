@@ -317,21 +317,63 @@ mailhog, у api и web нет портов. Пароль админа — в 1Pa
 
 ## Фаза 5. Caddy
 
-### PP-12 🖥 Серверный Caddyfile = репозиторий
+### PP-12 🖥 Caddy: сайт MAGGuarantee из репозитория
 
-Если PP-01 показал разницу (в репо метка сайта `vps-29a0acba.vps.ovh.net`, на
-сервере — реальный домен), правильный путь — **поправить репозиторий**
-(`infra/caddy/Caddyfile`, коммит), а не держать серверную правку. После
-коммита `diff` из PP-01 должен быть пустым.
+Caddy на staging **общий** (ещё `magspace.sainet.pl`), поэтому серверный
+`/opt/caddy/Caddyfile` целиком из репо не копируется (Q-12). Сайт MAGGuarantee
+живёт в `infra/caddy/sites/magguarantee.caddy` и читается прямо из чекаута
+через volume `sites`; серверный файл его только импортирует. Нужен чекаут
+после PP-11 (там `git pull` приносит фрагмент).
 
-Проверить, что Caddy видит новые контейнеры и отдаёт api:
+Страховочная копия серверного файла:
 
 ```bash
-curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' --max-redirs 0 https://<домен-preprod>/health
+cp /opt/caddy/Caddyfile /opt/caddy/Caddyfile.bak-$(date +%F)
 ```
 
-Ожидаемо `200 application/json…`. На prod этот шаг — другой: `Caddyfile.prod`,
-`UPSTREAM_PROXY_CIDRS`, `DOCKER-USER` (docs/23 §2.2, §3.3).
+В `/opt/caddy/Caddyfile` блок `mymag.sainet.pl { … }` **целиком** заменить
+одной строкой (блок `magspace.sainet.pl` и глобальные опции не трогать).
+Править `nano` — он пишет в тот же inode; `sed -i` не годится: файл смонтирован
+в контейнер одиночным файлом, и контейнер продолжит видеть старую версию.
+
+```
+import /etc/caddy/sites/magguarantee.caddy
+```
+
+Проверить конфиг **до** пересоздания — одноразовым контейнером, чтобы ошибка
+не уронила MAGSpace:
+
+```bash
+docker run --rm -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile:ro -v /opt/magguarantee/src/infra/caddy/sites:/etc/caddy/sites:ro caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+```
+
+Ожидаемо `Valid configuration`. Затем compose из репо (новый volume) и
+пересоздание — секунды простоя, в том числе `magspace.sainet.pl`:
+
+```bash
+cp /opt/magguarantee/src/infra/caddy/docker-compose.yml /opt/caddy/docker-compose.yml && cd /opt/caddy && docker compose up -d
+```
+
+Проверка:
+
+```bash
+curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' --max-redirs 0 https://mymag.sainet.pl/health
+```
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' https://magspace.sainet.pl
+```
+
+Ожидаемо `200 application/json…` и MAGSpace отвечает как раньше. Откат:
+`cp /opt/caddy/Caddyfile.bak-<дата> /opt/caddy/Caddyfile && docker restart caddy`.
+
+Дальше: правка сайта — только в репо; после `git pull`, который меняет
+фрагмент, — `docker exec caddy caddy reload --config /etc/caddy/Caddyfile`
+(CI этого не делает).
+
+На prod этот шаг — другой: `Caddyfile.prod` целиком либо prod-фрагмент +
+`import`, если Caddy там тоже общий (Q-13); плюс `UPSTREAM_PROXY_CIDRS`,
+`DOCKER-USER` (docs/23 §2.2, §3.3).
 
 ---
 
@@ -344,7 +386,7 @@ Settings → Environments → `staging` → Variables:
 | Variable | Значение |
 |---|---|
 | `COMPOSE_FILE` | `infra/docker-compose.prod.yml` |
-| `SITE_URL` | `https://<домен-preprod>` — **обязательно**: дефолт в `ci.yml` для staging — старый `vps-29a0acba.vps.ovh.net`, и внешняя проверка `/health` упадёт |
+| `SITE_URL` | `https://<домен-preprod>` — задать явно (дефолт в `ci.yml` — `https://mymag.sainet.pl`; после переезда на `mymag.magtrans.com.pl` без переменной внешняя проверка `/health` упадёт) |
 | `DEPLOY_PATH`, `DEPLOY_HISTORY` | дефолты, если PP-02 не показал иное |
 
 Required reviewers — по D-07.
