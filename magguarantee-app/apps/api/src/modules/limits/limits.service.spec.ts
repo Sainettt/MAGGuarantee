@@ -44,6 +44,12 @@ function makeRepo(opts: {
     upsert?: UpsertMonthlyLimitData;
     list?: { year: number };
     find?: { year: number; month: number };
+    listMonths?: { year: number; months: number[] };
+    upsertMany?: {
+      year: number;
+      months: number[];
+      data: Omit<UpsertMonthlyLimitData, 'year' | 'month'>;
+    };
   };
 }): LimitsRepository {
   return {
@@ -64,6 +70,34 @@ function makeRepo(opts: {
         ratePerKm: data.ratePerKm ?? null,
       });
     }),
+    // ── bulk surface (feature «wyłączane limity», 2026-09-20) ──
+    listForYearMonths: jest.fn(async (year: number, months: readonly number[]) => {
+      if (opts.captured) opts.captured.listMonths = { year, months: [...months] };
+      return (opts.listRows ?? []).filter((r) => months.includes(r.month));
+    }),
+    upsertMany: jest.fn(
+      async (
+        year: number,
+        months: readonly number[],
+        data: Omit<UpsertMonthlyLimitData, 'year' | 'month'>,
+      ) => {
+        if (opts.captured) {
+          opts.captured.upsertMany = { year, months: [...months], data };
+        }
+        return [...months]
+          .sort((a, b) => a - b)
+          .map((month) =>
+            makeRow({
+              id: `row-${year}-${month}`,
+              year,
+              month,
+              kmPerDay: data.kmPerDay ?? null,
+              ratePerKm: data.ratePerKm ?? null,
+              kmPerSaturday: data.kmPerSaturday ?? null,
+            }),
+          );
+      },
+    ),
   } as unknown as LimitsRepository;
 }
 
@@ -251,5 +285,114 @@ describe('LimitsService.upsert', () => {
     await expect(svc.upsert('2026-00', { kmPerDay: 1 })).rejects.toBeInstanceOf(
       UnprocessableEntityException,
     );
+  });
+});
+
+// ── Bulk upsert (feature «wyłączane limity gwarancji», 2026-09-20) ──
+
+describe('LimitsService.bulkUpsert', () => {
+  it('writes every selected month with the same partial payload, sorted', async () => {
+    const captured: {
+      listMonths?: { year: number; months: number[] };
+      upsertMany?: {
+        year: number;
+        months: number[];
+        data: Omit<UpsertMonthlyLimitData, 'year' | 'month'>;
+      };
+    } = {};
+    const repo = makeRepo({ listRows: [], captured });
+    const svc = new LimitsService(repo);
+
+    const { result } = await withAuditContext(() =>
+      svc.bulkUpsert({
+        year: 2026,
+        months: [3, 1, 2],
+        kmPerDay: 0,
+        kmPerSaturday: 0,
+      }),
+    );
+
+    // Months are normalised (sorted) before they reach the repository.
+    expect(captured.upsertMany).toEqual({
+      year: 2026,
+      months: [1, 2, 3],
+      // `ratePerKm` was NOT supplied ⇒ absent ⇒ column left untouched.
+      data: { kmPerDay: 0, kmPerSaturday: 0 },
+    });
+    expect(result).toHaveLength(3);
+    expect(result.map((r) => r.month)).toEqual([1, 2, 3]);
+    expect(result.every((r) => r.kmPerDay === 0)).toBe(true);
+  });
+
+  it('omits unspecified fields entirely (no accidental NULL/0 write)', async () => {
+    const captured: {
+      upsertMany?: {
+        year: number;
+        months: number[];
+        data: Omit<UpsertMonthlyLimitData, 'year' | 'month'>;
+      };
+    } = {};
+    const repo = makeRepo({ listRows: [], captured });
+    const svc = new LimitsService(repo);
+
+    await withAuditContext(() =>
+      svc.bulkUpsert({ year: 2026, months: [6], ratePerKm: 0.52 }),
+    );
+
+    expect(captured.upsertMany!.data).toEqual({ ratePerKm: 0.52 });
+    expect('kmPerDay' in captured.upsertMany!.data).toBe(false);
+    expect('kmPerSaturday' in captured.upsertMany!.data).toBe(false);
+  });
+
+  it('snapshots ONLY the affected rows into the audit `before`', async () => {
+    const rows = [
+      makeRow({ id: 'r1', year: 2026, month: 1, kmPerDay: 540, ratePerKm: 0.5 }),
+      makeRow({ id: 'r2', year: 2026, month: 2, kmPerDay: 500, ratePerKm: 0.5 }),
+      // Month 9 is NOT in the payload — must not appear in `before`.
+      makeRow({ id: 'r9', year: 2026, month: 9, kmPerDay: 400, ratePerKm: 0.5 }),
+    ];
+    const captured: { listMonths?: { year: number; months: number[] } } = {};
+    const repo = makeRepo({ listRows: rows, captured });
+    const svc = new LimitsService(repo);
+
+    const { store } = await withAuditContext(() =>
+      svc.bulkUpsert({ year: 2026, months: [1, 2], kmPerDay: 0 }),
+    );
+
+    expect(captured.listMonths).toEqual({ year: 2026, months: [1, 2] });
+    const before = store.before as {
+      year: number;
+      months: number[];
+      rows: Array<{ id: string; month: number; kmPerDay: number | null }>;
+    };
+    expect(before.year).toBe(2026);
+    expect(before.months).toEqual([1, 2]);
+    expect(before.rows.map((r) => r.id)).toEqual(['r1', 'r2']);
+    expect(before.rows[0]!.kmPerDay).toBe(540);
+  });
+
+  it('records the request payload in the audit metadata (intent, not just diff)', async () => {
+    const repo = makeRepo({ listRows: [] });
+    const svc = new LimitsService(repo);
+
+    const { store } = await withAuditContext(() =>
+      svc.bulkUpsert({ year: 2027, months: [11, 12], kmPerDay: 0 }),
+    );
+
+    expect(store.metadata).toEqual({
+      payload: { year: 2027, months: [11, 12], kmPerDay: 0 },
+    });
+  });
+
+  it('a month with no existing row simply has no `before` entry (INSERT path)', async () => {
+    const repo = makeRepo({ listRows: [] });
+    const svc = new LimitsService(repo);
+
+    const { result, store } = await withAuditContext(() =>
+      svc.bulkUpsert({ year: 2026, months: [4, 5], kmPerSaturday: 270 }),
+    );
+
+    expect((store.before as { rows: unknown[] }).rows).toEqual([]);
+    expect(result.map((r) => r.kmPerSaturday)).toEqual([270, 270]);
   });
 });

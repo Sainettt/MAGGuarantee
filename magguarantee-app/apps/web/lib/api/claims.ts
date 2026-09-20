@@ -11,6 +11,7 @@ import type {
   ClaimListItem,
   PreviewClaimDto,
   PreviewClaimResponse,
+  RecalcLimitsPreviewDto,
   SubmitClaimDto,
   SubmitReklamacjaDto,
   UpdateClaimDto,
@@ -156,6 +157,49 @@ export function uploadAuthorizationConfirmation(
   return apiForm<ClaimDto>(
     `/claims/${encodeURIComponent(nrZgl)}/authorization-confirmation`,
     fd,
+    { method: 'POST' },
+  );
+}
+
+/**
+ * `GET /claims/:nrZgl/recalc-limits/preview` — DRY RUN of the limits refresh.
+ *
+ * Computes the five figures a refresh would move with the same code path as
+ * the write, persists nothing and writes no audit row. Same roles
+ * (`admin` / `pracownik`) and the SAME status gate as the write, so a 422
+ * `CLAIM_LIMITS_REFRESH_BLOCKED` (with the server's Polish explanation)
+ * arrives BEFORE anything is committed. This is what lets the confirmation
+ * dialog show «było → станет» ahead of the POST — `POST /claims/:nrZgl/preview`
+ * cannot: it is pinned to the wniosek's own frozen limits snapshot.
+ */
+export function previewRecalcClaimLimits(
+  nrZgl: string,
+): Promise<RecalcLimitsPreviewDto> {
+  return apiJson<RecalcLimitsPreviewDto>(
+    `/claims/${encodeURIComponent(nrZgl)}/recalc-limits/preview`,
+    { method: 'GET' },
+  );
+}
+
+/**
+ * `POST /claims/:nrZgl/recalc-limits` — re-price a wniosek with the CURRENT
+ * `monthly_limits` instead of the snapshot frozen into it at submission
+ * (docs/14 §16.6). No body. Roles `admin` / `pracownik`.
+ *
+ * Rewrites kmGuaranteed / kmDifference / paymentEur / ratePerKmEffective /
+ * breakdown and resets the verification checkpoint when the money moved;
+ * touches neither the period, the mileage, nor the status, and sends no
+ * email. 422 `CLAIM_LIMITS_REFRESH_BLOCKED` (with a ready Polish message that
+ * differs for `OCZEKUJE_NA_AUTORYZACJE` vs a decided wniosek) unless the
+ * wniosek sits in `NA_WERYFIKACJI` — render the server's message, never a
+ * locally invented one.
+ *
+ * Returns the updated `ClaimDto`, which is what lets the dialog show
+ * «było → jest» against the row it had open.
+ */
+export function recalcClaimLimits(nrZgl: string): Promise<ClaimDto> {
+  return apiJson<ClaimDto>(
+    `/claims/${encodeURIComponent(nrZgl)}/recalc-limits`,
     { method: 'POST' },
   );
 }

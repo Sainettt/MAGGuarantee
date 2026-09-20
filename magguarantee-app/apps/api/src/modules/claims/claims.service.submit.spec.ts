@@ -302,8 +302,17 @@ function makeVehiclesRepo(): VehiclesRepository {
   } as unknown as VehiclesRepository;
 }
 
-function makeKmCalc(result?: Partial<KmCalcResult>): KmCalcService {
+function makeKmCalc(
+  result?: Partial<KmCalcResult>,
+  /**
+   * Whether every month of the period has a `MonthlyLimit` row. Consulted by
+   * `_noGuaranteeViolation` to tell "nothing configured" from "deliberately
+   * switched off" (feature «wyłączane limity gwarancji», 2026-09-20).
+   */
+  configured = true,
+): KmCalcService {
   return {
+    hasConfiguredLimits: jest.fn(async () => configured),
     // Default produces a non-trivial underrun (10_800 km guaranteed vs 8_000
     // supplied) so the tier-2 `paymentEur === 0` violation doesn't fire and
     // the success-path tests actually reach createWithin().
@@ -1100,5 +1109,156 @@ describe('ClaimsService.submit — delegation link', () => {
     await svc.submit(makeAuth('przewoznik'), dto);
     // The default fixture is guaranteed (agreement=true) — the claim persists.
     expect(repoFake.creates).toHaveLength(1);
+  });
+});
+
+// ── Zero-guarantee violation texts (feature «wyłączane limity», 2026-09-20) ──
+
+describe('ClaimsService.submit — why is the guarantee zero?', () => {
+  beforeAll(() => {
+    jest.useFakeTimers().setSystemTime(NOW);
+  });
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
+  /** One breakdown month, guarantee explicitly switched off (0 / 0). */
+  function disabledMonth(yearMonth = '2026-05') {
+    return {
+      yearMonth,
+      workingDays: 12,
+      kmPerDay: 0,
+      ratePerKm: 0.5,
+      saturdaysCounted: 0,
+      kmPerSaturday: 0,
+      kmFromSaturdays: 0,
+      kmInMonth: 0,
+      saturdayDays: [],
+      excludedDays: [],
+    };
+  }
+
+  it('every month switched off → «Gwarancja km jest wyłączona dla tego okresu.»', async () => {
+    const repoFake = makeRepo(null);
+    const svc = makeService(
+      repoFake,
+      undefined,
+      undefined,
+      makeKmCalc({
+        totalDays: 12,
+        rawTotalDays: 12,
+        kmGuaranteed: 0,
+        breakdown: [disabledMonth()],
+      }),
+    );
+
+    let caught: unknown;
+    try {
+      await svc.submit(makeAuth('przewoznik'), submitDto());
+    } catch (e) {
+      caught = e;
+    }
+    const v = readViolation(caught);
+    expect(v!.violations).toContain(
+      'Gwarancja km jest wyłączona dla tego okresu.',
+    );
+    expect(repoFake.creates).toHaveLength(0);
+  });
+
+  it('a month of the period has NO MonthlyLimit row → «Brak skonfigurowanych limitów…»', async () => {
+    const repoFake = makeRepo(null);
+    const svc = makeService(
+      repoFake,
+      undefined,
+      undefined,
+      makeKmCalc(
+        {
+          totalDays: 12,
+          rawTotalDays: 12,
+          // Zero guarantee even though the month is "active" — e.g. an active
+          // month whose credited days all fell away.
+          kmGuaranteed: 0,
+          breakdown: [
+            { ...disabledMonth(), kmPerDay: 540, kmInMonth: 0 },
+          ],
+        },
+        /* configured */ false,
+      ),
+    );
+
+    let caught: unknown;
+    try {
+      await svc.submit(makeAuth('przewoznik'), submitDto());
+    } catch (e) {
+      caught = e;
+    }
+    const v = readViolation(caught);
+    expect(
+      v!.violations.some((x) => x.startsWith('Brak skonfigurowanych limitów km')),
+    ).toBe(true);
+  });
+
+  it('no counted days at all → the legacy generic wording (duration gate explains it)', async () => {
+    const repoFake = makeRepo(null);
+    const svc = makeService(
+      repoFake,
+      undefined,
+      undefined,
+      makeKmCalc({ totalDays: 0, rawTotalDays: 0, kmGuaranteed: 0, breakdown: [] }),
+    );
+
+    let caught: unknown;
+    try {
+      await svc.submit(makeAuth('przewoznik'), submitDto());
+    } catch (e) {
+      caught = e;
+    }
+    const v = readViolation(caught);
+    expect(v!.violations).toContain('Brak limitu km gwarantowanych w tym okresie.');
+  });
+
+  it('a mixed period persists the settlement fields and pays the active month', async () => {
+    const repoFake = makeRepo(null);
+    const svc = makeService(
+      repoFake,
+      undefined,
+      undefined,
+      makeKmCalc({
+        totalDays: 20,
+        rawTotalDays: 20,
+        kmGuaranteed: 5_400,
+        ratePerKmEffective: 0.5,
+        breakdown: [
+          {
+            yearMonth: '2026-04',
+            workingDays: 10,
+            kmPerDay: 540,
+            ratePerKm: 0.5,
+            saturdaysCounted: 0,
+            kmPerSaturday: 0,
+            kmFromSaturdays: 0,
+            kmInMonth: 5_400,
+            saturdayDays: [],
+            excludedDays: [],
+          },
+          { ...disabledMonth('2026-05'), workingDays: 10 },
+        ],
+      }),
+      // Board sum = the carrier's declared mileage for this fixture.
+      makeDailyKmRepo(8_000).repo,
+    );
+
+    const out = await svc.submit(makeAuth('przewoznik'), submitDto());
+
+    // Only half the mileage is charged: 8_000 × 10/20 = 4_000.
+    expect(out.kmDifference).toBe(1_400);
+    expect(out.paymentEur).toBe(700);
+    const persisted = repoFake.creates[0]!.data;
+    expect(persisted.breakdown.daysActive).toBe(10);
+    expect(persisted.breakdown.daysTotal).toBe(20);
+    expect(persisted.breakdown.mileageEffective).toBe(4_000);
+    // `drivenDays` / `kmPerDay` stay over the FULL period (business decision).
+    expect(persisted.drivenDays).toBe(20);
+    expect(persisted.kmPerDay).toBe(400);
   });
 });

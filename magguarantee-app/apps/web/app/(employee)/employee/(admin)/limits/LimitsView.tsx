@@ -9,19 +9,40 @@
 //
 // Missing months: render an empty `<LimitsRow row={null}>`; on first save the
 // backend upserts so the row appears in the next refetch with a real id.
+//
+// §16 (wyłączane limity) adds three things here: the ONE page-level note that
+// explains the 540 km/day fallback for months nobody configured, the
+// «Zastosuj do wielu miesięcy» dialog trigger, and the sentence stating that
+// the daily and Saturday guarantees are independent. Writes go through
+// `useSerializedUpdateLimit` so a checkbox click and the blur it causes can
+// never race each other on the same month.
 
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { CalendarRange, ChevronLeft, ChevronRight, Info } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import type { UpdateMonthlyLimitDto } from '@magguarantee/shared';
 
+import BulkLimitsDialog from '@/components/limits/BulkLimitsDialog';
 import { LimitsRow } from '@/components/limits/LimitsRow';
 import { Button } from '@/components/ui/Button';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { LockNotice } from '@/components/ui/LockNotice';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { useLimits, useUpdateLimit } from '@/lib/hooks/useLimits';
+import { useLimits, useSerializedUpdateLimit } from '@/lib/hooks/useLimits';
+import {
+  FALLBACK_KM_PER_DAY,
+  FALLBACK_RATE_PER_KM,
+  countUnconfiguredMonths,
+} from '@/lib/limits/limitState';
 import { queryErrorProps } from '@/lib/query/queryErrorProps';
+
+function formatRate(value: number): string {
+  return new Intl.NumberFormat('pl-PL', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
 
 const CURRENT_YEAR = new Date().getFullYear();
 const MIN_YEAR = 2020;
@@ -36,7 +57,12 @@ export function LimitsView() {
   const limitsQ = useLimits(year);
   const { data, isLoading } = limitsQ;
 
-  const updateM = useUpdateLimit();
+  const [bulkOpen, setBulkOpen] = useState(false);
+  // Writes are serialized per `yearMonth` inside the hook: clicking a
+  // checkbox blurs the input next to it, so ONE gesture can fire two writes
+  // to the same month and an unordered pair would randomly overwrite the
+  // value the admin actually meant (§16.3).
+  const { save } = useSerializedUpdateLimit();
 
   const handleSave = async (
     saveYear: number,
@@ -44,7 +70,7 @@ export function LimitsView() {
     body: UpdateMonthlyLimitDto,
   ): Promise<void> => {
     try {
-      await updateM.mutateAsync({ year: saveYear, month, body });
+      await save(saveYear, month, body);
       toast.success(tCommon('saved'));
     } catch {
       toast.error(t('saveError'));
@@ -69,6 +95,10 @@ export function LimitsView() {
       label: tMonths(String(i + 1)),
     }),
   );
+
+  // Only once the year has actually loaded — an undefined cache would read as
+  // "12 months unconfigured" and flash a scary note during every year switch.
+  const unconfiguredCount = data ? countUnconfiguredMonths(data) : 0;
 
   const canPrev = year > MIN_YEAR;
   const canNext = year < MAX_YEAR;
@@ -106,8 +136,36 @@ export function LimitsView() {
           >
             <ChevronRight size={14} aria-hidden />
           </Button>
+          {/* Secondary on purpose: the page's primary scenario is editing one
+              cell; bulk application is the exception (§16.4). */}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="ml-1"
+            // The dialog plans against the loaded year: opening it before the
+            // rows arrive would show "brak (domyślne)" for all 12 months.
+            disabled={isLoading || !data}
+            onClick={() => setBulkOpen(true)}
+          >
+            <CalendarRange size={14} aria-hidden />
+            {t('bulk.trigger')}
+          </Button>
         </div>
       </header>
+
+      {/* ONE page-level note (never twelve row-level ones): state A is the
+          dangerous one — nobody configured the month and it silently pays the
+          maximum. The row sub-lines only mark it; the explanation lives here. */}
+      {unconfiguredCount > 0 && (
+        <LockNotice icon={Info} className="mb-3">
+          {t('defaultsNotice', {
+            count: unconfiguredCount,
+            kmPerDay: FALLBACK_KM_PER_DAY,
+            rate: formatRate(FALLBACK_RATE_PER_KM),
+          })}
+        </LockNotice>
+      )}
 
       <div className="rounded-xl border border-border bg-card shadow-card overflow-hidden">
         <div className="overflow-x-auto">
@@ -192,6 +250,18 @@ export function LimitsView() {
           </table>
         </div>
       </div>
+
+      {/* Spelled out, not merely implied by the layout: un-ticking the month
+          never touches the Saturday guarantee and vice versa (§16.2). */}
+      <p className="mt-2 text-xs text-text-sub">{t('independenceHint')}</p>
+
+      <BulkLimitsDialog
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        year={year}
+        rows={data}
+        monthLabels={months.map((m) => m.label)}
+      />
     </section>
   );
 }

@@ -117,6 +117,10 @@ function makeBreakdown(): KmCalcBreakdown {
     ],
     firstDay: null,
     lastDay: null,
+    // Settlement fields (2026-09-20): every month of this fixture has its
+    // guarantee ON, so the active day count equals the total.
+    daysActive: 20,
+    daysTotal: 20,
   };
 }
 

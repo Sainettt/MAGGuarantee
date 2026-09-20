@@ -423,6 +423,20 @@ export const REKLAMACJA_AMOUNT_EXCEEDS_CAP =
  */
 export const REKLAMACJA_NOT_PENDING = 'REKLAMACJA_NOT_PENDING' as const;
 
+/**
+ * 422 — `POST /claims/:nrZgl/recalc-limits` was called on a wniosek whose
+ * amount is frozen. The refresh re-prices a wniosek with the CURRENT
+ * `monthly_limits` (the escape hatch from the limits-snapshot freeze), so it
+ * is allowed ONLY in `NA_WERYFIKACJI`:
+ *  - `OCZEKUJE_NA_AUTORYZACJE` — Maksim was already emailed a concrete
+ *    dopłata; the number must not move underneath the authorization;
+ *  - any decided status (`ZAAKCEPTOWANO` / `ODRZUCONO` / `REKLAMACJA`) — the
+ *    money is settled; re-pricing it silently would rewrite history.
+ * Same single-code `extensions` envelope as `CLAIM_AUTHORIZATION_REQUIRED`.
+ */
+export const CLAIM_LIMITS_REFRESH_BLOCKED =
+  'CLAIM_LIMITS_REFRESH_BLOCKED' as const;
+
 // ─── km-calc breakdown row (mirror of MonthBreakdown in domain/km-calc) ──
 
 /**
@@ -516,6 +530,14 @@ export type BoundaryDayDto = z.infer<typeof BoundaryDaySchema>;
  * (an excluded boundary day reports `fraction: 0`, not `null`; `null` is
  * reserved for the invalid/empty-range engine path).
  *
+ * `daysActive` / `daysTotal` / `mileageEffective` come from the settlement
+ * pass (`domain/claim-settlement.ts`) and describe the proportional mileage
+ * split introduced with the «wyłączane limity gwarancji» feature: when some
+ * month of the period has its guarantee switched off (`kmPerDay = 0` and
+ * `kmPerSaturday = 0`), only `daysActive / daysTotal` of the mileage is
+ * charged against the guarantee. `daysActive === daysTotal` ⇒ nothing was
+ * disabled and `mileageEffective === claim.mileage`.
+ *
  * Zod 3 cannot reference sibling fields from inside `.default(...)` (the
  * default callback receives no args), so the missing-field fallback has to
  * live in a post-parse transform rather than the field schema itself.
@@ -529,10 +551,34 @@ export const KmCalcBreakdownSchema = z
     breakdown: z.array(MonthBreakdownSchema),
     firstDay: BoundaryDaySchema.nullable().optional().default(null),
     lastDay: BoundaryDaySchema.nullable().optional().default(null),
+    /**
+     * Counted days that fall on months whose guarantee is switched ON
+     * (`kmPerDay > 0 || kmPerSaturday > 0`). `.optional()` + backfilled to
+     * `totalDays`: every wniosek written before the «wyłączane limity»
+     * feature had all of its months active by construction.
+     */
+    daysActive: z.number().nonnegative().optional(),
+    /**
+     * Counted days over the whole period (weekday days + qualifying
+     * Saturdays) — equal to `totalDays` up to 2-dp rounding. Backfilled to
+     * `totalDays` on legacy rows for the same reason as `daysActive`.
+     */
+    daysTotal: z.number().nonnegative().optional(),
+    /**
+     * The share of the declared mileage actually charged against the
+     * guarantee: `round2(mileage × daysActive / daysTotal)`, or the raw
+     * mileage when every month is active. Deliberately NOT backfilled —
+     * `undefined` on a legacy row means "no proportional split was applied",
+     * and the UI renders `claim.mileage` instead. See
+     * `packages/shared/src/domain/claim-settlement.ts`.
+     */
+    mileageEffective: z.number().nonnegative().optional(),
   })
   .transform((v) => ({
     ...v,
     rawTotalDays: v.rawTotalDays ?? v.totalDays,
+    daysActive: v.daysActive ?? v.totalDays,
+    daysTotal: v.daysTotal ?? v.totalDays,
   }));
 export type KmCalcBreakdown = z.infer<typeof KmCalcBreakdownSchema>;
 
@@ -600,6 +646,54 @@ export const PreviewClaimResponseSchema = z.object({
   delegationContext: PreviewDelegationContextSchema.optional(),
 });
 export type PreviewClaimResponse = z.infer<typeof PreviewClaimResponseSchema>;
+
+// ─── Limits-refresh dry run ──────────────────────────────
+
+/**
+ * The five money/day figures a limits refresh can move. Deliberately a small,
+ * flat block — the dialog compares two of these side by side and nothing else
+ * on the wniosek changes (period, mileage, status and the `orig*` snapshots
+ * are untouched by `POST /claims/:nrZgl/recalc-limits`).
+ */
+export const RecalcLimitsFiguresSchema = z.object({
+  kmGuaranteed: z.number(),
+  /** May be negative — the carrier out-drove the (new) guarantee. */
+  kmDifference: z.number(),
+  paymentEur: z.number().nonnegative(),
+  ratePerKmEffective: z.number().nonnegative(),
+  drivenDays: z.number().nonnegative(),
+});
+export type RecalcLimitsFigures = z.infer<typeof RecalcLimitsFiguresSchema>;
+
+/**
+ * Response of `GET /claims/:nrZgl/recalc-limits/preview` — the DRY RUN behind
+ * the «Przelicz wg aktualnych limitów» confirmation dialog
+ * (docs/14-design-system.md §16.6).
+ *
+ * Why it exists: applying a refresh overwrites the wniosek's limits snapshot
+ * with a fresh `breakdown`, i.e. it is not reversible by re-running anything.
+ * Confirming that AFTER the write would be confirmation after the fact, and
+ * the frontend has no other way to obtain the numbers: `POST /claims/:nrZgl/
+ * preview` is deliberately pinned to the wniosek's frozen snapshot, and
+ * `GET /limits` is admin-only (a `pracownik` cannot read the live limits at
+ * all). So the api computes the "next" figures with the SAME code path as the
+ * write and returns them without persisting anything.
+ *
+ * Deliberately NOT a `ClaimDto`: nothing has been written, and handing back a
+ * claim-shaped object that does not exist in the database invites the client
+ * to cache it as state. The status gate (422 `CLAIM_LIMITS_REFRESH_BLOCKED`)
+ * is identical to the write endpoint's, so the refusal arrives BEFORE the
+ * dialog opens.
+ */
+export const RecalcLimitsPreviewSchema = z.object({
+  /** `true` when at least one of the five figures differs. */
+  changed: z.boolean(),
+  /** What the wniosek carries right now (its frozen limits snapshot). */
+  current: RecalcLimitsFiguresSchema,
+  /** What it would carry after a refresh against today's `monthly_limits`. */
+  next: RecalcLimitsFiguresSchema,
+});
+export type RecalcLimitsPreviewDto = z.infer<typeof RecalcLimitsPreviewSchema>;
 
 // ─── Filters (list / cursor pagination) ──────────────────
 

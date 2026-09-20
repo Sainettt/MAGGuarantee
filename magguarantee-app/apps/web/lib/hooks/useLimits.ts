@@ -18,17 +18,21 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
+import { useCallback, useRef } from 'react';
 import type {
+  BulkUpdateMonthlyLimitsDto,
   MonthlyLimitDto,
   MonthlyLimitListDto,
   UpdateMonthlyLimitDto,
 } from '@magguarantee/shared';
 
 import {
+  bulkUpdateMonthlyLimits,
   formatYearMonth,
   listMonthlyLimits,
   updateMonthlyLimit,
 } from '@/lib/api/limits';
+import { createSerialQueue, type SerialQueue } from '@/lib/limits/saveQueue';
 
 export const LIMITS_KEY = ['limits'] as const;
 
@@ -111,6 +115,54 @@ export function useUpdateLimit() {
       }
     },
     onSettled: (_data, _err, vars) => {
+      qc.invalidateQueries({ queryKey: [...LIMITS_KEY, 'list', vars.year] });
+    },
+  });
+}
+
+/**
+ * Save-on-blur + checkbox writes SERIALIZED per `yearMonth` (docs/14 §16.3).
+ *
+ * One gesture can produce two writes to the same month: clicking a row's
+ * checkbox blurs the input that was being edited, so the blur commit and the
+ * toggle commit both fire. Unserialized, their responses — and their
+ * optimistic patches — can land in either order and the row keeps the loser.
+ * The queue makes same-month writes strictly sequential in call order (blur
+ * before click) while different months stay parallel.
+ */
+export function useSerializedUpdateLimit() {
+  const updateM = useUpdateLimit();
+  const queueRef = useRef<SerialQueue | null>(null);
+  if (queueRef.current === null) queueRef.current = createSerialQueue();
+  const { mutateAsync } = updateM;
+
+  const save = useCallback(
+    (year: number, month: number, body: UpdateMonthlyLimitDto) => {
+      const queue = queueRef.current as SerialQueue;
+      return queue.run(formatYearMonth(year, month), () =>
+        mutateAsync({ year, month, body }),
+      );
+    },
+    [mutateAsync],
+  );
+
+  return { save };
+}
+
+/**
+ * `POST /limits/bulk` — one partial payload applied to N months of one year.
+ * The endpoint is atomic, so there is no per-row result to reconcile: on
+ * success we drop the year's cache and refetch the authoritative rows.
+ */
+export function useBulkUpdateLimits() {
+  const qc = useQueryClient();
+  return useMutation<
+    MonthlyLimitListDto,
+    Error,
+    BulkUpdateMonthlyLimitsDto
+  >({
+    mutationFn: (body) => bulkUpdateMonthlyLimits(body),
+    onSuccess: (_rows, vars) => {
       qc.invalidateQueries({ queryKey: [...LIMITS_KEY, 'list', vars.year] });
     },
   });

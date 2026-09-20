@@ -68,6 +68,42 @@ export class LimitsRepository {
   }
 
   /**
+   * Rows of one year restricted to the supplied months, ordered by month.
+   * Backs the `POST /limits/bulk` audit `before` snapshot (only the rows the
+   * bulk write will actually touch). An empty `months` list short-circuits.
+   */
+  async listForYearMonths(
+    year: number,
+    months: readonly number[],
+  ): Promise<MonthlyLimitRow[]> {
+    if (months.length === 0) return [];
+    const rows = await this.prisma.tx.monthlyLimit.findMany({
+      where: { year, month: { in: [...months] } },
+      orderBy: { month: 'asc' },
+    });
+    return rows.map((r) => this._toRow(r));
+  }
+
+  /**
+   * Apply ONE partial payload to several months of a single year. Each month
+   * goes through the same `upsert` as the single-row path, so the "omitted
+   * field ⇒ column untouched" contract is identical. Sequential on purpose:
+   * the calls share the ambient audit transaction (`prisma.tx`), and a
+   * Prisma interactive transaction is not safe to drive concurrently.
+   */
+  async upsertMany(
+    year: number,
+    months: readonly number[],
+    data: Omit<UpsertMonthlyLimitData, 'year' | 'month'>,
+  ): Promise<MonthlyLimitRow[]> {
+    const out: MonthlyLimitRow[] = [];
+    for (const month of [...months].sort((a, b) => a - b)) {
+      out.push(await this.upsert({ ...data, year, month }));
+    }
+    return out;
+  }
+
+  /**
    * Upsert by composite `(year, month)` unique. INSERT path writes whichever
    * fields the caller provided (the others remain NULL); UPDATE path patches
    * only what the caller provided (the others remain untouched). The unique

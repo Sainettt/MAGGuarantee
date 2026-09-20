@@ -91,6 +91,10 @@ function makeBreakdown(): KmCalcBreakdown {
     ],
     firstDay: null,
     lastDay: null,
+    // Settlement fields (2026-09-20): every month of this fixture has its
+    // guarantee ON, so the active day count equals the total.
+    daysActive: 20,
+    daysTotal: 20,
   };
 }
 
@@ -1245,5 +1249,85 @@ describe('ClaimsService.verifyClaim — threshold status auto-transition', () =>
     expect(patch.status).toBeUndefined();
     expect(out.status).toBe('OCZEKUJE_NA_AUTORYZACJE');
     expect(patch.verifiedAt).toEqual(NOW);
+  });
+});
+
+// ── Limits freeze on the verifier recalc (feature «wyłączane limity») ──
+
+describe('ClaimsService.verifyClaim — `_recalcClaim` limits snapshot', () => {
+  beforeAll(() => {
+    jest.useFakeTimers().setSystemTime(NOW);
+  });
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
+  it('a verifier correction re-prices with the SUBMITTED limits, not the edited ones', async () => {
+    const seeded = makeClaim();
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const { svc } = makeService(repoFake, km.svc, makePrismaService());
+
+    await withAuditContext(() =>
+      svc.verifyClaim(makeAuth('pracownik'), seeded.nrZgl, { mileage: 7_000 }),
+    );
+
+    expect(km.calls).toHaveLength(1);
+    const input = km.calls[0]!.input as {
+      limitsSnapshot?: Record<string, unknown>;
+    };
+    // `makeBreakdown()` carries 2026-04 @ 540 km/day, 0.5 EUR/km.
+    expect(input.limitsSnapshot).toEqual({
+      '2026-04': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 },
+    });
+  });
+
+  it('persists the settlement fields on the recalculated breakdown', async () => {
+    const seeded = makeClaim();
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService({
+      totalDays: 20,
+      rawTotalDays: 20,
+      kmGuaranteed: 5_400,
+      breakdown: [
+        {
+          yearMonth: '2026-04',
+          workingDays: 10,
+          kmPerDay: 540,
+          ratePerKm: 0.5,
+          saturdaysCounted: 0,
+          kmPerSaturday: 0,
+          kmFromSaturdays: 0,
+          kmInMonth: 5_400,
+          saturdayDays: [],
+          excludedDays: [],
+        },
+        {
+          yearMonth: '2026-05',
+          workingDays: 10,
+          kmPerDay: 0,
+          ratePerKm: 0.5,
+          saturdaysCounted: 0,
+          kmPerSaturday: 0,
+          kmFromSaturdays: 0,
+          kmInMonth: 0,
+          saturdayDays: [],
+          excludedDays: [],
+        },
+      ],
+    });
+    const { svc } = makeService(repoFake, km.svc, makePrismaService());
+
+    await withAuditContext(() =>
+      svc.verifyClaim(makeAuth('pracownik'), seeded.nrZgl, { mileage: 8_000 }),
+    );
+
+    const patch = repoFake.updateWithinCalls[0]!.data;
+    expect(patch.breakdown?.daysActive).toBe(10);
+    expect(patch.breakdown?.daysTotal).toBe(20);
+    expect(patch.breakdown?.mileageEffective).toBe(4_000);
+    // 5_400 − 4_000 = 1_400 ⇒ 700 EUR (the old formula would have paid 0).
+    expect(patch.kmDifference).toBe(1_400);
+    expect(patch.paymentEur).toBe(700);
   });
 });

@@ -111,6 +111,20 @@ describe('audit coverage — decorator presence on critical mutating endpoints',
       targetType: 'MonthlyLimit',
     },
     {
+      name: 'POST /limits/bulk',
+      controller: LimitsController,
+      method: 'bulkUpsert',
+      action: 'limits.bulkUpdate',
+      targetType: 'MonthlyLimit',
+    },
+    {
+      name: 'POST /claims/:nrZgl/recalc-limits',
+      controller: ClaimsController,
+      method: 'recalcLimits',
+      action: 'claim.limitsRefresh',
+      targetType: 'Claim',
+    },
+    {
       name: 'POST /users',
       controller: UsersController,
       method: 'create',
@@ -257,6 +271,63 @@ describe('audit coverage — interceptor writes a row end-to-end', () => {
     expect(out.entry!.action).toBe('limits.update');
     expect(out.entry!.targetType).toBe('MonthlyLimit');
     expect(out.entry!.targetKey).toBe('2026-04');
+    expect(out.txOpens).toBe(1);
+    expect(out.committed).toBe(true);
+  });
+
+  it('POST /limits/bulk → limits.bulkUpdate row, targetKey = `YYYY-MM..MM`', async () => {
+    const out = await runAuditedHandler({
+      controller: LimitsController,
+      method: 'bulkUpsert',
+      req: req({
+        method: 'POST',
+        url: '/api/v1/limits/bulk',
+        body: { year: 2026, months: [3, 1, 12], kmPerDay: 0 },
+      }),
+      // The handler returns an ARRAY of rows — the interceptor keeps the
+      // service's `before` object whole in that case (no key-trim).
+      result: [{ year: 2026, month: 1, kmPerDay: 0 }],
+      duringHandler: () =>
+        AuditContext.setBefore({ year: 2026, months: [1, 3, 12], rows: [] }),
+    });
+
+    expect(out.entry!.action).toBe('limits.bulkUpdate');
+    expect(out.entry!.targetType).toBe('MonthlyLimit');
+    // Year + first/last month touched (months are sorted first).
+    expect(out.entry!.targetKey).toBe('2026-01..12');
+    expect(out.entry!.before).toEqual({
+      year: 2026,
+      months: [1, 3, 12],
+      rows: [],
+    });
+    // Bulk MUST be atomic — one ambient transaction for N months + audit row.
+    expect(out.txOpens).toBe(1);
+    expect(out.committed).toBe(true);
+  });
+
+  it('POST /claims/:nrZgl/recalc-limits → claim.limitsRefresh row with before/after', async () => {
+    const out = await runAuditedHandler({
+      controller: ClaimsController,
+      method: 'recalcLimits',
+      req: req({
+        user: ADMIN,
+        params: { nrZgl: 'ZGL-2026-04-0007' },
+        method: 'POST',
+        url: '/api/v1/claims/ZGL-2026-04-0007/recalc-limits',
+      }),
+      result: { nrZgl: 'ZGL-2026-04-0007', kmGuaranteed: 5_400, paymentEur: 0 },
+      duringHandler: () =>
+        AuditContext.setBefore({ kmGuaranteed: 10_800, paymentEur: 1_400 }),
+    });
+
+    expect(out.entry!.action).toBe('claim.limitsRefresh');
+    expect(out.entry!.targetType).toBe('Claim');
+    expect(out.entry!.targetKey).toBe('ZGL-2026-04-0007');
+    expect(out.entry!.before).toEqual({
+      kmGuaranteed: 10_800,
+      paymentEur: 1_400,
+    });
+    expect(out.entry!.after).toMatchObject({ kmGuaranteed: 5_400 });
     expect(out.txOpens).toBe(1);
     expect(out.committed).toBe(true);
   });

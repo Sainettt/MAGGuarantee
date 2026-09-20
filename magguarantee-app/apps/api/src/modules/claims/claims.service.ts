@@ -16,8 +16,13 @@ import type {
   ClaimDto,
   ClaimFilters,
   ClaimListItem,
+  ClaimSettlement,
   ClaimStatus,
   KmCalcBreakdown,
+  KmCalcResult,
+  MonthLimit,
+  RecalcLimitsFigures,
+  RecalcLimitsPreviewDto,
   PreviewClaimDto,
   PreviewClaimResponse,
   ReklamacjaEligibility,
@@ -29,12 +34,14 @@ import type {
 import {
   canSubmitByDuration,
   CLAIM_DATE_BEFORE_DEPARTURE,
+  CLAIM_LIMITS_REFRESH_BLOCKED,
   cooldownCheck,
   DEFAULTS as CARRIER_SUBMISSION_DEFAULTS,
   getAuthThreshold,
   getReklamacjaEligibility,
   isCompensationDue,
   isWithinReklamacjaCap,
+  limitsSnapshotFromBreakdown,
   REKLAMACJA_ALREADY_SUBMITTED,
   REKLAMACJA_AMOUNT_EXCEEDS_CAP,
   REKLAMACJA_CLAIM_NOT_DECIDED,
@@ -43,6 +50,7 @@ import {
   REKLAMACJA_WINDOW_EXPIRED,
   REKLAMACJA_WINDOW_HOURS,
   requiresMaksimConfirmation,
+  settleClaim,
   startOfBusinessTodayUtc,
   VEHICLE_NOT_GUARANTEED,
 } from '@magguarantee/shared';
@@ -249,6 +257,117 @@ export class ClaimsService {
     if (!this.dailyKm) return 0;
     const toExclusive = new Date(dateEnd.getTime() + 24 * 60 * 60 * 1000);
     return this.dailyKm.sumDroveKm(vehicleId, dateStart, toExclusive);
+  }
+
+  /**
+   * Violation text for `kmGuaranteed === 0` at submit. Three distinct causes,
+   * three distinct messages — the carrier (and the support desk reading the
+   * banner) must be able to tell an admin decision from a configuration hole:
+   *
+   *  1. the period counted no days at all (weekend/holiday-only, invalid
+   *     range) → the generic legacy wording; the duration gate already
+   *     explains the real problem right above it;
+   *  2. every month of the period carries an explicit `0` → the guarantee was
+   *     deliberately switched off (feature «wyłączane limity», 2026-09-20);
+   *  3. at least one month has NO `MonthlyLimit` row → nothing is configured;
+   *     the global fallback only fires for months with no row, so this is an
+   *     admin task, not a carrier one.
+   */
+  private async _noGuaranteeViolation(
+    settlement: ClaimSettlement,
+    dateStartIso: string,
+    dateEndIso: string,
+  ): Promise<string> {
+    if (settlement.daysTotal <= 0) {
+      return 'Brak limitu km gwarantowanych w tym okresie.';
+    }
+    if (settlement.daysActive === 0) {
+      return 'Gwarancja km jest wyłączona dla tego okresu.';
+    }
+    const configured = await this.kmCalc.hasConfiguredLimits(
+      dateStartIso,
+      dateEndIso,
+    );
+    if (!configured) {
+      return (
+        'Brak skonfigurowanych limitów km dla tego okresu. ' +
+        'Skontaktuj się z administratorem.'
+      );
+    }
+    return 'Brak limitu km gwarantowanych w tym okresie.';
+  }
+
+  // ── Settlement + breakdown assembly (single seam) ───────
+  //
+  // Every km-calc consumer in this service goes through these three helpers.
+  // Before the «wyłączane limity gwarancji» feature the payout formula
+  // (`kmGuaranteed − mileage`) was inlined at five call sites; it now lives
+  // once, in `@magguarantee/shared/domain/claim-settlement.ts`.
+
+  /**
+   * Turn a km-calc result + the declared mileage into the settled numbers
+   * (`kmDifference` / `paymentEur` / the proportional `mileageEffective`).
+   * Output is bit-identical to the old inline formula whenever every month of
+   * the period has its guarantee switched on — i.e. for all existing data.
+   */
+  private _settle(calc: KmCalcResult, mileage: number): ClaimSettlement {
+    return settleClaim({
+      breakdown: calc.breakdown,
+      mileage,
+      kmGuaranteed: calc.kmGuaranteed,
+      ratePerKmEffective: calc.ratePerKmEffective,
+    });
+  }
+
+  /**
+   * Assemble the `KmCalcBreakdown` envelope persisted on `Claim.breakdown`
+   * and returned by `/preview`. Carries the engine output plus the settlement
+   * fields (`daysActive` / `daysTotal` / `mileageEffective`) the UI needs to
+   * explain a proportional split.
+   */
+  private _buildBreakdown(
+    calc: KmCalcResult,
+    settlement: ClaimSettlement,
+  ): KmCalcBreakdown {
+    return {
+      totalDays: calc.totalDays,
+      // Pre-`hoursAdjusted` raw total — surfaced so the UI can render
+      // `<HoursReadout>` with both raw and adjusted values
+      // (docs/14-design-system.md §"Phase 3.1").
+      rawTotalDays: calc.rawTotalDays,
+      kmGuaranteed: calc.kmGuaranteed,
+      ratePerKmEffective: calc.ratePerKmEffective,
+      breakdown: calc.breakdown,
+      // Credited fraction of the period's first/last calendar day (RAW, pre
+      // `hoursAdjusted`) — so the "Miesiąc" block can show exactly how much of
+      // each boundary day was counted without re-deriving the walk.
+      firstDay: calc.firstDay,
+      lastDay: calc.lastDay,
+      // Settlement pass — `daysActive < daysTotal` ⇒ some month of the period
+      // has its guarantee switched off and only the active share of the
+      // mileage was charged against the guarantee.
+      daysActive: settlement.daysActive,
+      daysTotal: settlement.daysTotal,
+      mileageEffective: settlement.mileageEffective,
+    };
+  }
+
+  /**
+   * The limits SNAPSHOT a wniosek was originally priced with, rebuilt from its
+   * persisted `Claim.breakdown`. Feeding it back into km-calc is what makes a
+   * recalc of an EXISTING wniosek immune to retroactive `PUT /limits/:yearMonth`
+   * edits (business decision 2026-09-20). `undefined` for legacy/empty
+   * breakdowns ⇒ the live limits are used, which is the pre-feature behaviour.
+   *
+   * Deliberately NOT used by `submit` (the snapshot is BORN there) nor by
+   * `POST /claims/:nrZgl/recalc-limits` (whose entire purpose is adopting the
+   * live limits).
+   */
+  private _limitsSnapshot(
+    claim: ClaimRow,
+  ): Record<string, MonthLimit> | undefined {
+    const snapshot = limitsSnapshotFromBreakdown(claim.breakdown);
+    return Object.keys(snapshot).length > 0 ? snapshot : undefined;
   }
 
   /**
@@ -533,8 +652,14 @@ export class ClaimsService {
       tier2.push(duration.message);
     }
 
+    // Settlement pass — proportional mileage split when some month of the
+    // period has its guarantee switched off (see `claim-settlement.ts`).
+    const settlement = this._settle(calc, mileage);
+
     if (calc.kmGuaranteed === 0) {
-      tier2.push('Brak limitu km gwarantowanych w tym okresie.');
+      tier2.push(
+        await this._noGuaranteeViolation(settlement, dateStartIso, dateEndIso),
+      );
     }
     // Sanity: average km/day. Trucks legitimately do up to ~1500 km/day in
     // 2-driver continuous operation; anything past that is almost always a
@@ -550,16 +675,20 @@ export class ClaimsService {
       }
     }
 
-    const kmDifference = calc.kmGuaranteed - mileage;
-    const paymentEur =
-      kmDifference > 0
-        ? round2(kmDifference * calc.ratePerKmEffective)
-        : 0;
+    const { kmDifference, paymentEur } = settlement;
     if (paymentEur === 0 && tier2.length === 0) {
       // Only surface "no underrun" if everything else is sane — otherwise
       // the user fixes the upstream issue first and this often resolves.
+      // When part of the period has its guarantee switched off, only the
+      // active share of the mileage was charged — say so, otherwise the two
+      // numbers in this sentence don't add up for the carrier.
+      const effectiveNote =
+        settlement.mileageEffective === mileage
+          ? ''
+          : ` (rozliczono ${settlement.mileageEffective} km — część okresu ` +
+            `ma wyłączoną gwarancję)`;
       tier2.push(
-        `Km zrealizowane (${mileage}) są równe lub wyższe niż km ` +
+        `Km zrealizowane (${mileage})${effectiveNote} są równe lub wyższe niż km ` +
           `gwarantowane (${calc.kmGuaranteed}). Brak podstaw do dopłaty.`,
       );
     }
@@ -570,18 +699,7 @@ export class ClaimsService {
     // `rawTotalDays` is the pre-`hoursAdjusted` total — persisted alongside
     // `totalDays` so the carrier/verifier UI can render `<HoursReadout>` with
     // both raw and adjusted hours per docs/14-design-system.md §"Phase 3.1".
-    const breakdown: KmCalcBreakdown = {
-      totalDays: calc.totalDays,
-      rawTotalDays: calc.rawTotalDays,
-      kmGuaranteed: calc.kmGuaranteed,
-      ratePerKmEffective: calc.ratePerKmEffective,
-      breakdown: calc.breakdown,
-      // Credited fraction of the period's first/last calendar day (RAW, pre
-      // `hoursAdjusted`) — surfaced so the "Miesiąc" block can show exactly how
-      // much of each boundary day was counted without re-deriving the walk.
-      firstDay: calc.firstDay,
-      lastDay: calc.lastDay,
-    };
+    const breakdown: KmCalcBreakdown = this._buildBreakdown(calc, settlement);
 
     // `dateStart` / `dateEnd` were already parsed to UTC midnight at the top
     // of submit() for the violation checks; reuse them for the insert.
@@ -843,6 +961,10 @@ export class ClaimsService {
         : await this._resolveMileage(claim.vehicleId, dateStart, dateEnd);
 
     // Re-run km-calc via the SAME `KmCalcService` (preview == submit == recalc).
+    // `limitsSnapshot` freezes the limits the wniosek was priced with: an
+    // outing-driven period shift must not also adopt retroactively edited
+    // limits (the explicit `POST /claims/:nrZgl/recalc-limits` does that).
+    // Months the shift moved INTO are not in the snapshot and are priced live.
     const calc = await this.kmCalc.calc({
       dateStart: toIsoDateOnly(dateStart),
       dateEnd: toIsoDateOnly(dateEnd),
@@ -850,25 +972,14 @@ export class ClaimsService {
       timeTo: claim.timeTo,
       // `hoursAdjustedValue` drives km-calc; preserve the currently-applied one.
       hoursAdjusted: claim.hoursAdjustedValue ?? 0,
+      limitsSnapshot: this._limitsSnapshot(claim),
     });
 
-    const kmDifference = calc.kmGuaranteed - mileage;
-    const paymentEur =
-      kmDifference > 0 ? round2(kmDifference * calc.ratePerKmEffective) : 0;
+    const settlement = this._settle(calc, mileage);
+    const { kmDifference, paymentEur } = settlement;
     const kmPerDay =
       calc.totalDays > 0 ? round2(mileage / calc.totalDays) : 0;
-    const breakdown: KmCalcBreakdown = {
-      totalDays: calc.totalDays,
-      rawTotalDays: calc.rawTotalDays,
-      kmGuaranteed: calc.kmGuaranteed,
-      ratePerKmEffective: calc.ratePerKmEffective,
-      breakdown: calc.breakdown,
-      // Credited fraction of the period's first/last calendar day (RAW, pre
-      // `hoursAdjusted`) — surfaced so the "Miesiąc" block can show exactly how
-      // much of each boundary day was counted without re-deriving the walk.
-      firstDay: calc.firstDay,
-      lastDay: calc.lastDay,
-    };
+    const breakdown: KmCalcBreakdown = this._buildBreakdown(calc, settlement);
 
     const recalcPatch: UpdateClaimData = {
       // dateStart is unchanged (departure day); only dateEnd shifts.
@@ -992,30 +1103,20 @@ export class ClaimsService {
         : await this._resolveMileage(claim.vehicleId, dateStart, dateEnd);
 
     // Re-run km-calc via the SAME `KmCalcService` (preview == submit == recalc).
+    // Same limits-freeze contract as the return-side recalc above.
     const calc = await this.kmCalc.calc({
       dateStart: toIsoDateOnly(dateStart),
       dateEnd: toIsoDateOnly(dateEnd),
       timeFrom: claim.timeFrom,
       timeTo: claim.timeTo,
       hoursAdjusted: claim.hoursAdjustedValue ?? 0,
+      limitsSnapshot: this._limitsSnapshot(claim),
     });
 
-    const kmDifference = calc.kmGuaranteed - mileage;
-    const paymentEur =
-      kmDifference > 0 ? round2(kmDifference * calc.ratePerKmEffective) : 0;
+    const settlement = this._settle(calc, mileage);
+    const { kmDifference, paymentEur } = settlement;
     const kmPerDay = calc.totalDays > 0 ? round2(mileage / calc.totalDays) : 0;
-    const breakdown: KmCalcBreakdown = {
-      totalDays: calc.totalDays,
-      rawTotalDays: calc.rawTotalDays,
-      kmGuaranteed: calc.kmGuaranteed,
-      ratePerKmEffective: calc.ratePerKmEffective,
-      breakdown: calc.breakdown,
-      // Credited fraction of the period's first/last calendar day (RAW, pre
-      // `hoursAdjusted`) — surfaced so the "Miesiąc" block can show exactly how
-      // much of each boundary day was counted without re-deriving the walk.
-      firstDay: calc.firstDay,
-      lastDay: calc.lastDay,
-    };
+    const breakdown: KmCalcBreakdown = this._buildBreakdown(calc, settlement);
 
     const recalcPatch: UpdateClaimData = {
       // dateEnd is unchanged (return day); only dateStart shifts.
@@ -1044,6 +1145,194 @@ export class ClaimsService {
       targetKey: claim.nrZgl,
       before,
       after: this._snapshotForAudit(updated),
+    });
+  }
+
+  // ── Limits refresh (escape hatch from the limits freeze) ──
+
+  /**
+   * `POST /claims/:nrZgl/recalc-limits` — re-price a wniosek with the LIVE
+   * `monthly_limits`, deliberately ignoring the limits snapshot frozen in its
+   * `breakdown`.
+   *
+   * Why it exists: every recalc of an existing wniosek is pinned to the limits
+   * it was submitted under (`_limitsSnapshot`), so an admin who FIXES a wrongly
+   * entered limit would otherwise have no way to make already-filed wnioski
+   * pick it up. This is that way — explicit, audited, and never automatic.
+   *
+   * Roles: `admin` + `pracownik` (docs/03-roles.md — repricing a wniosek is
+   * part of «Верифицировать заявление»; `weryfikator` has no `/claims` access).
+   *
+   * Scope: `kmGuaranteed` / `kmDifference` / `paymentEur` /
+   * `ratePerKmEffective` / `breakdown` / `drivenDays` / `kmPerDay`. The period,
+   * the time window, the mileage, the `orig*` snapshots and the status are NOT
+   * touched, and NO email is sent (this is a correction of our own data, not a
+   * decision the carrier must hear about).
+   *
+   * Status gate (`_assertLimitsRefreshAllowed`) mirrors the reasons
+   * `_skipReason` lists for the delegation auto-recalc: only `NA_WERYFIKACJI`
+   * is mutable. Audit row `claim.limitsRefresh` (before/after) is written by
+   * the `@Audit` interceptor in the SAME ambient transaction as the update.
+   */
+  async refreshLimits(user: AuthUser, nrZgl: string): Promise<ClaimDto> {
+    const existing = await this._loadForLimitsRefresh(nrZgl);
+
+    AuditContext.setBefore(this._snapshotForAudit(existing));
+
+    const { patch, next } = await this._computeLimitsRefresh(existing);
+    const current = this._limitsFigures(existing);
+
+    // The MONEY moved ⇒ any «Zapisz weryfikację» stamp no longer describes the
+    // current numbers, and a dopłata that crossed the authorization threshold
+    // would otherwise reach a decision without Maksim ever seeing it. Reset the
+    // checkpoint AND the gate in lockstep — exactly like the delegation-driven
+    // recalc does. An idempotent refresh (nothing changed) leaves both alone.
+    // Narrower than the `changed` flag the dry run reports: a moved
+    // `drivenDays`/`ratePerKmEffective` with identical amounts is not a reason
+    // to force re-verification.
+    if (
+      next.kmGuaranteed !== current.kmGuaranteed ||
+      next.kmDifference !== current.kmDifference ||
+      next.paymentEur !== current.paymentEur
+    ) {
+      this._resetVerificationState(patch);
+    }
+
+    const updated = await this.claims.update(existing.id, patch);
+
+    this.logger.log({
+      msg: 'claims.limitsRefresh',
+      nrZgl: updated.nrZgl,
+      actorRole: user.role,
+      paymentEurBefore: existing.paymentEur,
+      paymentEurAfter: updated.paymentEur,
+    });
+
+    return this.toDto(updated);
+  }
+
+  /**
+   * `GET /claims/:nrZgl/recalc-limits/preview` — DRY RUN of the refresh above.
+   *
+   * Why it exists: applying a refresh overwrites the wniosek's limits snapshot
+   * with a fresh `breakdown`, so it cannot be undone by re-running anything —
+   * and the confirmation dialog (docs/14 §16.6) has to show «było → станет»
+   * BEFORE that happens. The frontend cannot derive the numbers itself:
+   * `POST /claims/:nrZgl/preview` is deliberately pinned to the wniosek's
+   * frozen snapshot, and `GET /limits` is admin-only (a `pracownik` cannot
+   * read the live limits at all).
+   *
+   * Pure read: NO write, NO audit row, no transaction — hence no `@Audit()` on
+   * the route. It runs the SAME `_computeLimitsRefresh` the write path runs
+   * (one formula, no drift) and applies the SAME status gate, so a frozen
+   * wniosek is refused before the dialog opens rather than after.
+   */
+  async previewLimitsRefresh(nrZgl: string): Promise<RecalcLimitsPreviewDto> {
+    const existing = await this._loadForLimitsRefresh(nrZgl);
+    const { next } = await this._computeLimitsRefresh(existing);
+    const current = this._limitsFigures(existing);
+
+    return {
+      changed: (
+        Object.keys(next) as Array<keyof RecalcLimitsFigures>
+      ).some((k) => next[k] !== current[k]),
+      current,
+      next,
+    };
+  }
+
+  /**
+   * Shared prelude of both limits-refresh routes: load the wniosek (404) and
+   * apply the status gate (422). Keeping it in one place is what guarantees
+   * the dry run refuses exactly what the write refuses.
+   */
+  private async _loadForLimitsRefresh(nrZgl: string): Promise<ClaimRow> {
+    const existing = await this.claims.findByNrZgl(nrZgl);
+    if (!existing) throw new NotFoundException('Wniosek nie znaleziony');
+    this._assertLimitsRefreshAllowed(existing);
+    return existing;
+  }
+
+  /**
+   * Re-price a wniosek against TODAY's `monthly_limits` and return both the
+   * persistable patch and the flat figure block the dry run compares.
+   *
+   * Single source of the refresh math — `refreshLimits` persists the patch,
+   * `previewLimitsRefresh` throws it away. Nothing here writes.
+   */
+  private async _computeLimitsRefresh(claim: ClaimRow): Promise<{
+    patch: UpdateClaimData;
+    next: RecalcLimitsFigures;
+  }> {
+    // NOTE the absent `limitsSnapshot` — these are the ONLY km-calc calls on an
+    // existing wniosek that intentionally read today's `monthly_limits`.
+    const calc = await this.kmCalc.calc({
+      dateStart: toIsoDateOnly(claim.dateStart),
+      dateEnd: toIsoDateOnly(claim.dateEnd),
+      timeFrom: claim.timeFrom,
+      timeTo: claim.timeTo,
+      hoursAdjusted: claim.hoursAdjustedValue ?? 0,
+    });
+
+    const settlement = this._settle(calc, claim.mileage);
+    const patch: UpdateClaimData = {
+      drivenDays: calc.totalDays,
+      kmPerDay: calc.totalDays > 0 ? round2(claim.mileage / calc.totalDays) : 0,
+      kmGuaranteed: calc.kmGuaranteed,
+      kmDifference: settlement.kmDifference,
+      paymentEur: settlement.paymentEur,
+      ratePerKmEffective: calc.ratePerKmEffective,
+      breakdown: this._buildBreakdown(calc, settlement),
+    };
+
+    return {
+      patch,
+      next: {
+        kmGuaranteed: calc.kmGuaranteed,
+        kmDifference: settlement.kmDifference,
+        paymentEur: settlement.paymentEur,
+        ratePerKmEffective: calc.ratePerKmEffective,
+        drivenDays: calc.totalDays,
+      },
+    };
+  }
+
+  /** The five figures a limits refresh can move, read off a persisted row. */
+  private _limitsFigures(claim: ClaimRow): RecalcLimitsFigures {
+    return {
+      kmGuaranteed: claim.kmGuaranteed,
+      kmDifference: claim.kmDifference,
+      paymentEur: claim.paymentEur,
+      ratePerKmEffective: claim.ratePerKmEffective,
+      drivenDays: claim.drivenDays,
+    };
+  }
+
+  /**
+   * Status gate for the limits refresh. Only `NA_WERYFIKACJI` may be
+   * re-priced; everything else carries a number somebody already acted on.
+   * 422 with the stable `CLAIM_LIMITS_REFRESH_BLOCKED` code in the single-code
+   * `extensions` envelope (the shape `ProblemDetailsFilter` forwards) plus a
+   * Polish message that names the way out. Pure guard — no IO.
+   */
+  private _assertLimitsRefreshAllowed(claim: ClaimRow): void {
+    if (claim.status === 'NA_WERYFIKACJI') return;
+
+    const message =
+      claim.status === 'OCZEKUJE_NA_AUTORYZACJE'
+        ? 'Kwota tego wniosku jest zamrożona na czas autoryzacji — Maksim ' +
+          'dostał już konkretną dopłatę do zatwierdzenia. Najpierw cofnij ' +
+          'wniosek do weryfikacji, potem przelicz limity.'
+        : 'Wniosek został już rozpatrzony — kwota jest zamknięta. Najpierw ' +
+          'zwróć wniosek do weryfikacji, potem przelicz limity.';
+
+    throw new UnprocessableEntityException({
+      code: CLAIM_LIMITS_REFRESH_BLOCKED,
+      message,
+      extensions: {
+        code: CLAIM_LIMITS_REFRESH_BLOCKED,
+        status: claim.status,
+      },
     });
   }
 
@@ -1900,12 +2189,24 @@ export class ClaimsService {
         ? (dto.timeTo ?? existingClaim?.timeTo ?? null)
         : (existingClaim?.timeTo ?? null);
 
+    // Limits-freeze (2026-09-20): when an EXISTING wniosek is being inspected
+    // (verifier ClaimModal / carrier reklamacja view) the preview must price
+    // it with the limits it was priced with, or the panel would show one
+    // number and the subsequent PATCH would persist another. On the carrier's
+    // NEW-claim path (`ctx`) there is no snapshot yet — live limits, and
+    // submit will be born from exactly these.
+    const limitsSnapshot =
+      ctx === null && existingClaim
+        ? this._limitsSnapshot(existingClaim)
+        : undefined;
+
     const calc = await this.kmCalc.calc({
       dateStart: dateStartIso,
       dateEnd: dateEndIso,
       timeFrom,
       timeTo,
       hoursAdjusted: dto.hoursAdjusted ?? 0,
+      ...(limitsSnapshot ? { limitsSnapshot } : {}),
     });
 
     // Mileage resolution (REWORK 2026-07-30 — the daily-km board is no longer
@@ -1929,11 +2230,8 @@ export class ClaimsService {
             ? await this._resolveMileage(dto.vehicleId, dateStart, dateEnd)
             : 0;
 
-    const kmDifference = calc.kmGuaranteed - mileage;
-    const paymentEur =
-      kmDifference > 0
-        ? round2(kmDifference * calc.ratePerKmEffective)
-        : 0;
+    const settlement = this._settle(calc, mileage);
+    const { kmDifference, paymentEur } = settlement;
 
     return {
       mileage,
@@ -1941,21 +2239,7 @@ export class ClaimsService {
       kmDifference,
       paymentEur,
       ratePerKmEffective: calc.ratePerKmEffective,
-      breakdown: {
-        totalDays: calc.totalDays,
-        // Pre-`hoursAdjusted` raw total — surfaced so the live-preview UI
-        // can render `<HoursReadout>` with both raw and adjusted values
-        // (docs/14-design-system.md §"Phase 3.1").
-        rawTotalDays: calc.rawTotalDays,
-        kmGuaranteed: calc.kmGuaranteed,
-        ratePerKmEffective: calc.ratePerKmEffective,
-        breakdown: calc.breakdown,
-        // Credited fraction of the boundary days (RAW, pre `hoursAdjusted`) so
-        // the carrier new-claim / verifier live preview can render "ile z
-        // pierwszego / ostatniego dnia zaliczono" without re-deriving the walk.
-        firstDay: calc.firstDay,
-        lastDay: calc.lastDay,
-      },
+      breakdown: this._buildBreakdown(calc, settlement),
       // Echoed only on the carrier new-claim path. The period/time window are
       // now the carrier's own input (REWORK 2026-07-30) — echoing them keeps the
       // response self-describing (what was priced) and lets the form assert it
@@ -2563,37 +2847,24 @@ export class ClaimsService {
     const mileage = corrections.mileage ?? existing.mileage;
     const hoursAdjusted = corrections.hoursAdjusted ?? 0;
 
+    // Limits-freeze: a verifier correction re-prices the wniosek with the
+    // limits it was submitted under, never with retroactively edited ones
+    // (`POST /claims/:nrZgl/recalc-limits` is the deliberate escape hatch).
     const calc = await this.kmCalc.calc({
       dateStart,
       dateEnd,
       timeFrom,
       timeTo,
       hoursAdjusted,
+      limitsSnapshot: this._limitsSnapshot(existing),
     });
 
-    const kmDifference = calc.kmGuaranteed - mileage;
-    const paymentEur =
-      kmDifference > 0
-        ? round2(kmDifference * calc.ratePerKmEffective)
-        : 0;
+    const settlement = this._settle(calc, mileage);
+    const { kmDifference, paymentEur } = settlement;
     const kmPerDay =
       calc.totalDays > 0 ? round2(mileage / calc.totalDays) : 0;
 
-    const breakdown: KmCalcBreakdown = {
-      totalDays: calc.totalDays,
-      // Same pre-adjustment raw total as on submit/preview — kept on the
-      // re-calc patch so PATCH-driven verifier edits also propagate
-      // `<HoursReadout>`-ready data into the persisted breakdown JSONB.
-      rawTotalDays: calc.rawTotalDays,
-      kmGuaranteed: calc.kmGuaranteed,
-      ratePerKmEffective: calc.ratePerKmEffective,
-      breakdown: calc.breakdown,
-      // Credited fraction of the period's first/last calendar day (RAW, pre
-      // `hoursAdjusted`) — surfaced so the "Miesiąc" block can show exactly how
-      // much of each boundary day was counted without re-deriving the walk.
-      firstDay: calc.firstDay,
-      lastDay: calc.lastDay,
-    };
+    const breakdown: KmCalcBreakdown = this._buildBreakdown(calc, settlement);
 
     return {
       drivenDays: calc.totalDays,

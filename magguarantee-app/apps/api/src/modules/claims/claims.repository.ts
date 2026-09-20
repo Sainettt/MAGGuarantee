@@ -932,6 +932,8 @@ function hydrateBreakdown(raw: unknown): KmCalcBreakdown | null {
   const obj = raw as Partial<KmCalcBreakdown> & {
     totalDays?: number;
     rawTotalDays?: number;
+    daysActive?: number;
+    daysTotal?: number;
   };
   const totalDays = typeof obj.totalDays === 'number' ? obj.totalDays : 0;
   const rawTotalDays =
@@ -942,5 +944,13 @@ function hydrateBreakdown(raw: unknown): KmCalcBreakdown | null {
     // Legacy rows predate the boundary-day fields — default to null.
     firstDay: obj.firstDay ?? null,
     lastDay: obj.lastDay ?? null,
+    // Settlement fields (feature «wyłączane limity gwarancji», 2026-09-20).
+    // Rows written before it had every month active by construction, so both
+    // day counters collapse to `totalDays`. `mileageEffective` is deliberately
+    // NOT backfilled — `undefined` means "no proportional split was applied"
+    // and the UI renders `claim.mileage` instead (same contract as
+    // `KmCalcBreakdownSchema`'s transform).
+    daysActive: typeof obj.daysActive === 'number' ? obj.daysActive : totalDays,
+    daysTotal: typeof obj.daysTotal === 'number' ? obj.daysTotal : totalDays,
   };
 }

@@ -22,13 +22,25 @@
 // container queries in core — no plugin). The excluded-days disclosure is
 // shared via <ExcludedDays>.
 //
+// SWITCHED-OFF MONTHS (docs/14 §16.5) — a month whose guarantee is off pays
+// nothing, and a table of zeroes with no explanation reads as a bug. Derived
+// from the fields the breakdown already carries (see
+// `lib/claims/breakdownGuarantee.ts`): a fully-off month is muted and badged
+// «Gwarancja wyłączona», a Saturdays-only month is badged but NOT muted (it
+// pays), and wherever nothing is guaranteed the €/km cell prints «—» instead
+// of the engine's 0,50 fallback — a price per kilometre is meaningless with
+// zero kilometres and reads as a promise. A period that is off end-to-end
+// renders an <EmptyState> instead of a table of zeroes; a MIXED period gets
+// the neutral <GuaranteeGapNotice> ABOVE the numbers, because the numbers are
+// what look broken.
+//
 // Each month exposes a chevron when the engine surfaced any holiday /
 // EU-truck-ban days that were dropped from the count. Expanding reveals the
 // explicit date + label so the carrier can see WHY a workday didn't pay out
 // (weekends are universal and intentionally not listed).
 
 import { useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { CalendarOff, ChevronDown, Info } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
   formatDaysPl,
@@ -37,6 +49,15 @@ import {
   type MonthBreakdownDto,
 } from '@magguarantee/shared';
 
+import { Badge } from '@/components/ui/Badge';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { LockNotice } from '@/components/ui/LockNotice';
+import {
+  analyzeBreakdown,
+  isMonthGuaranteeDisabled,
+  isMonthSaturdayOnly,
+  type BreakdownGuaranteeInfo,
+} from '@/lib/claims/breakdownGuarantee';
 import { cn } from '@/lib/utils';
 
 function formatInt(n: number): string {
@@ -69,7 +90,79 @@ function formatExcludedDate(iso: string, locale: string): string {
 
 export interface BreakdownTableProps {
   breakdown: KmCalcBreakdown;
+  /**
+   * The declared mileage of the claim / preview. Feeds the
+   * «przyjęto X z Y km» half of <GuaranteeGapNotice> and is the fallback for
+   * `breakdown.mileageEffective`, which legacy wnioski never carry.
+   */
+  mileage?: number | null;
   className?: string;
+}
+
+/** `2026-02` → «luty 2026» (pl, lower-case) / «February 2026» (en). */
+function formatMonthLong(yearMonth: string, locale: string): string {
+  const [y, m] = yearMonth.split('-');
+  const date = new Date(Date.UTC(Number(y), Number(m) - 1, 1));
+  return new Intl.DateTimeFormat(locale === 'pl' ? 'pl-PL' : 'en-GB', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(date);
+}
+
+/** The «Gwarancja wyłączona» / «tylko w soboty» chip — outline, never loud. */
+function GuaranteeBadge({ label }: { label: string }) {
+  return (
+    <Badge
+      variant="muted"
+      className="border border-border bg-transparent text-[11px] font-semibold text-text-sub"
+    >
+      {label}
+    </Badge>
+  );
+}
+
+// ── Mixed-period notice (composition, not a primitive) ──────────────
+// Rendered ABOVE the table: the zero rows are what look broken, so the
+// explanation has to be read BEFORE the figures. Deliberately neutral (not a
+// warning): nothing went wrong, this IS the configuration.
+
+function GuaranteeGapNotice({
+  info,
+  locale,
+}: {
+  info: BreakdownGuaranteeInfo;
+  locale: string;
+}) {
+  const t = useTranslations('carrier.breakdown');
+  const months = info.disabledMonths
+    .map((m) =>
+      t('gapNoticeMonth', {
+        month: formatMonthLong(m.yearMonth, locale),
+        days: formatDaysPl(m.days),
+        daysTotal: formatDaysPl(info.daysTotal),
+      }),
+    )
+    .join(', ');
+
+  return (
+    <div className="border-b border-border p-3">
+      <LockNotice icon={Info}>
+        {t.rich('gapNotice', {
+          count: info.disabledCount,
+          months,
+          daysActive: formatDaysPl(info.daysActive),
+          mileageEffective: formatInt(info.mileageEffective),
+          mileage: formatInt(info.mileage),
+          b: (chunks) => (
+            <strong className="font-semibold tabular-nums text-text">
+              {chunks}
+            </strong>
+          ),
+        })}
+      </LockNotice>
+    </div>
+  );
 }
 
 // ── Shared excluded-days disclosure ──────────────────────────────────
@@ -255,30 +348,64 @@ function TableMonthRow({
   // actually credited this month. `workingDays` is weekdays-only, so this line
   // explains why `kmInMonth` exceeds `workingDays × kmPerDay`.
   const hasSaturdays = row.saturdaysCounted > 0;
+  const disabled = isMonthGuaranteeDisabled(row);
+  const saturdayOnly = isMonthSaturdayOnly(row);
 
   return (
     <>
       {/* When a Saturday sub-row follows, drop the month row's bottom border so
           the note reads as part of the same month block. */}
-      <tr className={hasSaturdays ? '' : 'border-b border-border last:border-b-0'}>
+      <tr
+        className={cn(
+          hasSaturdays ? '' : 'border-b border-border last:border-b-0',
+          // The ONE muted row state: guarantee off. Saturdays-only months stay
+          // normal — they pay.
+          disabled && 'bg-input/40',
+        )}
+      >
         <td className="px-2 py-2 h-10 align-middle">
-          <MonthToggle
-            row={row}
-            open={open}
-            onToggle={() => setOpen((v) => !v)}
-            excludedCount={excluded.length}
-          />
+          <div className="flex flex-wrap items-center gap-1.5">
+            <MonthToggle
+              row={row}
+              open={open}
+              onToggle={() => setOpen((v) => !v)}
+              excludedCount={excluded.length}
+            />
+            {disabled && <GuaranteeBadge label={t('guaranteeDisabled')} />}
+            {saturdayOnly && (
+              <GuaranteeBadge label={t('guaranteeSaturdayOnly')} />
+            )}
+          </div>
         </td>
         <td className="px-2 py-2 h-10 text-right tabular-nums text-text align-middle whitespace-nowrap">
           {formatDaysPl(row.workingDays)}
         </td>
-        <td className="px-2 py-2 h-10 text-right tabular-nums text-text align-middle whitespace-nowrap">
+        <td
+          className={cn(
+            'px-2 py-2 h-10 text-right tabular-nums align-middle whitespace-nowrap',
+            disabled ? 'text-text-sub' : 'text-text',
+          )}
+        >
           {formatInt(row.kmPerDay)}
         </td>
-        <td className="px-2 py-2 h-10 text-right tabular-nums text-text align-middle whitespace-nowrap">
-          {formatRate(row.ratePerKm)}
+        <td
+          className={cn(
+            'px-2 py-2 h-10 text-right tabular-nums align-middle whitespace-nowrap',
+            disabled ? 'text-text-sub' : 'text-text',
+          )}
+          title={disabled ? t('rateNoneTitle') : undefined}
+        >
+          {/* Ghost rate: with zero guaranteed km the engine still reports the
+              global 0,50 €/km fallback. Printing it next to «0 km» looks like
+              a promise, so it is «—» everywhere (§16.5.2, locked). */}
+          {disabled ? '—' : formatRate(row.ratePerKm)}
         </td>
-        <td className="px-2 py-2 h-10 text-right tabular-nums font-semibold text-text align-middle whitespace-nowrap">
+        <td
+          className={cn(
+            'px-2 py-2 h-10 text-right tabular-nums align-middle whitespace-nowrap',
+            disabled ? 'text-text-sub' : 'font-semibold text-text',
+          )}
+        >
           {formatInt(row.kmInMonth)}
         </td>
       </tr>
@@ -326,16 +453,25 @@ function CardMonth({
   const [open, setOpen] = useState(false);
   const excluded = row.excludedDays ?? [];
   const hasSaturdays = row.saturdaysCounted > 0;
+  const disabled = isMonthGuaranteeDisabled(row);
+  const saturdayOnly = isMonthSaturdayOnly(row);
 
   return (
-    <li className="rounded-md border border-border p-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
+    <li
+      className={cn(
+        'rounded-md border border-border p-3',
+        disabled && 'bg-input/40',
+      )}
+    >
+      <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
         <MonthToggle
           row={row}
           open={open}
           onToggle={() => setOpen((v) => !v)}
           excludedCount={excluded.length}
         />
+        {disabled && <GuaranteeBadge label={t('guaranteeDisabled')} />}
+        {saturdayOnly && <GuaranteeBadge label={t('guaranteeSaturdayOnly')} />}
       </div>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
         <div className="flex items-baseline justify-between gap-2">
@@ -346,15 +482,33 @@ function CardMonth({
         </div>
         <div className="flex items-baseline justify-between gap-2">
           <dt className="text-text-sub">{t('kmPerDay')}</dt>
-          <dd className="tabular-nums text-text">{formatInt(row.kmPerDay)}</dd>
+          <dd
+            className={cn(
+              'tabular-nums',
+              disabled ? 'text-text-sub' : 'text-text',
+            )}
+          >
+            {formatInt(row.kmPerDay)}
+          </dd>
         </div>
-        <div className="flex items-baseline justify-between gap-2">
-          <dt className="text-text-sub">{t('ratePerKm')}</dt>
-          <dd className="tabular-nums text-text">{formatRate(row.ratePerKm)}</dd>
-        </div>
+        {/* In the narrow card the ghost-rate row is dropped entirely — a
+            column can only be blanked to «—», a card row can go away. */}
+        {!disabled && (
+          <div className="flex items-baseline justify-between gap-2">
+            <dt className="text-text-sub">{t('ratePerKm')}</dt>
+            <dd className="tabular-nums text-text">
+              {formatRate(row.ratePerKm)}
+            </dd>
+          </div>
+        )}
         <div className="flex items-baseline justify-between gap-2">
           <dt className="text-text-sub">{t('kmInMonth')}</dt>
-          <dd className="tabular-nums font-semibold text-text">
+          <dd
+            className={cn(
+              'tabular-nums',
+              disabled ? 'text-text-sub' : 'font-semibold text-text',
+            )}
+          >
             {formatInt(row.kmInMonth)}
           </dd>
         </div>
@@ -380,10 +534,36 @@ function CardMonth({
   );
 }
 
-export function BreakdownTable({ breakdown, className }: BreakdownTableProps) {
+export function BreakdownTable({
+  breakdown,
+  mileage,
+  className,
+}: BreakdownTableProps) {
   const t = useTranslations('carrier.breakdown');
   const locale = useLocale();
   const rows = breakdown.breakdown ?? [];
+  const info = analyzeBreakdown(breakdown, mileage);
+
+  // Whole period without a guarantee → an honest empty state instead of a
+  // table of zeroes. The «Razem» footer and the boundary-day strip go with it
+  // (a zero total under an empty state says nothing), and the mixed-period
+  // notice is suppressed — one explanation per fact.
+  if (info.allDisabled) {
+    return (
+      <div
+        className={cn(
+          '@container bg-card rounded-lg border border-border overflow-hidden',
+          className,
+        )}
+      >
+        <EmptyState
+          icon={CalendarOff}
+          title={t('allDisabledTitle')}
+          message={t('allDisabledBody')}
+        />
+      </div>
+    );
+  }
 
   return (
     <div
@@ -394,6 +574,8 @@ export function BreakdownTable({ breakdown, className }: BreakdownTableProps) {
         className,
       )}
     >
+      {info.showGapNotice && <GuaranteeGapNotice info={info} locale={locale} />}
+
       {/* Stacked cards — container narrower than 34rem (cramped modal column,
           phone). No horizontal scroll. */}
       <div className="@max-[34rem]:block @min-[34rem]:hidden p-3">

@@ -1201,16 +1201,53 @@ model GuaranteeIdleEpisode {
 
 // ─── LIMITS (LIMITY KM) ─────────────────────────────────
 
+// Per-month guarantee configuration, keyed by (year, month).
+//
+// THREE-VALUED SEMANTICS of `kmPerDay` / `ratePerKm` / `kmPerSaturday`
+// (2026-09-20 — the admin limits sheet `/employee/limits` grew "gwarancja
+// włączona" / "soboty" checkboxes that write `0` when unticked; until then `0`
+// was impossible, Zod had `.positive()`). NULL and `0` are now DIFFERENT
+// business states and the difference carries money:
+//
+//   no row / NULL → month NOT configured → the api substitutes a fallback
+//                   (540 km/day, 0.5 EUR/km; for Saturdays — 0)
+//   0             → guarantee deliberately switched OFF by an admin
+//                   → 0 km credited for that month
+//   > 0           → the configured value, used as-is
+//
+// Consequences worth spelling out:
+//
+//   1. The EXISTENCE of the row is the only signal that an admin consciously
+//      configured the month. A month with no row is NOT "off" — it gets the
+//      540 / 0.5 fallback.
+//   2. The fallback is owned by the api (`km-calc.service.ts` `_loadMonthly-
+//      Limits` + `resolveMonthLimit`), NOT by the DB. These columns have NO
+//      `@default` and must never get one: a default would make NULL
+//      indistinguishable from `0` and silently flip "not configured" into
+//      "guarantee off" (and back) — see docs/12 §"LIMITY KM → MonthlyLimit".
+//   3. `_loadMonthlyLimits` substitutes the fallback PER FIELD. Previously a
+//      row with any NULL in `kmPerDay`/`ratePerKm` was dropped whole and the
+//      month fell back entirely; now a partially filled row keeps the fields
+//      that are set (e.g. `kmPerDay = 0` + `ratePerKm = NULL` ⇒ 0 km priced at
+//      the 0.5 fallback rate).
+//
+// NO MIGRATION backs this note — the DDL (nullable, no default) already
+// allowed `0`; only the meaning of the stored values changed.
 model MonthlyLimit {
   id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   year          Int
   month         Int // 1..12
+  // NULL = month not configured → api fallback 540 km/day. `0` = guarantee
+  // consciously OFF for the month (admin unticked "gwarancja włączona") ⇒ 0 km.
   kmPerDay      Decimal? @db.Decimal(8, 2)
+  // NULL = not configured → api fallback 0.5 EUR/km. `0` = priced at zero, a
+  // deliberate admin choice — not "unset".
   ratePerKm     Decimal? @db.Decimal(6, 4)
-  // Guarantee km credited for a single qualifying ("odd") Saturday. NULL is
-  // treated as 0 by km-calc (fallback owned by the api, NOT the DB — the column
-  // just stores the value, no default). Same precision as `kmPerDay`
-  // (Decimal(8,2); km is Decimal, never Float).
+  // Guarantee km credited for a single qualifying ("odd") Saturday. Unlike
+  // `kmPerDay`, here NULL and `0` are behaviourally IDENTICAL — both mean the
+  // feature is off for that month (the Saturday fallback is 0 anyway), so the
+  // "soboty" checkbox writes `0` purely to make the intent explicit in the UI.
+  // Same precision as `kmPerDay` (Decimal(8,2); km is Decimal, never Float).
   kmPerSaturday Decimal? @db.Decimal(8, 2)
 
   createdAt DateTime @default(now())

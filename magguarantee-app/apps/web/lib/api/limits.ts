@@ -6,6 +6,7 @@
 // ratePerKm, never both required) and Prisma upserts on `(year, month)`.
 
 import type {
+  BulkUpdateMonthlyLimitsDto,
   MonthlyLimitDto,
   MonthlyLimitListDto,
   UpdateMonthlyLimitDto,
@@ -30,6 +31,24 @@ export function updateMonthlyLimit(
 ): Promise<MonthlyLimitDto> {
   return apiJson<MonthlyLimitDto>(`/limits/${encodeURIComponent(yearMonth)}`, {
     method: 'PUT',
+    json: body,
+  });
+}
+
+/**
+ * `POST /limits/bulk` — apply ONE partial payload to several months of a
+ * single year (admin). Atomic server-side: the whole month list and the audit
+ * row commit in one transaction, so the caller only ever handles
+ * success / error — never a partial write, never a per-row retry.
+ *
+ * An omitted key leaves that column untouched; `0` is a real value ("guarantee
+ * switched off"). The body is never allowed to carry `null`.
+ */
+export function bulkUpdateMonthlyLimits(
+  body: BulkUpdateMonthlyLimitsDto,
+): Promise<MonthlyLimitListDto> {
+  return apiJson<MonthlyLimitListDto>('/limits/bulk', {
+    method: 'POST',
     json: body,
   });
 }

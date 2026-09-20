@@ -897,19 +897,23 @@ export class MailService implements IMailService {
         '',
         `Ciągnik: ${props.vehiclePlate}`,
         `Okres: ${props.periodFrom} → ${props.periodTo}`,
-        ...(props.drivenDays
+        // `!= null`, NOT truthiness: a legitimately ZERO figure ("0 km
+        // gwarantowanych" on a month whose guarantee is switched off, "0,00
+        // EUR" dopłata) must still be printed — a silently missing line reads
+        // as "the system didn't compute it" (feature «wyłączane limity», 2026-09-20).
+        ...(props.drivenDays != null
           ? [`Dni przepracowane: ${props.drivenDays}`]
           : []),
-        ...(props.kmGuaranteed
+        ...(props.kmGuaranteed != null
           ? [`Kilometry gwarantowane: ${props.kmGuaranteed} km`]
           : []),
-        ...(props.kmDriven
+        ...(props.kmDriven != null
           ? [`Kilometry przejechane: ${props.kmDriven} km`]
           : []),
-        ...(props.kmShortfall
+        ...(props.kmShortfall != null
           ? [`Niedobór kilometrów: ${props.kmShortfall} km`]
           : []),
-        ...(props.paymentEur
+        ...(props.paymentEur != null
           ? [`Kwota wnioskowana: ${props.paymentEur} EUR`]
           : []),
         '',
@@ -1447,7 +1451,8 @@ export class MailService implements IMailService {
       ...(p.carrierName ? [`Przewoźnik: ${p.carrierName}`] : []),
       `Ciągnik: ${p.vehiclePlate}`,
       `Okres: ${p.periodFrom} → ${p.periodTo}`,
-      ...(p.amount ? [`Kwota: ${p.amount} EUR`] : []),
+      // `!= null`: a pre-formatted `'0.00'` is a real amount, not "absent".
+      ...(p.amount != null ? [`Kwota: ${p.amount} EUR`] : []),
     ];
     if (p.comment) lines.push('', `Komentarz: ${p.comment}`);
     lines.push('', `Otwórz: ${p.deeplink}`);

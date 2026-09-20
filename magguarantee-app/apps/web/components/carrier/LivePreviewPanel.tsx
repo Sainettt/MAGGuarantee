@@ -10,6 +10,7 @@ import { useTranslations } from 'next-intl';
 import type { PreviewClaimResponse } from '@magguarantee/shared';
 
 import { BreakdownTable } from '@/components/carrier/BreakdownTable';
+import { isGhostRate } from '@/lib/claims/breakdownGuarantee';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { cn } from '@/lib/utils';
@@ -179,10 +180,17 @@ export function LivePreviewPanel({
         />
         <StatCard
           label={t('ratePerKm')}
-          value={new Intl.NumberFormat('pl-PL', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          }).format(data.ratePerKmEffective)}
+          // Ghost rate (§16.5.2, locked): with zero guaranteed km the engine
+          // still reports the global 0,50 €/km fallback. A price per kilometre
+          // is meaningless without kilometres — render «—», never the number.
+          value={
+            isGhostRate(data.kmGuaranteed)
+              ? '—'
+              : new Intl.NumberFormat('pl-PL', {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                }).format(data.ratePerKmEffective)
+          }
         />
         <StatCard
           label={t('paymentEur')}
@@ -197,7 +205,7 @@ export function LivePreviewPanel({
         />
       </div>
 
-      <BreakdownTable breakdown={data.breakdown} />
+      <BreakdownTable breakdown={data.breakdown} mileage={data.mileage} />
     </div>
   );
 }

@@ -6,6 +6,7 @@
 
 export * from './eu-calendar';
 export * from './km-calc';
+export * from './claim-settlement';
 export * from './claim-submission-rules';
 export * from './reklamacja-rules';
 export * from './polish-calendar';

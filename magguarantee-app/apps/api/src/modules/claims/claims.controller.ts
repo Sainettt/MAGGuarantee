@@ -27,6 +27,7 @@ import {
   type ClaimListItem,
   type PreviewClaimDto,
   type PreviewClaimResponse,
+  type RecalcLimitsPreviewDto,
   type SubmitClaimDto,
   type SubmitReklamacjaDto,
   type UpdateClaimDto,
@@ -244,6 +245,72 @@ export class ClaimsController {
     @Body(new ZodValidationPipe(VerifyClaimSchema)) dto: VerifyClaimDto,
   ): Promise<ClaimDto> {
     return this.claims.verifyClaim(user, nrZgl, dto);
+  }
+
+  // ── Limits refresh (escape hatch) ───────────────────────
+
+  /**
+   * `POST /claims/:nrZgl/recalc-limits` — re-price a wniosek with the CURRENT
+   * `monthly_limits`, ignoring the limits snapshot frozen in its breakdown.
+   *
+   * Every other recalc path is pinned to the limits the wniosek was submitted
+   * under, so a corrected limit never reaches filed wnioski by itself. This is
+   * the deliberate, audited way in: it rewrites
+   * `kmGuaranteed/kmDifference/paymentEur/ratePerKmEffective/breakdown/
+   * drivenDays/kmPerDay`, touches neither period/mileage/status nor the
+   * `orig*` snapshots, and sends NO email. 422
+   * `CLAIM_LIMITS_REFRESH_BLOCKED` unless the wniosek sits in
+   * `NA_WERYFIKACJI` (an authorised or decided amount is frozen).
+   *
+   * The response is the updated `ClaimDto` so the web can diff it against the
+   * row it had open and show "było → jest" in the confirmation dialog.
+   *
+   * Roles: `admin` + `pracownik` — the SAME pair that owns every other
+   * claim-mutating route. Per docs/03-roles.md «Верифицировать заявление
+   * (изменить статус, пересчитать km/доплату)» belongs to `pracownik`;
+   * `weryfikator` owns the km-board + outing statuses and has NO `/claims`
+   * access at all, so it must not be able to reprice a wniosek (nor receive a
+   * `ClaimDto` with the payout figures as the response).
+   */
+  /**
+   * `GET /claims/:nrZgl/recalc-limits/preview` — DRY RUN of the refresh below.
+   *
+   * The confirmation dialog (docs/14 §16.6) must show «было → станет» BEFORE
+   * the write, and the write is not undoable (it overwrites the wniosek's
+   * limits snapshot). No other endpoint can produce those numbers:
+   * `POST /claims/:nrZgl/preview` is pinned to the frozen snapshot on purpose,
+   * and `GET /limits` is admin-only.
+   *
+   * Pure read — computes with the SAME service code as the write, persists
+   * nothing and writes NO audit row (hence no `@Audit()`; the inverse
+   * audit-coverage spec only requires it on mutating verbs). Carries the SAME
+   * status gate, so a frozen wniosek 422s before the dialog opens.
+   *
+   * Response: `RecalcLimitsPreviewDto` — `{ changed, current, next }`,
+   * deliberately NOT a `ClaimDto` (nothing was written, so there is no claim
+   * state to hand back).
+   */
+  @Get(':nrZgl/recalc-limits/preview')
+  @Roles('admin', 'pracownik')
+  async recalcLimitsPreview(
+    @Param('nrZgl') nrZgl: string,
+  ): Promise<RecalcLimitsPreviewDto> {
+    return this.claims.previewLimitsRefresh(nrZgl);
+  }
+
+  @Post(':nrZgl/recalc-limits')
+  @HttpCode(HttpStatus.OK)
+  @Roles('admin', 'pracownik')
+  @Audit({
+    action: 'claim.limitsRefresh',
+    targetType: 'Claim',
+    targetKey: (req) => req.params?.nrZgl,
+  })
+  async recalcLimits(
+    @CurrentUser() user: AuthUser,
+    @Param('nrZgl') nrZgl: string,
+  ): Promise<ClaimDto> {
+    return this.claims.refreshLimits(user, nrZgl);
   }
 
   // ── Reklamacja ──────────────────────────────────────────

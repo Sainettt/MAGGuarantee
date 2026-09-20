@@ -133,7 +133,26 @@ Per-month cells in the legacy spreadsheet were also allowed to be **empty** (`''
 
 Source of truth: `Code.gs:32` (CONFIG), `Code.gs:801-802` (sheet seed), `Code.gs:850-858` (read).
 
-**What NOT to do:** do not reject claims when no `MonthlyLimit` row exists for a covered month. Do not warn the user — fallback is the silent default. Admin sees missing rows in the limits-management UI; they're not user-facing errors.
+### ⚠️ UPDATE 2026-09-20 — «wyłączane limity»: три состояния, пополевой fallback
+
+Фича «выключаемые лимиты гарантии» превратила двузначный мир («есть значение» / «нет строки») в **трёхзначный**, и легаси-семантика `Code.gs:850-858` больше **не** совпадает 1:1 — именно для нуля:
+
+| Состояние в БД | Смысл | km-calc |
+|---|---|---|
+| строки нет / колонка `NULL` | не сконфигурировано | fallback (540 км/дн, 0,5 €/км, **0** км/суббота) |
+| `0` | **выключено осознанно** | месяц даёт 0 км гарантии — fallback **НЕ** применяется |
+| `> 0` | значение | как задано |
+
+Легаси (и первая версия порта) трактовали «пусто» и «ноль» одинаково: `if (limity[y][m] !== undefined)` в GAS и `if (km === null || rate === null) continue` в `KmCalcService._loadMonthlyLimits` **выбрасывали строку целиком**. Для нуля это боевой дефект: строка `{kmPerDay: 0, ratePerKm: NULL}` (админ нажал «выключить» раньше, чем кто-то завёл ставку) давала месяцу **максимальную** гарантию 540 км/дн. Теперь:
+
+- **fallback подставляется пополево**, а не выбрасыванием строки: `{kmPerDay: 300, ratePerKm: NULL}` → 300 км/дн по ставке 0,5 (раньше → 540 @ 0,5). Это намеренное изменение поведения частично заполненных строк;
+- строка, у которой **все три** колонки `NULL`, по-прежнему эквивалентна отсутствию строки (полный fallback);
+- `0` доезжает до движка как `0` (движок корректен: `Number.isFinite`, а не truthiness);
+- `kmPerSaturday` остаётся **opt-in**: отсутствие ключа сворачивается в 0 = «субботы выключены». Глобальный `FALLBACK_KM_PER_SATURDAY` **обязан остаться нулём** — движок трактует месячный `0` как «не задано» и проваливается в fallback, так что положительный fallback молча включил бы субботы во всех месяцах, где их явно выключили. Пин закреплён тестами (`packages/shared/tests/claim-settlement.test.ts` → «engine pin», `apps/api/src/modules/km-calc/km-calc.service.spec.ts` → «ENGINE PIN»).
+
+Валидация: `UpdateMonthlyLimitSchema` / `BulkUpdateMonthlyLimitsSchema` теперь `nonnegative()` (не `positive()`), и они — **единственная** защита от отрицательных значений: DB-CHECK на `monthly_limits` нет.
+
+**What NOT to do:** не отвергать wniosek, когда для месяца просто **нет** строки `MonthlyLimit` — fallback тут по-прежнему тихий дефолт (админ видит пропуски в UI лимитов). Но **не путать это с нулём**: полностью выключенный период — это осознанное решение, и подача блокируется отдельным нарушением «Gwarancja km jest wyłączona dla tego okresu.» (тексты и диагностический бакет разведены — см. `ClaimsService._noGuaranteeViolation` и `DiagnosticsRepository.findClaimsHealth`). И не писать falsy-проверок (`x || 540`, `if (x)`) на `kmPerDay`/`ratePerKm` — только `?? ` / `!= null`, иначе выключенная гарантия молча превращается в максимальную.
 
 ---
 

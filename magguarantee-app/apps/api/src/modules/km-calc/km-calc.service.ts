@@ -24,6 +24,32 @@ export interface KmCalcServiceInput {
   timeTo?: string | null;
   /** Optional downtime correction (hours). */
   hoursAdjusted?: number;
+  /**
+   * Per-month limits SNAPSHOT (`'YYYY-MM' → MonthLimit`) that must win over
+   * whatever `monthly_limits` says today. Rebuilt from a wniosek's persisted
+   * `Claim.breakdown` via `limitsSnapshotFromBreakdown` so a recalc of an
+   * existing wniosek never silently adopts retroactively edited limits
+   * (feature «wyłączane limity gwarancji», 2026-09-20).
+   *
+   * Merge order is PER MONTH: snapshot ▸ live DB row (per field, see
+   * `mergeLimits`) ▸ global fallback. A month absent from the snapshot —
+   * e.g. the weryfikator moved `dateEnd` into a new month — is priced from
+   * the live DB, which is the only data that exists for it.
+   */
+  limitsSnapshot?: Record<string, MonthLimit>;
+}
+
+/**
+ * Raw `monthly_limits` row as loaded from the DB. Every column is
+ * independently nullable, and `null` ≠ `0`:
+ *  - `null` ⇒ NOT configured ⇒ the global fallback fills THAT field in;
+ *  - `0`    ⇒ deliberately switched off ⇒ stays `0` all the way into km-calc.
+ * See docs/19-known-quirks.md#monthlyLimit-fallback.
+ */
+export interface StoredMonthLimit {
+  kmPerDay: number | null;
+  ratePerKm: number | null;
+  kmPerSaturday: number | null;
 }
 
 /**
@@ -42,6 +68,12 @@ const FALLBACK_RATE_PER_KM = 0.5;
  * the `MonthlyLimit` row (admin seeds it per-month).
  */
 const FALLBACK_KM_PER_SATURDAY = 0;
+// ⚠️ Pinned at 0 on purpose. The engine's `resolveKmPerSaturday` treats a
+// month value of `0` as "not set" and falls through to THIS constant — so the
+// day someone makes it positive, every month that explicitly switched
+// Saturdays off would silently switch them back on. A regression test
+// (`packages/shared/tests/claim-settlement.test.ts` → "engine pin") locks the
+// behaviour; changing this constant is a business decision, not a tweak.
 
 const APP_CONFIG_KEY_KM_PER_DAY = 'km_dziennie_default';
 const APP_CONFIG_KEY_RATE_PER_KM = 'stawka_eur_default';
@@ -86,10 +118,15 @@ export class KmCalcService {
       });
     }
 
-    const [limits, fallback] = await Promise.all([
+    // Both reads stay parallel; the per-field fallback merge happens here,
+    // AFTER the join, because `_loadMonthlyLimits` must not depend on the
+    // fallback (that would serialise the two queries for no reason).
+    const [stored, fallback] = await Promise.all([
       this._loadMonthlyLimits(start, end),
       this._resolveFallback(),
     ]);
+
+    const limits = mergeLimits(stored, fallback, input.limitsSnapshot);
 
     return calcKmGwarantPerMonth({
       dateStart: input.dateStart,
@@ -102,16 +139,49 @@ export class KmCalcService {
     });
   }
 
+  /**
+   * Does `monthly_limits` carry a row for EVERY calendar month the period
+   * touches? Answers the "is the guarantee unconfigured, or deliberately
+   * switched off?" question the claims-submit violation text (and the admin
+   * diagnostics bucket) needs — a `kmGuaranteed === 0` with all rows present
+   * is an admin decision, without them it is a configuration hole.
+   *
+   * Returns `true` for an invalid/inverted range (there is nothing to
+   * configure, and the caller already has a date violation for that).
+   */
+  async hasConfiguredLimits(
+    dateStartIso: string,
+    dateEndIso: string,
+  ): Promise<boolean> {
+    const start = parseIso(dateStartIso);
+    const end = parseIso(dateEndIso);
+    if (!start || !end || start > end) return true;
+
+    const months = enumerateYearMonth(start, end);
+    if (months.length === 0) return true;
+
+    const rows = await this.prisma.client.monthlyLimit.findMany({
+      where: { OR: months.map(([year, month]) => ({ year, month })) },
+      select: { year: true, month: true },
+    });
+    const present = new Set(
+      rows.map((r) => fmtYearMonth(r.year, r.month)),
+    );
+    return months.every(([y, m]) => present.has(fmtYearMonth(y, m)));
+  }
+
   // ── Internals ───────────────────────────────────────────
 
   /**
    * Load every `MonthlyLimit` row whose `(year, month)` falls within
-   * `[start, end]` (inclusive on both ends).
+   * `[start, end]` (inclusive on both ends). Returns the RAW nullable
+   * columns — the fallback merge is `mergeLimits`'s job (it needs the
+   * fallback, which is resolved in parallel with this query).
    */
   private async _loadMonthlyLimits(
     start: Date,
     end: Date,
-  ): Promise<Record<string, MonthLimit>> {
+  ): Promise<Record<string, StoredMonthLimit>> {
     const months = enumerateYearMonth(start, end);
     if (months.length === 0) return {};
 
@@ -128,21 +198,12 @@ export class KmCalcService {
       },
     });
 
-    const out: Record<string, MonthLimit> = {};
+    const out: Record<string, StoredMonthLimit> = {};
     for (const row of rows) {
-      const km = decimalToNumber(row.kmPerDay);
-      const rate = decimalToNumber(row.ratePerKm);
-      // Skip rows where km OR rate is missing — the engine's fallback logic
-      // will substitute. Mirrors `Code.gs:850-858`. A missing `kmPerSaturday`
-      // must NOT trigger the skip: it is OPT-IN and simply collapses to 0 (the
-      // engine treats that as "feature OFF" for the month).
-      if (km === null || rate === null) continue;
-      const sat = decimalToNumber(row.kmPerSaturday);
       out[fmtYearMonth(row.year, row.month)] = {
-        kmPerDay: km,
-        ratePerKm: rate,
-        // Omit when absent → engine's `resolveMonthLimit` folds undefined → 0.
-        ...(sat !== null ? { kmPerSaturday: sat } : {}),
+        kmPerDay: decimalToNumber(row.kmPerDay),
+        ratePerKm: decimalToNumber(row.ratePerKm),
+        kmPerSaturday: decimalToNumber(row.kmPerSaturday),
       };
     }
     return out;
@@ -193,6 +254,68 @@ export class KmCalcService {
 }
 
 // ─── Pure helpers ────────────────────────────────────────
+
+/**
+ * Build the `'YYYY-MM' → MonthLimit` map km-calc consumes.
+ *
+ * ⚠️ BEHAVIOUR CHANGE (2026-09-20, feature «wyłączane limity gwarancji»).
+ * The previous implementation dropped a `monthly_limits` row WHOLESALE when
+ * either `kmPerDay` or `ratePerKm` was NULL, letting the engine fall back to
+ * 540 km/day + 0.5 EUR/km for that month. With `0` now meaning "guarantee
+ * switched off", that was a live defect: a row `{kmPerDay: 0, ratePerKm: NULL}`
+ * — admin pressing "off" before a rate was ever seeded — produced the MAXIMUM
+ * guarantee instead of none. (It was unreachable only because the write schema
+ * used to reject `0`.)
+ *
+ * The merge is now PER FIELD:
+ *  - a row where all three columns are NULL ≡ no row at all (skipped);
+ *  - each NULL column is filled from the global fallback INDEPENDENTLY, so
+ *    `{kmPerDay: 300, ratePerKm: NULL}` now prices at 300 km/day @ 0.5 EUR/km
+ *    (it used to price at 540 @ 0.5 — the intentional part of this change);
+ *  - `kmPerSaturday` is copied only when present: omitting the key lets the
+ *    engine fold it to 0 ("odd-Saturday feature OFF"), which is the documented
+ *    opt-in behaviour and must NOT become a fallback lookup.
+ *
+ * `snapshot` (when supplied) wins PER MONTH over the merged live row — a
+ * wniosek is re-priced with the limits it was originally priced with. Months
+ * missing from the snapshot keep the live values; months missing from both
+ * are left out entirely and the engine applies the global fallback.
+ *
+ * Exported for unit testing — the service method is the only production caller.
+ */
+export function mergeLimits(
+  stored: Record<string, StoredMonthLimit>,
+  fallback: MonthLimit,
+  snapshot?: Record<string, MonthLimit>,
+): Record<string, MonthLimit> {
+  const out: Record<string, MonthLimit> = {};
+  for (const [key, row] of Object.entries(stored)) {
+    // A completely empty row carries no admin intent — treat it as "no row"
+    // so the engine's own fallback path handles the month.
+    if (
+      row.kmPerDay === null &&
+      row.ratePerKm === null &&
+      row.kmPerSaturday === null
+    ) {
+      continue;
+    }
+    out[key] = {
+      kmPerDay: row.kmPerDay ?? fallback.kmPerDay,
+      ratePerKm: row.ratePerKm ?? fallback.ratePerKm,
+      // Absent ⇒ omit ⇒ engine folds to 0 (feature OFF for the month).
+      ...(row.kmPerSaturday !== null
+        ? { kmPerSaturday: row.kmPerSaturday }
+        : {}),
+    };
+  }
+  if (snapshot) {
+    for (const [key, limit] of Object.entries(snapshot)) {
+      out[key] = limit;
+    }
+  }
+  return out;
+}
+
 
 function parseIso(s: string): Date | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);

@@ -65,6 +65,16 @@ export interface ClaimPermissions {
    * read-only fact block can never be submitted as an edit.
    */
   payloadIncludesCorrections: boolean;
+  /**
+   * «Przelicz wg aktualnych limitów» is rendered in the DOPŁATA block
+   * (docs/14 §16.6). Mirror of `POST /claims/:nrZgl/recalc-limits`:
+   * `@Roles('admin', 'pracownik')` + the service's
+   * `CLAIM_LIMITS_REFRESH_BLOCKED` gate, which allows ONLY `NA_WERYFIKACJI`
+   * (an authorised or decided amount is frozen and moves through a
+   * reklamacja instead). §6.5.13 hard rule: impossible ⇒ REMOVED, not
+   * disabled — so this is a render flag, never a `disabled` prop.
+   */
+  showRecalcLimitsButton: boolean;
 }
 
 export function deriveClaimPermissions({
@@ -91,11 +101,18 @@ export function deriveClaimPermissions({
       ? 'adminInfo'
       : 'locked';
 
+  // Re-pricing is a WRITE, so it follows the same rule as every other action
+  // in this modal: it exists in `edit` mode only (`view` is read-only by
+  // construction — it has no decision panel and no verify button either).
+  const canRecalcLimits =
+    (isAdmin || role === 'pracownik') && status === 'NA_WERYFIKACJI';
+
   return {
     factsEditable,
     factsNotice,
     showVerifyButton: isEdit && canVerifyInStatus,
     requiresVerifiedCheckpoint: status === 'NA_WERYFIKACJI',
     payloadIncludesCorrections: factsEditable,
+    showRecalcLimitsButton: isEdit && canRecalcLimits,
   };
 }

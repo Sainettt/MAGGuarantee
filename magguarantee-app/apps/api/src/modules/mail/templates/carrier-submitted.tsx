@@ -57,7 +57,10 @@ export function CarrierSubmittedEmail({
   paymentEur,
   deeplink,
 }: CarrierSubmittedProps): React.ReactElement {
-  const hasKm = Boolean(kmGuaranteed || kmDriven || kmShortfall);
+  // `!= null`, NOT truthiness — a real `0` (guarantee switched off for the
+  // period, no shortfall) must render as "0 km", not vanish. See
+  // docs/19-known-quirks.md#monthlyLimit-fallback.
+  const hasKm = kmGuaranteed != null || kmDriven != null || kmShortfall != null;
   return (
     <MailLayout
       preview={`Nowy wniosek ${nrZgl} od ${carrierName}`}
@@ -74,20 +77,20 @@ export function CarrierSubmittedEmail({
 
       <DataSection heading="Okres rozliczeniowy">
         <FieldRow label="Zakres dat" value={`${periodFrom} – ${periodTo}`} />
-        {drivenDays ? (
+        {drivenDays != null ? (
           <FieldRow label="Dni przepracowane" value={drivenDays} />
         ) : null}
       </DataSection>
 
       {hasKm ? (
         <DataSection heading="Kilometry">
-          {kmGuaranteed ? (
+          {kmGuaranteed != null ? (
             <FieldRow label="Gwarantowane" value={`${kmGuaranteed} km`} />
           ) : null}
-          {kmDriven ? (
+          {kmDriven != null ? (
             <FieldRow label="Przejechane" value={`${kmDriven} km`} />
           ) : null}
-          {kmShortfall ? (
+          {kmShortfall != null ? (
             <FieldRow
               label="Niedobór"
               value={`${kmShortfall} km`}
@@ -97,7 +100,7 @@ export function CarrierSubmittedEmail({
         </DataSection>
       ) : null}
 
-      {paymentEur ? (
+      {paymentEur != null ? (
         <AmountPanel label="Kwota wnioskowana" value={`${paymentEur} EUR`} />
       ) : null}
     </MailLayout>

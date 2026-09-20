@@ -54,7 +54,8 @@ export function InternalDecisionEmail({
         <FieldRow label="Okres" value={`${periodFrom} – ${periodTo}`} />
       </DataSection>
 
-      {amount ? (
+      {/* `!= null`: a real `0.00 EUR` decision must still print. */}
+      {amount != null ? (
         <AmountPanel label="Kwota" value={`${amount} EUR`} valueColor={criticalColor(tone)} />
       ) : null}
 

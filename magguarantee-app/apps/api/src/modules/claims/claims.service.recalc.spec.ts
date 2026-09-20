@@ -66,6 +66,10 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
       breakdown: [],
       firstDay: null,
       lastDay: null,
+      // Settlement fields (2026-09-20): every month of this fixture has its
+      // guarantee ON, so the active day count equals the total.
+      daysActive: 10,
+      daysTotal: 10,
     },
     status: 'NA_WERYFIKACJI',
     statusChangedAt: null,
@@ -612,5 +616,127 @@ describe('ClaimsService auto-recalc — audit actor attribution', () => {
       raw.recalcFromDelegation('deleg-1', RETURN_AT),
     );
     expect(auditLogs).toEqual([{ action: 'system.claim.autoRecalc', userId: null }]);
+  });
+});
+
+// ── Limits freeze (feature «wyłączane limity gwarancji», 2026-09-20) ──
+
+describe('delegation auto-recalc — limits snapshot', () => {
+  const RETURN = new Date('2026-05-12T00:00:00.000Z');
+
+  it('re-prices with the limits the wniosek was SUBMITTED under, not today\'s', async () => {
+    const { service, kmCalcSpy } = build({
+      claim: makeClaim({
+        breakdown: {
+          totalDays: 10,
+          rawTotalDays: 10,
+          kmGuaranteed: 5_400,
+          ratePerKmEffective: 0.5,
+          breakdown: [
+            {
+              yearMonth: '2026-05',
+              workingDays: 10,
+              kmPerDay: 540,
+              ratePerKm: 0.5,
+              saturdaysCounted: 0,
+              kmPerSaturday: 0,
+              kmFromSaturdays: 0,
+              kmInMonth: 5_400,
+              saturdayDays: [],
+              excludedDays: [],
+            },
+          ],
+          firstDay: null,
+          lastDay: null,
+          daysActive: 10,
+          daysTotal: 10,
+        },
+      }),
+    });
+
+    await service.recalcFromDelegation('deleg-1', RETURN);
+
+    const input = kmCalcSpy.mock.calls[0]![0] as {
+      limitsSnapshot?: Record<string, unknown>;
+    };
+    expect(input.limitsSnapshot).toEqual({
+      '2026-05': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 },
+    });
+    // A month the period may have grown INTO is absent → priced live.
+    expect(input.limitsSnapshot!['2026-06']).toBeUndefined();
+  });
+
+  it('a legacy wniosek with no breakdown falls back to the live limits', async () => {
+    const { service, kmCalcSpy } = build({ claim: makeClaim({ breakdown: null }) });
+
+    await service.recalcFromDelegation('deleg-1', RETURN);
+
+    const input = kmCalcSpy.mock.calls[0]![0] as {
+      limitsSnapshot?: Record<string, unknown>;
+    };
+    expect(input.limitsSnapshot).toBeUndefined();
+  });
+
+  it('the departure-side recalc freezes the limits the same way', async () => {
+    const { service, kmCalcSpy } = build({ claim: makeClaim() });
+
+    await service.recalcDepartureFromDelegation(
+      'deleg-1',
+      new Date('2026-04-30T00:00:00.000Z'),
+    );
+
+    const input = kmCalcSpy.mock.calls[0]![0] as {
+      limitsSnapshot?: Record<string, unknown>;
+    };
+    // The default fixture has an EMPTY breakdown array ⇒ no snapshot to apply.
+    expect(input.limitsSnapshot).toBeUndefined();
+  });
+
+  it('persists the settlement fields into the recalculated breakdown', async () => {
+    const { service, updateSpy } = build({
+      claim: makeClaim(),
+      kmResult: {
+        totalDays: 20,
+        kmGuaranteed: 2_700,
+        breakdown: [
+          {
+            yearMonth: '2026-05',
+            workingDays: 10,
+            kmPerDay: 270,
+            ratePerKm: 0.5,
+            saturdaysCounted: 0,
+            kmPerSaturday: 0,
+            kmFromSaturdays: 0,
+            kmInMonth: 2_700,
+            saturdayDays: [],
+            excludedDays: [],
+          },
+          {
+            yearMonth: '2026-06',
+            workingDays: 10,
+            kmPerDay: 0,
+            ratePerKm: 0.5,
+            saturdaysCounted: 0,
+            kmPerSaturday: 0,
+            kmFromSaturdays: 0,
+            kmInMonth: 0,
+            saturdayDays: [],
+            excludedDays: [],
+          },
+        ],
+      },
+      droveSum: 9_000,
+    });
+
+    await service.recalcFromDelegation('deleg-1', RETURN);
+
+    const patch = updateSpy.mock.calls[0]![1] as UpdateClaimData;
+    expect(patch.breakdown?.daysActive).toBe(10);
+    expect(patch.breakdown?.daysTotal).toBe(20);
+    expect(patch.breakdown?.mileageEffective).toBe(4_500);
+    // Only half the mileage is charged: 2_700 − 4_500 = −1_800 (no dopłata),
+    // instead of 2_700 − 9_000 under the old formula.
+    expect(patch.kmDifference).toBe(-1_800);
+    expect(patch.paymentEur).toBe(0);
   });
 });

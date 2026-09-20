@@ -20,6 +20,7 @@ import type {
   ClaimFilters,
   PreviewClaimDto,
   PreviewClaimResponse,
+  RecalcLimitsPreviewDto,
   SubmitClaimDto,
   SubmitReklamacjaDto,
   UpdateClaimDto,
@@ -31,6 +32,8 @@ import {
   listClaims,
   previewExistingClaim,
   previewNewClaim,
+  previewRecalcClaimLimits,
+  recalcClaimLimits,
   submitClaim,
   submitReklamacja,
   updateClaim,
@@ -226,5 +229,55 @@ export function useUploadAuthorizationConfirmation(
       qc.invalidateQueries({ queryKey: CLAIMS_KEY });
       opts?.onSuccess?.(...args);
     },
+  });
+}
+
+/**
+ * `POST /claims/:nrZgl/recalc-limits` — re-price the wniosek with today's
+ * limits (docs/14 §16.6). Invalidates the whole claims tree, not just the
+ * detail: the amounts change, so the list row, the live `/preview` (which is
+ * pinned to the wniosek's limits SNAPSHOT — a different snapshot now) and the
+ * verification checkpoint state all have to be refetched.
+ */
+export function useRecalcClaimLimits(
+  nrZgl: string,
+  opts?: UseMutationOptions<ClaimDto, Error, void>,
+) {
+  const qc = useQueryClient();
+  return useMutation<ClaimDto, Error, void>({
+    mutationFn: () => recalcClaimLimits(nrZgl),
+    // The 422 gate carries a ready Polish message the dialog renders itself.
+    meta: SUPPRESS_GLOBAL_ERROR,
+    ...opts,
+    onSuccess: (...args) => {
+      qc.invalidateQueries({ queryKey: [...CLAIMS_KEY, 'detail', nrZgl] });
+      qc.invalidateQueries({ queryKey: CLAIMS_KEY });
+      opts?.onSuccess?.(...args);
+    },
+  });
+}
+
+/**
+ * `GET /claims/:nrZgl/recalc-limits/preview` — the dry run the confirmation
+ * dialog is built on (docs/14 §16.6).
+ *
+ * Gated on the dialog being open: it must run on EVERY open (the limits may
+ * have moved since the last look), hence `staleTime: 0`. `retry: false` +
+ * `SUPPRESS_GLOBAL_ERROR` because the expected failure is the 422 status gate,
+ * whose Polish text the dialog renders itself — a global toast would say the
+ * same thing twice and a retry would just re-fail.
+ */
+export function useRecalcClaimLimitsPreview(
+  nrZgl: string,
+  options?: { enabled?: boolean },
+) {
+  return useQuery<RecalcLimitsPreviewDto>({
+    queryKey: [...CLAIMS_KEY, 'recalcLimitsPreview', nrZgl],
+    queryFn: () => previewRecalcClaimLimits(nrZgl),
+    enabled: (options?.enabled ?? true) && Boolean(nrZgl),
+    retry: false,
+    staleTime: 0,
+    gcTime: 0,
+    meta: SUPPRESS_GLOBAL_ERROR,
   });
 }

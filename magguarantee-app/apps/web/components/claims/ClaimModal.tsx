@@ -43,6 +43,7 @@ import {
   Loader2,
   Lock,
   Pencil,
+  RefreshCw,
   ShieldAlert,
   ShieldCheck,
   Truck,
@@ -84,6 +85,7 @@ import { StatusBadge } from '@/components/carrier/StatusBadge';
 import { AutoRecalcBadge } from '@/components/claims/AutoRecalcBadge';
 import { HoursReadout } from '@/components/claims/HoursReadout';
 import { RecalcBadge } from '@/components/claims/RecalcBadge';
+import RecalcLimitsDialog from '@/components/claims/RecalcLimitsDialog';
 import { ReklamacjaResolutionChip } from '@/components/claims/ReklamacjaResolutionChip';
 import {
   deriveClaimPermissions,
@@ -948,6 +950,7 @@ function ModalBody({
           prog={prog}
           liveDrivenDays={liveDrivenDays}
           showExceedsHint={showExceedsHint}
+          showRecalcLimits={perms.showRecalcLimitsButton}
           tUnified={tUnified}
         />
 
@@ -1742,6 +1745,7 @@ function DoplataBlock({
   prog,
   liveDrivenDays,
   showExceedsHint,
+  showRecalcLimits,
   tUnified,
 }: {
   claim: ClaimDto;
@@ -1753,9 +1757,20 @@ function DoplataBlock({
   liveDrivenDays: number;
   /** `true` when dopłata > próg AND the claim is still pre-decision. */
   showExceedsHint: boolean;
+  /**
+   * §16.6 — «Przelicz wg aktualnych limitów» belongs to the AMOUNT, so it
+   * lives here and never in the footer (the footer belongs to the verdict; a
+   * third button next to Zaakceptuj / Odrzuć would read as a third verdict).
+   * Removed, never disabled, when the role or the status forbids it.
+   */
+  showRecalcLimits: boolean;
   tUnified: ReturnType<typeof useTranslations<'employee.claims.modal.unified'>>;
 }) {
   const tEdit = useTranslations('employee.claims.modal.edit');
+  const tRecalcLimits = useTranslations(
+    'employee.claims.modal.recalcLimits',
+  );
+  const [recalcLimitsOpen, setRecalcLimitsOpen] = useState(false);
 
   return (
     <section className="space-y-3 border-t border-border pt-5">
@@ -1763,11 +1778,28 @@ function DoplataBlock({
         <h3 className="text-xs font-bold uppercase tracking-wider text-text-sub">
           {tUnified('doplataSection')}
         </h3>
-        <RecalcBadge
-          state={recalcState}
-          baseAmount={claim.paymentEur}
-          previewAmount={liveDoplata}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          {/* The badge is the LIVE debounced recalc of the verifier's own
+              edits; the button pulls a DIFFERENT set of limits. They coexist
+              deliberately and never conflict. */}
+          <RecalcBadge
+            state={recalcState}
+            baseAmount={claim.paymentEur}
+            previewAmount={liveDoplata}
+          />
+          {showRecalcLimits && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              title={tRecalcLimits('buttonHint')}
+              onClick={() => setRecalcLimitsOpen(true)}
+            >
+              <RefreshCw size={14} aria-hidden />
+              {tRecalcLimits('button')}
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Locked / computed field — same recipe as amountApproved (§6.5.4):
@@ -1792,6 +1824,16 @@ function DoplataBlock({
         {tEdit('amountApprovedAuto')}
       </FormDescription>
 
+      {/* Without this line the button above is inexplicable: the amounts are a
+          SNAPSHOT of the limits in force at submission, not a live figure. */}
+      {showRecalcLimits && (
+        <p className="text-xs text-text-sub">
+          {tRecalcLimits('snapshotNote', {
+            date: formatDateFull(claim.createdAt),
+          })}
+        </p>
+      )}
+
       {/* Soft próg-autoryzacji hint — informational only, never blocks
           (matches legacy). Shown when the live dopłata exceeds the threshold
           for this claim's driven-days band AND the claim is still
@@ -1813,8 +1855,19 @@ function DoplataBlock({
 
       {claim.breakdown && (
         <div className="pt-1">
-          <BreakdownTable breakdown={claim.breakdown} />
+          <BreakdownTable
+            breakdown={claim.breakdown}
+            mileage={claim.mileage}
+          />
         </div>
+      )}
+
+      {showRecalcLimits && (
+        <RecalcLimitsDialog
+          open={recalcLimitsOpen}
+          onOpenChange={setRecalcLimitsOpen}
+          claim={claim}
+        />
       )}
     </section>
   );

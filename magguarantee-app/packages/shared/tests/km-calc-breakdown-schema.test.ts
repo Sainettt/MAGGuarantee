@@ -65,3 +65,46 @@ describe('KmCalcBreakdownSchema — firstDay / lastDay', () => {
     expect(res.success).toBe(false);
   });
 });
+
+describe('KmCalcBreakdownSchema — settlement fields (2026-09-20)', () => {
+  it('legacy row backfills daysActive/daysTotal to totalDays, leaves mileageEffective undefined', () => {
+    const parsed = KmCalcBreakdownSchema.parse(BASE);
+    expect(parsed.daysActive).toBe(20);
+    expect(parsed.daysTotal).toBe(20);
+    // Deliberately NOT backfilled — the UI falls back to `claim.mileage`.
+    expect(parsed.mileageEffective).toBeUndefined();
+  });
+
+  it('a fresh row round-trips all three settlement fields', () => {
+    const parsed = KmCalcBreakdownSchema.parse({
+      ...BASE,
+      daysActive: 12,
+      daysTotal: 30,
+      mileageEffective: 2_400,
+    });
+    expect(parsed.daysActive).toBe(12);
+    expect(parsed.daysTotal).toBe(30);
+    expect(parsed.mileageEffective).toBe(2_400);
+  });
+
+  it('a fully-disabled period parses (daysActive = 0, mileageEffective = 0)', () => {
+    const parsed = KmCalcBreakdownSchema.parse({
+      ...BASE,
+      kmGuaranteed: 0,
+      daysActive: 0,
+      daysTotal: 22,
+      mileageEffective: 0,
+    });
+    expect(parsed.daysActive).toBe(0);
+    expect(parsed.mileageEffective).toBe(0);
+  });
+
+  it('rejects negative settlement values', () => {
+    expect(() =>
+      KmCalcBreakdownSchema.parse({ ...BASE, daysActive: -1 }),
+    ).toThrow();
+    expect(() =>
+      KmCalcBreakdownSchema.parse({ ...BASE, mileageEffective: -0.01 }),
+    ).toThrow();
+  });
+});

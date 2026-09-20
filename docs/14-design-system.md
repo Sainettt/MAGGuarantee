@@ -917,22 +917,25 @@ Audit-log хранится в Postgres (legacy `ensureAuditLogSheet` → Prisma 
 
 ### `<LimitsRow>` (admin → limity, inline-edit)
 
+> ⚠️ **EXTENDED by §16 (2026-09-20) — «Wyłączenie gwarancji».** Строка получила **два чекбокса** (вкл/выкл дневной и субботней гарантии), **четвёртое состояние ячейки** (`unsaved`) и **трёх-статусный визуальный контракт строки** (не сконфигурирован / выключен / активен). Раздел ниже остаётся базовой анатомией; всё, что касается включения-выключения, три состояния, массового применения и отображения выключенного месяца у перевозчика — читать в **§16, он авторитетный**.
+
 Таблица KM-гарантий per (**год × месяц**) на `/employee/limits`: селектор года в шапке + 12 строк (по одной на месяц) с gap-fill на фронте — месяцы без строки в БД рендерятся пустыми, первое сохранение делает upsert. **Нет** измерения carrier/vehicle — лимит глобальный на месяц.
 
 Reference: legacy `ensureLimitySheet` (в легаси модель была per `carrier × vehicle × period`; в новом приложении упрощена до `год × месяц`).
 
-**Anatomy:** строка таблицы с **тремя** редактируемыми ячейками (`<EditableCell>`, `h-9 w-28 tabular-nums`, PL-запятая как десятичный разделитель):
-- **Km/dzień** (`kmPerDay`, `step=0.01`),
-- **Km/sobota** (`kmPerSaturday`, `step=0.01`) — помесячный опт-ин субботней гарантии: `> 0` ⇒ ВКЛ для месяца, пусто/0 ⇒ ВЫКЛ (см. [01-overview.md](01-overview.md)),
-- **rate** (`ratePerKm`, «Stawka € / km», `step=0.0001`).
+**Anatomy:** строка таблицы с **тремя** редактируемыми ячейками (`<EditableCell>`, `h-9 w-24 tabular-nums`, PL-запятая как десятичный разделитель):
+- **Km/dzień** (`kmPerDay`, `step=0.01`) — ячейка содержит чекбокс включения (§16.2),
+- **Km/sobota** (`kmPerSaturday`, `step=0.01`) — помесячный опт-ин субботней гарантии: `> 0` ⇒ ВКЛ для месяца, пусто/0 ⇒ ВЫКЛ (см. [01-overview.md](01-overview.md)); ячейка содержит свой чекбокс,
+- **rate** (`ratePerKm`, «Stawka € / km», `step=0.0001`) — чекбокса нет, ставка не выключается (§16.1).
 
-Порядок колонок: `Miesiąc | Km/dzień | Km/sobota | rate | Zaktualizowano`. Каждая ячейка — save-on-blur (`PUT /limits/:yearMonth`, partial body — шлётся только изменённое поле); при пустом/невалидном вводе значение откатывается к последнему валидному.
+Порядок колонок: `Miesiąc | Km/dzień | Km/sobota | rate | Zaktualizowano`. Каждая ячейка — save-on-blur (`PUT /limits/:yearMonth`, partial body — шлётся только изменённое поле); при невалидном вводе значение откатывается к последнему валидному. **Пустой ввод больше не «no-op»** — см. §16.3.
 
 **Состояния cell:**
 - `idle` — обычный input.
 - `saving` — спиннер 12px справа от input, input disabled.
 - `success` (кратко после save) — **зелёная рамка инпута** `border-success focus:border-success`, fade-out.
 - `error` — `border-danger`, value reverted, toast.
+- `unsaved` (§16.3, NEW) — чекбокс включён, значение ещё не введено: `border-warning bg-warning/5` + под-строка «Nie zapisano — obowiązuje 0 km».
 
 **Прочие колонки** — read-only: `Zaktualizowano` (updatedAt). Месяцы года без данных показывают пустые ячейки-инпуты — отдельной «add-row» кнопки нет, сетка всегда 12 строк.
 
@@ -978,7 +981,7 @@ Reference: legacy `ensureUsersSheet`. Стандартный `<DataTable>` Phase
 - [ ] `<ClaimsTable>` использует `<DataTable>` Phase 2; колонки в порядке таблицы выше; full-row click → modal.
 - [ ] ⚠️ **SUPERSEDED Phase 7.1 (§6.5):** `<ClaimVerificationModal>` теперь = центральная `<Dialog max-w-4xl>` с `mode: 'view' | 'edit'`, **не** `<Sheet>`. Сохраняются: live recalc badge debounce 300ms; live dopłata пересчёт при правке фактов; авторизация автоматическая через `MaksimGateBlock` в основном потоке (ручного таба «Autoryzacja» нет — этап 5.1). Раскладку (факты → dopłata → decyzja), парные строки, секондари-«Historia» и Maksim-gate читать из §6.5.
 - [ ] `<AuditRow>` имеет `default` и `compact` варианты; deterministic avatar-color hash; expand → JSON-diff `<pre>`.
-- [ ] `<LimitsRow>` — три inline-ячейки (`kmPerDay` / `kmPerSaturday` / `ratePerKm`), save-on-blur, optimistic update, rollback + toast on error.
+- [ ] `<LimitsRow>` — три inline-ячейки (`kmPerDay` / `kmPerSaturday` / `ratePerKm`), save-on-blur, optimistic update, rollback + toast on error. ⚠️ **Дополнено §16** (два чекбокса, состояние `unsaved`, три состояния строки).
 - [ ] `<UsersTable>` — role-badge color map; kebab actions; deactivate ≠ delete.
 - [ ] `lib/nav.config.ts` — pracownik видит ровно `[Dashboard, Wnioski]`, не больше.
 - [ ] **Ноль новых color/radius/shadow tokens** в Tailwind config относительно Phase 2.
@@ -1194,6 +1197,8 @@ Replaces legacy `.claim-card` (`index.html:419-426`). Layout (mobile-first singl
 Click → navigate to claim detail (`/carrier/claims/[id]`). Empty list → `<EmptyState>` with `<FileText />` icon and CTA "Złóż wniosek" linking to `/carrier/claims/new`.
 
 ### `<BreakdownTable>` — preview table on new-claim form
+
+> ⚠️ **EXTENDED by §16.5 (2026-09-20).** Месяц с выключенной гарантией (`kmPerDay === 0 && kmPerSaturday === 0`) рендерится по отдельному контракту: бейдж «Gwarancja wyłączona», приглушённая строка, `—` вместо ставки-призрака; смешанный период получает `<GuaranteeGapNotice>` **над** таблицей; период целиком без гарантии заменяет таблицу на `<EmptyState>`. **§16.5 авторитетен** для всего, что касается нулевых месяцев.
 
 Compact read-only table fed by server preview response. Columns:
 
@@ -4409,6 +4414,8 @@ This is intentionally the **same muted surface** as the computed-field pattern s
 
 ### 6.5.4 Dopłata — locked / computed field, live, ABOVE the decision
 
+> ⚠️ **EXTENDED by §16.6 (2026-09-20).** В header-строке этого блока, справа от `<RecalcBadge>`, добавляется вторичная кнопка **«Przelicz wg aktualnych limitów»** (`variant="outline"`, роли `admin` / `weryfikator`) + статичная строка `recalc.snapshotNote`. Кнопка **не** уезжает в футер — футер принадлежит решению. Диалог сравнения «было → станет» — §16.6.
+
 A single full-width block between the fact pairs and the decyzja block. This is the **`amountApproved` locked/computed-field pattern** already specified in §"Read-only / computed field pattern" (b) — render it verbatim (the canonical class string with `<Lock>` icon, `readOnly tabIndex={-1}`, `bg-input/40`, `<FormDescription>` "wyliczana automatycznie"):
 
 - **Live recalculation, decision-independent.** It recomputes via the live `/claims/preview` dopłata whenever any of the 6 facts changes (debounced 300ms — keep the Phase 4 debounce), **regardless of which `targetStatus` is selected**. The verifier sees the financial consequence of their corrections *before* committing to a decision. This is the reason it sits above decyzja, not inside the ZAAKCEPTOWANO branch.
@@ -7603,3 +7610,507 @@ KPI-кафели показывали числа, но были тупиком: 
 ### §15.5 — Правило
 
 Новый KPI-кафель обязан отвечать на вопрос «а что за этим числом?»: либо `href` на отфильтрованный список, либо `onClick`-тоггл с `<VehicleStatusFilterBar>`. Инертный кафель допустим только там, где за числом действительно нет набора строк.
+
+---
+
+## §16 — Wyłączenie gwarancji: три состояния лимита, массовое применение, выключенный месяц у перевозчика (NEW 2026-09-20 — AUTHORITATIVE)
+
+> **Scope.** Админский лист `/employee/limits` получает возможность **выключать гарантию** (месяц целиком и/или субботы), массово применять значения к диапазону месяцев; перевозчик и сотрудник получают честное объяснение, почему в выключенном месяце ноль. Этот раздел авторитетен для всего, что касается «включено / выключено / не настроено». Он **расширяет** §`<LimitsRow>` (Phase 4) и §`<BreakdownTable>` (Phase 3) и **добавляет** одну кнопку в §6.5.4.
+>
+> **Ноль новых токенов, ноль новых примитивов.** Всё собирается из `Checkbox`, `Input`, `Select`, `MultiSelect`, `Badge`, `Dialog` / `FormDialog`, `EmptyState`, `Button` и уже существующих цветовых токенов.
+
+### §16.1 — Три состояния лимита — визуальный контракт (главное решение)
+
+В БД у `kmPerDay` три значения с **противоположными** последствиями, и именно это нужно развести визуально:
+
+| # | БД | Что реально применится | Название в UI (PL) |
+|---|---|---|---|
+| **A** | строки нет / `NULL` | **fallback 540 км/день, 0,50 €/км** — месяц молча платит по максимуму | «domyślne» |
+| **B** | `0` | 0 км — гарантии нет | «wyłączona» |
+| **C** | `> 0` | заданное значение | — (нормальное состояние) |
+
+**Правило (locked): состояние A никогда не выражается пустотой.** Пустая ячейка не имеет права быть единственным сигналом «действует 540» — это ровно та ловушка, из-за которой забытый месяц выплачивает максимум. Поэтому состояние A всегда несёт **текст**, а не отсутствие текста.
+
+**Треугольник различий — по трём осям сразу** (цвет, текст, поверхность), чтобы 12 строк читались одним взглядом:
+
+| Ось | A. Nieskonfigurowany | B. Wyłączona | C. Aktywna |
+|---|---|---|---|
+| Поверхность `<tr>` | `bg-card` (обычная) | **`bg-input/40`** — единственная приглушённая строка в таблице | `bg-card` |
+| Ячейка «Miesiąc» | название + **под-строка** `text-[11px] text-warning-dark dark:text-warning`: «domyślne: 540 km/dz. · 0,50 €/km» | название `text-text-sub` + под-строка `text-[11px] text-text-sub`: «gwarancja wyłączona (0 km)» | только название `font-semibold text-text`, под-строки нет |
+| Инпут `Km/dzień` | пустой, `placeholder="540 (domyślnie)"` (`placeholder:text-text-sub`) | `readOnly`, значение `0`, поверхность `bg-input/40 text-text-sub cursor-not-allowed` | обычный `bg-input text-text` |
+| Чекбокс в ячейке | **отмечен** (гарантия действует — по умолчанию) | снят | отмечен |
+
+**Почему в состоянии A чекбокс отмечен.** Чекбокс отвечает на вопрос «действует ли гарантия в этом месяце», а не «есть ли строка в БД». При `NULL` гарантия действует (по fallback), поэтому галка стоит. Инвариант, который нельзя ломать: **снятая галка ⟺ значение `0` ⟺ ноль километров.** Одно значение — одно прочтение.
+
+**Цвет — только у состояния A, только в под-строке.** Это единственное цветное пятно в таблице, потому что A — единственное опасное состояние («ты этого не настраивал, а деньги идут по максимуму»). Заливки `bg-warning/10` на всю строку **нет**: год без конфигурации превратился бы в янтарную стену, и сигнал перестал бы быть сигналом. Приглушённая заливка зарезервирована за B — «выключено» должно читаться как выключенный свет, а не как ошибка.
+
+**Зачёркивание запрещено** во всей таблице лимитов: `line-through` читается как «удалено/аннулировано» (и так же озвучивается скринридерами `<del>`-семантикой), тогда как выключенный месяц — это действующая конфигурация, а сохранённая ставка вообще ценность, которую мы бережём.
+
+**Страничная сводка (одна, не двенадцать).** Над таблицей, когда `count > 0` месяцев в состоянии A, — тихая нота в рецепте §7.7.1b / `<LockNotice>` (нейтральная, `role="note"`, `flex items-start gap-2 rounded-md border border-border bg-input px-3 py-2 text-xs text-text-sub`), иконка `<Info size={14} className="mt-0.5 shrink-0" />`, копия `limits.defaultsNotice`. Именно здесь живёт объяснение fallback-а целиком — под-строки в рядах его только маркируют.
+
+**Обратной дороги в A нет.** UI **не** предоставляет способа вернуть месяц в `NULL`: как только строка записана, месяц сконфигурирован. Состояние A — только стартовое, никогда не пункт назначения. «Очистить месяц» в меню строки не добавлять.
+
+**У `kmPerSaturday` состояний только два.** `NULL` и `0` поведенчески идентичны (гарантии по субботам нет), поэтому суббота рендерится как чистый вкл/выкл: снятая галка + `readOnly` `0` + `bg-input/40` в своей ячейке. Под-строки «domyślne» у субботы **нет** никогда — fallback субботы равен нулю, скрытого риска нет.
+
+**Ставка (`ratePerKm`) не выключается.** У неё нет чекбокса и нет состояния «выключена»: ставка — цена километра, а не количество. В выключенном месяце она **сохраняется и остаётся редактируемой** (значение рендерится `text-text-sub`, поверхность обычная `bg-input`), с нативным `title` = `limits.disabledRateHint`. Это прямое следствие бизнес-требования «ставку не вводить заново».
+
+### §16.2 — Размещение чекбоксов: внутри ячеек, а не в колонке слева
+
+**Решение (locked): чекбокс живёт внутри той ячейки, которой управляет.** Ячейка `Km/dzień` = `[✓] [ 540 ]`, ячейка `Km/sobota` = `[ ] [ 0 ]`. Ни отдельной колонки слева от «Miesiąc», ни чекбокса в шапке колонки.
+
+| Отвергнутый вариант | Почему нет |
+|---|---|
+| Чекбокс первой колонкой / слева от названия месяца | Чекбокс в первой колонке таблицы — это **универсальная конвенция row-selection**. А у нас на этой же странице появляется массовое применение, т.е. пользователь вправе ждать, что галка выбирает строку для bulk-операции. Коллизия смыслов на ровном месте. |
+| Чекбокс субботы в шапке колонки `Km/sobota` | Чекбокс в `<th>` — тоже конвенция, и тоже чужая: «select all». Плюс он физически не может отличаться по месяцам, а суббота настраивается помесячно. |
+
+**Что даёт выбранный вариант:** (1) чекбокс и число, которым он управляет, — одно визуальное целое; (2) два чекбокса стоят рядом в соседних ячейках, на одном уровне, **никакой вложенности** — это и есть визуальное доказательство их независимости; (3) первая колонка остаётся свободной под будущий row-select, если он когда-нибудь понадобится.
+
+**Анатомия ячейки:**
+
+| Элемент | Tailwind |
+|---|---|
+| Обёртка ячейки | `flex items-center gap-2` |
+| Хит-область чекбокса | `<label className="inline-flex h-9 w-9 shrink-0 items-center justify-center cursor-pointer rounded-md hover:bg-input">` — сам `<Checkbox className="h-4 w-4">` внутри |
+| Инпут | `h-9 w-24 tabular-nums` (был `w-28` — 4 единицы отданы чекбоксу; колонка по ширине не меняется) |
+| Высота строки | `h-12` сохраняется; под-строки состояний ложатся в тот же ряд как второй `text-[11px]`-лайн в ячейке «Miesiąc», строка растёт до `h-14` только при наличии под-строки |
+
+**Touch-target.** 36×36 хит-области достаточно: WCAG 2.2 **2.5.8 Target Size (Minimum) — AA = 24×24 CSS px**; 44×44 это 2.5.5 (AAA). В плотной админ-таблице 36×36 — сознательный компромисс, зафиксированный здесь, чтобы web-agent не «чинил» его до 44 и не ломал ритм строки.
+
+**Доступное имя** у каждого чекбокса обязано содержать месяц, потому что видимая подпись — это заголовок колонки, а скринридер идёт по ячейкам: `aria-label={t('toggleDay', { month: 'Styczeń 2026' })}`. Для субботы — `toggleSaturday`.
+
+**Независимость проговаривается словами, а не только вёрсткой.** Под таблицей (или в `subtitle` шапки) — одна строка `text-xs text-text-sub`: `limits.independenceHint` («Gwarancja dzienna i sobotnia są niezależne — miesiąc może mieć włączone tylko soboty.»). Снятие месячной галки **никогда** не трогает субботнюю (и наоборот): ни автоматически, ни с подтверждением.
+
+### §16.3 — Поведение при переключении: снятие пишет, установка — нет
+
+Механика утверждена и переносится в UI буквально:
+
+| Действие | Что происходит с БД | Что видит пользователь |
+|---|---|---|
+| **Снять галку** | немедленный `PUT { kmPerDay: 0 }` (соотв. `{ kmPerSaturday: 0 }`) | ячейка `saving` → `success`-вспышка → строка оседает в состояние **B** |
+| **Поставить галку** | **ничего не пишется** | инпут разблокируется, получает фокус, ячейка переходит в состояние **`unsaved`** |
+| **Ввести значение и уйти с поля** | `PUT { kmPerDay: <value> }` | обычный `saving` → `success`, строка становится **C** |
+| **Уйти с пустого поля / Esc** | ничего | галка **сама возвращается в снятое положение**, `unsaved` гаснет, строка остаётся **B** |
+
+**Почему установка галки не пишет `NULL`:** запись `NULL` вернула бы месяц в состояние A, т.е. подарила бы ему fallback 540 — ровно та ловушка, от которой уходит вся фича. Это hard rule: **ни одна кнопка в приложении не пишет в лимит `NULL`.**
+
+**`unsaved` — четвёртое состояние ячейки** (дополняет `idle / saving / success / error` из §`<LimitsRow>`):
+
+| Аспект | Значение |
+|---|---|
+| Инпут | `border-warning bg-warning/5 focus:border-warning` |
+| Под-строка | `text-[11px] text-warning-dark dark:text-warning` = `limits.unsaved` («Nie zapisano — obowiązuje 0 km») |
+| Поверхность строки | **остаётся `bg-input/40`** (состояние B) — в БД по-прежнему ноль, и строка честно об этом говорит |
+| a11y | `aria-describedby` инпута → id под-строки; при авто-возврате галки — `role="status"` sr-only «Gwarancja pozostaje wyłączona» |
+
+Ключевой смысл: галка стоит, а строка всё ещё выглядит выключенной — это не баг вёрстки, это правда («пока не введёшь число, действует 0»).
+
+**Память о прежнем значении (session-local).** При снятии галки компонент запоминает последнее `> 0` значение в локальном state. При повторной установке галки в том же сеансе инпут **предзаполняется** этим числом как черновик — но всё ещё в состоянии `unsaved`, запись происходит только по blur. Это снимает раздражение «выключил случайно — потерял 540», не нарушая правило «установка галки ничего не пишет». Если памяти нет (страница перезагружена) — инпут пустой, `unsaved` с полной подсказкой `limits.unsavedHint`.
+
+**Подтверждения на одиночное выключение нет.** Один клик, мгновенно обратимый, значение помнится в сессии, ставка сохраняется, событие уходит в аудит. Диалог здесь был бы церемонией. Подтверждение появляется только у массовой операции (§16.4), где необратимость реальна.
+
+**Смена года / уход со страницы при наличии `unsaved`-ячеек** не блокируется и не подтверждается: черновик ничего не изменил в БД, а состояние на сервере (0) уже корректно отражено в строке.
+
+### §16.4 — `<BulkLimitsDialog>` — массовое применение к диапазону месяцев
+
+Триггер: кнопка в шапке страницы, рядом с переключателем года — `<Button variant="outline" size="sm"><CalendarRange size={14}/> Zastosuj do wielu miesięcy</Button>`. Не primary: основной сценарий страницы — точечная правка, массовая операция вторична.
+
+Поверхность — **`<FormDialog>` (§13.1), `sm:max-w-[900px]`**, а не `<ConfirmDialog>`: внутри форма + живая сводка, которые в `max-w-md` не живут.
+
+**Три секции в `FormDialogBody` (`space-y-6`, заголовки — `<FormSection title>`):**
+
+**1. `Zakres`.** Три взаимоисключающих режима — radio-группа, отрисованная как сегменты (`role="radiogroup"`, каждый сегмент — `<label>` с `border-border` / выбранный `border-brand/60 bg-brand-50/40 dark:bg-brand/10`, рецепт нажатого KPI-кафеля §15.1):
+
+| Режим | Контрол | Дефолт |
+|---|---|---|
+| «Cały rok {year}» | — | ✔ выбран |
+| «Od – do» | два `<Select>` месяцев (`Od`, `Do`); если `Do < Od` — границы меняются местами молча, ошибку не показываем | — |
+| «Wybrane miesiące» | `<MultiSelect>` с 12 месяцами, `sort={false}` (календарный порядок важнее алфавитного) | — |
+
+Область действия — **только выбранный на странице год**. Кросс-годовой диапазон не поддерживается; год печатается в заголовке диалога и в подписи кнопки, чтобы это не пришлось угадывать.
+
+**2. `Wartości`.** Здесь форма **сознательно отличается** от строки таблицы: у строки два состояния (вкл/выкл), у массовой операции их три — вкл, выкл и **«не трогать»**. Чекбокс третье состояние честно выразить не может (indeterminate, переключаемый кликом, — гадание), поэтому:
+
+| Поле | Контрол | Опции |
+|---|---|---|
+| `Km / dzień` | `<Select>` действия | «Bez zmian» (default) · «Włącz i ustaw wartość» · «Wyłącz (0 km)» |
+| `Km / sobota` | `<Select>` действия | те же три |
+| `Stawka € / km` | просто `<Input>` | пусто = «bez zmian» (`placeholder="bez zmian"`); у ставки нет вкл/выкл (§16.1) |
+
+Числовой инпут для km появляется только при «Włącz i ustaw wartość» — через `RevealInset` (§13.2.1), чтобы подполе читалось как принадлежащее своему селекту. «Włącz и ustaw» с пустым значением — ошибка сабмита `limits.bulk.errorValueRequired`, а не тихая запись нуля (иначе мы бы воспроизвели ту же двусмысленность, что чиним).
+
+**3. `Podsumowanie` — обязательная честная сводка.** Живая, пересчитывается на каждое изменение формы, стоит **над футером** и содержит:
+
+- Заголовок: `limits.bulk.summaryHeadline` — «Zmienisz **9** z **12** miesięcy roku 2026.»
+- Строка перезаписи: `limits.bulk.summaryOverwrite` — «6 miesięcy ma już ustawione wartości — zostaną nadpisane.» (считает только месяцы в состоянии C/B, т.е. те, где что-то реально затирается).
+- Строка необратимости: `limits.bulk.summaryIrreversible` — «Operacji nie można cofnąć. Poprzednie wartości pozostaną widoczne w audycie.»
+- **Таблица «Obecnie → Po zmianie»**, максимум 12 строк (скролла не будет):
+
+```
+Miesiąc     Km/dzień              Km/sobota          Stawka €/km
+Styczeń     540      →  0         wyłączone → —      0,50 → bez zmian
+Luty        brak (dom.) →  600    wyłączone → 300    0,50 → 0,52
+Marzec      600      →  bez zmian …
+```
+
+| Слот | Оформление |
+|---|---|
+| Старое значение | `text-text-sub tabular-nums` |
+| Стрелка | `<ArrowRight size={12} className="text-text-sub" />` (не символ `→` в тексте — иконка, чтобы скринридер не читал «стрелка вправо» 36 раз; вокруг колонки `<th>`-подписи `Obecnie` / `Po zmianie`) |
+| Новое значение | `font-semibold text-text tabular-nums` |
+| Без изменений | `text-text-sub` «bez zmian», вся ячейка приглушена |
+| Строка, где вообще ничего не меняется | вся `<tr>` `text-text-sub`, считается отдельно: `limits.bulk.summaryNoop` |
+| Пустое значение в «Obecnie» | **никогда не пустая ячейка** — «brak (domyślne)» для A, «wyłączone» для B |
+
+Именно эта таблица и есть подтверждение. **Второго, вложенного `<ConfirmDialog>` нет** — стек диалогов хуже, чем одна честная сводка, а primary-кнопка у нас и так брендово-красная. Финальная кнопка **называет объём**: `limits.bulk.apply` = «Zastosuj do **9** miesięcy» (правило §6.5.12 «кнопка называет то, что коммитит»; голое «Zapisz» запрещено).
+
+**Футер:** `[Anuluj (ghost)] [Zastosuj do {n} miesięcy (primary)]`. Primary `disabled`, пока нет ни одного выбранного месяца или ни одного изменения (`errorNoMonths` / `errorNoChanges` рендерится `mr-auto text-sm text-danger role="alert"` — стандартный validation-summary слот §13.1).
+
+**Результат и частичный отказ.** Диалог закрывается только при полном успехе → `toast.success(limits.bulk.successToast)`. При провале части месяцев диалог **остаётся открытым**, и таблица сводки превращается в таблицу результата: у каждой строки статус-слот — `<Check size={14} className="text-success"/>` / `<X size={14} className="text-danger"/>`; в футере появляется `<Button variant="outline">Ponów nieudane</Button>`. Пер-строчный результат — единственный честный способ показать частичную запись.
+
+> **Зависимость (не дизайнерское решение, вопрос к api-agent):** если бэкенд даст **один** bulk-эндпоинт с атомарной транзакцией, слой «пер-строчный результат» не понадобится — останется просто success/error. Если это N последовательных `PUT`, пер-строчный результат обязателен. Дизайн поддерживает оба варианта; предпочтителен атомарный.
+
+### §16.5 — Выключенный месяц у перевозчика: `<BreakdownTable>` + сводка периода
+
+Самая рискованная часть фичи: без пометок месяц с нулями читается как баг или как «у них что-то не настроено».
+
+#### §16.5.1 Как UI понимает, что месяц выключен
+
+Производится из уже существующих полей `MonthBreakdownDto` — **новых API-полей на уровне месяца не требуется**:
+
+| Признак | Условие | Трактовка |
+|---|---|---|
+| `disabled` | `kmPerDay === 0 && kmPerSaturday === 0` | гарантии нет весь месяц |
+| `saturdayOnly` | `kmPerDay === 0 && kmFromSaturdays > 0` | будни выключены, субботы работают |
+| обычный | иначе | без пометок |
+
+#### §16.5.2 Оформление месяца
+
+| Слот | `disabled` | `saturdayOnly` |
+|---|---|---|
+| Строка / карточка | `bg-input/40` | обычная (ничего не приглушаем — месяц платит) |
+| Метка у месяца | `<Badge variant="outline" className="border-border text-text-sub text-[11px]">Gwarancja wyłączona</Badge>` | `<Badge variant="outline" className="border-border text-text-sub text-[11px]">Gwarancja tylko w soboty</Badge>` |
+| `Km/dz.` | `0` в `text-text-sub` | `0` в `text-text-sub` |
+| `€/km` | **`—`** + нативный `title={t('rateNoneTitle')}` | обычная ставка |
+| `Km/mc` | `0` в `text-text-sub` (снимаем `font-semibold` — нечего подчёркивать) | обычная |
+| Карточный вариант (`< 34rem`) | бейдж под названием месяца; строка `€/km` **не рендерится вовсе** (в карточке строку можно убрать, в таблице — только поставить `—`) | как обычно |
+
+**Ставка-призрак — отдельное правило (locked).** Движок при `kmGuaranteed = 0` отдаёт `ratePerKmEffective` как глобальный fallback `0,50` — это артефакт вычисления, а не решение человека. **Везде, где `kmGuaranteed === 0`, ставка рендерится как `—`, а не как число:** в `<BreakdownTable>` (per-month и footer), в stat-карточках `<LivePreviewPanel>`, в §6.5 `ClaimModal`. Формулировка правила: *цена километра имеет смысл только при ненулевом количестве километров; ноль километров по 0,50 € — это не цена, это шум, который выглядит как обещание.*
+
+#### §16.5.3 Сводка смешанного периода — `<GuaranteeGapNotice>`
+
+Композиция (не примитив), рендерится **над** `<BreakdownTable>`, а не под ней: «сломанной» выглядит сама таблица нулей, поэтому объяснение обязано быть прочитано раньше цифр.
+
+| Аспект | Значение |
+|---|---|
+| Условие рендера | есть ≥1 месяц `disabled` **и** ≥1 месяц с гарантией (смешанный период) |
+| Элемент | `<p role="note" className="flex items-start gap-2 rounded-md border border-border bg-input px-3 py-2 text-xs text-text-sub">` |
+| Иконка | `<Info size={14} aria-hidden className="mt-0.5 shrink-0" />` — нейтральная, **не** semantic-цветная |
+| Числа внутри | `<strong className="font-semibold text-text tabular-nums">` — тон спокойный, цифры читаемые |
+| Тон | **нейтральный, не warning.** Это не ошибка и не предупреждение — это действующая конфигурация. Янтарь здесь означал бы «что-то пошло не так», а пошло всё ровно так, как настроено. |
+
+Текст (`carrier.breakdown.gapNotice` + `gapNoticeMonth`), пример рендера:
+
+> ⓘ Okres obejmuje miesiąc bez gwarancji (**luty 2026: 7 z 18 dni**). Do rozliczenia przyjęto **11 dni** i **5 500** z **9 000** km.
+
+Данные: `daysActive`, `daysTotal`, `mileageEffective` — новые поля `KmCalcBreakdown` (api-agent); `mileage` — уже есть; список выключенных месяцев и их дни — из строк breakdown.
+
+> **Зависимость данных (api-agent, не решение дизайна):** формулировка «luty 2026: 7 z 18 dni» требует, чтобы строка выключенного месяца **сохраняла реальное число своих дней** (`workingDays + saturdaysCounted`) даже при нулевых км. Если движок обнуляет дни выключенного месяца, нужно отдельное поле `daysInMonth` на строке — иначе фразу нечем наполнить. Это единственная зависимость §16.5 от бэкенда сверх трёх согласованных полей.
+
+Метка месяца в тексте — **строчная** PL-форма + год («luty 2026»), в EN — обычная заглавная («February 2026»). Несколько выключенных месяцев перечисляются через «, » внутри тех же скобок, `count` управляет формой слова «miesiąc».
+
+#### §16.5.4 Весь период без гарантии — пустое состояние вместо таблицы нулей
+
+Условие: **все** строки breakdown `disabled` (эквивалентно `kmGuaranteed === 0 && daysActive === 0`). Таблица/карточки **не рендерятся вообще** — вместо них `<EmptyState>`:
+
+| Слот | Значение |
+|---|---|
+| `icon` | `<CalendarOff />` |
+| `iconClassName` | по умолчанию (muted) — **не** danger |
+| `title` | `carrier.breakdown.allDisabledTitle` |
+| `message` | `carrier.breakdown.allDisabledBody` |
+| Обёртка | остаётся `bg-card rounded-lg border border-border` — карточка есть, содержимое заменено |
+
+`<GuaranteeGapNotice>` в этом случае **не** рендерится (иначе два объяснения одного факта); футер «Razem (km gwarant.)» тоже скрыт — нулевой итог под пустым состоянием бессмыслен. Блок «Pierwszy / ostatni dzień okresu» скрывается по тому же правилу.
+
+Финансовая часть вокруг (stat-карточки `<LivePreviewPanel>`, dopłata в §6.5) показывает `0,00 €` и `—` вместо ставки — она не прячется: перевозчик должен видеть, что сумма именно ноль, а не «не посчитано».
+
+> **Вне зоны дизайна (вопрос владельцу процесса):** блокировать ли подачу wniosek-а, когда весь период без гарантии. Здесь зафиксировано только визуальное поведение превью. Существующий гейт §6.5.5 («Gwarancja wyjeżdżona — wniosek można tylko odrzucić» при `kmDifference <= 0`) в этом случае и так срабатывает на стороне сотрудника.
+
+### §16.6 — «Przelicz wg aktualnych limitów» — кнопка и диалог сравнения
+
+Суммы wniosek-а заморожены снимком лимитов на момент подачи (см. memory: `Claim.mileage`/суммы — снимок). Когда админ исправил лимит задним числом, это **единственный** способ подтянуть исправление.
+
+**Размещение (locked): в блоке DOPŁATA (§6.5.4), в его header-строке, справа от `<RecalcBadge>` — не в футере.** Футер принадлежит решению («Zaakceptuj» / «Odrzuć»), и кнопка пересчёта рядом с ними читалась бы как третий вариант решения. Пересчёт действует на сумму — значит, живёт у суммы, ровно по нарративу §6.5.2 «факты → следствие → решение».
+
+| Аспект | Значение |
+|---|---|
+| Вид | `<Button type="button" variant="outline" size="sm"><RefreshCw size={14} aria-hidden /> Przelicz wg aktualnych limitów</Button>` — вторичное действие, никогда не primary и не destructive |
+| Роли | `admin`, `pracownik` (wniosek верифицирует именно `pracownik`; у `weryfikator` по [03-roles.md](03-roles.md) доступа к `/claims` нет вовсе). Для остальных **не рендерится** (§6.5.13 hard rule: невозможное действие удаляется, а не дизейблится) |
+| Состояния статуса | скрыта на уже решённых wniosek-ах (`ZAAKCEPTOWANO` / `ODRZUCONO`) — пересчёт решённой заявки идёт через реклямацию, это другой поток |
+| Контекст рядом | статичная строка в том же блоке `text-xs text-text-sub`: `recalc.snapshotNote` — «Kwoty wyliczono wg limitów z dnia złożenia wniosku (12.02.2026).» Без неё кнопка необъяснима |
+| Отличие от `<RecalcBadge>` | бейдж — живой дебаунс-пересчёт по правкам фактов; кнопка — подтягивание **другого набора лимитов**. Их видно одновременно, они не конфликтуют |
+
+**`<RecalcLimitsDialog>`** — небольшой `<Dialog max-w-md>` (не `<ConfirmDialog>`: тому можно передать только строку, а нам нужна таблица «было → станет»).
+
+```
+┌ Przelicz wg aktualnych limitów ──────────────────────┐
+│ Porównaj kwoty wyliczone przy złożeniu wniosku       │
+│ z kwotami wg aktualnych limitów.                     │
+│                                                      │
+│                  Wniosek (obecnie)   Wg aktualnych   │
+│  Km gwarantowane      9 000      →        5 500      │
+│  Dopłata           1 750,00 €    →      950,00 €     │
+│                                Różnica: −800,00 €    │
+│                                                      │
+│              [ Anuluj ]  [ Zastosuj nowe kwoty ]     │
+└──────────────────────────────────────────────────────┘
+```
+
+| Слот | Оформление |
+|---|---|
+| Старые значения | `text-text-sub tabular-nums` |
+| Новые значения | `font-semibold text-text tabular-nums` |
+| Дельта | `text-xs text-text-sub tabular-nums` со знаком — **без семантического цвета**. Уменьшение выплаты не «плохо» и не «ошибка»; красная дельта обвиняла бы систему в поломке |
+| Загрузка | `<Skeleton className="h-4 w-20">` в колонке «Wg aktualnych», confirm `disabled`, пока идёт запрос |
+| Изменений нет | вместо таблицы — `recalc.noChange`; футер схлопывается в одну `[Zamknij]` (нечего применять) |
+| Новая сумма = 0 | под таблицей строка `text-xs text-text-sub`: `recalc.toZero` — «Po przeliczeniu wniosek nie generuje dopłaty — będzie można go tylko odrzucić.» (связка с гейтом §6.5.5) |
+| Ошибка | диалог **остаётся открытым**, `toast.error(recalc.error)`, повтор доступен |
+
+После применения: значения в модалке обновляются, живой `<RecalcBadge>` показывает «Aktualne», `toast.success(recalc.success)`. Если в этот момент выбранная `targetStatus` была акцептующей, а `kmDifference` стал `<= 0`, — выбор сбрасывается в плейсхолдер ровно по правилу §6.5.5, отдельного сообщения не нужно.
+
+### §16.7 — i18n-контракт (PL default + EN) — готово к вставке
+
+**`messages/pl.json` → `limits`** (добавить к существующему объекту):
+
+```json
+"toggleDay": "Gwarancja km/dzień — {month}",
+"toggleSaturday": "Gwarancja km/sobota — {month}",
+"stateDefault": "domyślne: {kmPerDay} km/dz. · {rate} €/km",
+"stateDisabled": "gwarancja wyłączona (0 km)",
+"unsaved": "Nie zapisano — obowiązuje 0 km",
+"unsavedHint": "Wpisz wartość, aby włączyć gwarancję. Puste pole = miesiąc pozostaje wyłączony.",
+"unsavedRevertedSr": "Gwarancja pozostaje wyłączona",
+"disabledRateHint": "Stawka zachowana — zostanie użyta po ponownym włączeniu gwarancji.",
+"independenceHint": "Gwarancja dzienna i sobotnia są niezależne — miesiąc może mieć włączone tylko soboty.",
+"defaultsNotice": "{count, plural, one {# miesiąc nie ma konfiguracji} few {# miesiące nie mają konfiguracji} many {# miesięcy nie ma konfiguracji} other {# miesięcy nie ma konfiguracji}} — obowiązuje wartość domyślna: {kmPerDay} km/dzień i {rate} €/km.",
+"placeholderDefault": "{value} (domyślnie)",
+"placeholderNoChange": "bez zmian",
+"bulk": {
+  "trigger": "Zastosuj do wielu miesięcy",
+  "title": "Zastosuj limity do wielu miesięcy",
+  "description": "Zmiany dotyczą tylko roku {year}. Pola pozostawione jako „bez zmian” nie nadpisują istniejących wartości.",
+  "rangeLegend": "Zakres",
+  "rangeAll": "Cały rok {year}",
+  "rangeFromTo": "Od – do",
+  "rangeCustom": "Wybrane miesiące",
+  "from": "Od",
+  "to": "Do",
+  "monthsPlaceholder": "Wybierz miesiące",
+  "monthsSearchPlaceholder": "Szukaj miesiąca",
+  "monthsEmpty": "Brak wyników",
+  "valuesLegend": "Wartości",
+  "actionNoChange": "Bez zmian",
+  "actionSet": "Włącz i ustaw wartość",
+  "actionDisable": "Wyłącz (0 km)",
+  "kmPerDayAction": "Km / dzień",
+  "kmPerSaturdayAction": "Km / sobota",
+  "ratePerKm": "Stawka € / km",
+  "rateHint": "Puste pole = bez zmian. Stawka jest zachowywana również przy wyłączeniu gwarancji.",
+  "errorValueRequired": "Podaj wartość albo wybierz „Bez zmian” lub „Wyłącz (0 km)”.",
+  "errorNoMonths": "Wybierz co najmniej jeden miesiąc.",
+  "errorNoChanges": "Nie wybrano żadnej zmiany.",
+  "summaryLegend": "Podsumowanie",
+  "summaryHeadline": "Zmienisz {changed} z {total} miesięcy roku {year}.",
+  "summaryOverwrite": "{count, plural, one {# miesiąc ma już ustawione wartości — zostanie nadpisany} few {# miesiące mają już ustawione wartości — zostaną nadpisane} many {# miesięcy ma już ustawione wartości — zostaną nadpisane} other {# miesięcy ma już ustawione wartości — zostaną nadpisane}}.",
+  "summaryNoop": "{count, plural, one {# miesiąc bez zmian} few {# miesiące bez zmian} many {# miesięcy bez zmian} other {# miesięcy bez zmian}}.",
+  "summaryIrreversible": "Operacji nie można cofnąć. Poprzednie wartości pozostaną widoczne w audycie.",
+  "colMonth": "Miesiąc",
+  "colCurrent": "Obecnie",
+  "colNew": "Po zmianie",
+  "arrowSr": "zmiana na",
+  "valueNone": "brak (domyślne)",
+  "valueDisabled": "wyłączone",
+  "valueNoChange": "bez zmian",
+  "apply": "{count, plural, one {Zastosuj do # miesiąca} few {Zastosuj do # miesięcy} many {Zastosuj do # miesięcy} other {Zastosuj do # miesięcy}}",
+  "applying": "Zapisywanie…",
+  "successToast": "{count, plural, one {Zaktualizowano # miesiąc} few {Zaktualizowano # miesiące} many {Zaktualizowano # miesięcy} other {Zaktualizowano # miesięcy}}",
+  "partialError": "{count, plural, one {Nie zapisano # miesiąca} few {Nie zapisano # miesięcy} many {Nie zapisano # miesięcy} other {Nie zapisano # miesięcy}} — spróbuj ponownie.",
+  "retryFailed": "Ponów nieudane",
+  "rowOk": "Zapisano",
+  "rowFailed": "Błąd zapisu"
+}
+```
+
+**`messages/en.json` → `limits`:**
+
+```json
+"toggleDay": "Daily km guarantee — {month}",
+"toggleSaturday": "Saturday km guarantee — {month}",
+"stateDefault": "default: {kmPerDay} km/day · {rate} €/km",
+"stateDisabled": "guarantee disabled (0 km)",
+"unsaved": "Not saved — 0 km applies",
+"unsavedHint": "Enter a value to enable the guarantee. An empty field means the month stays disabled.",
+"unsavedRevertedSr": "The guarantee stays disabled",
+"disabledRateHint": "Rate kept — it will be used again when the guarantee is re-enabled.",
+"independenceHint": "The daily and Saturday guarantees are independent — a month can have Saturdays only.",
+"defaultsNotice": "{count, plural, one {# month has no configuration} other {# months have no configuration}} — the default applies: {kmPerDay} km/day and {rate} €/km.",
+"placeholderDefault": "{value} (default)",
+"placeholderNoChange": "no change",
+"bulk": {
+  "trigger": "Apply to several months",
+  "title": "Apply limits to several months",
+  "description": "Changes affect {year} only. Fields left as “no change” do not overwrite existing values.",
+  "rangeLegend": "Range",
+  "rangeAll": "Whole year {year}",
+  "rangeFromTo": "From – to",
+  "rangeCustom": "Selected months",
+  "from": "From",
+  "to": "To",
+  "monthsPlaceholder": "Select months",
+  "monthsSearchPlaceholder": "Search month",
+  "monthsEmpty": "No results",
+  "valuesLegend": "Values",
+  "actionNoChange": "No change",
+  "actionSet": "Enable and set a value",
+  "actionDisable": "Disable (0 km)",
+  "kmPerDayAction": "Km / day",
+  "kmPerSaturdayAction": "Km / Saturday",
+  "ratePerKm": "Rate € / km",
+  "rateHint": "Empty field = no change. The rate is kept even when the guarantee is disabled.",
+  "errorValueRequired": "Enter a value, or choose “No change” or “Disable (0 km)”.",
+  "errorNoMonths": "Select at least one month.",
+  "errorNoChanges": "No change selected.",
+  "summaryLegend": "Summary",
+  "summaryHeadline": "You are changing {changed} of {total} months in {year}.",
+  "summaryOverwrite": "{count, plural, one {# month already has values — it will be overwritten} other {# months already have values — they will be overwritten}}.",
+  "summaryNoop": "{count, plural, one {# month unchanged} other {# months unchanged}}.",
+  "summaryIrreversible": "This cannot be undone. Previous values remain visible in the audit log.",
+  "colMonth": "Month",
+  "colCurrent": "Current",
+  "colNew": "After the change",
+  "arrowSr": "changes to",
+  "valueNone": "none (default)",
+  "valueDisabled": "disabled",
+  "valueNoChange": "no change",
+  "apply": "{count, plural, one {Apply to # month} other {Apply to # months}}",
+  "applying": "Saving…",
+  "successToast": "{count, plural, one {# month updated} other {# months updated}}",
+  "partialError": "{count, plural, one {# month not saved} other {# months not saved}} — please try again.",
+  "retryFailed": "Retry failed months",
+  "rowOk": "Saved",
+  "rowFailed": "Save failed"
+}
+```
+
+**`messages/pl.json` → `carrier.breakdown`** (добавить):
+
+```json
+"guaranteeDisabled": "Gwarancja wyłączona",
+"guaranteeSaturdayOnly": "Gwarancja tylko w soboty",
+"rateNoneTitle": "Brak stawki — gwarancja wyłączona w tym miesiącu",
+"gapNotice": "Okres obejmuje {count, plural, one {miesiąc bez gwarancji} few {miesiące bez gwarancji} many {miesięcy bez gwarancji} other {miesięcy bez gwarancji}} ({months}). Do rozliczenia przyjęto {daysActive} dni i {mileageEffective} z {mileage} km.",
+"gapNoticeMonth": "{month}: {days} z {daysTotal} dni",
+"allDisabledTitle": "Brak gwarancji w tym okresie",
+"allDisabledBody": "Dla wszystkich miesięcy tego okresu gwarancja przebiegu jest wyłączona, dlatego wniosek nie generuje dopłaty. Skontaktuj się z opiekunem, jeśli to pomyłka."
+```
+
+**`messages/en.json` → `carrier.breakdown`:**
+
+```json
+"guaranteeDisabled": "Guarantee disabled",
+"guaranteeSaturdayOnly": "Saturdays only",
+"rateNoneTitle": "No rate — the guarantee is disabled for this month",
+"gapNotice": "The period includes {count, plural, one {a month} other {months}} without a mileage guarantee ({months}). The settlement uses {daysActive} days and {mileageEffective} of {mileage} km.",
+"gapNoticeMonth": "{month}: {days} of {daysTotal} days",
+"allDisabledTitle": "No guarantee in this period",
+"allDisabledBody": "The mileage guarantee is disabled for every month of this period, so the claim generates no compensation. Contact your account manager if this is a mistake."
+```
+
+**`messages/pl.json` → `employee.claims.modal.recalc`** (новый объект):
+
+```json
+"recalc": {
+  "button": "Przelicz wg aktualnych limitów",
+  "buttonHint": "Pobierz aktualne limity i przelicz kwoty wniosku.",
+  "snapshotNote": "Kwoty wyliczono wg limitów z dnia złożenia wniosku ({date}).",
+  "dialogTitle": "Przelicz wg aktualnych limitów",
+  "dialogBody": "Porównaj kwoty wyliczone przy złożeniu wniosku z kwotami wg aktualnych limitów. Zapis nadpisze kwoty wniosku.",
+  "colBefore": "Wniosek (obecnie)",
+  "colAfter": "Wg aktualnych limitów",
+  "rowKmGuaranteed": "Km gwarantowane",
+  "rowPayment": "Dopłata",
+  "delta": "Różnica: {value}",
+  "noChange": "Limity nie zmieniły się — kwoty pozostaną bez zmian.",
+  "toZero": "Po przeliczeniu wniosek nie generuje dopłaty — będzie można go tylko odrzucić.",
+  "confirm": "Zastosuj nowe kwoty",
+  "loading": "Przeliczanie…",
+  "success": "Przeliczono wg aktualnych limitów",
+  "error": "Nie udało się przeliczyć wniosku"
+}
+```
+
+**`messages/en.json` → `employee.claims.modal.recalc`:**
+
+```json
+"recalc": {
+  "button": "Recalculate with current limits",
+  "buttonHint": "Fetch the current limits and recalculate the claim amounts.",
+  "snapshotNote": "Amounts were calculated with the limits in force on the submission date ({date}).",
+  "dialogTitle": "Recalculate with current limits",
+  "dialogBody": "Compare the amounts calculated at submission with the amounts under the current limits. Saving overwrites the claim amounts.",
+  "colBefore": "Claim (current)",
+  "colAfter": "With current limits",
+  "rowKmGuaranteed": "Guaranteed km",
+  "rowPayment": "Compensation",
+  "delta": "Difference: {value}",
+  "noChange": "The limits have not changed — the amounts stay the same.",
+  "toZero": "After recalculation the claim generates no compensation — it can only be rejected.",
+  "confirm": "Apply the new amounts",
+  "loading": "Recalculating…",
+  "success": "Recalculated with current limits",
+  "error": "Could not recalculate the claim"
+}
+```
+
+### §16.8 — Компоненты / файлы / токены (сводка для web-agent)
+
+| Изменение | Где | Тип |
+|---|---|---|
+| `<LimitsRow>` — два чекбокса в ячейках, три состояния строки, состояние `unsaved`, память прежнего значения | `apps/web/components/limits/LimitsRow.tsx` | правка |
+| `<LimitsView>` — кнопка «Zastosuj do wielu miesięcy», страничная нота `defaultsNotice`, подсказка `independenceHint` | `apps/web/app/(employee)/employee/(admin)/limits/LimitsView.tsx` | правка |
+| `<BulkLimitsDialog>` — `<FormDialog>` + `<Select>` + `<MultiSelect>` + сводная таблица | `apps/web/components/limits/BulkLimitsDialog.tsx` | **новый** (композиция) |
+| `<BreakdownTable>` — бейджи `disabled` / `saturdayOnly`, `—` вместо ставки-призрака, пустое состояние всего периода | `apps/web/components/carrier/BreakdownTable.tsx` | правка |
+| `<GuaranteeGapNotice>` — нота смешанного периода | рядом с `BreakdownTable.tsx` (может жить в том же файле) | **новый** (композиция) |
+| `<RecalcLimitsDialog>` — сравнение «было → станет» | `apps/web/components/claims/RecalcLimitsDialog.tsx` | **новый** (композиция `<Dialog>`) |
+| Кнопка «Przelicz wg aktualnych limitów» + `snapshotNote` в блоке DOPŁATA | `apps/web/components/claims/ClaimModal.tsx` (§6.5.4) | правка |
+| i18n-ключи §16.7 | `messages/pl.json`, `messages/en.json` | правка |
+
+**Токены: 0 новых.** Используются существующие `bg-card`, `bg-input`, `bg-input/40`, `bg-warning/5`, `border-warning`, `text-warning-dark` / `dark:text-warning`, `text-text`, `text-text-sub`, `border-border`, `border-brand/60`, `bg-brand-50/40`, `text-success`, `text-danger`. **0 правок** `tailwind.config.ts` / `globals.css`.
+
+**Иконки (Lucide):** `Info`, `CalendarRange`, `CalendarOff`, `ArrowRight`, `RefreshCw`, `Check`, `X`. Эмодзи — нет.
+
+### §16.9 — Acceptance checklist (§16, web-agent)
+
+- [ ] **Три состояния различимы одним взглядом.** Скриншот года, где есть все три, читается без наведения: A — под-строка «domyślne: …» янтарным + `placeholder="540 (domyślnie)"`; B — `bg-input/40` строка + «gwarancja wyłączona (0 km)»; C — обычная строка без под-строки.
+- [ ] **Инвариант «снятая галка ⟺ 0 ⟺ ноль км»** соблюдён во всех трёх состояниях; при `NULL` галка **стоит**.
+- [ ] Пустая ячейка **нигде** не является единственным сигналом fallback-а; страничная нота `defaultsNotice` появляется при `count > 0`.
+- [ ] **`line-through` отсутствует** во всей таблице лимитов и в breakdown.
+- [ ] Оба чекбокса — **внутри своих ячеек**, ни одного чекбокса в первой колонке и ни одного в `<th>`; хит-область 36×36 (`h-9 w-9`), `aria-label` содержит месяц.
+- [ ] Выключение месяца **не** трогает субботу и наоборот; `independenceHint` отрендерен.
+- [ ] Снятие галки пишет `0` немедленно; установка галки **не отправляет ни одного запроса**; состояние `unsaved` показывает «Nie zapisano — obowiązuje 0 km» и `aria-describedby`.
+- [ ] Blur пустого поля при стоящей галке возвращает галку в снятое положение + sr-объявление; повторная установка в том же сеансе предзаполняет прежнее значение как черновик.
+- [ ] **Ни один путь UI не отправляет `NULL`** в `kmPerDay` / `kmPerSaturday`.
+- [ ] Ставка в выключенном месяце **сохраняется, остаётся редактируемой**, имеет `title` с объяснением.
+- [ ] `<BulkLimitsDialog>`: три режима диапазона; для km — `<Select>` из трёх опций (не чекбокс); пустая ставка = «bez zmian»; «Włącz i ustaw» без значения блокирует сабмит.
+- [ ] Сводка массовой операции показывает **пер-месячные «Obecnie → Po zmianie»**, счётчик перезаписываемых месяцев и строку необратимости; в «Obecnie» никогда нет пустой ячейки.
+- [ ] Кнопка применения **называет число месяцев**; второго вложенного диалога подтверждения нет.
+- [ ] Частичный отказ оставляет диалог открытым с пер-строчным результатом и «Ponów nieudane» (либо, при атомарном bulk-эндпоинте, простым success/error).
+- [ ] Выключенный месяц у перевозчика: бейдж «Gwarancja wyłączona», приглушённая строка, `Km/mc` без `font-semibold`.
+- [ ] **Ставка-призрак спрятана везде**, где `kmGuaranteed === 0` (breakdown per-month и footer, stat-карточки, `ClaimModal`) — рендерится `—`, `0,50` не появляется ни в одном месте.
+- [ ] `<GuaranteeGapNotice>` появляется только в смешанном периоде, стоит **над** таблицей, нейтрального тона, цифры выделены весом.
+- [ ] Период целиком без гарантии → `<EmptyState>` с `<CalendarOff />` вместо таблицы; футер «Razem» и блок граничных дней скрыты; ноты `gapNotice` нет.
+- [ ] Кнопка «Przelicz wg aktualnych limitów» — `variant="outline"` в блоке DOPŁATA, **не** в футере; отсутствует (не дизейблится) для ролей вне `admin`/`pracownik` и на решённых wniosek-ах; рядом стоит `snapshotNote`.
+- [ ] `<RecalcLimitsDialog>` показывает «было → станет» до записи; дельта **без семантического цвета**; вариант «Limity nie zmieniły się» схлопывает футер в «Zamknij»; ошибка оставляет диалог открытым.
+- [ ] Dark mode: все новые поверхности (`bg-input/40`, `bg-warning/5`, бейджи, нота) проверены в обеих темах; контраст AA (`text-warning-dark` на `bg-card` в light, `text-warning` на `bg-card` в dark).
+- [ ] Клавиатура: чекбокс → инпут → следующий чекбокс в естественном порядке табуляции; Esc в `unsaved`-ячейке отменяет черновик; фокус после закрытия диалогов возвращается на триггер.
+- [ ] **0 новых токенов, 0 новых примитивов, 0 правок `tailwind.config.ts` / `globals.css`.**

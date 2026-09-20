@@ -95,6 +95,10 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
       breakdown: [],
       firstDay: null,
       lastDay: null,
+      // Settlement fields (2026-09-20): every month of this fixture has its
+      // guarantee ON, so the active day count equals the total.
+      daysActive: 20,
+      daysTotal: 20,
     },
     status: 'NA_WERYFIKACJI',
     statusChangedAt: new Date('2026-04-21T08:00:00.000Z'),
@@ -962,5 +966,107 @@ describe('ClaimsService.previewKmCalc — guarantee gate (delegation-derived pat
     expect(
       (out as { delegationWarning?: unknown }).delegationWarning,
     ).toBeUndefined();
+  });
+});
+
+// ── Limits freeze (feature «wyłączane limity gwarancji», 2026-09-20) ──
+
+describe('preview — limits snapshot', () => {
+  beforeAll(() => {
+    jest.useFakeTimers().setSystemTime(NOW);
+  });
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
+  const SNAPSHOT_BREAKDOWN = {
+    totalDays: 20,
+    rawTotalDays: 20,
+    kmGuaranteed: 10_800,
+    ratePerKmEffective: 0.5,
+    breakdown: [
+      {
+        yearMonth: '2026-04',
+        workingDays: 20,
+        kmPerDay: 540,
+        ratePerKm: 0.5,
+        saturdaysCounted: 0,
+        kmPerSaturday: 0,
+        kmFromSaturdays: 0,
+        kmInMonth: 10_800,
+        saturdayDays: [],
+        excludedDays: [],
+      },
+    ],
+    firstDay: null,
+    lastDay: null,
+    daysActive: 20,
+    daysTotal: 20,
+  };
+
+  it('EXISTING wniosek: the preview prices the snapshot, so it matches what PATCH will persist', async () => {
+    const seeded = makeClaim({ breakdown: SNAPSHOT_BREAKDOWN });
+    const km = makeKmCalcService();
+    const svc = makeService(
+      makeClaimsRepo([seeded]),
+      makeCarriersRepo([]),
+      makeVehiclesRepo([]),
+      km.svc,
+    );
+
+    await svc.previewForExisting(makeAuth('pracownik'), seeded.nrZgl, PREVIEW_DTO);
+
+    const input = km.calls[0]!.input as {
+      limitsSnapshot?: Record<string, unknown>;
+    };
+    expect(input.limitsSnapshot).toEqual({
+      '2026-04': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 },
+    });
+  });
+
+  it('CARRIER new-claim path: no snapshot exists yet → live limits', async () => {
+    const carrier = makeCarrier();
+    const km = makeKmCalcService();
+    const svc = makeService(
+      makeClaimsRepo([]),
+      makeCarriersRepo([carrier]),
+      makeVehiclesRepo([]),
+      km.svc,
+      makeDailyKmRepo(8_000),
+      makeDelegationsRepo(makeDelegationForPreview(true)),
+    );
+
+    await svc.previewKmCalc(makeAuth('przewoznik', carrier.userId), {
+      delegationId: 'deleg-1',
+      hoursAdjusted: 0,
+      dateStart: '2026-04-01',
+      dateEnd: '2026-04-20',
+      timeFrom: '06:30',
+      timeTo: '14:30',
+      mileage: 8_000,
+    });
+
+    const input = km.calls[0]!.input as {
+      limitsSnapshot?: Record<string, unknown>;
+    };
+    expect(input.limitsSnapshot).toBeUndefined();
+  });
+
+  it('legacy wniosek without a breakdown → live limits (no snapshot to apply)', async () => {
+    const seeded = makeClaim({ breakdown: null });
+    const km = makeKmCalcService();
+    const svc = makeService(
+      makeClaimsRepo([seeded]),
+      makeCarriersRepo([]),
+      makeVehiclesRepo([]),
+      km.svc,
+    );
+
+    await svc.previewForExisting(makeAuth('admin'), seeded.nrZgl, PREVIEW_DTO);
+
+    const input = km.calls[0]!.input as {
+      limitsSnapshot?: Record<string, unknown>;
+    };
+    expect(input.limitsSnapshot).toBeUndefined();
   });
 });

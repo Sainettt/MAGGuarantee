@@ -789,15 +789,23 @@ model GuaranteeIdleEpisode {
 
 // ─── LIMITS, AUDIT, REFRESH, CONFIG, CLAIM-SEQUENCE ─────
 
+// ТРЁХЗНАЧНАЯ СЕМАНТИКА kmPerDay / ratePerKm / kmPerSaturday (2026-09-20):
+//   нет строки / NULL → месяц не сконфигурирован → fallback 540 / 0.5 (суббота — 0)
+//   0                 → гарантия осознанно выключена админом → 0 км за месяц
+//   > 0               → заданное значение
+// @default на этих колонках НЕТ и быть не должно — иначе NULL перестанет
+// отличаться от 0. См. §«LIMITY KM → MonthlyLimit».
 model MonthlyLimit {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   year      Int
   month     Int
-  kmPerDay  Decimal? @db.Decimal(8, 2)        // NULL → fallback 540 — see docs/19-known-quirks.md
-  ratePerKm Decimal? @db.Decimal(6, 4)        // NULL → fallback 0.5
+  kmPerDay  Decimal? @db.Decimal(8, 2)        // NULL → fallback 540; 0 → гарантия OFF (docs/19-known-quirks.md)
+  ratePerKm Decimal? @db.Decimal(6, 4)        // NULL → fallback 0.5;  0 → ставка ноль (осознанно)
   // Odd-Saturday guarantee: km credited per qualifying (1st/3rd/5th) Saturday of
-  // the month; priced at ratePerKm (NO separate EUR rate). NULL/0 ⇒ 0 in km-calc
-  // (fallback owned by the api — km-calc.service / limits — NOT the DB, no default).
+  // the month; priced at ratePerKm (NO separate EUR rate). Здесь — в отличие от
+  // kmPerDay — NULL и 0 поведенчески ИДЕНТИЧНЫ (обе = фича выключена), т.к.
+  // субботний fallback и так 0. Fallback владеет api (km-calc.service / limits),
+  // НЕ БД — no default.
   kmPerSaturday Decimal? @db.Decimal(8, 2)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1119,6 +1127,25 @@ derived hours.
 
 Из «широкой» структуры (год × колонки месяцев) делаем «длинную»: одна строка = (год, месяц, km/day, eur/km). Каждый год → 12 строк.
 
+#### Трёхзначная семантика значений (2026-09-20)
+
+На админском листе лимитов (`/employee/limits`) есть чекбоксы **«gwarancja włączona»** и **«soboty»**; при снятии галки в БД пишется `0`. Раньше `0` был невозможен (Zod `.positive()`), поэтому `NULL` и `0` считались одним и тем же. **Теперь это разные бизнес-состояния, и разница несёт деньги:**
+
+| Значение в БД | Смысл | Что делает km-calc |
+|---|---|---|
+| строки нет / `NULL` | месяц **не сконфигурирован** | подставляется fallback: 540 км/день, 0.5 €/км; для суббот — `0` |
+| `0` | гарантия **осознанно выключена** администратором | `0` км за этот месяц |
+| `> 0` | заданное значение | как задано |
+
+Следствия:
+
+1. **Существование строки `monthly_limits` — единственный признак того, что администратор осознанно сконфигурировал месяц.** Отсутствующий месяц **НЕ** выключен — он получает fallback 540 / 0.5 (это же правило, что в [19-known-quirks.md](19-known-quirks.md#monthlyLimit-fallback): «не отклоняем wniosek, если строки нет»).
+2. **Fallback владеет API (`km-calc.service.ts`), а не БД.** `@default` на колонках `kmPerDay` / `ratePerKm` / `kmPerSaturday` по-прежнему **НЕТ** и добавлять его нельзя: с дефолтом `NULL` перестанет отличаться от `0`, и «не сконфигурирован» молча превратится в «гарантия выключена» (или наоборот). Единственные источники дефолтов — `AppConfig.km_dziennie_default` (540) и `AppConfig.stawka_eur_default` (0.5).
+3. **Fallback подставляется ПОПОЛЕВО.** Раньше `_loadMonthlyLimits` выбрасывал строку целиком, если в `kmPerDay` **или** `ratePerKm` был `NULL` (месяц получал полный fallback — зеркало `Code.gs:850-858`). Теперь частично заполненная строка сохраняет заданные поля: `kmPerDay = 0` + `ratePerKm = NULL` ⇒ 0 км по fallback-ставке 0.5 €/км. Это изменение поведения **частично заполненных** строк; полностью заполненные и полностью отсутствующие месяцы считаются как раньше.
+4. **`kmPerSaturday` — исключение:** `NULL` и `0` поведенчески **идентичны** (обе = субботняя гарантия для месяца выключена), потому что субботний fallback и так `0`. Чекбокс «soboty» пишет `0` только чтобы сделать намерение явным в UI. В `kmPerDay` разница между `NULL` и `0` принципиальна.
+
+> **Миграции нет.** DDL не менялся — колонки как были `nullable` без `@default`, так и остались; `0` физически был допустим всегда. Изменилась только **интерпретация** значений (в Zod-слое api снят `.positive()` → `.nonnegative()`). См. §«Миграции», примечание после таблицы.
+
 ### Auth-листы (ADMIN/PRACOWNIK/OPIEKUN/PLANISCI/DYSPOZYTOR/EKSPORT/WERYFIKATOR/UZYTKOWNICY) → User + Carrier
 
 8 листов в Sheets — это 8 таблиц с одинаковой структурой, отличаются только `Rola`. В новой схеме это **одна таблица `users`** с полем `role: Role`. Для перевозчика расширенные поля (NIP, IBAN, OpiekunLogin, **Firma/company** и т.д.) живут в отдельной таблице `Carrier`, связанной с `User` 1:1. Это дедупликация структуры.
@@ -1242,6 +1269,8 @@ Prisma-диффер триггеры/функции не интроспекти�
 | `20260722083212_monthly_limit_km_per_saturday` | Odd-Saturday guarantee. Аддитивная миграция: `ALTER TABLE monthly_limits ADD COLUMN kmPerSaturday DECIMAL(8,2)` (nullable, без `@default` — существующие строки бэкфилятся в `NULL`, без потери данных). Семантика: км за одну зачётную нечётную (1-ю/3-ю/5-ю) субботу месяца, оцениваются по `ratePerKm`; `NULL`/`0` ⇒ `0` в km-calc (fallback владеет api — km-calc.service / limits, **НЕ** БД). Та же точность, что у `kmPerDay` (`DECIMAL(8,2)`; km — Decimal, не Float). |
 | `20260914120000_audit_log_append_only_trigger` | Аудит логирования 2026-08-14, п.7. Hand-authored SQL, без изменений данных: функция `audit_log_append_only_guard()` (plpgsql) + триггеры `audit_log_append_only_row` (BEFORE UPDATE OR DELETE, FOR EACH ROW) и `audit_log_append_only_truncate` (BEFORE TRUNCATE, FOR EACH STATEMENT). RAISE на всё, кроме FK-действия `ON DELETE SET NULL` по `userId` после hard-delete пользователя. Семантика, escape hatch и модель угроз — §«AuditLog — append-only на уровне БД». |
 | `20260914120100_add_email_logs` | Аудит логирования 2026-08-14, п.11. Аддитивная: enum `EmailLogStatus {sent, failed}` + таблица **`email_logs`** (журнал финальных исходов email-job; FK `triggeredById → users(id)` `ON DELETE SET NULL ON UPDATE CASCADE`; индексы `createdAt`, `(targetType, targetKey)`, `status`). Hand-added **CHECK** `email_log_attempts_non_negative` (`attempts >= 0`) и `email_log_sent_has_sent_at` (`status <> 'sent' OR sentAt IS NOT NULL`). Колонок для тела письма / кодов / паролей нет и не будет. Строки пишет api email-processor, чистит retention-prune по `EMAIL_LOG_RETENTION_DAYS` (дефолт 180). |
+
+> **Изменения семантики без DDL.** Не всякое изменение модели данных попадает в эту таблицу. 2026-09-20 трёхзначная семантика `monthly_limits.kmPerDay` / `ratePerKm` / `kmPerSaturday` (`NULL` = месяц не сконфигурирован → fallback; `0` = гарантия осознанно выключена; `> 0` = значение) введена **без миграции**: колонки как были nullable без `@default`, так и остались, `0` физически был допустим всегда — поменялась только интерпретация (и Zod-валидация в api: `.positive()` → `.nonnegative()`). Строки в таблице миграций для этого нет и быть не должно; описание — в §«LIMITY KM → MonthlyLimit».
 
 Production deploy: `prisma migrate deploy` в CI/CD пайплайне (без `--create-only`).
 
