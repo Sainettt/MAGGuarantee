@@ -18,7 +18,7 @@
 // the submit/preview paths use, so the project invariant
 // "preview == submit == recalc" holds.
 
-import type { KmCalcResult } from '@magguarantee/shared';
+import type { BoardDay, KmCalcResult } from '@magguarantee/shared';
 
 import { AuditContext } from '../../common/audit/audit-context';
 import { AuditWriter } from '../audit/audit.service';
@@ -131,6 +131,7 @@ interface Built {
   auditLogs: { action: string; userId: string | null }[];
   kmCalcSpy: jest.Mock;
   sumSpy: jest.Mock;
+  boardSpy: jest.Mock;
 }
 
 /** The weryfikator whose `markReturned` / `markInTransit` triggered the recalc. */
@@ -144,6 +145,8 @@ function build(opts: {
   claim: ClaimRow | null;
   kmResult?: Partial<KmCalcResult>;
   droveSum?: number;
+  /** Board rows a MIXED period is settled on (docs/20 §0⁵). */
+  board?: BoardDay[];
   /**
    * `operator` (default): the recalc runs inside the audited HTTP request of
    * the outing transition — its production caller. `none`: no ambient
@@ -174,8 +177,10 @@ function build(opts: {
   const kmCalc = { calc: kmCalcSpy } as unknown as KmCalcService;
 
   const sumSpy = jest.fn(async () => opts.droveSum ?? 9_000);
+  const boardSpy = jest.fn(async () => opts.board ?? []);
   const dailyKm = {
     sumDroveKm: sumSpy,
+    listBoardDays: boardSpy,
   } as unknown as VehicleDailyKmRepository;
 
   // The REAL AuditWriter over a fake Prisma client, so its `system.`-prefix
@@ -214,7 +219,7 @@ function build(opts: {
   );
   const service =
     opts.caller === 'none' ? raw : asOperatorRequest(raw, OPERATOR);
-  return { service, updateSpy, auditLogs, kmCalcSpy, sumSpy };
+  return { service, updateSpy, auditLogs, kmCalcSpy, sumSpy, boardSpy };
 }
 
 /**
@@ -692,17 +697,18 @@ describe('delegation auto-recalc — limits snapshot', () => {
     expect(input.limitsSnapshot).toBeUndefined();
   });
 
-  it('persists the settlement fields into the recalculated breakdown', async () => {
-    const { service, updateSpy } = build({
-      claim: makeClaim(),
+  it('a mixed NEW period is settled on the claim vehicle\'s board over that period', async () => {
+    // 25.05–05.06.2026: May guaranteed (25–29 = 5 × 540 = 2700 km), June off.
+    const { service, updateSpy, boardSpy } = build({
+      claim: makeClaim({ dateStart: new Date('2026-05-25T00:00:00.000Z') }),
       kmResult: {
-        totalDays: 20,
+        totalDays: 10,
         kmGuaranteed: 2_700,
         breakdown: [
           {
             yearMonth: '2026-05',
-            workingDays: 10,
-            kmPerDay: 270,
+            workingDays: 5,
+            kmPerDay: 540,
             ratePerKm: 0.5,
             saturdaysCounted: 0,
             kmPerSaturday: 0,
@@ -713,7 +719,7 @@ describe('delegation auto-recalc — limits snapshot', () => {
           },
           {
             yearMonth: '2026-06',
-            workingDays: 10,
+            workingDays: 5,
             kmPerDay: 0,
             ratePerKm: 0.5,
             saturdaysCounted: 0,
@@ -726,17 +732,49 @@ describe('delegation auto-recalc — limits snapshot', () => {
         ],
       },
       droveSum: 9_000,
+      board: [
+        { date: '2026-05-25', state: 'drove', km: 500 },
+        { date: '2026-05-26', state: 'drove', km: 500 },
+        { date: '2026-05-27', state: 'idle', km: null },
+        { date: '2026-05-28', state: 'idle', km: null },
+        { date: '2026-05-29', state: 'idle', km: null },
+        { date: '2026-05-30', state: 'idle', km: null },
+        { date: '2026-05-31', state: 'idle', km: null },
+        // June is switched off — its kilometres are never charged.
+        { date: '2026-06-01', state: 'drove', km: 7_000 },
+      ],
     });
+
+    await service.recalcFromDelegation(
+      'deleg-1',
+      new Date('2026-06-05T00:00:00.000Z'),
+    );
+
+    expect(boardSpy).toHaveBeenCalledWith(
+      'v-1',
+      new Date('2026-05-25T00:00:00.000Z'),
+      new Date('2026-06-06T00:00:00.000Z'),
+    );
+    const patch = updateSpy.mock.calls[0]![1] as UpdateClaimData;
+    expect(patch.breakdown?.mileageSource).toBe('board');
+    expect(patch.breakdown?.mileageEffective).toBe(1_000);
+    // 2_700 − 1_000 (May on the board) = 1_700 ⇒ 850 €; the re-prefilled
+    // declared 9_000 no longer decides the payout.
+    expect(patch.mileage).toBe(9_000);
+    expect(patch.kmDifference).toBe(1_700);
+    expect(patch.paymentEur).toBe(850);
+    // The day counters keep their meaning.
+    expect(patch.breakdown?.daysActive).toBe(5);
+    expect(patch.breakdown?.daysTotal).toBe(10);
+  });
+
+  it('an all-active period never reads the board', async () => {
+    const { service, boardSpy, updateSpy } = build({ claim: makeClaim() });
 
     await service.recalcFromDelegation('deleg-1', RETURN);
 
+    expect(boardSpy).not.toHaveBeenCalled();
     const patch = updateSpy.mock.calls[0]![1] as UpdateClaimData;
-    expect(patch.breakdown?.daysActive).toBe(10);
-    expect(patch.breakdown?.daysTotal).toBe(20);
-    expect(patch.breakdown?.mileageEffective).toBe(4_500);
-    // Only half the mileage is charged: 2_700 − 4_500 = −1_800 (no dopłata),
-    // instead of 2_700 − 9_000 under the old formula.
-    expect(patch.kmDifference).toBe(-1_800);
-    expect(patch.paymentEur).toBe(0);
+    expect(patch.breakdown?.mileageSource).toBe('declared');
   });
 });

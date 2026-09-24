@@ -19,6 +19,7 @@ import {
 } from '@nestjs/common';
 
 import type {
+  BoardDay,
   KmCalcResult,
   PreviewClaimDto,
 } from '@magguarantee/shared';
@@ -280,13 +281,17 @@ function makeAuditWriter(): AuditWriter {
 }
 
 /**
- * Daily-km repo fake. Phase 7 §0″ finish — preview mileage is ALWAYS the
- * daily-km sum (no body override), so the existing-claim preview path needs
- * this injected to reproduce the `mileage: 8_000` the assertions expect.
+ * Daily-km repo fake. `sumDroveKm` backs the bare-vehicle preview fallback;
+ * `listBoardDays` returns the board rows a MIXED period is settled on
+ * (docs/20 §0⁵). An all-active period must never call the latter.
  */
-function makeDailyKmRepo(sum: number): VehicleDailyKmRepository {
+function makeDailyKmRepo(
+  sum: number,
+  board: BoardDay[] = [],
+): VehicleDailyKmRepository {
   return {
     sumDroveKm: jest.fn(async () => sum),
+    listBoardDays: jest.fn(async () => board),
   } as unknown as VehicleDailyKmRepository;
 }
 
@@ -626,8 +631,10 @@ describe('ClaimsService.previewForExisting — verifier mileage override', () =>
     expect(out.kmDifference).toBe(5_800);
     // paymentEur = 5_800 * 0.5 = 2_900.00
     expect(out.paymentEur).toBe(2_900);
-    // The sum was short-circuited — the daily-km repo is never consulted.
-    expect(dailyKm.sumDroveKm).not.toHaveBeenCalled();
+    // The board total is read exactly once — for the separate staff-only
+    // `boardSumKm` hint — and never feeds `mileage` or the price.
+    expect(out.boardSumKm).toBe(8_000);
+    expect(dailyKm.sumDroveKm).toHaveBeenCalledTimes(1);
   });
 
   it('admin supplying mileage → same override contract as pracownik', async () => {
@@ -653,7 +660,9 @@ describe('ClaimsService.previewForExisting — verifier mileage override', () =>
 
     expect(out.mileage).toBe(5_000);
     expect(out.paymentEur).toBe(2_900);
-    expect(dailyKm.sumDroveKm).not.toHaveBeenCalled();
+    // Board read once, for `boardSumKm` only (see the pracownik case above).
+    expect(out.boardSumKm).toBe(8_000);
+    expect(dailyKm.sumDroveKm).toHaveBeenCalledTimes(1);
   });
 
   it('przewoznik supplying mileage → override IGNORED, the claim\'s own mileage used', async () => {
@@ -847,7 +856,10 @@ describe('ClaimsService.previewKmCalc — carrier path prices the declared facts
     // kmDifference = 10_800 - 5_000 = 5_800 → paymentEur = 2_900.
     expect(out.mileage).toBe(5_000);
     expect(out.paymentEur).toBe(2_900);
+    // All-active period ⇒ the board is not read at all.
     expect(dailyKm.sumDroveKm).not.toHaveBeenCalled();
+    expect(dailyKm.listBoardDays).not.toHaveBeenCalled();
+    expect(out.breakdown.mileageSource).toBe('declared');
   });
 });
 
@@ -1068,5 +1080,636 @@ describe('preview — limits snapshot', () => {
       limitsSnapshot?: Record<string, unknown>;
     };
     expect(input.limitsSnapshot).toBeUndefined();
+  });
+});
+
+// ── Mixed period settled on the daily-km board (docs/20 §0⁵) ─────────
+
+describe('preview — mixed period settled on the daily-km board', () => {
+  beforeAll(() => {
+    jest.useFakeTimers().setSystemTime(NOW);
+  });
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
+  // The spec example: 21.08–18.09.2025, August switched off (7 counted days),
+  // September on (14 × 540 = 7560 km @ 0.50 €/km).
+  const MIXED_RESULT: KmCalcResult = {
+    totalDays: 21,
+    rawTotalDays: 21,
+    kmGuaranteed: 7_560,
+    ratePerKmEffective: 0.5,
+    breakdown: [
+      {
+        yearMonth: '2025-08',
+        workingDays: 7,
+        kmPerDay: 0,
+        ratePerKm: 0.5,
+        saturdaysCounted: 0,
+        kmPerSaturday: 0,
+        kmFromSaturdays: 0,
+        kmInMonth: 0,
+        saturdayDays: [],
+        excludedDays: [],
+      },
+      {
+        yearMonth: '2025-09',
+        workingDays: 14,
+        kmPerDay: 540,
+        ratePerKm: 0.5,
+        saturdaysCounted: 0,
+        kmPerSaturday: 0,
+        kmFromSaturdays: 0,
+        kmInMonth: 7_560,
+        saturdayDays: [],
+        excludedDays: [],
+      },
+    ],
+    firstDay: null,
+    lastDay: null,
+  };
+
+  const MIXED_DTO: PreviewClaimDto = {
+    dateStart: '2025-08-21',
+    dateEnd: '2025-09-18',
+    hoursAdjusted: 0,
+  };
+
+  /** Every September day 01..18 on the board: `totalKm` on the 1st, the rest idle. */
+  function septemberBoard(totalKm: number, missing: readonly string[] = []): BoardDay[] {
+    const rows: BoardDay[] = [];
+    for (let d = 1; d <= 18; d += 1) {
+      const date = `2025-09-${d < 10 ? `0${d}` : d}`;
+      if (missing.includes(date)) continue;
+      rows.push(
+        d === 1
+          ? { date, state: 'drove', km: totalKm }
+          : { date, state: 'idle', km: null },
+      );
+    }
+    return rows;
+  }
+
+  function makeMixedKmCalc(): { svc: KmCalcService; calls: { input: unknown }[] } {
+    const calls: { input: unknown }[] = [];
+    const svc = {
+      calc: jest.fn(async (input: unknown) => {
+        calls.push({ input });
+        return MIXED_RESULT;
+      }),
+    } as unknown as KmCalcService;
+    return { svc, calls };
+  }
+
+  it('pracownik: pays on the board (not on the declared mileage) and gets the per-month boardSettlement', async () => {
+    const seeded = makeClaim({ mileage: 6_000 });
+    const dailyKm = makeDailyKmRepo(0, septemberBoard(2_000));
+    const svc = makeService(
+      makeClaimsRepo([seeded]),
+      makeCarriersRepo([]),
+      makeVehiclesRepo([]),
+      makeMixedKmCalc().svc,
+      dailyKm,
+    );
+
+    const out = await svc.previewForExisting(
+      makeAuth('pracownik'),
+      seeded.nrZgl,
+      MIXED_DTO,
+    );
+
+    // The declared figure is still echoed …
+    expect(out.mileage).toBe(6_000);
+    // … but the payout follows the board: 7_560 − 2_000 = 5_560 ⇒ 2_780 €.
+    expect(out.kmDifference).toBe(5_560);
+    expect(out.paymentEur).toBe(2_780);
+    expect(out.breakdown.mileageSource).toBe('board');
+    expect(out.breakdown.mileageEffective).toBe(2_000);
+    expect(out.boardSettlement).toEqual({
+      mileageEffective: 2_000,
+      kmDifference: 5_560,
+      paymentEur: 2_780,
+      months: [
+        {
+          yearMonth: '2025-08',
+          mode: 'off',
+          km: 0,
+          daysFilled: 0,
+          daysRequired: 0,
+          missingDates: [],
+        },
+        {
+          yearMonth: '2025-09',
+          mode: 'active',
+          km: 2_000,
+          daysFilled: 18,
+          daysRequired: 18,
+          missingDates: [],
+        },
+      ],
+      missingDates: [],
+      complete: true,
+    });
+    // ONE board read, for the claim's vehicle, over [dateStart, dateEnd + 1d).
+    expect(dailyKm.listBoardDays).toHaveBeenCalledTimes(1);
+    expect(dailyKm.listBoardDays).toHaveBeenCalledWith(
+      'v-1',
+      new Date('2025-08-21T00:00:00.000Z'),
+      new Date('2025-09-19T00:00:00.000Z'),
+    );
+  });
+
+  it('pracownik: a day missing in the active month is listed, the preview still prices', async () => {
+    const seeded = makeClaim();
+    const svc = makeService(
+      makeClaimsRepo([seeded]),
+      makeCarriersRepo([]),
+      makeVehiclesRepo([]),
+      makeMixedKmCalc().svc,
+      makeDailyKmRepo(0, septemberBoard(2_000, ['2025-09-18'])),
+    );
+
+    const out = await svc.previewForExisting(
+      makeAuth('admin'),
+      seeded.nrZgl,
+      MIXED_DTO,
+    );
+
+    expect(out.boardSettlement?.complete).toBe(false);
+    expect(out.boardSettlement?.missingDates).toEqual(['2025-09-18']);
+    expect(out.paymentEur).toBe(2_780);
+  });
+
+  it('przewoznik (reklamacja inspection): same board-based price, but NO boardSettlement', async () => {
+    const carrier = makeCarrier();
+    const seeded = makeClaim({ carrierId: carrier.id });
+    const svc = makeService(
+      makeClaimsRepo([seeded]),
+      makeCarriersRepo([carrier]),
+      makeVehiclesRepo([]),
+      makeMixedKmCalc().svc,
+      makeDailyKmRepo(0, septemberBoard(2_000)),
+    );
+
+    const out = await svc.previewForExisting(
+      makeAuth('przewoznik', carrier.userId),
+      seeded.nrZgl,
+      MIXED_DTO,
+    );
+
+    expect(out.paymentEur).toBe(2_780);
+    expect('boardSettlement' in out).toBe(false);
+  });
+
+  it('carrier new-claim path: reads the OUTING vehicle\'s board, never returns boardSettlement', async () => {
+    const carrier = makeCarrier();
+    const dailyKm = makeDailyKmRepo(0, septemberBoard(5_500));
+    const svc = makeService(
+      makeClaimsRepo([]),
+      makeCarriersRepo([carrier]),
+      makeVehiclesRepo([]),
+      makeMixedKmCalc().svc,
+      dailyKm,
+      makeDelegationsRepo(makeDelegationForPreview(true)),
+    );
+
+    const out = await svc.previewKmCalc(makeAuth('przewoznik', carrier.userId), {
+      delegationId: 'deleg-1',
+      hoursAdjusted: 0,
+      dateStart: '2025-08-21',
+      dateEnd: '2025-09-18',
+      timeFrom: '06:30',
+      timeTo: '14:30',
+      mileage: 6_000,
+    });
+
+    // 7_560 − 5_500 = 2_060 ⇒ 1_030 €.
+    expect(out.paymentEur).toBe(1_030);
+    expect(dailyKm.listBoardDays).toHaveBeenCalledWith(
+      'v-1',
+      new Date('2025-08-21T00:00:00.000Z'),
+      new Date('2025-09-19T00:00:00.000Z'),
+    );
+    expect('boardSettlement' in out).toBe(false);
+  });
+
+  it('all-active period: the board is never queried and staff get boardSettlement = null', async () => {
+    const seeded = makeClaim();
+    const dailyKm = makeDailyKmRepo(8_000);
+    const svc = makeService(
+      makeClaimsRepo([seeded]),
+      makeCarriersRepo([]),
+      makeVehiclesRepo([]),
+      makeKmCalcService().svc,
+      dailyKm,
+    );
+
+    const out = await svc.previewForExisting(
+      makeAuth('pracownik'),
+      seeded.nrZgl,
+      PREVIEW_DTO,
+    );
+
+    expect(out.boardSettlement).toBeNull();
+    expect(out.breakdown.mileageSource).toBe('declared');
+    expect(dailyKm.listBoardDays).not.toHaveBeenCalled();
+  });
+
+  // ── GET /claims/:nrZgl — the live board settlement on the detail view ──
+
+  /** A wniosek STORED as a mixed period, with a 3 h korekta applied. */
+  function storedMixedClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
+    return makeClaim({
+      dateStart: new Date('2025-08-21T00:00:00.000Z'),
+      dateEnd: new Date('2025-09-18T00:00:00.000Z'),
+      mileage: 6_000,
+      hoursAdjustedValue: 3,
+      breakdown: {
+        totalDays: 21,
+        rawTotalDays: 21,
+        kmGuaranteed: 7_560,
+        ratePerKmEffective: 0.5,
+        breakdown: MIXED_RESULT.breakdown,
+        firstDay: null,
+        lastDay: null,
+        daysActive: 14,
+        daysTotal: 21,
+        mileageEffective: 0,
+        mileageSource: 'board',
+      },
+      ...overrides,
+    });
+  }
+
+  it('getOne (pracownik): boardSettlement priced from the STORED period, times, korekta and limits snapshot', async () => {
+    const seeded = storedMixedClaim();
+    const km = makeMixedKmCalc();
+    const dailyKm = makeDailyKmRepo(0, septemberBoard(2_000, ['2025-09-18']));
+    const svc = makeService(
+      makeClaimsRepo([seeded]),
+      makeCarriersRepo([]),
+      makeVehiclesRepo([]),
+      km.svc,
+      dailyKm,
+    );
+
+    const out = await svc.getOne(makeAuth('pracownik'), seeded.nrZgl);
+
+    const input = km.calls[0]!.input as {
+      dateStart: string;
+      dateEnd: string;
+      timeFrom: string;
+      timeTo: string;
+      hoursAdjusted: number;
+      limitsSnapshot?: Record<string, unknown>;
+    };
+    expect(input).toMatchObject({
+      dateStart: '2025-08-21',
+      dateEnd: '2025-09-18',
+      timeFrom: '08:00',
+      timeTo: '18:00',
+      hoursAdjusted: 3,
+    });
+    expect(input.limitsSnapshot).toEqual({
+      '2025-08': { kmPerDay: 0, ratePerKm: 0.5, kmPerSaturday: 0 },
+      '2025-09': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 },
+    });
+    expect(out.boardSettlement).toMatchObject({
+      mileageEffective: 2_000,
+      paymentEur: 2_780,
+      missingDates: ['2025-09-18'],
+      complete: false,
+    });
+    // The stored row itself is returned untouched — the live block is extra.
+    expect(out.paymentEur).toBe(seeded.paymentEur);
+  });
+
+  it('getOne (opiekun of the carrier): boardSettlement is filled too', async () => {
+    const seeded = storedMixedClaim();
+    const carriersRepo = {
+      listIdsForOpiekun: jest.fn(async () => ['c-1']),
+    } as unknown as CarriersRepository;
+    const svc = makeService(
+      makeClaimsRepo([seeded]),
+      carriersRepo,
+      makeVehiclesRepo([]),
+      makeMixedKmCalc().svc,
+      makeDailyKmRepo(0, septemberBoard(2_000)),
+    );
+
+    const out = await svc.getOne(makeAuth('opiekun', 'u-opiekun'), seeded.nrZgl);
+
+    expect(out.boardSettlement?.complete).toBe(true);
+    expect(out.boardSettlement?.paymentEur).toBe(2_780);
+  });
+
+  it('getOne (przewoznik): boardSettlement is null — no km-calc, no board read', async () => {
+    const carrier = makeCarrier();
+    const seeded = storedMixedClaim({ carrierId: carrier.id });
+    const km = makeMixedKmCalc();
+    const dailyKm = makeDailyKmRepo(0, septemberBoard(2_000));
+    const svc = makeService(
+      makeClaimsRepo([seeded]),
+      makeCarriersRepo([carrier]),
+      makeVehiclesRepo([]),
+      km.svc,
+      dailyKm,
+    );
+
+    const out = await svc.getOne(makeAuth('przewoznik', carrier.userId), seeded.nrZgl);
+
+    expect(out.boardSettlement).toBeNull();
+    expect(km.calls).toHaveLength(0);
+    expect(dailyKm.listBoardDays).not.toHaveBeenCalled();
+  });
+
+  it('getOne (pracownik) on an all-active wniosek: boardSettlement null, nothing recomputed', async () => {
+    const seeded = makeClaim();
+    const km = makeKmCalcService();
+    const dailyKm = makeDailyKmRepo(0);
+    const svc = makeService(
+      makeClaimsRepo([seeded]),
+      makeCarriersRepo([]),
+      makeVehiclesRepo([]),
+      km.svc,
+      dailyKm,
+    );
+
+    const out = await svc.getOne(makeAuth('pracownik'), seeded.nrZgl);
+
+    expect(out.boardSettlement).toBeNull();
+    expect(km.calls).toHaveLength(0);
+    expect(dailyKm.listBoardDays).not.toHaveBeenCalled();
+  });
+});
+
+// ── boardSumKm — the pracownik «Wg tablicy przebiegów: N km» hint ─────
+//
+// User-reported bug: the hint showed the carrier's persisted mileage because
+// the web read `mileage` from a second preview. `boardSumKm` is the board
+// TOTAL over the previewed period, staff-only, independent of `mileage`.
+
+describe('preview — boardSumKm (staff board total over the previewed period)', () => {
+  beforeAll(() => {
+    jest.useFakeTimers().setSystemTime(NOW);
+  });
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
+  /**
+   * Board fake whose `sumDroveKm` really aggregates the rows (drove only,
+   * half-open `[from, toExclusive)`), so the window the service asks for is
+   * what decides the number.
+   */
+  function makeSummingBoardRepo(rows: BoardDay[]): {
+    repo: VehicleDailyKmRepository;
+    sumSpy: jest.Mock;
+  } {
+    const inWindow = (date: string, from: Date, toExclusive: Date): boolean => {
+      const t = new Date(`${date}T00:00:00.000Z`).getTime();
+      return t >= from.getTime() && t < toExclusive.getTime();
+    };
+    const sumSpy = jest.fn(
+      async (_vehicleId: string, from: Date, toExclusive: Date) =>
+        rows
+          .filter((r) => r.state === 'drove' && inWindow(r.date, from, toExclusive))
+          .reduce((sum, r) => sum + (r.km ?? 0), 0),
+    );
+    const listSpy = jest.fn(
+      async (_vehicleId: string, from: Date, toExclusive: Date) =>
+        rows.filter((r) => inWindow(r.date, from, toExclusive)),
+    );
+    return {
+      repo: {
+        sumDroveKm: sumSpy,
+        listBoardDays: listSpy,
+      } as unknown as VehicleDailyKmRepository,
+      sumSpy,
+    };
+  }
+
+  /**
+   * 01..17.04 × 550 = 9350 km (what the carrier declared), 18–19.04 idle,
+   * 20.04 = 500 km the weryfikator added AFTER submit, 21.04 outside the period.
+   */
+  function aprilBoard(): BoardDay[] {
+    const rows: BoardDay[] = [];
+    for (let d = 1; d <= 17; d += 1) {
+      rows.push({ date: `2026-04-${d < 10 ? `0${d}` : d}`, state: 'drove', km: 550 });
+    }
+    rows.push({ date: '2026-04-18', state: 'idle', km: null });
+    rows.push({ date: '2026-04-19', state: 'idle', km: null });
+    rows.push({ date: '2026-04-20', state: 'drove', km: 500 });
+    rows.push({ date: '2026-04-21', state: 'drove', km: 1_000 });
+    return rows;
+  }
+
+  const STAFF_DTO: PreviewClaimDto = {
+    dateStart: '2026-04-01',
+    dateEnd: '2026-04-20',
+    mileage: 9_350,
+    hoursAdjusted: 0,
+  };
+
+  it('pracownik: `mileage` stays the declared 9350, `boardSumKm` is the board 9850 (day added after submit included)', async () => {
+    const seeded = makeClaim({ mileage: 9_350 });
+    const board = makeSummingBoardRepo(aprilBoard());
+    const svc = makeService(
+      makeClaimsRepo([seeded]),
+      makeCarriersRepo([]),
+      makeVehiclesRepo([]),
+      makeKmCalcService().svc,
+      board.repo,
+    );
+
+    const out = await svc.previewForExisting(
+      makeAuth('pracownik'),
+      seeded.nrZgl,
+      STAFF_DTO,
+    );
+
+    expect(out.mileage).toBe(9_350);
+    expect(out.boardSumKm).toBe(9_850);
+    // The claim's vehicle over the body's inclusive period.
+    expect(board.sumSpy).toHaveBeenCalledWith(
+      'v-1',
+      new Date('2026-04-01T00:00:00.000Z'),
+      new Date('2026-04-21T00:00:00.000Z'),
+    );
+  });
+
+  it('admin: the BODY\'s (edited) period drives the sum, not the persisted one', async () => {
+    const seeded = makeClaim({ mileage: 9_350 });
+    const svc = makeService(
+      makeClaimsRepo([seeded]),
+      makeCarriersRepo([]),
+      makeVehiclesRepo([]),
+      makeKmCalcService().svc,
+      makeSummingBoardRepo(aprilBoard()).repo,
+    );
+
+    const out = await svc.previewForExisting(makeAuth('admin'), seeded.nrZgl, {
+      ...STAFF_DTO,
+      dateEnd: '2026-04-19',
+    });
+
+    expect(out.boardSumKm).toBe(9_350);
+  });
+
+  it('a real board sum of 0 is 0, not null', async () => {
+    const seeded = makeClaim();
+    const svc = makeService(
+      makeClaimsRepo([seeded]),
+      makeCarriersRepo([]),
+      makeVehiclesRepo([]),
+      makeKmCalcService().svc,
+      makeSummingBoardRepo([{ date: '2026-04-02', state: 'idle', km: null }]).repo,
+    );
+
+    const out = await svc.previewForExisting(
+      makeAuth('pracownik'),
+      seeded.nrZgl,
+      STAFF_DTO,
+    );
+
+    expect(out.boardSumKm).toBe(0);
+  });
+
+  it('przewoznik (reklamacja inspection): no `boardSumKm` key, board total never read', async () => {
+    const carrier = makeCarrier();
+    const seeded = makeClaim({ carrierId: carrier.id });
+    const board = makeSummingBoardRepo(aprilBoard());
+    const svc = makeService(
+      makeClaimsRepo([seeded]),
+      makeCarriersRepo([carrier]),
+      makeVehiclesRepo([]),
+      makeKmCalcService().svc,
+      board.repo,
+    );
+
+    const out = await svc.previewForExisting(
+      makeAuth('przewoznik', carrier.userId),
+      seeded.nrZgl,
+      STAFF_DTO,
+    );
+
+    expect('boardSumKm' in out).toBe(false);
+    expect(board.sumSpy).not.toHaveBeenCalled();
+  });
+
+  it('carrier new-claim path (ctx): no `boardSumKm` key', async () => {
+    const carrier = makeCarrier();
+    const board = makeSummingBoardRepo(aprilBoard());
+    const svc = makeService(
+      makeClaimsRepo([]),
+      makeCarriersRepo([carrier]),
+      makeVehiclesRepo([]),
+      makeKmCalcService().svc,
+      board.repo,
+      makeDelegationsRepo(makeDelegationForPreview(true)),
+    );
+
+    const out = await svc.previewKmCalc(makeAuth('przewoznik', carrier.userId), {
+      delegationId: 'deleg-1',
+      hoursAdjusted: 0,
+      dateStart: '2026-04-01',
+      dateEnd: '2026-04-20',
+      timeFrom: '06:30',
+      timeTo: '14:30',
+      mileage: 9_350,
+    });
+
+    expect('boardSumKm' in out).toBe(false);
+    expect(board.sumSpy).not.toHaveBeenCalled();
+  });
+
+  it('missing period dates ⇒ null (not a fake 0)', async () => {
+    const seeded = makeClaim();
+    const board = makeSummingBoardRepo(aprilBoard());
+    const svc = makeService(
+      makeClaimsRepo([seeded]),
+      makeCarriersRepo([]),
+      makeVehiclesRepo([]),
+      makeKmCalcService().svc,
+      board.repo,
+    );
+
+    const noStart = await svc.previewForExisting(makeAuth('pracownik'), seeded.nrZgl, {
+      dateEnd: '2026-04-20',
+      hoursAdjusted: 0,
+    });
+    const noDates = await svc.previewForExisting(makeAuth('pracownik'), seeded.nrZgl, {
+      hoursAdjusted: 0,
+    });
+
+    expect(noStart.boardSumKm).toBeNull();
+    expect(noDates.boardSumKm).toBeNull();
+    expect(board.sumSpy).not.toHaveBeenCalled();
+  });
+
+  it('invalid calendar date ⇒ null', async () => {
+    const seeded = makeClaim();
+    const svc = makeService(
+      makeClaimsRepo([seeded]),
+      makeCarriersRepo([]),
+      makeVehiclesRepo([]),
+      makeKmCalcService().svc,
+      makeSummingBoardRepo(aprilBoard()).repo,
+    );
+
+    const out = await svc.previewForExisting(makeAuth('pracownik'), seeded.nrZgl, {
+      ...STAFF_DTO,
+      dateStart: '2026-02-30',
+    });
+
+    expect(out.boardSumKm).toBeNull();
+  });
+
+  it('claim without a vehicle ⇒ null', async () => {
+    const seeded = makeClaim({ vehicleId: null, vehicle: null });
+    const board = makeSummingBoardRepo(aprilBoard());
+    const svc = makeService(
+      makeClaimsRepo([seeded]),
+      makeCarriersRepo([]),
+      makeVehiclesRepo([]),
+      makeKmCalcService().svc,
+      board.repo,
+    );
+
+    const out = await svc.previewForExisting(
+      makeAuth('pracownik'),
+      seeded.nrZgl,
+      STAFF_DTO,
+    );
+
+    expect(out.boardSumKm).toBeNull();
+    expect(board.sumSpy).not.toHaveBeenCalled();
+  });
+
+  it('board repository not wired ⇒ null (never the 0 `_resolveMileage` would answer)', async () => {
+    const seeded = makeClaim();
+    const noop = {} as unknown;
+    // No 12th ctor arg — `dailyKm` absent.
+    const svc = new ClaimsService(
+      makeClaimsRepo([seeded]),
+      makeCarriersRepo([]),
+      makeVehiclesRepo([]),
+      noop as DriversRepository,
+      noop as TrailersRepository,
+      makeKmCalcService().svc,
+      noop as NrZglService,
+      makePrismaService(),
+      makeAuditWriter(),
+    );
+
+    const out = await svc.previewForExisting(
+      makeAuth('pracownik'),
+      seeded.nrZgl,
+      STAFF_DTO,
+    );
+
+    expect(out.boardSumKm).toBeNull();
   });
 });

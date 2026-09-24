@@ -1198,7 +1198,7 @@ Click → navigate to claim detail (`/carrier/claims/[id]`). Empty list → `<Em
 
 ### `<BreakdownTable>` — preview table on new-claim form
 
-> ⚠️ **EXTENDED by §16.5 (2026-09-20).** Месяц с выключенной гарантией (`kmPerDay === 0 && kmPerSaturday === 0`) рендерится по отдельному контракту: бейдж «Gwarancja wyłączona», приглушённая строка, `—` вместо ставки-призрака; смешанный период получает `<GuaranteeGapNotice>` **над** таблицей; период целиком без гарантии заменяет таблицу на `<EmptyState>`. **§16.5 авторитетен** для всего, что касается нулевых месяцев.
+> ⚠️ **EXTENDED by §16.5 (2026-09-20).** Месяц с выключенной гарантией (`kmPerDay === 0 && kmPerSaturday === 0`) рендерится по отдельному контракту: бейдж «Gwarancja wyłączona», приглушённая строка, `—` вместо ставки-призрака; смешанный период получает `<GuaranteeGapNotice>` **над** таблицей; период целиком без гарантии заменяет таблицу на `<EmptyState>`. **§16.5 авторитетен** для всего, что касается нулевых месяцев. **2026-09-24:** смешанный период считается по tablicy km — новый текст ноты (§16.5.3), staff-колонки «Km wg weryfikatora» / «Wpisane dni» (§16.5.5).
 
 Compact read-only table fed by server preview response. Columns:
 
@@ -4416,6 +4416,8 @@ This is intentionally the **same muted surface** as the computed-field pattern s
 
 > ⚠️ **EXTENDED by §16.6 (2026-09-20).** В header-строке этого блока, справа от `<RecalcBadge>`, добавляется вторичная кнопка **«Przelicz wg aktualnych limitów»** (`variant="outline"`, роли `admin` / `weryfikator`) + статичная строка `recalc.snapshotNote`. Кнопка **не** уезжает в футер — футер принадлежит решению. Диалог сравнения «было → станет» — §16.6.
 
+> ⚠️ **EXTENDED by §16.5.10 (2026-09-24).** Directly under the dopłata field (above the «wyliczana automatycznie» description) a two-line **niedojazd** readout: a sentence («Pojazd przejechał o X km mniej, niż gwarantowano.») + formula («Niedojazd: G km gwarant. − D km … = X km × R €/km»). It uses the same data source as the field. The spec is in §16.5.10.
+
 A single full-width block between the fact pairs and the decyzja block. This is the **`amountApproved` locked/computed-field pattern** already specified in §"Read-only / computed field pattern" (b) — render it verbatim (the canonical class string with `<Lock>` icon, `readOnly tabIndex={-1}`, `bg-input/40`, `<FormDescription>` "wyliczana automatycznie"):
 
 - **Live recalculation, decision-independent.** It recomputes via the live `/claims/preview` dopłata whenever any of the 6 facts changes (debounced 300ms — keep the Phase 4 debounce), **regardless of which `targetStatus` is selected**. The verifier sees the financial consequence of their corrections *before* committing to a decision. This is the reason it sits above decyzja, not inside the ZAAKCEPTOWANO branch.
@@ -5924,6 +5926,8 @@ All dialogs reuse the **§7.1 confirm-`<Dialog>` pattern** (centered `<Dialog>`,
 > a figure the business does not pay on. The client mirrors the tier-1 date rules
 > (order / future / span) but **not** the deadline rule — that one is measured
 > server-side from `actualReturnAt`, which this form has no business showing.
+>
+> ⚠️ **2026-09-24 (docs/20 §0⁵):** the rationale above is obsolete — the weryfikator now reads daily km from SpedTrans as well, so the two figures agree. The form rule itself (no prefill, no board hint) stays until decided otherwise.
 
 > ⚠️ **§0‴ (2026-07-08):** the former `w_trasie` **warning banner + soft-confirm gate are REMOVED** — a wniosek can be submitted **only** for a `zjechal` delegation. The carrier no longer inputs a time window; `timeFrom`/`timeTo` are derived from the delegation's actual times and shown read-only («Godziny (z wyjazdu)»).
 
@@ -7769,19 +7773,43 @@ Marzec      600      →  bez zmian …
 
 > **Зависимость (не дизайнерское решение, вопрос к api-agent):** если бэкенд даст **один** bulk-эндпоинт с атомарной транзакцией, слой «пер-строчный результат» не понадобится — останется просто success/error. Если это N последовательных `PUT`, пер-строчный результат обязателен. Дизайн поддерживает оба варианта; предпочтителен атомарный.
 
-### §16.5 — Выключенный месяц у перевозчика: `<BreakdownTable>` + сводка периода
+### §16.5 — Выключенный месяц в разбивке: `<BreakdownTable>` (перевозчик + staff), смешанный период по tablicy km
 
 Самая рискованная часть фичи: без пометок месяц с нулями читается как баг или как «у них что-то не настроено».
 
-#### §16.5.1 Как UI понимает, что месяц выключен
+> ⚠️ **REWORK 2026-09-24 ([docs/20 §0⁵](20-phase-7-eksport-weryfikator.md)).** Смешанный период (есть выключенный месяц **и** есть активный) больше **не** делит заявленный пробег пропорционально дням. Км, вычитаемые из гарантии, — это **фактические** км с tablicy km weryfikatora за дни активных месяцев; цифра перевозчика на выплату не влияет. День активного месяца без записи на tablicy **не угадывается**: `ZAAKCEPTOWANO` недоступно, пока weryfikator не допишет; `ODRZUCONO` и «Zapisz weryfikację» — доступны всегда.
+>
+> **Что переписано:** §16.5.1 (флаг `mileageSource`), §16.5.3 (нота — новый текст, две аудитории), новые §16.5.5 (staff-колонки tablicy km), §16.5.6 (нота «brak danych» + гейт акцепта в `ClaimModal`), §16.5.7 (i18n), §16.5.8 (checklist). **Что осталось как было:** бейджи / приглушение / `—` вместо ставки-призрака (§16.5.2), пустое состояние всего выключенного периода (§16.5.4). Ключи `gapNotice` / `gapNoticeMonth` и формулировка «Do rozliczenia przyjęto {daysActive} dni i {mileageEffective} z {mileage} km» **удалены**.
+>
+> Периоды, где **все** месяцы активны, не меняются ни визуально, ни по копирайту — ни у перевозчика, ни у staff.
 
-Производится из уже существующих полей `MonthBreakdownDto` — **новых API-полей на уровне месяца не требуется**:
+#### §16.5.1 Как UI понимает, что месяц выключен и что период смешанный
+
+Состояние **месяца** производится из уже существующих полей `MonthBreakdownDto` — **новых API-полей на уровне месяца не требуется**:
 
 | Признак | Условие | Трактовка |
 |---|---|---|
 | `disabled` | `kmPerDay === 0 && kmPerSaturday === 0` | гарантии нет весь месяц |
 | `saturdayOnly` | `kmPerDay === 0 && kmFromSaturdays > 0` | будни выключены, субботы работают |
 | обычный | иначе | без пометок |
+
+Состояние **периода**. «Весь выключен» — по строкам, как было; **«смешанный» — только по серверному флагу**, из строк не выводится:
+
+| Признак | Условие | Источник |
+|---|---|---|
+| `allDisabled` | все строки `disabled` | строки breakdown (как было) — §16.5.4 |
+| `boardSettled` (смешанный) | `breakdown.mileageSource === 'board'` | сервер; отсутствие поля ⇒ `'declared'` |
+| staff-вариант | `boardSettled` **и** компоненту передан `boardSettlement` | API отдаёт `boardSettlement` только pracownik / admin / opiekun — перевозчику никогда |
+
+Почему не из строк: единственный старый (локальный) wniosek с пропорциональным расчётом имеет смешанные строки, но `mileageSource` у него нет — для него любая из новых нот была бы неправдой, поэтому он рендерится **без ноты** (бейджи и приглушение остаются). В проде wniosków нет.
+
+**Матрица рендера:**
+
+| Период | Перевозчик | Staff |
+|---|---|---|
+| все месяцы активны (`mileageSource !== 'board'`) | как сегодня, без ноты | как сегодня: без колонок tablicy, без ноты, без гейта |
+| смешанный (`'board'`) | §16.5.2 + нота `audience="carrier"` (§16.5.3) | §16.5.2 + нота `audience="staff"` (§16.5.3) + колонки tablicy (§16.5.5) + «brak danych» / гейт в `ClaimModal` (§16.5.6) |
+| весь период выключен | `<EmptyState>` (§16.5.4) | `<EmptyState>` (§16.5.4); колонок, ноты и гейта нет |
 
 #### §16.5.2 Оформление месяца
 
@@ -7796,27 +7824,48 @@ Marzec      600      →  bez zmian …
 
 **Ставка-призрак — отдельное правило (locked).** Движок при `kmGuaranteed = 0` отдаёт `ratePerKmEffective` как глобальный fallback `0,50` — это артефакт вычисления, а не решение человека. **Везде, где `kmGuaranteed === 0`, ставка рендерится как `—`, а не как число:** в `<BreakdownTable>` (per-month и footer), в stat-карточках `<LivePreviewPanel>`, в §6.5 `ClaimModal`. Формулировка правила: *цена километра имеет смысл только при ненулевом количестве километров; ноль километров по 0,50 € — это не цена, это шум, который выглядит как обещание.*
 
-#### §16.5.3 Сводка смешанного периода — `<GuaranteeGapNotice>`
+**2026-09-24: всё в §16.5.2 остаётся без изменений и для перевозчика, и для staff** — смена правила расчёта не касается того, как выглядит выключенный месяц. Единственное дополнение — staff-колонки tablicy km в `disabled`-месяце: обе ячейки `—` (правило то же, что у ставки-призрака: число, которое не участвует в расчёте, не печатается), детали в §16.5.5.
 
-Композиция (не примитив), рендерится **над** `<BreakdownTable>`, а не под ней: «сломанной» выглядит сама таблица нулей, поэтому объяснение обязано быть прочитано раньше цифр.
+#### §16.5.3 Нота смешанного периода — `<GuaranteeGapNotice audience>` (REWRITTEN 2026-09-24)
+
+Имя компонента сохраняется (он по-прежнему объясняет «дыру» в гарантии), меняются условие и текст. Композиция (не примитив), рендерится **над** таблицей / карточками внутри карточки `<BreakdownTable>`, а не под ними: «сломанными» выглядят нулевые строки, объяснение читается раньше цифр.
 
 | Аспект | Значение |
 |---|---|
-| Условие рендера | есть ≥1 месяц `disabled` **и** ≥1 месяц с гарантией (смешанный период) |
-| Элемент | `<p role="note" className="flex items-start gap-2 rounded-md border border-border bg-input px-3 py-2 text-xs text-text-sub">` |
-| Иконка | `<Info size={14} aria-hidden className="mt-0.5 shrink-0" />` — нейтральная, **не** semantic-цветная |
-| Числа внутри | `<strong className="font-semibold text-text tabular-nums">` — тон спокойный, цифры читаемые |
-| Тон | **нейтральный, не warning.** Это не ошибка и не предупреждение — это действующая конфигурация. Янтарь здесь означал бы «что-то пошло не так», а пошло всё ровно так, как настроено. |
+| Условие рендера | `mileageSource === 'board'` **и** не `allDisabled` (§16.5.1). Больше **не** выводится из строк |
+| Аудитория | `audience="staff"`, если компоненту передан `boardSettlement`; иначе `"carrier"`. Одна нота на экран — никогда обе |
+| Элемент | существующий `<LockNotice icon={Info}>` в обёртке `border-b border-border p-3` — **как сейчас в коде**, без изменений оформления |
+| Иконка | `Info` — нейтральная, **не** semantic-цветная |
+| Выделение | `t.rich(..., { b })` → `<strong className="font-semibold text-text">` — только на последнем предложении (carrier) / на предложении про цифру перевозчика (staff) |
+| Тон | **нейтральный, не warning.** Выключенный месяц — действующая конфигурация, а не ошибка. Недостающие дни tablicy — отдельная, янтарная плашка **только у staff** (§16.5.6), в эту ноту их не смешиваем |
+| Параметры | только `count` = число `disabled`-месяцев. **Никаких чисел км и дней** — ни у перевозчика, ни у staff |
 
-Текст (`carrier.breakdown.gapNotice` + `gapNoticeMonth`), пример рендера:
+**Перевозчик — `carrier.breakdown.mixedPeriodNotice`** (заменяет `gapNotice` + `gapNoticeMonth`):
 
-> ⓘ Okres obejmuje miesiąc bez gwarancji (**luty 2026: 7 z 18 dni**). Do rozliczenia przyjęto **11 dni** i **5 500** z **9 000** km.
+> ⓘ Okres obejmuje miesiąc bez gwarancji. Dopłata zależy wtedy od przebiegu pojazdu w dniach objętych gwarancją, a nie od łącznego przebiegu podanego we wniosku. **Ostateczną kwotę ustala się po weryfikacji wniosku.**
 
-Данные: `daysActive`, `daysTotal`, `mileageEffective` — новые поля `KmCalcBreakdown` (api-agent); `mileage` — уже есть; список выключенных месяцев и их дни — из строк breakdown.
+Зачем каждое предложение:
+1. *Okres obejmuje…* — почему в таблице нулевая строка (какой месяц — видно по бейджу строкой ниже, поэтому список месяцев из ноты убран вместе с `gapNoticeMonth`).
+2. *Dopłata zależy wtedy od…* — **обязательное**: в смешанном периоде превью перевозчика **не реагирует** на поле «Przebieg» в форме. Без этой фразы перевозчик меняет число, видит ту же dopłatę и решает, что форма сломана. Источник («tablica km weryfikatora», SpedTrans) перевозчику не называем — ему достаточно знать, что считается пробег по дням, а не его итоговая цифра.
+3. *Ostateczną kwotę ustala się po weryfikacji wniosku.* — сумма в превью и в поданном wniosku может быть посчитана без последнего дня (tablica за день съезда заполняется назавтра). Предложение в безличном настоящем времени — истинно и до, и после решения, поэтому один текст для формы, превью и страницы wniosku.
 
-> **Зависимость данных (api-agent, не решение дизайна):** формулировка «luty 2026: 7 z 18 dni» требует, чтобы строка выключенного месяца **сохраняла реальное число своих дней** (`workingDays + saturdaysCounted`) даже при нулевых км. Если движок обнуляет дни выключенного месяца, нужно отдельное поле `daysInMonth` на строке — иначе фразу нечем наполнить. Это единственная зависимость §16.5 от бэкенда сверх трёх согласованных полей.
+**Решения по перевозчику (locked 2026-09-24):**
 
-Метка месяца в тексте — **строчная** PL-форма + год («luty 2026»), в EN — обычная заглавная («February 2026»). Несколько выключенных месяцев перечисляются через «, » внутри тех же скобок, `count` управляет формой слова «miesiąc».
+| Вопрос | Решение | Почему |
+|---|---|---|
+| Видит ли перевозчик `mileageEffective`? | **Нет — нигде.** Ни в ноте, ни строкой «Razem», ни в карточке | Цифра может быть неполной (нет дня съезда), а предупреждать про недостающий день перевозчику решено **не** показывать (docs/20 §0⁵). Неполное число без предупреждения хуже, чем никакого |
+| Пер-месячные / пер-дневные км tablicy | **Нет** | решение docs/20 §0⁵ |
+| Предупреждение о незаписанном последнем дне | **Нет** | решение docs/20 §0⁵; третье предложение ноты закрывает это общим «сумма окончательна после weryfikacji» |
+| Stat-карточки `<LivePreviewPanel>` (Km gwarantowane / Różnica km / Stawka / Dopłata) | **Без изменений** | это существующий контракт превью; `Różnica km` — агрегат периода, не пер-месячная цифра tablicy. Нота объясняет, почему `Różnica km ≠ Km gwarantowane − Przebieg` |
+| Бейджи «Gwarancja wyłączona» / «Gwarancja tylko w soboty», `bg-input/40`, `Km/mc` без веса | **Остаются как есть** (§16.5.2) | |
+| Правило `—` вместо ставки-призрака | **Остаётся как есть** (§16.5.2) | |
+| Страница wniosku `/carrier/claims/[nrZgl]` | та же нота, тот же текст | `<BreakdownTable>` один и тот же; «Przebieg: X km» в фактах остаётся — это то, что перевозчик заявил |
+
+**Staff — `carrier.breakdown.boardNotice`** (pracownik / admin / opiekun; тот же компонент, `audience="staff"`):
+
+> ⓘ Okres obejmuje miesiąc bez gwarancji. Dopłatę liczy się z tablicy km weryfikatora — tylko z dni w miesiącach z gwarancją. **Przebieg podany przez przewoźnika nie wpływa na kwotę — służy tylko do porównania.**
+
+Выделенное предложение — главное для pracownik: поле «Przebieg / km zrealizowane» в `ClaimModal` остаётся редактируемым, но в смешанном периоде живой пересчёт на него **не реагирует**. Без этой строки правка км, не меняющая dopłatę, читается как баг `<RecalcBadge>`.
 
 #### §16.5.4 Весь период без гарантии — пустое состояние вместо таблицы нулей
 
@@ -7835,6 +7884,329 @@ Marzec      600      →  bez zmian …
 Финансовая часть вокруг (stat-карточки `<LivePreviewPanel>`, dopłata в §6.5) показывает `0,00 €` и `—` вместо ставки — она не прячется: перевозчик должен видеть, что сумма именно ноль, а не «не посчитано».
 
 > **Вне зоны дизайна (вопрос владельцу процесса):** блокировать ли подачу wniosek-а, когда весь период без гарантии. Здесь зафиксировано только визуальное поведение превью. Существующий гейт §6.5.5 («Gwarancja wyjeżdżona — wniosek można tylko odrzucić» при `kmDifference <= 0`) в этом случае и так срабатывает на стороне сотрудника.
+
+> **2026-09-24:** отказ сервера при подаче смешанного периода без недобега («W miesiącach objętych gwarancją przebieg jest równy lub wyższy niż km gwarantowane (X). Brak podstaw do dopłaty.») — серверный текст, показывается существующим путём 4xx-ошибки формы; отдельного ключа не заводим. Как и все серверные 4xx сегодня, он только по-польски.
+
+#### §16.5.5 Staff: колонки tablicy km в `<BreakdownTable>` (NEW 2026-09-24)
+
+**Контракт компонента.** `<BreakdownTable breakdown boardSettlement? className? />`.
+
+- `boardSettlement` передаёт **только** `ClaimModal` (pracownik / admin / opiekun). `LivePreviewPanel` и страница wniosku перевозчика его не передают — API перевозчику это поле не отдаёт. Роль компонент **не проверяет**: вариант определяется данными (§16.5.1).
+- Prop `mileage` **удаляется** — он кормил только старую ноту `gapNotice`. Вызовы: `LivePreviewPanel.tsx`, `app/(carrier)/carrier/claims/[nrZgl]/page.tsx`, `ClaimModal.tsx` (`DoplataBlock`).
+- В `ClaimModal` брать **`claim.boardSettlement` в паре с `claim.breakdown`** — один DTO, одни даты. Не смешивать `boardSettlement` из живого превью с persisted `claim.breakdown`: при правке дат месяцы разъедутся. (Если когда-нибудь разбивка в модалке переедет на живой breakdown — брать оба из превью.)
+- Колонки рендерятся только при `mileageSource === 'board'` **и** наличии `boardSettlement`. Период «все месяцы активны» у staff выглядит **ровно как сегодня** — даже если API вдруг пришлёт `boardSettlement` и для него.
+- Соединение: `boardSettlement.months` → строки breakdown по `yearMonth`. Месяц без пары → обе ячейки `—` (защитно; в норме не случается).
+
+**Ячейки по режиму месяца** (`mode` из `boardSettlement.months[]`):
+
+| Месяц | «Km wg weryfikatora» | «Wpisane dni» |
+|---|---|---|
+| `off` | `—`, `text-text-sub`, `title={t('boardOffTitle')}` | `—`, `text-text-sub` |
+| `active`, `daysFilled === daysRequired` | `formatInt(km)`, `font-semibold text-text tabular-nums` (тот же вес, что `Km/mc`: это пара «gwarantowano → przejechano») | `boardDaysValue` → «14 z 14», `text-text tabular-nums` |
+| `active`, `daysFilled < daysRequired` | как строкой выше — число показываем, сигнал несёт соседняя ячейка | `<AlertTriangle size={12} aria-hidden className="shrink-0" />` + «13 z 14» в `inline-flex items-center justify-end gap-1 font-semibold text-warning-dark dark:text-warning` + `<span className="sr-only">, {t('boardDaysMissingSr', { count: daysRequired − daysFilled })}</span>` |
+| `saturdaysOnly` | `formatInt(km)` — км только зачётных суббот | `boardSaturdaysValue` → «2 z 2 sob.» — единица подписана, иначе «2 z 2» читается как «2 дня месяца». Неполно → та же янтарная трактовка |
+| любой, `daysRequired === 0` | `—` | `—` |
+
+Янтарь никогда не единственный сигнал: иконка + sr-only (WCAG 1.4.1). Контраст — существующая проверенная пара (`text-warning-dark` на `bg-card` light, `text-warning` на `bg-card` dark).
+
+**Широкая таблица.** Порядок: `Miesiąc | Dni rob. | Km/dz. | €/km | Km/mc | Km wg weryfikatora | Wpisane dni`. Колонки tablicy стоят **сразу справа от `Km/mc`** — строка читается парой «gwarantowano X → przejechano Y», итог «Razem» — той же парой, а это и есть весь расчёт (`Σ gwarancji − Σ tablicy`). Граница «gwarancja | tablica km» — `border-l border-border` на первой колонке tablicy (в `th`, каждом `td` и `tfoot`). Заголовки — существующий класс `th`, `whitespace-nowrap`, выравнивание вправо, полные подписи (сокращать не нужно — см. порог ниже).
+
+- Под-строки «Soboty» и «Dni wyłączone»: `colSpan` 5 → **7**, когда колонки tablicy есть.
+- `tfoot`: лейбл `colSpan={4}` → **`total` «Razem»** (вместо «Razem (km gwarant.)» — под одним лейблом теперь два разных итога, что есть что — говорят заголовки колонок) | `kmGuaranteed` | `boardSettlement.mileageEffective` (`border-l`) | пустая ячейка. Итог колонки «Km wg weryfikatora» берётся **из того же живого `boardSettlement`, что и её строки** (Σ `months[].km`), поэтому колонка всегда сходится; **не** `breakdown.mileageEffective` — это км последнего расчёта wniosku (подача / верификация / решение), они устаревают, как только weryfikator дописал день. Выплату этот итог не показывает — сумма живёт только в поле dopłaty. «Wpisane dni» **не** суммируем: дни и субботы разных месяцев не складываются в осмысленное число; недостающие даты перечисляет §16.5.6.
+
+```
+┌ ⓘ Okres obejmuje miesiąc bez gwarancji. Dopłatę liczy się z tablicy km weryfikatora — … ─────────┐
+│ MIESIĄC                        DNI ROB.  KM/DZ.  €/KM   KM/MC │ KM WG WERYFIKATORA   WPISANE DNI │
+│ 2025-08 [Gwarancja wyłączona]       5       0     —        0 │                  —             — │ ← bg-input/40
+│ 2025-09                            14     540  0,50    7 560 │              2 000    ⚠ 13 z 14  │
+│ RAZEM                                                  7 560 │              2 000               │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Порог «таблица / карточки».** С колонками tablicy таблица становится 7-колоночной — на 34rem она не помещается без сжатия. **Staff-вариант переключается на 40rem**: карточки `@max-[40rem]:block @min-[40rem]:hidden`, таблица `@max-[40rem]:hidden @min-[40rem]:block`. Перевозчик и staff без колонок — по-прежнему 34rem. Классы **литеральные** (Tailwind v4 сканирует исходник, интерполяция `@min-[${bp}]` не сгенерирует CSS): два полных набора строк, выбор через `cn(boardMode ? '…40rem…' : '…34rem…')`. В `ClaimModal` (`max-w-4xl`, тело ≈ 52rem) на десктопе staff видит таблицу; карточки — на планшете / телефоне.
+
+**Узкий вид (карточки, контейнер < 40rem).** В карточке `active` / `saturdaysOnly`-месяца после существующих строк `dl` — блок tablicy: **две строки на всю ширину** (`col-span-2`; «Km wg weryfikatora» не помещается в полширины карточки) под разделителем `border-t border-border/60 pt-2` — тем же, что у строки «Soboty». Если у месяца есть и «Soboty», блок tablicy идёт **после** неё.
+
+```
+┌ 2025-09 ─────────────────────────────────┐
+│ Dni rob.        14   Km/dz.         540   │
+│ €/km          0,50   Km/mc        7 560   │
+│ ───────────────────────────────────────── │
+│ Km wg weryfikatora                2 000   │
+│ Wpisane dni                   ⚠ 13 z 14   │
+└───────────────────────────────────────────┘
+```
+
+- `off`-месяц: блок tablicy **не рендерится** (в карточке строку можно убрать — то же правило, что для `€/km`, §16.5.2).
+- Итоговая плашка под карточками (`bg-bg`): вторая строка `boardTotalKm` «Razem (km wg weryfikatora)» + `boardSettlement.mileageEffective` (тот же живой итог, что в `tfoot`), тем же стилем, что «Razem (km gwarant.)», между строками `mt-1.5`.
+
+#### §16.5.6 Staff: плашка «brak danych» + гейт `ZAAKCEPTOWANO` в `ClaimModal` (NEW 2026-09-24)
+
+```ts
+const board = claim.boardSettlement;                       // нет у перевозчика и у «всё активно»
+const boardIncomplete = board != null && board.complete === false;
+```
+
+**Гейт акцепта — тот же механизм, что `metGuarantee` (§6.5.5 «Acceptance gate by recalc result»): `ZAAKCEPTOWANO` УДАЛЯЕТСЯ из опций `<Select>`**, не дизейблится.
+
+- `availableTargets` фильтрует `ZAAKCEPTOWANO` при `metGuarantee || boardIncomplete`; существующий эффект, сбрасывающий устаревший выбор `ZAAKCEPTOWANO`, срабатывает по тому же `||`.
+- **`REKLAMACJA_ZAAKCEPTOWANO` не трогаем** — uznana reklamacja платит свою замороженную сумму, tablica в ней не участвует (§6.5.15 D).
+- `ODRZUCONO` остаётся всегда. «Zapisz weryfikację» гейт **не** затрагивает — сохранять верификацию с дырами можно.
+- Почему удаление, а не `<option disabled>`: один механизм на все причины «акцепт сейчас невозможен»; нативная disabled-опция не несёт причины и по-разному озвучивается скринридерами; причина стоит прямо над селектом (плашка ниже).
+- **`metGuarantee` старше.** Недостающие дни могут только **добавить** км, т.е. только уменьшить `kmDifference`. Если гарантия выезжена уже по неполной tablicy, после дозаполнения она останется выезженной. Поэтому при `metGuarantee` показывается только существующий `guaranteeMetHint`, а плашка «brak danych» **не** рендерится — её обещание «zaakceptować można po uzupełnieniu» было бы ложью.
+- Отдельной строки-подсказки **под** селектом для этого гейта нет: плашка стоит прямо над ним, третье повторение того же факта — шум.
+
+**Плашка `<BoardGapNotice>`** (композиция в `ClaimModal.tsx`, рядом с `InTransitGateBlock`).
+
+Условие:
+```
+boardIncomplete && !metGuarantee && !inTransitGated && !isReklamacja
+&& (claim.status === 'NA_WERYFIKACJI' || claim.status === 'OCZEKUJE_NA_AUTORYZACJE')
+```
+Гейтится **статусом, а не ролью**: opiekun тоже её видит (docs/20 §0⁵ «Что видят роли»). Рендерится и в `view`, и в `edit` — в `view` читатель узнаёт, почему акцепта не будет, ещё до перехода в редактирование. При `inTransitGated` не рендерится: пока выезд в трассе, дыры на tablicy ожидаемы, а баннер «Wyjazd jeszcze w trasie» уже блокирует всё — одно объяснение на факт.
+
+**Место: внутри `<DecisionPanel>`, первым дочерним элементом** — над `DecisionFields` (edit) / над абзацем `decisionRequired` (view). **Не** отдельным блоком над панелью, как Maksim / in-transit: те блокируют решение целиком (danger), этот убирает одну опцию — поэтому живёт в панели, непосредственно над селектом, в котором этой опции нет.
+
+| Слот | Оформление |
+|---|---|
+| Контейнер | `<section role="status" aria-labelledby={titleId} className="rounded-md border border-warning/40 bg-warning-bg px-3 py-3 dark:bg-warning/15">` — рецепт поверхности `progExceededHint`, **0 новых токенов** |
+| Тон | **warning, не danger.** Действие нужно от другого человека (weryfikator), читатель ничего не сломал; отклонить можно |
+| Иконка | `<CalendarX size={16} aria-hidden className="mt-0.5 shrink-0 text-warning-dark dark:text-warning" />` |
+| Заголовок | `<h4 id={titleId} className="text-sm font-bold text-warning-dark dark:text-warning">` ← `boardGate.title` «Brak danych za 2 dni» |
+| Текст | `<p className="mt-1 text-sm text-text">` ← `boardGate.body` |
+| Даты | `<ul aria-label={t('datesLabel')} className="mt-2 flex flex-wrap gap-1.5">`, каждая `<li className="rounded border border-warning/40 bg-card px-1.5 py-0.5 text-xs tabular-nums text-text">` |
+| Подсказка дня съезда | `<p className="mt-2 text-xs text-text-sub">` ← `boardGate.returnDayHint`, **только** если `missingDates` содержит последний день периода (`claim.dateEnd.slice(0, 10)`) |
+
+- **Источник дат:** `boardSettlement.missingDates` (верхнего уровня — уже только активные месяцы). `count` в заголовке = его длина. Сортировать по возрастанию защитно.
+- **Формат даты:** `Intl.DateTimeFormat(locale === 'pl' ? 'pl-PL' : 'en-GB', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })`, `YYYY-MM-DD` парсится как **локальная** дата (`new Date(y, m − 1, d)`, как `formatExcludedDate` в `BreakdownTable`) — без UTC-сдвига. Год всегда: период может пересекать Новый год. Пунктуация — та, что даёт Intl (≈ «czw., 18.09.2025» / «Thu, 18/09/2025»).
+- **Свёртка длинного списка:** ≤ 8 дат — все. > 8 — первые 6 + кнопка `boardGate.showAll` «Pokaż wszystkie (14)»; развёрнуто — все + `boardGate.showLess` «Zwiń». Кнопка: `<button type="button" aria-expanded={open} className="mt-1.5 py-1 text-xs font-semibold text-text underline-offset-2 hover:underline">`. Скрывать 1–2 даты ради кнопки бессмысленно — отсюда порог 8, а не 6. Число в заголовке всегда полное.
+- Если `complete === false`, но `missingDates` пуст (защитно) — список и кнопка не рендерятся; заголовок берёт ветку `=0` («Brak danych na tablicy km»).
+
+```
+┌ DECYZJA ───────────────────────────────────────────────────────────┐
+│ ┌ [CalendarX] Brak danych za 2 dni ─────────────────────────────┐ │  ← amber, role=status
+│ │ Weryfikator nie wpisał jeszcze przebiegu na tablicy km za      │ │
+│ │ poniższe dni w miesiącach z gwarancją. Zaakceptować wniosek…   │ │
+│ │ [śr., 17.09.2025] [czw., 18.09.2025]                           │ │
+│ │ Ostatni dzień okresu to zwykle dzień zjazdu — …                │ │
+│ └────────────────────────────────────────────────────────────────┘ │
+│ Decyzja *  [ Wybierz decyzję       ▾ ]   ← без ZAAKCEPTOWANO         │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**Ответы 422 на решение** — в `updateM.onError`, тем же паттерном, что `CLAIM_AUTHORIZATION_REQUIRED` / `CLAIM_DELEGATION_IN_TRANSIT`: ключ — `problemCode(err)`, инвалидировать `[...CLAIMS_KEY, 'detail', claim.nrZgl]`, показать **локализованный** тост (серверный польский `detail` не выводим — EN-интерфейс получил бы польский), `return`.
+
+| Код | Что делает UI | Тост |
+|---|---|---|
+| `CLAIM_BOARD_INCOMPLETE` | инвалидация → свежий `boardSettlement` → опция `ZAAKCEPTOWANO` пропадает, устаревший выбор сбрасывается эффектом, появляется плашка | `toast.error(tBoard('incompleteToast', { count: extensions.missingDates?.length ?? 0 }))` |
+| `CLAIM_BOARD_CHANGED` | инвалидация + локальный флаг `boardChanged = true`, входит в `decisionGated` (селект disabled), сбрасывается в `verifyM.onSuccess`. Подсказка `boardGate.changedHint` — в существующем слоте gate-hint под селектом (`text-xs text-text-sub`, `role="status"`), приоритет: после in-transit, **перед** подсказками верификации | `toast.error(tBoard('changedToast'))` |
+
+Зачем локальный флаг для `CHANGED`: без него pracownik повторяет то же решение, получает тот же 422, и тост выглядит как петля. Флаг чисто клиентский; правда остаётся на сервере (после повторного «Zapisz weryfikację» сервер сам решит, можно ли теперь).
+
+> **Открытый вопрос к api-agent (не дизайн):** docs/20 §0⁵ блокирует и авто-переход в `OCZEKUJE_NA_AUTORYZACJE`, пока tablica неполна. `progExceededHint` в блоке DOPŁATA обещает «po zapisaniu weryfikacji wniosek automatycznie przejdzie w stan „Czeka na autoryzację”». Если api действительно пропускает переход при `complete === false`, web **скрывает `progExceededHint` при `boardIncomplete`** (объяснение — янтарная плашка). Новый копирайт не нужен.
+
+#### §16.5.7 i18n (2026-09-24) — готово к вставке
+
+**`messages/pl.json` → `carrier.breakdown`:** **удалить** `gapNotice`, `gapNoticeMonth`; **добавить**:
+
+```json
+"mixedPeriodNotice": "Okres obejmuje {count, plural, one {miesiąc bez gwarancji} few {miesiące bez gwarancji} many {miesięcy bez gwarancji} other {miesięcy bez gwarancji}}. Dopłata zależy wtedy od przebiegu pojazdu w dniach objętych gwarancją, a nie od łącznego przebiegu podanego we wniosku. <b>Ostateczną kwotę ustala się po weryfikacji wniosku.</b>",
+"boardNotice": "Okres obejmuje {count, plural, one {miesiąc bez gwarancji} few {miesiące bez gwarancji} many {miesięcy bez gwarancji} other {miesięcy bez gwarancji}}. Dopłatę liczy się z tablicy km weryfikatora — tylko z dni w miesiącach z gwarancją. <b>Przebieg podany przez przewoźnika nie wpływa na kwotę — służy tylko do porównania.</b>",
+"boardKm": "Km wg weryfikatora",
+"boardDays": "Wpisane dni",
+"boardDaysValue": "{filled} z {required}",
+"boardSaturdaysValue": "{filled} z {required} sob.",
+"boardDaysMissingSr": "brak danych za {count, plural, one {# dzień} few {# dni} many {# dni} other {# dni}}",
+"boardOffTitle": "Nie liczy się — gwarancja wyłączona w tym miesiącu",
+"total": "Razem",
+"boardTotalKm": "Razem (km wg weryfikatora)"
+```
+
+**`messages/en.json` → `carrier.breakdown`:** **удалить** `gapNotice`, `gapNoticeMonth`; **добавить**:
+
+```json
+"mixedPeriodNotice": "The period includes {count, plural, one {a month} other {months}} without a mileage guarantee. In that case the compensation depends on the vehicle's mileage on the guaranteed days, not on the total mileage entered in the claim. <b>The final amount is set once the claim has been verified.</b>",
+"boardNotice": "The period includes {count, plural, one {a month} other {months}} without a mileage guarantee. The compensation is calculated from the verifier's km board — only days in guaranteed months count. <b>The mileage entered by the carrier does not affect the amount — it is for comparison only.</b>",
+"boardKm": "Km per verifier",
+"boardDays": "Days entered",
+"boardDaysValue": "{filled} of {required}",
+"boardSaturdaysValue": "{filled} of {required} Sat.",
+"boardDaysMissingSr": "no data for {count, plural, one {# day} other {# days}}",
+"boardOffTitle": "Not counted — the guarantee is disabled for this month",
+"total": "Total",
+"boardTotalKm": "Total (km per verifier)"
+```
+
+**`messages/pl.json` → `employee.claims.modal.boardGate`** (новый объект, сосед `maksimGate` / `inTransitGate`):
+
+```json
+"boardGate": {
+  "title": "{count, plural, =0 {Brak danych na tablicy km} one {Brak danych za # dzień} few {Brak danych za # dni} many {Brak danych za # dni} other {Brak danych za # dni}}",
+  "body": "Weryfikator nie wpisał jeszcze przebiegu na tablicy km za poniższe dni w miesiącach z gwarancją. Zaakceptować wniosek można dopiero po uzupełnieniu danych; odrzucić — w każdej chwili.",
+  "datesLabel": "Dni bez przebiegu na tablicy km",
+  "showAll": "Pokaż wszystkie ({count})",
+  "showLess": "Zwiń",
+  "returnDayHint": "Ostatni dzień okresu to zwykle dzień zjazdu — na tablicy km można go wpisać dopiero następnego dnia.",
+  "incompleteToast": "Nie można zaakceptować wniosku — {count, plural, =0 {brak przebiegu na tablicy km w dniach z gwarancją} one {brak przebiegu na tablicy km za # dzień} few {brak przebiegu na tablicy km za # dni} many {brak przebiegu na tablicy km za # dni} other {brak przebiegu na tablicy km za # dni}}. Poczekaj, aż weryfikator uzupełni dane.",
+  "changedToast": "Kwota dopłaty różni się od zapisanej przy weryfikacji — zmieniła się tablica km albo dane wniosku. Zapisz weryfikację ponownie, a następnie podejmij decyzję.",
+  "changedHint": "Kwota dopłaty zmieniła się od zapisania weryfikacji — zapisz weryfikację ponownie, aby podjąć decyzję.",
+  "changedHintNoEdit": "Kwota dopłaty zmieniła się od zapisania weryfikacji — weryfikację musi ponownie zapisać administrator."
+}
+```
+
+**`messages/en.json` → `employee.claims.modal.boardGate`:**
+
+```json
+"boardGate": {
+  "title": "{count, plural, =0 {No data on the km board} one {No data for # day} other {No data for # days}}",
+  "body": "The verifier has not yet entered mileage on the km board for the days below in guaranteed months. The claim can be accepted only once the data is complete; it can be rejected at any time.",
+  "datesLabel": "Days without mileage on the km board",
+  "showAll": "Show all ({count})",
+  "showLess": "Show less",
+  "returnDayHint": "The last day of the period is usually the return day — it can only be entered on the km board the following day.",
+  "incompleteToast": "The claim cannot be accepted — {count, plural, =0 {mileage is missing on the km board for guaranteed days} one {mileage is missing on the km board for # day} other {mileage is missing on the km board for # days}}. Wait until the verifier completes the data.",
+  "changedToast": "The compensation amount differs from the one saved at verification — the km board or the claim data has changed. Save the verification again, then make the decision.",
+  "changedHint": "The compensation amount changed since the verification was saved — save the verification again to make a decision.",
+  "changedHintNoEdit": "The compensation amount changed since the verification was saved — an administrator must save the verification again."
+}
+```
+
+> **2026-09-24, реализация (web-agent, решение main agent):** `changedToast` / `changedHint` переписаны нейтрально — «kwota różni się od zapisanej… zmieniła się tablica km **albo dane wniosku**» вместо «tablica km zmieniła się». Причина: web отправляет вместе с решением **все** correction-поля, поэтому 422 `CLAIM_BOARD_CHANGED` на смешанном периоде вызывает и несохранённая корректировка, не только правка tablicy (docs/13, `CLAIM_BOARD_CHANGED`). Текст, винящий tablicę, в этом случае был бы неправдой. PL-текст toast-а совпадает с серверным `detail`.
+>
+> **`changedHintNoEdit`** (добавлен 2026-09-24): вариант `changedHint` для пользователя, у которого **нет** кнопки «Zapisz weryfikację» (`perms.showVerifyButton === false` — на практике pracownik @ `OCZEKUJE_NA_AUTORYZACJE`, где пересохранить верификацию может только admin, 422 `CLAIM_VERIFY_ADMIN_ONLY`). Показывается в том же слоте gate-hint вместо `changedHint`, когда решение заблокировано флагом `boardChanged`. Велеть «zapisz weryfikację ponownie» тому, кто этого сделать не может, — тупик.
+
+Параметры: `count` — число (ICU-плюрал); `filled` / `required` — числа; `<b>` — rich-тег для `t.rich` (как у удалённого `gapNotice`). `total` и `boardTotalKm` используются только в staff-варианте; у перевозчика футер по-прежнему `totalKmGuaranteed`.
+
+#### §16.5.8 Acceptance checklist (2026-09-24, web-agent)
+
+- [ ] Период «все месяцы активны» у перевозчика и у staff **пиксельно как до изменения**: нет ноты, нет колонок tablicy, нет гейта.
+- [ ] Смешанный период определяется **только** по `mileageSource === 'board'`, не по строкам; без поля — `'declared'`.
+- [ ] Перевозчик: одна нота `mixedPeriodNotice`, **ни одного** числа км / дней в ней; `mileageEffective` не показывается нигде; stat-карточки превью не изменились; бейджи / приглушение / `—` §16.5.2 на месте.
+- [ ] `gapNotice` / `gapNoticeMonth` удалены из обоих `messages/*.json`, prop `mileage` удалён из `<BreakdownTable>` и всех трёх вызовов.
+- [ ] Staff: нота `boardNotice`, колонки «Km wg weryfikatora» / «Wpisane dni» справа от `Km/mc` с `border-l`; `off` → `—` (с `title`); `saturdaysOnly` → «X z Y sob.»; неполный месяц — янтарь + иконка + sr-only.
+- [ ] Staff-вариант переключает таблицу / карточки на **40rem** литеральными классами; в карточке `off`-месяца блока tablicy нет; итоговая плашка карточек — две строки.
+- [ ] `tfoot` staff: «Razem» | `kmGuaranteed` | `boardSettlement.mileageEffective` (сходится с суммой колонки) | пусто.
+- [ ] `ZAAKCEPTOWANO` **удалено** из опций при `boardIncomplete` (тем же фильтром, что `metGuarantee`), устаревший выбор сброшен; `REKLAMACJA_ZAAKCEPTOWANO`, `ODRZUCONO` и «Zapisz weryfikację» не затронуты.
+- [ ] `<BoardGapNotice>` внутри `<DecisionPanel>` первым элементом, в view и edit; не рендерится при `metGuarantee`, `inTransitGated`, reklamacji и вне `NA_WERYFIKACJI` / `OCZEKUJE_NA_AUTORYZACJE`; opiekun её видит.
+- [ ] Даты: локальный парсинг, год всегда, по возрастанию; > 8 → 6 + «Pokaż wszystkie (N)» с `aria-expanded`; `returnDayHint` только когда пропущен последний день периода.
+- [ ] 422 `CLAIM_BOARD_INCOMPLETE` / `CLAIM_BOARD_CHANGED` → инвалидация detail + локализованный тост; `CHANGED` держит решение закрытым с `changedHint` до успешного «Zapisz weryfikację».
+- [ ] Dark mode: `bg-warning-bg` / `dark:bg-warning/15`, `text-warning-dark` / `dark:text-warning` проверены в обеих темах.
+- [ ] **0 новых токенов, 0 новых примитивов.**
+
+#### §16.5.9 Deviations (web-agent implementation, 2026-09-24)
+
+Токены, иконки, копирайт (кроме `changedToast` / `changedHint` / `changedHintNoEdit`, см. примечания в §16.5.7) и визуальные рецепты §16.5.1–§16.5.8 — без изменений.
+
+**Источник данных в `ClaimModal` — как в §16.5.5 / §16.5.6, без отклонений:** таблица, гейт `ZAAKCEPTOWANO` и плашка «brak danych» читают **сохранённую пару claim-а** — `claim.breakdown` + `claim.boardSettlement` из `GET /claims/:nrZgl`, для всех ролей и в обоих режимах. Живое превью в таблицу не попадает. Период «все месяцы активны» (`claim.boardSettlement === null`, `mileageSource !== 'board'`) рендерится в модалке так же, как до фичи, в `view` и в `edit`.
+
+Отклонения от буквы спеки:
+
+1. **Dopłata решённого смешанного wniosku — сохранённая, не живая** (решение main agent, дополнение к §6.5.4). Живое превью `POST /claims/:nrZgl/preview` статус не проверяет, поэтому модалка и до фичи показывала в поле DOPŁATA (и в `<RecalcBadge>`) пересчитанную сумму даже для решённых wniosków. Для смешанного периода пересчёт идёт по tablicy «сейчас» и уезжает от решённой суммы при первой правке tablicy. Поэтому **ровно** при `claim.breakdown.mileageSource === 'board'` **и** статусе `ZAAKCEPTOWANO` / `ODRZUCONO` поле показывает сохранённый `claim.paymentEur` (бейдж тогда без дельты). `kmDifference` модалка не выводит (живой нужен только гейту `metGuarantee`, у решённого wniosku опций решения нет) — его не трогаем. **→ Устарело с §16.5.10:** модалка теперь выводит niedojazd под полем dopłaty, и он обязан брать `kmDifference` из **того же** объекта, что сумма (для решённого смешанного — сохранённый claim). Все остальные статусы (включая `REKLAMACJA`) и периоды «все активны» — как было.
+2. ~~«Razem» колонки tablicy = `breakdown.mileageEffective`~~ — **ОТМЕНЕНО 2026-09-24 (баг из ручного теста).** Итог колонки «Km wg weryfikatora» (`tfoot` и вторая строка итоговой плашки карточек) = **`boardSettlement.mileageEffective`**, как и было в §16.5.5: колонка суммирует тот же живой источник, что её строки, и поэтому всегда сходится. Репро прежнего варианта: смешанный период 24.08–18.09.2026, wniosek подан при пустом дне сентября (посчитан на 4950 км), weryfikator потом дописал день — строка сентября показывала 5450 / «18 z 18», а «Razem» — устаревшие 4950 (`breakdown.mileageEffective` с момента подачи). Выплата по-прежнему выводится **только** в поле dopłaty; `boardSettlement.paymentEur` нигде не показывается, сохранённая dopłata решённого смешанного wniosku (п. 1) не меняется.
+3. **`count` в `mixedPeriodNotice` / `boardNotice` = число месяцев с выключенной гарантией в будни (`kmPerDay === 0`)**, т.е. `disabled` **и** «tylko soboty», а не только `disabled`. Период «tylko soboty + активный» тоже `mileageSource === 'board'` (`settlementNeedsBoard`), и счёт только `disabled` дал бы `count = 0` → «Okres obejmuje miesięcy bez gwarancji». Бейдж «Gwarancja tylko w soboty» под нотой уточняет, какой это месяц.
+4. **Несохранённые корректировки на смешанном периоде убирают `ZAAKCEPTOWANO`** (решение main agent, дополнение к §16.5.6). Условие: **сохранённый** период смешанный (`claim.boardSettlement` или `claim.breakdown.mileageSource === 'board'`; живое превью не учитывается — период «все активны» в `edit` ведёт себя как до фичи) **и** fact-блок редактируем (`perms.payloadIncludesCorrections`) **и** есть грязные correction-поля (`correctionsDirty`, тот же RHF dirty-state, что гейт чекпоинта). Механизм тот же, что у `metGuarantee` (удаление опции + сброс устаревшего выбора); подсказка — `boardGate.changedHint` в слоте gate-hint, **после** подсказок чекпоинта и Maksima. На практике срабатывает только у admin @ `OCZEKUJE_NA_AUTORYZACJE` — в `NA_WERYFIKACJI` грязные корректировки и так закрывают решение гейтом чекпоинта. Цель — чтобы 422 `CLAIM_BOARD_CHANGED` почти не случался.
+5. **`progExceededHint` скрывается при неполной tablicy по любому из двух чтений** — `claim.boardSettlement` (сохранённые входы) **или** `boardSettlement` живого превью (текущие правки — ровно то, что посчитает «Zapisz weryfikację»; сама подсказка и так считается из превью). Так подсказка никогда не обещает переход, который api пропустит (открытый вопрос §16.5.6 закрыт: api пропускает авто-переход при неполной tablicy, docs/13). Это единственное место, где читается board из превью; на экран он не выводится.
+6. **`boardGate.changedHintNoEdit`** — если решение закрыто флагом `CLAIM_BOARD_CHANGED`, а у пользователя нет кнопки «Zapisz weryfikację» (`perms.showVerifyButton === false`: pracownik @ `OCZEKUJE_NA_AUTORYZACJE`), вместо `changedHint` («zapisz weryfikację ponownie») выводится «weryfikację musi ponownie zapisać administrator». Toast `changedToast` не меняется.
+7. **Кнопка «Pokaż wszystkie» получила `aria-controls`** на список дат (a11y, сверх `aria-expanded`).
+
+#### §16.5.10 Niedojazd в блоке DOPŁATA (`ClaimModal`, staff) (NEW 2026-09-24)
+
+**Проблема.** В модалке есть гарантия (`Km/mc`, «Razem»), км tablicy, сумма dopłaty и `<RecalcBadge>`, но нигде прямо не сказано «pojazd przejechał o 2 180 km mniej, niż gwarantowano». `kmDifference` модалка не выводит вообще (живое значение кормит только гейт `metGuarantee`). Pracownik вынужден вычитать в уме, а это ровно то число, за которое платят.
+
+**Размещение (locked): две строки прямо под полем dopłaty, над `<FormDescription>` «wyliczana automatycznie».** Порядок чтения блока: *сумма → почему такая сумма → она автоматическая*.
+
+```
+DOPŁATA GWARANCYJNA                          [RecalcBadge] [Przelicz wg aktualnych limitów]
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 1 090,00 €                                                           [Lock] │
+└─────────────────────────────────────────────────────────────────────────────┘
+W miesiącach z gwarancją pojazd przejechał o 2 180 km mniej, niż gwarantowano.   ← text-sm text-text, «2 180 km mniej» — font-semibold
+Niedojazd: 7 630 km gwarant. − 5 450 km wg weryfikatora = 2 180 km × 0,50 €/km   ← text-xs text-text-sub tabular-nums
+[Lock] wyliczana automatycznie
+```
+
+Почему здесь, а не в другом месте:
+
+| Вариант | Решение |
+|---|---|
+| **Под полем dopłaty** | **выбран.** Niedojazd — причина суммы; его место непосредственно у суммы. Читается одним взглядом вместе с полем и бейджем, одинаково в `view` и `edit` |
+| Строка «Razem» в `<BreakdownTable>` | **нет.** Таблица читает **сохранённую** пару claim-а (§16.5.9), а dopłata — живое превью: в `edit` строки разъехались бы, и `niedojazd × stawka ≠ dopłata`. Кроме того, в периоде «все активны» у таблицы нет колонки пробега — пришлось бы менять таблицу, которая по §16.5.8 должна остаться прежней |
+| Отдельная stat-карточка / плитка | **нет.** Модалка и так плотная; третья «цифра» рядом с полем и бейджем спорила бы с суммой за внимание. Строка текста подчинена полю, карточка — нет |
+| Только формула «7630 − 5450 = 2180 km» | **недостаточно.** Формулу надо расшифровывать; пожелание PO — сказать словами. Поэтому первая строка — фраза, вторая — формула для проверки |
+
+**Роли.** Там же, где поле dopłaty: pracownik / admin / opiekun — все, кто открывает `ClaimModal`, в `view` и в `edit`, во всех статусах, где рендерится блок DOPŁATA. Отдельного гейта по роли нет. Для смешанного периода staff и так видит км tablicy (§16.5.5) — новых данных строка не раскрывает.
+
+**Перевозчик — ничего нового.** Карточка «Różnica km» в `<LivePreviewPanel>` остаётся как есть; на странице wniosku перевозчика ни фразы, ни формулы нет. Требование «перевозчик не видит цифр tablicy, которых не видел раньше» выполняется тем, что мы ему ничего не добавляем. (Факт для PO: `Km gwarantowane − Różnica km` в превью перевозчика уже сейчас арифметически равно сумме km tablicy для смешанного периода — это было принято в §16.5.3 и здесь не меняется.)
+
+**Источник чисел — тот же объект, что у dopłaty (жёсткое правило).** Все четыре числа строки берутся из **одного** объекта — того, из которого поле берёт сумму:
+
+```ts
+// тот же выбор, что у liveDoplata; web может свести их в один объект
+const src = showStoredDoplata ? claim : (previewQ.data ?? claim);
+// src.kmGuaranteed, src.kmDifference, src.ratePerKmEffective, src.paymentEur,
+// src.breakdown?.mileageSource
+const driven = src.kmGuaranteed − src.kmDifference;   // = mileageEffective
+```
+
+- Никогда не смешивать `previewQ.data.kmDifference` с `claim.kmGuaranteed` (или наоборот): только так `niedojazd × stawka` всегда сходится с суммой в поле.
+- Решённый смешанный wniosek (`showStoredDoplata`, §16.5.9 п.1) → сохранённые значения claim-а; всё остальное → живое превью с откатом на claim.
+- **До прихода превью / во время дебаунса / при ошибке превью** — ровно как поле: показываем то, что показывает поле (claim до первого ответа; прошлый ответ, пока идёт пересчёт — `placeholderData`; claim при ошибке без данных). Ни скелетона, ни «—», ни приглушения — строка не должна вести себя иначе, чем сумма над ней; о пересчёте сообщает `<RecalcBadge>`.
+- `scope` («board» / «declared») — из `src.breakdown?.mileageSource` того же объекта; отсутствие ⇒ `declared`. Если pracownik правкой дат превратил период из смешанного во «все активны», формулировка переключится вместе с суммой.
+
+**Состояния.**
+
+| Условие (по `src`) | Строка 1 | Строка 2 (формула) |
+|---|---|---|
+| `kmGuaranteed === 0` (весь период без гарантии) | **не рендерится** — факт уже объяснён `<EmptyState>` в таблице (§16.5.4), одно объяснение на факт | не рендерится |
+| `isCompensationDue(kmDifference)` (niedojazd > 0) — тот же предикат, что у гейта `metGuarantee` | `shortfall.line` | `shortfall.formula` |
+| `kmDifference === 0` | `shortfall.metEqual` | не рендерится |
+| `kmDifference < 0` | `shortfall.metOver`, `km = |kmDifference|` — **отрицательное число не показываем никогда** | не рендерится |
+
+- «Gwarancja wyjeżdżona» — тот же термин, что у `guaranteeMetHint` в Decyzji; фразы не противоречат друг другу.
+- Тон: строка niedojazdu — `text-sm text-text`, выделение `<b>` → `font-semibold tabular-nums`; строки «wyjeżdżona» — `text-sm text-text-sub`. **Без семантического цвета и без иконки** (правило §16.6: сумма к выплате — не «плохо», её отсутствие — не «хорошо»).
+- Без `aria-live`: строка пересчитывается на каждую правку, живой регион болтал бы на каждый символ. Об изменении суммы уже сообщает `<RecalcBadge>`.
+- Формула **без** «= {dopłata}» в конце: сумма стоит строкой выше в поле, а повтор с округлением `round2` мог бы разойтись на цент с эффективной ставкой многомесячного периода.
+
+**Формулировки по периоду.** `scope = 'board'` (смешанный): «W miesiącach z gwarancją pojazd przejechał …» и «km wg weryfikatora» — понятно, что сравнивались только активные месяцы и только km tablicy (`driven` = итог колонки «Km wg weryfikatora»). `scope = 'declared'` (все активны): «Pojazd przejechał …» и «km przebiegu» — это поле «Przebieg / km zrealizowane» после правок pracownika. `km gwarant.` — тот же сокращённый термин, что «Razem (km gwarant.)».
+
+**Форматирование.** Параметры — предформатированные строки (как во всём `BreakdownTable`): `km` / `guaranteed` / `driven` — `Intl.NumberFormat('pl-PL', { maximumFractionDigits: 2 })` (`mileageEffective` бывает с копейками — `333,33`; `formatInt` дал бы видимое расхождение с суммой); `rate` — `{ minimumFractionDigits: 2, maximumFractionDigits: 4 }` (эффективная ставка многомесячного периода может быть не круглой). Разность `kmGuaranteed − kmDifference` в JS считается с плавающей ошибкой — форматтер с `maximumFractionDigits: 2` её убирает.
+
+**Термины: «Niedojazd» у staff vs «Różnica km» у перевозчика — расхождение намеренное.** Карточка перевозчика — это знаковое сырое число (может быть отрицательным), и слово «niedojazd» рядом с «−500» было бы бессмыслицей. Staff получает фразу, в которой знак заменён словами «mniej» / «więcej», поэтому здесь можно назвать вещь её рабочим именем. Карточку перевозчика не трогаем.
+
+**i18n — `messages/pl.json` → `employee.claims.modal.shortfall`** (новый объект):
+
+```json
+"shortfall": {
+  "line": "{scope, select, board {W miesiącach z gwarancją pojazd przejechał} other {Pojazd przejechał}} o <b>{km} km mniej</b>, niż gwarantowano.",
+  "formula": "Niedojazd: {guaranteed} km gwarant. − {driven} {scope, select, board {km wg weryfikatora} other {km przebiegu}} = {km} km × {rate} €/km",
+  "metEqual": "{scope, select, board {W miesiącach z gwarancją pojazd przejechał} other {Pojazd przejechał}} dokładnie tyle, ile gwarantowano ({guaranteed} km). Gwarancja wyjeżdżona — dopłata nie przysługuje.",
+  "metOver": "{scope, select, board {W miesiącach z gwarancją pojazd przejechał} other {Pojazd przejechał}} {driven} km przy {guaranteed} km gwarantowanych — o {km} km więcej. Gwarancja wyjeżdżona — dopłata nie przysługuje."
+}
+```
+
+**`messages/en.json` → `employee.claims.modal.shortfall`:**
+
+```json
+"shortfall": {
+  "line": "{scope, select, board {In the guaranteed months the vehicle drove} other {The vehicle drove}} <b>{km} km less</b> than guaranteed.",
+  "formula": "Shortfall: {guaranteed} guaranteed km − {driven} {scope, select, board {km per verifier} other {km driven}} = {km} km × {rate} €/km",
+  "metEqual": "{scope, select, board {In the guaranteed months the vehicle drove} other {The vehicle drove}} exactly the guaranteed distance ({guaranteed} km). Guarantee met — no compensation is due.",
+  "metOver": "{scope, select, board {In the guaranteed months the vehicle drove} other {The vehicle drove}} {driven} km against {guaranteed} guaranteed km — {km} km more. Guarantee met — no compensation is due."
+}
+```
+
+Параметры: `scope` — `'board'` | `'declared'` (ветка `other` покрывает `declared` и отсутствие поля); `km`, `guaranteed`, `driven`, `rate` — строки; `<b>` — rich-тег, `t.rich` (только в `line`). Остальные ключи — `t()`.
+
+**Acceptance checklist (§16.5.10):**
+
+- [ ] Две строки стоят **между** полем dopłaty и `<FormDescription>` «wyliczana automatycznie», в `view` и `edit`, для pracownik / admin / opiekun.
+- [ ] Все числа строки и сумма в поле берутся из **одного** объекта `src` (решённый смешанный → claim; иначе `previewQ.data ?? claim`). На скриншоте в `edit` после правки км: `niedojazd × stawka` = сумма в поле.
+- [ ] До ответа превью / во время пересчёта / при ошибке строка ведёт себя ровно как поле: без скелетона, без «—», без приглушения.
+- [ ] `kmDifference > 0` → фраза + формула; `= 0` → `metEqual`; `< 0` → `metOver` с модулем; **отрицательное число нигде не выводится**; `kmGuaranteed === 0` → строк нет.
+- [ ] Смешанный период (`src.breakdown.mileageSource === 'board'`) → «W miesiącach z gwarancją…» и «km wg weryfikatora»; в примере 7 630 − 5 450 = 2 180 km × 0,50 €/km при dopłacie 1 090,00 €; `driven` совпадает с итогом колонки «Km wg weryfikatora», когда превью и сохранённая пара считаны с одних входов.
+- [ ] Км — до 2 знаков после запятой, ставка — 2–4 знака; без семантического цвета, без иконки, без `aria-live`.
+- [ ] У перевозчика **ничего не изменилось**: `<LivePreviewPanel>` и страница wniosku — пиксельно как раньше.
+- [ ] **0 новых токенов, 0 новых примитивов, 0 правок API.**
 
 ### §16.6 — «Przelicz wg aktualnych limitów» — кнопка и диалог сравнения
 
@@ -8008,8 +8380,6 @@ Marzec      600      →  bez zmian …
 "guaranteeDisabled": "Gwarancja wyłączona",
 "guaranteeSaturdayOnly": "Gwarancja tylko w soboty",
 "rateNoneTitle": "Brak stawki — gwarancja wyłączona w tym miesiącu",
-"gapNotice": "Okres obejmuje {count, plural, one {miesiąc bez gwarancji} few {miesiące bez gwarancji} many {miesięcy bez gwarancji} other {miesięcy bez gwarancji}} ({months}). Do rozliczenia przyjęto {daysActive} dni i {mileageEffective} z {mileage} km.",
-"gapNoticeMonth": "{month}: {days} z {daysTotal} dni",
 "allDisabledTitle": "Brak gwarancji w tym okresie",
 "allDisabledBody": "Dla wszystkich miesięcy tego okresu gwarancja przebiegu jest wyłączona, dlatego wniosek nie generuje dopłaty. Skontaktuj się z opiekunem, jeśli to pomyłka."
 ```
@@ -8020,11 +8390,11 @@ Marzec      600      →  bez zmian …
 "guaranteeDisabled": "Guarantee disabled",
 "guaranteeSaturdayOnly": "Saturdays only",
 "rateNoneTitle": "No rate — the guarantee is disabled for this month",
-"gapNotice": "The period includes {count, plural, one {a month} other {months}} without a mileage guarantee ({months}). The settlement uses {daysActive} days and {mileageEffective} of {mileage} km.",
-"gapNoticeMonth": "{month}: {days} of {daysTotal} days",
 "allDisabledTitle": "No guarantee in this period",
 "allDisabledBody": "The mileage guarantee is disabled for every month of this period, so the claim generates no compensation. Contact your account manager if this is a mistake."
 ```
+
+> **2026-09-24:** `gapNotice` / `gapNoticeMonth` удалены из обоих языков. Ключи смешанного периода (`mixedPeriodNotice`, `boardNotice`), staff-колонок tablicy km и `employee.claims.modal.boardGate` — **§16.5.7** (единственный источник, здесь не дублируются).
 
 **`messages/pl.json` → `employee.claims.modal.recalc`** (новый объект):
 
@@ -8079,15 +8449,17 @@ Marzec      600      →  bez zmian …
 | `<LimitsRow>` — два чекбокса в ячейках, три состояния строки, состояние `unsaved`, память прежнего значения | `apps/web/components/limits/LimitsRow.tsx` | правка |
 | `<LimitsView>` — кнопка «Zastosuj do wielu miesięcy», страничная нота `defaultsNotice`, подсказка `independenceHint` | `apps/web/app/(employee)/employee/(admin)/limits/LimitsView.tsx` | правка |
 | `<BulkLimitsDialog>` — `<FormDialog>` + `<Select>` + `<MultiSelect>` + сводная таблица | `apps/web/components/limits/BulkLimitsDialog.tsx` | **новый** (композиция) |
-| `<BreakdownTable>` — бейджи `disabled` / `saturdayOnly`, `—` вместо ставки-призрака, пустое состояние всего периода | `apps/web/components/carrier/BreakdownTable.tsx` | правка |
-| `<GuaranteeGapNotice>` — нота смешанного периода | рядом с `BreakdownTable.tsx` (может жить в том же файле) | **новый** (композиция) |
+| `<BreakdownTable>` — бейджи `disabled` / `saturdayOnly`, `—` вместо ставки-призрака, пустое состояние всего периода; **2026-09-24:** prop `boardSettlement?`, prop `mileage` удалён, staff-колонки tablicy km + порог 40rem (§16.5.5) | `apps/web/components/carrier/BreakdownTable.tsx` | правка |
+| `<GuaranteeGapNotice audience>` — нота смешанного периода; **2026-09-24:** условие `mileageSource === 'board'`, тексты `mixedPeriodNotice` / `boardNotice` (§16.5.3) | в `BreakdownTable.tsx` | правка |
+| `analyzeBreakdown` — **2026-09-24:** смешанный период = `mileageSource === 'board'`; поля `daysActive` / `daysTotal` / `mileageEffective` / `mileage` из `BreakdownGuaranteeInfo` больше не нужны UI | `apps/web/lib/claims/breakdownGuarantee.ts` (+ тест) | правка |
+| **2026-09-24:** `<BoardGapNotice>` в `<DecisionPanel>`, гейт `ZAAKCEPTOWANO` по `boardSettlement.complete`, 422 `CLAIM_BOARD_INCOMPLETE` / `CLAIM_BOARD_CHANGED` (§16.5.6) | `apps/web/components/claims/ClaimModal.tsx` | правка |
 | `<RecalcLimitsDialog>` — сравнение «было → станет» | `apps/web/components/claims/RecalcLimitsDialog.tsx` | **новый** (композиция `<Dialog>`) |
 | Кнопка «Przelicz wg aktualnych limitów» + `snapshotNote` в блоке DOPŁATA | `apps/web/components/claims/ClaimModal.tsx` (§6.5.4) | правка |
 | i18n-ключи §16.7 | `messages/pl.json`, `messages/en.json` | правка |
 
 **Токены: 0 новых.** Используются существующие `bg-card`, `bg-input`, `bg-input/40`, `bg-warning/5`, `border-warning`, `text-warning-dark` / `dark:text-warning`, `text-text`, `text-text-sub`, `border-border`, `border-brand/60`, `bg-brand-50/40`, `text-success`, `text-danger`. **0 правок** `tailwind.config.ts` / `globals.css`.
 
-**Иконки (Lucide):** `Info`, `CalendarRange`, `CalendarOff`, `ArrowRight`, `RefreshCw`, `Check`, `X`. Эмодзи — нет.
+**Иконки (Lucide):** `Info`, `CalendarRange`, `CalendarOff`, `ArrowRight`, `RefreshCw`, `Check`, `X`; **2026-09-24:** `CalendarX` (плашка «brak danych»), `AlertTriangle` (неполный месяц в колонке «Wpisane dni»). Эмодзи — нет. Токены для §16.5.5–16.5.6 — существующие `bg-warning-bg`, `dark:bg-warning/15`, `border-warning/40`, `text-warning-dark`, `dark:text-warning` (та же поверхность, что `progExceededHint`).
 
 ### §16.9 — Acceptance checklist (§16, web-agent)
 
@@ -8107,8 +8479,8 @@ Marzec      600      →  bez zmian …
 - [ ] Частичный отказ оставляет диалог открытым с пер-строчным результатом и «Ponów nieudane» (либо, при атомарном bulk-эндпоинте, простым success/error).
 - [ ] Выключенный месяц у перевозчика: бейдж «Gwarancja wyłączona», приглушённая строка, `Km/mc` без `font-semibold`.
 - [ ] **Ставка-призрак спрятана везде**, где `kmGuaranteed === 0` (breakdown per-month и footer, stat-карточки, `ClaimModal`) — рендерится `—`, `0,50` не появляется ни в одном месте.
-- [ ] `<GuaranteeGapNotice>` появляется только в смешанном периоде, стоит **над** таблицей, нейтрального тона, цифры выделены весом.
-- [ ] Период целиком без гарантии → `<EmptyState>` с `<CalendarOff />` вместо таблицы; футер «Razem» и блок граничных дней скрыты; ноты `gapNotice` нет.
+- [ ] `<GuaranteeGapNotice>` появляется только при `mileageSource === 'board'`, стоит **над** таблицей, нейтрального тона, без чисел; текст по аудитории — §16.5.3 (REWRITTEN 2026-09-24). Остальной checklist смешанного периода — §16.5.8.
+- [ ] Период целиком без гарантии → `<EmptyState>` с `<CalendarOff />` вместо таблицы; футер «Razem» и блок граничных дней скрыты; ноты смешанного периода нет.
 - [ ] Кнопка «Przelicz wg aktualnych limitów» — `variant="outline"` в блоке DOPŁATA, **не** в футере; отсутствует (не дизейблится) для ролей вне `admin`/`pracownik` и на решённых wniosek-ах; рядом стоит `snapshotNote`.
 - [ ] `<RecalcLimitsDialog>` показывает «было → станет» до записи; дельта **без семантического цвета**; вариант «Limity nie zmieniły się» схлопывает футер в «Zamknij»; ошибка оставляет диалог открытым.
 - [ ] Dark mode: все новые поверхности (`bg-input/40`, `bg-warning/5`, бейджи, нота) проверены в обеих темах; контраст AA (`text-warning-dark` на `bg-card` в light, `text-warning` на `bg-card` в dark).

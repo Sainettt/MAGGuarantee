@@ -25,6 +25,7 @@ import {
 } from '@nestjs/common';
 
 import type {
+  BoardDay,
   KmCalcResult,
   SubmitClaimDto,
 } from '@magguarantee/shared';
@@ -368,18 +369,27 @@ function makeAuditWriter(): AuditWriter {
 }
 
 /**
- * Daily-km repo fake. `sumDroveKm` returns the configured prefill value so the
- * `mileage` pre-fill path (Phase 7 REWORK #3) can be exercised. The spy is
- * returned so tests can assert the queried window.
+ * Daily-km repo fake. `sumDroveKm` is the board TOTAL (never read by submit);
+ * `listBoardDays` returns the per-day rows a MIXED period is settled on
+ * (docs/20 §0⁵). Both spies are returned so tests can assert who was read.
  */
-function makeDailyKmRepo(sum: number): {
+function makeDailyKmRepo(
+  sum: number,
+  board: BoardDay[] = [],
+): {
   repo: VehicleDailyKmRepository;
   sumSpy: jest.Mock;
+  boardSpy: jest.Mock;
 } {
   const sumSpy = jest.fn(async () => sum);
+  const boardSpy = jest.fn(async () => board);
   return {
-    repo: { sumDroveKm: sumSpy } as unknown as VehicleDailyKmRepository,
+    repo: {
+      sumDroveKm: sumSpy,
+      listBoardDays: boardSpy,
+    } as unknown as VehicleDailyKmRepository,
     sumSpy,
+    boardSpy,
   };
 }
 
@@ -676,12 +686,11 @@ describe('ClaimsService.submit — carrier submission gates', () => {
 
   // ── carrier-declared mileage (REWORK 2026-07-30) ──────────
 
-  it('7. mileage is the CARRIER-DECLARED value; the daily-km board is not consulted', async () => {
+  it('7. mileage is the CARRIER-DECLARED value; an all-active period never reads the board', async () => {
     const repoFake = makeRepo(null);
-    // Board sum deliberately DIFFERENT from the declared mileage: the two come
-    // from different external systems and never agree — that divergence is the
-    // whole reason the carrier declares its own number now.
-    const { repo: dailyKm, sumSpy } = makeDailyKmRepo(6_123);
+    // Board sum deliberately DIFFERENT from the declared mileage: an all-active
+    // period is paid on the carrier's own number, whatever the board says.
+    const { repo: dailyKm, sumSpy, boardSpy } = makeDailyKmRepo(6_123);
     const svc = makeService(repoFake, undefined, undefined, undefined, dailyKm);
 
     const dto: SubmitClaimDto = submitDto({ mileage: 8_000 });
@@ -693,9 +702,11 @@ describe('ClaimsService.submit — carrier submission gates', () => {
     // Persisted verbatim, both in the working column and the carrier snapshot.
     expect(repoFake.creates[0]!.data.mileage).toBe(8_000);
     expect(repoFake.creates[0]!.data.origMileage).toBe(8_000);
-    // The board is the weryfikator's reference for `pracownik`, NOT an input to
-    // submit — submit must not even read it.
+    // Every month of the default fixture is active (empty breakdown) — submit
+    // must not even read the board.
     expect(sumSpy).not.toHaveBeenCalled();
+    expect(boardSpy).not.toHaveBeenCalled();
+    expect(repoFake.creates[0]!.data.breakdown.mileageSource).toBe('declared');
   });
 
   it('8. a declared mileage of 0 → 422 (mileage must be > 0)', async () => {
@@ -1217,48 +1228,163 @@ describe('ClaimsService.submit — why is the guarantee zero?', () => {
     expect(v!.violations).toContain('Brak limitu km gwarantowanych w tym okresie.');
   });
 
-  it('a mixed period persists the settlement fields and pays the active month', async () => {
+  it('an all-active period with no under-run keeps the declared wording', async () => {
     const repoFake = makeRepo(null);
     const svc = makeService(
       repoFake,
       undefined,
       undefined,
-      makeKmCalc({
-        totalDays: 20,
-        rawTotalDays: 20,
-        kmGuaranteed: 5_400,
-        ratePerKmEffective: 0.5,
-        breakdown: [
-          {
-            yearMonth: '2026-04',
-            workingDays: 10,
-            kmPerDay: 540,
-            ratePerKm: 0.5,
-            saturdaysCounted: 0,
-            kmPerSaturday: 0,
-            kmFromSaturdays: 0,
-            kmInMonth: 5_400,
-            saturdayDays: [],
-            excludedDays: [],
-          },
-          { ...disabledMonth('2026-05'), workingDays: 10 },
-        ],
-      }),
-      // Board sum = the carrier's declared mileage for this fixture.
-      makeDailyKmRepo(8_000).repo,
+      makeKmCalc({ kmGuaranteed: 5_000 }),
     );
 
-    const out = await svc.submit(makeAuth('przewoznik'), submitDto());
+    let caught: unknown;
+    try {
+      await svc.submit(makeAuth('przewoznik'), submitDto({ mileage: 8_000 }));
+    } catch (e) {
+      caught = e;
+    }
+    const v = readViolation(caught);
+    expect(v!.violations).toEqual([
+      'Km zrealizowane (8000) są równe lub wyższe niż km gwarantowane (5000). ' +
+        'Brak podstaw do dopłaty.',
+    ]);
+  });
+});
 
-    // Only half the mileage is charged: 8_000 × 10/20 = 4_000.
-    expect(out.kmDifference).toBe(1_400);
-    expect(out.paymentEur).toBe(700);
+// ─── mixed period settled on the daily-km board (docs/20 §0⁵) ──
+
+describe('ClaimsService.submit — mixed period settled on the daily-km board', () => {
+  beforeAll(() => {
+    jest.useFakeTimers().setSystemTime(NOW);
+  });
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
+  // 27.04–10.05.2026: April guaranteed (27–30 = 4 weekdays × 540 = 2160 km),
+  // May switched off. The outing departed on the 27th so the departure floor
+  // lets the carrier declare that start.
+  const MIXED_CALC: Partial<KmCalcResult> = {
+    totalDays: 10,
+    rawTotalDays: 10,
+    kmGuaranteed: 2_160,
+    ratePerKmEffective: 0.5,
+    breakdown: [
+      {
+        yearMonth: '2026-04',
+        workingDays: 4,
+        kmPerDay: 540,
+        ratePerKm: 0.5,
+        saturdaysCounted: 0,
+        kmPerSaturday: 0,
+        kmFromSaturdays: 0,
+        kmInMonth: 2_160,
+        saturdayDays: [],
+        excludedDays: [],
+      },
+      {
+        yearMonth: '2026-05',
+        workingDays: 6,
+        kmPerDay: 0,
+        ratePerKm: 0.5,
+        saturdaysCounted: 0,
+        kmPerSaturday: 0,
+        kmFromSaturdays: 0,
+        kmInMonth: 0,
+        saturdayDays: [],
+        excludedDays: [],
+      },
+    ],
+  };
+
+  const MIXED_DTO = submitDto({ dateStart: '2026-04-27', dateEnd: '2026-05-10' });
+
+  function aprilBoard(km: Record<string, number>): BoardDay[] {
+    return ['2026-04-27', '2026-04-28', '2026-04-29', '2026-04-30'].map(
+      (date): BoardDay =>
+        km[date] === undefined
+          ? { date, state: 'idle', km: null }
+          : { date, state: 'drove', km: km[date]! },
+    );
+  }
+
+  function mixedService(repoFake: RepoFake, board: BoardDay[]) {
+    const daily = makeDailyKmRepo(0, board);
+    const svc = makeService(
+      repoFake,
+      undefined,
+      undefined,
+      makeKmCalc(MIXED_CALC),
+      daily.repo,
+      makeDelegationsRepo(
+        makeDelegation({ departureAt: new Date('2026-04-27T06:30:00.000Z') }),
+      ),
+    );
+    return { svc, daily };
+  }
+
+  it('pays the guaranteed month on the board and persists mileageSource=board', async () => {
+    const repoFake = makeRepo(null);
+    const { svc, daily } = mixedService(
+      repoFake,
+      aprilBoard({ '2026-04-27': 400, '2026-04-28': 400 }),
+    );
+
+    const out = await svc.submit(makeAuth('przewoznik'), MIXED_DTO);
+
+    // 2_160 − 800 (board, April only) = 1_360 ⇒ 680 €. The declared 8_000 km
+    // would have wiped the dopłata out entirely.
+    expect(out.kmDifference).toBe(1_360);
+    expect(out.paymentEur).toBe(680);
     const persisted = repoFake.creates[0]!.data;
-    expect(persisted.breakdown.daysActive).toBe(10);
-    expect(persisted.breakdown.daysTotal).toBe(20);
-    expect(persisted.breakdown.mileageEffective).toBe(4_000);
-    // `drivenDays` / `kmPerDay` stay over the FULL period (business decision).
-    expect(persisted.drivenDays).toBe(20);
-    expect(persisted.kmPerDay).toBe(400);
+    expect(persisted.breakdown.mileageSource).toBe('board');
+    expect(persisted.breakdown.mileageEffective).toBe(800);
+    expect(persisted.origPaymentEur).toBe(680);
+    // The per-month board detail is live data — never persisted.
+    expect('board' in persisted.breakdown).toBe(false);
+    // `mileage` / `drivenDays` / `kmPerDay` stay the declared, full-period facts.
+    expect(persisted.mileage).toBe(8_000);
+    expect(persisted.drivenDays).toBe(10);
+    expect(persisted.kmPerDay).toBe(800);
+    // ONE board read — the outing vehicle, [dateStart, dateEnd + 1d).
+    expect(daily.boardSpy).toHaveBeenCalledTimes(1);
+    expect(daily.boardSpy).toHaveBeenCalledWith(
+      'v-1',
+      new Date('2026-04-27T00:00:00.000Z'),
+      new Date('2026-05-11T00:00:00.000Z'),
+    );
+    expect(daily.sumSpy).not.toHaveBeenCalled();
+  });
+
+  it('a day not yet on the board does not block the submit (it blocks the accept later)', async () => {
+    const repoFake = makeRepo(null);
+    const { svc } = mixedService(
+      repoFake,
+      aprilBoard({ '2026-04-27': 400 }).filter((d) => d.date !== '2026-04-30'),
+    );
+
+    const out = await svc.submit(makeAuth('przewoznik'), MIXED_DTO);
+
+    // 2_160 − 400 = 1_760 ⇒ 880 €; the missing day counts 0 km, nothing guessed.
+    expect(out.paymentEur).toBe(880);
+    expect(repoFake.creates).toHaveLength(1);
+  });
+
+  it('no under-run on the board ⇒ the mixed wording, without quoting the carrier or board figure', async () => {
+    const repoFake = makeRepo(null);
+    const { svc } = mixedService(repoFake, aprilBoard({ '2026-04-27': 3_000 }));
+
+    let caught: unknown;
+    try {
+      await svc.submit(makeAuth('przewoznik'), MIXED_DTO);
+    } catch (e) {
+      caught = e;
+    }
+    const v = readViolation(caught);
+    expect(v!.violations).toEqual([
+      'W miesiącach objętych gwarancją przebieg jest równy lub wyższy niż km ' +
+        'gwarantowane (2160). Brak podstaw do dopłaty.',
+    ]);
+    expect(repoFake.creates).toHaveLength(0);
   });
 });

@@ -340,20 +340,20 @@ export const PreviewClaimSchema = z
     timeFrom: emptyStringToUndefined(HhMmSchema.optional()),
     timeTo: emptyStringToUndefined(HhMmSchema.optional()),
     /**
-     * VERIFIER inspection-path override — only meaningful on
-     * `POST /claims/:nrZgl/preview` when the caller is a verifier role
-     * (`pracownik` / `admin`). When present, it replaces the server-computed
-     * `Σ VehicleDailyKm.km (state=drove)` in the live preview so the ClaimModal's
-     * dopłata / RecalcBadge / accept-gate / auto-populated `amountApproved` all
-     * track a km edit before the PATCH commits — mirroring what the PATCH recalc
-     * will persist (`UpdateClaimCorrectionFields.mileage`).
+     * The DECLARED mileage to price. On `POST /claims/:nrZgl/preview` a
+     * verifier (`pracownik` / `admin`) may send it to replace the claim's
+     * stored mileage, so the ClaimModal's dopłata / RecalcBadge / accept-gate /
+     * auto-populated `amountApproved` track a km edit before the PATCH commits —
+     * mirroring what the PATCH recalc will persist
+     * (`UpdateClaimCorrectionFields.mileage`). The CARRIER new-claim path
+     * (`delegationId` present) sends the carrier's own figure; the `przewoznik`
+     * reklamacja-inspection path ignores it.
      *
-     * ⚠️ REWORK 2026-07-30: the CARRIER new-claim path (`delegationId` present)
-     * now sends its OWN mileage — the daily-km board is no longer the source,
-     * only the verifier's reference. The `przewoznik` reklamacja-inspection path
-     * (existing claim) still ignores it. Empty string → undefined (form-friendly)
-     * via the same preprocessor the sibling fields use — a cleared numeric input
-     * never reaches `.nonnegative()`.
+     * For a mixed period (a month with `kmPerDay = 0`) the payout is settled on
+     * the daily-km board instead, so this figure does not move the price there
+     * (docs/20 §0⁵). Empty string → undefined (form-friendly) via the same
+     * preprocessor the sibling fields use — a cleared numeric input never
+     * reaches `.nonnegative()`.
      */
     mileage: emptyStringToUndefined(MileageSchema.optional()),
     hoursAdjusted: HoursAdjustedSchema.optional().default(0),
@@ -437,6 +437,26 @@ export const REKLAMACJA_NOT_PENDING = 'REKLAMACJA_NOT_PENDING' as const;
 export const CLAIM_LIMITS_REFRESH_BLOCKED =
   'CLAIM_LIMITS_REFRESH_BLOCKED' as const;
 
+/**
+ * 422 — `ZAAKCEPTOWANO` on a MIXED period (a month with `kmPerDay = 0`, so the
+ * payout is settled on the weryfikator's daily-km board, docs/20 §0⁵) while a
+ * counted day of a guaranteed month has no board row. `extensions.missingDates`
+ * lists those days (ISO `YYYY-MM-DD`, ascending). The weryfikator fills them
+ * in; nothing is guessed. Never raised for `ODRZUCONO` or a reklamacja.
+ */
+export const CLAIM_BOARD_INCOMPLETE = 'CLAIM_BOARD_INCOMPLETE' as const;
+
+/**
+ * 422 — `ZAAKCEPTOWANO` on a mixed period whose LIVE board-based dopłata
+ * differs from the one saved at verification, or is over the Maksim threshold
+ * without the gate armed and cleared at exactly that amount. Two causes: the
+ * board is live data and can move after «Zapisz weryfikację», OR the decision
+ * carries unsaved corrections (the web sends every correction field with it).
+ * Re-saving the verification re-prices the claim and re-arms the gate. Never
+ * raised for `ODRZUCONO` or a reklamacja.
+ */
+export const CLAIM_BOARD_CHANGED = 'CLAIM_BOARD_CHANGED' as const;
+
 // ─── km-calc breakdown row (mirror of MonthBreakdown in domain/km-calc) ──
 
 /**
@@ -496,6 +516,17 @@ export const MonthBreakdownSchema = z.object({
 export type MonthBreakdownDto = z.infer<typeof MonthBreakdownSchema>;
 
 /**
+ * Source of the kilometres a claim's payout was settled on
+ * (`ClaimSettlement.mileageSource` in `domain/claim-settlement.ts`):
+ *  - `declared` — every month of the period has its weekday guarantee on, the
+ *    carrier's declared mileage is charged against the guarantee;
+ *  - `board`    — some month has `kmPerDay = 0`; the weryfikator's daily-km
+ *    board over the counted days of the guaranteed months is charged instead.
+ */
+export const MileageSourceSchema = z.enum(['declared', 'board']);
+export type MileageSource = z.infer<typeof MileageSourceSchema>;
+
+/**
  * The claim period's boundary calendar day + the fraction of it actually
  * credited (0..1, 2-dp). Mirror of `KmCalcResult.firstDay` / `.lastDay` in
  * `domain/km-calc.ts`. `0` when the boundary day was excluded (Sunday /
@@ -530,13 +561,15 @@ export type BoundaryDayDto = z.infer<typeof BoundaryDaySchema>;
  * (an excluded boundary day reports `fraction: 0`, not `null`; `null` is
  * reserved for the invalid/empty-range engine path).
  *
- * `daysActive` / `daysTotal` / `mileageEffective` come from the settlement
- * pass (`domain/claim-settlement.ts`) and describe the proportional mileage
- * split introduced with the «wyłączane limity gwarancji» feature: when some
- * month of the period has its guarantee switched off (`kmPerDay = 0` and
- * `kmPerSaturday = 0`), only `daysActive / daysTotal` of the mileage is
- * charged against the guarantee. `daysActive === daysTotal` ⇒ nothing was
- * disabled and `mileageEffective === claim.mileage`.
+ * `daysActive` / `daysTotal` / `mileageEffective` / `mileageSource` come from
+ * the settlement pass (`domain/claim-settlement.ts`). When every month of the
+ * period has its weekday guarantee on, the declared mileage is charged against
+ * the guarantee (`mileageSource: 'declared'`, `mileageEffective ===
+ * claim.mileage`). When some month has `kmPerDay = 0`, the kilometres charged
+ * are the weryfikator's daily-km board summed over the counted days of the
+ * guaranteed months (`mileageSource: 'board'`, docs/20 §0⁵). The per-month
+ * board detail is NOT persisted here — the board is live data and is served
+ * separately as `boardSettlement` (see `ClaimBoardSettlementSchema`).
  *
  * Zod 3 cannot reference sibling fields from inside `.default(...)` (the
  * default callback receives no args), so the missing-field fallback has to
@@ -565,14 +598,19 @@ export const KmCalcBreakdownSchema = z
      */
     daysTotal: z.number().nonnegative().optional(),
     /**
-     * The share of the declared mileage actually charged against the
-     * guarantee: `round2(mileage × daysActive / daysTotal)`, or the raw
-     * mileage when every month is active. Deliberately NOT backfilled —
-     * `undefined` on a legacy row means "no proportional split was applied",
-     * and the UI renders `claim.mileage` instead. See
-     * `packages/shared/src/domain/claim-settlement.ts`.
+     * The kilometres charged against the guarantee when the claim was last
+     * priced: the declared mileage (`mileageSource: 'declared'`) or the board
+     * sum over the counted days (`mileageSource: 'board'`). Deliberately NOT
+     * backfilled — absent on legacy rows, where the UI renders
+     * `claim.mileage`. See `packages/shared/src/domain/claim-settlement.ts`.
      */
     mileageEffective: z.number().nonnegative().optional(),
+    /**
+     * Where `mileageEffective` came from. Persisted, NOT backfilled: absent ⇒
+     * `'declared'` (every row written before the board settlement had its
+     * mixed periods priced on the declared mileage).
+     */
+    mileageSource: MileageSourceSchema.optional(),
   })
   .transform((v) => ({
     ...v,
@@ -581,6 +619,59 @@ export const KmCalcBreakdownSchema = z
     daysTotal: v.daysTotal ?? v.totalDays,
   }));
 export type KmCalcBreakdown = z.infer<typeof KmCalcBreakdownSchema>;
+
+// ─── Board settlement (mixed periods, docs/20 §0⁵) ───────
+
+/** Mirror of `SettlementMonthMode` in `domain/claim-settlement.ts`. */
+export const SettlementMonthModeSchema = z.enum([
+  'active',
+  'saturdaysOnly',
+  'off',
+]);
+
+/**
+ * One calendar month of a mixed period on the board — wire mirror of
+ * `SettlementBoardMonth` in `domain/claim-settlement.ts`:
+ *  - `km`           — Σ `drove` km on the counted days (0 for `off`);
+ *  - `daysRequired` — `active`: every calendar day of month ∩ period;
+ *                     `saturdaysOnly`: the credited Saturdays; `off`: 0;
+ *  - `daysFilled`   — required days with a row (`drove` or `idle`);
+ *  - `missingDates` — required days without a row, ascending.
+ */
+export const SettlementBoardMonthSchema = z.object({
+  yearMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+  mode: SettlementMonthModeSchema,
+  km: z.number().nonnegative(),
+  daysFilled: z.number().int().nonnegative(),
+  daysRequired: z.number().int().nonnegative(),
+  missingDates: z.array(IsoDateSchema),
+});
+export type SettlementBoardMonthDto = z.infer<typeof SettlementBoardMonthSchema>;
+
+/**
+ * The LIVE board settlement of a mixed-period claim, computed on read (never
+ * persisted — the board is filled in after submit, so a frozen copy would go
+ * stale). Staff-only:
+ *  - `POST /claims/:nrZgl/preview` — for `pracownik` / `admin`, from the
+ *    previewed inputs;
+ *  - `GET /claims/:nrZgl` — for `admin` / `pracownik` / `opiekun`, from the
+ *    claim's stored period, times, `hoursAdjustedValue` and limits snapshot.
+ * `null` (or absent) for a carrier, for list items and whenever the period is
+ * all-active (`mileageSource: 'declared'`).
+ *
+ * `mileageEffective` / `kmDifference` / `paymentEur` are what the claim would
+ * be paid on right now; `complete === false` means acceptance is blocked
+ * (422 `CLAIM_BOARD_INCOMPLETE`) until the weryfikator fills `missingDates`.
+ */
+export const ClaimBoardSettlementSchema = z.object({
+  mileageEffective: z.number().nonnegative(),
+  kmDifference: z.number(),
+  paymentEur: z.number().nonnegative(),
+  months: z.array(SettlementBoardMonthSchema),
+  missingDates: z.array(IsoDateSchema),
+  complete: z.boolean(),
+});
+export type ClaimBoardSettlement = z.infer<typeof ClaimBoardSettlementSchema>;
 
 // ─── Preview response ────────────────────────────────────
 
@@ -606,13 +697,11 @@ export type PreviewDelegationContext = z.infer<
 
 export const PreviewClaimResponseSchema = z.object({
   /**
-   * Effective mileage used for the preview math. On the carrier new-claim path
-   * (a `delegationId` was supplied) this is ALWAYS the server-computed
-   * `Σ VehicleDailyKm.km (state=drove)` over the derived period for the
-   * delegation's vehicle (Phase 7 §0″ finish — no carrier override). On the
-   * existing-claim / verifier inspection path it falls back to the
-   * caller-supplied dates' vehicle sum. The web form renders the read-only
-   * mileage field from this.
+   * The DECLARED mileage the preview was priced with: the carrier's typed value
+   * on the new-claim path, the verifier's unsaved edit or the claim's stored
+   * mileage on the existing-claim path (the bare-vehicle legacy path falls back
+   * to the board sum). For a mixed period the payout is settled on the board
+   * instead — see `breakdown.mileageSource` / `breakdown.mileageEffective`.
    */
   mileage: z.number().nonnegative(),
   kmGuaranteed: z.number().nonnegative(),
@@ -644,6 +733,28 @@ export const PreviewClaimResponseSchema = z.object({
    * verifier inspection path.
    */
   delegationContext: PreviewDelegationContextSchema.optional(),
+  /**
+   * Live per-month board settlement — ONLY on `POST /claims/:nrZgl/preview`
+   * for `pracownik` / `admin`, and non-null only when the previewed period is
+   * mixed (`breakdown.mileageSource === 'board'`). Absent for carrier callers
+   * (new-claim and reklamacja inspection alike). See
+   * `ClaimBoardSettlementSchema`.
+   */
+  boardSettlement: ClaimBoardSettlementSchema.nullable().optional(),
+  /**
+   * Staff-only board TOTAL: Σ `VehicleDailyKm.km` (state `drove`) of the
+   * claim's vehicle over the preview's working period — the body's (possibly
+   * edited) inclusive `dateStart`/`dateEnd`, not the persisted ones. Backs the
+   * pracownik hint «Wg tablicy przebiegów: N km» + «Zastosuj» in the ClaimModal
+   * (distinct from `mileage`, which stays the DECLARED figure the preview was
+   * priced with).
+   *
+   * ONLY on `POST /claims/:nrZgl/preview` for `pracownik` / `admin` (same gate
+   * as `boardSettlement`); absent for carrier callers. `null` when the claim
+   * has no vehicle, a period date is missing / invalid, or the board is not
+   * available. A real board sum of 0 is `0`, not `null`.
+   */
+  boardSumKm: z.number().nonnegative().nullable().optional(),
 });
 export type PreviewClaimResponse = z.infer<typeof PreviewClaimResponseSchema>;
 
@@ -963,6 +1074,19 @@ export const ClaimDtoSchema = z.object({
    * and `null` in list responses (it costs a query per row).
    */
   verifierMileage: z.number().nullable(),
+  /**
+   * LIVE board settlement for a mixed period (docs/20 §0⁵) — per-month board
+   * km, filled/required days and the missing dates, plus the amount the claim
+   * would be paid on right now. Computed on read by `GET /claims/:nrZgl` for
+   * `admin` / `pracownik` / `opiekun` from the claim's stored period, times,
+   * `hoursAdjustedValue` and limits snapshot (opiekun cannot call the preview
+   * endpoint, hence it lives here too).
+   *
+   * `null` for a carrier, in every other response that returns a `ClaimDto`
+   * (submit / PATCH / verification / recalc-limits), and whenever the period
+   * is all-active. See `ClaimBoardSettlementSchema`.
+   */
+  boardSettlement: ClaimBoardSettlementSchema.nullable(),
   /**
    * The linked outing's lifecycle status, EMBEDDED on the claim so the pracownik
    * ClaimModal can render the read-only "w trasie" banner and the FE in-transit

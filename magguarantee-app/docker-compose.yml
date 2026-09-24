@@ -40,7 +40,7 @@ services:
   # cabotage screenshots, claim auth screenshots). Prod uses a real
   # S3-compatible provider (Cloudflare R2 / Hetzner Object Storage).
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:latest
     container_name: magguarantee-minio
     command: server /data --console-address ":9001"
     environment:
@@ -64,7 +64,7 @@ services:
   # if it does not exist. Exits 0 once done — `docker compose up` treats a
   # cleanly-exited one-shot as completed, not failed.
   minio-init:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:latest
     container_name: magguarantee-minio-init
     depends_on:
       minio:

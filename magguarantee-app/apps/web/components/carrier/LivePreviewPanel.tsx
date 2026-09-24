@@ -205,7 +205,7 @@ export function LivePreviewPanel({
         />
       </div>
 
-      <BreakdownTable breakdown={data.breakdown} mileage={data.mileage} />
+      <BreakdownTable breakdown={data.breakdown} />
     </div>
   );
 }

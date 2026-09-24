@@ -30,9 +30,20 @@
 // pays), and wherever nothing is guaranteed the €/km cell prints «—» instead
 // of the engine's 0,50 fallback — a price per kilometre is meaningless with
 // zero kilometres and reads as a promise. A period that is off end-to-end
-// renders an <EmptyState> instead of a table of zeroes; a MIXED period gets
-// the neutral <GuaranteeGapNotice> ABOVE the numbers, because the numbers are
-// what look broken.
+// renders an <EmptyState> instead of a table of zeroes.
+//
+// MIXED PERIOD (docs/14 §16.5.1/§16.5.3/§16.5.5, docs/20 §0⁵) — ONLY when the
+// server says so (`breakdown.mileageSource === 'board'`, never re-derived from
+// the rows): the payout is settled on the weryfikator's daily-km board, so the
+// neutral <GuaranteeGapNotice> goes ABOVE the numbers (the numbers are what
+// look broken). Two audiences, decided by data, not by role:
+//   • carrier (no `boardSettlement` prop) — one notice, no km/day figures, and
+//     `mileageEffective` is shown nowhere;
+//   • staff (`boardSettlement` passed by ClaimModal) — the staff notice plus two
+//     board columns right of «Km/mc» («Km wg weryfikatora», «Wpisane dni»), a
+//     «Razem» footer pairing guaranteed km with the live board total (the sum
+//     of the column above it), and a 40rem (not 34rem) table/card threshold because the table is now
+//     7 columns wide.
 //
 // Each month exposes a chevron when the engine surfaced any holiday /
 // EU-truck-ban days that were dropped from the count. Expanding reveals the
@@ -40,11 +51,12 @@
 // (weekends are universal and intentionally not listed).
 
 import { useState } from 'react';
-import { CalendarOff, ChevronDown, Info } from 'lucide-react';
+import { AlertTriangle, CalendarOff, ChevronDown, Info } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
   formatDaysPl,
   type BoundaryDayDto,
+  type ClaimBoardSettlement,
   type KmCalcBreakdown,
   type MonthBreakdownDto,
 } from '@magguarantee/shared';
@@ -54,9 +66,13 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { LockNotice } from '@/components/ui/LockNotice';
 import {
   analyzeBreakdown,
+  boardCell,
+  boardColumnTotalKm,
+  boardMonthIndex,
   isMonthGuaranteeDisabled,
   isMonthSaturdayOnly,
-  type BreakdownGuaranteeInfo,
+  type BoardCell,
+  type BoardValueCell,
 } from '@/lib/claims/breakdownGuarantee';
 import { cn } from '@/lib/utils';
 
@@ -91,23 +107,17 @@ function formatExcludedDate(iso: string, locale: string): string {
 export interface BreakdownTableProps {
   breakdown: KmCalcBreakdown;
   /**
-   * The declared mileage of the claim / preview. Feeds the
-   * «przyjęto X z Y km» half of <GuaranteeGapNotice> and is the fallback for
-   * `breakdown.mileageEffective`, which legacy wnioski never carry.
+   * STAFF ONLY — the live board settlement computed for THIS `breakdown` (same
+   * response / same period; never a board from one request next to a
+   * breakdown from another — after a period edit the months would not line
+   * up). Passed only by ClaimModal; the carrier pages never pass it and the
+   * API never sends it to a carrier. The component does not check the role:
+   * the staff variant is chosen by the data (§16.5.1). Ignored unless
+   * `breakdown.mileageSource === 'board'`, so an all-active period looks
+   * exactly as before even if a board is passed in.
    */
-  mileage?: number | null;
+  boardSettlement?: ClaimBoardSettlement | null;
   className?: string;
-}
-
-/** `2026-02` → «luty 2026» (pl, lower-case) / «February 2026» (en). */
-function formatMonthLong(yearMonth: string, locale: string): string {
-  const [y, m] = yearMonth.split('-');
-  const date = new Date(Date.UTC(Number(y), Number(m) - 1, 1));
-  return new Intl.DateTimeFormat(locale === 'pl' ? 'pl-PL' : 'en-GB', {
-    month: 'long',
-    year: 'numeric',
-    timeZone: 'UTC',
-  }).format(date);
 }
 
 /** The «Gwarancja wyłączona» / «tylko w soboty» chip — outline, never loud. */
@@ -125,43 +135,87 @@ function GuaranteeBadge({ label }: { label: string }) {
 // ── Mixed-period notice (composition, not a primitive) ──────────────
 // Rendered ABOVE the table: the zero rows are what look broken, so the
 // explanation has to be read BEFORE the figures. Deliberately neutral (not a
-// warning): nothing went wrong, this IS the configuration.
+// warning): nothing went wrong, this IS the configuration. Missing board days
+// are a separate, amber notice in ClaimModal (staff only) — never mixed in here.
+// No km or day figures in either text (§16.5.3): the only parameter is the
+// number of months without a (weekday) guarantee.
 
 function GuaranteeGapNotice({
-  info,
-  locale,
+  audience,
+  count,
 }: {
-  info: BreakdownGuaranteeInfo;
-  locale: string;
+  audience: 'carrier' | 'staff';
+  count: number;
 }) {
   const t = useTranslations('carrier.breakdown');
-  const months = info.disabledMonths
-    .map((m) =>
-      t('gapNoticeMonth', {
-        month: formatMonthLong(m.yearMonth, locale),
-        days: formatDaysPl(m.days),
-        daysTotal: formatDaysPl(info.daysTotal),
-      }),
-    )
-    .join(', ');
-
   return (
     <div className="border-b border-border p-3">
       <LockNotice icon={Info}>
-        {t.rich('gapNotice', {
-          count: info.disabledCount,
-          months,
-          daysActive: formatDaysPl(info.daysActive),
-          mileageEffective: formatInt(info.mileageEffective),
-          mileage: formatInt(info.mileage),
+        {t.rich(audience === 'staff' ? 'boardNotice' : 'mixedPeriodNotice', {
+          count,
           b: (chunks) => (
-            <strong className="font-semibold tabular-nums text-text">
-              {chunks}
-            </strong>
+            <strong className="font-semibold text-text">{chunks}</strong>
           ),
         })}
       </LockNotice>
     </div>
+  );
+}
+
+// ── Staff board cells (§16.5.5) ─────────────────────────────────────
+// «Wpisane dni» value: «14 z 14» / «2 z 2 sob.». An incomplete month is amber
+// + <AlertTriangle> + an sr-only «brak danych za N dni» — colour is never the
+// only signal (WCAG 1.4.1).
+
+function BoardDaysValue({ cell }: { cell: BoardValueCell }) {
+  const t = useTranslations('carrier.breakdown');
+  const label = t(cell.saturdaysOnly ? 'boardSaturdaysValue' : 'boardDaysValue', {
+    filled: cell.daysFilled,
+    required: cell.daysRequired,
+  });
+  if (cell.missing === 0) {
+    return <span className="tabular-nums text-text">{label}</span>;
+  }
+  return (
+    <span className="inline-flex items-center justify-end gap-1 font-semibold text-warning-dark dark:text-warning">
+      <AlertTriangle size={12} aria-hidden className="shrink-0" />
+      <span className="tabular-nums">{label}</span>
+      <span className="sr-only">
+        , {t('boardDaysMissingSr', { count: cell.missing })}
+      </span>
+    </span>
+  );
+}
+
+/** The two board `<td>`s of one table row. `border-l` = «gwarancja | tablica». */
+function BoardTableCells({ cell }: { cell: BoardCell }) {
+  const t = useTranslations('carrier.breakdown');
+  const base =
+    'px-2 py-2 h-10 text-right tabular-nums align-middle whitespace-nowrap';
+  if (cell.kind !== 'value') {
+    // A number that takes no part in the settlement is not printed (same rule
+    // as the ghost rate, §16.5.2).
+    return (
+      <>
+        <td
+          className={cn(base, 'border-l border-border text-text-sub')}
+          title={cell.kind === 'off' ? t('boardOffTitle') : undefined}
+        >
+          —
+        </td>
+        <td className={cn(base, 'text-text-sub')}>—</td>
+      </>
+    );
+  }
+  return (
+    <>
+      <td className={cn(base, 'border-l border-border font-semibold text-text')}>
+        {formatInt(cell.km)}
+      </td>
+      <td className={base}>
+        <BoardDaysValue cell={cell} />
+      </td>
+    </>
   );
 }
 
@@ -336,9 +390,12 @@ function MonthToggle({ row, open, onToggle, excludedCount }: MonthToggleProps) {
 function TableMonthRow({
   row,
   locale,
+  board,
 }: {
   row: MonthBreakdownDto;
   locale: string;
+  /** Staff board cells for this month; `null` ⇒ no board columns at all. */
+  board: BoardCell | null;
 }) {
   const t = useTranslations('carrier.breakdown');
   const [open, setOpen] = useState(false);
@@ -350,6 +407,8 @@ function TableMonthRow({
   const hasSaturdays = row.saturdaysCounted > 0;
   const disabled = isMonthGuaranteeDisabled(row);
   const saturdayOnly = isMonthSaturdayOnly(row);
+  // Full-width sub-rows span the board columns too when they are present.
+  const span = board ? 7 : 5;
 
   return (
     <>
@@ -408,10 +467,11 @@ function TableMonthRow({
         >
           {formatInt(row.kmInMonth)}
         </td>
+        {board && <BoardTableCells cell={board} />}
       </tr>
       {hasSaturdays && (
         <tr className="border-b border-border last:border-b-0">
-          <td colSpan={5} className="px-2 pb-2 pt-0">
+          <td colSpan={span} className="px-2 pb-2 pt-0">
             <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 pl-[22px] text-xs text-text-sub">
               <span className="font-semibold uppercase tracking-wide">
                 {t('saturdays')}
@@ -429,7 +489,7 @@ function TableMonthRow({
       )}
       {excluded.length > 0 && open && (
         <tr className="border-b border-border last:border-b-0 bg-bg/60">
-          <td colSpan={5} className="px-3 py-3">
+          <td colSpan={span} className="px-3 py-3">
             <ExcludedDays excluded={excluded} locale={locale} />
           </td>
         </tr>
@@ -445,9 +505,12 @@ function TableMonthRow({
 function CardMonth({
   row,
   locale,
+  board,
 }: {
   row: MonthBreakdownDto;
   locale: string;
+  /** Staff board block for this month; `null` ⇒ no board rows at all. */
+  board: BoardCell | null;
 }) {
   const t = useTranslations('carrier.breakdown');
   const [open, setOpen] = useState(false);
@@ -524,6 +587,36 @@ function CardMonth({
             </dd>
           </div>
         )}
+        {/* Staff board block (§16.5.5) — after «Soboty», full-width rows
+            («Km wg weryfikatora» does not fit half a card). An `off` month has
+            no block at all: a card row can go away, a table cell cannot. */}
+        {board && board.kind !== 'off' && (
+          <>
+            <div className="col-span-2 flex items-baseline justify-between gap-2 border-t border-border/60 pt-2">
+              <dt className="text-text-sub">{t('boardKm')}</dt>
+              <dd
+                className={cn(
+                  'tabular-nums',
+                  board.kind === 'value'
+                    ? 'font-semibold text-text'
+                    : 'text-text-sub',
+                )}
+              >
+                {board.kind === 'value' ? formatInt(board.km) : '—'}
+              </dd>
+            </div>
+            <div className="col-span-2 flex items-baseline justify-between gap-2">
+              <dt className="text-text-sub">{t('boardDays')}</dt>
+              <dd className="tabular-nums text-text-sub">
+                {board.kind === 'value' ? (
+                  <BoardDaysValue cell={board} />
+                ) : (
+                  '—'
+                )}
+              </dd>
+            </div>
+          </>
+        )}
       </dl>
       {excluded.length > 0 && open && (
         <div className="mt-3 border-t border-border pt-3">
@@ -534,15 +627,37 @@ function CardMonth({
   );
 }
 
+function formatOptionalInt(n: number | null | undefined): string {
+  return typeof n === 'number' && Number.isFinite(n) ? formatInt(n) : '—';
+}
+
 export function BreakdownTable({
   breakdown,
-  mileage,
+  boardSettlement,
   className,
 }: BreakdownTableProps) {
   const t = useTranslations('carrier.breakdown');
   const locale = useLocale();
   const rows = breakdown.breakdown ?? [];
-  const info = analyzeBreakdown(breakdown, mileage);
+  const info = analyzeBreakdown(breakdown);
+
+  // Staff vs carrier is decided by the data (§16.5.1/§16.5.3): a board is only
+  // ever passed by ClaimModal, and the API never sends one to a carrier.
+  const staffBoard = boardSettlement ?? null;
+  const audience = staffBoard !== null ? 'staff' : 'carrier';
+  // Board columns: mixed period (server flag) AND a board to show. An
+  // all-active period stays exactly as before even if a board is passed in.
+  const boardMode = info.boardSettled && staffBoard !== null;
+  const boardByMonth = boardMode ? boardMonthIndex(staffBoard) : null;
+  const boardFor = (yearMonth: string): BoardCell | null =>
+    boardByMonth ? boardCell(boardByMonth.get(yearMonth)) : null;
+  // «Razem» of the «Km wg weryfikatora» column (tfoot + the card total): the
+  // LIVE board total, `boardSettlement.mileageEffective` — the same source as
+  // the month rows above it, so the column always adds up. Not
+  // `breakdown.mileageEffective`: that is the km the claim was last priced on
+  // and goes stale once the weryfikator fills a day. This is a km figure, not
+  // money — the payout is shown only in ClaimModal's dopłata field.
+  const boardTotalKm = formatOptionalInt(boardColumnTotalKm(staffBoard));
 
   // Whole period without a guarantee → an honest empty state instead of a
   // table of zeroes. The «Razem» footer and the boundary-day strip go with it
@@ -574,11 +689,22 @@ export function BreakdownTable({
         className,
       )}
     >
-      {info.showGapNotice && <GuaranteeGapNotice info={info} locale={locale} />}
+      {info.showMixedNotice && (
+        <GuaranteeGapNotice audience={audience} count={info.offMonthCount} />
+      )}
 
       {/* Stacked cards — container narrower than 34rem (cramped modal column,
-          phone). No horizontal scroll. */}
-      <div className="@max-[34rem]:block @min-[34rem]:hidden p-3">
+          phone); 40rem with the staff board columns, which make the table 7
+          columns wide. Literal class strings on purpose: Tailwind v4 scans the
+          source, an interpolated `@min-[${bp}]` would generate no CSS. No
+          horizontal scroll. */}
+      <div
+        className={
+          boardMode
+            ? '@max-[40rem]:block @min-[40rem]:hidden p-3'
+            : '@max-[34rem]:block @min-[34rem]:hidden p-3'
+        }
+      >
         {rows.length === 0 ? (
           <p className="px-1 py-6 text-center text-sm text-text-sub">
             {t('empty')}
@@ -587,23 +713,56 @@ export function BreakdownTable({
           <>
             <ul className="space-y-2">
               {rows.map((row) => (
-                <CardMonth key={row.yearMonth} row={row} locale={locale} />
+                <CardMonth
+                  key={row.yearMonth}
+                  row={row}
+                  locale={locale}
+                  board={boardFor(row.yearMonth)}
+                />
               ))}
             </ul>
-            <div className="mt-3 flex items-baseline justify-between gap-2 rounded-md bg-bg px-3 py-2.5">
-              <span className="text-xs font-extrabold uppercase tracking-wider text-text">
-                {t('totalKmGuaranteed')}
-              </span>
-              <span className="tabular-nums font-extrabold text-text">
-                {formatInt(breakdown.kmGuaranteed)}
-              </span>
-            </div>
+            {boardMode ? (
+              <div className="mt-3 rounded-md bg-bg px-3 py-2.5">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-xs font-extrabold uppercase tracking-wider text-text">
+                    {t('totalKmGuaranteed')}
+                  </span>
+                  <span className="tabular-nums font-extrabold text-text">
+                    {formatInt(breakdown.kmGuaranteed)}
+                  </span>
+                </div>
+                <div className="mt-1.5 flex items-baseline justify-between gap-2">
+                  <span className="text-xs font-extrabold uppercase tracking-wider text-text">
+                    {t('boardTotalKm')}
+                  </span>
+                  <span className="tabular-nums font-extrabold text-text">
+                    {boardTotalKm}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3 flex items-baseline justify-between gap-2 rounded-md bg-bg px-3 py-2.5">
+                <span className="text-xs font-extrabold uppercase tracking-wider text-text">
+                  {t('totalKmGuaranteed')}
+                </span>
+                <span className="tabular-nums font-extrabold text-text">
+                  {formatInt(breakdown.kmGuaranteed)}
+                </span>
+              </div>
+            )}
           </>
         )}
       </div>
 
-      {/* Table — container at least 34rem wide (preview panel, roomy modal). */}
-      <div className="@max-[34rem]:hidden @min-[34rem]:block overflow-x-auto">
+      {/* Table — container at least 34rem wide (preview panel, roomy modal);
+          40rem with the staff board columns. */}
+      <div
+        className={
+          boardMode
+            ? '@max-[40rem]:hidden @min-[40rem]:block overflow-x-auto'
+            : '@max-[34rem]:hidden @min-[34rem]:block overflow-x-auto'
+        }
+      >
         <table className="w-full text-xs">
           <thead className="bg-bg">
             <tr>
@@ -637,13 +796,31 @@ export function BreakdownTable({
               >
                 {t('kmInMonth')}
               </th>
+              {/* Board columns sit right of «Km/mc» so each row reads as the
+                  pair «gwarantowano X → przejechano Y» (§16.5.5). */}
+              {boardMode && (
+                <>
+                  <th
+                    scope="col"
+                    className="px-2 py-2 h-10 text-right text-xs font-bold uppercase tracking-wide text-text-sub border-b border-l border-border whitespace-nowrap"
+                  >
+                    {t('boardKm')}
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-2 py-2 h-10 text-right text-xs font-bold uppercase tracking-wide text-text-sub border-b border-border whitespace-nowrap"
+                  >
+                    {t('boardDays')}
+                  </th>
+                </>
+              )}
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={boardMode ? 7 : 5}
                   className="px-2 py-8 text-center text-sm text-text-sub"
                 >
                   {t('empty')}
@@ -651,21 +828,38 @@ export function BreakdownTable({
               </tr>
             )}
             {rows.map((row) => (
-              <TableMonthRow key={row.yearMonth} row={row} locale={locale} />
+              <TableMonthRow
+                key={row.yearMonth}
+                row={row}
+                locale={locale}
+                board={boardFor(row.yearMonth)}
+              />
             ))}
           </tbody>
           {rows.length > 0 && (
             <tfoot>
               <tr className="bg-bg font-extrabold">
+                {/* With the board columns one label heads two different totals,
+                    so it is the plain «Razem» — the column headers say which is
+                    which. «Wpisane dni» is not summed: days and Saturdays of
+                    different months do not add up to a meaningful number. */}
                 <td
                   colSpan={4}
                   className="px-2 py-2 h-10 text-text uppercase text-xs tracking-wide whitespace-nowrap"
                 >
-                  {t('totalKmGuaranteed')}
+                  {boardMode ? t('total') : t('totalKmGuaranteed')}
                 </td>
                 <td className="px-2 py-2 h-10 text-right tabular-nums text-text whitespace-nowrap">
                   {formatInt(breakdown.kmGuaranteed)}
                 </td>
+                {boardMode && (
+                  <>
+                    <td className="px-2 py-2 h-10 text-right tabular-nums text-text whitespace-nowrap border-l border-border">
+                      {boardTotalKm}
+                    </td>
+                    <td className="px-2 py-2 h-10" />
+                  </>
+                )}
               </tr>
             </tfoot>
           )}

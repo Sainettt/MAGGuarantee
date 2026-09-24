@@ -328,7 +328,7 @@ export default function ClaimDetailPage() {
           <h2 className="text-sm font-bold uppercase tracking-wider text-text-sub mb-2">
             {tDetail('monthlyBreakdown')}
           </h2>
-          <BreakdownTable breakdown={claim.breakdown} mileage={claim.mileage} />
+          <BreakdownTable breakdown={claim.breakdown} />
         </div>
       )}
 

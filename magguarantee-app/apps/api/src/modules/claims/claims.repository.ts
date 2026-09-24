@@ -946,10 +946,11 @@ function hydrateBreakdown(raw: unknown): KmCalcBreakdown | null {
     lastDay: obj.lastDay ?? null,
     // Settlement fields (feature «wyłączane limity gwarancji», 2026-09-20).
     // Rows written before it had every month active by construction, so both
-    // day counters collapse to `totalDays`. `mileageEffective` is deliberately
-    // NOT backfilled — `undefined` means "no proportional split was applied"
-    // and the UI renders `claim.mileage` instead (same contract as
-    // `KmCalcBreakdownSchema`'s transform).
+    // day counters collapse to `totalDays`. `mileageEffective` and
+    // `mileageSource` are deliberately NOT backfilled (they ride along in the
+    // spread above when present): an absent `mileageEffective` makes the UI
+    // render `claim.mileage`, an absent `mileageSource` means `'declared'`
+    // (same contract as `KmCalcBreakdownSchema`'s transform).
     daysActive: typeof obj.daysActive === 'number' ? obj.daysActive : totalDays,
     daysTotal: typeof obj.daysTotal === 'number' ? obj.daysTotal : totalDays,
   };

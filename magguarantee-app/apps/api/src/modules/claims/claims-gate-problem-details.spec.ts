@@ -220,4 +220,45 @@ describe('Claim gates — machine code on the RFC-7807 wire', () => {
       'Nie można podjąć akcji — wyjazd jest jeszcze w trasie. Poczekaj na zjazd auta.',
     );
   });
+
+  it('CLAIM_BOARD_INCOMPLETE forwards the missing board dates alongside the code', () => {
+    // Same shape the accept board gate throws (docs/20 §0⁵).
+    const exception = new UnprocessableEntityException({
+      code: 'CLAIM_BOARD_INCOMPLETE',
+      message:
+        'Nie można zaakceptować wniosku — brak przebiegu na tablicy km za 1 dzień ' +
+        'w miesiącach z gwarancją: 18.09.2025. Poczekaj, aż weryfikator uzupełni dane.',
+      extensions: { code: 'CLAIM_BOARD_INCOMPLETE', missingDates: ['2025-09-18'] },
+    });
+    const { host, captured } = makeHost();
+
+    filter.catch(exception, host);
+
+    expect(captured.statusCode).toBe(422);
+    const ext = captured.body.extensions as {
+      code?: string;
+      missingDates?: string[];
+    };
+    expect(ext.code).toBe('CLAIM_BOARD_INCOMPLETE');
+    expect(ext.missingDates).toEqual(['2025-09-18']);
+  });
+
+  it('CLAIM_BOARD_CHANGED surfaces at body.extensions.code', () => {
+    const exception = new UnprocessableEntityException({
+      code: 'CLAIM_BOARD_CHANGED',
+      message:
+        'Kwota dopłaty różni się od zapisanej przy weryfikacji — zmieniła się ' +
+        'tablica km albo dane wniosku. Zapisz weryfikację ponownie, a następnie ' +
+        'podejmij decyzję.',
+      extensions: { code: 'CLAIM_BOARD_CHANGED' },
+    });
+    const { host, captured } = makeHost();
+
+    filter.catch(exception, host);
+
+    expect(captured.statusCode).toBe(422);
+    expect(
+      (captured.body.extensions as { code?: string } | undefined)?.code,
+    ).toBe('CLAIM_BOARD_CHANGED');
+  });
 });

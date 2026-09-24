@@ -23,6 +23,7 @@ import { NotFoundException, UnprocessableEntityException } from '@nestjs/common'
 import type { Prisma } from '@magguarantee/database';
 import { RecalcLimitsPreviewSchema } from '@magguarantee/shared';
 import type {
+  BoardDay,
   ClaimStatus,
   KmCalcBreakdown,
   KmCalcResult,
@@ -39,6 +40,7 @@ import type { DriversRepository } from '../drivers/drivers.repository';
 import type { KmCalcService, KmCalcServiceInput } from '../km-calc/km-calc.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { TrailersRepository } from '../trailers/trailers.repository';
+import type { VehicleDailyKmRepository } from '../vehicles/vehicle-daily-km.repository';
 import type { VehiclesRepository } from '../vehicles/vehicles.repository';
 import { ClaimsService } from './claims.service';
 import type {
@@ -173,11 +175,15 @@ interface Built {
   kmCalcSpy: jest.Mock<Promise<KmCalcResult>, [KmCalcServiceInput]>;
   /** Real `AuditWriter.log` seam — the dry run must never touch it. */
   auditLogSpy: jest.Mock;
+  /** `VehicleDailyKmRepository.listBoardDays` — read only for a mixed period. */
+  boardSpy: jest.Mock;
 }
 
 function build(opts: {
   claim: ClaimRow | null;
   kmResult?: Partial<KmCalcResult>;
+  /** Board rows a MIXED period is settled on (docs/20 §0⁵). */
+  board?: BoardDay[];
 }): Built {
   const updateSpy = jest.fn(async (id: string, data: UpdateClaimData) => ({
     ...(opts.claim as ClaimRow),
@@ -217,6 +223,10 @@ function build(opts: {
   const kmCalc = { calc: kmCalcSpy } as unknown as KmCalcService;
 
   const auditLogSpy = jest.fn(async () => undefined);
+  const boardSpy = jest.fn(async () => opts.board ?? []);
+  const dailyKm = {
+    listBoardDays: boardSpy,
+  } as unknown as VehicleDailyKmRepository;
   const noop = {} as never;
   const svc = new ClaimsService(
     claims,
@@ -228,8 +238,11 @@ function build(opts: {
     noop as NrZglService,
     noop as PrismaService,
     { log: auditLogSpy } as unknown as AuditWriter,
+    undefined,
+    undefined,
+    dailyKm,
   );
-  return { svc, updateSpy, kmCalcSpy, auditLogSpy };
+  return { svc, updateSpy, kmCalcSpy, auditLogSpy, boardSpy };
 }
 
 describe('ClaimsService.refreshLimits — happy path', () => {
@@ -270,9 +283,16 @@ describe('ClaimsService.refreshLimits — happy path', () => {
     expect(patch.status).toBeUndefined();
   });
 
-  it('carries the settlement fields into the persisted breakdown', async () => {
-    const { svc, updateSpy } = build({
-      claim: makeClaim(),
+  it('a limit switched off by the refresh settles the period on the board', async () => {
+    // 01.04–08.05.2026: April keeps its guarantee, May is switched off.
+    const { svc, updateSpy, boardSpy } = build({
+      claim: makeClaim({ dateEnd: new Date('2026-05-08T00:00:00.000Z') }),
+      board: [
+        { date: '2026-04-01', state: 'drove', km: 1_000 },
+        { date: '2026-04-02', state: 'drove', km: 1_000 },
+        // May is off — whatever is on the board there is never charged.
+        { date: '2026-05-04', state: 'drove', km: 6_000 },
+      ],
       kmResult: {
         kmGuaranteed: 2_700,
         breakdown: [
@@ -307,12 +327,32 @@ describe('ClaimsService.refreshLimits — happy path', () => {
 
     await withAuditContext(() => svc.refreshLimits(ADMIN, 'GWA/001/04/26'));
 
+    expect(boardSpy).toHaveBeenCalledWith(
+      'v-1',
+      new Date('2026-04-01T00:00:00.000Z'),
+      new Date('2026-05-09T00:00:00.000Z'),
+    );
     const patch = updateSpy.mock.calls[0]![1] as UpdateClaimData;
     expect(patch.breakdown?.daysActive).toBe(10);
     expect(patch.breakdown?.daysTotal).toBe(20);
-    expect(patch.breakdown?.mileageEffective).toBe(4_000);
-    // 2_700 − 4_000 = −1_300 (the disabled half of the mileage is not charged)
-    expect(patch.kmDifference).toBe(-1_300);
+    expect(patch.breakdown?.mileageSource).toBe('board');
+    // April on the board = 2_000 (the unrecorded April days count 0 km).
+    expect(patch.breakdown?.mileageEffective).toBe(2_000);
+    // 2_700 − 2_000 = 700 ⇒ 350 € — the declared 8_000 km no longer decide.
+    expect(patch.kmDifference).toBe(700);
+    expect(patch.paymentEur).toBe(350);
+    // The declared mileage itself is never touched by a refresh.
+    expect(patch.mileage).toBeUndefined();
+  });
+
+  it('an all-active refresh never reads the board', async () => {
+    const { svc, boardSpy, updateSpy } = build({ claim: makeClaim() });
+
+    await withAuditContext(() => svc.refreshLimits(ADMIN, 'GWA/001/04/26'));
+
+    expect(boardSpy).not.toHaveBeenCalled();
+    const patch = updateSpy.mock.calls[0]![1] as UpdateClaimData;
+    expect(patch.breakdown?.mileageSource).toBe('declared');
   });
 
   it('resets the verification checkpoint + Maksim gate when the money moved', async () => {

@@ -1286,6 +1286,24 @@
           "actionsBlockedHint": "Akcje są zablokowane, dopóki wyjazd jest w trasie. Poczekaj na zjazd.",
           "blockedToast": "Wyjazd jest jeszcze w trasie — poczekaj na zjazd, aby zweryfikować lub podjąć decyzję."
         },
+        "boardGate": {
+          "title": "{count, plural, =0 {Brak danych na tablicy km} one {Brak danych za # dzień} few {Brak danych za # dni} many {Brak danych za # dni} other {Brak danych za # dni}}",
+          "body": "Weryfikator nie wpisał jeszcze przebiegu na tablicy km za poniższe dni w miesiącach z gwarancją. Zaakceptować wniosek można dopiero po uzupełnieniu danych; odrzucić — w każdej chwili.",
+          "datesLabel": "Dni bez przebiegu na tablicy km",
+          "showAll": "Pokaż wszystkie ({count})",
+          "showLess": "Zwiń",
+          "returnDayHint": "Ostatni dzień okresu to zwykle dzień zjazdu — na tablicy km można go wpisać dopiero następnego dnia.",
+          "incompleteToast": "Nie można zaakceptować wniosku — {count, plural, =0 {brak przebiegu na tablicy km w dniach z gwarancją} one {brak przebiegu na tablicy km za # dzień} few {brak przebiegu na tablicy km za # dni} many {brak przebiegu na tablicy km za # dni} other {brak przebiegu na tablicy km za # dni}}. Poczekaj, aż weryfikator uzupełni dane.",
+          "changedToast": "Kwota dopłaty różni się od zapisanej przy weryfikacji — zmieniła się tablica km albo dane wniosku. Zapisz weryfikację ponownie, a następnie podejmij decyzję.",
+          "changedHint": "Kwota dopłaty zmieniła się od zapisania weryfikacji — zapisz weryfikację ponownie, aby podjąć decyzję.",
+          "changedHintNoEdit": "Kwota dopłaty zmieniła się od zapisania weryfikacji — weryfikację musi ponownie zapisać administrator."
+        },
+        "shortfall": {
+          "line": "{scope, select, board {W miesiącach z gwarancją pojazd przejechał} other {Pojazd przejechał}} o <b>{km} km mniej</b>, niż gwarantowano.",
+          "formula": "Niedojazd: {guaranteed} km gwarant. − {driven} {scope, select, board {km wg weryfikatora} other {km przebiegu}} = {km} km × {rate} €/km",
+          "metEqual": "{scope, select, board {W miesiącach z gwarancją pojazd przejechał} other {Pojazd przejechał}} dokładnie tyle, ile gwarantowano ({guaranteed} km). Gwarancja wyjeżdżona — dopłata nie przysługuje.",
+          "metOver": "{scope, select, board {W miesiącach z gwarancją pojazd przejechał} other {Pojazd przejechał}} {driven} km przy {guaranteed} km gwarantowanych — o {km} km więcej. Gwarancja wyjeżdżona — dopłata nie przysługuje."
+        },
         "linkedDelegation": {
           "heading": "Powiązany wyjazd",
           "vehicle": "Ciągnik",
@@ -1870,8 +1888,16 @@
       "guaranteeDisabled": "Gwarancja wyłączona",
       "guaranteeSaturdayOnly": "Gwarancja tylko w soboty",
       "rateNoneTitle": "Brak stawki — gwarancja wyłączona w tym miesiącu",
-      "gapNotice": "Okres obejmuje {count, plural, one {miesiąc bez gwarancji} few {miesiące bez gwarancji} many {miesięcy bez gwarancji} other {miesięcy bez gwarancji}} (<b>{months}</b>). Do rozliczenia przyjęto <b>{daysActive} dni</b> i <b>{mileageEffective}</b> z <b>{mileage}</b> km.",
-      "gapNoticeMonth": "{month}: {days} z {daysTotal} dni",
+      "mixedPeriodNotice": "Okres obejmuje {count, plural, one {miesiąc bez gwarancji} few {miesiące bez gwarancji} many {miesięcy bez gwarancji} other {miesięcy bez gwarancji}}. Dopłata zależy wtedy od przebiegu pojazdu w dniach objętych gwarancją, a nie od łącznego przebiegu podanego we wniosku. <b>Ostateczną kwotę ustala się po weryfikacji wniosku.</b>",
+      "boardNotice": "Okres obejmuje {count, plural, one {miesiąc bez gwarancji} few {miesiące bez gwarancji} many {miesięcy bez gwarancji} other {miesięcy bez gwarancji}}. Dopłatę liczy się z tablicy km weryfikatora — tylko z dni w miesiącach z gwarancją. <b>Przebieg podany przez przewoźnika nie wpływa na kwotę — służy tylko do porównania.</b>",
+      "boardKm": "Km wg weryfikatora",
+      "boardDays": "Wpisane dni",
+      "boardDaysValue": "{filled} z {required}",
+      "boardSaturdaysValue": "{filled} z {required} sob.",
+      "boardDaysMissingSr": "brak danych za {count, plural, one {# dzień} few {# dni} many {# dni} other {# dni}}",
+      "boardOffTitle": "Nie liczy się — gwarancja wyłączona w tym miesiącu",
+      "total": "Razem",
+      "boardTotalKm": "Razem (km wg weryfikatora)",
       "allDisabledTitle": "Brak gwarancji w tym okresie",
       "allDisabledBody": "Dla wszystkich miesięcy tego okresu gwarancja przebiegu jest wyłączona, dlatego wniosek nie generuje dopłaty. Skontaktuj się z opiekunem, jeśli to pomyłka."
     },

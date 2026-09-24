@@ -1286,6 +1286,24 @@
           "actionsBlockedHint": "Actions are blocked while the trip is in transit. Wait for the return.",
           "blockedToast": "The trip is still in transit — wait for the return to verify or decide."
         },
+        "boardGate": {
+          "title": "{count, plural, =0 {No data on the km board} one {No data for # day} other {No data for # days}}",
+          "body": "The verifier has not yet entered mileage on the km board for the days below in guaranteed months. The claim can be accepted only once the data is complete; it can be rejected at any time.",
+          "datesLabel": "Days without mileage on the km board",
+          "showAll": "Show all ({count})",
+          "showLess": "Show less",
+          "returnDayHint": "The last day of the period is usually the return day — it can only be entered on the km board the following day.",
+          "incompleteToast": "The claim cannot be accepted — {count, plural, =0 {mileage is missing on the km board for guaranteed days} one {mileage is missing on the km board for # day} other {mileage is missing on the km board for # days}}. Wait until the verifier completes the data.",
+          "changedToast": "The compensation amount differs from the one saved at verification — the km board or the claim data has changed. Save the verification again, then make the decision.",
+          "changedHint": "The compensation amount changed since the verification was saved — save the verification again to make a decision.",
+          "changedHintNoEdit": "The compensation amount changed since the verification was saved — an administrator must save the verification again."
+        },
+        "shortfall": {
+          "line": "{scope, select, board {In the guaranteed months the vehicle drove} other {The vehicle drove}} <b>{km} km less</b> than guaranteed.",
+          "formula": "Shortfall: {guaranteed} guaranteed km − {driven} {scope, select, board {km per verifier} other {km driven}} = {km} km × {rate} €/km",
+          "metEqual": "{scope, select, board {In the guaranteed months the vehicle drove} other {The vehicle drove}} exactly the guaranteed distance ({guaranteed} km). Guarantee met — no compensation is due.",
+          "metOver": "{scope, select, board {In the guaranteed months the vehicle drove} other {The vehicle drove}} {driven} km against {guaranteed} guaranteed km — {km} km more. Guarantee met — no compensation is due."
+        },
         "linkedDelegation": {
           "heading": "Linked trip",
           "vehicle": "Vehicle",
@@ -1870,8 +1888,16 @@
       "guaranteeDisabled": "Guarantee disabled",
       "guaranteeSaturdayOnly": "Saturdays only",
       "rateNoneTitle": "No rate — the guarantee is disabled for this month",
-      "gapNotice": "The period includes {count, plural, one {a month} other {months}} without a mileage guarantee (<b>{months}</b>). The settlement uses <b>{daysActive} days</b> and <b>{mileageEffective}</b> of <b>{mileage}</b> km.",
-      "gapNoticeMonth": "{month}: {days} of {daysTotal} days",
+      "mixedPeriodNotice": "The period includes {count, plural, one {a month} other {months}} without a mileage guarantee. In that case the compensation depends on the vehicle's mileage on the guaranteed days, not on the total mileage entered in the claim. <b>The final amount is set once the claim has been verified.</b>",
+      "boardNotice": "The period includes {count, plural, one {a month} other {months}} without a mileage guarantee. The compensation is calculated from the verifier's km board — only days in guaranteed months count. <b>The mileage entered by the carrier does not affect the amount — it is for comparison only.</b>",
+      "boardKm": "Km per verifier",
+      "boardDays": "Days entered",
+      "boardDaysValue": "{filled} of {required}",
+      "boardSaturdaysValue": "{filled} of {required} Sat.",
+      "boardDaysMissingSr": "no data for {count, plural, one {# day} other {# days}}",
+      "boardOffTitle": "Not counted — the guarantee is disabled for this month",
+      "total": "Total",
+      "boardTotalKm": "Total (km per verifier)",
       "allDisabledTitle": "No guarantee in this period",
       "allDisabledBody": "The mileage guarantee is disabled for every month of this period, so the claim generates no compensation. Contact your account manager if this is a mistake."
     },

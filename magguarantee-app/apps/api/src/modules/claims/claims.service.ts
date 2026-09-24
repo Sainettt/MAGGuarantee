@@ -13,6 +13,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 
 import type {
+  BoardDay,
+  ClaimBoardSettlement,
   ClaimDto,
   ClaimFilters,
   ClaimListItem,
@@ -26,6 +28,7 @@ import type {
   PreviewClaimDto,
   PreviewClaimResponse,
   ReklamacjaEligibility,
+  SettlementBoard,
   SubmitClaimDto,
   SubmitReklamacjaDto,
   UpdateClaimDto,
@@ -33,6 +36,8 @@ import type {
 } from '@magguarantee/shared';
 import {
   canSubmitByDuration,
+  CLAIM_BOARD_CHANGED,
+  CLAIM_BOARD_INCOMPLETE,
   CLAIM_DATE_BEFORE_DEPARTURE,
   CLAIM_LIMITS_REFRESH_BLOCKED,
   cooldownCheck,
@@ -51,6 +56,7 @@ import {
   REKLAMACJA_WINDOW_HOURS,
   requiresMaksimConfirmation,
   settleClaim,
+  settlementNeedsBoard,
   startOfBusinessTodayUtc,
   VEHICLE_NOT_GUARANTEED,
 } from '@magguarantee/shared';
@@ -104,6 +110,8 @@ const APP_CONFIG_VEHICLE_COOLDOWN_DAYS = 'carrier_vehicle_cooldown_days';
 const DEFAULT_MAX_DAYS_AFTER_UNLOAD = 7;
 const DEFAULT_MAX_PERIOD_DAYS = 90;
 const DEFAULT_MAX_AVG_KM_PER_DAY = 2000;
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /**
  * Audit actions of the delegation-driven auto-recalc. Written by the operator
@@ -225,10 +233,12 @@ export class ClaimsService {
     // other notifications.
     private readonly mailService?: MailService,
     private readonly configService?: ConfigService<Env, true>,
-    // Phase 7 REWORK (#3) — claim mileage pre-fill source. Optional ctor arg so
-    // the existing positional test fakes keep compiling; production wiring
-    // always injects it via DI (exported from VehiclesModule). When absent the
-    // prefill is skipped and the carrier-supplied mileage is used as-is.
+    // The weryfikator's daily-km board: the rows a mixed period is settled on
+    // (`_settle`, docs/20 §0⁵) and the `verifierMileage` reference sum. Optional
+    // ctor arg so the existing positional test fakes keep compiling; production
+    // wiring always injects it via DI (exported from VehiclesModule). When
+    // absent a mixed period sees an EMPTY board — every counted day is reported
+    // missing, nothing is guessed.
     private readonly dailyKm?: VehicleDailyKmRepository,
     // Phase 7 REWORK (#4) — submit derives the period/ownership from the chosen
     // outing, and the delegation `returned()` auto-recalc reads the linked
@@ -241,13 +251,13 @@ export class ClaimsService {
   ) {}
 
   /**
-   * Resolves the effective mileage for submit / preview / recalc as
-   * `Σ VehicleDailyKm.km (state=drove)` over `[dateStart, dateEnd]` of the
-   * vehicle (Phase 7 §0″ finish, docs/20 §0″). There is NO carrier override —
-   * the carrier no longer sends `mileage`; it is ALWAYS the server-computed
-   * daily-km sum. `pracownik` revises it at verification. `dateEnd` is
-   * inclusive, so we pass `dateEnd + 1d` as the half-open upper bound to the
-   * repository.
+   * `Σ VehicleDailyKm.km (state=drove)` over `[dateStart, dateEnd]` of one
+   * vehicle — a board TOTAL. Used for the `verifierMileage` reference figure,
+   * the legacy bare-vehicle preview fallback and the (defensive) delegation
+   * auto-recalc re-prefill. It is NOT what a claim is paid on: the carrier
+   * declares `mileage`, and a mixed period is settled per day on the board by
+   * `_settle`. `dateEnd` is inclusive, so we pass `dateEnd + 1d` as the
+   * half-open upper bound to the repository.
    */
   private async _resolveMileage(
     vehicleId: string,
@@ -299,31 +309,92 @@ export class ClaimsService {
 
   // ── Settlement + breakdown assembly (single seam) ───────
   //
-  // Every km-calc consumer in this service goes through these three helpers.
-  // Before the «wyłączane limity gwarancji» feature the payout formula
-  // (`kmGuaranteed − mileage`) was inlined at five call sites; it now lives
-  // once, in `@magguarantee/shared/domain/claim-settlement.ts`.
+  // Every km-calc consumer in this service goes through these helpers. The
+  // payout formula lives once, in `@magguarantee/shared/domain/
+  // claim-settlement.ts`; this seam only decides whether the weryfikator's
+  // daily-km board has to be fetched for it.
 
   /**
    * Turn a km-calc result + the declared mileage into the settled numbers
-   * (`kmDifference` / `paymentEur` / the proportional `mileageEffective`).
-   * Output is bit-identical to the old inline formula whenever every month of
-   * the period has its guarantee switched on — i.e. for all existing data.
+   * (`kmDifference` / `paymentEur` / `mileageEffective` / `mileageSource`).
+   *
+   *  - every month of the period active ⇒ the board is NOT queried and the
+   *    output is bit-identical to the pre-feature `kmGuaranteed − mileage`;
+   *  - some month with `kmPerDay = 0` (docs/20 §0⁵) ⇒ the vehicle's board rows
+   *    over the period are loaded and the payout is settled on them. No vehicle
+   *    (legacy row) or no board repository ⇒ an EMPTY board: every counted day
+   *    is reported missing, nothing is guessed.
+   *
+   * `period` carries the ISO dates the calc was run for (inclusive) and the
+   * vehicle whose board applies.
    */
-  private _settle(calc: KmCalcResult, mileage: number): ClaimSettlement {
+  private async _settle(
+    calc: KmCalcResult,
+    mileage: number,
+    period: { vehicleId: string | null; dateStart: string; dateEnd: string },
+  ): Promise<ClaimSettlement> {
+    const board = settlementNeedsBoard(calc.breakdown)
+      ? await this._loadBoard(period.vehicleId, period.dateStart, period.dateEnd)
+      : [];
     return settleClaim({
       breakdown: calc.breakdown,
       mileage,
       kmGuaranteed: calc.kmGuaranteed,
       ratePerKmEffective: calc.ratePerKmEffective,
+      dateStart: period.dateStart,
+      dateEnd: period.dateEnd,
+      board,
     });
+  }
+
+  /**
+   * The vehicle's board rows over `[dateStartIso … dateEndIso]` (inclusive).
+   * `[]` — never a guess — when the vehicle is unknown, the repository is not
+   * wired, or the range does not parse.
+   */
+  private async _loadBoard(
+    vehicleId: string | null,
+    dateStartIso: string,
+    dateEndIso: string,
+  ): Promise<BoardDay[]> {
+    const from = isoDateToMidnightUtc(dateStartIso);
+    const to = isoDateToMidnightUtc(dateEndIso);
+    if (!from || !to || to.getTime() < from.getTime()) return [];
+    if (!vehicleId || !this.dailyKm) {
+      this.logger.warn({
+        msg: 'claims.settle.board_unavailable',
+        reason: vehicleId ? 'no_daily_km_repository' : 'no_vehicle',
+        dateStart: dateStartIso,
+        dateEnd: dateEndIso,
+      });
+      return [];
+    }
+    return this.dailyKm.listBoardDays(
+      vehicleId,
+      from,
+      new Date(to.getTime() + MS_PER_DAY),
+    );
+  }
+
+  /**
+   * Was this wniosek last priced as a MIXED period (settled on the board)?
+   * Read off the persisted breakdown: the explicit `mileageSource` when present,
+   * else the month rows themselves (rows written before the field existed).
+   * A legacy / empty breakdown ⇒ `false`.
+   */
+  private _storedOnBoard(claim: ClaimRow): boolean {
+    const stored = claim.breakdown;
+    if (!stored) return false;
+    if (stored.mileageSource === 'board') return true;
+    return Array.isArray(stored.breakdown) && settlementNeedsBoard(stored.breakdown);
   }
 
   /**
    * Assemble the `KmCalcBreakdown` envelope persisted on `Claim.breakdown`
    * and returned by `/preview`. Carries the engine output plus the settlement
-   * fields (`daysActive` / `daysTotal` / `mileageEffective`) the UI needs to
-   * explain a proportional split.
+   * summary (`daysActive` / `daysTotal` / `mileageEffective` /
+   * `mileageSource`). The per-month board detail is deliberately NOT persisted
+   * — the board is live data, served as `boardSettlement` on read.
    */
   private _buildBreakdown(
     calc: KmCalcResult,
@@ -343,12 +414,13 @@ export class ClaimsService {
       // each boundary day was counted without re-deriving the walk.
       firstDay: calc.firstDay,
       lastDay: calc.lastDay,
-      // Settlement pass — `daysActive < daysTotal` ⇒ some month of the period
-      // has its guarantee switched off and only the active share of the
-      // mileage was charged against the guarantee.
+      // Settlement summary — `mileageSource: 'board'` ⇒ some month of the
+      // period has `kmPerDay = 0` and `mileageEffective` is the board sum over
+      // the counted days of the guaranteed months, not the declared mileage.
       daysActive: settlement.daysActive,
       daysTotal: settlement.daysTotal,
       mileageEffective: settlement.mileageEffective,
+      mileageSource: settlement.mileageSource,
     };
   }
 
@@ -652,9 +724,15 @@ export class ClaimsService {
       tier2.push(duration.message);
     }
 
-    // Settlement pass — proportional mileage split when some month of the
-    // period has its guarantee switched off (see `claim-settlement.ts`).
-    const settlement = this._settle(calc, mileage);
+    // Settlement pass — a period with a switched-off month is settled on the
+    // outing vehicle's daily-km board (docs/20 §0⁵), whatever it holds right
+    // now; a day the weryfikator has not recorded yet (typically the return
+    // day) simply counts 0 km here and blocks the ACCEPT later, not the submit.
+    const settlement = await this._settle(calc, mileage, {
+      vehicleId,
+      dateStart: dateStartIso,
+      dateEnd: dateEndIso,
+    });
 
     if (calc.kmGuaranteed === 0) {
       tier2.push(
@@ -679,17 +757,15 @@ export class ClaimsService {
     if (paymentEur === 0 && tier2.length === 0) {
       // Only surface "no underrun" if everything else is sane — otherwise
       // the user fixes the upstream issue first and this often resolves.
-      // When part of the period has its guarantee switched off, only the
-      // active share of the mileage was charged — say so, otherwise the two
-      // numbers in this sentence don't add up for the carrier.
-      const effectiveNote =
-        settlement.mileageEffective === mileage
-          ? ''
-          : ` (rozliczono ${settlement.mileageEffective} km — część okresu ` +
-            `ma wyłączoną gwarancję)`;
+      // A mixed period was NOT priced on the carrier's number, so quoting it
+      // (or the board figure next to it) would compare two unrelated sums —
+      // the sentence states the outcome without numbers from the board.
       tier2.push(
-        `Km zrealizowane (${mileage})${effectiveNote} są równe lub wyższe niż km ` +
-          `gwarantowane (${calc.kmGuaranteed}). Brak podstaw do dopłaty.`,
+        settlement.mileageSource === 'board'
+          ? `W miesiącach objętych gwarancją przebieg jest równy lub wyższy ` +
+              `niż km gwarantowane (${calc.kmGuaranteed}). Brak podstaw do dopłaty.`
+          : `Km zrealizowane (${mileage}) są równe lub wyższe niż km ` +
+              `gwarantowane (${calc.kmGuaranteed}). Brak podstaw do dopłaty.`,
       );
     }
 
@@ -947,12 +1023,11 @@ export class ClaimsService {
     const dateStart = startOfUtcDay(claim.dateStart);
     const dateEnd = startOfUtcDay(actualReturnAt);
 
-    // Re-prefill mileage via the SAME `_resolveMileage` (the daily-km sum over
-    // the NEW period) UNLESS a human has since changed it. The carrier no longer
-    // overrides at submit (mileage is always the daily-km sum), so the only way
-    // `mileage` can diverge from the immutable `origMileage` snapshot is a
-    // VERIFIER edit — and a human-corrected mileage must not be silently
-    // re-prefilled. `origMileage === mileage` ⇒ untouched ⇒ safe to re-prefill.
+    // Re-prefill mileage via `_resolveMileage` (the daily-km sum over the NEW
+    // period) UNLESS a human has since changed it: `origMileage === mileage` ⇒
+    // the declared figure is untouched ⇒ re-prefill; any divergence is a
+    // VERIFIER edit and must not be silently overwritten. (Defensive path — see
+    // the TODO above; unreachable while a wniosek needs a `zjechal` outing.)
     const mileageWasHumanEdited =
       claim.origMileage !== null && claim.origMileage !== claim.mileage;
     const mileage =
@@ -975,7 +1050,11 @@ export class ClaimsService {
       limitsSnapshot: this._limitsSnapshot(claim),
     });
 
-    const settlement = this._settle(calc, mileage);
+    const settlement = await this._settle(calc, mileage, {
+      vehicleId: claim.vehicleId,
+      dateStart: toIsoDateOnly(dateStart),
+      dateEnd: toIsoDateOnly(dateEnd),
+    });
     const { kmDifference, paymentEur } = settlement;
     const kmPerDay =
       calc.totalDays > 0 ? round2(mileage / calc.totalDays) : 0;
@@ -1113,7 +1192,11 @@ export class ClaimsService {
       limitsSnapshot: this._limitsSnapshot(claim),
     });
 
-    const settlement = this._settle(calc, mileage);
+    const settlement = await this._settle(calc, mileage, {
+      vehicleId: claim.vehicleId,
+      dateStart: toIsoDateOnly(dateStart),
+      dateEnd: toIsoDateOnly(dateEnd),
+    });
     const { kmDifference, paymentEur } = settlement;
     const kmPerDay = calc.totalDays > 0 ? round2(mileage / calc.totalDays) : 0;
     const breakdown: KmCalcBreakdown = this._buildBreakdown(calc, settlement);
@@ -1266,15 +1349,23 @@ export class ClaimsService {
   }> {
     // NOTE the absent `limitsSnapshot` — these are the ONLY km-calc calls on an
     // existing wniosek that intentionally read today's `monthly_limits`.
+    const dateStart = toIsoDateOnly(claim.dateStart);
+    const dateEnd = toIsoDateOnly(claim.dateEnd);
     const calc = await this.kmCalc.calc({
-      dateStart: toIsoDateOnly(claim.dateStart),
-      dateEnd: toIsoDateOnly(claim.dateEnd),
+      dateStart,
+      dateEnd,
       timeFrom: claim.timeFrom,
       timeTo: claim.timeTo,
       hoursAdjusted: claim.hoursAdjustedValue ?? 0,
     });
 
-    const settlement = this._settle(calc, claim.mileage);
+    // A limit switched off/on by the refresh can turn the period mixed (or
+    // back); a mixed one is settled on the board as it stands right now.
+    const settlement = await this._settle(calc, claim.mileage, {
+      vehicleId: claim.vehicleId,
+      dateStart,
+      dateEnd,
+    });
     const patch: UpdateClaimData = {
       drivenDays: calc.totalDays,
       kmPerDay: calc.totalDays > 0 ? round2(claim.mileage / calc.totalDays) : 0,
@@ -1403,9 +1494,21 @@ export class ClaimsService {
     // submit) and those branches carry no correction fields at all since the
     // REWORK 2026-07-31. The explicit skip is belt-and-braces so a future schema
     // change cannot silently reintroduce a recalc here.
+    //
+    // An ACCEPT of a mixed period (settled on the daily-km board) always
+    // re-prices: the claim is paid on the board as it stands at the decision,
+    // not at verification (docs/20 §0⁵).
     const recalc = isReklamacjaDecision
       ? null
-      : await this._recalcClaim(existing, dto);
+      : await this._recalcClaim(existing, dto, {
+          refreshBoard: dto.targetStatus === 'ZAAKCEPTOWANO',
+        });
+    // Board gates (ACCEPT of a mixed period only): every counted day must be on
+    // the board (422 CLAIM_BOARD_INCOMPLETE), and the live dopłata must be the
+    // one the verification saved and Maksim — when over threshold — cleared
+    // (422 CLAIM_BOARD_CHANGED). `ODRZUCONO` and reklamacja paths are never
+    // gated by either.
+    this._assertBoardSettledForAccept(existing, dto, recalc);
     // Authoritative accept-guard (Fix 3): a claim may only be ACCEPTED when the
     // (re)calculated km-difference shows an under-run, i.e. compensation is
     // actually due. This is the server-side mirror of the carrier-UI gate so a
@@ -1461,12 +1564,15 @@ export class ClaimsService {
    *      split lives HERE, not on `@Roles`, because it is status-dependent —
    *      the documented pattern (docs/15-auth-strategy.md §Roles: coarse gate on
    *      the controller, fine-grained scope in the service).
-   *   3. Re-run km-calc when the body carries a math-affecting correction (the
-   *      SAME `_recalcClaim` the decision PATCH uses; an EMPTY body → recalc is
-   *      `null` ⇒ "confirmed as-is", no math churn).
+   *   3. Re-run km-calc when the body carries a math-affecting correction OR
+   *      the wniosek is a mixed period settled on the daily-km board (the SAME
+   *      `_recalcClaim` the decision PATCH uses; an EMPTY body on an all-active
+   *      period → recalc is `null` ⇒ "confirmed as-is", no math churn).
    *   4. Arm / clear the Maksim authorization gate from the FINAL numbers, and
    *      AUTO-TRANSITION the status accordingly (this is the ONLY authorization
-   *      mechanism — there is no manual request flow):
+   *      mechanism — there is no manual request flow). SKIPPED entirely while a
+   *      mixed period has days missing on the board: status and gate columns
+   *      stay as they are and no email goes out (docs/20 §0⁵):
    *        - over threshold + `NA_WERYFIKACJI` → move to `OCZEKUJE_NA_AUTORYZACJE`,
    *        - under threshold + `OCZEKUJE_NA_AUTORYZACJE` → roll back to
    *          `NA_WERYFIKACJI`,
@@ -1509,10 +1615,12 @@ export class ClaimsService {
     // CLAIM_DELEGATION_IN_TRANSIT.
     this._assertDelegationReturned(existing);
 
-    // Re-run km-calc only when the body carries a math-affecting correction.
-    // An empty body ⇒ `touchesMath: false` ⇒ `recalc === null` ⇒ "confirmed
-    // as-is": we stamp `verifiedAt` without touching any calc column.
-    const recalc = await this._recalcClaim(existing, dto);
+    // Re-run km-calc when the body carries a math-affecting correction, or when
+    // the wniosek is a mixed period (its payout follows the live daily-km
+    // board, which may have been filled in since the last pricing). An empty
+    // body on an all-active period ⇒ `recalc === null` ⇒ "confirmed as-is": we
+    // stamp `verifiedAt` without touching any calc column.
+    const recalc = await this._recalcClaim(existing, dto, { refreshBoard: true });
 
     const now = new Date();
     const patch: UpdateClaimData = {
@@ -1525,48 +1633,27 @@ export class ClaimsService {
     const corrections = extractCorrectionFields(dto);
     this._applyCorrectionsToPatch(patch, corrections, recalc, existing);
 
-    // Maksim authorization gate — arm / clear from the FINAL numbers (recalc
-    // output when the math re-ran, otherwise the values already on the row).
-    // `_applyMaksimGate` mutates `patch` and returns whether the auto-email
-    // should be dispatched (fire-and-log, OUTSIDE the tx) after commit.
-    //
-    // Runs in BOTH verifiable statuses. This is the ONLY authorization mechanism
-    // (the manual request flow was removed), so an admin re-verify while the
-    // claim sits in `OCZEKUJE_NA_AUTORYZACJE` must re-evaluate the gate too:
-    // re-notify on a moved over-threshold amount (amount-aware dedup), or clear
-    // the gate and roll the status back to `NA_WERYFIKACJI` when a correction
-    // drops the dopłata under threshold. Both harms the old scoping guarded
-    // against are now DESIRED: (a) an admin amount edit re-notifies Maksim of the
-    // NEW dopłata, and (b) dropping under threshold correctly clears the
-    // clearance because the status rolls back in the same patch.
-    const finalPaymentEur = recalc ? recalc.paymentEur : existing.paymentEur;
-    const finalDrivenDays = recalc ? recalc.drivenDays : existing.drivenDays;
-    const overThreshold = requiresMaksimConfirmation({
-      paymentEur: finalPaymentEur,
-      drivenDays: finalDrivenDays,
-    });
-    const shouldNotifyMaksim = this._applyMaksimGate(
-      patch,
-      existing,
-      finalPaymentEur,
-      finalDrivenDays,
-      now,
-    );
-
-    // Threshold-driven status auto-transition. The state machine carries both
-    // edges in/out of `OCZEKUJE_NA_AUTORYZACJE`; PATCH never targets that status
-    // — only this checkpoint moves in and out of it. An idempotent re-save over
-    // threshold while already in `OCZEKUJE_NA_AUTORYZACJE` leaves the status
-    // untouched (only the amount-aware dedup decides on re-notify). `decidedById`
-    // is deliberately NOT set — this is verification, not a decision.
-    if (overThreshold && existing.status === 'NA_WERYFIKACJI') {
-      assertLegalTransition(existing.status, 'OCZEKUJE_NA_AUTORYZACJE');
-      patch.status = 'OCZEKUJE_NA_AUTORYZACJE';
-      patch.statusChangedAt = now;
-    } else if (!overThreshold && existing.status === 'OCZEKUJE_NA_AUTORYZACJE') {
-      assertLegalTransition(existing.status, 'NA_WERYFIKACJI');
-      patch.status = 'NA_WERYFIKACJI';
-      patch.statusChangedAt = now;
+    // Mixed period with days missing on the board (docs/20 §0⁵): the numbers
+    // are saved and `verifiedAt` is stamped — so `ODRZUCONO` stays reachable —
+    // but the amount is provisional. Arming Maksim's gate or moving the status
+    // on it would send him a figure that is still going to change, so BOTH are
+    // skipped; the accept is blocked by 422 CLAIM_BOARD_INCOMPLETE until the
+    // weryfikator fills the days in and the verification is saved again.
+    const missingDates = recalc?.board?.missingDates ?? [];
+    let shouldNotifyMaksim = false;
+    if (missingDates.length === 0) {
+      shouldNotifyMaksim = this._applyVerificationOutcome(
+        patch,
+        existing,
+        recalc,
+        now,
+      );
+    } else {
+      this.logger.log({
+        msg: 'claims.verify.board_incomplete',
+        nrZgl: existing.nrZgl,
+        missingDays: missingDates.length,
+      });
     }
 
     AuditContext.setBefore(this._snapshotForAudit(existing));
@@ -1591,6 +1678,59 @@ export class ClaimsService {
     }
 
     return this.toDto(updated);
+  }
+
+  /**
+   * The Maksim gate + the threshold-driven status auto-transition of a
+   * verification save, from the FINAL numbers (recalc output when the math
+   * re-ran, otherwise the values already on the row). Mutates `patch`; returns
+   * whether the Maksim email must be dispatched (fire-and-log, OUTSIDE the tx)
+   * after commit. Not called while a mixed period still has board gaps (see
+   * `verifyClaim`).
+   *
+   * Runs in BOTH verifiable statuses. This is the ONLY authorization mechanism
+   * (the manual request flow was removed), so an admin re-verify while the
+   * claim sits in `OCZEKUJE_NA_AUTORYZACJE` must re-evaluate the gate too:
+   * re-notify on a moved over-threshold amount (amount-aware dedup), or clear
+   * the gate and roll the status back to `NA_WERYFIKACJI` when a correction
+   * drops the dopłata under threshold.
+   *
+   * The state machine carries both edges in/out of `OCZEKUJE_NA_AUTORYZACJE`;
+   * PATCH never targets that status — only this checkpoint moves in and out of
+   * it. An idempotent re-save over threshold while already in
+   * `OCZEKUJE_NA_AUTORYZACJE` leaves the status untouched. `decidedById` is
+   * deliberately NOT set — this is verification, not a decision.
+   */
+  private _applyVerificationOutcome(
+    patch: UpdateClaimData,
+    existing: ClaimRow,
+    recalc: RecalcOutputs | null,
+    now: Date,
+  ): boolean {
+    const finalPaymentEur = recalc ? recalc.paymentEur : existing.paymentEur;
+    const finalDrivenDays = recalc ? recalc.drivenDays : existing.drivenDays;
+    const overThreshold = requiresMaksimConfirmation({
+      paymentEur: finalPaymentEur,
+      drivenDays: finalDrivenDays,
+    });
+    const shouldNotifyMaksim = this._applyMaksimGate(
+      patch,
+      existing,
+      finalPaymentEur,
+      finalDrivenDays,
+      now,
+    );
+
+    if (overThreshold && existing.status === 'NA_WERYFIKACJI') {
+      assertLegalTransition(existing.status, 'OCZEKUJE_NA_AUTORYZACJE');
+      patch.status = 'OCZEKUJE_NA_AUTORYZACJE';
+      patch.statusChangedAt = now;
+    } else if (!overThreshold && existing.status === 'OCZEKUJE_NA_AUTORYZACJE') {
+      assertLegalTransition(existing.status, 'NA_WERYFIKACJI');
+      patch.status = 'NA_WERYFIKACJI';
+      patch.statusChangedAt = now;
+    }
+    return shouldNotifyMaksim;
   }
 
   /**
@@ -2209,8 +2349,8 @@ export class ClaimsService {
       ...(limitsSnapshot ? { limitsSnapshot } : {}),
     });
 
-    // Mileage resolution (REWORK 2026-07-30 — the daily-km board is no longer
-    // the source of a claim's mileage, only the verifier's reference):
+    // DECLARED mileage resolution (the figure an all-active period is paid on;
+    // a mixed period is settled on the board by `_settle` instead):
     //  • carrier new-claim path (`ctx`): the mileage the carrier just typed —
     //    exactly what submit will persist. Absent mid-form ⇒ 0.
     //  • VERIFIER inspection path (`allowMileageOverride`): a supplied
@@ -2230,8 +2370,35 @@ export class ClaimsService {
             ? await this._resolveMileage(dto.vehicleId, dateStart, dateEnd)
             : 0;
 
-    const settlement = this._settle(calc, mileage);
+    // Board vehicle for a mixed period: the outing's on the new-claim path,
+    // the claim's own on the inspection path, the body's on the bare path.
+    const vehicleId = ctx
+      ? ctx.delegation.vehicleId
+      : existingClaim
+        ? existingClaim.vehicleId
+        : (dto.vehicleId ?? null);
+    const settlement = await this._settle(calc, mileage, {
+      vehicleId,
+      dateStart: dateStartIso,
+      dateEnd: dateEndIso,
+    });
     const { kmDifference, paymentEur } = settlement;
+
+    // Staff inspecting an existing wniosek (`allowMileageOverride` is the
+    // verifier gate) get the per-month board detail of a mixed period and the
+    // board TOTAL over the previewed period (the ClaimModal's «Wg tablicy
+    // przebiegów» hint). The carrier paths never carry either key.
+    const staffBoard =
+      ctx === null && allowMileageOverride
+        ? {
+            boardSettlement: toBoardSettlementDto(settlement),
+            boardSumKm: await this._previewBoardSum(
+              existingClaim?.vehicleId ?? null,
+              dto.dateStart,
+              dto.dateEnd,
+            ),
+          }
+        : {};
 
     return {
       mileage,
@@ -2254,7 +2421,31 @@ export class ClaimsService {
             delegationContext: this._buildDelegationContext(ctx.delegation),
           }
         : {}),
+      ...staffBoard,
     };
+  }
+
+  /**
+   * `PreviewClaimResponse.boardSumKm` — Σ `VehicleDailyKm.km` (state `drove`)
+   * of the claim's vehicle over the PREVIEWED period (the body's inclusive
+   * dates, possibly edited by the verifier). Deliberately NOT the declared
+   * `mileage`: the pracownik hint must show what the board holds now, e.g. a
+   * day the weryfikator filled in after submit.
+   *
+   * `null` — never a fake `0` — when there is no vehicle, a date is missing,
+   * invalid or the range inverted, or the board repository is not wired
+   * (`_resolveMileage` would answer 0 there). A real board sum of 0 is returned.
+   */
+  private async _previewBoardSum(
+    vehicleId: string | null,
+    dateStartIso: string | undefined,
+    dateEndIso: string | undefined,
+  ): Promise<number | null> {
+    if (!vehicleId || !this.dailyKm) return null;
+    const from = parseStrictIsoDate(dateStartIso);
+    const to = parseStrictIsoDate(dateEndIso);
+    if (!from || !to || to.getTime() < from.getTime()) return null;
+    return this._resolveMileage(vehicleId, from, to);
   }
 
   /**
@@ -2486,10 +2677,43 @@ export class ClaimsService {
     if (!row) throw new NotFoundException('Wniosek nie znaleziony');
     await this._assertClaimReadable(user, row);
     const dto = this.toDto(row);
+    // Staff-only live figures. `_assertClaimReadable` has already narrowed the
+    // caller to admin / pracownik / opiekun / przewoznik.
+    const staff = user.role !== 'przewoznik';
     return {
       ...dto,
       verifierMileage: await this._resolveVerifierMileage(user, row),
+      boardSettlement: staff ? await this._liveBoardSettlement(row) : null,
     };
+  }
+
+  /**
+   * The LIVE board settlement of a mixed-period wniosek, for the staff detail
+   * view (docs/20 §0⁵ «Что видят роли»). Priced exactly like the forced recalc
+   * of a verification save / an accept: the stored period, times and
+   * `hoursAdjustedValue`, the frozen limits snapshot, today's board. `null`
+   * for an all-active period — no km-calc, no board query.
+   */
+  private async _liveBoardSettlement(
+    row: ClaimRow,
+  ): Promise<ClaimBoardSettlement | null> {
+    if (!this._storedOnBoard(row)) return null;
+    const dateStart = toIsoDateOnly(row.dateStart);
+    const dateEnd = toIsoDateOnly(row.dateEnd);
+    const calc = await this.kmCalc.calc({
+      dateStart,
+      dateEnd,
+      timeFrom: row.timeFrom,
+      timeTo: row.timeTo,
+      hoursAdjusted: row.hoursAdjustedValue ?? 0,
+      limitsSnapshot: this._limitsSnapshot(row),
+    });
+    const settlement = await this._settle(calc, row.mileage, {
+      vehicleId: row.vehicleId,
+      dateStart,
+      dateEnd,
+    });
+    return toBoardSettlementDto(settlement);
   }
 
   /**
@@ -2673,6 +2897,9 @@ export class ClaimsService {
         : null,
       // Verifier-only, detail-only — `getOne` fills it in for verifier roles.
       verifierMileage: null,
+      // Staff-only, detail-only, live — `getOne` fills it in for a mixed
+      // period; every other response carrying a ClaimDto leaves it null.
+      boardSettlement: null,
       // Linked-outing lifecycle status — surfaced so the pracownik ClaimModal
       // renders the read-only "w trasie" banner and the FE in-transit gate keys
       // off the SAME field the API gates on. `null` when no linked outing.
@@ -2830,13 +3057,21 @@ export class ClaimsService {
    * decision changes (status + nrZlecenia + komentarz + reklamacja flags
    * only), we skip the recalc and surface the existing values — that's
    * pure optimisation but it also keeps the audit diff clean.
+   *
+   * `refreshBoard` (verification save + ACCEPT): a wniosek last priced as a
+   * MIXED period re-prices even without corrections, because its payout
+   * follows the live daily-km board (docs/20 §0⁵). That forced re-pricing
+   * keeps every stored input — including the currently applied
+   * `hoursAdjustedValue`.
    */
   private async _recalcClaim(
     existing: ClaimRow,
     dto: UpdateClaimDto | VerifyClaimDto,
+    opts: { refreshBoard: boolean },
   ): Promise<RecalcOutputs | null> {
     const corrections = extractCorrectionFields(dto);
-    if (!corrections.touchesMath) {
+    const forced = opts.refreshBoard && this._storedOnBoard(existing);
+    if (!corrections.touchesMath && !forced) {
       return null;
     }
 
@@ -2845,7 +3080,12 @@ export class ClaimsService {
     const timeFrom = corrections.timeFrom ?? existing.timeFrom;
     const timeTo = corrections.timeTo ?? existing.timeTo;
     const mileage = corrections.mileage ?? existing.mileage;
-    const hoursAdjusted = corrections.hoursAdjusted ?? 0;
+    // A correction body prices a missing `hoursAdjusted` as 0 (long-standing
+    // rule; the verifier form always re-sends the field). The forced board
+    // refresh carries no correction at all, so it keeps the applied korekta.
+    const hoursAdjusted =
+      corrections.hoursAdjusted ??
+      (corrections.touchesMath ? 0 : (existing.hoursAdjustedValue ?? 0));
 
     // Limits-freeze: a verifier correction re-prices the wniosek with the
     // limits it was submitted under, never with retroactively edited ones
@@ -2859,7 +3099,11 @@ export class ClaimsService {
       limitsSnapshot: this._limitsSnapshot(existing),
     });
 
-    const settlement = this._settle(calc, mileage);
+    const settlement = await this._settle(calc, mileage, {
+      vehicleId: existing.vehicleId,
+      dateStart,
+      dateEnd,
+    });
     const { kmDifference, paymentEur } = settlement;
     const kmPerDay =
       calc.totalDays > 0 ? round2(mileage / calc.totalDays) : 0;
@@ -2875,7 +3119,60 @@ export class ClaimsService {
       kmPerDay,
       breakdown,
       mileage,
+      board: settlement.board,
     };
+  }
+
+  /**
+   * Board gates of an ACCEPT (`targetStatus === 'ZAAKCEPTOWANO'`) on a period
+   * settled on the daily-km board (docs/20 §0⁵). No-op for every other target
+   * and for an all-active period (`recalc.board === null`). The recalc is
+   * always present here: an accept of a mixed period is force-re-priced.
+   *
+   *  - 422 `CLAIM_BOARD_INCOMPLETE` — a counted day of a guaranteed month has
+   *    no board row; `extensions.missingDates` lists them.
+   *  - 422 `CLAIM_BOARD_CHANGED` — the live dopłata differs from the one saved
+   *    at verification, OR it is over the Maksim threshold and the gate was not
+   *    armed + cleared at exactly that amount (a verification saved while the
+   *    board had gaps skipped the gate). Re-saving the verification re-prices
+   *    and re-arms.
+   *
+   * Pure decision helper — no IO.
+   */
+  private _assertBoardSettledForAccept(
+    existing: ClaimRow,
+    dto: UpdateClaimDto,
+    recalc: RecalcOutputs | null,
+  ): void {
+    if (dto.targetStatus !== 'ZAAKCEPTOWANO') return;
+    const board = recalc?.board;
+    if (!recalc || !board) return;
+
+    if (board.missingDates.length > 0) {
+      throw boardIncompleteException(board.missingDates);
+    }
+
+    const livePayment = round2(recalc.paymentEur);
+    const moved = livePayment !== round2(existing.paymentEur);
+    const needsAuthorization = requiresMaksimConfirmation({
+      paymentEur: recalc.paymentEur,
+      drivenDays: recalc.drivenDays,
+    });
+    const authorizedAtLiveAmount =
+      existing.maksimGateRequired &&
+      existing.maksimGateClearedAt !== null &&
+      existing.maksimGateNotifiedAmount !== null &&
+      round2(existing.maksimGateNotifiedAmount) === livePayment;
+    if (moved || (needsAuthorization && !authorizedAtLiveAmount)) {
+      throw new UnprocessableEntityException({
+        code: CLAIM_BOARD_CHANGED,
+        message:
+          'Kwota dopłaty różni się od zapisanej przy weryfikacji — zmieniła się ' +
+          'tablica km albo dane wniosku. Zapisz weryfikację ponownie, a ' +
+          'następnie podejmij decyzję.',
+        extensions: { code: CLAIM_BOARD_CHANGED },
+      });
+    }
   }
 
   /**
@@ -3779,6 +4076,54 @@ function formatDdMmYyyy(d: Date): string {
   return `${dd}.${mm}.${yyyy}`;
 }
 
+/** ISO `YYYY-MM-DD` → `dd.MM.yyyy` (string surgery — no `Date`, no timezone). */
+function isoToDdMmYyyy(iso: string): string {
+  const [y, m, d] = iso.split('-');
+  return `${d ?? ''}.${m ?? ''}.${y ?? ''}`;
+}
+
+/**
+ * 422 `CLAIM_BOARD_INCOMPLETE` — an accept of a mixed period while counted
+ * days of a guaranteed month have no board row. The machine code and the
+ * ISO dates travel under `extensions` (the only keys `ProblemDetailsFilter`
+ * forwards); the top-level `code` serves the in-process unit tests, same as
+ * the sibling gates.
+ */
+function boardIncompleteException(
+  missingDates: readonly string[],
+): UnprocessableEntityException {
+  const n = missingDates.length;
+  const dates = missingDates.map(isoToDdMmYyyy).join(', ');
+  return new UnprocessableEntityException({
+    code: CLAIM_BOARD_INCOMPLETE,
+    message:
+      `Nie można zaakceptować wniosku — brak przebiegu na tablicy km za ${n} ` +
+      `${n === 1 ? 'dzień' : 'dni'} w miesiącach z gwarancją: ${dates}. ` +
+      `Poczekaj, aż weryfikator uzupełni dane.`,
+    extensions: { code: CLAIM_BOARD_INCOMPLETE, missingDates: [...missingDates] },
+  });
+}
+
+/**
+ * Wire projection of a board settlement (`ClaimBoardSettlementSchema`).
+ * `null` for an all-active period — there is nothing on the board to show.
+ */
+function toBoardSettlementDto(
+  settlement: ClaimSettlement,
+): ClaimBoardSettlement | null {
+  if (settlement.mileageSource !== 'board' || settlement.board === null) {
+    return null;
+  }
+  return {
+    mileageEffective: settlement.mileageEffective,
+    kmDifference: settlement.kmDifference,
+    paymentEur: settlement.paymentEur,
+    months: settlement.board.months,
+    missingDates: settlement.board.missingDates,
+    complete: settlement.board.complete,
+  };
+}
+
 /**
  * "Today" as UTC midnight of the current calendar date in the business
  * timezone (Europe/Warsaw) is now sourced from the shared
@@ -3793,6 +4138,16 @@ function isoDateToMidnightUtc(iso: string): Date | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
   if (!m) return null;
   return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+}
+
+/**
+ * Strict `YYYY-MM-DD` → UTC midnight: `null` for a missing value, a malformed
+ * string or a non-existent calendar day (`2025-02-30` does not roll over).
+ */
+function parseStrictIsoDate(iso: string | undefined): Date | null {
+  if (iso === undefined) return null;
+  const d = isoDateToMidnightUtc(iso);
+  return d && toIsoDateOnly(d) === iso ? d : null;
 }
 
 /** `to - from` in whole calendar days (floor). Negative if `from > to`. */
@@ -3897,6 +4252,12 @@ interface RecalcOutputs {
   kmPerDay: number;
   breakdown: KmCalcBreakdown;
   mileage: number;
+  /**
+   * Live board settlement of a mixed period (`null` for an all-active one).
+   * Read by the verification C4 branch and the accept board gates; never
+   * persisted (`_applyCorrectionsToPatch` copies the columns only).
+   */
+  board: SettlementBoard | null;
 }
 
 /**

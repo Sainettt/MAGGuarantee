@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
 import { VehicleDayState, VehicleStatusSource } from '@magguarantee/database';
+import type { BoardDay } from '@magguarantee/shared';
 
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -185,8 +186,9 @@ export class VehicleDailyKmRepository {
 
   /**
    * `Σ km` over `drove` rows for ONE vehicle within `[from, toExclusive)`.
-   * Returns 0 when no drove rows exist. Used to pre-fill claim mileage as
-   * `Σ VehicleDailyKm.km (state=drove)` over the claim period.
+   * Returns 0 when no drove rows exist. Backs the claims' `verifierMileage`
+   * (the board total over the weryfikator's actual window) and the legacy
+   * bare-vehicle preview fallback.
    */
   async sumDroveKm(
     vehicleId: string,
@@ -202,6 +204,34 @@ export class VehicleDailyKmRepository {
       _sum: { km: true },
     });
     return agg._sum.km ?? 0;
+  }
+
+  /**
+   * Every mark (`drove` AND `idle`) of ONE vehicle within `[from, toExclusive)`,
+   * ascending, in the flat `BoardDay` shape the claim settlement consumes
+   * (`settleClaim` in `@magguarantee/shared`). A mixed-period wniosek is paid on
+   * these rows, and a day WITHOUT a row is a gap the settlement reports — so
+   * `idle` rows must come back too (they are filled days with 0 km).
+   *
+   * `date` is a `@db.Date` column (UTC midnight), hence the plain ISO slice.
+   * Goes through `prisma.tx` so a read inside the verification / decision
+   * transaction sees the same snapshot the write acts on.
+   */
+  async listBoardDays(
+    vehicleId: string,
+    from: Date,
+    toExclusive: Date,
+  ): Promise<BoardDay[]> {
+    const rows = await this.prisma.tx.vehicleDailyKm.findMany({
+      where: { vehicleId, date: { gte: from, lt: toExclusive } },
+      select: { date: true, state: true, km: true },
+      orderBy: { date: 'asc' },
+    });
+    return rows.map((r) => ({
+      date: r.date.toISOString().slice(0, 10),
+      state: r.state,
+      km: r.km,
+    }));
   }
 
   // ── helpers ──────────────────────────────────────────────

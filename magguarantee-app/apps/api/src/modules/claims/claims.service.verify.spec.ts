@@ -15,6 +15,7 @@ import { NotFoundException, UnprocessableEntityException } from '@nestjs/common'
 
 import type { Prisma } from '@magguarantee/database';
 import type {
+  BoardDay,
   ClaimStatus,
   KmCalcBreakdown,
   KmCalcResult,
@@ -32,6 +33,7 @@ import type { DriversRepository } from '../drivers/drivers.repository';
 import type { KmCalcService } from '../km-calc/km-calc.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { TrailersRepository } from '../trailers/trailers.repository';
+import type { VehicleDailyKmRepository } from '../vehicles/vehicle-daily-km.repository';
 import type { VehiclesRepository } from '../vehicles/vehicles.repository';
 import { ClaimsService } from './claims.service';
 import type {
@@ -331,6 +333,7 @@ function makeService(
   prisma: PrismaService,
   mail?: MailFake,
   config?: { get: jest.Mock },
+  dailyKm?: VehicleDailyKmRepository,
 ): { svc: ClaimsService; audit: { log: jest.Mock } } {
   const noop = {} as unknown;
   const audit = { log: jest.fn(async () => undefined) };
@@ -349,8 +352,21 @@ function makeService(
       import('../../config/env.schema').Env,
       true
     >,
+    dailyKm,
   );
   return { svc, audit };
+}
+
+/** Daily-km repo fake exposing only the board read a mixed period needs. */
+function makeBoardRepo(board: BoardDay[]): {
+  repo: VehicleDailyKmRepository;
+  boardSpy: jest.Mock;
+} {
+  const boardSpy = jest.fn(async () => board);
+  return {
+    repo: { listBoardDays: boardSpy } as unknown as VehicleDailyKmRepository,
+    boardSpy,
+  };
 }
 
 /** Waits a microtask turn so the fire-and-log email `void` promise settles. */
@@ -1282,52 +1298,282 @@ describe('ClaimsService.verifyClaim — `_recalcClaim` limits snapshot', () => {
     });
   });
 
-  it('persists the settlement fields on the recalculated breakdown', async () => {
-    const seeded = makeClaim();
-    const repoFake = makeClaimsRepo([seeded]);
-    const km = makeKmCalcService({
-      totalDays: 20,
-      rawTotalDays: 20,
-      kmGuaranteed: 5_400,
-      breakdown: [
-        {
-          yearMonth: '2026-04',
-          workingDays: 10,
-          kmPerDay: 540,
-          ratePerKm: 0.5,
-          saturdaysCounted: 0,
-          kmPerSaturday: 0,
-          kmFromSaturdays: 0,
-          kmInMonth: 5_400,
-          saturdayDays: [],
-          excludedDays: [],
-        },
-        {
-          yearMonth: '2026-05',
-          workingDays: 10,
-          kmPerDay: 0,
-          ratePerKm: 0.5,
-          saturdaysCounted: 0,
-          kmPerSaturday: 0,
-          kmFromSaturdays: 0,
-          kmInMonth: 0,
-          saturdayDays: [],
-          excludedDays: [],
-        },
-      ],
+});
+
+// ── Mixed period settled on the daily-km board (docs/20 §0⁵) ─────────
+
+describe('ClaimsService.verifyClaim — mixed period settled on the board', () => {
+  beforeAll(() => {
+    jest.useFakeTimers().setSystemTime(NOW);
+  });
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
+  // The spec example: 21.08–18.09.2025, August switched off (7 counted days),
+  // September on (14 × 540 = 7560 km @ 0.50 €/km). drivenDays 21 ⇒ Maksim
+  // threshold 500 €.
+  const AUGUST_OFF = {
+    yearMonth: '2025-08',
+    workingDays: 7,
+    kmPerDay: 0,
+    ratePerKm: 0.5,
+    saturdaysCounted: 0,
+    kmPerSaturday: 0,
+    kmFromSaturdays: 0,
+    kmInMonth: 0,
+    saturdayDays: [],
+    excludedDays: [],
+  };
+  const SEPTEMBER_ON = {
+    yearMonth: '2025-09',
+    workingDays: 14,
+    kmPerDay: 540,
+    ratePerKm: 0.5,
+    saturdaysCounted: 0,
+    kmPerSaturday: 0,
+    kmFromSaturdays: 0,
+    kmInMonth: 7_560,
+    saturdayDays: [],
+    excludedDays: [],
+  };
+  const MIXED_CALC: Partial<KmCalcResult> = {
+    totalDays: 21,
+    rawTotalDays: 21,
+    kmGuaranteed: 7_560,
+    ratePerKmEffective: 0.5,
+    breakdown: [AUGUST_OFF, SEPTEMBER_ON],
+  };
+
+  /** A wniosek last priced as a mixed period (board still empty at submit). */
+  function mixedClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
+    return makeClaim({
+      dateStart: new Date('2025-08-21T00:00:00.000Z'),
+      dateEnd: new Date('2025-09-18T00:00:00.000Z'),
+      drivenDays: 21,
+      mileage: 6_000,
+      kmGuaranteed: 7_560,
+      kmDifference: 7_560,
+      paymentEur: 3_780,
+      hoursAdjustedValue: 4,
+      breakdown: {
+        totalDays: 21,
+        rawTotalDays: 21,
+        kmGuaranteed: 7_560,
+        ratePerKmEffective: 0.5,
+        breakdown: [AUGUST_OFF, SEPTEMBER_ON],
+        firstDay: null,
+        lastDay: null,
+        daysActive: 14,
+        daysTotal: 21,
+        mileageEffective: 0,
+        mileageSource: 'board',
+      },
+      ...overrides,
     });
-    const { svc } = makeService(repoFake, km.svc, makePrismaService());
+  }
+
+  /** Every September day 01..18: `km` on the 1st, the rest idle, minus `missing`. */
+  function septemberBoard(km: number, missing: readonly string[] = []): BoardDay[] {
+    const rows: BoardDay[] = [];
+    for (let d = 1; d <= 18; d += 1) {
+      const date = `2025-09-${d < 10 ? `0${d}` : d}`;
+      if (missing.includes(date)) continue;
+      rows.push(
+        d === 1 ? { date, state: 'drove', km } : { date, state: 'idle', km: null },
+      );
+    }
+    return rows;
+  }
+
+  it('an EMPTY body still re-prices (forced) with the stored inputs, incl. the applied korekta', async () => {
+    const seeded = mixedClaim();
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService(MIXED_CALC);
+    const board = makeBoardRepo(septemberBoard(7_400));
+    const { svc } = makeService(
+      repoFake,
+      km.svc,
+      makePrismaService(),
+      undefined,
+      undefined,
+      board.repo,
+    );
 
     await withAuditContext(() =>
-      svc.verifyClaim(makeAuth('pracownik'), seeded.nrZgl, { mileage: 8_000 }),
+      svc.verifyClaim(makeAuth('pracownik'), seeded.nrZgl, {}),
+    );
+
+    expect(km.calls).toHaveLength(1);
+    const input = km.calls[0]!.input as {
+      dateStart: string;
+      dateEnd: string;
+      hoursAdjusted: number;
+      limitsSnapshot?: Record<string, unknown>;
+    };
+    expect(input.dateStart).toBe('2025-08-21');
+    expect(input.dateEnd).toBe('2025-09-18');
+    // NOT the `?? 0` of the correction path — the forced refresh keeps 4 h.
+    expect(input.hoursAdjusted).toBe(4);
+    expect(input.limitsSnapshot).toEqual({
+      '2025-08': { kmPerDay: 0, ratePerKm: 0.5, kmPerSaturday: 0 },
+      '2025-09': { kmPerDay: 540, ratePerKm: 0.5, kmPerSaturday: 0 },
+    });
+    expect(board.boardSpy).toHaveBeenCalledWith(
+      'v-1',
+      new Date('2025-08-21T00:00:00.000Z'),
+      new Date('2025-09-19T00:00:00.000Z'),
+    );
+    const patch = repoFake.updateWithinCalls[0]!.data;
+    // 7_560 − 7_400 = 160 ⇒ 80 € (under the 500 € threshold).
+    expect(patch.paymentEur).toBe(80);
+    expect(patch.breakdown?.mileageSource).toBe('board');
+    expect(patch.breakdown?.mileageEffective).toBe(7_400);
+    // No correction ⇒ the korekta column itself is not rewritten.
+    expect(patch.hoursAdjustedValue).toBeUndefined();
+  });
+
+  it('C4: gaps on the board ⇒ numbers + stamp saved, but NO Maksim gate, NO status move, NO email', async () => {
+    const seeded = mixedClaim();
+    const repoFake = makeClaimsRepo([seeded]);
+    const mail = makeMailFake();
+    const { svc } = makeService(
+      repoFake,
+      makeKmCalcService(MIXED_CALC).svc,
+      makePrismaService(),
+      mail,
+      makeConfigFake(),
+      // 1_000 km on the board, the return day not recorded yet.
+      makeBoardRepo(septemberBoard(1_000, ['2025-09-18'])).repo,
+    );
+
+    const { result: out } = await withAuditContext(() =>
+      svc.verifyClaim(makeAuth('pracownik'), seeded.nrZgl, {}),
+    );
+    await flushMicrotasks();
+
+    const patch = repoFake.updateWithinCalls[0]!.data;
+    // Stamped — `ODRZUCONO` stays reachable.
+    expect(patch.verifiedAt).toEqual(NOW);
+    expect(patch.verifiedById).toBe('u-actor');
+    // The provisional numbers are saved: 7_560 − 1_000 = 6_560 ⇒ 3_280 € …
+    expect(patch.paymentEur).toBe(3_280);
+    // … which is over the 500 € threshold, yet nothing about the gate moves.
+    expect(patch.status).toBeUndefined();
+    expect(patch.statusChangedAt).toBeUndefined();
+    expect(patch.maksimGateRequired).toBeUndefined();
+    expect(patch.maksimGateNotifiedAt).toBeUndefined();
+    expect(patch.maksimGateNotifiedAmount).toBeUndefined();
+    expect(patch.maksimGateClearedAt).toBeUndefined();
+    expect(mail.enqueueMaksimConfirmationRequest).not.toHaveBeenCalled();
+    expect(out.status).toBe('NA_WERYFIKACJI');
+  });
+
+  it('C4 (admin, OCZEKUJE): gaps ⇒ no roll-back to NA_WERYFIKACJI and the gate stays as it was', async () => {
+    const seeded = mixedClaim({
+      status: 'OCZEKUJE_NA_AUTORYZACJE' as ClaimStatus,
+      verifiedAt: new Date('2026-05-14T10:00:00.000Z'),
+      maksimGateRequired: true,
+      maksimGateNotifiedAt: new Date('2026-05-14T10:00:00.000Z'),
+      maksimGateNotifiedAmount: 3_780,
+    });
+    const repoFake = makeClaimsRepo([seeded]);
+    const mail = makeMailFake();
+    const { svc } = makeService(
+      repoFake,
+      makeKmCalcService(MIXED_CALC).svc,
+      makePrismaService(),
+      mail,
+      makeConfigFake(),
+      // Under threshold on the board (80 €) — but a day is still missing.
+      makeBoardRepo(septemberBoard(7_400, ['2025-09-07'])).repo,
+    );
+
+    await withAuditContext(() =>
+      svc.verifyClaim(makeAuth('admin', 'u-admin'), seeded.nrZgl, {}),
+    );
+    await flushMicrotasks();
+
+    const patch = repoFake.updateWithinCalls[0]!.data;
+    expect(patch.paymentEur).toBe(80);
+    expect(patch.status).toBeUndefined();
+    expect(patch.maksimGateRequired).toBeUndefined();
+    expect(patch.maksimGateNotifiedAmount).toBeUndefined();
+    expect(mail.enqueueMaksimConfirmationRequest).not.toHaveBeenCalled();
+  });
+
+  it('a complete board runs the normal gate: over threshold ⇒ OCZEKUJE + one Maksim email at the board amount', async () => {
+    const seeded = mixedClaim();
+    const repoFake = makeClaimsRepo([seeded]);
+    const mail = makeMailFake();
+    const { svc } = makeService(
+      repoFake,
+      makeKmCalcService(MIXED_CALC).svc,
+      makePrismaService(),
+      mail,
+      makeConfigFake(),
+      makeBoardRepo(septemberBoard(2_000)).repo,
+    );
+
+    await withAuditContext(() =>
+      svc.verifyClaim(makeAuth('pracownik'), seeded.nrZgl, {}),
+    );
+    await flushMicrotasks();
+
+    const patch = repoFake.updateWithinCalls[0]!.data;
+    // 7_560 − 2_000 = 5_560 ⇒ 2_780 € > 500 €.
+    expect(patch.paymentEur).toBe(2_780);
+    expect(patch.status).toBe('OCZEKUJE_NA_AUTORYZACJE');
+    expect(patch.maksimGateRequired).toBe(true);
+    expect(patch.maksimGateNotifiedAmount).toBe(2_780);
+    expect(mail.enqueueMaksimConfirmationRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('a mileage correction on a mixed period is saved, but the payout follows the board', async () => {
+    const seeded = mixedClaim();
+    const repoFake = makeClaimsRepo([seeded]);
+    const { svc } = makeService(
+      repoFake,
+      makeKmCalcService(MIXED_CALC).svc,
+      makePrismaService(),
+      undefined,
+      undefined,
+      makeBoardRepo(septemberBoard(7_400)).repo,
+    );
+
+    await withAuditContext(() =>
+      svc.verifyClaim(makeAuth('pracownik'), seeded.nrZgl, { mileage: 1 }),
     );
 
     const patch = repoFake.updateWithinCalls[0]!.data;
-    expect(patch.breakdown?.daysActive).toBe(10);
-    expect(patch.breakdown?.daysTotal).toBe(20);
-    expect(patch.breakdown?.mileageEffective).toBe(4_000);
-    // 5_400 − 4_000 = 1_400 ⇒ 700 EUR (the old formula would have paid 0).
-    expect(patch.kmDifference).toBe(1_400);
-    expect(patch.paymentEur).toBe(700);
+    expect(patch.mileage).toBe(1);
+    expect(patch.breakdown?.mileageEffective).toBe(7_400);
+    expect(patch.kmDifference).toBe(160);
+    expect(patch.paymentEur).toBe(80);
+    // Day counters keep their meaning (August's 7 days are not active).
+    expect(patch.breakdown?.daysActive).toBe(14);
+    expect(patch.breakdown?.daysTotal).toBe(21);
+  });
+
+  it('an all-active wniosek with an empty body still skips km-calc and never reads the board', async () => {
+    const seeded = makeClaim({ paymentEur: 300 });
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const board = makeBoardRepo([]);
+    const { svc } = makeService(
+      repoFake,
+      km.svc,
+      makePrismaService(),
+      undefined,
+      undefined,
+      board.repo,
+    );
+
+    await withAuditContext(() =>
+      svc.verifyClaim(makeAuth('pracownik'), seeded.nrZgl, {}),
+    );
+
+    expect(km.calls).toHaveLength(0);
+    expect(board.boardSpy).not.toHaveBeenCalled();
   });
 });

@@ -8,7 +8,11 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { KmCalcBreakdownSchema } from '../src/schemas/claims';
+import { settleClaim } from '../src/domain/claim-settlement';
+import {
+  ClaimBoardSettlementSchema,
+  KmCalcBreakdownSchema,
+} from '../src/schemas/claims';
 
 const BASE = {
   totalDays: 20,
@@ -106,5 +110,91 @@ describe('KmCalcBreakdownSchema — settlement fields (2026-09-20)', () => {
     expect(() =>
       KmCalcBreakdownSchema.parse({ ...BASE, mileageEffective: -0.01 }),
     ).toThrow();
+  });
+});
+
+describe('KmCalcBreakdownSchema — mileageSource (2026-09-24, docs/20 §0⁵)', () => {
+  it('is NOT backfilled: a legacy row keeps it undefined (⇒ "declared")', () => {
+    const parsed = KmCalcBreakdownSchema.parse(BASE);
+    expect(parsed.mileageSource).toBeUndefined();
+  });
+
+  it('round-trips both sources', () => {
+    expect(
+      KmCalcBreakdownSchema.parse({ ...BASE, mileageSource: 'declared' })
+        .mileageSource,
+    ).toBe('declared');
+    expect(
+      KmCalcBreakdownSchema.parse({ ...BASE, mileageSource: 'board' })
+        .mileageSource,
+    ).toBe('board');
+  });
+
+  it('rejects an unknown source', () => {
+    expect(
+      KmCalcBreakdownSchema.safeParse({ ...BASE, mileageSource: 'proportional' })
+        .success,
+    ).toBe(false);
+  });
+});
+
+describe('ClaimBoardSettlementSchema', () => {
+  it('accepts what the api builds from a board settlement', () => {
+    const settlement = settleClaim({
+      breakdown: [
+        { yearMonth: '2025-08', kmPerDay: 0, kmPerSaturday: 0, workingDays: 7 },
+        { yearMonth: '2025-09', kmPerDay: 540, workingDays: 14 },
+      ],
+      mileage: 6_000,
+      kmGuaranteed: 7_560,
+      ratePerKmEffective: 0.5,
+      dateStart: '2025-08-21',
+      dateEnd: '2025-09-18',
+      board: [{ date: '2025-09-01', state: 'drove', km: 2_000 }],
+    });
+    const wire = {
+      mileageEffective: settlement.mileageEffective,
+      kmDifference: settlement.kmDifference,
+      paymentEur: settlement.paymentEur,
+      months: settlement.board!.months,
+      missingDates: settlement.board!.missingDates,
+      complete: settlement.board!.complete,
+    };
+    const parsed = ClaimBoardSettlementSchema.parse(wire);
+    expect(parsed.paymentEur).toBe(2_780);
+    expect(parsed.complete).toBe(false);
+    expect(parsed.missingDates).toHaveLength(17);
+    expect(parsed.months.map((m) => m.mode)).toEqual(['off', 'active']);
+  });
+
+  it('rejects an unknown month mode and a malformed missing date', () => {
+    const base = {
+      mileageEffective: 0,
+      kmDifference: 0,
+      paymentEur: 0,
+      months: [],
+      missingDates: [],
+      complete: true,
+    };
+    expect(ClaimBoardSettlementSchema.safeParse(base).success).toBe(true);
+    expect(
+      ClaimBoardSettlementSchema.safeParse({
+        ...base,
+        months: [
+          {
+            yearMonth: '2025-09',
+            mode: 'partial',
+            km: 0,
+            daysFilled: 0,
+            daysRequired: 0,
+            missingDates: [],
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      ClaimBoardSettlementSchema.safeParse({ ...base, missingDates: ['1.09.2025'] })
+        .success,
+    ).toBe(false);
   });
 });

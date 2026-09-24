@@ -19,7 +19,10 @@
 //   ② DOPŁATA — locked/computed, live recalc INDEPENDENT of decyzja (§6.5.4)
 //   ②b MAKSIM-GATE — automatic over-threshold authorization block (§6.5.7),
 //      rendered only while the claim sits in `OCZEKUJE_NA_AUTORYZACJE`.
-//   ③ DECYZJA — targetStatus select + conditional fields (§6.5.5), at bottom
+//   ③ DECYZJA — targetStatus select + conditional fields (§6.5.5), at bottom.
+//      On a mixed period with gaps on the km board, the amber «brak danych»
+//      notice sits first inside it and `ZAAKCEPTOWANO` is not offered
+//      (docs/14 §16.5.6, docs/20 §0⁵).
 //   ④ Secondary Historia sub-panel (§6.5.7) — single section, omitted if empty.
 //
 // Authorization is ENTIRELY automatic (этап 4/5.1): the backend routes a claim
@@ -38,6 +41,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
   BadgeCheck,
+  CalendarX,
   Download,
   Gavel,
   Loader2,
@@ -48,7 +52,7 @@ import {
   ShieldCheck,
   Truck,
 } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import {
   useCallback,
   useEffect,
@@ -67,10 +71,13 @@ import {
 } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
+  CLAIM_BOARD_CHANGED,
+  CLAIM_BOARD_INCOMPLETE,
   UpdateClaimSchema,
   getAuthThreshold,
   isCompensationDue,
   resolveReklamacjaCap,
+  type ClaimBoardSettlement,
   type ClaimDto,
   type ClaimStatus,
   type KmCalcBreakdown,
@@ -111,7 +118,22 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Textarea } from '@/components/ui/Textarea';
 import { downloadAuthorizationConfirmation } from '@/lib/api/claims';
 import { ApiResponseError } from '@/lib/api/client';
+import {
+  formatBoardDate,
+  isBoardIncomplete,
+  isBoardSettled,
+  isMissingDatesCollapsible,
+  missesLastDay,
+  sortMissingDates,
+  visibleMissingDates,
+} from '@/lib/claims/breakdownGuarantee';
+import { boardSumHintKm } from '@/lib/claims/boardSumHint';
 import { verifierMovedAmount } from '@/lib/claims/money';
+import {
+  selectAmountSource,
+  shortfallView,
+  type ShortfallView,
+} from '@/lib/claims/shortfall';
 import { formatDateFull, formatEur } from '@/lib/format/numbers';
 import {
   CLAIMS_KEY,
@@ -181,8 +203,9 @@ function buildPreviewBody(
   // honored for pracownik/admin, IGNORED for przewoznik and on the
   // delegationId-driven carrier path. We only send it when it's a finite,
   // non-negative number; while the input is empty/NaN we omit the field so
-  // the server falls back to Σ VehicleDailyKm (no crash, just a momentary
-  // fallback). The verifier's mileage edit ALSO still flows through the PATCH
+  // the server falls back to the claim's persisted mileage (no crash, just a
+  // momentary fallback — NOT the board sum; that is `boardSumKm` on the
+  // response). The verifier's mileage edit ALSO still flows through the PATCH
   // (UpdateClaimCorrectionFields.mileage) as before.
   const hoursAdjusted =
     v.hoursAdjusted !== undefined && Number.isFinite(v.hoursAdjusted)
@@ -358,6 +381,20 @@ function problemCode(err: ApiResponseError): string | undefined {
   return typeof code === 'string' ? code : undefined;
 }
 
+/**
+ * `extensions.missingDates` of a 422 `CLAIM_BOARD_INCOMPLETE` (ISO dates). `[]`
+ * when absent or malformed — the toast then takes its `=0` branch.
+ */
+function problemMissingDates(err: ApiResponseError): string[] {
+  const extensions = (err.data as { extensions?: unknown } | undefined)
+    ?.extensions;
+  if (!extensions || typeof extensions !== 'object') return [];
+  const dates = (extensions as { missingDates?: unknown }).missingDates;
+  return Array.isArray(dates)
+    ? dates.filter((d): d is string => typeof d === 'string')
+    : [];
+}
+
 // ── Public component ────────────────────────────────────────────────
 // Keeps the <Dialog> mounted across the whole modal lifetime so the
 // view↔edit morph never re-mounts; the inner <ModalBody> mounts the RHF
@@ -484,6 +521,14 @@ function ModalBody({
 
   const targetStatus = form.watch('targetStatus');
 
+  // Unsaved corrections — RHF dirty state of the 6 fact fields, re-baselined by
+  // `form.reset(form.getValues())` on a successful «Zapisz weryfikację». Read
+  // by the verifier-checkpoint gate AND (mixed periods) the accept filter.
+  const dirtyFields = form.formState.dirtyFields as Partial<
+    Record<keyof FormValues, boolean>
+  >;
+  const correctionsDirty = CORRECTION_FIELDS.some((f) => dirtyFields[f]);
+
   // ── Live preview (debounced 300ms) — DECISION-INDEPENDENT (§6.5.4). ──
   // Recomputes whenever any of the 6 facts changes, regardless of the
   // selected targetStatus. Gated only on the vehicle being known (handled
@@ -493,7 +538,8 @@ function ModalBody({
   // recalc. It's honored server-side only for pracownik/admin (ignored for
   // przewoznik and on the delegationId carrier path); buildPreviewBody sends
   // it only while it's a finite non-negative number, otherwise omits it so the
-  // server falls back to Σ VehicleDailyKm. The PATCH still carries mileage too.
+  // server falls back to the claim's persisted mileage. The PATCH still
+  // carries mileage too.
   const watched = form.watch([
     'dateStart',
     'dateEnd',
@@ -540,9 +586,45 @@ function ModalBody({
           ? 'error'
           : 'success';
 
-  // The dopłata shown in the locked field: the live previewed value when
-  // available, else the persisted server value.
-  const liveDoplata = previewQ.data?.paymentEur ?? claim.paymentEur;
+  // ── Mixed period — settlement on the weryfikator's km board (docs/20 §0⁵,
+  //    docs/14 §16.5.5–§16.5.6) ──
+  //
+  // `claimBoard` — the LIVE board settlement from `GET /claims/:nrZgl`,
+  // computed from the claim's SAVED period / times / korekta (refetched on
+  // every open). It is the ONE board reading on this surface: the breakdown
+  // table (paired with `claim.breakdown`, the same DTO), the accept gate and
+  // the «brak danych» notice all read it — the server's accept gate prices the
+  // saved inputs against the board as it stands now. `null` for an all-active
+  // period. Money figures do NOT come from it: its `paymentEur` is never shown.
+  const claimBoard: ClaimBoardSettlement | null = claim.boardSettlement ?? null;
+  const boardIncomplete = isBoardIncomplete(claimBoard);
+  // The SAVED claim is a mixed period — only ever the server's flag, never the
+  // rows. (A board settlement is only ever sent for a mixed period.)
+  const mixedPeriod = claimBoard !== null || isBoardSettled(claim.breakdown);
+  // The web sends every correction field WITH the decision, and on a mixed
+  // period the server re-prices the accept on the board and answers 422
+  // `CLAIM_BOARD_CHANGED` when the dopłata moved from the saved one. So while
+  // corrections are unsaved, acceptance is not offered at all (same removal
+  // mechanism as `metGuarantee`). Only reachable where the decision is not
+  // already checkpoint-gated — admin @ OCZEKUJE_NA_AUTORYZACJE.
+  const boardDirtyGate =
+    mixedPeriod && perms.payloadIncludesCorrections && correctionsDirty;
+
+  // ── The amount source (§16.5.9 p.1, §16.5.10) ──
+  // ONE object feeds the dopłata field AND the niedojazd readout under it, so
+  // «niedojazd × stawka» always matches the amount shown:
+  //  - a DECIDED mixed period (mixed + ZAAKCEPTOWANO / ODRZUCONO) → the STORED
+  //    claim: the preview re-prices it on the board as it stands now, which
+  //    drifts from the decided dopłata once the weryfikator edits a day;
+  //  - otherwise the live preview once it exists (retained across refetches
+  //    by `placeholderData`), else the claim (before the first response, on
+  //    error, and for opiekun, whose /preview is 403).
+  const amountSrc = selectAmountSource(claim, previewQ.data);
+
+  // The dopłata shown in the locked field.
+  const liveDoplata = amountSrc.paymentEur;
+  // Niedojazd readout under the field — same source, pre-formatted.
+  const shortfall = shortfallView(amountSrc);
 
   // ── Próg autoryzacji — SOFT INFORMATIONAL hint (docs/01, getAuthThreshold) ──
   // Tracks the live recalc: dni jezdne come from the previewed breakdown when
@@ -555,7 +637,17 @@ function ModalBody({
     previewQ.data?.breakdown?.totalDays ?? claim.drivenDays;
   const prog = getAuthThreshold(liveDrivenDays);
   const exceedsProg = liveDoplata > prog;
-  const showExceedsHint = exceedsProg && claim.status === 'NA_WERYFIKACJI';
+  // Hidden while the km board has gaps: saving the verification then SKIPS the
+  // automatic move to `OCZEKUJE_NA_AUTORYZACJE` (docs/13, verification), so the
+  // hint's promise would be false. The hint itself is computed from the live
+  // preview (the verifier's current edits — what the save would price), so the
+  // preview's board counts as well as the saved one: either incomplete ⇒ no
+  // promise. (Not shown anywhere else; the table reads the claim's pair.)
+  const showExceedsHint =
+    exceedsProg &&
+    claim.status === 'NA_WERYFIKACJI' &&
+    !boardIncomplete &&
+    !isBoardIncomplete(previewQ.data?.boardSettlement);
 
   // ── Live hours readout source (§6.5.4 / Phase 3.1) ──
   // The edit-mode HoursReadout must reflect the verifier's CURRENT working
@@ -585,26 +677,32 @@ function ModalBody({
   // such reklamacja from ever being upheld.
   const liveKmDiff = previewQ.data?.kmDifference ?? claim.kmDifference;
   const metGuarantee = !isCompensationDue(liveKmDiff);
+  // Mixed-period acceptance gates (§16.5.6) — the SAME removal mechanism as
+  // `metGuarantee`: `ZAAKCEPTOWANO` is dropped from the options, never shown
+  // disabled. `REKLAMACJA_ZAAKCEPTOWANO` is untouched (an uznana reklamacja
+  // pays its own frozen kwota, the board plays no part); `ODRZUCONO` and
+  // «Zapisz weryfikację» stay available.
+  const acceptBlockedByBoard = boardIncomplete || boardDirtyGate;
   const availableTargets = useMemo(
     () =>
-      metGuarantee
+      metGuarantee || acceptBlockedByBoard
         ? targets.filter((target) => target !== 'ZAAKCEPTOWANO')
         : targets,
-    [metGuarantee, targets],
+    [metGuarantee, acceptBlockedByBoard, targets],
   );
 
-  // Clear a stale acceptance selection if an edit pushes recalc into
-  // "guarantee met". Guarded on the value of `targetStatus` (read via the
-  // watch above) and `metGuarantee` only — `form.setValue` is stable, so no
-  // loop. Skipped while a recalc is in flight to avoid flicker.
+  // Clear a stale acceptance selection once acceptance is no longer offered.
+  // Guarded on the value of `targetStatus` (read via the watch above) —
+  // `form.setValue` is stable, so no loop. The `metGuarantee` branch waits for
+  // an in-flight recalc to settle (avoids flicker); the board gates come from
+  // the claim DTO / the form's dirty state and clear at once.
   // Reklamacja targets are deliberately NOT cleared here (see above).
   useEffect(() => {
-    if (!metGuarantee) return;
-    if (recalcState === 'loading') return;
-    if (targetStatus === 'ZAAKCEPTOWANO') {
+    if (targetStatus !== 'ZAAKCEPTOWANO') return;
+    if (acceptBlockedByBoard || (metGuarantee && recalcState !== 'loading')) {
       form.setValue('targetStatus', '');
     }
-  }, [metGuarantee, recalcState, targetStatus, form]);
+  }, [acceptBlockedByBoard, metGuarantee, recalcState, targetStatus, form]);
 
   // Auto-populate `amountApproved` to the live dopłata for ZAAKCEPTOWANO
   // (decision-scoped — only fires when the accept branch is selected). The
@@ -622,6 +720,16 @@ function ModalBody({
   const tMaksim = useTranslations('employee.claims.modal.maksimGate');
   const tInTransit = useTranslations('employee.claims.modal.inTransitGate');
   const tLocked = useTranslations('employee.claims.modal.locked');
+  const tBoard = useTranslations('employee.claims.modal.boardGate');
+
+  // ── 422 CLAIM_BOARD_CHANGED latch (§16.5.6) ──
+  // The accept was refused because the live board dopłata no longer matches
+  // the one saved at verification. Without a latch the verifier repeats the
+  // same decision, gets the same 422, and the toast reads like a loop — so the
+  // decision stays closed (part of `decisionGated`) until a successful
+  // «Zapisz weryfikację» re-prices it (`verifyM.onSuccess`). Purely client
+  // state: the server still decides whether the next accept goes through.
+  const [boardChanged, setBoardChanged] = useState(false);
 
   // ── Linked-outing in-transit gate (in-transit-verifier-gate feature) ──
   // When the wniosek is filed against an outing that is still `w_trasie`, the
@@ -690,6 +798,38 @@ function ModalBody({
         toast.error(tInTransit('blockedToast'));
         return;
       }
+      // Mixed-period accept gates (docs/20 §0⁵) — same pattern: key on the
+      // machine code, refetch the claim detail, localized toast (the server
+      // `detail` is Polish only). INCOMPLETE: the fresh `boardSettlement`
+      // removes `ZAAKCEPTOWANO` (the effect above clears the stale choice),
+      // brings up the «brak danych» notice and refreshes the table's board
+      // columns. CHANGED: latch the decision closed until the verification is
+      // saved again.
+      if (
+        err instanceof ApiResponseError &&
+        problemCode(err) === CLAIM_BOARD_INCOMPLETE
+      ) {
+        qc.invalidateQueries({
+          queryKey: [...CLAIMS_KEY, 'detail', claim.nrZgl],
+        });
+        toast.error(
+          tBoard('incompleteToast', {
+            count: problemMissingDates(err).length,
+          }),
+        );
+        return;
+      }
+      if (
+        err instanceof ApiResponseError &&
+        problemCode(err) === CLAIM_BOARD_CHANGED
+      ) {
+        qc.invalidateQueries({
+          queryKey: [...CLAIMS_KEY, 'detail', claim.nrZgl],
+        });
+        setBoardChanged(true);
+        toast.error(tBoard('changedToast'));
+        return;
+      }
       const msg =
         err instanceof ApiResponseError && err.status >= 400 && err.status < 500
           ? err.message
@@ -720,10 +860,7 @@ function ModalBody({
   // the two into one `needsVerification` boolean was the original bug.
   const needsVerification = perms.requiresVerifiedCheckpoint;
   const isVerified = claim.verifiedAt != null;
-  const dirtyFields = form.formState.dirtyFields as Partial<
-    Record<keyof FormValues, boolean>
-  >;
-  const correctionsDirty = CORRECTION_FIELDS.some((f) => dirtyFields[f]);
+  // (`correctionsDirty` is derived near the top of the component.)
   // Gate is live only for NA_WERYFIKACJI; other statuses behave as before.
   // The in-transit gate is ADDITIVE: it blocks the verify + request-
   // authorization actions (both keyed off `verifyGated`) regardless of the
@@ -731,25 +868,58 @@ function ModalBody({
   // even once the checkpoint would otherwise clear.
   const verifyGated =
     inTransitGated || (needsVerification && (!isVerified || correctionsDirty));
-  const gateHint = inTransitGated
-    ? tInTransit('actionsBlockedHint')
-    : correctionsDirty
-      ? tEdit('verifyDirtyHint')
-      : tEdit('verifyRequiredHint');
 
   // The decyzja is blocked while ANY gate is armed: the verifier checkpoint
   // (verifyGated, which now also folds in the linked-outing in-transit gate) OR
   // the Maksim over-threshold gate (maksimGateActive, derived above from the
-  // DTO). The Maksim gate only meaningfully arms once the claim is verified (the
-  // api arms it on the verification save), so all gates compose cleanly — each a
-  // HARD gate ADDITIVE to the checkpoint. `inTransitGated` is spelled out here
-  // too (belt-and-braces) so the accept/reject buttons stay disabled while the
-  // outing is `w_trasie` even if the `verifyGated` composition ever changes.
-  const decisionGated = inTransitGated || verifyGated || maksimGateActive;
+  // DTO) OR the `CLAIM_BOARD_CHANGED` latch. The Maksim gate only meaningfully
+  // arms once the claim is verified (the api arms it on the verification save),
+  // so all gates compose cleanly — each a HARD gate ADDITIVE to the checkpoint.
+  // `inTransitGated` is spelled out here too (belt-and-braces) so the
+  // accept/reject buttons stay disabled while the outing is `w_trasie` even if
+  // the `verifyGated` composition ever changes.
+  const decisionGated =
+    inTransitGated || verifyGated || maksimGateActive || boardChanged;
+
+  // The ONE gate-hint line under the decyzja select — first match wins:
+  // in-transit → board changed (422 latch) → verifier checkpoint → Maksim →
+  // unsaved corrections on a mixed period (accept removed, reject still open).
+  // `boardIncomplete` has no line here: its amber notice sits right above the
+  // select, a third repetition would be noise (§16.5.6).
+  // The latch's remedy is «Zapisz weryfikację» — so when THIS user has no such
+  // button (`perms.showVerifyButton`: pracownik @ OCZEKUJE_NA_AUTORYZACJE), the
+  // hint names who can do it instead of telling them to do the impossible.
+  const decisionHint: string | null = inTransitGated
+    ? tInTransit('actionsBlockedHint')
+    : boardChanged
+      ? perms.showVerifyButton
+        ? tBoard('changedHint')
+        : tBoard('changedHintNoEdit')
+      : verifyGated
+        ? correctionsDirty
+          ? tEdit('verifyDirtyHint')
+          : tEdit('verifyRequiredHint')
+        : maksimGateActive
+          ? tMaksim('decisionBlockedHint')
+          : boardDirtyGate
+            ? tBoard('changedHint')
+            : null;
+
+  // «Brak danych» notice on the km board (§16.5.6) — see the render site.
+  const showBoardGapNotice =
+    boardIncomplete &&
+    !metGuarantee &&
+    !inTransitGated &&
+    !isReklamacja &&
+    (claim.status === 'NA_WERYFIKACJI' ||
+      claim.status === 'OCZEKUJE_NA_AUTORYZACJE');
 
   const verifyM = useVerifyClaim(claim.nrZgl, {
     onSuccess: () => {
       toast.success(tEdit('verifiedToast'));
+      // The verification re-priced the board dopłata — the accept may be tried
+      // again (the server re-checks it).
+      setBoardChanged(false);
       // Re-baseline the form to its current values so the correction fields go
       // clean and the decyzja gate (correctionsDirty) unlocks. The detail-query
       // invalidation refetches the claim (now carrying the fresh verifiedAt),
@@ -803,27 +973,21 @@ function ModalBody({
   };
 
   // ── Board-sum hint (verifier-checkpoint feature) ──
-  // A SECOND lightweight preview with the SAME debounced body but WITHOUT
-  // `mileage` — the server responds with `mileage` = Σ VehicleDailyKm (board
-  // sum) over the dates. Lets the pracownik pull in daily-km rows the
-  // weryfikator added after submit. Distinct body ⇒ distinct query key ⇒ no
-  // collision with the main recalc preview above.
+  // «Wg tablicy przebiegów: N km» + «Zastosuj» under the km input. Source: the
+  // MAIN live preview's `boardSumKm` — the staff-only Σ `drove` km on the
+  // weryfikator's daily-km board over the period being edited (the preview
+  // body's `[dateStart, dateEnd]`), so it tracks date edits and picks up days
+  // the weryfikator filled after submit. It does not depend on `mileage`, so
+  // «Zastosuj» (→ `setValue('mileage')`) re-runs the preview without moving
+  // the hint. `null` (no vehicle / missing or invalid date / board
+  // unavailable) hides the hint; a real 0 shows «0 km».
   // Scoped to `perms.factsEditable` (not the raw status) — the hint exists to
   // feed the km INPUT, so it belongs wherever that input is actually editable,
-  // which now includes admin @ OCZEKUJE_NA_AUTORYZACJE.
-  const boardSumBody = useMemo<PreviewClaimDto | null>(() => {
-    if (!perms.factsEditable) return null;
-    if (debouncedPreviewBody === null) return null;
-    // Drop `mileage` so the server falls back to Σ VehicleDailyKm (board sum).
-    const rest: PreviewClaimDto = { ...debouncedPreviewBody };
-    delete rest.mileage;
-    return rest;
-  }, [perms.factsEditable, debouncedPreviewBody]);
-
-  const boardSumQ = useClaimPreviewExisting(claim.nrZgl, boardSumBody, {
-    enabled: boardSumBody !== null,
-  });
-  const boardSum = boardSumQ.data?.mileage;
+  // which includes admin @ OCZEKUJE_NA_AUTORYZACJE.
+  // (Replaces a second preview sent without `mileage`: for an existing claim
+  // the server answers that with the carrier's persisted mileage, not the
+  // board, so the hint went stale.)
+  const boardSum = boardSumHintKm(previewQ.data, perms.factsEditable);
 
   // ── Mode transitions — focus management (§6.5.6) ──
   const enterEdit = () => {
@@ -947,6 +1111,7 @@ function ModalBody({
           claim={claim}
           recalcState={recalcState}
           liveDoplata={liveDoplata}
+          shortfall={shortfall}
           prog={prog}
           liveDrivenDays={liveDrivenDays}
           showExceedsHint={showExceedsHint}
@@ -986,6 +1151,17 @@ function ModalBody({
               : tUnified('decyzjaSubtitle')
           }
         >
+          {/* «Brak danych» on the km board (§16.5.6) — FIRST inside the panel,
+              directly above the select that no longer offers acceptance, in
+              view AND edit (the reader learns why acceptance won't be offered
+              before morphing to edit). Gated on status, not role — opiekun sees
+              it too. Suppressed when the guarantee is already met (missing days
+              can only ADD km, so "acceptable once filled" would be false), while
+              the outing is in transit (gaps are expected, the red banner already
+              blocks everything) and on a reklamacja (the board plays no part). */}
+          {showBoardGapNotice && claimBoard && (
+            <BoardGapNotice board={claimBoard} dateEnd={claim.dateEnd} />
+          )}
           {targets.length === 0 ? (
             <p className="rounded-md bg-input/40 p-3 text-sm text-text-sub">
               {/* A decided reklamacja is terminal too — say WHICH terminal
@@ -1012,19 +1188,14 @@ function ModalBody({
                 tEdit={tEdit}
                 tStatus={tStatus}
               />
-              {/* Gate hint under the disabled decyzja select. The verifier-
-                  checkpoint gate takes precedence (it's the first thing to
-                  clear); once verified, the Maksim over-threshold gate is what
-                  keeps the decision blocked. */}
-              {verifyGated ? (
+              {/* Gate hint under the decyzja select — one line, priority in
+                  `decisionHint`. The verifier-checkpoint gate precedes the
+                  Maksim gate (it's the first thing to clear). */}
+              {decisionHint && (
                 <p className="text-xs text-text-sub" role="status">
-                  {gateHint}
+                  {decisionHint}
                 </p>
-              ) : maksimGateActive ? (
-                <p className="text-xs text-text-sub" role="status">
-                  {tMaksim('decisionBlockedHint')}
-                </p>
-              ) : null}
+              )}
               {/* Acceptance gate hint — shown while recalc reports the
                   guarantee was met (no payout due ⇒ `ZAAKCEPTOWANO` removed).
                   Suppressed at REKLAMACJA: the gate does not apply there, so the
@@ -1231,8 +1402,8 @@ interface FactPairsProps {
   tLocked: ReturnType<typeof useTranslations<'employee.claims.modal.locked'>>;
   /** Show the board-sum hint under the km input (editable fact block only). */
   showBoardSum: boolean;
-  /** Server-computed Σ VehicleDailyKm over the current dates — `undefined`
-   *  until the board-sum preview query resolves. */
+  /** Live board sum (`boardSumKm` of the main preview) over the dates being
+   *  edited — `undefined` hides the hint (no preview yet / no board figure). */
   boardSum: number | undefined;
 }
 
@@ -1467,10 +1638,10 @@ function FactPairs({
             }
             error={errMsg('mileage')}
             extra={
-              // Board-sum hint — Σ VehicleDailyKm from the server (board sum) over
-              // the current dates. Lets the pracownik pull in daily-km rows the
-              // weryfikator added after submit. Only in NA_WERYFIKACJI edit, and
-              // only once the query has data.
+              // Board-sum hint — the live board sum (`boardSumKm` of the main
+              // preview) over the dates being edited. Lets the pracownik pull in
+              // daily-km rows the weryfikator added after submit. Only where the
+              // km input is editable, and only when the server has a figure.
               showBoardSum && boardSum !== undefined ? (
                 <div className="flex flex-wrap items-center gap-2 text-xs text-text-sub">
                   <span className="tabular-nums">
@@ -1736,12 +1907,71 @@ function HoursAdjustedFact({
   );
 }
 
+// ── ② Niedojazd readout (§16.5.10) ─────────────────────────────────
+//
+// Two lines under the dopłata field: a plain sentence («pojazd przejechał o
+// 2 180 km mniej, niż gwarantowano») + the formula to check it. The sign is
+// always carried by words («mniej» / «więcej»), never by a minus. No semantic
+// colour and no icon (an amount due is not "bad", its absence not "good"), no
+// aria-live (it re-renders on every keystroke; <RecalcBadge> already announces
+// recalculation). Carrier screens never render this.
+
+function ShortfallReadout({ view }: { view: ShortfallView }) {
+  const t = useTranslations('employee.claims.modal.shortfall');
+
+  switch (view.kind) {
+    case 'none':
+      return null;
+    case 'shortfall':
+      return (
+        <div className="space-y-0.5">
+          <p className="text-sm text-text">
+            {t.rich('line', {
+              scope: view.scope,
+              km: view.km,
+              b: (chunks) => (
+                <strong className="font-semibold tabular-nums">{chunks}</strong>
+              ),
+            })}
+          </p>
+          <p className="text-xs tabular-nums text-text-sub">
+            {t('formula', {
+              scope: view.scope,
+              guaranteed: view.guaranteed,
+              driven: view.driven,
+              km: view.km,
+              rate: view.rate,
+            })}
+          </p>
+        </div>
+      );
+    case 'metEqual':
+      return (
+        <p className="text-sm text-text-sub">
+          {t('metEqual', { scope: view.scope, guaranteed: view.guaranteed })}
+        </p>
+      );
+    case 'metOver':
+      return (
+        <p className="text-sm text-text-sub">
+          {t('metOver', {
+            scope: view.scope,
+            driven: view.driven,
+            guaranteed: view.guaranteed,
+            km: view.km,
+          })}
+        </p>
+      );
+  }
+}
+
 // ── ② Dopłata block ─────────────────────────────────────────────────
 
 function DoplataBlock({
   claim,
   recalcState,
   liveDoplata,
+  shortfall,
   prog,
   liveDrivenDays,
   showExceedsHint,
@@ -1751,6 +1981,8 @@ function DoplataBlock({
   claim: ClaimDto;
   recalcState: 'idle' | 'loading' | 'success' | 'error';
   liveDoplata: number;
+  /** Niedojazd readout (§16.5.10) — from the SAME source as `liveDoplata`. */
+  shortfall: ShortfallView;
   /** Live authorization threshold (EUR) for this claim's driven-days band. */
   prog: number;
   /** Driven working days the threshold band is derived from (for the hint). */
@@ -1819,6 +2051,9 @@ function DoplataBlock({
           className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-text-sub/70"
         />
       </div>
+      {/* Niedojazd (§16.5.10) — WHY the amount is what it is, directly under
+          it and above «wyliczana automatycznie»: amount → reason → automatic. */}
+      <ShortfallReadout view={shortfall} />
       <FormDescription className="flex items-center gap-1">
         <Lock aria-hidden className="size-3 shrink-0" />
         {tEdit('amountApprovedAuto')}
@@ -1853,11 +2088,14 @@ function DoplataBlock({
         </p>
       )}
 
+      {/* The claim's SAVED pair — breakdown and board settlement from the same
+          DTO, for every role and mode (§16.5.5). `boardSettlement` is `null` for
+          an all-active period, so that table is exactly the pre-feature one. */}
       {claim.breakdown && (
         <div className="pt-1">
           <BreakdownTable
             breakdown={claim.breakdown}
-            mileage={claim.mileage}
+            boardSettlement={claim.boardSettlement ?? null}
           />
         </div>
       )}
@@ -1913,6 +2151,98 @@ function InTransitGateBlock() {
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-bold text-danger">{t('bannerTitle')}</h3>
           <p className="mt-1 text-sm text-text">{t('bannerBody')}</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ── ③a «Brak danych» on the km board (mixed period, §16.5.6) ────────
+//
+// Warning, not danger: the action needed is someone else's (the weryfikator
+// fills the board), nothing is broken, and the claim can still be rejected. It
+// lives INSIDE the decision panel, directly above the select that no longer
+// offers `ZAAKCEPTOWANO` — it removes one option, it does not block the whole
+// decision like the Maksim / in-transit blocks do. Surface recipe of
+// `progExceededHint` (0 new tokens). Dates come from the TOP-LEVEL
+// `missingDates` (guaranteed months only), sorted defensively, formatted as
+// LOCAL calendar days with the year.
+
+function BoardGapNotice({
+  board,
+  dateEnd,
+}: {
+  board: ClaimBoardSettlement;
+  /** The claim's (saved) period end — the return-day hint keys on it. */
+  dateEnd: string;
+}) {
+  const t = useTranslations('employee.claims.modal.boardGate');
+  const locale = useLocale();
+  const titleId = useId();
+  const listId = useId();
+  const [expanded, setExpanded] = useState(false);
+
+  const dates = sortMissingDates(board.missingDates ?? []);
+  const shown = visibleMissingDates(dates, expanded);
+  const collapsible = isMissingDatesCollapsible(dates.length);
+
+  return (
+    <section
+      role="status"
+      aria-labelledby={titleId}
+      className="rounded-md border border-warning/40 bg-warning-bg px-3 py-3 dark:bg-warning/15"
+    >
+      <div className="flex items-start gap-2">
+        <CalendarX
+          size={16}
+          aria-hidden
+          className="mt-0.5 shrink-0 text-warning-dark dark:text-warning"
+        />
+        <div className="min-w-0 flex-1">
+          {/* The count is always the full one, even while collapsed. `=0`
+              (incomplete but no dates — defensive) reads «Brak danych na
+              tablicy km». */}
+          <h4
+            id={titleId}
+            className="text-sm font-bold text-warning-dark dark:text-warning"
+          >
+            {t('title', { count: dates.length })}
+          </h4>
+          <p className="mt-1 text-sm text-text">{t('body')}</p>
+          {dates.length > 0 && (
+            <>
+              <ul
+                id={listId}
+                aria-label={t('datesLabel')}
+                className="mt-2 flex flex-wrap gap-1.5"
+              >
+                {shown.map((iso) => (
+                  <li
+                    key={iso}
+                    className="rounded border border-warning/40 bg-card px-1.5 py-0.5 text-xs tabular-nums text-text"
+                  >
+                    {formatBoardDate(iso, locale)}
+                  </li>
+                ))}
+              </ul>
+              {collapsible && (
+                <button
+                  type="button"
+                  aria-expanded={expanded}
+                  aria-controls={listId}
+                  onClick={() => setExpanded((v) => !v)}
+                  className="mt-1.5 py-1 text-xs font-semibold text-text underline-offset-2 hover:underline"
+                >
+                  {expanded
+                    ? t('showLess')
+                    : t('showAll', { count: dates.length })}
+                </button>
+              )}
+            </>
+          )}
+          {missesLastDay(dates, dateEnd) && (
+            <p className="mt-2 text-xs text-text-sub">{t('returnDayHint')}</p>
+          )}
         </div>
       </div>
     </section>

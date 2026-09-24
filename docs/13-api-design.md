@@ -368,18 +368,18 @@ cursor-пагинация без изменений), остальные чет�
 | Method + Path | GAS | Роль |
 |---|---|---|
 | GET `/claims` | `getAllClaims` (admin/pracownik — все) / `getAllClaims` с opiekun-scope (свои перевозчики) / `getClaimsForCarrier` (carrier — свои) — единый endpoint, фильтрация по роли в сервисе | admin / pracownik / opiekun(scope) / przewoznik(scope) |
-| GET `/claims/:nrZgl` | `buildClaimObj` | admin / pracownik / opiekun(own carrier) / przewoznik(own) |
+| GET `/claims/:nrZgl` | `buildClaimObj`. Для admin / pracownik / opiekun ответ несёт **живой** `boardSettlement` смешанного периода (см. «Settlement смешанного периода» в «Ключевых DTO»); для przewoźnika, в списках и для полностью включённого периода — `null` | admin / pracownik / opiekun(own carrier) / przewoznik(own) |
 | GET `/claims/dashboard` | `getDashboardStats` | admin / pracownik (полный) / opiekun (scope: свои перевозчики) |
 | POST `/claims` | `submitNewClaim` | przewoznik |
-| PATCH `/claims/:nrZgl/verification` | (новое) **«Zapisz weryfikację»** — pracownik сохраняет свои корректировки ДО любого решения. Body — `VerifyClaimSchema` (только correction-поля: `dateStart`/`dateEnd`/`timeFrom`/`timeTo`/`mileage`/`hoursAdjusted`, все optional; **пустое тело легально** = «подтверждено как есть»). Ставит `verifiedAt`/`verifiedById`, при наличии корректировок пере-считывает km-calc (тот же движок, что PATCH) и перезаписывает `paymentEur` (`origPaymentEur` при этом НЕ трогается — он и есть запрошенная сумма). **Авто-переход статуса по порогу** (единственный механизм авторизации — ручного флоу нет): если итоговая dopłata СТРОГО выше `getAuthThreshold(drivenDays)`, wniosek авто-переводится `NA_WERYFIKACJI → OCZEKUJE_NA_AUTORYZACJE` (и система шлёт Maksimu письмо-подтверждение, amount-aware dedup); admin re-verify в `OCZEKUJE_NA_AUTORYZACJE`, опустивший сумму под порог, авто-откатывает статус `OCZEKUJE_NA_AUTORYZACJE → NA_WERYFIKACJI` и полностью чистит гейт. `decidedById` при авто-переходе НЕ трогается (это верификация, не решение). Повторяемо (re-verify перезаписывает; идемпотентный re-save над порогом в `OCZEKUJE` статус не трогает, re-notify только по amount-aware dedup). Авто-пересчёт выезда (`w_trasie→zjechal`) сбрасывает `verifiedAt`/`verifiedById` в NULL (данные изменились → нужна ре-верификация). 422 если статус ∉ {`NA_WERYFIKACJI`, `OCZEKUJE_NA_AUTORYZACJE`}; статус `OCZEKUJE_NA_AUTORYZACJE` доступен **только `admin`** (для `pracownik` — 422 `{code:'CLAIM_VERIFY_ADMIN_ONLY'}`, отличимый от статусного отказа). Audit `claim.verify`. | **admin / pracownik** |
-| PATCH `/claims/:nrZgl` | `updateClaimFull` — корректировки + decision (status, korekta godzin, nrZlecenia) + разрешение рекламации. Body — discriminated union `UpdateClaimSchema` в `@magguarantee/shared/schemas/claims.ts` (`targetStatus` ∈ {`ZAAKCEPTOWANO`, `ODRZUCONO`, `REKLAMACJA_ZAAKCEPTOWANO`, `REKLAMACJA_ODRZUCONO`}; синтетические литералы `REKLAMACJA_*` service резолвит в **`statusBeforeReklamacja`** (откат статуса при ОБОИХ исходах), а исход пишет в `reklamacjaResolution` — см. «Update claim (verification)» ниже; **422 `REKLAMACJA_NOT_PENDING`**, если статус ≠ `REKLAMACJA`). **`OCZEKUJE_NA_AUTORYZACJE` больше НЕ является PATCH-таргетом** — в этот статус попадают только автоматически на верификации. State-machine — `apps/api/src/modules/claims/claim-state-machine.ts`, 10 легальных рёбер (рёбра в/из `OCZEKUJE_NA_AUTORYZACJE` — автоматические, driven by verify; PATCH их не принимает), 422 на любой illegal transition. **Gate CLAIM_NOT_VERIFIED:** решение (akceptacja/odmowa) ИЗ `NA_WERYFIKACJI` блокируется 422 `{code:'CLAIM_NOT_VERIFIED'}`, пока wniosek не верифицирован (`verifiedAt` не проставлен через `PATCH /verification`). Переходы ИЗ `OCZEKUJE_NA_AUTORYZACJE` и `REKLAMACJA` — НЕ gated (wniosek уже был верифицирован). **Gate CLAIM_AUTHORIZATION_REQUIRED:** решение ИЗ `NA_WERYFIKACJI` ИЛИ `OCZEKUJE_NA_AUTORYZACJE` над порогом блокируется 422 `{code:'CLAIM_AUTHORIZATION_REQUIRED'}`, пока не загружен скриншот подтверждения Maksima (`POST /claims/:nrZgl/authorization-confirmation`, `category=AUTORYZACJA_MAKSIMA`, снимающий `maksimGateClearedAt`); блокирует и accept, и reject; reklamacja-пути не gated. | **admin / pracownik** |
+| PATCH `/claims/:nrZgl/verification` | (новое) **«Zapisz weryfikację»** — pracownik сохраняет свои корректировки ДО любого решения. Body — `VerifyClaimSchema` (только correction-поля: `dateStart`/`dateEnd`/`timeFrom`/`timeTo`/`mileage`/`hoursAdjusted`, все optional; **пустое тело легально** = «подтверждено как есть»). Ставит `verifiedAt`/`verifiedById`, при наличии корректировок пере-считывает km-calc (тот же движок, что PATCH) и перезаписывает `paymentEur` (`origPaymentEur` при этом НЕ трогается — он и есть запрошенная сумма). **Смешанный период** (есть месяц с `kmPerDay = 0` — выплата по km-доске, [20 §0⁵](20-phase-7-eksport-weryfikator.md)): пересчёт идёт **всегда**, даже с пустым телом (доска могла дописаться), с сохранёнными входами, включая применённый `hoursAdjustedValue`. Если у активных месяцев на доске есть незаписанные дни — `verifiedAt` ставится, корректировки и числа сохраняются (значит `ODRZUCONO` доступен), но **гейт Maksima и авто-переход статуса пропускаются в обе стороны**: статус и gate-поля не меняются, письмо Maksimu не уходит; принятие заблокировано 422 `CLAIM_BOARD_INCOMPLETE` до дозаполнения доски и повторной верификации. **Авто-переход статуса по порогу** (единственный механизм авторизации — ручного флоу нет): если итоговая dopłata СТРОГО выше `getAuthThreshold(drivenDays)`, wniosek авто-переводится `NA_WERYFIKACJI → OCZEKUJE_NA_AUTORYZACJE` (и система шлёт Maksimu письмо-подтверждение, amount-aware dedup); admin re-verify в `OCZEKUJE_NA_AUTORYZACJE`, опустивший сумму под порог, авто-откатывает статус `OCZEKUJE_NA_AUTORYZACJE → NA_WERYFIKACJI` и полностью чистит гейт. `decidedById` при авто-переходе НЕ трогается (это верификация, не решение). Повторяемо (re-verify перезаписывает; идемпотентный re-save над порогом в `OCZEKUJE` статус не трогает, re-notify только по amount-aware dedup). Авто-пересчёт выезда (`w_trasie→zjechal`) сбрасывает `verifiedAt`/`verifiedById` в NULL (данные изменились → нужна ре-верификация). 422 если статус ∉ {`NA_WERYFIKACJI`, `OCZEKUJE_NA_AUTORYZACJE`}; статус `OCZEKUJE_NA_AUTORYZACJE` доступен **только `admin`** (для `pracownik` — 422 `{code:'CLAIM_VERIFY_ADMIN_ONLY'}`, отличимый от статусного отказа). Audit `claim.verify`. | **admin / pracownik** |
+| PATCH `/claims/:nrZgl` | `updateClaimFull` — корректировки + decision (status, korekta godzin, nrZlecenia) + разрешение рекламации. Body — discriminated union `UpdateClaimSchema` в `@magguarantee/shared/schemas/claims.ts` (`targetStatus` ∈ {`ZAAKCEPTOWANO`, `ODRZUCONO`, `REKLAMACJA_ZAAKCEPTOWANO`, `REKLAMACJA_ODRZUCONO`}; синтетические литералы `REKLAMACJA_*` service резолвит в **`statusBeforeReklamacja`** (откат статуса при ОБОИХ исходах), а исход пишет в `reklamacjaResolution` — см. «Update claim (verification)» ниже; **422 `REKLAMACJA_NOT_PENDING`**, если статус ≠ `REKLAMACJA`). **`OCZEKUJE_NA_AUTORYZACJE` больше НЕ является PATCH-таргетом** — в этот статус попадают только автоматически на верификации. State-machine — `apps/api/src/modules/claims/claim-state-machine.ts`, 10 легальных рёбер (рёбра в/из `OCZEKUJE_NA_AUTORYZACJE` — автоматические, driven by verify; PATCH их не принимает), 422 на любой illegal transition. **Gate CLAIM_NOT_VERIFIED:** решение (akceptacja/odmowa) ИЗ `NA_WERYFIKACJI` блокируется 422 `{code:'CLAIM_NOT_VERIFIED'}`, пока wniosek не верифицирован (`verifiedAt` не проставлен через `PATCH /verification`). Переходы ИЗ `OCZEKUJE_NA_AUTORYZACJE` и `REKLAMACJA` — НЕ gated (wniosek уже был верифицирован). **Gate CLAIM_AUTHORIZATION_REQUIRED:** решение ИЗ `NA_WERYFIKACJI` ИЛИ `OCZEKUJE_NA_AUTORYZACJE` над порогом блокируется 422 `{code:'CLAIM_AUTHORIZATION_REQUIRED'}`, пока не загружен скриншот подтверждения Maksima (`POST /claims/:nrZgl/authorization-confirmation`, `category=AUTORYZACJA_MAKSIMA`, снимающий `maksimGateClearedAt`); блокирует и accept, и reject; reklamacja-пути не gated. **Board gates (смешанный период, только `ZAAKCEPTOWANO`, [20 §0⁵](20-phase-7-eksport-weryfikator.md)):** принятие всегда пересчитывает выплату по **живой** km-доске (с сохранёнными входами и применённым `hoursAdjustedValue`) и блокируется 422 `{code:'CLAIM_BOARD_INCOMPLETE', missingDates}`, пока у активных месяцев есть незаписанные дни, и 422 `{code:'CLAIM_BOARD_CHANGED'}`, если живая dopłata отличается от сохранённой при верификации либо лежит над порогом Maksima без гейта, взведённого и снятого ровно на эту сумму (лечится повторным «Zapisz weryfikację»). Порядок: после пересчёта, до compensation-due guard. `ODRZUCONO` и рекламация этими гейтами не блокируются. | **admin / pracownik** |
 | POST `/claims/:nrZgl/reklamacja` | `submitReklamacja` | przewoznik (own claim) |
 | GET `/claims/:nrZgl/recalc-limits/preview` | **NEW (2026-09-20)** — **dry run** пересчёта по актуальным лимитам для диалога подтверждения ([14-design-system.md](14-design-system.md) §16.6). Чистое чтение: считает тем же кодом, что POST ниже (`ClaimsService._computeLimitsRefresh`), но **ничего не пишет и аудит не пишет** (`@Audit` нет, транзакции нет). Тот же статус-гейт, что у POST — 422 `{code:'CLAIM_LIMITS_REFRESH_BLOCKED'}` приходит **до** открытия диалога. Ответ — `RecalcLimitsPreviewDto`: `{ changed: boolean, current: {...}, next: {...} }`, где обе половины — `{ kmGuaranteed, kmDifference, paymentEur, ratePerKmEffective, drivenDays }` (`RecalcLimitsPreviewSchema` / `RecalcLimitsFiguresSchema` в `packages/shared/src/schemas/claims.ts`). **Не** `ClaimDto` — записи не было, и отдавать claim-образный объект, которого нет в БД, вводило бы клиента в заблуждение. Нужен потому, что `POST /claims/:nrZgl/preview` намеренно заморожен на снимке лимитов самого wniosku, а `GET /limits` — admin-only (`pracownik` живые лимиты прочитать не может) | **admin / pracownik** |
 | POST `/claims/:nrZgl/recalc-limits` | **NEW (2026-09-20)** — пересчитать wniosek по **актуальным** `monthly_limits`, игнорируя снимок лимитов в `breakdown`. Тела нет. Перезаписывает только `kmGuaranteed/kmDifference/paymentEur/ratePerKmEffective/breakdown/drivenDays/kmPerDay`; период, пробег, статус и `orig*` не трогает; **писем не шлёт**. Если суммы сдвинулись — сбрасывает чекпоинт верификации и гейт Maksima в связке (`verifiedAt`/`maksimGate*` → NULL), чтобы выросшая доплата не проскочила мимо авторизации; идемпотентный вызов (цифры не изменились) не трогает ничего. Гейт: **только `NA_WERYFIKACJI`**, иначе 422 `{code:'CLAIM_LIMITS_REFRESH_BLOCKED'}` (сумма заморожена под авторизацию / решение принято — сначала верни wniosek на верификацию). Ответ — обновлённый `ClaimDto`. Diff «было → станет» веб получает ДО записи из `GET /claims/:nrZgl/recalc-limits/preview` (строка выше) — подтверждать необратимую правку денег постфактум нельзя. Audit `claim.limitsRefresh` (before/after) | **admin / pracownik** (пересчёт сумм — часть «Верифицировать заявление», см. [03-roles.md](03-roles.md); `weryfikator` к `/claims` доступа не имеет) |
 | ↳ **Body** (`SubmitReklamacjaSchema`, `.strict()`) | `{ tresc: string(1..4000), kwotaReklamacji: number > 0 }` — **только** сумма + обоснование. Данные заявления рекламацией **не правятся** (correction-полей нет). | |
 | ↳ **Гейты** (порядок, первый сработавший выигрывает) | 404 (нет wniosku) → 403 (чужой wniosek) → **409 `REKLAMACJA_ALREADY_SUBMITTED`** (одна рекламация на wniosek, флаг `reklamacjaSubmitted` не сбрасывается; сюда же попадает попытка при ещё не рассмотренной рекламации) → **422 `REKLAMACJA_CLAIM_NOT_DECIDED`** (статус ∉ {`ZAAKCEPTOWANO`,`ODRZUCONO`}) → **422 `REKLAMACJA_WINDOW_EXPIRED`** (>48ч от `statusChangedAt`; `extensions.deadlineAt: ISO`; при `statusChangedAt = null` правило не применяется) → **422 `REKLAMACJA_NO_DELTA`** (`maxAmount ≤ 0`) → **422 `REKLAMACJA_AMOUNT_EXCEEDS_CAP`** (`kwotaReklamacji > maxAmount`, СТРОГО, точность до цента; `extensions.maxAmount: number`). Гейты 3-6 считает `getReklamacjaEligibility()` из `@magguarantee/shared` (`domain/reklamacja-rules.ts`) — **единственное** место, где живёт формула потолка (web-форма зовёт ту же функцию). | |
 | ↳ **Потолок** | `maxAmount = (origPaymentEur ?? paymentEur) − (status==='ZAAKCEPTOWANO' ? (amountApproved ?? 0) : 0)`. Легаси-допуск `+1 €` **убран**. Запись — атомарно в ambient `@Audit`-транзакции (`updateWithin`), ставит `reklamacjaSubmittedAt` = `statusChangedAt` (один инстанс `Date`), `statusBeforeReklamacja = status`, `status = REKLAMACJA`. Письма: `reklamacja-internal-submitted` (все активные `admin`+`pracownik`) + `reklamacja-carrier-submitted` (перевозчику). | |
-| POST `/claims/:nrZgl/preview` | (новое) — server-side расчёт live preview, заменяет client-side `carrierPreviewCalc` | любой залогиненный (помогает заполнить форму) |
+| POST `/claims/:nrZgl/preview` | (новое) — server-side расчёт live preview, заменяет client-side `carrierPreviewCalc`. Для pracownik / admin ответ несёт `boardSettlement` (живая помесячная km-доска смешанного периода, `null` для полностью включённого) и `boardSumKm` (Σ drove-км доски за превьюируемый период из тела запроса; `null` без машины / дат / доски); у przewoźnika обоих ключей нет | любой залогиненный (помогает заполнить форму) |
 | GET `/claims/raw?nrZgl=...` | `getRawClaims` (admin diagnostics) | admin |
 
 ### Delegations (выезды) — `/api/v1/delegations`
@@ -641,6 +641,15 @@ type UserDto = {
 // деньги платятся по пробегу SpedTrans, а данные weryfikatora приходят из
 // другой системы и никогда не совпадают. Weryfikator не тронут: его цифры
 // стали ЭТАЛОНОМ для сверки, а не источником.
+// 2026-09-24 (docs/20 §0⁵, реализовано): «никогда не совпадают» больше не
+// верно — weryfikator берёт км из SpedTrans. Контракт запроса не меняется;
+// период с выключенным месяцем (`kmPerDay = 0`) оплачивается по km-доске
+// машины выезда за дни активных месяцев (`breakdown.mileageSource: 'board'`),
+// заявленный `mileage` на выплату там не влияет. Незаписанный день подачу не
+// блокирует (считается 0 км) — блокирует принятие (`CLAIM_BOARD_INCOMPLETE`).
+// Нарушение «нет недопробега» для такого периода не цитирует ни цифру
+// перевозчика, ни доску: «W miesiącach objętych gwarancją przebieg jest równy
+// lub wyższy niż km gwarantowane (N). Brak podstaw do dopłaty.»
 type SubmitClaimRequest = {
   delegationId: string;    // chosen outing (MUST be `zjechal` — see status gate)
   dateStart: string;       // 'YYYY-MM-DD' — floor: >= day(delegation.departureAt)
@@ -736,6 +745,14 @@ type ClaimDto = {
   origHoursAdjusted: number | null;
   hoursAdjustedValue: number | null;
   breakdown: KmCalcBreakdown;
+  // Живой settlement смешанного периода (см. «Settlement смешанного периода»
+  // ниже). Заполняется ТОЛЬКО в GET /claims/:nrZgl для admin / pracownik /
+  // opiekun (opiekun не может звать preview), считается при чтении из
+  // сохранённых периода, часов, `hoursAdjustedValue` и снимка лимитов + доски
+  // на сейчас. `null` у przewoźnika, во всех остальных ответах с ClaimDto
+  // (submit / PATCH / verification / recalc-limits) и для полностью
+  // включённого периода.
+  boardSettlement: ClaimBoardSettlement | null;
 };
 
 // POST /claims/preview (new-claim form) and POST /claims/:nrZgl/preview
@@ -767,9 +784,11 @@ type PreviewRequest = {
   mileage?: number;        // VERIFIER inspection override only (see note above)
 };
 type PreviewResponse = {
-  mileage: number;            // что было учтено в расчёте: заявленный перевозчиком
-                              // пробег (new-claim), правка верификатора или
-                              // сохранённый пробег заявления
+  mileage: number;            // ЗАЯВЛЕННЫЙ пробег, с которым считали: ввод
+                              // перевозчика (new-claim), правка верификатора или
+                              // сохранённый пробег заявления. Для смешанного
+                              // периода выплата идёт по доске — см.
+                              // breakdown.mileageSource / mileageEffective
   kmGuaranteed: number;
   kmDifference: number;
   paymentEur: number;
@@ -786,6 +805,19 @@ type PreviewResponse = {
     trailerId: string; trailerPlate: string | null;
     driverId: string; driverName: string | null;
   };
+  // ТОЛЬКО POST /claims/:nrZgl/preview для pracownik / admin: живая помесячная
+  // km-доска смешанного периода по превьюируемым входам; `null` для полностью
+  // включённого периода. У przewoźnika (new-claim и инспекция рекламации)
+  // ключа нет.
+  boardSettlement?: ClaimBoardSettlement | null;
+  // ТОЛЬКО POST /claims/:nrZgl/preview для pracownik / admin (тот же гейт, что
+  // у boardSettlement): Σ VehicleDailyKm.km (state = drove) машины wniosku за
+  // ПРЕВЬЮИРУЕМЫЙ период — даты из тела запроса (включительно, с правками
+  // верификатора), а не сохранённые. Источник подсказки «Wg tablicy
+  // przebiegów: N km» + «Zastosuj» в ClaimModal; `mileage` выше остаётся
+  // ЗАЯВЛЕННОЙ цифрой. `null` — нет машины, дата отсутствует / невалидна или
+  // доска недоступна; реальная сумма 0 — это 0. У przewoźnika ключа нет.
+  boardSumKm?: number | null;
 };
 
 // Источник истины формы `KmCalcBreakdown` — `KmCalcBreakdownSchema` в
@@ -805,24 +837,56 @@ type PreviewResponse = {
 //                             // бэкфилятся в `totalDays` (там всё было включено).
 //   daysTotal: number,        // NEW — Σ [workingDays + saturdaysCounted] ≡ totalDays;
 //                             // легаси бэкфилятся так же.
-//   mileageEffective?: number // NEW — доля пробега, зачтённая против гарантии
-//                             // (= mileage, когда daysActive === daysTotal).
+//   mileageEffective?: number // км, зачтённые против гарантии при последнем
+//                             // расчёте: `mileage` (source 'declared') или сумма
+//                             // доски по зачётным дням (source 'board').
 //                             // НЕ бэкфилится: `undefined` у легаси-строк ⇒ веб
 //                             // показывает `claim.mileage`.
+//   mileageSource?: 'declared' | 'board'  // NEW 2026-09-24 — откуда
+//                             // mileageEffective. Пишется в breakdown, НЕ
+//                             // бэкфилится: отсутствует ⇒ 'declared'.
 // }
 // Поле `rawTotalDays` нужно UI-компоненту `<HoursReadout>` (см.
 // docs/14-design-system.md §"Phase 3.1") чтобы показать "240,00 h surowych /
 // 215,50 h zaliczonych".
 //
-// Тройка `daysActive`/`daysTotal`/`mileageEffective` — результат settlement-
-// прохода (`packages/shared/src/domain/claim-settlement.ts`): при выключенной
-// гарантии на части периода против гарантии зачитывается только доля пробега
-// `daysActive / daysTotal` (формула — в docs/01-overview.md §«Расчёт доплаты»).
-// `daysActive === daysTotal` ⇒ ничего не выключено и `mileageEffective ===
-// claim.mileage`; на этом же условии веб решает, рисовать ли
-// `<GuaranteeGapNotice>` (docs/14 §16.5.3). Признак выключенного месяца
-// выводится из уже существующих полей строки (`kmPerDay === 0 &&
-// kmPerSaturday === 0`) — отдельного per-month поля нет.
+// `daysActive`/`daysTotal`/`mileageEffective`/`mileageSource` — результат
+// settlement-прохода (`packages/shared/src/domain/claim-settlement.ts`,
+// формула — docs/01-overview.md §«Расчёт доплаты»). Все месяцы периода с
+// `kmPerDay > 0` ⇒ `mileageSource: 'declared'`, `mileageEffective ===
+// claim.mileage`, числа побитово как до фичи. Есть месяц с `kmPerDay = 0` ⇒
+// `mileageSource: 'board'`: против гарантии зачитывается Σ `VehicleDailyKm.km`
+// (state = drove) по зачётным дням активных месяцев. `daysActive/daysTotal`
+// сохраняют прежний смысл (веб по ним решает, рисовать ли
+// `<GuaranteeGapNotice>`, docs/14 §16.5.3). Помесячная деталь доски в
+// breakdown НЕ хранится — доска живая, она отдаётся отдельно как
+// `boardSettlement`.
+//
+// ── Settlement смешанного периода (ClaimBoardSettlement) ──
+// Источник — `ClaimBoardSettlementSchema` в `packages/shared/src/schemas/claims.ts`.
+// type ClaimBoardSettlement = {
+//   mileageEffective: number,  // Σ доски по зачётным дням (сейчас)
+//   kmDifference: number,      // kmGuaranteed − mileageEffective (может быть < 0)
+//   paymentEur: number,        // сколько wniosek стоил бы прямо сейчас
+//   months: {
+//     yearMonth: string,       // 'YYYY-MM', по возрастанию, каждый месяц периода
+//     mode: 'active' | 'saturdaysOnly' | 'off',
+//     km: number,              // Σ drove-км по зачётным дням месяца (0 для 'off')
+//     daysFilled: number,      // обязательные дни, у которых есть строка (drove ИЛИ idle)
+//     daysRequired: number,    // active: каждый календарный день месяц∩период;
+//                              // saturdaysOnly: зачётные субботы; off: 0
+//     missingDates: string[],  // обязательные дни без строки, ISO, по возрастанию
+//   }[],
+//   missingDates: string[],    // все месяцы подряд
+//   complete: boolean,         // missingDates.length === 0; false ⇒ 422
+//                              // CLAIM_BOARD_INCOMPLETE на ZAAKCEPTOWANO
+// };
+// Какие дни считаются: 'active' — любой календарный день месяца в пределах
+// периода (воскресенья, праздники EU-бана, незачётные субботы, первый и
+// последний день целиком — timeFrom/timeTo укорачивают гарантию, а не км);
+// 'saturdaysOnly' (kmPerDay = 0, kmPerSaturday > 0) — только зачётные субботы;
+// 'off' (0 / 0) — ничего. `idle` — заполненный день с 0 км; `drove` с
+// `km = null` — 0 км. Незаписанный день никогда не угадывается.
 //
 // Форма одной месячной строки `MonthBreakdown` (источник — `MonthBreakdownSchema`
 // в `packages/shared/src/schemas/claims.ts`):
@@ -882,8 +946,10 @@ type UpdateClaimRequest =
 | Код | Когда |
 |---|---|
 | `REKLAMACJA_NOT_PENDING` | `targetStatus` = `REKLAMACJA_*`, но `existing.status !== 'REKLAMACJA'` (нет рекламации на рассмотрении). Проверяется **до** state-machine: `NA_WERYFIKACJI → ZAAKCEPTOWANO` — легальное ребро, и без этого гейта синтетический accept прошёл бы как свежий accept, минуя пересчёт и гейты. |
+| `CLAIM_BOARD_INCOMPLETE` | (2026-09-24, [20 §0⁵](20-phase-7-eksport-weryfikator.md)) `targetStatus = 'ZAAKCEPTOWANO'` на смешанном периоде, а у активных месяцев на km-доске есть дни без строки. `extensions: { code, missingDates: string[] }` (ISO, по возрастанию). Сообщение: «Nie można zaakceptować wniosku — brak przebiegu na tablicy km za N dzień/dni w miesiącach z gwarancją: dd.MM.yyyy, …. Poczekaj, aż weryfikator uzupełni dane.» |
+| `CLAIM_BOARD_CHANGED` | (2026-09-24) `targetStatus = 'ZAAKCEPTOWANO'` на смешанном периоде, доска полная, но живая пересчитанная dopłata ≠ `paymentEur`, сохранённой при верификации (причина — изменения на km-доске **или** несохранённые корректировки, отправленные вместе с решением), **или** она над порогом Maksima, а гейт не взведён и не снят ровно на эту сумму (напр. верификацию сохраняли, пока были дыры, — гейт тогда пропускается). `extensions: { code }`. Сообщение: «Kwota dopłaty różni się od zapisanej przy weryfikacji — zmieniła się tablica km albo dane wniosku. Zapisz weryfikację ponownie, a następnie podejmij decyzję.» |
 
-**Область действия гейтов решения.** `CLAIM_NOT_VERIFIED`, `CLAIM_AUTHORIZATION_REQUIRED` (порог Maksima) и compensation-due guard («нет недопробега — нельзя акцептовать») применяются **только к свежим решениям** (`ZAAKCEPTOWANO`/`ODRZUCONO`), но **не** к разрешению рекламации: уznana рекламация платит фиксированную `reklamacjaAmount` (ограниченную при подаче), не зависящую от km-calc, — поэтому wniosek, отклонённый именно из-за `kmDifference ≤ 0`, может законно получить уznaną рекламацию. km-calc (`_recalcClaim`) на reklamacja-ветках **не запускается** — суммы заморожены.
+**Область действия гейтов решения.** `CLAIM_NOT_VERIFIED`, `CLAIM_AUTHORIZATION_REQUIRED` (порог Maksima) и compensation-due guard («нет недопробега — нельзя акцептовать») применяются **только к свежим решениям** (`ZAAKCEPTOWANO`/`ODRZUCONO`), но **не** к разрешению рекламации: уznana рекламация платит фиксированную `reklamacjaAmount` (ограниченную при подаче), не зависящую от km-calc, — поэтому wniosek, отклонённый именно из-за `kmDifference ≤ 0`, может законно получить уznaną рекламацию. km-calc (`_recalcClaim`) на reklamacja-ветках **не запускается** — суммы заморожены. Board gates (`CLAIM_BOARD_INCOMPLETE` / `CLAIM_BOARD_CHANGED`) и принудительный пересчёт по доске действуют **только** на `ZAAKCEPTOWANO` (и на «Zapisz weryfikację»); `ODRZUCONO` и рекламация их не видят.
 
 ## Версионирование
 

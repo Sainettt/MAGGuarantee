@@ -1,50 +1,53 @@
-// Claim settlement — turns a km-calc result + the declared mileage into the
-// numbers a wniosek is actually paid on (`kmDifference`, `paymentEur`).
+// Claim settlement — turns a km-calc result + the kilometres actually driven
+// into the numbers a wniosek is paid on (`kmDifference`, `paymentEur`).
 //
-// Feature «wyłączane limity gwarancji» (2026-09-20). Until now the payout was
+// The guarantee is priced per calendar month, but the carrier declares ONE
+// mileage for the whole outing. While every month of the period carries a
+// weekday guarantee that is exactly what the payout needs:
 //
 //     kmDifference = kmGuaranteed − mileage
 //
-// which compares the mileage of the WHOLE period against the SUM of the
-// per-month guarantees. That is correct only while every month of the period
-// carries a guarantee. The moment an admin switches one month OFF
-// (`kmPerDay = 0`, `kmPerSaturday = 0`) its kilometres keep being subtracted
-// from the guarantee of the neighbouring, still-active month — and the
-// carrier loses compensation it is legally owed for the active month.
+// Once an admin switches a month's weekday guarantee off (`kmPerDay = 0`,
+// feature «wyłączane limity gwarancji», 2026-09-20) the declared figure is no
+// longer usable: it still contains the kilometres driven in the switched-off
+// month, and nothing in it says how many. Such a MIXED period is settled on the
+// weryfikator's daily-km board instead (docs/20 §0⁵, 2026-09-24) — the same
+// SpedTrans figures the carrier reads its own mileage from, recorded per day:
 //
-// The approved fix is a PROPORTIONAL distribution of the mileage over the
-// counted days, so only the share of the mileage that falls on ACTIVE months
-// is charged against the guarantee:
+//     mileageEffective = Σ VehicleDailyKm.km (state = drove)
+//                        over the days of [dateStart … dateEnd] that COUNT
+//     kmDifference     = kmGuaranteed − mileageEffective
+//     paymentEur       = kmDifference > 0 ? round2(kmDifference × ratePerKmEffective) : 0
 //
-//     daysActive        = Σ over ALL months [ (kmPerDay > 0 ? workingDays : 0)
-//                                            + saturdaysCounted ]
-//     daysTotal         = Σ over ALL months [ workingDays + saturdaysCounted ]
-//     mileageEffective  = daysActive === daysTotal ? mileage
-//                       : daysTotal > 0 ? round2(mileage × daysActive / daysTotal)
-//                       : 0
-//     kmDifference      = kmGuaranteed − mileageEffective
-//     paymentEur        = kmDifference > 0 ? round2(kmDifference × ratePerKmEffective) : 0
+// Which days count, per calendar month of the period (`SettlementMonthMode`):
+//   - `active`        (`kmPerDay > 0`) — EVERY calendar day of month ∩ period:
+//                     Sundays, EU-ban holidays, non-credited Saturdays, and the
+//                     first / last day in full (`timeFrom` / `timeTo` shorten
+//                     the GUARANTEE, not the kilometres). Same as a fully
+//                     active period, where the carrier's sum covers every day;
+//   - `saturdaysOnly` (`kmPerDay = 0`, `kmPerSaturday > 0`) — only the month's
+//                     credited Saturdays (`saturdayDays`); its weekdays
+//                     guarantee nothing, so their kilometres are not charged;
+//   - `off`           (`kmPerDay = 0`, `kmPerSaturday = 0`) — nothing.
 //
-// The split is BY DAY TYPE, not by month (uiux review 2026-09-20): a month
-// configured as "Saturdays only" (`kmPerDay = 0`, `kmPerSaturday > 0`) is a
-// supported configuration, and its WEEKDAYS guarantee nothing — counting them
-// as active would charge their mileage against the Saturday guarantee. The
-// Saturday term needs no condition: the engine only ever credits
-// `saturdaysCounted > 0` when `kmPerSaturday > 0`.
+// A counted day without a board row is NEVER guessed: it contributes 0 km and
+// is reported in `board.missingDates`. The api refuses to ACCEPT such a wniosek
+// until the weryfikator fills the day in (422 `CLAIM_BOARD_INCOMPLETE`). An
+// `idle` row is a filled day with 0 km; a `drove` row with `km = null` is 0 km.
 //
-// The `daysActive === daysTotal → mileage` short-circuit is NOT an
-// optimisation: it guarantees bit-identical output to the pre-feature formula
-// for every wniosek whose months are all active (i.e. everything in the DB
-// today), with zero floating-point drift.
+// All-active periods return BEFORE the board is looked at, so their numbers are
+// bit-identical to the pre-feature formula (`mileageEffective = mileage`).
 //
 // NOT handled here (deliberate, business decision):
 //  - `Claim.drivenDays` / `Claim.kmPerDay` stay computed over the FULL period
-//    (they describe the actual outing, not the settlement);
+//    from the declared mileage (they describe the outing, not the settlement);
 //  - the `max_avg_km_per_day` sanity check stays on the RAW `mileage / totalDays`;
-//  - the `canSubmitByDuration` (≥10 days) gate stays on `calc.totalDays`.
+//  - the `canSubmitByDuration` (≥10 days) gate stays on `calc.totalDays`;
+//  - fetching the board — the caller supplies the rows (the api reads them only
+//    when `settlementNeedsBoard` says so).
 //
-// Pure functions, no IO — shared by the API (submit / verify / recalc /
-// preview) and the web live-preview so both price a claim identically.
+// Pure functions, no IO, never throws — shared by the API (submit / verify /
+// decision / recalc / preview) so every path prices a claim identically.
 
 import type { MonthLimit } from './km-calc';
 
@@ -65,6 +68,26 @@ export interface SettlementMonth {
   workingDays: number;
   /** Counted qualifying ("odd") Saturdays. Absent on legacy rows ⇒ 0. */
   saturdaysCounted?: number;
+  /**
+   * `YYYY-MM` of the month — the key the board settlement classifies days by.
+   * A row WITHOUT it (legacy input) cannot be placed on the calendar and is
+   * treated as `active`: it never switches the settlement onto the board.
+   */
+  yearMonth?: string;
+  /**
+   * ISO dates of the month's CREDITED Saturdays (`MonthBreakdown.saturdayDays`).
+   * The only days that count in a `saturdaysOnly` month. Absent ⇒ none.
+   */
+  saturdayDays?: readonly string[];
+}
+
+/** One weryfikator mark for `(vehicle, day)` — a `VehicleDailyKm` row. */
+export interface BoardDay {
+  /** ISO calendar date `YYYY-MM-DD`. */
+  date: string;
+  state: 'drove' | 'idle';
+  /** km driven that day. `null` on `idle`; tolerated on `drove` (⇒ 0 km). */
+  km: number | null;
 }
 
 export interface ClaimSettlementInput {
@@ -76,6 +99,46 @@ export interface ClaimSettlementInput {
   kmGuaranteed: number;
   /** `KmCalcResult.ratePerKmEffective` — km-weighted EUR/km. */
   ratePerKmEffective: number;
+  /** First day of the claim period, ISO `YYYY-MM-DD`, inclusive. */
+  dateStart: string;
+  /** Last day of the claim period, ISO `YYYY-MM-DD`, inclusive. */
+  dateEnd: string;
+  /**
+   * The vehicle's board rows inside `[dateStart … dateEnd]`. `[]` when the
+   * board is unavailable — then every counted day is reported missing (nothing
+   * is guessed). Never read for an all-active period.
+   */
+  board: readonly BoardDay[];
+}
+
+/** How a calendar month of a mixed period contributes kilometres. */
+export type SettlementMonthMode = 'active' | 'saturdaysOnly' | 'off';
+
+/** Board settlement of ONE calendar month of the period. */
+export interface SettlementBoardMonth {
+  /** `YYYY-MM`. */
+  yearMonth: string;
+  mode: SettlementMonthMode;
+  /** Σ `drove` km on the counted days of this month (0 for `off`). */
+  km: number;
+  /** Required days that have a row (`drove` OR `idle`). */
+  daysFilled: number;
+  /**
+   * Days that must carry a row: every calendar day of month ∩ period for
+   * `active`, the credited Saturdays for `saturdaysOnly`, none for `off`.
+   */
+  daysRequired: number;
+  /** Required days without a row, ascending. */
+  missingDates: string[];
+}
+
+export interface SettlementBoard {
+  /** One entry per calendar month the period touches, ascending. */
+  months: SettlementBoardMonth[];
+  /** Every month's `missingDates`, concatenated (ascending). */
+  missingDates: string[];
+  /** `missingDates.length === 0`. */
+  complete: boolean;
 }
 
 export interface ClaimSettlement {
@@ -83,14 +146,22 @@ export interface ClaimSettlement {
   daysActive: number;
   /** Counted days over the whole period (≡ `KmCalcResult.totalDays`). */
   daysTotal: number;
-  /** The share of `mileage` charged against the guarantee. */
+  /**
+   * The kilometres charged against the guarantee: the declared `mileage`
+   * (`mileageSource === 'declared'`) or the board sum over the counted days
+   * (`mileageSource === 'board'`).
+   */
   mileageEffective: number;
   /** `kmGuaranteed − mileageEffective`; may be negative (no under-run). */
   kmDifference: number;
   /** Compensation in EUR, `0` when there is no under-run. */
   paymentEur: number;
-  /** At least one month of the period has its guarantee switched off. */
+  /** At least one month of the period has (part of) its guarantee switched off. */
   hasDisabledMonths: boolean;
+  /** Where `mileageEffective` came from. */
+  mileageSource: 'declared' | 'board';
+  /** Per-month board detail. `null` ⇔ `mileageSource === 'declared'`. */
+  board: SettlementBoard | null;
 }
 
 /** Shape of one persisted `Claim.breakdown.breakdown[]` row we can read. */
@@ -114,7 +185,7 @@ function round2(n: number): number {
 }
 
 /** Non-finite / missing numbers collapse to 0 — a missing limit is not a guarantee. */
-function num(v: number | undefined): number {
+function num(v: number | null | undefined): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }
 
@@ -127,43 +198,59 @@ export function isMonthActive(month: SettlementMonth): boolean {
   return num(month.kmPerDay) > 0 || num(month.kmPerSaturday) > 0;
 }
 
+/**
+ * Classify a month by its limits: `active` (weekday guarantee on),
+ * `saturdaysOnly` (only credited Saturdays guarantee anything) or `off`.
+ * Looks at the limits only — the "row without `yearMonth` is active" rule
+ * belongs to `settlementNeedsBoard` / the board walk.
+ */
+export function settlementMonthMode(month: SettlementMonth): SettlementMonthMode {
+  if (num(month.kmPerDay) > 0) return 'active';
+  return num(month.kmPerSaturday) > 0 ? 'saturdaysOnly' : 'off';
+}
+
+/**
+ * `true` when the period must be settled on the board: at least one month
+ * (identified by its `yearMonth`) has its weekday guarantee off
+ * (`kmPerDay = 0`, with or without Saturdays). The api reads the board ONLY
+ * when this holds.
+ */
+export function settlementNeedsBoard(
+  breakdown: readonly SettlementMonth[],
+): boolean {
+  return breakdown.some(
+    (month) =>
+      typeof month.yearMonth === 'string' &&
+      settlementMonthMode(month) !== 'active',
+  );
+}
+
 /** Counted days of one month = weekday days + qualifying Saturdays. */
 function daysOf(month: SettlementMonth): number {
   return num(month.workingDays) + num(month.saturdaysCounted);
 }
 
 /**
- * Counted days of one month that actually carry a guarantee.
- *
- * Weekdays count only while `kmPerDay > 0`; qualifying Saturdays always count
- * — the engine credits them exclusively when `kmPerSaturday > 0`, so a
- * non-zero `saturdaysCounted` already implies an active Saturday guarantee.
- * This is what makes the "Saturdays only" month (`kmPerDay = 0`,
- * `kmPerSaturday > 0`) settle correctly: its Saturdays are active, its
- * weekdays are not.
+ * Counted days of one month that actually carry a guarantee: weekdays only
+ * while `kmPerDay > 0`; qualifying Saturdays always (the engine credits them
+ * exclusively when `kmPerSaturday > 0`).
  */
 function activeDaysOf(month: SettlementMonth): number {
   const weekdays = num(month.kmPerDay) > 0 ? num(month.workingDays) : 0;
   return weekdays + num(month.saturdaysCounted);
 }
 
-// ─── Public API ──────────────────────────────────────────
-
-/**
- * Compute the settlement numbers for one wniosek. Pure; never throws.
- *
- * Degenerate inputs behave exactly like the pre-feature formula:
- *  - empty breakdown / `daysTotal === 0` ⇒ `daysActive === daysTotal` ⇒
- *    `mileageEffective = mileage` (and `kmGuaranteed` is 0 anyway, so the
- *    claim yields `kmDifference = −mileage`, `paymentEur = 0`);
- *  - all months active ⇒ `mileageEffective === mileage`, bit-identical output.
- */
-export function settleClaim(input: ClaimSettlementInput): ClaimSettlement {
+/** `daysActive` / `daysTotal` / `hasDisabledMonths` — the day-count summary. */
+function countDays(breakdown: readonly SettlementMonth[]): {
+  daysActive: number;
+  daysTotal: number;
+  hasDisabledMonths: boolean;
+} {
   let daysActiveRaw = 0;
   let daysTotalRaw = 0;
   let hasDisabledMonths = false;
 
-  for (const month of input.breakdown) {
+  for (const month of breakdown) {
     const days = daysOf(month);
     const active = activeDaysOf(month);
     daysTotalRaw += days;
@@ -176,30 +263,193 @@ export function settleClaim(input: ClaimSettlementInput): ClaimSettlement {
     }
   }
 
-  const daysActive = round2(daysActiveRaw);
-  const daysTotal = round2(daysTotalRaw);
+  return {
+    daysActive: round2(daysActiveRaw),
+    daysTotal: round2(daysTotalRaw),
+    hasDisabledMonths,
+  };
+}
 
-  // Identical sums ⇒ nothing is disabled (or the disabled months contributed
-  // no days) ⇒ hand the mileage through untouched. This is the branch every
-  // pre-feature wniosek takes, so its numbers never move.
-  const mileageEffective =
-    daysActive === daysTotal
-      ? input.mileage
-      : daysTotal > 0
-        ? round2((input.mileage * daysActive) / daysTotal)
-        : /* istanbul ignore next — unreachable: daysActive ≤ daysTotal */ 0;
-
+/** The money part — one formula for both mileage sources. */
+function price(
+  input: ClaimSettlementInput,
+  mileageEffective: number,
+): Pick<ClaimSettlement, 'mileageEffective' | 'kmDifference' | 'paymentEur'> {
   const kmDifference = input.kmGuaranteed - mileageEffective;
   const paymentEur =
     kmDifference > 0 ? round2(kmDifference * input.ratePerKmEffective) : 0;
+  return { mileageEffective, kmDifference, paymentEur };
+}
 
+// ─── Calendar walk (pure integer arithmetic, no `Date`) ──
+
+interface Ymd {
+  y: number;
+  /** 1..12 */
+  m: number;
+  d: number;
+}
+
+const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/u;
+
+function isLeapYear(y: number): boolean {
+  return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+}
+
+function daysInMonth(y: number, m: number): number {
+  if (m === 2) return isLeapYear(y) ? 29 : 28;
+  return m === 4 || m === 6 || m === 9 || m === 11 ? 30 : 31;
+}
+
+function parseYmd(s: string): Ymd | null {
+  const match = ISO_DATE_RE.exec(s);
+  if (!match) return null;
+  const y = Number(match[1]);
+  const m = Number(match[2]);
+  const d = Number(match[3]);
+  if (m < 1 || m > 12 || d < 1 || d > daysInMonth(y, m)) return null;
+  return { y, m, d };
+}
+
+function nextYmd({ y, m, d }: Ymd): Ymd {
+  if (d < daysInMonth(y, m)) return { y, m, d: d + 1 };
+  if (m < 12) return { y, m: m + 1, d: 1 };
+  return { y: y + 1, m: 1, d: 1 };
+}
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
+}
+
+/** `YYYY-MM-DD` with a zero-padded 4-digit year, so the strings sort as dates. */
+function fmtYmd({ y, m, d }: Ymd): string {
+  return `${String(y).padStart(4, '0')}-${pad2(m)}-${pad2(d)}`;
+}
+
+/** Every calendar day of `[dateStart … dateEnd]`; `[]` on an invalid/inverted range. */
+function walkPeriod(dateStart: string, dateEnd: string): string[] {
+  const start = parseYmd(dateStart);
+  const end = parseYmd(dateEnd);
+  if (!start || !end) return [];
+  const endIso = fmtYmd(end);
+  const out: string[] = [];
+  for (let cur = start; fmtYmd(cur) <= endIso; cur = nextYmd(cur)) {
+    out.push(fmtYmd(cur));
+  }
+  return out;
+}
+
+// ─── Board settlement ────────────────────────────────────
+
+interface MonthRule {
+  mode: SettlementMonthMode;
+  /** Credited Saturdays — consulted only for `saturdaysOnly`. */
+  saturdays: ReadonlySet<string>;
+}
+
+/** Months with no classifying row (legacy / unknown) are `active`. */
+const ACTIVE_RULE: MonthRule = { mode: 'active', saturdays: new Set<string>() };
+
+function buildMonthRules(
+  breakdown: readonly SettlementMonth[],
+): Map<string, MonthRule> {
+  const rules = new Map<string, MonthRule>();
+  for (const month of breakdown) {
+    if (typeof month.yearMonth !== 'string') continue;
+    rules.set(month.yearMonth, {
+      mode: settlementMonthMode(month),
+      saturdays: new Set(month.saturdayDays ?? []),
+    });
+  }
+  return rules;
+}
+
+function indexBoard(board: readonly BoardDay[]): Map<string, BoardDay> {
+  const rows = new Map<string, BoardDay>();
+  for (const day of board) {
+    if (typeof day.date !== 'string') continue;
+    rows.set(day.date.slice(0, 10), day);
+  }
+  return rows;
+}
+
+function isCountedDay(rule: MonthRule, date: string): boolean {
+  if (rule.mode === 'active') return true;
+  if (rule.mode === 'saturdaysOnly') return rule.saturdays.has(date);
+  return false; // 'off'
+}
+
+/** Walk the period day by day and settle every calendar month it touches. */
+function settleBoard(input: ClaimSettlementInput): SettlementBoard {
+  const rules = buildMonthRules(input.breakdown);
+  const rows = indexBoard(input.board);
+  const byMonth = new Map<string, SettlementBoardMonth>();
+  const months: SettlementBoardMonth[] = [];
+
+  for (const date of walkPeriod(input.dateStart, input.dateEnd)) {
+    const yearMonth = date.slice(0, 7);
+    const rule = rules.get(yearMonth) ?? ACTIVE_RULE;
+    let month = byMonth.get(yearMonth);
+    if (!month) {
+      month = {
+        yearMonth,
+        mode: rule.mode,
+        km: 0,
+        daysFilled: 0,
+        daysRequired: 0,
+        missingDates: [],
+      };
+      byMonth.set(yearMonth, month);
+      months.push(month);
+    }
+    if (!isCountedDay(rule, date)) continue;
+
+    month.daysRequired += 1;
+    const row = rows.get(date);
+    if (row === undefined) {
+      // Not checked by the weryfikator — reported, never guessed.
+      month.missingDates.push(date);
+      continue;
+    }
+    month.daysFilled += 1;
+    if (row.state === 'drove') month.km += num(row.km);
+  }
+
+  const missingDates = months.flatMap((month) => month.missingDates);
+  return { months, missingDates, complete: missingDates.length === 0 };
+}
+
+// ─── Public API ──────────────────────────────────────────
+
+/**
+ * Compute the settlement numbers for one wniosek. Pure; never throws.
+ *
+ *  - every month active (`!settlementNeedsBoard`) ⇒ `mileageEffective =
+ *    mileage`, output bit-identical to the pre-feature formula, `board` is
+ *    not even read;
+ *  - mixed period ⇒ `mileageEffective = Σ board.months[].km` (board values
+ *    as-is, no rounding); days without a row count 0 km and are listed in
+ *    `board.missingDates`.
+ */
+export function settleClaim(input: ClaimSettlementInput): ClaimSettlement {
+  const days = countDays(input.breakdown);
+
+  if (!settlementNeedsBoard(input.breakdown)) {
+    return {
+      ...days,
+      ...price(input, input.mileage),
+      mileageSource: 'declared',
+      board: null,
+    };
+  }
+
+  const board = settleBoard(input);
+  const boardKm = board.months.reduce((sum, month) => sum + month.km, 0);
   return {
-    daysActive,
-    daysTotal,
-    mileageEffective,
-    kmDifference,
-    paymentEur,
-    hasDisabledMonths,
+    ...days,
+    ...price(input, boardKm),
+    mileageSource: 'board',
+    board,
   };
 }
 
@@ -221,7 +471,9 @@ export function settleClaim(input: ClaimSettlementInput): ClaimSettlement {
  *  - a row needs a `YYYY-MM` key plus finite `kmPerDay` + `ratePerKm` to count;
  *  - `kmPerSaturday` is copied only when the row carries a finite number —
  *    legacy rows predate the field, and OMITTING the key lets the engine fold
- *    it to 0 (feature OFF), which is what those wnioski were priced with.
+ *    it to 0 (feature OFF), which is what those wnioski were priced with;
+ *  - every other envelope key (`mileageSource`, the day counters, …) is
+ *    ignored — only the per-month limits are a snapshot.
  */
 export function limitsSnapshotFromBreakdown(
   envelope: BreakdownSnapshotEnvelope | null | undefined,

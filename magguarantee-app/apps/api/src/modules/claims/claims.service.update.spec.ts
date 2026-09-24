@@ -24,6 +24,7 @@ import {
 
 import type { Prisma } from '@magguarantee/database';
 import type {
+  BoardDay,
   ClaimStatus,
   KmCalcBreakdown,
   KmCalcResult,
@@ -45,6 +46,7 @@ import type { KmCalcService } from '../km-calc/km-calc.service';
 import type { MailService } from '../mail/mail.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { TrailersRepository } from '../trailers/trailers.repository';
+import type { VehicleDailyKmRepository } from '../vehicles/vehicle-daily-km.repository';
 import type { VehiclesRepository } from '../vehicles/vehicles.repository';
 import { ClaimsService } from './claims.service';
 import type {
@@ -502,6 +504,7 @@ function makeService(
   km: KmCalcService,
   audit: AuditWriter,
   prisma: PrismaService,
+  dailyKm?: VehicleDailyKmRepository,
 ): ClaimsService {
   // The four ownership repos and NrZglService are not exercised in this
   // verifier-side path. Bare `{}` casts are fine because the methods we hit
@@ -517,6 +520,9 @@ function makeService(
     noop as NrZglService,
     prisma,
     audit,
+    undefined,
+    undefined,
+    dailyKm,
   );
 }
 
@@ -2053,5 +2059,368 @@ describe('ClaimsService — hours-adjusted Decimal split (submit + reklamacja)',
     expect(updates).toHaveLength(1);
     // No prior snapshot → fall back to the current applied value (3).
     expect(updates[0]!.data.origHoursAdjusted).toBe(3);
+  });
+});
+
+// ── ACCEPT of a mixed period — board gates (docs/20 §0⁵) ─────────────
+//
+// A period with a switched-off month is paid on the weryfikator's daily-km
+// board AS IT STANDS AT THE DECISION. The accept therefore always re-prices
+// (forced recalc) and is refused while a counted day is missing
+// (CLAIM_BOARD_INCOMPLETE) or the live amount is not the one the verification
+// saved and — over threshold — Maksim cleared (CLAIM_BOARD_CHANGED). Rejection
+// and reklamacja paths are never gated.
+
+describe('ClaimsService.update — accept of a mixed period (board gates)', () => {
+  beforeAll(() => {
+    jest.useFakeTimers().setSystemTime(NOW);
+  });
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
+  // 21.08–18.09.2025: August off (7 days), September 14 × 540 = 7560 km.
+  // drivenDays 21 ⇒ Maksim threshold 500 €.
+  const AUGUST_OFF = {
+    yearMonth: '2025-08',
+    workingDays: 7,
+    kmPerDay: 0,
+    ratePerKm: 0.5,
+    saturdaysCounted: 0,
+    kmPerSaturday: 0,
+    kmFromSaturdays: 0,
+    kmInMonth: 0,
+    saturdayDays: [],
+    excludedDays: [],
+  };
+  const SEPTEMBER_ON = {
+    yearMonth: '2025-09',
+    workingDays: 14,
+    kmPerDay: 540,
+    ratePerKm: 0.5,
+    saturdaysCounted: 0,
+    kmPerSaturday: 0,
+    kmFromSaturdays: 0,
+    kmInMonth: 7_560,
+    saturdayDays: [],
+    excludedDays: [],
+  };
+  const MIXED_CALC: Partial<KmCalcResult> = {
+    totalDays: 21,
+    rawTotalDays: 21,
+    kmGuaranteed: 7_560,
+    ratePerKmEffective: 0.5,
+    breakdown: [AUGUST_OFF, SEPTEMBER_ON],
+  };
+
+  /** Verified mixed-period wniosek whose saved dopłata is `paymentEur`. */
+  function mixedClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
+    return makeClaim({
+      dateStart: new Date('2025-08-21T00:00:00.000Z'),
+      dateEnd: new Date('2025-09-18T00:00:00.000Z'),
+      drivenDays: 21,
+      mileage: 6_000,
+      kmGuaranteed: 7_560,
+      kmDifference: 5_560,
+      paymentEur: 2_780,
+      hoursAdjustedValue: 2,
+      breakdown: {
+        totalDays: 21,
+        rawTotalDays: 21,
+        kmGuaranteed: 7_560,
+        ratePerKmEffective: 0.5,
+        breakdown: [AUGUST_OFF, SEPTEMBER_ON],
+        firstDay: null,
+        lastDay: null,
+        daysActive: 14,
+        daysTotal: 21,
+        mileageEffective: 2_000,
+        mileageSource: 'board',
+      },
+      ...overrides,
+    });
+  }
+
+  /** Every September day 01..18: `km` on the 1st, the rest idle, minus `missing`. */
+  function septemberBoard(km: number, missing: readonly string[] = []): BoardDay[] {
+    const rows: BoardDay[] = [];
+    for (let d = 1; d <= 18; d += 1) {
+      const date = `2025-09-${d < 10 ? `0${d}` : d}`;
+      if (missing.includes(date)) continue;
+      rows.push(
+        d === 1 ? { date, state: 'drove', km } : { date, state: 'idle', km: null },
+      );
+    }
+    return rows;
+  }
+
+  function makeBoardRepo(board: BoardDay[]): {
+    repo: VehicleDailyKmRepository;
+    boardSpy: jest.Mock;
+  } {
+    const boardSpy = jest.fn(async () => board);
+    return {
+      repo: { listBoardDays: boardSpy } as unknown as VehicleDailyKmRepository,
+      boardSpy,
+    };
+  }
+
+  function accept(amountApproved = 2_780): UpdateClaimDto {
+    return {
+      targetStatus: 'ZAAKCEPTOWANO',
+      orderNumber: 'ZL-1',
+      orderDate: '2025-09-30',
+      amountApproved,
+    };
+  }
+  const ACCEPT = accept();
+
+  async function catchUpdate(
+    svc: ClaimsService,
+    nrZgl: string,
+    dto: UpdateClaimDto,
+  ): Promise<unknown> {
+    try {
+      await withAuditContext(() => svc.update(makeAuth('pracownik'), nrZgl, dto));
+    } catch (e) {
+      return e;
+    }
+    return undefined;
+  }
+
+  it('B1. gaps in an active month ⇒ 422 CLAIM_BOARD_INCOMPLETE with the dates, no writes', async () => {
+    const seeded = mixedClaim();
+    const repoFake = makeClaimsRepo([seeded]);
+    const svc = makeService(
+      repoFake,
+      makeKmCalcService(MIXED_CALC).svc,
+      makeAuditWriter().writer,
+      makePrismaService(),
+      makeBoardRepo(septemberBoard(2_000, ['2025-09-07', '2025-09-18'])).repo,
+    );
+
+    const caught = await catchUpdate(svc, seeded.nrZgl, ACCEPT);
+
+    expect(caught).toBeInstanceOf(UnprocessableEntityException);
+    const body = (caught as UnprocessableEntityException).getResponse() as {
+      code?: string;
+      message?: string;
+      extensions?: { code?: string; missingDates?: string[] };
+    };
+    expect(body.code).toBe('CLAIM_BOARD_INCOMPLETE');
+    expect(body.extensions).toEqual({
+      code: 'CLAIM_BOARD_INCOMPLETE',
+      missingDates: ['2025-09-07', '2025-09-18'],
+    });
+    expect(body.message).toBe(
+      'Nie można zaakceptować wniosku — brak przebiegu na tablicy km za 2 dni ' +
+        'w miesiącach z gwarancją: 07.09.2025, 18.09.2025. ' +
+        'Poczekaj, aż weryfikator uzupełni dane.',
+    );
+    expect(repoFake.updateWithinCalls).toHaveLength(0);
+  });
+
+  it('B1b. a single missing day reads «1 dzień»', async () => {
+    const seeded = mixedClaim();
+    const svc = makeService(
+      makeClaimsRepo([seeded]),
+      makeKmCalcService(MIXED_CALC).svc,
+      makeAuditWriter().writer,
+      makePrismaService(),
+      makeBoardRepo(septemberBoard(2_000, ['2025-09-18'])).repo,
+    );
+
+    const caught = await catchUpdate(svc, seeded.nrZgl, ACCEPT);
+
+    const body = (caught as UnprocessableEntityException).getResponse() as {
+      message?: string;
+    };
+    expect(body.message).toContain('za 1 dzień w miesiącach z gwarancją: 18.09.2025.');
+  });
+
+  it('B2. ODRZUCONO with gaps is NOT gated (and does not even re-price)', async () => {
+    const seeded = mixedClaim();
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService(MIXED_CALC);
+    const board = makeBoardRepo(septemberBoard(2_000, ['2025-09-18']));
+    const svc = makeService(
+      repoFake,
+      km.svc,
+      makeAuditWriter().writer,
+      makePrismaService(),
+      board.repo,
+    );
+
+    await withAuditContext(() =>
+      svc.update(makeAuth('pracownik'), seeded.nrZgl, {
+        targetStatus: 'ODRZUCONO',
+        comment: 'Brak podstaw.',
+      }),
+    );
+
+    expect(repoFake.updateWithinCalls[0]!.data.status).toBe('ODRZUCONO');
+    expect(km.calls).toHaveLength(0);
+    expect(board.boardSpy).not.toHaveBeenCalled();
+  });
+
+  it('B3. the board moved since verification (live 1_030 € ≠ saved 2_780 €) ⇒ 422 CLAIM_BOARD_CHANGED', async () => {
+    const seeded = mixedClaim();
+    const repoFake = makeClaimsRepo([seeded]);
+    const svc = makeService(
+      repoFake,
+      makeKmCalcService(MIXED_CALC).svc,
+      makeAuditWriter().writer,
+      makePrismaService(),
+      makeBoardRepo(septemberBoard(5_500)).repo,
+    );
+
+    const caught = await catchUpdate(svc, seeded.nrZgl, ACCEPT);
+
+    expect(caught).toBeInstanceOf(UnprocessableEntityException);
+    const body = (caught as UnprocessableEntityException).getResponse() as {
+      code?: string;
+      message?: string;
+      extensions?: { code?: string };
+    };
+    expect(body.code).toBe('CLAIM_BOARD_CHANGED');
+    expect(body.extensions?.code).toBe('CLAIM_BOARD_CHANGED');
+    expect(body.message).toBe(
+      'Kwota dopłaty różni się od zapisanej przy weryfikacji — zmieniła się ' +
+        'tablica km albo dane wniosku. Zapisz weryfikację ponownie, a następnie ' +
+        'podejmij decyzję.',
+    );
+    expect(repoFake.updateWithinCalls).toHaveLength(0);
+  });
+
+  it('B4. same amount but over threshold with the gate never armed (verified with gaps) ⇒ 422 CLAIM_BOARD_CHANGED', async () => {
+    const seeded = mixedClaim({ maksimGateRequired: false });
+    const repoFake = makeClaimsRepo([seeded]);
+    const svc = makeService(
+      repoFake,
+      makeKmCalcService(MIXED_CALC).svc,
+      makeAuditWriter().writer,
+      makePrismaService(),
+      makeBoardRepo(septemberBoard(2_000)).repo,
+    );
+
+    const caught = await catchUpdate(svc, seeded.nrZgl, ACCEPT);
+
+    const body = (caught as UnprocessableEntityException).getResponse() as {
+      code?: string;
+    };
+    expect(body.code).toBe('CLAIM_BOARD_CHANGED');
+    expect(repoFake.updateWithinCalls).toHaveLength(0);
+  });
+
+  it('B5. complete board, unchanged amount, gate cleared at that amount ⇒ accepted on the live board', async () => {
+    const seeded = mixedClaim({
+      status: 'OCZEKUJE_NA_AUTORYZACJE' as ClaimStatus,
+      maksimGateRequired: true,
+      maksimGateNotifiedAt: new Date('2026-05-14T10:00:00.000Z'),
+      maksimGateNotifiedAmount: 2_780,
+      maksimGateClearedAt: new Date('2026-05-14T12:00:00.000Z'),
+      maksimGateClearedById: 'u-clearer',
+    });
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService(MIXED_CALC);
+    const board = makeBoardRepo(septemberBoard(2_000));
+    const svc = makeService(
+      repoFake,
+      km.svc,
+      makeAuditWriter().writer,
+      makePrismaService(),
+      board.repo,
+    );
+
+    await withAuditContext(() =>
+      svc.update(makeAuth('pracownik'), seeded.nrZgl, ACCEPT),
+    );
+
+    // Forced re-pricing with the stored inputs (applied korekta included).
+    expect(km.calls).toHaveLength(1);
+    expect((km.calls[0]!.input as { hoursAdjusted: number }).hoursAdjusted).toBe(2);
+    expect(board.boardSpy).toHaveBeenCalledWith(
+      'v-1',
+      new Date('2025-08-21T00:00:00.000Z'),
+      new Date('2025-09-19T00:00:00.000Z'),
+    );
+    const patch = repoFake.updateWithinCalls[0]!.data;
+    expect(patch.status).toBe('ZAAKCEPTOWANO');
+    expect(patch.paymentEur).toBe(2_780);
+    expect(patch.breakdown?.mileageSource).toBe('board');
+    expect(patch.breakdown?.mileageEffective).toBe(2_000);
+  });
+
+  it('B6. under threshold, complete, unchanged ⇒ accepted without any Maksim gate', async () => {
+    const seeded = mixedClaim({ paymentEur: 80, kmDifference: 160 });
+    const repoFake = makeClaimsRepo([seeded]);
+    const svc = makeService(
+      repoFake,
+      makeKmCalcService(MIXED_CALC).svc,
+      makeAuditWriter().writer,
+      makePrismaService(),
+      makeBoardRepo(septemberBoard(7_400)).repo,
+    );
+
+    await withAuditContext(() =>
+      svc.update(makeAuth('pracownik'), seeded.nrZgl, accept(80)),
+    );
+
+    expect(repoFake.updateWithinCalls[0]!.data.status).toBe('ZAAKCEPTOWANO');
+  });
+
+  it('B7. a reklamacja decision on a mixed period is never gated, never re-priced', async () => {
+    const seeded = mixedClaim({
+      status: 'REKLAMACJA' as ClaimStatus,
+      statusBeforeReklamacja: 'ZAAKCEPTOWANO',
+      reklamacjaSubmitted: true,
+      reklamacjaAmount: 100,
+      amountApproved: 2_780,
+      orderNumber: 'ZL-ORIG',
+      orderDate: new Date('2025-09-30T00:00:00.000Z'),
+    });
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService(MIXED_CALC);
+    const board = makeBoardRepo(septemberBoard(2_000, ['2025-09-18']));
+    const svc = makeService(
+      repoFake,
+      km.svc,
+      makeAuditWriter().writer,
+      makePrismaService(),
+      board.repo,
+    );
+
+    await withAuditContext(() =>
+      svc.update(makeAuth('pracownik'), seeded.nrZgl, {
+        targetStatus: 'REKLAMACJA_ZAAKCEPTOWANO',
+        reklamacjaOrderNumber: 'ZL-REK-1',
+      }),
+    );
+
+    expect(repoFake.updateWithinCalls[0]!.data.reklamacjaResolution).toBe('UZNANA');
+    expect(km.calls).toHaveLength(0);
+    expect(board.boardSpy).not.toHaveBeenCalled();
+  });
+
+  it('B8. an all-active accept keeps the old flow: no forced re-pricing, no board read', async () => {
+    const seeded = makeClaim();
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const board = makeBoardRepo([]);
+    const svc = makeService(
+      repoFake,
+      km.svc,
+      makeAuditWriter().writer,
+      makePrismaService(),
+      board.repo,
+    );
+
+    await withAuditContext(() =>
+      svc.update(makeAuth('pracownik'), seeded.nrZgl, accept(1_400)),
+    );
+
+    expect(km.calls).toHaveLength(0);
+    expect(board.boardSpy).not.toHaveBeenCalled();
+    expect(repoFake.updateWithinCalls[0]!.data.status).toBe('ZAAKCEPTOWANO');
   });
 });
