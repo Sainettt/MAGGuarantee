@@ -13,6 +13,7 @@ import type {
   GrantSsoAccessDto,
   SsoAccessGrantResultDto,
   StanowiskoRoleDto,
+  StanowiskoRoleListDto,
 } from '@magguarantee/shared';
 
 import {
@@ -27,9 +28,11 @@ import { USERS_KEY } from './useUsers';
 
 export const SSO_KEY = ['sso'] as const;
 
+const STANOWISKO_ROLES_KEY = [...SSO_KEY, 'stanowisko-roles'] as const;
+
 export function useStanowiskoRoles() {
   return useQuery({
-    queryKey: [...SSO_KEY, 'stanowisko-roles'],
+    queryKey: STANOWISKO_ROLES_KEY,
     queryFn: listStanowiskoRoles,
   });
 }
@@ -41,19 +44,44 @@ export function useSsoAccessDenials() {
   });
 }
 
+/** `lider` omitted = keep the stored flag (see `setStanowiskoRole`). */
+export interface SetStanowiskoRoleVars {
+  code: string;
+  role: AssignableRole;
+  lider?: boolean;
+}
+
 export function useSetStanowiskoRole(
-  opts?: UseMutationOptions<
-    StanowiskoRoleDto,
-    Error,
-    { code: string; role: AssignableRole }
-  >,
+  opts?: UseMutationOptions<StanowiskoRoleDto, Error, SetStanowiskoRoleVars>,
 ) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ code, role }: { code: string; role: AssignableRole }) =>
-      setStanowiskoRole(code, role),
+    mutationFn: ({ code, role, lider }: SetStanowiskoRoleVars) =>
+      setStanowiskoRole(code, role, lider),
     ...opts,
     onSuccess: (...args) => {
+      // Write the saved row straight into the list before the refetch lands,
+      // so the controlled role select / leader checkbox do not flick back to
+      // the old value in between. Only the fields this call decides are
+      // copied — `name` / `knownToMagspace` stay as the list computed them.
+      const [saved] = args;
+      qc.setQueryData<StanowiskoRoleListDto>(STANOWISKO_ROLES_KEY, (old) =>
+        old
+          ? {
+              ...old,
+              items: old.items.map((row) =>
+                row.code === saved.code
+                  ? {
+                      ...row,
+                      role: saved.role,
+                      lider: saved.lider,
+                      updatedAt: saved.updatedAt,
+                    }
+                  : row,
+              ),
+            }
+          : old,
+      );
       qc.invalidateQueries({ queryKey: SSO_KEY });
       opts?.onSuccess?.(...args);
     },

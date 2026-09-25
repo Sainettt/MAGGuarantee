@@ -21,6 +21,7 @@ import { Input } from '@/components/ui/Input';
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/Popover';
 import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
 import { useLookupUsersAdmin } from '@/lib/hooks/useAudit';
+import { roleLabelKey } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 
 interface UserAutocompleteProps {
@@ -139,7 +140,7 @@ export function UserAutocomplete({
                     )}
                   </span>
                   <span className="text-xs text-text-sub">
-                    {t(`roles.${u.role}`)}
+                    {t(roleLabelKey(u.role, u.lider))}
                   </span>
                 </button>
               </li>

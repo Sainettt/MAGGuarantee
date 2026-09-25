@@ -137,12 +137,22 @@ export type SeedStanowiskoRole = {
   code: string;
   name: string;
   role: Role;
+  // Leader flag handed out with `role` (docs/28 §2). Only for roles in
+  // `LIDER_ROLES` — CHECK `stanowisko_role_mapping_lider_requires_lider_role`.
+  lider: boolean;
 };
 
 /**
  * Seed content of `StanowiskoRoleMapping` — 6 of the 17 stanowiska MAGSpace
  * publishes. Only positions whose access is unambiguous are mapped; an admin
  * edits the rest through `/employee/sso`.
+ *
+ * `lider` is an add-on over the role, not a role of its own (docs/28 §0, §2):
+ * `PLANISTA_LIDER` → `planista` + lider, `DYSPOZYTOR_KIEROWNIK` → `dyspozytor`
+ * + lider (docs/28 §8 open question 1); every other row is `lider: false`.
+ * The DAF (`opiekun`), `pracownik` and `eksport` leaders are granted per person
+ * by an admin (`roleOverride` + lider): MAGSpace has no `DAF_LIDER`, and
+ * `pracownik` / `eksport` are never derived from a stanowisko at all (below).
  *
  * The eleven codes deliberately left out fall into two groups:
  *
@@ -166,13 +176,13 @@ export type SeedStanowiskoRole = {
  * whenever `/internal/v1/stanowiska` answers.
  */
 export const SEED_STANOWISKO_ROLES: SeedStanowiskoRole[] = [
-  { code: 'DYSPOZYTOR', name: 'Dyspozytor', role: Role.dyspozytor },
-  { code: 'DYSPOZYTOR_KIEROWNIK', name: 'Dyspozytor kierownik', role: Role.dyspozytor },
-  { code: 'PLANISTA', name: 'Planista', role: Role.planista },
-  { code: 'PLANISTA_LIDER', name: 'Planista lider', role: Role.planista },
-  { code: 'PLANISTA_MLODSZY', name: 'Planista młodszy', role: Role.planista },
+  { code: 'DYSPOZYTOR', name: 'Dyspozytor', role: Role.dyspozytor, lider: false },
+  { code: 'DYSPOZYTOR_KIEROWNIK', name: 'Dyspozytor kierownik', role: Role.dyspozytor, lider: true },
+  { code: 'PLANISTA', name: 'Planista', role: Role.planista, lider: false },
+  { code: 'PLANISTA_LIDER', name: 'Planista lider', role: Role.planista, lider: true },
+  { code: 'PLANISTA_MLODSZY', name: 'Planista młodszy', role: Role.planista, lider: false },
   // The only source of the `opiekun` role.
-  { code: 'DAF', name: 'DAF', role: Role.opiekun },
+  { code: 'DAF', name: 'DAF', role: Role.opiekun, lider: false },
 ];
 
 // ─── Seed functions ─────────────────────────────────────
@@ -237,10 +247,18 @@ export async function seedStanowiskoRoles(prisma: PrismaClient): Promise<number>
   for (const m of SEED_STANOWISKO_ROLES) {
     await prisma.stanowiskoRoleMapping.upsert({
       where: { stanowiskoCode: m.code },
-      create: { stanowiskoCode: m.code, stanowiskoName: m.name, role: m.role },
+      create: { stanowiskoCode: m.code, stanowiskoName: m.name, role: m.role, lider: m.lider },
       // Don't overwrite the role on rerun — an admin may have re-pointed it
       // through /employee/sso, and the seed must not silently undo that. The
       // display name is refreshed because it is only a cache of MAGSpace's.
+      //
+      // `lider` is written on CREATE ONLY, for the same reason and one more: if
+      // `update` set `lider: true` while an admin had moved the row to a role
+      // outside `LIDER_ROLES`, `seed:prod` would crash on CHECK
+      // `stanowisko_role_mapping_lider_requires_lider_role` on staging/prod. On
+      // databases seeded before docs/28 the flag on PLANISTA_LIDER /
+      // DYSPOZYTOR_KIEROWNIK is set by an admin in /employee/sso after L3 (ops
+      // step), not by this seed.
       update: { stanowiskoName: m.name },
     });
   }

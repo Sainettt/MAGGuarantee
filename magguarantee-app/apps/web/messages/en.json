@@ -87,16 +87,20 @@
       "activeLabel": "Filter by active status",
       "allActive": "All",
       "onlyActive": "Active only",
-      "onlyInactive": "Inactive only"
+      "onlyInactive": "Inactive only",
+      "onlyLiders": "Leads only"
     },
     "fields": {
       "login": "Login",
       "name": "Full name",
       "email": "E-mail",
       "role": "Role",
+      "lider": "Lead",
+      "liderHint": "The panel and data scope stay those of the role — the flag only adds lead permissions.",
+      "liderPendingSyncHint": "The lead flag can be set after the next sign-in or sync — that is when the hand-granted role replaces the account’s current role.",
       "password": "Temporary password",
       "passwordHint": "≥10 chars, ≥1 letter, ≥1 digit. Leave empty to auto-generate.",
-      "liderEmail": "Leader e-mail",
+      "liderEmail": "Leader e-mail (CC)",
       "liderEmailHint": "Only for the planista role — supervisor's address.",
       "active": "Active",
       "createdAt": "Created",
@@ -140,7 +144,11 @@
     },
     "tempPasswordToast": "Temporary password: {password}",
     "deactivatedToast": "User deactivated",
-    "reactivatedToast": "User reactivated"
+    "reactivatedToast": "User reactivated",
+    "errors": {
+      "liderRequiresLiderRole": "The lead flag can only be given to these roles: {roles}.",
+      "liderManagedByMagspace": "This account’s lead flag comes from the MAGSpace position mapping. Set a hand-granted role or switch the account to local management."
+    }
   },
   "forms": {
     "country": {
@@ -277,7 +285,14 @@
     "dyspozytor": "Dispatcher",
     "przewoznik": "Carrier",
     "eksport": "Export",
-    "weryfikator": "Verifier"
+    "weryfikator": "Verifier",
+    "lider": {
+      "planista": "Planners lead",
+      "dyspozytor": "Dispatchers lead",
+      "opiekun": "DAF lead",
+      "pracownik": "Claims-caretakers lead",
+      "eksport": "Export lead"
+    }
   },
   "landing": {
     "welcome": "Welcome, {name}",
@@ -2534,6 +2549,10 @@
     "neverSynced": "Never synced",
     "emptyTitle": "No positions",
     "emptyMessage": "MAGSpace returned no positions.",
+    "lider": "Lead",
+    "liderAria": "Lead — {stanowisko}",
+    "liderHint": "The panel and data scope stay those of the role — the flag only adds lead permissions.",
+    "liderUnavailableHint": "The lead flag is only available for these roles: {roles}.",
     "fields": {
       "stanowisko": "Position",
       "role": "Role",
@@ -2558,6 +2577,9 @@
       "reactivatedToast": "Account {login} restored with role {role}",
       "updatedToast": "Role of {login} changed to {role}",
       "errorToast": "Could not grant access."
+    },
+    "errors": {
+      "liderRequiresLiderRole": "The lead flag can only be given to these roles: {roles}."
     }
   },
   "errors": {

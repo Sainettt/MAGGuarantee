@@ -64,6 +64,13 @@ export type UserRow = {
    * `przewoznik` at the database level, so a row can never carry one.
    */
   roleOverride: Exclude<UserRow['role'], 'admin' | 'przewoznik'> | null;
+  /**
+   * Leader flag over `role` (docs/28). Never true outside `LIDER_ROLES` — CHECK
+   * `user_lider_requires_lider_role`. Owned like `role`: synced from the
+   * stanowisko mapping on `magspace` rows without `roleOverride`, set by an
+   * admin otherwise. Not `liderEmail` (the CC address).
+   */
+  lider: boolean;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -72,6 +79,8 @@ export type UserRow = {
 export interface UserListFilters {
   role?: UserRow['role'];
   active?: boolean;
+  /** `true` → leaders only, `false` → non-leaders only, omitted → both. */
+  lider?: boolean;
   cursor?: string;
   limit: number;
 }
@@ -176,6 +185,7 @@ export class UsersRepository {
     const where: Record<string, unknown> = {};
     if (filters.role) where.role = filters.role;
     if (typeof filters.active === 'boolean') where.active = filters.active;
+    if (typeof filters.lider === 'boolean') where.lider = filters.lider;
     const rows = await this.prisma.user.findMany({
       where,
       take: filters.limit + 1,
@@ -195,6 +205,8 @@ export class UsersRepository {
     passwordHash: string;
     liderEmail?: string | null;
     active?: boolean;
+    /** Leader flag; the caller has validated it against `role`. Default `false`. */
+    lider?: boolean;
     mustChangePassword?: boolean;
     passwordChangedAt?: Date | null;
   }): Promise<UserRow> {
@@ -207,6 +219,7 @@ export class UsersRepository {
         passwordHash: data.passwordHash,
         liderEmail: data.liderEmail ?? null,
         active: data.active ?? true,
+        lider: data.lider ?? false,
         mustChangePassword: data.mustChangePassword ?? false,
         passwordChangedAt: data.passwordChangedAt ?? null,
       },
@@ -247,6 +260,11 @@ export class UsersRepository {
     authProvider?: UserRow['authProvider'];
     /** Admin grant only — the role chosen by hand. Null on the JIT path. */
     roleOverride?: UserRow['roleOverride'];
+    /**
+     * Leader flag (docs/28): the stanowisko mapping's on the JIT path, the
+     * admin's choice on a grant. Required so neither path can forget it.
+     */
+    lider: boolean;
   }): Promise<UserRow> {
     const row = await this.prisma.user.create({
       data: {
@@ -254,6 +272,7 @@ export class UsersRepository {
         email: data.email,
         name: data.name,
         role: data.role,
+        lider: data.lider,
         passwordHash: null,
         active: true,
         authProvider: data.authProvider ?? 'google',
@@ -356,6 +375,11 @@ export class UsersRepository {
       magspaceEmployeeId: string | null;
       directorySyncedAt: Date | null;
       roleOverride: UserRow['roleOverride'];
+      /**
+       * Write it in the SAME update as `role` whenever both change — the CHECK
+       * `user_lider_requires_lider_role` sees only the final pair.
+       */
+      lider: boolean;
     }>,
   ): Promise<UserRow> {
     const row = await this.prisma.user.update({

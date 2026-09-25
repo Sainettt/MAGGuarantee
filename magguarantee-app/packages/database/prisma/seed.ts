@@ -35,6 +35,11 @@ type SeedUser = {
   email: string;
   name: string;
   role: Role;
+  // Leader flag (docs/28) — an add-on over `role`, NOT a role of its own. Only
+  // valid for roles in `LIDER_ROLES` (planista, dyspozytor, opiekun, pracownik,
+  // eksport); anything else fails CHECK `user_lider_requires_lider_role`.
+  // Omitted = false.
+  lider?: boolean;
 };
 
 const SEED_USERS: SeedUser[] = [
@@ -42,20 +47,31 @@ const SEED_USERS: SeedUser[] = [
   { login: 'pracownik1', email: 'pracownik1@magtrans.eu', name: 'Pracownik 1', role: Role.pracownik },
   { login: 'opiekun1', email: 'opiekun1@magtrans.eu', name: 'Opiekun 1', role: Role.opiekun },
   { login: 'planista1', email: 'planista1@magtrans.eu', name: 'Planista 1', role: Role.planista },
-  // Two dispatchers — both members of dispatch team 1.1.13 (Phase 11). A team
-  // normally has 2 dispatchers (by shift), so the demo team is fully populated.
+  // Two shift dispatchers — both members of dispatch team 1.1.13 (Phase 11). A
+  // team normally has 2 dispatchers (by shift); the dispatchers' lead
+  // `dyspozytorlider1` below sits in the same team (docs/28 §3.1).
   { login: 'dyspozytor1', email: 'dyspozytor1@magtrans.eu', name: 'Dyspozytor 1', role: Role.dyspozytor },
   { login: 'dyspozytor2', email: 'dyspozytor2@magtrans.eu', name: 'Dyspozytor 2', role: Role.dyspozytor },
   { login: 'przewoznik1', email: 'przewoznik1@magtrans.eu', name: 'Przewoznik 1', role: Role.przewoznik },
   { login: 'eksport1', email: 'eksport1@magtrans.eu', name: 'Eksport 1', role: Role.eksport },
   { login: 'weryfikator1', email: 'weryfikator1@magtrans.eu', name: 'Weryfikator 1', role: Role.weryfikator },
+  // Leaders (docs/28) — one per role in `LIDER_ROLES`. Same base role, same
+  // scope and panel as the plain accounts above; `lider: true` only adds
+  // permissions on top (none yet — they arrive with the permissions layer).
+  { login: 'planistalider1', email: 'planistalider1@magtrans.eu', name: 'Planista lider 1', role: Role.planista, lider: true },
+  { login: 'dyspozytorlider1', email: 'dyspozytorlider1@magtrans.eu', name: 'Dyspozytor lider 1', role: Role.dyspozytor, lider: true },
+  { login: 'opiekunlider1', email: 'opiekunlider1@magtrans.eu', name: 'Opiekun lider 1', role: Role.opiekun, lider: true },
+  { login: 'pracowniklider1', email: 'pracowniklider1@magtrans.eu', name: 'Pracownik lider 1', role: Role.pracownik, lider: true },
+  { login: 'eksportlider1', email: 'eksportlider1@magtrans.eu', name: 'Eksport lider 1', role: Role.eksport, lider: true },
 ];
 
 // ─── Dispatch teams (Phase 11) ──────────────────────────
 // Two teams seeded end-to-end so the dispatch UI is populated right after
 // `db seed`, with no manual setup:
-//   - `1.1.13` — fully staffed (dyspozytor1 + dyspozytor2) and assigned the
-//     demo vehicle below.
+//   - `1.1.13` — fully staffed (dyspozytor1 + dyspozytor2 on shifts, plus the
+//     dispatchers' lead dyspozytorlider1 — docs/28 §3.1; whether a lead
+//     belongs to one team or spans all is still open, docs/28 §8 q.3) and
+//     assigned the demo vehicle below.
 //   - `9.9.9`  — intentionally empty (no dispatchers) to exercise the UI's
 //     "Brak dyspozytorów" state.
 // `Team` uses an `active` flag, not soft-delete (see docs/04-data-model.md).
@@ -76,7 +92,7 @@ const SEED_TEAMS: SeedTeam[] = [
     code: DEMO_TEAM_CODE,
     name: 'Zespół DAF 1.1.13',
     active: true,
-    dispatcherLogins: ['dyspozytor1', 'dyspozytor2'],
+    dispatcherLogins: ['dyspozytor1', 'dyspozytor2', 'dyspozytorlider1'],
   },
   {
     code: EMPTY_TEAM_CODE,
@@ -114,16 +130,19 @@ async function seedUsers(passwordHash: string): Promise<number> {
         email: u.email,
         name: u.name,
         role: u.role,
+        lider: u.lider ?? false,
         passwordHash,
         active: true,
       },
       update: {
         // Keep existing user untouched on rerun — but ensure email/name/role
-        // stay in sync with the seed source-of-truth so dev environments
-        // converge after edits to this file.
+        // (and the lider flag, written in the same UPDATE as `role` so the
+        // CHECK sees the final pair) stay in sync with the seed source-of-truth
+        // so dev environments converge after edits to this file.
         email: u.email,
         name: u.name,
         role: u.role,
+        lider: u.lider ?? false,
         active: true,
       },
     });
@@ -336,13 +355,16 @@ function printBanner(
   for (const u of SEED_USERS) {
     const login = u.login.padEnd(longestLogin, ' ');
     const email = `(${u.email})`.padEnd(longestEmail + 2, ' ');
-    console.log(`  - ${login}   ${email}   role=${u.role}`);
+    console.log(`  - ${login}   ${email}   role=${u.role}${u.lider ? ' (lider)' : ''}`);
   }
+  const demoTeamDispatcherCount =
+    SEED_TEAMS.find((t) => t.code === DEMO_TEAM_CODE)?.dispatcherLogins.length ?? 0;
   console.log(`Seeded AppConfig:   ${configCount} keys`);
   console.log(`Seeded TrailerType: ${trailerTypeCount} entries`);
   console.log(
     `Seeded Team:        ${teamCount} teams ` +
-      `(${DEMO_TEAM_CODE}=2 dyspozytorów + ${vehicleCount} pojazd, ${EMPTY_TEAM_CODE}=pusty)`,
+      `(${DEMO_TEAM_CODE}=${demoTeamDispatcherCount} dyspozytorów + ${vehicleCount} pojazd, ` +
+      `${EMPTY_TEAM_CODE}=pusty)`,
   );
   console.log(`Seeded Vehicle:     ${vehicleCount} demo vehicle (plate ${DEMO_VEHICLE_PLATE})`);
   console.log(

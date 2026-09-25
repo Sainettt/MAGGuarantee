@@ -533,8 +533,10 @@ upper-snake бывшего справочника działów. Решение по
 
 | Stanowisko | Роль | |
 |---|---|---|
-| `DYSPOZYTOR`, `DYSPOZYTOR_KIEROWNIK` | `dyspozytor` | в сиде |
-| `PLANISTA`, `PLANISTA_LIDER`, `PLANISTA_MLODSZY` | `planista` | в сиде |
+| `DYSPOZYTOR` | `dyspozytor` | в сиде |
+| `DYSPOZYTOR_KIEROWNIK` | `dyspozytor` **+ lider** | в сиде (docs/28 §2; «kierownik = лидер» — открытый вопрос docs/28 §8 №1) |
+| `PLANISTA`, `PLANISTA_MLODSZY` | `planista` | в сиде |
+| `PLANISTA_LIDER` | `planista` **+ lider** | в сиде (docs/28 §2) |
 | `DAF` | `opiekun` | в сиде; единственный источник роли `opiekun` |
 | `HANDEL_SPEDYTOR`, `HANDEL_LIDER`, `HANDEL_KIEROWNIK`, `CONTROLLING` | **ручной апрув** | без записи |
 | `KAM`, `KAM_KIEROWNIK`, `KIEROWNIK_ODDZIALU`, `IT`, `WINDYKACJA`, `ASYSTENT`, `REKRUTER` | brak dostępu | без записи |

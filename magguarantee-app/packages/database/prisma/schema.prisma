@@ -309,6 +309,19 @@ model User {
   // mapping"; it still syncs `active`/`name` and still revokes access when the
   // person is terminated in MAGSpace. NULL = role comes from the mapping.
   roleOverride       Role?
+  // Leader flag (docs/28) — an add-on OVER the base role, allowed only for the
+  // roles in `LIDER_ROLES` (planista, dyspozytor, opiekun, pracownik, eksport).
+  // "lider_planista" = `role: planista` + `lider: true`: user type, scope,
+  // panel and every `@Roles` still come from `role`; the flag only adds
+  // permissions on top. A leader is NOT a value of `enum Role` — never add
+  // `lider_*` members to the enum (docs/28 §7 R1). Not to be confused with
+  // `liderEmail` below, which is the e-mail CC'd on decisions (docs/19 quirk
+  // #14). Owned like `role`: on `magspace` rows without `roleOverride` it is
+  // synced from `StanowiskoRoleMapping.lider`, otherwise an admin sets it.
+  // The pair (role, lider) is guarded by CHECK `user_lider_requires_lider_role`;
+  // the pair (roleOverride, lider) is validated by the api service (L2), not
+  // the DB — see docs/28 §7 R2.
+  lider              Boolean       @default(false)
 
   // role-specific fields (NULL for other roles)
   // planista — per-role tech debt; same denormalization pattern as the
@@ -378,9 +391,20 @@ model StanowiskoRoleMapping {
   // Display name as MAGSpace served it, snapshotted so the admin table still
   // reads sensibly when the directory is unreachable.
   stanowiskoName String
-  // Never `admin` or `przewoznik` — enforced in the Zod schema, not the DB,
-  // because Prisma enums cannot be narrowed per column.
+  // Never `admin` or `przewoznik` — enforced in the Zod schema AND in the DB by
+  // CHECK `stanowisko_role_mapping_role_not_privileged` (migration
+  // 20260909120000_sso_google_and_magspace; a CHECK because Prisma enums cannot
+  // be narrowed per column).
   role           Role
+
+  // Leader flag handed out together with `role` to everyone on this stanowisko
+  // (docs/28 §2) — e.g. PLANISTA_LIDER → planista + lider. Same meaning as
+  // `User.lider`: an add-on over the base role, allowed only for the roles in
+  // `LIDER_ROLES` (planista, dyspozytor, opiekun, pracownik, eksport); NOT a
+  // value of `enum Role` (docs/28 §7 R1) and unrelated to `User.liderEmail`.
+  // The pair (role, lider) is guarded by CHECK
+  // `stanowisko_role_mapping_lider_requires_lider_role`.
+  lider Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -296,6 +296,8 @@ Two reasonable cleanups (both backlog, neither urgent):
 
 Source of truth: `schema.prisma` (User model — `liderEmail String?` with comment pointing here); used in legacy email-CC logic.
 
+**Not to be confused with `User.lider`** (2026-09-25, [docs/28](28-lider-roles-plan.md)) — the boolean *leader flag* over a role (`lider_planista` = `role: planista` + `lider: true`). `liderEmail` is an address to CC; `lider` is the user's own status; there is no link between them today. The admin form labels the e-mail field «E-mail lidera (CC)» for that reason. Once a "who is whose leader" structure exists (needed for vehicle hand-over approvals), `liderEmail` will be derived from it and this field goes away.
+
 **What NOT to do:** do not expose `liderEmail` as a User-API-level field beyond the planista login flow. Do not surface it in admin's User-edit form for non-planista roles. Do not require it at User-create time — set it only after the assigned-role workflow knows the role is `planista`.
 
 ---

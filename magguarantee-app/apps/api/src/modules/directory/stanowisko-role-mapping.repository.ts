@@ -15,6 +15,11 @@ export type StanowiskoRoleMappingRow = {
   stanowiskoCode: string;
   stanowiskoName: string;
   role: AssignableRole;
+  /**
+   * Leader flag handed out with `role` (docs/28 §2). Never true outside
+   * `LIDER_ROLES` — CHECK `stanowisko_role_mapping_lider_requires_lider_role`.
+   */
+  lider: boolean;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -40,16 +45,21 @@ export class StanowiskoRoleMappingRepository {
   /**
    * Upsert keyed on the code. `stanowiskoName` is refreshed on every write
    * because it is only a cache of MAGSpace's label — the code is the identity.
+   *
+   * `lider` is always written explicitly, together with `role`: the caller has
+   * already resolved "omitted = keep the stored flag" and validated the pair,
+   * and one statement is what the CHECK needs to see the final pair.
    */
   async upsert(
     code: string,
     name: string,
     role: AssignableRole,
+    lider: boolean,
   ): Promise<StanowiskoRoleMappingRow> {
     const row = await this.prisma.tx.stanowiskoRoleMapping.upsert({
       where: { stanowiskoCode: code },
-      create: { stanowiskoCode: code, stanowiskoName: name, role },
-      update: { stanowiskoName: name, role },
+      create: { stanowiskoCode: code, stanowiskoName: name, role, lider },
+      update: { stanowiskoName: name, role, lider },
     });
     return row as unknown as StanowiskoRoleMappingRow;
   }

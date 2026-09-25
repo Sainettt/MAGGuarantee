@@ -8,11 +8,15 @@ import { z } from 'zod';
 
 import { RoleSchema, UuidSchema } from './common';
 
-/** Compact `{id, login, name}` used by the people-pickers. */
+/**
+ * Compact `{id, login, name, lider}` used by the people-pickers. `lider` lets a
+ * picker label a leader "(lider)" (docs/28); it does not change who is listed.
+ */
 export const LookupUserSchema = z.object({
   id: UuidSchema,
   login: z.string(),
   name: z.string().nullable(),
+  lider: z.boolean(),
 });
 export type LookupUserDto = z.infer<typeof LookupUserSchema>;
 
@@ -73,6 +77,8 @@ export const LookupUserAdminSchema = z.object({
   login: z.string(),
   name: z.string().nullable(),
   role: RoleSchema,
+  /** Leader flag over `role` (docs/28). */
+  lider: z.boolean(),
   active: z.boolean(),
 });
 export type LookupUserAdminDto = z.infer<typeof LookupUserAdminSchema>;

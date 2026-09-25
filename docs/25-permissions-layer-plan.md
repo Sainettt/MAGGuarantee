@@ -4,6 +4,10 @@
 > [24-sso-magspace-and-permissions-plan.md](24-sso-magspace-and-permissions-plan.md)
 > по фактическому состоянию кода на `a50077c`. Где этот документ расходится с
 > §3 docs/24, прав этот документ: §3 писался до инвентаризации.
+>
+> **Роли-лидеры (2026-09-25):** `lider_*` — не новые значения `Role`, а флаг
+> `User.lider`; как он встраивается в B1 (`LIDER_PERMISSIONS`,
+> `permissionsFor(role, lider)`), B2 и B6 — [28-lider-roles-plan.md](28-lider-roles-plan.md) §5.
 
 ## 0. Что меняется и что нет
 
@@ -168,6 +172,17 @@
   и уходит в allowlist `AUTHENTICATED_ONLY` с причиной.
 - **`claims.verify` не делится на verify/decide.** Сегодня у них одинаковые
   роли. Если понадобится развести, это одно изменение в каталоге.
+- **Лидеры** ([docs/28](28-lider-roles-plan.md), реализовано 2026-09-25) —
+  флаг `User.lider` над пятью ролями (`LIDER_ROLES` в shared), не колонка
+  матрицы. В каталог входит как
+  `LIDER_PERMISSIONS: Partial<Record<LiderRole, readonly Permission[]>>`
+  (на старте `{}`) и `permissionsFor(role, lider = false) =
+  ROLE_PERMISSIONS[role] ∪ (lider ? LIDER_PERMISSIONS[role] ?? [] : [])`;
+  тест: `permissionsFor(r, true) ⊇ permissionsFor(r, false)` — лидер только
+  добавляет. В сгенерированной матрице под-строка «+ lider» появляется только
+  у непустых. Эндпоинт только для лидера записывается в фикстуре B1 как
+  `["admin", "planista+lider"]`. Scope лидера (если понадобится) живёт
+  **внутри** ветки базовой роли — это по-прежнему «scope на роли».
 
 ---
 
@@ -192,7 +207,7 @@ Runtime-изменений ноль, PR можно мержить отдельн
 | Что | Где |
 |---|---|
 | `@RequirePermission(...perms)`: any-of, как `@Roles` | `modules/auth/decorators/require-permission.decorator.ts` |
-| `AuthUser.permissions: ReadonlySet<Permission>` — считается **один раз** в `JwtAccessStrategy.validate` (пользователь и так перечитывается из БД на каждом запросе). Отсюда B6 возьмёт overrides, не трогая guard и сервисы | `modules/auth/strategies/*`, `decorators/current-user.decorator.ts` |
+| `AuthUser.permissions: ReadonlySet<Permission>` — считается **один раз** в `JwtAccessStrategy.validate` (пользователь и так перечитывается из БД на каждом запросе) из пары `(user.role, user.lider)` — `lider` уже в `AuthUser` с 2026-09-25 (docs/28, DB-sourced). Отсюда B6 возьмёт overrides, не трогая guard и сервисы. Фикстура B1 при этом не меняется: `@Roles` лидера не знает | `modules/auth/strategies/*`, `decorators/current-user.decorator.ts` |
 | `can(user, p)` — тонкий помощник для сервисов | `common/authz/can.ts` |
 | `PermissionsGuard` глобально, рядом с `RolesGuard`. Переходный период: оба живут, эндпоинт несёт **либо** `@Roles`, **либо** `@RequirePermission` | `modules/auth/guards/permissions.guard.ts`, `app.module.ts` |
 | Замена `@Roles` → `@RequirePermission` по таблице §2, модуль за модулем. Заодно убрать 22 избыточных `@UseGuards(RolesGuard)` | 24 контроллера |
@@ -249,7 +264,7 @@ Ownership-guards (`@OpiekunOwns`, `@CarrierOwns`) не меняются.
 | Что | Решение |
 |---|---|
 | Хранение | `User.extraPermissions String[]` и `User.deniedPermissions String[]` (text[]); валидация Zod по `PERMISSIONS` на записи, неизвестные строки на чтении игнорируются с warn. **Нужны оба** (решение 2026-09-14): и добавить право сверх роли, и отозвать право у конкретного человека |
-| Вычисление | `JwtAccessStrategy.validate`: `(permissionsFor(role) ∪ extraPermissions) − deniedPermissions` → `AuthUser.permissions`. Отзыв побеждает добавление. Guard, сервисы и `/auth/me` не меняются |
+| Вычисление | `JwtAccessStrategy.validate`: `(permissionsFor(role, lider) ∪ extraPermissions) − deniedPermissions` → `AuthUser.permissions` (`lider` — флаг лидера, docs/28). Отзыв побеждает добавление. Guard, сервисы и `/auth/me` не меняются |
 | Защита от «отзыв ломает поток» | Отзыв сам по себе безопасен для данных (доступ только сужается), но может оставить бессмысленный экран: например, `claims.verify` без `claims.read`. `DEPENDENT_PERMISSIONS` в shared — при отзыве базового права UI предупреждает и предлагает отозвать зависимые; API не падает, просто отвечает 403 |
 | Защита от «capability без scope» | `GRANTABLE_EXTRA: Partial<Record<Role, Permission[]>>` в shared — какие права можно добавить какой роли. Пример запрета: `planista` + `claims.verify` бессмысленно (нет ветки в scope wniosków). Нарушение → 422 на API и CHECK-подобная проверка в сервисе |
 | UI | `UserSheet`: блок «Uprawnienia indywidualne» — «Dodatkowe» (чекбоксы из `GRANTABLE_EXTRA[role]`) и «Odebrane» (чекбоксы из `permissionsFor(role)`). Для `managedBy = magspace` оба поля редактируемые: reconcile их не трогает |

@@ -7,6 +7,7 @@
 import { z } from 'zod';
 
 import { AssignableRole } from './auth';
+import { refineLiderPair } from './common';
 import { UserDtoSchema } from './users';
 
 /**
@@ -25,6 +26,12 @@ export const StanowiskoRoleDtoSchema = z.object({
   name: z.string(),
   /** `null` = no mapping = no access (sign-in fails with SSO_NO_ROLE). */
   role: AssignableRole.nullable(),
+  /**
+   * Leader flag handed out together with `role` to everyone on this stanowisko
+   * (docs/28 §2) — e.g. `PLANISTA_LIDER` → planista + lider. Always `false` for
+   * an unmapped row.
+   */
+  lider: z.boolean(),
   /**
    * False when the code exists only in our table. Either MAGSpace is
    * unreachable (then this is false for every row — check `magspaceOk`) or the
@@ -49,12 +56,23 @@ export const StanowiskoRoleListDtoSchema = z.object({
 });
 export type StanowiskoRoleListDto = z.infer<typeof StanowiskoRoleListDtoSchema>;
 
-/** `PUT /sso/stanowisko-roles/:code` */
+/**
+ * `PUT /sso/stanowisko-roles/:code`
+ *
+ * `lider` is optional and NOT defaulted: omitted means "keep the stored flag"
+ * (`false` for a new row), so a client that sends only `{ role }` never wipes
+ * a leader mapping. The refine rejects an explicit `lider: true` next to a role
+ * outside `LIDER_ROLES`; the service checks the resulting pair (stored flag +
+ * new role) as well — e.g. `{ role: 'weryfikator' }` on a leader row is 422
+ * `USER_LIDER_REQUIRES_LIDER_ROLE`, never a silent loss of the flag.
+ */
 export const SetStanowiskoRoleSchema = z
   .object({
     role: AssignableRole,
+    lider: z.boolean().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine(refineLiderPair);
 export type SetStanowiskoRoleDto = z.infer<typeof SetStanowiskoRoleSchema>;
 
 /**
@@ -111,13 +129,20 @@ export type SsoAccessDenialListDto = z.infer<typeof SsoAccessDenialListDtoSchema
  * `role` excludes `admin`/`przewoznik` for the same reason `roleOverride` does
  * (CHECK `user_role_override_not_privileged`). The e-mail is normalised the way
  * MAGSpace normalises its own lookup key.
+ *
+ * `lider` (docs/28 §2) is written together with `role` / `roleOverride`; this
+ * is how a DAF / opiekun / eksport leader is granted, since no stanowisko maps
+ * to one. Optional without a Zod default (the service defaults it to `false`),
+ * so the body type still accepts `{ email, role }`.
  */
 export const GrantSsoAccessSchema = z
   .object({
     email: z.string().trim().toLowerCase().email().max(160),
     role: AssignableRole,
+    lider: z.boolean().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine(refineLiderPair);
 export type GrantSsoAccessDto = z.infer<typeof GrantSsoAccessSchema>;
 
 /**

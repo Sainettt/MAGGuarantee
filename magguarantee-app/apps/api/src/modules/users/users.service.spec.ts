@@ -1,5 +1,6 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 
+import { AuditContext, type AuditContextStore } from '../../common/audit';
 import { PasswordService } from '../auth/password.service';
 import { RefreshTokenRepository } from '../auth/refresh-token.repository';
 import {
@@ -32,6 +33,7 @@ function makeRow(overrides: Partial<UserRow> = {}): UserRow {
     magspaceEmployeeId: null,
     directorySyncedAt: null,
     roleOverride: null,
+    lider: false,
     createdAt: now,
     updatedAt: now,
     deletedAt: null,
@@ -406,6 +408,251 @@ describe('UsersService', () => {
       expect(dto.authProvider).toBe('google');
       expect(dto.roleOverride).toBe('weryfikator');
       expect(dto.directorySyncedAt).toBe('2026-09-01T10:00:00.000Z');
+    });
+  });
+
+  // ── Leader flag (docs/28) ────────────────────────────────
+
+  describe('leader flag', () => {
+    const LIDER = { response: { extensions: { code: 'USER_LIDER_REQUIRES_LIDER_ROLE' } } };
+    const MANAGED = (fields: string[]) => ({
+      response: { extensions: { code: 'USER_MANAGED_BY_MAGSPACE', fields } },
+    });
+
+    const managed = (over: Partial<UserRow> = {}): UserRow =>
+      makeRow({
+        id: 'u-mag',
+        login: 'jan.kowalski',
+        email: 'jan.kowalski@magtrans.eu',
+        role: 'planista',
+        managedBy: 'magspace',
+        authProvider: 'google',
+        magspaceEmployeeId: 'emp-1',
+        ...over,
+      });
+    const local = (over: Partial<UserRow> = {}): UserRow =>
+      makeRow({ id: 'u-loc', login: 'anna', role: 'planista', managedBy: 'local', ...over });
+
+    // ── create ──
+
+    it('create persists the flag for a leader role and echoes it', async () => {
+      const { svc, repo } = makeService();
+      const out = await svc.create({
+        login: 'lead',
+        email: 'lead@magtrans.eu',
+        name: 'Lead',
+        role: 'eksport',
+        lider: true,
+      });
+      expect(repo.create).toHaveBeenCalledWith(expect.objectContaining({ role: 'eksport', lider: true }));
+      expect(out.lider).toBe(true);
+    });
+
+    it('create defaults the flag to false', async () => {
+      const { svc, repo } = makeService();
+      await svc.create({ login: 'x', email: 'x@magtrans.eu', name: 'X', role: 'planista' });
+      expect(repo.create).toHaveBeenCalledWith(expect.objectContaining({ lider: false }));
+    });
+
+    it.each(['admin', 'weryfikator'] as const)(
+      'create refuses lider on %s with 422 USER_LIDER_REQUIRES_LIDER_ROLE (pipe bypassed)',
+      async (role) => {
+        const { svc, repo } = makeService();
+        await expect(
+          svc.create({ login: 'x', email: 'x@magtrans.eu', name: 'X', role, lider: true }),
+        ).rejects.toMatchObject(LIDER);
+        expect(repo.create).not.toHaveBeenCalled();
+      },
+    );
+
+    // ── list / toDto ──
+
+    it('list forwards the lider filter to the repository', async () => {
+      const { svc, repo } = makeService();
+      await svc.list({ limit: 50, lider: true });
+      expect(repo.list).toHaveBeenCalledWith(expect.objectContaining({ lider: true, limit: 50 }));
+      await svc.list({ limit: 50, lider: false });
+      expect(repo.list).toHaveBeenLastCalledWith(expect.objectContaining({ lider: false }));
+    });
+
+    it('list without the filter leaves it unset', async () => {
+      const { svc, repo } = makeService();
+      await svc.list({ limit: 50 });
+      expect((repo.list as jest.Mock).mock.calls[0][0].lider).toBeUndefined();
+    });
+
+    it('toDto surfaces lider', () => {
+      const { svc } = makeService();
+      expect(svc.toDto(local({ lider: true })).lider).toBe(true);
+      expect(svc.toDto(local()).lider).toBe(false);
+    });
+
+    // ── update: the (role, lider) pair on the merged row (rule D.2 / D.4) ──
+
+    it('a locally-managed leader role can be made a leader', async () => {
+      const { svc, repo } = makeService([local()]);
+      await expect(svc.update('u-loc', { lider: true })).resolves.toMatchObject({ lider: true });
+      expect(repo.update).toHaveBeenCalledWith('u-loc', { lider: true });
+    });
+
+    it('partial PATCH { role: weryfikator } on a leader is 422 — never a CHECK-violation 500', async () => {
+      const { svc, repo } = makeService([local({ lider: true })]);
+      await expect(svc.update('u-loc', { role: 'weryfikator' })).rejects.toMatchObject({
+        response: { extensions: { code: 'USER_LIDER_REQUIRES_LIDER_ROLE', field: 'role' } },
+      });
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('the same PATCH with lider: false passes, role and flag in ONE update', async () => {
+      const { svc, repo } = makeService([local({ lider: true })]);
+      await expect(
+        svc.update('u-loc', { role: 'weryfikator', lider: false }),
+      ).resolves.toMatchObject({ role: 'weryfikator', lider: false });
+      expect(repo.update).toHaveBeenCalledTimes(1);
+      expect(repo.update).toHaveBeenCalledWith(
+        'u-loc',
+        expect.objectContaining({ role: 'weryfikator', lider: false }),
+      );
+    });
+
+    it('lider: true on a stored non-leader role is 422', async () => {
+      const { svc } = makeService([local({ role: 'weryfikator' })]);
+      await expect(svc.update('u-loc', { lider: true })).rejects.toMatchObject(LIDER);
+    });
+
+    it('moving a leader between leader roles keeps the flag', async () => {
+      const { svc } = makeService([local({ role: 'planista', lider: true })]);
+      await expect(svc.update('u-loc', { role: 'opiekun' })).resolves.toMatchObject({
+        role: 'opiekun',
+        lider: true,
+      });
+    });
+
+    it('a no-op PATCH on a leader passes (the stored pair is valid by CHECK)', async () => {
+      const { svc } = makeService([local({ lider: true })]);
+      await expect(svc.update('u-loc', { name: 'Nowa' })).resolves.toMatchObject({ lider: true });
+    });
+
+    it('a roleOverride the next sync would pair with the flag is checked too (R2)', async () => {
+      // role stays planista (valid), but the sync would write weryfikator + lider.
+      const { svc, repo } = makeService([managed({ lider: true })]);
+      await expect(svc.update('u-mag', { roleOverride: 'weryfikator' })).rejects.toMatchObject({
+        response: { extensions: { code: 'USER_LIDER_REQUIRES_LIDER_ROLE', field: 'roleOverride' } },
+      });
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('…and passes when the same body drops the flag', async () => {
+      const { svc, repo } = makeService([managed({ lider: true })]);
+      await expect(
+        svc.update('u-mag', { roleOverride: 'weryfikator', lider: false }),
+      ).resolves.toMatchObject({ roleOverride: 'weryfikator', lider: false });
+      expect(repo.update).toHaveBeenCalledWith('u-mag', { roleOverride: 'weryfikator', lider: false });
+    });
+
+    it('variant A: { roleOverride: planista, lider: true } on a magspace weryfikator is 422 — role is not rewritten', async () => {
+      const { svc, repo } = makeService([managed({ role: 'weryfikator' })]);
+      await expect(
+        svc.update('u-mag', { roleOverride: 'planista', lider: true }),
+      ).rejects.toMatchObject({
+        response: { extensions: { code: 'USER_LIDER_REQUIRES_LIDER_ROLE', field: 'role' } },
+      });
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('{ roleOverride, lider } is fine when the stored role already is that leader role', async () => {
+      const { svc, repo } = makeService([managed({ role: 'planista' })]);
+      await expect(
+        svc.update('u-mag', { roleOverride: 'planista', lider: true }),
+      ).resolves.toMatchObject({ role: 'planista', roleOverride: 'planista', lider: true });
+      // `role` is left to the next sign-in, as for every override (docs/24).
+      expect(repo.update).toHaveBeenCalledWith('u-mag', { roleOverride: 'planista', lider: true });
+    });
+
+    // ── update: who owns the flag on a magspace account (rule D.3) ──
+
+    it('magspace without an override: the flag belongs to the mapping — 422 USER_MANAGED_BY_MAGSPACE [lider]', async () => {
+      const { svc, repo } = makeService([managed()]);
+      await expect(svc.update('u-mag', { lider: true })).rejects.toMatchObject(MANAGED(['lider']));
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('lists lider next to role when both are refused', async () => {
+      const { svc } = makeService([managed()]);
+      await expect(
+        svc.update('u-mag', { role: 'opiekun', lider: true }),
+      ).rejects.toMatchObject(MANAGED(['role', 'lider']));
+    });
+
+    it('restating the current flag is not a change', async () => {
+      const { svc } = makeService([managed({ lider: true })]);
+      await expect(svc.update('u-mag', { lider: true, name: 'Jan K.' })).resolves.toMatchObject({
+        name: 'Jan K.',
+      });
+    });
+
+    it('magspace with a stored override: the admin owns the flag', async () => {
+      // A DAF leader — MAGSpace has no DAF_LIDER.
+      const { svc, repo } = makeService([managed({ role: 'opiekun', roleOverride: 'opiekun' })]);
+      await expect(svc.update('u-mag', { lider: true })).resolves.toMatchObject({ lider: true });
+      expect(repo.update).toHaveBeenCalledWith('u-mag', { lider: true });
+    });
+
+    it('clearing the override in the same body gives the flag back to the mapping → 422', async () => {
+      const { svc } = makeService([managed({ role: 'opiekun', roleOverride: 'opiekun' })]);
+      await expect(
+        svc.update('u-mag', { roleOverride: null, lider: true }),
+      ).rejects.toMatchObject(MANAGED(['lider']));
+    });
+
+    it('hand-back to local allows the flag change', async () => {
+      const { svc, repo } = makeService([managed()]);
+      await expect(
+        svc.update('u-mag', { managedBy: 'local', lider: true }),
+      ).resolves.toMatchObject({ managedBy: 'local', lider: true, roleOverride: null });
+      expect(repo.update).toHaveBeenCalledWith(
+        'u-mag',
+        expect.objectContaining({ managedBy: 'local', lider: true, roleOverride: null }),
+      );
+    });
+
+    it('hand-back clears roleOverride BEFORE the pair check (rule D.1)', async () => {
+      // The stale override (weryfikator) would fail the (roleOverride, lider)
+      // pair — but the hand-back discards it, so only (planista, lider) counts.
+      const { svc } = makeService([managed({ role: 'planista', roleOverride: 'weryfikator' })]);
+      await expect(
+        svc.update('u-mag', { managedBy: 'local', lider: true }),
+      ).resolves.toMatchObject({ role: 'planista', roleOverride: null, lider: true });
+    });
+
+    // ── audit ──
+
+    it('stashes the pre-image for the updateUser audit row, flag included', async () => {
+      const existing = local({ lider: false });
+      const { svc } = makeService([existing]);
+      const store: AuditContextStore = {
+        actor: { userId: 'admin-1', userRole: 'admin' } as AuditContextStore['actor'],
+        ipAddress: null,
+      };
+
+      const out = await AuditContext.run(store, () => svc.update('u-loc', { lider: true }));
+
+      expect(store.before).toEqual(svc.toDto(existing));
+      expect(store.before).toMatchObject({ lider: false });
+      expect(out.lider).toBe(true);
+    });
+
+    it('stashes nothing when the update is refused', async () => {
+      const { svc } = makeService([local({ lider: true })]);
+      const store: AuditContextStore = {
+        actor: { userId: 'admin-1', userRole: 'admin' } as AuditContextStore['actor'],
+        ipAddress: null,
+      };
+
+      await expect(
+        AuditContext.run(store, () => svc.update('u-loc', { role: 'weryfikator' })),
+      ).rejects.toMatchObject(LIDER);
+      expect(store.before).toBeUndefined();
     });
   });
 

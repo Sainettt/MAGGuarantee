@@ -18,6 +18,7 @@ import type { Role, UserDto } from '@magguarantee/shared';
 import { ChangePasswordDialog } from '@/components/auth/ChangePasswordDialog';
 import { logout } from '@/lib/api/auth';
 import { ME_QUERY_KEY } from '@/lib/hooks/useAuth';
+import { roleLabelKey } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 
 interface UserMenuProps {
@@ -65,7 +66,8 @@ export function UserMenu({ user }: UserMenuProps) {
   };
 
   const initial = user.name.trim().slice(0, 1).toUpperCase() || 'U';
-  const roleKey = user.role as Role;
+  // «Lider planistów» for a leader (docs/28); the base role label otherwise.
+  const roleLabel = t(roleLabelKey(user.role as Role, user.lider));
 
   return (
     <div ref={ref} className="relative">
@@ -97,7 +99,7 @@ export function UserMenu({ user }: UserMenuProps) {
         >
           <div className="px-3 py-2 border-b border-border">
             <div className="font-bold text-text">{user.name}</div>
-            <div className="text-text-sub mt-0.5">{t(`roles.${roleKey}`)}</div>
+            <div className="text-text-sub mt-0.5">{roleLabel}</div>
             <div className="text-text-sub mt-0.5 text-[11px]">
               {user.email}
             </div>

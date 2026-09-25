@@ -44,6 +44,14 @@
   специфичные для конкретного 422 (например `nextAllowedAt: ISO` для
   vehicle-cooldown). Никаких глобальных ключей не зарезервировано — каждый
   сервис документирует свои в разделе соответствующего endpoint-а.
+- **422 из валидационного pipe** (2026-09-25, docs/28). Shared-схема может
+  выразить бизнес-правило как `superRefine`, пометив issue `code: 'custom'` +
+  `params.code` (первое и пока единственное — `refineLiderPair` →
+  `USER_LIDER_REQUIRES_LIDER_ROLE`). Если **все** ошибки Zod такие,
+  `ZodValidationPipe` отвечает не 400, а **422** с `extensions.code` и
+  `issues` — тем же кодом, что вернул бы сервис для того же правила на слитой
+  строке; любая ошибка формы в смеси оставляет обычный 400. Правило помечается
+  так только когда у него есть машинный код, который читает web.
 
 Стандартные коды:
 
@@ -106,7 +114,7 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 | POST `/auth/resend-code` | `resendLoginCode` (`Code.gs:1131`) | Принимает `{sessionToken}`. Rate-limited. |
 | POST `/auth/refresh` | — (новое, не было в GAS) | Refresh access из refresh. Rotation. `user` несёт `mustChangePassword`. |
 | POST `/auth/logout` | — | Инвалидирует refresh-токен (записывает в `revokedAt`). |
-| GET `/auth/me` | `validateCaller` | Возвращает текущего user-а на основе access-токена (вкл. `mustChangePassword`). |
+| GET `/auth/me` | `validateCaller` | Возвращает текущего user-а на основе access-токена (вкл. `mustChangePassword` и `lider` — флаг лидера, docs/28; из БД, не из JWT). |
 | POST `/auth/forgot-password` | — (новое) | `{login}`. **Always 200** `{sessionToken, maskedEmail}` (anti-enumeration: decoy для неизвестного login). Шлёт reset-код на email (Redis `pwreset:*`, attempts/lockout как 2FA). Rate 5/min/IP. |
 | POST `/auth/reset-password` | — (новое) | `{sessionToken, code, newPassword}` → 204. Верифицирует код, хеширует, ставит `passwordChangedAt`, чистит `mustChangePassword`, **отзывает все refresh-токены**. Без авто-логина. Rate 10/min. |
 | POST `/auth/resend-reset-code` | — (новое) | `{sessionToken}`. Cooldown как `resend-code`. Rate 2/min. |
@@ -119,10 +127,10 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 
 | Method + Path | Назначение |
 |---|---|
-| GET `/users` | Список всех пользователей (фильтр `role=`) |
+| GET `/users` | Список всех пользователей (фильтры `role=`, `active=`, `lider=true\|false` — строго строки `true`/`false`, иначе 400; `lider=true` — только лидеры). |
 | GET `/users/:id` | Деталь |
-| POST `/users` | Создать (admin) |
-| PATCH `/users/:id` | Обновить. На `managedBy = magspace` менять `role`/`active` нельзя (422 `USER_MANAGED_BY_MAGSPACE`), кроме как вместе с `managedBy: 'local'`. **Переход `magspace` → `local` принудительно обнуляет `roleOverride`** (побеждает `roleOverride` в том же теле); текущая `role` остаётся и дальше принадлежит админке. |
+| POST `/users` | Создать (admin). `lider?: boolean` (docs/28, по умолчанию `false`) — только для роли из `LIDER_ROLES` (`planista`/`dyspozytor`/`opiekun`/`pracownik`/`eksport`), иначе **422** `USER_LIDER_REQUIRES_LIDER_ROLE` (pipe `CreateUserRequestSchema`, см. «Формат ответов»; сервис проверяет повторно). |
+| PATCH `/users/:id` | Обновить. На `managedBy = magspace` менять `role`/`active` нельзя (422 `USER_MANAGED_BY_MAGSPACE`), кроме как вместе с `managedBy: 'local'`. **Переход `magspace` → `local` принудительно обнуляет `roleOverride`** (побеждает `roleOverride` в том же теле); текущая `role` остаётся и дальше принадлежит админке. **`lider?: boolean`** (docs/28): пара `lider ⇒ role ∈ LIDER_ROLES` проверяется на **слитой** строке и для итоговой `role`, и для итогового `roleOverride` (если не null) → **422** `USER_LIDER_REQUIRES_LIDER_ROLE` с `extensions.field` = `role` \| `roleOverride`; у лидера смена роли на роль вне `LIDER_ROLES` требует `lider: false` в том же теле (иначе 422, а не 500 от CHECK). На `magspace` флаг, **отличающийся** от текущего, допустим только при `roleOverride` (стоит или ставится в этом теле) либо вместе с `managedBy: 'local'`, иначе `USER_MANAGED_BY_MAGSPACE` с `fields ∋ 'lider'`; неизменённое значение проходит. `role` при установке `roleOverride` не переписывается, поэтому `{ roleOverride: 'planista', lider: true }` у `magspace`-weryfikatora — 422 (лидерство после следующего входа или через «Nadaj dostęp»). Audit `updateUser` пишет `before` → `after` (вкл. `lider`). |
 | POST `/users/:id/deactivate` | `Aktywny=Nie` + email |
 | POST `/users/:id/reactivate` | + email |
 | POST `/users/:id/reset-password` | Body `{mode:'generate'}` или `{mode:'custom', password}`. Ставит `mustChangePassword=true` + `passwordChangedAt`, отзывает refresh-токены юзера, возвращает `temporaryPassword`. (Email-доставка — Phase 9.) |
@@ -551,6 +559,8 @@ DB CHECK enforces `returnCountry` length 2..8 (covers `EL`) and `returnPostalCod
 | GET `/lookups/trailer-types` | `getNaczepyTypyList` (alias) |
 | GET `/lookups/teams` | (Phase 11) — команды с составом для дропдауна формы машины. Отдаёт `[{ id, code, name, active, dispatchers: [{ id, name, login, active }] }]` (включает `active` диспетчера — веб рисует preview состава без N+1). Read-only, любой залогиненный (состав команды non-sensitive — без ставок). |
 
+> **`lider` в пикерах (2026-09-25, docs/28).** `/lookups/dyspozytor`, `/lookups/planisci`, `/lookups/opiekuni` (`{ id, login, name, lider }`) и admin-автокомплит `/lookups/users` (`{ …, role, lider, active }`) отдают флаг лидера — только чтобы подписать «(lider)» / «Lider planistów»; **состав списков не меняется**: лидер остаётся planistą и попадает в пикер планистов как раньше.
+
 ### External integrations — `/api/v1/integrations`
 
 | Method + Path | GAS | Внешний API |
@@ -579,11 +589,11 @@ DB CHECK enforces `returnCountry` length 2..8 (covers `EL`) and `returnPostalCod
 
 | Method + Path | Назначение |
 |---|---|
-| GET `/sso/stanowisko-roles` | `{ items, magspaceOk, lastReconcileAt }`. `items` — **полное объединение**: каждое stanowisko, которое отдаёт MAGSpace (в т.ч. несопоставленные, `role: null`), плюс сохранённые строки, чьих кодов MAGSpace больше не знает (`knownToMagspace: false`). При недоступном MAGSpace отдаёт только сохранённые строки и `magspaceOk: false` — прятать текущий маппинг во время аварии было бы ровно наоборот. |
-| PUT `/sso/stanowisko-roles/:code` | `{ role }` → upsert. Идемпотентно: код — это идентичность. `role` из 6 назначаемых (без `admin`/`przewoznik`); код должен быть UPPER_SNAKE. |
+| GET `/sso/stanowisko-roles` | `{ items, magspaceOk, lastReconcileAt }`. `items` — **полное объединение**: каждое stanowisko, которое отдаёт MAGSpace (в т.ч. несопоставленные, `role: null`), плюс сохранённые строки, чьих кодов MAGSpace больше не знает (`knownToMagspace: false`). При недоступном MAGSpace отдаёт только сохранённые строки и `magspaceOk: false` — прятать текущий маппинг во время аварии было бы ровно наоборот. Каждая строка несёт `lider: boolean` (docs/28) — флаг лидера, который stanowisko выдаёт вместе с ролью; у несопоставленных `false`. |
+| PUT `/sso/stanowisko-roles/:code` | `{ role, lider? }` → upsert. Идемпотентно: код — это идентичность. `role` из 6 назначаемых (без `admin`/`przewoznik`); код должен быть UPPER_SNAKE. **`lider` не задан = сохранить текущий флаг** (у новой строки `false`), поэтому клиент, шлющий только `{ role }`, лидерство не стирает. Итоговая пара `(role, lider)` вне `LIDER_ROLES` → **422** `USER_LIDER_REQUIRES_LIDER_ROLE` — перевод строки-лидера на `weryfikator` требует явного `lider: false`. Пара проверяется **до** запроса в MAGSpace. Audit `setStanowiskoRole` пишет `before` для существующей строки. |
 | DELETE `/sso/stanowisko-roles/:code` | 204. Убирает маппинг — держатели теряют доступ на следующем входе или прогоне reconcile. 404, если строки не было. |
 | GET `/sso/access-denials` | `{ items }` — последние отказы `SSO_NO_ROLE`, читаются из audit-лога (`system.denyDirectoryAccess`), отдельной таблицы заявок нет. **Одна строка на человека**: повторные отказы одного адреса (без учёта регистра) схлопываются в последний; сканируется окно в 200 событий, в ответе ≤ 20 человек. Строка: `{ email, stanowiskoCode, at, status: 'pending' \| 'granted', userId: uuid \| null }` — `granted` + `userId`, если для адреса сейчас есть активная неудалённая учётка (неважно, как она появилась). |
-| POST `/sso/access-grants` | «Nadaj dostęp» одним шагом (docs/24 §10). Body `{ email, role }` (`GrantSsoAccessSchema`, `.strict()`, email trim+lowercase; `role` — 6 назначаемых). Адрес сверяется с MAGSpace, затем: **учётки нет** → создаётся (`managedBy=magspace`, `role = roleOverride = role`, без пароля, `authProvider=local` до первого входа через Google, login — из local-part адреса); **есть `magspace`-учётка** → `role = roleOverride = role`, `active = true` (reconcile сам не реактивирует и override к `role` не применяет). Override ставится, даже если stanowisko тем временем сопоставлено — это осознанное решение админа. Ответ **200** `{ user: UserDtoFull, outcome: 'created' \| 'reactivated' \| 'updated' }`. Ошибки (`extensions.code`): **503** `SSO_DIRECTORY_UNAVAILABLE`; **422** `SSO_GRANT_NOT_EMPLOYEE` (в MAGSpace нет адреса); **422** `SSO_GRANT_EMPLOYEE_INACTIVE`; **409** `SSO_GRANT_ACCOUNT_CONFLICT` + `extensions.reason` = `privileged` (admin/przewoznik) \| `local` (`managedBy=local` — править в Użytkownikach) \| `deleted` (адрес держит soft-deleted строка — уникальность email включает удалённых) \| `unique` (проиграна гонка на login / `magspaceEmployeeId`). Audit `grantSsoAccess` (актор — admin, `targetKey` = login, `before` = `{ user: { role, active, managedBy, roleOverride } }`, при создании пусто; `metadata` = `{ outcome, stanowiskoCode, magspaceEmployeeId }`), `@Audit({ manualTransaction: true })` — хендлер ходит в MAGSpace. |
+| POST `/sso/access-grants` | «Nadaj dostęp» одним шагом (docs/24 §10). Body `{ email, role, lider? }` (`GrantSsoAccessSchema`, `.strict()`, email trim+lowercase; `role` — 6 назначаемых; `lider` — docs/28, по умолчанию `false`, только для роли из `LIDER_ROLES`, иначе 422 `USER_LIDER_REQUIRES_LIDER_ROLE` ещё до запроса в MAGSpace; это **единственный одношаговый путь** выдать лидера DAF / opiekunów wniosków / eksportu). Адрес сверяется с MAGSpace, затем: **учётки нет** → создаётся (`managedBy=magspace`, `role = roleOverride = role`, `lider`, без пароля, `authProvider=local` до первого входа через Google, login — из local-part адреса); **есть `magspace`-учётка** → `role = roleOverride = role`, `lider`, `active = true` одним UPDATE (reconcile сам не реактивирует и override к `role` не применяет; флаг override-учётки sync больше не трогает). Override ставится, даже если stanowisko тем временем сопоставлено — это осознанное решение админа. Ответ **200** `{ user: UserDtoFull, outcome: 'created' \| 'reactivated' \| 'updated' }`. Ошибки (`extensions.code`): **503** `SSO_DIRECTORY_UNAVAILABLE`; **422** `SSO_GRANT_NOT_EMPLOYEE` (в MAGSpace нет адреса); **422** `SSO_GRANT_EMPLOYEE_INACTIVE`; **409** `SSO_GRANT_ACCOUNT_CONFLICT` + `extensions.reason` = `privileged` (admin/przewoznik) \| `local` (`managedBy=local` — править в Użytkownikach) \| `deleted` (адрес держит soft-deleted строка — уникальность email включает удалённых) \| `unique` (проиграна гонка на login / `magspaceEmployeeId`). Audit `grantSsoAccess` (актор — admin, `targetKey` = login, `before` = `{ user: { role, lider, active, managedBy, roleOverride } }`, при создании пусто; `metadata` = `{ outcome, stanowiskoCode, magspaceEmployeeId }`), `@Audit({ manualTransaction: true })` — хендлер ходит в MAGSpace. |
 
 ### Diagnostics (admin only) — `/api/v1/diagnostics`
 

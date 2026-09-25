@@ -87,6 +87,7 @@ import {
 } from './templates/sso-access-requested';
 import {
   DirectoryReconcileReportEmail,
+  roleWithLider,
   type DirectoryReconcileReportProps,
 } from './templates/directory-reconcile-report';
 import {
@@ -1396,7 +1397,9 @@ export class MailService implements IMailService {
           ? [
               `Zmiany ról (${props.roleChanges.length}):`,
               ...props.roleChanges.map(
-                (r) => `  - ${r.name ?? r.login} (${r.login}): ${r.fromRole} -> ${r.toRole}`,
+                (r) =>
+                  `  - ${r.name ?? r.login} (${r.login}): ` +
+                  `${roleWithLider(r.fromRole, r.fromLider)} -> ${roleWithLider(r.toRole, r.toLider)}`,
               ),
               '',
             ]

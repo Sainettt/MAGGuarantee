@@ -80,6 +80,10 @@ export class JwtAccessStrategy extends PassportStrategy(Strategy, 'jwt') {
       // payload), same pattern as mustChangePassword. Null for non-dyspozytor
       // roles and for an unassigned dyspozytor → empty fleet/km scope.
       teamId: user.teamId,
+      // docs/28 — leader flag, same DB-sourced path as teamId (never in the
+      // token: the edge gating does not depend on it, and a demotion must bite
+      // on the next request, not after the access token expires).
+      lider: user.lider,
     };
   }
 }

@@ -13,7 +13,9 @@ import type {
   StanowiskoRoleListDto,
 } from '@magguarantee/shared';
 
+import { AuditContext } from '../../common/audit';
 import { AuditQueryRepository, type AuditLogRow } from '../audit/audit-query.repository';
+import { assertLiderPair } from '../users/lider-pair';
 import { UsersRepository } from '../users/users.repository';
 import { UsersService } from '../users/users.service';
 import { DirectoryService } from './directory.service';
@@ -93,6 +95,8 @@ export class SsoService {
         // Live label wins — the stored one is a cache for outages.
         name: s.name,
         role: row?.role ?? null,
+        // An unmapped stanowisko grants nothing, leadership included.
+        lider: row?.lider ?? false,
         knownToMagspace: true,
         updatedAt: row?.updatedAt.toISOString() ?? null,
       };
@@ -106,6 +110,7 @@ export class SsoService {
         code: row.stanowiskoCode,
         name: row.stanowiskoName,
         role: row.role,
+        lider: row.lider,
         knownToMagspace: false,
         updatedAt: row.updatedAt.toISOString(),
       });
@@ -121,14 +126,39 @@ export class SsoService {
   }
 
   /**
-   * Points a stanowisko at a role.
+   * Points a stanowisko at a role (and, optionally, sets its leader flag).
+   *
+   * `lider` omitted = keep the stored flag (`false` for a new row), so a
+   * client that sends only `{ role }` never wipes a leader mapping. The
+   * RESULTING pair is then checked: re-pointing a leader row at a role outside
+   * `LIDER_ROLES` without `lider: false` is a 422, not a silent loss of the
+   * flag (docs/28 §3.3). Checked before MAGSpace is asked.
    *
    * The display name is taken from MAGSpace when it answers, so the stored
    * snapshot stays fresh; when it does not, an existing row keeps its name and
    * a brand-new row falls back to its code. Refusing to save during an outage
    * would be worse than a cosmetic label.
    */
-  async setStanowiskoRole(code: string, role: AssignableRole): Promise<StanowiskoRoleDto> {
+  async setStanowiskoRole(
+    code: string,
+    role: AssignableRole,
+    lider?: boolean,
+  ): Promise<StanowiskoRoleDto> {
+    const existing = await this.mappings.findByCode(code);
+    const nextLider = lider ?? existing?.lider ?? false;
+    assertLiderPair(role, nextLider);
+    if (existing) {
+      // Trimmed by the interceptor to the response's key-set → the audit row
+      // shows role/lider as before → after. A new row has no "before".
+      AuditContext.setBefore({
+        code: existing.stanowiskoCode,
+        name: existing.stanowiskoName,
+        role: existing.role,
+        lider: existing.lider,
+        updatedAt: existing.updatedAt.toISOString(),
+      });
+    }
+
     let name: string | null = null;
     let knownToMagspace = false;
     if (this.magspace.isConfigured) {
@@ -137,20 +167,22 @@ export class SsoService {
         const match = live.find((s) => s.code === code);
         name = match?.name ?? null;
         knownToMagspace = match !== undefined;
-      } catch {
+      } catch (err) {
         // Fall through to the stored / code fallback below.
+        this.logger.warn({
+          msg: 'could not confirm the stanowisko against MAGSpace, saving with the stored name',
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
-    if (name === null) {
-      const existing = await this.mappings.findByCode(code);
-      name = existing?.stanowiskoName ?? code;
-    }
+    name ??= existing?.stanowiskoName ?? code;
 
-    const row = await this.mappings.upsert(code, name, role);
+    const row = await this.mappings.upsert(code, name, role, nextLider);
     return {
       code: row.stanowiskoCode,
       name: row.stanowiskoName,
       role: row.role,
+      lider: row.lider,
       // Reported honestly: `false` here means we could not confirm the code
       // against MAGSpace — either it is unreachable or it does not serve that
       // position. Claiming `true` unconditionally would let the row look
@@ -178,7 +210,13 @@ export class SsoService {
    * answer for the wire.
    */
   async grantAccess(dto: GrantSsoAccessDto): Promise<SsoAccessGrantResultDto> {
-    const { user, outcome } = await this.directory.grantAccess(dto.email, dto.role);
+    const { user, outcome } = await this.directory.grantAccess(
+      dto.email,
+      dto.role,
+      // Optional on the wire (no Zod default, so `{ email, role }` stays a
+      // valid body type); absent = not a leader.
+      dto.lider ?? false,
+    );
     return { user: this.users.toDto(user), outcome };
   }
 

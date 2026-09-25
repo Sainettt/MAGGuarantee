@@ -19,6 +19,7 @@ import {
 } from '@magguarantee/shared';
 
 import type { Env } from '../../config/env.schema';
+import { AuditContext } from '../../common/audit';
 import { PasswordService } from '../auth/password.service';
 import { RefreshTokenRepository } from '../auth/refresh-token.repository';
 import { MailService } from '../mail/mail.service';
@@ -27,6 +28,7 @@ import {
   isPrismaUniqueViolation,
   uniqueViolationToConflict,
 } from '../../common/errors/prisma-error';
+import { assertLiderPair } from './lider-pair';
 import { UsersRepository, type UserRow } from './users.repository';
 
 /**
@@ -86,6 +88,7 @@ export class UsersService {
     const rows = await this.repo.list({
       role: filters.role,
       active: filters.active,
+      lider: filters.lider,
       cursor: filters.cursor,
       limit: filters.limit,
     });
@@ -111,6 +114,10 @@ export class UsersService {
         'Przewoźników utwórz endpointem POST /carriers',
       );
     }
+    // The controller's `CreateUserRequestSchema` already refused a bad pair
+    // with the same 422; repeated here for callers that bypass the pipe.
+    const lider = dto.lider ?? false;
+    assertLiderPair(dto.role, lider);
     const plain = dto.password ?? generateRandomPassword();
     const passwordHash = await this.passwords.hash(plain);
     let row: UserRow;
@@ -123,6 +130,7 @@ export class UsersService {
         passwordHash,
         liderEmail: dto.liderEmail ?? null,
         active: dto.active ?? true,
+        lider,
         // Force is always on: every admin-issued password (generated OR custom)
         // must be changed on first login. The issuance counts as a change, so
         // stamp `passwordChangedAt` too (docs/15-auth-strategy.md).
@@ -165,44 +173,30 @@ export class UsersService {
         'Nie można zmienić roli na przewoźnika tym endpointem',
       );
     }
-    // A directory-managed account has its `role` and `active` re-synced on
-    // every sign-in and every reconcile run, so accepting an edit here would be
-    // a lie: the value would be reverted within minutes and nobody would know
-    // why. Refuse instead, and name the two ways out — hand the account back to
-    // local management, or grant the role through `roleOverride`, which the
-    // reconcile respects (docs/24 §4).
-    //
-    // Deliberately allowed on a managed account: `managedBy` itself (that IS
-    // the way out), `roleOverride`, and the cosmetic `name` / `email` /
-    // `liderEmail` fields, which the next sync will simply overwrite.
-    if (existing.managedBy === 'magspace') {
-      const blocked: string[] = [];
-      if (dto.role !== undefined && dto.role !== existing.role) blocked.push('role');
-      if (dto.active !== undefined && dto.active !== existing.active) blocked.push('active');
-      if (blocked.length > 0 && dto.managedBy !== 'local') {
-        throw new UnprocessableEntityException({
-          message:
-            'Rola i aktywność tego użytkownika są zarządzane w MAGSpace. ' +
-            'Ustaw „rolę przyznaną ręcznie” albo przełącz konto na zarządzanie lokalne.',
-          extensions: { code: USER_MANAGED_BY_MAGSPACE, fields: blocked },
-        });
-      }
-    }
     // Hand-back: once the account is `local`, `role` is owned here and nothing
     // consults `roleOverride` any more. Leaving it set would be a trap — it
     // silently wins again the day someone flips the account back to
     // `magspace`, resurrecting a decision nobody remembers making. So the
     // hand-back clears it, and wins over any `roleOverride` in the same body;
-    // the current `role` stays as it is (docs/24 §9).
+    // the current `role` stays as it is (docs/24 §9). Resolved BEFORE the
+    // checks below, which must judge the override the row will really carry.
     const handingBack = existing.managedBy === 'magspace' && dto.managedBy === 'local';
     const roleOverride = handingBack ? null : dto.roleOverride;
+    this._assertDirectoryOwnedFields(existing, dto, roleOverride);
+    this._assertLiderPairs(existing, dto, roleOverride);
+    // Full pre-image; the interceptor trims it to the response's key-set, so
+    // a leadership change lands in the `updateUser` row as before → after.
+    AuditContext.setBefore(this.toDto(existing));
     try {
       const updated = await this.repo.update(id, {
         // `email` is NOT NULL post-phase3_blocks — patch with the value
         // verbatim; the Zod schema already rejected null upstream.
         ...(dto.email !== undefined ? { email: dto.email } : {}),
         ...(dto.name !== undefined ? { name: dto.name } : {}),
+        // `role` and `lider` go out in this one UPDATE: the CHECK
+        // `user_lider_requires_lider_role` judges the final pair only.
         ...(dto.role !== undefined ? { role: dto.role } : {}),
+        ...(dto.lider !== undefined ? { lider: dto.lider } : {}),
         ...(dto.liderEmail !== undefined ? { liderEmail: dto.liderEmail } : {}),
         ...(dto.active !== undefined ? { active: dto.active } : {}),
         ...(dto.managedBy !== undefined ? { managedBy: dto.managedBy } : {}),
@@ -217,6 +211,71 @@ export class UsersService {
       }
       throw err;
     }
+  }
+
+  /**
+   * A directory-managed account has its `role`, `active` and — unless an admin
+   * granted the role by hand — `lider` re-synced on every sign-in and every
+   * reconcile run, so accepting an edit here would be a lie: the value would
+   * be reverted within minutes and nobody would know why. Refuse instead, and
+   * name the two ways out — hand the account back to local management, or
+   * grant the role through `roleOverride`, which the reconcile respects
+   * (docs/24 §4, docs/28 §2).
+   *
+   * Deliberately allowed on a managed account: `managedBy` itself (that IS the
+   * way out), `roleOverride`, `lider` next to a `roleOverride` (stored, or set
+   * in this body — the sync then keeps the stored flag), and the cosmetic
+   * `name` / `email` / `liderEmail` fields, which the next sync overwrites.
+   *
+   * `roleOverride` is the value this UPDATE will write (`undefined` = keep).
+   */
+  private _assertDirectoryOwnedFields(
+    existing: UserRow,
+    dto: UpdateUserDto,
+    roleOverride: UserRow['roleOverride'] | undefined,
+  ): void {
+    if (existing.managedBy !== 'magspace' || dto.managedBy === 'local') return;
+    const finalOverride = roleOverride !== undefined ? roleOverride : existing.roleOverride;
+    const blocked: string[] = [];
+    if (dto.role !== undefined && dto.role !== existing.role) blocked.push('role');
+    if (dto.active !== undefined && dto.active !== existing.active) blocked.push('active');
+    if (dto.lider !== undefined && dto.lider !== existing.lider && finalOverride === null) {
+      blocked.push('lider');
+    }
+    if (blocked.length === 0) return;
+    throw new UnprocessableEntityException({
+      message:
+        'Rola, aktywność i flaga lidera tego użytkownika są zarządzane w MAGSpace. ' +
+        'Ustaw „rolę przyznaną ręcznie” albo przełącz konto na zarządzanie lokalne.',
+      extensions: { code: USER_MANAGED_BY_MAGSPACE, fields: blocked },
+    });
+  }
+
+  /**
+   * `lider ⇒ role ∈ LIDER_ROLES`, judged on the MERGED row (PATCH is partial),
+   * for two pairs (docs/28 §7 R2):
+   *  - the `role` this UPDATE leaves in the row — else the CHECK
+   *    `user_lider_requires_lider_role` turns the request into a 500;
+   *  - the `roleOverride` it leaves (when set) — the next sync copies it into
+   *    `role` next to the stored flag, and would hit the same CHECK there,
+   *    failing a sign-in or the reconcile.
+   *
+   * Consequence (docs/28 variant A): `{ roleOverride: 'planista', lider: true }`
+   * on a `magspace` weryfikator is refused — `role` is not rewritten here (the
+   * override applies at the next sign-in, docs/24), so the stored pair would be
+   * weryfikator + lider. Grant leadership after that sign-in, or through
+   * «Nadaj dostęp», which writes `role`, `roleOverride` and `lider` together.
+   */
+  private _assertLiderPairs(
+    existing: UserRow,
+    dto: UpdateUserDto,
+    roleOverride: UserRow['roleOverride'] | undefined,
+  ): void {
+    const lider = dto.lider ?? existing.lider;
+    if (!lider) return;
+    assertLiderPair(dto.role ?? existing.role, lider, 'role');
+    const finalOverride = roleOverride !== undefined ? roleOverride : existing.roleOverride;
+    if (finalOverride !== null) assertLiderPair(finalOverride, lider, 'roleOverride');
   }
 
   async deactivate(id: string): Promise<UserDtoFull> {
@@ -327,6 +386,7 @@ export class UsersService {
       managedBy: row.managedBy,
       authProvider: row.authProvider,
       roleOverride: row.roleOverride,
+      lider: row.lider,
       directorySyncedAt: row.directorySyncedAt
         ? row.directorySyncedAt.toISOString()
         : null,

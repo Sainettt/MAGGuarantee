@@ -11,9 +11,15 @@
 // No role is preselected on purpose: `pracownik`, `weryfikator` and `eksport`
 // gate wniosek verification and money, so the choice must never be one
 // careless click on a default.
+//
+// The «Lider» checkbox (docs/28 §2) is how a DAF / opiekun / eksport leader is
+// granted — no stanowisko maps to one. It is usable only for a role in
+// `LIDER_ROLES` and starts unticked for every person and every role choice.
 
 import {
   AssignableRole,
+  LIDER_ROLES,
+  isLiderRole,
   type SsoAccessDenialDto,
   type SsoAccessGrantOutcome,
 } from '@magguarantee/shared';
@@ -24,6 +30,7 @@ import { toast } from 'sonner';
 
 import { FormField } from '@/components/forms/Form';
 import { Button } from '@/components/ui/Button';
+import { Checkbox } from '@/components/ui/Checkbox';
 import {
   Dialog,
   DialogContent,
@@ -36,6 +43,8 @@ import { Select } from '@/components/ui/Select';
 import { ApiResponseError } from '@/lib/api/client';
 import { useGrantSsoAccess } from '@/lib/hooks/useSso';
 import { SUPPRESS_GLOBAL_ERROR } from '@/lib/query/globalErrors';
+import { roleLabelKey } from '@/lib/roles';
+import { liderErrorKind } from '@/lib/users/liderErrors';
 
 /** Static keys rather than a template string, so next-intl can type-check them. */
 const OUTCOME_TOAST = {
@@ -53,30 +62,47 @@ interface GrantAccessDialogProps {
 
 export function GrantAccessDialog({ target, onClose }: GrantAccessDialogProps) {
   const t = useTranslations('sso.denials');
+  const tSso = useTranslations('sso');
+  const tAll = useTranslations();
   const tCommon = useTranslations('common');
   const tRoles = useTranslations('roles');
   const [role, setRole] = useState<AssignableRole | ''>('');
+  const [lider, setLider] = useState(false);
   const grantM = useGrantSsoAccess({ meta: SUPPRESS_GLOBAL_ERROR });
 
-  // A fresh choice for every person — the role picked for the previous row
-  // must not carry over to the next one.
+  // A fresh choice for every person — the role (and leader flag) picked for
+  // the previous row must not carry over to the next one.
   useEffect(() => {
-    if (target) setRole('');
+    if (target) {
+      setRole('');
+      setLider(false);
+    }
   }, [target]);
+
+  const liderAllowed = role !== '' && isLiderRole(role);
+  const liderRoles = LIDER_ROLES.map((r) => tRoles(r)).join(', ');
 
   const onConfirm = async () => {
     if (!target || role === '') return;
     try {
-      const res = await grantM.mutateAsync({ email: target.email, role });
+      const res = await grantM.mutateAsync({
+        email: target.email,
+        role,
+        lider: liderAllowed && lider,
+      });
       toast.success(
         t(OUTCOME_TOAST[res.outcome], {
           login: res.user.login,
-          role: tRoles(res.user.role),
+          role: tAll(roleLabelKey(res.user.role, res.user.lider)),
         }),
       );
       onClose();
     } catch (err) {
-      toast.error(grantErrorMessage(err, t('errorToast')));
+      toast.error(
+        liderErrorKind(err) === 'requiresLiderRole'
+          ? tSso('errors.liderRequiresLiderRole', { roles: liderRoles })
+          : grantErrorMessage(err, t('errorToast')),
+      );
     }
   };
 
@@ -101,7 +127,11 @@ export function GrantAccessDialog({ target, onClose }: GrantAccessDialogProps) {
               id="grant-role"
               value={role}
               disabled={grantM.isPending}
-              onChange={(e) => setRole(e.target.value as AssignableRole | '')}
+              onChange={(e) => {
+                setRole(e.target.value as AssignableRole | '');
+                // Every role choice starts without the leader flag.
+                setLider(false);
+              }}
             >
               <option value="" disabled>
                 {t('grantRolePlaceholder')}
@@ -113,6 +143,26 @@ export function GrantAccessDialog({ target, onClose }: GrantAccessDialogProps) {
               ))}
             </Select>
           </FormField>
+
+          {/* One <label> wrapping the checkbox (not FormField, whose own
+              label would name the input twice); the hint is linked by id. */}
+          <div className="flex flex-col gap-1.5">
+            <label className="flex items-center gap-2 text-sm font-medium text-text">
+              <Checkbox
+                id="grant-lider"
+                aria-describedby="grant-lider-hint"
+                checked={liderAllowed && lider}
+                disabled={!liderAllowed || grantM.isPending}
+                onChange={(e) => setLider(e.target.checked)}
+              />
+              {tSso('lider')}
+            </label>
+            <p id="grant-lider-hint" className="text-xs text-text-sub">
+              {liderAllowed
+                ? tSso('liderHint')
+                : tSso('liderUnavailableHint', { roles: liderRoles })}
+            </p>
+          </div>
 
           <div className="flex items-start gap-2 rounded-[10px] border border-border bg-info-soft px-3.5 py-3 text-[13px] text-text">
             <Info size={16} className="mt-0.5 shrink-0 text-text-sub" aria-hidden />

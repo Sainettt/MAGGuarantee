@@ -158,6 +158,13 @@ export const UserDto = z.object({
    * gate. Cleared by change-password / reset-password.
    */
   mustChangePassword: z.boolean(),
+  /**
+   * Leader flag over `role` (docs/28): "lider_planista" = `role: 'planista'` +
+   * `lider: true`. Read from the database like `teamId` — NOT a JWT claim, the
+   * edge gating never depends on it. Panel, landing and nav still follow
+   * `role`; the web only uses this for the label (`roles.lider.<role>`).
+   */
+  lider: z.boolean(),
 });
 export type UserDto = z.infer<typeof UserDto>;
 
@@ -260,8 +267,20 @@ export type SsoErrorCode = (typeof SSO_ERROR_CODES)[number];
  * so a local edit would be silently reverted — better a 422 than a lie. The
  * admin's options are to flip `managedBy` back to `local`, or to set
  * `roleOverride`, which the reconcile respects.
+ *
+ * `lider` follows `role` (docs/28 §2): on a `magspace` account without a
+ * `roleOverride` (and none set in the same body) it belongs to the mapping, so
+ * changing it is refused the same way. `extensions.fields` names what was
+ * refused (`role` / `active` / `lider`).
  */
 export const USER_MANAGED_BY_MAGSPACE = 'USER_MANAGED_BY_MAGSPACE' as const;
+
+/**
+ * 422 — `lider: true` on a role outside `LIDER_ROLES` (docs/28 §1). Lives in
+ * `./common` (the users/sso refines need it and `./users` cannot import this
+ * file); re-exported here next to its sibling above.
+ */
+export { USER_LIDER_REQUIRES_LIDER_ROLE } from './common';
 
 // ─── POST /sso/access-grants refusals (docs/24 §10) ───────
 //

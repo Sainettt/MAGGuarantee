@@ -57,6 +57,7 @@ function makeUser(overrides: Partial<UserRow> = {}): UserRow {
     magspaceEmployeeId: 'emp-1',
     directorySyncedAt: now,
     roleOverride: null,
+    lider: false,
     createdAt: now,
     updatedAt: now,
     deletedAt: null,
@@ -92,7 +93,7 @@ function makeHarness(opts: {
 
   const directory = {
     resolveEmployee: jest.fn(),
-    roleFor: jest.fn(),
+    accessFor: jest.fn(),
     provisionOrSync: jest.fn(),
     deprovision: jest.fn(async () => undefined),
     linkGoogleAccount: jest.fn(async (u: UserRow) => ({ ...u, googleSub: IDENTITY.sub })),
@@ -159,7 +160,7 @@ describe('AuthService.loginWithGoogle', () => {
     const h = makeHarness();
     const employee = makeEmployee();
     h.directory.resolveEmployee.mockResolvedValue({ kind: 'found', employee });
-    h.directory.roleFor.mockResolvedValue('planista');
+    h.directory.accessFor.mockResolvedValue({ role: 'planista', lider: false });
     h.directory.provisionOrSync.mockResolvedValue(makeUser());
 
     const res = await h.svc.loginWithGoogle('a.b.c', {});
@@ -168,10 +169,79 @@ describe('AuthService.loginWithGoogle', () => {
       existing: null,
       employee,
       role: 'planista',
+      lider: false,
       googleSub: IDENTITY.sub,
     });
     expect(res.user.role).toBe('planista');
+    expect(res.user.lider).toBe(false);
     expect(res.tokens.accessToken).toBeTruthy();
+  });
+
+  // ── leader flag from the mapping (docs/28 §2) ──────────────
+
+  it('hands the mapping’s leader flag to provisionOrSync (PLANISTA_LIDER → planista + lider)', async () => {
+    const h = makeHarness();
+    const employee = makeEmployee({ stanowisko: { code: 'PLANISTA_LIDER', name: 'Planista lider' } });
+    h.directory.resolveEmployee.mockResolvedValue({ kind: 'found', employee });
+    h.directory.accessFor.mockResolvedValue({ role: 'planista', lider: true });
+    h.directory.provisionOrSync.mockResolvedValue(makeUser({ lider: true }));
+
+    const res = await h.svc.loginWithGoogle('a.b.c', {});
+
+    expect(h.directory.accessFor).toHaveBeenCalledWith(employee.stanowisko);
+    expect(h.directory.provisionOrSync).toHaveBeenCalledWith({
+      existing: null,
+      employee,
+      role: 'planista',
+      lider: true,
+      googleSub: IDENTITY.sub,
+    });
+    // The sign-in response carries the flag (toUserDto), like /auth/me.
+    expect(res.user).toMatchObject({ role: 'planista', lider: true });
+  });
+
+  it('passes lider=false when a hand-granted role stands in for a missing mapping', async () => {
+    // provisionOrSync keeps the stored flag for an override account; the login
+    // path must not invent one from a mapping that does not exist.
+    const existing = makeUser({ role: 'opiekun', roleOverride: 'opiekun', lider: true });
+    const h = makeHarness({ bySub: existing });
+    h.directory.resolveEmployee.mockResolvedValue({
+      kind: 'found',
+      employee: makeEmployee({ stanowisko: { code: 'CONTROLLING', name: 'Controlling' } }),
+    });
+    h.directory.accessFor.mockResolvedValue(null);
+    h.directory.provisionOrSync.mockResolvedValue(existing);
+
+    const res = await h.svc.loginWithGoogle('a.b.c', {});
+
+    expect(h.directory.provisionOrSync).toHaveBeenCalledWith(
+      expect.objectContaining({ existing, role: 'opiekun', lider: false }),
+    );
+    expect(res.user).toMatchObject({ role: 'opiekun', lider: true });
+  });
+
+  it('takes the override’s role but still forwards the mapping’s flag for provisionOrSync to ignore', async () => {
+    const existing = makeUser({ role: 'weryfikator', roleOverride: 'weryfikator' });
+    const h = makeHarness({ bySub: existing });
+    h.directory.resolveEmployee.mockResolvedValue({ kind: 'found', employee: makeEmployee() });
+    h.directory.accessFor.mockResolvedValue({ role: 'planista', lider: true });
+    h.directory.provisionOrSync.mockResolvedValue(existing);
+
+    await h.svc.loginWithGoogle('a.b.c', {});
+
+    expect(h.directory.provisionOrSync).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'weryfikator', lider: true }),
+    );
+  });
+
+  it('a locally-managed leader signs in with the flag from the row, MAGSpace unconsulted', async () => {
+    const lead = makeUser({ role: 'eksport', managedBy: 'local', lider: true });
+    const h = makeHarness({ bySub: lead });
+
+    const res = await h.svc.loginWithGoogle('a.b.c', {});
+
+    expect(res.user).toMatchObject({ role: 'eksport', lider: true });
+    expect(h.directory.accessFor).not.toHaveBeenCalled();
   });
 
   it('matches on googleSub before falling back to the e-mail', async () => {
@@ -183,7 +253,7 @@ describe('AuthService.loginWithGoogle', () => {
       kind: 'found',
       employee: makeEmployee(),
     });
-    h.directory.roleFor.mockResolvedValue('planista');
+    h.directory.accessFor.mockResolvedValue({ role: 'planista', lider: false });
     h.directory.provisionOrSync.mockResolvedValue(bySub);
 
     await h.svc.loginWithGoogle('a.b.c', {});
@@ -286,7 +356,7 @@ describe('AuthService.loginWithGoogle', () => {
       stanowisko: { code: 'CONTROLLING', name: 'Controlling' },
     });
     h.directory.resolveEmployee.mockResolvedValue({ kind: 'found', employee });
-    h.directory.roleFor.mockResolvedValue(null);
+    h.directory.accessFor.mockResolvedValue(null);
 
     await expect(h.svc.loginWithGoogle('a.b.c', {})).rejects.toMatchObject({
       response: { extensions: { code: 'SSO_NO_ROLE' } },
@@ -303,7 +373,7 @@ describe('AuthService.loginWithGoogle', () => {
       kind: 'found',
       employee: makeEmployee({ stanowisko: { code: 'CONTROLLING', name: 'Controlling' } }),
     });
-    h.directory.roleFor.mockResolvedValue(null);
+    h.directory.accessFor.mockResolvedValue(null);
     h.directory.provisionOrSync.mockResolvedValue(existing);
 
     const res = await h.svc.loginWithGoogle('a.b.c', {});
@@ -319,7 +389,7 @@ describe('AuthService.loginWithGoogle', () => {
       kind: 'found',
       employee: makeEmployee(),
     });
-    h.directory.roleFor.mockResolvedValue('planista');
+    h.directory.accessFor.mockResolvedValue({ role: 'planista', lider: false });
     h.directory.provisionOrSync.mockResolvedValue(makeUser({ failedAttempts: 9 }));
 
     await h.svc.loginWithGoogle('a.b.c', {});
@@ -355,7 +425,7 @@ describe('AuthService.loginWithGoogle — googleLogin audit row', () => {
       kind: 'found',
       employee: makeEmployee(),
     });
-    h.directory.roleFor.mockResolvedValue('planista');
+    h.directory.accessFor.mockResolvedValue({ role: 'planista', lider: false });
     h.directory.provisionOrSync.mockResolvedValue(makeUser());
 
     await h.svc.loginWithGoogle('a.b.c', CTX);
@@ -492,7 +562,7 @@ describe('AuthService.loginWithGoogle — refused sign-ins are logged', () => {
   it('no_role_for_stanowisko → WARN after notifying the admins', async () => {
     const h = makeHarness();
     h.directory.resolveEmployee.mockResolvedValue({ kind: 'found', employee: makeEmployee() });
-    h.directory.roleFor.mockResolvedValue(null);
+    h.directory.accessFor.mockResolvedValue(null);
 
     await expect(h.svc.loginWithGoogle('a.b.c', CTX)).rejects.toBeInstanceOf(ForbiddenException);
 

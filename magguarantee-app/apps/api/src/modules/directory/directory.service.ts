@@ -40,6 +40,7 @@ import { AuditWriter } from '../audit/audit.service';
 import { RefreshTokenRepository } from '../auth/refresh-token.repository';
 import { MailService } from '../mail/mail.service';
 import { RedisService } from '../redis/redis.service';
+import { assertLiderPair } from '../users/lider-pair';
 import { UsersRepository, type UserRow } from '../users/users.repository';
 import {
   DirectoryUnavailableError,
@@ -68,6 +69,16 @@ export type DeprovisionReason =
 export interface AccessGrant {
   user: UserRow;
   outcome: SsoAccessGrantOutcome;
+}
+
+/**
+ * What a stanowisko grants: the role and the leader flag on top of it
+ * (docs/28 §2). The pair is valid by construction — the mapping row is guarded
+ * by CHECK `stanowisko_role_mapping_lider_requires_lider_role`.
+ */
+export interface DirectoryAccess {
+  role: AssignableRole;
+  lider: boolean;
 }
 
 /**
@@ -121,16 +132,17 @@ export class DirectoryService {
   }
 
   /**
-   * Role for a stanowisko, or null when it has no mapping — which includes the
-   * `stanowisko: null` case (MAGSpace has an employee card with no position
-   * assigned yet). Both mean the same thing here: no access, fail-closed.
+   * Role and leader flag for a stanowisko, or null when it has no mapping —
+   * which includes the `stanowisko: null` case (MAGSpace has an employee card
+   * with no position assigned yet). Both mean the same thing here: no access,
+   * fail-closed.
    */
-  async roleFor(
+  async accessFor(
     stanowisko: MagspaceEmployee['stanowisko'],
-  ): Promise<AssignableRole | null> {
+  ): Promise<DirectoryAccess | null> {
     if (!stanowisko) return null;
     const mapping = await this.mappings.findByCode(stanowisko.code);
-    return mapping?.role ?? null;
+    return mapping ? { role: mapping.role, lider: mapping.lider } : null;
   }
 
   // ── Provisioning ───────────────────────────────────────
@@ -144,50 +156,84 @@ export class DirectoryService {
    * (docs/24 §4). Everything else — name, e-mail, active, the directory link —
    * is refreshed from MAGSpace on every sign-in, which is what makes a rename
    * or a re-hire propagate without anyone touching the admin UI.
+   *
+   * `lider` is the mapping's flag and follows the same ownership rule as the
+   * role (docs/28 §2): applied when the role comes from the mapping, ignored
+   * — the stored flag stays — when `roleOverride` is set.
    */
   async provisionOrSync(args: {
     existing: UserRow | null;
     employee: MagspaceEmployee;
     role: AssignableRole;
+    lider: boolean;
+    googleSub: string;
+  }): Promise<UserRow> {
+    return args.existing
+      ? this._syncExisting({ ...args, existing: args.existing })
+      : this._provisionNew(args);
+  }
+
+  /** First Google sign-in of someone we have no row for: JIT-create it. */
+  private async _provisionNew(args: {
+    employee: MagspaceEmployee;
+    role: AssignableRole;
+    lider: boolean;
+    googleSub: string;
+  }): Promise<UserRow> {
+    const { employee, googleSub } = args;
+    const login = await this.allocateLogin(employee.email);
+    const created = await this.users.createFromDirectory({
+      login,
+      email: employee.email,
+      name: displayName(employee),
+      role: args.role,
+      lider: args.lider,
+      googleSub,
+      authProvider: 'google',
+      magspaceEmployeeId: employee.id,
+      directorySyncedAt: new Date(),
+    });
+    await this.audit.log({
+      action: 'provisionUserFromDirectory',
+      targetType: 'User',
+      targetKey: created.login,
+      after: {
+        role: created.role,
+        lider: created.lider,
+        email: created.email,
+        managedBy: 'magspace',
+      },
+      metadata: { stanowiskoCode: employee.stanowisko?.code ?? null },
+      actor: { userId: created.id, userRole: created.role as Role },
+    });
+    this.logger.log({
+      msg: 'user provisioned from directory',
+      userId: created.id,
+      role: created.role,
+      lider: created.lider,
+      stanowiskoCode: employee.stanowisko?.code ?? null,
+    });
+    return created;
+  }
+
+  /** Refreshes an existing account from the directory on sign-in. */
+  private async _syncExisting(args: {
+    existing: UserRow;
+    employee: MagspaceEmployee;
+    role: AssignableRole;
+    lider: boolean;
     googleSub: string;
   }): Promise<UserRow> {
     const { existing, employee, googleSub } = args;
-    const now = new Date();
     const name = displayName(employee);
-
-    if (!existing) {
-      const login = await this.allocateLogin(employee.email);
-      const created = await this.users.createFromDirectory({
-        login,
-        email: employee.email,
-        name,
-        role: args.role,
-        googleSub,
-        authProvider: 'google',
-        magspaceEmployeeId: employee.id,
-        directorySyncedAt: now,
-      });
-      await this.audit.log({
-        action: 'provisionUserFromDirectory',
-        targetType: 'User',
-        targetKey: created.login,
-        after: { role: created.role, email: created.email, managedBy: 'magspace' },
-        metadata: { stanowiskoCode: employee.stanowisko?.code ?? null },
-        actor: { userId: created.id, userRole: created.role as Role },
-      });
-      this.logger.log({
-        msg: 'user provisioned from directory',
-        userId: created.id,
-        role: created.role,
-        stanowiskoCode: employee.stanowisko?.code ?? null,
-      });
-      return created;
-    }
-
-    // An admin-granted role is never overwritten by the mapping.
+    // An admin-granted role is never overwritten by the mapping — and neither
+    // is the leader flag that goes with it.
+    const fromOverride = existing.roleOverride !== null;
     const effectiveRole = existing.roleOverride ?? args.role;
+    const effectiveLider = fromOverride ? existing.lider : args.lider;
     const changed =
       existing.role !== effectiveRole ||
+      existing.lider !== effectiveLider ||
       existing.name !== name ||
       existing.email !== employee.email ||
       !existing.active ||
@@ -198,7 +244,10 @@ export class DirectoryService {
     const updated = await this.users.update(existing.id, {
       email: employee.email,
       name,
+      // One UPDATE for the pair: the CHECK `user_lider_requires_lider_role`
+      // sees only the final (role, lider).
       role: effectiveRole,
+      lider: effectiveLider,
       active: true,
       managedBy: 'magspace',
       // `google` = has signed in with Google at least once — true from here on,
@@ -206,7 +255,7 @@ export class DirectoryService {
       authProvider: 'google',
       googleSub,
       magspaceEmployeeId: employee.id,
-      directorySyncedAt: now,
+      directorySyncedAt: new Date(),
     });
 
     if (changed) {
@@ -214,11 +263,21 @@ export class DirectoryService {
         action: 'syncUserFromDirectory',
         targetType: 'User',
         targetKey: updated.login,
-        before: { role: existing.role, name: existing.name, active: existing.active },
-        after: { role: updated.role, name: updated.name, active: updated.active },
+        before: {
+          role: existing.role,
+          lider: existing.lider,
+          name: existing.name,
+          active: existing.active,
+        },
+        after: {
+          role: updated.role,
+          lider: updated.lider,
+          name: updated.name,
+          active: updated.active,
+        },
         metadata: {
           stanowiskoCode: employee.stanowisko?.code ?? null,
-          roleFromOverride: existing.roleOverride !== null,
+          roleFromOverride: fromOverride,
         },
         actor: { userId: updated.id, userRole: updated.role as Role },
       });
@@ -291,15 +350,25 @@ export class DirectoryService {
    *
    * Audited by the route's `@Audit` interceptor (actor = the admin); this only
    * contributes the `before` snapshot and the business metadata.
+   *
+   * `lider` (docs/28 §2) is written with the role, and — being a hand-granted
+   * role's flag — is then left alone by every sync. This is the only one-step
+   * way to make someone a DAF / opiekun / eksport leader: no stanowisko maps
+   * to one. The pair is checked before MAGSpace is asked.
    */
-  async grantAccess(email: string, role: AssignableRole): Promise<AccessGrant> {
+  async grantAccess(
+    email: string,
+    role: AssignableRole,
+    lider = false,
+  ): Promise<AccessGrant> {
+    assertLiderPair(role, lider);
     const employee = await this._requireGrantableEmployee(email);
     // Keyed on MAGSpace's own spelling of the address: that is what a new row
     // would store, so that is what the UNIQUE index would collide on.
     const existing = await this.users.findByEmailIncludingDeleted(employee.email);
     const grant = existing
-      ? await this._regrantExisting(existing, role)
-      : await this._createGranted(employee, role);
+      ? await this._regrantExisting(existing, role, lider)
+      : await this._createGranted(employee, role, lider);
 
     const stanowiskoCode = employee.stanowisko?.code ?? null;
     AuditContext.setMetadata({
@@ -311,6 +380,7 @@ export class DirectoryService {
       msg: 'directory access granted by admin',
       userId: grant.user.id,
       role,
+      lider,
       outcome: grant.outcome,
       stanowiskoCode,
     });
@@ -348,6 +418,7 @@ export class DirectoryService {
   private async _createGranted(
     employee: MagspaceEmployee,
     role: AssignableRole,
+    lider: boolean,
   ): Promise<AccessGrant> {
     const login = await this.allocateLogin(employee.email);
     try {
@@ -357,6 +428,7 @@ export class DirectoryService {
         name: displayName(employee),
         role,
         roleOverride: role,
+        lider,
         // Not `google` yet: the person has not signed in. The first Google
         // sign-in links `googleSub` by e-mail and flips this.
         authProvider: 'local',
@@ -381,6 +453,7 @@ export class DirectoryService {
   private async _regrantExisting(
     existing: UserRow,
     role: AssignableRole,
+    lider: boolean,
   ): Promise<AccessGrant> {
     assertDirectoryMayTakeOver(existing);
     // Nested under `user` so it survives the interceptor trimming `before` to
@@ -388,14 +461,19 @@ export class DirectoryService {
     AuditContext.setBefore({
       user: {
         role: existing.role,
+        lider: existing.lider,
         active: existing.active,
         managedBy: existing.managedBy,
         roleOverride: existing.roleOverride,
       },
     });
+    // One UPDATE: `role`, `roleOverride` and `lider` must land together — the
+    // CHECK judges the final (role, lider), and the next sync reads
+    // (roleOverride, lider).
     const user = await this.users.update(existing.id, {
       role,
       roleOverride: role,
+      lider,
       active: true,
       directorySyncedAt: new Date(),
     });

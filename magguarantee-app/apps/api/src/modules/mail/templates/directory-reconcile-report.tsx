@@ -29,12 +29,23 @@ export interface ReconcileDeprovisionRow {
   reasonLabel: string;
 }
 
-/** One account whose stanowisko now maps to a different role. */
+/**
+ * One account whose stanowisko now maps to a different role or leader flag
+ * (docs/28 §2) — either half may be the change, e.g. `planista → planista
+ * (lider)` after PLANISTA → PLANISTA_LIDER.
+ */
 export interface ReconcileRoleChangeRow {
   login: string;
   name: string | null;
   fromRole: string;
+  fromLider: boolean;
   toRole: string;
+  toLider: boolean;
+}
+
+/** `planista (lider)` / `planista` — the leader flag is not a role of its own. */
+export function roleWithLider(role: string, lider: boolean): string {
+  return lider ? `${role} (lider)` : role;
 }
 
 /**
@@ -158,7 +169,8 @@ export function DirectoryReconcileReportEmail({
             <p key={r.login} style={rowStyle}>
               <span style={{ fontWeight: 'bold' }}>{who(r.login, r.name)}</span>
               {' — '}
-              {r.fromRole} → <b>{r.toRole}</b>
+              {roleWithLider(r.fromRole, r.fromLider)} →{' '}
+              <b>{roleWithLider(r.toRole, r.toLider)}</b>
             </p>
           ))}
           <Note>

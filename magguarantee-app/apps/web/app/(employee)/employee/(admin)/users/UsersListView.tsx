@@ -23,6 +23,7 @@ import type { ResetPasswordModeDto, Role, UserDtoFull } from '@magguarantee/shar
 
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { RowActionsMenu } from '@/components/ui/RowActionsMenu';
 import {
@@ -46,6 +47,7 @@ import {
   useUsers,
 } from '@/lib/hooks/useUsers';
 import { queryErrorProps } from '@/lib/query/queryErrorProps';
+import { roleLabelKey } from '@/lib/roles';
 
 import { UserSheet } from './UserSheet';
 
@@ -85,16 +87,21 @@ export function UsersListView() {
   const t = useTranslations('users');
   const tCommon = useTranslations('common');
   const tRoles = useTranslations('roles');
+  const tAll = useTranslations();
 
   const [search, setSearch] = useState('');
   const [role, setRole] = useState<Role | ''>('');
   const [activeFilter, setActiveFilter] = useState<'' | 'true' | 'false'>('');
+  const [onlyLiders, setOnlyLiders] = useState(false);
 
   const listQ = useUsers({
     // The UserFiltersSchema doesn't support `q`, so we filter client-side.
     role: (role || undefined) as Role | undefined,
     active:
       activeFilter === '' ? undefined : activeFilter === 'true',
+    // Off = no filter at all (`undefined`), never `false` — `?lider=false`
+    // would mean "everyone EXCEPT the leaders".
+    lider: onlyLiders ? true : undefined,
     limit: 200,
   });
   const { data, isLoading } = listQ;
@@ -113,12 +120,13 @@ export function UsersListView() {
   }, [data, search]);
 
   const hasActiveFilters = Boolean(
-    search.trim().length >= 2 || role || activeFilter,
+    search.trim().length >= 2 || role || activeFilter || onlyLiders,
   );
   const clearFilters = () => {
     setSearch('');
     setRole('');
     setActiveFilter('');
+    setOnlyLiders(false);
   };
 
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -225,6 +233,15 @@ export function UsersListView() {
         cell: (row) => (
           <div className="flex items-center gap-1.5">
             <Badge variant={ROLE_VARIANT[row.role]}>{tRoles(row.role)}</Badge>
+            {/* Leader flag over the role (docs/28): the role chip stays the
+                base role — lider is not a role — and a neutral chip marks the
+                flag, its tooltip spelling the full label («Lider planistów»).
+                Not `info`: that is the «ręcznie» chip right next to it. */}
+            {row.lider && (
+              <span title={tAll(roleLabelKey(row.role, true))}>
+                <Badge variant="muted">{t('fields.lider')}</Badge>
+              </span>
+            )}
             {/* A hand-granted role is worth flagging: it is the one thing the
                 directory will NOT re-derive, so an admin looking for "why does
                 this person have this role" needs to see it here. */}
@@ -313,7 +330,7 @@ export function UsersListView() {
         ),
       },
     ],
-    [t, tCommon, tRoles, openEdit],
+    [t, tCommon, tRoles, tAll, openEdit],
   );
 
   return (
@@ -361,6 +378,13 @@ export function UsersListView() {
           <option value="true">{t('filters.onlyActive')}</option>
           <option value="false">{t('filters.onlyInactive')}</option>
         </Select>
+        <label className="flex items-center gap-2 text-sm text-text sm:px-1 whitespace-nowrap">
+          <Checkbox
+            checked={onlyLiders}
+            onChange={(e) => setOnlyLiders(e.target.checked)}
+          />
+          {t('filters.onlyLiders')}
+        </label>
       </div>
 
       <DataTable

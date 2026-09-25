@@ -87,16 +87,20 @@
       "activeLabel": "Filtruj po statusie aktywności",
       "allActive": "Wszyscy",
       "onlyActive": "Tylko aktywni",
-      "onlyInactive": "Tylko nieaktywni"
+      "onlyInactive": "Tylko nieaktywni",
+      "onlyLiders": "Tylko liderzy"
     },
     "fields": {
       "login": "Login",
       "name": "Imię i nazwisko",
       "email": "E-mail",
       "role": "Rola",
+      "lider": "Lider",
+      "liderHint": "Panel i zakres danych pozostają te same co dla roli — flaga dodaje tylko uprawnienia lidera.",
+      "liderPendingSyncHint": "Flagę lidera będzie można ustawić po następnym logowaniu lub synchronizacji — wtedy rola przyznana ręcznie zastąpi obecną rolę konta.",
       "password": "Hasło tymczasowe",
       "passwordHint": "≥10 znaków, ≥1 litera, ≥1 cyfra. Zostaw puste, aby wygenerować automatycznie.",
-      "liderEmail": "E-mail lidera",
+      "liderEmail": "E-mail lidera (CC)",
       "liderEmailHint": "Tylko dla roli planista — adres przełożonego.",
       "active": "Aktywny",
       "createdAt": "Utworzono",
@@ -140,7 +144,11 @@
     },
     "tempPasswordToast": "Hasło tymczasowe: {password}",
     "deactivatedToast": "Użytkownik dezaktywowany",
-    "reactivatedToast": "Użytkownik aktywowany"
+    "reactivatedToast": "Użytkownik aktywowany",
+    "errors": {
+      "liderRequiresLiderRole": "Flagę lidera można nadać tylko rolom: {roles}.",
+      "liderManagedByMagspace": "Flaga lidera tego konta pochodzi z mapowania stanowiska w MAGSpace. Ustaw „Rolę przyznaną ręcznie” albo przełącz konto na zarządzanie lokalne."
+    }
   },
   "forms": {
     "country": {
@@ -277,7 +285,14 @@
     "dyspozytor": "Dyspozytor",
     "przewoznik": "Przewoźnik",
     "eksport": "Eksport",
-    "weryfikator": "Weryfikator"
+    "weryfikator": "Weryfikator",
+    "lider": {
+      "planista": "Lider planistów",
+      "dyspozytor": "Lider dyspozytorów",
+      "opiekun": "Lider DAF",
+      "pracownik": "Lider opiekunów wniosków",
+      "eksport": "Lider eksportu"
+    }
   },
   "landing": {
     "welcome": "Witaj, {name}",
@@ -2534,6 +2549,10 @@
     "neverSynced": "Brak synchronizacji",
     "emptyTitle": "Brak stanowisk",
     "emptyMessage": "MAGSpace nie zwrócił żadnych stanowisk.",
+    "lider": "Lider",
+    "liderAria": "Lider — {stanowisko}",
+    "liderHint": "Panel i zakres danych pozostają te same co dla roli — flaga dodaje tylko uprawnienia lidera.",
+    "liderUnavailableHint": "Flaga lidera jest dostępna tylko dla ról: {roles}.",
     "fields": {
       "stanowisko": "Stanowisko",
       "role": "Rola",
@@ -2558,6 +2577,9 @@
       "reactivatedToast": "Konto {login} przywrócone z rolą {role}",
       "updatedToast": "Rola konta {login} zmieniona na {role}",
       "errorToast": "Nie udało się nadać dostępu."
+    },
+    "errors": {
+      "liderRequiresLiderRole": "Flagę lidera można nadać tylko rolom: {roles}."
     }
   },
   "errors": {

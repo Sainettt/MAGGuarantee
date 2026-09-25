@@ -345,8 +345,8 @@ export class AuthService {
     }
 
     // An admin-granted role bypasses the mapping — that is what it is for.
-    const mappedRole = await this.directory.roleFor(employee.stanowisko);
-    const role = local?.roleOverride ?? mappedRole;
+    const mapped = await this.directory.accessFor(employee.stanowisko);
+    const role = local?.roleOverride ?? mapped?.role ?? null;
     if (!role) {
       // Not an error condition so much as an onboarding step for the mixed
       // stanowiska: tell the admins who is waiting, then refuse (docs/24 §4).
@@ -368,6 +368,9 @@ export class AuthService {
       existing: local,
       employee,
       role,
+      // The mapping's flag. `provisionOrSync` ignores it for a hand-granted
+      // role (the stored flag stays) — same ownership rule as `role`, docs/28 §2.
+      lider: mapped?.lider ?? false,
       googleSub: identity.sub,
     });
     return this._finishGoogleLogin(user, ctx, 'directory');
@@ -751,6 +754,7 @@ export class AuthService {
       name: user.name ?? user.login,
       role: user.role,
       mustChangePassword: user.mustChangePassword,
+      lider: user.lider,
     };
   }
 

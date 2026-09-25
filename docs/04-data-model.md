@@ -71,6 +71,7 @@
 | `name` | имя |
 | `active` | блокировка логина |
 | `liderEmail` | только для `planista` — email лидера группы (для рассылки). Per-role tech debt — см. [19-known-quirks.md](19-known-quirks.md#liderEmail) |
+| `lider` | ✅ **2026-09-25** — флаг лидера **над** ролью из `LIDER_ROLES` (`planista` / `dyspozytor` / `opiekun` / `pracownik` / `eksport`); «lider_planista» = `role: planista` + `lider: true`, не значение `role`. CHECK `user_lider_requires_lider_role`. Владение как у `role` (маппинг stanowiska или admin). Не путать с `liderEmail`. См. [03-roles.md#lider](03-roles.md#lider), [28-lider-roles-plan.md](28-lider-roles-plan.md) |
 | `teamId` | ✅ **Phase 11 (реализовано 2026-06-17)** — только для `dyspozytor`, FK → Team (команда, в которой состоит диспетчер) |
 
 > ⚠️ Поля `company` (Firma) на `User` **больше нет** — оно перенесено на `Carrier` миграцией `20260507223021_move_company_to_carrier`. Внутренние роли MAGTRANS (admin/pracownik/opiekun/planista/dyspozytor/eksport/weryfikator) — это сотрудники одной компании, поле было денормализованным наследием GAS-миграции, которое использовалось только перевозчиками.

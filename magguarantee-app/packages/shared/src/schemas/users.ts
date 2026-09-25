@@ -12,10 +12,12 @@ import { z } from 'zod';
 
 import {
   AssignableRoleSchema,
+  BooleanQueryParamSchema,
   IsoDateTimeSchema,
   RoleSchema,
   UuidSchema,
   emptyStringToUndefined,
+  refineLiderPair,
 } from './common';
 
 // ─── Field primitives ────────────────────────────────────
@@ -81,9 +83,28 @@ export const CreateUserSchema = z
      */
     liderEmail: emptyStringToUndefined(EmailSchema.optional()),
     active: z.boolean().optional(),
+    /**
+     * Leader flag over `role` (docs/28) — only for roles in `LIDER_ROLES`.
+     * Omitted = `false`. Not to be confused with `liderEmail` above, which is
+     * the e-mail CC'd on decisions (docs/19 quirk #14).
+     */
+    lider: z.boolean().optional(),
   })
   .strict();
 export type CreateUserDto = z.infer<typeof CreateUserSchema>;
+
+/**
+ * `POST /users` body as the api validates it: {@link CreateUserSchema} plus the
+ * `(role, lider)` pair check. A violation is answered 422 with
+ * `extensions.code = USER_LIDER_REQUIRES_LIDER_ROLE` (the issue carries the
+ * code, see `refineLiderPair`).
+ *
+ * A separate export on purpose: `CreateUserSchema` must stay a plain
+ * `ZodObject`, because the admin form calls `.passthrough()` / `.extend()` on
+ * it, which a refined schema (`ZodEffects`) does not have. A form wanting the
+ * same check composes `CreateUserSchema.passthrough().superRefine(refineLiderPair)`.
+ */
+export const CreateUserRequestSchema = CreateUserSchema.superRefine(refineLiderPair);
 
 /**
  * PATCH /users/:id — every field optional. Role can change (e.g. promote a
@@ -124,6 +145,17 @@ export const UpdateUserSchema = z
      * run, so editing them here would be silently reverted.
      */
     roleOverride: AssignableRoleSchema.nullable().optional(),
+    /**
+     * Leader flag over `role` (docs/28). Owned like `role`: on a
+     * `managedBy = magspace` account it may change only together with a
+     * `roleOverride` (already set, or set in this body) or a hand-back to
+     * `local` — otherwise 422 `USER_MANAGED_BY_MAGSPACE`.
+     *
+     * No refine here: PATCH is partial, so the pair is checked by the service
+     * on the MERGED row — both `(role, lider)` and `(roleOverride, lider)` —
+     * and refused with 422 `USER_LIDER_REQUIRES_LIDER_ROLE`.
+     */
+    lider: z.boolean().optional(),
   })
   .strict();
 export type UpdateUserDto = z.infer<typeof UpdateUserSchema>;
@@ -134,6 +166,8 @@ export const UserFiltersSchema = z
   .object({
     role: RoleSchema.optional(),
     active: z.coerce.boolean().optional(),
+    /** `?lider=true` → leaders only, `?lider=false` → everyone else. Strictly `'true' | 'false'`. */
+    lider: BooleanQueryParamSchema.optional(),
     cursor: UuidSchema.optional(),
     limit: z.coerce.number().int().min(1).max(200).default(50),
   })
@@ -166,6 +200,12 @@ export const UserDtoSchema = z.object({
   authProvider: z.enum(['local', 'google']),
   /** Hand-granted role that overrides the stanowisko mapping; null = mapped. */
   roleOverride: AssignableRoleSchema.nullable(),
+  /**
+   * Leader flag over `role` (docs/28); never `true` outside `LIDER_ROLES`.
+   * Synced from the stanowisko mapping on `magspace` accounts without a
+   * `roleOverride`, set by an admin otherwise.
+   */
+  lider: z.boolean(),
   /** Last time the directory refreshed this row. Null for local accounts. */
   directorySyncedAt: IsoDateTimeSchema.nullable(),
   createdAt: IsoDateTimeSchema,

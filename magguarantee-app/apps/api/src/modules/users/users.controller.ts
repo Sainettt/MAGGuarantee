@@ -13,7 +13,7 @@ import {
 } from '@nestjs/common';
 
 import {
-  CreateUserSchema,
+  CreateUserRequestSchema,
   ResetPasswordModeSchema,
   UpdateUserSchema,
   UserFiltersSchema,
@@ -69,7 +69,9 @@ export class UsersController {
     targetKey: (_req, result) => (result as { login?: string }).login,
   })
   async create(
-    @Body(new ZodValidationPipe(CreateUserSchema)) dto: CreateUserDto,
+    // `CreateUserRequestSchema` = the shape + the `(role, lider)` pair; a bad
+    // pair is 422 `USER_LIDER_REQUIRES_LIDER_ROLE` (docs/28), not a 400.
+    @Body(new ZodValidationPipe(CreateUserRequestSchema)) dto: CreateUserDto,
   ): Promise<UserWithTemporaryPasswordDto> {
     return this.users.create(dto);
   }

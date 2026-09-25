@@ -23,14 +23,25 @@ export function listStanowiskoRoles(): Promise<StanowiskoRoleListDto> {
   });
 }
 
-/** Idempotent: the stanowisko code is the identity, so re-pointing is the same call. */
+/**
+ * Idempotent: the stanowisko code is the identity, so re-pointing is the same call.
+ *
+ * `lider` (docs/28 §2) is sent only when given: omitted means "keep the stored
+ * flag". Moving a leader row to another role must pass `lider: false`
+ * explicitly, otherwise a role outside `LIDER_ROLES` is a 422
+ * `USER_LIDER_REQUIRES_LIDER_ROLE`.
+ */
 export function setStanowiskoRole(
   code: string,
   role: AssignableRole,
+  lider?: boolean,
 ): Promise<StanowiskoRoleDto> {
   return apiJson<StanowiskoRoleDto>(
     `/sso/stanowisko-roles/${encodeURIComponent(code)}`,
-    { method: 'PUT', json: { role } },
+    {
+      method: 'PUT',
+      json: lider === undefined ? { role } : { role, lider },
+    },
   );
 }
 

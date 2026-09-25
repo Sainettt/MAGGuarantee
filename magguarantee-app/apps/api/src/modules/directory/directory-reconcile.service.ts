@@ -67,10 +67,21 @@ const REASON_LABELS: Record<DeprovisionReason, string> = {
   reconcile_unmapped: 'stanowisko bez przypisanej roli',
 };
 
+/**
+ * A mapped account whose `(role, lider)` pair no longer matches its stanowisko
+ * (docs/28 §2) — either half may have changed. Applied as ONE update so the
+ * CHECK `user_lider_requires_lider_role` only ever sees the final pair.
+ */
+interface RoleChange {
+  user: UserRow;
+  toRole: UserRow['role'];
+  toLider: boolean;
+}
+
 /** What a run decided, before anything was applied. */
 interface ReconcilePlan {
   deprovision: { user: UserRow; reason: DeprovisionReason }[];
-  roleChanges: { user: UserRow; toRole: UserRow['role'] }[];
+  roleChanges: RoleChange[];
   nameChanges: { user: UserRow; name: string | null }[];
   localNotices: UserRow[];
   managedTotal: number;
@@ -214,14 +225,15 @@ export class DirectoryReconcileService implements OnModuleInit, OnModuleDestroy 
       for (const change of plan.roleChanges) {
         await this.users.update(change.user.id, {
           role: change.toRole,
+          lider: change.toLider,
           directorySyncedAt: now,
         });
         await this.audit.log({
           action: 'system.syncUserFromDirectory',
           targetType: 'User',
           targetKey: change.user.login,
-          before: { role: change.user.role },
-          after: { role: change.toRole },
+          before: { role: change.user.role, lider: change.user.lider },
+          after: { role: change.toRole, lider: change.toLider },
           actor: 'system',
         });
       }
@@ -296,14 +308,18 @@ export class DirectoryReconcileService implements OnModuleInit, OnModuleDestroy 
       // A hand-granted role exempts the account from the mapping entirely —
       // that is the whole point of `roleOverride` (docs/24 §4). Without this
       // branch, the very people an admin approved by hand would be disabled on
-      // the next run, because their stanowisko is unmapped by design.
+      // the next run, because their stanowisko is unmapped by design. The
+      // leader flag rides along: an override account keeps the admin's
+      // `lider` too (docs/28 §2).
       if (user.roleOverride === null) {
-        const role = await this.directory.roleFor(employee.stanowisko);
-        if (!role) {
+        const access = await this.directory.accessFor(employee.stanowisko);
+        if (!access) {
           if (user.active) plan.deprovision.push({ user, reason: 'reconcile_unmapped' });
           continue;
         }
-        if (role !== user.role) plan.roleChanges.push({ user, toRole: role });
+        if (access.role !== user.role || access.lider !== user.lider) {
+          plan.roleChanges.push({ user, toRole: access.role, toLider: access.lider });
+        }
       }
 
       const name = `${employee.firstName} ${employee.lastName}`.trim() || null;
@@ -352,7 +368,9 @@ export class DirectoryReconcileService implements OnModuleInit, OnModuleDestroy 
       login: c.user.login,
       name: c.user.name,
       fromRole: c.user.role,
+      fromLider: c.user.lider,
       toRole: c.toRole,
+      toLider: c.toLider,
     }));
     const localNotices: ReconcileLocalNoticeRow[] = plan.localNotices.map((u) => ({
       login: u.login,

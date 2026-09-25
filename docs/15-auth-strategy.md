@@ -66,6 +66,13 @@ type JwtPayload = {
 };
 ```
 
+> **Что в payload не входит.** `teamId` (Phase 11) и флаг лидера `lider`
+> (docs/28) в токен не кладутся: `JwtAccessStrategy.validate` перечитывает
+> пользователя из БД на каждом запросе и подставляет их в `AuthUser` оттуда,
+> так что понижение бьёт на следующем запросе, а не после истечения access.
+> Edge-гейтинг в `middleware.ts` от них не зависит — панель и landing
+> определяет только `role`.
+
 ### Access vs Refresh
 
 | | Access | Refresh |

@@ -7,12 +7,22 @@
 //
 // The grant's decision logic is in directory.service.spec.ts.
 
-import { ForbiddenException, type ExecutionContext } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  UnprocessableEntityException,
+  type ExecutionContext,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 
-import { GrantSsoAccessSchema } from '@magguarantee/shared';
+import {
+  GrantSsoAccessSchema,
+  SetStanowiskoRoleSchema,
+  USER_LIDER_REQUIRES_LIDER_ROLE,
+} from '@magguarantee/shared';
 
 import { AuditContext } from '../../common/audit';
+import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import {
   readAuditConfig,
   runAuditedHandler,
@@ -83,13 +93,14 @@ describe('SsoController — POST /sso/access-grants', () => {
             active: true,
             managedBy: 'magspace',
             roleOverride: 'eksport',
+            lider: false,
           },
           outcome: 'reactivated',
         },
         // What DirectoryService.grantAccess contributes mid-handler.
         duringHandler: () => {
           AuditContext.setBefore({
-            user: { role: 'pracownik', active: false, managedBy: 'magspace', roleOverride: 'pracownik' },
+            user: { role: 'pracownik', lider: false, active: false, managedBy: 'magspace', roleOverride: 'pracownik' },
           });
           AuditContext.setMetadata({
             outcome: 'reactivated',
@@ -112,7 +123,7 @@ describe('SsoController — POST /sso/access-grants', () => {
       });
       // Nested under `user`, so it survives the trim to the response key-set.
       expect(out.entry!.before).toEqual({
-        user: { role: 'pracownik', active: false, managedBy: 'magspace', roleOverride: 'pracownik' },
+        user: { role: 'pracownik', lider: false, active: false, managedBy: 'magspace', roleOverride: 'pracownik' },
       });
       expect(out.entry!.metadata).toMatchObject({
         outcome: 'reactivated',
@@ -161,5 +172,59 @@ describe('SsoController — POST /sso/access-grants', () => {
       ).toBe(false);
       expect(GrantSsoAccessSchema.safeParse({ email: 'nope', role: 'eksport' }).success).toBe(false);
     });
+
+    // docs/28 — the leader flag rides on the grant.
+    it('accepts a leader grant and leaves an omitted flag absent', () => {
+      expect(
+        GrantSsoAccessSchema.parse({ email: 'jan.kowalski@magtrans.eu', role: 'opiekun', lider: true }),
+      ).toEqual({ email: 'jan.kowalski@magtrans.eu', role: 'opiekun', lider: true });
+      expect(
+        GrantSsoAccessSchema.parse({ email: 'jan.kowalski@magtrans.eu', role: 'opiekun' }),
+      ).not.toHaveProperty('lider');
+    });
+
+    it('through the route’s pipe, lider on weryfikator is 422 USER_LIDER_REQUIRES_LIDER_ROLE, not 400', () => {
+      const pipe = new ZodValidationPipe(GrantSsoAccessSchema);
+      let caught: unknown;
+      try {
+        pipe.transform(
+          { email: 'jan.kowalski@magtrans.eu', role: 'weryfikator', lider: true },
+          { type: 'body' },
+        );
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(UnprocessableEntityException);
+      expect((caught as UnprocessableEntityException).getResponse()).toMatchObject({
+        extensions: { code: USER_LIDER_REQUIRES_LIDER_ROLE },
+      });
+    });
+  });
+});
+
+describe('SsoController — PUT /sso/stanowisko-roles/:code body', () => {
+  const pipe = new ZodValidationPipe(SetStanowiskoRoleSchema);
+
+  it('passes `{ role }` through without inventing a flag (the service keeps the stored one)', () => {
+    expect(pipe.transform({ role: 'planista' }, { type: 'body' })).toEqual({ role: 'planista' });
+  });
+
+  it('passes an explicit leader mapping', () => {
+    expect(pipe.transform({ role: 'dyspozytor', lider: true }, { type: 'body' })).toEqual({
+      role: 'dyspozytor',
+      lider: true,
+    });
+  });
+
+  it('refuses lider on weryfikator with 422 + code', () => {
+    expect(() => pipe.transform({ role: 'weryfikator', lider: true }, { type: 'body' })).toThrow(
+      UnprocessableEntityException,
+    );
+  });
+
+  it('keeps 400 for a shape error', () => {
+    expect(() => pipe.transform({ role: 'planista', lider: 'tak' }, { type: 'body' })).toThrow(
+      BadRequestException,
+    );
   });
 });

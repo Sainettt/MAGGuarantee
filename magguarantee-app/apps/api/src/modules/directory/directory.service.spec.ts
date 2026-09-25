@@ -57,6 +57,7 @@ function makeUser(overrides: Partial<UserRow> = {}): UserRow {
     magspaceEmployeeId: 'emp-1',
     directorySyncedAt: now,
     roleOverride: null,
+    lider: false,
     createdAt: now,
     updatedAt: now,
     ...overrides,
@@ -136,29 +137,44 @@ describe('DirectoryService.resolveEmployee', () => {
   });
 });
 
-describe('DirectoryService.roleFor', () => {
+describe('DirectoryService.accessFor', () => {
+  const mapping = (code: string, role: string, lider: boolean) => ({
+    id: `m-${code}`,
+    stanowiskoCode: code,
+    stanowiskoName: code,
+    role,
+    lider,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
   it('returns null for a stanowisko with no mapping', async () => {
     const h = makeHarness();
-    await expect(h.svc.roleFor({ code: 'CONTROLLING', name: 'Controlling' })).resolves.toBeNull();
+    await expect(h.svc.accessFor({ code: 'CONTROLLING', name: 'Controlling' })).resolves.toBeNull();
   });
 
   it('treats "no stanowisko assigned" as no access, without hitting the table', async () => {
     const h = makeHarness();
-    await expect(h.svc.roleFor(null)).resolves.toBeNull();
+    await expect(h.svc.accessFor(null)).resolves.toBeNull();
     expect(h.mappings.findByCode).not.toHaveBeenCalled();
   });
 
-  it('returns the mapped role', async () => {
+  it('returns the mapped role with lider=false for an ordinary position', async () => {
     const h = makeHarness();
-    (h.mappings.findByCode as jest.Mock).mockResolvedValue({
-      id: 'm-1',
-      stanowiskoCode: 'PLANISTA',
-      stanowiskoName: 'Planista',
+    (h.mappings.findByCode as jest.Mock).mockResolvedValue(mapping('PLANISTA', 'planista', false));
+    await expect(h.svc.accessFor({ code: 'PLANISTA', name: 'Planista' })).resolves.toEqual({
       role: 'planista',
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      lider: false,
     });
-    await expect(h.svc.roleFor({ code: 'PLANISTA', name: 'Planista' })).resolves.toBe('planista');
+    expect(h.mappings.findByCode).toHaveBeenCalledWith('PLANISTA');
+  });
+
+  it('returns the leader flag of a leader position (PLANISTA_LIDER → planista + lider)', async () => {
+    const h = makeHarness();
+    (h.mappings.findByCode as jest.Mock).mockResolvedValue(mapping('PLANISTA_LIDER', 'planista', true));
+    await expect(
+      h.svc.accessFor({ code: 'PLANISTA_LIDER', name: 'Planista lider' }),
+    ).resolves.toEqual({ role: 'planista', lider: true });
   });
 });
 
@@ -187,6 +203,7 @@ describe('DirectoryService.provisionOrSync', () => {
       existing: null,
       employee: makeEmployee(),
       role: 'planista',
+      lider: false,
       googleSub: 'google-sub-1',
     });
 
@@ -218,6 +235,7 @@ describe('DirectoryService.provisionOrSync', () => {
       existing,
       employee: makeEmployee(),
       role: 'planista',
+      lider: false,
       googleSub: 'google-sub-1',
     });
 
@@ -237,6 +255,7 @@ describe('DirectoryService.provisionOrSync', () => {
       existing,
       employee: makeEmployee(),
       role: 'planista',
+      lider: false,
       googleSub: 'google-sub-1',
     });
 
@@ -255,6 +274,7 @@ describe('DirectoryService.provisionOrSync', () => {
       existing,
       employee: makeEmployee(),
       role: 'planista',
+      lider: false,
       googleSub: 'google-sub-1',
     });
 
@@ -272,6 +292,7 @@ describe('DirectoryService.provisionOrSync', () => {
       existing,
       employee: makeEmployee(),
       role: 'weryfikator',
+      lider: false,
       googleSub: 'google-sub-1',
     });
 
@@ -289,9 +310,147 @@ describe('DirectoryService.provisionOrSync', () => {
       existing: makeUser(),
       employee: makeEmployee(),
       role: 'planista',
+      lider: false,
       googleSub: 'google-sub-1',
     });
 
+    expect(h.audit.log).not.toHaveBeenCalled();
+  });
+
+  // ── leader flag (docs/28 §2) ───────────────────────────
+
+  it('JIT-creates a leader with the mapping’s flag and audits it', async () => {
+    const h = makeHarness();
+
+    const created = await h.svc.provisionOrSync({
+      existing: null,
+      employee: makeEmployee({ stanowisko: { code: 'PLANISTA_LIDER', name: 'Planista lider' } }),
+      role: 'planista',
+      lider: true,
+      googleSub: 'google-sub-1',
+    });
+
+    expect(h.users.createFromDirectory).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'planista', lider: true }),
+    );
+    expect(created.lider).toBe(true);
+    expect(h.audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'provisionUserFromDirectory',
+        after: expect.objectContaining({ role: 'planista', lider: true }),
+      }),
+    );
+  });
+
+  it('JIT-creates a non-leader with lider=false', async () => {
+    const h = makeHarness();
+
+    await h.svc.provisionOrSync({
+      existing: null,
+      employee: makeEmployee(),
+      role: 'planista',
+      lider: false,
+      googleSub: 'google-sub-1',
+    });
+
+    expect(h.users.createFromDirectory).toHaveBeenCalledWith(
+      expect.objectContaining({ lider: false }),
+    );
+  });
+
+  it('without an override, writes the mapping’s flag in the same update as the role', async () => {
+    const h = makeHarness();
+    const existing = makeUser({ role: 'planista', lider: false });
+
+    const updated = await h.svc.provisionOrSync({
+      existing,
+      employee: makeEmployee({ stanowisko: { code: 'PLANISTA_LIDER', name: 'Planista lider' } }),
+      role: 'planista',
+      lider: true,
+      googleSub: 'google-sub-1',
+    });
+
+    expect(h.users.update).toHaveBeenCalledTimes(1);
+    expect(h.users.update).toHaveBeenCalledWith(
+      existing.id,
+      expect.objectContaining({ role: 'planista', lider: true }),
+    );
+    expect(updated.lider).toBe(true);
+  });
+
+  it('a change of the flag alone is a change: audited with lider before → after', async () => {
+    // Everything else identical — only PLANISTA → PLANISTA_LIDER happened.
+    const h = makeHarness();
+    const existing = makeUser({ lider: false });
+
+    await h.svc.provisionOrSync({
+      existing,
+      employee: makeEmployee(),
+      role: 'planista',
+      lider: true,
+      googleSub: 'google-sub-1',
+    });
+
+    expect(h.audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'syncUserFromDirectory',
+        before: expect.objectContaining({ role: 'planista', lider: false }),
+        after: expect.objectContaining({ role: 'planista', lider: true }),
+        metadata: expect.objectContaining({ roleFromOverride: false }),
+      }),
+    );
+  });
+
+  it('a demotion in MAGSpace takes the flag away from a mapped account', async () => {
+    const h = makeHarness();
+    const existing = makeUser({ lider: true });
+
+    const updated = await h.svc.provisionOrSync({
+      existing,
+      employee: makeEmployee(),
+      role: 'planista',
+      lider: false,
+      googleSub: 'google-sub-1',
+    });
+
+    expect(h.users.update).toHaveBeenCalledWith(existing.id, expect.objectContaining({ lider: false }));
+    expect(updated.lider).toBe(false);
+  });
+
+  it('with an override, keeps the admin’s flag — the mapping cannot grant it…', async () => {
+    const h = makeHarness();
+    const existing = makeUser({ role: 'weryfikator', roleOverride: 'weryfikator', lider: false });
+
+    const updated = await h.svc.provisionOrSync({
+      existing,
+      employee: makeEmployee({ stanowisko: { code: 'PLANISTA_LIDER', name: 'Planista lider' } }),
+      role: 'weryfikator',
+      lider: true,
+      googleSub: 'google-sub-1',
+    });
+
+    expect(h.users.update).toHaveBeenCalledWith(
+      existing.id,
+      expect.objectContaining({ role: 'weryfikator', lider: false }),
+    );
+    expect(updated.lider).toBe(false);
+  });
+
+  it('…nor take it away', async () => {
+    // A DAF leader: MAGSpace has no DAF_LIDER, the admin granted it by hand.
+    const h = makeHarness();
+    const existing = makeUser({ role: 'opiekun', roleOverride: 'opiekun', lider: true });
+
+    await h.svc.provisionOrSync({
+      existing,
+      employee: makeEmployee({ stanowisko: { code: 'DAF', name: 'DAF' } }),
+      role: 'opiekun',
+      lider: false,
+      googleSub: 'google-sub-1',
+    });
+
+    expect(h.users.update).toHaveBeenCalledWith(existing.id, expect.objectContaining({ lider: true }));
+    // Nothing changed at all, so no audit row either.
     expect(h.audit.log).not.toHaveBeenCalled();
   });
 });
@@ -404,13 +563,19 @@ describe('DirectoryService.grantAccess', () => {
   const CONTROLLING = makeEmployee({ stanowisko: { code: 'CONTROLLING', name: 'Controlling' } });
 
   /** Runs the grant inside an audit context, the way the interceptor does. */
-  async function grant(h: ReturnType<typeof makeHarness>, role: 'weryfikator' | 'eksport' = 'weryfikator') {
+  async function grant(
+    h: ReturnType<typeof makeHarness>,
+    role: 'weryfikator' | 'eksport' | 'opiekun' = 'weryfikator',
+    lider?: boolean,
+  ) {
     const store: AuditContextStore = {
       actor: { userId: 'admin-1', userRole: 'admin' } as AuditContextStore['actor'],
       ipAddress: null,
     };
     const result = await AuditContext.run(store, () =>
-      h.svc.grantAccess('jan.kowalski@magtrans.eu', role),
+      lider === undefined
+        ? h.svc.grantAccess('jan.kowalski@magtrans.eu', role)
+        : h.svc.grantAccess('jan.kowalski@magtrans.eu', role, lider),
     );
     return { result, store };
   }
@@ -441,6 +606,8 @@ describe('DirectoryService.grantAccess', () => {
         name: 'Jan Kowalski',
         role: 'weryfikator',
         roleOverride: 'weryfikator',
+        // Omitted on the wire = not a leader (docs/28).
+        lider: false,
         // Not signed in with Google yet — that flips it later.
         authProvider: 'local',
         magspaceEmployeeId: 'emp-1',
@@ -482,12 +649,13 @@ describe('DirectoryService.grantAccess', () => {
     expect(h.users.update).toHaveBeenCalledWith('u-1', {
       role: 'weryfikator',
       roleOverride: 'weryfikator',
+      lider: false,
       active: true,
       directorySyncedAt: expect.any(Date),
     });
     expect(h.users.createFromDirectory).not.toHaveBeenCalled();
     expect(store.before).toEqual({
-      user: { role: 'planista', active: true, managedBy: 'magspace', roleOverride: null },
+      user: { role: 'planista', lider: false, active: true, managedBy: 'magspace', roleOverride: null },
     });
     expect(store.metadata).toMatchObject({ outcome: 'updated' });
   });
@@ -506,9 +674,59 @@ describe('DirectoryService.grantAccess', () => {
     expect(result.user.role).toBe('eksport');
     expect(result.user.roleOverride).toBe('eksport');
     expect(store.before).toEqual({
-      user: { role: 'pracownik', active: false, managedBy: 'magspace', roleOverride: 'pracownik' },
+      user: { role: 'pracownik', lider: false, active: false, managedBy: 'magspace', roleOverride: 'pracownik' },
     });
     expect(store.metadata).toMatchObject({ outcome: 'reactivated' });
+  });
+
+  // ── leader flag (docs/28 §2) ───────────────────────────
+
+  it('creates a leader in one step — the only way to get a DAF/opiekun leader', async () => {
+    const h = makeHarness();
+    h.magspace.lookupByEmail.mockResolvedValue(makeEmployee({ stanowisko: { code: 'DAF', name: 'DAF' } }));
+
+    const { result } = await grant(h, 'opiekun', true);
+
+    expect(result.outcome).toBe('created');
+    expect(h.users.createFromDirectory).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'opiekun', roleOverride: 'opiekun', lider: true }),
+    );
+    expect(result.user.lider).toBe(true);
+  });
+
+  it('re-grant writes role, roleOverride and lider in ONE update; before carries the old flag', async () => {
+    const h = makeHarness();
+    h.magspace.lookupByEmail.mockResolvedValue(CONTROLLING);
+    h.users.findByEmailIncludingDeleted.mockResolvedValue(
+      makeUser({ role: 'pracownik', roleOverride: 'pracownik', lider: true }),
+    );
+
+    const { result, store } = await grant(h, 'eksport', false);
+
+    expect(h.users.update).toHaveBeenCalledTimes(1);
+    expect(h.users.update).toHaveBeenCalledWith('u-1', {
+      role: 'eksport',
+      roleOverride: 'eksport',
+      lider: false,
+      active: true,
+      directorySyncedAt: expect.any(Date),
+    });
+    expect(result.user.lider).toBe(false);
+    expect(store.before).toEqual({
+      user: { role: 'pracownik', lider: true, active: true, managedBy: 'magspace', roleOverride: 'pracownik' },
+    });
+  });
+
+  it('422 USER_LIDER_REQUIRES_LIDER_ROLE for a leader weryfikator — before MAGSpace is asked', async () => {
+    const h = makeHarness();
+
+    const r = await refusal(grant(h, 'weryfikator', true));
+
+    expect(r.status).toBe(HttpStatus.UNPROCESSABLE_ENTITY);
+    expect(r.body).toMatchObject({ extensions: { code: 'USER_LIDER_REQUIRES_LIDER_ROLE' } });
+    expect(h.magspace.lookupByEmail).not.toHaveBeenCalled();
+    expect(h.users.createFromDirectory).not.toHaveBeenCalled();
+    expect(h.users.update).not.toHaveBeenCalled();
   });
 
   it('sets the override even when the stanowisko has meanwhile been mapped', async () => {

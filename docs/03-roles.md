@@ -1,6 +1,7 @@
 # 03. Роли и права доступа
 
 > 8 ролей пользователей. Этот документ — главный референс по бизнес-правилам авторизации.
+> Лидерство (`User.lider`, 2026-09-25) — флаг **поверх** пяти из них, а не девятая роль: см. [§«Лидеры»](#lider).
 
 ## Откуда берётся роль
 
@@ -28,6 +29,11 @@
 - Пользователь с `managedBy = 'magspace'` имеет `role` и `active` **только для
   чтения** в админке: их переписывает синхронизация. `PATCH /users/:id` на такую
   попытку отвечает 422 `USER_MANAGED_BY_MAGSPACE`.
+- **Флаг лидера `User.lider`** (2026-09-25, [docs/28](28-lider-roles-plan.md))
+  идёт вместе с ролью и подчиняется тем же правилам владения: у
+  `magspace`-учётки без `roleOverride` — из `StanowiskoRoleMapping.lider`
+  (`PLANISTA_LIDER`, `DYSPOZYTOR_KIEROWNIK`), иначе ставит admin. Лидер — не
+  роль, см. [§«Лидеры»](#lider).
 
 Матрица ниже описывает, **что может роль**, независимо от того, как она была
 назначена.
@@ -281,6 +287,27 @@
 - Точные времена выезда/съезда → из них деривируются `timeFrom`/`timeTo` в wniosek (перевозчик их не вводит; `pracownik` может поправить при верификации).
 - Видит все выезды — та же доска, что у eksport (активные по умолчанию, `includeHistory` — все).
 - **НЕ** делает: cancel выездов — это зона перевозчика (свой `zgloszony`) и админа; отметку `gotowy` — это eksport.
+
+---
+
+## <a id="lider"></a>⭐ Лидеры (`User.lider`)
+
+> Реализовано 2026-09-25 по [28-lider-roles-plan.md](28-lider-roles-plan.md).
+> **Лидер — не значение `enum Role`**, а булев флаг над одной из пяти ролей:
+> «lider_planista» = `role: planista` + `lider: true`. В enum `lider_*` не
+> добавлять никогда (docs/28 §7 R1): каждый `@Roles`, scope-ветка и
+> `Record<Role, …>` молча пропустили бы такую роль, а `OpiekunOwnershipGuard`
+> пропускает любую не-`opiekun` роль без проверки ownership.
+
+| | |
+|---|---|
+| Для каких ролей | `LIDER_ROLES` = `planista`, `dyspozytor`, `opiekun`, `pracownik`, `eksport`. `admin` и так может всё, `przewoznik` — не сотрудник, `weryfikator` не запрошен (добавить = одна строка в shared + новая миграция для двух CHECK) |
+| Инвариант | `lider = true ⇒ role ∈ LIDER_ROLES`, в трёх местах как у `AssignableRole`: Zod (`refineLiderPair`), сервисы (частичный `PATCH`, пара с `roleOverride`), CHECK в БД (`user_lider_requires_lider_role`, `stanowisko_role_mapping_lider_requires_lider_role`) |
+| Что даёт сегодня | **Ничего сверх базовой роли.** Тип пользователя, scope, ownership, панель, landing, nav и все `@Roles` — от `role`; лидер везде проходит как базовая роль. Права лидера появятся как `LIDER_PERMISSIONS[role]` в слое permissions ([docs/25](25-permissions-layer-plan.md) B1); первый кейс — передача машины другому планисте с апрувом лидера (отдельный план, docs/28 §8) |
+| Откуда берётся | Как `role`: `magspace` без `roleOverride` — из маппинга stanowiska (`PLANISTA_LIDER`, `DYSPOZYTOR_KIEROWNIK` → `+ lider`, docs/24 §10); с `roleOverride` («Nadaj dostęp» с галкой «Lider» или UserSheet) и `local` — admin. Лидеры DAF (`opiekun`), opiekunów wniosków (`pracownik`) и eksportu выдаются только руками — в MAGSpace нет соответствующих stanowisk |
+| UI-лейбл | `roles.lider.<role>`: «Lider planistów», «Lider dyspozytorów», «Lider DAF», «Lider opiekunów wniosków», «Lider eksportu» (EN: «Planners lead» …). Базовый `roles.<role>` не меняется; в списке пользователей — чип роли **плюс** чип «Lider», фильтр «Tylko liderzy» |
+| Где виден | `/auth/me.lider` и все ответы с `user`, `UserDtoFull.lider`, `GET /users?lider=true`, колонка «Lider» на `/employee/sso`, галка в «Nadaj dostęp», лейбл в меню пользователя и в автокомплите аудита, `lider` в DTO пикеров lookups. В JWT флага **нет** — читается из БД на каждом запросе, как `teamId` |
+| Не путать | `User.liderEmail` — e-mail для CC на решениях по wniosku ([quirk #14](19-known-quirks.md#liderEmail)), в UI подписан «E-mail lidera (CC)». Другое понятие, связи нет |
 
 ---
 

@@ -113,6 +113,12 @@ export type IsoDate = z.infer<typeof IsoDateSchema>;
  * NOTE: the auth slice has its own `Role` schema in `./auth.ts` for backward
  * compatibility. The two definitions MUST stay in sync; once Wave 3 lands
  * we'll consolidate to this single source of truth and re-export from auth.
+ *
+ * A leader is NOT a role: "lider_planista" is `role: 'planista'` plus the
+ * `lider` flag (see `LIDER_ROLES` below). Never add `lider_*` members here, in
+ * `auth.ts#Role` or in the Prisma enum — every `@Roles`, scope branch and
+ * `Record<Role, …>` would silently miss them (docs/28 §0, §7 R1). A test in
+ * `tests/lider-roles.test.ts` guards this.
  */
 export const RoleSchema = z.enum([
   'admin',
@@ -143,6 +149,99 @@ export type RoleSchema = z.infer<typeof RoleSchema>;
  */
 export const AssignableRoleSchema = RoleSchema.exclude(['admin', 'przewoznik']);
 export type AssignableRoleSchema = z.infer<typeof AssignableRoleSchema>;
+
+// ─── Leaders (docs/28) ────────────────────────────────────
+
+/**
+ * The base roles that may carry the leader flag (`User.lider`,
+ * `StanowiskoRoleMapping.lider`). A leader keeps the user type, scope, panel
+ * and every `@Roles` of the base role; the flag only adds permissions on top
+ * (docs/28 §1).
+ *
+ * `admin` does not need it (it can do everything), `przewoznik` is not an
+ * employee, `weryfikator` was not requested — adding one is this line plus the
+ * two CHECK constraints below.
+ *
+ * The invariant `lider ⇒ role ∈ LIDER_ROLES` is spelled in three places, like
+ * `AssignableRoleSchema`: the Zod refine ({@link refineLiderPair}, for the
+ * message), the api services (partial PATCH, merged rows) and the database
+ * CHECKs `user_lider_requires_lider_role` /
+ * `stanowisko_role_mapping_lider_requires_lider_role` (the guarantee).
+ */
+export const LIDER_ROLES = [
+  'planista',
+  'dyspozytor',
+  'opiekun',
+  'pracownik',
+  'eksport',
+] as const;
+
+export const LiderRoleSchema = RoleSchema.extract(LIDER_ROLES);
+export type LiderRoleSchema = z.infer<typeof LiderRoleSchema>;
+export type LiderRole = LiderRoleSchema;
+
+/** True when `role` may carry the leader flag. */
+export function isLiderRole(role: string): role is LiderRole {
+  return (LIDER_ROLES as readonly string[]).includes(role);
+}
+
+/**
+ * 422 — the pair `(role, lider)` breaks `lider ⇒ role ∈ LIDER_ROLES`. Carried
+ * as `extensions.code` of the RFC 7807 envelope, whether the Zod refine caught
+ * it (explicit pair in one body) or a service did (merged row: partial
+ * `PATCH /users/:id`, `roleOverride`, `PUT /sso/stanowisko-roles/:code` that
+ * keeps the stored flag).
+ *
+ * Defined here rather than in `./auth` (next to `USER_MANAGED_BY_MAGSPACE`,
+ * where it is re-exported) because `./users` and `./sso` need it for the
+ * refine and `./users` must not import `./auth` — that would close an import
+ * cycle (`./auth` imports `PasswordSchema` from `./users`).
+ */
+export const USER_LIDER_REQUIRES_LIDER_ROLE = 'USER_LIDER_REQUIRES_LIDER_ROLE' as const;
+
+/** Human fallback for {@link USER_LIDER_REQUIRES_LIDER_ROLE} — the web localises by code. */
+export const LIDER_REQUIRES_LIDER_ROLE_MESSAGE =
+  'Flagę lidera można nadać tylko rolom: planista, dyspozytor, opiekun, pracownik, eksport.';
+
+/**
+ * `superRefine` callback for a body that carries `role` and `lider` together:
+ * `lider: true` next to a role outside {@link LIDER_ROLES} is an issue on the
+ * `lider` path.
+ *
+ * The issue carries `params.code` = {@link USER_LIDER_REQUIRES_LIDER_ROLE}. The
+ * api's `ZodValidationPipe` answers such a business-rule issue with 422 +
+ * `extensions.code` instead of the plain 400, so the wire code is the same as
+ * when a service catches the pair on a merged row.
+ *
+ * Exported as a function (not only as refined schemas) so a form can bolt it
+ * onto its own variant — e.g. `CreateUserSchema.passthrough().superRefine(refineLiderPair)`.
+ */
+export function refineLiderPair(
+  value: { role?: string | null; lider?: boolean | null },
+  ctx: z.RefinementCtx,
+): void {
+  if (value.lider !== true || value.role == null || isLiderRole(value.role)) return;
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: ['lider'],
+    message: LIDER_REQUIRES_LIDER_ROLE_MESSAGE,
+    params: { code: USER_LIDER_REQUIRES_LIDER_ROLE },
+  });
+}
+
+// ─── Query-string primitives ──────────────────────────────
+
+/**
+ * A boolean query parameter: exactly `'true'` or `'false'`, anything else is a
+ * validation error.
+ *
+ * Deliberately NOT `z.coerce.boolean()`: that is `Boolean(value)`, so the
+ * string `'false'` coerces to `true` and `?lider=false` would return only the
+ * leaders.
+ */
+export const BooleanQueryParamSchema = z
+  .enum(['true', 'false'])
+  .transform((v) => v === 'true');
 
 // ─── Pagination & list query primitives ───────────────────
 

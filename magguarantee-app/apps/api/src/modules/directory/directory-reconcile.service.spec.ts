@@ -57,6 +57,7 @@ function user(over: Partial<UserRow> = {}): UserRow {
     magspaceEmployeeId: 'emp-1',
     directorySyncedAt: NOW,
     roleOverride: null,
+    lider: false,
     createdAt: NOW,
     updatedAt: NOW,
     ...over,
@@ -69,7 +70,7 @@ function makeHarness(opts: {
   localStaff?: UserRow[];
   roster?: MagspaceEmployee[];
   mode?: 'enforce' | 'report';
-  roleFor?: (s: MagspaceEmployee['stanowisko']) => string | null;
+  accessFor?: (s: MagspaceEmployee['stanowisko']) => { role: string; lider: boolean } | null;
   rosterFails?: boolean;
   failureSince?: Date;
   alreadyAlerted?: boolean;
@@ -84,8 +85,8 @@ function makeHarness(opts: {
 
   const directory = {
     deprovision: jest.fn(async () => undefined),
-    roleFor: jest.fn(async (s: MagspaceEmployee['stanowisko']) =>
-      opts.roleFor ? opts.roleFor(s) : s ? 'planista' : null,
+    accessFor: jest.fn(async (s: MagspaceEmployee['stanowisko']) =>
+      opts.accessFor ? opts.accessFor(s) : s ? { role: 'planista', lider: false } : null,
     ),
   } as unknown as jest.Mocked<DirectoryService>;
 
@@ -195,7 +196,7 @@ describe('DirectoryReconcileService.run', () => {
 
   it('disables an account whose stanowisko lost its mapping', async () => {
     const u = user();
-    const h = makeHarness({ managed: [u], roster: [employee()], roleFor: () => null });
+    const h = makeHarness({ managed: [u], roster: [employee()], accessFor: () => null });
 
     await h.svc.run(NOW);
 
@@ -210,18 +211,18 @@ describe('DirectoryReconcileService.run', () => {
     const h = makeHarness({
       managed: [u],
       roster: [employee({ stanowisko: { code: 'CONTROLLING', name: 'Controlling' } })],
-      roleFor: () => null,
+      accessFor: () => null,
     });
 
     await h.svc.run(NOW);
 
     expect(h.directory.deprovision).not.toHaveBeenCalled();
-    expect(h.directory.roleFor).not.toHaveBeenCalled();
+    expect(h.directory.accessFor).not.toHaveBeenCalled();
   });
 
   it('never re-points a hand-approved user at the mapped role', async () => {
     const u = user({ role: 'weryfikator', roleOverride: 'weryfikator' });
-    const h = makeHarness({ managed: [u], roster: [employee()], roleFor: () => 'planista' });
+    const h = makeHarness({ managed: [u], roster: [employee()], accessFor: () => ({ role: 'planista', lider: false }) });
 
     await h.svc.run(NOW);
 
@@ -233,7 +234,7 @@ describe('DirectoryReconcileService.run', () => {
 
   it('applies a changed role and audits it as a system action', async () => {
     const u = user({ role: 'dyspozytor' });
-    const h = makeHarness({ managed: [u], roster: [employee()], roleFor: () => 'planista' });
+    const h = makeHarness({ managed: [u], roster: [employee()], accessFor: () => ({ role: 'planista', lider: false }) });
 
     await h.svc.run(NOW);
 
@@ -243,6 +244,134 @@ describe('DirectoryReconcileService.run', () => {
     );
     expect(h.audit.log).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'system.syncUserFromDirectory', actor: 'system' }),
+    );
+  });
+
+  // ── leader flag (docs/28 §2) ────────────────────────────
+
+  it('a change of the leader flag alone is one role change: one UPDATE, one audit row, one mail line', async () => {
+    // PLANISTA → PLANISTA_LIDER: same role, the flag is the whole change.
+    const u = user({ role: 'planista', lider: false });
+    const h = makeHarness({
+      managed: [u],
+      roster: [employee({ stanowisko: { code: 'PLANISTA_LIDER', name: 'Planista lider' } })],
+      accessFor: () => ({ role: 'planista', lider: true }),
+    });
+
+    await expect(h.svc.run(NOW)).resolves.toMatchObject({ roleChanged: 1 });
+
+    // Name unchanged → the pair's UPDATE is the only write, role + lider together.
+    expect(h.users.update).toHaveBeenCalledTimes(1);
+    expect(h.users.update).toHaveBeenCalledWith(u.id, {
+      role: 'planista',
+      lider: true,
+      directorySyncedAt: NOW,
+    });
+    expect(h.audit.log).toHaveBeenCalledTimes(1);
+    expect(h.audit.log).toHaveBeenCalledWith({
+      action: 'system.syncUserFromDirectory',
+      targetType: 'User',
+      targetKey: 'jan.kowalski',
+      before: { role: 'planista', lider: false },
+      after: { role: 'planista', lider: true },
+      actor: 'system',
+    });
+    expect(h.mail.enqueueDirectoryReconcileReport).toHaveBeenCalledWith(
+      'admin@magtrans.eu',
+      expect.objectContaining({
+        roleChanges: [
+          {
+            login: 'jan.kowalski',
+            name: 'Jan Kowalski',
+            fromRole: 'planista',
+            fromLider: false,
+            toRole: 'planista',
+            toLider: true,
+          },
+        ],
+      }),
+    );
+  });
+
+  it('takes the flag away when the stanowisko stops being a leader one', async () => {
+    const u = user({ role: 'dyspozytor', lider: true });
+    const h = makeHarness({
+      managed: [u],
+      roster: [employee({ stanowisko: { code: 'DYSPOZYTOR', name: 'Dyspozytor' } })],
+      accessFor: () => ({ role: 'dyspozytor', lider: false }),
+    });
+
+    await h.svc.run(NOW);
+
+    expect(h.users.update).toHaveBeenCalledWith(
+      u.id,
+      expect.objectContaining({ role: 'dyspozytor', lider: false }),
+    );
+  });
+
+  it('writes role and flag in the same UPDATE when both change', async () => {
+    const u = user({ role: 'opiekun', lider: false });
+    const h = makeHarness({
+      managed: [u],
+      roster: [employee()],
+      accessFor: () => ({ role: 'planista', lider: true }),
+    });
+
+    await h.svc.run(NOW);
+
+    expect(h.users.update).toHaveBeenCalledTimes(1);
+    expect(h.users.update).toHaveBeenCalledWith(
+      u.id,
+      expect.objectContaining({ role: 'planista', lider: true }),
+    );
+  });
+
+  it('is quiet when role and flag both still match', async () => {
+    const u = user({ role: 'planista', lider: true });
+    const h = makeHarness({
+      managed: [u],
+      roster: [employee()],
+      accessFor: () => ({ role: 'planista', lider: true }),
+    });
+
+    await expect(h.svc.run(NOW)).resolves.toMatchObject({ roleChanged: 0 });
+    expect(h.users.update).not.toHaveBeenCalled();
+    expect(h.mail.enqueueDirectoryReconcileReport).not.toHaveBeenCalled();
+  });
+
+  it('never touches the flag of an override account (a hand-granted DAF leader)', async () => {
+    const u = user({ role: 'opiekun', roleOverride: 'opiekun', lider: true });
+    const h = makeHarness({
+      managed: [u],
+      roster: [employee({ stanowisko: { code: 'DAF', name: 'DAF' } })],
+      accessFor: () => ({ role: 'opiekun', lider: false }),
+    });
+
+    await expect(h.svc.run(NOW)).resolves.toMatchObject({ roleChanged: 0 });
+    expect(h.directory.accessFor).not.toHaveBeenCalled();
+    expect(h.users.update).not.toHaveBeenCalled();
+    expect(h.audit.log).not.toHaveBeenCalled();
+  });
+
+  it('in report mode it reports a flag change without writing it', async () => {
+    const u = user({ role: 'planista', lider: false });
+    const h = makeHarness({
+      managed: [u],
+      roster: [employee()],
+      accessFor: () => ({ role: 'planista', lider: true }),
+      mode: 'report',
+    });
+
+    await h.svc.run(NOW);
+
+    expect(h.users.update).not.toHaveBeenCalled();
+    expect(h.audit.log).not.toHaveBeenCalled();
+    expect(h.mail.enqueueDirectoryReconcileReport).toHaveBeenCalledWith(
+      'admin@magtrans.eu',
+      expect.objectContaining({
+        mode: 'report',
+        roleChanges: [expect.objectContaining({ fromLider: false, toLider: true })],
+      }),
     );
   });
 

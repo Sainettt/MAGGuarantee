@@ -51,6 +51,9 @@ export class SsoController {
    * Idempotent upsert — the code is the identity, so PUT rather than POST, and
    * re-pointing a stanowisko at a different role is the same call as mapping it
    * for the first time.
+   *
+   * Body `{ role, lider? }` (docs/28): `lider` omitted keeps the stored flag; a
+   * resulting pair outside `LIDER_ROLES` is 422 `USER_LIDER_REQUIRES_LIDER_ROLE`.
    */
   @Put('stanowisko-roles/:code')
   @Audit({
@@ -62,7 +65,7 @@ export class SsoController {
     @Param('code', new ZodValidationPipe(StanowiskoCodeSchema)) code: string,
     @Body(new ZodValidationPipe(SetStanowiskoRoleSchema)) body: SetStanowiskoRoleDto,
   ): Promise<StanowiskoRoleDto> {
-    return this.sso.setStanowiskoRole(code, body.role);
+    return this.sso.setStanowiskoRole(code, body.role, body.lider);
   }
 
   @Delete('stanowisko-roles/:code')

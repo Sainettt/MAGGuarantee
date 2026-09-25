@@ -7,6 +7,16 @@
 // optional `password`; edit drops password + login (immutable). The temporary
 // password (when the API returns one) is surfaced in a long-lived toast so
 // the admin can copy it before it disappears.
+//
+// Leaders (docs/28): the «Lider» checkbox under the role select. Who may change
+// it follows who owns `role` — see lib/users/liderCheckboxState.ts for the
+// rules. Two invariants live here, in the event handlers:
+//   - any change of the `role` / `roleOverride` select resets the flag to
+//     `false` (also between two leader roles) — on the select's onChange, NOT
+//     in an effect on `watch`, which would also fire on `form.reset` and wipe
+//     the value loaded from the user;
+//   - on edit the flag is sent only when it differs from `user.lider`, so an
+//     unrelated edit of a mapping-owned leader never trips a 422.
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslations } from 'next-intl';
@@ -17,7 +27,9 @@ import { z } from 'zod';
 import {
   AssignableRole,
   CreateUserSchema,
+  LIDER_ROLES,
   UpdateUserSchema,
+  refineLiderPair,
   type CreateUserDto,
   type UpdateUserDto,
   type UserDtoFull,
@@ -36,10 +48,17 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/Sheet';
-import { FormField } from '@/components/forms/Form';
+import { FormField, FormMessage } from '@/components/forms/Form';
 import { ApiResponseError } from '@/lib/api/client';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import { useCreateUser, useUpdateUser } from '@/lib/hooks/useUsers';
+import {
+  liderAfterRoleOverrideChange,
+  liderCheckboxState,
+  liderCreateValue,
+  liderPatchValue,
+} from '@/lib/users/liderCheckboxState';
+import { liderErrorKind } from '@/lib/users/liderErrors';
 
 // Roles the UI offers in the dropdown — przewoznik is excluded because
 // carrier users are provisioned via POST /carriers (the API would reject it
@@ -66,6 +85,8 @@ interface UserFormValues {
   password?: string;
   liderEmail?: string;
   active: boolean;
+  /** Leader flag over `role` (docs/28). Not `liderEmail` — that is the CC address. */
+  lider: boolean;
   // ── MAGSpace directory (docs/24) — edit only ───────────
   managedBy: 'local' | 'magspace';
   /** `''` = no override, i.e. the stanowisko mapping decides the role. */
@@ -80,6 +101,7 @@ const EMPTY_DEFAULTS: UserFormValues = {
   password: '',
   liderEmail: '',
   active: true,
+  lider: false,
   // A hand-created account is always locally managed; an admin can hand it to
   // the directory afterwards.
   managedBy: 'local',
@@ -96,6 +118,14 @@ const EMPTY_DEFAULTS: UserFormValues = {
 const EditFormSchema = UpdateUserSchema.extend({
   roleOverride: AssignableRole.or(z.literal('')).nullable().optional(),
 }).passthrough();
+
+/**
+ * Create-form resolver: `.passthrough()` for the extra form-only fields (see
+ * the resolver comment below) plus the same `(role, lider)` check the api
+ * runs on `POST /users`. `CreateUserSchema` itself stays a plain object —
+ * that is what keeps `.passthrough()` available.
+ */
+const CreateFormSchema = CreateUserSchema.passthrough().superRefine(refineLiderPair);
 
 interface Props {
   open: boolean;
@@ -117,7 +147,7 @@ export function UserSheet({ open, user, onClose }: Props) {
       // RHF needs a single resolver — we map the slice ourselves in onSubmit,
       // so just use CreateUserSchema.passthrough() to cover all fields the
       // form carries (Zod will yell about login on edit otherwise).
-      isEdit ? EditFormSchema : CreateUserSchema.passthrough(),
+      isEdit ? EditFormSchema : CreateFormSchema,
     ) as never,
     defaultValues: EMPTY_DEFAULTS,
   });
@@ -135,6 +165,9 @@ export function UserSheet({ open, user, onClose }: Props) {
         password: '',
         liderEmail: user.liderEmail ?? '',
         active: user.active,
+        // From the user, not `false`: otherwise the submit would "change" a
+        // mapping-owned leader flag on every edit and get a 422.
+        lider: user.lider,
         managedBy: user.managedBy,
         roleOverride: user.roleOverride ?? '',
       });
@@ -142,6 +175,21 @@ export function UserSheet({ open, user, onClose }: Props) {
       form.reset(EMPTY_DEFAULTS);
     }
   }, [open, isEdit, user, form]);
+
+  // «Planista, Dyspozytor, …» for the leader-rule error — built from
+  // LIDER_ROLES so the message cannot drift from the rule.
+  const liderRoles = LIDER_ROLES.map((r) => tRoles(r)).join(', ');
+
+  const apiErrorMessage = (err: unknown): string => {
+    switch (liderErrorKind(err)) {
+      case 'requiresLiderRole':
+        return t('errors.liderRequiresLiderRole', { roles: liderRoles });
+      case 'managedByMagspace':
+        return t('errors.liderManagedByMagspace');
+      default:
+        return formatApiError(err, tCommon('errorGeneric'));
+    }
+  };
 
   const createM = useCreateUser({
     onSuccess: (created) => {
@@ -157,7 +205,7 @@ export function UserSheet({ open, user, onClose }: Props) {
       }
       onClose();
     },
-    onError: (err) => toast.error(formatApiError(err, tCommon('errorGeneric'))),
+    onError: (err) => toast.error(apiErrorMessage(err)),
   });
 
   const updateM = useUpdateUser({
@@ -165,7 +213,7 @@ export function UserSheet({ open, user, onClose }: Props) {
       toast.success(tCommon('saved'));
       onClose();
     },
-    onError: (err) => toast.error(formatApiError(err, tCommon('errorGeneric'))),
+    onError: (err) => toast.error(apiErrorMessage(err)),
   });
 
   const onSubmit = form.handleSubmit(
@@ -178,11 +226,23 @@ export function UserSheet({ open, user, onClose }: Props) {
         cleaned[k] = v;
       }
 
+      // Resolved from the submitted values, not from the render-time watch.
+      const liderState = liderCheckboxState({
+        isEdit,
+        managedBy: values.managedBy,
+        role: values.role,
+        roleOverride: values.roleOverride,
+      });
+
       if (isEdit && user) {
         // Update slice — drop login + password (immutable through PATCH).
-        const { login: _l, password: _p, ...rest } = cleaned;
+        // `lider` is re-added below only when it actually changes.
+        const { login: _l, password: _p, lider: _li, ...rest } = cleaned;
         void _l;
         void _p;
+        void _li;
+        const lider = liderPatchValue(liderState, values.lider, user.lider);
+        if (lider !== undefined) rest.lider = lider;
         if (values.managedBy === 'local') {
           // A hand-granted role only means something to the directory. When
           // the account is (or goes back to being) locally managed it is not
@@ -208,6 +268,7 @@ export function UserSheet({ open, user, onClose }: Props) {
         const { managedBy: _m, roleOverride: _r, ...createBody } = cleaned;
         void _m;
         void _r;
+        createBody.lider = liderCreateValue(liderState, values.lider);
         createM.mutate(createBody as CreateUserDto);
       }
     },
@@ -236,6 +297,25 @@ export function UserSheet({ open, user, onClose }: Props) {
   // an account back (docs/24 §A2).
   const watchedManagedBy = form.watch('managedBy');
   const isDirectoryManaged = isEdit && watchedManagedBy === 'magspace';
+
+  const watchedRoleOverride = form.watch('roleOverride');
+  const liderState = liderCheckboxState({
+    isEdit,
+    managedBy: watchedManagedBy,
+    role: watchedRole,
+    roleOverride: watchedRoleOverride,
+  });
+  const liderHint =
+    liderState.mode === 'enabled'
+      ? t('fields.liderHint')
+      : liderState.mode === 'disabled' && liderState.reason === 'managed'
+        ? t('fields.managedHint')
+        : t('fields.liderPendingSyncHint');
+  // The only issue Zod can raise on `lider` is the pair refine, whose built-in
+  // message is Polish-only — show the localised text instead.
+  const liderError = errMsg('lider')
+    ? t('errors.liderRequiresLiderRole', { roles: liderRoles })
+    : undefined;
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
@@ -301,7 +381,10 @@ export function UserSheet({ open, user, onClose }: Props) {
                 <Select
                   id="user-role"
                   disabled={isDirectoryManaged}
-                  {...form.register('role')}
+                  {...form.register('role', {
+                    // Any role change drops the leader flag (see header).
+                    onChange: () => form.setValue('lider', false),
+                  })}
                 >
                   {SELECTABLE_ROLES.map((r) => (
                     <option key={r} value={r}>
@@ -310,6 +393,27 @@ export function UserSheet({ open, user, onClose }: Props) {
                   ))}
                 </Select>
               </FormField>
+
+              {liderState.mode !== 'hidden' && (
+                // A single <label> wraps the checkbox (FormField's own label
+                // would name it twice); the hint is linked by id.
+                <div className="flex flex-col gap-1.5">
+                  <label className="flex items-center gap-2 text-sm font-medium text-text">
+                    <Checkbox
+                      id="user-lider"
+                      aria-describedby="user-lider-hint"
+                      aria-invalid={liderError ? true : undefined}
+                      disabled={liderState.mode === 'disabled'}
+                      {...form.register('lider')}
+                    />
+                    {t('fields.lider')}
+                  </label>
+                  <p id="user-lider-hint" className="text-xs text-text-sub">
+                    {liderHint}
+                  </p>
+                  <FormMessage>{liderError}</FormMessage>
+                </div>
+              )}
 
               {showLiderEmail && (
                 <FormField
@@ -378,7 +482,18 @@ export function UserSheet({ open, user, onClose }: Props) {
                     >
                       <Select
                         id="user-roleOverride"
-                        {...form.register('roleOverride')}
+                        {...form.register('roleOverride', {
+                          // A new override resets the leader flag; clearing it
+                          // hands the flag back to the mapping (stored value).
+                          onChange: (e: { target: { value: string } }) =>
+                            form.setValue(
+                              'lider',
+                              liderAfterRoleOverrideChange(
+                                e.target.value,
+                                user?.lider ?? false,
+                              ),
+                            ),
+                        })}
                       >
                         <option value="">{t('fields.roleOverrideNone')}</option>
                         {AssignableRole.options.map((r) => (

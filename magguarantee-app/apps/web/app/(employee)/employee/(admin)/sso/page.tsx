@@ -16,6 +16,12 @@
 // The table degrades rather than fails when MAGSpace is unreachable: saved rows
 // are still shown, with a banner saying the list may be incomplete. Hiding the
 // current mapping during an outage would be exactly backwards.
+//
+// Leaders (docs/28 §2): a mapping row also carries a «Lider» flag, handed out
+// with the role to everyone on that stanowisko (e.g. PLANISTA_LIDER →
+// planista + lider). It is editable only on rows whose role may carry it
+// (`LIDER_ROLES`), and any role change clears it explicitly — the api keeps
+// the stored flag when `lider` is omitted and would refuse the new pair.
 
 import { AlertTriangle, KeyRound, ShieldQuestion, UserPlus } from 'lucide-react';
 import { useTranslations } from 'next-intl';
@@ -23,12 +29,15 @@ import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import {
   AssignableRole,
+  LIDER_ROLES,
+  isLiderRole,
   type SsoAccessDenialDto,
   type StanowiskoRoleDto,
 } from '@magguarantee/shared';
 
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Select } from '@/components/ui/Select';
@@ -41,6 +50,7 @@ import {
 } from '@/lib/hooks/useSso';
 import { queryErrorProps } from '@/lib/query/queryErrorProps';
 import { SUPPRESS_GLOBAL_ERROR } from '@/lib/query/globalErrors';
+import { liderErrorKind } from '@/lib/users/liderErrors';
 
 import { GrantAccessDialog } from './GrantAccessDialog';
 
@@ -63,6 +73,22 @@ export default function SsoPage() {
 
   const busy = setM.isPending || deleteM.isPending;
 
+  // «Planista, Dyspozytor, …» — built from LIDER_ROLES so the hint and the
+  // error never drift from the rule they describe.
+  const liderRoles = useMemo(
+    () => LIDER_ROLES.map((r) => tRoles(r)).join(', '),
+    [tRoles],
+  );
+  const liderUnavailableHint = t('liderUnavailableHint', { roles: liderRoles });
+
+  const errorMessage = useCallback(
+    (err: unknown): string =>
+      liderErrorKind(err) === 'requiresLiderRole'
+        ? t('errors.liderRequiresLiderRole', { roles: liderRoles })
+        : tCommon('errorGeneric'),
+    [t, tCommon, liderRoles],
+  );
+
   // Memoised so it does not re-create the column definitions on every render.
   const onRoleChange = useCallback(
     async (row: StanowiskoRoleDto, value: string) => {
@@ -74,15 +100,40 @@ export default function SsoPage() {
           await setM.mutateAsync({
             code: row.code,
             role: value as StanowiskoRoleDto['role'] & string,
+            // Any role change clears the leader flag — also between two
+            // leader roles (a DAF lead is not a planners lead). Sent
+            // explicitly: an omitted `lider` keeps the stored one.
+            lider: false,
           });
         }
         toast.success(tCommon('saved'));
-      } catch {
-        toast.error(tCommon('errorGeneric'));
+      } catch (err) {
+        toast.error(errorMessage(err));
       }
     },
-    [deleteM, setM, tCommon],
+    [deleteM, setM, tCommon, errorMessage],
   );
+
+  const onLiderChange = useCallback(
+    async (row: StanowiskoRoleDto, lider: boolean) => {
+      if (row.role === null) return;
+      try {
+        await setM.mutateAsync({ code: row.code, role: row.role, lider });
+        toast.success(tCommon('saved'));
+      } catch (err) {
+        toast.error(errorMessage(err));
+      }
+    },
+    [setM, tCommon, errorMessage],
+  );
+
+  // While a PUT for a row is in flight, show the value being saved rather
+  // than the stale one (the checkbox is controlled by the query data).
+  const pendingLiderCode =
+    setM.isPending && setM.variables?.lider !== undefined
+      ? setM.variables.code
+      : null;
+  const pendingLiderValue = setM.variables?.lider ?? false;
 
   const columns = useMemo<DataTableColumn<StanowiskoRoleDto>[]>(
     () => [
@@ -121,6 +172,40 @@ export default function SsoPage() {
         ),
       },
       {
+        id: 'lider',
+        header: t('lider'),
+        width: 'tight',
+        align: 'center',
+        cell: (row) => {
+          const eligible = row.role !== null && isLiderRole(row.role);
+          const checked =
+            pendingLiderCode === row.code ? pendingLiderValue : row.lider;
+          const hintId = `sso-lider-hint-${row.code}`;
+          return (
+            // The wrapper carries the tooltip: a disabled input does not
+            // reliably show its own `title` in every browser.
+            <span
+              className="inline-flex items-center justify-center"
+              title={eligible ? undefined : liderUnavailableHint}
+            >
+              <Checkbox
+                aria-label={t('liderAria', { stanowisko: row.name })}
+                aria-describedby={eligible ? undefined : hintId}
+                checked={checked}
+                disabled={busy || !eligible}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => void onLiderChange(row, e.target.checked)}
+              />
+              {!eligible && (
+                <span id={hintId} className="sr-only">
+                  {liderUnavailableHint}
+                </span>
+              )}
+            </span>
+          );
+        },
+      },
+      {
         id: 'state',
         header: t('fields.state'),
         width: 'tight',
@@ -144,7 +229,16 @@ export default function SsoPage() {
         ),
       },
     ],
-    [t, tRoles, busy, onRoleChange],
+    [
+      t,
+      tRoles,
+      busy,
+      onRoleChange,
+      onLiderChange,
+      pendingLiderCode,
+      pendingLiderValue,
+      liderUnavailableHint,
+    ],
   );
 
   const denialRows = denials?.items ?? [];

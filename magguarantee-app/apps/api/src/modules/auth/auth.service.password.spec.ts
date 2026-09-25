@@ -45,6 +45,7 @@ function makeUser(overrides: Partial<UserRow> = {}): UserRow {
     magspaceEmployeeId: null,
     directorySyncedAt: null,
     roleOverride: null,
+    lider: false,
     createdAt: NOW,
     updatedAt: NOW,
     deletedAt: null,

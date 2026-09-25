@@ -307,6 +307,9 @@ export class AuthController {
       name: user.name,
       role: user.role,
       mustChangePassword: user.mustChangePassword,
+      // DB-sourced by JwtAccessStrategy (docs/28); absent only on hand-built
+      // AuthUser fixtures.
+      lider: user.lider ?? false,
     };
   }
 

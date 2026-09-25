@@ -6,7 +6,10 @@
 // middleware (edge) and route-group layouts (server) consult `isAllowed` /
 // `roleForPath` to decide whether a given user may reach a path.
 
-import type { Role } from '@magguarantee/shared';
+// Type-only on purpose: `middleware.ts` (edge) imports this file, and the
+// shared package's runtime barrel is CommonJS + zod — a value import from it
+// here would drag all of that into the edge bundle.
+import type { LiderRole, Role } from '@magguarantee/shared';
 
 export const ROLE_LANDING: Record<Role, string> = {
   admin: '/employee',
@@ -35,6 +38,49 @@ export const ROLE_LANDING_PATHS = Array.from(
 
 export function landingFor(role: Role): string {
   return ROLE_LANDING[role];
+}
+
+// ─── Role labels (docs/28 — leaders) ──────────────────────────
+
+/**
+ * The roles that may carry the leader flag — a local mirror of shared
+ * `LIDER_ROLES`, kept here as a plain object so this edge-imported file needs
+ * no runtime import from `@magguarantee/shared` (see the import note above).
+ *
+ * `satisfies Record<LiderRole, true>` keeps the mirror honest at compile
+ * time: a role added to (or removed from) `LIDER_ROLES` without touching this
+ * object is a missing / excess property, so the build fails. `roles.test.ts`
+ * double-checks the key set against the runtime `LIDER_ROLES`.
+ *
+ * A leader is NOT a role (docs/28 §0, R1): landing, prefixes and edge gating
+ * above stay keyed by `Role` alone. The flag only changes the label.
+ */
+export const LIDER_LABEL_ROLES = {
+  planista: true,
+  dyspozytor: true,
+  opiekun: true,
+  pracownik: true,
+  eksport: true,
+} as const satisfies Record<LiderRole, true>;
+
+/** A full next-intl key under the root namespace: `roles.<role>` or `roles.lider.<role>`. */
+export type RoleLabelKey = `roles.${Role}` | `roles.lider.${LiderRole}`;
+
+function isLiderLabelRole(role: Role): role is LiderRole {
+  return (LIDER_LABEL_ROLES as Partial<Record<Role, true>>)[role] === true;
+}
+
+/**
+ * i18n key for a user's role label, for a translator bound to the ROOT
+ * namespace (`useTranslations()`): «Lider planistów» for `planista` + `lider`,
+ * «Planista» otherwise. A `lider` flag on a role that cannot carry it (admin,
+ * przewoznik, weryfikator — the database forbids the pair anyway) falls back
+ * to the base label rather than to a missing key.
+ */
+export function roleLabelKey(role: Role, lider?: boolean): RoleLabelKey {
+  return lider === true && isLiderLabelRole(role)
+    ? `roles.lider.${role}`
+    : `roles.${role}`;
 }
 
 // ─── Path-level access control ────────────────────────────────

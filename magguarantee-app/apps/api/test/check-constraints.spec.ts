@@ -215,3 +215,106 @@ describeIfDb('phase3_blocks CHECK constraints', () => {
     expect(claim.id).toBeTruthy();
   });
 });
+
+/**
+ * docs/28 — the database half of `lider ⇒ role ∈ LIDER_ROLES`
+ * (migration 20260925120000_user_lider_flag). The api services refuse the same
+ * pairs with 422 `USER_LIDER_REQUIRES_LIDER_ROLE` before a write; these tests
+ * pin the guarantee underneath them.
+ */
+describeIfDb('docs/28 lider CHECK constraints', () => {
+  const stamp = `${Date.now()}`;
+  const userIds: string[] = [];
+  const mappingCodes: string[] = [];
+
+  async function createUser(role: 'planista' | 'weryfikator' | 'admin', lider: boolean): Promise<string> {
+    const n = userIds.length;
+    const user = await prisma.user.create({
+      data: {
+        login: `checktest-lider-${stamp}-${n}`,
+        email: `checktest-lider-${stamp}-${n}@example.com`,
+        passwordHash: 'placeholder',
+        role,
+        lider,
+        name: 'Check Lider',
+      },
+    });
+    userIds.push(user.id);
+    return user.id;
+  }
+
+  async function violation(p: Promise<unknown>): Promise<boolean> {
+    try {
+      await p;
+    } catch (err) {
+      return isCheckViolation(err);
+    }
+    return false;
+  }
+
+  afterAll(async () => {
+    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+    await prisma.stanowiskoRoleMapping.deleteMany({ where: { stanowiskoCode: { in: mappingCodes } } });
+    await prisma.$disconnect();
+  });
+
+  it('user_lider_requires_lider_role accepts planista + lider', async () => {
+    const id = await createUser('planista', true);
+    expect(id).toBeTruthy();
+  });
+
+  it.each(['weryfikator', 'admin'] as const)(
+    'user_lider_requires_lider_role rejects %s + lider on insert',
+    async (role) => {
+      const n = userIds.length;
+      await expect(
+        violation(
+          prisma.user.create({
+            data: {
+              login: `checktest-lider-bad-${stamp}-${role}-${n}`,
+              email: `checktest-lider-bad-${stamp}-${role}-${n}@example.com`,
+              passwordHash: 'placeholder',
+              role,
+              lider: true,
+            },
+          }),
+        ),
+      ).resolves.toBe(true);
+    },
+  );
+
+  it('user_lider_requires_lider_role rejects a role change that strands the flag', async () => {
+    // The partial-PATCH case the service refuses with 422 (docs/28 rule D.4).
+    const id = await createUser('planista', true);
+    await expect(
+      violation(prisma.user.update({ where: { id }, data: { role: 'weryfikator' } })),
+    ).resolves.toBe(true);
+    // …and accepts the same change when the flag goes in the same UPDATE.
+    const updated = await prisma.user.update({
+      where: { id },
+      data: { role: 'weryfikator', lider: false },
+    });
+    expect(updated).toMatchObject({ role: 'weryfikator', lider: false });
+  });
+
+  it('stanowisko_role_mapping_lider_requires_lider_role accepts planista + lider', async () => {
+    const code = `CHK_LIDER_OK_${stamp}`;
+    mappingCodes.push(code);
+    const row = await prisma.stanowiskoRoleMapping.create({
+      data: { stanowiskoCode: code, stanowiskoName: 'Check', role: 'planista', lider: true },
+    });
+    expect(row.lider).toBe(true);
+  });
+
+  it('stanowisko_role_mapping_lider_requires_lider_role rejects weryfikator + lider', async () => {
+    const code = `CHK_LIDER_BAD_${stamp}`;
+    mappingCodes.push(code);
+    await expect(
+      violation(
+        prisma.stanowiskoRoleMapping.create({
+          data: { stanowiskoCode: code, stanowiskoName: 'Check', role: 'weryfikator', lider: true },
+        }),
+      ),
+    ).resolves.toBe(true);
+  });
+});

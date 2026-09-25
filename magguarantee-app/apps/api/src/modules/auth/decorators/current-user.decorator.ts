@@ -26,6 +26,14 @@ export interface AuthUser {
   // the strategy ALWAYS sets it. Scope code treats `undefined` and `null`
   // identically — both mean "no team" → empty set.
   teamId?: string | null;
+  // Leader flag over `role` (docs/28 §1). DB-sourced in
+  // JwtAccessStrategy.validate like `teamId` — NOT a JWT claim. Every guard and
+  // scope branch still keys on `role` alone; the permissions layer (docs/25
+  // B2) will read `(role, lider)`.
+  //
+  // Optional on the type so the existing `AuthUser` fixtures stay valid; the
+  // strategy ALWAYS sets it. `undefined` means "not a leader".
+  lider?: boolean;
   jti?: string; // present only on refresh tokens
 }
 

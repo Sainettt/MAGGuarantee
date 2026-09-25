@@ -42,6 +42,7 @@ function makeUser(overrides: Partial<UserRow> = {}): UserRow {
     magspaceEmployeeId: null,
     directorySyncedAt: null,
     roleOverride: null,
+    lider: false,
     createdAt: NOW,
     updatedAt: NOW,
     deletedAt: null,
@@ -159,8 +160,8 @@ describe('LookupsService — people pickers', () => {
     );
     const out = await svc.dyspozytor();
     expect(out).toEqual([
-      { id: 'u-d-1', login: 'd1', name: 'D1' },
-      { id: 'u-d-2', login: 'd2', name: 'D2' },
+      { id: 'u-d-1', login: 'd1', name: 'D1', lider: false },
+      { id: 'u-d-2', login: 'd2', name: 'D2', lider: false },
     ]);
   });
 
@@ -181,7 +182,7 @@ describe('LookupsService — people pickers', () => {
       makeTeamsService(),
     );
     const out = await svc.planisci();
-    expect(out).toEqual([{ id: 'u-p-1', login: 'p1', name: 'Name' }]);
+    expect(out).toEqual([{ id: 'u-p-1', login: 'p1', name: 'Name', lider: false }]);
   });
 
   it('returns opiekuni by role=opiekun', async () => {
@@ -203,6 +204,57 @@ describe('LookupsService — people pickers', () => {
     const out = await svc.opiekuni();
     expect(out).toHaveLength(1);
     expect(out[0]?.id).toBe('u-o-1');
+  });
+
+  it('lists a leader as its base role and flags it (docs/28)', async () => {
+    const plain = makeUser({ id: 'u-p-1', role: 'planista', login: 'p1', name: 'P1' });
+    const lead = makeUser({ id: 'u-p-2', role: 'planista', login: 'plead', name: 'Lead', lider: true });
+    const svc = new LookupsService(
+      makeUsersRepo({
+        planista: [plain, lead],
+        admin: [],
+        pracownik: [],
+        opiekun: [],
+        dyspozytor: [],
+        przewoznik: [],
+        eksport: [],
+        weryfikator: [],
+      }),
+      makeCarriersRepo(),
+      makeTeamsService(),
+    );
+    await expect(svc.planisci()).resolves.toEqual([
+      { id: 'u-p-1', login: 'p1', name: 'P1', lider: false },
+      { id: 'u-p-2', login: 'plead', name: 'Lead', lider: true },
+    ]);
+  });
+});
+
+describe('LookupsService — admin users picker', () => {
+  it('maps rows to the compact admin DTO, leader flag included', async () => {
+    const rows = [
+      makeUser({ id: 'u-1', login: 'eksplead', role: 'eksport', lider: true }),
+      makeUser({ id: 'u-2', login: 'wer', role: 'weryfikator', active: false }),
+    ];
+    const users = {
+      searchAdmin: jest.fn(async () => rows),
+    } as unknown as UsersRepository;
+    const svc = new LookupsService(users, makeCarriersRepo(), makeTeamsService());
+
+    const out = await svc.usersListAdmin(makeAuth('admin'), { q: 'e' });
+
+    expect(users.searchAdmin).toHaveBeenCalledWith({ q: 'e', limit: 100 });
+    expect(out).toEqual([
+      { id: 'u-1', login: 'eksplead', name: 'Name', role: 'eksport', lider: true, active: true },
+      { id: 'u-2', login: 'wer', name: 'Name', role: 'weryfikator', lider: false, active: false },
+    ]);
+  });
+
+  it('403 for a non-admin caller', async () => {
+    const svc = new LookupsService(makeEmptyUsersRepo(), makeCarriersRepo(), makeTeamsService());
+    await expect(svc.usersListAdmin(makeAuth('planista'), {})).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
   });
 });
 

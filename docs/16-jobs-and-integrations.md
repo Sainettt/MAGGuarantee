@@ -264,7 +264,10 @@ MAGSpace сам ничего не отправляет (вебхуков в v1 �
    не разойдутся в оценке.
    - нет в реестре / `active=false` → deprovision;
    - `roleOverride IS NULL` и stanowisko без маппинга → deprovision;
-   - `roleOverride IS NULL` и роль по маппингу другая → смена роли;
+   - `roleOverride IS NULL` и пара `(role, lider)` по маппингу другая → смена
+     роли и/или флага лидера **одним UPDATE** (docs/28: CHECK
+     `user_lider_requires_lider_role` видит только итоговую пару); в отчёте
+     `planista → planista (lider)`;
    - имя изменилось → синхронизация имени.
 4. **`roleOverride IS NOT NULL` выводит человека из-под маппинга целиком.** Это
    не оптимизация, а условие работоспособности ручного апрува (docs/24 §4): у

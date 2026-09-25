@@ -134,6 +134,7 @@ export class LookupsService {
         login: r.login,
         name: r.name,
         role: r.role,
+        lider: r.lider,
         active: r.active,
       }),
     );
@@ -145,6 +146,8 @@ export class LookupsService {
     role: 'dyspozytor' | 'planista' | 'opiekun',
   ): Promise<LookupUserListDto> {
     const rows = await this.users.listByRole(role);
-    return rows.map((u) => ({ id: u.id, login: u.login, name: u.name }));
+    // A leader is listed as the base role (docs/28) — `lider` only lets the
+    // picker label them; who is in the list does not change.
+    return rows.map((u) => ({ id: u.id, login: u.login, name: u.name, lider: u.lider }));
   }
 }
