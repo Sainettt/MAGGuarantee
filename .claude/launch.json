@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "api",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "cd /d C:\\Users\\danyil.fiut\\Projects\\MAGGuarantee\\magguarantee-app && fnm exec --using=20 npm.cmd run dev -w api"
+      ],
+      "port": 3001
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "cd /d C:\\Users\\danyil.fiut\\Projects\\MAGGuarantee\\magguarantee-app && fnm exec --using=20 npm.cmd run dev -w web"
+      ],
+      "port": 3000
+    }
+  ]
+}
