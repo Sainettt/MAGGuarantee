@@ -137,7 +137,7 @@ function makeUser(overrides: Partial<UserRow> = {}): UserRow {
     role: 'planista',
     name: 'Plan',
     active: true,
-    liderEmail: null,
+    liderId: null,
     teamId: null,
     mustChangePassword: false,
     passwordChangedAt: null,

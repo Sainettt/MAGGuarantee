@@ -68,7 +68,7 @@ function makeAdmin(overrides: Partial<UserRow> = {}): UserRow {
     role: 'admin',
     name: 'Admin One',
     active: true,
-    liderEmail: null,
+    liderId: null,
     teamId: null,
     mustChangePassword: false,
     passwordChangedAt: null,

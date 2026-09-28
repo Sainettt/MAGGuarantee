@@ -9,6 +9,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 
 import {
+  USER_LIDER_ID_INVALID,
+  USER_LIDER_ID_INVALID_MESSAGE,
   USER_MANAGED_BY_MAGSPACE,
   type CreateUserDto,
   type ResetPasswordModeDto,
@@ -29,7 +31,28 @@ import {
   uniqueViolationToConflict,
 } from '../../common/errors/prisma-error';
 import { assertLiderPair } from './lider-pair';
-import { UsersRepository, type UserRow } from './users.repository';
+import {
+  UsersRepository,
+  type UserLiderMiniRow,
+  type UserRow,
+} from './users.repository';
+
+/** Why a `liderId` was refused — `extensions.reason` of `USER_LIDER_ID_INVALID`. */
+type LiderIdRefusal =
+  | 'role_not_planista'
+  | 'self'
+  | 'not_found'
+  | 'not_planista'
+  | 'inactive'
+  | 'not_lider';
+
+/** The role a user will effectively act as once the directory syncs (`roleOverride ?? role`). */
+function effectiveRole(
+  role: UserRow['role'],
+  roleOverride: UserRow['roleOverride'],
+): UserRow['role'] {
+  return roleOverride ?? role;
+}
 
 /**
  * Phase 2 admin-CRUD service for `User`. The auth slice (login + 2FA) keeps
@@ -89,13 +112,21 @@ export class UsersService {
       role: filters.role,
       active: filters.active,
       lider: filters.lider,
+      liderId: filters.liderId,
       cursor: filters.cursor,
       limit: filters.limit,
     });
     const hasNext = rows.length > filters.limit;
     const page = hasNext ? rows.slice(0, filters.limit) : rows;
+    // One batched lookup for every leader on the page (no N+1).
+    const liderIds = [
+      ...new Set(page.map((r) => r.liderId).filter((v): v is string => v !== null)),
+    ];
+    const liders = await this.repo.findLiderMinis(liderIds);
     return {
-      items: page.map((r) => this.toDto(r)),
+      items: page.map((r) =>
+        this.toDto(r, r.liderId ? (liders.get(r.liderId) ?? null) : null),
+      ),
       nextCursor: hasNext ? (page[page.length - 1]?.id ?? null) : null,
     };
   }
@@ -103,7 +134,7 @@ export class UsersService {
   async getById(id: string): Promise<UserDtoFull> {
     const row = await this.repo.findById(id);
     if (!row) throw new NotFoundException('Użytkownik nie znaleziony');
-    return this.toDto(row);
+    return this.toDtoResolved(row);
   }
 
   async create(dto: CreateUserDto): Promise<UserWithTemporaryPasswordDto> {
@@ -118,6 +149,10 @@ export class UsersService {
     // with the same 422; repeated here for callers that bypass the pipe.
     const lider = dto.lider ?? false;
     assertLiderPair(dto.role, lider);
+    // docs/29 U9 — the planista's leader (a new account has no id yet, so
+    // "not himself" holds trivially).
+    const liderId = dto.liderId ?? null;
+    if (liderId !== null) await this._assertLiderTarget(liderId, null, dto.role);
     const plain = dto.password ?? generateRandomPassword();
     const passwordHash = await this.passwords.hash(plain);
     let row: UserRow;
@@ -128,7 +163,7 @@ export class UsersService {
         name: dto.name,
         role: dto.role,
         passwordHash,
-        liderEmail: dto.liderEmail ?? null,
+        liderId,
         active: dto.active ?? true,
         lider,
         // Force is always on: every admin-issued password (generated OR custom)
@@ -162,7 +197,7 @@ export class UsersService {
         }),
       'created',
     );
-    return { ...this.toDto(row), temporaryPassword: plain };
+    return { ...(await this.toDtoResolved(row)), temporaryPassword: plain };
   }
 
   async update(id: string, dto: UpdateUserDto): Promise<UserDtoFull> {
@@ -184,9 +219,10 @@ export class UsersService {
     const roleOverride = handingBack ? null : dto.roleOverride;
     this._assertDirectoryOwnedFields(existing, dto, roleOverride);
     this._assertLiderPairs(existing, dto, roleOverride);
+    const liderId = await this._resolveLiderId(existing, dto, roleOverride);
     // Full pre-image; the interceptor trims it to the response's key-set, so
     // a leadership change lands in the `updateUser` row as before → after.
-    AuditContext.setBefore(this.toDto(existing));
+    AuditContext.setBefore(await this.toDtoResolved(existing));
     try {
       const updated = await this.repo.update(id, {
         // `email` is NOT NULL post-phase3_blocks — patch with the value
@@ -197,14 +233,14 @@ export class UsersService {
         // `user_lider_requires_lider_role` judges the final pair only.
         ...(dto.role !== undefined ? { role: dto.role } : {}),
         ...(dto.lider !== undefined ? { lider: dto.lider } : {}),
-        ...(dto.liderEmail !== undefined ? { liderEmail: dto.liderEmail } : {}),
+        ...(liderId !== undefined ? { liderId } : {}),
         ...(dto.active !== undefined ? { active: dto.active } : {}),
         ...(dto.managedBy !== undefined ? { managedBy: dto.managedBy } : {}),
         // Clearing the override hands the role decision back to the stanowisko
         // mapping; the change takes effect on the next sign-in or reconcile.
         ...(roleOverride !== undefined ? { roleOverride } : {}),
       });
-      return this.toDto(updated);
+      return this.toDtoResolved(updated);
     } catch (err) {
       if (isPrismaUniqueViolation(err)) {
         throw uniqueViolationToConflict(err, 'Konflikt unikalności');
@@ -224,8 +260,10 @@ export class UsersService {
    *
    * Deliberately allowed on a managed account: `managedBy` itself (that IS the
    * way out), `roleOverride`, `lider` next to a `roleOverride` (stored, or set
-   * in this body — the sync then keeps the stored flag), and the cosmetic
-   * `name` / `email` / `liderEmail` fields, which the next sync overwrites.
+   * in this body — the sync then keeps the stored flag), the cosmetic
+   * `name` / `email` fields, which the next sync overwrites, and `liderId` —
+   * MAGSpace has no hierarchy, the directory never touches it, so only an
+   * admin sets it (docs/29 U9).
    *
    * `roleOverride` is the value this UPDATE will write (`undefined` = keep).
    */
@@ -278,6 +316,63 @@ export class UsersService {
     if (finalOverride !== null) assertLiderPair(finalOverride, lider, 'roleOverride');
   }
 
+  /**
+   * The `liderId` this PATCH writes (docs/29 U9), judged on the MERGED row —
+   * `undefined` = leave the column alone:
+   *  - an explicit new leader → validated (`_assertLiderTarget`) and written;
+   *  - the stored value re-sent while still a planista → no-op, NOT
+   *    re-validated: the link may be stale on purpose (its target lost the
+   *    flag, U10) and re-saving the form must not fail on it;
+   *  - `null` → cleared;
+   *  - omitted, but the effective role (`roleOverride ?? role`) stops being
+   *    `planista` → cleared, so no non-planista keeps a leader link.
+   * Only the account's OWN link is touched: a leader who loses his `lider`
+   * flag or his planista role keeps his subordinates linked (U10) — the
+   * decision rule checks the flag at decision time instead.
+   */
+  private async _resolveLiderId(
+    existing: UserRow,
+    dto: UpdateUserDto,
+    roleOverride: UserRow['roleOverride'] | undefined,
+  ): Promise<string | null | undefined> {
+    const finalOverride = roleOverride !== undefined ? roleOverride : existing.roleOverride;
+    const role = effectiveRole(dto.role ?? existing.role, finalOverride);
+    if (dto.liderId === null) return existing.liderId === null ? undefined : null;
+    if (dto.liderId !== undefined) {
+      if (dto.liderId === existing.liderId && role === 'planista') return undefined;
+      await this._assertLiderTarget(dto.liderId, existing.id, role);
+      return dto.liderId;
+    }
+    if (role !== 'planista' && existing.liderId !== null) return null;
+    return undefined;
+  }
+
+  /**
+   * U9 — a leader link is legal only on an (effective) `planista`, and only
+   * to ANOTHER active planista who carries `lider = true`. 422
+   * `USER_LIDER_ID_INVALID` with `extensions.reason` otherwise — checked
+   * here, not by the database (a cross-row rule, like `teamId`).
+   */
+  private async _assertLiderTarget(
+    liderId: string,
+    selfId: string | null,
+    role: UserRow['role'],
+  ): Promise<void> {
+    const refuse = (reason: LiderIdRefusal): never => {
+      throw new UnprocessableEntityException({
+        message: USER_LIDER_ID_INVALID_MESSAGE,
+        extensions: { code: USER_LIDER_ID_INVALID, reason },
+      });
+    };
+    if (role !== 'planista') refuse('role_not_planista');
+    if (liderId === selfId) refuse('self');
+    const target = await this.repo.findById(liderId);
+    if (!target) return refuse('not_found');
+    if (target.role !== 'planista') refuse('not_planista');
+    if (!target.active) refuse('inactive');
+    if (!target.lider) refuse('not_lider');
+  }
+
   async deactivate(id: string): Promise<UserDtoFull> {
     const existing = await this.repo.findById(id);
     if (!existing) throw new NotFoundException('Użytkownik nie znaleziony');
@@ -293,7 +388,7 @@ export class UsersService {
         }),
       'deactivated',
     );
-    return this.toDto(updated);
+    return this.toDtoResolved(updated);
   }
 
   async reactivate(id: string): Promise<UserDtoFull> {
@@ -312,7 +407,7 @@ export class UsersService {
         }),
       'reactivated',
     );
-    return this.toDto(updated);
+    return this.toDtoResolved(updated);
   }
 
   /**
@@ -361,7 +456,7 @@ export class UsersService {
         }),
       'password reset',
     );
-    return { ...this.toDto(updated), temporaryPassword: plain };
+    return { ...(await this.toDtoResolved(updated)), temporaryPassword: plain };
   }
 
   async softDelete(id: string): Promise<void> {
@@ -372,7 +467,22 @@ export class UsersService {
 
   // ── DTO mapping ──────────────────────────────────────────
 
-  toDto(row: UserRow): UserDtoFull {
+  /**
+   * `toDto` with the leader mini looked up (one extra read when `liderId` is
+   * set). Every single-row response of this service goes through here.
+   */
+  async toDtoResolved(row: UserRow): Promise<UserDtoFull> {
+    if (!row.liderId) return this.toDto(row, null);
+    const liders = await this.repo.findLiderMinis([row.liderId]);
+    return this.toDto(row, liders.get(row.liderId) ?? null);
+  }
+
+  /**
+   * Synchronous mapping. `liderUser` is the resolved leader mini — callers
+   * that did not resolve it (a batch, or a fresh account that cannot have a
+   * leader yet) pass `null`; `liderId` is always the stored value.
+   */
+  toDto(row: UserRow, liderUser: UserLiderMiniRow | null = null): UserDtoFull {
     return {
       id: row.id,
       login: row.login,
@@ -380,7 +490,16 @@ export class UsersService {
       name: row.name,
       role: row.role,
       active: row.active,
-      liderEmail: row.liderEmail,
+      liderId: row.liderId ?? null,
+      liderUser: liderUser
+        ? {
+            id: liderUser.id,
+            login: liderUser.login,
+            name: liderUser.name,
+            active: liderUser.active,
+            lider: liderUser.lider,
+          }
+        : null,
       mustChangePassword: row.mustChangePassword,
       lastLoginAt: row.lastLoginAt ? row.lastLoginAt.toISOString() : null,
       managedBy: row.managedBy,

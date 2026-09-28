@@ -15,11 +15,23 @@
 //
 // Formatting reuses the shared helpers in components/ui/entity-detail-values.tsx
 // and lib/format/numbers.ts — no duplicated Intl wrappers.
+//
+// docs/14 §17.6 — planner transfer (docs/29):
+//   * a LAST section «Historia planistów» (<PlannerHistoryTimeline>) for the
+//     viewers of U11 (admin, the carrier's opiekun, the current planista). A
+//     carrier (`hideCarrier`) never gets it and no request is sent; a 403 hides
+//     the section silently;
+//   * the «Planista» row gets the pending badge while a request is open;
+//   * the vehicle's CURRENT planista gets «Przekaż ciągnik» in the footer
+//     (D3, via the additive `extraActions` slot) → the request dialog stacked
+//     over this modal. The opiekun files from «Edytuj» instead (§17.2).
 
 import {
+  ArrowLeftRight,
   Banknote,
   ExternalLink,
   FileText,
+  History,
   Info,
   Loader2,
   Package,
@@ -28,12 +40,15 @@ import {
   UserCog,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import type { VehicleAttachmentDto, VehicleDto } from '@magguarantee/shared';
 import { toast } from 'sonner';
 
 import { VehicleStatusBadge } from '@/components/carrier/VehicleStatusBadge';
 import { TeamFieldValue } from '@/components/teams/TeamFieldValue';
+import { PlannerHistoryTimeline } from '@/components/transfers/PlannerHistoryTimeline';
+import { PlannerTransferRequestDialog } from '@/components/transfers/PlannerTransferRequestDialog';
+import { TransferStatusBadge } from '@/components/transfers/TransferStatusBadge';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import {
@@ -49,7 +64,15 @@ import {
 } from '@/components/ui/entity-detail-values';
 import { downloadVehicleAttachment } from '@/lib/api/vehicles';
 import { formatDateTime, formatEur } from '@/lib/format/numbers';
+import { useAuth } from '@/lib/hooks/useAuth';
 import { useOpenBlobInTab } from '@/lib/hooks/useOpenBlobInTab';
+import { useVehiclePlannerHistory } from '@/lib/hooks/usePlannerTransfers';
+import { pendingTransferOf } from '@/lib/transfers/plannerTimeline';
+import { isHistoryForbidden } from '@/lib/transfers/transferErrors';
+import { canTransferFromDetail, personName } from '@/lib/transfers/transferUi';
+
+/** Roles that may read a vehicle's planista journal (docs/29 U11). */
+const HISTORY_ROLES = new Set(['admin', 'opiekun', 'planista']);
 
 interface Props {
   open: boolean;
@@ -86,6 +109,19 @@ export function VehicleDetailModal({
   );
   const { open: openAttachment, isPending: isAttachmentPending } =
     useOpenBlobInTab(toast.error, blobMessages);
+
+  // ── Planner history (docs/14 §17.6) — own loading, independent of the
+  //    modal. Never requested for a carrier viewing its own fleet. ─────────
+  const tTransfers = useTranslations('transfers');
+  const { user } = useAuth();
+  const historyEnabled =
+    open && !hideCarrier && user !== null && HISTORY_ROLES.has(user.role);
+  const historyQ = useVehiclePlannerHistory(vehicle?.id ?? null, {
+    enabled: historyEnabled,
+  });
+  const historyForbidden = historyQ.isError && isHistoryForbidden(historyQ.error);
+  const pending = pendingTransferOf(historyQ.data);
+  const [requestOpen, setRequestOpen] = useState(false);
 
   // The modal is only rendered with a target; bail defensively so the hooks
   // above still run unconditionally (rules-of-hooks safe).
@@ -134,7 +170,21 @@ export function VehicleDetailModal({
     },
     {
       label: f('planner'),
-      value: textValue(vehicle.planner?.name ?? vehicle.planner?.login),
+      // §17.6.3 — a pending request is visible here without scrolling down to
+      // the journal.
+      value: pending ? (
+        <span className="flex flex-wrap items-center gap-2">
+          {textValue(vehicle.planner?.name ?? vehicle.planner?.login)}
+          <TransferStatusBadge
+            status="pending"
+            title={tTransfers('form.pendingTitle', {
+              to: personName(pending.toPlanner),
+            })}
+          />
+        </span>
+      ) : (
+        textValue(vehicle.planner?.name ?? vehicle.planner?.login)
+      ),
     },
     {
       label: f('dispatchTeam'),
@@ -275,6 +325,32 @@ export function VehicleDetailModal({
     });
   }
 
+  // ── «Historia planistów» — the LAST section (§17.6.3). Omitted for the
+  //    carrier and, silently, for a 403 (viewer outside U11). ─────────────
+  if (historyEnabled && !historyForbidden) {
+    sections.push({
+      title: tTransfers('history.title'),
+      icon: History,
+      span: 'full',
+      rows: [
+        {
+          label: tTransfers('history.title'),
+          value: (
+            <PlannerHistoryTimeline
+              plate={vehicle.plateNumber}
+              history={historyQ.data}
+              isLoading={historyQ.isLoading}
+              error={historyQ.error}
+              onRetry={() => void historyQ.refetch()}
+              isRetrying={historyQ.isFetching}
+            />
+          ),
+          fullWidth: true,
+        },
+      ],
+    });
+  }
+
   // ── Footer meta line — created / updated timestamps (§6.6) ──────────
   const meta: ReactNode = (
     <>
@@ -284,17 +360,54 @@ export function VehicleDetailModal({
     </>
   );
 
+  // ── «Przekaż ciągnik» — only the CURRENT planista (D3), enabled vehicle,
+  //    no pending request (known only once the history answered). ────────
+  const showTransfer = canTransferFromDetail({
+    viewerRole: user?.role,
+    viewerId: user?.id,
+    vehicle: { plannerId: vehicle.plannerId, active: vehicle.active },
+    historyReady: historyQ.isSuccess,
+    hasPending: pending !== null,
+  });
+  const extraActions = showTransfer ? (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="min-h-[44px] gap-1.5 sm:min-h-0"
+      onClick={() => setRequestOpen(true)}
+    >
+      <ArrowLeftRight size={14} aria-hidden="true" />
+      {tTransfers('request.buttonPlanista')}
+    </Button>
+  ) : undefined;
+
   return (
-    <EntityDetailModal
-      open={open}
-      onOpenChange={onOpenChange}
-      title={vehicle.plateNumber}
-      subtitle={subtitle}
-      badges={badges}
-      sections={sections}
-      meta={meta}
-      onEdit={onEdit}
-    />
+    <>
+      <EntityDetailModal
+        open={open}
+        onOpenChange={onOpenChange}
+        title={vehicle.plateNumber}
+        subtitle={subtitle}
+        badges={badges}
+        sections={sections}
+        meta={meta}
+        onEdit={onEdit}
+        extraActions={extraActions}
+      />
+      {showTransfer || requestOpen ? (
+        <PlannerTransferRequestDialog
+          open={requestOpen && open}
+          onOpenChange={setRequestOpen}
+          vehicle={{
+            id: vehicle.id,
+            plateNumber: vehicle.plateNumber,
+            carrierName: vehicle.carrier ? personName(vehicle.carrier) : null,
+            plannerName: personName(vehicle.planner),
+          }}
+        />
+      ) : null}
+    </>
   );
 }
 

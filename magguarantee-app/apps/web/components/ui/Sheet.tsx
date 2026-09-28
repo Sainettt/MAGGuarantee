@@ -32,6 +32,8 @@ import { createPortal } from 'react-dom';
 
 import { cn } from '@/lib/utils';
 
+import { isTopOverlay, popOverlay, pushOverlay } from './overlayStack';
+
 interface SheetCtx {
   open: boolean;
   setOpen: (open: boolean) => void;
@@ -123,6 +125,8 @@ export function SheetContent({
     previousFocus.current = document.activeElement as HTMLElement | null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    // Stacked overlays (docs/14 §17.2): Escape closes only the topmost one.
+    const token = pushOverlay();
 
     // Focus the first focusable element inside the sheet.
     const focusable = contentRef.current?.querySelector<HTMLElement>(
@@ -131,11 +135,12 @@ export function SheetContent({
     focusable?.focus();
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpenRef.current(false);
+      if (e.key === 'Escape' && isTopOverlay(token)) setOpenRef.current(false);
     };
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('keydown', onKey);
+      popOverlay(token);
       document.body.style.overflow = previousOverflow;
       previousFocus.current?.focus();
     };

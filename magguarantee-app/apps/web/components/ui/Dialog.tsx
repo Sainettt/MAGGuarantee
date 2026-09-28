@@ -21,6 +21,8 @@ import { createPortal } from 'react-dom';
 
 import { cn } from '@/lib/utils';
 
+import { isTopOverlay, popOverlay, pushOverlay } from './overlayStack';
+
 interface DialogCtx {
   open: boolean;
   setOpen: (open: boolean) => void;
@@ -98,16 +100,19 @@ export function DialogContent({
     previous.current = document.activeElement as HTMLElement | null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    // Stacked dialogs (docs/14 §17.2): Escape closes only the topmost one.
+    const token = pushOverlay();
     const focusable = ref.current?.querySelector<HTMLElement>(
       'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
     );
     focusable?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpenRef.current(false);
+      if (e.key === 'Escape' && isTopOverlay(token)) setOpenRef.current(false);
     };
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('keydown', onKey);
+      popOverlay(token);
       document.body.style.overflow = previousOverflow;
       previous.current?.focus();
     };

@@ -5,6 +5,7 @@ import { PasswordService } from '../auth/password.service';
 import { RefreshTokenRepository } from '../auth/refresh-token.repository';
 import {
   UsersRepository,
+  type UserLiderMiniRow,
   type UserRow,
 } from './users.repository';
 import { UsersService } from './users.service';
@@ -19,7 +20,7 @@ function makeRow(overrides: Partial<UserRow> = {}): UserRow {
     role: 'admin',
     name: 'Admin',
     active: true,
-    liderEmail: null,
+    liderId: null,
     teamId: null,
     mustChangePassword: false,
     passwordChangedAt: null,
@@ -89,6 +90,23 @@ function makeRepo(initial: UserRow[] = []): UsersRepository {
       if (cur) {
         rows.set(id, { ...cur, deletedAt: new Date() });
       }
+    }),
+    // docs/29 — leader minis (soft-deleted included, reported inactive).
+    findLiderMinis: jest.fn(async (ids: readonly string[]) => {
+      const out = new Map<string, UserLiderMiniRow>();
+      for (const id of ids) {
+        const r = rows.get(id);
+        if (r) {
+          out.set(id, {
+            id: r.id,
+            login: r.login,
+            name: r.name,
+            active: r.active && r.deletedAt === null,
+            lider: r.lider,
+          });
+        }
+      }
+      return out;
     }),
   } as unknown as UsersRepository;
 }
@@ -667,5 +685,141 @@ describe('UsersService', () => {
     expect(dto.lastLoginAt).toBe('2026-05-01T10:00:00.000Z');
     expect(dto.createdAt).toBe('2026-05-01T10:00:00.000Z');
     expect(dto.mustChangePassword).toBe(true);
+  });
+
+  // ── docs/29 R8 / U9 / U10 — the planista → lider link ──────
+  describe('liderId (docs/29)', () => {
+    const INVALID = (reason: string) => ({
+      status: 422,
+      response: { extensions: { code: 'USER_LIDER_ID_INVALID', reason } },
+    });
+    const lead = (over: Partial<UserRow> = {}): UserRow =>
+      makeRow({ id: 'u-lead', login: 'lead', role: 'planista', lider: true, ...over });
+    const plan = (over: Partial<UserRow> = {}): UserRow =>
+      makeRow({ id: 'u-plan', login: 'plan', role: 'planista', ...over });
+
+    it('create links a planista to an active planista-lider and returns the mini', async () => {
+      const { svc, repo } = makeService([lead()]);
+      const out = await svc.create({
+        login: 'nowy',
+        email: 'nowy@magtrans.eu',
+        name: 'Nowy',
+        role: 'planista',
+        liderId: 'u-lead',
+      });
+      expect(repo.create).toHaveBeenCalledWith(expect.objectContaining({ liderId: 'u-lead' }));
+      expect(out.liderId).toBe('u-lead');
+      expect(out.liderUser).toEqual({
+        id: 'u-lead',
+        login: 'lead',
+        name: 'Admin',
+        active: true,
+        lider: true,
+      });
+    });
+
+    it('create refuses a leader link on a non-planista (pipe bypassed)', async () => {
+      const { svc, repo } = makeService([lead()]);
+      await expect(
+        svc.create({ login: 'x', email: 'x@magtrans.eu', name: 'X', role: 'opiekun', liderId: 'u-lead' }),
+      ).rejects.toMatchObject(INVALID('role_not_planista'));
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['not_found', 'u-missing', [] as UserRow[]],
+      ['not_planista', 'u-lead', [lead({ role: 'opiekun' })]],
+      ['inactive', 'u-lead', [lead({ active: false })]],
+      ['not_lider', 'u-lead', [lead({ lider: false })]],
+    ] as const)('update refuses a %s target with 422', async (reason, target, extra) => {
+      const { svc, repo } = makeService([plan(), ...extra]);
+      await expect(svc.update('u-plan', { liderId: target })).rejects.toMatchObject(
+        INVALID(reason),
+      );
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('update refuses the user as his own leader', async () => {
+      const { svc } = makeService([plan({ lider: true })]);
+      await expect(svc.update('u-plan', { liderId: 'u-plan' })).rejects.toMatchObject(
+        INVALID('self'),
+      );
+    });
+
+    it('update sets a valid leader and clears it with null', async () => {
+      const { svc, repo } = makeService([plan(), lead()]);
+      await expect(svc.update('u-plan', { liderId: 'u-lead' })).resolves.toMatchObject({
+        liderId: 'u-lead',
+        liderUser: { id: 'u-lead', lider: true },
+      });
+      expect(repo.update).toHaveBeenLastCalledWith('u-plan', { liderId: 'u-lead' });
+      await expect(svc.update('u-plan', { liderId: null })).resolves.toMatchObject({
+        liderId: null,
+        liderUser: null,
+      });
+      expect(repo.update).toHaveBeenLastCalledWith('u-plan', { liderId: null });
+    });
+
+    it('re-sending a STALE stored link is a no-op, not a 422 (U10)', async () => {
+      // The leader lost his flag after the link was made — the form re-saves it.
+      const { svc, repo } = makeService([plan({ liderId: 'u-lead' }), lead({ lider: false })]);
+      const out = await svc.update('u-plan', { name: 'Plan Renamed', liderId: 'u-lead' });
+      expect(repo.update).toHaveBeenCalledWith('u-plan', { name: 'Plan Renamed' });
+      // The DTO shows the link as stale (the leader's CURRENT flag).
+      expect(out.liderUser).toMatchObject({ id: 'u-lead', lider: false, active: true });
+    });
+
+    it('changing the role away from planista clears the link', async () => {
+      const { svc, repo } = makeService([plan({ liderId: 'u-lead' }), lead()]);
+      await svc.update('u-plan', { role: 'opiekun' });
+      expect(repo.update).toHaveBeenCalledWith('u-plan', { role: 'opiekun', liderId: null });
+    });
+
+    it('a roleOverride away from planista on a MAGSpace account clears the link too', async () => {
+      const { svc, repo } = makeService([
+        plan({ liderId: 'u-lead', managedBy: 'magspace', authProvider: 'google' }),
+        lead(),
+      ]);
+      await svc.update('u-plan', { roleOverride: 'opiekun' });
+      expect(repo.update).toHaveBeenCalledWith('u-plan', { roleOverride: 'opiekun', liderId: null });
+    });
+
+    it('an explicit leader next to a role change away from planista is refused', async () => {
+      const { svc } = makeService([plan(), lead()]);
+      await expect(
+        svc.update('u-plan', { role: 'opiekun', liderId: 'u-lead' }),
+      ).rejects.toMatchObject(INVALID('role_not_planista'));
+    });
+
+    it('stays editable on a MAGSpace-managed planista (the directory never owns it)', async () => {
+      const { svc, repo } = makeService([
+        plan({ managedBy: 'magspace', authProvider: 'google', magspaceEmployeeId: 'e-1' }),
+        lead(),
+      ]);
+      await svc.update('u-plan', { liderId: 'u-lead' });
+      expect(repo.update).toHaveBeenCalledWith('u-plan', { liderId: 'u-lead' });
+    });
+
+    it("removing a leader's flag does NOT clear his planisci's links (U10)", async () => {
+      const { svc, repo } = makeService([plan({ liderId: 'u-lead' }), lead()]);
+      await svc.update('u-lead', { lider: false });
+      expect(repo.update).toHaveBeenCalledTimes(1);
+      expect(repo.update).toHaveBeenCalledWith('u-lead', { lider: false });
+      await expect(svc.getById('u-plan')).resolves.toMatchObject({ liderId: 'u-lead' });
+    });
+
+    it('list resolves every leader in one batch and forwards the liderId filter', async () => {
+      const { svc, repo } = makeService([
+        plan({ id: 'u-p1', login: 'p1', liderId: 'u-lead' }),
+        plan({ id: 'u-p2', login: 'p2', liderId: 'u-lead' }),
+        lead(),
+      ]);
+      const out = await svc.list({ limit: 50, liderId: 'u-lead' });
+      expect(repo.list).toHaveBeenCalledWith(expect.objectContaining({ liderId: 'u-lead' }));
+      expect(repo.findLiderMinis).toHaveBeenCalledTimes(1);
+      expect(repo.findLiderMinis).toHaveBeenCalledWith(['u-lead']);
+      const p1 = out.items.find((i) => i.id === 'u-p1');
+      expect(p1?.liderUser?.id).toBe('u-lead');
+    });
   });
 });

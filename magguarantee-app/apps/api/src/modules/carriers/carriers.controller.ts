@@ -186,9 +186,10 @@ export class CarriersController {
     targetKey: (req) => req.params?.id,
   })
   async delete(
+    @CurrentUser() user: AuthUser,
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
   ): Promise<void> {
-    await this.carriers.softDelete(id);
+    await this.carriers.softDelete(id, user);
   }
 
   /**

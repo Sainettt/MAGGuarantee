@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { LIDER_ROLES, RoleSchema, type Role } from '@magguarantee/shared';
 
-import { LIDER_LABEL_ROLES, roleLabelKey } from './roles';
+import { LIDER_LABEL_ROLES, isAllowedForRole, roleLabelKey } from './roles';
 
 const ALL_ROLES: readonly Role[] = RoleSchema.options;
 
@@ -86,4 +86,28 @@ describe('roleLabelKey', () => {
       expect(missing).toEqual([]);
     },
   );
+});
+
+// docs/29 / docs/14 §17.4 — the vehicle-transfer routes. Leadership is not a
+// role, so the edge only knows `planista`; the lider-only approvals route is
+// guarded on the client (`user.lider`), the rest by role here.
+describe('isAllowedForRole — planner-transfer routes', () => {
+  const cases: [string, Role, boolean][] = [
+    ['/employee/przekazania', 'admin', true],
+    ['/employee/przekazania', 'opiekun', true],
+    ['/employee/przekazania', 'pracownik', false],
+    ['/employee/przekazania', 'planista', false],
+    ['/employee/przekazania', 'przewoznik', false],
+    ['/planista/przekazania', 'planista', true],
+    ['/planista/zatwierdzenia', 'planista', true],
+    ['/planista/zatwierdzenia', 'admin', true],
+    ['/planista/przekazania', 'opiekun', false],
+    ['/planista/zatwierdzenia', 'dyspozytor', false],
+    // Unrelated employee routes keep their previous rules.
+    ['/employee/claims', 'pracownik', true],
+    ['/employee/vehicles', 'opiekun', true],
+  ];
+  it.each(cases)('%s for %s → %s', (path, role, allowed) => {
+    expect(isAllowedForRole(path, role)).toBe(allowed);
+  });
 });

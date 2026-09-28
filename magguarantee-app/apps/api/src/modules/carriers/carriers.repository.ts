@@ -448,12 +448,18 @@ export class CarriersRepository {
     return this.update(id, { active });
   }
 
-  async softDelete(id: string): Promise<void> {
+  /**
+   * `actorId` — the user deleting the carrier; it closes the pending planista
+   * transfer requests of the carrier's vehicles (docs/29 U6: switching a
+   * vehicle off cancels its pending request — the cascade below switches off
+   * the whole fleet).
+   */
+  async softDelete(id: string, actorId: string | null = null): Promise<void> {
     // Soft-deleting the carrier must cascade-soft-delete its fleet per
     // docs/04-data-model.md#cascade-при-удалении-carrier. The DELETE
     // /carriers/:id endpoint carries `@Audit('softDeleteCarrier')` so the
     // audit interceptor opens the ambient transaction; we just enrol in it
-    // via `this.prisma.tx`. All five updates + the audit row commit as one.
+    // via `this.prisma.tx`. All the updates + the audit row commit as one.
     const tx = this.prisma.tx;
     const carrier = await tx.carrier.findFirst({ where: { id } });
     if (!carrier) return;
@@ -461,6 +467,10 @@ export class CarriersRepository {
     await tx.vehicle.updateMany({
       where: { carrierId: id, deletedAt: null },
       data: { deletedAt: now, active: false },
+    });
+    await tx.vehiclePlannerTransfer.updateMany({
+      where: { status: 'pending', vehicle: { carrierId: id } },
+      data: { status: 'cancelled', decidedAt: now, decidedById: actorId },
     });
     await tx.driver.updateMany({
       where: { carrierId: id, deletedAt: null },

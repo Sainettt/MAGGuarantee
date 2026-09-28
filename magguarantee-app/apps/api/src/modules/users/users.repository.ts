@@ -33,7 +33,13 @@ export type UserRow = {
     | 'weryfikator';
   name: string | null;
   active: boolean;
-  liderEmail: string | null;
+  /**
+   * The planista's leader (docs/29 R8, U9) — replaces the deprecated
+   * `liderEmail` column, which the api no longer reads or writes (it is still
+   * on the table for one release and comes back from `findFirst`, but is not
+   * part of this type). Meaningful only on planista rows; set by an admin.
+   */
+  liderId: string | null;
   // Phase 11 — dispatch team membership (role=dyspozytor only; NULL otherwise).
   // Drives the dyspozytor fleet/km/delegations scope (resolved into AuthUser).
   teamId: string | null;
@@ -68,7 +74,7 @@ export type UserRow = {
    * Leader flag over `role` (docs/28). Never true outside `LIDER_ROLES` — CHECK
    * `user_lider_requires_lider_role`. Owned like `role`: synced from the
    * stanowisko mapping on `magspace` rows without `roleOverride`, set by an
-   * admin otherwise. Not `liderEmail` (the CC address).
+   * admin otherwise. Not `liderId` (whose leader this user has).
    */
   lider: boolean;
   createdAt: Date;
@@ -81,8 +87,20 @@ export interface UserListFilters {
   active?: boolean;
   /** `true` → leaders only, `false` → non-leaders only, omitted → both. */
   lider?: boolean;
+  /** Only the planisci whose leader is this user (docs/29). */
+  liderId?: string;
   cursor?: string;
   limit: number;
+}
+
+/** The leader a planista points at, with his current flags (docs/29 U10). */
+export interface UserLiderMiniRow {
+  id: string;
+  login: string;
+  name: string | null;
+  /** `false` for a deactivated OR soft-deleted leader. */
+  active: boolean;
+  lider: boolean;
 }
 
 /**
@@ -186,6 +204,7 @@ export class UsersRepository {
     if (filters.role) where.role = filters.role;
     if (typeof filters.active === 'boolean') where.active = filters.active;
     if (typeof filters.lider === 'boolean') where.lider = filters.lider;
+    if (filters.liderId) where.liderId = filters.liderId;
     const rows = await this.prisma.user.findMany({
       where,
       take: filters.limit + 1,
@@ -203,7 +222,8 @@ export class UsersRepository {
     name: string | null;
     role: UserRow['role'];
     passwordHash: string;
-    liderEmail?: string | null;
+    /** The planista's leader; the caller has validated it (docs/29 U9). */
+    liderId?: string | null;
     active?: boolean;
     /** Leader flag; the caller has validated it against `role`. Default `false`. */
     lider?: boolean;
@@ -217,7 +237,7 @@ export class UsersRepository {
         name: data.name,
         role: data.role,
         passwordHash: data.passwordHash,
-        liderEmail: data.liderEmail ?? null,
+        liderId: data.liderId ?? null,
         active: data.active ?? true,
         lider: data.lider ?? false,
         mustChangePassword: data.mustChangePassword ?? false,
@@ -364,7 +384,8 @@ export class UsersRepository {
       email: string;
       name: string | null;
       role: UserRow['role'];
-      liderEmail: string | null;
+      /** docs/29 U9 — validated by `UsersService`; the directory never writes it. */
+      liderId: string | null;
       active: boolean;
       passwordHash: string;
       mustChangePassword: boolean;
@@ -402,6 +423,46 @@ export class UsersRepository {
       orderBy: { name: 'asc' },
     });
     return rows as unknown as UserRow[];
+  }
+
+  /**
+   * Active planisci carrying the `lider` flag — the «Przełożony (lider)»
+   * picker of the admin user form (docs/29 U9). Sorted like `listByRole`.
+   */
+  async listActiveLiderPlanisci(): Promise<UserRow[]> {
+    const rows = await this.prisma.user.findMany({
+      where: { role: 'planista', active: true, lider: true },
+      orderBy: { name: 'asc' },
+    });
+    return rows as unknown as UserRow[];
+  }
+
+  /**
+   * Leader minis for a batch of `liderId`s (the `liderUser` of `UserDto`).
+   * Soft-deleted leaders are INCLUDED — a planista's link may still point at
+   * one (a soft delete does not fire the FK's SET NULL) — and reported as
+   * `active: false`, so the admin form can show the link as stale (U10).
+   */
+  async findLiderMinis(ids: readonly string[]): Promise<Map<string, UserLiderMiniRow>> {
+    const out = new Map<string, UserLiderMiniRow>();
+    if (ids.length === 0) return out;
+    const rows = (await this.prisma.user.findMany({
+      where: { id: { in: [...ids] } },
+      select: { id: true, login: true, name: true, active: true, lider: true, deletedAt: true },
+      [INCLUDE_SOFT_DELETED]: true,
+    } as unknown as Prisma.UserFindManyArgs)) as unknown as Array<
+      Omit<UserLiderMiniRow, 'active'> & { active: boolean; deletedAt: Date | null }
+    >;
+    for (const r of rows) {
+      out.set(r.id, {
+        id: r.id,
+        login: r.login,
+        name: r.name,
+        active: r.active && r.deletedAt === null,
+        lider: r.lider,
+      });
+    }
+    return out;
   }
 
   /**

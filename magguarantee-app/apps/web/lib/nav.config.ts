@@ -117,6 +117,17 @@ export const EMPLOYEE_NAV: readonly NavLink[] = [
     iconName: 'Truck',
     roles: ['admin', 'opiekun'],
   },
+  // docs/29 / docs/14 §17.4.1 — vehicle planner transfers, right after the
+  // vehicles (a transfer is an action on a vehicle). Admin: the inbox with a
+  // pending pill; opiekun: his own requests (D5, no pill). NOT admin-only —
+  // but closed to pracownik (`ROLE_RESTRICTED_EMPLOYEE_PREFIXES`).
+  {
+    key: 'transfers',
+    href: '/employee/przekazania',
+    labelKey: 'nav.transfers',
+    iconName: 'ArrowLeftRight',
+    roles: ['admin', 'opiekun'],
+  },
   {
     key: 'drivers',
     href: '/employee/drivers',

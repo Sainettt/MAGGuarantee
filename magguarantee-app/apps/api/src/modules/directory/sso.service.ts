@@ -217,7 +217,9 @@ export class SsoService {
       // valid body type); absent = not a leader.
       dto.lider ?? false,
     );
-    return { user: this.users.toDto(user), outcome };
+    // Resolved mapping: `liderUser` is the real leader mini when the account
+    // keeps a planista → lider link (docs/29), same as `GET /users/:id`.
+    return { user: await this.users.toDtoResolved(user), outcome };
   }
 
   /**

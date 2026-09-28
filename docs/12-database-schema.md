@@ -158,6 +158,14 @@ enum GuaranteeEpisodeState  { warning  violated  resolved }
 enum GuaranteeAnchorSource  { zjechal  agreement }
 enum GuaranteeResolveReason { wyjazd  agreement_off  vehicle_inactive }
 
+// Vehicle planner transfer (docs/29, migration 20260928120000). Request
+// lifecycle — `pending` is the only open state (≤1 per vehicle, partial unique);
+// approved/rejected are decided by admin or the lider of fromPlanner, cancelled
+// by the author. Origin of a planista-history row: create (vehicle-create form,
+// R7) / transfer (approved request, transferId set) / backfill (the migration).
+enum PlannerTransferStatus   { pending  approved  rejected  cancelled }
+enum PlannerAssignmentSource { create  transfer  backfill }
+
 // ─── USERS ──────────────────────────────────────────────
 
 model User {
@@ -177,8 +185,20 @@ model User {
   lockedUntil    DateTime?
   lastLoginAt    DateTime?
 
+  // Leader flag (docs/28) — add-on over the base role; CHECK user_lider_requires_lider_role.
+  lider          Boolean   @default(false)
+
   // role-specific (nullable for other roles)
-  // planista — see docs/19-known-quirks.md (#liderEmail tech debt)
+  // PLANISTA — his leader (docs/29 R8, U9; migration 20260928120000). Only on
+  // role=planista rows; target = active planista with lider=true, not self —
+  // enforced by the api (cross-row, no CHECK). Set only by an admin; the
+  // directory reconcile never touches it. NULL = no leader ⇒ only admin decides
+  // his transfer requests. Relation field is `liderUser` (`lider` is the flag).
+  liderId        String?   @db.Uuid
+  liderUser      User?     @relation("UserLider", fields: [liderId], references: [id], onDelete: SetNull)
+  ledPlanners    User[]    @relation("UserLider")
+  // DEPRECATED (docs/29 R8) — superseded by liderId; the api no longer reads it.
+  // Dropped by a SEPARATE later migration. See docs/19-known-quirks.md (#14).
   liderEmail     String?
 
   // Relations: opiekun↔Carrier (1:N), przewoznik↔Carrier (1:1), planner/dispatcher↔Vehicle, etc.
@@ -186,6 +206,14 @@ model User {
   carrierProfile     Carrier?       @relation("CarrierUser")
   plannerVehicles    Vehicle[]      @relation("VehiclePlanner")
   dispatcherVehicles Vehicle[]      @relation("VehicleDispatcher")
+  // docs/29 — planista transfer
+  plannedDelegations        Delegation[]               @relation("DelegationPlanner")         // Delegation.plannerId snapshot
+  plannerTransfersFrom      VehiclePlannerTransfer[]   @relation("PlannerTransferFrom")
+  plannerTransfersTo        VehiclePlannerTransfer[]   @relation("PlannerTransferTo")
+  plannerTransfersRequested VehiclePlannerTransfer[]   @relation("PlannerTransferRequestedBy")
+  plannerTransfersDecided   VehiclePlannerTransfer[]   @relation("PlannerTransferDecidedBy")
+  plannerAssignments        VehiclePlannerAssignment[] @relation("PlannerAssignmentPlanner")
+  plannerAssignmentsActed   VehiclePlannerAssignment[] @relation("PlannerAssignmentActor")
   reportedDelegations Delegation[]  @relation("DelegationReporter")
   verifiedDelegations Delegation[]  @relation("DelegationVerifier")
   authoredClaims     Claim[]        @relation("ClaimDecidedBy")
@@ -204,6 +232,7 @@ model User {
 
   @@index([role])
   @@index([deletedAt])
+  @@index([liderId])                            // docs/29 — lider inbox looks up his planisci
   @@map("users")
 }
 
@@ -290,6 +319,11 @@ model Vehicle {
   deactivatedAt DateTime?
   createdById   String?   @db.Uuid
 
+  // CURRENT planista — denormalized pointer (docs/29 §2 p.5). Invariant: equals
+  // plannerId of the open VehiclePlannerAssignment row (validTo IS NULL); NULL ⇔
+  // no open row. Set on create (+ `create` history row, R7); changed afterwards
+  // ONLY by approving a VehiclePlannerTransfer (R1) — PATCH /vehicles rejects it.
+  // Vehicle-level screens (fleet, GPS, km report, list/card) read it live (U7).
   plannerId    String? @db.Uuid
   planner      User?   @relation("VehiclePlanner", fields: [plannerId], references: [id])
   dispatchTeamId String? @db.Uuid
@@ -363,6 +397,8 @@ model Vehicle {
   attachments       VehicleAttachment[]
   dailyKm           VehicleDailyKm[]         // Phase 7 (#3) — daily km records (weryfikator)
   guaranteeEpisodes GuaranteeIdleEpisode[]   // Guarantee Watchdog — idle-episode journal
+  plannerTransfers   VehiclePlannerTransfer[]   // docs/29 — planista transfer requests
+  plannerAssignments VehiclePlannerAssignment[] // docs/29 — planista assignment history
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -701,6 +737,16 @@ model Delegation {
   verifiedBy   User?     @relation("DelegationVerifier", fields: [verifiedById], references: [id])
   verifiedAt   DateTime?
 
+  // Planista of THIS delegation's period — snapshot, not a live read of
+  // vehicle.plannerId (docs/29 R5; migration 20260928120000). api writes it on
+  // create (= vehicle.plannerId); a transfer approval rewrites it only for the
+  // vehicle's `zgloszony`/`gotowy` rows whose snapshot is fromPlanner (R6).
+  // Drives the planista delegation scope, «ZESPÓŁ PROWADZĄCY», the planista in
+  // the Chat message and wniosek mail recipients (U8). Nullable: rows of a
+  // vehicle without a planista at backfill time. FK ON DELETE SET NULL.
+  plannerId String? @db.Uuid
+  planner   User?   @relation("DelegationPlanner", fields: [plannerId], references: [id])
+
   notes String?
 
   createdAt DateTime  @default(now())
@@ -711,6 +757,7 @@ model Delegation {
   @@index([carrierId, status])
   @@index([carrierId, deletedAt, status])      // Phase 3 — carrier-panel
   @@index([status, departureAt])
+  @@index([plannerId, status])                 // docs/29 — planista scope of the delegation list
   @@map("delegations")
 }
 
@@ -785,6 +832,78 @@ model GuaranteeIdleEpisode {
   // + PARTIAL UNIQUE (raw SQL in migration):
   //   CREATE UNIQUE INDEX "GuaranteeIdleEpisode_open_vehicle_key"
   //     ON "guarantee_idle_episodes"("vehicleId") WHERE "state" <> 'resolved';
+}
+
+// ─── VEHICLE PLANNER TRANSFER (docs/29 — request → approval) ──
+// Filed by the carrier's opiekun or the current planista (R2; admin never files,
+// U1); decided by admin or the lider of fromPlanner (R3), never by the author or
+// toPlanner (R4); withdrawn by the author while pending (U4). No notifications.
+// APPEND-ONLY: never deleted; only pending → one terminal status. NO deletedAt,
+// NOT in SOFT_DELETE_MODELS (like GuaranteeIdleEpisode). decidedAt/decidedById =
+// who closed it and when, for all 3 terminal statuses (cancelled → the author).
+model VehiclePlannerTransfer {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vehicleId       String   @db.Uuid
+  vehicle         Vehicle  @relation(fields: [vehicleId], references: [id])                              // RESTRICT
+  fromPlannerId   String   @db.Uuid                                                                     // vehicle.plannerId at filing; re-checked on approval (U6)
+  fromPlanner     User     @relation("PlannerTransferFrom", fields: [fromPlannerId], references: [id])   // RESTRICT
+  toPlannerId     String   @db.Uuid
+  toPlanner       User     @relation("PlannerTransferTo", fields: [toPlannerId], references: [id])       // RESTRICT
+  requestedById   String   @db.Uuid
+  requestedBy     User     @relation("PlannerTransferRequestedBy", fields: [requestedById], references: [id]) // RESTRICT
+  status          PlannerTransferStatus @default(pending)
+  reason          String                                                                                // required, non-blank (U3)
+  decisionComment String?                                                                               // rejection reason (required) / approval comment (optional)
+  decidedById     String?  @db.Uuid
+  decidedBy       User?    @relation("PlannerTransferDecidedBy", fields: [decidedById], references: [id]) // SET NULL
+  decidedAt       DateTime?
+  assignment      VehiclePlannerAssignment?                                                             // history row opened by an approval
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([vehicleId, createdAt])     // per-vehicle journal (planner-history)
+  @@index([status, createdAt])        // admin inbox (?status=)
+  @@index([fromPlannerId, status])    // lider inbox — requests of his planisci
+  @@index([requestedById, status])    // "my requests"
+  @@map("vehicle_planner_transfers")
+  // + raw SQL in migration 20260928120000_vehicle_planner_transfer:
+  //   PARTIAL UNIQUE "VehiclePlannerTransfer_pending_vehicle_key" ON ("vehicleId") WHERE "status" = 'pending'
+  //   CHECK vehicle_planner_transfer_distinct_planners     ("fromPlannerId" <> "toPlannerId")
+  //   CHECK vehicle_planner_transfer_reason_not_blank      (btrim("reason") <> '')
+  //   CHECK vehicle_planner_transfer_closed_has_decided_at (("status" = 'pending') = ("decidedAt" IS NULL))
+  //   CHECK vehicle_planner_transfer_rejection_has_comment ("status" <> 'rejected' OR btrim(COALESCE("decisionComment", '')) <> '')
+}
+
+// ─── VEHICLE PLANNER ASSIGNMENT (docs/29 — planista history) ──
+// Exactly one OPEN row (validTo IS NULL) per vehicle with a planista; its
+// plannerId = Vehicle.plannerId (api keeps it in one transaction: create → open
+// `create` row; approval → close open row with validTo=now, open `transfer` row).
+// APPEND-ONLY: only UPDATE = closing (validTo). NO deletedAt, NOT in
+// SOFT_DELETE_MODELS. vehicleId FK is CASCADE on purpose — see «Политика
+// referential actions».
+model VehiclePlannerAssignment {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vehicleId  String    @db.Uuid
+  vehicle    Vehicle   @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  plannerId  String    @db.Uuid
+  planner    User      @relation("PlannerAssignmentPlanner", fields: [plannerId], references: [id])   // RESTRICT
+  validFrom  DateTime                                        // timestamp — a transfer takes effect at approval (U5)
+  validTo    DateTime?                                       // NULL = current
+  source     PlannerAssignmentSource
+  transferId String?   @unique @db.Uuid                      // set ⇔ source=transfer (CHECK); 1:1 with the approved request
+  transfer   VehiclePlannerTransfer? @relation(fields: [transferId], references: [id], onDelete: Restrict)
+  actorId    String?   @db.Uuid                              // creator (create) / approver (transfer) / NULL (backfill)
+  actor      User?     @relation("PlannerAssignmentActor", fields: [actorId], references: [id])     // SET NULL
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([vehicleId, validFrom])     // per-vehicle journal + period overlap for wniosek recipients (U8)
+  @@index([plannerId])
+  @@map("vehicle_planner_assignments")
+  // + raw SQL in migration 20260928120000_vehicle_planner_transfer:
+  //   PARTIAL UNIQUE "VehiclePlannerAssignment_open_vehicle_key" ON ("vehicleId") WHERE "validTo" IS NULL
+  //   CHECK vehicle_planner_assignment_valid_range  ("validTo" IS NULL OR "validTo" >= "validFrom")
+  //   CHECK vehicle_planner_assignment_transfer_link (("source" = 'transfer') = ("transferId" IS NOT NULL))
 }
 
 // ─── LIMITS, AUDIT, REFRESH, CONFIG, CLAIM-SEQUENCE ─────
@@ -995,6 +1114,7 @@ derived hours.
 | `actualDepartureAt` | DB nullable | Departure-side analogue of `actualReturnAt`. Set by the `markInTransit` transition on `w_trasie` — verifier's **exact departure datetime** (date + time, not date-only); `Claim.timeFrom` is derived from it. API layer enforces presence when `status='w_trasie'`; no DB CHECK because the column flips together with `status` inside a single service transaction (see "Invariants for api-agent"). |
 | `actualReturnAt` | DB nullable | Set by `markReturned` transition on `zjechal` — verifier's **exact return datetime** (date + time, not date-only); `Claim.timeTo` is derived from it. API layer enforces presence when `status='zjechal'`; no DB CHECK because the column flips together with `status` inside a single service transaction (see "Invariants for api-agent"). |
 | `notes`, snapshots | Optional everywhere | |
+| `plannerId` | DB nullable (FK → users, `ON DELETE SET NULL`); api sets on create | Снимок планисты периода выезда ([docs/29](29-vehicle-planner-transfer-plan.md) R5), не редактируется руками. Пишет api: при создании = `vehicle.plannerId`; одобрение передачи переписывает только `zgloszony`/`gotowy` с `plannerId = fromPlanner` (R6). NULL допустим только у выездов машины без планисты на момент бэкфилла |
 
 ### User
 
@@ -1002,7 +1122,8 @@ derived hours.
 |---|---|---|
 | `login`, `email`, `role` | Strict everywhere | DB NOT NULL + UNIQUE on login/email |
 | `passwordHash` | Optional (DB nullable) | Allows email-only auth. **Google-provisioned users genuinely have `null` here** until they set one through «Zapomniałem hasła» (docs/24) |
-| `liderEmail` | Optional everywhere; per-role tech debt — see docs/19-known-quirks.md (#liderEmail) |  |
+| `liderEmail` | **DEPRECATED** (2026-09-28, [docs/29](29-vehicle-planner-transfer-plan.md) R8) — заменён `liderId`; api больше не читает и не пишет | Колонка живёт ещё один релиз (сверить несовпавшие значения — см. миграцию `20260928120000_vehicle_planner_transfer`), затем удаляется отдельной миграцией |
+| `liderId` | Optional (DB nullable, FK → users, `ON DELETE SET NULL`, индекс); правило цели — api | Лидер планисты ([docs/29](29-vehicle-planner-transfer-plan.md) U9). Только у `role = planista`; цель — активный `planista` с `lider = true`, не он сам — межстрочное правило, CHECK не выразит, проверяет сервис (как `teamId`). Ставит только admin; reconcile не трогает. Снятие флага `lider` у цели `liderId` не чистит (U10) — api проверяет `lider = true` лидера в момент решения |
 | `authProvider`, `managedBy` | DB NOT NULL + default `local` | Google SSO (docs/24). `managedBy='magspace'` ⇒ `role`/`active` принадлежат справочнику; `PATCH /users/:id` на них отвечает 422 `USER_MANAGED_BY_MAGSPACE` |
 | `googleSub`, `magspaceEmployeeId` | Optional, UNIQUE | Ключи привязки. `magspaceEmployeeId` — **cuid**, не UUID: без `@db.Uuid` |
 | `roleOverride` | Optional; CHECK `user_role_override_not_privileged` | Роль, выданная админом вручную для stanowisk без маппинга. Заполнено ⇒ reconcile не меняет роль и не отключает за «нет маппинга», но при увольнении доступ всё равно гасит |
@@ -1015,7 +1136,26 @@ derived hours.
 | `stanowiskoCode` | Strict + UNIQUE | Значение enum `Stanowisko` из MAGSpace (UPPER_SNAKE). Код стабилен навсегда по контракту |
 | `stanowiskoName` | Strict | Снапшот польского названия — кэш на случай, когда MAGSpace недоступен; живое значение выигрывает |
 | `role` | Strict; CHECK `stanowisko_role_mapping_role_not_privileged` | Никогда `admin` / `przewoznik`. Отсутствие строки = нет доступа (fail-closed) |
-| `lider` | DB NOT NULL, default `false`; CHECK `stanowisko_role_mapping_lider_requires_lider_role` (`NOT lider OR role IN ('planista','dyspozytor','opiekun','pracownik','eksport')`) | Флаг лидера, выдаваемый вместе с `role` всем на этом stanowisku при входе / reconcile ([docs/28](28-lider-roles-plan.md) §2). Seed: `PLANISTA_LIDER`, `DYSPOZYTOR_KIEROWNIK` → `true` (только при создании строки). Не значение `enum Role` и не `User.liderEmail` |
+| `lider` | DB NOT NULL, default `false`; CHECK `stanowisko_role_mapping_lider_requires_lider_role` (`NOT lider OR role IN ('planista','dyspozytor','opiekun','pracownik','eksport')`) | Флаг лидера, выдаваемый вместе с `role` всем на этом stanowisku при входе / reconcile ([docs/28](28-lider-roles-plan.md) §2). Seed: `PLANISTA_LIDER`, `DYSPOZYTOR_KIEROWNIK` → `true` (только при создании строки). Не значение `enum Role` и не `User.liderId` |
+
+### VehiclePlannerTransfer
+
+| Поле | Слой защиты | Notes |
+|---|---|---|
+| `vehicleId`, `fromPlannerId`, `toPlannerId`, `requestedById`, `status` | DB NOT NULL (все FK `RESTRICT`) | `status` default `pending`. ≤1 `pending` на машину — PARTIAL UNIQUE `VehiclePlannerTransfer_pending_vehicle_key`. `fromPlannerId <> toPlannerId` — CHECK `vehicle_planner_transfer_distinct_planners` |
+| `reason` | Strict everywhere; CHECK `vehicle_planner_transfer_reason_not_blank` | Причина подачи обязательна (U3) |
+| `decidedAt` | DB nullable + CHECK `vehicle_planner_transfer_closed_has_decided_at` (`pending ⇔ decidedAt IS NULL`) | Момент выхода из `pending` для всех трёх терминальных статусов |
+| `decidedById` | Optional (FK `ON DELETE SET NULL`) | Кто закрыл: admin / лидер `fromPlanner` (approve/reject), автор (cancel). В CHECK не входит — FK SET NULL должен срабатывать |
+| `decisionComment` | DB nullable + CHECK `vehicle_planner_transfer_rejection_has_comment` | Обязателен (непустой) при `rejected` (U3); при `approved` — по желанию; при `pending`/`cancelled` — NULL (api) |
+
+### VehiclePlannerAssignment
+
+| Поле | Слой защиты | Notes |
+|---|---|---|
+| `vehicleId`, `plannerId`, `validFrom`, `source` | DB NOT NULL | ≤1 открытая строка на машину — PARTIAL UNIQUE `VehiclePlannerAssignment_open_vehicle_key` (`WHERE validTo IS NULL`) |
+| `validTo` | DB nullable + CHECK `vehicle_planner_assignment_valid_range` (`validTo >= validFrom`) | NULL = текущее назначение. `>=`, а не `>`: `now()` в Postgres фиксирован на транзакцию |
+| `transferId` | DB nullable, UNIQUE, FK `RESTRICT` + CHECK `vehicle_planner_assignment_transfer_link` (`source = 'transfer' ⇔ transferId IS NOT NULL`) | Одно одобрение открывает ровно одну строку |
+| `actorId` | Optional (FK `ON DELETE SET NULL`) | Создатель машины (`create`), одобривший (`transfer`), NULL (`backfill`) |
 
 ## Соответствие колонок Sheets → поля Prisma
 
@@ -1152,7 +1292,7 @@ derived hours.
 
 8 листов в Sheets — это 8 таблиц с одинаковой структурой, отличаются только `Rola`. В новой схеме это **одна таблица `users`** с полем `role: Role`. Для перевозчика расширенные поля (NIP, IBAN, OpiekunLogin, **Firma/company** и т.д.) живут в отдельной таблице `Carrier`, связанной с `User` 1:1. Это дедупликация структуры.
 
-> ⚠️ Поле `Firma/company` исторически жило на `users` (денормализация из GAS-листов). В Phase 3 миграция `20260507223021_move_company_to_carrier` перенесла его на `Carrier` (только przewoznik когда-либо имел не-NULL значение). Аналогичный pending-cleanup существует для `User.liderEmail` — see docs/19-known-quirks.md (#liderEmail).
+> ⚠️ Поле `Firma/company` исторически жило на `users` (денормализация из GAS-листов). В Phase 3 миграция `20260507223021_move_company_to_carrier` перенесла его на `Carrier` (только przewoznik когда-либо имел не-NULL значение). `User.liderEmail` (e-mail лидера из листа PLANISCI) заменён связью `User.liderId` миграцией `20260928120000_vehicle_planner_transfer` ([docs/29](29-vehicle-planner-transfer-plan.md) R8); сама колонка удаляется отдельным релизом.
 
 Пароли в новой схеме всегда bcrypt-hash (никогда plaintext). Поле `passwordHash` в `User` — nullable, чтобы можно было перейти на email-only auth (см. [15-auth-strategy.md](15-auth-strategy.md)).
 
@@ -1176,6 +1316,12 @@ derived hours.
 | `getMyFleet` авто перевозчика | `vehicles(active, deletedAt)` (+ FK на carrier) |
 | Активные авто планисты | `vehicles(plannerId)` |
 | Делегации авто | `delegations(vehicleId, status)` |
+| Выезды планисты (scope по снимку, docs/29) | `delegations(plannerId, status)` |
+| Входящие лидера: планисты, чей лидер — я | `users(liderId)` |
+| Заявки на передачу: входящие admin (`?status=`) / лидера (по `fromPlanner`) / «мои» / журнал машины | `vehicle_planner_transfers(status, createdAt)` / `(fromPlannerId, status)` / `(requestedById, status)` / `(vehicleId, createdAt)` |
+| «≤1 pending-заявка на машину» (write-инвариант) | PARTIAL UNIQUE `vehicle_planner_transfers(vehicleId) WHERE status = 'pending'` |
+| Журнал назначений машины + пересечение периодов для получателей писем (U8) | `vehicle_planner_assignments(vehicleId, validFrom)` |
+| «≤1 открытое назначение на машину» (write-инвариант) | PARTIAL UNIQUE `vehicle_planner_assignments(vehicleId) WHERE validTo IS NULL` |
 | Carrier delegations list (через soft-delete middleware) | `delegations(carrierId, deletedAt, status)` — Phase 3 |
 | Watchdog-борд опекуна/админа (по перевозчику + state) | `guarantee_idle_episodes(carrierId, state)` |
 | Watchdog per-машина (ensure-эпизод, история) | `guarantee_idle_episodes(vehicleId, state)` |
@@ -1200,6 +1346,8 @@ derived hours.
 | VehicleDailyKm | hard: `DELETE /vehicles/:id/daily-km` (weryfikator/admin) физически стирает строки-клетки km-доски (идемпотентный `deleteMany`); плюс каскад при hard-delete машины. |
 | ClaimAttachment | без `deletedAt`; физически удаляется только rollback-ом неудачного аплоада (orphan-cleanup) + каскад от Claim (который не удаляется никогда). |
 | GuaranteeIdleEpisode | append-only журнал, `deletedAt` нет; не в allowlist soft-delete-extension → extension его не трогает (закрытие эпизода = `state='resolved'` + `resolvedReason`, не удаление) |
+| VehiclePlannerTransfer | append-only (docs/29), `deletedAt` нет, не в allowlist soft-delete-extension; delete-путей нет — жизненный цикл только статусом (`pending` → `approved`/`rejected`/`cancelled`). FK на машину `RESTRICT`: машину с заявками физически не удалить |
+| VehiclePlannerAssignment | append-only журнал (docs/29), `deletedAt` нет, не в allowlist; единственный UPDATE — закрытие открытой строки (`validTo`). Физически уходит только `ON DELETE CASCADE` вместе с машиной (create-rollback api) |
 | RefreshToken | рантаймом НЕ удаляется (revoke/rotate = `update`); физически уходит только `ON DELETE CASCADE` при hard-delete User (внутри carrier hard). |
 | AuditLog | append-only, никогда не удаляем — **закреплено триггером в БД** (DELETE/TRUNCATE/UPDATE → RAISE), см. §«AuditLog — append-only на уровне БД» |
 | EmailLog | write-once журнал доставки, `deletedAt` нет; hard DELETE только retention-prune api (строки старше `EMAIL_LOG_RETENTION_DAYS`, дефолт 180); триггер audit_log на него не распространяется |
@@ -1210,7 +1358,8 @@ derived hours.
 ### Политика referential actions: бизнес-каскадов НЕТ, только RESTRICT (2026-07-17)
 
 - Все бизнес-FK стоят `ON DELETE RESTRICT` (дефолт Prisma для required-связей, подтверждено миграциями): `vehicles/drivers/trailers/claims/delegations → carriers`, `delegations → vehicles/drivers/trailers`, `guarantee_idle_episodes → vehicles/carriers`, `carriers → users`. Родителя, на которого ссылается хоть одна строка — **включая soft-deleted** (FK физический, `deletedAt` для Postgres невидим) — БД снести не даст.
-- `ON DELETE CASCADE` разрешён ТОЛЬКО «неотъемлемым» дочерним строкам самой записи: `*_attachments` (метаданные файлов), `vehicle_daily_km`, `claim_attachments`, `refresh_tokens`. Бизнес-сущности (флот, wnioski, wyjazdy, эпизоды) каскадом не удаляются никогда — это сознательная политика, а не упущение.
+- `ON DELETE CASCADE` разрешён ТОЛЬКО «неотъемлемым» дочерним строкам самой записи: `*_attachments` (метаданные файлов), `vehicle_daily_km`, `vehicle_planner_assignments`, `claim_attachments`, `refresh_tokens`. Бизнес-сущности (флот, wnioski, wyjazdy, эпизоды, заявки на передачу) каскадом не удаляются никогда — это сознательная политика, а не упущение.
+- `vehicle_planner_assignments → vehicles` — CASCADE (2026-09-28, docs/29): журнал назначений — часть самой записи машины, а единственный оставшийся физический DELETE машины — rollback в `VehiclesService.create` (упал аплоад вложения), который должен унести и только что записанную `create`-строку. `vehicle_planner_transfers → vehicles` — RESTRICT (бизнес-запись: кто просил, кто решил), поэтому машину, по которой была хоть одна заявка, физически не удалить. `vehicle_planner_assignments.transferId → vehicle_planner_transfers` — RESTRICT (заявки не удаляются; SET NULL сломал бы CHECK `vehicle_planner_assignment_transfer_link`). FK на `users`: обязательные (`fromPlannerId`, `toPlannerId`, `requestedById`, `vehicle_planner_assignments.plannerId`) — RESTRICT; необязательные (`decidedById`, `actorId`, `delegations.plannerId`, `users.liderId`) — SET NULL.
 - Следствие: admin-эндпоинты `/hard` реально срабатывают только для записей без истории (созданных по ошибке). При наличии ссылок API отвечает **409 Conflict** с machine-кодом `CARRIER_HAS_REFERENCES` / `VEHICLE_HAS_REFERENCES` / `DRIVER_HAS_REFERENCES` / `TRAILER_HAS_REFERENCES` (пре-чек счётчиками с `[INCLUDE_SOFT_DELETED]` + перехват P2003 на случай гонки).
 - Судьба файлов в MinIO: явный `DELETE …/attachments/:id` стирает строку (soft) **и объект** у drivers/trailers/carriers; у vehicles объект сознательно остаётся (историческое исключение по task brief). Hard-delete родителя объекты MinIO не трогает вообще; rollback-пути неудачных аплоадов подчищают и строку, и объект.
 
@@ -1272,6 +1421,7 @@ Prisma-диффер триггеры/функции не интроспекти�
 | `20260914120000_audit_log_append_only_trigger` | Аудит логирования 2026-08-14, п.7. Hand-authored SQL, без изменений данных: функция `audit_log_append_only_guard()` (plpgsql) + триггеры `audit_log_append_only_row` (BEFORE UPDATE OR DELETE, FOR EACH ROW) и `audit_log_append_only_truncate` (BEFORE TRUNCATE, FOR EACH STATEMENT). RAISE на всё, кроме FK-действия `ON DELETE SET NULL` по `userId` после hard-delete пользователя. Семантика, escape hatch и модель угроз — §«AuditLog — append-only на уровне БД». |
 | `20260914120100_add_email_logs` | Аудит логирования 2026-08-14, п.11. Аддитивная: enum `EmailLogStatus {sent, failed}` + таблица **`email_logs`** (журнал финальных исходов email-job; FK `triggeredById → users(id)` `ON DELETE SET NULL ON UPDATE CASCADE`; индексы `createdAt`, `(targetType, targetKey)`, `status`). Hand-added **CHECK** `email_log_attempts_non_negative` (`attempts >= 0`) и `email_log_sent_has_sent_at` (`status <> 'sent' OR sentAt IS NOT NULL`). Колонок для тела письма / кодов / паролей нет и не будет. Строки пишет api email-processor, чистит retention-prune по `EMAIL_LOG_RETENTION_DAYS` (дефолт 180). |
 | `20260925120000_user_lider_flag` | Флаг лидера на сотрудниках ([docs/28](28-lider-roles-plan.md), этап L1). `lider BOOLEAN NOT NULL DEFAULT false` на `users` и `stanowisko_role_mappings`. Лидер — **не** новое значение `enum Role`, а надстройка над пятью ролями из `LIDER_ROLES` (docs/28 §0): `enum Role` не меняется. **Два CHECK-констрейнта:** `user_lider_requires_lider_role` и `stanowisko_role_mapping_lider_requires_lider_role` — `NOT lider OR role IN ('planista','dyspozytor','opiekun','pracownik','eksport')`. `roleOverride` в CHECK сознательно не входит: то, что sync выводит из него, всё равно пишется в `role` и упирается в этот CHECK, а ранний 422 на пару `(roleOverride, lider)` — задача сервиса (L2, docs/28 §7 R2). Без индекса (лидеров единицы). Полностью аддитивная и forward-only, без бэкфилла: все существующие строки получают `lider=false` из DEFAULT; флаг у `PLANISTA_LIDER` / `DYSPOZYTOR_KIEROWNIK` на уже засеянных БД ставит админ в `/employee/sso` после L3. |
+| `20260928120000_vehicle_planner_transfer` | Передача машины другому планисте заявкой + история планистов ([docs/29](29-vehicle-planner-transfer-plan.md) §2). **Аддитивная, forward-only, рассчитана на уже заполненную БД (pre-prod).** Enum-ы `PlannerTransferStatus {pending, approved, rejected, cancelled}`, `PlannerAssignmentSource {create, transfer, backfill}`. `users.liderId UUID` (self-FK `ON DELETE SET NULL`, индекс `users_liderId_idx`); `delegations.plannerId UUID` (FK → users `ON DELETE SET NULL`, индекс `delegations_plannerId_status_idx`). Таблицы **`vehicle_planner_transfers`** (4 индекса, FK на vehicles/users RESTRICT, `decidedById` SET NULL) и **`vehicle_planner_assignments`** (FK на vehicles **CASCADE**, planner RESTRICT, `transferId` UNIQUE + RESTRICT, `actorId` SET NULL). Hand-added: PARTIAL UNIQUE `VehiclePlannerTransfer_pending_vehicle_key` и `VehiclePlannerAssignment_open_vehicle_key`; CHECK `vehicle_planner_transfer_distinct_planners`, `…_reason_not_blank`, `…_closed_has_decided_at`, `…_rejection_has_comment`, `vehicle_planner_assignment_valid_range`, `…_transfer_link`. **Бэкфиллы (идемпотентные — `IS NULL` / `NOT EXISTS`, повторный прогон ничего не меняет; `updatedAt` существующих строк не трогается):** (a) `users.liderId` ← `liderEmail` — только строки `role='planista'`; цель — ровно один пользователь `role='planista' AND lider AND deletedAt IS NULL` с совпадающим e-mail без учёта регистра и пробелов, не он сам (неоднозначное совпадение не угадывается); (b) `delegations.plannerId` ← текущий `vehicles.plannerId` (все строки, включая soft-deleted); (c) по одной открытой строке `source='backfill'` с `validFrom = vehicles.createdAt` на каждую машину с планистой (включая soft-deleted, чтобы инвариант «`plannerId` = открытая строка» держался везде). Отчёт — `RAISE NOTICE` (по строке на каждого несовпавшего планисту + итог «linked / UNMATCHED / non-planista ignored»); **`prisma migrate deploy` NOTICE-ы не показывает** (проверено), их видно только при прогоне SQL через `psql`. Поэтому после выката отчёт снимается запросом (работает, пока колонка `liderEmail` существует): `SELECT login, "liderEmail", "deletedAt" IS NOT NULL AS deleted FROM users WHERE role = 'planista' AND "liderId" IS NULL AND NULLIF(btrim("liderEmail"), '') IS NOT NULL ORDER BY login;` — и `SELECT login, role FROM users WHERE role <> 'planista' AND NULLIF(btrim("liderEmail"), '') IS NOT NULL;` для проигнорированных не-планистов. `liderEmail` остаётся в этом релизе; DROP — отдельной миграцией (R8). Ограничение бэкфилла: кто вёл машину до выката, неизвестно — все прошлые выезды приписаны текущему планисте. Hand-authored (БД в среде агента недоступна): DDL идентичен `prisma migrate diff`; вся цепочка прогнана `prisma migrate deploy` на PGlite (PG 17), `migrate diff --from-url` → пусто, бэкфиллы и все CHECK/partial unique проверены на фикстурах формы pre-prod. |
 
 > **Изменения семантики без DDL.** Не всякое изменение модели данных попадает в эту таблицу. 2026-09-20 трёхзначная семантика `monthly_limits.kmPerDay` / `ratePerKm` / `kmPerSaturday` (`NULL` = месяц не сконфигурирован → fallback; `0` = гарантия осознанно выключена; `> 0` = значение) введена **без миграции**: колонки как были nullable без `@default`, так и остались, `0` физически был допустим всегда — поменялась только интерпретация (и Zod-валидация в api: `.positive()` → `.nonnegative()`). Строки в таблице миграций для этого нет и быть не должно; описание — в §«LIMITY KM → MonthlyLimit».
 
@@ -1290,6 +1440,8 @@ Production deploy: `prisma migrate deploy` в CI/CD пайплайне (без `
 - `prisma/seed.prod.ts` — пароль первого админа берётся **только** из `SEED_ADMIN_PASSWORD`; хардкоженного fallback-а нет. Если переменная не задана или пустая — скрипт падает с понятной ошибкой **до любой записи в БД**. На повторном запуске существующий админ не трогается (`update: {}`), но переменную всё равно нужно передать.
 
 **Демо-лидеры (2026-09-25, [docs/28](28-lider-roles-plan.md) L1):** dev-seed (`prisma/seed.ts`) заводит пять пользователей с `lider=true` — `planistalider1` (planista), `dyspozytorlider1` (dyspozytor, в команде `1.1.13`), `opiekunlider1`, `pracowniklider1`, `eksportlider1`; `lider` пишется и в `create`, и в `update`. В маппинге (`seed-data.ts`, общий с `seed.prod.ts`) `PLANISTA_LIDER` / `DYSPOZYTOR_KIEROWNIK` получают `lider=true` **только при создании** строки: `update` не трогает ни `role`, ни `lider`, чтобы не упасть на CHECK, если админ перенастроил строку на роль вне `LIDER_ROLES`.
+
+**Передача машины и история планистов (2026-09-28, [docs/29](29-vehicle-planner-transfer-plan.md)):** dev-seed заводит `planista2` и `planista3`; `planista1` и `planista2` получают `liderId → planistalider1`, `planista3` — без лидера (его заявки решает только admin). Демо-машина `WX 11113` получает планисту `planista1` и открытую `create`-строку журнала (выездов у неё по-прежнему нет — на это опирается демо watchdog). Ещё две машины того же перевозчика: `WX 22224` — передана `planista1 → planista2` одобренной заявкой (решил `planistalider1`), две строки журнала (закрытая `create` + открытая `transfer`), четыре выезда со снимками `plannerId` по обе стороны передачи (в т.ч. `zjechal`, который был `w_trasie` в момент одобрения и остался за `planista1`, и `zgloszony` у `planista2`) + `pending`-заявка `planista2 → planista3` от `opiekun1`; `WX 33335` у `planista3` — заявки `rejected` (решил admin), `cancelled` (автор) и `pending` (решает только admin). Строки без уникального бизнес-ключа (журнал, заявки, выезды) имеют **фиксированные id** (`5eed0029-…`), все даты — смещения от `createdAt` машины (задаётся при первом insert и не двигается) → повторный прогон переписывает те же значения. Для открытой строки журнала seed сначала закрывает чужую открытую строку машины (например, `backfill` от миграции на уже заполненной dev-БД); `pending`-заявка пропускается, если на машине уже есть другая `pending`. `seed.prod.ts` машин и выездов не создаёт — не менялся.
 
 Snippet ниже — исходный эскиз структуры; актуальный код — `prisma/seed.ts` / `prisma/seed-data.ts` / `prisma/seed.prod.ts`.
 - Дефолтные `app_config` (lockout-ttl, code-ttl, max-attempts, ставки-fallback).

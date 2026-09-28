@@ -89,6 +89,12 @@ export const VehicleLifecycleStatusSchema = z.enum([
 ]);
 
 const vehicleAttributeFields = {
+  /**
+   * REQUIRED on create (docs/29 R7) — the vehicle's first planista, set
+   * directly in the create form. Service-side: an ACTIVE `planista`; the api
+   * opens the `create` row of the planista journal in the same insert. Every
+   * later change goes through a transfer request — `PATCH` refuses the field.
+   */
   plannerId: UuidSchema,
   /**
    * Phase 11 — the dispatch TEAM this vehicle is assigned to (replaces the
@@ -287,31 +293,86 @@ export const CreateVehicleObjectSchema = z
   })
   .strict();
 
+/**
+ * The cross-field rules of a COMPLETE vehicle body (create semantics: an
+ * absent flag counts as `false`). Shared by {@link CreateVehicleSchema} and the
+ * web edit form's {@link VehicleEditFormSchema}, so both validate identically.
+ */
+function refineCompleteVehicle(
+  d: Parameters<typeof vehicleFuelCardRefine>[0] &
+    Parameters<typeof vehicleFuelCardAgreementRefine>[0] &
+    Parameters<typeof vehicleWasteAdrRefine>[0] & {
+      gb?: boolean;
+      it?: boolean;
+      fr?: boolean;
+    },
+  ctx: z.RefinementCtx,
+): void {
+  vehicleFuelCardRefine(d, ctx);
+  vehicleFuelCardAgreementRefine(d, ctx);
+  vehicleWasteAdrRefine(d, ctx);
+  // min 2 of {gb, it, fr} — enforced at create (undefined counts as false).
+  if (countUkItFr(d.gb, d.it, d.fr) < 2) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Wymagane min. 2 z 3 dostępów: gb / it / fr',
+      path: ['gb'],
+    });
+  }
+}
+
 export const CreateVehicleSchema = CreateVehicleObjectSchema.superRefine(
-  (d, ctx) => {
-    vehicleFuelCardRefine(d, ctx);
-    vehicleFuelCardAgreementRefine(d, ctx);
-    vehicleWasteAdrRefine(d, ctx);
-    // min 2 of {gb, it, fr} — enforced at create (undefined counts as false).
-    if (countUkItFr(d.gb, d.it, d.fr) < 2) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Wymagane min. 2 z 3 dostępów: gb / it / fr',
-        path: ['gb'],
-      });
-    }
-  },
+  refineCompleteVehicle,
 );
 export type CreateVehicleDto = z.infer<typeof CreateVehicleSchema>;
 
+/**
+ * WEB-ONLY resolver of the vehicle EDIT form (docs/29 R1, docs/14 §17.2.2).
+ * The edit form holds the full vehicle (it is diffed into the PATCH body by
+ * the caller), so it validates with the create rules — minus `plannerId`,
+ * which the edit form neither renders nor registers: after creation the
+ * planista changes only through a transfer request, and a PATCH carrying the
+ * key is refused (422 `VEHICLE_PLANNER_CHANGE_REQUIRES_TRANSFER`).
+ *
+ * `.strip()` instead of `.strict()`: a stray form key (e.g. a `plannerId`
+ * left over from a create-mode render) is DROPPED from the output rather than
+ * failing the form with a root-level issue no field can display. Not an api
+ * request schema — the api validates `PATCH` with {@link UpdateVehicleSchema}.
+ */
+export const VehicleEditFormSchema = CreateVehicleObjectSchema.omit({
+  plannerId: true,
+})
+  .strip()
+  .superRefine(refineCompleteVehicle);
+export type VehicleEditFormValues = z.infer<typeof VehicleEditFormSchema>;
+
 // ─── Update ──────────────────────────────────────────────
 
-/** Underlying ZodObject — exported so web/zodResolver can compose it. */
+/**
+ * 422 — `PATCH /vehicles/:id` carried `plannerId`. After creation nobody
+ * changes a vehicle's planista directly — not an opiekun, not an admin, not a
+ * lider (docs/29 R1): it moves only through an approved transfer request
+ * (`POST /vehicles/:id/planner-transfers`). The field is refused, never
+ * silently dropped, so a stale client learns why its edit did nothing.
+ */
+export const VEHICLE_PLANNER_CHANGE_REQUIRES_TRANSFER =
+  'VEHICLE_PLANNER_CHANGE_REQUIRES_TRANSFER' as const;
+
+/** Human fallback for {@link VEHICLE_PLANNER_CHANGE_REQUIRES_TRANSFER} — the web localises by code. */
+export const VEHICLE_PLANNER_CHANGE_REQUIRES_TRANSFER_MESSAGE =
+  'Planistę pojazdu zmienia się tylko wnioskiem o przekazanie.';
+
+/**
+ * Underlying ZodObject — exported so web/zodResolver can compose it.
+ *
+ * `plannerId` is deliberately ABSENT (docs/29 R1) — see
+ * {@link VEHICLE_PLANNER_CHANGE_REQUIRES_TRANSFER}. The edit form must not
+ * register it and the PATCH body must not carry it.
+ */
 export const UpdateVehicleObjectSchema = z
   .object({
     plateNumber: PlateSchema.optional(),
     active: z.boolean().optional(),
-    plannerId: UuidSchema.nullable().optional(),
     /** Phase 11 — reassign the dispatch Team. Omit = leave unchanged; it
      *  cannot be cleared to null (a vehicle must always keep a team). */
     dispatchTeamId: UuidSchema.optional(),
@@ -375,8 +436,30 @@ export const UpdateVehicleObjectSchema = z
   })
   .strict();
 
-export const UpdateVehicleSchema = UpdateVehicleObjectSchema.superRefine(
-  (d, ctx) => {
+/**
+ * `PATCH /vehicles/:id` body as the api validates it.
+ *
+ * `plannerId` is accepted as a KEY only to be refused as a business rule: a
+ * `custom` issue with `params.code = VEHICLE_PLANNER_CHANGE_REQUIRES_TRANSFER`,
+ * which `ZodValidationPipe` answers with 422 + `extensions.code` (docs/13
+ * «Формат ответов») — a bare `.strict()` rejection would be an anonymous 400.
+ * Applies to every role, admin included (docs/29 R1). The output type has no
+ * `plannerId` (the transform drops the refused key).
+ */
+export const UpdateVehicleSchema = UpdateVehicleObjectSchema.extend({
+  plannerId: z.unknown().optional(),
+})
+  .superRefine((d, ctx) => {
+    if (d.plannerId !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['plannerId'],
+        message: VEHICLE_PLANNER_CHANGE_REQUIRES_TRANSFER_MESSAGE,
+        params: { code: VEHICLE_PLANNER_CHANGE_REQUIRES_TRANSFER },
+      });
+    }
+  })
+  .superRefine((d, ctx) => {
     vehicleFuelCardRefine(d, ctx);
     vehicleWasteAdrRefine(d, ctx);
     // HARD `fuelCard=true ⇒ agreement=true` — on PATCH only checkable when BOTH
@@ -414,8 +497,10 @@ export const UpdateVehicleSchema = UpdateVehicleObjectSchema.superRefine(
         path: ['gb'],
       });
     }
-  },
-);
+  })
+  // The refine above already refused a present `plannerId`; drop the key so
+  // the output (and `UpdateVehicleDto`) cannot carry it.
+  .transform(({ plannerId: _plannerId, ...rest }) => rest);
 export type UpdateVehicleDto = z.infer<typeof UpdateVehicleSchema>;
 
 // ─── Filters ─────────────────────────────────────────────
@@ -773,6 +858,11 @@ export const VehicleDtoSchema = z.object({
    * runs (status `wylaczona` or `aktywna`).
    */
   daysSinceReturn: z.number().int().nullable(),
+  /**
+   * The CURRENT planista (docs/29 §2 p.5) — changed only by an approved
+   * transfer request. Vehicle-level screens read it live (U7); a delegation
+   * carries its own snapshot (`DelegationDto.planner`).
+   */
   plannerId: UuidSchema.nullable(),
   planner: z
     .object({

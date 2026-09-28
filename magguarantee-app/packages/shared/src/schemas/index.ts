@@ -13,6 +13,7 @@
 //   ./integrations/    — VIES / Biała Lista / info-car / GPS (Wave 4)
 //   ./claims.ts        — Phase 3 — claims (wnioski) submit/preview/reklamacja
 //   ./delegations.ts   — Phase 3 — delegations submit/cancel
+//   ./planner-transfers.ts — docs/29 — vehicle planner transfer + history
 //   ./fleet.ts         — Phase 3 — fleet aggregates (GET /fleet/my)
 //   ./sso.ts           — Google SSO stanowisko → role mapping (docs/24)
 //
@@ -34,6 +35,8 @@ export * from './lookups';
 export * from './integrations';
 export * from './claims';
 export * from './delegations';
+// docs/29 — vehicle planner transfer (request → approval) + planista history.
+export * from './planner-transfers';
 export * from './fleet';
 // Google SSO — admin mapping of MAGSpace stanowiska onto MAGGuarantee roles.
 export * from './sso';

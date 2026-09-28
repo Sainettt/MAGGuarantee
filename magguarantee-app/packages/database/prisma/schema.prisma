@@ -266,6 +266,32 @@ enum GuaranteeResolveReason {
   vehicle_inactive
 }
 
+// ─── VEHICLE PLANNER TRANSFER (docs/29) ─────────────────
+// After creation a vehicle changes its planista ONLY through a transfer request
+// that an admin or the current planista's lider approves (docs/29 R1–R4, R7).
+
+// Lifecycle of a VehiclePlannerTransfer. `pending` is the only open state; the
+// other three are terminal. `approved` / `rejected` — decided by an admin or
+// the lider of `fromPlanner`; `cancelled` — withdrawn by its author. The
+// partial unique index allows at most one `pending` row per vehicle (U4).
+enum PlannerTransferStatus {
+  pending
+  approved
+  rejected
+  cancelled
+}
+
+// How a VehiclePlannerAssignment row came to be: `create` — the first planista,
+// set in the vehicle-create form (R7); `transfer` — opened by an approved
+// VehiclePlannerTransfer (then `transferId` is set, and only then — CHECK);
+// `backfill` — written by migration 20260928120000_vehicle_planner_transfer
+// for every vehicle that already had a planista (who led it before is unknown).
+enum PlannerAssignmentSource {
+  create
+  transfer
+  backfill
+}
+
 // ─── USERS (объединение всех auth-листов) ───────────────
 
 model User {
@@ -315,8 +341,8 @@ model User {
   // panel and every `@Roles` still come from `role`; the flag only adds
   // permissions on top. A leader is NOT a value of `enum Role` — never add
   // `lider_*` members to the enum (docs/28 §7 R1). Not to be confused with
-  // `liderEmail` below, which is the e-mail CC'd on decisions (docs/19 quirk
-  // #14). Owned like `role`: on `magspace` rows without `roleOverride` it is
+  // `liderId` below, which says WHOSE lider this user is (a planista's link to
+  // his leader). Owned like `role`: on `magspace` rows without `roleOverride` it is
   // synced from `StanowiskoRoleMapping.lider`, otherwise an admin sets it.
   // The pair (role, lider) is guarded by CHECK `user_lider_requires_lider_role`;
   // the pair (roleOverride, lider) is validated by the api service (L2), not
@@ -324,10 +350,29 @@ model User {
   lider              Boolean       @default(false)
 
   // role-specific fields (NULL for other roles)
-  // planista — per-role tech debt; same denormalization pattern as the
-  // ex-`User.company` field (already moved to Carrier). Likely future cleanup:
-  // move to a Planista extension table OR keep on User if no other
-  // planista-only fields emerge. See docs/19-known-quirks.md#liderEmail.
+
+  // PLANISTA — the planista's leader (docs/29 R8, U9). Meaningful only on
+  // role=planista rows; NULL = no leader, so only an admin decides this
+  // planista's vehicle-transfer requests (R4). The cross-row rule "target is an
+  // active planista with lider=true, and not the user himself" cannot be a
+  // CHECK: the api service enforces it on write (same pattern as `teamId`).
+  // Set only by an admin — the directory reconcile never touches it (U9), and
+  // removing the target's `lider` flag does NOT clear it (U10: the api checks
+  // `lider = true` on the leader at decision time instead).
+  // ON DELETE SET NULL; indexed (the lider's inbox looks up his planisci).
+  // The relation field is `liderUser` because `lider` is the Boolean flag above.
+  liderId     String? @db.Uuid
+  liderUser   User?   @relation("UserLider", fields: [liderId], references: [id], onDelete: SetNull)
+  // Reverse of `liderId`: the planisci whose leader this user is.
+  ledPlanners User[]  @relation("UserLider")
+
+  // DEPRECATED (docs/29 R8) — superseded by `liderId`. Formerly the e-mail CC'd
+  // on wniosek mails (docs/19 quirk #14). Migration
+  // 20260928120000_vehicle_planner_transfer copied every case-insensitive match
+  // (planista with lider=true) into `liderId`; from that release on the api
+  // neither reads nor writes this column. Kept one more release so unmatched
+  // values can still be inspected, then DROPPED by a separate migration —
+  // do not build anything new on it.
   liderEmail String?
 
   // DYSPOZYTOR — the dispatch team this dispatcher belongs to (Phase 11).
@@ -345,6 +390,15 @@ model User {
   // vehicle assignment — planista (lead spedytor) is a single user; the
   // dispatch side moved from a single user to a Team in Phase 11 (see Team).
   plannerVehicles Vehicle[] @relation("VehiclePlanner")
+
+  // vehicle planner transfer (docs/29)
+  plannedDelegations        Delegation[]               @relation("DelegationPlanner") // Delegation.plannerId snapshot
+  plannerTransfersFrom      VehiclePlannerTransfer[]   @relation("PlannerTransferFrom")
+  plannerTransfersTo        VehiclePlannerTransfer[]   @relation("PlannerTransferTo")
+  plannerTransfersRequested VehiclePlannerTransfer[]   @relation("PlannerTransferRequestedBy")
+  plannerTransfersDecided   VehiclePlannerTransfer[]   @relation("PlannerTransferDecidedBy")
+  plannerAssignments        VehiclePlannerAssignment[] @relation("PlannerAssignmentPlanner")
+  plannerAssignmentsActed   VehiclePlannerAssignment[] @relation("PlannerAssignmentActor")
 
   // activity
   reportedDelegations        Delegation[]        @relation("DelegationReporter")
@@ -370,6 +424,7 @@ model User {
   @@index([role])
   @@index([deletedAt])
   @@index([teamId])
+  @@index([liderId])
   // The directory reconcile scans every magspace-managed row each run.
   @@index([managedBy])
   @@map("users")
@@ -401,7 +456,7 @@ model StanowiskoRoleMapping {
   // (docs/28 §2) — e.g. PLANISTA_LIDER → planista + lider. Same meaning as
   // `User.lider`: an add-on over the base role, allowed only for the roles in
   // `LIDER_ROLES` (planista, dyspozytor, opiekun, pracownik, eksport); NOT a
-  // value of `enum Role` (docs/28 §7 R1) and unrelated to `User.liderEmail`.
+  // value of `enum Role` (docs/28 §7 R1) and unrelated to `User.liderId`.
   // The pair (role, lider) is guarded by CHECK
   // `stanowisko_role_mapping_lider_requires_lider_role`.
   lider Boolean @default(false)
@@ -544,6 +599,14 @@ model Vehicle {
   createdById   String?   @db.Uuid // UtworzonePrzez
 
   // people
+  // CURRENT planista — a denormalized pointer (docs/29 §2 p.5). Invariant: equals
+  // `plannerId` of the vehicle's open VehiclePlannerAssignment row
+  // (`validTo IS NULL`); NULL ⇔ no open row. Set on create (R7, together with a
+  // `create` history row) and changed afterwards ONLY by approving a
+  // VehiclePlannerTransfer (R1), in the same transaction that closes/opens the
+  // history rows. Never edited directly — `PATCH /vehicles/:id` rejects it.
+  // Vehicle-level screens (fleet, GPS, km report, vehicle list/card) read it
+  // live (U7); delegations use their own snapshot `Delegation.plannerId`.
   plannerId      String? @db.Uuid
   planner        User?   @relation("VehiclePlanner", fields: [plannerId], references: [id])
   // Phase 11 — dispatch moved from a single user (`dispatcherId`) to a Team.
@@ -639,11 +702,13 @@ model Vehicle {
   // when adminRemovalNotifiedAt is cleared — it is a lifetime counter.
   adminRemovalNotifyCount Int       @default(0)
 
-  delegations       Delegation[]
-  claims            Claim[]
-  attachments       VehicleAttachment[]
-  dailyKm           VehicleDailyKm[] // Phase 7 (#3) — daily km records (weryfikator)
-  guaranteeEpisodes GuaranteeIdleEpisode[] // Guarantee Watchdog — idle-episode journal
+  delegations        Delegation[]
+  claims             Claim[]
+  attachments        VehicleAttachment[]
+  dailyKm            VehicleDailyKm[] // Phase 7 (#3) — daily km records (weryfikator)
+  guaranteeEpisodes  GuaranteeIdleEpisode[] // Guarantee Watchdog — idle-episode journal
+  plannerTransfers   VehiclePlannerTransfer[] // docs/29 — planista transfer requests
+  plannerAssignments VehiclePlannerAssignment[] // docs/29 — planista assignment history
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1123,6 +1188,20 @@ model Delegation {
 
   spedOrderNumber String? // Nr zlecenia ze spedu — set on markReady (zgloszony → gotowy)
 
+  // Planista of THIS delegation's period — a snapshot, not a live read of
+  // `vehicle.plannerId` (docs/29 R5). Written by the api on create
+  // (= vehicle.plannerId at that moment). Rewritten only by the approval of a
+  // VehiclePlannerTransfer, and only for the vehicle's not-yet-departed
+  // delegations (`zgloszony` / `gotowy`) whose snapshot is `fromPlanner` (R6);
+  // `w_trasie` / `zjechal` / `anulowany` keep the old planista. Drives the
+  // planista scope of the delegation list/card, "ZESPÓŁ PROWADZĄCY", the
+  // planista name in the Chat message and the wniosek mail recipients (U8).
+  // Nullable: rows of a vehicle that had no planista at backfill time; the
+  // migration filled every other row from the then-current vehicle.plannerId
+  // (who led a vehicle before this release is unknown — docs/29 §2 note).
+  plannerId String? @db.Uuid
+  planner   User?   @relation("DelegationPlanner", fields: [plannerId], references: [id])
+
   notes String?
 
   createdAt DateTime  @default(now())
@@ -1133,6 +1212,9 @@ model Delegation {
   @@index([carrierId, status])
   @@index([carrierId, deletedAt, status])
   @@index([status, departureAt])
+  // docs/29 — planista scope of the delegation list (plannerId = me, optional
+  // status filter); mirrors the (vehicleId, status) / (carrierId, status) pair.
+  @@index([plannerId, status])
   @@map("delegations")
 }
 
@@ -1221,6 +1303,123 @@ model GuaranteeIdleEpisode {
   @@index([carrierId, state])
   @@index([vehicleId, state])
   @@map("guarantee_idle_episodes")
+}
+
+// ─── VEHICLE PLANNER TRANSFER (docs/29 — request → approval) ──
+// A request to hand a vehicle over from its current planista (`fromPlanner`)
+// to another one (`toPlanner`). Filed by the opiekun of the vehicle's carrier or
+// by the current planista (R2; an admin never files — U1). Decided by an admin
+// or by the lider of `fromPlanner` (R3), never by the author or by `toPlanner`
+// (R4). Withdrawn by its author while `pending` (U4). No notifications (R9).
+//
+// APPEND-ONLY: rows are never deleted — only `pending` → one terminal status,
+// stamping `decidedAt` / `decidedById` / `decisionComment`. NO `deletedAt`:
+// like GuaranteeIdleEpisode it is NOT in the api's SOFT_DELETE_MODELS
+// allowlist, so the soft-delete extension leaves it alone.
+//
+// `decidedAt` / `decidedById` record who CLOSED the request and when, for all
+// three terminal statuses — for `cancelled` that is the author himself.
+// `decisionComment` is the rejection reason (required, U3) or an optional
+// approval comment; NULL on `pending` / `cancelled`.
+//
+// Hand-added in the migration SQL (Prisma DSL cannot express them):
+//   PARTIAL UNIQUE "VehiclePlannerTransfer_pending_vehicle_key"
+//     ON ("vehicleId") WHERE "status" = 'pending'      — ≤1 pending per vehicle (U4)
+//   CHECK vehicle_planner_transfer_distinct_planners    — fromPlannerId <> toPlannerId (U2)
+//   CHECK vehicle_planner_transfer_reason_not_blank     — btrim(reason) <> '' (U3)
+//   CHECK vehicle_planner_transfer_closed_has_decided_at — pending ⇔ decidedAt IS NULL
+//   CHECK vehicle_planner_transfer_rejection_has_comment — rejected ⇒ non-blank decisionComment (U3)
+// Cross-row rules (roles, "lider of fromPlanner", "fromPlanner is still the
+// vehicle's planista", active vehicle/target) are api-only — docs/29 §3.
+model VehiclePlannerTransfer {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  vehicleId String  @db.Uuid
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id])
+
+  // Vehicle.plannerId at filing time. Approval re-checks it still matches (U6).
+  fromPlannerId String @db.Uuid
+  fromPlanner   User   @relation("PlannerTransferFrom", fields: [fromPlannerId], references: [id])
+  toPlannerId   String @db.Uuid
+  toPlanner     User   @relation("PlannerTransferTo", fields: [toPlannerId], references: [id])
+  requestedById String @db.Uuid
+  requestedBy   User   @relation("PlannerTransferRequestedBy", fields: [requestedById], references: [id])
+
+  status          PlannerTransferStatus @default(pending)
+  reason          String // why — required, non-blank (U3)
+  decisionComment String? // rejection reason (required) / approval comment (optional)
+  decidedById     String?               @db.Uuid
+  decidedBy       User?                 @relation("PlannerTransferDecidedBy", fields: [decidedById], references: [id])
+  decidedAt       DateTime?
+
+  // The history row this request opened — set only for `approved`.
+  assignment VehiclePlannerAssignment?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([vehicleId, createdAt]) // per-vehicle journal (planner-history)
+  @@index([status, createdAt]) // admin inbox: GET /planner-transfers?status=
+  @@index([fromPlannerId, status]) // lider inbox: requests of his planisci
+  @@index([requestedById, status]) // "my requests"
+  @@map("vehicle_planner_transfers")
+}
+
+// ─── VEHICLE PLANNER ASSIGNMENT (docs/29 — planista history) ──
+// Who was the vehicle's planista, from when to when. Exactly one OPEN row
+// (`validTo IS NULL`) per vehicle that has a planista, and its `plannerId`
+// equals `Vehicle.plannerId` (invariant held by the api in one transaction:
+// create → open a `create` row; approved transfer → close the open row with
+// `validTo = now` and open a `transfer` row linked to the request).
+//
+// APPEND-ONLY: rows are never deleted or re-pointed; the only UPDATE is closing
+// the open row (`validTo`). NO `deletedAt`, NOT in SOFT_DELETE_MODELS — same
+// as GuaranteeIdleEpisode.
+//
+// `validFrom` / `validTo` are timestamps (a transfer takes effect at the moment
+// of approval — U5). Wniosek recipients for a claim without a delegation are the
+// planisci whose [validFrom, validTo ?? ∞) overlaps the claim period (U8).
+//
+// FK on `vehicleId` is ON DELETE CASCADE, deliberately (docs/12 "referential
+// actions"): the history is an inherent part of the vehicle row, like
+// vehicle_daily_km — and the api's create-rollback path (a failed attachment
+// upload) physically deletes a just-created vehicle together with its `create`
+// row. A vehicle that has transfer requests can never be deleted anyway
+// (vehicle_planner_transfers → vehicles is RESTRICT).
+//
+// Hand-added in the migration SQL (Prisma DSL cannot express them):
+//   PARTIAL UNIQUE "VehiclePlannerAssignment_open_vehicle_key"
+//     ON ("vehicleId") WHERE "validTo" IS NULL           — ≤1 open row per vehicle
+//   CHECK vehicle_planner_assignment_valid_range        — validTo IS NULL OR validTo >= validFrom
+//   CHECK vehicle_planner_assignment_transfer_link      — (source = 'transfer') ⇔ (transferId IS NOT NULL)
+model VehiclePlannerAssignment {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  vehicleId String  @db.Uuid
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  plannerId String  @db.Uuid
+  planner   User    @relation("PlannerAssignmentPlanner", fields: [plannerId], references: [id])
+
+  validFrom DateTime
+  validTo   DateTime? // NULL = current assignment
+
+  source     PlannerAssignmentSource
+  // The approved request that opened this row (source=transfer only). 1:1 —
+  // one approval opens exactly one row. RESTRICT: requests are never deleted,
+  // and SET NULL would break CHECK vehicle_planner_assignment_transfer_link.
+  transferId String?                 @unique @db.Uuid
+  transfer   VehiclePlannerTransfer? @relation(fields: [transferId], references: [id], onDelete: Restrict)
+  // Who caused it: the vehicle's creator (create), the approver (transfer);
+  // NULL for backfill rows.
+  actorId    String?                 @db.Uuid
+  actor      User?                   @relation("PlannerAssignmentActor", fields: [actorId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([vehicleId, validFrom]) // per-vehicle journal + period-overlap lookup (U8)
+  @@index([plannerId])
+  @@map("vehicle_planner_assignments")
 }
 
 // ─── LIMITS (LIMITY KM) ─────────────────────────────────

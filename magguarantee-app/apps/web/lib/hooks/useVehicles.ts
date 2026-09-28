@@ -27,11 +27,17 @@ import {
   updateVehicle,
   type VehicleAttachmentUploads,
 } from '@/lib/api/vehicles';
+import { PLANNER_TRANSFERS_KEY } from '@/lib/hooks/plannerTransferKeys';
 import { CARRIERS_KEY } from '@/lib/hooks/useCarriers';
 import { MY_FLEET_KEY } from '@/lib/hooks/useMyFleet';
 import { OPIEKUN_KEY } from '@/lib/hooks/useOpiekunFleet';
 import type { MutationMetaOptions } from '@/lib/query/globalErrors';
 
+// The vehicle's planista journal + pending request live under this key too
+// (`['vehicles', 'planner-history', id]`, see usePlannerTransfers), so the
+// `VEHICLES_KEY` invalidations below refresh them. Switching a vehicle off /
+// deleting it also CANCELS its pending transfer request server-side (docs/29
+// U6) — those mutations additionally refresh the transfer lists + nav counter.
 export const VEHICLES_KEY = ['vehicles'] as const;
 
 /**
@@ -50,10 +56,14 @@ export interface UpdateVehicleVars {
   files?: VehicleAttachmentUploads;
 }
 
-export function useVehicles(filters: VehicleFilters = { limit: 50 }) {
+export function useVehicles(
+  filters: VehicleFilters = { limit: 50 },
+  opts: { enabled?: boolean } = {},
+) {
   return useQuery({
     queryKey: [...VEHICLES_KEY, 'list', filters],
     queryFn: () => listVehicles(filters),
+    enabled: opts.enabled ?? true,
   });
 }
 
@@ -105,6 +115,8 @@ export function useUpdateVehicle(
       // Editing a vehicle can change its active state — refresh the opiekun
       // readiness view so the incompleteFleet attention exclamation stays fresh.
       qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
+      // `active=false` in the PATCH cancels the pending transfer request.
+      qc.invalidateQueries({ queryKey: PLANNER_TRANSFERS_KEY });
       opts?.onSuccess?.(...args);
     },
   });
@@ -135,6 +147,8 @@ export function useDeactivateVehicle() {
       qc.invalidateQueries({ queryKey: CARRIERS_KEY });
       // Active-vehicle count + ADR flag feed the opiekun readiness view.
       qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
+      // Deactivation cancels the pending transfer request (docs/29 U6).
+      qc.invalidateQueries({ queryKey: PLANNER_TRANSFERS_KEY });
     },
   });
 }
@@ -164,6 +178,8 @@ export function useDeleteVehicle(opts?: MutationMetaOptions) {
       qc.invalidateQueries({ queryKey: CARRIERS_KEY });
       // Active-vehicle count + ADR flag feed the opiekun readiness view.
       qc.invalidateQueries({ queryKey: OPIEKUN_KEY });
+      // Deletion cancels the pending transfer request, like deactivation.
+      qc.invalidateQueries({ queryKey: PLANNER_TRANSFERS_KEY });
     },
   });
 }

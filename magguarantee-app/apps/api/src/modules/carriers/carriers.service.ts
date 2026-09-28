@@ -352,13 +352,14 @@ export class CarriersService {
     return { ...this.toDto(row), temporaryPassword: plain };
   }
 
-  async softDelete(id: string): Promise<void> {
+  async softDelete(id: string, actor?: AuthUser): Promise<void> {
     const existing = await this.carriers.findById(id);
     if (!existing) throw new NotFoundException('Przewoźnik nie znaleziony');
     // Capture the pre-mutation row so the audit row carries the carrier's
     // identity (login + name) for the admin audit page diff view.
     AuditContext.setBefore(this.toDto(existing));
-    await this.carriers.softDelete(id);
+    // `actor` closes the fleet's pending planista-transfer requests (docs/29 U6).
+    await this.carriers.softDelete(id, actor?.sub ?? null);
   }
 
   /**

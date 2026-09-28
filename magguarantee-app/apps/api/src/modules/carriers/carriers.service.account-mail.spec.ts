@@ -66,7 +66,7 @@ function makeOpiekun(): UserRow {
     role: 'opiekun',
     name: 'Op One',
     active: true,
-    liderEmail: null,
+    liderId: null,
     teamId: null,
     mustChangePassword: false,
     passwordChangedAt: null,

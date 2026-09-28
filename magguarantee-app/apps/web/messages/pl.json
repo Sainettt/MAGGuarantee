@@ -100,8 +100,6 @@
       "liderPendingSyncHint": "Flagę lidera będzie można ustawić po następnym logowaniu lub synchronizacji — wtedy rola przyznana ręcznie zastąpi obecną rolę konta.",
       "password": "Hasło tymczasowe",
       "passwordHint": "≥10 znaków, ≥1 litera, ≥1 cyfra. Zostaw puste, aby wygenerować automatycznie.",
-      "liderEmail": "E-mail lidera (CC)",
-      "liderEmailHint": "Tylko dla roli planista — adres przełożonego.",
       "active": "Aktywny",
       "createdAt": "Utworzono",
       "managedBy": "Zarządzanie",
@@ -113,7 +111,14 @@
       "roleOverrideHint": "Dla stanowisk bez mapowania (np. Controlling, Handel). Ustawiona rola nie zostanie zmieniona przez synchronizację, ale konto nadal wyłączy się w dniu zwolnienia.",
       "roleOverrideNone": "Brak — rola ze stanowiska",
       "roleOverrideShort": "ręcznie",
-      "roleOverrideHintShort": "Rola przyznana ręcznie przez administratora"
+      "roleOverrideHintShort": "Rola przyznana ręcznie przez administratora",
+      "liderId": "Przełożony (lider)",
+      "liderIdHint": "Zatwierdza przekazania ciągników tego planisty i dostaje kopię (CC) decyzji w wnioskach jego ciągników.",
+      "liderIdNone": "— brak (decyduje administrator) —",
+      "liderIdNoOptions": "Brak aktywnych liderów planistów — najpierw nadaj flagę „Lider” jednemu z planistów.",
+      "liderIdStaleNotLider": "{name} (nie jest już liderem)",
+      "liderIdStaleInactive": "{name} (nieaktywny)",
+      "liderIdStaleHint": "Wybrany przełożony nie jest aktywnym liderem — wnioski tego planisty rozpatruje administrator. Wybierz innego lidera."
     },
     "actions": {
       "resetPassword": "Zresetuj hasło…",
@@ -147,7 +152,8 @@
     "reactivatedToast": "Użytkownik aktywowany",
     "errors": {
       "liderRequiresLiderRole": "Flagę lidera można nadać tylko rolom: {roles}.",
-      "liderManagedByMagspace": "Flaga lidera tego konta pochodzi z mapowania stanowiska w MAGSpace. Ustaw „Rolę przyznaną ręcznie” albo przełącz konto na zarządzanie lokalne."
+      "liderManagedByMagspace": "Flaga lidera tego konta pochodzi z mapowania stanowiska w MAGSpace. Ustaw „Rolę przyznaną ręcznie” albo przełącz konto na zarządzanie lokalne.",
+      "liderIdInvalid": "Przełożonym może być tylko aktywny planista z flagą „Lider”, inny niż ten użytkownik."
     }
   },
   "forms": {
@@ -321,7 +327,9 @@
     "sectionLabel": "Sekcje panelu",
     "opiekaAttentionBadge": "{count, plural, one {# przewoźnik wymaga uwagi} few {# przewoźników wymaga uwagi} many {# przewoźników wymaga uwagi} other {# przewoźników wymaga uwagi}}",
     "alerts": "Alerty",
-    "alertsBadge": "{count, plural, one {# dokument wymaga uwagi} few {# dokumenty wymagają uwagi} many {# dokumentów wymaga uwagi} other {# dokumentów wymaga uwagi}}"
+    "alertsBadge": "{count, plural, one {# dokument wymaga uwagi} few {# dokumenty wymagają uwagi} many {# dokumentów wymaga uwagi} other {# dokumentów wymaga uwagi}}",
+    "transfers": "Przekazania",
+    "transfersBadge": "{count, plural, one {# wniosek czeka na decyzję} few {# wnioski czekają na decyzję} many {# wniosków czeka na decyzję} other {# wniosku czeka na decyzję}}"
   },
   "forbidden": {
     "title": "Brak dostępu",
@@ -784,7 +792,8 @@
     "planista": "Planista",
     "eksport": "Eksport",
     "codeAria": "Kod zespołu: {code}",
-    "membersAria": "Dyspozytorzy zespołu {code}"
+    "membersAria": "Dyspozytorzy zespołu {code}",
+    "planistaNow": "Ciągnik prowadzi obecnie: {name}"
   },
   "teams": {
     "title": "Zespoły prowadzące",
@@ -1609,7 +1618,7 @@
   "planista": {
     "title": "Panel planisty",
     "subtitle": "Przegląd planowanej floty — ciągniki, kierowcy i naczepy",
-    "readOnlyBanner": "Dane są tylko do podglądu — edytuje administrator.",
+    "readOnlyBanner": "Dane floty edytuje opiekun przewoźnika. Ciągnik możesz przekazać innemu planiście wnioskiem w zakładce „Moje wnioski”.",
     "tabs": {
       "ariaLabel": "Sekcje floty planisty",
       "vehicles": "Ciągniki",
@@ -1670,6 +1679,13 @@
         "period": "Okres",
         "status": "Status"
       }
+    },
+    "nav": {
+      "ariaLabel": "Sekcje panelu planisty",
+      "fleet": "Flota",
+      "myTransfers": "Moje wnioski",
+      "approvals": "Do zatwierdzenia",
+      "approvalsBadge": "{count, plural, one {# wniosek czeka na decyzję} few {# wnioski czekają na decyzję} many {# wniosków czeka na decyzję} other {# wniosku czeka na decyzję}}"
     }
   },
   "dyspozytor": {
@@ -2630,6 +2646,179 @@
     "session": {
       "title": "Nie udało się zweryfikować sesji",
       "message": "Serwis logowania jest chwilowo niedostępny — Twoja sesja nie została zakończona. Spróbuj ponownie za chwilę."
+    }
+  },
+  "transfers": {
+    "title": "Przekazania ciągników",
+    "subtitle": {
+      "admin": "Wnioski o zmianę planisty ciągnika. Planista zmienia się dopiero po zatwierdzeniu.",
+      "lider": "Wnioski o przekazanie ciągników Twoich planistów.",
+      "author": "Twoje wnioski o zmianę planisty i decyzje w ich sprawie."
+    },
+    "tabs": {
+      "ariaLabel": "Wnioski o przekazanie",
+      "pendingDecider": "Do decyzji",
+      "pendingAuthor": "Oczekujące",
+      "decided": "Rozpatrzone"
+    },
+    "status": {
+      "pending": "Oczekuje",
+      "approved": "Zatwierdzony",
+      "rejected": "Odrzucony",
+      "cancelled": "Anulowany"
+    },
+    "filter": {
+      "status": "Status",
+      "all": "Wszystkie",
+      "approved": "Zatwierdzone",
+      "rejected": "Odrzucone",
+      "cancelled": "Anulowane"
+    },
+    "card": {
+      "side": "bok {side}",
+      "fromToSr": "przekazanie do",
+      "requestedBy": "Wnioskuje: {name} · {role}",
+      "reasonLabel": "Powód",
+      "approvedBy": "Zatwierdził: {name} · {role} · {date}",
+      "rejectedBy": "Odrzucił: {name} · {role} · {date}",
+      "cancelledAt": "Anulowany przez wnioskującego · {date}",
+      "cancelledBy": "Anulował: {name} · {role} · {date}",
+      "commentLabel": "Komentarz",
+      "rejectionLabel": "Powód odrzucenia",
+      "liderOf": "Lider planisty: {name}",
+      "noLider": "Planista bez lidera — decyduje administrator",
+      "history": "Historia planistów",
+      "approve": "Zatwierdź",
+      "reject": "Odrzuć",
+      "cancel": "Anuluj wniosek",
+      "blockedTarget": "Jesteś planistą docelowym tego wniosku — decyzję podejmuje administrator.",
+      "blockedRequester": "To Twój wniosek — decyzję podejmuje administrator."
+    },
+    "form": {
+      "createHint": "Późniejsza zmiana planisty wymaga wniosku i zatwierdzenia.",
+      "locked": "Zablokowane — planistę zmienia się tylko wnioskiem o przekazanie.",
+      "lockedTitle": "Planisty nie można zmienić bezpośrednio. Złóż wniosek o przekazanie — zmiana nastąpi po zatwierdzeniu.",
+      "lockedAdmin": "Zablokowane — zmianę wnioskuje opiekun lub planista, Ty ją zatwierdzasz.",
+      "lockedInactive": "Zablokowane — ciągnik jest wyłączony, nie można go przekazać.",
+      "pendingTitle": "Wniosek o przekazanie do: {to}",
+      "pendingMeta": "Wnioskuje: {name} · {role} · {date}",
+      "reviewLink": "Rozpatrz w „Przekazania”"
+    },
+    "request": {
+      "buttonOpiekun": "Poproś o zmianę planisty",
+      "buttonPlanista": "Przekaż ciągnik",
+      "title": "Wniosek o zmianę planisty",
+      "vehicle": "Ciągnik",
+      "vehiclePlaceholder": "Wybierz ciągnik",
+      "vehicleOption": "{plate} · bok {side} — {carrier}",
+      "noVehicles": "Nie masz ciągników, które można przekazać.",
+      "currentPlanner": "Obecny planista",
+      "target": "Nowy planista",
+      "targetPlaceholder": "Wybierz planistę",
+      "noTargets": "Brak innych aktywnych planistów.",
+      "reason": "Powód",
+      "reasonPlaceholder": "Dlaczego ciągnik ma przejść do innego planisty?",
+      "reasonCounter": "{count}/{max}",
+      "vehicleRequired": "Wybierz ciągnik.",
+      "targetRequired": "Wybierz nowego planistę.",
+      "reasonRequired": "Podaj powód (min. 3 znaki).",
+      "reasonTooLong": "Powód może mieć maks. {max} znaków.",
+      "info": "Planista zmieni się dopiero po zatwierdzeniu przez lidera obecnego planisty lub administratora. Nie wysyłamy powiadomień — wniosek czeka na ich liście „Do decyzji”.",
+      "independentOfForm": "Wniosek wysyłasz od razu — niezależnie od zapisu formularza ciągnika.",
+      "submit": "Wyślij wniosek",
+      "submitting": "Wysyłanie…",
+      "success": "Wniosek wysłany do zatwierdzenia",
+      "errors": {
+        "alreadyPending": "Dla tego ciągnika jest już oczekujący wniosek — widok został odświeżony.",
+        "sameOrInvalidTarget": "Wybrany planista jest nieaktywny albo już prowadzi ten ciągnik. Wybierz innego.",
+        "vehicleInactive": "Ciągnik jest wyłączony — nie można go przekazać.",
+        "notAllowed": "Nie możesz złożyć wniosku dla tego ciągnika.",
+        "generic": "Nie udało się wysłać wniosku. Spróbuj ponownie."
+      }
+    },
+    "cancel": {
+      "title": "Anulować wniosek?",
+      "body": "Wniosek o przekazanie {plate} do planisty {to} zostanie anulowany. Możesz później złożyć nowy.",
+      "confirm": "Anuluj wniosek",
+      "back": "Wróć",
+      "success": "Wniosek anulowany",
+      "errors": {
+        "notPending": "Wniosek został już rozpatrzony — widok został odświeżony.",
+        "generic": "Nie udało się anulować wniosku."
+      }
+    },
+    "approve": {
+      "title": "Zatwierdzić przekazanie?",
+      "description": "{plate}: {from} → {to}",
+      "effectVehicle": "Ciągnik od razu przejdzie do planisty {to}.",
+      "effectTrips": "Wyjazdy „Zgłoszony” i „Gotowy” przejdą do {to}. Wyjazd „W trasie” poprowadzi {from} do zjazdu.",
+      "effectHistory": "{from} zachowa wgląd w wyjazdy, które prowadził.",
+      "comment": "Komentarz (opcjonalnie)",
+      "confirm": "Zatwierdź przekazanie",
+      "success": "Ciągnik {plate} przekazany do {to}"
+    },
+    "reject": {
+      "title": "Odrzucić wniosek?",
+      "description": "{plate}: {from} → {to}",
+      "reason": "Powód odrzucenia",
+      "reasonHint": "Wnioskujący zobaczy powód na swojej liście wniosków.",
+      "confirm": "Odrzuć wniosek",
+      "success": "Wniosek odrzucony"
+    },
+    "decisionErrors": {
+      "stale": "Wniosek jest nieaktualny — planista ciągnika się zmienił albo wniosek został już rozpatrzony. Lista została odświeżona.",
+      "targetInactive": "Planista docelowy jest nieaktywny — wniosku nie można zatwierdzić.",
+      "vehicleInactive": "Ciągnik jest wyłączony — wniosku nie można zatwierdzić.",
+      "forbidden": "Nie możesz rozpatrzyć tego wniosku.",
+      "generic": "Nie udało się zapisać decyzji. Spróbuj ponownie."
+    },
+    "history": {
+      "title": "Historia planistów",
+      "dialogTitle": "Historia planistów — {plate}",
+      "listAria": "Historia planistów ciągnika {plate}",
+      "current": "Obecnie",
+      "since": "od {from}",
+      "range": "{from} – {to}",
+      "source": {
+        "create": "Utworzenie",
+        "transfer": "Przekazanie",
+        "backfill": "Dane historyczne"
+      },
+      "createdBy": "Dodał: {name}",
+      "requestedBy": "Wnioskował: {name} · {role}",
+      "approvedBy": "Zatwierdził: {name} · {role}",
+      "backfillNote": "Przypisanie sprzed wprowadzenia historii — początek to data dodania ciągnika.",
+      "pendingNode": "Oczekuje na decyzję: przekazanie do {to}",
+      "pendingMeta": "Wniosek z {date} · wnioskuje {name} ({role})",
+      "closedRequests": "{count, plural, one {Odrzucony lub anulowany wniosek (#)} few {Odrzucone lub anulowane wnioski (#)} many {Odrzucone lub anulowane wnioski (#)} other {Odrzucone lub anulowane wnioski (#)}}",
+      "error": "Nie udało się wczytać historii planistów.",
+      "retry": "Spróbuj ponownie",
+      "forbidden": "Nie masz już wglądu w historię planistów tego ciągnika."
+    },
+    "empty": {
+      "pendingDecider": {
+        "title": "Brak wniosków do decyzji",
+        "message": "Nowe wnioski o przekazanie ciągników pojawią się tutaj."
+      },
+      "pendingAuthor": {
+        "title": "Brak oczekujących wniosków",
+        "messagePlanista": "Aby przekazać ciągnik innemu planiście, złóż wniosek.",
+        "messageOpiekun": "Wniosek o zmianę planisty złożysz w formularzu edycji ciągnika.",
+        "action": "Przekaż ciągnik"
+      },
+      "decided": {
+        "title": "Brak rozpatrzonych wniosków",
+        "message": "Tu pojawią się zatwierdzone, odrzucone i anulowane wnioski."
+      },
+      "decidedFiltered": {
+        "title": "Brak wyników",
+        "message": "Brak wniosków o wybranym statusie.",
+        "action": "Wyczyść filtry"
+      },
+      "notLider": {
+        "title": "Sekcja dla liderów planistów",
+        "message": "Wnioski o przekazanie ciągników rozpatruje lider planisty lub administrator."
+      }
     }
   }
 }

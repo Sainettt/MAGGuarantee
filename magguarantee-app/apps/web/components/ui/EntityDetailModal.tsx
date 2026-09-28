@@ -79,6 +79,12 @@ export interface EntityDetailModalProps {
    *  `tailwind-merge` lets a later `max-w-*` win over the default `max-w-5xl`.
    *  This is geometry only — NOT a token change. */
   className?: string;
+  /** Optional extra footer action(s) — rendered right of «Zamknij», left of
+   *  «Edytuj» (docs/14 §17.6.3: «Przekaż ciągnik» for the vehicle's current
+   *  planista). Additive: consumers that omit it render exactly as before.
+   *  The node owns its own `<Button>`(s); keep them `size="sm"` + the
+   *  mobile `min-h-[44px] sm:min-h-0` touch floor. */
+  extraActions?: ReactNode;
 }
 
 export function EntityDetailModal({
@@ -91,6 +97,7 @@ export function EntityDetailModal({
   meta,
   onEdit,
   className,
+  extraActions,
 }: EntityDetailModalProps) {
   const t = useTranslations('entityDetail');
 
@@ -220,6 +227,7 @@ export function EntityDetailModal({
               >
                 {t('close')}
               </Button>
+              {extraActions}
               {onEdit != null ? (
                 <Button
                   type="button"

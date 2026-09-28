@@ -1019,3 +1019,15 @@ describe('calcKmGwarantPerMonth', () => {
 - **Письма (3)**: `reklamacja-internal-submitted` (все active admin+pracownik), `reklamacja-carrier-submitted` (подтверждение перевозчику), `reklamacja-carrier-decision`; threadKey `wniosek-{nrZgl}`. Weekly-report: новая строка «Uznane reklamacje» (по `reklamacjaDecidedAt`) + исключение возвратов статуса из decided-in-week.
 - **Web**: `ReklamacjaSheet` на shared-хелпере (3 dead-end-состояния), `<ReklamacjaOutcome>` на carrier-детали, `<ReklamacjaResolutionChip>` (carrier+employee), decision-UX staff-модалки — nr zlecenia (prefill из `orderNumber`) вместо ввода суммы.
 - **Follow-up**: старые письма `internal-decision`/`maksim-confirmation-request` линкуют на несуществующий роут `/employee/claims/{nrZgl}` (рабочая форма — `?nrZgl=`); вне scope этой доработки.
+
+---
+
+## Доработка (2026-09-28) — Передача машины другому планисте
+
+Продолжение Фазы 6 (планиста) и docs/28 (лидеры). План и решения — [docs/29](29-vehicle-planner-transfer-plan.md); UI — `docs/14` §17; API — `docs/13` «Vehicle planner transfers»; поведение — `docs/03` (planista, opiekun, admin, лидеры), `docs/19` #14, #15.
+
+- **Прямой смены планисты нет** ни у кого: `PATCH /vehicles/:id` с `plannerId` → 422 `VEHICLE_PLANNER_CHANGE_REQUIRES_TRANSFER`. Планиста выбирается только при создании машины.
+- **Заявка → решение**: подают opiekun своего перевозчика или текущий планиста; решают admin или лидер текущего планисты (`User.liderId`), но не автор и не получатель. Одобрение в одной транзакции переключает `Vehicle.plannerId`, пишет журнал назначений и переносит невыехавшие выезды (`zgloszony`/`gotowy`). Уведомлений нет.
+- **История**: `Delegation.plannerId` — снимок планисты выезда (scope выездов, «ZESPÓŁ PROWADZĄCY», Chat), `VehiclePlannerAssignment` — журнал по машине; получатели писем по wnioskam — планиста периода + его текущий лидер. Флот, km-рапорт, GPS остаются живыми.
+- **`liderEmail` → `liderId`**: связь «планиста → его лидер», ставит admin в UserSheet; колонка `liderEmail` удаляется отдельным релизом.
+- **Миграция** `20260928120000_vehicle_planner_transfer`: две таблицы, два поля, бэкфиллы (`liderId` из `liderEmail`, снимки выездов, журнал с источником `backfill`). Перед выкатом на pre-prod — ручной бэкап; после — проставить `liderId` планистам (через `preprod-parity-agent`).

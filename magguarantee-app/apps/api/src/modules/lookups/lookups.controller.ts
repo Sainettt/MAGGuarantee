@@ -3,6 +3,8 @@ import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import {
   LookupCarrierFiltersSchema,
   LookupUserAdminFiltersSchema,
+  PlannerTransferTargetsQuerySchema,
+  type PlannerTransferTargetsQuery,
   type LookupCarrierFilters,
   type LookupCarrierListDto,
   type LookupTeamListDto,
@@ -50,6 +52,32 @@ export class LookupsController {
   @Roles('admin', 'opiekun')
   planisci(): Promise<LookupUserListDto> {
     return this.lookups.planisci();
+  }
+
+  /**
+   * «Nowy planista» picker of a transfer request (docs/29 U2, docs/14 §17.12
+   * A7): every ACTIVE planista, minus the current planista of `?vehicleId=`.
+   * Open to everyone who may FILE or DECIDE a request — admin, opiekun,
+   * planista (a planista files for his own vehicles). Staff names only.
+   */
+  @Get('planisci/transfer-targets')
+  @Roles('admin', 'opiekun', 'planista')
+  plannerTransferTargets(
+    @Query(new ZodValidationPipe(PlannerTransferTargetsQuerySchema))
+    query: PlannerTransferTargetsQuery,
+  ): Promise<LookupUserListDto> {
+    return this.lookups.plannerTransferTargets(query.vehicleId);
+  }
+
+  /**
+   * «Przełożony (lider)» picker of the admin user form (docs/29 U9, docs/14
+   * §17.7): active planisci carrying `lider = true`. Admin-only — only an
+   * admin sets `liderId`.
+   */
+  @Get('planisci/liders')
+  @Roles('admin')
+  planistaLiders(): Promise<LookupUserListDto> {
+    return this.lookups.planistaLiders();
   }
 
   @Get('opiekuni')

@@ -81,6 +81,8 @@ function makeRow(overrides: Partial<DelegationRow> = {}): DelegationRow {
       dispatchTeam: null,
       planner: null,
     },
+    plannerId: null,
+    planner: null,
     trailerId: 'trl-1',
     trailer: null,
     driverId: 'drv-1',

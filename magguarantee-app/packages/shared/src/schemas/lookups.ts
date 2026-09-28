@@ -23,6 +23,24 @@ export type LookupUserDto = z.infer<typeof LookupUserSchema>;
 export const LookupUserListSchema = z.array(LookupUserSchema);
 export type LookupUserListDto = z.infer<typeof LookupUserListSchema>;
 
+// ─── Planista pickers for docs/29 ────────────────────────
+
+/**
+ * Query for `GET /lookups/planisci/transfer-targets` — the «Nowy planista»
+ * picker of a transfer request (docs/29 U2): every ACTIVE planista, minus the
+ * CURRENT planista of `vehicleId` when given (unknown vehicle → nobody
+ * excluded; the request endpoint re-checks the target anyway). Same
+ * `LookupUserDto` rows as `/lookups/planisci`.
+ */
+export const PlannerTransferTargetsQuerySchema = z
+  .object({
+    vehicleId: UuidSchema.optional(),
+  })
+  .strict();
+export type PlannerTransferTargetsQuery = z.infer<
+  typeof PlannerTransferTargetsQuerySchema
+>;
+
 // CertificateL was collapsed from enum L1/L2/L3 to a Boolean TAK/NIE flag in
 // 20260515130307_vehicle_certificate_l_to_boolean. No lookup needed — UI
 // renders a single TAK/NIE switch.

@@ -6,12 +6,23 @@
 // source-of-truth where it makes sense (users), or left untouched where the
 // admin is expected to edit through the UI (monthly limits).
 //
-// Out of scope: real claims, carriers, vehicles, etc. Those are created via
-// the API in dev/prod.
+// Out of scope: real claims and the bulk of carriers / vehicles — those are
+// created via the API. The seed only builds a small demo fleet: one carrier,
+// three vehicles, and the docs/29 planner-transfer scenario (transfer requests
+// in every status, a vehicle with two planista-history rows and delegations on
+// both sides of the transfer). Rows without a unique business key (history,
+// transfer requests, delegations) use FIXED ids, so a re-run upserts the same
+// rows instead of appending new ones.
 
 import bcrypt from 'bcryptjs';
 
-import { PrismaClient, Role } from '../src/generated';
+import {
+  DelegationStatus,
+  PlannerAssignmentSource,
+  PlannerTransferStatus,
+  PrismaClient,
+  Role,
+} from '../src/generated';
 import {
   MONTHLY_LIMIT_KM_PER_DAY,
   MONTHLY_LIMIT_KM_PER_SATURDAY,
@@ -40,13 +51,22 @@ type SeedUser = {
   // eksport); anything else fails CHECK `user_lider_requires_lider_role`.
   // Omitted = false.
   lider?: boolean;
+  // planista only (docs/29 U9) — login of this planista's leader, written to
+  // `User.liderId`. Must be a planista with `lider: true`, not the user himself.
+  // Omitted = no leader (then only an admin decides his transfer requests, R4).
+  liderLogin?: string;
 };
 
 const SEED_USERS: SeedUser[] = [
   { login: 'admin', email: 'admin@magtrans.eu', name: 'Admin', role: Role.admin },
   { login: 'pracownik1', email: 'pracownik1@magtrans.eu', name: 'Pracownik 1', role: Role.pracownik },
   { login: 'opiekun1', email: 'opiekun1@magtrans.eu', name: 'Opiekun 1', role: Role.opiekun },
-  { login: 'planista1', email: 'planista1@magtrans.eu', name: 'Planista 1', role: Role.planista },
+  // Planisci (docs/29): planista1 and planista2 report to planistalider1, whose
+  // transfer decisions cover their vehicles; planista3 has NO leader, so only an
+  // admin decides his requests (R4).
+  { login: 'planista1', email: 'planista1@magtrans.eu', name: 'Planista 1', role: Role.planista, liderLogin: 'planistalider1' },
+  { login: 'planista2', email: 'planista2@magtrans.eu', name: 'Planista 2', role: Role.planista, liderLogin: 'planistalider1' },
+  { login: 'planista3', email: 'planista3@magtrans.eu', name: 'Planista 3 (bez lidera)', role: Role.planista },
   // Two shift dispatchers — both members of dispatch team 1.1.13 (Phase 11). A
   // team normally has 2 dispatchers (by shift); the dispatchers' lead
   // `dyspozytorlider1` below sits in the same team (docs/28 §3.1).
@@ -57,7 +77,8 @@ const SEED_USERS: SeedUser[] = [
   { login: 'weryfikator1', email: 'weryfikator1@magtrans.eu', name: 'Weryfikator 1', role: Role.weryfikator },
   // Leaders (docs/28) — one per role in `LIDER_ROLES`. Same base role, same
   // scope and panel as the plain accounts above; `lider: true` only adds
-  // permissions on top (none yet — they arrive with the permissions layer).
+  // permissions on top — so far one: planistalider1 decides the vehicle-transfer
+  // requests of the planisci whose `liderId` points at him (docs/29 R3).
   { login: 'planistalider1', email: 'planistalider1@magtrans.eu', name: 'Planista lider 1', role: Role.planista, lider: true },
   { login: 'dyspozytorlider1', email: 'dyspozytorlider1@magtrans.eu', name: 'Dyspozytor lider 1', role: Role.dyspozytor, lider: true },
   { login: 'opiekunlider1', email: 'opiekunlider1@magtrans.eu', name: 'Opiekun lider 1', role: Role.opiekun, lider: true },
@@ -105,15 +126,81 @@ const SEED_TEAMS: SeedTeam[] = [
 // ─── Demo carrier + vehicle (Phase 11 end-to-end) ───────
 // A minimal Carrier (extends przewoznik1) plus one Vehicle assigned to the
 // demo team, so the full dispatch flow (vehicle form, modals, dispatcher
-// panel) is visible immediately after seeding. Only DB-NOT-NULL fields are
-// populated; everything else is left at its default / NULL. `gpsMobilePhone`
-// (GPS tracker device id) is NOT NULL since 2026-06-17, so a value is supplied.
+// panel) is visible immediately after seeding.
+
+// Fields the vehicle EDIT form requires to save (shared `VehicleEditFormSchema`
+// + the api's post-update rules), applied to every demo vehicle on create AND
+// update so an already-seeded dev DB is repaired by the next seed run:
+//   - all four EUR/km rates (the form has no "leave empty" for them);
+//   - at least 2 of the gb / it / fr access flags;
+//   - no `gpsMobilePhone`: a GPS device id makes a live `gps` attachment (umowa
+//     GPS scan) mandatory, and the seed does not upload files to MinIO. The
+//     column is nullable again since 2026-07, so NULL is a valid demo state.
+const DEMO_VEHICLE_EDITABLE = {
+  rateDe: 0.55,
+  rateUe: 0.5,
+  rateExport: 0.6,
+  rateImport: 0.45,
+  gb: true,
+  it: true,
+  fr: false,
+  gpsMobilePhone: null,
+} as const;
 
 const DEMO_CARRIER_USER_LOGIN = 'przewoznik1';
 const DEMO_CARRIER_OPIEKUN_LOGIN = 'opiekun1';
 const DEMO_VEHICLE_PLATE = 'WX 11113';
+const DEMO_VEHICLE_PLANNER_LOGIN = 'planista1';
 const DEMO_TRAILER_PLATE = 'WX 99999';
 const DEMO_DRIVER_SLUG = 'andrii.kowal';
+
+// ─── Planner transfer demo (docs/29) ────────────────────
+// Two more vehicles of the demo carrier:
+//   - TRANSFERRED — planista1 → planista2 via an APPROVED request (decided by
+//     planistalider1, the lider of planista1). Two history rows (closed
+//     `create` + open `transfer`) and four delegations: two led by planista1
+//     (one of them was `w_trasie` at approval, so it stayed with him — R6), two
+//     by planista2 (one still `zgloszony`). Plus a PENDING request
+//     planista2 → planista3 filed by opiekun1 — decidable by admin or
+//     planistalider1.
+//   - LEADERLESS — led by planista3 (no lider): a REJECTED, a CANCELLED and a
+//     PENDING request; the pending one only an admin can decide (R4).
+// Timestamps are offsets from each vehicle's `createdAt`, which the seed sets
+// in the past on first insert and never moves — a re-run rewrites the same
+// values (deterministic, no drift).
+const TRANSFERRED_VEHICLE_PLATE = 'WX 22224';
+const LEADERLESS_VEHICLE_PLATE = 'WX 33335';
+const TRANSFERRED_VEHICLE_AGE_DAYS = 60;
+const LEADERLESS_VEHICLE_AGE_DAYS = 30;
+
+// Fixed ids (valid v4-shaped uuids) of the seeded rows that have no unique
+// business key. `5eed0029` = "seed, docs/29".
+const seedId = (n: number): string => `5eed0029-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
+const SEED_IDS = {
+  // vehicle_planner_assignments
+  assignDemoCreate: seedId(0x101),
+  assignTransferredCreate: seedId(0x102),
+  assignTransferredTransfer: seedId(0x103),
+  assignLeaderlessCreate: seedId(0x104),
+  // vehicle_planner_transfers
+  transferApproved: seedId(0x201),
+  transferPendingLider: seedId(0x202),
+  transferRejected: seedId(0x203),
+  transferCancelled: seedId(0x204),
+  transferPendingAdminOnly: seedId(0x205),
+  // delegations (all on the TRANSFERRED vehicle)
+  delegationOldReturned: seedId(0x301),
+  delegationOldInTransitAtApproval: seedId(0x302),
+  delegationNewReturned: seedId(0x303),
+  delegationNewReported: seedId(0x304),
+} as const;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+/** `base` + `days` (fractional allowed). */
+const plusDays = (base: Date, days: number): Date => new Date(base.getTime() + days * DAY_MS);
+/** Date-only value (UTC midnight) for `@db.Date` columns. */
+const dateOnly = (d: Date): Date => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 
 // MonthlyLimit placeholders, AppConfig and TrailerType reference data live in
 // ./seed-data (shared with the production bootstrap). The km/day and rate/km
@@ -147,6 +234,20 @@ async function seedUsers(passwordHash: string): Promise<number> {
       },
     });
   }
+
+  // Second pass — `liderId` points at another seeded user, which must exist
+  // first. Written for every seeded planista (NULL when `liderLogin` is omitted)
+  // so a re-run converges; the deprecated `liderEmail` is left alone.
+  for (const u of SEED_USERS) {
+    if (u.role !== Role.planista) continue;
+    const lider = u.liderLogin
+      ? await prisma.user.findUniqueOrThrow({ where: { login: u.liderLogin } })
+      : null;
+    await prisma.user.update({
+      where: { login: u.login },
+      data: { liderId: lider?.id ?? null },
+    });
+  }
   return SEED_USERS.length;
 }
 
@@ -172,13 +273,28 @@ async function seedTeams(): Promise<number> {
   return SEED_TEAMS.length;
 }
 
-async function seedDemoFleet(): Promise<number> {
+type DemoFleet = {
+  carrierId: string;
+  carrierUserId: string;
+  opiekunId: string;
+  dispatchTeamId: string;
+  trailerId: string;
+  driverId: string;
+  driverName: string;
+  driverPhone: string;
+};
+
+async function seedDemoFleet(): Promise<DemoFleet> {
   // Resolve the demo carrier's backing user + the opiekun (both seeded above).
   const carrierUser = await prisma.user.findUniqueOrThrow({
     where: { login: DEMO_CARRIER_USER_LOGIN },
   });
   const opiekun = await prisma.user.findUniqueOrThrow({
     where: { login: DEMO_CARRIER_OPIEKUN_LOGIN },
+  });
+  // Every vehicle gets its first planista at creation (docs/29 R7).
+  const demoPlanner = await prisma.user.findUniqueOrThrow({
+    where: { login: DEMO_VEHICLE_PLANNER_LOGIN },
   });
   const demoTeam = await prisma.team.findUniqueOrThrow({
     where: { code: DEMO_TEAM_CODE },
@@ -206,8 +322,8 @@ async function seedDemoFleet(): Promise<number> {
   });
 
   // One vehicle assigned to the demo dispatch team. Idempotent via the
-  // composite unique (carrierId, plateNumber). `gpsMobilePhone` (GPS tracker
-  // device id) is NOT NULL, so a demo value is supplied.
+  // composite unique (carrierId, plateNumber). Carries DEMO_VEHICLE_EDITABLE so
+  // the edit form saves.
   //
   // Guarantee Watchdog (план 2026-07-07): the demo vehicle is guaranteed
   // (agreement=true) so the watchdog board/banner has something to show in dev.
@@ -228,7 +344,7 @@ async function seedDemoFleet(): Promise<number> {
   fuelCardExpiry.setUTCFullYear(fuelCardExpiry.getUTCFullYear() + 2);
   fuelCardExpiry.setUTCHours(0, 0, 0, 0); // date-only → UTC midnight
 
-  await prisma.vehicle.upsert({
+  const demoVehicle = await prisma.vehicle.upsert({
     where: {
       carrier_plate_unique: {
         carrierId: carrier.id,
@@ -241,7 +357,9 @@ async function seedDemoFleet(): Promise<number> {
       certificateL: true,
       euro: 'VI',
       type: 'STD',
-      gpsMobilePhone: 'MOB126',
+      ...DEMO_VEHICLE_EDITABLE,
+      plannerId: demoPlanner.id,
+      createdById: opiekun.id,
       dispatchTeamId: demoTeam.id,
       agreement: true,
       agreementSince,
@@ -258,7 +376,9 @@ async function seedDemoFleet(): Promise<number> {
       wasteCountries: ['DE', 'PL'],
     },
     update: {
+      plannerId: demoPlanner.id,
       dispatchTeamId: demoTeam.id,
+      ...DEMO_VEHICLE_EDITABLE,
       agreement: true,
       agreementSince,
       fuelCard: true,
@@ -271,13 +391,25 @@ async function seedDemoFleet(): Promise<number> {
       wasteCountries: ['DE', 'PL'],
     },
   });
+  // Its planista history: one open `create` row (docs/29 R7). No delegations on
+  // this vehicle — the watchdog demo above depends on that.
+  await upsertAssignment({
+    id: SEED_IDS.assignDemoCreate,
+    vehicleId: demoVehicle.id,
+    plannerId: demoPlanner.id,
+    validFrom: demoVehicle.createdAt,
+    validTo: null,
+    source: PlannerAssignmentSource.create,
+    transferId: null,
+    actorId: opiekun.id,
+  });
 
   // One demo trailer (supplies the new NOT-NULL sideClearanceCm + the new
   // roof/box/beams fields). Idempotent via (carrierId, plateNumber).
   const stdTrailerType = await prisma.trailerType.findUniqueOrThrow({
     where: { name: 'STD' },
   });
-  await prisma.trailer.upsert({
+  const trailer = await prisma.trailer.upsert({
     where: {
       carrierId_plateNumber: {
         carrierId: carrier.id,
@@ -310,7 +442,7 @@ async function seedDemoFleet(): Promise<number> {
 
   // One demo driver (supplies the new required nationality + languages).
   // Idempotent via the unique loginSlug.
-  await prisma.driver.upsert({
+  const driver = await prisma.driver.upsert({
     where: { loginSlug: DEMO_DRIVER_SLUG },
     create: {
       carrierId: carrier.id,
@@ -331,7 +463,333 @@ async function seedDemoFleet(): Promise<number> {
     },
   });
 
-  return 1; // one demo vehicle
+  return {
+    carrierId: carrier.id,
+    carrierUserId: carrierUser.id,
+    opiekunId: opiekun.id,
+    dispatchTeamId: demoTeam.id,
+    trailerId: trailer.id,
+    driverId: driver.id,
+    driverName: `${driver.firstName} ${driver.lastName}`,
+    driverPhone: driver.phone,
+  };
+}
+
+// ─── Planner transfer demo (docs/29) ────────────────────
+
+type SeedAssignment = {
+  id: string;
+  vehicleId: string;
+  plannerId: string;
+  validFrom: Date;
+  validTo: Date | null;
+  source: PlannerAssignmentSource;
+  transferId: string | null;
+  actorId: string | null;
+};
+
+/**
+ * Upserts one planista-history row by its fixed id. For an OPEN row, any other
+ * open row of the same vehicle is closed first — on a dev DB that already went
+ * through migration 20260928120000 the vehicle may carry a `backfill` row, and
+ * the partial unique index "one open row per vehicle" would reject ours.
+ */
+async function upsertAssignment(a: SeedAssignment): Promise<void> {
+  if (a.validTo === null) {
+    await prisma.vehiclePlannerAssignment.updateMany({
+      where: { vehicleId: a.vehicleId, validTo: null, id: { not: a.id } },
+      data: { validTo: new Date() },
+    });
+  }
+  const { id, ...data } = a;
+  await prisma.vehiclePlannerAssignment.upsert({ where: { id }, create: a, update: data });
+}
+
+type SeedTransfer = {
+  id: string;
+  vehicleId: string;
+  fromPlannerId: string;
+  toPlannerId: string;
+  requestedById: string;
+  status: PlannerTransferStatus;
+  reason: string;
+  decisionComment: string | null;
+  decidedById: string | null;
+  decidedAt: Date | null;
+  createdAt: Date;
+};
+
+/**
+ * Upserts one transfer request by its fixed id. A PENDING one is skipped when
+ * the vehicle already has another pending request (e.g. filed through the UI
+ * on a dev DB) — the partial unique index allows only one, and the seed must
+ * not cancel someone's real request.
+ */
+async function upsertTransfer(t: SeedTransfer): Promise<boolean> {
+  if (t.status === PlannerTransferStatus.pending) {
+    const other = await prisma.vehiclePlannerTransfer.findFirst({
+      where: { vehicleId: t.vehicleId, status: PlannerTransferStatus.pending, id: { not: t.id } },
+    });
+    if (other) {
+      console.warn(`[seed] vehicle ${t.vehicleId} already has pending transfer ${other.id} — seed request ${t.id} skipped`);
+      return false;
+    }
+  }
+  const { id, ...data } = t;
+  await prisma.vehiclePlannerTransfer.upsert({ where: { id }, create: t, update: data });
+  return true;
+}
+
+type SeedDelegation = {
+  id: string;
+  status: DelegationStatus;
+  plannerId: string;
+  departureAt: Date;
+  plannedReturnAt: Date;
+  actualReturnAt: Date | null; // zjechal only
+};
+
+async function seedPlannerTransferDemo(fleet: DemoFleet): Promise<{ vehicles: number; transfers: number; delegations: number }> {
+  const byLogin = async (login: string) => prisma.user.findUniqueOrThrow({ where: { login } });
+  const [admin, planista1, planista2, planista3, planistaLider, eksport, weryfikator] = await Promise.all([
+    byLogin('admin'),
+    byLogin('planista1'),
+    byLogin('planista2'),
+    byLogin('planista3'),
+    byLogin('planistalider1'),
+    byLogin('eksport1'),
+    byLogin('weryfikator1'),
+  ]);
+
+  const upsertVehicle = async (plateNumber: string, plannerId: string, ageDays: number) => {
+    const createdAt = plusDays(new Date(), -ageDays);
+    return prisma.vehicle.upsert({
+      where: { carrier_plate_unique: { carrierId: fleet.carrierId, plateNumber } },
+      create: {
+        carrierId: fleet.carrierId,
+        plateNumber,
+        certificateL: true,
+        type: 'MEGA',
+        ...DEMO_VEHICLE_EDITABLE,
+        plannerId,
+        createdById: fleet.opiekunId,
+        dispatchTeamId: fleet.dispatchTeamId,
+        // Set once — every seeded timestamp below is an offset from it.
+        createdAt,
+        addedAt: createdAt,
+      },
+      // `createdAt` deliberately not rewritten: it is the anchor of the scenario.
+      update: { plannerId, dispatchTeamId: fleet.dispatchTeamId, ...DEMO_VEHICLE_EDITABLE },
+    });
+  };
+
+  // ── TRANSFERRED: planista1 → planista2 (approved), then pending → planista3 ──
+  const transferred = await upsertVehicle(
+    TRANSFERRED_VEHICLE_PLATE,
+    planista2.id,
+    TRANSFERRED_VEHICLE_AGE_DAYS,
+  );
+  const t0 = transferred.createdAt;
+  const approvedAt = plusDays(t0, 40);
+
+  // Requests first — the `transfer` history row references the approved one.
+  let transfers = 0;
+  if (
+    await upsertTransfer({
+      id: SEED_IDS.transferApproved,
+      vehicleId: transferred.id,
+      fromPlannerId: planista1.id,
+      toPlannerId: planista2.id,
+      requestedById: planista1.id, // the then-current planista (R2)
+      status: PlannerTransferStatus.approved,
+      reason: 'Zmiana podziału regionów — pojazd jeździ głównie na trasach planisty 2.',
+      decisionComment: 'Zgoda.',
+      decidedById: planistaLider.id, // lider of fromPlanner (R3)
+      decidedAt: approvedAt,
+      createdAt: plusDays(t0, 38),
+    })
+  )
+    transfers++;
+  if (
+    await upsertTransfer({
+      id: SEED_IDS.transferPendingLider,
+      vehicleId: transferred.id,
+      fromPlannerId: planista2.id,
+      toPlannerId: planista3.id,
+      requestedById: fleet.opiekunId, // opiekun of the carrier (R2)
+      status: PlannerTransferStatus.pending,
+      reason: 'Planista 2 przechodzi do innego działu — prośba o przekazanie pojazdu.',
+      decisionComment: null,
+      decidedById: null,
+      decidedAt: null,
+      createdAt: plusDays(t0, 57),
+    })
+  )
+    transfers++;
+
+  await upsertAssignment({
+    id: SEED_IDS.assignTransferredCreate,
+    vehicleId: transferred.id,
+    plannerId: planista1.id,
+    validFrom: t0,
+    validTo: approvedAt,
+    source: PlannerAssignmentSource.create,
+    transferId: null,
+    actorId: fleet.opiekunId,
+  });
+  await upsertAssignment({
+    id: SEED_IDS.assignTransferredTransfer,
+    vehicleId: transferred.id,
+    plannerId: planista2.id,
+    validFrom: approvedAt,
+    validTo: null,
+    source: PlannerAssignmentSource.transfer,
+    transferId: SEED_IDS.transferApproved,
+    actorId: planistaLider.id,
+  });
+
+  // Delegations on both sides of the transfer. `plannerId` is the snapshot of
+  // the planista of each delegation's period (R5/R6). At most one active
+  // (zgloszony/gotowy/w_trasie) delegation per vehicle — here only the last one.
+  const delegations: SeedDelegation[] = [
+    {
+      // Returned long before the transfer — stays with planista1.
+      id: SEED_IDS.delegationOldReturned,
+      status: DelegationStatus.zjechal,
+      plannerId: planista1.id,
+      departureAt: plusDays(t0, 5),
+      plannedReturnAt: plusDays(t0, 15),
+      actualReturnAt: plusDays(t0, 15),
+    },
+    {
+      // Was `w_trasie` at approval (departed day 36, back day 45) — the old
+      // planista finishes it (R6), so the snapshot stays planista1.
+      id: SEED_IDS.delegationOldInTransitAtApproval,
+      status: DelegationStatus.zjechal,
+      plannerId: planista1.id,
+      departureAt: plusDays(t0, 36),
+      plannedReturnAt: plusDays(t0, 46),
+      actualReturnAt: plusDays(t0, 45),
+    },
+    {
+      // First delegation after the transfer — planista2.
+      id: SEED_IDS.delegationNewReturned,
+      status: DelegationStatus.zjechal,
+      plannerId: planista2.id,
+      departureAt: plusDays(t0, 47),
+      plannedReturnAt: plusDays(t0, 55),
+      actualReturnAt: plusDays(t0, 55),
+    },
+    {
+      // Reported, not departed yet — would move to planista3 if the pending
+      // request above is approved (R6).
+      id: SEED_IDS.delegationNewReported,
+      status: DelegationStatus.zgloszony,
+      plannerId: planista2.id,
+      departureAt: plusDays(t0, 62),
+      plannedReturnAt: plusDays(t0, 72),
+      actualReturnAt: null,
+    },
+  ];
+  for (const d of delegations) {
+    const departed = d.status === DelegationStatus.w_trasie || d.status === DelegationStatus.zjechal;
+    const ready = departed || d.status === DelegationStatus.gotowy;
+    const data = {
+      vehicleId: transferred.id,
+      trailerId: fleet.trailerId,
+      driverId: fleet.driverId,
+      carrierId: fleet.carrierId,
+      driverNameSnapshot: fleet.driverName,
+      driverPhoneSnapshot: fleet.driverPhone,
+      departureAt: d.departureAt,
+      departureCountry: 'PL',
+      departurePostalCode: '05-800',
+      plannedReturnAt: dateOnly(d.plannedReturnAt),
+      returnCountry: 'PL',
+      returnPostalCode: '05-800',
+      status: d.status,
+      actualDepartureAt: departed ? d.departureAt : null,
+      actualReturnAt: d.actualReturnAt,
+      reportedById: fleet.carrierUserId,
+      reportedAt: plusDays(d.departureAt, -4),
+      readyById: ready ? eksport.id : null,
+      readyAt: ready ? plusDays(d.departureAt, -1) : null,
+      spedOrderNumber: ready ? `SPED/${d.id.slice(-4)}` : null,
+      verifiedById: departed ? weryfikator.id : null,
+      verifiedAt: d.actualReturnAt ?? (departed ? d.departureAt : null),
+      plannerId: d.plannerId,
+      createdAt: plusDays(d.departureAt, -4),
+    };
+    await prisma.delegation.upsert({ where: { id: d.id }, create: { id: d.id, ...data }, update: data });
+  }
+  // OstatnioJezdzilo — the api bumps it on `zjechal`; mirror that here.
+  const lastReturn = delegations
+    .map((d) => d.actualReturnAt)
+    .filter((x): x is Date => x !== null)
+    .reduce((a, b) => (a > b ? a : b));
+  await prisma.vehicle.update({ where: { id: transferred.id }, data: { lastDroveAt: lastReturn } });
+
+  // ── LEADERLESS: planista3 (no lider) — rejected, cancelled, pending ─────────
+  const leaderless = await upsertVehicle(
+    LEADERLESS_VEHICLE_PLATE,
+    planista3.id,
+    LEADERLESS_VEHICLE_AGE_DAYS,
+  );
+  const l0 = leaderless.createdAt;
+  await upsertAssignment({
+    id: SEED_IDS.assignLeaderlessCreate,
+    vehicleId: leaderless.id,
+    plannerId: planista3.id,
+    validFrom: l0,
+    validTo: null,
+    source: PlannerAssignmentSource.create,
+    transferId: null,
+    actorId: fleet.opiekunId,
+  });
+  const leaderlessTransfers: SeedTransfer[] = [
+    {
+      id: SEED_IDS.transferRejected,
+      vehicleId: leaderless.id,
+      fromPlannerId: planista3.id,
+      toPlannerId: planista1.id,
+      requestedById: planista3.id,
+      status: PlannerTransferStatus.rejected,
+      reason: 'Za dużo pojazdów w obsłudze.',
+      decisionComment: 'Planista 1 nie ma obecnie wolnych mocy — proszę spróbować za miesiąc.',
+      decidedById: admin.id, // planista3 has no lider → admin only (R4)
+      decidedAt: plusDays(l0, 4),
+      createdAt: plusDays(l0, 3),
+    },
+    {
+      id: SEED_IDS.transferCancelled,
+      vehicleId: leaderless.id,
+      fromPlannerId: planista3.id,
+      toPlannerId: planista2.id,
+      requestedById: fleet.opiekunId,
+      status: PlannerTransferStatus.cancelled,
+      reason: 'Przewoźnik prosi o planistę mówiącego po niemiecku.',
+      decisionComment: null,
+      decidedById: fleet.opiekunId, // cancelled by its author
+      decidedAt: new Date(plusDays(l0, 10).getTime() + 2 * HOUR_MS),
+      createdAt: plusDays(l0, 10),
+    },
+    {
+      id: SEED_IDS.transferPendingAdminOnly,
+      vehicleId: leaderless.id,
+      fromPlannerId: planista3.id,
+      toPlannerId: planista1.id,
+      requestedById: planista3.id,
+      status: PlannerTransferStatus.pending,
+      reason: 'Ponowna prośba — planista 1 zwolnił moce.',
+      decisionComment: null,
+      decidedById: null,
+      decidedAt: null,
+      createdAt: plusDays(l0, 25),
+    },
+  ];
+  for (const t of leaderlessTransfers) if (await upsertTransfer(t)) transfers++;
+
+  return { vehicles: 2, transfers, delegations: delegations.length };
 }
 
 // ─── Output ─────────────────────────────────────────────
@@ -341,10 +799,11 @@ function printBanner(
   configCount: number,
   trailerTypeCount: number,
   teamCount: number,
-  vehicleCount: number,
+  transferDemo: { vehicles: number; transfers: number; delegations: number },
   monthlyLimitCount: number,
   stanowiskoRoleCount: number,
 ): void {
+  const vehicleCount = 1 + transferDemo.vehicles;
   const longestLogin = SEED_USERS.reduce((max, u) => Math.max(max, u.login.length), 0);
   const longestEmail = SEED_USERS.reduce((max, u) => Math.max(max, u.email.length), 0);
 
@@ -355,7 +814,8 @@ function printBanner(
   for (const u of SEED_USERS) {
     const login = u.login.padEnd(longestLogin, ' ');
     const email = `(${u.email})`.padEnd(longestEmail + 2, ' ');
-    console.log(`  - ${login}   ${email}   role=${u.role}${u.lider ? ' (lider)' : ''}`);
+    const tags = [u.lider ? 'lider' : null, u.liderLogin ? `lider=${u.liderLogin}` : null].filter(Boolean);
+    console.log(`  - ${login}   ${email}   role=${u.role}${tags.length ? ` (${tags.join(', ')})` : ''}`);
   }
   const demoTeamDispatcherCount =
     SEED_TEAMS.find((t) => t.code === DEMO_TEAM_CODE)?.dispatcherLogins.length ?? 0;
@@ -363,10 +823,17 @@ function printBanner(
   console.log(`Seeded TrailerType: ${trailerTypeCount} entries`);
   console.log(
     `Seeded Team:        ${teamCount} teams ` +
-      `(${DEMO_TEAM_CODE}=${demoTeamDispatcherCount} dyspozytorów + ${vehicleCount} pojazd, ` +
+      `(${DEMO_TEAM_CODE}=${demoTeamDispatcherCount} dyspozytorów + ${vehicleCount} pojazdy, ` +
       `${EMPTY_TEAM_CODE}=pusty)`,
   );
-  console.log(`Seeded Vehicle:     ${vehicleCount} demo vehicle (plate ${DEMO_VEHICLE_PLATE})`);
+  console.log(
+    `Seeded Vehicle:     ${vehicleCount} demo vehicles (${DEMO_VEHICLE_PLATE}; ` +
+      `${TRANSFERRED_VEHICLE_PLATE} przekazany planista1→planista2; ${LEADERLESS_VEHICLE_PLATE} planista3 bez lidera)`,
+  );
+  console.log(
+    `Seeded docs/29:     ${transferDemo.transfers} transfer requests (approved/rejected/cancelled/2×pending), ` +
+      `${transferDemo.delegations} delegations on ${TRANSFERRED_VEHICLE_PLATE}`,
+  );
   console.log(
     `Seeded MonthlyLimit: ${monthlyLimitCount} rows (years ${MONTHLY_LIMIT_YEARS.join(', ')}, ` +
       `kmPerDay=${MONTHLY_LIMIT_KM_PER_DAY}, ratePerKm=${MONTHLY_LIMIT_RATE_PER_KM}, ` +
@@ -387,7 +854,10 @@ async function main(): Promise<void> {
   // Teams must be seeded after users (dispatchers) and before the demo fleet
   // (vehicle references the demo team).
   const teamCount = await seedTeams();
-  const vehicleCount = await seedDemoFleet();
+  const fleet = await seedDemoFleet();
+  // After the fleet (carrier / trailer / driver) and the users (planisci, their
+  // lider, eksport, weryfikator) it references.
+  const transferDemo = await seedPlannerTransferDemo(fleet);
   const monthlyLimitCount = await seedMonthlyLimits(prisma);
   const stanowiskoRoleCount = await seedStanowiskoRoles(prisma);
   printBanner(
@@ -395,7 +865,7 @@ async function main(): Promise<void> {
     configCount,
     trailerTypeCount,
     teamCount,
-    vehicleCount,
+    transferDemo,
     monthlyLimitCount,
     stanowiskoRoleCount,
   );

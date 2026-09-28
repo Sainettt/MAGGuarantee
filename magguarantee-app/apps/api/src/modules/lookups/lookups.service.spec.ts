@@ -8,6 +8,7 @@ import {
 } from '../carriers/carriers.repository';
 import { TeamsService } from '../teams/teams.service';
 import { UsersRepository, type UserRow } from '../users/users.repository';
+import type { VehiclesRepository } from '../vehicles/vehicles.repository';
 import { LookupsService } from './lookups.service';
 
 /** TeamsService stub — only `lookup()` is exercised by LookupsService. */
@@ -28,7 +29,7 @@ function makeUser(overrides: Partial<UserRow> = {}): UserRow {
     role: 'opiekun',
     name: 'Name',
     active: true,
-    liderEmail: null,
+    liderId: null,
     teamId: null,
     mustChangePassword: false,
     passwordChangedAt: null,
@@ -350,6 +351,48 @@ describe('LookupsService — carriers picker (Phase 4.4)', () => {
     expect(out).toEqual([
       { id: 'c-1', login: 'live', name: 'Live', active: true },
       { id: 'c-2', login: 'dead', name: 'Dead', active: false },
+    ]);
+  });
+});
+
+// ── docs/29 — planista pickers ──────────────────────────────
+
+describe('LookupsService — transfer targets + lider picker (docs/29)', () => {
+  const planisci = [
+    makeUser({ id: 'p-1', login: 'p1', role: 'planista' }),
+    makeUser({ id: 'p-2', login: 'p2', role: 'planista', lider: true }),
+    makeUser({ id: 'p-3', login: 'p3', role: 'planista' }),
+  ];
+  const users = (): UsersRepository =>
+    ({
+      listByRole: jest.fn(async (role: UserRow['role']) => (role === 'planista' ? planisci : [])),
+      listActiveLiderPlanisci: jest.fn(async () => planisci.filter((p) => p.lider)),
+    }) as unknown as UsersRepository;
+  const vehicles = (plannerId: string | null): VehiclesRepository =>
+    ({
+      findById: jest.fn(async (id: string) => (id === 'v-1' ? { id, plannerId } : null)),
+    }) as unknown as VehiclesRepository;
+
+  it('transfer targets = active planisci minus the vehicle’s current planista (U2)', async () => {
+    const svc = new LookupsService(users(), makeCarriersRepo(), makeTeamsService(), vehicles('p-2'));
+    const out = await svc.plannerTransferTargets('v-1');
+    expect(out.map((u) => u.id)).toEqual(['p-1', 'p-3']);
+  });
+
+  it('without a vehicle (or an unknown one) nobody is excluded', async () => {
+    const svc = new LookupsService(users(), makeCarriersRepo(), makeTeamsService(), vehicles('p-2'));
+    expect((await svc.plannerTransferTargets()).map((u) => u.id)).toEqual(['p-1', 'p-2', 'p-3']);
+    expect((await svc.plannerTransferTargets('v-unknown')).map((u) => u.id)).toEqual([
+      'p-1',
+      'p-2',
+      'p-3',
+    ]);
+  });
+
+  it('lider picker = active planisci with lider=true (U9)', async () => {
+    const svc = new LookupsService(users(), makeCarriersRepo(), makeTeamsService());
+    expect(await svc.planistaLiders()).toEqual([
+      { id: 'p-2', login: 'p2', name: 'Name', lider: true },
     ]);
   });
 });

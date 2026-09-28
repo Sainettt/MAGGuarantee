@@ -342,8 +342,31 @@ export class VehiclesRepository {
     sideNumber?: string | null;
     createdById?: string | null;
   }): Promise<VehicleRow> {
+    // docs/29 R7 — a vehicle created WITH a planista opens its planista
+    // journal in the same statement: the `create` row is a nested insert, so
+    // the vehicle and its row commit (or fail) together even though
+    // `POST /vehicles` runs outside an ambient transaction (manualTransaction,
+    // S3 uploads). `validFrom` = the vehicle's `createdAt` — one instant, set
+    // here rather than by the DB default so both columns carry the same value.
+    // The create-rollback path (`hardDelete`) removes the row with the vehicle
+    // (FK ON DELETE CASCADE).
+    const createdAt = new Date();
+    const plannerId = data.plannerId ?? null;
     const row = await this.prisma.tx.vehicle.create({
       data: {
+        createdAt,
+        ...(plannerId
+          ? {
+              plannerAssignments: {
+                create: {
+                  plannerId,
+                  validFrom: createdAt,
+                  source: 'create' as const,
+                  actorId: data.createdById ?? null,
+                },
+              },
+            }
+          : {}),
         carrierId: data.carrierId,
         plateNumber: data.plateNumber,
         active: data.active ?? true,
@@ -390,6 +413,32 @@ export class VehiclesRepository {
       include: this.includeShape(),
     });
     return this.flatten(row);
+  }
+
+  /**
+   * `SELECT … FOR UPDATE` on one vehicle row — the first step of a planista
+   * transfer approval (docs/29 §3.2). Must run inside a transaction (the
+   * ambient `@Audit` one): the lock is held until it commits, so a concurrent
+   * approval, deactivation or edit of the same vehicle waits and then sees
+   * the committed result. Returns `false` when the row does not exist
+   * (soft-deleted rows still lock — the caller re-reads through the
+   * soft-delete-filtered `findById`).
+   */
+  async lockForUpdate(id: string): Promise<boolean> {
+    const rows = await this.prisma.tx.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "vehicles" WHERE "id" = ${id}::uuid FOR UPDATE`;
+    return rows.length > 0;
+  }
+
+  /**
+   * Points the vehicle at its new CURRENT planista — only ever called by the
+   * transfer approval, next to closing/opening the journal rows (docs/29 R1).
+   */
+  async setPlanner(id: string, plannerId: string): Promise<void> {
+    await this.prisma.tx.vehicle.update({
+      where: { id },
+      data: { plannerId },
+    });
   }
 
   async setActive(id: string, active: boolean): Promise<VehicleRow> {

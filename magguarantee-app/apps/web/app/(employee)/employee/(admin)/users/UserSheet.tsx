@@ -17,10 +17,19 @@
 //     the value loaded from the user;
 //   - on edit the flag is sent only when it differs from `user.lider`, so an
 //     unrelated edit of a mapping-owned leader never trips a 422.
+//
+// «Przełożony (lider)» (docs/29 R8/U9/U10, docs/14 §17.7) replaces the free
+// «E-mail lidera (CC)» field: a select of active planista leaders, shown only
+// when the EFFECTIVE role (`roleOverride || role`) is `planista`, reset when
+// the effective role stops being planista, editable on MAGSpace accounts too
+// (the directory never sets it), sent on PATCH only when changed. A stale
+// stored link (the target lost the flag / is inactive — U10) stays an option,
+// marked, with a warning — see lib/users/liderSelect.ts.
 
 import { zodResolver } from '@hookform/resolvers/zod';
+import { AlertTriangle } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
@@ -31,6 +40,7 @@ import {
   UpdateUserSchema,
   refineLiderPair,
   type CreateUserDto,
+  type Role,
   type UpdateUserDto,
   type UserDtoFull,
 } from '@magguarantee/shared';
@@ -51,6 +61,7 @@ import {
 import { FormField, FormMessage } from '@/components/forms/Form';
 import { ApiResponseError } from '@/lib/api/client';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
+import { usePlannerLiders } from '@/lib/hooks/useLookups';
 import { useCreateUser, useUpdateUser } from '@/lib/hooks/useUsers';
 import {
   liderAfterRoleOverrideChange,
@@ -59,6 +70,12 @@ import {
   liderPatchValue,
 } from '@/lib/users/liderCheckboxState';
 import { liderErrorKind } from '@/lib/users/liderErrors';
+import {
+  liderIdCreateValue,
+  liderIdPatchValue,
+  liderSelectModel,
+  showsLiderField,
+} from '@/lib/users/liderSelect';
 
 // Roles the UI offers in the dropdown — przewoznik is excluded because
 // carrier users are provisioned via POST /carriers (the API would reject it
@@ -83,9 +100,14 @@ interface UserFormValues {
   email: string;
   role: SelectableRole;
   password?: string;
-  liderEmail?: string;
+  /**
+   * The planista's leader (docs/29 U9) — `''` = none («brak», an admin
+   * decides his transfers). Not the `lider` flag below: that says whether
+   * THIS user is a leader, `liderId` says WHOSE planista he is.
+   */
+  liderId: string;
   active: boolean;
-  /** Leader flag over `role` (docs/28). Not `liderEmail` — that is the CC address. */
+  /** Leader flag over `role` (docs/28). */
   lider: boolean;
   // ── MAGSpace directory (docs/24) — edit only ───────────
   managedBy: 'local' | 'magspace';
@@ -99,7 +121,7 @@ const EMPTY_DEFAULTS: UserFormValues = {
   email: '',
   role: 'pracownik',
   password: '',
-  liderEmail: '',
+  liderId: '',
   active: true,
   lider: false,
   // A hand-created account is always locally managed; an admin can hand it to
@@ -126,6 +148,19 @@ const EditFormSchema = UpdateUserSchema.extend({
  * that is what keeps `.passthrough()` available.
  */
 const CreateFormSchema = CreateUserSchema.passthrough().superRefine(refineLiderPair);
+
+/**
+ * The `roleOverride` that counts for the effective role: only a MAGSpace
+ * account carries one (a local account's override is cleared by the api on
+ * the magspace → local switch, and create has none).
+ */
+function effectiveOverride(
+  isEdit: boolean,
+  managedBy: 'local' | 'magspace',
+  roleOverride: Role | '',
+): Role | '' {
+  return isEdit && managedBy === 'magspace' ? roleOverride : '';
+}
 
 interface Props {
   open: boolean;
@@ -163,7 +198,7 @@ export function UserSheet({ open, user, onClose }: Props) {
           ? 'pracownik'
           : user.role) as SelectableRole,
         password: '',
-        liderEmail: user.liderEmail ?? '',
+        liderId: user.liderId ?? '',
         active: user.active,
         // From the user, not `false`: otherwise the submit would "change" a
         // mapping-owned leader flag on every edit and get a 422.
@@ -186,9 +221,20 @@ export function UserSheet({ open, user, onClose }: Props) {
         return t('errors.liderRequiresLiderRole', { roles: liderRoles });
       case 'managedByMagspace':
         return t('errors.liderManagedByMagspace');
+      case 'liderIdInvalid':
+        return t('errors.liderIdInvalid');
       default:
         return formatApiError(err, tCommon('errorGeneric'));
     }
+  };
+
+  /** 422 USER_LIDER_ID_INVALID goes under its field (§17.7); the rest toast. */
+  const onMutationError = (err: unknown): void => {
+    if (liderErrorKind(err) === 'liderIdInvalid') {
+      form.setError('liderId', { message: t('errors.liderIdInvalid') });
+      return;
+    }
+    toast.error(apiErrorMessage(err));
   };
 
   const createM = useCreateUser({
@@ -205,7 +251,7 @@ export function UserSheet({ open, user, onClose }: Props) {
       }
       onClose();
     },
-    onError: (err) => toast.error(apiErrorMessage(err)),
+    onError: onMutationError,
   });
 
   const updateM = useUpdateUser({
@@ -213,15 +259,17 @@ export function UserSheet({ open, user, onClose }: Props) {
       toast.success(tCommon('saved'));
       onClose();
     },
-    onError: (err) => toast.error(apiErrorMessage(err)),
+    onError: onMutationError,
   });
 
   const onSubmit = form.handleSubmit(
     (values) => {
-      // Clean empty strings → undefined so optional fields (password,
-      // liderEmail) don't trip Zod with "" against `.email()` / passwordRegex.
+      // Clean empty strings → undefined so optional fields (password) don't
+      // trip Zod with "" against passwordRegex. `liderId` is re-added below
+      // by its own rule (its `''` means «none», which PATCH must send as null).
       const cleaned: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(values)) {
+        if (k === 'liderId') continue;
         if (v === '' || v === undefined || v === null) continue;
         cleaned[k] = v;
       }
@@ -233,6 +281,10 @@ export function UserSheet({ open, user, onClose }: Props) {
         role: values.role,
         roleOverride: values.roleOverride,
       });
+      const isPlanista = showsLiderField(
+        values.role,
+        effectiveOverride(isEdit, values.managedBy, values.roleOverride),
+      );
 
       if (isEdit && user) {
         // Update slice — drop login + password (immutable through PATCH).
@@ -243,6 +295,14 @@ export function UserSheet({ open, user, onClose }: Props) {
         void _li;
         const lider = liderPatchValue(liderState, values.lider, user.lider);
         if (lider !== undefined) rest.lider = lider;
+        // Like the flag: only a change, and never next to a non-planista
+        // effective role (the api clears the link itself there).
+        const liderId = liderIdPatchValue({
+          formValue: values.liderId,
+          storedValue: user.liderId,
+          isPlanista,
+        });
+        if (liderId !== undefined) rest.liderId = liderId;
         if (values.managedBy === 'local') {
           // A hand-granted role only means something to the directory. When
           // the account is (or goes back to being) locally managed it is not
@@ -269,6 +329,11 @@ export function UserSheet({ open, user, onClose }: Props) {
         void _m;
         void _r;
         createBody.lider = liderCreateValue(liderState, values.lider);
+        const liderId = liderIdCreateValue({
+          formValue: values.liderId,
+          isPlanista,
+        });
+        if (liderId !== undefined) createBody.liderId = liderId;
         createM.mutate(createBody as CreateUserDto);
       }
     },
@@ -282,10 +347,7 @@ export function UserSheet({ open, user, onClose }: Props) {
   >;
   const errMsg = (key: string): string | undefined => errs[key]?.message;
 
-  // Only show the lider-email row when the active role is `planista` —
-  // the field is meaningless for the others (per docs/03-roles.md#planista).
   const watchedRole = form.watch('role');
-  const showLiderEmail = watchedRole === 'planista';
 
   // A directory-managed account has `role` and `active` re-synced on every
   // sign-in and every reconcile run, so the api refuses to change them here
@@ -316,6 +378,40 @@ export function UserSheet({ open, user, onClose }: Props) {
   const liderError = errMsg('lider')
     ? t('errors.liderRequiresLiderRole', { roles: liderRoles })
     : undefined;
+
+  // ── «Przełożony (lider)» (§17.7) ─────────────────────────────────────
+  // Shown only for an EFFECTIVE planista — the hand-granted role wins on a
+  // MAGSpace account (the old e-mail field looked at `role` alone).
+  const showLiderId = showsLiderField(
+    watchedRole,
+    effectiveOverride(isEdit, watchedManagedBy, watchedRoleOverride),
+  );
+  const lidersQ = usePlannerLiders({ enabled: open && showLiderId });
+  const liderModel = useMemo(
+    () =>
+      liderSelectModel({
+        liders: lidersQ.data ?? [],
+        selfId: user?.id,
+        stored: user?.liderUser ?? null,
+      }),
+    [lidersQ.data, user],
+  );
+  const watchedLiderId = form.watch('liderId');
+  const selectedLider = liderModel.options.find((o) => o.id === watchedLiderId);
+  const selectedIsStale = Boolean(selectedLider?.stale);
+  const noLiderOptions = lidersQ.isSuccess && liderModel.options.length === 0;
+  const liderIdError = errMsg('liderId');
+
+  // A role change that ends the planista role drops the link (like the flag,
+  // docs/28 §9.2 #13) — in the change handler, not an effect on `watch`
+  // (which would also fire on `form.reset` and wipe the loaded value).
+  const clearLiderIdUnlessPlanista = (nextRole: Role, nextOverride: Role | '') => {
+    const stillPlanista = showsLiderField(
+      nextRole,
+      effectiveOverride(isEdit, form.getValues('managedBy'), nextOverride),
+    );
+    if (!stillPlanista) form.setValue('liderId', '');
+  };
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
@@ -382,8 +478,15 @@ export function UserSheet({ open, user, onClose }: Props) {
                   id="user-role"
                   disabled={isDirectoryManaged}
                   {...form.register('role', {
-                    // Any role change drops the leader flag (see header).
-                    onChange: () => form.setValue('lider', false),
+                    // Any role change drops the leader flag (see header), and
+                    // the planista's leader when he stops being a planista.
+                    onChange: (e: { target: { value: string } }) => {
+                      form.setValue('lider', false);
+                      clearLiderIdUnlessPlanista(
+                        e.target.value as Role,
+                        form.getValues('roleOverride'),
+                      );
+                    },
                   })}
                 >
                   {SELECTABLE_ROLES.map((r) => (
@@ -415,19 +518,42 @@ export function UserSheet({ open, user, onClose }: Props) {
                 </div>
               )}
 
-              {showLiderEmail && (
+              {showLiderId && (
+                // §17.7 — right after the «Lider» flag block (where the old
+                // e-mail field was). Active on MAGSpace accounts too (U9).
                 <FormField
-                  label={t('fields.liderEmail')}
-                  description={t('fields.liderEmailHint')}
-                  error={errMsg('liderEmail')}
-                  htmlFor="user-liderEmail"
+                  label={t('fields.liderId')}
+                  description={
+                    noLiderOptions
+                      ? t('fields.liderIdNoOptions')
+                      : t('fields.liderIdHint')
+                  }
+                  error={liderIdError}
+                  htmlFor="user-liderId"
                 >
-                  <Input
-                    id="user-liderEmail"
-                    type="email"
-                    autoComplete="off"
-                    {...form.register('liderEmail')}
-                  />
+                  <Select
+                    id="user-liderId"
+                    disabled={noLiderOptions}
+                    aria-invalid={liderIdError ? true : undefined}
+                    {...form.register('liderId')}
+                  >
+                    <option value="">{t('fields.liderIdNone')}</option>
+                    {liderModel.options.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.stale === 'inactive'
+                          ? t('fields.liderIdStaleInactive', { name: o.name })
+                          : o.stale === 'notLider'
+                            ? t('fields.liderIdStaleNotLider', { name: o.name })
+                            : o.name}
+                      </option>
+                    ))}
+                  </Select>
+                  {selectedIsStale && (
+                    <p className="flex items-center gap-1.5 text-xs text-warning-dark dark:text-warning">
+                      <AlertTriangle size={14} aria-hidden />
+                      {t('fields.liderIdStaleHint')}
+                    </p>
+                  )}
                 </FormField>
               )}
 
@@ -463,7 +589,18 @@ export function UserSheet({ open, user, onClose }: Props) {
                     error={errMsg('managedBy')}
                     htmlFor="user-managedBy"
                   >
-                    <Select id="user-managedBy" {...form.register('managedBy')}>
+                    <Select
+                      id="user-managedBy"
+                      {...form.register('managedBy', {
+                        // magspace → local drops the override, which may end
+                        // the effective planista role (and its leader link).
+                        onChange: () =>
+                          clearLiderIdUnlessPlanista(
+                            form.getValues('role'),
+                            form.getValues('roleOverride'),
+                          ),
+                      })}
+                    >
                       <option value="local">{t('fields.local')}</option>
                       <option value="magspace">{t('fields.magspace')}</option>
                     </Select>
@@ -485,14 +622,20 @@ export function UserSheet({ open, user, onClose }: Props) {
                         {...form.register('roleOverride', {
                           // A new override resets the leader flag; clearing it
                           // hands the flag back to the mapping (stored value).
-                          onChange: (e: { target: { value: string } }) =>
+                          // A non-planista effective role drops `liderId`.
+                          onChange: (e: { target: { value: string } }) => {
                             form.setValue(
                               'lider',
                               liderAfterRoleOverrideChange(
                                 e.target.value,
                                 user?.lider ?? false,
                               ),
-                            ),
+                            );
+                            clearLiderIdUnlessPlanista(
+                              form.getValues('role'),
+                              e.target.value as Role | '',
+                            );
+                          },
                         })}
                       >
                         <option value="">{t('fields.roleOverrideNone')}</option>

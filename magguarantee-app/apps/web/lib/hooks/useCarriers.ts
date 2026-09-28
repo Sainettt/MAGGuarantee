@@ -36,6 +36,7 @@ import {
   updateCarrier,
   uploadCarrierAttachment,
 } from '@/lib/api/carriers';
+import { PLANNER_TRANSFERS_KEY } from '@/lib/hooks/plannerTransferKeys';
 import { OPIEKUN_KEY } from '@/lib/hooks/useOpiekunFleet';
 import type { MutationMetaOptions } from '@/lib/query/globalErrors';
 
@@ -137,7 +138,12 @@ export function useDeleteCarrier() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: deleteCarrier,
-    onSuccess: () => qc.invalidateQueries({ queryKey: CARRIERS_KEY }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: CARRIERS_KEY });
+      // The soft cascade also cancels the pending planner-transfer requests
+      // of the carrier's vehicles (docs/13 Carriers, docs/29 U6).
+      void qc.invalidateQueries({ queryKey: PLANNER_TRANSFERS_KEY });
+    },
   });
 }
 

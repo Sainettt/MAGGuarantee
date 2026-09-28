@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable, Optional } from '@nestjs/common';
 
 import type {
   LookupCarrierDto,
@@ -15,6 +15,7 @@ import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { CarriersRepository } from '../carriers/carriers.repository';
 import { TeamsService } from '../teams/teams.service';
 import { UsersRepository } from '../users/users.repository';
+import { VehiclesRepository } from '../vehicles/vehicles.repository';
 
 /** Hard cap for the carriers autocomplete result set per Phase 4.4 brief. */
 const LOOKUP_CARRIERS_LIMIT = 100;
@@ -45,6 +46,10 @@ export class LookupsService {
     private readonly users: UsersRepository,
     private readonly carriers: CarriersRepository,
     private readonly teams: TeamsService,
+    // docs/29 — the transfer-target picker excludes the vehicle's current
+    // planista. `@Optional()` so the positional service-test fakes keep
+    // compiling; without it nobody is excluded.
+    @Optional() private readonly vehicles?: VehiclesRepository,
   ) {}
 
   async dyspozytor(): Promise<LookupUserListDto> {
@@ -68,6 +73,29 @@ export class LookupsService {
 
   async opiekuni(): Promise<LookupUserListDto> {
     return this._listByRole('opiekun');
+  }
+
+  /**
+   * Transfer-request target picker (docs/29 U2): active planisci without the
+   * CURRENT planista of `vehicleId`. An unknown vehicle excludes nobody — the
+   * request endpoint re-validates the target anyway (422
+   * `PLANNER_TRANSFER_TARGET_INVALID`).
+   */
+  async plannerTransferTargets(vehicleId?: string): Promise<LookupUserListDto> {
+    const [all, vehicle] = await Promise.all([
+      this._listByRole('planista'),
+      vehicleId !== undefined && this.vehicles
+        ? this.vehicles.findById(vehicleId)
+        : Promise.resolve(null),
+    ]);
+    const current = vehicle?.plannerId ?? null;
+    return current ? all.filter((u) => u.id !== current) : all;
+  }
+
+  /** Leader picker of the admin user form (docs/29 U9): active planisci with `lider = true`. */
+  async planistaLiders(): Promise<LookupUserListDto> {
+    const rows = await this.users.listActiveLiderPlanisci();
+    return rows.map((u) => ({ id: u.id, login: u.login, name: u.name, lider: u.lider }));
   }
 
   /**

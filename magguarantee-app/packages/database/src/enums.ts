@@ -12,6 +12,8 @@ export {
   DriverLanguage,
   DriverNationality,
   EuroNorm,
+  PlannerAssignmentSource, // docs/29 — planista history row origin
+  PlannerTransferStatus, // docs/29 — vehicle planner transfer request lifecycle
   Role,
   TrailerAttachmentCategory,
   VehicleAttachmentCategory,

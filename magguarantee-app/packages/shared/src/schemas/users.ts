@@ -39,6 +39,49 @@ const LoginSchema = z
 const NameSchema = z.string().min(1).max(128);
 const EmailSchema = z.string().email().max(160);
 
+// ─── Planista → lider link (docs/29 R8, U9) ─────────────
+
+/**
+ * 422 — `liderId` breaks U9: it may be set only on a `planista` (the effective
+ * role — `roleOverride ?? role`), and must point at an ACTIVE `planista` with
+ * `lider = true` other than the user himself. `extensions.reason` says which
+ * part failed (`role_not_planista` | `self` | `not_found` | `not_planista` |
+ * `inactive` | `not_lider`); the web shows one message for all of them.
+ */
+export const USER_LIDER_ID_INVALID = 'USER_LIDER_ID_INVALID' as const;
+
+/** Human fallback for {@link USER_LIDER_ID_INVALID} — the web localises by code. */
+export const USER_LIDER_ID_INVALID_MESSAGE =
+  'Przełożonym planisty może być tylko inny aktywny planista z flagą lidera.';
+
+/**
+ * `superRefine` for a body carrying `role` and `liderId` together (the create
+ * form): a leader link on a non-planista is a business-rule issue with
+ * `params.code` — `ZodValidationPipe` answers it 422 + `extensions.code`, the
+ * same code the service returns for the merged row of a PATCH.
+ */
+export function refineLiderIdRole(
+  value: { role?: string | null; liderId?: string | null },
+  ctx: z.RefinementCtx,
+): void {
+  if (value.liderId == null || value.role == null || value.role === 'planista') return;
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: ['liderId'],
+    message: USER_LIDER_ID_INVALID_MESSAGE,
+    params: { code: USER_LIDER_ID_INVALID },
+  });
+}
+
+/**
+ * `liderId` as a request field: a UUID, `null` to clear. A form's `''` (the
+ * «— brak —» option) is read as `null`, i.e. "clear", not as "leave alone".
+ */
+const LiderIdFieldSchema = z.preprocess(
+  (v) => (v === '' ? null : v),
+  UuidSchema.nullable().optional(),
+);
+
 /**
  * Password policy — the single source of truth (docs/15-auth-strategy.md
  * #politika-паролей): ≥10 chars, ≥1 letter, ≥1 digit.
@@ -77,16 +120,18 @@ export const CreateUserSchema = z
      */
     password: emptyStringToUndefined(PasswordSchema.optional()),
     /**
-     * Only meaningful for `role=planista` per docs/03-roles.md#planista.
-     * `emptyStringToUndefined` for the same reason — form-default `''` must
-     * not hit `.email()` validation.
+     * The planista's leader (docs/29 R8, U9) — replaces the former
+     * `liderEmail`. Only for `role=planista`; the target must be an active
+     * planista with `lider = true` (422 {@link USER_LIDER_ID_INVALID}). That
+     * leader decides the planista's vehicle-transfer requests and is CC'd on
+     * his wniosek mails. Omitted / `null` / `''` = no leader.
      */
-    liderEmail: emptyStringToUndefined(EmailSchema.optional()),
+    liderId: LiderIdFieldSchema,
     active: z.boolean().optional(),
     /**
      * Leader flag over `role` (docs/28) — only for roles in `LIDER_ROLES`.
-     * Omitted = `false`. Not to be confused with `liderEmail` above, which is
-     * the e-mail CC'd on decisions (docs/19 quirk #14).
+     * Omitted = `false`. Not to be confused with `liderId` above, which says
+     * WHOSE leader a planista has.
      */
     lider: z.boolean().optional(),
   })
@@ -104,7 +149,11 @@ export type CreateUserDto = z.infer<typeof CreateUserSchema>;
  * it, which a refined schema (`ZodEffects`) does not have. A form wanting the
  * same check composes `CreateUserSchema.passthrough().superRefine(refineLiderPair)`.
  */
-export const CreateUserRequestSchema = CreateUserSchema.superRefine(refineLiderPair);
+export const CreateUserRequestSchema = CreateUserSchema.superRefine((value, ctx) => {
+  refineLiderPair(value, ctx);
+  // `liderId` only on a planista (docs/29 U9) — 422 USER_LIDER_ID_INVALID.
+  refineLiderIdRole(value, ctx);
+});
 
 /**
  * PATCH /users/:id — every field optional. Role can change (e.g. promote a
@@ -120,10 +169,17 @@ export const UpdateUserSchema = z
     email: emptyStringToUndefined(EmailSchema.optional()),
     name: emptyStringToUndefined(NameSchema.optional()),
     role: RoleSchema.exclude(['przewoznik']).optional(),
-    // `nullable` allowed so admin can wipe a lider-email on a planista
-    // (e.g. when promoting to opiekun). Empty-string from forms still
-    // coerces to undefined (= "leave alone"), not null (= "wipe").
-    liderEmail: emptyStringToUndefined(EmailSchema.nullable().optional()),
+    /**
+     * The planista's leader (docs/29 U9). `null` / `''` clears it, omitted
+     * leaves it alone. Checked by the service on the MERGED row: only on an
+     * effective `planista` (`roleOverride ?? role`), target = an active
+     * planista with `lider = true`, not the user himself → else 422
+     * {@link USER_LIDER_ID_INVALID}. Re-sending the stored value is a no-op
+     * even when its target lost the flag since (U10). When the effective role
+     * stops being `planista` the service clears it. Editable on
+     * `managedBy = magspace` accounts too — the directory never touches it.
+     */
+    liderId: LiderIdFieldSchema,
     active: z.boolean().optional(),
     /**
      * Hand the account over to (or take it back from) the MAGSpace directory.
@@ -168,6 +224,8 @@ export const UserFiltersSchema = z
     active: z.coerce.boolean().optional(),
     /** `?lider=true` → leaders only, `?lider=false` → everyone else. Strictly `'true' | 'false'`. */
     lider: BooleanQueryParamSchema.optional(),
+    /** `?liderId=<uuid>` → the planisci whose leader is that user (docs/29). */
+    liderId: UuidSchema.optional(),
     cursor: UuidSchema.optional(),
     limit: z.coerce.number().int().min(1).max(200).default(50),
   })
@@ -175,6 +233,18 @@ export const UserFiltersSchema = z
 export type UserFilters = z.infer<typeof UserFiltersSchema>;
 
 // ─── Response DTO ────────────────────────────────────────
+
+/** The leader a planista points at (`User.liderId → User`), with his current flags. */
+export const UserLiderMiniSchema = z.object({
+  id: UuidSchema,
+  login: z.string(),
+  name: z.string().nullable(),
+  /** `false` when the leader is deactivated or soft-deleted. */
+  active: z.boolean(),
+  /** The leader's CURRENT `lider` flag — `false` = the link is stale (U10). */
+  lider: z.boolean(),
+});
+export type UserLiderMiniDto = z.infer<typeof UserLiderMiniSchema>;
 
 export const UserDtoSchema = z.object({
   id: UuidSchema,
@@ -184,7 +254,15 @@ export const UserDtoSchema = z.object({
   name: z.string().nullable(),
   role: RoleSchema,
   active: z.boolean(),
-  liderEmail: z.string().email().nullable(),
+  /** The planista's leader (docs/29 R8) — `null` = none (only an admin decides his transfers). */
+  liderId: UuidSchema.nullable(),
+  /**
+   * The user `liderId` points at. `active` / `lider` are that user's CURRENT
+   * flags: a stored link may outlive them (U10 — removing the flag does not
+   * clear the link), and the admin form must still show it, marked stale.
+   * `active` is `false` for a soft-deleted leader too. `null` when unset.
+   */
+  liderUser: UserLiderMiniSchema.nullable(),
   /**
    * When true the user is gated to the forced change-password screen on the
    * next login (set on every admin-issued password — create + reset). The

@@ -100,8 +100,6 @@
       "liderPendingSyncHint": "The lead flag can be set after the next sign-in or sync — that is when the hand-granted role replaces the account’s current role.",
       "password": "Temporary password",
       "passwordHint": "≥10 chars, ≥1 letter, ≥1 digit. Leave empty to auto-generate.",
-      "liderEmail": "Leader e-mail (CC)",
-      "liderEmailHint": "Only for the planista role — supervisor's address.",
       "active": "Active",
       "createdAt": "Created",
       "managedBy": "Managed by",
@@ -113,7 +111,14 @@
       "roleOverrideHint": "For positions with no mapping (e.g. Controlling, Handel). The sync will not change this role, but the account still switches off on the termination date.",
       "roleOverrideNone": "None — role from the position",
       "roleOverrideShort": "by hand",
-      "roleOverrideHintShort": "Role granted by hand by an administrator"
+      "roleOverrideHintShort": "Role granted by hand by an administrator",
+      "liderId": "Reports to (lead)",
+      "liderIdHint": "Approves this planner's vehicle transfers and receives a copy (CC) of claim decisions for their vehicles.",
+      "liderIdNone": "— none (an administrator decides) —",
+      "liderIdNoOptions": "No active planner leads — first give the “Lead” flag to one of the planners.",
+      "liderIdStaleNotLider": "{name} (no longer a lead)",
+      "liderIdStaleInactive": "{name} (inactive)",
+      "liderIdStaleHint": "The selected supervisor is not an active lead — this planner's requests are decided by an administrator. Choose another lead."
     },
     "actions": {
       "resetPassword": "Reset password…",
@@ -147,7 +152,8 @@
     "reactivatedToast": "User reactivated",
     "errors": {
       "liderRequiresLiderRole": "The lead flag can only be given to these roles: {roles}.",
-      "liderManagedByMagspace": "This account’s lead flag comes from the MAGSpace position mapping. Set a hand-granted role or switch the account to local management."
+      "liderManagedByMagspace": "This account’s lead flag comes from the MAGSpace position mapping. Set a hand-granted role or switch the account to local management.",
+      "liderIdInvalid": "The supervisor must be an active planner with the “Lead” flag, other than this user."
     }
   },
   "forms": {
@@ -321,7 +327,9 @@
     "sectionLabel": "Panel sections",
     "opiekaAttentionBadge": "{count, plural, one {# carrier requires attention} other {# carriers require attention}}",
     "alerts": "Alerts",
-    "alertsBadge": "{count, plural, one {# document needs attention} other {# documents need attention}}"
+    "alertsBadge": "{count, plural, one {# document needs attention} other {# documents need attention}}",
+    "transfers": "Transfers",
+    "transfersBadge": "{count, plural, one {# request awaits a decision} other {# requests await a decision}}"
   },
   "forbidden": {
     "title": "Access denied",
@@ -784,7 +792,8 @@
     "planista": "Planner",
     "eksport": "Export",
     "codeAria": "Team code: {code}",
-    "membersAria": "Dispatchers of team {code}"
+    "membersAria": "Dispatchers of team {code}",
+    "planistaNow": "Now planned by: {name}"
   },
   "teams": {
     "title": "Leading teams",
@@ -1609,7 +1618,7 @@
   "planista": {
     "title": "Planner panel",
     "subtitle": "Overview of the planned fleet — vehicles, drivers and trailers",
-    "readOnlyBanner": "Data is read-only — managed by an administrator.",
+    "readOnlyBanner": "Fleet data is edited by the carrier's caretaker. You can hand a truck over to another planner with a request under “My requests”.",
     "tabs": {
       "ariaLabel": "Planner fleet sections",
       "vehicles": "Vehicles",
@@ -1670,6 +1679,13 @@
         "period": "Period",
         "status": "Status"
       }
+    },
+    "nav": {
+      "ariaLabel": "Planner panel sections",
+      "fleet": "Fleet",
+      "myTransfers": "My requests",
+      "approvals": "To approve",
+      "approvalsBadge": "{count, plural, one {# request awaits a decision} other {# requests await a decision}}"
     }
   },
   "dyspozytor": {
@@ -2630,6 +2646,179 @@
     "session": {
       "title": "Could not verify your session",
       "message": "The sign-in service is temporarily unavailable — you have not been signed out. Please try again in a moment."
+    }
+  },
+  "transfers": {
+    "title": "Vehicle transfers",
+    "subtitle": {
+      "admin": "Requests to change a vehicle's planner. The planner changes only after approval.",
+      "lider": "Transfer requests for your planners' vehicles.",
+      "author": "Your planner-change requests and their decisions."
+    },
+    "tabs": {
+      "ariaLabel": "Transfer requests",
+      "pendingDecider": "To decide",
+      "pendingAuthor": "Pending",
+      "decided": "Decided"
+    },
+    "status": {
+      "pending": "Pending",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "cancelled": "Cancelled"
+    },
+    "filter": {
+      "status": "Status",
+      "all": "All",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "cancelled": "Cancelled"
+    },
+    "card": {
+      "side": "side {side}",
+      "fromToSr": "transfer to",
+      "requestedBy": "Requested by: {name} · {role}",
+      "reasonLabel": "Reason",
+      "approvedBy": "Approved by: {name} · {role} · {date}",
+      "rejectedBy": "Rejected by: {name} · {role} · {date}",
+      "cancelledAt": "Cancelled by the requester · {date}",
+      "cancelledBy": "Cancelled by: {name} · {role} · {date}",
+      "commentLabel": "Comment",
+      "rejectionLabel": "Rejection reason",
+      "liderOf": "Planner's lead: {name}",
+      "noLider": "Planner has no lead — an administrator decides",
+      "history": "Planner history",
+      "approve": "Approve",
+      "reject": "Reject",
+      "cancel": "Cancel request",
+      "blockedTarget": "You are the target planner of this request — an administrator decides.",
+      "blockedRequester": "This is your request — an administrator decides."
+    },
+    "form": {
+      "createHint": "Changing the planner later requires a request and approval.",
+      "locked": "Locked — the planner changes only through a transfer request.",
+      "lockedTitle": "The planner can't be changed directly. File a transfer request — the change takes effect after approval.",
+      "lockedAdmin": "Locked — the caretaker or planner requests the change, you approve it.",
+      "lockedInactive": "Locked — the vehicle is disabled and can't be transferred.",
+      "pendingTitle": "Transfer request to: {to}",
+      "pendingMeta": "Requested by: {name} · {role} · {date}",
+      "reviewLink": "Review in “Transfers”"
+    },
+    "request": {
+      "buttonOpiekun": "Request a planner change",
+      "buttonPlanista": "Transfer vehicle",
+      "title": "Planner change request",
+      "vehicle": "Vehicle",
+      "vehiclePlaceholder": "Select a vehicle",
+      "vehicleOption": "{plate} · side {side} — {carrier}",
+      "noVehicles": "You have no vehicles that can be transferred.",
+      "currentPlanner": "Current planner",
+      "target": "New planner",
+      "targetPlaceholder": "Select a planner",
+      "noTargets": "There are no other active planners.",
+      "reason": "Reason",
+      "reasonPlaceholder": "Why should the vehicle move to another planner?",
+      "reasonCounter": "{count}/{max}",
+      "vehicleRequired": "Select a vehicle.",
+      "targetRequired": "Select the new planner.",
+      "reasonRequired": "Enter a reason (at least 3 characters).",
+      "reasonTooLong": "The reason can be at most {max} characters.",
+      "info": "The planner changes only after the current planner's lead or an administrator approves. No notifications are sent — the request waits in their “To decide” list.",
+      "independentOfForm": "The request is sent immediately — independently of saving the vehicle form.",
+      "submit": "Send request",
+      "submitting": "Sending…",
+      "success": "Request sent for approval",
+      "errors": {
+        "alreadyPending": "This vehicle already has a pending request — the view has been refreshed.",
+        "sameOrInvalidTarget": "The selected planner is inactive or already plans this vehicle. Choose another one.",
+        "vehicleInactive": "The vehicle is disabled and can't be transferred.",
+        "notAllowed": "You can't file a request for this vehicle.",
+        "generic": "Could not send the request. Please try again."
+      }
+    },
+    "cancel": {
+      "title": "Cancel the request?",
+      "body": "The request to transfer {plate} to {to} will be cancelled. You can file a new one later.",
+      "confirm": "Cancel request",
+      "back": "Go back",
+      "success": "Request cancelled",
+      "errors": {
+        "notPending": "The request has already been decided — the view has been refreshed.",
+        "generic": "Could not cancel the request."
+      }
+    },
+    "approve": {
+      "title": "Approve the transfer?",
+      "description": "{plate}: {from} → {to}",
+      "effectVehicle": "The vehicle moves to {to} immediately.",
+      "effectTrips": "“Reported” and “Ready” trips move to {to}. A trip “On the road” stays with {from} until it returns.",
+      "effectHistory": "{from} keeps access to the trips they planned.",
+      "comment": "Comment (optional)",
+      "confirm": "Approve transfer",
+      "success": "Vehicle {plate} transferred to {to}"
+    },
+    "reject": {
+      "title": "Reject the request?",
+      "description": "{plate}: {from} → {to}",
+      "reason": "Rejection reason",
+      "reasonHint": "The requester will see the reason in their list of requests.",
+      "confirm": "Reject request",
+      "success": "Request rejected"
+    },
+    "decisionErrors": {
+      "stale": "The request is out of date — the vehicle's planner has changed or the request was already decided. The list has been refreshed.",
+      "targetInactive": "The target planner is inactive — the request can't be approved.",
+      "vehicleInactive": "The vehicle is disabled — the request can't be approved.",
+      "forbidden": "You can't decide this request.",
+      "generic": "Could not save the decision. Please try again."
+    },
+    "history": {
+      "title": "Planner history",
+      "dialogTitle": "Planner history — {plate}",
+      "listAria": "Planner history of vehicle {plate}",
+      "current": "Current",
+      "since": "since {from}",
+      "range": "{from} – {to}",
+      "source": {
+        "create": "Creation",
+        "transfer": "Transfer",
+        "backfill": "Historical data"
+      },
+      "createdBy": "Added by: {name}",
+      "requestedBy": "Requested by: {name} · {role}",
+      "approvedBy": "Approved by: {name} · {role}",
+      "backfillNote": "Assignment from before history was recorded — the start is the date the vehicle was added.",
+      "pendingNode": "Awaiting decision: transfer to {to}",
+      "pendingMeta": "Request of {date} · requested by {name} ({role})",
+      "closedRequests": "{count, plural, one {Rejected or cancelled request (#)} other {Rejected or cancelled requests (#)}}",
+      "error": "Could not load the planner history.",
+      "retry": "Try again",
+      "forbidden": "You no longer have access to this vehicle's planner history."
+    },
+    "empty": {
+      "pendingDecider": {
+        "title": "No requests to decide",
+        "message": "New vehicle transfer requests will appear here."
+      },
+      "pendingAuthor": {
+        "title": "No pending requests",
+        "messagePlanista": "To hand a vehicle over to another planner, file a request.",
+        "messageOpiekun": "You file a planner-change request from the vehicle edit form.",
+        "action": "Transfer vehicle"
+      },
+      "decided": {
+        "title": "No decided requests",
+        "message": "Approved, rejected and cancelled requests will appear here."
+      },
+      "decidedFiltered": {
+        "title": "No results",
+        "message": "No requests with the selected status.",
+        "action": "Clear filters"
+      },
+      "notLider": {
+        "title": "For planner leads only",
+        "message": "Vehicle transfer requests are decided by the planner's lead or an administrator."
+      }
     }
   }
 }

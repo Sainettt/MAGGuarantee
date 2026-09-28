@@ -75,6 +75,9 @@ function makeRow(overrides: Partial<DelegationRow> = {}): DelegationRow {
       dispatchTeam: null,
       planner: null,
     },
+    // docs/29 — the trip's own planista snapshot drives the planista scope.
+    plannerId: PLANNER_SUB,
+    planner: null,
     trailerId: 'trl-1',
     trailer: { id: 'trl-1', plateNumber: 'TR1' },
     driverId: 'drv-1',
@@ -420,7 +423,9 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
   });
 
   it("planista is 403 on another planner's delegation", async () => {
+    // docs/29 — the trip's own snapshot is what counts: led by someone else.
     const row = makeRow({
+      plannerId: 'someone-else',
       vehicle: {
         id: 'veh-1',
         plateNumber: 'PL123',
@@ -430,6 +435,61 @@ describe('DelegationsService.getOne — by-id read scope (Phase 6.4)', () => {
         rateExport: RATE_EXPORT,
         rateImport: RATE_IMPORT,
         plannerId: 'someone-else',
+        dispatchTeamId: TEAM_ID,
+        dispatchTeam: null,
+        planner: null,
+      },
+    });
+    const { service } = makeService([row]);
+    await expect(
+      service.getOne(auth('planista', PLANNER_SUB), 'deleg-1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  // ── docs/29 — the planista scope reads the trip's SNAPSHOT, not the vehicle ──
+
+  it('planista who LED the trip may still read it after the vehicle moved to another planista', async () => {
+    // Transfer approved after the trip left (`w_trasie` stays with the old
+    // planista — R6): the vehicle now belongs to 'new-plan', the snapshot
+    // still names PLANNER_SUB.
+    const row = makeRow({
+      status: 'w_trasie',
+      plannerId: PLANNER_SUB,
+      vehicle: {
+        id: 'veh-1',
+        plateNumber: 'PL123',
+        agreement: null,
+        rateDe: RATE_DE,
+        rateUe: RATE_UE,
+        rateExport: RATE_EXPORT,
+        rateImport: RATE_IMPORT,
+        plannerId: 'new-plan',
+        dispatchTeamId: TEAM_ID,
+        dispatchTeam: null,
+        planner: { id: 'new-plan', login: 'new.plan', name: 'New Plan' },
+      },
+    });
+    const { service } = makeService([row]);
+    const out = await service.getOne(auth('planista', PLANNER_SUB), 'deleg-1');
+    expect(out.id).toBe('deleg-1');
+    // The DTO carries both: the trip's planista and the vehicle's current one.
+    expect(out.plannerId).toBe(PLANNER_SUB);
+    expect(out.vehicle?.planner?.id).toBe('new-plan');
+  });
+
+  it('the NEW planista may not read a trip that stayed with the previous planista', async () => {
+    const row = makeRow({
+      status: 'zjechal',
+      plannerId: 'old-plan',
+      vehicle: {
+        id: 'veh-1',
+        plateNumber: 'PL123',
+        agreement: null,
+        rateDe: RATE_DE,
+        rateUe: RATE_UE,
+        rateExport: RATE_EXPORT,
+        rateImport: RATE_IMPORT,
+        plannerId: PLANNER_SUB,
         dispatchTeamId: TEAM_ID,
         dispatchTeam: null,
         planner: null,

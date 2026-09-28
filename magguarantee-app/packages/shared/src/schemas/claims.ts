@@ -148,8 +148,11 @@ function datesWellOrdered(v: {
  * - `hoursAdjusted` is **NOT** in the carrier submit body — it is a
  *   verifier-only correction field on `UpdateClaimCorrectionFields`. Submit
  *   always persists `0` in both `origHoursAdjusted` and `hoursAdjustedValue`.
- * - `plannerId`/`opiekunId` are derived server-side from the vehicle's planner
- *   and the carrier's opiekun — clients do not send them.
+ * - A claim stores no planista/opiekun column and clients send none. The mail
+ *   recipients are resolved at send time: the planista of the outing's
+ *   period (the snapshot `Delegation.plannerId`, docs/29 U8 — NOT the
+ *   vehicle's current planista) plus his current lider in CC, and the
+ *   carrier's opiekun.
  * - `orderNumber` / `orderDate` are intentionally NOT in the submit DTO —
  *   they are MAGTRANS-internal and assigned by the verifier when transitioning
  *   to ZAAKCEPTOWANO. Carrier-side submit always persists NULL.

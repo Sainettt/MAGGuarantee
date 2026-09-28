@@ -22,7 +22,7 @@ function makeUser(over: Partial<UserRow> = {}): UserRow {
     role: 'planista',
     name: 'Planista lider 1',
     active: true,
-    liderEmail: null,
+    liderId: null,
     teamId: null,
     mustChangePassword: false,
     passwordChangedAt: null,

@@ -53,6 +53,7 @@ import {
   type VehicleAttachmentRow,
 } from './vehicle-attachments.repository';
 import { computeVehicleDerivedFlags } from './vehicle-derived-flags';
+import { VehiclePlannerTransfersRepository } from './vehicle-planner-transfers.repository';
 import {
   NO_TEAM_SENTINEL,
   VehiclesRepository,
@@ -143,6 +144,12 @@ export class VehiclesService {
     // resolves from `active` + `createdAt`).
     @Optional()
     private readonly delegationStatus?: VehicleDelegationStatusRepository,
+    // docs/29 U6 — switching a vehicle off (deactivate, PATCH active=false,
+    // soft-delete) cancels its pending planista-transfer request. `@Optional()`
+    // like the two above so the positional service-test fakes keep compiling;
+    // the hook no-ops when absent.
+    @Optional()
+    private readonly plannerTransfers?: VehiclePlannerTransfersRepository,
   ) {}
 
   async list(
@@ -267,6 +274,8 @@ export class VehiclesService {
     uploads: CategorizedUpload[],
   ): Promise<VehicleDto> {
     await this._assertCarrierAccessibleForWrite(user, dto.carrierId);
+    // R7 — the first planista is set here, directly (the schema requires it);
+    // `_persistVehicle` opens the `create` row of the planista journal.
     if (dto.plannerId) await this._assertRole(dto.plannerId, 'planista');
     if (dto.dispatchTeamId) await this._assertTeamActive(dto.dispatchTeamId);
 
@@ -313,11 +322,17 @@ export class VehiclesService {
    * removing existing ones (`removeAttachmentIds`). The required-attachment
    * rule must hold over the post-update set: existing live attachments minus
    * removed plus newly uploaded.
+   *
+   * The planista is NOT editable here (docs/29 R1): `UpdateVehicleSchema`
+   * refuses `plannerId` with 422 `VEHICLE_PLANNER_CHANGE_REQUIRES_TRANSFER`
+   * before this method runs. `actor` closes a pending transfer request when
+   * the PATCH switches the vehicle off (U6).
    */
   async update(
     id: string,
     dto: UpdateVehicleDto,
     uploads: CategorizedUpload[],
+    actor?: AuthUser,
   ): Promise<VehicleDto> {
     const existing = await this.vehicles.findById(id);
     if (!existing) throw new NotFoundException('Pojazd nie znaleziony');
@@ -330,9 +345,6 @@ export class VehiclesService {
     // narrows this down to the keys present in `after` (= response body)
     // before the audit row lands.
     AuditContext.setBefore(this.toDto(existing, this._lifecycleFor(existing, ds)));
-    if (dto.plannerId !== undefined && dto.plannerId !== null) {
-      await this._assertRole(dto.plannerId, 'planista');
-    }
     // Phase 11 — reassigning to a Team requires it to exist and be active.
     // `null` (detach) skips the check.
     if (dto.dispatchTeamId !== undefined && dto.dispatchTeamId !== null) {
@@ -374,6 +386,12 @@ export class VehiclesService {
         );
       }
       throw err;
+    }
+
+    // docs/29 U6 — a PATCH that switches the vehicle off cancels its pending
+    // planista-transfer request, exactly like `POST /:id/deactivate`.
+    if (existing.active && dto.active === false) {
+      await this._cancelPendingTransfer(id, actor);
     }
 
     // Apply attachment removals (soft-delete; MinIO object left intact) and
@@ -421,7 +439,11 @@ export class VehiclesService {
     return after ? 'enabled' : 'disabled';
   }
 
-  async deactivate(id: string): Promise<VehicleDto> {
+  /**
+   * Switches the vehicle off. `actor` (the caller) closes the vehicle's pending
+   * planista-transfer request, in the same `@Audit` transaction (docs/29 U6).
+   */
+  async deactivate(id: string, actor?: AuthUser): Promise<VehicleDto> {
     const existing = await this.vehicles.findById(id);
     if (!existing) throw new NotFoundException('Pojazd nie znaleziony');
     if (!existing.active) {
@@ -430,6 +452,7 @@ export class VehiclesService {
     const ds = await this._delegationStatusOf(id);
     AuditContext.setBefore(this.toDto(existing, this._lifecycleFor(existing, ds)));
     const row = await this.vehicles.setActive(id, false);
+    await this._cancelPendingTransfer(id, actor);
     // active→false ⇒ status collapses to `wylaczona` (short-circuits the clock).
     return this.toDto(row, this._lifecycleFor(row, ds));
   }
@@ -446,12 +469,39 @@ export class VehiclesService {
     return this.toDto(row, this._lifecycleFor(row, ds));
   }
 
-  async softDelete(id: string): Promise<void> {
+  /**
+   * Soft-deletes the vehicle. A removed vehicle can never be handed over, so
+   * its pending planista-transfer request is cancelled too (docs/29 U6 — the
+   * same rule as deactivation; otherwise it would sit in the inbox forever).
+   */
+  async softDelete(id: string, actor?: AuthUser): Promise<void> {
     const existing = await this.vehicles.findById(id);
     if (!existing) throw new NotFoundException('Pojazd nie znaleziony');
     const ds = await this._delegationStatusOf(id);
     AuditContext.setBefore(this.toDto(existing, this._lifecycleFor(existing, ds)));
     await this.vehicles.softDelete(id);
+    await this._cancelPendingTransfer(id, actor);
+  }
+
+  /**
+   * docs/29 U6 — closes the vehicle's `pending` planista-transfer request as
+   * `cancelled`, with `decidedById` = the user who switched the vehicle off.
+   * Runs in the caller's ambient transaction when there is one. The count is
+   * stashed in the audit metadata so the vehicle's audit row shows it.
+   */
+  private async _cancelPendingTransfer(
+    vehicleId: string,
+    actor: AuthUser | undefined,
+  ): Promise<void> {
+    if (!this.plannerTransfers) return;
+    const cancelled = await this.plannerTransfers.cancelPendingForVehicle(
+      vehicleId,
+      actor?.sub ?? null,
+      new Date(),
+    );
+    if (cancelled > 0) {
+      AuditContext.setMetadata({ cancelledPlannerTransfers: cancelled });
+    }
   }
 
   /**
@@ -594,10 +644,10 @@ export class VehiclesService {
     dto: UpdateVehicleDto,
   ): Record<string, unknown> {
     const patch: Record<string, unknown> = {};
+    // `plannerId` is intentionally absent — docs/29 R1 (transfer requests only).
     const passthrough: (keyof UpdateVehicleDto)[] = [
       'plateNumber',
       'active',
-      'plannerId',
       'dispatchTeamId',
       'notes',
       'certificateL',

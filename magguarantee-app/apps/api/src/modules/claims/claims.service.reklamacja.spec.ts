@@ -240,6 +240,8 @@ function makePrismaService(): { prisma: PrismaService; client: unknown } {
       })),
     },
     vehicle: { findFirst: jest.fn(async () => null) },
+    delegation: { findFirst: jest.fn(async () => null) },
+    vehiclePlannerAssignment: { findMany: jest.fn(async () => []) },
     appConfig: { findMany: jest.fn(async () => []) },
     claim: { update: jest.fn(), findFirst: jest.fn() },
     claimSequence: { upsert: jest.fn() },

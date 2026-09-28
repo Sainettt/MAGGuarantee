@@ -178,6 +178,10 @@ export class DelegationsService {
       returnPostalCode: dto.returnPostalCode,
       notes: dto.comment ?? null,
       reportedById: user.sub,
+      // docs/29 §3.3 — the trip remembers the planista of its period: the
+      // vehicle's current planista NOW. A later transfer moves it only while
+      // the trip is still `zgloszony` / `gotowy` (R6).
+      plannerId: vehicle.plannerId,
     });
 
     // Side-effect: post the wyjazd to the standing Google Chat space — the
@@ -714,7 +718,9 @@ export class DelegationsService {
    * or dyspozytor could read ANY delegation by guessing/learning its id. We now
    * mirror the list scope on the single-resource read:
    *  - `przewoznik` → row.carrierId must equal the caller's carrier.
-   *  - `planista`   → row.vehicle.plannerId must equal `user.sub`.
+   *  - `planista`   → the trip's snapshot `row.plannerId` must equal
+   *    `user.sub` (docs/29 §3.3 — the planista of the trip's period, not the
+   *    vehicle's current one).
    *  - `dyspozytor` → row.vehicle.dispatchTeamId must equal the dyspozytor's
    *    `teamId` (Phase 11 — team scope; a dyspozytor with no team matches
    *    nothing → 403).
@@ -739,7 +745,7 @@ export class DelegationsService {
       return;
     }
     if (user.role === 'planista') {
-      if (row.vehicle?.plannerId !== user.sub) {
+      if (row.plannerId !== user.sub) {
         throw new ForbiddenException('Brak uprawnień do tej delegacji');
       }
       return;
@@ -786,6 +792,10 @@ export class DelegationsService {
       driver: row.driver,
       carrierId: row.carrierId,
       carrier: row.carrier,
+      // docs/29 — the trip's own planista (snapshot); `vehicle.planner` is the
+      // vehicle's current one (docs/14 §17.8 shows both when they differ).
+      plannerId: row.plannerId,
+      planner: row.planner,
       driverNameSnapshot: row.driverNameSnapshot,
       driverPhoneSnapshot: row.driverPhoneSnapshot,
       departureAt: row.departureAt.toISOString(),
@@ -947,7 +957,7 @@ export class DelegationsService {
   private async _requireOwnedVehicle(
     carrierId: string,
     vehicleId: string,
-  ): Promise<{ id: string; plateNumber: string }> {
+  ): Promise<{ id: string; plateNumber: string; plannerId: string | null }> {
     const v = await this.vehicles.findById(vehicleId);
     if (!v || v.carrierId !== carrierId) {
       throw new UnprocessableEntityException('Nieprawidłowy pojazd');
@@ -955,7 +965,7 @@ export class DelegationsService {
     if (!v.active) {
       throw new UnprocessableEntityException('Pojazd jest nieaktywny');
     }
-    return { id: v.id, plateNumber: v.plateNumber };
+    return { id: v.id, plateNumber: v.plateNumber, plannerId: v.plannerId };
   }
 
   private async _requireOwnedTrailer(
@@ -1065,11 +1075,12 @@ export class DelegationsService {
       };
     }
     if (user.role === 'planista') {
-      // Phase 6.4 — planista sees ONLY delegations of vehicles they plan
-      // (`Vehicle.plannerId === user.sub`). Mirrors the dyspozytor scope
-      // exactly: server identity wins, so a client-supplied `carrierId` /
-      // `vehicleId` is stripped to stop the planista pivoting outside their
-      // planned fleet.
+      // Planista sees ONLY the trips he leads — the trip's snapshot
+      // `Delegation.plannerId === user.sub` (docs/29 §3.3; was the vehicle's
+      // live `plannerId` before). After a transfer the previous planista keeps
+      // the trips of his period, the new one sees trips from the transfer on
+      // (R5/R6). Server identity wins, so a client-supplied `carrierId` /
+      // `vehicleId` is stripped to stop the planista pivoting outside it.
       const { carrierId: _carrierId, vehicleId: _vehicleId, ...planRest } =
         rest;
       return { ...planRest, plannerId: user.sub };

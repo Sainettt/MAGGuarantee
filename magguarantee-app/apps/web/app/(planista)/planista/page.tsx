@@ -17,6 +17,9 @@
 // exactly like dyspozytor.
 //
 // Backed by `GET /fleet/planista` (`usePlanistaFleet`).
+//
+// docs/14 §17.4.2 (D2) — no `myKmHref` any more: «Przebieg» is a tab of the
+// shell's <PlanistaTabsNav> now (the dyspozytor panel keeps its header link).
 
 import { useTranslations } from 'next-intl';
 
@@ -45,7 +48,6 @@ export default function PlanistaPanelPage() {
       delegationsLoading={delegationsQ.isLoading}
       fleetError={queryErrorProps(fleetQ)}
       delegationsError={queryErrorProps(delegationsQ)}
-      myKmHref="/planista/moje-pojazdy"
       fullVehicleDetail
     />
   );

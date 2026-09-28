@@ -598,7 +598,7 @@ const html = await render(<CarrierDecisionEmail claim={claim} decision="ZAAKCEPT
 | `account-reactivated.tsx` | `sendAccountReactivatedEmail` | Reactivate — внутренние роли и перевозчики |
 | `login-code.tsx` | (новое, шаблон 2FA) | Каждый login |
 | `carrier-decision.tsx` | `buildCarrierEmail` | После verify wniosku |
-| `internal-decision.tsx` | `sendInternalDecisionEmail` | После verify wniosku → planiści, opiekun, lider, wnioski@ |
+| `internal-decision.tsx` | `sendInternalDecisionEmail` | После verify wniosku → planiści периода, их лидеры, opiekun, admin + pracownik, wnioski@ (см. «Получатели писем по wniosku» ниже) |
 | `carrier-submitted.tsx` | `submitNewClaim` notif | После submit перевозчиком |
 | ~~`daily-reminder.tsx`~~ | ~~`sendDailyReminders`~~ | ❌ **удалён 2026-07-30** — дублировал `verification-digest.tsx` |
 | `weekly-report.tsx` | `sendWeeklyReport` | Крон пн 09:00 — сводка прошлой недели всем активным `admin`: суммарная дoплата за неделю (панель) + «W tym tygodniu» (złożone/zaakceptowane/odrzucone + **«Uznane reklamacje»** — count · Σ `reklamacjaAmount` по `reklamacjaResolution='UZNANA'` и `reklamacjaDecidedAt` внутри недели) + «Stan bieżący» (na weryfikacji / czeka na autoryzację / reklamacje — backlog по `status='REKLAMACJA'`, без изменений). Шлётся даже при нулях. ⚠️ Счётчики «zaakceptowane»/«odrzucone» и Σ dopłat **исключают** строки, у которых рекламация была решена внутри окна: решение рекламации перештампывает `statusChangedAt` (из того же инстанса `Date`, что и `reklamacjaDecidedAt`), иначе старое решение засчиталось бы как свежее |
@@ -611,6 +611,29 @@ const html = await render(<CarrierDecisionEmail claim={claim} decision="ZAAKCEPT
 | `vehicle-removal-admin.tsx` (#19) | (новое, vehicle-status rework Step B) | Крон 07:20 — дайджест **всем активным admin**: список LIVE-машин со статусом `do_usuniecia` (idle ≥29 календарных дней). Персональный `User.email`. Тема `Pojazdy do usunięcia — {n}` |
 | `delegation-announced.tsx` | — (новое) | Перевозчик зарегистрировал выезд (`POST /delegations`) → **только перевозчику**, подтверждение-квитанция (ciągnik, kierowca, wyjazd, planowany powrót). Адрес — login-ящик `Carrier.user.email`. **Внутренней копии нет**: opiekun-письмо удалено 2026-08-07, внутреннее уведомление ушло в [Google Chat](#google-chat-notifications). Пропсов `forCarrier` / `carrierName` больше нет — аудитория одна |
 | `delegation-ready.tsx` | — (новое) | `eksport \| admin` перевёл выезд в `gotowy` (`POST /delegations/:id/ready`, не rollback) → перевозчику: нашли ładunek, выставили zlecenie. Тема `Zlecenie {spedOrderNumber} — ciągnik {plate}` |
+
+> **Получатели писем по wniosku** (`carrier-submitted`, `internal-decision` —
+> внутренний список `ClaimsService._collectClaimRecipients`, чтение
+> root-клиентом после коммита; письма рекламации берут из него только
+> `admin` + `pracownik`). Внутренние: все активные `admin` +
+> `pracownik`, opiekun перевозчика, **планиста(ы) периода wniosku** и их
+> лидеры, `wnioski@` (`GMAIL_FROM`); адрес перевозчика из внутренних
+> вычитается. Планиста периода — по docs/29 U8 (с 2026-09-28; раньше —
+> **текущий** `Vehicle.planner` + свободный `liderEmail`):
+>
+> - wniosek **с выездом** → планиста из снимка выезда `Delegation.plannerId`
+>   (тот, кто вёл этот выезд, даже если машину потом передали); снимок пуст →
+>   планисты-получателя нет;
+> - wniosek **без выезда** (legacy) → все планисты, чьи строки журнала
+>   `vehicle_planner_assignments` пересекают период: `validFrom < dateEnd + 1
+>   день` и (`validTo IS NULL` или `validTo >= dateStart`) — дата конца берётся
+>   целым днём, передача в последний день периода даёт обоих;
+> - CC — **текущий** лидер каждого такого планисты (`User.liderId → email`), не
+>   сохранённый адрес. `liderEmail` больше не читается (колонка удаляется
+>   отдельным релизом, docs/29 R8);
+> - неактивные / soft-deleted планисты и лидеры пропускаются.
+>
+> Заявки на передачу машины другому планисте (docs/29) писем **не** шлют (R9).
 
 > **Guarantee Watchdog — получатели:** перевозчик резолвится как `carrier-submitted` / `delegation-announced` — **login-user email** (`Carrier.user.email` через `User.id = Carrier.userId`), **не** `ordersEmail`. Опекун — персональный `User.email` (`Carrier.opiekunId → User`). При нарушении перевозчику письма **нет** (решение заказчика) — нарушение только в дайджесте опекуна (#18). Отправка через `MailService.enqueueGuarantee*` (`_enqueueOr` → очередь `email-send` с sync-фолбэком, `MailJobsRegistry`/diagnostics подхватываются автоматически).
 
@@ -939,7 +962,10 @@ OPIEKUN: <opiekun>
   `chat-context.builder.ts`). Водитель всегда есть (`Delegation.driverId` NOT
   NULL) → em-dash-фолбэка нет.
 - Источники команды:
-  - planista = `Vehicle.planner.name` (один ведущий спедитор), диспетчеры =
+  - planista = `Delegation.planner.name` — **снимок** планисты этого выезда
+    (docs/29 §3.3, с 2026-09-28; раньше — `Vehicle.planner.name`). В момент
+    `add()` это текущий планиста машины; снимок держит имя верным, даже если
+    job выполнится уже после передачи машины. Диспетчеры =
     **все** `Vehicle.dispatchTeam.dispatchers[].name` (обычно 2 по сменам, число
     не фиксировано). Любое имя может быть `null`/пустым → **опускается** из
     строки `ZESPÓŁ`, без пустого слота и без `//`.
@@ -950,7 +976,8 @@ OPIEKUN: <opiekun>
 > в MAGTRANS нет; выезд ведёт **второй диспетчер**. Строка `ZESPÓŁ PROWADZĄCY`
 > теперь `planista / <все диспетчеры команды авто>` — legacy-слот `weryfikator`
 > (единственный активный `User` с ролью `weryfikator`) **удалён**. Источники:
-> planista = `Vehicle.planner.name`, диспетчеры = `Vehicle.dispatchTeam.dispatchers[].name`.
+> planista = `Delegation.planner.name` (снимок выезда, docs/29; до 2026-09-28 —
+> `Vehicle.planner.name`), диспетчеры = `Vehicle.dispatchTeam.dispatchers[].name`.
 > См. [04-data-model.md](04-data-model.md) (сущность `Team`) и
 > [17-migration-roadmap.md](17-migration-roadmap.md) Phase 11.
 

@@ -21,6 +21,7 @@
 
 import {
   Activity,
+  ArrowLeftRight,
   BellRing,
   Building2,
   Container,
@@ -54,6 +55,7 @@ import { useActiveNavRefresh } from '@/lib/hooks/useActiveNavRefresh';
 import { useAlerts } from '@/lib/hooks/useAlerts';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { useOpiekunFleet } from '@/lib/hooks/useOpiekunFleet';
+import { usePendingDecideCount } from '@/lib/hooks/usePlannerTransfers';
 import { cn } from '@/lib/utils';
 
 /** Nav key of the «Moja opieka» entry — the one that carries the count pill. */
@@ -61,6 +63,9 @@ const OPIEKA_NAV_KEY = 'opieka';
 
 /** Nav key of the «Alerty» entry — carries a red expiring-docs count pill. */
 const ALERTS_NAV_KEY = 'alerts';
+
+/** Nav key of «Przekazania» — admin-only pending pill (docs/14 §17.4.3). */
+const TRANSFERS_NAV_KEY = 'transfers';
 
 /** Plain-JSON shape passed from the server-component layout. */
 export interface NavItem {
@@ -88,6 +93,7 @@ const ICONS: Record<string, LucideIcon> = {
   MapPin,
   Users2,
   BellRing,
+  ArrowLeftRight,
 };
 
 interface EmployeeSidebarProps {
@@ -132,6 +138,16 @@ export function EmployeeSidebar({
     ? alertsQ.data.meta.totals.expired + alertsQ.data.meta.totals.critical
     : 0;
 
+  // «Przekazania» pill — pending planner-transfer requests awaiting a
+  // decision. Admin only: the opiekun's entry is his own requests list (D5,
+  // no pill). Not a notification (R9) — the only signal a request exists.
+  // Shares the «Do decyzji» tab's query, so the numbers cannot disagree.
+  const showsTransfers = items.some((l) => l.key === TRANSFERS_NAV_KEY);
+  const transfersCount =
+    usePendingDecideCount({
+      enabled: showsTransfers && user?.role === 'admin',
+    }) ?? 0;
+
   // Compute one active key per render — the entry whose href is the
   // longest prefix of the current pathname.
   const activeKey = items.reduce<string | null>((best, link) => {
@@ -152,13 +168,17 @@ export function EmployeeSidebar({
         const spinning = active && isRefreshing;
         const Icon = spinning ? RefreshCw : (ICONS[link.iconName] ?? FileText);
         // Per-entry count pill: «Moja opieka» → amber attention tally;
-        // «Alerty» → red expired/expiring-today tally. At most one applies.
+        // «Alerty» → red expired/expiring-today tally; «Przekazania» →
+        // `bg-warning-dark` pending-decision tally (D8: white on #c2410c is
+        // 5.2:1, on #f97316 only 2.9:1). At most one applies.
         const pill =
           link.key === OPIEKA_NAV_KEY && attentionCount > 0
             ? { count: attentionCount, tone: 'bg-warning', label: t('nav.opiekaAttentionBadge', { count: attentionCount }) }
             : link.key === ALERTS_NAV_KEY && alertsCount > 0
               ? { count: alertsCount, tone: 'bg-danger', label: t('nav.alertsBadge', { count: alertsCount }) }
-              : null;
+              : link.key === TRANSFERS_NAV_KEY && transfersCount > 0
+                ? { count: transfersCount, tone: 'bg-warning-dark', label: t('nav.transfersBadge', { count: transfersCount }) }
+                : null;
         return (
           <li key={link.key}>
             <Link

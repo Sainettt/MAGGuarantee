@@ -15,6 +15,16 @@
 // (CreateVehicleSchema is `.strict()` and `File` isn't JSON-serialisable, so it
 // would break `useFormDraft`). They live in component `useState`; the submit
 // handler hands them to the mutation as a separate `files` payload.
+//
+// PLANISTA (docs/29 R1/R7, docs/14 §17.2): chosen ONLY on create (required,
+// with a «later change needs a request» hint). On edit nobody — admin
+// included — changes it directly: the cell is <VehiclePlannerLockedField>
+// (not registered in RHF), the edit resolver is `VehicleEditFormSchema` (the
+// create rules minus `plannerId`), and the PATCH body never carries the key
+// (the api answers 422 VEHICLE_PLANNER_CHANGE_REQUIRES_TRANSFER). The
+// opiekun's «Poproś o zmianę planisty» opens <PlannerTransferRequestDialog>
+// STACKED over this form — rendered outside the <form> element, it is sent
+// immediately, independent of «Zapisz».
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { AlertTriangle } from 'lucide-react';
@@ -24,6 +34,7 @@ import { Controller, useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
   CreateVehicleSchema,
+  VehicleEditFormSchema,
   WasteCountrySchema,
   AdrClassSchema,
   type CreateVehicleDto,
@@ -46,6 +57,8 @@ import { MultiSelect } from '@/components/ui/MultiSelect';
 import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import { TeamMembers } from '@/components/teams/TeamMembers';
+import { PlannerTransferRequestDialog } from '@/components/transfers/PlannerTransferRequestDialog';
+import { VehiclePlannerLockedField } from '@/components/transfers/VehiclePlannerLockedField';
 import { EntityAlreadyExistsNotice } from '@/components/carrier-onboarding/EntityAlreadyExistsNotice';
 import { TemporaryPasswordRow } from '@/components/carrier-onboarding/TemporaryPasswordRow';
 import { WizardStepper } from '@/components/carrier-onboarding/WizardStepper';
@@ -74,6 +87,7 @@ import { useFormDraft } from '@/lib/hooks/useFormDraft';
 import { usePlanisci, useTeamLookups } from '@/lib/hooks/useLookups';
 import { useCreateVehicle, useUpdateVehicle } from '@/lib/hooks/useVehicles';
 import type { VehicleAttachmentUploads } from '@/lib/api/vehicles';
+import { personName } from '@/lib/transfers/transferUi';
 
 const DRAFT_KEY = 'draft:vehicles:new';
 
@@ -157,9 +171,20 @@ export function VehicleFormDialog({
   const isWizard = mode === 'wizard';
 
   const form = useForm<FormValues>({
-    resolver: zodResolver(CreateVehicleSchema) as never,
+    // Edit validates with the create rules MINUS `plannerId` (docs/29 R1) —
+    // the edit form never registers the planista. RHF re-reads `resolver`
+    // from the options on every render, so the switch follows `isEdit`.
+    resolver: zodResolver(
+      isEdit ? VehicleEditFormSchema : CreateVehicleSchema,
+    ) as never,
     defaultValues: getDefaults(),
   });
+
+  // E1 — the opiekun's transfer request, stacked over this form (§17.2.2).
+  const [requestOpen, setRequestOpen] = useState(false);
+  useEffect(() => {
+    if (!open) setRequestOpen(false);
+  }, [open]);
 
   const [fileBuckets, setFileBuckets] = useState<FileBuckets>(EMPTY_BUCKETS);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -188,11 +213,11 @@ export function VehicleFormDialog({
     setAttachmentError(null);
     setFileFieldErrors({});
     if (isEdit && vehicle) {
+      // No `plannerId` here (docs/29 R1) — the edit form does not hold it.
       form.reset({
         carrierId: vehicle.carrierId,
         plateNumber: vehicle.plateNumber,
         active: vehicle.active,
-        plannerId: vehicle.plannerId ?? undefined,
         dispatchTeamId: vehicle.dispatchTeamId ?? undefined,
         notes: vehicle.notes ?? '',
         certificateL: vehicle.certificateL,
@@ -300,8 +325,11 @@ export function VehicleFormDialog({
       const newFiles = collectNewFiles(fileBuckets);
 
       if (isEdit && vehicle) {
-        const { carrierId: _carrierId, ...rest } = cleaned;
+        // `plannerId` is dropped explicitly too (belt and braces over the
+        // stripping edit resolver): a PATCH carrying it is a 422 (docs/29 R1).
+        const { carrierId: _carrierId, plannerId: _plannerId, ...rest } = cleaned;
         void _carrierId;
+        void _plannerId;
         const removeAttachmentIds = collectRemovedIds(
           vehicle.attachments ?? [],
           fileBuckets,
@@ -514,21 +542,34 @@ export function VehicleFormDialog({
                     <Badge variant="muted">{t('euroBadge')}</Badge>
                   </div>
                 </FormItem>
-                <FormField
-                  label={t('fields.planner')}
-                  required
-                  error={errs.plannerId?.message}
-                  htmlFor="vehicle-plannerId"
-                >
-                  <Select id="vehicle-plannerId" {...form.register('plannerId')}>
-                    <option value="">—</option>
-                    {(planisciQ.data ?? []).map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name ?? u.login}
-                      </option>
-                    ))}
-                  </Select>
-                </FormField>
+                {isEdit && vehicle ? (
+                  // §17.2.2 — locked for everyone; request / pending below.
+                  <VehiclePlannerLockedField
+                    vehicle={vehicle}
+                    label={t('fields.planner')}
+                    open={open}
+                    onRequest={() => setRequestOpen(true)}
+                  />
+                ) : (
+                  // §17.2.1 — create (and the carrier wizard): the first
+                  // planista is set directly (R7) — the choice is sticky.
+                  <FormField
+                    label={t('fields.planner')}
+                    required
+                    error={errs.plannerId?.message}
+                    description={tWizard('transfers.form.createHint')}
+                    htmlFor="vehicle-plannerId"
+                  >
+                    <Select id="vehicle-plannerId" {...form.register('plannerId')}>
+                      <option value="">—</option>
+                      {(planisciQ.data ?? []).map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.name ?? u.login}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                )}
                 <FormField
                   label={t('fields.dispatchTeam')}
                   required
@@ -973,10 +1014,30 @@ export function VehicleFormDialog({
           )}
         </FormDialogFooter>
       </form>
+
+      {/* §17.2.2 E1 — stacked OVER the open form (which keeps its unsaved
+          edits). A sibling of the <form>, not a child, so its submit can never
+          bubble (through the React portal tree) into the vehicle form; it
+          portals to <body> itself. Escape closes only this dialog. */}
+      {isEdit && vehicle ? (
+        <PlannerTransferRequestDialog
+          open={open && requestOpen}
+          onOpenChange={setRequestOpen}
+          fromForm
+          vehicle={{
+            id: vehicle.id,
+            plateNumber: vehicle.plateNumber,
+            carrierName: vehicle.carrier ? personName(vehicle.carrier) : null,
+            plannerName: personName(vehicle.planner),
+          }}
+        />
+      ) : null}
     </FormDialog>
   );
 }
 
+/** Create-mode defaults. `plannerId` exists only here — the edit form's reset
+ *  omits it and its resolver strips it (docs/29 R1). */
 function getDefaults(): FormValues {
   return {
     carrierId: '' as unknown as string,

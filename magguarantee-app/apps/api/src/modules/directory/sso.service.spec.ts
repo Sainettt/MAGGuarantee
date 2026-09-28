@@ -71,7 +71,13 @@ function makeHarness(
     grantAccess: jest.fn(),
   } as unknown as jest.Mocked<DirectoryService>;
   const users = {
-    toDto: jest.fn((row: UserRow) => ({ id: row.id, login: row.login })),
+    // docs/29 — the grant answers with the RESOLVED mapping (real `liderUser`).
+    toDtoResolved: jest.fn(async (row: UserRow) => ({
+      id: row.id,
+      login: row.login,
+      liderId: row.liderId ?? null,
+      liderUser: row.liderId ? { id: row.liderId, login: 'lead', name: null, active: true, lider: true } : null,
+    })),
   } as unknown as jest.Mocked<UsersService>;
 
   const saved = new Map((opts.saved ?? []).map((m) => [m.stanowiskoCode, m]));
@@ -222,8 +228,22 @@ describe('SsoService.grantAccess', () => {
 
     // No `lider` on the wire = not a leader.
     expect(h.directory.grantAccess).toHaveBeenCalledWith('jan.kowalski@magtrans.eu', 'eksport', false);
-    expect(h.users.toDto).toHaveBeenCalledWith(row);
-    expect(out).toEqual({ user: { id: 'u-9', login: 'jan.kowalski' }, outcome: 'reactivated' });
+    expect(h.users.toDtoResolved).toHaveBeenCalledWith(row);
+    expect(out).toEqual({
+      user: { id: 'u-9', login: 'jan.kowalski', liderId: null, liderUser: null },
+      outcome: 'reactivated',
+    });
+  });
+
+  it('answers with the real leader mini when the account keeps a leader link (docs/29)', async () => {
+    const h = makeHarness([]);
+    const row = { id: 'u-9', login: 'jan.kowalski', liderId: 'u-lead' } as UserRow;
+    h.directory.grantAccess.mockResolvedValue({ user: row, outcome: 'updated' });
+
+    const out = await h.svc.grantAccess({ email: 'jan.kowalski@magtrans.eu', role: 'planista' });
+
+    expect(h.users.toDtoResolved).toHaveBeenCalledWith(row);
+    expect(out.user).toMatchObject({ liderId: 'u-lead', liderUser: { id: 'u-lead', lider: true } });
   });
 
   it('forwards the leader flag (docs/28 — an eksport / DAF leader is granted this way)', async () => {

@@ -9,6 +9,10 @@
 // with N lock glyphs.
 //
 // The component owns no i18n — copy is passed in as children.
+//
+// Rendered as a <div>, not a <p>: children may be block content (the transfer
+// approve dialog passes a <ul>), and a list inside <p> is invalid HTML that
+// React reports as a hydration error.
 
 import { Lock, type LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
@@ -36,7 +40,7 @@ export function LockNotice({
   icon: Icon = Lock,
 }: LockNoticeProps) {
   return (
-    <p
+    <div
       role="note"
       id={id}
       className={cn(
@@ -45,8 +49,8 @@ export function LockNotice({
       )}
     >
       <Icon size={14} aria-hidden className="mt-0.5 shrink-0" />
-      <span>{children}</span>
-    </p>
+      <div className="min-w-0">{children}</div>
+    </div>
   );
 }
 

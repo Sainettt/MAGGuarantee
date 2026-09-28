@@ -38,8 +38,11 @@ function rawRow(rates: {
       plannerId: null,
       dispatchTeamId: null,
       dispatchTeam: null,
-      planner: null,
+      planner: { id: 'plan-now', login: 'plan.now', name: 'Plan Now' },
     },
+    // docs/29 — the trip's own planista (snapshot).
+    plannerId: 'plan-trip',
+    planner: { id: 'plan-trip', login: 'plan.trip', name: 'Plan Trip' },
     trailerId: 'trl-1',
     trailer: { id: 'trl-1', plateNumber: 'TR1' },
     driverId: 'drv-1',
@@ -128,5 +131,75 @@ describe('DelegationsRepository — vehicle rate Decimal→number mapping', () =
     expect(out?.vehicle?.rateUe).toBe(1.1);
     expect(out?.vehicle?.rateExport).toBeNull();
     expect(out?.vehicle?.rateImport).toBeNull();
+  });
+});
+
+// ── docs/29 — the planista snapshot on the trip ─────────────
+
+describe('DelegationsRepository — planista snapshot (docs/29)', () => {
+  const RATES = { rateDe: null, rateUe: null, rateExport: null, rateImport: null };
+
+  function makeCapturingRepo(): {
+    repo: DelegationsRepository;
+    findMany: jest.Mock;
+    updateMany: jest.Mock;
+  } {
+    const findMany = jest.fn(async () => [rawRow(RATES)]);
+    const updateMany = jest.fn(async () => ({ count: 2 }));
+    const prisma = {
+      tx: {
+        delegation: {
+          findFirst: jest.fn(async () => rawRow(RATES)),
+          findMany,
+          updateMany,
+        },
+      },
+    } as unknown as PrismaService;
+    return { repo: new DelegationsRepository(prisma), findMany, updateMany };
+  }
+
+  it('maps the trip snapshot AND keeps the vehicle’s current planista apart', async () => {
+    const { repo } = makeCapturingRepo();
+    const out = await repo.findById('deleg-1');
+    expect(out?.plannerId).toBe('plan-trip');
+    expect(out?.planner).toEqual({ id: 'plan-trip', login: 'plan.trip', name: 'Plan Trip' });
+    expect(out?.vehicle?.planner?.id).toBe('plan-now');
+  });
+
+  it('the planista list scope filters the trip column, not the vehicle relation', async () => {
+    const { repo, findMany } = makeCapturingRepo();
+    await repo.list({ plannerId: 'plan-trip', limit: 50 });
+    const where = (findMany.mock.calls[0] as unknown as [{ where: Record<string, unknown> }])[0]
+      .where;
+    expect(where.plannerId).toBe('plan-trip');
+    expect(where.vehicle).toBeUndefined();
+  });
+
+  it('the dyspozytor scope still reads the vehicle’s live team', async () => {
+    const { repo, findMany } = makeCapturingRepo();
+    await repo.list({ dispatchTeamId: 'team-1', limit: 50 });
+    const where = (findMany.mock.calls[0] as unknown as [{ where: Record<string, unknown> }])[0]
+      .where;
+    expect(where.vehicle).toEqual({ dispatchTeamId: 'team-1' });
+    expect(where.plannerId).toBeUndefined();
+  });
+
+  it('reassignPlannerSnapshot moves only the given statuses of the old planista on this vehicle', async () => {
+    const { repo, updateMany } = makeCapturingRepo();
+    const moved = await repo.reassignPlannerSnapshot({
+      vehicleId: 'veh-1',
+      fromPlannerId: 'p-old',
+      toPlannerId: 'p-new',
+      statuses: ['zgloszony', 'gotowy'],
+    });
+    expect(moved).toBe(2);
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        vehicleId: 'veh-1',
+        plannerId: 'p-old',
+        status: { in: ['zgloszony', 'gotowy'] },
+      },
+      data: { plannerId: 'p-new' },
+    });
   });
 });

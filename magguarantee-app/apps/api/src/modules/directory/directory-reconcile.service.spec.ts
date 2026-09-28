@@ -44,7 +44,7 @@ function user(over: Partial<UserRow> = {}): UserRow {
     role: 'planista',
     name: 'Jan Kowalski',
     active: true,
-    liderEmail: null,
+    liderId: null,
     teamId: null,
     mustChangePassword: false,
     passwordChangedAt: null,
@@ -307,6 +307,34 @@ describe('DirectoryReconcileService.run', () => {
       u.id,
       expect.objectContaining({ role: 'dyspozytor', lider: false }),
     );
+  });
+
+  it('never touches liderId — neither the planista’s own link nor his subordinates’ (docs/29 U9, U10)', async () => {
+    // A planista-lider loses the flag AND a planista loses the planista role:
+    // the reconcile writes (role, lider) only; `liderId` is admin-owned.
+    const leader = user({ id: 'u-lead', role: 'planista', lider: true, magspaceEmployeeId: 'emp-1' });
+    const sub = user({
+      id: 'u-sub',
+      login: 'anna.nowak',
+      email: 'anna.nowak@magtrans.eu',
+      role: 'planista',
+      liderId: 'u-lead',
+      magspaceEmployeeId: 'emp-2',
+    });
+    const h = makeHarness({
+      managed: [leader, sub],
+      roster: [
+        employee({ id: 'emp-1' }),
+        employee({ id: 'emp-2', email: 'anna.nowak@magtrans.eu', firstName: 'Anna', lastName: 'Nowak' }),
+      ],
+      accessFor: () => ({ role: 'opiekun', lider: false }),
+    });
+
+    await h.svc.run(NOW);
+
+    const calls = (h.users.update as jest.Mock).mock.calls as [string, Record<string, unknown>][];
+    expect(calls.length).toBeGreaterThan(0);
+    for (const [, data] of calls) expect('liderId' in data).toBe(false);
   });
 
   it('writes role and flag in the same UPDATE when both change', async () => {

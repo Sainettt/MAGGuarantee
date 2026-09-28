@@ -465,8 +465,15 @@ export class DirectoryService {
         active: existing.active,
         managedBy: existing.managedBy,
         roleOverride: existing.roleOverride,
+        liderId: existing.liderId,
       },
     });
+    // docs/29 U9 — a leader link lives only on a planista. The grant makes
+    // `role` the effective role (it writes `roleOverride` too), so a grant of
+    // any other role drops the account's OWN link — the same rule as
+    // `PATCH /users/:id`. Only this account's `liderId` is touched: if it is
+    // itself a leader, its planisci keep pointing at it (U10).
+    const dropsLeaderLink = role !== 'planista' && existing.liderId !== null;
     // One UPDATE: `role`, `roleOverride` and `lider` must land together — the
     // CHECK judges the final (role, lider), and the next sync reads
     // (roleOverride, lider).
@@ -474,6 +481,7 @@ export class DirectoryService {
       role,
       roleOverride: role,
       lider,
+      ...(dropsLeaderLink ? { liderId: null } : {}),
       active: true,
       directorySyncedAt: new Date(),
     });

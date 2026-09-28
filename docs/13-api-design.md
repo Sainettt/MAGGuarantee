@@ -46,8 +46,10 @@
   сервис документирует свои в разделе соответствующего endpoint-а.
 - **422 из валидационного pipe** (2026-09-25, docs/28). Shared-схема может
   выразить бизнес-правило как `superRefine`, пометив issue `code: 'custom'` +
-  `params.code` (первое и пока единственное — `refineLiderPair` →
-  `USER_LIDER_REQUIRES_LIDER_ROLE`). Если **все** ошибки Zod такие,
+  `params.code` (сейчас: `refineLiderPair` → `USER_LIDER_REQUIRES_LIDER_ROLE`;
+  docs/29 — `refineLiderIdRole` → `USER_LIDER_ID_INVALID`, `plannerId` в
+  `UpdateVehicleSchema` → `VEHICLE_PLANNER_CHANGE_REQUIRES_TRANSFER`, длина
+  `reason` заявки на передачу → `PLANNER_TRANSFER_REASON_INVALID`). Если **все** ошибки Zod такие,
   `ZodValidationPipe` отвечает не 400, а **422** с `extensions.code` и
   `issues` — тем же кодом, что вернул бы сервис для того же правила на слитой
   строке; любая ошибка формы в смеси оставляет обычный 400. Правило помечается
@@ -127,14 +129,39 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 
 | Method + Path | Назначение |
 |---|---|
-| GET `/users` | Список всех пользователей (фильтры `role=`, `active=`, `lider=true\|false` — строго строки `true`/`false`, иначе 400; `lider=true` — только лидеры). |
+| GET `/users` | Список всех пользователей (фильтры `role=`, `active=`, `lider=true\|false` — строго строки `true`/`false`, иначе 400; `lider=true` — только лидеры; `liderId=<uuid>` — планисты этого лидера, docs/29). |
 | GET `/users/:id` | Деталь |
-| POST `/users` | Создать (admin). `lider?: boolean` (docs/28, по умолчанию `false`) — только для роли из `LIDER_ROLES` (`planista`/`dyspozytor`/`opiekun`/`pracownik`/`eksport`), иначе **422** `USER_LIDER_REQUIRES_LIDER_ROLE` (pipe `CreateUserRequestSchema`, см. «Формат ответов»; сервис проверяет повторно). |
+| POST `/users` | Создать (admin). `lider?: boolean` (docs/28, по умолчанию `false`) — только для роли из `LIDER_ROLES` (`planista`/`dyspozytor`/`opiekun`/`pracownik`/`eksport`), иначе **422** `USER_LIDER_REQUIRES_LIDER_ROLE` (pipe `CreateUserRequestSchema`, см. «Формат ответов»; сервис проверяет повторно). `liderId?: uuid \| null` (docs/29 U9; `''` = нет) — только при `role = planista` (иначе 422 `USER_LIDER_ID_INVALID` уже из pipe), цель — активный `planista` с `lider = true`. |
 | PATCH `/users/:id` | Обновить. На `managedBy = magspace` менять `role`/`active` нельзя (422 `USER_MANAGED_BY_MAGSPACE`), кроме как вместе с `managedBy: 'local'`. **Переход `magspace` → `local` принудительно обнуляет `roleOverride`** (побеждает `roleOverride` в том же теле); текущая `role` остаётся и дальше принадлежит админке. **`lider?: boolean`** (docs/28): пара `lider ⇒ role ∈ LIDER_ROLES` проверяется на **слитой** строке и для итоговой `role`, и для итогового `roleOverride` (если не null) → **422** `USER_LIDER_REQUIRES_LIDER_ROLE` с `extensions.field` = `role` \| `roleOverride`; у лидера смена роли на роль вне `LIDER_ROLES` требует `lider: false` в том же теле (иначе 422, а не 500 от CHECK). На `magspace` флаг, **отличающийся** от текущего, допустим только при `roleOverride` (стоит или ставится в этом теле) либо вместе с `managedBy: 'local'`, иначе `USER_MANAGED_BY_MAGSPACE` с `fields ∋ 'lider'`; неизменённое значение проходит. `role` при установке `roleOverride` не переписывается, поэтому `{ roleOverride: 'planista', lider: true }` у `magspace`-weryfikatora — 422 (лидерство после следующего входа или через «Nadaj dostęp»). Audit `updateUser` пишет `before` → `after` (вкл. `lider`). |
 | POST `/users/:id/deactivate` | `Aktywny=Nie` + email |
 | POST `/users/:id/reactivate` | + email |
 | POST `/users/:id/reset-password` | Body `{mode:'generate'}` или `{mode:'custom', password}`. Ставит `mustChangePassword=true` + `passwordChangedAt`, отзывает refresh-токены юзера, возвращает `temporaryPassword`. (Email-доставка — Phase 9.) |
 | DELETE `/users/:id` | Soft delete |
+
+> **`liderId` — лидер планисты (docs/29 R8, U9, U10; с 2026-09-28).** Заменяет
+> свободный `liderEmail`: поле `liderEmail` **удалено** из `CreateUserSchema` /
+> `UpdateUserSchema` / `UserDto` (strict-схемы отвечают 400 на старый ключ;
+> колонка в БД живёт ещё один релиз, api её не читает и не пишет).
+>
+> - `POST` / `PATCH` принимают `liderId?: uuid | null` (`''` из формы = `null`;
+>   в PATCH отсутствие ключа = «не трогать»). Проверка на **слитой** строке →
+>   **422 `USER_LIDER_ID_INVALID`** с `extensions.reason`:
+>   `role_not_planista` (эффективная роль `roleOverride ?? role` ≠ `planista`),
+>   `self`, `not_found`, `not_planista`, `inactive`, `not_lider` (цель без флага).
+> - Повторная отправка **сохранённого** значения — no-op без проверки (связь
+>   может быть «устаревшей»: у цели сняли флаг, U10 — форма не должна падать на
+>   пересохранении).
+> - Эффективная роль перестаёт быть `planista` (смена `role` / `roleOverride`)
+>   → сервис **сам очищает** `liderId` в том же UPDATE. Явный `liderId` рядом со
+>   сменой роли на не-планисту — 422 `role_not_planista`.
+> - Снятие флага `lider` у лидера или смена его роли **не** очищает `liderId`
+>   его планистов (U10) — право решать проверяется по флагу в момент решения.
+> - На `managedBy = magspace` поле **редактируемо** (MAGSpace иерархии не
+>   отдаёт); directory-reconcile `liderId` не пишет никогда.
+> - `UserDto` несёт `liderId: uuid | null` и `liderUser: { id, login, name,
+>   active, lider } | null` — **текущие** флаги лидера (`active=false` и для
+>   soft-deleted), чтобы форма показала устаревшую связь. Список резолвит
+>   лидеров одним батч-запросом.
 
 ### Carriers — `/api/v1/carriers`
 
@@ -147,7 +174,7 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 | POST `/carriers/:id/deactivate` | `toggleCarrierActive` (off) | admin / opiekun(own) |
 | POST `/carriers/:id/reactivate` | `toggleCarrierActive` (on) | admin / opiekun(own) |
 | POST `/carriers/:id/reset-password` | `resetCarrierPassword` / `resetCarrierPasswordByOpiekun` | admin / opiekun(own) |
-| DELETE `/carriers/:id` | `deleteCarrierHard` (legacy name) | **admin only** — на деле **SOFT delete** (`deletedAt`) + ручной soft-каскад: vehicles/drivers/trailers (`deletedAt`+`active=false`) и 1:1 User (блок логина). Opiekun удалять не может — его альтернатива `/carriers/:id/deactivate`. |
+| DELETE `/carriers/:id` | `deleteCarrierHard` (legacy name) | **admin only** — на деле **SOFT delete** (`deletedAt`) + ручной soft-каскад: vehicles/drivers/trailers (`deletedAt`+`active=false`) и 1:1 User (блок логина); `pending`-заявки на передачу планисты машин перевозчика → `cancelled` (`decidedById` = удаляющий, docs/29 U6). Opiekun удалять не может — его альтернатива `/carriers/:id/deactivate`. |
 | DELETE `/carriers/:id/hard` | (новое, Phase 4.4) | **admin only**, body `{reason}` → `audit_log.metadata.reason`. **Физическое** удаление carrier + его User (login освобождается). **409 `CARRIER_HAS_REFERENCES`**, если существует хоть одна строка vehicles / drivers / trailers / claims / delegations / guarantee_idle_episodes этого перевозчика — **включая soft-deleted** (FK `ON DELETE RESTRICT`, бизнес-каскадов нет — docs/12 §Soft-delete). Hard-delete только для «пустых» записей, созданных по ошибке. |
 | GET `/carriers/:id/attachments` | (новое) — company docs (insurance/license/kreptd/other) | admin / opiekun(own) |
 | POST `/carriers/:id/attachments` | (новое) — upload one doc — **`multipart/form-data`** (`file` + `category`). Multiple files per category allowed (carrier-level `adr` removed 2026-07). | admin / opiekun(own) |
@@ -176,11 +203,11 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 |---|---|---|
 | GET `/vehicles?carrierId=...` | `getVehiclesForCarrier` / `getMyVehicles` (carrier) / `getAllVehiclesForAdmin` | admin / opiekun / planista / dyspozytor / przewoznik |
 | GET `/vehicles/:id` | `getVehicleDetails` | admin / opiekun / planista / dyspozytor / przewoznik |
-| POST `/vehicles` | `addVehicle` / `addVehicleByOpiekun` | admin / opiekun — **`multipart/form-data`** |
-| PATCH `/vehicles/:id` | `updateVehicleDetails` / `updateVehicleDetailsByOpiekun` | admin / opiekun — **`multipart/form-data`** |
-| POST `/vehicles/:id/deactivate` | `toggleVehicleActive` (off) | admin / opiekun |
+| POST `/vehicles` | `addVehicle` / `addVehicleByOpiekun` | admin / opiekun — **`multipart/form-data`**. `plannerId` **обязателен** (docs/29 R7) — первый планиста ставится здесь напрямую; тем же INSERT-ом открывается строка журнала планистов `source = create` (`validFrom` = `createdAt`, `actorId` = создатель) |
+| PATCH `/vehicles/:id` | `updateVehicleDetails` / `updateVehicleDetailsByOpiekun` | admin / opiekun — **`multipart/form-data`**. **`plannerId` запрещён** для всех ролей, включая admin: **422 `VEHICLE_PLANNER_CHANGE_REQUIRES_TRANSFER`** (docs/29 R1; снять планисту `null` тоже нельзя) — планисту меняет только одобренная заявка, см. [Vehicle planner transfers](#vehicle-planner-transfers--apiv1vehiclesidplanner--apiv1planner-transfers). `active=false` отменяет `pending`-заявку (как deactivate) |
+| POST `/vehicles/:id/deactivate` | `toggleVehicleActive` (off) | admin / opiekun. Отменяет `pending`-заявку на передачу машины (`cancelled`, `decidedById` = вызывающий, docs/29 U6) в той же транзакции; `audit_log.metadata.cancelledPlannerTransfers` |
 | POST `/vehicles/:id/reactivate` | (on) | admin / opiekun |
-| DELETE `/vehicles/:id` | `removeVehicle` / `removeVehicleByOpiekun` | admin / opiekun — **soft** (`deletedAt`) |
+| DELETE `/vehicles/:id` | `removeVehicle` / `removeVehicleByOpiekun` | admin / opiekun — **soft** (`deletedAt`); `pending`-заявка на передачу отменяется, как при deactivate |
 | GET `/vehicles/active?login=...` | `getActiveVehiclesForLogin` (для carrier-login dropdown) | — |
 | GET `/vehicles/:id/attachments` | (новое) — список porozumienie/gps/cabotage-вложений | admin / opiekun / planista / dyspozytor / przewoznik |
 | GET `/vehicles/:id/attachments/:attachmentId/download` | (новое) — proxy-стрим файла из MinIO | admin / opiekun / planista / dyspozytor / przewoznik |
@@ -305,6 +332,97 @@ cursor-пагинация без изменений), остальные чет�
 скопируются по **команде** (`Vehicle.dispatchTeamId === AuthUser.teamId`), а не
 по `user.sub`. Диспетчер **без команды** видит пустой набор.
 
+**Scope планисты — уровень машины живой (docs/29 U7).** `GET /vehicles`,
+`GET /vehicles/:id`, `GET /vehicles/km-report`, `GET /fleet/planista`, GPS
+читают **текущий** `Vehicle.plannerId`: после передачи прежний планиста теряет
+машину на этих экранах сразу (включая прошлые недели км). Исторические —
+только выезды (снимок `Delegation.plannerId`, см. Delegations), получатели писем
+по wnioskam и имя планисты в Chat-сообщении.
+
+### Vehicle planner transfers — `/api/v1/vehicles/:id/planner-*`, `/api/v1/planner-transfers`
+
+> docs/29 §3 (2026-09-28). После создания планисту машины меняет **только
+> одобренная заявка** (R1). Подают: opiekun перевозчика машины и **текущий**
+> планиста (R2; admin **не** подаёт — U1). Решают: admin или **текущий** лидер
+> текущего планисты (`fromPlanner.liderId = user.sub` и `user.lider = true` в
+> момент решения — U10), и никогда — автор или получатель (R4). Одна `pending`
+> на машину (U4). **Никаких писем и Chat-сообщений** о заявках и решениях (R9).
+> Контроллер — `apps/api/src/modules/planner-transfers/`; схемы —
+> `packages/shared/src/schemas/planner-transfers.ts`.
+
+| Method + Path | Роль | Что |
+|---|---|---|
+| POST `/vehicles/:id/planner-transfers` | opiekun (`OpiekunOwnershipGuard` — машины своих перевозчиков) / planista (только **текущий** планиста машины — проверка ресурса) | Подать заявку. Body `CreatePlannerTransferSchema` (strict): `{ toPlannerId: uuid, reason: string }` — `reason` обрезается, 3..500 символов. **201** `PlannerTransferDto`. Audit `plannerTransfer.request` |
+| GET `/vehicles/:id/planner-history` | admin / opiekun (свой перевозчик) / planista (**текущий** планиста машины **или** его текущий лидер) — U11; przewoznik, dyspozytor и прежний планиста — 403 | Журнал назначений + все заявки машины → `VehiclePlannerHistoryDto` |
+| GET `/planner-transfers?scope=decide\|mine&status=&vehicleId=&cursor=&limit=` | admin / opiekun / planista | `scope=decide` — входящие на решение: admin — **все**; planista с `lider=true` — заявки **своих** планистов (`fromPlanner.liderId = me`), включая строки, которые он решить не может (`viewerBlockedReason`); иначе 403 `PLANNER_TRANSFER_NOT_DECIDER`. `scope=mine` — поданные мной. `status` = `pending` (по умолчанию, **старые сверху**) \| `decided` (любой из `approved`/`rejected`/`cancelled`, **новые решения сверху**) \| один терминальный статус. Cursor-пагинация (`cursor` = последний `id`, `limit` ≤ 200, по умолчанию 50) → `{ items: PlannerTransferDto[], nextCursor }` |
+| POST `/planner-transfers/:id/approve` | admin / planista (лидер `fromPlanner` — ресурс) | Одобрить. Body `{ comment?: string ≤ 500 }` (пусто = без комментария). **200** `PlannerTransferDto`. Audit `plannerTransfer.approve` (`metadata`: `vehicleId`, `fromPlannerId`, `toPlannerId`, `movedDelegations`) |
+| POST `/planner-transfers/:id/reject` | admin / planista (лидер `fromPlanner`) | Отклонить. Body `{ reason: string }` (обязательна, 3..500, U3). Устаревшую заявку (планиста сменился, машина выключена, получатель неактивен) отклонить **можно**. **200**. Audit `plannerTransfer.reject` |
+| POST `/planner-transfers/:id/cancel` | opiekun / planista — **только автор** | Отозвать свою `pending`. Без тела. **200**. Audit `plannerTransfer.cancel` |
+
+**Транзакция одобрения** (ambient-транзакция `@Audit`, `manualTransaction` не
+используется): (1) `SELECT … FOR UPDATE` строки машины — параллельные
+одобрение / деактивация / правка той же машины ждут; (2) перечитать заявку и
+проверить заново (U6): всё ещё `pending` (иначе 409), `vehicle.plannerId =
+fromPlannerId` (иначе 409 «устарела»), машина существует и активна (422),
+получатель — активный `planista` (422); (3) compare-and-set закрытие заявки
+(`status = 'pending'` в `WHERE`; проиграли гонку — 409); (4) с **одним** `now`:
+открытая строка журнала `validTo = now`, новая строка `source = transfer`,
+`validFrom = now`, `transferId`, `actorId` = решающий; `Vehicle.plannerId =
+toPlanner`; выезды этой машины со статусом `zgloszony` / `gotowy` и снимком
+`plannerId = fromPlanner` → `toPlanner` (R6; `w_trasie` доводит прежний
+планиста, `zjechal` / `anulowany` остаются за ним). Отклонение и отмена машину
+не блокируют и U6 не перепроверяют.
+
+**Авторизация решения** — на уровне ресурса (не guard): `@Roles('admin',
+'planista')`, затем `role = admin` **или** (`role = planista` и `lider = true` и
+`fromPlanner.liderId = user.sub`); после этого в любом случае `user ≠
+requestedBy` и `user ≠ toPlanner`. `user.lider` берётся из БД на каждом
+запросе (`JwtAccessStrategy`), не из JWT.
+
+**`PlannerTransferDto`:** `{ id, status: 'pending'|'approved'|'rejected'|'cancelled',
+vehicle: { id, plateNumber, sideNumber, active, carrier: { id, login, name } | null },
+fromPlanner: Person & { leader: { id, login, name } | null }, toPlanner: Person,
+requestedBy: Person, decidedBy: Person | null, reason, decisionComment, decidedAt,
+createdAt, updatedAt, viewerCanDecide, viewerBlockedReason: 'target'|'requester'|null,
+viewerCanCancel }`, где `Person = { id, login, name, role, lider }`.
+`decidedBy` — закрывший заявку (для `cancelled` — сам автор); `decisionComment` —
+причина отказа (при `rejected` всегда есть) или комментарий одобрения.
+`viewer*` — флаги **для вызывающего**, считаются тем же правилом, что и 403
+мутаций: `viewerCanDecide` — `pending` и можно решить; `viewerBlockedReason` —
+почему решающий не может (он получатель / автор; только на `pending`);
+`viewerCanCancel` — `pending` и вызывающий — автор. `fromPlanner.leader` —
+**текущий** лидер (для подписи «Lider planisty» у admin).
+
+**`VehiclePlannerHistoryDto`:** `{ vehicleId, currentPlannerId, assignments:
+[{ id, planner: Person, validFrom, validTo | null, source: 'create'|'transfer'|'backfill',
+actor: Person | null, transfer: { id, requestedBy, decidedBy, reason, decisionComment,
+decidedAt, createdAt } | null }], transfers: PlannerTransferDto[] }` — оба
+списка **новые сверху**; `pending`-заявка (если есть) — элемент `transfers` со
+`status = 'pending'` (для плашки в форме машины). `backfill`-строки — от
+миграции (кто вёл машину раньше, неизвестно; `validFrom` = `createdAt` машины).
+
+**Коды ошибок (`extensions.code`):**
+
+| Код | HTTP | Когда |
+|---|---|---|
+| `PLANNER_TRANSFER_ALREADY_PENDING` | 409 | У машины уже есть `pending` (проверка + частичный уникальный индекс под гонкой) |
+| `PLANNER_TRANSFER_NOT_PENDING` | 409 | Заявка уже решена / отменена (в т.ч. проиграна гонка закрытия) |
+| `PLANNER_TRANSFER_PLANNER_CHANGED` | 409 | Одобрение: планиста машины уже не `fromPlanner` (заявка устарела) |
+| `PLANNER_TRANSFER_TARGET_INVALID` | 422 | Получатель не существует / не `planista` / неактивен / совпадает с текущим (U2) — подача и одобрение |
+| `PLANNER_TRANSFER_VEHICLE_INACTIVE` | 422 | Машина выключена (подача, одобрение) |
+| `PLANNER_TRANSFER_NO_CURRENT_PLANNER` | 422 | У машины нет планисты — передавать не от кого |
+| `PLANNER_TRANSFER_REASON_INVALID` | 422 | `reason` пустая / < 3 / > 500 после обрезки (подача, отклонение; из pipe, `issues[].path = reason`) |
+| `PLANNER_TRANSFER_REQUEST_FORBIDDEN` | 403 | Подаёт не opiekun перевозчика и не текущий планиста (admin отсекается ещё `@Roles`) |
+| `PLANNER_TRANSFER_NOT_DECIDER` | 403 | Решает не admin и не текущий лидер `fromPlanner` (в т.ч. лидер получателя, лидер без флага); `scope=decide` для не-решающего |
+| `PLANNER_TRANSFER_DECIDER_IS_REQUESTER` | 403 | Лидер — автор заявки: решает только admin (R4) |
+| `PLANNER_TRANSFER_DECIDER_IS_TARGET` | 403 | Лидер — получатель: решает только admin (R4) |
+| `PLANNER_TRANSFER_CANCEL_NOT_AUTHOR` | 403 | Отменяет не автор |
+
+Порядок проверок подачи: 404 машина → 403 кто подаёт → 422 машина
+выключена / без планисты → 422 получатель → 409 уже есть `pending`.
+Одобрение: 404 → 403 → (блокировка) → 409 не `pending` → 422 машина → 409
+устарела → 422 получатель.
+
 ### Drivers — `/api/v1/drivers`
 
 > Роль: `admin` (все), `opiekun` (свои), `przewoznik` (свои — **read-only**: GET list/detail only, никаких write). **Не `pracownik`.** Enforcement: все mutating-эндпоинты (POST/PATCH/deactivate/reactivate/DELETE) — `@Roles('admin', 'opiekun')`; GET-эндпоинты — `@Roles('admin', 'opiekun', 'przewoznik')`. Перевозчик водителей не редактирует — carrier-панель render-ит их read-only (consistent с trailers). См. `apps/api/src/modules/drivers/drivers.controller.ts`.
@@ -394,13 +512,23 @@ cursor-пагинация без изменений), остальные чет�
 
 | Method + Path | GAS |
 |---|---|
-| GET `/delegations` | Единый endpoint, фильтрация по роли. `eksport`/`weryfikator`: active-board `{zgloszony, gotowy, w_trasie}` + `?includeHistory=true`. carrier→свои, planista→свой `plannerId`, dyspozytor→своя team. `?claimable=true` (carrier outing-picker) → **только `zjechal`** без привязанного wniosek (§0‴: `w_trasie` больше НЕ claimable). (REWORK 2026-06-20: `weryfikator` снова видит выезды — §0″.) |
-| GET `/delegations/:id` | (lookup) — incl. `weryfikator` |
-| POST `/delegations` | `addDelegacja` (carrier → `zgloszony`) |
+| GET `/delegations` | Единый endpoint, фильтрация по роли. `eksport`/`weryfikator`: active-board `{zgloszony, gotowy, w_trasie}` + `?includeHistory=true`. carrier→свои, planista→выезды со **снимком** `Delegation.plannerId = user.sub` (docs/29 §3.3 — планиста периода выезда, **не** текущий `Vehicle.plannerId`), dyspozytor→своя team (живьём по машине). `?claimable=true` (carrier outing-picker) → **только `zjechal`** без привязанного wniosek (§0‴: `w_trasie` больше НЕ claimable). (REWORK 2026-06-20: `weryfikator` снова видит выезды — §0″.) |
+| GET `/delegations/:id` | (lookup) — incl. `weryfikator`; planista — только при снимке `plannerId = user.sub` |
+| POST `/delegations` | `addDelegacja` (carrier → `zgloszony`). Ставит снимок `Delegation.plannerId = Vehicle.plannerId` (docs/29) |
 | POST `/delegations/:id/ready` | **NEW** — `eksport \| admin`: `zgloszony→gotowy` (+ откат `gotowy→zgloszony` флагом `rollback: true`, пока не `w_trasie`). Audit `delegation.markReady`, при откате — `delegation.rollbackReady` (имя подменяется в сервисе через `AuditContext.setAction`); оба пишут `before = { status, spedOrderNumber, readyById, readyAt }`. |
 | POST `/delegations/:id/in-transit` | **NEW** — `weryfikator \| admin`: `gotowy→w_trasie`, body `{ actualDepartureAt }` (**ISO datetime**, required; границы `>= start-of-day(departureAt)`, `<= now`; 422 `DEPARTURE_DATE_FUTURE` — datetime-granулярный). weryfikator фиксирует точный момент выезда. Audit `delegation.markInTransit`. |
 | POST `/delegations/:id/returned` | **NEW** — `weryfikator \| admin`: `w_trasie→zjechal`, body `{ actualReturnAt }` (**ISO datetime**, required; 422 `RETURN_DATE_FUTURE` (`> now`), `RETURN_BEFORE_DEPARTURE` (`< actualDepartureAt`)). Txn: `vehicle.lastDroveAt = max(...)` + авто-пересчёт связанного wniosek (границы — §0″). Audit `delegation.markReturned`. |
 | POST `/delegations/:id/cancel` | carrier (свои `zgloszony`) **+ admin (любой активный)** → `anulowany`. |
+
+> **Планиста выезда — снимок (docs/29 R5/R6, 2026-09-28).** `DelegationDto`
+> несёт `plannerId` + `planner: { id, login, name } | null` — планисту **периода
+> этого выезда** (ставится при создании, переносится одобренной передачей
+> только пока выезд `zgloszony` / `gotowy`), и по-прежнему `vehicle.planner` —
+> **текущего** планисту машины (живьём). После передачи они различаются
+> (например, `w_trasie` доводит прежний планиста) — модалка показывает оба
+> (docs/14 §17.8). Прежний планиста продолжает видеть выезды, которые вёл;
+> новый — только перешедшие к нему и новые. «ZESPÓŁ PROWADZĄCY» и Chat
+> берут планисту из снимка.
 
 > **Side-effect (Google Chat + email):** контракт `POST /delegations` не
 > меняется. После создания выезда `add()` асинхронно (1) постит 6-строчную
@@ -559,6 +687,14 @@ DB CHECK enforces `returnCountry` length 2..8 (covers `EL`) and `returnPostalCod
 | GET `/lookups/trailer-types` | `getNaczepyTypyList` (alias) |
 | GET `/lookups/teams` | (Phase 11) — команды с составом для дропдауна формы машины. Отдаёт `[{ id, code, name, active, dispatchers: [{ id, name, login, active }] }]` (включает `active` диспетчера — веб рисует preview состава без N+1). Read-only, любой залогиненный (состав команды non-sensitive — без ставок). |
 
+> **Пикеры планистов для docs/29 (2026-09-28).** Оба отдают тот же `LookupUserDto`
+> `{ id, login, name, lider }`, только активные `planista`, по имени:
+>
+> | Method + Path | Роль | Что |
+> |---|---|---|
+> | GET `/lookups/planisci/transfer-targets?vehicleId=` | admin / opiekun / planista | Цели заявки на передачу (U2): все активные планисты **без текущего планисты** `vehicleId` (неизвестная машина / без параметра — никого не исключает; подача всё равно перепроверяет цель) |
+> | GET `/lookups/planisci/liders` | admin | Лидеры для поля «Przełożony (lider)» в UserSheet (U9): активные `planista` с `lider = true` (исключить самого редактируемого — на клиенте) |
+
 > **`lider` в пикерах (2026-09-25, docs/28).** `/lookups/dyspozytor`, `/lookups/planisci`, `/lookups/opiekuni` (`{ id, login, name, lider }`) и admin-автокомплит `/lookups/users` (`{ …, role, lider, active }`) отдают флаг лидера — только чтобы подписать «(lider)» / «Lider planistów»; **состав списков не меняется**: лидер остаётся planistą и попадает в пикер планистов как раньше.
 
 ### External integrations — `/api/v1/integrations`
@@ -593,7 +729,7 @@ DB CHECK enforces `returnCountry` length 2..8 (covers `EL`) and `returnPostalCod
 | PUT `/sso/stanowisko-roles/:code` | `{ role, lider? }` → upsert. Идемпотентно: код — это идентичность. `role` из 6 назначаемых (без `admin`/`przewoznik`); код должен быть UPPER_SNAKE. **`lider` не задан = сохранить текущий флаг** (у новой строки `false`), поэтому клиент, шлющий только `{ role }`, лидерство не стирает. Итоговая пара `(role, lider)` вне `LIDER_ROLES` → **422** `USER_LIDER_REQUIRES_LIDER_ROLE` — перевод строки-лидера на `weryfikator` требует явного `lider: false`. Пара проверяется **до** запроса в MAGSpace. Audit `setStanowiskoRole` пишет `before` для существующей строки. |
 | DELETE `/sso/stanowisko-roles/:code` | 204. Убирает маппинг — держатели теряют доступ на следующем входе или прогоне reconcile. 404, если строки не было. |
 | GET `/sso/access-denials` | `{ items }` — последние отказы `SSO_NO_ROLE`, читаются из audit-лога (`system.denyDirectoryAccess`), отдельной таблицы заявок нет. **Одна строка на человека**: повторные отказы одного адреса (без учёта регистра) схлопываются в последний; сканируется окно в 200 событий, в ответе ≤ 20 человек. Строка: `{ email, stanowiskoCode, at, status: 'pending' \| 'granted', userId: uuid \| null }` — `granted` + `userId`, если для адреса сейчас есть активная неудалённая учётка (неважно, как она появилась). |
-| POST `/sso/access-grants` | «Nadaj dostęp» одним шагом (docs/24 §10). Body `{ email, role, lider? }` (`GrantSsoAccessSchema`, `.strict()`, email trim+lowercase; `role` — 6 назначаемых; `lider` — docs/28, по умолчанию `false`, только для роли из `LIDER_ROLES`, иначе 422 `USER_LIDER_REQUIRES_LIDER_ROLE` ещё до запроса в MAGSpace; это **единственный одношаговый путь** выдать лидера DAF / opiekunów wniosków / eksportu). Адрес сверяется с MAGSpace, затем: **учётки нет** → создаётся (`managedBy=magspace`, `role = roleOverride = role`, `lider`, без пароля, `authProvider=local` до первого входа через Google, login — из local-part адреса); **есть `magspace`-учётка** → `role = roleOverride = role`, `lider`, `active = true` одним UPDATE (reconcile сам не реактивирует и override к `role` не применяет; флаг override-учётки sync больше не трогает). Override ставится, даже если stanowisko тем временем сопоставлено — это осознанное решение админа. Ответ **200** `{ user: UserDtoFull, outcome: 'created' \| 'reactivated' \| 'updated' }`. Ошибки (`extensions.code`): **503** `SSO_DIRECTORY_UNAVAILABLE`; **422** `SSO_GRANT_NOT_EMPLOYEE` (в MAGSpace нет адреса); **422** `SSO_GRANT_EMPLOYEE_INACTIVE`; **409** `SSO_GRANT_ACCOUNT_CONFLICT` + `extensions.reason` = `privileged` (admin/przewoznik) \| `local` (`managedBy=local` — править в Użytkownikach) \| `deleted` (адрес держит soft-deleted строка — уникальность email включает удалённых) \| `unique` (проиграна гонка на login / `magspaceEmployeeId`). Audit `grantSsoAccess` (актор — admin, `targetKey` = login, `before` = `{ user: { role, lider, active, managedBy, roleOverride } }`, при создании пусто; `metadata` = `{ outcome, stanowiskoCode, magspaceEmployeeId }`), `@Audit({ manualTransaction: true })` — хендлер ходит в MAGSpace. |
+| POST `/sso/access-grants` | «Nadaj dostęp» одним шагом (docs/24 §10). Body `{ email, role, lider? }` (`GrantSsoAccessSchema`, `.strict()`, email trim+lowercase; `role` — 6 назначаемых; `lider` — docs/28, по умолчанию `false`, только для роли из `LIDER_ROLES`, иначе 422 `USER_LIDER_REQUIRES_LIDER_ROLE` ещё до запроса в MAGSpace; это **единственный одношаговый путь** выдать лидера DAF / opiekunów wniosków / eksportu). Адрес сверяется с MAGSpace, затем: **учётки нет** → создаётся (`managedBy=magspace`, `role = roleOverride = role`, `lider`, без пароля, `authProvider=local` до первого входа через Google, login — из local-part адреса); **есть `magspace`-учётка** → `role = roleOverride = role`, `lider`, `active = true` одним UPDATE (reconcile сам не реактивирует и override к `role` не применяет; флаг override-учётки sync больше не трогает); если выдаётся роль **не** `planista`, тем же UPDATE очищается собственный `liderId` учётки (docs/29 U9 — как в `PATCH /users/:id`; `liderId` её планистов, если она сама лидер, не трогается — U10). Override ставится, даже если stanowisko тем временем сопоставлено — это осознанное решение админа. Ответ **200** `{ user: UserDtoFull (с резолвленным `liderUser`, как `GET /users/:id`), outcome: 'created' \| 'reactivated' \| 'updated' }`. Ошибки (`extensions.code`): **503** `SSO_DIRECTORY_UNAVAILABLE`; **422** `SSO_GRANT_NOT_EMPLOYEE` (в MAGSpace нет адреса); **422** `SSO_GRANT_EMPLOYEE_INACTIVE`; **409** `SSO_GRANT_ACCOUNT_CONFLICT` + `extensions.reason` = `privileged` (admin/przewoznik) \| `local` (`managedBy=local` — править в Użytkownikach) \| `deleted` (адрес держит soft-deleted строка — уникальность email включает удалённых) \| `unique` (проиграна гонка на login / `magspaceEmployeeId`). Audit `grantSsoAccess` (актор — admin, `targetKey` = login, `before` = `{ user: { role, lider, active, managedBy, roleOverride, liderId } }`, при создании пусто; `metadata` = `{ outcome, stanowiskoCode, magspaceEmployeeId }`), `@Audit({ manualTransaction: true })` — хендлер ходит в MAGSpace. |
 
 ### Diagnostics (admin only) — `/api/v1/diagnostics`
 
@@ -1007,7 +1143,7 @@ Source of truth — Zod-схемы в `packages/shared`. Никакого OpenAP
 
 | Роут | Почему не в общей транзакции |
 |---|---|
-| POST `/vehicles`, PATCH `/vehicles/:id` | multipart + загрузка в S3/MinIO |
+| POST `/vehicles`, PATCH `/vehicles/:id` | multipart + загрузка в S3/MinIO. Строка журнала планистов `create` (docs/29) атомарна с машиной — это вложенный INSERT того же запроса; отмена `pending`-заявки при PATCH `active=false` — отдельной записью после апдейта машины |
 | POST `/drivers`, PATCH `/drivers/:id` | то же |
 | POST `/trailers`, PATCH `/trailers/:id` | то же |
 | POST `/carriers/:id/attachments` | загрузка в S3 |

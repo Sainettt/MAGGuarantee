@@ -3523,8 +3523,10 @@ export class ClaimsService {
   /**
    * Resolve recipients for claim notifications (submit + decision):
    *  - `carrierEmail`   — the claim's carrier (gets `carrier-*` emails).
-   *  - `internalEmails` — admin + pracownik + opiekun + planista + lider +
-   *    the company `wnioski@` mailbox (GMAIL_FROM). The carrier address is
+   *  - `internalEmails` — admin + pracownik + opiekun + the planista(s) of the
+   *    claim's period and their current leaders (docs/29 U8, see
+   *    `_plannerRecipientEmails`) + the company `wnioski@` mailbox
+   *    (GMAIL_FROM). The carrier address is
    *    never double-sent as an internal recipient.
    *  - `openerEmails`   — subset of internal who may OPEN a wniosek
    *    (admin + pracownik only). Used to gate the deeplink button in the
@@ -3575,14 +3577,8 @@ export class ClaimsService {
         : null;
     if (carrier?.opiekun?.email) internal.add(carrier.opiekun.email.toLowerCase());
 
-    if (row.vehicleId) {
-      const v = await this.prisma.client.vehicle.findFirst({
-        where: { id: row.vehicleId },
-        select: { planner: { select: { email: true, liderEmail: true } } },
-      });
-      if (v?.planner?.email) internal.add(v.planner.email.toLowerCase());
-      if (v?.planner?.liderEmail)
-        internal.add(v.planner.liderEmail.toLowerCase());
+    for (const email of await this._plannerRecipientEmails(row)) {
+      internal.add(email);
     }
 
     const wnioski = this.configService?.get('GMAIL_FROM', { infer: true });
@@ -3597,6 +3593,69 @@ export class ClaimsService {
       internalEmails: [...internal].filter(isValidEmail),
       openerEmails,
     };
+  }
+
+  /**
+   * The planista side of the wniosek recipients (docs/29 U8) — lower-cased
+   * addresses of:
+   *  - the planista(s) of the claim's PERIOD (see `_claimPeriodPlannerIds`),
+   *    not the vehicle's current planista — a wniosek from before a transfer
+   *    goes to the planista who led that trip;
+   *  - each one's CURRENT leader (`liderId → User.email`) in CC — replaces the
+   *    former free-text `liderEmail` (R8).
+   * Deactivated / soft-deleted accounts are skipped (both planista and
+   * leader). Root client for the same reason as the caller.
+   */
+  private async _plannerRecipientEmails(row: ClaimRow): Promise<string[]> {
+    const plannerIds = await this._claimPeriodPlannerIds(row);
+    if (plannerIds.length === 0) return [];
+    const planners = await this.prisma.client.user.findMany({
+      where: { id: { in: plannerIds }, active: true, deletedAt: null },
+      select: {
+        email: true,
+        liderUser: { select: { email: true, active: true, deletedAt: true } },
+      },
+    });
+    const out: string[] = [];
+    for (const p of planners) {
+      if (p.email) out.push(p.email.toLowerCase());
+      const lider = p.liderUser;
+      if (lider?.email && lider.active && lider.deletedAt === null) {
+        out.push(lider.email.toLowerCase());
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Who led the claim's vehicle during the claim period (docs/29 U8):
+   *  - claim WITH an outing → that trip's snapshot `Delegation.plannerId`
+   *    (R5; `null` on a legacy trip of a vehicle without a planista → none);
+   *  - claim WITHOUT an outing → every planista whose journal row overlaps
+   *    the period: `validFrom < dateEnd + 1 day AND (validTo IS NULL OR
+   *    validTo >= dateStart)`. The claim dates are whole days (`@db.Date`), a
+   *    journal row is a timestamp range, so the end of the period is the END
+   *    of `dateEnd` — a transfer during the last day still counts both.
+   */
+  private async _claimPeriodPlannerIds(row: ClaimRow): Promise<string[]> {
+    if (row.delegationId) {
+      const trip = await this.prisma.client.delegation.findFirst({
+        where: { id: row.delegationId },
+        select: { plannerId: true },
+      });
+      return trip?.plannerId ? [trip.plannerId] : [];
+    }
+    if (!row.vehicleId) return [];
+    const periodEndExclusive = new Date(row.dateEnd.getTime() + MS_PER_DAY);
+    const rows = await this.prisma.client.vehiclePlannerAssignment.findMany({
+      where: {
+        vehicleId: row.vehicleId,
+        validFrom: { lt: periodEndExclusive },
+        OR: [{ validTo: null }, { validTo: { gte: row.dateStart } }],
+      },
+      select: { plannerId: true },
+    });
+    return [...new Set(rows.map((r) => r.plannerId))];
   }
 
   /**

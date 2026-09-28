@@ -235,16 +235,20 @@ export class VehiclesController {
     manualTransaction: true,
   })
   async update(
+    @CurrentUser() user: AuthUser,
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
     @Body() rawBody: Record<string, unknown>,
     @UploadedFiles() files: MultipartFiles,
   ): Promise<VehicleDto> {
+    // `UpdateVehicleSchema` refuses `plannerId` for every role, admin included:
+    // 422 `VEHICLE_PLANNER_CHANGE_REQUIRES_TRANSFER` (docs/29 R1) — the
+    // planista changes only through `POST /vehicles/:id/planner-transfers`.
     const dto: UpdateVehicleDto = parseMultipartBody(
       rawBody,
       UpdateVehicleSchema,
     );
     const uploads = collectAndValidateUploads(files);
-    return this.vehicles.update(id, dto, uploads);
+    return this.vehicles.update(id, dto, uploads, user);
   }
 
   @Post(':id/deactivate')
@@ -257,9 +261,11 @@ export class VehiclesController {
     targetKey: (req) => req.params?.id,
   })
   async deactivate(
+    @CurrentUser() user: AuthUser,
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
   ): Promise<VehicleDto> {
-    return this.vehicles.deactivate(id);
+    // Also cancels the vehicle's pending planista-transfer request (docs/29 U6).
+    return this.vehicles.deactivate(id, user);
   }
 
   @Post(':id/reactivate')
@@ -287,9 +293,10 @@ export class VehiclesController {
     targetKey: (req) => req.params?.id,
   })
   async delete(
+    @CurrentUser() user: AuthUser,
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
   ): Promise<void> {
-    await this.vehicles.softDelete(id);
+    await this.vehicles.softDelete(id, user);
   }
 
   // Vehicle hard-delete (`DELETE /vehicles/:id/hard`) was RETIRED in the

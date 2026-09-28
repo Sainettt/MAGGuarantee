@@ -24,10 +24,10 @@ export interface DelegationRow {
   id: string;
   vehicleId: string;
   /**
-   * `plannerId` / `dispatchTeamId` are carried for the Phase 6.4 `getOne`
-   * ownership checks (planista/dyspozytor by-id read scope). Phase 11 swapped
-   * the single `dispatcherId` for the team FK `dispatchTeamId`. Those two are
-   * NOT surfaced in the wire DTO — they are stripped at the DTO boundary.
+   * `dispatchTeamId` is carried for the Phase 11 `getOne` dyspozytor by-id
+   * read scope (the planista scope reads the trip's own snapshot
+   * `DelegationRow.plannerId` since docs/29, not `vehicle.plannerId`). Phase 11
+   * swapped the single `dispatcherId` for the team FK `dispatchTeamId`.
    *
    * Phase 11 Шаг D (additive) — `dispatchTeam` is resolved LIVE from
    * `Vehicle.dispatchTeam` (NOT a snapshot) and IS surfaced on the vehicle
@@ -56,11 +56,19 @@ export interface DelegationRow {
     plannerId: string | null;
     dispatchTeamId: string | null;
     dispatchTeam: VehicleDispatchTeamDto | null;
-    // Lead forwarder (`Vehicle.planner`, live) — surfaced on the wire vehicle
-    // mini so the «ZESPÓŁ PROWADZĄCY» block shows the full crew (planista +
-    // dispatchers + eksport). Identity only, NON-SENSITIVE.
+    // The vehicle's CURRENT planista (`Vehicle.planner`, live). Not the
+    // planista of this trip — that is the snapshot `planner` below (docs/29
+    // R5); the modal shows «Ciągnik prowadzi obecnie: …» when the two differ.
     planner: { id: string; login: string; name: string | null } | null;
   } | null;
+  /**
+   * Planista of THIS trip's period — the snapshot `Delegation.plannerId`
+   * (docs/29 R5), stamped from `Vehicle.plannerId` on create and moved only by
+   * a transfer approval while the trip is `zgloszony` / `gotowy` (R6). Drives
+   * the planista read scope (list + by-id) and «ZESPÓŁ PROWADZĄCY».
+   */
+  plannerId: string | null;
+  planner: { id: string; login: string; name: string | null } | null;
   trailerId: string;
   trailer: { id: string; plateNumber: string } | null;
   driverId: string;
@@ -158,12 +166,13 @@ export interface DelegationListFilters {
    */
   dispatchTeamId?: string;
   /**
-   * Phase 6.4 planista auto-scope — restrict to delegations whose vehicle is
-   * planned by this user (`Delegation.vehicle.plannerId === plannerId`).
-   * Server-identity driven (never client-supplied); the service sets it from
-   * the JWT `sub`. Translated to a relation filter `vehicle: { plannerId }`
-   * (the `Vehicle.plannerId` FK index narrows the join). Mirrors `dispatcherId`
-   * exactly; if both are ever set they AND under the same `vehicle` relation.
+   * Planista auto-scope — restrict to delegations whose SNAPSHOT planista is
+   * this user (`Delegation.plannerId === plannerId`, docs/29 §3.3). Not the
+   * vehicle's current planista: after a transfer the previous planista keeps
+   * the trips he led and the new one sees only trips from the transfer on
+   * (R5/R6). Server-identity driven (never client-supplied); the service sets
+   * it from the JWT `sub`. A plain column filter on the
+   * `(plannerId, status)` index.
    */
   plannerId?: string;
   /**
@@ -207,6 +216,8 @@ export interface CreateDelegationData {
   returnPostalCode: string;
   notes: string | null;
   reportedById: string | null;
+  /** Snapshot of `Vehicle.plannerId` at registration (docs/29 §3.3). */
+  plannerId: string | null;
 }
 
 export interface UpdateDelegationData {
@@ -304,18 +315,14 @@ export class DelegationsRepository {
     if (filters.carrierId) where.carrierId = filters.carrierId;
     if (filters.vehicleId) where.vehicleId = filters.vehicleId;
     if (filters.driverId) where.driverId = filters.driverId;
-    // Dyspozytor / planista auto-scope — relation filters so the FK indexes on
-    // `Vehicle.dispatchTeamId` / `Vehicle.plannerId` narrow the join instead of
-    // a client-side pass. If both are set (not currently sent together — the
-    // service injects exactly one) they AND under the same `vehicle` relation.
-    if (filters.dispatchTeamId || filters.plannerId) {
-      where.vehicle = {
-        ...(filters.dispatchTeamId
-          ? { dispatchTeamId: filters.dispatchTeamId }
-          : {}),
-        ...(filters.plannerId ? { plannerId: filters.plannerId } : {}),
-      };
+    // Dyspozytor auto-scope — relation filter on the vehicle's CURRENT team
+    // (live, the `Vehicle.dispatchTeamId` index narrows the join).
+    if (filters.dispatchTeamId) {
+      where.vehicle = { dispatchTeamId: filters.dispatchTeamId };
     }
+    // Planista auto-scope — the trip's own snapshot column (docs/29 §3.3),
+    // not the vehicle relation.
+    if (filters.plannerId) where.plannerId = filters.plannerId;
     // Opiekun auto-scope — relation filter on the CARRIER (indexed
     // `Carrier.opiekunId`). Independent axis from the vehicle relation above,
     // so it ANDs with `carrierId` / `vehicleId` / the planner+team filters.
@@ -369,11 +376,36 @@ export class DelegationsRepository {
         returnPostalCode: data.returnPostalCode,
         notes: data.notes,
         reportedById: data.reportedById,
+        plannerId: data.plannerId,
         status: 'zgloszony',
       },
       include: this.includeShape(),
     });
     return this.flatten(row);
+  }
+
+  /**
+   * Transfer approval (docs/29 R6): the vehicle's not-yet-departed trips
+   * (`statuses` — `zgloszony` / `gotowy`) whose snapshot is the previous
+   * planista move to the new one. `w_trasie` / `zjechal` / `anulowany` keep
+   * the planista of their period. Runs in the approval's ambient transaction;
+   * returns how many trips moved.
+   */
+  async reassignPlannerSnapshot(args: {
+    vehicleId: string;
+    fromPlannerId: string;
+    toPlannerId: string;
+    statuses: readonly DelegationStatus[];
+  }): Promise<number> {
+    const res = await this.prisma.tx.delegation.updateMany({
+      where: {
+        vehicleId: args.vehicleId,
+        plannerId: args.fromPlannerId,
+        status: { in: [...args.statuses] },
+      },
+      data: { plannerId: args.toPlannerId },
+    });
+    return res.count;
   }
 
   async update(id: string, data: UpdateDelegationData): Promise<DelegationRow> {
@@ -402,8 +434,8 @@ export class DelegationsRepository {
 
   private includeShape() {
     return {
-      // `plannerId` / `dispatchTeamId` feed the Phase 6.4/11 `getOne` ownership
-      // checks (planista/dyspozytor); they are stripped at the DTO boundary.
+      // `dispatchTeamId` feeds the Phase 11 `getOne` dyspozytor check; the
+      // planista check reads the trip's snapshot `plannerId` (docs/29).
       // Phase 11 Шаг D — `dispatchTeam` (live, with its dispatcher roster) IS
       // surfaced on the vehicle mini. The four km-guarantee rates are selected
       // too (they feed the modal's «Stawki» block); they are SENSITIVE and get
@@ -435,10 +467,13 @@ export class DelegationsRepository {
               },
             },
           },
-          // Lead forwarder — identity only (same mini as reportedBy/readyBy).
+          // The vehicle's CURRENT planista — identity only (same mini as
+          // reportedBy/readyBy). The trip's own planista is `planner` below.
           planner: { select: { id: true, login: true, name: true } },
         },
       },
+      // docs/29 — planista of this trip's period (snapshot).
+      planner: { select: { id: true, login: true, name: true } },
       trailer: { select: { id: true, plateNumber: true } },
       driver: { select: { id: true, firstName: true, lastName: true } },
       carrier: {
@@ -493,6 +528,8 @@ export class DelegationsRepository {
             planner: row.vehicle.planner ?? null,
           }
         : null,
+      plannerId: row.plannerId,
+      planner: row.planner ?? null,
       trailerId: row.trailerId,
       trailer: row.trailer ?? null,
       driverId: row.driverId,
@@ -559,6 +596,8 @@ interface DelegationPrismaShape {
     } | null;
     planner?: { id: string; login: string; name: string | null } | null;
   } | null;
+  plannerId: string | null;
+  planner?: { id: string; login: string; name: string | null } | null;
   trailerId: string;
   trailer?: { id: string; plateNumber: string } | null;
   driverId: string;

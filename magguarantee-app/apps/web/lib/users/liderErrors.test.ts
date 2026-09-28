@@ -38,6 +38,14 @@ describe('liderErrorKind', () => {
     expect(liderErrorKind(problem({ code: 'USER_MANAGED_BY_MAGSPACE' }))).toBeUndefined();
   });
 
+  it('USER_LIDER_ID_INVALID → liderIdInvalid, whatever the reason (docs/29 U9)', () => {
+    for (const reason of ['role_not_planista', 'self', 'not_found', 'not_planista', 'inactive', 'not_lider']) {
+      expect(liderErrorKind(problem({ code: 'USER_LIDER_ID_INVALID', reason }))).toBe(
+        'liderIdInvalid',
+      );
+    }
+  });
+
   it('other codes and non-api errors → undefined', () => {
     expect(liderErrorKind(problem({ code: 'SOMETHING_ELSE' }))).toBeUndefined();
     expect(liderErrorKind(new ApiResponseError(409, 'Login zajęty', {}))).toBeUndefined();

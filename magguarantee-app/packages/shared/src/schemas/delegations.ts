@@ -462,11 +462,13 @@ const VehicleMiniSchema = z.object({
    */
   dispatchTeam: VehicleDispatchTeamSchema.nullable(),
   /**
-   * The vehicle's CURRENT lead forwarder (`Vehicle.planner`, resolved LIVE —
-   * not a snapshot), same UserMini shape as `reportedBy`/`readyBy`. Completes
-   * the «ZESPÓŁ PROWADZĄCY» block in `DelegationDetailModal` (planista +
-   * dispatch team + eksport). Identity only (not a rate) → NON-SENSITIVE.
-   * `null` when the vehicle has no planner assigned.
+   * The vehicle's CURRENT planista (`Vehicle.planner`, read live), same
+   * UserMini shape as `reportedBy`/`readyBy`. NOT the planista of this trip —
+   * that is the snapshot `DelegationDto.planner` (docs/29 R5). The two differ
+   * after a transfer, e.g. a `w_trasie` trip the previous planista finishes
+   * (R6); the modal then adds «Ciągnik prowadzi obecnie: …» (docs/14 §17.8).
+   * Identity only (not a rate) → NON-SENSITIVE. `null` when the vehicle has no
+   * planista.
    */
   planner: UserMiniSchema.nullable(),
 });
@@ -503,6 +505,19 @@ export const DelegationDtoSchema = z.object({
 
   carrierId: UuidSchema,
   carrier: CarrierMiniSchema.nullable(),
+
+  /**
+   * Planista of THIS trip's period — a snapshot (docs/29 R5), not a live read
+   * of the vehicle: stamped from `Vehicle.plannerId` when the trip is
+   * registered and moved to the new planista by an approved transfer only
+   * while the trip is still `zgloszony` / `gotowy` (R6). It drives the
+   * planista scope of the delegation list/card, «ZESPÓŁ PROWADZĄCY», the
+   * Chat message and the wniosek mail recipients. `null` only for legacy rows
+   * of a vehicle that had no planista. The vehicle's current planista is
+   * `vehicle.planner`.
+   */
+  plannerId: UuidSchema.nullable(),
+  planner: UserMiniSchema.nullable(),
 
   driverNameSnapshot: z.string().nullable(),
   driverPhoneSnapshot: z.string().nullable(),

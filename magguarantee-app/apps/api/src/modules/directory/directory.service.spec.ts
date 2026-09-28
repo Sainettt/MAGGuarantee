@@ -44,7 +44,7 @@ function makeUser(overrides: Partial<UserRow> = {}): UserRow {
     role: 'planista',
     name: 'Jan Kowalski',
     active: true,
-    liderEmail: null,
+    liderId: null,
     teamId: null,
     mustChangePassword: false,
     passwordChangedAt: null,
@@ -565,7 +565,7 @@ describe('DirectoryService.grantAccess', () => {
   /** Runs the grant inside an audit context, the way the interceptor does. */
   async function grant(
     h: ReturnType<typeof makeHarness>,
-    role: 'weryfikator' | 'eksport' | 'opiekun' = 'weryfikator',
+    role: 'weryfikator' | 'eksport' | 'opiekun' | 'planista' = 'weryfikator',
     lider?: boolean,
   ) {
     const store: AuditContextStore = {
@@ -655,7 +655,7 @@ describe('DirectoryService.grantAccess', () => {
     });
     expect(h.users.createFromDirectory).not.toHaveBeenCalled();
     expect(store.before).toEqual({
-      user: { role: 'planista', lider: false, active: true, managedBy: 'magspace', roleOverride: null },
+      user: { role: 'planista', lider: false, active: true, managedBy: 'magspace', roleOverride: null, liderId: null },
     });
     expect(store.metadata).toMatchObject({ outcome: 'updated' });
   });
@@ -674,7 +674,7 @@ describe('DirectoryService.grantAccess', () => {
     expect(result.user.role).toBe('eksport');
     expect(result.user.roleOverride).toBe('eksport');
     expect(store.before).toEqual({
-      user: { role: 'pracownik', lider: false, active: false, managedBy: 'magspace', roleOverride: 'pracownik' },
+      user: { role: 'pracownik', lider: false, active: false, managedBy: 'magspace', roleOverride: 'pracownik', liderId: null },
     });
     expect(store.metadata).toMatchObject({ outcome: 'reactivated' });
   });
@@ -713,8 +713,60 @@ describe('DirectoryService.grantAccess', () => {
     });
     expect(result.user.lider).toBe(false);
     expect(store.before).toEqual({
-      user: { role: 'pracownik', lider: true, active: true, managedBy: 'magspace', roleOverride: 'pracownik' },
+      user: { role: 'pracownik', lider: true, active: true, managedBy: 'magspace', roleOverride: 'pracownik', liderId: null },
     });
+  });
+
+  // ── planista → lider link (docs/29 U9 / U10) ───────────
+
+  it('a re-grant AWAY from planista clears the account’s own leader link, in the same UPDATE', async () => {
+    const h = makeHarness();
+    h.magspace.lookupByEmail.mockResolvedValue(CONTROLLING);
+    h.users.findByEmailIncludingDeleted.mockResolvedValue(
+      makeUser({ role: 'planista', liderId: 'u-lead' }),
+    );
+
+    const { result, store } = await grant(h, 'eksport');
+
+    expect(h.users.update).toHaveBeenCalledTimes(1);
+    expect(h.users.update).toHaveBeenCalledWith('u-1', {
+      role: 'eksport',
+      roleOverride: 'eksport',
+      lider: false,
+      liderId: null,
+      active: true,
+      directorySyncedAt: expect.any(Date),
+    });
+    expect(result.user.liderId).toBeNull();
+    expect(store.before).toMatchObject({ user: { role: 'planista', liderId: 'u-lead' } });
+  });
+
+  it('a re-grant that keeps planista keeps the leader link', async () => {
+    const h = makeHarness();
+    h.magspace.lookupByEmail.mockResolvedValue(CONTROLLING);
+    h.users.findByEmailIncludingDeleted.mockResolvedValue(
+      makeUser({ role: 'weryfikator', roleOverride: 'weryfikator', liderId: 'u-lead' }),
+    );
+
+    await grant(h, 'planista');
+
+    const data = (h.users.update as jest.Mock).mock.calls[0]?.[1] as Record<string, unknown>;
+    expect('liderId' in data).toBe(false);
+  });
+
+  it('re-granting a LEADER another role touches only his own row — his planisci stay linked (U10)', async () => {
+    const h = makeHarness();
+    h.magspace.lookupByEmail.mockResolvedValue(CONTROLLING);
+    h.users.findByEmailIncludingDeleted.mockResolvedValue(
+      makeUser({ role: 'planista', lider: true, liderId: null }),
+    );
+
+    await grant(h, 'opiekun', true);
+
+    expect(h.users.update).toHaveBeenCalledTimes(1);
+    const data = (h.users.update as jest.Mock).mock.calls[0]?.[1] as Record<string, unknown>;
+    // No link of his own → nothing to clear; nobody else's row is written.
+    expect('liderId' in data).toBe(false);
   });
 
   it('422 USER_LIDER_REQUIRES_LIDER_ROLE for a leader weryfikator — before MAGSpace is asked', async () => {

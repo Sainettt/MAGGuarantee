@@ -70,8 +70,9 @@
 | `role` | `admin` / `pracownik` / `opiekun` / `planista` / `dyspozytor` / `przewoznik` / `eksport` / `weryfikator` |
 | `name` | имя |
 | `active` | блокировка логина |
-| `liderEmail` | только для `planista` — email лидера группы (для рассылки). Per-role tech debt — см. [19-known-quirks.md](19-known-quirks.md#liderEmail) |
-| `lider` | ✅ **2026-09-25** — флаг лидера **над** ролью из `LIDER_ROLES` (`planista` / `dyspozytor` / `opiekun` / `pracownik` / `eksport`); «lider_planista» = `role: planista` + `lider: true`, не значение `role`. CHECK `user_lider_requires_lider_role`. Владение как у `role` (маппинг stanowiska или admin). Не путать с `liderEmail`. См. [03-roles.md#lider](03-roles.md#lider), [28-lider-roles-plan.md](28-lider-roles-plan.md) |
+| `liderId` | ✅ **2026-09-28 (схема, миграция `20260928120000_vehicle_planner_transfer`)** — только для `planista`: FK → User, лидер этого планисты ([29](29-vehicle-planner-transfer-plan.md) R8, U9). Цель — активный `planista` с `lider = true`, не он сам (проверяет api). Ставит только admin; reconcile с MAGSpace поле не трогает. NULL = лидера нет → заявки на передачу его машин решает только admin (R4). Снятие флага `lider` у лидера `liderId` не очищает, но решать заявки может только тот, у кого `lider = true` в момент решения (U10) |
+| `liderEmail` | ⛔ **устарело (2026-09-28)** — заменено `liderId`; миграция перенесла совпавшие e-mail, api поле больше не читает. Колонка удаляется отдельным релизом (R8) |
+| `lider` | ✅ **2026-09-25** — флаг лидера **над** ролью из `LIDER_ROLES` (`planista` / `dyspozytor` / `opiekun` / `pracownik` / `eksport`); «lider_planista» = `role: planista` + `lider: true`, не значение `role`. CHECK `user_lider_requires_lider_role`. Владение как у `role` (маппинг stanowiska или admin). Не путать с `liderId` (кто лидер конкретного планисты). См. [03-roles.md#lider](03-roles.md#lider), [28-lider-roles-plan.md](28-lider-roles-plan.md) |
 | `teamId` | ✅ **Phase 11 (реализовано 2026-06-17)** — только для `dyspozytor`, FK → Team (команда, в которой состоит диспетчер) |
 
 > ⚠️ Поля `company` (Firma) на `User` **больше нет** — оно перенесено на `Carrier` миграцией `20260507223021_move_company_to_carrier`. Внутренние роли MAGTRANS (admin/pracownik/opiekun/planista/dyspozytor/eksport/weryfikator) — это сотрудники одной компании, поле было денормализованным наследием GAS-миграции, которое использовалось только перевозчиками.
@@ -79,7 +80,10 @@
 **Связи:**
 - 1:1 с `Carrier` (если role=przewoznik).
 - 1:N с `Carrier.opiekun` (если role=opiekun).
-- 1:N с `Vehicle.planner` (planista, ведущий спедитор).
+- 1:N с `Vehicle.planner` (planista, ведущий спедитор — **текущий**).
+- N:1 с `User` (via `liderId`, только planista) — его лидер; обратно `ledPlanners`.
+- 1:N с `Delegation.planner` (снимок планисты периода выезда).
+- 1:N с `VehiclePlannerTransfer` (как `fromPlanner` / `toPlanner` / `requestedBy` / `decidedBy`) и `VehiclePlannerAssignment` (как `planner` / `actor`).
 - N:1 с `Team` (via `User.teamId`, только для dyspozytor).
 - 1:N с `Delegation.reportedBy`, `Delegation.verifiedBy`.
 - 1:N с `Claim.decidedBy`.
@@ -118,7 +122,7 @@
 | `carrierId` | FK → Carrier |
 | `plateNumber` | NrRej |
 | `active` | флаг активности |
-| `plannerId` | FK → User (role=planista) — ведущий спедитор (один) |
+| `plannerId` | FK → User (role=planista) — ведущий спедитор (один), **текущий**. Денормализованный указатель: равен планисте открытой строки `VehiclePlannerAssignment`. Задаётся при создании машины, дальше меняется **только** одобрением `VehiclePlannerTransfer` ([29](29-vehicle-planner-transfer-plan.md) R1, R7) |
 | `dispatchTeamId` | ✅ **Phase 11 (реализовано 2026-06-17)** — FK → Team, **заменил** `dispatcherId` (миграция `20260617120000_phase11_team_dispatch`; оба сменщика видят авто через членство в команде) |
 | `certificateL` | Boolean — TAK/NIE (есть ли L-сертификат). До 2026-05 — enum L1/L2/L3, конвертировано миграцией `20260515130307_vehicle_certificate_l_to_boolean`. |
 | `euro` | III / IV / V / VI |
@@ -137,7 +141,8 @@
 
 **Инварианты (data-model contract):**
 - Уникальность `(carrierId, plateNumber)` — один номер на перевозчика.
-- `plannerId` — пользователь с ролью planista (ведущий спедитор).
+- `plannerId` — пользователь с ролью planista (ведущий спедитор). Ставится при создании (обязателен, R7) вместе со строкой журнала `create`; после — только через одобренную заявку на передачу, в одной транзакции с закрытием/открытием строк журнала. Прямой правки нет ни у кого, включая admin (R1). `plannerId` = `plannerId` открытой строки `VehiclePlannerAssignment` (NULL ⇔ открытой строки нет).
+- Экраны уровня машины (флот, GPS, отчёт по км, список и карточка машины) читают `plannerId` **живьём** — старый планиста теряет машину в них сразу после передачи (U7). Исторические — только выезды (`Delegation.plannerId`), получатели писем по wnioskam и имя планисты в Chat-сообщении.
 - `dispatchTeamId` — ссылка на активную `Team`; все её `dispatchers` (role=dyspozytor) считаются ведущими авто.
 - **CHECK `vehicle_gps_device_when_gps_on`** — если `gps=true`, то `gpsMobilePhone` обязан быть not-null. Это часть data-model contract, не имплементационная деталь.
 
@@ -171,9 +176,57 @@
 
 > **Смену (zmiana) НЕ храним** — она меняется каждую неделю; для уведомлений достаточно имён всех диспетчеров команды.
 
-> **Спедитор — НЕ через команду.** В уведомление о выезде летит один ведущий спедитор = `Vehicle.plannerId` (planista). Team существует только для диспетчеров.
+> **Спедитор — НЕ через команду.** В уведомление о выезде летит один ведущий спедитор = планиста **из снимка выезда** `Delegation.plannerId` (planista; при создании выезда = `Vehicle.plannerId`, [29](29-vehicle-planner-transfer-plan.md) §3.3). Team существует только для диспетчеров.
 
-**Уведомление о zgłoszeniu wyjazdu** разворачивает получателей так: `Vehicle.dispatchTeam.dispatchers` (все) + `Vehicle.planner` (один) + `Carrier.opiekun`. Верификацию/акцепт выезда выполняет диспетчер из команды авто (см. [03-roles.md](03-roles.md) и [17-migration-roadmap.md](17-migration-roadmap.md) Phase 11).
+**Уведомление о zgłoszeniu wyjazdu** разворачивает получателей так: `Vehicle.dispatchTeam.dispatchers` (все) + `Delegation.planner` (один, снимок) + `Carrier.opiekun`. Верификацию/акцепт выезда выполняет диспетчер из команды авто (см. [03-roles.md](03-roles.md) и [17-migration-roadmap.md](17-migration-roadmap.md) Phase 11).
+
+### `VehiclePlannerTransfer` — заявка на передачу машины другому планисте
+
+> ✅ **Реализовано 2026-09-28** — схема (миграция `20260928120000_vehicle_planner_transfer`), api (`modules/planner-transfers/`), web ([29](29-vehicle-planner-transfer-plan.md) §11).
+
+После создания машины планиста меняется **только** заявкой (R1). Подают: opiekun перевозчика машины или текущий планиста (R2; admin не подаёт — U1). Решают: admin или лидер `fromPlanner` (R3); автор заявки и получатель решить её не могут, у планисты без лидера решает только admin (R4). Автор может отменить свою `pending`-заявку (U4). Уведомлений нет (R9).
+
+| Поле | Назначение |
+|---|---|
+| `vehicleId` | FK → Vehicle |
+| `fromPlannerId` | FK → User — планиста машины в момент подачи (при одобрении api перепроверяет, что он всё ещё текущий, иначе 409 — U6) |
+| `toPlannerId` | FK → User — кому передать (активный планиста, не текущий — U2) |
+| `requestedById` | FK → User — автор (opiekun или текущий планиста) |
+| `status` | `pending` → `approved` / `rejected` / `cancelled` (enum `PlannerTransferStatus`) |
+| `reason` | причина подачи — обязательна (U3) |
+| `decisionComment` | причина отклонения (обязательна при `rejected`) / комментарий к одобрению (опц.) |
+| `decidedById`, `decidedAt` | кто и когда закрыл заявку — для всех трёх терминальных статусов (при `cancelled` — сам автор) |
+
+**Инварианты:**
+- ≤1 `pending`-заявки на машину — DB partial unique `VehiclePlannerTransfer_pending_vehicle_key`.
+- `fromPlannerId ≠ toPlannerId`; `reason` непустая; `pending ⇔ decidedAt IS NULL`; `rejected` ⇒ непустой `decisionComment` — DB CHECK.
+- Кто может подать / решить / отменить, «лидер именно `fromPlanner`» (`fromPlanner.liderId = решающий` и у решающего `lider = true` в момент решения — U10), активность машины и получателя — api (проверка ресурса в сервисе, §3.1 [29](29-vehicle-planner-transfer-plan.md)).
+- Деактивация машины отменяет её `pending`-заявку (U6) — api.
+- Одобрение (одна транзакция, §3.2 [29](29-vehicle-planner-transfer-plan.md)): `Vehicle.plannerId = toPlanner`; открытая строка журнала закрывается (`validTo = now`), открывается новая (`source = transfer`, ссылка на заявку); выезды машины `zgloszony`/`gotowy` с `plannerId = fromPlanner` переходят `toPlanner` (R6); заявка → `approved`.
+- Append-only: строки не удаляются (soft-delete нет), меняется только статус и поля решения.
+
+### `VehiclePlannerAssignment` — журнал назначений планисты
+
+> ✅ **Схема — 2026-09-28** (та же миграция).
+
+Кто был планистой машины и с какого по какое время. Показывается в карточке машины (кто, период, от кого к кому, кто подал, кто одобрил — через связанную заявку).
+
+| Поле | Назначение |
+|---|---|
+| `vehicleId` | FK → Vehicle |
+| `plannerId` | FK → User (planista) |
+| `validFrom`, `validTo` | период назначения (timestamp); `validTo = NULL` — текущее. Передача вступает в силу сразу при одобрении (U5) |
+| `source` | `create` (при создании машины) / `transfer` (одобренная заявка) / `backfill` (миграция — для машин, у которых планиста уже был) |
+| `transferId` | FK → VehiclePlannerTransfer — заявка, открывшая строку (только и обязательно при `source = transfer`; 1:1) |
+| `actorId` | FK → User — создатель машины (`create`) / одобривший (`transfer`); пусто для `backfill` |
+
+**Инварианты:**
+- ≤1 открытой строки на машину — DB partial unique `VehiclePlannerAssignment_open_vehicle_key`; её `plannerId` = `Vehicle.plannerId` (держит api в транзакции).
+- `validTo ≥ validFrom`; `source = transfer ⇔ transferId` задан — DB CHECK.
+- Append-only: единственное изменение — закрытие открытой строки. Физически удаляется только вместе с машиной (FK `ON DELETE CASCADE` — rollback неудачного создания машины).
+- Получатели писем по wniosku без выезда — все планисты, чьи периоды назначения пересекают `[dateStart, dateEnd]` wniosku (U8).
+
+> **Ограничение бэкфилла.** Кто вёл машину до выката фичи, неизвестно: миграция открыла по одной строке `backfill` c `validFrom = Vehicle.createdAt` на текущего планисту и приписала ему все прошлые выезды. Точная история начинается с выката.
 
 ### `VehicleDailyKm` — дневной километраж (weryfikator)
 
@@ -314,6 +367,7 @@
 | `status` | `zgloszony` → `gotowy` → `w_trasie` → `zjechal` / `anulowany`. **Операционный** (REWORK 2026-06-20): eksport ставит `gotowy`, weryfikator — `w_trasie`/`zjechal`. См. §0″ в [20](20-phase-7-eksport-weryfikator.md) |
 | `reportedById` | FK → User (кто зарегистрировал) |
 | `verifiedById` | FK → User (верификатор, изменивший статус) |
+| `plannerId` | ✅ **2026-09-28** — FK → User: **снимок** планисты периода выезда ([29](29-vehicle-planner-transfer-plan.md) R5). При создании = `Vehicle.plannerId`; одобрение передачи переписывает его только у `zgloszony`/`gotowy` (R6). По нему — scope выездов планисты, «ZESPÓŁ PROWADZĄCY», имя планисты в Chat-сообщении, получатели писем по wniosku (U8) |
 | `notes` | заметки |
 
 **Инварианты (data-model contract):**
@@ -322,6 +376,7 @@
 - `trailerId`, `driverId`, `plannedReturnAt`, `returnCountry`, `returnPostalCode` — все NOT NULL (migration `20260518113943_delegation_required_fields_and_date_only`). План возврата задаётся уже на момент `zgloszony`.
 - `status='zjechal'` ⇒ `actualReturnAt` обязан быть заполнен. Раньше это гарантировал DB CHECK `delegation_returned_complete` — он удалён, теперь правило enforced на уровне api (в сервисе при переходе статуса).
 - DB CHECK на длину: `returnCountry` 2..8 символов (covers `EL`), `returnPostalCode` ≤ 16. Формат-валидация (per-country regex) — на Zod-уровне через `EU_POSTAL_CODES` (см. `packages/shared/src/constants/eu-postal-codes.ts`).
+- **`plannerId` — исторический снимок, не живое значение.** Старый планиста продолжает видеть выезды, которые вёл; новый видит только выезды после передачи. При одобрении передачи `zgloszony`/`gotowy` уходят новому планисте, `w_trasie` доводит старый до возврата, `zjechal`/`anulowany` остаются за старым (R6). Ставит и переписывает только api (не редактируется в UI). NULL — только у выездов машины, у которой на момент миграции не было планисты.
 - **≤1 активный выезд на машину** — у машины может быть максимум один НЕ-терминальный выезд (`status ∈ {zgloszony, gotowy, w_trasie}`). Enforced на уровне api при создании (`DelegationsService.add` → 409 Conflict, если машина уже на/ожидает рейс); терминальные (`zjechal`/`anulowany`) и soft-deleted строки не блокируют. Проверка только на create — далее инвариант держится по индукции (DB unique-constraint нет, это service-level guard).
 
 > ⚠️ **ЧАСТИЧНО ОТМЕНЕНО РАЗВОРОТОМ 2026-07-30 (§0⁗):** связь `Claim.delegationId` остаётся, но период и `mileage` **из выезда больше не берутся** — их заявляет перевозчик; авто-пересчёт при позднем `zjechal` мёртв (подача возможна только из `zjechal`). Ниже — историческая формулировка.
@@ -427,7 +482,12 @@ Append-only журнал всех критических операций.
 | `User` 1:1 `Carrier` | один аккаунт carrier ↔ один профиль перевозчика |
 | `User` 1:N `Carrier` (via opiekunId) | опекун курирует много перевозчиков |
 | `Carrier` 1:N `Vehicle/Driver/Trailer` | перевозчик владеет автопарком |
-| `Vehicle` N:1 `User` (planner) | ведущий спедитор MagTrans |
+| `Vehicle` N:1 `User` (planner) | ведущий спедитор MagTrans — текущий |
+| `User` N:1 `User` (via `liderId`) | планиста → его лидер (planista с `lider = true`) |
+| `Vehicle` 1:N `VehiclePlannerAssignment` | журнал назначений планисты (одна открытая строка) |
+| `Vehicle` 1:N `VehiclePlannerTransfer` | заявки на передачу (≤1 `pending`) |
+| `VehiclePlannerTransfer` 1:0..1 `VehiclePlannerAssignment` | одобренная заявка открывает строку журнала |
+| `Delegation` N:1 `User` (planner) | снимок планисты периода выезда |
 | `Vehicle` N:1 `Team` (dispatchTeam) | команда диспетчеров авто |
 | `Team` 1:N `User` (dispatchers, via teamId) | состав команды диспетчеров |
 | `Carrier` 1:N `Claim` | перевозчик подаёт заявления |
@@ -448,7 +508,14 @@ Append-only журнал всех критических операций.
 | `Driver.loginSlug` уникален глобально | DB unique constraint, suffix-2/-3 |
 | `Trailer.plateNumber` уникален в рамках Carrier | DB unique constraint |
 | `Carrier.opiekunId` указывает на user с role=opiekun | проверка в сервисе при assign |
-| `Vehicle.plannerId` → User.role=planista | проверка в сервисе при assign |
+| `Vehicle.plannerId` → User.role=planista | проверка в сервисе (при создании машины и при одобрении передачи) |
+| `Vehicle.plannerId` меняется только одобрением передачи; = планиста открытой строки журнала | сервис (транзакция одобрения); ≤1 открытой строки — DB partial unique `VehiclePlannerAssignment_open_vehicle_key` |
+| ≤1 `pending`-заявки на передачу на машину | DB partial unique `VehiclePlannerTransfer_pending_vehicle_key` (+ 409 в сервисе) |
+| Заявка: `fromPlanner ≠ toPlanner`; причина непустая; `pending ⇔ decidedAt IS NULL`; `rejected` ⇒ комментарий | DB CHECK `vehicle_planner_transfer_*` |
+| Журнал: `validTo ≥ validFrom`; `source = transfer ⇔ transferId` | DB CHECK `vehicle_planner_assignment_*` |
+| Кто подаёт / решает / отменяет заявку (R2–R4, U1, U10) | проверка ресурса в сервисе |
+| `User.liderId` → активный planista с `lider = true`, не сам; только у planista | проверка в сервисе (межстрочное, CHECK не выразит) |
+| `Delegation.plannerId` — снимок: ставится при создании, переписывается только одобрением передачи (`zgloszony`/`gotowy`) | сервис |
 | `Vehicle.dispatchTeamId` → активная Team | проверка в сервисе при assign |
 | `User.teamId` → User.role=dyspozytor | проверка в сервисе |
 | `Team.code` уникален | DB unique constraint |
@@ -474,6 +541,7 @@ Append-only журнал всех критических операций.
 | RefreshToken | hard (по `expiresAt`) |
 | AuditLog | append-only, не удаляется — закреплено триггером в БД |
 | EmailLog | write-once; hard-delete только retention-очисткой api (старше `EMAIL_LOG_RETENTION_DAYS`, дефолт 180) |
+| VehiclePlannerTransfer, VehiclePlannerAssignment | append-only (без `deletedAt`, вне allowlist soft-delete); заявка живёт статусом, строка журнала — закрытием (`validTo`). Журнал физически уходит только каскадом вместе с машиной |
 
 ## Cascade при удалении Carrier
 

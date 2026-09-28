@@ -130,6 +130,9 @@
 | `vehicles.read` | ✅ | | ✅ | ✅ | ✅ | ✅ | | | `GET /vehicles(/:id)`, вложения |
 | `vehicles.rates.read` | ✅ | | ✅ | ✅ | | ✅ | | | сервис: scrub ставок (vehicles, модалка выезда) |
 | `vehicles.fuel_card.read` | ✅ | | ✅ | | | ✅ | | | сервис: scrub топливной карты |
+| `vehicles.planner_transfer.request` | | | ✅ | ✅ | | | | | `POST /vehicles/:id/planner-transfers`, `POST /planner-transfers/:id/cancel`, `GET /planner-transfers?scope=mine`; сервис: planista — только текущий планиста машины, cancel — только автор ([29](29-vehicle-planner-transfer-plan.md), добавлено 2026-09-28) |
+| `vehicles.planner_transfer.decide` | ✅ | | | lider | | | | | `POST /planner-transfers/:id/{approve,reject}`, `GET /planner-transfers?scope=decide`; planista — через `LIDER_PERMISSIONS.planista`; сервис: лидер **этого** `fromPlanner`, не автор и не получатель (`planner-transfer.rules.ts`) |
+| `vehicles.planner_history.read` | ✅ | | ✅ | ✅ | | | | | `GET /vehicles/:id/planner-history`; сервис: opiekun — свой перевозчик, planista — текущий планиста или его лидер |
 | `drivers.read` | ✅ | | ✅ | | | ✅ | | | `GET /drivers*`, вложения |
 | `trailers.read` | ✅ | | ✅ | | | ✅ | | | `GET /trailers*`, вложения |
 | `fleet.write` | ✅ | | ✅ | | | | | | запись и soft-delete vehicles/drivers/trailers и их вложений |
@@ -183,6 +186,16 @@
   у непустых. Эндпоинт только для лидера записывается в фикстуре B1 как
   `["admin", "planista+lider"]`. Scope лидера (если понадобится) живёт
   **внутри** ветки базовой роли — это по-прежнему «scope на роли».
+- **Передача машин** ([docs/29](29-vehicle-planner-transfer-plan.md),
+  2026-09-28) — первое лидерское право. Сделана **до** трека B и без
+  `LiderGuard`: эндпоинты решения стоят на `@Roles('admin','planista')`, а
+  «лидер именно этого планисты» проверяет сервис по ресурсу — ни `@Roles`, ни
+  permission это не выразят. В B1 это даёт три строки каталога
+  (`vehicles.planner_transfer.request|decide`, `vehicles.planner_history.read`)
+  и первое непустое `LIDER_PERMISSIONS.planista = ['vehicles.planner_transfer.decide']`;
+  ресурсная проверка в сервисе остаётся. Кандидат из docs/28 §1
+  `vehicles.reassign_planner` **отменён**: прямой смены планисты нет ни у
+  кого, включая admin и лидера (docs/29 R1).
 
 ---
 

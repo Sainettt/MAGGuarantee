@@ -64,7 +64,7 @@ function makeUser(overrides: Partial<UserRow> = {}): UserRow {
     role: 'opiekun',
     name: 'Op One',
     active: true,
-    liderEmail: null,
+    liderId: null,
     teamId: null,
     mustChangePassword: false,
     passwordChangedAt: null,
@@ -641,5 +641,38 @@ describe('CarriersRepository.countReferencingRows', () => {
       expect(arg.where).toEqual({ carrierId: 'c-1' });
       expect(arg[INCLUDE_SOFT_DELETED]).toBe(true);
     }
+  });
+});
+
+// ── docs/29 U6 — deleting a carrier switches its fleet off, so the fleet's
+// pending planista-transfer requests are cancelled in the same transaction,
+// closed by the deleting user.
+describe('CarriersRepository.softDelete — cancels the fleet’s pending transfers', () => {
+  it('closes every pending request of the carrier’s vehicles with decidedById = the actor', async () => {
+    const transferUpdateMany = jest.fn(async (_args: unknown) => ({ count: 2 }));
+    const noopMany = jest.fn(async (_args: unknown) => ({ count: 0 }));
+    const prisma = {
+      tx: {
+        carrier: {
+          findFirst: jest.fn(async () => ({ id: 'c-1', userId: 'u-c-1' })),
+          update: jest.fn(async () => ({})),
+        },
+        vehicle: { updateMany: noopMany },
+        driver: { updateMany: noopMany },
+        trailer: { updateMany: noopMany },
+        user: { update: jest.fn(async () => ({})) },
+        vehiclePlannerTransfer: { updateMany: transferUpdateMany },
+      },
+    } as unknown as PrismaService;
+
+    await new CarriersRepository(prisma).softDelete('c-1', 'u-admin');
+
+    const arg = transferUpdateMany.mock.calls[0]?.[0] as {
+      where: unknown;
+      data: { status: string; decidedById: string; decidedAt: Date };
+    };
+    expect(arg.where).toEqual({ status: 'pending', vehicle: { carrierId: 'c-1' } });
+    expect(arg.data).toMatchObject({ status: 'cancelled', decidedById: 'u-admin' });
+    expect(arg.data.decidedAt).toBeInstanceOf(Date);
   });
 });

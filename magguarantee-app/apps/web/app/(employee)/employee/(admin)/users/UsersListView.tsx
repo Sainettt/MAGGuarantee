@@ -8,6 +8,7 @@
 import {
   Check,
   Copy,
+  CornerDownRight,
   KeyRound,
   Pencil,
   Plus,
@@ -215,7 +216,22 @@ export function UsersListView() {
         width: 'flex',
         className: 'min-w-[200px]',
         cell: (row) => (
-          <span className="font-semibold truncate">{row.name ?? '—'}</span>
+          <div className="flex min-w-0 flex-col">
+            <span className="font-semibold truncate">{row.name ?? '—'}</span>
+            {/* docs/14 §17.7 (optional) — a planista's «Przełożony (lider)»
+                as a second line, so the admin sees the hierarchy that decides
+                who approves this planista's vehicle transfers. */}
+            {row.liderUser ? (
+              <span
+                className="flex items-center gap-1 truncate text-xs text-text-sub"
+                title={t('fields.liderId')}
+              >
+                <CornerDownRight size={12} aria-hidden className="shrink-0" />
+                <span className="sr-only">{t('fields.liderId')}: </span>
+                {row.liderUser.name ?? row.liderUser.login}
+              </span>
+            ) : null}
+          </div>
         ),
       },
       {

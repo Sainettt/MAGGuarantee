@@ -40,7 +40,12 @@ export interface ChatWyjazdRow {
   plannedReturnAt: Date;
   returnCountry: string;
   returnPostalCode: string;
-  /** `Vehicle.planner.name` — null when no planner assigned or name unset. */
+  /**
+   * `Delegation.planner.name` — the planista of THIS trip's period (snapshot,
+   * docs/29 §3.3), not the vehicle's current planista. At `add()` time they
+   * are the same person; the snapshot keeps the message right even if the job
+   * runs after a transfer. Null when the trip has no planista or name unset.
+   */
   planistaName: string | null;
   /**
    * Phase 11 — every dispatcher name on the vehicle's dispatch TEAM
@@ -64,10 +69,11 @@ export class ChatRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Fetch the wyjazd context for one delegation. Pulls the planner name + the
-   * dispatch TEAM's dispatcher names off the vehicle relation and the opiekun
-   * name off the carrier relation in a single query. Returns `null` if the
-   * delegation is gone (the processor treats that as a skip).
+   * Fetch the wyjazd context for one delegation. Pulls the planista name off
+   * the trip's own snapshot (docs/29), the dispatch TEAM's dispatcher names off
+   * the vehicle relation and the opiekun name off the carrier relation in a
+   * single query. Returns `null` if the delegation is gone (the processor
+   * treats that as a skip).
    */
   async findWyjazdRow(delegationId: string): Promise<ChatWyjazdRow | null> {
     const row = await this.prisma.tx.delegation.findFirst({
@@ -86,12 +92,13 @@ export class ChatRepository {
           select: { firstName: true, lastName: true, phone: true },
         },
         trailer: { select: { plateNumber: true } },
+        // docs/29 — the trip's own planista (snapshot).
+        planner: { select: { name: true } },
         vehicle: {
           select: {
             plateNumber: true,
             sideNumber: true,
             gpsMobilePhone: true,
-            planner: { select: { name: true } },
             dispatchTeam: {
               select: {
                 dispatchers: {
@@ -127,7 +134,7 @@ export class ChatRepository {
       plannedReturnAt: row.plannedReturnAt,
       returnCountry: row.returnCountry,
       returnPostalCode: row.returnPostalCode,
-      planistaName: row.vehicle?.planner?.name ?? null,
+      planistaName: row.planner?.name ?? null,
       dyspozytorNames:
         row.vehicle?.dispatchTeam?.dispatchers.map((d) => d.name) ?? [],
       opiekunName: row.carrier?.opiekun?.name ?? null,

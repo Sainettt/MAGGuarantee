@@ -85,6 +85,8 @@ function makeDelegation(overrides: Partial<DelegationRow> = {}): DelegationRow {
       dispatchTeam: null,
       planner: null,
     },
+    plannerId: null,
+    planner: null,
     trailerId: 'trl-1',
     trailer: { id: 'trl-1', plateNumber: 'TR9999' },
     driverId: 'drv-1',
@@ -353,6 +355,8 @@ function makePrismaService(): PrismaService {
     user: { findFirst: jest.fn(async () => null) },
     carrier: { findFirst: jest.fn(async () => null) },
     vehicle: { findFirst: jest.fn(async () => null) },
+    delegation: { findFirst: jest.fn(async () => null) },
+    vehiclePlannerAssignment: { findMany: jest.fn(async () => []) },
   };
   return {
     client,

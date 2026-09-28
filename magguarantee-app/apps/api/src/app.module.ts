@@ -34,6 +34,7 @@ import { LookupsModule } from './modules/lookups/lookups.module';
 import { MailModule } from './modules/mail/mail.module';
 import { OpiekunModule } from './modules/opiekun/opiekun.module';
 import { PasswordModule } from './modules/password/password.module';
+import { PlannerTransfersModule } from './modules/planner-transfers/planner-transfers.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
 import { RedisModule } from './modules/redis/redis.module';
 import { TeamsModule } from './modules/teams/teams.module';
@@ -98,6 +99,8 @@ import { WeeklyReportModule } from './modules/weekly-report/weekly-report.module
     KmCalcModule,
     ClaimsModule,
     DelegationsModule,
+    // docs/29 — vehicle planner transfer (request → approval) + planista history.
+    PlannerTransfersModule,
     FleetModule,
     OpiekunModule,
     ViesModule,

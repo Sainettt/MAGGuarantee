@@ -117,9 +117,11 @@
 | Алерты по документам, compliance гарантии, эпизоды watchdog | Только свои перевозчики |
 | VIES, Biała Lista, info-car | В формах перевозчика и машины |
 | GPS-позиции | Машины своих перевозчиков |
+| Заявка на смену планисты машины, отмена своей заявки, журнал планистов машины | Машины своих перевозчиков. Решает admin или лидер текущего планисты ([29](29-vehicle-planner-transfer-plan.md)) |
 
 ### Что НЕ может
 
+- Менять планисту машины напрямую — только заявкой (docs/29 R1). Планиста выбирается сразу только при создании машины.
 - Действовать на перевозчиках с другим `opiekunId` (403).
 - Верифицировать заявления и принимать по ним решения (это `pracownik`/`admin`).
 - Видеть **все** wnioski — только wnioski **своих** перевозчиков.
@@ -143,16 +145,18 @@
 
 **Кто это:** спедитор, отвечающий за загрузку конкретных автомобилей.
 
-**Атрибуты:** login, email, имя, **liderEmail** (email лидера группы — он тоже получает уведомления о решениях по авто планисты).
+**Атрибуты:** login, email, имя, **`liderId`** — его лидер (планиста с `lider = true`). Лидер решает заявки на передачу машин этого планисты и получает CC писем по wnioskam его машин. Ставит admin; MAGSpace иерархии не отдаёт. Заменил `liderEmail` ([29](29-vehicle-planner-transfer-plan.md) R8).
 
 ### Что может делать
-- Видеть авто, у которых `vehicle.plannerId = его id` (включая ставки DE/UE/Export/Import — в отличие от диспетчера).
+- Видеть авто, у которых `vehicle.plannerId = его id` — **текущий** планиста (включая ставки DE/UE/Export/Import — в отличие от диспетчера). Флот, km-рапорт и GPS живые: после передачи машина пропадает у старого планисты сразу, включая прошлые недели км.
 - Видеть водителей и прицепы перевозчиков своих авто (read-only, через панель `/fleet/planista`).
-- Видеть **выезды** своих авто.
+- Видеть **выезды, которые он вёл**: `Delegation.plannerId` — снимок планисты на момент регистрации выезда. После передачи машины старый планиста продолжает видеть свои выезды, новый — только выезды после передачи (docs/29 R5, R6).
 - Видеть km-рапорт по своим авто и GPS-позиции.
+- Подать заявку на передачу своей машины другому планисте и отменить свою заявку (`/planista/przekazania`).
+- **Лидер планистов** — решать заявки своих планистов (`/planista/zatwierdzenia`), см. [Лидеры](#lider).
 
 ### Что НЕ может
-- Ничего редактировать.
+- Ничего редактировать, кроме заявки на передачу своей машины (и её отмены).
 - Видеть заявления.
 - Видеть номер и PIN топливной карты.
 
@@ -243,7 +247,7 @@
 |---|---|
 | Видеть в Employee panel **ещё 4 вкладки**: Carriers, Vehicles, Drivers, Trailers | `index.html:4682-4686` (UI guard `isAdminRole`) |
 | CRUD **перевозчиков** (всех, не только своих) | `addCarrier` / `updateCarrier` / `toggleCarrierActive` / `deleteCarrierHard` / `resetCarrierPassword` → `POST/PATCH/DELETE /carriers` |
-| CRUD **авто** (всех) + редактирование `plannerId`, `dispatcherId`, ставок (DE/UE/Ekspoort/Import) | `addVehicle` / `updateVehicleDetails` / `toggleVehicleActive` / `removeVehicle` |
+| CRUD **авто** (всех) + редактирование `dispatchTeamId`, ставок (DE/UE/Ekspoort/Import). Планиста — только при создании; сменить его нельзя даже admin, admin **решает** заявки на смену (любые) и заявку не подаёт ([29](29-vehicle-planner-transfer-plan.md) R1, U1) | `addVehicle` / `updateVehicleDetails` / `toggleVehicleActive` / `removeVehicle`; `/planner-transfers/*` |
 | CRUD **водителей** (всех) | `addDriver` / `updateDriver` / `toggleDriverActive` / `removeDriver` |
 | CRUD **прицепов** (всех) | `addNaczepa` / `updateNaczepa` / `toggleNaczepaActive` / `removeNaczepa` |
 | Управление **справочником типов прицепов** | `addNaczepaTyp` / `toggleNaczepaTypActive` |
@@ -303,11 +307,11 @@
 |---|---|
 | Для каких ролей | `LIDER_ROLES` = `planista`, `dyspozytor`, `opiekun`, `pracownik`, `eksport`. `admin` и так может всё, `przewoznik` — не сотрудник, `weryfikator` не запрошен (добавить = одна строка в shared + новая миграция для двух CHECK) |
 | Инвариант | `lider = true ⇒ role ∈ LIDER_ROLES`, в трёх местах как у `AssignableRole`: Zod (`refineLiderPair`), сервисы (частичный `PATCH`, пара с `roleOverride`), CHECK в БД (`user_lider_requires_lider_role`, `stanowisko_role_mapping_lider_requires_lider_role`) |
-| Что даёт сегодня | **Ничего сверх базовой роли.** Тип пользователя, scope, ownership, панель, landing, nav и все `@Roles` — от `role`; лидер везде проходит как базовая роль. Права лидера появятся как `LIDER_PERMISSIONS[role]` в слое permissions ([docs/25](25-permissions-layer-plan.md) B1); первый кейс — передача машины другому планисте с апрувом лидера (отдельный план, docs/28 §8) |
+| Что даёт сегодня | **Лидер планистов** решает (одобряет / отклоняет) заявки на передачу машин **своих** планистов — тех, у кого `liderId` = его id ([29](29-vehicle-planner-transfer-plan.md)). Не может решить заявку, которую подал сам или в которой машину передают ему — её решает admin. Проверка на уровне ресурса в сервисе (`planner-transfer.rules.ts`), флаг `lider` читается в момент решения. Отдельный пункт меню «Do zatwierdzenia» — только при `lider`. **Лидеры остальных ролей — ничего сверх базовой роли.** Тип пользователя, scope, ownership, панель, landing и все `@Roles` — от `role`. Общие права лидера — `LIDER_PERMISSIONS[role]` в слое permissions ([docs/25](25-permissions-layer-plan.md) B1) |
 | Откуда берётся | Как `role`: `magspace` без `roleOverride` — из маппинга stanowiska (`PLANISTA_LIDER`, `DYSPOZYTOR_KIEROWNIK` → `+ lider`, docs/24 §10); с `roleOverride` («Nadaj dostęp» с галкой «Lider» или UserSheet) и `local` — admin. Лидеры DAF (`opiekun`), opiekunów wniosków (`pracownik`) и eksportu выдаются только руками — в MAGSpace нет соответствующих stanowisk |
 | UI-лейбл | `roles.lider.<role>`: «Lider planistów», «Lider dyspozytorów», «Lider DAF», «Lider opiekunów wniosków», «Lider eksportu» (EN: «Planners lead» …). Базовый `roles.<role>` не меняется; в списке пользователей — чип роли **плюс** чип «Lider», фильтр «Tylko liderzy» |
 | Где виден | `/auth/me.lider` и все ответы с `user`, `UserDtoFull.lider`, `GET /users?lider=true`, колонка «Lider» на `/employee/sso`, галка в «Nadaj dostęp», лейбл в меню пользователя и в автокомплите аудита, `lider` в DTO пикеров lookups. В JWT флага **нет** — читается из БД на каждом запросе, как `teamId` |
-| Не путать | `User.liderEmail` — e-mail для CC на решениях по wniosku ([quirk #14](19-known-quirks.md#liderEmail)), в UI подписан «E-mail lidera (CC)». Другое понятие, связи нет |
+| Связь «кто чей лидер» | `User.liderId` у планисты → планиста с `lider = true` (UserSheet «Przełożony (lider)», ставит admin). Заменил текстовый `User.liderEmail` ([quirk #14](19-known-quirks.md#liderEmail)): колонка ещё в БД, но не читается и удаляется отдельным релизом. Снятие флага `lider` не очищает `liderId` подчинённых — их заявки тогда решает admin |
 
 ---
 
@@ -330,6 +334,9 @@
 | CRUD авто (все) | ✅ | **—** | — | — | — | — | — | — |
 | CRUD авто (свои перев.) | — | — | ✅ | — | — | — | — | — |
 | Видеть свои авто (planner / dispatch team) | — | — | — | ✅ | ✅ | — | — | — |
+| Подать заявку на смену планисты машины / отменить свою | — | — | ✅ (своих перев.) | ✅ (текущий планиста машины) | — | — | — | — |
+| Решить заявку на смену планисты | ✅ (любую, кроме своей) | — | — | ✅ (лидер планисты-отправителя; не автор и не получатель) | — | — | — | — |
+| Журнал планистов машины | ✅ | — | ✅ (своих перев.) | ✅ (текущий планиста и его лидер) | — | — | — | — |
 | Видеть ставки авто | ✅ | — | ✅ | ✅ | **—** | ✅ | — | — |
 | Видеть номер и PIN топливной карты | ✅ | — | ✅ | — | — | ✅ | — | — |
 | Hard-delete водителей / прицепов / перевозчиков | ✅ | — | — | — | — | — | — | — |
@@ -343,7 +350,7 @@
 | Anulować выезд | ✅ (любой активный) | — | — | — | — | ✅ (свой, `zgloszony`) | — | — |
 | Проставлять дневной км машин | ✅ | — | — | — | — | — | — | ✅ |
 | Видеть km-рапорт (read-only) | ✅ | — | ✅ (своих перев.) | ✅ (свои) | ✅ (своя команда) | ✅ (своя флота) | ✅ | ✅ |
-| Видеть выезды | ✅ | — | ✅ (своих перев.) | ✅ (свои авто) | ✅ (своя команда) | ✅ (свои) | ✅ (все, активные по умолч.) | ✅ (все, активные по умолч.) |
+| Видеть выезды | ✅ | — | ✅ (своих перев.) | ✅ (которые вёл — по снимку) | ✅ (своя команда) | ✅ (свои) | ✅ (все, активные по умолч.) | ✅ (все, активные по умолч.) |
 | GPS-позиции машин | ✅ | — | ✅ (своих перев.) | ✅ (свои) | ✅ (своя команда) | ✅ (свои) | — | — |
 | Алерты по документам, compliance гарантии, эпизоды watchdog | ✅ | — | ✅ (своих перев.) | — | — | ✅ (только compliance и эпизоды, `/me`) | — | — |
 | VIES / Biała Lista / info-car | ✅ | — | ✅ | — | — | — | — | — |

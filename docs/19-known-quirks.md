@@ -281,7 +281,11 @@ The decision rationale: `pracownik` is now a narrow "Opiekun wniosków" role —
 
 ---
 
-## 14. <a id="liderEmail"></a>`User.liderEmail` is per-role tech debt
+## 14. <a id="liderEmail"></a>`User.liderEmail` is per-role tech debt ✅ RESOLVED (2026-09-28)
+
+> **Resolution ([docs/29](29-vehicle-planner-transfer-plan.md) R8).** The "who is whose leader" structure now exists: `User.liderId` — self-FK from a planista to a planista with `lider = true`, set by an admin in UserSheet («Przełożony (lider)»), never touched by the MAGSpace reconcile, cleared when the user's effective role stops being `planista`. It drives two things: who may decide the planista's vehicle-transfer requests, and whom claim e-mails CC (the lider's own `email`). Migration `20260928120000_vehicle_planner_transfer` backfilled `liderId` from matching `liderEmail` values. The `liderEmail` column is **deprecated**: still in the DB, no longer read or written by the api, absent from DTOs and the UI; it is dropped in a separate later release (after the unmatched values on pre-prod are resolved by hand). The text below is kept as history.
+>
+> **What NOT to do now:** do not read `liderEmail` anywhere, do not re-add it to DTOs or forms, and do not drop the column in the same release as another schema change.
 
 `User.liderEmail` (nullable string) is currently used **only for `planista` role** — the email of their team lead, who gets CC-ed on planning decisions for any vehicle the planista is assigned to.
 
@@ -302,19 +306,41 @@ Source of truth: `schema.prisma` (User model — `liderEmail String?` with comme
 
 ---
 
+## 15. <a id="planner-live-vs-snapshot"></a>Planista: vehicle views are live, trip and claim views are historical
+
+Since [docs/29](29-vehicle-planner-transfer-plan.md) (2026-09-28) "the planista" means two different things depending on the screen:
+
+| Where | Which planista | Field |
+|---|---|---|
+| Fleet panel, km-report, GPS, vehicle list / detail, lookups | the **current** planista of the vehicle — live | `Vehicle.plannerId` |
+| Delegation list / detail scope, «ZESPÓŁ PROWADZĄCY», Chat wyjazd message | the planista **of that trip** — snapshot taken at registration, re-stamped on transfer approval only while the trip is `zgloszony` / `gotowy` | `Delegation.plannerId` |
+| Claim e-mail recipients | the trip's snapshot planista; a claim without a trip → every planista whose assignment overlaps the claim period; CC = each one's **current** lider | `Delegation.plannerId`, `VehiclePlannerAssignment` |
+
+So after a transfer the old planista loses the vehicle (and its past km weeks) at once but keeps the trips he led; the new one sees the vehicle and its full km history but only trips from the transfer on. This is intended (docs/29 U7), not a bug. The delegation DTO carries both `planner` (trip) and `vehicle.planner` (current) so the UI can show «Ciągnik prowadzi obecnie: …» when they differ.
+
+`Vehicle.plannerId` is a denormalized pointer that must always equal the open `VehiclePlannerAssignment` row. It is written in exactly two places: vehicle create (with a `create` history row) and transfer approval (closes the open row, opens a `transfer` row, same timestamp). `PATCH /vehicles/:id` with `plannerId` is a 422 for every role, admin included.
+
+History before 2026-09-28 is approximate: the migration assumed the planista at deploy time led every earlier trip (`backfill` rows, `validFrom = vehicle.createdAt`).
+
+**What NOT to do:** do not "fix" the delegation scope back to `vehicle.plannerId`; do not add a direct write of `Vehicle.plannerId` outside the two paths above; do not make fleet / km-report historical without a product decision (docs/29 U7).
+
+---
+
 ## How to use this document
 
 Read the relevant section before:
 
 | You're implementing... | Read sections |
 |---|---|
-| Vehicle CRUD / forms | #1, #2, #3, #11 |
+| Vehicle CRUD / forms | #1, #2, #3, #11, #15 |
 | Carrier onboarding / VIES / Biała Lista | #4 |
 | Claim verification / decision PATCH | #5, #6, #9 |
+| Claim e-mail recipients | #14, #15 |
 | Maksim authorization gate (automatic) | #5, #6 |
 | `calcKmGwarantPerMonth` port | #7, #8 |
 | Auth + login + session | #10, #12 |
-| Delegations module | #11, #13 |
+| Delegations module | #11, #13, #15 |
+| Planista scope / vehicle transfers | #15 |
 | User edit / admin → users | #14, #12 |
 
 If you find a NEW non-obvious quirk while implementing, add it here. Number it sequentially, give it an anchor (`<a id="...">`), include source-of-truth references, and end with a "what NOT to do" line.

@@ -140,6 +140,23 @@ export const ADMIN_ONLY_EMPLOYEE_PREFIXES: readonly string[] = [
   '/employee/delegations',
 ];
 
+/**
+ * Sub-paths inside `/employee` open to SOME employee roles but not all — the
+ * listed roles only (admin is always listed explicitly). Checked in addition
+ * to `ADMIN_ONLY_EMPLOYEE_PREFIXES`.
+ *
+ * docs/29 / docs/14 §17.4.1 — «Przekazania»: admin decides every vehicle
+ * transfer request, the opiekun follows his own (D5); `pracownik` has no part
+ * in it (the api would 403 both `scope=decide` and `scope=mine` for him).
+ * Plain path data only — this file is edge-imported and must stay free of
+ * runtime imports from `@magguarantee/shared`.
+ */
+export const ROLE_RESTRICTED_EMPLOYEE_PREFIXES: Readonly<
+  Record<string, readonly Role[]>
+> = {
+  '/employee/przekazania': ['admin', 'opiekun'],
+};
+
 function startsWithPrefix(pathname: string, prefix: string): boolean {
   return pathname === prefix || pathname.startsWith(prefix + '/');
 }
@@ -162,6 +179,9 @@ export function isAllowedForRole(pathname: string, role: Role): boolean {
     pathStartsWithAny(pathname, ADMIN_ONLY_EMPLOYEE_PREFIXES)
   ) {
     return false;
+  }
+  for (const [prefix, roles] of Object.entries(ROLE_RESTRICTED_EMPLOYEE_PREFIXES)) {
+    if (startsWithPrefix(pathname, prefix) && !roles.includes(role)) return false;
   }
   return pathStartsWithAny(pathname, ROLE_ALLOWED_PREFIXES[role]);
 }

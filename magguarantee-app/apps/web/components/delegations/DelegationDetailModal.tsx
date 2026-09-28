@@ -520,15 +520,33 @@ export function DelegationDetailModal({
           ),
           fullWidth: true,
         },
-        // Planista (lead forwarder) — resolved LIVE off the delegation's
-        // vehicle (`Vehicle.planner`), so every role sees the FULL crew here:
-        // planista + dispatch team + eksport (mirrors the gchat ZESPÓŁ line).
+        // Planista — the snapshot of the trip period (docs/29 R5,
+        // `delegation.planner`), NOT the vehicle's live planista: after a
+        // transfer a `w_trasie` trip is still led by the previous one (R6).
+        // When they differ, one quiet line names who plans the vehicle now
+        // (docs/14 §17.8) — otherwise that case would look like an error.
         {
           label: tTeam('planista'),
-          value: textValue(
-            delegation.vehicle?.planner?.name ??
-              delegation.vehicle?.planner?.login,
-          ),
+          value: (() => {
+            const tripPlanner = delegation.planner;
+            const nowPlanner = delegation.vehicle?.planner ?? null;
+            const showNow =
+              tripPlanner !== null &&
+              nowPlanner !== null &&
+              tripPlanner.id !== nowPlanner.id;
+            return (
+              <span className="flex flex-col gap-0.5">
+                <span>{textValue(tripPlanner?.name ?? tripPlanner?.login)}</span>
+                {showNow ? (
+                  <span className="text-xs text-text-sub">
+                    {tTeam('planistaNow', {
+                      name: nowPlanner.name ?? nowPlanner.login,
+                    })}
+                  </span>
+                ) : null}
+              </span>
+            );
+          })(),
         },
         // Eksport grouped with the dispatchers — the staff steering this outing.
         // Same person shown as «Zweryfikowany przez» above (readyBy).

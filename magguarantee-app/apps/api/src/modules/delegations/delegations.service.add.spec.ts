@@ -23,6 +23,7 @@ import { DelegationsService } from './delegations.service';
 const CARRIER_ID = 'carrier-1';
 const CARRIER_USER = 'user-1';
 const VEHICLE_ID = 'veh-1';
+const VEHICLE_PLANNER = 'plan-1';
 
 function authCarrier(): AuthUser {
   return {
@@ -73,6 +74,8 @@ function activeRow(
     id: 'deleg-active',
     vehicleId: VEHICLE_ID,
     vehicle: null,
+    plannerId: null,
+    planner: null,
     trailerId: 'trl-1',
     trailer: null,
     driverId: 'drv-1',
@@ -159,6 +162,8 @@ function makeService(conflict: DelegationRow | null) {
       carrierId: CARRIER_ID,
       plateNumber: 'PL123',
       active: true,
+      // docs/29 — the vehicle's current planista, stamped onto the new trip.
+      plannerId: VEHICLE_PLANNER,
     })),
   } as unknown as VehiclesRepository;
 
@@ -286,5 +291,16 @@ describe('DelegationsService.add — ≤1 active delegation per vehicle (CREATE 
     expect(out.id).toBe('deleg-new');
     expect(createSpy).toHaveBeenCalledTimes(1);
     expect(findActiveSpy).toHaveBeenCalledWith(VEHICLE_ID, expect.anything());
+  });
+});
+
+describe('DelegationsService.add — planista snapshot (docs/29 §3.3)', () => {
+  it("stamps Delegation.plannerId = the vehicle's current planista and returns it", async () => {
+    const { service, createSpy } = makeService(null);
+    const out = await service.add(authCarrier(), submitDto());
+    expect(createSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ vehicleId: VEHICLE_ID, plannerId: VEHICLE_PLANNER }),
+    );
+    expect(out.plannerId).toBe(VEHICLE_PLANNER);
   });
 });
