@@ -1,4 +1,43 @@
+import { createPrivateKey } from 'node:crypto';
+
 import { z } from 'zod';
+
+/** "" / whitespace-only → undefined, so "blank in .env" == "absent". */
+const blankToUndefined = (v: unknown): unknown =>
+  typeof v === 'string' && v.trim() === '' ? undefined : v;
+
+// BugBot's own formats (MAGGuaranteeBugBot packages/shared: SLUG_RE in
+// config/project-identity.ts, KID_RE in config/auth-config.ts). Checking them
+// here turns a typo into a boot error instead of every handoff landing on
+// BugBot's opaque `invalid` page.
+const BUGBOT_SLUG_RE = /^[a-z][a-z0-9-]{1,39}$/;
+const BUGBOT_KID_RE = /^[A-Za-z0-9._-]{1,64}$/;
+
+/** The three keys that switch the BugBot handoff on — all of them or none. */
+const BUGBOT_HANDOFF_KEYS = [
+  'BUGBOT_URL',
+  'BUGBOT_HANDOFF_KID',
+  'BUGBOT_HANDOFF_PRIVATE_KEY',
+] as const;
+
+/**
+ * True when `pem` parses as an unencrypted EC private key on P-256 — the only
+ * key ES256 can sign with, and the only one BugBot will hold a public half of.
+ */
+function isP256PrivateKey(pem: string): boolean {
+  try {
+    const key = createPrivateKey({ key: pem, format: 'pem' });
+    return (
+      key.asymmetricKeyType === 'ec' &&
+      key.asymmetricKeyDetails?.namedCurve === 'prime256v1'
+    );
+  } catch {
+    // Not swallowed: the caller turns `false` into a validation issue with a
+    // fixed message. crypto's own message is dropped on purpose — it describes
+    // the input, and the input is a private key.
+    return false;
+  }
+}
 
 /**
  * Environment variables schema.
@@ -342,6 +381,64 @@ export const envSchema = z.object({
     (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
     z.string().url().optional(),
   ),
+
+  // ── BugBot handoff (docs/16-jobs-and-integrations.md#bugbot-handoff) ──
+  // BugBot is the separate MAGTRANS bug/idea intake. Our users have no account
+  // there: `GET /integrations/bugbot/handoff` signs a 60-second ES256 token for
+  // the signed-in user and returns the BugBot URL carrying it. Contract:
+  // MAGGuaranteeBugBot docs/06-contracts.md §1.
+  //
+  // BUGBOT_URL, BUGBOT_HANDOFF_KID and BUGBOT_HANDOFF_PRIVATE_KEY are all-or-
+  // nothing (superRefine below). All blank == the integration is off: the
+  // endpoint answers 404 and the app boots normally, which is the dev/test
+  // default. A half-filled set fails boot rather than surfacing as a 404 nobody
+  // can explain.
+  //
+  // BugBot's web origin, e.g. https://bugbot.sainet.pl. A trailing `/` is
+  // tolerated (stripped when the URL is built). http(s) only: the browser opens
+  // it in a new tab.
+  BUGBOT_URL: z.preprocess(
+    blankToUndefined,
+    z
+      .string()
+      .url()
+      .refine((u) => /^https?:\/\//iu.test(u), {
+        message: 'BUGBOT_URL must be an http(s) URL',
+      })
+      .optional(),
+  ),
+  // Our project slug in BugBot. It is the `/p/<slug>/` path segment AND the
+  // `iss` claim (BugBot's issuer is the slug by convention). Not a secret and
+  // not part of the all-or-nothing set — it has a working default.
+  BUGBOT_PROJECT_SLUG: z.preprocess(
+    blankToUndefined,
+    z
+      .string()
+      .regex(BUGBOT_SLUG_RE, 'BUGBOT_PROJECT_SLUG must match ^[a-z][a-z0-9-]{1,39}$')
+      .default('magguarantee'),
+  ),
+  // Id of the key pair, sent as the `kid` JWT header. Must equal the kid the
+  // public half is registered under in BugBot's Access panel. A new kid per
+  // rotation is what makes a zero-downtime switch possible.
+  BUGBOT_HANDOFF_KID: z.preprocess(
+    blankToUndefined,
+    z
+      .string()
+      .regex(BUGBOT_KID_RE, 'BUGBOT_HANDOFF_KID must be letters, digits, ".", "_" or "-" (max 64)')
+      .optional(),
+  ),
+  // The SECRET half: PEM, PKCS#8 (`BEGIN PRIVATE KEY`), EC P-256. Never leaves
+  // this server — BugBot only ever sees the public key. An env line cannot hold
+  // real newlines in most tooling, so the PEM is usually pasted as one line with
+  // literal `\n`; those are turned back into newlines HERE, so every consumer
+  // gets a ready PEM. A value with real newlines passes through unchanged.
+  BUGBOT_HANDOFF_PRIVATE_KEY: z.preprocess(
+    (v) => {
+      const blank = blankToUndefined(v);
+      return typeof blank === 'string' ? blank.replace(/\\n/gu, '\n') : blank;
+    },
+    z.string().optional(),
+  ),
 }).superRefine((env, ctx) => {
   // Gmail secrets are required only when the Gmail provider is selected — keeps
   // dev/staging `.env` (Mailhog) clean while still failing fast at boot in prod
@@ -362,6 +459,35 @@ export const envSchema = z.object({
         });
       }
     }
+  }
+
+  // BugBot handoff: all three keys or none. An issue on EACH missing key, so the
+  // boot error names exactly what to fill in.
+  const bugbotSet = BUGBOT_HANDOFF_KEYS.filter((key) => env[key] !== undefined);
+  if (bugbotSet.length > 0 && bugbotSet.length < BUGBOT_HANDOFF_KEYS.length) {
+    for (const key of BUGBOT_HANDOFF_KEYS) {
+      if (env[key] === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: `${key} is required when any of ${BUGBOT_HANDOFF_KEYS.join(', ')} is set`,
+        });
+      }
+    }
+  }
+  // A key that cannot sign ES256 is caught at boot, not at the first click. The
+  // message is fixed text: neither the value nor crypto's error (which
+  // describes the value) may end up in the boot log.
+  if (
+    env.BUGBOT_HANDOFF_PRIVATE_KEY !== undefined &&
+    !isP256PrivateKey(env.BUGBOT_HANDOFF_PRIVATE_KEY)
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['BUGBOT_HANDOFF_PRIVATE_KEY'],
+      message:
+        'BUGBOT_HANDOFF_PRIVATE_KEY must be an unencrypted PKCS#8 PEM private key on EC P-256 (prime256v1)',
+    });
   }
 });
 

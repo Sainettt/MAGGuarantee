@@ -200,6 +200,11 @@
     "pl": "Polski",
     "en": "Angielski"
   },
+  "bugbot": {
+    "report": "Zgłoś problem",
+    "idea": "Zgłoś pomysł",
+    "error": "Nie udało się otworzyć formularza. Spróbuj ponownie."
+  },
   "login": {
     "title": "MAGGuarantee",
     "subtitle": "Zaloguj się, aby kontynuować",

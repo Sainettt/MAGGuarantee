@@ -7,6 +7,9 @@
 // The self-service password change lives HERE, next to logout, for every role
 // (decision 2026-07-30) — it is the only password action a non-admin user can
 // perform on their own account while logged in.
+//
+// Below `lg` the menu also carries the BugBot actions (<BugbotMenuItems>) —
+// the header bar has no reliable room for them there.
 
 import { ChevronDown, KeyRound, LogOut } from 'lucide-react';
 import { useTranslations } from 'next-intl';
@@ -18,14 +21,19 @@ import type { Role, UserDto } from '@magguarantee/shared';
 import { ChangePasswordDialog } from '@/components/auth/ChangePasswordDialog';
 import { logout } from '@/lib/api/auth';
 import { ME_QUERY_KEY } from '@/lib/hooks/useAuth';
+import type { UseBugbotHandoffResult } from '@/lib/hooks/useBugbotHandoff';
 import { roleLabelKey } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 
+import { BugbotMenuItems } from './BugbotMenuItems';
+
 interface UserMenuProps {
   user: UserDto;
+  /** BugBot handoff owned by <Header>; its items show only below `lg`. */
+  bugbot?: UseBugbotHandoffResult;
 }
 
-export function UserMenu({ user }: UserMenuProps) {
+export function UserMenu({ user, bugbot }: UserMenuProps) {
   const t = useTranslations();
   const router = useRouter();
   const qc = useQueryClient();
@@ -119,6 +127,9 @@ export function UserMenu({ user }: UserMenuProps) {
             <KeyRound size={14} aria-hidden />
             {t('changePassword.menuItem')}
           </button>
+          {bugbot && (
+            <BugbotMenuItems handoff={bugbot} onSelect={() => setOpen(false)} />
+          )}
           <button
             type="button"
             onClick={onLogout}

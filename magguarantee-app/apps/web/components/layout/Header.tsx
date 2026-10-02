@@ -4,6 +4,11 @@
 // (logo + app name), language + theme toggles, and the <UserMenu>. The
 // optional `leftSlot` is used by shells that need a burger / nav-trigger
 // inside the header (Phase 4 employee panel on mobile — see <EmployeeShell>).
+//
+// BugBot «Zgłoś problem» / «Zgłoś pomysł» (off unless
+// NEXT_PUBLIC_BUGBOT_ENABLED): the header owns the ONE handoff instance and
+// hands it to both triggers — <BugbotButtons> pills from `lg`, <UserMenu>
+// items below `lg` — so they share the pending state and the inline error.
 
 import Image from 'next/image';
 import Link from 'next/link';
@@ -14,8 +19,10 @@ import type { Role } from '@magguarantee/shared';
 import { LanguageToggle } from '@/components/ui/LanguageToggle';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { useAuth } from '@/lib/hooks/useAuth';
+import { useBugbotHandoff } from '@/lib/hooks/useBugbotHandoff';
 import { landingFor } from '@/lib/roles';
 
+import { BugbotButtons } from './BugbotButtons';
 import { UserMenu } from './UserMenu';
 
 interface HeaderProps {
@@ -27,6 +34,7 @@ interface HeaderProps {
 export function Header({ leftSlot }: HeaderProps = {}) {
   const t = useTranslations('app');
   const { user } = useAuth();
+  const bugbot = useBugbotHandoff(user ? (user.role as Role) : null);
 
   // The logo doubles as the home link — resolves to the role's landing path
   // (for eksport/weryfikator that is the delegations board directly, so there
@@ -72,10 +80,13 @@ export function Header({ leftSlot }: HeaderProps = {}) {
           </span>
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-3">
+        {/* `relative self-stretch`: full bar height, so <BugbotButtons>' inline
+            error (absolute, `top-full`) hangs right below the header border. */}
+        <div className="relative self-stretch flex items-center gap-2 sm:gap-3">
+          {user && <BugbotButtons handoff={bugbot} />}
           <LanguageToggle />
           <ThemeToggle />
-          {user && <UserMenu user={user} />}
+          {user && <UserMenu user={user} bugbot={bugbot} />}
         </div>
       </div>
     </header>

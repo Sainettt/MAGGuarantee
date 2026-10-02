@@ -55,6 +55,12 @@ ENV NEXT_PUBLIC_ALLOW_PAST_DEPARTURE=$NEXT_PUBLIC_ALLOW_PAST_DEPARTURE
 ARG NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID=
 ENV NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID=$NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID
 
+# BugBot header buttons. Empty default = off: only the exact value `true`
+# renders them, and the api needs its BUGBOT_* settings as well (404
+# otherwise). Same rule as above — changing it requires a REBUILD.
+ARG NEXT_PUBLIC_BUGBOT_ENABLED=
+ENV NEXT_PUBLIC_BUGBOT_ENABLED=$NEXT_PUBLIC_BUGBOT_ENABLED
+
 RUN npm run build -w @magguarantee/shared && \
     npm run build -w web
 

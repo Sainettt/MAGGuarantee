@@ -22,6 +22,7 @@ import { DelegationsModule } from './modules/delegations/delegations.module';
 import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
 import { DriversModule } from './modules/drivers/drivers.module';
 import { FleetModule } from './modules/fleet/fleet.module';
+import { BugbotModule } from './modules/integrations/bugbot/bugbot.module';
 import { GpsModule } from './modules/integrations/gps/gps.module';
 import { GuaranteeWatchdogModule } from './modules/guarantee-watchdog/guarantee-watchdog.module';
 import { InspectionModule } from './modules/integrations/inspection/inspection.module';
@@ -107,6 +108,8 @@ import { WeeklyReportModule } from './modules/weekly-report/weekly-report.module
     WhiteListModule,
     InspectionModule,
     GpsModule,
+    // BugBot handoff — signed one-time sign-in URL into the bug/idea intake.
+    BugbotModule,
     // Phase 4.5 — admin ops surface (dashboard + audit read + diagnostics).
     LimitsModule,
     DiagnosticsModule,

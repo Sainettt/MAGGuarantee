@@ -200,6 +200,11 @@
     "pl": "Polish",
     "en": "English"
   },
+  "bugbot": {
+    "report": "Report a problem",
+    "idea": "Suggest an idea",
+    "error": "Couldn't open the form. Please try again."
+  },
   "login": {
     "title": "MAGGuarantee",
     "subtitle": "Sign in to continue",

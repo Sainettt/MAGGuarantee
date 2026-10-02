@@ -6,8 +6,10 @@
 //   ./whitelist.ts   — Biała Lista MF
 //   ./inspection.ts  — info-car.pl URL builder
 //   ./gps.ts         — GPS tracker (mock + future vendor)
+//   ./bugbot.ts      — BugBot handoff (one-time sign-in URL)
 
 export * from './vies';
 export * from './whitelist';
 export * from './inspection';
 export * from './gps';
+export * from './bugbot';
