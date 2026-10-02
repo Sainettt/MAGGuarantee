@@ -220,6 +220,10 @@ services:
         # a restart keeps the stale value. Empty = the Google button is not
         # rendered at all and only the password form is shown.
         NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID:-}
+        # BugBot header buttons. Baked at BUILD time like the keys above —
+        # changing it requires `docker compose build web`. Only `true` shows
+        # them; the api also needs its BUGBOT_* keys or the handoff is a 404.
+        NEXT_PUBLIC_BUGBOT_ENABLED: ${NEXT_PUBLIC_BUGBOT_ENABLED:-}
     container_name: magguarantee-web
     restart: unless-stopped
     env_file: .env

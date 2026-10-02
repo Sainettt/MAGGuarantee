@@ -250,6 +250,10 @@ services:
         # a restart keeps the stale value. Empty = the Google button is not
         # rendered at all and only the password form is shown.
         NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID:-}
+        # BugBot header buttons. Baked at BUILD time like the keys above —
+        # changing it requires `docker compose build web`. Only `true` shows
+        # them; the api also needs its BUGBOT_* keys or the handoff is a 404.
+        NEXT_PUBLIC_BUGBOT_ENABLED: ${NEXT_PUBLIC_BUGBOT_ENABLED:-}
     container_name: magguarantee-web
     restart: unless-stopped
     # Deliberately NOT `env_file: .env` — that would hand the web container the
@@ -270,6 +274,9 @@ services:
       # Server-rendered code must see the same client id the bundle was built
       # with, or a server/client mismatch shows up as a hydration warning.
       NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID:-}
+      # Same value the bundle was built with, so server-rendered markup agrees
+      # with the client about whether the BugBot buttons exist.
+      NEXT_PUBLIC_BUGBOT_ENABLED: ${NEXT_PUBLIC_BUGBOT_ENABLED:-}
     depends_on:
       - api
     # No published ports — Caddy reaches web over `proxy-net`

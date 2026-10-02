@@ -774,6 +774,72 @@ buildLink(vin: string): string {
 }
 ```
 
+### BugBot handoff
+
+> **С 2026-10-02.** Исходящая интеграция: кнопки «Zgłoś problem» / «Zgłoś pomysł» открывают BugBot — отдельный сервис MAGTRANS для приёма багов и идей. Источник истины по контракту — `MAGGuaranteeBugBot/docs/06-contracts.md` §1; здесь — выжимка и наша сторона. Модуль — `apps/api/src/modules/integrations/bugbot/`.
+
+**Зачем.** У пользователей MAGGuarantee нет аккаунтов в BugBot. Вместо отдельного логина наш API подписывает одноразовый короткоживущий токен «это пользователь X с ролью Y», BugBot проверяет его нашим публичным ключом и открывает сессию только на нашем проекте. Зарепортить в обход MAGGuarantee нельзя.
+
+**Поток.**
+
+1. Пользователь жмёт кнопку → web вызывает `GET /api/v1/integrations/bugbot/handoff?kind=bug|idea&locale=pl|en` с обычной сессией (глобальный `JwtAuthGuard`).
+2. `BugbotHandoffService` подписывает JWT (ES256) приватным ключом и отвечает `200 { url }` с `Cache-Control: no-store`, где `url` = `<BUGBOT_URL>/p/<BUGBOT_PROJECT_SLUG>/auth/callback?token=<jwt>`.
+3. Web открывает `url` в новой вкладке без `window.opener`.
+4. BugBot проверяет подпись публичным ключом, зарегистрированным под нашим `kid`, создаёт сессию и ведёт на форму бага или идеи. Отказ — его страница `/p/<slug>/auth/error?error=<code>` (`expired`, `replayed`, `invalid`, `forbidden`, `blocked`, `paused`, `unavailable` — расшифровка в §1.6 контракта).
+
+**Ответы нашего API.** `404` — интеграция не настроена; `403` — `kind=idea` не от `admin` (BugBot потом проверяет ещё и своими правилами); `400` — `kind`/`locale` вне enum или лишний query-параметр (`BugbotHandoffQuerySchema`, strict; дефолты `kind=bug`, `locale=pl`); `429` — лимит. Все ошибки — обычный ProblemDetails.
+
+**Токен** (кратко; полная таблица и пределы — §1.3 контракта):
+
+| Где | Имя | Значение |
+|---|---|---|
+| header | `alg`, `kid` | `ES256`, `BUGBOT_HANDOFF_KID` |
+| claim | `iss` | `BUGBOT_PROJECT_SLUG` |
+| claim | `aud` | `bugbot` |
+| claim | `sub` | `User.id` (UUID) |
+| claim | `iat`, `exp` | сейчас, `iat + 60` с |
+| claim | `jti` | `randomUUID()` — каждый токен принимается один раз |
+| claim | `roles` | `[user.role]` — роль как есть, без флага `lider` |
+| claim | `email` | только валидный адрес ≤ 254 символов, иначе claim **не отправляется** (пустая строка = отказ всего токена) |
+| claim | `name` | `name ?? login`, обрезка до 200 символов; пусто — не отправляется |
+| claim | `locale`, `kind` | из query |
+
+Всё, что идентифицирует пользователя, — из серверной сессии (`AuthUser`, перечитывается из БД в `JwtAccessStrategy`); из запроса — только `kind` и `locale`. Других claims нет. Подпись — `@nestjs/jwt`, отдельный экземпляр `new JwtService({})`: у `JwtService` из `AuthModule` HS256-секрет access-токена. Новых зависимостей нет.
+
+**Конфигурация (env).**
+
+| Переменная | Что |
+|---|---|
+| `BUGBOT_URL` | web-origin BugBot, http(s); завершающий `/` срезается |
+| `BUGBOT_PROJECT_SLUG` | slug проекта в BugBot, он же `iss`; дефолт `magguarantee`, формат `^[a-z][a-z0-9-]{1,39}$` |
+| `BUGBOT_HANDOFF_KID` | id ключа (`[A-Za-z0-9._-]{1,64}`, формат BugBot) — тот же, под которым публичный ключ лежит в BugBot |
+| `BUGBOT_HANDOFF_PRIVATE_KEY` | **секрет**: PEM PKCS#8, EC P-256. Обычно одной строкой с литеральными `\n` — схема превращает их в переводы строк |
+| `NEXT_PUBLIC_BUGBOT_ENABLED` | web, build-time: кнопки рендерятся только при `true`; после изменения — пересборка web-образа |
+
+`BUGBOT_URL` + `BUGBOT_HANDOFF_KID` + `BUGBOT_HANDOFF_PRIVATE_KEY` — «всё или ничего»: все пустые = интеграция выключена (404, это дефолт dev/test), заданы частично = api не стартует с issue на каждом недостающем ключе. Ключ проверяется на старте `createPrivateKey`: только EC `prime256v1` (RSA, P-384, публичный ключ, зашифрованный PKCS#8 — отказ). Текст ошибки фиксированный — без значения ключа и без сообщения crypto.
+
+**Генерация ключей** (на сервере проекта; staging и prod — разные пары и разные `kid`):
+
+```bash
+openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt -out bugbot-handoff.key
+openssl ec -in bugbot-handoff.key -pubout -out bugbot-handoff.pub
+awk 'NF {printf "%s\\n", $0}' bugbot-handoff.key   # значение BUGBOT_HANDOFF_PRIVATE_KEY одной строкой
+```
+
+`bugbot-handoff.pub` вместе с `kid` вставляется в BugBot → Projects → Access. Приватный ключ не покидает наш сервер и через BugBot не проходит. Генерировать вне чекаута (`/opt/magguarantee/src`); на случай ошибки оба файла в `.gitignore`.
+
+> **Исключение — pre-prod на staging-сервере (docs/26, решение D-08 в docs/27, 2026-10-02).** Pre-prod — это будущий prod, поэтому его пара ключей и `kid` переезжают на prod вместе с базой, а с pre-prod удаляются. Правило «разные пары» снова действует, когда staging вернётся как обычный staging: ему новая пара и новый `kid`.
+
+**Ротация** — без простоя, строго в таком порядке:
+
+1. Новая пара; новый публичный ключ добавить в BugBot под **новым** `kid` (старый пока остаётся).
+2. Здесь сменить `BUGBOT_HANDOFF_KID` + `BUGBOT_HANDOFF_PRIVATE_KEY`, перезапустить api.
+3. Удалить старый ключ в BugBot.
+
+**Лимит.** 10 запросов / 60 с **на пользователя** (ключ — `User.id`, не IP: офис за одним NAT не делит бакет); глобальные 100/мин/IP на роуте сохраняются. Реализация — `BugbotHandoffThrottlerGuard` (наследник `ThrottlerGuard` из `@nestjs/throttler` 6.x, `@UseGuards` на контроллере — выполняется после глобальных guard-ов, когда `req.user` уже есть). Через `@Throttle` нельзя: глобальный IP-guard читает те же метаданные и сделал бы 10/мин на IP. Заголовки этого бакета — с суффиксом: `X-RateLimit-Limit-bugbot-handoff` и т.д.
+
+**URL и токен не логируются.** Токен — учётные данные для входа на 60 секунд. Сервис пишет одну INFO-строку `bugbot handoff issued` `{ userId, kind }`; pino-http логирует путь без query string и не логирует тела ответов; фильтр ошибок тела не пишет; `@Audit` нет (GET, ничего не меняет) — в `audit_log` ответ тоже не попадает. Сбой подписи пишется ERROR только с `name`/`code` исключения. Наши Caddy/nginx этот URL не видят — его открывает браузер на origin BugBot; редактирование `token` в access-логах — на стороне BugBot (§1.8 контракта).
+
 ### GPS tracker (статус: ожидает доступа к API)
 
 > **Status:** API access ещё не предоставлен MAGTRANS. Модуль создаётся в Phase 2 как **скелетон с mock-провайдером** — не блокирует разработку остальных частей. Реальные вызовы добавляются как только credentials/endpoint становятся доступны.
@@ -1020,6 +1086,8 @@ OPIEKUN: <opiekun>
 
 Все ключи (Gmail private key, S3 credentials, JWT secrets) — в `.env` для dev, в secrets-manager для prod (Railway env vars / AWS Secrets Manager / Doppler).
 
+`BUGBOT_HANDOFF_PRIVATE_KEY` (с 2026-10-02) — приватный EC-ключ подписи handoff-токенов BugBot: только в env, генерируется на сервере отдельно для staging и prod, в BugBot уходит лишь публичная половина. Ротация и формат — [BugBot handoff](#bugbot-handoff).
+
 **НЕ коммитим** `.env` в git. `.env.example` — да.
 
 ## Locking
@@ -1094,6 +1162,7 @@ Atomic — без advisory lock. Точная семантика increment га�
 > - **Audit scrub** (`audit.constants.ts`): substring password/token/secret/authorization/cookie/credential/apikey/privatekey/accesskey; целым словом otp/totp/mfa/2fa/pin/cvv; `…Code` с префиксом — скрабится, кроме бизнес-allowlist (postal, country, type, stanowisko, team, status, currency…). `fuelCardPin` в audit — `***`.
 > - **Фильтр ошибок:** ≥ 500 — ERROR со стеком, методом, шаблоном роута, `userId`, IP; 401 / 403 / 429 — WARN без тел; прочие 4xx не логируются.
 > - **Внешние HTTP (`http-fetch`):** только tag, host, статус; URL и тело апстрима не логируются и не уходят клиенту.
+> - **BugBot handoff (2026-10-02):** подписанный токен и URL с ним не логируются нигде — одна INFO-строка `{ userId, kind }`; тела ответов не логируются в принципе. См. [BugBot handoff](#bugbot-handoff).
 > - **Storage:** каждый сбой S3/MinIO — ERROR с операцией, bucket, key, name/message/`Code`/HTTP-статусом/requestId; оригинал в `cause`.
 > - **Конвенция ошибок в логе:** `logger.error({ msg, …ids, err: { name, message, stack } })` — не pino-сигнатура `(obj, msg)`.
 > - **Скачивание вложений:** INFO `attachment downloaded` `{ entity, entityId | nrZgl, attachmentId, category, userId, role, ip }` — без имён файлов, только после успешного чтения из storage.

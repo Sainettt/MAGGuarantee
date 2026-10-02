@@ -708,6 +708,7 @@ DB CHECK enforces `returnCountry` length 2..8 (covers `EL`) and `returnPostalCod
 | GET `/integrations/gps/positions` | — (новое) | GPS tracker (TBD — см. [16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api](16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api)) |
 | GET `/integrations/gps/positions/:vehicleId` | — | GPS tracker (TBD) |
 | GET `/integrations/gps/trips/:vehicleId?from=...&to=...` | — | GPS tracker (Phase 11+) |
+| GET `/integrations/bugbot/handoff?kind=bug\|idea&locale=pl\|en` | — (новое, 2026-10-02) | BugBot handoff — одноразовый URL входа в BugBot с подписанным ES256-токеном (60 с). Любая роль; `kind=idea` — только `admin` (403); интеграция не настроена — 404. Ответ `200 { url }` + `Cache-Control: no-store` (`BugbotHandoffQuerySchema` strict, дефолты `bug`/`pl`; `BugbotHandoffResponseSchema`). См. [16-jobs-and-integrations.md#bugbot-handoff](16-jobs-and-integrations.md#bugbot-handoff) |
 
 > **VIES и Biała Lista — POST, хотя это чтение (2026-09-14).** До этого NIP, номер счёта и VAT-номер шли в query/path и оседали в access-логах API и Caddy и в `audit_log.metadata.route` (аудит логирования, п.2). Роли `admin` + `opiekun`, 10/мин, ответ `200`, без `@Audit` — в allowlist inverse audit-coverage спека как read-only. Ошибка апстрима клиенту уходит без тела внешнего сервиса: общее сообщение + `extensions.code` = `INTEGRATION_UPSTREAM_REJECTED` (4xx, статус апстрима сохраняется, 404 = «не найдено») или `INTEGRATION_UPSTREAM_UNAVAILABLE` (5xx / сеть).
 
@@ -1122,10 +1123,11 @@ Source of truth — Zod-схемы в `packages/shared`. Никакого OpenAP
 | `/auth/refresh` | 60 / минуту / IP (одна загрузка страницы может дать несколько параллельных refresh; офис за одним NAT делит бакет) |
 | `/integrations/vies/check` | 10 / минуту / IP (внешний API лимиты) |
 | `/integrations/whitelist/check`, `/integrations/whitelist/search` | 10 / минуту / IP |
+| `/integrations/bugbot/handoff` | 10 / минуту / **пользователя** (ключ — `User.id`, не IP; глобальные 100 / минуту / IP сохраняются) |
 | `/claims/*/preview` | 30 / минуту / user |
 | Остальные | 100 / минуту / user |
 
-Реализация: `@nestjs/throttler` (`@Throttle()` декоратор + `ThrottlerGuard`). Ключ — `req.ip`, поэтому в проде лимиты работают на реального клиента только при заданном `UPSTREAM_PROXY_CIDRS` в Caddy (иначе все пользователи = IP корпоративного nginx, см. docs/23). Каждый ответ 429 пишется WARN-строкой (`request rate-limited`: метод, шаблон роута, `userId`, IP). Страж: `auth.controller.throttle.spec.ts` требует `@Throttle` на каждом публичном auth-роуте.
+Реализация: `@nestjs/throttler` (`@Throttle()` декоратор + `ThrottlerGuard`). Ключ — `req.ip` (исключение — BugBot handoff: отдельный guard-наследник `BugbotHandoffThrottlerGuard` на контроллере, ключ — id пользователя, а не `@Throttle`, который глобальный IP-guard применил бы к IP), поэтому в проде лимиты работают на реального клиента только при заданном `UPSTREAM_PROXY_CIDRS` в Caddy (иначе все пользователи = IP корпоративного nginx, см. docs/23). Каждый ответ 429 пишется WARN-строкой (`request rate-limited`: метод, шаблон роута, `userId`, IP). Страж: `auth.controller.throttle.spec.ts` требует `@Throttle` на каждом публичном auth-роуте.
 
 ## Idempotency
 

@@ -83,6 +83,8 @@ type JwtPayload = {
 | Подпись | `JWT_ACCESS_SECRET` | `JWT_REFRESH_SECRET` (разные!) |
 | Revocation | в основном через истечение TTL | через таблицу `refresh_tokens` (revokedAt) |
 
+> **Исходящий handoff-токен BugBot (2026-10-02) — третий, отдельный JWT.** `GET /integrations/bugbot/handoff` подписывает для текущего пользователя токен **ES256** (асимметричный, `BUGBOT_HANDOFF_PRIVATE_KEY` + `kid`), `aud=bugbot`, TTL 60 с, одноразовый `jti`. Это не сессия MAGGuarantee: мы его только выпускаем, проверяет его BugBot нашим публичным ключом; access/refresh-секреты и `JwtService` из `AuthModule` в нём не участвуют. Claims, ключи, ротация, лимит 10/мин на пользователя — [16-jobs-and-integrations.md#bugbot-handoff](16-jobs-and-integrations.md#bugbot-handoff).
+
 ### Rotation
 
 При каждом `/auth/refresh`:
@@ -473,6 +475,7 @@ function RoleSwitcher() {
 | `PATCH /claims/:n` | access | role: admin / pracownik |
 | `POST /delegations/:id/in-transit` | access | role: weryfikator |
 | `GET /diagnostics/*` | access | role: admin |
+| `GET /integrations/bugbot/handoff` | access | любая роль; `kind=idea` — только admin; rate-limit 10/min/user |
 
 ## Защита от типичных атак
 

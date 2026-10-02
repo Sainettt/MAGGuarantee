@@ -1031,3 +1031,15 @@ describe('calcKmGwarantPerMonth', () => {
 - **История**: `Delegation.plannerId` — снимок планисты выезда (scope выездов, «ZESPÓŁ PROWADZĄCY», Chat), `VehiclePlannerAssignment` — журнал по машине; получатели писем по wnioskam — планиста периода + его текущий лидер. Флот, km-рапорт, GPS остаются живыми.
 - **`liderEmail` → `liderId`**: связь «планиста → его лидер», ставит admin в UserSheet; колонка `liderEmail` удаляется отдельным релизом.
 - **Миграция** `20260928120000_vehicle_planner_transfer`: две таблицы, два поля, бэкфиллы (`liderId` из `liderEmail`, снимки выездов, журнал с источником `backfill`). Перед выкатом на pre-prod — ручной бэкап; после — проставить `liderId` планистам (через `preprod-parity-agent`).
+
+---
+
+## Доработка (2026-10-02) — BugBot handoff
+
+Кнопки «Zgłoś problem» (все роли) и «Zgłoś pomysł» (admin) открывают BugBot — отдельный сервис MAGTRANS для приёма багов и идей — уже залогиненным. Контракт — `MAGGuaranteeBugBot/docs/06-contracts.md` §1; наша сторона — `docs/16` §«BugBot handoff»; API — `docs/13` «External integrations» и «Rate limiting»; auth — `docs/15` (третий JWT, отдельный от access/refresh).
+
+- **API**: `GET /integrations/bugbot/handoff?kind=&locale=` подписывает ES256-токен на 60 с (`@nestjs/jwt`, отдельный `new JwtService({})`, без новых зависимостей) и отвечает `{ url }` с `no-store`. Личность — только из сессии; `kind=idea` не-админом — 403; не настроено — 404.
+- **Env**: `BUGBOT_URL` + `BUGBOT_HANDOFF_KID` + `BUGBOT_HANDOFF_PRIVATE_KEY` — всё или ничего, ключ проверяется на старте (EC P-256); `BUGBOT_PROJECT_SLUG` (дефолт `magguarantee`); web — build-time `NEXT_PUBLIC_BUGBOT_ENABLED`.
+- **Лимит**: 10/мин на пользователя отдельным guard-наследником `ThrottlerGuard`; глобальные 100/мин/IP не тронуты.
+- **Логи**: токен и URL не пишутся нигде, одна INFO-строка `{ userId, kind }`.
+- **Выкат** (через `preprod-parity-agent`): сгенерировать пару ключей на сервере, публичный ключ + `kid` — в BugBot (Projects → Access), приватный — в `infra/.env`, `NEXT_PUBLIC_BUGBOT_ENABLED=true` и пересборка web. Staging и prod — разные пары.
