@@ -63,6 +63,7 @@ Defined in `.claude/agents/`. Always invoke `orchestrator-agent` first for any n
 - **Backend:** Node 20 + TypeScript + NestJS + Prisma + PostgreSQL + Redis + BullMQ + Gmail API + JWT.
 - **Frontend:** Next.js 15 (App Router) + TypeScript + Tailwind + shadcn/ui + TanStack Query + RHF + Zod + **next-intl** (PL default + EN, cookie-based).
 - **Infra:** npm workspaces (без Turborepo — `concurrently` для параллельного dev, `npm run X --workspaces --if-present` для остального) + Docker (всё контейнеризовано — api, web, Postgres, Redis в одном compose-стеке) + GitHub Container Registry для образов + GitHub Actions CI/CD + single VPS с **Caddy** как shared reverse-proxy (auto-HTTPS, multi-app роутинг по доменам).
+- **Deploy (с 2026-10-13):** стеками управляет Komodo. `.github/workflows/deploy.yml` только вызывает шаблоны `Sainettt/infra`: образ `:<sha>` собирается один раз (`web` — под окружение, `NEXT_PUBLIC_*` из переменных GitHub Environment), тег `:staging`/`:prod` передвигается, Komodo деплоит стек `magguarantee-<env>` по `infra/docker-compose.prod.yml`. Миграции — в CMD образа `api`. Self-hosted раннера и сборки на сервере больше нет; секреты приложения — в Environment стека в Komodo. `docs/23` и `docs/26` ещё описывают старую схему (раннер, сборка на сервере).
 
 Full details: [`docs/10-target-architecture.md`](docs/10-target-architecture.md).
 

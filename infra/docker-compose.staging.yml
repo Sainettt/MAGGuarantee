@@ -25,6 +25,10 @@
 # smoke test: any explicit path, e.g. ./data/postgres (resolves to infra/data/,
 # gitignored) — a conscious choice rather than a silent fallback.
 
+# Fixed project name, same as docker-compose.prod.yml (the directory name `infra`
+# was the implicit default before 2026-10-13).
+name: magguarantee
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -99,7 +103,9 @@ services:
   # Mailhog catches all outgoing email. Web UI bound to 127.0.0.1 only — on
   # the VPS reach it via SSH tunnel:  ssh -L 8025:localhost:8025 magguarantee-staging
   mailhog:
-    image: mailhog/mailhog:latest
+    # Pinned: `latest` has not moved since v1.0.1 (2020), but a floating tag is a
+    # floating tag.
+    image: mailhog/mailhog:v1.0.1
     container_name: magguarantee-mailhog
     restart: unless-stopped
     ports:
@@ -118,7 +124,9 @@ services:
   # a managed provider (Cloudflare R2 / Hetzner) by repointing the S3_* env
   # vars and dropping this service + minio-init.
   minio:
-    image: minio/minio:latest
+    # Same image as docker-compose.prod.yml (our GHCR mirror — MinIO withdrew its
+    # public images in 2026-09). Local smoke test needs `docker login ghcr.io`.
+    image: ghcr.io/sainettt/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: magguarantee-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -149,7 +157,8 @@ services:
   # One-shot: waits for MinIO, creates the `magguarantee` bucket if missing,
   # then exits 0. `api` waits for this so uploads never hit a missing bucket.
   minio-init:
-    image: minio/mc:latest
+    # Same image as docker-compose.prod.yml (our GHCR mirror).
+    image: ghcr.io/sainettt/mc:2026-10-13
     container_name: magguarantee-minio-init
     restart: 'no'
     depends_on:

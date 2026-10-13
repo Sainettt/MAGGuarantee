@@ -1,0 +1,94 @@
+name: Deploy
+
+# Выкат вручную: Actions → Deploy → Run workflow → окружение (+ при откате коммит).
+#
+#   checks  →  build :<sha> (если в GHCR ещё нет)  →  передвинуть тег :<окружение>  →  Komodo
+#
+# Вся логика — в reusable workflow репо Sainettt/infra; здесь только какие образы, какой стек
+# Komodo и где он. На сервере из GitHub ничего не выполняется: Periphery Komodo сам делает pull
+# и up по infra/docker-compose.prod.yml из этого репо. Секреты приложения живут в Environment
+# стека в Komodo, в GitHub их нет.
+#
+# Чем MAGGuarantee отличается от остальных проектов:
+#   • контекст сборки — magguarantee-app/, а не корень репо;
+#   • web собирается ПОД ОКРУЖЕНИЕ: четыре NEXT_PUBLIC_* вшиваются в клиентский бандл при сборке
+#     и у staging/prod разные. Их значения — переменные GitHub Environment `staging` / `prod`
+#     (Settings → Environments → Variables), образ получает тег <sha>-<окружение>;
+#   • миграции идут в CMD образа api (apps/api/Dockerfile), отдельного шага нет.
+#
+# Откат: Run workflow с предыдущим коммитом в `sha` — образ уже есть, тег уезжает назад, Komodo
+# перезапускает стек. Миграции базы откатом не трогаются.
+#
+# Урок 2026-07-28 в силе: push в main ничего не выкатывает, только проверяет (ci.yml).
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Куда выкатываем'
+        type: choice
+        # `prod` появится, когда прод-стек будет на сервере фирмы (фаза 9).
+        options: [staging]
+        default: staging
+      sha:
+        description: 'Коммит (полный sha). Пусто = текущий. Для отката — предыдущий'
+        type: string
+        default: ''
+      skip_checks:
+        description: 'Без lint/types/tests (только чтобы быстро вернуть рабочую сборку)'
+        type: boolean
+        default: false
+
+# Один выкат за раз на окружение.
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+# Шаблоны пушат образы и двигают теги в GHCR; без packages: write старт падает с
+# "requesting 'packages: write', but is only allowed 'packages: read'".
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  checks:
+    if: ${{ !inputs.skip_checks }}
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: [checks]
+    # Гейт можно пропустить осознанно (skip_checks), но не провалить.
+    if: ${{ always() && (needs.checks.result == 'success' || needs.checks.result == 'skipped') }}
+    uses: Sainettt/infra/.github/workflows/build.yml@main
+    with:
+      apps: '["api","web"]'
+      image_prefix: ghcr.io/sainettt/magguarantee
+      environment: ${{ inputs.environment }}
+      sha: ${{ inputs.sha }}
+      context: magguarantee-app
+      dockerfile: magguarantee-app/apps/{app}/Dockerfile
+      # web вшивает эти переменные при сборке → тег <sha>-<окружение>, значения из Environment.
+      env_specific_apps: '["web"]'
+      build_args_from_vars: '["NEXT_PUBLIC_API_URL","NEXT_PUBLIC_ALLOW_PAST_DEPARTURE","NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID","NEXT_PUBLIC_BUGBOT_ENABLED"]'
+
+  deploy:
+    needs: [build]
+    if: ${{ always() && needs.build.result == 'success' }}
+    uses: Sainettt/infra/.github/workflows/deploy.yml@main
+    with:
+      apps: '["api","web"]'
+      image_prefix: ghcr.io/sainettt/magguarantee
+      environment: ${{ inputs.environment }}
+      sha: ${{ needs.build.outputs.sha }}
+      env_specific_apps: '["web"]'
+      # Стек Komodo на окружение; в его Environment IMAGE_TAG=<окружение>.
+      stack: magguarantee-${{ inputs.environment }}
+      # Komodo Core на OVH, доступен только внутри tailnet (tailscale serve).
+      komodo_url: https://vps-29a0acba.tailf06055.ts.net
+      # api стартует с миграций, minio-init ждёт MinIO — первый up дольше обычного.
+      timeout_minutes: 20
+    secrets:
+      TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+      TS_OAUTH_SECRET: ${{ secrets.TS_OAUTH_SECRET }}
+      KOMODO_API_KEY: ${{ secrets.KOMODO_API_KEY }}
+      KOMODO_API_SECRET: ${{ secrets.KOMODO_API_SECRET }}

@@ -12,10 +12,11 @@
 # @magguarantee/database (the latter ships the Prisma client). We build all
 # of those in stage 2 and copy only the runtime artefacts into stage 3.
 #
-# Migrations are NOT applied here — run them at deploy time via:
-#   docker compose run --rm api node node_modules/.bin/prisma \
-#     migrate deploy --schema=prisma/schema.prisma
-# See docs/18-launch-and-deployment.md.
+# Migrations ARE applied at container start (CMD at the bottom): `prisma migrate
+# deploy` runs from this very image before the server starts, so code and
+# migrations can never come from different builds (incident 2026-05-14). A failed
+# migration keeps the api down, and `docker compose up --wait` fails the deploy
+# loudly instead of serving on the wrong schema.
 
 # ─── Stage 1: deps ──────────────────────────────────────────────────────────
 # Install all workspace dependencies. Manifests are copied first so this
@@ -125,4 +126,5 @@ EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD wget --quiet --spider --tries=1 "http://127.0.0.1:${PORT}/health" || exit 1
 
-CMD ["node", "dist/main.js"]
+# Migrations first, then the server. `exec` makes node PID 1 so stop signals reach it.
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy --schema=prisma/schema.prisma && exec node dist/main.js"]

@@ -524,6 +524,15 @@ type SeedTransfer = {
  * the vehicle already has another pending request (e.g. filed through the UI
  * on a dev DB) — the partial unique index allows only one, and the seed must
  * not cancel someone's real request.
+ *
+ * A non-approved one first drops the history row it may own: approving a seed
+ * request through the UI on a dev DB opens a `transfer` row linked to it, and
+ * the re-run below resets the request to pending. Only an approved request may
+ * own a row (1:1 `transferId`), and the stale one would fail its next approval
+ * with P2002. If the dropped row was the vehicle's open one, the seed's own
+ * open row (upsertAssignment) is the open one after the run — whether it is
+ * upserted after the requests (TRANSFERRED) or before them (LEADERLESS, where
+ * it has already closed the stale row).
  */
 async function upsertTransfer(t: SeedTransfer): Promise<boolean> {
   if (t.status === PlannerTransferStatus.pending) {
@@ -534,6 +543,9 @@ async function upsertTransfer(t: SeedTransfer): Promise<boolean> {
       console.warn(`[seed] vehicle ${t.vehicleId} already has pending transfer ${other.id} — seed request ${t.id} skipped`);
       return false;
     }
+  }
+  if (t.status !== PlannerTransferStatus.approved) {
+    await prisma.vehiclePlannerAssignment.deleteMany({ where: { transferId: t.id } });
   }
   const { id, ...data } = t;
   await prisma.vehiclePlannerTransfer.upsert({ where: { id }, create: t, update: data });
