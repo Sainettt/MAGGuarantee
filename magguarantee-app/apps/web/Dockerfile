@@ -84,7 +84,11 @@ ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
 # wget is preinstalled in node:20-alpine — used by the compose healthcheck.
+# 127.0.0.1, not `localhost`: in current node:20-alpine `localhost` resolves to
+# [::1] first, and the server listens on IPv4 only (HOSTNAME=0.0.0.0), so the
+# check got "Connection refused" and `compose up --wait` failed the deploy
+# (2026-10-13). Same form as the api healthcheck.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD wget -qO- http://localhost:3000 >/dev/null 2>&1 || exit 1
+  CMD wget -qO- http://127.0.0.1:3000 >/dev/null 2>&1 || exit 1
 
 CMD ["node", "apps/web/server.js"]
