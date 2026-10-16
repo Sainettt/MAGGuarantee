@@ -38,6 +38,10 @@ on:
         description: 'Без lint/types/tests (только чтобы быстро вернуть рабочую сборку)'
         type: boolean
         default: false
+      rebuild_web:
+        description: 'Пересобрать web, даже если образ этого коммита уже есть — после смены NEXT_PUBLIC_* в Environment'
+        type: boolean
+        default: false
 
 # Один выкат за раз на окружение.
 concurrency:
@@ -70,6 +74,8 @@ jobs:
       # web вшивает эти переменные при сборке → тег <sha>-<окружение>, значения из Environment.
       env_specific_apps: '["web"]'
       build_args_from_vars: '["NEXT_PUBLIC_API_URL","NEXT_PUBLIC_ALLOW_PAST_DEPARTURE","NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID","NEXT_PUBLIC_BUGBOT_ENABLED"]'
+      # Тот же коммит web повторно не собирается; после смены переменных Environment — галочка rebuild_web.
+      force_rebuild: ${{ inputs.rebuild_web }}
 
   deploy:
     needs: [build]
