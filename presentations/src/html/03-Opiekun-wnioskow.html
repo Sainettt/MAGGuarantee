@@ -1,0 +1,247 @@
+<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>MAGGuarantee — instrukcja dla opiekuna wniosków</title><style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@500&display=swap');
+:root{
+  --red:#dc2626; --red-d:#991b1b; --red-50:#fef2f2; --ink:#1a1a1a; --ink-2:#404040; --muted:#6b7280;
+  --line:#e5e7eb; --bg:#f5f5f5; --card:#ffffff; --green:#16a34a; --green-50:#f0fdf4; --amber:#d97706; --amber-50:#fffbeb;
+  --blue:#2563eb; --blue-50:#eff6ff; --grey-50:#f3f4f6;
+}
+@page{ size:1280px 720px; margin:0 }
+*{ box-sizing:border-box }
+html,body{ margin:0; padding:0; background:#888 }
+body{ font-family:'DM Sans',system-ui,sans-serif; color:var(--ink); -webkit-print-color-adjust:exact; print-color-adjust:exact }
+.slide{ width:1280px; height:720px; position:relative; overflow:hidden; background:#fff; page-break-after:always; break-after:page;
+  padding:46px 56px 54px; display:flex; flex-direction:column }
+@media screen{ .slide{ margin:0 auto 24px; box-shadow:0 4px 24px rgba(0,0,0,.25) } body{ padding:24px 0 } }
+.slide::before{ content:''; position:absolute; left:0; top:0; width:100%; height:6px; background:var(--red) }
+.kicker{ font-size:13px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--red); margin-bottom:6px }
+h1{ font-size:34px; line-height:1.15; margin:0 0 18px; font-weight:700; letter-spacing:-.01em }
+h2{ font-size:19px; margin:0 0 8px; font-weight:700 }
+h3{ font-size:16px; margin:12px 0 4px; font-weight:700; color:var(--ink-2); text-transform:uppercase; letter-spacing:.06em }
+p{ margin:0 0 10px; font-size:19px; line-height:1.45; color:var(--ink-2) }
+ul,ol{ margin:0 0 8px; padding-left:22px } li{ font-size:18.5px; line-height:1.4; margin:0 0 6px; color:var(--ink-2) }
+li li{ font-size:16.5px; margin-bottom:3px }
+b,strong{ color:var(--ink) }
+code,.mono{ font-family:'JetBrains Mono',monospace; font-size:.88em; background:var(--grey-50); padding:1px 5px; border-radius:4px; color:var(--ink) }
+.ui{ font-weight:600; color:var(--ink); background:var(--red-50); border:1px solid #fecaca; padding:0 6px; border-radius:5px; white-space:nowrap }
+.body{ flex:1; min-height:0; display:flex; gap:30px }
+.col{ flex:1; min-width:0 } .col-2{ flex:2; min-width:0 } .col-3{ flex:3; min-width:0 }
+.shot{ flex:1.75; min-width:0; display:flex; align-items:flex-start; justify-content:center }
+.shot.tall{ flex:1.2 }
+.shot img{ max-width:100%; max-height:100%; border:1px solid var(--line); border-radius:10px; box-shadow:0 6px 22px rgba(0,0,0,.10); object-fit:contain; background:#fff }
+.side{ flex:1; min-width:0; overflow:hidden }
+.full{ flex:1; min-height:0; display:flex; justify-content:center; align-items:flex-start }
+.full img{ max-width:100%; max-height:100%; border:1px solid var(--line); border-radius:10px; box-shadow:0 6px 22px rgba(0,0,0,.10) }
+.caption{ font-size:16px; color:var(--muted); margin-top:10px }
+.footer{ position:absolute; left:56px; right:56px; bottom:18px; display:flex; align-items:center; gap:14px; font-size:12.5px; color:var(--muted) }
+.footer img{ height:20px } .footer .sp{ flex:1 } .footer .pg{ font-weight:600; color:var(--ink-2) }
+table{ width:100%; border-collapse:collapse; font-size:17.5px }
+th{ text-align:left; font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:700; padding:7px 10px; border-bottom:2px solid var(--ink); background:#fff }
+td{ padding:9px 11px; border-bottom:1px solid var(--line); vertical-align:top; line-height:1.35; color:var(--ink-2) }
+td:first-child{ font-weight:600; color:var(--ink) }
+table.compact td{ padding:6px 10px; font-size:15.5px } table.compact th{ padding:5px 9px }
+.req{ display:inline-block; font-size:12.5px; font-weight:700; padding:1px 7px; border-radius:999px; background:var(--red); color:#fff; letter-spacing:.04em }
+.opt{ display:inline-block; font-size:12.5px; font-weight:700; padding:1px 7px; border-radius:999px; background:var(--grey-50); color:var(--muted); border:1px solid var(--line) }
+.cond{ display:inline-block; font-size:12.5px; font-weight:700; padding:1px 7px; border-radius:999px; background:var(--amber-50); color:var(--amber); border:1px solid #fde68a }
+.ro{ display:inline-block; font-size:12.5px; font-weight:700; padding:1px 7px; border-radius:999px; background:var(--blue-50); color:var(--blue); border:1px solid #bfdbfe }
+.pill{ display:inline-block; font-size:14px; font-weight:700; padding:2px 9px; border-radius:999px; white-space:nowrap }
+.p-blue{ background:var(--blue-50); color:var(--blue) } .p-amber{ background:var(--amber-50); color:var(--amber) }
+.p-green{ background:var(--green-50); color:var(--green) } .p-red{ background:var(--red-50); color:var(--red) } .p-grey{ background:var(--grey-50); color:var(--muted) }
+.box{ border:1px solid var(--line); border-radius:12px; padding:14px 18px; background:#fff; margin-bottom:12px }
+.box.tip{ background:var(--green-50); border-color:#bbf7d0 } .box.warn{ background:var(--amber-50); border-color:#fde68a } .box.key{ background:var(--red-50); border-color:#fecaca }
+.box.info{ background:var(--blue-50); border-color:#bfdbfe }
+.box h2{ font-size:18px; margin-bottom:6px } .box p,.box li{ font-size:17px } .box p:last-child,.box ul:last-child{ margin-bottom:0 }
+.grid2{ display:grid; grid-template-columns:1fr 1fr; gap:14px 22px } .grid3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px 18px }
+.grid4{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px }
+.stat{ border:1px solid var(--line); border-radius:12px; padding:14px 16px } .stat .n{ font-size:30px; font-weight:700; color:var(--red) } .stat .t{ font-size:14px; color:var(--ink-2) }
+.steps{ counter-reset:s; list-style:none; padding:0 } .steps>li{ counter-increment:s; position:relative; padding-left:42px; margin-bottom:10px }
+.steps>li::before{ content:counter(s); position:absolute; left:0; top:0; width:28px; height:28px; border-radius:50%; background:var(--red); color:#fff; font-weight:700; font-size:14px; display:flex; align-items:center; justify-content:center }
+.flow{ display:flex; align-items:stretch; gap:0; margin:6px 0 }
+.flow .st{ flex:1; border:1.5px solid var(--line); border-radius:12px; padding:12px 12px; background:#fff; position:relative }
+.flow .st .who{ font-size:11.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--red) }
+.flow .st .what{ font-size:16.5px; font-weight:600; color:var(--ink); margin-top:4px; line-height:1.3 } .flow .st .det{ font-size:14.5px; color:var(--muted); margin-top:4px; line-height:1.3 }
+.flow .ar{ width:26px; display:flex; align-items:center; justify-content:center; color:var(--red); font-size:22px; font-weight:700 }
+.flow .st.hl{ border-color:var(--red); background:var(--red-50) }
+.cover{ padding:0; flex-direction:row }
+.cover .l{ width:470px; background:var(--red); color:#fff; padding:64px 52px; display:flex; flex-direction:column; justify-content:space-between }
+.cover .l .big{ font-size:96px; line-height:1; font-weight:700; opacity:.95 }
+.cover .l .lbl{ font-size:15px; letter-spacing:.16em; text-transform:uppercase; font-weight:700; opacity:.85 }
+.cover .r{ flex:1; padding:70px 64px; display:flex; flex-direction:column; justify-content:center }
+.cover .r img{ height:54px; align-self:flex-start; margin-bottom:46px }
+.cover h1{ font-size:48px; margin-bottom:16px } .cover .sub{ font-size:21px; color:var(--ink-2); line-height:1.45; max-width:640px }
+.cover .meta{ margin-top:40px; font-size:14px; color:var(--muted) }
+.section{ background:var(--ink); color:#fff } .section::before{ background:var(--red) }
+.section .inner{ flex:1; display:flex; flex-direction:column; justify-content:center }
+.section .num{ font-size:120px; font-weight:700; color:var(--red); line-height:1 } .section h1{ color:#fff; font-size:46px; margin-top:12px }
+.section p{ color:#d4d4d4; font-size:20px; max-width:880px }
+.section .footer{ color:#a3a3a3 }
+.toc{ columns:2; column-gap:40px } .toc li{ font-size:19px; margin-bottom:8px; break-inside:avoid }
+.small{ font-size:15px !important } .muted{ color:var(--muted) }
+.callout-num{ display:inline-flex; width:22px; height:22px; border-radius:50%; background:var(--red); color:#fff; font-size:12px; font-weight:700; align-items:center; justify-content:center; margin-right:6px; vertical-align:1px }
+</style></head><body><section class="slide cover"><div class="l"><div class="lbl">Rola: opiekun wniosków (pracownik)</div><div class="big">03</div><div class="lbl">MAGGuarantee · instrukcja</div></div><div class="r"><img src="../../assets/logo.png" alt=""><h1>Instrukcja dla opiekuna wniosków</h1><div class="sub">Jak weryfikować wnioski o dopłatę gwarancyjną: dashboard i terminy, porównanie danych przewoźnika i weryfikatora, korekty, autoryzacja Maksima, decyzje i reklamacje.</div><div class="meta">Wersja na podstawie aplikacji z października 2026 · dane na zrzutach są fikcyjne (środowisko demo)</div></div></section><section class="slide "><h1>Twoja rola</h1><div class="body"><div class="col">
+<p>Jesteś <b>opiekunem wniosków</b> (w systemie rola <code>pracownik</code>). Sprawdzasz każdy wniosek przewoźnika i podejmujesz decyzję.</p>
+<div class="box key"><ul>
+<li>porównujesz deklarację przewoźnika z danymi weryfikatora i SpedTrans;</li>
+<li>korygujesz daty, godziny, przebieg, korektę godzin postoju;</li>
+<li><b>zapisujesz weryfikację</b>, a potem <b>akceptujesz</b> (z numerem zlecenia) lub <b>odrzucasz</b> (z powodem);</li>
+<li>rozpatrujesz <b>reklamacje</b>.</li>
+</ul></div>
+<p>Termin: <b>7 polskich dni roboczych</b> na każdy wniosek.</p>
+</div><div class="col">
+<h3>Menu</h3>
+<table class="compact"><tbody>
+<tr><td>Dashboard</td><td>wskaźniki, wykresy, wnioski z terminem</td></tr>
+<tr><td>Wnioski</td><td>lista wszystkich wniosków i okno weryfikacji</td></tr>
+</tbody></table>
+<h3>Logowanie</h3>
+<p>Przycisk Google, konto <code>@magtrans.eu</code>. Rolę nadaje ręcznie administrator.</p>
+<div class="box info"><p>Nie mylić z rolą <b>Opiekun</b> — ta prowadzi przewoźników i flotę. Opiekun wniosków zajmuje się wyłącznie wnioskami; nie widzi wyjazdów ani floty.</p></div>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun wniosków</span><span class="sp"></span><span class="pg">2 / 17</span></div></section><section class="slide "><h1>Dashboard</h1><div class="body"><div class="shot"><img src="../../assets/p01-dashboard.jpg" alt=""></div><div class="side">
+<p><b>Kafelki:</b> Wszystkie wnioski · Na weryfikacji · Zaakceptowane · Odrzucone · Oczekuje na autoryzację.</p>
+<p><b>Wykresy:</b> trend miesięczny (liczba wniosków i suma dopłat, 12 mies.) oraz rozkład statusów.</p>
+<p><b>Prawa kolumna:</b></p>
+<ul>
+<li><b>Po terminie</b> (czerwone) i <b>Zbliża się termin</b> (bursztynowe) — kliknięcie otwiera wniosek;</li>
+<li>Ostatnia aktywność — 10 ostatnich zdarzeń;</li>
+<li>Top przewoźnicy — wg sumy zaakceptowanych dopłat;</li>
+<li>Reklamacje — ile otwartych.</li>
+</ul>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun wniosków</span><span class="sp"></span><span class="pg">3 / 17</span></div></section><section class="slide "><h1>Termin weryfikacji (SLA)</h1><div class="body"><div class="col">
+<div class="box key"><h2>7 polskich dni roboczych</h2><p>Liczone od dnia następnego po wejściu wniosku w <span class="pill p-blue">Weryfikacja</span>.
+Nie liczą się soboty, niedziele i święta polskie (Wielki Piątek jest dniem roboczym).</p></div>
+<table class="compact"><thead><tr><th>Grupa</th><th>Warunek</th></tr></thead><tbody>
+<tr><td><span class="pill p-red">Po terminie</span></td><td>termin minął — „N dni po terminie”</td></tr>
+<tr><td><span class="pill p-amber">Zbliża się termin</span></td><td>0–3 dni robocze („dziś ostatni dzień”)</td></tr>
+<tr><td>w terminie</td><td>więcej niż 3 dni — bez wyróżnienia</td></tr>
+</tbody></table>
+</div><div class="col">
+<h3>Kiedy zegar stoi</h3>
+<ul>
+<li>wniosek w <span class="pill p-blue">Czeka na autoryzację</span> — zegar zatrzymany;</li>
+<li>po decyzji — koniec;</li>
+<li>reklamacje nie mają terminu SLA.</li>
+</ul>
+<h3>Przypomnienie</h3>
+<p>Codziennie o <b>07:00</b> e-mail <b>„Weryfikacja zgłoszeń — N wymaga uwagi”</b> z sekcjami „Po terminie” i „Zbliża się termin” oraz przyciskiem <span class="ui">Otwórz panel weryfikacji</span>.
+Wysyłany tylko, gdy coś wymaga uwagi.</p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun wniosków</span><span class="sp"></span><span class="pg">4 / 17</span></div></section><section class="slide "><h1>Lista wniosków</h1><div class="body"><div class="shot"><img src="../../assets/p02-claims.jpg" alt=""></div><div class="side">
+<p>Filtry: wyszukiwanie (nr zgłoszenia, nr rej., nr zlecenia; od 2 znaków), status, okres od / do.</p>
+<p>Kolumny:</p>
+<ul>
+<li><b>Nr zgłoszenia</b>, Przewoźnik, Ciągnik, Okres, Przebieg;</li>
+<li><b>Wnioskowana</b> — kwota z dnia złożenia;</li>
+<li><b>Zatwierdzona</b> — po decyzji (zielona / czerwona);</li>
+<li><b>Status</b> (+ plakietka reklamacji), czas od złożenia.</li>
+</ul>
+<p>Najnowsze na górze, 50 na stronę. Kliknięcie wiersza otwiera <b>okno wniosku</b>.</p>
+<p><span class="pill p-blue">Weryfikacja</span> <span class="pill p-blue">Czeka na autoryzację</span> <span class="pill p-green">Zaakceptowano</span> <span class="pill p-red">Odrzucono</span> <span class="pill p-amber">Reklamacja</span></p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun wniosków</span><span class="sp"></span><span class="pg">5 / 17</span></div></section><section class="slide "><h1>Okno wniosku — podgląd</h1><div class="body"><div class="shot tall"><img src="../../assets/p04-claim-view-pending-1.jpg" alt=""></div><div class="side">
+<p>Nagłówek: numer, status, przewoźnik · ciągnik, data złożenia, plakietka „Zweryfikowano {data} przez {osoba}”.</p>
+<ul>
+<li><b>Powiązany wyjazd</b> — ciągnik, planowany powrót, faktyczny zjazd;</li>
+<li><b>Dane</b> — daty, godziny, przebieg, korekta godzin;</li>
+<li><b>Dopłata gwarancyjna</b> z wyjaśnieniem niedoboru i tabelą miesięcy;</li>
+<li><b>Decyzja</b>.</li>
+</ul>
+<p>Przyciski: <span class="ui">Zamknij</span> i — gdy możliwa decyzja — <span class="ui">Edycja</span>.</p>
+<p class="small">Wnioski zaakceptowane / odrzucone bez reklamacji są w stanie końcowym — brak edycji.</p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun wniosków</span><span class="sp"></span><span class="pg">6 / 17</span></div></section><section class="slide "><h1>Tryb edycji — trzy kolumny</h1><div class="body"><div class="shot tall"><img src="../../assets/p05-claim-edit-1.jpg" alt=""></div><div class="side">
+<table class="compact"><tbody>
+<tr><td>Dane wniosku</td><td>deklaracja przewoźnika</td></tr>
+<tr><td>Dane weryfikatora</td><td>faktyczny wyjazd/zjazd i <b>suma km z tablicy</b> — różnice podświetlone na bursztynowo</td></tr>
+<tr><td>Dane po weryfikacji</td><td>pola do edycji — Twoje ustalenia</td></tr>
+</tbody></table>
+<p style="margin-top:10px">Pod przebiegiem: „Wg tablicy przebiegów: X km” + <span class="ui">Zastosuj</span> — kopiuje sumę z tablicy km.</p>
+<p>Pod korektą: „Czas: X h surowych / Y h zaliczonych”.</p>
+<div class="box info"><p>Różnica to informacja, nie błąd — decyzję podejmujesz na podstawie SpedTrans i tablicy km.</p></div>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun wniosków</span><span class="sp"></span><span class="pg">7 / 17</span></div></section><section class="slide "><h1>Pola korekty (Dane po weryfikacji)</h1><div class="body"><div class="col"><p>Każda zmiana od razu przelicza <b>Dopłatę gwarancyjną</b> (pole zablokowane — liczy ją system).</p><table class=""><colgroup><col style="width:32%"><col style="width:12%"><col style="width:56%"></colgroup><thead><tr><th>Pole</th><th>Wymagane</th><th>Zasady</th></tr></thead><tbody><tr><td>Data załadunku</td><td><span class="opt">nie</span></td><td>data; puste = bez zmian</td></tr><tr><td>Data rozładunku</td><td><span class="opt">nie</span></td><td>data</td></tr><tr><td>Godz. zjazdu (załadunku)</td><td><span class="opt">nie</span></td><td>HH:MM, 00:00–23:59</td></tr><tr><td>Godz. przyjazdu (rozładunku)</td><td><span class="opt">nie</span></td><td>HH:MM</td></tr><tr><td>Przebieg / km zrealizowane</td><td><span class="opt">nie</span></td><td>liczba całkowita 0 – 9 999 999; <span class="ui">Zastosuj</span> wstawia sumę z tablicy</td></tr><tr><td>Korekta godzin — postój / przestój</td><td><span class="opt">nie</span></td><td>0 – 999,99 h, krok 0,5; odejmowana od dni zaliczonych w miesiącach z gwarancją</td></tr></tbody></table><div class="caption">Pusty zapis weryfikacji jest dozwolony — oznacza „potwierdzam dane bez zmian”.</div></div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun wniosków</span><span class="sp"></span><span class="pg">8 / 17</span></div></section><section class="slide "><h1>Dopłata gwarancyjna i rozbicie</h1><div class="body"><div class="shot tall"><img src="../../assets/p05-claim-edit-2.jpg" alt=""></div><div class="side">
+<p>Zdanie wyjaśniające, np.: „Pojazd przejechał o <b>2 387 km mniej</b>, niż gwarantowano.” i wzór:
+<i>Niedojazd: gwarant. − przebieg = km × stawka €/km</i>.</p>
+<p>Gdy gwarancja wyjeżdżona: „Gwarancja wyjeżdżona — dopłata nie przysługuje” → można tylko <b>odrzucić</b>.</p>
+<p><b>Próg autoryzacji:</b> ostrzeżenie, gdy dopłata przekroczy próg — po zapisaniu weryfikacji wniosek przejdzie w „Czeka na autoryzację”.</p>
+<p><span class="ui">Przelicz wg aktualnych limitów</span> — porównanie z dzisiejszymi limitami i <span class="ui">Zastosuj nowe kwoty</span> (tylko w „Weryfikacja”).</p>
+<p class="small">Tabela: miesiące, dni rob., km/dz., €/km, soboty, dni wyłączone, dni graniczne.</p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun wniosków</span><span class="sp"></span><span class="pg">9 / 17</span></div></section><section class="slide "><h1>Krok 1: Zapisz weryfikację</h1><div class="body"><div class="col">
+<ol class="steps">
+<li>Otwórz wniosek → <span class="ui">Edycja</span>.</li>
+<li>Porównaj kolumny; skoryguj pola lub zostaw bez zmian.</li>
+<li>Kliknij <span class="ui">Zapisz weryfikację</span> (lewy dół okna) — komunikat „Zapisano weryfikację”.</li>
+</ol>
+<div class="box key"><p>Bez zapisanej weryfikacji <b>wybór decyzji jest zablokowany</b>: „Zapisz weryfikację, aby podjąć decyzję”.
+Po zmianach bez zapisu: „Masz niezapisane korekty — zapisz weryfikację”.</p></div>
+</div><div class="col">
+<h3>Co się dzieje po zapisie</h3>
+<ul>
+<li>wniosek dostaje plakietkę „Zweryfikowano”;</li>
+<li>kwota przeliczona wg limitów z dnia złożenia;</li>
+<li>gdy dopłata <b>&gt; próg</b> → automatycznie <span class="pill p-blue">Czeka na autoryzację</span> i e-mail do Maksima (odpowiedź przyjdzie do Ciebie).</li>
+</ul>
+<table class="compact"><thead><tr><th>Dni w trasie</th><th>Próg</th></tr></thead><tbody>
+<tr><td>do 15</td><td>300 €</td></tr><tr><td>16–30</td><td>500 €</td></tr><tr><td>31–60</td><td>800 €</td></tr><tr><td>61+</td><td>1000 €</td></tr>
+</tbody></table>
+<p class="small">Jeśli weryfikator zmieni km na tablicy po Twoim zapisie, akceptacja zgłosi „Kwota dopłaty różni się od zapisanej…” — zapisz weryfikację ponownie.</p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun wniosków</span><span class="sp"></span><span class="pg">10 / 17</span></div></section><section class="slide "><h1>Czeka na autoryzację — Maksim</h1><div class="body"><div class="shot tall"><img src="../../assets/p09-claim-authorization-2.jpg" alt=""></div><div class="side">
+<p>Wniosek powyżej progu wymaga potwierdzenia Maksima:</p>
+<ol class="steps">
+<li>System wysłał e-mail „Potwierdzenie autoryzacji: {nr}” (data w polu „Powiadomiono Maksima”).</li>
+<li>Gdy Maksim odpowie, zrób zrzut ekranu potwierdzenia.</li>
+<li>W oknie wniosku: <span class="ui">Zrzut ekranu potwierdzenia Maksima</span> — 1 plik JPG / PNG / WebP / PDF, maks. 10 MB.</li>
+<li>„Potwierdzenie autoryzacji wgrane — decyzja odblokowana” → podejmij decyzję.</li>
+</ol>
+<div class="box warn"><p>W tym stanie dane weryfikacji są zablokowane — poprawić je może tylko administrator. Bez zrzutu nie da się ani zaakceptować, ani odrzucić.</p></div>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun wniosków</span><span class="sp"></span><span class="pg">11 / 17</span></div></section><section class="slide "><h1>Krok 2: Decyzja — Zaakceptuj</h1><div class="body"><div class="shot tall"><img src="../../assets/p07-decision-accept-3.jpg" alt=""></div><div class="side">
+<p>Pole <span class="ui">Decyzja</span> → <b>Zaakceptuj</b>:</p>
+<table class="compact"><thead><tr><th>Pole</th><th>Wym.</th><th>Zasady</th></tr></thead><tbody>
+<tr><td>Numer zlecenia</td><td><span class="req">TAK</span></td><td>1–64 znaki — zlecenie, na które idzie wypłata</td></tr>
+<tr><td>Data zlecenia</td><td><span class="req">TAK</span></td><td>data</td></tr>
+<tr><td>Kwota zatwierdzona (EUR)</td><td><span class="ro">auto</span></td><td>= wyliczona dopłata</td></tr>
+<tr><td>Komentarz</td><td><span class="opt">nie</span></td><td>do 4000 znaków, widzi przewoźnik</td></tr>
+</tbody></table>
+<p style="margin-top:8px"><span class="ui">Zapisz decyzję</span> → „Zapisano”, e-mail do przewoźnika i zespołu.</p>
+<p class="small">„Zaakceptuj” znika, gdy: gwarancja wyjeżdżona; w okresie mieszanym brakuje dni na tablicy km („Brak danych za N dni”).</p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun wniosków</span><span class="sp"></span><span class="pg">12 / 17</span></div></section><section class="slide "><h1>Decyzja — Odrzuć</h1><div class="body"><div class="shot tall"><img src="../../assets/p08-decision-reject-3.jpg" alt=""></div><div class="side">
+<p>Pole <span class="ui">Decyzja</span> → <b>Odrzuć</b>:</p>
+<table class="compact"><thead><tr><th>Pole</th><th>Wym.</th><th>Zasady</th></tr></thead><tbody>
+<tr><td>Powód odrzucenia</td><td><span class="req">TAK</span></td><td>1–4000 znaków; trafia do przewoźnika</td></tr>
+</tbody></table>
+<p style="margin-top:10px">Status <span class="pill p-red">Odrzucono</span>. Przewoźnik ma 48 h na reklamację (do pełnej kwoty wnioskowanej). Odrzucony wniosek nie blokuje kolejnego wniosku na ten ciągnik.</p>
+<div class="box tip"><p>Pisz powód konkretnie — np. rozbieżność z SpedTrans, dni postoju, błędny okres. Przewoźnik zobaczy go w szczegółach wniosku.</p></div>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun wniosków</span><span class="sp"></span><span class="pg">13 / 17</span></div></section><section class="slide "><h1>Reklamacja — rozpatrzenie</h1><div class="body"><div class="shot tall"><img src="../../assets/p10-claim-reklamacja-2.jpg" alt=""></div><div class="side">
+<p>Sekcja <b>Reklamacja</b>: kwota, maksimum (wnioskowana − wypłacona), data, treść.</p>
+<table class="compact"><thead><tr><th>Decyzja</th><th>Pola</th></tr></thead><tbody>
+<tr><td>Uznaj reklamację</td><td><b>Nr zlecenia</b> (wymagany, podpowiadany z wniosku — można wpisać nowy) · kwota z reklamacji (tylko odczyt) · komentarz (opcjonalny)</td></tr>
+<tr><td>Odrzuć reklamację</td><td><b>Powód odrzucenia reklamacji</b> (wymagany, 1–4000) — przewoźnik zobaczy go jako „Odpowiedź MAGTRANS”</td></tr>
+</tbody></table>
+<p style="margin-top:8px">Po zapisie status wraca do poprzedniego (<span class="pill p-green">Zaakceptowano</span> / <span class="pill p-red">Odrzucono</span>), wynik widać jako „Reklamacja uznana / odrzucona”.</p>
+<p class="small">E-mail o nowej reklamacji: „Reklamacja: {nr} — {kwota} EUR”. Reklamacja jest jedna na wniosek.</p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun wniosków</span><span class="sp"></span><span class="pg">14 / 17</span></div></section><section class="slide "><h1>Statusy i dozwolone przejścia</h1><div class="body"><div class="col"><table class=""><colgroup><col style="width:30%"><col style="width:30%"><col style="width:40%"></colgroup><thead><tr><th>Z</th><th>Do</th><th>Jak</th></tr></thead><tbody><tr><td>(nowy)</td><td><span class="pill p-blue">Weryfikacja</span></td><td>przewoźnik składa wniosek</td></tr><tr><td><span class="pill p-blue">Weryfikacja</span></td><td><span class="pill p-blue">Czeka na autoryzację</span></td><td>automatycznie przy zapisie weryfikacji, gdy dopłata &gt; próg</td></tr><tr><td><span class="pill p-blue">Czeka na autoryzację</span></td><td><span class="pill p-blue">Weryfikacja</span></td><td>automatycznie, gdy administrator poprawi dane poniżej progu</td></tr><tr><td><span class="pill p-blue">Weryfikacja</span> / <span class="pill p-blue">Czeka na autoryzację</span></td><td><span class="pill p-green">Zaakceptowano</span> / <span class="pill p-red">Odrzucono</span></td><td>Twoja decyzja (w autoryzacji — po wgraniu zrzutu)</td></tr><tr><td><span class="pill p-green">Zaakceptowano</span> / <span class="pill p-red">Odrzucono</span></td><td><span class="pill p-amber">Reklamacja</span></td><td>przewoźnik w ciągu 48 h</td></tr><tr><td><span class="pill p-amber">Reklamacja</span></td><td>poprzedni status</td><td>Uznaj / Odrzuć reklamację</td></tr></tbody></table><div class="caption">Wypłata odbywa się poza systemem — nie ma statusu „wypłacono”. System zapisuje kwotę i numer zlecenia.</div></div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun wniosków</span><span class="sp"></span><span class="pg">15 / 17</span></div></section><section class="slide "><h1>Okres mieszany i tablica km</h1><div class="body"><div class="col">
+<p>Jeśli w okresie wniosku jest miesiąc z <b>wyłączoną gwarancją</b> (0 km/dzień), dopłatę liczy się z <b>tablicy km weryfikatora</b>, tylko w miesiącach z gwarancją.</p>
+<ul>
+<li>w tabeli pojawiają się kolumny „Km wg weryfikatora” i „Wpisane dni (X z Y)”;</li>
+<li>jeśli brakuje dni: „Brak danych za N dni” z listą dat — <b>akceptacja zablokowana</b>, odrzucić można zawsze;</li>
+<li>zwykle brakuje dnia zjazdu — weryfikator może go wpisać dopiero następnego dnia.</li>
+</ul>
+</div><div class="col">
+<h3>Limity zamrożone</h3>
+<p>Wniosek pamięta limity (km/dzień, €/km) z dnia złożenia. Jeśli administrator zmienił limity, możesz użyć <span class="ui">Przelicz wg aktualnych limitów</span>:
+okno pokazuje „Wniosek (obecnie)” vs „Wg aktualnych limitów” i różnicę → <span class="ui">Zastosuj nowe kwoty</span>.</p>
+<div class="box warn"><p>Dostępne tylko w statusie „Weryfikacja”.</p></div>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun wniosków</span><span class="sp"></span><span class="pg">16 / 17</span></div></section><section class="slide "><h1>Procedura dnia — checklista</h1><div class="body"><div class="col">
+<ol class="steps">
+<li>Rano: e-mail „Weryfikacja zgłoszeń” lub Dashboard → najpierw <b>Po terminie</b>, potem <b>Zbliża się termin</b>.</li>
+<li>Otwórz wniosek → <span class="ui">Edycja</span>.</li>
+<li>Porównaj <b>Dane wniosku</b> z <b>Danymi weryfikatora</b> i SpedTrans; skoryguj okres, godziny, przebieg, postój.</li>
+<li><span class="ui">Zapisz weryfikację</span>.</li>
+<li>Jeśli „Czeka na autoryzację” — poczekaj na Maksima i wgraj zrzut.</li>
+<li><span class="ui">Decyzja</span>: Zaakceptuj (nr i data zlecenia) albo Odrzuć (powód) → <span class="ui">Zapisz decyzję</span>.</li>
+</ol>
+</div><div class="col">
+<h3>E-maile, które dostajesz</h3>
+<table class="compact"><tbody>
+<tr><td>Weryfikacja zgłoszeń — N wymaga uwagi</td><td>codziennie 07:00</td></tr>
+<tr><td>Nowy wniosek: {nr}</td><td>przy każdym nowym wniosku</td></tr>
+<tr><td>Wniosek {nr}: ZAAKCEPTOWANO / ODRZUCONO</td><td>po decyzji</td></tr>
+<tr><td>Reklamacja: {nr} — {kwota} EUR</td><td>nowa reklamacja</td></tr>
+<tr><td>Odpowiedź Maksima</td><td>na Twój adres (Reply-To)</td></tr>
+</tbody></table>
+<div class="box tip" style="margin-top:12px"><p>Otwieraj wnioski z listy <span class="ui">Wnioski</span> lub z Dashboardu — tam działa bezpośrednie otwieranie okna wniosku.</p></div>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun wniosków</span><span class="sp"></span><span class="pg">17 / 17</span></div></section></body></html>

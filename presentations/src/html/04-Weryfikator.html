@@ -1,0 +1,160 @@
+<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>MAGGuarantee — instrukcja dla weryfikatora</title><style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@500&display=swap');
+:root{
+  --red:#dc2626; --red-d:#991b1b; --red-50:#fef2f2; --ink:#1a1a1a; --ink-2:#404040; --muted:#6b7280;
+  --line:#e5e7eb; --bg:#f5f5f5; --card:#ffffff; --green:#16a34a; --green-50:#f0fdf4; --amber:#d97706; --amber-50:#fffbeb;
+  --blue:#2563eb; --blue-50:#eff6ff; --grey-50:#f3f4f6;
+}
+@page{ size:1280px 720px; margin:0 }
+*{ box-sizing:border-box }
+html,body{ margin:0; padding:0; background:#888 }
+body{ font-family:'DM Sans',system-ui,sans-serif; color:var(--ink); -webkit-print-color-adjust:exact; print-color-adjust:exact }
+.slide{ width:1280px; height:720px; position:relative; overflow:hidden; background:#fff; page-break-after:always; break-after:page;
+  padding:46px 56px 54px; display:flex; flex-direction:column }
+@media screen{ .slide{ margin:0 auto 24px; box-shadow:0 4px 24px rgba(0,0,0,.25) } body{ padding:24px 0 } }
+.slide::before{ content:''; position:absolute; left:0; top:0; width:100%; height:6px; background:var(--red) }
+.kicker{ font-size:13px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--red); margin-bottom:6px }
+h1{ font-size:34px; line-height:1.15; margin:0 0 18px; font-weight:700; letter-spacing:-.01em }
+h2{ font-size:19px; margin:0 0 8px; font-weight:700 }
+h3{ font-size:16px; margin:12px 0 4px; font-weight:700; color:var(--ink-2); text-transform:uppercase; letter-spacing:.06em }
+p{ margin:0 0 10px; font-size:19px; line-height:1.45; color:var(--ink-2) }
+ul,ol{ margin:0 0 8px; padding-left:22px } li{ font-size:18.5px; line-height:1.4; margin:0 0 6px; color:var(--ink-2) }
+li li{ font-size:16.5px; margin-bottom:3px }
+b,strong{ color:var(--ink) }
+code,.mono{ font-family:'JetBrains Mono',monospace; font-size:.88em; background:var(--grey-50); padding:1px 5px; border-radius:4px; color:var(--ink) }
+.ui{ font-weight:600; color:var(--ink); background:var(--red-50); border:1px solid #fecaca; padding:0 6px; border-radius:5px; white-space:nowrap }
+.body{ flex:1; min-height:0; display:flex; gap:30px }
+.col{ flex:1; min-width:0 } .col-2{ flex:2; min-width:0 } .col-3{ flex:3; min-width:0 }
+.shot{ flex:1.75; min-width:0; display:flex; align-items:flex-start; justify-content:center }
+.shot.tall{ flex:1.2 }
+.shot img{ max-width:100%; max-height:100%; border:1px solid var(--line); border-radius:10px; box-shadow:0 6px 22px rgba(0,0,0,.10); object-fit:contain; background:#fff }
+.side{ flex:1; min-width:0; overflow:hidden }
+.full{ flex:1; min-height:0; display:flex; justify-content:center; align-items:flex-start }
+.full img{ max-width:100%; max-height:100%; border:1px solid var(--line); border-radius:10px; box-shadow:0 6px 22px rgba(0,0,0,.10) }
+.caption{ font-size:16px; color:var(--muted); margin-top:10px }
+.footer{ position:absolute; left:56px; right:56px; bottom:18px; display:flex; align-items:center; gap:14px; font-size:12.5px; color:var(--muted) }
+.footer img{ height:20px } .footer .sp{ flex:1 } .footer .pg{ font-weight:600; color:var(--ink-2) }
+table{ width:100%; border-collapse:collapse; font-size:17.5px }
+th{ text-align:left; font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:700; padding:7px 10px; border-bottom:2px solid var(--ink); background:#fff }
+td{ padding:9px 11px; border-bottom:1px solid var(--line); vertical-align:top; line-height:1.35; color:var(--ink-2) }
+td:first-child{ font-weight:600; color:var(--ink) }
+table.compact td{ padding:6px 10px; font-size:15.5px } table.compact th{ padding:5px 9px }
+.req{ display:inline-block; font-size:12.5px; font-weight:700; padding:1px 7px; border-radius:999px; background:var(--red); color:#fff; letter-spacing:.04em }
+.opt{ display:inline-block; font-size:12.5px; font-weight:700; padding:1px 7px; border-radius:999px; background:var(--grey-50); color:var(--muted); border:1px solid var(--line) }
+.cond{ display:inline-block; font-size:12.5px; font-weight:700; padding:1px 7px; border-radius:999px; background:var(--amber-50); color:var(--amber); border:1px solid #fde68a }
+.ro{ display:inline-block; font-size:12.5px; font-weight:700; padding:1px 7px; border-radius:999px; background:var(--blue-50); color:var(--blue); border:1px solid #bfdbfe }
+.pill{ display:inline-block; font-size:14px; font-weight:700; padding:2px 9px; border-radius:999px; white-space:nowrap }
+.p-blue{ background:var(--blue-50); color:var(--blue) } .p-amber{ background:var(--amber-50); color:var(--amber) }
+.p-green{ background:var(--green-50); color:var(--green) } .p-red{ background:var(--red-50); color:var(--red) } .p-grey{ background:var(--grey-50); color:var(--muted) }
+.box{ border:1px solid var(--line); border-radius:12px; padding:14px 18px; background:#fff; margin-bottom:12px }
+.box.tip{ background:var(--green-50); border-color:#bbf7d0 } .box.warn{ background:var(--amber-50); border-color:#fde68a } .box.key{ background:var(--red-50); border-color:#fecaca }
+.box.info{ background:var(--blue-50); border-color:#bfdbfe }
+.box h2{ font-size:18px; margin-bottom:6px } .box p,.box li{ font-size:17px } .box p:last-child,.box ul:last-child{ margin-bottom:0 }
+.grid2{ display:grid; grid-template-columns:1fr 1fr; gap:14px 22px } .grid3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px 18px }
+.grid4{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px }
+.stat{ border:1px solid var(--line); border-radius:12px; padding:14px 16px } .stat .n{ font-size:30px; font-weight:700; color:var(--red) } .stat .t{ font-size:14px; color:var(--ink-2) }
+.steps{ counter-reset:s; list-style:none; padding:0 } .steps>li{ counter-increment:s; position:relative; padding-left:42px; margin-bottom:10px }
+.steps>li::before{ content:counter(s); position:absolute; left:0; top:0; width:28px; height:28px; border-radius:50%; background:var(--red); color:#fff; font-weight:700; font-size:14px; display:flex; align-items:center; justify-content:center }
+.flow{ display:flex; align-items:stretch; gap:0; margin:6px 0 }
+.flow .st{ flex:1; border:1.5px solid var(--line); border-radius:12px; padding:12px 12px; background:#fff; position:relative }
+.flow .st .who{ font-size:11.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--red) }
+.flow .st .what{ font-size:16.5px; font-weight:600; color:var(--ink); margin-top:4px; line-height:1.3 } .flow .st .det{ font-size:14.5px; color:var(--muted); margin-top:4px; line-height:1.3 }
+.flow .ar{ width:26px; display:flex; align-items:center; justify-content:center; color:var(--red); font-size:22px; font-weight:700 }
+.flow .st.hl{ border-color:var(--red); background:var(--red-50) }
+.cover{ padding:0; flex-direction:row }
+.cover .l{ width:470px; background:var(--red); color:#fff; padding:64px 52px; display:flex; flex-direction:column; justify-content:space-between }
+.cover .l .big{ font-size:96px; line-height:1; font-weight:700; opacity:.95 }
+.cover .l .lbl{ font-size:15px; letter-spacing:.16em; text-transform:uppercase; font-weight:700; opacity:.85 }
+.cover .r{ flex:1; padding:70px 64px; display:flex; flex-direction:column; justify-content:center }
+.cover .r img{ height:54px; align-self:flex-start; margin-bottom:46px }
+.cover h1{ font-size:48px; margin-bottom:16px } .cover .sub{ font-size:21px; color:var(--ink-2); line-height:1.45; max-width:640px }
+.cover .meta{ margin-top:40px; font-size:14px; color:var(--muted) }
+.section{ background:var(--ink); color:#fff } .section::before{ background:var(--red) }
+.section .inner{ flex:1; display:flex; flex-direction:column; justify-content:center }
+.section .num{ font-size:120px; font-weight:700; color:var(--red); line-height:1 } .section h1{ color:#fff; font-size:46px; margin-top:12px }
+.section p{ color:#d4d4d4; font-size:20px; max-width:880px }
+.section .footer{ color:#a3a3a3 }
+.toc{ columns:2; column-gap:40px } .toc li{ font-size:19px; margin-bottom:8px; break-inside:avoid }
+.small{ font-size:15px !important } .muted{ color:var(--muted) }
+.callout-num{ display:inline-flex; width:22px; height:22px; border-radius:50%; background:var(--red); color:#fff; font-size:12px; font-weight:700; align-items:center; justify-content:center; margin-right:6px; vertical-align:1px }
+</style></head><body><section class="slide cover"><div class="l"><div class="lbl">Rola: weryfikator</div><div class="big">04</div><div class="lbl">MAGGuarantee · instrukcja</div></div><div class="r"><img src="../../assets/logo.png" alt=""><h1>Instrukcja dla weryfikatora</h1><div class="sub">Jak prowadzić dzienną tablicę km ciągników, oznaczać wyjazdy „w trasie” i „zjechał” oraz jak Twoje dane wpływają na wnioski o dopłatę.</div><div class="meta">Wersja na podstawie aplikacji z października 2026 · dane na zrzutach są fikcyjne (środowisko demo)</div></div></section><section class="slide "><h1>Twoja rola</h1><div class="body"><div class="col">
+<p>Jesteś <b>źródłem faktów</b> o ruchu ciągników. Na Twoich danych opierają się wnioski przewoźników i decyzje opiekuna wniosków.</p>
+<div class="box key"><h2>Dwa zadania</h2><ol>
+<li><b>Tablica km</b> — codziennie dla każdego ciągnika: <i>Jechał</i> + km albo <i>Nie jeździ</i>.</li>
+<li><b>Wyjazdy</b> — potwierdzasz faktyczny wyjazd (<span class="pill p-green">W trasie</span>) i faktyczny zjazd (<span class="pill p-grey">Zjechał</span>) z datą i godziną.</li>
+</ol></div>
+</div><div class="col">
+<h3>Zakładki</h3>
+<table class="compact"><tbody>
+<tr><td>Ciągniki / km</td><td>tygodniowa tablica km (strona startowa)</td></tr>
+<tr><td>Wyjazdy</td><td>lista wyjazdów i zmiana statusu</td></tr>
+</tbody></table>
+<h3>Nie możesz</h3>
+<ul><li>anulować wyjazdów (przewoźnik / admin);</li><li>oznaczać „Załadowany” (eksport);</li><li>widzieć ani decydować o wnioskach.</li></ul>
+<p>Widzisz <b>wszystkie aktywne ciągniki i wszystkie wyjazdy</b> — bez podziału na przewoźników.</p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Weryfikator</span><span class="sp"></span><span class="pg">2 / 10</span></div></section><section class="slide "><h1>Tablica km — widok tygodnia</h1><div class="body"><div class="shot"><img src="../../assets/w01-km-board.jpg" alt=""></div><div class="side">
+<p><b>Kafelki:</b> Tydzień · Ciągniki · W ruchu · Nie jeżdżą · Σ km · Notatek.</p>
+<p>„Dane aktualne na poprzedni dzień. Dzień bieżący i przyszłe są zablokowane.” oraz postęp „X z Y ciągników uzupełnionych w tym tygodniu”.</p>
+<ul>
+<li>‹ › poprzedni / następny tydzień, przycisk tygodnia otwiera kalendarz, <span class="ui">Bieżący tydzień</span>;</li>
+<li>tydzień jest w adresie strony — link można wysłać;</li>
+<li>wyszukiwarka: nr rej. / nr boczny / przewoźnik.</li>
+</ul>
+<p>Wiersz: ciągnik (nr rej., bok, przewoźnik · opiekun · planista), dni Pn–Nd, Σ km, notatka, <span class="ui">Historia</span>.</p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Weryfikator</span><span class="sp"></span><span class="pg">3 / 10</span></div></section><section class="slide "><h1>Stany komórki</h1><div class="body"><div class="col"><p>Dzisiejszy dzień ma czerwone podkreślenie w nagłówku, weekendy — szare tło.</p><table class=""><colgroup><col style="width:20%"><col style="width:32%"><col style="width:48%"></colgroup><thead><tr><th>Stan</th><th>Wygląd</th><th>Znaczenie</th></tr></thead><tbody><tr><td>Jechał</td><td>zielony ✓ + liczba km</td><td>ciągnik jechał tego dnia, podano przebieg</td></tr><tr><td>Nie jeździ</td><td>ikona parkingu, szare tło</td><td>ciągnik stał</td></tr><tr><td>Nie sprawdzono</td><td>„—”, białe tło</td><td>brak wpisu — do uzupełnienia</td></tr><tr><td>Zablokowane</td><td>przyciemnione, kłódka</td><td>dzisiaj lub przyszłość: „Można uzupełnić dopiero następnego dnia.”</td></tr><tr><td>Z notatką</td><td>mała ikona notatki</td><td>dzień ma notatkę (lista w kolumnie Notatka)</td></tr></tbody></table><div class="caption">Kolumna Σ km to suma tygodnia; kafelek „W ruchu” liczy ciągniki, których ostatni wpis w tygodniu to „Jechał”.</div></div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Weryfikator</span><span class="sp"></span><span class="pg">4 / 10</span></div></section><section class="slide "><h1>Wpisywanie km</h1><div class="body"><div class="shot" style="flex:1"><img src="../../assets/w02-km-cell-editor.jpg" alt=""></div><div class="shot" style="flex:1"><img src="../../assets/w03-km-cell-empty.jpg" alt=""></div><div class="side" style="flex:.8">
+<ol class="steps">
+<li>Kliknij komórkę minionego dnia (lub Tab + Enter).</li>
+<li><span class="ui">Status dnia</span>: <b>Jechał</b> / <b>Nie jeździ</b>.</li>
+<li>Przy „Jechał” wpisz <span class="ui">Przebieg (km)</span> — <b>wymagany</b>, tylko cyfry, &gt; 0.</li>
+<li>Opcjonalnie <span class="ui">Notatka</span> (do 2000 znaków).</li>
+<li><span class="ui">Zapisz</span> (Enter) lub <span class="ui">Anuluj</span> (Esc).</li>
+</ol>
+<p class="small">0 km → podpowiedź „0 km? oznacz „nie jeździ””. Puste → „Podaj km”.
+<span class="ui">Wyczyść ten dzień</span> przywraca „Nie sprawdzono” (z potwierdzeniem).</p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Weryfikator</span><span class="sp"></span><span class="pg">5 / 10</span></div></section><section class="slide "><h1>Zasady edycji tablicy</h1><div class="body"><div class="col">
+<ul>
+<li>edytować można <b>tylko dni minione</b> (czas polski) — także dowolnie stare tygodnie;</li>
+<li>jeden wpis na ciągnik i dzień — kolejny zapis go nadpisuje;</li>
+<li>każdy zapis i wyczyszczenie trafia do audytu;</li>
+<li>zapis „Jechał” przesuwa datę <b>ostatniego przejazdu</b> ciągnika (statusy floty);</li>
+<li>brak operacji zbiorczych — każdy dzień wpisuje się osobno.</li>
+</ul>
+<div class="box warn"><p>Maksymalna wartość km to 9 999 999; za duże wartości odrzuci serwer („Nie udało się zapisać km”) — sprawdź liczbę.</p></div>
+</div><div class="col">
+<h3>Wpływ na wnioski</h3>
+<ul>
+<li>opiekun wniosków widzi <b>sumę km z tablicy</b> za okres wyjazdu w kolumnie „Dane weryfikatora” i może ją zastosować;</li>
+<li>w okresach mieszanych (miesiąc bez gwarancji) dopłata liczy się <b>bezpośrednio z tablicy</b> — <b>akceptacja jest zablokowana, dopóki są luki</b>;</li>
+<li>zmiana km po weryfikacji wniosku wymusza ponowny zapis weryfikacji.</li>
+</ul>
+<div class="box key"><p>Uzupełniaj tablicę codziennie — szczególnie <b>dzień zjazdu</b> (możliwy do wpisania dopiero następnego dnia).</p></div>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Weryfikator</span><span class="sp"></span><span class="pg">6 / 10</span></div></section><section class="slide "><h1>Historia ciągnika i bieżący tydzień</h1><div class="body"><div class="shot" style="flex:1"><img src="../../assets/w04-km-history.jpg" alt=""></div><div class="shot" style="flex:1"><img src="../../assets/w05-km-current-week.jpg" alt=""></div><div class="side" style="flex:.8">
+<p><span class="ui">Historia</span> w wierszu — kalendarz miesiąca (od miesiąca utworzenia ciągnika do bieżącego), suma „Σ km w miesiącu”, tylko podgląd.</p>
+<p>Bieżący tydzień: dni od dziś są zablokowane — widać kłódki.</p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Weryfikator</span><span class="sp"></span><span class="pg">7 / 10</span></div></section><section class="slide "><h1>Wyjazdy</h1><div class="body"><div class="shot"><img src="../../assets/w06-delegations.jpg" alt=""></div><div class="side">
+<p>Filtry: status, <span class="ui">Pokaż historię (zjechał / anulowane)</span>. Domyślnie widać aktywne: <span class="pill p-blue">Zgłoszony</span> <span class="pill p-amber">Załadowany</span> <span class="pill p-green">W trasie</span>.</p>
+<p>Kolumny: Ciągnik, Przewoźnik, Trasa, Okres, Status, Akcje.</p>
+<table class="compact"><thead><tr><th>Status wiersza</th><th>Akcja</th></tr></thead><tbody>
+<tr><td><span class="pill p-amber">Załadowany</span></td><td><span class="ui">Oznacz w trasie</span></td></tr>
+<tr><td><span class="pill p-green">W trasie</span></td><td><span class="ui">Oznacz zjechał</span></td></tr>
+<tr><td>pozostałe</td><td>—</td></tr>
+</tbody></table>
+<p class="small" style="margin-top:6px">„W trasie” można oznaczyć dopiero po „Załadowany” od eksportu. Kliknięcie wiersza — szczegóły wyjazdu. Lista pokazuje 50 najnowszych.</p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Weryfikator</span><span class="sp"></span><span class="pg">8 / 10</span></div></section><section class="slide "><h1>Oznacz w trasie / Oznacz zjechał</h1><div class="body"><div class="shot" style="flex:1"><img src="../../assets/w07-mark-in-transit.jpg" alt=""></div><div class="shot" style="flex:1"><img src="../../assets/w08-mark-returned.jpg" alt=""></div><div class="side" style="flex:.8">
+<h3>Oznacz w trasie</h3>
+<p><span class="ui">Data i godzina faktycznego wyjazdu</span> — <b>wymagana</b>; domyślnie zgłoszona; nie w przyszłości i nie wcześniej niż dzień zgłoszonego wyjazdu.</p>
+<h3>Oznacz zjechał</h3>
+<p><span class="ui">Data i godzina zjazdu</span> — <b>wymagana</b>; nie w przyszłości i nie przed faktycznym wyjazdem.</p>
+<p class="small">Ostrzeżenie „dla N dni tego wyjazdu nie wpisano przebiegu na tablicy km” — nie blokuje, ale uzupełnij tablicę. Po „Zjechał” przewoźnik może złożyć wniosek (7 dni). Statusu nie da się cofnąć.</p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Weryfikator</span><span class="sp"></span><span class="pg">9 / 10</span></div></section><section class="slide "><h1>Codzienna rutyna</h1><div class="body"><div class="col">
+<ol class="steps">
+<li><b>Tablica km</b> — przejdź na bieżący tydzień i uzupełnij <b>wczoraj</b> dla wszystkich ciągników (cel: „X z Y uzupełnionych”).</li>
+<li>Sprawdź puste komórki „—” z poprzednich dni — szczególnie po weekendzie.</li>
+<li><b>Wyjazdy</b> — dla „Załadowany”, które faktycznie ruszyły: <span class="ui">Oznacz w trasie</span> z faktyczną godziną.</li>
+<li>Dla „W trasie”, które wróciły: <span class="ui">Oznacz zjechał</span> z faktyczną datą i godziną.</li>
+<li>Następnego dnia uzupełnij km za dzień zjazdu.</li>
+</ol>
+</div><div class="col">
+<div class="box info"><h2>Powiadomienia</h2><p>Twoje akcje nie wysyłają e-maili — są zapisywane w audycie. Przewoźnik widzi statusy i km w swoim panelu.</p></div>
+<div class="box"><h2>Współpraca z eksportem</h2><p>Eksport oznacza „Załadowany” po wystawieniu zlecenia w SpedTrans i może cofnąć ten status, dopóki Ty nie oznaczysz „W trasie”.</p></div>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Weryfikator</span><span class="sp"></span><span class="pg">10 / 10</span></div></section></body></html>

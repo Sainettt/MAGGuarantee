@@ -1,0 +1,304 @@
+<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>MAGGuarantee — instrukcja dla opiekuna</title><style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@500&display=swap');
+:root{
+  --red:#dc2626; --red-d:#991b1b; --red-50:#fef2f2; --ink:#1a1a1a; --ink-2:#404040; --muted:#6b7280;
+  --line:#e5e7eb; --bg:#f5f5f5; --card:#ffffff; --green:#16a34a; --green-50:#f0fdf4; --amber:#d97706; --amber-50:#fffbeb;
+  --blue:#2563eb; --blue-50:#eff6ff; --grey-50:#f3f4f6;
+}
+@page{ size:1280px 720px; margin:0 }
+*{ box-sizing:border-box }
+html,body{ margin:0; padding:0; background:#888 }
+body{ font-family:'DM Sans',system-ui,sans-serif; color:var(--ink); -webkit-print-color-adjust:exact; print-color-adjust:exact }
+.slide{ width:1280px; height:720px; position:relative; overflow:hidden; background:#fff; page-break-after:always; break-after:page;
+  padding:46px 56px 54px; display:flex; flex-direction:column }
+@media screen{ .slide{ margin:0 auto 24px; box-shadow:0 4px 24px rgba(0,0,0,.25) } body{ padding:24px 0 } }
+.slide::before{ content:''; position:absolute; left:0; top:0; width:100%; height:6px; background:var(--red) }
+.kicker{ font-size:13px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--red); margin-bottom:6px }
+h1{ font-size:34px; line-height:1.15; margin:0 0 18px; font-weight:700; letter-spacing:-.01em }
+h2{ font-size:19px; margin:0 0 8px; font-weight:700 }
+h3{ font-size:16px; margin:12px 0 4px; font-weight:700; color:var(--ink-2); text-transform:uppercase; letter-spacing:.06em }
+p{ margin:0 0 10px; font-size:19px; line-height:1.45; color:var(--ink-2) }
+ul,ol{ margin:0 0 8px; padding-left:22px } li{ font-size:18.5px; line-height:1.4; margin:0 0 6px; color:var(--ink-2) }
+li li{ font-size:16.5px; margin-bottom:3px }
+b,strong{ color:var(--ink) }
+code,.mono{ font-family:'JetBrains Mono',monospace; font-size:.88em; background:var(--grey-50); padding:1px 5px; border-radius:4px; color:var(--ink) }
+.ui{ font-weight:600; color:var(--ink); background:var(--red-50); border:1px solid #fecaca; padding:0 6px; border-radius:5px; white-space:nowrap }
+.body{ flex:1; min-height:0; display:flex; gap:30px }
+.col{ flex:1; min-width:0 } .col-2{ flex:2; min-width:0 } .col-3{ flex:3; min-width:0 }
+.shot{ flex:1.75; min-width:0; display:flex; align-items:flex-start; justify-content:center }
+.shot.tall{ flex:1.2 }
+.shot img{ max-width:100%; max-height:100%; border:1px solid var(--line); border-radius:10px; box-shadow:0 6px 22px rgba(0,0,0,.10); object-fit:contain; background:#fff }
+.side{ flex:1; min-width:0; overflow:hidden }
+.full{ flex:1; min-height:0; display:flex; justify-content:center; align-items:flex-start }
+.full img{ max-width:100%; max-height:100%; border:1px solid var(--line); border-radius:10px; box-shadow:0 6px 22px rgba(0,0,0,.10) }
+.caption{ font-size:16px; color:var(--muted); margin-top:10px }
+.footer{ position:absolute; left:56px; right:56px; bottom:18px; display:flex; align-items:center; gap:14px; font-size:12.5px; color:var(--muted) }
+.footer img{ height:20px } .footer .sp{ flex:1 } .footer .pg{ font-weight:600; color:var(--ink-2) }
+table{ width:100%; border-collapse:collapse; font-size:17.5px }
+th{ text-align:left; font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:700; padding:7px 10px; border-bottom:2px solid var(--ink); background:#fff }
+td{ padding:9px 11px; border-bottom:1px solid var(--line); vertical-align:top; line-height:1.35; color:var(--ink-2) }
+td:first-child{ font-weight:600; color:var(--ink) }
+table.compact td{ padding:6px 10px; font-size:15.5px } table.compact th{ padding:5px 9px }
+.req{ display:inline-block; font-size:12.5px; font-weight:700; padding:1px 7px; border-radius:999px; background:var(--red); color:#fff; letter-spacing:.04em }
+.opt{ display:inline-block; font-size:12.5px; font-weight:700; padding:1px 7px; border-radius:999px; background:var(--grey-50); color:var(--muted); border:1px solid var(--line) }
+.cond{ display:inline-block; font-size:12.5px; font-weight:700; padding:1px 7px; border-radius:999px; background:var(--amber-50); color:var(--amber); border:1px solid #fde68a }
+.ro{ display:inline-block; font-size:12.5px; font-weight:700; padding:1px 7px; border-radius:999px; background:var(--blue-50); color:var(--blue); border:1px solid #bfdbfe }
+.pill{ display:inline-block; font-size:14px; font-weight:700; padding:2px 9px; border-radius:999px; white-space:nowrap }
+.p-blue{ background:var(--blue-50); color:var(--blue) } .p-amber{ background:var(--amber-50); color:var(--amber) }
+.p-green{ background:var(--green-50); color:var(--green) } .p-red{ background:var(--red-50); color:var(--red) } .p-grey{ background:var(--grey-50); color:var(--muted) }
+.box{ border:1px solid var(--line); border-radius:12px; padding:14px 18px; background:#fff; margin-bottom:12px }
+.box.tip{ background:var(--green-50); border-color:#bbf7d0 } .box.warn{ background:var(--amber-50); border-color:#fde68a } .box.key{ background:var(--red-50); border-color:#fecaca }
+.box.info{ background:var(--blue-50); border-color:#bfdbfe }
+.box h2{ font-size:18px; margin-bottom:6px } .box p,.box li{ font-size:17px } .box p:last-child,.box ul:last-child{ margin-bottom:0 }
+.grid2{ display:grid; grid-template-columns:1fr 1fr; gap:14px 22px } .grid3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px 18px }
+.grid4{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px }
+.stat{ border:1px solid var(--line); border-radius:12px; padding:14px 16px } .stat .n{ font-size:30px; font-weight:700; color:var(--red) } .stat .t{ font-size:14px; color:var(--ink-2) }
+.steps{ counter-reset:s; list-style:none; padding:0 } .steps>li{ counter-increment:s; position:relative; padding-left:42px; margin-bottom:10px }
+.steps>li::before{ content:counter(s); position:absolute; left:0; top:0; width:28px; height:28px; border-radius:50%; background:var(--red); color:#fff; font-weight:700; font-size:14px; display:flex; align-items:center; justify-content:center }
+.flow{ display:flex; align-items:stretch; gap:0; margin:6px 0 }
+.flow .st{ flex:1; border:1.5px solid var(--line); border-radius:12px; padding:12px 12px; background:#fff; position:relative }
+.flow .st .who{ font-size:11.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--red) }
+.flow .st .what{ font-size:16.5px; font-weight:600; color:var(--ink); margin-top:4px; line-height:1.3 } .flow .st .det{ font-size:14.5px; color:var(--muted); margin-top:4px; line-height:1.3 }
+.flow .ar{ width:26px; display:flex; align-items:center; justify-content:center; color:var(--red); font-size:22px; font-weight:700 }
+.flow .st.hl{ border-color:var(--red); background:var(--red-50) }
+.cover{ padding:0; flex-direction:row }
+.cover .l{ width:470px; background:var(--red); color:#fff; padding:64px 52px; display:flex; flex-direction:column; justify-content:space-between }
+.cover .l .big{ font-size:96px; line-height:1; font-weight:700; opacity:.95 }
+.cover .l .lbl{ font-size:15px; letter-spacing:.16em; text-transform:uppercase; font-weight:700; opacity:.85 }
+.cover .r{ flex:1; padding:70px 64px; display:flex; flex-direction:column; justify-content:center }
+.cover .r img{ height:54px; align-self:flex-start; margin-bottom:46px }
+.cover h1{ font-size:48px; margin-bottom:16px } .cover .sub{ font-size:21px; color:var(--ink-2); line-height:1.45; max-width:640px }
+.cover .meta{ margin-top:40px; font-size:14px; color:var(--muted) }
+.section{ background:var(--ink); color:#fff } .section::before{ background:var(--red) }
+.section .inner{ flex:1; display:flex; flex-direction:column; justify-content:center }
+.section .num{ font-size:120px; font-weight:700; color:var(--red); line-height:1 } .section h1{ color:#fff; font-size:46px; margin-top:12px }
+.section p{ color:#d4d4d4; font-size:20px; max-width:880px }
+.section .footer{ color:#a3a3a3 }
+.toc{ columns:2; column-gap:40px } .toc li{ font-size:19px; margin-bottom:8px; break-inside:avoid }
+.small{ font-size:15px !important } .muted{ color:var(--muted) }
+.callout-num{ display:inline-flex; width:22px; height:22px; border-radius:50%; background:var(--red); color:#fff; font-size:12px; font-weight:700; align-items:center; justify-content:center; margin-right:6px; vertical-align:1px }
+</style></head><body><section class="slide cover"><div class="l"><div class="lbl">Rola: opiekun (DAF)</div><div class="big">02</div><div class="lbl">MAGGuarantee · instrukcja</div></div><div class="r"><img src="../../assets/logo.png" alt=""><h1>Instrukcja dla opiekuna przewoźników</h1><div class="sub">Jak założyć przewoźnika i całą jego flotę, które pola są wymagane, jak pilnować dokumentów, porozumień i terminów, jak zmienić planistę ciągnika i co widzisz z wyjazdów i przebiegu.</div><div class="meta">Wersja na podstawie aplikacji z października 2026 · dane na zrzutach są fikcyjne (środowisko demo)</div></div></section><section class="slide "><h1>Spis treści</h1><div class="body"><div class="col">
+<ol class="toc">
+<li>Twoja rola i zakres danych</li>
+<li>Logowanie i menu</li>
+<li>Moja opieka — pulpit</li>
+<li>Karta przewoźnika (ciągniki, wyjazdy, dokumenty, porozumienia)</li>
+<li>Przewoźnicy: lista i akcje</li>
+<li>Kreator „Dodaj przewoźnika” (4 kroki)</li>
+<li>Formularz przewoźnika — wszystkie pola, VIES i Biała Lista</li>
+<li>Edycja, dezaktywacja, reset hasła</li>
+<li>Ciągniki — formularz i zasady</li>
+<li>Zmiana planisty i Przekazania</li>
+<li>Kierowcy i naczepy — formularze</li>
+<li>Załączniki</li>
+<li>Alerty dokumentów</li>
+<li>Porozumienia — pilnowanie terminów</li>
+<li>Wyjazdy i przebieg</li>
+<li>E-maile, checklista nowego przewoźnika</li>
+</ol>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">2 / 34</span></div></section><section class="slide "><h1>Twoja rola</h1><div class="body"><div class="col">
+<p>Jesteś <b>opiekunem grupy przewoźników</b>. To Ty przygotowujesz wszystko, żeby przewoźnik mógł pracować:</p>
+<div class="box key"><ul>
+<li><b>bez konta</b> przewoźnik się nie zaloguje;</li>
+<li><b>bez aktywnego ciągnika, naczepy i kierowcy</b> nie zgłosi wyjazdu;</li>
+<li><b>bez porozumienia na ciągniku</b> nie złoży wniosku o dopłatę;</li>
+<li><b>bez aktualnych dokumentów</b> przewoźnik nie spełnia wymagań MAGTRANS.</li>
+</ul></div>
+<p>Pilnujesz też, by Twoi przewoźnicy zgłaszali kolejne wyjazdy w terminie (porozumienia).</p>
+</div><div class="col">
+<h3>Zakres</h3>
+<p>Widzisz i edytujesz <b>tylko przewoźników przypisanych do Ciebie</b> (oraz ich flotę). Dane innych opiekunów są niedostępne.</p>
+<h3>Możesz</h3>
+<ul>
+<li>zakładać i edytować przewoźników, dezaktywować ich, resetować hasła;</li>
+<li>dodawać, edytować, wyłączać i usuwać ciągniki, naczepy, kierowców;</li>
+<li>wgrywać dokumenty firmowe;</li>
+<li>wnioskować o zmianę planisty ciągnika;</li>
+<li>podglądać wyjazdy i przebieg km.</li>
+</ul>
+<h3>Nie możesz</h3>
+<ul><li>usuwać przewoźników (tylko admin);</li><li>weryfikować wniosków (to Opiekun wniosków);</li><li>zmieniać statusów wyjazdów.</li></ul>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">3 / 34</span></div></section><section class="slide "><h1>Logowanie i menu boczne</h1><div class="body"><div class="shot" style="flex:1"><img src="../../assets/g01-login-crop.jpg" alt=""></div><div class="shot" style="flex:1"><img src="../../assets/o01-sidebar.jpg" alt=""></div><div class="side" style="flex:.8">
+<p>Logujesz się przyciskiem <b>Google</b> kontem <code>@magtrans.eu</code>. Rola „opiekun” wynika ze stanowiska <b>DAF</b> w MAGSpace.
+Po zalogowaniu trafiasz na <b>Moja opieka</b>.</p>
+<table class="compact"><tbody>
+<tr><td>Moja opieka</td><td>pulpit; licznik = przewoźnicy wymagający uwagi</td></tr>
+<tr><td>Alerty</td><td>dokumenty; licznik = przeterminowane + dziś</td></tr>
+<tr><td>Przebieg</td><td>tygodniowe km ciągników</td></tr>
+<tr><td>Wyjazdy</td><td>wyjazdy Twoich przewoźników</td></tr>
+<tr><td>Przewoźnicy</td><td>lista + zakładanie</td></tr>
+<tr><td>Ciągniki</td><td>lista + formularz</td></tr>
+<tr><td>Przekazania</td><td>Twoje wnioski o zmianę planisty</td></tr>
+<tr><td>Kierowcy / Naczepy</td><td>listy + formularze</td></tr>
+</tbody></table>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">4 / 34</span></div></section><section class="slide "><h1>Moja opieka — pulpit</h1><div class="body"><div class="shot"><img src="../../assets/o01-opieka.jpg" alt=""></div><div class="side">
+<p><b>Kafelki</b> (każdy jest linkiem): Przewoźnicy · Ciągniki · <span class="pill p-green">Aktywne</span> · Stojące · <span class="pill p-amber">Długo stojące</span> · <span class="pill p-red">Do usunięcia</span>.</p>
+<table class="compact"><tbody>
+<tr><td>Aktywna</td><td>ma aktywny wyjazd</td></tr>
+<tr><td>Stojąca</td><td>0–14 dni od zjazdu</td></tr>
+<tr><td>Długo stojąca</td><td>15–28 dni</td></tr>
+<tr><td>Do usunięcia</td><td>≥ 29 dni — do wycofania</td></tr>
+<tr><td>Wyłączona</td><td>odznaczone „Aktywny”</td></tr>
+</tbody></table>
+<p style="margin-top:8px"><b>Karty przewoźników:</b> nazwa, login, NIP, liczniki ciągników. Trójkąt ⚠ = <i>niekompletna flota</i> (brak ciągnika, naczepy lub kierowcy) — taki przewoźnik nie zgłosi wyjazdu.
+Kliknięcie karty otwiera kartę przewoźnika.</p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">5 / 34</span></div></section><section class="slide "><h1>Karta przewoźnika</h1><div class="body"><div class="shot"><img src="../../assets/o02-carrier-drill.jpg" alt=""></div><div class="side">
+<p>Nagłówek: firma, status, login, NIP, opiekun. Zakładki:</p>
+<ul>
+<li><b>Ciągniki</b> — nr rej., nr boczny, typ, EURO, ADR, GB/IT/FR, ostatni przejazd, status;</li>
+<li><b>Kierowcy</b>, <b>Naczepy</b> — z oknem szczegółów;</li>
+<li><b>Wyjazdy</b> — wszystkie wyjazdy przewoźnika;</li>
+<li><b>Dokumenty</b> — pliki pogrupowane w kategorie;</li>
+<li><b>Porozumienia</b> — stan gwarancji i historia opóźnień.</li>
+</ul>
+<p class="small">Okna szczegółów są tylko do odczytu — edytujesz na listach Ciągniki / Kierowcy / Naczepy.</p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">6 / 34</span></div></section><section class="slide "><h1>Karta przewoźnika — Dokumenty</h1><div class="body"><div class="shot"><img src="../../assets/o03-carrier-docs.jpg" alt=""></div><div class="side">
+<p>Pięć grup kart:</p>
+<ul>
+<li><b>Dokumenty firmowe</b>: Ubezpieczenie/OCP, Licencja, KREPTD, Inne — <b>tu wgrywasz i usuwasz pliki</b> (<span class="ui">Prześlij</span>, <span class="ui">Usuń</span>);</li>
+<li><b>Dokumenty ciągników</b>: Umowa GPS, Porozumienie, Ubezpieczenie kabotażowe DE;</li>
+<li><b>ADR ciągników</b> (klasy);</li>
+<li><b>Dokumenty naczep</b>: Certyfikat XL;</li>
+<li><b>Dokumenty kierowców</b>: Świadectwo ADR.</li>
+</ul>
+<p>Kliknięcie karty otwiera listę plików z <span class="ui">Pobierz</span>. Dokumenty floty dodajesz w formularzu ciągnika / naczepy / kierowcy.</p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">7 / 34</span></div></section><section class="slide "><h1>Karta przewoźnika — Porozumienia</h1><div class="body"><div class="shot"><img src="../../assets/o04-carrier-poroz.jpg" alt=""></div><div class="side">
+<p><b>Ciągniki z gwarancją — stan bieżący</b>: ciągnik, <i>kotwica</i> (data zjazdu lub włączenia gwarancji), termin, stan (licznik dni, „Brak odjazdu”, „W trasie”).</p>
+<p><b>Historia epizodów</b>: każdy przypadek zbliżenia się lub przekroczenia terminu — stan (Ostrzeżenie / Po terminie / Zamknięty), rozliczenie
+(„Zgłoszono wyjazd”, „Zdjęto gwarancję”, „Ciągnik nieaktywny”) i wynik: <b>w terminie</b> albo <b>po terminie o N dni</b>.</p>
+<div class="box tip"><p>Pusta historia = przewoźnik nie miał opóźnień w zgłaszaniu wyjazdów.</p></div>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">8 / 34</span></div></section><section class="slide section"><div class="inner"><div class="num">A</div><h1>Zakładanie przewoźnika</h1><p>Kreator prowadzi przez 4 kroki: przewoźnik → ciągnik → naczepa → kierowca. Dopiero komplet pozwala przewoźnikowi zgłaszać wyjazdy.</p></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">9 / 34</span></div></section><section class="slide "><h1>Przewoźnicy — lista</h1><div class="body"><div class="shot"><img src="../../assets/o07-carriers.jpg" alt=""></div><div class="side">
+<p>Filtry: wyszukiwanie (login / nazwa / NIP), aktywni / nieaktywni, onboarding (niedokończeni / ukończeni).</p>
+<p>Kolumny: Login, Nazwa (+ plakietki <b>„Brak: Ciągnik / Naczepa / Kierowca”</b>), Firma, NIP, Opiekun, Aktywny.</p>
+<h3>Menu akcji (⋯)</h3>
+<ul>
+<li><span class="ui">Dokończ onboarding</span> — wraca do brakującego kroku kreatora;</li>
+<li><span class="ui">Edytuj</span>;</li>
+<li><span class="ui">Resetuj hasło</span>.</li>
+</ul>
+<p>Kliknięcie wiersza — podgląd danych z przyciskiem <span class="ui">Edytuj</span>. Nowy przewoźnik: <span class="ui">+ Nowy przewoźnik</span>.</p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">10 / 34</span></div></section><section class="slide "><h1>Kreator „Dodaj przewoźnika — krok 1 z 4”</h1><div class="body"><div class="shot tall"><img src="../../assets/o08-carrier-wizard-1.jpg" alt=""></div><div class="side">
+<ol class="steps">
+<li><b>Przewoźnik</b> — dane firmy i konta. Nie da się pominąć. <span class="ui">Zapisz i kontynuuj</span>.</li>
+<li><b>Ciągnik</b> — formularz ciągnika z zablokowanym przewoźnikiem.</li>
+<li><b>Przyczepa</b> — formularz naczepy.</li>
+<li><b>Kierowca</b> — formularz kierowcy.</li>
+</ol>
+<p>Kroki 2–4 mają <span class="ui">Pomiń</span> i <span class="ui">Wyjdź</span>. Stan kreatora przetrwa odświeżenie strony; wrócisz przez <span class="ui">Dokończ onboarding</span>.</p>
+<p>Po kroku 1 widać pasek <b>Hasło tymczasowe</b> (<span class="ui">Pokaż</span>, <span class="ui">Kopiuj</span>) — przekaż je przewoźnikowi lub poczekaj, aż dostanie e-mail.</p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">11 / 34</span></div></section><section class="slide "><h1>Formularz przewoźnika — Konto i kontakt</h1><div class="body"><div class="col-3"><table class="compact"><colgroup><col style="width:25%"><col style="width:13%"><col style="width:62%"></colgroup><thead><tr><th>Pole</th><th>Wymagane</th><th>Zasady</th></tr></thead><tbody><tr><td>Login</td><td><span class="req">TAK</span></td><td>2–64 znaki: litery, cyfry, kropka, myślnik, podkreślnik; unikalny; <b>nie można go potem zmienić</b></td></tr><tr><td>E-mail</td><td><span class="req">TAK</span></td><td>adres logowania — na niego idą hasło tymczasowe i kody; unikalny</td></tr><tr><td>Nazwa</td><td><span class="req">TAK</span></td><td>1–128 znaków (wyświetlana nazwa)</td></tr><tr><td>Osoba kontaktowa</td><td><span class="req">TAK</span></td><td>1–255 znaków</td></tr><tr><td>Telefon</td><td><span class="req">TAK</span></td><td>do 64 znaków, bez kontroli formatu</td></tr><tr><td>E-mail zleceń</td><td><span class="req">TAK</span></td><td>skrzynka operacyjna przewoźnika (zlecenia)</td></tr><tr><td>Hasło tymczasowe</td><td><span class="opt">nie</span></td><td>10–128 znaków, ≥ 1 litera, ≥ 1 cyfra. <b>Zostaw puste</b> — system wygeneruje hasło</td></tr></tbody></table><div class="caption">Formularz nowego przewoźnika zapisuje szkic w przeglądarce; „Wyczyść” go usuwa. Błąd zapisu: „Uzupełnij podświetlone pola”.</div></div><div class="shot tall" style="flex:2"><img src="../../assets/o08-carrier-wizard-1.jpg" alt=""></div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">12 / 34</span></div></section><section class="slide "><h1>Formularz przewoźnika — Dane firmy</h1><div class="body"><div class="col-3"><p>Plakietka przy NIP: <b>Sprawdzam…</b> → <b>Zweryfikowano — {firma}</b> / <b>Nie znaleziono</b> / <b>Usługa niedostępna</b>. Autouzupełnianie wypełnia tylko puste pola; gdy w rejestrze MF jest kilka kont, pojawi się wybór „Wybierz konto EUR”.</p><table class="compact"><colgroup><col style="width:22%"><col style="width:13%"><col style="width:65%"></colgroup><thead><tr><th>Pole</th><th>Wymagane</th><th>Zasady</th></tr></thead><tbody><tr><td>NIP / Tax ID</td><td><span class="req">TAK</span></td><td>5–20 znaków alfanumerycznych (spacje i myślniki usuwane); PL — 10 cyfr. <b>Po wyjściu z pola</b> system sprawdza VIES i Białą Listę</td></tr><tr><td>VAT-ID</td><td><span class="opt">nie</span></td><td>kraj (domyślnie PL) + numer (do 12 znaków)</td></tr><tr><td>Firma</td><td><span class="opt">nie</span></td><td>do 255 znaków — <b>uzupełniana automatycznie</b> z rejestru MF / VIES, jeśli pusta</td></tr><tr><td>Adres firmy</td><td><span class="req">TAK</span></td><td>1–500 znaków — też uzupełniany automatycznie, jeśli pusty</td></tr></tbody></table></div><div class="shot tall" style="flex:2"><img src="../../assets/o08-carrier-wizard-2.jpg" alt=""></div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">13 / 34</span></div></section><section class="slide "><h1>Formularz przewoźnika — Finanse i zezwolenia</h1><div class="body"><div class="col-3"><table class="compact"><colgroup><col style="width:28%"><col style="width:13%"><col style="width:59%"></colgroup><thead><tr><th>Pole</th><th>Wymagane</th><th>Zasady</th></tr></thead><tbody><tr><td>Konto EUR (IBAN)</td><td><span class="req">TAK</span></td><td>do 64 znaków; po wyjściu z pola — sprawdzenie na <b>Białej Liście</b> (dla 10-cyfrowego NIP i 26-cyfrowego konta bez „PL”)</td></tr><tr><td>Konto PLN</td><td><span class="opt">nie</span></td><td>do 64 znaków</td></tr><tr><td>Termin płatności (dni)</td><td><span class="opt">nie</span></td><td>0–365, domyślnie <b>30</b></td></tr><tr><td>Suma ubezpieczenia OCP</td><td><span class="req">TAK</span></td><td><b>min. 250 000 EUR</b></td></tr><tr><td>Ważność OCP</td><td><span class="req">TAK</span></td><td>data — wpływa na <b>Alerty</b></td></tr><tr><td>Ważność licencji</td><td><span class="req">TAK</span></td><td>data — wpływa na <b>Alerty</b></td></tr><tr><td>Liczba ciągników (KREPTD)</td><td><span class="opt">nie</span></td><td>0–10 000</td></tr><tr><td>Opiekun</td><td><span class="ro">tylko odczyt</span></td><td>ukryte — przewoźnik zawsze trafia do Ciebie</td></tr></tbody></table></div><div class="shot tall" style="flex:2"><img src="../../assets/o08-carrier-wizard-3.jpg" alt=""></div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">14 / 34</span></div></section><section class="slide "><h1>Po założeniu, edycja i dezaktywacja</h1><div class="body"><div class="col">
+<h3>Po zapisaniu kroku 1</h3>
+<ul>
+<li>przewoźnik dostaje e-mail <b>„Konto utworzone — MAGGuarantee”</b> z loginem i hasłem tymczasowym (na <b>E-mail</b> logowania, nie na e-mail zleceń);</li>
+<li>Ty widzisz hasło w kreatorze / komunikacie (30 s) — możesz je skopiować;</li>
+<li>przy pierwszym logowaniu przewoźnik ustawi własne hasło.</li>
+</ul>
+<h3>Edycja</h3>
+<p>Lista → ⋯ → <span class="ui">Edytuj</span>. Login jest zablokowany, reszta jak przy zakładaniu.</p>
+</div><div class="col">
+<h3>Dezaktywacja</h3>
+<p>W edycji odznacz <span class="ui">Aktywny</span>: „Nieaktywny przewoźnik traci dostęp do panelu, a jego ciągniki i kierowcy znikają z list wyboru.” Zaznaczenie z powrotem przywraca dostęp.</p>
+<h3>Reset hasła</h3>
+<ol class="steps">
+<li>⋯ → <span class="ui">Resetuj hasło</span> → potwierdź.</li>
+<li>Okno „Hasło zresetowane” pokazuje login i nowe hasło <b>tylko raz</b> — skopiuj je.</li>
+<li>Przewoźnik dostaje e-mail „Hasło zresetowane”; stare hasło przestaje działać.</li>
+</ol>
+<div class="box warn"><p>Usunąć przewoźnika może tylko administrator.</p></div>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">15 / 34</span></div></section><section class="slide section"><div class="inner"><div class="num">B</div><h1>Ciągniki</h1><p>Ciągnik to centrum wszystkiego: gwarancja (porozumienie), stawki, planista, zespół prowadzący, karta paliwowa i dokumenty.</p></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">16 / 34</span></div></section><section class="slide "><h1>Ciągniki — lista</h1><div class="body"><div class="shot"><img src="../../assets/o11-vehicles.jpg" alt=""></div><div class="side">
+<p>Filtry: numer rejestracyjny, przewoźnik, status (Aktywne / Stojące / Długo stojące / Do usunięcia / Wyłączone).</p>
+<p>Kolumny: <b>Numer rejestracyjny</b> (bursztynowa plakietka <b>„Brak skanu porozumienia”</b>), <b>Karta paliwowa</b> (aktywna / zablokowana), Przewoźnik, Planista, Zespół prowadzący, Typ, Status.</p>
+<p>Akcje: <span class="ui">Edytuj</span>, <span class="ui">Usuń</span>.</p>
+<div class="box warn"><p><b>Usunięcie ciągnika jest nieodwracalne</b> — tego numeru rejestracyjnego nie da się już ponownie dodać. Zwykle wystarczy odznaczyć „Aktywny”.</p></div>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">17 / 34</span></div></section><section class="slide "><h1>Nowy ciągnik — dane podstawowe</h1><div class="body"><div class="col-3"><table class="compact"><colgroup><col style="width:30%"><col style="width:13%"><col style="width:57%"></colgroup><thead><tr><th>Pole</th><th>Wymagane</th><th>Zasady</th></tr></thead><tbody><tr><td>Przewoźnik</td><td><span class="req">TAK</span></td><td>tylko przy tworzeniu; potem nie do zmiany</td></tr><tr><td>Numer rejestracyjny</td><td><span class="req">TAK</span></td><td>2–16 znaków, unikalny w ramach przewoźnika</td></tr><tr><td>Numer boczny</td><td><span class="opt">nie</span></td><td>do 16 znaków</td></tr><tr><td>Typ</td><td><span class="req">TAK</span></td><td>MEGA / STD / COIL</td></tr><tr><td>Norma EURO</td><td><span class="ro">tylko odczyt</span></td><td>zawsze EURO VI</td></tr><tr><td>Planista</td><td><span class="req">TAK</span></td><td>przy tworzeniu; <b>później zmiana tylko wnioskiem</b> o przekazanie</td></tr><tr><td>Zespół prowadzący</td><td><span class="req">TAK</span></td><td>aktywny zespół dyspozytorów — jego dyspozytorzy będą widzieć ciągnik</td></tr><tr><td>Notatki</td><td><span class="opt">nie</span></td><td>do 2000 znaków</td></tr><tr><td>Certyfikat L</td><td><span class="opt">nie</span></td><td>pole wyboru</td></tr><tr><td>Kraje specjalne GB / IT / FR</td><td><span class="req">TAK</span></td><td><b>min. 2 z 3</b> — ciągnik ma wszystkie pozwolenia na wjazd</td></tr></tbody></table></div><div class="shot tall" style="flex:2"><img src="../../assets/o12-vehicle-new-1.jpg" alt=""></div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">18 / 34</span></div></section><section class="slide "><h1>Nowy ciągnik — stawki, GPS, karta paliwowa</h1><div class="body"><div class="col-3"><p>Status karty liczy się na żywo: <b>Karta aktywna</b> tylko gdy zaznaczone porozumienie <b>i</b> wgrany skan porozumienia; inaczej <b>Karta zablokowana</b>.</p><table class="compact"><colgroup><col style="width:30%"><col style="width:17%"><col style="width:53%"></colgroup><thead><tr><th>Pole</th><th>Wymagane</th><th>Zasady</th></tr></thead><tbody><tr><td>Stawka DE / UE / eksport / import</td><td><span class="req">TAK</span></td><td>wszystkie 4, liczba ≥ 0 (0 dozwolone), krok 0,01</td></tr><tr><td>Numer GPS</td><td><span class="opt">nie</span></td><td>1–32 znaki (id urządzenia)</td></tr><tr><td>Umowa GPS (plik)</td><td><span class="cond">gdy jest nr GPS</span></td><td>„Wymagany skan umowy GPS, gdy podano numer GPS.”</td></tr><tr><td>Karta paliwowa</td><td><span class="opt">nie</span></td><td><b>aktywna dopiero po zaznaczeniu Porozumienia</b></td></tr><tr><td>Numer karty</td><td><span class="cond">gdy karta</span></td><td>dokładnie 16 cyfr</td></tr><tr><td>Data ważności karty</td><td><span class="cond">gdy karta</span></td><td>data — wpływa na Alerty</td></tr><tr><td>PIN</td><td><span class="cond">gdy karta</span></td><td>4–6 cyfr</td></tr></tbody></table></div><div class="shot tall" style="flex:2"><img src="../../assets/o12-vehicle-new-2.jpg" alt=""></div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">19 / 34</span></div></section><section class="slide "><h1>Nowy ciągnik — porozumienie, odpady, kabotaż, ADR</h1><div class="body"><div class="col-3"><table class="compact"><colgroup><col style="width:30%"><col style="width:17%"><col style="width:53%"></colgroup><thead><tr><th>Pole</th><th>Wymagane</th><th>Zasady</th></tr></thead><tbody><tr><td>Porozumienie</td><td><span class="opt">nie</span></td><td><b>włącza gwarancję</b> — tylko wtedy przewoźnik złoży wniosek; uruchamia pilnowanie terminów zgłaszania wyjazdów</td></tr><tr><td>Skan porozumienia</td><td><span class="opt">nie</span></td><td>bez skanu — ostrzeżenie „Brak skanu porozumienia” (nie blokuje zapisu, ale karta paliwowa będzie zablokowana)</td></tr><tr><td>Odpady</td><td><span class="opt">nie</span></td><td>pole wyboru</td></tr><tr><td>Kraje odpadowe</td><td><span class="cond">gdy Odpady</span></td><td>min. 1: DE, NL, AT, BE, LUX, FR, GB, IT, CZ, PL</td></tr><tr><td>Kabotaż DE / FR</td><td><span class="opt">nie</span></td><td>pola wyboru</td></tr><tr><td>Ubezpieczenie kabotażowe (plik)</td><td><span class="cond">gdy Kabotaż DE</span></td><td>„Wymagane ubezpieczenie kabotażowe DE.”</td></tr><tr><td>ADR</td><td><span class="opt">nie</span></td><td>pole wyboru</td></tr><tr><td>Klasy ADR</td><td><span class="cond">gdy ADR</span></td><td>min. 1 z klas 1–9</td></tr><tr><td>Aktywny</td><td><span class="opt">nie</span></td><td>domyślnie tak; odznaczony = ciągnik znika z list wyboru (status „Wyłączona”)</td></tr></tbody></table></div><div class="shot tall" style="flex:2"><img src="../../assets/o12-vehicle-new-3.jpg" alt=""></div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">20 / 34</span></div></section><section class="slide "><h1>Szczegóły i edycja ciągnika</h1><div class="body"><div class="shot" style="flex:1"><img src="../../assets/o13-vehicle-detail-1.jpg" alt=""></div><div class="shot" style="flex:1"><img src="../../assets/o14-vehicle-edit-1.jpg" alt=""></div><div class="side" style="flex:.8">
+<p>Kliknięcie wiersza — okno szczegółów: identyfikacja, <b>przypisanie</b> (przewoźnik, opiekun, planista, zespół), wyposażenie (GPS, karta paliwowa z numerem i PIN, porozumienie), stawki, pozwolenia, załączniki (<span class="ui">Otwórz</span>) i <b>Historia planistów</b>.</p>
+<p><span class="ui">Edytuj</span> otwiera formularz. Pole <b>Planista</b> jest zablokowane — obok przycisk <span class="ui">Poproś o zmianę planisty</span>.</p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">21 / 34</span></div></section><section class="slide "><h1>Zmiana planisty — wniosek</h1><div class="body"><div class="shot tall"><img src="../../assets/o15-transfer-request.jpg" alt=""></div><div class="side">
+<ol class="steps">
+<li>Edycja ciągnika → <span class="ui">Poproś o zmianę planisty</span>.</li>
+<li>Wybierz <span class="ui">Nowy planista</span> (dowolny inny aktywny planista) — <b>wymagane</b>.</li>
+<li>Wpisz <span class="ui">Powód</span> — <b>wymagany</b>, 3–500 znaków.</li>
+<li><span class="ui">Wyślij wniosek</span> — wysyła się od razu, niezależnie od zapisu formularza ciągnika.</li>
+</ol>
+<div class="box info"><p>Planista zmienia się dopiero po <b>zatwierdzeniu przez lidera obecnego planisty lub administratora</b>.
+Nie są wysyłane powiadomienia — wniosek czeka na liście „Do decyzji” decydenta.</p></div>
+<p class="small">Jeden oczekujący wniosek na ciągnik. Wyłączonego ciągnika nie da się przekazać.</p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">22 / 34</span></div></section><section class="slide "><h1>Przekazania — Twoje wnioski</h1><div class="body"><div class="shot"><img src="../../assets/o22-przekazania.jpg" alt=""></div><div class="side">
+<p>Zakładki: <b>Oczekujące</b> i <b>Rozpatrzone</b> (filtr: Zatwierdzone / Odrzucone / Anulowane).</p>
+<p>Karta wniosku: ciągnik, przewoźnik, z → do planisty, kto wnioskuje, powód, status <span class="pill p-amber">Oczekuje</span> <span class="pill p-green">Zatwierdzony</span> <span class="pill p-red">Odrzucony</span> <span class="pill p-grey">Anulowany</span>,
+decyzja z komentarzem lub <b>powodem odrzucenia</b>, przycisk <span class="ui">Historia planistów</span>.</p>
+<p>Własny oczekujący wniosek możesz <span class="ui">Anuluj wniosek</span>.</p>
+<h3>Po zatwierdzeniu</h3>
+<ul><li>ciągnik od razu przechodzi do nowego planisty;</li><li>wyjazdy „Zgłoszony” i „Załadowany” też;</li><li>wyjazd „W trasie” zostaje u starego planisty do zjazdu.</li></ul>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">23 / 34</span></div></section><section class="slide section"><div class="inner"><div class="num">C</div><h1>Kierowcy, naczepy i dokumenty</h1><p>Kompletna flota = co najmniej jeden aktywny ciągnik, naczepa i kierowca.</p></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">24 / 34</span></div></section><section class="slide "><h1>Kierowca — formularz</h1><div class="body"><div class="col-3"><table class="compact"><colgroup><col style="width:30%"><col style="width:15%"><col style="width:55%"></colgroup><thead><tr><th>Pole</th><th>Wymagane</th><th>Zasady</th></tr></thead><tbody><tr><td>Przewoźnik</td><td><span class="req">TAK</span></td><td>tylko przy tworzeniu</td></tr><tr><td>Imię / Nazwisko</td><td><span class="req">TAK</span></td><td>1–64 znaki każde</td></tr><tr><td>Nr prawa jazdy</td><td><span class="req">TAK</span></td><td>1–64 znaki, dowolny format</td></tr><tr><td>Ważność prawa jazdy</td><td><span class="req">TAK</span></td><td>data — wpływa na Alerty</td></tr><tr><td>Prefiks telefonu</td><td><span class="opt">nie</span></td><td>tylko podpowiedź formatu numeru</td></tr><tr><td>Telefon</td><td><span class="req">TAK</span></td><td>1–32 znaki; nietypowy format = ostrzeżenie, nie blokuje</td></tr><tr><td>Telefon (drugi), E-mail</td><td><span class="opt">nie</span></td><td>e-mail poprawny, do 160 znaków</td></tr><tr><td>Narodowość</td><td><span class="req">TAK</span></td><td>Białoruś, Rosja, Ukraina, Polska, Uzbekistan, Kirgistan, Kazachstan, Inne</td></tr><tr><td>Języki komunikacji</td><td><span class="req">TAK</span></td><td>min. 1: polski, rosyjski, angielski, ukraiński, niemiecki, inny</td></tr><tr><td>ADR → Klasy ADR + Świadectwo ADR</td><td><span class="cond">gdy ADR</span></td><td>min. 1 klasa i <b>wymagany skan świadectwa</b></td></tr><tr><td>Notatki / Aktywny</td><td><span class="opt">nie</span></td><td>do 2000 znaków / domyślnie aktywny</td></tr></tbody></table></div><div class="shot tall" style="flex:2"><img src="../../assets/o17-driver-new-1.jpg" alt=""></div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">25 / 34</span></div></section><section class="slide "><h1>Naczepa — formularz</h1><div class="body"><div class="col-3"><table class="compact"><colgroup><col style="width:36%"><col style="width:12%"><col style="width:52%"></colgroup><thead><tr><th>Pole</th><th>Wymagane</th><th>Zasady</th></tr></thead><tbody><tr><td>Przewoźnik</td><td><span class="req">TAK</span></td><td>tylko przy tworzeniu</td></tr><tr><td>Numer rejestracyjny</td><td><span class="req">TAK</span></td><td>2–16 znaków, unikalny w ramach przewoźnika</td></tr><tr><td>Typ naczepy</td><td><span class="req">TAK</span></td><td>ze słownika (np. STD, MEGA, COIL, IZO, CHŁO)</td></tr><tr><td>Długość / Szerokość / Wysokość wewn. (m), Ładowność (t)</td><td><span class="opt">nie</span></td><td>liczby ≥ 0</td></tr><tr><td>Boczny prześwit ład. (cm)</td><td><span class="req">TAK</span></td><td>liczba całkowita ≥ 0</td></tr><tr><td>Dach podnoszony / przesuwany (+ Edscha)</td><td><span class="opt">nie</span></td><td>Edscha pojawia się przy dachu przesuwanym</td></tr><tr><td>Kosz paletowy, Multilock</td><td><span class="opt">nie</span></td><td>pola wyboru</td></tr><tr><td>Pasy / Maty / Belki</td><td><span class="opt">nie</span></td><td>po zaznaczeniu — <b>liczba wymagana, min. 3</b></td></tr><tr><td>Certyfikat XL</td><td><span class="opt">nie</span></td><td>po zaznaczeniu — <b>wymagany plik PDF</b></td></tr><tr><td>Notatki / Aktywny</td><td><span class="opt">nie</span></td><td>do 2000 znaków / domyślnie aktywna</td></tr></tbody></table></div><div class="shot tall" style="flex:2"><img src="../../assets/o19-trailer-new-1.jpg" alt=""></div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">26 / 34</span></div></section><section class="slide "><h1>Załączniki i usuwanie</h1><div class="body"><div class="col">
+<h3>Pliki</h3>
+<ul>
+<li>pole „Dodaj plik lub upuść”: <b>JPG, PNG, WebP, PDF</b>, maks. <b>10 MB</b> na plik, do 10 plików na pole;</li>
+<li>Certyfikat XL naczepy — <b>tylko PDF</b>;</li>
+<li>błędy: „Plik przekracza 10 MB”, „Nieobsługiwany typ pliku”.</li>
+</ul>
+<h3>Pliki wymagane warunkowo</h3>
+<table class="compact"><tbody>
+<tr><td>Umowa GPS</td><td>gdy podano numer GPS</td></tr>
+<tr><td>Ubezpieczenie kabotażowe</td><td>gdy Kabotaż DE</td></tr>
+<tr><td>Świadectwo ADR kierowcy</td><td>gdy kierowca ma ADR</td></tr>
+<tr><td>Certyfikat XL (PDF)</td><td>gdy naczepa ma Certyfikat XL</td></tr>
+<tr><td>Skan porozumienia</td><td>zalecany — bez niego karta paliwowa zablokowana</td></tr>
+</tbody></table>
+</div><div class="col">
+<h3>Wyłączanie zamiast usuwania</h3>
+<p>W każdym formularzu jest pole <span class="ui">Aktywny</span>. Odznaczony ciągnik / naczepa / kierowca znika z list wyboru, ale zostaje w historii.</p>
+<h3>Usuwanie</h3>
+<ul>
+<li><b>Ciągnik</b> — nieodwracalnie; numer rejestracyjny nie wróci do systemu;</li>
+<li><b>Kierowca, naczepa</b> — usunięcie można cofnąć (przywraca administrator);</li>
+<li><b>Przewoźnik</b> — tylko administrator.</li>
+</ul>
+<div class="box warn"><p>Wyłączenie lub usunięcie ciągnika anuluje oczekujący wniosek o zmianę planisty.</p></div>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">27 / 34</span></div></section><section class="slide section"><div class="inner"><div class="num">D</div><h1>Pilnowanie terminów</h1><p>Alerty dokumentów i porozumienia pokazują, którzy przewoźnicy wymagają Twojej reakcji.</p></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">28 / 34</span></div></section><section class="slide "><h1>Alerty dokumentów</h1><div class="body"><div class="shot"><img src="../../assets/o06-alerts.jpg" alt=""></div><div class="side">
+<p>Dokumenty wygasające w ciągu 7 dni lub przeterminowane, liczone codziennie (dni kalendarzowe):</p>
+<table class="compact"><tbody>
+<tr><td><span class="pill p-red">Przeterminowane</span></td><td>po dacie ważności</td></tr>
+<tr><td><span class="pill p-red">Wygasają dziś</span></td><td>0 dni</td></tr>
+<tr><td><span class="pill p-amber">Za ≤3 dni</span></td><td>1–3 dni</td></tr>
+<tr><td><span class="pill p-blue">Za ≤7 dni</span></td><td>4–7 dni</td></tr>
+</tbody></table>
+<p style="margin-top:8px">Śledzone: <b>Ubezpieczenie OCP</b>, <b>Licencja transportowa</b> (przewoźnik), <b>Karta paliwowa</b> (ciągnik), <b>Prawo jazdy</b> (kierowca).
+Kliknięcie wiersza prowadzi do listy, gdzie zaktualizujesz datę.</p>
+<p class="small">Alerty są tylko w aplikacji (licznik w menu), bez e-maila.</p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">29 / 34</span></div></section><section class="slide "><h1>Porozumienia — zgłaszanie wyjazdów</h1><div class="body"><div class="shot"><img src="../../assets/o05-porozumienia.jpg" alt=""></div><div class="side">
+<div class="box key"><p>Ciągnik z porozumieniem musi mieć <b>zgłoszony kolejny wyjazd w ciągu 10 polskich dni roboczych</b> od zjazdu (lub od włączenia gwarancji).</p></div>
+<p>Sekcje: <span class="pill p-red">Po terminie</span> → <span class="pill p-amber">Zbliża się termin</span> (≤ 3 dni) → <b>Pod obserwacją</b> (zwinięta).</p>
+<p>Wiersz: ciągnik, przewoźnik, ostatni zjazd / od włączenia gwarancji, termin, licznik. Kliknięcie → karta przewoźnika, zakładka Porozumienia.</p>
+<h3>Codziennie o 07:10</h3>
+<ul><li>przewoźnik dostaje przypomnienie 3 i 1 dzień przed terminem;</li>
+<li><b>Ty dostajesz przegląd</b> „Gwarancje: przypomnienia i naruszenia — {data}” (gdy jest co pokazać).</li></ul>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">30 / 34</span></div></section><section class="slide "><h1>Wyjazdy Twoich przewoźników</h1><div class="body"><div class="shot" style="flex:1"><img src="../../assets/o20-delegations.jpg" alt=""></div><div class="shot" style="flex:1"><img src="../../assets/o21-delegation-detail-1.jpg" alt=""></div><div class="side" style="flex:.8">
+<p>Podgląd tylko do odczytu. Filtry: status, przewoźnik / nr rej., data od–do; 50 na stronę.</p>
+<p>Okno wyjazdu: trasa (zgłoszone / planowane / faktyczne daty), stawki, ciągnik i kierowca, historia statusu, nr zlecenia ze spedu, przebieg dzień po dniu, zespół prowadzący.</p>
+<p class="small">Statusy zmieniają eksport i weryfikator; anulować może przewoźnik (Zgłoszony) lub admin.</p>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">31 / 34</span></div></section><section class="slide "><h1>Przebieg ciągników</h1><div class="body"><div class="shot"><img src="../../assets/o23-km.jpg" alt=""></div><div class="side">
+<p>Tygodniowa tablica km, <b>tylko podgląd</b> (uzupełnia weryfikator), pogrupowana według przewoźników z sumą km.</p>
+<ul>
+<li>komórki: km ✓ / Nie jeździ / — (nie sprawdzono);</li>
+<li>„Tylko jeżdżące” domyślnie <b>wyłączone</b> — widzisz całą flotę, łącznie ze stojącymi;</li>
+<li>nawigacja tygodni, wyszukiwarka, notatki, <span class="ui">Historia</span> miesiąca.</li>
+</ul>
+<div class="box tip"><p>Dobry sposób, by zobaczyć, które ciągniki stoją, zanim system oznaczy je jako „Długo stojące”.</p></div>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">32 / 34</span></div></section><section class="slide "><h1>E-maile opiekuna</h1><div class="body"><div class="col"><p>Przewoźnik dostaje automatycznie e-maile, które wywołujesz: „Konto utworzone” i „Hasło zresetowane”.</p><table class=""><colgroup><col style="width:45%"><col style="width:55%"></colgroup><thead><tr><th>E-mail</th><th>Kiedy</th></tr></thead><tbody><tr><td>Gwarancje: przypomnienia i naruszenia — {data}</td><td>codziennie 07:10, jeśli któryś ciągnik zbliża się do terminu albo go przekroczył</td></tr><tr><td>Nowy wniosek: {nr}</td><td>Twój przewoźnik złożył wniosek (do wiadomości)</td></tr><tr><td>Wniosek {nr}: ZAAKCEPTOWANO / ODRZUCONO</td><td>decyzja w sprawie wniosku Twojego przewoźnika</td></tr><tr><td>Kod weryfikacyjny / Reset hasła</td><td>tylko jeśli logujesz się hasłem zamiast Google</td></tr></tbody></table><div class="caption">Nie wysyłamy e-maili o: przekazaniach planistów, alertach dokumentów (są w aplikacji), reklamacjach (idą do opiekuna wniosków).</div></div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">33 / 34</span></div></section><section class="slide "><h1>Checklista: nowy przewoźnik od zera</h1><div class="body"><div class="col">
+<ol class="steps">
+<li><span class="ui">Przewoźnicy</span> → <span class="ui">+ Nowy przewoźnik</span>.</li>
+<li>Krok 1: login, e-mail logowania, nazwa, osoba kontaktowa, telefon, e-mail zleceń; NIP → sprawdź plakietkę VIES/MF; adres; konto EUR; OCP ≥ 250 000 EUR i daty ważności OCP i licencji.</li>
+<li>Krok 2: ciągnik — nr rej., typ, planista, zespół, 2 z 3 GB/IT/FR, 4 stawki; <b>zaznacz Porozumienie</b> i wgraj skan.</li>
+<li>Krok 3: naczepa — nr rej., typ, prześwit boczny.</li>
+<li>Krok 4: kierowca — dane, prawo jazdy z datą, narodowość, języki.</li>
+</ol>
+</div><div class="col">
+<ol class="steps" style="counter-reset:s 5">
+<li>Wgraj dokumenty firmowe: karta przewoźnika → <span class="ui">Dokumenty</span> (OCP, licencja, KREPTD).</li>
+<li>Upewnij się, że przewoźnik dostał e-mail z hasłem (albo przekaż hasło z kreatora).</li>
+<li>Sprawdź na <span class="ui">Moja opieka</span>, że karta nie ma ⚠ „niekompletna flota”.</li>
+<li>Poinformuj przewoźnika: zgłaszać każdy wyjazd przed wyjazdem; po zjeździe wniosek w 7 dni; kolejny wyjazd w 10 dni roboczych.</li>
+</ol>
+<div class="box tip"><p>Przy kolejnych ciągnikach / kierowcach korzystaj z list Ciągniki / Kierowcy / Naczepy → <span class="ui">+ Nowy …</span>.</p></div>
+</div></div><div class="footer"><img src="../../assets/logo.png" alt=""><span>MAGGuarantee · Opiekun</span><span class="sp"></span><span class="pg">34 / 34</span></div></section></body></html>
