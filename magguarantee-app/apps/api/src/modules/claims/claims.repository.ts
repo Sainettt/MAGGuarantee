@@ -62,7 +62,13 @@ export interface ClaimRow {
   verifiedById: string | null;
   verifiedBy: { id: string; login: string; name: string | null } | null;
 
+  /** The carrier's note from submit. Staff never write it (UWAGI #4). */
   comment: string | null;
+  /**
+   * The verifier's wniosek-decision text: optional on ZAAKCEPTOWANO, required
+   * on ODRZUCONO. Fed by the PATCH wire field `comment` (UWAGI #4).
+   */
+  decisionComment: string | null;
   /** Nullable per Revert #1 — set only on transition to ZAAKCEPTOWANO. */
   orderNumber: string | null;
   orderDate: Date | null;
@@ -380,7 +386,13 @@ export interface UpdateClaimData {
   breakdown?: KmCalcBreakdown;
 
   // ── decision payload (Phase 4) ──
+  /**
+   * The carrier's submit note. No staff path sets it any more (UWAGI #4); the
+   * key stays so the type keeps describing the column.
+   */
   comment?: string | null;
+  /** Verifier's ZAAKCEPTOWANO / ODRZUCONO justification (UWAGI #4). */
+  decisionComment?: string | null;
   orderNumber?: string | null;
   orderDate?: Date | null;
   amountApproved?: number | null;
@@ -518,6 +530,9 @@ export class ClaimsRepository {
         status: data.status,
         statusChangedAt: data.statusChangedAt,
         comment: data.comment,
+        // A fresh wniosek has no decision. Deliberately not part of
+        // `CreateClaimData`, so the carrier submit cannot set it.
+        decisionComment: null,
         orderNumber: data.orderNumber,
         orderDate: data.orderDate,
         // Both columns receive the same numeric value at submit (Prisma coerces
@@ -625,6 +640,7 @@ export class ClaimsRepository {
     set('paymentEur');
     set('ratePerKmEffective');
     set('comment');
+    set('decisionComment');
     set('orderNumber');
     set('orderDate');
     set('amountApproved');
@@ -714,6 +730,9 @@ export class ClaimsRepository {
       verifiedById: row.verifiedById,
       verifiedBy: row.verifiedBy ?? null,
       comment: row.comment,
+      // `?? null`: defensive sentinel for the soft-delete extension's widened
+      // inferred type (mirrors the reklamacja columns below).
+      decisionComment: row.decisionComment ?? null,
       orderNumber: row.orderNumber,
       orderDate: row.orderDate,
       amountApproved: decimalToNumber(row.amountApproved),
@@ -810,6 +829,7 @@ interface ClaimPrismaShape {
   verifiedById: string | null;
   verifiedBy?: { id: string; login: string; name: string | null } | null;
   comment: string | null;
+  decisionComment?: string | null;
   orderNumber: string | null;
   orderDate: Date | null;
   amountApproved: { toNumber(): number } | number | null;

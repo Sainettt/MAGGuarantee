@@ -30,6 +30,9 @@ import type {
   SubmitClaimDto,
 } from '@magguarantee/shared';
 
+import type { ConfigService } from '@nestjs/config';
+
+import type { Env } from '../../config/env.schema';
 import type { AuditWriter } from '../audit/audit.service';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import type { CarriersRepository } from '../carriers/carriers.repository';
@@ -39,6 +42,7 @@ import type {
 } from '../delegations/delegations.repository';
 import type { DriversRepository } from '../drivers/drivers.repository';
 import type { KmCalcService } from '../km-calc/km-calc.service';
+import type { MailService } from '../mail/mail.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { TrailersRepository } from '../trailers/trailers.repository';
 import type { VehicleDailyKmRepository } from '../vehicles/vehicle-daily-km.repository';
@@ -214,6 +218,8 @@ function makeClaimRow(data: CreateClaimData): ClaimRow {
     verifiedById: null,
     verifiedBy: null,
     comment: data.comment,
+    // A fresh wniosek carries no decision (`createWithin` writes NULL).
+    decisionComment: null,
     orderNumber: data.orderNumber,
     orderDate: data.orderDate,
     amountApproved: null,
@@ -1390,5 +1396,118 @@ describe('ClaimsService.submit — mixed period settled on the daily-km board', 
         'gwarantowane (2160). Brak podstaw do dopłaty.',
     ]);
     expect(repoFake.creates).toHaveLength(0);
+  });
+});
+
+// ─── UWAGI #2 (2026-10-22) — staff deeplink of the submit notification ──────
+//
+// The only employee claim page is the list `/employee/claims`; `?nrZgl=` opens
+// the ClaimModal on arrival. The old `/employee/claims/{nrZgl}` link 404'd.
+// `_notifySubmit` is driven directly (as `claims.service.recipients.spec.ts`
+// drives `_collectClaimRecipients`): the submit pipeline fires it
+// fire-and-forget after the tx, and the gates above are not what is under test.
+
+describe('ClaimsService._notifySubmit — staff deeplink (UWAGI #2)', () => {
+  type SubmittedCall = [string, Record<string, unknown>];
+
+  function makeNotifyHarness(appUrl: string): {
+    svc: ClaimsService;
+    claimSubmitted: jest.Mock;
+  } {
+    const claimSubmitted = jest.fn(async () => undefined);
+    const client = {
+      user: {
+        findFirst: jest.fn(async () => null),
+        // admin + pracownik query → one opener; planista lookups → none.
+        findMany: jest.fn(async (args: { where?: { role?: unknown } }) =>
+          args.where?.role ? [{ email: 'pracownik@magtrans.eu' }] : [],
+        ),
+      },
+      carrier: {
+        findFirst: jest.fn(async () => ({
+          user: { email: 'carrier@example.com', login: 'pwz1', name: 'Pwz One' },
+          opiekun: { email: 'opiekun@magtrans.eu' },
+        })),
+      },
+      delegation: { findFirst: jest.fn(async () => null) },
+      vehiclePlannerAssignment: { findMany: jest.fn(async () => []) },
+    };
+    const prisma = {
+      client,
+      get tx() {
+        return client;
+      },
+    } as unknown as PrismaService;
+    const config = {
+      get: jest.fn((key: string) => (key === 'APP_URL' ? appUrl : undefined)),
+    } as unknown as ConfigService<Env, true>;
+    const svc = new ClaimsService(
+      {} as ClaimsRepository,
+      {} as CarriersRepository,
+      {} as VehiclesRepository,
+      {} as DriversRepository,
+      {} as TrailersRepository,
+      {} as KmCalcService,
+      {} as NrZglService,
+      prisma,
+      makeAuditWriter(),
+      { enqueueClaimSubmitted: claimSubmitted } as unknown as MailService,
+      config,
+    );
+    return { svc, claimSubmitted };
+  }
+
+  const row = {
+    nrZgl: 'GWA/100/05/26',
+    carrierId: 'c-1',
+    vehicleId: 'v-1',
+    delegationId: null,
+    vehiclePlateSnapshot: 'WX12345',
+    dateStart: new Date('2026-05-01T00:00:00.000Z'),
+    dateEnd: new Date('2026-05-10T00:00:00.000Z'),
+    mileage: 4_000,
+    kmGuaranteed: 5_400,
+    kmDifference: 1_400,
+    drivenDays: 10,
+    paymentEur: 700,
+  } as ClaimRow;
+
+  /** Runs the notification; returns the enqueued props keyed by recipient. */
+  async function notify(
+    appUrl: string,
+  ): Promise<Map<string, Record<string, unknown>>> {
+    const h = makeNotifyHarness(appUrl);
+    await (
+      h.svc as unknown as { _notifySubmit(r: ClaimRow): Promise<void> }
+    )._notifySubmit(row);
+    const calls = h.claimSubmitted.mock.calls as unknown as SubmittedCall[];
+    return new Map(calls.map(([to, props]) => [to, props]));
+  }
+
+  it('the opener (pracownik) gets /employee/claims?nrZgl=<encoded>', async () => {
+    const byRecipient = await notify('http://localhost:3000');
+
+    const deeplink = byRecipient.get('pracownik@magtrans.eu')?.deeplink;
+    expect(deeplink).toBe(
+      'http://localhost:3000/employee/claims?nrZgl=GWA%2F100%2F05%2F26',
+    );
+    expect(deeplink).not.toContain('/employee/claims/');
+  });
+
+  it('a trailing slash on APP_URL does not double the slash', async () => {
+    const byRecipient = await notify('https://gwarancje.magtrans.eu/');
+
+    expect(byRecipient.get('pracownik@magtrans.eu')?.deeplink).toBe(
+      'https://gwarancje.magtrans.eu/employee/claims?nrZgl=GWA%2F100%2F05%2F26',
+    );
+  });
+
+  it('non-openers (carrier receipt, opiekun) still get no deeplink', async () => {
+    const byRecipient = await notify('http://localhost:3000');
+
+    expect(byRecipient.get('carrier@example.com')).toBeDefined();
+    expect(byRecipient.get('carrier@example.com')).not.toHaveProperty('deeplink');
+    expect(byRecipient.get('opiekun@magtrans.eu')).toBeDefined();
+    expect(byRecipient.get('opiekun@magtrans.eu')).not.toHaveProperty('deeplink');
   });
 });

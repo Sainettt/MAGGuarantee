@@ -1,12 +1,15 @@
 // Cases for the calendar-day helpers added for the vehicle lifecycle model:
 // `businessDateIso` / `startOfBusinessDayUtc` (Warsaw-date reduction of an
-// arbitrary instant) and `calendarDaysBetween` (exact whole-day diff). Pure —
-// the only platform API is `Intl.DateTimeFormat`, deterministic across Node.
+// arbitrary instant) and `calendarDaysBetween` (exact whole-day diff), plus
+// `businessWallClockUtc` (Warsaw wall-clock "now" labelled UTC, UWAGI #1
+// 2026-10-22). Pure — the only platform API is `Intl.DateTimeFormat`,
+// deterministic across Node.
 
 import { describe, expect, it } from 'vitest';
 
 import {
   businessDateIso,
+  businessWallClockUtc,
   calendarDaysBetween,
   startOfBusinessDayUtc,
 } from '../src/domain/business-date';
@@ -40,6 +43,58 @@ describe('startOfBusinessDayUtc', () => {
   it('returns the UTC-midnight anchor of the instant’s Warsaw day', () => {
     const anchor = startOfBusinessDayUtc(new Date('2026-07-01T23:00:00Z'));
     expect(anchor.toISOString()).toBe('2026-07-02T00:00:00.000Z');
+  });
+});
+
+describe('businessWallClockUtc', () => {
+  /** Real UTC instant → Warsaw wall-clock labelled UTC, as an ISO string. */
+  function wall(iso: string): string {
+    return businessWallClockUtc(new Date(iso)).toISOString();
+  }
+
+  it('CET (+01:00): 10:00 UTC → 11:00 wall-clock labelled UTC', () => {
+    expect(wall('2026-01-15T10:00:00Z')).toBe('2026-01-15T11:00:00.000Z');
+  });
+
+  it('CEST (+02:00): 10:00 UTC → 12:00 wall-clock labelled UTC', () => {
+    expect(wall('2026-07-15T10:00:00Z')).toBe('2026-07-15T12:00:00.000Z');
+  });
+
+  it('rolls over local midnight into the NEXT calendar day', () => {
+    // 22:30 UTC 21 Oct = 00:30 CEST 22 Oct.
+    expect(wall('2026-10-21T22:30:00Z')).toBe('2026-10-22T00:30:00.000Z');
+  });
+
+  it('prints exact local midnight as 00 (hourCycle h23), never 24', () => {
+    // 23:00 UTC 14 Jan = 00:00 CET 15 Jan.
+    expect(wall('2026-01-14T23:00:00Z')).toBe('2026-01-15T00:00:00.000Z');
+  });
+
+  it('drops milliseconds (whole-second precision)', () => {
+    expect(wall('2026-01-15T10:00:00.789Z')).toBe('2026-01-15T11:00:00.000Z');
+  });
+
+  describe('spring-forward 2026-03-29 (02:00 CET → 03:00 CEST at 01:00 UTC)', () => {
+    it('last second before the switch is still CET: 00:59:59Z → 01:59:59', () => {
+      expect(wall('2026-03-29T00:59:59Z')).toBe('2026-03-29T01:59:59.000Z');
+    });
+
+    it('first instant after the switch is CEST: 01:00:00Z → 03:00:00 (02:xx never exists)', () => {
+      expect(wall('2026-03-29T01:00:00Z')).toBe('2026-03-29T03:00:00.000Z');
+    });
+  });
+
+  describe('fall-back 2026-10-25 (03:00 CEST → 02:00 CET at 01:00 UTC)', () => {
+    // The 02:00–02:59 local hour happens twice. Both real instants map to the
+    // same wall-clock — accepted: the stored `actual*` values carry no offset
+    // either, so they are equally ambiguous within that hour.
+    it('first pass (CEST): 00:30Z → 02:30', () => {
+      expect(wall('2026-10-25T00:30:00Z')).toBe('2026-10-25T02:30:00.000Z');
+    });
+
+    it('second pass (CET): 01:30Z → 02:30 (repeated hour)', () => {
+      expect(wall('2026-10-25T01:30:00Z')).toBe('2026-10-25T02:30:00.000Z');
+    });
   });
 });
 

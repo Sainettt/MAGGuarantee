@@ -14,6 +14,11 @@
 // on comparison direction, let a future cell through) for ~1–2h every night.
 // `Intl.DateTimeFormat('en-CA', { timeZone })` resolves the actual Warsaw
 // calendar date, so the boundary is correct at every instant of the day.
+//
+// `businessWallClockUtc` is the time-of-day sibling for the one place that
+// stores Warsaw wall-clock labelled UTC (`Delegation.actualDepartureAt` /
+// `actualReturnAt`) — see docs/19-known-quirks.md "Dual timestamp convention
+// on Delegation".
 
 /** MAGTRANS operating timezone — all "today" boundaries are computed here. */
 export const BUSINESS_TZ = 'Europe/Warsaw';
@@ -79,6 +84,48 @@ export function startOfBusinessDayUtc(d: Date = new Date()): Date {
  */
 export function startOfBusinessTodayUtc(now: Date = new Date()): Date {
   return startOfBusinessDayUtc(now);
+}
+
+/**
+ * "Now" as {@link BUSINESS_TZ} WALL-CLOCK time labelled UTC: the Warsaw local
+ * date-time of `now` (`YYYY-MM-DDTHH:mm:ss`) re-read as if it were UTC (`…Z`).
+ *
+ * NOT a real instant. It is the same "wall-clock labelled UTC" shape the
+ * weryfikator `/in-transit` and `/returned` dialogs send for
+ * `Delegation.actualDepartureAt` / `actualReturnAt` (they append `:00Z` to the
+ * typed wall-clock), so it is the correct operand for a "not in the future"
+ * check against those fields. Comparing them with the real `Date.now()`
+ * instead rejects every wall-clock in the last 1 h (CET) / 2 h (CEST) as
+ * "future". Never compare its result with a TRUE-UTC field (`departureAt`,
+ * `createdAt`, …) — that mixes the two conventions.
+ *
+ * DST: at spring-forward the skipped local hour never appears (01:59:59 →
+ * 03:00:00); at fall-back the repeated local hour maps two real instants onto
+ * the same wall-clock — accepted, the stored `actual*` values carry no offset
+ * and are equally ambiguous there. Precision is whole seconds (milliseconds are
+ * dropped); the dialogs send minute-granular values, so this is immaterial.
+ *
+ * `hourCycle: 'h23'` is load-bearing: with `hour12: false` some engines print
+ * local midnight as `24`, which would produce an invalid date. The optional
+ * `now` argument exists only for deterministic tests.
+ */
+export function businessWallClockUtc(now: Date = new Date()): Date {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BUSINESS_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const part = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((p) => p.type === type)!.value;
+  const wallClock =
+    `${part('year')}-${part('month')}-${part('day')}` +
+    `T${part('hour')}:${part('minute')}:${part('second')}`;
+  return new Date(`${wallClock}Z`);
 }
 
 /** One calendar day in milliseconds — both operands below are UTC midnight. */

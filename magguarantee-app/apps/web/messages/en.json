@@ -1369,6 +1369,8 @@
           "doplata": "Guarantee payout",
           "comment": "Comment",
           "commentRejected": "Rejection reason",
+          "decisionCommentAccepted": "Decision rationale (optional)",
+          "decisionCommentVisibleHint": "Visible to the carrier",
           "reklamacjaOrderNumber": "Order number",
           "reklamacjaOrderNumberHint": "It can be a corrected number of the previous order or an entirely new one — enter the order number the reclamation amount will be paid against.",
           "reklamacjaPayoutAmount": "Amount to pay (from the reclamation)",
@@ -1389,6 +1391,13 @@
           "verifyDirtyHint": "You have unsaved corrections — save the verification",
           "boardSumHint": "Per mileage board: {km} km",
           "boardSumApply": "Apply"
+        },
+        "notes": {
+          "carrierComment": "Carrier's note",
+          "carrierAuthor": "carrier",
+          "decisionCommentAccepted": "Decision rationale",
+          "decisionCommentRejected": "Rejection reason",
+          "magtransAuthor": "MAGTRANS"
         },
         "locked": {
           "factsPendingAuthorization": "Verification data is locked — the claim is awaiting Maksim's authorisation. Only an administrator can make changes.",
@@ -1814,7 +1823,9 @@
         "totalPaid": "Total paid",
         "orderNumber": "Order number",
         "orderDate": "Order date",
-        "comment": "Comment",
+        "comment": "Your note",
+        "decisionCommentAccepted": "MAGTRANS rationale",
+        "decisionCommentRejected": "Rejection reason",
         "moneyLabelApproved": "amount approved",
         "moneyLabelCalc": "calculation",
         "moneyLabelTotalPaid": "total paid",

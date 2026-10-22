@@ -933,7 +933,24 @@ export const ClaimDtoSchema = z.object({
   verifiedById: UuidSchema.nullable(),
   verifiedBy: UserMiniSchema.nullable(),
 
+  /**
+   * The CARRIER's note, written once at submit (`SubmitClaimSchema.comment`).
+   * Staff never write it (UWAGI #4, 2026-10-22): the verifier's decision text
+   * lives in `decisionComment`, a reklamacja answer in `reklamacjaResponse`.
+   * Caveat: rows accepted (ZAAKCEPTOWANO) before 2026-10-22 may still hold the
+   * verifier's acceptance comment here. The old decision overwrote this field
+   * and carrier vs verifier text cannot be told apart, so those rows were not
+   * backfilled (rejected rows were: their text moved to `decisionComment`).
+   */
   comment: z.string().nullable(),
+  /**
+   * The VERIFIER's justification of the wniosek decision: optional on
+   * ZAAKCEPTOWANO, required (non-blank) on ODRZUCONO. Written from the PATCH
+   * wire field `comment` (see `UpdateClaimSchema`). `null` until decided, or
+   * when an acceptance carried no comment. A reklamacja decision never writes
+   * it (that answer goes to `reklamacjaResponse`).
+   */
+  decisionComment: z.string().nullable(),
   orderNumber: z.string().nullable(),
   orderDate: IsoDateSchema.nullable(),
 
@@ -1208,6 +1225,10 @@ const UpdateClaimToAccepted = z
     orderDate: IsoDateSchema,
     /** REQUIRED — needed by the CHECK constraint at DB level. */
     amountApproved: UpdateClaimAmountSchema,
+    /**
+     * OPTIONAL — the verifier's justification. Persisted to
+     * `Claim.decisionComment`, NEVER to `Claim.comment` (the carrier's note).
+     */
     comment: emptyStringToUndefined(z.string().max(4_000).optional()),
     ...UpdateClaimCorrectionFields,
   })
@@ -1217,7 +1238,10 @@ const UpdateClaimToAccepted = z
 const UpdateClaimToRejected = z
   .object({
     targetStatus: z.literal('ODRZUCONO'),
-    /** REQUIRED — rejection reason. */
+    /**
+     * REQUIRED — rejection reason. Persisted to `Claim.decisionComment`,
+     * NEVER to `Claim.comment` (the carrier's note).
+     */
     comment: UpdateClaimCommentSchema,
   })
   .strict();
@@ -1270,6 +1294,12 @@ const UpdateClaimReklamacjaRejected = z
 /**
  * PATCH /claims/:nrZgl — discriminated by `targetStatus`. The synthetic
  * `REKLAMACJA_ZAAKCEPTOWANO` / `REKLAMACJA_ODRZUCONO` literals are wire-only.
+ *
+ * Wire field `comment` → column (UWAGI #4, 2026-10-22). Every branch keeps the
+ * body field name `comment`; the service maps it per branch:
+ *   - `ZAAKCEPTOWANO` / `ODRZUCONO`         → `Claim.decisionComment`
+ *   - `REKLAMACJA_ZAAKCEPTOWANO` / `_ODRZUCONO` → `Claim.reklamacjaResponse`
+ * No staff PATCH ever writes `Claim.comment` (the carrier's submit note).
  *
  * REWORK 2026-07-31 — they no longer translate to a FIXED `ZAAKCEPTOWANO` /
  * `ODRZUCONO`. Both outcomes roll `status` back to `statusBeforeReklamacja`

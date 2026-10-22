@@ -971,12 +971,22 @@ model Claim {
   verifiedById String?   @db.Uuid
   verifiedBy   User?     @relation("ClaimVerifiedBy", fields: [verifiedById], references: [id])
 
-  comment     String?
+  /// The carrier's note, written at submit. Never touched by staff (since
+  /// 2026-10-22, migration claim_decision_comment). Caveat: rows decided
+  /// ZAAKCEPTOWANO before that migration may still hold the verifier's
+  /// acceptance comment here (the old decision overwrote it, and carrier vs
+  /// verifier text cannot be told apart, so those rows were not backfilled).
+  comment         String?
+  /// The verifier's justification of the wniosek decision: optional for
+  /// ZAAKCEPTOWANO, required (non-blank) for ODRZUCONO. Enforced in app code,
+  /// deliberately no CHECK. Same naming as VehiclePlannerTransfer.decisionComment.
+  /// Reklamacja answers do NOT go here; they live in `reklamacjaResponse`.
+  decisionComment String?
   // NrZlecenia — set only on transition to ZAAKCEPTOWANO; carrier-side
   // submit creates the row with NULL. Strictness recovered via
   // `claim_accepted_payment_complete` CHECK constraint.
-  orderNumber String?
-  orderDate   DateTime? @db.Date
+  orderNumber     String?
+  orderDate       DateTime? @db.Date
 
   // Maksim authorization gate. When a verifier saves a verification and the
   // compensation exceeds the threshold on a verified claim, the accept/reject

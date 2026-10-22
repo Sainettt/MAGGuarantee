@@ -158,6 +158,7 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     verifiedById: 'u-verifier',
     verifiedBy: { id: 'u-verifier', login: 'ver', name: 'Verifier' },
     comment: null,
+    decisionComment: null,
     orderNumber: null,
     orderDate: null,
     amountApproved: null,
@@ -241,6 +242,9 @@ function makeClaimsRepo(seed: ClaimRow[] = []): ClaimsRepoFake {
             ? { verifiedById: data.verifiedById }
             : {}),
           ...(data.comment !== undefined ? { comment: data.comment } : {}),
+          ...(data.decisionComment !== undefined
+            ? { decisionComment: data.decisionComment }
+            : {}),
           ...(data.orderNumber !== undefined
             ? { orderNumber: data.orderNumber }
             : {}),
@@ -638,7 +642,11 @@ describe('ClaimsService.update — Phase 4 sub-slice 4.1', () => {
     const out = await svc.update(makeAuth('pracownik'), seeded.nrZgl, dto);
 
     expect(out.status).toBe('ODRZUCONO');
-    expect(out.comment).toBe('Brak podstaw — niepoprawne dane.');
+    // UWAGI #4 — the reason is the verifier's `decisionComment`; the
+    // carrier's `comment` (null in this fixture) is not written.
+    expect(out.decisionComment).toBe('Brak podstaw — niepoprawne dane.');
+    expect(out.comment).toBeNull();
+    expect(repoFake.updateWithinCalls[0]!.data).not.toHaveProperty('comment');
     // KmCalcService MUST NOT have been touched — no correction fields.
     expect(km.calls).toHaveLength(0);
 
@@ -2430,5 +2438,186 @@ describe('ClaimsService.update — accept of a mixed period (board gates)', () =
     expect(km.calls).toHaveLength(0);
     expect(board.boardSpy).not.toHaveBeenCalled();
     expect(repoFake.updateWithinCalls[0]!.data.status).toBe('ZAAKCEPTOWANO');
+  });
+});
+
+// ─── UWAGI #4 + #2 (2026-10-22) ──────────────────────────────
+//
+// #4 — the verifier's decision text lands in `decisionComment`. `comment` is the
+// carrier's submit note: no staff PATCH writes it, and the decision mails never
+// pass it off as MAGTRANS's text (the internal mail shows it as its own block).
+// #2 — the internal decision mail deeplinks `/employee/claims?nrZgl=…`, the only
+// employee claim page (`/employee/claims/{nrZgl}` does not exist).
+
+describe('ClaimsService.update — decision text vs carrier note (UWAGI #4) + deeplink (UWAGI #2)', () => {
+  const CARRIER_NOTE = 'Kierowca czekał 3 dni na załadunek.';
+  const REASON = 'Brak podstaw do dopłaty.';
+  const ENCODED_NR = 'GWA%2F001%2F04%2F26';
+
+  beforeAll(() => {
+    jest.useFakeTimers().setSystemTime(NOW);
+  });
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
+  /** Notifying prisma whose staff (admin + pracownik) query yields one pracownik. */
+  function makePrismaWithStaff(): PrismaService {
+    const prisma = makeNotifyingPrismaService();
+    (prisma.client.user.findMany as unknown as jest.Mock).mockImplementation(
+      async (args: { where?: { role?: unknown } }) =>
+        args.where?.role ? [{ email: 'pracownik@magtrans.eu' }] : [],
+    );
+    return prisma;
+  }
+
+  /** The decision mail is a fire-and-forget continuation with several awaits. */
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 200; i += 1) await Promise.resolve();
+  }
+
+  async function decide(
+    dto: UpdateClaimDto,
+    seed: Partial<ClaimRow> = {},
+  ): Promise<{
+    out: Awaited<ReturnType<ClaimsService['update']>>;
+    patch: UpdateClaimData;
+    mail: ReturnType<typeof makeMailServiceSpy>;
+  }> {
+    const seeded = makeClaim({ comment: CARRIER_NOTE, ...seed });
+    const repoFake = makeClaimsRepo([seeded]);
+    const mail = makeMailServiceSpy();
+    const svc = makeServiceWithMail(
+      repoFake,
+      makeKmCalcService().svc,
+      makeAuditWriter().writer,
+      makePrismaWithStaff(),
+      mail.service,
+    );
+    const out = await svc.update(makeAuth('pracownik'), seeded.nrZgl, dto);
+    await settle();
+    return { out, patch: repoFake.updateWithinCalls[0]!.data, mail };
+  }
+
+  const ACCEPT_BASE = {
+    targetStatus: 'ZAAKCEPTOWANO',
+    orderNumber: 'ZL-1',
+    orderDate: '2026-04-30',
+    amountApproved: 1_400,
+  } as const;
+
+  /** `[to, props]` of the first call of a mail spy. */
+  function firstCall(spy: jest.Mock): [string, Record<string, unknown>] {
+    return spy.mock.calls[0] as unknown as [string, Record<string, unknown>];
+  }
+
+  it('D1. ODRZUCONO writes the reason to decisionComment and leaves the carrier comment untouched', async () => {
+    const { out, patch } = await decide({ targetStatus: 'ODRZUCONO', comment: REASON });
+
+    expect(patch.decisionComment).toBe(REASON);
+    expect(patch).not.toHaveProperty('comment');
+    expect(out.decisionComment).toBe(REASON);
+    expect(out.comment).toBe(CARRIER_NOTE);
+  });
+
+  it('D2. ZAAKCEPTOWANO with a comment writes decisionComment and leaves the carrier comment untouched', async () => {
+    const { out, patch } = await decide({
+      ...ACCEPT_BASE,
+      comment: 'Dopłata zgodna z umową.',
+    });
+
+    expect(out.status).toBe('ZAAKCEPTOWANO');
+    expect(patch.decisionComment).toBe('Dopłata zgodna z umową.');
+    expect(patch).not.toHaveProperty('comment');
+    expect(out.decisionComment).toBe('Dopłata zgodna z umową.');
+    expect(out.comment).toBe(CARRIER_NOTE);
+  });
+
+  it('D3. ZAAKCEPTOWANO without a comment writes neither column', async () => {
+    const { out, patch } = await decide({ ...ACCEPT_BASE });
+
+    expect(patch).not.toHaveProperty('decisionComment');
+    expect(patch).not.toHaveProperty('comment');
+    expect(out.decisionComment).toBeNull();
+    expect(out.comment).toBe(CARRIER_NOTE);
+  });
+
+  it('D4. a reklamacja decision writes reklamacjaResponse only (neither comment nor decisionComment)', async () => {
+    const { out, patch } = await decide(
+      { targetStatus: 'REKLAMACJA_ODRZUCONO', comment: 'Bez podstaw.' },
+      {
+        status: 'REKLAMACJA',
+        statusBeforeReklamacja: 'ODRZUCONO',
+        decisionComment: 'Pierwotny powód odrzucenia.',
+        decidedById: 'u-original-decider',
+        reklamacjaSubmitted: true,
+        reklamacjaText: 'Za mało wypłacono.',
+        reklamacjaAmount: 250,
+        reklamacjaSubmittedAt: new Date('2026-05-14T08:00:00.000Z'),
+      },
+    );
+
+    expect(patch.reklamacjaResponse).toBe('Bez podstaw.');
+    expect(patch).not.toHaveProperty('comment');
+    expect(patch).not.toHaveProperty('decisionComment');
+    // The wniosek's own decision text survives the reklamacja decision.
+    expect(out.decisionComment).toBe('Pierwotny powód odrzucenia.');
+    expect(out.comment).toBe(CARRIER_NOTE);
+  });
+
+  it('D5. the carrier decision mail carries decisionComment and NOT the carrier note', async () => {
+    const { mail } = await decide({ targetStatus: 'ODRZUCONO', comment: REASON });
+
+    expect(mail.carrierDecision).toHaveBeenCalledTimes(1);
+    const [to, props] = firstCall(mail.carrierDecision);
+    expect(to).toBe('carrier@example.com');
+    expect(props.decisionLabel).toBe('ODRZUCONO');
+    expect(props.decisionComment).toBe(REASON);
+    expect(props).not.toHaveProperty('comment');
+    expect(props).not.toHaveProperty('carrierComment');
+    expect(JSON.stringify(props)).not.toContain(CARRIER_NOTE);
+    // The carrier link is untouched: the carrier detail page exists.
+    expect(props.deeplink).toBe(`http://localhost:3000/carrier/claims/${ENCODED_NR}`);
+  });
+
+  it('D6. ZAAKCEPTOWANO without a comment: the carrier mail does NOT fall back to the carrier note', async () => {
+    const { mail } = await decide({ ...ACCEPT_BASE });
+
+    expect(mail.carrierDecision).toHaveBeenCalledTimes(1);
+    const [, props] = firstCall(mail.carrierDecision);
+    expect(props.decisionComment).toBeUndefined();
+    expect(JSON.stringify(props)).not.toContain(CARRIER_NOTE);
+  });
+
+  it('D7. the internal decision mail carries both texts, each in its own prop', async () => {
+    const { mail } = await decide({ targetStatus: 'ODRZUCONO', comment: REASON });
+
+    expect(mail.internalDecision).toHaveBeenCalledTimes(1);
+    const [to, props] = firstCall(mail.internalDecision);
+    expect(to).toBe('pracownik@magtrans.eu');
+    expect(props.decisionComment).toBe(REASON);
+    expect(props.carrierComment).toBe(CARRIER_NOTE);
+    expect(props).not.toHaveProperty('comment');
+  });
+
+  it('D8. no carrier note: the internal mail gets no carrierComment', async () => {
+    const { mail } = await decide(
+      { targetStatus: 'ODRZUCONO', comment: REASON },
+      { comment: null },
+    );
+
+    const [, props] = firstCall(mail.internalDecision);
+    expect(props.decisionComment).toBe(REASON);
+    expect(props.carrierComment).toBeUndefined();
+  });
+
+  it('D9. the internal decision deeplink is /employee/claims?nrZgl=<encoded> (UWAGI #2)', async () => {
+    const { mail } = await decide({ ...ACCEPT_BASE });
+
+    const [, props] = firstCall(mail.internalDecision);
+    expect(props.deeplink).toBe(
+      `http://localhost:3000/employee/claims?nrZgl=${ENCODED_NR}`,
+    );
+    expect(props.deeplink).not.toContain('/employee/claims/');
   });
 });

@@ -81,6 +81,7 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     verifiedById: 'u-verifier',
     verifiedBy: { id: 'u-verifier', login: 'ver', name: 'Verifier' },
     comment: null,
+    decisionComment: null,
     orderNumber: null,
     orderDate: null,
     amountApproved: null,

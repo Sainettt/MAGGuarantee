@@ -46,6 +46,7 @@ function makeRawRow(
     verifiedById: null,
     verifiedBy: null,
     comment: null,
+    decisionComment: null,
     orderNumber: null,
     orderDate: null,
     amountApproved: null,

@@ -2,29 +2,39 @@
  * Verification outcome email to INTERNAL staff (planiści, opiekun, lider,
  * wnioski@). GAS analog: `sendInternalDecisionEmail`. Same data as the carrier
  * email plus the carrier name, since internal recipients handle many carriers.
+ *
+ * Free text (UWAGI #4, 2026-10-22) — two separately labelled blocks, each
+ * rendered only when non-empty:
+ *  - MAGTRANS's justification (`Claim.decisionComment`) → «Uzasadnienie
+ *    decyzji» (ZAAKCEPTOWANO) / «Powód odrzucenia» (ODRZUCONO);
+ *  - the carrier's submit note (`Claim.comment`) → «Komentarz przewoźnika».
  */
 import * as React from 'react';
 
-import { criticalColor, eyebrowStyle, paragraphStyle, type Tone } from './_theme';
+import { criticalColor, type Tone } from './_theme';
 import {
-  AmountPanel,
-  Block,
-  DataSection,
-  FieldRow,
-  MailLayout,
-} from './MailLayout';
+  CARRIER_COMMENT_HEADING,
+  DECISION_COMMENT_HEADING,
+  LabelledTextBlock,
+  type WniosekDecisionLabel,
+} from './_decision-copy';
+import { AmountPanel, DataSection, FieldRow, MailLayout } from './MailLayout';
 
 export interface InternalDecisionProps {
   nrZgl: string;
-  decisionLabel: string;
+  /** The decision, also the badge label (`ZAAKCEPTOWANO` / `ODRZUCONO`). */
+  decisionLabel: WniosekDecisionLabel;
   tone: Tone;
   carrierName: string;
   vehiclePlate: string;
   periodFrom: string;
   periodTo: string;
   amount?: string;
-  comment?: string;
-  /** Employee-side claim detail URL (already includes APP_URL). */
+  /** MAGTRANS's justification (`Claim.decisionComment`). */
+  decisionComment?: string;
+  /** The carrier's note written at submit (`Claim.comment`). */
+  carrierComment?: string;
+  /** Employee-side claim deeplink (`/employee/claims?nrZgl=…`, includes APP_URL). */
   deeplink: string;
 }
 
@@ -37,7 +47,8 @@ export function InternalDecisionEmail({
   periodFrom,
   periodTo,
   amount,
-  comment,
+  decisionComment,
+  carrierComment,
   deeplink,
 }: InternalDecisionProps): React.ReactElement {
   return (
@@ -59,11 +70,15 @@ export function InternalDecisionEmail({
         <AmountPanel label="Kwota" value={`${amount} EUR`} valueColor={criticalColor(tone)} />
       ) : null}
 
-      {comment ? (
-        <Block>
-          <p style={{ ...eyebrowStyle, margin: '18px 0 8px 0' }}>Komentarz</p>
-          <p style={{ ...paragraphStyle, whiteSpace: 'pre-line' }}>{comment}</p>
-        </Block>
+      {decisionComment ? (
+        <LabelledTextBlock
+          heading={DECISION_COMMENT_HEADING[decisionLabel]}
+          text={decisionComment}
+        />
+      ) : null}
+
+      {carrierComment ? (
+        <LabelledTextBlock heading={CARRIER_COMMENT_HEADING} text={carrierComment} />
       ) : null}
     </MailLayout>
   );

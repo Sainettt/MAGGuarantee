@@ -120,6 +120,7 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     verifiedById: 'u-verifier',
     verifiedBy: null,
     comment: null,
+    decisionComment: null,
     orderNumber: null,
     orderDate: null,
     amountApproved: null,

@@ -17,6 +17,9 @@
 // Body order (locked by §6.5.2, top→bottom):
 //   ① DANE WNIOSKU / DANE PO WERYFIKACJI — 6 fact pairs (§6.5.3)
 //   ② DOPŁATA — locked/computed, live recalc INDEPENDENT of decyzja (§6.5.4)
+//   ②a NOTATKI — who wrote what (UWAGI #4): «Komentarz przewoźnika» (the
+//      carrier's submit note) + MAGTRANS's «Uzasadnienie decyzji» / «Powód
+//      odrzucenia», each tagged with its author. Omitted when both are empty.
 //   ②b MAKSIM-GATE — automatic over-threshold authorization block (§6.5.7),
 //      rendered only while the claim sits in `OCZEKUJE_NA_AUTORYZACJE`.
 //   ③ DECYZJA — targetStatus select + conditional fields (§6.5.5), at bottom.
@@ -43,6 +46,7 @@ import {
   BadgeCheck,
   CalendarX,
   Download,
+  Eye,
   Gavel,
   Loader2,
   Lock,
@@ -128,6 +132,7 @@ import {
   visibleMissingDates,
 } from '@/lib/claims/breakdownGuarantee';
 import { boardSumHintKm } from '@/lib/claims/boardSumHint';
+import { carrierNote, decisionNote } from '@/lib/claims/claimNotes';
 import { verifierMovedAmount } from '@/lib/claims/money';
 import {
   selectAmountSource,
@@ -161,6 +166,11 @@ interface FormValues {
   orderNumber: string;
   orderDate: string;
   amountApproved: number | undefined;
+  /**
+   * Wire field `comment`; the server maps it per branch (UWAGI #4, 2026-10-22):
+   * ZAAKCEPTOWANO / ODRZUCONO → `decisionComment`, REKLAMACJA_* →
+   * `reklamacjaResponse`. Never the carrier's own `claim.comment`.
+   */
   comment: string;
   /**
    * REKLAMACJA_ZAAKCEPTOWANO only — «Nr zlecenia» the uznana reklamacja is paid
@@ -1118,6 +1128,13 @@ function ModalBody({
           showRecalcLimits={perms.showRecalcLimitsButton}
           tUnified={tUnified}
         />
+
+        {/* ②a Notes — the carrier's submit note and MAGTRANS's decision
+            justification, each tagged with its author (UWAGI #4). Same in view
+            and edit; placed before the Maksim gate so that gate stays directly
+            above Decyzja, and before the reklamacja so the record reads in
+            order: note → decision → dispute. */}
+        <ClaimNotesBlock claim={claim} />
 
         {/* ②b Maksim authorization gate — POST-verification hard block. The
             banner (armed) or the confirmed affordance (cleared) sits directly
@@ -2458,6 +2475,85 @@ function MaksimGateBlock({
   );
 }
 
+// ── ②a Notes — who wrote what (UWAGI #4, 2026-10-22) ────────────────
+//
+// The wniosek's two free-text fields, each tagged with its AUTHOR so the
+// verifier can never mistake one for the other:
+//   «Komentarz przewoźnika»  — `claim.comment`, the carrier's submit note.
+//   «Uzasadnienie decyzji» / «Powód odrzucenia» — `claim.decisionComment`,
+//     MAGTRANS's justification; label by verdict (the pre-reklamacja verdict
+//     while the claim sits in REKLAMACJA, see `lib/claims/claimNotes.ts`).
+// The reklamacja answer (`reklamacjaResponse`) is NOT here — <ReklamacjaBlock>.
+//
+// Same flat chrome and the same muted quoted surface (`bg-input/40`) as the
+// reklamacja treść / odpowiedź rows, so free text reads as quoted reference,
+// never as an input. Rendered in BOTH modes: a decision note only exists on a
+// decided claim, and the only decided claim that can be in `edit` is one in
+// REKLAMACJA — exactly where the verifier deciding the dispute needs the
+// original justification in view (and the morph must not drop content).
+
+function ClaimNotesBlock({ claim }: { claim: ClaimDto }) {
+  const t = useTranslations('employee.claims.modal.notes');
+
+  const carrier = carrierNote(claim);
+  const decision = decisionNote(claim);
+  if (carrier == null && decision == null) return null;
+
+  return (
+    <section className="border-t border-border pt-5">
+      <dl className="grid grid-cols-1 gap-4 text-sm">
+        {carrier != null && (
+          <NoteRow
+            label={t('carrierComment')}
+            author={t('carrierAuthor')}
+            icon={<Truck size={12} aria-hidden className="shrink-0" />}
+            text={carrier}
+          />
+        )}
+        {decision != null && (
+          <NoteRow
+            label={t(decision.labelKey)}
+            author={t('magtransAuthor')}
+            icon={<Gavel size={12} aria-hidden className="shrink-0" />}
+            text={decision.text}
+          />
+        )}
+      </dl>
+    </section>
+  );
+}
+
+/** One quoted free-text row: micro-label + author tag, then the text. */
+function NoteRow({
+  label,
+  author,
+  icon,
+  text,
+}: {
+  label: string;
+  /** Who wrote it — «przewoźnik» / «MAGTRANS». */
+  author: string;
+  icon: React.ReactNode;
+  text: string;
+}) {
+  return (
+    <div>
+      <dt className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
+        <span className="text-[11px] uppercase tracking-wider text-text-sub">
+          {label}
+        </span>
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-text-sub">
+          {icon}
+          {author}
+        </span>
+      </dt>
+      <dd className="mt-1 whitespace-pre-wrap rounded-md bg-input/40 p-3 text-text">
+        {text}
+      </dd>
+    </div>
+  );
+}
+
 // ── ②c Reklamacja block — read-only submission record (§6.5.15 A) ───
 //
 // Rendered whenever `claim.reklamacjaSubmitted` — independent of status, of mode
@@ -2791,8 +2887,11 @@ function DecisionFields({
               {tEdit('amountApprovedAuto')}
             </FormDescription>
           </FormField>
+          {/* MAGTRANS's justification → `decisionComment` (the wire field is
+              still `comment`). Never the carrier's note: that is shown,
+              read-only and author-tagged, in <ClaimNotesBlock> above. */}
           <FormField
-            label={tEdit('comment')}
+            label={tEdit('decisionCommentAccepted')}
             error={errMsg('comment')}
             htmlFor="claim-comment-accept"
             className="col-span-2"
@@ -2800,8 +2899,16 @@ function DecisionFields({
             <Textarea
               id="claim-comment-accept"
               rows={3}
+              aria-describedby="claim-comment-accept-hint"
               {...form.register('comment')}
             />
+            <FormDescription
+              id="claim-comment-accept-hint"
+              className="flex items-center gap-1"
+            >
+              <Eye aria-hidden className="size-3 shrink-0" />
+              {tEdit('decisionCommentVisibleHint')}
+            </FormDescription>
           </FormField>
         </FormGrid>
       )}
@@ -2816,8 +2923,16 @@ function DecisionFields({
           <Textarea
             id="claim-comment-reject"
             rows={5}
+            aria-describedby="claim-comment-reject-hint"
             {...form.register('comment')}
           />
+          <FormDescription
+            id="claim-comment-reject-hint"
+            className="flex items-center gap-1"
+          >
+            <Eye aria-hidden className="size-3 shrink-0" />
+            {tEdit('decisionCommentVisibleHint')}
+          </FormDescription>
         </FormField>
       )}
 
@@ -3182,10 +3297,14 @@ function getDefaults(claim: ClaimDto): FormValues {
     // «kwota Maksima» override). The ZAAKCEPTOWANO effect keeps it in sync with
     // the live dopłata; `paymentEur` is the prefill / fallback.
     amountApproved: claim.amountApproved ?? claim.paymentEur ?? undefined,
-    // On a REKLAMACJA the `comment` field feeds `reklamacjaResponse`, NOT the
-    // wniosek's own comment — prefilling it with the old decision comment would
-    // silently republish that text to the carrier as the reklamacja answer.
-    comment: claim.status === 'REKLAMACJA' ? '' : (claim.comment ?? ''),
+    // The decision textarea writes MAGTRANS's justification (`decisionComment`),
+    // so it is seeded from THAT — never from `claim.comment`, the carrier's own
+    // note (UWAGI #4: prefilling it re-sent the carrier's words as MAGTRANS's
+    // decision). On a REKLAMACJA the field feeds `reklamacjaResponse` instead —
+    // prefilling it with the old decision text would silently republish it to
+    // the carrier as the reklamacja answer, so it starts empty there.
+    comment:
+      claim.status === 'REKLAMACJA' ? '' : (claim.decisionComment ?? ''),
     // Seeded ONCE (mount / «Anuluj» re-baseline) from the wniosek's own order
     // number, per §6.5.15 B: a convenience prefill, never a lock, and
     // legitimately empty when the wniosek was rejected.

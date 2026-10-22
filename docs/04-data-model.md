@@ -313,6 +313,7 @@
 | `status` | `NA_WERYFIKACJI` / `ZAAKCEPTOWANO` / `ODRZUCONO` / `REKLAMACJA` / `OCZEKUJE_NA_AUTORYZACJE` |
 | `decidedById` | FK → User (кто верифицировал) |
 | `comment`, `orderNumber`, `orderDate` | мета |
+| `decisionComment` | обоснование решения верификатора по wnioskowi: обязательно при `ODRZUCONO`, опционально при `ZAAKCEPTOWANO` (только api, без CHECK; миграция `20261022120000_claim_decision_comment`). `comment` с этого момента — только заметка перевозчика с submit, персонал его не пишет; у строк, решённых `ZAAKCEPTOWANO` до миграции, в `comment` может остаться текст верификатора. Ответы по рекламации — в `reklamacjaResponse` |
 | **Авторизация — автоматический Maksim-gate** (для крупных сумм; порог `getAuthThreshold(drivenDays)` — см. [19-known-quirks.md](19-known-quirks.md#getAuthThreshold)): | |
 | `maksimGateRequired`, `maksimGateNotifiedAt`, `maksimGateNotifiedAmount` | гейт armed при `paymentEur > próg` на zapisie weryfikacji → **авто-переход** в `OCZEKUJE_NA_AUTORYZACJE` + email Maksim'у (dedup по сумме) |
 | `maksimGateClearedAt`, `maksimGateClearedById` | снятие гейта загрузкой скриншота подтверждения (`ClaimAttachment` категории `AUTORYZACJA_MAKSIMA`) — разблокирует решение |

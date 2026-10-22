@@ -1369,6 +1369,8 @@
           "doplata": "Dopłata gwarancyjna",
           "comment": "Komentarz",
           "commentRejected": "Powód odrzucenia",
+          "decisionCommentAccepted": "Uzasadnienie decyzji (opcjonalnie)",
+          "decisionCommentVisibleHint": "Widoczne dla przewoźnika",
           "reklamacjaOrderNumber": "Nr zlecenia",
           "reklamacjaOrderNumberHint": "Może to być poprawiony numer poprzedniego zlecenia albo całkiem nowe zlecenie — wpisz numer, na który zostanie wypłacona kwota reklamacji.",
           "reklamacjaPayoutAmount": "Kwota do wypłaty (z reklamacji)",
@@ -1389,6 +1391,13 @@
           "verifyDirtyHint": "Masz niezapisane korekty — zapisz weryfikację",
           "boardSumHint": "Wg tablicy przebiegów: {km} km",
           "boardSumApply": "Zastosuj"
+        },
+        "notes": {
+          "carrierComment": "Komentarz przewoźnika",
+          "carrierAuthor": "przewoźnik",
+          "decisionCommentAccepted": "Uzasadnienie decyzji",
+          "decisionCommentRejected": "Powód odrzucenia",
+          "magtransAuthor": "MAGTRANS"
         },
         "locked": {
           "factsPendingAuthorization": "Dane weryfikacji są zablokowane — wniosek czeka na autoryzację Maksima. Zmiany może wprowadzić tylko administrator.",
@@ -1814,7 +1823,9 @@
         "totalPaid": "Wypłacono łącznie",
         "orderNumber": "Numer zlecenia",
         "orderDate": "Data zlecenia",
-        "comment": "Komentarz",
+        "comment": "Twój komentarz",
+        "decisionCommentAccepted": "Uzasadnienie MAGTRANS",
+        "decisionCommentRejected": "Powód odrzucenia",
         "moneyLabelApproved": "kwota zatwierdzona",
         "moneyLabelCalc": "kalkulacja",
         "moneyLabelTotalPaid": "wypłacono łącznie",

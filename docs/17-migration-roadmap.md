@@ -257,7 +257,7 @@
 - [x] **4.2 Authorization flow** (≈2 дня) — **DONE** (2026-05-25)
   - [x] api: `POST /api/v1/claims/:nrZgl/request-authorization` — admin/pracownik, генерирует `authorizationToken` (UUID v4), переводит claim в `OCZEKUJE_NA_AUTORYZACJE`, шлёт email Maksim-у через Mailhog. Audit через `@Audit({action: 'claim.requestAuthorization'})` + ambient tx.
   - [x] api: `RequestAuthorizationSchema` (Zod) в `packages/shared/src/schemas/claims.ts`. Body — `{kwotaMaksima, comment?}`.
-  - [x] api: `MailService.sendAuthorizationRequest` + React Email template `authorization-request.tsx` с MAGTRANS RED branding, deeplink `{APP_URL}/employee/claims/{nrZgl}`, plain-text fallback.
+  - [x] api: `MailService.sendAuthorizationRequest` + React Email template `authorization-request.tsx` с MAGTRANS RED branding, deeplink `{APP_URL}/employee/claims?nrZgl={nrZgl}` (страницы `/employee/claims/{nrZgl}` нет; письма линковали на неё до 2026-10-22, исправлено — UWAGI #2), plain-text fallback.
   - [x] api: получатель kwota-Maksima-авторизации — env-var `MAKSIM_EMAIL` (validated в `apps/api/src/config/env.schema.ts`, `.default('maksim.siankevich@magtrans.eu')` = прод-адрес, override на dev/staging, читается через `ConfigService`). Опция вынести в AppConfig в Phase 9 остаётся. `APP_URL` env-var добавлен.
   - [x] api: `PATCH /claims/:nrZgl` принимает `amountMaximum` (= kwotaMaksima) внутри `UpdateClaimToAccepted` ветки — kwotaMaksima меняется **только при акцепте**, без отдельного override endpoint-а (решение от 2026-05-25: «потолок» — атрибут одобрения, не отдельная сущность).
   - [x] web: TanStack `useRequestAuthorization(nrZgl)` хук. UI Autoryzacja-таба переписан под Phase 4.2 (RHF + `zodResolver(RequestAuthorizationSchema)`, кнопка «Wymaga autoryzacji» с email-toast, при статусе уже `OCZEKUJE_NA_AUTORYZACJE` — read-only summary с info-banner).
@@ -1018,7 +1018,7 @@ describe('calcKmGwarantPerMonth', () => {
 - **Гейты/коды**: machine-codes `REKLAMACJA_*` (409 ALREADY_SUBMITTED; 422 CLAIM_NOT_DECIDED / WINDOW_EXPIRED / NO_DELTA / AMOUNT_EXCEEDS_CAP / NOT_PENDING); ветки рекламаций исключены из `CLAIM_NOT_VERIFIED`, Maksim-гейта и compensation-due-гейта; km-recalc на них заморожен.
 - **Письма (3)**: `reklamacja-internal-submitted` (все active admin+pracownik), `reklamacja-carrier-submitted` (подтверждение перевозчику), `reklamacja-carrier-decision`; threadKey `wniosek-{nrZgl}`. Weekly-report: новая строка «Uznane reklamacje» (по `reklamacjaDecidedAt`) + исключение возвратов статуса из decided-in-week.
 - **Web**: `ReklamacjaSheet` на shared-хелпере (3 dead-end-состояния), `<ReklamacjaOutcome>` на carrier-детали, `<ReklamacjaResolutionChip>` (carrier+employee), decision-UX staff-модалки — nr zlecenia (prefill из `orderNumber`) вместо ввода суммы.
-- **Follow-up**: старые письма `internal-decision`/`maksim-confirmation-request` линкуют на несуществующий роут `/employee/claims/{nrZgl}` (рабочая форма — `?nrZgl=`); вне scope этой доработки.
+- ~~**Follow-up**: старые письма `internal-decision`/`maksim-confirmation-request` линкуют на несуществующий роут `/employee/claims/{nrZgl}` (рабочая форма — `?nrZgl=`); вне scope этой доработки.~~ **Сделано 2026-10-22 (UWAGI #2):** `internal-decision`, `maksim-confirmation-request` и staff-копия `carrier-submitted` линкуют `{APP_URL}/employee/claims?nrZgl={encodeURIComponent(nrZgl)}` через общий helper `employeeClaimDeeplink` в `claims.service.ts` (им же пользуется `reklamacja-internal-submitted`). Страницы-редиректа нет.
 
 ---
 

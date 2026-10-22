@@ -326,6 +326,33 @@ History before 2026-09-28 is approximate: the migration assumed the planista at 
 
 ---
 
+## 16. <a id="delegation-dual-timestamps"></a>Dual timestamp convention on `Delegation` (UWAGI #1, 2026-10-22)
+
+Two different conventions live on the same row:
+
+| Field | Convention | Why |
+|---|---|---|
+| `departureAt` | **TRUE UTC instant** | The carrier form sends `new Date(localWallClock).toISOString()`; the panel converts it back to browser-local for display. |
+| `actualDepartureAt`, `actualReturnAt` | **Warsaw wall-clock LABELLED UTC** | The weryfikator `/in-transit` / `/returned` dialogs append `:00Z` to the typed wall-clock (`datetimeLocalToApiIso`), so the raw `T`-part IS the wall-clock. Originally the claim's `timeFrom` / `timeTo` were derived from it (docs/20 §0‴, cancelled by §0⁗); today the web reads it back as-is (`actualIsoToDatetimeLocal`, the ClaimModal «Dane weryfikatora» column via `hhMmFromIso`). A typed 14:20 is stored `…T14:20:00Z`, which as a real instant is 15:20 CET / 16:20 CEST. |
+
+The bug that surfaced this: the "not in the future" guards compared `actual*` with the real `Date.now()`, so any wall-clock in the last 1 h (CET) / 2 h (CEST) was rejected as `DEPARTURE_DATE_FUTURE` / `RETURN_DATE_FUTURE`. The `/in-transit` lower bound truncated the true-UTC `departureAt` to its UTC day, which for a departure reported at 00:00–00:59 CET / 00:00–01:59 CEST is the previous day, so the bound was a day too lenient.
+
+Helpers (`packages/shared/src/domain/business-date.ts`):
+
+- `businessWallClockUtc(now?)` — Warsaw wall-clock "now" in the same labelled-UTC shape. The operand for every "not in the future" check on `actual*`.
+- `startOfBusinessDayUtc(d)` — the Warsaw calendar date of a TRUE-UTC instant at `T00:00Z`. In labelled-UTC terms that is wall-clock midnight of that day, so it is the bridge from `departureAt` to the `actual*` convention (the `/in-transit` lower bound).
+
+Source of truth: `apps/api/src/modules/delegations/delegations.service.ts` (`_assertActualDepartureValid`, `_assertActualReturnValid`), the header of `apps/web/lib/format/datetimeLocal.ts`, `packages/shared/src/domain/business-date.ts`.
+
+Known remaining lenient spots (tracked separately, NOT fixed by UWAGI #1):
+
+- **`markReturned` fallback floor.** When `actualDepartureAt` is null, the return floor is the true-UTC `departureAt`, so the check is lenient by the UTC offset (1–2 h). Defensive path only: `markInTransit` always sets `actualDepartureAt`.
+- **`vehicle-status.ts` `daysSinceReturn`.** The module documents `lastReturnAt` as the date-only UTC-midnight convention, but it is an `actualReturnAt` (wall-clock labelled UTC, with a time-of-day). `calendarDaysBetween` reduces it as a true instant, so a wall-clock return from 23:00 (CET) / 22:00 (CEST) on counts as the next Warsaw day and `daysSinceReturn` comes out one lower.
+
+**What NOT to do:** never compare `actualDepartureAt` / `actualReturnAt` with `Date.now()` / a no-arg `new Date()`; use `businessWallClockUtc()`. Never compare them with true-UTC fields (`departureAt`, `createdAt`, `verifiedAt`, …) without converting first; for a day bound use `startOfBusinessDayUtc`, never `getUTC*` / UTC-day truncation. Do not call `toISOString()` on the typed wall-clock in the web dialogs (it tz-shifts the hour). Do not "fix" this by changing the storage format in passing: `actualIsoToDatetimeLocal`, the ClaimModal verifier column, and existing rows all depend on it, so a switch to true UTC needs its own product and data decision.
+
+---
+
 ## How to use this document
 
 Read the relevant section before:
@@ -339,7 +366,8 @@ Read the relevant section before:
 | Maksim authorization gate (automatic) | #5, #6 |
 | `calcKmGwarantPerMonth` port | #7, #8 |
 | Auth + login + session | #10, #12 |
-| Delegations module | #11, #13, #15 |
+| Delegations module | #11, #13, #15, #16 |
+| Delegation timestamps / "now" / day bounds | #16 |
 | Planista scope / vehicle transfers | #15 |
 | User edit / admin → users | #14, #12 |
 

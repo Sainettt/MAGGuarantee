@@ -516,8 +516,8 @@ decidedAt, createdAt } | null }], transfers: PlannerTransferDto[] }` — оба
 | GET `/delegations/:id` | (lookup) — incl. `weryfikator`; planista — только при снимке `plannerId = user.sub` |
 | POST `/delegations` | `addDelegacja` (carrier → `zgloszony`). Ставит снимок `Delegation.plannerId = Vehicle.plannerId` (docs/29) |
 | POST `/delegations/:id/ready` | **NEW** — `eksport \| admin`: `zgloszony→gotowy` (+ откат `gotowy→zgloszony` флагом `rollback: true`, пока не `w_trasie`). Audit `delegation.markReady`, при откате — `delegation.rollbackReady` (имя подменяется в сервисе через `AuditContext.setAction`); оба пишут `before = { status, spedOrderNumber, readyById, readyAt }`. |
-| POST `/delegations/:id/in-transit` | **NEW** — `weryfikator \| admin`: `gotowy→w_trasie`, body `{ actualDepartureAt }` (**ISO datetime**, required; границы `>= start-of-day(departureAt)`, `<= now`; 422 `DEPARTURE_DATE_FUTURE` — datetime-granулярный). weryfikator фиксирует точный момент выезда. Audit `delegation.markInTransit`. |
-| POST `/delegations/:id/returned` | **NEW** — `weryfikator \| admin`: `w_trasie→zjechal`, body `{ actualReturnAt }` (**ISO datetime**, required; 422 `RETURN_DATE_FUTURE` (`> now`), `RETURN_BEFORE_DEPARTURE` (`< actualDepartureAt`)). Txn: `vehicle.lastDroveAt = max(...)` + авто-пересчёт связанного wniosek (границы — §0″). Audit `delegation.markReturned`. |
+| POST `/delegations/:id/in-transit` | **NEW** — `weryfikator \| admin`: `gotowy→w_trasie`, body `{ actualDepartureAt }` (**ISO datetime**, required; границы `>= start-of-day(departureAt)` — варшавский день, `startOfBusinessDayUtc`, `<= now` — now = варшавский wall-clock (`businessWallClockUtc()`), т.к. `actual*` хранятся как wall-clock + `Z`, docs/19 #16; 422 `DEPARTURE_DATE_FUTURE` — datetime-granулярный). weryfikator фиксирует точный момент выезда. Audit `delegation.markInTransit`. |
+| POST `/delegations/:id/returned` | **NEW** — `weryfikator \| admin`: `w_trasie→zjechal`, body `{ actualReturnAt }` (**ISO datetime**, required; 422 `RETURN_DATE_FUTURE` (`> now`, now = варшавский wall-clock — `businessWallClockUtc()`, docs/19 #16), `RETURN_BEFORE_DEPARTURE` (`< actualDepartureAt`)). Txn: `vehicle.lastDroveAt = max(...)` + авто-пересчёт связанного wniosek (границы — §0″). Audit `delegation.markReturned`. |
 | POST `/delegations/:id/cancel` | carrier (свои `zgloszony`) **+ admin (любой активный)** → `anulowany`. |
 
 > **Планиста выезда — снимок (docs/29 R5/R6, 2026-09-28).** `DelegationDto`
@@ -804,7 +804,7 @@ type SubmitClaimRequest = {
   timeFrom: string;        // 'HH:mm' — обязательно (колонка NOT NULL)
   timeTo: string;          // 'HH:mm' — обязательно
   mileage: number;         // свободный; единственные санитары — >0 и km/дн cap
-  comment?: string;
+  comment?: string;        // заметка перевозчика → `Claim.comment`; staff её не перезаписывает (UWAGI #4)
   attachmentIds?: string[]; // pre-uploaded attachment UUIDs (max 20)
 };
 // Все пять заявленных значений дополнительно пишутся в orig*-снимки
@@ -880,6 +880,18 @@ type ClaimDto = {
   dateStart: string;
   dateEnd: string;
   // ...все поля Claim
+  // Два текста двух авторов (UWAGI #4, 2026-10-22):
+  //   comment         — заметка ПЕРЕВОЗЧИКА из submit. Staff её не пишет.
+  //                     ⚠️ У wniosków, принятых (ZAAKCEPTOWANO) до 2026-10-22,
+  //                     здесь может лежать текст weryfikatora: старое решение
+  //                     перезаписывало поле, а отличить автора нельзя, поэтому
+  //                     эти строки не бэкфиллились (ODRZUCONO — бэкфиллены).
+  //   decisionComment — обоснование решения WERYFIKATORA по wniosku:
+  //                     опционально при ZAAKCEPTOWANO, обязательно при
+  //                     ODRZUCONO. Пишется из wire-поля `comment` PATCH.
+  //                     Ответ на рекламацию сюда НЕ пишется (→ reklamacjaResponse).
+  comment: string | null;
+  decisionComment: string | null;
   // Hours-adjustment split: на storage-уровне колонка `hoursAdjusted` (boolean,
   // legacy) распилена на два Decimal(5,2)?: `origHoursAdjusted` — immutable
   // carrier-snapshot (set-once at submit, нельзя править после), и
@@ -1068,9 +1080,14 @@ type PreviewResponse = {
 // маппит его на `hoursAdjustedValue` в БД, `origHoursAdjusted` НЕ трогает.
 // `OCZEKUJE_NA_AUTORYZACJE` НЕ является PATCH-таргетом: в этот статус wniosek
 // попадает только автоматически на верификации (порог Maksima).
+// Wire-поле `comment` → колонка (UWAGI #4, 2026-10-22). Имя поля в body одно
+// и то же во всех ветках, service маппит его по ветке:
+//   ZAAKCEPTOWANO / ODRZUCONO                       → `decisionComment`
+//   REKLAMACJA_ZAAKCEPTOWANO / REKLAMACJA_ODRZUCONO → `reklamacjaResponse`
+// `Claim.comment` (заметка перевозчика из submit) не пишет НИ ОДНА ветка PATCH.
 type UpdateClaimRequest =
-  | { targetStatus: 'ZAAKCEPTOWANO';            /* + поля акцепта: orderNumber, orderDate, amountApproved, hoursAdjusted?, ... */ }
-  | { targetStatus: 'ODRZUCONO';                /* + поля отказа: comment, ... */ }
+  | { targetStatus: 'ZAAKCEPTOWANO';            /* + поля акцепта: orderNumber, orderDate, amountApproved, comment? (→ decisionComment), hoursAdjusted?, ... */ }
+  | { targetStatus: 'ODRZUCONO';                comment: string /* обязателен — причина отказа → decisionComment */ }
   // РЕКЛАМАЦИЯ УЗНАНА (REWORK 2026-07-31): `reklamacjaOrderNumber` (min 1, max 64)
   // ОБЯЗАТЕЛЕН — «Nr zlecenia», под которым платится dopłata (независим от
   // `orderNumber` самого wniosku; UI лишь префиллит из него). Суммы НЕ передаются:
@@ -1086,7 +1103,7 @@ type UpdateClaimRequest =
 
 **Динамический translate-back (REWORK 2026-07-31, вариант A).** Синтетические литералы больше **не** сворачиваются в фиксированные `ZAAKCEPTOWANO`/`ODRZUCONO`. При **обоих** исходах `status` **возвращается** в `statusBeforeReklamacja` (defensive fallback, если колонка почему-то NULL: `amountApproved != null ? 'ZAAKCEPTOWANO' : 'ODRZUCONO'`), а сам исход живёт **только** в новой колонке `reklamacjaResolution` (`UZNANA`/`ODRZUCONA`). Никогда не выводить исход рекламации из результирующего статуса. `assertLegalTransition(from, to)` из `claim-state-machine.ts` вызывается после резолва динамического таргета, до любых DB-операций (оба ребра `REKLAMACJA → ZAAKCEPTOWANO|ODRZUCONO` уже легальны — матрица не менялась).
 
-Что решение рекламации **никогда не трогает**: `amountApproved`, `orderNumber`, `orderDate`, `paymentEur`, `comment` и claim-level `decidedById` (последний остаётся автором ИСХОДНОГО решения по wniosku; автор решения по рекламации пишется в `reklamacjaDecidedById`). Это же снимает латентное нарушение DB CHECK `claim_accepted_payment_complete` на пути `ODRZUCONO → REKLAMACJA → уznana` (прежний код переводил статус в `ZAAKCEPTOWANO` без выплатных полей). `reklamacjaDecidedAt` и `statusChangedAt` пишутся из **одного** инстанса `Date` — на это равенство опирается недельный отчёт, отделяя откат статуса от свежего решения.
+Что решение рекламации **никогда не трогает**: `amountApproved`, `orderNumber`, `orderDate`, `paymentEur`, `comment` (заметка перевозчика), `decisionComment` (обоснование решения по wniosku) и claim-level `decidedById` (последний остаётся автором ИСХОДНОГО решения по wniosku; автор решения по рекламации пишется в `reklamacjaDecidedById`). Это же снимает латентное нарушение DB CHECK `claim_accepted_payment_complete` на пути `ODRZUCONO → REKLAMACJA → уznana` (прежний код переводил статус в `ZAAKCEPTOWANO` без выплатных полей). `reklamacjaDecidedAt` и `statusChangedAt` пишутся из **одного** инстанса `Date` — на это равенство опирается недельный отчёт, отделяя откат статуса от свежего решения.
 
 **Новые коды 422 на PATCH:**
 

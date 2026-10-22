@@ -131,8 +131,8 @@ overline темы. Никаких градиентов и цветных «ша�
 | Шаблон | Overline | Статус-бейдж | Amount/Code | CTA |
 |---|---|---|---|---|
 | `carrier-submitted` | Nowy wniosek o gwarancję | `warning` Oczekuje na weryfikację | AmountPanel (kwota) | Otwórz wniosek (только staff) |
-| `carrier-decision` | Decyzja w sprawie wniosku | tone решения (`success`/`danger`) | AmountPanel (kwota, если accept) | Otwórz wniosek |
-| `internal-decision` | Decyzja w sprawie wniosku | tone решения | AmountPanel | Otwórz w MAGGuarantee |
+| `carrier-decision` | Decyzja w sprawie wniosku | tone решения (`success`/`danger`) | AmountPanel (kwota, если accept) + текст MAGTRANS (`decisionComment`, если есть) под «Uzasadnienie decyzji» (ZAAKCEPTOWANO) / «Powód odrzucenia» (ODRZUCONO). Заметку перевозчика (`comment`) **не** показывает | Otwórz wniosek |
+| `internal-decision` | Decyzja w sprawie wniosku | tone решения | AmountPanel + тот же блок решения («Uzasadnienie decyzji» / «Powód odrzucenia») + отдельный блок «Komentarz przewoźnika» (`comment`), если перевозчик оставил заметку | Otwórz w MAGGuarantee (`/employee/claims?nrZgl=…`) |
 | `maksim-confirmation-request` | Potwierdzenie autoryzacji | `warning` Oczekuje na autoryzację | AmountPanel (dopłata, red) | Otwórz w MAGGuarantee + `replyExpected` (единственный) |
 | `reklamacja-internal-submitted` | Reklamacja | `warning` Reklamacja do rozpatrzenia | AmountPanel (kwota reklamacji, red) | Otwórz w MAGGuarantee |
 | `reklamacja-carrier-submitted` | Reklamacja | `warning` Reklamacja w toku | AmountPanel (kwota reklamacji, red) | Otwórz wniosek |
@@ -168,6 +168,11 @@ overline темы. Никаких градиентов и цветных «ша�
   Опциональный follow-up — единый префикс `MAGGuarantee · …`.
 - **Ссылка на настройки уведомлений** в футере из макета опущена — маршрута ещё
   нет; добавить, когда появится страница настроек.
-- **Plain-text fallback** в `mail.service.ts` не менялся (структура писем и так
+- **Plain-text fallback** decision-писем (`buildDecisionText` в
+  `templates/_decision-copy.tsx`, 2026-10-22) несёт те же заголовки блоков, что
+  и html («Uzasadnienie decyzji» / «Powód odrzucenia» / «Komentarz
+  przewoźnika»). Блоки свободного текста — общий `LabelledTextBlock` (eyebrow +
+  абзац `pre-line`) на существующих токенах, новых токенов нет.
+- **Plain-text fallback** остальных писем в `mail.service.ts` не менялся (структура писем и так
   отличается от html) — только html-скин.
 ```

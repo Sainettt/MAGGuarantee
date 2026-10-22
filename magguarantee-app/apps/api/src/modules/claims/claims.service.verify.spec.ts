@@ -130,6 +130,7 @@ function makeClaim(overrides: Partial<ClaimRow> = {}): ClaimRow {
     verifiedById: null,
     verifiedBy: null,
     comment: null,
+    decisionComment: null,
     orderNumber: null,
     orderDate: null,
     amountApproved: null,
@@ -653,6 +654,11 @@ describe('ClaimsService.verifyClaim — Maksim authorization gate arming', () =>
     expect(props.nrZgl).toBe(seeded.nrZgl);
     expect(props.doplata).toBe('1400.00');
     expect(props.prog).toBe('500.00');
+    // UWAGI #2 — the only employee claim page is the list; `?nrZgl=` opens
+    // the ClaimModal. `/employee/claims/{nrZgl}` does not exist.
+    expect(props.deeplink).toBe(
+      'http://localhost:3000/employee/claims?nrZgl=GWA%2F001%2F04%2F26',
+    );
     // DTO surfaces the gate + new status for the web.
     expect(out.maksimGateRequired).toBe(true);
     expect(out.maksimGateNotifiedAt).toBe(NOW.toISOString());
@@ -700,6 +706,30 @@ describe('ClaimsService.verifyClaim — Maksim authorization gate arming', () =>
     expect(mail.enqueueMaksimConfirmationRequest).toHaveBeenCalledTimes(1);
     const [, , replyTo] = mail.enqueueMaksimConfirmationRequest.mock.calls[0]!;
     expect(replyTo).toBeNull();
+  });
+
+  it('7d. Maksim deeplink tolerates a trailing slash on APP_URL and URL-encodes the nrZgl (UWAGI #2)', async () => {
+    const seeded = makeClaim();
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const prisma = makePrismaService();
+    const mail = makeMailFake();
+    const config = makeConfigFake();
+    config.get.mockImplementation((key: string) => {
+      if (key === 'APP_URL') return 'https://gwarancje.magtrans.eu/';
+      if (key === 'MAKSIM_EMAIL') return 'maksim@magtrans.eu';
+      return undefined;
+    });
+    const { svc } = makeService(repoFake, km.svc, prisma, mail, config);
+
+    await svc.verifyClaim(makeAuth('pracownik'), seeded.nrZgl, {});
+    await flushMicrotasks();
+
+    expect(mail.enqueueMaksimConfirmationRequest).toHaveBeenCalledTimes(1);
+    const [, props] = mail.enqueueMaksimConfirmationRequest.mock.calls[0]!;
+    expect(props.deeplink).toBe(
+      'https://gwarancje.magtrans.eu/employee/claims?nrZgl=GWA%2F001%2F04%2F26',
+    );
   });
 
   it('8. re-save when ALREADY notified at the SAME amount does NOT resend (amount-aware dedup)', async () => {

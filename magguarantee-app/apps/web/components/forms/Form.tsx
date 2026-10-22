@@ -104,15 +104,20 @@ export function FormLabel({
 }
 
 export function FormDescription({
+  id,
   className,
   children,
 }: {
+  /** Lets the control point at the helper via `aria-describedby`. */
+  id?: string;
   className?: string;
   children?: ReactNode;
 }) {
   if (!children) return null;
   return (
-    <p className={cn('text-xs text-text-sub', className)}>{children}</p>
+    <p id={id} className={cn('text-xs text-text-sub', className)}>
+      {children}
+    </p>
   );
 }
 

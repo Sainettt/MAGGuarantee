@@ -18,6 +18,8 @@ import {
   DEPARTURE_PAST_GRACE_MS,
   RETURN_BEFORE_DEPARTURE_CODE,
   RETURN_DATE_FUTURE_CODE,
+  businessWallClockUtc,
+  startOfBusinessDayUtc,
   type CancelDelegationDto,
   type DelegationDto,
   type DelegationEligibilityResponse,
@@ -463,10 +465,14 @@ export class DelegationsService {
    * `actualDepartureAt` is a **full datetime** (`YYYY-MM-DDTHH:mm:ssZ`) — the
    * ACTUAL moment the vehicle started driving. The weryfikator captures the exact
    * time; the linked wniosek's `dateStart` derives from its DAY and `timeFrom`
-   * from its wall-clock `HH:mm`. It is required and validated:
-   *   - not in the future (`<= now`, datetime granularity),
-   *   - not earlier than the reported `departureAt` DAY (`actualDepartureAt >=
-   *     startOfUtcDay(departureAt)` — an earlier same-day start IS allowed).
+   * from its wall-clock `HH:mm`. It is Warsaw wall-clock LABELLED UTC (the
+   * dialog appends `:00Z`), not a true instant — see docs/19-known-quirks.md
+   * #16. It is required and validated:
+   *   - not in the future (`<= businessWallClockUtc()`, i.e. not after Warsaw
+   *     wall-clock now; datetime granularity),
+   *   - not earlier than the reported `departureAt` Warsaw DAY
+   *     (`actualDepartureAt >= startOfBusinessDayUtc(departureAt)` — an earlier
+   *     same-day start IS allowed).
    *
    * In ONE `prisma.$transaction` (opened by `@Audit('delegation.markInTransit')`):
    *   1. set `actualDepartureAt` + status + `verifiedBy/At`,
@@ -529,28 +535,36 @@ export class DelegationsService {
    * Validates the weryfikator-supplied `actualDepartureAt` (a FULL datetime)
    * against the two business rules, throwing a 422 with a stable machine-readable
    * `code` in the `extensions` envelope (same shape as the `DEPARTURE_IN_PAST` /
-   * guarantee gates):
-   *   1. NOT in the future — `actualDepartureAt <= now` at DATETIME granularity
-   *      (the field now carries a time). Code `DEPARTURE_DATE_FUTURE`.
-   *   2. NOT earlier than the carrier-reported `departureAt` DAY
-   *      (`actualDepartureAt >= startOfUtcDay(departureAt)`). Hard constraint —
-   *      the actual start of driving cannot predate the reported departure day,
-   *      but an earlier same-day start (e.g. left at 05:00 vs a reported 08:00)
-   *      IS allowed. Code `DEPARTURE_BEFORE_REPORTED`.
+   * guarantee gates). `actualDepartureAt` is Warsaw wall-clock LABELLED UTC
+   * while `departureAt` is a TRUE UTC instant (docs/19-known-quirks.md #16), so
+   * both bounds are first brought into the wall-clock convention:
+   *   1. NOT in the future — `actualDepartureAt <= businessWallClockUtc()` at
+   *      DATETIME granularity: "now" is Warsaw wall-clock now, labelled UTC the
+   *      same way. Against the real `Date.now()` every wall-clock in the last
+   *      1 h (CET) / 2 h (CEST) was rejected (UWAGI #1, 2026-10-22). Code
+   *      `DEPARTURE_DATE_FUTURE`.
+   *   2. NOT earlier than the carrier-reported `departureAt` Warsaw DAY
+   *      (`actualDepartureAt >= startOfBusinessDayUtc(departureAt)`). Hard
+   *      constraint — the actual start of driving cannot predate the reported
+   *      departure day, but an earlier same-day start (e.g. left at 05:00 vs a
+   *      reported 08:00) IS allowed. Code `DEPARTURE_BEFORE_REPORTED`.
    */
   private _assertActualDepartureValid(
     actualDepartureAt: Date,
     departureAt: Date,
   ): void {
-    if (actualDepartureAt.getTime() > Date.now()) {
+    if (actualDepartureAt.getTime() > businessWallClockUtc().getTime()) {
       throw new UnprocessableEntityException({
         message: 'Data faktycznego wyjazdu nie może być w przyszłości.',
         extensions: { code: DEPARTURE_DATE_FUTURE_CODE },
       });
     }
-    // Lower bound is DAY-granular — `departureAt` carries a time-of-day, so
-    // truncate it to its calendar day; a same-day actual departure is allowed.
-    const reportedDay = startOfUtcDay(departureAt);
+    // Lower bound is DAY-granular: the Warsaw calendar date of the TRUE-UTC
+    // `departureAt`, at wall-clock midnight (`YYYY-MM-DDT00:00Z`) — the same
+    // convention as `actualDepartureAt`. A UTC-day truncation would put a
+    // departure reported for 00:00–00:59 CET / 00:00–01:59 CEST on the previous
+    // day and let a whole extra day through. Same-day actual departure allowed.
+    const reportedDay = startOfBusinessDayUtc(departureAt);
     if (actualDepartureAt.getTime() < reportedDay.getTime()) {
       throw new UnprocessableEntityException({
         message:
@@ -565,7 +579,9 @@ export class DelegationsService {
    *
    * `actualReturnAt` is a **full datetime** (the weryfikator captures the exact
    * moment of return; the linked wniosek's `timeTo` derives from its wall-clock
-   * `HH:mm`). Validated: `<= now` and `>= actualDepartureAt` (you cannot return
+   * `HH:mm`). Like `actualDepartureAt` it is Warsaw wall-clock LABELLED UTC
+   * (docs/19-known-quirks.md #16). Validated: `<= businessWallClockUtc()` (not
+   * after Warsaw wall-clock now) and `>= actualDepartureAt` (you cannot return
    * before you left). In ONE `prisma.$transaction`:
    *   1. set `actualReturnAt` + `verifiedBy/At` + status,
    *   2. advance `Vehicle.lastDroveAt = max(lastDroveAt, actualReturnAt)`
@@ -595,6 +611,8 @@ export class DelegationsService {
     // Bound the return moment: not in the future, and not before the actual
     // departure (fall back to the reported `departureAt` when no actual departure
     // was captured — legacy / defensive).
+    // NOTE: the fallback mixes conventions (true-UTC floor vs wall-clock value),
+    // so it is lenient by the UTC offset (1–2 h) — accepted, docs/19 #16.
     this._assertActualReturnValid(
       actualReturnAt,
       row.actualDepartureAt ?? row.departureAt,
@@ -637,7 +655,11 @@ export class DelegationsService {
    * Validates the weryfikator-supplied `actualReturnAt` (a FULL datetime) against
    * the two business rules, throwing a 422 with a stable machine-readable `code`
    * in the `extensions` envelope (mirrors `_assertActualDepartureValid`):
-   *   1. NOT in the future — `actualReturnAt <= now`. Code `RETURN_DATE_FUTURE`.
+   *   1. NOT in the future — `actualReturnAt <= businessWallClockUtc()`: "now"
+   *      is Warsaw wall-clock now labelled UTC, the same convention as the
+   *      field itself (docs/19-known-quirks.md #16). Against the real
+   *      `Date.now()` every wall-clock in the last 1 h (CET) / 2 h (CEST) was
+   *      rejected (UWAGI #1, 2026-10-22). Code `RETURN_DATE_FUTURE`.
    *   2. NOT before the departure — `actualReturnAt >= departureFloor` at DATETIME
    *      granularity (the vehicle cannot return before it left). `departureFloor`
    *      is the outing's `actualDepartureAt`, falling back to the reported
@@ -648,7 +670,7 @@ export class DelegationsService {
     actualReturnAt: Date,
     departureFloor: Date,
   ): void {
-    if (actualReturnAt.getTime() > Date.now()) {
+    if (actualReturnAt.getTime() > businessWallClockUtc().getTime()) {
       throw new UnprocessableEntityException({
         message: 'Data faktycznego zjazdu nie może być w przyszłości.',
         extensions: { code: RETURN_DATE_FUTURE_CODE },
@@ -1145,14 +1167,4 @@ function appendNote(existing: string | null, note: string): string {
   const ts = new Date().toISOString();
   const entry = `[${ts}] ${note}`;
   return existing ? `${existing}\n${entry}` : entry;
-}
-
-/**
- * Truncate any `Date` to UTC midnight of its calendar day. Used by
- * `_assertActualDepartureValid` to compare the (datetime) `actualDepartureAt`
- * against the reported `departureAt` at UTC-DAY granularity for the lower bound.
- * Mirrors the identically-named helper in `claims.service.ts`.
- */
-function startOfUtcDay(d: Date): Date {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }

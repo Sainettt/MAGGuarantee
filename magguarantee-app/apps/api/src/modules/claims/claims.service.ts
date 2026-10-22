@@ -74,6 +74,7 @@ import { CarriersRepository } from '../carriers/carriers.repository';
 import { DriversRepository } from '../drivers/drivers.repository';
 import { KmCalcService } from '../km-calc/km-calc.service';
 import { MailService } from '../mail/mail.service';
+import type { WniosekDecisionLabel } from '../mail/templates/_decision-copy';
 import type { Tone } from '../mail/templates/_theme';
 import { PrismaService } from '../prisma/prisma.service';
 import { TrailersRepository } from '../trailers/trailers.repository';
@@ -2024,7 +2025,7 @@ export class ClaimsService {
       this.configService?.get('MAKSIM_EMAIL', { infer: true }) ??
       'maksim.siankevich@magtrans.eu';
     const carrierName = await this._resolveCarrierDisplayName(row.carrierId);
-    const deeplink = `${appUrl.replace(/\/$/, '')}/employee/claims/${encodeURIComponent(row.nrZgl)}`;
+    const deeplink = employeeClaimDeeplink(appUrl, row.nrZgl);
     const replyTo = await this._resolveVerifierReplyTo(row.verifiedById);
 
     // Reuse the same diff builder as the manual authorization email.
@@ -2812,7 +2813,10 @@ export class ClaimsService {
       verifiedAt: row.verifiedAt ? row.verifiedAt.toISOString() : null,
       verifiedById: row.verifiedById,
       verifiedBy: row.verifiedBy,
+      // `comment` = the carrier's submit note; `decisionComment` = the
+      // verifier's ZAAKCEPTOWANO / ODRZUCONO justification (UWAGI #4).
       comment: row.comment,
+      decisionComment: row.decisionComment,
       orderNumber: row.orderNumber,
       orderDate: row.orderDate ? toDateString(row.orderDate) : null,
       amountApproved: row.amountApproved,
@@ -3332,23 +3336,51 @@ export class ClaimsService {
     this._applyCorrectionsToPatch(patch, corrections, recalc, existing);
 
     // Decision payload per discriminator branch.
+    this._applyDecisionPayload(patch, dto, user, now);
+
+    return patch;
+  }
+
+  /**
+   * Decision payload per `UpdateClaimDto` discriminator branch, applied onto the
+   * patch `_buildUpdatePatch` is composing. `now` is that method's single `Date`
+   * instance (`reklamacjaDecidedAt` must equal `statusChangedAt`).
+   *
+   * Wire `comment` → column (UWAGI #4, 2026-10-22): the wniosek decision
+   * (ZAAKCEPTOWANO / ODRZUCONO) writes `decisionComment`, the reklamacja branches
+   * write `reklamacjaResponse`. `patch.comment` is NEVER set here:
+   * `Claim.comment` is the carrier's submit note and no staff path may
+   * overwrite it.
+   */
+  private _applyDecisionPayload(
+    patch: UpdateClaimData,
+    dto: UpdateClaimDto,
+    user: AuthUser,
+    now: Date,
+  ): void {
     switch (dto.targetStatus) {
       case 'ZAAKCEPTOWANO':
         patch.orderNumber = dto.orderNumber;
         patch.orderDate = isoDateToMidnightUtc(dto.orderDate);
         patch.amountApproved = dto.amountApproved;
-        if (dto.comment !== undefined) patch.comment = dto.comment ?? null;
+        // Optional justification; omitted ⇒ the column is left as it is.
+        if (dto.comment !== undefined) {
+          patch.decisionComment = dto.comment ?? null;
+        }
         break;
       case 'ODRZUCONO':
-        patch.comment = dto.comment;
+        // Required by the schema — this IS the rejection reason.
+        patch.decisionComment = dto.comment;
         break;
       // ── Reklamacja resolutions (REWORK 2026-07-31) ──────────
       // BOTH outcomes roll `status` back to `statusBeforeReklamacja` (already in
       // `target`); the outcome itself lives ONLY in `reklamacjaResolution`.
       // Deliberately NOT touched here: `amountApproved`, `orderNumber`,
-      // `orderDate`, `paymentEur`, `comment` and `decidedById` — the wniosek's own
-      // decision and payout stay exactly as they were, which is also what keeps
-      // the DB CHECK `claim_accepted_payment_complete` trivially satisfied on the
+      // `orderDate`, `paymentEur`, `decidedById`, the carrier's `comment` and the
+      // wniosek's `decisionComment` (a reklamacja decision's staff text goes to
+      // `reklamacjaResponse` only). The wniosek's own decision and payout stay
+      // exactly as they were, which is also what keeps the DB CHECK
+      // `claim_accepted_payment_complete` trivially satisfied on the
       // `ODRZUCONO → REKLAMACJA → uznana` path (the pre-rework code violated it
       // there by flipping the status to ZAAKCEPTOWANO without a payout).
       case 'REKLAMACJA_ZAAKCEPTOWANO':
@@ -3380,8 +3412,6 @@ export class ClaimsService {
         );
       }
     }
-
-    return patch;
   }
 
   /**
@@ -3430,7 +3460,9 @@ export class ClaimsService {
   private async _applyDecisionEmails(row: ClaimRow): Promise<void> {
     // Only terminal verification outcomes notify carrier + internal staff.
     // Reklamacja and authorization transitions carry their own email flows.
-    const meta: Partial<Record<ClaimStatus, { label: string; tone: Tone }>> = {
+    const meta: Partial<
+      Record<ClaimStatus, { label: WniosekDecisionLabel; tone: Tone }>
+    > = {
       ZAAKCEPTOWANO: { label: 'ZAAKCEPTOWANO', tone: 'success' },
       ODRZUCONO: { label: 'ODRZUCONO', tone: 'danger' },
     };
@@ -3483,7 +3515,9 @@ export class ClaimsService {
           periodFrom,
           periodTo,
           amount,
-          comment: row.comment ?? undefined,
+          // MAGTRANS's justification only. NEVER falls back to `row.comment`:
+          // that is the carrier's own note, not part of the verdict.
+          decisionComment: row.decisionComment ?? undefined,
           deeplink: `${appUrl}/carrier/claims/${nz}`,
         })
         .catch(warn('carrier decision enqueue failed'));
@@ -3499,8 +3533,11 @@ export class ClaimsService {
           periodFrom,
           periodTo,
           amount,
-          comment: row.comment ?? undefined,
-          deeplink: `${appUrl}/employee/claims/${nz}`,
+          // Two separately labelled blocks: MAGTRANS's justification and the
+          // carrier's submit note. Neither falls back to the other.
+          decisionComment: row.decisionComment ?? undefined,
+          carrierComment: row.comment ?? undefined,
+          deeplink: employeeClaimDeeplink(appUrl, row.nrZgl),
         })
         .catch(warn('internal decision enqueue failed'));
     }
@@ -3697,6 +3734,7 @@ export class ClaimsService {
       paymentEur: row.paymentEur,
       ratePerKmEffective: row.ratePerKmEffective,
       comment: row.comment,
+      decisionComment: row.decisionComment,
       orderNumber: row.orderNumber,
       orderDate: row.orderDate
         ? row.orderDate.toISOString().slice(0, 10)
@@ -3875,7 +3913,6 @@ export class ClaimsService {
       'http://localhost:3000'
     ).replace(/\/$/, '');
     const carrierName = await this._resolveCarrierDisplayName(row.carrierId);
-    const nz = encodeURIComponent(row.nrZgl);
     const warn = (err: unknown) =>
       this.logger.warn({
         msg: 'claim submitted enqueue failed',
@@ -3897,7 +3934,7 @@ export class ClaimsService {
       drivenDays: row.drivenDays.toFixed(2),
       paymentEur: row.paymentEur.toFixed(2),
     };
-    const employeeDeeplink = `${appUrl}/employee/claims/${nz}`;
+    const employeeDeeplink = employeeClaimDeeplink(appUrl, row.nrZgl);
 
     // Carrier gets a receipt — no open button (only staff may open wnioski).
     if (targets.carrierEmail) {
@@ -3996,9 +4033,9 @@ export class ClaimsService {
               : '0.00',
           maksimum: maxAmount.toFixed(2),
           tresc,
-          // Employee list deeplink — same `?nrZgl=` pattern the other internal
-          // claim mails use to open the ClaimModal on arrival.
-          deeplink: `${appUrl}/employee/claims?nrZgl=${nz}`,
+          // Employee list deeplink — the same `?nrZgl=` shape every internal
+          // claim mail uses to open the ClaimModal on arrival.
+          deeplink: employeeClaimDeeplink(appUrl, row.nrZgl),
         })
         .catch(warn('reklamacja internal enqueue failed'));
     }
@@ -4200,6 +4237,19 @@ function daysBetween(from: Date, to: Date): number {
 /** Inclusive day count between two UTC-midnight dates (e.g. same-day → 1). */
 function daysBetweenInclusive(from: Date, to: Date): number {
   return Math.max(0, daysBetween(from, to)) + 1;
+}
+
+/**
+ * Employee-side deeplink to ONE wniosek (UWAGI #2, 2026-10-22). The only
+ * employee claim page is the list `/employee/claims`; `ClaimsListView` consumes
+ * `?nrZgl=` once and opens the ClaimModal on arrival. There is NO
+ * `/employee/claims/{nrZgl}` route, so every internal claim mail (submit,
+ * decision, Maksim authorization, reklamacja) links through here. A trailing
+ * slash on `APP_URL` is tolerated.
+ */
+function employeeClaimDeeplink(appUrl: string, nrZgl: string): string {
+  const base = appUrl.replace(/\/$/u, '');
+  return `${base}/employee/claims?nrZgl=${encodeURIComponent(nrZgl)}`;
 }
 
 function isValidEmail(s: string): boolean {

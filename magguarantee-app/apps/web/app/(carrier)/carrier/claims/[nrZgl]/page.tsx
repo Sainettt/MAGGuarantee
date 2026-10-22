@@ -36,6 +36,7 @@ import {
   moneyTone,
   verifierMovedAmount,
 } from '@/lib/claims/money';
+import { carrierNote, decisionNote } from '@/lib/claims/claimNotes';
 import { classifyApiError } from '@/lib/api/errors';
 import { useClaim } from '@/lib/hooks/useClaims';
 import { queryErrorProps } from '@/lib/query/queryErrorProps';
@@ -135,6 +136,11 @@ export default function ClaimDetailPage() {
   const requestedForHint = claim.origPaymentEur ?? claim.paymentEur;
 
   const origMoved = verifierMovedAmount(claim);
+
+  // Who wrote what (UWAGI #4): the carrier's own submit note vs MAGTRANS's
+  // decision justification — two rows, two treatments, never one «Komentarz».
+  const ownNote = carrierNote(claim);
+  const magtransNote = decisionNote(claim);
 
   // ── Money hero — three states, ONE typographic slot (no layout shift) ──
   // «Wypłacono łącznie» wins whenever the reklamacja was uznana: either part of
@@ -403,11 +409,24 @@ export default function ClaimDetailPage() {
               <dd className="mt-0.5 text-text">{formatDate(claim.orderDate)}</dd>
             </div>
           )}
-          {claim.comment && (
+          {/* Row 6 — «Twój komentarz»: the carrier's OWN submit note, plain. */}
+          {ownNote != null && (
             <div className="sm:col-span-2">
               <dt className="text-text-sub">{tDetail('comment')}</dt>
               <dd className="mt-0.5 text-text whitespace-pre-wrap">
-                {claim.comment}
+                {ownNote}
+              </dd>
+            </div>
+          )}
+          {/* Row 6b — MAGTRANS's justification of the decision: «Uzasadnienie
+              MAGTRANS» (accepted) / «Powód odrzucenia» (rejected), by the
+              pre-reklamacja verdict while a reklamacja is open. On the muted
+              quoted surface so it never reads as the carrier's own text. */}
+          {magtransNote != null && (
+            <div className="sm:col-span-2">
+              <dt className="text-text-sub">{tDetail(magtransNote.labelKey)}</dt>
+              <dd className="mt-1 whitespace-pre-wrap rounded-md bg-input/40 p-3 text-text">
+                {magtransNote.text}
               </dd>
             </div>
           )}

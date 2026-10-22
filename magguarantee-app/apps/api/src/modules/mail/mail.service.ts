@@ -57,6 +57,7 @@ import {
   CarrierDecisionEmail,
   type CarrierDecisionProps,
 } from './templates/carrier-decision';
+import { buildDecisionText } from './templates/_decision-copy';
 import {
   InternalDecisionEmail,
   type InternalDecisionProps,
@@ -818,14 +819,15 @@ export class MailService implements IMailService {
       to: email,
       subject: `Wniosek ${props.nrZgl}: ${props.decisionLabel}`,
       html: await render(CarrierDecisionEmail(props)),
-      text: this.buildDecisionText({
+      // No `carrierComment`: the carrier is not shown their own note back.
+      text: buildDecisionText({
         nrZgl: props.nrZgl,
         decisionLabel: props.decisionLabel,
         vehiclePlate: props.vehiclePlate,
         periodFrom: props.periodFrom,
         periodTo: props.periodTo,
         amount: props.amount,
-        comment: props.comment,
+        decisionComment: props.decisionComment,
         deeplink: props.deeplink,
       }),
       template: 'carrier-decision',
@@ -856,7 +858,7 @@ export class MailService implements IMailService {
       to: email,
       subject: `Wniosek ${props.nrZgl}: ${props.decisionLabel}`,
       html: await render(InternalDecisionEmail(props)),
-      text: this.buildDecisionText({
+      text: buildDecisionText({
         nrZgl: props.nrZgl,
         decisionLabel: props.decisionLabel,
         carrierName: props.carrierName,
@@ -864,7 +866,8 @@ export class MailService implements IMailService {
         periodFrom: props.periodFrom,
         periodTo: props.periodTo,
         amount: props.amount,
-        comment: props.comment,
+        decisionComment: props.decisionComment,
+        carrierComment: props.carrierComment,
         deeplink: props.deeplink,
       }),
       template: 'internal-decision',
@@ -1436,32 +1439,6 @@ export class MailService implements IMailService {
       () => this.sendDirectoryReconcileReport(email, props),
       opts,
     );
-  }
-
-  /** Plain-text fallback shared by carrier-decision and internal-decision. */
-  private buildDecisionText(p: {
-    nrZgl: string;
-    decisionLabel: string;
-    carrierName?: string;
-    vehiclePlate: string;
-    periodFrom: string;
-    periodTo: string;
-    amount?: string;
-    comment?: string;
-    deeplink: string;
-  }): string {
-    const lines = [
-      `Wniosek ${p.nrZgl}: ${p.decisionLabel}`,
-      '',
-      ...(p.carrierName ? [`Przewoźnik: ${p.carrierName}`] : []),
-      `Ciągnik: ${p.vehiclePlate}`,
-      `Okres: ${p.periodFrom} → ${p.periodTo}`,
-      // `!= null`: a pre-formatted `'0.00'` is a real amount, not "absent".
-      ...(p.amount != null ? [`Kwota: ${p.amount} EUR`] : []),
-    ];
-    if (p.comment) lines.push('', `Komentarz: ${p.comment}`);
-    lines.push('', `Otwórz: ${p.deeplink}`);
-    return lines.join('\n');
   }
 
   /**

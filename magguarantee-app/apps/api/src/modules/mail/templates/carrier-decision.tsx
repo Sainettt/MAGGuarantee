@@ -3,23 +3,27 @@
  * The status badge is driven by the decision (accepted → green, rejected → red)
  * per the legacy `CONFIG.KOLORY` colour mapping — now expressed as a status
  * pill instead of a tinted header (docs/22-email-design.md §5).
+ *
+ * Free text (UWAGI #4, 2026-10-22): only MAGTRANS's justification
+ * (`Claim.decisionComment`) is shown, headed «Uzasadnienie decyzji» /
+ * «Powód odrzucenia». The carrier's own submit note is deliberately NOT echoed
+ * back here (the internal mail shows it, see `internal-decision.tsx`).
  */
 import * as React from 'react';
 
-import { criticalColor, eyebrowStyle, paragraphStyle, type Tone } from './_theme';
+import { criticalColor, type Tone } from './_theme';
 import {
-  AmountPanel,
-  Block,
-  DataSection,
-  FieldRow,
-  MailLayout,
-} from './MailLayout';
+  DECISION_COMMENT_HEADING,
+  LabelledTextBlock,
+  type WniosekDecisionLabel,
+} from './_decision-copy';
+import { AmountPanel, DataSection, FieldRow, MailLayout } from './MailLayout';
 
 export interface CarrierDecisionProps {
   /** Numer zgłoszenia, e.g. `GWA/001/05/26`. */
   nrZgl: string;
-  /** Human label of the decision, e.g. `ZAAKCEPTOWANO`. */
-  decisionLabel: string;
+  /** The decision, also the badge label (`ZAAKCEPTOWANO` / `ODRZUCONO`). */
+  decisionLabel: WniosekDecisionLabel;
   /** Status accent for the decision (success = accepted, danger = rejected). */
   tone: Tone;
   vehiclePlate: string;
@@ -27,7 +31,11 @@ export interface CarrierDecisionProps {
   periodTo: string;
   /** Approved payout in EUR, pre-formatted (two decimals). Omitted if N/A. */
   amount?: string;
-  comment?: string;
+  /**
+   * MAGTRANS's justification (`Claim.decisionComment`): optional on
+   * ZAAKCEPTOWANO, always present on ODRZUCONO. Never the carrier's note.
+   */
+  decisionComment?: string;
   /** Carrier-facing claim detail URL (already includes APP_URL). */
   deeplink: string;
 }
@@ -40,7 +48,7 @@ export function CarrierDecisionEmail({
   periodFrom,
   periodTo,
   amount,
-  comment,
+  decisionComment,
   deeplink,
 }: CarrierDecisionProps): React.ReactElement {
   return (
@@ -61,11 +69,11 @@ export function CarrierDecisionEmail({
         <AmountPanel label="Kwota" value={`${amount} EUR`} valueColor={criticalColor(tone)} />
       ) : null}
 
-      {comment ? (
-        <Block>
-          <p style={{ ...eyebrowStyle, margin: '18px 0 8px 0' }}>Komentarz</p>
-          <p style={{ ...paragraphStyle, whiteSpace: 'pre-line' }}>{comment}</p>
-        </Block>
+      {decisionComment ? (
+        <LabelledTextBlock
+          heading={DECISION_COMMENT_HEADING[decisionLabel]}
+          text={decisionComment}
+        />
       ) : null}
     </MailLayout>
   );

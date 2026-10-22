@@ -13,13 +13,16 @@
 // - `plannedReturnAt` is `type="date"` (the DB column is `@db.Date`).
 // - Empty-string defaults keep RHF inputs controlled; Zod rejects them at
 //   submit so the user sees inline validation errors.
+// - `?vehicleId=<id>` (the dashboard «Zgłoś wyjazd» deep link from
+//   <GuaranteeStatusRow>) preselects the tractor once — see the preselect
+//   effect below.
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ArrowLeft, ShieldAlert } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { use, useEffect, useRef, useState } from 'react';
 import { Controller, useForm, type Resolver } from 'react-hook-form';
 import { toast } from 'sonner';
 import {
@@ -41,6 +44,7 @@ import { Textarea } from '@/components/ui/Textarea';
 import { CountrySelect } from '@/components/forms/CountrySelect';
 import { FormField, FormGrid, FormSection } from '@/components/forms/Form';
 import { MaskedPostalInput } from '@/components/forms/MaskedPostalInput';
+import { pickPreselectedVehicleId } from '@/lib/delegations/preselectVehicle';
 import { onInvalidToast } from '@/lib/forms/onInvalidToast';
 import {
   useDelegationEligibility,
@@ -139,13 +143,21 @@ const EMPTY_DEFAULTS: FormValues = {
   comment: undefined,
 };
 
-export default function NewDelegationPage() {
+interface NewDelegationPageProps {
+  // Next 15: a page's `searchParams` is a Promise, unwrapped with `use()`.
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
+export default function NewDelegationPage({
+  searchParams,
+}: NewDelegationPageProps) {
   const t = useTranslations('carrier.delegations');
   const tForm = useTranslations('carrier.delegations.form');
   const tBlocked = useTranslations('carrier.delegations.blocked');
   const tCommon = useTranslations('common');
   const router = useRouter();
   const fleetQ = useMyFleet();
+  const { vehicleId: vehicleIdParam } = use(searchParams);
 
   // Carrier-readiness gate. While loading we render the form skeleton; if the
   // carrier isn't ready we replace the form with a generic blocking state.
@@ -172,10 +184,14 @@ export default function NewDelegationPage() {
   });
 
   const draft = useFormDraft(form, DRAFT_KEY, { enabled: true });
+  // Flipped right after the mount-time draft hydration; gates the
+  // `?vehicleId=` preselect so it lands on top of the hydrated draft.
+  const [draftHydrated, setDraftHydrated] = useState(false);
 
   useEffect(() => {
     form.reset({ ...EMPTY_DEFAULTS });
     draft.hydrate();
+    setDraftHydrated(true);
     // Compute `min` only after mount — never during SSR — so the initial HTML
     // matches the first client render (no hydration mismatch). Skipped when the
     // past-departure block is bypassed.
@@ -187,6 +203,28 @@ export default function NewDelegationPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // `?vehicleId=` preselect (UWAGI #3). Applied exactly once, after BOTH the
+  // draft hydration above (so the URL wins over a stored draft's vehicle while
+  // every other draft field stays) AND the fleet load (so an id outside the
+  // carrier's active fleet is ignored silently). The latch stops a fleet
+  // refetch from re-applying it after the carrier picked another vehicle or
+  // hit «Wyczyść» — that reset stays a true reset. If the select isn't mounted
+  // yet (eligibility still loading), RHF keeps the value and writes it to the
+  // DOM when the field registers.
+  const preselectDoneRef = useRef(false);
+  const fleetData = fleetQ.data;
+  useEffect(() => {
+    if (preselectDoneRef.current || !draftHydrated || !fleetData) return;
+    preselectDoneRef.current = true;
+    const id = pickPreselectedVehicleId(vehicleIdParam, fleetData.vehicles);
+    if (id) {
+      form.setValue('vehicleId', id, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+    }
+  }, [draftHydrated, fleetData, vehicleIdParam, form]);
 
   const submitM = useSubmitDelegation({
     onSuccess: () => {

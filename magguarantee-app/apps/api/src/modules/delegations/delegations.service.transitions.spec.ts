@@ -405,7 +405,7 @@ describe('DelegationsService.markInTransit', () => {
 
   it('an actual-departure on the reported departure DAY is allowed (>= boundary)', async () => {
     // departureAt is 2026-06-01T08:00Z; a same-DAY actual departure (00:00Z)
-    // must pass the not-before-departureAt gate (UTC-day granularity).
+    // must pass the not-before-departureAt gate (Warsaw-day granularity).
     const { service, updateSpy } = build({ row: makeRow({ status: 'gotowy' }) });
     const out = await service.markInTransit(auth('weryfikator'), 'deleg-1', {
       actualDepartureAt: '2026-06-01',
@@ -607,6 +607,209 @@ describe('DelegationsService.markReturned', () => {
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
     expect(updateSpy).not.toHaveBeenCalled();
     expect(recalcSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ─── "not in the future" = Warsaw wall-clock now (UWAGI #1, 2026-10-22) ──────
+//
+// `actualDepartureAt` / `actualReturnAt` are Warsaw wall-clock LABELLED UTC (the
+// weryfikator dialogs append `:00Z` to the typed wall-clock), so the guards must
+// compare them with `businessWallClockUtc()`, not the real instant `Date.now()`
+// — otherwise a wall-clock within the last 1 h (CET) / 2 h (CEST) is rejected as
+// "in the future". The literal `2999-01-01` cases above never reach that
+// boundary, so the clock is frozen here in both offsets.
+//
+// Only `Date` is faked: every timer / tick API stays real so the async service
+// chain (awaited repository fakes) never stalls. A `jest.spyOn(Date, 'now')`
+// would NOT be enough — the helper reads a no-arg `new Date()`.
+
+/** Everything `jest.useFakeTimers` can fake EXCEPT `Date` (global type from @types/jest). */
+const NON_DATE_FAKEABLE_APIS: FakeableAPI[] = [
+  'hrtime',
+  'nextTick',
+  'performance',
+  'queueMicrotask',
+  'requestAnimationFrame',
+  'cancelAnimationFrame',
+  'requestIdleCallback',
+  'cancelIdleCallback',
+  'setImmediate',
+  'clearImmediate',
+  'setInterval',
+  'clearInterval',
+  'setTimeout',
+  'clearTimeout',
+];
+
+/** Shift an ISO instant by whole minutes → ISO string (fixture helper). */
+function plusMinutes(iso: string, minutes: number): string {
+  return new Date(new Date(iso).getTime() + minutes * 60_000).toISOString();
+}
+
+async function captureError(fn: () => Promise<unknown>): Promise<unknown> {
+  try {
+    await fn();
+  } catch (e) {
+    return e;
+  }
+  return undefined;
+}
+
+function expect422(thrown: unknown, code: string): void {
+  expect(thrown).toBeInstanceOf(UnprocessableEntityException);
+  expect((thrown as UnprocessableEntityException).getResponse()).toMatchObject({
+    extensions: { code },
+  });
+}
+
+describe('DelegationsService — "now" bound is Warsaw wall-clock (UWAGI #1)', () => {
+  beforeEach(() => {
+    jest.useFakeTimers({ doNotFake: NON_DATE_FAKEABLE_APIS });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  describe.each([
+    {
+      season: 'CEST (+02:00)',
+      // 10:00 UTC = 12:00 Warsaw → wall-clock-labelled-UTC "now" = 12:00Z.
+      realNow: '2026-07-15T10:00:00.000Z',
+      warsawNowLabelledUtc: '2026-07-15T12:00:00.000Z',
+      // Reported + captured actual departure days before "now", so neither
+      // lower bound interferes with the upper-bound assertions.
+      departureAt: '2026-07-10T06:00:00.000Z',
+      actualDepartureAt: '2026-07-10T08:00:00.000Z',
+    },
+    {
+      season: 'CET (+01:00)',
+      // 10:00 UTC = 11:00 Warsaw → wall-clock-labelled-UTC "now" = 11:00Z.
+      realNow: '2026-01-15T10:00:00.000Z',
+      warsawNowLabelledUtc: '2026-01-15T11:00:00.000Z',
+      departureAt: '2026-01-10T07:00:00.000Z',
+      actualDepartureAt: '2026-01-10T08:00:00.000Z',
+    },
+  ])('clock frozen in $season', (c) => {
+    beforeEach(() => {
+      jest.setSystemTime(new Date(c.realNow));
+    });
+
+    // ── markInTransit ──
+
+    it('markInTransit: Warsaw now − 30 min passes (it is AFTER the real UTC instant)', async () => {
+      const { service, updateSpy } = build({
+        row: makeRow({ status: 'gotowy', departureAt: new Date(c.departureAt) }),
+      });
+      const actual = plusMinutes(c.warsawNowLabelledUtc, -30);
+      // Sanity: the fixture really sits in the buggy window (after real now)
+      // and the no-arg `new Date()` is frozen.
+      expect(new Date(actual).getTime()).toBeGreaterThan(Date.now());
+      expect(new Date().toISOString()).toBe(c.realNow);
+
+      const out = await service.markInTransit(auth('weryfikator'), 'deleg-1', {
+        actualDepartureAt: actual,
+      });
+
+      expect(out.status).toBe('w_trasie');
+      expect(
+        (updateSpy.mock.calls[0]![1].actualDepartureAt as Date).toISOString(),
+      ).toBe(actual);
+    });
+
+    it('markInTransit: Warsaw now + 30 min → 422 DEPARTURE_DATE_FUTURE — writes nothing', async () => {
+      const { service, updateSpy } = build({
+        row: makeRow({ status: 'gotowy', departureAt: new Date(c.departureAt) }),
+      });
+      const thrown = await captureError(() =>
+        service.markInTransit(auth('weryfikator'), 'deleg-1', {
+          actualDepartureAt: plusMinutes(c.warsawNowLabelledUtc, 30),
+        }),
+      );
+      expect422(thrown, 'DEPARTURE_DATE_FUTURE');
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+
+    // ── markReturned ──
+
+    it('markReturned: Warsaw now − 30 min passes (it is AFTER the real UTC instant)', async () => {
+      const { service, updateSpy } = build({
+        row: makeRow({
+          status: 'w_trasie',
+          departureAt: new Date(c.departureAt),
+          actualDepartureAt: new Date(c.actualDepartureAt),
+        }),
+      });
+      const actual = plusMinutes(c.warsawNowLabelledUtc, -30);
+      expect(new Date(actual).getTime()).toBeGreaterThan(Date.now());
+
+      const out = await service.markReturned(auth('weryfikator'), 'deleg-1', {
+        actualReturnAt: actual,
+      });
+
+      expect(out.status).toBe('zjechal');
+      expect(
+        (updateSpy.mock.calls[0]![1].actualReturnAt as Date).toISOString(),
+      ).toBe(actual);
+    });
+
+    it('markReturned: Warsaw now + 30 min → 422 RETURN_DATE_FUTURE — writes nothing', async () => {
+      const { service, updateSpy, recalcSpy } = build({
+        row: makeRow({
+          status: 'w_trasie',
+          departureAt: new Date(c.departureAt),
+          actualDepartureAt: new Date(c.actualDepartureAt),
+        }),
+      });
+      const thrown = await captureError(() =>
+        service.markReturned(auth('weryfikator'), 'deleg-1', {
+          actualReturnAt: plusMinutes(c.warsawNowLabelledUtc, 30),
+        }),
+      );
+      expect422(thrown, 'RETURN_DATE_FUTURE');
+      expect(updateSpy).not.toHaveBeenCalled();
+      expect(recalcSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── lower bound: the reported departure DAY is the WARSAW calendar day ──
+  //
+  // `departureAt` is a TRUE UTC instant; `actualDepartureAt` is wall-clock
+  // labelled UTC. The floor is the Warsaw calendar date of `departureAt` at
+  // wall-clock midnight (`startOfBusinessDayUtc`). The former UTC-day
+  // truncation put a reported departure between 00:00–01:59 CEST on the
+  // PREVIOUS day, so the floor was a day too lenient.
+  describe('markInTransit lower bound (reported 2026-07-15 00:30 CEST)', () => {
+    // = 2026-07-15 00:30 Warsaw (CEST). UTC-day truncation would give 14 Jul.
+    const departureAt = new Date('2026-07-14T22:30:00.000Z');
+
+    beforeEach(() => {
+      jest.setSystemTime(new Date('2026-07-20T10:00:00.000Z'));
+    });
+
+    it('rejects wall-clock 14 Jul 23:00 (previous Warsaw day) → 422 DEPARTURE_BEFORE_REPORTED', async () => {
+      const { service, updateSpy } = build({
+        row: makeRow({ status: 'gotowy', departureAt }),
+      });
+      const thrown = await captureError(() =>
+        service.markInTransit(auth('weryfikator'), 'deleg-1', {
+          actualDepartureAt: '2026-07-14T23:00:00.000Z',
+        }),
+      );
+      expect422(thrown, 'DEPARTURE_BEFORE_REPORTED');
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+
+    it('accepts wall-clock 15 Jul 00:10 (same Warsaw day, earlier than the reported 00:30)', async () => {
+      const { service, updateSpy } = build({
+        row: makeRow({ status: 'gotowy', departureAt }),
+      });
+      const out = await service.markInTransit(auth('weryfikator'), 'deleg-1', {
+        actualDepartureAt: '2026-07-15T00:10:00.000Z',
+      });
+      expect(out.status).toBe('w_trasie');
+      expect(updateSpy).toHaveBeenCalledTimes(1);
+    });
   });
 });
 
