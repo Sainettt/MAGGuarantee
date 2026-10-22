@@ -2,7 +2,8 @@
 // cron tests. Hand-rolled fakes over `jest.fn`. We exercise the cron body
 // (`runDailyDigest`) directly with an injected `now` and assert: sends when
 // at-risk claims exist, sends nothing when none, and that a single failing
-// recipient address does not abort the rest (Promise.allSettled).
+// recipient address does not abort the rest (Promise.allSettled). Since
+// 2026-10-22 (docs/21 §1) REKLAMACJA claims share the clock and the lists.
 
 import { Logger } from '@nestjs/common';
 
@@ -77,7 +78,7 @@ function makeHarness(opts: {
   const findCandidates = jest.fn(async () => opts.candidates ?? []);
   const findRecipients = jest.fn(async () => opts.recipients ?? []);
   const repo = {
-    findNaWeryfikacjiForSla: findCandidates,
+    findOnSlaClock: findCandidates,
     findActivePracownikRecipients: findRecipients,
   } as unknown as VerificationSlaRepository;
 
@@ -188,7 +189,7 @@ describe('VerificationSlaService.runDailyDigest', () => {
     expect(h.findRecipients).not.toHaveBeenCalled();
   });
 
-  it('sends NOTHING when there are zero NA_WERYFIKACJI claims', async () => {
+  it('sends NOTHING when there are zero on-the-clock claims', async () => {
     const h = makeHarness({ candidates: [], recipients: [] });
 
     await h.service.runDailyDigest(NOW);
@@ -237,6 +238,76 @@ describe('VerificationSlaService.runDailyDigest', () => {
         'good2@magtrans.eu',
       ]),
     );
+  });
+
+  it('includes REKLAMACJA rows in the same lists, bucketed by their anchor, with status carried', async () => {
+    const h = makeHarness({
+      candidates: [
+        makeCandidate({ nrZgl: 'WER-OVERDUE', anchorDate: anchorForLeft(-1) }),
+        makeCandidate({
+          nrZgl: 'REK-OVERDUE',
+          status: 'REKLAMACJA',
+          anchorDate: anchorForLeft(-3),
+        }),
+        makeCandidate({
+          nrZgl: 'REK-SOON',
+          status: 'REKLAMACJA',
+          anchorDate: anchorForLeft(2),
+        }),
+        makeCandidate({
+          nrZgl: 'REK-ONTRACK',
+          status: 'REKLAMACJA',
+          anchorDate: anchorForLeft(7),
+        }),
+      ],
+      recipients: [{ email: 'a@magtrans.eu', name: 'Anna' }],
+    });
+
+    await h.service.runDailyDigest(NOW);
+
+    expect(h.sendVerificationDigest).toHaveBeenCalledTimes(1);
+    const [, props] = h.sendVerificationDigest.mock.calls[0] as [
+      string,
+      {
+        overdue: { nrZgl: string; status: string; workingDaysLeft: number }[];
+        dueSoon: { nrZgl: string; status: string; workingDaysLeft: number }[];
+      },
+    ];
+    expect(props.overdue.map((r) => [r.nrZgl, r.status, r.workingDaysLeft])).toEqual([
+      ['REK-OVERDUE', 'REKLAMACJA', -3],
+      ['WER-OVERDUE', 'NA_WERYFIKACJI', -1],
+    ]);
+    expect(props.dueSoon.map((r) => [r.nrZgl, r.status, r.workingDaysLeft])).toEqual([
+      ['REK-SOON', 'REKLAMACJA', 2],
+    ]);
+    expect([...props.overdue, ...props.dueSoon].map((r) => r.nrZgl)).not.toContain(
+      'REK-ONTRACK',
+    );
+  });
+
+  it('sends a digest when only REKLAMACJA claims are at risk', async () => {
+    const h = makeHarness({
+      candidates: [
+        makeCandidate({
+          nrZgl: 'REK-ONLY',
+          status: 'REKLAMACJA',
+          anchorDate: anchorForLeft(0),
+        }),
+      ],
+      recipients: [{ email: 'a@magtrans.eu', name: 'Anna' }],
+    });
+
+    await h.service.runDailyDigest(NOW);
+
+    expect(h.sendVerificationDigest).toHaveBeenCalledTimes(1);
+    const [, props] = h.sendVerificationDigest.mock.calls[0] as [
+      string,
+      { overdue: unknown[]; dueSoon: { nrZgl: string; status: string }[] },
+    ];
+    expect(props.overdue).toEqual([]);
+    expect(props.dueSoon).toEqual([
+      expect.objectContaining({ nrZgl: 'REK-ONLY', status: 'REKLAMACJA' }),
+    ]);
   });
 
   it('builds the deeplink against APP_URL pointing at the pracownik dashboard', async () => {

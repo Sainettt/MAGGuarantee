@@ -58,9 +58,10 @@ export function ClaimsListView() {
   const searchParams = useSearchParams();
 
   const { user } = useAuth();
-  // Phase 7.1 — admin + pracownik may edit; opiekun / others see the unified
-  // modal in `view` without an «Edycja» button. Passed into <ClaimModal> so
-  // the modal stays role-agnostic.
+  // Phase 7.1 — admin + pracownik may edit; they are the only roles that reach
+  // this page (opiekun has no claims access, docs/03-roles.md §opiekun). Any
+  // other role would get the unified modal in `view` without an «Edycja»
+  // button. Passed into <ClaimModal> so the modal stays role-agnostic.
   const canEdit = user?.role === 'admin' || user?.role === 'pracownik';
   // The ROLE itself travels separately: `canEdit` collapses admin and pracownik
   // into one boolean, but docs/14 §6.5.13/§6.5.14 gate whole sections on which

@@ -183,7 +183,7 @@ doplata          = roznica > 0 ? round2(roznica × ratePerKmEffective) : 0
 | Экранов в UI | 8 ролёвых (login, carrier, planista, dyspozytor, eksport, weryfikator, employee, comingSoon) |
 | Модальных окон | 18+ (CRUD + verification + auth + reklamacja) |
 | Фоновых задач (cron) | 2 регулярных (daily reminder, weekly report) |
-| Внешних API | 3 (VIES, Biała Lista MF, info-car.pl) |
+| Внешних API | 2 (VIES, Biała Lista MF); info-car.pl удалён решением 2026-10-22 |
 
 ## Связь с другими документами
 

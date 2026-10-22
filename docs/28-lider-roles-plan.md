@@ -63,7 +63,7 @@
 | Тип пользователя, scope, ownership | Базовая роль. **До фичи передачи лидер видит ровно то же, что базовая роль** — инвариант docs/25 §0 («поведение не меняется ни для одной роли») сохраняется, этот план можно мержить в любой момент |
 | Права | `LIDER_PERMISSIONS[role]` в каталоге docs/25 §2 — появляется в B1, на старте пустой. Первые кандидаты (после отдельного плана передачи машин): `vehicles.transfer.request` (planista), `vehicles.transfer.approve`, `vehicles.reassign_planner` (лидер). *(2026-09-28, docs/29: итоговые имена — `vehicles.planner_transfer.request` (opiekun, planista), `vehicles.planner_transfer.decide` (admin, лидер планистов), `vehicles.planner_history.read`; `reassign_planner` отменён — см. docs/25 §2)* |
 | Панель, landing, nav, edge-гейтинг | Базовой роли. Новых route-groups нет |
-| UI-лейбл | `roles.lider.<role>`: PL «Lider planistów», «Lider dyspozytorów», «Lider DAF», «Lider opiekunów wniosków», «Lider eksportu»; EN «Planners lead», «Dispatchers lead», «DAF lead», «Claims-caretakers lead», «Export lead». Базовый `roles.<role>` не меняется |
+| UI-лейбл | `roles.lider.<role>`: PL «Lider planistów», «Lider dyspozytorów», «Lider DAF», «Lider pracowników» (с 2026-10-22; раньше «Lider opiekunów wniosków»), «Lider eksportu»; EN «Planners lead», «Dispatchers lead», «DAF lead», «Employees lead», «Export lead». Базовый `roles.<role>` не меняется |
 | Для каких ролей допустим | `LIDER_ROLES = ['planista', 'dyspozytor', 'opiekun', 'pracownik', 'eksport']`. `admin` — не нужен (всё может), `przewoznik` — не сотрудник, `weryfikator` — не запрошен (добавить = одна строка в `LIDER_ROLES` + правка CHECK) |
 | Инвариант | `lider = true ⇒ role ∈ LIDER_ROLES`. Закрепляется в трёх местах, как `AssignableRole` сегодня: Zod (сообщение), сервис (частичный PATCH), CHECK в БД (гарантия) |
 | JWT | В payload **не кладём** — edge-гейтинг от лидера не зависит. В `AuthUser` и `/auth/me` — из БД, тем же путём, что `teamId` |
@@ -75,7 +75,7 @@
 | Учётка | Кто пишет `lider` |
 |---|---|
 | `managedBy = magspace`, `roleOverride IS NULL` | Маппинг: `StanowiskoRoleMapping.lider`. Синхронизируется при входе (`provisionOrSync`) и reconcile; в админке read-only, как `role` |
-| `managedBy = magspace`, `roleOverride` задан («Nadaj dostęp» или UserSheet) | Admin. Reconcile не трогает, как `role`. Так выдаются лидер DAF (в MAGSpace нет `DAF_LIDER`), лидер opiekunów wniosków и лидер eksportu — те же роли, что и сегодня выдаются руками (docs/24 §10) |
+| `managedBy = magspace`, `roleOverride` задан («Nadaj dostęp» или UserSheet) | Admin. Reconcile не трогает, как `role`. Так выдаются лидер DAF (в MAGSpace нет `DAF_LIDER`), лидер pracowników и лидер eksportu — те же роли, что и сегодня выдаются руками (docs/24 §10) |
 | `managedBy = local` | Admin |
 
 Переходы: `magspace → local` — `lider` остаётся (теперь принадлежит админке,
@@ -240,8 +240,12 @@ Runtime-поведение ни одной роли не меняется, по�
    решает заявки только своих планистов; `User.liderId` введён, `liderEmail`
    устарел. Видимость машин группы лидеру не добавлялась.
 3. Лидер диспетчеров — член одной команды (`teamId`) или над всеми командами?
-4. Лидеры opiekunów wniosków, DAF и eksportu — есть ли уже действия сверх
-   базовой роли, или флаг пока «на вырост»?
+4. Лидеры pracowników, DAF и eksportu — есть ли уже действия сверх
+   базовой роли, или флаг пока «на вырост»? **✅ 2026-10-22:** действий нет и
+   пока не планируется. Флаг у этих ролей (и у dyspozytora) — **задел на
+   будущее под новые функции**: меняет только подпись роли и чип «Lider».
+   Когда появится первая функция, она ляжет в `LIDER_PERMISSIONS[role]`
+   (docs/25 B1), как у лидера планистов.
 5. Может ли лидер планистов переназначить машину на себя, и нужен ли апрув,
    когда лидер инициирует сам (по запросу — нет)? **✅ 2026-09-28 (docs/29
    R1, R4):** переназначить сам не может никто; заявку, где лидер — автор или

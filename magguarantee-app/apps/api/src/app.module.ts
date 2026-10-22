@@ -25,7 +25,6 @@ import { FleetModule } from './modules/fleet/fleet.module';
 import { BugbotModule } from './modules/integrations/bugbot/bugbot.module';
 import { GpsModule } from './modules/integrations/gps/gps.module';
 import { GuaranteeWatchdogModule } from './modules/guarantee-watchdog/guarantee-watchdog.module';
-import { InspectionModule } from './modules/integrations/inspection/inspection.module';
 import { ViesModule } from './modules/integrations/vies/vies.module';
 import { WhiteListModule } from './modules/integrations/white-list/white-list.module';
 import { JobsModule } from './modules/jobs/jobs.module';
@@ -106,7 +105,6 @@ import { WeeklyReportModule } from './modules/weekly-report/weekly-report.module
     OpiekunModule,
     ViesModule,
     WhiteListModule,
-    InspectionModule,
     GpsModule,
     // BugBot handoff — signed one-time sign-in URL into the bug/idea intake.
     BugbotModule,

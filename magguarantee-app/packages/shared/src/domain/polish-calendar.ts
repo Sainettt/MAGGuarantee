@@ -1,9 +1,11 @@
 // Polish working-day calendar — public-holiday set + working-day arithmetic.
 //
 // Net-new for the pracownik verification-SLA "attention" feature
-// (docs/21-pracownik-verification-sla.md §3). Pure TypeScript: no Node, Nest,
-// Prisma or date-fns imports — both the API (NestJS) and the web (Next.js)
-// bundle the same code so the deadline / bucket math never drifts.
+// (docs/21-pracownik-verification-sla.md §3). The SLA clock runs for claims in
+// `NA_WERYFIKACJI` and — since the 2026-10-22 decision — `REKLAMACJA` (docs/21
+// §1; see `SLA_CLOCK_STATUSES`). Pure TypeScript: no Node, Nest, Prisma or
+// date-fns imports — both the API (NestJS) and the web (Next.js) bundle the
+// same code so the deadline / bucket math never drifts.
 //
 // ⚠️ This is NOT `getEUBanDays` from `eu-calendar.ts`. That set is the EU
 // heavy-vehicle driving-ban calendar (incl. German/Dutch holidays such as
@@ -16,6 +18,7 @@
 // keys. The SLA spec is explicitly "date-based, Europe/Warsaw"; callers are
 // expected to hand us local Warsaw calendar dates (see `bucketForAnchor`).
 
+import type { ClaimStatus } from '../schemas/claims';
 import { calcEaster } from './eu-calendar';
 
 // ─── Public types ────────────────────────────────────────
@@ -41,11 +44,27 @@ export interface SlaDeadline {
 // ─── Constants ───────────────────────────────────────────
 
 /**
- * SLA window: a claim entering `NA_WERYFIKACJI` must be verified within this
- * many Polish working days, counting forward from the day *after* it entered
- * the status (anchor day excluded). Per docs/21 §1.
+ * SLA window: a claim entering one of `SLA_CLOCK_STATUSES` (verification or a
+ * filed reklamacja) must be decided within this many Polish working days,
+ * counting forward from the day *after* it entered the status (anchor day
+ * excluded). Per docs/21 §1.
  */
 export const SLA_WORKING_DAYS = 7;
+
+/**
+ * Claim statuses that are "on the SLA clock" (docs/21 §1, decision 2026-10-22).
+ * `NA_WERYFIKACJI` — awaiting verification; `REKLAMACJA` — a filed complaint
+ * awaiting its decision. The anchor is `statusChangedAt ?? createdAt` for both:
+ * `submitReklamacja` re-stamps `statusChangedAt` at filing, and the decision
+ * (`→ ZAAKCEPTOWANO` / `→ ODRZUCONO`) re-stamps it again and stops the clock.
+ */
+export const SLA_CLOCK_STATUSES = [
+  'NA_WERYFIKACJI',
+  'REKLAMACJA',
+] as const satisfies readonly ClaimStatus[];
+
+/** One of the statuses whose claims run the verification SLA clock. */
+export type SlaClockStatus = (typeof SLA_CLOCK_STATUSES)[number];
 
 /**
  * `dueSoon` upper bound (inclusive). `0..3` working days left = amber.
@@ -226,7 +245,8 @@ export function workingDaysBetween(a: Date, b: Date): number {
 /**
  * Deadline + bucket helper for the verification SLA (docs/21 §1–2).
  *
- * Given the `anchorDate` (the day the claim entered `NA_WERYFIKACJI`) and
+ * Given the `anchorDate` (the day the claim entered one of
+ * `SLA_CLOCK_STATUSES` — `NA_WERYFIKACJI` or `REKLAMACJA`) and
  * `now`, computes:
  *   - `deadline        = addPolishWorkingDays(anchorDate, slaDays)`
  *   - `workingDaysLeft = workingDaysBetween(now, deadline)`  (signed)

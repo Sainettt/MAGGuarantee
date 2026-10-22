@@ -4,14 +4,23 @@ import {
   ClaimStatus as PrismaClaimStatus,
   Role as PrismaRole,
 } from '@magguarantee/database';
-import type { ClaimStatus } from '@magguarantee/shared';
+import { SLA_CLOCK_STATUSES, type ClaimStatus } from '@magguarantee/shared';
 
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
- * One `NA_WERYFIKACJI` claim considered by the daily verification-SLA digest
- * (docs/21-pracownik-verification-sla.md §5). Same anchor convention as the
- * dashboard widget: `statusChangedAt ?? createdAt`.
+ * `SLA_CLOCK_STATUSES` (`NA_WERYFIKACJI` + `REKLAMACJA`, docs/21 §1) as Prisma
+ * enum members. Indexing by the shared name keeps the two enums in lock-step at
+ * compile time.
+ */
+const SLA_CLOCK_PRISMA_STATUSES: readonly PrismaClaimStatus[] =
+  SLA_CLOCK_STATUSES.map((s) => PrismaClaimStatus[s]);
+
+/**
+ * One on-the-clock claim (`NA_WERYFIKACJI` or `REKLAMACJA`) considered by the
+ * daily verification-SLA digest (docs/21-pracownik-verification-sla.md §5).
+ * Same anchor convention as the dashboard widget: `statusChangedAt ?? createdAt`.
+ * `status` lets the digest mark reklamacja rows.
  */
 export interface SlaDigestCandidateRow {
   nrZgl: string;
@@ -39,14 +48,15 @@ export class VerificationSlaRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * ALL claims currently in `NA_WERYFIKACJI` — the "on the clock" set
-   * (docs/21 §1). Uses the `@@index([status, statusChangedAt])` index. The
-   * service buckets each row via `bucketForAnchor`; the bucket can't be a SQL
-   * predicate because it depends on the Polish working-day calendar.
+   * ALL claims currently in `NA_WERYFIKACJI` or `REKLAMACJA` — the "on the
+   * clock" set (docs/21 §1, `SLA_CLOCK_STATUSES`). Uses the
+   * `@@index([status, statusChangedAt])` index. The service buckets each row
+   * via `bucketForAnchor`; the bucket can't be a SQL predicate because it
+   * depends on the Polish working-day calendar.
    */
-  async findNaWeryfikacjiForSla(): Promise<SlaDigestCandidateRow[]> {
+  async findOnSlaClock(): Promise<SlaDigestCandidateRow[]> {
     const rows = await this.prisma.tx.claim.findMany({
-      where: { status: PrismaClaimStatus.NA_WERYFIKACJI },
+      where: { status: { in: [...SLA_CLOCK_PRISMA_STATUSES] } },
       orderBy: { statusChangedAt: 'asc' },
       select: {
         nrZgl: true,

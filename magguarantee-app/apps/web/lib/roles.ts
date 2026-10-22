@@ -155,6 +155,12 @@ export const ROLE_RESTRICTED_EMPLOYEE_PREFIXES: Readonly<
   Record<string, readonly Role[]>
 > = {
   '/employee/przekazania': ['admin', 'opiekun'],
+  // opiekun has no claims (wnioski) access at all — decision 2026-10-22,
+  // docs/03-roles.md §opiekun (the api drops him from GET /claims and
+  // GET /claims/:nrZgl). The nav already hides the tab and the page's
+  // `requireRoleAccess(['admin', 'pracownik'])` already bounces; this entry
+  // closes the edge/middleware layer for a typed URL or a stale deeplink.
+  '/employee/claims': ['admin', 'pracownik'],
 };
 
 function startsWithPrefix(pathname: string, prefix: string): boolean {

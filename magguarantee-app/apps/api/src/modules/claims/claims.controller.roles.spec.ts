@@ -1,11 +1,16 @@
-// Authorization unit tests for the limits-refresh pair
+// Authorization unit tests for the claims read pair (`GET /claims`,
+// `GET /claims/:nrZgl`) and the limits-refresh pair
 // (`POST /claims/:nrZgl/recalc-limits` + its dry run
 // `GET /claims/:nrZgl/recalc-limits/preview`) — feature «wyłączane limity
 // gwarancji», 2026-09-20.
 //
-// The endpoint re-prices a wniosek with the CURRENT `monthly_limits` and
-// answers with a full `ClaimDto` (payout figures included), so its role set
-// matters twice over — as a write gate AND as a read gate.
+// The read pair: opiekun lost all claims access on 2026-10-22 — see the
+// `READ_ALLOWED` / `READ_REFUSED` block below.
+//
+// The limits-refresh endpoint re-prices a wniosek with the CURRENT
+// `monthly_limits` and answers with a full `ClaimDto` (payout figures
+// included), so its role set matters twice over — as a write gate AND as a
+// read gate.
 //
 // Per docs/03-roles.md the section «Верифицировать заявление (изменить статус,
 // пересчитать km/доплату)» belongs to `pracownik`; `weryfikator` owns the
@@ -112,6 +117,48 @@ describe.each<{ label: string; handler: keyof ClaimsController }>([
     // «верификация» bucket.
     expect(rolesFor(handler).sort()).toEqual(rolesFor('update').sort());
     expect(rolesFor(handler).sort()).toEqual(rolesFor('verify').sort());
+  });
+});
+
+// `GET /claims` + `GET /claims/:nrZgl` — the read pair. Decision 2026-10-22
+// (docs/03-roles.md#opiekun, docs/13-api-design.md claims table): `opiekun`
+// lost ALL claims access (it used to read its own carriers' wnioski), so the
+// read set is exactly admin + pracownik (all) + przewoznik (own). The service
+// re-refuses opiekun as defence-in-depth (`claims.service.list-scope.spec.ts`,
+// `claims.service.preview.spec.ts` getOne cases).
+const READ_ALLOWED: Role[] = ['admin', 'pracownik', 'przewoznik'];
+const READ_REFUSED: Role[] = [
+  'opiekun',
+  'weryfikator',
+  'planista',
+  'dyspozytor',
+  'eksport',
+];
+
+describe.each<{ label: string; handler: keyof ClaimsController }>([
+  { label: 'GET /claims', handler: 'list' },
+  { label: 'GET /claims/:nrZgl', handler: 'getOne' },
+])('ClaimsController — $label read authorization', ({ handler }) => {
+  const guard = new RolesGuard(reflector);
+
+  it('carries exactly the documented role set (admin + pracownik + przewoznik)', () => {
+    expect(rolesFor(handler).sort()).toEqual(
+      ['admin', 'pracownik', 'przewoznik'].sort(),
+    );
+  });
+
+  it('does NOT list opiekun (decision 2026-10-22)', () => {
+    expect(rolesFor(handler)).not.toContain('opiekun');
+  });
+
+  it.each<Role>(READ_ALLOWED)('%s is allowed', (role) => {
+    expect(guard.canActivate(ctxFor(handler, userWith(role)))).toBe(true);
+  });
+
+  it.each<Role>(READ_REFUSED)('%s is rejected (403)', (role) => {
+    expect(() => guard.canActivate(ctxFor(handler, userWith(role)))).toThrow(
+      ForbiddenException,
+    );
   });
 });
 

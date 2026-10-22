@@ -1389,23 +1389,31 @@ describe('preview — mixed period settled on the daily-km board', () => {
     expect(out.paymentEur).toBe(seeded.paymentEur);
   });
 
-  it('getOne (opiekun of the carrier): boardSettlement is filled too', async () => {
+  it('getOne (opiekun, even of the carrier): 403 — no claims access, nothing priced', async () => {
+    // Decision 2026-10-22 (docs/03-roles.md#opiekun): opiekun sees no wnioski
+    // at all, so it must not get the live boardSettlement either. The fixture
+    // carrier IS supervised by this opiekun (`opiekunId` = the caller) — the
+    // refusal is role-based, not ownership-based.
     const seeded = storedMixedClaim();
-    const carriersRepo = {
-      listIdsForOpiekun: jest.fn(async () => ['c-1']),
-    } as unknown as CarriersRepository;
+    const carriersRepo = makeCarriersRepo([
+      makeCarrier({ opiekunId: 'u-opiekun' }),
+    ]);
+    const km = makeMixedKmCalc();
+    const dailyKm = makeDailyKmRepo(0, septemberBoard(2_000));
     const svc = makeService(
       makeClaimsRepo([seeded]),
       carriersRepo,
       makeVehiclesRepo([]),
-      makeMixedKmCalc().svc,
-      makeDailyKmRepo(0, septemberBoard(2_000)),
+      km.svc,
+      dailyKm,
     );
 
-    const out = await svc.getOne(makeAuth('opiekun', 'u-opiekun'), seeded.nrZgl);
-
-    expect(out.boardSettlement?.complete).toBe(true);
-    expect(out.boardSettlement?.paymentEur).toBe(2_780);
+    await expect(
+      svc.getOne(makeAuth('opiekun', 'u-opiekun'), seeded.nrZgl),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(km.calls).toHaveLength(0);
+    expect(dailyKm.listBoardDays).not.toHaveBeenCalled();
+    expect(carriersRepo.list).not.toHaveBeenCalled();
   });
 
   it('getOne (przewoznik): boardSettlement is null — no km-calc, no board read', async () => {

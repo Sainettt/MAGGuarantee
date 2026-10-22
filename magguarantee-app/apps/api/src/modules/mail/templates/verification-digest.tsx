@@ -10,19 +10,34 @@
  * Design: docs/22-email-design.md. Lists `overdue` rows first (red) then
  * `dueSoon` (amber), each with nrZgl, carrier, plate, and the working-days-left
  * label.
+ *
+ * Since 2026-10-22 (docs/21 §1/§5) the digest covers both claims awaiting
+ * verification (`NA_WERYFIKACJI`) and filed reklamacje awaiting a decision
+ * (`REKLAMACJA`) — one e-mail, one list per bucket, with a small «Reklamacja»
+ * pill on reklamacja rows (no separate section).
  */
 import * as React from 'react';
 
+import type { ClaimStatus } from '@magguarantee/shared';
+
 import { colors, eyebrowStyle, fontFamily } from './_theme';
-import { Block, MailLayout } from './MailLayout';
+import { Block, InlineBadge, MailLayout } from './MailLayout';
 
 /** Amber used for the "due soon" group (matches the reference pending badge). */
 const AMBER = '#8A5A16';
+
+/** Per-row marker label for claims on the SLA clock because of a reklamacja. */
+export const REKLAMACJA_MARKER_LABEL = 'Reklamacja';
 
 /** One claim row in the digest. `workingDaysLeft` is signed (negative = overdue). */
 export interface VerificationDigestRow {
   /** Numer zgłoszenia, e.g. `GWA/001/05/26`. */
   nrZgl: string;
+  /**
+   * Claim status — `NA_WERYFIKACJI` (verification) or `REKLAMACJA` (filed
+   * complaint). `REKLAMACJA` rows get the «Reklamacja» marker.
+   */
+  status: ClaimStatus;
   /** Display name of the carrier (User.name → fallback to login). */
   carrierName: string;
   /** Plate number snapshot from the claim. */
@@ -50,6 +65,19 @@ export function workingDaysLabel(workingDaysLeft: number): string {
   return `${workingDaysLeft} dni robocze`;
 }
 
+/** True for a reklamacja awaiting its decision (docs/21 §1). */
+export function isReklamacjaRow(row: Pick<VerificationDigestRow, 'status'>): boolean {
+  return row.status === 'REKLAMACJA';
+}
+
+/**
+ * Headline shared by the preheader and the e-mail subject, worded to cover
+ * both verification and reklamacja rows.
+ */
+export function verificationDigestHeadline(total: number): string {
+  return `Zgłoszenia i reklamacje do rozpatrzenia — ${total} wymaga uwagi`;
+}
+
 function DigestRow({
   row,
   accent,
@@ -68,6 +96,12 @@ function DigestRow({
       }}
     >
       <span style={{ fontWeight: 'bold' }}>{row.nrZgl}</span>
+      {isReklamacjaRow(row) ? (
+        <>
+          {' '}
+          <InlineBadge tone="neutral" label={REKLAMACJA_MARKER_LABEL} />
+        </>
+      ) : null}
       {' — '}
       {row.carrierName}
       {' · '}
@@ -88,12 +122,12 @@ export function VerificationDigestEmail(
 
   return (
     <MailLayout
-      preview={`Weryfikacja zgłoszeń — ${total} wymaga uwagi`}
+      preview={verificationDigestHeadline(total)}
       overline="Dzienny przegląd"
-      title="Zgłoszenia do weryfikacji"
+      title="Zgłoszenia do weryfikacji i reklamacje"
       badge={{ tone: 'warning', label: `${total} wymaga uwagi` }}
       cta={{ href: deeplink, label: 'Otwórz panel weryfikacji' }}
-      note="Otrzymujesz tę wiadomość jako pracownik odpowiedzialny za weryfikację zgłoszeń."
+      note="Otrzymujesz tę wiadomość jako pracownik odpowiedzialny za weryfikację zgłoszeń i rozpatrywanie reklamacji."
     >
       {overdue.length > 0 ? (
         <Block>

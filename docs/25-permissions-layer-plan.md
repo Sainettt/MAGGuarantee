@@ -55,7 +55,7 @@
 
 | Набор ролей | Эндпоинтов | Что это |
 |---|---|---|
-| `admin,opiekun` | 43 | carriers целиком, запись в vehicles/drivers/trailers, панель «Moja opieka», алерты, compliance, lookups сотрудников, VIES/Biała lista/info-car |
+| `admin,opiekun` | 43 | carriers целиком, запись в vehicles/drivers/trailers, панель «Moja opieka», алерты, compliance, lookups сотрудников, VIES/Biała lista (info-car удалён 2026-10-22, минус 1 эндпоинт) |
 | `admin` | 37 | users, teams, sso, limits, audit, diagnostics, запись trailer-types, `…/hard` (carriers, drivers, trailers, trailer-types), soft-delete carrier, `gps/refresh` |
 | `przewoznik` | 8 | подача и превью wniosku, reklamacja, создание выезда, eligibility, `fleet/my`, `guarantee-*/me` |
 | `admin,opiekun,przewoznik` | 8 | чтение drivers и trailers, их вложения |
@@ -63,7 +63,7 @@
 | `weryfikator,admin` | 5 | km-board, `PUT`/`DELETE daily-km`, `in-transit`, `returned` |
 | `admin,pracownik` | 5 | верификация и решение по wniosku, скриншот Maksima, dashboard |
 | все, кроме `pracownik` | 4 | `GET /delegations(/:id)`, `GET /vehicles/km-report`, `GET /vehicles/:id/daily-km` |
-| `admin,pracownik,opiekun,przewoznik` | 2 | `GET /claims(/:nrZgl)` |
+| `admin,pracownik,opiekun,przewoznik` | 2 | `GET /claims(/:nrZgl)` — с 2026-10-22 `admin,pracownik,przewoznik`: opiekun не видит wnioski ни в каком виде |
 | по 1 эндпоинту | 6 | `przewoznik,pracownik,admin` (превью существующего wniosku), `przewoznik,admin` (cancel выезда), `eksport,admin` (ready), `planista,admin`, `dyspozytor,admin`, `admin,pracownik,opiekun` (`lookups/carriers`) |
 
 Полная таблица «метод + путь → роли» строится скриптом и в B1 становится
@@ -119,7 +119,7 @@
 
 | Permission | admin | pracownik | opiekun | planista | dyspozytor | przewoznik | eksport | weryfikator | Покрывает |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|
-| `claims.read` | ✅ | ✅ | ✅ | | | ✅ | | | `GET /claims(/:nrZgl)` |
+| `claims.read` | ✅ | ✅ | | | | ✅ | | | `GET /claims(/:nrZgl)`; opiekun убран 2026-10-22 (решение: opiekun не видит wnioski ни в каком виде) |
 | `claims.submit` | | | | | | ✅ | | | `POST /claims`, `/claims/preview`, `/reklamacja` |
 | `claims.verify` | ✅ | ✅ | | | | | | | `PATCH /claims/:nrZgl(/verification)`, скриншот Maksima (upload/download) |
 | `claims.verify_pending_authorization` | ✅ | | | | | | | | сервис: `CLAIM_VERIFY_ADMIN_ONLY` |
@@ -152,7 +152,7 @@
 | `panel.carrier` | | | | | | ✅ | | | `/fleet/my`, `/guarantee-*/me` |
 | `lookups.staff` | ✅ | | ✅ | | | | | | `/lookups/{dyspozytor,opiekuni,planisci,teams}` |
 | `lookups.carriers` | ✅ | ✅ | ✅ | | | | | | `/lookups/carriers` |
-| `integrations.external` | ✅ | | ✅ | | | | | | VIES, Biała lista (оба), info-car |
+| `integrations.external` | ✅ | | ✅ | | | | | | VIES, Biała lista (оба); info-car удалён решением 2026-10-22 |
 | `users.manage` | ✅ | | | | | | | | `/users*`, `/lookups/users` |
 | `sso.manage` | ✅ | | | | | | | | `/sso/*` |
 | `teams.manage` | ✅ | | | | | | | | `/teams*` |
@@ -208,7 +208,7 @@
 | Что | Где |
 |---|---|
 | `PERMISSIONS`, `type Permission`, `ROLE_PERMISSIONS: Record<Role, readonly Permission[]>`, `hasPermission`, `hasAnyPermission`, `permissionsFor(role)`. Чистый TS без зависимостей: импортируется и API, и web, и edge-middleware | `packages/shared/src/permissions.ts` (+ экспорт из index) |
-| Генератор снапшота: обходит контроллеры через `DiscoveryService` + `Reflector`, пишет `{ "GET /claims": ["admin","opiekun","pracownik","przewoznik"], "POST /auth/login": "PUBLIC", … }` с отсортированными ключами | `apps/api/src/common/authz/roles-snapshot.script.ts` |
+| Генератор снапшота: обходит контроллеры через `DiscoveryService` + `Reflector`, пишет `{ "GET /claims": ["admin","pracownik","przewoznik"], "POST /auth/login": "PUBLIC", … }` с отсортированными ключами | `apps/api/src/common/authz/roles-snapshot.script.ts` |
 | Фикстура (коммитится) | `apps/api/src/common/authz/__fixtures__/endpoint-roles.snapshot.json` |
 | `permissions.spec.ts`: каждое право назначено хотя бы одной роли; нет неизвестных строк; матрица совпадает с markdown-таблицей, которую генерирует `npm run authz:matrix` для вставки в docs/03 | `packages/shared` |
 | docs/03: матрицу доступа **сгенерировать** из `ROLE_PERMISSIONS` (колонка «permission»); расхождения §1.4 уже исправлены вручную | `docs/03-roles.md` |

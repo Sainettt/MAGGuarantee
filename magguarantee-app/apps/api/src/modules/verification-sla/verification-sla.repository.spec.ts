@@ -1,8 +1,8 @@
 // docs/21-pracownik-verification-sla.md §5 — verification-SLA repository
-// tests. We mock `PrismaService.tx` to assert the two queries: the
-// NA_WERYFIKACJI scan with the `statusChangedAt ?? createdAt` anchor fallback,
-// and the active-pracownik recipient predicate (`role=pracownik AND
-// active=true AND deletedAt IS NULL`).
+// tests. We mock `PrismaService.tx` to assert the two queries: the on-the-clock
+// scan (`NA_WERYFIKACJI` + `REKLAMACJA`, docs/21 §1) with the
+// `statusChangedAt ?? createdAt` anchor fallback, and the active-pracownik
+// recipient predicate (`role=pracownik AND active=true AND deletedAt IS NULL`).
 
 import {
   ClaimStatus as PrismaClaimStatus,
@@ -23,23 +23,64 @@ function makeRepo(tx: Record<string, unknown>): {
   return { repo: new VerificationSlaRepository(prisma), claimFindMany, userFindMany };
 }
 
-describe('VerificationSlaRepository.findNaWeryfikacjiForSla', () => {
-  it('queries only NA_WERYFIKACJI ordered by statusChangedAt asc', async () => {
+describe('VerificationSlaRepository.findOnSlaClock', () => {
+  it('queries NA_WERYFIKACJI and REKLAMACJA ordered by statusChangedAt asc', async () => {
     const claimFindMany = jest.fn(async (_args: unknown) => []);
     const { repo } = makeRepo({
       claim: { findMany: claimFindMany },
       user: { findMany: jest.fn() },
     });
 
-    await repo.findNaWeryfikacjiForSla();
+    await repo.findOnSlaClock();
 
     expect(claimFindMany).toHaveBeenCalledTimes(1);
     const arg = claimFindMany.mock.calls[0]?.[0] as unknown as {
-      where: { status: unknown };
+      where: { status: { in: unknown[] } };
       orderBy: { statusChangedAt: string };
+      select: Record<string, unknown>;
     };
-    expect(arg.where.status).toBe(PrismaClaimStatus.NA_WERYFIKACJI);
+    expect(arg.where.status).toEqual({
+      in: [PrismaClaimStatus.NA_WERYFIKACJI, PrismaClaimStatus.REKLAMACJA],
+    });
     expect(arg.orderBy).toEqual({ statusChangedAt: 'asc' });
+    expect(arg.select).toMatchObject({
+      status: true,
+      statusChangedAt: true,
+      createdAt: true,
+    });
+  });
+
+  it('returns a REKLAMACJA row with its status and the filing (statusChangedAt) anchor', async () => {
+    // `submitReklamacja` re-stamps statusChangedAt at filing, so the reklamacja
+    // clock runs from the filing day, not from the original claim's createdAt.
+    const filed = new Date('2026-06-05T09:30:00.000Z');
+    const created = new Date('2026-04-02T08:00:00.000Z');
+    const claimFindMany = jest.fn(async () => [
+      {
+        nrZgl: 'GWA/003/04/26',
+        status: PrismaClaimStatus.REKLAMACJA,
+        vehiclePlateSnapshot: 'PO7777',
+        statusChangedAt: filed,
+        createdAt: created,
+        carrier: { user: { name: 'Carrier R', login: 'carrierr' } },
+      },
+    ]);
+    const { repo } = makeRepo({
+      claim: { findMany: claimFindMany },
+      user: { findMany: jest.fn() },
+    });
+
+    const rows = await repo.findOnSlaClock();
+
+    expect(rows).toEqual([
+      {
+        nrZgl: 'GWA/003/04/26',
+        status: 'REKLAMACJA',
+        carrierName: 'Carrier R',
+        vehiclePlate: 'PO7777',
+        anchorDate: filed,
+      },
+    ]);
   });
 
   it('uses statusChangedAt as the anchor when present', async () => {
@@ -60,7 +101,7 @@ describe('VerificationSlaRepository.findNaWeryfikacjiForSla', () => {
       user: { findMany: jest.fn() },
     });
 
-    const rows = await repo.findNaWeryfikacjiForSla();
+    const rows = await repo.findOnSlaClock();
 
     expect(rows[0]?.anchorDate).toEqual(changed);
     expect(rows[0]?.carrierName).toBe('Carrier A');
@@ -84,7 +125,7 @@ describe('VerificationSlaRepository.findNaWeryfikacjiForSla', () => {
       user: { findMany: jest.fn() },
     });
 
-    const rows = await repo.findNaWeryfikacjiForSla();
+    const rows = await repo.findOnSlaClock();
 
     expect(rows[0]?.anchorDate).toEqual(created);
     // carrier name falls back to login when User.name is null.

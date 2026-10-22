@@ -257,6 +257,44 @@ export function StatusBadge({
   );
 }
 
+/**
+ * Inline variant of `StatusBadge` — a `<span>` pill that can sit inside a line
+ * of text (e.g. a per-row marker in a digest list), where the block-level
+ * `<table>` badge would be invalid markup inside a `<p>`. Same `badgeStyles`
+ * tokens (docs/22-email-design.md §5), tighter size to sit in a 14px row.
+ * Clients that drop span padding/borders (Outlook desktop) still show the
+ * coloured label text.
+ */
+export function InlineBadge({
+  tone,
+  label,
+}: {
+  tone: Tone;
+  label: string;
+}): React.ReactElement {
+  const s = badgeStyles[tone];
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        backgroundColor: s.bg,
+        border: `1px solid ${s.border}`,
+        borderRadius: 3,
+        padding: '1px 6px',
+        fontFamily,
+        fontSize: 11,
+        lineHeight: '14px',
+        fontWeight: 'bold',
+        letterSpacing: 0.3,
+        color: s.fg,
+        verticalAlign: 'middle',
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
 // ── Data section (super-heading + label/value rows) ─────────────────────────
 
 /**

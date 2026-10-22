@@ -657,8 +657,9 @@ export type SettlementBoardMonthDto = z.infer<typeof SettlementBoardMonthSchema>
  * stale). Staff-only:
  *  - `POST /claims/:nrZgl/preview` — for `pracownik` / `admin`, from the
  *    previewed inputs;
- *  - `GET /claims/:nrZgl` — for `admin` / `pracownik` / `opiekun`, from the
- *    claim's stored period, times, `hoursAdjustedValue` and limits snapshot.
+ *  - `GET /claims/:nrZgl` — for `admin` / `pracownik`, from the claim's
+ *    stored period, times, `hoursAdjustedValue` and limits snapshot
+ *    (`opiekun` has no claims access since 2026-10-22, docs/03-roles.md).
  * `null` (or absent) for a carrier, for list items and whenever the period is
  * all-active (`mileageSource: 'declared'`).
  *
@@ -1081,9 +1082,10 @@ export const ClaimDtoSchema = z.object({
    * LIVE board settlement for a mixed period (docs/20 §0⁵) — per-month board
    * km, filled/required days and the missing dates, plus the amount the claim
    * would be paid on right now. Computed on read by `GET /claims/:nrZgl` for
-   * `admin` / `pracownik` / `opiekun` from the claim's stored period, times,
-   * `hoursAdjustedValue` and limits snapshot (opiekun cannot call the preview
-   * endpoint, hence it lives here too).
+   * `admin` / `pracownik` from the claim's stored period, times,
+   * `hoursAdjustedValue` and limits snapshot, so the detail view shows it
+   * without a preview round-trip. (`opiekun` has no claims access since
+   * 2026-10-22 — docs/03-roles.md#opiekun.)
    *
    * `null` for a carrier, in every other response that returns a `ClaimDto`
    * (submit / PATCH / verification / recalc-limits), and whenever the period

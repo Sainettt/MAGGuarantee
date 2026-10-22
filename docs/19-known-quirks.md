@@ -248,24 +248,24 @@ Source of truth: `schema.prisma` (Vehicle model comment); legacy: `Code.gs:4099-
 
 ---
 
-## 12. <a id="pracownik-ui-label"></a>`pracownik` is "Opiekun wniosków" in PL UI
+## 12. <a id="pracownik-ui-label"></a>`pracownik` is labelled "Pracownik" in the UI (decision 2026-10-22)
 
-The role identifier in DB and JWT is `pracownik`. **Every user-facing label** in PL (and EN once translated) must say "Opiekun wniosków" (claims-caretaker). Do NOT translate `pracownik` literally.
+The role identifier in DB and JWT is `pracownik`, and the UI label is the literal **"Pracownik"** (PL) / **"Employee"** (EN) — `roles.pracownik` in `apps/web/messages/*.json`. Until 2026-10-22 this quirk demanded the label "Opiekun wniosków" (claims-caretaker, after the legacy button `index.html:573` "🏢 Panel Opiekuna wniosków"). That was reversed: the code never followed it, and it made two of the 8 roles (`pracownik` and `opiekun`) read as "opiekun" in the UI. "Opiekun wniosków" survives only as a descriptive phrase in docs; the leader label `roles.lider.pracownik` is "Lider pracowników" / "Employees lead" (renamed the same day from "Lider opiekunów wniosków").
 
 | Layer | Identifier |
 |---|---|
 | DB enum (`Role`) | `pracownik` |
 | JWT `role` claim | `pracownik` |
 | API `@Roles('pracownik')` | `pracownik` |
-| **PL UI label** | **"Opiekun wniosków"** |
-| EN UI label (when added) | "Claims caretaker" |
+| **PL UI label** | **"Pracownik"** |
+| EN UI label | "Employee" |
 | Legacy comment (`Code.gs:944`) | "Pracownik = widzi wszystko, rozlicza wnioski, BEZ ustawień" |
 
-Carrier-facing semantics: this person is the carrier's claims caretaker — they verify and accept wnioski, handle the automatic authorization gate (screenshot upload), deal with reklamacje. They do NOT manage the carrier or fleet (that's `opiekun`, a separate role with overlapping label nicknames).
+Semantics are unchanged: this person verifies and accepts wnioski, handles the automatic authorization gate (screenshot upload), deals with reklamacje. They do NOT manage the carrier or fleet (that's `opiekun`, a separate role).
 
-Source of truth: `docs/03-roles.md#pracownik`; legacy: `index.html:573` (button text "🏢 Panel Opiekuna wniosków").
+Source of truth: `docs/03-roles.md#pracownik`.
 
-**What NOT to do:** do not surface `pracownik` literally in any user-facing string. Do not auto-translate to "Pracownik" / "Worker" / "Сотрудник" — the role's customer-facing semantics is "claims caretaker", not "employee". Easy to get wrong because two of the 8 roles (`pracownik` and `opiekun`) both map to the word "opiekun" in UI labels — they are different DB roles.
+**What NOT to do:** do not rename the label back to "Opiekun wniosków", and do not translate it as "Worker" / "Сотрудник" — "Pracownik" / "Employee" is the fixed pair.
 
 ---
 
@@ -275,7 +275,7 @@ This is **stricter than legacy**. The legacy `getDelegacjeForEksport` allowed `p
 
 Source of truth: `apps/api/src/modules/delegations/delegations.controller.ts` — every `@Roles(...)` decorator on the controller intentionally omits `pracownik`. The decision was locked in conversation; see header comment in the controller file.
 
-The decision rationale: `pracownik` is now a narrow "Opiekun wniosków" role — only claims verification + dashboard. Delegations are an `eksport` / `weryfikator` / `dyspozytor` / carrier concern.
+The decision rationale: `pracownik` is now a narrow claims-only role ("Pracownik" in the UI) — only claims verification + dashboard. Delegations are an `eksport` / `weryfikator` / `dyspozytor` / carrier concern.
 
 **What NOT to do:** if a future agent finds `pracownik` in `@Roles(...)` for any delegation endpoint, that's a **bug** — revert it. Do not "match legacy" for this — legacy was wrong-by-current-decision.
 

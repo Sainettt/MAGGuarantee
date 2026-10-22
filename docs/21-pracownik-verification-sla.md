@@ -2,12 +2,14 @@
 
 > Net-new фича (нет легаси-аналога в `Code.gs`). Решения заказчика зафиксированы 2026-06-10.
 > Цель: claim (wniosek) должен быть верифицирован за **7 польских рабочих дней** после входа в `NA_WERYFIKACJI`. За 3 рабочих дня до дедлайна (и после него) — привлекать внимание pracownik.
+>
+> **2026-10-22:** тот же 7-дневный счётчик распространён на **рекламации** — wniosek в статусе `REKLAMACJA` считается «на часах» от дня подачи рекламации. До этого рекламации никакого срока не имели (документ ошибочно предполагал, что рекламация возвращает wniosek в `NA_WERYFIKACJI`).
 
 ## 1. Правило и якорь
 
-- **SLA:** 7 **польских рабочих дней** (Пн–Пт минус польские дни ustawowo wolne), считая **от дня входа в `NA_WERYFIKACJI`, сам день входа исключён**, отсчёт вперёд. Все вычисления в таймзоне **Europe/Warsaw**, по датам (без времени суток).
-- **Якорь:** `Claim.statusChangedAt` — он re-stamped на КАЖДОМ переходе статуса, в т.ч. при возврате в верификацию через REKLAMACJA, поэтому **часы корректно перезапускаются** на повторной верификации. `statusChangedAt` nullable → **fallback `createdAt`** для редких legacy/edge-строк.
-- **Кого считаем:** только claim'ы в статусе `NA_WERYFIKACJI` (пока «на часах»). После решения (`ZAAKCEPTOWANO`/`ODRZUCONO`/`OCZEKUJE_NA_AUTORYZACJE`) часы останавливаются.
+- **SLA:** 7 **польских рабочих дней** (Пн–Пт минус польские дни ustawowo wolne), считая **от дня входа в `NA_WERYFIKACJI`** (верификация) **или от дня подачи рекламации** (вход в `REKLAMACJA`), **сам день входа исключён**, отсчёт вперёд. Все вычисления в таймзоне **Europe/Warsaw**, по датам (без времени суток).
+- **Якорь:** `Claim.statusChangedAt` — он re-stamped на КАЖДОМ переходе статуса. Рекламация **не** возвращает wniosek в `NA_WERYFIKACJI`: `submitReklamacja` ставит статус `REKLAMACJA` и re-stamps `statusChangedAt` (тот же момент, что `reklamacjaSubmittedAt`), поэтому у рекламации **свои часы от подачи**. Решение по рекламации (`UZNANA` / `ODRZUCONA`) возвращает прежний статус — часы останавливаются. `statusChangedAt` nullable → **fallback `createdAt`** для редких legacy/edge-строк.
+- **Кого считаем:** claim'ы в статусе `NA_WERYFIKACJI` **и `REKLAMACJA`** (решение 2026-10-22; до него — только `NA_WERYFIKACJI`). После решения (`ZAAKCEPTOWANO`/`ODRZUCONO`/`OCZEKUJE_NA_AUTORYZACJE`) часы останавливаются.
 
 ## 2. Бакеты (взаимоисключающие, overdue побеждает)
 
@@ -35,13 +37,13 @@ deadline        = addPolishWorkingDays(anchorDate, 7)
 
 - `GET /diagnostics/dashboard` (`@Roles('admin','pracownik')`), `DiagnosticsService.getDashboard()`.
 - **Заменяет** текущую кривую секцию `urgent` (она брала `updatedAt < now − 3 КАЛЕНДАРНЫХ дня` — неверный якорь и не рабочие дни).
-- Репозиторий тянет `NA_WERYFIKACJI` claim'ы + `statusChangedAt` (индекс `@@index([status, statusChangedAt])` уже есть; fallback `createdAt`); сервис бакетит через util из §3.
-- `DashboardDto` (в `@magguarantee/shared`): отдать `overdue[]` и `dueSoon[]`, в каждой строке — `nrZgl`, carrier, plate, `workingDaysLeft`, дип-линк. Согласовать форму DTO с web-agent.
+- Репозиторий тянет `NA_WERYFIKACJI` **и `REKLAMACJA`** claim'ы + `statusChangedAt` (индекс `@@index([status, statusChangedAt])` уже есть; fallback `createdAt`); сервис бакетит через util из §3.
+- `DashboardDto` (в `@magguarantee/shared`): отдать `overdue[]` и `dueSoon[]`, в каждой строке — `nrZgl`, carrier, plate, `workingDaysLeft`, **`status`** (чтобы виджет и список подписывали строку рекламации как «reklamacja», а не «weryfikacja»), дип-линк. Согласовать форму DTO с web-agent.
 
 ## 5. Дневной дайджест-email (api-agent) — первый scheduled-job
 
 - **Инструмент:** `@nestjs/schedule` `@Cron('0 7 * * *', { timeZone: 'Europe/Warsaw' })` — лёгкий, BullMQ под одну дневную задачу НЕ поднимаем.
-- **Логика:** раз в день сканирует `NA_WERYFIKACJI`, бакетит util'ой; если есть `dueSoon`+`overdue` → шлёт **ОДНО** письмо со списком. **Stateless** — никакого флага «уже уведомили», никакой записи в БД.
+- **Логика:** раз в день сканирует `NA_WERYFIKACJI` и `REKLAMACJA` (с 2026-10-22), бакетит util'ой; если есть `dueSoon`+`overdue` → шлёт **ОДНО** письмо со списком. **Stateless** — никакого флага «уже уведомили», никакой записи в БД.
 - **Пусто → письма нет** (без «all clear»).
 - **Получатели:** все активные пользователи с ролью `pracownik` (общая очередь, назначения claim'а нет). v1 — **только pracownik** (не admin). `Promise.allSettled` по адресам; per-send `record()` в mail-registry.
 - **Шаблон:** `mail/templates/verification-digest.tsx` + метод `MailService.sendVerificationDigest`, plain-text fallback. Визуал — общая email-дизайн-система ([22-email-design.md](22-email-design.md), бренд `#E02020`, не `#dc2626`).

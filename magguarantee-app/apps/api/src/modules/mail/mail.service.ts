@@ -23,9 +23,13 @@ import {
   type MaksimConfirmationRequestProps,
 } from './templates/maksim-confirmation-request';
 import {
+  isReklamacjaRow,
+  REKLAMACJA_MARKER_LABEL,
   VerificationDigestEmail,
+  verificationDigestHeadline,
   workingDaysLabel,
   type VerificationDigestProps,
+  type VerificationDigestRow,
 } from './templates/verification-digest';
 import { PasswordResetEmail } from './templates/password-reset';
 import { LoginCodeEmail } from './templates/login-code';
@@ -184,7 +188,8 @@ export interface IMailService {
   ): Promise<void>;
   /**
    * Verification-SLA daily digest (docs/21 §5). One email per recipient
-   * listing overdue + due-soon claims awaiting verification.
+   * listing overdue + due-soon claims awaiting verification and reklamacje
+   * awaiting a decision (both on the same 7-working-day clock since 2026-10-22).
    */
   sendVerificationDigest(
     email: string,
@@ -358,7 +363,7 @@ export class MailService implements IMailService {
     const total = counts.overdueCount + counts.dueSoonCount;
     await this._dispatch({
       to: email,
-      subject: `Weryfikacja zgłoszeń — ${total} wymaga uwagi`,
+      subject: verificationDigestHeadline(total),
       text: this.buildVerificationDigestText(props),
       html: await render(VerificationDigestEmail(props)),
       template: 'verification-digest',
@@ -371,29 +376,26 @@ export class MailService implements IMailService {
   /**
    * Plain-text fallback for the verification-SLA digest. Mirrors the HTML
    * structure: overdue group first, then due-soon, each row carrying the same
-   * «po terminie» / «{n} dni robocze» label as the template.
+   * «po terminie» / «{n} dni robocze» label as the template, and the same
+   * «Reklamacja» marker on reklamacja rows.
    */
   private buildVerificationDigestText(props: VerificationDigestProps): string {
     const lines: string[] = [
-      'MAGGuarantee — zgłoszenia do weryfikacji',
+      'MAGGuarantee — zgłoszenia do weryfikacji i reklamacje',
       '',
     ];
+    const row = (r: VerificationDigestRow): string => {
+      const marker = isReklamacjaRow(r) ? ` [${REKLAMACJA_MARKER_LABEL}]` : '';
+      return `  - ${r.nrZgl}${marker} — ${r.carrierName} · ${r.vehiclePlate} · ${workingDaysLabel(r.workingDaysLeft)}`;
+    };
     if (props.overdue.length > 0) {
       lines.push(`Po terminie (${props.overdue.length}):`);
-      for (const r of props.overdue) {
-        lines.push(
-          `  - ${r.nrZgl} — ${r.carrierName} · ${r.vehiclePlate} · ${workingDaysLabel(r.workingDaysLeft)}`,
-        );
-      }
+      for (const r of props.overdue) lines.push(row(r));
       lines.push('');
     }
     if (props.dueSoon.length > 0) {
       lines.push(`Zbliża się termin (${props.dueSoon.length}):`);
-      for (const r of props.dueSoon) {
-        lines.push(
-          `  - ${r.nrZgl} — ${r.carrierName} · ${r.vehiclePlate} · ${workingDaysLabel(r.workingDaysLeft)}`,
-        );
-      }
+      for (const r of props.dueSoon) lines.push(row(r));
       lines.push('');
     }
     lines.push(`Otwórz panel weryfikacji: ${props.deeplink}`);

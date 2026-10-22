@@ -3,6 +3,10 @@
 // `limits.service.spec.ts`. We stub `DiagnosticsRepository` and only exercise
 // the bucketing / sorting translation layer in `DiagnosticsService`.
 //
+// Since the 2026-10-22 decision (docs/21 §1) the SLA clock covers both
+// `NA_WERYFIKACJI` and `REKLAMACJA`; the candidate list mixes the two and the
+// service must bucket them identically and pass `status` through.
+//
 // Anchors are derived with the real `addPolishWorkingDays` helper so the test
 // is robust against the exact Polish calendar: we pick a reference `now`, then
 // craft an anchor whose deadline (`anchor + 7 working days`) sits exactly `k`
@@ -69,17 +73,18 @@ interface FakeRepoOpts {
 }
 
 function makeService(opts: FakeRepoOpts = {}): DiagnosticsService {
+  const candidates = opts.slaCandidates ?? [];
+  const countOf = (status: DashboardSlaCandidateRow['status']): number =>
+    candidates.filter((c) => c.status === status).length;
   const repo = {
     countClaimsByStatus: jest.fn(async () => ({
-      NA_WERYFIKACJI: opts.slaCandidates?.length ?? 0,
+      NA_WERYFIKACJI: countOf('NA_WERYFIKACJI'),
       ZAAKCEPTOWANO: 0,
       ODRZUCONO: 0,
-      REKLAMACJA: 0,
+      REKLAMACJA: countOf('REKLAMACJA'),
       OCZEKUJE_NA_AUTORYZACJE: 0,
     })),
-    findNaWeryfikacjiForSla: jest.fn(
-      async () => opts.slaCandidates ?? [],
-    ),
+    findOnSlaClock: jest.fn(async () => candidates),
     findRecentClaimAudit: jest.fn(async () => []),
     findTopCarriersByPayment: jest.fn(async () => []),
     findMonthlySeries: jest.fn(async () => []),
@@ -173,7 +178,7 @@ describe('DiagnosticsService.getDashboard — verification-SLA buckets', () => {
     });
   });
 
-  it('emits empty buckets when no NA_WERYFIKACJI claims at risk', async () => {
+  it('emits empty buckets when no on-the-clock claims are at risk', async () => {
     const svc = makeService({
       slaCandidates: [
         makeCandidate({ anchorDate: anchorForLeft(4) }), // onTrack
@@ -214,6 +219,78 @@ describe('DiagnosticsService.getDashboard — verification-SLA buckets', () => {
     expect(dto.topCarriers).toEqual([]);
     expect(dto.monthlySeries).toEqual([]);
     expect(dto.reklamacje).toEqual({ count: 0 });
+  });
+});
+
+describe('DiagnosticsService.getDashboard — REKLAMACJA runs the same SLA clock', () => {
+  beforeEach(() => {
+    seq = 0;
+  });
+
+  it('buckets REKLAMACJA rows by their own anchor and keeps status REKLAMACJA', async () => {
+    const svc = makeService({
+      slaCandidates: [
+        makeCandidate({
+          nrZgl: 'REK-OVERDUE',
+          status: 'REKLAMACJA',
+          anchorDate: anchorForLeft(-2),
+        }),
+        makeCandidate({
+          nrZgl: 'REK-SOON',
+          status: 'REKLAMACJA',
+          anchorDate: anchorForLeft(1),
+        }),
+        makeCandidate({
+          nrZgl: 'REK-ONTRACK',
+          status: 'REKLAMACJA',
+          anchorDate: anchorForLeft(5),
+        }),
+        makeCandidate({ nrZgl: 'WER-SOON', anchorDate: anchorForLeft(2) }),
+      ],
+    });
+
+    const dto = await svc.getDashboard(NOW);
+
+    expect(dto.overdue).toEqual([
+      expect.objectContaining({
+        nrZgl: 'REK-OVERDUE',
+        status: 'REKLAMACJA',
+        workingDaysLeft: -2,
+      }),
+    ]);
+    // One list for both statuses, sorted purely by urgency.
+    expect(
+      dto.dueSoon.map((r) => [r.nrZgl, r.status, r.workingDaysLeft]),
+    ).toEqual([
+      ['REK-SOON', 'REKLAMACJA', 1],
+      ['WER-SOON', 'NA_WERYFIKACJI', 2],
+    ]);
+    // onTrack reklamacja is dropped like any onTrack row.
+    const allNr = [...dto.overdue, ...dto.dueSoon].map((r) => r.nrZgl);
+    expect(allNr).not.toContain('REK-ONTRACK');
+  });
+
+  it('gives a REKLAMACJA row the same workingDaysLeft as a NA_WERYFIKACJI row with the same anchor', async () => {
+    const anchor = anchorForLeft(0);
+    const svc = makeService({
+      slaCandidates: [
+        makeCandidate({ nrZgl: 'WER', anchorDate: anchor }),
+        makeCandidate({
+          nrZgl: 'REK',
+          status: 'REKLAMACJA',
+          anchorDate: anchor,
+        }),
+      ],
+    });
+
+    const dto = await svc.getDashboard(NOW);
+
+    expect(dto.overdue).toEqual([]);
+    expect(dto.dueSoon.map((r) => r.workingDaysLeft)).toEqual([0, 0]);
+    expect(dto.dueSoon.map((r) => r.status).sort()).toEqual([
+      'NA_WERYFIKACJI',
+      'REKLAMACJA',
+    ]);
   });
 });
 

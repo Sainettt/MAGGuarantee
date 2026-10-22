@@ -30,7 +30,7 @@
 
 Юзер предложил такой порядок, но он субоптимален:
 
-- **pracownik и admin делят один Employee panel и оба верифицируют wnioski** — нет смысла делать их в разных фазах. Делаем вместе. (NB: pracownik — узкая роль «Opiekun wniosków», только wnioski + dashboard, без CRUD по carrier/vehicle/driver/trailer; admin — полный scope. См. [03-roles.md#pracownik](03-roles.md#pracownik).)
+- **pracownik и admin делят один Employee panel и оба верифицируют wnioski** — нет смысла делать их в разных фазах. Делаем вместе. (NB: pracownik — узкая роль, в UI «Pracownik», только wnioski + dashboard, без CRUD по carrier/vehicle/driver/trailer; admin — полный scope. См. [03-roles.md#pracownik](03-roles.md#pracownik).)
 - **planista — read-only** — это самая простая роль, она никак не помогает выявить риски архитектуры. Делать её перед admin = трата времени без пользы.
 - **carrier (przewoznik) — самый изолированный** — это лучший first-real-user слайс. Он видит только свои данные, простые формы, минимум зависимостей.
 
@@ -151,7 +151,7 @@
    - `CarrierOwnershipGuard` для carrier-эндпоинтов (read-доступ к своим авто/водителям/прицепам — мутации этих сущностей делает только admin/opiekun).
 8. Audit interceptor (минимальный): декоратор `@Audit('createCarrier')` пишет в `audit_log`.
 9. Lookups endpoints (`/lookups/dyspozytor`, `/lookups/planisci`, `/lookups/opiekuni`, `/lookups/cert-types`).
-10. Внешние интеграции: VIES, Biała Lista, info-car (см. [16-jobs-and-integrations.md](16-jobs-and-integrations.md#внешние-rest-интеграции)).
+10. Внешние интеграции: VIES, Biała Lista (info-car удалён решением 2026-10-22: VIN у машины нет, UI не вызывал; см. [16-jobs-and-integrations.md](16-jobs-and-integrations.md#внешние-rest-интеграции)).
 11. **GPS tracker — модуль-скелетон** (`apps/api/src/modules/integrations/gps/`): `GpsProvider` interface, `GpsMockProvider` (детерминированные позиции от `plateNumber`), BullMQ `gps-poll` repeatable job (репликирует контракт реального polling-а), Redis cache layer, endpoint-ы `/api/v1/integrations/gps/positions[/:vehicleId]` с ownership-фильтрацией. **Реальный API access ещё не предоставлен** — `GpsVendorProvider` остаётся заглушкой, выбор провайдера через `GPS_PROVIDER=mock|vendor` env. Полная спецификация — [16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api](16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api). Когда MAGTRANS отдаст credentials — финализируем `GpsVendorProvider` без миграций по DB и без правок UI (контракт уже стабилен).
 12. Unit tests: ownership guards, password hashing, репозитории.
 
@@ -230,7 +230,7 @@
 
 **Цель:** обе роли получают доступ к Employee panel — с разным scope-ом, **не путать**:
 
-- **`pracownik` («Opiekun wniosków»)** — узкая роль. Видит **только 2 вкладки**: Dashboard + Wnioski. Единственная задача — верифицировать заявления (изменение статуса, korekta godzin, nrZlecenia, запрос авторизации у Maksima, обработка reklamacji). Никакого CRUD по carrier/vehicle/driver/trailer/trailer-type/limits/users, никакого audit-log, никаких diagnostics. См. [03-roles.md#pracownik](03-roles.md#pracownik).
+- **`pracownik`** (UI «Pracownik») — узкая роль. Видит **только 2 вкладки**: Dashboard + Wnioski. Единственная задача — верифицировать заявления (изменение статуса, korekta godzin, nrZlecenia, запрос авторизации у Maksima, обработка reklamacji). Никакого CRUD по carrier/vehicle/driver/trailer/trailer-type/limits/users, никакого audit-log, никаких diagnostics. См. [03-roles.md#pracownik](03-roles.md#pracownik).
 - **`admin`** — полный scope. Всё, что умеет pracownik **плюс** CRUD по справочным сущностям и пользователям, управление лимитами, audit log, diagnostics. См. [03-roles.md#admin](03-roles.md#admin).
 
 В этой фазе делаем оба сразу, потому что они делят один `/employee` layout — разные пользователи видят разные tabs через guard на роль. Бэкенд-эндпоинты тоже общие по path, разнятся только `@Roles(...)` декораторы.

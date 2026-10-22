@@ -10,7 +10,7 @@
 //   ./trailers.ts      — trailers (Wave 3)
 //   ./trailer-types.ts — trailer-type lookup CRUD (Wave 3)
 //   ./lookups.ts       — read-only people pickers (Wave 3)
-//   ./integrations/    — VIES / Biała Lista / info-car / GPS (Wave 4)
+//   ./integrations/    — VIES / Biała Lista / GPS / BugBot (Wave 4)
 //   ./claims.ts        — Phase 3 — claims (wnioski) submit/preview/reklamacja
 //   ./delegations.ts   — Phase 3 — delegations submit/cancel
 //   ./planner-transfers.ts — docs/29 — vehicle planner transfer + history

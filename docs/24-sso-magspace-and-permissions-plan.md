@@ -342,8 +342,8 @@ A1 и A3 не зависят от MAGSpace вообще; A2 разрабатыв
 ### Что такое scope и почему он остаётся на роли
 
 Permission отвечает «может ли пользователь верифицировать wnioski вообще».
-Scope отвечает «какие именно строки он видит»: opiekun — wnioski своих
-перевозчиков, dyspozytor — машины своей команды, przewoznik — только своё.
+Scope отвечает «какие именно строки он видит»: opiekun — перевозчики и
+машины своих подопечных, dyspozytor — машины своей команды, przewoznik — только своё.
 Это ветки `if (user.role === ...)` внутри `_scopeFilters`-методов 15 сервисов,
 подставляющие `WHERE carrierId IN (...)`. Они завязаны на структуру данных
 роли (`Carrier.opiekunId`, `User.teamId`, `Carrier.userId`), а не на права.
@@ -360,7 +360,7 @@ export const PERMISSIONS = [
   'km.read', 'watchdog.read',
   'trailer_types.manage', 'teams.manage', 'limits.manage',
   'users.manage', 'sso.manage', 'audit.read', 'diagnostics.read',
-  'lookups.external',                                     // VIES / Biała lista / info-car
+  'lookups.external',                                     // VIES / Biała lista (info-car удалён 2026-10-22)
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -396,7 +396,7 @@ export function hasAnyPermission(role: Role, ps: readonly Permission[]): boolean
 | diagnostics | 5 | |
 | fleet, trailer-types, gps, guarantee-watchdog | по 4 | |
 | opiekun | 2 | |
-| users, white-list, vies, inspection, audit-query, limits, alerts, teams, sso (новый) | по 1 | |
+| users, white-list, vies, ~~inspection~~ (удалён 2026-10-22), audit-query, limits, alerts, teams, sso (новый) | по 1 | |
 
 Внутри `OpiekunOwnershipGuard` / `CarrierOwnershipGuard` ветвление по роли
 остаётся — это scope.

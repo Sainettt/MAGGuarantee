@@ -62,7 +62,7 @@
 
 ### Что видят роли
 
-- **pracownik / admin / opiekun** — в разбивке по месяцам рядом с гарантией месяца: «Km wg weryfikatora» и «Wpisane dni: X z Y»; при дырах в активном месяце — плашка «brak danych» с датами.
+- **pracownik / admin** (opiekun с 2026-10-22 wnioski не видит) — в разбивке по месяцам рядом с гарантией месяца: «Km wg weryfikatora» и «Wpisane dni: X z Y»; при дырах в активном месяце — плашка «brak danych» с датами.
 - **przewoźnik** — превью и wniosek считаются по тому же правилу (по доске). Никакого отдельного предупреждения про незаписанный последний день (решение 2026-09-24). Для смешанного периода — одна общая строка (`carrier.breakdown.mixedPeriodNotice`): доплата зависит от пробега в дни с гарантией, итоговую сумму устанавливают после weryfikacji. Цифры доски и `mileageEffective` перевозчик не видит (docs/14 §16.5.3).
 
 ### Что НЕ меняется
@@ -77,7 +77,7 @@
 | Слой | Что |
 |---|---|
 | shared | `claim-settlement.ts`: `settleClaim` принимает сырые строки доски (`board: BoardDay[]`) + `dateStart`/`dateEnd` и сам раскладывает их по месяцам (`SettlementBoard`: км, `daysFilled`/`daysRequired`, `missingDates` по месяцу); при «все включены» возвращает результат до чтения доски. Новое в результате: `mileageSource`, `board`. Тесты — `tests/claim-settlement.test.ts` |
-| api | `VehicleDailyKmRepository.listBoardDays`; `ClaimsService._settle` читает доску только для смешанного периода; принудительный пересчёт смешанного wniosku при сохранении верификации и при решении; 422 `CLAIM_BOARD_INCOMPLETE` / `CLAIM_BOARD_CHANGED` на `ZAAKCEPTOWANO`; при дырах верификация сохраняется без Maksim-гейта и без авто-перехода; `boardSettlement` в `GET /claims/:nrZgl` (admin/pracownik/opiekun) и в staff-превью |
+| api | `VehicleDailyKmRepository.listBoardDays`; `ClaimsService._settle` читает доску только для смешанного периода; принудительный пересчёт смешанного wniosku при сохранении верификации и при решении; 422 `CLAIM_BOARD_INCOMPLETE` / `CLAIM_BOARD_CHANGED` на `ZAAKCEPTOWANO`; при дырах верификация сохраняется без Maksim-гейта и без авто-перехода; `boardSettlement` в `GET /claims/:nrZgl` (admin/pracownik; opiekun с 2026-10-22 wnioski не видит) и в staff-превью |
 | web | колонки «Km wg weryfikatora» / «Wpisane dni» в `BreakdownTable` для staff; `BoardGapNotice` и гейт принятия в `ClaimModal`; `mixedPeriodNotice` для перевозчика вместо удалённых `gapNotice`/`gapNoticeMonth` |
 | docs | [01-overview.md §«Расчёт доплаты»](01-overview.md#расчёт-доплаты), [13-api-design.md](13-api-design.md), [14-design-system.md §16.5](14-design-system.md) — обновлены |
 

@@ -617,8 +617,8 @@ function ModalBody({
   //    claim: the preview re-prices it on the board as it stands now, which
   //    drifts from the decided dopłata once the weryfikator edits a day;
   //  - otherwise the live preview once it exists (retained across refetches
-  //    by `placeholderData`), else the claim (before the first response, on
-  //    error, and for opiekun, whose /preview is 403).
+  //    by `placeholderData`), else the claim (before the first response and
+  //    on error).
   const amountSrc = selectAmountSource(claim, previewQ.data);
 
   // The dopłata shown in the locked field.
@@ -1154,11 +1154,11 @@ function ModalBody({
           {/* «Brak danych» on the km board (§16.5.6) — FIRST inside the panel,
               directly above the select that no longer offers acceptance, in
               view AND edit (the reader learns why acceptance won't be offered
-              before morphing to edit). Gated on status, not role — opiekun sees
-              it too. Suppressed when the guarantee is already met (missing days
-              can only ADD km, so "acceptable once filled" would be false), while
-              the outing is in transit (gaps are expected, the red banner already
-              blocks everything) and on a reklamacja (the board plays no part). */}
+              before morphing to edit). Gated on status, not role. Suppressed
+              when the guarantee is already met (missing days can only ADD km,
+              so "acceptable once filled" would be false), while the outing is
+              in transit (gaps are expected, the red banner already blocks
+              everything) and on a reklamacja (the board plays no part). */}
           {showBoardGapNotice && claimBoard && (
             <BoardGapNotice board={claimBoard} dateEnd={claim.dateEnd} />
           )}

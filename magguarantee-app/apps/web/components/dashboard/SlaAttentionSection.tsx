@@ -14,13 +14,21 @@
 // Each row links to the claim filter (`/employee/claims?nrZgl=…`), matching
 // the old `urgent` row's deep-link, and carries a worded countdown badge so
 // urgency is never colour-alone (a11y).
+//
+// docs/21 — the buckets also carry open reklamacje (`REKLAMACJA`). Those rows
+// get the regular claim <StatusBadge> stacked under the countdown (no new
+// styling; the column is never wider than the countdown chip, so the row
+// holds at phone width) and the aria-label names the reklamacja, because the
+// label replaces the chip text for screen readers.
 
 import { AlertTriangle, Clock } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import type { DashboardSlaClaim } from '@magguarantee/shared';
 
+import { StatusBadge } from '@/components/carrier/StatusBadge';
 import { Badge } from '@/components/ui/Badge';
+import { slaRowView } from '@/lib/dashboard/slaRow';
 import { cn } from '@/lib/utils';
 
 import { SlaCountdownBadge } from './SlaCountdownBadge';
@@ -90,49 +98,54 @@ export function SlaAttentionSection({
       </header>
       <div className="p-3">
         <ul className="space-y-1">
-          {claims.map((c) => (
-            <li key={c.id}>
-              <Link
-                href={`/employee/claims?nrZgl=${encodeURIComponent(c.nrZgl)}`}
-                aria-label={t('rowAria', {
-                  nrZgl: c.nrZgl,
-                  status:
-                    severity === 'overdue'
-                      ? t('countdown.overdue', {
-                          days: Math.abs(c.workingDaysLeft),
-                        })
-                      : c.workingDaysLeft === 0
+          {claims.map((c) => {
+            const { kind, countdown } = slaRowView(c);
+            return (
+              <li key={c.id}>
+                <Link
+                  href={`/employee/claims?nrZgl=${encodeURIComponent(c.nrZgl)}`}
+                  aria-label={t('rowAria', {
+                    nrZgl: c.nrZgl,
+                    kind,
+                    status:
+                      countdown.key === 'lastDay'
                         ? t('countdown.lastDay')
-                        : t('countdown.dueSoon', {
-                            days: c.workingDaysLeft,
+                        : t(`countdown.${countdown.key}`, {
+                            days: countdown.days,
                           }),
-                })}
-                className={cn(
-                  'flex items-center gap-2 rounded-md px-2 py-1.5',
-                  'cursor-pointer transition-colors',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset',
-                  s.row,
-                )}
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate">
-                    <span className="font-medium tabular-nums text-text">
-                      {c.nrZgl}
-                    </span>{' '}
-                    <span className="text-xs text-text-sub">
-                      {c.carrierName ?? '—'}
+                  })}
+                  className={cn(
+                    'flex items-center gap-2 rounded-md px-2 py-1.5',
+                    'cursor-pointer transition-colors',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset',
+                    s.row,
+                  )}
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">
+                      <span className="font-medium tabular-nums text-text">
+                        {c.nrZgl}
+                      </span>{' '}
+                      <span className="text-xs text-text-sub">
+                        {c.carrierName ?? '—'}
+                      </span>
                     </span>
+                    {c.vehiclePlate ? (
+                      <span className="block truncate text-xs text-text-sub tabular-nums">
+                        {c.vehiclePlate}
+                      </span>
+                    ) : null}
                   </span>
-                  {c.vehiclePlate ? (
-                    <span className="block truncate text-xs text-text-sub tabular-nums">
-                      {c.vehiclePlate}
-                    </span>
-                  ) : null}
-                </span>
-                <SlaCountdownBadge workingDaysLeft={c.workingDaysLeft} />
-              </Link>
-            </li>
-          ))}
+                  <span className="flex shrink-0 flex-col items-end gap-1">
+                    <SlaCountdownBadge workingDaysLeft={c.workingDaysLeft} />
+                    {kind === 'reklamacja' ? (
+                      <StatusBadge status="REKLAMACJA" />
+                    ) : null}
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       </div>
     </section>

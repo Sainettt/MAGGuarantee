@@ -48,7 +48,7 @@
 | Роль | UI-лейбл (PL) | Описание | Главный экран |
 |---|---|---|---|
 | `admin` | Admin | Полный доступ. Может всё. | Employee panel + Diagnostics |
-| `pracownik` | **Opiekun wniosków** | Узкий «оператор заявок» — только верификация wniosków | Employee panel (Dashboard + Wnioski) |
+| `pracownik` | **Pracownik** | Узкий «оператор заявок» (opiekun wniosków) — только верификация wniosków | Employee panel (Dashboard + Wnioski) |
 | `opiekun` | Opiekun | Куратор группы перевозчиков | Employee panel (раздел Moja opieka) |
 | `planista` | Planista | Спедитор закреплённых авто | Planista panel (read-only) |
 | `dyspozytor` | Dyspozytor | Диспетчер по конкретным авто | Dyspozytor panel (read-only) |
@@ -56,7 +56,7 @@
 | `eksport` | Eksport | Эксперт экспорта | Eksport panel (доска выездов, отметка `gotowy`) |
 | `weryfikator` | Weryfikator | Верификатор делегаций | Weryfikator panel |
 
-> ⚠️ Роль называется `pracownik` в БД и в коде, но в UI она всегда отображается как **«Opiekun wniosków»** (claims-caretaker). Это сохраняем — пользователи MagTrans привыкли к этому термину. Не путать с ролью `opiekun` (куратор перевозчиков, совсем другой scope).
+> ⚠️ Роль называется `pracownik` в БД, в коде и в UI: лейбл **«Pracownik»** (EN «Employee»), ключ `roles.pracownik`. **Решение 2026-10-22:** вариант «Opiekun wniosków» в UI отклонён ([docs/19](19-known-quirks.md#pracownik-ui-label) квирк #12 пересмотрен). Слова «opiekun wniosków» в доках — только описание функции. Не путать с ролью `opiekun` (куратор перевозчиков, совсем другой scope).
 
 > 🗓️ **Phase 11 (Team) — реализовано 2026-06-17:** сущность `Team` (команда диспетчеров) даёт **gchat-уведомления о выездах** (интеграция выпиливалась 2026-07-28, возвращена 2026-08-07) и доступ диспетчеров к авто своей команды. Отдельного approval выезда нет: акцептом служит статус `gotowy`, который ставит `eksport` (решение 2026-07-03, см. [20-phase-7-eksport-weryfikator.md](20-phase-7-eksport-weryfikator.md) §0″).
 
@@ -111,12 +111,12 @@
 | Создание, редактирование, деактивация перевозчиков | Carrier (только свои; **удаление** перевозчика — только admin) |
 | CRUD авто, прицепов, водителей и их вложений | Vehicle / Trailer / Driver под своими carrier; удаление — только soft, hard-delete у admin |
 | Reset password перевозчику | Только свои |
-| Видеть wnioski | Только своих перевозчиков (read-only, без верификации) |
 | Видеть выезды | Только своих перевозчиков, все статусы |
 | Km-рапорт | Полная флота своих перевозчиков, включая стоящие машины |
 | Алерты по документам, compliance гарантии, эпизоды watchdog | Только свои перевозчики |
-| VIES, Biała Lista, info-car | В формах перевозчика и машины |
-| GPS-позиции | Машины своих перевозчиков |
+| VIES, Biała Lista | В форме перевозчика (VIES всегда для страны `PL` — решение 2026-10-22: выбор страны не нужен). **info-car удалён решением 2026-10-22**: у машины нет VIN, UI эндпоинт не вызывал |
+| GPS-позиции | Машины своих перевозчиков. **Пока только API**: воркер, который кладёт позиции в Redis, и UI не сделаны; источник данных не решён (SpedTrans или GPS-портал). Решение 2026-10-22 — оставить как есть, не удалять |
+| Письма по wnioskam своих перевозчиков («Nowy wniosek», решение) | Приходят на его e-mail. Решение 2026-10-22: письма остаются, хотя самих wniosków в системе он не видит |
 | Заявка на смену планисты машины, отмена своей заявки, журнал планистов машины | Машины своих перевозчиков. Решает admin или лидер текущего планисты ([29](29-vehicle-planner-transfer-plan.md)) |
 
 ### Что НЕ может
@@ -124,7 +124,7 @@
 - Менять планисту машины напрямую — только заявкой (docs/29 R1). Планиста выбирается сразу только при создании машины.
 - Действовать на перевозчиках с другим `opiekunId` (403).
 - Верифицировать заявления и принимать по ним решения (это `pracownik`/`admin`).
-- Видеть **все** wnioski — только wnioski **своих** перевозчиков.
+- Видеть wnioski вообще: ни списка, ни карточки, ни в каком виде (решение 2026-10-22; до него был read-only по своим перевозчикам, из `GET /claims` и `GET /claims/:nrZgl` opiekun убран).
 - Удалять перевозчиков и делать hard-delete чего-либо.
 
 ### Audit log
@@ -133,11 +133,14 @@
 
 ### Статистика «Moja opieka»
 
-По каждому подопечному перевозчику считаются:
-- `jezdzace` — авто, которые ездили в последние N дней (по полю `Vehicle.lastDroveAt`),
-- `stojace` — авто, не выезжавшие давно,
-- `nieaktywne` — `active=false`,
-- `potencjalne` — `numberOfVehicle - aktualnaLiczbaAut` (потенциал по KREPTD).
+По каждому подопечному перевозчику машины раскладываются по жизненному циклу (`computeVehicleLifecycle` в `vehicles/vehicle-lifecycle.ts`: считается от выездов, **не** от `Vehicle.lastDroveAt`; выровнено с кодом 2026-10-22):
+- `aktywne` — `active=true` и есть незавершённый выезд (`zgloszony` / `gotowy` / `w_trasie`),
+- `stojace` — `active=true`, выезда нет, простой 0–14 календарных дней (от последнего съезда, у машины без выездов — от даты создания),
+- `nieaktywne` — то же, простой 15–28 дней,
+- `doUsuniecia` — то же, простой ≥29 дней,
+- `wylaczone` — `active=false` (ручная деактивация),
+- `total` — сумма пяти корзин выше (все не-удалённые машины перевозчика),
+- `potencjalne` — `max(0, numberOfVehicle − total)` (потенциал по KREPTD).
 
 ---
 
@@ -185,16 +188,16 @@
 
 ---
 
-## <a id="pracownik"></a>👨‍💼 Opiekun wniosków (`pracownik`)
+## <a id="pracownik"></a>👨‍💼 Pracownik (`pracownik`)
 
 **Кто это:** сотрудник MagTrans, чья **единственная задача — верифицировать заявления (wnioski)**. Не управляет перевозчиками, авто, водителями или прицепами. Не имеет доступа к настройкам или административным панелям.
 
-> В legacy GAS-коде эта роль так и закомментирована: *«Pracownik = widzi wszystko, rozlicza wnioski, BEZ ustawień»* ([Code.gs:944](../Code.gs)). UI-лейбл — «Opiekun wniosków», не «Pracownik». В новой системе — то же.
+> В legacy GAS-коде эта роль так и закомментирована: *«Pracownik = widzi wszystko, rozlicza wnioski, BEZ ustawień»* ([Code.gs:944](../Code.gs)). UI-лейбл в новой системе — «Pracownik» (решение 2026-10-22; legacy-кнопка «Panel Opiekuna wniosków» не воспроизводится).
 
 ### Главный экран
 
 `Employee panel` с **двумя вкладками только**:
-1. **📊 Dashboard** — KPI, urgent-список, ostatnia aktywność, monthly-trend, top-przewoźnicy, reklamacje, top-payouts, wypłaty na planistę.
+1. **📊 Dashboard** (`GET /diagnostics/dashboard`; состав выровнен с кодом 2026-10-22) — пять KPI по статусам (razem, na weryfikacji, zaakceptowano, odrzucono, oczekuje na autoryzację), блок внимания SLA (`overdue` / `dueSoon`, [docs/21](21-pracownik-verification-sla.md)), график по месяцам за 12 месяцев (число wniosków + сумма EUR), разбивка по статусам, «Ostatnia aktywność» (audit), top-5 przewoźników по выплатам, счётчик reklamacji. Виджетов «top-payouts» и «wypłaty na planistę» нет.
 2. **📋 Wnioski** — таблица всех wniosków с фильтрами (статус, перевозчик, текстовый поиск).
 
 Вкладки `Carriers / Vehicles / Drivers / Trailers / Trailer types` ему **не показываются** — они для `admin`. Вкладка `Moja opieka` — для `opiekun`.
@@ -210,7 +213,7 @@
 | Указать `nrZlecenia` (номер заказа) при акцепте | `updateClaimFull` (поле `nrZlecenia`) |
 | Авто-гейт авторизации (ручного запроса нет): при zapisie weryfikacji с `doplata > getAuthThreshold(dniJezdne)` wniosek **автоматически** переходит в `OCZEKUJE NA AUTORYZACJĘ` + email Maksim'у | `sendAuthorizationRequest` → авто внутри `PATCH /claims/:nrZgl/verification` |
 | Загрузить screenshot подтверждения Maksima (после внесистемного email-потока; разблокирует решение) | `uploadAuthScreenshot` → `POST /claims/:nrZgl/authorization-confirmation` |
-| Решение по reklamacji: `UZNANA` (с обязательным `reklamacjaOrderNumber`) или `ODRZUCONA`; статус wniosku возвращается в прежний, payout-поля не трогаются | `PATCH /claims/:nrZgl` |
+| Решение по reklamacji: `UZNANA` (с обязательным `reklamacjaOrderNumber`) или `ODRZUCONA`; статус wniosku возвращается в прежний, payout-поля не трогаются. На рассмотрение — те же 7 польских рабочих дней от подачи рекламации, что и на верификацию (решение 2026-10-22, [docs/21](21-pracownik-verification-sla.md)) | `PATCH /claims/:nrZgl` |
 | Видеть dashboard со статистикой по всем wnioskom | `GET /diagnostics/dashboard` |
 
 ### Что **НЕ** может
@@ -231,9 +234,11 @@
 
 > Legacy enforcement: все CRUD-функции по carrier/vehicle/driver/trailer/trailer-type обёрнуты в `requireAdmin(callerLogin)` ([Code.gs:1212](../Code.gs)). `pracownik` в этих эндпоинтах получает `'Brak uprawnień (wymaga admin)'`. В UI вкладки этих сущностей просто не рендерятся для `pracownik` ([index.html:4682-4690](../index.html)).
 
-### Внешние проверки (VIES, Biała Lista MF, info-car)
+### Внешние проверки (VIES, Biała Lista MF)
 
-В legacy эти эндпоинты не имеют permission-check (любой залогиненный вызывает). В новой системе — они **используются только в формах carrier/vehicle**, поэтому де-факто доступны только `admin` и `opiekun`. `pracownik` их UI не открывает (нет вкладок Carriers/Vehicles).
+В legacy эти эндпоинты не имеют permission-check (любой залогиненный вызывает). В новой системе — они **используются только в форме carrier**, поэтому де-факто доступны только `admin` и `opiekun`. `pracownik` их UI не открывает (нет вкладки Carriers).
+
+> **info-car удалён решением 2026-10-22.** Эндпоинт `GET /integrations/inspection?vin=` только собирал ссылку на историю техосмотров на info-car.pl; у машины нет поля VIN, web его никогда не вызывал. Если понадобится — это новая фича (VIN у машины + кнопка), а не возврат старого кода.
 
 ---
 
@@ -269,7 +274,7 @@
 
 ### `eksport` — эксперт экспорта
 
-- Видит **все** выезды (без ownership-scope); по умолчанию доска активных (`zgloszony`, `w_trasie`), тумблер `includeHistory` расширяет до всех статусов.
+- Видит **все** выезды (без ownership-scope); по умолчанию доска активных (`zgloszony`, `gotowy`, `w_trasie` — `ACTIVE_DELEGATION_STATUSES`, `gotowy` на доске с 2026-06-20), тумблер `includeHistory` расширяет до всех статусов.
 - Ставит выезду `gotowy` (= акцепт после zlecenia в SpedTrans, обязателен `spedOrderNumber`) и откатывает `gotowy → zgloszony`, пока выезд не `w_trasie`.
 - Видит km-рапорт по всем машинам и дневной км любой машины (read-only).
 - Не видит wnioski, не редактирует флоту.
@@ -307,9 +312,9 @@
 |---|---|
 | Для каких ролей | `LIDER_ROLES` = `planista`, `dyspozytor`, `opiekun`, `pracownik`, `eksport`. `admin` и так может всё, `przewoznik` — не сотрудник, `weryfikator` не запрошен (добавить = одна строка в shared + новая миграция для двух CHECK) |
 | Инвариант | `lider = true ⇒ role ∈ LIDER_ROLES`, в трёх местах как у `AssignableRole`: Zod (`refineLiderPair`), сервисы (частичный `PATCH`, пара с `roleOverride`), CHECK в БД (`user_lider_requires_lider_role`, `stanowisko_role_mapping_lider_requires_lider_role`) |
-| Что даёт сегодня | **Лидер планистов** решает (одобряет / отклоняет) заявки на передачу машин **своих** планистов — тех, у кого `liderId` = его id ([29](29-vehicle-planner-transfer-plan.md)). Не может решить заявку, которую подал сам или в которой машину передают ему — её решает admin. Проверка на уровне ресурса в сервисе (`planner-transfer.rules.ts`), флаг `lider` читается в момент решения. Отдельный пункт меню «Do zatwierdzenia» — только при `lider`. **Лидеры остальных ролей — ничего сверх базовой роли.** Тип пользователя, scope, ownership, панель, landing и все `@Roles` — от `role`. Общие права лидера — `LIDER_PERMISSIONS[role]` в слое permissions ([docs/25](25-permissions-layer-plan.md) B1) |
-| Откуда берётся | Как `role`: `magspace` без `roleOverride` — из маппинга stanowiska (`PLANISTA_LIDER`, `DYSPOZYTOR_KIEROWNIK` → `+ lider`, docs/24 §10); с `roleOverride` («Nadaj dostęp» с галкой «Lider» или UserSheet) и `local` — admin. Лидеры DAF (`opiekun`), opiekunów wniosków (`pracownik`) и eksportu выдаются только руками — в MAGSpace нет соответствующих stanowisk |
-| UI-лейбл | `roles.lider.<role>`: «Lider planistów», «Lider dyspozytorów», «Lider DAF», «Lider opiekunów wniosków», «Lider eksportu» (EN: «Planners lead» …). Базовый `roles.<role>` не меняется; в списке пользователей — чип роли **плюс** чип «Lider», фильтр «Tylko liderzy» |
+| Что даёт сегодня | **Лидер планистов** решает (одобряет / отклоняет) заявки на передачу машин **своих** планистов — тех, у кого `liderId` = его id ([29](29-vehicle-planner-transfer-plan.md)). Не может решить заявку, которую подал сам или в которой машину передают ему — её решает admin. Проверка на уровне ресурса в сервисе (`planner-transfer.rules.ts`), флаг `lider` читается в момент решения. Отдельный пункт меню «Do zatwierdzenia» — только при `lider`. **У dyspozytora, DAF (`opiekun`), pracownika и eksportu флаг пока ничего не даёт: это задел на будущее под новые функции** (решение 2026-10-22, docs/28 §8 №4). Меняется только подпись роли и чип «Lider» в списке пользователей; никаких дополнительных прав, экранов или писем. Тип пользователя, scope, ownership, панель, landing и все `@Roles` — от `role`. Общие права лидера — `LIDER_PERMISSIONS[role]` в слое permissions ([docs/25](25-permissions-layer-plan.md) B1) |
+| Откуда берётся | Как `role`: `magspace` без `roleOverride` — из маппинга stanowiska (`PLANISTA_LIDER`, `DYSPOZYTOR_KIEROWNIK` → `+ lider`, docs/24 §10); с `roleOverride` («Nadaj dostęp» с галкой «Lider» или UserSheet) и `local` — admin. Лидеры DAF (`opiekun`), pracowników (`pracownik`) и eksportu выдаются только руками — в MAGSpace нет соответствующих stanowisk |
+| UI-лейбл | `roles.lider.<role>`: «Lider planistów», «Lider dyspozytorów», «Lider DAF», «Lider pracowników» (до 2026-10-22 — «Lider opiekunów wniosków»), «Lider eksportu» (EN: «Planners lead», …, «Employees lead»). Базовый `roles.<role>` не меняется; в списке пользователей — чип роли **плюс** чип «Lider», фильтр «Tylko liderzy» |
 | Где виден | `/auth/me.lider` и все ответы с `user`, `UserDtoFull.lider`, `GET /users?lider=true`, колонка «Lider» на `/employee/sso`, галка в «Nadaj dostęp», лейбл в меню пользователя и в автокомплите аудита, `lider` в DTO пикеров lookups. В JWT флага **нет** — читается из БД на каждом запросе, как `teamId` |
 | Связь «кто чей лидер» | `User.liderId` у планисты → планиста с `lider = true` (UserSheet «Przełożony (lider)», ставит admin). Заменил текстовый `User.liderEmail` ([quirk #14](19-known-quirks.md#liderEmail)): колонка ещё в БД, но не читается и удаляется отдельным релизом. Снятие флага `lider` не очищает `liderId` подчинённых — их заявки тогда решает admin |
 
@@ -327,7 +332,7 @@
 | Авто-гейт авторизации Maksima (ручного запроса нет) | ✅ | ✅ | — | — | — | — | — | — |
 | Загрузить screenshot авторизации | ✅ | ✅ | — | — | — | — | — | — |
 | Повторная верификация в `OCZEKUJE_NA_AUTORYZACJE` | ✅ | — | — | — | — | — | — | — |
-| Видеть свои заявления / заявления своих перевозчиков | — | — | ✅ (своих перев.) | — | — | ✅ (свои) | — | — |
+| Видеть свои заявления (opiekun — никаких, решение 2026-10-22) | — | — | — | — | — | ✅ (свои) | — | — |
 | Подать reklamację | — | — | — | — | — | ✅ | — | — |
 | CRUD перевозчиков (все) + удаление | ✅ | **—** | — | — | — | — | — | — |
 | Создание / правка / деактивация перевозчиков (свои), reset пароля | — | — | ✅ | — | — | — | — | — |
@@ -351,9 +356,9 @@
 | Проставлять дневной км машин | ✅ | — | — | — | — | — | — | ✅ |
 | Видеть km-рапорт (read-only) | ✅ | — | ✅ (своих перев.) | ✅ (свои) | ✅ (своя команда) | ✅ (своя флота) | ✅ | ✅ |
 | Видеть выезды | ✅ | — | ✅ (своих перев.) | ✅ (которые вёл — по снимку) | ✅ (своя команда) | ✅ (свои) | ✅ (все, активные по умолч.) | ✅ (все, активные по умолч.) |
-| GPS-позиции машин | ✅ | — | ✅ (своих перев.) | ✅ (свои) | ✅ (своя команда) | ✅ (свои) | — | — |
+| GPS-позиции машин (только API; воркер и UI не сделаны, источник данных не решён) | ✅ | — | ✅ (своих перев.) | ✅ (свои) | ✅ (своя команда) | ✅ (свои) | — | — |
 | Алерты по документам, compliance гарантии, эпизоды watchdog | ✅ | — | ✅ (своих перев.) | — | — | ✅ (только compliance и эпизоды, `/me`) | — | — |
-| VIES / Biała Lista / info-car | ✅ | — | ✅ | — | — | — | — | — |
+| VIES / Biała Lista (info-car удалён решением 2026-10-22) | ✅ | — | ✅ | — | — | — | — | — |
 | Управление лимитами / справочниками / командами / SSO-маппингом | ✅ | — | — | — | — | — | — | — |
 | CRUD пользователей | ✅ | — | — | — | — | — | — | — |
 | Audit log (чтение) | ✅ | — | — | — | — | — | — | — |

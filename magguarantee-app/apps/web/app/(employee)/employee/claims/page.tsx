@@ -1,7 +1,7 @@
-// Phase 4 — `/employee/claims`. Accessible by admin + pracownik per the
-// `EmployeeLayout` guard (no extra `(admin)` segment needed — pracownik
-// is the primary target). The page is a thin server-component shell that
-// just gates the route by role and renders the client list view.
+// Phase 4 — `/employee/claims`. admin + pracownik only (no extra `(admin)`
+// segment needed — pracownik is the primary target). The page is a thin
+// server-component shell that just gates the route by role and renders the
+// client list view.
 
 import { requireRoleAccess } from '@/lib/auth/server';
 import { ClaimsListView } from './ClaimsListView';
@@ -9,12 +9,11 @@ import { ClaimsListView } from './ClaimsListView';
 export const dynamic = 'force-dynamic';
 
 export default async function EmployeeClaimsPage() {
-  // Defense-in-depth: the parent `(employee)/layout.tsx` already restricts
-  // the route group to admin/pracownik/opiekun. opiekun has no nav entry
-  // here in Phase 4 but a typed URL would still resolve — we keep them on
-  // this page to a 403-ish empty view (the API will scope results to
-  // their own carriers anyway, which is acceptable). For now we let
-  // admin + pracownik in explicitly.
+  // opiekun is excluded: he has no claims (wnioski) access at all (decision
+  // 2026-10-22, docs/03-roles.md §opiekun). The parent `(employee)/layout.tsx`
+  // admits admin/pracownik/opiekun, so this page narrows it — the edge already
+  // bounces opiekun via `ROLE_RESTRICTED_EMPLOYEE_PREFIXES` in `lib/roles.ts`
+  // (nav hides the tab too); this server check is the defense-in-depth layer.
   await requireRoleAccess(['admin', 'pracownik']);
 
   return <ClaimsListView />;

@@ -137,7 +137,7 @@ overline темы. Никаких градиентов и цветных «ша�
 | `reklamacja-internal-submitted` | Reklamacja | `warning` Reklamacja do rozpatrzenia | AmountPanel (kwota reklamacji, red) | Otwórz w MAGGuarantee |
 | `reklamacja-carrier-submitted` | Reklamacja | `warning` Reklamacja w toku | AmountPanel (kwota reklamacji, red) | Otwórz wniosek |
 | `reklamacja-carrier-decision` | Decyzja w sprawie reklamacji | по `reklamacjaResolution`: `success` Reklamacja uznana / `danger` Reklamacja odrzucona | AmountPanel (kwota do wypłaty — **только** при `UZNANA`) | Otwórz wniosek |
-| `verification-digest` | Dzienny przegląd | `warning` (счётчик) | — (списки) | Otwórz panel weryfikacji |
+| `verification-digest` | Dzienny przegląd | `warning` (счётчик) | — (списки; с 2026-10-22 строки рекламаций (`REKLAMACJA`) несут серый inline-пилл «Reklamacja» — `InlineBadge` в `MailLayout.tsx`, `neutral`, не `warning`, чтобы не сливаться с янтарным «zbliża się termin») | Otwórz panel weryfikacji |
 | ~~`daily-reminder`~~ | — | — | — | ❌ удалён 2026-07-30 (дублировал `verification-digest`) |
 | `guarantee-reminder-carrier` | Przypomnienie | `warning` Zbliża się termin | — (таблица) | Zgłoś wyjazd |
 | `guarantee-opiekun-digest` | Gwarancje | — | — (группы) | — |

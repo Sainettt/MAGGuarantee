@@ -1,9 +1,21 @@
 import { Injectable } from '@nestjs/common';
 
 import { ClaimStatus as PrismaClaimStatus } from '@magguarantee/database';
-import type { ClaimStatus, Role } from '@magguarantee/shared';
+import {
+  SLA_CLOCK_STATUSES,
+  type ClaimStatus,
+  type Role,
+} from '@magguarantee/shared';
 
 import { PrismaService } from '../prisma/prisma.service';
+
+/**
+ * `SLA_CLOCK_STATUSES` (`NA_WERYFIKACJI` + `REKLAMACJA`, docs/21 §1) as Prisma
+ * enum members. Indexing by the shared name keeps the two enums in lock-step at
+ * compile time.
+ */
+const SLA_CLOCK_PRISMA_STATUSES: readonly PrismaClaimStatus[] =
+  SLA_CLOCK_STATUSES.map((s) => PrismaClaimStatus[s]);
 
 /**
  * Compact claim row used to bucket the verification-SLA widget
@@ -13,7 +25,8 @@ import { PrismaService } from '../prisma/prisma.service';
  *
  * `anchorDate` is the SLA anchor: `statusChangedAt` falling back to
  * `createdAt` when null (rare legacy/edge rows). The service buckets it via
- * `bucketForAnchor` and drops `onTrack`.
+ * `bucketForAnchor` and drops `onTrack`. `status` is `NA_WERYFIKACJI` or
+ * `REKLAMACJA` — passed through so the web can label reklamacja rows.
  */
 export interface DashboardSlaCandidateRow {
   id: string;
@@ -90,23 +103,26 @@ export class DiagnosticsRepository {
   }
 
   /**
-   * ALL claims currently in `NA_WERYFIKACJI` — the "on the clock" set for the
-   * verification-SLA widget (docs/21 §4). Uses the `@@index([status,
-   * statusChangedAt])` index. The service buckets these via `bucketForAnchor`
-   * (overdue / dueSoon / drop onTrack); we return every NA_WERYFIKACJI row
-   * because the bucket depends on the Polish working-day calendar, which can't
-   * be expressed as a SQL predicate.
+   * ALL claims currently in `NA_WERYFIKACJI` or `REKLAMACJA` — the "on the
+   * clock" set for the verification-SLA widget (docs/21 §1/§4,
+   * `SLA_CLOCK_STATUSES`). Uses the `@@index([status, statusChangedAt])`
+   * index. The service buckets these via `bucketForAnchor` (overdue / dueSoon /
+   * drop onTrack); we return every on-the-clock row because the bucket depends
+   * on the Polish working-day calendar, which can't be expressed as a SQL
+   * predicate.
    *
    * The anchor is `statusChangedAt ?? createdAt` — `statusChangedAt` is
    * re-stamped on every status transition (e.g. the `OCZEKUJE_NA_AUTORYZACJE →
    * NA_WERYFIKACJI` rollback when a re-verify drops the dopłata under threshold),
    * so the clock restarts correctly; the `createdAt` fallback covers rare rows
-   * where `statusChangedAt` was never set. A reklamacja decision also re-stamps
-   * it, but returns the claim to a DECIDED status, so it never re-enters this set.
+   * where `statusChangedAt` was never set. `submitReklamacja` re-stamps it at
+   * filing (same instant as `reklamacjaSubmittedAt`), so a reklamacja runs its
+   * own 7-day clock from the day it was filed; the decision (`→ ZAAKCEPTOWANO`
+   * / `→ ODRZUCONO`) re-stamps it again and takes the claim off the clock.
    */
-  async findNaWeryfikacjiForSla(): Promise<DashboardSlaCandidateRow[]> {
+  async findOnSlaClock(): Promise<DashboardSlaCandidateRow[]> {
     const rows = await this.prisma.tx.claim.findMany({
-      where: { status: PrismaClaimStatus.NA_WERYFIKACJI },
+      where: { status: { in: [...SLA_CLOCK_PRISMA_STATUSES] } },
       orderBy: { statusChangedAt: 'asc' },
       select: {
         id: true,

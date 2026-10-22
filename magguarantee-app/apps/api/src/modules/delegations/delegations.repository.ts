@@ -130,7 +130,8 @@ export interface DelegationListFilters {
   status?: DelegationStatus;
   /**
    * Phase 7 — server-injected status allow-list (the "active board" floor for
-   * eksport/weryfikator: `['zgloszony', 'w_trasie']`). NEVER client-supplied —
+   * eksport/weryfikator: `['zgloszony', 'gotowy', 'w_trasie']`, the service's
+   * `ACTIVE_DELEGATION_STATUSES`). NEVER client-supplied —
    * `DelegationsService._scopeListFilters` sets it only for those two roles
    * when their `includeHistory` toggle is OFF. It is the ONLY mechanism that
    * restricts which statuses appear, and it is scoped to that one branch so it

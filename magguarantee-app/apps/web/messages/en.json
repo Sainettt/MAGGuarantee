@@ -301,7 +301,7 @@
       "planista": "Planners lead",
       "dyspozytor": "Dispatchers lead",
       "opiekun": "DAF lead",
-      "pracownik": "Claims-caretakers lead",
+      "pracownik": "Employees lead",
       "eksport": "Export lead"
     }
   },
@@ -899,7 +899,7 @@
       "overdueTitle": "Overdue",
       "dueSoonTitle": "Deadline approaching",
       "allClear": "No claims need attention",
-      "rowAria": "Claim {nrZgl} — {status}, open verification",
+      "rowAria": "Claim {nrZgl}{kind, select, reklamacja {, reclamation} other {}} — {status}, open claim",
       "countdown": {
         "overdue": "{days, plural, one {# day overdue} other {# days overdue}}",
         "lastDay": "last day today",

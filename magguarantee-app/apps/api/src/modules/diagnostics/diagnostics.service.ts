@@ -83,7 +83,7 @@ export class DiagnosticsService {
       reklamacjeCount,
     ] = await Promise.all([
       this.repo.countClaimsByStatus(),
-      this.repo.findNaWeryfikacjiForSla(),
+      this.repo.findOnSlaClock(),
       this.repo.findRecentClaimAudit(DASHBOARD_RECENT_LIMIT),
       this.repo.findTopCarriersByPayment({
         limit: DASHBOARD_TOP_CARRIERS_LIMIT,
@@ -143,11 +143,13 @@ export class DiagnosticsService {
   }
 
   /**
-   * Buckets every `NA_WERYFIKACJI` candidate via the shared Polish-working-day
-   * SLA helper (docs/21 §2): `overdue` (workingDaysLeft < 0) and `dueSoon`
-   * (0..3). `onTrack` rows are dropped. Each bucket is sorted by
-   * `workingDaysLeft` ascending (most urgent / most overdue first), and the
-   * signed `workingDaysLeft` is attached per row for the web widget label.
+   * Buckets every on-the-clock candidate (`NA_WERYFIKACJI` and `REKLAMACJA`,
+   * docs/21 §1) via the shared Polish-working-day SLA helper (docs/21 §2):
+   * `overdue` (workingDaysLeft < 0) and `dueSoon` (0..3). `onTrack` rows are
+   * dropped. Each bucket is sorted by `workingDaysLeft` ascending (most urgent
+   * / most overdue first), and the signed `workingDaysLeft` is attached per row
+   * for the web widget label. `status` is passed through so the web can mark
+   * reklamacja rows (docs/21 §4).
    */
   private _bucketSla(
     candidates: DashboardSlaCandidateRow[],

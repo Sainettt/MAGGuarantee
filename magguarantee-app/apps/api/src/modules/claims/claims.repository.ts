@@ -199,12 +199,6 @@ export interface ClaimRow {
 export interface ClaimListFilters {
   status?: ClaimStatus;
   carrierId?: string;
-  /**
-   * Server-injected opiekun scope — matches claims whose carrier is supervised
-   * by this opiekun (`Claim.carrier.opiekunId === …`). Set ONLY by
-   * `ClaimsService._scopeListFilters` for the opiekun role; never client-driven.
-   */
-  carrierOpiekunId?: string;
   vehicleId?: string;
   /** ISO date `YYYY-MM-DD` — match claims whose `dateStart` ≥ from. */
   from?: string;
@@ -467,12 +461,6 @@ export class ClaimsRepository {
     const where: Record<string, unknown> = {};
     if (filters.status) where.status = filters.status;
     if (filters.carrierId) where.carrierId = filters.carrierId;
-    // Opiekun scope: filter through the carrier relation. Combines with an
-    // explicit `carrierId` (an opiekun narrowing to one of THEIR carriers) via
-    // plain AND — a foreign `carrierId` is already rejected 403 in the service.
-    if (filters.carrierOpiekunId) {
-      where.carrier = { opiekunId: filters.carrierOpiekunId };
-    }
     if (filters.vehicleId) where.vehicleId = filters.vehicleId;
     if (filters.from) where.dateStart = { gte: new Date(filters.from) };
     if (filters.to) {

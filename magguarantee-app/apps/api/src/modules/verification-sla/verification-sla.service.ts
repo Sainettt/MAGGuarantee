@@ -24,9 +24,12 @@ const DIGEST_JOB_NAME = 'verification-sla-digest';
  * Daily verification-SLA digest — the system's first scheduled job
  * (docs/21-pracownik-verification-sla.md §5).
  *
- * Once a day it scans every `NA_WERYFIKACJI` claim, buckets each via the
- * shared `bucketForAnchor` Polish-working-day helper, and — if any are
- * overdue or due-soon — sends ONE digest email to every ACTIVE pracownik.
+ * Once a day it scans every claim on the SLA clock — `NA_WERYFIKACJI` and,
+ * since the 2026-10-22 decision, `REKLAMACJA` (`SLA_CLOCK_STATUSES`, docs/21
+ * §1) — buckets each via the shared `bucketForAnchor` Polish-working-day
+ * helper, and — if any are overdue or due-soon — sends ONE digest email to
+ * every ACTIVE pracownik. Reklamacja rows share the same lists and carry a
+ * per-row marker (`status` on each row).
  *
  * STATELESS by design: no "already notified" flag, no DB write. An empty
  * at-risk set sends nothing (no "all clear" mail).
@@ -65,7 +68,7 @@ export class VerificationSlaService {
   }
 
   private async _runDailyDigest(now: Date): Promise<void> {
-    const candidates = await this.repo.findNaWeryfikacjiForSla();
+    const candidates = await this.repo.findOnSlaClock();
     const { overdue, dueSoon } = this._bucket(candidates, now);
 
     if (overdue.length === 0 && dueSoon.length === 0) {
@@ -91,7 +94,8 @@ export class VerificationSlaService {
    * Buckets candidates into overdue / dueSoon digest rows via the shared
    * Polish-working-day helper; `onTrack` is dropped. Each bucket is sorted by
    * `workingDaysLeft` ascending (most urgent / most overdue first) so the
-   * email lists the most pressing claims at the top.
+   * email lists the most pressing claims at the top. `status` is carried so the
+   * template can mark reklamacja rows.
    */
   private _bucket(
     candidates: SlaDigestCandidateRow[],
@@ -105,6 +109,7 @@ export class VerificationSlaService {
       if (bucket === 'onTrack') continue;
       const row: VerificationDigestRow = {
         nrZgl: c.nrZgl,
+        status: c.status,
         carrierName: c.carrierName ?? '—',
         vehiclePlate: c.vehiclePlate ?? '—',
         workingDaysLeft,

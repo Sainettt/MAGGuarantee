@@ -163,7 +163,7 @@ MAGGuarantee/                          ← корень репозитория
 - Все бизнес-расчёты: `calcKmGwarantPerMonth`, `calcEasterGS`, `getEUBanDaysGS`, `calcBusinessDays`.
 - Все публичные API-функции (см. `13-api-design.md`).
 - Все email-шаблоны (HTML переписать на React Email).
-- Внешние интеграции: VIES, Biała Lista MF, info-car.pl, GPS tracker (положения авто из стороннего fleet-сервиса; API access ожидается — см. [16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api](16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api)).
+- Внешние интеграции: VIES, Biała Lista MF, GPS tracker (положения авто из стороннего fleet-сервиса; API access ожидается, источник данных не решён; info-car.pl удалён решением 2026-10-22 — см. [16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api](16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api)).
 - Дизайн (цвета, типографика, компоненты — см. `14-design-system.md`).
 - Бизнес-правила доступа по ролям (`03-roles.md` остаётся актуален).
 

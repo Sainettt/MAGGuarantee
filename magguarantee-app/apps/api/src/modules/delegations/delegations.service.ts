@@ -89,8 +89,9 @@ export const MARK_READY_AUDIT_ACTIONS = {
  * status; that role manages per-vehicle route status in the vehicles module.
  * The former `markInTransit` / `markReturned` transitions were removed. The
  * only remaining special-role behaviour here is the `eksport` read-only board:
- * an active-status floor (`{zgloszony, w_trasie}`) by default, widened to all
- * statuses via the `includeHistory` toggle.
+ * an active-status floor (`{zgloszony, gotowy, w_trasie}` —
+ * `ACTIVE_DELEGATION_STATUSES`) by default, widened to all statuses via the
+ * `includeHistory` toggle.
  */
 @Injectable()
 export class DelegationsService {
@@ -1044,7 +1045,8 @@ export class DelegationsService {
     // ONLY place the `statusIn` allow-list is injected, so the restriction
     // cannot leak to any other role's list:
     //   - `includeHistory` OFF (default) and no explicit `status` → restrict to
-    //     `{zgloszony, w_trasie}` via `statusIn`.
+    //     `{zgloszony, gotowy, w_trasie}` (`ACTIVE_DELEGATION_STATUSES`) via
+    //     `statusIn`.
     //   - `includeHistory` ON → widen to all statuses (no `statusIn`).
     //   - an explicit `status` filter ALWAYS narrows further (the repo prefers
     //     `status` over `statusIn`), so e.g. `status=zjechal` still works even

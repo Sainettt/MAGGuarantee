@@ -63,7 +63,7 @@
 | onEdit | `onEditTrigger` (`Code.gs:6977`) | реал-тайм при правке Sheet | **Не нужен** (нет Sheets) |
 | onOpen | `onOpen` (`Code.gs:6950`) | при открытии Sheet | **Не нужен** |
 | Refresh-token cleanup | — (новое) | ежедневно **03:30** | ✅ `@Cron` в API-процессе (`modules/token-cleanup/`, 2026-09-14) — см. [Token cleanup](#token-cleanup) |
-| Verification-SLA digest | — (новое, docs/21) | ежедневно 07:00 | `@Cron` в API-процессе |
+| Verification-SLA digest | — (новое, docs/21) | ежедневно 07:00 | `@Cron` в API-процессе. С 2026-10-22 в выборке и письме также wnioski в статусе `REKLAMACJA` (те же 7 рабочих дней от подачи рекламации, строка помечена «Reklamacja») |
 | **Guarantee Watchdog** | — (новое, план 2026-07-07) | ежедневно **07:10** Europe/Warsaw | `@Cron` в API-процессе (стаггер после verification-sla) |
 | **Vehicle-removal alert** | — (новое, vehicle-status rework Step B) | ежедневно **07:20** Europe/Warsaw | `@Cron` в API-процессе (стаггер после Guarantee Watchdog) |
 
@@ -763,16 +763,9 @@ async searchByNip(nip: string): Promise<WhiteListSearchResult> {
 
 `requestId` / `requestDateTime` — MF audit handles, отдаём как метаданные. Если в будущем понадобится доказательная база (карьер оспаривает данные с которыми мы согласовали заявку), можно завести отдельную таблицу аудита для этих идентификаторов — сейчас за рамки MVP это выносим.
 
-### info-car.pl
+### ~~info-car.pl~~ — удалён решением 2026-10-22
 
-URL builder, не запрос API:
-
-```ts
-// modules/integrations/inspection/inspection.service.ts
-buildLink(vin: string): string {
-  return `https://info-car.pl/inspections?vin=${encodeURIComponent(vin)}`;
-}
-```
+Был URL-builder (`modules/integrations/inspection/`, `GET /integrations/inspection?vin=`), который собирал ссылку на историю техосмотров `https://info-car.pl/inspections?vin=…`. Удалён вместе с shared-схемой: у машины нет поля VIN, web эндпоинт никогда не вызывал. Если понадобится — заводить как новую фичу (VIN у машины + кнопка в карточке), не возвращать старый код.
 
 ### BugBot handoff
 
@@ -848,7 +841,7 @@ awk 'NF {printf "%s\\n", $0}' bugbot-handoff.key   # значение BUGBOT_HAN
 
 У авто перевозчиков MAGTRANS установлены GPS-трекеры, подключённые к стороннему сервису мониторинга автопарка. Сейчас, чтобы посмотреть положение авто, сотрудники открывают веб-портал этого сервиса. Цель новой интеграции — забирать данные через API и показывать их **в нашем UI** (в первую очередь на `/fleet/*` экранах для opiekun / planista / dyspozytor / weryfikator), без перехода во внешний сервис.
 
-Это **пятая внешняя интеграция** (после VIES, Biała Lista, info-car и Gmail API).
+Это **четвёртая внешняя интеграция** (после VIES, Biała Lista и Gmail API; info-car удалён решением 2026-10-22).
 
 #### Что нужно получить от MAGTRANS перед finalize
 

@@ -301,7 +301,7 @@
       "planista": "Lider planistów",
       "dyspozytor": "Lider dyspozytorów",
       "opiekun": "Lider DAF",
-      "pracownik": "Lider opiekunów wniosków",
+      "pracownik": "Lider pracowników",
       "eksport": "Lider eksportu"
     }
   },
@@ -899,7 +899,7 @@
       "overdueTitle": "Po terminie",
       "dueSoonTitle": "Zbliża się termin",
       "allClear": "Brak wniosków wymagających uwagi",
-      "rowAria": "Wniosek {nrZgl} — {status}, otwórz weryfikację",
+      "rowAria": "Wniosek {nrZgl}{kind, select, reklamacja {, reklamacja} other {}} — {status}, otwórz wniosek",
       "countdown": {
         "overdue": "{days, plural, one {# dzień po terminie} few {# dni po terminie} many {# dni po terminie} other {# dni po terminie}}",
         "lastDay": "dziś ostatni dzień",

@@ -106,10 +106,9 @@ MAGGuarantee/
     │   │   │   │   │   │   └── ...
     │   │   │   │   │   └── thread-key.util.ts
     │   │   │   │   │
-    │   │   │   │   ├── integrations/           ← VIES, Biała Lista, info-car
+    │   │   │   │   ├── integrations/           ← VIES, Biała Lista (inspection/ = info-car удалён решением 2026-10-22)
     │   │   │   │   │   ├── vies/
-    │   │   │   │   │   ├── white-list/
-    │   │   │   │   │   └── inspection/
+    │   │   │   │   │   └── white-list/
     │   │   │   │   │
     │   │   │   │   ├── storage/                ← S3 для скриншотов авторизации
     │   │   │   │   │

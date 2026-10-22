@@ -757,8 +757,8 @@ VIES и Biała Lista lookups триггерятся on-blur. UI должен д�
 Employee nav (top tabs или left sidebar — решит web-agent в Phase 4) — содержание зависит от роли:
 
 - `admin` — видит **все** вкладки: Dashboard, Wnioski, Carriers, Vehicles, Drivers, Trailers, Trailer types.
-- `pracownik` («Opiekun wniosków») — видит **только** Dashboard + Wnioski. Никаких CRUD-вкладок для справочных сущностей. Это соответствует legacy (`index.html:4682-4690`: tabs `Carriers/Vehicles/Drivers/Trailers` рендерятся `if isAdminRole`).
-- `opiekun` — видит Dashboard + Wnioski (только своих перевозчиков) + вкладку «Moja opieka» (свой scope CRUD).
+- `pracownik` (UI «Pracownik») — видит **только** Dashboard + Wnioski. Никаких CRUD-вкладок для справочных сущностей. Это соответствует legacy (`index.html:4682-4690`: tabs `Carriers/Vehicles/Drivers/Trailers` рендерятся `if isAdminRole`).
+- `opiekun` — вкладка «Moja opieka» (свой scope CRUD) и разделы своего scope по `nav.config.ts`; Wnioski **не видит** ни в каком виде (решение 2026-10-22).
 - `planista`, `dyspozytor`, `eksport`, `weryfikator` — собственные панели, не Employee panel.
 
 Pattern:
@@ -775,7 +775,7 @@ Phase 2 web (admin DataTable + Sheet edit forms + RHF/Zod валидация + i
 
 ## Phase 4 — Employee panel (polished UI)
 
-> Pracownik («Opiekun wniosków») + admin. Полированный уровень, прод-ready. Все компоненты собираются из примитивов Phase 2 — **новых color/radius/shadow токенов не вводим**. Reference: `docs/screenshots/employee-*.png`, `docs/screenshots/modal-status-p1/p2.png`.
+> Pracownik (UI «Pracownik») + admin. Полированный уровень, прод-ready. Все компоненты собираются из примитивов Phase 2 — **новых color/radius/shadow токенов не вводим**. Reference: `docs/screenshots/employee-*.png`, `docs/screenshots/modal-status-p1/p2.png`.
 
 ### Status mapping (`ClaimStatus → semantic color`)
 
@@ -5024,6 +5024,8 @@ Acceptance (Phase 7.5):
 
 ### 7.6 Pracownik dashboard — verification-SLA «attention» severity scale (Phase 7.6)
 
+> **2026-10-22:** в `overdue` / `dueSoon` попадают и wnioski в статусе `REKLAMACJA` (тот же 7-дневный счётчик от подачи рекламации, [docs/21](21-pracownik-verification-sla.md)). Строка рекламации в `<SlaAttentionSection>` несёт существующий чип статуса «Reklamacja»; новых токенов и уровней severity нет, бейджа в списке wniosków и в `ClaimModal` по-прежнему нет (дашборд-only).
+
 > **Scope.** The pracownik dashboard replaces the old crude `urgent` list with two SLA «attention» buckets surfaced in `<DashboardSidebar>` (§`<DashboardSidebar>`): **`overdue`** (`workingDaysLeft < 0`) and **`dueSoon`** (`0 ≤ workingDaysLeft ≤ 3`). Spec source: [`21-pracownik-verification-sla.md` §2, §4](21-pracownik-verification-sla.md). Both buckets list `NA_WERYFIKACJI` claims; clicking a row opens the §6.5 verification Dialog.
 >
 > **No new tokens** (Phase 4.4 policy). The two urgency levels map cleanly onto the **existing `danger` (red, brand-aligned) and `warning` (amber) semantics** already used by `StatusBadge`/alert bands. `tailwind.config.ts` / `globals.css` untouched.
@@ -7804,7 +7806,7 @@ Marzec      600      →  bez zmian …
 |---|---|---|
 | `allDisabled` | все строки `disabled` | строки breakdown (как было) — §16.5.4 |
 | `boardSettled` (смешанный) | `breakdown.mileageSource === 'board'` | сервер; отсутствие поля ⇒ `'declared'` |
-| staff-вариант | `boardSettled` **и** компоненту передан `boardSettlement` | API отдаёт `boardSettlement` только pracownik / admin / opiekun — перевозчику никогда |
+| staff-вариант | `boardSettled` **и** компоненту передан `boardSettlement` | API отдаёт `boardSettlement` только pracownik / admin — перевозчику никогда (opiekun с 2026-10-22 wnioski не видит) |
 
 Почему не из строк: единственный старый (локальный) wniosek с пропорциональным расчётом имеет смешанные строки, но `mileageSource` у него нет — для него любая из новых нот была бы неправдой, поэтому он рендерится **без ноты** (бейджи и приглушение остаются). В проде wniosków нет.
 
@@ -7866,7 +7868,7 @@ Marzec      600      →  bez zmian …
 | Правило `—` вместо ставки-призрака | **Остаётся как есть** (§16.5.2) | |
 | Страница wniosku `/carrier/claims/[nrZgl]` | та же нота, тот же текст | `<BreakdownTable>` один и тот же; «Przebieg: X km» в фактах остаётся — это то, что перевозчик заявил |
 
-**Staff — `carrier.breakdown.boardNotice`** (pracownik / admin / opiekun; тот же компонент, `audience="staff"`):
+**Staff — `carrier.breakdown.boardNotice`** (pracownik / admin; тот же компонент, `audience="staff"`):
 
 > ⓘ Okres obejmuje miesiąc bez gwarancji. Dopłatę liczy się z tablicy km weryfikatora — tylko z dni w miesiącach z gwarancją. **Przebieg podany przez przewoźnika nie wpływa na kwotę — służy tylko do porównania.**
 
@@ -7896,7 +7898,7 @@ Marzec      600      →  bez zmian …
 
 **Контракт компонента.** `<BreakdownTable breakdown boardSettlement? className? />`.
 
-- `boardSettlement` передаёт **только** `ClaimModal` (pracownik / admin / opiekun). `LivePreviewPanel` и страница wniosku перевозчика его не передают — API перевозчику это поле не отдаёт. Роль компонент **не проверяет**: вариант определяется данными (§16.5.1).
+- `boardSettlement` передаёт **только** `ClaimModal` (pracownik / admin). `LivePreviewPanel` и страница wniosku перевозчика его не передают — API перевозчику это поле не отдаёт. Роль компонент **не проверяет**: вариант определяется данными (§16.5.1).
 - Prop `mileage` **удаляется** — он кормил только старую ноту `gapNotice`. Вызовы: `LivePreviewPanel.tsx`, `app/(carrier)/carrier/claims/[nrZgl]/page.tsx`, `ClaimModal.tsx` (`DoplataBlock`).
 - В `ClaimModal` брать **`claim.boardSettlement` в паре с `claim.breakdown`** — один DTO, одни даты. Не смешивать `boardSettlement` из живого превью с persisted `claim.breakdown`: при правке дат месяцы разъедутся. (Если когда-нибудь разбивка в модалке переедет на живой breakdown — брать оба из превью.)
 - Колонки рендерятся только при `mileageSource === 'board'` **и** наличии `boardSettlement`. Период «все месяцы активны» у staff выглядит **ровно как сегодня** — даже если API вдруг пришлёт `boardSettlement` и для него.
@@ -7968,7 +7970,7 @@ const boardIncomplete = board != null && board.complete === false;
 boardIncomplete && !metGuarantee && !inTransitGated && !isReklamacja
 && (claim.status === 'NA_WERYFIKACJI' || claim.status === 'OCZEKUJE_NA_AUTORYZACJE')
 ```
-Гейтится **статусом, а не ролью**: opiekun тоже её видит (docs/20 §0⁵ «Что видят роли»). Рендерится и в `view`, и в `edit` — в `view` читатель узнаёт, почему акцепта не будет, ещё до перехода в редактирование. При `inTransitGated` не рендерится: пока выезд в трассе, дыры на tablicy ожидаемы, а баннер «Wyjazd jeszcze w trasie» уже блокирует всё — одно объяснение на факт.
+Гейтится **статусом, а не ролью**: ролевого гейта нет, видит любой, кто открывает `ClaimModal` (pracownik / admin; opiekun с 2026-10-22 wnioski не видит). Рендерится и в `view`, и в `edit` — в `view` читатель узнаёт, почему акцепта не будет, ещё до перехода в редактирование. При `inTransitGated` не рендерится: пока выезд в трассе, дыры на tablicy ожидаемы, а баннер «Wyjazd jeszcze w trasie» уже блокирует всё — одно объяснение на факт.
 
 **Место: внутри `<DecisionPanel>`, первым дочерним элементом** — над `DecisionFields` (edit) / над абзацем `decisionRequired` (view). **Не** отдельным блоком над панелью, как Maksim / in-transit: те блокируют решение целиком (danger), этот убирает одну опцию — поэтому живёт в панели, непосредственно над селектом, в котором этой опции нет.
 
@@ -8139,7 +8141,7 @@ Niedojazd: 7 630 km gwarant. − 5 450 km wg weryfikatora = 2 180 km × 0,50 €
 | Отдельная stat-карточка / плитка | **нет.** Модалка и так плотная; третья «цифра» рядом с полем и бейджем спорила бы с суммой за внимание. Строка текста подчинена полю, карточка — нет |
 | Только формула «7630 − 5450 = 2180 km» | **недостаточно.** Формулу надо расшифровывать; пожелание PO — сказать словами. Поэтому первая строка — фраза, вторая — формула для проверки |
 
-**Роли.** Там же, где поле dopłaty: pracownik / admin / opiekun — все, кто открывает `ClaimModal`, в `view` и в `edit`, во всех статусах, где рендерится блок DOPŁATA. Отдельного гейта по роли нет. Для смешанного периода staff и так видит км tablicy (§16.5.5) — новых данных строка не раскрывает.
+**Роли.** Там же, где поле dopłaty: pracownik / admin — все, кто открывает `ClaimModal`, в `view` и в `edit`, во всех статусах, где рендерится блок DOPŁATA. Отдельного гейта по роли нет. Для смешанного периода staff и так видит км tablicy (§16.5.5) — новых данных строка не раскрывает.
 
 **Перевозчик — ничего нового.** Карточка «Różnica km» в `<LivePreviewPanel>` остаётся как есть; на странице wniosku перевозчика ни фразы, ни формулы нет. Требование «перевозчик не видит цифр tablicy, которых не видел раньше» выполняется тем, что мы ему ничего не добавляем. (Факт для PO: `Km gwarantowane − Różnica km` в превью перевозчика уже сейчас арифметически равно сумме km tablicy для смешанного периода — это было принято в §16.5.3 и здесь не меняется.)
 
@@ -8204,7 +8206,7 @@ const driven = src.kmGuaranteed − src.kmDifference;   // = mileageEffective
 
 **Acceptance checklist (§16.5.10):**
 
-- [ ] Две строки стоят **между** полем dopłaty и `<FormDescription>` «wyliczana automatycznie», в `view` и `edit`, для pracownik / admin / opiekun.
+- [ ] Две строки стоят **между** полем dopłaty и `<FormDescription>` «wyliczana automatycznie», в `view` и `edit`, для pracownik / admin.
 - [ ] Все числа строки и сумма в поле берутся из **одного** объекта `src` (решённый смешанный → claim; иначе `previewQ.data ?? claim`). На скриншоте в `edit` после правки км: `niedojazd × stawka` = сумма в поле.
 - [ ] До ответа превью / во время пересчёта / при ошибке строка ведёт себя ровно как поле: без скелетона, без «—», без приглушения.
 - [ ] `kmDifference > 0` → фраза + формула; `= 0` → `metEqual`; `< 0` → `metOver` с модулем; **отрицательное число нигде не выводится**; `kmGuaranteed === 0` → строк нет.

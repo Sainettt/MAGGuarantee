@@ -22,8 +22,10 @@ import {
   bucketForAnchor,
   isPolishWorkingDay,
   polishHolidays,
+  SLA_CLOCK_STATUSES,
   workingDaysBetween,
 } from '../src/domain/polish-calendar';
+import { ClaimStatusSchema } from '../src/schemas/claims';
 
 /** `YYYY-MM-DD` → local-midnight Date (test-local helper). */
 function D(s: string): Date {
@@ -278,5 +280,24 @@ describe('bucketForAnchor — deadline + bucket classification', () => {
     const r = bucketForAnchor(D('2026-06-01'), D('2026-06-06'));
     expect(r.workingDaysLeft).toBe(4);
     expect(r.bucket).toBe('onTrack');
+  });
+});
+
+describe('SLA_CLOCK_STATUSES — statuses on the SLA clock (docs/21 §1)', () => {
+  it('is exactly NA_WERYFIKACJI + REKLAMACJA (decision 2026-10-22)', () => {
+    expect([...SLA_CLOCK_STATUSES]).toEqual(['NA_WERYFIKACJI', 'REKLAMACJA']);
+  });
+
+  it('only lists valid ClaimStatus values', () => {
+    for (const s of SLA_CLOCK_STATUSES) {
+      expect(ClaimStatusSchema.safeParse(s).success).toBe(true);
+    }
+  });
+
+  it('excludes decided / authorisation statuses (clock stops there)', () => {
+    const onClock: readonly string[] = SLA_CLOCK_STATUSES;
+    for (const s of ['ZAAKCEPTOWANO', 'ODRZUCONO', 'OCZEKUJE_NA_AUTORYZACJE']) {
+      expect(onClock).not.toContain(s);
+    }
   });
 });

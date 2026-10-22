@@ -2678,7 +2678,8 @@ export class ClaimsService {
     await this._assertClaimReadable(user, row);
     const dto = this.toDto(row);
     // Staff-only live figures. `_assertClaimReadable` has already narrowed the
-    // caller to admin / pracownik / opiekun / przewoznik.
+    // caller to admin / pracownik / przewoznik, so "staff" here means
+    // admin / pracownik (opiekun has no claims access — docs/03-roles.md#opiekun).
     const staff = user.role !== 'przewoznik';
     return {
       ...dto,
@@ -2717,25 +2718,18 @@ export class ClaimsService {
   }
 
   /**
-   * Read-ownership gate for a single wniosek. admin/pracownik → any; opiekun →
-   * only their supervised carriers; przewoznik → only own. Every other role is
-   * rejected (they are also excluded at the `@Roles` level, so this is
-   * defence-in-depth). The `@CarrierOwns` guard already covers przewoznik at
-   * the route, but opiekun has NO guard on the claims controller — so its
-   * ownership check MUST live here.
+   * Read-ownership gate for a single wniosek. admin/pracownik → any;
+   * przewoznik → only own. Every other role — opiekun included (no claims
+   * access since 2026-10-22, docs/03-roles.md#opiekun), planista, dyspozytor,
+   * eksport, weryfikator — is rejected. They are also excluded at the `@Roles`
+   * level, so this is defence-in-depth; the `@CarrierOwns` guard already
+   * covers przewoznik at the route.
    */
   private async _assertClaimReadable(
     user: AuthUser,
     row: ClaimRow,
   ): Promise<void> {
     if (user.role === 'admin' || user.role === 'pracownik') return;
-    if (user.role === 'opiekun') {
-      const owned = await this.carriers.listIdsForOpiekun(user.sub);
-      if (!owned.includes(row.carrierId)) {
-        throw new ForbiddenException('Brak uprawnień do tego wniosku');
-      }
-      return;
-    }
     if (user.role === 'przewoznik') {
       const carrier = await this._requireCarrierProfile(user);
       if (row.carrierId !== carrier.id) {
@@ -3841,19 +3835,6 @@ export class ClaimsService {
     if (user.role === 'admin' || user.role === 'pracownik') {
       return filters;
     }
-    if (user.role === 'opiekun') {
-      // Opiekun sees ONLY wnioski of the carriers they supervise
-      // (docs/03-roles.md#opiekun). A client-supplied `carrierId` must be one
-      // of theirs (else 403); the server-injected `carrierOpiekunId` relation
-      // filter is applied unconditionally as defence-in-depth.
-      if (filters.carrierId) {
-        const owned = await this.carriers.listIdsForOpiekun(user.sub);
-        if (!owned.includes(filters.carrierId)) {
-          throw new ForbiddenException('Brak uprawnień do tego przewoźnika');
-        }
-      }
-      return { ...filters, carrierOpiekunId: user.sub };
-    }
     if (user.role === 'przewoznik') {
       const carrier = await this._requireCarrierProfile(user);
       if (filters.carrierId && filters.carrierId !== carrier.id) {
@@ -3861,7 +3842,8 @@ export class ClaimsService {
       }
       return { ...filters, carrierId: carrier.id };
     }
-    // planista / dyspozytor / eksport / weryfikator — no claims access.
+    // opiekun (decision 2026-10-22, docs/03-roles.md#opiekun) / planista /
+    // dyspozytor / eksport / weryfikator — no claims access.
     throw new ForbiddenException('Brak uprawnień');
   }
 
