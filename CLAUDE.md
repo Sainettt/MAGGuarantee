@@ -24,6 +24,7 @@
 | Design system (tokens, Tailwind, components) | [`docs/14-design-system.md`](docs/14-design-system.md) |
 | Email design system (transactional mail templates) | [`docs/22-email-design.md`](docs/22-email-design.md) |
 | Auth (JWT, 2FA, guards) | [`docs/15-auth-strategy.md`](docs/15-auth-strategy.md) |
+| Permissions model (каталог прав в shared, `@RequirePermission`, `can()` vs `// scope:`, фикстуры authz) | [`docs/15-auth-strategy.md`](docs/15-auth-strategy.md) §Roles & Guards + [`docs/25-permissions-layer-plan.md`](docs/25-permissions-layer-plan.md) |
 | Cron, email, integrations | [`docs/16-jobs-and-integrations.md`](docs/16-jobs-and-integrations.md) |
 | Phased development plan | [`docs/17-migration-roadmap.md`](docs/17-migration-roadmap.md) |
 | Production launch checklist | [`docs/18-launch-and-deployment.md`](docs/18-launch-and-deployment.md) |

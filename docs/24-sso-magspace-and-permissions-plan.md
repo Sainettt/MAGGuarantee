@@ -91,7 +91,7 @@
 |---|---|
 | `Employee.email` | Обязательное, уникальное, хранится в нижнем регистре. В форме приёма **предзаполняется** по паттерну `imię.nazwisko@magtrans.eu` из полей имя/фамилия (с транслитерацией диакритики: ł→l, ż→z, ó→o …), человек может **поправить перед сохранением** (тёзки, двойные фамилии). После этого поле — просто данные, парсинга нет. |
 | `Stanowisko` | **Фиксированный перечень** в коде MAGSpace (enum): `HANDLOWIEC`, `PLANISTA`, `LIDER_HANDEL`, … Наружу отдаётся `code` = значение enum (UPPER_SNAKE, пробелы → `_`) и `name` для отображения («Lider handel»). Код стабилен навсегда; новая должность = новое значение enum + деплой MAGSpace. Одноимённость с ролью MAGGuarantee (`PLANISTA` ↔ `planista`) **ничего не значит** — маппинг всегда явный. |
-| `Employee.stanowisko` | Ровно **одно** на сотрудника, совмещений нет (§8 в.1). Исключения, если появятся, решаются per-user правами на функции (трек B5), а не вторым stanowisko. |
+| `Employee.stanowisko` | Ровно **одно** на сотрудника, совмещений нет (§8 в.1). Исключения, если появятся, решаются per-user правами на функции (docs/25 B6; в этом документе это называлось «B5»), а не вторым stanowisko. |
 | `Employee.active` | Вычисляется из трудоустройства: `employedTo IS NULL OR employedTo > today`. Увольнение = `active=false`, **не удаление строки**. |
 
 #### A0.2 Аутентификация между сервисами
@@ -334,6 +334,9 @@ A1 и A3 не зависят от MAGSpace вообще; A2 разрабатыв
 > ⚠️ Первоначальный набросок. Актуальный план с инвентаризацией (139
 > эндпоинтов, 19 наборов ролей, сервисные capability-проверки, тест
 > эквивалентности) — [25-permissions-layer-plan.md](25-permissions-layer-plan.md).
+> **Трек B реализован** (B1–B5, 2026-10-23): модель описана в
+> [15-auth-strategy.md §Roles & Guards](15-auth-strategy.md); «B5 per-user
+> overrides» из этого раздела = docs/25 **B6**, следующий шаг.
 
 Цель: роль остаётся типом пользователя и ключом data-scope, но **право на
 действие** получает имя и один источник. Поведение системы не меняется —
@@ -405,8 +408,8 @@ export function hasAnyPermission(role: Role, ps: readonly Permission[]): boolean
 
 | Файл | Что |
 |---|---|
-| `lib/nav.config.ts` | `roles: [...]` → `permission: 'carriers.read'`; `filterNavForRole` через `hasPermission`. |
-| `lib/roles.ts` | `ROLE_ALLOWED_PREFIXES` / `ADMIN_ONLY_EMPLOYEE_PREFIXES` → `PATH_PERMISSIONS: Record<prefix, Permission>`; `isAllowedForRole` внутри вызывает `hasPermission`. Сигнатура для `middleware.ts` не меняется. |
+| `lib/nav.config.ts` | `roles: [...]` → `permission: 'carriers.read'`; `filterNavForRole` через `hasPermission`. ✅ сделано в B4 (2026-10-23) как `permission` + `filterNav(permissions, role)`, см. docs/25 §3 B4 |
+| `lib/roles.ts` | `ROLE_ALLOWED_PREFIXES` / `ADMIN_ONLY_EMPLOYEE_PREFIXES` → `PATH_PERMISSIONS: Record<prefix, Permission>`; `isAllowedForRole` внутри вызывает `hasPermission`. Сигнатура для `middleware.ts` не меняется. ✅ сделано в B4; `ROLE_ALLOWED_PREFIXES` остался (панель = роль) |
 | `components/claims/claim-permissions.ts` | `isAdmin` → permission-проверка. |
 | ~20 файлов с `role ===` | Разобрать по одному: **capability** (показать кнопку) → permission; **scope** (например `isOpiekun` для загрузки «Moja opieka») → оставить роль. Список из grep: `EmployeeSidebar`, pages `carriers/drivers/vehicles/trailers`, `ClaimsListView`, `CarrierFormDialog`, `(admin)/layout`, `ClaimModal`, `UsersListView`, `UserSheet`, `trailer-types/page`, `DelegationDetailModal`, `useAlerts`, `useOpiekunFleet`. |
 
@@ -494,7 +497,7 @@ export function hasAnyPermission(role: Role, ps: readonly Permission[]): boolean
 
 | # | Вопрос | Ответ | Что зафиксировано |
 |---|---|---|---|
-| 1 | Несколько stanowisk у одного сотрудника? | Нет, ровно одно; исключений не предвидится, а если появятся — выдавать доступ на функции | `EmployeeDto.stanowisko` — одиночный объект; исключения → B5 |
+| 1 | Несколько stanowisk у одного сотрудника? | Нет, ровно одно; исключений не предвидится, а если появятся — выдавать доступ на функции | `EmployeeDto.stanowisko` — одиночный объект; исключения → docs/25 B6 |
 | 2 | Stanowiska — справочник или текст? | Фиксированный перечень: `HANDLOWIEC`, `PLANISTA`, `LIDER HANDEL`, … | `code` = значение enum в UPPER_SNAKE, `/stanowiska` отдаётся из enum |
 | 3 | Число сотрудников | Около 100 | `GET /employees` без пагинации |
 

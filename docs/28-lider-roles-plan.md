@@ -142,7 +142,7 @@ Seed маппинга (docs/24 §10 дополняется): `PLANISTA_LIDER →
 | `components/layout/UserMenu.tsx` | Лейбл через `roleLabelKey(user)` |
 | `lib/roles.ts` | `roleLabelKey(role, lider)` → `roles.<role>` \| `roles.lider.<role>`. `ROLE_LANDING`, `ROLE_ALLOWED_PREFIXES`, `isAllowedForRole` — не меняются |
 | `messages/pl.json`, `en.json` | `roles.lider.*`, `users.fields.lider`, `users.fields.liderHint`, `sso.lider` |
-| **Не меняются** | `middleware.ts` (`KNOWN_ROLES`), `nav.config.ts`, layouts с `requireRoleAccess`, `claim-permissions.ts`, все `role ===` |
+| **Не меняются** | `middleware.ts` (`KNOWN_ROLES`), `nav.config.ts`, layouts с `requireRoleAccess`, `claim-permissions.ts`, все `role ===` — *на момент L4. В треке B B4 (2026-10-23) `nav.config.ts`, `claim-permissions.ts` и capability-проверки `role ===` переведены на права (`useCan`, `requirePermission`); `middleware.ts`, `KNOWN_ROLES` и layouts с `requireRoleAccess` остались* |
 
 ### 3.5 docs (главный агент)
 

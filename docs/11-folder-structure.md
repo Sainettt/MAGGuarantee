@@ -22,7 +22,7 @@ MAGGuarantee/
     │   │   │   │   │   └── public.decorator.ts
     │   │   │   │   ├── guards/
     │   │   │   │   │   ├── jwt-auth.guard.ts
-    │   │   │   │   │   ├── roles.guard.ts
+    │   │   │   │   │   ├── permissions.guard.ts        ← @RequirePermission / @AuthenticatedOnly (трек B; roles.guard.ts удалён в B5)
     │   │   │   │   │   └── ownership.guard.ts
     │   │   │   │   ├── interceptors/
     │   │   │   │   │   ├── audit.interceptor.ts

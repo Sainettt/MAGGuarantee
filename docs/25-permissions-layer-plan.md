@@ -1,6 +1,6 @@
 # 25. План: трек B — слой permissions
 
-> **Статус: B1 сделан 2026-10-23 (`2419bfc`); B2 сделан 2026-10-23 (`67f5a8b`…`94fbcff` + B2d); B3 сделан 2026-10-23 (сервисные capability → `can()`, scope помечен `// scope:`), B4 следующий (план от 2026-09-14). Решения по открытым вопросам — §7; первый случай для B6 — в §3 B6.** Детализирует §3 из
+> **Статус: B1 сделан 2026-10-23 (`2419bfc`); B2 сделан 2026-10-23 (`67f5a8b`…`94fbcff` + B2d); B3 сделан 2026-10-23 (`14f979a`: сервисные capability → `can()`, scope помечен `// scope:`); B4 сделан 2026-10-23 (`1cf8d89` api `UserDto.permissions`, `37e5dc3` web); B5 в работе (план от 2026-09-14). Решения по открытым вопросам — §7; первый случай для B6 — в §3 B6.** Детализирует §3 из
 > [24-sso-magspace-and-permissions-plan.md](24-sso-magspace-and-permissions-plan.md)
 > по фактическому состоянию кода на `a50077c`. Где этот документ расходится с
 > §3 docs/24, прав этот документ: §3 писался до инвентаризации.
@@ -92,7 +92,7 @@
 
 | Где | Как устроено сейчас |
 |---|---|
-| `lib/roles.ts` | `ROLE_LANDING` и `ROLE_ALLOWED_PREFIXES` (панель = роль); `ADMIN_ONLY_EMPLOYEE_PREFIXES`: 8 путей внутри `/employee` |
+| `lib/roles.ts` | `ROLE_LANDING` и `ROLE_ALLOWED_PREFIXES` (панель = роль); `ADMIN_ONLY_EMPLOYEE_PREFIXES`: 8 путей внутри `/employee` *(историческое; с B4 — `PATH_PERMISSIONS`)* |
 | `middleware.ts:102,328` | Декодирует роль из JWT без проверки подписи и применяет `isAllowedForRole`. Это защита в глубину; решает API |
 | `lib/nav.config.ts` | 19 пунктов с `roles: Role[]` и `filterNavForRole` |
 | `lib/auth/server.ts:112` | `requireRoleAccess(allowed)`, 9 вызовов (layouts групп и несколько страниц) |
@@ -369,6 +369,14 @@ gps service / repository, vehicle-daily-km, bugbot controller и пять spec-�
 | `(admin)/layout.tsx`: вместо `role !== 'admin'` — «есть хотя бы одно admin-право»; каждая страница группы проверяет своё право | |
 | `claim-permissions.ts`: `isAdmin` → `can('claims.verify_pending_authorization')` | |
 | ~26 сравнений `role ===` в 18 файлах: capability (показать кнопку hard-delete, колонку ставок) → `useCan`; scope (`isOpiekun` для загрузки «Moja opieka», скрытие фильтра по опекуну) → оставить роль | список в PR |
+
+**Сделано (2026-10-23, `1cf8d89` api + `37e5dc3` web).** Поведение для всех 8 ролей и лидерских вариантов не изменилось: золотой тест вкладок по ролям (`lib/nav.config.test.ts`) и регрессионные тесты «старая логика по роли = новая по правам» для `deriveClaimPermissions`, `plannerCellState`, `isAllowedForRole`. Отличия от таблицы выше:
+- `permissions` отдаёт не только `/auth/me`, а каждый `UserDto` (verify, google, refresh, change-password) — web заполняет кэш `/me` из этих ответов. Единственное место расчёта — `apps/api/src/common/authz/effective-permissions.ts` (сюда встанут overrides B6). В JWT прав нет (тест закрепляет).
+- Web читает каталог через чистый subpath `@magguarantee/shared/permissions` (`lib/auth/permissions.ts`); edge-бандл +3.5 KB, zod в нём нет, тест `lib/auth/edge-imports.test.ts` запрещает value-импорт barrel'а из `middleware.ts`/`lib/roles.ts`. `effectivePermissionsOf(user)` = `user.permissions`, иначе `permissionsFor(role, lider)` — fallback на время выката со старым api (R3: overrides там не учитываются, пересмотреть в B6).
+- `filterNav` ограничен ролями employee-shell (scope): planista держит `vehicles.read`, но вкладку не получает — панель это роль. `nav` несёт `permission` + редкий `roles`-квалификатор (`opieka-delegations` → opiekun, `delegations` → admin).
+- `PATH_PERMISSIONS` заменил оба списка префиксов; `/employee/delegations` остался scope-правилом по роли admin (opiekun держит `delegations.read`, но это список «все выезды»). Новых edge-гейтов не добавлено: страницы, которые pracownik сегодня открывает по прямому URL и получает 403 от api (UWAGI #17), — отдельный PR после B6.
+- `(admin)/layout` проверяет «есть хотя бы одно admin-право», каждая страница — своё; у client-страниц (sso, teams, trailer-types) тонкий серверный `layout.tsx`; `(admin)/delegations` дополнительно держит роль admin (scope).
+- Единственное видимое изменение: анонимный пользователь на `(admin)/layout` и `/employee/przekazania` теперь уходит на `/login?next=…`, как на остальных страницах, а не на голый `/login`.
 
 ### B5. Зачистка и документация (≈ 0.5 дня)
 

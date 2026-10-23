@@ -89,7 +89,7 @@ MAGGuarantee/                          ← корень репозитория
 │  └─────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │  Guards / Interceptors                               │   │
-│  │   JwtGuard, RolesGuard, OwnershipGuard, AuditInterc. │   │
+│  │   JwtGuard, PermissionsGuard, OwnershipGuard, Audit │   │
 │  └─────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │  Services (business logic)                           │   │
@@ -125,7 +125,7 @@ MAGGuarantee/                          ← корень репозитория
 
 | GAS (текущее) | Nest (новое) |
 |---|---|
-| `validateCaller`, `requireAdmin` | `@UseGuards(JwtAuthGuard, RolesGuard)` + `@Roles('admin')` |
+| `validateCaller`, `requireAdmin` | глобальные `JwtAuthGuard` + `PermissionsGuard`; на маршруте `@RequirePermission('users.manage')` и т.п. (каталог прав в shared, docs/15 §Roles & Guards, трек B) |
 | `_requireOpiekun`, `_opiekunOwnsCarrier` | `OwnershipGuard` + декоратор `@OpiekunOwns('carrierLogin')` |
 | `_parseCarrierRow`, `_parseAutoRow` | Prisma model + автомаппинг |
 | `_writeAuditLog` | `AuditInterceptor` (декларативный через `@Audit('createCarrier')`) |

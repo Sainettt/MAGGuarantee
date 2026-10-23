@@ -214,21 +214,11 @@ Source of truth: `schema.prisma` (Claim model — `orig*`, `statusBeforeReklamac
 
 ## 10. <a id="multi-role"></a>Multi-role users (e.g., przewoznik + opiekun)
 
-A physical person can hold two roles. Common combo: a carrier-owner who also curates a small group of other carriers as `opiekun`. Implementation pattern:
+**Not implemented and not planned** (decision 2026-10-23, track B B5; docs/03 §Multi-role). One account = one role. The JWT carries a single `role`; there is no `alternateRoles`, no `POST /auth/switch-role`, no panel switcher (the legacy `#btnSwitchToEmployee` at `index.html:573` is not reproduced). A physical person who genuinely needs two roles (e.g. a carrier-owner who also curates other carriers as `opiekun`) gets **two `User` rows with two different e-mails** — `User.email` is unique and nothing links the rows. "This person needs one more function" is solved by per-user permission overrides (docs/25 B6), never by a second role.
 
-- **TWO `User` rows**, one per role, linked by **the same `email`** (NOT joined by FK; loose coupling on email).
-- At login the auth service finds both rows. JWT carries `role` (the active one) + `alternateRoles[]` (the others). UI shows a panel switcher.
-- Switching roles = `POST /auth/switch-role` → server issues a new access JWT with a different `role` claim. The refresh token is unchanged — same physical session.
+Source of truth: `docs/03-roles.md#multi-role`; `packages/shared/src/schemas/auth.ts` (`UserDto` has no `alternateRoles`).
 
-Why not "one User with `roles: Role[]`":
-
-- Breaks 1:1 mapping with the 8 legacy auth-listy (every legacy sheet had its own row per role).
-- Multiplies edge cases in role-scoped queries — every `findByRole(role)` becomes `findByRole IN (role)` in JSON arrays.
-- Soft-delete and audit semantics differ per role — we want to deactivate the carrier-side account independently of the opiekun-side.
-
-Source of truth: `docs/15-auth-strategy.md#multi-role`; legacy: `index.html:573` (the `#btnSwitchToEmployee` panel switcher).
-
-**What NOT to do:** do not collapse the two rows into one with an array of roles. Do not rely on FK between the rows — they're linked only by email match (which is enforced unique on `User.email`). Do not assume the `role` field is the only role the user has — read `alternateRoles` if you're surfacing what the user can switch into.
+**What NOT to do:** do not add `alternateRoles`, a role switcher or a second role to a user; do not link two accounts by e-mail match (it cannot happen — the column is unique). If an admin asks for "the opiekun who is also a carrier", create a second account with another e-mail or, when the need is one function, grant a permission (B6).
 
 ---
 
@@ -256,7 +246,7 @@ The role identifier in DB and JWT is `pracownik`, and the UI label is the litera
 |---|---|
 | DB enum (`Role`) | `pracownik` |
 | JWT `role` claim | `pracownik` |
-| API `@Roles('pracownik')` | `pracownik` |
+| API rights (`ROLE_PERMISSIONS.pracownik`, `packages/shared/src/permissions.ts`) | `claims.read`, `claims.verify`, `dashboard.read`, `lookups.carriers` — nothing else |
 | **PL UI label** | **"Pracownik"** |
 | EN UI label | "Employee" |
 | Legacy comment (`Code.gs:944`) | "Pracownik = widzi wszystko, rozlicza wnioski, BEZ ustawień" |
@@ -273,11 +263,11 @@ Source of truth: `docs/03-roles.md#pracownik`.
 
 This is **stricter than legacy**. The legacy `getDelegacjeForEksport` allowed `pracownik` access (alongside `eksport`). In the new system, `pracownik` is **excluded** from the delegations module entirely.
 
-Source of truth: `apps/api/src/modules/delegations/delegations.controller.ts` — every `@Roles(...)` decorator on the controller intentionally omits `pracownik`. The decision was locked in conversation; see header comment in the controller file.
+Source of truth: the permissions catalog — `ROLE_PERMISSIONS.pracownik` in `packages/shared/src/permissions.ts` holds no `delegations.*` right, so every `@RequirePermission` on `delegations.controller.ts` excludes pracownik; the frozen `endpoint-roles.snapshot.json` fixture pins it. The decision was locked in conversation; see the header comment in the controller file.
 
 The decision rationale: `pracownik` is now a narrow claims-only role ("Pracownik" in the UI) — only claims verification + dashboard. Delegations are an `eksport` / `weryfikator` / `dyspozytor` / carrier concern.
 
-**What NOT to do:** if a future agent finds `pracownik` in `@Roles(...)` for any delegation endpoint, that's a **bug** — revert it. Do not "match legacy" for this — legacy was wrong-by-current-decision.
+**What NOT to do:** adding any `delegations.*` right to `ROLE_PERMISSIONS.pracownik`, or gating a delegation route with a right pracownik holds, is a **bug** — the roles-fixture test goes red; revert it. Do not "match legacy" for this — legacy was wrong-by-current-decision.
 
 ---
 

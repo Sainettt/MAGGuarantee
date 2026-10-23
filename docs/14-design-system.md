@@ -762,8 +762,8 @@ Employee nav (top tabs или left sidebar — решит web-agent в Phase 4) 
 - `planista`, `dyspozytor`, `eksport`, `weryfikator` — собственные панели, не Employee panel.
 
 Pattern:
-- Список ссылок строится из конфига `nav.config.ts`, каждая запись — `{ href, label, icon, roles: Role[] }`.
-- Фильтрация в layout server-component: `links.filter(l => l.roles.includes(currentRole))`.
+- Список ссылок строится из конфига `nav.config.ts`, каждая запись — `{ href, label, icon, permission: Permission | Permission[] (any-of), roles?: Role[] }` (с трека B B4, 2026-10-23; до этого `roles: Role[]`). `roles` — редкий scope-квалификатор (сегодня только `opieka-delegations` → opiekun, `delegations` → admin).
+- Фильтрация в layout server-component: `filterNav(effectivePermissionsOf(user), user.role)` — права из `/auth/me.permissions` (fallback `permissionsFor(role, lider)` при расхождении версий api/web), плюс ограничение на роли employee-shell (планиста с `vehicles.read` вкладку не получает — панель это роль). Золотой тест `lib/nav.config.test.ts` фиксирует набор вкладок по ролям.
 - Никакого client-side hide через CSS. Что роль не видит — не рендерится.
 - Активное состояние ссылки — `bg-brand-50 text-brand` light / `bg-brand/15 text-brand-light` dark.
 
@@ -8642,7 +8642,7 @@ Planista                                        ← FormLabel, без «*» (п�
 
 #### §17.4.1 — Employee sidebar: «Przekazania»
 
-Новая запись в `lib/nav.config.ts`: `{ key: 'transfers', href: '/employee/przekazania', labelKey: 'nav.transfers', iconName: 'ArrowLeftRight', roles: ['admin', 'opiekun'] }`. Место — сразу после `vehicles` (передача — действие над машинами). Маршрут **не** в `ADMIN_ONLY_EMPLOYEE_PREFIXES` (опекун туда ходит, D5).
+Новая запись в `lib/nav.config.ts`: `{ key: 'transfers', href: '/employee/przekazania', labelKey: 'nav.transfers', iconName: 'ArrowLeftRight', permission: ['vehicles.planner_transfer.request', 'vehicles.planner_transfer.decide'] }` (с B4; раньше `roles: ['admin', 'opiekun']`). Место — сразу после `vehicles` (передача — действие над машинами). Маршрут в `PATH_PERMISSIONS` под теми же правами (опекун туда ходит, D5).
 
 | Роль | Содержимое страницы | Счётчик |
 |---|---|---|
@@ -9466,7 +9466,7 @@ HISTORIA PLANISTÓW                                    ← заголовок с
 | W5 | Футер `<VehicleDetailModal>` | «Przekaż ciągnik» появляется только после ответа журнала (`historyReady`) | Тот же принцип, что skeleton в E1: не показывать кнопку, которая через секунду окажется «уже есть заявка» |
 | W6 | `<PlanistaTabsNav>` | Контейнер `mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 pt-6` (добавлено `mx-auto max-w-screen-2xl`), `overflow-x-auto` на tablist | Страницы планисты (FleetPanel, KmBoardScreen) центрированы с `max-w-screen-2xl`; без этого на ≥1536px табы уезжали влево от заголовка. 4 вкладки на 360px прокручиваются, а не переносятся |
 | W7 | `/planista/przekazania`, `/planista/zatwierdzenia` | Admin по прямой ссылке **редиректится** на `/employee/przekazania` (server). *(2026-10-23: остаётся без изменений; редирект идёт на страницу по умолчанию — вкладку «Do decyzji»)* | И решения, и свои заявки admin (вкладка «Moje wnioski», §17.5.8, D9) живут в employee-разделе; второго места для его заявок не нужно |
-| W8 | `/employee/przekazania` | Закрыт для `pracownik`: edge — `ROLE_RESTRICTED_EMPLOYEE_PREFIXES` в `lib/roles.ts` (чистые данные, без runtime-импорта shared — docs/28 §9.2 #18), server — redirect на `/employee/forbidden` | Маршрут не admin-only (опекун), но pracownik к передачам отношения не имеет, api ответил бы 403 на оба scope |
+| W8 | `/employee/przekazania` | Закрыт для `pracownik`: edge — `PATH_PERMISSIONS` в `lib/roles.ts` (any-of `vehicles.planner_transfer.request` / `.decide` по `permissionsFor(role)`; каталог импортируется через чистый subpath `@magguarantee/shared/permissions`, без zod в edge-бандле — docs/28 §9.2 #18, B4 2026-10-23), server — `requirePermission(…, 'forbidden')` → `/employee/forbidden` | Маршрут не admin-only (опекун), но pracownik к передачам отношения не имеет, api ответил бы 403 на оба scope |
 | W9 | i18n | Два **новых** ключа сверх §17.11: `transfers.card.cancelledBy` («Anulował: {name} · {role} · {date}») и `transfers.history.forbidden` («Nie masz już wglądu w historię planistów tego ciągnika.») | `cancelled` ставит не только автор: выключение/удаление машины и удаление перевозчика отменяют `pending` с `decidedBy` = выполнившему (docs/13) — «Anulowany przez wnioskującego» был бы ложью. `forbidden` — диалог журнала из карточки, когда зритель уже вне U11 (например, автор-планиста после одобрения): пустой диалог выглядел бы сломанным |
 | W10 | `<PlannerHistoryDialog>` | `DialogTitle` = `history.dialogTitle` обычным шрифтом; номер `font-mono` — в `DialogDescription` (+ перевозчик) | Значения next-intl — только примитивы, React-узел в `{plate}` не вставить без смены ключа |
 | W11 | `<PlannerHistoryTimeline>` | «od {from}» / «{from} – {to}» рендерятся с настоящими `<time dateTime>` в слотах (маркеры `lib/transfers/interpolateNodes.ts`), порядок слов остаётся за переводом | §17.10 требует `<time>`; ключи §17.11 не менялись |
