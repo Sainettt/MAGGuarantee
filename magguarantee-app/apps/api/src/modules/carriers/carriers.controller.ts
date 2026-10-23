@@ -44,10 +44,10 @@ import { CarriersService } from './carriers.service';
 /**
  * Carriers REST surface per docs/13-api-design.md#carriers.
  *
- * Gates (docs/25 §3 B2): every route carries `@RequirePermission` exactly as
- * planned in `common/authz/endpoint-permissions.ts`, checked by the global
- * `PermissionsGuard`; who holds what is `ROLE_PERMISSIONS` in
- * `@magguarantee/shared`:
+ * Gates (docs/25 §3 B2, B5): every route carries `@RequirePermission`, checked
+ * by the global `PermissionsGuard` and mirrored per route in the generated
+ * fixture `common/authz/__fixtures__/endpoint-permissions.snapshot.json`; who
+ * holds what is `ROLE_PERMISSIONS` in `@magguarantee/shared`:
  *  - GET (list / detail): `carriers.read` (admin / opiekun(own))
  *  - GET documents overview: `carrier_documents.read` (admin / opiekun(own))
  *  - POST: `carriers.write` (admin / opiekun — auto-self-assign for opiekun)

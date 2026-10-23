@@ -33,8 +33,9 @@ import type { CarrierAttachmentsService } from './carrier-attachments.service';
  * `.delete` (delete). Two layers, same pattern as
  * `claims.controller.roles.spec.ts`:
  *   1. the `@RequirePermission(...)` metadata on each handler is exactly the
- *      planned requirement (`common/authz/endpoint-permissions.ts`), and the
- *      catalog maps it onto the documented role set;
+ *      requirement recorded in the generated fixture
+ *      (`common/authz/__fixtures__/endpoint-permissions.snapshot.json`), and
+ *      the catalog maps it onto the documented role set;
  *   2. `PermissionsGuard` lets through / refuses users built the way
  *      `JwtAccessStrategy` builds them (`makeAuthUser(role)`), over the same
  *      role matrix the former `RolesGuard` checks used.
@@ -87,7 +88,11 @@ const ALL_HANDLERS: (keyof CarrierAttachmentsController)[] = [
   'delete',
 ];
 
-/** The plan (`ENDPOINT_PERMISSIONS`) per handler — decision 2026-10-23, docs/25 B6. */
+/**
+ * Requirement per handler, as recorded in the generated fixture
+ * `common/authz/__fixtures__/endpoint-permissions.snapshot.json` — decision
+ * 2026-10-23, docs/25 B6.
+ */
 const PLANNED: Record<string, Permission[]> = {
   upload: ['carrier_documents.add'],
   list: ['carrier_documents.read'],

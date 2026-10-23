@@ -59,19 +59,19 @@ type JwtPayload = {
   login: string;
   role: Role;
   carrierId?: string;   // для przewoznik — для быстрого ownership check
-  alternateRoles?: Role[]; // если у carrier есть запись в OPIEKUN/PRACOWNIK
   iat: number;
   exp: number;
   jti: string;          // unique token ID (для revocation tracking)
 };
 ```
 
-> **Что в payload не входит.** `teamId` (Phase 11) и флаг лидера `lider`
-> (docs/28) в токен не кладутся: `JwtAccessStrategy.validate` перечитывает
-> пользователя из БД на каждом запросе и подставляет их в `AuthUser` оттуда,
-> так что понижение бьёт на следующем запросе, а не после истечения access.
-> Edge-гейтинг в `middleware.ts` от них не зависит — панель и landing
-> определяет только `role`.
+> **Что в payload не входит.** `teamId` (Phase 11), флаг лидера `lider`
+> (docs/28) и права `permissions` (docs/25 B4) в токен не кладутся:
+> `JwtAccessStrategy.validate` перечитывает пользователя из БД на каждом запросе
+> и строит `AuthUser` (включая `permissions`) оттуда, так что понижение бьёт на
+> следующем запросе, а не после истечения access. Edge-гейтинг в `middleware.ts`
+> знает только `role`: панель, landing и права пути — каталог по роли, без флага
+> лидера (§Middleware).
 
 ### Access vs Refresh
 
@@ -293,169 +293,261 @@ managed-пользователя пускаем по последней синх
 
 ## Roles & Guards
 
-### Декоратор `@Roles`
+> Роль — тип пользователя и ключ data-scope («какие строки видит»). Право
+> (permission) — имя одного действия («что можно сделать»). Роуты и
+> capability-ветки в сервисах решаются **правами**, scope остаётся на **роли**.
+> План и история перехода — [25-permissions-layer-plan.md](25-permissions-layer-plan.md)
+> (трек B, B1–B5 сделаны 2026-10-23).
+
+### Каталог прав
+
+`packages/shared/src/permissions.ts` — единственный источник «кто что может»:
+
+| Экспорт | Что |
+|---|---|
+| `PERMISSIONS`, `type Permission` | все права, `домен.действие` (snake_case внутри сегмента); порядок = порядок матрицы docs/03 и вывода `permissionsFor` |
+| `ROLE_PERMISSIONS: Record<Role, readonly Permission[]>` | права роли без флага лидера. `admin` ≠ «все права»: у него нет `claims.submit`, `delegations.create`, `panel.carrier` |
+| `LIDER_PERMISSIONS: Partial<Record<LiderRole, readonly Permission[]>>` | что добавляет флаг `User.lider` (docs/28); сегодня только `planista: ['vehicles.planner_transfer.decide']`. Лидер только добавляет: тест `permissionsFor(r, true) ⊇ permissionsFor(r, false)` |
+| `permissionsFor(role, lider = false)` | `ROLE_PERMISSIONS[role] ∪ (lider ? LIDER_PERMISSIONS[role] : [])`, без дублей, в порядке каталога; строка, которая не роль, → `[]` (fail closed) |
+| `hasPermission`, `hasAnyPermission` | проверки над парой `(role, lider)` — для edge и тестов; запросный пользователь проверяется через `AuthUser.permissions` |
+| `rolesSatisfying(required, { lider })` | роли, которые пропускает any-of требование, — для сверки с фикстурой ролей |
+
+Модуль без runtime-зависимостей (только type-импорты, zod нет — тест это
+проверяет): его импортируют api, web и edge-middleware. Таблица для людей —
+сгенерированный блок docs/03 [«Каталог прав (генерируется)»](03-roles.md#каталог-прав-генерируется)
+(`npm run -s authz:matrix -w @magguarantee/shared`; `packages/shared/tests/permissions.test.ts`
+сверяет блок с каталогом).
+
+### `AuthUser.permissions` — один расчёт на запрос
+
+`JwtAccessStrategy.validate` перечитывает пользователя из БД на каждом запросе
+(активность, `passwordChangedAt`, `teamId`, `lider`) и там же **один раз** строит
+`AuthUser.permissions: ReadonlySet<Permission>` через `effectivePermissions(user)`
+(`apps/api/src/common/authz/effective-permissions.ts`). Сегодня это ровно
+`permissionsFor(role, lider)`; B6 добавит сюда персональные extra/denied-права — и
+только сюда: guard, сервисы и `/auth/me` при этом не меняются.
+
+- Тот же модуль (`toPermissionList`) даёт `UserDto.permissions: Permission[]` —
+  в `GET /auth/me` и в `{ user }` каждого auth-ответа (`verify-code`, `google`,
+  `refresh`, `change-password`), без дублей, в порядке каталога. Web считает этот
+  список авторитетным.
+- **В JWT прав нет** (тест закрепляет): понижение роли, снятие флага лидера, а в
+  B6 — отзыв права действуют со следующего запроса, а не после истечения access.
+- Guard и сервисы читают только `req.user.permissions` и **никогда** не
+  пересчитывают права из `role`. Пользователь без набора (refresh-payload,
+  самодельный объект) прав не имеет. В тестах пользователей строит
+  `common/testing/make-auth-user.ts` (`makeAuthUser`, `withRole`, `withoutPermission`).
+
+### Цепочка guard'ов
+
+Глобальные `APP_GUARD` в `app.module.ts` (порядок регистрации = порядок
+выполнения), за ними — guard'ы из `@UseGuards` контроллера:
+
+```
+ThrottlerGuard → JwtAuthGuard → PermissionsGuard → @UseGuards(...) контроллера (ownership)
+```
+
+- `JwtAuthGuard` — 401 без валидного access (кроме `@Public`); кладёт `AuthUser` в `req.user`.
+- `PermissionsGuard` — решение об авторизации роута (ниже).
+- `OpiekunOwnershipGuard`, `CarrierOwnershipGuard` — scope одного ресурса по
+  `@OpiekunOwns` / `@CarrierOwns`; стоят в `@UseGuards` контроллера, обычно на классе.
+
+### `PermissionsGuard` — deny by default
+
+`apps/api/src/modules/auth/guards/permissions.guard.ts`. Метаданные читаются через
+`getAllAndOverride([handler, class])` — метод перекрывает класс. По порядку:
+
+1. `@Public()` → пропуск. Проверяется первым: на `POST /auth/refresh` в `req.user`
+   лежит refresh-payload без `permissions`.
+2. `@AuthenticatedOnly(reason)` → пропуск, если `req.user` есть (любая сессия,
+   права не смотрятся); иначе 403.
+3. `@RequirePermission(...)` → пропуск, если в `req.user.permissions` есть **хотя
+   бы одно** из прав (any-of). Набора нет → 403 + warn: fail closed, из роли не
+   пересчитывается.
+4. Ничего не объявлено → **403** + warn с именем хендлера. Роут без решения об
+   авторизации — баг, а не «любая сессия»; до main его не пускает inverse-правило
+   (§«Фикстуры»).
+
+Противоречивые пары (`@Public` или `@AuthenticatedOnly` рядом с
+`@RequirePermission`, `@Public` + `@AuthenticatedOnly`) рантайм разрешает этим
+порядком, но в CI они красные. Тела 403 (`auth.constants.ts`):
+`FORBIDDEN_NO_USER_MESSAGE` = «Brak uprawnień» (нет пользователя или нет решения),
+`FORBIDDEN_NOT_GRANTED_MESSAGE` = «Brak uprawnień dla tej roli» (прав не хватает) —
+те же строки, что отдавал ролевой guard до трека B.
 
 ```ts
-// common/decorators/roles.decorator.ts
-export const Roles = (...roles: Role[]) => SetMetadata('roles', roles);
-
-// usage
 @Controller('claims')
+@UseGuards(CarrierOwnershipGuard)                      // scope одного ресурса
 export class ClaimsController {
   @Get()
-  @Roles('admin', 'pracownik', 'opiekun', 'przewoznik')
-  list(@CurrentUser() user: User, @Query() q: ListQuery) { ... }
-  // Service-level scope: admin/pracownik видят все, opiekun — только своих перевозчиков, przewoznik — только свои.
+  @RequirePermission('claims.read')                    // admin, pracownik, przewoznik
+  list(@CurrentUser() user: AuthUser, @Query() q: ClaimFilters) { ... }
+  // Какие строки — сервис по роли: admin/pracownik все, przewoznik свои (`// scope:`).
 
-  @Patch(':nrZgl')
-  @Roles('admin', 'pracownik')   // ← одно из НЕМНОГИХ мест где pracownik уместен — claims-верификация это его основная задача
-  update(@Param('nrZgl') nrZgl: string, @Body() dto: UpdateClaimDto) { ... }
-}
-
-// CONTRAST: для CRUD по carrier/vehicle/driver/trailer pracownik НЕ допущен:
-@Controller('carriers')
-export class CarriersController {
-  @Patch(':id')
-  @Roles('admin', 'opiekun')   // ← pracownik сюда НЕ ходит (legacy: requireAdmin / _requireOpiekun)
-  update(...) { ... }
+  @Post(':nrZgl/preview')
+  @RequirePermission('claims.submit', 'claims.verify')  // any-of
+  @CarrierOwns('nrZgl', 'param', 'claimNrZgl')
+  previewExisting(...) { ... }
 }
 ```
 
-### Guards
+### `@AuthenticatedOnly(reason)`
+
+`modules/auth/decorators/authenticated-only.decorator.ts` — явное решение «любой
+залогиненный» для роутов, которые нужны каждой роли. `reason` (не короче
+`AUTHENTICATED_ONLY_MIN_REASON_LENGTH` = 20 символов) пишется для ревьюера и
+inverse-правила, рантайм его не читает. Сегодня ровно 5 роутов:
+
+| Роут | Почему без права |
+|---|---|
+| `GET /auth/me` | свой профиль сессии |
+| `POST /auth/logout` | закрыть свою сессию |
+| `POST /auth/change-password` | self-service и выход из принудительной смены пароля (`mustChangePassword`) — для любой роли |
+| `GET /trailer-types` | справочник для форм всех панелей; запись — `trailer_types.manage` |
+| `GET /integrations/bugbot/handoff` | баг-репорт доступен всем; `kind=idea` — capability `bugbot.submit_idea` в сервисе |
+
+Предпочитай право из каталога: новый `@AuthenticatedOnly` — осознанное решение,
+которое видно в диффе фикстуры как `"AUTHENTICATED"`.
+
+### Capability в сервисах, scope на роли
+
+- **Capability** — право, которое решает ветку внутри сервиса, а не роут:
+  `can(user, p)` / `canAny(user, ps)` из `apps/api/src/common/authz/can.ts`. Читают тот
+  же `AuthUser.permissions` и так же fail closed (нет набора или пустой список →
+  `false`). Права, которые не гейтят ни одного роута, перечислены с местом проверки в
+  `SERVICE_CAPABILITIES` (`common/authz/endpoint-permissions.ts`):
+  `claims.verify_pending_authorization`, `vehicles.rates.read`,
+  `vehicles.fuel_card.read`, `bugbot.submit_idea`.
+- **Scope** — «какие строки» (`_scopeFilters`, `opiekun ? свои : все`,
+  ownership-guards) — остаётся на **роли**: он завязан на структуру данных роли
+  (`Carrier.opiekunId`, `Carrier.userId`, `Vehicle.plannerId`, `User.teamId`, …).
+  Каждое такое место помечено `// scope:` с ключом. Правом scope не заменяют
+  (docs/25 §0 «Не цель»): выданное другой роли право не должно расширить строки до
+  «все» — риск R4 (docs/25 §6), отсюда `GRANTABLE_EXTRA` в B6.
 
 ```ts
-// common/guards/roles.guard.ts
-@Injectable()
-export class RolesGuard implements CanActivate {
-  constructor(private reflector: Reflector) {}
+// capability — право
+if (kind === 'idea' && !can(user, 'bugbot.submit_idea')) throw new ForbiddenException(...);
 
-  canActivate(ctx: ExecutionContext): boolean {
-    const required = this.reflector.getAllAndOverride<Role[]>('roles', [
-      ctx.getHandler(),
-      ctx.getClass(),
-    ]);
-    if (!required) return true;
-    const { user } = ctx.switchToHttp().getRequest();
-    if (!user) return false;
-    const userRoles = [user.role, ...(user.alternateRoles ?? [])];
-    return required.some(r => userRoles.includes(r));
-  }
-}
+// scope — роль
+// scope: opiekun видит только своих перевозчиков (Carrier.opiekunId)
+const where = user.role === 'opiekun' ? { opiekunId: user.sub } : {};
 ```
 
-### `PermissionsGuard` (трек B, с 2026-10-23)
+### Лидер (`User.lider`)
 
-**B2 завершён: все контроллеры переведены** на `@RequirePermission(...)` (any-of,
-права из `packages/shared/src/permissions.ts`; какое право требует каждый роут —
-`apps/api/src/common/authz/endpoint-permissions.ts`), см.
-[25-permissions-layer-plan.md](25-permissions-layer-plan.md) §3 B2. Декоратор
-`@Roles` и `RolesGuard` в примерах выше описывают состояние до трека B: `@Roles`
-нет ни на одном живом роуте или классе контроллера — иначе красный тест
-`endpoint-permissions.spec`. Оба guard'а пока глобальные (`APP_GUARD`), порядок —
-Throttler → `JwtAuthGuard` → `RolesGuard` → `PermissionsGuard`; ownership-guards из
-`@UseGuards` контроллера идут после них. `RolesGuard` без метаданных пропускает
-всех, то есть остаётся зарегистрированным no-op'ом до B5. Inverse-правило (фаза 2,
-с B2d): каждый не-`@Public` роут несёт `@RequirePermission` или стоит в
-`AUTHENTICATED_ONLY` с причиной; `@Roles` решением об авторизации больше не
-считается. `AuthUser.permissions` считается **один раз** в
-`JwtAccessStrategy.validate` из `permissionsFor(role, lider)` (та же пара из БД, что
-`role`/`lider`; B6 добавит сюда индивидуальные права). `PermissionsGuard` проверяет
-по порядку:
+Лидер — не роль, а флаг над базовой ролью (docs/28); его права —
+`permissionsFor(role, true)`. Единственное лидерское право сегодня —
+`vehicles.planner_transfer.decide` у `planista`, поэтому planista решает передачи
+машин **только через флаг**: planista без `lider` на
+`POST /planner-transfers/:id/{approve,reject}` получает 403 от `PermissionsGuard`
+(«Brak uprawnień dla tej roli», до сервиса). Ресурсную часть — лидер именно этого
+`fromPlanner`, не автор и не получатель — по-прежнему проверяет сервис
+(`planner-transfer.rules.ts`): правом её не выразить. Edge флага не знает (§Middleware).
 
-1. `@Public` (тот же `IS_PUBLIC_KEY`, что у `JwtAuthGuard`) → пропуск. На
-   `POST /auth/refresh` в `req.user` лежит refresh-payload без `permissions`.
-2. Нет метаданных `@RequirePermission` (`getAllAndOverride([handler, class])`) →
-   пропуск: это session-only роут из `AUTHENTICATED_ONLY` (inverse-правило в
-   `endpoint-permissions.spec`).
-3. Метаданные есть, а `req.user.permissions` нет → 403, fail closed; права из
-   роли **не** пересчитываются.
-4. Иначе пропуск, если у пользователя есть хотя бы одно из требуемых прав
-   (пустое требование не пропускает никого).
+### Фикстуры и `npm run authz:snapshot`
 
-Тексты 403 у обоих guard'ов общие (`FORBIDDEN_*_MESSAGE`), поэтому перевод роутов
-с `@Roles` на `@RequirePermission` (B2a–c) ответы не изменил. Для сервисов —
-`can(user, p)` / `canAny` из `common/authz/can.ts` (тот же fail closed). С B3
-capability-проверки в сервисах идут через `can()`, а scope («какие строки») остаётся
-на роли и помечен `// scope:` (docs/25 §3 B3). B5 удалит `@Roles` и `RolesGuard`.
+Три закоммиченные фикстуры в `apps/api/src/common/authz/__fixtures__/`.
+`roles-snapshot.spec.ts` строит их из живых метаданных всех контроллеров `AppModule`
+(`common/authz/roles-snapshot.ts`; без БД и провайдеров) и при расхождении падает с
+построчным диффом.
+
+| Фикстура | Что записано | Что доказывает |
+|---|---|---|
+| `endpoint-permissions.snapshot.json` | роут → `"PUBLIC"` / `"AUTHENTICATED"` / any-of список прав | **источник по роутам**: что требует каждый роут. Новый роут или сменившееся требование — одна строка диффа |
+| `endpoint-roles.snapshot.json` | роут → `"PUBLIC"` / `"AUTHENTICATED"` / роли, которые проходят | снята в B1 до замены декораторов, с тех пор неизменна. `endpoint-permissions.spec.ts`: каталог, применённый к фикстуре прав (`rolesSatisfying(…, { lider: true })`), воспроизводит её точно — никто не получил и не потерял доступ |
+| `endpoint-ownership.snapshot.json` | роут → `@OpiekunOwns` / `@CarrierOwns` с аргументами | ни один ownership-guard не потерян и не сменил источник id |
+
+`endpoint-permissions.spec.ts` держит и inverse-правило над живыми метаданными:
+каждый не-`@Public` роут несёт `@RequirePermission` **или** `@AuthenticatedOnly` с
+причиной, никогда оба; `@AuthenticatedOnly`-роуты — ровно записи `"AUTHENTICATED"`
+фикстуры; каждое право каталога гейтит роут (по фикстуре) **или** стоит в
+`SERVICE_CAPABILITIES` — не оба и не ни одно.
+
+Перезапись: `npm run authz:snapshot -w api` — запускает `roles-snapshot.spec` с
+`AUTHZ_SNAPSHOT_UPDATE=1` и пишет все три фикстуры. Роут **без решения** не
+записывается никогда: генератор считает его противоречием, а не `"AUTHENTICATED"`.
+
+### Как добавить роут
+
+1. На хендлер (или класс) — `@RequirePermission('домен.действие', …)` с правом из
+   каталога; если роут нужен каждой роли — `@AuthenticatedOnly('почему …')`. Scope
+   одного ресурса — `@OpiekunOwns` / `@CarrierOwns` и guard в `@UseGuards` контроллера.
+2. `npm run authz:snapshot -w api`.
+3. Просмотреть дифф: в `endpoint-permissions` — ровно новая строка с ожидаемым
+   требованием; в `endpoint-roles` — та же строка с ожидаемыми ролями; в
+   `endpoint-ownership` — если роут скоупится ownership-guard'ом. Закоммитить
+   фикстуры вместе с кодом.
+4. Если понадобилось новое право или сменились права роли — правка
+   `packages/shared/src/permissions.ts`, регенерация блока docs/03
+   (`npm run -s authz:matrix -w @magguarantee/shared`), строка в docs/25 §2. Смена
+   «кто что может» — отдельный PR с обновлением docs/03 (docs/25 §0).
+
+Роут без решения — красный CI (inverse-правило и противоречие в снапшоте); если он
+всё же доедет до рантайма — 403 всем и warn в логе.
+
+> **Что изменилось (трек B, 2026-10-23).** До трека B роуты гейтил `@Roles(...)` +
+> глобальный `RolesGuard`, а роут без `@Roles` пропускал любую сессию. B2 перевёл
+> 135 роутов на `@RequirePermission`, B3 — capability в сервисах на `can()`, B4 —
+> web на `UserDto.permissions`; B5 (`3579226`) удалил `@Roles`, `RolesGuard` и
+> `ROLES_METADATA_KEY`, ввёл deny by default и `@AuthenticatedOnly`, а рукописную
+> таблицу `ENDPOINT_PERMISSIONS` заменил сгенерированной фикстурой. Кто что может —
+> не изменилось (фикстуры ролей и ownership байт-в-байт), кроме принятого в B2c:
+> planista без флага лидера на approve/reject получает 403 от guard'а вместо
+> `PLANNER_TRANSFER_NOT_DECIDER` от сервиса.
 
 ### OwnershipGuard для opiekun-эндпоинтов
 
-```ts
-// common/guards/ownership.guard.ts — проверяет что carrier принадлежит opiekun-у
-@Injectable()
-export class OpiekunOwnershipGuard implements CanActivate {
-  constructor(private carriers: CarriersRepository) {}
+`apps/api/src/common/guards/opiekun-ownership.guard.ts`, работает по метаданным:
+без `@OpiekunOwns(name, source, as)` на роуте — no-op.
 
-  async canActivate(ctx: ExecutionContext): Promise<boolean> {
-    const req = ctx.switchToHttp().getRequest();
-    const { user } = req;
-    // admin пропускается — у него доступ ко всем перевозчикам.
-    // pracownik сюда НЕ должен попадать — он не имеет доступа к carrier-эндпоинтам вообще
-    // (контроллер carriers поднимает 403 через @Roles('admin', 'opiekun')).
-    if (user.role === 'admin') return true;
-    if (user.role !== 'opiekun') return true; // другая роль — другой guard
-    const carrierId = req.params.carrierId ?? req.body.carrierId ?? req.params.id;
-    if (!carrierId) throw new BadRequestException('No carrier in request');
-    const carrier = await this.carriers.findById(carrierId);
-    if (!carrier) throw new NotFoundException('Carrier not found');
-    if (carrier.opiekunId !== user.sub) {
-      throw new ForbiddenException('Nie masz uprawnień do tego przewoźnika');
-    }
-    return true;
-  }
+- admin → пропуск (доступ ко всем перевозчикам); любая роль, кроме opiekun, →
+  пропуск (её scope решают другие guard'ы и сервис);
+- opiekun → id берётся из `param` / `body` / `query` по метаданным и разрешается
+  до `carrierId` (vehicle / driver / trailer / claim / delegation → их `carrierId`);
+  `carrier.opiekunId !== user.sub` → 403 «Nie masz uprawnień do tego przewoźnika»;
+  нет id → 400, нет ресурса → 404.
+
+pracownik сюда не доходит: на carrier- и fleet-роутах его останавливает
+`PermissionsGuard` — в его наборе нет `carriers.*`, `vehicles.read`, `fleet.write` и т.п.
+
+```ts
+@Controller('carriers')
+@UseGuards(OpiekunOwnershipGuard)            // ownership — на классе
+export class CarriersController {
+  @Patch(':id')
+  @RequirePermission('carriers.write')        // admin, opiekun — НЕ pracownik
+  @OpiekunOwns('id', 'param', 'carrierId')    // opiekun — только свой перевозчик
+  update(@Param('id') id: string, ...) { ... }
 }
-```
-
-Применение:
-
-```ts
-@Patch('carriers/:id')
-@Roles('admin', 'opiekun')   // ← НЕ 'pracownik' — у него нет доступа к carrier-CRUD
-@UseGuards(JwtAuthGuard, RolesGuard, OpiekunOwnershipGuard)
-update(@Param('id') id: string, ...) { ... }
 ```
 
 ### CarrierOwnershipGuard
 
-Для перевозчика — что claim/vehicle/driver/trailer принадлежит ему:
+`apps/api/src/common/guards/carrier-ownership.guard.ts`, тоже по метаданным
+(`@CarrierOwns(name, source, as)`). Действует только на `przewoznik`: ресурс
+(claim / vehicle / driver / trailer / delegation) должен принадлежать его `Carrier`
+(`Carrier.userId = user.sub`; `carrierId` в JWT нет, профиль читается на запросе).
+Остальные роли — пропуск.
 
 ```ts
-@Injectable()
-export class CarrierOwnershipGuard implements CanActivate {
-  // ...
-  // Проверяет что resource.carrierId === user.carrierId для role=przewoznik
+@Controller('vehicles')
+@UseGuards(OpiekunOwnershipGuard, CarrierOwnershipGuard)
+export class VehiclesController {
+  @Get(':id')
+  @RequirePermission('vehicles.read')
+  @OpiekunOwns('id', 'param', 'vehicleId')
+  @CarrierOwns('id', 'param', 'vehicleId')
+  getById(...) { ... }
 }
 ```
 
-## Multi-role (carrier ↔ opiekun-переключатель)
+## Multi-role
 
-Текущий GAS: кнопка `#btnSwitchToEmployee` (`index.html:573`) — если carrier также имеет запись в `ADMIN`/`PRACOWNIK`/`OPIEKUN`, может переключиться.
-
-**Реализация:**
-
-В JWT есть `alternateRoles: Role[]`. На фронте — переключатель:
-
-```tsx
-// components/layout/RoleSwitcher.tsx
-function RoleSwitcher() {
-  const { user, switchRole } = useAuth();
-  if (!user.alternateRoles?.length) return null;
-  return (
-    <Select onValueChange={switchRole} defaultValue={user.activeRole}>
-      <SelectTrigger>{user.activeRole}</SelectTrigger>
-      <SelectContent>
-        {[user.role, ...user.alternateRoles].map(r => (
-          <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
-```
-
-Сам user в БД не дублируется — это один `User` с `role=przewoznik`, но в `users` таблице с тем же `email` есть второй row с `role=opiekun`. При login находим оба, склеиваем в один UserDto с `role` (primary) и `alternateRoles` (остальные). Переключение — это смена `Authorization` контекста через **новый JWT**: `POST /auth/switch-role` с {role}. Сервер выдаёт новый access-токен с другим `role` claim, refresh не меняется.
-
-Альтернативно: один user с массивом ролей, но это ломает 1:1 mapping с auth-листами и усложняет миграцию данных. Текущий подход проще.
+Не реализовано и **не планируется** — см. [docs/03 §Multi-role](03-roles.md#multi-role):
+одна учётка = одна роль, JWT несёт одну роль, `alternateRoles` и переключателя
+панелей нет. «Этому человеку ещё одна функция» решается точечными правами
+(docs/25 §3 B6), а не второй ролью.
 
 ## Logout
 
@@ -498,19 +590,22 @@ function RoleSwitcher() {
 
 ## Защита endpoints
 
-| Endpoint | Аутентификация | Авторизация |
+| Endpoint | Аутентификация | Авторизация (`PermissionsGuard`) |
 |---|---|---|
-| `POST /auth/login` | — | rate-limit 5/min/IP |
-| `POST /auth/verify-code` | sessionToken | rate-limit |
-| `POST /auth/refresh` | refresh-cookie | rate-limit 60/min/IP |
-| `GET /auth/me` | access | — |
-| `POST /auth/logout` | access | — |
-| `GET /carriers` | access | role: admin / opiekun(own) — НЕ pracownik |
-| `POST /claims` | access | role: przewoznik + ownership на vehicle |
-| `PATCH /claims/:n` | access | role: admin / pracownik |
-| `POST /delegations/:id/in-transit` | access | role: weryfikator |
-| `GET /diagnostics/*` | access | role: admin |
-| `GET /integrations/bugbot/handoff` | access | любая роль; `kind=idea` — только admin; rate-limit 10/min/user |
+| `POST /auth/login` | — | `@Public`; rate-limit 5/min/IP |
+| `POST /auth/verify-code` | sessionToken | `@Public`; rate-limit |
+| `POST /auth/refresh` | refresh-cookie | `@Public` (+ `JwtRefreshGuard`); rate-limit 60/min/IP |
+| `GET /auth/me` | access | `@AuthenticatedOnly` — любая роль; ответ несёт `permissions` (эффективные права этого запроса, порядок каталога) |
+| `POST /auth/logout` | access | `@AuthenticatedOnly` |
+| `GET /carriers` | access | `carriers.read` (admin / opiekun — строки: свои) — НЕ pracownik |
+| `POST /claims` | access | `claims.submit` (przewoznik) + `@CarrierOwns` на выезд (`delegationId` из body) |
+| `PATCH /claims/:n` | access | `claims.verify` (admin / pracownik) |
+| `POST /delegations/:id/in-transit` | access | `delegations.transit` (admin / weryfikator) |
+| `GET /diagnostics/*` | access | `diagnostics.manage` (admin); `GET /diagnostics/dashboard` — `dashboard.read` (admin / pracownik) |
+| `GET /integrations/bugbot/handoff` | access | `@AuthenticatedOnly` — любая роль; `kind=idea` — capability `bugbot.submit_idea` (admin); rate-limit 10/min/user |
+
+Полный список «роут → требование» — фикстура
+`apps/api/src/common/authz/__fixtures__/endpoint-permissions.snapshot.json` (§Roles & Guards).
 
 ## Защита от типичных атак
 
@@ -557,8 +652,22 @@ reload, server-rendered route). Здесь нет XHR-перехватчика, 
   `/login` (с `?next=` для не-root, не-login путей). Без ретраев: если refresh
   не прошёл, сервер уже инвалидировал сессию (редкий cross-tab race → login —
   корректный безопасный исход).
-- После (возможного) refresh — role-gating по свежему `access` через
-  `lib/roles.ts` (`isGatedPath` / `isAllowedForRole` / `landingFor`).
+- После (возможного) refresh — гейтинг пути по свежему `access` через
+  `lib/roles.ts`: `isGatedPath` → `isAllowedForRole(path, role)` → иначе redirect
+  на `landingFor(role)`. `isAllowedForRole` = префиксы панели роли
+  (`ROLE_ALLOWED_PREFIXES`; панель — это роль) + `PATH_PERMISSIONS` (под-пути
+  `/employee/*`, которым нужно право, any-of) + scope-правило
+  `SCOPE_RESTRICTED_EMPLOYEE_PREFIXES` (`/employee/delegations` → admin).
+- Edge знает из JWT только роль, поэтому право пути проверяется по каталогу роли:
+  `hasAnyPermission(role, rule, false)` = `permissionsFor(role)` — **без флага
+  лидера и без персональных overrides** (docs/25 R3). Это грубая защита в глубину:
+  точную проверку по эффективному списку делает layout / page
+  (`requirePermission`, §Hook useAuth), решает API.
+- Каталог edge берёт через чистый subpath `@magguarantee/shared/permissions`
+  (tsconfig `paths` → `packages/shared/src/permissions.ts`, только type-импорты),
+  а не через barrel `@magguarantee/shared`, который тянет все zod-схемы в
+  edge-бандл; `lib/auth/edge-imports.test.ts` падает на value-импорте barrel'а
+  из графа `middleware.ts`.
 
 ```ts
 // apps/web/middleware.ts (сокращённо — полная версия в репозитории)
@@ -588,7 +697,7 @@ export async function middleware(req: NextRequest) {
       refreshedSetCookies = apiRes.headers.getSetCookie();
       const newAccess = parseSetCookie(refreshedSetCookies, ACCESS_COOKIE);
       if (!newAccess) return loginRedirect(req);
-      access = newAccess; // role-gating uses the fresh claim
+      access = newAccess; // path gating uses the fresh role claim
     } catch {
       return loginRedirect(req);
     }
@@ -597,7 +706,7 @@ export async function middleware(req: NextRequest) {
   // ...build response: rewrite request `cookie` header (so this request's
   // Server Components see the new token) + append refreshedSetCookies to the
   // browser response; carry them onto role-mismatch redirects too; then run
-  // role-gating with `access`.
+  // path gating (role prefixes + PATH_PERMISSIONS) with `access`.
 }
 
 export const config = {
@@ -609,18 +718,41 @@ export const config = {
 > `Path=/` (а не `/api/v1/auth`), иначе браузер не пришлёт его на web-роуты и
 > middleware не сможет его прочитать.
 
-### Hook `useAuth`
+### Hook `useAuth` и права в UI
 
 ```ts
-// lib/hooks/useAuth.ts
-export function useAuth() {
-  const { data: user, ...rest } = useQuery({
-    queryKey: ['me'],
-    queryFn: () => api.get('/auth/me'),
+// lib/hooks/useAuth.ts (сокращённо)
+export const ME_QUERY_KEY = ['auth', 'me'] as const;
+
+export function useAuth(): UseAuthResult {
+  const { data, isLoading, isError, ... } = useQuery({
+    queryKey: ME_QUERY_KEY,
+    queryFn: getMe,            // 401 → null (аноним), остальные ошибки — isError
     staleTime: 5 * 60_000,
+    retry: false,
   });
-  return { user, ...rest };
+  return { user: data ?? null, isAuthenticated: !!data, isAnonymous: data === null, ... };
 }
+```
+
+`user` — `UserDto` из `GET /auth/me`, с `permissions`; кэш `/me` заполняют и
+ответы `verify-code` / `google` / `refresh` / `change-password`. Права в UI
+решаются по **эффективному списку** пользователя, роль в права не пере-маппится
+(docs/25 §3 B4):
+
+| Где | Что |
+|---|---|
+| `lib/auth/permissions.ts` | единая точка входа web в каталог (через subpath `@magguarantee/shared/permissions`). `effectivePermissionsOf(user)` = `user.permissions`; только если поля нет (rolling deploy со старым api) — fallback `permissionsFor(role, lider)`, без overrides (пересмотреть в B6). `canAny(granted, rule)`, `PermissionRule` (право или any-of список), `ADMIN_SECTION_PERMISSIONS` для `(admin)/layout` |
+| `lib/hooks/useCan.ts` (client) | `usePermissions()` — список пользователя (пустой, пока `/me` грузится, и у анонима); `useCan(rule)` — any-of, `false` без пользователя |
+| `lib/auth/server.ts` (Server Components) | `requirePermission(rule, { onDenied: 'landing' \| 'forbidden' })`: аноним → `/login?next=…`, нет права → landing роли или `/employee/forbidden`. `requireRoleAccess(roles)` остаётся в layouts групп — панель это роль |
+| `lib/nav.config.ts` | `filterNav(permissions, role)`: пункт меню по `permission`, в пределах ролей employee-shell (scope) |
+
+Capability (кнопка hard-delete, колонка ставок) → `useCan` / `requirePermission`;
+scope (какая панель, какой список) → роль.
+
+```tsx
+const canHardDelete = useCan('fleet.hard_delete');            // client
+await requirePermission('audit.read', { onDenied: 'forbidden' }); // server page
 ```
 
 ### Auto-refresh interceptor

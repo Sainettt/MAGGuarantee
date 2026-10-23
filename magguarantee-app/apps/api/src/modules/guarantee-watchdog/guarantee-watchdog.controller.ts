@@ -21,9 +21,10 @@ import { GuaranteeWatchdogService } from './guarantee-watchdog.service';
  * Guarantee Watchdog read surface (plan §5). Three GET endpoints — no writes in
  * v1 (no manual episode mutation). The global `JwtAuthGuard` covers auth; the
  * global `PermissionsGuard` + `@RequirePermission` gate each route (docs/25
- * §3 B2, plan in `common/authz/endpoint-permissions.ts`): `panel.opiekun`
- * (admin, opiekun) on the board / archive, `panel.carrier` (przewoznik) on the
- * `/me` variants. Opiekun scoping is enforced service-side
+ * §3 B2; mirrored per route in the generated fixture
+ * `common/authz/__fixtures__/endpoint-permissions.snapshot.json`):
+ * `panel.opiekun` (admin, opiekun) on the board / archive, `panel.carrier`
+ * (przewoznik) on the `/me` variants. Opiekun scoping is enforced service-side
  * (`carrier.opiekunId = user.sub`), NOT via `OpiekunOwnershipGuard` (which is
  * decorator-driven for single-resource lookups). No `@Audit` — reads.
  */

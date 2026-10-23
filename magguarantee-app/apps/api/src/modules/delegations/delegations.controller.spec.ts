@@ -23,8 +23,9 @@ import { DelegationsController } from './delegations.controller';
  * Track B (docs/25 §3 B2): the routes carry `@RequirePermission` instead of
  * `@Roles`. Two layers, same pattern as `claims.controller.roles.spec.ts`:
  *   1. The `@RequirePermission(...)` metadata on each handler is exactly the
- *      planned requirement (`common/authz/endpoint-permissions.ts`), and the
- *      catalog maps it onto the documented role set (reflection — catches
+ *      requirement recorded in the generated fixture
+ *      (`common/authz/__fixtures__/endpoint-permissions.snapshot.json`), and
+ *      the catalog maps it onto the documented role set (reflection — catches
  *      accidental decorator or catalog drift).
  *   2. `PermissionsGuard` actually lets through / refuses users built the way
  *      `JwtAccessStrategy` builds them (`makeAuthUser(role)`), over the same

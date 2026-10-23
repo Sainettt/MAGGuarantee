@@ -63,9 +63,10 @@ import {
  * brought the transitions and the weryfikator read board back — see the
  * status-transition handlers.)
  *
- * Gates (docs/25 §3 B2): every route carries `@RequirePermission` exactly as
- * planned in `common/authz/endpoint-permissions.ts`, checked by the global
- * `PermissionsGuard` — `delegations.read`, `.create`, `.cancel`,
+ * Gates (docs/25 §3 B2, B5): every route carries `@RequirePermission`, checked
+ * by the global `PermissionsGuard` and mirrored per route in the generated
+ * fixture `common/authz/__fixtures__/endpoint-permissions.snapshot.json` —
+ * `delegations.read`, `.create`, `.cancel`,
  * `.mark_ready`, `.transit`; who holds what is `ROLE_PERMISSIONS` in
  * `@magguarantee/shared`. Row scope stays on the role: the class-level
  * `CarrierOwnershipGuard` runs the `@CarrierOwns` checks, and the service

@@ -24,12 +24,13 @@ import { FleetService } from './fleet.service';
  * `/fleet/dyspozytor` (admin + dyspozytor). The remaining variants
  * (`/fleet/eksport`, `/fleet/weryfikator`) belong to later phases.
  *
- * Gates (docs/25 §3 B2): each route carries the panel permission planned in
- * `common/authz/endpoint-permissions.ts`, checked by the global
- * `PermissionsGuard` — `panel.carrier` (`/my`: przewoznik), `panel.opiekun`
- * (`/opiekun`: admin, opiekun), `panel.planista` (`/planista`: admin,
- * planista), `panel.dyspozytor` (`/dyspozytor`: admin, dyspozytor). Row scope
- * stays on the role, server-side in `FleetService`.
+ * Gates (docs/25 §3 B2, B5): each route carries its panel permission, checked
+ * by the global `PermissionsGuard` and mirrored per route in the generated
+ * fixture `common/authz/__fixtures__/endpoint-permissions.snapshot.json` —
+ * `panel.carrier` (`/my`: przewoznik), `panel.opiekun` (`/opiekun`: admin,
+ * opiekun), `panel.planista` (`/planista`: admin, planista),
+ * `panel.dyspozytor` (`/dyspozytor`: admin, dyspozytor). Row scope stays on
+ * the role, server-side in `FleetService`.
  */
 @Controller('fleet')
 export class FleetController {

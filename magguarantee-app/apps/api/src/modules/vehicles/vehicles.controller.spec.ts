@@ -35,8 +35,9 @@ import type { VehiclesService } from './vehicles.service';
  * `@Roles` — `vehicles.read`, `fleet.write`, `km.read`, `km.verify`. Two
  * layers are asserted (same pattern as `claims.controller.roles.spec.ts`):
  *  1. The `@RequirePermission(...)` metadata on the handlers is exactly the
- *     planned requirement (`common/authz/endpoint-permissions.ts`), and the
- *     catalog maps it onto the documented role set.
+ *     requirement recorded in the generated fixture
+ *     (`common/authz/__fixtures__/endpoint-permissions.snapshot.json`), and
+ *     the catalog maps it onto the documented role set.
  *  2. `PermissionsGuard` rejects a `przewoznik` user (built like
  *     `JwtAccessStrategy` builds it, `makeAuthUser` / `withRole`) on those
  *     mutations (403) and passes a `przewoznik` through on the GET routes —

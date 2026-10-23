@@ -1,6 +1,6 @@
 # 25. План: трек B — слой permissions
 
-> **Статус: B1 сделан 2026-10-23 (`2419bfc`); B2 сделан 2026-10-23 (`67f5a8b`…`94fbcff` + B2d); B3 сделан 2026-10-23 (`14f979a`: сервисные capability → `can()`, scope помечен `// scope:`); B4 сделан 2026-10-23 (`1cf8d89` api `UserDto.permissions`, `37e5dc3` web); B5 в работе (план от 2026-09-14). Решения по открытым вопросам — §7; первый случай для B6 — в §3 B6.** Детализирует §3 из
+> **Статус: B1–B5 сделаны 2026-10-23 (B5: `3579226`); следующий — B6 (первый случай — §3 B6).** Коммиты этапов: B1 `2419bfc`; B2 `67f5a8b`…`94fbcff` + B2d; B3 `14f979a` (сервисные capability → `can()`, scope помечен `// scope:`); B4 `1cf8d89` (api `UserDto.permissions`) + `37e5dc3` (web); B5 `3579226` (deny by default, `@Roles` / `RolesGuard` удалены). Решения по открытым вопросам — §7. Детализирует §3 из
 > [24-sso-magspace-and-permissions-plan.md](24-sso-magspace-and-permissions-plan.md)
 > по фактическому состоянию кода на `a50077c`. Где этот документ расходится с
 > §3 docs/24, прав этот документ: §3 писался до инвентаризации.
@@ -43,7 +43,8 @@
 > Историческая инвентаризация на момент плана. С B1 (2026-10-23) актуальное
 > состояние «эндпоинт → роли» — фикстура
 > `apps/api/src/common/authz/__fixtures__/endpoint-roles.snapshot.json`
-> (плюс `endpoint-ownership.snapshot.json` для `@OpiekunOwns` / `@CarrierOwns`);
+> (плюс `endpoint-ownership.snapshot.json` для `@OpiekunOwns` / `@CarrierOwns`),
+> с B5 «эндпоинт → право» — `endpoint-permissions.snapshot.json` там же;
 > цифры ниже не обновляются.
 
 ### 1.1 API: `@Roles` на контроллерах
@@ -171,9 +172,13 @@
 | `diagnostics.manage` | ✅ | | | | | | | | `/diagnostics/{db,mails,claims}`, resend |
 | `bugbot.submit_idea` | ✅ | | | | | | | | сервис: `kind=idea` в BugBot handoff (`bugbot-handoff.service.ts`); сам `GET /integrations/bugbot/handoff` — `AUTHENTICATED` |
 
-Итого **42 права** (B1, 2026-10-23; в плане было 38). Источник истины —
-`packages/shared/src/permissions.ts`, сверка с реальными `@Roles` —
-`apps/api/src/common/authz/endpoint-permissions.ts` + фикстуры. Замечания:
+Итого **45 прав** (в B1, 2026-10-23, — 42, в плане было 38; +3
+`carrier_documents.*` под первый случай B6). Источник истины —
+`packages/shared/src/permissions.ts`; что требует каждый роут — сгенерированная
+фикстура `apps/api/src/common/authz/__fixtures__/endpoint-permissions.snapshot.json`
+(до B5 — рукописная таблица `ENDPOINT_PERMISSIONS` в `endpoint-permissions.ts`),
+сверка с доступом до трека B — против замороженной `endpoint-roles.snapshot.json`.
+Замечания:
 
 - **admin ≠ «все права».** Сегодня admin **не** проходит на эндпоинты,
   доступные только перевозчику (`claims.submit`, `delegations.create`,
@@ -185,8 +190,9 @@
   единообразие guard'а. Схлопывать их в `role` не надо: B6 может выдать,
   например, `panel.opiekun` админу-наблюдателю без смены роли, но только
   вместе со scope (см. B6).
-- **`GET /trailer-types`** остаётся «любой залогиненный» (справочник для форм)
-  и уходит в allowlist `AUTHENTICATED_ONLY` с причиной.
+- **`GET /trailer-types`** остаётся «любой залогиненный» (справочник для форм):
+  `@AuthenticatedOnly(reason)` на роуте (до B5 — allowlist `AUTHENTICATED_ONLY`
+  с причиной).
 - **`claims.verify` не делится на verify/decide.** Сегодня у них одинаковые
   роли. Если понадобится развести, это одно изменение в каталоге.
 - **Лидеры** ([docs/28](28-lider-roles-plan.md), реализовано 2026-09-25) —
@@ -207,7 +213,7 @@
   **внутри** ветки базовой роли — это по-прежнему «scope на роли».
 - **Передача машин** ([docs/29](29-vehicle-planner-transfer-plan.md),
   2026-09-28) — первое лидерское право. Сделана **до** трека B и без
-  `LiderGuard`: эндпоинты решения стоят на `@Roles('admin','planista')`, а
+  `LiderGuard`: эндпоинты решения стояли на `@Roles('admin','planista')`, а
   «лидер именно этого планисты» проверяет сервис по ресурсу — ни `@Roles`, ни
   permission это не выразят. В B1 это даёт три строки каталога
   (`vehicles.planner_transfer.request|decide`, `vehicles.planner_history.read`)
@@ -238,25 +244,25 @@ Runtime-изменений ноль, PR можно мержить отдельн
 
 > **Сделано 2026-10-23 — B2 целиком** (`67f5a8b` B2.0, `ac89f10` 2a, `f31459f` 2b,
 > `94fbcff` 2c, + B2d). Все 24 контроллера на `@RequirePermission`, живого `@Roles`
-> нет. Переведено 135 роутов — ровно строки `ENDPOINT_PERMISSIONS`: 2a — 20 (claims,
+> нет. Переведено 135 роутов — ровно строки `ENDPOINT_PERMISSIONS` (до B5): 2a — 20 (claims,
 > claim-attachments, delegations), 2b — 65 (carriers, carrier-attachments, vehicles,
 > drivers, trailers, fleet, gps, opiekun, alerts, guarantee-watchdog), 2c — 50 (users,
 > teams, sso, limits, audit, diagnostics, trailer-types, lookups, vies, white-list,
-> planner-transfers; `GET /trailer-types` остаётся в `AUTHENTICATED_ONLY`). Убрано 23
+> planner-transfers; `GET /trailer-types` остаётся в `AUTHENTICATED_ONLY`, до B5). Убрано 23
 > избыточных `@UseGuards(RolesGuard)` (3 + 10 + 10); ownership-guards и их порядок не
 > тронуты. В B2.0 на `makeAuthUser` / `withRole` переехали 72 места в spec-файлах.
 > Обе фикстуры B1 байт-в-байт после каждого шага. B2d: inverse-правило фаза 2
 > (`@Roles` больше не решение об авторизации), живое `@RequirePermission` =
-> `ENDPOINT_PERMISSIONS` в обе стороны и проверка, что `@Roles`-метаданных нет ни на
+> `ENDPOINT_PERMISSIONS` (до B5) в обе стороны и проверка, что `@Roles`-метаданных нет ни на
 > одном живом классе или хендлере (`rolesMetadataSites` в `roles-snapshot.ts`;
 > единственные пользователи `@Roles` до B5 — синтетические контроллеры
-> `snapshot-builders.spec`). `RolesGuard` остаётся зарегистрированным no-op'ом до B5.
+> `snapshot-builders.spec`). `RolesGuard` оставался зарегистрированным no-op'ом до B5.
 > Принятое следствие правила лидера (planista без флага на `approve`/`reject`) — в
 > строке «Тест эквивалентности» ниже; кроме него runtime-поведение не изменилось.
 
 > **B2.0 сделан 2026-10-23** (инфраструктура, ни один контроллер не переведён; обе
 > фикстуры B1 байт-в-байт). `@RequirePermission` (кортеж ≥ 1 права) +
-> `PERMISSIONS_METADATA_KEY`; глобальный `PermissionsGuard` после `RolesGuard`
+> `PERMISSIONS_METADATA_KEY`; глобальный `PermissionsGuard` после `RolesGuard` (до B5)
 > (порядок проверок — docs/15 §Roles & Guards; 403-сообщения общие с
 > `RolesGuard`, `FORBIDDEN_*_MESSAGE` в `auth.constants.ts`);
 > `AuthUser.permissions` **обязательное** поле, заполняется в
@@ -271,20 +277,20 @@ Runtime-изменений ноль, PR можно мержить отдельн
 > требование. `endpoint-permissions.spec`: живое `@RequirePermission` =
 > `ENDPOINT_PERMISSIONS[route]` (пока пусто) и inverse-правило фаза 1
 > (`@Roles` **или** `@RequirePermission` **или** `AUTHENTICATED_ONLY`; фаза 2
-> без `@Roles` — в B2d).
+> без `@Roles` — в B2d; таблица и allowlist — до B5).
 
 | Что | Где |
 |---|---|
 | **Сделано (B2.0).** `@RequirePermission(...perms)`: any-of, как `@Roles` | `modules/auth/decorators/require-permission.decorator.ts` |
 | **Сделано (B2.0).** `AuthUser.permissions: ReadonlySet<Permission>` — считается **один раз** в `JwtAccessStrategy.validate` (пользователь и так перечитывается из БД на каждом запросе) из пары `(user.role, user.lider)` — `lider` уже в `AuthUser` с 2026-09-25 (docs/28, DB-sourced). Отсюда B6 возьмёт overrides, не трогая guard и сервисы. Фикстура B1 при этом не меняется: `@Roles` лидера не знает | `modules/auth/strategies/*`, `decorators/current-user.decorator.ts` |
 | **Сделано (B2.0).** `can(user, p)` — тонкий помощник для сервисов | `common/authz/can.ts` |
-| **Сделано (B2.0).** `PermissionsGuard` глобально, после `RolesGuard` (`APP_GUARD`). Порядок проверок: `@Public` → пропуск (на `POST /auth/refresh` в `req.user` лежит refresh-payload без `permissions`); нет метаданных → пропуск (переходный период, как `RolesGuard` сегодня); метаданные есть, а `req.user.permissions` нет → 403, fail closed, из роли не пересчитывать; иначе any-of. Оба декоратора на одном роуте — красный тест (не рантайм). Эндпоинт несёт **либо** `@Roles`, **либо** `@RequirePermission` | `modules/auth/guards/permissions.guard.ts`, `app.module.ts` |
+| **Сделано (B2.0).** `PermissionsGuard` глобально, после `RolesGuard` (`APP_GUARD`; до B5). Порядок проверок: `@Public` → пропуск (на `POST /auth/refresh` в `req.user` лежит refresh-payload без `permissions`); нет метаданных → пропуск (переходный период до B5, как тогдашний `RolesGuard`; с B5 — 403, deny by default); метаданные есть, а `req.user.permissions` нет → 403, fail closed, из роли не пересчитывать; иначе any-of. Оба декоратора на одном роуте — красный тест (не рантайм). Эндпоинт несёт **либо** `@Roles`, **либо** `@RequirePermission` | `modules/auth/guards/permissions.guard.ts`, `app.module.ts` |
 | **Сделано (B2.0).** `makeAuthUser(role, overrides?)` — тестовая фабрика, строит `permissions` через `permissionsFor`; в B2.0 на неё (и на `withRole`) переехали 72 места в 45 spec-файлах — 48 типизированных литералов `AuthUser`, 21 копия со сменой роли, 3 пользователя из заголовка в supertest-спеках (нужна уже здесь, не в B3) | `common/testing/make-auth-user.ts` |
 | **Сделано (B2.0).** Генератор снапшота из B1 учится читать `@RequirePermission`: роли = `rolesSatisfying(required, { lider: true })`; роут с обоими декораторами — ошибка. Без этого первый же переведённый контроллер ломает `roles-snapshot.spec`, а `AUTHZ_SNAPSHOT_UPDATE=1` тихо записал бы его как `AUTHENTICATED` | `common/authz/roles-snapshot.ts` |
-| **Сделано (B2a–B2c: 20 + 65 + 50 роутов).** Замена `@Roles` → `@RequirePermission` по `endpoint-permissions.ts`, модуль за модулем. Заодно убрать 23 избыточных `@UseGuards(RolesGuard)` (22 файла, в lookups два на методах); в 8 из них рядом стоят ownership-guards — их порядок не трогать | 24 контроллера |
+| **Сделано (B2a–B2c: 20 + 65 + 50 роутов).** Замена `@Roles` → `@RequirePermission` по `endpoint-permissions.ts` (рукописная таблица `ENDPOINT_PERMISSIONS`, до B5), модуль за модулем. Заодно убрать 23 избыточных `@UseGuards(RolesGuard)` (22 файла, в lookups два на методах); в 8 из них рядом стоят ownership-guards — их порядок не трогать | 24 контроллера |
 | **Сделано (B2.0–B2d).** **Тест эквивалентности**: для каждого эндпоинта `роли(metadata) = ROLES.filter(r => hasAnyPermission(r, required, /* lider */ true))` (или роли из `@Roles`, пока он не заменён) и сравнение с фикстурой из B1. Правило лидера (2026-10-23): роль допущена, если её лидерский вариант удовлетворяет требованию — иначе `approve`/`reject` передачи дали бы `["admin"]` вместо `["admin","planista"]` из фикстуры. Следствие, принято в B2c (2026-10-23): planista **без** флага лидера на `approve`/`reject` теперь получает 403 от `PermissionsGuard` до сервиса (общее «Brak uprawnień dla tej roli» вместо кода `PLANNER_TRANSFER_NOT_DECIDER`); статус тот же, web это действие ему не показывает, случай закреплён тестом. Любое расширение или сужение — красный тест. Вторая фикстура: ownership-декораторы на месте. Не новый файл, а расширение `roles-snapshot.spec.ts` и `endpoint-permissions.spec.ts` из B1 | `common/authz/*.spec.ts` |
-| **Сделано (фаза 1 — B2.0, фаза 2 — B2d).** **Inverse-правило**: каждый не-`@Public` эндпоинт обязан нести `@RequirePermission` или быть в `AUTHENTICATED_ONLY` с причиной. Новый роут без решения об авторизации не проходит CI (родственник audit-coverage spec из аудита логов, п. 18) | тот же spec |
-| **Сделано (B2.0–B2c).** Spec-файлы, проверяющие метаданные `@Roles`, переписать на permission: vehicles, drivers, delegations, claims (`claims.controller.roles.spec`), planner-transfers, carrier-attachments, bugbot (утверждает отсутствие метаданных); supertest-спеки vies, white-list, `sso.controller.audit` регистрируют `RolesGuard` как `APP_GUARD` и подсовывают пользователя без `permissions` — им нужен `makeAuthUser` | соответствующие `*.spec.ts` |
+| **Сделано (фаза 1 — B2.0, фаза 2 — B2d).** **Inverse-правило**: каждый не-`@Public` эндпоинт обязан нести `@RequirePermission` или быть в `AUTHENTICATED_ONLY` с причиной (до B5; с B5 — `@AuthenticatedOnly(reason)` на самом роуте, а роут без решения guard отклоняет). Новый роут без решения об авторизации не проходит CI (родственник audit-coverage spec из аудита логов, п. 18) | тот же spec |
+| **Сделано (B2.0–B2c).** Spec-файлы, проверяющие метаданные `@Roles`, переписать на permission: vehicles, drivers, delegations, claims (`claims.controller.roles.spec`), planner-transfers, carrier-attachments, bugbot (утверждает отсутствие метаданных); supertest-спеки vies, white-list, `sso.controller.audit` регистрировали `RolesGuard` как `APP_GUARD` (до B5) и подсовывали пользователя без `permissions` — им нужен `makeAuthUser` | соответствующие `*.spec.ts` |
 
 Ownership-guards (`@OpiekunOwns`, `@CarrierOwns`) не меняются.
 
@@ -349,7 +355,7 @@ in depth / `@Roles`» заменены). Проверка роли охраня�
 управляемых пользователей (`users`, `directory`, `teams`, `auth`; `vehicles._assertRole`,
 `carriers._assertIsOpiekun`, `planner-transfers._assertTarget`, `teams.service.ts:213`),
 сквозная передача роли в лог / аудит / BugBot (`actorRole`, `requestedByRole`,
-`roles: [user.role]`), `roles.guard.ts` (уходит в B5).
+`roles: [user.role]`), `roles.guard.ts` (удалён в B5).
 
 Комментарии, которые после B2d ещё описывали `@Roles` как гейт, переписаны на
 `@RequirePermission` (claims, fleet, opiekun, delegations, `delegation-state-machine`,
@@ -380,14 +386,51 @@ gps service / repository, vehicle-daily-km, bugbot controller и пять spec-�
 
 ### B5. Зачистка и документация (≈ 0.5 дня)
 
-- Удалить `@Roles`, `RolesGuard`, `ROLES_METADATA_KEY`; фикстура из B1
-  остаётся замороженным контрактом.
-- docs/15 §Roles & Guards — переписать под permissions; docs/13 — колонка
-  «permission» у эндпоинтов (генерируется тем же скриптом); docs/24 §3 —
-  ссылка сюда; комментарий `sso.controller.ts:4-5` («после трека B …») закрыть.
-- docs/03 §Multi-role: убрать `alternateRoles` как нереализованное (или
-  явно пометить «не планируется»), комментарий в `RolesGuard` уходит вместе
-  с ним.
+> **Сделано 2026-10-23** (`3579226` — код; docs и комментарии — следующим
+> коммитом). Кто что может — не изменилось: `endpoint-roles` и
+> `endpoint-ownership` байт-в-байт; новая `endpoint-permissions.snapshot.json`
+> (150 роутов: 135 по праву, 5 `AUTHENTICATED`, 10 `PUBLIC`) совпала с удалённой
+> рукописной таблицей роут в роут.
+>
+> - **Deny by default + `@AuthenticatedOnly` (решение 2026-10-23).**
+>   `PermissionsGuard`: `@Public` → пропуск; `@AuthenticatedOnly(reason)` (причина
+>   ≥ 20 символов) → пропуск при наличии сессии; `@RequirePermission` → any-of;
+>   ничего не объявлено → 403 + warn. До B5 роут без метаданных пропускал любую
+>   сессию (переходное правило B2.0, наследие `RolesGuard`). Декоратор несут пять
+>   session-only роутов: `GET /auth/me`, `POST /auth/logout`,
+>   `POST /auth/change-password`, `GET /trailer-types`,
+>   `GET /integrations/bugbot/handoff`. Роут без решения — противоречие снапшота,
+>   в фикстуру не записывается никогда.
+> - **Рукописная таблица → сгенерированная фикстура.** `ENDPOINT_PERMISSIONS` и
+>   allowlist `AUTHENTICATED_ONLY` удалены из `common/authz/endpoint-permissions.ts`
+>   (в файле остался `SERVICE_CAPABILITIES`). Источник — декораторы, их зеркало —
+>   `__fixtures__/endpoint-permissions.snapshot.json`; `npm run authz:snapshot -w api`
+>   пишет все три фикстуры. Проверки B1 перенаправлены на фикстуру; inverse-правило —
+>   `@RequirePermission` или `@AuthenticatedOnly`, никогда оба (и `@Public` ни с
+>   одним из них).
+> - **docs/13 — отступление от плана.** Колонки «permission» у эндпоинтов нет:
+>   вместо неё общая оговорка в §Соглашения (колонка «Роль» — следствие права) и
+>   ссылка на фикстуру как источник по роутам; в тексте разделов переписаны только
+>   фразы, утверждавшие механизм `@Roles` / `RolesGuard`. R5 скорректирован (§6).
+> - **Удалено:** `roles.decorator.ts`, `roles.guard.ts` (+ spec), `ROLES_METADATA_KEY`,
+>   строка `APP_GUARD` с `RolesGuard`; supertest-спеки vies / white-list его больше не
+>   регистрируют. `alternateRoles` убран из `UserDto` в docs/13 и из docs/15.
+> - **Mutation check:** снятие `@AuthenticatedOnly` с `GET /auth/me` валит
+>   inverse-spec, snapshot-spec и новый тест guard'а (403 всем ролям).
+> - **Docs и комментарии:** docs/15 §Roles & Guards переписан как справочник модели
+>   (каталог, `AuthUser.permissions`, цепочка guard'ов, deny by default,
+>   `@AuthenticatedOnly`, capability vs scope, лидер, фикстуры, «как добавить роут»);
+>   ~20 комментариев в контроллерах и спеках `apps/api` перенаправлены с
+>   `endpoint-permissions.ts` на фикстуру.
+
+| Что (план) | Итог |
+|---|---|
+| Удалить `@Roles`, `RolesGuard`, `ROLES_METADATA_KEY`; фикстура из B1 остаётся замороженным контрактом | ✅ `3579226` |
+| docs/15 §Roles & Guards — переписать под permissions | ✅ |
+| docs/13 — колонка «permission» у эндпоинтов (генерируется тем же скриптом) | ✅ иначе: оговорка + ссылка на фикстуру (см. выше, R5) |
+| docs/24 §3 — ссылка сюда | ✅ (ссылка уже стояла) |
+| Комментарий `sso.controller.ts:4-5` («после трека B …») закрыть | ✅ (уже закрыт; файл — `modules/directory/sso.controller.ts`) |
+| docs/03 §Multi-role: убрать `alternateRoles` или пометить «не планируется»; комментарий в `RolesGuard` уходит вместе с ним | ✅ docs/03 — «не планируется»; `RolesGuard` удалён |
 
 ### B6 (позже, под первый реальный запрос). Точечные права пользователю
 
@@ -434,8 +477,9 @@ PR-B5  зачистка @Roles/RolesGuard + docs
 ```
 
 Каждый PR независимо зелёный: typecheck, api и web тесты, тест эквивалентности.
-Между B2 и B5 оба guard'а живут, и это безопасно: на эндпоинте только один
-из двух декораторов, а inverse-правило ловит эндпоинт вообще без авторизации.
+Между B2 и B5 оба guard'а жили, и это было безопасно: на эндпоинте стоял только
+один из двух декораторов, а inverse-правило ловило эндпоинт вообще без
+авторизации. С B5 guard один — `PermissionsGuard`, deny by default.
 
 **Зависимость от аудита логов:** ✅ снята — `audit-coverage.spec.ts` и
 `audit-coverage.inverse.spec.ts` (п.18) уже в main. Исходная формулировка: B2 расширяет coverage-spec, который
@@ -459,10 +503,10 @@ PR-B5  зачистка @Roles/RolesGuard + docs
 | # | Риск | Митигация |
 |---|---|---|
 | R1 | Тихое расширение/сужение доступа при механической замене | Тест эквивалентности против фикстуры, снятой до замены |
-| R2 | Новый эндпоинт без решения об авторизации (сегодня `RolesGuard` без метаданных = «пропустить») | Inverse-правило: `@RequirePermission` или `AUTHENTICATED_ONLY` с причиной |
+| R2 | Новый эндпоинт без решения об авторизации (до B5 guard без метаданных = «пропустить») | ✅ С B5 закрыт и в рантайме: `PermissionsGuard` отклоняет роут без решения (403 + warn). В CI — inverse-правило (`@RequirePermission` или `@AuthenticatedOnly(reason)`, никогда оба) и противоречие снапшота: такой роут не записывается в фикстуру |
 | R3 | Edge-middleware не знает overrides (B6) и отбивает легитимный доступ | B4 гейтит на edge только грубо, точная проверка в layout; в B6 edge не отказывает по `PATH_PERMISSIONS` |
 | R4 | Capability без scope: право выдано, данных нет (пустые экраны) или, хуже, scope-ветка отсутствует и сервис падает в «видит всё» | `GRANTABLE_EXTRA` в B6; в B3 каждый `user.role` помечается `// scope:` — видно, где у роли нет ветки |
-| R5 | docs/03 разъезжается с кодом снова | Матрица в docs/03 и колонка в docs/13 **генерируются** из `ROLE_PERMISSIONS` |
+| R5 | docs/03 разъезжается с кодом снова | Матрица в docs/03 **генерируется** из `ROLE_PERMISSIONS` (тест сверяет блок). docs/13 (поправка B5): колонка не генерируется — источник «роут → право» сгенерированная фикстура `endpoint-permissions.snapshot.json`, колонка «Роль» в docs/13 по общей оговорке — следствие права; при расхождении права фикстура |
 | R6 | Конфликт с параллельной работой в контроллерах | PR-B2 по модулям; мержить после аудита логов (п.18) |
 
 ## 7. Решения (2026-09-14)

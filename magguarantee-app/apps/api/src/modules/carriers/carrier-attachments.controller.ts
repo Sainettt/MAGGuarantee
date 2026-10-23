@@ -50,7 +50,8 @@ const MULTIPART_OPTIONS = {
  * Standalone carrier-document endpoints per docs/13-api-design.md#carriers.
  *
  * Mounted at `carriers/:id/attachments`. Gates (docs/25 §3 B2; global
- * `PermissionsGuard`, plan in `common/authz/endpoint-permissions.ts`):
+ * `PermissionsGuard`; mirrored per route in the generated fixture
+ * `common/authz/__fixtures__/endpoint-permissions.snapshot.json`):
  * `carrier_documents.read` (list, download), `.add` (upload), `.delete`
  * (delete) — today all three held by admin / opiekun(own), the same set as the
  * carrier CRUD surface. The carrier `:id` is a route param on every

@@ -30,7 +30,8 @@ import type { DriversService } from './drivers.service';
  * `@Roles` — `drivers.read` on the reads, `fleet.write` on the mutations.
  * Two layers are asserted (same pattern as `claims.controller.roles.spec.ts`):
  *  1. The `@RequirePermission(...)` metadata declared on each handler is
- *     exactly the planned requirement (`common/authz/endpoint-permissions.ts`),
+ *     exactly the requirement recorded in the generated fixture
+ *     (`common/authz/__fixtures__/endpoint-permissions.snapshot.json`),
  *     and the catalog maps it onto the documented role set (reflection —
  *     catches an accidental decorator or catalog change).
  *  2. `PermissionsGuard` actually rejects a `przewoznik` user (built like

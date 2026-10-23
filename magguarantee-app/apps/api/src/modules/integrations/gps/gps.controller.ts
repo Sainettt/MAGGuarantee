@@ -26,8 +26,8 @@ import { GpsService } from './gps.service';
  * GPS endpoints per docs/13-api-design.md#external-integrations and
  * docs/16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api.
  *
- * Gates (docs/25 §3 B2; global `PermissionsGuard`, plan in
- * `common/authz/endpoint-permissions.ts`):
+ * Gates (docs/25 §3 B2; global `PermissionsGuard`; mirrored per route in the
+ * generated fixture `common/authz/__fixtures__/endpoint-permissions.snapshot.json`):
  *  - `gps.read` (positions, trips): admin / opiekun / planista / dyspozytor /
  *    przewoznik.
  *  - `gps.refresh` (refresh): admin only.

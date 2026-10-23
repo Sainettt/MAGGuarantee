@@ -12,8 +12,8 @@
 
 - Все endpoints (кроме `/auth/login`, `/auth/verify-code`, `/auth/google`, `/auth/refresh`, `/health`) защищены `JwtAuthGuard`.
 - JWT передаётся в `Authorization: Bearer <access_token>` или в HttpOnly cookie `mt_access` (для web).
-- Авторизация — `@RequirePermission(...)` (any-of) и глобальный `PermissionsGuard` после `JwtAuthGuard` (трек B, [docs/25](25-permissions-layer-plan.md) §3 B2; порядок проверок — [docs/15 §Roles & Guards](15-auth-strategy.md#roles--guards)). Права — каталог `packages/shared/src/permissions.ts` (`ROLE_PERMISSIONS` + `LIDER_PERMISSIONS`; набор пользователя считается один раз в `JwtAccessStrategy` из `role` и `lider`); какое право требует каждый роут — таблица `apps/api/src/common/authz/endpoint-permissions.ts`. Не-`@Public` роут без `@RequirePermission` допустим только из `AUTHENTICATED_ONLY` той же таблицы, с причиной (inverse-правило в `endpoint-permissions.spec.ts`). `RolesGuard` ещё зарегистрирован, но это no-op: `@Roles` нет ни на одном роуте; B5 удалит его вместе с декоратором. Помни: `pracownik` — узкая роль (в UI «Pracownik»), у неё только `claims.read`, `claims.verify`, `dashboard.read` и `lookups.carriers`; CRUD по carriers/vehicles/drivers/trailers гейтится правами `carriers.*` / `vehicles.read` / `fleet.write` и т.п., которых у pracownik нет, — не добавляй их ему в каталог.
-- Колонка «Роль» в таблицах эндпоинтов ниже (и упоминания `@Roles(...)` / `RolesGuard` в тексте разделов, написанные до трека B) теперь следствие права: это роли, у которых право роута есть в [сгенерированном каталоге docs/03](03-roles.md#каталог-прав-генерируется), с учётом флага лидера; при расхождении прав код.
+- Авторизация — глобальный `PermissionsGuard` после `JwtAuthGuard` (трек B, [docs/25](25-permissions-layer-plan.md); порядок проверок — [docs/15 §Roles & Guards](15-auth-strategy.md#roles--guards)), **deny by default**: каждый не-`@Public` роут несёт `@RequirePermission(...)` (any-of) или `@AuthenticatedOnly(reason)` (5 роутов: `GET /auth/me`, `POST /auth/logout`, `POST /auth/change-password`, `GET /trailer-types`, `GET /integrations/bugbot/handoff`); роут без решения — 403 всем и красный CI (inverse-правило в `endpoint-permissions.spec.ts`). Права — каталог `packages/shared/src/permissions.ts` (`ROLE_PERMISSIONS` + `LIDER_PERMISSIONS`; набор пользователя считается один раз в `JwtAccessStrategy` из `role` и `lider`). Помни: `pracownik` — узкая роль (в UI «Pracownik»), у неё только `claims.read`, `claims.verify`, `dashboard.read` и `lookups.carriers`; CRUD по carriers/vehicles/drivers/trailers гейтится правами `carriers.*` / `vehicles.read` / `fleet.write` и т.п., которых у pracownik нет, — не добавляй их ему в каталог.
+- Колонка «Роль» в таблицах эндпоинтов ниже — следствие права: это роли, у которых право роута есть в [сгенерированном каталоге docs/03](03-roles.md#каталог-прав-генерируется), с учётом флага лидера. **Какое право требует каждый роут** — сгенерированная фикстура `apps/api/src/common/authz/__fixtures__/endpoint-permissions.snapshot.json` (`"PUBLIC"` / `"AUTHENTICATED"` / any-of список прав; перезапись — `npm run authz:snapshot -w api`). При расхождении с таблицами ниже права фикстура.
 - `OwnershipGuard` для opiekun-эндпоинтов: проверяет, что `carrierId` в pathparam принадлежит текущему opiekun.
 
 ### Формат ответов
@@ -183,9 +183,9 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 | DELETE `/carriers/:id/attachments/:attachmentId` | (новое) — soft-delete + remove object | admin / opiekun(own) |
 | GET `/carriers/:id/documents/overview` | (новое) — read-only aggregate for the opiekun "Dokumenty" tab: `CarrierDocumentsOverviewDto` — every live document tied to the carrier grouped by owning entity (company docs + per-vehicle files + per-trailer XL certs + per-driver ADR certs + ADR-flagged vehicles). Downloads reuse the existing per-entity download routes (the DTO carries the ids). | admin / opiekun(own) |
 
-> Один endpoint, один сервис. Различия admin/opiekun — на уровне `RolesGuard` + `OwnershipGuard`. Дублей `*ByOpiekun` нет.
+> Один endpoint, один сервис. Различия admin/opiekun — право роута (`PermissionsGuard`) + scope через `OpiekunOwnershipGuard`. Дублей `*ByOpiekun` нет.
 >
-> **`GET /carriers/:id/documents/overview`** (opiekun "Dokumenty" tab, read-only). Guarded exactly like the carrier detail/attachments endpoints (`@Roles('admin','opiekun')` + `OpiekunOwnershipGuard` `@OpiekunOwns('id','param','carrierId')` — opiekun sees only carriers where `opiekunId = user.sub`). Response `CarrierDocumentsOverviewDto` (`packages/shared/src/schemas/carriers.ts`):
+> **`GET /carriers/:id/documents/overview`** (opiekun "Dokumenty" tab, read-only). Guarded like the carrier attachments endpoints (`@RequirePermission('carrier_documents.read')` — admin / opiekun — + `OpiekunOwnershipGuard` `@OpiekunOwns('id','param','carrierId')` — opiekun sees only carriers where `opiekunId = user.sub`). Response `CarrierDocumentsOverviewDto` (`packages/shared/src/schemas/carriers.ts`):
 > - `carrierId: string`
 > - `carrierDocs: CarrierAttachmentDto[]` — company documents (insurance/license/kreptd/other).
 > - `vehicleDocs` — per category (`gps` | `agreement` | `cabotage_de_insurance`, mirroring `VehicleAttachmentCategory` order) → `{ attachmentId, fileName, size, createdAt, vehicle: { id, registration, sideNumber } }[]`. Every category key always present (empty array when none). `agreement` (porozumienie scan) IS included — core guarantee paperwork for the opiekun (see docs/14-design-system.md §5R).
@@ -198,7 +198,7 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 
 ### Vehicles — `/api/v1/vehicles`
 
-> Роль: `admin` (все), `opiekun` (свои перевозчики), `przewoznik` (свои авто — **read-only**: GET list/detail/attachments only, никаких write). **Не `pracownik`.** Enforcement: все mutating-эндпоинты (POST/PATCH/deactivate/reactivate/DELETE) — `@Roles('admin', 'opiekun')`; GET-эндпоинты — `@Roles('admin', 'opiekun', 'planista', 'dyspozytor', 'przewoznik')`. Перевозчик флоту не редактирует — carrier-панель render-ит её read-only (consistent с trailers). См. `apps/api/src/modules/vehicles/vehicles.controller.ts`.
+> Роль: `admin` (все), `opiekun` (свои перевозчики), `przewoznik` (свои авто — **read-only**: GET list/detail/attachments only, никаких write). **Не `pracownik`.** Enforcement: все mutating-эндпоинты (POST/PATCH/deactivate/reactivate/DELETE) — `@RequirePermission('fleet.write')` (admin / opiekun); GET-эндпоинты — `vehicles.read` (admin / opiekun / planista / dyspozytor / przewoznik). Перевозчик флоту не редактирует — carrier-панель render-ит её read-only (consistent с trailers). См. `apps/api/src/modules/vehicles/vehicles.controller.ts`.
 
 | Method + Path | GAS | Роль |
 |---|---|---|
@@ -375,8 +375,10 @@ toPlanner`; выезды этой машины со статусом `zgloszony`
 планиста, `zjechal` / `anulowany` остаются за ним). Отклонение и отмена машину
 не блокируют и U6 не перепроверяют.
 
-**Авторизация решения** — на уровне ресурса (не guard): `@Roles('admin',
-'planista')`, затем `role = admin` **или** (`role = planista` и `lider = true` и
+**Авторизация решения** — право на guard'е, остальное на ресурсе: роут требует
+`vehicles.planner_transfer.decide` (admin; planista — только с `lider = true`,
+`LIDER_PERMISSIONS`; planista без флага получает 403 от `PermissionsGuard` до
+сервиса), затем сервис: `role = admin` **или** (`role = planista` и `lider = true` и
 `fromPlanner.liderId = user.sub`); после этого в любом случае `user ≠
 requestedBy` и `user ≠ toPlanner`. `user.lider` берётся из БД на каждом
 запросе (`JwtAccessStrategy`), не из JWT.
@@ -414,8 +416,8 @@ decidedAt, createdAt } | null }], transfers: PlannerTransferDto[] }` — оба
 | `PLANNER_TRANSFER_VEHICLE_INACTIVE` | 422 | Машина выключена (подача, одобрение) |
 | `PLANNER_TRANSFER_NO_CURRENT_PLANNER` | 422 | У машины нет планисты — передавать не от кого |
 | `PLANNER_TRANSFER_REASON_INVALID` | 422 | `reason` пустая / < 3 / > 500 после обрезки (подача, отклонение; из pipe, `issues[].path = reason`) |
-| `PLANNER_TRANSFER_REQUEST_FORBIDDEN` | 403 | Подаёт не opiekun перевозчика и не текущий планиста (admin отсекается ещё `@Roles`) |
-| `PLANNER_TRANSFER_NOT_DECIDER` | 403 | Решает не admin и не текущий лидер `fromPlanner` (в т.ч. лидер получателя, лидер без флага); `scope=decide` для не-решающего |
+| `PLANNER_TRANSFER_REQUEST_FORBIDDEN` | 403 | Подаёт не admin, не opiekun перевозчика и не текущий планиста машины (роль без `vehicles.planner_transfer.request` отсекается ещё `PermissionsGuard`) |
+| `PLANNER_TRANSFER_NOT_DECIDER` | 403 | Решает не admin и не текущий лидер `fromPlanner` (в т.ч. лидер получателя); `scope=decide` для не-решающего (в т.ч. planista без флага лидера). Planista без флага на approve / reject сюда не доходит — 403 от `PermissionsGuard` без кода |
 | `PLANNER_TRANSFER_DECIDER_IS_REQUESTER` | 403 | Лидер — автор заявки: решает только admin (R4) |
 | `PLANNER_TRANSFER_DECIDER_IS_TARGET` | 403 | Лидер — получатель: решает только admin (R4) |
 | `PLANNER_TRANSFER_CANCEL_NOT_AUTHOR` | 403 | Отменяет не автор |
@@ -427,7 +429,7 @@ decidedAt, createdAt } | null }], transfers: PlannerTransferDto[] }` — оба
 
 ### Drivers — `/api/v1/drivers`
 
-> Роль: `admin` (все), `opiekun` (свои), `przewoznik` (свои — **read-only**: GET list/detail only, никаких write). **Не `pracownik`.** Enforcement: все mutating-эндпоинты (POST/PATCH/deactivate/reactivate/DELETE) — `@Roles('admin', 'opiekun')`; GET-эндпоинты — `@Roles('admin', 'opiekun', 'przewoznik')`. Перевозчик водителей не редактирует — carrier-панель render-ит их read-only (consistent с trailers). См. `apps/api/src/modules/drivers/drivers.controller.ts`.
+> Роль: `admin` (все), `opiekun` (свои), `przewoznik` (свои — **read-only**: GET list/detail only, никаких write). **Не `pracownik`.** Enforcement: все mutating-эндпоинты (POST/PATCH/deactivate/reactivate/DELETE) — `@RequirePermission('fleet.write')` (admin / opiekun; `DELETE …/hard` — `fleet.hard_delete`, admin); GET-эндпоинты — `drivers.read` (admin / opiekun / przewoznik). Перевозчик водителей не редактирует — carrier-панель render-ит их read-only (consistent с trailers). См. `apps/api/src/modules/drivers/drivers.controller.ts`.
 
 | Method + Path | GAS | Роль |
 |---|---|---|
@@ -443,7 +445,7 @@ decidedAt, createdAt } | null }], transfers: PlannerTransferDto[] }` — оба
 
 ### Trailers — `/api/v1/trailers`
 
-> Роль: `admin` (все), `opiekun` (свои), `przewoznik` (свои — **read-only**: только GET list/detail, никаких write). **Не `pracownik`.** Enforcement: все mutating-эндпоинты (POST/PATCH/deactivate/reactivate/DELETE) — `@Roles('admin', 'opiekun')`; GET-эндпоинты — `@Roles('admin', 'opiekun', 'przewoznik')`. Перевозчик прицепы не редактирует — carrier-панель render-ит их read-only (consistent с vehicles). См. `apps/api/src/modules/trailers/trailers.controller.ts`.
+> Роль: `admin` (все), `opiekun` (свои), `przewoznik` (свои — **read-only**: только GET list/detail, никаких write). **Не `pracownik`.** Enforcement: все mutating-эндпоинты (POST/PATCH/deactivate/reactivate/DELETE) — `@RequirePermission('fleet.write')` (admin / opiekun; `DELETE …/hard` — `fleet.hard_delete`, admin); GET-эндпоинты — `trailers.read` (admin / opiekun / przewoznik). Перевозчик прицепы не редактирует — carrier-панель render-ит их read-only (consistent с vehicles). См. `apps/api/src/modules/trailers/trailers.controller.ts`.
 
 | Method + Path | GAS |
 |---|---|
@@ -473,7 +475,7 @@ decidedAt, createdAt } | null }], transfers: PlannerTransferDto[] }` — оба
 
 > **Phase 11.** A `Team` is a numbered dispatch team (code like `1.1.13`) that a vehicle is assigned to (`Vehicle.dispatchTeamId`). It replaces the legacy single `Vehicle.dispatcherId` FK — a vehicle now belongs to a whole team, and every dispatcher in the team (usually 2 by shift) sees it through team membership. The catalog is an explicit replacement for the external "raport DAF" Excel.
 >
-> `Team` uses an `active` flag (NOT a `deletedAt` soft-delete). All endpoints are **admin-only** (`@Roles('admin')` + `RolesGuard`). Every mutating endpoint is audited (`@Audit`).
+> `Team` uses an `active` flag (NOT a `deletedAt` soft-delete). All endpoints are **admin-only** (`@RequirePermission('teams.manage')`, global `PermissionsGuard`). Every mutating endpoint is audited (`@Audit`).
 
 | Method + Path | Назначение | Роль |
 |---|---|---|
@@ -643,7 +645,7 @@ DB CHECK enforces `returnCountry` length 2..8 (covers `EL`) and `returnPostalCod
 
 **`GuaranteeEpisodeDto`** (архив): `{ id, vehicleId, plateNumber, sideNumber, carrierId, carrierName, anchorAt: date, anchorSource, deadlineAt: date, state: 'warning'|'violated'|'resolved', reminder3SentAt, reminder1SentAt, violationSentAt, violatedAt, resolvedAt, resolvedByDelegationId, resolvedDaysLeft: int|null, resolvedReason: 'wyjazd'|'agreement_off'|'vehicle_inactive'|null, createdAt, updatedAt }`. **Response:** `{ items: GuaranteeEpisodeDto[], nextCursor: uuid|null }`.
 
-**Защита endpoints:** глобальный `JwtAuthGuard` + `RolesGuard` (`@Roles`). Скоуп опекуна — service-level (`carrier.opiekunId = user.sub`), **не** через `OpiekunOwnershipGuard` (тот decorator-driven для single-resource). `pracownik` доступа не имеет в v1.
+**Защита endpoints:** глобальные `JwtAuthGuard` + `PermissionsGuard`: `panel.opiekun` (admin / opiekun) на доске и архиве, `panel.carrier` (przewoznik) на `/me`. Скоуп опекуна — service-level (`carrier.opiekunId = user.sub`), **не** через `OpiekunOwnershipGuard` (тот decorator-driven для single-resource). `pracownik` доступа не имеет в v1.
 
 ### Limits — `/api/v1/limits`
 
@@ -781,8 +783,6 @@ type UserDto = {
   // только для carrier:
   carrierId?: string;
   vehicles?: { id: string; plateNumber: string }[];
-  // мульти-роль (если у carrier есть запись в OPIEKUN):
-  alternateRoles?: Role[];
 };
 ```
 

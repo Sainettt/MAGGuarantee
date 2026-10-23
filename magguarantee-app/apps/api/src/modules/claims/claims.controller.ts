@@ -75,9 +75,10 @@ const RL_PREVIEW = {
  * over-threshold verification auto-moves the claim into OCZEKUJE_NA_AUTORYZACJE
  * (no manual flow).
  *
- * Gates (docs/25 §3 B2): every route carries `@RequirePermission` exactly as
- * planned in `common/authz/endpoint-permissions.ts`, checked by the global
- * `PermissionsGuard` — `claims.read` (admin, pracownik, przewoznik),
+ * Gates (docs/25 §3 B2, B5): every route carries `@RequirePermission`, checked
+ * by the global `PermissionsGuard` and mirrored per route in the generated
+ * fixture `common/authz/__fixtures__/endpoint-permissions.snapshot.json` —
+ * `claims.read` (admin, pracownik, przewoznik),
  * `claims.submit` (przewoznik), `claims.verify` (admin, pracownik); who holds
  * what is `ROLE_PERMISSIONS` in `@magguarantee/shared`. Row scope stays on
  * the role: the class-level `CarrierOwnershipGuard` runs the `@CarrierOwns`

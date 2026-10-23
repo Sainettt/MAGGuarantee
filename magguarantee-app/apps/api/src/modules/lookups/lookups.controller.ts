@@ -25,7 +25,8 @@ import { LookupsService } from './lookups.service';
  * Read-only dropdown helpers per docs/13-api-design.md#lookups.
  *
  * Every route carries a per-method `@RequirePermission` (docs/25 §3 B2; global
- * `PermissionsGuard`) exactly as planned in `common/authz/endpoint-permissions.ts`:
+ * `PermissionsGuard`; mirrored per route in the generated fixture
+ * `common/authz/__fixtures__/endpoint-permissions.snapshot.json`):
  *  - staff pickers `dyspozytor`, `planisci`, `opiekuni`, `teams` —
  *    `lookups.staff` (admin, opiekun);
  *  - `planisci/transfer-targets` — `vehicles.planner_transfer.request` or

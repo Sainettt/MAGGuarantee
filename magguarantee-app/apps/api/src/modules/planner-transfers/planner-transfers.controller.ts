@@ -46,8 +46,9 @@ import { PlannerTransfersService } from './planner-transfers.service';
  * `vehicles/:id/planner-*` pair and the request-scoped `planner-transfers/*`.
  *
  * Guards: global `JwtAuthGuard`; global `PermissionsGuard` + per-route
- * `@RequirePermission` exactly as planned in `common/authz/endpoint-permissions.ts`
- * (docs/25 §3 B2) — `vehicles.planner_transfer.request` to file and cancel,
+ * `@RequirePermission` (docs/25 §3 B2; mirrored per route in the generated
+ * fixture `common/authz/__fixtures__/endpoint-permissions.snapshot.json`) —
+ * `vehicles.planner_transfer.request` to file and cancel,
  * `vehicles.planner_transfer.decide` to approve / reject (admin; a planista
  * holds it only with the leader flag, `LIDER_PERMISSIONS`), either of the two
  * for the list, `vehicles.planner_history.read` for the vehicle journal.

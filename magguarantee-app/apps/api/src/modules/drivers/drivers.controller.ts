@@ -84,10 +84,10 @@ const MULTIPART_OPTIONS = {
 /**
  * Drivers REST surface per docs/13-api-design.md#drivers.
  *
- * Gates (docs/25 §3 B2): every route carries `@RequirePermission` exactly as
- * planned in `common/authz/endpoint-permissions.ts`, checked by the global
- * `PermissionsGuard`; who holds what is `ROLE_PERMISSIONS` in
- * `@magguarantee/shared`:
+ * Gates (docs/25 §3 B2, B5): every route carries `@RequirePermission`, checked
+ * by the global `PermissionsGuard` and mirrored per route in the generated
+ * fixture `common/authz/__fixtures__/endpoint-permissions.snapshot.json`; who
+ * holds what is `ROLE_PERMISSIONS` in `@magguarantee/shared`:
  *  - `drivers.read` — list / detail / attachments list + download
  *    (admin, opiekun(own), przewoznik(own));
  *  - `fleet.write` — create / update / deactivate / reactivate / delete /

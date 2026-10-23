@@ -7,8 +7,9 @@
 // Track B (docs/25 §3 B2): the routes carry `@RequirePermission` instead of
 // `@Roles`. Same two layers as `delegations.controller.spec.ts`:
 //   1. the `@RequirePermission(...)` metadata on each handler is exactly the
-//      planned requirement (`common/authz/endpoint-permissions.ts`), and the
-//      catalog maps it onto the documented role set — counting the leader
+//      requirement recorded in the generated fixture
+//      (`common/authz/__fixtures__/endpoint-permissions.snapshot.json`), and
+//      the catalog maps it onto the documented role set — counting the leader
 //      flag, as the snapshot does (approve / reject: a planista only as lider);
 //   2. `PermissionsGuard` lets through / refuses users built the way
 //      `JwtAccessStrategy` builds them (`makeAuthUser(role, { lider })`), over
