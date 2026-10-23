@@ -1,5 +1,6 @@
 // POST /sso/access-grants — the route-level contract (docs/13 «SSO», docs/24 §10):
-//  - admin-only via the real RolesGuard + the controller's real @Roles metadata;
+//  - admin-only via the real PermissionsGuard + the controller's real
+//    class-level @RequirePermission('sso.manage') metadata (docs/25 §3 B2);
 //  - audited by the real AuditInterceptor, attributed to the admin, WITHOUT an
 //    interceptor transaction (the handler calls MAGSpace — docs/13 «Audit на
 //    уровне API»);
@@ -17,8 +18,11 @@ import { Reflector } from '@nestjs/core';
 
 import {
   GrantSsoAccessSchema,
+  RoleSchema,
   SetStanowiskoRoleSchema,
   USER_LIDER_REQUIRES_LIDER_ROLE,
+  rolesSatisfying,
+  type Role,
 } from '@magguarantee/shared';
 
 import { AuditContext } from '../../common/audit';
@@ -28,9 +32,10 @@ import {
   runAuditedHandler,
   type HarnessRequest,
 } from '../../common/audit/testing/audit-coverage.harness';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { SsoController } from './sso.controller';
 import { makeAuthUser } from '../../common/testing/make-auth-user';
+import { PERMISSIONS_METADATA_KEY } from '../auth/auth.constants';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { SsoController } from './sso.controller';
 
 const ADMIN: HarnessRequest['user'] = makeAuthUser('admin', {
   sub: 'admin-1',
@@ -133,7 +138,17 @@ describe('SsoController — POST /sso/access-grants', () => {
   });
 
   describe('access', () => {
-    const guard = new RolesGuard(new Reflector());
+    const reflector = new Reflector();
+    const guard = new PermissionsGuard(reflector);
+
+    it('the controller requires exactly sso.manage, which only admin holds', () => {
+      const required = reflector.getAllAndOverride<string[] | undefined>(PERMISSIONS_METADATA_KEY, [
+        SsoController.prototype.grant,
+        SsoController,
+      ]);
+      expect(required).toEqual(['sso.manage']);
+      expect(rolesSatisfying(['sso.manage'], { lider: true })).toEqual(['admin']);
+    });
 
     it('lets an admin through', () => {
       expect(guard.canActivate(guardContext(ADMIN))).toBe(true);
@@ -142,6 +157,15 @@ describe('SsoController — POST /sso/access-grants', () => {
     it('403 for any other role', () => {
       expect(() => guard.canActivate(guardContext(PRACOWNIK))).toThrow(ForbiddenException);
     });
+
+    const NON_ADMIN: readonly Role[] = RoleSchema.options.filter((role) => role !== 'admin');
+
+    it.each(NON_ADMIN)(
+      '403 for %s',
+      (role) => {
+        expect(() => guard.canActivate(guardContext(makeAuthUser(role)))).toThrow(ForbiddenException);
+      },
+    );
 
     it('403 without an authenticated user (defence in depth behind JwtAuthGuard)', () => {
       expect(() => guard.canActivate(guardContext(undefined))).toThrow(ForbiddenException);

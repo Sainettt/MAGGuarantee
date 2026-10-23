@@ -33,7 +33,7 @@ import { RoleSchema } from '@magguarantee/shared';
 import { AUDIT_METADATA_KEY } from '../../../common/audit/audit.constants';
 import { ProblemDetailsFilter } from '../../../common/errors/problem-details.filter';
 import type { Env } from '../../../config/env.schema';
-import { ROLES_METADATA_KEY } from '../../auth/auth.constants';
+import { PERMISSIONS_METADATA_KEY, ROLES_METADATA_KEY } from '../../auth/auth.constants';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { makeAuthUser } from '../../../common/testing/make-auth-user';
@@ -204,12 +204,15 @@ describe('BugbotHandoffController (HTTP)', () => {
     expect(await remaining('per-user-b')).toBe(first);
   });
 
-  it('carries no @Audit, no @Roles and no @Throttle override; mounts the per-user guard', () => {
+  it('carries no @Audit, no @Roles, no @RequirePermission and no @Throttle override; mounts the per-user guard', () => {
     const reflector = new Reflector();
     const handler = BugbotHandoffController.prototype.createHandoff;
     for (const target of [handler, BugbotHandoffController]) {
       expect(reflector.get(AUDIT_METADATA_KEY, target)).toBeUndefined();
       expect(reflector.get(ROLES_METADATA_KEY, target)).toBeUndefined();
+      // AUTHENTICATED_ONLY route (common/authz/endpoint-permissions.ts): every
+      // role may report a bug; kind=idea is a service capability.
+      expect(reflector.get(PERMISSIONS_METADATA_KEY, target)).toBeUndefined();
       expect(reflector.get('THROTTLER:LIMITdefault', target)).toBeUndefined();
       expect(reflector.get('THROTTLER:TTLdefault', target)).toBeUndefined();
     }

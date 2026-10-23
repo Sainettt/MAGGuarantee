@@ -9,7 +9,6 @@ import {
   Patch,
   Post,
   Query,
-  UseGuards,
 } from '@nestjs/common';
 
 import {
@@ -25,25 +24,24 @@ import {
 
 import { Audit } from '../../common/audit';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { TeamsService } from './teams.service';
 
 /**
  * Dispatch-team admin CRUD per docs/13-api-design.md#teams-admin-only.
  *
- * Every endpoint is `admin`-only (Phase 11). A `Team` is the dispatch unit a
- * vehicle is assigned to — it replaces the legacy single `Vehicle.dispatcherId`.
- * The team catalog is an explicit replacement for the external "raport DAF"
- * Excel.
+ * Every endpoint requires `teams.manage` (class-level `@RequirePermission`,
+ * docs/25 §3 B2; global `PermissionsGuard`), held only by `admin` — the
+ * Phase 11 "admin-only" gate. A `Team` is the dispatch unit a vehicle is
+ * assigned to — it replaces the legacy single `Vehicle.dispatcherId`. The team
+ * catalog is an explicit replacement for the external "raport DAF" Excel.
  *
  * Hard-delete is GUARDED (409 if the team still references users/vehicles) —
  * deactivate via `/teams/:id/deactivate` to take a referenced team out of
  * service.
  */
 @Controller('teams')
-@UseGuards(RolesGuard)
-@Roles('admin')
+@RequirePermission('teams.manage')
 export class TeamsController {
   constructor(private readonly teams: TeamsService) {}
 

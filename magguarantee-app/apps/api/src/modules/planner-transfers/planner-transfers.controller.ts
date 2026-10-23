@@ -32,8 +32,7 @@ import {
   CurrentUser,
   type AuthUser,
 } from '../auth/decorators/current-user.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import {
   PLANNER_TRANSFER_AUDIT_ACTIONS,
   PLANNER_TRANSFER_AUDIT_TARGET,
@@ -46,10 +45,15 @@ import { PlannerTransfersService } from './planner-transfers.service';
  * `GuaranteeWatchdogController` precedent): the vehicle-scoped
  * `vehicles/:id/planner-*` pair and the request-scoped `planner-transfers/*`.
  *
- * Guards: global `JwtAuthGuard`; `RolesGuard` + `@Roles` per route;
+ * Guards: global `JwtAuthGuard`; global `PermissionsGuard` + per-route
+ * `@RequirePermission` exactly as planned in `common/authz/endpoint-permissions.ts`
+ * (docs/25 §3 B2) — `vehicles.planner_transfer.request` to file and cancel,
+ * `vehicles.planner_transfer.decide` to approve / reject (admin; a planista
+ * holds it only with the leader flag, `LIDER_PERMISSIONS`), either of the two
+ * for the list, `vehicles.planner_history.read` for the vehicle journal.
  * `OpiekunOwnershipGuard` scopes an opiekun to vehicles of his carriers on the
  * two vehicle routes (no-op for other roles). Everything else — "current
- * planista of this vehicle", "lider of fromPlanner", "author" — is a
+ * planista of this vehicle", "lider of THIS fromPlanner", "author" — is a
  * resource-level check in the service (docs/29 §3.1: no `LiderGuard`).
  *
  * The four mutations carry `@Audit` WITHOUT `manualTransaction`: the approval
@@ -57,7 +61,7 @@ import { PlannerTransfersService } from './planner-transfers.service';
  * transaction, and every write + the audit row commit together.
  */
 @Controller()
-@UseGuards(RolesGuard, OpiekunOwnershipGuard)
+@UseGuards(OpiekunOwnershipGuard)
 export class PlannerTransfersController {
   constructor(private readonly transfers: PlannerTransfersService) {}
 
@@ -68,7 +72,7 @@ export class PlannerTransfersController {
    */
   @Post('vehicles/:id/planner-transfers')
   @HttpCode(HttpStatus.CREATED)
-  @Roles('admin', 'opiekun', 'planista')
+  @RequirePermission('vehicles.planner_transfer.request')
   @OpiekunOwns('id', 'param', 'vehicleId')
   @Audit({
     action: PLANNER_TRANSFER_AUDIT_ACTIONS.request,
@@ -86,7 +90,7 @@ export class PlannerTransfersController {
 
   /** The vehicle's planista journal + all its requests (visibility U11). */
   @Get('vehicles/:id/planner-history')
-  @Roles('admin', 'opiekun', 'planista')
+  @RequirePermission('vehicles.planner_history.read')
   @OpiekunOwns('id', 'param', 'vehicleId')
   async history(
     @CurrentUser() user: AuthUser,
@@ -95,9 +99,13 @@ export class PlannerTransfersController {
     return this.transfers.history(user, vehicleId);
   }
 
-  /** Inbox (`scope=decide`) or own requests (`scope=mine`). */
+  /**
+   * Inbox (`scope=decide`) or own requests (`scope=mine`) — one route, two
+   * inboxes, so either permission opens it; the service 403s `scope=decide`
+   * for a non-decider.
+   */
   @Get('planner-transfers')
-  @Roles('admin', 'opiekun', 'planista')
+  @RequirePermission('vehicles.planner_transfer.request', 'vehicles.planner_transfer.decide')
   async list(
     @CurrentUser() user: AuthUser,
     @Query(new ZodValidationPipe(PlannerTransferListQuerySchema))
@@ -106,10 +114,14 @@ export class PlannerTransfersController {
     return this.transfers.list(user, query);
   }
 
-  /** Admin or the current lider of `fromPlanner`; never author / target (R3/R4). */
+  /**
+   * Admin or the current lider of `fromPlanner`; never author / target (R3/R4).
+   * `vehicles.planner_transfer.decide` lets admin and a planista-lider reach
+   * the handler; "lider of THIS fromPlanner" stays the service's call.
+   */
   @Post('planner-transfers/:id/approve')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'planista')
+  @RequirePermission('vehicles.planner_transfer.decide')
   @Audit({
     action: PLANNER_TRANSFER_AUDIT_ACTIONS.approve,
     targetType: PLANNER_TRANSFER_AUDIT_TARGET,
@@ -127,7 +139,7 @@ export class PlannerTransfersController {
   /** Same deciders as approve; `reason` required (U3). */
   @Post('planner-transfers/:id/reject')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'planista')
+  @RequirePermission('vehicles.planner_transfer.decide')
   @Audit({
     action: PLANNER_TRANSFER_AUDIT_ACTIONS.reject,
     targetType: PLANNER_TRANSFER_AUDIT_TARGET,
@@ -145,7 +157,7 @@ export class PlannerTransfersController {
   /** The author withdraws his own pending request (U4) — every role that files. No body. */
   @Post('planner-transfers/:id/cancel')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'opiekun', 'planista')
+  @RequirePermission('vehicles.planner_transfer.request')
   @Audit({
     action: PLANNER_TRANSFER_AUDIT_ACTIONS.cancel,
     targetType: PLANNER_TRANSFER_AUDIT_TARGET,

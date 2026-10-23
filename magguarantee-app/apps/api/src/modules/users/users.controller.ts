@@ -9,7 +9,6 @@ import {
   Patch,
   Post,
   Query,
-  UseGuards,
 } from '@nestjs/common';
 
 import {
@@ -28,22 +27,22 @@ import {
 
 import { Audit } from '../../common/audit';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { UsersService } from './users.service';
 
 /**
  * Admin user CRUD per docs/13-api-design.md#users-admin-only.
  *
- * The whole controller is gated to `role=admin` (RolesGuard at class level).
- * Mutating endpoints carry @Audit so each change lands in `audit_log`.
+ * The whole controller requires `users.manage` (class-level
+ * `@RequirePermission`, docs/25 §3 B2; global `PermissionsGuard`), held only
+ * by `admin`. Mutating endpoints carry @Audit so each change lands in
+ * `audit_log`.
  *
  * Note: przewoznik users are NOT created here — see CarriersController which
  * provisions a user + carrier row in the same transaction.
  */
 @Controller('users')
-@Roles('admin')
-@UseGuards(RolesGuard)
+@RequirePermission('users.manage')
 export class UsersController {
   constructor(private readonly users: UsersService) {}
 

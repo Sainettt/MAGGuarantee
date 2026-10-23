@@ -9,7 +9,6 @@ import {
   Patch,
   Post,
   Query,
-  UseGuards,
 } from '@nestjs/common';
 
 import {
@@ -27,8 +26,7 @@ import {
 
 import { Audit } from '../../common/audit';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { TrailerTypesService } from './trailer-types.service';
 
 /**
@@ -36,10 +34,12 @@ import { TrailerTypesService } from './trailer-types.service';
  *
  * `TrailerType` is a global lookup seeded by db-agent. GET is readable by any
  * authenticated user (used as a dropdown when creating/editing trailers, per
- * docs/13-api-design.md#lookups). Mutations are admin-only.
+ * docs/13-api-design.md#lookups) — no decorator on purpose, the route sits in
+ * `AUTHENTICATED_ONLY` (`common/authz/endpoint-permissions.ts`). Mutations
+ * require `trailer_types.manage` (per-method `@RequirePermission`, docs/25
+ * §3 B2; global `PermissionsGuard`), which only `admin` holds.
  */
 @Controller('trailer-types')
-@UseGuards(RolesGuard)
 export class TrailerTypesController {
   constructor(private readonly types: TrailerTypesService) {}
 
@@ -52,7 +52,7 @@ export class TrailerTypesController {
   }
 
   @Post()
-  @Roles('admin')
+  @RequirePermission('trailer_types.manage')
   @HttpCode(HttpStatus.CREATED)
   @Audit({
     action: 'createTrailerType',
@@ -67,7 +67,7 @@ export class TrailerTypesController {
   }
 
   @Patch(':id')
-  @Roles('admin')
+  @RequirePermission('trailer_types.manage')
   @Audit({
     action: 'updateTrailerType',
     targetType: 'TrailerType',
@@ -82,7 +82,7 @@ export class TrailerTypesController {
   }
 
   @Post(':id/deactivate')
-  @Roles('admin')
+  @RequirePermission('trailer_types.manage')
   @HttpCode(HttpStatus.OK)
   @Audit({
     action: 'deactivateTrailerType',
@@ -104,7 +104,7 @@ export class TrailerTypesController {
    * (Restrict FK).
    */
   @Delete(':id/hard')
-  @Roles('admin')
+  @RequirePermission('trailer_types.manage')
   @HttpCode(HttpStatus.NO_CONTENT)
   @Audit({
     action: 'hardDeleteTrailerType',

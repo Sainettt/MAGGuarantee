@@ -1,9 +1,9 @@
 // Admin surface of the Google SSO (docs/24 §A2/§A5/§10): the stanowisko → role
 // mapping, the refused-sign-in queue, and the one-step grant that answers it.
 //
-// Admin-only, like every other screen that hands out access. After track B this
-// becomes `@RequirePermission('sso.manage')`; the role check is the same thing
-// spelled the way the codebase spells it today.
+// Admin-only, like every other screen that hands out access: the whole
+// controller requires `sso.manage` (class-level `@RequirePermission`, docs/25
+// §3 B2; global `PermissionsGuard`), which only `admin` holds.
 
 import {
   Body,
@@ -15,7 +15,6 @@ import {
   Param,
   Post,
   Put,
-  UseGuards,
 } from '@nestjs/common';
 
 import {
@@ -32,13 +31,11 @@ import {
 
 import { Audit } from '../../common/audit';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { SsoService } from './sso.service';
 
 @Controller('sso')
-@Roles('admin')
-@UseGuards(RolesGuard)
+@RequirePermission('sso.manage')
 export class SsoController {
   constructor(private readonly sso: SsoService) {}
 

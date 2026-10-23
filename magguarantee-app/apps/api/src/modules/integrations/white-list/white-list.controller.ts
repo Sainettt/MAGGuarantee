@@ -11,7 +11,7 @@ import {
 } from '@magguarantee/shared';
 
 import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe';
-import { Roles } from '../../auth/decorators/roles.decorator';
+import { RequirePermission } from '../../auth/decorators/require-permission.decorator';
 import { WhiteListService } from './white-list.service';
 
 // Per docs/13-api-design.md#rate-limiting: 10 / min / IP for `/integrations/whitelist`.
@@ -31,10 +31,11 @@ const RL = { limit: process.env.NODE_ENV === 'test' ? 1_000 : 10, ttl: 60_000 };
  * nothing is mutated.
  *
  * Same auth policy as VIES — admin/opiekun only (carrier-onboarding tools),
- * enforced by the global RolesGuard via this class-level `@Roles`.
+ * enforced by the global PermissionsGuard via this class-level
+ * `@RequirePermission('integrations.external')` (docs/25 §3 B2).
  */
 @Controller('integrations/whitelist')
-@Roles('admin', 'opiekun')
+@RequirePermission('integrations.external')
 export class WhiteListController {
   constructor(private readonly whiteList: WhiteListService) {}
 

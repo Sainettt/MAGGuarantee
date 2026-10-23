@@ -5,7 +5,6 @@ import {
   HttpStatus,
   Param,
   Post,
-  UseGuards,
 } from '@nestjs/common';
 
 import type {
@@ -17,44 +16,43 @@ import type {
 } from '@magguarantee/shared';
 
 import { Audit } from '../../common/audit';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { DiagnosticsService } from './diagnostics.service';
 
 /**
  * Phase 4.5 — Diagnostics admin endpoints per
  * docs/13-api-design.md#diagnostics-admin-only.
  *
- * Five endpoints; role gates are per-method:
- *  - `GET /diagnostics/dashboard`              — admin + pracownik
- *  - `GET /diagnostics/mails`                  — admin only
- *  - `POST /diagnostics/mails/:jobId/resend`   — admin only, audited
- *  - `GET /diagnostics/claims`                 — admin only
- *  - `GET /diagnostics/db`                     — admin only
+ * Five endpoints; gates are per-method `@RequirePermission` (docs/25 §3 B2;
+ * global `PermissionsGuard`):
+ *  - `GET /diagnostics/dashboard`              — `dashboard.read` (admin + pracownik)
+ *  - `GET /diagnostics/mails`                  — `diagnostics.manage` (admin only)
+ *  - `POST /diagnostics/mails/:jobId/resend`   — `diagnostics.manage` (admin only), audited
+ *  - `GET /diagnostics/claims`                 — `diagnostics.manage` (admin only)
+ *  - `GET /diagnostics/db`                     — `diagnostics.manage` (admin only)
  *
  * Reads are NOT audited (audit-of-audit churn isn't useful). Only the
  * mutating resend endpoint carries `@Audit(...)`.
  */
 @Controller('diagnostics')
-@UseGuards(RolesGuard)
 export class DiagnosticsController {
   constructor(private readonly diagnostics: DiagnosticsService) {}
 
   @Get('dashboard')
-  @Roles('admin', 'pracownik')
+  @RequirePermission('dashboard.read')
   async dashboard(): Promise<DashboardDto> {
     return this.diagnostics.getDashboard();
   }
 
   @Get('mails')
-  @Roles('admin')
+  @RequirePermission('diagnostics.manage')
   async mails(): Promise<DiagnosticsMailJobListDto> {
     return this.diagnostics.getMails();
   }
 
   @Post('mails/:jobId/resend')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin')
+  @RequirePermission('diagnostics.manage')
   @Audit({
     action: 'diagnostics.mail.resend',
     targetType: 'MailJob',
@@ -67,13 +65,13 @@ export class DiagnosticsController {
   }
 
   @Get('claims')
-  @Roles('admin')
+  @RequirePermission('diagnostics.manage')
   async claimsHealth(): Promise<DiagnosticsClaimsHealthDto> {
     return this.diagnostics.getClaimsHealth();
   }
 
   @Get('db')
-  @Roles('admin')
+  @RequirePermission('diagnostics.manage')
   async dbHealth(): Promise<DiagnosticsDbHealthDto> {
     return this.diagnostics.getDbHealth();
   }

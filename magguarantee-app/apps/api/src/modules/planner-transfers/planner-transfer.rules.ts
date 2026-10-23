@@ -1,11 +1,12 @@
 // Pure authorization rules of the vehicle planner transfer (docs/29 §3.1).
 //
-// Deciding is a RESOURCE-level check, not a guard: `@Roles('admin','planista')`
-// lets both roles reach the handler, and only the request row can say whether
-// this planista is the lider of ITS `fromPlanner` (no `LiderGuard`, no
-// permissions layer — docs/29 §7 p.2). Kept pure so the decision matrix is
-// tested without a database, and shared by the mutation (403) and the DTO's
-// viewer flags so the UI and the server can never disagree.
+// Deciding is a RESOURCE-level check, not a guard: the route permission
+// `vehicles.planner_transfer.decide` (docs/25 §3 B2) only lets an admin or a
+// planista-lider reach the handler, and only the request row can say whether
+// this planista is the lider of ITS `fromPlanner` (no `LiderGuard` — the
+// permission cannot express "of this transfer", docs/29 §7 p.2). Kept pure so
+// the decision matrix is tested without a database, and shared by the mutation
+// (403) and the DTO's viewer flags so the UI and the server can never disagree.
 
 import type { DelegationStatus } from '@magguarantee/shared';
 

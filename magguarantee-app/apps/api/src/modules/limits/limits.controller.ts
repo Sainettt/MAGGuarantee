@@ -8,7 +8,6 @@ import {
   Post,
   Put,
   Query,
-  UseGuards,
 } from '@nestjs/common';
 
 import {
@@ -25,8 +24,7 @@ import {
 
 import { Audit } from '../../common/audit';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { LimitsService } from './limits.service';
 
 /**
@@ -64,11 +62,12 @@ function bulkTargetKey(body: unknown): string | undefined {
  *  - `POST /api/v1/limits/bulk` — the same partial write applied to N months
  *    of one year inside that single transaction (`limits.bulkUpdate`).
  *
- * All three endpoints are admin-only per `docs/03-roles.md#admin`.
+ * All three endpoints are admin-only per `docs/03-roles.md#admin`: the class
+ * requires `limits.manage` (`@RequirePermission`, docs/25 §3 B2; global
+ * `PermissionsGuard`), which only `admin` holds.
  */
 @Controller('limits')
-@UseGuards(RolesGuard)
-@Roles('admin')
+@RequirePermission('limits.manage')
 export class LimitsController {
   constructor(private readonly limits: LimitsService) {}
 
