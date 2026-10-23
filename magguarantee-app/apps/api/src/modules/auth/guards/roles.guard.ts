@@ -8,7 +8,11 @@ import { Reflector } from '@nestjs/core';
 
 import type { Role } from '@magguarantee/shared';
 
-import { ROLES_METADATA_KEY } from '../auth.constants';
+import {
+  FORBIDDEN_NO_USER_MESSAGE,
+  FORBIDDEN_NOT_GRANTED_MESSAGE,
+  ROLES_METADATA_KEY,
+} from '../auth.constants';
 import type { AuthUser } from '../decorators/current-user.decorator';
 
 /**
@@ -47,10 +51,10 @@ export class RolesGuard implements CanActivate {
       // Unauthenticated. JwtAuthGuard runs first and would normally produce
       // 401; if we somehow ran without it, surface as 403 to avoid leaking
       // the JWT-state to an unauthenticated caller.
-      throw new ForbiddenException('Brak uprawnień');
+      throw new ForbiddenException(FORBIDDEN_NO_USER_MESSAGE);
     }
     if (!required.includes(user.role)) {
-      throw new ForbiddenException('Brak uprawnień dla tej roli');
+      throw new ForbiddenException(FORBIDDEN_NOT_GRANTED_MESSAGE);
     }
     return true;
   }

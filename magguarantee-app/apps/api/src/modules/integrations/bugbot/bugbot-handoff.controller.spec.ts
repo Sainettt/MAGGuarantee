@@ -3,8 +3,9 @@
 // query validation (400), 401 / 403 / 404, no `@Audit`, and the throttling
 // split — global 100/min/IP untouched, per-user bucket on top.
 //
-// The guard chain mirrors app.module.ts: ThrottlerGuard → auth → RolesGuard as
-// APP_GUARDs, then the controller's own BugbotHandoffThrottlerGuard. The real
+// The guard chain mirrors app.module.ts: ThrottlerGuard → auth → RolesGuard →
+// PermissionsGuard as APP_GUARDs, then the controller's own
+// BugbotHandoffThrottlerGuard. The real
 // service signs with a key pair generated for this run.
 
 import 'reflect-metadata';
@@ -27,11 +28,15 @@ import { Test } from '@nestjs/testing';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import request from 'supertest';
 
+import { RoleSchema } from '@magguarantee/shared';
+
 import { AUDIT_METADATA_KEY } from '../../../common/audit/audit.constants';
 import { ProblemDetailsFilter } from '../../../common/errors/problem-details.filter';
 import type { Env } from '../../../config/env.schema';
 import { ROLES_METADATA_KEY } from '../../auth/auth.constants';
+import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
+import { makeAuthUser } from '../../../common/testing/make-auth-user';
 import { BugbotHandoffThrottlerGuard } from './bugbot-handoff-throttler.guard';
 import {
   BUGBOT_HANDOFF_RATE_LIMIT,
@@ -48,16 +53,15 @@ class HeaderAuthGuard implements CanActivate {
       headers: Record<string, string | undefined>;
       user?: unknown;
     }>();
-    const role = req.headers['x-test-role'];
-    if (!role) throw new UnauthorizedException();
-    req.user = {
+    const role = RoleSchema.safeParse(req.headers['x-test-role']);
+    if (!role.success) throw new UnauthorizedException();
+    req.user = makeAuthUser(role.data, {
       sub: req.headers['x-test-user'] ?? 'u-1',
       login: 'u',
       email: 'u@magtrans.eu',
       name: 'U',
-      role,
       mustChangePassword: false,
-    };
+    });
     return true;
   }
 }
@@ -92,6 +96,7 @@ async function boot(enabled: boolean): Promise<INestApplication> {
       { provide: APP_GUARD, useClass: ThrottlerGuard },
       { provide: APP_GUARD, useClass: HeaderAuthGuard },
       { provide: APP_GUARD, useClass: RolesGuard },
+      { provide: APP_GUARD, useClass: PermissionsGuard },
     ],
   }).compile();
   const app = moduleRef.createNestApplication({ logger: false });

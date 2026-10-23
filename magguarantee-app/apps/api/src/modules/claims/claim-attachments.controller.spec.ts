@@ -10,15 +10,15 @@ import type { Request, Response } from 'express';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { ClaimAttachmentsController } from './claim-attachments.controller';
 import type { ClaimAttachmentsService } from './claim-attachments.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
-const pracownik: AuthUser = {
+const pracownik: AuthUser = makeAuthUser('pracownik', {
   sub: 'u-prac',
   login: 'prac',
   email: 'prac@magtrans.eu',
   name: 'Pracownik',
-  role: 'pracownik',
   mustChangePassword: false,
-};
+});
 
 function controllerWith(download: jest.Mock): ClaimAttachmentsController {
   return new ClaimAttachmentsController({

@@ -9,6 +9,7 @@ import { ROLES_METADATA_KEY } from '../auth/auth.constants';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { DelegationsController } from './delegations.controller';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 /**
  * Authorization unit tests for the delegations surface after the Phase 7 REWORK
@@ -60,14 +61,13 @@ function ctxFor(
 }
 
 function userWith(role: Role): AuthUser {
-  return {
+  return makeAuthUser(role, {
     sub: `u-${role}`,
     login: role,
     email: `${role}@magtrans.eu`,
     name: role,
-    role,
     mustChangePassword: false,
-  };
+  });
 }
 
 describe('DelegationsController — authorization (Phase 7 REWORK 2026-06-20 #4)', () => {

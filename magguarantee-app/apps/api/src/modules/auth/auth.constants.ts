@@ -86,6 +86,16 @@ export const APP_CONFIG_KEY = {
 // ── Metadata keys for guards ────────────────────────────
 export const IS_PUBLIC_KEY = 'isPublic';
 export const ROLES_METADATA_KEY = 'roles';
+// docs/25 B2 — `@RequirePermission(...)`, read by PermissionsGuard. Coexists
+// with ROLES_METADATA_KEY until B5; a route carries one of the two, never both
+// (enforced by common/authz/roles-snapshot.spec.ts, not at runtime).
+export const PERMISSIONS_METADATA_KEY = 'permissions';
+
+// ── 403 messages of the authorization guards ────────────
+// Shared by RolesGuard and PermissionsGuard on purpose: converting a route from
+// `@Roles` to `@RequirePermission` (docs/25 B2a–c) must not change its 403 body.
+export const FORBIDDEN_NO_USER_MESSAGE = 'Brak uprawnień';
+export const FORBIDDEN_NOT_GRANTED_MESSAGE = 'Brak uprawnień dla tej roli';
 
 // Dummy hash used for constant-time bcrypt compare on unknown logins. Per
 // docs/15-auth-strategy.md#account-enumeration, the response shape AND the

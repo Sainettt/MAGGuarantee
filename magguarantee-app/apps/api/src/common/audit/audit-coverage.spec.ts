@@ -40,25 +40,24 @@ import {
   runAuditedHandler,
   type HarnessRequest,
 } from './testing/audit-coverage.harness';
+import { makeAuthUser } from '../testing/make-auth-user';
 
 // ─── shared fixtures ─────────────────────────────────────────
 
-const ADMIN: HarnessRequest['user'] = {
+const ADMIN: HarnessRequest['user'] = makeAuthUser('admin', {
   sub: 'admin-1',
   login: 'admin',
   email: 'admin@magtrans.eu',
   name: 'Admin',
-  role: 'admin',
   mustChangePassword: false,
-};
-const PRACOWNIK: HarnessRequest['user'] = {
+});
+const PRACOWNIK: HarnessRequest['user'] = makeAuthUser('pracownik', {
   sub: 'prac-1',
   login: 'prac',
   email: 'prac@magtrans.eu',
   name: 'Pracownik',
-  role: 'pracownik',
   mustChangePassword: false,
-};
+});
 
 function req(over: Partial<HarnessRequest>): HarnessRequest {
   return {
@@ -389,14 +388,13 @@ describe('audit coverage — interceptor writes a row end-to-end', () => {
   // and the `gotowy → zgloszony` rollback with `rollback: true`. The service
   // renames the row via `AuditContext.setAction` (2026-08-14 audit, item 22).
 
-  const EKSPORT: HarnessRequest['user'] = {
+  const EKSPORT: HarnessRequest['user'] = makeAuthUser('eksport', {
     sub: 'eks-1',
     login: 'eks',
     email: 'eks@magtrans.eu',
     name: 'Eksport',
-    role: 'eksport',
     mustChangePassword: false,
-  };
+  });
   const readyReq = req({
     user: EKSPORT,
     params: { id: 'deleg-uuid-1' },

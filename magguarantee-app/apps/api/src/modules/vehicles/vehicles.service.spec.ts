@@ -27,6 +27,7 @@ import {
 import { VehiclesService } from './vehicles.service';
 import { StorageService } from '../storage/storage.service';
 import { collectAndValidateUploads } from './attachment-validation';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 const NOW = new Date('2026-05-01T10:00:00.000Z');
 
@@ -160,14 +161,13 @@ function makeUser(overrides: Partial<UserRow> = {}): UserRow {
 }
 
 function makeAuth(role: AuthUser['role'], sub = 'u-actor'): AuthUser {
-  return {
+  return makeAuthUser(role, {
     sub,
     login: 'actor',
     email: 'actor@magtrans.eu',
     name: 'Actor',
-    role,
     mustChangePassword: false,
-  };
+  });
 }
 
 function makeVehiclesRepo(seed: VehicleRow[] = []): VehiclesRepository {

@@ -4,6 +4,8 @@ import { PassportStrategy } from '@nestjs/passport';
 import type { Request } from 'express';
 import { ExtractJwt, Strategy, type JwtFromRequestFunction } from 'passport-jwt';
 
+import { permissionsFor } from '@magguarantee/shared';
+
 import type { Env } from '../../../config/env.schema';
 import type { AuthUser } from '../decorators/current-user.decorator';
 import { COOKIE_ACCESS } from '../auth.constants';
@@ -84,6 +86,11 @@ export class JwtAccessStrategy extends PassportStrategy(Strategy, 'jwt') {
       // token: the edge gating does not depend on it, and a demotion must bite
       // on the next request, not after the access token expires).
       lider: user.lider,
+      // docs/25 B2 — effective permissions, computed ONCE per request from the
+      // same DB-sourced (role, lider) pair; PermissionsGuard and `can()` read
+      // only this set and never recompute it from the role. B6 adds per-user
+      // extra/denied overrides here, nowhere else.
+      permissions: new Set(permissionsFor(user.role, user.lider)),
     };
   }
 }

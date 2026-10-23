@@ -19,6 +19,7 @@ import type { CategorizedUpload } from './attachment-validation';
 import { TrailerAttachmentsRepository } from './trailer-attachments.repository';
 import { TrailersRepository, type TrailerRow } from './trailers.repository';
 import { TrailersService } from './trailers.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 const NOW = new Date('2026-05-01T10:00:00.000Z');
 
@@ -109,14 +110,13 @@ function makeType(overrides: Partial<TrailerTypeRow> = {}): TrailerTypeRow {
 }
 
 function makeAuth(role: AuthUser['role'], sub = 'u-actor'): AuthUser {
-  return {
+  return makeAuthUser(role, {
     sub,
     login: 'actor',
     email: 'actor@magtrans.eu',
     name: 'Actor',
-    role,
     mustChangePassword: false,
-  };
+  });
 }
 
 function makeTrailersRepo(seed: TrailerRow[] = []): TrailersRepository {

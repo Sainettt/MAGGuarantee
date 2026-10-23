@@ -34,6 +34,7 @@ import { ROLES_METADATA_KEY } from '../auth/auth.constants';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { ClaimsController } from './claims.controller';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 const reflector = new Reflector();
 
@@ -66,14 +67,13 @@ function ctxFor(
 }
 
 function userWith(role: Role): AuthUser {
-  return {
+  return makeAuthUser(role, {
     sub: `u-${role}`,
     login: role,
     email: `${role}@magtrans.eu`,
     name: role,
-    role,
     mustChangePassword: false,
-  };
+  });
 }
 
 const REFUSED: Role[] = [

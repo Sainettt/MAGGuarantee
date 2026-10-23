@@ -14,6 +14,7 @@ import {
   type DelegationRow,
 } from './delegations.repository';
 import { DelegationsService } from './delegations.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 const DISPATCHER_SUB = 'dys-1';
 const TEAM_ID = 'team-1';
@@ -35,15 +36,14 @@ function auth(
   sub: string,
   teamId: string | null = TEAM_ID,
 ): AuthUser {
-  return {
+  return makeAuthUser(role, {
     sub,
     login: 'actor',
     email: 'actor@magtrans.eu',
     name: 'Actor',
-    role,
     mustChangePassword: false,
     teamId,
-  };
+  });
 }
 
 function baseFilters(overrides: Partial<DelegationFilters> = {}): DelegationFilters {

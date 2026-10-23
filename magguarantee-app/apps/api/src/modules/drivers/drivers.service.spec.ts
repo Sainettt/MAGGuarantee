@@ -20,6 +20,7 @@ import {
 } from './drivers.repository';
 import { DriversService } from './drivers.service';
 import { StorageService } from '../storage/storage.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 const NOW = new Date('2026-05-01T10:00:00.000Z');
 
@@ -137,14 +138,13 @@ function makeCarrier(overrides: Partial<CarrierRow> = {}): CarrierRow {
 }
 
 function makeAuth(role: AuthUser['role'], sub = 'u-actor'): AuthUser {
-  return {
+  return makeAuthUser(role, {
     sub,
     login: 'actor',
     email: 'actor@magtrans.eu',
     name: 'Actor',
-    role,
     mustChangePassword: false,
-  };
+  });
 }
 
 function makeDriversRepo(seed: DriverRow[] = []): DriversRepository {

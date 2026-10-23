@@ -10,6 +10,7 @@ import { TeamsService } from '../teams/teams.service';
 import { UsersRepository, type UserRow } from '../users/users.repository';
 import type { VehiclesRepository } from '../vehicles/vehicles.repository';
 import { LookupsService } from './lookups.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 /** TeamsService stub — only `lookup()` is exercised by LookupsService. */
 function makeTeamsService(
@@ -129,14 +130,13 @@ function makeCarriersRepo(
 }
 
 function makeAuth(role: AuthUser['role'], sub = 'u-actor'): AuthUser {
-  return {
+  return makeAuthUser(role, {
     sub,
     login: 'actor',
     email: 'actor@magtrans.eu',
     name: 'Actor',
-    role,
     mustChangePassword: false,
-  };
+  });
 }
 
 describe('LookupsService — people pickers', () => {

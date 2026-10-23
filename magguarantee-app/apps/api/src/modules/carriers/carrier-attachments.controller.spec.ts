@@ -16,6 +16,7 @@ import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { CarrierAttachmentsController } from './carrier-attachments.controller';
 import type { CarrierAttachmentsService } from './carrier-attachments.service';
+import { makeAuthUser, withRole } from '../../common/testing/make-auth-user';
 
 /**
  * Authorization unit tests for `CarrierAttachmentsController`.
@@ -69,14 +70,13 @@ const ALL_HANDLERS: (keyof CarrierAttachmentsController)[] = [
   'delete',
 ];
 
-const carrierUser: AuthUser = {
+const carrierUser: AuthUser = makeAuthUser('przewoznik', {
   sub: 'u-carrier',
   login: 'przewoznik1',
   email: 'przewoznik1@magtrans.eu',
   name: 'Carrier One',
-  role: 'przewoznik',
   mustChangePassword: false,
-};
+});
 
 describe('CarrierAttachmentsController — authorization', () => {
   const guard = new RolesGuard(reflector);
@@ -101,12 +101,12 @@ describe('CarrierAttachmentsController — authorization', () => {
     });
 
     it.each(ALL_HANDLERS)('allows admin on %s', (handler) => {
-      const adminUser: AuthUser = { ...carrierUser, role: 'admin' };
+      const adminUser: AuthUser = withRole(carrierUser, 'admin');
       expect(guard.canActivate(ctxFor(handler, adminUser))).toBe(true);
     });
 
     it.each(ALL_HANDLERS)('allows opiekun on %s', (handler) => {
-      const opiekunUser: AuthUser = { ...carrierUser, role: 'opiekun' };
+      const opiekunUser: AuthUser = withRole(carrierUser, 'opiekun');
       expect(guard.canActivate(ctxFor(handler, opiekunUser))).toBe(true);
     });
   });
@@ -128,7 +128,7 @@ describe('CarrierAttachmentsController.download — access log', () => {
     }));
     const service = { download } as unknown as CarrierAttachmentsService;
     const res = { setHeader: jest.fn() } as unknown as Response;
-    const admin: AuthUser = { ...carrierUser, sub: 'u-adm', role: 'admin' };
+    const admin: AuthUser = withRole(carrierUser, 'admin', { sub: 'u-adm' });
 
     await new CarrierAttachmentsController(service).download(
       admin,

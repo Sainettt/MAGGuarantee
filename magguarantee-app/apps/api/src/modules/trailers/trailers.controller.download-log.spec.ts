@@ -10,15 +10,15 @@ import type { Request, Response } from 'express';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { TrailersController } from './trailers.controller';
 import type { TrailersService } from './trailers.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
-const opiekun: AuthUser = {
+const opiekun: AuthUser = makeAuthUser('opiekun', {
   sub: 'u-op',
   login: 'opiekun1',
   email: 'opiekun1@magtrans.eu',
   name: 'Opiekun One',
-  role: 'opiekun',
   mustChangePassword: false,
-};
+});
 
 function controllerWith(downloadAttachment: jest.Mock): TrailersController {
   return new TrailersController({

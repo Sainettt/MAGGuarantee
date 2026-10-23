@@ -9,11 +9,19 @@
 // B2 swaps `@Roles` for `@RequirePermission` and must leave both maps
 // unchanged; the spec next to this file turns any drift into a red test.
 //
+// A `@RequirePermission` route (B2.0+) is recorded as the roles that pass it:
+// `rolesSatisfying(required, { lider: true })` — a role counts when its leader
+// variant holds one of the permissions, which is how the B1 fixture encodes
+// the planner-transfer decide routes. `@Roles` + `@RequirePermission` on one
+// route, `@Public` + `@RequirePermission`, an empty or non-catalog
+// requirement are contradictions (red test), never silently recorded. The
+// ownership map does not change shape: it never looked at the role gate.
+//
 // Everything is resolved the way the production guards resolve it:
-//   - `@Public` / `@Roles` / `@OpiekunOwns` / `@CarrierOwns` via
-//     `Reflector.getAllAndOverride([handler, class])` — the handler wins
-//     (`JwtAuthGuard`, `RolesGuard`, `OpiekunOwnershipGuard`,
-//     `CarrierOwnershipGuard`);
+//   - `@Public` / `@Roles` / `@RequirePermission` / `@OpiekunOwns` /
+//     `@CarrierOwns` via `Reflector.getAllAndOverride([handler, class])` —
+//     the handler wins (`JwtAuthGuard`, `RolesGuard`, `PermissionsGuard`,
+//     `OpiekunOwnershipGuard`, `CarrierOwnershipGuard`);
 //   - `@UseGuards` as Nest's guards consumer does: class guards plus handler
 //     guards, concatenated (no override).
 //
@@ -24,9 +32,19 @@ import type { CanActivate, Type } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
 
-import { RoleSchema, type Role } from '@magguarantee/shared';
+import {
+  PERMISSIONS,
+  RoleSchema,
+  rolesSatisfying,
+  type Permission,
+  type Role,
+} from '@magguarantee/shared';
 
-import { IS_PUBLIC_KEY, ROLES_METADATA_KEY } from '../../modules/auth/auth.constants';
+import {
+  IS_PUBLIC_KEY,
+  PERMISSIONS_METADATA_KEY,
+  ROLES_METADATA_KEY,
+} from '../../modules/auth/auth.constants';
 import { CarrierOwnershipGuard } from '../guards/carrier-ownership.guard';
 import { OpiekunOwnershipGuard } from '../guards/opiekun-ownership.guard';
 import {
@@ -46,7 +64,9 @@ export const ACCESS_AUTHENTICATED = 'AUTHENTICATED' as const;
 
 /**
  * Who passes the role gate of one route. A role array is sorted in
- * `RoleSchema.options` order and never empty.
+ * `RoleSchema.options` order. It is empty only for a `@RequirePermission` that
+ * admits nobody — always reported as a contradiction, and rejected by
+ * {@link parseRolesSnapshot}, so it can never be committed.
  */
 export type EndpointAccess =
   | typeof ACCESS_PUBLIC
@@ -83,6 +103,77 @@ export type SnapshotRoute = Pick<
 
 const ROLE_ORDER: readonly Role[] = RoleSchema.options;
 
+// ─── Gate resolution (shared by every builder below) ───────
+
+/** The authorization metadata of one route, resolved like the guards do. */
+interface RouteGates {
+  isPublic: boolean;
+  /** `@Roles` present at all (an empty `@Roles()` counts as present). */
+  rolesDeclared: boolean;
+  roles: Role[];
+  unknownRoles: unknown[];
+  /** `@RequirePermission` present at all. */
+  permissionsDeclared: boolean;
+  /** Catalog permissions of the requirement, in `PERMISSIONS` order. */
+  permissions: Permission[];
+  unknownPermissions: unknown[];
+}
+
+function resolveGates(reflector: Reflector, route: SnapshotRoute): RouteGates {
+  const targets = metadataTargets(route);
+  const isPublic = reflector.getAllAndOverride<boolean | undefined>(IS_PUBLIC_KEY, targets);
+  const declaredRoles = reflector.getAllAndOverride<unknown>(ROLES_METADATA_KEY, targets);
+  const declaredPerms = reflector.getAllAndOverride<unknown>(PERMISSIONS_METADATA_KEY, targets);
+  const roles = normaliseRoles(declaredRoles);
+  const permissions = normalisePermissions(declaredPerms);
+  return {
+    isPublic: Boolean(isPublic),
+    rolesDeclared: isDeclared(declaredRoles),
+    roles: roles.roles,
+    unknownRoles: roles.unknown,
+    permissionsDeclared: isDeclared(declaredPerms),
+    permissions: permissions.permissions,
+    unknownPermissions: permissions.unknown,
+  };
+}
+
+/**
+ * How a route decides who may call it — the input of the inverse rule
+ * (`endpoint-permissions.spec.ts`, docs/25 R2):
+ *   `public`      — `@Public` (whatever else it carries);
+ *   `roles`       — non-empty `@Roles`, no `@RequirePermission`;
+ *   `permissions` — `@RequirePermission`, no `@Roles`;
+ *   `both`        — `@RequirePermission` and `@Roles` (a contradiction);
+ *   `none`        — any session passes (no or empty `@Roles`, no requirement).
+ */
+export type RouteGate = 'public' | 'roles' | 'permissions' | 'both' | 'none';
+
+export function routeGate(route: SnapshotRoute): RouteGate {
+  const gates = resolveGates(new Reflector(), route);
+  if (gates.isPublic) return 'public';
+  if (gates.permissionsDeclared) return gates.rolesDeclared ? 'both' : 'permissions';
+  return gates.roles.length > 0 ? 'roles' : 'none';
+}
+
+/**
+ * The live `@RequirePermission` requirement of every route that carries one
+ * (catalog permissions, `PERMISSIONS` order). Compared with the B1 plan
+ * `ENDPOINT_PERMISSIONS` by `endpoint-permissions.spec.ts`. Malformed
+ * requirements are reported by {@link buildRolesSnapshot}, not here.
+ */
+export function buildPermissionRequirements(
+  routes: readonly SnapshotRoute[],
+): Readonly<Record<string, readonly Permission[]>> {
+  const reflector = new Reflector();
+  const entries = new Map<string, readonly Permission[]>();
+  for (const route of routes) {
+    if (entries.has(route.key)) continue;
+    const gates = resolveGates(reflector, route);
+    if (gates.permissionsDeclared) entries.set(route.key, gates.permissions);
+  }
+  return sortedRecord(entries);
+}
+
 // ─── Roles snapshot ────────────────────────────────────────
 
 /** Builds the `endpoint-roles` map from live metadata. */
@@ -99,30 +190,60 @@ export function buildRolesSnapshot(
       contradictions.push(`${where}: a second handler resolves to the same METHOD /path`);
       continue;
     }
-    const targets = metadataTargets(route);
-    const isPublic = reflector.getAllAndOverride<boolean | undefined>(IS_PUBLIC_KEY, targets);
-    const declared = reflector.getAllAndOverride<unknown>(ROLES_METADATA_KEY, targets);
-    const { roles, unknown } = normaliseRoles(declared);
-
-    for (const value of unknown) {
-      contradictions.push(`${where}: @Roles carries a value that is not a Role: ${JSON.stringify(value)}`);
-    }
-    if (isPublic && roles.length > 0) {
-      contradictions.push(
-        `${where}: @Public together with @Roles(${roles.join(', ')}) — RolesGuard answers 403 to every caller (no req.user)`,
-      );
-    }
-
-    entries.set(route.key, accessOf(Boolean(isPublic), roles));
+    const gates = resolveGates(reflector, route);
+    contradictions.push(...gateContradictions(where, gates));
+    entries.set(route.key, accessOf(gates));
   }
 
   return { snapshot: sortedRecord(entries), contradictions };
 }
 
-function accessOf(isPublic: boolean, roles: readonly Role[]): EndpointAccess {
-  if (isPublic) return ACCESS_PUBLIC;
-  if (roles.length === 0) return ACCESS_AUTHENTICATED;
-  return roles;
+function gateContradictions(where: string, gates: RouteGates): string[] {
+  const out: string[] = [];
+  const roles = gates.roles.join(', ');
+  const required = gates.permissions.join(', ');
+  for (const value of gates.unknownRoles) {
+    out.push(`${where}: @Roles carries a value that is not a Role: ${JSON.stringify(value)}`);
+  }
+  if (gates.isPublic && gates.roles.length > 0) {
+    out.push(`${where}: @Public together with @Roles(${roles}) — RolesGuard answers 403 to every caller (no req.user)`);
+  }
+  if (!gates.permissionsDeclared) return out;
+
+  for (const value of gates.unknownPermissions) {
+    out.push(`${where}: @RequirePermission carries a value that is not a Permission: ${JSON.stringify(value)}`);
+  }
+  if (gates.permissions.length === 0) {
+    out.push(`${where}: @RequirePermission without a catalog permission — PermissionsGuard answers 403 to every caller`);
+  }
+  if (gates.rolesDeclared) {
+    out.push(
+      `${where}: @Roles(${roles}) together with @RequirePermission(${required}) — a route carries one of the two (docs/25 B2), both guards would apply`,
+    );
+  }
+  if (gates.isPublic) {
+    out.push(`${where}: @Public together with @RequirePermission(${required}) — PermissionsGuard lets every caller through, the requirement never applies`);
+  }
+  return out;
+}
+
+/**
+ * The access the guards actually enforce. For the contradictory `@Roles` +
+ * `@RequirePermission` pair that is the intersection (both guards run).
+ */
+function accessOf(gates: RouteGates): EndpointAccess {
+  if (gates.isPublic) return ACCESS_PUBLIC;
+  if (gates.permissionsDeclared) {
+    const admitted = rolesSatisfying(gates.permissions, { lider: true });
+    if (gates.roles.length === 0) return admitted;
+    return admitted.filter((role) => gates.roles.includes(role));
+  }
+  if (gates.roles.length === 0) return ACCESS_AUTHENTICATED;
+  return gates.roles;
+}
+
+function isDeclared(value: unknown): boolean {
+  return value !== undefined && value !== null;
 }
 
 /**
@@ -136,6 +257,19 @@ function normaliseRoles(declared: unknown): { roles: Role[]; unknown: unknown[] 
   const unknown = values.filter((v) => typeof v !== 'string' || !known.has(v));
   const present = new Set(values.filter((v): v is string => typeof v === 'string'));
   return { roles: ROLE_ORDER.filter((r) => present.has(r)), unknown };
+}
+
+/**
+ * `@RequirePermission` metadata → catalog permissions in `PERMISSIONS` order
+ * (deduplicated) + every value that is not one. `undefined` → none.
+ */
+function normalisePermissions(declared: unknown): { permissions: Permission[]; unknown: unknown[] } {
+  if (declared === undefined || declared === null) return { permissions: [], unknown: [] };
+  const values: unknown[] = Array.isArray(declared) ? declared : [declared];
+  const known = new Set<string>(PERMISSIONS);
+  const unknown = values.filter((v) => typeof v !== 'string' || !known.has(v));
+  const present = new Set(values.filter((v): v is string => typeof v === 'string'));
+  return { permissions: PERMISSIONS.filter((p) => present.has(p)), unknown };
 }
 
 // ─── Ownership snapshot ────────────────────────────────────

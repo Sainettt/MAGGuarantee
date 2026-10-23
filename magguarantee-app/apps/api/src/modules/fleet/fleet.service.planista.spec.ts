@@ -15,6 +15,7 @@ import {
   type VehicleRow,
 } from '../vehicles/vehicles.repository';
 import { FleetService } from './fleet.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 /** `YYYY-MM-DD` → UTC-midnight Date (date-only convention for `lastReturnAt`). */
 function U(s: string): Date {
@@ -37,14 +38,13 @@ const ZERO_STATS = {
 // ─── Fixture builders ────────────────────────────────────
 
 function makeAuth(role: AuthUser['role'], sub = 'plan-self'): AuthUser {
-  return {
+  return makeAuthUser(role, {
     sub,
     login: 'actor',
     email: 'actor@magtrans.eu',
     name: 'Actor',
-    role,
     mustChangePassword: false,
-  };
+  });
 }
 
 function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {

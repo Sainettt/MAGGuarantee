@@ -26,6 +26,7 @@ import {
   type VehicleBoardRow,
   type VehicleBoardScope,
 } from './vehicles.repository';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 const VEHICLE_ID = 'veh-1';
 const WER_SUB = 'wer-1';
@@ -35,15 +36,14 @@ function auth(
   sub: string,
   teamId: string | null = 'team-1',
 ): AuthUser {
-  return {
+  return makeAuthUser(role, {
     sub,
     login: 'actor',
     email: 'actor@magtrans.eu',
     name: 'Actor',
-    role,
     mustChangePassword: false,
     teamId,
-  };
+  });
 }
 
 function kmRow(overrides: Partial<VehicleDailyKmRow> = {}): VehicleDailyKmRow {

@@ -15,6 +15,7 @@ import { HealthModule } from './health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { DirectoryModule } from './modules/directory/directory.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
+import { PermissionsGuard } from './modules/auth/guards/permissions.guard';
 import { RolesGuard } from './modules/auth/guards/roles.guard';
 import { CarriersModule } from './modules/carriers/carriers.module';
 import { ClaimsModule } from './modules/claims/claims.module';
@@ -135,6 +136,13 @@ import { WeeklyReportModule } from './modules/weekly-report/weekly-report.module
     // closing the "silent open endpoint" gap. Controllers may keep their own
     // `@UseGuards(RolesGuard)` (idempotent).
     { provide: APP_GUARD, useClass: RolesGuard },
+    // docs/25 B2 — global permission gate, AFTER RolesGuard (order of APP_GUARD
+    // providers = order of execution). Same opt-in shape: a no-op on routes
+    // without `@RequirePermission` and on `@Public` ones; with metadata it
+    // checks `req.user.permissions` (built by JwtAccessStrategy) and fails
+    // closed when the set is missing. A route carries `@Roles` OR
+    // `@RequirePermission`, never both (common/authz/roles-snapshot.spec.ts).
+    { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
 })
 export class AppModule {}

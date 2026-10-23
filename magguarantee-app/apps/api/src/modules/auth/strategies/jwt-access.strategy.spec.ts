@@ -2,9 +2,15 @@
 // the token: `mustChangePassword`, `teamId` and — docs/28 — the leader flag.
 // `lider` is deliberately not a JWT claim (the edge gating never depends on
 // it), so the only way it can reach guards, services and `/auth/me` is here.
+//
+// docs/25 B2: the same call also fills `permissions` — once, from that DB pair
+// `(role, lider)` via `permissionsFor`. It is the only place the set is built;
+// PermissionsGuard and `can()` never recompute it from the role.
 
 import { UnauthorizedException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
+
+import { permissionsFor } from '@magguarantee/shared';
 
 import type { Env } from '../../../config/env.schema';
 import type { UserRow } from '../../users/users.repository';
@@ -96,5 +102,45 @@ describe('JwtAccessStrategy.validate', () => {
     await expect(strategy.validate({ sub: 'u-1', role: 'planista' })).rejects.toBeInstanceOf(
       UnauthorizedException,
     );
+  });
+
+  describe('permissions (docs/25 B2)', () => {
+    it('a lider planista holds vehicles.planner_transfer.decide', async () => {
+      const { strategy } = makeStrategy(makeUser({ role: 'planista', lider: true }));
+
+      const user = await strategy.validate({ sub: 'u-1', role: 'planista' });
+
+      expect(user.permissions.has('vehicles.planner_transfer.decide')).toBe(true);
+      expect([...user.permissions]).toEqual(permissionsFor('planista', true));
+    });
+
+    it('a plain planista does not — the flag is what grants it', async () => {
+      const { strategy } = makeStrategy(makeUser({ role: 'planista', lider: false }));
+
+      const user = await strategy.validate({ sub: 'u-1', role: 'planista' });
+
+      expect(user.permissions.has('vehicles.planner_transfer.decide')).toBe(false);
+      // Everything else a planista may do is still there.
+      expect(user.permissions.has('vehicles.planner_transfer.request')).toBe(true);
+      expect([...user.permissions]).toEqual(permissionsFor('planista', false));
+    });
+
+    it('follows the DB role, not the role claim of the token', async () => {
+      // Role changed by an admin after the token was minted.
+      const { strategy } = makeStrategy(makeUser({ role: 'admin', lider: false }));
+
+      const user = await strategy.validate({ sub: 'u-1', role: 'planista' });
+
+      expect(user.role).toBe('admin');
+      expect([...user.permissions]).toEqual(permissionsFor('admin', false));
+    });
+
+    it('a demotion from lider drops the leader permission on the next request', async () => {
+      const { strategy } = makeStrategy(makeUser({ role: 'planista', lider: false }));
+
+      const user = await strategy.validate({ sub: 'u-1', role: 'planista', iat: 1 });
+
+      expect(user.permissions.has('vehicles.planner_transfer.decide')).toBe(false);
+    });
   });
 });

@@ -30,24 +30,23 @@ import {
 } from '../../common/audit/testing/audit-coverage.harness';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { SsoController } from './sso.controller';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
-const ADMIN: HarnessRequest['user'] = {
+const ADMIN: HarnessRequest['user'] = makeAuthUser('admin', {
   sub: 'admin-1',
   login: 'admin',
   email: 'admin@magtrans.eu',
   name: 'Admin',
-  role: 'admin',
   mustChangePassword: false,
-};
+});
 
-const PRACOWNIK: HarnessRequest['user'] = {
+const PRACOWNIK: HarnessRequest['user'] = makeAuthUser('pracownik', {
   sub: 'prac-1',
   login: 'prac',
   email: 'prac@magtrans.eu',
   name: 'Pracownik',
-  role: 'pracownik',
   mustChangePassword: false,
-};
+});
 
 function guardContext(user: HarnessRequest['user']): ExecutionContext {
   return {

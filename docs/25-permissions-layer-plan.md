@@ -1,6 +1,6 @@
 # 25. План: трек B — слой permissions
 
-> **Статус: B1 сделан 2026-10-23 (`2419bfc`), B2 следующий (план от 2026-09-14). Решения по открытым вопросам — §7; первый случай для B6 — в §3 B6.** Детализирует §3 из
+> **Статус: B1 сделан 2026-10-23 (`2419bfc`), B2.0 (инфраструктура) сделан 2026-10-23, следующий — B2a (план от 2026-09-14). Решения по открытым вопросам — §7; первый случай для B6 — в §3 B6.** Детализирует §3 из
 > [24-sso-magspace-and-permissions-plan.md](24-sso-magspace-and-permissions-plan.md)
 > по фактическому состоянию кода на `a50077c`. Где этот документ расходится с
 > §3 docs/24, прав этот документ: §3 писался до инвентаризации.
@@ -235,6 +235,25 @@
 Runtime-изменений ноль, PR можно мержить отдельно.
 
 ### B2. API: guard и контроллеры (≈ 1.5 дня)
+
+> **B2.0 сделан 2026-10-23** (инфраструктура, ни один контроллер не переведён; обе
+> фикстуры B1 байт-в-байт). `@RequirePermission` (кортеж ≥ 1 права) +
+> `PERMISSIONS_METADATA_KEY`; глобальный `PermissionsGuard` после `RolesGuard`
+> (порядок проверок — docs/15 §Roles & Guards; 403-сообщения общие с
+> `RolesGuard`, `FORBIDDEN_*_MESSAGE` в `auth.constants.ts`);
+> `AuthUser.permissions` **обязательное** поле, заполняется в
+> `JwtAccessStrategy.validate`; `common/authz/can.ts` (`can`, `canAny`);
+> `common/testing/make-auth-user.ts` (`makeAuthUser`, `withRole` для копий
+> вида `{ ...user, role }`) — на фабрику переехали 72 места в 45 spec-файлах
+> (48 типизированных литералов, 21 копия со сменой роли, 3 пользователя из
+> заголовка в supertest-спеках vies / white-list / bugbot, которые теперь
+> регистрируют и `PermissionsGuard`). Генератор снапшота читает
+> `@RequirePermission` (`rolesSatisfying(…, { lider: true })`); противоречия:
+> оба декоратора, `@Public` + `@RequirePermission`, пустое или некаталожное
+> требование. `endpoint-permissions.spec`: живое `@RequirePermission` =
+> `ENDPOINT_PERMISSIONS[route]` (пока пусто) и inverse-правило фаза 1
+> (`@Roles` **или** `@RequirePermission` **или** `AUTHENTICATED_ONLY`; фаза 2
+> без `@Roles` — в B2d).
 
 | Что | Где |
 |---|---|

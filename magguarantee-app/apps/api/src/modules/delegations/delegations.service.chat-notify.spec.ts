@@ -26,6 +26,7 @@ import { TrailersRepository } from '../trailers/trailers.repository';
 import { VehiclesRepository } from '../vehicles/vehicles.repository';
 import { DelegationsRepository } from './delegations.repository';
 import { DelegationsService } from './delegations.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 const CARRIER_ID = 'carrier-1';
 const CARRIER_USER = 'user-1';
@@ -34,14 +35,13 @@ const NEW_DELEGATION_ID = 'deleg-new';
 const CARRIER_EMAIL = 'przewoznik@example.com';
 
 function authCarrier(): AuthUser {
-  return {
+  return makeAuthUser('przewoznik', {
     sub: CARRIER_USER,
     login: 'pwz',
     email: CARRIER_EMAIL,
     name: 'Carrier',
-    role: 'przewoznik',
     mustChangePassword: false,
-  };
+  });
 }
 
 function submitDto(): SubmitDelegationDto {

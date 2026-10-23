@@ -18,6 +18,7 @@ import { ROLES_METADATA_KEY } from '../auth/auth.constants';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { PlannerTransfersController } from './planner-transfers.controller';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 const reflector = new Reflector();
 
@@ -32,14 +33,13 @@ function meta<T>(key: string, name: Handler): T | undefined {
 }
 
 function ctxFor(name: Handler, role: Role): ExecutionContext {
-  const user: AuthUser = {
+  const user: AuthUser = makeAuthUser(role, {
     sub: 'u-1',
     login: 'u',
     email: 'u@magtrans.eu',
     name: 'U',
-    role,
     mustChangePassword: false,
-  };
+  });
   return {
     getHandler: () => handlerOf(name),
     getClass: () => PlannerTransfersController,

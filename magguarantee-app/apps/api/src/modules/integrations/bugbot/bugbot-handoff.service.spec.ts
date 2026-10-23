@@ -21,6 +21,7 @@ import type { BugbotHandoffQuery, Role } from '@magguarantee/shared';
 import type { Env } from '../../../config/env.schema';
 import type { AuthUser } from '../../auth/decorators/current-user.decorator';
 import { BugbotHandoffService, emailClaim, nameClaim } from './bugbot-handoff.service';
+import { makeAuthUser } from '../../../common/testing/make-auth-user';
 
 const SLUG = 'magguarantee';
 const KID = 'mg-2026-10';
@@ -50,16 +51,17 @@ function makeConfig(overrides: Partial<Record<keyof Env, unknown>> = {}): Config
 }
 
 function user(overrides: Partial<AuthUser> = {}): AuthUser {
-  return {
+  // `role` picks the permission set, so it is the factory's argument, not an override.
+  const { role = 'przewoznik', ...rest } = overrides;
+  return makeAuthUser(role, {
     sub: '3f1c2a9e-8b7d-4c6e-9a1b-2d3e4f5a6b7c',
     login: 'jkowalski',
     email: 'Jan.Kowalski@magtrans.eu',
     name: 'Jan Kowalski',
-    role: 'przewoznik',
     mustChangePassword: false,
     lider: false,
-    ...overrides,
-  };
+    ...rest,
+  });
 }
 
 const BUG_PL: BugbotHandoffQuery = { kind: 'bug', locale: 'pl' };

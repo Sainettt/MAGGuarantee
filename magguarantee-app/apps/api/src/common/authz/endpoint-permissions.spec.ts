@@ -2,12 +2,28 @@
 // `@magguarantee/shared` reproduces today's `@Roles` access on every route.
 //
 // Input is the committed `__fixtures__/endpoint-roles.snapshot.json` (kept in
-// sync with live metadata by `roles-snapshot.spec.ts`), so this spec needs no
+// sync with live metadata by `roles-snapshot.spec.ts`), so these checks need no
 // Nest module graph. Decided rule (2026-10-23): a role counts when its LEADER
 // variant satisfies the requirement (`rolesSatisfying(…, { lider: true })`),
 // because `@Roles` cannot express the flag — `@Roles('admin', 'planista')` on
 // the planner-transfer decide routes is `vehicles.planner_transfer.decide`,
 // which a planista holds only through `LIDER_PERMISSIONS`.
+//
+// B2.0 adds two checks on the LIVE controller metadata (module graph scanned
+// like `roles-snapshot.spec.ts`, no providers booted):
+//   - every route with `@RequirePermission` carries exactly the set planned in
+//     `ENDPOINT_PERMISSIONS` (vacuous until B2a converts the first module);
+//   - inverse rule, phase 1 (docs/25 R2): every non-`@Public` route is gated by
+//     `@Roles` or `@RequirePermission`, or allowlisted in `AUTHENTICATED_ONLY`
+//     with a reason. B2d drops `@Roles` from the accepted gates.
+
+// `AppModule` evaluates `ConfigModule.forRoot({ validate: validateEnv })` at
+// import time; the unit-test job has no `.env`. Only the module graph matters
+// here — pass the raw env through (same as `roles-snapshot.spec.ts`).
+jest.mock('../../config/env.schema', () => ({
+  ...jest.requireActual<object>('../../config/env.schema'),
+  validateEnv: (raw: Record<string, unknown>): Record<string, unknown> => raw,
+}));
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -20,6 +36,8 @@ import {
   type Role,
 } from '@magguarantee/shared';
 
+import { AppModule } from '../../app.module';
+import { discoverControllers, listRoutes, type DiscoveredRoute } from '../testing/route-discovery';
 import {
   AUTHENTICATED_ONLY,
   ENDPOINT_PERMISSIONS,
@@ -28,7 +46,9 @@ import {
 import {
   ACCESS_AUTHENTICATED,
   ACCESS_PUBLIC,
+  buildPermissionRequirements,
   parseRolesSnapshot,
+  routeGate,
   type EndpointRolesSnapshot,
 } from './roles-snapshot';
 
@@ -132,5 +152,63 @@ describe('endpoint permissions plan ⇔ @Roles snapshot (docs/25 B1)', () => {
     expect(unused).toEqual([]);
     expect(both).toEqual([]);
     expect([...inServices].filter((p) => !isPermission(p))).toEqual([]);
+  });
+});
+
+// ─── B2.0: live @RequirePermission metadata ────────────────
+
+function sortedUnique(values: readonly string[]): string[] {
+  return [...new Set(values)].sort();
+}
+
+describe('live @RequirePermission metadata (docs/25 B2)', () => {
+  let routes: DiscoveredRoute[];
+
+  beforeAll(async () => {
+    routes = listRoutes(await discoverControllers(AppModule));
+  });
+
+  it('scans the real module graph (a broken scan must not pass vacuously)', () => {
+    expect(routes.length).toBeGreaterThan(100);
+    // Every route of the committed snapshot is served, and nothing else.
+    expect(sortedUnique(routes.map((r) => r.key))).toEqual(Object.keys(SNAPSHOT).sort());
+  });
+
+  it('every route with live @RequirePermission carries exactly its ENDPOINT_PERMISSIONS set', () => {
+    // Vacuous until B2a converts the first controller; from then on a route
+    // whose decorator drifts from the plan (or that is not planned) is red.
+    const live = buildPermissionRequirements(routes);
+    const drift = Object.entries(live)
+      .map(([key, required]) => {
+        const planned = ENDPOINT_PERMISSIONS[key];
+        if (!planned) return `${key}: @RequirePermission(${required.join(', ')}) on a route with no plan`;
+        const same = sortedUnique(required).join() === sortedUnique(planned).join();
+        return same ? null : `${key}: @RequirePermission(${required.join(', ')}) ≠ plan (${planned.join(', ')})`;
+      })
+      .filter((line): line is string => line !== null);
+    expect(drift).toEqual([]);
+  });
+
+  it('inverse rule, phase 1: every non-@Public route has @Roles or @RequirePermission, or is allowlisted', () => {
+    const undecided = routes
+      .filter((route) => routeGate(route) === 'none' && !(route.key in AUTHENTICATED_ONLY))
+      .map((route) => `${route.key} (${route.controller}.${route.handler})`);
+    // A new route must take an authorization decision: @RequirePermission from
+    // the catalog (preferred), or an AUTHENTICATED_ONLY entry saying why any
+    // session may call it.
+    expect(undecided).toEqual([]);
+  });
+
+  it('every AUTHENTICATED_ONLY entry is a live session-only route (no stale allowlist)', () => {
+    const gateByKey = new Map(routes.map((route) => [route.key, routeGate(route)]));
+    const stale = Object.keys(AUTHENTICATED_ONLY)
+      .filter((key) => gateByKey.get(key) !== 'none')
+      .map((key) => `${key}: ${gateByKey.get(key) ?? 'not served'}`);
+    expect(stale).toEqual([]);
+  });
+
+  it('no route carries both @Roles and @RequirePermission', () => {
+    const both = routes.filter((route) => routeGate(route) === 'both').map((route) => route.key);
+    expect(both).toEqual([]);
   });
 });

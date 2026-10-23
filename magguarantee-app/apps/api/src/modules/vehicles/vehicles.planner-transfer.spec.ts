@@ -32,11 +32,12 @@ import type { VehiclePlannerTransfersRepository } from './vehicle-planner-transf
 import { VehiclesController } from './vehicles.controller';
 import { VehiclesRepository, type VehicleRow } from './vehicles.repository';
 import { VehiclesService } from './vehicles.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 const NOW = new Date('2026-09-28T10:00:00.000Z');
 
 function user(role: AuthUser['role'], sub = `u-${role}`): AuthUser {
-  return { sub, login: role, email: `${role}@magtrans.eu`, name: role, role, mustChangePassword: false };
+  return makeAuthUser(role, { sub, login: role, email: `${role}@magtrans.eu`, name: role, mustChangePassword: false });
 }
 
 function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {

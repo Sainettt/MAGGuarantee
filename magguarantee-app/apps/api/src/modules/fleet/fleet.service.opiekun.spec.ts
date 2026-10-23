@@ -14,6 +14,7 @@ import {
 } from '../vehicles/vehicle-delegation-status.repository';
 import { VehiclesRepository } from '../vehicles/vehicles.repository';
 import { FleetService } from './fleet.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 // Anchor "now" — the delegation-driven lifecycle classifier counts CALENDAR
 // days (Europe/Warsaw) from the idle anchor to this Warsaw "today"
@@ -48,14 +49,13 @@ function veh(
 }
 
 function makeAuth(role: AuthUser['role'], sub = 'op-self'): AuthUser {
-  return {
+  return makeAuthUser(role, {
     sub,
     login: 'actor',
     email: 'actor@magtrans.eu',
     name: 'Actor',
-    role,
     mustChangePassword: false,
-  };
+  });
 }
 
 function makeCarrierRow(

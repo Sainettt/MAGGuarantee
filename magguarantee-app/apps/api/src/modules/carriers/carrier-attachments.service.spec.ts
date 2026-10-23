@@ -11,6 +11,7 @@ import type {
   CarrierAttachmentsRepository,
 } from './carrier-attachments.repository';
 import type { CarriersRepository } from './carriers.repository';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 /**
  * Service-layer tests for `CarrierAttachmentsService.upload`.
@@ -27,14 +28,13 @@ const NOW = new Date('2026-07-09T10:00:00.000Z');
 const CARRIER_ID = 'c-1';
 
 function makeUser(): AuthUser {
-  return {
+  return makeAuthUser('opiekun', {
     sub: 'u-actor',
     login: 'op1',
     email: 'op1@magtrans.eu',
     name: 'Op One',
-    role: 'opiekun',
     mustChangePassword: false,
-  };
+  });
 }
 
 function makeFile(overrides: Partial<UploadedFile> = {}): UploadedFile {

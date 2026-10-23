@@ -7,6 +7,7 @@ import type {
   AlertSourceRow,
   AlertsRepository,
 } from './alerts.repository';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 // Fixed "now" so day-diffs are deterministic (Europe/Warsaw, summer = UTC+2).
 const NOW = new Date('2026-08-03T09:00:00Z'); // Warsaw calendar day = 2026-08-03
@@ -19,15 +20,14 @@ function dateOffset(days: number): Date {
 }
 
 function makeAuth(role: AuthUser['role'], sub = 'u-1'): AuthUser {
-  return {
+  return makeAuthUser(role, {
     sub,
     login: `${role}1`,
     email: `${role}@magtrans.eu`,
     name: role,
-    role,
     mustChangePassword: false,
     teamId: null,
-  };
+  });
 }
 
 /**

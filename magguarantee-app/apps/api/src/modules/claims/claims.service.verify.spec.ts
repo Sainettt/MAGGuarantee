@@ -42,6 +42,7 @@ import type {
   UpdateClaimData,
 } from './claims.repository';
 import type { NrZglService } from './nr-zgl.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 // ─── helpers ─────────────────────────────────────────────────
 
@@ -60,14 +61,13 @@ async function withAuditContext<T>(
 }
 
 function makeAuth(role: AuthUser['role'], sub = 'u-actor'): AuthUser {
-  return {
+  return makeAuthUser(role, {
     sub,
     login: 'actor',
     email: 'actor@magtrans.eu',
     name: 'Actor',
-    role,
     mustChangePassword: false,
-  };
+  });
 }
 
 function makeBreakdown(): KmCalcBreakdown {

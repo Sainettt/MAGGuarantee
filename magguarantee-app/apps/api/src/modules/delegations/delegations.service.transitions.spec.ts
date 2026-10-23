@@ -43,20 +43,20 @@ import {
   DelegationsService,
   MARK_READY_AUDIT_ACTIONS,
 } from './delegations.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 const VEHICLE_ID = 'veh-1';
 const CARRIER_ID = 'carrier-1';
 const CARRIER_USER = 'user-1';
 
 function auth(role: AuthUser['role'], sub = `u-${role}`): AuthUser {
-  return {
+  return makeAuthUser(role, {
     sub,
     login: role,
     email: `${role}@magtrans.eu`,
     name: role,
-    role,
     mustChangePassword: false,
-  };
+  });
 }
 
 function makeRow(overrides: Partial<DelegationRow> = {}): DelegationRow {

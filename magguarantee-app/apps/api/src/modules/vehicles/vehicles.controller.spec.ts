@@ -21,6 +21,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import type { VehicleDailyKmService } from './vehicle-daily-km.service';
 import { VehiclesController } from './vehicles.controller';
 import type { VehiclesService } from './vehicles.service';
+import { makeAuthUser, withRole } from '../../common/testing/make-auth-user';
 
 /**
  * Authorization unit tests for `VehiclesController`.
@@ -70,14 +71,13 @@ function ctxFor(
   } as unknown as ExecutionContext;
 }
 
-const carrierUser: AuthUser = {
+const carrierUser: AuthUser = makeAuthUser('przewoznik', {
   sub: 'u-carrier',
   login: 'przewoznik1',
   email: 'przewoznik1@magtrans.eu',
   name: 'Carrier One',
-  role: 'przewoznik',
   mustChangePassword: false,
-};
+});
 
 /** Mutating routes the carrier-lockdown wave removed `przewoznik` from. */
 const LOCKED_MUTATIONS: (keyof VehiclesController)[] = [
@@ -127,12 +127,12 @@ describe('VehiclesController — authorization', () => {
     });
 
     it.each(LOCKED_MUTATIONS)('still allows admin on %s', (handler) => {
-      const adminUser: AuthUser = { ...carrierUser, role: 'admin' };
+      const adminUser: AuthUser = withRole(carrierUser, 'admin');
       expect(guard.canActivate(ctxFor(handler, adminUser))).toBe(true);
     });
 
     it.each(LOCKED_MUTATIONS)('still allows opiekun on %s', (handler) => {
-      const opiekunUser: AuthUser = { ...carrierUser, role: 'opiekun' };
+      const opiekunUser: AuthUser = withRole(carrierUser, 'opiekun');
       expect(guard.canActivate(ctxFor(handler, opiekunUser))).toBe(true);
     });
   });
@@ -157,19 +157,19 @@ describe('VehiclesController — authorization', () => {
     );
 
     it.each(DAILY_KM_HANDLERS)('allows weryfikator on %s', (handler) => {
-      const wer: AuthUser = { ...carrierUser, role: 'weryfikator' };
+      const wer: AuthUser = withRole(carrierUser, 'weryfikator');
       expect(guard.canActivate(ctxFor(handler, wer))).toBe(true);
     });
 
     it.each(DAILY_KM_HANDLERS)('allows admin on %s', (handler) => {
-      const adm: AuthUser = { ...carrierUser, role: 'admin' };
+      const adm: AuthUser = withRole(carrierUser, 'admin');
       expect(guard.canActivate(ctxFor(handler, adm))).toBe(true);
     });
 
     it.each(['przewoznik', 'eksport', 'planista', 'dyspozytor', 'opiekun'] as const)(
       'rejects %s on the daily-km WRITE endpoints (403)',
       (role) => {
-        const u: AuthUser = { ...carrierUser, role };
+        const u: AuthUser = withRole(carrierUser, role);
         for (const handler of DAILY_KM_HANDLERS) {
           expect(() => guard.canActivate(ctxFor(handler, u))).toThrow(
             ForbiddenException,
@@ -225,7 +225,7 @@ describe('VehiclesController — authorization', () => {
       'weryfikator',
       'eksport',
     ] as const)('RolesGuard allows %s on getDailyKm', (role) => {
-      const u: AuthUser = { ...carrierUser, role };
+      const u: AuthUser = withRole(carrierUser, role);
       expect(guard.canActivate(ctxFor('getDailyKm', u))).toBe(true);
     });
 
@@ -237,7 +237,7 @@ describe('VehiclesController — authorization', () => {
     it.each(['pracownik'] as const)(
       'RolesGuard rejects %s on getDailyKm (403)',
       (role) => {
-        const u: AuthUser = { ...carrierUser, role };
+        const u: AuthUser = withRole(carrierUser, role);
         expect(() => guard.canActivate(ctxFor('getDailyKm', u))).toThrow(
           ForbiddenException,
         );
@@ -306,7 +306,7 @@ describe('VehiclesController — authorization', () => {
         reflector,
         prismaStub(OWN_CARRIER_ID),
       );
-      const u: AuthUser = { ...carrierUser, role: 'przewoznik' };
+      const u: AuthUser = withRole(carrierUser, 'przewoznik');
       await expect(
         carrierGuard.canActivate(ownershipCtx(u, VEHICLE_ID)),
       ).resolves.toBe(true);
@@ -317,14 +317,14 @@ describe('VehiclesController — authorization', () => {
         reflector,
         prismaStub(OTHER_CARRIER_ID),
       );
-      const u: AuthUser = { ...carrierUser, role: 'przewoznik' };
+      const u: AuthUser = withRole(carrierUser, 'przewoznik');
       await expect(
         carrierGuard.canActivate(ownershipCtx(u, VEHICLE_ID)),
       ).rejects.toThrow(ForbiddenException);
     });
 
     it('(3) weryfikator reads ANY vehicle daily-km → both ownership guards short-circuit', async () => {
-      const wer: AuthUser = { ...carrierUser, role: 'weryfikator' };
+      const wer: AuthUser = withRole(carrierUser, 'weryfikator');
       // Foreign carrier on the vehicle — irrelevant, weryfikator is not scoped.
       const carrierGuard = new CarrierOwnershipGuard(
         reflector,
@@ -367,14 +367,14 @@ describe('VehiclesController — authorization', () => {
       'przewoznik',
       'opiekun',
     ] as const)('allows %s on kmReport', (role) => {
-      const u: AuthUser = { ...carrierUser, role };
+      const u: AuthUser = withRole(carrierUser, role);
       expect(guard.canActivate(ctxFor('kmReport', u))).toBe(true);
     });
 
     it.each(['pracownik'] as const)(
       'rejects %s on kmReport (403)',
       (role) => {
-        const u: AuthUser = { ...carrierUser, role };
+        const u: AuthUser = withRole(carrierUser, role);
         expect(() => guard.canActivate(ctxFor('kmReport', u))).toThrow(
           ForbiddenException,
         );
@@ -405,7 +405,7 @@ describe('VehiclesController.downloadAttachment — access log', () => {
       category: 'agreement',
     }));
     const res = { setHeader: jest.fn() } as unknown as Response;
-    const planista: AuthUser = { ...carrierUser, sub: 'u-plan', role: 'planista' };
+    const planista: AuthUser = withRole(carrierUser, 'planista', { sub: 'u-plan' });
 
     await controllerWith(download).downloadAttachment(
       planista,

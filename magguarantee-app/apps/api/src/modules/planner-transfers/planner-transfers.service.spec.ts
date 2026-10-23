@@ -39,6 +39,7 @@ import type {
 } from '../vehicles/vehicle-planner-transfers.repository';
 import type { VehicleRow, VehiclesRepository } from '../vehicles/vehicles.repository';
 import { PlannerTransfersService } from './planner-transfers.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 // ─── the world ───────────────────────────────────────────────
 
@@ -309,15 +310,14 @@ function makeService(w: World): PlannerTransfersService {
 
 function as(w: World, id: string): AuthUser {
   const p = w.people.get(id)!;
-  return {
+  return makeAuthUser(p.role, {
     sub: id,
     login: id,
     email: `${id}@magtrans.eu`,
     name: id,
-    role: p.role,
     lider: p.lider,
     mustChangePassword: false,
-  };
+  });
 }
 
 /** Runs a mutation inside an audit context (what the interceptor does). */

@@ -16,11 +16,17 @@ import { APP_GUARD, Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 
-import type { WhiteListResponse, WhiteListSearchResponse } from '@magguarantee/shared';
+import {
+  RoleSchema,
+  type WhiteListResponse,
+  type WhiteListSearchResponse,
+} from '@magguarantee/shared';
 
 import { AUDIT_METADATA_KEY } from '../../../common/audit/audit.constants';
 import { ProblemDetailsFilter } from '../../../common/errors/problem-details.filter';
+import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
+import { makeAuthUser } from '../../../common/testing/make-auth-user';
 import { WhiteListController } from './white-list.controller';
 import { WhiteListService } from './white-list.service';
 
@@ -35,9 +41,15 @@ class HeaderAuthGuard implements CanActivate {
       headers: Record<string, string | undefined>;
       user?: unknown;
     }>();
-    const role = req.headers['x-test-role'];
-    if (!role) throw new UnauthorizedException();
-    req.user = { sub: 'u-1', login: 'u', email: 'u@magtrans.eu', name: 'U', role, mustChangePassword: false };
+    const role = RoleSchema.safeParse(req.headers['x-test-role']);
+    if (!role.success) throw new UnauthorizedException();
+    req.user = makeAuthUser(role.data, {
+      sub: 'u-1',
+      login: 'u',
+      email: 'u@magtrans.eu',
+      name: 'U',
+      mustChangePassword: false,
+    });
     return true;
   }
 }
@@ -78,6 +90,7 @@ describe('WhiteListController (HTTP)', () => {
         { provide: WhiteListService, useValue: service },
         { provide: APP_GUARD, useClass: HeaderAuthGuard },
         { provide: APP_GUARD, useClass: RolesGuard },
+        { provide: APP_GUARD, useClass: PermissionsGuard },
       ],
     }).compile();
     app = moduleRef.createNestApplication({ logger: false });

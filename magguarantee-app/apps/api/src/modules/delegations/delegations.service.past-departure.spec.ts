@@ -18,6 +18,7 @@ import {
   type DelegationRow,
 } from './delegations.repository';
 import { DelegationsService } from './delegations.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 const CARRIER_ID = 'carrier-1';
 const CARRIER_USER = 'user-1';
@@ -29,14 +30,13 @@ const PAST_DEPARTURE = '2020-01-01T08:00:00.000Z';
 const FUTURE_DEPARTURE = '2999-01-01T08:00:00.000Z';
 
 function authCarrier(): AuthUser {
-  return {
+  return makeAuthUser('przewoznik', {
     sub: CARRIER_USER,
     login: 'pwz',
     email: 'pwz@magtrans.eu',
     name: 'Carrier',
-    role: 'przewoznik',
     mustChangePassword: false,
-  };
+  });
 }
 
 function submitDto(departureAt: string): SubmitDelegationDto {

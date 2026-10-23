@@ -19,6 +19,7 @@ import type { UserRow } from '../users/users.repository';
 import { UsersRepository } from '../users/users.repository';
 import { CarriersRepository, type CarrierRow } from './carriers.repository';
 import { CarriersService } from './carriers.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 const NOW = new Date('2026-07-30T10:00:00.000Z');
 
@@ -80,14 +81,13 @@ function makeOpiekun(): UserRow {
 }
 
 function makeAuth(role: AuthUser['role'], sub = 'u-actor'): AuthUser {
-  return {
+  return makeAuthUser(role, {
     sub,
     login: 'actor',
     email: 'actor@magtrans.eu',
     name: 'Actor',
-    role,
     mustChangePassword: false,
-  };
+  });
 }
 
 function makeCarriersRepo(seed: CarrierRow[] = []): CarriersRepository {

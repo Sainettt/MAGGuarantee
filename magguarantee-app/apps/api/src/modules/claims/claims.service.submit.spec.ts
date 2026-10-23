@@ -54,6 +54,7 @@ import type {
   CreateClaimData,
 } from './claims.repository';
 import type { NrZglService } from './nr-zgl.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 /**
  * REWORK 2026-07-30 — the carrier DECLARES the period, the time window and the
@@ -175,14 +176,13 @@ function makeAuth(
   role: AuthUser['role'],
   sub = 'u-carrier-1',
 ): AuthUser {
-  return {
+  return makeAuthUser(role, {
     sub,
     login: 'carrier1',
     email: 'carrier@example.com',
     name: 'Carrier One',
-    role,
     mustChangePassword: false,
-  };
+  });
 }
 
 function makeClaimRow(data: CreateClaimData): ClaimRow {

@@ -49,15 +49,15 @@ import type {
   UpdateClaimData,
 } from './claims.repository';
 import type { NrZglService } from './nr-zgl.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
-const ADMIN: AuthUser = {
+const ADMIN: AuthUser = makeAuthUser('admin', {
   sub: 'u-admin',
   login: 'admin',
   email: 'admin@magtrans.eu',
   name: 'Admin',
-  role: 'admin',
   mustChangePassword: false,
-};
+});
 
 async function withAuditContext<T>(
   fn: () => Promise<T>,

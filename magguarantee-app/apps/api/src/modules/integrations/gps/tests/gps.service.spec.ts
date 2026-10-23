@@ -9,6 +9,7 @@ import {
   type GpsScope,
 } from '../gps.repository';
 import type { GpsPosition, GpsProvider, GpsVehicleRef } from '../gps.types';
+import { makeAuthUser } from '../../../../common/testing/make-auth-user';
 
 // ─── Test doubles ────────────────────────────────────────────
 
@@ -85,15 +86,14 @@ function authUser(
   sub = 'u-1',
   teamId: string | null = null,
 ): AuthUser {
-  return {
+  return makeAuthUser(role, {
     sub,
     login: 'tester',
     email: 't@example.com',
     name: 'Tester',
-    role,
     mustChangePassword: false,
     teamId,
-  };
+  });
 }
 
 function makeFix(overrides: Partial<GpsPosition> = {}): GpsPosition {

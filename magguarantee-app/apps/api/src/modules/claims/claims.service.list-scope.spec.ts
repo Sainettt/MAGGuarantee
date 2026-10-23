@@ -35,6 +35,7 @@ import type {
 } from './claims.repository';
 import { ClaimsService } from './claims.service';
 import type { NrZglService } from './nr-zgl.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 // ─── fixtures ────────────────────────────────────────────────
 
@@ -44,14 +45,13 @@ const CARRIER_USER = 'u-przewoznik-1';
 const FOREIGN_CARRIER_ID = '22222222-2222-4222-8222-222222222222';
 
 function auth(role: AuthUser['role'], sub = `u-${role}`): AuthUser {
-  return {
+  return makeAuthUser(role, {
     sub,
     login: 'actor',
     email: 'actor@magtrans.eu',
     name: 'Actor',
-    role,
     mustChangePassword: false,
-  };
+  });
 }
 
 function filters(overrides: Partial<ClaimFilters> = {}): ClaimFilters {

@@ -40,6 +40,7 @@ import type {
   GuaranteeWatchdogRepository,
   WatchdogVehicleScopeRow,
 } from './guarantee-watchdog.repository';
+import { makeAuthUser, withRole } from '../../common/testing/make-auth-user';
 
 // A stable weekday well clear of Polish holidays (Wed 2026-06-10, same as the
 // SLA spec) so the working-day arithmetic never straddles a holiday cluster.
@@ -784,15 +785,14 @@ describe('GuaranteeWatchdogService — agreement-off hook (onAgreementDisabled)'
 });
 
 describe('GuaranteeWatchdogService — board scoping', () => {
-  const opiekunUser: AuthUser = {
+  const opiekunUser: AuthUser = makeAuthUser('opiekun', {
     sub: 'op-1',
     login: 'op1',
     email: 'op1@magtrans.eu',
     name: 'Opiekun One',
-    role: 'opiekun',
     mustChangePassword: false,
-  };
-  const adminUser: AuthUser = { ...opiekunUser, sub: 'adm-1', role: 'admin' };
+  });
+  const adminUser: AuthUser = withRole(opiekunUser, 'admin', { sub: 'adm-1' });
 
   it('opiekun sees only their own carriers; a foreign carrier is invisible', async () => {
     const mine = makeScopeRow({
@@ -839,14 +839,13 @@ describe('GuaranteeWatchdogService — board scoping', () => {
   });
 
   it('board rows carry the carrier block; /me rows omit it', async () => {
-    const carrierUser: AuthUser = {
+    const carrierUser: AuthUser = makeAuthUser('przewoznik', {
       sub: 'usr-car-1',
       login: 'car1',
       email: 'car1@example.com',
       name: 'Car One',
-      role: 'przewoznik',
       mustChangePassword: false,
-    };
+    });
     const h = makeHarness({
       scope: [
         makeScopeRow({
@@ -866,14 +865,13 @@ describe('GuaranteeWatchdogService — board scoping', () => {
   });
 
   it('rejects a non-admin/opiekun caller on the board', async () => {
-    const carrierUser: AuthUser = {
+    const carrierUser: AuthUser = makeAuthUser('przewoznik', {
       sub: 'usr-1',
       login: 'c',
       email: 'c@example.com',
       name: 'C',
-      role: 'przewoznik',
       mustChangePassword: false,
-    };
+    });
     const h = makeHarness({ scope: [] });
 
     await expect(h.service.getComplianceBoard(carrierUser, NOW)).rejects.toThrow();
@@ -881,14 +879,13 @@ describe('GuaranteeWatchdogService — board scoping', () => {
 });
 
 describe('GuaranteeWatchdogService — carrier episode archive (listMyEpisodes)', () => {
-  const carrierUser: AuthUser = {
+  const carrierUser: AuthUser = makeAuthUser('przewoznik', {
     sub: 'usr-car-1',
     login: 'car1',
     email: 'car1@example.com',
     name: 'Car One',
-    role: 'przewoznik',
     mustChangePassword: false,
-  };
+  });
 
   /** A list-row shaped like the repo returns (episode + joined identity). */
   function makeListRow(
@@ -905,7 +902,7 @@ describe('GuaranteeWatchdogService — carrier episode archive (listMyEpisodes)'
   }
 
   it('rejects a non-przewoznik caller (role gate, defence-in-depth)', async () => {
-    const admin: AuthUser = { ...carrierUser, sub: 'adm-1', role: 'admin' };
+    const admin: AuthUser = withRole(carrierUser, 'admin', { sub: 'adm-1' });
     const h = makeHarness();
 
     await expect(

@@ -15,6 +15,7 @@ import {
   type VehicleRow,
 } from '../vehicles/vehicles.repository';
 import { FleetService } from './fleet.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 // Anchor "now" — the delegation-driven lifecycle classifier measures CALENDAR
 // days (Europe/Warsaw) from the idle anchor to this Warsaw "today"
@@ -45,15 +46,14 @@ function makeAuth(
   sub = 'dys-self',
   teamId: string | null = 'team-1',
 ): AuthUser {
-  return {
+  return makeAuthUser(role, {
     sub,
     login: 'actor',
     email: 'actor@magtrans.eu',
     name: 'Actor',
-    role,
     mustChangePassword: false,
     teamId,
-  };
+  });
 }
 
 function makeVehicle(overrides: Partial<VehicleRow> = {}): VehicleRow {

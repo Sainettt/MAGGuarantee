@@ -6,16 +6,16 @@ import {
   type OpiekunAggregateCarrierRow,
 } from '../carriers/carriers.repository';
 import { OpiekunService } from './opiekun.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 function makeAuth(role: AuthUser['role'], sub = 'op-self'): AuthUser {
-  return {
+  return makeAuthUser(role, {
     sub,
     login: 'actor',
     email: 'actor@magtrans.eu',
     name: 'Actor',
-    role,
     mustChangePassword: false,
-  };
+  });
 }
 
 function ownedBy(

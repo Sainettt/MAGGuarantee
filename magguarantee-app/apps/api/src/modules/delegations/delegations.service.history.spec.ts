@@ -11,6 +11,7 @@ import {
   type DelegationListFilters,
 } from './delegations.repository';
 import { DelegationsService } from './delegations.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 const CARRIER_ID = 'carrier-1';
 const CARRIER_USER = 'user-1';
@@ -20,15 +21,14 @@ function auth(
   sub: string,
   teamId: string | null = 'team-1',
 ): AuthUser {
-  return {
+  return makeAuthUser(role, {
     sub,
     login: 'actor',
     email: 'actor@magtrans.eu',
     name: 'Actor',
-    role,
     mustChangePassword: false,
     teamId,
-  };
+  });
 }
 
 function baseFilters(

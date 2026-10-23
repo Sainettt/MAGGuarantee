@@ -50,6 +50,7 @@ import type {
   UpdateClaimData,
 } from './claims.repository';
 import type { NrZglService } from './nr-zgl.service';
+import { makeAuthUser } from '../../common/testing/make-auth-user';
 
 /** Fixed clock. Every window case expresses `statusChangedAt` relative to it. */
 const NOW = new Date('2026-07-22T10:00:00.000Z');
@@ -60,14 +61,13 @@ function makeAuth(
   role: AuthUser['role'] = 'przewoznik',
   sub = 'u-carrier-1',
 ): AuthUser {
-  return {
+  return makeAuthUser(role, {
     sub,
     login: 'carrier1',
     email: 'carrier@example.com',
     name: 'Carrier One',
-    role,
     mustChangePassword: false,
-  };
+  });
 }
 
 function makeBreakdown(): KmCalcBreakdown {

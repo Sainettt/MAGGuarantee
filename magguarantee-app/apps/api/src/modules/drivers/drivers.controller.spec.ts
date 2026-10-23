@@ -16,6 +16,7 @@ import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { DriversController } from './drivers.controller';
 import type { DriversService } from './drivers.service';
+import { makeAuthUser, withRole } from '../../common/testing/make-auth-user';
 
 /**
  * Authorization unit tests for `DriversController`.
@@ -63,14 +64,13 @@ function ctxFor(
   } as unknown as ExecutionContext;
 }
 
-const carrierUser: AuthUser = {
+const carrierUser: AuthUser = makeAuthUser('przewoznik', {
   sub: 'u-carrier',
   login: 'przewoznik1',
   email: 'przewoznik1@magtrans.eu',
   name: 'Carrier One',
-  role: 'przewoznik',
   mustChangePassword: false,
-};
+});
 
 const MUTATING: (keyof DriversController)[] = [
   'create',
@@ -132,12 +132,12 @@ describe('DriversController — authorization', () => {
     });
 
     it.each(MUTATING)('still allows admin on %s', (handler) => {
-      const adminUser: AuthUser = { ...carrierUser, role: 'admin' };
+      const adminUser: AuthUser = withRole(carrierUser, 'admin');
       expect(guard.canActivate(ctxFor(handler, adminUser))).toBe(true);
     });
 
     it.each(MUTATING)('still allows opiekun on %s', (handler) => {
-      const opiekunUser: AuthUser = { ...carrierUser, role: 'opiekun' };
+      const opiekunUser: AuthUser = withRole(carrierUser, 'opiekun');
       expect(guard.canActivate(ctxFor(handler, opiekunUser))).toBe(true);
     });
   });
@@ -165,7 +165,7 @@ describe('DriversController.downloadAttachment — access log', () => {
       category: 'adr',
     }));
     const { controller, res } = build(download);
-    const opiekun: AuthUser = { ...carrierUser, sub: 'u-op', role: 'opiekun' };
+    const opiekun: AuthUser = withRole(carrierUser, 'opiekun', { sub: 'u-op' });
 
     await controller.downloadAttachment(
       opiekun,
