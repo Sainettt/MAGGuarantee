@@ -20,7 +20,6 @@ import { RoleSchema, type ViesLookupResponse } from '@magguarantee/shared';
 import { AUDIT_METADATA_KEY } from '../../../common/audit/audit.constants';
 import { ProblemDetailsFilter } from '../../../common/errors/problem-details.filter';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
-import { RolesGuard } from '../../auth/guards/roles.guard';
 import { makeAuthUser } from '../../../common/testing/make-auth-user';
 import { ViesController } from './vies.controller';
 import { ViesService } from './vies.service';
@@ -67,7 +66,6 @@ describe('ViesController (HTTP)', () => {
       providers: [
         { provide: ViesService, useValue: service },
         { provide: APP_GUARD, useClass: HeaderAuthGuard },
-        { provide: APP_GUARD, useClass: RolesGuard },
         { provide: APP_GUARD, useClass: PermissionsGuard },
       ],
     }).compile();

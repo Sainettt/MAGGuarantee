@@ -1,10 +1,11 @@
 // Permissions catalog (docs/25 §2, §3 B1; leader flag docs/28 §5).
 //
-// The route-level equivalence with today's `@Roles` lives in the api
-// (`apps/api/src/common/authz/endpoint-permissions.spec.ts`, against the
-// committed snapshot). Here: the catalog's own invariants, the decided
-// assignments that no route pins (service capabilities, 2026-10-22/23
-// decisions) and that docs/03 shows exactly what the code grants.
+// The route-level equivalence with the pre-track-B access lives in the api
+// (`apps/api/src/common/authz/endpoint-permissions.spec.ts`, the generated
+// permission fixture against the frozen roles fixture). Here: the catalog's
+// own invariants, the decided assignments that no route pins (service
+// capabilities, 2026-10-22/23 decisions) and that docs/03 shows exactly what
+// the code grants.
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -149,7 +150,7 @@ describe('rolesSatisfying (the B1/B2 equivalence helper)', () => {
     ]);
   });
 
-  it('{ lider: true } counts a role whose leader variant satisfies — @Roles(admin, planista) on decide', () => {
+  it('{ lider: true } counts a role whose leader variant satisfies — admin + planista on the decide routes', () => {
     expect(rolesSatisfying(['vehicles.planner_transfer.decide'])).toEqual(['admin']);
     expect(rolesSatisfying(['vehicles.planner_transfer.decide'], { lider: true })).toEqual([
       'admin',

@@ -77,6 +77,7 @@ import {
 } from './auth.constants';
 import { ConfigService } from '@nestjs/config';
 import type { Env } from '../../config/env.schema';
+import { AuthenticatedOnly } from './decorators/authenticated-only.decorator';
 import { Public } from './decorators/public.decorator';
 import { CurrentUser, type AuthUser } from './decorators/current-user.decorator';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
@@ -234,6 +235,9 @@ export class AuthController {
   // ── POST /auth/change-password (authenticated) ───────
 
   @Post('change-password')
+  @AuthenticatedOnly(
+    'Self-service and the forced change gate (mustChangePassword) — must work for every role.',
+  )
   @HttpCode(HttpStatus.OK)
   @Audit({
     action: 'changePassword',
@@ -285,6 +289,7 @@ export class AuthController {
   // No @Audit: the service audits (best-effort, after revoking) so a failed
   // audit write can never keep the session alive or the cookies set.
   @Post('logout')
+  @AuthenticatedOnly('Every signed-in user may end their own session.')
   @HttpCode(HttpStatus.NO_CONTENT)
   async logout(
     @Req() req: Request,
@@ -300,6 +305,7 @@ export class AuthController {
   // ── GET /auth/me ─────────────────────────────────────
 
   @Get('me')
+  @AuthenticatedOnly('Every signed-in user reads their own session profile.')
   async me(@CurrentUser() user: AuthUser): Promise<UserDto> {
     return {
       id: user.sub,

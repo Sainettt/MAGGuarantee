@@ -1,26 +1,36 @@
-// Authorization snapshot of every served route (docs/25 §3 B1).
+// Authorization snapshot of every served route (docs/25 §3 B1, B5).
 //
-// Turns the live controller metadata into two plain, sorted, diff-friendly
-// maps that are committed as fixtures BEFORE track B touches a single
-// controller:
-//   - `endpoint-roles.snapshot.json`     — who passes the role gate;
-//   - `endpoint-ownership.snapshot.json` — which routes run an ownership guard
-//     (`@OpiekunOwns` / `@CarrierOwns`) and with which arguments.
-// B2 swaps `@Roles` for `@RequirePermission` and must leave both maps
-// unchanged; the spec next to this file turns any drift into a red test.
+// Turns the live controller metadata into plain, sorted, diff-friendly maps
+// that are committed as fixtures:
+//   - `endpoint-roles.snapshot.json`       — who passes the authorization gate
+//     (taken BEFORE track B touched a single controller, frozen since);
+//   - `endpoint-ownership.snapshot.json`   — which routes run an ownership
+//     guard (`@OpiekunOwns` / `@CarrierOwns`) and with which arguments;
+//   - `endpoint-permissions.snapshot.json` — what each route requires
+//     (docs/25 B5; generated, replaces the hand table of B1–B4).
+// An access change shows up as a diff in all of them; the spec next to this
+// file turns any drift into a red test.
 //
-// A `@RequirePermission` route (B2.0+) is recorded as the roles that pass it:
-// `rolesSatisfying(required, { lider: true })` — a role counts when its leader
-// variant holds one of the permissions, which is how the B1 fixture encodes
-// the planner-transfer decide routes. `@Roles` + `@RequirePermission` on one
-// route, `@Public` + `@RequirePermission`, an empty or non-catalog
-// requirement are contradictions (red test), never silently recorded. The
-// ownership map does not change shape: it never looked at the role gate.
+// `PermissionsGuard` denies by default (B5), so a route takes exactly one
+// decision:
+//   `@Public`               → `PUBLIC`;
+//   `@AuthenticatedOnly`    → `AUTHENTICATED` (any session);
+//   `@RequirePermission(…)` → the permissions (permission fixture) / the roles
+//     that pass, `rolesSatisfying(required, { lider: true })` (roles fixture) —
+//     a role counts when its leader variant holds one of the permissions,
+//     which is how the B1 fixture encodes the planner-transfer decide routes.
+// A route with NO decision is a contradiction and is never recorded: it is
+// denied to everyone, and `AUTHZ_SNAPSHOT_UPDATE=1` must not write it down as
+// `AUTHENTICATED`. Two decisions on one route (`@Public` or
+// `@AuthenticatedOnly` next to `@RequirePermission`, `@Public` next to
+// `@AuthenticatedOnly`), an empty or non-catalog requirement are
+// contradictions too (red test); they are recorded as what the guard does.
+// The ownership map never looked at the authorization gate.
 //
 // Everything is resolved the way the production guards resolve it:
-//   - `@Public` / `@Roles` / `@RequirePermission` / `@OpiekunOwns` /
+//   - `@Public` / `@AuthenticatedOnly` / `@RequirePermission` / `@OpiekunOwns` /
 //     `@CarrierOwns` via `Reflector.getAllAndOverride([handler, class])` —
-//     the handler wins (`JwtAuthGuard`, `RolesGuard`, `PermissionsGuard`,
+//     the handler wins (`JwtAuthGuard`, `PermissionsGuard`,
 //     `OpiekunOwnershipGuard`, `CarrierOwnershipGuard`);
 //   - `@UseGuards` as Nest's guards consumer does: class guards plus handler
 //     guards, concatenated (no override).
@@ -35,15 +45,16 @@ import { Reflector } from '@nestjs/core';
 import {
   PERMISSIONS,
   RoleSchema,
+  isPermission,
   rolesSatisfying,
   type Permission,
   type Role,
 } from '@magguarantee/shared';
 
 import {
+  AUTHENTICATED_ONLY_KEY,
   IS_PUBLIC_KEY,
   PERMISSIONS_METADATA_KEY,
-  ROLES_METADATA_KEY,
 } from '../../modules/auth/auth.constants';
 import { CarrierOwnershipGuard } from '../guards/carrier-ownership.guard';
 import { OpiekunOwnershipGuard } from '../guards/opiekun-ownership.guard';
@@ -59,11 +70,11 @@ import type { DiscoveredRoute } from '../testing/route-discovery';
 
 /** `@Public()` — `JwtAuthGuard` lets the request through without a session. */
 export const ACCESS_PUBLIC = 'PUBLIC' as const;
-/** Session required, no `@Roles` (or an empty `@Roles()`): any role passes. */
+/** `@AuthenticatedOnly(reason)` — any session passes, whatever its permissions. */
 export const ACCESS_AUTHENTICATED = 'AUTHENTICATED' as const;
 
 /**
- * Who passes the role gate of one route. A role array is sorted in
+ * Who passes the authorization gate of one route. A role array is sorted in
  * `RoleSchema.options` order. It is empty only for a `@RequirePermission` that
  * admits nobody — always reported as a contradiction, and rejected by
  * {@link parseRolesSnapshot}, so it can never be committed.
@@ -75,6 +86,20 @@ export type EndpointAccess =
 
 /** `"POST /claims/:nrZgl/preview"` (no `api/v1` prefix) → access. Keys sorted. */
 export type EndpointRolesSnapshot = Readonly<Record<string, EndpointAccess>>;
+
+/**
+ * What one route requires: `PUBLIC`, `AUTHENTICATED`, or the any-of
+ * `@RequirePermission` list (catalog permissions, `PERMISSIONS` order,
+ * deduplicated). An empty list is a contradiction, rejected by
+ * {@link parsePermissionsSnapshot}.
+ */
+export type EndpointRequirement =
+  | typeof ACCESS_PUBLIC
+  | typeof ACCESS_AUTHENTICATED
+  | readonly Permission[];
+
+/** `"GET /claims"` → requirement. Keys sorted. */
+export type EndpointPermissionsSnapshot = Readonly<Record<string, EndpointRequirement>>;
 
 /** The ownership guards that actually run on one route, with their arguments. */
 export interface EndpointOwnership {
@@ -89,8 +114,8 @@ export interface SnapshotResult<T> {
   snapshot: T;
   /**
    * Metadata combinations that cannot mean what their author intended (e.g.
-   * `@Public` + `@Roles` — `RolesGuard` 403s every caller of such a route,
-   * because a public request has no `req.user`). Human-readable, one per line.
+   * a route without any authorization decision — `PermissionsGuard` answers
+   * 403 to every caller). Human-readable, one per line.
    */
   contradictions: string[];
 }
@@ -105,13 +130,13 @@ const ROLE_ORDER: readonly Role[] = RoleSchema.options;
 
 // ─── Gate resolution (shared by every builder below) ───────
 
-/** The authorization metadata of one route, resolved like the guards do. */
+/** The authorization metadata of one route, resolved like the guard does. */
 interface RouteGates {
   isPublic: boolean;
-  /** `@Roles` present at all (an empty `@Roles()` counts as present). */
-  rolesDeclared: boolean;
-  roles: Role[];
-  unknownRoles: unknown[];
+  /** `@AuthenticatedOnly` present at all (whatever its reason). */
+  authenticatedOnly: boolean;
+  /** The `@AuthenticatedOnly` reason as declared; `undefined` without one. */
+  reason: unknown;
   /** `@RequirePermission` present at all. */
   permissionsDeclared: boolean;
   /** Catalog permissions of the requirement, in `PERMISSIONS` order. */
@@ -122,15 +147,13 @@ interface RouteGates {
 function resolveGates(reflector: Reflector, route: SnapshotRoute): RouteGates {
   const targets = metadataTargets(route);
   const isPublic = reflector.getAllAndOverride<boolean | undefined>(IS_PUBLIC_KEY, targets);
-  const declaredRoles = reflector.getAllAndOverride<unknown>(ROLES_METADATA_KEY, targets);
+  const reason = reflector.getAllAndOverride<unknown>(AUTHENTICATED_ONLY_KEY, targets);
   const declaredPerms = reflector.getAllAndOverride<unknown>(PERMISSIONS_METADATA_KEY, targets);
-  const roles = normaliseRoles(declaredRoles);
   const permissions = normalisePermissions(declaredPerms);
   return {
     isPublic: Boolean(isPublic),
-    rolesDeclared: isDeclared(declaredRoles),
-    roles: roles.roles,
-    unknownRoles: roles.unknown,
+    authenticatedOnly: isDeclared(reason),
+    reason,
     permissionsDeclared: isDeclared(declaredPerms),
     permissions: permissions.permissions,
     unknownPermissions: permissions.unknown,
@@ -140,65 +163,70 @@ function resolveGates(reflector: Reflector, route: SnapshotRoute): RouteGates {
 /**
  * How a route decides who may call it — the input of the inverse rule
  * (`endpoint-permissions.spec.ts`, docs/25 R2):
- *   `public`      — `@Public` (whatever else it carries);
- *   `roles`       — non-empty `@Roles`, no `@RequirePermission`;
- *   `permissions` — `@RequirePermission`, no `@Roles`;
- *   `both`        — `@RequirePermission` and `@Roles` (a contradiction);
- *   `none`        — any session passes (no or empty `@Roles`, no requirement).
+ *   `public`        — `@Public` (whatever else it carries);
+ *   `authenticated` — `@AuthenticatedOnly`, no `@RequirePermission`;
+ *   `permissions`   — `@RequirePermission`, no `@AuthenticatedOnly`;
+ *   `conflict`      — `@AuthenticatedOnly` and `@RequirePermission` (a
+ *                     contradiction: the guard admits any session, the
+ *                     requirement never applies);
+ *   `none`          — no decision: `PermissionsGuard` denies every caller.
  */
-export type RouteGate = 'public' | 'roles' | 'permissions' | 'both' | 'none';
+export type RouteGate = 'public' | 'authenticated' | 'permissions' | 'conflict' | 'none';
 
 export function routeGate(route: SnapshotRoute): RouteGate {
   const gates = resolveGates(new Reflector(), route);
   if (gates.isPublic) return 'public';
-  if (gates.permissionsDeclared) return gates.rolesDeclared ? 'both' : 'permissions';
-  return gates.roles.length > 0 ? 'roles' : 'none';
+  if (gates.authenticatedOnly) return gates.permissionsDeclared ? 'conflict' : 'authenticated';
+  return gates.permissionsDeclared ? 'permissions' : 'none';
 }
 
 /**
- * The live `@RequirePermission` requirement of every route that carries one
- * (catalog permissions, `PERMISSIONS` order). Compared with the B1 plan
- * `ENDPOINT_PERMISSIONS` by `endpoint-permissions.spec.ts`. Malformed
- * requirements are reported by {@link buildRolesSnapshot}, not here.
+ * The `@AuthenticatedOnly` reason of a route as declared (handler over class),
+ * `undefined` when it carries none. Not validated here: the inverse rule
+ * checks it is a string of at least `AUTHENTICATED_ONLY_MIN_REASON_LENGTH`.
+ */
+export function authenticatedOnlyReason(route: SnapshotRoute): unknown {
+  return resolveGates(new Reflector(), route).reason;
+}
+
+/**
+ * The requirement `PermissionsGuard` enforces, in its own order; `null` — the
+ * route takes no decision (denied to everyone, never recorded).
+ */
+function requirementOf(gates: RouteGates): EndpointRequirement | null {
+  if (gates.isPublic) return ACCESS_PUBLIC;
+  if (gates.authenticatedOnly) return ACCESS_AUTHENTICATED;
+  if (gates.permissionsDeclared) return gates.permissions;
+  return null;
+}
+
+/** The roles a requirement admits (leader variant counted, see the header). */
+function accessOf(requirement: EndpointRequirement): EndpointAccess {
+  if (requirement === ACCESS_PUBLIC || requirement === ACCESS_AUTHENTICATED) return requirement;
+  return rolesSatisfying(requirement, { lider: true });
+}
+
+// ─── Permissions snapshot ──────────────────────────────────
+
+/**
+ * Builds the `endpoint-permissions` map from live metadata: every route that
+ * takes a decision, with what the guard enforces. Routes without a decision
+ * and contradictions are reported by {@link buildRolesSnapshot}, not here;
+ * a malformed requirement stays visible (empty / catalog part only).
  */
 export function buildPermissionRequirements(
   routes: readonly SnapshotRoute[],
-): Readonly<Record<string, readonly Permission[]>> {
+): EndpointPermissionsSnapshot {
   const reflector = new Reflector();
-  const entries = new Map<string, readonly Permission[]>();
+  const entries = new Map<string, EndpointRequirement>();
+  const seen = new Set<string>();
   for (const route of routes) {
-    if (entries.has(route.key)) continue;
-    const gates = resolveGates(reflector, route);
-    if (gates.permissionsDeclared) entries.set(route.key, gates.permissions);
+    if (seen.has(route.key)) continue; // reported by buildRolesSnapshot
+    seen.add(route.key);
+    const requirement = requirementOf(resolveGates(reflector, route));
+    if (requirement !== null) entries.set(route.key, requirement);
   }
   return sortedRecord(entries);
-}
-
-/**
- * Every place a `@Roles` decorator left metadata on a served route — the
- * controller class or the route handler, read raw (`Reflect.getMetadata`, no
- * handler-over-class override, so a class `@Roles` hidden behind handler
- * metadata is still reported). An empty `@Roles()` and non-role values count:
- * any `@Roles` is a leftover. Since docs/25 B2d no route of the live module
- * graph may carry one (`endpoint-permissions.spec.ts`); the synthetic
- * controllers of `snapshot-builders.spec.ts` are its only users until B5
- * deletes the decorator. One line per site, values as written, sorted.
- */
-export function rolesMetadataSites(routes: readonly SnapshotRoute[]): string[] {
-  const sites = new Set<string>();
-  for (const route of routes) {
-    const onClass: unknown = Reflect.getMetadata(ROLES_METADATA_KEY, route.controllerRef);
-    if (isDeclared(onClass)) sites.add(`${route.controller} (class): ${rolesAsWritten(onClass)}`);
-    const onHandler: unknown = Reflect.getMetadata(ROLES_METADATA_KEY, route.handlerRef);
-    if (isDeclared(onHandler)) sites.add(`${routeLabel(route)}: ${rolesAsWritten(onHandler)}`);
-  }
-  return [...sites].sort(byCodeUnit);
-}
-
-function rolesAsWritten(declared: unknown): string {
-  const values: unknown[] = Array.isArray(declared) ? declared : [declared];
-  const shown = values.map((v) => (typeof v === 'string' ? v : JSON.stringify(v)));
-  return `@Roles(${shown.join(', ')})`;
 }
 
 // ─── Roles snapshot ────────────────────────────────────────
@@ -210,16 +238,19 @@ export function buildRolesSnapshot(
   const reflector = new Reflector();
   const entries = new Map<string, EndpointAccess>();
   const contradictions: string[] = [];
+  const seen = new Set<string>();
 
   for (const route of routes) {
     const where = routeLabel(route);
-    if (entries.has(route.key)) {
+    if (seen.has(route.key)) {
       contradictions.push(`${where}: a second handler resolves to the same METHOD /path`);
       continue;
     }
+    seen.add(route.key);
     const gates = resolveGates(reflector, route);
     contradictions.push(...gateContradictions(where, gates));
-    entries.set(route.key, accessOf(gates));
+    const requirement = requirementOf(gates);
+    if (requirement !== null) entries.set(route.key, accessOf(requirement));
   }
 
   return { snapshot: sortedRecord(entries), contradictions };
@@ -227,63 +258,36 @@ export function buildRolesSnapshot(
 
 function gateContradictions(where: string, gates: RouteGates): string[] {
   const out: string[] = [];
-  const roles = gates.roles.join(', ');
   const required = gates.permissions.join(', ');
-  for (const value of gates.unknownRoles) {
-    out.push(`${where}: @Roles carries a value that is not a Role: ${JSON.stringify(value)}`);
+  if (gates.permissionsDeclared) {
+    for (const value of gates.unknownPermissions) {
+      out.push(`${where}: @RequirePermission carries a value that is not a Permission: ${JSON.stringify(value)}`);
+    }
+    if (gates.permissions.length === 0) {
+      out.push(`${where}: @RequirePermission without a catalog permission — PermissionsGuard answers 403 to every caller`);
+    }
   }
-  if (gates.isPublic && gates.roles.length > 0) {
-    out.push(`${where}: @Public together with @Roles(${roles}) — RolesGuard answers 403 to every caller (no req.user)`);
+  if (gates.isPublic && gates.authenticatedOnly) {
+    out.push(`${where}: @Public together with @AuthenticatedOnly — PermissionsGuard lets every caller through, the session requirement never applies`);
   }
-  if (!gates.permissionsDeclared) return out;
-
-  for (const value of gates.unknownPermissions) {
-    out.push(`${where}: @RequirePermission carries a value that is not a Permission: ${JSON.stringify(value)}`);
+  if (gates.isPublic && gates.permissionsDeclared) {
+    out.push(`${where}: @Public together with @RequirePermission(${required}) — PermissionsGuard lets every caller through, the requirement never applies`);
   }
-  if (gates.permissions.length === 0) {
-    out.push(`${where}: @RequirePermission without a catalog permission — PermissionsGuard answers 403 to every caller`);
-  }
-  if (gates.rolesDeclared) {
+  if (gates.authenticatedOnly && gates.permissionsDeclared) {
     out.push(
-      `${where}: @Roles(${roles}) together with @RequirePermission(${required}) — a route carries one of the two (docs/25 B2), both guards would apply`,
+      `${where}: @AuthenticatedOnly together with @RequirePermission(${required}) — PermissionsGuard admits every session, the requirement never applies; a route carries one of the two (docs/25 B5)`,
     );
   }
-  if (gates.isPublic) {
-    out.push(`${where}: @Public together with @RequirePermission(${required}) — PermissionsGuard lets every caller through, the requirement never applies`);
+  if (requirementOf(gates) === null) {
+    out.push(
+      `${where}: no @Public, @AuthenticatedOnly or @RequirePermission — PermissionsGuard denies every caller (deny by default); not recorded`,
+    );
   }
   return out;
 }
 
-/**
- * The access the guards actually enforce. For the contradictory `@Roles` +
- * `@RequirePermission` pair that is the intersection (both guards run).
- */
-function accessOf(gates: RouteGates): EndpointAccess {
-  if (gates.isPublic) return ACCESS_PUBLIC;
-  if (gates.permissionsDeclared) {
-    const admitted = rolesSatisfying(gates.permissions, { lider: true });
-    if (gates.roles.length === 0) return admitted;
-    return admitted.filter((role) => gates.roles.includes(role));
-  }
-  if (gates.roles.length === 0) return ACCESS_AUTHENTICATED;
-  return gates.roles;
-}
-
 function isDeclared(value: unknown): boolean {
   return value !== undefined && value !== null;
-}
-
-/**
- * `@Roles` metadata → known roles in canonical order (deduplicated) + every
- * value that is not a role. `undefined` / `[]` → no roles (= AUTHENTICATED).
- */
-function normaliseRoles(declared: unknown): { roles: Role[]; unknown: unknown[] } {
-  if (declared === undefined || declared === null) return { roles: [], unknown: [] };
-  const values: unknown[] = Array.isArray(declared) ? declared : [declared];
-  const known = new Set<string>(ROLE_ORDER);
-  const unknown = values.filter((v) => typeof v !== 'string' || !known.has(v));
-  const present = new Set(values.filter((v): v is string => typeof v === 'string'));
-  return { roles: ROLE_ORDER.filter((r) => present.has(r)), unknown };
 }
 
 /**
@@ -436,6 +440,32 @@ export function parseRolesSnapshot(raw: unknown): EndpointRolesSnapshot {
     }
   }
   return out;
+}
+
+/**
+ * Narrows a parsed `endpoint-permissions` fixture; throws on a malformed entry
+ * (an empty list, a duplicate, a string outside the catalog).
+ */
+export function parsePermissionsSnapshot(raw: unknown): EndpointPermissionsSnapshot {
+  const record = asRecord(raw, 'endpoint-permissions fixture');
+  const out: Record<string, EndpointRequirement> = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (value === ACCESS_PUBLIC || value === ACCESS_AUTHENTICATED || isPermissionList(value)) {
+      out[key] = value;
+    } else {
+      throw new TypeError(`endpoint-permissions fixture: bad entry ${key}: ${JSON.stringify(value)}`);
+    }
+  }
+  return out;
+}
+
+function isPermissionList(value: unknown): value is Permission[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    new Set(value).size === value.length &&
+    value.every((v) => typeof v === 'string' && isPermission(v))
+  );
 }
 
 /** Narrows a parsed `endpoint-ownership` fixture; throws on a malformed entry. */

@@ -25,7 +25,6 @@ import {
 import { AUDIT_METADATA_KEY } from '../../../common/audit/audit.constants';
 import { ProblemDetailsFilter } from '../../../common/errors/problem-details.filter';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
-import { RolesGuard } from '../../auth/guards/roles.guard';
 import { makeAuthUser } from '../../../common/testing/make-auth-user';
 import { WhiteListController } from './white-list.controller';
 import { WhiteListService } from './white-list.service';
@@ -89,7 +88,6 @@ describe('WhiteListController (HTTP)', () => {
       providers: [
         { provide: WhiteListService, useValue: service },
         { provide: APP_GUARD, useClass: HeaderAuthGuard },
-        { provide: APP_GUARD, useClass: RolesGuard },
         { provide: APP_GUARD, useClass: PermissionsGuard },
       ],
     }).compile();

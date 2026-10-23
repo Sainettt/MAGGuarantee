@@ -10,11 +10,13 @@
 // the web and by the Next.js edge middleware. Only TYPE imports below — no zod
 // at runtime (a test asserts it).
 //
-// B1 changes nothing at runtime: no guard reads this file yet. The contract
-// that it reproduces today's access exactly is
-// `apps/api/src/common/authz/endpoint-permissions.spec.ts` (against the
-// committed `@Roles` snapshot). Human-readable descriptions and the docs/03
-// table live in `./permissions-matrix.ts` (not exported from the barrel).
+// The api's `PermissionsGuard` and services read it through
+// `AuthUser.permissions` (docs/25 B2–B5). The contract that it reproduces the
+// pre-track-B access exactly is
+// `apps/api/src/common/authz/endpoint-permissions.spec.ts` (the generated
+// per-route permission fixture against the frozen roles fixture).
+// Human-readable descriptions and the docs/03 table live in
+// `./permissions-matrix.ts` (not exported from the barrel).
 
 import type { Role } from './schemas/auth';
 import type { LiderRole } from './schemas/common';
@@ -277,10 +279,11 @@ export function hasAnyPermission(
 export interface RolesSatisfyingOptions {
   /**
    * Count a role when its LEADER variant satisfies the requirement. This is
-   * how the catalog is compared with `@Roles` metadata, which cannot express
-   * the flag: `@Roles('admin', 'planista')` on the planner-transfer decide
-   * routes ⇔ `vehicles.planner_transfer.decide`, held by admin and by a
-   * planista only through `LIDER_PERMISSIONS` (docs/25 B1, decision 2026-10-23).
+   * how the catalog is compared with the pre-track-B role sets (the api's
+   * `endpoint-roles` fixture), which could not express the flag: admin and
+   * planista on the planner-transfer decide routes ⇔
+   * `vehicles.planner_transfer.decide`, held by admin and by a planista only
+   * through `LIDER_PERMISSIONS` (docs/25 B1, decision 2026-10-23).
    */
   lider?: boolean;
 }

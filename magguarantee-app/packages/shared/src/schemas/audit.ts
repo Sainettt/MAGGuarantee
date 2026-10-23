@@ -5,7 +5,8 @@
 // (`AuditWriter`, `AuditInterceptor`) is a backend-internal concern and is
 // NOT exposed here.
 //
-// Admin-only — see `@Roles('admin')` on the controller.
+// Admin-only — `@RequirePermission('audit.read')` on the controller, which only
+// admin holds (docs/03 «Каталог прав»).
 
 import { z } from 'zod';
 

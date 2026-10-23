@@ -16,7 +16,6 @@ import { AuthModule } from './modules/auth/auth.module';
 import { DirectoryModule } from './modules/directory/directory.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './modules/auth/guards/permissions.guard';
-import { RolesGuard } from './modules/auth/guards/roles.guard';
 import { CarriersModule } from './modules/carriers/carriers.module';
 import { ClaimsModule } from './modules/claims/claims.module';
 import { DelegationsModule } from './modules/delegations/delegations.module';
@@ -129,18 +128,13 @@ import { WeeklyReportModule } from './modules/weekly-report/weekly-report.module
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
-    // Global role gate — stays registered as a no-op until docs/25 B5 deletes
-    // it together with `@Roles`. Since B2 no live controller or route carries
-    // `@Roles` metadata (common/authz/endpoint-permissions.spec.ts), so the
-    // guard always passes through; authorization is PermissionsGuard's, below.
-    { provide: APP_GUARD, useClass: RolesGuard },
-    // docs/25 B2 — global permission gate, AFTER RolesGuard (order of APP_GUARD
-    // providers = order of execution). Opt-in shape: a no-op on routes
-    // without `@RequirePermission` and on `@Public` ones; with metadata it
-    // checks `req.user.permissions` (built by JwtAccessStrategy) and fails
-    // closed when the set is missing. Every non-`@Public` route carries
-    // `@RequirePermission` or sits in `AUTHENTICATED_ONLY` with a reason
-    // (inverse rule, common/authz/endpoint-permissions.spec.ts).
+    // docs/25 B2, B5 — the authorization gate, AFTER JwtAuthGuard (order of
+    // APP_GUARD providers = order of execution). Deny by default: `@Public`
+    // passes, `@AuthenticatedOnly(reason)` passes any session,
+    // `@RequirePermission` checks `req.user.permissions` (built by
+    // JwtAccessStrategy, fail closed when missing), a route with none of the
+    // three is 403. The inverse rule (common/authz/endpoint-permissions.spec.ts)
+    // keeps such a route from shipping.
     { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
 })

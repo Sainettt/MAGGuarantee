@@ -3,10 +3,16 @@
 // — the one PermissionsGuard admitted it with — listed in catalog order. It is
 // never recomputed from the role here, so the web cannot see rights the guards
 // would not grant (or miss ones they would).
+//
+// Last block (docs/25 B5): the real session-only handlers of this controller
+// through the real PermissionsGuard. The guard denies by default, so these
+// routes reach every role only because they carry `@AuthenticatedOnly`.
 
+import { ExecutionContext, ForbiddenException, Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
+import { Reflector } from '@nestjs/core';
 
-import { permissionsFor, UserDto, type Permission } from '@magguarantee/shared';
+import { permissionsFor, RoleSchema, UserDto, type Permission } from '@magguarantee/shared';
 
 import { toPermissionList } from '../../common/authz/effective-permissions';
 import { makeAuthUser } from '../../common/testing/make-auth-user';
@@ -14,6 +20,7 @@ import type { Env } from '../../config/env.schema';
 import type { AuthUser } from './decorators/current-user.decorator';
 import { AuthController } from './auth.controller';
 import type { AuthService } from './auth.service';
+import { PermissionsGuard } from './guards/permissions.guard';
 
 const DECIDE: Permission = 'vehicles.planner_transfer.decide';
 
@@ -86,5 +93,44 @@ describe('GET /auth/me — permissions (docs/25 B4)', () => {
     });
     // `z.object` strips unknown keys — equality after parse means none leaked.
     expect(UserDto.parse(body)).toEqual(body);
+  });
+});
+
+describe('AuthController session-only routes through PermissionsGuard (docs/25 B5)', () => {
+  type SessionHandler = 'me' | 'logout' | 'changePassword';
+  const HANDLERS: readonly SessionHandler[] = ['me', 'logout', 'changePassword'];
+  const guard = new PermissionsGuard(new Reflector());
+
+  function guardContext(handler: SessionHandler, user?: AuthUser): ExecutionContext {
+    const req = user === undefined ? {} : { user };
+    return {
+      getHandler: () => AuthController.prototype[handler],
+      getClass: () => AuthController,
+      switchToHttp: () => ({ getRequest: () => req }),
+    } as unknown as ExecutionContext;
+  }
+
+  beforeEach(() => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it.each(HANDLERS.flatMap((handler) => RoleSchema.options.map((role) => [handler, role] as const)))(
+    '%s admits %s',
+    (handler, role) => {
+      expect(guard.canActivate(guardContext(handler, makeAuthUser(role)))).toBe(true);
+    },
+  );
+
+  it.each(HANDLERS)('%s admits a session holding no permission at all', (handler) => {
+    const user = makeAuthUser('przewoznik', { permissions: new Set() });
+    expect(guard.canActivate(guardContext(handler, user))).toBe(true);
+  });
+
+  it.each(HANDLERS)('%s: 403 without a request user', (handler) => {
+    expect(() => guard.canActivate(guardContext(handler))).toThrow(ForbiddenException);
   });
 });

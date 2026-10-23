@@ -11,6 +11,7 @@ import {
   CurrentUser,
   type AuthUser,
 } from '../../auth/decorators/current-user.decorator';
+import { AuthenticatedOnly } from '../../auth/decorators/authenticated-only.decorator';
 import { BugbotHandoffThrottlerGuard } from './bugbot-handoff-throttler.guard';
 import { BugbotHandoffService } from './bugbot-handoff.service';
 
@@ -18,8 +19,8 @@ import { BugbotHandoffService } from './bugbot-handoff.service';
  * `GET /api/v1/integrations/bugbot/handoff?kind=bug|idea&locale=pl|en`
  * per docs/13-api-design.md#external-integrations.
  *
- * Auth: the global JwtAuthGuard; every role may report a bug, so there is no
- * `@RequirePermission` (the route is in `AUTHENTICATED_ONLY`). `kind=idea`
+ * Auth: the global JwtAuthGuard; every role may report a bug, so the route is
+ * `@AuthenticatedOnly` rather than `@RequirePermission` (docs/25 B5). `kind=idea`
  * needs `bugbot.submit_idea` (admin only) — a 403 from the service via `can()`,
  * because the rule depends on a query parameter, not on the route.
  *
@@ -36,6 +37,9 @@ export class BugbotHandoffController {
   constructor(private readonly handoff: BugbotHandoffService) {}
 
   @Get('handoff')
+  @AuthenticatedOnly(
+    'Bug reports are open to every role; kind=idea is the bugbot.submit_idea capability checked in BugbotHandoffService.',
+  )
   @Header('Cache-Control', 'no-store')
   createHandoff(
     @CurrentUser() user: AuthUser,

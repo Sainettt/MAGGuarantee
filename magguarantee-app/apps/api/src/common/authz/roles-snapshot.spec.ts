@@ -1,16 +1,19 @@
-// Authorization snapshot (docs/25 §3 B1, risk R1).
+// Authorization snapshot (docs/25 §3 B1, B5, risk R1).
 //
-// Reads the live `@Public` / `@Roles` / `@RequirePermission` / `@OpiekunOwns` /
-// `@CarrierOwns` / `@UseGuards` metadata of every controller registered in
-// `AppModule` and compares it with the two committed fixtures:
-//   __fixtures__/endpoint-roles.snapshot.json      — who passes the role gate
-//   __fixtures__/endpoint-ownership.snapshot.json  — which ownership guards run
+// Reads the live `@Public` / `@AuthenticatedOnly` / `@RequirePermission` /
+// `@OpiekunOwns` / `@CarrierOwns` / `@UseGuards` metadata of every controller
+// registered in `AppModule` and compares it with the three committed fixtures:
+//   __fixtures__/endpoint-roles.snapshot.json       — who passes the gate
+//   __fixtures__/endpoint-ownership.snapshot.json   — which ownership guards run
+//   __fixtures__/endpoint-permissions.snapshot.json — what each route requires
 // Any widening, narrowing, new route or dropped ownership guard is a red test
-// with a line-per-route diff. Track B (B2: `@Roles` → `@RequirePermission`)
-// must keep both fixtures byte-for-byte; a deliberate access change updates
-// them in its own PR together with docs/03 (docs/25 §0 «Не цель»).
+// with a line-per-route diff. Track B kept the roles and ownership fixtures
+// byte-for-byte since B1; a deliberate access change updates them in its own
+// PR together with docs/03 (docs/25 §0 «Не цель»). The permission fixture
+// (B5) is the generated successor of the B1–B4 hand table: a new route or a
+// changed requirement is reviewed as a one-line diff there.
 //
-// Regenerate (writes both fixtures, then the comparisons pass trivially):
+// Regenerate (writes all three fixtures, then the comparisons pass trivially):
 //   npm run authz:snapshot -w api
 // which runs this file with AUTHZ_SNAPSHOT_UPDATE=1.
 
@@ -39,18 +42,22 @@ import {
   ACCESS_AUTHENTICATED,
   ACCESS_PUBLIC,
   buildOwnershipSnapshot,
+  buildPermissionRequirements,
   buildRolesSnapshot,
   diffSnapshots,
   formatSnapshot,
   parseOwnershipSnapshot,
+  parsePermissionsSnapshot,
   parseRolesSnapshot,
   type EndpointOwnershipSnapshot,
+  type EndpointPermissionsSnapshot,
   type EndpointRolesSnapshot,
 } from './roles-snapshot';
 
 const FIXTURES_DIR = join(__dirname, '__fixtures__');
 const ROLES_FIXTURE = join(FIXTURES_DIR, 'endpoint-roles.snapshot.json');
 const OWNERSHIP_FIXTURE = join(FIXTURES_DIR, 'endpoint-ownership.snapshot.json');
+const PERMISSIONS_FIXTURE = join(FIXTURES_DIR, 'endpoint-permissions.snapshot.json');
 const UPDATE = process.env.AUTHZ_SNAPSHOT_UPDATE === '1';
 const UPDATE_HINT = 'npm run authz:snapshot -w api';
 
@@ -73,11 +80,12 @@ function readJson(path: string): unknown {
   return JSON.parse(readFileSync(path, 'utf8')) as unknown;
 }
 
-describe('authorization snapshot (docs/25 B1)', () => {
+describe('authorization snapshot (docs/25 B1, B5)', () => {
   let controllers: Array<Type<unknown>>;
   let routes: DiscoveredRoute[];
   let liveRoles: EndpointRolesSnapshot;
   let liveOwnership: EndpointOwnershipSnapshot;
+  let livePermissions: EndpointPermissionsSnapshot;
   let contradictions: string[];
 
   beforeAll(async () => {
@@ -87,11 +95,13 @@ describe('authorization snapshot (docs/25 B1)', () => {
     const ownership = buildOwnershipSnapshot(routes);
     liveRoles = roles.snapshot;
     liveOwnership = ownership.snapshot;
+    livePermissions = buildPermissionRequirements(routes);
     contradictions = [...roles.contradictions, ...ownership.contradictions];
 
     if (UPDATE) {
       writeFileSync(ROLES_FIXTURE, formatSnapshot(liveRoles), 'utf8');
       writeFileSync(OWNERSHIP_FIXTURE, formatSnapshot(liveOwnership), 'utf8');
+      writeFileSync(PERMISSIONS_FIXTURE, formatSnapshot(livePermissions), 'utf8');
     }
   });
 
@@ -106,10 +116,13 @@ describe('authorization snapshot (docs/25 B1)', () => {
     expect(controllers.length).toBeGreaterThanOrEqual(20);
   });
 
-  it('every discovered route is in the snapshot exactly once', () => {
+  it('every discovered route is in both gate snapshots exactly once', () => {
+    // A route without an authorization decision is never recorded, so it
+    // shows up here as missing (and as a contradiction below).
     const keys = routes.map((r) => r.key);
     expect(new Set(keys).size).toBe(keys.length);
     expect(Object.keys(liveRoles).sort()).toEqual([...keys].sort());
+    expect(Object.keys(livePermissions).sort()).toEqual([...keys].sort());
     expect(keys.length).toBeGreaterThan(100);
   });
 
@@ -118,17 +131,25 @@ describe('authorization snapshot (docs/25 B1)', () => {
     expect(liveRoles['GET /auth/me']).toBe(ACCESS_AUTHENTICATED);
     // Class-level @RequirePermission is inherited by the handler (getAllAndOverride).
     expect(liveRoles['GET /users']).toEqual(['admin']);
+    expect(livePermissions['POST /auth/login']).toBe(ACCESS_PUBLIC);
+    expect(livePermissions['GET /auth/me']).toBe(ACCESS_AUTHENTICATED);
+    expect(livePermissions['GET /users']).toEqual(['users.manage']);
   });
 
   // ── the contract ──
 
-  it('no contradictory metadata (e.g. @Public + @Roles, ownership decorator without its guard)', () => {
+  it('no contradictory metadata (e.g. a route without a decision, ownership decorator without its guard)', () => {
     expect(contradictions).toEqual([]);
   });
 
-  it('endpoint-roles.snapshot.json matches the live @Public / @Roles metadata', () => {
+  it('endpoint-roles.snapshot.json matches the live @Public / @AuthenticatedOnly / @RequirePermission metadata', () => {
     const fixture = parseRolesSnapshot(readJson(ROLES_FIXTURE));
     expectNoDrift('endpoint-roles.snapshot.json', diffSnapshots(fixture, liveRoles));
+  });
+
+  it('endpoint-permissions.snapshot.json matches the live @Public / @AuthenticatedOnly / @RequirePermission metadata', () => {
+    const fixture = parsePermissionsSnapshot(readJson(PERMISSIONS_FIXTURE));
+    expectNoDrift('endpoint-permissions.snapshot.json', diffSnapshots(fixture, livePermissions));
   });
 
   it('endpoint-ownership.snapshot.json matches the live @OpiekunOwns / @CarrierOwns guards', () => {

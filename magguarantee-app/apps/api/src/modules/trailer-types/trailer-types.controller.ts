@@ -26,6 +26,7 @@ import {
 
 import { Audit } from '../../common/audit';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
+import { AuthenticatedOnly } from '../auth/decorators/authenticated-only.decorator';
 import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { TrailerTypesService } from './trailer-types.service';
 
@@ -34,16 +35,19 @@ import { TrailerTypesService } from './trailer-types.service';
  *
  * `TrailerType` is a global lookup seeded by db-agent. GET is readable by any
  * authenticated user (used as a dropdown when creating/editing trailers, per
- * docs/13-api-design.md#lookups) — no decorator on purpose, the route sits in
- * `AUTHENTICATED_ONLY` (`common/authz/endpoint-permissions.ts`). Mutations
- * require `trailer_types.manage` (per-method `@RequirePermission`, docs/25
- * §3 B2; global `PermissionsGuard`), which only `admin` holds.
+ * docs/13-api-design.md#lookups) — `@AuthenticatedOnly`, no permission on
+ * purpose (docs/25 B5). Mutations require `trailer_types.manage` (per-method
+ * `@RequirePermission`, docs/25 §3 B2; global `PermissionsGuard`), which only
+ * `admin` holds.
  */
 @Controller('trailer-types')
 export class TrailerTypesController {
   constructor(private readonly types: TrailerTypesService) {}
 
   @Get()
+  @AuthenticatedOnly(
+    'Read-only dictionary for vehicle/trailer forms of every panel; writes are trailer_types.manage.',
+  )
   async list(
     @Query(new ZodValidationPipe(TrailerTypeFiltersSchema))
     query: TrailerTypeFilters,

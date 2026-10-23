@@ -85,15 +85,22 @@ export const APP_CONFIG_KEY = {
 
 // ── Metadata keys for guards ────────────────────────────
 export const IS_PUBLIC_KEY = 'isPublic';
-export const ROLES_METADATA_KEY = 'roles';
-// docs/25 B2 — `@RequirePermission(...)`, read by PermissionsGuard. Coexists
-// with ROLES_METADATA_KEY until B5; a route carries one of the two, never both
-// (enforced by common/authz/roles-snapshot.spec.ts, not at runtime).
+// docs/25 B2 — `@RequirePermission(...)`, read by PermissionsGuard.
 export const PERMISSIONS_METADATA_KEY = 'permissions';
+// docs/25 B5 — `@AuthenticatedOnly(reason)`, read by PermissionsGuard: any
+// session passes. PermissionsGuard denies by default, so every non-`@Public`
+// route carries this or `@RequirePermission`, never both (enforced by
+// common/authz/endpoint-permissions.spec.ts and roles-snapshot.spec.ts, not at
+// runtime). The value is the reason, as written.
+export const AUTHENTICATED_ONLY_KEY = 'authenticatedOnly';
 
-// ── 403 messages of the authorization guards ────────────
-// Shared by RolesGuard and PermissionsGuard on purpose: converting a route from
-// `@Roles` to `@RequirePermission` (docs/25 B2a–c) must not change its 403 body.
+// ── 403 messages of PermissionsGuard ────────────────────
+// Pinned literally by permissions.guard.spec.ts: the bodies predate track B
+// (the role gate before docs/25 B5 sent the same two) and the web may show them.
+//   NO_USER     — generic: no session user on a non-public route, or a route
+//                 that declares no authorization decision (deny by default);
+//                 says nothing about the route.
+//   NOT_GRANTED — a session whose permission set misses every requirement.
 export const FORBIDDEN_NO_USER_MESSAGE = 'Brak uprawnień';
 export const FORBIDDEN_NOT_GRANTED_MESSAGE = 'Brak uprawnień dla tej roli';
 

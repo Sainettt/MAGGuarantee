@@ -154,8 +154,9 @@ export type ResetPasswordForm = z.infer<typeof ResetPasswordFormSchema>;
 
 // ─── User DTO ─────────────────────────────────────────────
 
-// Phase 1 keeps this minimal — Phase 2+ extends with carrierId, vehicles,
-// alternateRoles once Carrier/Vehicle ship.
+// Phase 1 keeps this minimal — Phase 2+ extends with carrierId, vehicles once
+// Carrier/Vehicle ship. `alternateRoles` (multi-role) — не планируется, см.
+// docs/03 §Multi-role.
 export const UserDto = z.object({
   id: z.string().uuid(),
   login: z.string(),

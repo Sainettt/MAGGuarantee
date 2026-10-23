@@ -3,9 +3,10 @@
 // query validation (400), 401 / 403 / 404, no `@Audit`, and the throttling
 // split — global 100/min/IP untouched, per-user bucket on top.
 //
-// The guard chain mirrors app.module.ts: ThrottlerGuard → auth → RolesGuard →
+// The guard chain mirrors app.module.ts: ThrottlerGuard → auth →
 // PermissionsGuard as APP_GUARDs, then the controller's own
-// BugbotHandoffThrottlerGuard. The real
+// BugbotHandoffThrottlerGuard. PermissionsGuard denies by default, so the
+// 200s below also prove the route's `@AuthenticatedOnly`. The real
 // service signs with a key pair generated for this run.
 
 import 'reflect-metadata';
@@ -33,9 +34,9 @@ import { RoleSchema } from '@magguarantee/shared';
 import { AUDIT_METADATA_KEY } from '../../../common/audit/audit.constants';
 import { ProblemDetailsFilter } from '../../../common/errors/problem-details.filter';
 import type { Env } from '../../../config/env.schema';
-import { PERMISSIONS_METADATA_KEY, ROLES_METADATA_KEY } from '../../auth/auth.constants';
+import { AUTHENTICATED_ONLY_KEY, PERMISSIONS_METADATA_KEY } from '../../auth/auth.constants';
+import { AUTHENTICATED_ONLY_MIN_REASON_LENGTH } from '../../auth/decorators/authenticated-only.decorator';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
-import { RolesGuard } from '../../auth/guards/roles.guard';
 import { makeAuthUser } from '../../../common/testing/make-auth-user';
 import { BugbotHandoffThrottlerGuard } from './bugbot-handoff-throttler.guard';
 import {
@@ -95,7 +96,6 @@ async function boot(enabled: boolean): Promise<INestApplication> {
       { provide: BugbotHandoffService, useValue: new BugbotHandoffService(makeConfig(enabled)) },
       { provide: APP_GUARD, useClass: ThrottlerGuard },
       { provide: APP_GUARD, useClass: HeaderAuthGuard },
-      { provide: APP_GUARD, useClass: RolesGuard },
       { provide: APP_GUARD, useClass: PermissionsGuard },
     ],
   }).compile();
@@ -204,14 +204,16 @@ describe('BugbotHandoffController (HTTP)', () => {
     expect(await remaining('per-user-b')).toBe(first);
   });
 
-  it('carries no @Audit, no @Roles, no @RequirePermission and no @Throttle override; mounts the per-user guard', () => {
+  it('carries @AuthenticatedOnly with a reason, no @Audit, no @RequirePermission and no @Throttle override; mounts the per-user guard', () => {
     const reflector = new Reflector();
     const handler = BugbotHandoffController.prototype.createHandoff;
+    // Session-only (docs/25 B5): every role may report a bug; kind=idea is a
+    // service capability, not a route permission.
+    const reason: unknown = reflector.getAllAndOverride(AUTHENTICATED_ONLY_KEY, [handler, BugbotHandoffController]);
+    expect(typeof reason).toBe('string');
+    expect(String(reason).trim().length).toBeGreaterThanOrEqual(AUTHENTICATED_ONLY_MIN_REASON_LENGTH);
     for (const target of [handler, BugbotHandoffController]) {
       expect(reflector.get(AUDIT_METADATA_KEY, target)).toBeUndefined();
-      expect(reflector.get(ROLES_METADATA_KEY, target)).toBeUndefined();
-      // AUTHENTICATED_ONLY route (common/authz/endpoint-permissions.ts): every
-      // role may report a bug; kind=idea is a service capability.
       expect(reflector.get(PERMISSIONS_METADATA_KEY, target)).toBeUndefined();
       expect(reflector.get('THROTTLER:LIMITdefault', target)).toBeUndefined();
       expect(reflector.get('THROTTLER:TTLdefault', target)).toBeUndefined();
