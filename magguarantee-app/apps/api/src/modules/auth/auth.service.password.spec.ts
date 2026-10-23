@@ -2,6 +2,8 @@ import { Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 
+import { permissionsFor } from '@magguarantee/shared';
+
 import type { Env } from '../../config/env.schema';
 import type { AuditWriter } from '../audit/audit.service';
 import { DirectoryService } from '../directory/directory.service';
@@ -401,6 +403,8 @@ describe('AuthService — change password (authenticated / forced)', () => {
     expect(h.refreshTokens.revokeAllForUser).not.toHaveBeenCalled();
     // DTO carries the cleared flag (findById is re-read after the change).
     expect(user.mustChangePassword).toBe(false);
+    // …and the effective permissions, like /auth/me (docs/25 B4).
+    expect(user.permissions).toEqual(permissionsFor('opiekun', false));
   });
 
   it('rejects when the account is no longer active', async () => {

@@ -3,15 +3,17 @@
 // `lider` is deliberately not a JWT claim (the edge gating never depends on
 // it), so the only way it can reach guards, services and `/auth/me` is here.
 //
-// docs/25 B2: the same call also fills `permissions` — once, from that DB pair
-// `(role, lider)` via `permissionsFor`. It is the only place the set is built;
-// PermissionsGuard and `can()` never recompute it from the role.
+// docs/25 B2: the same call also fills `permissions` — once, from that DB row
+// via `effectivePermissions` (today `permissionsFor(role, lider)`; B4 builds
+// `UserDto.permissions` with the same helper). It is the only place the
+// request's set is built; PermissionsGuard and `can()` never recompute it.
 
 import { UnauthorizedException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 
 import { permissionsFor } from '@magguarantee/shared';
 
+import { effectivePermissions } from '../../../common/authz/effective-permissions';
 import type { Env } from '../../../config/env.schema';
 import type { UserRow } from '../../users/users.repository';
 import type { UsersService } from '../../users/users.service';
@@ -133,6 +135,17 @@ describe('JwtAccessStrategy.validate', () => {
 
       expect(user.role).toBe('admin');
       expect([...user.permissions]).toEqual(permissionsFor('admin', false));
+    });
+
+    it('is exactly effectivePermissions(row) — the helper UserDto.permissions uses (B4)', async () => {
+      for (const lider of [false, true]) {
+        const row = makeUser({ role: 'planista', lider });
+        const { strategy } = makeStrategy(row);
+
+        const user = await strategy.validate({ sub: 'u-1', role: 'planista' });
+
+        expect([...user.permissions]).toEqual([...effectivePermissions(row)]);
+      }
     });
 
     it('a demotion from lider drops the leader permission on the next request', async () => {

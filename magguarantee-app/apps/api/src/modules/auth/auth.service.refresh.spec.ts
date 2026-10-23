@@ -2,6 +2,8 @@ import { Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 
+import { permissionsFor } from '@magguarantee/shared';
+
 import type { Env } from '../../config/env.schema';
 import { REFRESH_ROTATION_GRACE_MS } from './auth.constants';
 import type { AuditWriter } from '../audit/audit.service';
@@ -214,6 +216,8 @@ describe('AuthService — refresh (rotation race vs theft)', () => {
     // Access-only: the loser must NOT receive (or overwrite) a refresh cookie.
     expect('refreshToken' in tokens).toBe(false);
     expect(user.id).toBe('u-1');
+    // The heal path builds the same UserDto (docs/25 B4).
+    expect(user.permissions).toEqual(permissionsFor('opiekun', false));
     expect(h.refreshTokens.revokeAllForUser).not.toHaveBeenCalled();
     // No rotation attempted for a token we already know is revoked.
     expect(h.prismaTx).not.toHaveBeenCalled();
@@ -407,6 +411,8 @@ describe('AuthService — refresh (rotation race vs theft)', () => {
     expect(tokens.refreshToken).toBe('signed.jwt.token');
     expect(tokens.refreshTokenId).toBe('rt-new');
     expect(user.id).toBe('u-1');
+    // docs/25 B4 — the refreshed user seeds the web's /auth/me cache too.
+    expect(user.permissions).toEqual(permissionsFor('opiekun', false));
     expect(h.prismaTx).toHaveBeenCalledTimes(1);
     expect(h.refreshTokens.revokeAllForUser).not.toHaveBeenCalled();
   });

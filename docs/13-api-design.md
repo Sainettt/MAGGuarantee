@@ -117,7 +117,7 @@ GET /api/v1/claims?carrier_id=...&status=ZAAKCEPTOWANO&from=2026-01-01&to=2026-0
 | POST `/auth/resend-code` | `resendLoginCode` (`Code.gs:1131`) | Принимает `{sessionToken}`. Rate-limited. |
 | POST `/auth/refresh` | — (новое, не было в GAS) | Refresh access из refresh. Rotation. `user` несёт `mustChangePassword`. |
 | POST `/auth/logout` | — | Инвалидирует refresh-токен (записывает в `revokedAt`). |
-| GET `/auth/me` | `validateCaller` | Возвращает текущего user-а на основе access-токена (вкл. `mustChangePassword` и `lider` — флаг лидера, docs/28; из БД, не из JWT). |
+| GET `/auth/me` | `validateCaller` | Возвращает текущего user-а на основе access-токена (вкл. `mustChangePassword` и `lider` — флаг лидера, docs/28; из БД, не из JWT) и `permissions: Permission[]` — эффективные права (docs/25 §3 B4): тот же набор, что `PermissionsGuard` проверял на этом запросе (`effectivePermissions` в `apps/api/src/common/authz/effective-permissions.ts`; сегодня = `permissionsFor(role, lider)`, B6 добавит персональные overrides), без дублей, **в порядке каталога `PERMISSIONS`**. Тот же `UserDto` (с `permissions`) приходит в `{ user }` ответов `verify-code` / `google` / `refresh` / `change-password` — web заполняет из них кэш `/auth/me`. Клиент считает список авторитетным; fallback на `permissionsFor(role, lider)` — только при рассинхроне версий (старый api без поля). В JWT права **не** кладутся. |
 | POST `/auth/forgot-password` | — (новое) | `{login}`. **Always 200** `{sessionToken, maskedEmail}` (anti-enumeration: decoy для неизвестного login). Шлёт reset-код на email (Redis `pwreset:*`, attempts/lockout как 2FA). Rate 5/min/IP. |
 | POST `/auth/reset-password` | — (новое) | `{sessionToken, code, newPassword}` → 204. Верифицирует код, хеширует, ставит `passwordChangedAt`, чистит `mustChangePassword`, **отзывает все refresh-токены**. Без авто-логина. Rate 10/min. |
 | POST `/auth/resend-reset-code` | — (новое) | `{sessionToken}`. Cooldown как `resend-code`. Rate 2/min. |
@@ -774,6 +774,10 @@ type UserDto = {
   email: string;
   role: Role;
   name: string;
+  mustChangePassword: boolean;
+  lider: boolean;          // docs/28, из БД
+  permissions: Permission[]; // docs/25 B4 — эффективные права, порядок каталога
+  // ниже — ранний черновик; в `packages/shared/src/schemas/auth.ts` его НЕТ:
   // только для carrier:
   carrierId?: string;
   vehicles?: { id: string; plateNumber: string }[];

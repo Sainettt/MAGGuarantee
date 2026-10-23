@@ -9,6 +9,9 @@ import { Logger, UnauthorizedException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { JwtService } from '@nestjs/jwt';
 
+import { permissionsFor } from '@magguarantee/shared';
+
+import { toPermissionList } from '../../common/authz/effective-permissions';
 import type { Env } from '../../config/env.schema';
 import type { AuditWriter } from '../audit/audit.service';
 import type { DirectoryService } from '../directory/directory.service';
@@ -127,6 +130,10 @@ function makeHarness(opts: { user?: UserRow | null; passwordOk?: boolean; attemp
       })[key as string],
   };
 
+  const jwt = {
+    signAsync: jest.fn(async (_payload: object, _options?: object) => 'signed.jwt.token'),
+  };
+
   const svc = new AuthService(
     users as unknown as UsersService,
     passwords as unknown as PasswordService,
@@ -134,14 +141,14 @@ function makeHarness(opts: { user?: UserRow | null; passwordOk?: boolean; attemp
     {} as unknown as PasswordResetService,
     refreshTokens as unknown as RefreshTokenRepository,
     mail as unknown as MailService,
-    { signAsync: jest.fn(async () => 'signed.jwt.token') } as unknown as JwtService,
+    jwt as unknown as JwtService,
     prisma as unknown as PrismaService,
     config as unknown as ConfigService<Env, true>,
     {} as unknown as GoogleIdTokenService,
     {} as unknown as DirectoryService,
     audit as unknown as AuditWriter,
   );
-  return { svc, users, passwords, twoFactor, refreshTokens, mail, audit, prisma };
+  return { svc, users, passwords, twoFactor, refreshTokens, mail, audit, prisma, jwt };
 }
 
 let warn: jest.SpyInstance;
@@ -419,6 +426,56 @@ describe('AuthService.verifyCode — passwordLogin audit row', () => {
     );
     expect(h.audit.log).not.toHaveBeenCalled();
     expect(h.prisma.$transaction).not.toHaveBeenCalled();
+  });
+});
+
+// docs/25 B4 — the web seeds its `/auth/me` cache from this `user`, so it must
+// carry the same effective-permission list `/auth/me` serves.
+describe('AuthService.verifyCode — UserDto.permissions', () => {
+  it('echoes the full UserDto, permissions in catalog order', async () => {
+    const h = makeHarness();
+
+    const res = await h.svc.verifyCode('s'.repeat(64), '123456', CTX);
+
+    expect(res.user).toEqual({
+      id: 'u-1',
+      login: 'jan.kowalski',
+      email: 'jan@magtrans.eu',
+      name: 'Jan',
+      role: 'opiekun',
+      mustChangePassword: false,
+      lider: false,
+      permissions: toPermissionList(new Set(permissionsFor('opiekun', false))),
+    });
+    expect(res.user.permissions).toEqual(permissionsFor('opiekun', false));
+  });
+
+  it('a lider planista gets the leader permission on the verify path', async () => {
+    const h = makeHarness({ user: makeUser({ role: 'planista', lider: true }) });
+
+    const res = await h.svc.verifyCode('s'.repeat(64), '123456', CTX);
+
+    expect(res.user.permissions).toEqual(permissionsFor('planista', true));
+    expect(res.user.permissions).toContain('vehicles.planner_transfer.decide');
+  });
+
+  it('a plain planista does not — the flag is what grants it', async () => {
+    const h = makeHarness({ user: makeUser({ role: 'planista', lider: false }) });
+
+    const res = await h.svc.verifyCode('s'.repeat(64), '123456', CTX);
+
+    expect(res.user.permissions).toEqual(permissionsFor('planista', false));
+    expect(res.user.permissions).not.toContain('vehicles.planner_transfer.decide');
+  });
+
+  it('never puts permissions into the access-token claims', async () => {
+    const h = makeHarness();
+
+    await h.svc.verifyCode('s'.repeat(64), '123456', CTX);
+
+    const payloads = h.jwt.signAsync.mock.calls.map(([payload]) => payload);
+    expect(payloads.length).toBeGreaterThan(0);
+    for (const payload of payloads) expect(payload).not.toHaveProperty('permissions');
   });
 });
 

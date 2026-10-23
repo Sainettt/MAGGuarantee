@@ -20,6 +20,10 @@ import {
   type UserDto,
 } from '@magguarantee/shared';
 
+import {
+  effectivePermissions,
+  toPermissionList,
+} from '../../common/authz/effective-permissions';
 import type { Env } from '../../config/env.schema';
 import {
   LOGIN_LOCKOUT_MS,
@@ -746,6 +750,12 @@ export class AuthService {
 
   // ── Public helpers used by controllers ───────────────
 
+  /**
+   * The `user` of every session-issuing response (verify-code, google,
+   * refresh, change-password). The web seeds its `/auth/me` cache from it, so
+   * it must match `GET /auth/me` field for field — `permissions` included
+   * (docs/25 B4), computed by the same helper the access strategy uses.
+   */
   toUserDto(user: UserRow): UserDto {
     return {
       id: user.id,
@@ -755,6 +765,7 @@ export class AuthService {
       role: user.role,
       mustChangePassword: user.mustChangePassword,
       lider: user.lider,
+      permissions: toPermissionList(effectivePermissions(user)),
     };
   }
 

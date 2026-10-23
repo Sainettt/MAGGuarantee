@@ -8,6 +8,7 @@
 
 import { z } from 'zod';
 
+import { PERMISSIONS } from '../permissions';
 import { AssignableRoleSchema } from './common';
 import { PasswordSchema } from './users';
 
@@ -28,6 +29,16 @@ export const Role = z.enum([
   'weryfikator',
 ]);
 export type Role = z.infer<typeof Role>;
+
+// ─── Permissions ──────────────────────────────────────────
+
+/**
+ * One catalog permission (docs/25 §2). The enum lives here, not in
+ * `../permissions`: that module must stay runtime-dependency-free (the Next.js
+ * edge middleware imports it; a test enforces "type imports only"). The TS
+ * type is `Permission`, exported from `../permissions`.
+ */
+export const PermissionSchema = z.enum(PERMISSIONS);
 
 // ─── Login flow ───────────────────────────────────────────
 
@@ -165,6 +176,17 @@ export const UserDto = z.object({
    * `role`; the web only uses this for the label (`roles.lider.<role>`).
    */
   lider: z.boolean(),
+  /**
+   * Effective permissions of this user (docs/25 §3 B4), deduplicated, in
+   * catalog (`PERMISSIONS`) order. Today = `permissionsFor(role, lider)`; B6
+   * adds per-user extra/denied overrides on the api side, so clients must treat
+   * this list as AUTHORITATIVE and never re-derive it from `role`. The only
+   * allowed fallback is `permissionsFor(role, lider)` while an api that does
+   * not send the field yet is still deployed (version skew).
+   *
+   * Built from the same DB row as `role` / `lider` — never a JWT claim.
+   */
+  permissions: z.array(PermissionSchema),
 });
 export type UserDto = z.infer<typeof UserDto>;
 

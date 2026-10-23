@@ -13,6 +13,8 @@ import {
 import type { ConfigService } from '@nestjs/config';
 import type { JwtService } from '@nestjs/jwt';
 
+import { permissionsFor } from '@magguarantee/shared';
+
 import type { Env } from '../../config/env.schema';
 import type { AuditWriter } from '../audit/audit.service';
 import type { DirectoryService } from '../directory/directory.service';
@@ -174,6 +176,7 @@ describe('AuthService.loginWithGoogle', () => {
     });
     expect(res.user.role).toBe('planista');
     expect(res.user.lider).toBe(false);
+    expect(res.user.permissions).toEqual(permissionsFor('planista', false));
     expect(res.tokens.accessToken).toBeTruthy();
   });
 
@@ -196,8 +199,11 @@ describe('AuthService.loginWithGoogle', () => {
       lider: true,
       googleSub: IDENTITY.sub,
     });
-    // The sign-in response carries the flag (toUserDto), like /auth/me.
+    // The sign-in response carries the flag (toUserDto), like /auth/me…
     expect(res.user).toMatchObject({ role: 'planista', lider: true });
+    // …and the permissions it grants (docs/25 B4).
+    expect(res.user.permissions).toEqual(permissionsFor('planista', true));
+    expect(res.user.permissions).toContain('vehicles.planner_transfer.decide');
   });
 
   it('passes lider=false when a hand-granted role stands in for a missing mapping', async () => {

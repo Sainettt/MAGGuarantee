@@ -61,6 +61,7 @@ import {
 } from '@magguarantee/shared';
 
 import { Audit } from '../../common/audit';
+import { toPermissionList } from '../../common/authz/effective-permissions';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { clientIp } from '../../common/utils/client-ip';
 import {
@@ -310,6 +311,9 @@ export class AuthController {
       // DB-sourced by JwtAccessStrategy (docs/28); absent only on hand-built
       // AuthUser fixtures.
       lider: user.lider ?? false,
+      // docs/25 B4 — the set the guards of THIS request use, serialised (not
+      // recomputed): whatever PermissionsGuard admitted is what the web sees.
+      permissions: toPermissionList(user.permissions),
     };
   }
 
