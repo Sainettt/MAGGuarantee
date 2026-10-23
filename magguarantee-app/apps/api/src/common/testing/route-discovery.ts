@@ -1,5 +1,7 @@
-// Route discovery for the inverse audit-coverage spec (2026-08-14 logging
-// audit, item 18).
+// Route discovery for the metadata specs that must see EVERY served route:
+// the inverse audit-coverage spec (2026-08-14 logging audit, item 18) and the
+// authorization snapshot (`common/authz/roles-snapshot.spec.ts`, docs/25 B1).
+// Lives in a neutral folder so neither feature owns it.
 //
 // Discovers every controller REGISTERED in a module graph the same way Nest
 // does at bootstrap — `DependenciesScanner.scan(rootModule)` walks imports
@@ -31,8 +33,8 @@ import {
 import { GraphInspector } from '@nestjs/core/inspector/graph-inspector';
 import { DependenciesScanner } from '@nestjs/core/scanner';
 
-import { AUDIT_METADATA_KEY } from '../audit.constants';
-import type { AuditConfig } from '../audit.decorator';
+import { AUDIT_METADATA_KEY } from '../audit/audit.constants';
+import type { AuditConfig } from '../audit/audit.decorator';
 
 export interface DiscoveredRoute {
   /** `POST /claims/:nrZgl/preview` — the allowlist key format. */

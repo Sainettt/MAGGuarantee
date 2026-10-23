@@ -9,3 +9,6 @@
 export * from './schemas';
 export * from './constants';
 export * from './domain';
+// docs/25 B1 — permissions catalog (dependency-free; also imported by the edge
+// middleware). `./permissions-matrix` (docs/03 table) is deliberately NOT here.
+export * from './permissions';

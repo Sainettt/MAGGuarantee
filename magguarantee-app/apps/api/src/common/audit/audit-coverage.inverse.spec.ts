@@ -5,7 +5,7 @@
 // nobody added to that list. This spec inverts the direction: it discovers
 // every controller actually registered in `AppModule` (Nest's own
 // `DependenciesScanner`, no providers instantiated — see
-// `testing/route-discovery.ts`) and requires every POST / PUT / PATCH / DELETE
+// `common/testing/route-discovery.ts`) and requires every POST / PUT / PATCH / DELETE
 // handler to either
 //   - carry `@Audit()` metadata (resolved exactly like `AuditInterceptor`:
 //     handler first, then class), or
@@ -43,7 +43,7 @@ import {
   isMutating,
   listRoutes,
   type DiscoveredRoute,
-} from './testing/route-discovery';
+} from '../testing/route-discovery';
 
 /**
  * Mutating routes that intentionally have NO `@Audit()` decorator.

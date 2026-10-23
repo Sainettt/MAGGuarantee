@@ -1,6 +1,6 @@
 # 25. План: трек B — слой permissions
 
-> **Статус: план, не начат (2026-09-14). Решения по открытым вопросам — §7.** Детализирует §3 из
+> **Статус: B1 в работе с 2026-10-23 (план от 2026-09-14). Решения по открытым вопросам — §7; первый случай для B6 — в §3 B6.** Детализирует §3 из
 > [24-sso-magspace-and-permissions-plan.md](24-sso-magspace-and-permissions-plan.md)
 > по фактическому состоянию кода на `a50077c`. Где этот документ расходится с
 > §3 docs/24, прав этот документ: §3 писался до инвентаризации.
@@ -39,6 +39,12 @@
 ---
 
 ## 1. Фактическое состояние (инвентаризация 2026-09-14)
+
+> Историческая инвентаризация на момент плана. С B1 (2026-10-23) актуальное
+> состояние «эндпоинт → роли» — фикстура
+> `apps/api/src/common/authz/__fixtures__/endpoint-roles.snapshot.json`
+> (плюс `endpoint-ownership.snapshot.json` для `@OpiekunOwns` / `@CarrierOwns`);
+> цифры ниже не обновляются.
 
 ### 1.1 API: `@Roles` на контроллерах
 
@@ -121,16 +127,19 @@
 |---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|
 | `claims.read` | ✅ | ✅ | | | | ✅ | | | `GET /claims(/:nrZgl)`; opiekun убран 2026-10-22 (решение: opiekun не видит wnioski ни в каком виде) |
 | `claims.submit` | | | | | | ✅ | | | `POST /claims`, `/claims/preview`, `/reklamacja` |
-| `claims.verify` | ✅ | ✅ | | | | | | | `PATCH /claims/:nrZgl(/verification)`, скриншот Maksima (upload/download) |
+| `claims.verify` | ✅ | ✅ | | | | | | | `PATCH /claims/:nrZgl(/verification)`, скриншот Maksima (upload/download), `recalc-limits(/preview)`; `POST /claims/:nrZgl/preview` — any-of(`claims.submit`, `claims.verify`) |
 | `claims.verify_pending_authorization` | ✅ | | | | | | | | сервис: `CLAIM_VERIFY_ADMIN_ONLY` |
 | `dashboard.read` | ✅ | ✅ | | | | | | | `GET /diagnostics/dashboard` |
-| `carriers.read` | ✅ | | ✅ | | | | | | `GET /carriers*`, вложения, documents overview |
-| `carriers.write` | ✅ | | ✅ | | | | | | create/update/deactivate/reactivate/reset-password, вложения |
+| `carriers.read` | ✅ | | ✅ | | | | | | `GET /carriers`, `GET /carriers/:id` |
+| `carriers.write` | ✅ | | ✅ | | | | | | create/update/deactivate/reactivate/reset-password |
+| `carrier_documents.read` | ✅ | | ✅ | | | | | | `GET /carriers/:id/attachments`, `…/:attachmentId/download`, `GET /carriers/:id/documents/overview` (выделено 2026-10-23 под первый случай B6) |
+| `carrier_documents.add` | ✅ | | ✅ | | | | | | `POST /carriers/:id/attachments` |
+| `carrier_documents.delete` | ✅ | | ✅ | | | | | | `DELETE /carriers/:id/attachments/:attachmentId`; перевозчику не выдаётся |
 | `carriers.delete` | ✅ | | | | | | | | `DELETE /carriers/:id`, `…/hard` |
 | `vehicles.read` | ✅ | | ✅ | ✅ | ✅ | ✅ | | | `GET /vehicles(/:id)`, вложения |
-| `vehicles.rates.read` | ✅ | | ✅ | ✅ | | ✅ | | | сервис: scrub ставок (vehicles, модалка выезда) |
+| `vehicles.rates.read` | ✅ | | ✅ | ✅ | | ✅ | ✅ | ✅ | сервис: scrub ставок (карточка машины, модалка выезда). eksport и weryfikator добавлены 2026-10-23 по факту кода: модалка выезда прячет ставки только от dyspozytora (docs/14 §6.4.1); карточку машины эти роли не открывают |
 | `vehicles.fuel_card.read` | ✅ | | ✅ | | | ✅ | | | сервис: scrub топливной карты |
-| `vehicles.planner_transfer.request` | | | ✅ | ✅ | | | | | `POST /vehicles/:id/planner-transfers`, `POST /planner-transfers/:id/cancel`, `GET /planner-transfers?scope=mine`; сервис: planista — только текущий планиста машины, cancel — только автор ([29](29-vehicle-planner-transfer-plan.md), добавлено 2026-09-28) |
+| `vehicles.planner_transfer.request` | | | ✅ | ✅ | | | | | `POST /vehicles/:id/planner-transfers`, `POST /planner-transfers/:id/cancel`, `GET /planner-transfers?scope=mine`; сервис: planista — только текущий планиста машины, cancel — только автор ([29](29-vehicle-planner-transfer-plan.md), добавлено 2026-09-28). `GET /planner-transfers` и `GET /lookups/planisci/transfer-targets` — any-of(`.request`, `.decide`) |
 | `vehicles.planner_transfer.decide` | ✅ | | | lider | | | | | `POST /planner-transfers/:id/{approve,reject}`, `GET /planner-transfers?scope=decide`; planista — через `LIDER_PERMISSIONS.planista`; сервис: лидер **этого** `fromPlanner`, не автор и не получатель (`planner-transfer.rules.ts`) |
 | `vehicles.planner_history.read` | ✅ | | ✅ | ✅ | | | | | `GET /vehicles/:id/planner-history`; сервис: opiekun — свой перевозчик, planista — текущий планиста или его лидер |
 | `drivers.read` | ✅ | | ✅ | | | ✅ | | | `GET /drivers*`, вложения |
@@ -153,19 +162,23 @@
 | `lookups.staff` | ✅ | | ✅ | | | | | | `/lookups/{dyspozytor,opiekuni,planisci,teams}` |
 | `lookups.carriers` | ✅ | ✅ | ✅ | | | | | | `/lookups/carriers` |
 | `integrations.external` | ✅ | | ✅ | | | | | | VIES, Biała lista (оба); info-car удалён решением 2026-10-22 |
-| `users.manage` | ✅ | | | | | | | | `/users*`, `/lookups/users` |
+| `users.manage` | ✅ | | | | | | | | `/users*`, `/lookups/users`, `/lookups/planisci/liders` |
 | `sso.manage` | ✅ | | | | | | | | `/sso/*` |
 | `teams.manage` | ✅ | | | | | | | | `/teams*` |
-| `trailer_types.manage` | ✅ | | | | | | | | запись `/trailer-types*` |
+| `trailer_types.manage` | ✅ | | | | | | | | запись `/trailer-types*`, включая `DELETE /trailer-types/:id/hard` (не `fleet.hard_delete`) |
 | `limits.manage` | ✅ | | | | | | | | `/limits*` |
 | `audit.read` | ✅ | | | | | | | | `GET /audit` |
 | `diagnostics.manage` | ✅ | | | | | | | | `/diagnostics/{db,mails,claims}`, resend |
+| `bugbot.submit_idea` | ✅ | | | | | | | | сервис: `kind=idea` в BugBot handoff (`bugbot-handoff.service.ts`); сам `GET /integrations/bugbot/handoff` — `AUTHENTICATED` |
 
-Итого 38 прав. Замечания:
+Итого **42 права** (B1, 2026-10-23; в плане было 38). Источник истины —
+`packages/shared/src/permissions.ts`, сверка с реальными `@Roles` —
+`apps/api/src/common/authz/endpoint-permissions.ts` + фикстуры. Замечания:
 
 - **admin ≠ «все права».** Сегодня admin **не** проходит на эндпоинты,
   доступные только перевозчику (`claims.submit`, `delegations.create`,
-  `panel.carrier`). Матрица это сохраняет, а тест эквивалентности не даст
+  `panel.carrier`) и не подаёт заявку на передачу машины
+  (`vehicles.planner_transfer.request`, docs/29 U1). Матрица это сохраняет, а тест эквивалентности не даст
   «упростить» до `admin: PERMISSIONS`.
 - **`panel.*` — по сути роли под другим именем.** Это честная плата за
   единообразие guard'а. Схлопывать их в `role` не надо: B6 может выдать,
@@ -179,12 +192,17 @@
   флаг `User.lider` над пятью ролями (`LIDER_ROLES` в shared), не колонка
   матрицы. В каталог входит как
   `LIDER_PERMISSIONS: Partial<Record<LiderRole, readonly Permission[]>>`
-  (на старте `{}`) и `permissionsFor(role, lider = false) =
+  (на старте только `planista: ['vehicles.planner_transfer.decide']`) и
+  `permissionsFor(role, lider = false) =
   ROLE_PERMISSIONS[role] ∪ (lider ? LIDER_PERMISSIONS[role] ?? [] : [])`;
   тест: `permissionsFor(r, true) ⊇ permissionsFor(r, false)` — лидер только
   добавляет. В сгенерированной матрице под-строка «+ lider» появляется только
-  у непустых. Эндпоинт только для лидера записывается в фикстуре B1 как
-  `["admin", "planista+lider"]`. Scope лидера (если понадобится) живёт
+  у непустых. **Фикстура B1 снимается с `@Roles`, который лидера не знает**:
+  эндпоинты решения по передаче стоят на `@Roles('admin','planista')` и в
+  фикстуре записаны как `["admin","planista"]`. Правило эквивалентности
+  (решение 2026-10-23): роль считается допущенной, если требование
+  удовлетворяет `permissionsFor(r, true)`; «именно лидер этого планисты»
+  по-прежнему проверяет сервис. Scope лидера (если понадобится) живёт
   **внутри** ветки базовой роли — это по-прежнему «scope на роли».
 - **Передача машин** ([docs/29](29-vehicle-planner-transfer-plan.md),
   2026-09-28) — первое лидерское право. Сделана **до** трека B и без
@@ -207,11 +225,11 @@
 
 | Что | Где |
 |---|---|
-| `PERMISSIONS`, `type Permission`, `ROLE_PERMISSIONS: Record<Role, readonly Permission[]>`, `hasPermission`, `hasAnyPermission`, `permissionsFor(role)`. Чистый TS без зависимостей: импортируется и API, и web, и edge-middleware | `packages/shared/src/permissions.ts` (+ экспорт из index) |
-| Генератор снапшота: обходит контроллеры через `DiscoveryService` + `Reflector`, пишет `{ "GET /claims": ["admin","pracownik","przewoznik"], "POST /auth/login": "PUBLIC", … }` с отсортированными ключами | `apps/api/src/common/authz/roles-snapshot.script.ts` |
-| Фикстура (коммитится) | `apps/api/src/common/authz/__fixtures__/endpoint-roles.snapshot.json` |
-| `permissions.spec.ts`: каждое право назначено хотя бы одной роли; нет неизвестных строк; матрица совпадает с markdown-таблицей, которую генерирует `npm run authz:matrix` для вставки в docs/03 | `packages/shared` |
-| docs/03: матрицу доступа **сгенерировать** из `ROLE_PERMISSIONS` (колонка «permission»); расхождения §1.4 уже исправлены вручную | `docs/03-roles.md` |
+| `PERMISSIONS`, `type Permission`, `ROLE_PERMISSIONS: Record<Role, readonly Permission[]>`, `LIDER_PERMISSIONS`, `permissionsFor(role, lider)`, `hasPermission`, `hasAnyPermission`. Чистый TS, только type-only импорты `Role`/`LiderRole` (без zod в рантайме): импортируется и API, и web, и edge-middleware. Отдельный модуль `permissions-matrix.ts` (не в barrel) рендерит markdown-матрицу с описаниями | `packages/shared/src/permissions.ts` (+ экспорт из index), `packages/shared/src/permissions-matrix.ts` |
+| Генератор снапшота: обходит контроллеры через `DependenciesScanner` (`common/testing/route-discovery.ts`, перенесён из `common/audit/testing/` в B1; провайдеры не инстанцируются — без БД/Redis) + `Reflector.getAllAndOverride([handler, class])` как в `RolesGuard`; пишет `{ "GET /claims": ["admin","pracownik","przewoznik"], "POST /auth/login": "PUBLIC", "GET /auth/me": "AUTHENTICATED", … }` с отсортированными ключами (`AUTHENTICATED` = нет `@Roles` или пустой, как guard пропускает). Запускается под Jest; перезапись фикстур только при `AUTHZ_SNAPSHOT_UPDATE=1` (`npm run authz:snapshot`) | `apps/api/src/common/authz/roles-snapshot.ts` + `roles-snapshot.spec.ts` |
+| Фикстуры (коммитятся): роли по эндпоинтам и, вторая, какие роуты несут `@OpiekunOwns` / `@CarrierOwns` — чтобы B2 не потерял ownership-guard при замене декораторов | `apps/api/src/common/authz/__fixtures__/endpoint-roles.snapshot.json`, `endpoint-ownership.snapshot.json` |
+| `tests/permissions.test.ts`: каждое право назначено хотя бы одной роли; нет неизвестных строк; `permissionsFor(r, true) ⊇ permissionsFor(r, false)`; для каждой строки фикстуры каталог воспроизводит ровно тот же набор ролей (с правилом лидера, см. §2); блок между маркерами `<!-- authz:matrix:start/end -->` в docs/03 равен `renderPermissionMatrix()` (`npm run authz:matrix` печатает его) | `packages/shared` |
+| docs/03: подраздел «Каталог прав (генерируется)» между маркерами; рукописная матрица действий со scope-пометками остаётся | `docs/03-roles.md` |
 
 Runtime-изменений ноль, PR можно мержить отдельно.
 
@@ -224,7 +242,7 @@ Runtime-изменений ноль, PR можно мержить отдельн
 | `can(user, p)` — тонкий помощник для сервисов | `common/authz/can.ts` |
 | `PermissionsGuard` глобально, рядом с `RolesGuard`. Переходный период: оба живут, эндпоинт несёт **либо** `@Roles`, **либо** `@RequirePermission` | `modules/auth/guards/permissions.guard.ts`, `app.module.ts` |
 | Замена `@Roles` → `@RequirePermission` по таблице §2, модуль за модулем. Заодно убрать 22 избыточных `@UseGuards(RolesGuard)` | 24 контроллера |
-| **Тест эквивалентности**: для каждого эндпоинта `роли(metadata) = ROLES.filter(r => hasAnyPermission(r, required))` (или роли из `@Roles`, пока он не заменён) и сравнение с фикстурой из B1. Любое расширение или сужение — красный тест | `common/authz/endpoint-authz.spec.ts` |
+| **Тест эквивалентности**: для каждого эндпоинта `роли(metadata) = ROLES.filter(r => hasAnyPermission(r, required, /* lider */ true))` (или роли из `@Roles`, пока он не заменён) и сравнение с фикстурой из B1. Правило лидера (2026-10-23): роль допущена, если её лидерский вариант удовлетворяет требованию — иначе `approve`/`reject` передачи дали бы `["admin"]` вместо `["admin","planista"]` из фикстуры, а не-лидер planista получал бы 403 от guard'а вместо `not_decider` из сервиса. Любое расширение или сужение — красный тест. Вторая фикстура: ownership-декораторы на месте | `common/authz/endpoint-authz.spec.ts` |
 | **Inverse-правило**: каждый не-`@Public` эндпоинт обязан нести `@RequirePermission` или быть в `AUTHENTICATED_ONLY` с причиной. Новый роут без решения об авторизации не проходит CI (родственник audit-coverage spec из аудита логов, п. 18) | тот же spec |
 | Spec-файлы, проверяющие метаданные `@Roles` (vehicles, drivers, delegations), переписать на permission | соответствующие `*.spec.ts` |
 
@@ -273,6 +291,19 @@ Ownership-guards (`@OpiekunOwns`, `@CarrierOwns`) не меняются.
 
 Это и есть отдача трека (docs/24 §8 в.1). Делается **под конкретный случай**,
 но B2/B4 уже подготовили точку расширения.
+
+> **Первый реальный случай (решение 2026-10-23).** Выбранный admin'ом
+> перевозчик видит документы своей фирмы так, как их видит opiekun (вкладка
+> «Dokumenty»: документы фирмы + обзор документов флота), и может **только
+> загружать новые файлы** — не удалять, не заменять, не править даты.
+> Выдаётся **точечно**, не всем перевозчикам. В каталоге это три права
+> `carrier_documents.read` / `.add` / `.delete` (admin и opiekun — по роли,
+> przewoznik — ничего по роли); в `GRANTABLE_EXTRA.przewoznik` попадают
+> только `.read` и `.add`. Scope у перевозчика уже есть («свой перевозчик»,
+> `@CarrierOwns`), поэтому право без scope не возникает. Web: страница
+> `/carrier/dokumenty` на той же вкладке, без кнопки удаления; пункт меню —
+> только по праву. Приёмка: перевозчик с правом загружает и не может удалить,
+> перевозчик без права не видит вкладки и получает 403.
 
 | Что | Решение |
 |---|---|

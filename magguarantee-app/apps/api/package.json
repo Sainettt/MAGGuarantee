@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "test:e2e": "node --experimental-vm-modules ../../node_modules/jest/bin/jest.js --config ./test/jest-e2e.config.js --runInBand",
+    "authz:snapshot": "node -e \"const r=require('child_process').spawnSync(process.execPath,[require.resolve('jest/bin/jest'),'roles-snapshot.spec'],{stdio:'inherit',env:Object.assign({},process.env,{AUTHZ_SNAPSHOT_UPDATE:'1'})});process.exit(r.status===null?1:r.status)\"",
     "gmail:token": "ts-node scripts/gmail-oauth-token.ts"
   },
   "dependencies": {

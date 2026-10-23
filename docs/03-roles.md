@@ -342,7 +342,7 @@
 | Подать заявку на смену планисты машины / отменить свою | — | — | ✅ (своих перев.) | ✅ (текущий планиста машины) | — | — | — | — |
 | Решить заявку на смену планисты | ✅ (любую, кроме своей) | — | — | ✅ (лидер планисты-отправителя; не автор и не получатель) | — | — | — | — |
 | Журнал планистов машины | ✅ | — | ✅ (своих перев.) | ✅ (текущий планиста и его лидер) | — | — | — | — |
-| Видеть ставки авто | ✅ | — | ✅ | ✅ | **—** | ✅ | — | — |
+| Видеть ставки авто | ✅ | — | ✅ | ✅ | **—** | ✅ | ✅ (только в модалке выезда, карточку машины не открывает) | ✅ (только в модалке выезда) |
 | Видеть номер и PIN топливной карты | ✅ | — | ✅ | — | — | ✅ | — | — |
 | Hard-delete водителей / прицепов / перевозчиков | ✅ | — | — | — | — | — | — | — |
 | CRUD водителей (все) | ✅ | **—** | — | — | — | — | — | — |
@@ -363,6 +363,74 @@
 | CRUD пользователей | ✅ | — | — | — | — | — | — | — |
 | Audit log (чтение) | ✅ | — | — | — | — | — | — | — |
 | Diagnostic endpoints | ✅ | — | — | — | — | — | — | — |
+
+### Каталог прав (генерируется)
+
+> Источник — `ROLE_PERMISSIONS` и `LIDER_PERMISSIONS` в
+> [`packages/shared/src/permissions.ts`](../magguarantee-app/packages/shared/src/permissions.ts)
+> ([docs/25](25-permissions-layer-plan.md) B1). Таблица между маркерами генерируется
+> `npm run -s authz:matrix -w @magguarantee/shared`, а `packages/shared/tests/permissions.test.ts`
+> падает, если она разошлась с кодом — руками не править. Таблица действий выше остаётся
+> описанием для людей; при расхождении прав код.
+>
+> Отметки — права **по роли**. Строка «↳ + lider» — что добавляет флаг `User.lider`
+> (раздел [Лидеры](#lider)), и она есть только там, где флаг что-то даёт. Scope («свои
+> перевозчики», «своя команда», «свой/любой») здесь не показан: он остаётся на роли.
+> Какое право требует каждый эндпоинт — `apps/api/src/common/authz/endpoint-permissions.ts`;
+> его сверяют со снапшотом `@Roles` (`apps/api/src/common/authz/__fixtures__/endpoint-roles.snapshot.json`).
+
+<!-- authz:matrix:start -->
+
+| Permission | admin | pracownik | opiekun | planista | dyspozytor | przewoznik | eksport | weryfikator | Покрывает |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
+| `claims.read` | ✅ | ✅ |  |  |  | ✅ |  |  | `GET /claims`, `GET /claims/:nrZgl` (scope: przewoznik — свои). opiekun не видит wnioski ни в каком виде (решение 2026-10-22) |
+| `claims.submit` |  |  |  |  |  | ✅ |  |  | `POST /claims`, `POST /claims/preview`, `POST /claims/:nrZgl/reklamacja`; вместе с `claims.verify` — `POST /claims/:nrZgl/preview` |
+| `claims.verify` | ✅ | ✅ |  |  |  |  |  |  | `PATCH /claims/:nrZgl`, `PATCH /claims/:nrZgl/verification`, `POST /claims/:nrZgl/recalc-limits` (+ `GET …/preview`), скриншот Maksima (`POST /claims/:nrZgl/authorization-confirmation`, download); вместе с `claims.submit` — `POST /claims/:nrZgl/preview` |
+| `claims.verify_pending_authorization` | ✅ |  |  |  |  |  |  |  | сервис: повторная верификация в `OCZEKUJE_NA_AUTORYZACJE` (иначе 422 `CLAIM_VERIFY_ADMIN_ONLY`) |
+| `dashboard.read` | ✅ | ✅ |  |  |  |  |  |  | `GET /diagnostics/dashboard` |
+| `carriers.read` | ✅ |  | ✅ |  |  |  |  |  | `GET /carriers`, `GET /carriers/:id` |
+| `carriers.write` | ✅ |  | ✅ |  |  |  |  |  | `POST /carriers`, `PATCH /carriers/:id`, `POST /carriers/:id/{deactivate,reactivate,reset-password}` |
+| `carriers.delete` | ✅ |  |  |  |  |  |  |  | `DELETE /carriers/:id`, `DELETE /carriers/:id/hard` |
+| `carrier_documents.read` | ✅ |  | ✅ |  |  |  |  |  | `GET /carriers/:id/attachments`, `GET …/:attachmentId/download`, `GET /carriers/:id/documents/overview`. Перевозчику — только точечно (B6) |
+| `carrier_documents.add` | ✅ |  | ✅ |  |  |  |  |  | `POST /carriers/:id/attachments`. Перевозчику — только точечно (B6) |
+| `carrier_documents.delete` | ✅ |  | ✅ |  |  |  |  |  | `DELETE /carriers/:id/attachments/:attachmentId` |
+| `vehicles.read` | ✅ |  | ✅ | ✅ | ✅ | ✅ |  |  | `GET /vehicles`, `GET /vehicles/:id`, вложения (список, download) |
+| `vehicles.rates.read` | ✅ |  | ✅ | ✅ |  | ✅ | ✅ | ✅ | сервис: четыре ставки в карточке авто и в блоке «Stawki» модалки выезда (скрыты от dyspozytor; eksport и weryfikator видят их только в модалке выезда) |
+| `vehicles.fuel_card.read` | ✅ |  | ✅ |  |  | ✅ |  |  | сервис: номер и PIN топливной карты в карточке авто |
+| `vehicles.planner_transfer.request` |  |  | ✅ | ✅ |  |  |  |  | `POST /vehicles/:id/planner-transfers`, `POST /planner-transfers/:id/cancel`; вместе с `.decide` — `GET /planner-transfers`, `GET /lookups/planisci/transfer-targets`. Сервис: planista — только текущий планиста машины, cancel — только автор |
+| `vehicles.planner_transfer.decide` | ✅ |  |  |  |  |  |  |  | `POST /planner-transfers/:id/{approve,reject}`; вместе с `.request` — `GET /planner-transfers`, `GET /lookups/planisci/transfer-targets`. Сервис: лидер **этого** `fromPlanner`, не автор и не получатель |
+| ↳ + lider |  |  |  | ✅ |  |  |  |  | `LIDER_PERMISSIONS.planista` |
+| `vehicles.planner_history.read` | ✅ |  | ✅ | ✅ |  |  |  |  | `GET /vehicles/:id/planner-history` (сервис: opiekun — свой перевозчик, planista — текущий планиста или его лидер) |
+| `drivers.read` | ✅ |  | ✅ |  |  | ✅ |  |  | `GET /drivers`, `GET /drivers/:id`, вложения (список, download) |
+| `trailers.read` | ✅ |  | ✅ |  |  | ✅ |  |  | `GET /trailers`, `GET /trailers/:id`, вложения (список, download) |
+| `fleet.write` | ✅ |  | ✅ |  |  |  |  |  | создание, правка, деактивация / реактивация и soft-delete vehicles, drivers, trailers; удаление их вложений |
+| `fleet.hard_delete` | ✅ |  |  |  |  |  |  |  | `DELETE /drivers/:id/hard`, `DELETE /trailers/:id/hard` (у vehicles hard-delete выведен из API) |
+| `gps.read` | ✅ |  | ✅ | ✅ | ✅ | ✅ |  |  | `GET /integrations/gps/positions`, `GET /integrations/gps/positions/:vehicleId`, `GET /integrations/gps/trips/:vehicleId` |
+| `gps.refresh` | ✅ |  |  |  |  |  |  |  | `POST /integrations/gps/refresh` |
+| `delegations.read` | ✅ |  | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | `GET /delegations`, `GET /delegations/:id` |
+| `delegations.create` |  |  |  |  |  | ✅ |  |  | `POST /delegations`, `GET /delegations/eligibility` |
+| `delegations.cancel` | ✅ |  |  |  |  | ✅ |  |  | `POST /delegations/:id/cancel` (свой / любой активный — scope) |
+| `delegations.mark_ready` | ✅ |  |  |  |  |  | ✅ |  | `POST /delegations/:id/ready` |
+| `delegations.transit` | ✅ |  |  |  |  |  |  | ✅ | `POST /delegations/:id/in-transit`, `POST /delegations/:id/returned` |
+| `km.read` | ✅ |  | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | `GET /vehicles/km-report`, `GET /vehicles/:id/daily-km` |
+| `km.verify` | ✅ |  |  |  |  |  |  | ✅ | `GET /vehicles/km-board`, `PUT /vehicles/:id/daily-km`, `DELETE /vehicles/:id/daily-km` |
+| `panel.opiekun` | ✅ |  | ✅ |  |  |  |  |  | `GET /fleet/opiekun`, `GET /opiekun/carriers`, `GET /alerts`, `GET /guarantee-compliance`, `GET /guarantee-episodes` |
+| `panel.planista` | ✅ |  |  | ✅ |  |  |  |  | `GET /fleet/planista` |
+| `panel.dyspozytor` | ✅ |  |  |  | ✅ |  |  |  | `GET /fleet/dyspozytor` |
+| `panel.carrier` |  |  |  |  |  | ✅ |  |  | `GET /fleet/my`, `GET /guarantee-compliance/me`, `GET /guarantee-episodes/me` |
+| `lookups.staff` | ✅ |  | ✅ |  |  |  |  |  | `GET /lookups/{dyspozytor,opiekuni,planisci,teams}` |
+| `lookups.carriers` | ✅ | ✅ | ✅ |  |  |  |  |  | `GET /lookups/carriers` |
+| `integrations.external` | ✅ |  | ✅ |  |  |  |  |  | `POST /integrations/vies/check`, `POST /integrations/whitelist/{check,search}` (info-car удалён 2026-10-22) |
+| `bugbot.submit_idea` | ✅ |  |  |  |  |  |  |  | сервис: `GET /integrations/bugbot/handoff?kind=idea`. Сам эндпоинт — любой залогиненный (`kind=bug` открыт всем) |
+| `users.manage` | ✅ |  |  |  |  |  |  |  | `/users*`, `GET /lookups/users`, `GET /lookups/planisci/liders` |
+| `sso.manage` | ✅ |  |  |  |  |  |  |  | `/sso/*` |
+| `teams.manage` | ✅ |  |  |  |  |  |  |  | `/teams*` |
+| `trailer_types.manage` | ✅ |  |  |  |  |  |  |  | запись `/trailer-types*` (create, patch, deactivate, hard); `GET /trailer-types` — любой залогиненный |
+| `limits.manage` | ✅ |  |  |  |  |  |  |  | `GET /limits`, `PUT /limits/:yearMonth`, `POST /limits/bulk` |
+| `audit.read` | ✅ |  |  |  |  |  |  |  | `GET /audit` |
+| `diagnostics.manage` | ✅ |  |  |  |  |  |  |  | `GET /diagnostics/{db,mails,claims}`, `POST /diagnostics/mails/:jobId/resend` |
+
+<!-- authz:matrix:end -->
 
 ---
 
