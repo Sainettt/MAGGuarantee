@@ -27,9 +27,9 @@ import {
  *     `POST /auth/refresh` `req.user` is the refresh-token payload, which has
  *     no `permissions`.
  *  2. No `@RequirePermission` metadata (`getAllAndOverride([handler, class])`)
- *     → allow: the transition period, mirroring `RolesGuard` on a route
- *     without `@Roles`. The inverse rule in `endpoint-permissions.spec.ts`
- *     makes sure such a route is `@Roles`-gated or allowlisted.
+ *     → allow: a session-only route. The inverse rule in
+ *     `endpoint-permissions.spec.ts` (phase 2 since docs/25 B2d) makes sure
+ *     such a route is listed in `AUTHENTICATED_ONLY` with a reason.
  *  3. Metadata present, `req.user.permissions` missing → 403, fail closed.
  *     The set is NEVER recomputed from the role here: it is built once in
  *     `JwtAccessStrategy.validate`, and that is where B6 overrides land.
@@ -51,7 +51,7 @@ export class PermissionsGuard implements CanActivate {
     if (isPublic) return true;
 
     const declared = this.reflector.getAllAndOverride<unknown>(PERMISSIONS_METADATA_KEY, targets);
-    // Decorator-driven: no metadata → no opinion (transition, see 2. above).
+    // Decorator-driven: no metadata → no opinion (session-only, see 2. above).
     if (declared === undefined || declared === null) return true;
     const required: unknown[] = Array.isArray(declared) ? declared : [];
 

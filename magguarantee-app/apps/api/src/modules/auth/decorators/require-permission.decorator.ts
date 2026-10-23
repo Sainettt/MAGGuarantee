@@ -18,9 +18,9 @@ import { PERMISSIONS_METADATA_KEY } from '../auth.constants';
  * would admit nobody (the guard fails closed on it), which is never what the
  * author meant.
  *
- * Track B transition (docs/25 §3 B2): a route carries EITHER `@Roles` OR
- * `@RequirePermission`, never both — `roles-snapshot.spec.ts` turns the
- * combination into a red test. `@Public` + `@RequirePermission` is red too.
+ * Since docs/25 B2d no live route carries `@Roles` at all
+ * (`endpoint-permissions.spec.ts`); `@Roles` + `@RequirePermission` and
+ * `@Public` + `@RequirePermission` are red in `roles-snapshot.spec.ts` too.
  */
 export const RequirePermission = (
   ...permissions: [Permission, ...Permission[]]

@@ -24,8 +24,8 @@ import {
  *
  *  - admin → pass through (global access)
  *  - non-opiekun roles → pass through (this guard has no opinion; other
- *    guards such as `CarrierOwnershipGuard` or `RolesGuard` cover them).
- *    pracownik is excluded at the @Roles level on every CRUD endpoint per
+ *    guards such as `CarrierOwnershipGuard` or `PermissionsGuard` cover them).
+ *    pracownik is excluded by `@RequirePermission` on every CRUD endpoint per
  *    docs/03-roles.md#pracownik (claims-only role).
  *  - opiekun → must own the targeted carrier; otherwise 403
  *
@@ -65,8 +65,8 @@ export class OpiekunOwnershipGuard implements CanActivate {
     }
 
     // admin bypass — global access per docs/03-roles.md. pracownik does NOT
-    // bypass: it is excluded from carrier/vehicle/driver/trailer CRUD at the
-    // @Roles level (docs/03-roles.md#pracownik), so it should never reach
+    // bypass: it is excluded from carrier/vehicle/driver/trailer CRUD by their
+    // `@RequirePermission` (docs/03-roles.md#pracownik), so it should never reach
     // this guard via those routes; if it ever did, falling through to the
     // opiekun branch below would still deny (it has no `opiekunId` match).
     if (user.role === 'admin') return true;

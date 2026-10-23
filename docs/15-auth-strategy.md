@@ -343,30 +343,37 @@ export class RolesGuard implements CanActivate {
 }
 ```
 
-### `PermissionsGuard` рядом с `RolesGuard` (трек B, с 2026-10-23)
+### `PermissionsGuard` (трек B, с 2026-10-23)
 
-Переходный период трека B ([25-permissions-layer-plan.md](25-permissions-layer-plan.md) §3 B2):
-оба guard'а глобальные (`APP_GUARD`), порядок — Throttler → `JwtAuthGuard` →
-`RolesGuard` → `PermissionsGuard`; ownership-guards из `@UseGuards` контроллера
-идут после них. Эндпоинт несёт **либо** `@Roles(...)`, **либо**
-`@RequirePermission(...)` (any-of, права из `packages/shared/src/permissions.ts`),
-никогда оба — это красный тест `roles-snapshot.spec`, не рантайм-проверка.
-`AuthUser.permissions` считается **один раз** в `JwtAccessStrategy.validate` из
-`permissionsFor(role, lider)` (та же пара из БД, что `role`/`lider`; B6 добавит
-сюда индивидуальные права). `PermissionsGuard` проверяет по порядку:
+**B2 завершён: все контроллеры переведены** на `@RequirePermission(...)` (any-of,
+права из `packages/shared/src/permissions.ts`; какое право требует каждый роут —
+`apps/api/src/common/authz/endpoint-permissions.ts`), см.
+[25-permissions-layer-plan.md](25-permissions-layer-plan.md) §3 B2. Декоратор
+`@Roles` и `RolesGuard` в примерах выше описывают состояние до трека B: `@Roles`
+нет ни на одном живом роуте или классе контроллера — иначе красный тест
+`endpoint-permissions.spec`. Оба guard'а пока глобальные (`APP_GUARD`), порядок —
+Throttler → `JwtAuthGuard` → `RolesGuard` → `PermissionsGuard`; ownership-guards из
+`@UseGuards` контроллера идут после них. `RolesGuard` без метаданных пропускает
+всех, то есть остаётся зарегистрированным no-op'ом до B5. Inverse-правило (фаза 2,
+с B2d): каждый не-`@Public` роут несёт `@RequirePermission` или стоит в
+`AUTHENTICATED_ONLY` с причиной; `@Roles` решением об авторизации больше не
+считается. `AuthUser.permissions` считается **один раз** в
+`JwtAccessStrategy.validate` из `permissionsFor(role, lider)` (та же пара из БД, что
+`role`/`lider`; B6 добавит сюда индивидуальные права). `PermissionsGuard` проверяет
+по порядку:
 
 1. `@Public` (тот же `IS_PUBLIC_KEY`, что у `JwtAuthGuard`) → пропуск. На
    `POST /auth/refresh` в `req.user` лежит refresh-payload без `permissions`.
 2. Нет метаданных `@RequirePermission` (`getAllAndOverride([handler, class])`) →
-   пропуск: роутом занимается `RolesGuard` или он в `AUTHENTICATED_ONLY`
-   (inverse-правило в `endpoint-permissions.spec`).
+   пропуск: это session-only роут из `AUTHENTICATED_ONLY` (inverse-правило в
+   `endpoint-permissions.spec`).
 3. Метаданные есть, а `req.user.permissions` нет → 403, fail closed; права из
    роли **не** пересчитываются.
 4. Иначе пропуск, если у пользователя есть хотя бы одно из требуемых прав
    (пустое требование не пропускает никого).
 
-Тексты 403 у обоих guard'ов общие (`FORBIDDEN_*_MESSAGE`), поэтому перевод роута
-с `@Roles` на `@RequirePermission` не меняет ответ. Для сервисов —
+Тексты 403 у обоих guard'ов общие (`FORBIDDEN_*_MESSAGE`), поэтому перевод роутов
+с `@Roles` на `@RequirePermission` (B2a–c) ответы не изменил. Для сервисов —
 `can(user, p)` / `canAny` из `common/authz/can.ts` (тот же fail closed). B5 удалит
 `@Roles` и `RolesGuard`.
 

@@ -59,9 +59,9 @@ export class CarrierOwnershipGuard implements CanActivate {
 
     // Only przewoznik is scoped by this guard. Other roles either have
     // global access (admin) or are subject to a different guard
-    // (opiekun → OpiekunOwnershipGuard). pracownik is blocked at the @Roles
-    // level on every endpoint that uses this guard per docs/03-roles.md
-    // (#pracownik). Pass through.
+    // (opiekun → OpiekunOwnershipGuard). pracownik is blocked by the
+    // `@RequirePermission` of every endpoint that uses this guard per
+    // docs/03-roles.md (#pracownik). Pass through.
     if (user.role !== 'przewoznik') return true;
 
     const carrier = await this.prisma.client.carrier.findFirst({

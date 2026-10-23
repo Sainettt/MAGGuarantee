@@ -1,16 +1,18 @@
 // Route → permission plan for track B (docs/25 §3 B1 → B2).
 //
-// B1 (now): pure data, read by no guard. `endpoint-permissions.spec.ts` proves
-// that for every role-gated route in the committed `@Roles` snapshot
+// B1: pure data, read by no guard. `endpoint-permissions.spec.ts` proves that
+// for every role-gated route in the committed `@Roles` snapshot
 // (`__fixtures__/endpoint-roles.snapshot.json`)
 //   rolesSatisfying(ENDPOINT_PERMISSIONS[route], { lider: true }) === snapshot[route]
-// i.e. that the catalog in `@magguarantee/shared` reproduces today's access
-// exactly, before a single controller changes.
+// i.e. that the catalog in `@magguarantee/shared` reproduces the pre-track-B
+// access exactly.
 //
-// B2: each `@Roles(...)` becomes `@RequirePermission(...ENDPOINT_PERMISSIONS[route])`
-// (any-of, like `@Roles`), and the B2 equivalence spec checks the live
-// decorator metadata against this table and the same snapshot. B5 deletes the
-// table once the decorators are the only source.
+// B2 (done 2026-10-23): every `@Roles(...)` became
+// `@RequirePermission(...ENDPOINT_PERMISSIONS[route])` (any-of, like `@Roles`).
+// The same spec checks that the live decorators equal this table route for
+// route and that every other non-`@Public` route is in `AUTHENTICATED_ONLY`.
+// Still read by no guard; B5 deletes the table once the decorators are the
+// only source.
 //
 // Keys: `METHOD /path` without the `api/v1` prefix (the snapshot format).
 
@@ -192,9 +194,9 @@ export const ENDPOINT_PERMISSIONS: Readonly<Record<string, readonly Permission[]
 };
 
 /**
- * Session-only routes (no `@Roles` today) and why they stay that way. B2 turns
- * this into the `AUTHENTICATED_ONLY` allowlist of the inverse rule: every
- * non-`@Public` route carries `@RequirePermission` or sits here (docs/25 R2).
+ * Session-only routes (no `@RequirePermission`: any session passes) and why
+ * they stay that way — the allowlist of the inverse rule: every non-`@Public`
+ * route carries `@RequirePermission` or sits here (docs/25 R2).
  */
 export const AUTHENTICATED_ONLY: Readonly<Record<string, string>> = {
   'GET /auth/me': 'Every signed-in user reads their own session profile.',

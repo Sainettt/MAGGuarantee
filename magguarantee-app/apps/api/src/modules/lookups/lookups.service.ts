@@ -138,8 +138,8 @@ export class LookupsService {
 
   /**
    * Admin users-autocomplete per Phase 4.5. Returns up to 100 rows. Caller is
-   * guaranteed admin by the controller's `@Roles('admin')` — re-asserted
-   * here defensively (mirrors `carriersList`).
+   * guaranteed admin by the controller's `@RequirePermission('users.manage')`
+   * (an admin-only right) — re-asserted here defensively (mirrors `carriersList`).
    *
    * Includes inactive users so the admin can filter audit rows tied to
    * deactivated accounts; soft-deleted rows are excluded by the soft-delete

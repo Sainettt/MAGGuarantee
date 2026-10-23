@@ -1756,9 +1756,10 @@ export class ClaimsService {
 
   /**
    * Role gate for the verification checkpoint, STATUS-DEPENDENT — which is why
-   * it lives in the service and not on `@Roles('admin','pracownik')` (the
-   * controller decorator stays the coarse gate per docs/15-auth-strategy.md
-   * §Roles; docs/03-roles.md gives admin the superset of pracownik).
+   * it lives in the service and not on the controller's
+   * `@RequirePermission('claims.verify')` (admin + pracownik; the decorator
+   * stays the coarse gate per docs/15-auth-strategy.md §Roles & Guards;
+   * docs/03-roles.md gives admin the superset of pracownik).
    *
    * `NA_WERYFIKACJI` is open to admin + pracownik alike (unchanged).
    * `OCZEKUJE_NA_AUTORYZACJE` is admin-ONLY: the wniosek already left the

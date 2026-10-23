@@ -1,8 +1,8 @@
 // Authorization snapshot (docs/25 §3 B1, risk R1).
 //
-// Reads the live `@Public` / `@Roles` / `@OpiekunOwns` / `@CarrierOwns` /
-// `@UseGuards` metadata of every controller registered in `AppModule` and
-// compares it with the two committed fixtures:
+// Reads the live `@Public` / `@Roles` / `@RequirePermission` / `@OpiekunOwns` /
+// `@CarrierOwns` / `@UseGuards` metadata of every controller registered in
+// `AppModule` and compares it with the two committed fixtures:
 //   __fixtures__/endpoint-roles.snapshot.json      — who passes the role gate
 //   __fixtures__/endpoint-ownership.snapshot.json  — which ownership guards run
 // Any widening, narrowing, new route or dropped ownership guard is a red test
@@ -116,7 +116,7 @@ describe('authorization snapshot (docs/25 B1)', () => {
   it('knows the three access kinds (sanity check on metadata resolution)', () => {
     expect(liveRoles['POST /auth/login']).toBe(ACCESS_PUBLIC);
     expect(liveRoles['GET /auth/me']).toBe(ACCESS_AUTHENTICATED);
-    // Class-level @Roles is inherited by the handler (getAllAndOverride).
+    // Class-level @RequirePermission is inherited by the handler (getAllAndOverride).
     expect(liveRoles['GET /users']).toEqual(['admin']);
   });
 

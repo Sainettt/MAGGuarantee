@@ -78,7 +78,8 @@ const CATEGORY_ORDER: readonly AlertCategory[] = ['carrier', 'vehicle', 'driver'
  * Document-expiry alerts (in-app only, no email). Computed LIVE per request
  * against today (Europe/Warsaw) — no cron, no persisted state.
  *
- * Role gating (mirrors the controller's `@Roles('admin','opiekun')`):
+ * Role gating (mirrors the controller's `@RequirePermission('panel.opiekun')`,
+ * held by admin + opiekun):
  *   - admin   → every active entity's documents (no scope);
  *   - opiekun → only carriers they supervise (`Carrier.opiekunId === user.sub`);
  *   - anyone else → 403.

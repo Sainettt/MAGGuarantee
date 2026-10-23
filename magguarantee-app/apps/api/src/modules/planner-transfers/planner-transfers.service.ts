@@ -64,7 +64,8 @@ type VehicleWithPlanner = VehicleRow & { plannerId: string };
  * Every mutation runs inside the ambient `@Audit` transaction (the controller
  * does not opt out), so the vehicle lock, the writes and the audit row commit
  * together. Authorization of the decision is resource-level (`decisionRefusal`)
- * — `@Roles('admin','planista')` only lets the roles reach it.
+ * — the controller's `@RequirePermission('vehicles.planner_transfer.decide')`
+ * (admin, a planista only as lider) only lets the roles reach it.
  */
 @Injectable()
 export class PlannerTransfersService {

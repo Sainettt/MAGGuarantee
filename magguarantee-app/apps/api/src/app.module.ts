@@ -129,19 +129,18 @@ import { WeeklyReportModule } from './modules/weekly-report/weekly-report.module
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
-    // Global role gate. Runs AFTER JwtAuthGuard (so `req.user` is populated).
-    // A no-op on routes without `@Roles(...)` (the guard returns true when no
-    // metadata is present), so it only ADDS enforcement where a handler
-    // declares `@Roles` but its controller forgot `@UseGuards(RolesGuard)` —
-    // closing the "silent open endpoint" gap. Controllers may keep their own
-    // `@UseGuards(RolesGuard)` (idempotent).
+    // Global role gate — stays registered as a no-op until docs/25 B5 deletes
+    // it together with `@Roles`. Since B2 no live controller or route carries
+    // `@Roles` metadata (common/authz/endpoint-permissions.spec.ts), so the
+    // guard always passes through; authorization is PermissionsGuard's, below.
     { provide: APP_GUARD, useClass: RolesGuard },
     // docs/25 B2 — global permission gate, AFTER RolesGuard (order of APP_GUARD
-    // providers = order of execution). Same opt-in shape: a no-op on routes
+    // providers = order of execution). Opt-in shape: a no-op on routes
     // without `@RequirePermission` and on `@Public` ones; with metadata it
     // checks `req.user.permissions` (built by JwtAccessStrategy) and fails
-    // closed when the set is missing. A route carries `@Roles` OR
-    // `@RequirePermission`, never both (common/authz/roles-snapshot.spec.ts).
+    // closed when the set is missing. Every non-`@Public` route carries
+    // `@RequirePermission` or sits in `AUTHENTICATED_ONLY` with a reason
+    // (inverse rule, common/authz/endpoint-permissions.spec.ts).
     { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
 })

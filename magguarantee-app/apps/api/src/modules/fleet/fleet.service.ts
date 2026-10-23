@@ -409,10 +409,10 @@ export class FleetService {
   // ── Phase 6 shared helpers ───────────────────────────────
 
   /**
-   * Defence-in-depth role gate (the `@Roles(...)` decorator on the controller
-   * is the primary one). `admin` always passes — every read-only panel honours
-   * the admin debug-fallback. Any other role is rejected with the role-specific
-   * message.
+   * Defence-in-depth role gate (the controller's
+   * `@RequirePermission('panel.<role>')` is the primary one). `admin` always
+   * passes — every read-only panel honours the admin debug-fallback. Any other
+   * role is rejected with the role-specific message.
    */
   private _assertRole(
     user: AuthUser,

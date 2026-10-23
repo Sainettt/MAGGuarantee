@@ -10,15 +10,18 @@ import {
 /**
  * Marks an endpoint as requiring opiekun-level ownership of the targeted
  * carrier (or carrier-bound resource). The guard is a no-op for admin
- * (global access) and for non-opiekun roles. `pracownik` is excluded from
- * carrier-CRUD endpoints at the @Roles level per docs/03-roles.md#pracownik
- * (narrow claims-only role).
+ * (global access) and for non-opiekun roles. `pracownik` is kept off
+ * carrier-CRUD endpoints by their `@RequirePermission` — no carrier or fleet
+ * right (`carriers.*`, `vehicles.read`, `fleet.write`, …) is in its set
+ * (docs/03-roles.md#pracownik, narrow claims-only role).
  *
- * Usage:
+ * Usage — the permission gate is `@RequirePermission` (global
+ * `PermissionsGuard`), `@UseGuards` carries only the ownership guard (the
+ * real controllers declare it once on the class):
  *   ```ts
  *   @Patch('carriers/:id')
- *   @Roles('admin', 'opiekun')
- *   @UseGuards(RolesGuard, OpiekunOwnershipGuard)
+ *   @RequirePermission('carriers.write')
+ *   @UseGuards(OpiekunOwnershipGuard)
  *   @OpiekunOwns('id', 'param', 'carrierId')
  *   update(...)
  *   ```
@@ -34,13 +37,15 @@ export const OpiekunOwns = (
  * Marks an endpoint as requiring that the targeted resource belongs to the
  * authenticated carrier user. No-op for non-przewoznik roles.
  *
- * Usage:
+ * Usage — the permission gate is `@RequirePermission` (global
+ * `PermissionsGuard`), `@UseGuards` carries only the ownership guard (the
+ * real controllers declare it once on the class):
  *   ```ts
- *   @Patch('vehicles/:id')
- *   @Roles('przewoznik', 'admin', 'opiekun')
- *   @UseGuards(RolesGuard, CarrierOwnershipGuard)
+ *   @Get('vehicles/:id')
+ *   @RequirePermission('vehicles.read')
+ *   @UseGuards(CarrierOwnershipGuard)
  *   @CarrierOwns('id', 'param', 'vehicleId')
- *   update(...)
+ *   getById(...)
  *   ```
  */
 export const CarrierOwns = (

@@ -6,6 +6,8 @@
 // any session, role order, guard + decorator pairing) and the fixture helpers.
 // B2.0 adds `@RequirePermission`: a permission-only route, the
 // both-decorators and `@Public` contradictions, malformed requirements.
+// B2d adds `rolesMetadataSites`: these synthetic controllers are the only
+// users of `@Roles` left, so they pin what the live "no @Roles" check reports.
 
 import { Controller, Delete, Get, Patch, Post, Put, SetMetadata, UseGuards } from '@nestjs/common';
 
@@ -28,6 +30,7 @@ import {
   formatSnapshot,
   parseOwnershipSnapshot,
   parseRolesSnapshot,
+  rolesMetadataSites,
   routeGate,
 } from './roles-snapshot';
 
@@ -398,5 +401,31 @@ describe('routeGate', () => {
     expect(gateOf('GET /perm-class-roles')).toBe('both');
     // Empty @Roles() = any session: not a decision the inverse rule accepts.
     expect(gateOf('GET /things/:id')).toBe('none');
+  });
+});
+
+describe('rolesMetadataSites (docs/25 B2d)', () => {
+  it('lists every class and handler carrying @Roles — raw, empty @Roles() included, values as written', () => {
+    expect(rolesMetadataSites([...routes, ...permRoutes, ...badRoutes])).toEqual([
+      'ClassRolesHandlerPermController (class): @Roles(admin)',
+      'DELETE /owned/:id (OwnedController.both): @Roles(przewoznik, opiekun)',
+      'DELETE /perm-bad/:id (PermContradictionsController.both): @Roles(admin, pracownik)',
+      'GET /owned/:id (OwnedController.byClassGuard): @Roles(admin, opiekun)',
+      'GET /things/:id (ThingsController.open): @Roles()',
+      'PATCH /things/:id (ThingsController.patch): @Roles(weryfikator, admin, admin)',
+      'POST /owned (OwnedController.noOwnership): @Roles(admin)',
+      'PUT /owned/:id (OwnedController.inert): @Roles(przewoznik)',
+      // One line per class, however many routes it reaches.
+      'ThingsController (class): @Roles(opiekun, admin)',
+    ]);
+  });
+
+  it('shows non-role values as written and reports nothing for permission-only controllers', () => {
+    const [first] = routes;
+    if (!first) throw new TypeError('no synthetic routes discovered');
+    const bogus = { ...first, key: 'GET /bogus', handler: 'bogus', handlerRef: bogusHandler };
+    expect(rolesMetadataSites([bogus])).toContain('GET /bogus (ThingsController.bogus): @Roles(admin, superuser)');
+    expect(rolesMetadataSites(permRoutes)).toEqual([]);
+    expect(rolesMetadataSites(listRoutes([OpenController]))).toEqual([]);
   });
 });

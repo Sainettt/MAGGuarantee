@@ -101,7 +101,7 @@ export interface AuditableRequest {
  * Usage:
  *   ```ts
  *   @Patch(':nrZgl')
- *   @Roles('admin', 'pracownik')
+ *   @RequirePermission('claims.verify')
  *   @Audit({
  *     action: 'updateClaim',
  *     targetType: 'Claim',

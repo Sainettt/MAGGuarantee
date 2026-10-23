@@ -174,6 +174,33 @@ export function buildPermissionRequirements(
   return sortedRecord(entries);
 }
 
+/**
+ * Every place a `@Roles` decorator left metadata on a served route — the
+ * controller class or the route handler, read raw (`Reflect.getMetadata`, no
+ * handler-over-class override, so a class `@Roles` hidden behind handler
+ * metadata is still reported). An empty `@Roles()` and non-role values count:
+ * any `@Roles` is a leftover. Since docs/25 B2d no route of the live module
+ * graph may carry one (`endpoint-permissions.spec.ts`); the synthetic
+ * controllers of `snapshot-builders.spec.ts` are its only users until B5
+ * deletes the decorator. One line per site, values as written, sorted.
+ */
+export function rolesMetadataSites(routes: readonly SnapshotRoute[]): string[] {
+  const sites = new Set<string>();
+  for (const route of routes) {
+    const onClass: unknown = Reflect.getMetadata(ROLES_METADATA_KEY, route.controllerRef);
+    if (isDeclared(onClass)) sites.add(`${route.controller} (class): ${rolesAsWritten(onClass)}`);
+    const onHandler: unknown = Reflect.getMetadata(ROLES_METADATA_KEY, route.handlerRef);
+    if (isDeclared(onHandler)) sites.add(`${routeLabel(route)}: ${rolesAsWritten(onHandler)}`);
+  }
+  return [...sites].sort(byCodeUnit);
+}
+
+function rolesAsWritten(declared: unknown): string {
+  const values: unknown[] = Array.isArray(declared) ? declared : [declared];
+  const shown = values.map((v) => (typeof v === 'string' ? v : JSON.stringify(v)));
+  return `@Roles(${shown.join(', ')})`;
+}
+
 // ─── Roles snapshot ────────────────────────────────────────
 
 /** Builds the `endpoint-roles` map from live metadata. */

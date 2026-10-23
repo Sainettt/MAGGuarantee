@@ -843,7 +843,8 @@ export class GuaranteeWatchdogService implements OnModuleInit {
 
   /**
    * Carrier self-archive (`GET /guarantee-episodes/me`). Hard-rejects any
-   * non-przewoznik caller (defence-in-depth behind `@Roles('przewoznik')`).
+   * non-przewoznik caller (defence-in-depth behind the controller's
+   * `@RequirePermission('panel.carrier')`, a przewoznik-only right).
    * The carrier scope is ALWAYS derived from the JWT (`carrier.userId = user.sub`)
    * — `carrierId` is not even in `MyGuaranteeEpisodeFilters`, so a client can
    * never widen the scope (IDOR guard). Honours vehicleId/state/cursor/limit,
