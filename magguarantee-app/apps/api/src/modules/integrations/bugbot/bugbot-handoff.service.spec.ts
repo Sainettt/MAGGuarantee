@@ -21,7 +21,7 @@ import type { BugbotHandoffQuery, Role } from '@magguarantee/shared';
 import type { Env } from '../../../config/env.schema';
 import type { AuthUser } from '../../auth/decorators/current-user.decorator';
 import { BugbotHandoffService, emailClaim, nameClaim } from './bugbot-handoff.service';
-import { makeAuthUser } from '../../../common/testing/make-auth-user';
+import { makeAuthUser, withoutPermission } from '../../../common/testing/make-auth-user';
 
 const SLUG = 'magguarantee';
 const KID = 'mg-2026-10';
@@ -183,6 +183,17 @@ describe('BugbotHandoffService', () => {
       const { url } = await svc.createHandoff(user({ role: 'admin' }), { kind: 'idea', locale: 'pl' });
 
       expect((await verify(tokenOf(url))).kind).toBe('idea');
+    });
+
+    it('is decided by bugbot.submit_idea, not by the role: an admin without it gets 403', async () => {
+      const svc = new BugbotHandoffService(makeConfig());
+
+      await expect(
+        svc.createHandoff(withoutPermission(user({ role: 'admin' }), 'bugbot.submit_idea'), {
+          kind: 'idea',
+          locale: 'pl',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
     });
   });
 

@@ -5,7 +5,7 @@
 import { permissionsFor, RoleSchema } from '@magguarantee/shared';
 
 import type { AuthUser } from '../../modules/auth/decorators/current-user.decorator';
-import { makeAuthUser, withRole } from './make-auth-user';
+import { makeAuthUser, withoutPermission, withRole } from './make-auth-user';
 
 describe('makeAuthUser', () => {
   it.each(RoleSchema.options)('%s: permissions = permissionsFor(role, false)', (role) => {
@@ -71,5 +71,18 @@ describe('withRole', () => {
     withRole(carrier, 'admin');
     expect(carrier.role).toBe('przewoznik');
     expect([...carrier.permissions]).toEqual(permissionsFor('przewoznik', false));
+  });
+});
+
+describe('withoutPermission', () => {
+  it('revokes exactly one permission, keeps the role and the person, leaves the base intact', () => {
+    const admin = makeAuthUser('admin', { sub: 'u-admin' });
+    const revoked = withoutPermission(admin, 'users.manage');
+
+    expect(revoked).toMatchObject({ sub: 'u-admin', role: 'admin' });
+    expect([...revoked.permissions]).toEqual(
+      permissionsFor('admin', false).filter((p) => p !== 'users.manage'),
+    );
+    expect(admin.permissions.has('users.manage')).toBe(true);
   });
 });

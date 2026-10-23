@@ -19,8 +19,9 @@ import { BugbotHandoffService } from './bugbot-handoff.service';
  * per docs/13-api-design.md#external-integrations.
  *
  * Auth: the global JwtAuthGuard; every role may report a bug, so there is no
- * `@Roles`. `kind=idea` is admin-only — a 403 from the service, because the
- * rule depends on a query parameter, not on the route.
+ * `@RequirePermission` (the route is in `AUTHENTICATED_ONLY`). `kind=idea`
+ * needs `bugbot.submit_idea` (admin only) — a 403 from the service via `can()`,
+ * because the rule depends on a query parameter, not on the route.
  *
  * Rate limit: the global 100/min/IP stays as is; BugbotHandoffThrottlerGuard
  * adds 10/min per user (see the guard for why not `@Throttle`).

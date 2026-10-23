@@ -63,6 +63,10 @@ export function decisionRefusal(
   viewer: Pick<AuthUser, 'sub' | 'role' | 'lider'>,
   subject: DecisionSubject,
 ): 'not_decider' | 'requester' | 'target' | null {
+  // scope: resource-level — "lider of THIS request's fromPlanner"
+  // (fromPlanner.liderId), keyed on role + lider, deliberately not on
+  // `permissions`: the route's `vehicles.planner_transfer.decide` only lets
+  // deciders reach it (docs/25 §0, docs/29 §3.1).
   const isAuthority =
     viewer.role === 'admin' ||
     (viewer.role === 'planista' &&

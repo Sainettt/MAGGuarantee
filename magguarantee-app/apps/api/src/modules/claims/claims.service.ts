@@ -62,6 +62,7 @@ import {
 } from '@magguarantee/shared';
 
 import { AuditContext } from '../../common/audit/audit-context';
+import { can } from '../../common/authz/can';
 import type { Env } from '../../config/env.schema';
 import { AuditWriter } from '../audit/audit.service';
 import type { AuditActor } from '../audit/audit.types';
@@ -578,7 +579,8 @@ export class ClaimsService {
   // ── Submit ──────────────────────────────────────────────
 
   async submit(user: AuthUser, dto: SubmitClaimDto): Promise<ClaimDto> {
-    // carrier-only path, see @Roles on POST /claims
+    // carrier-only path: the route needs `claims.submit` (przewoznik only); the
+    // carrier itself comes from `_requireCarrierProfile` (scope, see there).
     const carrier = await this._requireCarrierProfile(user);
 
     // REWORK 2026-07-30 — the outing supplies the IDENTITY (vehicle, trailer,
@@ -1560,11 +1562,13 @@ export class ClaimsService {
    *
    *   1. Load the claim (404 if missing).
    *   2. Require a verifiable status (422 otherwise): `NA_WERYFIKACJI` for
-   *      admin + pracownik alike, plus `OCZEKUJE_NA_AUTORYZACJE` for `admin`
-   *      ONLY (422 `CLAIM_VERIFY_ADMIN_ONLY` for pracownik there). The role
-   *      split lives HERE, not on `@Roles`, because it is status-dependent —
-   *      the documented pattern (docs/15-auth-strategy.md §Roles: coarse gate on
-   *      the controller, fine-grained scope in the service).
+   *      admin + pracownik alike, plus `OCZEKUJE_NA_AUTORYZACJE` only with the
+   *      `claims.verify_pending_authorization` capability — admin alone in the
+   *      catalog (422 `CLAIM_VERIFY_ADMIN_ONLY` for pracownik there). The split
+   *      lives HERE, not on the route's `@RequirePermission('claims.verify')`,
+   *      because it is status-dependent — the documented pattern
+   *      (docs/15-auth-strategy.md §Roles & Guards: coarse gate on the
+   *      controller, capability via `can()` in the service).
    *   3. Re-run km-calc when the body carries a math-affecting correction OR
    *      the wniosek is a mixed period settled on the daily-km board (the SAME
    *      `_recalcClaim` the decision PATCH uses; an EMPTY body on an all-active
@@ -1740,8 +1744,9 @@ export class ClaimsService {
    *
    *   - `NA_WERYFIKACJI`           — the normal verification window.
    *   - `OCZEKUJE_NA_AUTORYZACJE`  — the pending-authorization window; the
-   *     numbers can still need a fix while Maksim's reply is awaited. Role is
-   *     narrowed separately by `_assertMayVerifyInStatus` (admin only).
+   *     numbers can still need a fix while Maksim's reply is awaited. Who may
+   *     act there is narrowed separately by `_assertMayVerifyInStatus`
+   *     (`claims.verify_pending_authorization`, admin only).
    *
    * Any other status (decided / reklamacja) → 422 with a friendly Polish
    * message, no machine code (unchanged from before). Pure guard — no IO.
@@ -1755,15 +1760,17 @@ export class ClaimsService {
   }
 
   /**
-   * Role gate for the verification checkpoint, STATUS-DEPENDENT — which is why
-   * it lives in the service and not on the controller's
+   * Capability gate for the verification checkpoint, STATUS-DEPENDENT — which
+   * is why it lives in the service and not on the controller's
    * `@RequirePermission('claims.verify')` (admin + pracownik; the decorator
    * stays the coarse gate per docs/15-auth-strategy.md §Roles & Guards;
    * docs/03-roles.md gives admin the superset of pracownik).
    *
    * `NA_WERYFIKACJI` is open to admin + pracownik alike (unchanged).
-   * `OCZEKUJE_NA_AUTORYZACJE` is admin-ONLY: the wniosek already left the
+   * `OCZEKUJE_NA_AUTORYZACJE` needs `claims.verify_pending_authorization`
+   * (docs/25 §3 B3; admin only in the catalog): the wniosek already left the
    * verifier's desk and is awaiting Maksim, so only an admin may reach back in.
+   * The refusal keeps its admin wording and code — today they name the same set.
    *
    * Enforced HERE (server-side) rather than by merely hiding the button, so it
    * cannot be bypassed by calling the endpoint directly. Throws 422 with the
@@ -1773,7 +1780,7 @@ export class ClaimsService {
    */
   private _assertMayVerifyInStatus(user: AuthUser, existing: ClaimRow): void {
     if (existing.status !== 'OCZEKUJE_NA_AUTORYZACJE') return;
-    if (user.role === 'admin') return;
+    if (can(user, 'claims.verify_pending_authorization')) return;
 
     throw new UnprocessableEntityException({
       code: 'CLAIM_VERIFY_ADMIN_ONLY',
@@ -2201,7 +2208,8 @@ export class ClaimsService {
     user: AuthUser,
     dto: PreviewClaimDto,
   ): Promise<PreviewClaimResponse> {
-    // carrier-only path, see @Roles on POST /claims/preview
+    // carrier-only path: the route needs `claims.submit` (przewoznik only); the
+    // carrier itself comes from `_requireCarrierProfile` (scope, see there).
     const carrier = await this._requireCarrierProfile(user);
 
     // REWORK 2026-07-30 — when the carrier has picked an outing we still run
@@ -2246,6 +2254,9 @@ export class ClaimsService {
   ): Promise<PreviewClaimResponse> {
     const claim = await this.claims.findByNrZgl(nrZgl);
     if (!claim) throw new NotFoundException('Wniosek nie znaleziony');
+    // scope: a carrier previews only its own wniosek (Claim.carrierId ↔
+    // Carrier.userId); every other role passes unscoped — today only admin /
+    // pracownik reach here, the route is the only limit (docs/25 §0, R4).
     if (user.role === 'przewoznik') {
       const carrier = await this._requireCarrierProfile(user);
       if (claim.carrierId !== carrier.id) {
@@ -2257,15 +2268,15 @@ export class ClaimsService {
     // Vehicle → Carrier); for admin / pracownik, vehicle ownership is
     // irrelevant. The DTO's `vehicleId` is consumed only as km-calc input.
     //
-    // Mileage-override gate: only VERIFIER roles (anything but `przewoznik`,
-    // i.e. `pracownik`/`admin` — the roles wired at the controller for this
-    // route) may replace the daily-km sum with `dto.mileage` so the ClaimModal's
+    // Mileage-override gate: only a VERIFIER (`claims.verify` — admin /
+    // pracownik; of the roles this route admits, everyone but `przewoznik`)
+    // may replace the daily-km sum with `dto.mileage` so the ClaimModal's
     // live dopłata tracks a km edit. The carrier reklamacja-inspection path
     // (`przewoznik`) keeps the sum — the "no carrier override" invariant from
     // Phase 7 §0″ stands. `ctx` is null here (existing-claim path), so the flag
     // is actually consulted; the carrier new-claim `previewKmCalc` path never
     // sets it.
-    const allowMileageOverride = user.role !== 'przewoznik';
+    const allowMileageOverride = can(user, 'claims.verify');
     // Times come from the persisted claim (the preview body no longer carries
     // `timeFrom`/`timeTo`); pass the loaded row so the live math keeps the
     // claim's fractional-boundary window for mileage/date/hours edits.
@@ -2508,7 +2519,8 @@ export class ClaimsService {
     nrZgl: string,
     dto: SubmitReklamacjaDto,
   ): Promise<ClaimDto> {
-    // carrier-only path, see @Roles on POST /claims/:nrZgl/reklamacja
+    // carrier-only path: the route needs `claims.submit` (przewoznik only); the
+    // carrier itself comes from `_requireCarrierProfile` (scope, see there).
     const carrier = await this._requireCarrierProfile(user);
     const claim = await this.claims.findByNrZgl(nrZgl);
     if (!claim) throw new NotFoundException('Wniosek nie znaleziony');
@@ -2679,10 +2691,11 @@ export class ClaimsService {
     if (!row) throw new NotFoundException('Wniosek nie znaleziony');
     await this._assertClaimReadable(user, row);
     const dto = this.toDto(row);
-    // Staff-only live figures. `_assertClaimReadable` has already narrowed the
-    // caller to admin / pracownik / przewoznik, so "staff" here means
-    // admin / pracownik (opiekun has no claims access — docs/03-roles.md#opiekun).
-    const staff = user.role !== 'przewoznik';
+    // Staff-only live figures, for a verifier (`claims.verify`).
+    // `_assertClaimReadable` has already narrowed the caller to admin /
+    // pracownik / przewoznik, so "staff" here means admin / pracownik (opiekun
+    // has no claims access — docs/03-roles.md#opiekun).
+    const staff = can(user, 'claims.verify');
     return {
       ...dto,
       verifierMileage: await this._resolveVerifierMileage(user, row),
@@ -2723,14 +2736,17 @@ export class ClaimsService {
    * Read-ownership gate for a single wniosek. admin/pracownik → any;
    * przewoznik → only own. Every other role — opiekun included (no claims
    * access since 2026-10-22, docs/03-roles.md#opiekun), planista, dyspozytor,
-   * eksport, weryfikator — is rejected. They are also excluded at the `@Roles`
-   * level, so this is defence-in-depth; the `@CarrierOwns` guard already
-   * covers przewoznik at the route.
+   * eksport, weryfikator — is rejected. They are also refused by the route's
+   * `@RequirePermission('claims.read')`, so this is defence-in-depth; the
+   * `@CarrierOwns` guard already covers przewoznik at the route.
    */
   private async _assertClaimReadable(
     user: AuthUser,
     row: ClaimRow,
   ): Promise<void> {
+    // scope: admin / pracownik → every wniosek, przewoznik → own
+    // (Claim.carrierId ↔ Carrier.userId), anyone else → 403 (docs/25 §0). Not a
+    // capability: "admin or pracownik → return" means "sees all" (docs/25 §3 B3).
     if (user.role === 'admin' || user.role === 'pracownik') return;
     if (user.role === 'przewoznik') {
       const carrier = await this._requireCarrierProfile(user);
@@ -2747,8 +2763,9 @@ export class ClaimsService {
    * ClaimModal shows beside the carrier's declared mileage (REWORK 2026-07-30).
    *
    * Deliberately narrow:
-   *  - verifier roles only (a carrier must not be handed the other system's
-   *    number — the two disagree by design and it is not what it is paid on);
+   *  - verifiers only (`claims.verify`) — a carrier must not be handed the
+   *    other system's number (the two disagree by design and it is not what
+   *    it is paid on);
    *  - detail only (one aggregate per opened claim, never per list row);
    *  - `null` unless the outing carries BOTH actual datetimes, so a partial
    *    window never produces a misleading half-sum.
@@ -2757,7 +2774,7 @@ export class ClaimsService {
     user: AuthUser,
     row: ClaimRow,
   ): Promise<number | null> {
-    if (user.role === 'przewoznik') return null;
+    if (!can(user, 'claims.verify')) return null;
     const from = row.delegationActualDepartureAt;
     const to = row.delegationActualReturnAt;
     if (!from || !to || !row.vehicleId) return null;
@@ -3774,6 +3791,8 @@ export class ClaimsService {
   private async _requireCarrierProfile(
     user: AuthUser,
   ): Promise<{ id: string }> {
+    // scope: the caller's own carrier — Carrier.userId = user.sub; only a
+    // przewoznik has one (docs/25 §0).
     if (user.role !== 'przewoznik') {
       // Other roles don't have a carrier profile; the caller decides whether
       // that's an error (submit/preview) or a no-op (list).
@@ -3869,6 +3888,8 @@ export class ClaimsService {
     user: AuthUser,
     filters: ClaimFilters,
   ): Promise<ClaimListFilters> {
+    // scope: which wnioski the list returns — all for admin / pracownik, the own
+    // carrier's (Claim.carrierId) for przewoznik, 403 otherwise (docs/25 §0).
     // Full, unscoped access — the only two roles that see every carrier's
     // wnioski (docs/03-roles.md access matrix).
     if (user.role === 'admin' || user.role === 'pracownik') {

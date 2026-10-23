@@ -42,7 +42,7 @@ import type {
   UpdateClaimData,
 } from './claims.repository';
 import type { NrZglService } from './nr-zgl.service';
-import { makeAuthUser } from '../../common/testing/make-auth-user';
+import { makeAuthUser, withoutPermission } from '../../common/testing/make-auth-user';
 
 // ─── helpers ─────────────────────────────────────────────────
 
@@ -984,8 +984,9 @@ describe('ClaimsService.verifyClaim — in-transit gate', () => {
 // docs/03-roles.md: `admin` is the superset of `pracownik`. The checkpoint is
 // open to BOTH in `NA_WERYFIKACJI`, and to `admin` ONLY in the pending
 // `OCZEKUJE_NA_AUTORYZACJE` window. The split is STATUS-dependent, so it lives
-// in the service — `@Roles('admin','pracownik')` on the controller stays the
-// coarse gate (docs/15-auth-strategy.md §Roles).
+// in the service (`can(user, 'claims.verify_pending_authorization')`) —
+// `@RequirePermission('claims.verify')` on the controller stays the coarse gate
+// (docs/15-auth-strategy.md §Roles & Guards).
 
 describe('ClaimsService.verifyClaim — status × role matrix', () => {
   beforeAll(() => {
@@ -1148,6 +1149,33 @@ describe('ClaimsService.verifyClaim — status × role matrix', () => {
     };
     expect(roleBody.code).toBe('CLAIM_VERIFY_ADMIN_ONLY');
     expect(roleBody.message).not.toBe(statusBody.message);
+  });
+
+  it('17a. the capability decides, not the role: admin WITHOUT claims.verify_pending_authorization × OCZEKUJE → same 422, no writes', async () => {
+    const seeded = makePendingClaim();
+    const repoFake = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const prisma = makePrismaService();
+    const { svc } = makeService(repoFake, km.svc, prisma);
+    const admin = withoutPermission(
+      makeAuth('admin', 'u-admin'),
+      'claims.verify_pending_authorization',
+    );
+
+    try {
+      await svc.verifyClaim(admin, seeded.nrZgl, { mileage: 7_000 });
+      throw new Error('expected verifyClaim to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(UnprocessableEntityException);
+      const body = (err as UnprocessableEntityException).getResponse() as {
+        code?: string;
+        extensions?: { code?: string };
+      };
+      expect(body.code).toBe('CLAIM_VERIFY_ADMIN_ONLY');
+      expect(body.extensions?.code).toBe('CLAIM_VERIFY_ADMIN_ONLY');
+    }
+    expect(km.calls).toHaveLength(0);
+    expect(repoFake.updateWithinCalls).toHaveLength(0);
   });
 });
 

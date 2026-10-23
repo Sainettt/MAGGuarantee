@@ -608,6 +608,9 @@ export class DriversService {
     requested: string | undefined,
   ): Promise<string> {
     if (requested) return requested;
+    // scope: a carrier defaults to its own carrier (Carrier.userId = user.sub);
+    // staff must name one. Access to it is `_assertCarrierAccessibleForWrite`
+    // (docs/25 §0).
     if (user.role === 'przewoznik') {
       const list = await this.carriers.list({ limit: 200 });
       const mine = list.find((c) => c.userId === user.sub);
@@ -625,6 +628,8 @@ export class DriversService {
     user: AuthUser,
     carrierId: string,
   ): Promise<void> {
+    // scope: writes only under a carrier the caller manages — admin any,
+    // opiekun Carrier.opiekunId, przewoznik Carrier.userId; else 403 (docs/25 §0).
     if (user.role === 'admin') return;
     const carrier = await this.carriers.findById(carrierId);
     if (!carrier) throw new NotFoundException('Przewoźnik nie znaleziony');
@@ -647,6 +652,8 @@ export class DriversService {
     user: AuthUser,
     filters: DriverFilters,
   ): Promise<DriverFilters & { carrierIds?: string[] }> {
+    // scope: which drivers a list returns — admin all, opiekun via
+    // Carrier.opiekunId, przewoznik Carrier.userId; else 403 (docs/25 §0).
     if (user.role === 'admin') return filters;
     if (user.role === 'opiekun') {
       // Phase 5.1 — mirror VehiclesService._scopeFilters: opiekun no longer

@@ -34,6 +34,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 
 import { AuditContext } from '../../common/audit/audit-context';
+import { can } from '../../common/authz/can';
 import type { Env } from '../../config/env.schema';
 import { ClaimsService } from '../claims/claims.service';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
@@ -345,6 +346,12 @@ export class DelegationsService {
     const row = await this.delegations.findById(id);
     if (!row) throw new NotFoundException('Delegacja nie znaleziona');
 
+    // scope: which outings the caller may cancel — admin any ACTIVE status,
+    // przewoznik only its own (Delegation.carrierId ↔ Carrier.userId) and only
+    // `zgloszony`; anyone else 403. The admin status widening has no catalog
+    // permission (`delegations.cancel` is held by both), so it stays on the
+    // role (docs/25 §0, §3 B3).
+    //
     // Phase 7 REWORK (2026-06-20 #4) — admin may anulate ANY active outing
     // (`zgloszony | gotowy | w_trasie`), closing the "rejs sorvался после
     // zlecenia" hole. The carrier branch below is UNCHANGED (own + `zgloszony`).
@@ -751,15 +758,21 @@ export class DelegationsService {
    *    supervises (`Carrier.opiekunId === user.sub`) — docs/03-roles.md#opiekun
    *    («действовать на перевозчиках с другим `opiekunId` (403)»). Mirrors the
    *    `carrierOpiekunId` list scope so a by-id read cannot bypass it.
-   *  - admin/eksport → unrestricted (all-access roles).
-   *  - any other role never reaches here (controller `@Roles` excludes them,
-   *    notably `pracownik` — quirk #13 — and `weryfikator`, dropped in the
-   *    Phase 7 rework 2026-06-10 #2).
+   *  - admin / eksport / weryfikator → unrestricted (all-access, like their
+   *    list branches).
+   *  - any other role never reaches here: the route's
+   *    `@RequirePermission('delegations.read')` excludes them, notably
+   *    `pracownik` (quirk #13).
    */
   private async _assertCanReadOne(
     user: AuthUser,
     row: DelegationRow,
   ): Promise<void> {
+    // scope: one outing — przewoznik Delegation.carrierId ↔ Carrier.userId,
+    // planista Delegation.plannerId, dyspozytor Vehicle.dispatchTeamId, opiekun
+    // Carrier.opiekunId. admin / eksport / weryfikator — and ANY role not listed
+    // here — fall through to allowed: an R4 gap that only the route covers
+    // (docs/25 §0, R4; deliberately not changed in B3).
     if (user.role === 'przewoznik') {
       const carrier = await this._requireCarrierProfile(user);
       if (row.carrierId !== carrier.id) {
@@ -799,7 +812,8 @@ export class DelegationsService {
    * `viewer` drives the rates scrub on the vehicle mini (see
    * `_scrubVehicleRates`). It is OPTIONAL so internal/fire-and-forget callers
    * that have no request user (e.g. a future cron path) can still map a row;
-   * an absent viewer is treated as "not a dyspozytor" → rates pass through.
+   * an absent viewer passes the rates through (an explicit branch — `can()`
+   * would fail closed on it).
    * Every current request-path caller (add / cancel / markReady /
    * markInTransit / markReturned / list / getOne) has an `AuthUser` in scope
    * and passes it, so the scrub always runs on the wire.
@@ -854,15 +868,17 @@ export class DelegationsService {
   }
 
   /**
-   * Role-aware scrub of the vehicle mini's four km-guarantee rates. The rates
-   * are SENSITIVE commercial data: every delegation-reading role sees them
-   * EXCEPT `dyspozytor`, which is excluded per docs/14-design-system.md
-   * §6.4.2 / §6.15 (planista joined the rates-visible group on 2026-06-26).
-   * For a dyspozytor viewer all four are forced to `null` — so the wire
-   * payload matches visibility (deliberately STRONGER than the UI-only
-   * exclusion on `VehicleDto`; no IDOR leak here). All other roles — and the
-   * absent-viewer internal path — pass the values through unchanged; a rate is
-   * already `null` when the vehicle has no negotiated value for that lane.
+   * Capability scrub of the vehicle mini's four km-guarantee rates
+   * (`vehicles.rates.read`, docs/25 §3 B3). The rates are SENSITIVE commercial
+   * data: every delegation-reading role holds the right EXCEPT `dyspozytor`,
+   * which is excluded per docs/14-design-system.md §6.4.2 / §6.15 (planista
+   * joined the rates-visible group on 2026-06-26). For a viewer without it all
+   * four are forced to `null` — so the wire payload matches visibility
+   * (deliberately STRONGER than the UI-only exclusion on `VehicleDto`; no IDOR
+   * leak here). The absent-viewer internal path passes the values through
+   * unchanged — an EXPLICIT branch, because `can()` fails closed on a missing
+   * user; a rate is already `null` when the vehicle has no negotiated value for
+   * that lane.
    *
    * Kept as the SINGLE scrub point, invoked from `toDto`, so every producer
    * (create / cancel / status transitions / list / getOne) is covered.
@@ -871,7 +887,9 @@ export class DelegationsService {
     vehicle: DelegationRow['vehicle'],
     viewer?: AuthUser,
   ): DelegationRow['vehicle'] {
-    if (!vehicle || viewer?.role !== 'dyspozytor') return vehicle;
+    if (!vehicle) return vehicle;
+    // No viewer = an internal mapping, not a request: pass through (see above).
+    if (!viewer || can(viewer, 'vehicles.rates.read')) return vehicle;
     return {
       ...vehicle,
       rateDe: null,
@@ -939,6 +957,8 @@ export class DelegationsService {
   private async _requireCarrierProfile(
     user: AuthUser,
   ): Promise<{ id: string }> {
+    // scope: the caller's own carrier — Carrier.userId = user.sub; only a
+    // przewoznik has one (docs/25 §0).
     if (user.role !== 'przewoznik') {
       throw new ForbiddenException('Wymaga konta przewoźnika');
     }
@@ -1031,6 +1051,11 @@ export class DelegationsService {
     // przewoznik branch below.
     const { includeHistory, claimable, ...rest } = filters;
 
+    // scope: which outings the list returns — admin all, opiekun
+    // Carrier.opiekunId, eksport / weryfikator all with the active-board floor,
+    // przewoznik Carrier.userId, planista Delegation.plannerId, dyspozytor
+    // Vehicle.dispatchTeamId; anyone else 403 (docs/25 §0).
+    //
     // All-access, no status floor: admin sees every delegation in every status,
     // always (docs/03-roles.md). The `includeHistory` toggle is NOT consulted
     // here — this role never gets the active-board restriction, so its list

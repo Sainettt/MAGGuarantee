@@ -256,9 +256,12 @@ export class VehicleDailyKmService {
    * planista / dyspozytor / eksport / admin / weryfikator keep
    * `includeIdle: false` (drove-only, unchanged); przewoznik / opiekun get
    * `includeIdle: true` (full fleet). Any other role would already have been
-   * blocked by `@Roles` — defensive 403.
+   * blocked by the route's `@RequirePermission('km.read')` — defensive 403.
    */
   private async _resolveReportScope(user: AuthUser): Promise<ReportScope> {
+    // scope: the km-report vehicle set per role — see the table above
+    // (Vehicle.plannerId / dispatchTeamId, Carrier.userId / opiekunId, or all)
+    // (docs/25 §0).
     switch (user.role) {
       case 'planista':
         return { plannerId: user.sub, includeIdle: false };

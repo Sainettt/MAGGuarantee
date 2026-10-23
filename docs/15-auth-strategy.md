@@ -374,8 +374,9 @@ Throttler → `JwtAuthGuard` → `RolesGuard` → `PermissionsGuard`; ownership-
 
 Тексты 403 у обоих guard'ов общие (`FORBIDDEN_*_MESSAGE`), поэтому перевод роутов
 с `@Roles` на `@RequirePermission` (B2a–c) ответы не изменил. Для сервисов —
-`can(user, p)` / `canAny` из `common/authz/can.ts` (тот же fail closed). B5 удалит
-`@Roles` и `RolesGuard`.
+`can(user, p)` / `canAny` из `common/authz/can.ts` (тот же fail closed). С B3
+capability-проверки в сервисах идут через `can()`, а scope («какие строки») остаётся
+на роли и помечен `// scope:` (docs/25 §3 B3). B5 удалит `@Roles` и `RolesGuard`.
 
 ### OwnershipGuard для opiekun-эндпоинтов
 

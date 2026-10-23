@@ -610,6 +610,8 @@ export class TrailersService {
     user: AuthUser,
     carrierId: string,
   ): Promise<void> {
+    // scope: writes only under a carrier the caller manages — admin any,
+    // opiekun Carrier.opiekunId, przewoznik Carrier.userId; else 403 (docs/25 §0).
     if (user.role === 'admin') return;
     const carrier = await this.carriers.findById(carrierId);
     if (!carrier) throw new NotFoundException('Przewoźnik nie znaleziony');
@@ -636,6 +638,8 @@ export class TrailersService {
     user: AuthUser,
     filters: TrailerFilters,
   ): Promise<TrailerFilters & { carrierIds?: string[] }> {
+    // scope: which trailers a list returns — admin all, opiekun via
+    // Carrier.opiekunId, przewoznik Carrier.userId; else 403 (docs/25 §0).
     if (user.role === 'admin') return filters;
     if (user.role === 'opiekun') {
       const opiekunCarriers = await this.carriers.list({

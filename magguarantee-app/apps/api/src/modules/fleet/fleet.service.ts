@@ -12,11 +12,13 @@ import type {
   OpiekunCarrierStats,
   OpiekunCarrierVehicleStats,
   OpiekunFleetResponse,
+  Permission,
   PlanistaFleetResponse,
   TrailerListItem,
   VehicleListItem,
 } from '@magguarantee/shared';
 
+import { can } from '../../common/authz/can';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import {
   CarrierReadinessService,
@@ -68,6 +70,9 @@ export class FleetService {
     user: AuthUser,
     query: MyFleetQuery = { includeInactive: false },
   ): Promise<MyFleetResponse> {
+    // scope: the caller's own carrier (Carrier.userId = user.sub). Role-keyed on
+    // purpose, not can('panel.carrier'): only a przewoznik has a carrier to
+    // resolve, a B6 grant of the panel right must not change that (docs/25 §0, R4).
     if (user.role !== 'przewoznik') {
       throw new ForbiddenException('Wymaga konta przewoźnika');
     }
@@ -112,8 +117,8 @@ export class FleetService {
    *  - opiekun  → `Carrier.opiekunId === user.sub` only. Filtered server-side
    *               (the OpiekunOwnershipGuard is decorator-driven and targets
    *               single-resource lookups, not list-aggregates).
-   *  - other    → 403 (defence in depth; `@Roles` on the controller is the
-   *               primary gate).
+   *  - other    → 403 (scope, see `_assertOpiekunOrAdmin`; the route's
+   *               `@RequirePermission('panel.opiekun')` is the primary gate).
    *
    * Query budget — O(1), not O(n): the carrier aggregate is one round-trip and
    * the active vehicle / trailer / driver counts come for free on the aggregate
@@ -121,6 +126,7 @@ export class FleetService {
    * removed with the carrier-level ADR concept, 2026-07) — no extra reads.
    */
   async getOpiekunFleet(user: AuthUser): Promise<OpiekunFleetResponse> {
+    // scope: opiekun → own carriers (Carrier.opiekunId), admin → all.
     this._assertOpiekunOrAdmin(user);
     const rows = await this.carriers.listForOpiekunAggregate(
       user.role === 'opiekun' ? { opiekunId: user.sub } : {},
@@ -164,6 +170,10 @@ export class FleetService {
   // ── opiekun-fleet helpers ────────────────────────────────
 
   private _assertOpiekunOrAdmin(user: AuthUser): void {
+    // scope: role-keyed on purpose, not can('panel.opiekun') — it guards the
+    // `opiekun ? own : all` ternary in getOpiekunFleet, so a B6 grant of the
+    // panel right to another role must not widen it to every carrier
+    // (docs/25 §0, R4).
     if (user.role !== 'admin' && user.role !== 'opiekun') {
       throw new ForbiddenException('Brak uprawnień (wymaga konta opiekuna)');
     }
@@ -325,9 +335,11 @@ export class FleetService {
    * byte-identical. `stats`/`stojaceList` reuse the dyspozytor shapes.
    */
   async getPlanistaFleet(user: AuthUser): Promise<PlanistaFleetResponse> {
-    this._assertRole(user, 'planista', 'Brak uprawnień (wymaga konta planisty)');
+    this._assertPanel(user, 'panel.planista', 'Brak uprawnień (wymaga konta planisty)');
     const vehicleRows = await this.vehicles.list({
-      // admin → no planner scope (sees every vehicle); planista → own only.
+      // scope: admin → no planner scope (sees every vehicle); anyone else → own
+      // only (Vehicle.plannerId) — fails closed for any other panel holder
+      // (docs/25 §0).
       plannerId: user.role === 'admin' ? undefined : user.sub,
       limit: 500,
     });
@@ -370,11 +382,13 @@ export class FleetService {
    *     `do_usuniecia`).
    */
   async getDyspozytorFleet(user: AuthUser): Promise<DyspozytorFleetResponse> {
-    this._assertRole(
+    this._assertPanel(
       user,
-      'dyspozytor',
+      'panel.dyspozytor',
       'Brak uprawnień (wymaga konta dyspozytora)',
     );
+    // scope: admin → every vehicle, anyone else → own team
+    // (Vehicle.dispatchTeamId; no team → sentinel, 0 rows) (docs/25 §0).
     // A dyspozytor with no team → empty fleet (no query). Admin keeps all.
     if (user.role === 'dyspozytor' && !user.teamId) {
       return this._emptyDispatcherFleet();
@@ -409,17 +423,18 @@ export class FleetService {
   // ── Phase 6 shared helpers ───────────────────────────────
 
   /**
-   * Defence-in-depth role gate (the controller's
-   * `@RequirePermission('panel.<role>')` is the primary one). `admin` always
-   * passes — every read-only panel honours the admin debug-fallback. Any other
-   * role is rejected with the role-specific message.
+   * Panel capability gate (docs/25 §3 B3): `permission` is the panel right the
+   * route already requires (`panel.planista` / `panel.dyspozytor`), held by the
+   * panel's role and by `admin` — every read-only panel honours the admin
+   * debug-fallback. Without it → 403 with the panel-specific message. Rows are
+   * scoped after it, on the role, and fail closed for any other holder.
    */
-  private _assertRole(
+  private _assertPanel(
     user: AuthUser,
-    role: AuthUser['role'],
+    permission: Permission,
     message: string,
   ): void {
-    if (user.role !== 'admin' && user.role !== role) {
+    if (!can(user, permission)) {
       throw new ForbiddenException(message);
     }
   }

@@ -15,7 +15,7 @@ import {
   type VehicleRow,
 } from '../vehicles/vehicles.repository';
 import { FleetService } from './fleet.service';
-import { makeAuthUser } from '../../common/testing/make-auth-user';
+import { makeAuthUser, withoutPermission } from '../../common/testing/make-auth-user';
 
 // Anchor "now" — the delegation-driven lifecycle classifier measures CALENDAR
 // days (Europe/Warsaw) from the idle anchor to this Warsaw "today"
@@ -279,6 +279,13 @@ describe('FleetService.getDyspozytorFleet — role gating', () => {
     const svc = newSvc({ vehicles: [] });
     await expect(
       svc.getDyspozytorFleet(makeAuth(role)),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('is decided by panel.dyspozytor, not by the role: a dyspozytor without it gets 403', async () => {
+    const svc = newSvc({ vehicles: [] });
+    await expect(
+      svc.getDyspozytorFleet(withoutPermission(makeAuth('dyspozytor'), 'panel.dyspozytor')),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

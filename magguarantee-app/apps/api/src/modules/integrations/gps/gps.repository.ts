@@ -81,7 +81,8 @@ export class GpsRepository {
    *    (the scope carries `teamId: null`, matched as "no rows").
    *
    * pracownik / eksport / weryfikator have NO GPS visibility — those roles
-   * never reach this method (the controller blocks via @Roles). pracownik is
+   * never reach this method (the route's `@RequirePermission('gps.read')`
+   * blocks them; `GpsService._scopeFor` throws for them too). pracownik is
    * a narrow claims-only role per docs/03-roles.md#pracownik.
    */
   async findManyForGps(scope: GpsScope): Promise<GpsVehicleRef[]> {

@@ -8,7 +8,7 @@
 //
 // Not a spec file and imports nothing from Jest: usable from any test helper.
 
-import { permissionsFor, type Role } from '@magguarantee/shared';
+import { permissionsFor, type Permission, type Role } from '@magguarantee/shared';
 
 import type { AuthUser } from '../../modules/auth/decorators/current-user.decorator';
 
@@ -51,4 +51,16 @@ export function makeAuthUser(role: Role, overrides: AuthUserOverrides = {}): Aut
 export function withRole(base: AuthUser, role: Role, overrides: AuthUserOverrides = {}): AuthUser {
   const { role: _previousRole, permissions: _previousPermissions, ...person } = base;
   return makeAuthUser(role, { ...person, ...overrides });
+}
+
+/**
+ * The same user with one permission revoked and the role kept — the shape a
+ * B6 `deniedPermissions` entry produces. Lets a spec prove that a service
+ * capability is decided by `can()` and not by `role` (docs/25 §3 B3).
+ * `base` is not mutated.
+ */
+export function withoutPermission(base: AuthUser, permission: Permission): AuthUser {
+  const permissions = new Set(base.permissions);
+  permissions.delete(permission);
+  return { ...base, permissions };
 }

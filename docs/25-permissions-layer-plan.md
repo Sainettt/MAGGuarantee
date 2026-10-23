@@ -1,6 +1,6 @@
 # 25. План: трек B — слой permissions
 
-> **Статус: B1 сделан 2026-10-23 (`2419bfc`); B2 сделан 2026-10-23 (`67f5a8b`…`94fbcff` + B2d), B3 следующий (план от 2026-09-14). Решения по открытым вопросам — §7; первый случай для B6 — в §3 B6.** Детализирует §3 из
+> **Статус: B1 сделан 2026-10-23 (`2419bfc`); B2 сделан 2026-10-23 (`67f5a8b`…`94fbcff` + B2d); B3 сделан 2026-10-23 (сервисные capability → `can()`, scope помечен `// scope:`), B4 следующий (план от 2026-09-14). Решения по открытым вопросам — §7; первый случай для B6 — в §3 B6.** Детализирует §3 из
 > [24-sso-magspace-and-permissions-plan.md](24-sso-magspace-and-permissions-plan.md)
 > по фактическому состоянию кода на `a50077c`. Где этот документ расходится с
 > §3 docs/24, прав этот документ: §3 писался до инвентаризации.
@@ -86,7 +86,7 @@
 | **Дубль guard'а** — сервис повторяет `@Roles` | `opiekun.service.ts:28`, `guarantee-watchdog.service.ts:553,602`, `fleet.service.ts:167,422`, `lookups.service.ts:83,124` | → `can(user, p)` либо удалить, если это чистый дубль |
 | **Scope** | `_scopeFilters` в 15 сервисах, `if (user.role === 'admin') return filters`, `plannerId: user.role === 'admin' ? undefined : user.sub` | **не трогаем** |
 
-В PR B3 каждое место получает метку «capability / дубль / scope».
+В PR B3 каждое место получает метку «capability / дубль / scope». Итог разбора — §3 B3.
 
 ### 1.3 Web
 
@@ -290,18 +290,72 @@ Ownership-guards (`@OpiekunOwns`, `@CarrierOwns`) не меняются.
 
 ### B3. API: capability-проверки в сервисах (≈ 1 день)
 
-| Место | Замена |
-|---|---|
-| `claims.service.ts:1316` `_assertMayVerifyInStatus` | `can(user, 'claims.verify_pending_authorization')` |
-| `vehicles.service.ts:1078` `_scrubForViewer` | `vehicles.fuel_card.read` / `vehicles.rates.read` |
-| scrub ставок в модалке выезда (`delegations.service.ts`) | `vehicles.rates.read` |
-| Дубли guard'ов: `opiekun.service.ts:28`, `guarantee-watchdog.service.ts:553,602`, `fleet.service.ts:167,422`, `lookups.service.ts:83,124` | разобрать каждый: `can()` либо удалить с комментарием «покрыто guard'ом» |
-| Ловушка: `claims.service.ts:2194` `_assertClaimReadable` и `:3185` `_scopeListFilters` выглядят как capability (`admin \|\| pracownik → return`), но это **scope** («видит все wnioski») | не трогать, пометить `// scope:` |
-| Всё, что осталось с `user.role` | должно быть scope — пометить комментарием `// scope:` |
+> **Сделано 2026-10-23.** Capability-проверки в сервисах идут через `can()`
+> (`common/authz/can.ts`, импорт по относительному пути); scope остался на роли и
+> помечен `// scope:` с указанием структуры данных, из которой он берётся
+> (`Carrier.opiekunId`, `Carrier.userId`, `Vehicle.plannerId`,
+> `Vehicle.dispatchTeamId`, `User.liderId`, …). **Ничего не удалено:** каждый
+> «дубль guard'а» из §1.2 при разборе оказался scope. Runtime-поведение не
+> изменилось: обе фикстуры B1 байт-в-байт; ни одно ожидание в spec-файлах не
+> правилось (неизменённые spec-файлы на новом коде — 323/323 зелёные); 18 новых
+> кейсов, из них часть доказывает, что решает право, а не роль —
+> `withoutPermission(user, p)` в `common/testing/make-auth-user.ts` моделирует
+> отзыв права из B6.
 
-Проверка: полный api-сьют зелёный без правок ожиданий, кроме замены
-моков `AuthUser` (добавится `permissions`). Тестовая фабрика
-`makeAuthUser(role)` строит набор прав через `permissionsFor(role)`.
+**Переведено на `can()`.** На каждом пути, где код достижим, множество ролей то же,
+что было:
+
+| Место | Было | Стало | Почему поведение то же |
+|---|---|---|---|
+| `ClaimsService._assertMayVerifyInStatus` | `role === 'admin'` | `can(user, 'claims.verify_pending_authorization')`; тело 422 `CLAIM_VERIFY_ADMIN_ONLY` байт-в-байт | право есть только у admin |
+| `ClaimsService.previewForExisting` → `allowMileageOverride` (verifier-фигура 1) | `role !== 'przewoznik'` | `can(user, 'claims.verify')` | роут пускает admin / pracownik / przewoznik; `claims.verify` — ровно admin / pracownik |
+| `ClaimsService.getOne` → `staff` / `boardSettlement` (фигура 2) | `role !== 'przewoznik'` | `can(user, 'claims.verify')` | `_assertClaimReadable` уже сузил до admin / pracownik / przewoznik |
+| `ClaimsService._resolveVerifierMileage` (фигура 3) | `role === 'przewoznik'` → `null` | `!can(user, 'claims.verify')` → `null` | то же |
+| `VehiclesService._scrubForViewer` | карта: admin / opiekun / przewoznik; ставки: то же ∪ planista | два независимых флага: `vehicles.fuel_card.read` / `vehicles.rates.read` | вызывается только из `list` / `getById` (`vehicles.read`); eksport / weryfikator держат `rates.read` в каталоге, но сюда не доходят |
+| `DelegationsService._scrubVehicleRates` | скрыть iff `viewer?.role === 'dyspozytor'` | пропустить iff `!viewer \|\| can(viewer, 'vehicles.rates.read')` | все вызовы `toDto` с пользователем идут из роутов delegations, из их ролей права нет только у dyspozytor. Ветка без viewer — **явная**: `can()` без пользователя fail closed (покрыта новым кейсом) |
+| `BugbotHandoffService._assertKindAllowed` | `kind === 'idea' && role !== 'admin'` → 403 | `kind === 'idea' && !can(user, 'bugbot.submit_idea')` | право только у admin; текст 403 тот же |
+| `FleetService._assertRole` → `_assertPanel` (панели planista / dyspozytor) | `role === 'admin' \|\| role === <панель>` | `can(user, 'panel.planista' \| 'panel.dyspozytor')`, 403-сообщения панелей те же | права ровно у admin + роли панели; scope после проверки (`admin ? все : свои`) fail closed для любого другого держателя |
+| `LookupsService.usersListAdmin` | `role !== 'admin'` | `!can(user, 'users.manage')` | право только у admin; у списка нет row-scope |
+
+**Оставлено на роли как scope** (`// scope:` + R4; стоявшие там комментарии «defence
+in depth / `@Roles`» заменены). Проверка роли охраняет тернарник
+`opiekun ? свои : все` (или поиск «своего» перевозчика): выдача в B6 права
+`panel.*` / `lookups.carriers` другой роли не должна расширить строки до «все».
+
+| Место | Ключ scope |
+|---|---|
+| `OpiekunService.listMyCarriers` | `Carrier.opiekunId` |
+| `GuaranteeWatchdogService.getComplianceBoard`, `.listEpisodes` | `Carrier.opiekunId` (`opiekunScopeId`) |
+| `GuaranteeWatchdogService.getMyCompliance`, `.listMyEpisodes` | `Carrier.userId` (`carrierUserScopeId`) |
+| `FleetService.getMyFleet` | `Carrier.userId` |
+| `FleetService.getOpiekunFleet` + `_assertOpiekunOrAdmin` | `Carrier.opiekunId` |
+| `LookupsService.carriersList` | `Carrier.opiekunId`; admin / pracownik — все |
+
+**Помечено `// scope:`, логика не тронута:**
+
+| Место | Замечание |
+|---|---|
+| `ClaimsService.previewForExisting` (ownership), `_assertClaimReadable`, `_requireCarrierProfile`, `_scopeListFilters` | `Claim.carrierId` ↔ `Carrier.userId`; «ловушка» из плана — `admin \|\| pracownik → return` означает «видит все wnioski», это scope. В `previewForExisting` любая роль, кроме przewoznik, идёт без scope — сегодня это только admin / pracownik, ограничивает роут (R4) |
+| `DelegationsService.cancel` | admin отменяет выезд в любом активном статусе, przewoznik — только свой и только `zgloszony`. **Для расширения по статусу права в каталоге нет** (`delegations.cancel` есть у обоих), поэтому оно остаётся на роли |
+| `DelegationsService._assertCanReadOne` | przewoznik / planista / dyspozytor / opiekun — свои строки; **admin, eksport, weryfikator и любая не перечисленная роль проходят** — R4-дыра, закрытая только роутом (`delegations.read`). В B3 не исправлялась; docblock больше не утверждает, что weryfikator сюда не доходит |
+| `DelegationsService._requireCarrierProfile`, `_scopeListFilters` | `Carrier.userId`; список — по веткам ролей |
+| `VehiclesService._scopeFilters`, `_assertVehicleReadable`, `_assertCarrierAccessibleForWrite` | |
+| `DriversService._resolveCarrierId`, `_assertCarrierAccessibleForWrite`, `_scopeFilters`; `TrailersService._assertCarrierAccessibleForWrite`, `_scopeFilters` | |
+| `CarriersService.list`, `_resolveOpiekunId`, `_resolveOpiekunPatch` | у не-opiekun (сегодня только admin) выбор opiekun'а свободный (R4) |
+| `AlertsService._scopeFor`, `GpsService._scopeFor` / `_assertCanRead`, `VehicleDailyKmService._resolveReportScope`, `FleetService.getPlanistaFleet` / `getDyspozytorFleet` (после `_assertPanel`) | |
+| `PlannerTransfersService._assertMayRequest`, `_listFilters` (inbox `decide`), `_assertMayReadHistory`; `planner-transfer.rules.ts` `decisionRefusal` | `decisionRefusal` по-прежнему принимает `Pick<AuthUser, 'sub' \| 'role' \| 'lider'>` — `permissions` не читает |
+
+**Не помечалось** (не scope и не capability вызывающего): сравнения ролей целевых /
+управляемых пользователей (`users`, `directory`, `teams`, `auth`; `vehicles._assertRole`,
+`carriers._assertIsOpiekun`, `planner-transfers._assertTarget`, `teams.service.ts:213`),
+сквозная передача роли в лог / аудит / BugBot (`actorRole`, `requestedByRole`,
+`roles: [user.role]`), `roles.guard.ts` (уходит в B5).
+
+Комментарии, которые после B2d ещё описывали `@Roles` как гейт, переписаны на
+`@RequirePermission` (claims, fleet, opiekun, delegations, `delegation-state-machine`,
+gps service / repository, vehicle-daily-km, bugbot controller и пять spec-комментариев).
+В `SERVICE_CAPABILITIES` (`endpoint-permissions.ts`) — «проверяется через `can()`»;
+четыре записи те же, `claims.verify` туда не добавлен (он охраняет роуты).
 
 ### B4. Web (≈ 1–1.5 дня)
 

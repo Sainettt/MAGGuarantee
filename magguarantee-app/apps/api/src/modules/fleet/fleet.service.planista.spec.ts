@@ -15,7 +15,7 @@ import {
   type VehicleRow,
 } from '../vehicles/vehicles.repository';
 import { FleetService } from './fleet.service';
-import { makeAuthUser } from '../../common/testing/make-auth-user';
+import { makeAuthUser, withoutPermission } from '../../common/testing/make-auth-user';
 
 /** `YYYY-MM-DD` → UTC-midnight Date (date-only convention for `lastReturnAt`). */
 function U(s: string): Date {
@@ -261,6 +261,13 @@ describe('FleetService.getPlanistaFleet — role gating', () => {
     const svc = newSvc({ vehicles: [] });
     await expect(
       svc.getPlanistaFleet(makeAuth(role)),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('is decided by panel.planista, not by the role: a planista without it gets 403', async () => {
+    const svc = newSvc({ vehicles: [] });
+    await expect(
+      svc.getPlanistaFleet(withoutPermission(makeAuth('planista'), 'panel.planista')),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 

@@ -257,6 +257,9 @@ export class PlannerTransfersService {
    * R4 (`decisionRefusal` → `requester`) stops him deciding his own request.
    */
   private _assertMayRequest(user: AuthUser, vehicle: VehicleRow): void {
+    // scope: who may file for THIS vehicle — admin any, the opiekun of its
+    // carrier (vehicle.opiekun ← Carrier.opiekunId), its current planista
+    // (Vehicle.plannerId); else 403 (docs/25 §0).
     const allowed =
       user.role === 'admin' ||
       (user.role === 'opiekun' && vehicle.opiekun?.id === user.sub) ||
@@ -410,6 +413,8 @@ export class PlannerTransfersService {
       limit: query.limit,
     };
     if (query.scope === 'mine') return { ...base, requestedById: user.sub };
+    // scope: the decide inbox — admin all, a planista-lider only requests whose
+    // fromPlanner he leads (User.liderId); else 403 (docs/25 §0).
     if (user.role === 'admin') return base;
     if (user.role === 'planista' && user.lider === true) {
       return { ...base, fromPlannerLiderId: user.sub };
@@ -422,6 +427,8 @@ export class PlannerTransfersService {
 
   /** U11 — who may read a vehicle's planista journal. */
   private async _assertMayReadHistory(user: AuthUser, vehicle: VehicleRow): Promise<void> {
+    // scope: admin any vehicle, the opiekun of its carrier, its current
+    // planista or that planista's lider (User.liderId); else 403 (docs/25 §0).
     if (user.role === 'admin') return;
     // The route's OpiekunOwnershipGuard already checked the carrier; repeated.
     if (user.role === 'opiekun' && vehicle.opiekun?.id === user.sub) return;

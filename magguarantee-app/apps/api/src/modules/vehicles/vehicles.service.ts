@@ -33,6 +33,7 @@ import {
 } from './vehicle-lifecycle';
 
 import { AuditContext } from '../../common/audit';
+import { can } from '../../common/authz/can';
 import {
   isPrismaUniqueViolation,
   uniqueViolationToConflict,
@@ -157,10 +158,11 @@ export class VehiclesService {
     filters: VehicleFilters,
   ): Promise<VehiclePage> {
     const page = await this._listResolved(user, filters);
-    // Role-scrub every row on the wire: dyspozytor never sees the four km rates,
-    // and only admin/opiekun/przewoznik see the fuel-card number + PIN. Applied
-    // ONCE here so both list paths (`_listPage` / `_listByIdleStatus`) are
-    // covered without threading the viewer through each private method.
+    // Capability-scrub every row on the wire (`_scrubForViewer`): dyspozytor never
+    // sees the four km rates, and only admin/opiekun/przewoznik see the fuel-card
+    // number + PIN. Applied ONCE here so both list paths (`_listPage` /
+    // `_listByIdleStatus`) are covered without threading the viewer through
+    // each private method.
     return {
       items: page.items.map((v) => this._scrubForViewer(v, user)),
       nextCursor: page.nextCursor,
@@ -1040,6 +1042,9 @@ export class VehiclesService {
     user: AuthUser,
     filters: VehicleFilters,
   ): Promise<VehicleFilters & { carrierIds?: string[] }> {
+    // scope: which vehicles a list returns — admin all, opiekun via
+    // Carrier.opiekunId, planista Vehicle.plannerId, dyspozytor
+    // Vehicle.dispatchTeamId, przewoznik Carrier.userId; else 403 (docs/25 §0).
     if (user.role === 'admin') {
       return filters;
     }
@@ -1107,6 +1112,9 @@ export class VehiclesService {
    * the check still holds if a guard is ever dropped from the route.
    */
   private _assertVehicleReadable(user: AuthUser, row: VehicleRow): void {
+    // scope: one vehicle — planista Vehicle.plannerId, dyspozytor
+    // Vehicle.dispatchTeamId; opiekun / przewoznik are row-checked by the
+    // route's ownership guards; any other role 403 (docs/25 §0).
     switch (user.role) {
       case 'admin':
         return;
@@ -1132,19 +1140,20 @@ export class VehiclesService {
   }
 
   /**
-   * Role-aware scrub of sensitive vehicle fields on the read wire:
-   *  - fuel-card NUMBER + PIN → only admin / opiekun / przewoznik (the operator
-   *    who actually fuels the truck). Everyone else gets `null`.
-   *  - the four km rates → hidden for `dyspozytor` (mirrors the delegation-modal
-   *    server scrub, docs/14 §6.4.2); admin/opiekun/przewoznik/planista keep them.
+   * Capability scrub of sensitive vehicle fields on the read wire — two
+   * independent flags (docs/25 §3 B3):
+   *  - fuel-card NUMBER + PIN → `vehicles.fuel_card.read` (admin / opiekun /
+   *    przewoznik — the operator who actually fuels the truck). Everyone else
+   *    gets `null`.
+   *  - the four km rates → `vehicles.rates.read`: of the roles that reach this
+   *    code (`vehicles.read`) only `dyspozytor` lacks it (mirrors the
+   *    delegation-modal server scrub, docs/14 §6.4.2). eksport / weryfikator
+   *    hold it for that modal but never get here.
    * The DTO fields are all nullable, so nulling them is type-safe.
    */
   private _scrubForViewer(dto: VehicleDto, user: AuthUser): VehicleDto {
-    const canSeeFuelCard =
-      user.role === 'admin' ||
-      user.role === 'opiekun' ||
-      user.role === 'przewoznik';
-    const canSeeRates = canSeeFuelCard || user.role === 'planista';
+    const canSeeFuelCard = can(user, 'vehicles.fuel_card.read');
+    const canSeeRates = can(user, 'vehicles.rates.read');
     if (canSeeFuelCard && canSeeRates) return dto;
     return {
       ...dto,
@@ -1161,6 +1170,8 @@ export class VehiclesService {
     user: AuthUser,
     carrierId: string,
   ): Promise<void> {
+    // scope: writes only under a carrier the caller manages — admin any,
+    // opiekun Carrier.opiekunId, przewoznik Carrier.userId; else 403 (docs/25 §0).
     if (user.role === 'admin') return;
     const carrier = await this.carriers.findById(carrierId);
     if (!carrier) throw new NotFoundException('Przewoźnik nie znaleziony');

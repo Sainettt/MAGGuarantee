@@ -211,7 +211,8 @@ export const AUTHENTICATED_ONLY: Readonly<Record<string, string>> = {
 
 /**
  * Permissions that guard no route — they gate a capability inside a service
- * (docs/25 §1.2 "capability"; replaced by `can(user, p)` in B3). Value: where.
+ * (docs/25 §1.2 "capability"), checked with `can(user, p)` since B3. Value:
+ * where.
  */
 export const SERVICE_CAPABILITIES: Readonly<Partial<Record<Permission, string>>> = {
   'claims.verify_pending_authorization':

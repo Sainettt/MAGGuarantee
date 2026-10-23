@@ -49,7 +49,7 @@ import type {
   ClaimsRepository,
 } from './claims.repository';
 import type { NrZglService } from './nr-zgl.service';
-import { makeAuthUser } from '../../common/testing/make-auth-user';
+import { makeAuthUser, withoutPermission } from '../../common/testing/make-auth-user';
 
 // ─── fixtures ────────────────────────────────────────────────
 
@@ -566,7 +566,7 @@ describe('ClaimsService.previewKmCalc — carrier-only entry point intact', () =
   });
 
   it('non-carrier role → 403 (defence-in-depth, controller already gates)', async () => {
-    // The route is @Roles('przewoznik') in the controller, but the service
+    // The route needs `claims.submit` (przewoznik only), but the service
     // must still reject other roles in case it's invoked directly (tests,
     // future internal callers).
     const claimsRepo = makeClaimsRepo([]);
@@ -702,6 +702,99 @@ describe('ClaimsService.previewForExisting — verifier mileage override', () =>
     expect(out.paymentEur).toBe(1_400);
     // The daily-km board is the weryfikator's reference, never a claim's
     // mileage source (REWORK 2026-07-30) — it must not be read here.
+    expect(dailyKm.sumDroveKm).not.toHaveBeenCalled();
+  });
+
+  it('claims.verify decides, not the role: a pracownik without it gets the carrier contract (override IGNORED)', async () => {
+    const seeded = makeClaim();
+    const claimsRepo = makeClaimsRepo([seeded]);
+    const km = makeKmCalcService();
+    const dailyKm = makeDailyKmRepo(8_000);
+    const svc = makeService(
+      claimsRepo,
+      makeCarriersRepo([]),
+      makeVehiclesRepo([]),
+      km.svc,
+      dailyKm,
+    );
+
+    const out = await svc.previewForExisting(
+      withoutPermission(makeAuth('pracownik'), 'claims.verify'),
+      seeded.nrZgl,
+      OVERRIDE_DTO,
+    );
+
+    // The claim's persisted 8_000, not the 5_000 override.
+    expect(out.mileage).toBe(8_000);
+    expect(out.paymentEur).toBe(1_400);
+    expect(dailyKm.sumDroveKm).not.toHaveBeenCalled();
+  });
+});
+
+// `getOne` adds two staff-only live figures (`verifierMileage`,
+// `boardSettlement`) for a verifier — `can(user, 'claims.verify')` since
+// docs/25 §3 B3 (was `role !== 'przewoznik'`; same set on this route).
+describe('ClaimsService.getOne — verifier-only figures', () => {
+  const ACTUAL_WINDOW: Partial<ClaimRow> = {
+    delegationActualDepartureAt: new Date('2026-04-01T06:00:00.000Z'),
+    delegationActualReturnAt: new Date('2026-04-20T18:00:00.000Z'),
+  };
+
+  it('pracownik gets verifierMileage = Σ daily-km over the actual outing window', async () => {
+    const seeded = makeClaim(ACTUAL_WINDOW);
+    const dailyKm = makeDailyKmRepo(7_500);
+    const svc = makeService(
+      makeClaimsRepo([seeded]),
+      makeCarriersRepo([]),
+      makeVehiclesRepo([]),
+      makeKmCalcService().svc,
+      dailyKm,
+    );
+
+    const out = await svc.getOne(makeAuth('pracownik'), seeded.nrZgl);
+
+    expect(out.verifierMileage).toBe(7_500);
+    // All-active period → no live board settlement, even for staff.
+    expect(out.boardSettlement).toBeNull();
+    expect(dailyKm.sumDroveKm).toHaveBeenCalledTimes(1);
+  });
+
+  it('przewoznik (own wniosek) gets neither figure and the board is never read', async () => {
+    const carrier = makeCarrier();
+    const seeded = makeClaim({ ...ACTUAL_WINDOW, carrierId: carrier.id });
+    const dailyKm = makeDailyKmRepo(7_500);
+    const svc = makeService(
+      makeClaimsRepo([seeded]),
+      makeCarriersRepo([carrier]),
+      makeVehiclesRepo([]),
+      makeKmCalcService().svc,
+      dailyKm,
+    );
+
+    const out = await svc.getOne(makeAuth('przewoznik', carrier.userId), seeded.nrZgl);
+
+    expect(out.verifierMileage).toBeNull();
+    expect(out.boardSettlement).toBeNull();
+    expect(dailyKm.sumDroveKm).not.toHaveBeenCalled();
+  });
+
+  it('claims.verify decides, not the role: a pracownik without it gets the carrier view', async () => {
+    const seeded = makeClaim(ACTUAL_WINDOW);
+    const dailyKm = makeDailyKmRepo(7_500);
+    const svc = makeService(
+      makeClaimsRepo([seeded]),
+      makeCarriersRepo([]),
+      makeVehiclesRepo([]),
+      makeKmCalcService().svc,
+      dailyKm,
+    );
+
+    const out = await svc.getOne(
+      withoutPermission(makeAuth('pracownik'), 'claims.verify'),
+      seeded.nrZgl,
+    );
+
+    expect(out.verifierMileage).toBeNull();
     expect(dailyKm.sumDroveKm).not.toHaveBeenCalled();
   });
 });

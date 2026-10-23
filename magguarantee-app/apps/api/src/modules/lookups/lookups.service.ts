@@ -11,6 +11,7 @@ import type {
   LookupUserListDto,
 } from '@magguarantee/shared';
 
+import { can } from '../../common/authz/can';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
 import { CarriersRepository } from '../carriers/carriers.repository';
 import { TeamsService } from '../teams/teams.service';
@@ -107,14 +108,16 @@ export class LookupsService {
     user: AuthUser,
     filters: LookupCarrierFilters,
   ): Promise<LookupCarrierListDto> {
+    // scope: role-keyed on purpose, not can('lookups.carriers') — this check
+    // guards the `opiekun ? own : all` filter below, so a B6 grant of the
+    // lookup right to another role must not widen it to every carrier
+    // (docs/25 §0, R4). pracownik is in the "all" set (read-only autocomplete,
+    // Phase 4.4 brief) although the carriers routes exclude it.
     if (
       user.role !== 'admin' &&
       user.role !== 'pracownik' &&
       user.role !== 'opiekun'
     ) {
-      // Mirror the carriers controller's role gate — pracownik is included
-      // here (read-only autocomplete) per the Phase 4.4 brief, even though
-      // carriers.controller.ts excludes pracownik from list/CRUD.
       throw new ForbiddenException('Brak uprawnień do listy przewoźników');
     }
     // Opiekun scope: filter to supervised carriers only, mirroring
@@ -137,9 +140,10 @@ export class LookupsService {
   }
 
   /**
-   * Admin users-autocomplete per Phase 4.5. Returns up to 100 rows. Caller is
-   * guaranteed admin by the controller's `@RequirePermission('users.manage')`
-   * (an admin-only right) — re-asserted here defensively (mirrors `carriersList`).
+   * Admin users-autocomplete per Phase 4.5. Returns up to 100 rows. The
+   * controller's `@RequirePermission('users.manage')` (an admin-only right)
+   * already gates the caller; re-checked here with `can()` as a capability —
+   * the list has no row scope, every holder sees all users (docs/25 §3 B3).
    *
    * Includes inactive users so the admin can filter audit rows tied to
    * deactivated accounts; soft-deleted rows are excluded by the soft-delete
@@ -149,7 +153,7 @@ export class LookupsService {
     user: AuthUser,
     filters: LookupUserAdminFilters,
   ): Promise<LookupUserAdminListDto> {
-    if (user.role !== 'admin') {
+    if (!can(user, 'users.manage')) {
       throw new ForbiddenException('Brak uprawnień do listy użytkowników');
     }
     const rows = await this.users.searchAdmin({

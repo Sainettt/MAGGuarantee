@@ -3,8 +3,9 @@
 // Single source of truth for which `DelegationStatus → DelegationStatus`
 // transitions are legal. Modelled on `claims/claim-state-machine.ts`.
 //
-// Lifecycle (strict chain order — admin is allowed onto the endpoints via
-// `@Roles` but does NOT bypass the matrix; the gate applies to every caller):
+// Lifecycle (strict chain order — admin is allowed onto the endpoints by their
+// `@RequirePermission` but does NOT bypass the matrix; the gate applies to
+// every caller):
 //
 //   carrier      eksport|admin       weryfikator|admin   weryfikator|admin
 //   zgloszony ──▶ gotowy ──────────▶ w_trasie ──────────▶ zjechal

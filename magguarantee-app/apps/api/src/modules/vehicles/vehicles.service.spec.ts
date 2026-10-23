@@ -27,7 +27,7 @@ import {
 import { VehiclesService } from './vehicles.service';
 import { StorageService } from '../storage/storage.service';
 import { collectAndValidateUploads } from './attachment-validation';
-import { makeAuthUser } from '../../common/testing/make-auth-user';
+import { makeAuthUser, withoutPermission } from '../../common/testing/make-auth-user';
 
 const NOW = new Date('2026-05-01T10:00:00.000Z');
 
@@ -1454,6 +1454,54 @@ describe('VehiclesService', () => {
     });
     expect(second.items.map((v) => v.id)).toEqual(['v-3']);
     expect(second.nextCursor).toBeNull();
+  });
+});
+
+// ── Capability scrub on the read wire (docs/25 §3 B3) ──────────────
+// `_scrubForViewer` reads two independent capabilities through `can()`:
+// `vehicles.fuel_card.read` (fuel-card number + PIN) and `vehicles.rates.read`
+// (the four km rates). The matrix pins the outcome for every role that reaches
+// `GET /vehicles/:id`; the last case proves the flags, not the role, decide.
+describe('VehiclesService.getById — fuel card / rates scrub', () => {
+  const SENSITIVE: Partial<VehicleRow> = {
+    fuelCard: true,
+    fuelCardNumber: '1234567890123456',
+    fuelCardPin: '1234',
+    rateDe: 0.9,
+    rateUe: 0.8,
+    rateExport: 0.7,
+    rateImport: 0.6,
+    // Lets the planista / dyspozytor single-vehicle scope pass.
+    plannerId: 'u-viewer',
+    dispatchTeamId: 't-1',
+  };
+
+  async function read(viewer: AuthUser) {
+    const { svc } = buildService({ vehicles: [makeVehicle({ id: 'v-1', ...SENSITIVE })] });
+    return svc.getById(viewer, 'v-1');
+  }
+
+  it.each([
+    ['admin', true, true],
+    ['opiekun', true, true],
+    ['przewoznik', true, true],
+    ['planista', false, true],
+    ['dyspozytor', false, false],
+  ] as const)('%s → fuel card visible: %s, rates visible: %s', async (role, fuelCard, rates) => {
+    const dto = await read(makeAuthUser(role, { sub: 'u-viewer', teamId: 't-1' }));
+    expect(dto.fuelCardNumber).toBe(fuelCard ? '1234567890123456' : null);
+    expect(dto.fuelCardPin).toBe(fuelCard ? '1234' : null);
+    expect(dto.rateDe).toBe(rates ? 0.9 : null);
+    expect(dto.rateImport).toBe(rates ? 0.6 : null);
+  });
+
+  it('the flags are independent and decided by can(): an admin without vehicles.fuel_card.read keeps the rates', async () => {
+    const admin = makeAuthUser('admin', { sub: 'u-viewer' });
+    const dto = await read(withoutPermission(admin, 'vehicles.fuel_card.read'));
+    expect(dto.fuelCardNumber).toBeNull();
+    expect(dto.fuelCardPin).toBeNull();
+    expect(dto.rateDe).toBe(0.9);
+    expect(dto.rateUe).toBe(0.8);
   });
 });
 

@@ -778,6 +778,10 @@ export class GuaranteeWatchdogService implements OnModuleInit {
     user: AuthUser,
     now: Date = new Date(),
   ): Promise<GuaranteeComplianceResponse> {
+    // scope: opiekun → own carriers (Carrier.opiekunId), admin → all. Role-keyed
+    // on purpose, not can('panel.opiekun'): the check guards the
+    // `opiekun ? own : all` filter below, so a B6 grant of the panel right must
+    // not widen it (docs/25 §0, R4).
     if (user.role !== 'admin' && user.role !== 'opiekun') {
       throw new ForbiddenException('Wymaga konta administratora lub opiekuna');
     }
@@ -804,6 +808,8 @@ export class GuaranteeWatchdogService implements OnModuleInit {
     user: AuthUser,
     now: Date = new Date(),
   ): Promise<GuaranteeComplianceResponse> {
+    // scope: the caller's own carrier (Carrier.userId = user.sub); role-keyed,
+    // not can('panel.carrier') — only a przewoznik owns a carrier (docs/25 §0, R4).
     if (user.role !== 'przewoznik') {
       throw new ForbiddenException('Wymaga konta przewoźnika');
     }
@@ -827,6 +833,9 @@ export class GuaranteeWatchdogService implements OnModuleInit {
     user: AuthUser,
     filters: GuaranteeEpisodeFilters,
   ): Promise<GuaranteeEpisodeListDto> {
+    // scope: opiekun → own carriers (`opiekunScopeId`, Carrier.opiekunId), admin
+    // → all. Role-keyed on purpose, not can('panel.opiekun'): the check guards
+    // the `opiekun ? own : all` filter below (docs/25 §0, R4).
     if (user.role !== 'admin' && user.role !== 'opiekun') {
       throw new ForbiddenException('Wymaga konta administratora lub opiekuna');
     }
@@ -854,6 +863,9 @@ export class GuaranteeWatchdogService implements OnModuleInit {
     user: AuthUser,
     filters: MyGuaranteeEpisodeFilters,
   ): Promise<GuaranteeEpisodeListDto> {
+    // scope: the caller's own carrier (`carrierUserScopeId`, Carrier.userId);
+    // role-keyed, not can('panel.carrier') — only a przewoznik owns a carrier
+    // (docs/25 §0, R4).
     if (user.role !== 'przewoznik') {
       throw new ForbiddenException('Wymaga konta przewoźnika');
     }

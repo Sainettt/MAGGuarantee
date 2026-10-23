@@ -157,6 +157,9 @@ export class GpsService {
   // ── role / ownership helpers ─────────────────────────────
 
   private _scopeFor(user: AuthUser): GpsScope {
+    // scope: which vehicles a GPS list covers — admin all, opiekun
+    // Carrier.opiekunId, planista Vehicle.plannerId, dyspozytor
+    // Vehicle.dispatchTeamId, przewoznik Carrier.userId; else 403 (docs/25 §0).
     switch (user.role) {
       case 'admin':
         return { kind: 'all' };
@@ -170,9 +173,10 @@ export class GpsService {
         return { kind: 'dyspozytor', teamId: user.teamId ?? null };
       case 'przewoznik':
         return { kind: 'przewoznik', userId: user.sub };
-      // 'pracownik' / 'eksport' / 'weryfikator' filtered upstream by @Roles
-      // — keep an explicit defensive throw in case a future change misses
-      // that. pracownik has no fleet visibility per docs/03-roles.md#pracownik.
+      // 'pracownik' / 'eksport' / 'weryfikator' are refused upstream by the
+      // route's `@RequirePermission('gps.read')` — keep an explicit defensive
+      // throw in case a future change misses that. pracownik has no fleet
+      // visibility per docs/03-roles.md#pracownik.
       default:
         throw new ForbiddenException('Brak uprawnień do GPS');
     }
@@ -187,6 +191,9 @@ export class GpsService {
       dispatchTeamId: string | null;
     },
   ): void {
+    // scope: one vehicle's GPS — the same owner fields as `_scopeFor`
+    // (opiekunId / plannerId / dispatchTeamId / carrierUserId); else 403
+    // (docs/25 §0).
     switch (user.role) {
       case 'admin':
         return;

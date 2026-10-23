@@ -14,7 +14,7 @@ import {
   type DelegationRow,
 } from './delegations.repository';
 import { DelegationsService } from './delegations.service';
-import { makeAuthUser } from '../../common/testing/make-auth-user';
+import { makeAuthUser, withoutPermission } from '../../common/testing/make-auth-user';
 
 const DISPATCHER_SUB = 'dys-1';
 const TEAM_ID = 'team-1';
@@ -746,5 +746,26 @@ describe('DelegationsService — vehicle mini rate scrub (§6.4.2 / §6.15)', ()
     expect(items[0]!.vehicle?.rateUe).toBeNull();
     expect(items[0]!.vehicle?.rateExport).toBeNull();
     expect(items[0]!.vehicle?.rateImport).toBeNull();
+  });
+
+  it('toDto without a viewer (internal mapping) passes the rates through — explicit, not fail-closed', () => {
+    // `can()` fails closed on a missing user, so the absent-viewer branch must
+    // stay an explicit pass-through (docs/25 §3 B3).
+    const { service } = makeService([makeRow()]);
+    const out = service.toDto(makeRow());
+    expect(out.vehicle?.rateDe).toBe(RATE_DE);
+    expect(out.vehicle?.rateUe).toBe(RATE_UE);
+    expect(out.vehicle?.rateExport).toBe(RATE_EXPORT);
+    expect(out.vehicle?.rateImport).toBe(RATE_IMPORT);
+  });
+
+  it('vehicles.rates.read decides, not the role: an eksport without it gets the rates scrubbed', async () => {
+    const { service } = makeService([makeRow()]);
+    const viewer = withoutPermission(auth('eksport', 'eksport-1'), 'vehicles.rates.read');
+    const out = await service.getOne(viewer, 'deleg-1');
+    expect(out.vehicle?.rateDe).toBeNull();
+    expect(out.vehicle?.rateUe).toBeNull();
+    expect(out.vehicle?.rateExport).toBeNull();
+    expect(out.vehicle?.rateImport).toBeNull();
   });
 });

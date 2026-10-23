@@ -6,9 +6,10 @@
 // nor a single wniosek. It used to be scoped to its supervised carriers via a
 // server-injected `carrierOpiekunId` relation filter; that branch is gone and
 // opiekun now lands on the same 403 as planista / dyspozytor / eksport /
-// weryfikator. The `@Roles` gate on the controller already refuses it
-// (`claims.controller.roles.spec.ts`); this spec pins the service-level
-// defence-in-depth so a future `@Roles` slip cannot reopen the list.
+// weryfikator. The `@RequirePermission('claims.read')` gate on the controller
+// already refuses it (`claims.controller.roles.spec.ts`); this spec pins the
+// service-level scope (`// scope:` in `_scopeListFilters`) so a future slip of
+// the route permission cannot reopen the list.
 //
 // Style mirrors `claims.service.preview.spec.ts`: hand-rolled fakes, no
 // jest-mock-extended.

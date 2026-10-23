@@ -120,6 +120,8 @@ export class AlertsService {
   // ── internals ────────────────────────────────────────────
 
   private _scopeFor(user: AuthUser): AlertScope {
+    // scope: admin → every entity, opiekun → own carriers (Carrier.opiekunId),
+    // anyone else 403 (docs/25 §0).
     if (user.role === 'admin') return {};
     if (user.role === 'opiekun') return { opiekunId: user.sub };
     throw new ForbiddenException(

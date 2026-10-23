@@ -25,10 +25,12 @@ export class OpiekunService {
   constructor(private readonly carriers: CarriersRepository) {}
 
   async listMyCarriers(user: AuthUser): Promise<OpiekunCarriersResponse> {
+    // scope: opiekun → own carriers (Carrier.opiekunId), admin → all. Role-keyed
+    // on purpose, not can('panel.opiekun'): this check guards the
+    // `opiekun ? own : all` ternary below, so a B6 grant of the panel right to
+    // another role must not widen it to every carrier (docs/25 §0, R4). The
+    // route's `@RequirePermission('panel.opiekun')` is the primary gate.
     if (user.role !== 'admin' && user.role !== 'opiekun') {
-      // Defence in depth — controller's `@Roles('admin','opiekun')` is the
-      // primary gate; this assertion guards direct service callers (tests,
-      // scripts) from accidentally bypassing the role check.
       throw new ForbiddenException(
         'Brak uprawnień (wymaga konta opiekuna lub administratora)',
       );

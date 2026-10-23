@@ -93,13 +93,13 @@ describe('OpiekunOwnershipGuard', () => {
 
   it('does not bypass for pracownik (no admin-level global access)', async () => {
     // Per docs/03-roles.md#pracownik the role is a narrow "Opiekun wniosków"
-    // (claims-only) and is excluded from carrier CRUD at the @Roles level on
+    // (claims-only) and is excluded from carrier CRUD by @RequirePermission on
     // every endpoint that uses this guard. This guard does not opinion-check
     // pracownik itself — it falls through the `user.role !== 'opiekun'`
     // early-return at line 70 and returns true. The point of this test is to
     // pin down that pracownik no longer triggers the admin-bypass branch
     // (which would short-circuit BEFORE the opiekun gate). Production safety
-    // for pracownik on these routes lives in the controller's @Roles list.
+    // for pracownik on these routes lives in the routes' @RequirePermission.
     const guard = new OpiekunOwnershipGuard(
       makeReflector({ source: 'param', name: 'id', as: 'carrierId' }),
       makePrisma(),

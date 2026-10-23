@@ -10,7 +10,7 @@ import { TeamsService } from '../teams/teams.service';
 import { UsersRepository, type UserRow } from '../users/users.repository';
 import type { VehiclesRepository } from '../vehicles/vehicles.repository';
 import { LookupsService } from './lookups.service';
-import { makeAuthUser } from '../../common/testing/make-auth-user';
+import { makeAuthUser, withoutPermission } from '../../common/testing/make-auth-user';
 
 /** TeamsService stub — only `lookup()` is exercised by LookupsService. */
 function makeTeamsService(
@@ -256,6 +256,13 @@ describe('LookupsService — admin users picker', () => {
     await expect(svc.usersListAdmin(makeAuth('planista'), {})).rejects.toBeInstanceOf(
       ForbiddenException,
     );
+  });
+
+  it('is decided by users.manage, not by the role: an admin without it gets 403', async () => {
+    const svc = new LookupsService(makeEmptyUsersRepo(), makeCarriersRepo(), makeTeamsService());
+    await expect(
+      svc.usersListAdmin(withoutPermission(makeAuth('admin'), 'users.manage'), {}),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 });
 

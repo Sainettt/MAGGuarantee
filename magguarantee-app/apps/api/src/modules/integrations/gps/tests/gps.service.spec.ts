@@ -311,7 +311,7 @@ describe('GpsService.getMany', () => {
   it.each([
     // [role, sub, teamId, expectedScope]. dyspozytor scopes by TEAM (Phase 11),
     // so its scope carries `teamId`, not `userId`. pracownik intentionally
-    // omitted — no GPS scope (blocked upstream by @Roles).
+    // omitted — no GPS scope (blocked upstream by `@RequirePermission('gps.read')`).
     ['admin', 'u-x', null, { kind: 'all' }],
     ['opiekun', 'op-x', null, { kind: 'opiekun', userId: 'op-x' }],
     ['planista', 'pl-x', null, { kind: 'planista', userId: 'pl-x' }],

@@ -34,6 +34,7 @@ import type {
   Role,
 } from '@magguarantee/shared';
 
+import { can } from '../../../common/authz/can';
 import type { Env } from '../../../config/env.schema';
 import type { AuthUser } from '../../auth/decorators/current-user.decorator';
 import {
@@ -98,7 +99,8 @@ export class BugbotHandoffService {
    * Signs a handoff token for `user` and returns the BugBot URL carrying it.
    *
    * @throws NotFoundException when BUGBOT_URL / KID / KEY are not configured.
-   * @throws ForbiddenException for `kind = idea` by anyone but an admin.
+   * @throws ForbiddenException for `kind = idea` without `bugbot.submit_idea`
+   *   (admin only in the catalog).
    */
   async createHandoff(
     user: AuthUser,
@@ -121,11 +123,13 @@ export class BugbotHandoffService {
   }
 
   /**
-   * Who may open the ideas form is decided here (contract §1.8); BugBot applies
-   * its own access rules on top. Bug reports are open to every role.
+   * Who may open the ideas form is decided here (contract §1.8): the
+   * `bugbot.submit_idea` capability (docs/25 §3 B3; admin only in the catalog,
+   * hence the message). BugBot applies its own access rules on top. Bug reports
+   * are open to every role.
    */
   private _assertKindAllowed(user: AuthUser, kind: BugbotHandoffKind): void {
-    if (kind === 'idea' && user.role !== 'admin') {
+    if (kind === 'idea' && !can(user, 'bugbot.submit_idea')) {
       throw new ForbiddenException(
         'Zgłaszanie pomysłów jest dostępne tylko dla administratorów.',
       );

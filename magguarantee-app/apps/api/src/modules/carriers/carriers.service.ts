@@ -106,6 +106,8 @@ export class CarriersService {
     // Per docs/03-roles.md opiekun sees only their carriers — enforce here
     // because the guard cannot fire without a per-row id.
     const effective: CarrierFilters = { ...filters };
+    // scope: opiekun → own carriers (Carrier.opiekunId), admin → all, anyone
+    // else 403 (docs/25 §0).
     if (user.role === 'opiekun') {
       effective.opiekunId = user.sub;
     } else if (user.role !== 'admin') {
@@ -454,6 +456,9 @@ export class CarriersService {
     user: AuthUser,
     requested: string | undefined,
   ): Promise<string> {
+    // scope: an opiekun creates carriers only under himself (Carrier.opiekunId =
+    // user.sub); any other caller — today only admin reaches here — names the
+    // opiekun freely (docs/25 §0, R4).
     // Opiekun callers: default to themselves if no opiekunId provided; if
     // they specify a different one, reject — they cannot reassign.
     if (user.role === 'opiekun') {
@@ -484,6 +489,8 @@ export class CarriersService {
     // so we only ever see a string or undefined here. `undefined` means "do
     // not touch"; the carriers.service caller passes us only strings.
     if (requested === undefined) return undefined;
+    // scope: an opiekun may (re)assign only himself as Carrier.opiekunId; any
+    // other caller — today only admin — assigns freely (docs/25 §0, R4).
     if (user.role === 'opiekun' && requested !== user.sub) {
       throw new ForbiddenException(
         'Opiekun nie może przypisać innego opiekuna',
