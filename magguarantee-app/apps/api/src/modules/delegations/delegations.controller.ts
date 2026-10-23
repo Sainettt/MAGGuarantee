@@ -38,8 +38,7 @@ import {
   CurrentUser,
   type AuthUser,
 } from '../auth/decorators/current-user.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import {
   DelegationsService,
   MARK_READY_AUDIT_ACTIONS,
@@ -58,31 +57,33 @@ import {
  * touches delegations at all — that role now records per-VEHICLE DAILY km (see
  * the vehicles module: `PUT /vehicles/:id/daily-km`, `GET /vehicles/km-board`).
  * The former in-transit/returned delegation handlers were removed and
- * `weryfikator` was dropped from every `@Roles(...)` here. `eksport` stays — it
+ * `weryfikator` was dropped from every role gate here. `eksport` stays — it
  * keeps its read-only outings board (active-status floor + `includeHistory`
- * toggle). Cancel remains carrier-only, unchanged.
+ * toggle). Cancel remains carrier-only, unchanged. (The 2026-06-20 #4 rework
+ * brought the transitions and the weryfikator read board back — see the
+ * status-transition handlers.)
  *
- * `pracownik` is intentionally NOT in the role list — per
+ * Gates (docs/25 §3 B2): every route carries `@RequirePermission` exactly as
+ * planned in `common/authz/endpoint-permissions.ts`, checked by the global
+ * `PermissionsGuard` — `delegations.read`, `.create`, `.cancel`,
+ * `.mark_ready`, `.transit`; who holds what is `ROLE_PERMISSIONS` in
+ * `@magguarantee/shared`. Row scope stays on the role: the class-level
+ * `CarrierOwnershipGuard` runs the `@CarrierOwns` checks, and the service
+ * narrows lists and status branches by role.
+ *
+ * `pracownik` intentionally holds NO `delegations.*` permission — per
  * docs/03-roles.md#pracownik that role is a narrow "Opiekun wniosków"
  * scoped to claims verification only. This is stricter than legacy
  * (`getDelegacjeForEksport` allowed pracownik) — decision locked in the
  * wave brief.
  */
 @Controller('delegations')
-@UseGuards(RolesGuard, CarrierOwnershipGuard)
+@UseGuards(CarrierOwnershipGuard)
 export class DelegationsController {
   constructor(private readonly delegations: DelegationsService) {}
 
   @Get()
-  @Roles(
-    'admin',
-    'opiekun',
-    'planista',
-    'dyspozytor',
-    'przewoznik',
-    'eksport',
-    'weryfikator',
-  )
+  @RequirePermission('delegations.read')
   async list(
     @CurrentUser() user: AuthUser,
     @Query(new ZodValidationPipe(DelegationFiltersSchema))
@@ -99,7 +100,7 @@ export class DelegationsController {
    * fleet view via `attentionReasons`).
    */
   @Get('eligibility')
-  @Roles('przewoznik')
+  @RequirePermission('delegations.create')
   async eligibility(
     @CurrentUser() user: AuthUser,
   ): Promise<DelegationEligibilityResponse> {
@@ -107,15 +108,7 @@ export class DelegationsController {
   }
 
   @Get(':id')
-  @Roles(
-    'admin',
-    'opiekun',
-    'planista',
-    'dyspozytor',
-    'przewoznik',
-    'eksport',
-    'weryfikator',
-  )
+  @RequirePermission('delegations.read')
   @CarrierOwns('id', 'param', 'delegationId')
   async getOne(
     @CurrentUser() user: AuthUser,
@@ -126,7 +119,7 @@ export class DelegationsController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @Roles('przewoznik')
+  @RequirePermission('delegations.create')
   @CarrierOwns('vehicleId', 'body', 'vehicleId')
   @Audit({
     action: 'submitDelegation',
@@ -144,8 +137,9 @@ export class DelegationsController {
   @Post(':id/cancel')
   @HttpCode(HttpStatus.OK)
   // Phase 7 REWORK (2026-06-20 #4) — admin may anulate any active outing; the
-  // carrier branch (own + `zgloszony`) is unchanged. The service gates by role.
-  @Roles('przewoznik', 'admin')
+  // carrier branch (own + `zgloszony`) is unchanged. `delegations.cancel`
+  // (przewoznik, admin) opens the route; the service picks the branch by role.
+  @RequirePermission('delegations.cancel')
   @CarrierOwns('id', 'param', 'delegationId')
   @Audit({
     action: 'cancelDelegation',
@@ -164,9 +158,10 @@ export class DelegationsController {
   // ── Status transitions (Phase 7 REWORK 2026-06-20 #4) ────
 
   /**
-   * `POST /delegations/:id/ready` — eksport|admin. `zgloszony → gotowy` (clean
-   * flip after a SpedTrans zlecenie) + rollback `gotowy → zgloszony` (pre-
-   * `w_trasie`, via `rollback: true`). The state machine 422s an illegal edge.
+   * `POST /delegations/:id/ready` — `delegations.mark_ready` (eksport, admin).
+   * `zgloszony → gotowy` (clean flip after a SpedTrans zlecenie) + rollback
+   * `gotowy → zgloszony` (pre-`w_trasie`, via `rollback: true`). The state
+   * machine 422s an illegal edge.
    *
    * Audit: `delegation.markReady` for the flip; the service renames the row to
    * `delegation.rollbackReady` on the rollback branch (`AuditContext.setAction`)
@@ -174,7 +169,7 @@ export class DelegationsController {
    */
   @Post(':id/ready')
   @HttpCode(HttpStatus.OK)
-  @Roles('eksport', 'admin')
+  @RequirePermission('delegations.mark_ready')
   @Audit({
     action: MARK_READY_AUDIT_ACTIONS.ready,
     targetType: 'Delegation',
@@ -189,13 +184,13 @@ export class DelegationsController {
   }
 
   /**
-   * `POST /delegations/:id/in-transit` — weryfikator|admin. `gotowy → w_trasie`,
-   * stamps `verifiedBy/At`. admin is on `@Roles` but still passes the gate (no
-   * skipping `gotowy`).
+   * `POST /delegations/:id/in-transit` — `delegations.transit` (weryfikator,
+   * admin). `gotowy → w_trasie`, stamps `verifiedBy/At`. admin holds the
+   * permission but still goes through the state machine (no skipping `gotowy`).
    */
   @Post(':id/in-transit')
   @HttpCode(HttpStatus.OK)
-  @Roles('weryfikator', 'admin')
+  @RequirePermission('delegations.transit')
   @Audit({
     action: 'delegation.markInTransit',
     targetType: 'Delegation',
@@ -210,15 +205,16 @@ export class DelegationsController {
   }
 
   /**
-   * `POST /delegations/:id/returned` — weryfikator|admin. `w_trasie → zjechal`
-   * with date-only `actualReturnAt`. In one transaction: sets `actualReturnAt`
-   * + `verifiedBy/At`, advances `Vehicle.lastDroveAt`, and auto-recalculates the
-   * linked wniosek. The `@Audit('delegation.markReturned')` interceptor opens
-   * that ambient transaction.
+   * `POST /delegations/:id/returned` — `delegations.transit` (weryfikator,
+   * admin). `w_trasie → zjechal` with date-only `actualReturnAt`. In one
+   * transaction: sets `actualReturnAt` + `verifiedBy/At`, advances
+   * `Vehicle.lastDroveAt`, and auto-recalculates the linked wniosek. The
+   * `@Audit('delegation.markReturned')` interceptor opens that ambient
+   * transaction.
    */
   @Post(':id/returned')
   @HttpCode(HttpStatus.OK)
-  @Roles('weryfikator', 'admin')
+  @RequirePermission('delegations.transit')
   @Audit({
     action: 'delegation.markReturned',
     targetType: 'Delegation',

@@ -3,13 +3,13 @@ import 'reflect-metadata';
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 
-import type { Role } from '@magguarantee/shared';
+import { rolesSatisfying, type Permission, type Role } from '@magguarantee/shared';
 
-import { ROLES_METADATA_KEY } from '../auth/auth.constants';
-import type { AuthUser } from '../auth/decorators/current-user.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { DelegationsController } from './delegations.controller';
 import { makeAuthUser } from '../../common/testing/make-auth-user';
+import { PERMISSIONS_METADATA_KEY } from '../auth/auth.constants';
+import type { AuthUser } from '../auth/decorators/current-user.decorator';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { DelegationsController } from './delegations.controller';
 
 /**
  * Authorization unit tests for the delegations surface after the Phase 7 REWORK
@@ -20,10 +20,15 @@ import { makeAuthUser } from '../../common/testing/make-auth-user';
  *  - cancel: carrier (own `zgloszony`) + admin (any active); NOT weryfikator
  *    (it never cancels) and NOT eksport.
  *
- * Two layers, same pattern as `drivers.controller.spec.ts`:
- *   1. The `@Roles(...)` metadata on each handler is exactly the documented set
- *      (reflection — catches accidental decorator drift).
- *   2. `RolesGuard` actually accepts/rejects the right tokens.
+ * Track B (docs/25 §3 B2): the routes carry `@RequirePermission` instead of
+ * `@Roles`. Two layers, same pattern as `claims.controller.roles.spec.ts`:
+ *   1. The `@RequirePermission(...)` metadata on each handler is exactly the
+ *      planned requirement (`common/authz/endpoint-permissions.ts`), and the
+ *      catalog maps it onto the documented role set (reflection — catches
+ *      accidental decorator or catalog drift).
+ *   2. `PermissionsGuard` actually lets through / refuses users built the way
+ *      `JwtAccessStrategy` builds them (`makeAuthUser(role)`), over the same
+ *      role matrices the former `RolesGuard` checks used.
  */
 
 const reflector = new Reflector();
@@ -36,12 +41,18 @@ function handlerOf(
   ) => unknown;
 }
 
-function rolesFor(handlerName: keyof DelegationsController): Role[] {
-  const meta = reflector.get<Role[] | undefined>(
-    ROLES_METADATA_KEY,
-    handlerOf(handlerName),
+/** The live requirement, resolved like `PermissionsGuard` does (handler, then class). */
+function requiredFor(handlerName: keyof DelegationsController): Permission[] {
+  const meta = reflector.getAllAndOverride<Permission[] | undefined>(
+    PERMISSIONS_METADATA_KEY,
+    [handlerOf(handlerName), DelegationsController],
   );
   return meta ?? [];
+}
+
+/** Who the catalog admits through that requirement (leader rule as in the snapshot). */
+function admittedRoles(handlerName: keyof DelegationsController): Role[] {
+  return rolesSatisfying(requiredFor(handlerName), { lider: true });
 }
 
 function ctxFor(
@@ -60,18 +71,8 @@ function ctxFor(
   } as unknown as ExecutionContext;
 }
 
-function userWith(role: Role): AuthUser {
-  return makeAuthUser(role, {
-    sub: `u-${role}`,
-    login: role,
-    email: `${role}@magtrans.eu`,
-    name: role,
-    mustChangePassword: false,
-  });
-}
-
 describe('DelegationsController — authorization (Phase 7 REWORK 2026-06-20 #4)', () => {
-  const guard = new RolesGuard(reflector);
+  const guard = new PermissionsGuard(reflector);
 
   describe('the verifier transition handlers exist again', () => {
     it('markReady / markInTransit / markReturned are methods on the controller', () => {
@@ -87,10 +88,16 @@ describe('DelegationsController — authorization (Phase 7 REWORK 2026-06-20 #4)
 
   describe('list / getOne — weryfikator is back (active board like eksport)', () => {
     it.each(['list', 'getOne'] as const)(
-      '%s includes BOTH eksport and weryfikator',
+      '%s requires exactly delegations.read',
       (handler) => {
-        const roles = rolesFor(handler);
-        expect(roles).toEqual(
+        expect(requiredFor(handler)).toEqual(['delegations.read']);
+      },
+    );
+
+    it.each(['list', 'getOne'] as const)(
+      '%s admits BOTH eksport and weryfikator',
+      (handler) => {
+        expect(admittedRoles(handler)).toEqual(
           expect.arrayContaining([
             'admin',
             'opiekun',
@@ -105,18 +112,18 @@ describe('DelegationsController — authorization (Phase 7 REWORK 2026-06-20 #4)
     );
 
     it.each(['list', 'getOne'] as const)(
-      'RolesGuard allows weryfikator on %s',
+      'PermissionsGuard allows weryfikator on %s',
       (handler) => {
         expect(
-          guard.canActivate(ctxFor(handler, userWith('weryfikator'))),
+          guard.canActivate(ctxFor(handler, makeAuthUser('weryfikator'))),
         ).toBe(true);
       },
     );
 
     it.each(['list', 'getOne'] as const)(
-      'RolesGuard allows eksport on %s',
+      'PermissionsGuard allows eksport on %s',
       (handler) => {
-        expect(guard.canActivate(ctxFor(handler, userWith('eksport')))).toBe(
+        expect(guard.canActivate(ctxFor(handler, makeAuthUser('eksport')))).toBe(
           true,
         );
       },
@@ -124,19 +131,25 @@ describe('DelegationsController — authorization (Phase 7 REWORK 2026-06-20 #4)
   });
 
   describe('markReady — eksport|admin', () => {
-    it('is @Roles(eksport, admin)', () => {
-      expect(rolesFor('markReady').sort()).toEqual(['admin', 'eksport']);
+    it('requires exactly delegations.mark_ready', () => {
+      expect(requiredFor('markReady')).toEqual(['delegations.mark_ready']);
     });
 
-    it.each(['eksport', 'admin'] as const)('RolesGuard allows %s', (role) => {
-      expect(guard.canActivate(ctxFor('markReady', userWith(role)))).toBe(true);
+    it('which admits exactly eksport + admin', () => {
+      expect(admittedRoles('markReady').sort()).toEqual(['admin', 'eksport']);
+    });
+
+    it.each(['eksport', 'admin'] as const)('PermissionsGuard allows %s', (role) => {
+      expect(guard.canActivate(ctxFor('markReady', makeAuthUser(role)))).toBe(
+        true,
+      );
     });
 
     it.each(['weryfikator', 'przewoznik', 'planista'] as const)(
-      'RolesGuard rejects %s (403)',
+      'PermissionsGuard rejects %s (403)',
       (role) => {
         expect(() =>
-          guard.canActivate(ctxFor('markReady', userWith(role))),
+          guard.canActivate(ctxFor('markReady', makeAuthUser(role))),
         ).toThrow(ForbiddenException);
       },
     );
@@ -144,49 +157,59 @@ describe('DelegationsController — authorization (Phase 7 REWORK 2026-06-20 #4)
 
   describe('markInTransit / markReturned — weryfikator|admin', () => {
     it.each(['markInTransit', 'markReturned'] as const)(
-      '%s is @Roles(weryfikator, admin)',
+      '%s requires exactly delegations.transit',
       (handler) => {
-        expect(rolesFor(handler).sort()).toEqual(['admin', 'weryfikator']);
+        expect(requiredFor(handler)).toEqual(['delegations.transit']);
       },
     );
 
     it.each(['markInTransit', 'markReturned'] as const)(
-      'RolesGuard rejects eksport on %s (403)',
+      '%s admits exactly weryfikator + admin',
+      (handler) => {
+        expect(admittedRoles(handler).sort()).toEqual(['admin', 'weryfikator']);
+      },
+    );
+
+    it.each(['markInTransit', 'markReturned'] as const)(
+      'PermissionsGuard rejects eksport on %s (403)',
       (handler) => {
         expect(() =>
-          guard.canActivate(ctxFor(handler, userWith('eksport'))),
+          guard.canActivate(ctxFor(handler, makeAuthUser('eksport'))),
         ).toThrow(ForbiddenException);
       },
     );
 
     it.each(['markInTransit', 'markReturned'] as const)(
-      'RolesGuard allows weryfikator on %s',
+      'PermissionsGuard allows weryfikator on %s',
       (handler) => {
         expect(
-          guard.canActivate(ctxFor(handler, userWith('weryfikator'))),
+          guard.canActivate(ctxFor(handler, makeAuthUser('weryfikator'))),
         ).toBe(true);
       },
     );
   });
 
   describe('cancel — carrier + admin (verifier still has NO cancel)', () => {
-    it('cancel is @Roles(przewoznik, admin)', () => {
-      const roles = rolesFor('cancel');
-      expect(roles.sort()).toEqual(['admin', 'przewoznik']);
+    it('cancel requires exactly delegations.cancel (przewoznik + admin)', () => {
+      expect(requiredFor('cancel')).toEqual(['delegations.cancel']);
+      const roles = admittedRoles('cancel');
+      expect([...roles].sort()).toEqual(['admin', 'przewoznik']);
       expect(roles).not.toContain('weryfikator');
       expect(roles).not.toContain('eksport');
     });
 
-    it('RolesGuard rejects a weryfikator on cancel (403)', () => {
+    it('PermissionsGuard rejects a weryfikator on cancel (403)', () => {
       expect(() =>
-        guard.canActivate(ctxFor('cancel', userWith('weryfikator'))),
+        guard.canActivate(ctxFor('cancel', makeAuthUser('weryfikator'))),
       ).toThrow(ForbiddenException);
     });
 
     it.each(['przewoznik', 'admin'] as const)(
-      'RolesGuard allows %s on cancel',
+      'PermissionsGuard allows %s on cancel',
       (role) => {
-        expect(guard.canActivate(ctxFor('cancel', userWith(role)))).toBe(true);
+        expect(guard.canActivate(ctxFor('cancel', makeAuthUser(role)))).toBe(
+          true,
+        );
       },
     );
   });

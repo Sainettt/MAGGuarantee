@@ -42,8 +42,7 @@ import {
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { clientIp } from '../../common/utils/client-ip';
 import { CurrentUser, type AuthUser } from '../auth/decorators/current-user.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { ClaimsService } from './claims.service';
 
 // Claim rate limits per docs/13-api-design.md#rate-limiting:
@@ -67,7 +66,7 @@ const RL_PREVIEW = {
  *  - POST /claims/:nrZgl/reklamacja (carrier disputes a decided claim)
  *
  * Phase 4:
- *  - PATCH /claims/:nrZgl (decision, admin/pracownik only)
+ *  - PATCH /claims/:nrZgl (decision, `claims.verify` — admin/pracownik)
  *  - PATCH /claims/:nrZgl/verification («Zapisz weryfikację» checkpoint; the
  *    over-threshold dopłata auto-moves the claim into OCZEKUJE_NA_AUTORYZACJE)
  *
@@ -75,22 +74,31 @@ const RL_PREVIEW = {
  * (`AUTORYZACJA_MAKSIMA`), lifting the over-threshold decision gate — the
  * over-threshold verification auto-moves the claim into OCZEKUJE_NA_AUTORYZACJE
  * (no manual flow).
+ *
+ * Gates (docs/25 §3 B2): every route carries `@RequirePermission` exactly as
+ * planned in `common/authz/endpoint-permissions.ts`, checked by the global
+ * `PermissionsGuard` — `claims.read` (admin, pracownik, przewoznik),
+ * `claims.submit` (przewoznik), `claims.verify` (admin, pracownik); who holds
+ * what is `ROLE_PERMISSIONS` in `@magguarantee/shared`. Row scope stays on
+ * the role: the class-level `CarrierOwnershipGuard` runs the `@CarrierOwns`
+ * checks, and the service narrows lists / re-checks single reads.
  */
 @Controller('claims')
-@UseGuards(RolesGuard, CarrierOwnershipGuard)
+@UseGuards(CarrierOwnershipGuard)
 export class ClaimsController {
   constructor(private readonly claims: ClaimsService) {}
 
   // ── List & detail ───────────────────────────────────────
 
-  // Claims are visible ONLY to admin/pracownik (all) and przewoznik (own).
-  // opiekun has NO claims access at all — neither the list nor a single
+  // `claims.read` — held ONLY by admin/pracownik (all wnioski) and przewoznik
+  // (own). opiekun has NO claims access at all — neither the list nor a single
   // wniosek (decision 2026-10-22, docs/03-roles.md#opiekun; it used to read
   // its own carriers' claims). planista / dyspozytor / eksport / weryfikator
   // have no claims access either (docs/03-roles.md access matrix). The same
-  // set guards `getOne` below; the service re-checks it as defence-in-depth.
+  // permission guards `getOne` below; the service re-checks the role as
+  // defence-in-depth.
   @Get()
-  @Roles('admin', 'pracownik', 'przewoznik')
+  @RequirePermission('claims.read')
   async list(
     @CurrentUser() user: AuthUser,
     @Query(new ZodValidationPipe(ClaimFiltersSchema)) query: ClaimFilters,
@@ -111,7 +119,7 @@ export class ClaimsController {
    */
   @Post('preview')
   @HttpCode(HttpStatus.OK)
-  @Roles('przewoznik')
+  @RequirePermission('claims.submit')
   @Throttle({ default: RL_PREVIEW })
   async previewNew(
     @CurrentUser() user: AuthUser,
@@ -121,7 +129,7 @@ export class ClaimsController {
   }
 
   @Get(':nrZgl')
-  @Roles('admin', 'pracownik', 'przewoznik')
+  @RequirePermission('claims.read')
   @CarrierOwns('nrZgl', 'param', 'claimNrZgl')
   async getOne(
     @CurrentUser() user: AuthUser,
@@ -134,10 +142,14 @@ export class ClaimsController {
    * `POST /claims/:nrZgl/preview` — scoped to an existing claim. Used by the
    * reklamacja edit form so the carrier can see how amended inputs would
    * have changed the math.
+   *
+   * Any-of `claims.submit` (the carrier's reklamacja form) / `claims.verify`
+   * (the verifier's edit mode): whoever may amend the wniosek may preview the
+   * amendment.
    */
   @Post(':nrZgl/preview')
   @HttpCode(HttpStatus.OK)
-  @Roles('przewoznik', 'pracownik', 'admin')
+  @RequirePermission('claims.submit', 'claims.verify')
   @Throttle({ default: RL_PREVIEW })
   @CarrierOwns('nrZgl', 'param', 'claimNrZgl')
   async previewExisting(
@@ -151,14 +163,14 @@ export class ClaimsController {
   // ── Submit (carrier) ────────────────────────────────────
 
   /**
-   * `POST /claims` — only carriers may submit. `Idempotency-Key` header is
-   * accepted per docs/13-api-design.md#idempotency; the actual
+   * `POST /claims` — `claims.submit`, held only by carriers. `Idempotency-Key`
+   * header is accepted per docs/13-api-design.md#idempotency; the actual
    * de-duplication happens in a future Wave's IdempotencyInterceptor.
    * For now we wire the route + audit so the contract holds.
    */
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @Roles('przewoznik')
+  @RequirePermission('claims.submit')
   // Phase 7 §0″ finish — vehicle/trailer/driver/mileage no longer travel in the
   // body; ownership is now enforced via the chosen outing. The `delegationId`
   // body field must point at an outing owned by the authenticated carrier
@@ -200,7 +212,7 @@ export class ClaimsController {
    * mutation (`AuditWriter.log({ tx })`).
    */
   @Patch(':nrZgl')
-  @Roles('admin', 'pracownik')
+  @RequirePermission('claims.verify')
   @Audit({
     action: 'updateClaim',
     targetType: 'Claim',
@@ -234,7 +246,7 @@ export class ClaimsController {
    * global `AuditInterceptor` (see `@Audit(...)` below); no email.
    */
   @Patch(':nrZgl/verification')
-  @Roles('admin', 'pracownik')
+  @RequirePermission('claims.verify')
   @Audit({
     action: 'claim.verify',
     targetType: 'Claim',
@@ -249,6 +261,32 @@ export class ClaimsController {
   }
 
   // ── Limits refresh (escape hatch) ───────────────────────
+
+  /**
+   * `GET /claims/:nrZgl/recalc-limits/preview` — DRY RUN of the refresh below.
+   *
+   * The confirmation dialog (docs/14 §16.6) must show «было → станет» BEFORE
+   * the write, and the write is not undoable (it overwrites the wniosek's
+   * limits snapshot). No other endpoint can produce those numbers:
+   * `POST /claims/:nrZgl/preview` is pinned to the frozen snapshot on purpose,
+   * and `GET /limits` is admin-only.
+   *
+   * Pure read — computes with the SAME service code as the write, persists
+   * nothing and writes NO audit row (hence no `@Audit()`; the inverse
+   * audit-coverage spec only requires it on mutating verbs). Carries the SAME
+   * status gate, so a frozen wniosek 422s before the dialog opens.
+   *
+   * Response: `RecalcLimitsPreviewDto` — `{ changed, current, next }`,
+   * deliberately NOT a `ClaimDto` (nothing was written, so there is no claim
+   * state to hand back). Gate: `claims.verify`, the same as the write.
+   */
+  @Get(':nrZgl/recalc-limits/preview')
+  @RequirePermission('claims.verify')
+  async recalcLimitsPreview(
+    @Param('nrZgl') nrZgl: string,
+  ): Promise<RecalcLimitsPreviewDto> {
+    return this.claims.previewLimitsRefresh(nrZgl);
+  }
 
   /**
    * `POST /claims/:nrZgl/recalc-limits` — re-price a wniosek with the CURRENT
@@ -266,42 +304,16 @@ export class ClaimsController {
    * The response is the updated `ClaimDto` so the web can diff it against the
    * row it had open and show "było → jest" in the confirmation dialog.
    *
-   * Roles: `admin` + `pracownik` — the SAME pair that owns every other
-   * claim-mutating route. Per docs/03-roles.md «Верифицировать заявление
+   * Gate: `claims.verify` (admin + pracownik) — the SAME requirement as every
+   * other claim-mutating route. Per docs/03-roles.md «Верифицировать заявление
    * (изменить статус, пересчитать km/доплату)» belongs to `pracownik`;
-   * `weryfikator` owns the km-board + outing statuses and has NO `/claims`
-   * access at all, so it must not be able to reprice a wniosek (nor receive a
-   * `ClaimDto` with the payout figures as the response).
+   * `weryfikator` owns the km-board + outing statuses and holds no `claims.*`
+   * permission at all, so it must not be able to reprice a wniosek (nor receive
+   * a `ClaimDto` with the payout figures as the response).
    */
-  /**
-   * `GET /claims/:nrZgl/recalc-limits/preview` — DRY RUN of the refresh below.
-   *
-   * The confirmation dialog (docs/14 §16.6) must show «было → станет» BEFORE
-   * the write, and the write is not undoable (it overwrites the wniosek's
-   * limits snapshot). No other endpoint can produce those numbers:
-   * `POST /claims/:nrZgl/preview` is pinned to the frozen snapshot on purpose,
-   * and `GET /limits` is admin-only.
-   *
-   * Pure read — computes with the SAME service code as the write, persists
-   * nothing and writes NO audit row (hence no `@Audit()`; the inverse
-   * audit-coverage spec only requires it on mutating verbs). Carries the SAME
-   * status gate, so a frozen wniosek 422s before the dialog opens.
-   *
-   * Response: `RecalcLimitsPreviewDto` — `{ changed, current, next }`,
-   * deliberately NOT a `ClaimDto` (nothing was written, so there is no claim
-   * state to hand back).
-   */
-  @Get(':nrZgl/recalc-limits/preview')
-  @Roles('admin', 'pracownik')
-  async recalcLimitsPreview(
-    @Param('nrZgl') nrZgl: string,
-  ): Promise<RecalcLimitsPreviewDto> {
-    return this.claims.previewLimitsRefresh(nrZgl);
-  }
-
   @Post(':nrZgl/recalc-limits')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'pracownik')
+  @RequirePermission('claims.verify')
   @Audit({
     action: 'claim.limitsRefresh',
     targetType: 'Claim',
@@ -318,7 +330,7 @@ export class ClaimsController {
 
   @Post(':nrZgl/reklamacja')
   @HttpCode(HttpStatus.OK)
-  @Roles('przewoznik')
+  @RequirePermission('claims.submit')
   @CarrierOwns('nrZgl', 'param', 'claimNrZgl')
   @Audit({
     action: 'submitReklamacja',

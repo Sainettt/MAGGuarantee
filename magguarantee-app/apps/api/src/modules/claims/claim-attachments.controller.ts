@@ -9,7 +9,6 @@ import {
   Req,
   Res,
   UploadedFile,
-  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -29,8 +28,7 @@ import {
   CurrentUser,
   type AuthUser,
 } from '../auth/decorators/current-user.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { ClaimAttachmentsService } from './claim-attachments.service';
 
 /** The single multipart file field name. Web MUST use this exact name. */
@@ -45,12 +43,12 @@ const MULTIPART_OPTIONS = {
  * Maksim-authorization confirmation-screenshot endpoints (the ADDITIVE gate on
  * `NA_WERYFIKACJI`) per docs/13-api-design.md#claims + brief §2.5.
  *
- * Mounted at `claims/:nrZgl/authorization-confirmation`. Internal roles only —
+ * Mounted at `claims/:nrZgl/authorization-confirmation`. Both routes require
+ * `claims.verify` (docs/25 §3 B2; global `PermissionsGuard`), held only by
  * `admin` / `pracownik` (the verifier who takes the decision). `opiekun` /
- * `przewoznik` are excluded: the gate is a verification-desk concern.
+ * `przewoznik` do not hold it: the gate is a verification-desk concern.
  */
 @Controller('claims/:nrZgl/authorization-confirmation')
-@UseGuards(RolesGuard)
 export class ClaimAttachmentsController {
   private readonly logger = new Logger(ClaimAttachmentsController.name);
 
@@ -58,7 +56,7 @@ export class ClaimAttachmentsController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @Roles('admin', 'pracownik')
+  @RequirePermission('claims.verify')
   @UseInterceptors(FileInterceptor(ATTACHMENT_FILE_FIELD, MULTIPART_OPTIONS))
   @Audit({
     action: 'claim.authorizationConfirmation',
@@ -78,7 +76,7 @@ export class ClaimAttachmentsController {
   }
 
   @Get(':attachmentId/download')
-  @Roles('admin', 'pracownik')
+  @RequirePermission('claims.verify')
   async download(
     @CurrentUser() user: AuthUser,
     @Param('nrZgl') nrZgl: string,
