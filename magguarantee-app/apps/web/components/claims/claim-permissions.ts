@@ -11,7 +11,7 @@
 // «Zapisz weryfikację» button that the API answers with
 // 422 `CLAIM_VERIFY_ADMIN_ONLY`.
 //
-// So: (status, role, mode) → ONE `ClaimPermissions` object, and EVERY section
+// So: (status, permissions, mode) → ONE `ClaimPermissions` object, and EVERY section
 // (fact pairs, verify button, decision panel, submit payload) reads from it.
 // Adding a rule means editing this function, not five call sites. In particular
 // `payloadIncludesCorrections` is derived from the SAME `factsEditable` flag
@@ -28,15 +28,25 @@
 //   - `_assertMayVerifyInStatus` (claims.service.ts) → `canVerifyInStatus`
 //   - the `CLAIM_NOT_VERIFIED` decision gate      → `requiresVerifiedCheckpoint`
 // Server-side enforcement is authoritative; this is the UI's honest mirror.
+//
+// docs/25 §3 B4 — the input is the viewer's EFFECTIVE permissions, not his
+// role: `claims.verify_pending_authorization` (admin) is what used to be
+// `role === 'admin'`, `claims.verify` (admin + pracownik) what used to be
+// `admin || pracownik`.
 
-import type { ClaimStatus, Role } from '@magguarantee/shared';
+import type { ClaimStatus } from '@magguarantee/shared';
+
+import type { Permission } from '@/lib/auth/permissions';
 
 export type ClaimModalMode = 'view' | 'edit';
 
 export interface ClaimPermissionsInput {
   status: ClaimStatus;
-  /** Current user's role. `undefined` while `GET /auth/me` is in flight. */
-  role: Role | undefined;
+  /**
+   * The viewer's effective permissions (`usePermissions()`). `undefined` /
+   * empty while `GET /auth/me` is in flight — every gated action is then off.
+   */
+  permissions: readonly Permission[] | undefined;
   mode: ClaimModalMode;
 }
 
@@ -68,7 +78,7 @@ export interface ClaimPermissions {
   /**
    * «Przelicz wg aktualnych limitów» is rendered in the DOPŁATA block
    * (docs/14 §16.6). Mirror of `POST /claims/:nrZgl/recalc-limits`:
-   * `@Roles('admin', 'pracownik')` + the service's
+   * `claims.verify` (admin, pracownik) + the service's
    * `CLAIM_LIMITS_REFRESH_BLOCKED` gate, which allows ONLY `NA_WERYFIKACJI`
    * (an authorised or decided amount is frozen and moves through a
    * reklamacja instead). §6.5.13 hard rule: impossible ⇒ REMOVED, not
@@ -79,17 +89,24 @@ export interface ClaimPermissions {
 
 export function deriveClaimPermissions({
   status,
-  role,
+  permissions,
   mode,
 }: ClaimPermissionsInput): ClaimPermissions {
-  const isAdmin = role === 'admin';
+  const granted = permissions ?? [];
+  // Re-saving a checkpoint / deciding while the amount waits for Maksim's
+  // authorization — admin (`CLAIM_VERIFY_ADMIN_ONLY` server-side).
+  const canVerifyPendingAuthorization = granted.includes(
+    'claims.verify_pending_authorization',
+  );
+  const canVerify = granted.includes('claims.verify');
   const isEdit = mode === 'edit';
   const pendingAuthorization = status === 'OCZEKUJE_NA_AUTORYZACJE';
 
   // Status window in which a verification checkpoint may be saved at all —
   // mirror of `VERIFIABLE_CLAIM_STATUSES` + `_assertMayVerifyInStatus`.
   const canVerifyInStatus =
-    status === 'NA_WERYFIKACJI' || (pendingAuthorization && isAdmin);
+    status === 'NA_WERYFIKACJI' ||
+    (pendingAuthorization && canVerifyPendingAuthorization);
 
   // Facts follow the verify right: if you cannot save the checkpoint in this
   // status you have no business typing into the fields it would persist.
@@ -97,15 +114,14 @@ export function deriveClaimPermissions({
 
   const factsNotice: ClaimPermissions['factsNotice'] = !pendingAuthorization
     ? null
-    : isAdmin
+    : canVerifyPendingAuthorization
       ? 'adminInfo'
       : 'locked';
 
   // Re-pricing is a WRITE, so it follows the same rule as every other action
   // in this modal: it exists in `edit` mode only (`view` is read-only by
   // construction — it has no decision panel and no verify button either).
-  const canRecalcLimits =
-    (isAdmin || role === 'pracownik') && status === 'NA_WERYFIKACJI';
+  const canRecalcLimits = canVerify && status === 'NA_WERYFIKACJI';
 
   return {
     factsEditable,

@@ -22,16 +22,21 @@ import {
   BugbotHandoffLocaleSchema,
   type BugbotHandoffKind,
   type BugbotHandoffLocale,
-  type Role,
 } from '@magguarantee/shared';
 
-/** Which BugBot forms a role gets. `idea` is admin-only (the API 403s otherwise). */
+import type { Permission } from '@/lib/auth/permissions';
+
+/**
+ * Which BugBot forms a signed-in user gets, from his EFFECTIVE permissions:
+ * «Zgłoś problem» for everyone, «Zgłoś pomysł» only with `bugbot.submit_idea`
+ * (admin — the API 403s otherwise).
+ */
 export function bugbotKindsFor(
-  role: Role,
+  permissions: readonly Permission[],
   enabled: boolean,
 ): readonly BugbotHandoffKind[] {
   if (!enabled) return [];
-  return role === 'admin' ? ['bug', 'idea'] : ['bug'];
+  return permissions.includes('bugbot.submit_idea') ? ['bug', 'idea'] : ['bug'];
 }
 
 /** The UI locale narrowed to what BugBot renders; anything unknown → `pl`. */

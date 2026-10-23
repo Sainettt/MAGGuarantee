@@ -68,7 +68,7 @@ import {
 } from '@/components/ui/EntityDetailModal';
 import { textValue } from '@/components/ui/entity-detail-values';
 import { formatDateTime, formatEur } from '@/lib/format/numbers';
-import { useAuth } from '@/lib/hooks/useAuth';
+import { useCan } from '@/lib/hooks/useCan';
 
 interface Props {
   open: boolean;
@@ -302,25 +302,26 @@ export function DelegationDetailModal({
   const tKmCal = useTranslations('delegation.kmCalendar');
   const tTeam = useTranslations('team');
   const tRates = useTranslations('vehicles.sections');
-  // Viewer role — drives the «Stawki» UI gate (§6.4.1). Called unconditionally
-  // at the top (rules-of-hooks safe), before the null bail below.
-  const { user } = useAuth();
+  // Viewer permission — drives the «Stawki» UI gate (§6.4.1). Called
+  // unconditionally at the top (rules-of-hooks safe), before the null bail
+  // below. False while `/auth/me` loads.
+  const canReadRates = useCan('vehicles.rates.read');
 
   // The modal is only rendered with a target; bail defensively so the hooks
   // above still run unconditionally (rules-of-hooks safe).
   if (!delegation) return null;
 
   // ── «Stawki» visibility gate (§6.4.1 — two conditions, both required) ────
-  //   1. Viewer role: shown to every delegation-reading role EXCEPT dyspozytor
-  //      (whose rates the server ALSO scrubs to null — this is the 2nd layer).
+  //   1. Viewer permission `vehicles.rates.read`: every delegation-reading
+  //      role holds it EXCEPT dyspozytor (whose rates the server ALSO scrubs
+  //      to null — this is the 2nd layer).
   //   2. Data: a resolvable vehicle AND at least one non-null rate (per §6.4
   //      "empty section omitted" — no all-em-dash block). Read straight off the
   //      shared mini — no defensive cast (unlike `readVehicleDispatchTeam`,
   //      which predated its field).
   const ratesVehicle = delegation.vehicle;
   const showRates =
-    !!user &&
-    user.role !== 'dyspozytor' &&
+    canReadRates &&
     ratesVehicle != null &&
     (ratesVehicle.rateDe != null ||
       ratesVehicle.rateUe != null ||

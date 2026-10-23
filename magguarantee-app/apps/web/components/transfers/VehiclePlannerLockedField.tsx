@@ -31,6 +31,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/lib/hooks/useAuth';
+import { usePermissions } from '@/lib/hooks/useCan';
 import { useVehiclePlannerHistory } from '@/lib/hooks/usePlannerTransfers';
 import { pendingTransferOf } from '@/lib/transfers/plannerTimeline';
 import { personName, plannerCellState } from '@/lib/transfers/transferUi';
@@ -55,11 +56,13 @@ export default function VehiclePlannerLockedField({
 }: VehiclePlannerLockedFieldProps) {
   const t = useTranslations('transfers');
   const { user } = useAuth();
+  const permissions = usePermissions();
   const historyQ = useVehiclePlannerHistory(vehicle.id, { enabled: open });
   const pending = pendingTransferOf(historyQ.data);
 
   const state = plannerCellState({
     viewerRole: user?.role,
+    viewerPermissions: permissions,
     vehicleActive: vehicle.active,
     history: historyQ.isLoading
       ? 'loading'

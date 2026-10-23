@@ -13,12 +13,15 @@
 // (`carriers`, `vehicles`, `drivers`, `trailers`, `trailer-types`) have
 // their own nested guard at `(admin)/layout.tsx`.
 //
-// Nav filtering happens here in the server context — what a given role
-// can't see isn't shipped to the client at all.
+// Nav filtering happens here in the server context — what a given user
+// can't see isn't shipped to the client at all. It runs on the user's
+// EFFECTIVE permissions from `/auth/me` (docs/25 §3 B4); the role only scopes
+// the shell (a panel is a role) and the two «Wyjazdy» entries.
 
 import { EmployeeShell } from '@/components/layout/EmployeeShell';
+import { effectivePermissionsOf } from '@/lib/auth/permissions';
 import { requireRoleAccess } from '@/lib/auth/server';
-import { filterNavForRole } from '@/lib/nav.config';
+import { EMPLOYEE_SHELL_ROLES, filterNav } from '@/lib/nav.config';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,11 +30,11 @@ export default async function EmployeeLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const user = await requireRoleAccess(['admin', 'pracownik', 'opiekun']);
+  const user = await requireRoleAccess(EMPLOYEE_SHELL_ROLES);
 
-  // Strip the `roles` array — the client doesn't need it, and dropping it
-  // keeps the RSC payload smaller (no per-link redundancy).
-  const navItems = filterNavForRole(user.role).map(
+  // Strip `permission` / `roles` — the client doesn't need them, and dropping
+  // them keeps the RSC payload smaller (no per-link redundancy).
+  const navItems = filterNav(effectivePermissionsOf(user), user.role).map(
     ({ key, href, labelKey, iconName }) => ({
       key,
       href,

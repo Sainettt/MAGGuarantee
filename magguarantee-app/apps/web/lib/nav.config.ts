@@ -1,10 +1,12 @@
-// Role-gated employee navigation per docs/14-design-system.md
-// §"Role-gated navigation (реализация)" (Phase 4 spec).
+// Permission-gated employee navigation per docs/14-design-system.md
+// §"Role-gated navigation (реализация)" (Phase 4 spec) and docs/25 §3 B4.
 //
 // Single source of truth — hardcoded array, not a runtime feature flag.
-// Each entry declares which roles may *see* the link; layouts filter the
-// array in a server context before rendering, so what a role doesn't see
-// isn't even shipped to the client (no client-side CSS hiding).
+// Each entry declares which PERMISSION lets a user *see* the link (any-of
+// when a list), plus — for exactly two entries — a `roles` scope qualifier;
+// layouts filter the array in a server context before rendering, so what a
+// user doesn't see isn't even shipped to the client (no client-side CSS
+// hiding). `nav.config.test.ts` freezes the per-role output.
 //
 // Note on `iconName`: React component references aren't serialisable across
 // the server/client boundary, so we keep the icon as a *string name* here
@@ -13,10 +15,12 @@
 // can keep this config fully importable without crashing the RSC payload.
 //
 // Per-path access control (direct-URL navigation) is enforced separately
-// in `lib/roles.ts` (`isAllowedForRole` / `ADMIN_ONLY_EMPLOYEE_PREFIXES`)
-// and re-checked by each admin segment's `layout.tsx` server-side.
+// in `lib/roles.ts` (`isAllowedForRole` / `PATH_PERMISSIONS`) and re-checked
+// by each admin segment's `layout.tsx` / page server-side.
 
 import type { Role } from '@magguarantee/shared';
+
+import { canAny, type Permission, type PermissionRule } from './auth/permissions';
 
 export interface NavLink {
   /** Stable identifier — used as React key + for active-state matching. */
@@ -26,12 +30,28 @@ export interface NavLink {
   labelKey: string;
   /** Lucide icon component *name* — resolved on the client. */
   iconName: string;
-  /** Roles allowed to see this link in the nav. */
-  roles: readonly Role[];
+  /** Permission needed to see this link (any-of when a list). */
+  permission: PermissionRule;
+  /**
+   * scope: an extra ROLE qualifier on top of `permission` — for a link whose
+   * permission is shared by roles that must land on DIFFERENT screens for the
+   * same data (the two «Wyjazdy» entries). Not an access right: who may read
+   * at all is `permission`; this only picks which of the two lists he gets.
+   */
+  roles?: readonly Role[];
 }
 
 /**
- * Employee-panel navigation. Layout filters by role before render.
+ * scope: the roles whose panel IS the employee shell — `(employee)/layout.tsx`
+ * admits exactly these (a panel is a role, docs/25 §3 B4). The nav belongs to
+ * that panel, so `filterNav` returns nothing for any other role even when a
+ * permission would match (a planista holds `vehicles.read` but has his own
+ * shell).
+ */
+export const EMPLOYEE_SHELL_ROLES: readonly Role[] = ['admin', 'pracownik', 'opiekun'];
+
+/**
+ * Employee-panel navigation. Layout filters by permission before render.
  *
  *   `pracownik` sees exactly: Dashboard + Wnioski.
  *   `opiekun`   sees: Moja opieka + Przebieg + Wyjazdy + Carriers / Vehicles /
@@ -49,14 +69,14 @@ export const EMPLOYEE_NAV: readonly NavLink[] = [
     href: '/employee/dashboard',
     labelKey: 'nav.dashboard',
     iconName: 'LayoutDashboard',
-    roles: ['admin', 'pracownik'],
+    permission: 'dashboard.read',
   },
   {
     key: 'claims',
     href: '/employee/claims',
     labelKey: 'nav.claims',
     iconName: 'FileText',
-    roles: ['admin', 'pracownik'],
+    permission: 'claims.read',
   },
   // Opiekun + admin — Phase 5 ownership-scoped fleet view.
   {
@@ -64,7 +84,7 @@ export const EMPLOYEE_NAV: readonly NavLink[] = [
     href: '/employee/opieka',
     labelKey: 'nav.opieka',
     iconName: 'HeartHandshake',
-    roles: ['opiekun', 'admin'],
+    permission: 'panel.opiekun',
   },
   // Opiekun + admin — Phase 5.2 «Alerty»: expiring/expired documents (OCP
   // insurance, transport licence, fuel card, driving licence). In-app only.
@@ -74,7 +94,7 @@ export const EMPLOYEE_NAV: readonly NavLink[] = [
     href: '/employee/alerts',
     labelKey: 'nav.alerts',
     iconName: 'BellRing',
-    roles: ['opiekun', 'admin'],
+    permission: 'panel.opiekun',
   },
   // Opiekun + admin — Phase 7.8 «Moje pojazdy — przebieg» (docs/14 §7.8): the
   // read-only multi-carrier weekly km tab scoped to the carriers the opiekun
@@ -85,11 +105,11 @@ export const EMPLOYEE_NAV: readonly NavLink[] = [
     href: '/employee/moje-pojazdy',
     labelKey: 'myKm.tab',
     iconName: 'Gauge',
-    roles: ['opiekun', 'admin'],
+    permission: 'km.read',
   },
   // Opiekun — read-only «Wyjazdy» across every supervised carrier. Lives at
   // `/employee/opieka/delegations`, NOT `/employee/delegations`: that path is
-  // admin-only (see `ADMIN_ONLY_EMPLOYEE_PREFIXES`). Admin is intentionally
+  // admin-only (see `SCOPE_RESTRICTED_EMPLOYEE_PREFIXES`). Admin is intentionally
   // absent here — they already have the unscoped `delegations` entry below, and
   // two «Wyjazdy» rows in one sidebar would be noise. pracownik must never see
   // delegacje (docs/19-known-quirks.md #13).
@@ -98,6 +118,8 @@ export const EMPLOYEE_NAV: readonly NavLink[] = [
     href: '/employee/opieka/delegations',
     labelKey: 'nav.delegations',
     iconName: 'MapPin',
+    permission: 'delegations.read',
+    // scope: the opiekun's scoped list; admin reads the unscoped one below.
     roles: ['opiekun'],
   },
   // Admin + opiekun — Phase 5.1 opened these four to opiekun (API auto-scopes
@@ -108,46 +130,49 @@ export const EMPLOYEE_NAV: readonly NavLink[] = [
     href: '/employee/carriers',
     labelKey: 'nav.carriers',
     iconName: 'Building2',
-    roles: ['admin', 'opiekun'],
+    permission: 'carriers.read',
   },
   {
     key: 'vehicles',
     href: '/employee/vehicles',
     labelKey: 'nav.vehicles',
     iconName: 'Truck',
-    roles: ['admin', 'opiekun'],
+    permission: 'vehicles.read',
   },
   // docs/29 / docs/14 §17.4.1 — vehicle planner transfers, right after the
   // vehicles (a transfer is an action on a vehicle). Admin: the inbox with a
   // pending pill; opiekun: his own requests (D5, no pill). NOT admin-only —
-  // but closed to pracownik (`ROLE_RESTRICTED_EMPLOYEE_PREFIXES`).
+  // but closed to pracownik (`PATH_PERMISSIONS` in lib/roles.ts).
   {
     key: 'transfers',
     href: '/employee/przekazania',
     labelKey: 'nav.transfers',
     iconName: 'ArrowLeftRight',
-    roles: ['admin', 'opiekun'],
+    permission: [
+      'vehicles.planner_transfer.request',
+      'vehicles.planner_transfer.decide',
+    ],
   },
   {
     key: 'drivers',
     href: '/employee/drivers',
     labelKey: 'nav.drivers',
     iconName: 'Users',
-    roles: ['admin', 'opiekun'],
+    permission: 'drivers.read',
   },
   {
     key: 'trailers',
     href: '/employee/trailers',
     labelKey: 'nav.trailers',
     iconName: 'Container',
-    roles: ['admin', 'opiekun'],
+    permission: 'trailers.read',
   },
   {
     key: 'trailer-types',
     href: '/employee/trailer-types',
     labelKey: 'nav.trailerTypes',
     iconName: 'Settings2',
-    roles: ['admin'],
+    permission: 'trailer_types.manage',
   },
   // Phase 11 — admin «Zespoły prowadzące» (dispatch-team CRUD). Replaces the
   // external "raport DAF" Excel; vehicles are assigned to a team, every
@@ -157,7 +182,7 @@ export const EMPLOYEE_NAV: readonly NavLink[] = [
     href: '/employee/teams',
     labelKey: 'nav.teams',
     iconName: 'Users2',
-    roles: ['admin'],
+    permission: 'teams.manage',
   },
   // Admin-only all-access "Wyjazdy" — the same read-only delegations view
   // planista/dyspozytor/carrier see, but unscoped (admin is all-access on
@@ -168,6 +193,9 @@ export const EMPLOYEE_NAV: readonly NavLink[] = [
     href: '/employee/delegations',
     labelKey: 'nav.delegations',
     iconName: 'MapPin',
+    permission: 'delegations.read',
+    // scope: the unscoped all-carriers list is the admin's view; the opiekun
+    // (who reads delegations too) gets `opieka-delegations` above.
     roles: ['admin'],
   },
   // NB: the admin «Raport km» (Phase 7.7 `/employee/km`) entry was removed —
@@ -180,39 +208,51 @@ export const EMPLOYEE_NAV: readonly NavLink[] = [
     href: '/employee/limits',
     labelKey: 'nav.limits',
     iconName: 'Gauge',
-    roles: ['admin'],
+    permission: 'limits.manage',
   },
   {
     key: 'users',
     href: '/employee/users',
     labelKey: 'nav.users',
     iconName: 'UserCog',
-    roles: ['admin'],
+    permission: 'users.manage',
   },
   {
     key: 'sso',
     href: '/employee/sso',
     labelKey: 'nav.sso',
     iconName: 'KeyRound',
-    roles: ['admin'],
+    permission: 'sso.manage',
   },
   {
     key: 'audit',
     href: '/employee/audit',
     labelKey: 'nav.audit',
     iconName: 'History',
-    roles: ['admin'],
+    permission: 'audit.read',
   },
   {
     key: 'diagnostics',
     href: '/employee/diagnostics',
     labelKey: 'nav.diagnostics',
     iconName: 'Activity',
-    roles: ['admin'],
+    permission: 'diagnostics.manage',
   },
 ];
 
-/** Returns the subset of EMPLOYEE_NAV visible to the given role. */
-export function filterNavForRole(role: Role): NavLink[] {
-  return EMPLOYEE_NAV.filter((link) => link.roles.includes(role));
+/**
+ * The subset of EMPLOYEE_NAV visible to a user with these EFFECTIVE
+ * `permissions` (`effectivePermissionsOf(user)`) and this `role` (used only
+ * for the shell scope and the `roles` qualifier). Array order is kept.
+ */
+export function filterNav(
+  permissions: readonly Permission[],
+  role: Role,
+): NavLink[] {
+  if (!EMPLOYEE_SHELL_ROLES.includes(role)) return [];
+  return EMPLOYEE_NAV.filter(
+    (link) =>
+      canAny(permissions, link.permission) &&
+      (link.roles === undefined || link.roles.includes(role)),
+  );
 }

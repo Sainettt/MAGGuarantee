@@ -11,5 +11,6 @@ export const dynamic = 'force-dynamic';
 
 export default async function EmployeeRootPage(): Promise<never> {
   const user = await requireRoleAccess(['admin', 'pracownik', 'opiekun']);
+  // scope: a landing is per panel role (like `ROLE_LANDING`), not a right.
   redirect(user.role === 'opiekun' ? '/employee/opieka' : '/employee/dashboard');
 }

@@ -17,7 +17,7 @@ import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { RowActionsMenu, type RowAction } from '@/components/ui/RowActionsMenu';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
-import { useAuth } from '@/lib/hooks/useAuth';
+import { useCan } from '@/lib/hooks/useCan';
 import {
   useHardDeleteTrailerType,
   useTrailerTypes,
@@ -31,8 +31,8 @@ export default function TrailerTypesPage() {
   const t = useTranslations('trailerTypes');
   const tCommon = useTranslations('common');
   const tConfirm = useTranslations('confirmDelete');
-  const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  // Hard delete of a catalog row (docs/25 §3 B4) — false while `/auth/me` loads.
+  const canHardDelete = useCan('trailer_types.manage');
   const [search, setSearch] = useState('');
 
   const listQ = useTrailerTypes({
@@ -108,7 +108,7 @@ export default function TrailerTypesPage() {
               onSelect: () => openEdit(row),
             },
           ];
-          if (isAdmin) {
+          if (canHardDelete) {
             actions.push({
               key: 'delete',
               label: tConfirm('confirm'),
@@ -128,7 +128,7 @@ export default function TrailerTypesPage() {
         },
       },
     ],
-    [t, tCommon, tConfirm, isAdmin, openHardDelete],
+    [t, tCommon, tConfirm, canHardDelete, openHardDelete],
   );
 
   return (

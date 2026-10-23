@@ -5,7 +5,8 @@
 // Rule of thumb: WHO may decide / cancel a request is never re-derived here —
 // the api computes it per viewer (`viewerCanDecide`, `viewerBlockedReason`,
 // `viewerCanCancel`) with the same rule as its 403s. This module only turns
-// those flags + the viewer's role into "what to render".
+// those flags + the viewer's permissions (who may FILE — docs/25 §3 B4) and
+// role (which sentence / entry point he gets — scope) into "what to render".
 //
 // Since 2026-10-23 an admin files requests too (docs/14 §17.0 D9 — U1
 // reversed): from the vehicle edit form, on any active vehicle (E2). He still
@@ -13,6 +14,8 @@
 // lider does (R4); the api flags that row `viewerBlockedReason='requester'`.
 
 import type { PlannerTransferDto, Role } from '@magguarantee/shared';
+
+import type { Permission } from '@/lib/auth/permissions';
 
 // ─── Nav counter (§17.4.3) ───────────────────────────────
 
@@ -30,7 +33,10 @@ export function decidableCount(items: readonly PlannerTransferDto[]): number {
 export type PlannerLockReason = 'locked' | 'lockedAdmin' | 'lockedInactive';
 
 export interface PlannerCellInput {
+  /** scope: picks the lock sentence only (`lockedAdmin` for the admin). */
   viewerRole: Role | undefined;
+  /** The viewer's effective permissions (`usePermissions()`); empty while loading. */
+  viewerPermissions: readonly Permission[];
   /** The SAVED state of the vehicle (not the form's unsaved checkbox). */
   vehicleActive: boolean;
   /**
@@ -57,20 +63,27 @@ export interface PlannerCellState {
 
 export function plannerCellState({
   viewerRole,
+  viewerPermissions,
   vehicleActive,
   history,
   hasPending,
 }: PlannerCellInput): PlannerCellState {
+  // scope: the admin's sentence names his wider reach (any vehicle, E2) —
+  // wording, not a right.
   const reason: PlannerLockReason = !vehicleActive
     ? 'lockedInactive'
     : viewerRole === 'admin'
       ? 'lockedAdmin'
       : 'locked';
-  // R2 + D9: both roles of the edit form file — the opiekun (E1) and, since
-  // 2026-10-23, the admin on any vehicle (E2); nobody for a switched-off
-  // vehicle (E3, A5 — the api would 422 anyway).
+  // R2 + D9: the edit-form filers — whoever may file a transfer AND edit the
+  // vehicle (`request` + `fleet.write`: the opiekun, E1, and since 2026-10-23
+  // the admin on any vehicle, E2). `request` alone would hand the button to
+  // the planista, who files from the detail modal instead (D3). Nobody for a
+  // switched-off vehicle (E3, A5 — the api would 422 anyway).
   const canFile =
-    (viewerRole === 'opiekun' || viewerRole === 'admin') && vehicleActive;
+    viewerPermissions.includes('vehicles.planner_transfer.request') &&
+    viewerPermissions.includes('fleet.write') &&
+    vehicleActive;
   if (!canFile) return { reason, action: null };
   if (history === 'loading') return { reason, action: 'skeleton' };
   if (hasPending) return { reason, action: null };
@@ -102,6 +115,8 @@ export function canTransferFromDetail({
   historyReady,
   hasPending,
 }: DetailTransferInput): boolean {
+  // scope: the CURRENT planner of this vehicle (role + id), one entry point
+  // per role — not a permission (opiekun/admin hold `request` too).
   return (
     viewerRole === 'planista' &&
     viewerId !== undefined &&
@@ -160,6 +175,7 @@ export function blockedNoticeKey(
   reason: 'target' | 'requester',
   viewerRole: Role | undefined,
 ): BlockedNoticeKey {
+  // scope: wording per role (who else decides), the api already said "no".
   if (reason === 'target') return 'blockedTarget';
   return viewerRole === 'admin' ? 'blockedRequesterAdmin' : 'blockedRequester';
 }
@@ -188,6 +204,8 @@ export function pendingNoticeState(
   transfer: Pick<PlannerTransferDto, 'viewerCanCancel' | 'requestedBy'>,
   viewer: { role: Role | undefined; id: string | undefined },
 ): PendingNoticeState {
+  // scope: the admin's inbox link and his author note — which screen / wording,
+  // while the api's `viewerCanCancel` / `viewerCanDecide` stay the rights.
   const isAdmin = viewer.role === 'admin';
   const isAuthor =
     transfer.viewerCanCancel ||

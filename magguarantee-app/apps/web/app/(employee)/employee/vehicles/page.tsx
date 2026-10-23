@@ -29,7 +29,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { VehicleDetailModal } from '@/components/vehicles/VehicleDetailModal';
-import { useAuth } from '@/lib/hooks/useAuth';
+import { useCan } from '@/lib/hooks/useCan';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import { useDeleteVehicle, useVehicles } from '@/lib/hooks/useVehicles';
 import { queryErrorProps } from '@/lib/query/queryErrorProps';
@@ -51,15 +51,13 @@ export default function VehiclesPage() {
   const tCommon = useTranslations('common');
   const tConfirm = useTranslations('confirmDelete');
   const tVehStatus = useTranslations('vehicleStatus');
-  const { user } = useAuth();
-  // The delete row-action renders for both admin and opiekun, and since the
-  // vehicle hard-delete endpoint was RETIRED (Vehicle-status rework), BOTH now
-  // run the same SOFT delete (`DELETE /vehicles/:id`, sets `deletedAt`,
-  // restorable server-side). Carriers are the exception — they get no delete at
-  // all (backend-locked out of fleet mutations).
-  const isAdmin = user?.role === 'admin';
-  const isOpiekun = user?.role === 'opiekun';
-  const canDelete = isAdmin || isOpiekun;
+  // The delete row-action renders for every holder of `fleet.write` (admin and
+  // opiekun), and since the vehicle hard-delete endpoint was RETIRED
+  // (Vehicle-status rework), they all run the same SOFT delete
+  // (`DELETE /vehicles/:id`, sets `deletedAt`, restorable server-side).
+  // Carriers are the exception — they get no delete at all (backend-locked out
+  // of fleet mutations).
+  const canDelete = useCan('fleet.write');
   const [search, setSearch] = useState('');
 
   // ── URL-backed filters (§15) ────────────────────────────────────────────

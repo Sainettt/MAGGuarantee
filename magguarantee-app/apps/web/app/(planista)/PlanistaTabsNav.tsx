@@ -7,14 +7,16 @@
 //   Flota             /planista                 everyone in the shell
 //   Przebieg          /planista/moje-pojazdy    everyone in the shell
 //   Moje wnioski      /planista/przekazania     role === 'planista'
-//   Do zatwierdzenia  /planista/zatwierdzenia   role === 'planista' && user.lider
+//   Do zatwierdzenia  /planista/zatwierdzenia   role === 'planista' &&
+//                                               vehicles.planner_transfer.decide
 //
 // Admin (debug access to the shell) sees only Flota / Przebieg: both his
 // decisions and his own requests (the «Moje wnioski» tab there, docs/14
 // §17.5.8 / D9) live in /employee/przekazania. The lider tab is decided on the
-// CLIENT from `useAuth().user.lider` — the edge middleware knows nothing about
-// leadership and must not import shared (docs/28 §9.2 #18). It is the first
-// menu entry that depends on the flag (docs/29 §4).
+// CLIENT from the user's effective permissions (`/auth/me` — a planista gets
+// `decide` through the leader flag, docs/25 §3 B4): the edge middleware knows
+// nothing about leadership (the JWT carries the role only, docs/28 §9.2 #18).
+// It is the first menu entry that depends on the flag (docs/29 §4).
 //
 // «Do zatwierdzenia» carries the pending pill: the rows this lider can decide
 // (§17.4.3), `bg-warning-dark text-white` (D8 — 5.2:1), hidden at 0 / loading.
@@ -34,6 +36,7 @@ import { useRef } from 'react';
 
 import { useActiveNavRefresh } from '@/lib/hooks/useActiveNavRefresh';
 import { useAuth } from '@/lib/hooks/useAuth';
+import { useCan } from '@/lib/hooks/useCan';
 import { usePendingDecideCount } from '@/lib/hooks/usePlannerTransfers';
 import { cn } from '@/lib/utils';
 
@@ -67,8 +70,11 @@ export function PlanistaTabsNav() {
   const { user } = useAuth();
   const { isRefreshing, onActiveNavClick } = useActiveNavRefresh();
 
+  // scope: the two transfer tabs are the PLANISTA's own screens — the admin
+  // (who may decide too) works in /employee/przekazania instead.
   const isPlanista = user?.role === 'planista';
-  const isLider = isPlanista && user?.lider === true;
+  const canDecide = useCan('vehicles.planner_transfer.decide');
+  const isLider = isPlanista && canDecide;
   const tabs: PlanistaTab[] = [
     FLEET,
     KM,

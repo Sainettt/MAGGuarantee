@@ -18,6 +18,7 @@ import type { Role } from '@magguarantee/shared';
 
 import { LanguageToggle } from '@/components/ui/LanguageToggle';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
+import { effectivePermissionsOf } from '@/lib/auth/permissions';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { useBugbotHandoff } from '@/lib/hooks/useBugbotHandoff';
 import { landingFor } from '@/lib/roles';
@@ -34,11 +35,12 @@ interface HeaderProps {
 export function Header({ leftSlot }: HeaderProps = {}) {
   const t = useTranslations('app');
   const { user } = useAuth();
-  const bugbot = useBugbotHandoff(user ? (user.role as Role) : null);
+  const bugbot = useBugbotHandoff(user ? effectivePermissionsOf(user) : null);
 
   // The logo doubles as the home link — resolves to the role's landing path
   // (for eksport/weryfikator that is the delegations board directly, so there
   // is no redirect loop; docs/14-design-system.md §7.2). Anonymous: inert logo.
+  // scope: a landing is per panel role, not a right.
   const homeHref = user ? landingFor(user.role as Role) : undefined;
   const logo = (
     <Image

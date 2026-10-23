@@ -19,7 +19,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { ApiResponseError } from '@/lib/api/client';
-import { useAuth } from '@/lib/hooks/useAuth';
+import { useCan } from '@/lib/hooks/useCan';
 import { useCarriers } from '@/lib/hooks/useCarriers';
 import {
   useDeleteDriver,
@@ -35,16 +35,15 @@ export default function DriversPage() {
   const t = useTranslations('drivers');
   const tCommon = useTranslations('common');
   const tConfirm = useTranslations('confirmDelete');
-  const { user } = useAuth();
-  // The delete row-action renders for both admin and opiekun, but they hit
-  // DIFFERENT endpoints (docs/13-api-design.md): admin runs a physical
-  // hard-delete with a mandatory powód (`DELETE /drivers/:id/hard`, admin-only),
-  // opiekun runs a SOFT delete of their own driver (`DELETE /drivers/:id`,
-  // sets `deletedAt`, restorable server-side). Carriers are the exception —
-  // there opiekun gets no delete at all (see carriers/page.tsx).
-  const isAdmin = user?.role === 'admin';
-  const isOpiekun = user?.role === 'opiekun';
-  const canDelete = isAdmin || isOpiekun;
+  // The delete row-action renders for every holder of `fleet.write` (admin and
+  // opiekun), but they hit DIFFERENT endpoints (docs/13-api-design.md): a
+  // holder of `fleet.hard_delete` (admin) runs a physical hard-delete with a
+  // mandatory powód (`DELETE /drivers/:id/hard`); everyone else runs a SOFT
+  // delete of their own driver (`DELETE /drivers/:id`, sets `deletedAt`,
+  // restorable server-side). Carriers are the exception — there opiekun gets
+  // no delete at all (see carriers/page.tsx).
+  const canDelete = useCan('fleet.write');
+  const canHardDelete = useCan('fleet.hard_delete');
   const [search, setSearch] = useState('');
   const [carrierId, setCarrierId] = useState<string>('');
 
@@ -98,8 +97,8 @@ export default function DriversPage() {
     if (detailTarget) openEdit(detailTarget);
   };
 
-  // Opens whichever delete dialog matches the current role (reason dialog for
-  // admin, bare confirm for opiekun) — both share this target/open pair.
+  // Opens whichever delete dialog matches the caller (reason dialog for a hard
+  // delete, bare confirm for a soft one) — both share this target/open pair.
   const openDelete = useCallback((row: DriverDto) => {
     setDeleteTarget(row);
     setDeleteOpen(true);
@@ -158,7 +157,7 @@ export default function DriversPage() {
           if (canDelete) {
             actions.push({
               key: 'delete',
-              label: isAdmin ? tConfirm('confirm') : tConfirm('softConfirm'),
+              label: canHardDelete ? tConfirm('confirm') : tConfirm('softConfirm'),
               icon: Trash2,
               destructive: true,
               onSelect: () => openDelete(row),
@@ -175,7 +174,7 @@ export default function DriversPage() {
         },
       },
     ],
-    [t, tCommon, tConfirm, canDelete, isAdmin, openDelete],
+    [t, tCommon, tConfirm, canDelete, canHardDelete, openDelete],
   );
 
   return (
@@ -267,8 +266,8 @@ export default function DriversPage() {
         onClose={() => setSheetOpen(false)}
       />
 
-      {/* Admin — physical hard-delete with a mandatory powód. */}
-      {isAdmin && (
+      {/* `fleet.hard_delete` (admin) — physical hard-delete with a mandatory powód. */}
+      {canHardDelete && (
         <ConfirmDeleteWithReasonDialog
           open={deleteOpen}
           onOpenChange={setDeleteOpen}
@@ -301,8 +300,8 @@ export default function DriversPage() {
         />
       )}
 
-      {/* Opiekun — soft delete (restorable), no powód. */}
-      {isOpiekun && (
+      {/* `fleet.write` without hard delete (opiekun) — soft delete (restorable), no powód. */}
+      {canDelete && !canHardDelete && (
         <ConfirmDialog
           open={deleteOpen}
           onOpenChange={setDeleteOpen}

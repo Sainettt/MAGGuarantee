@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RoleSchema, type Role } from '@magguarantee/shared';
 
+import { permissionsFor } from '@/lib/auth/permissions';
+
 import {
   bugbotKindsFor,
   isSafeHandoffUrl,
@@ -60,6 +62,8 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+// docs/25 §3 B4 — the input is the user's effective permissions; for every
+// role (and leader variant) the output is what the former role check gave.
 describe('bugbotKindsFor', () => {
   it('fixture sanity: 8 roles, 7 of them non-admin', () => {
     expect(ALL_ROLES).toHaveLength(8);
@@ -67,15 +71,22 @@ describe('bugbotKindsFor', () => {
   });
 
   it.each(ALL_ROLES)('flag off → nothing for %s', (role) => {
-    expect(bugbotKindsFor(role, false)).toEqual([]);
+    expect(bugbotKindsFor(permissionsFor(role), false)).toEqual([]);
+    expect(bugbotKindsFor(permissionsFor(role, true), false)).toEqual([]);
   });
 
   it('admin → both buttons, bug first', () => {
-    expect(bugbotKindsFor('admin', true)).toEqual(['bug', 'idea']);
+    expect(bugbotKindsFor(permissionsFor('admin'), true)).toEqual(['bug', 'idea']);
   });
 
-  it.each(NON_ADMIN)('%s → «Zgłoś problem» only', (role) => {
-    expect(bugbotKindsFor(role, true)).toEqual(['bug']);
+  it.each(NON_ADMIN)('%s → «Zgłoś problem» only (leader or not)', (role) => {
+    expect(bugbotKindsFor(permissionsFor(role), true)).toEqual(['bug']);
+    expect(bugbotKindsFor(permissionsFor(role, true), true)).toEqual(['bug']);
+  });
+
+  it('«Zgłoś pomysł» follows `bugbot.submit_idea`, not the role', () => {
+    expect(bugbotKindsFor(['bugbot.submit_idea'], true)).toEqual(['bug', 'idea']);
+    expect(bugbotKindsFor([], true)).toEqual(['bug']);
   });
 });
 

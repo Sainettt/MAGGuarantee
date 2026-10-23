@@ -75,6 +75,7 @@ export function UserMenu({ user, bugbot }: UserMenuProps) {
 
   const initial = user.name.trim().slice(0, 1).toUpperCase() || 'U';
   // «Lider planistów» for a leader (docs/28); the base role label otherwise.
+  // scope: a label of the user TYPE, not a right.
   const roleLabel = t(roleLabelKey(user.role as Role, user.lider));
 
   return (

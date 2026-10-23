@@ -20,6 +20,11 @@ import {
   AUTH_UNAVAILABLE_HEADER,
   REFRESH_COOKIE,
 } from './constants';
+import {
+  canAny,
+  effectivePermissionsOf,
+  type PermissionRule,
+} from './permissions';
 
 const SERVER_API_URL =
   process.env.API_URL ??
@@ -183,11 +188,57 @@ async function currentPathForNextParam(): Promise<string | null> {
 export async function requireRoleAccess(
   allowed: readonly Role[],
 ): Promise<UserDto> {
+  const user = await requireServerUser();
+  if (!allowed.includes(user.role)) redirect(landingFor(user.role));
+  return user;
+}
+
+/** The current user, or `/login?next=<current-path>` for an anonymous caller. */
+async function requireServerUser(): Promise<UserDto> {
   const user = await getServerUser();
   if (!user) {
     const next = await currentPathForNextParam();
     redirect(next ? `/login?next=${encodeURIComponent(next)}` : '/login');
   }
-  if (!allowed.includes(user.role)) redirect(landingFor(user.role));
+  return user;
+}
+
+/** The employee shell's «Brak dostępu» page — inside the shell, no loop. */
+export const EMPLOYEE_FORBIDDEN_PATH = '/employee/forbidden';
+
+export interface RequirePermissionOptions {
+  /**
+   * Where a signed-in user WITHOUT the permission goes. Every converted page
+   * keeps the target it had as a role check (docs/25 §3 B4):
+   *   `landing`   → the role's own landing (what `requireRoleAccess` does);
+   *   `forbidden` → `/employee/forbidden` (the `(admin)` segment contract).
+   */
+  onDenied: 'landing' | 'forbidden';
+}
+
+/**
+ * Server-side permission gate (docs/25 §3 B4) — the twin of
+ * `requireRoleAccess` for ACTIONS. `rule` is one permission or an any-of list,
+ * checked against the user's EFFECTIVE permissions from `/auth/me`
+ * (`effectivePermissionsOf`), never re-derived from the role.
+ *  - API unreachable / failing → `AuthServiceUnavailableError` propagates;
+ *  - anonymous → `/login?next=<current-path>`;
+ *  - lacking `rule` → `options.onDenied`;
+ *  - otherwise → the user.
+ *
+ * Route-group layouts keep `requireRoleAccess`: a panel is a role.
+ */
+export async function requirePermission(
+  rule: PermissionRule,
+  options: RequirePermissionOptions,
+): Promise<UserDto> {
+  const user = await requireServerUser();
+  if (!canAny(effectivePermissionsOf(user), rule)) {
+    redirect(
+      options.onDenied === 'forbidden'
+        ? EMPLOYEE_FORBIDDEN_PATH
+        : landingFor(user.role),
+    );
+  }
   return user;
 }

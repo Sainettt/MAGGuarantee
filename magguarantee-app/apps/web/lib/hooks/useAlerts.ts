@@ -15,7 +15,7 @@ import { getAlerts } from '@/lib/api/alerts';
 export const ALERTS_KEY = ['alerts'] as const;
 
 interface UseAlertsOptions {
-  /** Gate the query — the sidebar passes `role === 'admin' || 'opiekun'`. */
+  /** Gate the query — the sidebar passes `useCan('panel.opiekun')` (admin + opiekun). */
   enabled?: boolean;
 }
 

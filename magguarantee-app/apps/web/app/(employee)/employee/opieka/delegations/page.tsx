@@ -2,7 +2,7 @@
 //
 // Deliberately NOT `/employee/delegations`: that path is admin-only (it sits
 // under the `(admin)` route group and is listed in
-// `ADMIN_ONLY_EMPLOYEE_PREFIXES`, so an opiekun is bounced at the edge). This
+// `SCOPE_RESTRICTED_EMPLOYEE_PREFIXES`, so an opiekun is bounced at the edge). This
 // route lives under `/employee/opieka/*`, which the shared `(employee)` layout
 // already gates to admin/pracownik/opiekun; pracownik has no nav entry here and
 // the API returns 403 for them.

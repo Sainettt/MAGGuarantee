@@ -1,29 +1,41 @@
-// Gating of «Przelicz wg aktualnych limitów» (§16.6 + §6.5.13).
+// Gating of «Przelicz wg aktualnych limitów» (§16.6 + §6.5.13), plus the
+// docs/25 §3 B4 contract: the derivation now reads PERMISSIONS, and for every
+// role × leader flag it must produce exactly what the former role-keyed
+// version did.
 //
-// Mirrors the server: `@Roles('admin', 'pracownik')` on
-// `POST /claims/:nrZgl/recalc-limits` + the `CLAIM_LIMITS_REFRESH_BLOCKED`
-// gate that allows only `NA_WERYFIKACJI`.
+// Mirrors the server: `claims.verify` on `POST /claims/:nrZgl/recalc-limits`
+// + the `CLAIM_LIMITS_REFRESH_BLOCKED` gate that allows only `NA_WERYFIKACJI`.
 
 import { describe, expect, it } from 'vitest';
-import type { ClaimStatus, Role } from '@magguarantee/shared';
+import {
+  ClaimStatusSchema,
+  RoleSchema,
+  type ClaimStatus,
+  type Role,
+} from '@magguarantee/shared';
 
-import { deriveClaimPermissions } from './claim-permissions';
+import { permissionsFor, type Permission } from '@/lib/auth/permissions';
 
-const ALL_ROLES: Role[] = [
-  'admin',
-  'pracownik',
-  'opiekun',
-  'przewoznik',
-  'planista',
-  'dyspozytor',
-  'eksport',
-  'weryfikator',
-];
+import {
+  deriveClaimPermissions,
+  type ClaimModalMode,
+  type ClaimPermissions,
+} from './claim-permissions';
+
+const ALL_ROLES: readonly Role[] = RoleSchema.options;
+
+const ALL_STATUSES: readonly ClaimStatus[] = ClaimStatusSchema.options;
 
 const DECIDED: ClaimStatus[] = ['ZAAKCEPTOWANO', 'ODRZUCONO'];
 
-function show(role: Role | undefined, status: ClaimStatus, mode: 'view' | 'edit' = 'edit') {
-  return deriveClaimPermissions({ role, status, mode }).showRecalcLimitsButton;
+/** What `/auth/me` sends for a role today (no overrides); `undefined` = loading. */
+function perms(role: Role | undefined, lider = false): readonly Permission[] | undefined {
+  return role === undefined ? undefined : permissionsFor(role, lider);
+}
+
+function show(role: Role | undefined, status: ClaimStatus, mode: ClaimModalMode = 'edit') {
+  return deriveClaimPermissions({ permissions: perms(role), status, mode })
+    .showRecalcLimitsButton;
 }
 
 describe('showRecalcLimitsButton', () => {
@@ -57,12 +69,105 @@ describe('showRecalcLimitsButton', () => {
   });
 
   it('does not disturb the other permission flags', () => {
-    const perms = deriveClaimPermissions({
-      role: 'pracownik',
+    const result = deriveClaimPermissions({
+      permissions: perms('pracownik'),
       status: 'NA_WERYFIKACJI',
       mode: 'edit',
     });
-    expect(perms.factsEditable).toBe(true);
-    expect(perms.showVerifyButton).toBe(true);
+    expect(result.factsEditable).toBe(true);
+    expect(result.showVerifyButton).toBe(true);
+  });
+});
+
+describe('the OCZEKUJE_NA_AUTORYZACJE split (§6.5.13)', () => {
+  it('admin (`claims.verify_pending_authorization`) keeps editable facts + verify', () => {
+    const result = deriveClaimPermissions({
+      permissions: perms('admin'),
+      status: 'OCZEKUJE_NA_AUTORYZACJE',
+      mode: 'edit',
+    });
+    expect(result).toMatchObject({
+      factsEditable: true,
+      factsNotice: 'adminInfo',
+      showVerifyButton: true,
+    });
+  });
+
+  it('pracownik (`claims.verify` only) gets the locked block, no verify button', () => {
+    const result = deriveClaimPermissions({
+      permissions: perms('pracownik'),
+      status: 'OCZEKUJE_NA_AUTORYZACJE',
+      mode: 'edit',
+    });
+    expect(result).toMatchObject({
+      factsEditable: false,
+      factsNotice: 'locked',
+      showVerifyButton: false,
+    });
+  });
+
+  it('while `/auth/me` loads (no permissions) everything gated is off', () => {
+    const result = deriveClaimPermissions({
+      permissions: undefined,
+      status: 'OCZEKUJE_NA_AUTORYZACJE',
+      mode: 'edit',
+    });
+    expect(result).toMatchObject({
+      factsEditable: false,
+      factsNotice: 'locked',
+      showVerifyButton: false,
+      showRecalcLimitsButton: false,
+    });
+  });
+});
+
+// ─── docs/25 §3 B4 — frozen pre-B4 derivation (role-keyed) ─────────────────
+// A literal copy of the function as it was before the permissions layer. The
+// new one must agree with it for every role × lider × status × mode.
+function legacyDerive(
+  status: ClaimStatus,
+  role: Role | undefined,
+  mode: ClaimModalMode,
+): ClaimPermissions {
+  const isAdmin = role === 'admin';
+  const isEdit = mode === 'edit';
+  const pendingAuthorization = status === 'OCZEKUJE_NA_AUTORYZACJE';
+  const canVerifyInStatus =
+    status === 'NA_WERYFIKACJI' || (pendingAuthorization && isAdmin);
+  const factsEditable = isEdit && canVerifyInStatus;
+  const factsNotice: ClaimPermissions['factsNotice'] = !pendingAuthorization
+    ? null
+    : isAdmin
+      ? 'adminInfo'
+      : 'locked';
+  const canRecalcLimits =
+    (isAdmin || role === 'pracownik') && status === 'NA_WERYFIKACJI';
+  return {
+    factsEditable,
+    factsNotice,
+    showVerifyButton: isEdit && canVerifyInStatus,
+    requiresVerifiedCheckpoint: status === 'NA_WERYFIKACJI',
+    payloadIncludesCorrections: factsEditable,
+    showRecalcLimitsButton: isEdit && canRecalcLimits,
+  };
+}
+
+describe('deriveClaimPermissions ≡ the pre-B4 role derivation', () => {
+  const viewers: [Role | undefined, boolean][] = [
+    [undefined, false],
+    ...ALL_ROLES.flatMap((r): [Role, boolean][] => [
+      [r, false],
+      [r, true],
+    ]),
+  ];
+
+  it.each(viewers)('%s (lider: %s) — every status × mode', (role, lider) => {
+    for (const status of ALL_STATUSES) {
+      for (const mode of ['view', 'edit'] as const) {
+        expect(
+          deriveClaimPermissions({ permissions: perms(role, lider), status, mode }),
+        ).toEqual(legacyDerive(status, role, mode));
+      }
+    }
   });
 });

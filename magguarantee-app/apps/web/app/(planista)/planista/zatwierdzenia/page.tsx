@@ -2,9 +2,11 @@
 // requests of this lider's planisci (decider mode).
 //
 // Who is a lider is NOT known at the edge (the middleware reads only the JWT
-// role and must not import shared — docs/28 §9.2 #18), so the route is open to
-// every planista and the view decides on the client: a non-lider gets the
-// informational «Sekcja dla liderów planistów» state WITHOUT an API call.
+// role and must not import the shared barrel — docs/28 §9.2 #18), so the
+// route is open to every planista and the view decides on the client (the
+// `vehicles.planner_transfer.decide` permission from `/auth/me`): a non-lider
+// gets the informational «Sekcja dla liderów planistów» state WITHOUT an API
+// call.
 // Admin decides in `/employee/przekazania` (all requests) — redirected there.
 
 import { redirect } from 'next/navigation';
@@ -17,6 +19,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function PlanistaApprovalsPage() {
   const user = await getServerUser();
+  // scope: the admin's transfer screens live in the employee shell (W7).
   if (user?.role === 'admin') redirect('/employee/przekazania');
   return <PlanistaApprovalsView />;
 }

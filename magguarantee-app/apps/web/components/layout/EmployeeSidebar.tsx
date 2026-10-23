@@ -54,6 +54,7 @@ import {
 import { useActiveNavRefresh } from '@/lib/hooks/useActiveNavRefresh';
 import { useAlerts } from '@/lib/hooks/useAlerts';
 import { useAuth } from '@/lib/hooks/useAuth';
+import { useCan } from '@/lib/hooks/useCan';
 import { useOpiekunFleet } from '@/lib/hooks/useOpiekunFleet';
 import { usePendingDecideCount } from '@/lib/hooks/usePlannerTransfers';
 import { cn } from '@/lib/utils';
@@ -119,6 +120,8 @@ export function EmployeeSidebar({
   // is wasteful — we gate the query to opiekun. Other roles never reach this
   // shell. The query key matches the opieka list page, so when an opiekun is
   // on /employee/opieka the data is shared (no extra request).
+  // scope: WHOSE carriers the tally covers (his own vs all), not a right —
+  // both roles hold `panel.opiekun`.
   const isOpiekun = user?.role === 'opiekun';
   const showsOpieka = items.some((l) => l.key === OPIEKA_NAV_KEY);
   const fleetQ = useOpiekunFleet({ enabled: isOpiekun && showsOpieka });
@@ -130,22 +133,25 @@ export function EmployeeSidebar({
 
   // «Alerty» pill — count of documents already invalid OR expiring today
   // (expired + critical); the softer warning/upcoming buckets don't earn a nav
-  // badge. Gated (and cache-shared) with the alerts page: admin + opiekun only.
+  // badge. Gated (and cache-shared) with the alerts page: `panel.opiekun`
+  // (admin + opiekun) only.
   const showsAlerts = items.some((l) => l.key === ALERTS_NAV_KEY);
-  const canSeeAlerts = user?.role === 'admin' || user?.role === 'opiekun';
+  const canSeeAlerts = useCan('panel.opiekun');
   const alertsQ = useAlerts({ enabled: showsAlerts && canSeeAlerts });
   const alertsCount = alertsQ.data
     ? alertsQ.data.meta.totals.expired + alertsQ.data.meta.totals.critical
     : 0;
 
   // «Przekazania» pill — pending planner-transfer requests awaiting a
-  // decision. Admin only: the opiekun's entry is his own requests list (D5,
-  // no pill). Not a notification (R9) — the only signal a request exists.
+  // decision. Deciders only (`vehicles.planner_transfer.decide` — in this
+  // shell the admin): the opiekun's entry is his own requests list (D5, no
+  // pill). Not a notification (R9) — the only signal a request exists.
   // Shares the «Do decyzji» tab's query, so the numbers cannot disagree.
   const showsTransfers = items.some((l) => l.key === TRANSFERS_NAV_KEY);
+  const canDecideTransfers = useCan('vehicles.planner_transfer.decide');
   const transfersCount =
     usePendingDecideCount({
-      enabled: showsTransfers && user?.role === 'admin',
+      enabled: showsTransfers && canDecideTransfers,
     }) ?? 0;
 
   // Compute one active key per render — the entry whose href is the

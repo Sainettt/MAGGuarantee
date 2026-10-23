@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { RoleSchema, type Role } from '@magguarantee/shared';
+
+import { permissionsFor } from '@/lib/auth/permissions';
 
 import { person, transfer } from './fixtures';
 import {
@@ -9,6 +12,7 @@ import {
   pendingNoticeState,
   personName,
   plannerCellState,
+  type PlannerCellInput,
 } from './transferUi';
 
 describe('decidableCount (§17.4.3)', () => {
@@ -32,10 +36,22 @@ describe('decidableCount (§17.4.3)', () => {
 });
 
 describe('plannerCellState (§17.2.2 E1–E4)', () => {
+  // docs/25 §3 B4 — the filer check reads PERMISSIONS (`request` + `fleet.write`);
+  // the role only picks the sentence. Inputs are what `/auth/me` sends today.
+  const cell = (
+    viewerRole: Role | undefined,
+    rest: Omit<PlannerCellInput, 'viewerRole' | 'viewerPermissions'>,
+    lider = false,
+  ) =>
+    plannerCellState({
+      viewerRole,
+      viewerPermissions: viewerRole ? permissionsFor(viewerRole, lider) : [],
+      ...rest,
+    });
+
   it('E1 — opiekun, active vehicle, no pending → request button', () => {
     expect(
-      plannerCellState({
-        viewerRole: 'opiekun',
+      cell('opiekun', {
         vehicleActive: true,
         history: 'ready',
         hasPending: false,
@@ -45,8 +61,7 @@ describe('plannerCellState (§17.2.2 E1–E4)', () => {
 
   it('E1 while the history loads → skeleton instead of the button', () => {
     expect(
-      plannerCellState({
-        viewerRole: 'opiekun',
+      cell('opiekun', {
         vehicleActive: true,
         history: 'loading',
         hasPending: false,
@@ -56,8 +71,7 @@ describe('plannerCellState (§17.2.2 E1–E4)', () => {
 
   it('E1 when the history failed → the button stays (the api re-checks)', () => {
     expect(
-      plannerCellState({
-        viewerRole: 'opiekun',
+      cell('opiekun', {
         vehicleActive: true,
         history: 'unavailable',
         hasPending: false,
@@ -67,8 +81,7 @@ describe('plannerCellState (§17.2.2 E1–E4)', () => {
 
   it('E2 — admin, any active vehicle, no pending → the same button, his own reason (D9)', () => {
     expect(
-      plannerCellState({
-        viewerRole: 'admin',
+      cell('admin', {
         vehicleActive: true,
         history: 'ready',
         hasPending: false,
@@ -77,12 +90,12 @@ describe('plannerCellState (§17.2.2 E1–E4)', () => {
   });
 
   it('E2 — the same skeleton while the history loads, the button when it failed', () => {
-    const base = { viewerRole: 'admin' as const, vehicleActive: true, hasPending: false };
-    expect(plannerCellState({ ...base, history: 'loading' })).toEqual({
+    const base = { vehicleActive: true, hasPending: false };
+    expect(cell('admin', { ...base, history: 'loading' })).toEqual({
       reason: 'lockedAdmin',
       action: 'skeleton',
     });
-    expect(plannerCellState({ ...base, history: 'unavailable' })).toEqual({
+    expect(cell('admin', { ...base, history: 'unavailable' })).toEqual({
       reason: 'lockedAdmin',
       action: 'request',
     });
@@ -92,8 +105,7 @@ describe('plannerCellState (§17.2.2 E1–E4)', () => {
     for (const viewerRole of ['admin', 'opiekun', 'pracownik'] as const) {
       for (const history of ['loading', 'ready', 'unavailable'] as const) {
         expect(
-          plannerCellState({
-            viewerRole,
+          cell(viewerRole, {
             vehicleActive: false,
             history,
             hasPending: false,
@@ -108,8 +120,7 @@ describe('plannerCellState (§17.2.2 E1–E4)', () => {
     ['admin', 'lockedAdmin'],
   ] as const)('E4 — %s: a pending request removes the button, the reason stays', (viewerRole, reason) => {
     expect(
-      plannerCellState({
-        viewerRole,
+      cell(viewerRole, {
         vehicleActive: true,
         history: 'ready',
         hasPending: true,
@@ -121,8 +132,7 @@ describe('plannerCellState (§17.2.2 E1–E4)', () => {
     'roles outside the edit form filers (%s) never get the button',
     (viewerRole) => {
       expect(
-        plannerCellState({
-          viewerRole,
+        cell(viewerRole, {
           vehicleActive: true,
           history: 'ready',
           hasPending: false,
@@ -130,6 +140,51 @@ describe('plannerCellState (§17.2.2 E1–E4)', () => {
       ).toEqual({ reason: 'locked', action: null });
     },
   );
+
+  it('a lider planista holds `decide` but still files from the detail modal, not here', () => {
+    expect(
+      cell('planista', { vehicleActive: true, history: 'ready', hasPending: false }, true),
+    ).toEqual({ reason: 'locked', action: null });
+  });
+
+  // Frozen pre-B4 rule (role-keyed) — the new one must agree for every
+  // role × lider × vehicle state × history × pending.
+  function legacyCell({
+    viewerRole,
+    vehicleActive,
+    history,
+    hasPending,
+  }: Omit<PlannerCellInput, 'viewerPermissions'>) {
+    const reason = !vehicleActive
+      ? 'lockedInactive'
+      : viewerRole === 'admin'
+        ? 'lockedAdmin'
+        : 'locked';
+    const canFile =
+      (viewerRole === 'opiekun' || viewerRole === 'admin') && vehicleActive;
+    if (!canFile) return { reason, action: null };
+    if (history === 'loading') return { reason, action: 'skeleton' };
+    if (hasPending) return { reason, action: null };
+    return { reason, action: 'request' };
+  }
+
+  it('≡ the pre-B4 role rule for every input', () => {
+    const roles: (Role | undefined)[] = [undefined, ...RoleSchema.options];
+    for (const viewerRole of roles) {
+      for (const lider of [false, true]) {
+        for (const vehicleActive of [false, true]) {
+          for (const history of ['loading', 'ready', 'unavailable'] as const) {
+            for (const hasPending of [false, true]) {
+              const rest = { vehicleActive, history, hasPending };
+              expect(cell(viewerRole, rest, lider)).toEqual(
+                legacyCell({ viewerRole, ...rest }),
+              );
+            }
+          }
+        }
+      }
+    }
+  });
 });
 
 describe('canTransferFromDetail (§17.6.3)', () => {

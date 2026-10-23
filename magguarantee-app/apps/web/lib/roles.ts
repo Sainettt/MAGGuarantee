@@ -2,14 +2,19 @@
 // because their UIs converge in Phases 4–5; the rest each get a dedicated
 // route group ready for Phase 2+ divergence.
 //
-// This file is also the source of truth for path-level role gating. Both
+// This file is also the source of truth for path-level gating. Both
 // middleware (edge) and route-group layouts (server) consult `isAllowed` /
 // `roleForPath` to decide whether a given user may reach a path.
 
 // Type-only on purpose: `middleware.ts` (edge) imports this file, and the
-// shared package's runtime barrel is CommonJS + zod — a value import from it
-// here would drag all of that into the edge bundle.
+// shared package's runtime barrel pulls every zod schema — a value import
+// from it here would drag all of that into the edge bundle (docs/28 §9.2 #18).
+// The permissions catalog comes through `./auth/permissions`, which imports
+// the dependency-free `@magguarantee/shared/permissions` subpath instead;
+// `lib/auth/edge-imports.test.ts` fails on a value import from the barrel.
 import type { LiderRole, Role } from '@magguarantee/shared';
+
+import { hasAnyPermission, type Permission } from './auth/permissions';
 
 export const ROLE_LANDING: Record<Role, string> = {
   admin: '/employee',
@@ -88,7 +93,7 @@ export function roleLabelKey(role: Role, lider?: boolean): RoleLabelKey {
 /**
  * Per-role allow-list of route-group prefixes. A path is reachable for a role
  * iff it starts with one of these prefixes (with `/employee` having extra
- * sub-rules — see `ADMIN_ONLY_EMPLOYEE_PREFIXES`).
+ * sub-rules — see `PATH_PERMISSIONS` and `SCOPE_RESTRICTED_EMPLOYEE_PREFIXES`).
  *
  * Why admin lists every prefix: admin can switch into any panel, including
  * `/carrier` for debug-fallback (see docs/03-roles.md#admin — "В Carrier
@@ -106,61 +111,60 @@ export const ROLE_ALLOWED_PREFIXES: Record<Role, readonly string[]> = {
 };
 
 /**
- * Sub-paths inside `/employee` that only `admin` may reach. `pracownik` and
- * `opiekun` share the employee shell but their nav row hides these tabs and
- * direct-URL access must be blocked too. See docs/03-roles.md#pracownik.
+ * Sub-paths inside `/employee` that need a PERMISSION (any-of when a list) on
+ * top of the role's prefix allow-list (docs/25 §3 B4). `pracownik` and
+ * `opiekun` share the employee shell; their nav hides what they lack and
+ * direct-URL access is bounced here too.
  *
- * Phase 5.1 — `carriers`, `vehicles`, `drivers`, `trailers` are now also
- * reachable by `opiekun` (ownership-scoped by the API). They've been removed
- * from this list and their page directories were moved out of the `(admin)`
- * route group accordingly. `trailer-types` stays admin-only per
- * docs/03-roles.md.
+ * The edge only knows the JWT role, so the check is the role catalog with
+ * `lider = false` and no per-user overrides (docs/25 R3) — the server pages
+ * re-check the EFFECTIVE list from `/auth/me` (`requirePermission`).
+ * `roles.test.ts` pins `isAllowedForRole` to the role lists this replaced.
+ *
+ * Phase 5.1 — `carriers`, `vehicles`, `drivers`, `trailers` are reachable by
+ * `opiekun` (ownership-scoped by the API), so they are not listed here.
  */
-export const ADMIN_ONLY_EMPLOYEE_PREFIXES: readonly string[] = [
-  '/employee/trailer-types',
-  // Phase 11 — admin «Zespoły prowadzące» (dispatch-team CRUD). Lives under the
-  // `(admin)` route group; this entry bounces non-admin direct-URL nav at the
-  // edge (docs/03-roles.md — only admin manages catalogs/teams).
-  '/employee/teams',
-  // Phase 4.5 — admin ops surfaces (users CRUD shipped in 4.4; limits / audit
-  // / diagnostics added in 4.5). Each renders behind the `(admin)` layout
-  // guard too, but middleware needs the same allow-list so direct-URL
-  // navigation by non-admins is bounced at the edge.
-  '/employee/users',
+export const PATH_PERMISSIONS: Readonly<Record<string, readonly Permission[]>> = {
+  // Catalog of trailer types — admin only (docs/03-roles.md).
+  '/employee/trailer-types': ['trailer_types.manage'],
+  // Phase 11 — «Zespoły prowadzące» (dispatch-team CRUD).
+  '/employee/teams': ['teams.manage'],
+  // Phase 4.5 — ops surfaces (users CRUD 4.4; limits / audit / diagnostics
+  // 4.5). Each renders behind the `(admin)` layout + its own page check too.
+  '/employee/users': ['users.manage'],
   // Google SSO — the stanowisko → role mapping (docs/24 §A5). Handing out
-  // roles is as privileged as user CRUD, so it lives behind the same gate.
-  '/employee/sso',
-  '/employee/limits',
-  '/employee/audit',
-  '/employee/diagnostics',
-  // Phase 6.x — admin all-access "Wyjazdy" (read-only delegations list).
-  // Lives under the `(admin)` route group too; this entry bounces non-admin
-  // direct-URL navigation at the edge. pracownik/opiekun must NEVER reach it
-  // (docs/19-known-quirks.md #13 + roles matrix).
-  '/employee/delegations',
-];
-
-/**
- * Sub-paths inside `/employee` open to SOME employee roles but not all — the
- * listed roles only (admin is always listed explicitly). Checked in addition
- * to `ADMIN_ONLY_EMPLOYEE_PREFIXES`.
- *
- * docs/29 / docs/14 §17.4.1 — «Przekazania»: admin decides every vehicle
- * transfer request, the opiekun follows his own (D5); `pracownik` has no part
- * in it (the api would 403 both `scope=decide` and `scope=mine` for him).
- * Plain path data only — this file is edge-imported and must stay free of
- * runtime imports from `@magguarantee/shared`.
- */
-export const ROLE_RESTRICTED_EMPLOYEE_PREFIXES: Readonly<
-  Record<string, readonly Role[]>
-> = {
-  '/employee/przekazania': ['admin', 'opiekun'],
+  // roles is as privileged as user CRUD.
+  '/employee/sso': ['sso.manage'],
+  '/employee/limits': ['limits.manage'],
+  '/employee/audit': ['audit.read'],
+  '/employee/diagnostics': ['diagnostics.manage'],
+  // docs/29 / docs/14 §17.4.1 — «Przekazania»: admin decides every vehicle
+  // transfer request, the opiekun follows his own (D5); `pracownik` has no
+  // part in it (the api would 403 both `scope=decide` and `scope=mine`).
+  '/employee/przekazania': [
+    'vehicles.planner_transfer.request',
+    'vehicles.planner_transfer.decide',
+  ],
   // opiekun has no claims (wnioski) access at all — decision 2026-10-22,
   // docs/03-roles.md §opiekun (the api drops him from GET /claims and
-  // GET /claims/:nrZgl). The nav already hides the tab and the page's
-  // `requireRoleAccess(['admin', 'pracownik'])` already bounces; this entry
-  // closes the edge/middleware layer for a typed URL or a stale deeplink.
-  '/employee/claims': ['admin', 'pracownik'],
+  // GET /claims/:nrZgl). Closes the edge layer for a typed URL or a stale
+  // `?nrZgl=` deeplink; the page's `requirePermission` is the server twin.
+  '/employee/claims': ['claims.read'],
+};
+
+/**
+ * scope: sub-paths inside `/employee` kept for the listed ROLES — not an
+ * access right but which screen a role gets for data it may read.
+ *
+ * Phase 6.x — the admin's all-access «Wyjazdy» (read-only, unscoped). It
+ * cannot be a permission without a behaviour change: the opiekun holds
+ * `delegations.read` too, but his list is `/employee/opieka/delegations`.
+ * pracownik/opiekun must NEVER reach this one (docs/19-known-quirks.md #13).
+ */
+export const SCOPE_RESTRICTED_EMPLOYEE_PREFIXES: Readonly<
+  Record<string, readonly Role[]>
+> = {
+  '/employee/delegations': ['admin'],
 };
 
 function startsWithPrefix(pathname: string, prefix: string): boolean {
@@ -179,14 +183,13 @@ function pathStartsWithAny(pathname: string, prefixes: readonly string[]): boole
  * for unrecognized prefixes the caller is expected to handle separately.
  */
 export function isAllowedForRole(pathname: string, role: Role): boolean {
-  // Admin sub-section of `/employee` is reserved.
-  if (
-    role !== 'admin' &&
-    pathStartsWithAny(pathname, ADMIN_ONLY_EMPLOYEE_PREFIXES)
-  ) {
-    return false;
+  // Edge = role catalog only: lider = false, no overrides (docs/25 R3).
+  for (const [prefix, rule] of Object.entries(PATH_PERMISSIONS)) {
+    if (startsWithPrefix(pathname, prefix) && !hasAnyPermission(role, rule, false)) {
+      return false;
+    }
   }
-  for (const [prefix, roles] of Object.entries(ROLE_RESTRICTED_EMPLOYEE_PREFIXES)) {
+  for (const [prefix, roles] of Object.entries(SCOPE_RESTRICTED_EMPLOYEE_PREFIXES)) {
     if (startsWithPrefix(pathname, prefix) && !roles.includes(role)) return false;
   }
   return pathStartsWithAny(pathname, ROLE_ALLOWED_PREFIXES[role]);

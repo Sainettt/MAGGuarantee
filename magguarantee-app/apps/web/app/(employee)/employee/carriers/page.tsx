@@ -34,6 +34,7 @@ import { CarrierResetPasswordDialogs } from '@/components/carriers/CarrierResetP
 import { OnboardingMissingBadge } from '@/components/carriers/OnboardingMissingBadge';
 import { ApiResponseError } from '@/lib/api/client';
 import { useAuth } from '@/lib/hooks/useAuth';
+import { useCan } from '@/lib/hooks/useCan';
 import { useCarriers, useHardDeleteCarrier } from '@/lib/hooks/useCarriers';
 import { useOpiekuni } from '@/lib/hooks/useLookups';
 import { queryErrorProps } from '@/lib/query/queryErrorProps';
@@ -59,16 +60,17 @@ function CarriersPageInner() {
   const tConfirm = useTranslations('confirmDelete');
   const tReset = useTranslations('carriers.resetPassword');
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
-  // Opiekun's list endpoint is auto-scoped to their own carriers (Phase 5.1
-  // backend), so the "filter by opiekun" select is meaningless for them —
-  // they would only ever see themselves in the dropdown.
+  // scope: opiekun's list endpoint is auto-scoped to their own carriers
+  // (Phase 5.1 backend), so the "filter by opiekun" select is meaningless for
+  // them — they would only ever see themselves in the dropdown. A data-scope
+  // question (whose carriers the list holds), not a permission.
   const isOpiekun = user?.role === 'opiekun';
   // Carriers are the exception to the fleet-delete rule: BOTH the soft delete
-  // (`DELETE /carriers/:id`) and the hard delete (`/carriers/:id/hard`) are
-  // admin-only (docs/13-api-design.md). An opiekun's only carrier lifecycle
-  // tool is deactivate, so the delete row-action must not render for them.
-  const canHardDelete = isAdmin;
+  // (`DELETE /carriers/:id`) and the hard delete (`/carriers/:id/hard`) need
+  // `carriers.delete` (admin — docs/13-api-design.md). An opiekun's only
+  // carrier lifecycle tool is deactivate, so the delete row-action must not
+  // render for them.
+  const canHardDelete = useCan('carriers.delete');
   const [search, setSearch] = useState('');
   const [opiekunId, setOpiekunId] = useState<string>('');
   const [activeFilter, setActiveFilter] = useState<'' | 'true' | 'false'>('');
@@ -318,6 +320,7 @@ function CarriersPageInner() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        {/* scope: see `isOpiekun` — the opiekun's list holds only his carriers. */}
         {!isOpiekun && (
           <Select
             className="sm:max-w-xs"

@@ -86,7 +86,6 @@ import {
   type ClaimStatus,
   type KmCalcBreakdown,
   type PreviewClaimDto,
-  type Role,
   type UpdateClaimDto,
   type VerifyClaimDto,
 } from '@magguarantee/shared';
@@ -122,6 +121,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Textarea } from '@/components/ui/Textarea';
 import { downloadAuthorizationConfirmation } from '@/lib/api/claims';
 import { ApiResponseError } from '@/lib/api/client';
+import type { Permission } from '@/lib/auth/permissions';
 import {
   formatBoardDate,
   isBoardIncomplete,
@@ -193,11 +193,13 @@ interface ClaimModalProps {
    *  read-only roles the modal stays in `view` with no edit button. */
   canEdit?: boolean;
   /**
-   * The viewer's role. Passed EXPLICITLY (never inferred from `canEdit`, which
-   * collapses admin and pracownik into one boolean) because §6.5.13/§6.5.14
-   * gate whole sections on admin-vs-pracownik — see `deriveClaimPermissions`.
+   * The viewer's effective permissions (`usePermissions()`). Passed EXPLICITLY
+   * (never inferred from `canEdit`, which collapses admin and pracownik into
+   * one boolean) because §6.5.13/§6.5.14 gate whole sections on
+   * `claims.verify_pending_authorization` (admin) vs `claims.verify` — see
+   * `deriveClaimPermissions`.
    */
-  role?: Role;
+  permissions?: readonly Permission[];
   onClose: () => void;
 }
 
@@ -415,7 +417,7 @@ export function ClaimModal({
   nrZgl,
   initialMode = 'view',
   canEdit = false,
-  role,
+  permissions,
   onClose,
 }: ClaimModalProps) {
   const t = useTranslations('employee.claims.modal');
@@ -434,7 +436,7 @@ export function ClaimModal({
             claim={claim}
             initialMode={initialMode}
             canEdit={canEdit}
-            role={role}
+            permissions={permissions}
             onClose={onClose}
           />
         )}
@@ -473,7 +475,7 @@ interface ModalBodyProps {
   claim: ClaimDto;
   initialMode: ClaimModalMode;
   canEdit: boolean;
-  role: Role | undefined;
+  permissions: readonly Permission[] | undefined;
   onClose: () => void;
 }
 
@@ -481,7 +483,7 @@ function ModalBody({
   claim,
   initialMode,
   canEdit,
-  role,
+  permissions,
   onClose,
 }: ModalBodyProps) {
   const t = useTranslations('employee.claims.modal');
@@ -507,7 +509,7 @@ function ModalBody({
   );
 
   // ── THE permission object (§6.5.12–§6.5.14) ──
-  // Single derivation from (status, role, mode). Every section below reads from
+  // Single derivation from (status, permissions, mode). Every section below reads from
   // `perms` — fact-block editability, the verify button, the amountApproved
   // branch, and the submit payload shape. Do NOT reintroduce ad-hoc
   // `status === …` / `role === …` checks at the call sites; they are what let
@@ -516,10 +518,10 @@ function ModalBody({
     () =>
       deriveClaimPermissions({
         status: claim.status,
-        role,
+        permissions,
         mode,
       }),
-    [claim.status, role, mode],
+    [claim.status, permissions, mode],
   );
   const editButtonRef = useRef<HTMLButtonElement | null>(null);
   const firstInputRef = useRef<HTMLInputElement | null>(null);

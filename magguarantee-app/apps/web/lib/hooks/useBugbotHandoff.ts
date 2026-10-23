@@ -18,9 +18,10 @@
 
 import { useLocale } from 'next-intl';
 import { useCallback, useRef, useState } from 'react';
-import type { BugbotHandoffKind, Role } from '@magguarantee/shared';
+import type { BugbotHandoffKind } from '@magguarantee/shared';
 
 import { getBugbotHandoffUrl } from '@/lib/api/bugbot';
+import type { Permission } from '@/lib/auth/permissions';
 import {
   bugbotKindsFor,
   openBugbotHandoff,
@@ -49,8 +50,13 @@ export interface UseBugbotHandoffResult {
   dismissError: () => void;
 }
 
-/** @param role the signed-in user's role; `null` while anonymous → no kinds. */
-export function useBugbotHandoff(role: Role | null): UseBugbotHandoffResult {
+/**
+ * @param permissions the signed-in user's effective permissions
+ *   (`effectivePermissionsOf(user)`); `null` while anonymous → no kinds.
+ */
+export function useBugbotHandoff(
+  permissions: readonly Permission[] | null,
+): UseBugbotHandoffResult {
   const locale = toBugbotLocale(useLocale());
   const [pendingKind, setPendingKind] = useState<BugbotHandoffKind | null>(
     null,
@@ -87,7 +93,7 @@ export function useBugbotHandoff(role: Role | null): UseBugbotHandoffResult {
   const dismissError = useCallback(() => setFailed(false), []);
 
   return {
-    kinds: role ? bugbotKindsFor(role, BUGBOT_ENABLED) : NO_KINDS,
+    kinds: permissions ? bugbotKindsFor(permissions, BUGBOT_ENABLED) : NO_KINDS,
     pendingKind,
     failed,
     open,

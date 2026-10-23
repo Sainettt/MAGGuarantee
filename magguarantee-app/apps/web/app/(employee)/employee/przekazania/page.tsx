@@ -9,23 +9,23 @@
 //
 // NOT admin-only (the opiekun reaches it), but not for `pracownik` either: he
 // has no part in vehicle transfers and the api would 403 both scopes. The
-// edge middleware bounces him already (`ROLE_RESTRICTED_EMPLOYEE_PREFIXES` in
-// lib/roles.ts); this server check is the defense-in-depth twin, landing on
-// the shell's «Brak dostępu» page like the `(admin)` segment does.
+// edge middleware bounces him already (`PATH_PERMISSIONS` in lib/roles.ts);
+// this server check is the defense-in-depth twin, landing on the shell's
+// «Brak dostępu» page like the `(admin)` segment does.
 
-import { redirect } from 'next/navigation';
-
-import { getServerUser } from '@/lib/auth/server';
+import { requirePermission } from '@/lib/auth/server';
 
 import { TransfersView } from './TransfersView';
 
 export const dynamic = 'force-dynamic';
 
 export default async function EmployeeTransfersPage() {
-  const user = await getServerUser();
-  if (!user) redirect('/login');
-  if (user.role !== 'admin' && user.role !== 'opiekun') {
-    redirect('/employee/forbidden');
-  }
+  const user = await requirePermission(
+    ['vehicles.planner_transfer.request', 'vehicles.planner_transfer.decide'],
+    { onDenied: 'forbidden' },
+  );
+  // scope: which LIST the employee shell shows, not a right — the admin's
+  // inbox spans every request (decider), the opiekun's holds his own (author).
+  // Who may decide a given row is the api's per-row `viewerCanDecide`.
   return <TransfersView mode={user.role === 'admin' ? 'decider' : 'author'} />;
 }

@@ -37,7 +37,7 @@ import { ClaimsTable } from '@/components/claims/ClaimsTable';
 import { CursorPager } from '@/components/ui/CursorPager';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
-import { useAuth } from '@/lib/hooks/useAuth';
+import { useCan, usePermissions } from '@/lib/hooks/useCan';
 import { useClaims } from '@/lib/hooks/useClaims';
 import { queryErrorProps } from '@/lib/query/queryErrorProps';
 import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
@@ -57,18 +57,19 @@ export function ClaimsListView() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const { user } = useAuth();
-  // Phase 7.1 — admin + pracownik may edit; they are the only roles that reach
-  // this page (opiekun has no claims access, docs/03-roles.md §opiekun). Any
-  // other role would get the unified modal in `view` without an «Edycja»
-  // button. Passed into <ClaimModal> so the modal stays role-agnostic.
-  const canEdit = user?.role === 'admin' || user?.role === 'pracownik';
-  // The ROLE itself travels separately: `canEdit` collapses admin and pracownik
-  // into one boolean, but docs/14 §6.5.13/§6.5.14 gate whole sections on which
-  // of the two it is (fact block, «Zapisz weryfikację», kwota zatwierdzona).
-  // Inferring the role back out of `canEdit` is exactly the drift the single
-  // `deriveClaimPermissions` derivation exists to prevent.
-  const role = user?.role;
+  // Phase 7.1 — `claims.verify` (admin + pracownik) may edit; they are the
+  // only roles that reach this page (opiekun has no claims access,
+  // docs/03-roles.md §opiekun). Anyone else would get the unified modal in
+  // `view` without an «Edycja» button. Passed into <ClaimModal> so the modal
+  // stays role-agnostic.
+  const canEdit = useCan('claims.verify');
+  // The PERMISSIONS themselves travel separately: `canEdit` collapses admin and
+  // pracownik into one boolean, but docs/14 §6.5.13/§6.5.14 gate whole sections
+  // on `claims.verify_pending_authorization` (fact block, «Zapisz
+  // weryfikację», kwota zatwierdzona). Inferring that back out of `canEdit` is
+  // exactly the drift the single `deriveClaimPermissions` derivation exists to
+  // prevent.
+  const permissions = usePermissions();
 
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<ClaimStatus | ''>('');
@@ -259,7 +260,7 @@ export function ClaimsListView() {
         nrZgl={selectedNrZgl}
         initialMode="view"
         canEdit={canEdit}
-        role={role}
+        permissions={permissions}
         onClose={onModalClose}
       />
     </section>

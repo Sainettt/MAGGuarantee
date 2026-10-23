@@ -9,6 +9,10 @@ import { LIDER_ROLES, RoleSchema, type Role } from '@magguarantee/shared';
 
 import {
   LIDER_LABEL_ROLES,
+  PATH_PERMISSIONS,
+  ROLE_ALLOWED_PREFIXES,
+  ROLE_LANDING,
+  SCOPE_RESTRICTED_EMPLOYEE_PREFIXES,
   isAllowedForRole,
   roleLabelKey,
   safeNextPath,
@@ -95,7 +99,8 @@ describe('roleLabelKey', () => {
 
 // docs/29 / docs/14 §17.4 — the vehicle-transfer routes. Leadership is not a
 // role, so the edge only knows `planista`; the lider-only approvals route is
-// guarded on the client (`user.lider`), the rest by role here.
+// guarded on the client (`vehicles.planner_transfer.decide` from `/auth/me`),
+// the rest by role / role permissions here.
 describe('isAllowedForRole — planner-transfer routes', () => {
   const cases: [string, Role, boolean][] = [
     ['/employee/przekazania', 'admin', true],
@@ -141,5 +146,108 @@ describe('isAllowedForRole — employee claims route', () => {
     expect(safeNextPath(next, 'opiekun')).toBeNull();
     expect(safeNextPath(next, 'pracownik')).toBe(next);
     expect(safeNextPath(next, 'admin')).toBe(next);
+  });
+});
+
+// ─── docs/25 §3 B4 — PATH_PERMISSIONS ≡ the role lists it replaced ─────────
+// The pre-B4 lists, frozen as a literal fixture, and the pre-B4 check built
+// from them. `isAllowedForRole` (now permission-keyed, lider = false, no
+// overrides — R3) must agree with it for all 8 roles on every old and new
+// prefix, their sub-paths, stem siblings and every role root / landing.
+describe('isAllowedForRole ≡ the pre-B4 role lists', () => {
+  const LEGACY_ADMIN_ONLY_EMPLOYEE_PREFIXES: readonly string[] = [
+    '/employee/trailer-types',
+    '/employee/teams',
+    '/employee/users',
+    '/employee/sso',
+    '/employee/limits',
+    '/employee/audit',
+    '/employee/diagnostics',
+    '/employee/delegations',
+  ];
+  const LEGACY_ROLE_RESTRICTED_EMPLOYEE_PREFIXES: Readonly<
+    Record<string, readonly Role[]>
+  > = {
+    '/employee/przekazania': ['admin', 'opiekun'],
+    '/employee/claims': ['admin', 'pracownik'],
+  };
+  const LEGACY_ROLE_ALLOWED_PREFIXES: Record<Role, readonly string[]> = {
+    admin: ['/employee', '/carrier', '/planista', '/dyspozytor', '/eksport', '/weryfikator'],
+    pracownik: ['/employee'],
+    opiekun: ['/employee'],
+    przewoznik: ['/carrier'],
+    planista: ['/planista'],
+    dyspozytor: ['/dyspozytor'],
+    eksport: ['/eksport'],
+    weryfikator: ['/weryfikator'],
+  };
+
+  const under = (path: string, prefix: string) =>
+    path === prefix || path.startsWith(prefix + '/');
+
+  function legacyIsAllowedForRole(path: string, role: Role): boolean {
+    if (
+      role !== 'admin' &&
+      LEGACY_ADMIN_ONLY_EMPLOYEE_PREFIXES.some((p) => under(path, p))
+    ) {
+      return false;
+    }
+    for (const [prefix, roles] of Object.entries(LEGACY_ROLE_RESTRICTED_EMPLOYEE_PREFIXES)) {
+      if (under(path, prefix) && !roles.includes(role)) return false;
+    }
+    return LEGACY_ROLE_ALLOWED_PREFIXES[role].some((p) => under(path, p));
+  }
+
+  const prefixes = new Set<string>([
+    ...LEGACY_ADMIN_ONLY_EMPLOYEE_PREFIXES,
+    ...Object.keys(LEGACY_ROLE_RESTRICTED_EMPLOYEE_PREFIXES),
+    ...Object.keys(PATH_PERMISSIONS),
+    ...Object.keys(SCOPE_RESTRICTED_EMPLOYEE_PREFIXES),
+    ...Object.values(LEGACY_ROLE_ALLOWED_PREFIXES).flat(),
+    ...Object.values(ROLE_ALLOWED_PREFIXES).flat(),
+    ...Object.values(ROLE_LANDING),
+    // Employee routes outside every list — must stay as they were.
+    '/employee/opieka',
+    '/employee/opieka/delegations',
+    '/employee/alerts',
+    '/employee/moje-pojazdy',
+    '/employee/carriers',
+    '/employee/vehicles',
+    '/employee/drivers',
+    '/employee/trailers',
+    '/employee/dashboard',
+    '/employee/forbidden',
+    '/planista/przekazania',
+    '/planista/zatwierdzenia',
+  ]);
+  const paths = [...prefixes].flatMap((p) => [p, `${p}/x`, `${p}x`]);
+
+  it('the fixture lists every prefix the new tables gate', () => {
+    for (const p of Object.keys(PATH_PERMISSIONS)) {
+      expect(
+        LEGACY_ADMIN_ONLY_EMPLOYEE_PREFIXES.includes(p) ||
+          p in LEGACY_ROLE_RESTRICTED_EMPLOYEE_PREFIXES,
+      ).toBe(true);
+    }
+    expect(ROLE_ALLOWED_PREFIXES).toEqual(LEGACY_ROLE_ALLOWED_PREFIXES);
+  });
+
+  it.each(ALL_ROLES)('%s — identical on every path', (role) => {
+    const diff = paths.filter(
+      (path) => isAllowedForRole(path, role) !== legacyIsAllowedForRole(path, role),
+    );
+    expect(diff).toEqual([]);
+  });
+
+  it('only `/employee/delegations` stays a role scope (no new edge gates)', () => {
+    expect(SCOPE_RESTRICTED_EMPLOYEE_PREFIXES).toEqual({
+      '/employee/delegations': ['admin'],
+    });
+    expect(Object.keys(PATH_PERMISSIONS).sort()).toEqual(
+      [
+        ...LEGACY_ADMIN_ONLY_EMPLOYEE_PREFIXES.filter((p) => p !== '/employee/delegations'),
+        ...Object.keys(LEGACY_ROLE_RESTRICTED_EMPLOYEE_PREFIXES),
+      ].sort(),
+    );
   });
 });

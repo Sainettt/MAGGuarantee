@@ -65,14 +65,12 @@ import {
 import { downloadVehicleAttachment } from '@/lib/api/vehicles';
 import { formatDateTime, formatEur } from '@/lib/format/numbers';
 import { useAuth } from '@/lib/hooks/useAuth';
+import { useCan } from '@/lib/hooks/useCan';
 import { useOpenBlobInTab } from '@/lib/hooks/useOpenBlobInTab';
 import { useVehiclePlannerHistory } from '@/lib/hooks/usePlannerTransfers';
 import { pendingTransferOf } from '@/lib/transfers/plannerTimeline';
 import { isHistoryForbidden } from '@/lib/transfers/transferErrors';
 import { canTransferFromDetail, personName } from '@/lib/transfers/transferUi';
-
-/** Roles that may read a vehicle's planista journal (docs/29 U11). */
-const HISTORY_ROLES = new Set(['admin', 'opiekun', 'planista']);
 
 interface Props {
   open: boolean;
@@ -114,8 +112,10 @@ export function VehicleDetailModal({
   //    modal. Never requested for a carrier viewing its own fleet. ─────────
   const tTransfers = useTranslations('transfers');
   const { user } = useAuth();
-  const historyEnabled =
-    open && !hideCarrier && user !== null && HISTORY_ROLES.has(user.role);
+  // `vehicles.planner_history.read` — admin, opiekun, planista (docs/29 U11);
+  // false while `/auth/me` loads.
+  const canReadHistory = useCan('vehicles.planner_history.read');
+  const historyEnabled = open && !hideCarrier && canReadHistory;
   const historyQ = useVehiclePlannerHistory(vehicle?.id ?? null, {
     enabled: historyEnabled,
   });
@@ -362,6 +362,8 @@ export function VehicleDetailModal({
 
   // ── «Przekaż ciągnik» — only the CURRENT planista (D3), enabled vehicle,
   //    no pending request (known only once the history answered). ────────
+  // scope: role + id pick the ONE entry point per role (planista here, the
+  // edit form for opiekun/admin — D9); see `canTransferFromDetail`.
   const showTransfer = canTransferFromDetail({
     viewerRole: user?.role,
     viewerId: user?.id,

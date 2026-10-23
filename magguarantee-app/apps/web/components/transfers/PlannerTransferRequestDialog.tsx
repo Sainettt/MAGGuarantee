@@ -146,6 +146,7 @@ export default function PlannerTransferRequestDialog({
     { scope: 'mine', status: 'pending', limit: PENDING_PAGE_LIMIT },
     { enabled: open && pickVehicle },
   );
+  // scope: "his own" = the vehicles whose CURRENT planner is the viewer (id).
   const pickableVehicles = useMemo(() => {
     if (!pickVehicle) return [];
     const pendingIds = new Set(
@@ -373,6 +374,7 @@ export default function PlannerTransferRequestDialog({
               </p>
             </FormField>
 
+            {/* scope: wording per role (who decides the admin's own request). */}
             <LockNotice icon={Info}>
               {user?.role === 'admin' ? t('request.infoAdmin') : t('request.info')}
             </LockNotice>

@@ -18,6 +18,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function PlanistaMyTransfersPage() {
   const user = await getServerUser();
+  // scope: the admin's transfer screens live in the employee shell (W7).
   if (user?.role === 'admin') redirect('/employee/przekazania');
   return <PlanistaMyTransfersView />;
 }

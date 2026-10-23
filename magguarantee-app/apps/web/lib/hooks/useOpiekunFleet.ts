@@ -16,8 +16,9 @@ export const OPIEKUN_KEY = ['opiekun'] as const;
 interface UseOpiekunFleetOptions {
   /**
    * Gate the query. Defaults to `true` (the opieka pages always want it). The
-   * sidebar passes `enabled: role === 'opiekun'` so the fleet endpoint isn't
-   * fetched for roles that can't see the opieka section. The query key is
+   * sidebar passes `enabled: role === 'opiekun'` (scope: the tally covers HIS
+   * carriers; admin also holds `panel.opiekun` but would get every carrier)
+   * so the fleet endpoint isn't fetched for anyone else. The query key is
    * unchanged, so an enabled instance still shares cache with the opieka list
    * page — no double fetch.
    */

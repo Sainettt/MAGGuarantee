@@ -164,6 +164,8 @@ export function CarrierFormDialog({
   // backend rejects a foreign `opiekunId` with 403 and defaults to `=self`
   // when the field is omitted, so we hide the assignment picker entirely
   // for opiekun and keep the `defaultOpiekunId` baked into form state below.
+  // scope: self-assignment (WHO owns the carrier), not a right — admin and
+  // opiekun both hold `carriers.write`.
   const isOpiekunCaller = user?.role === 'opiekun';
 
   // Both schemas are .strict() but our form carries fields that aren't part
@@ -322,7 +324,7 @@ export function CarrierFormDialog({
 
   // Default opiekunId on create: if the current user is an opiekun,
   // preselect their own id. Computed once per `user` change so reset()
-  // below picks it up deterministically.
+  // below picks it up deterministically. scope: self-assignment, see above.
   const defaultOpiekunId = useMemo(
     () => (user?.role === 'opiekun' ? user.id : undefined),
     [user?.role, user?.id],
