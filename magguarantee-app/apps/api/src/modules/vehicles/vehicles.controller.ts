@@ -57,8 +57,7 @@ import {
   CurrentUser,
   type AuthUser,
 } from '../auth/decorators/current-user.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import {
   collectAndValidateUploads,
   type MultipartFiles,
@@ -100,9 +99,23 @@ const MULTIPART_OPTIONS = {
  * out by role; carrier writes go through both Opiekun and Carrier ownership
  * guards (each is a no-op for non-matching roles, so they compose additively
  * per the wave brief).
+ *
+ * Gates (docs/25 §3 B2): every route carries `@RequirePermission` exactly as
+ * planned in `common/authz/endpoint-permissions.ts`, checked by the global
+ * `PermissionsGuard`; who holds what is `ROLE_PERMISSIONS` in
+ * `@magguarantee/shared`:
+ *  - `vehicles.read` — list / detail / attachments list + download
+ *    (admin, opiekun, planista, dyspozytor, przewoznik);
+ *  - `fleet.write` — create / update / deactivate / reactivate / delete /
+ *    attachment delete (admin, opiekun);
+ *  - `km.read` — km-report, daily-km history (every role but pracownik);
+ *  - `km.verify` — km-board, daily-km PUT / DELETE (admin, weryfikator).
+ * Row scope stays on the role: the class-level ownership guards run the
+ * `@OpiekunOwns` / `@CarrierOwns` checks, and the service narrows lists by
+ * role.
  */
 @Controller('vehicles')
-@UseGuards(RolesGuard, OpiekunOwnershipGuard, CarrierOwnershipGuard)
+@UseGuards(OpiekunOwnershipGuard, CarrierOwnershipGuard)
 export class VehiclesController {
   private readonly logger = new Logger(VehiclesController.name);
 
@@ -117,12 +130,13 @@ export class VehiclesController {
    * status. Declared BEFORE `GET /:id` so the literal `km-board` segment is
    * matched first (Express matches in declaration order). A dedicated endpoint
    * — NOT an overload of the ownership-scoped `GET /vehicles` — so the board is
-   * never narrowed by carrier/opiekun scope. `RolesGuard` does the gate; the
-   * class-level ownership guards short-circuit (no `@*Owns` decorator here).
+   * never narrowed by carrier/opiekun scope. `km.verify` (weryfikator, admin)
+   * is the gate; the class-level ownership guards short-circuit (no `@*Owns`
+   * decorator here).
    * Replaces the former `GET /vehicles/route-board`.
    */
   @Get('km-board')
-  @Roles('weryfikator', 'admin')
+  @RequirePermission('km.verify')
   async kmBoard(
     @Query(new ZodValidationPipe(KmBoardQuerySchema)) query: KmBoardQuery,
   ): Promise<VehicleKmBoardDto> {
@@ -139,18 +153,10 @@ export class VehiclesController {
    * opiekun see their FULL fleet incl. non-driving vehicles (service-derived
    * `includeIdle` — NO new query param, contract unchanged per
    * docs/14-design-system.md §7.8.7). Declared before `GET /:id` for
-   * literal-segment match.
+   * literal-segment match. Gate: `km.read` (every role listed above).
    */
   @Get('km-report')
-  @Roles(
-    'planista',
-    'dyspozytor',
-    'eksport',
-    'admin',
-    'weryfikator',
-    'przewoznik',
-    'opiekun',
-  )
+  @RequirePermission('km.read')
   async kmReport(
     @CurrentUser() user: AuthUser,
     @Query(new ZodValidationPipe(KmBoardQuerySchema)) query: KmBoardQuery,
@@ -159,7 +165,7 @@ export class VehiclesController {
   }
 
   @Get()
-  @Roles('admin', 'opiekun', 'planista', 'dyspozytor', 'przewoznik')
+  @RequirePermission('vehicles.read')
   async list(
     @CurrentUser() user: AuthUser,
     @Query(new ZodValidationPipe(VehicleFiltersSchema)) query: VehicleFilters,
@@ -168,7 +174,7 @@ export class VehiclesController {
   }
 
   @Get(':id')
-  @Roles('admin', 'opiekun', 'planista', 'dyspozytor', 'przewoznik')
+  @RequirePermission('vehicles.read')
   @OpiekunOwns('id', 'param', 'vehicleId')
   @CarrierOwns('id', 'param', 'vehicleId')
   async getById(
@@ -180,7 +186,7 @@ export class VehiclesController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @Roles('admin', 'opiekun')
+  @RequirePermission('fleet.write')
   // NOTE: deliberately NO `@OpiekunOwns('carrierId', 'body', 'carrierId')`
   // here. Guards run BEFORE interceptors in NestJS, and this endpoint uses
   // `FileFieldsInterceptor` (multer) to parse multipart/form-data. At guard
@@ -217,11 +223,12 @@ export class VehiclesController {
   }
 
   // Carriers are view-only for vehicles — the carrier panel renders a
-  // read-only list/detail. Only admin/opiekun reach the mutating handlers,
-  // so CarrierOwns is intentionally absent (opiekun-ownership is enough).
+  // read-only list/detail. Only `fleet.write` holders (admin/opiekun) reach
+  // the mutating handlers, so CarrierOwns is intentionally absent
+  // (opiekun-ownership is enough).
   // Mirrors the trailers controller pattern.
   @Patch(':id')
-  @Roles('admin', 'opiekun')
+  @RequirePermission('fleet.write')
   @OpiekunOwns('id', 'param', 'vehicleId')
   @UseInterceptors(
     FileFieldsInterceptor(ATTACHMENT_UPLOAD_FIELDS, MULTIPART_OPTIONS),
@@ -253,7 +260,7 @@ export class VehiclesController {
 
   @Post(':id/deactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'opiekun')
+  @RequirePermission('fleet.write')
   @OpiekunOwns('id', 'param', 'vehicleId')
   @Audit({
     action: 'deactivateVehicle',
@@ -270,7 +277,7 @@ export class VehiclesController {
 
   @Post(':id/reactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'opiekun')
+  @RequirePermission('fleet.write')
   @OpiekunOwns('id', 'param', 'vehicleId')
   @Audit({
     action: 'reactivateVehicle',
@@ -285,7 +292,7 @@ export class VehiclesController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Roles('admin', 'opiekun')
+  @RequirePermission('fleet.write')
   @OpiekunOwns('id', 'param', 'vehicleId')
   @Audit({
     action: 'deleteVehicle',
@@ -308,7 +315,7 @@ export class VehiclesController {
   // ── Attachments ──────────────────────────────────────────
 
   @Get(':id/attachments')
-  @Roles('admin', 'opiekun', 'planista', 'dyspozytor', 'przewoznik')
+  @RequirePermission('vehicles.read')
   @OpiekunOwns('id', 'param', 'vehicleId')
   @CarrierOwns('id', 'param', 'vehicleId')
   async listAttachments(
@@ -318,7 +325,7 @@ export class VehiclesController {
   }
 
   @Get(':id/attachments/:attachmentId/download')
-  @Roles('admin', 'opiekun', 'planista', 'dyspozytor', 'przewoznik')
+  @RequirePermission('vehicles.read')
   @OpiekunOwns('id', 'param', 'vehicleId')
   @CarrierOwns('id', 'param', 'vehicleId')
   async downloadAttachment(
@@ -356,11 +363,12 @@ export class VehiclesController {
 
   // Carrier fleet is READ-ONLY (docs/03-roles.md#przewoznik): przewoznik must
   // NOT delete vehicle attachments (compliance scans — porozumienie / GPS /
-  // cabotage — that gate readiness). admin/opiekun only. CarrierOwns is dropped
-  // with the role; OpiekunOwns still scopes opiekun to their carriers.
+  // cabotage — that gate readiness). `fleet.write` (admin/opiekun) only; a
+  // przewoznik does not hold it. CarrierOwns is dropped with the role;
+  // OpiekunOwns still scopes opiekun to their carriers.
   @Delete(':id/attachments/:attachmentId')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Roles('admin', 'opiekun')
+  @RequirePermission('fleet.write')
   @OpiekunOwns('id', 'param', 'vehicleId')
   @Audit({
     action: 'deleteVehicleAttachment',
@@ -378,18 +386,18 @@ export class VehiclesController {
   // ── Daily km (Phase 7 REWORK #3 weryfikator km-board) ────
 
   /**
-   * UPSERTs one (vehicle, day) km mark. Weryfikator/admin only. `state='drove'`
-   * requires `km>0`; `state='idle'` forbids `km`. Re-stamping a day overwrites
-   * the previous mark (unique on (vehicleId, date)). When `state='drove'` the
-   * vehicle's `lastDroveAt` is bumped to `max(lastDroveAt, date)` in the same
-   * `@Audit`-opened transaction (ambient `prisma.tx` — upsert + bump + audit
-   * row commit atomically). No ownership decorator: the class-level ownership
-   * guards short-circuit for weryfikator/admin. Replaces the former
-   * `POST /vehicles/:id/route-status`.
+   * UPSERTs one (vehicle, day) km mark. `km.verify` (weryfikator/admin) only.
+   * `state='drove'` requires `km>0`; `state='idle'` forbids `km`. Re-stamping a
+   * day overwrites the previous mark (unique on (vehicleId, date)). When
+   * `state='drove'` the vehicle's `lastDroveAt` is bumped to
+   * `max(lastDroveAt, date)` in the same `@Audit`-opened transaction (ambient
+   * `prisma.tx` — upsert + bump + audit row commit atomically). No ownership
+   * decorator: the class-level ownership guards short-circuit for
+   * weryfikator/admin. Replaces the former `POST /vehicles/:id/route-status`.
    */
   @Put(':id/daily-km')
   @HttpCode(HttpStatus.OK)
-  @Roles('weryfikator', 'admin')
+  @RequirePermission('km.verify')
   @Audit({
     action: 'vehicle.setDailyKm',
     targetType: 'Vehicle',
@@ -406,17 +414,18 @@ export class VehiclesController {
 
   /**
    * Clears ONE (vehicle, day) km mark via `?date=YYYY-MM-DD`, returning the
-   * cell to «not checked» (row absence). Weryfikator/admin only — mirrors the
-   * PUT write gate; no ownership decorator (the class-level ownership guards
-   * short-circuit for these roles). IDEMPOTENT: clearing an already-absent /
-   * «not checked» cell still returns 204, never 404 (the service uses
-   * `deleteMany`). `Vehicle.lastDroveAt` is left untouched on delete (it only
-   * ever moves forward — see the service note). The delete + audit row commit
-   * atomically in the `@Audit`-opened transaction (ambient `prisma.tx`).
+   * cell to «not checked» (row absence). `km.verify` (weryfikator/admin) only —
+   * mirrors the PUT write gate; no ownership decorator (the class-level
+   * ownership guards short-circuit for these roles). IDEMPOTENT: clearing an
+   * already-absent / «not checked» cell still returns 204, never 404 (the
+   * service uses `deleteMany`). `Vehicle.lastDroveAt` is left untouched on
+   * delete (it only ever moves forward — see the service note). The delete +
+   * audit row commit atomically in the `@Audit`-opened transaction (ambient
+   * `prisma.tx`).
    */
   @Delete(':id/daily-km')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Roles('weryfikator', 'admin')
+  @RequirePermission('km.verify')
   @Audit({
     action: 'vehicle.clearDailyKm',
     targetType: 'Vehicle',
@@ -436,8 +445,9 @@ export class VehiclesController {
    * `?from&to` (date-only, inclusive). Drives the «Historia» modal for
    * weryfikator/admin AND the carrier panel's km-calendar for przewoznik.
    *
-   * Access mirrors `GET /vehicles/:id` (getById) so the read fans out by role
-   * exactly like vehicle detail:
+   * Gate: `km.read` (every role but pracownik). Row access mirrors
+   * `GET /vehicles/:id` (getById) so the read fans out by role exactly like
+   * vehicle detail:
    *  - weryfikator / admin / planista / dyspozytor / eksport → read any vehicle
    *    (ownership guards short-circuit for these roles — see below). `eksport`
    *    has all-access read on outflows and the related km (same posture as the
@@ -457,19 +467,12 @@ export class VehiclesController {
    * role==='opiekun'. So weryfikator (and the rest) keep full «Historia»
    * access despite the `@*Owns` decorators.
    *
-   * The WRITE side (`PUT :id/daily-km`) stays weryfikator/admin-only — carriers
-   * and planners never edit km. Replaces the former `GET /vehicles/:id/route-status`.
+   * The WRITE side (`PUT :id/daily-km`) stays `km.verify` (weryfikator/admin)
+   * — carriers and planners never edit km. Replaces the former
+   * `GET /vehicles/:id/route-status`.
    */
   @Get(':id/daily-km')
-  @Roles(
-    'admin',
-    'opiekun',
-    'planista',
-    'dyspozytor',
-    'przewoznik',
-    'weryfikator',
-    'eksport',
-  )
+  @RequirePermission('km.read')
   @OpiekunOwns('id', 'param', 'vehicleId')
   @CarrierOwns('id', 'param', 'vehicleId')
   async getDailyKm(

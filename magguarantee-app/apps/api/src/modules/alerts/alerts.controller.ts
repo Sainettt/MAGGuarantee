@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get } from '@nestjs/common';
 
 import type { AlertsResponse } from '@magguarantee/shared';
 
@@ -6,21 +6,20 @@ import {
   CurrentUser,
   type AuthUser,
 } from '../auth/decorators/current-user.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { AlertsService } from './alerts.service';
 
 /**
  * `GET /api/v1/alerts` — document-expiry alerts (OCP insurance, transport
  * licence, fuel card, driving licence) approaching or past their date.
  *
- * Read-only, in-app only (no email), no `@Audit` (it's a derived read). Role
- * gating: admin (all) + opiekun (their carriers, scoped in the service). Any
- * other role → 403.
+ * Read-only, in-app only (no email), no `@Audit` (it's a derived read). Gate:
+ * class-level `@RequirePermission('panel.opiekun')` (docs/25 §3 B2, global
+ * `PermissionsGuard`) — held by admin (all) + opiekun (their carriers, scoped
+ * in the service). Any other role → 403.
  */
 @Controller('alerts')
-@UseGuards(RolesGuard)
-@Roles('admin', 'opiekun')
+@RequirePermission('panel.opiekun')
 export class AlertsController {
   constructor(private readonly alerts: AlertsService) {}
 

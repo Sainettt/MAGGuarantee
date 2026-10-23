@@ -9,14 +9,14 @@ import {
 import { Reflector } from '@nestjs/core';
 import type { Request, Response } from 'express';
 
-import type { Role } from '@magguarantee/shared';
+import { rolesSatisfying, type Permission, type Role } from '@magguarantee/shared';
 
-import { ROLES_METADATA_KEY } from '../auth/auth.constants';
+import { makeAuthUser, withRole } from '../../common/testing/make-auth-user';
+import { PERMISSIONS_METADATA_KEY } from '../auth/auth.constants';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { DriversController } from './drivers.controller';
 import type { DriversService } from './drivers.service';
-import { makeAuthUser, withRole } from '../../common/testing/make-auth-user';
 
 /**
  * Authorization unit tests for `DriversController`.
@@ -26,11 +26,16 @@ import { makeAuthUser, withRole } from '../../common/testing/make-auth-user';
  * `admin`/`opiekun` reach the mutating handlers. Mirrors the already-correct
  * trailers controller (docs/03-roles.md access matrix).
  *
- * Two layers are asserted:
- *  1. The `@Roles(...)` metadata declared on each handler is exactly the
- *     documented set (reflection — catches an accidental decorator change).
- *  2. `RolesGuard` actually rejects a `przewoznik` token on mutations (403)
- *     and passes a `przewoznik` through on the GET routes.
+ * Track B (docs/25 §3 B2): the routes carry `@RequirePermission` instead of
+ * `@Roles` — `drivers.read` on the reads, `fleet.write` on the mutations.
+ * Two layers are asserted (same pattern as `claims.controller.roles.spec.ts`):
+ *  1. The `@RequirePermission(...)` metadata declared on each handler is
+ *     exactly the planned requirement (`common/authz/endpoint-permissions.ts`),
+ *     and the catalog maps it onto the documented role set (reflection —
+ *     catches an accidental decorator or catalog change).
+ *  2. `PermissionsGuard` actually rejects a `przewoznik` user (built like
+ *     `JwtAccessStrategy` builds it, `makeAuthUser`) on mutations (403) and
+ *     passes a `przewoznik` through on the GET routes.
  */
 
 const reflector = new Reflector();
@@ -39,12 +44,18 @@ function handlerOf(name: keyof DriversController): (...args: never[]) => unknown
   return DriversController.prototype[name] as (...args: never[]) => unknown;
 }
 
-function rolesFor(handlerName: keyof DriversController): Role[] {
-  const meta = reflector.get<Role[] | undefined>(
-    ROLES_METADATA_KEY,
-    handlerOf(handlerName),
+/** The live requirement, resolved like `PermissionsGuard` does (handler, then class). */
+function requiredFor(handlerName: keyof DriversController): Permission[] {
+  const meta = reflector.getAllAndOverride<Permission[] | undefined>(
+    PERMISSIONS_METADATA_KEY,
+    [handlerOf(handlerName), DriversController],
   );
   return meta ?? [];
+}
+
+/** Who the catalog admits through that requirement (leader rule as in the snapshot). */
+function admittedRoles(handlerName: keyof DriversController): Role[] {
+  return rolesSatisfying(requiredFor(handlerName), { lider: true });
 }
 
 /** Minimal `ExecutionContext` carrying the given user on `req.user`. */
@@ -91,36 +102,48 @@ const READ_ONLY: (keyof DriversController)[] = [
 const ATTACHMENT_MUTATING: (keyof DriversController)[] = ['deleteAttachment'];
 
 describe('DriversController — authorization', () => {
-  const guard = new RolesGuard(reflector);
+  const guard = new PermissionsGuard(reflector);
 
-  describe('@Roles metadata', () => {
+  describe('@RequirePermission metadata', () => {
+    it.each(MUTATING)('%s requires exactly fleet.write', (handler) => {
+      expect(requiredFor(handler)).toEqual(['fleet.write']);
+    });
+
     it.each(MUTATING)(
-      '%s is restricted to admin + opiekun (no przewoznik)',
+      '%s admits only admin + opiekun (no przewoznik)',
       (handler) => {
-        const roles = rolesFor(handler);
-        expect(roles.sort()).toEqual(['admin', 'opiekun']);
+        const roles = admittedRoles(handler);
+        expect([...roles].sort()).toEqual(['admin', 'opiekun']);
         expect(roles).not.toContain('przewoznik');
       },
     );
 
-    it.each(READ_ONLY)('%s still allows przewoznik to view', (handler) => {
-      const roles = rolesFor(handler);
+    it.each(READ_ONLY)('%s requires exactly drivers.read', (handler) => {
+      expect(requiredFor(handler)).toEqual(['drivers.read']);
+    });
+
+    it.each(READ_ONLY)('%s still admits przewoznik to view', (handler) => {
+      const roles = admittedRoles(handler);
       expect(roles).toContain('przewoznik');
       expect(roles).toContain('admin');
       expect(roles).toContain('opiekun');
     });
 
+    it.each(ATTACHMENT_MUTATING)('%s requires exactly fleet.write', (handler) => {
+      expect(requiredFor(handler)).toEqual(['fleet.write']);
+    });
+
     it.each(ATTACHMENT_MUTATING)(
-      '%s is restricted to admin + opiekun (no przewoznik)',
+      '%s admits only admin + opiekun (no przewoznik)',
       (handler) => {
-        const roles = rolesFor(handler);
-        expect(roles.sort()).toEqual(['admin', 'opiekun']);
+        const roles = admittedRoles(handler);
+        expect([...roles].sort()).toEqual(['admin', 'opiekun']);
         expect(roles).not.toContain('przewoznik');
       },
     );
   });
 
-  describe('RolesGuard against a przewoznik token', () => {
+  describe('PermissionsGuard against a przewoznik user', () => {
     it.each(MUTATING)('rejects przewoznik on %s with 403', (handler) => {
       expect(() => guard.canActivate(ctxFor(handler, carrierUser))).toThrow(
         ForbiddenException,

@@ -48,8 +48,7 @@ import {
   CurrentUser,
   type AuthUser,
 } from '../auth/decorators/current-user.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import {
   collectAndValidateUploads,
   type MultipartFiles,
@@ -80,15 +79,31 @@ const MULTIPART_OPTIONS = {
   },
 };
 
+/**
+ * Trailers REST surface per docs/13-api-design.md#trailers.
+ *
+ * Gates (docs/25 §3 B2): every route carries `@RequirePermission` exactly as
+ * planned in `common/authz/endpoint-permissions.ts`, checked by the global
+ * `PermissionsGuard`; who holds what is `ROLE_PERMISSIONS` in
+ * `@magguarantee/shared`:
+ *  - `trailers.read` — list / detail / attachments list + download
+ *    (admin, opiekun(own), przewoznik(own));
+ *  - `fleet.write` — create / update / deactivate / reactivate / delete /
+ *    attachment delete (admin, opiekun(own));
+ *  - `fleet.hard_delete` — DELETE /hard (admin only).
+ * Row scope stays on the role: the class-level ownership guards run the
+ * `@OpiekunOwns` / `@CarrierOwns` checks ("(own)" above), and the service
+ * narrows lists by role.
+ */
 @Controller('trailers')
-@UseGuards(RolesGuard, OpiekunOwnershipGuard, CarrierOwnershipGuard)
+@UseGuards(OpiekunOwnershipGuard, CarrierOwnershipGuard)
 export class TrailersController {
   private readonly logger = new Logger(TrailersController.name);
 
   constructor(private readonly trailers: TrailersService) {}
 
   @Get()
-  @Roles('admin', 'opiekun', 'przewoznik')
+  @RequirePermission('trailers.read')
   async list(
     @CurrentUser() user: AuthUser,
     @Query(new ZodValidationPipe(TrailerFiltersSchema)) query: TrailerFilters,
@@ -97,7 +112,7 @@ export class TrailersController {
   }
 
   @Get(':id')
-  @Roles('admin', 'opiekun', 'przewoznik')
+  @RequirePermission('trailers.read')
   @OpiekunOwns('id', 'param', 'trailerId')
   @CarrierOwns('id', 'param', 'trailerId')
   async getById(
@@ -106,16 +121,17 @@ export class TrailersController {
     return this.trailers.getById(id);
   }
 
-  // Trailers are managed by admin/opiekun ONLY — carriers consume them but
-  // never create/edit. NOTE: deliberately NO `@OpiekunOwns('carrierId','body',
-  // 'carrierId')` here. Guards run BEFORE interceptors, and this endpoint uses
+  // Trailers are managed by `fleet.write` holders (admin/opiekun) ONLY —
+  // carriers consume them but never create/edit. NOTE: deliberately NO
+  // `@OpiekunOwns('carrierId','body','carrierId')` here. Guards run BEFORE
+  // interceptors, and this endpoint uses
   // `FileFieldsInterceptor` (multer) to parse multipart/form-data — at guard
   // time `req.body` is still empty, so the guard would 400 for opiekun callers.
   // The carrier-ownership check runs at the service layer
   // (`_assertCarrierAccessibleForWrite`) after Zod parses the multipart body.
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @Roles('admin', 'opiekun')
+  @RequirePermission('fleet.write')
   @UseInterceptors(
     FileFieldsInterceptor(ATTACHMENT_UPLOAD_FIELDS, MULTIPART_OPTIONS),
   )
@@ -141,7 +157,7 @@ export class TrailersController {
   }
 
   @Patch(':id')
-  @Roles('admin', 'opiekun')
+  @RequirePermission('fleet.write')
   @OpiekunOwns('id', 'param', 'trailerId')
   @UseInterceptors(
     FileFieldsInterceptor(ATTACHMENT_UPLOAD_FIELDS, MULTIPART_OPTIONS),
@@ -167,7 +183,7 @@ export class TrailersController {
 
   @Post(':id/deactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'opiekun')
+  @RequirePermission('fleet.write')
   @OpiekunOwns('id', 'param', 'trailerId')
   @Audit({
     action: 'deactivateTrailer',
@@ -182,7 +198,7 @@ export class TrailersController {
 
   @Post(':id/reactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'opiekun')
+  @RequirePermission('fleet.write')
   @OpiekunOwns('id', 'param', 'trailerId')
   @Audit({
     action: 'reactivateTrailer',
@@ -197,7 +213,7 @@ export class TrailersController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Roles('admin', 'opiekun')
+  @RequirePermission('fleet.write')
   @OpiekunOwns('id', 'param', 'trailerId')
   @Audit({
     action: 'deleteTrailer',
@@ -211,12 +227,12 @@ export class TrailersController {
   }
 
   /**
-   * Hard-delete (admin-only) per Phase 4.4. `reason` required, persisted to
-   * `audit_log.metadata.reason`.
+   * Hard-delete (`fleet.hard_delete`, admin-only) per Phase 4.4. `reason`
+   * required, persisted to `audit_log.metadata.reason`.
    */
   @Delete(':id/hard')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Roles('admin')
+  @RequirePermission('fleet.hard_delete')
   @Audit({
     action: 'hardDeleteTrailer',
     targetType: 'Trailer',
@@ -233,7 +249,7 @@ export class TrailersController {
   // ── Attachments ──────────────────────────────────────────
 
   @Get(':id/attachments')
-  @Roles('admin', 'opiekun', 'przewoznik')
+  @RequirePermission('trailers.read')
   @OpiekunOwns('id', 'param', 'trailerId')
   @CarrierOwns('id', 'param', 'trailerId')
   async listAttachments(
@@ -243,7 +259,7 @@ export class TrailersController {
   }
 
   @Get(':id/attachments/:attachmentId/download')
-  @Roles('admin', 'opiekun', 'przewoznik')
+  @RequirePermission('trailers.read')
   @OpiekunOwns('id', 'param', 'trailerId')
   @CarrierOwns('id', 'param', 'trailerId')
   async downloadAttachment(
@@ -281,7 +297,7 @@ export class TrailersController {
 
   @Delete(':id/attachments/:attachmentId')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Roles('admin', 'opiekun')
+  @RequirePermission('fleet.write')
   @OpiekunOwns('id', 'param', 'trailerId')
   @Audit({
     action: 'deleteTrailerAttachment',

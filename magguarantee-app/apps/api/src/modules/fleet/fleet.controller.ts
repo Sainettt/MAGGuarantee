@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 
 import {
   MyFleetQuerySchema,
@@ -13,8 +13,7 @@ import {
 
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { CurrentUser, type AuthUser } from '../auth/decorators/current-user.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { FleetService } from './fleet.service';
 
 /**
@@ -24,14 +23,20 @@ import { FleetService } from './fleet.service';
  * (admin + opiekun); Phase 6 adds `/fleet/planista` (admin + planista) and
  * `/fleet/dyspozytor` (admin + dyspozytor). The remaining variants
  * (`/fleet/eksport`, `/fleet/weryfikator`) belong to later phases.
+ *
+ * Gates (docs/25 §3 B2): each route carries the panel permission planned in
+ * `common/authz/endpoint-permissions.ts`, checked by the global
+ * `PermissionsGuard` — `panel.carrier` (`/my`: przewoznik), `panel.opiekun`
+ * (`/opiekun`: admin, opiekun), `panel.planista` (`/planista`: admin,
+ * planista), `panel.dyspozytor` (`/dyspozytor`: admin, dyspozytor). Row scope
+ * stays on the role, server-side in `FleetService`.
  */
 @Controller('fleet')
-@UseGuards(RolesGuard)
 export class FleetController {
   constructor(private readonly fleet: FleetService) {}
 
   @Get('my')
-  @Roles('przewoznik')
+  @RequirePermission('panel.carrier')
   async my(
     @CurrentUser() user: AuthUser,
     @Query(new ZodValidationPipe(MyFleetQuerySchema)) query: MyFleetQuery,
@@ -48,7 +53,7 @@ export class FleetController {
    * controller churn.
    */
   @Get('opiekun')
-  @Roles('admin', 'opiekun')
+  @RequirePermission('panel.opiekun')
   async opiekun(
     @CurrentUser() user: AuthUser,
     @Query(new ZodValidationPipe(OpiekunFleetQuerySchema))
@@ -65,7 +70,7 @@ export class FleetController {
    * client filter param. See `FleetService.getPlanistaFleet`.
    */
   @Get('planista')
-  @Roles('planista', 'admin')
+  @RequirePermission('panel.planista')
   async planista(
     @CurrentUser() user: AuthUser,
   ): Promise<PlanistaFleetResponse> {
@@ -81,7 +86,7 @@ export class FleetController {
    * (JWT-driven). See `FleetService.getDyspozytorFleet`.
    */
   @Get('dyspozytor')
-  @Roles('dyspozytor', 'admin')
+  @RequirePermission('panel.dyspozytor')
   async dyspozytor(
     @CurrentUser() user: AuthUser,
   ): Promise<DyspozytorFleetResponse> {

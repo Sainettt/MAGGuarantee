@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get } from '@nestjs/common';
 
 import type { OpiekunCarriersResponse } from '@magguarantee/shared';
 
@@ -6,8 +6,7 @@ import {
   CurrentUser,
   type AuthUser,
 } from '../auth/decorators/current-user.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { OpiekunService } from './opiekun.service';
 
 /**
@@ -18,18 +17,18 @@ import { OpiekunService } from './opiekun.service';
  * caller's supervision (admin → all carriers; opiekun → own only). Used
  * for the dashboard sidebar / navigation rail.
  *
- * Role gating mirrors `/fleet/opiekun`: `@Roles('admin','opiekun')`.
+ * Gate mirrors `/fleet/opiekun`: `@RequirePermission('panel.opiekun')`
+ * (admin, opiekun; docs/25 §3 B2, global `PermissionsGuard`).
  * Ownership scoping is applied server-side in
  * `OpiekunService.listMyCarriers` (the OpiekunOwnershipGuard is
  * decorator-driven and only fires on single-resource lookups).
  */
 @Controller('opiekun')
-@UseGuards(RolesGuard)
 export class OpiekunController {
   constructor(private readonly opiekun: OpiekunService) {}
 
   @Get('carriers')
-  @Roles('admin', 'opiekun')
+  @RequirePermission('panel.opiekun')
   async carriers(
     @CurrentUser() user: AuthUser,
   ): Promise<OpiekunCarriersResponse> {

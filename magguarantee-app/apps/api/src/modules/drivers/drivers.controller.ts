@@ -48,8 +48,7 @@ import {
   CurrentUser,
   type AuthUser,
 } from '../auth/decorators/current-user.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import {
   collectAndValidateUploads,
   type MultipartFiles,
@@ -82,15 +81,31 @@ const MULTIPART_OPTIONS = {
   },
 };
 
+/**
+ * Drivers REST surface per docs/13-api-design.md#drivers.
+ *
+ * Gates (docs/25 §3 B2): every route carries `@RequirePermission` exactly as
+ * planned in `common/authz/endpoint-permissions.ts`, checked by the global
+ * `PermissionsGuard`; who holds what is `ROLE_PERMISSIONS` in
+ * `@magguarantee/shared`:
+ *  - `drivers.read` — list / detail / attachments list + download
+ *    (admin, opiekun(own), przewoznik(own));
+ *  - `fleet.write` — create / update / deactivate / reactivate / delete /
+ *    attachment delete (admin, opiekun(own));
+ *  - `fleet.hard_delete` — DELETE /hard (admin only).
+ * Row scope stays on the role: the class-level ownership guards run the
+ * `@OpiekunOwns` / `@CarrierOwns` checks ("(own)" above), and the service
+ * narrows lists by role.
+ */
 @Controller('drivers')
-@UseGuards(RolesGuard, OpiekunOwnershipGuard, CarrierOwnershipGuard)
+@UseGuards(OpiekunOwnershipGuard, CarrierOwnershipGuard)
 export class DriversController {
   private readonly logger = new Logger(DriversController.name);
 
   constructor(private readonly drivers: DriversService) {}
 
   @Get()
-  @Roles('admin', 'opiekun', 'przewoznik')
+  @RequirePermission('drivers.read')
   async list(
     @CurrentUser() user: AuthUser,
     @Query(new ZodValidationPipe(DriverFiltersSchema)) query: DriverFilters,
@@ -99,7 +114,7 @@ export class DriversController {
   }
 
   @Get(':id')
-  @Roles('admin', 'opiekun', 'przewoznik')
+  @RequirePermission('drivers.read')
   @OpiekunOwns('id', 'param', 'driverId')
   @CarrierOwns('id', 'param', 'driverId')
   async getById(
@@ -109,9 +124,9 @@ export class DriversController {
   }
 
   // Carriers are view-only for drivers — they consume the list/detail
-  // endpoints but never create/edit. Only admin/opiekun reach the mutating
-  // handlers, so CarrierOwns is intentionally absent (opiekun-ownership is
-  // enough). Mirrors the trailers controller pattern.
+  // endpoints but never create/edit. Only `fleet.write` holders (admin/opiekun)
+  // reach the mutating handlers, so CarrierOwns is intentionally absent
+  // (opiekun-ownership is enough). Mirrors the trailers controller pattern.
   //
   // NOTE: deliberately NO `@OpiekunOwns('carrierId', 'body', 'carrierId')`
   // here. Guards run BEFORE interceptors in NestJS, and this endpoint uses
@@ -122,7 +137,7 @@ export class DriversController {
   // multipart body — same caveat as the vehicle create endpoint.
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @Roles('admin', 'opiekun')
+  @RequirePermission('fleet.write')
   @UseInterceptors(
     FileFieldsInterceptor(ATTACHMENT_UPLOAD_FIELDS, MULTIPART_OPTIONS),
   )
@@ -146,7 +161,7 @@ export class DriversController {
   }
 
   @Patch(':id')
-  @Roles('admin', 'opiekun')
+  @RequirePermission('fleet.write')
   @OpiekunOwns('id', 'param', 'driverId')
   @UseInterceptors(
     FileFieldsInterceptor(ATTACHMENT_UPLOAD_FIELDS, MULTIPART_OPTIONS),
@@ -171,7 +186,7 @@ export class DriversController {
 
   @Post(':id/deactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'opiekun')
+  @RequirePermission('fleet.write')
   @OpiekunOwns('id', 'param', 'driverId')
   @Audit({
     action: 'deactivateDriver',
@@ -186,7 +201,7 @@ export class DriversController {
 
   @Post(':id/reactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'opiekun')
+  @RequirePermission('fleet.write')
   @OpiekunOwns('id', 'param', 'driverId')
   @Audit({
     action: 'reactivateDriver',
@@ -201,7 +216,7 @@ export class DriversController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Roles('admin', 'opiekun')
+  @RequirePermission('fleet.write')
   @OpiekunOwns('id', 'param', 'driverId')
   @Audit({
     action: 'deleteDriver',
@@ -215,13 +230,13 @@ export class DriversController {
   }
 
   /**
-   * Hard-delete (admin-only) per Phase 4.4. Mounted as a sibling of the
-   * soft-delete endpoint. `reason` required, persisted to
+   * Hard-delete (`fleet.hard_delete`, admin-only) per Phase 4.4. Mounted as a
+   * sibling of the soft-delete endpoint. `reason` required, persisted to
    * `audit_log.metadata.reason`.
    */
   @Delete(':id/hard')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Roles('admin')
+  @RequirePermission('fleet.hard_delete')
   @Audit({
     action: 'hardDeleteDriver',
     targetType: 'Driver',
@@ -238,7 +253,7 @@ export class DriversController {
   // ── Attachments ──────────────────────────────────────────
 
   @Get(':id/attachments')
-  @Roles('admin', 'opiekun', 'przewoznik')
+  @RequirePermission('drivers.read')
   @OpiekunOwns('id', 'param', 'driverId')
   @CarrierOwns('id', 'param', 'driverId')
   async listAttachments(
@@ -248,7 +263,7 @@ export class DriversController {
   }
 
   @Get(':id/attachments/:attachmentId/download')
-  @Roles('admin', 'opiekun', 'przewoznik')
+  @RequirePermission('drivers.read')
   @OpiekunOwns('id', 'param', 'driverId')
   @CarrierOwns('id', 'param', 'driverId')
   async downloadAttachment(
@@ -287,7 +302,7 @@ export class DriversController {
 
   @Delete(':id/attachments/:attachmentId')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Roles('admin', 'opiekun')
+  @RequirePermission('fleet.write')
   @OpiekunOwns('id', 'param', 'driverId')
   @Audit({
     action: 'deleteDriverAttachment',

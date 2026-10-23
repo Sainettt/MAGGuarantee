@@ -34,8 +34,7 @@ import {
   CurrentUser,
   type AuthUser,
 } from '../auth/decorators/current-user.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { CarrierAttachmentsService } from './carrier-attachments.service';
 import {
   ATTACHMENT_FILE_FIELD,
@@ -50,15 +49,19 @@ const MULTIPART_OPTIONS = {
 /**
  * Standalone carrier-document endpoints per docs/13-api-design.md#carriers.
  *
- * Mounted at `carriers/:id/attachments`. Role gating mirrors the carrier CRUD
- * surface: admin / opiekun(own). The carrier `:id` is a route param on every
+ * Mounted at `carriers/:id/attachments`. Gates (docs/25 §3 B2; global
+ * `PermissionsGuard`, plan in `common/authz/endpoint-permissions.ts`):
+ * `carrier_documents.read` (list, download), `.add` (upload), `.delete`
+ * (delete) — today all three held by admin / opiekun(own), the same set as the
+ * carrier CRUD surface. The carrier `:id` is a route param on every
  * endpoint — including the multipart upload — so `OpiekunOwnershipGuard`
  * (`@OpiekunOwns('id','param','carrierId')`) enforces opiekun ownership
- * without needing to read the request body. `pracownik` is intentionally
- * excluded (claims-only role per docs/03-roles.md#pracownik).
+ * without needing to read the request body. `pracownik` holds no
+ * `carrier_documents.*` permission (claims-only role per
+ * docs/03-roles.md#pracownik).
  */
 @Controller('carriers/:id/attachments')
-@UseGuards(RolesGuard, OpiekunOwnershipGuard)
+@UseGuards(OpiekunOwnershipGuard)
 export class CarrierAttachmentsController {
   private readonly logger = new Logger(CarrierAttachmentsController.name);
 
@@ -66,7 +69,7 @@ export class CarrierAttachmentsController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @Roles('admin', 'opiekun')
+  @RequirePermission('carrier_documents.add')
   @OpiekunOwns('id', 'param', 'carrierId')
   @UseInterceptors(FileInterceptor(ATTACHMENT_FILE_FIELD, MULTIPART_OPTIONS))
   @Audit({
@@ -91,7 +94,7 @@ export class CarrierAttachmentsController {
   }
 
   @Get()
-  @Roles('admin', 'opiekun')
+  @RequirePermission('carrier_documents.read')
   @OpiekunOwns('id', 'param', 'carrierId')
   async list(
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
@@ -100,7 +103,7 @@ export class CarrierAttachmentsController {
   }
 
   @Get(':attachmentId/download')
-  @Roles('admin', 'opiekun')
+  @RequirePermission('carrier_documents.read')
   @OpiekunOwns('id', 'param', 'carrierId')
   async download(
     @CurrentUser() user: AuthUser,
@@ -137,7 +140,7 @@ export class CarrierAttachmentsController {
 
   @Delete(':attachmentId')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Roles('admin', 'opiekun')
+  @RequirePermission('carrier_documents.delete')
   @OpiekunOwns('id', 'param', 'carrierId')
   @Audit({
     action: 'deleteCarrierAttachment',

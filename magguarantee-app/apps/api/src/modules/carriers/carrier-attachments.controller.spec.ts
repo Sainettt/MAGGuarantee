@@ -9,14 +9,14 @@ import {
 import { Reflector } from '@nestjs/core';
 import type { Request, Response } from 'express';
 
-import type { Role } from '@magguarantee/shared';
+import { rolesSatisfying, type Permission, type Role } from '@magguarantee/shared';
 
-import { ROLES_METADATA_KEY } from '../auth/auth.constants';
+import { makeAuthUser, withRole } from '../../common/testing/make-auth-user';
+import { PERMISSIONS_METADATA_KEY } from '../auth/auth.constants';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { CarrierAttachmentsController } from './carrier-attachments.controller';
 import type { CarrierAttachmentsService } from './carrier-attachments.service';
-import { makeAuthUser, withRole } from '../../common/testing/make-auth-user';
 
 /**
  * Authorization unit tests for `CarrierAttachmentsController`.
@@ -27,6 +27,17 @@ import { makeAuthUser, withRole } from '../../common/testing/make-auth-user';
  * `OpiekunOwnershipGuard` (`@OpiekunOwns('id','param','carrierId')`) since
  * the carrier id is a route param on every endpoint — including the
  * multipart upload.
+ *
+ * Track B (docs/25 §3 B2): the routes carry `@RequirePermission` instead of
+ * `@Roles` — `carrier_documents.read` (list, download), `.add` (upload),
+ * `.delete` (delete). Two layers, same pattern as
+ * `claims.controller.roles.spec.ts`:
+ *   1. the `@RequirePermission(...)` metadata on each handler is exactly the
+ *      planned requirement (`common/authz/endpoint-permissions.ts`), and the
+ *      catalog maps it onto the documented role set;
+ *   2. `PermissionsGuard` lets through / refuses users built the way
+ *      `JwtAccessStrategy` builds them (`makeAuthUser(role)`), over the same
+ *      role matrix the former `RolesGuard` checks used.
  */
 
 const reflector = new Reflector();
@@ -39,12 +50,18 @@ function handlerOf(
   ) => unknown;
 }
 
-function rolesFor(handlerName: keyof CarrierAttachmentsController): Role[] {
-  const meta = reflector.get<Role[] | undefined>(
-    ROLES_METADATA_KEY,
-    handlerOf(handlerName),
+/** The live requirement, resolved like `PermissionsGuard` does (handler, then class). */
+function requiredFor(handlerName: keyof CarrierAttachmentsController): Permission[] {
+  const meta = reflector.getAllAndOverride<Permission[] | undefined>(
+    PERMISSIONS_METADATA_KEY,
+    [handlerOf(handlerName), CarrierAttachmentsController],
   );
   return meta ?? [];
+}
+
+/** Who the catalog admits through that requirement (leader rule as in the snapshot). */
+function admittedRoles(handlerName: keyof CarrierAttachmentsController): Role[] {
+  return rolesSatisfying(requiredFor(handlerName), { lider: true });
 }
 
 function ctxFor(
@@ -70,6 +87,14 @@ const ALL_HANDLERS: (keyof CarrierAttachmentsController)[] = [
   'delete',
 ];
 
+/** The plan (`ENDPOINT_PERMISSIONS`) per handler — decision 2026-10-23, docs/25 B6. */
+const PLANNED: Record<string, Permission[]> = {
+  upload: ['carrier_documents.add'],
+  list: ['carrier_documents.read'],
+  download: ['carrier_documents.read'],
+  delete: ['carrier_documents.delete'],
+};
+
 const carrierUser: AuthUser = makeAuthUser('przewoznik', {
   sub: 'u-carrier',
   login: 'przewoznik1',
@@ -79,21 +104,25 @@ const carrierUser: AuthUser = makeAuthUser('przewoznik', {
 });
 
 describe('CarrierAttachmentsController — authorization', () => {
-  const guard = new RolesGuard(reflector);
+  const guard = new PermissionsGuard(reflector);
 
-  describe('@Roles metadata', () => {
+  describe('@RequirePermission metadata', () => {
+    it.each(ALL_HANDLERS)('%s requires exactly its planned permission', (handler) => {
+      expect(requiredFor(handler)).toEqual(PLANNED[handler]);
+    });
+
     it.each(ALL_HANDLERS)(
-      '%s is restricted to admin + opiekun',
+      '%s admits exactly admin + opiekun',
       (handler) => {
-        const roles = rolesFor(handler);
-        expect(roles.sort()).toEqual(['admin', 'opiekun']);
+        const roles = admittedRoles(handler);
+        expect([...roles].sort()).toEqual(['admin', 'opiekun']);
         expect(roles).not.toContain('przewoznik');
         expect(roles).not.toContain('pracownik');
       },
     );
   });
 
-  describe('RolesGuard', () => {
+  describe('PermissionsGuard', () => {
     it.each(ALL_HANDLERS)('rejects przewoznik on %s with 403', (handler) => {
       expect(() => guard.canActivate(ctxFor(handler, carrierUser))).toThrow(
         ForbiddenException,

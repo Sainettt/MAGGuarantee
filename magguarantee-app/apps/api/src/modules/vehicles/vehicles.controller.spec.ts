@@ -9,19 +9,19 @@ import {
 import { Reflector } from '@nestjs/core';
 import type { Request, Response } from 'express';
 
-import type { Role } from '@magguarantee/shared';
+import { rolesSatisfying, type Permission, type Role } from '@magguarantee/shared';
 
 import {
   CarrierOwnershipGuard,
   OpiekunOwnershipGuard,
 } from '../../common/guards';
-import { ROLES_METADATA_KEY } from '../auth/auth.constants';
+import { makeAuthUser, withRole } from '../../common/testing/make-auth-user';
+import { PERMISSIONS_METADATA_KEY } from '../auth/auth.constants';
 import type { AuthUser } from '../auth/decorators/current-user.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import type { VehicleDailyKmService } from './vehicle-daily-km.service';
 import { VehiclesController } from './vehicles.controller';
 import type { VehiclesService } from './vehicles.service';
-import { makeAuthUser, withRole } from '../../common/testing/make-auth-user';
 
 /**
  * Authorization unit tests for `VehiclesController`.
@@ -31,11 +31,16 @@ import { makeAuthUser, withRole } from '../../common/testing/make-auth-user';
  * excluded carriers. Only `admin`/`opiekun` reach the mutating handlers.
  * Mirrors the already-correct trailers controller (docs/03-roles.md).
  *
- * Two layers are asserted:
- *  1. The `@Roles(...)` metadata on the changed handlers is exactly the
- *     documented set.
- *  2. `RolesGuard` rejects a `przewoznik` token on those mutations (403) and
- *     passes a `przewoznik` through on the GET routes.
+ * Track B (docs/25 §3 B2): the routes carry `@RequirePermission` instead of
+ * `@Roles` — `vehicles.read`, `fleet.write`, `km.read`, `km.verify`. Two
+ * layers are asserted (same pattern as `claims.controller.roles.spec.ts`):
+ *  1. The `@RequirePermission(...)` metadata on the handlers is exactly the
+ *     planned requirement (`common/authz/endpoint-permissions.ts`), and the
+ *     catalog maps it onto the documented role set.
+ *  2. `PermissionsGuard` rejects a `przewoznik` user (built like
+ *     `JwtAccessStrategy` builds it, `makeAuthUser` / `withRole`) on those
+ *     mutations (403) and passes a `przewoznik` through on the GET routes —
+ *     over the same role matrices the former `RolesGuard` checks used.
  */
 
 const reflector = new Reflector();
@@ -46,12 +51,18 @@ function handlerOf(
   return VehiclesController.prototype[name] as (...args: never[]) => unknown;
 }
 
-function rolesFor(handlerName: keyof VehiclesController): Role[] {
-  const meta = reflector.get<Role[] | undefined>(
-    ROLES_METADATA_KEY,
-    handlerOf(handlerName),
+/** The live requirement, resolved like `PermissionsGuard` does (handler, then class). */
+function requiredFor(handlerName: keyof VehiclesController): Permission[] {
+  const meta = reflector.getAllAndOverride<Permission[] | undefined>(
+    PERMISSIONS_METADATA_KEY,
+    [handlerOf(handlerName), VehiclesController],
   );
   return meta ?? [];
+}
+
+/** Who the catalog admits through that requirement (leader rule as in the snapshot). */
+function admittedRoles(handlerName: keyof VehiclesController): Role[] {
+  return rolesSatisfying(requiredFor(handlerName), { lider: true });
 }
 
 /** Minimal `ExecutionContext` carrying the given user on `req.user`. */
@@ -90,32 +101,42 @@ const LOCKED_MUTATIONS: (keyof VehiclesController)[] = [
 const READ_ONLY: (keyof VehiclesController)[] = ['list', 'getById'];
 
 describe('VehiclesController — authorization', () => {
-  const guard = new RolesGuard(reflector);
+  const guard = new PermissionsGuard(reflector);
 
-  describe('@Roles metadata', () => {
+  describe('@RequirePermission metadata', () => {
+    it.each(LOCKED_MUTATIONS)('%s requires exactly fleet.write', (handler) => {
+      expect(requiredFor(handler)).toEqual(['fleet.write']);
+    });
+
     it.each(LOCKED_MUTATIONS)(
-      '%s is restricted to admin + opiekun (no przewoznik)',
+      '%s admits only admin + opiekun (no przewoznik)',
       (handler) => {
-        const roles = rolesFor(handler);
-        expect(roles.sort()).toEqual(['admin', 'opiekun']);
+        const roles = admittedRoles(handler);
+        expect([...roles].sort()).toEqual(['admin', 'opiekun']);
         expect(roles).not.toContain('przewoznik');
       },
     );
 
-    it.each(READ_ONLY)('%s still allows przewoznik to view', (handler) => {
-      expect(rolesFor(handler)).toContain('przewoznik');
+    it.each(READ_ONLY)('%s requires exactly vehicles.read', (handler) => {
+      expect(requiredFor(handler)).toEqual(['vehicles.read']);
+    });
+
+    it.each(READ_ONLY)('%s still admits przewoznik to view', (handler) => {
+      expect(admittedRoles(handler)).toContain('przewoznik');
     });
 
     it('create still excludes przewoznik (unchanged)', () => {
-      expect(rolesFor('create')).not.toContain('przewoznik');
+      expect(requiredFor('create')).toEqual(['fleet.write']);
+      expect(admittedRoles('create')).not.toContain('przewoznik');
     });
 
     it('delete still excludes przewoznik (unchanged)', () => {
-      expect(rolesFor('delete')).not.toContain('przewoznik');
+      expect(requiredFor('delete')).toEqual(['fleet.write']);
+      expect(admittedRoles('delete')).not.toContain('przewoznik');
     });
   });
 
-  describe('RolesGuard against a przewoznik token', () => {
+  describe('PermissionsGuard against a przewoznik user', () => {
     it.each(LOCKED_MUTATIONS)('rejects przewoznik on %s with 403', (handler) => {
       expect(() => guard.canActivate(ctxFor(handler, carrierUser))).toThrow(
         ForbiddenException,
@@ -148,11 +169,15 @@ describe('VehiclesController — authorization', () => {
       'kmBoard',
     ];
 
+    it.each(DAILY_KM_HANDLERS)('%s requires exactly km.verify', (handler) => {
+      expect(requiredFor(handler)).toEqual(['km.verify']);
+    });
+
     it.each(DAILY_KM_HANDLERS)(
-      '%s is restricted to weryfikator + admin',
+      '%s admits only weryfikator + admin',
       (handler) => {
-        const roles = rolesFor(handler);
-        expect(roles.sort()).toEqual(['admin', 'weryfikator']);
+        const roles = admittedRoles(handler);
+        expect([...roles].sort()).toEqual(['admin', 'weryfikator']);
       },
     );
 
@@ -183,10 +208,15 @@ describe('VehiclesController — authorization', () => {
   //
   // Regression for the carrier km-calendar 403 bug: the GET must read the same
   // role set as `getById` and be scoped by the ownership guards. We assert both
-  // the `@Roles` metadata + `RolesGuard`, and the ownership-guard behavior
-  // (carrier own → OK, carrier foreign → 403, weryfikator → OK via short-circuit).
+  // the `@RequirePermission` metadata + `PermissionsGuard`, and the
+  // ownership-guard behavior (carrier own → OK, carrier foreign → 403,
+  // weryfikator → OK via short-circuit).
 
   describe('getDailyKm READ authorization (role fan-out like getById)', () => {
+    it('requires exactly km.read', () => {
+      expect(requiredFor('getDailyKm')).toEqual(['km.read']);
+    });
+
     it('reads the getById role set plus weryfikator + eksport (Historia + eksport km-calendar)', () => {
       // getDailyKm fans out exactly like getById for the carrier/opiekun/planner
       // roles, ADDITIONALLY keeps weryfikator (its original audience), AND grants
@@ -195,7 +225,7 @@ describe('VehiclesController — authorization', () => {
       // read on outflows + the related km (docs/03-roles.md matrix «Видеть
       // выезды» + km-report all-access), so it must reach this READ for ANY
       // vehicle. The WRITE (PUT/DELETE) stays weryfikator/admin-only.
-      expect(rolesFor('getDailyKm').sort()).toEqual([
+      expect([...admittedRoles('getDailyKm')].sort()).toEqual([
         'admin',
         'dyspozytor',
         'eksport',
@@ -204,14 +234,14 @@ describe('VehiclesController — authorization', () => {
         'przewoznik',
         'weryfikator',
       ]);
-      const byIdRoles = rolesFor('getById');
+      const byIdRoles = admittedRoles('getById');
       for (const r of byIdRoles) {
-        expect(rolesFor('getDailyKm')).toContain(r);
+        expect(admittedRoles('getDailyKm')).toContain(r);
       }
     });
 
-    it('@Roles includes przewoznik and weryfikator', () => {
-      const roles = rolesFor('getDailyKm');
+    it('km.read admits przewoznik and weryfikator', () => {
+      const roles = admittedRoles('getDailyKm');
       expect(roles).toContain('przewoznik');
       expect(roles).toContain('weryfikator');
     });
@@ -224,7 +254,7 @@ describe('VehiclesController — authorization', () => {
       'przewoznik',
       'weryfikator',
       'eksport',
-    ] as const)('RolesGuard allows %s on getDailyKm', (role) => {
+    ] as const)('PermissionsGuard allows %s on getDailyKm', (role) => {
       const u: AuthUser = withRole(carrierUser, role);
       expect(guard.canActivate(ctxFor('getDailyKm', u))).toBe(true);
     });
@@ -235,7 +265,7 @@ describe('VehiclesController — authorization', () => {
     // now pass (see the allow block above). `pracownik` stays out — it has no
     // delegation/km read in docs/03-roles.md.
     it.each(['pracownik'] as const)(
-      'RolesGuard rejects %s on getDailyKm (403)',
+      'PermissionsGuard rejects %s on getDailyKm (403)',
       (role) => {
         const u: AuthUser = withRole(carrierUser, role);
         expect(() => guard.canActivate(ctxFor('getDailyKm', u))).toThrow(
@@ -346,8 +376,12 @@ describe('VehiclesController — authorization', () => {
   // ── km-report (read-only, role-scoped) ───────────────────
 
   describe('km-report authorization', () => {
+    it('requires exactly km.read', () => {
+      expect(requiredFor('kmReport')).toEqual(['km.read']);
+    });
+
     it('is open to planista / dyspozytor / eksport / admin / weryfikator / przewoznik / opiekun', () => {
-      expect(rolesFor('kmReport').sort()).toEqual([
+      expect([...admittedRoles('kmReport')].sort()).toEqual([
         'admin',
         'dyspozytor',
         'eksport',

@@ -6,7 +6,6 @@ import {
   HttpStatus,
   Param,
   Post,
-  UseGuards,
 } from '@nestjs/common';
 
 import {
@@ -20,29 +19,30 @@ import {
   CurrentUser,
   type AuthUser,
 } from '../../auth/decorators/current-user.decorator';
-import { Roles } from '../../auth/decorators/roles.decorator';
-import { RolesGuard } from '../../auth/guards/roles.guard';
+import { RequirePermission } from '../../auth/decorators/require-permission.decorator';
 import { GpsService } from './gps.service';
 
 /**
  * GPS endpoints per docs/13-api-design.md#external-integrations and
  * docs/16-jobs-and-integrations.md#gps-tracker-статус-ожидает-доступа-к-api.
  *
- * Roles:
- *  - admin / opiekun / planista / dyspozytor / przewoznik OK.
- *  - pracownik / eksport / weryfikator → blocked (403). pracownik is a
+ * Gates (docs/25 §3 B2; global `PermissionsGuard`, plan in
+ * `common/authz/endpoint-permissions.ts`):
+ *  - `gps.read` (positions, trips): admin / opiekun / planista / dyspozytor /
+ *    przewoznik.
+ *  - `gps.refresh` (refresh): admin only.
+ *  - pracownik / eksport / weryfikator hold neither → 403. pracownik is a
  *    narrow claims-only role per docs/03-roles.md#pracownik (no fleet view);
  *    eksport / weryfikator have NO GPS visibility per the wave brief.
  *
  * The /trips endpoint is documented but Phase 11+ — we expose it as 501.
  */
 @Controller('integrations/gps')
-@UseGuards(RolesGuard)
 export class GpsController {
   constructor(private readonly gps: GpsService) {}
 
   @Get('positions')
-  @Roles('admin', 'opiekun', 'planista', 'dyspozytor', 'przewoznik')
+  @RequirePermission('gps.read')
   async listPositions(
     @CurrentUser() user: AuthUser,
   ): Promise<GpsPositionListResponse> {
@@ -50,7 +50,7 @@ export class GpsController {
   }
 
   @Get('positions/:vehicleId')
-  @Roles('admin', 'opiekun', 'planista', 'dyspozytor', 'przewoznik')
+  @RequirePermission('gps.read')
   async getPosition(
     @CurrentUser() user: AuthUser,
     @Param('vehicleId', new ZodValidationPipe(UuidSchema)) vehicleId: string,
@@ -59,7 +59,7 @@ export class GpsController {
   }
 
   @Get('trips/:vehicleId')
-  @Roles('admin', 'opiekun', 'planista', 'dyspozytor', 'przewoznik')
+  @RequirePermission('gps.read')
   trips(): never {
     // Phase 11+ feature per docs/16-jobs-and-integrations.md#todo-после-получения-api-access.
     // Surfacing an explicit 501 is deliberate — clients see the endpoint exists
@@ -74,16 +74,16 @@ export class GpsController {
   }
 
   /**
-   * Admin-only debug endpoint: forces the configured provider to refresh the
-   * Redis cache for the entire fleet. Useful during Phase 2 (no BullMQ
-   * worker yet) so devs / QA can populate the cache on demand.
+   * Admin-only (`gps.refresh`) debug endpoint: forces the configured provider
+   * to refresh the Redis cache for the entire fleet. Useful during Phase 2 (no
+   * BullMQ worker yet) so devs / QA can populate the cache on demand.
    *
    * Once the BullMQ worker is wired (Phase 9), this endpoint stays — it's
    * still handy for "rerun after vendor outage" scenarios.
    */
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin')
+  @RequirePermission('gps.refresh')
   async refresh(): Promise<{ written: number; source: 'mock' | 'vendor' }> {
     return this.gps.populateFromProvider({ kind: 'all' });
   }

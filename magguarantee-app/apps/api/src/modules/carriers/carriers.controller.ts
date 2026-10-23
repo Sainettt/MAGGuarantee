@@ -37,27 +37,33 @@ import {
   CurrentUser,
   type AuthUser,
 } from '../auth/decorators/current-user.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { CarrierDocumentsService } from './carrier-documents.service';
 import { CarriersService } from './carriers.service';
 
 /**
  * Carriers REST surface per docs/13-api-design.md#carriers.
  *
- * Role gating per endpoint:
- *  - GET (list / detail): admin / opiekun(own)
- *  - POST: admin / opiekun (auto-self-assign for opiekun)
- *  - PATCH / deactivate / reactivate / reset-password:
- *      admin / opiekun(own)
- *  - DELETE: admin only (soft, cascades to fleet)
+ * Gates (docs/25 §3 B2): every route carries `@RequirePermission` exactly as
+ * planned in `common/authz/endpoint-permissions.ts`, checked by the global
+ * `PermissionsGuard`; who holds what is `ROLE_PERMISSIONS` in
+ * `@magguarantee/shared`:
+ *  - GET (list / detail): `carriers.read` (admin / opiekun(own))
+ *  - GET documents overview: `carrier_documents.read` (admin / opiekun(own))
+ *  - POST: `carriers.write` (admin / opiekun — auto-self-assign for opiekun)
+ *  - PATCH / deactivate / reactivate / reset-password: `carriers.write`
+ *      (admin / opiekun(own))
+ *  - DELETE (soft, cascades to fleet) and DELETE /hard: `carriers.delete`
+ *      (admin only)
+ * Row scope stays on the role: the class-level `OpiekunOwnershipGuard` runs
+ * the `@OpiekunOwns` checks ("(own)" above).
  *
- * `pracownik` is intentionally excluded — per docs/03-roles.md#pracownik that
- * role is a narrow "Opiekun wniosków" scoped to claims verification only and
- * has no carrier-CRUD access.
+ * `pracownik` intentionally holds no `carriers.*` permission — per
+ * docs/03-roles.md#pracownik that role is a narrow "Opiekun wniosków" scoped
+ * to claims verification only and has no carrier-CRUD access.
  */
 @Controller('carriers')
-@UseGuards(RolesGuard, OpiekunOwnershipGuard)
+@UseGuards(OpiekunOwnershipGuard)
 export class CarriersController {
   constructor(
     private readonly carriers: CarriersService,
@@ -65,7 +71,7 @@ export class CarriersController {
   ) {}
 
   @Get()
-  @Roles('admin', 'opiekun')
+  @RequirePermission('carriers.read')
   async list(
     @CurrentUser() user: AuthUser,
     @Query(new ZodValidationPipe(CarrierFiltersSchema)) query: CarrierFilters,
@@ -74,7 +80,7 @@ export class CarriersController {
   }
 
   @Get(':id')
-  @Roles('admin', 'opiekun')
+  @RequirePermission('carriers.read')
   @OpiekunOwns('id', 'param', 'carrierId')
   async getById(
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
@@ -87,12 +93,13 @@ export class CarriersController {
    * document tied to the carrier (company docs + per-vehicle / per-trailer /
    * per-driver files + ADR-flagged vehicles), grouped for the UI. Downloads
    * reuse the EXISTING per-entity download routes (the DTO carries the ids).
-   * Same scoping as the carrier detail / attachments endpoints: admin sees all,
-   * opiekun only their own carriers (`OpiekunOwnershipGuard`). Per
-   * docs/13-api-design.md#carriers.
+   * Gate: `carrier_documents.read` (the documents permission, like the
+   * attachments endpoints — not `carriers.read`). Same scoping as the carrier
+   * detail / attachments endpoints: admin sees all, opiekun only their own
+   * carriers (`OpiekunOwnershipGuard`). Per docs/13-api-design.md#carriers.
    */
   @Get(':id/documents/overview')
-  @Roles('admin', 'opiekun')
+  @RequirePermission('carrier_documents.read')
   @OpiekunOwns('id', 'param', 'carrierId')
   async documentsOverview(
     @Param('id', new ZodValidationPipe(UuidSchema)) id: string,
@@ -102,7 +109,7 @@ export class CarriersController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @Roles('admin', 'opiekun')
+  @RequirePermission('carriers.write')
   @Audit({
     action: 'createCarrier',
     targetType: 'Carrier',
@@ -116,7 +123,7 @@ export class CarriersController {
   }
 
   @Patch(':id')
-  @Roles('admin', 'opiekun')
+  @RequirePermission('carriers.write')
   @OpiekunOwns('id', 'param', 'carrierId')
   @Audit({
     action: 'updateCarrier',
@@ -133,7 +140,7 @@ export class CarriersController {
 
   @Post(':id/deactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'opiekun')
+  @RequirePermission('carriers.write')
   @OpiekunOwns('id', 'param', 'carrierId')
   @Audit({
     action: 'deactivateCarrier',
@@ -148,7 +155,7 @@ export class CarriersController {
 
   @Post(':id/reactivate')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'opiekun')
+  @RequirePermission('carriers.write')
   @OpiekunOwns('id', 'param', 'carrierId')
   @Audit({
     action: 'reactivateCarrier',
@@ -163,7 +170,7 @@ export class CarriersController {
 
   @Post(':id/reset-password')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin', 'opiekun')
+  @RequirePermission('carriers.write')
   @OpiekunOwns('id', 'param', 'carrierId')
   @Audit({
     action: 'resetCarrierPassword',
@@ -179,7 +186,7 @@ export class CarriersController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Roles('admin')
+  @RequirePermission('carriers.delete')
   @Audit({
     action: 'deleteCarrier',
     targetType: 'Carrier',
@@ -200,7 +207,7 @@ export class CarriersController {
    */
   @Delete(':id/hard')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Roles('admin')
+  @RequirePermission('carriers.delete')
   @Audit({
     action: 'hardDeleteCarrier',
     targetType: 'Carrier',
