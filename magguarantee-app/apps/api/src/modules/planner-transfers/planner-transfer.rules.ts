@@ -50,9 +50,13 @@ export interface DecisionSubject {
  *    is read from the database on every request, not from the JWT) AND
  *    `fromPlanner.liderId = viewer`. The lider of the TARGET planista, or of
  *    anyone else, is not a decider.
- *  - `requester` / `target` — a decider who filed the request himself or
- *    would receive the vehicle; only an admin decides then (R4). An admin can
- *    never be either (he does not file — U1 — and is not a planista).
+ *  - `requester` — a decider who filed the request himself (R4, absolute).
+ *    Since 2026-10-23 an admin may file (U1 reversed), so this hits an admin
+ *    too: his own request is decided by ANOTHER admin or by the lider of
+ *    `fromPlanner`. With a single admin and no eligible lider only the author
+ *    can close it — by cancelling (accepted dead end, docs/29 R4).
+ *  - `target` — a lider who would receive the vehicle; an admin decides then
+ *    (R4). An admin is never the target (he is not a planista).
  */
 export function decisionRefusal(
   viewer: Pick<AuthUser, 'sub' | 'role' | 'lider'>,

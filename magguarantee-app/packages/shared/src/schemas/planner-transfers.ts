@@ -42,14 +42,18 @@ export const PLANNER_TRANSFER_NO_CURRENT_PLANNER = 'PLANNER_TRANSFER_NO_CURRENT_
 /** 422 — `reason` (filing / rejection) is blank, shorter than 3 or longer than 500 chars (U3). */
 export const PLANNER_TRANSFER_REASON_INVALID = 'PLANNER_TRANSFER_REASON_INVALID' as const;
 /**
- * 403 — the caller may not FILE a request for this vehicle: an admin (U1), a
- * planista who is not the vehicle's current planista, or any other role.
- * (An opiekun of another carrier is refused earlier by the ownership guard.)
+ * 403 — the caller may not FILE a request for this vehicle: a planista who is
+ * not the vehicle's current planista, or a role outside admin / opiekun /
+ * planista. An admin files for any vehicle (U1 reversed 2026-10-23); an
+ * opiekun of another carrier is refused earlier by the ownership guard.
  */
 export const PLANNER_TRANSFER_REQUEST_FORBIDDEN = 'PLANNER_TRANSFER_REQUEST_FORBIDDEN' as const;
 /** 403 — the caller is neither an admin nor the (current) lider of `fromPlanner` (R3, U10). */
 export const PLANNER_TRANSFER_NOT_DECIDER = 'PLANNER_TRANSFER_NOT_DECIDER' as const;
-/** 403 — a lider may not decide his own request; only an admin can (R4). */
+/**
+ * 403 — the author (an admin or a lider) may not decide his own request (R4,
+ * absolute): another admin or the lider of `fromPlanner` decides it.
+ */
 export const PLANNER_TRANSFER_DECIDER_IS_REQUESTER = 'PLANNER_TRANSFER_DECIDER_IS_REQUESTER' as const;
 /** 403 — a lider may not decide a request that hands the vehicle to himself; only an admin can (R4). */
 export const PLANNER_TRANSFER_DECIDER_IS_TARGET = 'PLANNER_TRANSFER_DECIDER_IS_TARGET' as const;
@@ -170,8 +174,8 @@ export type ApprovePlannerTransferDto = z.infer<typeof ApprovePlannerTransferSch
  *    planisci (`fromPlanner.liderId = me`), including the rows he may not
  *    decide himself (he is the author or the target — `viewerBlockedReason`).
  *    Anyone else → 403 `PLANNER_TRANSFER_NOT_DECIDER`.
- *  - `scope=mine` — requests the caller filed (`requestedBy = me`): opiekun,
- *    planista. An admin never files (U1), so his `mine` is always empty.
+ *  - `scope=mine` — requests the caller filed (`requestedBy = me`): admin,
+ *    opiekun, planista (an admin files since 2026-10-23 — U1 reversed).
  *
  * `status`: `pending` (default; oldest first — a queue), `decided` = any of
  * `approved | rejected | cancelled` (newest decision first), or one terminal

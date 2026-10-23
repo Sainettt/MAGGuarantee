@@ -191,7 +191,11 @@ describe('decided assignments without a route of their own', () => {
 
   it('admin is not "every permission": no wniosek / outing filing, no carrier panel', () => {
     const missing = PERMISSIONS.filter((p) => !hasPermission('admin', p, true));
-    expect(missing).toEqual(['claims.submit', 'vehicles.planner_transfer.request', 'delegations.create', 'panel.carrier']);
+    expect(missing).toEqual(['claims.submit', 'delegations.create', 'panel.carrier']);
+  });
+
+  it('admin files planner-transfer requests too (docs/29 U1 reversed 2026-10-23)', () => {
+    expect(grantedTo('vehicles.planner_transfer.request')).toEqual(['admin', 'opiekun', 'planista']);
   });
 });
 

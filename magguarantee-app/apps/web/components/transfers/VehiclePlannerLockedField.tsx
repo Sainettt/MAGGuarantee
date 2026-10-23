@@ -11,10 +11,13 @@
 //      (`type="button"` — it lives inside the vehicle <form>); while the
 //      history loads a skeleton stands in (never show a button that turns
 //      out to be «already pending» a second later);
-//   E2 admin → his own reason, no action (U1 — he approves, he doesn't file);
-//   E3 switched-off vehicle → «cannot be transferred», no action;
-//   E4 pending request → <PendingTransferNotice> (cancel for the author,
-//      review link for admin).
+//   E2 admin, any active vehicle, no pending → the SAME button + skeleton
+//      (D9, 2026-10-23), with his own reason: another admin or the current
+//      planner's lider decides his request — he never does (R4);
+//   E3 switched-off vehicle, any role → «cannot be transferred», no action;
+//   E4 pending request → <PendingTransferNotice> (cancel for the author —
+//      admin included, with a «who decides» line —, review link for an admin
+//      who is not the author).
 //
 // Rendered as a <FormItem> so it slots into the form's <FormGrid> subgrid
 // (label band + control band) like its neighbours.
@@ -40,7 +43,7 @@ export interface VehiclePlannerLockedFieldProps {
   label: string;
   /** Whether the host form is open — the history query runs only then. */
   open: boolean;
-  /** E1 — open the request dialog (owned by the host, stacked over the form). */
+  /** E1 / E2 — open the request dialog (owned by the host, stacked over the form). */
   onRequest: () => void;
 }
 
@@ -103,13 +106,14 @@ export default function VehiclePlannerLockedField({
           onClick={onRequest}
         >
           <ArrowLeftRight size={14} aria-hidden="true" />
-          {t('request.buttonOpiekun')}
+          {t('request.button')}
         </Button>
       ) : null}
       {pending ? (
         <PendingTransferNotice
           transfer={pending}
-          viewerIsAdmin={user?.role === 'admin'}
+          viewerRole={user?.role}
+          viewerId={user?.id}
         />
       ) : null}
     </FormItem>

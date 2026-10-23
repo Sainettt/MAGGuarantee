@@ -342,22 +342,23 @@ cursor-пагинация без изменений), остальные чет�
 ### Vehicle planner transfers — `/api/v1/vehicles/:id/planner-*`, `/api/v1/planner-transfers`
 
 > docs/29 §3 (2026-09-28). После создания планисту машины меняет **только
-> одобренная заявка** (R1). Подают: opiekun перевозчика машины и **текущий**
-> планиста (R2; admin **не** подаёт — U1). Решают: admin или **текущий** лидер
+> одобренная заявка** (R1). Подают: opiekun перевозчика машины, **текущий**
+> планиста и admin — по любой машине (R2, U1 с 2026-10-23). Решают: admin или **текущий** лидер
 > текущего планисты (`fromPlanner.liderId = user.sub` и `user.lider = true` в
-> момент решения — U10), и никогда — автор или получатель (R4). Одна `pending`
+> момент решения — U10), и никогда — автор или получатель (R4; заявку admin
+> решает другой admin или этот лидер). Одна `pending`
 > на машину (U4). **Никаких писем и Chat-сообщений** о заявках и решениях (R9).
 > Контроллер — `apps/api/src/modules/planner-transfers/`; схемы —
 > `packages/shared/src/schemas/planner-transfers.ts`.
 
 | Method + Path | Роль | Что |
 |---|---|---|
-| POST `/vehicles/:id/planner-transfers` | opiekun (`OpiekunOwnershipGuard` — машины своих перевозчиков) / planista (только **текущий** планиста машины — проверка ресурса) | Подать заявку. Body `CreatePlannerTransferSchema` (strict): `{ toPlannerId: uuid, reason: string }` — `reason` обрезается, 3..500 символов. **201** `PlannerTransferDto`. Audit `plannerTransfer.request` |
+| POST `/vehicles/:id/planner-transfers` | admin (любая машина — U1, 2026-10-23) / opiekun (`OpiekunOwnershipGuard` — машины своих перевозчиков) / planista (только **текущий** планиста машины — проверка ресурса); иначе 403 `PLANNER_TRANSFER_REQUEST_FORBIDDEN` | Подать заявку. Body `CreatePlannerTransferSchema` (strict): `{ toPlannerId: uuid, reason: string }` — `reason` обрезается, 3..500 символов. **201** `PlannerTransferDto`. Audit `plannerTransfer.request` (`metadata`: `vehicleId`, `fromPlannerId`, `toPlannerId`, `requestedByRole`) |
 | GET `/vehicles/:id/planner-history` | admin / opiekun (свой перевозчик) / planista (**текущий** планиста машины **или** его текущий лидер) — U11; przewoznik, dyspozytor и прежний планиста — 403 | Журнал назначений + все заявки машины → `VehiclePlannerHistoryDto` |
 | GET `/planner-transfers?scope=decide\|mine&status=&vehicleId=&cursor=&limit=` | admin / opiekun / planista | `scope=decide` — входящие на решение: admin — **все**; planista с `lider=true` — заявки **своих** планистов (`fromPlanner.liderId = me`), включая строки, которые он решить не может (`viewerBlockedReason`); иначе 403 `PLANNER_TRANSFER_NOT_DECIDER`. `scope=mine` — поданные мной. `status` = `pending` (по умолчанию, **старые сверху**) \| `decided` (любой из `approved`/`rejected`/`cancelled`, **новые решения сверху**) \| один терминальный статус. Cursor-пагинация (`cursor` = последний `id`, `limit` ≤ 200, по умолчанию 50) → `{ items: PlannerTransferDto[], nextCursor }` |
 | POST `/planner-transfers/:id/approve` | admin / planista (лидер `fromPlanner` — ресурс) | Одобрить. Body `{ comment?: string ≤ 500 }` (пусто = без комментария). **200** `PlannerTransferDto`. Audit `plannerTransfer.approve` (`metadata`: `vehicleId`, `fromPlannerId`, `toPlannerId`, `movedDelegations`) |
 | POST `/planner-transfers/:id/reject` | admin / planista (лидер `fromPlanner`) | Отклонить. Body `{ reason: string }` (обязательна, 3..500, U3). Устаревшую заявку (планиста сменился, машина выключена, получатель неактивен) отклонить **можно**. **200**. Audit `plannerTransfer.reject` |
-| POST `/planner-transfers/:id/cancel` | opiekun / planista — **только автор** | Отозвать свою `pending`. Без тела. **200**. Audit `plannerTransfer.cancel` |
+| POST `/planner-transfers/:id/cancel` | admin / opiekun / planista — **только автор** (иначе 403 `PLANNER_TRANSFER_CANCEL_NOT_AUTHOR`) | Отозвать свою `pending`. Без тела. **200**. Audit `plannerTransfer.cancel` |
 
 **Транзакция одобрения** (ambient-транзакция `@Audit`, `manualTransaction` не
 используется): (1) `SELECT … FOR UPDATE` строки машины — параллельные

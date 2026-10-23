@@ -1,7 +1,7 @@
 // Typed API wrappers for the vehicle planner transfer (docs/29, docs/13
 // «Vehicle planner transfers»):
 //
-//   POST /vehicles/:id/planner-transfers          — file a request (opiekun / current planista)
+//   POST /vehicles/:id/planner-transfers          — file a request (admin / opiekun / current planista)
 //   GET  /vehicles/:id/planner-history            — journal + every request of one vehicle
 //   GET  /planner-transfers?scope=&status=…       — inbox (`decide`) / own requests (`mine`)
 //   POST /planner-transfers/:id/approve|reject|cancel

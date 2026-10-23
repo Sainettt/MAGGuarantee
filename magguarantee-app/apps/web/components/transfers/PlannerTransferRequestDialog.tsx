@@ -4,13 +4,16 @@
 // A confirm-with-input dialog (§7.10.2), not a 900px <FormDialog>.
 //
 // Two entries, one dialog:
-//   * `vehicle` given — from the vehicle form (opiekun, E1) or the detail-modal
-//     footer (the vehicle's current planista, §17.6.3). The vehicle is fixed.
+//   * `vehicle` given — from the vehicle form (opiekun E1 / admin E2) or the
+//     detail-modal footer (the vehicle's current planista, §17.6.3). The
+//     vehicle is fixed.
 //   * `vehicle` omitted — the «Przekaż ciągnik» CTA on «Moje wnioski» (planista):
 //     a «Ciągnik» select of his own ACTIVE vehicles without his pending request.
 //
 // Nothing is notified (R9): the info line says so, so the author does not wait
-// for a mail. Everything the user must READ after a refusal (409 / 422 / 403)
+// for a mail. An admin reads `request.infoAdmin` instead — he can't approve
+// his own request (R4), and with no other admin / lider it can only be
+// cancelled. Everything the user must READ after a refusal (409 / 422 / 403)
 // stays inside the open dialog; only network / 5xx failures toast.
 //
 // When opened over the vehicle form the dialog is a STACKED overlay: Escape
@@ -370,7 +373,9 @@ export default function PlannerTransferRequestDialog({
               </p>
             </FormField>
 
-            <LockNotice icon={Info}>{t('request.info')}</LockNotice>
+            <LockNotice icon={Info}>
+              {user?.role === 'admin' ? t('request.infoAdmin') : t('request.info')}
+            </LockNotice>
 
             {fromForm && (
               <p className="text-xs text-text-sub">

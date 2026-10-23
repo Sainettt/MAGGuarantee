@@ -2675,7 +2675,8 @@
       "ariaLabel": "Wnioski o przekazanie",
       "pendingDecider": "Do decyzji",
       "pendingAuthor": "Oczekujące",
-      "decided": "Rozpatrzone"
+      "decided": "Rozpatrzone",
+      "mine": "Moje wnioski"
     },
     "status": {
       "pending": "Oczekuje",
@@ -2686,6 +2687,8 @@
     "filter": {
       "status": "Status",
       "all": "Wszystkie",
+      "pending": "Oczekujące",
+      "allDecided": "Wszystkie rozpatrzone",
       "approved": "Zatwierdzone",
       "rejected": "Odrzucone",
       "cancelled": "Anulowane"
@@ -2708,20 +2711,21 @@
       "reject": "Odrzuć",
       "cancel": "Anuluj wniosek",
       "blockedTarget": "Jesteś planistą docelowym tego wniosku — decyzję podejmuje administrator.",
-      "blockedRequester": "To Twój wniosek — decyzję podejmuje administrator."
+      "blockedRequester": "To Twój wniosek — decyzję podejmuje administrator.",
+      "blockedRequesterAdmin": "To Twój wniosek — decyzję podejmuje inny administrator lub lider obecnego planisty."
     },
     "form": {
       "createHint": "Późniejsza zmiana planisty wymaga wniosku i zatwierdzenia.",
       "locked": "Zablokowane — planistę zmienia się tylko wnioskiem o przekazanie.",
       "lockedTitle": "Planisty nie można zmienić bezpośrednio. Złóż wniosek o przekazanie — zmiana nastąpi po zatwierdzeniu.",
-      "lockedAdmin": "Zablokowane — zmianę wnioskuje opiekun lub planista, Ty ją zatwierdzasz.",
+      "lockedAdmin": "Zablokowane — planistę zmienia się tylko wnioskiem. Twój wniosek rozpatrzy inny administrator lub lider obecnego planisty.",
       "lockedInactive": "Zablokowane — ciągnik jest wyłączony, nie można go przekazać.",
       "pendingTitle": "Wniosek o przekazanie do: {to}",
       "pendingMeta": "Wnioskuje: {name} · {role} · {date}",
       "reviewLink": "Rozpatrz w „Przekazania”"
     },
     "request": {
-      "buttonOpiekun": "Poproś o zmianę planisty",
+      "button": "Poproś o zmianę planisty",
       "buttonPlanista": "Przekaż ciągnik",
       "title": "Wniosek o zmianę planisty",
       "vehicle": "Ciągnik",
@@ -2740,6 +2744,7 @@
       "reasonRequired": "Podaj powód (min. 3 znaki).",
       "reasonTooLong": "Powód może mieć maks. {max} znaków.",
       "info": "Planista zmieni się dopiero po zatwierdzeniu przez lidera obecnego planisty lub administratora. Nie wysyłamy powiadomień — wniosek czeka na ich liście „Do decyzji”.",
+      "infoAdmin": "Planista zmieni się dopiero po zatwierdzeniu przez innego administratora lub lidera obecnego planisty — swojego wniosku nie zatwierdzisz. Nie wysyłamy powiadomień. Jeśli nie ma nikogo takiego, wniosek można tylko anulować.",
       "independentOfForm": "Wniosek wysyłasz od razu — niezależnie od zapisu formularza ciągnika.",
       "submit": "Wyślij wniosek",
       "submitting": "Wysyłanie…",

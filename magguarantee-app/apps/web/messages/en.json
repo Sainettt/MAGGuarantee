@@ -2675,7 +2675,8 @@
       "ariaLabel": "Transfer requests",
       "pendingDecider": "To decide",
       "pendingAuthor": "Pending",
-      "decided": "Decided"
+      "decided": "Decided",
+      "mine": "My requests"
     },
     "status": {
       "pending": "Pending",
@@ -2686,6 +2687,8 @@
     "filter": {
       "status": "Status",
       "all": "All",
+      "pending": "Pending",
+      "allDecided": "All decided",
       "approved": "Approved",
       "rejected": "Rejected",
       "cancelled": "Cancelled"
@@ -2708,20 +2711,21 @@
       "reject": "Reject",
       "cancel": "Cancel request",
       "blockedTarget": "You are the target planner of this request — an administrator decides.",
-      "blockedRequester": "This is your request — an administrator decides."
+      "blockedRequester": "This is your request — an administrator decides.",
+      "blockedRequesterAdmin": "This is your request — another administrator or the current planner's lead decides."
     },
     "form": {
       "createHint": "Changing the planner later requires a request and approval.",
       "locked": "Locked — the planner changes only through a transfer request.",
       "lockedTitle": "The planner can't be changed directly. File a transfer request — the change takes effect after approval.",
-      "lockedAdmin": "Locked — the caretaker or planner requests the change, you approve it.",
+      "lockedAdmin": "Locked — the planner changes only through a request. Your request is decided by another administrator or the current planner's lead.",
       "lockedInactive": "Locked — the vehicle is disabled and can't be transferred.",
       "pendingTitle": "Transfer request to: {to}",
       "pendingMeta": "Requested by: {name} · {role} · {date}",
       "reviewLink": "Review in “Transfers”"
     },
     "request": {
-      "buttonOpiekun": "Request a planner change",
+      "button": "Request a planner change",
       "buttonPlanista": "Transfer vehicle",
       "title": "Planner change request",
       "vehicle": "Vehicle",
@@ -2740,6 +2744,7 @@
       "reasonRequired": "Enter a reason (at least 3 characters).",
       "reasonTooLong": "The reason can be at most {max} characters.",
       "info": "The planner changes only after the current planner's lead or an administrator approves. No notifications are sent — the request waits in their “To decide” list.",
+      "infoAdmin": "The planner changes only after another administrator or the current planner's lead approves — you can't approve your own request. No notifications are sent. If there is no one who can decide, the request can only be cancelled.",
       "independentOfForm": "The request is sent immediately — independently of saving the vehicle form.",
       "submit": "Send request",
       "submitting": "Sending…",

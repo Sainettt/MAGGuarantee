@@ -1317,10 +1317,12 @@ model GuaranteeIdleEpisode {
 
 // ─── VEHICLE PLANNER TRANSFER (docs/29 — request → approval) ──
 // A request to hand a vehicle over from its current planista (`fromPlanner`)
-// to another one (`toPlanner`). Filed by the opiekun of the vehicle's carrier or
-// by the current planista (R2; an admin never files — U1). Decided by an admin
-// or by the lider of `fromPlanner` (R3), never by the author or by `toPlanner`
-// (R4). Withdrawn by its author while `pending` (U4). No notifications (R9).
+// to another one (`toPlanner`). Filed by the opiekun of the vehicle's carrier,
+// by the current planista, or — since 2026-10-23 (U1 reversed) — by an admin on
+// any vehicle (R2). Decided by an admin or by the lider of `fromPlanner` (R3),
+// never by the author or by `toPlanner` (R4) — so an admin-filed request needs
+// another admin or that lider. Withdrawn by its author while `pending` (U4).
+// No notifications (R9).
 //
 // APPEND-ONLY: rows are never deleted — only `pending` → one terminal status,
 // stamping `decidedAt` / `decidedById` / `decisionComment`. NO `deletedAt`:

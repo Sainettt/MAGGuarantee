@@ -252,7 +252,7 @@
 |---|---|
 | Видеть в Employee panel **ещё 4 вкладки**: Carriers, Vehicles, Drivers, Trailers | `index.html:4682-4686` (UI guard `isAdminRole`) |
 | CRUD **перевозчиков** (всех, не только своих) | `addCarrier` / `updateCarrier` / `toggleCarrierActive` / `deleteCarrierHard` / `resetCarrierPassword` → `POST/PATCH/DELETE /carriers` |
-| CRUD **авто** (всех) + редактирование `dispatchTeamId`, ставок (DE/UE/Ekspoort/Import). Планиста — только при создании; сменить его нельзя даже admin, admin **решает** заявки на смену (любые) и заявку не подаёт ([29](29-vehicle-planner-transfer-plan.md) R1, U1) | `addVehicle` / `updateVehicleDetails` / `toggleVehicleActive` / `removeVehicle`; `/planner-transfers/*` |
+| CRUD **авто** (всех) + редактирование `dispatchTeamId`, ставок (DE/UE/Ekspoort/Import). Планиста — только при создании; сменить его напрямую нельзя даже admin — только заявкой. Admin **подаёт** заявку на смену по любой машине (с 2026-10-23) и **решает** любые заявки, кроме своей: свою решает другой admin или лидер текущего планисты ([29](29-vehicle-planner-transfer-plan.md) R1, R4, U1) | `addVehicle` / `updateVehicleDetails` / `toggleVehicleActive` / `removeVehicle`; `/planner-transfers/*` |
 | CRUD **водителей** (всех) | `addDriver` / `updateDriver` / `toggleDriverActive` / `removeDriver` |
 | CRUD **прицепов** (всех) | `addNaczepa` / `updateNaczepa` / `toggleNaczepaActive` / `removeNaczepa` |
 | Управление **справочником типов прицепов** | `addNaczepaTyp` / `toggleNaczepaTypActive` |
@@ -339,7 +339,7 @@
 | CRUD авто (все) | ✅ | **—** | — | — | — | — | — | — |
 | CRUD авто (свои перев.) | — | — | ✅ | — | — | — | — | — |
 | Видеть свои авто (planner / dispatch team) | — | — | — | ✅ | ✅ | — | — | — |
-| Подать заявку на смену планисты машины / отменить свою | — | — | ✅ (своих перев.) | ✅ (текущий планиста машины) | — | — | — | — |
+| Подать заявку на смену планисты машины / отменить свою | ✅ (любая машина; свою решить не может) | — | ✅ (своих перев.) | ✅ (текущий планиста машины) | — | — | — | — |
 | Решить заявку на смену планисты | ✅ (любую, кроме своей) | — | — | ✅ (лидер планисты-отправителя; не автор и не получатель) | — | — | — | — |
 | Журнал планистов машины | ✅ | — | ✅ (своих перев.) | ✅ (текущий планиста и его лидер) | — | — | — | — |
 | Видеть ставки авто | ✅ | — | ✅ | ✅ | **—** | ✅ | ✅ (только в модалке выезда, карточку машины не открывает) | ✅ (только в модалке выезда) |
@@ -397,7 +397,7 @@
 | `vehicles.read` | ✅ |  | ✅ | ✅ | ✅ | ✅ |  |  | `GET /vehicles`, `GET /vehicles/:id`, вложения (список, download) |
 | `vehicles.rates.read` | ✅ |  | ✅ | ✅ |  | ✅ | ✅ | ✅ | сервис: четыре ставки в карточке авто и в блоке «Stawki» модалки выезда (скрыты от dyspozytor; eksport и weryfikator видят их только в модалке выезда) |
 | `vehicles.fuel_card.read` | ✅ |  | ✅ |  |  | ✅ |  |  | сервис: номер и PIN топливной карты в карточке авто |
-| `vehicles.planner_transfer.request` |  |  | ✅ | ✅ |  |  |  |  | `POST /vehicles/:id/planner-transfers`, `POST /planner-transfers/:id/cancel`; вместе с `.decide` — `GET /planner-transfers`, `GET /lookups/planisci/transfer-targets`. Сервис: planista — только текущий планиста машины, cancel — только автор |
+| `vehicles.planner_transfer.request` | ✅ |  | ✅ | ✅ |  |  |  |  | `POST /vehicles/:id/planner-transfers`, `POST /planner-transfers/:id/cancel`; вместе с `.decide` — `GET /planner-transfers`, `GET /lookups/planisci/transfer-targets`. Сервис: planista — только текущий планиста машины, cancel — только автор |
 | `vehicles.planner_transfer.decide` | ✅ |  |  |  |  |  |  |  | `POST /planner-transfers/:id/{approve,reject}`; вместе с `.request` — `GET /planner-transfers`, `GET /lookups/planisci/transfer-targets`. Сервис: лидер **этого** `fromPlanner`, не автор и не получатель |
 | ↳ + lider |  |  |  | ✅ |  |  |  |  | `LIDER_PERMISSIONS.planista` |
 | `vehicles.planner_history.read` | ✅ |  | ✅ | ✅ |  |  |  |  | `GET /vehicles/:id/planner-history` (сервис: opiekun — свой перевозчик, planista — текущий планиста или его лидер) |

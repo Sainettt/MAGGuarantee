@@ -8500,6 +8500,10 @@ const driven = src.kmGuaranteed − src.kmDifference;   // = mileageEffective
 
 ## §17 — Przekazanie ciągnika innemu planiście: wniosek → decyzja, historia planistów (NEW 2026-09-28 — AUTHORITATIVE)
 
+> **Changelog.**
+> - **2026-10-23 — admin подаёт заявки (docs/29 U1 отменено).** Admin может подать заявку по **любой** активной машине — только из формы правки машины (E2 стал состоянием «подать», как E1; кнопки в футере детальной модалки у admin нет). Свои заявки admin видит на третьей вкладке **«Moje wnioski»** страницы `/employee/przekazania` (`scope=mine`). R4 не меняется: автор не решает свою заявку — заявку admin решает другой admin или лидер `fromPlanner`; при одном admin и без лидера её можно только отменить (принятый тупик, docs/29). Уведомлений по-прежнему нет. Admin по-прежнему редиректится с `/planista/*` (W7). Затронуты: D9 (новое), §17.2.2 (E2, E4, `<PendingTransferNotice>`), §17.3, §17.4.1, §17.4.2, §17.4.3, §17.5 (хосты, §17.5.1, §17.5.3, §17.5.4, §17.5.7, §17.5.8 — новое), §17.6.3, §17.11, §17.12 (A9), §17.13, §17.14, W4, W7. Токенов и типов компонентов не добавлено.
+> - 2026-09-28 — первая версия.
+
 > **Scope.** UI-спека к [29-vehicle-planner-transfer-plan.md](29-vehicle-planner-transfer-plan.md) §4. Контракт поведения — там (решения R1–R9, умолчания U1–U11); здесь только то, как это выглядит, называется и объявляется скринридеру. Если текст ниже расходится с docs/29 по **поведению** — прав docs/29; по **виду, копирайту, размещению** — прав этот раздел.
 >
 > Восемь артефактов: (1) статус-чип заявки, (2) ячейка «Planista» в `VehicleFormDialog`, (3) диалог подачи заявки, (4) навигация + счётчик, (5) входящие на решение (admin + лидер) и «мои заявки» (автор), (6) журнал назначений в карточке машины, (7) поле «Przełożony (lider)» в `UserSheet`, (8) планиста в модалке выезда.
@@ -8520,6 +8524,7 @@ const driven = src.kmGuaranteed − src.kmDifference;   // = mileageEffective
 | D6 | Поле в `UserSheet` называется **«Przełożony (lider)»**, не «Lider» | запрос («select Lider») | В той же форме уже есть чекбокс «Lider» (флаг docs/28). Два поля «Lider» с разным смыслом рядом — повтор путаницы R4 из docs/28 §7 |
 | D7 | Входящие и «мои заявки» — **список карточек**, а не `<DataTable>` | §8.0 архетип A (таблица) | В каждой строке свободный текст (причина, комментарий, причина отказа), ради которого решение и принимается. Таблица его обрезает; карточка показывает целиком. Прецедент — `<ClaimCard>` на `/carrier/claims` |
 | D8 | Счётчик — `bg-warning-dark text-white`, не `bg-warning text-white` как у «Moja opieka» | существующий pill в `EmployeeSidebar` | `#fff` на `#f97316` = 2.9:1 — провал AA для 11px bold. `#fff` на `#c2410c` = 5.2:1 ✔. Рекомендация back-port в pill «Moja opieka» — отдельной задачей |
+| D9 | *(2026-10-23)* Admin подаёт заявку **только из формы правки машины** (E2, §17.2.2), как опекун; свои заявки — на вкладке **«Moje wnioski»** в `/employee/przekazania` (§17.5.8). На `/planista/*` admin не попадает (W7) | docs/29 U1 (было: «admin не подаёт») — U1 отменено решением 2026-10-23 | Один вход на роль: admin, как и опекун, правит машину в форме — там и видит, почему планиста заблокирован. Разделение «решаю / подал» повторяет лидера (`/planista/zatwierdzenia` vs `/planista/przekazania`), но в пределах одной страницы — у admin нет второго шелла |
 
 ### §17.1 — `<TransferStatusBadge>` — статус заявки
 
@@ -8555,17 +8560,19 @@ Planista                                        ← FormLabel, без «*» (п�
 │ Anna Nowak                                 │  ← <Input readOnly tabIndex={-1} aria-readonly>, рецепт §6.5.13 A
 └────────────────────────────────────────────┘
 🔒 Zablokowane — planistę zmienia się tylko wnioskiem o przekazanie.   ← FormDescription (причина)
-[⇄ Poproś o zmianę planisty]                                          ← opiekun, если нет pending
+[⇄ Poproś o zmianę planisty]                                          ← opiekun или admin, если нет pending
 ```
 
 Состояния ячейки (по роли зрителя и данным). Невозможное действие **убирается, а не дизейблится** (§6.5.13):
 
 | # | Условие | Под полем | Действие |
 |---|---|---|---|
-| E1 | opiekun, машина активна, `pending` нет | `transfers.form.locked` | `<Button type="button" variant="outline" size="sm">` + `<ArrowLeftRight size={14}/>` «Poproś o zmianę planisty» (`transfers.request.buttonOpiekun`) → §17.3 |
-| E2 | admin, `pending` нет | `transfers.form.lockedAdmin` — «Zablokowane — zmianę wnioskuje opiekun lub planista, Ty ją zatwierdzasz.» | нет (U1 — admin не подаёт) |
-| E3 | машина выключена (`vehicle.active === false` в сохранённом состоянии) | `transfers.form.lockedInactive` | нет |
-| E4 | есть `pending` (любая роль зрителя) | причина из E1/E2 + **`<PendingTransferNotice>`** под ней | автор: «Anuluj wniosek»; admin: ссылка «Rozpatrz w „Przekazania”»; остальные — ничего |
+| E1 | opiekun, машина активна, `pending` нет | `transfers.form.locked` | `<Button type="button" variant="outline" size="sm">` + `<ArrowLeftRight size={14}/>` «Poproś o zmianę planisty» (`transfers.request.button`) → §17.3 |
+| E2 | *(2026-10-23)* admin, машина активна, `pending` нет — **любая** машина | `transfers.form.lockedAdmin` — «Zablokowane — planistę zmienia się tylko wnioskiem. Twój wniosek rozpatrzy inny administrator lub lider obecnego planisty.» | та же кнопка, что E1 (`transfers.request.button`) → §17.3; тот же skeleton, пока грузится журнал |
+| E3 | машина выключена (`vehicle.active === false` в сохранённом состоянии), любая роль | `transfers.form.lockedInactive` | нет |
+| E4 | есть `pending` (любая роль зрителя) | причина из E1/E2 + **`<PendingTransferNotice>`** под ней | автор (opiekun, планиста **или admin**): «Anuluj wniosek»; admin, который **не** автор: ссылка «Rozpatrz w „Przekazania”»; остальные — ничего |
+
+Кнопка одна на E1 и E2 — ключ ролево-нейтральный (`request.button`); `request.buttonOpiekun` удаляется. Причина под полем (`locked` / `lockedAdmin`) остаётся ролевой: опекуну незачем знать, что admin решает чужие заявки, а admin должен знать, что свою заявку он **не** решит (R4).
 
 `type="button"` обязателен — кнопка внутри `<form>` формы машины и не должна её сабмитить.
 
@@ -8576,6 +8583,7 @@ Planista                                        ← FormLabel, без «*» (п�
 │ [⏱ Oczekuje]  Wniosek o przekazanie do: Piotr Wiśniewski │
 │ Wnioskuje: Jan Kowalski · Opiekun · 12.10.2026, 14:05     │
 │ „Planista przechodzi do działu eksportu…”                  │
+│ To Twój wniosek — decyzję podejmuje inny administrator…   │  ← только admin-автору
 │                                        [Anuluj wniosek]  │  ← только автору
 └──────────────────────────────────────────────────────────┘
 ```
@@ -8586,12 +8594,13 @@ Planista                                        ← FormLabel, без «*» (п�
 | Заголовок | `flex flex-wrap items-center gap-2` + бейдж + `font-medium text-text` `transfers.form.pendingTitle` |
 | Мета | `text-xs text-text-sub` `transfers.form.pendingMeta` (дата-время через `dateTimeValue`, `<time dateTime>`) |
 | Причина | `text-sm text-text whitespace-pre-line break-words line-clamp-3` + полный текст в `title` |
-| Действие автора | `<Button type="button" variant="ghost" size="sm" className="self-end">` «Anuluj wniosek» → `<ConfirmDialog>` §17.5.6 |
-| Действие admin | `<Link href="/employee/przekazania" className="self-end text-xs font-semibold text-brand hover:underline">` `transfers.form.reviewLink` |
+| Кто решает *(2026-10-23, только admin-автор)* | `text-xs text-text-sub` `transfers.card.blockedRequesterAdmin` — «To Twój wniosek — decyzję podejmuje inny administrator lub lider obecnego planisty.» Над кнопкой отмены. Нужна именно admin: у него вместо привычной ссылки «Rozpatrz» появляется «Anuluj», и без этой строки неясно, почему решить нельзя. Опекуну/планисте-автору строка не показывается (им это уже сказал `request.info` при подаче) |
+| Действие автора | `<Button type="button" variant="ghost" size="sm" className="self-end">` «Anuluj wniosek» → `<ConfirmDialog>` §17.5.6. Автор — по `viewerCanCancel`, admin включительно |
+| Действие admin (не автор) | `<Link href="/employee/przekazania" className="self-end text-xs font-semibold text-brand hover:underline">` `transfers.form.reviewLink`. Приоритет: автор → отмена, иначе admin → ссылка. Admin-автор ссылку **не** получает — на «Do decyzji» его строка заблокирована (§17.5.4) |
 
 Источник данных для `pending` — тот же запрос, что и журнал: `GET /vehicles/:id/planner-history` (§17.6), ключ кеша общий с карточкой машины. Пока запрос грузится — под полем `<Skeleton className="h-8 w-48">` вместо кнопки (нельзя показать кнопку, которая через секунду окажется «уже есть заявка»).
 
-**Вложенный диалог.** Кнопка E1 открывает §17.3 **поверх** открытой формы машины (форма не закрывается — в ней могут быть несохранённые правки). Esc закрывает только верхний диалог, фокус возвращается на кнопку. В диалоге §17.3 строка `transfers.request.independentOfForm` явно говорит, что заявка уходит сразу, независимо от «Zapisz». Web-agent: проверить, что самописный `components/ui/Dialog.tsx` корректно стекует два диалога (z-index, focus-trap верхнего, scroll-lock не снимается при закрытии верхнего).
+**Вложенный диалог.** Кнопка E1/E2 открывает §17.3 **поверх** открытой формы машины (форма не закрывается — в ней могут быть несохранённые правки). Esc закрывает только верхний диалог, фокус возвращается на кнопку. В диалоге §17.3 строка `transfers.request.independentOfForm` явно говорит, что заявка уходит сразу, независимо от «Zapisz». Web-agent: проверить, что самописный `components/ui/Dialog.tsx` корректно стекует два диалога (z-index, focus-trap верхнего, scroll-lock не снимается при закрытии верхнего).
 
 ### §17.3 — `<PlannerTransferRequestDialog>` — подать заявку
 
@@ -8603,7 +8612,7 @@ Planista                                        ← FormLabel, без «*» (п�
 
 | Вход | Кто | Поле «Ciągnik» | Заголовок / описание |
 |---|---|---|---|
-| Форма машины (E1) и футер `<VehicleDetailModal>` (§17.6.3) | opiekun / текущий планиста | нет — машина задана | `DialogTitle` = `transfers.request.title` «Wniosek o zmianę planisty»; `DialogDescription` = `{plate} · {carrier}` (plate `font-mono`) |
+| Форма машины (E1 / E2) и футер `<VehicleDetailModal>` (§17.6.3) | opiekun / admin (только форма, D9) / текущий планиста (только футер) | нет — машина задана | `DialogTitle` = `transfers.request.title` «Wniosek o zmianę planisty»; `DialogDescription` = `{plate} · {carrier}` (plate `font-mono`) |
 | CTA на «Moje wnioski» (§17.5) | планиста | `<Select>` своих **активных** машин, без тех, по которым у него уже есть `pending` | тот же заголовок; описание — `—` до выбора машины, затем `{plate} · {carrier}` |
 
 **Тело сверху вниз:**
@@ -8612,7 +8621,7 @@ Planista                                        ← FormLabel, без «*» (п�
 2. Статичная пара (не инпут, §6.5 «value is text»): `<dl className="grid grid-cols-[auto_1fr] gap-x-3 text-sm">` → `<dt className="text-text-sub">Obecny planista</dt><dd className="font-medium text-text">Anna Nowak</dd>`.
 3. `FormField` «Nowy planista» `required` → `<Select>`: активные планисты **кроме текущего** (U2; пикер из lookups, docs/29 §3.4), `placeholder` `targetPlaceholder`. Загрузка — `<Skeleton className="h-10 w-full">` на месте селекта (не текст «Ładowanie…», §8.1). Пустой список → `disabled` + `FormDescription` `noTargets`, submit `disabled`.
 4. `FormField` «Powód» `required` → `<Textarea rows={3} maxLength={500}>`, `placeholder` `reasonPlaceholder`; под полем справа счётчик `text-xs text-text-sub tabular-nums` «{count}/500». Лимиты `min 3 / max 500` — зеркало `DeleteWithReasonSchema`; **окончательно — по схеме api-agent** в shared.
-5. Инфо-строка (нейтральная, рецепт `<LockNotice>` без замка): `flex items-start gap-2 rounded-md border border-border bg-input px-3 py-2 text-xs text-text-sub` + `<Info size={14} className="mt-0.5 shrink-0" aria-hidden/>` + `transfers.request.info`. Смысл: планиста сменится только после решения; уведомлений нет (R9) — пусть автор не ждёт письма.
+5. Инфо-строка (нейтральная, рецепт `<LockNotice>` без замка): `flex items-start gap-2 rounded-md border border-border bg-input px-3 py-2 text-xs text-text-sub` + `<Info size={14} className="mt-0.5 shrink-0" aria-hidden/>` + `transfers.request.info`. Смысл: планиста сменится только после решения; уведомлений нет (R9) — пусть автор не ждёт письма. *(2026-10-23)* Если подаёт **admin** — вместо `info` ключ `transfers.request.infoAdmin`: тот же смысл + «свою заявку ты не утвердишь» + честный тупик (нет другого admin и лидера → только отмена). Выбор ключа — по `user.role === 'admin'`, иконка и рецепт те же.
 6. *(только из формы машины)* `text-xs text-text-sub` `transfers.request.independentOfForm`.
 
 **Футер (LTR):** `[слот ошибки — mr-auto text-sm text-danger role="alert"]` … `[Anuluj — ghost sm]` `[Wyślij wniosek — default sm]`. Primary `disabled`, пока форма невалидна или идёт запрос (label → `submitting`). Кнопка называет действие, голое «Zapisz» запрещено (§6.5.12).
@@ -8637,7 +8646,7 @@ Planista                                        ← FormLabel, без «*» (п�
 
 | Роль | Содержимое страницы | Счётчик |
 |---|---|---|
-| admin | режим **decider** (§17.5), все заявки | да — все `pending` |
+| admin | режим **decider** (§17.5), все заявки — вкладки «Do decyzji» / «Rozpatrzone» + *(2026-10-23)* третья вкладка **«Moje wnioski»** — свои заявки (`scope=mine`, §17.5.8) | да — `pending`, которые он **может решить** (свои не в счёт, §17.4.3) |
 | opiekun | режим **author** — свои заявки | нет |
 
 #### §17.4.2 — `<PlanistaTabsNav>` (D2)
@@ -8651,7 +8660,7 @@ Planista                                        ← FormLabel, без «*» (п�
 | Moje wnioski | `/planista/przekazania` | `ArrowLeftRight` | `role === 'planista'` | `planista.nav.myTransfers` |
 | Do zatwierdzenia | `/planista/zatwierdzenia` | `ClipboardCheck` | `role === 'planista' && user.lider` | `planista.nav.approvals` + счётчик |
 
-- Admin в `(planista)`-шелле (debug-доступ) видит только «Flota» / «Przebieg»: заявки он не подаёт (U1), а решает в `/employee/przekazania`.
+- Admin в `(planista)`-шелле (debug-доступ) видит только «Flota» / «Przebieg»: и решения, и *(2026-10-23)* свои заявки («Moje wnioski», §17.5.8) у него живут в `/employee/przekazania`; прямой заход на `/planista/przekazania` / `/planista/zatwierdzenia` — редирект туда (W7).
 - Решение «показывать ли вкладку» — **клиентское**, по `useAuth().user.lider`: edge-middleware не знает о лидерстве и не импортирует shared (docs/28 §9.2 #18). Прямой заход не-лидера на `/planista/zatwierdzenia` не редиректит, а рендерит информационный `<EmptyState icon={Lock}>` `transfers.empty.notLider` и **не вызывает API**.
 - `FleetPanel` на `/planista` перестаёт получать `myKmHref` (вкладка «Przebieg» его заменяет); `/dyspozytor` не меняется.
 
@@ -8662,7 +8671,7 @@ Planista                                        ← FormLabel, без «*» (п�
 | Свойство | Контракт |
 |---|---|
 | Где | sidebar «Przekazania» (только admin); вкладка «Do zatwierdzenia» (лидер) |
-| Число | admin — все `pending`; лидер — `pending`, которые он **может решить** (`toPlanner.id !== me && requestedBy.id !== me`). Заблокированные для него строки (§17.5.4) в счёт не идут — иначе счётчик никогда не обнулится |
+| Число | admin и лидер — `pending`, которые зритель **может решить** (`viewerCanDecide`; лидер: `toPlanner.id !== me && requestedBy.id !== me`; admin *(2026-10-23)*: `requestedBy.id !== me`). Заблокированные для него строки (§17.5.4), в том числе собственные заявки admin, в счёт не идут — иначе счётчик никогда не обнулится |
 | Скрыт | при `0` и во время загрузки (нет фантомного бейджа) |
 | Форма | `ml-auto inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] font-bold leading-none tabular-nums` (в табе — `ml-1.5` вместо `ml-auto`) |
 | Тон | **`bg-warning-dark text-white`** (5.2:1). Не `bg-danger`: красный — «просрочено/сломано» (Alerty), заявка — «ждёт человека» |
@@ -8675,12 +8684,12 @@ Planista                                        ← FormLabel, без «*» (п�
 
 | Хост | Режим | Заголовок `h1` / подзаголовок |
 |---|---|---|
-| `/employee/przekazania` (admin) | `decider` | `transfers.title` / `transfers.subtitle.admin` |
+| `/employee/przekazania` (admin) | `decider` на вкладках 1–2 + `author` на вкладке 3 «Moje wnioski» (§17.5.8) | `transfers.title` / `transfers.subtitle.admin` |
 | `/employee/przekazania` (opiekun) | `author` | `transfers.title` / `transfers.subtitle.author` |
 | `/planista/przekazania` | `author` | `planista.nav.myTransfers` / `transfers.subtitle.author` |
 | `/planista/zatwierdzenia` (лидер) | `decider` | `planista.nav.approvals` / `transfers.subtitle.lider` |
 
-Контейнер — тот же, что у соседних страниц шелла (employee: §3.4 A; planista: `mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-8`). Шапка страницы — рецепт §6.3.1 п.1. В режиме `author` для планисты справа от заголовка — CTA `<Button size="sm"><ArrowLeftRight size={14}/> Przekaż ciągnik</Button>` → §17.3 (второй вход). У опекуна CTA нет: он подаёт заявку из формы машины.
+Контейнер — тот же, что у соседних страниц шелла (employee: §3.4 A; planista: `mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 py-8`). Шапка страницы — рецепт §6.3.1 п.1. В режиме `author` для планисты справа от заголовка — CTA `<Button size="sm"><ArrowLeftRight size={14}/> Przekaż ciągnik</Button>` → §17.3 (второй вход). У опекуна и admin CTA нет: они подают заявку из формы машины (D9).
 
 #### §17.5.1 — Вкладки
 
@@ -8690,8 +8699,9 @@ Planista                                        ← FormLabel, без «*» (п�
 |---|---|---|---|---|
 | 1 | «Do decyzji» `pendingDecider` + счётчик в скобках | «Oczekujące» `pendingAuthor` | **старые сверху** (очередь: дольше всех ждёт — первой) | `status=pending` |
 | 2 | «Rozpatrzone» `decided` | то же | новые решения сверху | `status ∈ approved, rejected, cancelled`; фильтр-`<Select>` статуса над списком (`bg-input` фильтр-бар, §Surface policy); пагинация `<CursorPager>` |
+| 3 *(только admin, 2026-10-23)* | «Moje wnioski» `mine` | — | по фильтру: `pending` — старые сверху, остальное — новые решения сверху (как отдаёт api) | `scope=mine`; подробно — §17.5.8 |
 
-Вкладка по умолчанию — первая, даже если она пуста (предсказуемость важнее «умного» переключения).
+Вкладка по умолчанию — первая, даже если она пуста (предсказуемость важнее «умного» переключения). У admin тоже: «Do decyzji» — его основная работа, «Moje wnioski» — редкий случай.
 
 #### §17.5.2 — `<TransferRequestCard>`
 
@@ -8726,8 +8736,8 @@ Planista                                        ← FormLabel, без «*» (п�
 |---|---|
 | decider, `pending`, может решить | `[Odrzuć — outline sm]` `[Zatwierdź — default sm]` → §17.5.5 |
 | decider, `pending`, **не может** решить (R4) | действий нет; на их месте `<LockNotice>` с причиной (§17.5.4) |
-| author, `pending` | `[Anuluj wniosek — ghost sm]` → §17.5.6 |
-| любой, вкладка «Rozpatrzone» | только «Historia planistów» |
+| author, `pending` (включая admin на «Moje wnioski») | `[Anuluj wniosek — ghost sm]` → §17.5.6 |
+| любой, вкладка «Rozpatrzone»; «Moje wnioski» с фильтром, отличным от «Oczekujące» | только «Historia planistów» |
 
 #### §17.5.4 — Почему лидер не может решить эту строку (R3/R4)
 
@@ -8736,9 +8746,10 @@ Planista                                        ← FormLabel, без «*» (п�
 | Условие (вычисляет UI по id; сервер — окончательно, 403) | Ключ | PL |
 |---|---|---|
 | `toPlanner.id === me` | `card.blockedTarget` | «Jesteś planistą docelowym tego wniosku — decyzję podejmuje administrator.» |
-| `requestedBy.id === me` | `card.blockedRequester` | «To Twój wniosek — decyzję podejmuje administrator.» |
+| `requestedBy.id === me`, зритель — лидер | `card.blockedRequester` | «To Twój wniosek — decyzję podejmuje administrator.» |
+| `requestedBy.id === me`, зритель — **admin** *(2026-10-23)* | `card.blockedRequesterAdmin` | «To Twój wniosek — decyzję podejmuje inny administrator lub lider obecnego planisty.» |
 
-Кнопки **не рендерятся** (не `disabled`) — правило §6.5.13. Лидер, потерявший флаг (U10), до строк не доходит: страница показывает `empty.notLider` (§17.4.2).
+Своя заявка admin остаётся на его «Do decyzji» (`scope=decide` у admin — все заявки): admin видит полную очередь, но вместо кнопок — `<LockNotice>` выше. Отмена своей заявки на этой вкладке **не** предлагается — она живёт на «Moje wnioski» (§17.5.8) и в плашке формы машины (§17.2.2); одно действие — одно место в списке. Кнопки **не рендерятся** (не `disabled`) — правило §6.5.13. Лидер, потерявший флаг (U10), до строк не доходит: страница показывает `empty.notLider` (§17.4.2).
 
 #### §17.5.5 — Диалоги решения
 
@@ -8781,8 +8792,44 @@ Planista                                        ← FormLabel, без «*» (п�
 | «Rozpatrzone» пусто без фильтра | `empty.decided` | нет |
 | «Rozpatrzone» пусто с фильтром | `empty.decidedFiltered` | «Wyczyść filtry» |
 | не-лидер на `/planista/zatwierdzenia` | `empty.notLider` (иконка `Lock`) | нет |
+| admin, «Moje wnioski» | по фильтру — §17.5.8 | §17.5.8 |
 
 Иконка пустых состояний — `ArrowLeftRight`.
+
+#### §17.5.8 — Admin: вкладка «Moje wnioski» (`scope=mine`) (NEW 2026-10-23)
+
+Третья вкладка в `<Tabs>` страницы `/employee/przekazania`, **только у admin**: `[Do decyzji (n)] [Rozpatrzone] [Moje wnioski]`. Лейбл `transfers.tabs.mine`, **без счётчика** (режим author счётчиков не имеет, §17.4.1 — у опекуна и планисты тоже). Рендер — тот же `<PlannerTransferList>` в режиме `author` внутри `TabsContent`, без собственной шапки страницы (`h1` / подзаголовок — общие для страницы, `subtitle.admin`).
+
+Вложенные вкладки (как «Oczekujące / Rozpatrzone» у планисты) здесь **запрещены** — второй таб-бар под первым читается как одна навигация. Вместо них — один фильтр-`<Select>` статуса в `bg-input` фильтр-баре (рецепт вкладки «Rozpatrzone», включая W14 `bg-card` у селекта). Опции 1:1 повторяют значения `status` в API (docs/13), поэтому один запрос и одна курсорная пагинация:
+
+| Опция | Ключ | `status=` | Сортировка (от api) |
+|---|---|---|---|
+| «Oczekujące» — **по умолчанию** | `transfers.filter.pending` | `pending` | старые сверху |
+| «Wszystkie rozpatrzone» | `transfers.filter.allDecided` | `decided` | новые решения сверху |
+| «Zatwierdzone» | `transfers.filter.approved` (есть) | `approved` | новые сверху |
+| «Odrzucone» | `transfers.filter.rejected` (есть) | `rejected` | новые сверху |
+| «Anulowane» | `transfers.filter.cancelled` (есть) | `cancelled` | новые сверху |
+
+По умолчанию — «Oczekujące»: единственное, что admin-автор может сделать со своей заявкой, — отменить её, и это возможно только пока она `pending`. Фильтр — локальное состояние вкладки (не URL); переход на другую вкладку и обратно его не сбрасывает в пределах визита.
+
+**Карточка** — `<TransferRequestCard>` без изменений, с `<TransferStatusBadge>` в строке 1, как на `/planista/przekazania`. Строка «Wnioskuje: {admin} · Administrator» остаётся (единый вид карточки). Действия — по §17.5.3:
+
+| Статус карточки | Действия |
+|---|---|
+| `pending` | `[Historia planistów — ghost sm]` … `[Anuluj wniosek — ghost sm]` → §17.5.6 (`<ConfirmDialog>`, «Wróć») |
+| `approved` / `rejected` / `cancelled` | только «Historia planistów»; блок решения как на «Rozpatrzone» (кто решил, комментарий / причина отказа — целиком) |
+
+Строки `<LockNotice>` (§17.5.4) на этой вкладке нет: это список **своих** заявок, «не можешь решить» здесь — норма, не исключение. Почему решить нельзя, admin уже прочитал при подаче (`request.infoAdmin`) и видит в плашке формы (`card.blockedRequesterAdmin`).
+
+**Загрузка / ошибка / пусто** — §17.5.7 (3 skeleton-карточки; `queryErrorProps`), пустые состояния:
+
+| Фильтр | Заголовок / текст | Действие |
+|---|---|---|
+| «Oczekujące» | `empty.pendingAuthor.title` «Brak oczekujących wniosków» + `empty.pendingAuthor.messageOpiekun` «Wniosek o zmianę planisty złożysz w formularzu edycji ciągnika.» (текст ролево-нейтрален — reuse) | нет (вход — форма машины, D9) |
+| «Wszystkie rozpatrzone» | `empty.decided` | нет |
+| один терминальный статус | `empty.decidedFiltered` | «Wyczyść filtry» → фильтр обратно в «Oczekujące» (значение по умолчанию) |
+
+**Инвалидация** — §17.9 без изменений: подача из формы машины и отмена инвалидируют список заявок, а значит и эту вкладку, и pill (в котором своя заявка admin всё равно не считается).
 
 ### §17.6 — Журнал назначений: `<PlannerHistoryTimeline>`
 
@@ -8841,7 +8888,7 @@ HISTORIA PLANISTÓW                                    ← заголовок с
 - Строка «Planista» в «Przypisanie / Ludzie» при наличии `pending` получает хвост `<TransferStatusBadge status="pending">` с `title` = `transfers.form.pendingTitle` — видно без прокрутки до журнала.
 - Загрузка секции — независимо от модалки (модалка уже открыта с данными машины): 3 строки `<Skeleton>` (точка `h-2 w-2 rounded-full` + `h-4 w-40` + `h-3 w-56`).
 - **Футер для текущего планисты** (D3): между «Zamknij» и (отсутствующим у него) «Edytuj» — `<Button variant="outline" size="sm"><ArrowLeftRight size={14}/> Przekaż ciągnik</Button>` → §17.3 (первый вход). Не рендерится, если есть `pending`, если машина выключена, для любой другой роли. Требует аддитивного слота `extraActions?: ReactNode` в `<EntityDetailModal>` (§6.9) — рендерится слева от primary, справа от «Zamknij». Существующие вызовы не меняются.
-- Опекун в детальной модалке кнопки не получает — у него путь через «Edytuj» (§17.2), как в docs/29 §4.
+- Опекун и *(2026-10-23)* admin в детальной модалке кнопки не получают — у них путь через «Edytuj» (§17.2, E1 / E2; D9), как в docs/29 §4.
 
 #### §17.6.4 — Диалог из карточки заявки
 
@@ -8938,7 +8985,8 @@ HISTORIA PLANISTÓW                                    ← заголовок с
     "ariaLabel": "Wnioski o przekazanie",
     "pendingDecider": "Do decyzji",
     "pendingAuthor": "Oczekujące",
-    "decided": "Rozpatrzone"
+    "decided": "Rozpatrzone",
+    "mine": "Moje wnioski"
   },
   "status": {
     "pending": "Oczekuje",
@@ -8949,6 +8997,8 @@ HISTORIA PLANISTÓW                                    ← заголовок с
   "filter": {
     "status": "Status",
     "all": "Wszystkie",
+    "pending": "Oczekujące",
+    "allDecided": "Wszystkie rozpatrzone",
     "approved": "Zatwierdzone",
     "rejected": "Odrzucone",
     "cancelled": "Anulowane"
@@ -8970,20 +9020,21 @@ HISTORIA PLANISTÓW                                    ← заголовок с
     "reject": "Odrzuć",
     "cancel": "Anuluj wniosek",
     "blockedTarget": "Jesteś planistą docelowym tego wniosku — decyzję podejmuje administrator.",
-    "blockedRequester": "To Twój wniosek — decyzję podejmuje administrator."
+    "blockedRequester": "To Twój wniosek — decyzję podejmuje administrator.",
+    "blockedRequesterAdmin": "To Twój wniosek — decyzję podejmuje inny administrator lub lider obecnego planisty."
   },
   "form": {
     "createHint": "Późniejsza zmiana planisty wymaga wniosku i zatwierdzenia.",
     "locked": "Zablokowane — planistę zmienia się tylko wnioskiem o przekazanie.",
     "lockedTitle": "Planisty nie można zmienić bezpośrednio. Złóż wniosek o przekazanie — zmiana nastąpi po zatwierdzeniu.",
-    "lockedAdmin": "Zablokowane — zmianę wnioskuje opiekun lub planista, Ty ją zatwierdzasz.",
+    "lockedAdmin": "Zablokowane — planistę zmienia się tylko wnioskiem. Twój wniosek rozpatrzy inny administrator lub lider obecnego planisty.",
     "lockedInactive": "Zablokowane — ciągnik jest wyłączony, nie można go przekazać.",
     "pendingTitle": "Wniosek o przekazanie do: {to}",
     "pendingMeta": "Wnioskuje: {name} · {role} · {date}",
     "reviewLink": "Rozpatrz w „Przekazania”"
   },
   "request": {
-    "buttonOpiekun": "Poproś o zmianę planisty",
+    "button": "Poproś o zmianę planisty",
     "buttonPlanista": "Przekaż ciągnik",
     "title": "Wniosek o zmianę planisty",
     "vehicle": "Ciągnik",
@@ -9002,6 +9053,7 @@ HISTORIA PLANISTÓW                                    ← заголовок с
     "reasonRequired": "Podaj powód (min. 3 znaki).",
     "reasonTooLong": "Powód może mieć maks. {max} znaków.",
     "info": "Planista zmieni się dopiero po zatwierdzeniu przez lidera obecnego planisty lub administratora. Nie wysyłamy powiadomień — wniosek czeka na ich liście „Do decyzji”.",
+    "infoAdmin": "Planista zmieni się dopiero po zatwierdzeniu przez innego administratora lub lidera obecnego planisty — swojego wniosku nie zatwierdzisz. Nie wysyłamy powiadomień. Jeśli nie ma nikogo takiego, wniosek można tylko anulować.",
     "independentOfForm": "Wniosek wysyłasz od razu — niezależnie od zapisu formularza ciągnika.",
     "submit": "Wyślij wniosek",
     "submitting": "Wysyłanie…",
@@ -9144,7 +9196,8 @@ HISTORIA PLANISTÓW                                    ← заголовок с
     "ariaLabel": "Transfer requests",
     "pendingDecider": "To decide",
     "pendingAuthor": "Pending",
-    "decided": "Decided"
+    "decided": "Decided",
+    "mine": "My requests"
   },
   "status": {
     "pending": "Pending",
@@ -9155,6 +9208,8 @@ HISTORIA PLANISTÓW                                    ← заголовок с
   "filter": {
     "status": "Status",
     "all": "All",
+    "pending": "Pending",
+    "allDecided": "All decided",
     "approved": "Approved",
     "rejected": "Rejected",
     "cancelled": "Cancelled"
@@ -9176,20 +9231,21 @@ HISTORIA PLANISTÓW                                    ← заголовок с
     "reject": "Reject",
     "cancel": "Cancel request",
     "blockedTarget": "You are the target planner of this request — an administrator decides.",
-    "blockedRequester": "This is your request — an administrator decides."
+    "blockedRequester": "This is your request — an administrator decides.",
+    "blockedRequesterAdmin": "This is your request — another administrator or the current planner's lead decides."
   },
   "form": {
     "createHint": "Changing the planner later requires a request and approval.",
     "locked": "Locked — the planner changes only through a transfer request.",
     "lockedTitle": "The planner can't be changed directly. File a transfer request — the change takes effect after approval.",
-    "lockedAdmin": "Locked — the caretaker or planner requests the change, you approve it.",
+    "lockedAdmin": "Locked — the planner changes only through a request. Your request is decided by another administrator or the current planner's lead.",
     "lockedInactive": "Locked — the vehicle is disabled and can't be transferred.",
     "pendingTitle": "Transfer request to: {to}",
     "pendingMeta": "Requested by: {name} · {role} · {date}",
     "reviewLink": "Review in “Transfers”"
   },
   "request": {
-    "buttonOpiekun": "Request a planner change",
+    "button": "Request a planner change",
     "buttonPlanista": "Transfer vehicle",
     "title": "Planner change request",
     "vehicle": "Vehicle",
@@ -9208,6 +9264,7 @@ HISTORIA PLANISTÓW                                    ← заголовок с
     "reasonRequired": "Enter a reason (at least 3 characters).",
     "reasonTooLong": "The reason can be at most {max} characters.",
     "info": "The planner changes only after the current planner's lead or an administrator approves. No notifications are sent — the request waits in their “To decide” list.",
+    "infoAdmin": "The planner changes only after another administrator or the current planner's lead approves — you can't approve your own request. No notifications are sent. If there is no one who can decide, the request can only be cancelled.",
     "independentOfForm": "The request is sent immediately — independently of saving the vehicle form.",
     "submit": "Send request",
     "submitting": "Sending…",
@@ -9306,7 +9363,24 @@ HISTORIA PLANISTÓW                                    ← заголовок с
 }
 ```
 
-**Удалить** из обоих языков: `users.fields.liderEmail`, `users.fields.liderEmailHint`. Ключи-объекты выше **сливаются** с существующими (`nav`, `planista`, `team`, `users.fields`, `users.errors`), а не заменяют их. Метка вкладки «Przebieg» — существующий `myKm.tab`. Паритет PL/EN проверяется существующей проверкой.
+**Удалить** из обоих языков: `users.fields.liderEmail`, `users.fields.liderEmailHint`, *(2026-10-23)* `transfers.request.buttonOpiekun` (заменён `transfers.request.button`).
+
+**Дельта 2026-10-23 (admin подаёт заявки)** — уже внесена в блоки выше; таблица для web-agent:
+
+| Ключ | Действие | PL | EN |
+|---|---|---|---|
+| `transfers.request.button` | новый (вместо `buttonOpiekun`; опекун + admin, E1/E2) | Poproś o zmianę planisty | Request a planner change |
+| `transfers.request.buttonOpiekun` | **удалить** | — | — |
+| `transfers.form.lockedAdmin` | изменить текст (E2) | Zablokowane — planistę zmienia się tylko wnioskiem. Twój wniosek rozpatrzy inny administrator lub lider obecnego planisty. | Locked — the planner changes only through a request. Your request is decided by another administrator or the current planner's lead. |
+| `transfers.request.infoAdmin` | новый (инфо-строка диалога подачи, admin) | Planista zmieni się dopiero po zatwierdzeniu przez innego administratora lub lidera obecnego planisty — swojego wniosku nie zatwierdzisz. Nie wysyłamy powiadomień. Jeśli nie ma nikogo takiego, wniosek można tylko anulować. | The planner changes only after another administrator or the current planner's lead approves — you can't approve your own request. No notifications are sent. If there is no one who can decide, the request can only be cancelled. |
+| `transfers.card.blockedRequesterAdmin` | новый (`<LockNotice>` на «Do decyzji» + строка в `<PendingTransferNotice>`) | To Twój wniosek — decyzję podejmuje inny administrator lub lider obecnego planisty. | This is your request — another administrator or the current planner's lead decides. |
+| `transfers.tabs.mine` | новый (3-я вкладка admin) | Moje wnioski | My requests |
+| `transfers.filter.pending` | новый (фильтр «Moje wnioski», по умолчанию) | Oczekujące | Pending |
+| `transfers.filter.allDecided` | новый (фильтр «Moje wnioski») | Wszystkie rozpatrzone | All decided |
+| `transfers.filter.approved` / `rejected` / `cancelled` | reuse | — | — |
+| `transfers.empty.pendingAuthor.title` + `.messageOpiekun`, `empty.decided`, `empty.decidedFiltered` | reuse (пустые состояния «Moje wnioski») | — | — |
+
+Ключи-объекты выше **сливаются** с существующими (`nav`, `planista`, `team`, `users.fields`, `users.errors`), а не заменяют их. Метка вкладки «Przebieg» — существующий `myKm.tab`. Паритет PL/EN проверяется существующей проверкой.
 
 ### §17.12 — Что UI ждёт от api-agent (зависимости, не дизайн-решения)
 
@@ -9320,6 +9394,7 @@ HISTORIA PLANISTÓW                                    ← заголовок с
 | A6 | DTO выезда: `planner` (снимок) **и** `vehicle.planner {id, name, login}` | Подсказка §17.8 |
 | A7 | Lookups: цели передачи (активные планисты без текущего) и лидеры для UserSheet (активные `planista` + `lider`) | §17.3 п.3, §17.7 |
 | A8 | Пагинация «Rozpatrzone» — курсором (под `<CursorPager>`) | §17.5.1 |
+| A9 *(2026-10-23)* | admin: `POST /vehicles/:id/planner-transfers` по любой машине, `POST /planner-transfers/:id/cancel` для своей заявки, `GET /planner-transfers?scope=mine` (все значения `status`); в `scope=decide` у admin своя заявка приходит с `viewerCanDecide=false`, `viewerBlockedReason='requester'`, `viewerCanCancel=true` | E2 / E4 (§17.2.2), pill (§17.4.3), §17.5.4, §17.5.8. UI дублирует проверку по id (`requestedBy.id === me`), сервер — окончательно (403) |
 
 ### §17.13 — Компоненты / файлы / токены (сводка для web-agent)
 
@@ -9334,7 +9409,8 @@ HISTORIA PLANISTÓW                                    ← заголовок с
 | Секция «Historia planistów» (последняя, `span:'full'`), бейдж `pending` у строки «Planista», кнопка «Przekaż ciągnik» для текущего планисты | `VehicleDetailModal` (§6.15) | правка |
 | Аддитивный слот `extraActions?: ReactNode` в футере | `components/ui/EntityDetailModal.tsx` | правка примитива (аддитивно) |
 | Пункт `transfers` + pill `bg-warning-dark` (только admin) | `lib/nav.config.ts`, `components/layout/EmployeeSidebar.tsx` | правка |
-| `/employee/przekazania` (admin → decider, opiekun → author) | `app/(employee)/employee/przekazania/page.tsx` | **новый маршрут** (не admin-only) |
+| `/employee/przekazania` (admin → decider + вкладка «Moje wnioski» `scope=mine` с фильтром статуса, §17.5.8; opiekun → author) | `app/(employee)/employee/przekazania/page.tsx` | **новый маршрут** (не admin-only) |
+| *(2026-10-23)* E2 = «подать» для admin (кнопка `request.button`, причина `lockedAdmin`); `<PendingTransferNotice>`: строка `blockedRequesterAdmin` + отмена для admin-автора; `infoAdmin` в диалоге подачи; `blockedRequesterAdmin` в §17.5.4 | `VehiclePlannerLockedField.tsx` (+ `plannerCellState`), `PendingTransferNotice.tsx`, `PlannerTransferRequestDialog.tsx`, `TransferRequestCard.tsx` | правка |
 | `<PlanistaTabsNav>` (4 вкладки, лидерская — по `user.lider`, pill) | `app/(planista)/PlanistaTabsNav.tsx` + `layout.tsx` | **новый** |
 | `/planista/przekazania` (author), `/planista/zatwierdzenia` (decider, guard `user.lider`) | `app/(planista)/planista/…` | **новые маршруты** |
 | `FleetPanel` без `myKmHref` на `/planista` | `app/(planista)/planista/page.tsx` | правка |
@@ -9351,8 +9427,10 @@ HISTORIA PLANISTÓW                                    ← заголовок с
 - [ ] **Никто не меняет планисту напрямую.** В edit-режиме `VehicleFormDialog` нет селекта планисты ни для одной роли, включая admin; `plannerId` отсутствует в теле `PATCH` (проверено в network).
 - [ ] Create-режим (включая wizard): селект на месте, обязателен, под ним `createHint`.
 - [ ] Заблокированное поле — рецепт §6.5.13 Tier A (readOnly-инпут + замок + причина в `FormDescription` + `title`), не `disabled`, не `opacity-50`; причина по роли/состоянию E1–E3.
-- [ ] Кнопка «Poproś o zmianę planisty» — только opiekun, только при активной машине и без `pending`; у admin её **нет в DOM**; `type="button"`.
-- [ ] `<PendingTransferNotice>` показывает цель, автора с ролью, дату-время, причину; «Anuluj wniosek» — только автору; admin видит ссылку в «Przekazania».
+- [ ] Кнопка «Poproś o zmianę planisty» (`request.button`) — opiekun (E1) и *(2026-10-23)* admin (E2, любая машина), только при активной машине и без `pending`; у других ролей её **нет в DOM**; `type="button"`. В футере детальной модалки у admin кнопки нет.
+- [ ] `<PendingTransferNotice>` показывает цель, автора с ролью, дату-время, причину; «Anuluj wniosek» — только автору (admin включительно); admin-автор видит строку `blockedRequesterAdmin` и **не** видит ссылку «Rozpatrz»; admin, который не автор, видит ссылку в «Przekazania».
+- [ ] *(2026-10-23)* Диалог подачи у admin — инфо-строка `request.infoAdmin` вместо `request.info`.
+- [ ] *(2026-10-23)* `/employee/przekazania` у admin: вкладки «Do decyzji (n)» · «Rozpatrzone» · «Moje wnioski» (без счётчика, по умолчанию активна первая); на «Moje wnioski» — фильтр статуса (по умолчанию «Oczekujące»), без вложенных вкладок; `pending`-карточка — «Anuluj wniosek», остальные — только «Historia planistów». Своя заявка admin на «Do decyzji» — `<LockNotice>` `blockedRequesterAdmin`, без кнопок, в pill и «(n)» не считается.
 - [ ] Диалог подачи: цель без текущего планисты, причина обязательна со счётчиком, инфо-строка про отсутствие уведомлений; из формы машины — строка `independentOfForm`; вложенный диалог корректно стекуется поверх формы.
 - [ ] 409 «уже есть» / 422 / 403 показываются **в диалоге** (слот футера или `<FormMessage>`), не тостом; после 409 у хоста появляется `pending`-плашка.
 - [ ] `<TransferStatusBadge>`: четыре статуса → `warning` / `success` / `danger` / `muted` + иконка + текст; ни одного нового варианта `<Badge>`.
@@ -9384,10 +9462,10 @@ HISTORIA PLANISTÓW                                    ← заголовок с
 | W1 | `components/ui/Dialog.tsx`, `Sheet.tsx` (+ `overlayStack.ts`) | Проверка из §17.2 «вложенный диалог» нашла баг: каждый открытый `<Dialog>`/`<Sheet>` вешал свой `keydown` на `document`, и один Esc закрывал **оба** слоя (форма машины теряла несохранённые правки; тот же баг был у `KmCellEditorDialog` + `ConfirmDialog`). Добавлен стек оверлеев: Esc закрывает только верхний. z-index не менялся (поздний портал рисуется поверх), scroll-lock корректен (верхний восстанавливает `hidden`), фокус возвращается на кнопку-триггер. Focus-trap у самописного `Dialog` по-прежнему нет (только начальный фокус + возврат) — как было | a11y / потеря данных; визуально ничего не меняется |
 | W2 | `VehicleFormDialog` | `<PlannerTransferRequestDialog>` рендерится **соседом** `<form>` внутри `FormDialog`, а его `onSubmit` делает `stopPropagation` | React-события всплывают по дереву компонентов и через портал: submit вложенной формы иначе дошёл бы до `onSubmit` формы машины и отправил бы PATCH |
 | W3 | shared `vehicles.ts` | Новый экспорт `VehicleEditFormSchema` (web-only резолвер edit-формы: правила create **минус** `plannerId`, `.strip()`); общий `refineCompleteVehicle` для create и edit | Edit-форма валидировалась `CreateVehicleSchema`, где `plannerId` обязателен; без поля в форме валидация бы падала. `.strip()` вместо `.strict()` — «лишний» ключ отбрасывается, а не роняет форму root-ошибкой без поля |
-| W4 | E2/E3 (§17.2.2) | У admin на **выключенной** машине причина — `lockedInactive`, а не `lockedAdmin` | Причина состояния важнее причины роли; действия нет в обоих случаях |
+| W4 | E2/E3 (§17.2.2) | У admin на **выключенной** машине причина — `lockedInactive`, а не `lockedAdmin`, и кнопки нет. *(2026-10-23: с отменой U1 правило вошло в саму таблицу E — E3 теперь «любая роль», а у E2 кнопка есть только при активной машине; поведение то же)* | Причина состояния важнее причины роли; подать заявку по выключенной машине нельзя никому (A5) |
 | W5 | Футер `<VehicleDetailModal>` | «Przekaż ciągnik» появляется только после ответа журнала (`historyReady`) | Тот же принцип, что skeleton в E1: не показывать кнопку, которая через секунду окажется «уже есть заявка» |
 | W6 | `<PlanistaTabsNav>` | Контейнер `mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-10 xl:px-12 pt-6` (добавлено `mx-auto max-w-screen-2xl`), `overflow-x-auto` на tablist | Страницы планисты (FleetPanel, KmBoardScreen) центрированы с `max-w-screen-2xl`; без этого на ≥1536px табы уезжали влево от заголовка. 4 вкладки на 360px прокручиваются, а не переносятся |
-| W7 | `/planista/przekazania`, `/planista/zatwierdzenia` | Admin по прямой ссылке **редиректится** на `/employee/przekazania` (server) | Admin не подаёт (U1) — его «мои» всегда пусты; решает он в employee-разделе |
+| W7 | `/planista/przekazania`, `/planista/zatwierdzenia` | Admin по прямой ссылке **редиректится** на `/employee/przekazania` (server). *(2026-10-23: остаётся без изменений; редирект идёт на страницу по умолчанию — вкладку «Do decyzji»)* | И решения, и свои заявки admin (вкладка «Moje wnioski», §17.5.8, D9) живут в employee-разделе; второго места для его заявок не нужно |
 | W8 | `/employee/przekazania` | Закрыт для `pracownik`: edge — `ROLE_RESTRICTED_EMPLOYEE_PREFIXES` в `lib/roles.ts` (чистые данные, без runtime-импорта shared — docs/28 §9.2 #18), server — redirect на `/employee/forbidden` | Маршрут не admin-only (опекун), но pracownik к передачам отношения не имеет, api ответил бы 403 на оба scope |
 | W9 | i18n | Два **новых** ключа сверх §17.11: `transfers.card.cancelledBy` («Anulował: {name} · {role} · {date}») и `transfers.history.forbidden` («Nie masz już wglądu w historię planistów tego ciągnika.») | `cancelled` ставит не только автор: выключение/удаление машины и удаление перевозчика отменяют `pending` с `decidedBy` = выполнившему (docs/13) — «Anulowany przez wnioskującego» был бы ложью. `forbidden` — диалог журнала из карточки, когда зритель уже вне U11 (например, автор-планиста после одобрения): пустой диалог выглядел бы сломанным |
 | W10 | `<PlannerHistoryDialog>` | `DialogTitle` = `history.dialogTitle` обычным шрифтом; номер `font-mono` — в `DialogDescription` (+ перевозчик) | Значения next-intl — только примитивы, React-узел в `{plate}` не вставить без смены ключа |

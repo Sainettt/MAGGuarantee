@@ -36,7 +36,12 @@ export type RequestErrorKind =
   | 'targetInvalid'
   /** 422 — the vehicle is switched off. */
   | 'vehicleInactive'
-  /** 403 / 404 / no current planista — this caller cannot file for this vehicle. */
+  /**
+   * 403 / 404 / no current planista — this caller cannot file for this vehicle
+   * (a planista who is not its current one, an opiekun of another carrier).
+   * Admin and opiekun both file from the edit form (E1 / E2) — there is no
+   * role-specific refusal copy.
+   */
   | 'notAllowed'
   /** Network, 5xx, anything unexpected — toast + retry. */
   | 'generic';

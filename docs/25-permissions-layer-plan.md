@@ -1,6 +1,6 @@
 # 25. План: трек B — слой permissions
 
-> **Статус: B1 в работе с 2026-10-23 (план от 2026-09-14). Решения по открытым вопросам — §7; первый случай для B6 — в §3 B6.** Детализирует §3 из
+> **Статус: B1 сделан 2026-10-23 (`2419bfc`), B2 следующий (план от 2026-09-14). Решения по открытым вопросам — §7; первый случай для B6 — в §3 B6.** Детализирует §3 из
 > [24-sso-magspace-and-permissions-plan.md](24-sso-magspace-and-permissions-plan.md)
 > по фактическому состоянию кода на `a50077c`. Где этот документ расходится с
 > §3 docs/24, прав этот документ: §3 писался до инвентаризации.
@@ -139,7 +139,7 @@
 | `vehicles.read` | ✅ | | ✅ | ✅ | ✅ | ✅ | | | `GET /vehicles(/:id)`, вложения |
 | `vehicles.rates.read` | ✅ | | ✅ | ✅ | | ✅ | ✅ | ✅ | сервис: scrub ставок (карточка машины, модалка выезда). eksport и weryfikator добавлены 2026-10-23 по факту кода: модалка выезда прячет ставки только от dyspozytora (docs/14 §6.4.1); карточку машины эти роли не открывают |
 | `vehicles.fuel_card.read` | ✅ | | ✅ | | | ✅ | | | сервис: scrub топливной карты |
-| `vehicles.planner_transfer.request` | | | ✅ | ✅ | | | | | `POST /vehicles/:id/planner-transfers`, `POST /planner-transfers/:id/cancel`, `GET /planner-transfers?scope=mine`; сервис: planista — только текущий планиста машины, cancel — только автор ([29](29-vehicle-planner-transfer-plan.md), добавлено 2026-09-28). `GET /planner-transfers` и `GET /lookups/planisci/transfer-targets` — any-of(`.request`, `.decide`) |
+| `vehicles.planner_transfer.request` | ✅ | | ✅ | ✅ | | | | | `POST /vehicles/:id/planner-transfers`, `POST /planner-transfers/:id/cancel`, `GET /planner-transfers?scope=mine`; сервис: planista — только текущий планиста машины, cancel — только автор ([29](29-vehicle-planner-transfer-plan.md), добавлено 2026-09-28; admin — с 2026-10-23, docs/29 U1 переписан, свою заявку он не решает — R4). `GET /planner-transfers` и `GET /lookups/planisci/transfer-targets` — any-of(`.request`, `.decide`) |
 | `vehicles.planner_transfer.decide` | ✅ | | | lider | | | | | `POST /planner-transfers/:id/{approve,reject}`, `GET /planner-transfers?scope=decide`; planista — через `LIDER_PERMISSIONS.planista`; сервис: лидер **этого** `fromPlanner`, не автор и не получатель (`planner-transfer.rules.ts`) |
 | `vehicles.planner_history.read` | ✅ | | ✅ | ✅ | | | | | `GET /vehicles/:id/planner-history`; сервис: opiekun — свой перевозчик, planista — текущий планиста или его лидер |
 | `drivers.read` | ✅ | | ✅ | | | ✅ | | | `GET /drivers*`, вложения |
@@ -177,9 +177,10 @@
 
 - **admin ≠ «все права».** Сегодня admin **не** проходит на эндпоинты,
   доступные только перевозчику (`claims.submit`, `delegations.create`,
-  `panel.carrier`) и не подаёт заявку на передачу машины
-  (`vehicles.planner_transfer.request`, docs/29 U1). Матрица это сохраняет, а тест эквивалентности не даст
-  «упростить» до `admin: PERMISSIONS`.
+  `panel.carrier`). Матрица это сохраняет, а тест эквивалентности не даст
+  «упростить» до `admin: PERMISSIONS`. (Исключение для
+  `vehicles.planner_transfer.request` снято 2026-10-23: admin подаёт заявки
+  на передачу машины, docs/29 U1.)
 - **`panel.*` — по сути роли под другим именем.** Это честная плата за
   единообразие guard'а. Схлопывать их в `role` не надо: B6 может выдать,
   например, `panel.opiekun` админу-наблюдателю без смены роли, но только
@@ -240,11 +241,13 @@ Runtime-изменений ноль, PR можно мержить отдельн
 | `@RequirePermission(...perms)`: any-of, как `@Roles` | `modules/auth/decorators/require-permission.decorator.ts` |
 | `AuthUser.permissions: ReadonlySet<Permission>` — считается **один раз** в `JwtAccessStrategy.validate` (пользователь и так перечитывается из БД на каждом запросе) из пары `(user.role, user.lider)` — `lider` уже в `AuthUser` с 2026-09-25 (docs/28, DB-sourced). Отсюда B6 возьмёт overrides, не трогая guard и сервисы. Фикстура B1 при этом не меняется: `@Roles` лидера не знает | `modules/auth/strategies/*`, `decorators/current-user.decorator.ts` |
 | `can(user, p)` — тонкий помощник для сервисов | `common/authz/can.ts` |
-| `PermissionsGuard` глобально, рядом с `RolesGuard`. Переходный период: оба живут, эндпоинт несёт **либо** `@Roles`, **либо** `@RequirePermission` | `modules/auth/guards/permissions.guard.ts`, `app.module.ts` |
-| Замена `@Roles` → `@RequirePermission` по таблице §2, модуль за модулем. Заодно убрать 22 избыточных `@UseGuards(RolesGuard)` | 24 контроллера |
-| **Тест эквивалентности**: для каждого эндпоинта `роли(metadata) = ROLES.filter(r => hasAnyPermission(r, required, /* lider */ true))` (или роли из `@Roles`, пока он не заменён) и сравнение с фикстурой из B1. Правило лидера (2026-10-23): роль допущена, если её лидерский вариант удовлетворяет требованию — иначе `approve`/`reject` передачи дали бы `["admin"]` вместо `["admin","planista"]` из фикстуры, а не-лидер planista получал бы 403 от guard'а вместо `not_decider` из сервиса. Любое расширение или сужение — красный тест. Вторая фикстура: ownership-декораторы на месте | `common/authz/endpoint-authz.spec.ts` |
+| `PermissionsGuard` глобально, после `RolesGuard` (`APP_GUARD`). Порядок проверок: `@Public` → пропуск (на `POST /auth/refresh` в `req.user` лежит refresh-payload без `permissions`); нет метаданных → пропуск (переходный период, как `RolesGuard` сегодня); метаданные есть, а `req.user.permissions` нет → 403, fail closed, из роли не пересчитывать; иначе any-of. Оба декоратора на одном роуте — красный тест (не рантайм). Эндпоинт несёт **либо** `@Roles`, **либо** `@RequirePermission` | `modules/auth/guards/permissions.guard.ts`, `app.module.ts` |
+| `makeAuthUser(role, overrides?)` — тестовая фабрика, строит `permissions` через `permissionsFor`; ~43 типизированных литералов `AuthUser` в 19 spec-файлах переезжают на неё в B2.0 (нужна уже здесь, не в B3) | `common/testing/make-auth-user.ts` |
+| Генератор снапшота из B1 учится читать `@RequirePermission`: роли = `rolesSatisfying(required, { lider: true })`; роут с обоими декораторами — ошибка. Без этого первый же переведённый контроллер ломает `roles-snapshot.spec`, а `AUTHZ_SNAPSHOT_UPDATE=1` тихо записал бы его как `AUTHENTICATED` | `common/authz/roles-snapshot.ts` |
+| Замена `@Roles` → `@RequirePermission` по `endpoint-permissions.ts`, модуль за модулем. Заодно убрать 23 избыточных `@UseGuards(RolesGuard)` (22 файла, в lookups два на методах); в 8 из них рядом стоят ownership-guards — их порядок не трогать | 24 контроллера |
+| **Тест эквивалентности**: для каждого эндпоинта `роли(metadata) = ROLES.filter(r => hasAnyPermission(r, required, /* lider */ true))` (или роли из `@Roles`, пока он не заменён) и сравнение с фикстурой из B1. Правило лидера (2026-10-23): роль допущена, если её лидерский вариант удовлетворяет требованию — иначе `approve`/`reject` передачи дали бы `["admin"]` вместо `["admin","planista"]` из фикстуры, а не-лидер planista получал бы 403 от guard'а вместо `not_decider` из сервиса. Любое расширение или сужение — красный тест. Вторая фикстура: ownership-декораторы на месте. Не новый файл, а расширение `roles-snapshot.spec.ts` и `endpoint-permissions.spec.ts` из B1 | `common/authz/*.spec.ts` |
 | **Inverse-правило**: каждый не-`@Public` эндпоинт обязан нести `@RequirePermission` или быть в `AUTHENTICATED_ONLY` с причиной. Новый роут без решения об авторизации не проходит CI (родственник audit-coverage spec из аудита логов, п. 18) | тот же spec |
-| Spec-файлы, проверяющие метаданные `@Roles` (vehicles, drivers, delegations), переписать на permission | соответствующие `*.spec.ts` |
+| Spec-файлы, проверяющие метаданные `@Roles`, переписать на permission: vehicles, drivers, delegations, claims (`claims.controller.roles.spec`), planner-transfers, carrier-attachments, bugbot (утверждает отсутствие метаданных); supertest-спеки vies, white-list, `sso.controller.audit` регистрируют `RolesGuard` как `APP_GUARD` и подсовывают пользователя без `permissions` — им нужен `makeAuthUser` | соответствующие `*.spec.ts` |
 
 Ownership-guards (`@OpiekunOwns`, `@CarrierOwns`) не меняются.
 
@@ -324,7 +327,7 @@ Ownership-guards (`@OpiekunOwns`, `@CarrierOwns`) не меняются.
 
 ```
 PR-B1  shared/permissions + snapshot-фикстура + docs/03 выровнен      (runtime: 0)
-PR-B2  PermissionsGuard + AuthUser.permissions + контроллеры          (можно по модулям: 2a claims/delegations/km, 2b carriers/fleet, 2c admin/lookups/integrations)
+PR-B2  PermissionsGuard + AuthUser.permissions + контроллеры          (коммиты: B2.0 инфраструктура без контроллеров → 2a claims/claim-attachments/delegations → 2b carriers/carrier-attachments/vehicles (включая km-board, km-report, daily-km)/drivers/trailers/fleet/gps/opiekun/alerts/guarantee-watchdog → 2c users/teams/sso/limits/audit/diagnostics/trailer-types/lookups/vies/white-list/planner-transfers → 2d ужесточение inverse-правила + docs)
 PR-B3  сервисные capability-проверки
 PR-B4  web
 PR-B5  зачистка @Roles/RolesGuard + docs
@@ -335,7 +338,8 @@ PR-B5  зачистка @Roles/RolesGuard + docs
 Между B2 и B5 оба guard'а живут, и это безопасно: на эндпоинте только один
 из двух декораторов, а inverse-правило ловит эндпоинт вообще без авторизации.
 
-**Зависимость от аудита логов:** B2 расширяет coverage-spec, который
+**Зависимость от аудита логов:** ✅ снята — `audit-coverage.spec.ts` и
+`audit-coverage.inverse.spec.ts` (п.18) уже в main. Исходная формулировка: B2 расширяет coverage-spec, который
 вводится в рамках п.18 аудита. Делать B2 после его мержа, чтобы не конфликтовать
 в `common/audit/testing/`.
 

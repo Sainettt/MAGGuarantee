@@ -22,9 +22,10 @@
 // (not registered in RHF), the edit resolver is `VehicleEditFormSchema` (the
 // create rules minus `plannerId`), and the PATCH body never carries the key
 // (the api answers 422 VEHICLE_PLANNER_CHANGE_REQUIRES_TRANSFER). The
-// opiekun's «Poproś o zmianę planisty» opens <PlannerTransferRequestDialog>
-// STACKED over this form — rendered outside the <form> element, it is sent
-// immediately, independent of «Zapisz».
+// «Poproś o zmianę planisty» of the opiekun (E1) and the admin (E2, any
+// vehicle — D9) opens <PlannerTransferRequestDialog> STACKED over this form —
+// rendered outside the <form> element, it is sent immediately, independent of
+// «Zapisz».
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { AlertTriangle } from 'lucide-react';
@@ -180,7 +181,8 @@ export function VehicleFormDialog({
     defaultValues: getDefaults(),
   });
 
-  // E1 — the opiekun's transfer request, stacked over this form (§17.2.2).
+  // E1 / E2 — the opiekun's / admin's transfer request, stacked over this
+  // form (§17.2.2).
   const [requestOpen, setRequestOpen] = useState(false);
   useEffect(() => {
     if (!open) setRequestOpen(false);
@@ -1015,7 +1017,7 @@ export function VehicleFormDialog({
         </FormDialogFooter>
       </form>
 
-      {/* §17.2.2 E1 — stacked OVER the open form (which keeps its unsaved
+      {/* §17.2.2 E1 / E2 — stacked OVER the open form (which keeps its unsaved
           edits). A sibling of the <form>, not a child, so its submit can never
           bubble (through the React portal tree) into the vehicle form; it
           portals to <body> itself. Escape closes only this dialog. */}

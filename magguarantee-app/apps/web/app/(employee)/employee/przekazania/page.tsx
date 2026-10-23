@@ -1,6 +1,9 @@
 // docs/14 §17.4.1 / §17.5 — `/employee/przekazania` «Przekazania ciągników».
 //
-//   admin   → decider: every request (approve / reject), nav pill = pending;
+//   admin   → decider: every request (approve / reject), nav pill = pending
+//             he can decide (his own excluded); plus the third tab «Moje
+//             wnioski» — the requests HE filed (`scope=mine`, §17.5.8). He
+//             files from the vehicle edit form (E2, D9), so no CTA here;
 //   opiekun → author: his own requests (D5 — no pill; he files from the
 //             vehicle edit form, so the list has no CTA).
 //

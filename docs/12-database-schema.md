@@ -843,9 +843,11 @@ model GuaranteeIdleEpisode {
 }
 
 // ─── VEHICLE PLANNER TRANSFER (docs/29 — request → approval) ──
-// Filed by the carrier's opiekun or the current planista (R2; admin never files,
-// U1); decided by admin or the lider of fromPlanner (R3), never by the author or
-// toPlanner (R4); withdrawn by the author while pending (U4). No notifications.
+// Filed by the carrier's opiekun, the current planista or — since 2026-10-23
+// (U1 reversed) — an admin on any vehicle (R2); decided by admin or the lider of
+// fromPlanner (R3), never by the author or toPlanner (R4), so an admin-filed
+// request needs another admin or that lider; withdrawn by the author while
+// pending (U4). No notifications.
 // APPEND-ONLY: never deleted; only pending → one terminal status. NO deletedAt,
 // NOT in SOFT_DELETE_MODELS (like GuaranteeIdleEpisode). decidedAt/decidedById =
 // who closed it and when, for all 3 terminal statuses (cancelled → the author).

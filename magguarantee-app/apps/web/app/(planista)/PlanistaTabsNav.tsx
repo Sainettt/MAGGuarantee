@@ -9,8 +9,9 @@
 //   Moje wnioski      /planista/przekazania     role === 'planista'
 //   Do zatwierdzenia  /planista/zatwierdzenia   role === 'planista' && user.lider
 //
-// Admin (debug access to the shell) sees only Flota / Przebieg: he never files
-// (U1) and decides in /employee/przekazania. The lider tab is decided on the
+// Admin (debug access to the shell) sees only Flota / Przebieg: both his
+// decisions and his own requests (the «Moje wnioski» tab there, docs/14
+// §17.5.8 / D9) live in /employee/przekazania. The lider tab is decided on the
 // CLIENT from `useAuth().user.lider` — the edge middleware knows nothing about
 // leadership and must not import shared (docs/28 §9.2 #18). It is the first
 // menu entry that depends on the flag (docs/29 §4).

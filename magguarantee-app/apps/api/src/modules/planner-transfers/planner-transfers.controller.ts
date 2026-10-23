@@ -62,12 +62,13 @@ export class PlannerTransfersController {
   constructor(private readonly transfers: PlannerTransfersService) {}
 
   /**
-   * File a request — the opiekun of the vehicle's carrier or its current
-   * planista (R2). Admin excluded by `@Roles` (U1).
+   * File a request — an admin (any vehicle), the opiekun of the vehicle's
+   * carrier or its current planista (R2, U1 as of 2026-10-23). The ownership
+   * guard scopes only the opiekun; R4 keeps an admin from deciding his own.
    */
   @Post('vehicles/:id/planner-transfers')
   @HttpCode(HttpStatus.CREATED)
-  @Roles('opiekun', 'planista')
+  @Roles('admin', 'opiekun', 'planista')
   @OpiekunOwns('id', 'param', 'vehicleId')
   @Audit({
     action: PLANNER_TRANSFER_AUDIT_ACTIONS.request,
@@ -141,10 +142,10 @@ export class PlannerTransfersController {
     return this.transfers.reject(user, id, dto);
   }
 
-  /** The author withdraws his own pending request (U4). No body. */
+  /** The author withdraws his own pending request (U4) — every role that files. No body. */
   @Post('planner-transfers/:id/cancel')
   @HttpCode(HttpStatus.OK)
-  @Roles('opiekun', 'planista')
+  @Roles('admin', 'opiekun', 'planista')
   @Audit({
     action: PLANNER_TRANSFER_AUDIT_ACTIONS.cancel,
     targetType: PLANNER_TRANSFER_AUDIT_TARGET,

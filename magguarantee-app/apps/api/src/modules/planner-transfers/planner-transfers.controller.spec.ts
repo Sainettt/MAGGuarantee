@@ -48,16 +48,17 @@ function ctxFor(name: Handler, role: Role): ExecutionContext {
 }
 
 const EXPECTED_ROLES: Record<Handler, Role[]> = {
-  // R2 + U1 — the opiekun or the current planista files; an admin never does.
-  request: ['opiekun', 'planista'],
+  // R2 + U1 (reversed 2026-10-23) — an admin (any vehicle), the opiekun or the
+  // current planista files; the service narrows the last two.
+  request: ['admin', 'opiekun', 'planista'],
   // U11 — the service narrows planista to current / lider of current.
   history: ['admin', 'opiekun', 'planista'],
   list: ['admin', 'opiekun', 'planista'],
   // R3 — admin or a planista-lider; the lider check is resource-level.
   approve: ['admin', 'planista'],
   reject: ['admin', 'planista'],
-  // U4 — authors only.
-  cancel: ['opiekun', 'planista'],
+  // U4 — authors only; every role that files may be one.
+  cancel: ['admin', 'opiekun', 'planista'],
 };
 
 describe('PlannerTransfersController — route contract', () => {
@@ -79,8 +80,10 @@ describe('PlannerTransfersController — route contract', () => {
     },
   );
 
-  it('an admin cannot file a request (U1) — RolesGuard 403', () => {
-    expect(() => guard.canActivate(ctxFor('request', 'admin'))).toThrow(ForbiddenException);
+  it('an admin reaches request and cancel (U1 reversed 2026-10-23) — RolesGuard lets him through', () => {
+    for (const name of ['request', 'cancel'] as const) {
+      expect(guard.canActivate(ctxFor(name, 'admin'))).toBe(true);
+    }
   });
 
   it('an opiekun is scoped to vehicles of his carriers on the two vehicle routes', () => {

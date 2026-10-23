@@ -53,10 +53,11 @@ type VehicleWithPlanner = VehicleRow & { plannerId: string };
 /**
  * Vehicle planner transfer — request → approval (docs/29 §3).
  *
- * After creation a vehicle changes its planista ONLY here (R1). The opiekun
- * of the vehicle's carrier or its current planista files a request (R2; an
- * admin never files — U1); an admin or the CURRENT lider of the current
- * planista decides (R3), never the author nor the target (R4). Approval takes
+ * After creation a vehicle changes its planista ONLY here (R1). An admin (any
+ * vehicle), the opiekun of the vehicle's carrier or its current planista files
+ * a request (R2, U1 since 2026-10-23); an admin or the CURRENT lider of the
+ * current planista decides (R3), never the author nor the target (R4) — so an
+ * admin's own request goes to another admin or to that lider. Approval takes
  * effect at once (U5) and re-validates everything under a row lock (U6). No
  * e-mail, no Chat (R9).
  *
@@ -104,6 +105,7 @@ export class PlannerTransfersService {
       vehicleId,
       fromPlannerId: row.fromPlannerId,
       toPlannerId: row.toPlannerId,
+      requestedByRole: user.role,
     });
     return toPlannerTransferDto(row, user);
   }
@@ -247,20 +249,20 @@ export class PlannerTransfersService {
   }
 
   /**
-   * R2 / U1 — who may file: the opiekun of the vehicle's carrier (the route's
-   * `OpiekunOwnershipGuard` checks it first; repeated here as defence in
-   * depth) or the vehicle's CURRENT planista. Never an admin.
+   * R2 / U1 — who may file: an admin (any vehicle, U1 reversed 2026-10-23),
+   * the opiekun of the vehicle's carrier (the route's `OpiekunOwnershipGuard`
+   * checks it first; repeated here as defence in depth) or the vehicle's
+   * CURRENT planista. The admin still passes every later check (422 / 409);
+   * R4 (`decisionRefusal` → `requester`) stops him deciding his own request.
    */
   private _assertMayRequest(user: AuthUser, vehicle: VehicleRow): void {
     const allowed =
+      user.role === 'admin' ||
       (user.role === 'opiekun' && vehicle.opiekun?.id === user.sub) ||
       (user.role === 'planista' && vehicle.plannerId === user.sub);
     if (allowed) return;
     throw new ForbiddenException({
-      message:
-        user.role === 'admin'
-          ? 'Administrator nie składa wniosków o przekazanie — zatwierdza je.'
-          : 'Wniosek może złożyć opiekun przewoźnika lub obecny planista pojazdu.',
+      message: 'Wniosek może złożyć administrator, opiekun przewoźnika lub obecny planista pojazdu.',
       extensions: { code: PLANNER_TRANSFER_REQUEST_FORBIDDEN },
     });
   }
@@ -320,7 +322,8 @@ export class PlannerTransfersService {
       },
       requester: {
         code: PLANNER_TRANSFER_DECIDER_IS_REQUESTER,
-        message: 'To Twój wniosek — decyzję podejmuje administrator.',
+        message:
+          'Autor wniosku nie może go rozpatrzyć — decyzję podejmuje inny administrator lub lider obecnego planisty.',
       },
       target: {
         code: PLANNER_TRANSFER_DECIDER_IS_TARGET,

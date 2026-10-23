@@ -98,7 +98,9 @@ export function isPermission(value: string): value is Permission {
  *
  * `admin` is NOT "every permission": today admin cannot file a wniosek or an
  * outing, and has no carrier panel (`claims.submit`, `delegations.create`,
- * `panel.carrier`) — do not "simplify" it to `PERMISSIONS`.
+ * `panel.carrier`) — do not "simplify" it to `PERMISSIONS`. He does file
+ * planner-transfer requests (docs/29 U1 reversed 2026-10-23); R4 in
+ * `planner-transfer.rules.ts` keeps him from deciding his own.
  */
 export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
   admin: [
@@ -115,6 +117,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'vehicles.read',
     'vehicles.rates.read',
     'vehicles.fuel_card.read',
+    'vehicles.planner_transfer.request',
     'vehicles.planner_transfer.decide',
     'vehicles.planner_history.read',
     'drivers.read',

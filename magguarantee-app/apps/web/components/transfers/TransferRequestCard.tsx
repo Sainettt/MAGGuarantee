@@ -7,7 +7,8 @@
 // from the viewer flags the api computed (`cardActions`, §17.5.3) — never
 // re-derived here. A decider who may not decide a row (he is its author /
 // target, R4) gets the REASON in a <LockNotice> instead of the buttons (not
-// disabled buttons — §6.5.13).
+// disabled buttons — §6.5.13); an admin-author is told that ANOTHER admin or
+// the current planner's lider decides (`blockedRequesterAdmin`, §17.5.4).
 //
 // `compact` — the rejected / cancelled rows under the history timeline
 // (§17.6.2): same anatomy, `p-3`, no action row.
@@ -15,13 +16,17 @@
 import { ArrowRight, History } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useId } from 'react';
-import type { PlannerTransferDto } from '@magguarantee/shared';
+import type { PlannerTransferDto, Role } from '@magguarantee/shared';
 
 import { Button } from '@/components/ui/Button';
 import { LockNotice } from '@/components/ui/LockNotice';
 import { formatDateTime } from '@/lib/format/numbers';
 import { roleLabelKey } from '@/lib/roles';
-import { cardActions, personName } from '@/lib/transfers/transferUi';
+import {
+  blockedNoticeKey,
+  cardActions,
+  personName,
+} from '@/lib/transfers/transferUi';
 import { cn } from '@/lib/utils';
 
 import { TransferStatusBadge } from './TransferStatusBadge';
@@ -29,6 +34,8 @@ import { TransferStatusBadge } from './TransferStatusBadge';
 export interface TransferRequestCardProps {
   transfer: PlannerTransferDto;
   mode: 'decider' | 'author';
+  /** The viewer's role — picks the <LockNotice> sentence of a blocked row. */
+  viewerRole?: Role;
   /** Admin inbox: the «Lider planisty: …» line (who else could decide). */
   showLeader?: boolean;
   /** History-timeline variant: `p-3`, no action row. */
@@ -51,6 +58,7 @@ function Caption({ children }: { children: React.ReactNode }) {
 export default function TransferRequestCard({
   transfer,
   mode,
+  viewerRole,
   showLeader = false,
   compact = false,
   onApprove,
@@ -230,7 +238,7 @@ export default function TransferRequestCard({
             </div>
           ) : actions.kind === 'blocked' ? (
             <LockNotice id={lockId} className="sm:ml-auto sm:max-w-md">
-              {actions.reason === 'target' ? t('blockedTarget') : t('blockedRequester')}
+              {t(blockedNoticeKey(actions.reason, viewerRole))}
             </LockNotice>
           ) : actions.kind === 'cancel' ? (
             <Button

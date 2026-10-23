@@ -4,7 +4,10 @@
 //
 // Cache layout
 // ────────────
-//   ['plannerTransfers', 'list', params]        — inbox / own requests (both tabs)
+//   ['plannerTransfers', 'list', params]        — inbox (`scope=decide`) / own
+//                                                 requests (`scope=mine`: the
+//                                                 author lists AND the admin's
+//                                                 «Moje wnioski» tab), every tab
 //   ['vehicles', 'planner-history', vehicleId]  — journal + requests of one vehicle
 //
 // The history lives under `VEHICLES_KEY` on purpose: every vehicle mutation
@@ -16,7 +19,10 @@
 // decyzji» tab (`scope=decide&status=pending&limit=200`), so the badge and the
 // list cannot disagree and opening the page costs no extra request.
 //
-// Invalidation (docs/14 §17.9) — every mutation refreshes the lists + counter,
+// Invalidation (docs/14 §17.9) — every mutation refreshes the lists + counter
+// (one PREFIX invalidation of `PLANNER_TRANSFERS_KEY` covers both scopes and
+// every status filter, so an admin filing / cancelling from the vehicle form
+// also refreshes his «Moje wnioski» tab — no per-scope key to keep in sync),
 // the vehicle's history and its detail; an approval additionally refreshes
 // everything that reads the vehicle's planista LIVE (U7): vehicle lists / km
 // report (all under `['vehicles']`), the planista fleet, delegations (a

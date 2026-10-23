@@ -99,13 +99,15 @@ interface World {
 //   lider-a / lider-b — planisci with the lider flag
 //   p-plain — a planista without the flag and without a leader
 //   op-1  — opiekun of the vehicle's carrier;  op-2 — another opiekun
-//   admin — admin
+//   admin / admin-2 — two admins (an admin may file since 2026-10-23, and his
+//   own request needs ANOTHER decider — R4)
 function makeWorld(): World {
   const people = new Map<string, Person>();
   const add = (p: Person): void => {
     people.set(p.id, p);
   };
   add({ id: 'admin', role: 'admin', lider: false, active: true, liderId: null });
+  add({ id: 'admin-2', role: 'admin', lider: false, active: true, liderId: null });
   add({ id: 'op-1', role: 'opiekun', lider: false, active: true, liderId: null });
   add({ id: 'op-2', role: 'opiekun', lider: false, active: true, liderId: null });
   add({ id: 'lider-a', role: 'planista', lider: true, active: true, liderId: null });
@@ -334,6 +336,19 @@ async function fileStandard(w: World, svc: PlannerTransfersService): Promise<str
   return out.id;
 }
 
+/** Files a request by `admin` (U1 reversed 2026-10-23); returns its id. */
+async function fileByAdmin(
+  w: World,
+  svc: PlannerTransfersService,
+  toPlannerId = 'p-new',
+): Promise<string> {
+  const out = await svc.request(as(w, 'admin'), 'v-1', {
+    toPlannerId,
+    reason: 'Opiekun na urlopie, planista odchodzi',
+  });
+  return out.id;
+}
+
 function codeOf(err: unknown): string | undefined {
   const body = (err as { getResponse?: () => unknown }).getResponse?.() as
     | { extensions?: { code?: string } }
@@ -386,11 +401,63 @@ describe('PlannerTransfersService.request — who may file (R2, U1, U2, U4)', ()
     expect(out.requestedBy.id).toBe('p-old');
   });
 
+  it('an admin files for ANY vehicle — neither its opiekun nor its planista (U1 reversed 2026-10-23)', async () => {
+    const w = makeWorld();
+    const svc = makeService(w);
+    const { result, store } = await audited(() =>
+      svc.request(as(w, 'admin'), 'v-1', { toPlannerId: 'p-new', reason: 'Opiekun na urlopie' }),
+    );
+    expect(result).toMatchObject({
+      status: 'pending',
+      fromPlanner: { id: 'p-old', leader: { id: 'lider-a' } },
+      toPlanner: { id: 'p-new' },
+      requestedBy: { id: 'admin', role: 'admin' },
+      // He is the author: he may withdraw it, never decide it (R4).
+      viewerCanCancel: true,
+      viewerCanDecide: false,
+      viewerBlockedReason: 'requester',
+    });
+    expect(store.metadata).toMatchObject({
+      vehicleId: 'v-1',
+      fromPlannerId: 'p-old',
+      toPlannerId: 'p-new',
+      requestedByRole: 'admin',
+    });
+    expect(w.vehicle.plannerId).toBe('p-old');
+  });
+
+  it.each<[string, (w: World) => void, string, string]>([
+    ['a switched-off vehicle', (w) => (w.vehicle.active = false), 'p-new', 'PLANNER_TRANSFER_VEHICLE_INACTIVE'],
+    ['a vehicle without a planista', (w) => (w.vehicle.plannerId = null), 'p-new', 'PLANNER_TRANSFER_NO_CURRENT_PLANNER'],
+    ['target = the current planista', () => undefined, 'p-old', 'PLANNER_TRANSFER_TARGET_INVALID'],
+    ['target = an inactive planista', (w) => (w.people.get('p-new')!.active = false), 'p-new', 'PLANNER_TRANSFER_TARGET_INVALID'],
+    ['target = a non-planista', () => undefined, 'op-1', 'PLANNER_TRANSFER_TARGET_INVALID'],
+  ])('an admin is held to the same 422 rules: %s', async (_l, mutate, target, code) => {
+    const w = makeWorld();
+    mutate(w);
+    await expectRejection(
+      makeService(w).request(as(w, 'admin'), 'v-1', { toPlannerId: target, reason: 'Powód' }),
+      UnprocessableEntityException,
+      code,
+    );
+    expect(w.transfers).toHaveLength(0);
+  });
+
+  it('an admin gets 409 PLANNER_TRANSFER_ALREADY_PENDING like anyone else (U4)', async () => {
+    const w = makeWorld();
+    const svc = makeService(w);
+    await fileStandard(w, svc);
+    await expectRejection(
+      svc.request(as(w, 'admin'), 'v-1', { toPlannerId: 'p-plain', reason: 'Inny powód' }),
+      ConflictException,
+      'PLANNER_TRANSFER_ALREADY_PENDING',
+    );
+  });
+
   it.each([
     ['an opiekun of ANOTHER carrier', 'op-2'],
     ['a planista who is not the current one', 'p-new'],
     ['the lider of the current planista', 'lider-a'],
-    ['an admin (U1 — he only decides)', 'admin'],
   ])('%s is refused with 403 PLANNER_TRANSFER_REQUEST_FORBIDDEN', async (_l, who) => {
     const w = makeWorld();
     await expectRejection(
@@ -558,6 +625,130 @@ describe('PlannerTransfersService — decision matrix', () => {
     expect(out.fromPlanner.leader).toBeNull();
     await expectRejection(svc.approve(as(w, 'lider-a'), out.id, {}), ForbiddenException);
     await expect(svc.approve(as(w, 'admin'), out.id, {})).resolves.toMatchObject({ status: 'approved' });
+  });
+});
+
+// ─── an admin-filed request (R4 stays absolute, U1 reversed) ─
+
+describe('PlannerTransfersService — decision matrix of an ADMIN-filed request', () => {
+  it('the authoring admin is 403 PLANNER_TRANSFER_DECIDER_IS_REQUESTER on approve and reject', async () => {
+    const w = makeWorld();
+    const svc = makeService(w);
+    const id = await fileByAdmin(w, svc);
+    await expectRejection(
+      svc.approve(as(w, 'admin'), id, {}),
+      ForbiddenException,
+      'PLANNER_TRANSFER_DECIDER_IS_REQUESTER',
+    );
+    await expectRejection(
+      svc.reject(as(w, 'admin'), id, { reason: 'Jednak nie' }),
+      ForbiddenException,
+      'PLANNER_TRANSFER_DECIDER_IS_REQUESTER',
+    );
+    expect(w.transfers[0]?.status).toBe('pending');
+    expect(w.vehicle.plannerId).toBe('p-old');
+  });
+
+  it.each([
+    ['another admin', 'admin-2'],
+    ['the lider of fromPlanner', 'lider-a'],
+  ])('%s may approve it', async (_l, who) => {
+    const w = makeWorld();
+    const svc = makeService(w);
+    const id = await fileByAdmin(w, svc);
+    const out = await svc.approve(as(w, who), id, {});
+    expect(out).toMatchObject({ status: 'approved', decidedBy: { id: who }, requestedBy: { id: 'admin' } });
+    expect(w.vehicle.plannerId).toBe('p-new');
+  });
+
+  it.each([
+    ['another admin', 'admin-2'],
+    ['the lider of fromPlanner', 'lider-a'],
+  ])('%s may reject it', async (_l, who) => {
+    const w = makeWorld();
+    const svc = makeService(w);
+    const id = await fileByAdmin(w, svc);
+    await expect(svc.reject(as(w, who), id, { reason: 'Brak zgody' })).resolves.toMatchObject({
+      status: 'rejected',
+      decidedBy: { id: who },
+    });
+  });
+
+  it('the lider of fromPlanner who is the TARGET is 403 PLANNER_TRANSFER_DECIDER_IS_TARGET; another admin decides', async () => {
+    const w = makeWorld();
+    const svc = makeService(w);
+    const id = await fileByAdmin(w, svc, 'lider-a');
+    await expectRejection(
+      svc.approve(as(w, 'lider-a'), id, {}),
+      ForbiddenException,
+      'PLANNER_TRANSFER_DECIDER_IS_TARGET',
+    );
+    await expectRejection(
+      svc.approve(as(w, 'admin'), id, {}),
+      ForbiddenException,
+      'PLANNER_TRANSFER_DECIDER_IS_REQUESTER',
+    );
+    await expect(svc.approve(as(w, 'admin-2'), id, {})).resolves.toMatchObject({ status: 'approved' });
+  });
+
+  it.each([
+    ['the lider of the TARGET planista', 'lider-b'],
+    ['a planista without any link', 'p-plain'],
+  ])('%s is 403 PLANNER_TRANSFER_NOT_DECIDER', async (_l, who) => {
+    const w = makeWorld();
+    const svc = makeService(w);
+    const id = await fileByAdmin(w, svc);
+    await expectRejection(svc.approve(as(w, who), id, {}), ForbiddenException, 'PLANNER_TRANSFER_NOT_DECIDER');
+  });
+
+  it('single admin + no eligible lider: nobody can decide it, only the author closes it by cancelling', async () => {
+    const w = makeWorld();
+    w.people.delete('admin-2');
+    w.vehicle.plannerId = 'p-plain'; // a planista without a leader
+    const svc = makeService(w);
+    const id = await fileByAdmin(w, svc);
+    await expectRejection(
+      svc.approve(as(w, 'admin'), id, {}),
+      ForbiddenException,
+      'PLANNER_TRANSFER_DECIDER_IS_REQUESTER',
+    );
+    for (const lider of ['lider-a', 'lider-b']) {
+      await expectRejection(svc.approve(as(w, lider), id, {}), ForbiddenException, 'PLANNER_TRANSFER_NOT_DECIDER');
+    }
+    const out = await svc.cancel(as(w, 'admin'), id);
+    expect(out).toMatchObject({ status: 'cancelled', decidedBy: { id: 'admin' } });
+    expect(w.vehicle.plannerId).toBe('p-plain');
+  });
+
+  it('the authoring admin cancels his pending request; another admin cannot (U4 — author only)', async () => {
+    const w = makeWorld();
+    const svc = makeService(w);
+    const id = await fileByAdmin(w, svc);
+    await expectRejection(svc.cancel(as(w, 'admin-2'), id), ForbiddenException, 'PLANNER_TRANSFER_CANCEL_NOT_AUTHOR');
+    const { result, store } = await audited(() => svc.cancel(as(w, 'admin'), id));
+    expect(result).toMatchObject({ status: 'cancelled', decidedBy: { id: 'admin' }, viewerCanCancel: false });
+    expect(store.before).toMatchObject({ status: 'pending' });
+    expect(w.transfers[0]?.decidedAt).toBeInstanceOf(Date);
+  });
+
+  it('lists: in his own mine and decide (blocked as requester); decidable for admin-2 and lider-a', async () => {
+    const w = makeWorld();
+    const svc = makeService(w);
+    await fileByAdmin(w, svc);
+    const q = { status: 'pending' as const, limit: 50 };
+    const mine = await svc.list(as(w, 'admin'), { ...q, scope: 'mine' });
+    expect(mine.items).toHaveLength(1);
+    expect(mine.items[0]).toMatchObject({ viewerCanCancel: true, viewerCanDecide: false });
+    const own = await svc.list(as(w, 'admin'), { ...q, scope: 'decide' });
+    expect(own.items[0]).toMatchObject({ viewerCanDecide: false, viewerBlockedReason: 'requester' });
+    for (const who of ['admin-2', 'lider-a']) {
+      const out = await svc.list(as(w, who), { ...q, scope: 'decide' });
+      expect(out.items[0]).toMatchObject({
+        viewerCanDecide: true,
+        viewerBlockedReason: null,
+        viewerCanCancel: false,
+      });
+    }
   });
 });
 
